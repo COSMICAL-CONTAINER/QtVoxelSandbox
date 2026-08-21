@@ -4002,6 +4002,15 @@ void PlayerController::placeBlock()
         const bool pz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz + 1));
         const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
+        // t738 附着面专项校验（红石火把墙置收口）：placeState 编码的**那个**附着邻（torchOrientFromNormal
+        //   由命中面推导——瞄侧面 → 墙邻、瞄顶面 → 下方）必须实体，否则拒放（不挥）。旧宽检只查 5 向任一
+        //   实邻，留下两类非法放置：①瞄火把 / 木梯 / 草丛等非实体面放（attach 编码指向非实体 → 放下即
+        //   「悬浮」、渲染按 attach 贴墙朝非实体方向歪）；②瞄方块底面（天花板）放 → torchOrientFromNormal
+        //   无 ny<0 分支兜底 TorchFloor → 立柱悬空挂在天花板旁。机制等价 MC 1.0 火把只可附实体面（顶面 /
+        //   四侧），不可贴 cross 形 / 薄板 / 天花板。红石火把与普通火把同分支同守卫（附着语义一族）。
+        int tax = 0, tay = 0, taz = 0;
+        BlockRegistry::torchAttachOffset(placeState, tax, tay, taz);
+        if (!BlockRegistry::isSolid(m_world->blockAt(tx + tax, ty + tay, tz + taz))) return;
     }
     // t638 ③ 轨上放轨拒绝（spec「铁轨不能放在铁轨上」）+ t667 完整立方顶面支撑：
     //   铁轨只能放在**完整方块顶面**（机制等价 MC rails 须全支撑块）。两重守卫（覆盖全部放置路径）：

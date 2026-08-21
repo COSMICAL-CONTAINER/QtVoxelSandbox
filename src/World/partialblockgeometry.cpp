@@ -725,34 +725,60 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::RedstoneTorch: {
-        // t638/t657 红石火把 cross 模型：与蘑菇 / 枯灌木同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
-        //   亮态（默认）贴 redstone_torch(161)（透明底 + 深棕柄 + 亮红焰头）；**熄灭态**（t657 反相器：附着块被
+        // t638/t657 红石火把 cross 模型：与蘑菇 / 枯灌木同款两片对角相交双面 quad。亮态（默认）贴
+        //   redstone_torch(161)（透明底 + 深棕柄 + 亮红焰头）；**熄灭态**（t657 反相器：附着块被
         //   供电 → state 置 RedstoneTorchStateOffFlag）换 redstone_torch_off(170)（暗红熄焰，无白热心）。
         //   alphaCutoff cutout → 仅火把剪影显。tile 由 tileIndex 取 sideTile（161 def 默认；off 在此覆写）。
-        //   **t705 贴墙渲染**（修「红石火把只能插地、插墙后仍显示为居中立柱」）：state 低 3 位附着编码
-        //   （torchAttachOffset 同源——placeBlock t638 并入 Torch 分支写入，floor=0 / 1..4=四向贴墙）驱动
-        //   墙态摆位 —— 柄根沉入支撑面（沿附着反向偏移 4/16），quad 平面向 45° 十字随同平移，视觉读作
-        //   「斜插在墙上的火把」（机制等价 MC 1.0 墙红石火把倾柄形态；cross quad 自身不旋转——贴图剪影
-        //   居中，平移后焰头在柄自由端观感成立）。贴地（floor）保持满格居中（原观感）。
+        //   **t705 → t738 贴墙渲染重做**：t705 版统一偏移 -attachOffset×4/16 想把剪影「沉向支撑面」，但
+        //   torchAttachOffset 返回的是**指向支撑格**的向量 → 负号后两个方向全反：贴地态（dy=-1）被抬
+        //   +4/16 悬空（用户报「悬浮不落地」的根因）、贴墙态被推**离**墙 4/16 且穿出格界。t738 重做为
+        //   分态几何（机制等价 MC 1.0 红石火把贴地立柱 / 墙插倾柄两形态）：
+        //     · 贴地（TorchFloor）：恢复满格居中 cross（0..1，剪影落地——t705 前的原观感）。
+        //     · 墙插（TorchOnNX/PX/NZ/PZ）：对齐 Main.qml 火把 delegate 的倾柄位姿（torchHandleLocalPos
+        //       / torchHandleEuler t150e/f 同源常量）——柄根贴墙（离墙面 0.025、离地 0.197）、火把轴自竖直
+        //       上倾 30°（sin/cos 0.5/0.866）伸离墙、轴长 0.80（焰头顶 0.897 ≈ 普通火把焰顶 0.89）。两片
+        //       quad 均含火把轴（剪影沿倾轴渲染）：W 片平行墙面（正对墙看的正视图，宽 0.8）+ S 片垂直
+        //       墙面（侧视深度片，宽 0.45）—— 剪影紧贴附着面、读作「斜插墙上的火把」。
         int torchTile = tile;
         if (state & BlockRegistry::RedstoneTorchStateOffFlag)
             torchTile = 170; // t657 熄灭态（redstone_torch_off）
-        // t705 墙态偏移：附着向支撑（torchAttachOffset 语义 = 支撑格方向）→ 火把体沉向支撑面 4/16。
         int ax = 0, ay = 0, az = 0;
         BlockRegistry::torchAttachOffset(state, ax, ay, az);
-        constexpr float kWallSink = 4.0f / 16.0f; // 柄根嵌支撑深度（cross 剪影中心偏到墙侧）
-        const float ox = -ax * kWallSink, oy = -ay * kWallSink, oz = -az * kWallSink;
+        if (ax == 0 && az == 0) {
+            // t738 贴地立柱：满格居中 cross（柄剪影贴 cell 底，不悬浮）。
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
+                          torchTile, light, tileW, hx, hy, v0, v1);
+            pushCrossQuad(verts, idx, lx, ly, lz,
+                          1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  0.f, 1.f, 1.f,  1.f, 1.f, 0.f, // Plane B: BL→BR→TR→TL
+                          torchTile, light, tileW, hx, hy, v0, v1);
+            break;
+        }
+        // t738 墙插倾柄（ax/az 即支撑向 s；墙面 = 柄根侧 cell 边）。
+        constexpr float kLean = 0.5f;      // sin30°：火把轴上倾（同 t150f 普通火把 30° 上倾）
+        constexpr float kUpright = 0.866f; // cos30°
+        constexpr float kShaftLen = 0.80f; // quad 沿火把轴长（焰头顶 ≈0.897，对齐普通火把焰顶）
+        const float ux = -ax * kLean, uy = kUpright, uz = -az * kLean; // 轴向：上 + 伸离墙
+        // 柄根（quad 底边中心）：贴墙 0.025（普通火把 delegate 柄根端 -0.475 同源）+ 离地 0.197（柄根端
+        //   y 0.197，torchHandleLocalPos/半柄长 0.35 推得）。
+        const float bx = 0.5f + ax * 0.475f, by = 0.197f, bz = 0.5f + az * 0.475f;
+        // W 片（平行墙面，正视图）：底边沿墙切向 t = (-az,0,ax)（s 的水平垂直向）±0.4。含火把轴 →
+        //   剪影自柄根沿 30° 倾轴渲染（柄根贴墙、焰头伸向格心），与普通火把 delegate 柄完全同线。
+        const float tx = -az * 0.4f, tz = ax * 0.4f;
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      ox + 0.f, oy + 0.f, oz + 0.f,
-                      ox + 1.f, oy + 0.f, oz + 1.f,
-                      ox + 1.f, oy + 1.f, oz + 1.f,
-                      ox + 0.f, oy + 1.f, oz + 0.f, // Plane A: BL→BR→TR→TL
+                      bx - tx, by, bz - tz,
+                      bx + tx, by, bz + tz,
+                      bx + tx + ux * kShaftLen, by + uy * kShaftLen, bz + tz + uz * kShaftLen,
+                      bx - tx + ux * kShaftLen, by + uy * kShaftLen, bz - tz + uz * kShaftLen,
                       torchTile, light, tileW, hx, hy, v0, v1);
+        // S 片（垂直墙面，侧视深度片）：底边自柄根伸离墙 0.45（不嵌墙——底边起点即墙面侧，避免穿
+        //   支撑块）。侧视读作同角度倾柄（深度参照，剪影略粗无碍）。
+        const float sx = -ax * 0.45f, sz = -az * 0.45f;
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      ox + 1.f, oy + 0.f, oz + 0.f,
-                      ox + 0.f, oy + 0.f, oz + 1.f,
-                      ox + 0.f, oy + 1.f, oz + 1.f,
-                      ox + 1.f, oy + 1.f, oz + 0.f, // Plane B: BL→BR→TR→TL
+                      bx, by, bz,
+                      bx + sx, by, bz + sz,
+                      bx + sx + ux * kShaftLen, by + uy * kShaftLen, bz + sz + uz * kShaftLen,
+                      bx + ux * kShaftLen, by + uy * kShaftLen, bz + uz * kShaftLen,
                       torchTile, light, tileW, hx, hy, v0, v1);
         break;
     }

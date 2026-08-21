@@ -1720,11 +1720,25 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
             // t656 红石粉导线薄板命中盒（同铁轨族模式——贴地薄层，上方空气穿过命中后方方块；+1/16 容差
             //   使准星贴地平扫微偏亦命中，可清粉）。
             return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, 2.0f / 16.0f, 1.0f}};
-        if (blockId == RedstoneTorch)
-            // t638 红石火把：cross 形小立柱（同火把语义——准星瞄柄/焰才命中，格角落空气穿过）。视觉是
-            //   两片对角 cross quad 贴满格（贴图透明底只显中央火把剪影），取中央 0.4 见方 × 0.85 高保守盒
-            //   （覆盖剪影主体；与 Torch 的命中盒同尺寸——同族光源手感一致）。
+        if (blockId == RedstoneTorch) {
+            // t638 红石火把：cross 形小立柱（同火把语义——准星瞄柄/焰才命中，格角落空气穿过）。**t738
+            //   墙插态盒贴墙半区**：火把体自墙面伸向格心（mesher t738 倾柄几何：柄根贴墙 0.025、焰头水平
+            //   到达 0.425），旧中央盒 [0.3,0.7] 在墙向完全错过火把体 → 墙插红石火把瞄不准 / 挖不掉。
+            //   贴地态保持中央 0.4 见方 × 0.85 高（剪影立柱居中，与 Torch 命中盒同尺寸——同族手感一致）。
+            //   朝向解码与 mesher / dropUnsupportedTorchesAround 同源（torchAttachOffset 掩熄灭位）。
+            int tax = 0, tay = 0, taz = 0;
+            torchAttachOffset(state, tax, tay, taz);
+            if (tax < 0) // 支撑 -X → 墙面在 x=0 侧：盒贴墙半区 [0, 0.48]
+                return {BlockAABB{0.0f, 0.15f, 0.25f, 0.48f, 0.95f, 0.75f}};
+            if (tax > 0) // 支撑 +X → 墙面在 x=1 侧
+                return {BlockAABB{0.52f, 0.15f, 0.25f, 1.0f, 0.95f, 0.75f}};
+            if (taz < 0) // 支撑 -Z → 墙面在 z=0 侧
+                return {BlockAABB{0.25f, 0.15f, 0.0f, 0.75f, 0.95f, 0.48f}};
+            if (taz > 0) // 支撑 +Z → 墙面在 z=1 侧
+                return {BlockAABB{0.25f, 0.15f, 0.52f, 0.75f, 0.95f, 1.0f}};
+            // 贴地立柱：中央保守盒（覆盖剪影主体；与 Torch 同尺寸）。
             return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 0.85f, 0.7f}};
+        }
         // t662 机关方块（Lever / WoodButton / StoneButton）：贴附着面的小钮 / 底座+棍（mechBoxes 单一几何源
         //   —— 渲染与选中同盒，准星落在钮 / 棍上才命中、格内空气穿过命中后方块，同木梯 t501「透视不优先
         //   选中」模式）。碰撞为空（ShapeNone）；仅选体走本集。

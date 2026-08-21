@@ -9,6 +9,9 @@
 
 #include <vector>
 
+#include "world.h" // t738 爆炸失撑火把掉落 helper 入参用 World::DestroyedVoxel 嵌套类型（World 层在
+                   //   Entities 之下，向下 include 合 PLAN §2 分层；World 不反向 include 本头，无环）
+
 // 统一实体管理器（t95；Entities 层）。t239 扩展为「生物基类（AI/物理/血量/受击/死亡）」。
 //
 // 每个 Mob 实体 = {世界坐标 pos, 半径 radius, 可推动标志 pushable, 渲染外观（kind/color/mobType/blockId）,
@@ -484,6 +487,13 @@ public:
     //   各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部（踩沙漠神殿压力板 → 3×3 连锁全爆）；
     //   ④ 距离衰减伤玩家 + 击退；⑤ emit explosion（音/视单一入口）。分层：向下写 World（destroySphereSilent）+ 发语义信号。
     void detonateTntSphere(int cx, int cy, int cz, World *world, const QVector3D &playerPos);
+    // t738 爆炸失撑火把掉落（Stalker / TNT 两爆炸路径共用）：destroyed 列表内每破坏格扫 6 邻的火把族
+    //   （Torch / RedstoneTorch——附着语义一族），state 解码其唯一附着格（torchAttachOffset，掩熄灭位），
+    //   该格已非 solid（爆炸把支撑块炸掉、火把本体在球外幸存）→ setWaterSilent 清火把 + 恒发
+    //   explosionDroppedItem（支撑脱落是必然事件，不走 ~50% 破坏掉落概率门；机制等价 MC 爆炸震落墙上
+    //   火把）。同玩家挖支撑块的 PlayerController::dropUnsupportedTorchesAround 语义（爆炸版）。去重：
+    //   清后格为 Air → 邻格重复扫到时非火把族 → 不双掉。分层：向下写 World（setWaterSilent）+ 发语义信号。
+    void dropUnsupportedTorchesAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed, World *world);
     // t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed）。QML delegate 据它对 FallingBlock 叠白闪脉冲
     //   （primed=true → baseColor 白闪；false → 普通下落方块原色）。越界 / 非 primed → false。
     Q_INVOKABLE bool isPrimedAt(int i) const;

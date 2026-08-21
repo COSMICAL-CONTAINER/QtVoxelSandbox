@@ -3599,6 +3599,31 @@ bool EntityManager::aiEmberling(int idx, Entity &e, float dt, World *world, cons
     return moved;
 }
 
+// t738 爆炸失撑火把掉落（Stalker detonateStalker / TNT detonateTntSphere 两爆炸路径共用；头文件注释
+//   详述语义）。实现同 PlayerController::dropUnsupportedTorchesAround 的判定（火把族 state 解码唯一附着
+//   格 → 非 solid 即掉），差异仅在写入口与掉落通道：爆炸是系统事件 → setWaterSilent 静默清（无破块粒子 /
+//   音 spam，同球形破坏口径）+ 恒发 explosionDroppedItem（呈现层 spawnItem，机制等价 MC 爆炸震落墙上
+//   火把成物品）。去重：首扫清格后 blockAt=Air → 破坏列表邻格复扫不再命中火把族 → 不双掉。越界格
+//   blockAt 返 Air 天然跳过。
+void EntityManager::dropUnsupportedTorchesAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed,
+                                                     World *world)
+{
+    if (!world) return;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const World::DestroyedVoxel &d : destroyed) {
+        for (const auto &n : kNb) {
+            const int tx = d.x + n[0], ty = d.y + n[1], tz = d.z + n[2];
+            const quint8 tb = world->blockAt(tx, ty, tz);
+            if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
+            int ax, ay, az;
+            BlockRegistry::torchAttachOffset(world->stateAt(tx, ty, tz), ax, ay, az);
+            if (BlockRegistry::isSolid(world->blockAt(tx + ax, ty + ay, tz + az))) continue; // 支撑幸存 → 保留
+            world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
+            emit explosionDroppedItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 脱落恒掉（不走概率门）
+        }
+    }
+}
+
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
@@ -3657,6 +3682,8 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
             if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
                 emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
         }
+        // t738 爆炸失撑火把掉落：支撑块被炸掉、火把本体在球外幸存 → 脱落为掉落物（不悬空残留）。
+        dropUnsupportedTorchesAfterBlast(destroyed, world);
     }
 
     // (b) 距离衰减伤害玩家：以玩家身体中心（脚位 + ~0.9，机制等价 MC 玩家受击采样身体中部）到爆炸中心计 3D 距离；
@@ -3753,6 +3780,8 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
         if (dropItemId > 0 && QRandomGenerator::global()->generateDouble() < kExplosionDropChance)
             emit explosionDroppedItem(d.x, d.y, d.z, dropItemId);
     }
+    // t738 爆炸失撑火把掉落：支撑块被炸掉、火把本体在球外幸存 → 脱落为掉落物（同 Stalker 路径）。
+    dropUnsupportedTorchesAfterBlast(destroyed, world);
     // 水中链式：destroyed 空（未破坏地形）→ 扫球内 TNT 方块单独引燃（水下 TNT 连锁不断，机制等价 MC 水中 TNT
     //   连锁；不破坏其它方块 / 无掉落）。立方盒 [cx±R, cy±R, cz±R] 逐格距中心 ≤ R 判，同 destroySphereSilent 口径。
     if (originInWater && world) {
