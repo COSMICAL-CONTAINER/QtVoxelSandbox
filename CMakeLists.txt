@@ -71,7 +71,8 @@ qt_add_executable(voxelsandbox
     src/Renderer/unitcube.cpp
     src/Renderer/unitcube.h
     # t697 符文字迹几何（附魔台悬浮书页面细节）：8 条错落扁盒条组成的「字行」，压在书页纸面上读作
-    # 手写符文（程序生成，§9 原创）。Main.qml 悬浮书左右页各绑一片。
+    # 手写符文（程序生成，§9 原创）。t732 悬浮书重贴图后页面符文由贴图自带（叠层与贴图字迹会错位
+    # 重影）→ QML 撤用；类保留注册（几何库一员，后续 UI 可复用）。
     src/Renderer/glyphlines.cpp
     src/Renderer/glyphlines.h
     src/Renderer/crackbox.cpp
@@ -113,6 +114,16 @@ qt_add_executable(voxelsandbox
     #   贴图选择在呈现层（Main.qml skinTexture()），本类只产出几何 + UV。
     src/Renderer/playerskinbox.cpp
     src/Renderer/playerskinbox.h
+    # t732 矿车斗贴图盒几何（Renderer 层）：cartHost delegate（t565）的底板 / 纵帮 / 端帮从 UnitCube
+    #   纯色换贴图采样。±0.5 单位盒 + 「部件 × 六面」像素矩形表（qrc 程序 / demo 包双布局实测分区）。
+    #   贴图选择在呈现层（Main.qml），pack 探测在 Core entitySource，本类只产出几何 + UV。
+    src/Renderer/minecartbox.cpp
+    src/Renderer/minecartbox.h
+    # t732 附魔台悬浮书贴图盒几何（Renderer 层）：bookDelegate（t679）的封面页 / 纸页 / 书脊 / 翻页片
+    #   从 UnitCube 纯色换贴图采样（解决 t679「整书 UV 与两页盒不符」遗留）。同双布局像素矩形表。
+    #   贴图选择在呈现层（Main.qml），pack 探测在 Core entitySource，本类只产出几何 + UV。
+    src/Renderer/enchantbookbox.cpp
+    src/Renderer/enchantbookbox.h
     # t331 骸骨持用弓几何（独立于 MobModel —— 弓需木褐色材质 + 拉弓动画；QML 独立 Model 消费）。
     #   drawAmount Q_PROPERTY 驱动弦后拉 + 肢增弯；EntityManager::drawAmountAt 设值（aimTimer 驱动）。
     src/Renderer/mobbow.cpp

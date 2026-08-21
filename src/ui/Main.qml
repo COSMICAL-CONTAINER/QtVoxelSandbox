@@ -3739,6 +3739,17 @@ Window {
         //   pack 命中 → MobModel box-UV 展开进该贴图（mantle 12×16×12 @ (0,0) + 8 触腕共用 2×12×2 @ (48,0)）+
         //   packTextured=true；pack 关 → source 空 → 回退 mobSquidTex（程序生成 mob_squid）。
         Texture { id: mobSquidPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(9) : ""; generateMipmaps: false }
+        // t732 矿车贴图两态（同 mobSquidPackTex 模式）：pack 命中 entitySource("minecart")（demo 包扁平
+        //   entity/minecart.png 512×256 = base 8×）→ cartPackTex + MinecartBox layout 1（demo 包实测分区）；
+        //   pack 关 / 包缺 → cartTex（qrc 程序 entity_minecart 64×32，layout 0）。source 绑定读 active →
+        //   pack 开关即时刷新。运行期读本地 gitignored pack PNG（红线 §9）。
+        Texture { id: cartTex; source: "qrc:/textures/entity_minecart.png"; generateMipmaps: false }
+        Texture { id: cartPackTex; source: resourcePack.active ? resourcePack.entitySource("minecart") : ""; generateMipmaps: false }
+        // t732 附魔台悬浮书贴图两态：pack 命中 entitySource("enchant_book")（entity/enchanting_table_book.png
+        //   512×256 = base 8×）→ enchantBookPackTex + EnchantBookBox layout 1；否则 qrc 程序
+        //   entity_enchant_book 64×32（layout 0）。t679「整书 UV 与两页盒不符」由像素实测分区重解读解决。
+        Texture { id: enchantBookTex; source: "qrc:/textures/entity_enchant_book.png"; generateMipmaps: false }
+        Texture { id: enchantBookPackTex; source: resourcePack.active ? resourcePack.entitySource("enchant_book") : ""; generateMipmaps: false }
 
         // t718 盔甲 layer 贴图（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 几何按 MC box-UV 从中采样）：
         //   5 tier × 2 layer = 10 张**静态** Texture 实例（tier/layer 各一——玩家与多个 mob 可同时穿不同
@@ -5739,10 +5750,13 @@ Window {
         //   空槽 delegate visible=false 隐藏不销毁（同 itemHost 族）。
         // 触发：carts.count 随 spawnCart 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置 / 朝向随
         //   骑乘物理推进 bump revision → {revision; posAt / yawAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2）。
-        // 外观（§9a 原创程序几何 UnitCube 拼装，无 MC 资产）：斗形（四面车帮中间凹的敞口车斗）—— 1 块车底板
+        // 外观（§9a 原创程序几何拼装，无 MC 资产）：斗形（四面车帮中间凹的敞口车斗）—— 1 块车底板
         //   （宽 0.8 × 长 0.9）+ 4 面车帮壁（前后左右整圈上凸），整体 ~0.9×0.3×1.0（X 宽 × Y 高 × Z 长，长轴沿
         //   行进方向 Z；与 kCartHalfW=0.45 / kCartHalfL=0.5 / kCartHalfH=0.45 命中盒 XZ 对齐）。NoLighting 必备
-        //   （可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。车斗常驻铁灰金属色（原创配色）。
+        //   （可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。
+        // t732 重贴图：纯色 UnitCube → MinecartBox 贴图盒（铁灰壁 + 铆钉 + 木底板）：pack 命中
+        //   entitySource("minecart") → 包贴图（布局 1）；miss → qrc 程序 entity_minecart（布局 0）。
+        //   呈现层换装，骑乘 / 物理 / 槽位逻辑零改动。
         // t565 接入说明（审查修）：MinecartManager 本体 / PlayerController 矿车分支（放置 / 骑乘 / 行驶 / 下车）
         //   已存在，但 QML 未实例化 / 未绑 minecartManager 属性 / 无渲染 → m_minecartManager 恒 nullptr，
         //   所有矿车路径被守卫跳过。本段补齐呈现层接线（实例化 + 属性绑定 + 渲染 Repeater + cartBroken 路由）。
@@ -5765,45 +5779,52 @@ Window {
                     property real cartYaw: carts.revision >= 0 ? carts.yawAt(index) : 0
                     eulerRotation: Qt.vector3d(0, cartRoot.cartYaw, 0)
 
+                    // t732 pack 矿车贴图命中态：命中 → cartPackTex + MinecartBox 布局 1（demo 包 8× 实测
+                    //   分区）；miss → cartTex + 布局 0（qrc 程序 64×32）。source 读 active → pack 开关即时重刷。
+                    property bool cartPackHit: cartPackTex.source.toString().length > 0
+
                     Component.onCompleted: {
                         if (parent === null) parent = cartHost
                     }
 
                     // 车底板（封闭整底）：宽 0.8 × 高 0.06 × 长 0.9，中心下方（车斗底贴轨面 —— 矿车中心已在轨面上
                     //   kCartRideH=0.3，底板下沿 ~轨面 +0.03 不穿轨）。斗形「底」：封闭整面 + 骑乘玩家的「地板」。
+                    //   t732 MinecartBox piece 0：±Y 大面采木底板带（qrc 程序木条 / 包木底块）。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: MinecartBox { piece: 0; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0, -0.12, 0)
                         scale: Qt.vector3d(0.8, 0.06, 0.9)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#9a9a9a" }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.24 × 长 0.9，贴 -X 边。斗形「帮」：四面整圈上凸中间凹。
+                    //   t732 MinecartBox piece 1：外面采左壁窗（含亮卷边顶行），顶面 = 卷边条。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: MinecartBox { piece: 1; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(-0.36, 0.03, 0)
                         scale: Qt.vector3d(0.08, 0.24, 0.9)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 右车帮（+X 纵长壁；与左对称）。
+                    // 右车帮（+X 纵长壁；与左对称）。t732 piece 2：外面采右壁窗。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: MinecartBox { piece: 2; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0.36, 0.03, 0)
                         scale: Qt.vector3d(0.08, 0.24, 0.9)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // 车头帮（-Z 端横壁，跨满宽 x∈[-0.4,0.4]；盖住四角 → 与纵壁端面共面无重叠，同船 t556 消闪烁手法）。
+                    //   t732 MinecartBox piece 3：端面大区（qrc 壁窗 / 包框栏端面）。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: MinecartBox { piece: 3; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0, 0.03, -0.41)
                         scale: Qt.vector3d(0.8, 0.24, 0.08)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 车尾帮（+Z 端横壁；与车头对称）。
+                    // 车尾帮（+Z 端横壁；与车头对称，同 piece 3 —— ±Z 大面取同区，前后壁共用几何）。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: MinecartBox { piece: 3; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0, 0.03, 0.41)
                         scale: Qt.vector3d(0.8, 0.24, 0.08)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a8a8a" }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // F3+B 矿车碰撞箱（同 boat hitbox 模式；PLAN §2-F F3 调试叠层）：
                     //   kCartHalfW=0.45 / kCartHalfH=0.45 / kCartHalfL=0.5 → scale=(2·半W, 2·半H, 2·半L)+0.01 外扩避面重叠。
@@ -7985,9 +8006,12 @@ Window {
         //   28° 成 V（薄盒 0.38 宽 × 0.46 深，页心 ±0.19 使内缘贴书脊）；书脊 = 底部细深色横条；翻页片 =
         //   覆在右页上的同尺寸薄片，书脊枢轴绕 Z 从 28°（贴右页）翻越顶部到 332°（落左页）再返回（页片摆动）。
         //   随机翻页：每 2.5-6s 随机触发一次翻页动画（右页片翻到左页 → 停 250ms → 翻回），整体再叠加
-        //   缓慢浮沉（bob）→ 「悬浮 + 随机翻页」双动效。贴图：无 pack 实体书贴图接入（pack
-        //   enchanting_table_book.png 是 512×256 整本书 UV 展开，与两页盒映射不符）→ 程序白纸页
-        //   （暖白 #f5f1e6 + 书脊深棕 #4a3628），§9 自绘原创（机制等价 MC 书外观，非 MC 资产）。
+        //   缓慢浮沉（bob）→ 「悬浮 + 随机翻页」双动效。
+        //   贴图（t732 重贴图，替换 t679 程序纯色）：EnchantBookBox 贴图盒按「部件 × 面」像素分区采样
+        //   —— pack 命中 entitySource("enchant_book") → 包贴图（布局 1，封面 / 纸页 / 书脊 / 翻页白页
+        //   实测分区，解决 t679「整本书 UV 与两页盒不符」遗留）；miss → qrc 程序
+        //   entity_enchant_book（布局 0：左页棕封金边纹章 / 右页纸页符文行 / 书脊金边条）。页面符文由
+        //   贴图自带（t697 GlyphLines 叠层撤下 —— 叠层与贴图字迹会错位重影），翻页 / 浮沉 / 事件机制零改动。
         Node {
             id: bookHost
             property var bookObjs: ({})
@@ -8026,6 +8050,10 @@ Window {
                 property int cellX: 0
                 property int cellY: 0
                 property int cellZ: 0
+                // t732 pack 书贴图命中态：命中 → enchantBookPackTex + EnchantBookBox 布局 1（demo 包 8×
+                //   实测分区）；miss → enchantBookTex + 布局 0（qrc 程序 64×32）。source 读 active →
+                //   pack 开关即时重刷。
+                property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
                 // 悬浮位：台格中心 + 0.25 间隙内（矮盒顶 y+0.75 ↔ 格顶 y+1.0；书心 y+0.82，页尖
                 //   ~y+0.96 收在间隙内不凸到上一格）。
                 position: Qt.vector3d(cellX + 0.5, cellY + 0.82, cellZ + 0.5)
@@ -8048,52 +8076,39 @@ Window {
                     }
 
                     // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
-                    //   t697 页面细节：页盒上叠「符文字迹」薄片（暗色短横条 ×3 行，程序生成 —— 用户
-                    //   「字太少 / 太白」；暗条压在暖白纸面上读作符文行，不再是一整块白）。单页共用
-                    //   glyphComponent（行位置随 X 偏移分散，两页不同排布避免镜像雷同）。
+                    //   t732 EnchantBookBox piece 0（封面页）：上面采封面区（qrc 左半棕封金边纹章 / 包左封），
+                    //   书脊侧窄面 = 金边竖条。页面符文 / 纹章由贴图自带（t697 GlyphLines 叠层撤下：贴图字迹
+                    //   已覆盖「字太少 / 太白」诉求，叠层再压会错位重影）。
                     Node {
                         rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
                         Model {
-                            geometry: UnitCube {}
+                            geometry: EnchantBookBox { piece: 0; layout: bookPackHit ? 1 : 0 }
                             position: Qt.vector3d(-0.19, 0.0, 0.0)
                             scale: Qt.vector3d(0.38, 0.022, 0.46)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5f1e6" }
-                        }
-                        // 左页符文字迹（y +0.013 略高于页面上表面，避 z-fight）：6 道暗横条两列排布。
-                        Model {
-                            geometry: GlyphLines {}
-                            position: Qt.vector3d(-0.19, 0.013, 0.0)
-                            scale: Qt.vector3d(0.30, 1.0, 0.38)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a4034" }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                         }
                     }
-                    // 右页：镜像（+22°）。
+                    // 右页：镜像（+22°）。t732 piece 1（纸页）：上面采纸页区（qrc 右半符文行 / 包纸页叠）。
                     Node {
                         rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: 22 }
                         Model {
-                            geometry: UnitCube {}
+                            geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
                             position: Qt.vector3d(0.19, 0.0, 0.0)
                             scale: Qt.vector3d(0.38, 0.022, 0.46)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f5f1e6" }
-                        }
-                        // 右页符文字迹（同左页几何，符号条错位排布由几何内顶点位置决定）。
-                        Model {
-                            geometry: GlyphLines {}
-                            position: Qt.vector3d(0.19, 0.013, 0.0)
-                            scale: Qt.vector3d(0.30, 1.0, 0.38)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a4034" }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                         }
                     }
-                    // 书脊：底部细深棕横条（两页交汇处）。
+                    // 书脊：两页交汇处细横条。t732 piece 2：可见窄面 = 金边竖条（qrc）/ 书脊条含白宝石（包）。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: EnchantBookBox { piece: 2; layout: bookPackHit ? 1 : 0 }
                         position: Qt.vector3d(0.0, -0.02, 0.0)
                         scale: Qt.vector3d(0.032, 0.03, 0.46)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a3628" }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                     }
                     // 翻页片：覆于右页上的同尺寸薄片，枢轴在书脊。baseAngle=22（贴右页）；
                     //   flipAngle 0→316 → 页片总角 22→338（翻越顶部 ≡ -22° 落左页）；再 316→0 翻回。
                     //   轴对齐盒无曲率 → 像素风下读作「页片摆动」（机制等价 MC 书页翻动，§9 原创简化）。
+                    //   t732 piece 3：上下大面采无字白纸区（qrc）/ 翻页白页（包）—— 与静态纸页区分，翻动可辨。
                     Node {
                         id: flipPivot
                         property real baseAngle: 22
@@ -8103,10 +8118,10 @@ Window {
                             angle: flipPivot.baseAngle + flipPivot.flipAngle
                         }
                         Model {
-                            geometry: UnitCube {}
+                            geometry: EnchantBookBox { piece: 3; layout: bookPackHit ? 1 : 0 }
                             position: Qt.vector3d(0.19, 0.006, 0.0)
                             scale: Qt.vector3d(0.38, 0.014, 0.44)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fdfaf1" }
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                         }
                     }
                 }
