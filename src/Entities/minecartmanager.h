@@ -13,7 +13,9 @@
 // 矿车是新实体类型：放在铁轨上（Rail 方块），玩家右键矿车实体 → 骑乘，W/A/D 控制沿轨道前后 /
 // 拐弯（轨连接位导向 —— 矿车从当前轨格沿「玩家意图方向最近的连接向」推进到相邻轨格，拐角自动转弯；
 // 机制等价 MC 1.0 矿车沿轨行驶 + 弯道自动转向），轨上快速移动（明显快于步行）；离轨（下一格无轨）→ 停。
-// 左键挖矿车 → 矿车实体消失 + 掉矿车物品（可重放）。
+// 左键挖矿车（t735 ②）：创造单击即毁 + 掉矿车物品（可重放）；生存需连击 kCartHitPoints 下（每击受击
+//   摇晃 —— 呈层据 hpAt 绑定驱动摇晃动画），最后一击才毁 + 掉落（用户明确要求的多击耐久语义；机制
+//   等价口径下 MC 1.0 矿车本是一击即毁，此为按本工程 spec 的有意偏差）。
 //
 // 数据形态：每个矿车实体 = {世界坐标 pos（矿车中心，车底贴轨板顶 —— t734 基准=轨格 cell 底+1/16）、水平行进方向 dirX/dirZ（单位向量，
 //   轨向四向之一）、朝向 yawDeg（呈现层 Model 据它定向）、速度 speed（blocks/s，W 前进加速 / 松键摩擦衰减）、
@@ -82,6 +84,10 @@ public:
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个矿车的朝向（度；车头方向，呈现层矿车 Model eulerRotation.y）。越界返回 0。
     Q_INVOKABLE float yawAt(int i) const;
+    // t735 ② 第 i 个矿车的剩余耐久（可承受击数；满血 = kCartHitPoints，越界 / 空槽返回 0）。呈现层 delegate
+    //   绑它（`carts.revision >= 0 ? carts.hpAt(index) : 0` 表达式形式注册 revision 依赖，t498/t556 铁律），
+    //   值变小 → onCartHpChanged 触发受击摇晃动画。越界 / 空槽返 0（空槽 delegate 本就 visible=false）。
+    Q_INVOKABLE int hpAt(int i) const;
 
     // 切世界清空（同 BoatManager.clearAll 模式）：释放全部活体槽（保 slot-reuse 单调不变量）+ 清骑乘态。
     Q_INVOKABLE void clearAll() {
@@ -97,11 +103,17 @@ public:
     //   maxDist 内命中首个活体矿车 → 返其索引（outDist 写命中距离）；无命中 → -1。
     int findCartHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist) const;
 
-    // 挖矿车（攻击）：跑 findCartHit 命中矿车 → 移除该矿车（releaseSlot）+ emit cartBroken（呈层据它
-    //   spawnItem 掉矿车物品 MinecartId）。若命中的是被骑的矿车（idx == m_riderCart）→ 同步清 m_riderCart。
+    // 挖矿车（攻击）：跑 findCartHit 命中矿车 → 按 t735 ②耐久语义分流：
+    //   instantBreak=true（caller 创造模式传）→ 直接摧毁；否则 hp>1 时扣 1 血（不掉不毁，呈层 hpAt 绑定
+    //   变化驱动受击摇晃动画），hp 归零的那一击才 releaseSlot + emit cartBroken（呈层据它 spawnItem 掉
+    //   MinecartId 物品）。t735 ①：掉落格带 world 做**非实心邻格散布**（同船 t711 修法）——旧版掉矿车
+    //   中心格 = 常与攻击者本人所在格重合，kPickupDist 1.5 半径内 0.5s 免拾窗一过即被 pickupScan 吸回，
+    //   用户观感「不掉落」（创造贴脸测更易复现；与船 t661 同根因：掉落点选格，非模式门控）。
+    //   若命中的是被骑的矿车（idx == m_riderCart）→ 同步清 m_riderCart。
     //   由 PlayerController.beginMining 调（左键瞄矿车 → 挖矿车，优先于破块路径，同船 hitBoatFromRay 分流模式）。
-    //   返 true = 命中并移除（caller 据此发 swingArm + 不再走破块）；false = 未命中（caller 落回破块路径）。
-    bool hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist);
+    //   返 true = 命中并结算（扣血或摧毁；caller 据此发 swingArm + 不再走破块）；false = 未命中（caller 落回破块路径）。
+    bool hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist,
+                        World *world = nullptr, bool instantBreak = false);
 
     // 尝试骑乘：跑 findCartHit 命中矿车 → 设 m_riderCart + 返 true；未命中 / 命中当前骑的 → false。
     //   由 PlayerController placeBlock 矿车段调（右键瞄矿车 → 上车，优先于放矿车）。
@@ -119,10 +131,34 @@ public:
     void tickRiddenCart(qreal dt, World *world, float wishX, float wishZ, QVector3D &outCartPos);
 
     // t708 ④/③ 空矿车被推后的滑行（PlayerController.step 每帧调，全模式统一推进）：扫全部未被骑的活体矿车，
-    //   有速度（被 pushEmptyCart 推动 / 下坡自然溜）→ 松手摩擦渐停 / 下坡顺坡滑 → 沿轨推进（共享
+    //   有速度（被 pushEmptyCart 推动 / 碰撞获速 / 下坡自然溜）→ 松手摩擦渐停 / 下坡顺坡滑 → 沿轨推进（共享
     //   stepCartAlongRail —— 出轨 / 死端自动停：无轨不前进）→ 钉轨面（坡面贴地）。静止空车不自动起步。
-    //   空车不吃动力轨 boost / 探测轨道标（t708 范围外；被骑路径语义不变）。
+    //   **t735 ④ 语义变更**（覆盖 t708「空车不吃动力轨 boost」注释）：脚下是**通电**动力轨（GoldenRail +
+    //   GoldenRailStateOnFlag）→ 摩擦不衰减，反被加速到 boost 档（保持前进直到离开动力段；机制等价动力轨
+    //   对无骑手矿车同样供能）。静置（speed≈0）空车在动力轨上**不被弹射起步**（t708 起步闸门保留 —— 弹射
+    //   语义只属被骑路径，防玩家放置的车自己跑掉）。探测轨道标仍只属被骑路径（占用是「骑乘压轨」语义）。
     void tickPushedCarts(qreal dt, World *world);
+
+    // t735 ③ 矿车↔矿车碰撞（PlayerController.step 每帧调，骑乘 / 非骑乘分支都调 —— 被骑的车也要能撞开
+    //   前方空车）：全部活体矿车两两（O(n²)，kCap=64 上界 → ≤2016 对，每帧可承受）做水平 AABB 相交检测
+    //   （简化：不旋转盒，对称半径 kCartCollideSep），重叠对做两件事 ——
+    //   (a) 位置去穿插：沿「两车中心连线」把两车各推开半穿透量，但**投影到各自轨轴**（沿轨四向）位移 ——
+    //       垂直于轨轴的分量不位移（防把车顶出轨道列 → pinCartY 无轨判死），交叉轨道两车互不挤位只交换冲量；
+    //   (b) 动量传递（**一维沿轨向近似**，注明简化：等质量非弹性碰撞的简化 —— 后车（中心连线方向上速度
+    //       更大者）把「接近速度 × kCartMomentumTransfer」沿中心线投影到前车轨轴上加给前车 speed，自身
+    //       减同量；不做能量守恒精确解，比例常量可调）。对撞（互相逼近）同公式自然得到「双双减速 / 轻微
+    //       反弹」（负速 = 沿 -dir 倒行，stepCartAlongRail 已支持）。
+    //   任一车 speed/pos 被改 → notifyChanged（revision 触碰驱动 QML 位置刷新）。
+    void resolveCartCollisions(World *world);
+
+    // t735 ③ 行进矿车轻推玩家（实体互推的车→玩家半边；玩家→车半边 = 既有 pushEmptyCart）：扫全部活体矿车，
+    //   |speed| 超阈的车与玩家 AABB（脚底 playerFeet ± playerHalfW，高 playerHeight）水平相交 → 玩家沿车
+    //   行进向获轻推冲量（outPushX/Z 累加，caller 写入 m_knockback —— 复用受击击退冲量通道，防穿墙子步 /
+    //   指数衰减全免费；**不做伤害**）；车每帧按 kCartBumpDrag 指数掉速（碾过玩家有阻力但不挡停 —— 机制
+    //   等价矿车推着实体走）。静置车不推人（推车由 pushEmptyCart 承担）。被骑的车不推人（骑乘分支早退不
+    //   调本方法）。caller 每帧重写同值 → 接触期间推力持续、接触结束即自然衰减（非逐帧无界叠加）。
+    void resolvePlayerPush(World *world, const QVector3D &playerFeet, float playerHalfW, float playerHeight,
+                           qreal dt, float &outPushX, float &outPushZ);
 
     // t708 ④ 空车被玩家推动：玩家水平 AABB（脚底 ±kPlayerHalfW）与静止空矿车 footprint 重叠 + wish 沿
     //   轨轴有分量 → 把矿车沿轨道推进（按 wish 与该轨格连接向点积最大者定朝向与速度；车无碰撞盒，
@@ -146,6 +182,8 @@ private:
         float dirZ = 1.0f;   // 行进方向 Z
         float speed = 0.0f;  // 沿行进方向速度（blocks/s；W 加速 / 松键摩擦衰减 / 轨尽头停）
         float yaw = 0.0f;    // 车头朝向（度；呈现层矿车 Model eulerRotation.y）
+        int hp = 0;           // t735 ② 剩余耐久击数（spawnCart 置 kCartHitPoints；创造 instantBreak 不看它）。
+                              //   非 default-member-init 常量（kCartHits 定义于类后半部，spawnCart 显式赋值）。
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Cart> m_carts;
@@ -239,6 +277,21 @@ private:
     // t708 ④ 推车判定重叠半径：玩家脚底中心与静止空矿车中心的水平距离 ≤ 0.8 视为「贴住可推」
     //   （≈ 玩家碰撞盒半宽 0.3 + 矿车 footprint 半宽 0.45 + 0.05 容差；同量级玩家站立占格半径 0.5）。
     static constexpr float kCartPushReach = 0.8f;
+    // t735 ② 生存矿车耐久击数（可承受的攻击次数；第 kCartHitPoints 击摧毁+掉落）。机制注：MC 1.0 矿车
+    //   本是一击即毁，此为用户明确要求的多击耐久语义（可调：改小=更快毁）。创造模式不看它（单击即毁）。
+    static constexpr int kCartHitPoints = 3;
+    // t735 ③ 车-车碰撞分离距离（格）：两车中心水平距离小于它视为碰撞重叠（AABB 简化：对称半径取
+    //   max(kCartHalfW,kCartHalfL)=0.5 ×2，再留 2% 收缩容差防贴轨停驻的两车永久微抖）。
+    static constexpr float kCartCollideSep = 0.98f;
+    // t735 ③④ 动量传递比（0..1）：碰撞时「接近速度 × 该比」沿中心线传给前车（等质量非弹性碰撞的简化；
+    //   1.0=完全非弹性贴走，0=完全弹性穿透不传。0.85 取「后车明显减速、前车吃到大部分速度」的 MC 观感）。
+    static constexpr float kCartMomentumTransfer = 0.85f;
+    // t735 ③ 行进矿车轻推玩家的冲量强度（blocks/s，写入 m_knockback 通道）。轻推 = 明显小于受击击退
+    //   6.0 / 衰减率同 kHitKnockbackDrag → 总位移 ≈ 2.0/4.5 ≈ 0.44 格（推开让位，不弹飞）。
+    static constexpr float kCartBumpSpeed = 2.0f;
+    // t735 ③ 矿车碾过玩家的掉速率（1/s，指数衰减）：接触期间车速按此衰减（有阻力但不挡停 —— 机制等价
+    //   矿车推着实体前进，推开后恢复动力轨 / 重力供能）。
+    static constexpr float kCartBumpDrag = 2.0f;
     // 速度 lerp 接近率（1/s；动量感：松键后滑行一段渐停）。
     static constexpr float kCartAccel  = 3.0f;
     // 空车 / 松键摩擦衰减率（1/s）。

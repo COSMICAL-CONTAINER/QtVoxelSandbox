@@ -5777,7 +5777,29 @@ Window {
                     position: carts.revision >= 0 ? carts.posAt(index) : Qt.vector3d(0, 0, 0)
                     // 车头朝向（度；先读进 property 再喂 eulerRotation —— 块表达式不能作函数实参）。
                     property real cartYaw: carts.revision >= 0 ? carts.yawAt(index) : 0
-                    eulerRotation: Qt.vector3d(0, cartRoot.cartYaw, 0)
+                    // t735 ② 受击耐久摇晃：cartHp 绑 hpAt（表达式形式注册 revision 依赖，t498/t556 铁律）——
+                    //   C++ hitCartFromRay 扣血后 revision bump → 绑定重算值变小 → onCartHpChanged 触发摇晃
+                    //   动画。cartHpSeen 记上次值：仅「变小」视为受击（槽复用 0→满血回摆 / 新车初始求值
+                    //   都不误触发）。耐久 / 扣血物理在 Entities 层，此处只做呈现（PLAN §2 分层）。
+                    property int cartHp: carts.revision >= 0 ? carts.hpAt(index) : 0
+                    property int cartHpSeen: 0
+                    onCartHpChanged: {
+                        if (cartHp < cartHpSeen) cartShake.restart()
+                        cartHpSeen = cartHp
+                    }
+                    // 受击摇晃横滚角（度）：左右摇摆衰减回正（纯呈现叠加层，不动 position/cartYaw 绑定 ——
+                    //   车被撞翻的错觉只靠 roll，物理位姿权威仍在 C++）。
+                    property real shakeRoll: 0
+                    SequentialAnimation {
+                        id: cartShake
+                        running: false
+                        NumberAnimation { target: cartRoot; property: "shakeRoll"; to: 9;  duration: 60; easing.type: Easing.OutQuad }
+                        NumberAnimation { target: cartRoot; property: "shakeRoll"; to: -7; duration: 90; easing.type: Easing.InOutQuad }
+                        NumberAnimation { target: cartRoot; property: "shakeRoll"; to: 4;  duration: 80; easing.type: Easing.InOutQuad }
+                        NumberAnimation { target: cartRoot; property: "shakeRoll"; to: -2; duration: 70; easing.type: Easing.InOutQuad }
+                        NumberAnimation { target: cartRoot; property: "shakeRoll"; to: 0;  duration: 60; easing.type: Easing.OutQuad }
+                    }
+                    eulerRotation: Qt.vector3d(0, cartRoot.cartYaw, cartRoot.shakeRoll)
 
                     // t732 pack 矿车贴图命中态：命中 → cartPackTex + MinecartBox 布局 1（demo 包 8× 实测
                     //   分区）；miss → cartTex + 布局 0（qrc 程序 64×32）。source 读 active → pack 开关即时重刷。
@@ -5785,6 +5807,7 @@ Window {
 
                     Component.onCompleted: {
                         if (parent === null) parent = cartHost
+                        cartHpSeen = cartHp // t735 ② 初始同步（防创建求值期误判受击）
                     }
 
                     // 车底板（封闭整底）：宽 0.8 × 高 0.06 × 长 0.9，中心下方（车斗底贴轨面 —— 矿车中心已在轨面上

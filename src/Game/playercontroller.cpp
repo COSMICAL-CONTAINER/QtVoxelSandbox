@@ -1030,16 +1030,18 @@ void PlayerController::beginMining()
         }
     }
     // t565 挖矿车掉落（机制等价 MC 1.0 攻击矿车 → 矿车破坏掉矿车物品；同挖船 hitBoatFromRay 分流模式）。
-    //   独立跑 cart 命中射线：命中活体矿车且（无方块命中 OR 矿车比方块更近）→ hitCartFromRay 移除矿车 +
-    //   emit cartBroken（→ 呈层 spawnItem 掉矿车物品）+ swingArm，不进破块分支。挖的是被骑的矿车 → 玩家自然
-    //   下车（hitCartFromRay 内清骑乘态）。攻击冷却门控同船（防长按瞬秒多车）。
+    //   独立跑 cart 命中射线：命中活体矿车且（无方块命中 OR 矿车比方块更近）→ hitCartFromRay + swingArm，
+    //   不进破块分支。挖的是被骑的矿车 → 玩家自然下车（hitCartFromRay 内清骑乘态）。攻击冷却门控同船
+    //   （防长按瞬秒多车）。
+    //   t735 ②耐久分流：创造单击瞬毁（instantBreak=true，掉落走 manager 内非实心邻格散布）；生存多击
+    //   （kCartHitPoints 击：前几击扣血摇晃、末击摧毁+掉落；0.5s 攻击冷却定连击节奏）。
     if (m_minecartManager && m_attackCooldown <= 0.0f) {
         const QVector3D eye = position();
         const QVector3D look = lookDirection();
         float cartDist = 0.0f;
         const int cartIdx = m_minecartManager->findCartHit(eye, look, kReach, &cartDist);
         if (cartIdx >= 0 && cartDist <= m_hitDist) {
-            m_minecartManager->hitCartFromRay(eye, look, kReach);
+            m_minecartManager->hitCartFromRay(eye, look, kReach, m_world, /*instantBreak=*/m_mode == Creative);
             m_attackCooldown = kAttackCooldown; // 挖矿车也走攻击冷却
             emit swingArm();
             return;
@@ -5957,8 +5959,16 @@ void PlayerController::step(qreal dt)
         // WASD 驱动矿车（wish 是据 yaw 的世界系意图向量；tickRiddenCart 在轨约束下投影到行进方向）。
         QVector3D cartPos;
         m_minecartManager->tickRiddenCart(dt, m_world, wish.x(), wish.z(), cartPos);
+        // t735 ③ 骑乘帧也推进其它空车 + 全对碰撞解析：t708 旧「骑乘态空车不 tick（停驻可接受）」语义
+        //   推进 —— 被骑车撞开 / 追尾传递动量的前车要在骑乘期间持续滑行，否则动量给了车却不动（观感
+        //   「撞不动」）。tickPushedCarts 内部跳过被骑车（走上方专属物理）；resolveCartCollisions 含被骑
+        //   车 vs 空车全对（去穿插可能移动被骑车 → 下方玩家同步改读解析后的最终位 posAt）。
+        m_minecartManager->tickPushedCarts(dt, m_world);
+        m_minecartManager->resolveCartCollisions(m_world);
+        const int riddenIdx = m_minecartManager->ridingIndex();
+        const QVector3D finalCartPos = (riddenIdx >= 0) ? m_minecartManager->posAt(riddenIdx) : cartPos;
         // 玩家随矿车位移（脚底 = 矿车中心下移 0.3 —— 坐进车斗；眼位 / 相机自动跟随 position()）。
-        m_pos = QVector3D(cartPos.x(), cartPos.y() - 0.3f, cartPos.z());
+        m_pos = QVector3D(finalCartPos.x(), finalCartPos.y() - 0.3f, finalCartPos.z());
         m_vel = QVector3D(0, 0, 0);
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
@@ -5971,6 +5981,21 @@ void PlayerController::step(qreal dt)
     if (m_minecartManager) {
         m_minecartManager->tickPushedCarts(dt, m_world);
         m_minecartManager->pushEmptyCart(m_world, m_pos, wish.x(), wish.z());
+        // t735 ③ 车-车碰撞（O(n²) 对解析：去穿插 + 一维沿轨向动量传递）。
+        m_minecartManager->resolveCartCollisions(m_world);
+        // t735 ③ 行进矿车轻推玩家（实体互推的「车→人」半边；「人→车」= 上行 pushEmptyCart）：冲量写入
+        //   m_knockback 受击击退通道（复用其防穿墙子步 + 指数衰减 + 被埋锁定清零；不做伤害 —— 车只是
+        //   推着玩家让位，不弹飞）。观察者 / 创造飞行不被推：knockback 通道对 noclip 路径不积分、也不
+        //   衰减，写入会成陈旧冲量挂账（落地走路时突兀一推）→ 按「通道消费者」门控写入侧。接触期间
+        //   每帧重写同值 = 推力持续；接触结束即自然衰减（~0.5s 停，总位移 ≈ kCartBumpSpeed/drag ≈ 0.44 格）。
+        if (m_mode == Survival || (m_mode == Creative && !m_flying)) {
+            float bumpX = 0.0f, bumpZ = 0.0f;
+            m_minecartManager->resolvePlayerPush(m_world, m_pos, kHalfW, m_height, dt, bumpX, bumpZ);
+            if (bumpX != 0.0f || bumpZ != 0.0f) {
+                m_knockback.setX(bumpX); // 整写（非累加）：接触期间推力恒定不逐帧叠加；车撞优先于怪击退
+                m_knockback.setZ(bumpZ);
+            }
+        }
     }
     // t159 水下速度倍数：眼位在水格 → 水平（及飞垂直）速度 ×kUnderwaterSpeedMul（~0.4）。所有模式统一适用
     //   （走 / 飞 / 观察者进水都变慢，机制等价 MC 水中减速）。每 tick 查一次（blockAt 单查，廉价）。

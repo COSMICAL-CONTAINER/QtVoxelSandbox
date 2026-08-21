@@ -3,6 +3,7 @@
 #include <QtMath>
 #include <cmath>
 #include <algorithm>
+#include <QRandomGenerator> // t735 ① 掉落邻格散布随机取（同船 t711 修法）
 #include <unordered_set> // t658 探测轨占用边沿表（m_detectorOccupied）
 
 #include "world.h"           // 向下只读 World（blockAt / stateAt —— 轨与连接位）
@@ -86,6 +87,7 @@ void MinecartManager::spawnCart(int x, int y, int z, World *world)
         c.yaw = 180.0f; // +Z 行进的车头朝向（-Z 前约定下 yaw=180）
     }
     c.speed = 0.0f;
+    c.hp = kCartHitPoints; // t735 ② 生存耐久满血（创造 instantBreak 不看它；槽复用整结构覆盖无残留）
     acquireSlot(std::move(c));
     notifyChanged();
 }
@@ -100,6 +102,13 @@ float MinecartManager::yawAt(int i) const
 {
     if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return 0.0f;
     return m_carts[size_t(i)].yaw;
+}
+
+// t735 ② 剩余耐久读口（呈现层 delegate 绑它驱动受击摇晃；见头注释）。
+int MinecartManager::hpAt(int i) const
+{
+    if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return 0;
+    return m_carts[size_t(i)].hp;
 }
 
 int MinecartManager::findCartHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist) const
@@ -364,9 +373,10 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
 
 // t708 ③ 空矿车被推后的滑行（PlayerController.step 每帧调，骑乘分支之外）：扫全部未被骑的活体矿车，
 //   静置（speed≈0）不动（无被骑路径的 slopeDownAuto 起步闸门 —— 空车不自动溜坡，机制保守）；有速度
-//   （pushEmptyCart 推动 / 推入下坡段顺坡溜）→ 下坡不衰减（重力抵消摩擦 → 顺坡滑）、平 / 上坡磨擦渐停
-//   → 共享 stepCartAlongRail 沿轨推进（出轨 / 死端自动停：无轨不前进）→ 钉轨面（坡面贴地）。空车不吃
-//   动力轨 boost / 探测轨道标（t708 范围外；被骑路径语义不变 —— tickRiddenCart 才处理 boost / detector 沿）。
+//   （pushEmptyCart 推动 / t735 碰撞获速 / 推入下坡段顺坡溜）→ 下坡不衰减（重力抵消摩擦 → 顺坡滑）、
+//   平 / 上坡磨擦渐停 → 共享 stepCartAlongRail 沿轨推进（出轨 / 死端自动停：无轨不前进）→ 钉轨面（坡面
+//   贴地）。t735 ④ 语义变更：**通电动力轨上摩擦不衰减、加速到 boost 档**（撞击获速的空车在动力段保持
+//   前进直到离开；见循环内注释）。探测轨道标仍只属被骑路径（占用是「骑乘压轨」语义）。
 //   任一车本帧水平位移 → 发一次 entitiesChanged（revision 触碰驱动 QML 位置刷新；无位移不发防每帧空转）。
 void MinecartManager::tickPushedCarts(qreal dt, World *world)
 {
@@ -391,17 +401,116 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             { world->blockAt(cx + ndx, ry, cz + ndz),
               world->blockAt(cx + ndx, ry + 1, cz + ndz),
               world->blockAt(cx + ndx, ry - 1, cz + ndz) });
-        if (slope == INT_MIN || slope >= 0) { // 平 / 上坡：摩擦衰减（帧率无关 exp 衰减）
+        // t735 ④ 动力段保持（**语义变更**：t708 旧注释「空车不吃动力轨 boost」被本任务推翻 —— 碰撞 / 玩家
+        //   推动获速的空车驶上通电动力轨（GoldenRail + GoldenRailStateOnFlag，同被骑路径 t658 通电判定）
+        //   应保持前进直到离开动力段）：摩擦不衰减，反被 lerp 加速到 boost 档（沿当前 speed 符号 —— 动力
+        //   轨不改向，只沿车既行方向供能）。静置空车（|speed|<1e-3 早退闸门）在动力轨上不被弹射起步 ——
+        //   弹射语义只属被骑路径（防玩家放下的车自己跑掉）。
+        const bool railPowered = world->blockAt(cx, ry, cz) == BlockRegistry::GoldenRail
+            && (world->stateAt(cx, ry, cz) & BlockRegistry::GoldenRailStateOnFlag) != 0;
+        if (railPowered) {
+            const float targetV = (c.speed >= 0.0f ? 1.0f : -1.0f) * kCartBoostSpeed;
+            const float alpha = 1.0f - std::exp(-kCartAccel * float(dt));
+            c.speed += (targetV - c.speed) * alpha;
+        } else if (slope == INT_MIN || slope >= 0) { // 平 / 上坡：摩擦衰减（帧率无关 exp 衰减）
             const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
             c.speed -= c.speed * alpha;
             if (std::fabs(c.speed) < 0.02f) { c.speed = 0.0f; continue; } // 磨擦停稳（死区）
-        } // 下坡（slope<0）→ 不衰减（顺坡滑）
+        } // 下坡（slope<0）→ 不衰减（顺坡滑）；动力段已先行接管（boost 12.8 > 溜坡 10，语义不冲突）
         stepCartAlongRail(c, world, float(dt));
         pinCartY(c, world); // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）
         const float dx = c.pos.x() - bx, dz = c.pos.z() - bz;
         if (dx * dx + dz * dz > 1e-6f) moved = true;
     }
     if (moved) notifyChanged();
+}
+
+// t735 ③ 矿车↔矿车碰撞（实现见头注释）：两两水平 AABB 相交 → (a) 沿各自轨轴的位置去穿插（垂直轨轴
+//   分量不位移 —— 防把车顶出轨道列被 pinCartY 判死）+ (b) 一维沿轨向近似动量传递（接近速度 ×
+//   kCartMomentumTransfer 投影到各自轨轴加减；**注明简化**：等质量非弹性碰撞的简化模型，不做能量守恒
+//   精确解）。不需要读世界（world 参数保留给未来方块级阻挡；轨约束由下一帧 stepCartAlongRail 收口：
+//   去穿插位移恒沿轨轴、跨格经 pickTrackStep 验证）。任一车 speed/pos 被改 → notifyChanged。
+void MinecartManager::resolveCartCollisions(World *world)
+{
+    Q_UNUSED(world);
+    if (m_carts.size() < 2) return; // <2 车 → 无对可撞（零开销）
+    bool changed = false;
+    for (size_t i = 0; i < m_carts.size(); ++i) {
+        Cart &a = m_carts[i];
+        if (!a.alive) continue;
+        for (size_t j = i + 1; j < m_carts.size(); ++j) {
+            Cart &b = m_carts[j];
+            if (!b.alive) continue;
+            // Y 层筛（不同高度的轨道层互不相交）：两车中心 Y 差 ≥ 2×半高 → 跳过。
+            if (std::fabs(a.pos.y() - b.pos.y()) >= 2.0f * kCartHalfH) continue;
+            // 水平中心连线 n（A→B 单位向量，即「碰撞法线」）。两车同格心（dist≈0；spawn 每格一车，理论
+            //   不并置，防御）→ 用 A 行进向兜底定轴。
+            float nx = b.pos.x() - a.pos.x();
+            float nz = b.pos.z() - a.pos.z();
+            float dist = std::sqrt(nx * nx + nz * nz);
+            if (dist < 1e-4f) { nx = a.dirX; nz = a.dirZ; dist = 1.0f; }
+            else { nx /= dist; nz /= dist; }
+            if (dist >= kCartCollideSep) continue; // 未重叠
+            // (b) 动量传递（仅互相逼近 closing>0 时）：各车速度矢量（dir×speed）沿 n 投影 → 接近速度；
+            //   冲量 = closing × kCartMomentumTransfer，沿 n 加给 B、减给 A，再投影回**各自轨轴**
+            //   （dot(n,dir) ∈ {0, ±0.707, ±1}）：同轨追尾 dot=±1 全额传递（后车减速、前车沿 n 被推走 ——
+            //   负速=沿 -dir 倒行，与车头朝向无关地「被撞开」）；交叉轨道 dot≈±0.707 吃部分冲量；完全垂直
+            //   dot=0 不吃（车沿原轨穿过道口，不飞出轨道）。对撞同式自然得「双双减速 / 轻微反弹」。
+            const float aDot = a.dirX * nx + a.dirZ * nz;
+            const float bDot = b.dirX * nx + b.dirZ * nz;
+            const float closing = a.speed * aDot - b.speed * bDot; // >0 = A 沿 n 逼近 B
+            if (closing > 0.05f) {
+                const float impulse = closing * kCartMomentumTransfer;
+                b.speed += impulse * bDot;
+                a.speed -= impulse * aDot;
+                changed = true;
+            }
+            // (a) 位置去穿插（穿透 >5cm 才推，防贴轨停驻两车的 FP 微抖抖动）：各沿自身轨轴推开半穿透量
+            //   （-n 在 A 轨轴上的投影定 A 的位移符号与大小；投影 0 = 交叉轨道不位移，只交换冲量）。
+            const float pen = kCartCollideSep - dist;
+            if (pen > 0.05f) {
+                const float sA = -aDot * (pen * 0.5f); // A 沿 -n 方向（背离 B）在其轨轴上的分量
+                const float sB =  bDot * (pen * 0.5f); // B 沿 +n 方向（背离 A）在其轨轴上的分量
+                a.pos.setX(a.pos.x() + a.dirX * sA);
+                a.pos.setZ(a.pos.z() + a.dirZ * sA);
+                b.pos.setX(b.pos.x() + b.dirX * sB);
+                b.pos.setZ(b.pos.z() + b.dirZ * sB);
+                changed = true;
+            }
+        }
+    }
+    if (changed) notifyChanged();
+}
+
+// t735 ③ 行进矿车轻推玩家（实现见头注释）：|speed|>0.1 的活体车与玩家轴对齐 AABB 三轴相交 → 玩家沿车
+//   行进向（dir×sign(speed)，负速=倒行推 -dir）获 kCartBumpSpeed 冲量（caller 写 m_knockback 击退通道，
+//   复用其防穿墙子步与指数衰减；不做伤害）；车按 kCartBumpDrag 指数掉速（有阻力不挡停）。静置车不推人。
+void MinecartManager::resolvePlayerPush(World *world, const QVector3D &playerFeet, float playerHalfW,
+                                        float playerHeight, qreal dt, float &outPushX, float &outPushZ)
+{
+    outPushX = 0.0f;
+    outPushZ = 0.0f;
+    if (!world || dt <= 0.0) return;
+    bool touched = false;
+    for (size_t i = 0; i < m_carts.size(); ++i) {
+        Cart &c = m_carts[i];
+        if (!c.alive) continue;
+        if (std::fabs(c.speed) < 0.1f) continue; // 静置车不推人（玩家推车由 pushEmptyCart 承担）
+        // 轴对齐 AABB 相交（简化：不旋转盒，X 半宽 kCartHalfW / Z 半长 kCartHalfL 对轨向四向车取外接）。
+        if (std::fabs(playerFeet.x() - c.pos.x()) >= kCartHalfW + playerHalfW) continue;
+        if (std::fabs(playerFeet.z() - c.pos.z()) >= kCartHalfL + playerHalfW) continue;
+        // Y 相交：玩家 [feet.y, feet.y+height] vs 车 [pos.y-kCartHalfH, pos.y+kCartHalfH]。
+        if (playerFeet.y() >= c.pos.y() + kCartHalfH) continue;
+        if (playerFeet.y() + playerHeight <= c.pos.y() - kCartHalfH) continue;
+        const float sgn = (c.speed >= 0.0f) ? 1.0f : -1.0f; // 负速 = 倒行（推向 -dir）
+        outPushX += c.dirX * sgn * kCartBumpSpeed;
+        outPushZ += c.dirZ * sgn * kCartBumpSpeed;
+        // 车碾过玩家掉速（帧率无关 exp 衰减；动力段 / 下坡会再供能 —— 推开玩家后继续走）。
+        const float alpha = 1.0f - std::exp(-kCartBumpDrag * float(dt));
+        c.speed -= c.speed * alpha;
+        touched = true;
+    }
+    if (touched) notifyChanged(); // 车速被改 → revision 触碰（下一帧推进照常刷新位置）
 }
 
 // t708 ④ 空车被玩家推动（PlayerController.step 走路 / 飞 / 观察者分支统一调；实现见头注释）：玩家脚底
@@ -647,17 +756,52 @@ void MinecartManager::updateDetectorRailEdges(World *world,
     }
 }
 
-bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist)
+bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist,
+                                     World *world, bool instantBreak)
 {
     float dist = 0.0f;
     const int idx = findCartHit(origin, dir, maxDist, &dist);
     if (idx < 0 || idx >= int(m_carts.size()) || !m_carts[size_t(idx)].alive) return false;
-    // 挖矿车：移除该矿车 + 清骑乘态（若挖的是被骑的矿车）+ emit cartBroken → 呈层 spawnItem 掉矿车物品
-    //   （机制等价 MC 1.0 攻击矿车 → 矿车破坏掉矿车物品）。格坐标取矿车中心所在格。
-    const QVector3D cp = m_carts[size_t(idx)].pos;
+    Cart &c = m_carts[size_t(idx)];
+    // t735 ② 生存耐久：非最后一击 → 只扣血 + 受击摇晃（notifyChanged bump revision → 呈层 hpAt 绑定
+    //   重算 → delegate onCartHpChanged 触发摇晃动画），不掉落不摧毁。创造（instantBreak，caller 按
+    //   m_mode==Creative 传）跳过耐久直接摧毁（同方块创造单击瞬破语义）。连击节奏由 caller 的
+    //   kAttackCooldown（0.5s）门控 → kCartHitPoints 击约 1.5s 打毁一辆。
+    if (!instantBreak && c.hp > 1) {
+        c.hp -= 1;
+        notifyChanged();
+        return true;
+    }
+    // 摧毁（生存最后一击 / 创造瞬破）：移除该矿车 + 清骑乘态（若挖的是被骑的矿车）+ emit cartBroken
+    //   （→ 呈层 spawnItem 掉 MinecartId，可重放；机制等价 MC 1.0 攻击矿车 → 矿车破坏掉矿车物品）。
+    const QVector3D cp = c.pos;
     if (idx == m_riderCart) m_riderCart = -1; // 挖骑乘中的矿车 → 玩家自然下车
     releaseSlot(idx);
-    emit cartBroken(int(std::floor(cp.x())), int(std::floor(cp.y())), int(std::floor(cp.z())));
+    // t735 ① 掉落格散布（同船 t711 修法）：旧版掉「矿车中心格」—— 轨格非实心、玩家可与车同格 / 紧邻，
+    //   掉落物常落在攻击者本人 kPickupDist 1.5 半径内 → 0.5s 免拾窗一过被 pickupScan 立即吸回（背包静默
+    //   +1）→ 用户全程看不到掉落物 = 观感「不掉落」（根因是掉落点选格与攻击者重合，非创造模式跳过掉落
+    //   —— hitCartFromRay 全模式同路径；同船 t661 排查结论的矿车族）。改掉「首个非实心水平邻格」随机
+    //   一格（邻格上方一格也须非实心，防掉进 1 格深坑壁内）；4 邻全实心（窄缝嵌车）→ 掉车中心格上一格
+    //   （y+1，自重落顶不埋）。world 空（防御路径）→ 保留旧中心格行为。
+    int dropX = int(std::floor(cp.x())), dropY = int(std::floor(cp.y())), dropZ = int(std::floor(cp.z()));
+    if (world) {
+        static constexpr int kDropNb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        int cand[4] = {-1, -1, -1, -1};
+        int nCand = 0;
+        for (int n = 0; n < 4; ++n) {
+            const int nx = dropX + kDropNb[n][0], nz = dropZ + kDropNb[n][1];
+            if (!world->isCollidable(nx, dropY, nz) && !world->isCollidable(nx, dropY + 1, nz))
+                cand[nCand++] = n;
+        }
+        if (nCand > 0) {
+            const int nb = cand[QRandomGenerator::global()->bounded(nCand)];
+            dropX += kDropNb[nb][0];
+            dropZ += kDropNb[nb][1];
+        } else {
+            dropY += 1; // 4 邻全实心（窄缝嵌车）→ 掉头顶上一格（自重落顶，不埋）
+        }
+    }
+    emit cartBroken(dropX, dropY, dropZ);
     notifyChanged();
     return true;
 }
