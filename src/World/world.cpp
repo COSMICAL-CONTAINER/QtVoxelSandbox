@@ -1340,8 +1340,9 @@ void World::tickFire()
         if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) continue; // 越界防御
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Fire) continue;     // 陈旧项跳过
 
-        // (a) 寿命：6 邻 + 下方均无可燃方块 → 火无燃料，按概率自熄（setBlock Air → blockBroken 粒子/音 +
-        //     QML fireHost 收 delegate + noteFireWrite 移除索引）。机制等价 MC 无燃料火渐熄。
+        // (a) 寿命：6 邻（kNb 已含下方 {0,-1,0}）均无可燃方块 → 火无燃料，按概率自熄（setBlock Air → blockBroken
+        //     粒子/音 + QML fireHost 收 delegate + noteFireWrite 移除索引）。机制等价 MC 无燃料火渐熄。
+        //     审查修 B13（t724-t729 复盘）：旧注释写「6 邻 + 下方」——kNb[6] 本身含下方，逻辑对注释误导，改准。
         bool hasFuel = false;
         for (const auto &n : kNb) {
             const int nx = x + n[0], ny = y + n[1], nz = z + n[2];

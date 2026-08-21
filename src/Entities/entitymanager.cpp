@@ -3431,7 +3431,11 @@ bool EntityManager::teleportEntity(int idx, Entity &e, World *world, float minDi
         if (bodyY < 0) continue;
         if (world->blockAt(tx, bodyY, tz) == BlockRegistry::Water) continue;     // 身体中段水 → 重试（怕水）
         if (world->blockAt(tx, qFloor(cy - e.halfH), tz) == BlockRegistry::Water) continue; // 脚位水
-        if (world->isSolid(tx, bodyY, tz) || world->isSolid(tx, bodyY + 1, tz)) continue; // 立位 / 头位被占
+        // 审查修 B10（t724-t729 复盘）：复查补脚位格 isSolid —— 下方支撑扫描自 startY 向下，若首格即实体
+        //   （groundY == startY），脚位格 groundY+1 = startY+1 从未被扫过（下扫不经过）且高个 mob（halfH≥1）
+        //   的脚位 < bodyY 也不在 bodyY/bodyY+1 复查内 → 窄情形瞬移落点脚嵌方块（靠窒息扣血兜底）。
+        const int footY = qFloor(cy - e.halfH);
+        if (world->isSolid(tx, footY, tz) || world->isSolid(tx, bodyY, tz) || world->isSolid(tx, bodyY + 1, tz)) continue; // 脚位 / 立位 / 头位被占
         if (!nightwalkerSpotFree(world, txF, cy, tzF, e.halfW, e.halfH, idx)) continue;    // 撞 mob
         // 落定
         e.pos = QVector3D(txF, cy, tzF);
@@ -4513,15 +4517,20 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   t724 火系统）。mob / 玩家命中已早退，贴墙目标不会先撞墙。仅未命目标的飞行火球走此。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-                if (by >= 0 && world->isSolid(bx, by, bz)) {
+                // 审查修 B12（t724-t729 复盘）：命中判定并入水格 —— 旧版只判 isSolid（水非 solid）→ 火球
+                //   水下飞行不消失；入水即熄（remove，不参与点燃，机制等价 MC 1.0 火球遇水熄灭）。
+                const bool hitWater = (by >= 0 && world->blockAt(bx, by, bz) == BlockRegistry::Water);
+                if (by >= 0 && (world->isSolid(bx, by, bz) || hitWater)) {
                     remove = true;
                     hitBlock = true;
                     // ~20% 点燃（机制等价 MC 火球落地引燃邻近方块）：命中格 / 水平 4 邻 / 上或下格任一为实体方块
                     //   （可燃度近似「实体方块即可延烧」）→ 在「命中格正上方空位」置 Fire（t724 火系统；选顶面延烧，
                     //   确定性落点避免乱放火）。若上方被占（命中格上方非 air）→ 放弃点燃（无安全落火面）。
-                    if (QRandomGenerator::global()->bounded(100) < kFireballIgniteChance) {
+                    // 审查修 B12：水命中不点燃（熄灭）；点燃目标格收紧为 == Air（旧 !isSolid 会把火放进
+                    //   水 / 岩浆 / 火把等非实体格 → 短暂水中火焰）。
+                    if (!hitWater && QRandomGenerator::global()->bounded(100) < kFireballIgniteChance) {
                         const int tx = qFloor(next.x()), ty = qFloor(next.y()) + 1, tz = qFloor(next.z());
-                        if (ty < world->height() && !world->isSolid(tx, ty, tz)) {
+                        if (ty < world->height() && world->blockAt(tx, ty, tz) == BlockRegistry::Air) {
                             // 命中块正上方是空位 → 落火（命中块顶面是实体 → 延烧成立；t724 火系统承接）。
                             // 审查修 B3（t724-t729 复盘）：点燃改走 5 参数 setBlock（同打火石点火 / tickFire
                             //   蔓延路径）—— 旧 setWaterSilent 只发 worldChanged 不发 blockPlaced → Main.qml
@@ -4571,7 +4580,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 飞行态：直线位移（速度恒定 ~kEnderEyeSpeed）+ **略升**（kEnderEyeRiseOff 向上偏置，机制等价 MC 末影
             //   之眼飞行时微微抬升）+ 剩余距离递减（按速度长度，非仅水平）。
             const float spd = std::sqrt(e.vx * e.vx + e.vy * e.vy + e.vz * e.vz);
-            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz + 0.0f) * float(dt)
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt) // 审查修 B13：去掉无意义 + 0.0f
                                    + QVector3D(0.0f, kEnderEyeRiseOff, 0.0f) * float(dt);
             e.pos = next;
             if (spd > 1e-4f) e.enderEyeDistLeft -= spd * float(dt);
@@ -4581,7 +4590,25 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (QRandomGenerator::global()->bounded(100) < kEnderEyeDropChance) {
                     // 80% → 变**掉落物实体**（机制等价 MC 末影之眼落地变掉落物可回收；emit 语义事件，呈现层转发
                     //   ItemEntityManager.spawnItem 生成 item 实体，玩家走近可捡回 —— 反复使用逐步逼近要塞）。
-                    emit enderEyeBecameItem(qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()));
+                    // 审查修 B11（t724-t729 复盘）：眼睛无方块碰撞（设计上穿墙），结算点可能在实体格内（掉落物
+                    //   卡方块永不可拾）或岩浆 / 火格（被 t724 焚毁逻辑吞掉，玩家白耗一只眼）→ 从当前位置向下
+                    //   找最近「非实体且非岩浆 / 火」格再落物（穿出墙底 / 落到地表）；全柱无可落格 → 原位兜底
+                    //   （极深实心柱罕见；blockAt 越界返 Air 安全）。
+                    int dropX = qFloor(e.pos.x());
+                    int dropY = qFloor(e.pos.y());
+                    const int dropZ = qFloor(e.pos.z());
+                    bool settled = false;
+                    for (int yy = dropY; yy >= 0; --yy) {
+                        const quint8 b = world->blockAt(dropX, yy, dropZ);
+                        if (!world->isSolid(dropX, yy, dropZ)
+                            && b != BlockRegistry::Lava && b != BlockRegistry::Fire) {
+                            dropY = yy;
+                            settled = true;
+                            break;
+                        }
+                    }
+                    if (!settled) dropY = qFloor(e.pos.y()); // 全柱无空位 → 原位置（同旧行为兜底）
+                    emit enderEyeBecameItem(dropX, dropY, dropZ);
                     toRemove.push_back(idx);
                     dirty = true;
                 } else {

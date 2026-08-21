@@ -548,7 +548,11 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::BlazeRodId),         // 燃烬棒：怒焰人死亡掉落；熔炉冶炼为燃烬粉（t726）
         // t727 生物蛋（夜行者）：创造模式物品，右键地面 → 生成夜行者（MobNightwalker，末影人同源敌对潜行
         //   者；3 格高、怕水、瞪视激怒、弹射物免疫）。机制等价 MC 1.0 enderman spawn egg；§9 改名。
-        int(RecipeRegistry::SpawnEggNightwalkerId) // 生物蛋（夜行者）：右键 → 生成夜行者（t727）
+        int(RecipeRegistry::SpawnEggNightwalkerId), // 生物蛋（夜行者）：右键 → 生成夜行者（t727）
+        // t728 生物蛋（燃烬者）：创造模式物品，右键地面 → 生成燃烬者（MobEmberling，悬浮漂移 + 远程喷火球
+        //   + 火力免疫）。机制等价 MC 1.0 blaze spawn egg。审查修 B9（t724-t729 复盘）：t728 漏进创造调色板
+        //   → 蛋不可取得（recipe/placeBlock/图鉴都已接好，唯 hotbar 两处漏）；对齐夜行者蛋先例补行。
+        int(RecipeRegistry::SpawnEggEmberlingId)    // 生物蛋（燃烬者）：右键 → 生成燃烬者（t728）
     };
 }
 
@@ -928,6 +932,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::BlazeRodId)      return QStringLiteral("燃烬棒");     // 怒焰人死亡掉落；烧燃烬粉
         // t727 生物蛋（夜行者）：末影人同源敌对潜行者的生成蛋。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::SpawnEggNightwalkerId) return QStringLiteral("生物蛋（夜行者）"); // 右键 → 生成夜行者
+        // t728 生物蛋（燃烬者）：审查修 B9（t724-t729 复盘）—— t728 漏显示名（nameForBlock 返空 → 调色板
+        //   / 物品栏无名），对齐夜行者蛋先例补行。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::SpawnEggEmberlingId) return QStringLiteral("生物蛋（燃烬者）"); // 右键 → 生成燃烬者
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);
