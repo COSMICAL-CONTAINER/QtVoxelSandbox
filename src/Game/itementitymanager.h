@@ -61,6 +61,10 @@ public:
     // t256：第 i 个槽位是否活体。呈现层 delegate 据它 visible：空槽隐藏（slot 复用保 Repeater count
     //   单调不降、delegate 永不销毁）。越界 → false。pickupScan 也据此跳过空槽。
     Q_INVOKABLE bool aliveAt(int i) const;
+    // t743：第 i 个槽位实体是否**已着地**（resting——落在支撑方块顶面静止；飞行 / 浮水 / 瀑布下沉恒
+    //   false）。压力板掉落物触发（updatePressurePlates 掉落物分支）据它门控：着地 = 物品与板面真实
+    //   接触才压板（机制等价 MC 物品实体压板），飞行掠过板顶不误触。空槽 / 越界 → false。
+    Q_INVOKABLE bool restingAt(int i) const;
 
     // 在方块格 (x,y,z)（整数坐标）生成一个 itemId 的掉落实体。位置存该格中心
     // (x+0.5, y+0.5, z+0.5)（实体悬浮在格中央）。达到 kCap → 跳过 + qWarning（防溢出）。

@@ -603,16 +603,20 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* diamond_block*/ {int(BlockRegistry::DiamondBlock),      149,149,149,149, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 3, true,  int(BlockRegistry::DiamondBlock),    1, 64, "diamond_block","钻石块"},
     /* gold_block   */ {int(BlockRegistry::GoldBlock),         150,150,150,150, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 3, true,  int(BlockRegistry::GoldBlock),       1, 64, "gold_block",   "金块"},
     /* redstone_block*/{int(BlockRegistry::RedstoneBlock),     151,151,151,151, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 3, true,  int(BlockRegistry::RedstoneBlock),   1, 64, "redstone_block","红石块"},
-    // ── t620 红石灯（RedstoneLamp）：机制等价 MC 1.0 redstone lamp —— 右键开关的可放置光源（无红石系统，
-    //   简化为右键直接翻 state bit0；on 态 mesher 换 redstone_lamp_on(153) 贴图 + lightEmission 状态感知版
-    //   返 15 重 flood 方块光，同 t494 燃烧熔炉模式）。整立方 opaque、hardness=0.3（玻璃质软）、Pickaxe、
+    // ── t620 红石灯（RedstoneLamp）：机制等价 MC 1.0 redstone lamp。t620 初版是「右键开关的可放置光源」
+    //   （当时无红石系统的简化）；**t658 红石电力系统 v1 落地后右键手动开关已移除——电力是唯一驱动源**
+    //   （World::tickRedstone 检出通断翻 state bit0；t743 复核落定：不保留手动态，bit0 单义 = 亮，旧存档
+    //   右键点亮的灯读作亮态、被邻域电力编辑唤醒时按供电实态收敛——最不破坏存档且机制等价 MC）。
+    //   on 态 mesher 换 redstone_lamp_on(153) 贴图 + lightEmission 状态感知版返 15 重 flood 方块光，
+    //   同 t494 燃烧熔炉模式）。整立方 opaque、hardness=0.3（玻璃质软）、Pickaxe、
     //   requiresTool=false（空手可破且掉落，本工程可回收口径）、dropId=自身、dropCount=1、maxStack=64。
     //   各面贴图=redstone_lamp_off(152)（def 默认；on 态 tileFor 换 153）。音色归 GroupStone（玻璃质）。
     //   配方：4 红石粉 + 1 玻璃 → 1（recipe.cpp 十字围心；无荧石用玻璃作壳）。
     /* redstone_lamp*/ {int(BlockRegistry::RedstoneLamp),      152,152,152,152, true,  BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::RedstoneLamp),    1, 64, "redstone_lamp","红石灯"},
     // ── t627 压力板家族扩展（stone / iron(heavy) / gold(light)；机制等价 MC 1.0 三板）。贴地薄板专用瓦片
-    //   154..156（build_pressure_plates.py：边框暗带 + 中央板面 + 材质底噪）。触发权重：stone=玩家+mob+掉落物
-    //   （同木/圆石板）/ iron=仅玩家+mob（重质）/ gold=仅掉落物（轻质）——pressurePlateAccepts 单一权威。
+    //   154..156（build_pressure_plates.py：边框暗带 + 中央板面 + 材质底噪）。触发权重（t743 修订）：stone=仅
+    //   玩家+mob（对齐 MC 1.0 石板仅活体——t627 旧口径「全触发」收回）/ iron=仅玩家+mob（重质）/ gold=仅
+    //   掉落物（轻质）——pressurePlateAccepts 单一权威。
     //   踩下沿 fire 一次 + state bit0 压半高视觉（t627 边沿化，见 blockregistry.h 段注释）。
     /* stone_pressure_plate */ {int(BlockRegistry::StonePressurePlate), 154,154,154,154, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::StonePressurePlate), 1, 64, "stone_pressure_plate", "石压力板"},
     /* iron_pressure_plate  */ {int(BlockRegistry::IronPressurePlate),  155,155,155,155, false, BlockRegistry::ShapePlate, 0.5f, int(BlockRegistry::Pickaxe), 1, true, int(BlockRegistry::IronPressurePlate),  1, 64, "iron_pressure_plate",  "铁压力板"},
@@ -953,14 +957,17 @@ bool BlockRegistry::isPressurePlate(quint8 blockId)
         || blockId == GoldPressurePlate;
 }
 
-// t627 压力板触发权重单一权威（见 .h 注释）：wood/cobble/stone=玩家+mob+掉落物全触发；iron=仅玩家+mob
-//   （重质金属板——掉落物太轻不触发）；gold=仅掉落物（轻质金板——dev-plan t627 口径「金=仅掉落物（轻）」，
-//   机制等价 MC 1.0 light weighted plate 的物品级灵敏度本地化）。非压力板 → false。
+// t627 压力板触发权重单一权威（见 .h 注释）：wood/cobble=玩家+mob+掉落物全触发（MC 1.0 木板语义——任何
+//   实体含物品都压得动）；stone/iron=仅玩家+mob（**t743**：石板从 t627 旧「全触发」收紧——机制等价 MC 1.0
+//   stone pressure plate 仅活体触发，活体级重量才压得动石板、掉落物太轻；铁板保持 t627「重」语义）；
+//   gold=仅掉落物（轻质金板——dev-plan t627 口径「金=仅掉落物（轻）」，机制等价 MC light weighted plate
+//   的物品级灵敏度本地化）。非压力板 → false。
 bool BlockRegistry::pressurePlateAccepts(quint8 blockId, bool byItem)
 {
-    if (blockId == IronPressurePlate) return !byItem;  // 铁（重）：仅玩家 + mob
-    if (blockId == GoldPressurePlate) return byItem;   // 金（轻）：仅掉落物
-    if (isPressurePlate(blockId))     return true;     // 木/圆石/石：全触发
+    if (blockId == IronPressurePlate)  return !byItem; // 铁（重）：仅玩家 + mob
+    if (blockId == StonePressurePlate) return !byItem; // 石：仅玩家 + mob（t743 对齐 MC 1.0 石板仅活体）
+    if (blockId == GoldPressurePlate)  return byItem;  // 金（轻）：仅掉落物
+    if (isPressurePlate(blockId))      return true;    // 木/圆石：全触发（含掉落物）
     return false;                                      // 非压力板
 }
 

@@ -293,6 +293,13 @@ bool ItemEntityManager::aliveAt(int i) const
     return m_entities[size_t(i)].alive;
 }
 
+// t743 掉落物着地态查询（见 .h 注释）：压力板掉落物触发门控用（着地 = 与支撑面接触）。
+bool ItemEntityManager::restingAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    return m_entities[size_t(i)].resting;
+}
+
 QVector3D ItemEntityManager::posAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return QVector3D();

@@ -804,14 +804,15 @@ public:
         //   redstone_lamp_on(153)（暖黄亮芯 vs 灰暗壳，机制等价 MC 1.0 两态贴图）。音色归 GroupStone
         //   （玻璃质，同 glass / ice）。合成：4 红石粉 + 1 玻璃 → 1 红石灯（十字围心；无荧石故用玻璃作壳，
         //   机制对标 MC glowstone+redstone 的本地化）。进创造调色板。
-        RedstoneLamp    = 123, // 红石灯：右键开关的可放置光源（on=光 15 + 亮贴图；机制等价 MC 1.0 redstone lamp）
+        RedstoneLamp    = 123, // 红石灯：电力驱动亮灭的可放置光源（on=光 15 + 亮贴图；t658 起右键手动开关已移除——电力是唯一驱动源，机制等价 MC 1.0 redstone lamp；t743 复核落定：无手动态/电力态叠加，bit0 单义=亮）
         // ── t627 压力板家族扩展（plate family；机制等价 MC 1.0 stone / iron(heavy) / gold(light) pressure
         //   plate）。三者复用既有异形方块系统（ShapePlate 贴地薄板 + PartialBlockGeometry plate case），
         //   仅贴图 / 采掘属性 / **触发权重**差异。触发语义（t627 边沿化）：玩家/mob/掉落物站上 → 踩下沿触发
         //   一次（scanTntTraps / scanDispenserTraps 只在踩下沿 fire；离开重置 armed，再踩再触发）+ state bit0
         //   = PressurePlateStatePressedFlag（踩下视觉：mesher 据 bit0 把薄板高度 1/16 压到 1/32，机制等价
         //   MC 压力板被压下变矮）。**触发权重**（BlockRegistry::pressurePlateAccepts 单一权威）：
-        //     - 石压力板（StonePressurePlate）：玩家 + mob + 掉落物全触发（同木/圆石板，机制等价 MC 1.0 石板）。
+        //     - 石压力板（StonePressurePlate）：仅玩家 + mob（**t743 对齐 MC 1.0 石板仅活体触发**——活体级
+        //       重量才压得动石板，掉落物太轻不触发；t627 旧口径「全触发」收回，与铁板同权重档）。
         //     - 铁压力板（IronPressurePlate）：仅玩家 + mob（重质金属板——机制等价 MC 1.0 heavy weighted plate
         //       的「重」语义本地化：需生物级重量，掉落物太轻不触发）。
         //     - 金压力板（GoldPressurePlate）：仅掉落物（轻质金板——机制等价 MC 1.0 light weighted plate 的
@@ -822,7 +823,7 @@ public:
         //   maxStack=64。音色归 GroupStone（石质/金属质）。放置放宽同木/圆石板（isPressurePlate 谓词统一覆盖）。
         //   配方（t627，recipe.cpp）：stone=2 石头横排 / iron=2 铁锭横排 / gold=2 金锭横排（机制等价 MC 1.0
         //   压力板 2 材料配方，同木/圆石板既存模式）。进创造调色板（机关件 tab，紧随圆石压力板）。
-        StonePressurePlate = 124, // 石压力板：玩家+mob+掉落物触发（同木/圆石板）；踩下沿 fire 一次 + 薄板压半
+        StonePressurePlate = 124, // 石压力板：仅玩家+mob 触发（t743 对齐 MC 1.0 石板仅活体）；踩下沿 fire 一次 + 薄板压半
         IronPressurePlate  = 125, // 铁压力板（重）：仅玩家+mob 触发；踩下沿 fire 一次 + 薄板压半
         GoldPressurePlate  = 126, // 金压力板（轻）：仅掉落物触发；踩下沿 fire 一次 + 薄板压半
         // ── t638 铁轨家族扩展 + 红石火把 + 附魔台翻页书（机制等价 MC 1.0 powered rail / detector rail /
@@ -2057,7 +2058,8 @@ public:
     //   ::updatePressurePlates（footprint + mob + 掉落物扫描，同 scanTntTraps 采样族的统一触发源）在踩下沿 /
     //   离开沿翻转本位（5 参数 setBlock，id 不变 → 仅 worldChanged 重建 mesh，同门开合模式）；mesher
     //   （PartialBlockGeometry plate case）据本位把薄板高度 1/16 压到 1/32 → 「被压下去变矮」视觉。触发权重
-    //   （wood/cobble/stone=全部 / iron=仅玩家+mob / gold=仅掉落物）由 pressurePlateAccepts 单一权威判定。
+    //   （wood/cobble=全部 / stone/iron=仅玩家+mob（t743 石板对齐 MC 1.0 仅活体）/ gold=仅掉落物）由
+    //   pressurePlateAccepts 单一权威判定。
     //   collisionAABBs / selectionAABBs 不读 plate state（ShapePlate 薄板碰撞恒 1/16，踩下不改碰撞 → 复用
     //   bit0 零回归，同 RedstoneOreStateLitFlag 模式）。state 经 m_states 落 SQLite round-trip 保真。
     static constexpr quint8 PressurePlateStatePressedFlag = 0x01;
@@ -2091,7 +2093,8 @@ public:
     //   直接返回本集（碰撞为空 —— ShapeNone 无碰撞，机制等价 MC 机关无 hitbox）。见 .cpp 实现处几何注释。
     static std::vector<BlockAABB> mechBoxes(quint8 blockId, quint8 state);
     // t627 压力板触发权重单一权威：给定压力板 id + 触发源类型（byItem=true 掉落物 / false 玩家或 mob），
-    //   返回该源能否触发此板。wood/cobble/stone=全触发；iron=仅玩家+mob（重质，掉落物不触发）；gold=仅
+    //   返回该源能否触发此板。wood/cobble=全触发；stone/iron=仅玩家+mob（**t743**：石板从旧「全触发」收紧
+    //   对齐 MC 1.0 stone plate 仅活体触发——活体级重量才压得动，掉落物太轻；铁板同档「重」语义）；gold=仅
     //   掉落物（轻质，任何掉落物即触发）。非压力板 → false。供 PlayerController::updatePressurePlates
     //   统一读（不各处硬编码 id 判定，同 isPressurePlate 谓词模式；未来追加权重变体时一处同步）。
     static bool pressurePlateAccepts(quint8 blockId, bool byItem);

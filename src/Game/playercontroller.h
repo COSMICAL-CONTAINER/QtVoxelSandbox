@@ -1015,8 +1015,10 @@ private:
     //   每 tick 先跑（在 scanTntTraps / scanDispenserTraps 之前——两者只消费本 tick 算出的踩下沿）：
     //   (1) 收集当前被压下的压力板格全集——玩家 footprint（非观察者——观察者无碰撞不压板；同 MC spectator
     //       不触发机关）+ EntityManager 全体活体 mob（feet 格 = floor(pos - halfH)）+ ItemEntityManager 全体
-    //       活体掉落物（feet 格 = floor(pos)），各源经 BlockRegistry::pressurePlateAccepts 权重判定
-    //       （wood/cobble/stone=全触发 / iron=仅玩家+mob / gold=仅掉落物）后并入集合；
+    //       活体且**已着地**（t743 ②）的掉落物（板格 = floor(pos.y())-1 支撑格——掉落物静止中心在支撑顶
+    //       +0.3，旧「feet 格 = floor(pos)」恒查板上空气格致掉落物从不触发），各源经 BlockRegistry
+    //       ::pressurePlateAccepts 权重判定（wood/cobble=全触发 / stone/iron=仅玩家+mob（t743 石板对齐
+    //       MC 1.0 仅活体）/ gold=仅掉落物）后并入集合；
     //   (2) 边沿检测：新进集合 = 本 tick 踩下沿 → 写 m_plateJustPressed + 置该板 state bit0
     //       （PressurePlateStatePressedFlag，5 参数 setBlock → mesher 薄板压半高）；离开集合 → 清 state bit0；
     //   (3) m_platePressedCells = 新集合。持续踩着 → 无新沿 → 下游（TNT 点燃 / 发射器）不再触发；
