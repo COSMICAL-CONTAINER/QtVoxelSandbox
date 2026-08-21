@@ -2800,7 +2800,7 @@ t680-t716（37 项）。**严格顺序：t680-t692 审查修复（H 先）→ t6
 
 ### 🅶 鱿鱼、皮肤、杂项贴图
 **t730** 鱿鱼贴图接入：MobSquid=9 已有 AI（t399 喷水推进）但贴图占位——squid.png 自拼 3D 模型（头+8 触腕盒体组）+ 怪物蛋 + 资源查看器图标。✅✅ 已完成（commit b261a45：mobEntityMap 加 {9,"squid/squid.png"}（demo 包实存扁平 entity/squid.png 512×256 = base 64×32 的 8×，mobTextureSource 两级探测扁平回退命中）；MobModel squid 分支补 pack box-UV——mantle 12×16×12 @ (0,0) 六面像素区实测 100% 不透明 + 尖顶复用 mantle 区 + 8 触腕共用 2×12×2 @ (48,0) 单区（vanilla 单触腕区复用，像素实测验证）；Main.qml mobSquidPackTex + delegate packTextured + baseColorMap 切换（t597 近白 tint 规则）/ pack 关回退 mobSquidTex 程序贴图零回归；怪物蛋 0x22E 与 ResourceBrowser 图标 t717 已备，未动）。
-**t731** 玩家皮肤：steve.png/alex.png 运行期映射（playerModel 第三人称贴图，程序回退=现纯色）；皮肤选择（设置或 /skin 命令 v1）。
+**t731** 玩家皮肤：steve.png/alex.png 运行期映射（playerModel 第三人称贴图，程序回退=现纯色）；皮肤选择（设置或 /skin 命令 v1）。✅✅ 已完成（commit 780f8a6：ResourcePackManager playerSkin/setPlayerSkin（settings.json 持久化）+ playerSkinSource（pack steve.png/alex.png 两级探测 + 64×64 老式布局裁上半 32 行落盘缓存，miss 回退 qrc 程序皮肤）；Renderer 新 PlayerSkinBox 几何（piece 0-3 盒区 + subV0/1 腿分段采样，同 ArmorLayerBox box-UV 公式）；Main.qml playerModel 全部件换 PlayerSkinBox + playerSkinTex（pack 命中/ qrc 回退两态，hurtTint 近白 tint 乘子保受伤红闪，旧眼子 Model 移除）；CharacterPreview3D 同套换装即时跟随；commandRegistry 加 /skin default|alex（持久化 + 即时换肤 + 中文回显）；第一人称 viewmodel 纯色未动（范围外））。
 **t732** 矿车 + 附魔书 3D 贴图接入：minecart.png（矿车斗形重贴图，替换程序纯色）+ enchanting_table_book.png（附魔台悬浮书重贴图，替换 t679 程序书模型贴图）。
 
 ### 📎 R19.10 范围与顺序
