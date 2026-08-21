@@ -4180,6 +4180,19 @@ void PlayerController::placeBlock()
             if (upId != BlockRegistry::Air && upId != BlockRegistry::Water
                 && upId != BlockRegistry::Lava) return; // 上格非空（实体）→ 门放不下
         }
+        // t741 门放置支撑校验（门族统一：WoodDoor / SpruceDoor / IronDoor 共用本分支——木门 / 云杉门
+        //   现状与铁门同病「可悬空放在红石粉 / 铁轨 / cross 形上方」，一并修）：门站的「地面」须是
+        //   **支撑面与格顶齐平**的格（完整立方 或 上半砖顶面）—— 语义与 t739 红石粉 isDustSupport 同构
+        //   （粉铺顶面 / 门站地面，都要求支撑面满格高），统一走 isTopFlushSupport 单一权威。下半砖 /
+        //   楼梯 / 耕地（顶面 0.5 / 0.9375 非满高）、红石粉 / 铁轨 / 草丛等 cross 形或贴地薄层（非实体
+        //   完整立方）上方一律拒放（不挥，同火把 / 铁轨拒放先例）。机制等价 MC 1.0 门须实体地面。
+        //   blockAt/stateAt 越界安全返 0（Air）→ ty-1 出界（y=0 放门）自然落入下方非支撑分支拒掉。
+        //   只影响放置预检：已放置的门（含存档读回）不经此路径，不受影响。
+        {
+            const quint8 belowId = m_world->blockAt(tx, ty - 1, tz);
+            const quint8 belowState = m_world->stateAt(tx, ty - 1, tz);
+            if (!BlockRegistry::isTopFlushSupport(belowId, belowState)) return; // 下方非齐平支撑 → 拒整门
+        }
         m_world->setBlock(tx, ty, tz, idByte, doorFacing);              // 下格：bit3=0(下格) bit2=0(合) bit[1:0]=朝向
         m_world->setBlock(tx, ty + 1, tz, idByte, quint8(doorFacing | 8)); // 上格：bit3=1
         // t669 放置消耗收口：生存放置由 C++ 侧统一消耗 1 件（门两格同写只耗 1 扇；原由 QML onBlockPlaced

@@ -997,12 +997,25 @@ def run_from_pack():
                 #   上半 y[1,2] 贴 upper、下半 y[0,1] 贴 lower（per-face bit3 选图）。分两次渲染
                 #   各自盒再合成（上盒 cy 抬高 1 格；共享 depth 不必要 —— 两盒屏幕不重叠区
                 #   各自采样，直接两次 pass 画在同一画布：先画下半（近），再画上半（远在上）。
-                #   简化：一次 render_pack_box 画下半（side=lower），再画上半（side=upper，
-                #   cy 抬 v*scale）。scale=0.7 同既有 icon_wood_door 几何常数。
-                img_lo = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 3.0 / 16.0)],
-                                         lo, lo, cy_local=W * 0.62, scale=0.7)
-                img_up = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 3.0 / 16.0)],
-                                         up, up, cy_local=W * 0.12, scale=0.7)
+                #   scale=0.7 同既有 icon_wood_door 几何常数。
+                # t741 修「门图标上下两半中缝断开成空气」（铁 / 木 / 云杉三门同病）：旧 cy 硬编码
+                #   0.62W / 0.12W（两基线间距 0.5W）而每半盒的屏幕身高只有 v*scale=0.35W → 中缝
+                #   0.15W 空气（64px 图标上 ~10px 断带），且上溢出画布顶 / 下切画布底。改为由
+                #   几何常量推导，两步：
+                #   ① 无缝拼接 —— 连续投影式 sy = cy + (1-y)*v*s 下，世界 y=1 是两半共享缝：
+                #     下半盒顶边（盒 y=1）与上半盒底边（盒 y=0，世界 y=1）共边 ⇔ cy_up = cy_lo - v*s。
+                #   ② 整门竖直居中 —— 轮廓最高点 = 上半盒顶菱形 N 角（cy_up - dv*s）、最低点 =
+                #     下半盒右下角（cy_lo + v*s + (1+z1)*dv*s），总高 H = 2*v*s + (1+z1)*dv*s，
+                #     取轮廓中点 = W/2 反解 cy_up。
+                z1 = 3.0 / 16.0
+                sc = 0.7  # 两格高整体缩到画布内（同既有门图标比例）
+                H = 2.0 * v * sc + (1.0 + z1) * dv * sc  # 整门轮廓总高（两段侧身高 + 顶/底斜差）
+                cy_up = W / 2.0 + dv * sc - H / 2.0       # 上半盒基线（居中反解）
+                cy_lo = cy_up + v * sc                     # 下半盒基线（无缝缝位）
+                img_lo = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, z1)],
+                                         lo, lo, cy_local=cy_lo, scale=sc)
+                img_up = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, z1)],
+                                         up, up, cy_local=cy_up, scale=sc)
                 canvas = Image.new("RGBA", (OUT, OUT), (0, 0, 0, 0))
                 canvas.alpha_composite(img_up)
                 canvas.alpha_composite(img_lo)

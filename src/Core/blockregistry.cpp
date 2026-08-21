@@ -1179,7 +1179,16 @@ bool BlockRegistry::isRedstoneDust(quint8 blockId)
 
 // t739 红石粉支撑判定（单一权威，见 .h 头注释）：完整立方 或 上半砖（state bit0=1，顶面与格顶齐平）。
 //   下半砖 / 楼梯 / 耕地 / 粉自身等顶面非满格高 → 不可撑粉（机制等价 MC 1.0 粉只能铺满顶高面）。
+//   t741 起语义抽为 isTopFlushSupport 通用谓词（粉铺顶面 = 顶面齐平支撑的特例），本函数委托保持
+//   三处粉调用点（放置预检 / 挖撑掉落 / 爆炸掉落）不变。
 bool BlockRegistry::isDustSupport(quint8 belowId, quint8 belowState)
+{
+    return isTopFlushSupport(belowId, belowState);
+}
+
+// t741 「支撑面与格顶齐平」通用支撑判定（单一权威，见 .h 头注释）：完整立方 或 上半砖（顶面与格顶
+//   齐平）。供门族放置（门站地面，playercontroller isDoor 分支）与红石粉（isDustSupport 委托）共用。
+bool BlockRegistry::isTopFlushSupport(quint8 belowId, quint8 belowState)
 {
     return isFullCube(belowId) || (isSlab(belowId) && (belowState & 1) != 0);
 }

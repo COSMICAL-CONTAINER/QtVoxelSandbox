@@ -1825,6 +1825,14 @@ public:
     //   （dropUnsupportedDustAbove）；③ 爆炸失撑掉落（EntityManager::dropUnsupportedDustAfterBlast）。
     //   入参带下方格 state（半砖上下半位），caller 读 World 后传入；纯函数不依赖 World。
     static bool isDustSupport(quint8 belowId, quint8 belowState);
+    // t741 「支撑面与格顶齐平」通用支撑判定（单一权威）：下方格顶面是否与格顶齐平 —— 完整立方
+    //   （isFullCube）或上半砖（isSlab 且 state bit0=1，砖体占格上半、顶面与格顶齐平）。这是
+    //   「站在 / 铺在格顶」类方块（门站地面 / 红石粉铺顶面）的共享支撑语义：支撑面必须满格高
+    //   （下半砖 / 楼梯 / 耕地顶面在半格高 0.5 / 0.9375 处 → 不可撑）。t739 isDustSupport 的语义
+    //   本就是它（粉铺顶面），t741 起抽为通用谓词供门族放置共用（门站地面与粉铺顶面同构：都要求
+    //   支撑面与格顶齐平），isDustSupport 委托本谓词保持三处粉调用点不变（同 isCrossBillboard
+    //   吸收 Sapling 的单一权威模式：语义名下再挂具体场景入口，避免多处分流漂移）。
+    static bool isTopFlushSupport(quint8 belowId, quint8 belowState);
     // t638 探测铁轨 state bit4（值 16）=「矿车驶过」标记（机制等价 MC 1.0 detector rail 被矿车压住时输出
     //   信号——本工程无红石系统，简化为通电视觉：bit4=1 → mesher 换 rail_detector_on(160) 亮红贴图；
     //   MinecartManager tick 驶过置位（setWaterSilent state 写，同红石灯开关模式）。**bit4 不与连接位冲突**
