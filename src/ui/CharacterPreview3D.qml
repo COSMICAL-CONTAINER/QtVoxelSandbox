@@ -59,7 +59,8 @@ Item {
 
     // t731 皮肤化后玩家本色纯色退役（皮肤贴图接管，window.skinFinalUrl 两态选源；previewSkinTex 见
     //   View3D 内）。护甲 overlay 仍是纯色档色（t551 旧观感，未迁 layer 贴图——预览面板小、档色可辨）。
-    // 护甲材质档色（同 Main.qml playerModel.armorBaseColor 表）。
+    // 护甲材质档色（档色表单一权威 = 本函数；终审修 L6：旧注引用的 Main.qml playerModel.armorBaseColor
+    //   表已随 t718 盔甲层贴图化删除，档色只剩此处一份）。
     function armorColor(aid) {
         const t = root.hotbar ? root.hotbar.armorTier(aid) : -1
         switch (t) {

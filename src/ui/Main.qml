@@ -7567,13 +7567,18 @@ Window {
                                     baseColorMap: mobSquidPackTex.source.toString().length > 0 ? mobSquidPackTex : mobSquidTex
                                 }
                                 // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
+                                //   终审修 L5：pack 命中时隐藏——pack 贴图前脸自带眼睛纹素，几何黑点眼再叠其上
+                                //   会成「贴图眼 + 黑点眼」双层眼（t731 玩家皮肤化删眼盒正是同理由，t730 未同步）；
+                                //   pack 关闭时保留（程序贴图 mob_squid 不画眼，眼睛全靠这两颗几何盒表达）。
                                 Model {
+                                    visible: mobSquidPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.10, 0.10, -0.29)
                                     scale: Qt.vector3d(0.03, 0.03, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
+                                    visible: mobSquidPackTex.source.toString().length === 0
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.10, 0.10, -0.29)
                                     scale: Qt.vector3d(0.03, 0.03, 0.02)

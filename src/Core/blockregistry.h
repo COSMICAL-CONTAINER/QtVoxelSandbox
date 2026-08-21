@@ -966,9 +966,11 @@ public:
         //   dropId=自身、dropCount=1、maxStack=64。各面贴图=iron_trapdoor(178)（格子板 + 两列栅格孔真透明
         //   —— 走 cutout 段渲染须 alpha discard 透视，同门族 t638① 模式）。lightOpacity 同 WoodTrapdoor：
         //   合=满遮 15 / 开=全透 0（lightOpacity 特例行）。音色 GroupStone（金属质，同 IronDoor 族）。
-        //   **进红石 tab 创造调色板**（铁活板门是红石机关件——仅红石驱动开合）。配方：6 铁锭 2×3 横摆
-        //   （同铁轨形状?? → 冲突！用 MC 1.0 实际配方 6 铁锭 2×3 → **1** 个，横摆 3×2 与铁轨同形 → 本工程
-        //   取**竖摆 2×3**与铁门一致避开铁轨冲突，dev-plan 注明）。破坏掉落自身 1 件。
+        //   **进红石 tab 创造调色板**（铁活板门是红石机关件——仅红石驱动开合）。配方：6 铁锭横摆 3×2
+        //   （顶 + 中两行满，机制等价 MC 1.0 iron trapdoor 6 iron ingot 横排 → 1）。与铁门（2×3 竖摆包围盒
+        //   异形）/ 铁轨（t723 起补木棒多重集 {Iron:6, Stick:1} 异）互不冲突。终审修 L2：旧注释是 t722
+        //   已放弃的「竖摆 2×3 避让铁轨」方案残文（含「?? → 冲突！」半截文本）——t723 实际改铁轨配方
+        //   从根上消除冲突，本方块自始即横摆（见 recipe.cpp t723 铁活板门行）。破坏掉落自身 1 件。
         IronTrapdoor   = 136, // 铁活板门：水平/竖直薄板（仅红石驱动开合；右键无效应）；格子板贴图
         // ── t724 火焰方块（Fire；机制等价 MC 1.0 fire id 51）：非实体光源格（lightEmission=15，同岩浆档），
         //   渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Painting t720 模式）→ Main.qml fireHost 逐格

@@ -4420,9 +4420,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   所在的空气侧格）：贴墙命中 → e.pos 仍在其前面的空气格 → 小鸡生在墙外的地面上，
                     //   spawnMobCore 放格中心 + halfH，重力 tick 贴地表（地面弹 / 砸地面时 e.pos = 飞行末格，
                     //   小鸡落在命中面上方，落地行为保持）。spawnMobCore 不 emit（本 tick 末尾统一 emit）；
-                    //   spawn 可 acquireSlot push_back —— 已脱离本实体循环内的 Entity& 引用使用区间（本分支
-                    //   后续只读局部 next / idx），同 tickBreeding 主循环外 spawn 的安全纪律。
-                    const int slot = spawnMobCore(qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()),
+                    //   spawn 可 acquireSlot push_back → vector 扩容后本循环内的 Entity& e 悬垂 —— 终审修
+                    //   L1（B8 同型残留）：e.pos **先拷局部 hatchPos**，spawn 与下方日志一律读局部量（旧代码
+                    //   在 spawn 之后再读 e.pos 打日志 = 悬垂引用读，UB；旧注释声称「后续只读局部 next/idx」
+                    //   与事实不符，一并订正），同 tickBreeding 主循环外 spawn 的安全纪律。
+                    const QVector3D hatchPos = e.pos;
+                    const int slot = spawnMobCore(qFloor(hatchPos.x()), qFloor(hatchPos.y()), qFloor(hatchPos.z()),
                                                   MobChicken, QStringLiteral("#f5f0e4"), 0);
                     if (slot >= 0) {
                         // 幼崽态（复用 t400 繁殖幼崽机制：baby=true → QML babyScaleAt 0.5 缩小 + growTimer
@@ -4430,7 +4433,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         //   spawnMobCore 内部用 kDefaultMaxHealth（同 spawn egg 路径）。
                         m_entities[size_t(slot)].baby = true;
                         m_entities[size_t(slot)].growTimer = kBabyGrowTime;
-                        qCInfo(lcEnt) << "egg hatched baby chicken at" << e.pos;
+                        qCInfo(lcEnt) << "egg hatched baby chicken at" << hatchPos;
                     }
                 }
             }

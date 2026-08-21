@@ -2734,7 +2734,8 @@ void PlayerController::placeBlock()
         //   门放置仅产生同 id 配对），故读配对格 blockAt 而非硬编码 WoodDoor。
         // t722 铁门除外：**徒手不开**（机制等价 MC 1.0 铁门右键无效应——开 / 关仅红石驱动，state bit2 由
         //   World::recomputePowerLocal 接收器分支写）。本分支对铁门不消费右键（return 掉会吞掉后续放置路径
-        //   的语义），直接 fall-through——右键铁门 = 无动作（不挥臂、不放置、不开合）。
+        //   的语义），直接 fall-through——终审修 L3：fall-through 只跳过「门开合」这一个动作，手持方块右键
+        //   铁门面仍会正常放置 + 挥臂（MC 同此：铁门只是不吃 use，不挡放置），空手右键铁门才真正无动作。
         if (BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 flipped = quint8((st & ~4) | (((st & 4) == 0) ? 4 : 0)); // 翻 bit2（开合）
