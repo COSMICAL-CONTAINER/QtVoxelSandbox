@@ -716,6 +716,101 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
+    // P12 t736 探测轨真实路径（真实矿车实体驱动，含空车；区别于矩阵主体的「直接写 state」驱动）：直线轨
+    //   Rail - DetectorRail - Rail - Rail，探测轨侧邻红石灯。占用统一重扫在 tickPushedCarts 末尾
+    //   （updateDetectorRailOccupancy，全车种帧级收口）。
+    //   (a) 空车停驻探测轨（spawn 即静止、无人骑乘）→ tickPushedCarts + tickRedstone → bit4 置 + 灯亮
+    //       （t736 新覆盖：旧版 t658 只标被骑路径，空车不触发）；
+    //   (a2) 驻轨续帧幂等守卫 —— worldChanged（setWaterSilent 每次写必发）计数在稳态续帧不增（state
+    //       不变不写，车驻轨期间零 state 写）；
+    //   (b) 玩家追推离开（pushEmptyCart + tickPushedCarts 每帧、玩家随车贴住，同 P11 空车跑法）→ 车滑出
+    //       探测格 → bit4 清 + 灯灭（离开沿降断电；用户验收「车离开 → 信号断开」）；
+    //   (c) 被骑路径回归（tryMount + tickRiddenCart 与 tickPushedCarts 同帧双调 —— 与 PlayerController
+    //       骑乘分支同序）：停驻被骑 → 灯亮（t680 ③ 停驶恒供电语义经统一 pass 保留），W 推离 → 灯灭。
+    {
+        const auto [x0, z0] = nextSlot();
+        const int detX = x0 + 1;
+        const int lampX = x0 + 1, lampZ = z0 + 1;
+        w.setBlock(x0,     kRigY, z0, BR::Rail, 0);
+        w.setBlock(detX,   kRigY, z0, BR::DetectorRail, 0);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Rail, 0);
+        w.setBlock(x0 + 3, kRigY, z0, BR::Rail, 0);
+        w.setBlock(lampX,  kRigY, lampZ, BR::RedstoneLamp, 0);
+        const auto detOn  = [&]() { return (w.stateAt(detX, kRigY, z0) & BR::DetectorRailStateOnFlag) != 0; };
+        const auto lampOn = [&]() { return (w.stateAt(lampX, kRigY, lampZ) & BR::RedstoneLampStateOnFlag) != 0; };
+        int wc = 0; // worldChanged 计数（幂等守卫探针：setWaterSilent 每次写必发）
+        const QMetaObject::Connection wcConn =
+            QObject::connect(&w, &World::worldChanged, &w, [&]() { ++wc; });
+
+        // (a) 空车停驻 → 通电。
+        MinecartManager carts;
+        carts.spawnCart(detX, kRigY, z0, &w); // 空车直落探测轨（静止，无人骑）
+        for (int t = 0; t < 8; ++t) { carts.tickPushedCarts(0.016, &w); w.tickRedstone(); }
+        bool okA = detOn() && lampOn();
+        // (a2) 稳态续帧零写（幂等守卫：state 已置不重写 → worldChanged 不增，轨保持通电）。
+        const int wc0 = wc;
+        for (int t = 0; t < 20; ++t) { carts.tickPushedCarts(0.016, &w); w.tickRedstone(); }
+        const bool okA2 = (wc == wc0) && detOn() && lampOn();
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| empty cart parked on detector -> bit4 + adjacent lamp on (t736)";
+        if (!okA2) ++totalFail;
+        qInfo().noquote() << (okA2 ? "PASS" : "FAIL")
+                          << "| idempotent guard: steady frames zero state writes, lamp stays on (t736)";
+        // (b) 追推离开 → 降沿断电。
+        QVector3D player = carts.posAt(0);
+        bool left = false;
+        for (int t = 0; t < 600 && !left; ++t) {
+            carts.pushEmptyCart(&w, player, 1.0f, 0.0f); // 玩家追着车：静止即续推（滑行中被速度闸门跳过）
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+            player = carts.posAt(0);
+            if (int(std::floor(player.x())) >= x0 + 2) left = true; // 车心已出探测格
+        }
+        for (int t = 0; t < 12; ++t) { carts.tickPushedCarts(0.016, &w); w.tickRedstone(); } // 离开沿收敛
+        const bool okB = left && !detOn() && !lampOn();
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| empty cart pushed off detector -> bit4 clear + lamp off (leave edge, t736)";
+        // (c) 被骑路径回归：挖掉空车 → 原格重生 + 上车 → 停驻被骑亮 / 推离灭。
+        carts.hitCartFromRay(QVector3D(carts.posAt(0).x(), float(kRigY) + 2.0f, carts.posAt(0).z()),
+                             QVector3D(0, -1, 0), 4.0f, &w, true); // 清场（车在远处轨上，与探测轨无关）
+        carts.spawnCart(detX, kRigY, z0, &w);
+        const QVector3D mountOrigin(float(detX) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+        bool okC = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f) && carts.ridingIndex() == 0;
+        for (int t = 0; t < 8; ++t) { // 停驻被骑（wish 0）—— 同帧双调镜像 PlayerController 骑乘分支
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+        }
+        okC = okC && detOn() && lampOn();
+        bool rodeAway = false;
+        for (int t = 0; t < 240 && !rodeAway; ++t) { // W 推离（wish +X 沿轨）
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+            if (int(std::floor(carts.posAt(0).x())) >= x0 + 2) rodeAway = true;
+        }
+        for (int t = 0; t < 12; ++t) { // 离开沿收敛（停驻被骑帧续跑统一 pass）
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+        }
+        okC = okC && rodeAway && !detOn() && !lampOn();
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| ridden path regression: parked-on lit, rode away -> off (t736)";
+        QObject::disconnect(wcConn);
+        // 清场
+        carts.clearAll();
+        for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        w.setBlock(lampX, kRigY, lampZ, BR::Air);
+        tickN(w, 2);
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

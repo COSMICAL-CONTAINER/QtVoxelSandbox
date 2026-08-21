@@ -136,7 +136,10 @@ public:
     //   **t735 ④ 语义变更**（覆盖 t708「空车不吃动力轨 boost」注释）：脚下是**通电**动力轨（GoldenRail +
     //   GoldenRailStateOnFlag）→ 摩擦不衰减，反被加速到 boost 档（保持前进直到离开动力段；机制等价动力轨
     //   对无骑手矿车同样供能）。静置（speed≈0）空车在动力轨上**不被弹射起步**（t708 起步闸门保留 —— 弹射
-    //   语义只属被骑路径，防玩家放置的车自己跑掉）。探测轨道标仍只属被骑路径（占用是「骑乘压轨」语义）。
+    //   语义只属被骑路径，防玩家放置的车自己跑掉）。
+    //   **t736 探测轨占用统一收口在本 tick 末尾**（updateDetectorRailOccupancy）：PlayerController 骑乘 /
+    //   非骑乘两分支每帧都调本 tick → 被骑 / 空车 / 停驶车全车种在同一帧重扫占用（旧版只标被骑路径，t658
+    //   「占用是骑乘压轨语义」的简化由 t736 推翻 —— 机制等价 MC 1.0 detector rail 对**任何**矿车输出信号）。
     void tickPushedCarts(qreal dt, World *world);
 
     // t735 ③ 矿车↔矿车碰撞（PlayerController.step 每帧调，骑乘 / 非骑乘分支都调 —— 被骑的车也要能撞开
@@ -166,10 +169,19 @@ public:
     //   由 PlayerController.step 走路分支调（wish = 玩家世界向移动意图）。
     bool pushEmptyCart(World *world, const QVector3D &playerFeet, float wishX, float wishZ);
 
-    // t658 探测轨占用边沿收尾（tickRiddenCart 末尾调）：prev（上一帧占用快照）− 本帧占用 = 离开沿 →
-    //   清该探测轨 state bit4（DetectorRailStateOnFlag）断电（机制等价 MC 1.0 矿车离开即断；setWaterSilent
-    //   静默写 → notePowerWrite → 电力重算断开下游接收器）。prev 空 → 零开销早退。
+    // t658 探测轨占用边沿收尾（t736 起由 updateDetectorRailOccupancy 末尾调）：prev（上一帧占用快照）− 本帧
+    //   占用 = 离开沿 → 清该探测轨 state bit4（DetectorRailStateOnFlag）断电（机制等价 MC 1.0 矿车离开即断；
+    //   setWaterSilent 静默写 → notePowerWrite → 电力重算断开下游接收器）。prev 空 → 零开销早退。
     void updateDetectorRailEdges(World *world, const std::unordered_set<quint64> &prev);
+
+    // t736 探测轨占用统一重扫（每帧一次，tickPushedCarts 末尾调——骑乘 / 非骑乘帧 PlayerController 都必调
+    //   该 tick，占用在帧级收口而非按驱动路径分头标）：快照上一帧占用表 → 清空重建：遍历**全部活体矿车**
+    //   （被骑 / 空车 / 停驶车，不再只标被骑路径——机制等价 MC 1.0 detector rail 对任何矿车输出信号），列内
+    //   向下扫最近轨格为探测轨 → 幂等置 bit4（DetectorRailStateOnFlag，置过不重写）+ 记占用键；末尾
+    //   updateDetectorRailEdges 清离开沿（车推走 / 被挖毁 / clearAll → 断电）。旧版在 tickRiddenCart 内标
+    //   被骑车的根因缺陷：空车驶过探测轨不触发（本任务修）；且骑乘帧 tickRiddenCart 先清占用表再只标被骑
+    //   车 → 邻轨空车占用每帧被误判离开沿（清位）又在下个 pass 重置 → 电力抖动——统一帧级重扫一并消除。
+    void updateDetectorRailOccupancy(World *world);
 
 signals:
     void entitiesChanged();                        // spawn / 挖毁 / 骑乘物理推进触发；驱动 count/revision + QML 绑定刷新
@@ -191,9 +203,10 @@ private:
     int m_riderCart = -1;   // 玩家当前骑的矿车索引（-1 = 未骑）
     std::vector<int> m_freeSlots; // slot-reuse：已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体矿车数
-    // t658 探测轨当前占用表（本帧被骑矿车压住的探测轨格；键 = packRailCell 世界坐标打包）。tickRiddenCart
-    //   开头快照为 prev、本帧重建；updateDetectorRailEdges 用 prev − cur 找离开沿清位断电。
-    //   无探测轨场景恒空（零开销）。切世界不显式清（占用表陈旧项的 blockAt 守卫自然跳过；下帧重建覆盖）。
+    // t658 探测轨当前占用表（本帧被矿车压住的探测轨格；键 = packRailCell 世界坐标打包）。t736 起由
+    //   updateDetectorRailOccupancy（tickPushedCarts 开头）每帧快照 prev、重建 cur；用 prev − cur 找
+    //   离开沿清位断电。无探测轨场景恒空（零开销）。切世界不显式清（占用表陈旧项的 blockAt 守卫自然
+    //   跳过；下帧重建覆盖）。
     std::unordered_set<quint64> m_detectorOccupied;
 
     int acquireSlot(Cart &&c)

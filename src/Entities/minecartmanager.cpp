@@ -391,17 +391,18 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
 //   （pushEmptyCart 推动 / t735 碰撞获速 / 推入下坡段顺坡溜）→ 下坡不衰减（重力抵消摩擦 → 顺坡滑）、
 //   平 / 上坡磨擦渐停 → 共享 stepCartAlongRail 沿轨推进（出轨 / 死端自动停：无轨不前进）→ 钉轨面（坡面
 //   贴地）。t735 ④ 语义变更：**通电动力轨上摩擦不衰减、加速到 boost 档**（撞击获速的空车在动力段保持
-//   前进直到离开；见循环内注释）。探测轨道标仍只属被骑路径（占用是「骑乘压轨」语义）。
+//   前进直到离开；见循环内注释）。t736：探测轨占用标记统一在本 tick 末尾重扫（updateDetectorRailOccupancy
+//   —— 被骑 / 空车 / 停驶全车种，见其头注释；被骑路径 tickRiddenCart 不再自标）。
 //   任一车本帧水平位移 → 发一次 entitiesChanged（revision 触碰驱动 QML 位置刷新；无位移不发防每帧空转）。
 void MinecartManager::tickPushedCarts(qreal dt, World *world)
 {
     if (!world || dt <= 0.0) return;
-    if (m_carts.empty()) return; // 无矿车 → 零开销（非骑乘帧常见路径）
+    if (m_carts.empty()) return; // 无矿车 → 零开销（非骑乘帧常见路径；空向量 ⇔ 从未有过车 ⇔ 占用表必空，无需收边沿）
     bool moved = false;
     for (size_t i = 0; i < m_carts.size(); ++i) {
         Cart &c = m_carts[i];
         if (!c.alive) continue;
-        if (int(i) == m_riderCart) continue; // 被骑的走 tickRiddenCart 专属物理（boost / 探测轨沿 / 停驻重选向）
+        if (int(i) == m_riderCart) continue; // 被骑的走 tickRiddenCart 专属物理（boost / 停驻重选向；占用统一在帧首 pass）
         if (std::fabs(c.speed) < 1e-3f) continue; // 静置空车不自动起步
         // 滑行物理：行进侧邻轨高度差判定（同 tickRiddenCart 坡道重力公式；空车无输入 → 只做滑行不抬速）。
         //   下坡（δ=-1）→ 重力抵摩擦 → 本帧不衰减（顺坡滑）；平 / 上坡 / 无轨（INT_MIN）→ 磨擦渐停。
@@ -438,6 +439,12 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
         if (dx * dx + dz * dz > 1e-6f) moved = true;
     }
     if (moved) notifyChanged();
+    // t736 探测轨占用统一重扫：置于循环**之后** —— 空车已推进到本帧终位（被骑车在骑乘分支由先行的
+    //   tickRiddenCart 推进），占用按全车种最新位置判定，无跨帧陈旧。PlayerController 骑乘 / 非骑乘两
+    //   分支每帧都调本 tick → 占用（含离开沿清位）在帧级收口：车被挖毁 / clearAll 后本 pass 以「上一帧
+    //   占用 − 本帧占用」自动清位断电（旧版被骑车被毁时 tickRiddenCart 早退不再收边沿 → 探测轨永久带电
+    //   的泄漏一并修复）。
+    updateDetectorRailOccupancy(world);
 }
 
 // t735 ③ 矿车↔矿车碰撞（实现见头注释）：两两水平 AABB 相交 → (a) 沿各自轨轴的位置去穿插（垂直轨轴
@@ -567,9 +574,10 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     Cart &c = m_carts[size_t(m_riderCart)];
     if (!c.alive) { outCartPos = QVector3D(); return; }
 
-    // t658 探测轨占用边沿基线快照（本帧重建 m_detectorOccupied 后，prev − cur = 离开沿 → 清位断电）。
-    const std::unordered_set<quint64> detectorPrev = m_detectorOccupied;
-    m_detectorOccupied.clear(); // t680 ②：重建前清空（漏清则集合只增不减 →「离开沿」永不触发 → 一次通电永久带电）
+    // t736：探测轨占用 / 离开沿不再在本函数处理 —— 统一移到 tickPushedCarts 末尾的
+    //   updateDetectorRailOccupancy（全车种帧级收口；PlayerController 骑乘分支在调完本函数后必调
+    //   tickPushedCarts）。旧版在本函数清占用表 + 只标被骑车 → 骑乘帧邻轨空车占用每帧被误判离开沿
+    //   （清位）又由别处重置 → 电力抖动；且空车路径（无人骑乘）完全不触发探测轨。
 
     // 停驻重选向（speed==0 且有输入）：按 wish 直接从轨连接位选向（pickTrackStep 内滤 dot<0 反向连接
     //   → 面向死端壁的 wish 无可用连接 → 保持停驻不动，不掉头不振荡）。选出的向与 wish 点积 ≥0 → 下方
@@ -604,8 +612,8 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         c.speed = 0.0f;
         outCartPos = c.pos;
         notifyChanged();
-        // 探测轨占用边沿照常收尾：m_detectorOccupied 本帧已清空 → prev 全为离开沿 → 离开格断电。
-        updateDetectorRailEdges(world, detectorPrev);
+        // t736：离轨车的探测轨占用由 tickPushedCarts 末尾的统一 pass 以「上一帧占用 − 本帧占用」收边沿
+        //   （本帧被骑车不在任何探测轨上 → 不记占用 → 离开沿自动清位断电）。
         return;
     }
 
@@ -690,30 +698,10 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         //   0.5，且坡后 30% 位置（rise≥0.7）floor(pos.y)-1 的三处派生（boost 判定 / 坡道重力 / 探测轨）取错
         //   轨层。轴取法与 mesher 同源：state 连接位（cpx||cnx → X 轴；0 连接读 RailAxisEWFlag 轴偏好）。
         if (world) {
-            const int bcx = int(std::floor(c.pos.x()));
-            const int bcz = int(std::floor(c.pos.z()));
-            // t708：钉轨面提取为共享 helper pinCartY（空车被推 tickPushedCarts 同一 Y 钉定；探测轨判定
-            //   读返回的 pinnedY —— 同 t680 ①「钉轨面循环钉到的轨格 Y」语义，防 floor(pos.y)-1 坡顶错层）。
-            const int pinnedY = pinCartY(c, world);
-            // t638/t658 ⑤ 探测轨信号输出（**边沿化**——t658 起探测轨是红石电源，机制等价 MC 1.0 detector
-            //   rail 被矿车压住时**实时通电 / 离开断电**；t638 的「压过后保持亮」占位语义被电力系统取代）：
-            //   矿车所在列（钉到的轨格）为探测轨 → 置 state bit4（DetectorRailStateOnFlag = 0x10）→ 经
-            //   setWaterSilent 的 notePowerWrite 入电力脏集 → tickRedstone 把 bit4 读作电源 15 向 6 邻
-            //   供能（world.cpp powerSourceLevel）。矿车离开（本 tick 不在任何探测轨上）→ 清位断电
-            //   （m_detectorOccupied 表记录上一帧占用的探测轨格，本帧不在 → 清位；同压力板
-            //   updatePressurePlates 的边沿基线模式）。写走 setWaterSilent（静默 + notePowerWrite）。
-            //   节流：位置未变（格坐标同）→ 跳过写。
-            // t680 ①：判定改读钉轨面循环记下的 pinnedY（旧版从 bcy=floor(pos.y) 起向下扫、首行
-            //   `!= DetectorRail 即 break` —— 但钉轨后 pos.y = 轨Y+1+rise+0.30 → bcy 是轨上方空气格
-            //   → 首行恒 break → detY 恒 -1 → DetectorRailStateOnFlag 永不置位（t658 探测轨供电死代码）。
-            if (pinnedY >= 0 && world->blockAt(bcx, pinnedY, bcz) == BlockRegistry::DetectorRail) {
-                const quint8 ds = world->stateAt(bcx, pinnedY, bcz);
-                if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
-                    world->setWaterSilent(bcx, pinnedY, bcz, BlockRegistry::DetectorRail,
-                                          quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
-                }
-                m_detectorOccupied.insert(packRailCell(bcx, pinnedY, bcz)); // 本帧占用（下帧边沿比较基线）
-            }
+            // t708：钉轨面提取为共享 helper pinCartY（空车被推 tickPushedCarts 同一 Y 钉定）。
+            //   t736：探测轨占用判定不再在此做 —— 统一移 tickPushedCarts 末尾 updateDetectorRailOccupancy
+            //   （全车种帧级收口；此处只保留 Y 钉定物理）。
+            pinCartY(c, world);
         }
         // 车头朝向（-Z 前约定，同 PlayerController horizontalFacing / 相机 yaw）：yaw = atan2(-dirX,-dirZ)
         //   → dir=(0,-1) → 0°；(0,1) → 180°；(-1,0) → 90°；(1,0) → 270°（车头本地 -Z 经 R_y(yaw) 旋转后
@@ -721,37 +709,55 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         //   → 车头保持原朝向（车底朝后退行），跨格重选向（正行转弯）才更新。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
-    } else if (world) {
-        // t680 ③：停稳（speed==0 且非下坡起步）的矿车仍持续标记探测轨占用 —— 占用是「位置」语义而非
-        //   「移动」语义（机制等价 MC 探测轨上静止矿车恒供电）。若只随 speed!=0 闸门标记，停稳帧集合
-        //   为空 → updateDetectorRailEdges 把「上一帧还占用」误判为离开沿 → 清位断电 → 车一停轨就断电。
+    }
+    // t680 ③ 停稳（speed==0 且非下坡起步）被骑车的探测轨占用：t736 起同由统一 pass 收口（占用是「位置」
+    //   语义而非「移动」语义，机制等价 MC 探测轨上静止矿车恒供电 —— 统一 pass 遍历全部活体车不看速度，
+    //   停驶车照常占用，语义保留）。
+
+    outCartPos = c.pos;
+    notifyChanged();
+}
+
+// t736 探测轨占用统一重扫（每帧一次，tickPushedCarts 末尾调；头注释见 minecartmanager.h）：快照上一帧
+//   占用表 → 清空重建：遍历全部活体矿车（被骑 / 空车 / 停驶车全车种 —— 机制等价 MC 1.0 detector rail
+//   对任何矿车输出信号，t658 旧版只标被骑路径），列内向下扫最近轨格（同 pinCartY / 旧停驶分支的「列内
+//   最近一轨」扫描语义，窗口 ±2 覆盖坡顶 rise 造成的 pos.y 抬层）为探测轨 → **幂等**置 state bit4
+//   （DetectorRailStateOnFlag；已置不重写 —— 车驻轨期间每帧零 state 写，setWaterSilent 只在置位 / 清位
+//   沿各发生一次）+ 记占用键。末尾 updateDetectorRailEdges 以「上一帧占用 − 本帧占用」清离开沿断电。
+void MinecartManager::updateDetectorRailOccupancy(World *world)
+{
+    if (!world) return;
+    const std::unordered_set<quint64> prev = m_detectorOccupied;
+    m_detectorOccupied.clear(); // 重建前清空（漏清则集合只增不减 →「离开沿」永不触发 → 一次通电永久带电）
+    for (size_t i = 0; i < m_carts.size(); ++i) {
+        const Cart &c = m_carts[i];
+        if (!c.alive) continue; // 车被挖毁 / clearAll 释放 → 不记占用 → 下一帧离开沿自动断电
         const int bcx = int(std::floor(c.pos.x()));
         const int bcz = int(std::floor(c.pos.z()));
-        for (int y = int(std::floor(c.pos.y())); y >= int(std::floor(c.pos.y())) - 2 && y >= 0; --y) {
+        const int top = int(std::floor(c.pos.y()));
+        for (int y = top; y >= top - 2 && y >= 0; --y) {
             if (!BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) continue;
             if (world->blockAt(bcx, y, bcz) == BlockRegistry::DetectorRail) {
                 const quint8 ds = world->stateAt(bcx, y, bcz);
                 if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
+                    // 置位沿：setWaterSilent（静默 + notePowerWrite → m_powerDirty → tickRedstone 把
+                    //   bit4 读作电源 15 向 6 邻供能，world.cpp powerSourceLevel；不发 blockPlaced）。
                     world->setWaterSilent(bcx, y, bcz, BlockRegistry::DetectorRail,
                                           quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
                 }
-                m_detectorOccupied.insert(packRailCell(bcx, y, bcz)); // 停稳仍占用（持续供电）
+                m_detectorOccupied.insert(packRailCell(bcx, y, bcz)); // 本帧占用（下帧边沿比较基线）
             }
-            break; // 只取列内首个轨格（同钉轨面循环的「最近一轨」语义）
+            break; // 只取列内最近一轨（钉轨后 pos.y = 轨Y+rise+0.225 → 扫描窗必含轨层；非轨列跳过）
         }
     }
-
-    outCartPos = c.pos;
-    notifyChanged();
-    // t658 探测轨离开沿清位（prev − cur：矿车驶离的探测轨断电 → 下游接收器经电力重算断开）。
-    updateDetectorRailEdges(world, detectorPrev);
+    updateDetectorRailEdges(world, prev);
 }
 
-// t658 探测轨占用边沿收尾（tickRiddenCart 末尾调；prev = 本帧开头快照的上一帧占用表，cur = 本帧重建的
-//   占用表（m_detectorOccupied））：上一帧占用、本帧不再占用的探测轨 → 清 state bit4
-//   （DetectorRailStateOnFlag）断电（机制等价 MC 1.0 detector rail 矿车离开即断；t638「压过后保持亮」
-//   占位语义由电力系统取代）。经 setWaterSilent 静默写（notePowerWrite → 电力重算把下游接收器断电）。
-//   prev 空 → 零开销早退（无探测轨场景每帧仅一次判空）。表键与 powerTnt 信号等均世界坐标打包。
+// t658 探测轨占用边沿收尾（t736 起由 updateDetectorRailOccupancy 末尾调；prev = 本帧开头快照的上一帧
+//   占用表，cur = 本帧重建的占用表（m_detectorOccupied））：上一帧占用、本帧不再占用的探测轨 → 清
+//   state bit4（DetectorRailStateOnFlag）断电（机制等价 MC 1.0 detector rail 矿车离开即断；t638「压过
+//   后保持亮」占位语义由电力系统取代）。经 setWaterSilent 静默写（notePowerWrite → 电力重算把下游接收器
+//   断电）。prev 空 → 零开销早退（无探测轨场景每帧仅一次判空）。表键与 powerTnt 信号等均世界坐标打包。
 void MinecartManager::updateDetectorRailEdges(World *world,
                                               const std::unordered_set<quint64> &prev)
 {

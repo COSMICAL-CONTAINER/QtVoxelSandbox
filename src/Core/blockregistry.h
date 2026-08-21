@@ -845,15 +845,18 @@ public:
         //   配方（MC 1.0）：6 金锭（两行满）+ 中行 木棒+红石粉+木棒（MC 实际 6 gold + stick + redstone
         //   最小包围盒 2×3；本工程 3×3 有序取上两行金锭满 + 中行 棒-红石-棒）→ 6 动力轨。
         GoldenRail     = 127, // 动力铁轨：矿车驶过加速（boost）；仅直线连接；配方 6 金锭+棒+红石
-        //   探测铁轨（DetectorRail）：贴地薄板（同 Rail 几何）；**矿车驶上时通电视觉**——state bit0
-        //   （DetectorRailStateOnFlag）置位 → mesher 换 rail_detector_on(160) 亮红贴图（占位反馈；真红石
-        //   信号输出留红石大轮，spec「踩过变 powered 贴图」）。矿车离开不清位（保持「被压过」状态直到
-        //   再编辑——简化：MC 探测轨矿车离开即断，本工程做「驶过闪亮」→ MinecartManager tick 置位 + 定
-        //   时清位走 setWaterSilent state 写。直线连接同动力轨（无拐角）。solid=false / ShapeNone /
+        //   探测铁轨（DetectorRail）：贴地薄板（同 Rail 几何）；**矿车（含空车 / 停驶车）驶上 → 该轨成为
+        //   红石电源**——state bit4（DetectorRailStateOnFlag，0x10）实时置位，MinecartManager 每帧统一
+        //   重扫占用（t736 全车种帧级收口；置 / 清沿各写一次，幂等守卫），经 setWaterSilent 的
+        //   notePowerWrite 入电力脏集 → tickRedstone 读作电源 15 向 6 邻供能（红石粉 / 灯 / 铁门等；
+        //   world.cpp powerSourceLevel）；车离开（推走 / 挖毁）→ 位清 → 降沿断下游（机制等价 MC 1.0
+        //   detector rail 实时通断，t638「压过后保持亮 + 定时清位闪亮」占位已被取代）。bit4 同时驱动
+        //   mesher 换 rail_detector_on(160) 亮红贴图（通电视觉与电力同一位 —— t691 起统一，非旧 bit0）。
+        //   直线连接同动力轨（无拐角）。solid=false / ShapeNone /
         //   hardness=0 / NoTool / dropId=自身 / maxStack=64。各面=rail_detector(158)（程序回退透明底 +
         //   石枕 + 亮红探测点）；pack {158→detector_rail.png}（_on 变体 {160→detector_rail_on.png}）。
         //   音色 GroupStone。配方（MC 1.0）：6 铁锭 + 石压力板 + 红石 → 6 探测轨。
-        DetectorRail  = 128, // 探测铁轨：矿车驶过通电视觉（占位）；仅直线连接；配方 6 铁锭+石压力板+红石
+        DetectorRail  = 128, // 探测铁轨：矿车（含空车）驶上即发红石信号（15 向 6 邻，离开即断）；仅直线连接；配方 6 铁锭+石压力板+红石
         //   红石火把（RedstoneTorch）：**常亮 ON 装饰光源**（真红石信号源留红石大轮——本工程无红石系统，
         //   同 t620 红石灯「右键开关」简化口径的姊妹简化：恒亮不熄）。solid=false / ShapeNone（无碰撞、
         //   不挡邻居面剔除）、lightEmission=7（MC 1.0 红石火把光 level 7，约为火把 14 的一半——暗红氛围
