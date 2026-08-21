@@ -21,8 +21,8 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Cobble:        return "icon_cobble.png";
     case BlockRegistry::Log:           return "icon_log.png";
     case BlockRegistry::Planks:        return "icon_planks.png";
-    case BlockRegistry::Leaves:        return "icon_leaves.png";
-    case BlockRegistry::SpruceLeaves:  return "icon_spruce_leaves.png"; // t714 云杉树叶（深蓝绿针叶立方体图标）
+    case BlockRegistry::Leaves:        return "icon_leaves.png";       // t746 仅兜底（④ 层；pack 烘焙图——正常路径走 ②/③ 3D 投影）
+    case BlockRegistry::SpruceLeaves:  return "icon_spruce_leaves.png"; // t746 仅兜底（④ 层；同上）
     case BlockRegistry::Sand:          return "icon_sand.png";
     case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50/t676 工作台 3D 立方体图标（cube per-face：顶=台面网格 / 右=侧图 / 前=前图）
     case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80/t676 熔炉 3D 立方体图标（cube per-face：顶=炉顶 / 右=炉侧 / 前=炉口）
@@ -182,10 +182,13 @@ const char *iconFileForBlock(quint8 id)
 //   时，改由 ResourcePackManager::blockAtlasIconSource(id, false) 从**程序图集**运行期重渲程序原生
 //   dimetric / flat 图标（与被覆盖前的程序图标同贴图同投影观感，且随程序图集更新自动同步——比恢复
 //   git 历史旧图更稳）；渲染失败兜底 = 退显当前 qrc 图（pack 风格，可接受降级）。
-//   叶（Leaves/SpruceLeaves）刻意不在列：t746 专任务重做叶图标（2D tint 路径 + 3D 化），本任务不动。
+//   t746 叶（Leaves/SpruceLeaves）入列：qrc icon_leaves/icon_spruce_leaves 是 t714 --from-pack 烘焙的
+//   pack 风格立方图 → pack 关必须程序图集重渲（否则 pack 关显 pack 风格，违反总纲）。
 bool isPackDerivedIconFamily(quint8 id)
 {
     switch (id) {
+    case BlockRegistry::Leaves:         // t746 叶族 3D 化（原 2D tint 立绘路径已删，见 blockItemIconMap）
+    case BlockRegistry::SpruceLeaves:   // t746
     case BlockRegistry::CraftingTable:   // t676 cube_front
     case BlockRegistry::Furnace:         // t676 cube_front
     case BlockRegistry::TntBlock:        // t676 cube_front
@@ -846,9 +849,10 @@ QString Hotbar::iconSourceForBlock(int blockId) const
     // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
     // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
-    // t456 既有 2D pack item 立绘覆盖（床 16 色 / 木梯 / 门 / 铁轨 / 红石火把 / 叶）：pack 启用且包内有
+    // t456 既有 2D pack item 立绘覆盖（床 16 色 / 木梯 / 门 / 铁轨 / 红石火把）：pack 启用且包内有
     //   item/前贴图 PNG → 直接用（这些方块的物品形态本就是 2D 立绘或染色模板，不走 3D dimetric）。
     //   仅 2D 物品图标路径（hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径。
+    //   t746 叶移出本层（原 2D 灰度 tint 立绘 → 观感平面）：改走下方 ③ 图集 3D 立方投影。
     const QString pack2D = ResourcePackManager::blockItemIconSource(blockId);
     if (!pack2D.isEmpty())
         return pack2D;

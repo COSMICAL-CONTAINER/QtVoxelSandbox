@@ -36,6 +36,24 @@ static const FaceDef kFaces[6] = {
     /*-Z*/ {{0, 0, -1}, {0, 0, -1}, {{1, 0, 0}, {0, 0, 0}, {0, 1, 0}, {1, 1, 0}}},
 };
 
+// t746 邻面遮挡判定（叶族特例）：叶（Leaves/SpruceLeaves）def.solid=true 仅供碰撞 / 光照遮蔽 / mob 支撑等
+//   格逻辑；但叶贴图是 cutout 带孔瓦片（Mask alphaCutoff 0.5，程序 oak ~22% 孔 / pack oak ~33% 孔），
+//   mesher 邻面剔除若把叶当实体遮挡，叶与实体邻的接界会**双侧**被剔（叶底面被地面剔、地面顶面被叶剔）
+//   → 边界无任何面 → 透过叶面孔洞直通地形内部空洞，直到第一个内界面（洞穴顶）才挡住 —— 穿墙透视级
+//   （用户「树叶放地上透视看到底下方块」根因，pack 态 / 程序态同病：孔密度只影响严重度）。
+//   机制等价 MC 1.0 fancy leaves 的「非不透明方块」语义：叶不遮挡任何邻面。修后行为——
+//     · 邻面（叶下草地顶面 / 树冠内原木面）恢复绘制：透过叶孔看到的是紧贴的邻面表面而非 void；
+//     · 叶自身面对实体邻仍剔除（实体满格完全遮挡，画了只会共面 z-fight）；
+//     · 叶-叶间面双侧绘制（共面反向法线，背面剔除后各朝各可见 —— 树冠呈叶簇通透感而非空心透视，
+//       取舍：冠内面数上升（贪婪合并按 tile+光合并可部分抵消），换透视破绽归零）。
+//   t639 教训：不动 isSolid 共享谓词（其消费者是碰撞/光照/支撑链），只在本消费者（mesher）做局部特例。
+static bool occludesNeighborFace(quint8 nb)
+{
+    if (!BlockRegistry::isSolid(nb))
+        return false;
+    return nb != BlockRegistry::Leaves && nb != BlockRegistry::SpruceLeaves; // t746 叶不遮挡邻面
+}
+
 // t153 PCF 软影调参与 t166 顶点色钳制（kSunMin/kSunFade/kMaxShadow/kVcMin/kVcMax）已迁至
 //   voxellight.h（VoxelLight 命名空间）—— mesher 与 BlockCube（t257 掉落沙顶点色）共用同一实现，
 //   杜绝「两处各持魔数、调参漂移」。见 VoxelLight::sunShadow / VoxelLight::vertexLight。
@@ -749,7 +767,9 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             float yLo = 0.0f, yHi = myTop;
                             if (F.dir[1] != 0) {
                                 // 顶/底面：邻(上/下)为实体或水 → 剔除；为空气 → 画在水面 / 底。
-                                if (BlockRegistry::isSolid(nb)) continue;
+                                // t746 叶邻不剔（occludesNeighborFace）：树叶盖在水面上时，水面若被剔，
+                                //   叶孔直通水体内部 → 同地形透视病；画回水面后叶孔下见水表面。
+                                if (occludesNeighborFace(nb)) continue;
                                 if (nb == fluidId) continue;
                                 if (nbOtherFluid) continue; // t563 ③：异种流体上下邻 → 剔共面（防 z-fight 闪烁）
                                 yLo = yHi = (F.dir[1] > 0) ? myTop : 0.0f; // 顶在 myTop / 底在 0
@@ -763,7 +783,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 //   朝新实体面不再被 `isSolid→continue` 抹掉其 water_flow 侧壁贴图。
                                 //   水源（state=0，满高 1.0）邻实体仍**剔除**：满格实体完全遮挡，画了只在实体面上
                                 //   叠一层半透水色（z-fight / 渗色观感），无视觉收益且会把所有水-地形接缝染蓝。
-                                if (BlockRegistry::isSolid(nb)) {
+                                if (occludesNeighborFace(nb)) { // t746 叶邻不剔（叶孔后应见水侧壁而非 void）
                                     if (st == 0) continue; // 水源满高：邻实体完全遮挡 → 剔除（原行为）
                                     // 流水降水面：画 [0,myTop] 满侧（yLo=0,yHi=myTop 已是默认）保持贴图可见
                                 } else if (nbOtherFluid) {
@@ -893,7 +913,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书条带不进图集）；立方面路径会把火格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；立方面路径会把门格画成 tile 0 草顶立方
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
-                            if (BlockRegistry::isSolid(nb)) continue;       // 邻居实体 → 剔除（跨 chunk 路由正确）
+                            if (occludesNeighborFace(nb)) continue;        // t746 邻居实体 → 剔除（跨 chunk 路由正确）；叶邻不剔（防叶孔透视 void）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
                             if (isLava && nb == BlockRegistry::Lava) continue;   // t343 岩浆-岩浆面互剔
                             // t405 玻璃-玻璃面互剔（Glass solid=false → isSolid(nb) 不剔除玻璃邻；显式剔除避免两玻璃共面重复绘制）。
@@ -1010,7 +1030,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
-                            if (BlockRegistry::isSolid(nb)) continue;
+                            if (occludesNeighborFace(nb)) continue; // t746 叶邻不剔（同 greedy 路防叶孔透视 void）
                             if (isWater && nb == BlockRegistry::Water) continue;
                             if (isLava && nb == BlockRegistry::Lava) continue;
                             // t405 玻璃-玻璃面互剔（Glass solid=false → isSolid(nb) 不剔除玻璃邻；显式剔除避免两玻璃共面重复绘制）。

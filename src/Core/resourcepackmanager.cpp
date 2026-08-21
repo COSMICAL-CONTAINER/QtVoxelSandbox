@@ -83,10 +83,6 @@ struct BuiltState {
     //   copper_*（1.8 等老包）→ 用铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，
     //   后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
     QHash<int, QString> copperIconFiles;
-    // t714 叶子 item 图标染色缓存：leafId（Leaves=7 / SpruceLeaves=133）→落盘的染色后叶图标 file:// 路径。
-    //   pack 叶贴图（oak_leaves / spruce_leaves）是灰度可染色 base，首次查询按叶 tint 重染（同床 retint 模式）
-    //   落盘 voxelsandbox_rp_leaf_<id>.png，后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
-    QHash<int, QString> leafIconFiles;
     // t745 统一贴图原则：方块 item 图标运行期 pack 渲染缓存。blockId→落盘的 dimetric/flat 图标 file:// 路径
     //   （voxelsandbox_rp_icon_<id>_r<rev>.png，文件名带 revision —— apply() 重建后 URL 变 → QML Image 重载，
     //   规避「同路径落盘新图但 Image 不重读」的陈旧缓存）。首次查询渲染 + 落盘，后续命中 O(1)。
@@ -1070,13 +1066,10 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         { 127, { QStringLiteral("rail_golden.png"),   QStringLiteral("powered_rail.png") } },   // GoldenRail 动力铁轨（t703 老名 HD 优先）
         { 128, { QStringLiteral("rail_detector.png"), QStringLiteral("detector_rail.png") } }, // DetectorRail 探测铁轨（t703 老名 HD 优先）
         { 129, { QStringLiteral("redstone_torch_on.png") } },                                  // RedstoneTorch 红石火把（常亮态 2D）
-        // t714 ③叶子背包 item 图标同步（用户「叶子背包图标跟放置贴图不一致」）：Leaves / SpruceLeaves 命中 →
-        //   blockItemIconSource 的叶 tint 重染路径（leafTintForBlock，同床 retint 模式）——pack 叶贴图是灰度可
-        //   着色瓦片（demo 包实测 oak 150/150/150 灰、spruce 130 灰），直接用 2D 原图会显灰白；乘叶 tint 后
-        //   落盘 voxelsandbox_rp_leaf_<id>.png。tint 值与 tileTint 单一权威同源（oak=plains 叶绿素 / spruce=
-        //   深蓝绿）→ 背包图标色调与世界放置观感一致。pack 关 / 包内缺 → 回退程序 icon_leaves / icon_spruce_leaves。
-        { 7,   { QStringLiteral("oak_leaves.png") } },    // Leaves 橡树树叶（灰度 + plains 叶绿素 tint）
-        { 133, { QStringLiteral("spruce_leaves.png") } }, // SpruceLeaves 云杉树叶（灰度 + 云杉深蓝绿 tint；t714）
+        // t746 叶（Leaves/SpruceLeaves）移出本 2D 立绘映射：t714 曾让叶走 pack 灰度原图 + retint 落盘
+        //   voxelsandbox_rp_leaf_<id>.png（平面 2D 观感）。t746 叶图标 3D 化 —— pack 态改由
+        //   blockAtlasIconSource(id,true) 从合成图集（pack 叶瓦片 × tileTint）运行期 dimetric 立方投影；
+        //   pack 关走 isPackDerivedIconFamily → 程序图集重渲程序原生 3D（hotbar.cpp 四层回退链 ②③）。
     };
     return kMap;
 }
@@ -1305,46 +1298,6 @@ void retintCopperTemplate(QImage &img)
                 ng = midG + ((liteG - midG) * f) / 256;
                 nb = midB + ((liteB - midB) * f) / 256;
             }
-            scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
-        }
-    }
-}
-
-// t714 叶子 item 图标 tint 查表：leafId → 叶 tint（与 tileTint 单一权威同源：oak=plains 叶绿素 #5a8a3a /
-//   spruce=深蓝绿 #3a6e55）。返 nullptr = 非叶段。pack 叶贴图（oak_leaves / spruce_leaves）是灰度可染色
-//   base（demo 包实测 150 / 130 灰）→ blockItemIconSource 命中叶段时乘本 tint 落盘染色图标（同床 / 皮革 /
-//   铜 retint 模式），背包图标色调与世界放置观感（tileTint 合成图集）一致。
-struct LeafTint { int r, g, b; };
-const LeafTint *leafTintForBlock(int blockId)
-{
-    static constexpr LeafTint kOak    = {0x5a, 0x8a, 0x3a}; // plains 叶绿素（同 tileTint kFoliage）
-    static constexpr LeafTint kSpruce = {0x3a, 0x6e, 0x55}; // 云杉深蓝绿（同 tileTint kSpruce）
-    if (blockId == 7) return &kOak;      // Leaves 橡树树叶
-    if (blockId == 133) return &kSpruce; // SpruceLeaves 云杉树叶（t714）
-    return nullptr;
-}
-
-// t714 叶贴图 retint：灰度叶贴图 × 叶 tint（机制等价 MC foliageColor 着色）。灰度亮度保留明暗层次
-// （叶脉亮 / 叶隙暗），仅色相迁到目标绿；半透明像素（叶贴图自带 alpha 渐变边）按 alpha 预乘染色。
-// img 为 Format_ARGB32_Premultiplied；输出亦保持预乘。透明像素（alpha=0）不动。
-void retintLeafTemplate(QImage &img, int tgtR, int tgtG, int tgtB)
-{
-    const int w = img.width(), h = img.height();
-    for (int y = 0; y < h; ++y) {
-        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
-        for (int x = 0; x < w; ++x) {
-            const QRgb c = scan[x];
-            const int a = qAlpha(c);
-            if (a == 0) continue; // 透明像素不动
-            // 反预乘取线性 RGB（灰度叶贴图 r≈g≈b，取 luma 代表亮度）。
-            const int r = qBound(0, qRed(c) * 255 / qMax(1, a), 255);
-            const int g = qBound(0, qGreen(c) * 255 / qMax(1, a), 255);
-            const int b = qBound(0, qBlue(c) * 255 / qMax(1, a), 255);
-            const int l = (r * 299 + g * 587 + b * 114) / 1000; // 0..255 灰度亮度
-            // 灰度×tint（Q8 分数：l/255）→ 保留明暗层次仅换色相（同 tileTint applyTint 合成数学）。
-            const int nr = (tgtR * l) / 255;
-            const int ng = (tgtG * l) / 255;
-            const int nb = (tgtB * l) / 255;
             scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
         }
     }
@@ -1683,7 +1636,6 @@ void ensureBuiltLocked()
     s.bedIconFiles.clear(); // t496 reset 床染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
-    s.leafIconFiles.clear();    // t714 reset 叶子染色图标缓存（pack 切换 / 重解析 → 重染）
     s.blockIconFiles.clear();   // t745 reset 方块 item 图标运行期渲染缓存（pack 切换 / 重解析 → 重渲）
     s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
@@ -2343,30 +2295,8 @@ QString ResourcePackManager::blockItemIconSource(int blockId)
         return QStringLiteral("file:///") + out;
     }
 
-    // t714 ③叶子图标同步（用户「叶子背包图标跟放置贴图不一致」）：叶段命中 → 灰度叶贴图乘叶 tint 重染
-    //   （retintLeafTemplate，同床 retint 模式）落盘 voxelsandbox_rp_leaf_<id>.png，背包图标色调与世界
-    //   放置观感（tileTint 合成图集）一致。命中缓存直接返（首次染色后落盘，后续 O(1)）。非叶段直接返
-    //   foundPath（原样用 pack 2D 图标，不染色）。
-    if (const LeafTint *lt = leafTintForBlock(blockId)) {
-        const auto it = s.leafIconFiles.constFind(blockId);
-        if (it != s.leafIconFiles.constEnd() && QFile::exists(it.value()))
-            return QStringLiteral("file:///") + it.value();
-        QImage leaf(foundPath);
-        if (leaf.isNull())
-            return QStringLiteral("file:///") + foundPath; // 解码失败 → 回退未染色灰度（可接受降级）
-        leaf = leaf.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-        retintLeafTemplate(leaf, lt->r, lt->g, lt->b);
-        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-        if (dir.isEmpty())
-            return QStringLiteral("file:///") + foundPath; // 无可写目录 → 回退灰度（降级）
-        QDir().mkpath(dir);
-        const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_leaf_%1.png").arg(blockId));
-        if (!leaf.save(out, "PNG"))
-            return QStringLiteral("file:///") + foundPath; // 落盘失败 → 回退灰度（降级）
-        state().leafIconFiles.insert(blockId, out);
-        return QStringLiteral("file:///") + out;
-    }
+    // t746 叶段整块删除：叶（Leaves/SpruceLeaves）已移出 blockItemIconMap → 本函数对叶恒返空串，
+    //   调用方（Hotbar::iconSourceForBlock）落到 t745 回退链 ②/③ 的 blockAtlasIconSource 3D 立方投影。
 
     return QStringLiteral("file:///") + foundPath;
 }
@@ -2402,9 +2332,12 @@ struct AtlasIconBox {
 };
 
 // 图标规格：flat（cross / 贴地薄片立绘，瓦片原样放大保留 alpha）或 boxes（dimetric 子盒投影）。
+//   t746 solidify：瓦片实心化开关（叶族专用）——瓦片含 alpha<255 孔/半透像素时，投影前用不透明像素
+//   平均色填孔并强制不透明（对齐离线 build_cube_icons.py load_face「保证实心立方图标」约定）。
 struct AtlasIconSpec {
     bool valid = false;
     bool flat = false;
+    bool solidify = false; // t746 叶族 cutout 瓦片 → 实心立方图标（铁活板门 t742 刻意保孔不在此列）
     int flatTile = -1;
     QList<AtlasIconBox> boxes; // 已按「远 → 近」深度序（painter 直接依序绘制）
 };
@@ -2423,6 +2356,9 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
     // ① flat 2D：cross 族 / 贴地薄片 / 火把立绘（icon 观感 = 世界内 cross 立绘）。cross 族 def 六面同
     //    瓦片 → topTile 即立绘；小麦作物 / 浆果丛 def 存阶段 0 基底瓦片 → 显成熟阶段瓦片（金黄麦穗 /
     //    成熟红浆果一眼可辨；瓦片号与 tileFilenameMap 36/105 同源）。
+    // t746 叶族走 ③ ShapeFull 满立方盒 + solidify 实心化（瓦片带孔直投会显半透筛子，读不出体积）。
+    if (blockId == BlockRegistry::Leaves || blockId == BlockRegistry::SpruceLeaves)
+        spec.solidify = true;
     const auto flatSpec = [&spec](int tile) {
         spec.valid = true;
         spec.flat = true;
@@ -2560,6 +2496,50 @@ QImage shadedTile(const QImage &tile, qreal f)
     return img;
 }
 
+// t746 瓦片实心化（叶族图标专用，机制同离线 build_cube_icons.py load_face）：alpha<128 的孔用不透明像素
+//   平均色填掉；半透（128..254）像素反预乘取原色后强制不透明（世界内 Mask cutout 下它们本就近似实心显示）。
+//   兜底：全透瓦片用程序叶绿常量。img 为 Format_ARGB32_Premultiplied，输出保持同格式（alpha=255 时
+//   预乘值 = 直行值，直接写直行色安全）。
+QImage solidifyTile(const QImage &tile)
+{
+    if (tile.isNull())
+        return tile;
+    QImage img = tile.copy();
+    qint64 sr = 0, sg = 0, sb = 0;
+    int n = 0;
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb *scan = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const int a = qAlpha(scan[x]);
+            if (a < 128)
+                continue; // 孔不参与代表色统计（预乘色会偏暗）
+            sr += qBound(0, qRed(scan[x]) * 255 / a, 255);
+            sg += qBound(0, qGreen(scan[x]) * 255 / a, 255);
+            sb += qBound(0, qBlue(scan[x]) * 255 / a, 255);
+            ++n;
+        }
+    }
+    const int fr = n > 0 ? int(sr / n) : 90;  // 兜底叶绿 90/130/50（load_face 同款常量）
+    const int fg = n > 0 ? int(sg / n) : 130;
+    const int fb = n > 0 ? int(sb / n) : 50;
+    for (int y = 0; y < img.height(); ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const QRgb c = scan[x];
+            const int a = qAlpha(c);
+            if (a >= 128) {
+                // 半透像素：保留原色相/明暗，升满不透明（预乘 → 直行）。
+                scan[x] = qRgb(qBound(0, qRed(c) * 255 / a, 255),
+                               qBound(0, qGreen(c) * 255 / a, 255),
+                               qBound(0, qBlue(c) * 255 / a, 255));
+            } else {
+                scan[x] = qRgb(fr, fg, fb); // 孔 → 代表色填
+            }
+        }
+    }
+    return img;
+}
+
 // 单个 dimetric 平行四边形面：仿射变换（单位正方形 → 平行四边形 o / o+e1 / o+e1+e2 / o+e2）贴图。
 //   先用瓦片中心色实填多边形（抗相邻面抗锯齿缝透出透明底 —— 仅瓦片全不透明时；含透明孔瓦片如
 //   铁活板门跳过底填保留孔洞），再 SmoothPixmapTransform 贴图。明暗已烘进瓦片（shadedTile）。
@@ -2604,23 +2584,30 @@ QImage renderAtlasIcon(const QImage &atlas, const AtlasIconSpec &spec)
         return img;
     }
     for (const AtlasIconBox &b : spec.boxes) {
+        // t746 瓦片预取 lambda：solidify（叶族）先实心化再明暗（与离线 load_face→render 顺序一致）。
+        const auto faceTile = [&atlas, &spec](int tileIdx, qreal shade) {
+            QImage t = atlasTile(atlas, tileIdx);
+            if (spec.solidify)
+                t = solidifyTile(t);
+            return shadedTile(t, shade);
+        };
         // 顶面 (+Y)：原点 = 远角 (x0,y1,z0)，e1 = +X，e2 = +Z（贴图 u→X / v→Z）。
         {
             const QPointF o = isoProject(b.x0, b.y1, b.z0);
-            drawIsoFace(p, shadedTile(atlasTile(atlas, b.topTile), 1.0), o,
+            drawIsoFace(p, faceTile(b.topTile, 1.0), o,
                         isoProject(b.x1, b.y1, b.z0) - o, isoProject(b.x0, b.y1, b.z1) - o);
         }
         // 右面 (+X)：原点 = 顶后角 (x1,y1,z0)（e2 向下 = 贴图 v 上缘对齐盒顶），e1 = +Z。明暗 0.62。
         {
-            const QImage t = shadedTile(atlasTile(atlas, b.sideTile), 0.62);
             const QPointF o = isoProject(b.x1, b.y1, b.z0);
-            drawIsoFace(p, t, o, isoProject(b.x1, b.y1, b.z1) - o, isoProject(b.x1, b.y0, b.z0) - o);
+            drawIsoFace(p, faceTile(b.sideTile, 0.62), o,
+                        isoProject(b.x1, b.y1, b.z1) - o, isoProject(b.x1, b.y0, b.z0) - o);
         }
         // 左前面 (+Z)：原点 = 顶左角 (x0,y1,z1)，e1 = +X，e2 向下。明暗 0.80。
         {
-            const QImage t = shadedTile(atlasTile(atlas, b.frontTile), 0.80);
             const QPointF o = isoProject(b.x0, b.y1, b.z1);
-            drawIsoFace(p, t, o, isoProject(b.x1, b.y1, b.z1) - o, isoProject(b.x0, b.y0, b.z1) - o);
+            drawIsoFace(p, faceTile(b.frontTile, 0.80), o,
+                        isoProject(b.x1, b.y1, b.z1) - o, isoProject(b.x0, b.y0, b.z1) - o);
         }
     }
     return img;
