@@ -1110,6 +1110,18 @@ private:
     //   低帧率 / dt=0 / 节流帧漂移时仍必然移除）。同 ItemEntityManager / XpOrbManager 的 m_clock 模式。
     QElapsedTimer m_clock;
 
+    // 审查修 B8（t724-t729 复盘）：主实体循环内投射物 spawn 延迟缓冲。aiEmberling（火球 t728）/ aiArcher
+    //   （箭 t283 起既有）在 tick 主循环持 Entity& 引用期间直接 spawn → acquireSlot 无空闲槽时 push_back
+    //   （h:acquireSlot）→ vector 扩容使循环内全部引用悬空（违反 tickBreeding 前注释记录的「主循环不可
+    //   push_back」不变量，t400 繁殖已用 pending 延迟修同因；空闲槽充足时碰巧安全，实体数首破高水位且无
+    //   空槽时触发 = 堆损坏级 UB）。AI 只记请求，主循环结束后 flushPendingShots() 统一生成：每项重取引用
+    //   → 逐项安全；发射者带 spawnSerial 快照双查（同 t553 雪球先例）防槽复用误绑 / 死者补射。
+    struct PendingFireball { QVector3D origin, vel; int shooterIdx; quint32 shooterSerial; }; // 火球请求（含 B1 发射者）
+    struct PendingArrow { QVector3D target; int shooterIdx; quint32 shooterSerial; };         // 箭请求（target 为射向点）
+    std::vector<PendingFireball> m_pendingFireballs;
+    std::vector<PendingArrow> m_pendingArrows;
+    void flushPendingShots(); // tick 主循环外统一生成 pending 火球 / 箭（见实现注释）
+
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
     {

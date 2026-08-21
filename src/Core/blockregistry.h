@@ -1698,10 +1698,12 @@ public:
     static bool isSolid(quint8 blockId);
     // t724 可燃方块单一权威谓词（fire spread 生态）：World::tickFire 的蔓延判定（邻可燃概率点燃）与
     //   寿命判定（无任何可燃邻居 → 概率自熄）都读本谓词，避免各处自写「木类判定」漂移（同 isSolid 单一
-    //   权威先例）。表 = 木类族（Log/SpruceLog/Planks/SprucePlanks/门/活版门/书架/栅栏/台阶/楼梯/工作台/
-    //   箱）+ 叶（Leaves/SpruceLeaves）+ 树苗 + 草丛（机制等价 MC 1.0 fire spread 的可燃方块集，superset
+    //   权威先例）。表 = 木类族（Log/SpruceLog/Planks/SprucePlanks/门/活版门/书架/栅栏/台阶/楼梯）
+    //   + 叶（Leaves/SpruceLeaves）+ 树苗 + 草丛（机制等价 MC 1.0 fire spread 的可燃方块集，superset
     //   对齐 tickLavaFlow isWoodLike + 叶 / 树苗 / 草丛扩展）。**TNT 不入表**（t724 v1 排除：TNT 被点燃
-    //   走既有雷击 / 压力板引燃链，火焰蔓延直接引爆不在本任务范围）。越界 / 非 air → false。
+    //   走既有雷击 / 压力板引燃链，火焰蔓延直接引爆不在本任务范围）。**工作台 / 箱不入表**（审查修 B7，
+    //   t724-t729 复盘：火吞箱走不掉落链 → 箱内物品凭空消失 + chestStore 残留，保数据优先；详见 .cpp 注释）。
+    //   越界 / 非 air → false。
     static bool flammable(quint8 blockId);
     // t146 方块碰撞/选中形状（BlockDef.shape；越界 → air 行 = ShapeNone）。
     static Shape shape(quint8 blockId);

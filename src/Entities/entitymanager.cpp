@@ -514,6 +514,36 @@ int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel)
     emit entitiesChanged();
     return slot;
 }
+
+// 审查修 B8（t724-t729 复盘）：统一生成 AI 段记入 pending 的火球 / 箭 —— aiEmberling / aiArcher 在 tick
+//   主实体循环持 Entity& 引用期间直接 spawn，acquireSlot 无空闲槽时 push_back → vector 扩容使循环内全部
+//   引用悬空（堆损坏级 UB；违反 tickBreeding 前注释的「主循环不可 push_back」不变量，t400 繁殖同因先例）。
+//   现改为：AI 只记请求（发射者槽 + spawnSerial 代际 + 弹道参数），本方法在主循环结束后被 tick 调用 ——
+//   此时不再持有任何 Entity&，且逐项重新按索引取引用（前一项 spawn 扩容不影响后一项重取）→ 安全。
+//   发射者双查（slot + serial + 活体校验）：主循环内发射者可能已死 / 槽被复用 → 弃射（死者不补射，机制
+//   等价 MC 死亡瞬间不出手）。火球在此写入 fireballShooter/Serial（审查修 B1 的命中排除数据源）。
+void EntityManager::flushPendingShots()
+{
+    for (const PendingFireball &fb : m_pendingFireballs) {
+        if (fb.shooterIdx < 0 || fb.shooterIdx >= int(m_entities.size())) continue;
+        const Entity &sh = m_entities[size_t(fb.shooterIdx)];
+        if (!sh.alive || sh.kind != Mob || sh.dead || sh.spawnSerial != fb.shooterSerial) continue; // 死者/槽复用 → 弃射
+        const int slot = spawnFireball(fb.origin, fb.vel);
+        if (slot >= 0 && slot < int(m_entities.size())) {
+            Entity &fbEnt = m_entities[size_t(slot)]; // push_back 后按新索引重取（安全）
+            fbEnt.fireballShooter = fb.shooterIdx;
+            fbEnt.fireballShooterSerial = fb.shooterSerial;
+        }
+    }
+    m_pendingFireballs.clear();
+    for (const PendingArrow &ar : m_pendingArrows) {
+        if (ar.shooterIdx < 0 || ar.shooterIdx >= int(m_entities.size())) continue;
+        Entity &sh = m_entities[size_t(ar.shooterIdx)]; // 每项重取（前一项 spawn 可能扩容）
+        if (!sh.alive || sh.kind != Mob || sh.dead || sh.spawnSerial != ar.shooterSerial) continue;
+        fireArrow(ar.shooterIdx, sh, ar.target); // 内部 spawnArrow 后仅按索引访问（fireArrow 尾段安全）
+    }
+    m_pendingArrows.clear();
+}
 // t729 生成暗渊之眼投射物（玩家右键 EndEyeId 掷出；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，直线弹道
 //   朝要塞传送门）+ kind=EnderEye + pushable=false + halfW/halfH=0.16（小绿瞳珠小体视觉 + 碰撞最小；命中检测走
 //   距离判定不读 halfW）。entity.enderEyeDistLeft = 随机 [kEnderEyeDistMin,Max]（10..16）剩余飞行距离 → tick 递减
@@ -712,8 +742,13 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
         const bool rainingHere = exposedToSun && world->isPrecipitatingAt(sx, sz);
         const bool inWater = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
                              || (sy >= 0 && sy < worldH && world->blockAt(sx, sy, sz) == BlockRegistry::Water);
+        // 审查修 B6（t724-t729 复盘）：日光燃烧改「亡灵白名单」（仅 Shambler/Bones）—— 旧黑名单只排 Stalker，
+        //   t727 夜行者（末影人语义白天不燃只瞬移）/ t728 燃烬者（火力免疫设定却仍被日光烧死，burnTimer 走
+        //   tickHostileLife 独立扣血路径不经被跳过的火烧分支）/ t487 银鱼同漏排。白名单贴合 t284 注释的设计
+        //   意图（「仅 Shambler/Bones 亡灵类燃烧」）且防未来新增敌对再漏（新敌对默认不晒燃，显式加白才燃）。
+        const bool undeadBurnsInDay = (e.mobType == MobShambler || e.mobType == MobBones);
         const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness)
-                                 && e.mobType != MobStalker && !rainingHere
+                                 && undeadBurnsInDay && !rainingHere
                                  && !inWater && e.armorHelmet == 0;
         if (inDaylight) {
             if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
@@ -2858,7 +2893,9 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
                 if (e.losClear) {
                     e.aimTimer += float(dt);
                     if (e.aimTimer >= kAimWindup) {
-                        fireArrow(idx, e, target);
+                        // 审查修 B8（t724-t729 复盘）：主循环持 Entity& 期间不直接 fireArrow（spawnArrow 可能
+                        //   push_back → 引用悬空 UB）→ 记 pending，tick 主循环外 flushPendingShots 统一射出。
+                        m_pendingArrows.push_back({ target, idx, e.spawnSerial });
                         e.attackCooldown = kShootCooldown;
                         e.aimTimer = 0.0f;
                         qCInfo(lcEnt) << "archer (Bones) fired arrow at iron golem" << golemIdx << "dist=" << gDist;
@@ -2972,7 +3009,10 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
         if (e.losClear) {
             e.aimTimer += float(dt);
             if (e.aimTimer >= kAimWindup) {
-                fireArrow(idx, e, target); // t480 idx = 发射者槽（箭 arrowShooter = idx）
+                // 审查修 B8（t724-t729 复盘）：主循环持 Entity& 期间不直接 fireArrow（spawnArrow 可能
+                //   push_back → 引用悬空 UB，t283 起既有隐患）→ 记 pending，tick 主循环外 flushPendingShots
+                //   统一射出（t480 idx = 发射者槽，箭 arrowShooter 由 fireArrow 内写入不变）。
+                m_pendingArrows.push_back({ target, idx, e.spawnSerial });
                 e.attackCooldown = kShootCooldown;
                 e.aimTimer = 0.0f;
                 qCInfo(lcEnt) << "archer (Bones) fired arrow; dist=" << distXZ;
@@ -3517,14 +3557,10 @@ bool EntityManager::aiEmberling(int idx, Entity &e, float dt, World *world, cons
                 //   （机制等价 MC 投射物不命中发射者自身）。
                 const QVector3D spawnOrigin = origin + dir * (e.halfW + 0.5f);
                 const QVector3D vel = dir * kEmberlingFireballSpeed;
-                const quint32 shooterSerial = e.spawnSerial; // spawn 前先取（spawn 可能扩容使 e 悬垂，B8 段收口）
-                const int fbSlot = spawnFireball(spawnOrigin, vel); // 直线弹道火球（Fireball tick 分支结算命中 / 点燃）
-                // 审查修 B1：火球记发射者槽 + 代际 → tick mob 命中循环跳过发射者（m_entities[...] 重取索引，
-                //   push_back 后按索引访问安全）。
-                if (fbSlot >= 0 && fbSlot < int(m_entities.size())) {
-                    m_entities[size_t(fbSlot)].fireballShooter = idx;
-                    m_entities[size_t(fbSlot)].fireballShooterSerial = shooterSerial;
-                }
+                // 审查修 B8（t724-t729 复盘）：主循环持 Entity& 期间不直接 spawn（acquireSlot 无空槽时
+                //   push_back → vector 扩容使循环内引用悬空 UB，t400 繁殖同因先例）→ 记 pending，tick
+                //   主循环外 flushPendingShots 统一生成（发射者槽 + 代际由 flush 写入火球供 B1 排除）。
+                m_pendingFireballs.push_back({ spawnOrigin, vel, idx, e.spawnSerial });
                 qCInfo(lcEnt) << "emberling" << idx << "spit fireball at player dist=" << distXZ;
             }
             e.fireCooldown = kEmberlingFireIntervalMin
@@ -5433,6 +5469,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     //   泄漏。release 不 shift 索引，顺序无关（逆序仅为保留与旧 erase 路径一致的可读性）。
     for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it)
         releaseSlot(*it);
+
+    // 审查修 B8（t724-t729 复盘）：主循环外统一生成 AI 段 pending 的火球 / 箭（aiEmberling / aiArcher 记入；
+    //   循环内直接 spawn 会因 acquireSlot push_back 使 Entity& 悬空 —— 此处不再持引用，逐项重取安全）。
+    //   在 toRemove 释放之后 → 本帧已判死的发射者不出手（flush 内再校验 alive/serial 双保险）。
+    flushPendingShots();
 
     // t400 繁殖 tick（主实体循环之外 —— 幼崽生成 acquireSlot 可能 push_back，主循环持 Entity& 引用期间不可 push_back
     //   致其失效）：衰减求偶 / 冷却 / 幼崽长大计时 + 求偶配对产幼崽（受 kPassiveMobCap 钳制）。dirty 合入本 tick

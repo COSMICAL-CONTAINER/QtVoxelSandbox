@@ -895,6 +895,10 @@ BlockRegistry::Shape BlockRegistry::shape(quint8 blockId) { return def(blockId).
 // t724 可燃方块单一权威谓词（见 .h 注释）：World::tickFire 蔓延 / 寿命判定共用。表 = 木类族（与
 //   tickLavaFlow isWoodLike 对齐 + Bookshelf 扩展）+ 叶两族 + 树苗 + 草丛（机制等价 MC 1.0 fire spread
 //   可燃方块集）。TNT 不入表（t724 v1 排除：火焰蔓延直接引爆不在范围，TNT 点燃走既有引燃链）。
+//   审查修 B7（t724-t729 复盘）：Chest / CraftingTable 移出可燃表 —— tickFire 蔓延对可燃方块无差别
+//   setBlock(Fire) 替换，既不发 blockBroken 也不走挖箱掉落链 → 箱内物品凭空消失 + chestStore 条目残留
+//   （同坐标再放新箱可能读出旧内容，存档串物风险）。MC 1.0 箱子确可燃，但本工程掉落链未跟上 —— 保数据
+//   优先（报告标注的简单方案）；工作台同因一并保守（未来掉落链下沉 Game 层后可再入表）。
 bool BlockRegistry::flammable(quint8 blockId)
 {
     using BR = BlockRegistry;
@@ -908,7 +912,6 @@ bool BlockRegistry::flammable(quint8 blockId)
     case BR::WoodFence: case BR::SpruceFence:
     case BR::WoodSlab: case BR::SpruceSlab:
     case BR::WoodStairs:
-    case BR::CraftingTable: case BR::Chest:
     case BR::Sapling: case BR::TallGrass:
         return true;
     default:
