@@ -2345,6 +2345,9 @@ struct AtlasIconSpec {
     bool valid = false;
     bool flat = false;
     bool solidify = false; // t746 叶族 cutout 瓦片 → 实心立方图标（铁活板门 t742 刻意保孔不在此列）
+    // t764 ① 附魔台专用：盒投影画完后叠画「悬浮敞开书」两页 V 形（drawEnchantBookOverlay；贴图两态
+    //   pack/程序与放置态 bookDelegate 同源）。图标与放置观感对齐（用户「item 图标缺悬浮书」）。
+    bool bookOverlay = false;
     int flatTile = -1;
     QList<AtlasIconBox> boxes; // 已按「远 → 近」深度序（painter 直接依序绘制）
 };
@@ -2414,6 +2417,7 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
         break;
     case BlockRegistry::EnchantingTable: // 0.75 矮盒（侧瓦片已由图集合成裁顶部 0.25 空白）
         addBox(0.0, 0.0, 0.0, 1.0, 0.75, 1.0, topT, sideT, sideT);
+        spec.bookOverlay = true; // t764 ① 盒顶叠画悬浮敞开书（见 drawEnchantBookOverlay）
         break;
     case BlockRegistry::EndPortal: // 祭坛框 13/16 高（endframe 化；顶瓦片含未放眼态合成）
         addBox(0.0, 0.0, 0.0, 1.0, 0.8125, 1.0, topT, sideT, sideT);
@@ -2628,6 +2632,82 @@ const QImage &programAtlas()
     return img;
 }
 
+// t764 ① 附魔台图标悬浮书叠层贴图（两态与 Main.qml bookDelegate / EnchantBookBox 同源）：pack 启用且
+//   entity 目录命中 enchant_book（entityKindMap 同一表，两级探测同 entitySource）→ 包书贴图（*packLayout
+//   置真，分区按 EnchantBookBox 布局 1 的 base 64×32 实测等比）；miss / 关 → qrc 程序 entity_enchant_book
+//   （布局 0 左右对半）。解码失败也回退程序贴图（图标永不因包图异常而空书）。
+QImage enchantBookOverlayTexture(bool packActive, const QString &entityDir, bool *packLayout)
+{
+    if (packLayout)
+        *packLayout = false;
+    if (packActive && !entityDir.isEmpty()) {
+        QString relPath;
+        for (const EntityTexEntry &e : entityKindMap()) {
+            if (QLatin1String(e.kind) == QLatin1String("enchant_book")) {
+                relPath = QString::fromLatin1(e.packPath);
+                break;
+            }
+        }
+        if (!relPath.isEmpty()) {
+            const QDir dir(entityDir);
+            QString p = dir.absoluteFilePath(relPath);
+            if (!QFile::exists(p))
+                p = dir.absoluteFilePath(QFileInfo(relPath).fileName());
+            if (QFile::exists(p)) {
+                const QImage pack(p);
+                if (!pack.isNull()) {
+                    if (packLayout)
+                        *packLayout = true;
+                    return pack.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                }
+            }
+        }
+    }
+    return QImage(QStringLiteral(":/textures/entity_enchant_book.png"))
+            .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+}
+
+// t764 ① 附魔台图标叠画「悬浮敞开书」两页 V 形：与放置态 bookDelegate 同造型 —— 书脊沿 Z 过
+//   (0.5, 0.80, z)（书心 ~0.82 的静息近似），两页各绕 Z 外倾 22°（半展 0.38·cos22°≈0.352、外缘抬升
+//   0.38·sin22°≈0.142 → 页尖 y≈0.94），页深 z[0.27,0.73]（0.46 深）。斜置矩形在 dimetric 仿射投影下仍是
+//   平行四边形 → drawIsoFace 直接贴图（u 自书脊向页外缘 = 阅读行向；v=0（图顶行）落 −Z 远端，与
+//   EnchantBookBox t764 的 v 修正同口径）。分区（base 64×32 像素，任意分辨率按图尺寸等比）：
+//   pack 封面带左封 {0,0,11,10} / 纸页叠 {1,10,12,19}——两区书脊都在区内**右缘** → 水平镜像令 u=0 在
+//   书脊；程序左半封面 {0,0,32,32} / 右半纸页 {32,0,64,32}——书脊在**左缘**不镜像。明暗 左 0.86 / 右
+//   1.0（同顶面族微差，读出 V 形两页）。分层（PLAN §2）：Core 图标渲染器自带 2D 画法，不依赖 Renderer
+//   层几何（数值镜像互指，同 t633 mob 头像模式）。
+void drawEnchantBookOverlay(QImage &img, const QImage &bookTex, bool packLayout)
+{
+    if (bookTex.isNull() || bookTex.width() < 4 || bookTex.height() < 4)
+        return;
+    const qreal sx = qreal(bookTex.width()) / 64.0;
+    const qreal sy = qreal(bookTex.height()) / 32.0;
+    const auto baseRect = [&bookTex, sx, sy](int u0, int v0, int u1, int v1) {
+        return QRect(qRound(u0 * sx), qRound(v0 * sy),
+                     qRound((u1 - u0) * sx), qRound((v1 - v0) * sy)).intersected(bookTex.rect());
+    };
+    QImage cover, paper;
+    if (packLayout) {
+        cover = bookTex.copy(baseRect(0, 0, 11, 10)).flipped(Qt::Horizontal);
+        paper = bookTex.copy(baseRect(1, 10, 12, 19)).flipped(Qt::Horizontal);
+    } else {
+        cover = bookTex.copy(baseRect(0, 0, 32, 32));
+        paper = bookTex.copy(baseRect(32, 0, 64, 32));
+    }
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    const QPointF spineFar = isoProject(0.5, 0.80, 0.27);   // 书脊 × 远端（−Z，图顶行落此端）
+    const QPointF spineNear = isoProject(0.5, 0.80, 0.73);  // 书脊 × 近端（+Z 观察者侧）
+    const QPointF e2 = spineNear - spineFar;                // v：远 → 近（页深向）
+    // 左页（封面）：u 自书脊（0.5）向 −X 外缘（0.148, y+0.142）；先画（屏上位更远）。
+    drawIsoFace(p, shadedTile(cover, 0.86), spineFar,
+                isoProject(0.148, 0.942, 0.27) - spineFar, e2);
+    // 右页（纸页）：u 自书脊向 +X 外缘（0.852, y+0.142）。
+    drawIsoFace(p, shadedTile(paper, 1.0), spineFar,
+                isoProject(0.852, 0.942, 0.27) - spineFar, e2);
+}
+
 // 合成图集瓦片 vs 程序图集瓦片逐像素比对（64×64 小图，开销可忽略）。尺寸/格式异常按「有差异」处理
 //   （宁可多渲染不误杀 pack 覆盖）。
 bool tileDiffersFromProgram(const QImage &composite, const QImage &program, int tile)
@@ -2677,15 +2757,24 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     const auto it = s.blockIconFiles.constFind(blockId);
     if (it != s.blockIconFiles.constEnd() && QFile::exists(it.value()))
         return QStringLiteral("file:///") + it.value();
-    const QImage img = renderAtlasIcon(s.atlas, spec);
+    QImage img = renderAtlasIcon(s.atlas, spec);
     if (img.isNull())
         return {};
+    // t764 ① 附魔台叠画悬浮书（pack 命中包书贴图 / 否则程序书贴图；与放置态 bookDelegate 两态同源）。
+    //   注意须在「缓存命中」检查之后、落盘之前 —— 叠层是渲染的一部分，不能只叠在内存像不落缓存。
+    if (spec.bookOverlay) {
+        bool packBook = false;
+        const QImage bookTex = enchantBookOverlayTexture(s.active, s.entityDir, &packBook);
+        drawEnchantBookOverlay(img, bookTex, packBook);
+    }
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty())
         return {};
     QDir().mkpath(dir);
+    // t764 文件族 icon → icon2：画法版本变更（附魔台加悬浮书）须换缓存名，否则老缓存（无书图标）在
+    //   pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_icon_%1_r%2.png").arg(blockId).arg(s.revision));
+            QStringLiteral("voxelsandbox_rp_icon2_%1_r%2.png").arg(blockId).arg(s.revision));
     if (!img.save(out, "PNG"))
         return {};
     s.blockIconFiles.insert(blockId, out);

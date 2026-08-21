@@ -666,6 +666,10 @@ def render_partial_2d(shape, fill_name="default_wood"):
 # pack 目录（gitignored 只读参考；本工程 demo 包实际布局 assets/minecraft/textures/block）。
 PACK_BLOCK = os.path.join(HERE, "..", "docs", "Default HD 128x Demo 1.8.2.2",
                           "assets", "minecraft", "textures", "block")
+# t764 pack entity 目录（附魔台悬浮书贴图 enchanting_table_book.png 所在；与引擎 entitySource
+#   "enchant_book" 探测的 entity/ 同一目录）。
+PACK_ENTITY = os.path.join(HERE, "..", "docs", "Default HD 128x Demo 1.8.2.2",
+                           "assets", "minecraft", "textures", "entity")
 
 
 def load_pack_face(filename, alpha="fill"):
@@ -697,7 +701,7 @@ def render_flat_pack(filename):
 
 
 def render_pack_box(boxes, top, side, front=None, cy_local=None, scale=1.0,
-                    side_v0=0.0, side_v1=1.0):
+                    side_v0=0.0, side_v1=1.0, book_overlay=False):
     """pack 贴图版形状渲染：boxes 轴对齐子盒列表 + depth buffer（同 render_partial_3d 的几何管线）。
 
     与 render_partial_3d 的差异（贴合「放置态」）：
@@ -763,6 +767,22 @@ def render_pack_box(boxes, top, side, front=None, cy_local=None, scale=1.0,
               face_depth(x0, y0, z1, x1 - x0, 0, 0, 0, y1 - y0, 0),
               front_face, 0.62, side_v0, side_v1)
 
+    if book_overlay:
+        # t764 ① 附魔台叠画「悬浮敞开书」两页 V 形（与 Main.qml bookDelegate 放置态同造型）：书脊线
+        #   (0.5, 0.80, z)，页深 z[0.27,0.73]，两页绕 Z 各外倾 22°（半展 0.38·cos22°≈0.352、外缘抬升
+        #   0.38·sin22°≈0.142 → 页尖 y≈0.94 悬于 0.75 台面上方）。o 取书脊×近端（+Z 观察者侧）、v 轴
+        #   指向远端 → sample_win 的 v=1（贴图顶行）落 −Z 远端（与运行期 drawEnchantBookOverlay 行序
+        #   同口径）。depth=x+y+z：书体 y≥0.80 > 台面 0.75 → 与台面重叠屏区恒胜，正确盖画。
+        #   明暗 左 0.86 / 右 1.0（顶面族微差读出 V 形两页）。
+        cover, paper = load_pack_book_faces()
+        o_s = project_pt(0.5, 0.80, 0.73, cy_local, scale)
+        vax = project_pt(0.5, 0.80, 0.27, cy_local, scale) - o_s
+        for face, xtip, shade in ((cover, 0.148, 0.86), (paper, 0.852, 1.0)):
+            uax = project_pt(xtip, 0.942, 0.73, cy_local, scale) - o_s
+            depth_fn = (lambda u, vv, xt=xtip:
+                        (0.5 + u * (xt - 0.5)) + (0.80 + u * 0.142) + (0.73 + vv * (0.27 - 0.73)))
+            paint(o_s, uax, vax, depth_fn, face, shade, 0.0, 1.0)
+
     img = Image.fromarray(np.clip(canvas, 0, 255).astype(np.uint8), "RGBA")
     return img.resize((OUT, OUT), Image.LANCZOS)
 
@@ -773,6 +793,29 @@ def load_pack_face_or_none(filename):
     if not os.path.exists(p):
         return None
     return load_pack_face(filename)
+
+
+# t764 附魔台图标悬浮书贴图裁区：pack entity/enchanting_table_book.png（运行期 entitySource
+#   "enchant_book" 同一文件）。分区与 EnchantBookBox 布局 1 同源：封面带 y[0,10) 左封 x[0,11) /
+#   纸页叠 y[10,19) x[1,12)（书脊侧）——两区书脊都在区内**右缘** → 水平翻转令 u=0 在书脊（阅读
+#   行向自书脊向外）。任意分辨率按 base 64×32 等比换算裁区；缩到 FACE_RES² float 走 sample_win
+#   采样管线（BILINEAR 保 HD 封面纹样），alpha 强制满（裁区本不透明，防边缘插值透底）。
+def load_pack_book_faces():
+    p = os.path.join(PACK_ENTITY, "enchanting_table_book.png")
+    img = Image.open(p).convert("RGBA")
+    w, h = img.size
+    sx, sy = w / 64.0, h / 32.0
+
+    def crop(u0, v0, u1, v1):
+        box = (int(round(u0 * sx)), int(round(v0 * sy)),
+               int(round(u1 * sx)), int(round(v1 * sy)))
+        c = img.crop(box).transpose(Image.FLIP_LEFT_RIGHT) \
+                  .resize((FACE_RES, FACE_RES), Image.BILINEAR)
+        arr = np.asarray(c, dtype=np.float64)
+        arr[..., 3] = 255.0
+        return arr
+
+    return crop(0, 0, 11, 10), crop(1, 10, 12, 19)
 
 
 def pick_pumpkin_face():
@@ -869,6 +912,7 @@ FROM_PACK = [
                                           front="tnt_side.png")),
     # 附魔台：0.75 矮盒（放置态 y[0,0.75]），顶 = enchanting_table_top，侧 = enchanting_table_side
     #   顶部 4/16 空白（引擎合成 cropTopBlank(0.25) → 有效 0.75 整张贴 0.75 高侧面）。
+    #   t764 ①：叠画悬浮敞开书（book_overlay；放置态 bookDelegate 有书而旧图标没有 → 背包/放置观感漂移）。
     ("enchanting_table", "table", dict(top="enchanting_table_top.png",
                                        side="enchanting_table_side.png")),
     # 末地祭坛（EndPortal 方块 endframe 化）：放置态整格满立方；顶 = endframe_top（未放之眼态），
@@ -992,11 +1036,14 @@ def run_from_pack():
                                       cy_local=W / 2.0 - 0.5 * v)
             elif mode == "table":
                 # 0.75 矮盒（附魔台）；侧窗 [0.25,1]（顶部空白带裁除，= cropTopBlank(0.25)）。
+                # t764 ①：盒顶叠画悬浮敞开书（book_overlay=True；贴图 = pack entity 书分区，
+                #   机制等价运行期 ResourcePackManager drawEnchantBookOverlay——离线/运行期同造型）。
                 img = render_pack_box([(0.0, 1.0, 0.0, 0.75, 0.0, 1.0)],
                                       load_pack_face(spec["top"]),
                                       load_pack_face(spec["side"]),
                                       cy_local=W / 2.0 - 0.625 * v,
-                                      side_v0=0.25, side_v1=1.0)
+                                      side_v0=0.25, side_v1=1.0,
+                                      book_overlay=True)
             elif mode == "frame":
                 # 满立方（祭坛放置态整格）；侧窗 [0.1875,1]（顶部空白裁除，= cropTopBlank(0.1875)）。
                 img = render_pack_box([(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)],

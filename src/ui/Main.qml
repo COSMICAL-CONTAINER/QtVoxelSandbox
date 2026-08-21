@@ -8111,10 +8111,12 @@ Window {
         //   在任一台旁都看到悬浮翻页书，机制等价 MC 附魔台顶部 floating book）。
         //   分层（PLAN §2）：纯呈现层，只读 blockAt 校验 + 消费 blockPlaced/broken 语义事件，绝不反向写栅格。
         //   几何：cell-local 原点 = 台格中心 (cellX+0.5, cellY+0.85, cellZ+0.5)。两页绕书脊（Z 轴）各外倾
-        //   28° 成 V（薄盒 0.38 宽 × 0.46 深，页心 ±0.19 使内缘贴书脊）；书脊 = 底部细深色横条；翻页片 =
-        //   覆在右页上的同尺寸薄片，书脊枢轴绕 Z 从 28°（贴右页）翻越顶部到 332°（落左页）再返回（页片摆动）。
-        //   随机翻页：每 2.5-6s 随机触发一次翻页动画（右页片翻到左页 → 停 250ms → 翻回），整体再叠加
+        //   22° 成 V（薄盒 0.38 宽 × 0.46 深，页心 ±0.19 使内缘贴书脊）；书脊 = 底部细深色横条；翻页片 =
+        //   绕书脊枢轴的薄片，总角 22°→152° 翻越顶部落左页再返回（t764 ④ 修正目标角，旧 338° 过冲扫书底）。
+        //   随机翻页：每 2.5-6s 随机触发一次翻页动画（右页片翻到左页 → 停 → 翻回），整体再叠加
         //   缓慢浮沉（bob）→ 「悬浮 + 随机翻页」双动效。
+        //   t764 ③：bookRoot yaw 时刻朝玩家（+Z 阅读正面 → atan2(dx,dz)，10Hz 节流）+ 前倾改 +20° 对正
+        //   面（旧 −20° 仰向背侧 = 「右页看到反面」根因之一）；② UV 修在 EnchantBookBox（v=1 钉 −Z 远端）。
         //   贴图（t732 重贴图，替换 t679 程序纯色）：EnchantBookBox 贴图盒按「部件 × 面」像素分区采样
         //   —— pack 命中 entitySource("enchant_book") → 包贴图（布局 1，封面 / 纸页 / 书脊 / 翻页白页
         //   实测分区，解决 t679「整本书 UV 与两页盒不符」遗留）；miss → qrc 程序
@@ -8166,75 +8168,108 @@ Window {
                 //   ~y+0.96 收在间隙内不凸到上一格）。
                 position: Qt.vector3d(cellX + 0.5, cellY + 0.82, cellZ + 0.5)
 
+                // t764 ③ 整书 yaw 时刻朝向玩家（用户「书应朝人敞开」）：bookRoot 只承载 yaw
+                //   （eulerRotation.y = atan2(dx,dz) 使局部 +Z 正对玩家——+Z 是页面阅读正面，见
+                //   EnchantBookBox「v=1 钉 −Z 远端」分区约定），前倾与翻面动画在内层 leanNode/bobNode
+                //   不受影响。低频 0.1s 节流（faceTimer）而非逐帧绑定 player.feetPosition——书是慢观感
+                //   物，10Hz 转向肉眼已连续，且多附魔台同屏时省每帧 JS（同 t585 指南针 4Hz 节流先例）。
+                property real bookYaw: 0
+                eulerRotation: Qt.vector3d(0, bookYaw, 0)
+                Timer {
+                    id: faceTimer
+                    interval: 100   // 10Hz 节流（机制等价 MC 附魔台书随玩家转向；不需每帧）
+                    running: true; repeat: true
+                    onTriggered: {
+                        const dx = player.feetPosition.x - (bookRoot.cellX + 0.5)
+                        const dz = player.feetPosition.z - (bookRoot.cellZ + 0.5)
+                        // 玩家恰在书心正上 → 保持原朝向（atan2(0,0)=0 会每拍跳回北，观感抖动）
+                        if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01)
+                            bookRoot.bookYaw = Math.atan2(dx, dz) * 180 / Math.PI
+                    }
+                }
+
                 // t697 前倾 ~20° 朝玩家（讲台观感，用户「书太平」）：整书绕 X 轴前倾 20° —— 页面从水平
                 //   变为斜向朝上对玩家（站立俯视时页面正对视线，机制等价 MC 附魔台书略立起的观感）。
-                //   前倾方向：-X 旋转把页远端抬向玩家（eulerRotation.x 负 = 前倾，Qt 3D 右手系 +X 轴）。
-                eulerRotation: Qt.vector3d(-20, 0, 0)
-
-                // 柔浮（整体缓慢上下浮沉，幅度 ~0.07 格；独立 bobNode 承载，不动 position 主锚）。
+                //   t764 ②符号翻正：+X 旋转把 −Z 远端抬向 +Z 玩家（旧 −20 把阅读面仰向 −Z 背侧，玩家从
+                //   +Z 正面看到页面底面 = 「右页看到反面」的朝向根因之一）；现 +20 与 yaw 后的正面对齐。
+                //   独立 leanNode 承载（yaw 在 bookRoot）→ 旋转序与 eulerRotation 内部次序解耦，恒为
+                //   「先 yaw 定正面、再前倾对视线」。
                 Node {
-                    id: bobNode
-                    property real bob: 0.0
-                    position: Qt.vector3d(0, -0.035 + 0.07 * bob, 0)
-                    // 单段线性 0→1 经 yoyo 自动往返 → 正弦式浮沉（柔和悬浮感）。
-                    SequentialAnimation on bob {
-                        running: true; loops: Animation.Infinite
-                        NumberAnimation { from: 0.0; to: 1.0; duration: 3200 }
-                        NumberAnimation { from: 1.0; to: 0.0; duration: 3200 }
-                    }
+                    id: leanNode
+                    eulerRotation: Qt.vector3d(20, 0, 0)
 
-                    // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
-                    //   t732 EnchantBookBox piece 0（封面页）：上面采封面区（qrc 左半棕封金边纹章 / 包左封），
-                    //   书脊侧窄面 = 金边竖条。页面符文 / 纹章由贴图自带（t697 GlyphLines 叠层撤下：贴图字迹
-                    //   已覆盖「字太少 / 太白」诉求，叠层再压会错位重影）。
+                    // 柔浮（整体缓慢上下浮沉，幅度 ~0.07 格；独立 bobNode 承载，不动 position 主锚）。
                     Node {
-                        rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
+                        id: bobNode
+                        property real bob: 0.0
+                        position: Qt.vector3d(0, -0.035 + 0.07 * bob, 0)
+                        // 单段线性 0→1 经 yoyo 自动往返 → 正弦式浮沉（柔和悬浮感）。
+                        SequentialAnimation on bob {
+                            running: true; loops: Animation.Infinite
+                            NumberAnimation { from: 0.0; to: 1.0; duration: 3200 }
+                            NumberAnimation { from: 1.0; to: 0.0; duration: 3200 }
+                        }
+
+                        // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
+                        //   t732 EnchantBookBox piece 0（封面页）：上面采封面区（qrc 左半棕封金边纹章 / 包左封），
+                        //   书脊侧窄面 = 金边竖条。页面符文 / 纹章由贴图自带（t697 GlyphLines 叠层撤下：贴图字迹
+                        //   已覆盖「字太少 / 太白」诉求，叠层再压会错位重影）。
+                        Node {
+                            rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
+                            Model {
+                                geometry: EnchantBookBox { piece: 0; layout: bookPackHit ? 1 : 0 }
+                                position: Qt.vector3d(-0.19, 0.0, 0.0)
+                                scale: Qt.vector3d(0.38, 0.022, 0.46)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
+                            }
+                        }
+                        // 右页：镜像（+22°）。t732 piece 1（纸页）：上面采纸页区（qrc 右半符文行 / 包纸页叠）。
+                        Node {
+                            rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: 22 }
+                            Model {
+                                geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
+                                position: Qt.vector3d(0.19, 0.0, 0.0)
+                                scale: Qt.vector3d(0.38, 0.022, 0.46)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
+                            }
+                        }
+                        // 书脊：两页交汇处细横条。t732 piece 2：可见窄面 = 金边竖条（qrc）/ 书脊条含白宝石（包）。
                         Model {
-                            geometry: EnchantBookBox { piece: 0; layout: bookPackHit ? 1 : 0 }
-                            position: Qt.vector3d(-0.19, 0.0, 0.0)
-                            scale: Qt.vector3d(0.38, 0.022, 0.46)
+                            geometry: EnchantBookBox { piece: 2; layout: bookPackHit ? 1 : 0 }
+                            position: Qt.vector3d(0.0, -0.02, 0.0)
+                            scale: Qt.vector3d(0.032, 0.03, 0.46)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                         }
-                    }
-                    // 右页：镜像（+22°）。t732 piece 1（纸页）：上面采纸页区（qrc 右半符文行 / 包纸页叠）。
-                    Node {
-                        rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: 22 }
-                        Model {
-                            geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
-                            position: Qt.vector3d(0.19, 0.0, 0.0)
-                            scale: Qt.vector3d(0.38, 0.022, 0.46)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
-                        }
-                    }
-                    // 书脊：两页交汇处细横条。t732 piece 2：可见窄面 = 金边竖条（qrc）/ 书脊条含白宝石（包）。
-                    Model {
-                        geometry: EnchantBookBox { piece: 2; layout: bookPackHit ? 1 : 0 }
-                        position: Qt.vector3d(0.0, -0.02, 0.0)
-                        scale: Qt.vector3d(0.032, 0.03, 0.46)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
-                    }
-                    // 翻页片：覆于右页上的同尺寸薄片，枢轴在书脊。baseAngle=22（贴右页）；
-                    //   flipAngle 0→316 → 页片总角 22→338（翻越顶部 ≡ -22° 落左页）；再 316→0 翻回。
-                    //   轴对齐盒无曲率 → 像素风下读作「页片摆动」（机制等价 MC 书页翻动，§9 原创简化）。
-                    //   t732 piece 3：上下大面采无字白纸区（qrc）/ 翻页白页（包）—— 与静态纸页区分，翻动可辨。
-                    Node {
-                        id: flipPivot
-                        property real baseAngle: 22
-                        property real flipAngle: 0.0
-                        rotation: Rotation {
-                            axis: Qt.vector3d(0, 0, 1)
-                            angle: flipPivot.baseAngle + flipPivot.flipAngle
-                        }
-                        Model {
-                            geometry: EnchantBookBox { piece: 3; layout: bookPackHit ? 1 : 0 }
-                            position: Qt.vector3d(0.19, 0.006, 0.0)
-                            scale: Qt.vector3d(0.38, 0.014, 0.44)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
+                        // 翻页片：绕书脊枢轴摆动的薄页。t764 ④几何三修（旧版「只见 bob 不见翻页」）：
+                        //   a) 摆角目标 316°→130°：左页射线在总角 158°（=180°−22°），旧 338° 过冲 180°，
+                        //      页片后半程从书底扫过（穿入附魔台体被遮挡）——注释旧称「≡−22° 落左页」是几何
+                        //      误判（−22° 在右页正下方）。现 22°→152° 翻越顶部落左页（差 6° 收角，页片
+                        //      略翘 resting 于封面上方 ~0.004，不与左页共面 z-fight）。
+                        //   b) 静息位藏进右页体内（position.y 0.006→0.004 + 厚 0.014→0.010 + 宽 0.38→0.36：
+                        //      顶面 y+0.009 < 页顶 +0.011，侧面也内收）——旧版与右页近共面（穿叠 0.001）
+                        //      z-fighting 闪烁；翻起时从书页「剥离」而出，读作揭页。
+                        //   c) 材质暖 tint #f2e8d5：白纸页贴白纸页肉眼不可辨（t732 后 piece 3 采图已带符文，
+                        //      再叠暖调与静态页拉开明度）。
+                        //   轴对齐盒无曲率 → 像素风下读作「页片摆动」（机制等价 MC 书页翻动，§9 原创简化）。
+                        Node {
+                            id: flipPivot
+                            property real baseAngle: 22
+                            property real flipAngle: 0.0
+                            rotation: Rotation {
+                                axis: Qt.vector3d(0, 0, 1)
+                                angle: flipPivot.baseAngle + flipPivot.flipAngle
+                            }
+                            Model {
+                                geometry: EnchantBookBox { piece: 3; layout: bookPackHit ? 1 : 0 }
+                                position: Qt.vector3d(0.19, 0.004, 0.0)
+                                scale: Qt.vector3d(0.36, 0.010, 0.42)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f2e8d5"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
+                            }
                         }
                     }
                 }
 
-                // t697 翻页循环（风翻页感，用户「翻页应循环」）：页片翻到左页 → 停 600ms → 翻回 → 停
+                // t697 翻页循环（风翻页感，用户「翻页应循环」）：页片翻到左页 → 停 700ms → 翻回 → 停
                 //   900ms → 下一轮。每轮间隔 1.4-3.2s 随机（风不定时吹动；旧 2.5-6s 间隔稀疏，读作
                 //   「偶尔动一下」非循环风感）。Timer 驱动（repeat 恒真，interval 每轮随机重设）。
                 Timer {
@@ -8248,14 +8283,15 @@ Window {
                         pageFlipTimer.interval = 1400 + Math.floor(Math.random() * 1800)
                     }
                 }
-                // 翻页动画：flipAngle 0→316（总角 22→338，翻越顶部 → 落左页）停 600ms → 316→0（翻回右页）
-                //   → 停 900ms（歇一拍再起下一轮，风翻页的「吹—落—歇」节奏）。
+                // 翻页动画：flipAngle 0→130（总角 22°→152° 翻越顶部、落左页面上方，见 flipPivot 注 a）
+                //   停 700ms（页片摊在封面可辨）→ 130→0 翻回右页 → 停 900ms（歇一拍再起下一轮，风翻页
+                //   的「吹—落—歇」节奏）。t764 ④：旧目标 316 的后半程扫书底（被台体遮挡）已废。
                 SequentialAnimation {
                     id: pageFlipAnim
                     running: false
-                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 316.0; duration: 700; easing.type: Easing.InOutQuad }
-                    PauseAnimation { duration: 600 }
-                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 316.0; to: 0.0; duration: 500; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 130.0; duration: 550; easing.type: Easing.InOutQuad }
+                    PauseAnimation { duration: 700 }
+                    NumberAnimation { target: flipPivot; property: "flipAngle"; from: 130.0; to: 0.0; duration: 500; easing.type: Easing.InOutQuad }
                     PauseAnimation { duration: 900 }
                 }
             }
