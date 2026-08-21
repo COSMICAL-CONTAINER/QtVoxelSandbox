@@ -4806,9 +4806,22 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 寿命兜底命中：悬空到期视作落点结算（落点列向下找支撑传送，防极端上抛珍珠永久滞留堆积）。
             if (e.arrowLife <= 0.0f) { remove = true; landed = true; }
             // 方块命中 → 即结算（撞地 / 撞墙：落点 = 命中格，Game 层扫描从命中格起向下找支撑 → 立命中块顶）。
+            //   **t762 余烬门无交互修正（t725 链复核项⑩）**：旧判据 World::isSolid（语义=「非 air 实存」）会把
+            //   NetherPortal（ShapeNone 无碰撞面片）当实心 → 珠掷过门格被「拦停」并把掷出者传送进门框，与
+            //   「门面无碰撞可穿入」（箭走 collisionAABBsAt 点测已穿门）不一致。改用与箭 M7 修复同源的
+            //   collisionAABBsAt 点在盒内判定：门 / 火把 / 火焰（ShapeNone 无碰撞盒）/ 水（无盒）不再拦珠 ——
+            //   投掷物统一「只与真碰撞体交互」；完整立方 / 半砖 / 楼梯等碰撞盒照常命中（行为不变）。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-                if (by >= 0 && world->isSolid(bx, by, bz)) { remove = true; landed = true; }
+                bool hitBlock = false;
+                if (by >= 0) {
+                    for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(bx, by, bz)) {
+                        if (next.x() > b.minX && next.x() < b.maxX
+                            && next.y() > b.minY && next.y() < b.maxY
+                            && next.z() > b.minZ && next.z() < b.maxZ) { hitBlock = true; break; }
+                    }
+                }
+                if (hitBlock) { remove = true; landed = true; }
             }
             // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 静默移除**不传送**（防把玩家传到界外 / 虚空不可玩位置；
             //   珍珠白耗。机制取舍：MC 珍珠入虚空同样有去无回）。

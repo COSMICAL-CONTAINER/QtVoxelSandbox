@@ -751,10 +751,13 @@ endif()
 #   （同 build_*.py 资产生成脚本），不随主程序部署；全过 exit 0，FAIL 行 = 电力链断点直接暴露。
 #   t737 环线探针附加：World 层 mesher（partialblockgeometry —— 拐角象限断言同源直调）与
 #   Entities 层 MinecartManager（矿车绕圈；两者向下只依赖 Core+World，不引入 Game/QML）。
+#   t762 黑曜石挖掘规则探针附加：Game 层 ToolRegistry（miningTime/canHarvest 纯表查询——只向下依赖
+#   Core 的 BlockRegistry，不引入 PlayerController/QML）。
 add_executable(redstone_matrix_test
     tools/redstone_matrix_test.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
+    src/Game/toolregistry.cpp
     src/World/chunk.cpp
     src/World/chunkmanager.cpp
     src/World/world.cpp
@@ -763,6 +766,7 @@ add_executable(redstone_matrix_test
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
     ${CMAKE_CURRENT_SOURCE_DIR}/src/World
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
 )

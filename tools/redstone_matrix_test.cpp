@@ -13,6 +13,7 @@
 #include <cmath>
 
 #include "blockregistry.h"
+#include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
 #include "world.h"
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
@@ -890,6 +891,34 @@ int main(int argc, char *argv[])
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| stronghold portal room headroom: 4 air above frames + roof at +5, ring intact at"
                              " recorded Y, corridor/stair clearance (t759)";
+    }
+
+    // ── t762 黑曜石挖掘规则探针（纯 Core/Game 表查询，无 World 交互）：① 无附魔钻石镐 miningTime == 12.0s
+    //    （hardness 96 / speedMul 8，t762 验收值）；② 仅钻石镐 canHarvest（掉落），木/石/铁/金/铜镐全 false
+    //    （无掉落）；③ 低档镐 miningSpeedMul == 1.0（无加成恒慢，96s 极慢）+ 空手 canHarvest false。
+    {
+        // 工具段枚举值即绝对物品 id（PickaxeWood=0x101 起；ToolIdBase=0x100 仅是段下界哨兵，非加数）。
+        const auto diaId  = int(ToolRegistry::PickaxeDiamond);
+        const auto ironId = int(ToolRegistry::PickaxeIron);
+        const auto goldId = int(ToolRegistry::GoldPickaxe);
+        const auto woodId = int(ToolRegistry::PickaxeWood);
+        const auto stoneId = int(ToolRegistry::PickaxeStone);
+        const auto copperId = int(ToolRegistry::CopperPickaxe);
+        bool ok = std::abs(ToolRegistry::miningTime(BR::Obsidian, diaId) - 12.0f) < 1e-3f
+                  && ToolRegistry::canHarvest(BR::Obsidian, diaId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, ironId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, goldId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, woodId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, stoneId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, copperId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, 0) // 空手（非工具 id 0）→ 无掉落
+                  && ToolRegistry::miningSpeedMul(BR::Obsidian, ironId) == 1.0f
+                  && ToolRegistry::miningSpeedMul(BR::Obsidian, goldId) == 1.0f
+                  && ToolRegistry::canMine(BR::Obsidian); // 可挖（破坏进度可推进，仅速度/掉落受限）
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| obsidian mining rule: diamond pick 96/8=12.0s + drop; wood/stone/iron/gold/"
+                             "copper pick no bonus (1.0x) and NO drop (t762)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

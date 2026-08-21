@@ -779,6 +779,11 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::BedLime),     int(BlockRegistry::BedPink),
              int(BlockRegistry::BedGray),     int(BlockRegistry::BedLightGray),
              int(BlockRegistry::BedPurple),   int(BlockRegistry::BedBrown),
+             // t762 黑曜石进创造调色板（此前缺失——t411 定「系统获得不进调色板」，但它是附魔台配方原料
+             //   （书+钻石+黑曜石）与余烬门框原料（t725 门链），两条机制链都需玩家可取黑曜石才能测试 /
+             //   建筑；生存获得链完整保留：铁桶舀岩浆源 + 水浇凝（t411 pass A 流水触岩浆源 / t472 pass B
+             //   双源静置），挖取仅钻石镐（minToolTier 4，96.0 硬度 → 12.0s）。紧邻附魔台（配方原料关系）。
+             int(BlockRegistry::Obsidian),                                    // 黑曜石：水+岩浆源凝固产物；附魔台/门框原料；仅钻石镐可挖（t762）
              // t474 附魔链两件方块（机制等价 MC 1.0 enchanting table / bookshelf；右键附魔台开 UI / 书架作加成源）。
              int(BlockRegistry::EnchantingTable),                              // 附魔台（右键开附魔 UI；配方书+钻石+黑曜石）
              int(BlockRegistry::Bookshelf),                                   // 书架（合成产物；附魔台加成来源；配方木板+书）

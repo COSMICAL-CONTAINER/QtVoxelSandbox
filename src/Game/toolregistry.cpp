@@ -55,6 +55,9 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     // t472 钻石镐：tier 4（最高档）、speedMul 8.0（项目设计预留的钻石档倍率，见上「铁档 6 留金 12 / 钻石 8 空间」；
     //   机制对齐 MC 1.0 钻石镐采掘速度）。maxDurability=1561（MC 1.0 钻石镐耐久，铁 250 之上的最高耐久）。
     //   采掘 Obsidian 的唯一工具（Obsidian.minToolTier=4）。追加在末尾（与 ToolId 枚举同序；不重排保向后兼容）。
+    //   **t762 挖掘速度参数表行（Obsidian）**：miningTime = hardness/speedMul = 96.0/8.0 = **12.0s**（无附魔钻石镐
+    //   采掘黑曜石时长，t762 验收值）；效率附魔再 ×(1+level) 加速（t476 链）；木 / 石 / 铁 / 金 / 铜镐 harvestLevel
+    //   1/2/3/1/2 < 4 → miningSpeedMul 恒 1.0（96s 极慢）+ canHarvest=false（无掉落，仅 AIR）——「仅钻石镐可挖」。
     /* PickaxeDiamond */ {int(BlockRegistry::Pickaxe), 4, 4, 8.0f, 1561, "pickaxe_diamond", "钻石镐"},
     // t557 金工具（机制等价 MC 1.0 gold tools：耐久 32 最脆、speedMul 12.0 最快 —— 「快而脆」）。**rv56 问题6 修正：
     //   harvestLevel=1（MC 1.0 gold mining level = wood）**——金镐 tier 5 虽高于钻石 4，但采掘门槛同木镐（挖不动
