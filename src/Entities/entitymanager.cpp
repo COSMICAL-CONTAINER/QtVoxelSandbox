@@ -3510,8 +3510,21 @@ bool EntityManager::aiEmberling(int idx, Entity &e, float dt, World *world, cons
                                playerPos.z() - origin.z()); // 朝玩家中心高度（脚位 + 0.9）
             const float tl = to.length();
             if (tl > 1e-3f) {
-                const QVector3D vel = to / tl * kEmberlingFireballSpeed;
-                spawnFireball(origin, vel); // 直线弹道火球（Fireball tick 分支结算命中 / 点燃）
+                const QVector3D dir = to / tl;
+                // 审查修 B1（t724-t729 复盘）：出生点沿射向前移出自身命中盒（halfW + 0.5，同玩家掷眼
+                //   eye+look*0.5 防贴墙思路）—— 旧版火球生在自身 AABB 正中心，mob 命中盒外扩
+                //   kFireballHitHalfW 后首帧仍在发射者盒内。与命中循环 fireballShooter 排除双保险
+                //   （机制等价 MC 投射物不命中发射者自身）。
+                const QVector3D spawnOrigin = origin + dir * (e.halfW + 0.5f);
+                const QVector3D vel = dir * kEmberlingFireballSpeed;
+                const quint32 shooterSerial = e.spawnSerial; // spawn 前先取（spawn 可能扩容使 e 悬垂，B8 段收口）
+                const int fbSlot = spawnFireball(spawnOrigin, vel); // 直线弹道火球（Fireball tick 分支结算命中 / 点燃）
+                // 审查修 B1：火球记发射者槽 + 代际 → tick mob 命中循环跳过发射者（m_entities[...] 重取索引，
+                //   push_back 后按索引访问安全）。
+                if (fbSlot >= 0 && fbSlot < int(m_entities.size())) {
+                    m_entities[size_t(fbSlot)].fireballShooter = idx;
+                    m_entities[size_t(fbSlot)].fireballShooterSerial = shooterSerial;
+                }
                 qCInfo(lcEnt) << "emberling" << idx << "spit fireball at player dist=" << distXZ;
             }
             e.fireCooldown = kEmberlingFireIntervalMin
@@ -4436,6 +4449,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 for (int mi = 0; mi < int(m_entities.size()); ++mi) {
                     const Entity &m = m_entities[size_t(mi)];
                     if (!m.alive || m.kind != Mob || m.dead) continue;
+                    // 审查修 B1（t724-t729 复盘）：跳过发射者（slot + serial 双查，同雪球 t553 先例）——
+                    //   火球出生在发射者外扩命中盒内，不排除则首帧判中发射者自己（自伤 5HP + 点燃，约 4 发自杀）。
+                    if (mi == e.fireballShooter && m.spawnSerial == e.fireballShooterSerial) continue;
                     const float ex2 = m.pos.x() - m.halfW - kFireballHitHalfW;
                     const float ey2 = m.pos.y() - m.halfH - kFireballHitHalfW;
                     const float ez2 = m.pos.z() - m.halfW - kFireballHitHalfW;
@@ -4446,7 +4462,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         // t453 点燃目标（火伤）：fireTimer 刷新到 kFireDuration（t724 点燃判据先例；若目标自身火
                         //   免疫如另一燃烬者无实际火伤，但仍设 fireTimer —— 免疫由火烧分支跳过不伤）。
                         Entity &tm = m_entities[size_t(mi)];
-                        if (tm.alive && tm.kind == Mob && !tm.dead)
+                        // 审查修 B2（t724-t729 复盘）：火免疫者（燃烬者）不再设 fireTimer —— 免疫分支跳过
+                        //   衰减后设了永不归零 = 永久火焰特效（isBurningAt 据 fireTimer>0 显焰）。
+                        if (tm.alive && tm.kind == Mob && !tm.dead && tm.mobType != MobEmberling)
                             tm.fireTimer = std::max(tm.fireTimer, kFireDuration);
                         qCInfo(lcEnt) << "emberling fireball hit mob" << mi << "for"
                                       << kEmberlingFireballDamage << "HP";
@@ -4469,7 +4487,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         const int tx = qFloor(next.x()), ty = qFloor(next.y()) + 1, tz = qFloor(next.z());
                         if (ty < world->height() && !world->isSolid(tx, ty, tz)) {
                             // 命中块正上方是空位 → 落火（命中块顶面是实体 → 延烧成立；t724 火系统承接）。
-                            world->setWaterSilent(tx, ty, tz, BlockRegistry::Fire, 0);
+                            // 审查修 B3（t724-t729 复盘）：点燃改走 5 参数 setBlock（同打火石点火 / tickFire
+                            //   蔓延路径）—— 旧 setWaterSilent 只发 worldChanged 不发 blockPlaced → Main.qml
+                            //   fireHost 的 delegate 永不挂载 = 隐形火（火真实存在并继续蔓延，玩家看到
+                            //   「火从空气中冒出来」）。火球命中低频，无粒子风暴风险。
+                            world->setBlock(tx, ty, tz, BlockRegistry::Fire, 0);
                             qCInfo(lcEnt) << "emberling fireball ignited at" << tx << ty << tz;
                         }
                     }
@@ -4768,7 +4790,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   t728 火力免疫（Emberling；机制等价 MC 1.0 烈焰人免疫火伤）：燃烬者跳过整段火烧系统 —— 岩浆 / 火
             //   格不点燃、已有 fireTimer 不推进扣血（惰性 → 不伤），且不受外部 ignite（fire 点燃）影响。火免疫
             //   故段内全部逻辑对其 no-op（不点燃 / 不扣火伤 / 岩浆不点燃），isBurningAt 亦不显火焰（fireTimer 恒 0）。
-            if (e.mobType != MobEmberling) {
+            //   审查修 B2（t724-t729 复盘）：免疫分支曾把「fireTimer 递减 + 随机熄灭」一并跳过 → 外部路径设的
+            //   fireTimer 永不衰减 = 永久火焰特效。现免疫分支对残留 fireTimer 立即清零（压制点燃 + 正常熄灭两全）；
+            //   kEmberlingFireResistImmunity 常量在此真正消费（审查修 B13：原为无消费方的死常量）。
+            const bool emberlingFireImmune = kEmberlingFireResistImmunity && e.mobType == MobEmberling;
+            if (!emberlingFireImmune) {
                 const int fx = qFloor(e.pos.x());
                 const int fz = qFloor(e.pos.z());
                 const int footY = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
@@ -4821,7 +4847,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         dirty = true;
                     }
                 }
-            } // /t728 火免疫：非 Emberling 走火烧系统；Emberling 跳过（不点燃不扣火伤）
+            } else if (e.fireTimer > 0.0f) {
+                // 审查修 B2（t724-t729 复盘）：火免疫分支压制残留点燃 —— 旧路径（如火球命中）设的 fireTimer
+                //   若无人清 → 永不衰减永久显火焰。免疫 = 不伤 + 不显焰，立即归零。
+                e.fireTimer = 0.0f;
+                e.fireDamageTimer = 0.0f;
+                dirty = true; // 熄火 → bump（QML 收火焰）
+            } // /t728 火免疫：非 Emberling 走火烧系统；Emberling 跳过（不点燃不扣火伤 + 残留火立即熄）
             // 火伤可能本帧致死（damageEntity 置 dead）→ 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
             if (e.dead) continue;
 

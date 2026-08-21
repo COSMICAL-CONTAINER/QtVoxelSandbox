@@ -849,6 +849,13 @@ private:
         //   m_entities[idx].spawnSerial；命中排除**同时**比对 slot+serial —— 槽复用换任后 serial 不同 →
         //   不再误排除新生物。玩家雪球（thrower=-1）本字段不读。默认 0。
         quint32 snowballThrowerSerial = 0; // 发射者代际快照（与命中时槽内实体的 spawnSerial 比对）
+        // t728 审查修 B1（t724-t729 复盘）：火球发射者槽索引 + 代际快照（仅 kind==Fireball 用；机制同
+        //   snowballThrower/snowballThrowerSerial 双查先例）：aiEmberling 喷火后在火球实体上记发射者槽 →
+        //   Fireball tick 的 mob 命中循环跳过发射者（火球是首个「mob 发射 + 命中 mob」投射物：出生点在发射者
+        //   外扩命中盒内（halfW+kFireballHitHalfW），不排除则首帧判中自己 → 每发 5HP 自击约 4 发自杀）。
+        //   带 serial 防槽复用后误把新生物当发射者（rv-low-batch1 雪球同因）。默认 -1 / 0（无发射者 → 不排除）。
+        int fireballShooter = -1;          // 火球发射者槽索引（仅 kind==Fireball；-1 = 无 / 玩家侧）
+        quint32 fireballShooterSerial = 0; // 火球发射者代际快照（与命中时槽内实体的 spawnSerial 比对）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]

@@ -928,7 +928,8 @@ private:
     //   t564「全图至多一个末地传送门」）。m_hasStronghold=false → 无要塞（世界未生成 / 空）→ 暗渊之眼掷出兜底
     //   不寻路。坐标语义 = 传送门房 12 框架环中心格：x=placeAt 的 cx（环 x 中心）、y=cy+4（地板 cy 之上门面 dy=4）、
     //   z=cz-18（传送门房内部 dz∈[-21,-12] 中心 -18）。玩家眼位 → 该点方向 = 末影之眼飞行目标（EntityManager 掷出
-    //   + Game 层算方向，分层只向下的只读源）。regenerate / beginLoad 重建世界时由 placeStronghold 重写。
+    //   + Game 层算方向，分层只向下的只读源）。generate 时由 placeStronghold 记录；beginLoad 显式清（防旧
+    //   世界残留误导），finishLoad 末由 rebindStrongholdPortalFromVoxels 从体素反推回写（审查修 B5：读档不丢）。
     bool m_hasStronghold = false;
     int m_strongholdPortalX = 0, m_strongholdPortalY = 0, m_strongholdPortalZ = 0;
     ChunkManager m_chunks;    // 多 chunk 存储 + 跨 chunk 路由（World 层；默认空，generate 重建）
@@ -1179,6 +1180,9 @@ private:
     void noteFireWrite(int x, int y, int z, quint8 oldId, quint8 newId);
     // t724 perf：全图扫描重建火焰方格集合（generate / finishLoad 末调一次；运行期由 noteFireWrite 维护）。
     void rebuildFireCells();
+    // 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞传送门坐标回写 m_strongholdPortal*（beginLoad 只清
+    //   不重建 → 旧版读档后坐标丢失/陈旧，暗渊之眼飞错方向）。finishLoad 末调一次；实现见 world.cpp 注释。
+    void rebindStrongholdPortalFromVoxels();
     // r2-B2/B3 读档机关态归一（finishLoad 在 emit worldChanged 前调一次）：全图扫按钮（Wood/Stone）与压力板
     //   （五件族）且 state bit0=1 → 清 bit0（弹起）。按钮按下 / 压力板被压都是瞬态（伴生 Game 层表 / 实体不进
     //   存档），读档归一为弹起：按钮恢复「自动弹回 + 可再按」；压力板压下视觉不残留（玩家仍站着 → 首 tick

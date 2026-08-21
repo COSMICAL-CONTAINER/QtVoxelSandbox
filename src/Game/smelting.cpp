@@ -8,6 +8,8 @@
 //   - gold：金原矿（材料段 0x21E）→ 金锭（0x21F）。t308：机制等价 MC 1.0「金矿采下为原矿，须熔炉冶炼成锭」。
 //   - glass：沙子（方块段 Sand）→ 玻璃（材料段 0x204，spec 可选）。
 //   - charcoal：原木（方块段 Log）→ 木炭（材料段 0x205，spec 可选）。
+//   - blaze_powder：燃烬棒（材料段 0x245）→ 燃烬粉（0x244）。审查修 B4（t724-t729 复盘）：t726 多处注释
+//     声称「燃烬棒熔炉冶炼为燃烬粉」但本表漏注册 → 生存链断裂（暗渊之眼不可合成，t729 掷眼只剩创造可用）。
 //   注：钻石矿直接掉钻石（宝石，无需冶炼）—— 钻石不进本表（spec「钻石挖掘就还是钻石的样子」）。
 //
 // 燃料表（MC burn ticks / 20 = 秒；1 件冶炼 = 10s = 200 ticks）：
@@ -31,6 +33,9 @@ constexpr SmeltEntry kSmelt[] = {
     //   鸡 / 鱼等其余生肉同理可补，本轮按用户报障范围（猪 / 牛）先修这两条，结构已通用（加一行即可扩）。
     { RecipeRegistry::RawPorkchopId,   RecipeRegistry::CookedPorkchopId, "porkchop" }, // 生猪排 → 熟猪排（机制等价 MC 1.0 raw→cooked porkchop）
     { RecipeRegistry::RawBeefId,       RecipeRegistry::CookedBeefId,     "beef"     }, // 生牛肉 → 熟牛肉（机制等价 MC 1.0 raw→cooked beef）
+    // 审查修 B4（t724-t729 复盘）：燃烬棒 → 燃烬粉（暗渊之眼合成链：杀燃烬者得棒 → 熔炉烧粉 → 粉 + 暗渊珠
+    //   合眼）。t726 只在注释里声称此配方，本表漏行 → 生存模式棒放熔炉无反应、链路断裂。
+    { RecipeRegistry::BlazeRodId,      RecipeRegistry::BlazePowderId,    "blaze_powder" }, // 燃烬棒 → 燃烬粉（暗渊之眼链）
 };
 
 constexpr FuelEntry kFuel[] = {
@@ -78,6 +83,8 @@ constexpr SmeltXpEntry kSmeltXp[] = {
     { RecipeRegistry::GoldIngotId,   2, "gold"     }, // 金锭：金原矿冶炼给 2 XP（t308 金链）
     { RecipeRegistry::CharcoalId,    1, "charcoal" }, // 木炭：原木冶炼给 1 XP（spec「charcoal」；少于铁，数据自然表达）
     { RecipeRegistry::GlassId,       0, "glass"    }, // 玻璃：沙子冶炼给 0 XP（无金属价值）
+    // 审查修 B4 配套：燃烬粉 1 XP（同木炭量级 —— 非金属加工物；暗渊之眼链冶炼正途给 XP）。
+    { RecipeRegistry::BlazePowderId, 1, "blaze_powder" }, // 燃烬粉：燃烬棒冶炼给 1 XP（暗渊之眼链）
 };
 } // namespace
 

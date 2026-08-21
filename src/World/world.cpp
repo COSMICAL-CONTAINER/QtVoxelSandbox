@@ -74,6 +74,10 @@ void World::beginLoad(int seed)
     m_iceCells.clear();      // t495：网格重置 → 普通冰方格索引作废（finishLoad 写完 blob 后 rebuildIceCells 全图重建）
     m_fireCells.clear();     // t724：网格重置 → 火焰方格索引作废（finishLoad 写完 blob 后 rebuildFireCells 全图重建）
     m_powerDirty.clear();    // t656：网格重置 → 红石电力脏集作废（finishLoad 末全量重建红石族脏集）
+    // 审查修 B5（t724-t729 复盘）：清要塞传送门坐标 —— 旧版只在世界生成（placeStronghold）记录，读档后
+    //   残留上一世界坐标会让暗渊之眼（t729）朝错误方向飞；finishLoad 末 rebindStrongholdPortalFromVoxels
+    //   从存档体素反推回写（若本世界确有要塞）。
+    m_hasStronghold = false;
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
@@ -122,6 +126,77 @@ void World::finishLoad()
                     if (isPowerFamilyBlock(m_chunks.blockAt(x, y, z)))
                         m_powerDirty.insert(packGrowthCell(x, y, z));
     }
+    // 审查修 B5（t724-t729 复盘）：从体素反推要塞传送门坐标回写（存档不落盘 m_strongholdPortal* —— 旧版
+    //   只在 generate 的 placeStronghold 记录，读档后丢失 / 陈旧）。同 rebuildFireCells 的一次性全图扫描
+    //   模式（加载期可接受，非每 tick）。
+    rebindStrongholdPortalFromVoxels();
+}
+
+// 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞末地传送门中心格回写 m_strongholdPortal*。旧版三坐标
+//   只在世界生成（placeStronghold）记录 → 读档（beginLoad+finishLoad）后丢失或残留旧世界坐标，暗渊之眼
+//   （t729）飞错方向 / 误走「无要塞」直飞兜底。扫描对象 = 末地传送门框架（EndPortal=111）而非激活门面
+//   （EndPortalSurface=131）：门面只在 12 框架全激活后存在（t664），未激活要塞扫门面必漏 → 扫框架则任何
+//   存档都能反推（框架 worldgen 必放、生存不可挖，见 blockregistry.h EndPortal 注释）。框架环足迹 5×5：
+//   就近并入同簇（XZ 落簇 bbox 外扩 3 内且同层 ±1），取「格数最多、平局取距世界中心（=出生点）最近」的簇
+//   （同 placeStronghold 的 best 选择语义；创造玩家自建框架环属边缘情形，多格优先 + 近出生点优先大体还原
+//   worldgen 选择）。簇 bbox 中心 = 环中心：标准环相对坐标 x∈[-2,2] / z∈[-20,-16] → 中心 (0,-18)，y=框架
+//   层 = 生成期记录的 cy+4，与 placeStronghold 写入值一致。≥3 格才算环（低于此视为残骸 / 散置框架不绑定）。
+//   一次性全图扫描（~数 M blockAt），同 rebuildFireCells 先例；直读 m_chunks（finishLoad 时机无信号语义，
+//   同 rebuildFireCells 约定）。
+void World::rebindStrongholdPortalFromVoxels()
+{
+    struct Cluster { int minX, maxX, minZ, maxZ, y; int count; };
+    std::vector<Cluster> clusters;
+    const int W = m_width, D = m_depth, H = m_height;
+    for (int y = 0; y < H; ++y) {
+        for (int z = 0; z < D; ++z) {
+            for (int x = 0; x < W; ++x) {
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::EndPortal) continue;
+                // 就近并入既有簇（环 5×5 足迹：bbox 外扩 3 覆盖环内任意两框架间距；同层 ±1 容地面高差）。
+                bool merged = false;
+                for (Cluster &c : clusters) {
+                    if (std::abs(y - c.y) > 1) continue;
+                    if (x < c.minX - 3 || x > c.maxX + 3 || z < c.minZ - 3 || z > c.maxZ + 3) continue;
+                    c.minX = std::min(c.minX, x); c.maxX = std::max(c.maxX, x);
+                    c.minZ = std::min(c.minZ, z); c.maxZ = std::max(c.maxZ, z);
+                    ++c.count;
+                    merged = true;
+                    break;
+                }
+                if (!merged) clusters.push_back({ x, x, z, z, y, 1 });
+            }
+        }
+    }
+    // 选簇：格数最多优先（完整 12 环 > 残环 > 玩家散放），平局取距世界中心最近（同 placeStronghold 的
+    //   bestIdx 语义 —— worldgen 放的就是距出生点最近那座）。bestCount 起 2 → 仅 ≥3 格的簇可入选。
+    int best = -1;
+    int bestCount = 2;
+    double bestDistSq = 1e18;
+    const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
+    for (size_t i = 0; i < clusters.size(); ++i) {
+        const Cluster &c = clusters[i];
+        if (c.count < 3) continue;
+        const double dx = (c.minX + c.maxX) * 0.5 - centerX;
+        const double dz = (c.minZ + c.maxZ) * 0.5 - centerZ;
+        const double d = dx * dx + dz * dz;
+        if (c.count > bestCount || (c.count == bestCount && d < bestDistSq)) {
+            best = int(i);
+            bestCount = c.count;
+            bestDistSq = d;
+        }
+    }
+    if (best < 0) {
+        m_hasStronghold = false; // 存档无要塞 / 框架已毁 → 无目标（掷眼走直飞兜底；beginLoad 已清，此处确认）
+        qInfo() << "worldload: stronghold rebind -> none";
+        return;
+    }
+    const Cluster &c = clusters[size_t(best)];
+    m_hasStronghold = true;
+    m_strongholdPortalX = (c.minX + c.maxX) / 2;
+    m_strongholdPortalY = c.y;
+    m_strongholdPortalZ = (c.minZ + c.maxZ) / 2;
+    qInfo() << "worldload: stronghold rebind ->" << m_strongholdPortalX << m_strongholdPortalY
+            << m_strongholdPortalZ << "frames=" << c.count;
 }
 
 // t425 perf：生长方格索引增量维护。写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）在
