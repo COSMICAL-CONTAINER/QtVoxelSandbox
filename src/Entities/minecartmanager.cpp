@@ -26,6 +26,17 @@ static inline void unpackRailCell(quint64 k, int &x, int &y, int &z)
     y = int(quint32(k >> 42)) & 0x3FFu;
 }
 
+// t737 车头朝向随行进向更新（-Z 前约定：yaw = atan2(-dirX,-dirZ)，与 spawnCart / pushEmptyCart /
+//   tickRiddenCart 末尾同公式同源）。stepCartAlongRail 拐角重选向时同步调用 —— 旧版只在被骑 tick 末尾
+//   更新 yaw → **空车**（tickPushedCarts）过弯 dir 已转但车头不转（t737「骑乘与空车都要转」的空车半边；
+//   被骑路径末尾重算同公式 → 幂等无害）。
+static inline void cartYawFromDir(float dirX, float dirZ, float &outYaw)
+{
+    float y = std::atan2(-dirX, -dirZ) * 57.2957795f;
+    while (y < 0.0f) y += 360.0f;
+    outYaw = y;
+}
+
 bool MinecartManager::aliveAt(int i) const
 {
     if (i < 0 || i >= int(m_carts.size())) return false;
@@ -210,6 +221,10 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     //   （dot=-1，来路）不返回：死端轨若返回来路连接 → 跨格即 180° 掉头、按 W 全速倒退 → 两端永久振荡；
     //   改为返回 false 让「轨尽头 → 停」分支接管，停下后 tickRiddenCart 末尾的 -dir 重选分支再实现
     //   「按 W 蓄力反推回」（机制等价 MC 矿车在尽头轨停下后可反向推回）。
+    //   t737 注：拐角形态（恰 1 X + 1 Z 臂）的「连接位 → 两臂走向」与贴图象限映射同源单一权威
+    //   BlockRegistry::railCornerArms（Core）—— 本通用点积环在拐角格的选中结果与该表逐格等价
+    //   （轴对齐行进进拐角 → 出口恒 = 垂直臂 dot=0；矩阵测试环线探针对两者一致性逐拐角断言），
+    //   贴图与物理不再各查各表（t737 前贴图像限自查表镜像错位的教训）。
     struct Dir { int dx, dz; quint8 bit; };
     static const Dir kDirs[4] = {
         { 1,  0, BlockRegistry::RailConnPx},
@@ -328,7 +343,7 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
         if (std::fabs(c.pos.x() - ccx) < 1e-4f && std::fabs(c.pos.z() - ccz) < 1e-4f) {
             int vdx = 0, vdz = 0;
             if (!pickTrackStep(world, c.pos, tx, tz, vdx, vdz)) { c.speed = 0.0f; return; }
-            if (sgn > 0) { c.dirX = float(vdx); c.dirZ = float(vdz); }
+            if (sgn > 0) { c.dirX = float(vdx); c.dirZ = float(vdz); cartYawFromDir(c.dirX, c.dirZ, c.yaw); } // t737：起步重选向（含拐角格起步）→ 车头同步
             tx = float(vdx); tz = float(vdz);
         }
     }
@@ -365,7 +380,7 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
                 c.speed = 0.0f; // 轨尽头 → 停（速度清零；正行 W 再推也停，须反推 / 上轨延伸）
                 break;
             }
-            if (sgn > 0) { c.dirX = float(ndx); c.dirZ = float(ndz); } // 正行跨格 → 车头同步新连接向（转弯）
+            if (sgn > 0) { c.dirX = float(ndx); c.dirZ = float(ndz); cartYawFromDir(c.dirX, c.dirZ, c.yaw); } // t737：正行跨格 → 车头同步新连接向（空车过弯也转 —— 骑乘 tick 末尾另有同公式重算，幂等）
             tx = float(ndx); tz = float(ndz); // 行进方向继续（倒行沿新连接向退行 —— 拐角倒车自动过弯）
         }
     }

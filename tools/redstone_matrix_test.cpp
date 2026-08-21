@@ -4,13 +4,17 @@
 //   动机（t740）：用户实测「红石火把 / 红石粉不能激活 TNT」而静态核对链路完整 —— 本测试把整条
 //   World 层电力链（setBlock→notePowerWrite→m_powerDirty→tickRedstone→recomputePowerLocal→信号/state）
 //   在真实对象上跑通，断点直接暴露为 FAIL 行；同时产出「源×接收器」矩阵核对表（commit message 引用）。
-//   分层（PLAN §2）：仅 Core+World，不依赖 Game/Entities/QML —— 消费端（firePowerTnt 等）不在本测试
-//   范围（呈现层桥接由 Main.qml 静态核对）。运行：build/redstone_matrix_test.exe，全过 exit 0。
+//   分层（PLAN §2）：Core+World 为主；t737 环线探针附加 World 层 mesher（partialblockgeometry）与
+//   Entities 层 MinecartManager 源码直编（两者向下只依赖 Core+World，不引入 Game/QML）。
+//   运行：build/redstone_matrix_test.exe，全过 exit 0。
 #include <QCoreApplication>
 #include <QDebug>
+#include <cmath>
 
 #include "blockregistry.h"
 #include "world.h"
+#include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
+#include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
 
 namespace {
 
@@ -543,6 +547,173 @@ int main(int argc, char *argv[])
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| rail support-drop on mine/blast/tnt-prime for all 3 kinds (t733)";
+    }
+
+    // P11 t737 铁轨环线探针（贴图象限 + 矿车绕圈）：铺 3×3 环（8 格轨、4 拐角）→
+    //   (a) 连接位断言：四拐角 state 恰为各自两邻臂位（railConnections 权威实算）；
+    //   (b) 象限断言：每拐角经 BlockRegistry::railCornerArms（连接位→两臂单一权威）出臂向 →
+    //       PartialBlockGeometry::append（mesher 同源直调）产出的拐角 quad 的贴图肘角 (u=0,v=0) 必落
+    //       (ex,ez)（出口臂贴 x 臂边 / 入口臂贴 z 臂边）—— t737 修正前四象限 v↔z 全反（左转显右转贴图）；
+    //   (c) 骑乘绕圈：上车 + 持续 W（wish 动态随行进向）→ 车必须留在环 footprint、四拐角逐一过心、
+    //       每拐角进/出向垂直（真转弯非直行穿出）、Y 钉轨面；
+    //   (d) 空车绕圈：玩家「追着推」（静止即续推）→ 同 footprint / 转弯断言 + 车头 yaw 覆盖全部
+    //       4 基数向（t737：stepCartAlongRail 过弯更新 yaw —— 旧版空车过弯车头不转）。
+    {
+        const auto [x0, z0] = nextSlot();
+        const int cx = x0 + 1, cz = z0 + 1; // 环心（环 = 心外 8 格）
+        const auto isRing = [&](int x, int z) {
+            return std::abs(x - cx) <= 1 && std::abs(z - cz) <= 1 && (x != cx || z != cz);
+        };
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                if (dx != 0 || dz != 0)
+                    w.setBlock(cx + dx, kRigY, cz + dz, BR::Rail, 0);
+        // (a)+(b) 四拐角：NW=(cx-1,cz-1) 等；期望 con = 两邻臂位组合。
+        const struct { int x, z; quint8 wantCon; } corners[4] = {
+            { cx - 1, cz - 1, quint8(BR::RailConnPx | BR::RailConnPz) }, // 东+南邻
+            { cx + 1, cz - 1, quint8(BR::RailConnNx | BR::RailConnPz) }, // 西+南邻
+            { cx - 1, cz + 1, quint8(BR::RailConnPx | BR::RailConnNz) }, // 东+北邻
+            { cx + 1, cz + 1, quint8(BR::RailConnNx | BR::RailConnNz) }, // 西+北邻
+        };
+        bool ok = true;
+        for (const auto &c : corners) {
+            const quint8 con = quint8(w.stateAt(c.x, kRigY, c.z) & 0x0F);
+            if (con != c.wantCon) {
+                qInfo().noquote() << "  corner" << c.x << kRigY << c.z << "con" << int(con)
+                                  << "expect" << int(c.wantCon);
+                ok = false;
+                continue;
+            }
+            int axd = 0, azd = 0;
+            if (!BR::railCornerArms(con, axd, azd)) { ok = false; continue; }
+            // mesher 同源直调：零邻居 ctx（railDelta 缺省 INT_MIN → 平拐角），归一 UV 空间验象限。
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = 0; // Rail case 只读 railDelta*（缺省 INT_MIN 平拐角）
+            const float tileW = 1.0f / 16.0f;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::Rail, con, lctx, nctx,
+                                         tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            const float ex = (axd > 0) ? 1.0f : 0.0f; // 出口臂贴的 x 边
+            const float ez = (azd > 0) ? 1.0f : 0.0f; // 入口臂贴的 z 边
+            bool elbow = false, diag = false;
+            for (const Vtx &v : verts) {
+                const float uu = (v.u - 136.0f * tileW) / tileW; // 拐角瓦片 UV 归一 [0,1]
+                if (uu < 0.25f && v.v < 0.25f
+                    && std::fabs(v.x - ex) < 1e-4f && std::fabs(v.z - ez) < 1e-4f) elbow = true;
+                if (uu > 0.75f && v.v > 0.75f
+                    && std::fabs(v.x - (1.0f - ex)) < 1e-4f && std::fabs(v.z - (1.0f - ez)) < 1e-4f) diag = true;
+            }
+            if (!elbow || !diag) {
+                qInfo().noquote() << "  corner quadrant wrong at" << c.x << c.z
+                                  << "arms" << axd << azd << "elbow" << elbow << "diag" << diag;
+                ok = false;
+            }
+        }
+        // 环上直格应是对向 2 位（EW）直轨形态（拐角规则不外溢到边格）。
+        if (quint8(w.stateAt(cx, kRigY, cz - 1) & 0x0F) != quint8(BR::RailConnPx | BR::RailConnNx)) ok = false;
+        // ── 通用绕圈跑法（骑乘 / 空车共用断言壳）──
+        const float rideH = 0.225f; // kCartRideH（MinecartManager 私有常量的文档值：轨格 cell 底 + 1/16 板 + 车底偏移）
+        const int kTicks = 2400;    // 0.016s × 2400 ≈ 38.4s 仿真：骑乘 ~8 格/s 多圈 / 空车 4 格/s 续推多圈
+        bool seenYaw[4] = { false, false, false, false }; // 空车过弯 yaw 基数覆盖（0/90/180/270）
+        const auto runLaps = [&](MinecartManager &carts, int cartIdx, bool ridden) {
+            QVector3D prev = carts.posAt(cartIdx);
+            float wishX = 1.0f, wishZ = 0.0f; // 初始沿 spawn 定向（北边中点格 EW 直轨 → +X）
+            int lastBx = int(std::floor(prev.x())), lastBz = int(std::floor(prev.z()));
+            int inDx = 1, inDz = 0; // 进入当前格的方向（spawn 格起步向 +X）
+            double pathLen = 0.0;
+            int cornerVisits = 0, turns = 0;
+            for (int t = 0; t < kTicks; ++t) {
+                QVector3D cp;
+                if (ridden) {
+                    carts.tickRiddenCart(0.016, &w, wishX, wishZ, cp);
+                } else {
+                    carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着车：静止即续推（滑行中被速度闸门跳过）
+                    carts.tickPushedCarts(0.016, &w);
+                    cp = carts.posAt(cartIdx);
+                }
+                const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
+                pathLen += std::sqrt(double(ddx) * ddx + double(ddz) * ddz);
+                const float dl = std::sqrt(ddx * ddx + ddz * ddz);
+                if (dl > 1e-4f) { wishX = ddx / dl; wishZ = ddz / dl; } // wish 动态随行进向（玩家随车头朝前）
+                if (!ridden) {
+                    // 过弯车头基数断言（t737：stepCartAlongRail 重选向时同步 yaw；四舍五入吸收 FP 尾差）
+                    const int yb = int(std::lround(carts.yawAt(cartIdx))) % 360;
+                    const int ybucket = (yb == 0) ? 0 : (yb == 90) ? 1 : (yb == 180) ? 2 : (yb == 270) ? 3 : -1;
+                    if (ybucket >= 0) seenYaw[ybucket] = true;
+                }
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                if (!isRing(bx, bz)) {
+                    qInfo().noquote() << "  cart left ring at tick" << t << "pos" << cp;
+                    return false;
+                }
+                if (std::fabs(cp.y() - (kRigY + rideH)) > 0.01f) {
+                    qInfo().noquote() << "  cart off rail surface at tick" << t << "y" << cp.y();
+                    return false;
+                }
+                if (bx != lastBx || bz != lastBz) {
+                    const int ndx = bx - lastBx, ndz = bz - lastBz;
+                    if (std::abs(ndx) + std::abs(ndz) != 1) { // 跨格必单位轴对齐（一步一格）
+                        qInfo().noquote() << "  non-adjacent cell jump at tick" << t;
+                        return false;
+                    }
+                    const bool wasCorner = (std::abs(lastBx - cx) == 1 && std::abs(lastBz - cz) == 1);
+                    if (wasCorner) {
+                        if (ndx * inDx + ndz * inDz != 0) { // 出拐角必垂直进向（真转弯，非直行穿出）
+                            qInfo().noquote() << "  no turn at corner" << lastBx << lastBz
+                                              << "in" << inDx << inDz << "out" << ndx << ndz;
+                            return false;
+                        }
+                        ++turns;
+                    } else if (ndx != inDx || ndz != inDz) { // 直格不跑偏
+                        qInfo().noquote() << "  drift on straight at" << lastBx << lastBz;
+                        return false;
+                    }
+                    inDx = ndx; inDz = ndz;
+                    lastBx = bx; lastBz = bz;
+                }
+                for (const auto &c : corners) {
+                    if (std::fabs(cp.x() - (c.x + 0.5f)) < 0.2f && std::fabs(cp.z() - (c.z + 0.5f)) < 0.2f) {
+                        ++cornerVisits; // 过心采样（tick 步长 0.13 内必有一次距心 <0.2）
+                        break;
+                    }
+                }
+                prev = cp;
+            }
+            // 门槛按驱动方式分档：骑乘 8 格/s 巡航 ~8 圈；空车 4 格/s 续推（每推 ~2 格）~3.5 圈。
+            const double minPath = ridden ? 40.0 : 20.0;
+            const int minVisits = ridden ? 12 : 8;
+            const int minTurns = ridden ? 8 : 6;
+            qInfo().noquote() << "  laps ridden=" << ridden << "pathLen" << pathLen
+                              << "cornerVisits" << cornerVisits << "turns" << turns;
+            return pathLen > minPath && cornerVisits >= minVisits && turns >= minTurns;
+        };
+        // (c) 骑乘绕圈
+        MinecartManager carts;
+        carts.spawnCart(cx, kRigY, cz - 1, &w); // 北边中点格（EW 直轨 → spawn 定向 +X）
+        const QVector3D mountOrigin(float(cx) + 0.5f, float(kRigY) + 2.0f, float(cz - 1) + 0.5f);
+        if (!carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f)) ok = false;
+        ok = ok && runLaps(carts, 0, true);
+        // (d) 空车绕圈（销毁骑乘车 → 原格重生空车 → 续推绕圈 + yaw 基数覆盖断言）。
+        //   slot-reuse LIFO：销毁 0 号槽后重生车仍落 0 号槽（count() 恒 1）→ cartIdx 恒 0。
+        if (!carts.hitCartFromRay(QVector3D(carts.posAt(0).x(), float(kRigY) + 2.0f, carts.posAt(0).z()),
+                                  QVector3D(0, -1, 0), 4.0f, &w, true)) ok = false;
+        carts.spawnCart(cx, kRigY, cz - 1, &w);
+        ok = ok && runLaps(carts, 0, false);
+        if (!(seenYaw[0] && seenYaw[1] && seenYaw[2] && seenYaw[3])) {
+            qInfo().noquote() << "  empty-cart yaw did not cover 4 cardinals:"
+                              << seenYaw[0] << seenYaw[1] << seenYaw[2] << seenYaw[3];
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| rail loop: corner quadrants + ridden/empty cart orbit with turning + yaw (t737)";
+        // 清场
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(cx + dx, kRigY, cz + dz, BR::Air);
+        tickN(w, 2);
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

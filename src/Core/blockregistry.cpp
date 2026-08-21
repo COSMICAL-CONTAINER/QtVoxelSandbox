@@ -2105,6 +2105,18 @@ int BlockRegistry::railProbeDelta(const RailProbe &p)
     return INT_MIN;
 }
 
+// t737 铁轨拐角「连接位 → 两臂走向」（单一权威，见 blockregistry.h 头注释）：con 低 4 位恰 1 X + 1 Z 位
+//   → 两臂符号；其余形态 false。纯函数无副作用，mesher 象限映射与矿车过弯核对两侧同源消费。
+bool BlockRegistry::railCornerArms(quint8 con, int &outXD, int &outZD)
+{
+    const bool cpx = (con & RailConnPx) != 0, cnx = (con & RailConnNx) != 0;
+    const bool cpz = (con & RailConnPz) != 0, cnz = (con & RailConnNz) != 0;
+    if (int(cpx) + int(cnx) != 1 || int(cpz) + int(cnz) != 1) return false; // 0/对向/十字 → 非拐角
+    outXD = cpx ? 1 : -1;
+    outZD = cpz ? 1 : -1;
+    return true;
+}
+
 // t225 箱子前面（锁面）所朝 Face（state 低 2 位解码，与 horizontalFacing 同源 0=+X 1=-X 2=+Z 3=-Z）。
 //   越界高位忽略（& 3）；mesher 据此把 chest_front 贴到对应面。无需「兜底」分支 —— 低 2 位四值全合法。
 BlockRegistry::Face BlockRegistry::chestFrontFace(quint8 state)

@@ -1940,6 +1940,14 @@ public:
     //   注：**只抬不掏**（渲染约定）——本格 quad 端边抬高量 = max(delta,0)×权重，delta≤0 不拉低（坡由低端
     //   轨自己画，高端平铺，避免边界双重几何；见 partialblockgeometry.h RailDelta 注释）。
     static int railProbeDelta(const RailProbe &p);
+    // t737 铁轨拐角「连接位 → 两臂走向」单一权威：con 低 4 位恰为 1 X 臂 + 1 Z 臂（拐角形态，railConnections
+    //   规则①产物）→ 返回 X 臂向 outXD ∈ {+1,-1} 与 Z 臂向 outZD ∈ {+1,-1}，true；其余形态（0 / 对向直 /
+    //   十字）→ false。**消费方**：(a) mesher 拐角贴图象限映射（PartialBlockGeometry Rail case —— 出口臂贴
+    //   x 臂边 / 入口臂贴 z 臂边的世界边由本函数给出）；(b) 矿车过弯走向核对（MinecartManager pickTrackStep
+    //   / 矩阵测试环线探针）。t737 前贴图象限翻在 partialblockgeometry 自查表、与物理各查各表 → 镜像错位
+    //   （用户实测「左转显右转贴图」）；统一到 Core 单表后，两侧语义同源，杜绝同类错位（机制等价 MC 1.0
+    //   rail corner 单一 metadata → 贴图 / 寻路同解码）。
+    static bool railCornerArms(quint8 con, int &outXD, int &outZD);
     // 由放置命中面外法线（指向玩家侧）推火把附着方向。torch target = hitBlock + normal，故 normal +X
     //   → 火把在 hitBlock 的 +X 侧 → 其支撑 = 火把的 -X 邻 = hitBlock（TorchOnNX）。ny>0 → TorchFloor。
     //   无法线（不应发生）→ TorchFloor 兜底。placeBlock 据此写 state；与 torchPlaced 信号传出的命中面

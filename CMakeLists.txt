@@ -746,6 +746,8 @@ endif()
 #   不链接主 exe），按「信号源×接收器」全组合驱动 tickRedstone 核对通电 / 降沿 + 场景探针
 #   （火把后放 TNT / 粉衰减 / 超距 / torch-on-block 斜下粉 / NOT 门）。tools/ 是开发期工具
 #   （同 build_*.py 资产生成脚本），不随主程序部署；全过 exit 0，FAIL 行 = 电力链断点直接暴露。
+#   t737 环线探针附加：World 层 mesher（partialblockgeometry —— 拐角象限断言同源直调）与
+#   Entities 层 MinecartManager（矿车绕圈；两者向下只依赖 Core+World，不引入 Game/QML）。
 add_executable(redstone_matrix_test
     tools/redstone_matrix_test.cpp
     src/Core/blockregistry.cpp
@@ -753,12 +755,16 @@ add_executable(redstone_matrix_test
     src/World/chunk.cpp
     src/World/chunkmanager.cpp
     src/World/world.cpp
+    src/World/partialblockgeometry.cpp
+    src/Entities/minecartmanager.cpp
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/World
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
 )
 target_link_libraries(redstone_matrix_test PRIVATE
     Qt6::Core
+    Qt6::Gui
     Qt6::Qml
 )

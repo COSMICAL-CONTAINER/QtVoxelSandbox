@@ -660,8 +660,13 @@ int PartialBlockGeometry::append(
         // 水平 quad 通用：BL→BR→TR→TL 四角（UV (0,0)(1,0)(1,1)(0,1)；pushCrossQuad 内部固定该映射）。
         //   NS（标准）：u→x、v→z —— (x,z) = (0,0)(1,0)(1,1)(0,1)。
         //   EW（旋转 90°）：u→z、v→x —— (x,z) = (0,0)(0,1)(1,1)(1,0)。
-        //   拐角镜像：以「南进西出」贴图为基准（tile 136 绘制语义：v=1 贴图底行 = 南入口侧、u=0 左列 = 西出口
-        //   侧；t620 已把 pack 右转弯贴图镜像成左转基准）。四象限经轴翻转映射，轨两端恰落两个连接向上。
+        //   t737 拐角象限**基准确认（图集像素级）**：tile 136（程序 build_rail.py 与 pack 镜像合成同构）的
+        //   **入口臂（纵段）在图底行半 = UV v≈0 半、出口臂（横段）在图左列半 = UV u≈0 半** —— 引擎 UV
+        //   v=1 采样图**顶**行（立方面 cv=dy：y=1 顶点 → v=1，草侧绿带在图顶行且渲染在面上沿 —— 既证事实，
+        //   flipV 默认）。t565/t666 旧注释按「v=1 底行=南入口」编码 → 四象限 v↔z 关系全反（每格显示其
+        //   南北镜像 = t737 用户报「左转显右转贴图、反之亦然」根因）。修正后两臂落边由
+        //   BlockRegistry::railCornerArms（连接位→两臂走向单一权威）给出：出口臂（u=0 列）贴 x 臂边、
+        //   入口臂（v=0 行）贴 z 臂边。
         const auto pushRailQuad = [&](float y0y, float y1y, float y2y, float y3y, int tileIdx,
                                       float ax0, float az0, float ax1, float az1,
                                       float ax2, float az2, float ax3, float az3) {
@@ -673,14 +678,20 @@ int PartialBlockGeometry::append(
                                       float ax2, float az2, float ax3, float az3) {
             pushRailQuad(yr, yr, yr, yr, tileIdx, ax0, az0, ax1, az1, ax2, az2, ax3, az3);
         };
+        // t737 拐角两臂走向先行解出（连接位→臂向单一权威；分支条件即其成功条件，防御失败则落直轨路径）。
+        int armXD = 0, armZD = 0;
+        const bool cornerArms = (!straightOnly && nConn == 2 && ((cpx || cnx) && (cpz || cnz)))
+                                && BlockRegistry::railCornerArms(con, armXD, armZD);
         if (!straightOnly && nConn >= 3) {
             // 十字 / T（3+ 连接）：tile 137 整片（T 以十字瓦片近似）。无坡。
             pushRailFlat(137, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
-        } else if (!straightOnly && nConn == 2 && ((cpx || cnx) && (cpz || cnz))) {
-            // 拐角（恰好 1 X + 1 Z 连接，仅普通轨）。tile 136 四象限映射（基准确认：tile 136 = 轨自南(+Z)进、
-            //   向西(-X)弯出；u 翻 = 东西镜像、v 翻 = 南北镜像、双翻 = 180°。验证表见 t666 commit 报告：
-            //     {+Z,-X}（南进→西出）基准无翻；{+Z,+X}（南进→东出）u 翻；{-Z,-X}（北进→西出）v 翻；
-            //     {-Z,+X}（北进→东出）双翻 —— 与既有 t565（已目测）四象限映射同构，t666 只重写形状选择）。
+        } else if (cornerArms) {
+            // 拐角（恰好 1 X + 1 Z 连接，仅普通轨）。tile 136 象限映射（t737 重写；基准确认见上方注释段）：
+            //   出口臂（贴图 u=0 左列半）须贴到 **x 臂边**（armXD<0 → x=0 / >0 → x=1）、入口臂（贴图 v=0
+            //   底行半）须贴到 **z 臂边**（armZD>0 → z=1 / <0 → z=0）—— 轨两臂恰落两个连接向的世界边。
+            //   旧表（t565/t666）按错误前提「v=1=南入口」把四象限的 v↔z 关系全编反（每格显示南北镜像），
+            //   t737 经图集像素实测 + 草侧绿带 v 朝向既证事实修正。四角 = p0..p3 ← UV (0,0)(1,0)(1,1)(0,1)：
+            //   p0=(ex,ez) 即 (u=0,v=0) 角 —— 出口边与入口边的交角（L 的肘角），p2 对角。
             //   t709 坡臂拐角（t666 拐角规则放宽后新增形态：下坡轨降到交界格再拐弯）：拐角 quad 沿**臂侧**
             //   抬升 —— 臂方向邻轨高 1（railProbeDelta +1）时该边整边抬高 1（同直轨 rise 约定「低格画坡」，
             //   高臂侧的臂轨不画坡 → 由本拐角格补齐连接高度，坡底拐弯轨面连续不悬空）。四角高度 = 该角触及的
@@ -698,10 +709,11 @@ int PartialBlockGeometry::append(
                 if (az == 1.0f) l += eS; // 南边（+Z 臂侧）
                 return l;
             };
-            if (cpz && cnx)       pushRailQuad(yr + armLift(0.f, 0.f), yr + armLift(1.f, 0.f), yr + armLift(1.f, 1.f), yr + armLift(0.f, 1.f), 136, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // 南→西
-            else if (cpz && cpx)  pushRailQuad(yr + armLift(1.f, 0.f), yr + armLift(0.f, 0.f), yr + armLift(0.f, 1.f), yr + armLift(1.f, 1.f), 136, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f); // 南→东
-            else if (cnz && cnx)  pushRailQuad(yr + armLift(0.f, 1.f), yr + armLift(1.f, 1.f), yr + armLift(1.f, 0.f), yr + armLift(0.f, 0.f), 136, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f); // 北→西
-            else                  pushRailQuad(yr + armLift(1.f, 1.f), yr + armLift(0.f, 1.f), yr + armLift(0.f, 0.f), yr + armLift(1.f, 0.f), 136, 1.f, 1.f, 0.f, 1.f, 0.f, 0.f, 1.f, 0.f); // 北→东
+            const float ex = (armXD > 0) ? 1.0f : 0.0f; // 出口臂世界边 x（贴图 u=0 列贴此边）
+            const float ez = (armZD > 0) ? 1.0f : 0.0f; // 入口臂世界边 z（贴图 v=0 行贴此边）
+            pushRailQuad(yr + armLift(ex, ez), yr + armLift(1.0f - ex, ez),
+                         yr + armLift(1.0f - ex, 1.0f - ez), yr + armLift(ex, 1.0f - ez),
+                         136, ex, ez, 1.0f - ex, ez, 1.0f - ex, 1.0f - ez, ex, 1.0f - ez);
         } else {
             // 直轨：EW（X 向连接，或 0 连接 + 轴偏好位 → 贴图旋转 90° u→z、v→x）；NS（Z 向连接 / 0 连接默认
             //   → 标准）。straightOnly 的拐角 / 十字连接位降级走「X 向优先」（t666 规则集②下不会产生，防御）。
