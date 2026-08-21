@@ -3794,7 +3794,8 @@ Window {
         //   + opacity:0.99：透明底不丢弃会被当不透明黑 → 图标坍黑块）。
         Texture {
             id: partialIconTex
-            source: hotbarVM.iconSourceForBlock(player.selectedBlock)
+            // t745 触碰 resourcePack.active → pack 开关即时换手持 2D 图标（双态路由见 iconSourceForBlock）。
+            source: { const _p = resourcePack.active; return _p >= 0 ? hotbarVM.iconSourceForBlock(player.selectedBlock) : "" }
             generateMipmaps: false
         }
 
@@ -5223,7 +5224,7 @@ Window {
                             opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                             baseColor: terrainLight(worldClock.skyLight)
                             baseColorMap: Texture {
-                                source: hotbarVM.iconSourceForBlock(entRoot.entId)   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同此（icon_*.png 透明底）；t496 床段返染色 bed 图标
+                                source: { const _p = resourcePack.active; return _p >= 0 ? hotbarVM.iconSourceForBlock(entRoot.entId) : "" }   // t440：cross 段（花/蘑菇/睡莲/树苗…）flat 图标同此（icon_*.png 透明底）；t496 床段返染色 bed 图标；t745 触碰 active → pack 开关即时刷
                                 generateMipmaps: false
                             }
                         }
@@ -10263,7 +10264,7 @@ Window {
                                         Image {
                                             anchors.fill: parent
                                             visible: !hotbarVM.isTool(modelData.iconId) && !hotbarVM.isMaterial(modelData.iconId)
-                                            source: hotbarVM.iconSourceForBlock(modelData.iconId)
+                                            source: { const _p = resourcePack.active; return _p >= 0 ? hotbarVM.iconSourceForBlock(modelData.iconId) : "" }
                                             fillMode: Image.PreserveAspectFit; smooth: true
                                         }
                                         ToolIcon {

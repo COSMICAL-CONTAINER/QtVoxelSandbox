@@ -232,6 +232,22 @@ public:
     //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。active=false / 无映射 / 文件缺 → ""。
     static QString blockItemIconSource(int blockId);
 
+    // t745 统一贴图原则（方块 item 图标 pack 化统一——「pack 启用 = 图标按 pack 贴图渲染，pack 关闭 =
+    //   回退程序原生」总纲机制）：从**当前合成图集**运行期渲染方块 item 图标 —— 任意启用 pack 通用（合成
+    //   图集本身就是「程序瓦片 + 任意 pack 覆盖 + tint/特判合成」的单一产物，不依赖本地参考包），机制同
+    //   playerSkinSource「运行期渲染 + AppLocalData 落盘缓存」。pack 关闭时合成图集退纯程序瓦片 → 调用方
+    //   传 requirePackContribution=false 可得**程序原生** dimetric 重渲（供 FROM_PACK 派生图标家族在 pack
+    //   关态回退程序观感——qrc icon_X.png 已被 t644/t676/t722/t742 批 pack 派生图覆盖，旧程序图未存 VCS）。
+    //   渲染形状按 BlockRegistry::def 泛化（ShapeFull/Slab/Stairs/Fence/Plate/Door/Trapdoor/SnowLayer +
+    //   仙人掌柱 / 附魔台矮盒 / 祭坛框 / 铁砧特型；cross / 贴地薄片 / 火把走 flat 2D 保留 alpha）。
+    //   requirePackContribution=true：pack 未实际覆盖该块可见面瓦片（合成 vs 程序图集逐像素比对）→ 返空串，
+    //   调用方回落手绘程序图标（Hotbar::iconSourceForBlock 回退链）。
+    //   产物缓存 voxelsandbox_rp_icon_<id>_r<rev>.png（文件名带 apply() revision → pack 切换后 QML Image 按
+    //   URL 变化重载）。红线 §9：渲染产物是运行期派生缓存（pack PNG + 程序图集 → 图标），**不进 qrc/VCS**
+    //   （区别于 t644 FROM_PACK「离线渲染派生图提交」先例——本机制全部运行期生成，盘上文件即缓存）。
+    //   分层（PLAN §2）：Core 只读 BlockRegistry 瓦片表 + 本地 pack，不依赖 Game/Renderer。
+    static QString blockAtlasIconSource(int blockId, bool requirePackContribution);
+
 signals:
     void activeChanged();   // active 或 atlasSource（revision）变（驱动 QML Texture 重载）
     void configChanged();   // enabled / packPath 变（驱动设置 UI 刷新；不立即重建图集）

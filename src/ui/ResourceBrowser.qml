@@ -26,7 +26,8 @@ import VoxelSandbox
 //
 // 复用既有渲染：方块预览的 BlockCube 几何与掉落实体 / 手持立方同一条已验证可见路径
 // （BlockCube + voxelAtlas + PrincipledMaterial.NoLighting）。图集 source 由 host 注入（resourcePack.atlasSource），
-// pack 切换即时刷新（file:// ↔ qrc:/）；网格图标走 hotbar.iconSourceForBlock（pack 启用时对 LapisOre / 床等映射内方块返 pack item 贴图；工作台 / 熔炉 t537 回退到 t492 二轮的 2D pack 图，pack 启用即覆盖 3D 立方体图标）。
+// pack 切换即时刷新（file:// ↔ qrc:/）；网格图标走 hotbar.iconSourceForBlock（t745 双态路由：pack 开 = 运行期
+//   pack 图集渲染 / 2D pack 立绘；pack 关 = 程序原生手绘或程序图集重渲）。
 //
 // 分层（PLAN §2）：本组件属 UI 呈现层，只读 Hotbar VM（ViewModel 读 BlockRegistry / ToolRegistry），
 // 不反向写栅格 / 槽位；3D 几何属 Renderer，向下依赖合规。零 MC 专名 / 资产（§9）。
@@ -506,7 +507,7 @@ Item {
                                                 Image {
                                                     anchors.fill: parent
                                                     visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
-                                                    // 触碰 packActive → pack 切换图标刷新（iconSourceForBlock 对 pack 映射内方块返 pack item 贴图；工作台 / 熔炉 t537 回退到 2D pack 图，pack 启用即覆盖 3D 立方体）。
+                                                    // 触碰 packActive → pack 切换图标刷新（t745 双态路由：pack 开 = 运行期 pack 图集渲染 / 2D pack 立绘；pack 关 = 程序原生）。
                                                     source: { const _r = root.packActive; return _r >= 0 ? (root.hotbar.iconSourceForBlock(modelData)) : "" }
                                                     fillMode: Image.PreserveAspectFit
                                                     smooth: true

@@ -176,6 +176,54 @@ const char *iconFileForBlock(quint8 id)
     }
 }
 
+// t745 FROM_PACK 派生图标家族：以下方块的 qrc icon_X.png 由 tools/build_cube_icons.py --from-pack 用
+//   pack 贴图离线烘焙（t644/t675/t676/t722/t742 批），被覆盖前的程序版图标未存 VCS —— pack 关闭时直接
+//   用它们会显示 pack 风格，违反「pack 关 = 程序原生」总纲。处理：此类方块在 pack 关 / pack 未覆盖其贴图
+//   时，改由 ResourcePackManager::blockAtlasIconSource(id, false) 从**程序图集**运行期重渲程序原生
+//   dimetric / flat 图标（与被覆盖前的程序图标同贴图同投影观感，且随程序图集更新自动同步——比恢复
+//   git 历史旧图更稳）；渲染失败兜底 = 退显当前 qrc 图（pack 风格，可接受降级）。
+//   叶（Leaves/SpruceLeaves）刻意不在列：t746 专任务重做叶图标（2D tint 路径 + 3D 化），本任务不动。
+bool isPackDerivedIconFamily(quint8 id)
+{
+    switch (id) {
+    case BlockRegistry::CraftingTable:   // t676 cube_front
+    case BlockRegistry::Furnace:         // t676 cube_front
+    case BlockRegistry::TntBlock:        // t676 cube_front
+    case BlockRegistry::Dispenser:      // t676 cube_front
+    case BlockRegistry::Dropper:         // t676 cube_front
+    case BlockRegistry::Pumpkin:         // t675 cube_front
+    case BlockRegistry::EnchantingTable: // t644 table（0.75 矮盒）
+    case BlockRegistry::EndPortal:       // t644 frame
+    case BlockRegistry::Bookshelf:       // t644 cube
+    case BlockRegistry::Rail:            // t644 flat
+    case BlockRegistry::GoldenRail:      // t644 flat
+    case BlockRegistry::DetectorRail:    // t644 flat
+    case BlockRegistry::RedstoneTorch:   // t644 flat
+    case BlockRegistry::RedstoneLamp:    // t644 cube（off 态）
+    case BlockRegistry::IronBlock:       // t644 cube（矿物存储块族）
+    case BlockRegistry::CoalBlock:
+    case BlockRegistry::LapisBlock:
+    case BlockRegistry::DiamondBlock:
+    case BlockRegistry::GoldBlock:
+    case BlockRegistry::RedstoneBlock:
+    case BlockRegistry::WoodDoor:        // t644 door（两格薄板）
+    case BlockRegistry::SpruceDoor:      // t644 door
+    case BlockRegistry::IronDoor:        // t722 door
+    case BlockRegistry::IronTrapdoor:    // t742 trapdoor
+    case BlockRegistry::WoodSlab:        // t714 partial（pack 木纹重烘）
+    case BlockRegistry::WoodStairs:      // t714 partial
+    case BlockRegistry::WoodFence:       // t714 partial
+    case BlockRegistry::SpruceSlab:      // t714 partial
+    case BlockRegistry::SpruceFence:     // t714 partial
+    case BlockRegistry::StonePressurePlate: // t644 plate
+    case BlockRegistry::IronPressurePlate:  // t644 plate
+    case BlockRegistry::GoldPressurePlate:  // t644 plate
+        return true;
+    default:
+        return false;
+    }
+}
+
 // 物品 id 段：方块段 0..BlockRegistry::Count-1；工具段 id>=0x100（t33，不可堆叠）；
 // 材料段 id>=0x200（t50 合成产物：木棒等，可堆叠 64）。
 constexpr int kToolIdBase     = 0x100;
@@ -639,12 +687,15 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Cobble),        int(BlockRegistry::Log),   int(BlockRegistry::Planks),
              int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
              int(BlockRegistry::CraftingTable), int(BlockRegistry::Furnace),
-             int(BlockRegistry::CoalOre),       int(BlockRegistry::IronOre),
-             int(BlockRegistry::DiamondOre),                                   // t279 钻矿石（散布于 stone 深层 y∈[5,40]、需铁镐采掘；掉钻石材料）
+             // t745 矿石段重排：煤 → 铁 → 铜 → 金 → 红石 → 青金石 → 钻石（用户点名顺序——旧序煤铁钻铜金
+             //   青红把钻石插在第三位，与「矿物价值递进」直觉相悖；七矿连排同段，逐行注释保留各自机制说明）。
+             int(BlockRegistry::CoalOre),       // t84 煤矿石
+             int(BlockRegistry::IronOre),       // t84 铁矿石
              int(BlockRegistry::CopperOre),                                    // t308 铜矿石（散布于 stone 浅中层 y∈[5,45]、需石镐采掘；掉铜原矿→熔炉烧铜锭）
              int(BlockRegistry::GoldOre),                                      // t308 金矿石（散布于 stone 深层 y∈[5,25]、需铁镐采掘；掉金原矿→熔炉烧金锭）
-             int(BlockRegistry::LapisOre),                                     // t471 青金矿石（散布于 stone 深层 y∈[5,31]、需石镐采掘；掉青金石物品）
              int(BlockRegistry::RedstoneOre),                                  // t569 红石矿石（散布于 stone 最深层 y∈[5,16]、需铁镐采掘；掉 4 红石粉；走过/挖掘点亮微弱红光）
+             int(BlockRegistry::LapisOre),                                     // t471 青金矿石（散布于 stone 深层 y∈[5,31]、需石镐采掘；掉青金石物品）
+             int(BlockRegistry::DiamondOre),                                   // t279 钻矿石（散布于 stone 深层 y∈[5,40]、需铁镐采掘；掉钻石材料）
              int(BlockRegistry::Bedrock),                                      // misc 二轮 基岩（机制等价 MC 创造可取 bedrock 物品；生存不可破 hardness=-1，创造可放置/取用，便于建筑/测试底层封顶）
              int(BlockRegistry::Torch),
              int(BlockRegistry::Chest),                                    // t173 箱子（右键开 27 槽）
@@ -795,14 +846,33 @@ QString Hotbar::iconSourceForBlock(int blockId) const
     // （ToolIcon / 材料图标 Canvas，§9a）→ 返空串，调用方据 isTool / isMaterial 切到对应自绘 delegate。
     // 越界先判再 cast，防 quint8 截断别名。
     if (blockId <= 0 || blockId >= int(BlockRegistry::Count)) return QString();
-    // t456 pack item 图标覆盖：pack 启用且该方块在「方块→pack item/前贴图」映射内（t676 后剩 16 色床
-    //   {32..39,78..85}→bed.png 染色 + 木梯 Ladder=62→ladder.png + 门 / 铁轨族；工作台 / 熔炉 / 发射器 /
-    //   投掷器已撤出 —— 用户点名升 cube per-face 3D 立方体图标，保留 2D front 覆盖会让 3D 永不显）、
-    //   包内有 PNG 时，返 pack 的 file:// URL；pack 关 / 无映射 / 包内缺 → 落下方程序生成 icon_<block>.png。
-    //   仅 2D 物品图标路径（hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径，不调本函数，故不受影响。
-    const QString packSrc = ResourcePackManager::blockItemIconSource(blockId);
-    if (!packSrc.isEmpty())
-        return packSrc;
+    // t456 既有 2D pack item 立绘覆盖（床 16 色 / 木梯 / 门 / 铁轨 / 红石火把 / 叶）：pack 启用且包内有
+    //   item/前贴图 PNG → 直接用（这些方块的物品形态本就是 2D 立绘或染色模板，不走 3D dimetric）。
+    //   仅 2D 物品图标路径（hotbar/背包/光标）消费；3D 手持立方 / 掉落物走 BlockCube+voxelAtlas 另一路径。
+    const QString pack2D = ResourcePackManager::blockItemIconSource(blockId);
+    if (!pack2D.isEmpty())
+        return pack2D;
+    // t745 统一贴图原则回退链（「pack 启用 = 图标按 pack 贴图渲染；pack 关闭 = 程序原生」总纲）：
+    //   ① pack 启用且 pack 实际覆盖该块可见面贴图（合成图集 vs 程序图集逐像素比对）→
+    //     blockAtlasIconSource 从合成图集运行期渲染 dimetric/flat 图标 —— **任意 pack 通用**（非仅本地
+    //     参考包）；草/泥土/石头/圆石/原木/木板/七矿/机关盒/异形半方块等全量在此路径统一。
+    //   ② FROM_PACK 派生家族（qrc icon_X.png 是 pack 风格烘焙图）→ blockAtlasIconSource(id,false) 从
+    //     程序图集运行期重渲**程序原生**图标（pack 关 / pack 开但未覆盖该块两态同路径；渲染失败兜底
+    //     退显当前 qrc pack 风格图 = 可接受降级）。
+    //   ③ qrc 手绘程序图标 icon_X.png：非派生家族的默认态 —— pack 关 = 程序原生恒成立；pack 开但未
+    //     覆盖该块贴图也走此（pack 没提供贴图就没有「pack 观感」可显，程序原生即正确）。
+    // QML 侧各消费点绑定已统一触碰 resourcePack.active（NOTIFY activeChanged）→ pack 开关即时刷新。
+    if (ResourcePackManager::packActive()) {
+        const QString packRendered =
+                ResourcePackManager::blockAtlasIconSource(blockId, /*requirePackContribution=*/true);
+        if (!packRendered.isEmpty())
+            return packRendered;
+    }
+    if (isPackDerivedIconFamily(quint8(blockId))) {
+        const QString nativeRendered = ResourcePackManager::blockAtlasIconSource(blockId, false);
+        if (!nativeRendered.isEmpty())
+            return nativeRendered;
+    }
     const char *file = iconFileForBlock(quint8(blockId));
     if (!file) return QString();
     return QStringLiteral("qrc:/textures/") + QString::fromLatin1(file);

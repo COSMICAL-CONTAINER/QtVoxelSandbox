@@ -1,5 +1,6 @@
 #include "resourcepackmanager.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 
@@ -86,6 +87,12 @@ struct BuiltState {
     //   pack 叶贴图（oak_leaves / spruce_leaves）是灰度可染色 base，首次查询按叶 tint 重染（同床 retint 模式）
     //   落盘 voxelsandbox_rp_leaf_<id>.png，后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
     QHash<int, QString> leafIconFiles;
+    // t745 统一贴图原则：方块 item 图标运行期 pack 渲染缓存。blockId→落盘的 dimetric/flat 图标 file:// 路径
+    //   （voxelsandbox_rp_icon_<id>_r<rev>.png，文件名带 revision —— apply() 重建后 URL 变 → QML Image 重载，
+    //   规避「同路径落盘新图但 Image 不重读」的陈旧缓存）。首次查询渲染 + 落盘，后续命中 O(1)。
+    //   apply() 重建时清空（pack 切换 / 重解析 → 重渲）。红线 §9：渲染产物源自启用 pack 的贴图（运行期读
+    //   本地 gitignored 包 + 程序图集），是派生缓存非提交资产，不进 qrc/VCS。
+    QHash<int, QString> blockIconFiles;
     // t585 指南针/钟动画帧序列状态：帧文件 stem（"compass"/"clock"）→（帧数，上次帧 index）。帧数在
     //   ensureBuiltLocked 探测 item 目录实际存在的 <stem>_NN.png 数（demo 包实测 compass 32 / clock 64；
     //   用 QHash 因未来可扩别的逐帧物品）。lastIndex 供 updateAnimatedItemState 检出「帧真变」才递增
@@ -1052,6 +1059,9 @@ const QList<QPair<int, QStringList>> &blockItemIconMap()
         //   熔炉撤出理由 —— 保留 2D front 覆盖会让程序 3D 立方体图标永不显）。
         { 19,  { QStringLiteral("oak_door.png"),                       QStringLiteral("door_wood_lower.png") } },  // WoodDoor 木板门
         { 89,  { QStringLiteral("spruce_door.png"),                    QStringLiteral("door_spruce_lower.png") } }, // SpruceDoor 云杉门
+        // t745 铁门补 2D pack 立绘（同木门/云杉门模式：item 目录优先、block 老命名 HD 兜底；此前铁门
+        //   只能恒显 FROM_PACK 烘焙 3D 薄板，pack 关态无程序回退 —— 现纳入双态：pack 关走程序图集重渲）。
+        { 135, { QStringLiteral("iron_door.png"),                      QStringLiteral("door_iron_lower.png") } }, // IronDoor 铁门
         { 103, { QStringLiteral("rail_normal.png") } },               // Rail 铁轨（block 兜底：item 目录无 rail 图标）
         // t638 铁轨家族 + 红石火把 pack 2D item 图标（item 目录无 rail 族图标（demo 包实测）→ block 直轨 2D
         //   图兜底；红石火把 item 目录同样无 → block/redstone_torch_on.png 兜底（常亮态 2D 火把立绘））。
@@ -1674,6 +1684,7 @@ void ensureBuiltLocked()
     s.leatherIconFiles.clear(); // R19 B1 reset 皮革护甲染色图标缓存（pack 切换 / 重解析 → 重染）
     s.copperIconFiles.clear();  // t588 reset 铜物品染色图标缓存（pack 切换 / 重解析 → 重染）
     s.leafIconFiles.clear();    // t714 reset 叶子染色图标缓存（pack 切换 / 重解析 → 重染）
+    s.blockIconFiles.clear();   // t745 reset 方块 item 图标运行期渲染缓存（pack 切换 / 重解析 → 重渲）
     s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
@@ -2358,6 +2369,333 @@ QString ResourcePackManager::blockItemIconSource(int blockId)
     }
 
     return QStringLiteral("file:///") + foundPath;
+}
+
+// ───────────────────────── t745 方块 item 图标运行期 pack 渲染（统一贴图原则总纲机制） ─────────────────────────
+// 机制：从**当前合成图集**运行期渲染方块 item 图标（dimetric 立方 / partial 子盒投影 / flat 2D）。
+//   合成图集 = 程序图集 + 任意启用 pack 的贴图覆盖 + tint / 特判合成（ensureBuiltLocked 单一产物）→ 本
+//   渲染器天然「任意 pack 通用」（不依赖本地参考包），pack 关闭时图集退纯程序瓦片 → 渲染结果即程序原生。
+//   产物落盘 AppLocalData 缓存（playerSkinSource / 皮革染色落盘模式），文件名带 apply() revision →
+//   pack 切换后 URL 变化驱动 QML Image 重载。
+// 红线 §9：图标是运行期派生缓存（pack PNG + 程序图集 → 渲染产物），**不进 qrc / VCS**（与 t644 提交的
+//   FROM_PACK 派生图标不同——那批是「离线 3D 渲染派生图入 VCS」先例；本机制运行期生成，盘上文件即缓存）。
+namespace {
+
+// t745 dimetric 投影常量（128×128 画布）。X 轴 → 屏幕 (+a,+b)（右下）/ Z 轴 → (-a,+b)（左下）/ Y 轴 →
+//   (0,-2b)（上）；a:b = 2:1 等距。观察者在 (+X,+Y,+Z) 方向 → 可见面 = +Y 顶面（全亮）/ +Z 左前面（0.80）/
+//   +X 右面（0.62）—— 与既有 icon_*.png 顶亮 / 左中 / 右暗的观感约定一致。
+constexpr qreal kIconSize = 128.0;
+constexpr qreal kIsoA = 58.0;
+constexpr qreal kIsoB = 29.0;
+constexpr qreal kIsoCx = 64.0;
+constexpr qreal kIsoCy = 64.0; // 顶点 (0,1,0) 投影到 y = 64 - 58 = 6；底前角 (1,0,1) 到 y = 64 + 58 = 122
+
+QPointF isoProject(qreal x, qreal y, qreal z)
+{
+    return QPointF(kIsoCx + kIsoA * (x - z), kIsoCy + kIsoB * (x + z) - 2.0 * kIsoB * y);
+}
+
+// 图标子盒：方块内轴对齐盒（cell-local [0,1]³）+ 三个可见面各用的图集瓦片。
+struct AtlasIconBox {
+    qreal x0, y0, z0, x1, y1, z1;
+    int topTile, sideTile, frontTile;
+};
+
+// 图标规格：flat（cross / 贴地薄片立绘，瓦片原样放大保留 alpha）或 boxes（dimetric 子盒投影）。
+struct AtlasIconSpec {
+    bool valid = false;
+    bool flat = false;
+    int flatTile = -1;
+    QList<AtlasIconBox> boxes; // 已按「远 → 近」深度序（painter 直接依序绘制）
+};
+
+// 方块 id → 图标形状规格。瓦片一律取 BlockRegistry::def 单一权威（topTile/sideTile/frontTile/bottomTile），
+//   不另持映射副本；几何按 def.shape 泛化（整立方 / 台阶 / 楼梯 / 栅栏 / 压力板 / 门 / 活板门 / 积雪层）+
+//   少数放置态特型方块（仙人掌细柱 / 附魔台矮盒 / 祭坛框 / 铁砧三段）显式覆盖。床（ShapeBed）与
+//   RedstoneDust 不进（床走 blockItemIconMap 2D pack 床图 / 手绘；红石粉瓦片未映射 pack 且已有手绘 flat 图）。
+AtlasIconSpec atlasIconSpecForBlock(int blockId)
+{
+    AtlasIconSpec spec;
+    if (blockId <= 0 || blockId >= int(BlockRegistry::Count))
+        return spec;
+    const BlockRegistry::BlockDef &d = BlockRegistry::def(quint8(blockId));
+
+    // ① flat 2D：cross 族 / 贴地薄片 / 火把立绘（icon 观感 = 世界内 cross 立绘）。cross 族 def 六面同
+    //    瓦片 → topTile 即立绘；小麦作物 / 浆果丛 def 存阶段 0 基底瓦片 → 显成熟阶段瓦片（金黄麦穗 /
+    //    成熟红浆果一眼可辨；瓦片号与 tileFilenameMap 36/105 同源）。
+    const auto flatSpec = [&spec](int tile) {
+        spec.valid = true;
+        spec.flat = true;
+        spec.flatTile = tile;
+    };
+    switch (blockId) {
+    case BlockRegistry::TallGrass:
+    case BlockRegistry::DeadBush:
+    case BlockRegistry::Sapling:
+    case BlockRegistry::Cobweb:
+    case BlockRegistry::LilyPad:
+    case BlockRegistry::Mushroom:
+    case BlockRegistry::BrownMushroom:
+    case BlockRegistry::FlowerRed:
+    case BlockRegistry::FlowerYellow:
+    case BlockRegistry::FlowerBlue:
+    case BlockRegistry::FlowerWhite:
+    case BlockRegistry::Sugarcane:
+    case BlockRegistry::Torch:
+    case BlockRegistry::Lever:
+    case BlockRegistry::RedstoneTorch:
+    case BlockRegistry::Rail:
+    case BlockRegistry::GoldenRail:
+    case BlockRegistry::DetectorRail:
+        flatSpec(d.topTile);
+        return spec;
+    case BlockRegistry::WheatCrop:
+        flatSpec(36); // wheat_stage_7 成熟阶段瓦片（tileFilenameMap 36 同源）
+        return spec;
+    case BlockRegistry::SweetBerryBush:
+        flatSpec(105); // sweet_berry_bush_stage2 成熟阶段瓦片（103..105 = 阶段 0..2）
+        return spec;
+    default:
+        break;
+    }
+
+    // ② 盒模式特型覆盖（放置态异形几何，PartialBlockGeometry 同款形状）。
+    const auto addBox = [&spec](qreal x0, qreal y0, qreal z0, qreal x1, qreal y1, qreal z1,
+                                int top, int side, int front) {
+        spec.boxes.append(AtlasIconBox{x0, y0, z0, x1, y1, z1, top, side, front});
+    };
+    const int topT = d.topTile, sideT = d.sideTile, frontT = d.frontTile;
+    switch (blockId) {
+    case BlockRegistry::Cactus: // 放置态 14/16 细柱（PartialBlockGeometry Cactus case；顶面 topTile 余 side）
+        addBox(0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375, topT, sideT, sideT);
+        break;
+    case BlockRegistry::EnchantingTable: // 0.75 矮盒（侧瓦片已由图集合成裁顶部 0.25 空白）
+        addBox(0.0, 0.0, 0.0, 1.0, 0.75, 1.0, topT, sideT, sideT);
+        break;
+    case BlockRegistry::EndPortal: // 祭坛框 13/16 高（endframe 化；顶瓦片含未放眼态合成）
+        addBox(0.0, 0.0, 0.0, 1.0, 0.8125, 1.0, topT, sideT, sideT);
+        break;
+    case BlockRegistry::Anvil: // 铁砧三段：底座 + 束腰 + 砧面台（顶瓦片 = 各阶段砧面 anvil_top*）
+    case BlockRegistry::AnvilChipped:
+    case BlockRegistry::AnvilDamaged:
+        addBox(0.125, 0.0, 0.3125, 0.875, 0.25, 0.6875, sideT, sideT, sideT);  // 底座
+        addBox(0.375, 0.25, 0.4375, 0.625, 0.625, 0.5625, sideT, sideT, sideT); // 束腰
+        addBox(0.1875, 0.625, 0.25, 0.8125, 0.8125, 0.75, topT, sideT, sideT);  // 砧面台（顶面 anvil_top）
+        break;
+    default:
+        break;
+    }
+
+    // ③ def.shape 泛化（特型未命中时）。子盒坐标与 collisionAABBs / PartialBlockGeometry 的形状语义一致。
+    if (spec.boxes.isEmpty()) {
+        switch (d.shape) {
+        case BlockRegistry::ShapeFull:
+            addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, topT, sideT, frontT);
+            break;
+        case BlockRegistry::ShapeSlab:
+            addBox(0.0, 0.0, 0.0, 1.0, 0.5, 1.0, topT, sideT, frontT);
+            break;
+        case BlockRegistry::ShapeStairs: // 整步（低，全 footprint）+ 背墙（远端半高 z[0,0.5] 上半）
+            addBox(0.0, 0.0, 0.0, 1.0, 0.5, 1.0, topT, sideT, frontT);
+            addBox(0.0, 0.5, 0.0, 1.0, 1.0, 0.5, topT, sideT, frontT);
+            break;
+        case BlockRegistry::ShapeFence: // 立柱 + 上下横档（build_cube_icons.py _partial_shape_boxes 同款）
+            addBox(6.0 / 16.0, 0.0, 6.0 / 16.0, 10.0 / 16.0, 1.0, 10.0 / 16.0, topT, sideT, frontT);
+            addBox(0.0, 12.0 / 16.0, 6.0 / 16.0, 1.0, 15.0 / 16.0, 10.0 / 16.0, topT, sideT, frontT);
+            addBox(0.0, 5.0 / 16.0, 6.0 / 16.0, 1.0, 8.0 / 16.0, 10.0 / 16.0, topT, sideT, frontT);
+            break;
+        case BlockRegistry::ShapePlate:
+            addBox(1.0 / 16.0, 0.0, 1.0 / 16.0, 15.0 / 16.0, 1.0 / 16.0, 15.0 / 16.0, topT, sideT, frontT);
+            break;
+        case BlockRegistry::ShapeDoor: // 两格高 3/16 薄板：下半贴 bottomTile（lower）、上半贴 topTile（upper）
+            addBox(0.0, 0.0, 0.0, 1.0, 0.5, 3.0 / 16.0, d.bottomTile, d.bottomTile, d.bottomTile);
+            addBox(0.0, 0.5, 0.0, 1.0, 1.0, 3.0 / 16.0, topT, topT, topT);
+            break;
+        case BlockRegistry::ShapeTrapdoor:
+            addBox(0.0, 0.0, 0.0, 1.0, 3.0 / 16.0, 1.0, topT, sideT, frontT);
+            break;
+        case BlockRegistry::ShapeSnowLayer: // 1 层雪 1/8 高（state 0 基底观感）
+            addBox(0.0, 0.0, 0.0, 1.0, 0.125, 1.0, topT, sideT, frontT);
+            break;
+        default: // ShapeNone（非立绘类）/ ShapeBed：无盒渲染路径（调用方回落 2D pack 图 / 手绘 qrc 图标）
+            return spec;
+        }
+    }
+    spec.valid = true;
+
+    // 深度排序（远 → 近，painter 依序覆盖）：观察方向 (+1,+1,+1) → 中心 (x+y+z) 越小越远。
+    std::sort(spec.boxes.begin(), spec.boxes.end(), [](const AtlasIconBox &a, const AtlasIconBox &b) {
+        const qreal da = (a.x0 + a.x1) + (a.y0 + a.y1) + (a.z0 + a.z1);
+        const qreal db = (b.x0 + b.x1) + (b.y0 + b.y1) + (b.z0 + b.z1);
+        return da < db;
+    });
+    return spec;
+}
+
+// 图集瓦片提取（水平条带图集：tile i 位于 x = i*kTile，高 = kTile）。
+QImage atlasTile(const QImage &atlas, int tile)
+{
+    if (tile < 0)
+        return {};
+    const int x = tile * kTile;
+    if (x + kTile > atlas.width())
+        return {};
+    return atlas.copy(x, 0, kTile, atlas.height());
+}
+
+// 瓦片明暗（预乘 RGB 乘系数，保持预乘关系 —— applyTint 同法）：顶 1.0 / 左前 0.80 / 右 0.62。
+QImage shadedTile(const QImage &tile, qreal f)
+{
+    if (tile.isNull() || f >= 0.999)
+        return tile;
+    QImage img = tile.copy();
+    const int num = qRound(f * 256.0);
+    for (int y = 0; y < img.height(); ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const QRgb c = scan[x];
+            scan[x] = qRgba((qRed(c) * num) >> 8, (qGreen(c) * num) >> 8, (qBlue(c) * num) >> 8, qAlpha(c));
+        }
+    }
+    return img;
+}
+
+// 单个 dimetric 平行四边形面：仿射变换（单位正方形 → 平行四边形 o / o+e1 / o+e1+e2 / o+e2）贴图。
+//   先用瓦片中心色实填多边形（抗相邻面抗锯齿缝透出透明底 —— 仅瓦片全不透明时；含透明孔瓦片如
+//   铁活板门跳过底填保留孔洞），再 SmoothPixmapTransform 贴图。明暗已烘进瓦片（shadedTile）。
+void drawIsoFace(QPainter &p, const QImage &tile, const QPointF &o,
+                 const QPointF &e1, const QPointF &e2)
+{
+    if (tile.isNull())
+        return;
+    bool opaque = true;
+    for (int y = 0; y < tile.height() && opaque; ++y) {
+        const QRgb *scan = reinterpret_cast<const QRgb *>(tile.constScanLine(y));
+        for (int x = 0; x < tile.width(); ++x) {
+            if (qAlpha(scan[x]) < 255) {
+                opaque = false;
+                break;
+            }
+        }
+    }
+    QPolygonF poly;
+    poly << o << (o + e1) << (o + e1 + e2) << (o + e2);
+    if (opaque) {
+        const QRgb c = tile.pixel(tile.width() / 2, tile.height() / 2);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(qRed(c), qGreen(c), qBlue(c)));
+        p.drawPolygon(poly);
+    }
+    p.save();
+    p.setTransform(QTransform(e1.x(), e1.y(), e2.x(), e2.y(), o.x(), o.y()));
+    p.drawImage(QRectF(0.0, 0.0, 1.0, 1.0), tile);
+    p.restore();
+}
+
+QImage renderAtlasIcon(const QImage &atlas, const AtlasIconSpec &spec)
+{
+    QImage img(int(kIconSize), int(kIconSize), QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    if (spec.flat) {
+        p.drawImage(QRectF(8.0, 8.0, kIconSize - 16.0, kIconSize - 16.0), atlasTile(atlas, spec.flatTile));
+        return img;
+    }
+    for (const AtlasIconBox &b : spec.boxes) {
+        // 顶面 (+Y)：原点 = 远角 (x0,y1,z0)，e1 = +X，e2 = +Z（贴图 u→X / v→Z）。
+        {
+            const QPointF o = isoProject(b.x0, b.y1, b.z0);
+            drawIsoFace(p, shadedTile(atlasTile(atlas, b.topTile), 1.0), o,
+                        isoProject(b.x1, b.y1, b.z0) - o, isoProject(b.x0, b.y1, b.z1) - o);
+        }
+        // 右面 (+X)：原点 = 顶后角 (x1,y1,z0)（e2 向下 = 贴图 v 上缘对齐盒顶），e1 = +Z。明暗 0.62。
+        {
+            const QImage t = shadedTile(atlasTile(atlas, b.sideTile), 0.62);
+            const QPointF o = isoProject(b.x1, b.y1, b.z0);
+            drawIsoFace(p, t, o, isoProject(b.x1, b.y1, b.z1) - o, isoProject(b.x1, b.y0, b.z0) - o);
+        }
+        // 左前面 (+Z)：原点 = 顶左角 (x0,y1,z1)，e1 = +X，e2 向下。明暗 0.80。
+        {
+            const QImage t = shadedTile(atlasTile(atlas, b.frontTile), 0.80);
+            const QPointF o = isoProject(b.x0, b.y1, b.z1);
+            drawIsoFace(p, t, o, isoProject(b.x1, b.y1, b.z1) - o, isoProject(b.x0, b.y0, b.z1) - o);
+        }
+    }
+    return img;
+}
+
+// 纯程序图集（qrc；进程内单次加载）。作「pack 是否实际覆盖了该瓦片」比对基准。
+const QImage &programAtlas()
+{
+    static const QImage img = QImage(QStringLiteral(":/textures/atlas.png"))
+                                  .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    return img;
+}
+
+// 合成图集瓦片 vs 程序图集瓦片逐像素比对（64×64 小图，开销可忽略）。尺寸/格式异常按「有差异」处理
+//   （宁可多渲染不误杀 pack 覆盖）。
+bool tileDiffersFromProgram(const QImage &composite, const QImage &program, int tile)
+{
+    const QImage a = atlasTile(composite, tile);
+    const QImage b = atlasTile(program, tile);
+    if (a.isNull() || b.isNull() || a.size() != b.size() || a.format() != b.format())
+        return true;
+    return a != b;
+}
+
+} // namespace
+
+// t745 统一贴图原则：方块 item 图标运行期渲染（任意 pack 通用）。详见 resourcepackmanager.h 声明处注释。
+QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackContribution)
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    BuiltState &s = state();
+    if (requirePackContribution && !s.active)
+        return {};
+    const AtlasIconSpec spec = atlasIconSpecForBlock(blockId);
+    if (!spec.valid)
+        return {};
+    // 「pack 实际覆盖了该块可见面吗」：合成图集瓦片与纯程序图集逐像素比对 —— 全相同 = pack 无产出 →
+    //   返空串（调用方回落手绘程序图标 / FROM_PACK 家族的程序重渲；此时渲染结果只会复刻程序观感，
+    //   覆盖手绘图标反而损失美术质量）。
+    if (requirePackContribution) {
+        const QImage &prog = programAtlas();
+        bool contributed = false;
+        if (spec.flat) {
+            contributed = tileDiffersFromProgram(s.atlas, prog, spec.flatTile);
+        } else {
+            for (const AtlasIconBox &b : spec.boxes) {
+                if (tileDiffersFromProgram(s.atlas, prog, b.topTile)
+                    || tileDiffersFromProgram(s.atlas, prog, b.sideTile)
+                    || tileDiffersFromProgram(s.atlas, prog, b.frontTile)) {
+                    contributed = true;
+                    break;
+                }
+            }
+        }
+        if (!contributed)
+            return {};
+    }
+    // 缓存命中（revision 内稳定；apply() 重建清缓存 + 文件名带 revision → 无陈旧路径）。
+    const auto it = s.blockIconFiles.constFind(blockId);
+    if (it != s.blockIconFiles.constEnd() && QFile::exists(it.value()))
+        return QStringLiteral("file:///") + it.value();
+    const QImage img = renderAtlasIcon(s.atlas, spec);
+    if (img.isNull())
+        return {};
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        return {};
+    QDir().mkpath(dir);
+    const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_icon_%1_r%2.png").arg(blockId).arg(s.revision));
+    if (!img.save(out, "PNG"))
+        return {};
+    s.blockIconFiles.insert(blockId, out);
+    return QStringLiteral("file:///") + out;
 }
 
 // t715 状态效果 HUD 图标覆盖（实例 Q_INVOKABLE；Main.qml effectBar delegate 调）：pack 启用且 effectDir

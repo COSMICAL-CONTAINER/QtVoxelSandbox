@@ -32,6 +32,10 @@ import "InventoryOps.js" as InventoryOps
 Item {
     id: root
 
+    // t745 pack 开关 → activeChanged → 方块图标绑定重算（iconSourceForBlock 双态路由：pack 开 = pack
+    //   贴图渲染 / pack 关 = 程序原生；下方调色板/合成格/主栏/快捷栏图标绑定的 _p 守卫同 AOT 模式）。
+    ResourcePackManager { id: iconPackRefresh }
+
     // 宿主注入：hotbar 视图模型（提供 creativeBlocks / slotList / iconSourceForBlock /
     // nameForBlock / setSlotBlock / selectedSlot / slotRevision）。
     property Hotbar hotbar
@@ -752,7 +756,7 @@ Item {
                                 Image {
                                     anchors.fill: parent
                                     visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData) && !parent.bookInfo
-                                    source: root.hotbar.iconSourceForBlock(modelData)
+                                    source: { const _p = iconPackRefresh.active; return _p >= 0 ? root.hotbar.iconSourceForBlock(modelData) : "" }
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
                                 }
@@ -1142,7 +1146,7 @@ Item {
                                             anchors.fill: parent
                                             visible: { const _r = root.craftRev; return _r >= 0 ? (!root.hotbar.isTool(root.craftSlots[index] || 0)
                                                                                                   && !root.hotbar.isMaterial(root.craftSlots[index] || 0)) : false }
-                                            source: { const _r = root.craftRev; return _r >= 0 ? (root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)) : "" }
+                                            source: { const _r = root.craftRev; const _p = iconPackRefresh.active; return _r >= 0 && _p >= 0 ? (root.hotbar.iconSourceForBlock(root.craftSlots[index] || 0)) : "" }
                                             fillMode: Image.PreserveAspectFit; smooth: true
                                         }
                                         ToolIcon {
@@ -1331,7 +1335,7 @@ Item {
                                 Image {
                                     anchors.fill: parent
                                     visible: parent.outId !== 0 && !root.hotbar.isTool(parent.outId) && !root.hotbar.isMaterial(parent.outId)
-                                    source: parent.outId !== 0 ? root.hotbar.iconSourceForBlock(parent.outId) : ""
+                                    source: { const _p = iconPackRefresh.active; return _p >= 0 && parent.outId !== 0 ? root.hotbar.iconSourceForBlock(parent.outId) : "" }
                                     fillMode: Image.PreserveAspectFit; smooth: true
                                 }
                                 ToolIcon {
@@ -1405,7 +1409,7 @@ Item {
                                     Image {
                                         anchors.fill: parent
                                         visible: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (!root.hotbar.isTool(mainId) && !root.hotbar.isMaterial(mainId)) : false }
-                                        source: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(mainId)) : "" }
+                                        source: { const _r = root.hotbar.mainRevision; const _p = iconPackRefresh.active; return _r >= 0 && _p >= 0 ? (root.hotbar.iconSourceForBlock(mainId)) : "" }
                                         fillMode: Image.PreserveAspectFit; smooth: true
                                     }
                                     ToolIcon {
@@ -1594,7 +1598,7 @@ Item {
                                     Image {
                                         anchors.fill: parent
                                         visible: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (!root.hotbar.isTool(slotId) && !root.hotbar.isMaterial(slotId)) : false }
-                                        source: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.iconSourceForBlock(slotId)) : "" }
+                                        source: { const _r = root.hotbar.slotRevision; const _p = iconPackRefresh.active; return _r >= 0 && _p >= 0 ? (root.hotbar.iconSourceForBlock(slotId)) : "" }
                                         fillMode: Image.PreserveAspectFit
                                         smooth: true
                                     }
