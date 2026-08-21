@@ -4716,11 +4716,14 @@ void World::carveCaves()
 
     // 推进 worm 队列（索引循环：子 worm 入队尾，wi 跟进 → 宽度优先展开整张隧道网）。分叉仅在总数 < kMaxWorms
     //   时允许（预算上限）。worm 出界（x/z 边 / y 越基岩顶或世界顶）即杀（break），不留悬空段。
+    //   t759 修悬空引用：引用须在 while 每步重取 —— 分叉 push_back 可能使 vector 扩容搬移存储，跨步持有的
+    //   `Worm &` 指向已释放旧缓冲（UB；是否崩取决于堆布局，重复重生成世界（改种子/尺寸）可复现崩溃 ——
+    //   修法=每步经 worms[wi] 现取，push_back 后下一步自动绑到新存储）。
     int wormSteps = 0;
     for (size_t wi = 0; wi < worms.size(); ++wi) {
-        Worm &w = worms[wi];
         int step = 0;
-        while (w.life > 0) {
+        while (worms[wi].life > 0) {
+            Worm &w = worms[wi]; // 每步重取（t759：分叉扩容后旧引用悬空）
             carveSphere(w.x, w.y, w.z, kWormRadius);
             ++wormSteps;
             // 方向扰动：noise3 采样 worm 头位置 → 平滑曲线（位置驱动，纯函数 → 路径可复现）。
@@ -5908,11 +5911,12 @@ void World::placeJungleTemple()
 //   刷怪笼。确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构与 placeDungeons / placeJungleTemple 同源
 //   （网格采样 + 概率筛选 + 抖动 + y 范围派生）。
 //
-//   布局（t713 扩建 ~4.5×：45×45 水平 footprint，dx/dz ∈ [-22,22]；竖直 dy ∈ [0,6]，墙高 5 → 大厅净高 4）：
-//     - 地板（dy=0）与顶板（dy=6）：全幅 StoneBrick（封闭黑暗，机制等价 MC 1.0 要塞石砖地牢氛围）。
-//     - **内部空间**（走廊 / 房间内部，dy 1..5）：清 Air 玩家可走；其余非内部格 = 石砖墙（hash 变体：
+//   布局（t713 扩建 ~4.5×：45×45 水平 footprint，dx/dz ∈ [-22,22]；竖直 dy ∈ [0,9]，墙高 8 → 内部净高 8 格
+//   （t759 自墙高 5 / 净高 5 加高 3 —— 传送门房框架上方通行空间修复，见 kWallH 注释））：
+//     - 地板（dy=0）与顶板（dy=9）：全幅 StoneBrick（封闭黑暗，机制等价 MC 1.0 要塞石砖地牢氛围）。
+//     - **内部空间**（走廊 / 房间内部，dy 1..8）：清 Air 玩家可走；其余非内部格 = 石砖墙（hash 变体：
 //       ~10% MossyCobble 苔石 / ~8% MonsterEgg 怪物蛋嵌墙 —— 机制等价 MC 要塞石砖墙混嵌银鱼怪物蛋）。
-//     - **中央大厅**（13×13，dx/dz ∈ [-6,6]）：四向走廊交汇点 + 四角石砖承重柱（dy 1..5）。
+//     - **中央大厅**（13×13，dx/dz ∈ [-6,6]）：四向走廊交汇点 + 四角石砖承重柱（dy 1..8，随 kWallH 撑到顶）。
 //     - **东入口走廊**（5 宽×15 深，x 7..21, z -2..2）：玩家从东侧周界墙门洞走入。
 //     - **东北 / 东南储藏龛**（7×5，x 12..18, z ∓8..∓4；1 宽门洞 x 14..16 接走廊）：空置龛 + 蛛网（观感扩容）。
 //     - **北走廊**（5 宽，x -2..2, z -11..-7）→ **传送门房**（25×10，x -12..12, z -21..-12）：北侧环沟岩浆河
@@ -5941,7 +5945,15 @@ void World::placeStronghold()
     constexpr int kSurfaceGap      = 5;     // 与地表保留的最小距离（要塞上方至少 5 格石顶 → 不破地表、封闭黑暗）
     constexpr int kHalf            = 22;    // 建筑外圈半边（45×45 = (2*22+1)² 外圈；t713 扩建自 21×21 约 4.5× 面积）
     constexpr int kMargin          = kHalf + 1; // 留边界（外圈半边 22 + 抖动余量 → 半径 ≤ 23 不越界）
-    constexpr int kWallH           = 5;     // 墙体高度层数（dy 1..5；地板 dy=0 / 顶板 dy=6 → 净高 5 格）
+    constexpr int kWallH           = 8;     // 墙体高度层数（dy 1..8；地板 dy=0 / 顶板 dy=9 → 净高 8 格）。t759
+                                            //   5→8：传送门房净空修复 —— 框架立于高台顶 dy=4，旧净高 5 时框架
+                                            //   之上仅 1 格 Air（玩家 1.8 高无法跨过框架环走进环中心）；整体加高 3
+                                            //   后框架顶之上 4 格 Air ≥ 验收「至少 3 格」。取「顶板上移 + 墙加高」
+                                            //   全局方案而非仅传送门房局部抬顶：框架层 dy=4 与全部相对坐标零变化
+                                            //   （B5 读档反推 / m_strongholdPortalY 记录值零回归），且避免局部抬顶
+                                            //   在新旧顶板交界处留「天然地形邻接面」（洞穴恰过即漏光破封闭黑暗）。
+                                            //   入口走廊 / 北走廊 / 楼梯同为内部空间 → 净高同步 8（同步检查通过）。
+                                            //   worldgen 常量改动仅新世界生效（旧存档体素不回填，B5 反推自适应）。
 
     int placed = 0;
     const int strongSeed = m_seed + 26513; // 要塞哈希偏移（与其它 worldgen hashColumn 解耦；纯整数加，确定性）
@@ -5971,10 +5983,10 @@ void World::placeStronghold()
         //                          ← 西走廊（5 宽×5 深）→ 图书馆（10×17 大房：书架墙 + 中央书架岛）
         //                          ← 北走廊（5 宽×5 深）→ 传送门房（25×10：岩浆河 + 高台 + 楼梯 + 12 框架环）
         //                          ← 南门洞（3 宽）→ 战利品/银鱼房（17×11：刷怪笼 + 宝箱 + 蛛网）
-        //   房间 / 走廊 = 内部空间（dy 1..5 清 Air，玩家可走）；其余 = StoneBrick 墙（hash 变体：
+        //   房间 / 走廊 = 内部空间（dy 1..8 清 Air，玩家可走；t759 墙高 5→8）；其余 = StoneBrick 墙（hash 变体：
         //   ~10% MossyCobble 苔石砖观感 / ~8% MonsterEgg 怪物蛋嵌墙）。确定性（hashVoxel + strongSeed，
         //   同 seed 同结构同散布，PLAN §2-K）。
-        // 1) 地板（dy=0）+ 顶板（dy=6）：全幅 StoneBrick（封闭黑暗）。
+        // 1) 地板（dy=0）+ 顶板（dy=kWallH+1=9）：全幅 StoneBrick（封闭黑暗）。
         for (int dx = -kHalf; dx <= kHalf; ++dx) {
             for (int dz = -kHalf; dz <= kHalf; ++dz) {
                 put(dx, 0, dz, BlockRegistry::StoneBrick);
@@ -6000,7 +6012,7 @@ void World::placeStronghold()
             return false;
         };
 
-        // 2) 墙体 + 内部空间（y 1..5）：非内部格 = 石砖（hash 变体 MossyCobble 苔石 / MonsterEgg 怪物蛋嵌墙，
+        // 2) 墙体 + 内部空间（y 1..8）：非内部格 = 石砖（hash 变体 MossyCobble 苔石 / MonsterEgg 怪物蛋嵌墙，
         //    机制等价 MC 要塞石砖墙混嵌怪物蛋；确定性 → 同 seed 同墙同蛋）；内部格 = 清 Air（玩家可走入）。
         for (int dy = 1; dy <= kWallH; ++dy) {
             for (int dx = -kHalf; dx <= kHalf; ++dx) {
@@ -6021,8 +6033,8 @@ void World::placeStronghold()
             }
         }
 
-        // 3) 中央大厅四角承重柱（(±3,±3)，dy 1..5）：石砖实心柱撑顶（扩厅观感 + 结构叙事；柱距内部边 3 格
-        //    → 不挡四向走廊动线，仅大厅中心 7×7 仍开阔）。
+        // 3) 中央大厅四角承重柱（(±3,±3)，dy 1..8 随 kWallH 撑到新顶）：石砖实心柱撑顶（扩厅观感 + 结构叙事；
+        //    柱距内部边 3 格 → 不挡四向走廊动线，仅大厅中心 7×7 仍开阔）。
         for (int pxIdx = -1; pxIdx <= 1; pxIdx += 2) {
             for (int pzIdx = -1; pzIdx <= 1; pzIdx += 2) {
                 for (int dy = 1; dy <= kWallH; ++dy)
@@ -6033,6 +6045,9 @@ void World::placeStronghold()
         // 4) **传送门房**（x -12..12, z -21..-12 内部 25×10）—— 岩浆河 + 石砖高台 + 3 级楼梯 + 12 框架环 +
         //    3×3 岩浆盆 + 银鱼刷怪笼（机制等价 MC 1.0 传送门房：熔岩池环绕 + 石砖台 + 框架环 + 台上银鱼笼；
         //    t664 框架/门面机制接线；t713 修「平台太小站不下 / 岩浆位置错 / 楼梯悬浮挡路」）：
+        //    （t759 净空修复：框架层 dy=4 之上 dy 5..8 全 Air —— 框架顶以上 4 格通行空间，玩家 1.8 高可跨过
+        //    框架环走进环中心（旧净高 5 时仅 1 格，跨不过去）；北走廊 / 东入口走廊 / 楼梯同为内部空间随墙高
+        //    同步净高 8，同步检查通行无局促）
         //    a) **石砖高台**：x -6..6 × z -21..-16（13×6 footprint），dy 1..3 实心石砖 → 顶面 y=4 可站立
         //       （13×6 台面远大于旧 5×1 单排，12 框架环 + 内圈 3×3 全部落在台上，玩家上台自如）；
         //    b) **3×3 岩浆盆**：环内圈（x -1..1, z -19..-17）在 dy=3 层挖槽灌岩浆 —— 恰在门面（框架环激活后
@@ -6182,6 +6197,9 @@ void World::placeStronghold()
             if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠要塞（避免与海水柱冲突）
             const int h = std::min(heightAt(cx, cz), m_height - 1);
             // 要塞 y 范围：基岩之上 ~ kStrongholdMaxY 之下；上方至少留 kSurfaceGap 格石顶（不破地表、封闭黑暗）。
+            //   t759 注：yHi 随 kWallH(5→8) 同步下移 3 → 同 seed 的要塞地板 y 与旧版不同（内部最高 Air 层仍
+            //   ≤ kStrongholdMaxY，语义不变）。worldgen 常量改动仅新生成世界生效，旧存档体素不回填（B5 读档
+            //   反推自适应旧几何）。
             const int yLo = kBedrockTop + 2;
             const int yHi = std::min(kStrongholdMaxY - kWallH, h - kSurfaceGap - kWallH);
             if (yHi <= yLo) continue; // 此列地下空间不足（极低洼 / 山顶浅层）→ 跳过

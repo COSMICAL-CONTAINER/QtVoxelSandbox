@@ -5,7 +5,8 @@
 //   World 层电力链（setBlock→notePowerWrite→m_powerDirty→tickRedstone→recomputePowerLocal→信号/state）
 //   在真实对象上跑通，断点直接暴露为 FAIL 行；同时产出「源×接收器」矩阵核对表（commit message 引用）。
 //   分层（PLAN §2）：Core+World 为主；t737 环线探针附加 World 层 mesher（partialblockgeometry）与
-//   Entities 层 MinecartManager 源码直编（两者向下只依赖 Core+World，不引入 Game/QML）。
+//   Entities 层 MinecartManager 源码直编（两者向下只依赖 Core+World，不引入 Game/QML）；t759 附加 World 层
+//   worldgen 断言（要塞传送门房净空 —— 独立小世界扫种子，不动主世界 rig）。
 //   运行：build/redstone_matrix_test.exe，全过 exit 0。
 #include <QCoreApplication>
 #include <QDebug>
@@ -809,6 +810,86 @@ int main(int argc, char *argv[])
         for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         w.setBlock(lampX, kRigY, lampZ, BR::Air);
         tickN(w, 2);
+    }
+
+    // P13 t759 要塞传送门房净空探针（worldgen 回归，非红石 —— 同 t737 环线先例收录）。断言：(a) 12 框架环
+    //   逐格仍在记录层 strongholdPortalY（B5 三坐标一致性的生成侧镜像 —— t759 只抬顶板不动框架层）；
+    //   (b) 每框架顶之上 4 格 Air + 第 5 格顶板石砖（净高 8：内部 dy 1..8 Air / 顶板 dy=9 = 框架层+5）→ 验收
+    //   「框架上方至少 3 格通行空间」；(c) 通行断面抽样：北走廊中段 / 东走廊中段离地 2..4 格 Air、楼梯顶步
+    //   之上 3 格 Air（同步检查入口 / 楼梯高度；不断言贴地 dy=1 —— 走廊蛛网（可穿过仅减速）允许存在）。
+    //   被测世界：优先主世界 w（默认种子 1337 的 96×96×48 生成即含 1 座要塞 → 零额外生成开销，且 rig 全在
+    //   y=41 浅层不触地下要塞）；主世界无要塞时（未来 worldgen 常量演进）独立 96×96 世界扫种子兜底 —— 尺寸
+    //   取 96 与主世界同：要塞 kMargin=23 抖动域 [-10,+5]，bx=60 候选族恒过边界（60+5 < 96-23）→ 每种子
+    //   ~64% 命中，24 发上限仅防退化（首版 64×64 抖动全域压边界 → 每种子仅 ~2% 命中 24 发全空，已修）。
+    {
+        const World *pw = &w;
+        World fallbackW;
+        if (!pw->hasStronghold()) {
+            fallbackW.setWidth(96);
+            fallbackW.setDepth(96);
+            fallbackW.setHeight(48);
+            for (int s = 1; s <= 24 && !fallbackW.hasStronghold(); ++s)
+                fallbackW.setSeed(s); // 同尺寸重生成一次（96×96 共 4 候选格，每种子 ~64% 命中）
+            pw = &fallbackW;
+        }
+        bool ok = pw->hasStronghold();
+        if (!ok)
+            qInfo().noquote() << "  no stronghold in main or 24 fallback seeds (infra failure, not product bug)";
+        if (ok) {
+            const int px = pw->strongholdPortalX(), py = pw->strongholdPortalY(), pz = pw->strongholdPortalZ();
+            const int cy = py - 4, cz = pz + 18; // 反解要塞原点（框架层 = cy+4；环中心 dz = -18）
+            // (a)+(b) 框架环 12 格（标准 ±2 方形环，四边各 3 不含角）逐格验框架 / 头顶净空 / 顶板。
+            int frames = 0;
+            for (int rdx = -2; rdx <= 2; ++rdx) {
+                for (int rdz = -2; rdz <= 2; ++rdz) {
+                    const bool onRing = (rdx == -2 || rdx == 2) ? (rdz >= -1 && rdz <= 1)
+                                                                : (rdz == -2 || rdz == 2) && (rdx >= -1 && rdx <= 1);
+                    if (!onRing) continue;
+                    ++frames;
+                    if (pw->blockAt(px + rdx, py, pz + rdz) != BR::EndPortal) {
+                        qInfo().noquote() << "  frame missing at" << (px + rdx) << py << (pz + rdz);
+                        ok = false;
+                    }
+                    for (int up = 1; up <= 4; ++up) { // 框架顶之上 4 格全 Air（任务验收 ≥3，取满量自证）
+                        if (pw->blockAt(px + rdx, py + up, pz + rdz) != BR::Air) {
+                            qInfo().noquote() << "  headroom blocked at +" << up << "above frame" << (px + rdx) << (pz + rdz);
+                            ok = false;
+                        }
+                    }
+                    if (pw->blockAt(px + rdx, py + 5, pz + rdz) != BR::StoneBrick) { // 顶板（dy=9 = 框架层+5）
+                        qInfo().noquote() << "  roof missing at +5 above frame" << (px + rdx) << (pz + rdz);
+                        ok = false;
+                    }
+                }
+            }
+            if (frames != 12) {
+                qInfo().noquote() << "  ring frame count" << frames << "!= 12";
+                ok = false;
+            }
+            // (c) 通行断面抽样：北走廊中段 (dx=0,dz=-9) / 东走廊中段 (dx=14,dz=0) 自地板上 2..4 格；楼梯
+            //     顶步（dy=3）上 1..3 格（玩家站楼梯脚位 ~dy+3.5，头需再 2 格）。
+            const auto airRun = [&](int x, int yBase, int z, int from, int to) {
+                for (int up = from; up <= to; ++up)
+                    if (pw->blockAt(x, yBase + up, z) != BR::Air) return false;
+                return true;
+            };
+            if (!airRun(px, cy, cz - 9, 2, 4)) {
+                qInfo().noquote() << "  north corridor headroom blocked";
+                ok = false;
+            }
+            if (!airRun(px + 14, cy, cz, 2, 4)) {
+                qInfo().noquote() << "  east corridor headroom blocked";
+                ok = false;
+            }
+            if (!airRun(px, cy + 3, cz - 15, 1, 3)) {
+                qInfo().noquote() << "  stair top headroom blocked";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| stronghold portal room headroom: 4 air above frames + roof at +5, ring intact at"
+                             " recorded Y, corridor/stair clearance (t759)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
