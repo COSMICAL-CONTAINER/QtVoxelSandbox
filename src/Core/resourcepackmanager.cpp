@@ -72,6 +72,12 @@ struct BuiltState {
     //   仅 0x300..0x303 四件（皮革 tier）；铁/金/钻石原样用 pack 图不染色；铜（t613）走 copperIconFiles
     //   的 iron_* 染铜回退（同铜工具机制），不经本缓存。
     QHash<int, QString> leatherIconFiles;
+    // t731 玩家皮肤名（"default"/"alex"；settings.json playerSkin 镜像，缺省 default）。/skin 命令经
+    //   setPlayerSkin 改写 + 持久化；Main.qml skinName 属性启动期从 playerSkin() 读。
+    QString playerSkin;
+    // t731 pack 皮肤 64×64→64×32 裁切缓存：kind（"skin_default"/"skin_alex"）→落盘的裁上半图 file://
+    //   路径（voxelsandbox_rp_skin_<kind>.png）。apply() 重建时清空（pack 切换/重解析 → 重裁）。
+    QHash<QString, QString> skinPackFiles;
     // t588/t613 铜物品（铜工具 0x118..0x11C / 铜锭 0x21D / 铜护甲 0x308..0x30B）染色图标缓存：pack 无
     //   copper_*（1.8 等老包）→ 用铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，
     //   后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
@@ -306,10 +312,12 @@ QString discoverDefault()
     return {};
 }
 
-// 读 settings.json：resourcePackEnabled（缺省 false）+ resourcePack（可空）。
+// 读 settings.json：resourcePackEnabled（缺省 false）+ resourcePack（可空）+ playerSkin（t731，
+//   "default"/"alex"，缺省 default）。
 struct Settings {
     bool enabled = false;
     QString packPath;
+    QString playerSkin;
 };
 Settings readSettings()
 {
@@ -326,11 +334,14 @@ Settings readSettings()
         s.enabled = obj.value(QStringLiteral("resourcePackEnabled")).toBool(false);
     if (obj.contains(QStringLiteral("resourcePack")))
         s.packPath = obj.value(QStringLiteral("resourcePack")).toString();
+    if (obj.contains(QStringLiteral("playerSkin")))
+        s.playerSkin = obj.value(QStringLiteral("playerSkin")).toString();
     return s;
 }
 
-// t415 写 settings.json（enabled + packPath），保留其它已有字段。返回是否成功（失败已告警，调用方降级）。
-bool writeSettings(bool enabled, const QString &packPath)
+// t415 写 settings.json（enabled + packPath + playerSkin），保留其它已有字段。返回是否成功（失败已
+//   告警，调用方降级——皮肤名/包路径仅存内存）。
+bool writeSettings(bool enabled, const QString &packPath, const QString &playerSkin)
 {
     const QString path = resolveSettingsWritePath();
     if (path.isEmpty()) {
@@ -347,6 +358,7 @@ bool writeSettings(bool enabled, const QString &packPath)
     }
     obj.insert(QStringLiteral("resourcePackEnabled"), enabled);
     obj.insert(QStringLiteral("resourcePack"), packPath);
+    obj.insert(QStringLiteral("playerSkin"), playerSkin);
     QFile fout(path);
     if (!fout.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         qWarning("ResourcePack: 无法写入 settings.json %s（%s）；配置仅存内存。",
@@ -1665,6 +1677,7 @@ void ensureBuiltLocked()
     s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
+    s.skinPackFiles.clear(); // t731 reset pack 皮肤裁切缓存（pack 切换 / 重解析 → 重裁）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -1676,11 +1689,14 @@ void ensureBuiltLocked()
     s.atlas = base;
     const int tileCount = base.width() / kTile; // 从图集宽度推导瓦片数（避免硬编码魔数）。
 
-    // t415 config 首次从 settings.json 加载；之后只信内存。
+    // t415 config 首次从 settings.json 加载；之后只信内存。t731 playerSkin 同批（仅 namespaced 字段，
+    //   非包路径——不参与 enabled 门控，空/非法回退 default）。
     if (!s.configLoaded) {
         const Settings cfg = readSettings();
         s.enabled = cfg.enabled;
         s.packPath = cfg.packPath;
+        s.playerSkin = (cfg.playerSkin == QLatin1String("alex")) ? cfg.playerSkin
+                                                                : QStringLiteral("default");
         s.configLoaded = true;
     }
 
@@ -1980,15 +1996,16 @@ bool ResourcePackManager::enabled() const
 
 void ResourcePackManager::setEnabled(bool e)
 {
-    QString curPath;
+    QString curPath, curSkin;
     {
         QMutexLocker lock(&stateMutex());
         BuiltState &s = state();
         s.enabled = e;
         s.configLoaded = true;
         curPath = s.packPath;
+        curSkin = s.playerSkin;
     }
-    writeSettings(e, curPath); // 持久化（文件 IO 在锁外，少占 image provider）
+    writeSettings(e, curPath, curSkin); // 持久化（文件 IO 在锁外，少占 image provider）
     emit configChanged();
 }
 
@@ -2001,14 +2018,16 @@ QString ResourcePackManager::packPath() const
 void ResourcePackManager::setPackPath(const QString &p)
 {
     bool curEnabled;
+    QString curSkin;
     {
         QMutexLocker lock(&stateMutex());
         BuiltState &s = state();
         s.packPath = p;
         s.configLoaded = true;
         curEnabled = s.enabled;
+        curSkin = s.playerSkin;
     }
-    writeSettings(curEnabled, p);
+    writeSettings(curEnabled, p, curSkin);
     emit configChanged();
 }
 
@@ -2487,6 +2506,106 @@ QString ResourcePackManager::armorLayerSource(int tier, int layer) const
     if (!leather.save(out, "PNG"))
         return QStringLiteral("file:///") + p; // 落盘失败 → 回退白底（降级）
     s.leatherIconFiles.insert(key, out); // stateMutex 已持锁，安全
+    return QStringLiteral("file:///") + out;
+}
+
+// t731 玩家皮肤名（"default"/"alex"；settings.json playerSkin 镜像，缺省 default）。/skin 命令经
+//   setPlayerSkin 切换 + 持久化；Main.qml skinName 属性启动期从这里读初值。
+QString ResourcePackManager::playerSkin() const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    return s.playerSkin == QLatin1String("alex") ? QStringLiteral("alex") : QStringLiteral("default");
+}
+
+// t731 切换玩家皮肤并持久化 settings.json（setEnabled/setPackPath 同 writeSettings 管线）。非法名拒收
+//   （返 false，调用方回显用法）；合法则内存态立即生效（QML skinName 同步 → Texture 换绑）。
+bool ResourcePackManager::setPlayerSkin(const QString &name)
+{
+    if (name != QLatin1String("default") && name != QLatin1String("alex"))
+        return false;
+    bool curEnabled;
+    QString curPath;
+    {
+        QMutexLocker lock(&stateMutex());
+        ensureBuiltLocked();
+        BuiltState &s = state();
+        s.playerSkin = name;
+        s.configLoaded = true;
+        curEnabled = s.enabled;
+        curPath = s.packPath;
+    }
+    writeSettings(curEnabled, curPath, name); // 持久化（文件 IO 在锁外，同 setEnabled）
+    return true;
+}
+
+// t731 玩家皮肤 pack 源（含 64×64 老式布局 → 64×32 裁切重排）：skin（"default"/"alex"）→ entityKindMap
+//   的 skin_default（steve.png）/ skin_alex（alex.png）两级探测（子目录 → 扁平，同 entitySource）。
+//   命中后按贴图实际宽高判型：h == w/2（64×32 族）→ 原样返回 file:///；更高（64×64 老式布局——上半 32
+//   行是 base 头/身/臂/腿区，与 64×32 兼容；下半是 1.8+ overlay）→ QImage 裁上半 w×(w/2) 落盘
+//   voxelsandbox_rp_skin_<kind>.png 缓存（apply() 重建随 skinPackFiles 清空重裁；同皮革染色落盘模式）。
+//   miss / 解码 / 落盘失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
+//   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+QString ResourcePackManager::playerSkinSource(const QString &skin) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty())
+        return {};
+    const QString kind = (skin.compare(QLatin1String("alex"), Qt::CaseInsensitive) == 0)
+            ? QStringLiteral("skin_alex") : QStringLiteral("skin_default");
+    // entityKindMap 探测（两级：子目录 → 扁平）拿 pack 原图绝对路径。
+    QString relPath;
+    for (const EntityTexEntry &e : entityKindMap()) {
+        if (kind == QLatin1String(e.kind)) {
+            relPath = QString::fromLatin1(e.packPath);
+            break;
+        }
+    }
+    if (relPath.isEmpty())
+        return {};
+    const QDir entityDir(s.entityDir);
+    QString src;
+    const QString sub = entityDir.absoluteFilePath(relPath);
+    if (QFile::exists(sub)) {
+        src = sub;
+    } else {
+        const QFileInfo fi(relPath);
+        const QString flat = entityDir.absoluteFilePath(fi.fileName());
+        if (QFile::exists(flat))
+            src = flat;
+    }
+    if (src.isEmpty())
+        return {};
+    // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+    const auto cached = s.skinPackFiles.constFind(kind);
+    if (cached != s.skinPackFiles.constEnd() && QFile::exists(cached.value()))
+        return QStringLiteral("file:///") + cached.value();
+    // 判型 + 裁切：64×32 族（h == w/2）原样；64×64 老式布局裁上半 32 行（base 区，与 64×32 UV 分数
+    //   兼容——UV 分母按 base 64×32，采样行 = 分数 × 实图高，裁后图高恰为宽一半 → 分数对齐）。
+    QImage tex(src);
+    if (tex.isNull())
+        return {}; // 解码失败 → 回退程序皮肤（降级）
+    const int w = tex.width(), h = tex.height();
+    if (w <= 0 || h < w / 2)
+        return {}; // 异常尺寸（非 2:1/1:1 族）→ 回退（降级）
+    if (h == w / 2)
+        return QStringLiteral("file:///") + src; // 已是 64×32 族，无需裁切
+    const QImage cropped = tex.copy(0, 0, w, w / 2);
+    if (cropped.isNull())
+        return {};
+    // 落盘缓存（AppLocalDataLocation，同 atlasFile / 皮革染色目录）。
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        return {}; // 无可写目录 → 回退程序皮肤（降级）
+    QDir().mkpath(dir);
+    const QString out = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_skin_%1.png").arg(kind));
+    if (!cropped.save(out, "PNG"))
+        return {}; // 落盘失败 → 回退（降级）
+    s.skinPackFiles.insert(kind, out); // stateMutex 已持锁，安全
     return QStringLiteral("file:///") + out;
 }
 

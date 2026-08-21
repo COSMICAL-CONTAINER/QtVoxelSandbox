@@ -180,6 +180,20 @@ public:
     //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString armorLayerSource(int tier, int layer) const;
 
+    // t731 玩家皮肤名（"default"/"alex"；settings.json playerSkin 镜像，缺省 default）。/skin 命令经
+    //   setPlayerSkin 切换 + 持久化；Main.qml skinName 属性启动期从这里读初值。
+    Q_INVOKABLE QString playerSkin() const;
+    // t731 切换玩家皮肤（持久化 settings.json，同 setEnabled/setPackPath 的 writeSettings 管线）。
+    //   非法名（非 default/alex）拒收返 false；成功返 true（QML skinName 由调用方同步）。
+    Q_INVOKABLE bool setPlayerSkin(const QString &name);
+    // t731 玩家皮肤 pack 源（含 64×64 老式布局 → 64×32 裁切重排，落盘缓存同皮革染色模式）：skin
+    //   （"default"/"alex"）→ entityKindMap 的 skin_default（steve.png）/ skin_alex（alex.png）两级探测。
+    //   命中且 h == w/2（64×32 族）→ 原样 file:///；更高（64×64 老式布局，上半 32 行 = base 区）→ 裁上半
+    //   落盘 voxelsandbox_rp_skin_<kind>.png 返 file:///（apply() 重建清缓存重裁）。miss / 解码 / 落盘
+    //   失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
+    //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+    Q_INVOKABLE QString playerSkinSource(const QString &skin) const;
+
     // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内
     //   对应 PNG 存在时，返回 file:///<entityDir>/<mob>/<mob>.png 供 QtQuick3D Texture 直接加载（MobModel 据
     //   packTextured 把几何 UV 按 T 字展开进该贴图）；否则返空串 → Main.qml 各 mob delegate 回退程序生成

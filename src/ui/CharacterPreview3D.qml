@@ -5,7 +5,7 @@ import QtQuick3D
 import VoxelSandbox
 
 // t546 角色预览 3D（第三人称视角）：mini View3D 渲染**完整玩家模型**（复用 Main.qml playerModel 的
-// 部件几何 / 配色：头 + 双眼 + 躯干 + 双臂 + 双腿，总高 1.8）+ 4 装备槽护甲 overlay（头盔 / 胸甲 /
+// 部件几何 / 姿态：头 + 躯干 + 双臂 + 双腿，总高 1.8）+ 4 装备槽护甲 overlay（头盔 / 胸甲 /
 // 护腿 / 靴，按 hotbar.armor* VM），替代 2D Canvas 人形剪影占位。「玩家穿装备的第三人称样子」——
 // 满足「装备/物品图标都要 3D（像玩家第三人称那样）」的核心诉求（装备槽逐格 3D 见 ArmorSlot3D）。
 //
@@ -19,8 +19,10 @@ import VoxelSandbox
 //       （bodyYaw）+ 转头（headYawLead）+ 抬头/低头（headPitch）朝鼠标方向（MC 角色预览类 UI 交互）。
 //   (4) 3D 人物右移（宿主面板 x，t573 定格 slotSize*2-10；t551 曾移 slotSize*2+6 被用户反馈偏过头）。
 //
-// 全部 UnitCube + NoLighting 纯色（§9a 原创，非 MC 皮肤资产）。坐标以脚底 y=0 为原点（同 Main.qml
-// playerModel / 玩家 AABB 约定）：头心 1.55、躯干 0.95、肩 1.3、髋 0.6、脚 0。
+// t731 皮肤化：身体部件 UnitCube 纯色 → PlayerSkinBox（MC 64×32 皮肤布局 box-UV 按部位采样，同
+// Main.qml playerModel）+ 皮肤贴图（window.skinFinalUrl() 两态：pack steve/alex.png / qrc 程序自绘
+// entity_skin_*，§9 原创+运行期读本地 pack）。眼子 Model 移除（脸区纹素自带五官）。坐标以脚底 y=0
+// 为原点（同 Main.qml playerModel / 玩家 AABB 约定）：头心 1.55、躯干 0.95、肩 1.3、髋 0.6、脚 0。
 //
 // F3+B（showHitboxes）：叠加玩家 AABB 线框（0.62×1.82×0.62，同 Main.qml F3+B 玩家碰撞箱 0.6×1.8×0.6
 // 微扩防线融于体）。
@@ -55,10 +57,8 @@ Item {
     property int legsArmor: root.hotbar ? (root.hotbar.armorRevision >= 0 ? root.hotbar.armorBlockIdAt(2) : 0) : 0
     property int bootArmor: root.hotbar ? (root.hotbar.armorRevision >= 0 ? root.hotbar.armorBlockIdAt(3) : 0) : 0
 
-    // 玩家本色（§9a 原创纯色，同 Main.qml playerModel 配色 / SurvivalInventory 预览配色）。
-    readonly property color skinC: "#caa472"
-    readonly property color shirtC: "#3a6a9a"
-    readonly property color pantsC: "#3a3a5a"
+    // t731 皮肤化后玩家本色纯色退役（皮肤贴图接管，window.skinFinalUrl 两态选源；previewSkinTex 见
+    //   View3D 内）。护甲 overlay 仍是纯色档色（t551 旧观感，未迁 layer 贴图——预览面板小、档色可辨）。
     // 护甲材质档色（同 Main.qml playerModel.armorBaseColor 表）。
     function armorColor(aid) {
         const t = root.hotbar ? root.hotbar.armorTier(aid) : -1
@@ -150,6 +150,11 @@ Item {
             clipNear: 0.1
             clipFar: 100
         }
+        // t731 预览皮肤贴图：source 读宿主 window.skinFinalUrl()（Main.qml 窗口级两态：pack 命中 file:///
+        //   / 否则 qrc 程序皮肤；/skin 切 skinName 或 pack 开关 → 绑定重算即时换肤）。独立实例——Texture
+        //   是场景资源，不与 Main.qml playerSkinTex 跨 View3D 共享（unqualified window 经实例化上下文链
+        //   解析，同 SurvivalInventory `window.showHitboxes` 先例）。
+        Texture { id: previewSkinTex; source: window.skinFinalUrl(); generateMipmaps: false }
         // 模型根：正面（-Z，含脸/眼）旋向 +Z 相机 + 22° 3/4 侧角（同 MC 角色预览视角）。脚底 y=0。
         // t551：position.y 随离地抬升（跳）；eulerRotation.y = 基角 + bodyYaw（看鼠标转身）。
         Node {
@@ -210,40 +215,16 @@ Item {
                     position: Qt.vector3d(0, 0.7, 0)
                     eulerRotation: Qt.vector3d(root.lookPitch, root.headYawLead, 0)
 
-                    // 头（≈0.5³，肤色）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。
+                    // 头（≈0.5³）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。t731 皮肤化：PlayerSkinBox
+                    //   {piece:0}（head 区 box-UV，-Z 前脸 = 皮肤脸区自带五官）+ 皮肤贴图。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: PlayerSkinBox { piece: 0 }
                         position: Qt.vector3d(0, 0.25, 0)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.skinC }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                     }
-                    // 眼白（贴脸 z=-0.25，同 Main.qml t52/t66；相对颈 y=0.32 = 世界 1.62）。
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(-0.1, 0.32, -0.25)
-                        scale: Qt.vector3d(0.1, 0.12, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                    }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0.1, 0.32, -0.25)
-                        scale: Qt.vector3d(0.1, 0.12, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                    }
-                    // 瞳（z=-0.26 略凸出白底前）。
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(-0.1, 0.32, -0.26)
-                        scale: Qt.vector3d(0.05, 0.06, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                    }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0.1, 0.32, -0.26)
-                        scale: Qt.vector3d(0.05, 0.06, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                    }
-                    // 头盔（装备槽 0 有护甲时叠头；z 探出 +0.06，眼仍露，同 Main.qml playerArmorHead）。
+                    // t731 眼子 Model 移除（t52 四件白底/瞳）：皮肤脸区纹素自带五官，独立眼盒会叠画成双层眼。
+                    // 头盔（装备槽 0 有护甲时叠头；z 探出 +0.06，脸仍露，同 Main.qml playerArmorHead）。
                     Model {
                         visible: root.headArmor !== 0
                         geometry: UnitCube {}
@@ -253,12 +234,12 @@ Item {
                     }
                 }
 
-                // ── 躯干 + 胸甲（心 0.95，相对髋 y=0.35）──
+                // ── 躯干 + 胸甲（心 0.95，相对髋 y=0.35）── t731 皮肤化：PlayerSkinBox{piece:1} body 区。
                 Model {
-                    geometry: UnitCube {}
+                    geometry: PlayerSkinBox { piece: 1 }
                     position: Qt.vector3d(0, 0.35, 0)
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.shirtC }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                 }
                 Model {
                     visible: root.chestArmor !== 0
@@ -274,11 +255,13 @@ Item {
                 Node {
                     position: Qt.vector3d(-0.375, 0.7, 0)
                     eulerRotation: Qt.vector3d(Math.sin(root.player ? root.player.walkPhase : 0) * 22 * root.walkBlend * root.swingAmp, 0, 0)
+                    // t731 整臂皮肤盒（袖+手合并为 piece:2 整臂盒：arm 区覆盖整臂含手；中心 -0.35 长 0.7，
+                    //   同 Main.qml playerModel 双臂；护甲袖 (0.30,0.52,0.30) 包上臂不变）。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.25, 0.5, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.shirtC }
+                        geometry: PlayerSkinBox { piece: 2 }
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.25, 0.7, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                     }
                     Model {
                         visible: root.chestArmor !== 0
@@ -287,21 +270,18 @@ Item {
                         scale: Qt.vector3d(0.30, 0.52, 0.30)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.armorColor(root.chestArmor) }
                     }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.6, 0)
-                        scale: Qt.vector3d(0.25, 0.2, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.skinC }
-                    }
+                    // t731 旧手段 Model 移除：并入上方整臂皮肤盒（arm 区底 2px 行即手纹素）。
                 }
                 Node {
                     position: Qt.vector3d(0.375, 0.7, 0)
                     eulerRotation: Qt.vector3d(-Math.sin(root.player ? root.player.walkPhase : 0) * 22 * root.walkBlend * root.swingAmp, 0, 0)
+                    // t731 整臂皮肤盒（袖+手合并为 piece:2 整臂盒：arm 区覆盖整臂含手；中心 -0.35 长 0.7，
+                    //   同 Main.qml playerModel 双臂；护甲袖 (0.30,0.52,0.30) 包上臂不变）。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.25, 0.5, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.shirtC }
+                        geometry: PlayerSkinBox { piece: 2 }
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.25, 0.7, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                     }
                     Model {
                         visible: root.chestArmor !== 0
@@ -310,12 +290,7 @@ Item {
                         scale: Qt.vector3d(0.30, 0.52, 0.30)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.armorColor(root.chestArmor) }
                     }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.6, 0)
-                        scale: Qt.vector3d(0.25, 0.2, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.skinC }
-                    }
+                    // t731 旧手段 Model 移除：并入上方整臂皮肤盒（arm 区底 2px 行即手纹素）。
                 }
             }
 
@@ -328,11 +303,12 @@ Item {
                 eulerRotation: Qt.vector3d(-Math.sin(root.player ? root.player.walkPhase : 0) * 28 * root.walkBlend * root.swingAmp
                                            + root.crouchThigh + root.jumpThigh, 0, 0)
                 // 大腿段（裤色 #3a3a5a；髋下 0..0.3，中心 -0.15、scale.y=0.3）
+                // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区上半行（同 Main.qml）。
                 Model {
-                    geometry: UnitCube {}
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.pantsC }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                 }
                 Model {
                     visible: root.legsArmor !== 0
@@ -345,11 +321,12 @@ Item {
                 Node {
                     position: Qt.vector3d(0, -0.3, 0)
                     eulerRotation: Qt.vector3d(root.crouchKnee, 0, 0)
+                    // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（鞋在最底）。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.pantsC }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                     }
                     Model {
                         visible: root.legsArmor !== 0
@@ -372,11 +349,12 @@ Item {
                 position: Qt.vector3d(0.125, 0.6 - root.crouchDrop, 0)
                 eulerRotation: Qt.vector3d(Math.sin(root.player ? root.player.walkPhase : 0) * 28 * root.walkBlend * root.swingAmp
                                            + root.crouchThigh + root.jumpThigh, 0, 0)
+                // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区上半行（同 Main.qml）。
                 Model {
-                    geometry: UnitCube {}
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.pantsC }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                 }
                 Model {
                     visible: root.legsArmor !== 0
@@ -388,11 +366,12 @@ Item {
                 Node {
                     position: Qt.vector3d(0, -0.3, 0)
                     eulerRotation: Qt.vector3d(root.crouchKnee, 0, 0)
+                    // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（鞋在最底）。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.pantsC }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
                     }
                     Model {
                         visible: root.legsArmor !== 0

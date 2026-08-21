@@ -1383,6 +1383,13 @@ Window {
         "mobarmor": {
             desc: "/mobarmor <tier> —— 最近的人形 mob（蹒跚者/骸骨）穿整套护甲；越界 tier 脱甲",
             run: function(rest) { return window.runMobArmor(rest) }
+        },
+        // t731 /skin 命令（spec t731 皮肤选择 v1）：/skin <default|alex> 切换玩家皮肤（setPlayerSkin 持久化
+        //   settings.json + 内存态即时生效），成功同步 window.skinName → playerModel/背包预览贴图绑定重算
+        //   即时换肤。机制等价 MC 1.0 经典皮肤选择（两档；§9：仅机制映射，贴图为程序/pack 自备）。
+        "skin": {
+            desc: "/skin <default|alex> —— 切换玩家皮肤（第三人称模型 + 背包预览即时生效）",
+            run: function(rest) { return window.runSkin(rest) }
         }
     })
     // t715 /effect 解析：rest 含前导空格如 " poison 30"。类型词 → PlayerState.StatusEffect 枚举值
@@ -1457,6 +1464,19 @@ Window {
                 : "最近的 mob 已脱甲"
         }
         return "穿甲失败（目标非人形或已死亡）"
+    }
+    // t731 /skin 解析（spec 见 commandRegistry.skin 注释）：rest 含前导空格如 " alex"。仅 default/alex 两档
+    //   （v1）；成功 → setPlayerSkin（Core 持久化 settings.json）+ 同步 skinName（QML 贴图绑定重算即时换肤）
+    //   + 中文确认回显；非法/失败 → 用法提示。分层（PLAN §2）：皮肤名权威态在 Core ResourcePackManager，
+    //   QML skinName 仅镜像供贴图绑定，命令胶水只在呈现层。
+    function runSkin(rest) {
+        const name = rest.trim().split(/\s+/)[0].toLowerCase()
+        if (name !== "default" && name !== "alex")
+            return "用法: /skin <default|alex>（当前: " + skinName + "）"
+        if (!resourcePack.setPlayerSkin(name))
+            return "皮肤切换失败（settings.json 写入受限，重启后回退旧值）"
+        skinName = name   // 绑定重算 → playerModel / CharacterPreview3D 即时换肤
+        return "已切换玩家皮肤: " + name
     }
     // misc 二轮 `/time` 解析（spec）：rest 含前导空格如 " set day"。子命令 set/add。
     //   phase 语义：0=正午 0.25=黄昏 0.5=子夜 0.75=黎明（与 WorldClock 一致）。
@@ -1964,6 +1984,23 @@ Window {
         if (layer === 2)
             return t === 0 ? armorL2T0 : t === 2 ? armorL2T2 : t === 3 ? armorL2T3 : t === 4 ? armorL2T4 : armorL2T1
         return t === 0 ? armorL1T0 : t === 2 ? armorL1T2 : t === 3 ? armorL1T3 : t === 4 ? armorL1T4 : armorL1T1
+    }
+
+    // ── t731 玩家皮肤（playerModel 第三人称 + CharacterPreview3D 背包预览共用；PlayerSkinBox 采样源）──
+    // 皮肤名（"default"/"alex"）：启动初值从 Core 读（playerSkin() = settings.json playerSkin 镜像，缺省
+    //   default）；/skin 命令切换时由 runSkin 同步 → 下方贴图 source 绑定重算即时换肤。QML 侧仅镜像
+    //   （权威态在 Core ResourcePackManager，PLAN §2 分层）。
+    property string skinName: resourcePack.playerSkin()
+    // 皮肤贴图两态 URL（同 armorLayerFinalUrl 模式）：pack 启用且命中（playerSkinSource 返非空 file:///，
+    //   Core 侧含 64×64 老式布局裁上半重排落盘）→ pack 皮肤；否则程序皮肤 qrc:/textures/entity_skin_<名>
+    //   .png（t717 程序自绘，§9 原创）。Q_INVOKABLE 返 QString → 真字符串判空 length 无妨（Texture.source
+    //   的 QUrl 对象才须 toString().length，t497 坑）。source 绑定读 active + skinName → pack 开关/换肤即时刷新。
+    function skinFinalUrl() {
+        if (resourcePack.active) {
+            const u = resourcePack.playerSkinSource(skinName)
+            if (u.length > 0) return u
+        }
+        return "qrc:/textures/entity_skin_" + (skinName === "alex" ? "alex" : "default") + ".png"
     }
 
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
@@ -3722,6 +3759,10 @@ Window {
         Texture { id: armorL2T2; source: window.armorLayerFinalUrl(2, 2); generateMipmaps: false }
         Texture { id: armorL2T3; source: window.armorLayerFinalUrl(3, 2); generateMipmaps: false }
         Texture { id: armorL2T4; source: window.armorLayerFinalUrl(4, 2); generateMipmaps: false }
+        // t731 玩家皮肤贴图（playerModel 全部件共享单实例；CharacterPreview3D 预览另持独立实例——Texture 是
+        //   场景资源不跨 View3D 共享）：source 两态 pack/程序（skinFinalUrl），/skin 换肤（skinName 变）或
+        //   pack 开关（activeChanged）→ 绑定重算即时刷新。运行期读本地 gitignored pack PNG（红线 §9）。
+        Texture { id: playerSkinTex; source: window.skinFinalUrl(); generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
         //   但手持/掉落旧路径走 BlockCube（6 面立方贴图集 tile 17）→ 即便 alphaCutoff 丢弃透明底，肉眼仍是
@@ -4158,9 +4199,10 @@ Window {
         }
 
         // 玩家 3D 模型（t28）：方块化人形（头/躯干/双臂/双腿），跟随玩家脚底位置 + yaw 朝向。
-        // 纯色 PrincipledMaterial 自绘原创（肤色/上衣/裤色，对齐 SurvivalInventory 预览配色），不拷贝任何
-        // MC 皮肤/玩家贴图（§9 override (a)）。模型属呈现层、纯装饰——碰撞仍走 PlayerController 的 AABB，
-        // 模型不进 World/Physics（PLAN §2 分层）。
+        // t731 皮肤化：身体各部件 UnitCube 纯色 → PlayerSkinBox（MC 64×32 皮肤布局 box-UV 按部位采样）+
+        //   皮肤贴图（pack 命中 steve/alex.png / 否则 qrc 程序自绘 entity_skin_*，两态由 skinFinalUrl 选；
+        //   §9：程序贴图原创、pack PNG 运行期读本地 gitignored 文件）。模型属呈现层、纯装饰——碰撞仍走
+        //   PlayerController 的 AABB，模型不进 World/Physics（PLAN §2 分层）。
         // 显隐：仅第三人称可见（第一人称看不到自己身体，visible 绑 cameraMode）。不透明度绑模式：观察者
         // = 半透幽灵 0.35（opacity<1 时 PrincipledMaterial 自动走透明混合），创造/生存=不透明 1.0。
         // 身体（躯干/四肢）只随水平 yaw 转、不随 pitch 倾；抬头只动相机 + 头部 Node（t66），不动身体躯干。
@@ -4181,7 +4223,8 @@ Window {
             property real hurt: 0.0
             // 把基础 RGB（0..1 三通道）按 hurt 系数 lerp 向纯红 (1,0,0)。hurt 作参数显式传入 → 绑定依赖
             //   挂在 hurt 上（与 dayNightColor(worldClock.skyLight) 同模式：变化的 NOTIFY 属性作函数参数）。
-            //   hurt=0 返回原色、hurt=1 返回纯红。纯函数（不存状态）。眼睛（白/瞳）不调此函数 → 不变红。
+            //   hurt=0 返回原色、hurt=1 返回纯红。纯函数（不存状态）。t731 皮肤化部件传 (1,1,1) → 健康=
+            //   白 tint（贴图原色完整透出）、受伤=红 tint 乘贴图（t730 mob 贴图 tint 同规，贴图不受破坏）。
             function hurtTint(hurt, r, g, b) {
                 return Qt.rgba(r + (1.0 - r) * hurt, g * (1.0 - hurt), b * (1.0 - hurt), 1.0)
             }
@@ -4305,12 +4348,16 @@ Window {
                     position: Qt.vector3d(0, 0.7, 0)   // 颈枢（相对 upperBody）：头底/躯干顶；世界 = 髋枢+0.7
                     eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, player.pitch)), 0, 0)
 
-                    // 头（≈0.5³，肤色）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。pitch=0 时与重组前完全一致。
+                    // 头（≈0.5³）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。pitch=0 时与重组前完全一致。
+                    //   t731 皮肤化：UnitCube 纯色 → PlayerSkinBox{piece:0}（head 区 (0,0) 8×8×8 box-UV；本工程
+                    //   -Z 前脸采皮肤脸区 → 五官由贴图自带，旧 4 个眼子 Model 移除，见下方注释）。材质对齐贴图
+                    //   生物（t730 鱿鱼同款）：NoLighting + baseColor 近白 tint——hurtTint(hurt,1,1,1) 健康=白
+                    //   （贴图原色完整透出）、受伤=红（tint 乘贴图，贴图不受破坏）。
                     Model {
-                        geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
+                        geometry: PlayerSkinBox { piece: 0 }
                         position: Qt.vector3d(0, 0.25, 0)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                     }
                     // t377/t452/t498/t718 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲。
                     //   t718 升级 layer 贴图壳：几何换 ArmorLayerBox{piece:0}（±0.5 单位盒 + MC armor layer_1
@@ -4343,46 +4390,19 @@ Window {
                             opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity
                         }
                     }
-                    // 眼睛（t39 / t52 贴脸修正）：头部正面（朝 -Z = 玩家朝向；t04 约定 yaw=0 时前向 = (0,0,-1)）
-                    // 的两个对称小方块，使第三人称能看到「脸」。白眼底 (#e8e8e8) + 深色瞳 (#1a1a1a) 两层，原创纯色
-                    // （§9 override (a)，无 MC 皮肤）。作 headNode 子节点 → 随头部俯仰（眼贴头表面 → 跟随看视线方向）。
-                    //
-                    // t52：贴脸 z（头半厚 0.25，头前面 z=-0.25）：白眼底 z=-0.25、瞳 z=-0.26（略凸出 0.01，
-                    //   在白眼底前；z 须 ≤-0.25 才不被不透明头遮挡）。|z|≈头半径 0.25 → 贴头表面而非外飘。
-                    // t66：眼从 playerModel 直系子迁入 headNode（颈枢本地坐标）；眼相对颈 y=0.32（世界 1.62-1.3），
-                    //   pitch=0 时绝对坐标与重组前一致（无回归）；贴脸 z 不变。
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(-0.1, 0.32, -0.25)
-                        scale: Qt.vector3d(0.1, 0.12, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
-                    }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0.1, 0.32, -0.25)
-                        scale: Qt.vector3d(0.1, 0.12, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8"; opacity: playerModel.bodyOpacity }
-                    }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(-0.1, 0.32, -0.26)
-                        scale: Qt.vector3d(0.05, 0.06, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
-                    }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0.1, 0.32, -0.26)
-                        scale: Qt.vector3d(0.05, 0.06, 0.02)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a"; opacity: playerModel.bodyOpacity }
-                    }
+                    // t731 眼子 Model 移除（t39/t52/t66 四件：白眼底×2 + 瞳×2）：头换 PlayerSkinBox 皮肤脸区
+                    //   后五官（含眼）由贴图纹素自带——独立眼盒会叠画在贴图眼上（双层眼瑕疵），整组删除。
+                    //   随头部俯仰的锚定由 headNode 本身承担（原眼作 headNode 子节点随俯仰，删后无姿态回归）。
                 }
                 // 躯干（上衣色；y 0.6→1.3，宽 0.5 深 0.3）。t71：迁入 upperBody；本地中心 y=0.35（髋枢+0.35=世界 0.95），
-                //   蹲下随上半身绕髋前倾鞠躬（非 t65 逐件下沉）。
+                //   蹲下随上半身绕髋前倾鞠躬（非 t65 逐件下沉）。t731 皮肤化：UnitCube → PlayerSkinBox{piece:1}
+                //   （body 区 (16,16) 8×12×4 box-UV）+ 皮肤贴图（tint 同头部：近白透贴图、受伤红闪）。
+                //   位置/尺度沿用（0.7 高 vs 贴图 12px 有 ~7% 竖向微拉伸——保持 1.8 总高与护甲/蹲坐几何零回归）。
                 Model {
-                    geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 改自定义 UnitCube 几何（同地形/线框的已验证路径）
+                    geometry: PlayerSkinBox { piece: 1 }
                     position: Qt.vector3d(0, 0.35, 0)
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                 }
                 // t377/t452/t498/t718 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t452 放大包裹躯干
                 //   （X 探 0.04 / Y 探 0.02 / Z 探 0.07）；t718 几何换 ArmorLayerBox{piece:1}（layer_1 胸甲区
@@ -4418,12 +4438,15 @@ Window {
                         const walk = Math.sin(player.walkPhase) * 22 * playerModel.walkBlend * playerModel.swingAmp
                         return Qt.vector3d(walk, 0, 0)
                     }
-                    // 袖段（上衣色 #3a6a9a；y 0.8→1.3 = 肩下 0.25..0.5）
+                    // t731 整臂皮肤盒（袖+手两 Model 合并）：皮肤 arm 区 (40,16) 4×12×4 覆盖整臂含手（底部
+                    //   ~2px 行即手区），分两 Model 采样会切断袖→手纹素连续 → 单整臂盒 piece:2。区间 = 旧袖
+                    //   span(-0.5..0) ∪ 旧手 span(-0.5..-0.7) → 中心 -0.35、长 0.7；护甲袖 (0.30,0.52,0.30)
+                    //   包上臂不变（t718 盔甲层照常叠显/遮挡）。
                     Model {
-                        geometry: UnitCube {}   // t31：静态 #Cube 不渲染 → 自定义 UnitCube（同地形/线框已验证路径）
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.25, 0.5, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                        geometry: PlayerSkinBox { piece: 2 }
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.25, 0.7, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                     }
                     // t498 二轮复盘/t718：左臂胸甲袖（装备槽 1 胸甲覆盖手臂；机制等价 MC 1.0 chestplate 覆盖躯干+双臂）。
                     //   作 leftArmPivot 子节点 → 随左臂行走摆动。略大于袖段（X/Z 探 0.02 包裹袖）。t718 几何换
@@ -4445,13 +4468,7 @@ Window {
                             opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity
                         }
                     }
-                    // 手（肤色 #caa472；臂末端 y 0.6→0.8 = 肩下 0.5..0.7）
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.6, 0)
-                        scale: Qt.vector3d(0.25, 0.2, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
-                    }
+                    // t731 旧手段 Model 移除：并入上方整臂皮肤盒（arm 区底 2px 行即手纹素）。
                 }
                 // 右臂枢轴（t45 / t52 持方块）：与左臂对称（右肩相对 upperBody：0.375, 0.7, 0），行走与左腿同相（−sin）。
                 //   t52：挖掘/放置只动右手——仅右臂读 mineBlend（挖掘挥臂前抬 70°）；左臂已不读（见上）。t71：随 upperBody 鞠躬。
@@ -4464,11 +4481,12 @@ Window {
                         const x = walk * (1 - playerModel.mineBlend) + 70 * playerModel.mineBlend
                         return Qt.vector3d(x, 0, 0)
                     }
+                    // t731 右臂整臂皮肤盒（同左臂注：袖+手合并为 piece:2 整臂盒，中心 -0.35 长 0.7）。
                     Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.25, 0.5, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604); opacity: playerModel.bodyOpacity }
+                        geometry: PlayerSkinBox { piece: 2 }
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.25, 0.7, 0.25)
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                     }
                     // t498 二轮复盘/t718：右臂胸甲袖（同左臂 playerArmorSleeveL，镜像；覆盖右袖，随右臂行走/挖掘挥动）。
                     //   t718 几何换 ArmorLayerBox{piece:2} + layer 贴图（同左袖）。
@@ -4487,12 +4505,7 @@ Window {
                             opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity
                         }
                     }
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.6, 0)
-                        scale: Qt.vector3d(0.25, 0.2, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447); opacity: playerModel.bodyOpacity }
-                    }
+                    // t731 旧手段 Model 移除：并入上方整臂皮肤盒（同左臂）。
                     // 手持方块（t52）：持有方块（selectedBlock≠0）时，第三人称右手上显该方块小图标。
                     //   作 rightArmPivot 子节点 → 随右臂行走 / 挖掘挥臂同步运动（块在手中，自然跟随）。
                     //   BlockCube + 共享图集 → per-face 贴图（草顶 / 草侧…），复用地形贴图（零 MC 资产）。
@@ -4748,11 +4761,13 @@ Window {
                     return Qt.vector3d(walk + playerModel.crouchThigh + playerModel.sitThigh, 0, 0)
                 }
                 // 大腿段（裤色 #3a3a5a；髋下 0..0.3，中心 -0.15、scale.y=0.3）
+                // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区 (0,16) 上半行（裤）——
+                //   MC 整腿单盒 vs 本工程分大腿/小腿绕膝弯折 → 段各采半区（几何类 subV 头注释）；位置/尺度沿用。
                 Model {
-                    geometry: UnitCube {}
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                 }
                 // t377/t452/t718 左护腿-大腿段（装备槽 2）：作大腿枢轴子节点 → 随大腿行走 / 蹲下摆动。t452 放大
                 //   （X/Z 探 0.025、Y 探 0.02）使第三人称可见；小腿段见 leftKneePivot 内 playerArmorCalfL（MC 护腿
@@ -4780,11 +4795,13 @@ Window {
                     position: Qt.vector3d(0, -0.3, 0)
                     eulerRotation: Qt.vector3d(playerModel.crouchKnee + playerModel.sitKnee, 0, 0)
                     // 小腿段（膝下 0..0.3，中心 -0.15、scale.y=0.3）
+                    // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（裤脚+鞋在最底
+                    //   2 行，恰落小腿段底 = 鞋位正确）。护腿/靴壳（t718）照常叠显遮挡，未动。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                     }
                     // t452/t718 左护腿-小腿段（装备槽 2）：作膝盖枢轴子节点 → 随小腿 / 蹲下弯折。与大腿段 playerArmorLegL
                     //   共享装备槽 2（护腿覆盖整条腿）；放大同大腿段（探 0.025），第三人称小腿护甲清晰可见。t718 几何换
@@ -4834,11 +4851,13 @@ Window {
                     const walk = Math.sin(player.walkPhase) * 28 * playerModel.walkBlend * playerModel.swingAmp
                     return Qt.vector3d(walk + playerModel.crouchThigh + playerModel.sitThigh, 0, 0)
                 }
+                // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区 (0,16) 上半行（裤）——
+                //   MC 整腿单盒 vs 本工程分大腿/小腿绕膝弯折 → 段各采半区（几何类 subV 头注释）；位置/尺度沿用。
                 Model {
-                    geometry: UnitCube {}
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                 }
                 // t377/t452/t718 右护腿-大腿段（装备槽 2）：镜像左大腿护腿（t452 放大；小腿段见 rightKneePivot）。
                 //   t718 几何换 ArmorLayerBox{piece:3} + layer 贴图（同左侧）。t498 绑定改表达式形式（见头盔注）。
@@ -4861,11 +4880,13 @@ Window {
                     id: rightKneePivot
                     position: Qt.vector3d(0, -0.3, 0)
                     eulerRotation: Qt.vector3d(playerModel.crouchKnee + playerModel.sitKnee, 0, 0)
+                    // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（裤脚+鞋在最底
+                    //   2 行，恰落小腿段底 = 鞋位正确）。护腿/靴壳（t718）照常叠显遮挡，未动。
                     Model {
-                        geometry: UnitCube {}
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.227, 0.353); opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
                     }
                     // t452/t718 右护腿-小腿段（装备槽 2）：镜像左小腿护腿（随小腿 / 蹲下弯折；与右大腿段共享槽 2）。
                     //   t718 几何换 ArmorLayerBox{piece:3} + layer 贴图（同左侧）。

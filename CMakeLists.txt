@@ -108,6 +108,11 @@ qt_add_executable(voxelsandbox
     #   （程序层 / pack 运行期映射）按部位采样。贴图选择在呈现层（Main.qml），本类只产出几何 + UV。
     src/Renderer/armorlayerbox.cpp
     src/Renderer/armorlayerbox.h
+    # t731 玩家皮肤盒几何（Renderer 层）：playerModel 第三人称 + CharacterPreview3D 预览共用。±0.5
+    #   单位盒 + MC 皮肤 64×32 box-UV 六面子区（同 ArmorLayerBox 公式）+ subV0/1 腿分段行区间裁切。
+    #   贴图选择在呈现层（Main.qml skinTexture()），本类只产出几何 + UV。
+    src/Renderer/playerskinbox.cpp
+    src/Renderer/playerskinbox.h
     # t331 骸骨持用弓几何（独立于 MobModel —— 弓需木褐色材质 + 拉弓动画；QML 独立 Model 消费）。
     #   drawAmount Q_PROPERTY 驱动弦后拉 + 肢增弯；EntityManager::drawAmountAt 设值（aimTimer 驱动）。
     src/Renderer/mobbow.cpp
