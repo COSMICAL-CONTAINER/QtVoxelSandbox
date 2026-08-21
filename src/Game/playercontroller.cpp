@@ -3717,10 +3717,10 @@ void PlayerController::placeBlock()
     }
     // t565 矿车交互（spec「右键铁轨放矿车 / 右键矿车骑乘 / WASD 沿轨行驶」；机制等价 MC 1.0 minecart）。
     //   两分支（同船交互模式）：(a) 骑乘（优先）：跑独立矿车命中射线（tryMount 内 findCartHit）命中矿车 →
-    //   上车（不要求 m_hasHit —— 瞄的是实体非方块）。(b) 放矿车：手持矿车物品（MinecartId）+ 命中方块是
-    //   Rail → 在该轨格生成矿车（spawnCart，pos = 格中心轨面上）；生存消耗 1 / 创造不耗。矿车物品非方块
+    //   上车（不要求 m_hasHit —— 瞄的是实体非方块）。(b) 放矿车：手持矿车物品（MinecartId）+ 命中方块
+    //   是 Rail → 在该轨格生成矿车（spawnCart，pos = 格中心车底贴轨板顶）；命中非轨 → 命中面邻格地面放
+    //   置（t734 放宽，静止待拾取）。生存消耗 1 / 创造不耗。矿车物品非方块
     //   （材料段）→ selectedBlock 归 Air，须在 m_selectedBlock==Air 守卫之前分流（同船 / 桶 / 蛋模式）。
-    //   命中方块非 Rail → 不放（矿车只能放轨上，机制等价 MC 矿车须置于铁轨）。
     if (m_minecartManager) {
         // (a) 骑乘：命中矿车 → 上车（即便手持矿车物品也不另放，机制等价 MC 右键矿车优先上车）。
         //   rv-low-batch2 骑乘互斥：骑船时不得再上矿车（旧版两 rider 同时置位成幽灵骑乘态）。守卫：骑船中
@@ -3731,16 +3731,29 @@ void PlayerController::placeBlock()
             emit swingArm();
             return;
         }
-        // (b) 放矿车：手持矿车物品 + 未骑乘 + 命中方块为铁轨（t638 家族——普通 / 动力 / 探测轨均可放车）。
+        // (b) 放矿车（t734 放宽「可放地上但静止」）：手持矿车物品 + 未骑乘 + 有命中。命中 Rail（t638
+        //   家族——普通 / 动力 / 探测轨）→ 轨上放置（行驶语义，格 = 命中轨格）；命中非轨方块 → 放置邻格
+        //   （命中面外推 hit+normal，同普通方块放置推导），须邻格为 Air 且下方有支撑（车底贴格底静止
+        //   待拾取 —— 推不动：pushEmptyCart 的 pickTrackStep 无轨不推 / tickRiddenCart 离轨钉停 /
+        //   stepCartAlongRail 到心重选失败即停；机制等价 MC 矿车可放地上但推不动）。邻格非 Air / 无支撑
+        //   → 不放。生存消耗 1 / 创造不耗。
         if (m_minecartManager->ridingIndex() < 0 && m_hotbar
-            && heldItemId == RecipeRegistry::MinecartId && m_hasHit
-            && BlockRegistry::isRail(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
-            m_minecartManager->spawnCart(m_hitBx, m_hitBy, m_hitBz, m_world);
-            if (m_mode != Creative)
-                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 矿车（创造不耗）
-            m_lastPlaceMs = now;
-            emit swingArm();
-            return;
+            && heldItemId == RecipeRegistry::MinecartId && m_hasHit && m_world) {
+            int cx = m_hitBx, cy = m_hitBy, cz = m_hitBz;
+            bool ok = BlockRegistry::isRail(m_world->blockAt(cx, cy, cz));
+            if (!ok) {
+                cx += m_hitNx; cy += m_hitNy; cz += m_hitNz; // 非轨命中 → 命中面邻格（矿车是实体，落位格须空）
+                ok = m_world->blockAt(cx, cy, cz) == BlockRegistry::Air
+                     && m_world->blockAt(cx, cy - 1, cz) != BlockRegistry::Air; // 上方落位空 + 下方有支撑
+            }
+            if (ok) {
+                m_minecartManager->spawnCart(cx, cy, cz, m_world);
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 矿车（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm();
+                return;
+            }
         }
     }
     // t661 睡莲深水放置（dev-plan t661「只能放浅水（鼠标须指到水下方块）」修）：瞄深水（水底实块超出射程 /

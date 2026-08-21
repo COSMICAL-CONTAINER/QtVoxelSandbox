@@ -35,12 +35,18 @@ void MinecartManager::spawnCart(int x, int y, int z, World *world)
 {
     if (m_liveCount >= kCap) { qWarning("vo.entities: MinecartManager spawnCart cap reached (%d)", kCap); return; }
     Cart c;
-    // 矿车中心 = 轨格中心、轨面上 kCartRideH（轨格 cell 顶 = y+1；轨薄板 y=1/16 之上 → 车底贴轨面）。
-    c.pos = QVector3D(float(x) + 0.5f, float(y) + 1.0f + kCartRideH, float(z) + 0.5f);
+    // t734 ① 贴轨修真：轨面基准 = 轨格 cell 底 + 薄板 1/16（mesher yr 常量），**非 cell 顶**。旧版
+    //   y+1.0+kCartRideH 把「格底薄板」当「格顶」→ 矿车悬浮约一整格（primed TNT / 雪傀儡 restY 基准
+    //   同族错：渲染面贴格底、物理从格顶叠）。轨上：车底（渲染底板下沿 = 中心 −0.15）贴轨板顶 →
+    //   中心 = y + rise + kCartRideH；非轨格（t734 放宽地面放置）：底贴 cell 底静止（kCartGroundH）。
+    const bool onRail = world && BlockRegistry::isRail(world->blockAt(x, y, z));
+    c.pos = QVector3D(float(x) + 0.5f,
+                      float(y) + (onRail ? kCartRideH : kCartGroundH),
+                      float(z) + 0.5f);
     // t708 ② 初始朝向沿轨延伸（不再固定 +Z）：据目标轨格连接位定轴 —— X 轴连接 → 沿 X（单端取该延伸向、
     //   对向取 +X）；仅 Z 连接 → 沿 Z（单端取该向、对向取 +Z）；孤轨（0 连接）→ 默认 +Z（旧行为兜底）。
     //   车头由 tick 停驻重选向 / 玩家 S 反推（负速倒行）按 wish 重定向 —— 「双方向」由推 / 倒行机制承担。
-    if (world) {
+    if (onRail) {
         const quint8 st = world->stateAt(x, y, z);
         const quint8 con = quint8(st & 0x0F);
         const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
@@ -69,13 +75,13 @@ void MinecartManager::spawnCart(int x, int y, int z, World *world)
                 const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * 0.5f;
                 const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * 0.5f;
             }
-            c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
+            c.pos.setY(float(y) + rise + kCartRideH); // t734：cell 底 + 坡面高（去掉旧 +1.0 格顶基准）
         }
         // 朝向 yaw 与 dir 同一公式（-Z 前 = 0 约定；见 tickRiddenCart yaw 更新注释）。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
     } else {
-        // 无世界（QML 兜底入口）：默认 +Z 初始行进方向（视觉初值；首 tick 据 wish 重选向）。
+        // t734 非轨格放置（地面静止车）/ 无世界兜底：默认 +Z 朝向（静态 —— 推进侧无轨守卫保证不动）。
         c.dirX = 0.0f; c.dirZ = 1.0f;
         c.yaw = 180.0f; // +Z 行进的车头朝向（-Z 前约定下 yaw=180）
     }
@@ -229,8 +235,8 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     return true;
 }
 
-// t708 钉轨面（共享 helper；实现见头注释）：矿车所在列向下扫最近轨格 → Y = cell 顶 + 坡面高 + kCartRideH。
-//   返钉到的轨格 Y（-1 = 列内无轨）。
+// t708 钉轨面（共享 helper；实现见头注释）：矿车所在列向下扫最近轨格 → Y = cell 底 + 坡面高 + kCartRideH
+//   （t734 基准修真：轨板贴 cell 底 +1/16，去掉旧 +1.0 格顶叠加）。返钉到的轨格 Y（-1 = 列内无轨）。
 int MinecartManager::pinCartY(Cart &c, World *world)
 {
     if (!world) return -1;
@@ -285,7 +291,7 @@ int MinecartManager::pinCartY(Cart &c, World *world)
                 }
             }
         }
-        c.pos.setY(float(y) + 1.0f + rise + kCartRideH);
+        c.pos.setY(float(y) + rise + kCartRideH); // t734：轨板贴 cell 底（mesher yr=1/16），去掉旧 +1.0 格顶基准
         return y;
     }
     return -1;
@@ -302,27 +308,46 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
     const int sgn = (step > 0.0f) ? 1 : -1;
     float tx = c.dirX * float(sgn);
     float tz = c.dirZ * float(sgn);
+    // t734 起步先验：矿车停在格心（到心重选失败 / 停驻死区 / spawn / 被推起步都在格心）时，起步前先从
+    //   当前列重选行进向 —— 死端 / 离轨即刻停零位移（旧版起步段不验 → 被骑输入每帧把清零速度再 lerp
+    //   起步，一格一格把车「蠕行」推离轨道）。格心判定用 1e-4 容差（到心落位 / spawn 均写精确 .5 值；
+    //   摩擦停车在段中非格心 → 跳过先验，其段已由上一格心的重选验证过）。拐角格心起步：重选结果即
+    //   出口向（自动掰向，同到心重选语义）。
+    {
+        const float ccx = std::floor(c.pos.x()) + 0.5f;
+        const float ccz = std::floor(c.pos.z()) + 0.5f;
+        if (std::fabs(c.pos.x() - ccx) < 1e-4f && std::fabs(c.pos.z() - ccz) < 1e-4f) {
+            int vdx = 0, vdz = 0;
+            if (!pickTrackStep(world, c.pos, tx, tz, vdx, vdz)) { c.speed = 0.0f; return; }
+            if (sgn > 0) { c.dirX = float(vdx); c.dirZ = float(vdz); }
+            tx = float(vdx); tz = float(vdz);
+        }
+    }
     float remain = std::fabs(step);
     int guard = 0;
-    while (remain > 1e-5f && guard++ < 8) { // 子步循环（单帧跨多格；8 子步上限防死循环）
-        // 当前段终点 = 当前所在格中心 + 行进 tx/tz（沿行进向的下一格中心边界）。
-        const int cxc = int(std::floor(c.pos.x()));
-        const int czc = int(std::floor(c.pos.z()));
-        const float nextCx = float(cxc) + 0.5f + tx;
-        const float nextCz = float(czc) + 0.5f + tz;
-        const float ddx = nextCx - c.pos.x();
-        const float ddz = nextCz - c.pos.z();
-        const float segLen = std::fabs(ddx) + std::fabs(ddz); // 轴向 → 曼哈顿 = 欧氏
-        if (segLen <= 1e-5f) { c.speed = 0.0f; break; }       // 已在格中心（理论不达，防御）
+    while (remain > 1e-5f && guard++ < 16) { // 子步循环（单帧跨多格；16 子步上限（boost×卡顿尖峰 dt 余量））
+        // t734 段终点重写 = 行进向上**前方最近的格心**（行进轴 floor/ceil 取 k+0.5，另一轴不动）。
+        //   旧版「当前格心 + 行进向」在 16ms tick 下步长 ~0.06-0.21 < 段长下界 0.5 → `remain < segLen`
+        //   恒真 → 跨格分支（连接重选 / 拐角转弯 / 尽头停）在稳定帧率下是**死代码**、仅 dt 卡顿尖峰偶发
+        //   触发 → 矿车沿初始 dir 直线冲出轨道悬浮滑到地图边界（t734 用户报「离轨仍可移动」根因）。
+        //   改「前方最近格心」后每跨一个格心必经一次到心重选，任意步长都被轨连接位约束（帧率无关）。
+        float nextCx = c.pos.x(), nextCz = c.pos.z();
+        if (tx > 0.5f)       nextCx = std::floor(c.pos.x() + 0.5f) + 0.5f;
+        else if (tx < -0.5f) nextCx = std::ceil(c.pos.x() - 0.5f) - 0.5f;
+        else if (tz > 0.5f)  nextCz = std::floor(c.pos.z() + 0.5f) + 0.5f;
+        else if (tz < -0.5f) nextCz = std::ceil(c.pos.z() - 0.5f) - 0.5f;
+        const float segLen = std::fabs(nextCx - c.pos.x()) + std::fabs(nextCz - c.pos.z()); // 轴向 → 曼哈顿 = 欧氏
+        // 注：segLen→0（pos 距格心 <1e-5 的 FP 残差）不在此停 —— 循环条件保证 remain>1e-5 ≥ segLen，
+        //   自然落到心分支：钉到格心 + 到心重选（ε 残差被吸收，不误停车）。
         if (remain < segLen) {
-            // 段内推进：沿行进 tx/tz 归一位移（带符号 dir）。
+            // 段内推进：沿行进 tx/tz 归一位移（带符号 dir）。段起点必经上一格心重选验证 → 段内位移
+            //   恒在已验证的轨列上。
             c.pos.setX(c.pos.x() + tx * remain);
             c.pos.setZ(c.pos.z() + tz * remain);
             remain = 0.0f;
         } else {
-            // 跨到下一格中心：先落位，再重选下一连接向（拐角在此转弯）。pickTrackStep 内滤 dot<0 反向
-            //   （仅剩来路 / 无轨 = 轨尽头 → 返 false → 停：出轨不前进、倒行撞死端停）。t708：轨格解析
-            //   已改列内下扫（pickTrackStep 内部），坡顶 rise≥0.7 不再错层。
+            // 到心落位 → 重选下一连接向（拐角在此转弯；want = 行进向，dot≥0 滤反向）。无可用连接
+            //   （死端 / 离轨）→ 停在格心、零溢出（t734：格心即验证点，越过格心的位移必先经验证）。
             c.pos.setX(nextCx);
             c.pos.setZ(nextCz);
             remain -= segLen;
@@ -445,6 +470,19 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         for (int y = scanTop; y >= scanTop - 2 && y >= 0; --y) {
             if (BlockRegistry::isRail(world->blockAt(railX, y, railZ))) { railY = y; break; }
         }
+    }
+
+    // t734 ③ 离轨静止（防「矿车不在铁轨上仍可被骑着一路悬浮滑到地图边界」）：列内无轨（railY<0）→
+    //   钉死速度、跳过全部输入物理与推进 —— 不重选向 / 不 lerp 起步 / 不坡道溜 / 不位移。旧版速度照常
+    //   按输入 lerp 起步 + 段内推进不验轨 → 离轨车仍全速直线滑行。地面放置（t734 放宽）/ 轨被拆 / 冲出
+    //   轨端的矿车由此统一静止：可 Shift 下车（dismount 不经本函数）+ 左键拾取（hitCartFromRay）。
+    if (railY < 0) {
+        c.speed = 0.0f;
+        outCartPos = c.pos;
+        notifyChanged();
+        // 探测轨占用边沿照常收尾：m_detectorOccupied 本帧已清空 → prev 全为离开沿 → 离开格断电。
+        updateDetectorRailEdges(world, detectorPrev);
+        return;
     }
 
     // 目标速度：wish 在当前行进方向上的投影（前推 / 后拉；无输入 → 0 摩擦滑行渐停）。

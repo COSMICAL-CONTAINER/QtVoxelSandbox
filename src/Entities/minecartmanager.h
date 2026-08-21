@@ -15,7 +15,7 @@
 // 机制等价 MC 1.0 矿车沿轨行驶 + 弯道自动转向），轨上快速移动（明显快于步行）；离轨（下一格无轨）→ 停。
 // 左键挖矿车 → 矿车实体消失 + 掉矿车物品（可重放）。
 //
-// 数据形态：每个矿车实体 = {世界坐标 pos（矿车中心，轨面上 0.15）、水平行进方向 dirX/dirZ（单位向量，
+// 数据形态：每个矿车实体 = {世界坐标 pos（矿车中心，车底贴轨板顶 —— t734 基准=轨格 cell 底+1/16）、水平行进方向 dirX/dirZ（单位向量，
 //   轨向四向之一）、朝向 yawDeg（呈现层 Model 据它定向）、速度 speed（blocks/s，W 前进加速 / 松键摩擦衰减）、
 //   槽位 alive（slot-reuse 模型）}。呈现层（Main.qml 的 cartHost Repeater）经 count/posAt/yawAt 读数据，
 //   自发渲染矿车 Model（原创斗形几何，NoLighting），绝不反向写。
@@ -30,7 +30,7 @@
 //   的输入因无可用连接被拒 → 保持停驻；面向来路的输入选中来路 → 蓄力反推回程，机制等价 MC 尽头轨反向
 //   推回）。据 wish 在矿车行进方向上的投影算目标速度（前进 / 后退），速度向目标 lerp（动量）→ 沿「轨连接
 //   位」逐格推进（跨格时按行进方向选下一连接向 —— 拐角自动转弯，反向连接不选；仅剩来路（死端）→ 停）。
-//   矿车 Y 钉轨面（轨格 cell 顶 + kCartRideH）。
+//   矿车 Y 钉轨面（轨格 cell 底 + 坡面高 + kCartRideH；t734 基准修真：轨板贴 cell 底非 cell 顶）。
 //
 // 分层（PLAN §2）：本层属 Entities（位于 Game/Physics 之下、World 之上）。向下只读 World
 // （blockAt / stateAt，判轨 / 连接位），不依赖 Renderer / Physics / QtQuick3D。tickRiddenCart /
@@ -60,13 +60,16 @@ public:
     // 第 i 个槽位是否活体。呈现层 delegate 据它 visible（空槽隐藏，slot 复用保 Repeater count 单调不降）。
     Q_INVOKABLE bool aliveAt(int i) const;
 
-    // 在铁轨格 (x,y,z)（整数坐标，Rail 方块格）生成一个矿车实体。位置 = 该格中心、轨面上 kCartRideH。
+    // 在格 (x,y,z) 生成一个矿车实体。位置 = 该格中心、车底贴面：t734 起双模式 —— 目标格是 Rail（isRail
+    //   家族）→ 轨上模式（车底贴轨板顶 = cell 底+1/16+坡面高，可行驶）；目标格非 Rail（t734 放宽地面放置）
+    //   → 地面静止模式（车底贴 cell 底，kCartGroundH；推不动 —— pushEmptyCart 的 pickTrackStep 无轨不推、
+    //   tickRiddenCart 离轨钉停，静止待左键拾取）。
     //   t708 ①：贴轨面 —— 放置格中心（fx=fz=0.5）的坡面高按 mesher / tickRiddenCart 钉轨面同公式叠加
     //   （railProbeDelta 本轴抬升），坡格放置不悬空；拐角 / 十字无坡（mesher 同判）。
     //   t708 ②：初始朝向沿轨延伸 —— 据连接位定轴（X 连接 → 沿 X；否则 Z），单端连接取该延伸向、
     //   对向 / 无连接取 +X / +Z；车头由下方 tick / 玩家进入后按 wish 重定向（S 反推见 tick 负速倒行）。
-    //   目标格非 Rail → 不生成（防御；placeBlock 已守）。达 kCap → 跳过 + qWarning（防溢出）。
-    //   world 可空（QML 兜底入口缺世界时退避平贴 + 默认 +Z 朝向）。t708：本方法带 World* 参数 ——
+    //   达 kCap → 跳过 + qWarning（防溢出）。
+    //   world 可空（QML 兜底入口缺世界时退地面静止模式 + 默认 +Z 朝向）。t708：本方法带 World* 参数 ——
     //   **非 Q_INVOKABLE**（同 tryMount / dismount 的 C++ 直调约定；Q_INVOKABLE 会让 moc 对 World* 前向
     //   类型做 QMetaType 注册 → 「Meta Types must be fully defined」编译错）。仅 PlayerController placeBlock
     //   调（QML 无调用点 —— Main.qml 只读 count/revision/posAt/yawAt）。
@@ -189,6 +192,9 @@ private:
     // t708 沿轨推进（共享：被骑 / 空车被推同一物理）：把矿车沿当前行进 dir 推进 speed×dt（支持负速倒行
     //   —— S 反向推力的减速 → 负速退行），正行跨格时重选连接向（拐角自动转弯；轨尽头 / 出轨停）；
     //   倒行不翻转 dir（车头保持朝向），跨格前先验目的格列内确有轨（防倒退出轨落空悬停）。无轨列 → 清零停。
+    //   t734 段终点重写 = 行进向上前方最近的格心（旧「当前格心+行进向」段长 >0.5，在 16ms tick 步长
+    //   ~0.06-0.21 下跨格分支永不触发 = 连接重选/拐弯/尽头停全失效 → 直线冲出轨道；新取法每过一格心
+    //   必重选，帧率无关）+ 格心起步先验（死端/离轨零位移即停）。
     void stepCartAlongRail(Cart &c, World *world, float dt);
 
     // t708 钉轨面（共享：被骑 tickRiddenCart / 空车 tickPushedCarts 同一 Y 钉定）：把矿车 Y 钉到所在列向下
@@ -206,8 +212,17 @@ private:
     static constexpr float kCartHalfW  = 0.45f;  // 矿车 footprint 半宽（X；footprint 宽 0.9，匹配车斗）
     static constexpr float kCartHalfL  = 0.50f;  // 矿车 footprint 半长（Z；footprint 长 1.0）
     static constexpr float kCartHalfH  = 0.45f;  // 矿车命中盒半高（0.9 高，含车帮）
-    // 矿车中心距轨面（轨格 cell 顶）的骑乘高度：车底板贴轨面（铁轨薄板 y=1/16 之上）→ 中心 = 轨顶 + 0.3。
-    static constexpr float kCartRideH  = 0.30f;
+    // t734 贴轨修真：矿车中心距**轨格 cell 底**的骑乘高度。轨面真基准 = 轨格 cell 底 + 薄板厚 1/16
+    //   （PartialBlockGeometry Rail case 的 yr=1/16 常量，板贴 cell 底防 z-fight）——旧版 kCartRideH=0.30
+    //   配「+1.0 格」（cell 顶）把「格底薄板」误当「格顶」→ 矿车悬浮约一整格（primed TNT / 雪傀儡 restY
+    //   基准算错同族 bug：渲染面在格底、物理却从格顶叠）。车底 = 渲染 delegate 底板下沿（Main.qml cartHost
+    //   底板 piece：position.y=-0.12、scale.y=0.06 → 底 = 中心 −0.15）→ 中心 = 板顶 1/16 + 0.15 + 0.0125
+    //   微隙（防底板与轨板共面 z-fight）= 0.225。偏移远离整数格边界 → floor(pos.y) 定格列无 ULP 取整风险
+    //   （lessons「resting 复探 FP 边界」条）。
+    static constexpr float kCartRideH  = 0.225f;
+    // t734 非轨格（地面）放置的静止车：车底贴 cell 底（0.15 底板偏移 + 0.0125 微隙，无轨薄板层）。
+    //   放宽放置（可放地上但推不动）后 spawnCart 非轨模式用；离轨静止由推进侧无轨守卫保证。
+    static constexpr float kCartGroundH = 0.1625f;
     // 轨上矿车速度（blocks/s）：明显快于步行 4.3（机制等价 MC 1.0 矿车轨上 8 blocks/s）。
     static constexpr float kCartSpeed  = 8.0f;
     // t638 ⑤ 动力轨（GoldenRail）boost 档（blocks/s）：矿车驶上动力轨时的目标速度上限（kCartSpeed 的
