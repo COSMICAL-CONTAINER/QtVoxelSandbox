@@ -57,6 +57,7 @@ QString PlayerState::deathCauseText() const
     case GolemSlain:      return QStringLiteral("被铁傀儡击杀"); // t712：近距重拳直接击杀（非摔落路径）
     case Nightwalker:     return QStringLiteral("被夜行者重拳击杀"); // t727 近距蓄力重拳（末影人，§9 改名）
     case Emberling:       return QStringLiteral("被燃烬者的火球焚杀"); // t728 火球命中点燃（烈焰人，§9 改名）
+    case EnderPearlTp:    return QStringLiteral("被暗渊珠传送撕碎"); // t758 暗渊珠落点传送的固定代价伤害（§9 原创文案）
     case Generic:
     default:           return QStringLiteral("不明原因");
     }

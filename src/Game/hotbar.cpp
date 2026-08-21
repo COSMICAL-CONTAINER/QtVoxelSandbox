@@ -1001,7 +1001,7 @@ QString Hotbar::nameForBlock(int blockId) const
         // t720 画作（机制等价 MC 1.0 painting；8 木棒+1 羊毛合成；右键墙侧面贴画）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::PaintingId)      return QStringLiteral("画作");       // 8 木棒+1 羊毛合成；右键墙贴画
         // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod）。零 MC 专名（§9）。
-        if (blockId == RecipeRegistry::EnderPearlId)    return QStringLiteral("暗渊珠");     // 杀夜行者掉落；暗渊之眼原料
+        if (blockId == RecipeRegistry::EnderPearlId)    return QStringLiteral("暗渊珠");     // 杀夜行者掉落；暗渊之眼原料；右键投掷 → 落点传送（t758，tooltip 显名不含动作提示 —— 同雪球/蛋口径）
         if (blockId == RecipeRegistry::BlazePowderId)   return QStringLiteral("燃烬粉");     // 燃烬棒冶炼产物；暗渊之眼原料
         if (blockId == RecipeRegistry::BlazeRodId)      return QStringLiteral("燃烬棒");     // 怒焰人死亡掉落；烧燃烬粉
         // t727 生物蛋（夜行者）：末影人同源敌对潜行者的生成蛋。零 MC 专名（§9）。

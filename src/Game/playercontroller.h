@@ -442,6 +442,18 @@ public:
     //   垂直走 kGolemLaunchVy=16（峰值 16²/(2·28)≈4.6 格 > 3 格摔伤线 → 落回原位即 1..2 HP 摔落伤害，
     //   用户口径「打飞 4 格以上摔伤」）；同 applyHitKnockback 的 m_vel.y 直写模式（无双重力）。
     Q_INVOKABLE void applyGolemLaunch(float dirX, float dirZ);
+    // t758 暗渊珠落点传送（机制等价 MC 1.0 ender pearl 落地把掷出者传过去 + 传送附带伤害）：EntityManager
+    //   enderPearlLanded(x,y,z)（珍珠命中格 floor(next)）经 Main.qml Connections 路由调本方法（同
+    //   emberFireballHitPlayer→applyStatusEffect 模式）。安全落点 = B11 模式向下找最近「非实体立位（脚位 +
+    //   头位双格查，玩家高 ~1.8）+ 下方 solid 支撑」：命中格本身实体（撞地 / 撞墙）→ 首个支撑即命中格 → 立
+    //   其顶；悬空寿命到期 → 向下扫到地表。全列无可立位（深坑实心柱 / 一格窄缝）→ 不传送（珍珠白耗，防传
+    //   到不可玩位置）。瞬移 = loadSavedState 模式（m_pos 直写格中心 + 清 m_vel/m_knockback + **m_peakY 重置**
+    //   防瞬移落差误判摔伤 + emit positionChanged）；骑乘中先下坐骑（同 respawn；防传后仍挂在远处坐骑上）。
+    //   传送伤害 kEnderPearlTpDamage **仅 Survival 发**（fallDamageTaken 链 → 护甲减伤 → takeDamage，死因
+    //   EnderPearlTp「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 创造无敌）。死亡态（掷出后珍珠飞行
+    //   中被怪打死）不传（尸体原地）。分层（PLAN §2）：本方法属 Game/Physics（读 World 扫落点 + 写玩家态），
+    //   落点语义由 Entities 层经信号向下传。
+    Q_INVOKABLE void applyEnderPearlTeleport(int x, int y, int z);
     // t477 铁砧损坏推进（AnvilUI 每次成功操作后调）：滚概率（~1/3）损坏铁砧 +1 阶段。据当前阶段经
     //   BlockRegistry::anvilNextStage 推进：完好→微损 / 微损→重损 / 重损→Air（碎裂移除）。重损→碎裂时
     //   发 blockBroken(Anvil) 触发破块粒子 / 音（机制等价 MC 铁砧用坏碎裂）。坐标 = 玩家所点铁砧格世界坐标。
@@ -1471,6 +1483,11 @@ private:
     //   → 落回原位落差 >3 格必触发摔落伤害（4..5 格 → 1..2 HP，机制等价 MC 1.0 铁傀儡上勾拳抛起摔伤）。
     //   数值语义同 EntityManager::kGolemLaunchVy（单一权威在 Entities 的攻击参数区；此处 Physics 侧镜像消费）。
     static constexpr float kGolemLaunchVy     = 16.0f; // 铁傀儡上抛垂直初速（blocks/s）
+    // t758 暗渊珠传送伤害（HP）：applyEnderPearlTeleport 瞬移后即发 fallDamageTaken(本值, EnderPearlTp)。
+    //   机制等价 MC 1.0 ender pearl 传送固定扣 5HP（2.5 心「传送撕裂」代价 —— 高频滥用会被磨死，珍珠是
+    //   战术位移非免费飞行）；走 fallDamageTaken 链吃护甲 / 摔落保护减伤（同玩家侧伤害族口径）。仅 Survival
+    //   发（Creative 无伤，见方法注释）。
+    static constexpr int kEnderPearlTpDamage  = 5;     // 暗渊珠传送伤害（HP；MC 1.0 同值 5）
     // t655 击飞→摔死归属窗口（秒）：applyGolemLaunch 起 5s 内的着地摔伤归因「被铁傀儡击飞摔死」。
     //   5s 贴 MC 惯例（伤害归属窗口量级），且 > 上抛滞空时长（16/(2·28)·2 ≈ 1.1s 单程来回）充分覆盖。
     static constexpr float kGolemLaunchAttributionWindow = 5.0f;

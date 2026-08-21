@@ -89,7 +89,7 @@ public:
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
     // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
-    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, EnderEye }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 EnderEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, EnderEye, EnderPearl }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 EnderEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 EnderPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -300,6 +300,16 @@ public:
     //   vel 只作初速（tick 内转向平滑接管），spawn 另记 enderEyeCruiseY = origin.y()+kEnderEyeClimbHeight。
     //   达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnEnderEye(const QVector3D &origin, const QVector3D &vel);
+    // t758 暗渊珠投射物（玩家右键 EnderPearlId 掷出；机制等价 MC 1.0 ender pearl —— 右键掷出受重力抛物飞行，
+    //   落点把掷出者传送过去 + 传送附带伤害）：在 origin 处生成携带 3D 速度 vel（blocks/s，含 vy 抛物）的小珠
+    //   实体。kind=EnderPearl、pushable=false（玩家走碰不推）、halfW/halfH=kEnderPearlHalfDim（深绿小珠视觉 +
+    //   碰撞最小；命中判定走点格不读它）。tick 内 EnderPearl 分支：重力改 vy（抛物，同雪球）+ 速度位移 +
+    //   **方块命中即结算**（emit enderPearlLanded(命中格) → 呈现层路由 PlayerController.applyEnderPearlTeleport
+    //   扫安全落点瞬移玩家 + 扣传送伤害）+ 移除；寿命到期视作「悬空落点」同样结算（B11 向下找支撑传送，防极端
+    //   上抛珍珠永久滞留）；越界（世界外 / 虚空）静默移除**不传送**（防传到不可玩位置）。**不做 mob 命中**（取舍：
+    //   珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送掷者，伤害分支 v1 不做）。vx/vy/vz 复用 3D
+    //   速度（不走 Mob 击退衰减分支，无冲突）。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
+    Q_INVOKABLE int spawnEnderPearl(const QVector3D &origin, const QVector3D &vel);
     // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
     //   槽）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。
@@ -777,6 +787,12 @@ signals:
     //   (0x23A=EndEyeId ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只
     //   消费路由到 Game 层 ItemEntityManager，不反向依赖）。20% 碎裂分支不发本信号（无掉落物）。
     void enderEyeBecameItem(int x, int y, int z);
+    // t758 暗渊珠落点结算（机制等价 MC 1.0 ender pearl 落地把掷出者传送到落点）：EnderPearl tick 命中方块 /
+    //   寿命兜底到期时发 —— 坐标 = floor(命中点 / 到期点)（整数格，与 enderEyeBecameItem 约定一致）。呈现层
+    //   （Main.qml）Connections 据它路由 PlayerController.applyEnderPearlTeleport（落点列向下扫安全立位瞬移玩家 +
+    //   传送伤害，机制语义收口在 Game 层；单向事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费路由，
+    //   同 emberFireballHitPlayer 模式）。越界（世界外 / 跌出底部）移除不发本信号（珍珠白耗，防传到不可玩位置）。
+    void enderPearlLanded(int x, int y, int z);
     // t728 燃烬者火球命中玩家着火（机制等价 MC 1.0 烈焰人火球点燃玩家）：Fireball tick 命中玩家时发 —— 伤害
     //   5 走 mobAttackedPlayer（见上，死因 Emberling），着火由本信号另行驱动（呈现层 Main.qml 路由到
     //   player.applyStatusEffect(EffectFire, 秒数, 1)，刷新 m_fireTimer）。单次命中两者成对发（QML 均消费）；
@@ -1757,6 +1773,16 @@ private:
     static constexpr float kEnderEyeNearDist     = 50.0f; // t757 两段切换水平距离阈值（blocks；>50 远段升空指示 / ≤50 近段下探逼近）
     static constexpr float kEnderEyeClimbHeight  = 8.0f;  // t757 远段巡航高度 = 掷出眼位 Y + 8（blocks；玩家上方合理指示高度）
     static constexpr float kEnderEyeTurnRate     = 6.0f;  // t757 速度方向趋近速率（1/s；指数平滑，两段切换圆弧过渡）
+    // t758 暗渊珠投射物常量（机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行，落点把掷出者传送到落点 +
+    //   传送附带伤害）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
+    //   - kEnderPearlLifetime：最长飞行秒（寿命兜底「命中」—— 悬空到期视作落点结算传送，落点列向下找支撑，
+    //     防极端上抛珍珠永久滞留堆积）。取 8（> 满初速 12 的 45° 全弧滞空 ~1.7s，正常抛掷方块落点先到，
+    //     兜底不抢戏）。
+    //   - kEnderPearlHalfDim：半宽 / 半高（blocks；深绿小珠视觉 + 碰撞最小；命中判定走点格不读它，同火球）。
+    //   传送伤害常量在 Game 层（PlayerController::kEnderPearlTpDamage —— 伤害发射属 Game/Physics，单一权威
+    //   置于消费点近旁；初速常量在 Game 层掷出分支本地（kPlayerPearlSpeed，同雪球先例））。
+    static constexpr float kEnderPearlLifetime   = 8.0f;  // 暗渊珠最长飞行（秒；寿命兜底命中传送）
+    static constexpr float kEnderPearlHalfDim    = 0.14f; // 暗渊珠半宽/半高（blocks）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）

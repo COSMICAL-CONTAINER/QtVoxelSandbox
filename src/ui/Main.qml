@@ -2319,6 +2319,13 @@ Window {
         //   不 import C++ 静态类故用字面量，同 onMobDied 既有约定）。坐标 = 眼睛落点货架 floor(pos)（与 spawnItem
         //   整数格约定一致）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费路由到 Game 层 item 管理）。
         function onEnderEyeBecameItem(x, y, z) { itemEntities.spawnItem(x, y, z, 0x23A, 1) }
+        // t758 暗渊珠落点传送（EntityManager EnderPearl tick 命中方块 / 寿命兜底到期发 enderPearlLanded(落点格)）：
+        //   转发到 PlayerController.applyEnderPearlTeleport —— 落点列向下扫安全立位（脚位 + 头位非实体 + 下方 solid
+        //   支撑）瞬移玩家 + 传送伤害（Survival 扣 kEnderPearlTpDamage=5HP 走 onFallDamageTaken 护甲减伤链，死因
+        //   EnderPearlTp「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 1.0 ender pearl 传送代价）。越界（世界
+        //   外 / 虚空）移除不发本信号（珍珠白耗）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费
+        //   路由到 Game 层方法，同 emberFireballHitPlayer→applyStatusEffect 模式）。
+        function onEnderPearlLanded(x, y, z) { player.applyEnderPearlTeleport(x, y, z) }
         // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
         //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
         //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
@@ -3706,6 +3713,11 @@ Window {
         //   包缺 → source 空 → delegate 回退 endereyeTex（程序生成小绿瞳珠）。同其他 pack 实体贴图两级探测语义
         //   （t497 QUrl 判空铁律：Texture.source 是 QUrl —— 判空走 .source.toString().length，.length 恒 undefined）。
         Texture { id: endereyePackTex; source: resourcePack.active ? resourcePack.itemIconSource(0x23A) : ""; generateMipmaps: false }
+        // t758 暗渊珠（EnderPearl）pack 实体贴图（item/ender_pearl.png，t726 itemFilenameMap 0x243 → ender_pearl.png）：
+        //   pack 启用且 resourcePack.itemIconSource(0x243) 命中 → source 为 file:/// URL（透明底小珠图标）；pack 关 /
+        //   包缺 → source 空 → delegate 回退**程序双色深绿小方珠**（纯色 Model 组合，同雪球 / 蛋 delegate 模式 ——
+        //   基础包无独立珍珠实体 PNG，程序回退不新增资产）。t497 QUrl 判空铁律：.source.toString().length。
+        Texture { id: enderpearlPackTex; source: resourcePack.active ? resourcePack.itemIconSource(0x243) : ""; generateMipmaps: false }
         // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
         //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
         Texture { id: mobNightwalkerEyesTex; source: "qrc:/textures/mob_nightwalker_eyes.png"; generateMipmaps: false }
@@ -7956,6 +7968,47 @@ Window {
                                     alphaCutoff: 0.5
                                 }
                             }
+                        }
+                    }
+                    // t758 暗渊珠（EnderPearl；机制等价 MC 1.0 ender pearl —— 玩家右键 EnderPearlId 掷出受重力
+                    //   抛物飞行，落点把玩家传送过去；§9 区隔 + 原创视觉）：深绿小珠（~0.26 立方铺 item 暗渊珠
+                    //   贴图）+ 飞行自旋（绕 Y 慢转，读作「翻滚的珠子」）。命中（方块 / 寿命兜底）→ C++ emit
+                    //   enderPearlLanded → 呈现层路由 applyEnderPearlTeleport 传送（珠落即传，槽即时释放无碎裂
+                    //   动画）。贴图三态：pack 命中（ender_pearl.png 透明底图标 → alphaMode Mask 裁掉底色，t757
+                    //   教训）/ pack 关（程序回退双色深绿小方珠 —— 深绿主体 + 亮绿高光角，同雪球双层 delegate
+                    //   模式，基础包无独立珍珠 PNG 不新增资产）。NoLighting（红线：可见 Model 必须 NoLighting）。
+                    Node {
+                        id: enderpearlNode
+                        visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.EnderPearl) : false }
+                        property real spin: 0
+                        NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
+                        eulerRotation.y: enderpearlNode.spin
+                        // pack 贴图态：item 暗渊珠图标（透明底 → Mask 裁剪；t497 QUrl 判空 .toString().length）。
+                        Model {
+                            visible: enderpearlPackTex.source.toString().length > 0
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(0.26, 0.26, 0.26)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColorMap: enderpearlPackTex
+                                alphaMode: PrincipledMaterial.Mask
+                                alphaCutoff: 0.5
+                            }
+                        }
+                        // 程序回退态（pack 关 / 边界 miss）：双层深绿小方珠 —— 深绿主体 + 偏角亮绿高光
+                        //   （读作「深色圆珠带反光」非纯色块，同雪球内层高光模式）。
+                        Model {
+                            visible: enderpearlPackTex.source.toString().length <= 0
+                            geometry: UnitCube {}
+                            scale: Qt.vector3d(0.26, 0.26, 0.26)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1f8a4c" }
+                        }
+                        Model {
+                            visible: enderpearlPackTex.source.toString().length <= 0
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0.04, 0.04, 0.05)
+                            scale: Qt.vector3d(0.12, 0.12, 0.12)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#7fe0a0" }
                         }
                     }
                 }

@@ -572,7 +572,31 @@ int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
     e.enderEyeShatter = 0.0f; // 飞行态（非碎裂）
     // t757 远段巡航高度：掷出眼位 + kEnderEyeClimbHeight（spawn 定死不随地形变 —— 眼睛无方块碰撞，
     //   平飞穿山可接受；换算依据是「玩家上方的指示高度」而非地表，故以掷出点为基准最直观）。
-    e.enderEyeCruiseY = origin.y() + kEnderEyeClimbHeight;
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    return slot;
+}
+// t758 生成暗渊珠投射物（玩家右键 EnderPearlId 掷出；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
+//   kind=EnderPearl + pushable=false + 寿命。halfW/halfH=kEnderPearlHalfDim（深绿小珠视觉 + 碰撞最小；命中
+//   判定走点格不读它）。bump revision → QML Repeater 追加 delegate（EnderPearl 分支深绿小珠 Model）。达 kCap →
+//   跳过 + 告警（防溢出）。返新珠槽索引（调试用）；达 kCap → -1。
+int EntityManager::spawnEnderPearl(const QVector3D &origin, const QVector3D &vel)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); ender pearl spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = kEnderPearlHalfDim; // 深绿小珠视觉 + 碰撞最小
+    e.halfH = kEnderPearlHalfDim;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 眼）
+    e.kind = EnderPearl;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（EnderPearl 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kEnderPearlLifetime; // 寿命兜底「命中」（悬空到期视作落点结算传送）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -4766,6 +4790,46 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
             }
             continue; // EnderEye 不走 Mob AI / resting / 击退衰减
+        }
+
+        // --- EnderPearl（t758 暗渊珠投掷物）：重力抛物 + 方块/寿命兜底命中 → 落点结算传送 ---
+        //   机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行（同雪球骨架），命中即结算 —— emit
+        //   enderPearlLanded(落点格) → 呈现层路由 PlayerController.applyEnderPearlTeleport（安全落点扫描 +
+        //   瞬移玩家 + 传送伤害，机制语义收口在 Game 层）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，
+        //   撞 mob 穿过 —— MC 对 mob 命中亦仅传送掷者，伤害分支 v1 不做，同头文件注释）。
+        if (e.kind == EnderPearl) {
+            e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
+            e.vy -= kGravity * float(dt); // 抛物：重力改 vy（与世界重力同值 → 弧自然，同雪球）
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            bool remove = false;
+            bool landed = false; // 命中结算（方块命中 / 寿命兜底）→ emit enderPearlLanded（传送掷出者）
+            // 寿命兜底命中：悬空到期视作落点结算（落点列向下找支撑传送，防极端上抛珍珠永久滞留堆积）。
+            if (e.arrowLife <= 0.0f) { remove = true; landed = true; }
+            // 方块命中 → 即结算（撞地 / 撞墙：落点 = 命中格，Game 层扫描从命中格起向下找支撑 → 立命中块顶）。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) { remove = true; landed = true; }
+            }
+            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 静默移除**不传送**（防把玩家传到界外 / 虚空不可玩位置；
+            //   珍珠白耗。机制取舍：MC 珍珠入虚空同样有去无回）。
+            if (!remove) {
+                if (next.x() < 0.0f || next.z() < 0.0f
+                    || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                    remove = true;
+                }
+            }
+            // 命中结算 → emit 落点格（floor(next)，整数格约定同 enderEyeBecameItem；呈现层路由传送）。
+            if (remove && landed) {
+                emit enderPearlLanded(qFloor(next.x()), qFloor(next.y()), qFloor(next.z()));
+            }
+            if (remove) {
+                toRemove.push_back(idx);
+                dirty = true;
+            } else {
+                e.pos = next; // 继续飞行
+                dirty = true;
+            }
+            continue; // EnderPearl 不走 Mob AI / resting / 击退衰减
         }
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---
