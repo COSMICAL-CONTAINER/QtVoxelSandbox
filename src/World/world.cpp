@@ -2344,6 +2344,17 @@ void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
         if (BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
             m_powerDirty.insert(packGrowthCell(nx, ny, nz));
     }
+    // t740 火把斜下环粉入脏集（同上可达性动机）：t740 起火把经 4 个斜下格喂粉，但拆 / 放火把的
+    //   编辑锚点经 6 正交种子够不到斜角粉 → 环粉保留陈旧电力（拆火把后灯不灭——降沿失达，t706
+    //   同类）。仅火把编辑需要（火把 ↔ 斜下粉是唯一的斜角供电关系）。
+    if (oldId == BlockRegistry::RedstoneTorch || newId == BlockRegistry::RedstoneTorch) {
+        static constexpr int kDiag[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (const auto &h : kDiag) {
+            const int nx = x + h[0], ny = y - 1, nz = z + h[1];
+            if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+        }
+    }
 }
 
 // 电力局部重算核心（tickRedstone 消费 m_powerDirty）：两阶段——
@@ -2418,12 +2429,32 @@ bool World::recomputePowerLocal()
     for (const quint64 k : region) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
+        bool seeded = false;
         for (const auto &d : kNb) {
             if (powerSourceLevel(x + d[0], y + d[1], z + d[2]) > 0) {
-                dist[k] = 1;
-                bfsq.push_back(k);
+                seeded = true;
                 break;
             }
+        }
+        // t740 火把斜下供粉（机制等价 MC 1.0：立在方块顶面的红石火把为**贴地一圈斜角粉**供 15——火把格
+        //   比这些粉高一格且水平错一格，6 正交读不到 → 经典「火把立块上、地面粉环绕」布线在 v1 整圈死粉
+        //   （用户实测「火把 / 粉点不着 TNT」的可达形态之一）。仅红石火把有此形态：其它源（拉杆 / 按钮 /
+        //   压力板 / 探测轨）都装在自身格内、无抬升，6 正交已等价 MC；火把亮态判定与 powerSourceLevel 同
+        //   源（OffFlag 位）。斜角喂粉只入 BFS 种子（粉 state 电力级），不改 isReceivingPower 的接收器读
+        //   ——接收器（TNT / 灯 / …）挨着通电粉即亮，语义不变。
+        if (!seeded && y + 1 < H) {
+            for (const auto &h : kHDir2) {
+                const int tx = x + h[0], ty = y + 1, tz = z + h[1];
+                if (m_chunks.blockAt(tx, ty, tz) != BlockRegistry::RedstoneTorch) continue;
+                if ((m_chunks.stateAt(tx, ty, tz) & BlockRegistry::RedstoneTorchStateOffFlag) != 0)
+                    continue; // 熄灭态（反相）不供能
+                seeded = true;
+                break;
+            }
+        }
+        if (seeded) {
+            dist[k] = 1;
+            bfsq.push_back(k);
         }
     }
     // 外扩：每 hop +1，沿 6 正交邻粉 + 爬墙斜角粉（t702 爬墙 = 1 格台阶，同样算一跳衰减）；距 >15 视为不达。
@@ -2734,20 +2765,27 @@ bool World::recomputePowerLocal()
         // t657 附着块供电判定 —— **排除火把自身**（机制等价 MC：火把不向其所附着的方块供能 —— 否则
         //   亮火把给自己的支撑供电 → 反相熄灭 → 失电重亮 → 永久振荡（自反馈）。isReceivingPowerEx 沿
         //   isReceivingPower 逻辑但跳过火把格 (x,y,z)（该火把自身）。
+        // t740 再排除**基座环粉**（火把 4 个斜下格的通电粉）：t740 斜下供粉后，立在方块顶面的火把喂
+        //   亮的地面环粉同时是支撑块的水平 6 邻 → 无形状语义的 v1 读法会把火把自己的输出当输入 →
+        //   反相熄灭 → 环粉断电 → 重亮 → 振荡（用户「灯闪 / 时亮时不亮」形态）。MC 里粉按连接形状
+        //   供电（点 / 切向线不向侧邻块灌电）——环粉永不回灌支撑；v1 无形状位 → 直接排除火把斜下
+        //   4 格的粉。支撑仍可被同层线 / 其它侧的源供电（NOT 门输入路径不变）。
         const bool attachPowered = [&]() {
             static constexpr int kNb2[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
             const int sx = x + ax, sy = y + ay, sz = z + az;
             for (const auto &d : kNb2) {
                 const int nx = sx + d[0], ny = sy + d[1], nz = sz + d[2];
                 if (nx == x && ny == y && nz == z) continue; // 跳过火把自身（防自反馈振荡）
-                if (powerSourceLevel(nx, ny, nz) > 0) return true;
+                if (powerSourceLevel(nx, ny, nz) > 0) return true; // 真实源（拉杆 / 红石块…）在环位也照常供电
+                // t740：仅排除**粉**在基座环位的回灌（见上注）——源不受形状语义影响，仍可 NOT 门输入。
+                if (ny == y - 1 && qAbs(nx - x) + qAbs(nz - z) == 1) continue;
                 const quint8 nb = m_chunks.blockAt(nx, ny, nz);
                 if (BlockRegistry::isRedstoneDust(nb)
                     && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0)
                     return true;
             }
             return false;
-        }(); // 附着块被供电（含粉 / 源；不含本火把）
+        }(); // 附着块被供电（含粉 / 源；不含本火把与其基座环输出）
         const bool off = (st & BlockRegistry::RedstoneTorchStateOffFlag) != 0;
         if (attachPowered != off) {
             // 供电 → 置熄灭位；失电 → 清熄灭位重亮。附着位（低 3 位）不动。

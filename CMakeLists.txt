@@ -741,3 +741,24 @@ if(WIN32)
         message(WARNING "windeployqt 未找到；Qt 运行时/QML 插件需手动部署")
     endif()
 endif()
+
+# t740 红石激活矩阵冒烟测试（无 GUI 控制台程序）：直接实例化 World（Core+World 两层源码直编，
+#   不链接主 exe），按「信号源×接收器」全组合驱动 tickRedstone 核对通电 / 降沿 + 场景探针
+#   （火把后放 TNT / 粉衰减 / 超距 / torch-on-block 斜下粉 / NOT 门）。tools/ 是开发期工具
+#   （同 build_*.py 资产生成脚本），不随主程序部署；全过 exit 0，FAIL 行 = 电力链断点直接暴露。
+add_executable(redstone_matrix_test
+    tools/redstone_matrix_test.cpp
+    src/Core/blockregistry.cpp
+    src/Core/frameprofiler.cpp
+    src/World/chunk.cpp
+    src/World/chunkmanager.cpp
+    src/World/world.cpp
+)
+target_include_directories(redstone_matrix_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/World
+)
+target_link_libraries(redstone_matrix_test PRIVATE
+    Qt6::Core
+    Qt6::Qml
+)
