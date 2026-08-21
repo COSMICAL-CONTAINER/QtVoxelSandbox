@@ -451,6 +451,100 @@ int main(int argc, char *argv[])
                           << "| mech per-attach geometry: floor=flat-thin-box, wall=flush-to-support, decode parity (t744)";
     }
 
+    // P10 t733 铁轨失撑掉落（R19.11 三族统一；World::checkRailOnEdit 单一入口覆盖全部破坏路径）：支撑位被清
+    //   为 Air → 正上方铁轨坍落为掉落物（blockDroppedAsItem，dropId=自身；连接位 / 通电位丢弃）。本探针驱动
+    //   三族代表路径：① 挖掘（setBlock Air 破支撑，含创造——World 层无 drop 标志）② 爆炸（destroySphereSilent
+    //   逐破坏格：轨在球外幸存、支撑被炸）③ TNT 点火变实体（clearBlockSilent 清支撑）。另锁两个边界：
+    //   ④ 上半砖支撑（isTopFlushSupport 正分支）——清侧邻不掉 / 清半砖本体才掉；⑤ 直破铁轨本格零掉落
+    //   （守卫 isRail(oldId) 防与 finishMiningAt 通用 drop 双掉）。
+    {
+        int railDrops = 0;
+        quint8 lastDropId = 0; int lastDropX = -1, lastDropY = -1;
+        const QMetaObject::Connection dropConn =
+            QObject::connect(&w, &World::blockDroppedAsItem, &w, [&](int x, int y, int z, int id) {
+                Q_UNUSED(z);
+                ++railDrops; lastDropId = quint8(id); lastDropX = x; lastDropY = y;
+            });
+        bool ok = true;
+        // ① 挖掘路径 × 三族：Stone 支撑 + 轨其上 → 破支撑 → 轨成掉落物（id=自身）且格已清（无浮空残留）。
+        const quint8 railKinds[3] = { BR::Rail, BR::GoldenRail, BR::DetectorRail };
+        for (const quint8 rk : railKinds) {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::Stone, 0);
+            w.setBlock(x0, kRigY + 1, z0, rk, 0);
+            const int d0 = railDrops;
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            if (railDrops != d0 + 1 || lastDropId != rk || lastDropX != x0 || lastDropY != kRigY + 1
+                || w.blockAt(x0, kRigY + 1, z0) != BR::Air) {
+                qInfo().noquote() << "  mine-support rail-drop failed for id" << int(rk);
+                ok = false;
+            }
+        }
+        // ② 爆炸路径：半径 3 球心 (x0,kRigY,z0)——支撑 (dx=2,dy=2) 距 2.83 被炸；轨 (dx=2,dy=3) 距 3.61 球外
+        //   幸存但失撑 → 坍落（恒掉，不走爆炸 ~50% 破坏掉落概率门——支撑脱落是必然事件）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0 + 2, kRigY + 2, z0, BR::Stone, 0);
+            w.setBlock(x0 + 2, kRigY + 3, z0, BR::Rail, 0);
+            const int d0 = railDrops;
+            w.destroySphereSilent(x0, kRigY, z0, 3.0f);
+            if (railDrops != d0 + 1 || lastDropId != BR::Rail
+                || w.blockAt(x0 + 2, kRigY + 3, z0) != BR::Air) {
+                qInfo().noquote() << "  blast-support rail-drop failed";
+                ok = false;
+            }
+        }
+        // ③ TNT 点火路径：TNT 支撑被 clearBlockSilent 静默清（变引燃实体）→ 其上轨立即掉落（无浮空残留）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::TntBlock, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::GoldenRail, 0); // 动力轨铺 TNT 顶（用户场景）
+            const int d0 = railDrops;
+            w.clearBlockSilent(x0, kRigY, z0);
+            if (railDrops != d0 + 1 || lastDropId != BR::GoldenRail
+                || w.blockAt(x0, kRigY + 1, z0) != BR::Air) {
+                qInfo().noquote() << "  tnt-prime rail-drop failed";
+                ok = false;
+            }
+        }
+        // ④ 上半砖支撑边界（isTopFlushSupport：完整立方 ∨ 上半砖，t741 单一权威）：清侧邻 → 支撑在 → 不掉；
+        //    清半砖本体 → 掉。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::WoodSlab, 1);      // 上半砖（bit0=1 → 顶面齐平可撑）
+            w.setBlock(x0, kRigY + 1, z0, BR::Rail, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Stone, 0);
+            const int d0 = railDrops;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);          // 清侧邻 → 不掉
+            if (railDrops != d0 || w.blockAt(x0, kRigY + 1, z0) != BR::Rail) {
+                qInfo().noquote() << "  lateral clear must not drop rail";
+                ok = false;
+            }
+            w.setBlock(x0, kRigY, z0, BR::Air);              // 清半砖本体 → 掉
+            if (railDrops != d0 + 1 || w.blockAt(x0, kRigY + 1, z0) != BR::Air) {
+                qInfo().noquote() << "  slab-support clear must drop rail";
+                ok = false;
+            }
+        }
+        // ⑤ 直破铁轨本格：守卫 isRail(oldId) → 本分支零掉落（通用 drop 走 finishMiningAt，防双掉）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::Stone, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::Rail, 0);
+            const int d0 = railDrops;
+            w.setBlock(x0, kRigY + 1, z0, BR::Air);          // 直破轨本体
+            if (railDrops != d0) {
+                qInfo().noquote() << "  direct rail break must not double-drop";
+                ok = false;
+            }
+            w.setBlock(x0, kRigY, z0, BR::Air);
+        }
+        QObject::disconnect(dropConn); // 探针结束拆计数器（不影响主程序的掉落物消费链）
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| rail support-drop on mine/blast/tnt-prime for all 3 kinds (t733)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

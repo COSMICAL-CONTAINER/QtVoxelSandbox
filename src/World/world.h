@@ -517,6 +517,11 @@ public:
     //   Rail 邻的非轨块 → 无关；破 Rail 本格 → 邻轨断开该向）。重算范围 = 本格 + 水平 4 邻的 Rail 格
     //   （新轨自身连接 + 邻轨回连 / 断连）。静默直写不重入（recomputeRailConnections 内不经 setBlock）。
     //   供 4/5 参数 setBlock 末尾各调一次（编辑路径收口，同 checkSugarcaneOnEdit 模式）。
+    //   t733 起兼任铁轨**失撑掉落**入口：本格被清为 Air（挖 / 炸 / TNT 点火变实体）且正上方是铁轨、本格
+    //   已非有效支撑（isTopFlushSupport：完整立方 ∨ 上半砖）→ 该轨坍落为掉落物（blockDroppedAsItem，
+    //   dropId=自身；恒发含创造，t571②）。五个写入口（setBlock×2 / clearBlockSilent / setWaterSilent /
+    //   destroySphereSilent）全部经本钩子 → 挖掘 / 爆炸三路 / TNT 点火三路一处覆盖。先掉轨再重算连接
+    //   （邻轨连接位按「轨已消失」重算）。三族（普通 / 动力 / 探测）统一（isRail 单一权威）。
     void checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
     // t664 末地传送门完整性复检（机制等价 MC「传送门开启后拆任一框架 → 门面全消失」；同 checkRailOnEdit

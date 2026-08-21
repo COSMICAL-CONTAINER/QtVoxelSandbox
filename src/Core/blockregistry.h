@@ -620,6 +620,9 @@ public:
         //   放置 / 邻轨破放时由 World::checkRailOnEdit / placeBlock 自动计算（与相邻 Rail 互连；0/1 连接 → 直轨、
         //   对向 2 连接 → 直轨、邻向 2 连接 → 90° 拐角、3+ 连接 → 十字），mesher 据连接位选 121（直 NS）/
         //   UV 旋转（直 EW）/ 136（拐角）/ 137（十字）—— 机制等价 MC 1.0 rail 自动连接 + 转弯。
+        //   **t733 失撑掉落**：支撑位（恒正下方）被清为 Air（挖 / 炸 / TNT 点火）且已非 isTopFlushSupport
+        //   （完整立方 ∨ 上半砖）→ 铁轨立即坍落为掉落物（World::checkRailOnEdit 统一入口，覆盖全部破坏
+        //   路径；三族同语义；激活态 / 连接位丢弃）。
         //   solid=false（非实体 → 不挡邻居面剔除，同睡莲）、shape=ShapeNone（**无碰撞** → 玩家走过；矿车沿轨
         //   行驶（t565 MinecartManager，Entities 层））、hardness=0（瞬破）、NoTool（空手可采且掉落）、
         //   dropId=自身（破铁轨掉铁轨方块，可放回）、dropCount=1、maxStack=64。各面贴图=rail(121)（透明底 +

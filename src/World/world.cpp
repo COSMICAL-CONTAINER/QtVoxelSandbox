@@ -2148,10 +2148,44 @@ void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
 //   重算范围 = 本格 + 四向各 3 高（同层 / 上 / 下）—— t667 坡度引入后，置 / 破轨会改变邻列 ±1 高轨的
 //   连接（新轨低 1 格 → 上方台阶轨新增下坡连接位，反之亦然），故 13 格（本格 + 4 向 × 3 高）都要复检。
 //   有实际 state 写入才 1 次 worldChanged（批量收口）。静默直写不重入。
+//   t733 起本函数兼任铁轨编辑钩子的**失撑掉落**入口（见函数体内 t733 注释段）：支撑位被清 → 正上方铁轨
+//   坍落为掉落物，先于连接重算执行。
 void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
-    Q_UNUSED(oldId); Q_UNUSED(id); // 任何编辑（放 / 破任意方块）都可能改变邻轨连接 → 不筛编辑类型（简单正确）
     bool changed = false;
+    // t733 铁轨失撑掉落（R19.11「挖掉铁轨底部方块 → 铁轨不得浮空」；普通 / 动力 / 探测三族统一，isRail
+    //   单一权威）。守卫（同 checkPressurePlateOnEdit）：仅当本格刚被**清为 Air** 且被清块本身非铁轨——
+    //   玩家直破铁轨的掉落由 finishMiningAt 通用 drop 路径负责（三族 dropId=自身），此处再掉会双掉。
+    //   判定：正上方是铁轨、且本格（铁轨唯一支撑位，恒为正下方——轨不贴墙、无 state 附着编码可解）已非
+    //   有效支撑（isTopFlushSupport 单一权威：完整立方 ∨ 上半砖，t741；与红石粉 / 门族同语义）→ 铁轨立即
+    //   坍落为掉落物（连接位 / 动力轨通电位 / 探测轨压过位随方块清除一并丢弃，掉落物 = 自身物品）。
+    //   机制等价 MC「铁轨支撑方块被移除即脱落，不浮空残留，不重新粘到别处」。t571②【自然失撑掉落：恒发
+    //   （含创造）】—— World 层无 drop 标志概念，失撑坍落是结构后果（同板 / 甘蔗 / 仙人掌族）。
+    //   **为何收口在本 hook 而非 playercontroller dropUnsupported* 族（t738/t739/t744 先例）**：本函数是
+    //   铁轨编辑钩子，五个写入口（4/5 参数 setBlock（玩家挖 / 放）、clearBlockSilent（TNT 三条点火路径
+    //   变实体）、setWaterSilent、destroySphereSilent 逐破坏格（Stalker / TNT 陆地爆炸；水下链式引燃走
+    //   clearBlockSilent））末尾全部调它 → **一处实现即覆盖挖掘 / 爆炸三路 / TNT 点火三路全部失撑源**，
+    //   未来新增静默清路径自动继承（避免 t744「每条点火路径逐处补扫」的漏点维护成本）。掉落通道走
+    //   blockDroppedAsItem（Main.qml → spawnItem，同 World 支撑校验族 cactus / plate / sugarcane）。
+    //   **先掉轨再重算连接**：下方 13 格重算表覆盖被掉轨的全部水平邻（y+1 行在列）→ 邻轨连接位按
+    //   「轨已消失」重算，不残留指向空位的连接形态。notePowerWrite 维护电力脏集（动力轨是接收器 /
+    //   探测轨是源，isPowerFamilyBlock 含两者——轨被清后邻网络下 tick 重算，机制同 t683 爆炸补 note）。
+    if (id == BlockRegistry::Air && !BlockRegistry::isRail(oldId)) {
+        const int ry = y + 1;
+        if (x >= 0 && z >= 0 && x < m_width && z < m_depth && ry >= 0 && ry < m_height) {
+            const quint8 rb = m_chunks.blockAt(x, ry, z);
+            if (BlockRegistry::isRail(rb)
+                && !BlockRegistry::isTopFlushSupport(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z))) {
+                m_chunks.setBlock(x, ry, z, BlockRegistry::Air); // 静默清（直写 + 标脏，不经 World::setBlock → 不重入本检查）
+                notePowerWrite(x, ry, z, rb, BlockRegistry::Air); // 电力脏标记（动力 / 探测轨在电力族，t683 同口径）
+                emit blockBroken(x, ry, z, int(rb));               // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
+                emit blockDroppedAsItem(x, ry, z, int(rb));        // 掉落物 = 自身（三族 dropId=自身；state 丢弃）
+                recomputeLightAround(x, ry, z, rb, BlockRegistry::Air); // 轨不遮光，仍重 flood 保正确（同板族）
+                changed = true; // 并入末尾 1 次 worldChanged + clearAllDirty 收口（N 写 1 emit）
+            }
+        }
+    }
+    // （连接重算不筛编辑类型——放 / 破任意方块都可能改变邻轨连接，简单正确。）
     #define VO_RECOMPUTE_RC(XX, YY, ZZ) recomputeRailConnections(XX, YY, ZZ, changed)
     VO_RECOMPUTE_RC(x, y, z);            // 本格若是 Rail → 重算自身连接
     VO_RECOMPUTE_RC(x + 1, y, z);        // +X 列（同 / 上 / 下 3 高）Rail 回连 / 断连
