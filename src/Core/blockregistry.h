@@ -1818,6 +1818,13 @@ public:
     //   （导线 BFS 传播 / 连接位维护）、放置预检（红石粉物品放置）与 mesher 路由（贴地薄层 cutout 段，
     //   经 isCrossBillboard 并入）统一判定，避免各处硬编码 id（同 isLadder 单 id 模式）。
     static bool isRedstoneDust(quint8 blockId);
+    // t739 红石粉支撑判定（单一权威）：粉正下方格是否为有效支撑 —— 完整立方顶面（isFullCube）或
+    //   上半砖顶面（isSlab 且 state bit0=1：上半砖体占格上半、顶面与格顶齐平 → 粉铺其上与整立方同高；
+    //   下半砖顶面在半格高 0.5 处 → 不可撑粉）。供三处共用，避免支撑口径漂移（同 torchAttachOffset
+    //   附着语义的单一权威模式）：① PlayerController 红石粉物品放置预检；② 玩家挖支撑块的失撑掉落
+    //   （dropUnsupportedDustAbove）；③ 爆炸失撑掉落（EntityManager::dropUnsupportedDustAfterBlast）。
+    //   入参带下方格 state（半砖上下半位），caller 读 World 后传入；纯函数不依赖 World。
+    static bool isDustSupport(quint8 belowId, quint8 belowState);
     // t638 探测铁轨 state bit4（值 16）=「矿车驶过」标记（机制等价 MC 1.0 detector rail 被矿车压住时输出
     //   信号——本工程无红石系统，简化为通电视觉：bit4=1 → mesher 换 rail_detector_on(160) 亮红贴图；
     //   MinecartManager tick 驶过置位（setWaterSilent state 写，同红石灯开关模式）。**bit4 不与连接位冲突**

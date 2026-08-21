@@ -494,6 +494,14 @@ public:
     //   火把）。同玩家挖支撑块的 PlayerController::dropUnsupportedTorchesAround 语义（爆炸版）。去重：
     //   清后格为 Air → 邻格重复扫到时非火把族 → 不双掉。分层：向下写 World（setWaterSilent）+ 发语义信号。
     void dropUnsupportedTorchesAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed, World *world);
+    // t739 爆炸失撑红石粉掉落（Stalker / TNT 两爆炸路径共用）：destroyed 列表内每破坏格查其**正上方**
+    // 的红石粉导线，若该破坏格（粉的唯一支撑位）已非有效支撑（isDustSupport：整立方 / 上半砖；被炸为
+    // Air / 顶半砖被炸）→ setWaterSilent 清粉 + 恒发 explosionDroppedItem（支撑脱落是必然事件，不走
+    // ~50% 破坏掉落概率门；激活态照样掉，掉落物 = 红石粉物品 0x224）。同玩家挖支撑块的
+    // PlayerController::dropUnsupportedDustAbove 语义（爆炸版；判定比火把简——粉支撑恒为正下方格，
+    // 无 state 附着编码可解）。setWaterSilent 已挂 notePowerWrite → 失效段电力即时重算断信号。
+    // 去重：球内被炸的粉 blockAt=Air → 不再命中；上方粉清格后复扫不双掉。分层：向下写 World + 发语义信号。
+    void dropUnsupportedDustAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed, World *world);
     // t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed）。QML delegate 据它对 FallingBlock 叠白闪脉冲
     //   （primed=true → baseColor 白闪；false → 普通下落方块原色）。越界 / 非 primed → false。
     Q_INVOKABLE bool isPrimedAt(int i) const;

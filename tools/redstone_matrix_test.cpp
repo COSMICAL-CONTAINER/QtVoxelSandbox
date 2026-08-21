@@ -308,6 +308,47 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
+    // P10 t739 阶梯爬坡供电（平地粉 → 上台阶 → 平地粉；渲染改 L 形贴边爬升后的电力侧回归）：
+    //   电力语义不动（爬墙斜角仍算一跳衰减，t702/t738/t740 修复保持）—— lever + 平地粉×2 + 一格高
+    //   石阶 + 阶上粉 + 阶后平地粉 + 灯：全线导通（灯亮）且电力 15/14/13/12 逐粉 -1（爬墙计一跳）；
+    //   连接位高半字节按「水平邻粉 + 爬墙斜角」置位（渲染 L 形贴边（低处平铺 + 竖直贴面段）读的
+    //   正是这些位 + chunkgeometry 三高探针——本探针锁 state 侧不回退）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Lever, 1);
+        w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);     // 平地粉
+        w.setBlock(x0 + 2, kRigY, z0, BR::RedstoneDust, 0);     // 平地粉（墙脚）
+        w.setBlock(x0 + 3, kRigY, z0, BR::Stone, 0);            // 一格高台阶
+        w.setBlock(x0 + 3, kRigY + 1, z0, BR::RedstoneDust, 0); // 阶上粉（爬升）
+        w.setBlock(x0 + 4, kRigY, z0, BR::RedstoneDust, 0);     // 阶后平地粉（下降）
+        w.setBlock(x0 + 5, kRigY, z0, BR::RedstoneLamp, 0);
+        tickN(w, 8);
+        const bool lampOn = (w.stateAt(x0 + 5, kRigY, z0) & BR::RedstoneLampStateOnFlag) != 0;
+        bool ok = lampOn;
+        const struct { int x, y, wantP, wantConn; } want[] = {
+            { x0 + 1, kRigY,     15, 0x01 }, // 仅 +X 同层粉
+            { x0 + 2, kRigY,     14, 0x03 }, // -X 同层 + +X 爬墙（斜角上粉）
+            { x0 + 3, kRigY + 1, 13, 0x03 }, // -X / +X 皆爬墙（斜角下粉）
+            { x0 + 4, kRigY,     12, 0x02 }, // 仅 -X 爬墙（斜角上粉）
+        };
+        for (const auto &e : want) {
+            const quint8 st = w.stateAt(e.x, e.y, z0);
+            const int p = st & BR::RedstoneDustPowerMask;
+            const int conn = st >> 4;
+            if (p != e.wantP || conn != e.wantConn) {
+                qInfo().noquote() << "  dust" << e.x << "y" << e.y << "power" << p << "conn" << conn
+                                  << "expect power" << e.wantP << "conn" << e.wantConn;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| stair-step climb over 1-block step: power 15/14/13/12, lamp on (t739)";
+        for (int i = 0; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 3, kRigY + 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

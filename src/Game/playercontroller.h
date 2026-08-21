@@ -943,6 +943,13 @@ private:
     //   链）；TallGrass / WheatCrop 非 solid 且不作他物支撑 → 单趟向上扫即足够（无级联，破一块不会链式
     //   掉一串）。掉落产出与玩家破块同源（dropCropDrops 共用，成熟小麦失撑仍掉小麦 + 种子）。
     void dropUnsupportedCropsAround(int x, int y, int z);
+    // t739 红石粉失撑掉落（R19.11 用户复盘「红石粉不得浮空」）：破块后查**正上方格**，若为红石粉导线、
+    //   且本格（粉的唯一支撑位——粉恒铺在支撑格顶面）已非有效支撑（isDustSupport 单一权威：完整立方 /
+    //   上半砖）→ 粉直接掉落为红石粉物品（0x224，与放置来源一致；激活态照样掉）。机制等价 MC「红石粉
+    //   支撑方块被挖 → 粉脱落」。同 dropUnsupportedTorchesAround 模式：仅玩家破块触发；粉不撑他粉 →
+    //   单查正上方即足够（无级联）。setBlock(Air) 已挂 notePowerWrite → 失效段电力即时重算断信号。
+    //   t571 标注【自然失撑掉落：恒发（含创造）】。
+    void dropUnsupportedDustAbove(int x, int y, int z);
     // t720 画作放置主体（placeBlock 画物品分支调；机制等价 MC 1.0 painting 放置）：face = 墙面外法线
     //   （0=+X 1=-X 2=+Z 3=-Z，horizontalFacing 同源编码）。流程：锚格 = 命中格 + 法线（左上角）；
     //   对该面测最大可用矩形（向「观察者右」u 向贪心扩宽 maxW、向下逐行扫 maxH，每格须 Air 且其墙格

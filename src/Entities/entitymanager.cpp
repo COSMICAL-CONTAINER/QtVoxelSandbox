@@ -3624,6 +3624,27 @@ void EntityManager::dropUnsupportedTorchesAfterBlast(const std::vector<World::De
     }
 }
 
+// t739 爆炸失撑红石粉掉落（Stalker detonateStalker / TNT detonateTntSphere 两爆炸路径共用；头文件注释
+//   详述语义）。实现同 PlayerController::dropUnsupportedDustAbove 的判定（正上方粉 + isDustSupport 支撑
+//   复检），差异仅在写入口与掉落通道：爆炸是系统事件 → setWaterSilent 静默清（无破块粒子 / 音 spam，
+//   同球形破坏口径）+ 恒发 explosionDroppedItem（呈现层 spawnItem，机制等价 MC 爆炸震落粉成物品）。
+//   setWaterSilent 已挂 notePowerWrite → 清粉格 + 邻粉入电力脏集，下 tick 红石重算断失效段信号。
+void EntityManager::dropUnsupportedDustAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed,
+                                                  World *world)
+{
+    if (!world) return;
+    for (const World::DestroyedVoxel &d : destroyed) {
+        const int ty = d.y + 1;
+        if (ty >= world->height()) continue;
+        if (!BlockRegistry::isRedstoneDust(world->blockAt(d.x, ty, d.z))) continue;
+        if (BlockRegistry::isDustSupport(world->blockAt(d.x, d.y, d.z),
+                                         world->stateAt(d.x, d.y, d.z)))
+            continue; // 支撑幸存（如上半砖在球外 / 双半砖合并）→ 粉保留
+        world->setWaterSilent(d.x, ty, d.z, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
+        emit explosionDroppedItem(d.x, ty, d.z, BlockRegistry::dropId(BlockRegistry::RedstoneDust)); // 恒掉
+    }
+}
+
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
@@ -3684,6 +3705,9 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
         }
         // t738 爆炸失撑火把掉落：支撑块被炸掉、火把本体在球外幸存 → 脱落为掉落物（不悬空残留）。
         dropUnsupportedTorchesAfterBlast(destroyed, world);
+        // t739 爆炸失撑红石粉掉落：支撑块被炸掉、粉本体在球外幸存 → 脱落为红石粉物品（不浮空残留；
+        //   激活态照样掉，失效段电力即时重算断信号）。
+        dropUnsupportedDustAfterBlast(destroyed, world);
     }
 
     // (b) 距离衰减伤害玩家：以玩家身体中心（脚位 + ~0.9，机制等价 MC 玩家受击采样身体中部）到爆炸中心计 3D 距离；
@@ -3782,6 +3806,8 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
     }
     // t738 爆炸失撑火把掉落：支撑块被炸掉、火把本体在球外幸存 → 脱落为掉落物（同 Stalker 路径）。
     dropUnsupportedTorchesAfterBlast(destroyed, world);
+    // t739 爆炸失撑红石粉掉落：支撑块被炸掉、粉本体在球外幸存 → 脱落为红石粉物品（同 Stalker 路径）。
+    dropUnsupportedDustAfterBlast(destroyed, world);
     // 水中链式：destroyed 空（未破坏地形）→ 扫球内 TNT 方块单独引燃（水下 TNT 连锁不断，机制等价 MC 水中 TNT
     //   连锁；不破坏其它方块 / 无掉落）。立方盒 [cx±R, cy±R, cz±R] 逐格距中心 ≤ R 判，同 destroySphereSilent 口径。
     if (originInWater && world) {

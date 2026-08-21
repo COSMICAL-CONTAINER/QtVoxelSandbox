@@ -1226,6 +1226,12 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
     //   t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedCropsAround(x, y, z);
+    // t739 红石粉失撑掉落（R19.11 用户复盘「粉不得浮空」）：刚破的格若正上方是粉、且本格已非有效
+    //   支撑（isDustSupport：整立方 / 上半砖——粉的唯一支撑格恒在其正下方）→ 粉立即变掉落物（激活态
+    //   照样掉，掉落物 = 红石粉物品 0x224 与放置来源一致）。机制等价 MC「粉下方方块被挖 → 粉脱落」。
+    //   setBlock(Air) 已挂 notePowerWrite → 失效段粉连通域入电力脏集，下 tick 红石重算即断信号（网络
+    //   即时更新）。恒发（含创造，t571 自然失撑语义；粉不撑他粉 → 单查正上方即足够，无级联）。
+    dropUnsupportedDustAbove(x, y, z);
     // t305/t325 树叶衰减（spec「挖光一棵树所有原木→树叶消失」，t325 渐进化）：玩家破原木 → 触发 World 扫破块点
     //   周围树叶，失撑叶（4 格切比雪夫距离内无原木）**入渐进衰减队列**（非瞬时清）；队列由 tickLeafDecay 每
     //   窗按散布概率逐叶渐退 ~10-30s（机制等价 MC 1.0 叶衰 random-tick 渐退）。**不依赖 drop 标志**（创造瞬破
@@ -1487,6 +1493,26 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
     m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
+}
+
+// t739 红石粉失撑掉落（见 playercontroller.h 头注释）：破块后查正上方格，若为红石粉导线、且本格
+//   （粉的唯一支撑位）已非有效支撑（isDustSupport 单一权威：完整立方 / 上半砖；本格刚被破为 Air →
+//   恒失撑，但保留复检以兼容「破坏后仍有支撑残留」的演化，如双半砖合并）→ 粉直接掉落为红石粉物品
+//   （dropId=0x224，与放置来源一致；激活态照样掉——掉落与通电态无关，同火把失撑语义）。
+//   机制等价 MC「红石粉支撑方块被移除即脱落，不浮空残留」。setBlock(Air) → World 发 blockBroken +
+//   worldChanged（mesh 重建 / 粒子）+ notePowerWrite 入电力脏集（下 tick 失效段断电，网络即时更新）。
+//   t571 标注【自然失撑掉落：恒发（含创造）】。粉非 solid 且不撑他粉 → 单查正上方即足够（无级联）。
+void PlayerController::dropUnsupportedDustAbove(int x, int y, int z)
+{
+    if (!m_world) return;
+    const int cy = y + 1;
+    if (cy >= m_world->height()) return;
+    if (!BlockRegistry::isRedstoneDust(m_world->blockAt(x, cy, z))) return;
+    if (BlockRegistry::isDustSupport(m_world->blockAt(x, y, z), m_world->stateAt(x, y, z)))
+        return; // 支撑复检仍有效（如破坏后本格被其它支撑占位）→ 粉保留
+    m_world->setBlock(x, cy, z, BlockRegistry::Air); // → blockBroken + notePowerWrite（失效段即时断电）
+    emit spawnItem(x, cy, z, BlockRegistry::dropId(BlockRegistry::RedstoneDust),
+                   std::max(1, BlockRegistry::dropCount(BlockRegistry::RedstoneDust)));
 }
 
 // t305 树叶掉落（见 playercontroller.h 头注释）。机制等价 MC 1.0 破叶掉落：t379 调高后 10% 树苗物品 / 8% 木棒。
@@ -2974,17 +3000,21 @@ void PlayerController::placeBlock()
             const int tx = m_hitBx, ty = m_hitBy + 1, tz = m_hitBz; // 粉铺在命中方块正上方一格
             if (ty < m_world->height()) {
                 const quint8 tgt = m_world->blockAt(tx, ty, tz);
-                // t702 放置守卫（镜像 t666 铁轨守卫）：粉只能铺在**完整立方顶面**——
+                // t702 放置守卫（镜像 t666 铁轨守卫）：粉只能铺在**有效支撑面**（t739 起经 isDustSupport
+                //   单一权威）——
                 //   ① 目标格已是粉 → 拒（机制等价 MC 粉不可叠粉；旧版 tgt 允许 Water/Air，但命中「粉的顶面」
                 //      时射线把粉当实体命中（raycastAABBs 粉薄板命中盒）→ ty = 粉格 +1 且下方是粉 → 旧守卫
                 //      拦不住「粉上放粉」的悬空二层粉（用户实测「红石粉可以在红石粉上面放」）。
-                //   ② 目标格正下方须 isFullCube（粉贴地薄层须满顶面支撑——同铁轨 / 雪层 t554 支撑语义；
-                //      耕地 / 半砖 / 楼梯顶不铺，粉上也不满足 → ② 同时兜死 ① 的漏网路径）。
-                const bool belowFull = ty - 1 >= 0
-                    && BlockRegistry::isFullCube(m_world->blockAt(tx, ty - 1, tz));
+                //   ② 目标格正下方须可撑粉（isDustSupport：完整立方 或 **上半砖**——t739 放置面修正：上半砖
+                //      体占格上半、顶面与格顶齐平 → 粉铺其上与整立方顶同高（粉格 = 半砖格 +1，层高 1/16 恰
+                //      贴半砖顶面，渲染零改动）；下半砖顶面在半格高 0.5 处 → 拒（t739 语义：上半可放、下半
+                //      不可）；耕地 / 楼梯顶不铺，粉上也不满足 → ② 同时兜死 ① 的漏网路径）。
+                const bool belowSupport = ty - 1 >= 0
+                    && BlockRegistry::isDustSupport(m_world->blockAt(tx, ty - 1, tz),
+                                                    m_world->stateAt(tx, ty - 1, tz));
                 if (!BlockRegistry::isRedstoneDust(tgt)
                     && (tgt == BlockRegistry::Air || tgt == BlockRegistry::Water)
-                    && belowFull) {
+                    && belowSupport) {
                     m_world->setBlock(tx, ty, tz, BlockRegistry::RedstoneDust, 0); // state=0（断电；World 首次重算点亮）
                     if (m_mode != Creative)
                         m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 粉（创造不耗）

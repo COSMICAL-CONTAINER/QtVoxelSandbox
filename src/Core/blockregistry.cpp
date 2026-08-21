@@ -1177,6 +1177,13 @@ bool BlockRegistry::isRedstoneDust(quint8 blockId)
     return blockId == RedstoneDust;
 }
 
+// t739 红石粉支撑判定（单一权威，见 .h 头注释）：完整立方 或 上半砖（state bit0=1，顶面与格顶齐平）。
+//   下半砖 / 楼梯 / 耕地 / 粉自身等顶面非满格高 → 不可撑粉（机制等价 MC 1.0 粉只能铺满顶高面）。
+bool BlockRegistry::isDustSupport(quint8 belowId, quint8 belowState)
+{
+    return isFullCube(belowId) || (isSlab(belowId) && (belowState & 1) != 0);
+}
+
 // t620 红石灯统一谓词（单一权威，见头注释）：blockId == RedstoneLamp 即红石灯。供 PlayerController
 //   placeBlock useBlock 分支「右键翻开关态」判定（不各处硬编码 id，同 isTnt 单 id 模式）。
 bool BlockRegistry::isRedstoneLamp(quint8 blockId)

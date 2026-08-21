@@ -803,9 +803,10 @@ int PartialBlockGeometry::append(
         //     - 3 连接 → T（三段半臂）。
         //     - 4 连接 → 十字（两片整线叠成 +）。
         //     半臂 = 线向瓦片的中心半段 quad（UV 取瓦片内半区 → 粉线宽度 / 端头收口观感与整线一致）。
-        //   t702 爬墙（机制等价 MC 1.0 粉沿 1 格台阶上爬，用户「粉能跟铁轨一样上墙」）：nb.dustClimbPx*
-        //   （chunkgeometry 填的三高探针）>0 时该向半臂外沿抬高 1 格成斜段（同铁轨 t667 坡「低端画坡、
-        //   高端平铺」约定——低处粉画斜段，高处粉平铺）。
+        //   t702 爬墙（机制等价 MC 1.0 粉沿 1 格台阶上爬，用户「粉能跟铁轨一样上墙」）+ t739 阶梯形
+        //   （R19.11 用户复盘「越过一格高方块时不直连斜穿」）：nb.dustClimbPx*（chunkgeometry 填的三高
+        //   探针）>0 时该向线臂**保持贴地平铺**，另发一片竖直 quad 贴被爬方块侧面（yr → 1+yr）——
+        //   「贴边缘水平延伸、触到方块侧面再竖直爬升」的 L 形阶梯路径（详见下方 pushDustClimb* 段）。
         constexpr float yr = 1.0f / 16.0f; // 粉层厚度（cell 底以上 1/16，贴地面防 z-fight，同铁轨）
         const quint8 con = quint8(state >> 4);                      // 高 4 位连接位
         const int pw = int(state & BlockRegistry::RedstoneDustPowerMask); // 电力级 0..15（亮度档源）
@@ -816,7 +817,7 @@ int PartialBlockGeometry::append(
         // t692 亮度档选瓦：0→off、1-5→lvl1、6-10→lvl2、11-15→on（线 / 点两形态各一瓦）。
         const int lineTile = (pw == 0) ? 166 : (pw <= 5) ? 171 : (pw <= 10) ? 172 : 168;
         const int dotTile  = (pw == 0) ? 167 : (pw <= 5) ? 173 : (pw <= 10) ? 174 : 169;
-        // 通用 quad：四角各自 y（t702 爬墙斜段——端边外沿抬 1，同 pushRailQuad 模式）。
+        // 通用 quad：四角各自 y（t739 阶梯爬坡竖直段用——底边 yr / 顶边 1+yr；平铺臂经 pushDust 固定 yr）。
         const auto pushDustY = [&](int t,
                                    float ax0, float ay0, float az0,  float ax1, float ay1, float az1,
                                    float ax2, float ay2, float az2,  float ax3, float ay3, float az3) {
@@ -841,15 +842,26 @@ int PartialBlockGeometry::append(
         const bool dnx = cnx || isDustDevice(nb.negX); // -X
         const bool dpz = cpz || isDustDevice(nb.posZ); // +Z
         const bool dnz = cnz || isDustDevice(nb.negZ); // -Z
-        // t702 爬墙抬升（该向水平邻的**上 / 下一格**有粉 → 线臂画斜段：外沿 y=1+yr、内沿 yr）。只抬
-        //   dustClimb>0（邻上格有粉 = 本粉在墙脚，画上坡）；邻下格有粉（本粉在墙顶）→ 对端粉画坡、本格平铺
-        //   （「低端画坡、高端平铺」同铁轨 t667，防双重斜面）。dustClimb* 由 chunkgeometry 三高探针填
-        //   （PartialNeighborCtx，1=上格有粉 / -1=下格有粉 / 0=无）。
-        const float rpx = (nb.dustClimbPx > 0) ? 1.0f : 0.0f; // +X 外沿抬高量
-        const float rnx = (nb.dustClimbNx > 0) ? 1.0f : 0.0f; // -X
-        const float rpz = (nb.dustClimbPz > 0) ? 1.0f : 0.0f; // +Z
-        const float rnz = (nb.dustClimbNz > 0) ? 1.0f : 0.0f; // -Z
-        // ── 形状选择（t702）──
+        // t739 爬坡改「阶梯形贴边」（R19.11 用户复盘「不直连斜穿」）：旧 t702 把线臂外沿整边抬 1 画成
+        //   斜面（跨一格高方块直连斜穿）；现拆两段 L 形——①线臂保持贴地平铺到 cell 边（贴方块边缘水平
+        //   延伸）；②另发一片**竖直 quad 贴被爬方块侧面**（yr → 1+yr，向本格 air 侧内缩 1/64 防与墙面
+        //   共面 z-fight）。「触到方块侧面再竖直爬升」；高处粉只平铺（其 cell 内 1/16 层恰与竖直段顶端
+        //   同一全局平面 y+1+1/16）→ 低处发竖直段 + 两侧平铺臂拼成完整 L、不重复画（「低处发竖直段、
+        //   高处平铺」分工 = 铁轨 t667「低端画坡、高端平铺」约定的阶梯版）。dustClimb* 探针语义不变
+        //   （1=该向水平邻上格有粉 / -1=下格有粉 → 本格平铺等对端发竖直段）。连接位 / BFS 电力语义
+        //   不动（爬墙斜角仍算一跳，t738/t740 修复保持）——本改动纯呈现层。
+        constexpr float kClimbInset = 1.0f / 64.0f; // 竖直段内缩量（贴墙 air 侧，防共面 z-fight）
+        // 竖直爬升段：±X 边平面（u 沿 z、v 沿 y → 线瓦的线沿 v 轴呈竖直走线，与平铺臂同瓦观感衔接）。
+        const auto pushDustClimbX = [&](bool positive) {
+            const float q = positive ? 1.0f - kClimbInset : kClimbInset; // ±X cell 边向本格内缩
+            pushDustY(lineTile, q, yr, 0.f,  q, yr, 1.f,  q, 1.f + yr, 1.f,  q, 1.f + yr, 0.f);
+        };
+        // ±Z 边平面（u 沿 x、v 沿 y）。
+        const auto pushDustClimbZ = [&](bool positive) {
+            const float q = positive ? 1.0f - kClimbInset : kClimbInset;
+            pushDustY(lineTile, 0.f, yr, q,  1.f, yr, q,  1.f, 1.f + yr, q,  0.f, 1.f + yr, q);
+        };
+        // ── 形状选择（t702；t739 起线臂一律平铺不抬边）──
         const int nConn = int(dpx) + int(dnx) + int(dpz) + int(dnz);
         if (nConn == 0) {
             // 孤立点（无任何水平邻粉 / 装置）。
@@ -859,30 +871,32 @@ int PartialBlockGeometry::append(
             pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f); // X 向整线（EW 旋转序）
             pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // Z 向整线（标准序）
         } else if (nConn == 2 && ((dpx && dnx) || (dpz && dnz))) {
-            // 对向贯穿直线（±X 成对或 ±Z 成对，另一轴无连接）→ 整片线向（含爬墙抬升：两端各自抬高）。
-            if (dpx && dnx) {
-                // X 贯穿：+X 外沿抬 rpx、-X 外沿抬 rnx（BL/BR = -X 端，TR/TL = +X 端，EW 角序 (0,0)(0,1)(1,1)(1,0)）。
-                pushDustY(lineTile, 0.f, yr + rnx, 0.f,  0.f, yr + rnx, 1.f,
-                                   1.f, yr + rpx, 1.f,  1.f, yr + rpx, 0.f);
-            } else {
-                // Z 贯穿：+Z 外沿抬 rpz、-Z 外沿抬 rnz（NS 角序 (0,0)(1,0)(1,1)(0,1)：p0/p1 = -Z 端）。
-                pushDustY(lineTile, 0.f, yr + rnz, 0.f,  1.f, yr + rnz, 0.f,
-                                   1.f, yr + rpz, 1.f,  0.f, yr + rpz, 1.f);
-            }
+            // 对向贯穿直线（±X 成对或 ±Z 成对，另一轴无连接）→ 整片线向平铺（爬坡端竖直段见下方）。
+            if (dpx && dnx)
+                pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f, 1.f, 0.f); // X 贯穿（EW 角序）
+            else
+                pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f); // Z 贯穿（标准序）
         } else {
-            // 半臂集合（1 连接 / 邻向 L（1X+1Z）/ 3 连接 T）：每个连接向画一段「中心 → 该向边」的半臂 quad
-            //   （UV 由 pushCrossQuad 固定整瓦映射——半臂用整张瓦片铺半段，粉线宽度观感随几何半长加倍宽
+            // 半臂集合（1 连接 / 邻向 L（1X+1Z）/ 3 连接 T）：每个连接向画一段「中心 → 该向边」的半臂
+            //   quad（UV 由 pushCrossQuad 固定整瓦映射——半臂用整张瓦片铺半段，粉线宽度观感随几何半长加倍宽
             //   （16px 瓦的 2px 线在半臂上呈 4px），可接受的近似；中心处各臂在 cell 中心相接成 L/T 形）。
-            //   爬墙：该臂外沿抬 1。
-            if (dpx) // +X 半臂：x 0.5→1、z 0→1（外沿 = +X 边抬 rpx）
-                pushDustY(lineTile, 0.5f, yr, 0.f,  0.5f, yr, 1.f,  1.f, yr + rpx, 1.f,  1.f, yr + rpx, 0.f);
-            if (dnx) // -X 半臂：x 0→0.5（外沿 = -X 边抬 rnx）
-                pushDustY(lineTile, 0.f, yr + rnx, 0.f,  0.f, yr + rnx, 1.f,  0.5f, yr, 1.f,  0.5f, yr, 0.f);
-            if (dpz) // +Z 半臂：z 0.5→1（外沿 = +Z 边抬 rpz）
-                pushDustY(lineTile, 0.f, yr, 0.5f,  1.f, yr, 0.5f,  1.f, yr + rpz, 1.f,  0.f, yr + rpz, 1.f);
-            if (dnz) // -Z 半臂：z 0→0.5（外沿 = -Z 边抬 rnz）
-                pushDustY(lineTile, 0.f, yr + rnz, 0.f,  1.f, yr + rnz, 0.f,  1.f, yr, 0.5f,  0.f, yr, 0.5f);
+            //   t739 起半臂平铺（爬坡向竖直段见下方）。
+            if (dpx) // +X 半臂：x 0.5→1、z 0→1
+                pushDust(lineTile, 0.5f, 0.f, 0.5f, 1.f, 1.f, 1.f, 1.f, 0.f);
+            if (dnx) // -X 半臂：x 0→0.5
+                pushDust(lineTile, 0.f, 0.f, 0.f, 1.f, 0.5f, 1.f, 0.5f, 0.f);
+            if (dpz) // +Z 半臂：z 0.5→1
+                pushDust(lineTile, 0.f, 0.5f, 1.f, 0.5f, 1.f, 1.f, 0.f, 1.f);
+            if (dnz) // -Z 半臂：z 0→0.5
+                pushDust(lineTile, 0.f, 0.f, 1.f, 0.f, 1.f, 0.5f, 0.f, 0.5f);
         }
+        // t739 阶梯爬坡竖直段：每个「连接向且该向探针 >0（本粉在墙脚）」的 cell 边发一片贴面竖直 quad
+        //   （贯穿直线 / 十字 / 半臂各形状统一在此收口；探针 <0 = 对端更低 → 由对端粉发竖直段，本格平铺）。
+        //   dot（nConn==0）无连接向 → 自然不发。
+        if (dpx && nb.dustClimbPx > 0) pushDustClimbX(true);
+        if (dnx && nb.dustClimbNx > 0) pushDustClimbX(false);
+        if (dpz && nb.dustClimbPz > 0) pushDustClimbZ(true);
+        if (dnz && nb.dustClimbNz > 0) pushDustClimbZ(false);
         break;
     }
     case BlockRegistry::EndPortalSurface: {
