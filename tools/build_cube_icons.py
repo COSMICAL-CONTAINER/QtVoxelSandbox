@@ -147,6 +147,10 @@ BLOCKS = [
     # t676：工作台 / 熔炉 / 发射器 / 投掷器 / TNT 图标走 FROM_PACK cube_front（--from-pack 重生成；本表不再管）。
     # t487 要塞结构方块立方体图标（build_stone_brick.py 程序生成原创像素图；顶 + 两侧明暗 → 肉眼可辨）。
     ("stone_brick",     "default_stone_brick", "default_stone_brick"),  # t487 石砖（各面同贴图=石质灰底+砖块缝纹网格；要塞墙体主体）
+    # t760 刷怪笼立方体图标（build_spawner.py 程序生成原创像素图；t760 起贴图为 cutout 栅格——孔透明，
+    #   load_face 会把 alpha<128 孔用不透明像素均值色（铁灰）填掉 → 图标仍实心立方，读作铁笼）。
+    #   机制等价 MC 1.0 创造背包可取刷怪笼 + 中键复制出带图标的 item（此前 iconFileForBlock 无 case → 空串 → 透明图标）。
+    ("spawner",         "default_spawner", "default_spawner"),  # t760 刷怪笼（各面同贴图=铁灰栅栏笼格；地牢/要塞结构方块）
     # t600 石砖台阶/楼梯不再走 BLOCKS（满立方体投影）：三个图标渲染成同一张整砖立方 → 背包里与石砖满格无法区分
     #   （用户「三个都是石砖满一格子的样子」）。改走下方 PARTIALS_3D_STONE_BRICK（slab/stairs 形状投影，砖纹 fill）。
 ]

@@ -556,6 +556,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_dispenser.png              # t486/t644 发射器立方体图标（--from-pack：正面为主投影，pack 贴图，与放置态一致）
         textures/icon_dropper.png                # t609/t644 投掷器立方体图标（--from-pack：正面为主投影，pack 贴图）
         textures/icon_stone_brick.png            # t487 石砖立方体图标（build_cube_icons.py；各面=石质灰底+砖块缝纹网格；要塞墙体主体）
+        textures/icon_spawner.png                # t760 刷怪笼立方体图标（build_cube_icons.py；各面=铁灰栅栏笼格，cutout 孔被均值色填实；创造背包/中键复制 item 用）
         textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
         textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）

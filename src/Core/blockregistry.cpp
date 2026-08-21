@@ -172,13 +172,20 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* bed_magenta  */ {int(BlockRegistry::BedMagenta),                49, 49, 49, 49, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedMagenta),    1, 64, "bed_magenta",  "品红色床"},
     /* bed_black    */ {int(BlockRegistry::BedBlack),                  50, 50, 50, 50, false, BlockRegistry::ShapeBed,     0.2f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::BedBlack),      1, 64, "bed_black",    "黑色床"},
     // ── t392 刷怪笼（Spawner）：机制等价 MC 1.0 刷怪笼（地下地牢中央放置的整立方方块，玩家在范围内时周期刷 1 敌对 mob，
-    //   破坏后停止刷怪）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest / wool
-    //   同族）、hardness=5.0（同 MC 1.0 刷怪笼量级，需镐且耗时）、toolType=Pickaxe、requiresTool=true、minToolTier=1
+    //   破坏后停止刷怪）。hardness=5.0（同 MC 1.0 刷怪笼量级，需镐且耗时）、toolType=Pickaxe、requiresTool=true、minToolTier=1
     //   （木镐可破）、**dropId=0**（破块不掉落 —— MC 1.0 刷怪笼不可正常获得，本工程无精准采集故恒不掉落）、dropCount=0、
-    //   maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图=spawner(51)（暗蓝灰底
-    //   + 铁灰栅栏 + 中心青绿光斑，原创自绘 §9a）。音色归 GroupStone（铁笼金属敲击）。worldgen placeDungeons 在地下地牢
-    //   中央放置；玩家可破坏以停止刷怪（EntityManager::tickSpawners 扫到该格 blockAt != Spawner 即跳过）。不进创造调色板。
-    /* spawner      */ {int(BlockRegistry::Spawner),                    51, 51, 51, 51, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "spawner",      "刷怪笼"},
+    //   maxStack=64（t760 起进创造调色板故堆叠可达）。各面贴图=spawner(51)（t760 改 cutout 铁笼栅格：栅栏 alpha=255 +
+    //   格间透明孔，孔下留暗蓝灰 RGB 供非 Mask 消费者降级；中心光斑删除，改由笼内旋转迷你蠹虫 delegate 表达「内有活物」，
+    //   原创自绘 §9a）。
+    //   t760 渲染重构：solid=false / ShapeFull（glass / ice / cactus 先例：solid 仅作 mesher 邻居面剔除依据 —— 本方块
+    //   t760 起**被 mesher 双 pass 跳过**（同 Painting/Fire/NetherPortal），整笼改由 QML spawnerHost delegate 渲染
+    //   （BlockCube 铁笼壳 alphaMode:Mask + 笼内旋转迷你蠹虫）；若仍 solid=true 会被误剔邻居整面 → 笼四周露 x-ray 洞。
+    //   碰撞 / 选中 / 射线走 shape=ShapeFull **不变**（整格可站 / 可选 / 可挖）；lightOpacity 随 solid=false 转全透 0
+    //   （t742 铁活板门同款 cutout 语义：栅格孔真透明 → 孔后邻面采到本格天光，孔洞通透）。音色归 GroupStone（铁笼金属
+    //   敲击）。worldgen placeDungeons 地牢中央 / placeStronghold 传送门房放置（后者带 SpawnerStateSilverfishFlag 刷蠹虫）；
+    //   玩家可破坏以停止刷怪（EntityManager::tickSpawners 扫到该格 blockAt != Spawner 即跳过）。
+    //   t760 进创造调色板（此前 worldgen 专属不可获得——见 Hotbar::creativeBlocks）。
+    /* spawner      */ {int(BlockRegistry::Spawner),                    51, 51, 51, 51, false, BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "spawner",      "刷怪笼"},
     // ── t394 沙漠群系内容（机制等价 MC 1.0 沙漠三件套：sandstone / cactus / dead bush；名称 / 贴图全原创自绘 §9a）：
     //   砂岩（Sandstone）：沙下成岩整立方。solid=true / ShapeFull（走 mesher 整立方面路径，**非**异形，与 chest/wool
     //   同族）、hardness=0.8（同 MC 1.0 砂岩量级）、toolType=Pickaxe、requiresTool=true、minToolTier=1（木镐可破，同

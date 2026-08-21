@@ -172,6 +172,10 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::DetectorRail:  return "icon_detector_rail.png";  // 探测铁轨（pack detector_rail；矿车驶过通电视觉）
     case BlockRegistry::RedstoneTorch: return "icon_redstone_torch.png"; // 红石火把（pack 常亮态贴图；装饰光源 光 7）
     case BlockRegistry::RedstoneDust:  return "icon_redstone_dust.png";  // t660 红石粉导线（flat 2D 断电线向贴图；红石 tab 方块形态条目）
+    // t760 刷怪笼 item 图标（build_cube_icons.py 程序生成立方投影；贴图虽 t760 改 cutout 栅格，图标烘焙时
+    //   透明孔被不透明均值色填实 → 实心铁笼立方图标）。此前此处无 case → iconSourceForBlock 回退链 route③
+    //   落 nullptr → 空串 → 中键复制 / 创造背包拿到「透明 item」（pickBlock 写 id 本身没错，纯图标查表缺失）。
+    case BlockRegistry::Spawner:       return "icon_spawner.png";        // t760 刷怪笼（铁灰栅栏笼格；地牢/要塞结构方块）
     default: return nullptr; // air / 未知 / 工具段：无图标（t33 落地工具图标时扩展）
     }
 }
@@ -835,6 +839,13 @@ QVariantList Hotbar::creativeBlocks() const
              //   （hardness=-1，同基岩）。右键交互不变（持末影之眼 → 激活 state bit0；不持 → 无效应）。
              //   紧随要塞石砖系列（同为要塞结构族）。
              int(BlockRegistry::EndPortal),                                  // 末地传送门（末影祭坛；末影之眼右键激活；创造可放/瞬破）
+             // t760 刷怪笼（Spawner）进创造调色板（此前缺失：worldgen 专属方块，玩家只能挖到却拿不到——中键
+             //   复制出的 item 也因无图标显透明）。机制等价 MC 1.0 刷怪笼：玩家在附近时周期性在笼周刷一只
+             //   敌对 mob（地牢=僵尸/骷髅系，要塞=蠹虫，见 EntityManager::tickSpawners），破坏后停止刷怪
+             //   （dropId=0 恒不掉落，采掘仅清方块）。创造取用可自建刷怪陷阱场。放置正常（ShapeFull 整格，
+             //   t760 起渲染走 spawnerHost delegate：cutout 铁笼 + 笼内旋转迷你蠹虫）；紧随要塞结构族
+             //   （地牢/要塞两处 worldgen 结构均放此方块）。
+             int(BlockRegistry::Spawner),                                    // 刷怪笼（铁笼内旋转迷你蠹虫；近玩家周期刷怪；破坏停止）
              int(BlockRegistry::StoneBrickStairs) };                         // 石砖楼梯（整步+背墙；复用 ShapeStairs 几何 + 石砖贴图；可放置）
 }
 

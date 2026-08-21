@@ -539,6 +539,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     if (b == BlockRegistry::Painting) continue;    // t720 画作走 paintingHost（QML delegate，贴图不进图集）——非 partial 非 cross，双 PASS 均跳过
                     if (b == BlockRegistry::Fire) continue;        // t724 火焰走 fireHost（QML delegate 两片对角交叉双面 quad + fire_strip 翻书）——非 partial 非 cross，双 PASS 均跳过
                     if (b == BlockRegistry::NetherPortal) continue; // t725 余烬门走 portalHost（QML delegate 竖直平面 quad + portal_strip 翻书）——非 partial 非 cross，双 PASS 均跳过
+                    if (b == BlockRegistry::Spawner) continue;    // t760 刷怪笼走 spawnerHost（QML delegate：BlockCube cutout 铁笼壳 + 笼内旋转迷你蠹虫）——整笼 delegate 渲染，双 PASS 均跳过
                     // t194：必须闭区间 [FirstPartial, LastPartial]。段后整立方（Chest=22）虽 id 更大但非异形
                     //   （ShapeFull，走 PASS 2 立方面）。旧单边 `b >= FirstPartial` 把 Chest 误路由进 PartialBlockGeometry
                     //   （switch 无 case → 0 顶点 → 放置后透明透视格子）。Water/Torch 在上方已显式 continue。
@@ -912,6 +913,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；立方面路径会把画格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书条带不进图集）；立方面路径会把火格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；立方面路径会把门格画成 tile 0 草顶立方
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Spawner) continue; // t760 刷怪笼渲染走 spawnerHost QML delegate（BlockCube cutout 笼壳 + 旋转迷你蠹虫）；terrain 立方是 opaque 整壳会完全遮住笼内迷你蠹虫
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (occludesNeighborFace(nb)) continue;        // t746 邻居实体 → 剔除（跨 chunk 路由正确）；叶邻不剔（防叶孔透视 void）
                             if (isWater && nb == BlockRegistry::Water) continue; // 水-水面互剔
@@ -1027,6 +1029,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；不进整立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Spawner) continue; // t760 刷怪笼渲染走 spawnerHost QML delegate（BlockCube cutout 笼壳 + 旋转迷你蠹虫）；不进整立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const quint8 nb = blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);

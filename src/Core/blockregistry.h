@@ -231,15 +231,20 @@ public:
         BedBlue        = 37, // 蓝床
         BedMagenta     = 38, // 品红床
         BedBlack       = 39, // 黑床
-        Spawner        = 40, // 刷怪笼（t392）：机制等价 MC 1.0 刷怪笼（mob spawner）。整立方 opaque
-                                  //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 chest /
-                                  //   wool 同族）、hardness=5.0（同 MC 1.0 刷怪笼量级，需镐且耗时）、toolType=Pickaxe、
+        Spawner        = 40, // 刷怪笼（t392）：机制等价 MC 1.0 刷怪笼（mob spawner）。hardness=5.0（同 MC 1.0
+                                  //   刷怪笼量级，需镐且耗时）、toolType=Pickaxe、
                                   //   requiresTool=true、minToolTier=1（木镐可破）、**dropId=0**（破块不掉落 —— MC 1.0
                                   //   刷怪笼不可正常获得，仅创造 / 精准采集；本工程无精准采集故恒不掉落）、dropCount=0、
-                                  //   maxStack=64。各面贴图=spawner(51)（暗蓝灰底 + 铁灰栅栏 + 中心青绿光斑，原创自绘 §9a）。
+                                  //   maxStack=64。各面贴图=spawner(51)（t760 改 cutout 铁笼栅格：铁灰栅栏 + 格间透明孔，
+                                  //   中心光斑删除，原创自绘 §9a）。
+                                  //   **t760 渲染重构**：solid=false / ShapeFull（glass / ice 先例）—— 本方块被 mesher
+                                  //   双 pass 跳过（同 Painting/Fire/NetherPortal），整笼改由 QML spawnerHost delegate
+                                  //   渲染（BlockCube 铁笼壳 alphaMode:Mask cutout + 笼内缓慢旋转迷你蠹虫模型）；
+                                  //   碰撞 / 选中 / 射线走 shape=ShapeFull 不变；lightOpacity 随 solid=false 转 0
+                                  //   （t742 铁活板门 cutout 同款：孔后邻面采到本格天光）。
                                   //   音色归 GroupStone（铁笼金属敲击感，最接近 MC 1.0 刷怪笼 metal SoundType）。
-                                  //   **worldgen 专属**（placeDungeons 在地下地牢中央放置），不进创造调色板（非玩家常规
-                                  //   放置 —— 与水 / 岩浆同属「worldgen / 系统获得」语义）；玩家可破坏以**停止刷怪**
+                                  //   worldgen 放置（placeDungeons 地牢中央 / placeStronghold 传送门房带蠹虫 flag）；
+                                  //   t760 起进创造调色板（此前 worldgen 专属不可获得）；玩家可破坏以**停止刷怪**
                                   //   （spec「spawner ... can be broken to stop」—— 破坏后 EntityManager::tickSpawners 扫到
                                   //   该格 blockAt != Spawner 即跳过，刷怪停止）。**刷怪 tick**：EntityManager::tickSpawners
                                   //   周期扫玩家周围 Spawner 块，玩家在 kSpawnerPlayerRange 内 + 该笼周 kSpawnerMobCheckRadius

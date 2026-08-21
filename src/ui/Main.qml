@@ -524,6 +524,19 @@ Window {
                 portalHost.addPortalVis(pcells[pi], pcells[pi + 1], pcells[pi + 2])
             console.info("[t725] portal rebuild on load: " + (pcells.length / 3) + " cells")
         }
+        // t760 刷怪笼读档重建（同 t725 余烬门模式）：读档 blob / worldgen 直写不经 blockPlaced → 事件驱动的
+        //   spawnerHost 读档后恒空（笼被 mesher 跳过 → 格子不可见）；先清上一世界残留 delegate 再按本世界
+        //   真值重建（地牢 placeDungeons / 要塞 placeStronghold 放置的笼一次到位）。
+        {
+            for (const key in spawnerHost.spawnerObjs) {
+                spawnerHost.spawnerObjs[key].destroy()
+                delete spawnerHost.spawnerObjs[key]
+            }
+            const scells = theWorld.collectBlocksOfId(40) // 40 = BlockRegistry::Spawner（字面量+注释）
+            for (let si = 0; si + 2 < scells.length; si += 3)
+                spawnerHost.addSpawnerVis(scells[si], scells[si + 1], scells[si + 2])
+            console.info("[t760] spawner rebuild on load: " + (scells.length / 3) + " cages")
+        }
         applyPlayerState(worldStore.loadPlayerData())
         // r2-B1 读档机关态收尾：清上一局的机关瞬态表（发射器冷却 / 红石矿点亮 / 压力板边沿基线 / 按钮复位）
         //   —— 读档复用同一 theWorld/player 对象（setWorld 不触发），不清则旧世界同坐标键串扰；并置压力板沿
@@ -8479,6 +8492,127 @@ Window {
             }
         }
 
+        // t760 刷怪笼渲染 host（同 portalHost / fireHost / paintingHost 的 createObject delegate 模式）：
+        //   Spawner（40）t760 起渲染不走 chunk mesh（chunkgeometry 三处 PASS 已 skip —— terrain 立方是 opaque
+        //   整壳，会完全遮住笼内迷你蠹虫），每格刷怪笼一个 delegate = ①BlockCube 铁笼壳（±0.5 满格 per-face
+        //   图集 UV → 各面 spawner tile 51；贴图 t760 改 cutout 栅格：铁栅 alpha=255 + 格间透明孔）+ alphaMode
+        //   Mask（孔硬边丢弃透视，同 cross/cutout 段契约）+ ②笼心缓慢自旋的迷你蠹虫（MobModel mobType 14 缩
+        //   0.45 + mobSilverfishTex，机制等价 MC 1.0 刷怪笼内旋转小怪剪影——本工程用真 3D 迷你模型，观感更
+        //   立体；地牢笼 / 要塞蠹虫笼统一显蠹虫剪影）。光照 NoLighting 全亮（笼在地底暗处，全亮保「内有活物」
+        //   信号可读；同手持/掉落物先例）。维护三重（同 fire/portal 模式）：onBlockPlaced(40) 加 /
+        //   onBlockBroken(40) 删 / onWorldChanged 兜底清孤儿；enterWorld 用 collectBlocksOfId(40) 重建（读档
+        //   blob 直写不经 blockPlaced）。分层（PLAN §2）：纯呈现层，只消费语义事件，绝不反向写栅格。
+        Node {
+            id: spawnerHost
+            property var spawnerObjs: ({})
+            function addSpawnerVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                if (spawnerObjs[key]) return
+                if (theWorld.blockAt(x, y, z) !== 40) return  // 真值校验（防陈旧信号挂假 delegate）
+                // createObject 失败（返回 null）不落表——cleanupVis 遍历对 null .destroy() 会 TypeError。
+                const o = spawnerDelegate.createObject(spawnerHost, {cellX: x, cellY: y, cellZ: z})
+                if (o) spawnerObjs[key] = o
+            }
+            function removeSpawnerVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = spawnerObjs[key]
+                if (o) { o.destroy(); delete spawnerObjs[key] }
+            }
+            // 兜底清孤儿（爆炸 / 系统改写）：blockAt != Spawner(40) 的条目销毁（blockBroken 之外的清除路径收口）。
+            function cleanupVis() {
+                for (const key in spawnerObjs) {
+                    const p = key.split(",")
+                    const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
+                    if (theWorld.blockAt(x, y, z) !== 40) {
+                        spawnerObjs[key].destroy(); delete spawnerObjs[key]
+                    }
+                }
+            }
+        }
+
+        // t760 刷怪笼 delegate 模板：spawnerHost.addSpawnerVis 经 createObject 实例化（cellX/Y/Z 注入）、
+        //   removeSpawnerVis/cleanupVis 用 .destroy() 回收（同 fireDelegate / portalDelegate 模式）。
+        Component {
+            id: spawnerDelegate
+            Node {
+                id: spawnerRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                // 格中心锚点（世界坐标）：笼壳与迷你蠹虫共锚（壳 ±0.5 恰覆整格）。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
+
+                // ① 铁笼壳：BlockCube 满格立方（blockId 40 → per-face 图集 UV 各面 spawner tile 51）。
+                //   scale 1.001 微放大：solid=false 后邻居实体面不再被剔除 → 邻面与本壳 ±0.5 面共面，
+                //   微放大把壳面推出共面距，消 z-fight。不设 world → BlockCube 顶点色恒白（全亮），
+                //   暗处笼体可读（同掉落物先例）。
+                Model {
+                    geometry: BlockCube { blockId: 40 }
+                    scale: Qt.vector3d(1.001, 1.001, 1.001)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaMode: PrincipledMaterial.Mask   // cutout：栅格孔透明硬边丢弃（同 cross/cutout 段契约）
+                        alphaCutoff: 0.5
+                        baseColorMap: voxelAtlas
+                    }
+                }
+
+                // ② 笼心迷你蠹虫：绕 Y 慢速自旋（4s/圈线性）+ 轻微上下浮沉（幅度 ~0.03 格，bookHost bob 先例
+                //   同款 yoyo 动画；机制等价 MC 1.0 刷怪笼内小怪旋转 + 浮沉剪影）。材质取**原样不透明**（弃
+                //   半透明：PrincipledMaterial Blend 进透明 pass 按模型级深度排序，蠹虫多体节相互重叠会自混合
+                //   出穿模伪影；MC 1.0 笼内小怪亦为不透明微型化——观感一致且无伪影）。walkPhase 恒 0（静态姿；
+                //   不接 entityManager 逐实体 revision——delegate 非实体，动感由自旋 + 浮沉承载即可）。
+                Node {
+                    id: miniMobSpin
+                    property real spinY: 0.0
+                    eulerRotation: Qt.vector3d(0, spinY, 0)
+                    // 单段线性 0→360 无缝循环（360≡0 无视觉跳变）。
+                    SequentialAnimation on spinY {
+                        running: true; loops: Animation.Infinite
+                        NumberAnimation { from: 0.0; to: 360.0; duration: 4000 }
+                    }
+
+                    Node {
+                        id: miniMobBob
+                        property real bob: 0.0
+                        position: Qt.vector3d(0, -0.015 + 0.03 * bob, 0)
+                        // 单段线性 0→1 yoyo 往返 → 正弦式浮沉（bookHost bob 同款）。
+                        SequentialAnimation on bob {
+                            running: true; loops: Animation.Infinite
+                            NumberAnimation { from: 0.0; to: 1.0; duration: 2600 }
+                            NumberAnimation { from: 1.0; to: 0.0; duration: 2600 }
+                        }
+
+                        // MobModel 蠹虫（mobType 14）缩 0.45 微型化：模型脚位在原点（halfH=0.15/mobModelYOff=0
+                        // → 体高 ~0.3），position.y 提 -0.15×0.45 ≈ -0.067 使虫体**竖直居中**于自旋轴（自旋绕
+                        // 体心非绕脚）。眼 2 颗嵌套随父缩放（同 t487 实体蠹虫眼位：头前侧 (±0.05, 0, -0.35)）。
+                        Model {
+                            geometry: MobModel { mobType: 14; walkPhase: 0 }
+                            position: Qt.vector3d(0, -0.067, 0)
+                            scale: Qt.vector3d(0.45, 0.45, 0.45)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColorMap: mobSilverfishTex
+                                baseColor: "#ffffff"   // 全亮（笼在地底暗处，保「内有活物」信号可读）
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(-0.05, 0.00, -0.35)
+                                scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                            }
+                            Model {
+                                geometry: UnitCube {}
+                                position: Qt.vector3d(0.05, 0.00, -0.35)
+                                scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // t196 / t225 / t441 箱子盖子开合动画（场景内 3D Node，与 torchHost / itemHost 同层）。仅当前所开箱子
         //   （chestX/Y/Z）一处显盖子（一次只开一只箱子，chestOpen 单 bool）。chestLidAngle 由 openChest/
         //   closeChest 驱动（window 级 Behavior 平滑过渡 0↔全开角）。
@@ -8907,6 +9041,10 @@ Window {
             //   发本信号，连通域其余格走 setWaterSilent 静默不发——由 onWorldChanged portalHost.cleanupVis
             //   兜底清）。挖门无掉落（dropId=0，C++ 侧）。
             if (id === 138) portalHost.removePortalVis(x, y, z)
+            // t760：刷怪笼被破 → 销毁视觉 delegate（id=40=BlockRegistry::Spawner；笼被 mesher 跳过全靠
+            //   delegate 呈现，此处不删则破笼后残影）。破笼无掉落（dropId=0，C++ 侧）；刷怪停止由
+            //   EntityManager::tickSpawners 扫 blockAt != Spawner 自动跳过（C++ 侧，非本层职责）。
+            if (id === 40) spawnerHost.removeSpawnerVis(x, y, z)
             // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
             //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
             //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
@@ -9003,6 +9141,9 @@ Window {
             // t725：余烬门生成（打火石点燃门框 → tryIgniteNetherPortal 逐格 setBlock NetherPortal）→ 挂视觉
             //   delegate（id=138=BlockRegistry::NetherPortal）。addPortalVis 内 blockAt 真值校验（同火模式）。
             if (id === 138) portalHost.addPortalVis(x, y, z)
+            // t760：刷怪笼放置（创造背包取笼放置 setBlock Spawner）→ 挂视觉 delegate（id=40=
+            //   BlockRegistry::Spawner）。addSpawnerVis 内 blockAt 真值校验（同火/门模式，防陈旧信号）。
+            if (id === 40) spawnerHost.addSpawnerVis(x, y, z)
             // t669 放置消耗收口：生存放置由 PlayerController::placeBlock（C++）各放置分支统一 takeStack。
             //   原 t32 行为是此处 blanket takeStack —— 但 World::blockPlaced 不止由玩家 placeBlock 触发：
             //   锄耕地（setBlock Farmland）/ 踩踏回土（setBlock Dirt）/ 种植 / 倒流体等都是非放置类
@@ -9075,6 +9216,9 @@ Window {
             // t725：同步清余烬门视觉 delegate 孤儿（门框破坏连锁 / 连通域静默清不经 blockBroken 的路径
             //   收口；removeNetherPortalAt 的 setWaterSilent 只发 worldChanged → 此处兜底）。
             portalHost.cleanupVis()
+            // t760：同步清刷怪笼视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同
+            //   portalHost 模式）。
+            spawnerHost.cleanupVis()
         }
     }
 
