@@ -356,6 +356,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_furnace_top.png
         textures/default_grass_side.png
         textures/default_grass_top.png
+        textures/default_gravel.png             # t761 沙砾贴图（build_gravel.py；灰砾石+卵石碎砾斑；tile 179；重力方块，挖掉概率掉燧石）
         textures/default_iron_ore.png
         textures/default_leaves.png
         textures/default_bedrock.png
@@ -569,6 +570,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_dirt.png
         textures/icon_furnace.png                # t80/t492 熔炉立方体图标（build_cube_icons.py；正面为主投影，显炉口）
         textures/icon_grass.png
+        textures/icon_gravel.png               # t761 沙砾立方体图标（build_cube_icons.py；灰砾石 3D 投影）
         textures/icon_iron_ore.png
         textures/icon_leaves.png
         textures/icon_log.png

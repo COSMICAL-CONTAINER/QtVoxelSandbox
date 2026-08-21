@@ -1015,7 +1015,16 @@ public:
         //   （maxStack=0 不可拾取/放置）。tickFire 生态**零交互**：flammable() 表不含本格（火不蔓延进门 /
         //   门不助燃——门格非 air，flint 分支亦不覆写）。
         NetherPortal   = 138, // 余烬门：黑曜石门框内点燃的传送门面片（光 11）；竖直平面 quad + 32 帧紫色漩涡；站入灼烧
-        Count           = 139, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t761 沙砾（Gravel；机制等价 MC 1.0 gravel id 13，「换皮沙子」重力方块）：松散灰砾石。**与沙
+        //   同受重力**（Main.qml maybeTriggerFallingBlock 按 id 8||139 触发塌落，链式 / 落水穿透 / 遇不完整
+        //   方块变掉落物全同沙）；solid=true / ShapeFull（整立方，mesher 走贪心合并天然支持）；hardness=0.6 /
+        //   Shovel / requiresTool=false（对齐沙子的铲加速 + 空手可采且掉落，仅比沙略硬表「砾石更紧实」）；
+        //   音色 GroupSand（颗粒沙响，同沙 / 雪）。**掉落规则特殊**（playercontroller finishMiningAt 特例
+        //   分支）：大概率掉沙砾自身、小概率只掉燧石（FlintId 0x248，概率常量 kGravelFlintDropPct 可调），
+        //   精准采集恒掉自身（同 silk 语义）；BlockDef.dropId=自身 仅是表兜底。生成 = 地下浅层矿袋
+        //   （World::placeGravelPockets）+ 沙海盘沙滩与沙混排（generate inSandSea 列表层）。各面=gravel(179)。
+        Gravel         = 139, // 沙砾：灰色松散砾石（受重力）；挖掉大概率自掉、小概率掉燧石
+        Count           = 140, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1669,7 +1678,10 @@ public:
     //       pack {176→door_iron_upper.png /
     //       177→door_iron_lower.png / 178→iron_trapdoor.png}。本批无 BlockDef 引用（t722/t723 建 IronDoor/
     //       IronTrapdoor 时接 topTile/bottomTile/sideTile），static_assert 守卫随既有 kDefs 不变。
-    static constexpr int AtlasTileCount = 179;
+    //   t761：179=gravel（沙砾各面贴图；Gravel(139) 各面=本 tile）。灰砾石底 + 深浅卵石碎砾斑（无层理，
+    //       区别于成岩纹理——沙砾是松散碎砾堆积）；tools/build_gravel.py 程序生成（§9 override (a)；
+    //       零 MC 资产）。pack {179→gravel.png}。
+    static constexpr int AtlasTileCount = 180;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

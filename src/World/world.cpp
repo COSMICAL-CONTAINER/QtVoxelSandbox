@@ -3430,6 +3430,16 @@ void World::generate()
             const int desertSandThickness = desert ? (4 + int(colHash % 3u)) : 0;
             // t394：沙下砂岩层厚度 3..5 格（colHash bit[9:8] 派生；沙下成岩，机制等价 MC 沙漠沙下砂岩）。
             const int desertSandstoneThickness = desert ? (3 + int((colHash >> 8) % 3u)) : 0;
+            // t761 沙海盘表层沙砾混排（机制等价 MC 1.0 海岸砾石滩斑 / 砾石海底）：两级确定性哈希——
+            //   ① 4×4 粗格（x>>2,z>>2 共享决策）按 kGravelBeachPct% 选「砾石斑带」；② 带内逐列 65% 兑现。
+            //   为什么两级：纯列级独立掷硬币成「撒胡椒面」（单列孤立砾石不读作滩斑），先成带再参差兑现
+            //   → 成片但边缘破碎的砾石滩观感。密度旋钮 = kGravelBeachPct（常量可调，约 16% 沙海面列）。
+            //   仅沙海盘（inSandSea）表层 y==h 一格（沙滩面 / 海底面）；沙砾同受重力（与沙同族塌落链）。
+            constexpr unsigned kGravelBeachPct = 25u;  // 砾石斑带命中概率（密度主旋钮：25% 带 × 65% 列兑现 ≈ 16%）
+            constexpr unsigned kGravelBeachFill = 65u; // 带内列兑现概率（调小 → 斑更稀碎；调大 → 斑更整片）
+            const bool beachGravel = inSandSea
+                && ((hashColumn(m_seed + 7611, x >> 2, z >> 2) % 100u) < kGravelBeachPct)
+                && ((hashColumn(m_seed + 7612, x, z) % 100u) < kGravelBeachFill);
             if (desert) ++desertCols;
             else if (inSandSea) ++seaCols;
             // t306：森林地表仍为草（机制等价 MC 森林地表草地），仅树/草密度分化 → surface 填充无需分流 forest。
@@ -3444,7 +3454,9 @@ void World::generate()
                 if (inSandSea) {
                     // t338 海域：沙表层（海底 / 沙滩）+ Dirt + Stone（机制等价 MC 海岸沙 + 水下沙底）。沙海盘优先于
                     //   群系（海覆盖任何群系，统一沙底）；fillWater 随后在海盆（h<waterLevel）灌满海水到海平面。
-                    if (y == h)          b = BlockRegistry::Sand;  // 沙表层（海底 / 沙滩）
+                    //   t761：表层按列确定性混排沙砾（beachGravel 两级哈希，见上方常量注释）——砾石滩斑 /
+                    //   砾石海底观感（机制等价 MC 1.0 海岸 gravel 滩）。
+                    if (y == h)          b = beachGravel ? BlockRegistry::Gravel : BlockRegistry::Sand;  // 沙表层（海底 / 沙滩；t761 概率混砾）
                     else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
                     else                 b = BlockRegistry::Stone; // 深石
                 } else if (desert) {
@@ -3506,6 +3518,8 @@ void World::generate()
 
     placeBedrock(); // t119：底层基岩（y 0..4 坑洼，底实顶疏；不可破坏）。先于矿石 / 树（仅覆盖最底几格）
     scatterOres(); // 地形填充后确定性散布矿石（stone 区段，t84；先于树木，树只动地表空气无冲突）
+    placeGravelPockets(); // t761：地下浅层沙砾矿袋（scatterOres 之后——矿石先占位不被覆盖；carveCaves 之前——
+                          //   洞穴切穿矿袋 → 洞壁裸露沙砾，同矿石「carve 暴露」语义）。
     carveCaves(); // t278：洞穴隧道 carve（terrain + 矿石之后；挖走 stone/dirt/ore 暴露矿石于洞壁 → 为 t279 铺路）。
                   //   先于填水 → 水只填地表低洼列（h+1..waterLevel），不灌地下洞穴；先于树/草 → 表面特征放于完整地表。
     carveCaveEntrances(); // t341：山坡洞口（carveCaves 之后 → 连通既有洞穴网络；先于地下水 → 洞口路径干净；先于填水
@@ -4589,6 +4603,63 @@ void World::scatterOres()
             << "iron" << ironPlaced << "gold" << goldPlaced
             << "diamond" << diamondPlaced << "lapis" << lapisPlaced
             << "redstone" << redstonePlaced; // 同 seed → 同计数（确定性核对）
+}
+
+// t761 沙砾矿袋（见 world.h 头注释）。机制等价 MC 1.0 地下 gravel 砾石袋：地下浅层小团 Gravel 替换 Stone。
+//   确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构同 placeUndergroundWaterPools 的「网格 + 概率筛选
+//   + 抖动」模式，但产出不是空腔而是**材质替换**（只把 Stone 换成 Gravel；不动基岩 / 矿石 / dirt / 既有
+//   洞穴 air → 与洞穴重叠时洞壁一圈沙砾、与矿石相邻互不覆盖，机制等价 MC 砾石袋被洞穴切穿暴露于洞壁）。
+//   密度低（网格 / 概率常量可调，每图十余小袋）+ **浅层带**（地表下 [kShallowMin, kShallowMax]，玩家下挖
+//   几格即遇——机制等价 MC gravel 浅层常见；留 ≥4 格顶盖防直接露天成「砾石丘」）。pass 序：scatterOres 之后
+//   （矿石先占位、砾袋不覆盖矿石）/ carveCaves 之前（后到的 carve 切穿矿袋 → 洞壁裸露沙砾，同矿石暴露语义）。
+//   海域列不跳过：纯替换无空腔（对比 placeUndergroundWaterPools 挖空腔须避海水柱），海底之下砾石袋自然。
+void World::placeGravelPockets()
+{
+    constexpr int     kPocketGrid = 16;     // 候选网格间距（密度主旋钮：越大越稀；同 kPoolGrid 量级）
+    constexpr unsigned kPocketPct = 45u;    // 候选命中概率（密度副旋钮：越大越多；t761 取值 → 每图约十余袋）
+    constexpr int     kBedrockTop = 4;      // 不动基岩（同 carveCaves / placeBedrock）
+    constexpr int     kShallowMin = 4;      // 浅层带上界：地表下至少几格（保顶盖封闭，同 kSurfaceCeil 语义）
+    constexpr int     kShallowMax = 18;     // 浅层带下界：地表下至多几格（浅层富集；调大 → 深处也有）
+
+    int placed = 0;
+    const int pocketSeed = m_seed + 7610; // 矿袋哈希偏移（与其它 worldgen hashColumn 解耦）
+    for (int bx = kPocketGrid / 2; bx < m_width; bx += kPocketGrid) {
+        for (int bz = kPocketGrid / 2; bz < m_depth; bz += kPocketGrid) {
+            const quint32 r = hashColumn(pocketSeed, bx, bz);
+            if ((r % 100u) >= kPocketPct) continue; // 概率筛选
+            const int span = kPocketGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界（半径 ≤3 不越界）
+            const int h = std::min(heightAt(cx, cz), m_height - 1);
+            // 浅层带 y 范围：地表下 [kShallowMin, kShallowMax]（顶盖 ≥4 格；浅层富集）。
+            const int yHi = h - kShallowMin;
+            const int yLo = std::max(kBedrockTop + 1, h - kShallowMax);
+            if (yHi <= yLo) continue; // 此列地下空间不足（极浅 / 极矮列）→ 跳过
+            const int cy = yLo + int((r >> 9) & 0x1Fu) % (yHi - yLo + 1);
+            const int rad = 2 + int((r >> 14) & 1u);       // 水平半径 2..3（小袋）
+            const int layers = 1 + int((r >> 16) & 1u) + int((r >> 17) & 1u); // 竖向 1..3 层（小团非薄饼）
+
+            // 小团替换（水平圆盘 × 竖向 layers 层，竖向居中）：仅替换 Stone → Gravel。不动基岩 / 矿石 /
+            //   dirt / air / 水 → 与既有特征天然共存。沙砾受重力但 worldgen 静态放置即稳态（支撑判定在
+            //   游玩期破坏时才触发，同沙海盘沙柱惯例）。
+            const int rad2 = rad * rad;
+            for (int dy = 0; dy < layers; ++dy) {
+                const int yy = cy + dy - (layers - 1) / 2;
+                if (yy <= kBedrockTop || yy >= m_height) continue;
+                for (int dx = -rad; dx <= rad; ++dx) {
+                    for (int dz = -rad; dz <= rad; ++dz) {
+                        if (dx * dx + dz * dz > rad2) continue; // 圆盘
+                        if (m_chunks.blockAt(cx + dx, yy, cz + dz) == BlockRegistry::Stone)
+                            m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Gravel);
+                    }
+                }
+            }
+            ++placed;
+        }
+    }
+    qInfo() << "worldgen: gravel pockets =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t278 洞穴隧道生成（PLAN §2-K 确定性；spec「3D Perlin 阈值 / random-worm 隧道 + 分叉路口；内部黑暗；连通性」）。

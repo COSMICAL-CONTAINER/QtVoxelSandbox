@@ -48,6 +48,9 @@ BLOCKS = [
     ("planks",          "default_wood",      "default_wood"),
     ("leaves",          "default_leaves",    "default_leaves"),
     ("sand",            "default_sand",      "default_sand"),
+    # t761 沙砾（Gravel=139「换皮沙子」重力方块；灰砾石底 + 深浅卵石碎砾斑——颗粒比沙的细噪点更大更稀疏，
+    #   肉眼可辨「砾石不是灰沙」）。tools/build_gravel.py 程序生成原创像素图（§9 override (a)）。
+    ("gravel",          "default_gravel",    "default_gravel"),
     # t492 工作台 / 熔炉 / 发射器曾移到 BLOCKS_FRONT（正面为主投影）→ t676 再移 FROM_PACK cube_front
     #   （满立方 dimetric 顶 + 右侧 + 前面三面独立贴图 —— 用户点名「front 方案太扁平」升全立体）。
     ("coal_ore",        "default_coal_ore", "default_coal_ore"),  # t84 煤矿石（各面同贴图）

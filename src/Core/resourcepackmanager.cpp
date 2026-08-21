@@ -676,6 +676,9 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {176, QStringLiteral("door_iron_upper.png")},  // door_iron_upper（t717 铁门上半：门板+格栅窗）
         {177, QStringLiteral("door_iron_lower.png")},  // door_iron_lower（t717 铁门下半：门板+锁孔板）
         {178, QStringLiteral("iron_trapdoor.png")},    // iron_trapdoor（t717 铁活板门：格子板+栅格孔）
+        // t761 沙砾：tile 179 gravel → pack 内 gravel.png（demo 包实存）。非 pack 回落程序生成
+        //   default_gravel.png（tools/build_gravel.py 自绘灰砾石 + 卵石碎砾斑）。包内缺 PNG 时安全跳过。
+        {179, QStringLiteral("gravel.png")},           // gravel（t761 沙砾：灰砾石+卵石碎砾斑）
     };
     return kMap;
 }
@@ -827,6 +830,10 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x243, QStringLiteral("ender_pearl.png")},      // 暗渊珠（t726：杀夜行者掉落；暗渊之眼原料）
         {0x244, QStringLiteral("blaze_powder.png")},     // 燃烬粉（t726：燃烬棒冶炼产物；暗渊之眼原料）
         {0x245, QStringLiteral("blaze_rod.png")},        // 燃烬棒（t726：怒焰人死亡掉落；烧燃烬粉）
+        // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint item 318）：pack item 目录有 flint.png 则接
+        //   （demo 包实存）；包缺 → 安全跳过回退 MaterialIcon drawFlint 自绘。来源 = 挖沙砾小概率掉落，
+        //   打火石配方原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。
+        {0x248, QStringLiteral("flint.png")},            // 燧石（t761：挖沙砾概率掉落；打火石配方原料）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},

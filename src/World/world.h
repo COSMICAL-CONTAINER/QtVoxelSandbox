@@ -712,6 +712,14 @@ private:
     //   仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源。密度随深度上调（深层 stone 多、洞穴穿
     //   多 → 洞壁裸露矿更可见，spec「洞穴 carve 自然暴露」——carveCaves 在本 pass 之后挖走 stone/ore 暴露矿脉）。
     void scatterOres();
+    // t761 沙砾矿袋（机制等价 MC 1.0 地下 gravel pocket / 砾石袋）：scatterOres 之后、carveCaves 之前，
+    //   地下**浅层**确定性散布小型沙砾团（网格 + hashColumn 概率筛选 + 抖动 + 小椭球团替换，结构同
+    //   placeUndergroundWaterPools 的圆盘空腔模式但**只替换 Stone 为 Gravel**——不挖空腔、不动基岩 / 水 /
+    //   矿石）。密度低（网格间距 / 命中概率常量在 .cpp 可调）；置于 carveCaves 前 → 洞穴自然切穿矿袋
+    //   暴露沙砾于洞壁（同矿石「carve 暴露」语义）。纯函数于 seed（hashColumn + seed 偏移）→ 同 seed
+    //   同矿袋分布（PLAN §2-K）。沙砾受重力：暴露面朝下挖空后塌落由游玩期 maybeTriggerFallingBlock
+    //   触发（worldgen 静态放置无需预检支撑）。
+    void placeGravelPockets();
     // t119 底层基岩（PLAN §2-K 确定性）：地形填充后在 y 0..4 铺一层 Bedrock（不可破坏，hardness=-1.0）。
     // 厚度按 hashVoxel 坑洼（底实顶疏，机制等价 MC 1.0 基岩层）。仅覆盖最底几格；同 seed → 同分布。
     void placeBedrock();

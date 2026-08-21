@@ -382,6 +382,10 @@ TILES = [
     "default_door_iron_upper",       # 176 door_iron_upper（铁门上半：门板 + 下部 2×2 格栅窗；t717）
     "default_door_iron_lower",       # 177 door_iron_lower（铁门下半：门板 + 锁孔板 + 底部横带；t717）
     "default_iron_trapdoor",         # 178 iron_trapdoor（铁活板门：格子板 + 栅格孔；t717）
+    # t761 沙砾（Gravel=139 各面=本 tile；机制等价 MC 1.0 gravel id 13，「换皮沙子」重力方块）。
+    #   中灰砾石底 + 深浅卵石碎砾斑（颗粒比沙的细噪点更大更稀疏——砾石粒 > 沙粒，肉眼可辨）；
+    #   tools/build_gravel.py 程序生成（§9 override (a)；零 MC 资产）。pack {179→gravel.png}。
+    "default_gravel",                # 179 gravel（沙砾：灰砾石 + 卵石碎砾斑；t761）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

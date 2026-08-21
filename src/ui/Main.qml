@@ -9154,7 +9154,8 @@ Window {
             //   不会发 blockPlaced；游戏内该信号现仅表示「某格 id 被世界改写了」。
             //   t117：FallingBlock 着地走 World::setBlockFromEntity（不发 blockPlaced）→ 不会误触本分支。
             // t117：新放的沙若下方空气 → 自身塌落（玩家在半空放沙立即落）。
-            if (id === 8) maybeTriggerFallingBlock(x, y, z)
+            // t761：沙砾（id=139=BlockRegistry::Gravel）同受重力（「换皮沙子」），与沙同触发。
+            if (id === 8 || id === 139) maybeTriggerFallingBlock(x, y, z)
             // t607：玩家放置发射器 → dispenserStore.ensureDispenser 注册条目（区分「玩家库存发射器」vs
             //   「神殿陷阱发射器」身份）：有条目（含全空）踩板按库存分派、库存空无动作（陷阱解除）；无条目
             //   （worldgen 生成、不写 store）踩板 fallback 默认射箭（t579 神殿行为）。旧版玩家放置不注册 →
@@ -9382,24 +9383,28 @@ Window {
         }
     }
 
-    // t117/t220 沙子重力触发：查 (x,y,z) 是否为沙且**下方非完整立方支撑** → 先把沙格置 air（经 World::setBlock
-    //   发 blockBroken 递归触发上方沙链）再 spawn 下落方块实体。仅 id=8（BlockRegistry::Sand）参与；其余方块无重力。
-    //   t220「仅完整方块可支撑沙」：下方为完整立方（isFullCubeAt）→ 有支撑不落；下方为 air / 水 / 不完整方块
+    // t117/t220 沙子重力触发：查 (x,y,z) 是否为重力方块（沙 id=8 / t761 沙砾 id=139）且**下方非完整立方
+    //   支撑** → 先把该格置 air（经 World::setBlock 发 blockBroken 递归触上方链）再 spawn 下落方块实体。
+    //   t761 沙砾 = 「换皮沙子」（BlockRegistry::Gravel=139，机制等价 MC 1.0 gravel），与沙共用本触发与
+    //   FallingBlock 实体（EntityManager.spawnFallingBlock / tick 全按 blockId 泛化，着地 setBlockFromEntity
+    //   还原沙砾本体）—— 呈现层只需把 id 白名单从「仅 8」扩到「8||139」（字面量+注释，同 id===8 既有模式）。
+    //   t220「仅完整方块可支撑」：下方为完整立方（isFullCubeAt）→ 有支撑不落；下方为 air / 水 / 不完整方块
     //   （火把 / 半砖 / ...）→ 失撑触发下落（沙落水穿透填堵水格、沙遇不完整方块变掉落物 由 EntityManager.tick
     //   落体判定）。旧版查「下方非空气」把水 / 火把 / 半砖当支撑，致沙卡在水上一格 / 粘在火把上（t220 (b)(c)）。
-    //   「先置 air 再 spawn」使链式塌落自然：setBlock(air) → blockBroken(x,y,z,Sand) → onBlockBroken 再查
-    //   (x,y+1,z) 沙并递归 trigger（沙柱一次塌完，机制等价 MC 沙链）。
+    //   「先置 air 再 spawn」使链式塌落自然：setBlock(air) → blockBroken(x,y,z,id) → onBlockBroken 再查
+    //   (x,y+1,z) 重力方块并递归 trigger（重力柱一次塌完，机制等价 MC 沙 / 砾石链）。
     //   分层（PLAN §2）：呈现层（Main.qml）消费 World 语义事件（blockPlaced/broken）→ EntityManager 生成
     //   实体；实体物理（重力 / 着地）由 Game/Entities 层 tick 自治（同 spawnItem→掉落物 模式），呈现层不反向写。
     function maybeTriggerFallingBlock(x, y, z) {
         if (y < 0 || y >= theWorld.height) return
         if (x < 0 || z < 0 || x >= theWorld.width || z >= theWorld.depth) return
-        if (theWorld.blockAt(x, y, z) !== 8) return // 仅沙（BlockRegistry::Sand=8）
-        // t220：仅完整立方可支撑沙。下方为完整立方 → 有支撑不落；下方为 air/水/不完整方块 → 失撑触发。
+        const gid = theWorld.blockAt(x, y, z) // 捕获本格 id：沙(8)/沙砾(139) 两族重力方块（t761 扩族）
+        if (gid !== 8 && gid !== 139) return // 仅重力方块（BlockRegistry::Sand=8 / Gravel=139）
+        // t220：仅完整立方可支撑。下方为完整立方 → 有支撑不落；下方为 air/水/不完整方块 → 失撑触发。
         if (y > 0 && theWorld.isFullCubeAt(x, y - 1, z)) return
-        // 下方失撑 → 触发：先置 air（递归触发上方沙链），再 spawn 下落实体。
+        // 下方失撑 → 触发：先置 air（递归触发上方重力链），再 spawn 下落实体（携带本格真实 id——着地还原沙或沙砾）。
         theWorld.setBlock(x, y, z, 0)
-        entityManager.spawnFallingBlock(x, y, z, 8)
+        entityManager.spawnFallingBlock(x, y, z, gid)
     }
 
     // [t55] 诊断：HUD hotbar 刷新追踪。slotsChanged（setStack/addStack/takeStack/resetForMode）时打印

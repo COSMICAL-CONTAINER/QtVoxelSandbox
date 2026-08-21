@@ -961,13 +961,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { int(BlockRegistry::Stone), 0, 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::StoneButton), 1, 1, "stone_button" },
-    // t724 打火石配方：铁锭上 + 圆石下纵列 → 1 打火石（有序 2×2；最小包围盒 1×2）。机制等价 MC 1.0
-    //   flint and steel（铁锭 + 燧石）—— 本工程无燧石材料（MC 1.0 燧石由挖砾石掉落，本工程无砾石层）→
-    //   圆石本地化替代（dev-plan t724 注明；打火石是右键点火工具：命中面外空气格生 Fire 方块，耐久 64）。
-    //   包围盒内容 {IronIngot,Cobble} 与杠杆（{Cobble,Stick}）不同 → shaped 逐格比对区分（不冲突）。
+    // t724/t761 打火石配方：铁锭上 + 燧石下纵列 → 1 打火石（有序 2×2；最小包围盒 1×2）。
+    //   t724 时本工程无燧石材料（无砾石层 → 燧石无来源）→ 曾以「圆石+铁锭」占位本地化；t761 建沙砾方块
+    //   + 燧石物品（FlintId，挖沙砾概率掉落）后**改回正统配方**：铁锭 + 燧石（机制等价 MC 1.0 flint and
+    //   steel）。MC 1.0 原版是无序配方，本工程配方表统一走 2×2 网格最小包围盒（无独立 shapeless-2 形态
+    //   先例冲突）→ 取纵列形态（铁上燧下），包围盒内容 {IronIngot,Flint} 与杠杆（{Cobble,Stick}）/ t724
+    //   旧占位（{IronIngot,Cobble}）均不同 → shaped 逐格比对区分（不冲突）。打火石是右键点火工具：命中面
+    //   外空气格生 Fire 方块，耐久 64。
     { int(RecipeRegistry::Inventory2x2), false,
       { RecipeRegistry::IronIngotId, 0, 0,
-        int(BlockRegistry::Cobble), 0, 0,
+        RecipeRegistry::FlintId,     0, 0,
         0, 0, 0 },
       int(ToolRegistry::FlintAndSteel), 1, 1, "flint_and_steel" },
 };

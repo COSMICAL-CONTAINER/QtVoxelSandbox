@@ -1292,6 +1292,23 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             //   一次入多件）。
             const int snowballCount = 2 + int(QRandomGenerator::global()->bounded(2)); // 随机 2..3（bounded(2) → 0..1）
             emit spawnItem(x, y, z, RecipeRegistry::SnowballId, snowballCount);
+        } else if (brokenId == BlockRegistry::Gravel) {
+            // t761 沙砾掉落（机制等价 MC 1.0 挖 gravel：大概率自掉、小概率只掉燧石 flint）：特殊掉落在通用
+            //   BlockDef 表之上提前分流（同 WheatCrop / 雪层 / 双半砖模式，表 dropId=自身 仅兜底）。三分支：
+            //   ① 精准采集（SilkTouch）→ 恒掉沙砾自身（同 t476 通用 silk 语义「掉方块本体」，矿石 / 石头先例；
+            //      本分支先于通用 silk 路径判，防概率门控吞掉 silk 产物）；
+            //   ② 概率命中（kGravelFlintDropPct%，常量在 playercontroller.h 可调）→ 只掉燧石（FlintId 0x248，
+            //      打火石配方原料——t724 占位「圆石+铁锭」由此改回正统）；
+            //   ③ 其余 → 掉沙砾自身（走 dropId/dropCount 表值）。玩家交互随机（QRandomGenerator）非 §2-K 范畴。
+            const bool gravelSilk = (m_hotbar
+                                     && m_hotbar->selectedItemEnchantLevel(EnchantRegistry::SilkTouch) > 0);
+            if (gravelSilk) {
+                emit spawnItem(x, y, z, int(brokenId), 1);
+            } else if (QRandomGenerator::global()->bounded(100) < kGravelFlintDropPct) {
+                emit spawnItem(x, y, z, RecipeRegistry::FlintId, 1);
+            } else {
+                emit spawnItem(x, y, z, dropId, dropCount);
+            }
         } else if ((brokenState & BlockRegistry::DoubleSlabMarkerBit)
                    && BlockRegistry::fullBlockSlabDrop(brokenId) != 0) {
             // t215/t412 双半砖（合并态）破块掉 2× 对应半砖为**2 个独立物品实体**（非 1 个 count=2 栈）：

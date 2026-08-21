@@ -343,6 +343,11 @@ public:
     //   地面 → EntityManager::spawnMobTyped 生成 MobEmberling（t728 燃烬者实体）。可堆叠 64（走材料段默认，
     //   同其他生物蛋）。图标：MaterialIcon 自绘蛋形 + 燃烬者橙黄焰色斑点（drawSpawnEgg("emberling")，§9 原创）。
     static constexpr int SpawnEggEmberlingId = 0x247; // 生物蛋（燃烬者）：右键地面 → 生成燃烬者（MobEmberling）
+    // t761 燧石（flint：材料段 0x248）：机制等价 MC 1.0 flint（item id 318）—— 挖沙砾（Gravel=139）小概率
+    //   掉落（kGravelFlintDropPct，playercontroller finishMiningAt 特例分支），打火石配方原料（t724 占位
+    //   「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。可堆叠 64（走材料段默认）；非方块 → 右键不放置。
+    //   图标：MaterialIcon 自绘深灰燧石碎片（drawFlint，§9 原创）；pack 映射 0x248 → flint.png。
+    static constexpr int FlintId = 0x248; // 燧石：挖沙砾概率掉落；打火石配方原料（t761）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

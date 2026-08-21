@@ -24,6 +24,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::Leaves:        return "icon_leaves.png";       // t746 仅兜底（④ 层；pack 烘焙图——正常路径走 ②/③ 3D 投影）
     case BlockRegistry::SpruceLeaves:  return "icon_spruce_leaves.png"; // t746 仅兜底（④ 层；同上）
     case BlockRegistry::Sand:          return "icon_sand.png";
+    case BlockRegistry::Gravel:        return "icon_gravel.png";      // t761 沙砾立方体图标（灰砾石+卵石碎砾斑；重力方块）
     case BlockRegistry::CraftingTable: return "icon_crafting_table.png"; // t50/t676 工作台 3D 立方体图标（cube per-face：顶=台面网格 / 右=侧图 / 前=前图）
     case BlockRegistry::Furnace:       return "icon_furnace.png";        // t80/t676 熔炉 3D 立方体图标（cube per-face：顶=炉顶 / 右=炉侧 / 前=炉口）
     case BlockRegistry::CoalOre:       return "icon_coal_ore.png";       // t84 煤矿石立方体图标
@@ -607,7 +608,11 @@ QVariantList Hotbar::creativeMaterials() const
         // t728 生物蛋（燃烬者）：创造模式物品，右键地面 → 生成燃烬者（MobEmberling，悬浮漂移 + 远程喷火球
         //   + 火力免疫）。机制等价 MC 1.0 blaze spawn egg。审查修 B9（t724-t729 复盘）：t728 漏进创造调色板
         //   → 蛋不可取得（recipe/placeBlock/图鉴都已接好，唯 hotbar 两处漏）；对齐夜行者蛋先例补行。
-        int(RecipeRegistry::SpawnEggEmberlingId)    // 生物蛋（燃烬者）：右键 → 生成燃烬者（t728）
+        int(RecipeRegistry::SpawnEggEmberlingId), // 生物蛋（燃烬者）：右键 → 生成燃烬者（t728）
+        // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落（生存获得途径）；打火石配方
+        //   原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。创造调色板补全便于测试配方链；
+        //   可堆叠 64（走材料段默认）；非方块 → 右键不放置。MaterialIcon 自绘深灰燧石碎片（drawFlint）。
+        int(RecipeRegistry::FlintId)          // 燧石：挖沙砾概率掉落；打火石配方原料（t761）
     };
 }
 
@@ -693,6 +698,9 @@ QVariantList Hotbar::creativeBlocks() const
     return { int(BlockRegistry::Grass),         int(BlockRegistry::Dirt),  int(BlockRegistry::Stone),
              int(BlockRegistry::Cobble),        int(BlockRegistry::Log),   int(BlockRegistry::Planks),
              int(BlockRegistry::Leaves),        int(BlockRegistry::Sand),
+             // t761 沙砾：与沙相邻摆放（「换皮沙子」重力方块——挖掉大概率自掉 / 小概率只掉燧石；地下浅层
+             //   矿袋 + 沙滩混排生成）。创造可取便于测试重力塌落链与燧石掉落概率。
+             int(BlockRegistry::Gravel),
              int(BlockRegistry::CraftingTable), int(BlockRegistry::Furnace),
              // t745 矿石段重排：煤 → 铁 → 铜 → 金 → 红石 → 青金石 → 钻石（用户点名顺序——旧序煤铁钻铜金
              //   青红把钻石插在第三位，与「矿物价值递进」直觉相悖；七矿连排同段，逐行注释保留各自机制说明）。
@@ -1020,6 +1028,8 @@ QString Hotbar::nameForBlock(int blockId) const
         // t728 生物蛋（燃烬者）：审查修 B9（t724-t729 复盘）—— t728 漏显示名（nameForBlock 返空 → 调色板
         //   / 物品栏无名），对齐夜行者蛋先例补行。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::SpawnEggEmberlingId) return QStringLiteral("生物蛋（燃烬者）"); // 右键 → 生成燃烬者
+        // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

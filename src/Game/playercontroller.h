@@ -1441,6 +1441,11 @@ private:
     //   同 WheatCrop 收割种子 1-2 随机。羊吃草（entitymanager::sheepEatGrass）走静默 setWaterSilent 不发掉落，
     //   与本玩家破块路径互不影响。
     static constexpr int kTallGrassSeedDropDenom = 8; // 1/8 ≈ 12.5%（MC 1.0 草丛掉种概率）
+    // t761 沙砾掉燧石概率（机制等价 MC 1.0 挖 gravel 小概率掉 flint）：finishMiningAt 破 Gravel 时以
+    //   kGravelFlintDropPct% 概率只掉燧石（FlintId 0x248，打火石配方原料），否则掉沙砾自身；精准采集
+    //   （SilkTouch）恒掉自身不走概率。可在本常量调（百分比制，MC 1.0 量级 10%）。玩家交互掉落的随机性
+    //   （QRandomGenerator），非 worldgen 确定性范畴 §2-K（同 kTallGrassSeedDropDenom / kLeafSaplingDropPct）。
+    static constexpr int kGravelFlintDropPct = 10; // 10%（MC 1.0 沙砾掉燧石概率量级）
     // t305 树叶掉落概率（机制等价 MC 1.0 破叶掉落）：finishMiningAt 破 Leaves 时按本概率掉树苗物品 / 木棒。
     //   t379 调参（spec 反馈掉落偏少）：kLeafSaplingDropPct=10（10% 掉 1 树苗，较 MC 1.0 原值 5% 翻倍；
     //   kLeafStickDropPct=8（8% 掉 1 木棒，较 MC 1.0 原值 2% 提至 4×，木棒比树苗更常见，符合廉价材料定位）。

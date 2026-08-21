@@ -710,6 +710,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   dropId=0 无掉落、NoTool、**maxStack=0**（不可进背包——无物品形态，只能打火石点燃产生）。
     //   lightEmission 特例行返 11（见 lightEmission switch）。state=朝向（0=X 平面 / 1=Z 平面，点燃检测写定）。
     /* nether_portal  */ {int(BlockRegistry::NetherPortal),        0,  0, 0,  0, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false,                             0, 0,  0, "nether_portal","余烬门"},
+    // ── t761 沙砾（Gravel；机制等价 MC 1.0 gravel id 13，属性注释见 blockregistry.h Id 枚举 Gravel 行）：
+    //   「换皮沙子」重力方块（触发在呈现层 Main.qml maybeTriggerFallingBlock，id 8||139）。各面=gravel(179)
+    //   （灰砾石底 + 深浅卵石碎砾斑）；solid=true / ShapeFull（整立方贪心合并天然支持，光照满遮同沙）；
+    //   hardness=0.6（对齐沙子档，略硬表「砾石更紧实」）/ Shovel 铲加速 / requiresTool=false（空手可采且
+    //   掉落，同沙）。dropId=自身 / dropCount=1 是**表兜底**——真实掉落走 playercontroller finishMiningAt
+    //   特例分支（大概率自掉、小概率只掉燧石 FlintId 0x248，概率常量可调；精准采集恒自掉）。
+    /* gravel         */ {int(BlockRegistry::Gravel),             179,179,179,179, true, BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Gravel),         1, 64, "gravel",         "沙砾"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -879,6 +886,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     // t725 余烬门 → MC 1.0 nether portal id 90（1.0 存在；黑曜石框内打火石点燃、破框整门熄灭机制等价实现；
     //   无物品形态、无下界维度——本工程单维度 v1 站入灼烧降级）。
     /* nether_portal          */ 90,
+    // t761 沙砾 → MC 1.0 gravel id 13（1.0 存在；受重力、挖掉小概率掉燧石机制等价实现）。
+    //   **t691 教训**：本行须是独立真实初始化项（上一行行尾 // 注释不会吞掉本行——保持「一行一条目 + 行内
+    //   注释」格式，防聚合初始化零填充回归）。
+    /* gravel                 */ 13,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -2215,6 +2226,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）
     case Snow: // t482 雪块 → 颗粒雪响（同积雪层；雪傀儡身体材质）
+    case Gravel: // t761 沙砾 → 颗粒沙响（松散砾石颗粒，同沙档；机制等价 MC 1.0 gravel SoundType = sand）
         return GroupSand;
     case Leaves:
     case SpruceLeaves: // t714 云杉树叶 → 叶音色（同橡树叶）
