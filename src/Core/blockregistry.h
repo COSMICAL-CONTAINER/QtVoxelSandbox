@@ -572,8 +572,12 @@ public:
         //   方块 id**（非 state 编码）—— 因 mesher 整立方路径按 BlockDef 静态 tile 渲染、无 per-state top tile
         //   选择先例（water/wheat 走水段/cross 段），故同 bed/wool 多 id 模式（每阶段独立 tile 顶面 + 共享侧面）。
         //   isAnvil 单一权威谓词覆盖三阶段（playercontroller 右键开 UI / 破块掉落统一读它）。
-        //   整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形；MC 1.0 铁砧是异形低体
-        //   + 上方砧台，本工程简化为整立方以复用既有渲染路径，机制等价非视觉对齐 §4）、hardness=5.0（同 MC
+        //   **t766 异形三盒模型**（solid=false / ShapeFull —— 宽基座 + 窄腰柱 + 宽顶砧台三盒拼装，机制等价
+        //   MC 1.0 铁砧低体+砧台造型；t477 曾简化整立方，侧贴图 114（铁砧侧视立绘）满贴四面被读作「上下
+        //   各一半」不完整观感 → t766 改走 PartialBlockGeometry 异形路径（Spawner/附魔台 solid=false 先例）：
+        //   渲染异形 / 邻居不剔面；**碰撞/选中/射线走 shape=ShapeFull 整格不变**（模型满高 [0,1] 整格碰撞即贴
+        //   合）；光照满遮 lightOpacity 特例 15（同 Farmland/EnchantingTable 模式，防顶部漏光）、
+        //   hardness=5.0（同 MC
         //   1.0 铁砧量级，金属偏硬）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落）、
         //   dropId=自身（破任一阶段铁砧掉对应阶段铁砧方块，可放回；玩家仅在创造调色板取用**完好**铁砧）、
         //   dropCount=1、maxStack=64。各面贴图：顶=anvil_top / anvil_damaged_1_top / anvil_damaged_2_top

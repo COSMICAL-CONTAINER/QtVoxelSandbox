@@ -441,15 +441,19 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   铆钉网格+高光）。音色归 GroupStone（金属质）。配方：9 铁锭 3×3 满铺 → 1 铁块。进创造调色板。
     /* iron_block   */ {int(BlockRegistry::IronBlock),       112,112,112,112, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::IronBlock),       1, 64, "iron_block",   "铁块"},
     // ── t477 铁砧 3 损坏阶段（机制等价 MC 1.0 anvil：右键开铁砧 UI 修复/合并/重命名 + 自身损坏）。
-    //   整立方 opaque（solid=true / ShapeFull，与附魔台同族走整立方面路径，**非**异形 —— MC 1.0 铁砧是异形
-    //   低体+砧台，本工程简化为整立方，机制等价非视觉对齐 §4）、hardness=5.0（金属偏硬）、Pickaxe、
-    //   requiresTool=true、minTier1（木镐可破且掉落）、dropId=自身（破任一阶段掉对应阶段铁砧，可放回）、
-    //   dropCount=1、maxStack=64。顶面贴图按阶段递增裂纹（113 完好 / 115 微损 / 116 重损）；底·侧·前共享
-    //   anvil_base(114)（深铁砧身）。音色归 GroupStone（金属质）。配方（仅完好 Anvil）：3 铁块顶行 + 4 铁锭
-    //   中底行 → 1 完好铁砧。进创造调色板（仅 Anvil 完好；微损/重损由使用产生不进调色板）。
-    /* anvil        */ {int(BlockRegistry::Anvil),           113,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Anvil),           1, 64, "anvil",        "铁砧"},
-    /* anvil_chipped*/ {int(BlockRegistry::AnvilChipped),    115,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilChipped),    1, 64, "anvil_chipped","微损铁砧"},
-    /* anvil_damaged*/ {int(BlockRegistry::AnvilDamaged),    116,114,114,114, true,  BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilDamaged),    1, 64, "anvil_damaged","重损铁砧"},
+    //   t766 起**异形三盒模型**（宽基座 + 窄腰柱 + 宽顶砧台，机制等价 MC 1.0 铁砧低体 + 砧台造型；此前 t477
+    //   简化为整立方 → 走整立方面路径把侧贴图 114（铁砧侧视立绘）满贴四面 = 用户报「上下各一半」不完整观感）：
+    //   solid=false / ShapeFull（Spawner/附魔台先例 —— 渲染走 PartialBlockGeometry 异形路径 + 邻居不剔面；
+    //   碰撞/选中/射线走 ShapeFull 整格**不变**，模型满高 [0,1] 整格碰撞即贴合；光照满遮 lightOpacity 特例 15，
+    //   同 Farmland/Cactus/EnchantingTable 模式见 .cpp）、hardness=5.0（金属偏硬）、Pickaxe、requiresTool=true、
+    //   minTier1（木镐可破且掉落）、dropId=自身（破任一阶段掉对应阶段铁砧，可放回）、dropCount=1、maxStack=64。
+    //   顶面贴图按阶段递增裂纹（113 完好 / 115 微损 / 116 重损，def.topTile 驱动）；底·侧共享 anvil_base(114)
+    //   （铁砧侧视立绘：上亮颈带 / 中暗身 / 下亮宽座 —— 三盒各取整张贴面，配色沿用 §9a）。音色归 GroupStone
+    //   （金属质）。配方（仅完好 Anvil）：3 铁块顶行 + 4 铁锭中底行 → 1 完好铁砧。进创造调色板（仅 Anvil 完好；
+    //   微损/重损由使用产生不进调色板）。
+    /* anvil        */ {int(BlockRegistry::Anvil),           113,114,114,114, false, BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Anvil),           1, 64, "anvil",        "铁砧"},
+    /* anvil_chipped*/ {int(BlockRegistry::AnvilChipped),    115,114,114,114, false, BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilChipped),    1, 64, "anvil_chipped","微损铁砧"},
+    /* anvil_damaged*/ {int(BlockRegistry::AnvilDamaged),    116,114,114,114, false, BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::AnvilDamaged),    1, 64, "anvil_damaged","重损铁砧"},
     // ── t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；名称 / 贴图全原创自绘 §9a）。
     //   南瓜（Pumpkin）：造物头部方块（玩家放置南瓜 + 下方排列 → 触发造物生成）。整立方 opaque（solid=true /
     //   ShapeFull，与 chest/wool 同族走整立方面路径）、hardness=1.0（软质）、NoTool（空手可采且掉落）、
@@ -1638,6 +1642,9 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     case Cactus:       return 15;                     // t445 仙人掌 solid=false（0.8 细柱渲染）但仍是 opaque 实体植物 → 满遮光
     case EnchantingTable: return 15;                 // t620 附魔台 solid=false（0.75 矮盒渲染）但仍是 opaque 实体石台 → 满遮光
+    case Anvil:        return 15;                     // t766 铁砧三阶段 solid=false（三盒异形渲染）但仍是 opaque
+    case AnvilChipped: return 15;                     //   实体铁块（同 Farmland/Cactus/EnchantingTable 模式）→ 满遮光
+    case AnvilDamaged: return 15;                     //   （防顶面漏光柱；三阶段同遮）
     default:           return 0;                      // 其余全透（air/torch/water/stairs/fence/plate/door/cross）
     }
 }

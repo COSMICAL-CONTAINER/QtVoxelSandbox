@@ -1006,6 +1006,37 @@ int PartialBlockGeometry::append(
         //   图集（后续书 UI 或其他用途可复用），本 case 不再消费。
         break;
     }
+    case BlockRegistry::Anvil:
+    case BlockRegistry::AnvilChipped:
+    case BlockRegistry::AnvilDamaged: {
+        // t766 铁砧完整三盒造型（机制等价 MC 1.0 铁砧异形模型：宽底座 + 窄腰柱 + 宽顶砧台，三损坏阶段共用）。
+        //   根因：t477 曾把铁砧当整立方渲染 —— 侧贴图 anvil_base(114)（铁砧侧视立绘：上亮颈带 / 中暗砧身 /
+        //   下亮宽座）被满贴到四面整立面 → 上下两段色带被读作「上下各一半」的不完整铁砧。t766 改走本异形
+        //   路径（solid=false / ShapeFull，Spawner/附魔台先例）：渲染三盒拼装 / 邻居不剔面；碰撞·选中·射线走
+        //   ShapeFull 整格不变（模型满高 [0,1]，整格碰撞即贴合）；光照满遮 lightOpacity 特例 15（防顶漏光柱）。
+        //
+        //   三盒坐标（16 像素格 → /16，与贴图 footprint 对齐）：
+        //   ① 宽基座 x[2,14] y[0,4] z[2,14]（12×4×12）—— 对应 114 下段亮宽座带；
+        //   ② 窄腰柱 x[6,10] y[4,10] z[6,10]（4×6×4）—— 对应 114 中段深铁砧身（颈缩）；
+        //   ③ 宽顶砧台 x[2,14] y[10,16] z[3,13]（12×6×10）—— 对应 114 上段亮颈带；顶面 = def.topTile
+        //     （113 完好 / 115 微损 / 116 重损，俯视砧面亮矩形 rect[2,11]×[3,12] + 尖角在 +X，与顶盒
+        //     x/z footprint 同比例 → 亮砧面恰落顶盒顶面；尖角烘焙在顶贴图内（顶面平简化，无独立角几何））。
+        //   贴图配色沿用 §9a 原创铁系（IRON_DARK/BASE/FACE/HI）：全侧·底面整张 114 竖压到各盒侧面
+        //   （pushBox cu,cv 恒 {0,1} 整瓦片铺面约定，同 Bed 床垫/附魔台侧竖压可接受降级）；阶段裂纹仅顶面体现。
+        //   不做邻居剔除（异形小体约定，同 Farmland/附魔台；内面被上下盒遮挡 overdraw 可忽）。
+        constexpr float s = 1.f / 16.f;
+        // ① 宽基座（下亮宽座带 114 满贴）
+        pushBox(verts, idx, lx, ly, lz, 2*s, 14*s, 0.f, 4*s, 2*s, 14*s,
+                tile, light, tileW, hx, hy, v0, v1);
+        // ② 窄腰柱（中暗砧身 114 满贴）
+        pushBox(verts, idx, lx, ly, lz, 6*s, 10*s, 4*s, 10*s, 6*s, 10*s,
+                tile, light, tileW, hx, hy, v0, v1);
+        // ③ 宽顶砧台（侧·底 114；+Y 顶面 = 阶段 topTile 113/115/116 → 裂纹阶段肉眼可辨）
+        pushBox(verts, idx, lx, ly, lz, 2*s, 14*s, 10*s, 1.f, 3*s, 13*s,
+                tile, light, tileW, hx, hy, v0, v1,
+                BlockRegistry::def(blockId).topTile);
+        break;
+    }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:
     case BlockRegistry::BedGreen: case BlockRegistry::BedCyan: case BlockRegistry::BedBlue:
     case BlockRegistry::BedMagenta: case BlockRegistry::BedBlack:

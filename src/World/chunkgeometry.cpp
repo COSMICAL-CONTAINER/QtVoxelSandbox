@@ -555,6 +555,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                             || b == BlockRegistry::Cactus   // t445 仙人掌 0.8 细柱经 PartialBlockGeometry 渲染（非满格）
                                             || b == BlockRegistry::SnowLayer // t505 积雪层薄板经 PartialBlockGeometry 渲染（state 高度 1/8..1.0；非满格）
                                             || b == BlockRegistry::EnchantingTable // t620 附魔台 0.75 矮盒经 PartialBlockGeometry 渲染（非满格）
+                                            || BlockRegistry::isAnvil(b)     // t766 铁砧三盒异形（基座+腰柱+砧台）经 PartialBlockGeometry 渲染（非满格；isAnvil 覆盖三阶段 id）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     // t638 ① 木门镂空窗：门上半格栅窗贴图带 alpha（pack door_wood_upper.png 窗格真透明 /
@@ -910,6 +911,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::SnowLayer) continue; // t505 积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isAnvil(blk)) continue; // t766 铁砧三盒异形已在 PASS 1；不进整立方面（否则满格立方覆盖三盒造型，退回「上下各一半」观感）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；立方面路径会把画格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书条带不进图集）；立方面路径会把火格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；立方面路径会把门格画成 tile 0 草顶立方
@@ -1026,6 +1028,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::SnowLayer) continue; // t505/t510 二轮复盘：积雪层薄板已在 PASS 1；不进整立方面（否则满格立方覆盖薄板，雪层显完整方块）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isAnvil(b)) continue; // t766 铁砧三盒异形已在 PASS 1；不进整立方面（greedy 同 culled 路径双保险）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；不进整立方面

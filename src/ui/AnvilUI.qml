@@ -319,8 +319,11 @@ Item {
                 const move = Math.min(space, src.count)
                 // t615 附魔书（maxStack=1，每本独立附魔列表）→ 整件入槽且**附魔随实例保真**（同工具语义）；
                 //   修复材料（可堆叠、无附魔）→ 惯例 0。
+                // t766 审计修缺：此前第 7 参 name 漏传 → 改过名的附魔书（铁砧 rename 产物）Shift 入 B 槽
+                //   丢实例名（附魔虽在、名字被清）。补 name 透传（isBook 时传 src.name，材料恒 ""）。
                 InventoryOps.writeSlot(root, "anvil", 1, src.id, target.count + move, 0,
-                                      isBook ? src.enchants : [0,0,0,0])
+                                      isBook ? src.enchants : [0,0,0,0],
+                                      isBook ? src.name : "")
                 const remain = src.count - move
                 InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain, 0)
                 return
@@ -775,6 +778,13 @@ Item {
         // t622 实例名通道打通（held / 槽 / 本地槽全链）：默认继承左槽实例名（改名物品修复 / 合并后仍带
         //   原名——修「修一下装备名字没了」）；改名框非空时用新名覆盖（下方 renaming 段）。
         let outName = root.nameAt(0)
+        // ── t766 附魔保留审计锚点（全链静态核对结论）：四 op 产物附魔来源 ——
+        //   repair/rename → enchAt(0)（左槽原样保留）；combine → computeCombineEnch（并集 + 冲突过滤 +
+        //   同款等级合并 max/相等+1 + enchantMaxLevel 封顶）；merge → computeBookMerge().out（适用过滤
+        //   enchantApplicableTo + 冲突组 enchantConflictsWith + 同前等级合并；附魔书 + 武器 = 武器获书附魔）。
+        //   落光标链 heldBlock → heldCount → heldDurability → setHeldEnchants(outEnch) → heldCustomName
+        //   顺序敏感（setHeldBlock 切新 id 会清附魔+清名，hotbar.cpp :1662 一带），故 setHeldEnchants 必须
+        //   在其后调用（下方落定段已按此序）。本锚点为后续回归排查钉死数据流，勿在中间插清附魔写。
         if (op === "repair") {
             const max = root.maxDur(outId)
             // t550-review 修：按实耗材料数修（use = min(右槽实有, 修满所需)），1 锭修 1/3、费 1 级；
