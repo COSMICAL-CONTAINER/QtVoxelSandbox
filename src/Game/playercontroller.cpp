@@ -3223,8 +3223,8 @@ void PlayerController::placeBlock()
         constexpr float kPlayerEyeUseSpeed = 4.0f; // 玩家掷暗渊之眼速度（blocks/s；同 EntityManager::kEnderEyeSpeed）
         constexpr float kPlayerEyeNearDist = 50.0f; // t757 两段切换阈值（blocks；同 EntityManager::kEnderEyeNearDist —— private 跨层不可读，同值自定，同上常量先例）
         const QVector3D eye = position();
-        // 初速方向（t757 两段式）：有要塞时按掷出点水平距离分段 —— 远段 = 水平朝传送门 + 单位爬升分量
-        //   （初速即远段目标方向，EntityManager tick 的转向平滑只做微修正，避免头几帧朝地下俯冲）；近段 =
+        // 初速方向（t757 两段式）：有要塞时按掷出点水平距离分段 —— 远段 = 纯水平朝传送门（爬升全交
+        //   EntityManager tick 的缺口收敛 + 转向平滑，见下方分支注释）；近段 =
         //   朝传送门中心 + 略升偏置（t729 近段语义保留）。无要塞 / 就在传送门正上方（水平距 ~0）→ 视线朝向
         //   任意方向（兜底不崩）。
         QVector3D dir;
@@ -3235,8 +3235,11 @@ void PlayerController::placeBlock()
             const float horizDist = std::sqrt(pdx * pdx + pdz * pdz);
             if (horizDist > 1e-3f) {
                 if (horizDist > kPlayerEyeNearDist) {
-                    // 远段：水平单位向量 + 爬升分量 1.0（与水平 1:1 ≈ 45° 起爬，对齐 EntityManager 远段满爬公式）
-                    dir = QVector3D(pdx / horizDist, 1.0f, pdz / horizDist).normalized();
+                    // 远段：纯水平朝传送门（审查修 L1：爬升分量不再由掷出侧硬编码 —— EntityManager tick 的
+                    //   「缺口收敛」公式（gap>3 满爬 / 0..3 线性收敛）+ 指数转向会把眼从水平平滑弧线拉起。
+                    //   旧版此处硬编码爬升 1.0（45° 起窜），与实体端按缺口收敛的语义不一致，修复 #1 后会被
+                    //   tick 压平 → 白窜一段。初速即远段巡航方向，起爬弧度全交实体端，两层单一口径。）
+                    dir = QVector3D(pdx / horizDist, 0.0f, pdz / horizDist);
                 } else {
                     // 近段：直线朝传送门中心 + 略升（机制等价 MC 末影之眼飞距略升；tick 已不叠加，仅此初速含）
                     dir = QVector3D(pdx, float(m_world->strongholdPortalY()) - eye.y(), pdz).normalized();

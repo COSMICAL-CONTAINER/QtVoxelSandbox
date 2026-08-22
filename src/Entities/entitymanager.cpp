@@ -4862,7 +4862,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
             }
             // 命中结算 → emit 落点格（floor(next)，整数格约定同 enderEyeBecameItem；呈现层路由传送）。
-            if (remove && landed) {
+            //   审查修 L2：寿命到期分支（上方）先于越界检查置 landed=true → 到期与出界同 tick 时越界检查被
+            //   !remove 短路，仍会 emit 越界坐标把掷出者传到界外 / 虚空。emit 前补界内校验（与越界兜底同
+            //   口径）：落点出界 → 只移除不传送（珍珠白耗，语义与「越界不传送」注释一致）。
+            if (remove && landed
+                && next.x() >= 0.0f && next.z() >= 0.0f
+                && next.x() <= worldW && next.z() <= worldD && next.y() >= 0.0f) {
                 emit enderPearlLanded(qFloor(next.x()), qFloor(next.y()), qFloor(next.z()));
             }
             if (remove) {
