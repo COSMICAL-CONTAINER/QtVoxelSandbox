@@ -17,8 +17,8 @@ Nightwalker / Blaze→燃烬者 Emberling）。
   - entity_squid.png（64×32；MC squid 布局）：mantle(12,0)24×20 + tentacle(0,20)？—— 实测包
     squid.png base 占用（mantle (12,0)-(36,20) / 触腕区 (0,12)-(56,20)）：深蓝头（斑驳浅肚）+
     触腕条。
-  - entity_minecart.png（64×32；MC minecart 布局）：侧帮 (0,4)-(44,20) / 底板 (0,20)-(44,28)。
-    铁灰壁（铆钉）+ 木底（棕板条）。
+  - entity_minecart.png（64×32；MC minecart 布局）：侧帮 (0,4)-(44,20) / 底板 (0,20)-(64,32)（t768
+    扩满全宽 12 行重画为橡木板 course）。铁灰壁（铆钉）+ 木底（棕板条）。
   - entity_enchant_book.png（64×32 整页区）：棕封 + 金边 + 白纸页（t732 附魔台悬浮书重贴图，
     供两页盒各取半区）。
   - entity_skin_default.png / entity_skin_alex.png（t747 升 **128×64 HD**：64×32 MC 皮肤布局 ×2 重绘，
@@ -183,11 +183,26 @@ def draw_minecart():
     for x in range(2, 44, 5):                              # 铆钉列
         rect(img, x, 9, x + 1, 10, (212, 214, 220, 255))
         rect(img, x, 10, x + 1, 11, (112, 114, 120, 255))
-    # 底板区（实测 (0,20)-(44,28)）：木底棕板条 + 板缝。
-    rect(img, 0, 20, 44, 28, (128, 96, 58, 255))
-    for x in range(0, 44, 6):
-        rect(img, x, 20, x + 1, 28, (100, 74, 44, 255))    # 竖板缝
-    speckle(img, rng, 0, 20, 44, 28, (148, 112, 68, 255), 1, 8)
+    # 底板区（t768 重画：明确「橡木底板」，扩满 (0,20)-(64,32) 全宽 12 行 = 4 行 3px 板 course）。旧
+    #   (0,20)-(44,28) 是低对比棕底撒点 + 稀疏细竖缝 —— 在底板大面（0.8×0.9）上拉伸采样后观感「麻布 /
+    #   布料」（用户报 t768 ②：四周车帮铁壁对、中间凹槽布料样）。重画要点 = 板缝对比拉满 + 结构化：
+    #   横板缝（course 底 1px 暗缝）+ 隔行错位端缝 + 每行板基色差 + 板面顶棱受光 + 竖木纹 + 缝钉。
+    PLANK = [(168, 128, 74), (180, 138, 84), (158, 118, 66), (174, 134, 80)]  # 行板基色（微差）
+    SEAM  = (104, 76, 44)    # 板缝（暗棕，对比拉满 → 远读出「板」而非「布」）
+    GRAIN = (136, 102, 58)   # 竖木纹
+    SHEEN = (196, 156, 100)  # 板面顶棱受光
+    NAIL  = (84, 60, 34)     # 缝端钉点
+    for i in range(4):
+        cy = 20 + i * 3
+        rect(img, 0, cy, 64, cy + 3, PLANK[i] + (255,))          # 行板基色
+        rect(img, 0, cy, 64, cy + 1, SHEEN + (255,))              # 板面顶棱受光（1px）
+        rect(img, 0, cy + 2, 64, cy + 3, SEAM + (255,))           # 横板缝（course 底）
+        for jx in range(8 + (i % 2) * 16, 64, 32):                # 错位端缝（隔行移半板）
+            rect(img, jx, cy, jx + 1, cy + 2, SEAM + (255,))      # 端缝（只穿板身 2px，不压横缝）
+            rect(img, jx, cy + 2, jx + 1, cy + 3, NAIL + (255,))  # 端缝底钉点
+    for k, gx in enumerate(range(2, 64, 5)):                     # 竖木纹（每 course 板身内 1-2px 短纹，
+        cy = 20 + (k % 4) * 3                                     #   只落 [cy,cy+2) 板身行，不压横缝）
+        rect(img, gx, cy, gx + 1, cy + (2 if (k % 3) else 1), GRAIN + (255,))
     return img
 
 

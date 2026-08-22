@@ -479,7 +479,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_fireball.png           # t728 燃烬者火球程序生成贴图（build_mob.py；16×16 橙黄自发光火球，与 Main.qml 火球 delegate 配色同源）
         textures/entity_endereye.png        # t729 暗渊之眼实体贴图（build_mob.py；16×16 小绿瞳珠：深绿珠身+暗绿竖瞳+白高光，EndEyeId 0x23A 寻路要塞）
         textures/entity_squid.png           # t717 鱿鱼 64×32 实体 UV 贴图（深蓝头+浅肚+触腕条；t730 自拼 3D 接入）
-        textures/entity_minecart.png        # t717 矿车 64×32 贴图（铁灰壁+铆钉+木底板；t732 矿车斗重贴图）
+        textures/entity_minecart.png        # t717 矿车 64×32 贴图（铁灰壁+铆钉+木底板；t732 矿车斗重贴图；t768 底板带扩满重画为橡木板 course）
         textures/entity_enchant_book.png    # t717 附魔书 64×32 贴图（棕封金边+白纸页；t732 悬浮书重贴图）
         textures/entity_skin_default.png    # t717 玩家默认皮肤 64×32（蓝裤+棕发+肤色脸；机制等价 MC steve 皮肤布局，§9 程序自绘；t731 接入）
         textures/entity_skin_alex.png       # t717 皮肤变体 64×32（橙发+绿衣；机制等价 MC alex 变体；t731 接入）

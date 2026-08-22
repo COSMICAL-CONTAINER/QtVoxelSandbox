@@ -6171,12 +6171,13 @@ void PlayerController::step(qreal dt)
         const int riddenIdx = m_minecartManager->ridingIndex();
         const QVector3D finalCartPos = (riddenIdx >= 0) ? m_minecartManager->posAt(riddenIdx) : cartPos;
         // 玩家随矿车位移（脚底 = 矿车中心下移 kCartSeatDrop —— 坐进车斗；眼位 / 相机自动跟随 position()）。
-        //   审查修 L4：旧偏移 -0.3 是 t680 旧 Y 基准（轨格**顶** +0.30）时代的标定残留，t734 把车中心改到
-        //   真轨面基准 kCartRideH=0.225（轨格**底** +1/16 板 + 车底板 0.15 + 微隙）后未同步 → 脚底 = 中心
-        //   -0.3 比车底板面（中心 -0.15，Main.qml cartHost 底板 piece）低 0.15 → 脚底穿车底板沉入轨格。
-        //   改与车底板面挂钩（脚底 ≈ 板面 -0.15）。kCartRideH / 底板偏移是 MinecartManager private 跨类
-        //   不可读 → 本层同值命名常量（同 kPlayerEyeUseSpeed 先例；改须与 Main.qml 底板 piece 同步）。
-        constexpr float kCartSeatDrop = 0.15f; // 脚底相对矿车中心下移 = 车底板面偏移（坐车斗内，脚踩板面）
+        //   审查修 L4：旧偏移 -0.3 是 t680 旧 Y 基准（轨格**顶** +0.30）时代的标定残留 → 脚底穿车底板沉入
+        //   轨格，t734 改与车底板面挂钩。t768 车斗加高（0.75 模型，本地 ±0.375）再同步：底板件
+        //   [-0.375,-0.3125]（下沿贴轨板上沿 + 微隙，厚 1/16）→ 脚底 = 板面 = 中心 −0.3125（脚踩板面）。
+        //   帮顶 +0.375 高出脚底 ~0.69 → 腿没入斗、胸头露帮上（机制等价 MC 矿车骑乘观感；坐姿 sitDrop
+        //   枢轴见 QML sitThigh 注）。kCartRideH / 底板偏移是 MinecartManager private 跨类不可读 → 本层
+        //   同值命名常量（同 kPlayerEyeUseSpeed 先例；改须与 Main.qml 底板 piece / kCartRideH 三处同步）。
+        constexpr float kCartSeatDrop = 0.3125f; // 脚底相对矿车中心下移 = 车底板面偏移（坐车斗内，脚踩板面）
         m_pos = QVector3D(finalCartPos.x(), finalCartPos.y() - kCartSeatDrop, finalCartPos.z());
         m_vel = QVector3D(0, 0, 0);
         reportHorizSpeed(posBefore, dt);

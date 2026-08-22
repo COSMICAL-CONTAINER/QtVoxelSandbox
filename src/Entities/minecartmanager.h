@@ -279,17 +279,17 @@ private:
     static constexpr float kCartHalfW  = 0.45f;  // 矿车 footprint 半宽（X；footprint 宽 0.9，匹配车斗）
     static constexpr float kCartHalfL  = 0.50f;  // 矿车 footprint 半长（Z；footprint 长 1.0）
     static constexpr float kCartHalfH  = 0.45f;  // 矿车命中盒半高（0.9 高，含车帮）
-    // t734 贴轨修真：矿车中心距**轨格 cell 底**的骑乘高度。轨面真基准 = 轨格 cell 底 + 薄板厚 1/16
-    //   （PartialBlockGeometry Rail case 的 yr=1/16 常量，板贴 cell 底防 z-fight）——旧版 kCartRideH=0.30
-    //   配「+1.0 格」（cell 顶）把「格底薄板」误当「格顶」→ 矿车悬浮约一整格（primed TNT / 雪傀儡 restY
-    //   基准算错同族 bug：渲染面在格底、物理却从格顶叠）。车底 = 渲染 delegate 底板下沿（Main.qml cartHost
-    //   底板 piece：position.y=-0.12、scale.y=0.06 → 底 = 中心 −0.15）→ 中心 = 板顶 1/16 + 0.15 + 0.0125
-    //   微隙（防底板与轨板共面 z-fight）= 0.225。偏移远离整数格边界 → floor(pos.y) 定格列无 ULP 取整风险
-    //   （lessons「resting 复探 FP 边界」条）。
-    static constexpr float kCartRideH  = 0.225f;
-    // t734 非轨格（地面）放置的静止车：车底贴 cell 底（0.15 底板偏移 + 0.0125 微隙，无轨薄板层）。
+    // t734 贴轨修真 / t768 车斗加高重推：矿车中心距**轨格 cell 底**的骑乘高度。轨面真基准 = 轨格 cell 底
+    //   + 薄板厚 1/16（PartialBlockGeometry Rail case 的 yr=1/16 常量，板贴 cell 底防 z-fight）。t768 车斗
+    //   0.75 高模型（本地 ±0.375；旧 0.3 高扁平车观感 ~0.25 格）→ 中心 = 板顶 1/16 + 底板下沿偏移 0.375 +
+    //   0.0125 微隙（防底板与轨板共面 z-fight）= 0.45（t734 旧值 0.225 = 旧底板 −0.15 时代推导）。偏移远离
+    //   整数格边界 → floor(pos.y) 定格列无 ULP 取整风险（lessons「resting 复探 FP 边界」条）；坡中段
+    //   floor(pos.y) 提前跨 cell 由 scanRailColumn 向下 2 格窗兜住（与旧值同语义）。骑乘脚底 kCartSeatDrop
+    //   （playercontroller 同值命名常量 = 底板面 −0.3125）与 Main.qml 底板 piece 三层同值推导，改须同步。
+    static constexpr float kCartRideH  = 0.45f;
+    // t734 非轨格（地面）放置的静止车：车底贴 cell 底（t768：0.375 底板下沿偏移 + 0.0125 微隙，无轨薄板层）。
     //   放宽放置（可放地上但推不动）后 spawnCart 非轨模式用；离轨静止由推进侧无轨守卫保证。
-    static constexpr float kCartGroundH = 0.1625f;
+    static constexpr float kCartGroundH = 0.3875f;
     // 轨上矿车速度（blocks/s）：明显快于步行 4.3（机制等价 MC 1.0 矿车轨上 8 blocks/s）。
     static constexpr float kCartSpeed  = 8.0f;
     // t638 ⑤ 动力轨（GoldenRail）boost 档（blocks/s）：矿车驶上动力轨时的目标速度上限（kCartSpeed 的
