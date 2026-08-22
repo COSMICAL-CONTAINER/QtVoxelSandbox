@@ -412,13 +412,28 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
         if (std::fabs(c.pos.x() - ccx) < 1e-4f && std::fabs(c.pos.z() - ccz) < 1e-4f) {
             int vdx = 0, vdz = 0;
             if (!pickTrackStep(world, c.pos, tx, tz, vdx, vdz)) { c.speed = 0.0f; return; }
-            if (sgn > 0) { c.dirX = float(vdx); c.dirZ = float(vdz); cartYawFromDir(c.dirX, c.dirZ, c.yaw); } // t737：起步重选向（含拐角格起步）→ 车头同步
+            // t770 ①：起步重选向结果**双符号持久化**（旧版 sgn<0 不写回 dir → 倒退起步过弯只改本帧局部
+            //   tx/tz，下一帧 travel 仍按旧轴横切出轨）：正行 dir=新臂（t737 车头同步语义）；倒行 dir=
+            //   **新臂取反**（车头回指弯道 = 倒车出弯的正确头向；travel = dir×sgn = 新臂，下一帧重算不回退）。
+            if (sgn > 0) { c.dirX = float(vdx);  c.dirZ = float(vdz); }
+            else         { c.dirX = -float(vdx); c.dirZ = -float(vdz); }
+            cartYawFromDir(c.dirX, c.dirZ, c.yaw);
             tx = float(vdx); tz = float(vdz);
         }
     }
     float remain = std::fabs(step);
     int guard = 0;
     while (remain > 1e-5f && guard++ < 16) { // 子步循环（单帧跨多格；16 子步上限（boost×卡顿尖峰 dt 余量））
+        // t770 ② 弯道格内强制贴轨约束（与速度 / 方向 / 步长无关的几何连续约束）：把行进向的**垂直轴**钉到
+        //   所在格中心线（floor+0.5）。轨格模型 = 格心折线（直段沿轴中心线、拐角过格心转直角）→ 矿车合法
+        //   位置集合 = 这条折线；但方向重选并非只在到心时刻发生 —— 停驻重选向（tickRiddenCart 速度死区
+        //   归零帧）/ 被推起步（pushEmptyCart）都可能在**段中非心位**把 dir 掰向新轴（弯道格内 wish 略偏
+        //   即选中出口臂）→ 车沿平行偏移线行驶（用户报「慢速前进未触发旋转即脱轨」的几何根因；倒退经
+        //   ①持久化后同样受益）。每子步钉回中心线：正常行驶恒在 .5 上 → no-op 零开销；偏移只可能来自上述
+        //   重选（量 <0.5 格，且不出本格 → 不改变 floor 列解析），一次钉回即根除脱轨。90° 瞬转本身允许
+        //   （MC 亦近似瞬转），不允许的是位置脱离中心线 —— 本行就是「位置必须连续贴轨」的执行点。
+        if (std::fabs(tx) > 0.5f) c.pos.setZ(std::floor(c.pos.z()) + 0.5f);
+        else                      c.pos.setX(std::floor(c.pos.x()) + 0.5f);
         // t734 段终点重写 = 行进向上**前方最近的格心**（行进轴 floor/ceil 取 k+0.5，另一轴不动）。
         //   旧版「当前格心 + 行进向」在 16ms tick 下步长 ~0.06-0.21 < 段长下界 0.5 → `remain < segLen`
         //   恒真 → 跨格分支（连接重选 / 拐角转弯 / 尽头停）在稳定帧率下是**死代码**、仅 dt 卡顿尖峰偶发
@@ -449,8 +464,16 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
                 c.speed = 0.0f; // 轨尽头 → 停（速度清零；正行 W 再推也停，须反推 / 上轨延伸）
                 break;
             }
-            if (sgn > 0) { c.dirX = float(ndx); c.dirZ = float(ndz); cartYawFromDir(c.dirX, c.dirZ, c.yaw); } // t737：正行跨格 → 车头同步新连接向（空车过弯也转 —— 骑乘 tick 末尾另有同公式重算，幂等）
-            tx = float(ndx); tz = float(ndz); // 行进方向继续（倒行沿新连接向退行 —— 拐角倒车自动过弯）
+            // t770 ①：到心重选结果双符号持久化（同上方起步先验）：正行 dir=新臂（t737 车头同步）；倒行
+            //   dir=新臂取反（车头回指弯道 = 倒车出弯头向；travel = dir×sgn = 新臂）。旧版 sgn<0 只改本
+            //   子步循环的局部 tx/tz、不写回 dir → 倒退过弯后**下一帧** travel = 旧 dir×sgn 沿旧轴横切 ——
+            //   弯道格心一过，车垂直于轨道滑进无轨列，到心重选 false → 停在轨外一格悬空（用户报「倒退
+            //   大概率脱轨」根因；任意倒退速度都触发，慢速下肉眼全程可见）。直格上臂=行进向 → dir=新臂
+            //   取反 = 原 dir，幂等无翻转；仅拐角处头向随新臂旋转 90°（位置由 ② 钉在中心线上，几何连续）。
+            if (sgn > 0) { c.dirX = float(ndx);  c.dirZ = float(ndz); }
+            else         { c.dirX = -float(ndx); c.dirZ = -float(ndz); }
+            cartYawFromDir(c.dirX, c.dirZ, c.yaw);
+            tx = float(ndx); tz = float(ndz); // 行进方向继续（正行沿新臂 / 倒行沿新臂退行 —— 拐角双向自动过弯）
         }
     }
 }
@@ -825,7 +848,8 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         // 车头朝向（-Z 前约定，同 PlayerController horizontalFacing / 相机 yaw）：yaw = atan2(-dirX,-dirZ)
         //   → dir=(0,-1) → 0°；(0,1) → 180°；(-1,0) → 90°；(1,0) → 270°（车头本地 -Z 经 R_y(yaw) 旋转后
         //   指向 dir；与 QML cartRoot eulerRotation.y 直连，dir 与渲染朝向严格一致）。负速倒行时 dir 不变
-        //   → 车头保持原朝向（车底朝后退行），跨格重选向（正行转弯）才更新。
+        //   → 车头保持原朝向（车底朝后退行）；跨格到心重选向才更新 dir —— t770 ① 起正倒行都更新（倒行
+        //   = 新臂取反，见 stepCartAlongRail 注释；直格幂等、拐角头随新臂旋转 90°，位置恒被钉在中心线）。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
     } else if (world) {
