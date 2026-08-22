@@ -126,6 +126,14 @@ public:
     Q_INVOKABLE int strongholdPortalX() const { return m_strongholdPortalX; }
     Q_INVOKABLE int strongholdPortalY() const { return m_strongholdPortalY; }
     Q_INVOKABLE int strongholdPortalZ() const { return m_strongholdPortalZ; }
+    // t756 世界出生列坐标 getter（findSpawnColumn 解析；详见 m_spawnCol* 字段头注释）。Game 层
+    //   （PlayerController::snapSpawnToGround）出生 / 重生定位采用本列 —— 出生格 + 头部格保证 Air、
+    //   支撑格为实体且在真地表（修「种子 42 出生在树里」：旧链固定 (kSpawnX,kSpawnZ)=(80,80) 且只按
+    //   heightAt（不含树的纯 fBm 地表）贴 Y，中心列被树干 / 邻树树冠占据时玩家卡进树体）。未解析
+    //   （-1：世界未生成完 / 极端全占满）→ 回退世界中心列（width/2, depth/2 = 旧 kSpawn 语义，行为
+    //   与 t276 前一致地退化）。分层（PLAN §2）：纯只读查询，Q_INVOKABLE 兼 F3 调试 / HUD。
+    Q_INVOKABLE int spawnColumnX() const { return m_spawnColX >= 0 ? m_spawnColX : m_width / 2; }
+    Q_INVOKABLE int spawnColumnZ() const { return m_spawnColZ >= 0 ? m_spawnColZ : m_depth / 2; }
     // t146 给定格的碰撞 sub-AABB（**世界坐标**；cell-local AABB + (x,y,z) 偏移）。air/torch → 空；
     //   常规整立方 → 单盒覆盖整格；不完整方块 → 形状对应的多 sub-AABB（slab/stairs/fence/plate/door/
     //   trapdoor，state 解码同 partialblockgeometry）。玩家碰撞迭代玩家 AABB 覆盖的所有格，逐 sub-AABB
@@ -777,6 +785,16 @@ private:
     //   纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源。仅写空气格（setVoxelIfAir）
     //   → 不覆盖雪上已生成的方块（云杉树干 / 树叶 / 任何已占格）。
     void placeSweetBerryBushes();
+    // t756 出生列确定性解析（PLAN §2-K）：全部地表特征（树 / 草 / 花 / 甘蔗 / 浆果丛）定型后，自世界
+    //   中心列起按 chebyshev 环距向外扫描，取首个「可站立裸地表」列并记录 m_spawnCol*（供 Game 层出生 /
+    //   重生定位）。三守卫（机制等价 MC 1.0 spawn 搜索「找首个安全露天落点」；地表取 min(heightAt,
+    //   height-1) 与 generate 填充同式）：(a) 支撑格为完整立方或积雪层（实体支撑 + 在真地表，不接受
+    //   树冠 / 洞顶 / 水面薄物）；(b) 出生格 h+1 与头部格 h+2 全 Air（树干 / 邻树树冠 / 草丛 / 水面 / 仙人掌
+    //   等一切占据 → 否决；世界顶之上越界格恒 Air = 开放天空）；(c) heightmapAt == h（当前列首个非空
+    //   恰为地表 → 头顶无任何遮蔽，从栅格真值侧双保险 (b)）。
+    //   纯读栅格 + 固定环序 → 同 seed 同出生列。generate 末与 finishLoad 末（读档反推，同要塞坐标 B5
+    //   模式 —— 存档体素可能已被玩家改造）各调一次；全图无合格列 → 保持 -1（getter 回退中心列）。
+    void findSpawnColumn();
     // t395 雪原/针叶群系水面冻结（PLAN §2-K 确定性）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
     //   地下水池（cy ≤ h-7 << waterLevel）不在 y==waterLevel 故不受影响。generate 在 fillWater 之后调（水已就位）。
@@ -954,6 +972,13 @@ private:
     //   世界残留误导），finishLoad 末由 rebindStrongholdPortalFromVoxels 从体素反推回写（审查修 B5：读档不丢）。
     bool m_hasStronghold = false;
     int m_strongholdPortalX = 0, m_strongholdPortalY = 0, m_strongholdPortalZ = 0;
+    // t756 世界出生列（玩家初始出生 / 未睡床时的重生列）：findSpawnColumn 解析记录（见其声明注释的四守卫）。
+    //   修「种子 42 出生在树里」：placeTrees 无出生邻域豁免 → 固定出生列 (80,80) 恰命中密度筛选即生树，
+    //   旧出生链只按 heightAt（不含树的纯 fBm 地表）贴 Y → 玩家脚底嵌进树干 / 头部嵌进树冠。出生列改为
+    //   **选定**而非假定：环形外扫避让一切地表特征（树冠半径 2 会越过任何半径 1 的排除带 —— 选定法比
+    //   worldgen 排除带稳）。-1 = 未解析（世界未生成完 / 极端全占满）→ getter 回退世界中心列（旧 kSpawn
+    //   语义退化）。beginLoad 显式清（防旧世界残留），finishLoad 末从存档体素重新解析（B5 反推模式）。
+    int m_spawnColX = -1, m_spawnColZ = -1;
     ChunkManager m_chunks;    // 多 chunk 存储 + 跨 chunk 路由（World 层；默认空，generate 重建）
     // t185 水流 tick 节流计数：tickWaterFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFlowTickInterval
     //   才把波前推进 1 格（~0.3s 一格 → 1 格/tick 流动动画可见）。MC 自身约 0.25s/格，本工程取 3（0.3s）平衡

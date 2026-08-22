@@ -1110,7 +1110,14 @@ private:
     //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生
     //   落差。分别在 componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终
     //   贴地表。无世界 → no-op（m_pos 保持 kSpawnY 兜底）。只读 World::heightAt（向下依赖，不改栅格）。
+    //   t756：出生列改采用 World 选定列（见 .cpp 实现头注释）。
     void snapSpawnToGround();
+    // t756 世界换代复位重生点：World::seedChanged（regenerate / beginLoad / setSeed 均 emit）→ 旧
+    //   m_spawnPos 坐标不再指向当前世界（旧世界出生列 / 旧世界床位）→ 复位回 kSpawn pristine，下一次
+    //   snapSpawnToGround 采用新世界的选定出生列。修启动序隐患：componentComplete 在菜单默认种子世界
+    //   上先行采用过出生列（m_spawnPos 已改写非 pristine）→ enterWorld 换真种子重生时旧坐标误用。床位
+    //   重生不跨世界（存档不持久化床位，同既有语义）→ 换代即复位无行为回归。只改内存态 + emit，零栅格写。
+    void onWorldSeedChanged();
 
     World *m_world = nullptr;
     Hotbar *m_hotbar = nullptr;                  // 拾取 addStack / 丢弃 takeStack 的栈操作目标（Q_PROPERTY 绑定）
@@ -1184,6 +1191,9 @@ private:
     // t388 重生点（mutable）：初值 = 出生列 kSpawn（与世界生成初值同源）；夜间右键床睡觉完成后设为床位
     //   （玩家在床上的位置 = 床格上方 0.5/1.0），respawn() 传回此处（覆盖旧固定 kSpawn）。snapSpawnToGround
     //   据本列贴地表（床位本就在地表方块上 → 重生贴床顶）。未被床设过时 == kSpawn（行为不变）。
+    //   t756：第三写点 = snapSpawnToGround 在 pristine（仍精确等于 kSpawn 初值 = 从未被床设过）时改写为
+    //   World 选定出生列（出生格+头部格 Air、实体支撑、真地表）。世界换代（seedChanged）由 onWorldSeedChanged
+    //   复位回 kSpawn pristine（旧世界出生列 / 旧世界床位不跨世界，床位本就不持久化——同既有语义）。
     QVector3D m_spawnPos{kSpawnX, kSpawnY, kSpawnZ};
     QVector3D m_vel{0, 0, 0};
     float m_yaw = 0, m_pitch = -42;

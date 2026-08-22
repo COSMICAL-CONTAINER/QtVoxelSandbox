@@ -115,6 +115,10 @@ void PlayerController::setWorld(World *w)
     m_plateJustPressed.clear();   // t627：同上（沿表生命周期一帧，但换世界须一并清防陈旧沿触发）
     m_buttonRecoverCells.clear(); // t628：换世界清按钮自动复位表（防跨世界同坐标串扰；键按世界坐标打包，同 m_dispenserCooldowns）
     m_dispenserPoweredCells.clear(); // t689：换世界清机器电力基线集（防跨世界同坐标串扰；键同冷却编码）
+    // t756：世界换代（regenerate / beginLoad / setSeed 均 emit seedChanged）→ 复位重生点（onWorldSeedChanged：
+    //   旧世界出生列 / 床位坐标不再指向当前世界）。UniqueConnection 防重复挂接（theWorld 单例 + setWorld
+    //   幂等早退，此处理论只连一次）。
+    connect(w, &World::seedChanged, this, &PlayerController::onWorldSeedChanged, Qt::UniqueConnection);
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -125,14 +129,48 @@ void PlayerController::setWorld(World *w)
 //   在 componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终贴地表。
 //   无世界 → no-op（m_pos 保持 kSpawnY 兜底）。分层（PLAN §2）：只读 World::heightAt（worldgen 地表纯
 //   函数，同 generate() 填充用），不改栅格；Game 层向下读 World，无反向依赖。
+//   t756：出生列改为**采用 World 选定列**（findSpawnColumn：出生格+头部格 Air、实体支撑、真地表）——
+//   旧链固定 (kSpawnX,kSpawnZ)=(80,80) 且只按 heightAt（不含树的纯 fBm 地表）贴 Y，中心列被树干 / 邻树
+//   树冠占据时（种子 42 即中）玩家卡进树体。仅在 m_spawnPos 仍为构造初值（未被床设过）时采用并改写
+//   m_spawnPos（重生点 / 指南针基准随真实出生列）；睡床后的床位重生点（sleepAdvanceToDawn 已改写
+//   m_spawnPos）不走本分支，贴床顶行为不变（t388 语义零回归）。
 void PlayerController::snapSpawnToGround()
 {
     if (!m_world) return;
+    // t756：m_spawnPos 精确等于 kSpawn 常量初值 = 「从未被床改写」的 pristine 判据（m_spawnPos 仅两写：
+    // 此处 + sleepAdvanceToDawn 床位 +0.5 格心，后者恒异于常量初值 → 判据充分）。采用 World 出生列。
+    if (m_spawnPos.x() == kSpawnX && m_spawnPos.y() == kSpawnY && m_spawnPos.z() == kSpawnZ) {
+        const int sx = m_world->spawnColumnX();
+        const int sz = m_world->spawnColumnZ();
+        const int sh = m_world->heightAt(sx, sz);
+        const QVector3D adopted(float(sx) + 0.5f, float(sh) + 1.0f, float(sz) + 0.5f); // 格心（同床位 +0.5 约定）
+        if (m_spawnPos != adopted) {
+            m_spawnPos = adopted;      // 重生点 / 指南针基准改写为真实出生列
+            m_pos = m_spawnPos;        // 初次落位 / 重生（respawn 已先 m_pos=m_spawnPos，此处幂等）
+            emit spawnPointChanged();  // t567 HUD 指南针指针重算（出生点 → 真实出生列）
+        }
+    }
     // t388：按当前重生点列贴地表（m_spawnPos）。世界就绪时 m_spawnPos==kSpawn（初值，行为不变）；夜间睡床后
     //   m_spawnPos=床位，重生贴床顶（床是 solid 地表方块 → heightAt 返床 y，+1 站其上）。
     const int h = m_world->heightAt(int(m_spawnPos.x()), int(m_spawnPos.z()));
     m_pos.setY(float(h) + 1.0f); // 脚底 = 地表方块顶面（h 为地表方块 y，+1 站其上）
     m_peakY = m_pos.y();         // 掉落伤害基准重置（同 componentComplete / setMode 语义，防陈旧落差）
+}
+
+// t756 世界换代复位重生点（setWorld 时 connect 到 World::seedChanged）：regenerate（新世界 worldgen）/
+//   beginLoad（读档零填充）均 emit seedChanged → 旧 m_spawnPos（上一世界选定出生列 / 上一世界床位）坐标
+//   不再指向当前世界，必须复位回 kSpawn pristine，让下一次 snapSpawnToGround 采用**本**世界的选定出生列。
+//   不复位则启动序隐患：componentComplete 在菜单态默认种子世界先行采用过出生列（m_spawnPos 已非
+//   pristine）→ enterWorld 换真种子后 snap 的 pristine 判据失效 → 玩家落在旧世界坐标上。床位不持久化
+//   （存档无 spawn 字段）→ 换代复位床位与本既有语义一致（切世界后重生点本就非床位）。只改内存 + emit，
+//   不动 m_pos（位姿由随后的 respawn / loadSavedState 定位）。
+void PlayerController::onWorldSeedChanged()
+{
+    const QVector3D pristine{kSpawnX, kSpawnY, kSpawnZ};
+    if (m_spawnPos != pristine) {
+        m_spawnPos = pristine;
+        emit spawnPointChanged(); // t567 指南针基准复位（随后 snap 采用新出生列时再刷新）
+    }
 }
 
 void PlayerController::setHotbar(Hotbar *h)

@@ -78,6 +78,8 @@ void World::beginLoad(int seed)
     //   残留上一世界坐标会让暗渊之眼（t729）朝错误方向飞；finishLoad 末 rebindStrongholdPortalFromVoxels
     //   从存档体素反推回写（若本世界确有要塞）。
     m_hasStronghold = false;
+    m_spawnColX = -1; // t756：出生列同步清（防旧世界残留坐标误导出生定位）；finishLoad 末从存档体素重新解析
+    m_spawnColZ = -1;
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
@@ -130,6 +132,10 @@ void World::finishLoad()
     //   只在 generate 的 placeStronghold 记录，读档后丢失 / 陈旧）。同 rebuildFireCells 的一次性全图扫描
     //   模式（加载期可接受，非每 tick）。
     rebindStrongholdPortalFromVoxels();
+    // t756：出生列同 B5 模式从存档体素重新解析 —— 存档不落盘 m_spawnCol*（generate 记录值只对新世界有效），
+    //   且玩家可能已挖掉 / 改造原出生列（建房 / 种树）。须在 recomputeAllHeightmaps 之后（heightmapAt 判据
+    //   依赖重算后的列顶）。一次性有界环扫（加载期可接受）。
+    findSpawnColumn();
 }
 
 // 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞末地传送门中心格回写 m_strongholdPortal*。旧版三坐标
@@ -197,6 +203,53 @@ void World::rebindStrongholdPortalFromVoxels()
     m_strongholdPortalZ = (c.minZ + c.maxZ) / 2;
     qInfo() << "worldload: stronghold rebind ->" << m_strongholdPortalX << m_strongholdPortalY
             << m_strongholdPortalZ << "frames=" << c.count;
+}
+
+// t756 出生列确定性解析（机制等价 MC 1.0 spawn 搜索「自中心外扫找首个安全露天落点」；见头注释四守卫）。
+//   根因背景：placeTrees 无出生邻域豁免，固定出生列 (80,80) 恰命中密度筛选即生树（种子 42 即中）；而出生链
+//   只按 heightAt（纯 fBm 地表、不含树）贴 Y → 玩家脚底嵌树干 / 头部嵌树冠。此处改「假定出生列」为「选定
+//   出生列」：树冠半径 2 会越过任何半径 1 的 worldgen 排除带（方案 B 弱点），选定法从栅格真值侧一次保证
+//   「出生格 + 头部格 Air、脚下实体支撑且在真地表」。环序固定（r=0 中心起，环内 dx 外层 / dz 内层）→
+//   同 seed 同出生列（PLAN §2-K，无运行期随机源）。分层（PLAN §2）：只读 heightAt / blockAt /
+//   heightmapAt（m_chunks 直读，generate 末 / finishLoad 末两时机均无信号语义，同 rebuildFireCells 约定）。
+void World::findSpawnColumn()
+{
+    m_spawnColX = -1; // 先复位（全图无合格列时保持 -1 → getter 回退世界中心列）
+    m_spawnColZ = -1;
+    const int cx = m_width / 2, cz = m_depth / 2;
+    const int maxR = std::max(cx, cz); // 覆盖全图的最小环上界
+    for (int r = 0; r <= maxR; ++r) {
+        // 环遍历：整方形 [-r,r]² 内只走 chebyshev 距离 == r 的边环（r=0 退化为中心列）。
+        for (int dx = -r; dx <= r; ++dx) {
+            for (int dz = -r; dz <= r; ++dz) {
+                if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                const int x = cx + dx, z = cz + dz;
+                if (x < 0 || z < 0 || x >= m_width || z >= m_depth) continue; // 环越界列跳过
+                // 有效地表 = generate 地形填充同式（世界矮于 fBm 地表时钳到顶 —— 否则 blockAt 按越界读 Air，
+                // 支撑判据全列误否决；测试小世界 96×96×48 即此情形，实体地形顶在 47 而裸 heightAt ~62..66）。
+                const int h = std::min(heightAt(x, z), m_height - 1);
+                if (h < 0) continue; // 防御：零高世界无地表
+                const quint8 support = m_chunks.blockAt(x, h, z);
+                // (a) 实体支撑：完整立方（Grass/Dirt/Sand/Stone/Gravel/Snow…）或积雪层（Snowy 地表结构顶层
+                //     SnowLayer 薄板可踩，同 placeTrees 的「草顶 / 雪顶」守卫口径）。树叶 / 原木 / 草丛 /
+                //     水面薄物（睡莲）均非完整立方 → 天然否决「出生在树冠 / 洞顶上」。水下 / 湖列由 (b) 否决
+                //     （水面占 h+1），沙滩干列可站属合法裸地表（机制等价 MC 出生不限群系）。
+                if (!BlockRegistry::isFullCube(support) && support != BlockRegistry::SnowLayer) continue;
+                // (b) 出生格 + 头部格全 Air（树干占 h+1、树冠占 h+1..h+3、草丛 / 花 / 水面占 h+1 的列全部
+                //     落选）。越界格 blockAt 恒 Air → 世界顶之上的两格 = 开放天空，合法（小世界钳顶列）。
+                if (m_chunks.blockAt(x, h + 1, z) != BlockRegistry::Air) continue;
+                if (m_chunks.blockAt(x, h + 2, z) != BlockRegistry::Air) continue;
+                // (c) 真地表：当前列首个非空恰为支撑本身 → 头顶无任何占位（洞口开口 / 悬浮雪 / 结构残留
+                //     一票否决；(b) 的列级强化双保险 —— heightmap 由 setBlock 增量维护，树 / 草 / 玩家编辑均覆盖）。
+                if (m_chunks.heightmapAt(x, z) != h) continue;
+                m_spawnColX = x;
+                m_spawnColZ = z;
+                qInfo() << "worldgen: spawn column ->" << x << z << "surfaceY" << h;
+                return;
+            }
+        }
+    }
+    qInfo() << "worldgen: spawn column -> none (getter falls back to center)";
 }
 
 // t425 perf：生长方格索引增量维护。写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）在
@@ -3547,6 +3600,7 @@ void World::generate()
     placeFlowers(); // t397：各群系草地确定性散布 4 色花（PLAN §2-K；草丛后，仅写空气格不覆盖草 / 树）
     placeSugarcane(); // t397：水域邻接陆地确定性散布 1..3 格高甘蔗（PLAN §2-K；花后，仅写空气格不覆盖草 / 树 / 花）
     placeSweetBerryBushes(); // t467：Snowy 群系雪顶确定性散布浆果灌木丛（PLAN §2-K；甘蔗后，仅写空气格不覆盖雪上已占格）
+    findSpawnColumn(); // t756：全部地表特征（树 / 草 / 花 / 甘蔗 / 浆果丛）定型后选出生列 —— 裸地表判据读的是最终栅格
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
     // perf：worldgen 末全图重建流体方格索引一次 —— worldgen 经 m_chunks.setBlock / fillWater 直写 chunk
     //   （不经 World 写入路径 → noteFluidWrite 不捕获）。一次性 3.3M 扫描在生成期可接受（非每 tick），

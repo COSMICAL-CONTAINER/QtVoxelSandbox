@@ -1012,6 +1012,44 @@ int main(int argc, char *argv[])
                              "dead + full restore (t755)";
     }
 
+    // ── t756 出生点选择探针（World 层 findSpawnColumn 多种子回归；独立小世界逐种子重生成，不动主世界
+    //    rig）：种子 42（用户报告「出生在树里」的复现种子）+ 4 个互异回归种子，断言每个世界记录的出生列
+    //    均为「可站立裸地表」：① 支撑格完整立方或积雪层（实体支撑，树叶/原木/草丛/水面薄物均不合规）；
+    //    ② 出生格 h+1 与头部格 h+2 全 Air（树干/邻树树冠占据即否决——修复的直接断言面；水下/湖列的水面
+    //    占 h+1 同遭否决）；③ heightmapAt == h（当前列首个非空恰为地表 → 头顶无任何遮蔽，非树冠/洞顶）。
+    //    世界取 96×96×96（高 96 > 树冠顶 ~82 → 树正常生成，探针真正行使避树；48 高主世界地表钳顶无树，
+    //    用它探针会空转）。h 断言用 min(heightAt, height-1) 同 findSpawnColumn / generate 填充式。
+    {
+        World spawnW;
+        spawnW.setWidth(96);
+        spawnW.setDepth(96);
+        spawnW.setHeight(96);
+        const int seeds[] = { 42, 7, 1337, 2024, 99 }; // 5 个互异种子（验收「连开 5 个不同种子」）
+        bool ok = true;
+        for (const int s : seeds) {
+            spawnW.setSeed(s); // 同尺寸重生成（同 P13 fallback 模式）
+            const int sx = spawnW.spawnColumnX(), sz = spawnW.spawnColumnZ();
+            const int h = std::min(spawnW.heightAt(sx, sz), 95); // 与填充同式钳顶（96-1）
+            const quint8 sup = spawnW.blockAt(sx, h, sz);
+            const quint8 feet = spawnW.blockAt(sx, h + 1, sz);
+            const quint8 head = spawnW.blockAt(sx, h + 2, sz);
+            const bool colOk = (BR::isFullCube(sup) || sup == BR::SnowLayer)
+                               && feet == BR::Air && head == BR::Air
+                               && spawnW.heightmapAt(sx, sz) == h;
+            if (!colOk) {
+                qInfo().noquote() << "  seed" << s << "col" << sx << sz << "h" << h
+                                  << "sup" << int(sup) << "feet" << int(feet)
+                                  << "head" << int(head) << "hm" << spawnW.heightmapAt(sx, sz);
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| spawn column search: seeds {42,7,1337,2024,99} all resolve to standable "
+                             "bare surface — solid/snow-layer support, feet+head cells air, heightmap=="
+                             "heightAt (no trunk/canopy/water overhead) (t756)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
