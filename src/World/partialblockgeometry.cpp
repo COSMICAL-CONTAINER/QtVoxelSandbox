@@ -107,6 +107,8 @@ void pushBox(QVector<Vtx> &verts, QVector<quint32> &idx,
 //   quad 四角 p0..p3 须共面、按「从某一侧看 CCW」序给出（UV: p0=(0,0) p1=(1,0) p2=(1,1) p3=(0,1)，
 //   即 BL→BR→TR→TL，整张瓦片铺满该 quad）。法线由 (p1-p0)×(p3-p0) 算（NoLighting 下不影响着色，仅填格式）。
 //   光照：cross 各面共用本格光场值（cross 立于开敞格、本格 flood 光即其光照；PartialLightCtx.light）。
+//   t776 追加可选 su0/su1（瓦片内 u 子区 [su0,su1]，默认 [0,1] 整瓦）：quad 只采瓦片的该横向条带 ——
+//   红石火把墙插 S 窄带采中央 [0.375,0.625]（焰头 4px 列区），使两片剪影同 texel 密度且火把列共轴。
 void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
                    int lx, int ly, int lz,
                    float p0x, float p0y, float p0z,
@@ -114,7 +116,8 @@ void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
                    float p2x, float p2y, float p2z,
                    float p3x, float p3y, float p3z,
                    int tile, const PartialLightCtx &L,
-                   float tileW, float hx, float hy, float v0, float v1)
+                   float tileW, float hx, float hy, float v0, float v1,
+                   float su0 = 0.0f, float su1 = 1.0f)
 {
     const float u0 = tile * tileW + hx, u1 = (tile + 1) * tileW - hx;
     const float vc = L.light; // cross 用本格光场（开敞格 flood 光）
@@ -137,7 +140,7 @@ void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
         Vtx v;
         v.x = float(lx) + c[i][0]; v.y = float(ly) + c[i][1]; v.z = float(lz) + c[i][2];
         v.nx = nx; v.ny = ny; v.nz = nz;
-        v.u = u0 + uv[i][0] * (u1 - u0);
+        v.u = u0 + (su0 + uv[i][0] * (su1 - su0)) * (u1 - u0);
         v.v = v0 + uv[i][1] * (v1 - v0);
         v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f;
         verts.append(v);
@@ -150,7 +153,7 @@ void pushCrossQuad(QVector<Vtx> &verts, QVector<quint32> &idx,
         Vtx v;
         v.x = float(lx) + c[i][0]; v.y = float(ly) + c[i][1]; v.z = float(lz) + c[i][2];
         v.nx = -nx; v.ny = -ny; v.nz = -nz;
-        v.u = u0 + uv[i][0] * (u1 - u0);
+        v.u = u0 + (su0 + uv[i][0] * (su1 - su0)) * (u1 - u0);
         v.v = v0 + uv[i][1] * (v1 - v0);
         v.r = vc; v.g = vc; v.b = vc; v.a = 1.0f;
         verts.append(v);
@@ -764,8 +767,9 @@ int PartialBlockGeometry::append(
         //     · 墙插（TorchOnNX/PX/NZ/PZ）：对齐 Main.qml 火把 delegate 的倾柄位姿（torchHandleLocalPos
         //       / torchHandleEuler t150e/f 同源常量）——柄根贴墙（离墙面 0.025、离地 0.197）、火把轴自竖直
         //       上倾 30°（sin/cos 0.5/0.866）伸离墙、轴长 0.80（焰头顶 0.897 ≈ 普通火把焰顶 0.89）。两片
-        //       quad 均含火把轴（剪影沿倾轴渲染）：W 片平行墙面（正对墙看的正视图，宽 0.8）+ S 片垂直
-        //       墙面（侧视深度片，宽 0.45）—— 剪影紧贴附着面、读作「斜插墙上的火把」。
+        //       quad 均含火把轴（剪影沿倾轴渲染）：W 片平行墙面（正对墙看的正视图，宽 0.8 整瓦）+ S 片
+        //       垂直墙面（侧视深度窄带宽 0.2，t776 采瓦片中央焰列区）—— 两片火把列共轴重合（t776 修
+        //       「横竖剪影错位不重合」）、剪影紧贴附着面、读作「斜插墙上的火把」。
         int torchTile = tile;
         if (state & BlockRegistry::RedstoneTorchStateOffFlag)
             torchTile = 170; // t657 熄灭态（redstone_torch_off）
@@ -791,6 +795,7 @@ int PartialBlockGeometry::append(
         const float bx = 0.5f + ax * 0.475f, by = 0.197f, bz = 0.5f + az * 0.475f;
         // W 片（平行墙面，正视图）：底边沿墙切向 t = (-az,0,ax)（s 的水平垂直向）±0.4。含火把轴 →
         //   剪影自柄根沿 30° 倾轴渲染（柄根贴墙、焰头伸向格心），与普通火把 delegate 柄完全同线。
+        //   整张瓦片铺 0.8 宽 → 中央火把列（柄 2px + 焰头 4px）恰落片中心线 = 火把轴。
         const float tx = -az * 0.4f, tz = ax * 0.4f;
         pushCrossQuad(verts, idx, lx, ly, lz,
                       bx - tx, by, bz - tz,
@@ -798,15 +803,24 @@ int PartialBlockGeometry::append(
                       bx + tx + ux * kShaftLen, by + uy * kShaftLen, bz + tz + uz * kShaftLen,
                       bx - tx + ux * kShaftLen, by + uy * kShaftLen, bz - tz + uz * kShaftLen,
                       torchTile, light, tileW, hx, hy, v0, v1);
-        // S 片（垂直墙面，侧视深度片）：底边自柄根伸离墙 0.45（不嵌墙——底边起点即墙面侧，避免穿
-        //   支撑块）。侧视读作同角度倾柄（深度参照，剪影略粗无碍）。
-        const float sx = -ax * 0.45f, sz = -az * 0.45f;
+        // S 片（垂直墙面，侧视深度片）**t776 重做（修用户报「横着的竖着的贴图没有重合到一块去」）**：
+        //   t738 旧版 = 柄根→离墙 0.45 的**单向** quad 铺整张瓦片 → 贴图中央火把列落在片内 u=0.5 =
+        //   离墙 0.225 处，而 W 片火把列在火把轴（柄根贴墙）上 —— 两片剪影沿轴错开 0.225 互相不重合
+        //   （斜视时一把火把裂成两把错位剪影）。改为**绕火把轴对称窄带**：宽 0.2（= 0.8×0.25），只采
+        //   瓦片中央子区 u∈[0.375,0.625]（build_rail_family 焰头 4px 列区 x6..9、柄 2px 居中 x7..8；
+        //   170 熄灭态同布局）—— 与 W 片（整瓦铺 0.8 宽）**同 texel 密度**：柄/焰头的世界宽度两片一致，
+        //   且两片的贴图中央火把列都钉在共同火把轴上（底/顶边中点 = 柄根/轴端）→ 正视 / 侧视 / 斜视均
+        //   读作同一把斜插火把（机制等价 MC 1.0 墙火把单一模型的两向投影）。贴墙内侧半带（柄根向墙内
+        //   ≤0.1）嵌进支撑实体块被其面遮挡 —— 支撑恒实体（失撑即掉落），无可见穿模。
+        constexpr float kRibbonHalf = 0.1f; // 窄带半宽 = kShaftLen 宽基准 0.8 × 子区宽 0.25 ÷ 2
+        const float sx = -ax * kRibbonHalf, sz = -az * kRibbonHalf;
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      bx, by, bz,
+                      bx - sx, by, bz - sz,
                       bx + sx, by, bz + sz,
                       bx + sx + ux * kShaftLen, by + uy * kShaftLen, bz + sz + uz * kShaftLen,
-                      bx + ux * kShaftLen, by + uy * kShaftLen, bz + uz * kShaftLen,
-                      torchTile, light, tileW, hx, hy, v0, v1);
+                      bx - sx + ux * kShaftLen, by + uy * kShaftLen, bz - sz + uz * kShaftLen,
+                      torchTile, light, tileW, hx, hy, v0, v1,
+                      0.375f, 0.625f);
         break;
     }
     case BlockRegistry::RedstoneDust: {

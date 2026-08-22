@@ -1955,6 +1955,130 @@ int main(int argc, char *argv[])
                              "(ceiling does not occlude scanRailColumn)";
     }
 
+    // ── P19 t776 墙插红石火把贴图共轴重合探针（mesher 同源直调，同 P11 模式；纯 Core+World 断言）──
+    //   用户报告（R19.12）：「红石火把可插墙，但横着的竖着的贴图没有重合到一块去」。根因：t738 墙插
+    //   S 片（垂直墙面的侧视深度片）= 柄根→离墙 0.45 的**单向** quad 铺**整张瓦片** → 贴图中央火把列
+    //   （柄 2px + 焰头 4px）落在片内 u=0.5 = 离墙 0.225 处，而 W 片（平行墙面正视图）火把列在火把轴
+    //   （柄根贴墙）→ 两片剪影沿轴错开互不重合（斜视一把火把裂成两把错位剪影）。t776 修：S 片改绕火把
+    //   把轴**对称**窄带（宽 0.2）只采瓦片中央子区 u∈[0.375,0.625] —— 与 W 片（整瓦铺 0.8 宽）同 texel
+    //   密度（柄/焰世界宽两片一致），两片火把列共轴重合。矩阵断言（像素级视觉留人工目视，几何/UV 规则
+    //   在 mesher 输出上可精确锁定）：
+    //   (a) 五形态（立地 + 四向墙插）每 quad 底边中点 == 柄根 B、顶边中点 == B+轴×0.8 —— 贴图中央火把列
+    //       （u=0.5 处）钉在两片共同火把轴上（t776 修前 S 片中点离轴 0.225 → FAIL）；
+    //   (b) 墙插两片宽度恰 {0.8 整瓦采样, 0.2 子区采样} 各一：0.2 片顶点 u 归一落 [0.375,0.625]（焰头
+    //       4px 列区）、0.8 片 u 归一铺满 [0,1] → 两片 texel 密度一致（0.8/1.0 == 0.2/0.25）；
+    //   (c) 杆向/亮端：底边（贴图底=柄端，v=0）恒 y=0.197 且离墙最近、顶边中点沿轴伸离墙（四向各验
+    //       点积符号）+ 上倾 0.866×0.8；立地态底边 y=0、顶边 y=1、中点 (0.5,·,0.5)（亮端朝上）；
+    //   (d) 熄灭位（RedstoneTorchStateOffFlag）几何不变、瓦片换 170（暗红熄焰）：u 全落 tile 170 区。
+    {
+        // 镜像常量（partialblockgeometry RedstoneTorch case 同源；改几何须两处同步）。
+        constexpr float kTLean = 0.5f, kTUpright = 0.866f, kTShaft = 0.80f;
+        constexpr float kTBaseOffWall = 0.475f, kTBaseY = 0.197f;
+        const float tileW = 1.0f / 16.0f;
+        const int onTile = BR::tileIndex(BR::RedstoneTorch, BR::PosX); // 161（def sideTile）
+        PartialLightCtx lctx; lctx.light = 1.0f;
+        for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+        PartialNeighborCtx nctx; // RedstoneTorch case 不读邻居（缺省全 0 即可）
+        bool ok = true;
+        // 墙插四向（state 低 3 位 1..4 = TorchOnNX/PX/NZ/PZ，torchAttachOffset 出支撑向 (ax,0,az)）。
+        for (int form = 1; form <= 4; ++form) {
+            int ax = 0, ay = 0, az = 0;
+            BR::torchAttachOffset(quint8(form), ax, ay, az);
+            const float bx = 0.5f + ax * kTBaseOffWall, bz = 0.5f + az * kTBaseOffWall;
+            const float axx = -ax * kTLean * kTShaft, ayy = kTUpright * kTShaft, azz = -az * kTLean * kTShaft;
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch, quint8(form),
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            // 逐 quad（pushCrossQuad 每 quad 正反两组、每组 4 顶点同角同 UV → 步长 4 全组同断言）。
+            int wPlanes = 0, ribbons = 0;
+            for (int g = 0; g + 3 < verts.size(); g += 4) {
+                const Vtx &p0 = verts[g], &p1 = verts[g + 1], &p2 = verts[g + 2], &p3 = verts[g + 3];
+                const float mbx = (p0.x + p1.x) / 2, mbz = (p0.z + p1.z) / 2; // 底边中点（= 贴图 u=0.5 火把列）
+                const float mtx = (p2.x + p3.x) / 2, mtz = (p2.z + p3.z) / 2;
+                // (a) 火把列钉共同轴：底/顶边中点 == 柄根 / 轴端（W 片与 S 带中点重合 = 两片剪影重合）。
+                if (std::fabs(mbx - bx) > 1e-4f || std::fabs(p0.y - kTBaseY) > 1e-4f
+                    || std::fabs(mbz - bz) > 1e-4f
+                    || std::fabs(mtx - (bx + axx)) > 1e-4f || std::fabs(p2.y - (kTBaseY + ayy)) > 1e-4f
+                    || std::fabs(mtz - (bz + azz)) > 1e-4f) {
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "off torch axis: base mid" << mbx << p0.y << mbz
+                                      << "top mid" << mtx << p2.y << mtz;
+                    ok = false;
+                    continue;
+                }
+                // (c) 亮端离墙：底边 v=0（贴图底=柄端）且顶边中点比柄根伸离支撑（away·Δ>0）。
+                const float away = -(ax * (mtx - mbx) + az * (mtz - mbz));
+                if (p0.v > 1e-4f || p1.v > 1e-4f || p2.v < 1.0f - 1e-4f || away <= 0.0f
+                    || std::fabs((p2.y - p0.y) - ayy) > 1e-4f) {
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "bright-end dir wrong: v0" << p0.v << "v2" << p2.v
+                                      << "away" << away;
+                    ok = false;
+                    continue;
+                }
+                // (b) 两片各一：0.8 整瓦（u 归一铺满 [0,1]）/ 0.2 子区带（u 归一 [0.375,0.625]）。
+                const float wdt = std::sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)
+                                           + (p1.z - p0.z) * (p1.z - p0.z));
+                const float uu0 = (p0.u - onTile * tileW) / tileW, uu1 = (p1.u - onTile * tileW) / tileW;
+                const bool fullTile = std::fabs(wdt - 0.8f) < 1e-4f
+                                      && std::fabs(uu0) < 1e-4f && std::fabs(uu1 - 1.0f) < 1e-4f;
+                const bool ribbon = std::fabs(wdt - 0.2f) < 1e-4f
+                                    && std::fabs(uu0 - 0.375f) < 1e-4f && std::fabs(uu1 - 0.625f) < 1e-4f;
+                if (fullTile && !ribbon) ++wPlanes;
+                else if (ribbon && !fullTile) ++ribbons;
+                else {
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "width/uv-region wrong: w" << wdt << "uu" << uu0 << uu1;
+                    ok = false;
+                }
+            }
+            if (wPlanes != 2 || ribbons != 2) { // 每 quad 正反两组 → 各计 2
+                qInfo().noquote() << "  wall form" << form << "plane mix wrong: W" << wPlanes << "S" << ribbons;
+                ok = false;
+            }
+        }
+        // 立地（TorchFloor=0）：满格居中 cross —— 中点 (0.5,·,0.5)、底 y=0 顶 y=1、整瓦采样、亮端朝上。
+        {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch, 0,
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            for (int g = 0; g + 3 < verts.size(); g += 4) {
+                const Vtx &p0 = verts[g], &p1 = verts[g + 1], &p2 = verts[g + 2];
+                const float mbx = (p0.x + p1.x) / 2, mbz = (p0.z + p1.z) / 2;
+                if (std::fabs(mbx - 0.5f) > 1e-4f || std::fabs(mbz - 0.5f) > 1e-4f
+                    || std::fabs(p0.y) > 1e-4f || std::fabs(p2.y - 1.0f) > 1e-4f
+                    || p0.v > 1e-4f || p2.v < 1.0f - 1e-4f
+                    || std::fabs((p0.u - onTile * tileW) / tileW) > 1e-4f
+                    || std::fabs((p1.u - onTile * tileW) / tileW - 1.0f) > 1e-4f) {
+                    qInfo().noquote() << "  floor form quad" << g / 4 << "wrong: mid" << mbx << mbz
+                                      << "y" << p0.y << p2.y << "v" << p0.v << p2.v;
+                    ok = false;
+                }
+            }
+        }
+        // (d) 熄灭位：几何同上（底边中点共轴）、瓦片换 170。
+        {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch,
+                                         quint8(1 | BR::RedstoneTorchStateOffFlag),
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            for (const Vtx &v : verts) {
+                if (v.u < 170.0f * tileW - 1e-6f || v.u > 171.0f * tileW + 1e-6f) {
+                    qInfo().noquote() << "  off-flag tile wrong: u" << v.u;
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t776 wall redstone torch texture alignment: all 5 attach forms pin "
+                             "mid-edge torch column onto shared torch axis (base/top midpoints); wall "
+                             "W-plane 0.8 full-tile + S-ribbon 0.2 sub-region [0.375,0.625] same texel "
+                             "density; bright end away from wall (4 dirs signed) / up on floor; off "
+                             "flag swaps tile 170 with same geometry";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
