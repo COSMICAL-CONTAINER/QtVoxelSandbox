@@ -584,6 +584,13 @@ public:
     //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
     //   发白）。非 Stalker / 未蓄力 / 越界 → 0（模型静态）。revision 在蓄力期每帧 bump（tick Mob 分支）让绑定刷新。
     Q_INVOKABLE float inflateAt(int i) const;
+    // t804 打火石点燃 Stalker（PlayerController 打火石右键的 mob 命中分支调）：置 flintIgnited=true →
+    //   aiStalker 无条件累加 fuseTimer 至 kFuseTime（~1.5s）引爆（原地短引信，不追踪 / 不熄火 / 猫不可断，
+    //   机制等价 MC 1.0 flint and steel 点燃苦力怕）。已点燃（幂等）/ 恰好蓄力中（保留既有进度，封顶
+    //   kFuseTime 内引爆）均返 true（消耗耐久 + 挥手，机制等价 MC 对点燃中的苦力怕再用打火石无新效果）。
+    //   越界 / 非 MobStalker / 已死 → false（no-op；caller 据它回退方块点火路径）。嘶嘶声由 aiStalker 的
+    //   fuseTimer 0→正 沿发 stalkerFuseLit（同近距蓄力链，不在此处重复发）。分层：只写自身实体数据。
+    Q_INVOKABLE bool igniteStalkerFlint(int idx);
     // t331 骸骨拉弓瞄准进度（0..1）：仅 mobType==MobBones 且 aimTimer>0（正在拉弓瞄准）时返
     //   clamp(aimTimer/kAimWindup,0,1)，供 QML delegate 据 it 驱动 MobModel 肩枢 Node 抬右臂 + MobBowGeometry 弦后拉
     //   （机制等价 MC 1.0 骷髅停步拉弓瞄准）。aiArcher 射程内 + 视线清 + 冷却到 → 累加 aimTimer；满 kAimWindup 才射
@@ -1043,6 +1050,13 @@ private:
         //     并 continue 跳过后续重力 / resting（尸体即除，不再模拟）。爆炸当帧生效。
         float fuseTimer = 0.0f;   // 蓄力计时（秒；>0 = 正在蓄力膨胀；仅 MobStalker 用）
         bool  exploded  = false;  // 本 tick 已引爆（仅 MobStalker 用；detonateStalker 置 true 后当帧移除）
+        // t804 打火石点燃态（仅 mobType==MobStalker 用；其余 mob 留默认 false 不触发）：true = 被打火石
+        //   右键点燃（igniteStalkerFlint 置位）→ aiStalker 无视追踪 / 距离 / 猫**无条件**累加 fuseTimer
+        //   至 kFuseTime 引爆（机制等价 MC 1.0 flint and steel 对苦力怕右键：原地 ~1.5s 引信爆炸，玩家
+        //   逃开 / 猫靠近 / 切观察者都不熄火——「不可逆」）。区别于近距追踪蓄力链（可 defuse / 猫断 /
+        //   !playerTargetable 清零）——本标志是独立短引信态，普通蓄力链不置位、两链不互改。槽复用
+        //   （spawnMobCore move 入槽）覆盖旧值。
+        bool  flintIgnited = false; // 打火石点燃（不可逆短引信；仅 MobStalker 用）
         // t331 骸骨拉弓瞄准计时（秒；仅 mobType==MobBones 用；其余 mob 留默认 0 不触发）：
         //   aiArcher 在射程内 + 视线清 + 冷却到时累加；满 kAimWindup → fireArrow + 清零（每发前先拉弓瞄准 ~0.5s，
         //   期间位移减速到停 = SLOWS + pauses to aim）。脱射程 / 视线断 / 冷却中 → 清零（中止拉弓）。drawAmountAt 据

@@ -2055,6 +2055,17 @@ Window {
     // 触发由 PlayerController 发 spawnItem 信号，下面 Connections 转发到 spawnItem()（单向事件流）。
     ItemEntityManager { id: itemEntities }
 
+    // t804 掉落物火焚烟粒子（itemBurned 语义事件 → 粒子呈现；单向事件流，PLAN §2 分层）：掉落物在
+    //   Fire 格烧尽（0.8s 点燃窗后焚毁）瞬间 ItemEntityManager 发 itemBurned(x,y,z) → 在焚毁点迸白烟
+    //   （burstDeathSmoke 同 mob 死亡烟模式；机制等价 MC 掉落物在火中烧尽的烟）。岩浆瞬毁（t343）不
+    //   发此信号（岩浆吞物无烟，两者语义刻意不同）。
+    Connections {
+        target: itemEntities
+        function onItemBurned(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstDeathSmoke(x, y, z)
+        }
+    }
+
     // t95 统一实体管理器（Entities 层）：为后续 Mob/AI 系统铺垫的统一实体基类（pos / 半径 / 可推动
     // 标志 / 渲染外观）。本轮持有测试生物（pushable=true，纯色方块），玩家走碰可推动；掉落物
     // （itemEntities）机制等价「pushable=false、被拾取」的实体变体（本轮不迁移、仅确立基类形态）。

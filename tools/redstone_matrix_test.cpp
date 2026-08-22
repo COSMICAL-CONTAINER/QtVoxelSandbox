@@ -20,6 +20,7 @@
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
 #include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
+#include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 
 namespace {
 
@@ -2182,6 +2183,171 @@ int main(int argc, char *argv[])
             w.setBlock(fx + dx4[i], ty + 1, fz + dz4[i], BR::Air);
         }
         tickN(w, 2);
+    }
+
+    // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火焚毁）──
+    //   用户报告（R19.12）：「打火石对着木头制品右键点燃 + 蔓延」「打火石对苦力怕右键引爆」「往火里丢
+    //   物品被烧掉（参考岩浆）」。三段断言（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 木墙蔓延烧毁：石台上 6 连木板墙 + 端点火格 → 驱动 tickFire（每 5 调 = 1 判定窗，0.5s/窗）600 窗
+    //       （300s，逐邻独立 5%/窗 → 每块期望 ~10s，链式 ~60-120s + 余量）→ 全部木板被吞（blockAt 全非
+    //       Planks）、火最终无燃料自熄（全 Air）；烧毁走 setBlock(Fire) 放置语义 → blockBroken(Planks)
+    //       恒 0（烧毁无掉落，区别于破块链）；
+    //   (b) Stalker 打火石引爆：远场监听（>> kDetectRange 不追踪）+ playerTargetable=false（旧 !targetable
+    //       门会清 fuseTimer 并跳过 aiStalker——本断言兼证 t804 的门豁免）→ igniteStalkerFlint 返 true；
+    //       猪（非 Stalker）同调用返 false（类型拒）；点燃后原地 ~1.5s 引爆（爆炸恰一次、引爆时刻 ∈
+    //       [1.4, 2.3]s、期间 inflateAt 曾 >0.2 = 蓄力膨胀可见）；
+    //   (c) item 入火焚毁计时：item 直落 Fire 格（t804 重力列扫 / resting 复探豁免 Fire——旧版 isSolid
+    //       非 air 实存语义使 item 骑在火格顶面永不进格 = 用户「往火里丢东西烧不掉」的复现点）→ ~30 tick
+    //       落地 + 0.8s（50 tick）点燃窗后焚毁（总 [65,120] tick）+ itemBurned 恰一次且坐标在火格列；
+    //       对照 Lava 格内生成瞬毁（t343 首 tick 即毁 ≤3，无点燃窗，两者语义刻意不同）；抢救窗：入火
+    //       55 tick（<窗）后拆火 → item 存活且其后 200 tick 不焚毁（出火熄火 fireBurn 清 0）。
+    //   确定性：item 物理无随机源（spawnItemAt 零初速直落，免 spawnItem 弹出方向的哈希漂移）；tickFire
+    //   散布 = hashVoxel(seed+窗口序号) 纯函数（300s 窗数远超期望值 3σ，非精确值断言）。
+    {
+        // rig 寻址：运行期扫描空区（同 P20 先例——nextSlot() 已被上方循环探针耗尽；「40 以上必空」不可
+        //   尽信）。需 24 格宽（(a) 木墙 8 + (c) 焚烧 5 + (b) Stalker+爆炸半径缓冲 11）× y∈[ty-1,ty+3] 全净空。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 23 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 23 && clear; ++dx)
+                    for (int dy = -1; dy <= 3 && clear; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const int ty = kRigY;
+        const bool rigOk = x0 >= 0;
+
+        // (a) 木墙点燃蔓延烧毁链：石台 dx 0..7，木板墙 dx 1..6（ty 层），火 dx 0（贴首块木板）。
+        //   blockBroken 计数只滤 Planks（火自熄 Fire→Air 也发 blockBroken 但 oldId==Fire，排除）。
+        int plankBreaks = 0;
+        QObject::connect(&w, &World::blockBroken, &w,
+                         [&](int, int, int, int oldId) { if (oldId == int(BR::Planks)) ++plankBreaks; });
+        for (int dx = 0; dx <= 7; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        for (int dx = 1; dx <= 6; ++dx) w.setBlock(x0 + dx, ty, z0, BR::Planks, 0);
+        w.setBlock(x0, ty, z0, BR::Fire, 0);
+        for (int win = 0; win < 600; ++win)
+            for (int k = 0; k < 5; ++k) w.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）
+        int planksLeft = 0, firesLeft = 0;
+        for (int dx = 0; dx <= 7; ++dx) {
+            const quint8 b = w.blockAt(x0 + dx, ty, z0);
+            if (b == BR::Planks) ++planksLeft;
+            if (b == BR::Fire) ++firesLeft;
+        }
+        const bool okA = planksLeft == 0 && firesLeft == 0 && plankBreaks == 0;
+        // 清 (a) 场（石台 + 残火/灰烬；正常应为全 Air，仍防御性清）。
+        for (int dx = 0; dx <= 7; ++dx) {
+            w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + dx, ty, z0, BR::Air, 0);
+        }
+        tickN(w, 2);
+
+        // (b) Stalker 打火石短引信引爆：Stalker dx 16 / 猪 dx 18（类型拒对照）各 1×1 石台；远场监听 +
+        //   playerTargetable=false（兼证 !targetable 门豁免——已点燃的引信不因切模式熄火）。
+        EntityManager ents;
+        w.setBlock(x0 + 16, ty - 1, z0, BR::Stone, 0);
+        w.setBlock(x0 + 18, ty - 1, z0, BR::Stone, 0);
+        const int stalker = ents.spawnMobTyped(x0 + 16, ty, z0, EntityManager::MobStalker,
+                                               QStringLiteral("#44aa44"), 20);
+        const int pig = ents.spawnMobTyped(x0 + 18, ty, z0, EntityManager::MobPig,
+                                           QStringLiteral("#ee9999"), 10);
+        int explosions = 0;
+        QObject::connect(&ents, &EntityManager::explosion, &ents,
+                         [&](int, int, int) { ++explosions; });
+        const bool ignOk = rigOk && stalker >= 0 && pig >= 0
+                           && ents.igniteStalkerFlint(stalker)   // Stalker → true（置不可逆短引信）
+                           && !ents.igniteStalkerFlint(pig);     // 猪 → false（仅 Stalker 可点）
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        int explodeTick = -1;
+        float inflateSeen = 0.0f;
+        for (int t = 1; t <= 300 && explodeTick < 0; ++t) {
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            if (!ents.aliveAt(stalker)) { explodeTick = t; break; }
+            const float inf = ents.inflateAt(stalker);
+            if (inf > inflateSeen) inflateSeen = inf;
+        }
+        const double fuseSec = explodeTick > 0 ? explodeTick * 0.016 : -1.0;
+        const bool okB = ignOk && explodeTick > 0 && fuseSec >= 1.4 && fuseSec <= 2.3
+                         && inflateSeen > 0.2f && explosions == 1;
+        // 清 (b) 场：爆炸球（半径 3）残坑 + 石台 —— 整盒覆写 Air（含 ty±若干，防残骸影响 (c)）。
+        for (int dx = 12; dx <= 21; ++dx)
+            for (int dy = -3; dy <= 4; ++dy)
+                w.setBlock(x0 + dx, ty + dy, z0, BR::Air, 0);
+        tickN(w, 2);
+
+        // (c) item 入火焚毁计时：火 dx 10 / 岩浆 dx 12（各石台支撑）；item 从 ty+3 直落（spawnItemAt 零初速）。
+        ItemEntityManager items;
+        int burnSignals = 0;
+        float burnX = -1.0f, burnY = -1.0f, burnZ = -1.0f;
+        QObject::connect(&items, &ItemEntityManager::itemBurned, &items,
+                         [&](qreal x, qreal y, qreal z) {
+                             ++burnSignals; burnX = float(x); burnY = float(y); burnZ = float(z);
+                         });
+        const int fx = x0 + 10, lx = x0 + 12;
+        for (int dx = 10; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        w.setBlock(fx, ty, z0, BR::Fire, 0);
+        // (c1) 火焚毁：~30 tick 落地 + 50 tick 点燃窗 → 总 [65,120]；itemBurned 恰一次 + 坐标在火格列。
+        items.spawnItemAt(QVector3D(float(fx) + 0.5f, float(ty + 3) + 0.5f, float(z0) + 0.5f),
+                          int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
+        const int itFire = items.count() - 1;
+        int burnTick = -1;
+        for (int t = 1; t <= 400; ++t) {
+            items.tick(0.016, &w);
+            if (!items.aliveAt(itFire)) { burnTick = t; break; }
+        }
+        // (c2) 岩浆瞬毁对照：直接生成于岩浆格内（t343 消费路径 = 中心格 == Lava 即毁；直落会先停在
+        //     岩浆面顶——岩浆非穿透语义，不在本任务范围）→ 首 tick 即毁（无点燃窗，与火焚语义对照）。
+        w.setBlock(lx, ty, z0, BR::Lava, 0);
+        items.spawnItemAt(QVector3D(float(lx) + 0.5f, float(ty) + 0.5f, float(z0) + 0.5f),
+                          int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
+        const int itLava = items.count() - 1;
+        int lavaTick = -1;
+        for (int t = 1; t <= 200; ++t) {
+            items.tick(0.016, &w);
+            if (!items.aliveAt(itLava)) { lavaTick = t; break; }
+        }
+        // (c3) 抢救窗：新 item 入火 55 tick（落地 ~31 + 燃 0.38s < 0.8s 窗）→ 拆火 → 存活且其后 200 tick 不毁。
+        items.spawnItemAt(QVector3D(float(fx) + 0.5f, float(ty + 3) + 0.5f, float(z0) + 0.5f),
+                          int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
+        const int itRescue = items.count() - 1;
+        for (int t = 0; t < 55; ++t) items.tick(0.016, &w);
+        w.setBlock(fx, ty, z0, BR::Air, 0);
+        bool rescued = items.aliveAt(itRescue);
+        for (int t = 0; t < 200 && rescued; ++t) {
+            items.tick(0.016, &w);
+            rescued = items.aliveAt(itRescue);
+        }
+        const bool okC = rigOk && burnTick >= 65 && burnTick <= 120
+                         && burnSignals == 1
+                         && int(burnX) == fx && int(burnY) == ty && int(burnZ) == z0
+                         && lavaTick >= 1 && lavaTick <= 3 && lavaTick < burnTick - 15
+                         && rescued;
+        // 清 (c) 场（石台 + 岩浆；岩浆不驱动 tickLavaFlow 不蔓延，直接清）。
+        w.setBlock(lx, ty, z0, BR::Air, 0);
+        for (int dx = 10; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
+        tickN(w, 2);
+
+        const bool ok = rigOk && okA && okB && okC;
+        if (!ok) {
+            qInfo().noquote() << "  [t804 diag] rigOk" << rigOk << "| okA" << okA
+                              << "planksLeft" << planksLeft << "firesLeft" << firesLeft
+                              << "plankBreaks" << plankBreaks
+                              << "| okB" << okB << "ignOk" << ignOk << "explodeTick" << explodeTick
+                              << "fuseSec" << QString::number(fuseSec, 'f', 2)
+                              << "inflateSeen" << inflateSeen << "explosions" << explosions
+                              << "| okC" << okC << "burnTick" << burnTick << "lavaTick" << lavaTick
+                              << "burnSignals" << burnSignals << "burnPos" << burnX << burnY << burnZ
+                              << "rescued" << rescued;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t804 flint ignition extended: fire next to 6-plank wall burns all planks "
+                             "away (no blockBroken-drop chain) and self-extinguishes; flint on stalker "
+                             "detonates in-place ~1.5s uncancellable fuse (pig rejected, !targetable gate "
+                             "exempt, exactly one explosion, inflate visible); item dropped into fire "
+                             "burns after ~0.8s window (itemBurned smoke once at fire cell) vs lava "
+                             "instant destroy, item rescued within window survives after fire removed";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

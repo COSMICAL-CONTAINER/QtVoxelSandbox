@@ -1455,18 +1455,22 @@ void World::tickFire()
         // 安全阀：活跃火格超 cap → 本窗不再新增（既有火照常走 (a) 熄灭收敛；防链式大火烧穿重建预算）。
         if (int(m_fireCells.size()) > kFireCellCap) continue;
 
-        // (b) 蔓延：5% 随机选一 6 邻格，为可燃方块 → 点燃（setBlock Fire → blockPlaced + QML delegate 挂载 +
-        //     noteFireWrite 入索引，下窗作为新火格继续判定 → 链式烧穿木屋）。可燃物本体被火替换（机制等价
-        //     MC 火吞可燃物；非「可燃物旁生火」——蔓延即燃烧，木块变火格）。
-        {
-            const quint32 hv = hashVoxel(m_seed ^ 0xF179, x, y, z) ^ (quint32(m_fireIntervalIndex) * 2654435761u);
-            if ((hv % 100u) < unsigned(kFireSpreadPct)) {
-                const auto &n = kNb[hv % 6u];
-                const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-                if (nx >= 0 && ny >= 0 && nz >= 0 && nx < W && ny < H && nz < D
-                    && BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz)))
-                    setBlock(nx, ny, nz, BlockRegistry::Fire);
-            }
+        // (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPct（每邻每窗 5%），邻格为可燃方块 → 点燃（setBlock
+        //     Fire → blockPlaced + QML delegate 挂载 + noteFireWrite 入索引，下窗作为新火格继续判定 → 链式
+        //     烧穿木屋）。可燃物本体被火替换（机制等价 MC 火吞可燃物；非「可燃物旁生火」——蔓延即燃烧，
+        //     木块变火格，无掉落：setBlock(Fire) 走放置语义，不发 blockBroken / 不走挖块掉落链）。
+        //     t804 修「点不然木头」体感：旧版每窗只随机挑 1/6 邻掷 5% → 单块可燃物被吞期望 ~60s（5%×1/6
+        //     /0.5s），打火石点了火眼看木墙久不烧 → 用户报「打火石点不然木制品」。改逐邻独立掷 → 每块
+        //     ~10s（5%/0.5s，与头注释既有「~10s/格，烧穿木屋的链式节奏」文档对齐）。逐邻掷须邻间独立：
+        //     哈希混入邻格坐标（x*3+nx 等 6 邻互异）防同一掷值复用于多邻。kFireCellCap 安全阀不变。
+        for (const auto &n : kNb) {
+            const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            if (!BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) continue;
+            const quint32 hv = hashVoxel(m_seed ^ 0xF179, x * 3 + nx, y * 3 + ny, z * 3 + nz)
+                               ^ (quint32(m_fireIntervalIndex) * 2654435761u);
+            if ((hv % 100u) < unsigned(kFireSpreadPct))
+                setBlock(nx, ny, nz, BlockRegistry::Fire);
         }
 
         // (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 概率上方生火（火焰柱向上舔；机制等价 MC 火向
