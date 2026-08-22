@@ -231,6 +231,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/Main.qml
         src/ui/BlockParticles.qml
         src/ui/EnchantRunes.qml # t649 附魔台符文粒子（书架→台 漂浮字符；Model+Timer 池，无 Particles3D 依赖）
+        src/ui/EnchantGlyphFlow.qml # t765 书架→附魔台文字字形粒子流（UI 开期间 glyph sprite 飞向悬浮书；Model+Timer 池）
         src/ui/TorchSmoke.qml
         src/ui/WeatherParticles.qml
         src/ui/AmbientParticles.qml
@@ -269,6 +270,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/sun.png
         textures/cloud.png                # t384 云层贴图（build_cloud.py 程序生成可无缝平铺的云密度图；昼白夜灰由 baseColor 乘灰阶实现）
         textures/stars.png                # t389 星空贴图（build_stars.py 程序生成透明底+白/蓝星点；铺到 SkyDome 内表面，夜间淡入）
+        textures/glyphs.png               # t765 符文字形图集（build_glyph_sprites.py 程序生成 4×4 原创字形；附魔台 UI 开时书架→悬浮书 glyph 粒子贴图）
         textures/moon_0.png               # t389 月相 8 帧贴图（build_moon.py 程序生成；满→盈凸→上弦→蛾眉→新月→残月→下弦→亏凸，WorldClock.moonPhase 选其一）
         textures/moon_1.png
         textures/moon_2.png
