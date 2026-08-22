@@ -1776,6 +1776,15 @@ public:
     //   （grass/stone/log/planks/.../chest 等）→ true。机制等价 MC「方块是否完整立方」。
     static bool isFullCube(quint8 blockId);
 
+    // 审查修 R1（Review_2026-08-22 残留）：火把 / 红石火把附着支撑判定（放置预检 + 玩家挖掘失撑掉落 +
+    //   爆炸 AfterBlast / 水下链式失撑掉落**三方共用单一权威**，防口径漂移 → 放得上却立刻掉）。合成判定
+    //   （与船放置「可碰撞 ∨ 实体」同款）：isCollidable（有碰撞 sub-AABB —— Spawner ShapeFull 恒真，故
+    //   可贴刷怪笼，机制等价 MC 1.0）∨ isFullCube。air/torch/cross 族两支皆假（仍不可贴）；门/活板门/
+    //   台阶等有碰撞 partial 块由此可贴（「可碰撞即有实体面」口径，文档化简化）。原 L12 修复只统一了
+    //   PlayerController 侧（匿名命名空间 helper），EntityManager 爆炸路径仍读 isSolid —— 火把贴刷怪笼
+    //   + 邻近爆炸会被误判失撑掉落；上提为公共谓词后三处同源。
+    static bool torchSupportBlock(quint8 blockId, quint8 state);
+
     // t334 per-block 光衰减量（lightOpacity；机制等价 MC 1.0 lightOpacity 0..15）：光穿入该格时损失的光级。
     //   flood-fill（World recomputeLightField / refloodBox）据本值算邻格衰减 = max(1, lightOpacity)，取代旧的
     //   isSolid 二值遮光（旧实现在所有 solid=false 的异形方块上恒「全透」，致合活版门 / 台阶也透光 —— 与形状语义矛盾）。

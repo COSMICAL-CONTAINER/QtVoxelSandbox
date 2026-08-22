@@ -1375,6 +1375,12 @@ float BlockRegistry::hardness(quint8 blockId)    { return def(blockId).hardness;
 int   BlockRegistry::toolType(quint8 blockId)    { return def(blockId).toolType; }
 int   BlockRegistry::minToolTier(quint8 blockId) { return def(blockId).minToolTier; }
 bool  BlockRegistry::requiresTool(quint8 blockId){ return def(blockId).requiresTool; } // t265 掉落是否需匹配工具
+
+// 审查修 R1：火把 / 红石火把附着支撑判定（三方共用单一权威，语义见 .h 注释）。
+bool BlockRegistry::torchSupportBlock(quint8 blockId, quint8 state)
+{
+    return isCollidable(blockId, state) || isFullCube(blockId);
+}
 int   BlockRegistry::dropId(quint8 blockId)      { return def(blockId).dropId; }
 int   BlockRegistry::dropCount(quint8 blockId)   { return def(blockId).dropCount; }
 int   BlockRegistry::maxStack(quint8 blockId)    { return def(blockId).maxStack; }

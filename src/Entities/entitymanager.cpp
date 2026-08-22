@@ -3708,7 +3708,7 @@ void EntityManager::dropUnsupportedTorchesAroundCell(int x, int y, int z, World 
         if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
         int ax, ay, az;
         BlockRegistry::torchAttachOffset(world->stateAt(tx, ty, tz), ax, ay, az);
-        if (BlockRegistry::isSolid(world->blockAt(tx + ax, ty + ay, tz + az))) continue; // 支撑幸存 → 保留
+        if (BlockRegistry::torchSupportBlock(world->blockAt(tx + ax, ty + ay, tz + az), world->stateAt(tx + ax, ty + ay, tz + az))) continue; // 支撑幸存 → 保留（审查修 R1：与放置预检同口径 isCollidable∨isFullCube——旧读 isSolid 会把火把贴刷怪笼（solid=false）误判失撑）
         world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
         emit explosionDroppedItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 脱落恒掉（不走概率门）
     }

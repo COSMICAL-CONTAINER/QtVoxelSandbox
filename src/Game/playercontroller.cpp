@@ -51,16 +51,9 @@ bool isWolfMeatItem(int itemId)
         || itemId == RecipeRegistry::CookedChickenId;
 }
 
-// 审查修 L12：火把 / 红石火把附着支撑判定（放置预检 + 失撑掉落**共用**，防两处口径漂移 → 放得上却
-//   立刻掉 / 掉落判据比放置宽）。旧版单读 isSolid（solid 标志）—— Spawner t760 改 solid=false（cutout
-//   铁笼不剔邻面 / 不遮光）后火把无法贴刷怪笼（MC 1.0 允许贴刷怪笼）。改合成判定（与船放置 t508 二轮
-//   的「可碰撞 ∨ 实体」同款）：isCollidable（有碰撞 sub-AABB —— Spawner ShapeFull 恒真）∨ isFullCube。
-//   air/torch/cross 族两支皆假（仍不可贴，语义不变）；门 / 活板门 / 台阶等有碰撞 partial 块由此可贴
-//   （本工程「可碰撞即有实体面」口径，简化文档化）。
-bool torchSupportBlock(quint8 id, quint8 state)
-{
-    return BlockRegistry::isCollidable(id, state) || BlockRegistry::isFullCube(id);
-}
+// 审查修 L12/R1：火把 / 红石火把附着支撑判定已上提为 BlockRegistry::torchSupportBlock 公共谓词
+//   （isCollidable ∨ isFullCube，语义详注见 blockregistry.h）—— 放置预检 / 玩家挖掘失撑 / EntityManager
+//   爆炸与水下链式失撑三方同源，防「放得上却立刻掉」口径漂移。本地 helper 删除（原 L12 版）。
 } // namespace
 
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
@@ -1451,7 +1444,7 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
         // 审查修 L12：与放置预检同口径（torchSupportBlock 合成判定）—— 火把贴刷怪笼（solid=false 但
         //   isCollidable）后，破**其它**邻块触发本扫时不再误判「附着格非 solid → 掉落」（否则贴笼火把
         //   放上后邻块一动就掉，放置与掉落口径漂移）。
-        if (torchSupportBlock(m_world->blockAt(sx, sy, sz), m_world->stateAt(sx, sy, sz))) continue; // 附着格仍支撑 → 火把保留
+        if (BlockRegistry::torchSupportBlock(m_world->blockAt(sx, sy, sz), m_world->stateAt(sx, sy, sz))) continue; // 附着格仍支撑 → 火把保留
         m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → 清伪光源 + 重建
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(tb),
                        std::max(1, BlockRegistry::dropCount(tb)));
@@ -4235,7 +4228,7 @@ void PlayerController::placeBlock()
     //   剪影不依赖邻居推断朝向，但支撑语义 / 失撑掉落（finishMiningAt 破支撑邻即掉）与火把一致）。
     if (m_selectedBlock == BlockRegistry::Torch || m_selectedBlock == BlockRegistry::RedstoneTorch) {
         const auto torchHostOk = [this](int ax, int ay, int az) {
-            return torchSupportBlock(m_world->blockAt(ax, ay, az), m_world->stateAt(ax, ay, az));
+            return BlockRegistry::torchSupportBlock(m_world->blockAt(ax, ay, az), m_world->stateAt(ax, ay, az));
         };
         const bool below = torchHostOk(tx, ty - 1, tz);
         const bool px = torchHostOk(tx + 1, ty, tz);
