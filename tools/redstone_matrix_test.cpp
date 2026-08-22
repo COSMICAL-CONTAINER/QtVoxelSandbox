@@ -15,6 +15,8 @@
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
 #include "hotbar.h"       // t763 附魔数值生效链探针（EPF 路由 / 耐久消耗概率 / 攻击伤 tooltip 源）
+#include "recipe.h"       // t802 全配方审计探针（match 两阶段匹配 + recipeAt 全表自匹配回归）
+#include "smelting.h"     // t802 云杉链熔炉补缺探针（SpruceLog→木炭 + 云杉原木/木板燃料）
 #include "playerstate.h"  // t755 死亡态硬锁探针（致死落库 0 / heal 死亡免疫 / respawn 复位链）
 #include "world.h"
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
@@ -2781,6 +2783,197 @@ int main(int argc, char *argv[])
                              "(jump apex ~1.25 < 1.5 -> still unjumpable, mob support/obstacle chain untouched), "
                              "selection + raycast boxes synced to 1.0 visual - fixes 'fence model pokes 0.5 block "
                              "above, clipping into neighbors' look";
+    }
+
+    // ── t802 全配方审计探针（纯 Game 层静态表查询 + 匹配器直调，无 World rig，不占 nextSlot 容量）──
+    //    用户报三缺 + 举一反三全表：① 云杉原木→云杉木板→木剑等木制品链（根因 = 木制品配方原料只认
+    //    Planks，云杉木板 SprucePlanks 是独立 id 且无平行配方 → 修法 = 匹配器两阶段「精确→板材族等价
+    //    回退」，机制等价 MC 1.0 任意木板通配，云杉专属配方 spruce_slab/door/boat 仍精确优先不被截胡）；
+    //    ② 打火石合成不了（t761 误写有序纵列，MC 1.0 原版无序 → 改 shapeless，横/竖/斜摆全通）；
+    //    ③ 燃烬棒不能分解成燃烬粉（MC 正道是合成分解 1 棒→2 粉 → 补 shapeless 配方，熔炉路径并存）。
+    //    附全表回归：recipeAt 遍历每条配方「自身 pattern 自匹配」指针相等断言（防被更早配方遮蔽 = 永不
+    //    可合，防未来匹配算法改动静默丢配方）+ 表长下限（防整段误删）；补缺新配方（箱子/梯子/砂岩×2/
+    //    石砖×3/发射器）随全表自匹配一并覆盖；圆石压力板 gridSize 勘误（t627 漏改）单测；箭改回 MC
+    //    正统原料（燧石+棒+羽毛）正反两测；云杉熔炉链（烧炭 + 燃料）单测。
+    {
+        bool ok = true;
+        const auto expectCraft = [&](const int *grid, int n, int wantOut, int wantCnt, const char *tag) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(grid, n);
+            if (!r || r->outputId != wantOut || r->outputCount != wantCnt) {
+                qInfo().noquote() << "  [t802 diag]" << tag << "-> got"
+                                  << (r ? QStringLiteral("out=%1 cnt=%2").arg(r->outputId).arg(r->outputCount)
+                                        : QStringLiteral("null"))
+                                  << "want out=" << wantOut << "cnt=" << wantCnt;
+                ok = false;
+            }
+        };
+        const auto expectNoMatch = [&](const int *grid, int n, const char *tag) {
+            if (RecipeRegistry::match(grid, n)) {
+                qInfo().noquote() << "  [t802 diag]" << tag << "-> unexpectedly matched out="
+                                  << RecipeRegistry::match(grid, n)->outputId;
+                ok = false;
+            }
+        };
+
+        // (1) 云杉木制品链：原木→木板→木棒/工作台/五件套工具（等价回退路径，全经 2×2 或 3×3）。
+        const int SP = int(BR::SprucePlanks);
+        {
+            const int g1[9] = { int(BR::SpruceLog), 0, 0, 0 };
+            expectCraft(g1, 2, int(BR::SprucePlanks), 4, "spruce_log->planks");
+            const int g2[9] = { SP, 0, SP, 0 };
+            expectCraft(g2, 2, RecipeRegistry::StickId, 4, "spruce_planks->sticks");
+            const int g3[9] = { SP, SP, SP, SP };
+            expectCraft(g3, 2, int(BR::CraftingTable), 1, "spruce_planks->crafting_table");
+            const int gPick[9] = { SP, SP, SP,  0, RecipeRegistry::StickId, 0,  0, RecipeRegistry::StickId, 0 };
+            expectCraft(gPick, 3, int(ToolRegistry::PickaxeWood), 1, "spruce_wood_pickaxe");
+            const int gAxe[9]  = { SP, SP, 0,  SP, RecipeRegistry::StickId, 0,  0, RecipeRegistry::StickId, 0 };
+            expectCraft(gAxe, 3, int(ToolRegistry::AxeWood), 1, "spruce_wood_axe");
+            const int gShv[9]  = { SP, 0, 0,  RecipeRegistry::StickId, 0, 0,  RecipeRegistry::StickId, 0, 0 };
+            expectCraft(gShv, 3, int(ToolRegistry::ShovelWood), 1, "spruce_wood_shovel");
+            const int gHoe[9]  = { SP, SP, 0,  0, RecipeRegistry::StickId, 0,  0, RecipeRegistry::StickId, 0 };
+            expectCraft(gHoe, 3, int(ToolRegistry::HoeWood), 1, "spruce_wood_hoe");
+            const int gSwd[9]  = { SP, 0, 0,  SP, 0, 0,  RecipeRegistry::StickId, 0, 0 };
+            expectCraft(gSwd, 3, int(ToolRegistry::SwordWood), 1, "spruce_wood_sword");
+            // 精确优先（等价回退不得截胡云杉专属产物）：3 云杉木板横排 → 云杉台阶（非橡木台阶）；
+            //   云杉木板纵列 → 云杉门（非橡木门）；橡木横排 → 橡木台阶（非云杉台阶）。
+            const int gSlabS[9] = { SP, SP, SP, 0, 0, 0, 0, 0, 0 };
+            expectCraft(gSlabS, 3, int(BR::SpruceSlab), 6, "3*spruce_planks->spruce_slab(exact-first)");
+            const int gDoorS[9] = { SP, 0, 0, SP, 0, 0, SP, 0, 0 };
+            expectCraft(gDoorS, 3, int(BR::SpruceDoor), 1, "spruce_col->spruce_door(exact-first)");
+            const int gSlabO[9] = { int(BR::Planks), int(BR::Planks), int(BR::Planks), 0, 0, 0, 0, 0, 0 };
+            expectCraft(gSlabO, 3, int(BR::WoodSlab), 6, "3*planks->wood_slab(oak-exact)");
+            // 等价回退广度抽样：云杉板+羊毛→红床 / 云杉板楼梯形→橡木楼梯 / 单云杉板→木按钮 /
+            //   云杉板+羊毛方块床形→白床（MC 任意木板语义的族外覆盖）。
+            const int gBed[9] = { SP, int(RecipeRegistry::WoolId), 0, 0 };
+            expectCraft(gBed, 2, int(BR::BedRed), 1, "spruce_planks+wool->bed_red");
+            const int gStair[9] = { SP, 0, 0, SP, SP, 0, SP, SP, SP };
+            expectCraft(gStair, 3, int(BR::WoodStairs), 4, "spruce_stairs-shape->wood_stairs");
+            const int gBtn[9] = { SP, 0, 0, 0 };
+            expectCraft(gBtn, 2, int(BR::WoodButton), 1, "single_spruce_plank->wood_button");
+            const int gBedW[9] = { int(BR::Wool), int(BR::Wool), int(BR::Wool), SP, SP, SP, 0, 0, 0 };
+            expectCraft(gBedW, 3, int(BR::BedWhite), 1, "wool+spruce_row->bed_white");
+        }
+
+        // (2) 打火石：MC 1.0 无序配方——铁锭+燧石 2×2 四种摆法（竖/倒竖/横/斜）+ 3×3 对角全通。
+        {
+            const int iron = RecipeRegistry::IronIngotId, flint = RecipeRegistry::FlintId;
+            const int gA[9] = { iron, 0, flint, 0 };
+            expectCraft(gA, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_vertical");
+            const int gB[9] = { flint, 0, iron, 0 };
+            expectCraft(gB, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_vertical_flipped");
+            const int gC[9] = { iron, flint, 0, 0 };
+            expectCraft(gC, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_horizontal");
+            const int gD[9] = { iron, 0, 0, flint };
+            expectCraft(gD, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_diagonal");
+            const int gE[9] = { iron, 0, 0, 0, 0, 0, 0, 0, flint };
+            expectCraft(gE, 3, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_3x3_corners");
+        }
+
+        // (3) 燃烬棒分解：1 棒 → 2 粉（合成正道，任意格；熔炉路径并存核）。
+        {
+            const int g1[9] = { RecipeRegistry::BlazeRodId, 0, 0, 0 };
+            expectCraft(g1, 2, RecipeRegistry::BlazePowderId, 2, "blaze_rod->2_powder_2x2");
+            const int g2[9] = { 0, 0, 0, 0, RecipeRegistry::BlazeRodId, 0, 0, 0, 0 };
+            expectCraft(g2, 3, RecipeRegistry::BlazePowderId, 2, "blaze_rod->2_powder_center");
+            if (SmeltingRegistry::smeltResult(RecipeRegistry::BlazeRodId) != RecipeRegistry::BlazePowderId) {
+                qInfo().noquote() << "  [t802 diag] blaze_rod furnace path lost";
+                ok = false;
+            }
+        }
+
+        // (4) 审计补缺新配方显式抽查（全量由下方 (6) 自匹配覆盖）：箱子 / 梯子 / 发射器。
+        {
+            const int P = int(BR::Planks);
+            const int gChest[9] = { P, P, P, P, 0, P, P, P, P };
+            expectCraft(gChest, 3, int(BR::Chest), 1, "8_planks_ring->chest");
+            const int gLadder[9] = { RecipeRegistry::StickId, 0, RecipeRegistry::StickId,
+                                     RecipeRegistry::StickId, RecipeRegistry::StickId, RecipeRegistry::StickId,
+                                     RecipeRegistry::StickId, 0, RecipeRegistry::StickId };
+            expectCraft(gLadder, 3, int(BR::Ladder), 3, "7_sticks_H->3_ladder");
+            const int gDisp[9] = { int(BR::Cobble), int(BR::Cobble), int(BR::Cobble),
+                                   int(BR::Cobble), int(ToolRegistry::Bow), int(BR::Cobble),
+                                   int(BR::Cobble), RecipeRegistry::RedstoneId, int(BR::Cobble) };
+            expectCraft(gDisp, 3, int(BR::Dispenser), 1, "7_cobble+bow+redstone->dispenser");
+            // 圆石压力板 gridSize 勘误：2 圆石横排在 2×2 背包栏即可合（t627 注释口径，代码曾漏改）。
+            const int gPlate[9] = { int(BR::Cobble), int(BR::Cobble), 0, 0 };
+            expectCraft(gPlate, 2, int(BR::CobblePressurePlate), 1, "2_cobble_row_2x2->cobble_plate");
+        }
+
+        // (5) 箭改回 MC 正统原料：燧石+棒+羽毛 → 4 箭；旧「铁锭+棒+线」不再匹配。
+        {
+            const int gNew[9] = { RecipeRegistry::FlintId, 0, 0,
+                                  RecipeRegistry::StickId, 0, 0,
+                                  RecipeRegistry::FeatherId, 0, 0 };
+            expectCraft(gNew, 3, RecipeRegistry::ArrowId, 4, "flint+stick+feather->4_arrows");
+            const int gOld[9] = { RecipeRegistry::IronIngotId, 0, 0,
+                                  RecipeRegistry::StickId, 0, 0,
+                                  RecipeRegistry::StringId, 0, 0 };
+            expectNoMatch(gOld, 3, "old_iron_arrow_column(retired)");
+        }
+
+        // (6) 全表回归：每条配方「自身 pattern 在自身 gridSize 上经 match() 必返回自身」（指针相等 =
+        //    未被更早配方遮蔽 + 匹配算法两轮后仍可达）+ 表长下限（t802 后 ≥ 140；防整段误删）。
+        const int recipeTotal = RecipeRegistry::recipeCount();
+        if (recipeTotal < 140) {
+            qInfo().noquote() << "  [t802 diag] recipe table shrank: count =" << recipeTotal;
+            ok = false;
+        }
+        for (int i = 0; i < recipeTotal; ++i) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::recipeAt(i);
+            if (!r) { qInfo().noquote() << "  [t802 diag] recipeAt(" << i << ") null"; ok = false; continue; }
+            int g[9] = { 0 };
+            const int n = r->gridSize;
+            if (r->shapeless) {
+                // 无序：pattern 位置无关（匹配只读多重集）→ 非空格依序填入前 k 格；非空格数 > n*n
+                //   = 该配方在自身 gridSize 实际不可合（真缺口，指针断言下方暴露）。
+                int k = 0;
+                for (int c = 0; c < 9; ++c)
+                    if (r->pattern[c] != 0) {
+                        if (k < n * n) g[k] = r->pattern[c];
+                        ++k;
+                    }
+                if (k > n * n) {
+                    qInfo().noquote() << "  [t802 diag] recipe" << i << r->name
+                                      << "shapeless ingredients" << k << ">" << n * n << "cells";
+                    ok = false;
+                    continue;
+                }
+            } else {
+                // 有序：按 2×2 左上子矩阵约定抽取（pattern 内容越出子矩阵 = 2×2 实际不可合 = 真缺口）。
+                for (int y = 0; y < n; ++y)
+                    for (int x = 0; x < n; ++x)
+                        g[y * n + x] = r->pattern[y * 3 + x];
+            }
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, n);
+            if (m != r) {
+                qInfo().noquote() << "  [t802 diag] recipe" << i << r->name << "self-match got"
+                                  << (m ? m->name : "null") << "(shadowed?)";
+                ok = false;
+            }
+        }
+
+        // (7) 云杉熔炉链补缺：云杉原木烧木炭 + 云杉原木/木板可当燃料（15s 同橡木）。
+        if (SmeltingRegistry::smeltResult(int(BR::SpruceLog)) != RecipeRegistry::CharcoalId
+            || SmeltingRegistry::fuelBurnSeconds(int(BR::SpruceLog)) != 15.f
+            || SmeltingRegistry::fuelBurnSeconds(int(BR::SprucePlanks)) != 15.f) {
+            qInfo().noquote() << "  [t802 diag] spruce furnace chain:"
+                              << "smelt=" << SmeltingRegistry::smeltResult(int(BR::SpruceLog))
+                              << "fuelLog=" << SmeltingRegistry::fuelBurnSeconds(int(BR::SpruceLog))
+                              << "fuelPlanks=" << SmeltingRegistry::fuelBurnSeconds(int(BR::SprucePlanks));
+            ok = false;
+        }
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t802 recipe audit: spruce planks family-equivalence fallback (log->planks->"
+                             "sticks/crafting-table/5 wood tools all craftable, exact-first keeps spruce "
+                             "slab/door outputs, oak unaffected), flint&steel restored to shapeless (all 4 "
+                             "2x2 arrangements + 3x3 diagonal), blaze rod craft-decomposition 1->2 powder "
+                             "(furnace path kept), 9 missing recipes added (chest/ladder/sandstone/cut-"
+                             "sandstone/stone-brick x3/dispenser/blaze-powder), cobble pressure-plate grid "
+                             "size fixed to 2x2, arrow back to MC flint+stick+feather, spruce log smelts to "
+                             "charcoal + spruce log/planks burn 15s, full-table self-match regression over"
+                          << recipeTotal << "recipes";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

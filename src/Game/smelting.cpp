@@ -27,6 +27,9 @@ constexpr SmeltEntry kSmelt[] = {
     { RecipeRegistry::GoldOreDropId,   RecipeRegistry::GoldIngotId,   "gold"     }, // t308 金原矿 → 金锭
     { int(BlockRegistry::Sand),        RecipeRegistry::GlassId,       "glass"    }, // 沙子 → 玻璃
     { int(BlockRegistry::Log),         RecipeRegistry::CharcoalId,    "charcoal" }, // 原木 → 木炭
+    // t802 云杉原木 → 木炭（云杉链补缺）：MC 1.0 任意原木均可烧炭；本表原只有橡木 Log 一条 → 云杉原木
+    //   放熔炉无反应，雪原群系玩家烧不出木炭（配套燃料表补 SpruceLog/SprucePlanks 两行，见 kFuel）。
+    { int(BlockRegistry::SpruceLog),   RecipeRegistry::CharcoalId,    "charcoal_spruce" }, // 云杉原木 → 木炭（t802 任意原木语义）
     // t494/t513 二轮复盘：生肉 → 熟肉配方（机制等价 MC 1.0 熔炉烤肉）。原 kSmelt 表只列矿石 / 沙 / 原木，
     //   缺生肉 → 熟肉链，导致生猪排 / 生牛肉放熔炉 smeltResult 返 0 → 烧不出熟肉（用户实测 t494/t513 报障根因）。
     //   熟肉此前仅由「mob 燃烧致死」掉落（t344 EntityManager 路径）获得；此处补齐「熔炉烤肉」正途。
@@ -43,6 +46,10 @@ constexpr FuelEntry kFuel[] = {
     { RecipeRegistry::CharcoalId, 80.f, "charcoal"       }, // 木炭 80s（与煤等价）
     { int(BlockRegistry::Log),           15.f, "log"     }, // 原木 15s（1.5 件）
     { int(BlockRegistry::Planks),        15.f, "planks"  }, // 木板 15s（1.5 件）
+    // t802 云杉链补缺：云杉原木 / 云杉木板燃料值与橡木对齐（MC 任意原木 / 木板等价燃烧；原表只有
+    //   橡木两条 → 云杉木既烧不出炭也当不了燃料，雪原群系熔炉链断）。
+    { int(BlockRegistry::SpruceLog),     15.f, "spruce_log"    }, // 云杉原木 15s（t802 同原木）
+    { int(BlockRegistry::SprucePlanks),  15.f, "spruce_planks" }, // 云杉木板 15s（t802 同木板）
     { int(BlockRegistry::CraftingTable), 15.f, "crafting_table" }, // 工作台 15s（同木板；t93）
     { RecipeRegistry::StickId,     5.f, "stick"          }, // 木棒 5s（0.5 件；t93）
     // t620 煤炭块燃料：800s（80 件；机制等价 MC 1.0 block of coal 8000 burn ticks = 400s×2 —— MC 1.0 烧 80 件
