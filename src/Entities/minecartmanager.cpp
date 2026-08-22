@@ -519,11 +519,20 @@ void MinecartManager::resolveCartCollisions(World *world)
             if (dist < 1e-4f) { nx = a.dirX; nz = a.dirZ; dist = 1.0f; }
             else { nx /= dist; nz /= dist; }
             if (dist >= kCartCollideSep) continue; // 未重叠
+            // 审查修 L3（交叉道口顶停堵线）：轨轴点积 axisDot（轨向恒四向单位向量 → ∈ {0,±1}；0 = 两车
+            //   所在轨列互相垂直 = 交叉道口 / 垂直对穿）。旧版 (a) 去穿插把半穿透量投影到各自轨轴 ——
+            //   道口场景 n ≈ 驶来车的轨轴 → aDot=±1 全额反推、bDot≈0 停车不动 → 驶向「停着车的道口」的
+            //   车在 ~1 格外被逐帧顶退、永久滞留堵死一条线路（与头注释「交叉轨道互不挤位」承诺相反；
+            //   同因 (b) 的冲量减速也把驶来车「吸」停在道口前）。修（= 报告建议的 axisDot² 缩放在四向
+            //   轨下的 0/1 离散实现）：轨轴垂直对整体跳过 (a)+(b) → 道口两车互穿通过、各走各轨；同轨
+            //   追尾 / 对撞（|axisDot|=1 → 轴平方=1）行为不变。
+            const float axisDot = a.dirX * b.dirX + a.dirZ * b.dirZ;
+            if (std::fabs(axisDot) <= 0.5f) continue; // 交叉道口：不挤位不传冲量（见上）
             // (b) 动量传递（仅互相逼近 closing>0 时）：各车速度矢量（dir×speed）沿 n 投影 → 接近速度；
             //   冲量 = closing × kCartMomentumTransfer，沿 n 加给 B、减给 A，再投影回**各自轨轴**
-            //   （dot(n,dir) ∈ {0, ±0.707, ±1}）：同轨追尾 dot=±1 全额传递（后车减速、前车沿 n 被推走 ——
-            //   负速=沿 -dir 倒行，与车头朝向无关地「被撞开」）；交叉轨道 dot≈±0.707 吃部分冲量；完全垂直
-            //   dot=0 不吃（车沿原轨穿过道口，不飞出轨道）。对撞同式自然得「双双减速 / 轻微反弹」。
+            //   （同轨对 dot(n,dir) 恒 ±1 全额传递：后车减速、前车沿 n 被推走 —— 负速=沿 -dir 倒行，
+            //   与车头朝向无关地「被撞开」；交叉轨道对已被上方 L3 守卫跳过，不进此段）。对撞同式自然
+            //   得「双双减速 / 轻微反弹」。
             const float aDot = a.dirX * nx + a.dirZ * nz;
             const float bDot = b.dirX * nx + b.dirZ * nz;
             const float closing = a.speed * aDot - b.speed * bDot; // >0 = A 沿 n 逼近 B
@@ -536,7 +545,8 @@ void MinecartManager::resolveCartCollisions(World *world)
                 changed = true;
             }
             // (a) 位置去穿插（穿透 >5cm 才推，防贴轨停驻两车的 FP 微抖抖动）：各沿自身轨轴推开半穿透量
-            //   （-n 在 A 轨轴上的投影定 A 的位移符号与大小；投影 0 = 交叉轨道不位移，只交换冲量）。
+            //   （-n 在 A 轨轴上的投影定 A 的位移符号与大小；交叉轨道对已在上方 L3 守卫跳过 —— 本段只
+            //   处理同轨对，投影恒全额，不再依赖「投影 0 不位移」兜底）。
             const float pen = kCartCollideSep - dist;
             if (pen > 0.05f) {
                 // 复审 #3 (a)：位移过 clampShift 守卫（越界无轨 → 钳当前格边界内；离轨车不动）。

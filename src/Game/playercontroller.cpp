@@ -6121,6 +6121,13 @@ void PlayerController::step(qreal dt)
             m_autoCrouch = false;
             setMoveState(Walk);
         }
+        // 审查修 L5：骑船分支早 return 不经下方矿车全局 tick（tickPushedCarts 末尾的
+        //   updateDetectorRailOccupancy 是探测轨占用的帧级收口）→ 船上挖掉压轨矿车时探测轨保持通电
+        //   直到下船。return 前补调占用重扫（全车种重扫 + 离开沿清位；O(车数×列扫)，帧级开销可承受；
+        //   不推进空车物理 —— 骑船期车停驻语义不变）。dismount / 撞毁两 return 不用补：下一帧已脱离
+        //   骑船态走正常路径收口。
+        if (m_minecartManager)
+            m_minecartManager->updateDetectorRailOccupancy(m_world);
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
         return;
@@ -6152,8 +6159,14 @@ void PlayerController::step(qreal dt)
         m_minecartManager->resolveCartCollisions(m_world);
         const int riddenIdx = m_minecartManager->ridingIndex();
         const QVector3D finalCartPos = (riddenIdx >= 0) ? m_minecartManager->posAt(riddenIdx) : cartPos;
-        // 玩家随矿车位移（脚底 = 矿车中心下移 0.3 —— 坐进车斗；眼位 / 相机自动跟随 position()）。
-        m_pos = QVector3D(finalCartPos.x(), finalCartPos.y() - 0.3f, finalCartPos.z());
+        // 玩家随矿车位移（脚底 = 矿车中心下移 kCartSeatDrop —— 坐进车斗；眼位 / 相机自动跟随 position()）。
+        //   审查修 L4：旧偏移 -0.3 是 t680 旧 Y 基准（轨格**顶** +0.30）时代的标定残留，t734 把车中心改到
+        //   真轨面基准 kCartRideH=0.225（轨格**底** +1/16 板 + 车底板 0.15 + 微隙）后未同步 → 脚底 = 中心
+        //   -0.3 比车底板面（中心 -0.15，Main.qml cartHost 底板 piece）低 0.15 → 脚底穿车底板沉入轨格。
+        //   改与车底板面挂钩（脚底 ≈ 板面 -0.15）。kCartRideH / 底板偏移是 MinecartManager private 跨类
+        //   不可读 → 本层同值命名常量（同 kPlayerEyeUseSpeed 先例；改须与 Main.qml 底板 piece 同步）。
+        constexpr float kCartSeatDrop = 0.15f; // 脚底相对矿车中心下移 = 车底板面偏移（坐车斗内，脚踩板面）
+        m_pos = QVector3D(finalCartPos.x(), finalCartPos.y() - kCartSeatDrop, finalCartPos.z());
         m_vel = QVector3D(0, 0, 0);
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
