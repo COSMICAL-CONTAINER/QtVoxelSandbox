@@ -682,6 +682,14 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
         || lightOldId == BlockRegistry::Water || lightOldId == BlockRegistry::Lava)
         fluidActExpand(x, y, z);
     notePowerWrite(x, y, z, lightOldId, id); // t656：红石电力脏标记（机关 state 静默写——压力板压下 / 探测轨有车标记经本入口；红石族外 no-op 零开销）
+    // 审查修 L6：补齐 checkRailOnEdit 调用 —— checkRailOnEdit 头注释承诺「五个写入口末尾全部调它」，
+    //   旧版本入口只调 notePowerWrite 漏了它（注释不实，后续维护者会踩坑）。流体写（Water/Air/凝固族 /
+    //   作物升阶等）不直接触及轨族：连接重算对非轨格单次 blockAt 早退（13 邻探 + 失撑查 ≈ 十几次读/写，
+    //   流体批量热路径可承受）；实际可达效果 = 「水漫入轨下支撑格 / 蒸发清 Air 后正上方铁轨失撑」的
+    //   潜在边角（水非 isTopFlushSupport → 轨坍落），补调后与其余四入口同口径。批量路径
+    //   （m_batchFluid）中 checkRailOnEdit 末尾的条件 emit+clearAllDirty 只在真有轨变化时触发 =
+    //   多一次中间重建（同 destroySphereSilent 逐格调用的先例），批量终态不受破坏。
+    checkRailOnEdit(x, y, z, lightOldId, id);
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏

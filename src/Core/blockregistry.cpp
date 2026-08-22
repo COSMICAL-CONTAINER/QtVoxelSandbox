@@ -1620,21 +1620,25 @@ bool BlockRegistry::isFluidLike(quint8 blockId)
 }
 
 // t334 per-block 光衰减量（见头注释）。flood-fill 据本值算邻格衰减 = max(1, lightOpacity)，取代旧 isSolid 二值遮光。
-//   全实体方块（isSolid）满遮光 → 15（保旧语义）；活版门合=15 / 开=0；台阶=7（半遮）；其余 → 0（全透）。
+//   全实体方块（isSolid）满遮光 → 15（保旧语义）；活版门合=7 / 开=0（审查修 L7 两族统一半遮折衷，见
+//   switch 内注释）；台阶=7（半遮）；其余 → 0（全透）。
 quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
 {
     if (isSolid(blockId)) return 15;                  // 全实体方块：满遮光（保旧 isSolid 光照语义）
     if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
     switch (blockId) {
-    case WoodTrapdoor: // 合=满遮（修「合活版门透光」）/ 开=全透
-        return (state & 1) ? 0 : 15;
-    case IronTrapdoor: // t742 铁活板门恒全透（区别 WoodTrapdoor 合=15）：贴图栅格孔真透明（cutout 透视），
-                       //   合态若仍满遮 15 → 天光种子柱被本格截断、本格 flood 光压到 0，而孔后邻面（如下方
-                       //   方块顶面）恰采本格光 → 「孔后放方块全黑、只有竖直缝看天光」（t742 修）。恒 0 后
-                       //   孔后邻面采到本格天光 → 孔洞通透可见后方面块贴图/天光（机制等价 MC 非不透明方块
-                       //   lightOpacity 0）；恒值亦免去红石开合 state 翻转的透光差（WoodTrapdoor 特有的
-                       //   微滞后在此不存在）。
-        return 0;
+    case WoodTrapdoor: // 审查修 L7：合 = 半遮 7 / 开 = 全透（与 IronTrapdoor 统一口径）。旧「合=15 满遮」
+                       //   与铁活板门恒 0 分裂。cutout 呈现取舍如实说明：活板门贴图带栅格孔（cutout 真透明）
+                       //   —— 满遮 15 会截断天光种子柱（t742 实测铁门「孔后放方块全黑」）、恒 0 则关着的门
+                       //   完全不挡天光（与 MC 活板门挡光不符）→ 折衷取 7（同台阶族占空比口径）：关态下方
+                       //   变暗不黑、孔后透微光；开态板面竖直 → 全透。
+        return (state & 1) ? 0 : 7;
+    case IronTrapdoor: // 审查修 L7：同 WoodTrapdoor 统一 —— 合 = 半遮 7 / 开 = 全透（t742 旧恒 0 是对
+                       //   「合=15 孔后全黑」的过正矫正：关着的铁门不挡任何天光，与木质合=15 语义分裂）。
+                       //   cutout 栅格孔真透明 → 不能满遮 15（t742 修保留）；取半遮 7 折衷：关态孔后可见
+                       //   微光 / 下方变暗。恒值改随 state 后开合翻转有透光差（同 WoodTrapdoor 既有行为，
+                       //   编辑路径会触发该格光照重 flood）。
+        return (state & 1) ? 0 : 7;
     case WoodSlab:     return 7;                      // 半遮光（占空比 0.5 → floor(0.5×15)=7 → 衰减 7，约半减）
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）
