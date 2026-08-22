@@ -2672,6 +2672,50 @@ int main(int argc, char *argv[])
                              "the collapse - fixes 'sand sits stable on torch' user report";
     }
 
+    // ── t800 物品栏归类清理探针（纯 Game 层 Hotbar 实例，无 World rig）：① 材料段调色板不再列羊毛物品
+    //    （0x20E）与玻璃物品（0x204）——用户「羊毛 item 多此一举（方块栏已有羊毛方块）」「玻璃应放方块那边」；
+    //    ② 方块段调色板含玻璃 Glass=54（移入）且白羊毛 + 15 色变体全在列（建筑取色不受影响）；③ 两物品生存链
+    //    完好 —— nameForBlock 仍返中文名（杀羊掉羊毛 / 破玻璃掉玻璃的 tooltip / 图鉴名源）；④ 玻璃方块图标可
+    //    解析（iconSourceForBlock(54) 非空 —— Glass 无 qrc 手绘图，pack 关态靠 isPackDerivedIconFamily 程序
+    //    图集重渲 flat 2D，回退链断链 = 空图标 = FAIL 面）。注：④ 在本测试二进制只验「URL 解析链通」——测试
+    //    target 无 qrc 资源（atlas 加载失败会打一条预期内 qWarning），瓦片像素内容留给实机人工目视；测试进程
+    //    落盘的空图不毒害实机缓存（App 侧缓存命中只认进程内 map，恒重渲覆写，见 blockAtlasIconSource L9/L10）。
+    {
+        Hotbar hb;
+        const QVariantList mats = hb.creativeMaterials();
+        bool matsClean = true;
+        for (const QVariant &m : mats)
+            matsClean = matsClean && m.toInt() != int(RecipeRegistry::WoolId)
+                                 && m.toInt() != int(RecipeRegistry::GlassId);
+        const QVariantList blocks = hb.creativeBlocks();
+        bool hasGlass = false, hasWhiteWool = false;
+        int woolVariants = 0;
+        for (const QVariant &b : blocks) {
+            hasGlass     = hasGlass || b.toInt() == int(BR::Glass);
+            hasWhiteWool = hasWhiteWool || b.toInt() == int(BR::Wool);
+            if (b.toInt() >= int(BR::WoolOrange) && b.toInt() <= int(BR::WoolBlack))
+                ++woolVariants;
+        }
+        const bool ok = matsClean && hasGlass && hasWhiteWool && woolVariants == 15
+                && hb.nameForBlock(int(RecipeRegistry::WoolId)) == QString::fromUtf8("羊毛")
+                && hb.nameForBlock(int(RecipeRegistry::GlassId)) == QString::fromUtf8("玻璃")
+                && !hb.iconSourceForBlock(int(BR::Glass)).isEmpty();
+        if (!ok) {
+            qInfo().noquote() << "  [t800 diag] matsClean" << matsClean << "| hasGlass" << hasGlass
+                              << "| hasWhiteWool" << hasWhiteWool << "| woolVariants" << woolVariants
+                              << "| woolName" << hb.nameForBlock(int(RecipeRegistry::WoolId))
+                              << "| glassName" << hb.nameForBlock(int(RecipeRegistry::GlassId))
+                              << "| glassIcon empty?" << hb.iconSourceForBlock(int(BR::Glass)).isEmpty();
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t800 inventory categorization: wool item (0x20E) and glass item (0x204) "
+                             "removed from creative materials palette, glass block (54) present in blocks "
+                             "palette alongside white wool + 15 color variants, both item names still "
+                             "resolve for survival drop chains, glass block icon resolves via flat-2D "
+                             "runtime re-render";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

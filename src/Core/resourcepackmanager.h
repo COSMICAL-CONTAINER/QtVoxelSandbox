@@ -258,7 +258,7 @@ public:
     //   仙人掌柱 / 附魔台矮盒 / 祭坛框 / 铁砧特型；cross / 贴地薄片 / 火把走 flat 2D 保留 alpha）。
     //   requirePackContribution=true：pack 未实际覆盖该块可见面瓦片（合成 vs 程序图集逐像素比对）→ 返空串，
     //   调用方回落手绘程序图标（Hotbar::iconSourceForBlock 回退链）。
-    //   产物缓存 voxelsandbox_rp_icon3_<id>_<p|a>_r<rev>.png（文件名带 requirePackContribution 模式位
+    //   产物缓存 voxelsandbox_rp_icon4_<id>_<p|a>_r<rev>.png（文件名带 requirePackContribution 模式位
     //   （p = pack 贡献 / a = 任意）+ apply() revision → 两模式不互取缓存、pack 切换后 QML Image 按 URL
     //   变化重载；审查修 L9/L10：渲染+落盘在 stateMutex 外，锁内只取快照防串行阻塞）。红线 §9：渲染产物
     //   是运行期派生缓存（pack PNG + 程序图集 → 图标），**不进 qrc/VCS**

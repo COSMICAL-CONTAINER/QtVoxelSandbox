@@ -2476,6 +2476,13 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
     case BlockRegistry::DetectorRail:
         flatSpec(d.topTile);
         return spec;
+    case BlockRegistry::Glass:
+        // t800 玻璃 item 图标改 2D 平贴图（用户「玻璃的 item 贴图是 2D 的，不是 3D 的」）：对齐 MC 玻璃物品
+        //   图标 = 平面 glass 瓦片语义，不走 ShapeFull 默认 dimetric 立方投影。pack 态采包 glass.png（瓦片 68
+        //   已由 tileFilenameMap 映射）/ 程序态采 default_glass 平贴，两态同规格（保留瓦片 alpha 边缘）。
+        //   玻璃进创造调色板改走方块段（creativeBlocks，hotbar.cpp t800 注），本规格随之被方块 id 54 命中。
+        flatSpec(d.topTile);
+        return spec;
     case BlockRegistry::WheatCrop:
         flatSpec(36); // wheat_stage_7 成熟阶段瓦片（tileFilenameMap 36 同源）
         return spec;
@@ -2760,7 +2767,7 @@ bool tileDiffersFromProgram(const QImage &composite, const QImage &program, int 
 
 // t745 统一贴图原则：方块 item 图标运行期渲染（任意 pack 通用）。详见 resourcepackmanager.h 声明处注释。
 //   审查修 L9/L10（2026-08-22）：
-//   · L9 缓存键与落盘文件名带 requirePackContribution 模式位（键 = blockId*2+mode；文件名 icon3_<id>_<p|a>_r<rev>）
+//   · L9 缓存键与落盘文件名带 requirePackContribution 模式位（键 = blockId*2+mode；文件名 icon4_<id>_<p|a>_r<rev>）
 //     —— 旧版两模式共用 blockIconFiles[blockId] 与同一文件名，pack 贡献模式（程序观感返空回退手绘）与任意
 //     模式（无条件渲）渲染入口不同，layer-1 落盘失败后 layer-2 成功 / 未来新调用方换模式取同一键 = 缓存
 //     投毒边角。文件族 icon2 → icon3（换名即换代，旧 mode-less 缓存自然失效成孤儿）。
@@ -2832,10 +2839,12 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     if (dir.isEmpty())
         return {};
     QDir().mkpath(dir);
-    // t764/t745 文件族 icon → icon2 → icon3：画法版本或缓存键策略变更须换缓存名，否则老缓存在
+    // t764/t745 文件族 icon → icon2 → icon3 → icon4：画法版本或缓存键策略变更须换缓存名，否则老缓存在
     //   pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
+    //   t800 换 icon4：玻璃（54）画法 dimetric 立方 → flat 2D 平贴（此前中键拾取玻璃方块 / pack 态已落盘的
+    //   icon3_54_* 是旧立方投影，不换名则永久复用旧观感）。
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_icon3_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
+            QStringLiteral("voxelsandbox_rp_icon4_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
     if (!img.save(out, "PNG"))
         return {};
     {
