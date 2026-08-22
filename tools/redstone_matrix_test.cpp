@@ -1663,6 +1663,140 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── P17 t773 TNT 点燃路径补全探针（粉链两接法 + 升降沿语义 + 探测轨有车端到端）──
+    //   用户报告（R19.12）：「通电红石粉也点不着 TNT」「探测轨有车信号也应触发 TNT」。t772 P15 已实证
+    //   直供源（红石块 / 火把 / 拉杆）× TNT 双放置顺序全过（用户症状 = 陈旧 exe）；本组探针补齐**粉链**
+    //   与**探测轨**两条剩余路径的回归锁：
+    //   (a) 同层粉链（lever - 粉 - TNT）：升沿恰一次点燃 + 坐标命中；断电降沿复算触达（World 层清块归
+    //       呈现层信号消费端）但**不得再触发**；断电后再上电（场内无 TNT）不触发；重放 TNT（粉仍通电）
+    //       → 立即点燃（器件后放路径，等价用户重新摆 TNT）；
+    //   (b) 粉在 TNT 上方爬坡斜接（lever - 地面粉 - TNT 顶粉）：顶粉经爬墙斜角（水平邻 y+1）从地面粉
+    //       得电（距源 2 跳 → 电力 14），TNT 由正交上邻通电粉点燃（isReceivingPower 含 +Y 向读）；
+    //       拆源降沿顶粉同步断电、无再触发；
+    //   (c) 探测轨有车端到端（Rail-Detector-Rail-Rail 直轨 + 空车直落探测格 + TNT 贴轨南邻）：车压轨
+    //       bit4 置位（setWaterSilent → notePowerWrite，非主矩阵的「直摆激活态」捷径）→ 邻接 TNT 点燃；
+    //       驻轨稳态幂等零写 → 不重复点燃；推离降沿 bit4 清 → 无再触发。
+    //   ⚠ 消费端镜像（探针成败关键）：World 层 TNT 分支无升沿守卫（每次电力活动 pass 触达且通电即 emit
+    //   ——粉 state 写入沿的回插复算会再触达），防双触发的收口在呈现层消费端（playercontroller
+    //   firePowerTnt：isTnt 守卫 + 同步 clearBlockSilent——2810 行分支注释「点燃后清 Air 由信号消费端做」）。
+    //   孤测若无消费端清块，「恰一次」断言必假 FAIL（双 emit 落在同一 TNT 块上；真实链路里第一次 emit
+    //   已同步清块 → 第二次 emit 前 addReceiver 读到 Air 根本不发生）。本组探针统一挂 scoped 消费端
+    //   镜像连接（isTnt 守卫 + clearBlockSilent，firePowerTnt 的 World 侧动作同款），断言语义 = 真实链路。
+    {
+        // 消费端镜像连接（(a)(b)(c) 共用；探针末统一断开——全局计数连接不动）。
+        const QMetaObject::Connection tntCons =
+            QObject::connect(&w, &World::powerTntTriggered, &w, [&](int x, int y, int z) {
+                if (BR::isTnt(w.blockAt(x, y, z))) w.clearBlockSilent(x, y, z);
+            });
+
+        // (a) 同层粉链 + 升降沿语义。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0,     kRigY, z0, BR::Lever, 1);         // 源（扳开）
+            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);  // 粉（与 TNT 同层相邻）
+            w.setBlock(x0 + 2, kRigY, z0, BR::TntBlock, 0);      // TNT 最后放（编辑锚点入脏驱动首算）
+            const int t0 = tntFired;
+            tickN(w, 6);
+            bool ok = (tntFired - t0 == 1)                                                     // 升沿恰一次
+                      && lastTntX == x0 + 2 && lastTntY == kRigY && lastTntZ == z0              // 坐标命中
+                      && w.blockAt(x0 + 2, kRigY, z0) == BR::Air                               // 消费端已清块
+                      && (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) == 15;      // 粉确为活跃 15
+            w.setBlock(x0, kRigY, z0, BR::Lever, 0);   // 断源 → 降沿
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 1)                                                     // 降沿不重复点燃
+                  && (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) == 0;           // 粉断电收敛
+            w.setBlock(x0, kRigY, z0, BR::Lever, 1);   // 再上电（场内无 TNT——原块已点燃清走）
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 1);                                                    // 无器件 → 不触发
+            w.setBlock(x0 + 2, kRigY, z0, BR::TntBlock, 0); // 重放 TNT（用户重新摆；粉仍通电 15）
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 2)                                                     // 器件后放 → 立即点燃
+                  && lastTntX == x0 + 2 && lastTntY == kRigY && lastTntZ == z0
+                  && w.blockAt(x0 + 2, kRigY, z0) == BR::Air;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t773 same-level dust trail -> TNT: rising edge fires exactly once, "
+                                 "falling edge no re-fire, re-power w/o TNT silent, replaced TNT fires "
+                                 "immediately";
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (b) 粉在 TNT 上方爬坡斜接（t769 教训：先净空工作 box——本列地形可能达 y≥42，顶粉格被挤占即假 FAIL）。
+        {
+            const auto [x0, z0] = nextSlot();
+            for (int i = 0; i <= 2; ++i)
+                for (int dy = 0; dy <= 1; ++dy)
+                    if (w.blockAt(x0 + i, kRigY + dy, z0) != BR::Air)
+                        w.setBlock(x0 + i, kRigY + dy, z0, BR::Air);
+            w.setBlock(x0,     kRigY,     z0, BR::Lever, 1);         // 源
+            w.setBlock(x0 + 1, kRigY,     z0, BR::RedstoneDust, 0);  // 地面粉（源直供 15）
+            w.setBlock(x0 + 2, kRigY,     z0, BR::TntBlock, 0);      // TNT
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::RedstoneDust, 0);  // TNT 顶粉（与地面粉爬墙斜角互连）
+            const int t0 = tntFired;
+            tickN(w, 6);
+            bool ok = (tntFired - t0 == 1)
+                      && lastTntX == x0 + 2 && lastTntY == kRigY && lastTntZ == z0
+                      && (w.stateAt(x0 + 2, kRigY + 1, z0) & BR::RedstoneDustPowerMask) == 14; // 距源 2 跳
+            w.setBlock(x0, kRigY, z0, BR::Air);       // 拆源 → 全线断电降沿
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 1)
+                  && (w.stateAt(x0 + 2, kRigY + 1, z0) & BR::RedstoneDustPowerMask) == 0       // 顶粉同步断电
+                  && (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) == 0;         // 地面粉同步断电
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t773 dust climbing onto TNT top (wall-diagonal hop): top dust power 14, "
+                                 "TNT fires once; source removed -> trail dead, no re-fire";
+            w.setBlock(x0,     kRigY,     z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY,     z0, BR::Air);
+            w.setBlock(x0 + 2, kRigY,     z0, BR::Air);
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::Air);
+            tickN(w, 2);
+        }
+        // (c) 探测轨有车 → TNT 端到端（真实矿车压轨置位链，非直摆激活态）。
+        {
+            const auto [x0, z0] = nextSlot();
+            const int detX = x0 + 1;
+            w.setBlock(x0,     kRigY, z0,     BR::Rail, 0);
+            w.setBlock(detX,   kRigY, z0,     BR::DetectorRail, 0);
+            w.setBlock(x0 + 2, kRigY, z0,     BR::Rail, 0);
+            w.setBlock(x0 + 3, kRigY, z0,     BR::Rail, 0);
+            w.setBlock(detX,   kRigY, z0 + 1, BR::TntBlock, 0);   // TNT 贴探测轨南邻
+            const auto detOn = [&]() { return (w.stateAt(detX, kRigY, z0) & BR::DetectorRailStateOnFlag) != 0; };
+            MinecartManager carts;
+            carts.spawnCart(detX, kRigY, z0, &w); // 空车直落探测轨（静止，无人骑）
+            const int t0 = tntFired;
+            for (int t = 0; t < 8; ++t) { carts.tickPushedCarts(0.016f, &w); w.tickRedstone(); }
+            bool ok = detOn()                                                        // bit4 置位（经矿车占用链）
+                      && (tntFired - t0 == 1)                                        // 升沿恰一次点燃
+                      && lastTntX == detX && lastTntY == kRigY && lastTntZ == z0 + 1; // 坐标命中
+            for (int t = 0; t < 20; ++t) { carts.tickPushedCarts(0.016f, &w); w.tickRedstone(); }
+            ok = ok && detOn() && (tntFired - t0 == 1);                              // 驻轨稳态幂等零写不重复点燃
+            QVector3D player = carts.posAt(0);                                       // 玩家追推 +X 离开（同 P12 跑法）
+            bool left = false;
+            for (int t = 0; t < 600 && !left; ++t) {
+                carts.pushEmptyCart(&w, player, 1.0f, 0.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                w.tickRedstone();
+                player = carts.posAt(0);
+                if (int(std::floor(player.x())) >= x0 + 2) left = true;
+            }
+            for (int t = 0; t < 12; ++t) { carts.tickPushedCarts(0.016f, &w); w.tickRedstone(); }
+            ok = ok && left && !detOn() && (tntFired - t0 == 1);                     // 离开沿断电降沿无再触发
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t773 detector rail with real cart -> adjacent TNT fires exactly once "
+                                 "(bit4 via occupancy chain); parked steady no re-fire; cart leaves -> off, "
+                                 "no re-fire";
+            carts.clearAll();
+            for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+            w.setBlock(detX, kRigY, z0 + 1, BR::Air);
+            tickN(w, 2);
+        }
+
+        QObject::disconnect(tntCons); // 消费端镜像仅限本组探针（全局计数连接保留）
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
