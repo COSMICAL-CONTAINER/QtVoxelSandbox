@@ -384,7 +384,9 @@ public:
         //   lavaOnly 的透明分流）；地形段跳过 Glass（避免与玻璃段重复绘制 + 被当不透明地形）。glassOnly 段面剔除：
         //   邻实体剔（避免与实体面共面 z-fight）、邻 Glass 剔（玻璃-玻璃共面不重复绘制）、邻空气画（半透面，透视关键）。
         //   lightOpacity=0（玻璃透光——机制等价 MC 玻璃 lightOpacity 0；solid=false 已致全透，玻璃与其它 solid=false
-        //   方块同）。进创造调色板经玻璃**物品**（0x204，creativeMaterials，MaterialIcon drawGlass 图标），非方块段。
+        //   方块同）。进创造调色板走玻璃**方块**本 id（creativeBlocks，t800 从材料段物品 0x204 改道 —— item 图标
+        //   2D 平贴图 flatSpec，对齐 MC 玻璃物品图标语义）；玻璃物品 0x204 保留生存链（沙子冶炼产物 / 破玻璃掉落 /
+        //   红石灯配方原料），不再列材料段调色板。
         Glass          = 54, // 玻璃：沙子冶炼产物方块；透明整立方（solid=false + glassOnly 段半透渲染）。
         // ── t407 胡萝卜/马铃薯作物（crop）：机制等价 MC 1.0 carrot/potato 作物。**cross 形广告牌方块**（与 WheatCrop
         //   同走 PartialBlockGeometry 的 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。

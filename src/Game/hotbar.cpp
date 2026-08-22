@@ -189,6 +189,11 @@ const char *iconFileForBlock(quint8 id)
 //   git 历史旧图更稳）；渲染失败兜底 = 退显当前 qrc 图（pack 风格，可接受降级）。
 //   t746 叶（Leaves/SpruceLeaves）入列：qrc icon_leaves/icon_spruce_leaves 是 t714 --from-pack 烘焙的
 //   pack 风格立方图 → pack 关必须程序图集重渲（否则 pack 关显 pack 风格，违反总纲）。
+// t800 Glass 入列（语义外延，非 FROM_PACK 家族）：玻璃方块**无 qrc 手绘图**（iconFileForBlock 返 nullptr）→
+//   若不入本族，pack 关 / pack 未覆盖玻璃瓦片时 iconSourceForBlock 回退链走到末层空串 = 玻璃条目无图标。
+//   入族后走 blockAtlasIconSource(id,false) 从程序图集运行期重渲 **flat 2D 平贴图**（用户「玻璃 item 贴图是
+//   2D 的，不是 3D」；对齐 MC 玻璃物品图标=平面贴图语义），pack 开且覆盖瓦片时则由回退链 ① 出包风格平贴图
+//   —— 两态同规格（flatSpec 瓦片 68）。渲染恒成功，无「退显 qrc」兜底需求。
 bool isPackDerivedIconFamily(quint8 id)
 {
     switch (id) {
@@ -226,6 +231,7 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::StonePressurePlate: // t644 plate
     case BlockRegistry::IronPressurePlate:  // t644 plate
     case BlockRegistry::GoldPressurePlate:  // t644 plate
+    case BlockRegistry::Glass:           // t800 flat 2D（见上注 —— 无 qrc 手绘图，程序图集重渲是唯一原生路径）
         return true;
     default:
         return false;
@@ -466,7 +472,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::CharcoalId),    // 木炭
         int(RecipeRegistry::IronOreDropId), // 铁原矿
         int(RecipeRegistry::IronIngotId),   // 铁锭
-        int(RecipeRegistry::GlassId),       // 玻璃
+        // t800 玻璃移出材料段调色板（用户「玻璃应该放在方块那边而不是材料这边」）：条目改走方块段 Glass=54
+        //   （creativeBlocks 冰族后），item 图标同步改 2D 平贴图（atlasIconSpecForBlock flatSpec）。玻璃物品
+        //   0x204 保留全部生存链（沙子熔炉冶炼产物 / 破玻璃方块掉落 / 红石灯配方原料 / 右键放置），仅不再列
+        //   创造材料 tab —— 方块段可直接取用，材料段再列同物即冗余。
         int(RecipeRegistry::BucketEmptyId), // t174 铁桶（空）
         int(RecipeRegistry::WaterBucketId), // t174 装水铁桶
         int(RecipeRegistry::LavaBucketId),  // t351 装岩浆铁桶（创造调色板补全：平行装水铁桶；右键放岩浆源）
@@ -492,7 +501,9 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RawPorkchopId),   // 生猪排：杀猪掉落（带骨肉排，浅粉红）
         int(RecipeRegistry::RawBeefId),       // 生牛肉：杀牛掉落（深红肉块）
         int(RecipeRegistry::LeatherId),       // 皮革：杀牛掉落（棕黄兽皮）
-        int(RecipeRegistry::WoolId),          // 羊毛：杀羊掉落（白色绒毛团）
+        // t800 羊毛移出材料段调色板（用户「羊毛方块就放在方块里面，材料里面的羊毛物品多此一举」）：羊毛物品
+        //   0x20E 保留全部生存链（杀羊 / 剪羊毛掉落 + bed_red 简化配方原料），仅不再列创造材料 tab —— 建筑取色
+        //   走方块段 16 色 wool（creativeBlocks 早已在列，t788 染料链的染色基底也是白羊毛**方块**）。
         int(RecipeRegistry::DiamondId),       // t279 钻石：钻石矿挖掘掉落（需铁镐；机制等价 MC 1.0 钻石）
         // t299 敌对 mob 死亡掉落物（杀骸骨 / 蹒跚者 / 蜘蛛产出；机制等价 MC 1.0 敌对生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由敌对 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
@@ -753,6 +764,12 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Ice),                                        // 冰（雪原水面冻结；半透；冰上滑行）
              int(BlockRegistry::PackIce),                                    // 浮冰（更滑变种；半透；可放置）
              int(BlockRegistry::BlueIce),                                    // 蓝冰（最滑变种；半透；可放置）
+             // t800 玻璃从材料段物品（0x204）改经方块段进调色板（用户「玻璃应该放在方块那边」）：与冰族同列
+             //   （同为透明整立方半透渲染族）。item 图标改 2D 平贴图（atlasIconSpecForBlock flatSpec 用玻璃瓦片
+             //   68 —— pack 态采包 glass.png / 程序态采 default_glass 平贴，对齐 MC 玻璃物品图标=平面贴图语义，
+             //   非 3D 立方投影）。玻璃物品 0x204 仍作生存链中转（冶炼产物 / 破玻璃掉落 / 红石灯原料），不在
+             //   材料 tab 重复列出。
+             int(BlockRegistry::Glass),                                      // 玻璃（沙子冶炼产物；透明整立方；可放置）
              // t466 云杉木制品链（机制等价 MC 1.0 spruce 木制品；名称 / 贴图原创自绘 §9a）。复用既有木制品机制，
              //   仅换 id + 贴图（深色木纹 spruce_planks 区别橡木 planks）。云杉原木→4 云杉木板；云杉木板→台阶/栅栏/门。
              int(BlockRegistry::SprucePlanks),                               // 云杉木板（深色木纹整立方；配方：云杉原木→4）
