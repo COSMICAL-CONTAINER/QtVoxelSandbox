@@ -263,7 +263,7 @@ Item {
                     // t731 整臂皮肤盒（袖+手合并为 piece:2 整臂盒：arm 区覆盖整臂含手；中心 -0.35 长 0.7，
                     //   同 Main.qml playerModel 双臂；护甲袖 (0.30,0.52,0.30) 包上臂不变）。
                     Model {
-                        geometry: PlayerSkinBox { piece: 2 }
+                        geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
@@ -283,7 +283,7 @@ Item {
                     // t731 整臂皮肤盒（袖+手合并为 piece:2 整臂盒：arm 区覆盖整臂含手；中心 -0.35 长 0.7，
                     //   同 Main.qml playerModel 双臂；护甲袖 (0.30,0.52,0.30) 包上臂不变）。
                     Model {
-                        geometry: PlayerSkinBox { piece: 2 }
+                        geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
@@ -310,7 +310,7 @@ Item {
                 // 大腿段（裤色 #3a3a5a；髋下 0..0.3，中心 -0.15、scale.y=0.3）
                 // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区上半行（同 Main.qml）。
                 Model {
-                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
@@ -328,7 +328,7 @@ Item {
                     eulerRotation: Qt.vector3d(root.crouchKnee, 0, 0)
                     // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（鞋在最底）。
                     Model {
-                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
@@ -356,7 +356,7 @@ Item {
                                            + root.crouchThigh + root.jumpThigh, 0, 0)
                 // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区上半行（同 Main.qml）。
                 Model {
-                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
@@ -373,7 +373,7 @@ Item {
                     eulerRotation: Qt.vector3d(root.crouchKnee, 0, 0)
                     // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（鞋在最底）。
                     Model {
-                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }

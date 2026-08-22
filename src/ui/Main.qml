@@ -2016,6 +2016,17 @@ Window {
         return "qrc:/textures/entity_skin_" + (skinName === "alex" ? "alex" : "default") + ".png"
     }
 
+    // 复审 #8（2026-08-22）：pack 皮肤 slim（3px 臂/腿）布局判定（PlayerSkinBox.slim 联动）——slim
+    //   布局臂/腿盒区仅 3px 宽，经典 4px 采样采到布局外透明列 → 臂/腿镂空条纹，切 3px 盒区修复。pack
+    //   命中才探测（Core 侧臂区尾 alpha 探测，playerSkinSource 顺带建缓存）；miss / 未启用 → false
+    //   （classic 4px——程序皮肤按 4px 绘制）。函数内读 active + skinName → 绑定依赖齐全（同
+    //   skinFinalUrl 模式：pack 开关 / 换肤即时刷新）。
+    function skinIsSlim() {
+        if (resourcePack.active && resourcePack.playerSkinSource(skinName).length > 0)
+            return resourcePack.playerSkinSlim(skinName)
+        return false
+    }
+
     // Hotbar 视图模型（9 槽选择态 + 槽位内容）。选中方块 id 经绑定驱动玩家右键放置（t05）。
     Hotbar { id: hotbarVM }
     // t173/t179 箱子内容存储 VM（按方块世界坐标键控的 27 槽；ChestUI 读写 + onBlockBroken(Chest) 清孤儿）。
@@ -4499,7 +4510,7 @@ Window {
                     //   span(-0.5..0) ∪ 旧手 span(-0.5..-0.7) → 中心 -0.35、长 0.7；护甲袖 (0.30,0.52,0.30)
                     //   包上臂不变（t718 盔甲层照常叠显/遮挡）。
                     Model {
-                        geometry: PlayerSkinBox { piece: 2 }
+                        geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
@@ -4539,7 +4550,7 @@ Window {
                     }
                     // t731 右臂整臂皮肤盒（同左臂注：袖+手合并为 piece:2 整臂盒，中心 -0.35 长 0.7）。
                     Model {
-                        geometry: PlayerSkinBox { piece: 2 }
+                        geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
@@ -4820,7 +4831,7 @@ Window {
                 // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区 (0,16) 上半行（裤）——
                 //   MC 整腿单盒 vs 本工程分大腿/小腿绕膝弯折 → 段各采半区（几何类 subV 头注释）；位置/尺度沿用。
                 Model {
-                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
@@ -4854,7 +4865,7 @@ Window {
                     // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（裤脚+鞋在最底
                     //   2 行，恰落小腿段底 = 鞋位正确）。护腿/靴壳（t718）照常叠显遮挡，未动。
                     Model {
-                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
@@ -4910,7 +4921,7 @@ Window {
                 // t731 大腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0 subV1:0.5} = 腿区 (0,16) 上半行（裤）——
                 //   MC 整腿单盒 vs 本工程分大腿/小腿绕膝弯折 → 段各采半区（几何类 subV 头注释）；位置/尺度沿用。
                 Model {
-                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5 }
+                    geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
@@ -4939,7 +4950,7 @@ Window {
                     // t731 小腿段皮肤盒：PlayerSkinBox{piece:3 subV0:0.5 subV1:1} = 腿区下半行（裤脚+鞋在最底
                     //   2 行，恰落小腿段底 = 鞋位正确）。护腿/靴壳（t718）照常叠显遮挡，未动。
                     Model {
-                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1 }
+                        geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }

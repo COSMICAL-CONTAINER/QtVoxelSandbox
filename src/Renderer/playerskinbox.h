@@ -43,6 +43,11 @@ class PlayerSkinBox : public QQuick3DGeometry
     // 盒高采样分数区间 [subV0,subV1]（腿分段用；0/1 = 整段）。含 h 的面 v 行区间按它裁。
     Q_PROPERTY(qreal subV0 READ subV0 WRITE setSubV0 NOTIFY subV0Changed)
     Q_PROPERTY(qreal subV1 READ subV1 WRITE setSubV1 NOTIFY subV1Changed)
+    // slim（3px 臂/腿）布局皮肤（复审 #8）：true 时 Arm/Leg 盒区切 3px（Arm (40,16) 3×12×3、Leg
+    //   (0,16) 3×12×3——经典 4px 采样会采到 slim 布局外 u52..56 透明列 → 臂/腿镂空条纹）；Head/Body
+    //   不变。判型在 Core ResourcePackManager::playerSkinSlim（臂区尾 alpha 探测），QML 绑定联动；
+    //   自家 qrc 程序皮肤按 4px 绘制 → 恒 false（默认）。setter 触发 rebuild 重选盒区。
+    Q_PROPERTY(bool slim READ slim WRITE setSlim NOTIFY slimChanged)
 
 public:
     explicit PlayerSkinBox(QQuick3DObject *parent = nullptr);
@@ -56,10 +61,14 @@ public:
     qreal subV1() const { return m_subV1; }
     void setSubV1(qreal v);
 
+    bool slim() const { return m_slim; }
+    void setSlim(bool s);
+
 signals:
     void pieceChanged();
     void subV0Changed();
     void subV1Changed();
+    void slimChanged();
 
 private:
     void rebuild(); // 按 m_piece 选 MC box-UV 盒区 + m_subV0/1 裁侧/前后面的 v 行区间，建 ±0.5 单位盒。
@@ -67,6 +76,7 @@ private:
     int m_piece = 0;       // 默认 Head（合法非空，防未设 piece 时空几何）
     qreal m_subV0 = 0.0;   // 盒高采样起点分数（0 = 盒顶）
     qreal m_subV1 = 1.0;   // 盒高采样终点分数（1 = 盒底）
+    bool m_slim = false;   // slim（3px 臂/腿）布局（默认 classic 4px；见 Q_PROPERTY 注释）
 };
 
 #endif // PLAYERSKINBOX_H

@@ -58,12 +58,21 @@ constexpr int kMcFace[6] = { 1, 0, 2, 3, 5, 4 };
 
 // t731 皮肤部位盒区表（index = piece；MC textureOffset + size，见 playerskinbox.h 注释出处——与
 //   build_entities_pack.py draw_skin 的 paint_box 调用同源）。行：{ u0, v0, w, h, d }。
+//   复审 #8：slim（3px 臂/腿）布局第三/四行切 3px（Arm (40,16) 3×12×3、Leg (0,16) 3×12×3——slim
+//   皮肤臂/腿盒区仅占 u40..52 / u0..12，4px 采样在 u52..56 采到布局外透明列 → 镂空条纹）。Head/Body
+//   两布局同区不变。
 struct BoxTex { float u0, v0, w, h, d; };
-constexpr std::array<BoxTex, 4> kPieces = {{
+constexpr std::array<BoxTex, 4> kPiecesClassic = {{
     {  0.0f,  0.0f, 8.0f,  8.0f, 8.0f }, // 0 Head（脸在 Front (8,8)-(16,16)）
     { 16.0f, 16.0f, 8.0f, 12.0f, 4.0f }, // 1 Body
     { 40.0f, 16.0f, 4.0f, 12.0f, 4.0f }, // 2 Arm（左右共用）
     {  0.0f, 16.0f, 4.0f, 12.0f, 4.0f }, // 3 Leg（左右共用）
+}};
+constexpr std::array<BoxTex, 4> kPiecesSlim = {{
+    {  0.0f,  0.0f, 8.0f,  8.0f, 8.0f }, // 0 Head（同 classic）
+    { 16.0f, 16.0f, 8.0f, 12.0f, 4.0f }, // 1 Body（同 classic）
+    { 40.0f, 16.0f, 3.0f, 12.0f, 3.0f }, // 2 Arm slim 3px（左右共用）
+    {  0.0f, 16.0f, 3.0f, 12.0f, 3.0f }, // 3 Leg slim 3px（左右共用）
 }};
 
 // 某面 MC box-UV 像素矩形 → Qt UV 子区（armorlayerbox.cpp faceQtUV + subV 行区间裁切）。
@@ -126,9 +135,19 @@ void PlayerSkinBox::setSubV1(qreal v)
     rebuild();
 }
 
+// 复审 #8：slim 布局切换（Arm/Leg 盒区 4px → 3px；见 kPiecesSlim 注释）。幂等（同值 no-op）。
+void PlayerSkinBox::setSlim(bool s)
+{
+    if (s == m_slim) return;
+    m_slim = s;
+    emit slimChanged();
+    rebuild();
+}
+
 void PlayerSkinBox::rebuild()
 {
-    const BoxTex &t = kPieces[size_t(m_piece)];
+    // 复审 #8：盒区表按 slim 布局选（Head/Body 两表同区，选择无差）。
+    const BoxTex &t = (m_slim ? kPiecesSlim : kPiecesClassic)[size_t(m_piece)];
     // 采样分数区间（防退化：sub1 <= sub0 时抬 sub1 到 sub0+ε，保面片非零高）。
     float sub0 = float(m_subV0);
     float sub1 = float(m_subV1);

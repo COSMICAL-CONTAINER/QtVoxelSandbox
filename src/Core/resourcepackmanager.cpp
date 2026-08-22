@@ -87,6 +87,10 @@ struct BuiltState {
     // t731 pack 皮肤 64×64→64×32 裁切缓存：kind（"skin_default"/"skin_alex"）→落盘的裁上半图 file://
     //   路径（voxelsandbox_rp_skin_<kind>_r<revision>.png）。apply() 重建时清空（pack 切换/重解析 → 重裁）。
     QHash<QString, QString> skinPackFiles;
+    // 复审 #8（2026-08-22）pack 皮肤 slim（3px 臂/腿）布局探测缓存：kind → 臂区尾 alpha 探测结果
+    //   （probeSlimSkinLayout）。playerSkinSource 裁切时写入；playerSkinSlim 读（QML PlayerSkinBox.slim
+    //   联动）。apply() 重建时清空（pack 切换 → 重探测）。
+    QHash<QString, bool> skinSlimFlags;
     // t588/t613 铜物品（铜工具 0x118..0x11C / 铜锭 0x21D / 铜护甲 0x308..0x30B）染色图标缓存：pack 无
     //   copper_*（1.8 等老包）→ 用铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，
     //   后续命中直接返。apply() 重建时清空（pack 切换 / 重解析 → 重染）。
@@ -1663,6 +1667,7 @@ void ensureBuiltLocked()
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
     s.skinPackFiles.clear(); // t731 reset pack 皮肤裁切缓存（pack 切换 / 重解析 → 重裁）
+    s.skinSlimFlags.clear(); // 复审 #8 reset slim 布局探测缓存（pack 切换 / 重解析 → 重探测）
     s.sheepWoolFaceFile.clear(); // t749 reset 羊合成贴图缓存（pack 切换 / 重解析 → 重合成）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
@@ -2977,6 +2982,46 @@ bool ResourcePackManager::setPlayerSkin(const QString &name)
     return true;
 }
 
+// 复审 #8（2026-08-22）：slim（3px 臂/腿）皮肤布局探测。经典（4px）右臂盒区条带 u40..56（d=w=4）；
+//   slim 仅 u40..52（d=w=3）→ 探测区 u52..54 × v20..32（经典 = 臂背面左半，规范皮肤必不透明；slim =
+//   布局外空白）全列 alpha==0 → 判 slim。HD（base 整数倍）按 w/64 缩放坐标；64×64 老式布局上半 32 行
+//   与 64×32 base 同布局 → 探测坐标通用（裁切前后同结果）。保守方向：把该区当画布画了内容的 slim 皮肤
+//   误判 classic（退回 4px 采样 = 修复前行为，仅边缘条纹）；classic 皮肤该区全透明的极端自定义会误判
+//   slim（3px 采样丢 1px 边缘列，无镂空）——两向误判都不劣于修复前。
+static bool probeSlimSkinLayout(const QImage &tex)
+{
+    const int w = tex.width();
+    if (w < 64) return false; // 异常小图 → 保守 classic
+    const qreal sc = qreal(w) / 64.0;
+    const int x0 = int(52 * sc), x1 = int(54 * sc);
+    const int y0 = int(20 * sc), y1 = int(32 * sc);
+    for (int y = y0; y < qMin(y1, tex.height()); ++y)
+        for (int x = x0; x < qMin(x1, w); ++x)
+            if (qAlpha(tex.pixel(x, y)) != 0) return false; // 任一实色像素 → classic
+    return true; // 探测区全透明 → slim
+}
+
+// 复审 #8：kind → pack 皮肤原图绝对路径（entityKindMap 两级探测：子目录 → 扁平；miss 返空）。
+//   playerSkinSource / playerSkinSlim 共用（后者在 slim 缓存未建时自行解析探测）。
+static QString resolveSkinPackSrc(const QString &entityDir, const QString &kind)
+{
+    QString relPath;
+    for (const EntityTexEntry &e : entityKindMap()) {
+        if (kind == QLatin1String(e.kind)) {
+            relPath = QString::fromLatin1(e.packPath);
+            break;
+        }
+    }
+    if (relPath.isEmpty()) return {};
+    const QDir dir(entityDir);
+    const QString sub = dir.absoluteFilePath(relPath);
+    if (QFile::exists(sub)) return sub;
+    const QFileInfo fi(relPath);
+    const QString flat = dir.absoluteFilePath(fi.fileName());
+    if (QFile::exists(flat)) return flat;
+    return {};
+}
+
 // t731 玩家皮肤 pack 源（含 64×64 老式布局 → 64×32 裁切重排）：skin（"default"/"alex"）→ entityKindMap
 //   的 skin_default（steve.png）/ skin_alex（alex.png）两级探测（子目录 → 扁平，同 entitySource）。
 //   命中后按贴图实际宽高判型：h == w/2（64×32 族）→ 原样返回 file:///；更高（64×64 老式布局——上半 32
@@ -2993,27 +3038,9 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
         return {};
     const QString kind = (skin.compare(QLatin1String("alex"), Qt::CaseInsensitive) == 0)
             ? QStringLiteral("skin_alex") : QStringLiteral("skin_default");
-    // entityKindMap 探测（两级：子目录 → 扁平）拿 pack 原图绝对路径。
-    QString relPath;
-    for (const EntityTexEntry &e : entityKindMap()) {
-        if (kind == QLatin1String(e.kind)) {
-            relPath = QString::fromLatin1(e.packPath);
-            break;
-        }
-    }
-    if (relPath.isEmpty())
-        return {};
-    const QDir entityDir(s.entityDir);
-    QString src;
-    const QString sub = entityDir.absoluteFilePath(relPath);
-    if (QFile::exists(sub)) {
-        src = sub;
-    } else {
-        const QFileInfo fi(relPath);
-        const QString flat = entityDir.absoluteFilePath(fi.fileName());
-        if (QFile::exists(flat))
-            src = flat;
-    }
+    // entityKindMap 探测（两级：子目录 → 扁平；复审 #8 收口 resolveSkinPackSrc，与 playerSkinSlim 共用）
+    //   拿 pack 原图绝对路径。
+    const QString src = resolveSkinPackSrc(s.entityDir, kind);
     if (src.isEmpty())
         return {};
     // 命中缓存（pack 未重解析期间稳定）→ 直接返。
@@ -3025,6 +3052,9 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
     QImage tex(src);
     if (tex.isNull())
         return {}; // 解码失败 → 回退程序皮肤（降级）
+    // 复审 #8：slim（3px 臂/腿）布局探测并缓存（playerSkinSlim 读；PlayerSkinBox.slim 切 3px 臂/腿
+    //   盒区，防 4px 采样采到 slim 布局外透明列的镂空条纹）。
+    s.skinSlimFlags[kind] = probeSlimSkinLayout(tex);
     const int w = tex.width(), h = tex.height();
     if (w <= 0 || h < w / 2)
         return {}; // 异常尺寸（非 2:1/1:1 族）→ 回退（降级）
@@ -3046,6 +3076,31 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
         return {}; // 落盘失败 → 回退（降级）
     s.skinPackFiles.insert(kind, out); // stateMutex 已持锁，安全
     return QStringLiteral("file:///") + out;
+}
+
+// 复审 #8 玩家皮肤 slim（3px 臂/腿）布局查询（呈现层 PlayerSkinBox.slim 联动）：pack 命中的皮肤按
+//   臂区尾 alpha 探测（probeSlimSkinLayout）。playerSkinSource 已探测 → 缓存 O(1) 命中；缓存未建
+//   （QML slim 绑定先于贴图 source 求值 / 该皮肤未被裁切取用）→ 自行解析 pack 原图（resolveSkinPackSrc）
+//   探测一次并缓存。pack 未启用 / miss / 解码失败 → false（classic 4px —— 自家 qrc 程序皮肤按 4px
+//   绘制恒 classic）。QML 侧调用函数内读 active / skinName → 绑定依赖齐全（pack 开关 / 换肤即时
+//   刷新，同 skinFinalUrl 模式）。
+bool ResourcePackManager::playerSkinSlim(const QString &skin) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty()) return false;
+    const QString kind = (skin.compare(QLatin1String("alex"), Qt::CaseInsensitive) == 0)
+            ? QStringLiteral("skin_alex") : QStringLiteral("skin_default");
+    const auto it = s.skinSlimFlags.constFind(kind);
+    if (it != s.skinSlimFlags.constEnd()) return it.value();
+    const QString src = resolveSkinPackSrc(s.entityDir, kind);
+    if (src.isEmpty()) return false;
+    QImage tex(src);
+    if (tex.isNull()) return false;
+    const bool slim = probeSlimSkinLayout(tex);
+    s.skinSlimFlags.insert(kind, slim);
+    return slim;
 }
 
 QString ResourcePackManager::mobTextureSource(int mobType) const
