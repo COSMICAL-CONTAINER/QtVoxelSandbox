@@ -26,11 +26,14 @@ bool isCropBlock(int blockId)
 
 // t642 越障跳判据「前方脚位是墙」：isSolid（非 air 实存）且**非作物格**。作物可穿越 → 不应触发跳跃
 //   （机制等价 MC 怪在耕地/作物上不跳，只是慢走）。水保持原行为（旧 isSolid 恒 true → 照旧跳，非本任务范围）。
+//   t803 火焰同作物排除：Fire 可穿入（mobAabbHitsSolid 已豁免）→ 不应触发现有火格上「越障跳」（否则
+//   mob 被火格弹跳翻过 / 跳过火格，绕开点燃判据 = 用户「碰火不燃」的另一路径）。
 bool isJumpObstacle(World *world, int x, int y, int z)
 {
     if (!world || y < 0) return false;
     const quint8 bid = world->blockAt(x, y, z);
     if (bid == BlockRegistry::Air) return false;
+    if (bid == BlockRegistry::Fire) return false; // t803 火焰非障碍（ShapeNone 无碰撞，同作物族可穿入不跳）
     return !isCropBlock(bid);
 }
 
@@ -121,6 +124,14 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
                 //   「视穿透」族：World::isSolid 语义=非 air → 作物/草丛类恒当墙，须显式排除）。含掉落沙 /
                 //   击退 / 流水推动等所有 mobAabbHitsSolid 消费路径（沙落作物格穿透到下方耕地，机制等价 MC）。
                 if (isCropBlock(bid)) continue;
+                // t803 火焰视穿透（同作物 / 水「视穿透」族）：Fire 是 ShapeNone 无碰撞盒的光源格（blockregistry
+                //   solid=false），但 World::isSolid 语义=「非 air 实存」把火当整墙 → mobAabbHitsSolid 恒 true →
+                //   **mob 永远走不进火格**（水平移动在火格边界被逐轴撤回）。根因链：t724 的 mob 火点燃判据只采样
+                //   mob 自身脚位 / 身体格 == Fire（entitymanager tick 火烧段），而碰撞把 mob 挡在火格边界外
+                //   （脚位格 = 邻格）→ 触碰判定永假 = 用户实测「僵尸碰火不燃烧」。玩家侧不受影响（玩家碰撞走
+                //   collisionAABBsAt 的 shape 语义，Fire ShapeNone 无盒）。豁免后 mob 踏入火格 → 脚位格==Fire
+                //   → 走 t344 火烧链（点燃 / 火伤 / 随机熄灭 / 死亡掉熟肉），机制等价 MC 实体穿火着火。
+                if (bid == BlockRegistry::Fire) continue;
                 // t333 水视穿透（同 t271 掉落物 / t220 水不挡沙）：World::isSolid 语义=「非 air」含 Water，
                 //   会把水当墙 → mob 横向进不了水 + 流水推力被水格自身撤回（t333 根因「怪水上走 + 不被推」）。
                 //   水非实体碰撞 → 排除后 mob 可入水游 / 被流水沿流推动，仍撞石头/泥土等真实体方块。
@@ -153,7 +164,11 @@ bool mobFootprintHasSupport(World *world, float cx, float cz, int supportY, floa
     for (int z = z0; z <= z1; ++z)
         for (int x = x0; x <= x1; ++x)
             // t333 水视穿透（同 mobAabbHitsSolid）：水格不算实体支撑 → 怪不把水面当地面站着。
-            if (world->blockAt(x, supportY, z) != BlockRegistry::Water && world->isSolid(x, supportY, z))
+            // t803 火焰视穿透（同上）：火格非支撑（ShapeNone 无碰撞）→ footprint 压火格不触发「有支撑」
+            //   复探，mob 落进火格沉到下方真支撑（同 mobSupportTopY 火焰 -1 配对）。
+            if (world->blockAt(x, supportY, z) != BlockRegistry::Water
+                && world->blockAt(x, supportY, z) != BlockRegistry::Fire
+                && world->isSolid(x, supportY, z))
                 return true;
     return false;
 }
@@ -166,6 +181,9 @@ float mobSupportTopY(World *world, int x, int y, int z)
     if (!world) return -1.0f;
     const quint8 id = world->blockAt(x, y, z);
     if (id == BlockRegistry::Water) return -1.0f; // 水非支撑（t333 穿透语义，落地扫描跳过水格）
+    if (id == BlockRegistry::Fire) return -1.0f;  // t803 火非支撑：ShapeNone 无碰撞（同水穿透语义）→ mob 落
+                                                  //   进火格沉到下方真支撑块，不悬停在火格顶（着火判据 = 脚位
+                                                  //   格==Fire，须真落入火格才点燃——见 mobAabbHitsSolid t803 注）
     if (id == BlockRegistry::SnowLayer)
         return float(y) + BlockRegistry::snowLayerHeight(world->stateAt(x, y, z)); // 薄层真顶
     if (!world->isSolid(x, y, z)) return -1.0f;
@@ -5189,7 +5207,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     touchingLava = true;
                 if (touchingLava) {
                     if (e.fireTimer < kFireDuration) { e.fireTimer = kFireDuration; dirty = true; } // 翻入着火 → bump（QML 显火焰）
-                    e.fireDamageTimer = 0.0f; // 岩浆内重置火伤累积（持续重燃）
+                    // t803：**不再清零 e.fireDamageTimer**（对齐玩家侧 t351 修复）。旧版在火 / 岩浆内每 AI tick
+                    //   把火伤累积器归零 → 累积永达不到 kFireDamageInterval → **mob 泡在火里反而不扣血**（同玩家
+                    //   t351「伤害时有时无」的 mob 侧镜像；点燃视觉有、周期火伤无）。现只刷 fireTimer（保持续燃
+                    //   = 离开前不熄），火伤累积器照常推进 → 站火 / 余焰均按 kFireDamageInterval 稳定扣血。
                 }
                 // t385 雨灭 mob 火（spec「雨灭 mob 火」）：mob 直接见天（skyLightAt>=15 = 头顶无遮挡）且所在列
                 //   正降水（雨/雪/雷，群系解析；沙漠不降水）→ 立即灭火。机制等价 MC 雨水浇灭着火实体。

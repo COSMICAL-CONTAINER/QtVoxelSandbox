@@ -3321,6 +3321,34 @@ Window {
                         }
                     }
                 }
+                // t803 打火石（type=FlintSteel 9）第一人称手持：打火石无独立 3D 几何 → billboard ToolIcon 平图标
+                //   （同剪刀 6 / 钓竿 8 路径：BillboardQuad + Canvas sourceItem + 抵消手 X 旋转 → billboard +Z
+                //   恒指回相机）。根因（用户「打火石拿在手上第一人称看不到物品」）：t724 只补了 ToolIcon
+                //   toolType===9 自绘图（背包槽 / 创造调色板可见），viewModelHand 工具分支只覆盖 1-8 →
+                //   选中打火石（工具段 → selectedBlock=Air，方块/异形/火把分支全不命中；工具分支无 9）→
+                //   手上无任何渲染分支 = 空手观感。补 billboard 分支后手持弯钢击片 + 燧石 + 火花平图标贴脸
+                //   相机（ToolIcon 内部含 pack flint_and_steel.png 覆盖 → pack 态同图源）。alphaCutoff:0.5 +
+                //   opacity:0.99 沿用透明底 alpha-test 契约（Canvas 透明底不丢弃会被当不透明黑 → 图标坍黑块）。
+                Model {
+                    visible: hotbarVM.isTool(player.selectedItem) && hotbarVM.toolType(player.selectedItem) === 9
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.02, 0.04, -0.22)
+                    scale: Qt.vector3d(0.18, 0.18, 0.18)
+                    eulerRotation: Qt.vector3d(-(viewModelHand.baseTilt + viewModelHand.swingAngle), 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        alphaCutoff: 0.5
+                        opacity: 0.99
+                        baseColor: terrainLight(worldClock.skyLight)
+                        baseColorMap: Texture {
+                            flipV: false
+                            sourceItem: ToolIcon {
+                                toolType: 9
+                                width: 64; height: 64
+                            }
+                        }
+                    }
+                }
                 // t169 手持材料（木棒/煤/木炭/铁锭 等）：选中材料段槽（isMaterial(selectedItem)）时，手前显
                 //   该材料的平图标 billboard。机制对齐 MC（手持非方块物品=平图标贴脸相机）+ spec t169
                 //   「四类贴图都要有」覆盖材料段（①背包槽 MaterialIcon / ②本手持 / ③掉落物 BillboardQuad+
@@ -5513,6 +5541,31 @@ Window {
                                 flipV: false
                                 sourceItem: ToolIcon {
                                     toolType: 6
+                                    width: 64; height: 64
+                                }
+                            }
+                        }
+                    }
+                    // t803 打火石掉落物（type=FlintSteel 9）：billboard ToolIcon 平图标（同剪刀 6 掉落路径）。
+                    //   根因同第一人称手持缺失：t724 未补掉落物分支 → 丢弃 / 死亡掉落的打火石实体无渲染分支
+                    //   （首段 BlockCube 的 visible 排除 isTool，后面工具分支只覆盖 1-7 + 剪刀 6）→ 空中只剩
+                    //   半透光晕壳无本体。补 billboard 分支（ToolIcon toolType===9 自绘 / pack 覆盖同图源），
+                    //   拾取链不变（itemId 原样回背包）。alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约。
+                    Model {
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 9
+                        geometry: BillboardQuad {}
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y - entRoot.rotY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                            baseColor: terrainLight(worldClock.skyLight)
+                            baseColorMap: Texture {
+                                flipV: false
+                                sourceItem: ToolIcon {
+                                    toolType: 9
                                     width: 64; height: 64
                                 }
                             }

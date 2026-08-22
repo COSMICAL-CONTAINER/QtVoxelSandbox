@@ -2079,6 +2079,111 @@ int main(int argc, char *argv[])
                              "flag swaps tile 170 with same geometry";
     }
 
+    // ── P20 t803 生物碰火燃烧探针（Entities 层 EntityManager 直编，同 t774 TNT 先例）──
+    //   用户报告（R19.12）：「怪物碰到火不燃烧（僵尸实测）」。根因（t803）：mob 碰撞 / 支撑 / 越障判定
+    //   （mobAabbHitsSolid / mobFootprintHasSupport / mobSupportTopY / isJumpObstacle）消费 World::isSolid
+    //   （语义 = 非 air 实存，非碰撞）→ Fire（ShapeNone 无碰撞盒光源格）被当实体墙 → mob 永远走不进火格
+    //   （t724 点燃判定「脚位/身体格 == Fire」永不命中，且 isJumpObstacle 还会对火格起跳翻过）；另旧版站火
+    //   时每 AI tick 清零火伤累积器 → 泡在火里反而不扣血（玩家侧 t351 修复的 mob 镜像）。矩阵断言（任一
+    //   FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 追击穿火：僵尸（Shambler，敌对近战）追玩家穿火格 —— 中心进火格（>=x+4.1）且点燃（isBurningAt）
+    //       （HEAD 旧象：火=墙 → 僵尸停在格边 / 跳过火格，永不点燃）；
+    //   (b) 站火持续燃烧 + 周期火伤：僵尸困 1×1 石栏火格（四邻 2 高石墙 —— 2 高墙顶非空气 → 越障跳不触发）
+    //       20s：燃烧近全程（burnTicks >= 总 tick−60，容 15% 随机熄灭后 ≤4 帧复燃的短隙）、扣血 >=10HP
+    //       （每 kFireDamageInterval=1s 扣 1HP × 15% 随机提前熄灭 → 20s 期望 ~17HP；阈值 10 ≈ 4σ 统计护栏）、
+    //       不死（100HP 上限 ~20 伤）；
+    //   (c) 火灭即恢复：拆火格 → <=9.5s 内停燃（fireTimer <= kFireDuration 8s 定时双保险 + 随机熄灭只会更早）
+    //       且其后 2.5s 血量恒定（无残留伤害源）。
+    //   确定性：tickN 只驱动 tickRedstone（World::tick / tickFire / tickWeather / tickHostileLife 均不跑）→
+    //   火格不自灭 / 不蔓延、无雨灭、无日光烧（日光 burning 走 tickHostileLife）→ 唯一随机源 = 15% 火伤
+    //   随机熄灭（触火即 ≤4 帧内复燃）。日光 / 降水两混淆源由此路径性排除（非靠搭顶棚）。
+    {
+        // rig 寻址：**运行期扫描空区，不走 nextSlot()** —— 上述循环探针在运行期已把 124 个 slot 位（4 列 × 31
+        //   行，z=4..94）耗尽，nextSlot() 此刻返回 z=97+ 越界 → setBlock 全被拒（火 / 平台 / 栏杆全没放上 = 假
+        //   FAIL，本探针首轮实测踩坑）；且 kRigY=41 头注释「40 以上必空」不可尽信（本世界 (6,41..43,1) 实测有
+        //   生成石柱，spawn 即嵌墙窒息 = 假 FAIL 第二轮）。改扫 y∈[ty-1, ty+3] 全净空的 12 格行（扫不到 → rigOk
+        //   false 判 FAIL，不下断言防越界副作用）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 11 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 11 && clear; ++dx)
+                    for (int dy = -1; dy <= 3 && clear; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const int ty = kRigY;
+        EntityManager ents;
+        const bool rigOk = x0 >= 0;
+        // (a) 追击走廊：石台 x0..x0+8（防 spawn 坠落），火格在路径中点 (x0+4, ty, z0)；虚拟玩家脚位
+        //     (x0+8.5, ty, z0+0.5) —— XZ 距 ~8 < kDetectRange=16 → 僵尸全程追击（追击向量纯 +X，同 z 行）。
+        for (int dx = 0; dx <= 8; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        w.setBlock(x0 + 4, ty, z0, BR::Fire, 0);
+        const int zombie = ents.spawnMobTyped(x0, ty, z0, EntityManager::MobShambler, QStringLiteral("#44aa44"), 100);
+        const QVector3D playerFeet(x0 + 8.5f, float(ty), z0 + 0.5f);
+        float maxX = ents.posAt(zombie).x();
+        bool burnedAfter = false;
+        for (int t = 0; t < 240; ++t) { // 3.84s：8 格追击 ~2.9s（kChaseSpeed 2.8 b/s）+ 余量
+            ents.tick(0.016f, &w, playerFeet, 0.3f, 1.8f, true); // playerTargetable=true → 敌对可锁定追击
+            if (ents.posAt(zombie).x() > maxX) maxX = ents.posAt(zombie).x();
+            if (ents.isBurningAt(zombie)) burnedAfter = true;
+        }
+        const bool okA = maxX >= x0 + 4.1f && burnedAfter; // 中心进火列（floor(pos.x)==x0+4）且曾点燃
+        // 清 (a) 场（火 + 石台；僵尸留在 ents 里随后续段自然游荡 / 坠落，不参与任何断言）。
+        w.setBlock(x0 + 4, ty, z0, BR::Air);
+        for (int dx = 0; dx <= 8; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air);
+        tickN(w, 2);
+
+        // (b) 困兽火格：火 (fx, ty, fz)（复用 (a) 已清场区），四邻 ±X/±Z 各 2 高石墙（ty / ty+1 —— 越障跳需
+        //     墙顶两格空气，2 高墙挡跳 → 僵尸被钉在火格内持续触火；半宽 0.30 < 0.5 → 1×1 栏内放得下，脚位格恒 = 火格）。
+        const int fx = x0 + 4, fz = z0;
+        w.setBlock(fx, ty - 1, fz, BR::Stone, 0); // 火格支撑（防僵尸跌出栏）
+        w.setBlock(fx, ty, fz, BR::Fire, 0);
+        const int dx4[4] = { 1, -1, 0, 0 }, dz4[4] = { 0, 0, 1, -1 };
+        for (int i = 0; i < 4; ++i) {
+            w.setBlock(fx + dx4[i], ty,     fz + dz4[i], BR::Stone, 0);
+            w.setBlock(fx + dx4[i], ty + 1, fz + dz4[i], BR::Stone, 0);
+        }
+        const int victim = ents.spawnMobTyped(fx, ty, fz, EntityManager::MobShambler, QStringLiteral("#44aa44"), 100);
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f); // 距 >> kDetectRange → 不追击，栏内纯游荡
+        const int totalTicks = 1250;                            // 20s
+        int burnTicks = 0;
+        for (int t = 0; t < totalTicks; ++t) {
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            if (ents.isBurningAt(victim)) ++burnTicks;
+        }
+        const int dmg = 100 - ents.healthAt(victim);
+        const bool okB = burnTicks >= totalTicks - 60 && dmg >= 10 && !ents.deadAt(victim);
+
+        // (c) 拆火 → 停燃 + 血量稳定：fireTimer <= 8s（定时双保险），9.5s 窗（+1.5s 余量，随机熄灭只会更早）
+        //     内必然烧尽；再 2.5s 验证无残留伤害（火伤 / 仙人掌均无源，血量必须逐 tick 不变）。
+        w.setBlock(fx, ty, fz, BR::Air);
+        for (int t = 0; t < 594 && ents.isBurningAt(victim); ++t) // 9.5s；烧尽即早停（省时）
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        const bool outOk = !ents.isBurningAt(victim);
+        const int hpStable = ents.healthAt(victim);
+        for (int t = 0; t < 157; ++t) // 2.5s
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        const bool okC = outOk && ents.healthAt(victim) == hpStable;
+
+        const bool ok = rigOk && okA && okB && okC;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t803 mobs ignite on fire cells: chasing shambler walks into fire cell "
+                             "and burns (fire pass-through in collision/support/jump predicates); pinned "
+                             "shambler burns nearly full 20s (relight gaps <=60 ticks) taking >=10 HP "
+                             "periodic fire damage without dying; after fire removed burn stops <=9.5s "
+                             "(fireTimer 8s cap) and health stays stable";
+        // 清场（火已拆；栏杆 + 支撑）。
+        w.setBlock(fx, ty - 1, fz, BR::Air);
+        for (int i = 0; i < 4; ++i) {
+            w.setBlock(fx + dx4[i], ty,     fz + dz4[i], BR::Air);
+            w.setBlock(fx + dx4[i], ty + 1, fz + dz4[i], BR::Air);
+        }
+        tickN(w, 2);
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
