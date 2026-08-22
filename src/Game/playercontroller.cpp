@@ -6907,7 +6907,10 @@ void PlayerController::step(qreal dt)
                         const float cMaxY = float(footY - 1) + 1.0f; // 脚下仙人掌格顶 = footY
                         if (pMinX <= cMaxX + kTouchSkin && pMaxX >= cMinX - kTouchSkin  // 同主循环容差皮（X snap 缝）
                             && pMinZ <= cMaxZ + kTouchSkin && pMaxZ >= cMinZ - kTouchSkin
-                            && pMinY <= cMaxY) touch = true;
+                            // fix(站顶不扣血·用户实测回归)：Y 也吃落地 snap 的 +1e-4 缝（t259：落地 snap 把
+                            //   脚位停在支撑面**上方** eps → pMinY = cMaxY + 1e-4 > cMaxY → t716 的含边界判定
+                            //   恒 false。同 XZ 加容差皮（该分支只查脚下支撑格一层，无误伤面）。
+                            && pMinY <= cMaxY + kTouchSkin) touch = true;
                     }
         }
         if (touch) {
