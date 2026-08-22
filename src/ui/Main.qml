@@ -10813,24 +10813,29 @@ Window {
                         }
                     }
                 }
-                // 返回按钮：关进度面板回暂停菜单。
-                //   t678(e) 移出 Column、锚定 progressPanel 底部（bottomMargin 8）—— 旧版在 Column 内
-                //   被列底部留白 + 面板 margin 16 推到 ~43px 高处（离下边缘过远）；改贴底 8px。
-                Rectangle {
-                    width: 120; height: 32; radius: 6
-                    anchors.horizontalCenter: progressPanel.horizontalCenter
-                    anchors.bottom: progressPanel.bottom
-                    anchors.bottomMargin: 8
-                    color: backProgressArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
-                    border.color: "#3a5a7a"; border.width: 1
-                    Text { anchors.centerIn: parent; text: "返回"
-                           color: "#7fb0e5"; font.pixelSize: 13 }
-                    MouseArea {
-                        id: backProgressArea
-                        anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: window.progressOpen = false
-                    }
+            }
+            // 返回按钮：关进度面板回暂停菜单。progressPanel 直属子（与 Column 平级）→ 两条锚均为合法父锚。
+            //   水平居中 —— 惯例调研（t754）：暂停菜单族面板底部返回钮均水平居中（选项面板 / 统计面板均
+            //   `anchors.horizontalCenter: parent.horizontalCenter`），本按钮取同款居中。
+            //   t678(e) 语义保留：贴面板底 bottomMargin 8（替代旧版 Column 内堆叠被列底留白 + 面板 margin 16
+            //   双叠推到 ~43px 高处）；treeViewport 预留 -38（按钮区+间距）恰好容纳贴底按钮，不与树视口重叠。
+            //   t754 修「返回按钮靠左」真因：按钮此前实际仍留在 Column 内（t678(e) 只改锚未移出声明体），
+            //   锚 progressPanel=祖父（QML 锚只允许父/兄弟）→ 非法锚被忽略 → x 回退 0（Column 左缘 + margin 16）。
+            //   现 Rectangle 真移出 Column，horizontalCenter / bottom 双锚同生效，居中 + 贴底一次到位。
+            Rectangle {
+                width: 120; height: 32; radius: 6
+                anchors.horizontalCenter: progressPanel.horizontalCenter
+                anchors.bottom: progressPanel.bottom
+                anchors.bottomMargin: 8
+                color: backProgressArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                border.color: "#3a5a7a"; border.width: 1
+                Text { anchors.centerIn: parent; text: "返回"
+                       color: "#7fb0e5"; font.pixelSize: 13 }
+                MouseArea {
+                    id: backProgressArea
+                    anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: window.progressOpen = false
                 }
             }
         }
