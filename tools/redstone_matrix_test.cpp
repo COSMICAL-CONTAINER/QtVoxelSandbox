@@ -2508,6 +2508,170 @@ int main(int argc, char *argv[])
                              "'beaching needs speed / shore stops boat' semantics lost in 21fff7b (t711)";
     }
 
+    // ── t799 沙/沙砾失撑即时下落探针（World 层 checkGravityBlockOnEdit + Entities 层 FallingBlock 链）──
+    //   用户报告（R19.12）：「沙子直接放在火把上面不会触发掉落，能稳定放置；下面是睡莲/草丛/半砖也一样，
+    //   只有超过一格高度下落才变掉落物。沙砾同样」。旧实现 = Main.qml maybeTriggerFallingBlock（消费
+    //   blockPlaced/blockBroken 在呈现层嵌套 setBlock+spawn）——修后判定下沉 World 层单一谓词
+    //   （BlockRegistry::isGravityBlock + isFullCube 支撑判定），发 gravityBlockFell → 呈现层转
+    //   EntityManager.spawnFallingBlock（本探针复刻该消费端）。矩阵断言（任一 FAIL = 用户症状复现点）：
+    //   (a) 放置路径：沙/沙砾放火把/半砖/草丛/睡莲（非完整立方支撑）上 → setBlock 同步坍落（信号 +
+    //       格清 Air），实体下落遇火把变掉落物（t220 语义回归）；
+    //   (b) 稳定：放完整立方（石头/TNT/另一沙）上 → 零信号零坍落（沙柱叠放稳定性不回归）；
+    //   (c) 更新路径：挖掉沙柱底层支撑 → 上方坍落 + 实体落到完整支撑格上还原方块（>1 格落差着地）；
+    //   (d) 半空放置（下方空气 >1 格落差）→ 坍落实体落到火把上 → 变掉落物（用户「>1 格才变掉落物」现状
+    //       的正确侧保留：落差不是门控，失撑才是）；
+    //   (e) 水中沙：沙放水面上 → 坍落穿透水柱落到水底还原（t220 水不挡沙 / 填堵水格不回归）；
+    //   (f) 爆炸（destroySphereSilent）与 TNT 点火（clearBlockSilent）两静默入口 → 上方沙坍落（写入口收口）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 的 4×31 网格早被前序循环探针耗尽，此刻返回
+        //   z=97+ 越界 → setBlock 全被拒 = 假 FAIL）。需 13 格宽 × y∈[ty-1,ty+3] 全净空（含 (d) 半空放置
+        //   上探一层，防残留浮空重力方块混入坍落计数）。
+        const int ty = kRigY;
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 12 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 12 && clear; ++dx)
+                    for (int dy = -1; dy <= 3 && clear; ++dy)
+                        if (w.blockAt(xx + dx, ty + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const bool rigOk = x0 >= 0;
+        if (!rigOk)
+            qInfo().noquote() << "  [t799 diag] no clear rig strip found (13 wide x y[ty-1,ty+3])";
+        // 平台（实体落点 / 支撑底座；探针即用即清）。列布局（互不复用防串扰）：
+        //   dx0..3 沙×{火把,半砖,草丛,睡莲} / dx4..7 沙砾×同族 / dx8 石+沙+沙砾稳定柱 / dx9 TNT+沙 /
+        //   dx10 火把+半空沙 / dx11 水+沙 / dx12 独立石柱+沙（爆炸用）。
+        for (int dx = 0; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        EntityManager ents;
+        // 复刻 Main.qml onGravityBlockFell 消费端（World 语义事件 → 下落实体）+ fallingBlockDropped → 计数。
+        //   （旧版只计数不 spawn → ents 恒空 / itemDrops 恒 0 = 假 FAIL；消费端必须真转实体。）
+        int fellSignals = 0, fellId = -1, itemDrops = 0;
+        QObject::connect(&w, &World::gravityBlockFell, &w,
+                         [&](int x, int y, int z, int blockId) {
+                             ++fellSignals; fellId = blockId;
+                             ents.spawnFallingBlock(x, y, z, blockId);
+                         });
+        QObject::connect(&ents, &EntityManager::fallingBlockDropped, &ents,
+                         [&](int, int, int, int) { ++itemDrops; });
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        const auto settle = [&](int frames) { // 驱动实体物理至稳态（着地还原 / 变掉落物均含移除）
+            for (int t = 0; t < frames; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        };
+
+        // (a) 放置路径 × 支撑族矩阵：沙(8)/沙砾(139) × {火把, 半砖, 草丛, 睡莲} → 同步坍落 + 落非完整支撑变掉落物。
+        bool okA = true;
+        const quint8 partials[] = { BR::Torch, BR::WoodSlab, BR::TallGrass, BR::LilyPad };
+        const quint8 gravities[] = { BR::Sand, BR::Gravel };
+        for (int g = 0; g < 2; ++g) {
+            for (int k = 0; k < 4; ++k) {
+                const int cx = x0 + g * 4 + k;             // 沙 dx0..3 / 沙砾 dx4..7
+                w.setBlock(cx, ty, z0, partials[k], 0);    // 非完整立方支撑（立平台上）
+                fellSignals = 0; fellId = -1; itemDrops = 0;
+                w.setBlock(cx, ty + 1, z0, gravities[g], 0); // 玩家放置同一入口
+                const bool fellNow = fellSignals == 1 && fellId == int(gravities[g])
+                                     && w.blockAt(cx, ty + 1, z0) == BR::Air; // 同帧清格转实体
+                settle(240);                               // 实体下落 → 遇非完整支撑变掉落物（t220）
+                okA = okA && fellNow && itemDrops == 1 && ents.liveCount() == 0
+                      && w.blockAt(cx, ty + 1, z0) == BR::Air; // 不还原成方块（支撑族全同判）
+            }
+        }
+
+        // (b) 稳定矩阵：完整立方支撑（石头 / TNT / 下层沙）→ 零信号零坍落（沙柱叠放稳定性）。
+        bool okB = true;
+        {
+            w.setBlock(x0 + 8, ty, z0, BR::Stone, 0);
+            w.setBlock(x0 + 9, ty, z0, BR::TntBlock, 0);
+            fellSignals = 0;
+            w.setBlock(x0 + 8, ty + 1, z0, BR::Sand, 0);    // 沙放石头上
+            w.setBlock(x0 + 8, ty + 2, z0, BR::Gravel, 0);  // 沙砾放沙上（沙=完整立方可支撑）
+            w.setBlock(x0 + 9, ty + 1, z0, BR::Sand, 0);    // 沙放 TNT 上（TNT 完整立方）
+            okB = fellSignals == 0
+                  && w.blockAt(x0 + 8, ty + 1, z0) == BR::Sand
+                  && w.blockAt(x0 + 8, ty + 2, z0) == BR::Gravel
+                  && w.blockAt(x0 + 9, ty + 1, z0) == BR::Sand;
+            settle(60); // 稳定柱若干 tick 后仍原位（无实体生成）
+            okB = okB && ents.liveCount() == 0
+                  && w.blockAt(x0 + 8, ty + 1, z0) == BR::Sand
+                  && w.blockAt(x0 + 8, ty + 2, z0) == BR::Gravel;
+        }
+
+        // (c) 更新路径：挖掉稳定柱底层沙 → 正上方沙砾坍落 + 落到石头上还原方块（着地支撑=完整立方）。
+        bool okC = true;
+        {
+            fellSignals = 0; fellId = -1; itemDrops = 0;
+            w.setBlock(x0 + 8, ty + 1, z0, BR::Air, 0);     // 挖底层沙（正上方沙砾失撑）
+            okC = fellSignals == 1 && fellId == int(BR::Gravel)
+                  && w.blockAt(x0 + 8, ty + 2, z0) == BR::Air; // 柱清空转实体
+            settle(240);                                     // 1 格落差 → 落到石柱顶还原沙砾
+            okC = okC && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 8, ty + 1, z0) == BR::Gravel; // 着地还原（非掉落物——下方是完整支撑）
+        }
+
+        // (d) 半空放置（>1 格落差）：沙放火把上两格（中间空气）→ 坍落 → 穿 1 格空气落火把 → 变掉落物。
+        bool okD = true;
+        {
+            w.setBlock(x0 + 10, ty, z0, BR::Torch, 0);
+            fellSignals = 0; itemDrops = 0;
+            w.setBlock(x0 + 10, ty + 2, z0, BR::Sand, 0);   // 下方 (ty+1) 空气 → 放置即失撑
+            okD = fellSignals == 1 && w.blockAt(x0 + 10, ty + 2, z0) == BR::Air;
+            settle(240);
+            okD = okD && itemDrops == 1 && ents.liveCount() == 0; // 落火把 → 掉落物（落差不改变语义）
+        }
+
+        // (e) 水中沙：平台上 1 格水柱，沙放水面 → 坍落穿透水（t220 水不挡沙）→ 落水底还原（填堵水格）。
+        bool okE = true;
+        {
+            w.setBlock(x0 + 11, ty, z0, BR::Water, 0);
+            fellSignals = 0; itemDrops = 0;
+            w.setBlock(x0 + 11, ty + 1, z0, BR::Sand, 0);   // 下方水 → 非完整支撑 → 失撑
+            okE = fellSignals == 1 && w.blockAt(x0 + 11, ty + 1, z0) == BR::Air;
+            settle(240);
+            okE = okE && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 11, ty, z0) == BR::Sand; // 着地还原在水底格（排水填堵）
+        }
+
+        // (f) 静默写入口收口：爆炸（destroySphereSilent 破支撑）+ TNT 点火（clearBlockSilent 清 TNT 格）。
+        bool okF = true;
+        {
+            // 爆炸：沙 (ty+1) 立于独立石柱 (ty) 上，炸石柱（半径 <1 只毁中心格）→ 上方沙坍落 → 落平台还原。
+            w.setBlock(x0 + 12, ty, z0, BR::Stone, 0);
+            w.setBlock(x0 + 12, ty + 1, z0, BR::Sand, 0);
+            fellSignals = 0; itemDrops = 0;
+            w.destroySphereSilent(x0 + 12, ty, z0, 0.9f);
+            okF = fellSignals == 1 && w.blockAt(x0 + 12, ty + 1, z0) == BR::Air;
+            settle(240);
+            okF = okF && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 12, ty, z0) == BR::Sand; // 落到平台石顶还原
+            // TNT 点火：(b) 的 dx9 列（TNT + 上方沙仍稳定）→ 清 TNT 格（firePowerTnt 同一入口）→ 沙坍落。
+            fellSignals = 0; itemDrops = 0;
+            w.clearBlockSilent(x0 + 9, ty, z0);
+            okF = okF && fellSignals == 1 && w.blockAt(x0 + 9, ty + 1, z0) == BR::Air;
+            settle(240);
+            okF = okF && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 9, ty, z0) == BR::Sand;  // 落到平台石顶还原
+        }
+
+        const bool ok = rigOk && okA && okB && okC && okD && okE && okF;
+        if (!ok) {
+            qInfo().noquote() << "  [t799 diag] okA" << okA << "| okB" << okB << "| okC" << okC
+                              << "| okD" << okD << "| okE" << okE << "| okF" << okF
+                              << "| lastFellSignals" << fellSignals << "fellId" << fellId
+                              << "itemDrops" << itemDrops;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t799 gravity blocks (sand/gravel) instant-fall on non-full-cube "
+                             "supports: placing sand or gravel on torch/slab/tall-grass/lily-pad "
+                             "collapses to a falling entity in the same setBlock (single World-layer "
+                             "predicate, placement == update path), falling through/onto a partial "
+                             "block converts to item drop (t220), on full cube it re-places; "
+                             "sand-column stacking on full support stays put, water column pierced "
+                             "and sealed, explosion + TNT-prime silent write entries also trigger "
+                             "the collapse - fixes 'sand sits stable on torch' user report";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

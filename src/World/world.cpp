@@ -469,6 +469,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
+    checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；4 参数放置/挖掘主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
@@ -575,6 +576,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑（破下方支撑 → 正上方压力板掉落）复检
     checkSugarcaneOnEdit(x, y, z, oldId, id); // t524：甘蔗失撑（破下方支撑 → 正上方甘蔗整柱坍落）复检
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
+    checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；5 参数放置/开合主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
@@ -655,6 +657,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     //   destroySphereSilent 末尾同族补调注释）。
     checkRailOnEdit(x, y, z, occ, id);      // t565：邻轨连接重算（清 Air → 邻轨断向 / 形态切换）
     checkSnowLayerOnEdit(x, y, z, occ, id); // t527：正上方雪层失撑 → 整柱坍落为携带层数的下落实体
+    checkGravityBlockOnEdit(x, y, z, occ, id); // t799：正上方沙/沙砾失撑坍落（TNT 点火清格 → 上方沙柱塌落砸在引燃 TNT 上）
     notePowerWrite(x, y, z, occ, id);       // t656：红石电力脏标记（TNT 被点火清 Air → 邻粉 / 邻接收器重算）
     return true;
 }
@@ -725,6 +728,11 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     //   （m_batchFluid）中 checkRailOnEdit 末尾的条件 emit+clearAllDirty 只在真有轨变化时触发 =
     //   多一次中间重建（同 destroySphereSilent 逐格调用的先例），批量终态不受破坏。
     checkRailOnEdit(x, y, z, lightOldId, id);
+    // t799：流体静默写亦复检沙/沙砾失撑（水蒸发清 Air / 水漫入支撑格替换为非完整立方 → 正上方沙坍落；
+    //   同审查修 L6 给 checkRailOnEdit 补本入口的口径——批量流体热路径下非重力族单次 blockAt 早退，
+    //   真坍落才走整柱清除 + 中间 worldChanged（同 checkRailOnEdit 批量先例，批量终态不受破坏）。
+    //   t527 雪层未挂本入口（雪层贴地生成、水上无雪），沙/砾可在水中失撑故挂）。
+    checkGravityBlockOnEdit(x, y, z, lightOldId, id);
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -761,6 +769,7 @@ bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
     checkPressurePlateOnEdit(x, y, z, oldId, id); // t494：压力板失撑复检
     checkSugarcaneOnEdit(x, y, z, oldId, id);    // t524：甘蔗失撑复检
     checkSnowLayerOnEdit(x, y, z, oldId, id);    // t527：积雪层失撑复检
+    checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（系统静默写路径收口，同族）
     checkRailOnEdit(x, y, z, oldId, id);         // t565：铁轨连接重算
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检
     notePowerWrite(x, y, z, oldId, id);          // t656：红石电力脏标记
@@ -1401,6 +1410,7 @@ void World::tickLavaFlow()
             checkDeadBushOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t504：枯灌木失撑复检（正上方枯灌木掉落，同 setBlock 路径）
             checkSugarcaneOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t524：甘蔗失撑复检（正上方甘蔗整柱坍落，同 setBlock 路径）
             checkSnowLayerOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t527：积雪层失撑复检（正上方雪层整柱坍落，同 setBlock 路径）
+            checkGravityBlockOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t799：沙/沙砾失撑复检（焚毁木支撑 → 正上方沙柱坍落，同 setBlock 路径）
             pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
         }
         m_batchFluid = false;
@@ -1974,6 +1984,7 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     for (const DestroyedVoxel &d : destroyed) {
         checkRailOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         checkSnowLayerOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        checkGravityBlockOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t799：爆炸破坏支撑 → 弹坑上缘沙/沙砾柱坍落（旧 QML 链不发信号 → 悬空残留）
     }
     emit worldChanged();
     m_chunks.clearAllDirty();
@@ -2198,6 +2209,62 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     emit snowLayerFell(x, by, z, totalLayers);
     emit worldChanged();        // 驱动 mesh 重建（雪层薄板段消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t799 重力方块（沙 / 沙砾）整柱坍落 helper（头注释见 world.h）：自 (x,y,z) 起向上逐格清**连续重力方块**
+//   （BlockRegistry::isGravityBlock 单一权威；混合沙/沙砾柱各自保留 id）。每格：静默写 Air（m_chunks.setBlock
+//   直写 + 标脏，不经 World::setBlock → 不递归触发 checkGravityBlockOnEdit / 不重复发 broken/placed 链）+
+//   note*Write 索引维护（同雪柱坍落口径——重力方块非流体/冰/火/生长段，理论 no-op，保持入口一致防未来
+//   把某重力方块归入索引段后漏维护）+ emit blockBroken（破块粒子 / 音，机制等价 MC 失撑坍落反馈）+
+//   recomputeLightAround（实体沙柱消失重 flood）+ emit gravityBlockFell（每格一信号一实体，着地各自还原）。
+//   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。空首格 → no-op。
+void World::dropGravityColumn(int x, int y, int z)
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    if (y < 0 || y >= m_height) return;
+    int cy = y;
+    bool any = false;
+    while (cy < m_height && BlockRegistry::isGravityBlock(m_chunks.blockAt(x, cy, z))) {
+        const quint8 b = m_chunks.blockAt(x, cy, z);
+        m_chunks.setBlock(x, cy, z, BlockRegistry::Air); // 静默直写 + 标脏（含边界邻接）；不经 World::setBlock（无重入）
+        noteGrowthWrite(x, cy, z, b, BlockRegistry::Air); // 沙非生长方块 → no-op（同雪柱口径保持一致）
+        noteFluidWrite(x, cy, z, b, BlockRegistry::Air);  // 沙非流体 → no-op（同上）
+        noteIceWrite(x, cy, z, b, BlockRegistry::Air);    // 沙非冰 → no-op（同上）
+        noteFireWrite(x, cy, z, b, BlockRegistry::Air);   // 沙非火 → no-op（同上）
+        emit blockBroken(x, cy, z, int(b));               // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
+        recomputeLightAround(x, cy, z, b, BlockRegistry::Air); // 沙柱遮光消失重 flood
+        emit gravityBlockFell(x, cy, z, int(b));          // 呈现层转 spawnFallingBlock（每格一实体，保留真实 id）
+        any = true;
+        ++cy;
+    }
+    if (!any) return;
+    emit worldChanged();      // 驱动 mesh 重建（沙柱消失）
+    m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t799 重力方块失撑复检（头注释见 world.h；机制等价 MC 1.0「沙放火把上立即落 / 支撑失效即刻落」）。
+//   旧实现（t117/t220）：Main.qml maybeTriggerFallingBlock 消费 blockPlaced/blockBroken 信号在呈现层
+//   嵌套 setBlock(air)+spawnFallingBlock —— 放置路径实测不触发（用户报「沙放火把 / 睡莲 / 草丛 / 半砖上
+//   稳定站住，只有 >1 格落差才变掉落物」），且爆炸 / TNT 点火 / 焚毁等静默写入口完全绕过该 QML 链。
+//   本检查下沉 World 层（同甘蔗 / 雪层支撑校验族先例）后：写入口全收口，两路径同一谓词。
+void World::checkGravityBlockOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); // 两分支都只看编辑后状态（id + 邻格现值）；参数保留供 checkXxxOnEdit 族签名一致
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    if (y < 0 || y >= m_height) return;
+    // ① 放置自检：本格刚写入重力方块且下方非完整立方支撑（火把 / 睡莲 / 草丛 / 半砖 / 空气 / 水…）→ 坍落。
+    //   y==0（世界底）无下格 → 视为失撑（实体落出世界由 EntityManager tick 移除，同旧 QML 版 y>0 守卫语义）。
+    if (BlockRegistry::isGravityBlock(id)) {
+        const bool supported = (y > 0) && BlockRegistry::isFullCube(m_chunks.blockAt(x, y - 1, z));
+        if (!supported) dropGravityColumn(x, y, z);
+        return; // 本格即重力方块 → ② 的「正上方」必是重力柱上层，坍落时已整柱带走，无需重复查
+    }
+    // ② 支撑变化复检：本格编辑后非完整立方（被破为 Air / 换成不完整方块）且正上方是重力方块 → 上方坍落。
+    //   覆盖：挖支撑（→Air）、支撑被替换为火把 / 半砖等（放上去那刻上方沙即落）、水蒸发 / 焚毁 / 爆炸。
+    if (BlockRegistry::isFullCube(id)) return; // 仍是完整立方支撑（含 state 变化）→ 上方不失撑
+    if (y + 1 >= m_height) return;
+    if (BlockRegistry::isGravityBlock(m_chunks.blockAt(x, y + 1, z)))
+        dropGravityColumn(x, y + 1, z);
 }
 
 // t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 的 4 向 × 3 高（同层 / 上 / 下 —— 坡度邻轨存在性，

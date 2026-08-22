@@ -1776,6 +1776,12 @@ public:
     //   （grass/stone/log/planks/.../chest 等）→ true。机制等价 MC「方块是否完整立方」。
     static bool isFullCube(quint8 blockId);
 
+    // t799 重力方块单一权威谓词：id ∈ {Sand, Gravel}（机制等价 MC 1.0 falling block 族 sand/gravel）。
+    //   供 World::checkGravityBlockOnEdit（失撑坍落复检，放置 / 破坏 / 爆炸 / 点火多路径同判）与
+    //   EntityManager（下落实体族语义注释）共用 —— 各处散落 `id==Sand || id==Gravel` 字面量收口到
+    //   本谓词，加新重力方块（未来 concrete powder 类）只改一处。
+    static bool isGravityBlock(quint8 blockId);
+
     // 审查修 R1（Review_2026-08-22 残留）：火把 / 红石火把附着支撑判定（放置预检 + 玩家挖掘失撑掉落 +
     //   爆炸 AfterBlast / 水下链式失撑掉落**三方共用单一权威**，防口径漂移 → 放得上却立刻掉）。合成判定
     //   （与船放置「可碰撞 ∨ 实体」同款）：isCollidable（有碰撞 sub-AABB —— Spawner ShapeFull 恒真，故
