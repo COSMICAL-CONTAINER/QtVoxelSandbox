@@ -313,8 +313,10 @@ public:
     //   同 tickLavaFlow ignite pass —— 不同火格错峰判定）：
     //   (a) 寿命：火格 6 邻 + 下方均**无可燃方块**（BlockRegistry::flammable 单一权威）→ 按 kFireExtinguishPct
     //       自熄（setBlock Air → blockBroken 粒子/音 + QML fireHost 收 delegate）。机制等价 MC 无燃料火渐熄。
-    //   (b) 蔓延：5% 随机选一 6 邻格，若为可燃方块 → 点燃为 Fire（setBlock Fire → blockPlaced → QML delegate
-    //       挂载）。机制等价 MC 火向相邻可燃物概率蔓延（烧穿木屋的链式感）。
+    //   (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPct（t804：旧版每窗只随机挑 1/6 邻 → 单块可燃物期望
+    //       ~60s 才被吞，用户读作「打火石点不然木制品」），邻格为可燃方块 → 点燃为 Fire（setBlock Fire →
+    //       blockPlaced → QML delegate 挂载；可燃物本体被火替换 = 烧毁，无掉落）。机制等价 MC 火向相邻
+    //       可燃物概率蔓延（烧穿木屋的链式感）。
     //   (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 按 kFireRisePct 在上方生成火（火焰柱向上舔）。
     //   安全阀：m_fireCells > kFireCellCap（256）→ 本窗跳过 (b)/(c) 新增（防森林大火无限链烧穿 chunk mesh
     //   重建预算；既有火照常熄灭收敛）。写入走 4 参数 setBlock（发 blockBroken/blockPlaced → 粒子/音 +
@@ -1048,7 +1050,8 @@ private:
     //   才开一个判定窗（~每 kFireTickInterval×0.1s = 0.5s/窗）。窗口序号 m_fireIntervalIndex 每窗 +1 喂入
     //   hashVoxel 散布概率 → 不同火格不同窗错峰判定（非全部同步烧穿 / 熄灭，PLAN §2-K 精神，同 lava ignite）。
     //   kFireExtinguishPct=5：无燃料火每窗自熄概率（5% → 平均 ~10s 熄，可见可验收）。
-    //   kFireSpreadPct=5：每火格每窗向随机 6 邻可燃格蔓延概率（5% → 平均 ~10s/格，烧穿木屋的链式节奏）。
+    //   kFireSpreadPct=5：每火格每窗对每个 6 邻可燃格的独立蔓延概率（t804 改逐邻独立掷；5% → 每块平均
+    //     ~10s 被吞，烧穿木屋的链式节奏）。
     //   kFireRisePct=3：火柱上窜概率（下方燃烧 + 上方空气 → 3% 概率上方生火，舔焰柱观感）。
     //   kFireCellCap=256：安全阀 —— 活跃火格超此数本窗不再**新增**（既有火照常熄灭收敛；防链式大火烧穿
     //   mesh 重建预算 / delegate 上限）。

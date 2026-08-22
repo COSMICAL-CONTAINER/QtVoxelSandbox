@@ -781,6 +781,9 @@ add_executable(redstone_matrix_test
     # 审查 #1 末影眼巡航高度回归探针附加：Entities 层 EntityManager（spawnEnderEye 后断言
     # enderEyeCruiseYAt == origin.y()+8；向下只依赖 Core+World，不引入 Game/QML）。
     src/Entities/entitymanager.cpp
+    # t804 掉落物火焚探针附加：Game 层 ItemEntityManager（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号
+    # + 出火熄火；向下只依赖 Core/World/Qt，不引入 PlayerController/QML）。
+    src/Game/itementitymanager.cpp
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core

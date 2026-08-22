@@ -1192,6 +1192,23 @@ float EntityManager::inflateAt(int i) const
     return p;
 }
 
+// t804 打火石点燃 Stalker（见头文件注释）：置不可逆短引信态。仅翻自身数据（flintIgnited），蓄力推进 /
+//   引爆 / 嘶声全由 aiStalker 的 flintIgnited 分支接管（同帧不引爆——点燃到爆炸 ≥1 AI tick，机制等价
+//   MC 点燃后 ~1.5s 引信窗口，玩家可后退逃离伤害半径）。
+bool EntityManager::igniteStalkerFlint(int idx)
+{
+    if (idx < 0 || idx >= int(m_entities.size())) return false;
+    Entity &e = m_entities[size_t(idx)];
+    if (!e.alive || e.kind != Mob || e.dead) return false;       // 空槽 / 非 mob / 尸体 → no-op
+    if (e.mobType != MobStalker) return false;                   // 仅 Stalker 可点燃（MC 仅苦力怕）
+    if (!e.flintIgnited) {
+        e.flintIgnited = true;                                    // 首次点燃 → 置位（幂等：已点燃返 true 不重复置）
+        // 蓄力进度保留（近距蓄力中被点燃 → 从当前 fuseTimer 续走，≤kFuseTime 内引爆）；不重置 chasing /
+        //   猫状态——aiStalker 的 flintIgnited 分支短路它们，残留态随爆炸销毁。
+    }
+    return true;
+}
+
 // t331 骸骨拉弓瞄准进度（0..1）：仅 mobType==MobBones 且 aimTimer>0（正在拉弓）时返 clamp(aimTimer/kAimWindup,0,1)，
 //   供 QML delegate 据 it 驱动肩枢 Node 抬右臂 + MobBowGeometry 弦后拉。非 Bones / 未瞄准（aimTimer<=0）/ 越界 → 0
 //   （模型静态、松弦）。机制等价 MC 1.0 骷髅停步拉弓瞄准。
@@ -3152,6 +3169,28 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
     const float dx = playerPos.x() - e.pos.x();
     const float dz = playerPos.z() - e.pos.z();
     const float distXZ = std::sqrt(dx * dx + dz * dz);
+    Q_UNUSED(distXZ); // t804：flintIgnited 短路路径不读距离（不可逆引信与玩家远近无关）；下方常规链照用
+
+    // t804 打火石点燃（不可逆短引信，机制等价 MC 1.0 flint and steel 点燃苦力怕）：flintIgnited → 无视
+    //   追踪 / 距离 / 猫**原地站立蓄力至爆**——玩家逃开（远于 kDefuseRange）/ 猫靠近 / !playerTargetable
+    //   都不熄火（区别于近距蓄力链的 defuse / 猫断 / 模式清零，机制等价 MC 点燃后的苦力怕必然爆炸）。
+    //   **优先于猫驱赶与追踪判定短路**（那些链都会清 fuseTimer，与不可逆语义冲突）。蓄力进度沿
+    //   fuseTimer（近距蓄力中被点燃 → 续走不重置）；inflateAt / QML 膨胀动画 / stalkerFuseLit 嘶声
+    //   全复用既有链（tick Mob 分支 flintIgnited 亦每帧 bump revision 驱动绑定刷新）。
+    if (e.flintIgnited) {
+        if (e.fuseTimer <= 0.0f)
+            emit stalkerFuseLit(qFloor(e.pos.x()), qFloor(e.pos.z())); // t616 点燃嘶声（0→正 沿发一次）
+        e.fuseTimer += float(dt);
+        if (e.fuseTimer >= kFuseTime) {
+            detonateStalker(idx, e, world, playerPos); // t480 idx = 本 mob 槽（爆炸伤玩家 → 驯服狼防御目标）
+            e.moveSpeed = 0.0f;
+            e.wanderSpeed = 0.0f;
+            return false;
+        }
+        e.wanderSpeed = 0.0f; // 蓄力站立（同近距蓄力语义：腿停 moveSpeed=0）
+        e.moveSpeed = 0.0f;
+        return false;
+    }
 
     // (1) detect + chase memory（同 aiHostile / aiArcher）：进入 kDetectRange → 追踪 + 刷新记忆；脱离后记忆期内续追。
     if (distXZ <= kDetectRange) {
@@ -5318,7 +5357,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   回退 wander（机制等价 MC 1.0 创造/观察者无敌且不被仇恨）。清残留追踪态（chasing/chaseTimer）
                 //   + Stalker 熄火（fuseTimer 归零）防 Survival→Creative/Spectator 切换后 mob 仍贴脸/蓄力。
                 //   playerTargetable 由 PlayerController 传（mode==Survival）。变值即回退 wander → dirty 若真移动。
-                if (!playerTargetable) {
+                //   t804 例外：**打火石点燃的 Stalker 不走此门**（flintIgnited 不可逆——切观察者已点燃的引信
+                //   照常烧完，机制等价 MC 点燃后的苦力怕不因玩家切模式而熄火）→ 落回 mobType 分发链照跑 aiStalker。
+                if (!playerTargetable && !e.flintIgnited) {
                     if (e.chasing || e.fuseTimer > 0.0f) {
                         e.chasing = false;
                         e.chaseTimer = 0.0f;
@@ -5341,7 +5382,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // 蓄力期（chasing）每帧 bump revision → QML inflateAt 绑定刷新（驱动膨胀动画 + 蓄力发白）；
                     //   即使 aiStalker 返 moved=false（蓄力站立不动），inflate 仍在变 → 须 dirty。熄火（fuseTimer→0）
                     //   亦在 chasing 态内 → 一并刷新让 QML 收回膨胀。
-                    if (e.chasing) dirty = true;
+                    //   t804：打火石点燃（flintIgnited，玩家可能在远处未追踪）fuseTimer 同样每帧变 → 一并 bump
+                    //   （膨胀 / 发白动画照播，不依赖 chasing）。
+                    if (e.chasing || e.flintIgnited) dirty = true;
                     // 引爆当帧移除：detonateStalker 置 exploded=true → 跳过后续重力 / resting（尸体即除）。
                     if (e.exploded) { toRemove.push_back(idx); continue; }
                 } else if (e.mobType == MobNightwalker) {

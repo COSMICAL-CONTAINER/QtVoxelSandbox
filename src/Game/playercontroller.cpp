@@ -3646,6 +3646,27 @@ void PlayerController::placeBlock()
     //   生成 6 格 NetherPortal 门面（机制等价 MC 1.0 黑曜石框内点燃传送门）；未命中 → 回退普通 Fire 点燃
     //   （原 t724 语义不变）。两路均消耗耐久 / 挥手（机制等价 MC 点燃失败生火同样耗打火石）。
     if (m_hotbar && m_world && heldItemId == int(ToolRegistry::FlintAndSteel)) {
+        // t804 ② 优先「打火石点燃 Stalker」：在方块命中之外**独立**跑一条 mob 命中射线（findMobHit，同剪刀
+        //   剪羊 / 攻击选中模式）。命中活体 Stalker → EntityManager::igniteStalkerFlint（置不可逆短引信态：
+        //   aiStalker 无条件蓄力 ~1.5s 原地引爆，不追踪 / 不熄火 / 猫不可断，机制等价 MC 1.0 flint and
+        //   steel 对苦力怕右键点燃）→ 消耗耐久 + 挥手 + return（瞄的是 mob，不再对方块生火）。命中非
+        //   Stalker mob / igniteStalkerFlint 拒（false）→ 落回下方方块点火路径（原 t724/t725 语义不变）。
+        //   幂等：已点燃的 Stalker 再点 → igniteStalkerFlint 返 true（无新效果，照耗耐久，机制等价 MC）。
+        //   spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可点燃。
+        if (m_entityManager) {
+            float mobDist = 0.0f;
+            const int mobIdx = m_entityManager->findMobHit(position(), lookDirection(), kReach, &mobDist);
+            // 遮挡守卫（同 t653② 蛋拾取 / beginMining 攻击约定）：mob 须不晚于命中方块（mobDist<=m_hitDist）
+            //   或无方块命中 —— 瞄木墙但 Stalker 在墙后时不误燃（方块更近 → 走方块点火路径）。
+            if (mobIdx >= 0 && (!m_hasHit || mobDist <= m_hitDist)
+                && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobStalker
+                && m_entityManager->igniteStalkerFlint(mobIdx)) {
+                if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（同点火；创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 点燃 mob 也是一次「使用」动作 → 挥手（t29）
+                return;
+            }
+        }
         if (m_hasHit) {
             const int fx = m_hitBx + m_hitNx, fy = m_hitBy + m_hitNy, fz = m_hitBz + m_hitNz;
             if (fy >= 0 && fy < m_world->height()

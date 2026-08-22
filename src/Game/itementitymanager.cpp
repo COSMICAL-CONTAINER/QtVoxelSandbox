@@ -415,14 +415,29 @@ void ItemEntityManager::tick(qreal dt, World *world)
             dirty = true;
             continue;
         }
-        // t724 掉落物落入火焰被摧毁（机制等价 MC 1.0 掉落物接触火即消失，同岩浆焚毁语义）：实体中心格 ==
-        //   Fire → 摧毁释放该槽。releaseSlot 标 alive=false（slot-reuse，同岩浆 / 仙人掌路径）；末尾
-        //   dirty=true 触发 emit entitiesChanged → QML delegate 隐藏。
+        // t724→t804 掉落物落入火焰**短延迟**焚毁（机制等价 MC 1.0 掉落物入火燃烧片刻后消失）：实体中心格
+        //   == Fire → 首触置 fireBurn=kItemFireBurnSec（0.8s 点燃窗——刚丢进火里的东西短窗内尚可抢回，
+        //   用户语义「往火里丢东西被烧掉，参考岩浆，但别瞬间蒸发」），逐帧倒计归零 → releaseSlot 释放槽
+        //   （slot-reuse，同岩浆 / 仙人掌路径）+ emit itemBurned（呈现层在焚毁点迸白烟）。离开火格（火熄 /
+        //   被冲走 / 拾取失败弹开）→ fireBurn 清 0 熄火（未烧尽可存活，机制等价 MC 出火即停烧）。
+        //   对比：岩浆（上方分支 t343）保持瞬毁——岩浆吞物不留窗，火焚给 0.8s 抢救窗，两者语义刻意不同。
         if (cy >= 0 && world->blockAt(cx, cy, cz) == BlockRegistry::Fire) {
             const int idx = int(&e - &m_entities.front());
-            releaseSlot(idx);
-            dirty = true;
-            continue;
+            if (e.fireBurn <= 0.0f) {
+                e.fireBurn = kItemFireBurnSec; // 首触火 → 点燃（倒计起点）
+            } else {
+                e.fireBurn -= float(dt);
+                if (e.fireBurn <= 0.0f) {
+                    const QVector3D burnPos = e.pos; // 先存坐标再释放槽（releaseSlot 只翻 alive，pos 仍在，
+                                                     // 但语义上取「焚毁瞬间位置」存档更稳）
+                    releaseSlot(idx);
+                    emit itemBurned(burnPos.x(), burnPos.y(), burnPos.z()); // t804 烟粒子信号（槽已释放）
+                    dirty = true;
+                    continue;
+                }
+            }
+        } else if (e.fireBurn > 0.0f) {
+            e.fireBurn = 0.0f; // 离开火格 → 熄火（点燃窗作废，出火未烧尽即存活）
         }
         // t445 ⑤ 掉落物落到 / 触碰仙人掌被摧毁（spec「Q 丢物落到仙人掌→被顶掉/销毁」）：实体中心下方一格 ==
         //   Cactus（即落在仙人掌顶上 / 贴其侧下落）→ 摧毁释放该槽。机制等价 MC 1.0 掉落物接触仙人掌即消失
@@ -506,11 +521,16 @@ void ItemEntityManager::tick(qreal dt, World *world)
         // === 重力分支（空气 + 瀑布）：t60 原逻辑，列扫已修正「水穿透」 ===
         // 已落地：复探支撑格（cellY = floor(pos.y) - 1，即静止中心下方那一格）。水不再算支撑
         //   （isSolid && blockAt != Water）→ 水填满下方时解除 resting 续落 / 下帧转浮水分支。
+        //   t804 火同水穿透：World::isSolid 是「非 air 实存」语义（火焰 / 岩浆皆实存）→ 不豁免 Fire 的
+        //   话掉落物会**停在火格顶面**（中心永不进火格 → 火焚永不触发——用户「往火里丢东西烧不掉」
+        //   根因；同 t803 mob 侧 mobFootprintHasSupport 豁免 Fire 的教训：isSolid 的实体侧消费者须
+        //   逐个豁免非实心光源格，别翻转共享谓词）。
         if (e.resting) {
             const int supportY = qFloor(e.pos.y()) - 1; // 静止中心下方那一格（= 支撑方块 cellY）
             // 三目两支统一为 quint8（blockAt 返回 quint8，false 支显式强转枚举避 -Wextra 枚举/非枚举混用告警）。
             const quint8 sb = (supportY >= 0) ? world->blockAt(cx, supportY, cz) : quint8(BlockRegistry::Air);
-            if (sb != BlockRegistry::Water && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止
+            if (sb != BlockRegistry::Water && sb != BlockRegistry::Fire
+                && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止（火同水：非支撑，穿透入格）
             e.resting = false; // 支撑消失（被挖 / 被水填）→ 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
@@ -523,6 +543,8 @@ void ItemEntityManager::tick(qreal dt, World *world)
         // 下移路径自顶向下扫实体所在列首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
         //   t271 关键修正：水视作穿透（isSolid && blockAt != Water）→ 掉落物穿水面入水，下帧转浮水分支
         //   （机制等价 t220「水不挡沙」），而非粘在水面当着地。
+        //   t804：火同水穿透（同上方 resting 复探的 Fire 豁免）→ 掉落物落进火格（中心在火格内 →
+        //   tick 头部火焚判定接管），而非骑在火格顶面。
         const int topCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
         int botCell = qFloor(newY);
         if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell（vy≈0 时 newY 微高于 pos.y）
@@ -530,7 +552,8 @@ void ItemEntityManager::tick(qreal dt, World *world)
         for (int scy = topCell; scy >= botCell; --scy) {
             if (scy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
             const quint8 b = world->blockAt(cx, scy, cz);
-            if (b != BlockRegistry::Water && world->isSolid(cx, scy, cz)) { solidCellY = scy; break; }
+            if (b != BlockRegistry::Water && b != BlockRegistry::Fire
+                && world->isSolid(cx, scy, cz)) { solidCellY = scy; break; }
         }
 
         if (solidCellY >= 0) {
