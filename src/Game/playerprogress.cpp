@@ -16,8 +16,10 @@
 //   §9：成就名用中文通用词，零 MC 专名。定义序 = 依赖树 DFS 先序（父先于子、同父兄弟相邻）：
 //   主线（t637 布局重排，用户「打开背包最左根 → 获得原木一条线」）：「打开背包」唯一最左根 →
 //   「获得原木」(←打开背包) →「合成台」→「出击时间」→「怪物猎人」→「神射手」(←怪物猎人)；
-//   「挖矿时间到」(←合成台) →「获得升级」→「钻石!」→「附魔师」→「书虫」/「铁匠」(←附魔师)。
-//   独立根线（t637）：「农夫」（收获 10 作物）/「起航」（骑船）/「发射!」（发射器触发）各自独立根。
+//   「挖矿时间到」(←合成台) →「获得升级」→「钻石!」→「附魔师」→「书虫」/「铁匠」(←附魔师)；
+//   「耕种时间到」(←合成台，t752；与「出击时间」「挖矿时间到」并列的第三分支，首次合成任意材质锄头)
+//   →「农夫」(←耕种时间到，t752 由独立根重挂——「做锄头」作前置、「收获 10 作物」为其后继)。
+//   独立根线（t637；t752 后仅剩两条）：「起航」（骑船）/「发射!」（发射器触发）各自独立根。
 //   父成就未解锁时子成就不解锁（unlock 前置检查）。iconId = 节点图标（QML 树节点显示）。
 const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
 {
@@ -32,13 +34,14 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
           int(BlockRegistry::Log) },
         { "crafting_table", "get_wood",       "合成台",     "用 4 块木板合成工作台",
           int(BlockRegistry::CraftingTable) },
-        { "sword_time",     "crafting_table", "出击时间",   "合成一把木剑准备战斗",
+        // t752 ② 材质放宽：出击/挖矿/耕种三兄弟全走「任意材质」（描述同步去「木」字——判定见 onCraft）。
+        { "sword_time",     "crafting_table", "出击时间",   "合成一把剑准备战斗",
           int(ToolRegistry::SwordWood) },
         { "monster_hunter", "sword_time",     "怪物猎人",   "击杀一只敌对怪物",
           int(ToolRegistry::SwordIron) },
         { "sniper",         "monster_hunter", "神射手",     "用箭命中生物 10 次",
           int(ToolRegistry::Bow) },
-        { "mining_time",    "crafting_table", "挖矿时间到", "合成一把木镐开始挖矿",
+        { "mining_time",    "crafting_table", "挖矿时间到", "合成一把镐开始挖矿",
           int(ToolRegistry::PickaxeWood) },
         { "upgrade",        "mining_time",    "获得升级",   "升级到石质工具",
           int(ToolRegistry::PickaxeStone) },
@@ -50,9 +53,14 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
           int(RecipeRegistry::EnchantedBookId) },
         { "blacksmith",     "enchanter",      "铁匠",       "用铁砧修复或合并物品",
           int(BlockRegistry::Anvil) },
-        // ── 独立根线（t637：各自独立根，不挂主线）──
-        { "farmer",         nullptr,          "农夫",       "收获 10 株成熟作物",
+        // t752 ①「耕种时间到」：首次合成任意材质锄头（与「出击时间」「挖矿时间到」同族，挂合成台下并列）；
+        //   「农夫」由独立根（t637）重挂其下。旧存档已解锁 farmer 不受影响——loadVariant 直插 m_unlocked
+        //   绕过父检查（仅新解锁事件走前置；同 t637 get_wood 重挂的兼容语义）。
+        { "time_to_farm",   "crafting_table", "耕种时间到", "合成一把锄头开始耕种",
+          int(ToolRegistry::HoeWood) },
+        { "farmer",         "time_to_farm",   "农夫",       "收获 10 株成熟作物",
           int(RecipeRegistry::WheatId) },
+        // ── 独立根线（t637：各自独立根，不挂主线；t752 后农夫已重挂「耕种时间到」下）──
         { "set_sail",       nullptr,          "起航",       "坐上船开始航行",
           int(RecipeRegistry::OakBoatId) },
         { "dispense",       nullptr,          "发射!",      "让发射器或投掷器弹出物品",
@@ -134,14 +142,20 @@ void PlayerProgress::onMobKilled(int mobType)
 
 void PlayerProgress::onDeath() { ++m_deaths; bumpAndEmit(); }
 
-// 合成成功：累加 + 据产物判成就。CraftingTable→「合成台」；SwordWood→「出击时间」；
-//   PickaxeWood→「挖矿时间到」；任一石质工具→「获得升级」。
+// 合成成功：累加 + 据产物判成就。CraftingTable→「合成台」；t752 ② 材质放宽：任意材质镐→「挖矿时间到」/
+//   任意材质剑→「出击时间」/任意材质锄→「耕种时间到」（旧版仅认木系首件 id 等值——玩家直跳石/铁/钻/金/铜
+//   档合成时不触发是漏判；改按 ToolDef.type 工具类判，新增材质自动覆盖，免逐一枚举 id 集合）；
+//   任一石质工具→「获得升级」。
 void PlayerProgress::onCraft(int resultId)
 {
     ++m_craftsCount;
     if (resultId == int(BlockRegistry::CraftingTable)) unlock("crafting_table");
-    if (resultId == int(ToolRegistry::SwordWood))      unlock("sword_time");
-    if (resultId == int(ToolRegistry::PickaxeWood))    unlock("mining_time");
+    // t752 ②：按工具类型（Pickaxe/Sword/Hoe）判三兄弟成就，全材质（木/石/铁/钻/金/铜）任一均可。
+    if (const ToolRegistry::ToolDef *td = ToolRegistry::tool(resultId)) {
+        if (td->type == BlockRegistry::Pickaxe) unlock("mining_time");
+        if (td->type == BlockRegistry::Sword)   unlock("sword_time");
+        if (td->type == BlockRegistry::Hoe)     unlock("time_to_farm");
+    }
     using TI = ToolRegistry::ToolId;
     if (resultId == int(TI::PickaxeStone) || resultId == int(TI::HoeStone)
         || resultId == int(TI::AxeStone) || resultId == int(TI::ShovelStone)
@@ -206,8 +220,9 @@ void PlayerProgress::setDayCount(int day)
 // 全部成就 [{id,name,desc,unlocked,parentId,parentName,depth,locked,col,row,iconId}, ...]（定义序 = 依赖树
 //   DFS 先序）。parentName = 父成就中文名（locked 态提示）；depth = 沿 parentId 链上溯层数（0=根成就）；
 //   locked = 未解锁 且 父未解锁（父已解锁但未解锁 → 可解锁，locked=false，QML 显 ○）。
-//   t619 树状图布局字段：col = depth（依赖层级，root=0 在左）；row = 同列内垂直序 —— 递归子树布局：
-//   同列内按「子树叶子数」分配垂直跨度（多子树的父的孙辈互不重叠），x=col×列距、y=row×行距（QML 摆位）。
+//   t619 树状图布局字段：col = depth（依赖层级，root=0 在左）；row = 同列内垂直序（t752 ③ 起 qreal，可带
+//   .5 半行）—— 递归子树布局：叶子占 1 行、父 = 首末子女中心的中点（对称对齐；多子树的父的孙辈互不重叠），
+//   x=col×列距、y=row×行距（QML 摆位；QML 侧 visibleTree 复刻同一算法，见 Main.qml）。
 //   iconId = 节点图标物品 id（QML 据 isTool/isMaterial 路由 ToolIcon/MaterialIcon/方块 Image）。
 QVariantList PlayerProgress::achievements() const
 {
@@ -237,10 +252,11 @@ QVariantList PlayerProgress::achievements() const
     };
 
     // ── t619 树状布局（递归子树垂直分配）：row = 同列内序 ──
-    // 叶子子树占 1 行；父节点 row = 子女 row 的中点（居中对齐子女）；各根子树垂直堆叠不重叠。
+    // 叶子子树占 1 行；父节点 row = 首末子女中心的中点（居中对齐子女）；各根子树垂直堆叠不重叠。
     // defs 父先于子（DFS 先序）→ 按定义序递归即可（子必在父之后定义）。
-    QHash<QString, int> rowOf;          // id → 已分配 row（-1 = 未分配）
-    for (const auto &d : defs) rowOf.insert(QString::fromUtf8(d.id), -1);
+    QHash<QString, qreal> rowOf;        // id → 已分配 row（-1 = 未分配；t752 ③ 升格 qreal——偶数子女跨度
+                                        //   的精确中点带 .5，QML 摆位按 real 计算天然兼容）
+    for (const auto &d : defs) rowOf.insert(QString::fromUtf8(d.id), -1.0);
     int nextRow = 0;                    // 全局行计数器（跨根连续堆叠）
     // 递归分配 id 的子树行；返回子树占的行数。
     std::function<int(const QString &)> layoutSubtree = [&](const QString &id) -> int {
@@ -250,13 +266,18 @@ QVariantList PlayerProgress::achievements() const
             if (d.parentId && id == QString::fromUtf8(d.parentId))
                 children.append(QString::fromUtf8(d.id));
         if (children.isEmpty()) {
-            rowOf[id] = nextRow++;      // 叶子占 1 行
+            rowOf[id] = qreal(nextRow++); // 叶子占 1 行
             return 1;
         }
-        const int startRow = nextRow;
         int total = 0;
         for (const auto &c : children) total += layoutSubtree(c);
-        rowOf[id] = startRow + (total - 1) / 2; // 父居中于子女跨度
+        // t752 ③ 布局对齐修复：父 row = 首末子女「中心」的中点 (c1+cn)/2，替代旧式「子树叶子跨度中点」
+        //   startRow+(total-1)/2（整除截断）。旧式在子女子树行数不均时把父拉向大子树——例（旧树形）
+        //   合成台下「出击」子树 1 行 +「挖矿」子树 2 行（附魔师展开双分支），旧式父 = 0+(3-1)/2 = 1
+        //   而挖矿链中心 1.5 → 父距上路 1.0 行、距下路中心仅 0.5 行（用户「下方占比多、更贴近」，
+        //   上下并列路线不等距）。中点式对任意子女组合恒等距对称；且中点 ∈ [c1, cn] ⊆ 自身子树行区间，
+        //   不会侵入兄弟子树（叶子行分配 nextRow 顺序不变，total 语义照旧）。
+        rowOf[id] = (rowOf[children.first()] + rowOf[children.last()]) / 2.0;
         return total;
     };
     // 按定义序对每个根（parentId 空）起布局。

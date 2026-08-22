@@ -45,7 +45,8 @@
 //   - revision（int，任一统计 / 成就变更自增；成就 / 统计列表 delegate 触碰 revision 取最新值）。
 //   - Q_INVOKABLE QVariantList achievements()：[{id,name,desc,unlocked,parentId,parentName,depth,locked,col,row,iconId}, ...]
 //     供 QML 树状成就图显示（定义序 = 依赖树 DFS 先序：父先于子、同父兄弟相邻）。col = 依赖层级（root=0），
-//     row = 同列内垂直序（QML 布局用：x=col×列距、y=row×行距）。iconId = 节点图标物品/方块 id（QML 路由
+//     row = 同列内垂直序（qreal 可带 .5 半行；父 = 首末子女中心中点，t752 ③ 对称对齐；QML 布局用：
+//     x=col×列距、y=row×行距）。iconId = 节点图标物品/方块 id（QML 路由
 //     方块 Image / ToolIcon / MaterialIcon）。locked = 父未解锁。
 //   - Q_INVOKABLE QVariantList statsList()：[{name, value}, ...] 供 QML 统计面板显示。
 //
@@ -104,7 +105,8 @@ public:
     // 玩家死亡（仅 Survival）。累加 deaths。
     Q_INVOKABLE void onDeath();
     // 合成成功（resultId = 产物物品 id）。累加 craftsCount + 据产物判成就：
-    //   CraftingTable → 「合成台」；SwordWood → 「出击时间」；PickaxeWood → 「挖矿时间到」；
+    //   CraftingTable → 「合成台」；t752 ② 材质放宽（按 ToolDef.type 判，全材质任一）：
+    //   任意剑 → 「出击时间」；任意镐 → 「挖矿时间到」；任意锄 → 「耕种时间到」；
     //   石质工具（石镐/石剑/石斧/石锄/石铲）→ 「获得升级」。
     Q_INVOKABLE void onCraft(int resultId);
     // 拾取物品（itemId = 物品 id）。累加 itemsPicked + 据物品判成就：Log/SpruceLog → 「获得原木」。

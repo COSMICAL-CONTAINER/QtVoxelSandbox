@@ -10202,7 +10202,7 @@ Window {
     // pause-menu 进度面板（行2「进度」按钮 → progressOpen）：**成就树状图**（t619 重做；用户要「从左到右
     //   排布、连线横平竖直、界面可上下左右拖动看不同成就之间的连线」）。
     //   布局：progress.achievements() 携 col（依赖层级，root=0）+ row（同列垂直序；C++ 递归子树布局——叶子占
-    //   1 行、父居中于子女跨度、多根垂直堆叠）→ QML 节点 x = kPad + col×kColW(200)、y = kPad + row×kRowH(110)。
+    //   1 行、父居中于首末子女中心（t752 ③ 对称对齐）、多根垂直堆叠）→ QML 节点 x = kPad + col×kColW(200)、y = kPad + row×kRowH(110)。
     //   连线：正交折线（父右中点 → 水平出 → 列间垂直转 → 水平入子左中点），Repeater+Rectangle 拼线段（横平竖直
     //   elbows，纯 QtQuick 无 Canvas）。父已解锁=亮绿线 / 父未解锁=暗灰线。
     //   节点三态：已解锁=绿框亮底+✓；可进行（父解锁未达成）=黄框脉动描边+○；locked（父未解锁）=暗底+🔒。
@@ -10338,17 +10338,24 @@ Window {
                 }
                 for (let i = 0; i < tree.length; ++i)
                     if (!tree[i].parentId) walk(tree[i].id)
-                // 递归布局：可见叶子 1 行；父 = 可见子女跨度中点；跨根连续堆叠（复刻 C++ 算法）。
+                // 递归布局：可见叶子 1 行；父 = 首末子女中心的中点；跨根连续堆叠（复刻 C++ 算法）。
                 const rowOf = {}
                 let nextRow = 0
                 const layout = (id) => {
                     const ch = kids[id]
                     const visCh = ch ? ch.filter(c => visible[c]) : []
                     if (!visCh.length) { rowOf[id] = nextRow++; return 1 }
-                    const start = nextRow
                     let total = 0
                     for (let k = 0; k < visCh.length; ++k) total += layout(visCh[k])
-                    rowOf[id] = start + (total - 1) / 2
+                    // t752 ③ 布局对齐修复：父 row = 首末子女「中心」的中点 (rowOf[c1]+rowOf[cn])/2，
+                    //   替代旧式「子树叶子跨度中点」start+(total-1)/2。旧式在子女子树行数不均时把父拉向
+                    //   大子树——复现用户 bug：旧树形合成台下「出击」子树 1 行 +「挖矿」子树 2 行（附魔师
+                    //   展开书虫/铁匠双分支），旧式父 = 0+(3-1)/2 = 1 而挖矿链中心 1.5 → 父距上路 1.0 行、
+                    //   距下路中心仅 0.5 行（「下方占比多、更贴近」，上下并列路线不等距）。中点式对任意
+                    //   子女组合恒等距对称（偶跨度得 .5 半行，JS 除法天然浮点）；且中点 ∈ [c1,cn] ⊆ 自身
+                    //   子树行区间（叶子行 nextRow 顺序分配不变），不与兄弟子树重叠。C++ achievements()
+                    //   同公式同改（两处算法互为镜像，须同步）。
+                    rowOf[id] = (rowOf[visCh[0]] + rowOf[visCh[visCh.length - 1]]) / 2
                     return total
                 }
                 for (let i = 0; i < tree.length; ++i)
@@ -10366,15 +10373,20 @@ Window {
                     // t678(d) 单链节点（仅 1 个子女的链）不显 +/− 钮：折叠 1 子节点只藏起 1 个节点（视觉
                     //   无收缩收益）且面板无法从该钮展开子树 —— 只在**真分叉**（≥2 子女）处给钮（用户点名
                     //   「打开背包→获得原木→合成台 一条线不显 +/− 钮」）。
-                    o.hasKids = ch && ch.length >= 2
+                    // t752 ④ 无后续子项的成就（神射手 / 起航 / 发射! 等叶子）恒不显 +/- 展开占位符：钮只
+                    //   服务「子树可收起」，叶子无子树可收（显式 false 而非 undefined，语义钉死）；后续真加
+                    //   后继时本处 ≥2 判定自动放行。
+                    o.hasKids = ch ? ch.length >= 2 : false
                     o.collapsed = cl[n.id] === true
                     out.push(o)
                 }
                 return out
             }
             // 树边界（最大列 / 行号；连线端点 + 画布尺寸用；t637 读重排后的 visibleTree）。
+            //   t752 ③ treeRows int→real：中点式布局父行可带 .5（全局最大行正常是叶子整行，real 仅为
+            //   奇形防御——int 属性会截断 .5 致画布高度少半行）。
             readonly property int treeCols: { const _t = visibleTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].col); return m }
-            readonly property int treeRows: { const _t = visibleTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].row); return m }
+            readonly property real treeRows: { const _t = visibleTree; let m = 0; for (let i = 0; i < _t.length; ++i) m = Math.max(m, _t[i].row); return m }
             // 已解锁计数（副标题「已解锁 X / Y」；全树口径 —— 收起不改「已解锁 / 总数」）。
             readonly property int unlockedCount: { const _t = achTree; let c = 0; for (let i = 0; i < _t.length; ++i) if (_t[i].unlocked) ++c; return c }
             Column {
