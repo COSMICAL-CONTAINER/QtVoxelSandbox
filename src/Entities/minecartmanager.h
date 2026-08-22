@@ -84,6 +84,11 @@ public:
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个矿车的朝向（度；车头方向，呈现层矿车 Model eulerRotation.y）。越界返回 0。
     Q_INVOKABLE float yawAt(int i) const;
+    // t769 第 i 个矿车的车身俯仰角（度；正 = 车头上扬，同 EntityManager::arrowPitchAt 约定 → 呈现层
+    //   delegate eulerRotation.x 直连）。坡上贴合轨面（1:1 坡 ~±45°）、平轨 / 拐角 / 离轨 0；跨段（平↔坡）
+    //   沿车头向 ±kCartPitchProbe 采样轨面高差 → 随位置线性过渡（连续无阶跃）。**纯呈现量**：物理判定
+    //   （碰撞盒 / 命中射线 / 骑乘座位）不读它。越界 / 空槽返回 0。
+    Q_INVOKABLE float pitchAt(int i) const;
     // t735 ② 第 i 个矿车的剩余耐久（可承受击数；满血 = kCartHitPoints，越界 / 空槽返回 0）。呈现层 delegate
     //   绑它（`carts.revision >= 0 ? carts.hpAt(index) : 0` 表达式形式注册 revision 依赖，t498/t556 铁律），
     //   值变小 → onCartHpChanged 触发受击摇晃动画。越界 / 空槽返 0（空槽 delegate 本就 visible=false）。
@@ -203,6 +208,7 @@ private:
         float dirZ = 1.0f;   // 行进方向 Z
         float speed = 0.0f;  // 沿行进方向速度（blocks/s；W 加速 / 松键摩擦衰减 / 轨尽头停）
         float yaw = 0.0f;    // 车头朝向（度；呈现层矿车 Model eulerRotation.y）
+        float pitch = 0.0f;  // t769 车身俯仰角（度；正 = 车头上扬。坡上贴合轨面，纯呈现量 —— 见 pitchAt 注释）
         int hp = 0;           // t735 ② 剩余耐久击数（spawnCart 置 kCartHitPoints；创造 instantBreak 不看它）。
                               //   非 default-member-init 常量（kCartHits 定义于类后半部，spawnCart 显式赋值）。
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
@@ -255,6 +261,23 @@ private:
     //   下方探测轨隧道 / 把车（连人）钉到地板下方轨面的假支撑都由此拒；轨 / 火把 / 花草 / 水（无碰撞）
     //   不遮挡，坡顶场景格与轨之间只隔空气不受影响）。返轨格 Y（-1 = 列内无可达轨）。只读 World。
     int scanRailColumn(World *world, int cx, int topY, int cz) const;
+
+    // t769 轨格内坡面高（从 pinCartY 抽出的纯查询，Y 钉定 / 俯仰采样共用）：轨格 (bcx,y,bcz) 按连接位定
+    //   行进轴（mesher 同源：EW（±X 连接）读 ±X 探针、NS 读 ±Z；0 连接读 RailAxisEWFlag 轴偏好），格内
+    //   横向位置 (fx,fz) 上的邻轨抬升叠加（只抬 δ>0 —— 高端平铺、低端画坡；与 PartialBlockGeometry Rail
+    //   case 的 riseAtX/riseAtZ 同公式同语义、同读 railProbeDelta → 渲染坡面 / 矿车 Y / 俯仰采样三者同一张面）。
+    //   拐角取四角抬升的双线性中心；V 形凹谷（两端皆 +1）取 2|轴-0.5|；十字无坡。只读 World。
+    static float railRiseAt(World *world, int bcx, int y, int bcz, float fx, float fz);
+
+    // t769 轨道面高度采样（俯仰角计算用）：世界坐标 (sx,sz) 所在列自 topY 向下扫最近可达轨格（scanRailColumn
+    //   同语义）→ 轨格 Y + 格内坡面高（railRiseAt）。列内无可达轨 → 返 false。caller 传的 topY 应为车所在
+    //   轨层 +1（采样列与车列至多相邻 → 轨层差 ∈ [-1,+1]，扫描窗 [topY, topY-2] 恰覆盖）。
+    bool railSurfaceYAt(World *world, float sx, float sz, int topY, float &outY) const;
+
+    // t769 车身俯仰刷新（纯呈现）：以车心为基准、沿车头向 ±kCartPitchProbe 两点采样轨面高（railSurfaceYAt）
+    //   → pitch = atan2(前-后, 2·probe)。railY = 车所在列轨层（pinCartY 返回值 / 被骑停驻帧的前置钉定 railY）。
+    //   详见 .cpp 实现处头注释（采样窗语义 / 跨段过渡 / 符号约定）。
+    void updateCartPitch(Cart &c, World *world, int railY);
 
     // t708 沿轨推进（共享：被骑 / 空车被推同一物理）：把矿车沿当前行进 dir 推进 speed×dt（支持负速倒行
     //   —— S 反向推力的减速 → 负速退行），正行跨格时重选连接向（拐角自动转弯；轨尽头 / 出轨停）；
@@ -323,6 +346,10 @@ private:
     static constexpr float kCartBumpDrag = 2.0f;
     // 速度 lerp 接近率（1/s；动量感：松键后滑行一段渐停）。
     static constexpr float kCartAccel  = 3.0f;
+    // t769 俯仰采样半窗（格）：沿车头向 ±0.25 两点采样轨面高差（≈ 车轮距 —— 斗长 1.0 的半长减帮厚）。
+    //   坡中段窗全落坡格 → 1:1 坡恰 45°；跨段折缝（平↔坡）窗横跨两段 → 线性过渡（过渡带 ~0.5 格，与车速 /
+    //   帧率无关 —— 轨面高分段线性且连续 → 俯仰随位置连续，无需时间平滑）。
+    static constexpr float kCartPitchProbe = 0.25f;
     // 空车 / 松键摩擦衰减率（1/s）。
     static constexpr float kCartFriction = 2.0f;
 };
