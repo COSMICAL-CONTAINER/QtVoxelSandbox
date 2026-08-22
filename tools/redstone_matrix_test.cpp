@@ -21,6 +21,7 @@
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
 #include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
+#include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 
 namespace {
 
@@ -2348,6 +2349,163 @@ int main(int argc, char *argv[])
                              "exempt, exactly one explosion, inflate visible); item dropped into fire "
                              "burns after ~0.8s window (itemBurned smoke once at fire cell) vs lava "
                              "instant destroy, item rescued within window survives after fire removed";
+    }
+
+    // ── t805 船上岸回归探针（用户「船又能直接开上岸」；回归根因 = t711/21fff7b 把碰岸探测的 ignoreIce
+    //    豁免扩为「与水面同高的任何固体」→ 世界海缓坡（seaColumnHeight 每 ~12 格升 1）的 h==waterLevel
+    //    同层湿沙带宽达 10+ 格，整条带变「可行驶表面」→ 船从海里顶着 W 直接开上沙滩深处 = t661「上岸应
+    //    难 / 需速度」语义被冲掉。修复 = 豁免收回仅冰族 isIce）──
+    //    四泳道断言（BoatManager 直调 tickRiddenBoat，dt=1/60 定步长；全程不跑 BoatManager::tick → 被骑
+    //    船物理唯一由本探针驱动，确定性；未骑船不 tick → 冻结在原位不干扰后续泳道）：
+    //    A 水道：开阔水满速推进 ≥7 b/s（kBoatSpeed=8 的 lerp 稳态 7.9）；
+    //    B 陆道：无水陆档怠速 ∈[1.8,3.0]（kBoatSpeed×kBoatLandSpeedMul=2.4，t584 原值）+ 水陆速比 ≥2.5
+    //      （「离水减速」骤降比，期望 ~3.3）；
+    //    C 岸道：同层湿沙（沙格顶==水面顶）+1 格干沙滩柱 —— 满 W 冲岸 5s：船停在水线前（中心 x 从未越
+    //      沙列界，仍浮水面 Y==水面顶，=「不可直接开上岸」）；随后倒挡 1s 退回水道 ≥3 格（=「贴岸可被推
+    //      下水」，t611 只清朝向分量的语义）；
+    //    D 冰道：同层冰面（冰格顶==水面顶）—— 船可从水面直接滑上冰面越界 ≥1.5 格（L10 冰豁免保留，防
+    //      本修复过度回退把冰也挡了）。冰是船可行驶表面 / 沙岸是岸（船贴水线停），两者本就应不同。──
+    {
+        // rig 选址：本测试世界 setHeight(48) 而 worldgen 地表基线 64 → 高度被钳到 47，y 44..47 几乎整片
+        //   实心石（t804 实测同因「kRigY=41 也有生成石柱」）。不清场扫描、直接**凿进石里**：每泳道 =
+        //   3 格宽条带（船 footprint Z ±0.7 自条带中格 bz+k+1.5 覆盖 bz+k..bz+k+2，恰不溢出到邻带），
+        //   y=44 铺石板（防下方天然洞穴漏支撑）、y 45..47 凿空（船碰撞层 cy/cy+1 必净空）。
+        //   本探针最后跑，覆写既有探针残留无副作用；rigOk = 石板落位抽查。
+        const int bx = 6, bz = 6;             // 远离世界边 clamp（minX=0.5）；x 39 / z 20 以内全在界内
+        const int fy = 44;                    // 石板层；水面 / 同层沙面 / 冰面 = 45；水面顶 = 46
+        const int zA = bz + 1, zB = bz + 5, zC = bz + 9, zD = bz + 13; // 泳道中格（条带 = 中格 ±1）
+        BoatManager boats;
+        bool rigOk = true;
+        bool okSpeeds = false, okStop = false, okFloat = false, okReverse = false, okIce = false;
+        float waterSpeed = 0.0f, landSpeed = 0.0f, maxXC = 0.0f, revX = 0.0f, xD = 0.0f;
+        QVector3D posC;
+        QVector3D bp;
+        bool crashed = false;
+        const auto mount = [&boats](const QVector3D &p) {   // 从船正上方垂直下射线（命中即骑）
+            return boats.tryMount(QVector3D(p.x(), p.y() + 3.0f, p.z()), QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+        };
+        // 凿道：四条带（z 中格 ±1）× x bx..bx+33：y=44 Stone、y 45..47 Air；随后各道铺特征。
+        const int laneMid[4] = { zA, zB, zC, zD };
+        for (const int zm : laneMid) {
+            for (int dx = 0; dx <= 33; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    w.setBlock(bx + dx, fy, zm + dz, BR::Stone, 0);
+                    w.setBlock(bx + dx, fy + 1, zm + dz, BR::Air, 0);
+                    w.setBlock(bx + dx, fy + 2, zm + dz, BR::Air, 0);
+                    w.setBlock(bx + dx, fy + 3, zm + dz, BR::Air, 0);
+                }
+        }
+        rigOk = w.blockAt(bx + 2, fy, zA) == BR::Stone;
+        // A 水道：整条铺水（45 层）；B 陆道：保持凿空石板（船贴 45.2 息速）。
+        for (int dx = 0; dx <= 33; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, zA + dz, BR::Water, 0);
+        // C 岸道：水 bx..bx+7 + 同层湿沙列 bx+8（沙格顶==水面顶 46）+ 干沙滩柱 bx+9（顶 47，高出水面 1）。
+        for (int dx = 0; dx <= 7; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, zC + dz, BR::Water, 0);
+        for (int dz = -1; dz <= 1; ++dz) {
+            w.setBlock(bx + 8, fy + 1, zC + dz, BR::Sand, 0);
+            w.setBlock(bx + 9, fy + 1, zC + dz, BR::Sand, 0);
+            w.setBlock(bx + 9, fy + 2, zC + dz, BR::Sand, 0);
+        }
+        // D 冰道：水 bx..bx+7 + 同层冰面 bx+8..bx+12（冰格顶==水面顶 → L10 豁免应放行）。
+        for (int dx = 0; dx <= 12; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, zD + dz, dx <= 7 ? BR::Water : BR::Ice);
+
+        if (rigOk) {
+            // A 水道满速：帧 100→150（1.67→2.5s）平均速度 ≈7.9（kBoatSpeed=8，approach=4 的 lerp 稳态）。
+            //   注：spawnBoat 返 bool（非索引）→ 骑乘射线用**确定的落点**（格中心 (x+0.5, y+1, z+0.5)，
+            //   kBoatDraft=0）发，船索引用 tryMount 后的 ridingIndex()。
+            const bool spawnA = boats.spawnBoat(bx + 2, fy + 1, zA, BoatManager::Oak);
+            const bool mountA = spawnA && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 2), float(zA) + 0.5f));
+            const int boatA = boats.ridingIndex();
+            float xA100 = 0.0f, xA150 = 0.0f;
+            for (int t = 1; t <= 150; ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                if (t == 100) xA100 = boats.posAt(boatA).x();
+                if (t == 150) xA150 = boats.posAt(boatA).x();
+            }
+            waterSpeed = (xA150 - xA100) / (50.0 / 60.0);
+
+            // B 陆道怠速：同一测量窗（期望 2.4 = 8×kBoatLandSpeedMul 0.3，t584 原值）。tryMount 自动换骑。
+            const bool spawnB = boats.spawnBoat(bx + 2, fy, zB, BoatManager::Oak);
+            const bool mountB = spawnB && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 1), float(zB) + 0.5f));
+            const int boatB = boats.ridingIndex();
+            float xB100 = 0.0f, xB150 = 0.0f;
+            for (int t = 1; t <= 150; ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                if (t == 100) xB100 = boats.posAt(boatB).x();
+                if (t == 150) xB150 = boats.posAt(boatB).x();
+            }
+            landSpeed = (xB150 - xB100) / (50.0 / 60.0);
+            okSpeeds = mountA && mountB && !crashed && boats.aliveAt(boatA) && boats.aliveAt(boatB)
+                       && waterSpeed >= 7.0f && landSpeed >= 1.8f && landSpeed <= 3.0f
+                       && waterSpeed / landSpeed >= 2.5f;
+
+            // C 岸道挡停：满 W 冲岸 5s —— 探测（修复后同层沙不再豁免）每帧清朝向速度 → 船停在沙列界前
+            //   ~0.5 格（中心 x ≤ 界-0.2），从未越过；Y 仍钉水面顶 46（未搁浅 / 未爬岸）。
+            const bool spawnC = boats.spawnBoat(bx + 2, fy + 1, zC, BoatManager::Oak);
+            const bool mountC = spawnC && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 2), float(zC) + 0.5f));
+            const int boatC = boats.ridingIndex();
+            for (int t = 1; t <= 300; ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                const float x = boats.posAt(boatC).x();
+                if (x > maxXC) maxXC = x;
+            }
+            posC = boats.posAt(boatC);
+            okStop = mountC && !crashed && boats.aliveAt(boatC)
+                     && maxXC <= float(bx + 8) - 0.2f   // 中心从未越过沙列界（界 = bx+8.0）
+                     && posC.x() >= float(bx + 6);      // 且确已冲到水线（非中途卡住）
+            okFloat = std::abs(posC.y() - float(fy + 2)) <= 0.3f; // 仍浮水面（水面顶 = fy+2 = 46）
+            // C 倒挡退水：贴岸船倒退 1s（t611：探测只清朝向分量 → 背向保留）→ 退回水道 ≥3 格。
+            for (int t = 1; t <= 60; ++t)
+                boats.tickRiddenBoat(1.0 / 60.0, &w, -1.0f, 0.0f, bp, crashed);
+            revX = boats.posAt(boatC).x();
+            okReverse = !crashed && posC.x() - revX >= 3.0f;
+
+            // D 冰道放行（豁免保留）：满 W 冲冰 —— 冰族仍豁免 → 船从水面直接滑上冰面（中心越冰列界
+            //   bx+8 至少 1.5 格；冰档换挡后 11.2 b/s，~1.3s 即达）。
+            const bool spawnD = boats.spawnBoat(bx + 2, fy + 1, zD, BoatManager::Oak);
+            const bool mountD = spawnD && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 2), float(zD) + 0.5f));
+            const int boatD = boats.ridingIndex();
+            for (int t = 1; t <= 300 && xD < float(bx + 10); ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                xD = boats.posAt(boatD).x();
+            }
+            okIce = mountD && !crashed && boats.aliveAt(boatD)
+                    && xD >= float(bx + 8) + 1.5f
+                    && std::abs(boats.posAt(boatD).y() - float(fy + 2) - 0.2f) <= 0.5f; // 骑在冰面顶上
+
+            // 清场（石板 / 水 / 沙 / 冰全清 Air —— 与其它探针同款即用即清）。
+            boats.clearAll();
+            for (const int zm : laneMid)
+                for (int dx = 0; dx <= 33; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dy = fy; dy <= fy + 3; ++dy)
+                            w.setBlock(bx + dx, dy, zm + dz, BR::Air, 0);
+            tickN(w, 2);
+        }
+        const bool ok = rigOk && okSpeeds && okStop && okFloat && okReverse && okIce;
+        if (!ok) {
+            qInfo().noquote() << "  [t805 diag] rigOk" << rigOk << "| okSpeeds" << okSpeeds
+                              << "waterSpeed" << QString::number(waterSpeed, 'f', 2)
+                              << "landSpeed" << QString::number(landSpeed, 'f', 2)
+                              << "| okStop" << okStop << "maxXC" << maxXC << "sandEdge" << bx + 8
+                              << "posC.x" << posC.x() << "| okFloat" << okFloat << "posC.y" << posC.y()
+                              << "| okReverse" << okReverse << "revX" << revX
+                              << "| okIce" << okIce << "xD" << xD;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t805 boat shore regression: full-W boat in open water reaches ~8 b/s while "
+                             "land gear idles at 2.4 (ratio ~3.3, sharp out-of-water decel); same-level wet "
+                             "sand shore (block top == water surface top) stops the boat at the waterline "
+                             "(center never crosses the sand column, still afloat at surface Y) and reverse "
+                             "backs it >=3 blocks into the water; same-level ice stays exempt (boat slides "
+                             "onto ice >=1.5 blocks past the edge, riding on top) - restores t661 "
+                             "'beaching needs speed / shore stops boat' semantics lost in 21fff7b (t711)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
