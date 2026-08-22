@@ -839,6 +839,120 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
+    // P12b t769 矿车坡道行驶探针（Entities 层 MinecartManager 直编，同 P11/P12 模式）：平-坡-平轨道
+    //   （x0..x0+1 @Y 低平 + 坡格 x0+1@Y 东邻 x0+2@Y+1 + x0+2..x0+3 @Y+1 高平 —— 1:1 上坡）。
+    //   (a) 被骑上坡（tryMount + W 持续 +X）：断言 400 tick 内爬上高平台停驻死端 (x0+3.5, Y+1+rideH)
+    //       （旧版 pickTrackStep 邻轨防御只查同层 → 坡脚格心 x0+1.5 停死，本探针复现「上不去」）；
+    //       沿途坡段 Y 随水平进度连续插值（y = Y+(x-(x0+1))+rideH，验收「非阶跃」）。
+    //   (b) 空车下坡（顶平台 spawn + 玩家向西续推，同 P12(b) 跑法）：断言滑到低平台停驻死端 (x0+0.5,
+    //       Y+rideH)（旧版在坡顶格心 x0+2.5 停死，复现「下不去」）；沿途坡段 Y 同款连续插值。
+    //   (c) 坡格中心直接 spawn 的静止车：初始俯仰即贴合坡面（车头朝上坡向）——不需先行驶（放置即平行）。
+    {
+        const auto [x0, z0] = nextSlot();
+        const float rideH = 0.45f; // kCartRideH（P11 同款镜像值：轨格 cell 底 + 1/16 板 + 车底偏移）
+        // t769 教训：本 slot 的地形可达 y≥42（「40 以上必空」假设在该列失效）—— 坡轨上方格若被地形实心
+        //   占据，scanRailColumn 的实心遮挡断扫（复审 #4 语义，防隔板假支撑）会把坡中段（pos.y 跨上轨层
+        //   后向下扫）判离轨 → 车冻死在坡 55% 处。用户场景是露天坡（坡格上方是天空）→ rig 先净空轨道
+        //   box（x0..x0+3 × kRigY..kRigY+2 × z0）再铺轨，等价露天环境。
+        for (int i = 0; i <= 3; ++i)
+            for (int dy = 0; dy <= 2; ++dy)
+                if (w.blockAt(x0 + i, kRigY + dy, z0) != BR::Air)
+                    w.setBlock(x0 + i, kRigY + dy, z0, BR::Air);
+        w.setBlock(x0,     kRigY,     z0, BR::Rail, 0);
+        w.setBlock(x0 + 1, kRigY,     z0, BR::Rail, 0); // 坡格（东邻高一格 → 坡面自西向东抬升）
+        w.setBlock(x0 + 2, kRigY + 1, z0, BR::Rail, 0);
+        w.setBlock(x0 + 3, kRigY + 1, z0, BR::Rail, 0);
+        // 坡段期望表面（验收 Y 连续插值）：x∈[x0+1,x0+2] → Y+(x-(x0+1))；低平段 Y；高平段 Y+1。
+        const auto wantSurf = [&](float x) {
+            if (x < float(x0 + 1)) return float(kRigY);
+            if (x > float(x0 + 2)) return float(kRigY + 1);
+            return float(kRigY) + (x - float(x0 + 1));
+        };
+        MinecartManager carts;
+        // (a) 被骑上坡。
+        carts.spawnCart(x0, kRigY, z0, &w);
+        const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+        bool okA = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+        bool yContA = true;
+        float slopePitchA = 0.0f; int slopePitchN = 0; // 坡中段（x∈[x0+1.3,x0+1.7] 窗全落坡格）俯仰均值
+        for (int t = 0; t < 400; ++t) {
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp); // W 持续（+X 上坡）
+            carts.tickPushedCarts(0.016, &w);
+            if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) {
+                qInfo().noquote() << "  uphill Y off surface at tick" << t << "pos" << cp;
+                yContA = false;
+                break;
+            }
+            if (cp.x() > float(x0 + 1) + 0.3f && cp.x() < float(x0 + 1) + 0.7f) {
+                slopePitchA += carts.pitchAt(0);
+                ++slopePitchN;
+            }
+        }
+        const QVector3D topP = carts.posAt(0);
+        okA = okA && yContA
+            && std::fabs(topP.x() - float(x0 + 3) - 0.5f) < 0.01f
+            && std::fabs(topP.y() - float(kRigY + 1) - rideH) < 0.02f
+            && slopePitchN >= 3 && std::fabs(slopePitchA / float(slopePitchN) - 45.0f) < 1.0f
+            && std::fabs(carts.pitchAt(0)) < 0.5f; // 停驻高平台 → 俯仰归零
+        if (!okA) qInfo().noquote() << "  uphill final pos" << topP << "pitch" << carts.pitchAt(0)
+                                     << "slopePitch" << (slopePitchN ? slopePitchA / float(slopePitchN) : 0.0f)
+                                     << "samples" << slopePitchN
+                                     << "con(slope)" << int(w.stateAt(x0 + 1, kRigY, z0) & 0x0F)
+                                     << "blockAboveSlope" << int(w.blockAt(x0 + 1, kRigY + 1, z0));
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| cart climbs ramp: reaches top dead-end, Y interpolates, pitch ~+45 on slope / 0 on flat (t769)";
+        // (b) 空车下坡：销毁被骑车 → 顶平台格心重生（连接位定轴朝 -X 下坡向）→ 玩家续推滑降。
+        carts.hitCartFromRay(QVector3D(topP.x(), float(kRigY) + 3.0f, topP.z()),
+                             QVector3D(0, -1, 0), 4.0f, &w, true);
+        carts.spawnCart(x0 + 3, kRigY + 1, z0, &w);
+        QVector3D player = carts.posAt(0);
+        bool yContB = true;
+        float slopePitchB = 0.0f; int slopePitchN2 = 0;
+        for (int t = 0; t < 400; ++t) {
+            carts.pushEmptyCart(&w, player, -1.0f, 0.0f); // 玩家追着车向西推
+            carts.tickPushedCarts(0.016, &w);
+            player = carts.posAt(0);
+            if (std::fabs(player.y() - (wantSurf(player.x()) + rideH)) > 0.02f) {
+                qInfo().noquote() << "  downhill Y off surface at tick" << t << "pos" << player;
+                yContB = false;
+                break;
+            }
+            if (player.x() > float(x0 + 1) + 0.3f && player.x() < float(x0 + 1) + 0.7f) {
+                slopePitchB += carts.pitchAt(0); // 车头朝坡下 → 俯仰应为负（下俯）
+                ++slopePitchN2;
+            }
+        }
+        const bool okB = yContB
+            && int(std::floor(player.x())) == x0 // 滑到低平台格（全程下坡完成；精确停点是摩擦渐停位置，
+                                                 //   不钉死端格心 —— 空车无持续供能，可能在心前磨停）
+            && std::fabs(player.y() - float(kRigY) - rideH) < 0.02f
+            && slopePitchN2 >= 3 && std::fabs(slopePitchB / float(slopePitchN2) + 45.0f) < 1.0f;
+        if (!okB) qInfo().noquote() << "  downhill final pos" << player << "pitch" << carts.pitchAt(0)
+                                    << "slopePitch" << (slopePitchN2 ? slopePitchB / float(slopePitchN2) : 0.0f)
+                                    << "samples" << slopePitchN2;
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| cart descends ramp: coasts to bottom dead-end, Y interpolates, pitch ~-45 (nose downhill) (t769)";
+        // (c) 坡格中心直接 spawn 的静止车：初始俯仰即贴合坡面（车头朝上坡向 +45；放置即平行，无需先行驶）。
+        carts.spawnCart(x0 + 1, kRigY, z0, &w); // slot-reuse 后新车落槽 1（0 号槽被 (b) 车占用）
+        const QVector3D sp = carts.posAt(1);
+        const bool okC = carts.count() == 2
+            && std::fabs(sp.x() - float(x0 + 1) - 0.5f) < 0.01f
+            && std::fabs(sp.y() - (float(kRigY) + 0.5f + rideH)) < 0.02f // 坡格中心坡面高 = 0.5
+            && std::fabs(carts.pitchAt(1) - 45.0f) < 0.5f;
+        if (!okC) qInfo().noquote() << "  slope-spawn pos" << sp << "pitch" << carts.pitchAt(1)
+                                    << "count" << carts.count();
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| cart spawned on slope cell: parked body already parallel to ramp (+45) (t769)";
+        // 清场（(c) 的静止车由 clearAll 收）。
+        carts.clearAll();
+        for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY + ((i >= 2) ? 1 : 0), z0, BR::Air);
+        tickN(w, 2);
+    }
+
     // P13 t759 要塞传送门房净空探针（worldgen 回归，非红石 —— 同 t737 环线先例收录）。断言：(a) 12 框架环
     //   逐格仍在记录层 strongholdPortalY（B5 三坐标一致性的生成侧镜像 —— t759 只抬顶板不动框架层）；
     //   (b) 每框架顶之上 4 格 Air + 第 5 格顶板石砖（净高 8：内部 dy 1..8 Air / 顶板 dy=9 = 框架层+5）→ 验收

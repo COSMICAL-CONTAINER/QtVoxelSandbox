@@ -92,6 +92,9 @@ void MinecartManager::spawnCart(int x, int y, int z, World *world)
         // 朝向 yaw 与 dir 同一公式（-Z 前 = 0 约定；见 tickRiddenCart yaw 更新注释）。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
+        // t769 放置即贴坡：初始俯仰按轨面几何取（坡格中心 ±0.25 采样 → 1:1 坡恰 45°；平格 / 拐角 0）——
+        //   停驻车（speed==0 不进 tick 推进）放置在坡上即刻平行轨面，无需先行驶一段。
+        updateCartPitch(c, world, y);
     } else {
         // t734 非轨格放置（地面静止车）/ 无世界兜底：默认 +Z 朝向（静态 —— 推进侧无轨守卫保证不动）。
         c.dirX = 0.0f; c.dirZ = 1.0f;
@@ -113,6 +116,13 @@ float MinecartManager::yawAt(int i) const
 {
     if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return 0.0f;
     return m_carts[size_t(i)].yaw;
+}
+
+// t769 俯仰读口（呈现层 delegate eulerRotation.x 直连；见头注释）。
+float MinecartManager::pitchAt(int i) const
+{
+    if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return 0.0f;
+    return m_carts[size_t(i)].pitch;
 }
 
 // t735 ② 剩余耐久读口（呈现层 delegate 绑它驱动受击摇晃；见头注释）。
@@ -252,11 +262,20 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     }
     if (best < 0) return false; // 无非反向连接（轨尽头 / 仅来路）→ 停
     // 邻格确为铁轨（连接位应与之一致；防御 —— 连接位 stale 时兜底直查）。t638 家族判定。
-    if (!BlockRegistry::isRail(world->blockAt(rx + kDirs[best].dx, ry, rz + kDirs[best].dz))) {
-        // 连接位失真：直接按邻格实查重选（首查四邻中与 want 点积最大、非反向且为铁轨者）。
+    //   t769 坡道修真：存在性按**三高探针**（同 railConnections 的 anyRail / railProbeDelta：同层 / 上 / 下
+    //   任一为轨即有轨）—— 坡连接的邻轨在 ry±1（轨格层与连接位同源三高探针写入），旧版只查同层 ry →
+    //   上坡在坡脚格心 / 下坡在坡顶格心的重选一律误判「连接位失真」，且下方兜底重选也只查同层 → 返
+    //   false → 矿车在坡段两端的格心停死（用户报「上不去也下不去」根因；矩阵测试 P12b 复现）。
+    const auto railAt3 = [&](int dx, int dz) {
+        return BlockRegistry::isRail(world->blockAt(rx + dx, ry, rz + dz))
+            || BlockRegistry::isRail(world->blockAt(rx + dx, ry + 1, rz + dz))
+            || BlockRegistry::isRail(world->blockAt(rx + dx, ry - 1, rz + dz));
+    };
+    if (!railAt3(kDirs[best].dx, kDirs[best].dz)) {
+        // 连接位失真：直接按邻格实查重选（首查四邻中与 want 点积最大、非反向且为铁轨者 —— 同三高探针）。
         int fb = -1; float fDot = -1.0f;
         for (int i = 0; i < 4; ++i) {
-            if (!BlockRegistry::isRail(world->blockAt(rx + kDirs[i].dx, ry, rz + kDirs[i].dz))) continue;
+            if (!railAt3(kDirs[i].dx, kDirs[i].dz)) continue;
             const float dot = float(kDirs[i].dx) * wantX + float(kDirs[i].dz) * wantZ;
             if (dot < 0.0f) continue; // 反向连接不选（同上：死端返回 false 走停车分支）
             if (dot > fDot) { fDot = dot; fb = i; }
@@ -272,6 +291,7 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
 // t708 钉轨面（共享 helper；实现见头注释）：矿车所在列向下扫最近轨格 → Y = cell 底 + 坡面高 + kCartRideH
 //   （t734 基准修真：轨板贴 cell 底 +1/16，去掉旧 +1.0 格顶叠加）。返钉到的轨格 Y（-1 = 列内无轨）。
 //   复审 #4：列扫描收口到 scanRailColumn（含实心遮挡断扫 —— 地面车隔着实心地板不再钉到地板下的轨）。
+//   t769：坡面高计算抽到 railRiseAt（Y 钉定 / 俯仰采样共用同一张面）。
 int MinecartManager::pinCartY(Cart &c, World *world)
 {
     if (!world) return -1;
@@ -281,14 +301,24 @@ int MinecartManager::pinCartY(Cart &c, World *world)
     if (y < 0) return -1;
     const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
     const float fz = c.pos.z() - float(bcz);
+    const float rise = railRiseAt(world, bcx, y, bcz, fx, fz);
+    c.pos.setY(float(y) + rise + kCartRideH); // t734：轨板贴 cell 底（mesher yr=1/16），去掉旧 +1.0 格顶基准
+    return y;
+}
+
+// t769 轨格内坡面高（从 pinCartY 抽出的纯查询；头注释见 minecartmanager.h）：连接位定行进轴（mesher
+//   同源：EW（±X 连接）→ riseAtX、NS → riseAtZ；0 连接读 RailAxisEWFlag 轴偏好），格内 (fx,fz) 上邻轨
+//   抬升叠加（只抬 δ>0）。t691 轴判定的原注释语义保留：mesher 对直轨只读本轴 rise —— 垂直邻线探针命中
+//   不抬车。拐角 / 十字无坡（mesher 同判）；拐角取四角抬升双线性中心（t709 坡臂拐角曲面）；V 形凹谷
+//   （t710 两端皆 +1）取 2|轴-0.5|。
+float MinecartManager::railRiseAt(World *world, int bcx, int y, int bcz, float fx, float fz)
+{
     const auto dlt = [&](int dx, int dz) {
         return BlockRegistry::railProbeDelta(
             { world->blockAt(bcx + dx, y, bcz + dz),
               world->blockAt(bcx + dx, y + 1, bcz + dz),
               world->blockAt(bcx + dx, y - 1, bcz + dz) });
     };
-    // t691 轴判定（mesher 同源）：连接位低 4 位定行进轴；EW（±X 连接）→ riseAtX、NS → riseAtZ；
-    //   0 连接读 RailAxisEWFlag（bit5 轴偏好）。拐角 / 十字无坡（mesher 同判）。
     const quint8 rst = world->stateAt(bcx, y, bcz);
     const quint8 con = quint8(rst & 0x0F);
     const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
@@ -325,8 +355,39 @@ int MinecartManager::pinCartY(Cart &c, World *world)
             }
         }
     }
-    c.pos.setY(float(y) + rise + kCartRideH); // t734：轨板贴 cell 底（mesher yr=1/16），去掉旧 +1.0 格顶基准
-    return y;
+    return rise;
+}
+
+// t769 轨道面高度采样（头注释见 minecartmanager.h；俯仰角计算用 —— 采到的正是 pinCartY 所钉的同一张面）。
+bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY, float &outY) const
+{
+    if (!world) return false;
+    const int cx = int(std::floor(sx));
+    const int cz = int(std::floor(sz));
+    const int y = scanRailColumn(world, cx, topY, cz);
+    if (y < 0) return false;
+    outY = float(y) + railRiseAt(world, cx, y, cz, sx - float(cx), sz - float(cz));
+    return true;
+}
+
+// t769 车身俯仰刷新（坡道平行轨面，纯呈现 —— 不反馈物理；头注释见 minecartmanager.h）：以车心为基准、
+//   沿车头向（dir，负速倒行车头不变 → 俯仰跟车头不跟行进）±kCartPitchProbe 两点采样轨面高 →
+//   pitch = atan2(前-后, 2·probe)（正 = 车头上扬 —— 与 EntityManager::arrowPitchAt 同约定，QML
+//   eulerRotation.x 直连）。采样窗语义：坡中段窗全落坡格 → 1:1 坡恰 ±45°；跨段折缝窗横跨两段 → 过渡带
+//   内线性（轨面 H 分段线性且连续 → 俯仰随位置连续，无阶跃、与车速 / 帧率无关、无需时间平滑）；车头
+//   翻转（S 反推 / 停驻重选向）→ 窗对调 → 符号自动翻转。平轨 / 拐角两采样等高 → 0。采样列无可达轨
+//   （死端前探 / 离轨防御）→ 归 0（水平摆）。railY = 车所在列轨层：采样列扫描窗 [railY+1, railY-1]
+//   覆盖坡步进 ±1（采样点距车心 ≤0.25 → 至多邻列）。
+void MinecartManager::updateCartPitch(Cart &c, World *world, int railY)
+{
+    if (!world || railY < 0) { c.pitch = 0.0f; return; }
+    float hF = 0.0f, hB = 0.0f;
+    const bool okF = railSurfaceYAt(world, c.pos.x() + c.dirX * kCartPitchProbe,
+                                    c.pos.z() + c.dirZ * kCartPitchProbe, railY + 1, hF);
+    const bool okB = railSurfaceYAt(world, c.pos.x() - c.dirX * kCartPitchProbe,
+                                    c.pos.z() - c.dirZ * kCartPitchProbe, railY + 1, hB);
+    if (!okF || !okB) { c.pitch = 0.0f; return; }
+    c.pitch = qRadiansToDegrees(std::atan2(hF - hB, 2.0f * kCartPitchProbe));
 }
 
 // t708 沿轨推进（共享：被骑 / 空车被推同一物理；实现见头注释）。负速 = 倒行（沿 -dir，车头保持原朝向）。
@@ -442,7 +503,8 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             if (std::fabs(c.speed) < 0.02f) { c.speed = 0.0f; continue; } // 磨擦停稳（死区）
         } // 下坡（slope<0）→ 不衰减（顺坡滑）；动力段已先行接管（boost 12.8 > 溜坡 10，语义不冲突）
         stepCartAlongRail(c, world, float(dt));
-        pinCartY(c, world); // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）
+        // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）；t769 返回值带出新轨层 → 俯仰随坡刷新。
+        updateCartPitch(c, world, pinCartY(c, world));
         const float dx = c.pos.x() - bx, dz = c.pos.z() - bz;
         if (dx * dx + dz * dz > 1e-6f) moved = true;
     }
@@ -756,7 +818,9 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
             // t708：钉轨面提取为共享 helper pinCartY（空车被推 tickPushedCarts 同一 Y 钉定）。
             //   t736：探测轨占用判定不再在此做 —— 统一移 tickPushedCarts 末尾 updateDetectorRailOccupancy
             //   （全车种帧级收口；此处只保留 Y 钉定物理）。
-            pinCartY(c, world);
+            //   t769：钉轨返回值带出本帧轨层 → 俯仰随坡刷新（采样与 Y 钉定同一张面，见 updateCartPitch）。
+            const int pinnedY = pinCartY(c, world);
+            updateCartPitch(c, world, pinnedY);
         }
         // 车头朝向（-Z 前约定，同 PlayerController horizontalFacing / 相机 yaw）：yaw = atan2(-dirX,-dirZ)
         //   → dir=(0,-1) → 0°；(0,1) → 180°；(-1,0) → 90°；(1,0) → 270°（车头本地 -Z 经 R_y(yaw) 旋转后
@@ -764,6 +828,10 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         //   → 车头保持原朝向（车底朝后退行），跨格重选向（正行转弯）才更新。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
+    } else if (world) {
+        // t769 停驻帧俯仰收敛：移动帧在上方 pinCartY 后已刷新；停驻（speed==0 且非下坡起步溜）被骑车
+        //   停在坡上时保持贴合坡面（轨层用本 tick 前置钉定的 railY —— 车未动，列不变）。
+        updateCartPitch(c, world, railY);
     }
     // t680 ③ 停稳（speed==0 且非下坡起步）被骑车的探测轨占用：t736 起同由统一 pass 收口（占用是「位置」
     //   语义而非「移动」语义，机制等价 MC 探测轨上静止矿车恒供电 —— 统一 pass 遍历全部活体车不看速度，

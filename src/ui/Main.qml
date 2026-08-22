@@ -5889,6 +5889,10 @@ Window {
                     position: carts.revision >= 0 ? carts.posAt(index) : Qt.vector3d(0, 0, 0)
                     // 车头朝向（度；先读进 property 再喂 eulerRotation —— 块表达式不能作函数实参）。
                     property real cartYaw: carts.revision >= 0 ? carts.yawAt(index) : 0
+                    // t769 坡道俯仰（度；正 = 车头上扬，同 arrowPitchAt 约定 → eulerRotation.x 直连）：
+                    //   C++ updateCartPitch 沿车头向 ±0.25 采样轨面高差（与 pinCartY 同一张面）→ 坡上 ~±45°
+                    //   平行轨面、平轨 / 拐角 0、跨段随位置连续过渡。纯呈现量，物理位姿权威仍在 C++。
+                    property real cartPitch: carts.revision >= 0 ? carts.pitchAt(index) : 0
                     // t735 ② 受击耐久摇晃：cartHp 绑 hpAt（表达式形式注册 revision 依赖，t498/t556 铁律）——
                     //   C++ hitCartFromRay 扣血后 revision bump → 绑定重算值变小 → onCartHpChanged 触发摇晃
                     //   动画。cartHpSeen 记上次值：仅「变小」视为受击（槽复用 0→满血回摆 / 新车初始求值
@@ -5911,7 +5915,7 @@ Window {
                         NumberAnimation { target: cartRoot; property: "shakeRoll"; to: -2; duration: 70; easing.type: Easing.InOutQuad }
                         NumberAnimation { target: cartRoot; property: "shakeRoll"; to: 0;  duration: 60; easing.type: Easing.OutQuad }
                     }
-                    eulerRotation: Qt.vector3d(0, cartRoot.cartYaw, cartRoot.shakeRoll)
+                    eulerRotation: Qt.vector3d(cartRoot.cartPitch, cartRoot.cartYaw, cartRoot.shakeRoll)
 
                     // t732 pack 矿车贴图命中态：命中 → cartPackTex + MinecartBox 布局 1（demo 包 8× 实测
                     //   分区）；miss → cartTex + 布局 0（qrc 程序 64×32）。source 读 active → pack 开关即时重刷。
