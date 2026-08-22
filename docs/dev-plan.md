@@ -2928,7 +2928,7 @@ t733-t766（34 项）。**建议顺序：t740 红石激活矩阵先行（排查�
 ### 🅸 方块物理与物品归类（t799-t801）
 **t799** ✅✅ 沙/沙砾即时下落：放在火把/睡莲/草丛/半砖等**非实体支撑**上 → 应**立即转下落实体**（现状稳定站住，只有 >1 格落差才变掉落物）；放置路径与更新路径同判（MC 语义：支撑失效即刻落）。
   - 实现（fix t799）：判定下沉 World 层单一谓词——`BlockRegistry::isGravityBlock(Sand/Gravel)` + `isFullCube(下方)` 支撑判定；`checkGravityBlockOnEdit` 挂全部 7 个网格写入口（setBlock×2 / clearBlockSilent / setWaterSilent / setBlockSilent / tickFire 烧毁 / destroySphereSilent 爆炸）→ 失撑发 `gravityBlockFell` → 呈现层 Main.qml `onGravityBlockFell → spawnFallingBlock`（同 t527 雪层模式）；旧 Main.qml `maybeTriggerFallingBlock` 嵌套判定整体删除（放置==更新同判达成）；坍落列静默直写防重入。矩阵探针 6 场景（放置族/稳定柱/挖撑/半空/水穿/爆炸+TNT 点火）全 PASS，176/0。
-**t800** 物品栏归类清理：① 材料栏的羊毛 item 删除（方块栏已有羊毛方块，多此一举）；② 玻璃移到方块栏（现处材料栏）且玻璃 item 图标改 **2D 平贴图**（非 3D 立方投影）。
+**t800** 物品栏归类清理：① 材料栏的羊毛 item 删除（方块栏已有羊毛方块，多此一举）；② 玻璃移到方块栏（现处材料栏）且玻璃 item 图标改 **2D 平贴图**（非 3D 立方投影）。✅✅ 已完成（commit 5f46f12：① creativeMaterials 删 WoolId 0x20E 条目——物品本体保留全部生存链（杀羊/剪羊毛掉落 + bed_red 简化配方原料），仅不再列材料 tab（建筑取色走方块段 16 色 wool，t788 染料链基底=白羊毛方块不受影响）；② creativeMaterials 删 GlassId 0x204 条目 + creativeBlocks 冰族后加 Glass=54（透明整立方同族排列；资源查看器/背包/调色板三处同源表自动一致）；item 图标 atlasIconSpecForBlock 加 Glass→flatSpec(瓦片 68) 2D 平贴（pack 态采包 glass.png / 程序态采 default_glass，对齐 MC 玻璃物品图标=平面贴图语义）；关键补洞：Glass 无 qrc 手绘图 → 入 isPackDerivedIconFamily（否则 pack 关态回退链走空 = 玻璃条目无图标）；图标缓存族 icon3→icon4 换代（54 号画法 dimetric→flat，防旧立方投影缓存永久复用）。矩阵探针 t800：材料段两 id 不在列 + 方块段含玻璃/白羊毛/15 色变体 + 两物品名仍解析（生存掉落 tooltip 源）+ 玻璃方块图标 URL 可解析——**177 PASS/0 FAIL**（基线 176+1）。**需人工目视**：创造方块 tab 玻璃条目显 2D 平贴图（pack 开/关两态）、材料 tab 无羊毛/玻璃残留。
 **t801** 栅栏视觉高度：视觉改 **1 格高**（mesher 几何裁剪；碰撞/跳跃判定保 1.5 不变）→ 消除 0.5 格悬空穿模观感。
 
 ### 🅹 合成体系审计（t802）
