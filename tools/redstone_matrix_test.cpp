@@ -2716,6 +2716,73 @@ int main(int argc, char *argv[])
                              "runtime re-render";
     }
 
+    // ── t801 栅栏视觉高度探针（Core 表查询 + mesher 同源直调，P11/P19 模式；纯静态断言无 rig，不占
+    //    nextSlot 容量）：用户「栅栏视觉 1 格、实际跳不上去才对（1.5 多出 0.5 格悬空穿模）」→ 视觉 1.0 /
+    //    碰撞 1.5 分离（机制等价 MC 栅栏「模型 1 格 / 碰撞箱 1.5 不可越」）。断言两层：
+    //    (a) 几何：三变体（木/圆石/云杉）× 两形态（孤立四邻空气=只画立柱 / 四向连栅栏=立柱+8 段横档），
+    //        全部生成顶点 y ∈ [0-ε, 1.0+ε] 且最高点≈1.0（立柱裁到 1.0 且不缩水；修前立柱 1.5 / 上档
+    //        1.125 必越上界 FAIL）、最低点=0（落地）；连接形态须存在 x/z==0 与 ==1 顶点（横档真延伸到格边）；
+    //    (b) 分离：collisionAABBs 顶==1.5（> 跳跃顶点 ~1.25（playercontroller.h kJump=8.4 的文档镜像值，
+    //        同 P11 rideH 镜像先例）→ 玩家跳不过 + mob 支撑/越障链零改动）；selectionAABBs / raycastAABBs
+    //        顶==1.0（选中框 + 射线贴视觉，瞄立柱上方 0.5 空带穿过不优先选中）。
+    {
+        const quint8 fences[3] = { BR::WoodFence, BR::CobbleFence, BR::SpruceFence };
+        constexpr float kEps = 1e-4f;
+        constexpr float kJumpApex = 1.25f; // playercontroller.h kJump=8.4「顶点约 1.25 格」的文档镜像值（改跳跃力须同步）
+        const auto topOf = [](const std::vector<BR::BlockAABB> &bs) {
+            float t = -1.0f;
+            for (const auto &b : bs) if (b.maxY > t) t = b.maxY;
+            return t;
+        };
+        bool ok = true;
+        for (quint8 fid : fences) {
+            for (int connected = 0; connected <= 1; ++connected) {
+                QVector<Vtx> verts; QVector<quint32> idx;
+                PartialLightCtx lctx; lctx.light = 1.0f;
+                for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+                PartialNeighborCtx nctx;
+                const quint8 nb = connected ? BR::WoodFence : quint8(BR::Air); // 连接判定 isFence||isSolid：栅栏邻即连
+                nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = nb;
+                PartialBlockGeometry::append(verts, idx, 0, 0, 0, fid, 0, lctx, nctx,
+                                             1.0f / 16.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+                float yMin = 1e9f, yMax = -1e9f;
+                bool edgeX = false, edgeZ = false;
+                for (const Vtx &v : verts) {
+                    if (v.y < yMin) yMin = v.y;
+                    if (v.y > yMax) yMax = v.y;
+                    if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps) edgeX = true;
+                    if (std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edgeZ = true;
+                }
+                if (verts.isEmpty() || yMin > kEps || yMax > 1.0f + kEps || yMax < 1.0f - kEps) {
+                    qInfo().noquote() << "  [t801 diag] fence" << int(fid) << "connected" << connected
+                                      << "verts" << verts.size() << "yMin" << yMin << "yMax" << yMax;
+                    ok = false;
+                }
+                if (connected && (!edgeX || !edgeZ)) { // 横档须到格边（t209 连接逻辑不因裁高回归）
+                    qInfo().noquote() << "  [t801 diag] fence" << int(fid)
+                                      << "arms missing edgeX" << edgeX << "edgeZ" << edgeZ;
+                    ok = false;
+                }
+            }
+            const float colTop = topOf(BR::collisionAABBs(fid, 0));
+            const float selTop = topOf(BR::selectionAABBs(fid, 0));
+            const float rayTop = topOf(BR::raycastAABBs(fid, 0));
+            if (!(std::fabs(colTop - 1.5f) < kEps && colTop > kJumpApex
+                  && std::fabs(selTop - 1.0f) < kEps && std::fabs(rayTop - 1.0f) < kEps)) {
+                qInfo().noquote() << "  [t801 diag] fence" << int(fid) << "colTop" << colTop
+                                  << "selTop" << selTop << "rayTop" << rayTop;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t801 fence visual height: mesher post+rails clipped to y<=1.0 for all 3 variants "
+                             "(isolated + connected, arms still reach cell edges), collision AABB stays 1.5 "
+                             "(jump apex ~1.25 < 1.5 -> still unjumpable, mob support/obstacle chain untouched), "
+                             "selection + raycast boxes synced to 1.0 visual - fixes 'fence model pokes 0.5 block "
+                             "above, clipping into neighbors' look";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -54,7 +54,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   mesher 经 PartialBlockGeometry::append 按 (id,state) 生成异形顶点。maxStack：door=1（单件不可堆叠），其余 64。
     /* wood_slab      */ {int(BlockRegistry::WoodSlab),          8,  8, 8,  8, false, BlockRegistry::ShapeSlab,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodSlab),          1, 64, "wood_slab",          "木板台阶"}, // t265 斧加速；state bit0=上半(1)/下半(0)；半高 0.5
     /* wood_stairs    */ {int(BlockRegistry::WoodStairs),        8,  8, 8,  8, false, BlockRegistry::ShapeStairs,   2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodStairs),        1, 64, "wood_stairs",        "木板楼梯"}, // t265 斧加速；state[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z；bit2=上下倒置
-    /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // t265 斧加速；中心立柱 0.4 见方 × 1.5 高 + 四向横档连邻居（t209）；state=0
+    /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // t265 斧加速；中心立柱 0.4 见方（t801 视觉 1.0 高 / 碰撞 1.5 不可越）+ 四向横档连邻居（t209）；state=0
     /* wood_pressure_plate */ {int(BlockRegistry::WoodPressurePlate), 8, 8, 8, 8, false, BlockRegistry::ShapePlate, 2.0f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::WoodPressurePlate), 1, 64, "wood_pressure_plate", "木板压力板"}, // t265 斧加速；贴地薄板；state=0
     /* wood_door      */ {int(BlockRegistry::WoodDoor),        143,144,144,144, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodDoor),          1,  1, "wood_door",          "木板门"}, // t265 斧加速；两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向；t620 上下半 per-face（topTile=upper143/bottomTile=lower144，door case 据 bit3 选；手持/掉落 sideTile=lower）
     /* wood_trapdoor  */ {int(BlockRegistry::WoodTrapdoor),      8,  8, 8,  8, false, BlockRegistry::ShapeTrapdoor, 2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodTrapdoor),      1, 64, "wood_trapdoor",      "木活板门"}, // t265 斧加速；state bit0=开/合 bit[2:1]=开时朝向
@@ -1486,11 +1486,14 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         return out;
     }
     case BlockRegistry::ShapeFence:
-        // t209 立柱 1.5 高（与 partialblockgeometry 渲染立柱同高）。maxY=1.5 探入上格 0.5 → 玩家跳跃顶点
-        //   ~1.25 < 1.5 跳不过（机制等价 MC 栅栏 1.5 高不可越）。仅立柱碰撞（横档纯视觉，不进 AABB；
-        //   机制等价 MC 栅栏 VoxelShape 仅立柱）。玩家跨格 X/Z 移动 + 跳跃时，PlayerController::overlapSubAABBs
-        //   的 Y 取样向下扩 1 格（catch 上格以下立柱探入的 AABB），故 1.5 高碰撞对跳跃 / 立柱顶站立均生效。
-        out.push_back({0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（与 mesher 同）
+        // t209 立柱碰撞 1.5 高。maxY=1.5 探入上格 0.5 → 玩家跳跃顶点 ~1.25 < 1.5 跳不过（机制等价 MC 栅栏
+        //   1.5 高不可越）。仅立柱碰撞（横档纯视觉，不进 AABB；机制等价 MC 栅栏 VoxelShape 仅立柱）。玩家跨格
+        //   X/Z 移动 + 跳跃时，PlayerController::overlapSubAABBs 的 Y 取样向下扩 1 格（catch 上格以下立柱探入的
+        //   AABB），故 1.5 高碰撞对跳跃 / 立柱顶站立均生效。
+        //   t801 视觉/碰撞分离（MC 栅栏语义）：渲染立柱/横档已裁到 1.0 高（partialblockgeometry），本盒 1.5
+        //   **仅喂 collisionAABBs**（mob 支撑/越障 + 玩家碰撞链零改动）；selectionAABBs / raycastAABBs 对
+        //   isFence 特例 1.0 盒贴视觉（准星瞄立柱上方空带穿过，不再被 1.5 空带挡住优先选中）。
+        out.push_back({0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（碰撞语义；视觉 1.0 见 t801）
         return out;
     case BlockRegistry::ShapePlate:
         out.push_back({0.0625f, 0, 0.0625f, 0.9375f, 0.0625f, 0.9375f}); // 贴地薄板 1/16 厚
@@ -1610,6 +1613,13 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     //   （半砖 / 雪层 / 附魔台等 partial 块已有此先例）。渲染不受影响（PartialBlockGeometry 矮盒不变）。
     if (blockId == Farmland)
         return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
+    // t801 栅栏选中框贴合 1.0 视觉（用户「栅栏视觉上就是 1 格」）：渲染立柱/横档已裁到 y[0,1]
+    //   （partialblockgeometry t801），选中框若仍走 shapeBoxes 的 1.5 → 瞄立柱顶上方 0.5 空气带也框住
+    //   栅栏（0.5 格悬空错位观感）。特例返 1.0 盒与视觉同高（同 t639 耕地矮框先例：选中框 = 实际可见
+    //   体形）；碰撞 1.5 保持不动（collisionAABBs 走 shapeBoxes 原盒——MC 栅栏「模型 1 格 / 碰撞 1.5
+    //   不可越」分离语义）。isFence 覆盖木/圆石/云杉三变体。
+    if (isFence(blockId))
+        return {BlockAABB{0.3f, 0, 0.3f, 0.7f, 1.0f, 0.7f}};
     // t720 画作选中框：贴墙薄板（与 raycastAABBs Painting 分支同盒——瞄准画显示贴墙薄框而非满格黑边，
     //   机制等价 MC 画选中框贴画面）。ShapeNone → shapeBoxes 空，此处特例给形状。
     if (blockId == Painting)
@@ -1730,7 +1740,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     switch (def(blockId).shape) {
     case ShapeSlab:     return (state & 1) ? 1.0f : 0.5f;     // 上半砖顶=1.0 / 下半砖顶=0.5
     case ShapeTrapdoor: return (state & 1) ? 1.0f : 0.1875f;  // 开=竖直板到顶 1.0 / 合=水平薄板顶 0.1875
-    case ShapeFence:    return 1.5f;                          // 中心立柱 1.5 高
+    case ShapeFence:    return 1.0f;                          // t801 视觉立柱 1.0 高（PCF 列顶实面随视觉；碰撞 1.5 见 collisionAABBs）
     case ShapePlate:    return 0.0625f;                       // 贴地薄板 1/16 高
     case ShapeStairs:   return 1.0f;                          // 背墙到顶（整步+背墙最高点 = cellY+1）
     case ShapeFull:     return 1.0f;                          // 整立方
@@ -1757,6 +1767,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
         constexpr float kFarmlandTop = 15.0f / 16.0f; // 0.9375（与 partialblockgeometry 耕地矮盒 / collision 同高）
         return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kFarmlandTop, 1.0f}};
     }
+    // t801 栅栏射线命中盒贴 1.0 视觉（与 selectionAABBs 的 isFence 特例同盒同源）：渲染立柱/横档已裁到
+    //   y[0,1]，准星瞄立柱顶上方 0.5 空气带的射线须穿过命中后方方块（不再被旧 1.5 sub-AABB 挡住优先
+    //   选中栅栏——同木梯 t501 / 铁轨 t638③「透视不优先选中」模式）；碰撞 1.5 不动（collisionAABBs 走
+    //   shapeBoxes 原盒，玩家/怪物跳跃越障语义零改动）。isFence 覆盖木/圆石/云杉三变体。
+    if (isFence(blockId))
+        return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 1.0f, 0.7f}};
     const Shape sh = def(blockId).shape;
     if (sh == ShapeFull)
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // 整格：射线进格即中（等同旧行为）
