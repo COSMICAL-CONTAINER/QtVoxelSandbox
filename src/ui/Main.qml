@@ -2113,8 +2113,10 @@ Window {
     }
 
     // t565 挖矿车 → 掉矿车物品（语义事件路由，同 onBoatBroken→spawnItem 模式；PLAN §2 分层）。
-    //   cartBroken 由 hitCartFromRay（攻击 / 挖矿车）发 → 呈层据它 spawnItem 掉 MinecartId（可重放）。
-    //   机制等价 MC 1.0 攻击矿车 → 矿车破坏掉完整矿车物品。
+    //   cartBroken 由 hitCartFromRay（攻击 / 挖矿车，生存末击）发 → 呈层据它 spawnItem 掉 MinecartId
+    //   （可重放）。机制等价 MC 1.0 生存攻击矿车 → 矿车破坏掉完整矿车物品。t767：创造瞬破无掉落——
+    //   门控在 MinecartManager::hitCartFromRay 内（instantBreak 提前 return 不发本信号，对齐 t571①
+    //   「主动破坏掉落仅生存」），本 handler 无需查模式。
     Connections {
         target: carts
         function onCartBroken(x, y, z) {

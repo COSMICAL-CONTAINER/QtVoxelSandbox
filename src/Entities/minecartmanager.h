@@ -104,7 +104,8 @@ public:
     int findCartHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist) const;
 
     // 挖矿车（攻击）：跑 findCartHit 命中矿车 → 按 t735 ②耐久语义分流：
-    //   instantBreak=true（caller 创造模式传）→ 直接摧毁；否则 hp>1 时扣 1 血（不掉不毁，呈层 hpAt 绑定
+    //   instantBreak=true（caller 创造模式传）→ 直接摧毁且**无掉落**（t767 对齐 t571①「主动破坏掉落仅
+    //   生存」——创造瞬破只移除车体，不 emit cartBroken）；否则 hp>1 时扣 1 血（不掉不毁，呈层 hpAt 绑定
     //   变化驱动受击摇晃动画），hp 归零的那一击才 releaseSlot + emit cartBroken（呈层据它 spawnItem 掉
     //   MinecartId 物品）。t735 ①：掉落格带 world 做**非实心邻格散布**（同船 t711 修法）——旧版掉矿车
     //   中心格 = 常与攻击者本人所在格重合，kPickupDist 1.5 半径内 0.5s 免拾窗一过即被 pickupScan 吸回，
@@ -193,7 +194,7 @@ public:
 
 signals:
     void entitiesChanged();                        // spawn / 挖毁 / 骑乘物理推进触发；驱动 count/revision + QML 绑定刷新
-    void cartBroken(int x, int y, int z);          // 矿车被「挖」（攻击）→ 呈层据它 spawnItem 掉 MinecartId 物品
+    void cartBroken(int x, int y, int z);          // 矿车被「挖」（攻击，生存末击）→ 呈层据它 spawnItem 掉 MinecartId 物品；t767 起创造瞬破不发（主动破坏掉落仅生存，t571①）
 
 private:
     struct Cart {
