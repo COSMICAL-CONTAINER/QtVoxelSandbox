@@ -755,7 +755,8 @@ void BoatManager::breakRiddenBoat()
     notifyChanged();
 }
 
-bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world)
+bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world,
+                                 bool instantBreak)
 {
     float dist = 0.0f;
     const int idx = findBoatHit(origin, dir, maxDist, &dist);
@@ -766,6 +767,11 @@ bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, 
     const int bt = m_boats[size_t(idx)].boatType;
     if (idx == m_riderBoat) m_riderBoat = -1; // 挖骑乘中的船 → 玩家自然下马
     releaseSlot(idx);
+    // t767 对齐：创造瞬破不掉落（同矿车 hitCart instantBreak 分支 / t571① 方块创造主动破坏零掉落）。
+    if (instantBreak) {
+        notifyChanged();
+        return true;
+    }
     // t661 四轮「创造攻击船不掉落船物品」：掉落格从「船中心格」改为「船侧首个非实体水平邻格」（同双半砖
     //   掉落散布模式）。根因非「创造跳过掉落」（hitBoatFromRay / onBoatBroken 全模式同路径）——而是掉落
     //   物生成在船中心格 = 常与**攻击者本人所在格重合**（玩家站船上 / 骑乘中攻击自己脚下的船：骑乘者

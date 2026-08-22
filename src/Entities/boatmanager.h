@@ -112,7 +112,10 @@ public:
     //   方块里永远不可见 = 用户观感「打船不掉落」（创造常在岸 / 冰边测船、生存多在开阔水面测 → 差异观感）。
     //   掉落路径本身全模式同链（hitBoatFromRay / onBoatBroken 无模式分流）—— 根因是落点选格，非创造门控。
     //   world null（防御）→ 退回旧 4 邻随机（无世界可查）。
-    bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world = nullptr);
+    //   t767 对齐：instantBreak（caller 传 m_mode==Creative）= 创造瞬破 —— 移除船体后**提前 return 不 emit
+    //   boatBroken**（创造主动破坏不掉落，对齐 t571① 方块 / t767 矿车同款语义；生存保持掉落散布）。
+    bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world = nullptr,
+                        bool instantBreak = false);
 
     // 尝试骑乘：跑 findBoatHit 命中船 → 设 m_riderBoat + 返 true；未命中 → false（不改态）。由 PlayerController
     //   placeBlock 船段调（右键瞄船 → 上船）。t508 换船：已骑乘时命中**另一艘**船（idx != m_riderBoat）→ 直接切到
