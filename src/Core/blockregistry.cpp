@@ -1624,6 +1624,13 @@ bool BlockRegistry::isFullCube(quint8 blockId)
     return def(blockId).shape == ShapeFull;
 }
 
+// t799 重力方块单一权威谓词（见 .h 注释）：沙（8）+ 沙砾（t761，139，「换皮沙子」机制等价 MC 1.0 gravel）。
+//   失撑判定 / 下落实体语义全走本谓词，不再散落字面量。
+bool BlockRegistry::isGravityBlock(quint8 blockId)
+{
+    return blockId == Sand || blockId == Gravel;
+}
+
 // t188 perf：流体类格子（Air/Water/Lava）判定，供 chunk 流体专用脏标记分类（见头注释）。
 bool BlockRegistry::isFluidLike(quint8 blockId)
 {

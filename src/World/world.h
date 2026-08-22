@@ -522,6 +522,29 @@ public:
     //   岩浆焚毁路径末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t799 重力方块（沙 / 沙砾）失撑坍落复检（机制等价 MC 1.0 falling sand/gravel「支撑失效即刻落」；
+    //   同甘蔗 / 雪层支撑校验族）。（x,y,z,oldId,id）= 本格刚发生的编辑。**放置路径与更新路径同判**
+    //   （单一谓词 BlockRegistry::isGravityBlock + isFullCube 支撑判定，取代旧 Main.qml
+    //   maybeTriggerFallingBlock 的 QML 侧触发——旧版依赖 blockPlaced/blockBroken 信号→QML→嵌套 setBlock
+    //   的呈现层链路，脆弱且放置路径实测不触发「沙放火把上稳定站住」）。两分支：
+    //   ① 放置自检：本格刚写入重力方块（id ∈ 重力族）且下方 (x,y-1,z) 非完整立方（火把 / 睡莲 / 草丛 /
+    //     半砖 / 空气 / 水…）→ 本格失撑坍落；y==0（世界底无下格）亦视为失撑（落出世界由实体 tick 移除）。
+    //   ② 支撑变化复检：本格编辑后非完整立方（被破为 Air / 被替换为不完整方块）且正上方 (x,y+1,z) 是
+    //     重力方块 → 上方方块失撑坍落。
+    //   坍落 = dropGravityColumn：自失撑格起向上逐格清连续重力方块（混合沙/沙砾柱各自保留 id），每格
+    //   静默写 Air（m_chunks.setBlock 直写 + 标脏，**不**经 World::setBlock → 不递归触发本检查）+ emit
+    //   blockBroken（破块粒子 / 音）+ recomputeLightAround + emit gravityBlockFell（每格一信号一实体，
+    //   呈现层转 EntityManager.spawnFallingBlock；整柱同 tick 生成、保间距、着地各自归位 —— 机制等价 MC
+    //   整柱沙同时塌落）。末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。
+    //   下落实体着地 / 落不完整方块变掉落物（t220 语义）由 EntityManager.tick 既有 FallingBlock 分支承担，
+    //   本检查只负责「失撑 → 转实体」。供 4/5 参数 setBlock + setBlockSilent + clearBlockSilent +
+    //   setWaterSilent + tickFire 焚毁 + destroySphereSilent 末尾各调一次（写入口全收口，同 checkRailOnEdit
+    //   「五入口」承诺）。非 Q_INVOKABLE（内部 helper）。
+    void checkGravityBlockOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+    // t799 重力方块整柱坍落 helper（checkGravityBlockOnEdit 调）：自 (x,y,z)（须为重力方块）起向上清
+    //   连续重力方块列 + 每格 emit gravityBlockFell。空首格 → no-op。见上方头注释。
+    void dropGravityColumn(int x, int y, int z);
+
     // t565 铁轨连接重算（机制等价 MC 1.0 rail 自动连接 + 转弯）。读 (x,y,z) 的水平 4 邻块 id 经
     //   BlockRegistry::railConnections（单一权威）算该 Rail 的连接 state；与当前 state 不同 → 静默直写
     //   新 state（m_chunks.setBlock(id,state) + 标脏，**不经 World::setBlock** → 不重入本检查、不发
@@ -645,6 +668,12 @@ signals:
     //   （携带 state=layers-1 的 metadata；着地 setBlockFromEntity(...,state) 写回雪层，**保留层数**）。
     //   分层（PLAN §2）：World 低层只发语义事件，不反向依赖 Entities —— 呈现层只消费（同 blockDroppedAsItem 模式）。
     void snowLayerFell(int x, int y, int z, int layers);
+    // t799 重力方块（沙 / 沙砾）失撑坍落：每坍落一格发一次（携该格世界坐标 + 真实方块 id —— 混合柱各自
+    //   保留 id，着地还原沙或沙砾）。呈现层（Main.qml）据本信号 entityManager.spawnFallingBlock(x,y,z,id)
+    //   生成下落实体（重力 / 着地 / 落不完整方块变掉落物由 EntityManager.tick 既有 FallingBlock 分支承担，
+    //   t220 语义不动）。分层（PLAN §2）：World 低层只发语义事件，不反向依赖 Entities —— 呈现层只消费
+    //   （同 snowLayerFell 模式，但雪层整柱一实体（层数 metadata）、沙/砾每格一实体）。
+    void gravityBlockFell(int x, int y, int z, int blockId);
     // t656/t658 TNT 被**红石电力**点燃（通电上升沿，区别于既有「踩板 / 右键机关」直接触发路径——电力是
     //   第三条统一触发源，三条路径共用 spawnPrimedTnt 实体链）。World 低层只发语义事件（坐标），呈现层
     //   （Main.qml）转发 player.firePowerTnt（PlayerController 暴露的 QML 入口 → clearBlockSilent +
