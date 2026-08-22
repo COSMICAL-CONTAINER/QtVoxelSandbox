@@ -1624,6 +1624,11 @@ bool BlockRegistry::isFluidLike(quint8 blockId)
 //   switch 内注释）；台阶=7（半遮）；其余 → 0（全透）。
 quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
 {
+    // fix(叶底灰面)：叶（Leaves/SpruceLeaves）def.solid=true 走默认分支满遮 15 → 叶格内部天光被压到 0；
+    //   t746 后叶不遮挡邻面（叶下地面顶面恢复绘制），该面顶点光采样叶格内 flood 光 = 黑 → 透过叶孔见
+    //   灰黑「底面」（用户「树叶放地上贴地那面是灰色的」）。机制等价 MC 光过滤叶（light filtering，
+    //   衰减 1/层）：叶层逐层渐暗、单片叶下仍亮。须置于 isSolid 默认分支**之前**（叶 solid=true 会先命中）。
+    if (blockId == Leaves || blockId == SpruceLeaves) return 1;
     if (isSolid(blockId)) return 15;                  // 全实体方块：满遮光（保旧 isSolid 光照语义）
     if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
     switch (blockId) {

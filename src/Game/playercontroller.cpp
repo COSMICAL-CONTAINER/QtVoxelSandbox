@@ -6866,12 +6866,19 @@ void PlayerController::step(qreal dt)
         const float pMinX = m_pos.x() - 0.3f, pMaxX = m_pos.x() + 0.3f;
         const float pMinZ = m_pos.z() - 0.3f, pMaxZ = m_pos.z() + 0.3f;
         const float pMinY = m_pos.y(),         pMaxY = m_pos.y() + m_height;
+        // fix(仙人掌接触伤害失效)：misc 三轮的「含边界」（>=/<=）假设玩家被满格碰撞 snap 在格边界**正上**，
+        //   但 moveAxis 实际把玩家 snap 在障碍面**外 eps=1e-4 缝**上（见 ~L5902 与 autoStepLift ~L5837 注释，
+        //   t581 修睡莲/雪层迈步时同病灶）→ pMaxX = cMinX − 1e-4 → 含边界比较仍恒 false → 侧撞仙人掌恒不触发
+        //   （用户「碰到还是不扣血」根因；站顶分支因落地 Y snap 恰好相等而幸存）。修：XZ 判定外加
+        //   kTouchSkin 容差皮（≫ 1e-4 snap 缝、≪ 0.3 半宽，量级同 kStepProbe/10）；斜对角仍在至少一轴
+        //   隔 ≥0.3−0.002 → 不误伤。Y 判定维持原样（主循环严格 / 站顶含边界）。
+        constexpr float kTouchSkin = 0.002f;
         auto cactusAabbOverlap = [&](int cx, int cy, int cz) -> bool {
             const float cMinX = float(cx), cMaxX = float(cx) + 1.0f;   // 满格 AABB（仙人掌实体 0.8 内缩不用于伤害判定；
             const float cMinZ = float(cz), cMaxZ = float(cz) + 1.0f;   //   触碰伤害用整格接触，避免边界相等漏判）
             const float cMinY = float(cy), cMaxY = float(cy) + 1.0f;
-            return pMinX <= cMaxX && pMaxX >= cMinX   // 含边界（>=/<=）：玩家挡在格边界 = 接触
-                   && pMinZ <= cMaxZ && pMaxZ >= cMinZ
+            return pMinX <= cMaxX + kTouchSkin && pMaxX >= cMinX - kTouchSkin   // 容差皮：吸收碰撞 snap 的 1e-4 缝 = 接触
+                   && pMinZ <= cMaxZ + kTouchSkin && pMaxZ >= cMinZ - kTouchSkin
                    && pMinY <  cMaxY && pMaxY >  cMinY;  // Y 严格（上下格不因边界相等误判）
         };
         bool touch = false;
@@ -6898,8 +6905,8 @@ void PlayerController::step(qreal dt)
                         const float cMinX = float(cx), cMaxX = float(cx) + 1.0f;
                         const float cMinZ = float(cz), cMaxZ = float(cz) + 1.0f;
                         const float cMaxY = float(footY - 1) + 1.0f; // 脚下仙人掌格顶 = footY
-                        if (pMinX <= cMaxX && pMaxX >= cMinX
-                            && pMinZ <= cMaxZ && pMaxZ >= cMinZ
+                        if (pMinX <= cMaxX + kTouchSkin && pMaxX >= cMinX - kTouchSkin  // 同主循环容差皮（X snap 缝）
+                            && pMinZ <= cMaxZ + kTouchSkin && pMaxZ >= cMinZ - kTouchSkin
                             && pMinY <= cMaxY) touch = true;
                     }
         }

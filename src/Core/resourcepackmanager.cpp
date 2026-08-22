@@ -1643,9 +1643,54 @@ int detectAnimFrameCount(const QString &itemDir, const QString &stem)
 
 // 合成构建（调用者须已持 stateMutex()）。幂等（built 标志）。运行期经 apply() 置 built=false 强制重建。
 //   config 首次从 settings.json 加载；之后只信 BuiltState 内存值（setter 已持久化保持同步）。
-void ensureBuiltLocked()
+// t746 瓦片实心化（原叶族图标专用；fix 仙人掌透光起图集构建期亦用——机制同离线 build_cube_icons.py
+//   load_face）：alpha<128 的孔用不透明像素平均色填掉；半透（128..254）像素反预乘取原色后强制不透明
+//   （世界内 Mask cutout 下它们本就近似实心显示）。兜底：全透瓦片用程序叶绿常量。img 为
+//   Format_ARGB32_Premultiplied，输出保持同格式（alpha=255 时预乘值 = 直行值，直接写直行色安全）。
+//   fix(命名空间)：从图标段（双层匿名命名空间内）整体前移到本处（ensureBuiltLocked 同层）——
+//   图集构建循环与图标渲染两处调用点均晚于此定义，消除前向声明嵌套层不匹配的歧义。
+QImage solidifyTile(const QImage &tile)
 {
-    BuiltState &s = state();
+    if (tile.isNull())
+        return tile;
+    QImage img = tile.copy();
+    qint64 sr = 0, sg = 0, sb = 0;
+    int n = 0;
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb *scan = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const int a = qAlpha(scan[x]);
+            if (a < 128)
+                continue; // 孔不参与代表色统计（预乘色会偏暗）
+            sr += qBound(0, qRed(scan[x]) * 255 / a, 255);
+            sg += qBound(0, qGreen(scan[x]) * 255 / a, 255);
+            sb += qBound(0, qBlue(scan[x]) * 255 / a, 255);
+            ++n;
+        }
+    }
+    const int fr = n > 0 ? int(sr / n) : 90;  // 兜底叶绿 90/130/50（load_face 同款常量）
+    const int fg = n > 0 ? int(sg / n) : 130;
+    const int fb = n > 0 ? int(sb / n) : 50;
+    for (int y = 0; y < img.height(); ++y) {
+        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const QRgb c = scan[x];
+            const int a = qAlpha(c);
+            if (a >= 128) {
+                // 半透像素：保留原色相/明暗，升满不透明（预乘 → 直行）。
+                scan[x] = qRgb(qBound(0, qRed(c) * 255 / a, 255),
+                               qBound(0, qGreen(c) * 255 / a, 255),
+                               qBound(0, qBlue(c) * 255 / a, 255));
+            } else {
+                scan[x] = qRgb(fr, fg, fb); // 孔 → 代表色填
+            }
+        }
+    }
+    return img;
+}
+
+void ensureBuiltLocked()
+{    BuiltState &s = state();
     if (s.built)
         return;
     s.built = true;
@@ -1882,6 +1927,15 @@ void ensureBuiltLocked()
             tile = tile.scaled(kTile, kTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         if (const int *tint = tileTint(m.first))
             applyTint(tile, tint[0], tint[1], tint[2]); // t416/t444：灰度可着色瓦片乘群系 tint（叶/草顶/草丛 plains 绿；睡莲沼泽水生绿）
+        // fix(仙人掌透光)：demo 包 cactus 三瓦片实测自带大量透明像素（side ~9.4%：水平透明带 + 左右 ~1/16
+        //   透明边；top/bottom ~23.4%：整圈 ~1/16 透明框）→ 世界内 0.8 细柱四侧面在竖直棱处双边透明 =
+        //   斜向看穿柱体（用户「中间有空隙可以看过去」）；手持 BlockCube（审查修 L11 起 alphaMode:Mask）更把
+        //   透明像素硬丢弃成真洞。本工程仙人掌语义是实心不透明植物（lightOpacity=15、terrain 不透明材质），
+        //   pack 画师的透明像素在此为冗余（MC 模型 uv 裁边不采外框）→ 图集构建期 solidify：透明孔用瓦片
+        //   代表色填（复用下方图标段叶族 solidifyTile 同算法；对无透明瓦片幂等零行为差）。按文件名匹配
+        //   cactus_*（tileFilenameMap 三条 54/55/163 同源），程序图集（pack 关）瓦片本就不透明不经过此路径。
+        if (m.second.contains(QLatin1String("cactus"), Qt::CaseInsensitive))
+            tile = solidifyTile(tile);
         // t716 ② 门窗 4 孔回归（橡木门只剩上 2 孔）根因修复：drawImage 默认 SourceOver 把瓦片**叠**在程序
         //   生成底图上 —— pack 瓦片的透明窗洞像素叠在底图上**露出底图门板/窗棂**而非真透明（机制：SourceOver
         //   透明源像素 = 保留目标）。实测：door_wood_upper 两窗带中带 1 恰落在底图程序窗洞 1 上（透出 → 显 2 孔）、
@@ -2529,50 +2583,6 @@ QImage shadedTile(const QImage &tile, qreal f)
         for (int x = 0; x < img.width(); ++x) {
             const QRgb c = scan[x];
             scan[x] = qRgba((qRed(c) * num) >> 8, (qGreen(c) * num) >> 8, (qBlue(c) * num) >> 8, qAlpha(c));
-        }
-    }
-    return img;
-}
-
-// t746 瓦片实心化（叶族图标专用，机制同离线 build_cube_icons.py load_face）：alpha<128 的孔用不透明像素
-//   平均色填掉；半透（128..254）像素反预乘取原色后强制不透明（世界内 Mask cutout 下它们本就近似实心显示）。
-//   兜底：全透瓦片用程序叶绿常量。img 为 Format_ARGB32_Premultiplied，输出保持同格式（alpha=255 时
-//   预乘值 = 直行值，直接写直行色安全）。
-QImage solidifyTile(const QImage &tile)
-{
-    if (tile.isNull())
-        return tile;
-    QImage img = tile.copy();
-    qint64 sr = 0, sg = 0, sb = 0;
-    int n = 0;
-    for (int y = 0; y < img.height(); ++y) {
-        const QRgb *scan = reinterpret_cast<const QRgb *>(img.constScanLine(y));
-        for (int x = 0; x < img.width(); ++x) {
-            const int a = qAlpha(scan[x]);
-            if (a < 128)
-                continue; // 孔不参与代表色统计（预乘色会偏暗）
-            sr += qBound(0, qRed(scan[x]) * 255 / a, 255);
-            sg += qBound(0, qGreen(scan[x]) * 255 / a, 255);
-            sb += qBound(0, qBlue(scan[x]) * 255 / a, 255);
-            ++n;
-        }
-    }
-    const int fr = n > 0 ? int(sr / n) : 90;  // 兜底叶绿 90/130/50（load_face 同款常量）
-    const int fg = n > 0 ? int(sg / n) : 130;
-    const int fb = n > 0 ? int(sb / n) : 50;
-    for (int y = 0; y < img.height(); ++y) {
-        QRgb *scan = reinterpret_cast<QRgb *>(img.scanLine(y));
-        for (int x = 0; x < img.width(); ++x) {
-            const QRgb c = scan[x];
-            const int a = qAlpha(c);
-            if (a >= 128) {
-                // 半透像素：保留原色相/明暗，升满不透明（预乘 → 直行）。
-                scan[x] = qRgb(qBound(0, qRed(c) * 255 / a, 255),
-                               qBound(0, qGreen(c) * 255 / a, 255),
-                               qBound(0, qBlue(c) * 255 / a, 255));
-            } else {
-                scan[x] = qRgb(fr, fg, fb); // 孔 → 代表色填
-            }
         }
     }
     return img;
