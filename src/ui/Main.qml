@@ -4374,11 +4374,21 @@ Window {
 
                 // 头部枢轴 Node（t66）：头 + 双眼打包成一个子 Node，绕「颈部」俯仰，让第三人称头部跟随视线 pitch。
                 //   t71：迁入 upperBody；本地颈枢 y=0.7（髋枢 0.6 + 0.7 = 世界 1.3，与重组前一致），鞠躬时随上半身
-                //     绕髋前倾（头世界旋转 = Ry(yaw)·Rx(−crouchBow)·Rx(+pitch)，鞠躬 ∘ 视线俯仰）。
+                //     绕髋前倾（t748 起本地角补偿鞠躬量，头世界俯仰不再叠加鞠躬，见下）。
                 //   旋转符号：与相机一致用 +player.pitch（相机 eulerRotation.x = +pitch；pollMouse 中鼠标上推 →
                 //     m_pitch 增大 → 抬头看上方，故 pitch>0 = 抬头）。头部作为身体(yaw)的子节点，世界旋转与相机
                 //     同向 → 头朝视线方向。dev-spec 原稿写「-pitch」是符号笔误，此处据相机约定修正为 +pitch。
-                //   clamp ±60°：player.pitch 全程 ±89°，头部限 ±60° 即可表达俯仰且不至「折颈」过倾穿身。
+                //   t748 潜行头部跟随（用户报「按住 Shift 潜行时头部不再跟随视角旋转（被固定）」）：t71 起本 Node
+                //     挂进前倾鞠躬的 upperBody（eulerRotation.x = −crouchBow）内，旧绑定 x = clamp(pitch) 是
+                //     「身体系」角 → 蹲下时鞠躬 −35° 被烙进头的世界俯仰：头世界 pitch = pitch − 35（默认俯角
+                //     −42 时头指向 −77° 几乎垂直看地，再叠 ±60 钳在低头半段饱和）→ 观感=头被锁死在前倾躯干上、
+                //     不跟视角。修：本地角补回父级鞠躬量 x = clamp(pitch + crouchBow) → 头世界 pitch =
+                //     −crouchBow + (pitch + crouchBow) = pitch，站立（crouchBow=0）与蹲下都与视线一致
+                //     （机制等价 MC 蹲下头仍自由看向视线方向）；潜行只影响身体前倾/髋下沉，头部独立跟随视角。
+                //     yaw 无此问题：模型 root Node 绑 player.yaw，蹲行不改写 → 蹲/站头部偏航都跟视角。
+                //   clamp ±60°：钳的是「颈相对躯干」的本地角（补 crouchBow 之后再钳）；player.pitch 全程 ±89°，
+                //     蹲下时视线 pitch ∈ [−89, +25] 头世界角=视线角精确一致（游玩几乎全程），+25 以上达颈限
+                //     （蹲姿仰头受限，与真人一致）；站立时与旧行为完全相同（零回归）。
                 //   颈枢（非头心）：头绕脖子转（解剖正确），低头下巴前伸 / 抬头后仰，比绕头心转自然；极端低头
                 //     时下巴与胸口轻微相贴（与真人低头一致，非穿模瑕疵）。
                 //   分层（PLAN §2）：pitch 是 Game 层 Q_PROPERTY（playercontroller.h 已暴露 + pitchChanged），
@@ -4386,7 +4396,8 @@ Window {
                 Node {
                     id: headNode
                     position: Qt.vector3d(0, 0.7, 0)   // 颈枢（相对 upperBody）：头底/躯干顶；世界 = 髋枢+0.7
-                    eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, player.pitch)), 0, 0)
+                    // t748：+ crouchBow 补偿父级 upperBody 的 −crouchBow 前倾 → 蹲/站头世界俯仰都=视线俯仰（根因与推导见上注）。
+                    eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, player.pitch + playerModel.crouchBow)), 0, 0)
 
                     // 头（≈0.5³）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。pitch=0 时与重组前完全一致。
                     //   t731 皮肤化：UnitCube 纯色 → PlayerSkinBox{piece:0}（head 区 (0,0) 8×8×8 box-UV；本工程

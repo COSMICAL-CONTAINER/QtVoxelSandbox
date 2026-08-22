@@ -214,7 +214,11 @@ Item {
                 Node {
                     id: headNode
                     position: Qt.vector3d(0, 0.7, 0)
-                    eulerRotation: Qt.vector3d(root.lookPitch, root.headYawLead, 0)
+                    // t748：+ crouchBow 补偿父级 upperBody 的 −crouchBow 前倾（本预览镜像 Main.qml 玩家模型蹲姿，
+                    //   同根修：旧 x = lookPitch 是身体系角 → 蹲姿预览头被鞠躬 −35° 拖向地面不跟 lookPitch）→
+                    //   蹲/站头的世界俯仰都 = lookPitch；站立（crouchBow=0）零变化。lookPitch 已钳 ±45，
+                    //   补偿后本地角 ∈ [−10, 80] 不再额外钳（颈限语义同 Main.qml headNode）。
+                    eulerRotation: Qt.vector3d(root.lookPitch + root.crouchBow, root.headYawLead, 0)
 
                     // 头（≈0.5³）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。t731 皮肤化：PlayerSkinBox
                     //   {piece:0}（head 区 box-UV，-Z 前脸 = 皮肤脸区自带五官）+ 皮肤贴图。
