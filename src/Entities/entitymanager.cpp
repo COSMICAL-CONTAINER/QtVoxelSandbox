@@ -572,6 +572,9 @@ int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
     e.enderEyeShatter = 0.0f; // 飞行态（非碎裂）
     // t757 远段巡航高度：掷出眼位 + kEnderEyeClimbHeight（spawn 定死不随地形变 —— 眼睛无方块碰撞，
     //   平飞穿山可接受；换算依据是「玩家上方的指示高度」而非地表，故以掷出点为基准最直观）。
+    //   审查 #1 回归补回：t758 插入 spawnEnderPearl 时本赋值被 diff 吞掉 → 字段全工程无写入点（只剩
+    //   头文件默认 0.0f）→ tick 远段 gap 恒负、爬升分量恒 0，升空巡航整体死码。矩阵测试有断言防线。
+    e.enderEyeCruiseY = origin.y() + kEnderEyeClimbHeight;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -719,6 +722,15 @@ bool EntityManager::shatteringAt(int i) const
     if (i < 0 || i >= int(m_entities.size())) return false;
     const Entity &e = m_entities[size_t(i)];
     return e.alive && e.kind == EnderEye && e.enderEyeShatter > 0.0f;
+}
+
+// 审查 #1 回归探针（头文件注释详述动机）：读第 i 个暗渊之眼的远段巡航高度。离线矩阵测试 spawn 后断言
+//   == origin.y()+kEnderEyeClimbHeight，防「插入新 spawn 函数被 diff 吞赋值 → 巡航死码」静默回归复刻。
+float EntityManager::enderEyeCruiseYAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    return (e.alive && e.kind == EnderEye) ? e.enderEyeCruiseY : 0.0f;
 }
 
 // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。

@@ -314,6 +314,11 @@ public:
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
     //   槽）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。
     Q_INVOKABLE bool shatteringAt(int i) const;
+    // 审查 #1 回归探针：读第 i 个暗渊之眼的远段巡航高度 enderEyeCruiseY（spawn 时定死 = 掷出眼位 Y +
+    //   kEnderEyeClimbHeight=8）。离线矩阵测试 spawn 后断言该值 == origin.y()+8——t758 插入新 spawn 函数时
+    //   本赋值曾被 diff 静默吞掉（字段无写入点 → 升空巡航整体死码，运行期无任何报错面），此访问器 + 探针
+    //   是唯一防线。越界 / 非活体 EnderEye → 0.0f（同 aliveAt 越界安全语义）。
+    Q_INVOKABLE float enderEyeCruiseYAt(int i) const;
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进

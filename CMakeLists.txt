@@ -778,6 +778,9 @@ add_executable(redstone_matrix_test
     src/World/world.cpp
     src/World/partialblockgeometry.cpp
     src/Entities/minecartmanager.cpp
+    # 审查 #1 末影眼巡航高度回归探针附加：Entities 层 EntityManager（spawnEnderEye 后断言
+    # enderEyeCruiseYAt == origin.y()+8；向下只依赖 Core+World，不引入 Game/QML）。
+    src/Entities/entitymanager.cpp
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core

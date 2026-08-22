@@ -2882,6 +2882,16 @@ bool World::recomputePowerLocal()
             recomputeLightAround(x, y, z, BlockRegistry::RedstoneTorch, st, BlockRegistry::RedstoneTorch, ns);
             // 火把供能变化（15↔0）→ 其 6 邻粉须重算 → 火把格重入脏集（下一 tick 传播；定点迭代）。
             m_powerDirty.insert(k);
+            // 审查 #2（t740 降沿失达补口）：本翻转分支是静默直写（m_chunks.setBlock），不经 notePowerWrite
+            //   的火把斜下环入脏集；而 Phase A 锚点展开只播 6 正交种子，(±1,-1,0)/(0,-1,±1) 斜角粉从火把格
+            //   出发永不可达 → 熄灭 / 重亮两方向环粉都保留陈旧电力（NOT 门灯恒亮 / TNT 假信号，直到该粉
+            //   线被任意其它编辑触碰）。修法与 notePowerWrite 的 kDiag 环入脏集同表（kHDir2）同判定：翻转
+            //   时把 4 个斜下粉一并入脏集，下一 tick 锚点自身是粉即入域重算（升 / 降沿各收敛一次）。
+            for (const auto &h : kHDir2) {
+                const int nx = x + h[0], ny = y - 1, nz = z + h[1];
+                if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                    m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+            }
             any = true;
         }
     }

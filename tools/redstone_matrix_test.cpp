@@ -19,6 +19,7 @@
 #include "world.h"
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
+#include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
 
 namespace {
 
@@ -1048,6 +1049,61 @@ int main(int argc, char *argv[])
                           << "| spawn column search: seeds {42,7,1337,2024,99} all resolve to standable "
                              "bare surface — solid/snow-layer support, feet+head cells air, heightmap=="
                              "heightAt (no trunk/canopy/water overhead) (t756)";
+    }
+
+    // P14 审查 #2 火把翻转降沿 / 重亮升沿探针（t740 环粉可达性回归锁）：立在石块上的火把喂斜下环粉 → 灯亮；
+    //    邻位拉杆供能支撑块 → 火把熄灭（NOT 门翻转）→ 环粉必须断电、灯灭（修前：翻转走 Phase B2 静默直写
+    //    不经 notePowerWrite，锚点展开只播 6 正交种子 → 斜下环粉永不可达，保留陈旧电力 15 恒亮）；拉杆回位
+    //    → 火把重亮 → 环粉复电 15、灯复亮（两方向翻转都收敛）。对照 P4：P4 验「拆火把」的编辑路径（经
+    //    notePowerWrite kDiag），本探针验「火把在场、自身反相」的翻转路径——审查 #2 指出 t740 矩阵漏的正是这条。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0,     kRigY,     z0, BR::Stone, 0);          // 支撑块
+        w.setBlock(x0,     kRigY + 1, z0, BR::RedstoneTorch, 0);  // 火把立其上
+        w.setBlock(x0 + 1, kRigY,     z0, BR::RedstoneDust, 0);   // 斜下环粉（仅火把斜角供，拉杆对它是斜角不直供）
+        w.setBlock(x0 + 2, kRigY,     z0, BR::RedstoneLamp, 0);   // 灯挨粉
+        w.setBlock(x0,     kRigY,     z0 + 1, BR::Lever, 0);      // NOT 门输入：拉杆贴支撑块侧面（初始关）
+        tickN(w, 10);
+        const auto dustP = [&]() { return w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask; };
+        const auto lampOn = [&]() { return (w.stateAt(x0 + 2, kRigY, z0) & BR::RedstoneLampStateOnFlag) != 0; };
+        bool ok = dustP() == 15 && lampOn();            // 初稳态：火把亮 → 环粉 15、灯亮
+        w.setBlock(x0, kRigY, z0 + 1, BR::Lever, 1);    // 拉杆供能支撑块 → 火把反相熄灭
+        tickN(w, 10);
+        ok = ok && dustP() == 0 && !lampOn();           // 翻转降沿：环粉断电、灯灭（修前此处恒亮 = FAIL 面）
+        w.setBlock(x0, kRigY, z0 + 1, BR::Lever, 0);    // 拉杆回位 → 火把重亮
+        tickN(w, 10);
+        ok = ok && dustP() == 15 && lampOn();           // 重亮升沿：环粉复电、灯复亮
+        w.setBlock(x0, kRigY, z0 + 1, BR::Lever, 1);    // 再供能再熄（双向翻转收敛性）
+        tickN(w, 10);
+        ok = ok && dustP() == 0 && !lampOn();
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| torch NOT-gate FLIP reaches diagonal ring dust: lit 15/lamp on, "
+                             "flip-off 0/lamp off, relight 15/lamp on again (review #2)";
+        // 清场
+        w.setBlock(x0, kRigY + 1, z0, BR::Air);
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Air);
+        w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+        tickN(w, 2);
+    }
+
+    // ── 审查 #1 末影眼巡航高度回归探针（Entities 层 EntityManager 直编，同 t737 MinecartManager 先例）：
+    //    t758 插入 spawnEnderPearl 时 spawnEnderEye 的 enderEyeCruiseY 赋值被 diff 吞掉 → 字段全工程无写入
+    //    点（只剩默认 0.0f）→ tick 远段爬升分量恒 0，升空巡航整体死码且运行期无任何报错面。spawn 两枚不同
+    //    高度的眼，断言巡航高度 == origin.y() + 8（kEnderEyeClimbHeight），防同类「插函数吞赋值」静默回归。
+    {
+        EntityManager ents;
+        const int s1 = ents.spawnEnderEye(QVector3D(10.5f, 20.0f, 10.5f), QVector3D(1.0f, 0.5f, 0.0f));
+        const int s2 = ents.spawnEnderEye(QVector3D(12.5f, 33.0f, 12.5f), QVector3D(0.0f, 0.2f, 1.0f));
+        const bool ok = s1 >= 0 && s2 >= 0
+                        && std::abs(ents.enderEyeCruiseYAt(s1) - 28.0f) < 1e-4f
+                        && std::abs(ents.enderEyeCruiseYAt(s2) - 41.0f) < 1e-4f;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| ender-eye spawn records cruise Y = origin.y()+8 at two throw heights "
+                             "(regression guard, review #1)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
