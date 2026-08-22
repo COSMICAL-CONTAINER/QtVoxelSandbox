@@ -772,6 +772,12 @@ private:
     void tickImpl();
     void pollMouse();
     void step(qreal dt);
+    // t775 窒息 tick（t160 原 step() 内联块抽出，语义原样）：眼位点嵌实体方块碰撞体 → m_suffocationTimer
+    //   累积，每 kSuffocationInterval 秒 emit fallDamageTaken(1, Suffocation)（复用 takeDamage→damaged
+    //   红闪 / 视角晃链 + t311 死因）。仅 Survival 且有世界才生效（创造 / 观察者无敌）。抽出动机：step()
+    //   的船 / 矿车骑乘分支早 return 不经走路路径的窒息块 —— 矿车骑乘穿 1 格高通道（玩家头进实心格）旧版
+    //   无痛穿过（用户 R19.12 报告），骑乘分支在 m_pos 同步到座位后直调本方法接入同一窒息链。
+    void tickSuffocation(float dt);
     // t223 近流水 proximity 扫描：在玩家眼位周围 kFlowSoundRadius 盒内查最近**流动水**格（Water 且 state>0；
     //   静水水源 state=0 不算），返回 [0,1] 强度（1=贴脸 / 0=范围外或无流水）。节流由 tickImpl 累加 dt 控制
     //   （kFlowScanInterval）。只读 World::blockAt/stateAt（向下依赖）；无世界 → 0。

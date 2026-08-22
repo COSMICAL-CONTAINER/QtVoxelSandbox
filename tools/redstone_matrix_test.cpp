@@ -1870,6 +1870,91 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
+    // ── P18 t775 骑矿车窒息探针（1 格高通道顶头扣血的几何 + 节奏断言）──
+    //   用户报告（R19.12）：「生存坐矿车穿 1 格高通道（头撞实体方块）应扣血，现无痛穿过」。根因：
+    //   PlayerController.step 的矿车骑乘分支早 return，不经走路路径末尾的 t160 窒息块 → 骑乘期头部
+    //   嵌实心格零伤（修法 = 分支内座位同步后直调抽出的 tickSuffocation，走路 / 骑乘共用同链）。
+    //   矩阵断言（World + Entities 层可及范围 —— PlayerController 属 Game 层不直编，接线由上述共用
+    //   函数保证，探针锁定几何前提与节奏规则）：
+    //   (a) 1 格净空（轨格 y=R、天花板 y=R+1）：骑乘眼位（脚底 = 车心 −kCartSeatDrop + 眼高）对
+    //       World::pointBlockedByCollision 恒 true（t775 起玩家窒息与探针共用本 World 判据）；
+    //   (b) 每秒 1HP 节奏镜像（kSuffocationInterval=1s 同规则累积）≥3 脉冲（4.8s 连续嵌 → 4 脉冲）；
+    //   (c) 对照组 2 格净空（天花板 y=R+2）：眼位 1.7575 < 2 不嵌 → 全程 false、0 脉冲（防「坐车
+    //       恒扣血」的反向回归）；
+    //   (d) 车本体不受天花板影响：两 rig 车都全程钉轨面（y=R+rideH）且驶完全程到死端（scanRailColumn
+    //   自 floor(pos.y) 起扫，天花板在其上方不遮轨 → 矿车物理可进 1 格净空通道 = 用户症状前提）。
+    {
+        // 镜像常量（与 Game 层 playercontroller / minecartmanager 私有常量文档值同步，改几何须三处同步）：
+        const float seatDrop = 0.3125f; // kCartSeatDrop（脚底 = 矿车中心 −0.3125，t768 底板面偏移）
+        const float eyeH = 1.62f;       // kEyeHeight（站姿眼位；骑乘不改变 m_eyeHeight）
+        const float suffInterval = 1.0f; // kSuffocationInterval（t160 窒息扣血间隔，每秒 1HP）
+        // rig 坐标：不用 nextSlot()（其 4×31 网格已被前序探针占满，尾行 z0=97 越界 → setBlock 全拒 = 假
+        //   FAIL）；固定 z=94 行（界内最后一行，前序探针已自清）+ 前置净空（含前后各 1 格隔离边 + 上方
+        //   4 层 —— 断开残留邻轨的连接位 / 清残留实心，幂等）。
+        const int tunX = 30, tunZ = 94;
+        const auto driveTunnel = [&](int ceilY, int *outPulses) -> bool {
+            const int cells = 12;
+            for (int i = -1; i <= cells; ++i)
+                for (int y = kRigY; y <= kRigY + 3; ++y)
+                    w.setBlock(tunX + i, y, tunZ, BR::Air, 0);
+            for (int i = 0; i < cells; ++i) {
+                w.setBlock(tunX + i, kRigY, tunZ, BR::Rail, 0);      // 直轨 EW（连接位自动互连）
+                w.setBlock(tunX + i, ceilY, tunZ, BR::Stone, 0);     // 天花板（1 格净空 ceilY=R+1 / 对照 R+2）
+            }
+            MinecartManager carts;
+            carts.spawnCart(tunX, kRigY, tunZ, &w); // 西端格（EW 直轨 → spawn 定向 +X）
+            const QVector3D mountOrigin(float(tunX) + 0.5f, float(kRigY) + 2.0f, float(tunZ) + 0.5f);
+            *outPulses = 0;
+            float suffTimer = 0.0f, maxX = 0.0f;
+            bool asExpected = true;
+            if (!carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f)) {
+                qInfo().noquote() << "  mount failed: cart" << carts.posAt(0);
+                return false;
+            }
+            const bool wantEmbedded = (ceilY == kRigY + 1); // 1 格净空 → 全程嵌；2 格 → 全程不嵌
+            for (int t = 0; t < 300; ++t) { // 0.016s × 300 = 4.8s：8 格/s 巡航 ~1.6s 驶完 12 格后停死端（仍嵌）
+                QVector3D cp;
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp); // 持续 W（+X 沿轨）
+                // (d) 车钉轨面（天花板不遮 scanRailColumn —— 车物理可进 1 格净空通道）。
+                if (std::fabs(cp.y() - (kRigY + 0.45f)) > 0.01f) asExpected = false;
+                if (cp.x() > maxX) maxX = cp.x();
+                // (a)/(c) 骑乘眼位（玩家几何：脚底 = 车心 −seatDrop，眼 = 脚底 +eyeH ≈ R+1.7575）。
+                const float eyeY = cp.y() - seatDrop + eyeH;
+                const bool embedded = w.pointBlockedByCollision(cp.x(), eyeY, cp.z());
+                if (embedded != wantEmbedded) asExpected = false;
+                // 节奏镜像（t160 同规则：嵌 → 累积 dt，每 1s 一脉冲；出 → 清零）。
+                if (embedded) {
+                    suffTimer += 0.016f;
+                    if (suffTimer >= suffInterval) { suffTimer -= suffInterval; ++(*outPulses); }
+                } else {
+                    suffTimer = 0.0f;
+                }
+            }
+            // (d) 驶完全程：西端格心 x0+0.5 → 东端死端格心 +11.5 共 11 格；阈值 10.5 吸收停驻格心微差。
+            if (maxX < float(tunX) + 10.5f)
+                qInfo().noquote() << "  short run: maxX" << maxX << "ceilY" << ceilY;
+            carts.clearAll();
+            for (int i = -1; i <= cells; ++i)
+                for (int y = kRigY; y <= kRigY + 3; ++y)
+                    w.setBlock(tunX + i, y, tunZ, BR::Air, 0);
+            tickN(w, 2);
+            return asExpected && (maxX >= float(tunX) + 10.5f);
+        };
+        int pulses1 = 0, pulses2 = 0;
+        const bool ok1 = driveTunnel(kRigY + 1, &pulses1); // (a)+(b) 1 格净空 → 全程嵌 + 多脉冲
+        const bool ok2 = driveTunnel(kRigY + 2, &pulses2); // (c) 对照 2 格净空 → 全程不嵌 + 0 脉冲
+        bool ok = ok1 && ok2 && pulses1 >= 3 && pulses2 == 0;
+        if (!ok)
+            qInfo().noquote() << "  tunnel suffocation mismatch: 1blk ok" << ok1 << "pulses" << pulses1
+                              << "| 2blk ok" << ok2 << "pulses" << pulses2;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t775 ridden-cart head-in-block: 1-block tunnel embeds rider eye "
+                             "(pointBlockedByCollision) every tick + >=3 suffocation pulses @1HP/s; "
+                             "2-block control never embeds (0 pulses); cart stays pinned to rail in both "
+                             "(ceiling does not occlude scanRailColumn)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

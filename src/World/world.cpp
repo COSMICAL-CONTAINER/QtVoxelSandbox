@@ -519,6 +519,18 @@ std::vector<BlockRegistry::BlockAABB> World::collisionAABBsAt(int x, int y, int 
     return out;
 }
 
+// t775 点级碰撞占据查询（头注释见 world.h）：取点所在格的碰撞 sub-AABB，任一盒严格包含该点 → true。
+//   玩家（t160）/ mob（t254）窒息与矿车骑乘窒息（t775）共用本判据（旧三处各自内联，收敛单一权威）。
+bool World::pointBlockedByCollision(float x, float y, float z) const
+{
+    for (const BlockRegistry::BlockAABB &b
+         : collisionAABBsAt(int(std::floor(x)), int(std::floor(y)), int(std::floor(z)))) {
+        if (x > b.minX && x < b.maxX && y > b.minY && y < b.maxY && z > b.minZ && z < b.maxZ)
+            return true;
+    }
+    return false;
+}
+
 // t133：写 id + state + 标脏（含边界邻接）。变化判定含 state：oldId==id && oldState==state 才视为无变化
 //   （id 不变只 state 变 —— 如 door/trapdoor 右键开合 —— 仍需重网格化，故走写入 + worldChanged）。
 //   信号语义：仅 id 变化发 broken/placed；id 不变只 state 变不发（非破 / 放，是开合动作），仅 worldChanged。
