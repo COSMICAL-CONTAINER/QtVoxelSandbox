@@ -19,7 +19,7 @@
 // state 编码（与 BlockRegistry::Id 注释 + playercontroller placeBlock 一致；机制等价 MC (id,metadata)）：
 //   slab        bit0      = 上半(1)/下半(0)
 //   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
-//   fence       —         （中心立柱 1.5 高 + 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
+//   fence       —         （中心立柱 1.0 高（t801 视觉裁剪，碰撞仍 1.5）+ 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
 //   pressure_plate —      （贴地薄板；state bit0=踩下（t627）→ 板高压半 1/32；机制等价 MC 压力板被压下）
 //   lever/button —        （t662 重做：贴附着面小体——按钮凸钮单盒（按下压薄 1/16）/ 拉杆底座+摆棍两段阶梯盒；
 //                          state bit0=激活（t628）、bit[3:1]=附着面 0=贴地 1..4=四向贴墙（blockregistry.h
@@ -212,20 +212,24 @@ int PartialBlockGeometry::append(
     case BlockRegistry::WoodFence:
     case BlockRegistry::CobbleFence: // t412 圆石墙（与 WoodFence 同几何；机制等价 MC 圆石墙）
     case BlockRegistry::SpruceFence: { // t466 云杉栅栏（与 WoodFence 同几何，tile=spruce_planks）
-        // t209 栅栏 = 中心立柱（0.4 见方，1.5 高）+ 四向横档（连接相邻栅栏 / 实体方块）。
-        //   立柱 y[0, 1.5] 与 collisionAABBs(ShapeFence) 同高（{0.3,0,0.3,0.7,1.5,0.7}）→ 玩家跳不过
-        //   （跳跃顶点 ~1.25 < 1.5；机制等价 MC 栅栏 1.5 高不可越）。立柱顶探入上格 0.5（栅栏上格必为空气，
-        //   否则碰撞亦不可能 1.5 高 → 渲染安全）。
+        // t209 栅栏 = 中心立柱（0.4 见方）+ 四向横档（连接相邻栅栏 / 实体方块）。
+        //   t801 视觉高度裁到 **1 格**（立柱 y[0,1]，上档收进 1 格内）：旧 1.5 高视觉使立柱顶 + 上档探入
+        //   上格 0.5，贴栅栏放箱/靠墙摆件等场景见「0.5 格悬空穿模」观感。视觉与碰撞自此分离（机制等价
+        //   MC 栅栏语义：模型 1 格高、碰撞箱 1.5 高不可越——跳跃顶点 ~1.25 < 碰撞 1.5，玩家/怪物仍跳不过；
+        //   collisionAABBs(ShapeFence) 保持 {0.3,0,0.3,0.7,1.5,0.7} 不动，selectionAABBs/raycastAABBs/
+        //   solidTopOffset 同步 1.0 视觉）。贴图无需 v 区间适配：pushBox 各面 cu,cv 恒取单位 {0,1}
+        //   （整张瓦片铺满该面、随面拉伸采样），立柱 1.5→1.0 后侧贴图从 1.5:1 拉伸回到 1:1（比例反而更正）。
         //   横档分上下两道（MC 式），每道从立柱中心延伸到格边；仅在该向「有连接」时画。连接判定 = 邻格为
         //   任意栅栏（WoodFence/CobbleFence，t412 经 isFence 谓词）或 isSolid（实体整立方；不连空气/水/火把/
         //   不完整方块，同 MC 栅栏只连栅栏与实体）。横档纯视觉（不进碰撞 AABB，机制等价 MC 栅栏 VoxelShape
         //   仅立柱；玩家贴立柱碰撞即可挡）。
-        pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.5f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.0f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
         const auto connects = [](quint8 blk) {
             return BlockRegistry::isFence(blk) || BlockRegistry::isSolid(blk);
         };
         const float yLo0 = 0.375f,  yLo1 = 0.5625f; // 下档（MC 6/16..9/16）
-        const float yHi0 = 0.9375f, yHi1 = 1.125f;  // 上档（探入 1.5 高区间，呼应立柱顶高度）
+        const float yHi0 = 0.75f,   yHi1 = 0.9375f; // 上档（MC 12/16..15/16；t801 前为探入 1.5 区间的
+                                                    //   0.9375..1.125，随立柱同裁收进 1 格视觉内）
         if (connects(nb.posX)) { // +X：x[中心, +X 边]
             pushBox(verts, idx, lx, ly, lz, 0.5f, 1.0f, yLo0, yLo1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
             pushBox(verts, idx, lx, ly, lz, 0.5f, 1.0f, yHi0, yHi1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
