@@ -232,6 +232,28 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
+    // P4b 复审 #6：墙上挂的红石火把（attach 低 3 位 1..4）**不**向斜下角粉供电 —— 旧 seeding 不读
+    //   attach 形态，墙上装饰火把把墙脚一圈粉点亮（意外通电）。立式（P4）语义不变（正对照）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0 - 1, kRigY + 1, z0, BR::Stone);            // 墙（火把支撑，-X 邻）
+        w.setBlock(x0,     kRigY + 1, z0, BR::RedstoneTorch, BR::TorchOnNX); // 墙挂火把（支撑在 -X）
+        w.setBlock(x0 + 1, kRigY,     z0, BR::RedstoneDust, 0);   // 墙脚斜下角粉（+1,-1,0）
+        w.setBlock(x0 + 2, kRigY,     z0, BR::RedstoneLamp, 0);
+        tickN(w, 6);
+        const int p = w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask;
+        const bool lampOff = (w.stateAt(x0 + 2, kRigY, z0) & BR::RedstoneLampStateOnFlag) == 0;
+        const bool ok = (p == 0) && lampOff;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| wall torch (TorchOnNX) -> diagonal-down dust stays 0, lamp off (review #6)";
+        w.setBlock(x0 - 1, kRigY + 1, z0, BR::Air);
+        w.setBlock(x0,     kRigY + 1, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY,     z0, BR::Air);
+        w.setBlock(x0 + 2, kRigY,     z0, BR::Air);
+        tickN(w, 2);
+    }
+
     // P5 火把立在 TNT 顶面（TNT 是火把支撑）：火把供下邻强电 → 应点燃。
     {
         const auto [x0, z0] = nextSlot();

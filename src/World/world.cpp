@@ -2529,10 +2529,17 @@ bool World::recomputePowerLocal()
         //   压力板 / 探测轨）都装在自身格内、无抬升，6 正交已等价 MC；火把亮态判定与 powerSourceLevel 同
         //   源（OffFlag 位）。斜角喂粉只入 BFS 种子（粉 state 电力级），不改 isReceivingPower 的接收器读
         //   ——接收器（TNT / 灯 / …）挨着通电粉即亮，语义不变。
+        //   复审 #6（2026-08-22）：仅**立式**火把（TorchFloor）有斜下供电 —— 墙上插的火把（attach 低 3 位
+        //   1..4）在 MC 只强充能其附着块，不向斜对角粉直接供电；旧 seeding 不读 attach 形态 → 墙上装饰
+        //   火把把墙脚一圈粉全部点亮（意外通电）。torchAttachOffset 是 attach 编码单一权威（越界 state →
+        //   floor 兜底），与 Phase B 反相分支同源解码（两处立式语义一致）。
         if (!seeded && y + 1 < H) {
             for (const auto &h : kHDir2) {
                 const int tx = x + h[0], ty = y + 1, tz = z + h[1];
                 if (m_chunks.blockAt(tx, ty, tz) != BlockRegistry::RedstoneTorch) continue;
+                int tax, tay, taz;
+                BlockRegistry::torchAttachOffset(m_chunks.stateAt(tx, ty, tz), tax, tay, taz);
+                if (tay != -1) continue; // 墙挂态（支撑在水平邻）→ 不 seed 斜角粉
                 if ((m_chunks.stateAt(tx, ty, tz) & BlockRegistry::RedstoneTorchStateOffFlag) != 0)
                     continue; // 熄灭态（反相）不供能
                 seeded = true;
@@ -2887,10 +2894,15 @@ bool World::recomputePowerLocal()
             //   出发永不可达 → 熄灭 / 重亮两方向环粉都保留陈旧电力（NOT 门灯恒亮 / TNT 假信号，直到该粉
             //   线被任意其它编辑触碰）。修法与 notePowerWrite 的 kDiag 环入脏集同表（kHDir2）同判定：翻转
             //   时把 4 个斜下粉一并入脏集，下一 tick 锚点自身是粉即入域重算（升 / 降沿各收敛一次）。
-            for (const auto &h : kHDir2) {
-                const int nx = x + h[0], ny = y - 1, nz = z + h[1];
-                if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
-                    m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+            //   复审 #6：与供电 seeding 同步只对**立式**火把（ay==-1）扩脏集 —— 墙挂火把与斜下粉无供电
+            //   关系（seeding 已拒），翻转时不再把无关斜角粉拉入重算（两处立式语义保持一致；notePowerWrite
+            //   的编辑路径扩集是可达性超集（拆火把时旧 attach state 不可得），重算幂等无害）。
+            if (ay == -1) {
+                for (const auto &h : kHDir2) {
+                    const int nx = x + h[0], ny = y - 1, nz = z + h[1];
+                    if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                        m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+                }
             }
             any = true;
         }
