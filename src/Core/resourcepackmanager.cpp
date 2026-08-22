@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutex>
@@ -2390,6 +2391,11 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
     // t746 叶族走 ③ ShapeFull 满立方盒 + solidify 实心化（瓦片带孔直投会显半透筛子，读不出体积）。
     if (blockId == BlockRegistry::Leaves || blockId == BlockRegistry::SpruceLeaves)
         spec.solidify = true;
+    // 审查修 L13：刷怪笼同入 solidify —— t760 瓦片改 cutout 铁笼栅格后，pack 态图标若直投带孔瓦片会显
+    //   「镂空筛子」，与 pack 关态 qrc 图标（实心铁笼）两态观感割裂。实心化（alpha<255 填不透明均值色）
+    //   后 pack 态读作实心铁笼块，与关态对齐（叶族同款处理）。
+    if (blockId == BlockRegistry::Spawner)
+        spec.solidify = true;
     const auto flatSpec = [&spec](int tile) {
         spec.valid = true;
         spec.flat = true;
@@ -2743,62 +2749,93 @@ bool tileDiffersFromProgram(const QImage &composite, const QImage &program, int 
 } // namespace
 
 // t745 统一贴图原则：方块 item 图标运行期渲染（任意 pack 通用）。详见 resourcepackmanager.h 声明处注释。
+//   审查修 L9/L10（2026-08-22）：
+//   · L9 缓存键与落盘文件名带 requirePackContribution 模式位（键 = blockId*2+mode；文件名 icon3_<id>_<p|a>_r<rev>）
+//     —— 旧版两模式共用 blockIconFiles[blockId] 与同一文件名，pack 贡献模式（程序观感返空回退手绘）与任意
+//     模式（无条件渲）渲染入口不同，layer-1 落盘失败后 layer-2 成功 / 未来新调用方换模式取同一键 = 缓存
+//     投毒边角。文件族 icon2 → icon3（换名即换代，旧 mode-less 缓存自然失效成孤儿）。
+//   · L10 渲染 + PNG 落盘移到 stateMutex 外 —— 旧版全程持锁做 QImage 投影渲染 + 磁盘 IO，首开背包几十个
+//     图标逐个串行，同锁的任何查询（active/entitySource/...）全被阻塞；工程内 setEnabled 已有「IO 在锁外」
+//     先例。锁内只做：贡献判定（64×64 小图比对，廉价）+ 缓存命中检查 + 取图集/字段快照（QImage 隐式共享，
+//     即便随后 apply() 重建 s.atlas 本快照数据仍保活有效）。回锁写缓存前校验 revision 未变（快照后发生过
+//     apply() 重建则不回写，防旧图集派生物挂进新状态）。
 QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackContribution)
 {
-    QMutexLocker lock(&stateMutex());
-    ensureBuiltLocked();
-    BuiltState &s = state();
-    if (requirePackContribution && !s.active)
-        return {};
+    // 纯函数（BlockRegistry::def 单一权威，不读 BuiltState）→ 锁外先算。
     const AtlasIconSpec spec = atlasIconSpecForBlock(blockId);
     if (!spec.valid)
         return {};
-    // 「pack 实际覆盖了该块可见面吗」：合成图集瓦片与纯程序图集逐像素比对 —— 全相同 = pack 无产出 →
-    //   返空串（调用方回落手绘程序图标 / FROM_PACK 家族的程序重渲；此时渲染结果只会复刻程序观感，
-    //   覆盖手绘图标反而损失美术质量）。
-    if (requirePackContribution) {
-        const QImage &prog = programAtlas();
-        bool contributed = false;
-        if (spec.flat) {
-            contributed = tileDiffersFromProgram(s.atlas, prog, spec.flatTile);
-        } else {
-            for (const AtlasIconBox &b : spec.boxes) {
-                if (tileDiffersFromProgram(s.atlas, prog, b.topTile)
-                    || tileDiffersFromProgram(s.atlas, prog, b.sideTile)
-                    || tileDiffersFromProgram(s.atlas, prog, b.frontTile)) {
-                    contributed = true;
-                    break;
+    const int cacheKey = blockId * 2 + (requirePackContribution ? 1 : 0);
+    const QLatin1String modeSuffix(requirePackContribution ? "_p" : "_a"); // p = pack 贡献模式 / a = 任意模式
+    QImage atlasCopy;       // 图集快照（隐式共享；锁内取、锁外渲染用）
+    QString entityDirCopy;  // bookOverlay 两态贴图探测用（锁外）
+    bool activeCopy = false;
+    int revisionAtSnapshot = 0;
+    {
+        QMutexLocker lock(&stateMutex());
+        ensureBuiltLocked();
+        BuiltState &s = state();
+        if (requirePackContribution && !s.active)
+            return {};
+        // 「pack 实际覆盖了该块可见面吗」：合成图集瓦片与纯程序图集逐像素比对 —— 全相同 = pack 无产出 →
+        //   返空串（调用方回落手绘程序图标 / FROM_PACK 家族的程序重渲；此时渲染结果只会复刻程序观感，
+        //   覆盖手绘图标反而损失美术质量）。
+        if (requirePackContribution) {
+            const QImage &prog = programAtlas();
+            bool contributed = false;
+            if (spec.flat) {
+                contributed = tileDiffersFromProgram(s.atlas, prog, spec.flatTile);
+            } else {
+                for (const AtlasIconBox &b : spec.boxes) {
+                    if (tileDiffersFromProgram(s.atlas, prog, b.topTile)
+                        || tileDiffersFromProgram(s.atlas, prog, b.sideTile)
+                        || tileDiffersFromProgram(s.atlas, prog, b.frontTile)) {
+                        contributed = true;
+                        break;
+                    }
                 }
             }
+            if (!contributed)
+                return {};
         }
-        if (!contributed)
-            return {};
+        // 缓存命中（revision 内稳定；apply() 重建清缓存 + 文件名带 revision → 无陈旧路径）。
+        const auto it = s.blockIconFiles.constFind(cacheKey);
+        if (it != s.blockIconFiles.constEnd() && QFile::exists(it.value()))
+            return QStringLiteral("file:///") + it.value();
+        atlasCopy = s.atlas;
+        entityDirCopy = s.entityDir;
+        activeCopy = s.active;
+        revisionAtSnapshot = s.revision;
     }
-    // 缓存命中（revision 内稳定；apply() 重建清缓存 + 文件名带 revision → 无陈旧路径）。
-    const auto it = s.blockIconFiles.constFind(blockId);
-    if (it != s.blockIconFiles.constEnd() && QFile::exists(it.value()))
-        return QStringLiteral("file:///") + it.value();
-    QImage img = renderAtlasIcon(s.atlas, spec);
+    // ---- 锁外：渲染 + 落盘（L10；IO 与像素投影不再阻塞 stateMutex）----
+    QImage img = renderAtlasIcon(atlasCopy, spec);
     if (img.isNull())
         return {};
     // t764 ① 附魔台叠画悬浮书（pack 命中包书贴图 / 否则程序书贴图；与放置态 bookDelegate 两态同源）。
     //   注意须在「缓存命中」检查之后、落盘之前 —— 叠层是渲染的一部分，不能只叠在内存像不落缓存。
     if (spec.bookOverlay) {
         bool packBook = false;
-        const QImage bookTex = enchantBookOverlayTexture(s.active, s.entityDir, &packBook);
+        const QImage bookTex = enchantBookOverlayTexture(activeCopy, entityDirCopy, &packBook);
         drawEnchantBookOverlay(img, bookTex, packBook);
     }
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty())
         return {};
     QDir().mkpath(dir);
-    // t764 文件族 icon → icon2：画法版本变更（附魔台加悬浮书）须换缓存名，否则老缓存（无书图标）在
+    // t764/t745 文件族 icon → icon2 → icon3：画法版本或缓存键策略变更须换缓存名，否则老缓存在
     //   pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_icon2_%1_r%2.png").arg(blockId).arg(s.revision));
+            QStringLiteral("voxelsandbox_rp_icon3_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
     if (!img.save(out, "PNG"))
         return {};
-    s.blockIconFiles.insert(blockId, out);
+    {
+        QMutexLocker lock(&stateMutex());
+        // 快照后发生过 apply() 重建（revision 变 / 缓存已清）→ 本张按旧图集渲染，不回写（防陈旧派生物
+        //   挂账；本次仍返回该文件，下次调用按新图集重渲新 revision 文件名）。
+        BuiltState &s = state();
+        if (s.revision == revisionAtSnapshot)
+            s.blockIconFiles.insert(cacheKey, out);
+    }
     return QStringLiteral("file:///") + out;
 }
 
@@ -2902,6 +2939,34 @@ QString ResourcePackManager::entitySource(const QString &kind) const
         return {};
     };
     return probe(relPath); // 两级探测（子目录 → 扁平）；miss 返空回退程序贴图
+}
+
+// 审查修 L8：pack 实体贴图像素宽（头注释见 resourcepackmanager.h）。QImageReader::size() 只读 PNG 头
+//   （不整解码，微秒级）；两级探测路径解析与 entitySource 同源（防两函数对同一 kind 解析到不同文件）。
+int ResourcePackManager::entityTextureWidth(const QString &kind) const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    if (!s.active || s.entityDir.isEmpty())
+        return 0;
+    QString relPath;
+    for (const EntityTexEntry &e : entityKindMap()) {
+        if (kind == QLatin1String(e.kind)) {
+            relPath = QString::fromLatin1(e.packPath);
+            break;
+        }
+    }
+    if (relPath.isEmpty())
+        return 0;
+    const QDir entityDir(s.entityDir);
+    QString p = entityDir.absoluteFilePath(relPath);
+    if (!QFile::exists(p))
+        p = entityDir.absoluteFilePath(QFileInfo(relPath).fileName());
+    if (!QFile::exists(p))
+        return 0;
+    QImageReader r(p);
+    return r.canRead() ? r.size().width() : 0;
 }
 
 // t717/t718 盔甲 layer 贴图源（玩家 + 人形 mob 护甲 3D 显示的 pack 覆盖）：tier（0 皮/1 铁/2 铜/3 金/4 钻/5 链）+

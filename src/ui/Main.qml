@@ -2791,7 +2791,13 @@ Window {
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColorMap: voxelAtlas
-                        alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）/ 床段（isBed，t496）已走下方 billboard 分支，本立方路径不再处理它们
+                        // 审查修 L11：手持立方路径加 alpha-test（Mask + 0.5，同世界内 spawnerDelegate / 地形
+                        //   t442 契约）—— t760 刷怪笼 tile 改 cutout 铁笼栅格后，本路径旧 alphaCutoff:0 且缺
+                        //   alphaMode（Opaque 下 alpha 全忽略）→ 手持刷怪笼显暗蓝灰实心块（叶族 fancy 孔同理）。
+                        //   不透明 tile（草/石/…）alpha 恒 255 → Mask 零丢弃外观不变；含 alpha 的 ShapeFull
+                        //   （Spawner/叶）孔洞硬边丢弃透视。火把（13）/ 异形 / cross / 床仍走下方 billboard 分支。
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.5
                     }
                 }
                 // t219 手持木板衍生方块（第一人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）在世界内非整立方
@@ -4590,7 +4596,12 @@ Window {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
                             opacity: playerModel.bodyOpacity
-                            alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）/ 床段（isBed，t496）走下方 billboard 分支
+                            // 审查修 L11：同第一人称 viewModelHand 手持立方 —— Mask + 0.5 alpha-test
+                            //   （spawner cutout 栅格 / 叶族孔洞透空；不透明 tile 零丢弃外观不变）。
+                            //   火把（13）/ 异形 / cross / 床走下方 billboard 分支。opacity 跟 bodyOpacity
+                            //   （可见态恒 1.0，观察者被 visible 绑定排除）不与 Mask 冲突。
+                            alphaMode: PrincipledMaterial.Mask
+                            alphaCutoff: 0.5
                         }
                     }
                     // t219 手持木板衍生方块（第三人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 →
@@ -5898,7 +5909,11 @@ Window {
 
                     // t732 pack 矿车贴图命中态：命中 → cartPackTex + MinecartBox 布局 1（demo 包 8× 实测
                     //   分区）；miss → cartTex + 布局 0（qrc 程序 64×32）。source 读 active → pack 开关即时重刷。
+                    //   审查修 L8：布局 1 分区表钉死 demo 包排版 —— 64×32 原尺寸 pack（如 vanilla 1.0 排版）
+                    //   命中即整面采空（车斗采样窗落空白区）。entityTextureWidth 守卫：宽 ≤ 64（非 demo 包
+                    //   等比放大族）→ 按 miss 处理（qrc 程序贴图 + 布局 0，已知良好观感）；宽 > 64 才走包贴图。
                     property bool cartPackHit: cartPackTex.source.toString().length > 0
+                                                && resourcePack.entityTextureWidth("minecart") > 64
 
                     Component.onCompleted: {
                         if (parent === null) parent = cartHost
@@ -8230,8 +8245,10 @@ Window {
                 property int cellZ: 0
                 // t732 pack 书贴图命中态：命中 → enchantBookPackTex + EnchantBookBox 布局 1（demo 包 8×
                 //   实测分区）；miss → enchantBookTex + 布局 0（qrc 程序 64×32）。source 读 active →
-                //   pack 开关即时重刷。
+                //   pack 开关即时重刷。审查修 L8（同 cartPackHit）：布局 1 分区表钉死 demo 包排版，
+                //   64×32 原尺寸 pack 命中即整面采空 → 宽 ≤ 64 按 miss 处理（qrc + 布局 0）。
                 property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
+                                            && resourcePack.entityTextureWidth("enchant_book") > 64
                 // 悬浮位：台格中心 + 0.25 间隙内（矮盒顶 y+0.75 ↔ 格顶 y+1.0；书心 y+0.82，页尖
                 //   ~y+0.96 收在间隙内不凸到上一格）。
                 position: Qt.vector3d(cellX + 0.5, cellY + 0.82, cellZ + 0.5)

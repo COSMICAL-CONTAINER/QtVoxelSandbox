@@ -50,6 +50,17 @@ bool isWolfMeatItem(int itemId)
         || itemId == RecipeRegistry::CookedMuttonId
         || itemId == RecipeRegistry::CookedChickenId;
 }
+
+// 审查修 L12：火把 / 红石火把附着支撑判定（放置预检 + 失撑掉落**共用**，防两处口径漂移 → 放得上却
+//   立刻掉 / 掉落判据比放置宽）。旧版单读 isSolid（solid 标志）—— Spawner t760 改 solid=false（cutout
+//   铁笼不剔邻面 / 不遮光）后火把无法贴刷怪笼（MC 1.0 允许贴刷怪笼）。改合成判定（与船放置 t508 二轮
+//   的「可碰撞 ∨ 实体」同款）：isCollidable（有碰撞 sub-AABB —— Spawner ShapeFull 恒真）∨ isFullCube。
+//   air/torch/cross 族两支皆假（仍不可贴，语义不变）；门 / 活板门 / 台阶等有碰撞 partial 块由此可贴
+//   （本工程「可碰撞即有实体面」口径，简化文档化）。
+bool torchSupportBlock(quint8 id, quint8 state)
+{
+    return BlockRegistry::isCollidable(id, state) || BlockRegistry::isFullCube(id);
+}
 } // namespace
 
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
@@ -1437,7 +1448,10 @@ void PlayerController::dropUnsupportedTorchesAround(int x, int y, int z)
         int ax, ay, az;
         BlockRegistry::torchAttachOffset(m_world->stateAt(tx, ty, tz), ax, ay, az);
         const int sx = tx + ax, sy = ty + ay, sz = tz + az;
-        if (BlockRegistry::isSolid(m_world->blockAt(sx, sy, sz))) continue; // 附着格仍 solid → 火把保留
+        // 审查修 L12：与放置预检同口径（torchSupportBlock 合成判定）—— 火把贴刷怪笼（solid=false 但
+        //   isCollidable）后，破**其它**邻块触发本扫时不再误判「附着格非 solid → 掉落」（否则贴笼火把
+        //   放上后邻块一动就掉，放置与掉落口径漂移）。
+        if (torchSupportBlock(m_world->blockAt(sx, sy, sz), m_world->stateAt(sx, sy, sz))) continue; // 附着格仍支撑 → 火把保留
         m_world->setBlock(tx, ty, tz, BlockRegistry::Air); // → World 发 blockBroken + worldChanged → 清伪光源 + 重建
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(tb),
                        std::max(1, BlockRegistry::dropCount(tb)));
@@ -4214,16 +4228,20 @@ void PlayerController::placeBlock()
     if (isDoor && overlapsPlayerAABB(tx, ty + 1, tz, idByte, quint8(doorFacing | 8))) return;
     if (isBed && overlapsPlayerAABB(tx + hdx, ty, tz + hdz, idByte, quint8(bedFacing | 8))) return;
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
-    // 需要支撑面」—— 平地或墙面）。判定用 BlockRegistry::isSolid（实体方块语义；不挂到空气 / 另一火把
-    // / 工作台等非实体方块）。torchHost 据同样语义在运行期推断朝向（下 solid=垂直 / 侧 solid=横插）。
+    // 需要支撑面」—— 平地或墙面）。判定用 torchSupportBlock（审查修 L12：isCollidable ∨ isFullCube
+    // 合成判定，见其定义处注释 —— Spawner solid=false 后仍可贴，MC 1.0 允许；不挂空气 / 火把 / cross 族）。
+    //   torchHost 据同样语义在运行期推断朝向（下支撑=垂直 / 侧支撑=横插）。
     // t638 ⑥ 红石火把并入火把预检（机制等价 MC 红石火把同火把须支撑面；cross 形网格渲染贴图自带火把
     //   剪影不依赖邻居推断朝向，但支撑语义 / 失撑掉落（finishMiningAt 破支撑邻即掉）与火把一致）。
     if (m_selectedBlock == BlockRegistry::Torch || m_selectedBlock == BlockRegistry::RedstoneTorch) {
-        const bool below = BlockRegistry::isSolid(m_world->blockAt(tx, ty - 1, tz));
-        const bool px = BlockRegistry::isSolid(m_world->blockAt(tx + 1, ty, tz));
-        const bool nx = BlockRegistry::isSolid(m_world->blockAt(tx - 1, ty, tz));
-        const bool pz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz + 1));
-        const bool nz = BlockRegistry::isSolid(m_world->blockAt(tx, ty, tz - 1));
+        const auto torchHostOk = [this](int ax, int ay, int az) {
+            return torchSupportBlock(m_world->blockAt(ax, ay, az), m_world->stateAt(ax, ay, az));
+        };
+        const bool below = torchHostOk(tx, ty - 1, tz);
+        const bool px = torchHostOk(tx + 1, ty, tz);
+        const bool nx = torchHostOk(tx - 1, ty, tz);
+        const bool pz = torchHostOk(tx, ty, tz + 1);
+        const bool nz = torchHostOk(tx, ty, tz - 1);
         if (!below && !px && !nx && !pz && !nz) return; // 无任何实体邻居 → 悬空火把，拒绝放置
         // t738 附着面专项校验（红石火把墙置收口）：placeState 编码的**那个**附着邻（torchOrientFromNormal
         //   由命中面推导——瞄侧面 → 墙邻、瞄顶面 → 下方）必须实体，否则拒放（不挥）。旧宽检只查 5 向任一
@@ -4233,7 +4251,7 @@ void PlayerController::placeBlock()
         //   四侧），不可贴 cross 形 / 薄板 / 天花板。红石火把与普通火把同分支同守卫（附着语义一族）。
         int tax = 0, tay = 0, taz = 0;
         BlockRegistry::torchAttachOffset(placeState, tax, tay, taz);
-        if (!BlockRegistry::isSolid(m_world->blockAt(tx + tax, ty + tay, tz + taz))) return;
+        if (!torchHostOk(tx + tax, ty + tay, tz + taz)) return; // 审查修 L12：附着邻守卫同 torchSupportBlock 口径
     }
     // t638 ③ 轨上放轨拒绝（spec「铁轨不能放在铁轨上」）+ t667 完整立方顶面支撑：
     //   铁轨只能放在**完整方块顶面**（机制等价 MC rails 须全支撑块）。两重守卫（覆盖全部放置路径）：

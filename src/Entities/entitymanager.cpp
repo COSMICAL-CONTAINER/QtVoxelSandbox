@@ -3600,7 +3600,13 @@ bool EntityManager::aiEmberling(int idx, Entity &e, float dt, World *world, cons
                 //   eye+look*0.5 防贴墙思路）—— 旧版火球生在自身 AABB 正中心，mob 命中盒外扩
                 //   kFireballHitHalfW 后首帧仍在发射者盒内。与命中循环 fireballShooter 排除双保险
                 //   （机制等价 MC 投射物不命中发射者自身）。
-                const QVector3D spawnOrigin = origin + dir * (e.halfW + 0.5f);
+                // 审查修 L15：前移出生点若落进实体格（燃烬者贴墙朝玩家喷）→ 火球首帧 isSolid 方块命中
+                //   即消失（视觉「白喷一下」）。生成前与命中判定同口径 isSolid 预检：实体格 → 回退用
+                //   发射者中心（燃烬者自身必在空气格 —— 漂移逐轴 AABB 碰撞撤回保证；盒内生成的 mob 自伤
+                //   由 fireballShooter 排除兜住，B1 不回归）。
+                QVector3D spawnOrigin = origin + dir * (e.halfW + 0.5f);
+                if (world->isSolid(qFloor(spawnOrigin.x()), qFloor(spawnOrigin.y()), qFloor(spawnOrigin.z())))
+                    spawnOrigin = origin; // 前移点入墙 → 回退发射者中心
                 const QVector3D vel = dir * kEmberlingFireballSpeed;
                 // 审查修 B8（t724-t729 复盘）：主循环持 Entity& 期间不直接 spawn（acquireSlot 无空槽时
                 //   push_back → vector 扩容使循环内引用悬空 UB，t400 繁殖同因先例）→ 记 pending，tick
@@ -5083,6 +5089,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   省 1 blockAt/mob/非-aiTick-帧（60 槽 × 3/4 帧 ≈ 45 blockAt/帧）。
             float speedScale = 1.0f;
 
+            // 审查修 L16：火免疫（燃烬者）残留 fireTimer 清零**提到 aiTick 节流块外**（每帧 O(1) 一次比较
+            //   + 罕见置零）—— 旧版清零在下方 4 帧节流块内的免疫分支，外部 ignite() 路径（火格点燃 / 命中
+            //   火焰 / 玩家侧点燃）设的 fireTimer 最长挂 ~4 帧（~66ms）才被清 → QML isBurningAt 短闪火焰
+            //   残留。每帧清零后外部点燃即时压制（免疫 = 不伤 + 不显焰）；火烧系统主体仍在节流块内（B2
+            //   语义不变，仅清零时机提前）。
+            if (kEmberlingFireResistImmunity && e.mobType == MobEmberling && e.fireTimer > 0.0f) {
+                e.fireTimer = 0.0f;
+                e.fireDamageTimer = 0.0f;
+                dirty = true; // 熄火 → bump（QML 收火焰）
+            }
+
             // t500 perf mob 子桶：mobAI 计时 —— 包裹整个 aiTick 块（火烧 / 仙人掌 / AI 决策移动 / 吃草）。
             //   非 aiTick 帧此块全跳过 → aiNs 不累（mobAI≈0）；aiTick 帧 aiNs 累入 mobAI 桶。
             const qint64 aiT0 = FrameProfiler::nowNs();
@@ -5113,9 +5130,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   t728 火力免疫（Emberling；机制等价 MC 1.0 烈焰人免疫火伤）：燃烬者跳过整段火烧系统 —— 岩浆 / 火
             //   格不点燃、已有 fireTimer 不推进扣血（惰性 → 不伤），且不受外部 ignite（fire 点燃）影响。火免疫
             //   故段内全部逻辑对其 no-op（不点燃 / 不扣火伤 / 岩浆不点燃），isBurningAt 亦不显火焰（fireTimer 恒 0）。
-            //   审查修 B2（t724-t729 复盘）：免疫分支曾把「fireTimer 递减 + 随机熄灭」一并跳过 → 外部路径设的
-            //   fireTimer 永不衰减 = 永久火焰特效。现免疫分支对残留 fireTimer 立即清零（压制点燃 + 正常熄灭两全）；
-            //   kEmberlingFireResistImmunity 常量在此真正消费（审查修 B13：原为无消费方的死常量）。
+            //   审查修 B2（t724-t729 复盘）：免疫者残留 fireTimer（外部路径所设）的清零已**提到节流块外每帧
+            //   执行**（见上方 L16 段注释）—— 旧版在本节流块内跳过「递减 + 随机熄灭」却无人清 → 永久火焰 /
+            //   4 帧残留；kEmberlingFireResistImmunity 常量在彼处与下方守卫两处消费（审查修 B13 一并）。
             const bool emberlingFireImmune = kEmberlingFireResistImmunity && e.mobType == MobEmberling;
             if (!emberlingFireImmune) {
                 const int fx = qFloor(e.pos.x());
@@ -5170,13 +5187,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         dirty = true;
                     }
                 }
-            } else if (e.fireTimer > 0.0f) {
-                // 审查修 B2（t724-t729 复盘）：火免疫分支压制残留点燃 —— 旧路径（如火球命中）设的 fireTimer
-                //   若无人清 → 永不衰减永久显火焰。免疫 = 不伤 + 不显焰，立即归零。
-                e.fireTimer = 0.0f;
-                e.fireDamageTimer = 0.0f;
-                dirty = true; // 熄火 → bump（QML 收火焰）
-            } // /t728 火免疫：非 Emberling 走火烧系统；Emberling 跳过（不点燃不扣火伤 + 残留火立即熄）
+            } // /t728 火免疫：非 Emberling 走火烧系统；Emberling 跳过（不点燃不扣火伤；残留火清零已提级
+              //    到节流块外每帧执行 —— 审查修 L16，见上方）
             // 火伤可能本帧致死（damageEntity 置 dead）→ 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
             if (e.dead) continue;
 

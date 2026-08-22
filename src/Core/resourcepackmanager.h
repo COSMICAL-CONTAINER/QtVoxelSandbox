@@ -172,6 +172,12 @@ public:
     //   无目录 / 文件缺 → ""。红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString entitySource(const QString &kind) const;
 
+    // 审查修 L8：pack 实体贴图像素宽（QImageReader 只读 PNG 头取 size，不整解码；线程锁内做两级探测
+    //   同 entitySource）。miss / active=false / 解码失败 → 0。用途：QML 侧「布局 1 分区表按 demo 包
+    //   （base 64×32 的 8× 等比放大）实测钉死」的守卫 —— 64×32 原尺寸 pack（如 vanilla 1.0 排版）命中
+    //   即按布局 1 采样会整面采空，调用方对 width ≤ 64 退回 qrc 程序贴图 + 布局 0（已知良好观感）。
+    Q_INVOKABLE int entityTextureWidth(const QString &kind) const;
+
     // t717/t718 盔甲 layer 贴图覆盖（玩家 + 人形 mob 护甲 3D 显示的 pack 映射）：tier（0 皮革/1 铁/2 铜/3 金/
     //   4 钻石/5 链甲——与 Hotbar::armorTier 同源序）+ layer（1=头盔+胸甲+护腿 / 2=靴，MC armor 两层）→
     //   pack 启用且包内 models/armor 目录有 <prefix>_layer_<n>.png 时返 file:/// URL（皮革 tier 命中时按
@@ -252,8 +258,10 @@ public:
     //   仙人掌柱 / 附魔台矮盒 / 祭坛框 / 铁砧特型；cross / 贴地薄片 / 火把走 flat 2D 保留 alpha）。
     //   requirePackContribution=true：pack 未实际覆盖该块可见面瓦片（合成 vs 程序图集逐像素比对）→ 返空串，
     //   调用方回落手绘程序图标（Hotbar::iconSourceForBlock 回退链）。
-    //   产物缓存 voxelsandbox_rp_icon_<id>_r<rev>.png（文件名带 apply() revision → pack 切换后 QML Image 按
-    //   URL 变化重载）。红线 §9：渲染产物是运行期派生缓存（pack PNG + 程序图集 → 图标），**不进 qrc/VCS**
+    //   产物缓存 voxelsandbox_rp_icon3_<id>_<p|a>_r<rev>.png（文件名带 requirePackContribution 模式位
+    //   （p = pack 贡献 / a = 任意）+ apply() revision → 两模式不互取缓存、pack 切换后 QML Image 按 URL
+    //   变化重载；审查修 L9/L10：渲染+落盘在 stateMutex 外，锁内只取快照防串行阻塞）。红线 §9：渲染产物
+    //   是运行期派生缓存（pack PNG + 程序图集 → 图标），**不进 qrc/VCS**
     //   （区别于 t644 FROM_PACK「离线渲染派生图提交」先例——本机制全部运行期生成，盘上文件即缓存）。
     //   分层（PLAN §2）：Core 只读 BlockRegistry 瓦片表 + 本地 pack，不依赖 Game/Renderer。
     static QString blockAtlasIconSource(int blockId, bool requirePackContribution);

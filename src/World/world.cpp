@@ -151,25 +151,41 @@ void World::finishLoad()
 //   同 rebuildFireCells 约定）。
 void World::rebindStrongholdPortalFromVoxels()
 {
-    struct Cluster { int minX, maxX, minZ, maxZ, y; int count; };
+    // 审查修 L14：簇的 y 判据从「与簇基准 c.y（首帧层、合并从不更新）差 ≤1」改为「与簇 y 区间
+    //   [minY,maxY] 外扩 1 相交」+ per-layer 计数（绑定层取帧数最多的众数层，平局取低层 —— y 升序扫
+    //   首见层先入表，严格大于保先者，确定性）。旧版逐格 y 递变的多层框架环（玩家自建 / 旧存档地形
+    //   变动的边缘情形）第 3 格起 |y−c.y|>1 → 分裂成多簇，best 可能取到 <3 格残簇直接漏绑。
+    //   worldgen 12 框架全同层 → yCounts 单桶、绑定层 = 该层，行为不变。
+    struct Cluster {
+        int minX, maxX, minZ, maxZ, minY, maxY;
+        int count;
+        std::vector<std::pair<int, int>> yCounts; // (层 y, 该层帧数) —— 众数层作绑定层
+    };
     std::vector<Cluster> clusters;
     const int W = m_width, D = m_depth, H = m_height;
     for (int y = 0; y < H; ++y) {
         for (int z = 0; z < D; ++z) {
             for (int x = 0; x < W; ++x) {
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::EndPortal) continue;
-                // 就近并入既有簇（环 5×5 足迹：bbox 外扩 3 覆盖环内任意两框架间距；同层 ±1 容地面高差）。
+                // 就近并入既有簇（环 5×5 足迹：bbox 外扩 3 覆盖环内任意两框架间距；y 区间外扩 1 相交
+                //   容层间 ≤1 的阶梯衔接 / 多层环 —— 审查修 L14）。
                 bool merged = false;
                 for (Cluster &c : clusters) {
-                    if (std::abs(y - c.y) > 1) continue;
+                    if (y < c.minY - 1 || y > c.maxY + 1) continue;
                     if (x < c.minX - 3 || x > c.maxX + 3 || z < c.minZ - 3 || z > c.maxZ + 3) continue;
                     c.minX = std::min(c.minX, x); c.maxX = std::max(c.maxX, x);
                     c.minZ = std::min(c.minZ, z); c.maxZ = std::max(c.maxZ, z);
+                    c.minY = std::min(c.minY, y); c.maxY = std::max(c.maxY, y);
                     ++c.count;
+                    bool ySeen = false;
+                    for (auto &p : c.yCounts) {
+                        if (p.first == y) { ++p.second; ySeen = true; break; }
+                    }
+                    if (!ySeen) c.yCounts.push_back({ y, 1 });
                     merged = true;
                     break;
                 }
-                if (!merged) clusters.push_back({ x, x, z, z, y, 1 });
+                if (!merged) clusters.push_back({ x, x, z, z, y, y, 1, { { y, 1 } } });
             }
         }
     }
@@ -199,7 +215,14 @@ void World::rebindStrongholdPortalFromVoxels()
     const Cluster &c = clusters[size_t(best)];
     m_hasStronghold = true;
     m_strongholdPortalX = (c.minX + c.maxX) / 2;
-    m_strongholdPortalY = c.y;
+    // 绑定层 = 众数层（帧数最多的 y；平局取低层 —— 确定性，见函数头 L14 注释）。单层环（worldgen 全部
+    //   情形）= 该层，与生成期记录的 cy+4 一致；多层环取主层。
+    int bindY = c.minY;
+    int bindCount = -1;
+    for (const auto &p : c.yCounts) {
+        if (p.second > bindCount) { bindCount = p.second; bindY = p.first; }
+    }
+    m_strongholdPortalY = bindY;
     m_strongholdPortalZ = (c.minZ + c.maxZ) / 2;
     qInfo() << "worldload: stronghold rebind ->" << m_strongholdPortalX << m_strongholdPortalY
             << m_strongholdPortalZ << "frames=" << c.count;
