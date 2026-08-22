@@ -10681,6 +10681,137 @@ Window {
                             }
                         }
                     }
+                    // ── t753 成就树 minimap 总览图（地图软件式 overview）：视口右上角灰色缩略导航图 ──
+                    //   整棵可见树（visibleTree 的 baseW×baseH 画布）等比缩进 160×120：节点=小灰点
+                    //   （已解锁微亮）、连线=浅灰正交折线（复用主画布三段公式 × fitScale）、当前视口=
+                    //   #ffd76a 亮色矩形框。全部走属性绑定：只在树结构（visibleTree / baseW/H）或视口
+                    //   四元组（contentX/Y/viewScale/视口尺寸）变化时重算，非逐帧动画（低频重绘）。
+                    //   声明在 treeCanvas 之后 + z=5 → 视觉与输入均在树内容之上（minimap 区域的拖拽/
+                    //   点击不落入 treeDragArea，不误平移树）。
+                    Item {
+                        id: treeMinimap
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.margins: 8
+                        width: 160; height: 120
+                        z: 5
+                        // 半透明深灰底 + 描边（悬浮于树内容之上但不完全遮挡背后节点；面板同族配色）。
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 6
+                            color: Qt.rgba(0.07, 0.07, 0.07, 0.85)
+                            border.color: "#3a3a3a"; border.width: 1
+                        }
+                        // ── 几何映射（t753 核心）：树画布坐标 c ↔ minimap 坐标 m ──
+                        //   正映射 m = off + c × fitScale（整树 bounding box 等比缩放居中）；
+                        //   反映射 c = (m − off) / fitScale（点击跳转用）。
+                        //   视口可见区换算依赖 t637 既有变换语义 v = contentX + c × viewScale
+                        //   （滚轮缩放公式同源），反解 c = (v − contentX) / viewScale。
+                        readonly property real mapPad: 7
+                        readonly property real mapW: width - mapPad * 2
+                        readonly property real mapH: height - mapPad * 2
+                        readonly property real fitScale: Math.min(mapW / treeViewport.baseW, mapH / treeViewport.baseH)
+                        readonly property real offX: mapPad + (mapW - treeViewport.baseW * fitScale) / 2
+                        readonly property real offY: mapPad + (mapH - treeViewport.baseH * fitScale) / 2
+                        // 节点小圆点直径（树节点投影；钳 2..5 —— 极小树不过分巨大、巨树不消失于亚像素）。
+                        readonly property real dotD: Math.max(2, Math.min(5, treeViewport.nodeW * fitScale))
+                        // 视口可见区（树坐标）：左上 = (−contentX/s, −contentY/s)，尺寸 = 视口像素 / s；
+                        //   映射进 minimap 即亮框位置（内容小于视口被居中时框可越出树界 → 内容层 clip）。
+                        readonly property real viewCanvasX0: -treeViewport.contentX / treeViewport.viewScale
+                        readonly property real viewCanvasY0: -treeViewport.contentY / treeViewport.viewScale
+                        readonly property real viewW: treeViewport.width / treeViewport.viewScale * fitScale
+                        readonly property real viewH: treeViewport.height / treeViewport.viewScale * fitScale
+                        // 点击 / 按住拖动跳转（加分项已实现）：minimap 点反解树坐标 → 令该点为视口中心
+                        //   （contentX = 视口宽/2 − c × viewScale），clampPan 钳界；缩放档保持不变
+                        //   （跳转只平移，防点一下把用户调好的倍率偷改掉）。
+                        function jumpTo(mx, my) {
+                            const cx = (mx - treeMinimap.offX) / treeMinimap.fitScale
+                            const cy = (my - treeMinimap.offY) / treeMinimap.fitScale
+                            treeViewport.contentX = treeViewport.width / 2 - cx * treeViewport.viewScale
+                            treeViewport.contentY = treeViewport.height / 2 - cy * treeViewport.viewScale
+                            treeViewport.clampPan()
+                        }
+                        // 内容层（连线 + 节点 + 视口框；clip 钳制越界部分 —— 居中态视口框可超出树界）。
+                        Item {
+                            anchors.fill: parent
+                            clip: true
+                            // ── 连线层（浅灰正交折线；同主画布「父右中点→列间垂直→子左中点」公式 × fitScale，
+                            //    端点取节点垂直中点；父已解锁=灰绿微亮 / 未解锁=暗灰）──
+                            Repeater {
+                                model: progressPanel.visibleTree
+                                delegate: Item {
+                                    // 仅子节点画线；根节点 delegate 空占位（同主画布连线层模式）。
+                                    visible: String(modelData.parentId).length > 0
+                                    // 查父节点（必在同表；收起态下父必可见 —— 父收起则子不可见）。
+                                    readonly property var parentNode: {
+                                        const tree = progressPanel.visibleTree
+                                        for (let i = 0; i < tree.length; ++i)
+                                            if (tree[i].id === modelData.parentId) return tree[i]
+                                        return null
+                                    }
+                                    // minimap 坐标 = off + 树坐标 × fitScale（树坐标公式同主画布端点）。
+                                    readonly property real myX: treeMinimap.offX + (treeViewport.kPad + modelData.col * treeViewport.kColW) * treeMinimap.fitScale
+                                    readonly property real myY: treeMinimap.offY + (treeViewport.kPad + modelData.row * treeViewport.kRowH + treeViewport.nodeH / 2) * treeMinimap.fitScale
+                                    readonly property real parentX: treeMinimap.offX + (treeViewport.kPad + parentNode.col * treeViewport.kColW + treeViewport.nodeW) * treeMinimap.fitScale
+                                    readonly property real parentY: treeMinimap.offY + (treeViewport.kPad + parentNode.row * treeViewport.kRowH + treeViewport.nodeH / 2) * treeMinimap.fitScale
+                                    // 垂直段 x = 两列中点（同主画布）。
+                                    readonly property real midX: (parentX + myX) / 2
+                                    readonly property color lineColor: parentNode && parentNode.unlocked ? "#557055" : "#3c3c3c"
+                                    // 水平出段（父右中点 → midX）。
+                                    Rectangle {
+                                        x: parent.parentX; y: parent.parentY - 0.5
+                                        width: Math.max(0, parent.midX - parent.parentX); height: 1
+                                        color: parent.lineColor
+                                    }
+                                    // 垂直段（midX 处 parentY → myY；近同 y 直连则不显）。
+                                    Rectangle {
+                                        visible: Math.abs(parent.myY - parent.parentY) > 1
+                                        x: parent.midX - 0.5
+                                        y: Math.min(parent.parentY, parent.myY)
+                                        width: 1; height: Math.abs(parent.myY - parent.parentY)
+                                        color: parent.lineColor
+                                    }
+                                    // 水平入段（midX → 子左中点）。
+                                    Rectangle {
+                                        x: parent.midX; y: parent.myY - 0.5
+                                        width: Math.max(0, parent.myX - parent.midX); height: 1
+                                        color: parent.lineColor
+                                    }
+                                }
+                            }
+                            // ── 节点层（小圆点；总览只分「已解锁微亮 / 可进行中灰 / 锁定暗灰」三档灰阶，
+                            //    不复刻主视图全彩三态 —— overview 是导航辅助，防止喧宾夺主）──
+                            Repeater {
+                                model: progressPanel.visibleTree
+                                delegate: Rectangle {
+                                    // 节点中心（col/row × 列行距 + 节点半宽高）投影到 minimap。
+                                    x: treeMinimap.offX + (treeViewport.kPad + modelData.col * treeViewport.kColW + treeViewport.nodeW / 2) * treeMinimap.fitScale - width / 2
+                                    y: treeMinimap.offY + (treeViewport.kPad + modelData.row * treeViewport.kRowH + treeViewport.nodeH / 2) * treeMinimap.fitScale - height / 2
+                                    width: treeMinimap.dotD; height: treeMinimap.dotD
+                                    radius: treeMinimap.dotD / 2
+                                    color: modelData.unlocked ? "#a8c8a8" : (modelData.locked ? "#4a4a4a" : "#6f6f6f")
+                                }
+                            }
+                            // ── 当前视口框（#ffd76a 亮色描边 = 面板强调色族；随 contentX/Y/viewScale/
+                            //    视口尺寸绑定更新 —— 拖拽 / 缩放即同步，无需手动刷新）──
+                            Rectangle {
+                                x: treeMinimap.offX + treeMinimap.viewCanvasX0 * treeMinimap.fitScale
+                                y: treeMinimap.offY + treeMinimap.viewCanvasY0 * treeMinimap.fitScale
+                                width: treeMinimap.viewW; height: treeMinimap.viewH
+                                color: "transparent"
+                                border.color: "#ffd76a"; border.width: 1
+                            }
+                        }
+                        // 交互层（最后声明 = 输入最顶层）：点击即跳视口中心；按住拖动持续平移（拖动
+                        //   期间逐点 jumpTo —— 与点击同路径，顺带获得「拖动 minimap 框浏览全树」手感）。
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onPressed: (mouse) => parent.jumpTo(mouse.x, mouse.y)
+                            onPositionChanged: (mouse) => { if (pressed) parent.jumpTo(mouse.x, mouse.y) }
+                        }
+                    }
                 }
                 // 返回按钮：关进度面板回暂停菜单。
                 //   t678(e) 移出 Column、锚定 progressPanel 底部（bottomMargin 8）—— 旧版在 Column 内
