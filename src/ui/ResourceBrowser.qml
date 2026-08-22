@@ -148,12 +148,12 @@ Item {
             case 6: return 0.05   // 潜行者 [-0.90, 0.81]（t616 拉高 ~1.7 格后近对称 → 微上提居中）
             case 7: return 0.08   // 蜘蛛 [-0.30, 0.13]
             case 8: return 0.01   // 鸡 [-0.40, 0.38]
-            case 9: return 0.0    // 鱿鱼 [-0.46, 0.58]（mantle 对称居中）
+            case 9: return 0.0    // 鱿鱼 [-0.46, 0.58]（mantle 对称居中；t750 起 pack 关省略尖顶 → 顶 0.32，mantle 仍近对称）
             case 10: return 0.05  // 狼 [-0.42, 0.37]
             case 11: return 0.05  // 豹猫 [-0.40, 0.33]
             case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
             case 13: return 0.30 // 铁傀儡 [-1.20, 0.58]（偏 -Y，上提 0.30 居中主体）
-            case 14: return -0.30 // 蠹虫 [-0.15, 0.11]（小虫贴地 → 下压 0.30 进镜头中心）
+            case 14: return -0.30 // 蠹虫 [-0.15, 0.14]（t750 分节重做：背脊甲板顶 0.14；小虫贴地 → 下压 0.30 进镜头中心）
             case 16: return 0.13 // t727 夜行者 [-1.40, 1.17]（偏 -Y 0.12；×0.55 缩后上提居中主体）
             case 17: return 0.0  // t728 燃烬者悬浮头盒 [-0.225, 0.225]（近对称居中，无需调整）
         }
@@ -327,6 +327,20 @@ Item {
         id: mobShearedTex
         source: root.sheepBodyPackSrc !== "" ? root.sheepBodyPackSrc
                                              : "qrc:/textures/mob_sheep_sheared.png"
+        generateMipmaps: false
+    }
+    // t750 夜行者眼睛发光层两态贴图（镜像 Main.qml mobNightwalkerEyesTex / nightwalkerEyesPackTex）：
+    //   pack 命中 enderman_eyes → 包内竖眼层；否则程序生成 mob_nightwalker_eyes（透明底 + 紫白竖眼，
+    //   Mask 裁透明底只显竖眼）。图鉴预览头前眼层 Model 用（修复④「黑影无五官」）。
+    Texture {
+        id: mobNwEyesTex
+        source: "qrc:/textures/mob_nightwalker_eyes.png"
+        generateMipmaps: false
+    }
+    Texture {
+        id: nwEyesPackTex
+        source: root.resourcePack && root.resourcePack.active
+            ? root.resourcePack.entitySource("nightwalker_eyes") : ""
         generateMipmaps: false
     }
 
@@ -765,6 +779,130 @@ Item {
                                             position: Qt.vector3d(0.05, 0.00, -0.35)
                                             scale: Qt.vector3d(0.03, 0.03, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                                        }
+                                        // ── t750 图鉴 3D 预览对齐游戏内模型（六模型修复）──
+                                        // 抉择「共享组件 vs 浏览器复刻」：游戏内正确拼装深嵌 Main.qml mobHost
+                                        //   delegate（绑 entityManager 索引族 walkPhase/hurtFlash/rage/sit…），
+                                        //   抽共享组件须把十余条实体绑定参数化且回归面覆盖全部 17 种 mob——成本 /
+                                        //   风险远超收益；按任务行「评估成本」走**浏览器侧 1:1 复刻**（同 t598 傀儡
+                                        //   头 / t616 弓 + 鸡腿 / t663 羊眼先例），各块注明 Main.qml 锚点互指。几何级
+                                        //   差异（鱿鱼尖顶 / 蠹虫分节）已下沉 MobModel 共享层（mobmodel.cpp t750，
+                                        //   两侧同源无双份维护）。
+                                        // t750 ① 鱿鱼眼（2 颗黑点；镜像 Main.qml squid delegate t730 终审 L5：
+                                        //   pack 命中时隐藏——包贴图前脸自带眼纹素，几何黑点再叠成双层眼；pack 关
+                                        //   显示（程序贴图 mob_squid 不画眼，眼全靠几何盒））。「头顶小鱿鱼」叠加层
+                                        //   已在几何层修（pack 关省略尖顶盒，见 mobmodel.cpp t750 注释）。
+                                        Model {
+                                            visible: root.selectedMobType === 9 && root.selectedMobPackSrc === ""
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.10, 0.10, -0.29)
+                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 9 && root.selectedMobPackSrc === ""
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.10, 0.10, -0.29)
+                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        // t750 ② 狼尾（修复「像兔子」——缺尾缺眼的灰身立耳四足读作兔；镜像
+                                        //   Main.qml wolfTailPivot：尾根 (0,0.16,0.38) + 竖细盒毛色 0.55 灰；图鉴
+                                        //   静态取满血竖起 35°（游戏内随血量 35°..140°）。
+                                        Node {
+                                            visible: root.selectedMobType === 10
+                                            position: Qt.vector3d(0, 0.16, 0.38)
+                                            eulerRotation.x: 35
+                                            Model {
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0, 0.10, 0)
+                                                scale: Qt.vector3d(0.06, 0.20, 0.06)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8c8c8c" }
+                                            }
+                                        }
+                                        // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
+                                        //   (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 眼贴头前 (±0.08,0.16,-0.71)）。
+                                        Model {
+                                            visible: root.selectedMobType === 10
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.08, 0.16, -0.71)
+                                            scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 10
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.08, 0.16, -0.71)
+                                            scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        // t750 ③ 豹猫眼（修复「没有脸」；镜像 Main.qml ocelot delegate：头心
+                                        //   (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 眼贴头前 (±0.07,0.15,-0.61)）。
+                                        Model {
+                                            visible: root.selectedMobType === 11
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.07, 0.15, -0.61)
+                                            scale: Qt.vector3d(0.035, 0.04, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 11
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.07, 0.15, -0.61)
+                                            scale: Qt.vector3d(0.035, 0.04, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        // t750 ④ 夜行者头前五官层（修复「黑影无脸」；镜像 Main.qml nwHead：
+                                        //   细长人形几何本体走共享 MobModel mobType 16，图鉴此前漏此层 = 无脸黑影）：
+                                        //   眼发光层头前 (0,0.95,-0.21) 铺竖眼贴图（pack 命中 enderman_eyes 切包内
+                                        //   竖眼；Mask 裁透明底）+ 嘴非激怒态淡显暗唇（opacity 0.15，同游戏内静态）。
+                                        Model {
+                                            visible: root.selectedMobType === 16
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0, 0.95, -0.21)
+                                            scale: Qt.vector3d(0.30, 0.12, 0.03)
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                baseColor: "#e8dcff" // 紫白魅眼底色（贴图缺失兜底，同游戏内）
+                                                baseColorMap: nwEyesPackTex.source.toString().length > 0 ? nwEyesPackTex : mobNwEyesTex
+                                                alphaMode: PrincipledMaterial.Mask
+                                                alphaCutoff: 0.5
+                                            }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 16
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0, 0.78, -0.20)
+                                            scale: Qt.vector3d(0.16, 0.05, 0.03)
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                opacity: 0.15
+                                                baseColor: "#140f18" // 近黑紫（嘴缝/口腔）
+                                            }
+                                        }
+                                        // t750 ⑤ 燃烬者环绕竖棒（修复缺棒「多余白色身体」观感；1:1 镜像
+                                        //   Main.qml emberRods：4 根烟灰橙竖棒半径 0.52、2200ms/圈绕 Y 匀速旋转
+                                        //   ——单悬浮头 + 旋转棒是游戏内 t728 标志形态）。悬浮 bob 属游戏内游动
+                                        //   动画，图鉴自转已给动态 → 不复刻（观感锚点是旋转棒）。
+                                        Node {
+                                            visible: root.selectedMobType === 17
+                                            property real spin: 0
+                                            NumberAnimation on spin { from: 0; to: 360; duration: 2200; loops: Animation.Infinite }
+                                            eulerRotation.y: spin
+                                            Repeater {
+                                                model: 4
+                                                Model {
+                                                    geometry: UnitCube {}
+                                                    property real ang: index * 90
+                                                    position: Qt.vector3d(Math.cos(ang * 0.0174533) * 0.52, 0,
+                                                                          Math.sin(ang * 0.0174533) * 0.52)
+                                                    scale: Qt.vector3d(0.09, 1.15, 0.09)
+                                                    materials: PrincipledMaterial {
+                                                        lighting: PrincipledMaterial.NoLighting
+                                                        baseColor: "#e8b030" // 烟灰橙黄（同游戏内 / 蛋生成色）
+                                                    }
+                                                }
+                                            }
                                         }
                                         // t616 骷髅弓箭手持弓（用户「能不能拿上弓箭」；同 t598 傀儡头补法——图鉴预览
                                         //   此前只显 MobModel，游戏内弓（Main.qml 肩枢 Node）漏显 = 无弓骷髅）：Bones 时在

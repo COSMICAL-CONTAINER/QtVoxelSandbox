@@ -587,8 +587,15 @@ void MobModel::rebuild()
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(0, 0, 12, 16, 12);
         addBox( 0.00f,  0.08f,  0.00f, 0.28f, 0.24f, 0.28f, verts, idx, bMin, bMax); // 圆胖躯干（mantle 主体）
-        setMobTex(0, 0, 12, 16, 12);
-        addBox( 0.00f,  0.45f,  0.00f, 0.15f, 0.13f, 0.15f, verts, idx, bMin, bMax); // 顶端小尖（mantle 尖顶）
+        // t750 图鉴修复①「大鱿鱼正确但头顶叠一只小鱿鱼」：pack 关（全脸 UV）时每面铺整张 mob_squid →
+        //   0.30 宽的尖顶小盒六面各显一只压缩整图「小鱿鱼」叠在大鱿鱼头顶（图鉴预览用户报告）。pack 命中
+        //   走 box-UV（尖顶采 mantle 顶区皮色，游戏内 t730 已验证无歧义）→ 尖顶仅 pack 态保留、全脸态省略
+        //   （同下方猪鼻 if (g_packTextured) 条件盒先例）。本几何为图鉴 / 游戏内共享单源 → 两侧同步修复，
+        //   非图鉴侧私有拼装问题。
+        if (g_packTextured) {
+            setMobTex(0, 0, 12, 16, 12);
+            addBox( 0.00f,  0.45f,  0.00f, 0.15f, 0.13f, 0.15f, verts, idx, bMin, bMax); // 顶端小尖（mantle 尖顶）
+        }
         // 8 触腕（环绕躯干底沿八向分布，半径 0.20）：每条细垂直盒（half 0.045×0.15×0.045），顶端枢轴 y=-0.16（躯干底）。
         //   绕 X 轴摆动（前后波浪式起伏）：angle = 0.18·sin(walkPhase + i·π/4)，相位错开 → 触腕此起彼伏飘动（游动感）。
         //   摆幅 0.18 弧度（~10°）小于四足 kLegSwingAmp（触腕是飘动非大跨步）；pivZ = 各触腕 z（绕各自 z 线旋转）。
@@ -722,7 +729,18 @@ void MobModel::rebuild()
         //   Main.qml mobModelYOff=0.15−0.15=0）。walkPhase 驱动短腿摆动（缩小幅度，虫类快步频）。
         //   hostile → EntityManager AI 自动追击玩家（默认 aiHostile 近战追击）。眼由 Main.qml delegate 补（纯色
         //   子 Model）。mob_silverfish 贴图：灰白甲壳 + 体节横纹（build_mob.py 程序生成原创像素图）。
-        addBox( 0.00f,  0.00f,  0.00f, 0.20f, 0.12f, 0.32f, verts, idx, bMin, bMax); // 分节躯干（细长，比蜘蛛更小）
+        // t750 图鉴修复⑥「长方体身体太可爱平滑 → 增加凹凸/分节」：旧单盒躯干（0.40×0.24×0.64 光滑长方体）
+        //   重做分节凹凸造型——三节体节（前宽后窄交替 + 高低错落衔接）+ 2 片背脊甲板（凸起破滑顶）+ 2 根
+        //   后伸尾须（细棒破光滑轮廓），机制对齐多节虫体观感（§9 原创比例）。全脸 UV 每节铺整张
+        //   mob_silverfish（体节横纹贴图）→ 分节几何 × 横纹叠加读作甲壳分节。本几何图鉴 / 游戏内共享 →
+        //   两侧同步（头盒 / 6 短腿 / 眼位 / 碰撞 halfH=0.15 均不动，零机制回归）。
+        addBox( 0.00f,  0.00f, -0.13f, 0.185f, 0.105f, 0.13f, verts, idx, bMin, bMax); // 前体节（最宽，衔接头部）
+        addBox( 0.00f,  0.01f,  0.06f, 0.165f, 0.115f, 0.13f, verts, idx, bMin, bMax); // 中体节（略窄略高 → 错落凹凸）
+        addBox( 0.00f, -0.01f,  0.24f, 0.145f, 0.095f, 0.10f, verts, idx, bMin, bMax); // 后体节（收窄后锥）
+        addBox( 0.00f,  0.115f, 0.05f, 0.11f, 0.025f, 0.09f, verts, idx, bMin, bMax);  // 背脊甲板①（中段凸起）
+        addBox( 0.00f,  0.10f, -0.12f, 0.10f, 0.022f, 0.08f, verts, idx, bMin, bMax);  // 背脊甲板②（前段凸起）
+        addBox(-0.05f,  0.02f,  0.37f, 0.018f, 0.018f, 0.07f, verts, idx, bMin, bMax); // 左尾须（后伸细棒）
+        addBox( 0.05f,  0.02f,  0.37f, 0.018f, 0.018f, 0.07f, verts, idx, bMin, bMax); // 右尾须
         addBox( 0.00f,  0.00f, -0.24f, 0.14f, 0.11f, 0.10f, verts, idx, bMin, bMax); // 前伸小头（虫头部，略窄于躯干）
         // 多对短腿（3 对沿躯干 Z 分布；每对绕躯干侧面髋枢 X 轴摆动，前后对反相 → 快步频虫类交替步态）。
         const float sw = kLegSwingAmp * 0.6f * std::sin(m_walkPhase); // 虫腿摆幅缩 0.6（短腿快频小步）
