@@ -320,12 +320,21 @@ Item {
                 // t615 附魔书（maxStack=1，每本独立附魔列表）→ 整件入槽且**附魔随实例保真**（同工具语义）；
                 //   修复材料（可堆叠、无附魔）→ 惯例 0。
                 // t766 审计修缺：此前第 7 参 name 漏传 → 改过名的附魔书（铁砧 rename 产物）Shift 入 B 槽
-                //   丢实例名（附魔虽在、名字被清）。补 name 透传（isBook 时传 src.name，材料恒 ""）。
+                //   丢实例名（附魔虽在、名字被清）。补 name 透传。
+                // t792 名保真扩到材料段 + 余量段（实测回归排查中发现的两处同类缺参）：
+                //   - 名：rename 产物可以是**整栈带名材料**（outCount=leftCount 保留整栈数量）→ 材料不再恒 ""。
+                //     空槽开新栈 → src.name 随整栈入槽；同 id 并入既有栈 → 槽保留自身名（合并不搬实例元数据，
+                //     同 resolveClick C / 右键 rv2-A1 口径）。书段 cap=1 到不了并入分支（上方 space<=0 已挡）→ 恒 src.name。
+                //   - 余量：源槽短参 writeSlot 只传 id/count → 带名材料栈部分入 B 后**余量丢名**（与 t766 修的
+                //     缺参同形态）。补齐 dur/ench/name（空栈清零语义不变，写法同下方 anvil→背包分支）。
                 InventoryOps.writeSlot(root, "anvil", 1, src.id, target.count + move, 0,
                                       isBook ? src.enchants : [0,0,0,0],
-                                      isBook ? src.name : "")
+                                      isBook ? src.name : (target.id === 0 ? src.name : target.name))
                 const remain = src.count - move
-                InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain, 0)
+                InventoryOps.writeSlot(root, group, index, remain > 0 ? src.id : 0, remain,
+                                      remain > 0 ? src.durability : 0,
+                                      remain > 0 ? src.enchants : [0,0,0,0],
+                                      remain > 0 ? src.name : "")
                 return
             }
             // 其余 → 通用 main↔hotbar 搬运。
@@ -869,9 +878,14 @@ Item {
         }
         // 清左输入槽 + 改名框（lastAutoName 一并复位；下方 anvilRev++ 触发 onAnvilRevChanged 左槽空分支
         //   同步清框，此处先行保持不变量「renameName 与输入框同步」）。t622：名数组一并清（名已随产物走）。
+        // t792：元数据清理收窄为「确已空的槽」——旧版无条件整组 wipe anvilEnch/anvilNames；repair 分支只
+        //   扣实耗材料数（repairMatUse ≤ 实有）→ B 槽余量材料仍在时其附魔/名被一并抹掉（带名材料修一半 →
+        //   剩余丢名；merge 书段 remainBook>0 的余本同护）。B 非空 → 实例元数据保真；外层新引用赋值（t699
+        //   var-NOTIFY 可靠模式）。槽 2 为产物预览派生态（从不经 writeSlot 写入）→ 恒清零。
         root.anvilSlots[0] = 0; root.anvilCounts[0] = 0; root.anvilDur[0] = 0
-        root.anvilEnch = [[0,0,0,0], [0,0,0,0], [0,0,0,0]]
-        root.anvilNames = ["", "", ""]
+        const bEmpty = (root.anvilSlots[1] || 0) === 0
+        root.anvilEnch = [ [0,0,0,0], bEmpty ? [0,0,0,0] : (root.anvilEnch[1] || [0,0,0,0]), [0,0,0,0] ]
+        root.anvilNames = [ "", bEmpty ? "" : (root.anvilNames[1] || ""), "" ]
         root.renameName = ""; nameInput.text = ""; root.lastAutoName = ""
 
         // ── 产物落定（t626② 简化：探路段已把光标收敛为「空 或 同 id」两态，恒走光标通道）──
@@ -1071,6 +1085,8 @@ Item {
                             group: "anvil"; index: 1
                             slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[1] || 0) : 0 }
                             slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[1] || 0) : 0 }
+                            // t792：补 slotDur 绑定（原漏 → 同物合并第二件工具入 B 槽不显耐久条；写法同 A 槽）。
+                            slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilDur[1] || 0) : 0 }
                             slotEnch: { const _r = root.anvilRev; return _r >= 0 ? (root.enchAt(1)) : [0, 0, 0, 0] }
                         }
                     }
