@@ -169,18 +169,17 @@ bool BoatManager::boatFootprintBlocked(World *world, float px, float py, float p
     //   速度被清朝向分量后每帧只重建 ~0.5 < 撞碎阈值 3.0 → 船在叶前楔死、撞碎永不触发。豁免后船保速驶入
     //   叶格 → 高速撞碎（smashLilyPads 在探测前跑）；低速船仍被位移碰撞挡（叶按实体，不传本参）→「快=碎、
     //   慢=挡」两态成立。
-    //   t711 五修「冰面可上 / 沙滩不可上不一致」：ignoreIce 同步豁免**与水面同高的任何固体方块**（不止冰）
-    //     —— 旧版只豁免冰族：与水面齐平的湿沙滩（沙格顶 == 水面顶）被当岸清速 → 船上不了同层沙滩，而同层
-    //     冰面能上（行为不一致）。判据 = 方块格顶 (y+1) ≤ 船中心 Y（探测传 py=船中心−1 → 该层格顶 == 船
-    //     中心所在水面顶）→ 与冰同语义「同层可行驶表面」；高出水面的真岸（顶 > 船中心）不豁免（须
-    //     beachTimer 冲量爬升登岸，t661「上岸应需速度」语义保持）。机制等价 MC 1.0 船可在与水面齐平的
-    //     湿沙滩 / 冰面上行驶（同为船可行驶表面，行为一致）。
-    const auto cellBlocked = [world, ignoreIce, ignoreLilyPad, py](int x, int y, int z) {
+    //   t805 回归修复（用户「船又能直接开上岸」）：t711 曾把 ignoreIce 豁免扩为「与水面同高的任何固体」
+    //     （沙滩与冰一致可上）→ 世界海缓坡（seaColumnHeight 每 ~12 格才升 1）使 h==waterLevel 的**同层
+    //     湿沙带**常宽达 10+ 格，整条带被当成「可行驶表面」→ 船从海里顶着 W 直接开上沙滩深处 = t661
+    //     「上岸应难 / 需速度」语义被冲掉（回归提交 21fff7b）。恢复 t661/L10 语义：探测豁免**仅冰族**
+    //     （isIce 单一权威）。冰可上 / 沙不可上并非不一致：冰顶与水面同层且光滑，是船可行驶表面（机制
+    //     等价 MC 1.0 船可从水面滑上冰面、冰面行船）；沙 / 草 / 石岸是「岸」—— 探测清朝向速度分量 → 船
+    //     贴水线停住（离水减速 + 不可加速上岸），高出水面的真岸另须 beachTimer 冲量（t661）。
+    const auto cellBlocked = [world, ignoreIce, ignoreLilyPad](int x, int y, int z) {
         if (!world->isCollidable(x, y, z)) return false;
         const quint8 id = world->blockAt(x, y, z);
-        // t711 同层可行驶表面豁免：ignoreIce 探测（py=船中心−1）时格顶 ≤ py+1（= 船中心水面顶）的同层
-        //   固体（冰 + 同高沙滩）视作可通行；位移碰撞（ignoreIce=false / py=船中心）恒 y+1 > py 不豁免。
-        if (ignoreIce && (BlockRegistry::isIce(id) || float(y) + 1.0f <= py + 1.0f + 1e-3f)) return false;
+        if (ignoreIce && BlockRegistry::isIce(id)) return false;
         if (ignoreLilyPad && id == BlockRegistry::LilyPad) return false;
         return true;
     };

@@ -784,6 +784,9 @@ add_executable(redstone_matrix_test
     # t804 掉落物火焚探针附加：Game 层 ItemEntityManager（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号
     # + 出火熄火；向下只依赖 Core/World/Qt，不引入 PlayerController/QML）。
     src/Game/itementitymanager.cpp
+    # t805 船上岸回归探针附加：Entities 层 BoatManager（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留 +
+    # 贴岸倒退；向下只依赖 Core+World，不引入 Game/QML）。
+    src/Entities/boatmanager.cpp
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
