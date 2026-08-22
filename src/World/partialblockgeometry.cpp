@@ -623,6 +623,8 @@ int PartialBlockGeometry::append(
         //     → 邻向 2 连接（恰好 1 X + 1 Z）：**普通轨（id==Rail）only** → tile 136 拐角（四象限 UV 变换，
         //       验证见下）；动力 / 探测轨永不拐角 / 十字（straightOnly，机制等价 MC golden/detector rail 无
         //       转弯形态）→ 降级 X 向直线。t666 规则集②已保证这类连接位对非普通轨不产生，此直落仅防御。修症状④。
+        //       t771：拐角的**配对臂**轨种不限（普通 / 动力 / 探测邻均可让普通轨格成弯——连接位由
+        //       railConnections 规则①统一判定），弯道贴图仍只呈现在普通轨格（本 case 分支不变）。
         //     → 3/4 连接：普通轨 → tile 137 十字 / T（T 以十字瓦片近似，机制等价 MC rail crossing）。
         //   t667 坡度（机制等价 MC 1.0 铁轨爬坡；渲染约定「低端画坡、高端平铺」）：
         //   直轨读本 cell 的 nb.railDelta*（chunkgeometry 按三高探针填的邻轨高度差）——quad 对应端边抬高 1 格

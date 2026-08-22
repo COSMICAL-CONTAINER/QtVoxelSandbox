@@ -1488,6 +1488,181 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── P16 t771 跨轨种拐角探针（普通轨×{普通,动力,探测}邻弯 + 动力-普通-动力垂直链 + 矿车过混合拐角）──
+    //   用户报告（R19.12）：「只有普通铁轨可以转弯……动力铁轨和动力铁轨之间中间放普通铁轨也能转弯才对，
+    //   只需要一个普通铁轨也可以转弯，普通铁轨和动力铁轨之间也可以转弯，仿我的世界规则」。机制等价
+    //   MC 1.0：弯道形态只呈现在**普通轨格**上（railCornerArms 消费 con 位），但配对邻轨**轨种不限**
+    //   （普通/动力/探测均可作臂）；动力/探测轨自身永不弯（railConnections 规则②直线投影恒直）。
+    //   断言四层（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 混合 L 拐角 × 3 臂种（两臂同为普通/动力/探测）：拐角格 con 恰为两垂直臂位 + mesher 象限
+    //       （railCornerArms + PartialBlockGeometry 同源直调，同 P11 (b)）；两臂格各自回落指向拐角的
+    //       单端直位（臂轨不弯）；
+    //   (b) 动力轨坐弯位（两垂直普通邻）永不弯：con 为直线投影单端位（railCornerArms 拒绝）；
+    //   (c) 动力-普通-动力 / 探测-普通-探测垂直链（用户主诉场景）：中间普通轨 con = 两垂直臂位（拐角）；
+    //       破端轨 → 中间轨随编辑复检回落单端直位（连接是派生态，破轨断弯）；
+    //   (d) 矿车过混合拐角（动力轨起步 → 普通轨拐角 → 动力轨死端）：进/出拐角必垂直（真转弯）、
+    //       Y 钉轨面、过弯后 yaw 覆盖行进向基数（180 = +Z 头向）、终停死端格心（pickTrackStep 反向滤）。
+    {
+        // 拐角象限断言（P11 (b) 同源）：con → railCornerArms 臂向 → mesher 直调拐角 quad 的肘角/对角
+        //   落 (ex,ez)/(1-ex,1-ez)。提出共享 lambda（P16 三处复用：混合 L × 3 臂种 + 链弯中间轨）。
+        const auto cornerQuadrantOk = [](quint8 con) {
+            int axd = 0, azd = 0;
+            if (!BR::railCornerArms(con, axd, azd)) return false;
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = 0; // Rail case 只读 railDelta*（缺省平拐角）
+            const float tileW = 1.0f / 16.0f;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::Rail, con, lctx, nctx,
+                                         tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            const float ex = (axd > 0) ? 1.0f : 0.0f; // 出口臂贴的 x 边
+            const float ez = (azd > 0) ? 1.0f : 0.0f; // 入口臂贴的 z 边
+            bool elbow = false, diag = false;
+            for (const Vtx &v : verts) {
+                const float uu = (v.u - 136.0f * tileW) / tileW; // 拐角瓦片 UV 归一 [0,1]
+                if (uu < 0.25f && v.v < 0.25f
+                    && std::fabs(v.x - ex) < 1e-4f && std::fabs(v.z - ez) < 1e-4f) elbow = true;
+                if (uu > 0.75f && v.v > 0.75f
+                    && std::fabs(v.x - (1.0f - ex)) < 1e-4f && std::fabs(v.z - (1.0f - ez)) < 1e-4f) diag = true;
+            }
+            return elbow && diag;
+        };
+
+        // (a) 混合 L：拐角 C=(x0,z0) 普通轨；-X 臂与 +Z 臂同为轨种 K ∈ {普通,动力,探测}。
+        const struct { const char *name; quint8 id; } armKinds[3] = {
+            { "rail",     BR::Rail },
+            { "golden",   BR::GoldenRail },
+            { "detector", BR::DetectorRail },
+        };
+        for (const auto &k : armKinds) {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0 - 1, kRigY, z0, k.id, 0);       // -X 臂（轨种 K）
+            w.setBlock(x0, kRigY, z0 + 1, k.id, 0);       // +Z 臂（轨种 K）
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);       // 拐角（最后放：邻齐后一次成形）
+            const quint8 cCon = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            const quint8 armX = quint8(w.stateAt(x0 - 1, kRigY, z0) & 0x0F);
+            const quint8 armZ = quint8(w.stateAt(x0, kRigY, z0 + 1) & 0x0F);
+            const bool ok = cCon == quint8(BR::RailConnNx | BR::RailConnPz) // 拐角 = 两垂直臂位
+                            && cornerQuadrantOk(cCon)                       // 象限（贴图与连接位同源）
+                            && armX == BR::RailConnPx                        // -X 臂单端直位（臂不弯）
+                            && armZ == BR::RailConnNz;                       // +Z 臂单端直位
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771 mixed L corner, arms =" << k.name
+                              << "con" << int(cCon) << "armX" << int(armX) << "armZ" << int(armZ);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (b) 动力轨坐弯位（两垂直普通邻）永不弯：NS 轴偏好下直线投影取 +Z 单端位（非拐角组合）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0 - 1, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0); // 动力轨最后放（坐进弯位）
+            const quint8 gCon = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            int axd = 0, azd = 0;
+            const bool ok = gCon == BR::RailConnPz && !BR::railCornerArms(gCon, axd, azd);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771 golden rail at bend slot stays straight, con" << int(gCon);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (c) 垂直链：端轨 E1(-X) + 中间普通轨 + 端轨 E2(+Z)，端轨种 ∈ {动力×2, 探测×2}（用户主诉
+        //     「动力和动力之间中间放普通铁轨也能转弯」）。破 E2 复检断弯回落。
+        const struct { const char *name; quint8 id; } endKinds[2] = {
+            { "golden",   BR::GoldenRail },
+            { "detector", BR::DetectorRail },
+        };
+        for (const auto &e : endKinds) {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, e.id, 0);           // E1（-X 端）
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);   // 中间普通轨
+            w.setBlock(x0 + 1, kRigY, z0 + 1, e.id, 0);   // E2（+Z 端，最后放 → 中间轨成弯）
+            const quint8 mCon = quint8(w.stateAt(x0 + 1, kRigY, z0) & 0x0F);
+            const quint8 e1 = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            const quint8 e2 = quint8(w.stateAt(x0 + 1, kRigY, z0 + 1) & 0x0F);
+            bool ok = mCon == quint8(BR::RailConnNx | BR::RailConnPz) && cornerQuadrantOk(mCon)
+                      && e1 == BR::RailConnPx && e2 == BR::RailConnNz;
+            // 破 E2 → 中间轨随邻编辑复检断弯，回落 -X 单端直位（连接是派生态非持久属性）。
+            w.setBlock(x0 + 1, kRigY, z0 + 1, BR::Air);
+            const quint8 mAfter = quint8(w.stateAt(x0 + 1, kRigY, z0) & 0x0F);
+            ok = ok && mAfter == BR::RailConnNx;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771" << e.name << "-rail-" << e.name << "vertical chain bends middle,"
+                                 "after break" << int(mAfter);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (d) 矿车过混合拐角：G1(动力,-X 端起步) → 拐角(普通轨) → G2(动力,+Z 死端)。空车追推跑法
+        //     （同 P11 (d)：pushEmptyCart + tickPushedCarts 每帧、wish 随行进向）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0);       // G1：con=Px → spawn 定向 +X
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);         // 拐角（普通轨）
+            w.setBlock(x0 + 1, kRigY, z0 + 1, BR::GoldenRail, 0); // G2：死端（到达即停）
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const float rideH = 0.45f; // kCartRideH 文档值（同 P11 镜像注释）
+            QVector3D prev = carts.posAt(0);
+            float wishX = 1.0f, wishZ = 0.0f;
+            int lastBx = int(std::floor(prev.x())), lastBz = int(std::floor(prev.z()));
+            int inDx = 1, inDz = 0; // 进入当前格方向（spawn 定向 +X）
+            bool reachedCorner = false, reachedEnd = false, turnOk = false, yawOk = false;
+            bool inFootprint = true, yOk = true;
+            for (int t = 0; t < 900 && inFootprint; ++t) {
+                carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着推（静止即续推）
+                carts.tickPushedCarts(0.016f, &w);
+                const QVector3D cp = carts.posAt(0);
+                const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
+                const float dl = std::sqrt(ddx * ddx + ddz * ddz);
+                if (dl > 1e-4f) { wishX = ddx / dl; wishZ = ddz / dl; }
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                const bool onTrack = (bx == x0 && bz == z0) || (bx == x0 + 1 && bz == z0)
+                                     || (bx == x0 + 1 && bz == z0 + 1);
+                if (!onTrack) { inFootprint = false; break; }
+                if (std::fabs(cp.y() - (float(kRigY) + rideH)) > 0.01f) yOk = false;
+                if (bx != lastBx || bz != lastBz) {
+                    const int ndx = bx - lastBx, ndz = bz - lastBz;
+                    // 出拐角必垂直进向（真转弯非直行穿出）——先判后更新 in-dir（同 P11 环线断言）。
+                    if (lastBx == x0 + 1 && lastBz == z0 && ndx * inDx + ndz * inDz == 0) turnOk = true;
+                    inDx = ndx; inDz = ndz;
+                    lastBx = bx; lastBz = bz;
+                }
+                if (bx == x0 + 1 && bz == z0) reachedCorner = true;
+                if (bx == x0 + 1 && bz == z0 + 1) {
+                    reachedEnd = true;
+                    const int yb = int(std::lround(carts.yawAt(0))) % 360;
+                    if (yb == 180) yawOk = true; // +Z 行进头向（-Z 前 = 0 约定下 yaw=180）
+                }
+                prev = cp;
+            }
+            // 终停死端格心：G2 是唯一出口朝来路的格（pickTrackStep 反向滤 → 到心停）。
+            const QVector3D fin = carts.posAt(0);
+            const bool stoppedAtEnd = int(std::floor(fin.x())) == x0 + 1 && int(std::floor(fin.z())) == z0 + 1;
+            const bool ok = reachedCorner && reachedEnd && turnOk && yawOk && inFootprint && yOk
+                            && stoppedAtEnd;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771 cart through mixed corner (golden->rail corner->golden dead end):"
+                                 " turn" << turnOk << "yaw180" << yawOk << "stopAtEnd" << stoppedAtEnd;
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0 + 1, BR::Air);
+            tickN(w, 2);
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

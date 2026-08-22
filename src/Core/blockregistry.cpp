@@ -2026,9 +2026,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
 //   纯函数单一权威 —— World::checkRailOnEdit（破邻复检重算）/ placeMineshaft（worldgen 铺轨后统一算）
 //   共用，杜绝各处自写连接判定漂移。
 //
-// t666 规则集实现（与头注释逐条对应）：
-//   ① 拐角形成（普通轨 only，唯一允许的重新定向）：恰好 2 个同层普通轨（id==Rail）在互相垂直的两向、
-//      且各自反向同层±上下均无轨 → 返那两向（拐角 2 位）。动力 / 探测轨永远不拐角（含与普通轨垂直配对）。
+// t666 规则集实现（与头注释逐条对应；t771 修①的臂轨种限定）：
+//   ① 拐角形成（普通轨 only，唯一允许的重新定向）：恰好 2 条互相垂直的邻轨（t771 起轨种不限——isRail
+//      家族任一可作臂）且各自反向同层±上下均无轨 → 返那两向（拐角 2 位）。动力 / 探测轨自身永远不拐角
+//      （弯道形态只呈现在普通轨格上，机制等价 MC 1.0；但它们可作普通轨拐角的配对臂）。
 //   ② 非普通轨（动力 / 探测）：直线投影 —— 优先「对向贯穿轴」；否则保持既有轴偏好向的单端连接；
 //      否则任取单端；均无 → 0。绝不产生垂直 2 位 / 十字。
 //   ③ 普通轨：贯穿轴优先（保持既有轴偏好：既有对向双连接 / 既有单向 / 轴偏好位 bit5）；
@@ -2038,8 +2039,8 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
                                       const RailProbe &px, const RailProbe &nx,
                                       const RailProbe &pz, const RailProbe &nz)
 {
-    // 存在性：三高任一为铁轨族 → 该方向有轨（坡度邻居也算）。普通轨存在性：仅同层 id==Rail
-    // （拐角配对限定同层普通轨，机制等价 MC 拐角不爬坡）。
+    // 存在性：三高任一为铁轨族 → 该方向有轨（坡度邻居也算）。t771 起拐角配对臂同样按家族存在性
+    // （任意轨种 / 任意高度可作臂 —— 见下规则①）。
     const auto anyRail = [](const RailProbe &p) {
         return isRail(p.same) || isRail(p.up) || isRail(p.down);
     };
@@ -2056,26 +2057,23 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
 
     const bool isNormal = (selfId == Rail);
 
-    // ① 拐角：普通轨 && 恰好 1 X 臂 + 1 Z 臂 && 两臂均为普通轨（id==Rail；动力 / 探测轨不拐角）&&
-    //   各自反向无轨（三高都无）。t709：臂高放宽 —— 同层 / 上 / 下一格的普通轨均可配对（机制等价
-    //   MC 1.0 坡底拐弯：下坡轨降到交界格再转弯，旧版要求两臂同层 → 坡臂不配对 → 规则③/④把坡臂整个
-    //   丢弃、交界格只渲染单臂 stub —— 用户实测「拐角处方向相反 / 轨道断头」根因）。臂方向判定用 hasP*
-    //   （三高任一轨），配对臂限定普通轨（armRail：same/up/down 任一为 Rail —— 动力 / 探测轨臂不构成拐角，
-    //   落规则③直线投影）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 → 不构成拐角 → bothX/bothZ 直线优先
-    //   （t710「单格凹谷不允许直化」由本优先序保证：凹谷双上臂恒走 EW/NS 直线 + 双端画坡，永不被垂直
-    //   邻带歪成拐角）。
-    const auto armRail = [](const RailProbe &p) {
-        return p.same == Rail || p.up == Rail || p.down == Rail;
-    };
+    // ① 拐角：普通轨 && 恰好 1 X 臂 + 1 Z 臂。t771 起配对臂**轨种不限** —— isRail 家族任一（普通 / 动力 /
+    //   探测）均可作臂（机制等价 MC 1.0「弯道形态只呈现在普通轨格上，但配对邻轨可以是任意轨种」：普通×
+    //   动力相邻 → 普通轨侧成弯；动力-普通-动力垂直链 → 中间普通轨成弯。t771 前臂限定 id==Rail → 跨轨种
+    //   垂直邻被规则③整个丢弃 → 只有普通×普通能弯（用户实测报告根因））。动力 / 探测轨**自身**仍永不弯
+    //   （isNormal 守卫 + 规则②直线投影恒直）。t709：臂高放宽 —— 同层 / 上 / 下一格的轨均可配对（机制等价
+    //   MC 1.0 坡底拐弯：下坡轨降到交界格再转弯，旧版要求两臂同层 → 坡臂不配对 → 交界格只渲染单臂
+    //   stub —— 用户实测「拐角处方向相反 / 轨道断头」根因）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 →
+    //   不构成拐角 → bothX/bothZ 直线优先（t710「单格凹谷不允许直化」由本优先序保证：凹谷双上臂恒走
+    //   EW/NS 直线 + 双端画坡，永不被垂直邻带歪成拐角）。t771 起臂存在性即 hasP*（三高任一轨）—— 反向
+    //   守卫（!hasN*）随 nArm==2 垂直配对自动成立，不再显式判。
     if (isNormal) {
-        const bool aPX = hasPX && armRail(px), aNX = hasNX && armRail(nx);
-        const bool aPZ = hasPZ && armRail(pz), aNZ = hasNZ && armRail(nz);
-        const int nArm = int(aPX) + int(aNX) + int(aPZ) + int(aNZ);
-        if (nArm == 2 && ((aPX || aNX) && (aPZ || aNZ))) {
-            if (aPX && aPZ && !hasNX && !hasNZ) return quint8(RailConnPx | RailConnPz);
-            if (aPX && aNZ && !hasNX && !hasPZ) return quint8(RailConnPx | RailConnNz);
-            if (aNX && aPZ && !hasPX && !hasNZ) return quint8(RailConnNx | RailConnPz);
-            if (aNX && aNZ && !hasPX && !hasPZ) return quint8(RailConnNx | RailConnNz);
+        const int nArm = int(hasPX) + int(hasNX) + int(hasPZ) + int(hasNZ);
+        if (nArm == 2 && ((hasPX || hasNX) && (hasPZ || hasNZ))) {
+            if (hasPX && hasPZ) return quint8(RailConnPx | RailConnPz);
+            if (hasPX && hasNZ) return quint8(RailConnPx | RailConnNz);
+            if (hasNX && hasPZ) return quint8(RailConnNx | RailConnPz);
+            return quint8(RailConnNx | RailConnNz);
         }
     }
 
