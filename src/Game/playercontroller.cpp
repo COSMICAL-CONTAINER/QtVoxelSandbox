@@ -3031,6 +3031,12 @@ void PlayerController::placeBlock()
                     //   「按钮放 TNT 上、右键激活后按钮悬在原地」）。机制等价 MC 支撑方块消失 → 附着
                     //   机关脱落；同火把 t214 / 木梯 t501 的「静默清路径也要扫失撑」补口。
                     dropUnsupportedMechAround(tx, ty, tz);
+                    // 审查 #5（失撑三族对称补口）：TNT 格被静默清同样使贴其墙面的红石火把（附着编码
+                    //   唯一支撑）与铺其顶面的红石粉（唯一支撑 = 正下方）失撑——t744 只补机关一族把
+                    //   不对称固化：火把悬空残留且照旧供电（powerSourceLevel 只读格子 id）、粉悬空残留。
+                    //   与 finishMiningAt 的 torch/mech/dust 三连调对齐（clearBlockSilent 不经其失撑扫描）。
+                    dropUnsupportedTorchesAround(tx, ty, tz);
+                    dropUnsupportedDustAbove(tx, ty, tz);
                 } else if (BlockRegistry::isDispenser(tb) || BlockRegistry::isDropper(tb)) {
                     fireDispenserAt(tx, ty, tz, tb); // t628 发射器/投掷器：per-dispenser 冷却 + state 朝向发射
                 }
@@ -4893,6 +4899,9 @@ void PlayerController::scanTntTraps()
                 // t744① 压力板点燃路径同右键机关路径：TNT 格被静默清 → 附着其上的按钮/拉杆立即失撑
                 //   掉落（同 t662 语义；clearBlockSilent 不经 finishMiningAt 的失撑扫描故须显式补）。
                 dropUnsupportedMechAround(tx, ty, tz);
+                // 审查 #5：同格失撑的火把（贴 TNT 墙）/ 粉（铺 TNT 顶）一并补口（三族对称，同上注）。
+                dropUnsupportedTorchesAround(tx, ty, tz);
+                dropUnsupportedDustAbove(tx, ty, tz);
                 break; // 本板单点点燃（链式引爆覆盖其余邻 TNT）
             }
         }
@@ -5142,6 +5151,9 @@ void PlayerController::firePowerTnt(int x, int y, int z)
     // t744① 红石电力点燃路径同右键机关 / 压力板路径：TNT 格被静默清 → 附着其上的按钮/拉杆立即
     //   失撑掉落（同 t662 语义；clearBlockSilent 不经 finishMiningAt 的失撑扫描故须显式补）。
     dropUnsupportedMechAround(x, y, z);
+    // 审查 #5：同格失撑的火把（贴 TNT 墙）/ 粉（铺 TNT 顶）一并补口（三族对称，同上两处）。
+    dropUnsupportedTorchesAround(x, y, z);
+    dropUnsupportedDustAbove(x, y, z);
 }
 
 // t658 红石电力触发发射器 / 投掷器（powerDispenserTriggered → Main.qml 转发；见头注释）。该格仍是

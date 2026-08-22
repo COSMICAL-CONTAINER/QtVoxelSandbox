@@ -85,7 +85,7 @@ struct BuiltState {
     //   setPlayerSkin 改写 + 持久化；Main.qml skinName 属性启动期从 playerSkin() 读。
     QString playerSkin;
     // t731 pack 皮肤 64×64→64×32 裁切缓存：kind（"skin_default"/"skin_alex"）→落盘的裁上半图 file://
-    //   路径（voxelsandbox_rp_skin_<kind>.png）。apply() 重建时清空（pack 切换/重解析 → 重裁）。
+    //   路径（voxelsandbox_rp_skin_<kind>_r<revision>.png）。apply() 重建时清空（pack 切换/重解析 → 重裁）。
     QHash<QString, QString> skinPackFiles;
     // t588/t613 铜物品（铜工具 0x118..0x11C / 铜锭 0x21D / 铜护甲 0x308..0x30B）染色图标缓存：pack 无
     //   copper_*（1.8 等老包）→ 用铁对应贴图染铜橙（retintCopperTemplate）落盘 voxelsandbox_rp_copper_<id>.png，
@@ -2981,8 +2981,8 @@ bool ResourcePackManager::setPlayerSkin(const QString &name)
 //   的 skin_default（steve.png）/ skin_alex（alex.png）两级探测（子目录 → 扁平，同 entitySource）。
 //   命中后按贴图实际宽高判型：h == w/2（64×32 族）→ 原样返回 file:///；更高（64×64 老式布局——上半 32
 //   行是 base 头/身/臂/腿区，与 64×32 兼容；下半是 1.8+ overlay）→ QImage 裁上半 w×(w/2) 落盘
-//   voxelsandbox_rp_skin_<kind>.png 缓存（apply() 重建随 skinPackFiles 清空重裁；同皮革染色落盘模式）。
-//   miss / 解码 / 落盘失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
+//   voxelsandbox_rp_skin_<kind>_r<revision>.png 缓存（apply() 重建随 skinPackFiles 清空重裁；revision
+//   后缀保证换包后 URL 变 → QML 重读，同皮革染色落盘模式）。miss / 解码 / 落盘失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
 //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
 QString ResourcePackManager::playerSkinSource(const QString &skin) const
 {
@@ -3033,13 +3033,15 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
     const QImage cropped = tex.copy(0, 0, w, w / 2);
     if (cropped.isNull())
         return {};
-    // 落盘缓存（AppLocalDataLocation，同 atlasFile / 皮革染色目录）。
+    // 落盘缓存（AppLocalDataLocation，同 atlasFile / 皮革染色目录）。文件名带 revision（审查 #7：同
+    //   t745 icon2 族先例——apply() 每次 ++s.revision → 换包重裁后落盘路径随版本变，QML Texture 按
+    //   file:/// URL 重读新图；无 revision 时同路径落新图但 URL 不变 → 换包后皮肤陈旧直到重启）。
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty())
         return {}; // 无可写目录 → 回退程序皮肤（降级）
     QDir().mkpath(dir);
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_skin_%1.png").arg(kind));
+            QStringLiteral("voxelsandbox_rp_skin_%1_r%2.png").arg(kind).arg(s.revision));
     if (!cropped.save(out, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
     s.skinPackFiles.insert(kind, out); // stateMutex 已持锁，安全

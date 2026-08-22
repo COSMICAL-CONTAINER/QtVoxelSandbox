@@ -3650,19 +3650,8 @@ void EntityManager::dropUnsupportedTorchesAfterBlast(const std::vector<World::De
                                                      World *world)
 {
     if (!world) return;
-    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-    for (const World::DestroyedVoxel &d : destroyed) {
-        for (const auto &n : kNb) {
-            const int tx = d.x + n[0], ty = d.y + n[1], tz = d.z + n[2];
-            const quint8 tb = world->blockAt(tx, ty, tz);
-            if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
-            int ax, ay, az;
-            BlockRegistry::torchAttachOffset(world->stateAt(tx, ty, tz), ax, ay, az);
-            if (BlockRegistry::isSolid(world->blockAt(tx + ax, ty + ay, tz + az))) continue; // 支撑幸存 → 保留
-            world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
-            emit explosionDroppedItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 脱落恒掉（不走概率门）
-        }
-    }
+    for (const World::DestroyedVoxel &d : destroyed)
+        dropUnsupportedTorchesAroundCell(d.x, d.y, d.z, world); // 审查 #5：收口单格版（逻辑不变，水下路径复用）
 }
 
 // t739 爆炸失撑红石粉掉落（Stalker detonateStalker / TNT detonateTntSphere 两爆炸路径共用；头文件注释
@@ -3674,16 +3663,8 @@ void EntityManager::dropUnsupportedDustAfterBlast(const std::vector<World::Destr
                                                   World *world)
 {
     if (!world) return;
-    for (const World::DestroyedVoxel &d : destroyed) {
-        const int ty = d.y + 1;
-        if (ty >= world->height()) continue;
-        if (!BlockRegistry::isRedstoneDust(world->blockAt(d.x, ty, d.z))) continue;
-        if (BlockRegistry::isDustSupport(world->blockAt(d.x, d.y, d.z),
-                                         world->stateAt(d.x, d.y, d.z)))
-            continue; // 支撑幸存（如上半砖在球外 / 双半砖合并）→ 粉保留
-        world->setWaterSilent(d.x, ty, d.z, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
-        emit explosionDroppedItem(d.x, ty, d.z, BlockRegistry::dropId(BlockRegistry::RedstoneDust)); // 恒掉
-    }
+    for (const World::DestroyedVoxel &d : destroyed)
+        dropUnsupportedDustAboveCell(d.x, d.y, d.z, world); // 审查 #5：收口单格版（逻辑不变，水下路径复用）
 }
 
 // t744① 单格版：扫 (x,y,z) 的 6 邻机关族（Lever / WoodButton / StoneButton），state bit[3:1] 解码唯一
@@ -3707,6 +3688,39 @@ void EntityManager::dropUnsupportedMechAroundCell(int x, int y, int z, World *wo
         world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
         emit explosionDroppedItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 脱落恒掉（不走概率门）
     }
+}
+
+// 审查 #5 单格版（火把族；头文件注释详述）：AfterBlast 逐破坏格 + 水下链式引燃的 clearBlockSilent 后
+//   共用。判定与收口前完全一致（state 解码唯一附着格 → 非 solid 即掉；去重：清后 Air 复扫不双掉）。
+void EntityManager::dropUnsupportedTorchesAroundCell(int x, int y, int z, World *world)
+{
+    if (!world) return;
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &n : kNb) {
+        const int tx = x + n[0], ty = y + n[1], tz = z + n[2];
+        const quint8 tb = world->blockAt(tx, ty, tz);
+        if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
+        int ax, ay, az;
+        BlockRegistry::torchAttachOffset(world->stateAt(tx, ty, tz), ax, ay, az);
+        if (BlockRegistry::isSolid(world->blockAt(tx + ax, ty + ay, tz + az))) continue; // 支撑幸存 → 保留
+        world->setWaterSilent(tx, ty, tz, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
+        emit explosionDroppedItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 脱落恒掉（不走概率门）
+    }
+}
+
+// 审查 #5 单格版（红石粉；头文件注释详述）：AfterBlast 逐破坏格 + 水下链式引燃共用。判定与收口前完全
+//   一致（正上方粉 + isDustSupport 支撑复检；清后 Air 复扫不双掉）。setWaterSilent 已挂 notePowerWrite
+//   → 清粉格 + 邻粉入电力脏集，下 tick 红石重算断失效段信号。
+void EntityManager::dropUnsupportedDustAboveCell(int x, int y, int z, World *world)
+{
+    if (!world) return;
+    const int ty = y + 1;
+    if (ty >= world->height()) return;
+    if (!BlockRegistry::isRedstoneDust(world->blockAt(x, ty, z))) return;
+    if (BlockRegistry::isDustSupport(world->blockAt(x, y, z), world->stateAt(x, y, z)))
+        return; // 支撑幸存（如上半砖在球外 / 双半砖合并）→ 粉保留
+    world->setWaterSilent(x, ty, z, BlockRegistry::Air, 0); // 静默清（mesh 重建走 worldChanged）
+    emit explosionDroppedItem(x, ty, z, BlockRegistry::dropId(BlockRegistry::RedstoneDust)); // 恒掉
 }
 
 // t744① 爆炸失撑机关掉落（头文件注释详述语义）：destroyed 每破坏格调单格版扫 6 邻。覆盖两类失撑源：
@@ -3909,6 +3923,10 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
                     // t744① 水下链式引燃的机关失撑掉落：本路径 destroyed 为空（不毁地形）→ AfterBlast 扫不到，
                     //   但 clearBlockSilent 清 TNT 格同样使其上/旁的按钮/拉杆失撑 → 单格版显式补扫（同语义）。
                     dropUnsupportedMechAroundCell(x, y, z, world);
+                    // 审查 #5：同格失撑的火把（贴 TNT 墙）/ 粉（铺 TNT 顶）一并单格补扫——悬空火把残留
+                    //   还会照旧供电（powerSourceLevel 只读格子 id），水下链式路径与玩家侧三处点火对齐。
+                    dropUnsupportedTorchesAroundCell(x, y, z, world);
+                    dropUnsupportedDustAboveCell(x, y, z, world);
                 }
     }
 

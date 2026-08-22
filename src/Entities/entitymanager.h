@@ -531,6 +531,13 @@ public:
     // t744① 单格版：扫 (x,y,z) 的 6 邻机关族失撑掉落（AfterBlast 逐破坏格调它；水下链式引燃的
     //   clearBlockSilent 后单独调——那格不在 destroyed 列表里）。
     void dropUnsupportedMechAroundCell(int x, int y, int z, World *world);
+    // 审查 #5 单格版（火把 / 粉两族，与 mech 单格版同结构——AfterBlast 逐破坏格调它；水下链式引燃的
+    //   clearBlockSilent 清 TNT 格后单独调）：扫 (x,y,z) 的 6 邻火把族失撑掉落（判定同
+    //   dropUnsupportedTorchesAfterBlast：state 解码唯一附着格 → 非 solid 即掉）。
+    void dropUnsupportedTorchesAroundCell(int x, int y, int z, World *world);
+    // 审查 #5 单格版（红石粉）：查 (x,y,z) 正上方的粉、本格已非 isDustSupport 支撑 → 清 + 掉落
+    //   （判定同 dropUnsupportedDustAfterBlast；粉支撑恒为正下方格，无 state 附着编码可解）。
+    void dropUnsupportedDustAboveCell(int x, int y, int z, World *world);
     // t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed）。QML delegate 据它对 FallingBlock 叠白闪脉冲
     //   （primed=true → baseColor 白闪；false → 普通下落方块原色）。越界 / 非 primed → false。
     Q_INVOKABLE bool isPrimedAt(int i) const;

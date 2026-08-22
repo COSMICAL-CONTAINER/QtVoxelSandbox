@@ -190,8 +190,9 @@ public:
     // t731 玩家皮肤 pack 源（含 64×64 老式布局 → 64×32 裁切重排，落盘缓存同皮革染色模式）：skin
     //   （"default"/"alex"）→ entityKindMap 的 skin_default（steve.png）/ skin_alex（alex.png）两级探测。
     //   命中且 h == w/2（64×32 族）→ 原样 file:///；更高（64×64 老式布局，上半 32 行 = base 区）→ 裁上半
-    //   落盘 voxelsandbox_rp_skin_<kind>.png 返 file:///（apply() 重建清缓存重裁）。miss / 解码 / 落盘
-    //   失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
+    //   落盘 voxelsandbox_rp_skin_<kind>_r<revision>.png 返 file:///（apply() 重建清缓存重裁，revision
+    //   后缀保证换包后 URL 变 → QML Texture 重读新图）。miss / 解码 / 落盘失败 → 空串 → 调用方回退程序
+    //   皮肤 qrc:/textures/entity_skin_<default|alex>.png。
     //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString playerSkinSource(const QString &skin) const;
 
