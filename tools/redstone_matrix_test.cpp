@@ -1128,6 +1128,86 @@ int main(int argc, char *argv[])
                              "(regression guard, review #1)";
     }
 
+    // ── P15 t772 红石块直供全器件 × 双放置顺序矩阵 ──
+    //   用户报告（R19.12 测试）：「红石块只点亮红石粉/红石灯，发射器、TNT 等均不响应；通电红石粉也点不着
+    //   TNT」。主矩阵（上方 12 源 × 7 接收器）只测「源与器件同帧在场后的首个重算」——放置顺序从未独立成
+    //   维度，而顺序正是可达性路径的分水岭：order A（器件先就位稳态、后放源）可达性走 notePowerWrite 锚点
+    //   的 6 邻接收器展开（t657 引入、t706 扩全红石族脏达）；order B（源先就位稳态、后放器件）可达性走
+    //   器件自身锚点（t656 起即有）。本探针把两条路径 × 3 源（红石块 / 立式亮火把 / 扳开拉杆）× 7 器件全
+    //   组合断言激活（信号型 = 计数 + 坐标；状态型 = 通电位 + 降沿复查）——任一组合 FAIL 即用户症状在当前
+    //   HEAD 的复现点。同槽复用（每 case 末完整清场 + 2 tick 收敛，槽预算 6 个，远低于 124 上限）。
+    //   注：发射器 / 投掷器在呈现层另有「空库存无动作」语义（t607 玩家机器身份）——本 World 层探针断言
+    //   的是 powerDispenserTriggered 信号已发出（消费端 fireDispenserAtQml 的沿检测输入），非可见弹射。
+    {
+        const SourceDef s772[] = {
+            { "RedstoneBlock",      BR::RedstoneBlock, 0,                           true,  false },
+            { "RedstoneTorch(lit)", BR::RedstoneTorch, 0,                           true,  false },
+            { "Lever(on)",          BR::Lever,         1,                           false, false },
+        };
+        const RecvDef r772[] = {
+            { "TNT",          BR::TntBlock,      0,                           true  },
+            { "Dispenser",    BR::Dispenser,     0,                           true  },
+            { "Dropper",      BR::Dropper,       0,                           true  },
+            { "RedstoneLamp", BR::RedstoneLamp,  BR::RedstoneLampStateOnFlag, false },
+            { "GoldenRail",   BR::GoldenRail,    BR::GoldenRailStateOnFlag,   false },
+            { "IronDoor",     BR::IronDoor,      0x04,                        false },
+            { "IronTrapdoor", BR::IronTrapdoor,  0x01,                        false },
+        };
+        for (int order = 0; order < 2; ++order) {
+            for (const SourceDef &src : s772) {
+                const auto [x0, z0] = nextSlot(); // 每源一槽，7 器件顺序复用（case 间全清 + 收敛 tick）
+                for (const RecvDef &rc : r772) {
+                    const int srcX = x0, recvX = x0 + 1;
+                    if (order == 0) {
+                        // order A：器件先就位 + 稳态 4 tick → 后放源（用户实测路径：先摆 TNT/发射器、再贴红石块）。
+                        w.setBlock(recvX, kRigY, z0, rc.id, 0);
+                        tickN(w, 4);
+                        w.setBlock(srcX, kRigY, z0, src.id, src.onState);
+                    } else {
+                        // order B：源先就位 + 稳态 4 tick → 后放器件。
+                        w.setBlock(srcX, kRigY, z0, src.id, src.onState);
+                        tickN(w, 4);
+                        w.setBlock(recvX, kRigY, z0, rc.id, 0);
+                    }
+                    const int tnt0 = tntFired, disp0 = dispFired;
+                    tickN(w, 6);
+                    bool on = false;
+                    QString onNote;
+                    if (rc.signalBased && rc.id == BR::TntBlock) {
+                        on = (tntFired > tnt0) && lastTntX == recvX && lastTntY == kRigY && lastTntZ == z0;
+                        if (!on) onNote = QStringLiteral("no powerTntTriggered");
+                    } else if (rc.signalBased) {
+                        on = dispFired > disp0;
+                        if (!on) onNote = QStringLiteral("no powerDispenserTriggered");
+                    } else {
+                        on = (w.stateAt(recvX, kRigY, z0) & rc.onFlag) != 0;
+                        if (!on) onNote = QStringLiteral("state flag not set (st=%1)").arg(int(w.stateAt(recvX, kRigY, z0)));
+                    }
+                    bool offOk = true;
+                    QString offNote;
+                    if (on && !rc.signalBased) {
+                        if (src.removeToOff) w.setBlock(srcX, kRigY, z0, BR::Air);
+                        else                 w.setBlock(srcX, kRigY, z0, src.id, 0);
+                        tickN(w, 6);
+                        offOk = (w.stateAt(recvX, kRigY, z0) & rc.onFlag) == 0;
+                        if (!offOk) offNote = QStringLiteral("falling edge: flag stuck");
+                    }
+                    const bool ok = on && offOk;
+                    if (!ok) ++totalFail;
+                    qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                                      << "| t772"
+                                      << (order == 0 ? "[device-first,source-last]" : "[source-first,device-last]")
+                                      << src.name << "->" << rc.name
+                                      << (on ? QString() : onNote) << (offOk ? QString() : offNote);
+                    // 清场（源 + 器件全清；信号型 TNT 的清块在呈现层，World 层探针须自理）+ 2 tick 收敛。
+                    w.setBlock(srcX, kRigY, z0, BR::Air);
+                    w.setBlock(recvX, kRigY, z0, BR::Air);
+                    tickN(w, 2);
+                }
+            }
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
