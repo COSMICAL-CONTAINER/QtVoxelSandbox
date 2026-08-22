@@ -3911,8 +3911,12 @@ void PlayerController::placeBlock()
             bool ok = BlockRegistry::isRail(m_world->blockAt(cx, cy, cz));
             if (!ok) {
                 cx += m_hitNx; cy += m_hitNy; cz += m_hitNz; // 非轨命中 → 命中面邻格（矿车是实体，落位格须空）
+                // 复审 #4（2026-08-22）：支撑判定改**可碰撞实心**（isCollidable）—— 旧 `!= Air` 把轨 /
+                //   火把 / 花草 / 水等非实心都当支撑：落位格在某条轨正上方时支撑 = 轨本身 → 生成悬浮车，
+                //   骑上后列扫描命中下方轨被 pinCartY 瞬移砸到轨上。轨 / 植物 / 液体（ShapeNone 无碰撞）
+                //   不再当支撑（机制等价 MC 矿车放地上须实心地面）。
                 ok = m_world->blockAt(cx, cy, cz) == BlockRegistry::Air
-                     && m_world->blockAt(cx, cy - 1, cz) != BlockRegistry::Air; // 上方落位空 + 下方有支撑
+                     && m_world->isCollidable(cx, cy - 1, cz); // 上方落位空 + 下方实心支撑
             }
             if (ok) {
                 m_minecartManager->spawnCart(cx, cy, cz, m_world);

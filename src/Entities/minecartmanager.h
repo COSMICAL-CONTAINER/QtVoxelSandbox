@@ -151,6 +151,12 @@ public:
     //       更大者）把「接近速度 × kCartMomentumTransfer」沿中心线投影到前车轨轴上加给前车 speed，自身
     //       减同量；不做能量守恒精确解，比例常量可调）。对撞（互相逼近）同公式自然得到「双双减速 / 轻微
     //       反弹」（负速 = 沿 -dir 倒行，stepCartAlongRail 已支持）。
+    //   **复审 #3（2026-08-22）轨道守卫**：(a)/(b) 旧版都绕过轨道约束（轨道合法性只在 stepCartAlongRail
+    //   格心重选时校验）—— 去穿插位移 / 冲量获速可把车直接送进**无轨列**，下一帧 pinCartY 返 -1 只清速度
+    //   不回落 Y → 悬浮永久死车（死端追尾稳定复现）。现两路加守卫：(a) 位移越过当前格边界时先以
+    //   scanRailColumn（pinCartY 同语义列扫描，自车当前 Y）探测目标列有轨，无轨 → 钳制在当前格边界内
+    //   （离轨 / 地面车本列无轨 → 位移恒 0，同 pushEmptyCart「无轨推不动」语义）；(b) 受冲量方向
+    //   （A 沿 -n / B 沿 +n）无合法连接（pickTrackStep false：死端 / 离轨）→ 该车不吃冲量。
     //   任一车 speed/pos 被改 → notifyChanged（revision 触碰驱动 QML 位置刷新）。
     void resolveCartCollisions(World *world);
 
@@ -239,6 +245,13 @@ private:
     //   轨可反向推回）。
     bool pickTrackStep(World *world, const QVector3D &cartPos, float wantX, float wantZ,
                        int &outDx, int &outDz) const;
+
+    // 复审 #4（2026-08-22）：列内向下扫「最近**可达**轨格」（pinCartY / pickTrackStep / tickRiddenCart
+    //   前置钉定 / 探测轨占用四点共用语义，抽单一权威防各处漂移）：从 topY 向下最多 2 格找首个 Rail 族
+    //   格；扫描途中遇**可碰撞实心方块即断**（实心遮挡 → 更下方轨不可达 —— 地面静止车隔着实心地板点亮
+    //   下方探测轨隧道 / 把车（连人）钉到地板下方轨面的假支撑都由此拒；轨 / 火把 / 花草 / 水（无碰撞）
+    //   不遮挡，坡顶场景格与轨之间只隔空气不受影响）。返轨格 Y（-1 = 列内无可达轨）。只读 World。
+    int scanRailColumn(World *world, int cx, int topY, int cz) const;
 
     // t708 沿轨推进（共享：被骑 / 空车被推同一物理）：把矿车沿当前行进 dir 推进 speed×dt（支持负速倒行
     //   —— S 反向推力的减速 → 负速退行），正行跨格时重选连接向（拐角自动转弯；轨尽头 / 出轨停）；

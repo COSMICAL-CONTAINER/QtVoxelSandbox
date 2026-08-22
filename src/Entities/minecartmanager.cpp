@@ -199,6 +199,19 @@ bool MinecartManager::dismount(World *world, QVector3D &outPlayerFeet)
     return true;
 }
 
+// 复审 #4：列内向下扫最近可达轨格（实现见头注释；pinCartY / pickTrackStep / tickRiddenCart / 探测轨
+//   占用四点共用单一权威）。遮挡判定 World::isCollidable（Core isCollidable 单一权威：轨 / 火把 / 水 /
+//   花草 ShapeNone 恒 false 不遮挡；LilyPad 特例可踩碰撞当遮挡 —— 矿车压睡莲列本就非法，可接受）。
+int MinecartManager::scanRailColumn(World *world, int cx, int topY, int cz) const
+{
+    if (!world) return -1;
+    for (int y = topY; y >= topY - 2 && y >= 0; --y) {
+        if (BlockRegistry::isRail(world->blockAt(cx, y, cz))) return y;
+        if (world->isCollidable(cx, y, cz)) break; // 实心遮挡 → 更下方轨不可达（隔板供电 / 假支撑拒）
+    }
+    return -1;
+}
+
 bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, float wantX, float wantZ,
                                     int &outDx, int &outDz) const
 {
@@ -207,14 +220,11 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     //   pos.y = 轨Y+1+rise+0.30 → floor(pos.y)-1 = 轨**上方**空气层 → isRail 判不在轨上 → 拐角重选向 /
     //   S 倒行 / 推空车在坡顶 30% 段全部失联。与 tickRiddenCart 钉轨面 / t691 前置钉定同「列内向下扫、
     //   容差 2」语义 → 坡顶 / 坡脚 / 平轨一律解析到真轨格）。轨判定 isRail 家族（普通 / 动力 / 探测）。
+    //   复审 #4：扫描收口到 scanRailColumn（含实心遮挡断扫）。
     const int rx = int(std::floor(cartPos.x()));
     const int rz = int(std::floor(cartPos.z()));
-    int ry = -1;
-    const int scanTop = int(std::floor(cartPos.y()));
-    for (int y = scanTop; y >= scanTop - 2 && y >= 0; --y) {
-        if (BlockRegistry::isRail(world->blockAt(rx, y, rz))) { ry = y; break; }
-    }
-    if (ry < 0) return false; // 不在轨上（防御）
+    const int ry = scanRailColumn(world, rx, int(std::floor(cartPos.y())), rz);
+    if (ry < 0) return false; // 不在轨上（防御；含实心遮挡 → 列内轨不可达）
     const quint8 con = world->stateAt(rx, ry, rz);
     // 4 向连接位（RailConnPx/Nx/Pz/Nz）→ 位移向量；选与 (wantX,wantZ) 点积最大且**非反向**（dot ≥ 0）者
     //   （拐角 dot=0 自动选中 —— 行进 +Z 时拐角连接 +X 点积 0 > 反向 -Z 的 -1 → 自动转弯）。反向连接
@@ -261,64 +271,62 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
 
 // t708 钉轨面（共享 helper；实现见头注释）：矿车所在列向下扫最近轨格 → Y = cell 底 + 坡面高 + kCartRideH
 //   （t734 基准修真：轨板贴 cell 底 +1/16，去掉旧 +1.0 格顶叠加）。返钉到的轨格 Y（-1 = 列内无轨）。
+//   复审 #4：列扫描收口到 scanRailColumn（含实心遮挡断扫 —— 地面车隔着实心地板不再钉到地板下的轨）。
 int MinecartManager::pinCartY(Cart &c, World *world)
 {
     if (!world) return -1;
     const int bcx = int(std::floor(c.pos.x()));
     const int bcz = int(std::floor(c.pos.z()));
-    const int bcy = int(std::floor(c.pos.y()));
-    for (int y = bcy; y >= bcy - 2 && y >= 0; --y) {
-        if (!BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) continue;
-        const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
-        const float fz = c.pos.z() - float(bcz);
-        const auto dlt = [&](int dx, int dz) {
-            return BlockRegistry::railProbeDelta(
-                { world->blockAt(bcx + dx, y, bcz + dz),
-                  world->blockAt(bcx + dx, y + 1, bcz + dz),
-                  world->blockAt(bcx + dx, y - 1, bcz + dz) });
-        };
-        // t691 轴判定（mesher 同源）：连接位低 4 位定行进轴；EW（±X 连接）→ riseAtX、NS → riseAtZ；
-        //   0 连接读 RailAxisEWFlag（bit5 轴偏好）。拐角 / 十字无坡（mesher 同判）。
-        const quint8 rst = world->stateAt(bcx, y, bcz);
-        const quint8 con = quint8(rst & 0x0F);
-        const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
-        const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
-        const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
-        const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
-        const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
-        const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
-        const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
-        float rise = 0.0f;
-        if (isCorner) {
-            // t709 坡臂拐角：mesher 拐角 quad 沿臂侧整边抬升（armLift）→ 矿车在格中心取四角抬升的
-            //   双线性中心（坡底拐弯曲面过弯不跳变；平地拐角四角全 0 → rise 0 语义不变）。
-            const int dpx = dlt(1, 0), dnx = dlt(-1, 0), dpz = dlt(0, 1), dnz = dlt(0, -1);
-            const float eE = dpx > 0 ? float(dpx) : 0.0f, eW = dnx > 0 ? float(dnx) : 0.0f;
-            const float eS = dpz > 0 ? float(dpz) : 0.0f, eN = dnz > 0 ? float(dnz) : 0.0f;
-            rise = 0.25f * (eW + eE + eN + eS);
-        } else if (nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
-            if (ew) {
-                const int dpx = dlt(1, 0);
-                const int dnx = dlt(-1, 0);
-                if (dpx > 0 && dnx > 0) rise += 2.0f * std::fabs(fx - 0.5f); // t710 V 形凹谷：两端 +1、谷心 0（与 mesher 两半 quad 同曲面；railProbe 只回 ±1 → 无多档）
-                else {
-                    if (dpx > 0) rise += float(dpx) * fx;
-                    if (dnx > 0) rise += float(dnx) * (1.0f - fx);
-                }
-            } else {
-                const int dpz = dlt(0, 1);
-                const int dnz = dlt(0, -1);
-                if (dpz > 0 && dnz > 0) rise += 2.0f * std::fabs(fz - 0.5f); // t710 V 形凹谷（Z 向）
-                else {
-                    if (dpz > 0) rise += float(dpz) * fz;
-                    if (dnz > 0) rise += float(dnz) * (1.0f - fz);
-                }
+    const int y = scanRailColumn(world, bcx, int(std::floor(c.pos.y())), bcz);
+    if (y < 0) return -1;
+    const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
+    const float fz = c.pos.z() - float(bcz);
+    const auto dlt = [&](int dx, int dz) {
+        return BlockRegistry::railProbeDelta(
+            { world->blockAt(bcx + dx, y, bcz + dz),
+              world->blockAt(bcx + dx, y + 1, bcz + dz),
+              world->blockAt(bcx + dx, y - 1, bcz + dz) });
+    };
+    // t691 轴判定（mesher 同源）：连接位低 4 位定行进轴；EW（±X 连接）→ riseAtX、NS → riseAtZ；
+    //   0 连接读 RailAxisEWFlag（bit5 轴偏好）。拐角 / 十字无坡（mesher 同判）。
+    const quint8 rst = world->stateAt(bcx, y, bcz);
+    const quint8 con = quint8(rst & 0x0F);
+    const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
+    const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
+    const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
+    const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
+    const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
+    const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
+    const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
+    float rise = 0.0f;
+    if (isCorner) {
+        // t709 坡臂拐角：mesher 拐角 quad 沿臂侧整边抬升（armLift）→ 矿车在格中心取四角抬升的
+        //   双线性中心（坡底拐弯曲面过弯不跳变；平地拐角四角全 0 → rise 0 语义不变）。
+        const int dpx = dlt(1, 0), dnx = dlt(-1, 0), dpz = dlt(0, 1), dnz = dlt(0, -1);
+        const float eE = dpx > 0 ? float(dpx) : 0.0f, eW = dnx > 0 ? float(dnx) : 0.0f;
+        const float eS = dpz > 0 ? float(dpz) : 0.0f, eN = dnz > 0 ? float(dnz) : 0.0f;
+        rise = 0.25f * (eW + eE + eN + eS);
+    } else if (nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
+        if (ew) {
+            const int dpx = dlt(1, 0);
+            const int dnx = dlt(-1, 0);
+            if (dpx > 0 && dnx > 0) rise += 2.0f * std::fabs(fx - 0.5f); // t710 V 形凹谷：两端 +1、谷心 0（与 mesher 两半 quad 同曲面；railProbe 只回 ±1 → 无多档）
+            else {
+                if (dpx > 0) rise += float(dpx) * fx;
+                if (dnx > 0) rise += float(dnx) * (1.0f - fx);
+            }
+        } else {
+            const int dpz = dlt(0, 1);
+            const int dnz = dlt(0, -1);
+            if (dpz > 0 && dnz > 0) rise += 2.0f * std::fabs(fz - 0.5f); // t710 V 形凹谷（Z 向）
+            else {
+                if (dpz > 0) rise += float(dpz) * fz;
+                if (dnz > 0) rise += float(dnz) * (1.0f - fz);
             }
         }
-        c.pos.setY(float(y) + rise + kCartRideH); // t734：轨板贴 cell 底（mesher yr=1/16），去掉旧 +1.0 格顶基准
-        return y;
     }
-    return -1;
+    c.pos.setY(float(y) + rise + kCartRideH); // t734：轨板贴 cell 底（mesher yr=1/16），去掉旧 +1.0 格顶基准
+    return y;
 }
 
 // t708 沿轨推进（共享：被骑 / 空车被推同一物理；实现见头注释）。负速 = 倒行（沿 -dir，车头保持原朝向）。
@@ -450,12 +458,50 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
 // t735 ③ 矿车↔矿车碰撞（实现见头注释）：两两水平 AABB 相交 → (a) 沿各自轨轴的位置去穿插（垂直轨轴
 //   分量不位移 —— 防把车顶出轨道列被 pinCartY 判死）+ (b) 一维沿轨向近似动量传递（接近速度 ×
 //   kCartMomentumTransfer 投影到各自轨轴加减；**注明简化**：等质量非弹性碰撞的简化模型，不做能量守恒
-//   精确解）。不需要读世界（world 参数保留给未来方块级阻挡；轨约束由下一帧 stepCartAlongRail 收口：
-//   去穿插位移恒沿轨轴、跨格经 pickTrackStep 验证）。任一车 speed/pos 被改 → notifyChanged。
+//   精确解）。
+//   复审 #3（2026-08-22）：(a)/(b) 旧版不读世界直接改 pos/speed —— 轨道合法性只在 stepCartAlongRail
+//   格心重选时校验，去穿插位移（每帧最多 ~0.46 格）与 0.85×closing 获速可把车送进无轨列 → 下一帧
+//   pinCartY 返 -1 只清速度不回落 Y → 悬浮永久死车（死端追尾稳定复现）。修：
+//   (a) clampShift —— 位移越过当前格边界时以 scanRailColumn（pinCartY 同语义，自车当前 Y 向下）探测
+//       目标列有轨，无轨钳制在当前格边界内（ε 内缩防 FP 压线）；本列已无轨（离轨 / 地面车）位移恒 0
+//       （同 pushEmptyCart「无轨推不动」语义）。目标列有轨但当前 Y 扫描窗够不到（坡顶上格 + 车 Y 尚停
+//       坡脚低处）同样拒 —— 保证位移后位置下一帧 pinCartY 必能解析，位移永不制造「离轨悬空」态。
+//   (b) impulseDirOk —— 受冲量方向（A 沿 -n 顶退 / B 沿 +n 推离）须有合法轨连接（pickTrackStep），
+//       死端车（仅剩来路连接）/ 离轨车不吃冲量（正常追尾 / 对撞 / 坡道 / 交叉的正向连接不受影响）。
+//   任一车 speed/pos 被改 → notifyChanged。
 void MinecartManager::resolveCartCollisions(World *world)
 {
-    Q_UNUSED(world);
     if (m_carts.size() < 2) return; // <2 车 → 无对可撞（零开销）
+    // 复审 #3 (b) 冲量方向守卫：车沿 pushDir 有合法轨连接（pickTrackStep：列内有轨 + 非反向连接）才
+    //   允许改速；无世界（防御路径）恒 false（无轨约束可验即不动车）。
+    const auto impulseDirOk = [&](const Cart &c, float wx, float wz) -> bool {
+        if (!world) return false;
+        int pdx = 0, pdz = 0;
+        return pickTrackStep(world, c.pos, wx, wz, pdx, pdz);
+    };
+    // 复审 #3 (a) 位移边界守卫：去穿插位移 s（沿轨轴带符号标量）若使车越过当前格边界，先以 pinCartY
+    //   同语义列扫描（自车当前 Y 向下 + 实心遮挡断扫）探测目标列有轨；无轨 → 钳制在当前格边界内。
+    //   返回允许执行的位移标量（0 = 不动；负 = 把已越线的半格拉回边界内）。
+    const auto clampShift = [&](const Cart &c, float s) -> float {
+        if (!world) return 0.0f;
+        if (std::fabs(s) < 1e-6f) return s;
+        const bool axisX = std::fabs(c.dirX) > 0.5f;
+        const float d = axisX ? c.dirX : c.dirZ; // 轨轴分量（轨向四向 → 恒 ±1）
+        const float cur = axisX ? c.pos.x() : c.pos.z();
+        const int cellCur = int(std::floor(cur));
+        const int cellNxt = int(std::floor(cur + d * s));
+        if (cellNxt == cellCur) return s; // 段内位移（未跨格）→ 放行
+        const int cx = int(std::floor(c.pos.x()));
+        const int cz = int(std::floor(c.pos.z()));
+        const int topY = int(std::floor(c.pos.y()));
+        if (scanRailColumn(world, cx, topY, cz) < 0) return 0.0f; // 本列无轨（离轨 / 地面车）→ 推不动
+        const int step = (cellNxt > cellCur) ? 1 : -1;
+        const int tx = axisX ? cx + step : cx;
+        const int tz = axisX ? cz : cz + step;
+        if (scanRailColumn(world, tx, topY, tz) >= 0) return s; // 目标列有轨（当前 Y 可达）→ 放行
+        const float bound = (step > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
+        return (bound - cur) / d; // 钳到边界内（d=±1 → 同号同模换算）
+    };
     bool changed = false;
     for (size_t i = 0; i < m_carts.size(); ++i) {
         Cart &a = m_carts[i];
@@ -482,21 +528,24 @@ void MinecartManager::resolveCartCollisions(World *world)
             const float bDot = b.dirX * nx + b.dirZ * nz;
             const float closing = a.speed * aDot - b.speed * bDot; // >0 = A 沿 n 逼近 B
             if (closing > 0.05f) {
+                // 复审 #3 (b)：A 的受冲向 = -n（顶退）、B 的 = +n（推离），各自须有合法轨连接才吃冲量
+                //   （死端车不被撞进无轨列；守卫未过者速度原样保留 —— 另一侧的减速分量照常生效）。
                 const float impulse = closing * kCartMomentumTransfer;
-                b.speed += impulse * bDot;
-                a.speed -= impulse * aDot;
+                if (impulseDirOk(b, nx, nz)) b.speed += impulse * bDot;
+                if (impulseDirOk(a, -nx, -nz)) a.speed -= impulse * aDot;
                 changed = true;
             }
             // (a) 位置去穿插（穿透 >5cm 才推，防贴轨停驻两车的 FP 微抖抖动）：各沿自身轨轴推开半穿透量
             //   （-n 在 A 轨轴上的投影定 A 的位移符号与大小；投影 0 = 交叉轨道不位移，只交换冲量）。
             const float pen = kCartCollideSep - dist;
             if (pen > 0.05f) {
-                const float sA = -aDot * (pen * 0.5f); // A 沿 -n 方向（背离 B）在其轨轴上的分量
-                const float sB =  bDot * (pen * 0.5f); // B 沿 +n 方向（背离 A）在其轨轴上的分量
-                a.pos.setX(a.pos.x() + a.dirX * sA);
-                a.pos.setZ(a.pos.z() + a.dirZ * sA);
-                b.pos.setX(b.pos.x() + b.dirX * sB);
-                b.pos.setZ(b.pos.z() + b.dirZ * sB);
+                // 复审 #3 (a)：位移过 clampShift 守卫（越界无轨 → 钳当前格边界内；离轨车不动）。
+                const float gA = clampShift(a, -aDot * (pen * 0.5f)); // A 沿 -n（背离 B）在其轨轴上的分量
+                const float gB = clampShift(b,  bDot * (pen * 0.5f)); // B 沿 +n（背离 A）在其轨轴上的分量
+                a.pos.setX(a.pos.x() + a.dirX * gA);
+                a.pos.setZ(a.pos.z() + a.dirZ * gA);
+                b.pos.setX(b.pos.x() + b.dirX * gB);
+                b.pos.setZ(b.pos.z() + b.dirZ * gB);
                 changed = true;
             }
         }
@@ -594,15 +643,11 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     // t691 轨格层前置钉定：boost / 坡道重力两处旧用 floor(pos.y)-1 派生轨层 —— 坡格上 pos.y = 轨Y+1+
     //   rise+0.30，rise≥0.7 时 floor-1 取到轨**上方**层（约 30% 位置错层 → boost 判定 / 坡修正读空气 →
     //   间歇性失效）。改为与下方钉轨面循环同源的「本列向下扫最近轨格」，全 tick 用同一 pinnedY。
+    //   复审 #4：扫描收口到 scanRailColumn（含实心遮挡断扫，与 pinCartY / 探测轨占用同语义）。
     const int railX = int(std::floor(c.pos.x()));
     const int railZ = int(std::floor(c.pos.z()));
-    int railY = -1; // -1 = 列内无轨
-    if (world) {
-        const int scanTop = int(std::floor(c.pos.y()));
-        for (int y = scanTop; y >= scanTop - 2 && y >= 0; --y) {
-            if (BlockRegistry::isRail(world->blockAt(railX, y, railZ))) { railY = y; break; }
-        }
-    }
+    const int railY = world ? scanRailColumn(world, railX, int(std::floor(c.pos.y())), railZ)
+                            : -1; // -1 = 列内无轨
 
     // t734 ③ 离轨静止（防「矿车不在铁轨上仍可被骑着一路悬浮滑到地图边界」）：列内无轨（railY<0）→
     //   钉死速度、跳过全部输入物理与推进 —— 不重选向 / 不 lerp 起步 / 不坡道溜 / 不位移。旧版速度照常
@@ -734,20 +779,18 @@ void MinecartManager::updateDetectorRailOccupancy(World *world)
         if (!c.alive) continue; // 车被挖毁 / clearAll 释放 → 不记占用 → 下一帧离开沿自动断电
         const int bcx = int(std::floor(c.pos.x()));
         const int bcz = int(std::floor(c.pos.z()));
-        const int top = int(std::floor(c.pos.y()));
-        for (int y = top; y >= top - 2 && y >= 0; --y) {
-            if (!BlockRegistry::isRail(world->blockAt(bcx, y, bcz))) continue;
-            if (world->blockAt(bcx, y, bcz) == BlockRegistry::DetectorRail) {
-                const quint8 ds = world->stateAt(bcx, y, bcz);
-                if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
-                    // 置位沿：setWaterSilent（静默 + notePowerWrite → m_powerDirty → tickRedstone 把
-                    //   bit4 读作电源 15 向 6 邻供能，world.cpp powerSourceLevel；不发 blockPlaced）。
-                    world->setWaterSilent(bcx, y, bcz, BlockRegistry::DetectorRail,
-                                          quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
-                }
-                m_detectorOccupied.insert(packRailCell(bcx, y, bcz)); // 本帧占用（下帧边沿比较基线）
+        // 复审 #4：列扫描收口 scanRailColumn（含实心遮挡断扫）—— 地面静止车隔着实心地板不再点亮
+        //   下方探测轨隧道（MC 探测轨只响应压在自己身上的车；坡顶场景格与轨之间只隔空气不受影响）。
+        const int y = scanRailColumn(world, bcx, int(std::floor(c.pos.y())), bcz);
+        if (y >= 0 && world->blockAt(bcx, y, bcz) == BlockRegistry::DetectorRail) {
+            const quint8 ds = world->stateAt(bcx, y, bcz);
+            if ((ds & BlockRegistry::DetectorRailStateOnFlag) == 0) {
+                // 置位沿：setWaterSilent（静默 + notePowerWrite → m_powerDirty → tickRedstone 把
+                //   bit4 读作电源 15 向 6 邻供能，world.cpp powerSourceLevel；不发 blockPlaced）。
+                world->setWaterSilent(bcx, y, bcz, BlockRegistry::DetectorRail,
+                                      quint8(ds | BlockRegistry::DetectorRailStateOnFlag));
             }
-            break; // 只取列内最近一轨（钉轨后 pos.y = 轨Y+rise+0.225 → 扫描窗必含轨层；非轨列跳过）
+            m_detectorOccupied.insert(packRailCell(bcx, y, bcz)); // 本帧占用（下帧边沿比较基线）
         }
     }
     updateDetectorRailEdges(world, prev);
