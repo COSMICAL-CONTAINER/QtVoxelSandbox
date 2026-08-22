@@ -6074,6 +6074,30 @@ void PlayerController::launchUnburyUpward()
     qInfo("player golem-launch unburied upward to y=%.2f (embedded cell y=%d)", topY, embY);
 }
 
+// t775 窒息 tick（t160 判定原 step() 内联，抽出供走路 + 骑乘两路共用；语义原样）：眼位（头部）点嵌进
+//   实体方块的碰撞体（被埋 / 头卡进方块，机制等价 MC 窒息）→ 每 kSuffocationInterval 秒扣 1HP
+//   （fallDamageTaken 同路径 → PlayerState.takeDamage → damaged 红屏闪 + 视角晃动）。
+//   创造 / 观察者无伤。脱困（头部出方块）即停累积。蹲下眼位低随之判定点下移。
+//   t575 判据收紧「眼位格 collidable」→「眼位点落入该格某 sub-AABB 内」：1.5 格通道的天花板（上半砖等
+//   partial 块）整格 collidable，但蹲态眼位（1.35）只在其下方空气区 —— 旧判据把这种「合法约束蹲姿」
+//   误判窒息扣血。点在 sub-AABB 内才真嵌（与碰撞同源，partial 块精确）—— t775 起点盒判定收口到
+//   World::pointBlockedByCollision 单一权威（原内联公式逐字等价）。
+void PlayerController::tickSuffocation(float dt)
+{
+    if (m_mode != Survival || !m_world) return;
+    const float ex = m_pos.x(), ey = m_pos.y() + m_eyeHeight, ez = m_pos.z();
+    if (m_world->pointBlockedByCollision(ex, ey, ez)) {
+        m_suffocationTimer += dt;
+        if (m_suffocationTimer >= kSuffocationInterval) {
+            m_suffocationTimer -= kSuffocationInterval;
+            // fallDamageTaken(1) 经既有链 takeDamage→damaged→onDamaged 已驱动 HP 扣减 + 红屏闪 + 视角晃动（t67）。
+            emit fallDamageTaken(1, PlayerState::Suffocation); // t311 死因=窒息
+        }
+    } else {
+        m_suffocationTimer = 0.0f;
+    }
+}
+
 void PlayerController::step(qreal dt)
 {
     const QVector3D posBefore = m_pos; // t159：出口算实际水平速度（speed 属性）的位移基准
@@ -6180,6 +6204,15 @@ void PlayerController::step(qreal dt)
         constexpr float kCartSeatDrop = 0.3125f; // 脚底相对矿车中心下移 = 车底板面偏移（坐车斗内，脚踩板面）
         m_pos = QVector3D(finalCartPos.x(), finalCartPos.y() - kCartSeatDrop, finalCartPos.z());
         m_vel = QVector3D(0, 0, 0);
+        // t775 骑矿车窒息（用户 R19.12 报告「生存坐矿车穿 1 格高通道无痛」）：骑乘分支早 return 不经
+        //   step() 末尾的 t160 窒息块 → 头进实心格零伤。座位同步后直调同一窒息链（判据 / 每秒 1HP 节奏 /
+        //   Suffocation 死因与走路完全一致）：矿车高 0.75 可进净空 1 格的通道（轨格上方即天花板），玩家
+        //   1.8 高 → 眼位（脚底 = 车心 −kCartSeatDrop + 眼 1.62 ≈ 轨格底 +1.76）必然嵌进天花板实心格 →
+        //   定期扣血（机制等价 MC 1.0 骑矿车顶头窒息）；净空 ≥2 格（眼位 < 天花板底）不嵌不扣。创造 /
+        //   观察者由 tickSuffocation 内模式闸免伤；下车 / 死亡走既有 dismount / respawn 清骑乘链。船分支
+        //   不接：玩家眼位在水面上方（浮水船位远低于头顶净空需求），且骑船已有自动蹲配合低顶桥洞的既有
+        //   玩法语义（t556/canStandUp 复探），不在本任务范围。
+        tickSuffocation(float(dt));
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
         return;
@@ -6587,33 +6620,9 @@ void PlayerController::step(qreal dt)
         m_peakY = m_pos.y();
     }
 
-    // t160 窒息（仅 Survival）：眼位（头部）嵌进实体方块的碰撞体（被埋 / 头卡进方块，机制等价 MC 窒息）→
-    //   每 kSuffocationInterval 秒扣 1HP（fallDamageTaken 同路径 → PlayerState.takeDamage）+ 发 suffocationPulse
-    //   （呈现层红屏闪 + 视角晃动）。创造 / 观察者无伤。脱困（头部出方块）即停累积。蹲下眼位低随之判定点下移。
-    // t575 判据收紧「眼位格 collidable」→「眼位点落入该格某 sub-AABB 内」：1.5 格通道的天花板（上半砖等
-    //   partial 块）整格 collidable，但蹲态眼位（1.35）只在其下方空气区 —— 旧判据把这种「合法约束蹲姿」
-    //   误判窒息扣血。点在 sub-AABB 内才真嵌（与碰撞同源，partial 块精确）。
-    if (m_mode == Survival && m_world) {
-        const float ex = m_pos.x(), ey = m_pos.y() + m_eyeHeight, ez = m_pos.z();
-        bool embedded = false;
-        for (const BlockRegistry::BlockAABB &b
-             : m_world->collisionAABBsAt(int(std::floor(ex)), int(std::floor(ey)), int(std::floor(ez)))) {
-            if (ex > b.minX && ex < b.maxX && ey > b.minY && ey < b.maxY && ez > b.minZ && ez < b.maxZ) {
-                embedded = true;
-                break;
-            }
-        }
-        if (embedded) {
-            m_suffocationTimer += float(dt);
-            if (m_suffocationTimer >= kSuffocationInterval) {
-                m_suffocationTimer -= kSuffocationInterval;
-                // fallDamageTaken(1) 经既有链 takeDamage→damaged→onDamaged 已驱动 HP 扣减 + 红屏闪 + 视角晃动（t67）。
-                emit fallDamageTaken(1, PlayerState::Suffocation); // t311 死因=窒息
-            }
-        } else {
-            m_suffocationTimer = 0.0f;
-        }
-    }
+    // t160 窒息（仅 Survival）：抽为 tickSuffocation（t775 —— 骑乘分支早 return 不经此处，矿车骑乘分支
+    //   在座位同步后直调同函数；判据 / 节奏 / 死因语义原样，详见函数头注释）。
+    tickSuffocation(float(dt));
 
     // t202 气泡 + 溺水（仅 Survival 耗气；Creative/Spectator 不溺水 → 恒满气）。复用 eyeInWater()（眼位
     //   blockAt == Water；同 t201 蓝滤镜判定）。眼位入水：m_airTimer 累加 → 每 kAirInterval 减 1 气泡

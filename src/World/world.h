@@ -141,6 +141,13 @@ public:
     //   分层（PLAN §2）：本方法属 World 层，只读 ChunkManager（blockAt + stateAt）+ BlockRegistry，
     //   不依赖 Renderer/Physics；PlayerController（Game/Physics）只读消费。
     std::vector<BlockRegistry::BlockAABB> collisionAABBsAt(int x, int y, int z) const;
+    // t775 点级碰撞占据查询：世界坐标点所在格的任一碰撞 sub-AABB **严格包含**该点 → true（点嵌进实体
+    //   方块的碰撞体）。窒息判定的原子查询（t160 玩家眼位 / t254 mob 头部原各自内联本判定，t775 收敛为
+    //   World 单一权威 —— 矩阵测试矿车骑乘窒息探针与 PlayerController 共用同源判据，防两处漂移）。
+    //   partial 块精确：点在格内但不在任何 sub-AABB 内缘（如上半砖下方的空气区）→ false（与碰撞同源，
+    //   t575 收紧语义原样保留）。只读（collisionAABBsAt + 点盒判定）；分层（PLAN §2）：World 低层查询，
+    //   Game / Entities / 测试直调。
+    bool pointBlockedByCollision(float x, float y, float z) const;
 
     // t121 天光 heightmap（PLAN §2-H「per-column 天光——自顶向下首个实体」）：世界坐标列首个非空气的 y
     //（越界 / 空列 → -1）。mesher 据此判顶点见天（ly >= hm → 天光 1.0）/ 地下（暗 0.2）。经 ChunkManager
