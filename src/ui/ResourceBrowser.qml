@@ -77,7 +77,8 @@ Item {
         { mobType: 16, name: "夜行者" }, // t727 末影人→夜行者（§9 改名；生物图鉴条目 + 生物蛋 0x246 映射）
         { mobType: 17, name: "燃烬者" }, // t728 烈焰人→燃烬者（§9 改名；生物图鉴条目 + 生物蛋 0x247 映射）
         // t663 ⑥ 剪毛变体条目（同 mobType 异外观）：选中 → 右侧预览显对应剪后形态（shearedAt=true 的游戏内
-        //   外观镜像——羊 = 裸肤色 #d6b890、雪傀儡 = 纯雪头（无南瓜））。「所有做好的生物形态都在图鉴里」。
+        //   外观镜像——羊 = t749 贴图裸肤 + 残羊毛（pack 本体层 / 程序 mob_sheep_sheared）、雪傀儡 = 纯雪头
+        //   （无南瓜））。「所有做好的生物形态都在图鉴里」。
         { mobType: 3, name: "羊（剪毛后）", sheared: true },
         { mobType: 12, name: "雪傀儡（剪头后）", sheared: true }
     ]
@@ -191,6 +192,12 @@ Item {
                 && root.mobModel[i].name === root.selectedMobName)
                 return root.mobModel[i].sheared === true
         return false
+    }
+    // t749 剪毛羊 pack 本体层源（pack 启用且包内有 sheep/sheep.png → file:///；否则空串走程序贴图）。
+    //   与 mobTextureSource(3) 的毛层合成路径分开——剪毛态要裸身 + 真脸（本体层），不要毛身。触碰 packActive。
+    readonly property string sheepBodyPackSrc: {
+        const _r = root.packActive
+        return _r >= 0 && root.resourcePack ? root.resourcePack.entitySource("sheep_body") : ""
     }
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
@@ -313,6 +320,15 @@ Item {
         source: root.selectedMobTexSource
         generateMipmaps: false
     }
+    // t749 剪毛羊预览贴图（双态）：pack 命中本体层 sheep/sheep.png（裸身 + 真脸 box-UV 布局）；否则程序生成
+    //   mob_sheep_sheared.png（裸肤 + 残羊毛块全脸 UV，build_mob.py t749 新增）。替代旧纯色 #d6b890——
+    //   用户「被剪羊毛的羊贴图纯色错误，应有裸皮 + 残毛造型」。
+    Texture {
+        id: mobShearedTex
+        source: root.sheepBodyPackSrc !== "" ? root.sheepBodyPackSrc
+                                             : "qrc:/textures/mob_sheep_sheared.png"
+        generateMipmaps: false
+    }
 
     // ── 尺寸常量 ──
     // t591：paletteCols 9 → 8 —— 物品网格 8×42+7×4=364 ≤ 左区视口 398 − 滚动条 6（当时 cellSize=42；9 列 410
@@ -421,15 +437,29 @@ Item {
                                                 anchors.centerIn: parent
                                                 spacing: 2
                                                 // t633 ② 生物头像：pack 命中 → mobHeadIconSource 裁的头部 2D
-                                                //   PNG（pack 关 / 无该 mob 头区 → 空串 → 回退体色 swatch）。
-                                                //   Image source 触碰 packActive（表达式形式防 AOT 死代码消除）。
+                                                //   PNG；miss → 回退链。Image source 触碰 packActive（表达式形式
+                                                //   防 AOT 死代码消除）。
+                                                // t749 七张空白头像补齐回退链（鱿鱼9/狼10/豹猫11/蠹虫14/夜行者16/
+                                                //   燃烬者17）：pack 关 / 头区裁剪 miss → 改显程序 mob 贴图全脸图
+                                                //   （mobFallbackTexture，对齐 mobTextureSource 的「pack 命中→程序
+                                                //   回退」双态语义）——旧态这些 mobType 不在 mobHeadRegions 表 =
+                                                //   mobHeadIconSource 恒空串 → 白色 swatch 被读作「空白」的根因。
+                                                //   雪傀儡（12）pack 关无程序实体贴图 → 维持 swatch（雪白块）；
+                                                //   其余 10 mob 维持 swatch 回退不变（原行为零回归）。
                                                 Item {
                                                     width: 26; height: 26
                                                     anchors.horizontalCenter: parent.horizontalCenter
-                                                    // 头像命中 → 显 Image；否则显体色方块（原 swatch）。
                                                     property string headSrc: {
                                                         const _r = root.packActive
-                                                        return (_r && root.resourcePack) ? root.resourcePack.mobHeadIconSource(modelData.mobType) : ""
+                                                        const t = modelData.mobType
+                                                        if (_r >= 0 && root.resourcePack) {
+                                                            const s = root.resourcePack.mobHeadIconSource(t)
+                                                            if (s !== "")
+                                                                return s
+                                                        }
+                                                        const hasProgAvatar = t === 9 || t === 10 || t === 11
+                                                              || t === 14 || t === 16 || t === 17
+                                                        return hasProgAvatar ? root.mobFallbackTexture(t) : ""
                                                     }
                                                     Image {
                                                         anchors.fill: parent
@@ -662,7 +692,11 @@ Item {
                                         Model {
                                             geometry: MobModel {
                                                 mobType: root.selectedMobType
+                                                // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
+                                                //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
                                                 packTextured: root.selectedMobPackSrc !== ""
+                                                    || (root.selectedMobSheared && root.selectedMobType === 3
+                                                        && root.sheepBodyPackSrc !== "")
                                             }
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
@@ -671,15 +705,15 @@ Item {
                                                 //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
                                                 //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
                                                 //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
-                                                // t663 ⑥ 剪毛羊变体：选「羊（剪毛后）」→ 去贴图改裸肤色 #d6b890
-                                                //   （同 Main.qml 裸羊 delegate；pack 贴图是毛层，裸羊不走它）。
-                                                // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：sheep_fur.png 头前/体侧
-                                                //   有透明镂空（毛层透出下层），Main.qml t633 ③ 已加 Mask + 0.5 但图鉴预览
-                                                //   漏带 → pack 开时图鉴羊透明区渲成黑块（= 用户「羊模型 wrong now」根因）。
-                                                //   仅 pack 命中时 Mask（程序 mob_sheep.png 全不透明，Mask 对它无影响）。
-                                                baseColorMap: root.selectedMobTexSource !== "" && !root.selectedMobSheared ? mobPrevTex : null
-                                                baseColor: root.selectedMobSheared && root.selectedMobType === 3 ? "#d6b890"
-                                                    : (root.selectedMobTexSource !== "" ? "#ffffff" : root.mobFallbackColor(root.selectedMobType))
+                                                // t663 ⑥ → t749 改：剪毛羊变体去**纯色**改贴图（pack 本体层 / 程序
+                                                //   mob_sheep_sheared 裸肤 + 残羊毛块），贴图在身 → baseColor 白（同 t597）。
+                                                baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
+                                                    : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
+                                                baseColor: (root.selectedMobSheared && root.selectedMobType === 3)
+                                                    || root.selectedMobTexSource !== "" ? "#ffffff"
+                                                    : root.mobFallbackColor(root.selectedMobType)
+                                                // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
+                                                //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
                                                 alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared
                                                            ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
                                                 alphaCutoff: 0.5

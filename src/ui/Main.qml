@@ -3745,6 +3745,11 @@ Window {
         Texture { id: mobPigPackTex;      source: resourcePack.active ? resourcePack.mobTextureSource(1) : ""; generateMipmaps: false }
         Texture { id: mobCowPackTex;      source: resourcePack.active ? resourcePack.mobTextureSource(2) : ""; generateMipmaps: false }
         Texture { id: mobSheepPackTex;    source: resourcePack.active ? resourcePack.mobTextureSource(3) : ""; generateMipmaps: false }
+        // t749 剪毛羊双态贴图（shearedAt=true 羊专用）：pack 命中本体层 sheep/sheep.png（裸身 + 真脸 box-UV 布局，
+        //   与 MobModel 羊 setMobTex 同布局 → packTextured 直采）；pack 关回退程序 mob_sheep_sheared.png（裸肤 +
+        //   残羊毛块全脸 UV，build_mob.py t749 新增）。替代旧纯色 #d6b890 实色（用户：剪毛羊应裸皮 + 残毛造型非纯色块）。
+        Texture { id: mobSheepShearedTex; source: "qrc:/textures/mob_sheep_sheared.png"; generateMipmaps: false }
+        Texture { id: sheepBodyPackTex;   source: resourcePack.active ? resourcePack.entitySource("sheep_body") : ""; generateMipmaps: false }
         Texture { id: mobShamblerPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(4) : ""; generateMipmaps: false }
         Texture { id: mobBonesPackTex;    source: resourcePack.active ? resourcePack.mobTextureSource(5) : ""; generateMipmaps: false }
         Texture { id: mobStalkerPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(6) : ""; generateMipmaps: false }
@@ -6751,12 +6756,11 @@ Window {
                         sourceComponent: Component {
                             Model {
                                 // t300 羊（mobType 3）裸态：剪羊毛后（shearedAt=true）的羊外观。复用 MobModel 几何（同
-                                //   毛茸态四肢 + 头 + 躯干），但去贴图改裸肤色 #d6b890（机制等价 MC 1.0 剪羊毛后羊裸露
-                                //   皮肤；t363 改肤色而非纯粉：贴近玩家手肤 + 略带残白羊毛，无 mob_sheep 毛茸贴图 → 直接
-                                //   baseColor 实色渲染，受 terrainLight 调制保昼夜明暗 + hurtFlash 红闪仍生效）。与上方毛茸态
-                                //   Model 互斥 visible（shearedAt 翻转 → 切换）。
-                                //   walkPhase / headPitch 同步绑定 → 裸羊照常行走 + 吃草低头动画。
-                                //   重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
+                                //   毛茸态四肢 + 头 + 躯干）。t749 改**贴图**渲染（旧纯色 #d6b890 实色被用户点「形状不对，
+                                //   应裸皮 + 残毛造型」）：pack 命中本体层 sheep/sheep.png（裸身 + 真脸）/ 程序生成
+                                //   mob_sheep_sheared.png（裸肤 + 残羊毛块，build_mob.py）。与上方毛茸态 Model 互斥
+                                //   visible（shearedAt 翻转 → 切换）。walkPhase / headPitch 同步绑定 → 裸羊照常行走 +
+                                //   吃草低头动画。重长毛（C++ tick 内吃草方块 → sheared=false）→ 上方毛茸 Model 显、本 Model 隐。
                                 visible: {
                                     const _r = entityManager.revision
                                     return _r >= 0 && entKind === EntityManager.Mob && entMobType === 3
@@ -6764,6 +6768,8 @@ Window {
                                 }
                                 geometry: MobModel {
                                     mobType: 3
+                                    // t749：pack 命中本体层是 box-UV 布局 → 开 T 字展开；程序残毛贴图全脸 UV（关）。
+                                    packTextured: sheepBodyPackTex.source.toString().length > 0
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                     headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                 }
@@ -6771,11 +6777,12 @@ Window {
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    // 受击红闪覆盖肤色（同毛茸态红闪语义）；否则肤色 × terrainLight 调昼夜明暗。
-                                    // t363 baseColor=肤色 #d6b890（玩家手肤 0.792/0.643/0.447=#caa472 略向白偏，留少量残白羊毛感，
-                                    //   非猪粉 #e8b8b8）：剪羊毛后裸露的是肤色调而非纯粉，贴近玩家手肤、带一丝残白。
-                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#d6b890") : "#000000" }
-                                    // 无 baseColorMap → PrincipaledMaterial 走纯 baseColor 实色路径（默认即无贴图）。
+                                    // t749 剪毛羊改贴图渲染（去旧纯色 #d6b890 实色）：贴图自带裸肤 + 残羊毛造型 →
+                                    //   baseColor 白让贴图原色透出（t597 铁律：暗 baseColor × 贴图 = 压黑）；红闪仍红
+                                    //   覆盖、terrainLight 乘昼夜明暗（同毛茸态语义）。
+                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                    // 双态：pack 本体层（裸身 + 真脸）/ 程序 mob_sheep_sheared（裸肤 + 残毛块）。
+                                    baseColorMap: sheepBodyPackTex.source.toString().length > 0 ? sheepBodyPackTex : mobSheepShearedTex
                                 }
                                 // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰；t633 ③ 同步
                                 //   眼位/尺寸 —— z=-0.35 凸出面外 + y=0.00 头面下半，恒显不 z-fight）。

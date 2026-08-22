@@ -164,7 +164,8 @@ public:
 
     // t717 实体贴图覆盖（t727 夜行者 / t728 燃烬者 / t730 鱿鱼 / t731 皮肤 / t732 矿车·书的 pack 映射
     //   前置）：kind 字符串 key（"nightwalker"/"nightwalker_eyes"/"emberling"/"squid"/"minecart"/
-    //   "enchant_book"/"skin_default"/"skin_alex"，entityKindMap 表）→ pack 启用且包内 entity 目录命中
+    //   "enchant_book"/"skin_default"/"skin_alex"/"sheep_body"（t749 剪毛羊本体层），entityKindMap 表）→
+    //   pack 启用且包内 entity 目录命中
     //   （子目录布局优先、扁平兜底，同 mobTextureSource 两级探测）时返 file:/// URL 供 QtQuick3D Texture
     //   加载；否则空串 → 调用方回退 qrc:/textures/entity_<kind>.png 程序自绘（tools/build_entities_pack.py；
     //   §9 改名：Enderman→Nightwalker 夜行者、Blaze→Emberling 燃烬者）。无映射 kind / active=false /
@@ -201,15 +202,18 @@ public:
     //   entity 子目录命名（pig/cow/sheep/chicken/zombie/skeleton/creeper/spider），是功能性元数据（红线 §9 可随
     //   代码提交）；贴图文件本身仅运行期读本地 gitignored pack，不 bake 进 qrc/VCS。active=false / 无 entity 目录 /
     //   无映射 / 文件缺 → ""。子目录缺时自动回退扁平 entity/<mob>.png（兼容旧 / HD 包布局）。
+    //   t749 羊特例：毛层命中时改返运行期合成贴图（fur 毛身 + 本体层头区真脸，落盘缓存）——单贴图几何的
+    //   box-UV 与毛层膨胀头盒布局不符 = 旧「3D 预览完全不像羊」根因（详见 cpp generateSheepWoolFaceFile）。
     Q_INVOKABLE QString mobTextureSource(int mobType) const;
 
-    // t633 图鉴生物列表 2D 头像图标：pack 启用且 mobType 有头部 box-UV 区（mobmodel.cpp 同源 texOffs/size 表）
-    //   时，加载 pack entity 贴图、裁「头正面」（MC +Z Front 面 = (u0+d, v0+d)-(u0+d+w, v0+d+h) 像素矩形）
+    // t633 图鉴生物列表 2D 头像图标：pack 启用且 mobType 有头部 box-UV 区（mobmodel.cpp 同源 texOffs/size 表，
+    //   t749 起含狼/豹猫/蠹虫的**头像专用显式源**——它们不进 mobEntityMap 以防 3D packTextured 误命中）时，
+    //   加载 pack entity 贴图、裁「头正面」（MC +Z Front 面 = (u0+d, v0+d)-(u0+d+w, v0+d+h) 像素矩形）
     //   放大到 64×64 透明底 PNG，落盘 AppLocalData/voxelsandbox_rp_mobhead_<mobType>.png（缓存；apply() 重建时
-    //   随图集重生成）并返回 file:/// 路径。无 pack / 无映射 / 裁剪解码失败 → 空串（调用方回退体色方块）。
+    //   随图集重生成）并返回 file:/// 路径。无 pack / 无映射 / 裁剪解码失败 → 空串（调用方回退程序贴图或体色块）。
     //   羊特例：主贴图是 sheep_fur.png（毛层，头前是纯白羊毛无脸）→ 头像改裁 sheep/sheep.png 本体层的头区
-    //   （有真脸）。雪傀儡头是南瓜方块（非 entity 贴图）/ 鱿鱼·狼·豹猫·银鱼无映射 → 空串回退。
-    //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
+    //   （有真脸）。pack 关时的程序贴图回退在调用方（ResourceBrowser mobFallbackTexture，对齐 mobTextureSource
+    //   的 pack/程序双态语义）。红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString mobHeadIconSource(int mobType) const;
 
     // 引擎图集瓦片尺寸（HD 图集 t668：16 → 64）。读 BlockRegistry::kAtlasTilePx **单一权威**（与 build_atlas.py

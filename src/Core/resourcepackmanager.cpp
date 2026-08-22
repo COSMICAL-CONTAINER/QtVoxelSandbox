@@ -16,6 +16,7 @@
 #include <QMutexLocker>
 #include <QPainter>
 #include <QStandardPaths>
+#include <QUrl>
 
 // 资源包解析 + 图集合成。详见 resourcepackmanager.h 的总体设计 / 红线（PLAN §9）。
 // 引擎瓦片尺寸（与 build_atlas.py TILE=16 + chunkgeometry UV 同源）。
@@ -33,9 +34,16 @@ struct MobHeadRegion {
     int u0, v0, w, h, d;
     int texW, texH;
     bool sheepBody; // true = 用 sheep/sheep.png（本体层）而非 mobEntityMap 主映射（毛层）
+    // t749 头像专用显式 pack 源（相对 entity/ 的路径；缺省 nullptr = 走 mobEntityMap 主映射）。
+    //   狼/豹猫/蠹虫**不进 mobEntityMap**——它们 MobModel 几何分支无 setMobTex box-UV 数据（全脸 UV 模型），
+    //   若 mobTextureSource 命中会让 delegate 把 packTextured 几何 UV 采到未设定位 → 3D 贴图错乱；
+    //   头像只读像素裁剪不涉几何 → 显式源只喂头像路径，3D 路径零改动（回归面最小）。
+    const char *explicitSrc;
 };
 const QList<MobHeadRegion> &mobHeadRegions();
 QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath);
+// t749 羊 3D 预览合成贴图：sheep_fur.png 毛身 + sheep.png 本体层头区（真脸）→ 落盘绝对路径（空 = 失败回退）。
+QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath);
 
 namespace {
 
@@ -108,6 +116,8 @@ struct BuiltState {
     // t633 图鉴生物头像缓存：mobType→落盘的头部裁剪图标 file:// 路径（mobHeadIconSource 首次裁剪落盘后记）。
     //   apply() 重建时清空（pack 切换 / 重解析 → 重裁）。随 atlasFile 同目录写（AppLocalDataLocation，已 mkpath）。
     QHash<int, QString> mobHeadIconFiles;
+    // t749 羊「毛身+真脸」合成贴图缓存（mobTextureSource(3) 首次合成落盘后记；apply() 重建时清空重合成）。
+    QString sheepWoolFaceFile;
     // t645 生成式生物蛋 item 图标缓存：spawnEggId（0x20F..0x216/0x22C/0x22E）→落盘的两层染色蛋图标
     //   file:// 路径。pack 无 pig_spawn_egg.png 等独立文件（demo 包实测 9 蛋全 miss）→ 生成式路径：
     //   item/spawn_egg.png（灰度蛋形 base）染 mob 主色 + item/spawn_egg_overlay.png（斑点叠层）染
@@ -981,6 +991,11 @@ const QList<EntityTexEntry> &entityKindMap()
         { "enchant_book",     "enchanting_table_book.png", "entity_enchant_book" },   // t732 附魔台悬浮书
         { "skin_default",     "steve.png",               "entity_skin_default" },     // t731 玩家默认皮肤
         { "skin_alex",        "alex.png",                "entity_skin_alex" },        // t731 皮肤变体
+        // t749 剪毛羊本体层（mobType 3 shearedAt）：pack 命中 sheep/sheep.png（裸身 + 真脸 box-UV 布局，
+        //   与 MobModel 羊 setMobTex 同布局 → packTextured 直采）；pack 关回退程序 mob_sheep_sheared.png
+        //   （裸肤 + 残羊毛块全脸 UV，build_mob.py t749 新增）。区别于 mobEntityMap 的 sheep_fur.png 毛层
+        //   （毛茸态用）——剪毛态要的是裸身观感，不与 3D 毛层路径共用映射。
+        { "sheep_body",       "sheep/sheep.png",         "mob_sheep_sheared" },
     };
     return kMap;
 }
@@ -1648,6 +1663,7 @@ void ensureBuiltLocked()
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
     s.skinPackFiles.clear(); // t731 reset pack 皮肤裁切缓存（pack 切换 / 重解析 → 重裁）
+    s.sheepWoolFaceFile.clear(); // t749 reset 羊合成贴图缓存（pack 切换 / 重解析 → 重合成）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -3033,7 +3049,8 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
 QString ResourcePackManager::mobTextureSource(int mobType) const
 {    QMutexLocker lock(&stateMutex());
     ensureBuiltLocked();
-    const BuiltState &s = state();
+    // t749 非 const：羊合成贴图缓存写入（sheepWoolFaceFile，同 armorLayerSource 的 leatherIconFiles 写法）。
+    BuiltState &s = state();
     if (!s.active || s.entityDir.isEmpty())
         return {};
     // 引擎 mob id → pack entity 子目录/文件名（mobEntityMap 单一权威）。无映射 → 空串（回退程序生成 / 纯色）。
@@ -3065,8 +3082,27 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
     //   优于无贴图——长毛观感降级但仍显 pack 质感，且剪毛态语义不变）。仅羊有此兜底（其余 mob 的映射
     //   文件名即唯一候选）；前缀判定随映射同生共死（羊移出映射则兜底自动失效）。
     QString hit = probe(relPath);
-    if (!hit.isEmpty())
+    if (!hit.isEmpty()) {
+        // t749 羊合成贴图（仅 mobType 3 且命中的是毛层主映射）：fur 毛身 + 本体层头区（真脸）→ 单贴图几何
+        //   两态兼顾（见 generateSheepWoolFaceFile 布局取证注释）。缓存命中 O(1)；miss 合成落盘一次。
+        //   本体层缺 / 合成失败 → 毛层原样返回（降级 = t593 现状，不劣化）。
+        if (mobType == 3) {
+            if (!s.sheepWoolFaceFile.isEmpty() && QFile::exists(s.sheepWoolFaceFile))
+                return QStringLiteral("file:///") + s.sheepWoolFaceFile;
+            const QString bodySub = entityDir.absoluteFilePath(QStringLiteral("sheep/sheep.png"));
+            const QString bodyFlat = entityDir.absoluteFilePath(QStringLiteral("sheep.png"));
+            const QString bodyPath = QFile::exists(bodySub) ? bodySub
+                                  : (QFile::exists(bodyFlat) ? bodyFlat : QString());
+            if (!bodyPath.isEmpty()) {
+                const QString out = generateSheepWoolFaceFile(QUrl(hit).toLocalFile(), bodyPath);
+                if (!out.isEmpty()) {
+                    s.sheepWoolFaceFile = out; // stateMutex 已持锁，安全
+                    return QStringLiteral("file:///") + out;
+                }
+            }
+        }
         return hit;
+    }
     if (relPath.startsWith(QStringLiteral("sheep/"))) {
         hit = probe(QStringLiteral("sheep/sheep.png"));
         if (!hit.isEmpty())
@@ -3094,9 +3130,32 @@ const QList<MobHeadRegion> &mobHeadRegions()
         /* 蜘蛛   */ {  7, 32,  4,  8,  8,  8,  64,  32, false },
         /* 鸡     */ {  8,  0,  0,  4,  6,  3,  64,  32, false },
         /* 铁傀儡 */ { 13,  0,  0,  8, 10,  8, 128, 128, false },
-        // 雪傀儡（12）：头是南瓜方块非 entity 贴图；鱿鱼（9）：t730 起 mobEntityMap 已映射（squid.png）但鱿鱼
-        //   软体无「头部盒」语义（mantle 无脸）→ 仍不进头像表（图鉴回退体色方块）；狼（10）/豹猫（11）/银鱼（14）：
-        //   mobEntityMap 无映射 → 不进表（回退体色方块）。
+        // ── t749 补齐七张空白头像（用户「鱿鱼/狼/豹猫/雪傀儡/蠹虫/夜行者/燃烬者头像空白」根因 = 本表缺条目，
+        //    mobHeadIconSource 返空串 → QML 回退体色块）。头区数据 = demo 包像素取证（同 t598 铁傀儡实测法：
+        //    枚举候选 box 的面矩形，取含五官特征的全不透明区），非 vanilla 源码值照抄（demo 包 HD 重绘有
+        //    微偏移，如夜行者头前仅 6 行不透明）。
+        /* 鱿鱼   */ {  9,  0,  0, 12, 16, 12,  64,  32, false, nullptr },
+        //   鱿鱼无「头部盒」——mantle 前面 (12,12)-(24,28) 带双眼（demo 包 rows 18-19 亮斑实测）当头像；
+        //   映射走 mobEntityMap t730 既有序（squid/squid.png 扁平）。
+        /* 狼     */ { 10,  0,  0,  6,  6,  4,  64,  32, false, "wolf/wolf.png" },
+        //   头盒 (0,0)6×6×4 → 前 (4,4)-(10,10)（demo 包 row6 双黑瞳 + row9 浅鼻吻实测）；显式源 = 不进
+        //   mobEntityMap（见 MobHeadRegion::explicitSrc 注释——狼几何全脸 UV 无 box-UV 数据）。
+        /* 豹猫   */ { 11,  1,  1,  5,  4,  4,  64,  32, false, "cat/ocelot.png" },
+        //   头盒 (1,1)5×4×4 → 前 (5,5)-(10,9)（row6 双黑点眼实测）；demo 包路径 entity/cat/ocelot.png（1.8+
+        //   猫科合并目录，非 ocelot/ 子目录）。
+        /* 雪傀儡 */ { 12,  0,  0,  8,  8,  8,  64,  64, false, nullptr },
+        //   旧注「头是南瓜方块非 entity 贴图」对 demo 包不成立——snow_golem.png 头盒 (0,0)8×8×8 前面
+        //   (8,8)-(16,16) 画有深色 derpy 脸（rows 13-14 竖排双眼实测）；映射走 mobEntityMap（snow_golem.png 扁平）。
+        /* 蠹虫   */ { 14,  0,  2,  8,  5,  2,  64,  32, false, "silverfish.png" },
+        //   蠹虫无标准头部盒（vanilla 多节虫模型碎盒）→ 取实证「头段」区前 (2,4)-(10,9)（甲壳 + 暗斑，
+        //   读作虫头）；显式源（同狼——mobEntityMap 不含 14，防 3D packTextured 误命中）。
+        /* 夜行者 */ { 16,  0,  0,  8,  6,  8,  64,  32, false, nullptr },
+        //   头盒 (0,0)8×8×8 但 demo 包头前仅 rows 8-13 不透明（底部 2 行空）→ h=6 取 (8,8)-(16,14)（row12
+        //   左右对称亮眼实测：x8-10 / x13-15）；映射走 mobEntityMap（enderman/enderman.png t727 既有序）。
+        /* 燃烬者 */ { 17,  0,  0,  8,  8,  8,  64,  32, false, nullptr },
+        //   头盒 (0,0)8×8×8 前 (8,8)-(16,16)（黄焰纹实测；demo 包 blaze.png 实为 64×32 base 非 vanilla 64×64，
+        //   texH 按**包内实底**取 32——scale 公式按 min(w/texW,h/texH) 裁剪不受模型侧 g_texH=64 影响）；
+        //   映射走 mobEntityMap（blaze/blaze.png t728 既有序）。
     };
     return kRegions;
 }
@@ -3114,6 +3173,18 @@ QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &enti
         const QString sub = entityDir.absoluteFilePath(QStringLiteral("sheep/sheep.png"));
         const QString flat = entityDir.absoluteFilePath(QStringLiteral("sheep.png"));
         srcPath = QFile::exists(sub) ? sub : (QFile::exists(flat) ? flat : QString());
+    } else if (region.explicitSrc) {
+        // t749 头像专用显式源（狼 wolf/wolf.png / 豹猫 cat/ocelot.png / 蠹虫 silverfish.png）：两级探测同
+        //   主映射（子目录布局优先、扁平文件名兜底）。只喂头像——mobTextureSource 不读它（3D 路径零改动）。
+        const QString rel = QString::fromLatin1(region.explicitSrc);
+        const QString sub = entityDir.absoluteFilePath(rel);
+        if (QFile::exists(sub)) {
+            srcPath = sub;
+        } else {
+            const QFileInfo fi(rel);
+            const QString flat = entityDir.absoluteFilePath(fi.fileName());
+            if (QFile::exists(flat)) srcPath = flat;
+        }
     } else {
         QString relPath;
         for (const auto &m : mobEntityMap()) {
@@ -3167,6 +3238,49 @@ QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &enti
     if (!icon.save(out, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
     return out;
+}
+
+// t749 羊「毛身 + 真脸」合成贴图生成（见文件顶 generateSheepWoolFaceFile 声明处设计注释；mobTextureSource(3)
+//   调用，stateMutex 已持锁——纯函数只读两源 PNG + 写落盘文件，缓存插入归 caller）。
+//   布局依据（demo 包 512×256 = 64×32 base ×8 像素取证）：fur 层与本体层的 body/legs 行（base rows 14-31 +
+//   body 顶面 rows 8-13 x≥28）布局逐区一致（毛盒与身盒同框同位）；唯头部区（base (0,0)-(28,14)）不同——
+//   fur 是**膨胀毛盒**（偏移 + 无脸），本体层头盒 (0,0)6×6×8 与 MobModel 羊 setMobTex 同布局（有脸）。
+//   单贴图 MobModel 只有一套 box-UV（本体布局）→ 直用 sheep_fur.png 时头六面全采偏移区 = 用户
+//   「3D 预览完全不像羊」根因。合成 = fur 整张（毛身白）+ 本体层头区覆写 → 长毛羊身 + 真脸，两态兼顾
+//   （t593「无毛粉肉身」与本次「毛层无脸」两轮诉求一次满足；机制等价 MC 本体+毛层双层模型，单层几何近似）。
+QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath)
+{
+    QImage fur(furPath), body(bodyPath);
+    if (fur.isNull() || body.isNull())
+        return {}; // 任一解码失败 → 回退（降级：调用方仍返毛层原样）
+    // 各文件自身 HD 倍率（两文件通常同倍；异倍包各算各的，头区裁剪按各自 base 坐标换算）。
+    const float furS = std::min(float(fur.width()) / 64.0f, float(fur.height()) / 32.0f);
+    const float bodyS = std::min(float(body.width()) / 64.0f, float(body.height()) / 32.0f);
+    if (furS <= 0.0f || bodyS <= 0.0f)
+        return {}; // 非 base 整数倍（异形包）→ 回退
+    QImage out = fur.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    // 本体层头区（base (0,0)-(28,14)：头 top/bottom + 侧面四连含脸）。
+    QImage headCrop = body.copy(0, 0, qRound(28 * bodyS), qRound(14 * bodyS));
+    if (headCrop.isNull())
+        return {};
+    if (std::abs(furS - bodyS) > 0.01f)
+        headCrop = headCrop.scaled(qRound(28 * furS), qRound(14 * furS),
+                                   Qt::IgnoreAspectRatio, Qt::FastTransformation);
+    QPainter p(&out);
+    // Source 模式连 alpha 一起覆写（SourceOver 会把本体层头区外的透明像素留成毛层底 → 残毛边）；
+    //   头区像素 = 本体层原值（含头区边缘的透明 → 干净截断）。
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.drawImage(0, 0, headCrop);
+    p.end();
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        return {}; // 无可写目录 → 回退（降级）
+    QDir().mkpath(dir);
+    const QString file = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_sheep_woolface.png"));
+    if (!out.save(file, "PNG"))
+        return {}; // 落盘失败 → 回退（降级）
+    return file;
 }
 
 // t633 图鉴生物头像裁剪（见头文件 mobHeadIconSource 注释）。首查缓存（pack 未重解析期间稳定）→ miss 走

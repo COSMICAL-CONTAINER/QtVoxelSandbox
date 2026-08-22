@@ -25,9 +25,10 @@
 图案采用固定位置 + 确定性散布（无随机源 → CI 可复现、与 build_atlas.py / build_tall_grass.py 同风格）。
 
 输出（覆盖写入 textures/）：
-  mob_pig.png / mob_cow.png / mob_sheep.png / mob_shambler.png / mob_chicken.png / mob_squid.png / mob_wolf.png /
+  mob_pig.png / mob_cow.png / mob_sheep.png / mob_sheep_sheared.png（t749 剪毛羊裸肤+残羊毛块）/ mob_shambler.png /
+  mob_chicken.png / mob_squid.png / mob_wolf.png /
   mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png \
-  mob_nightwalker.png / mob_nightwalker_eyes.png / mob_fireball.png
+  mob_nightwalker.png / mob_nightwalker_eyes.png / mob_fireball.png / entity_endereye.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -137,6 +138,46 @@ def make_sheep():
     ], deep)
 
     out = os.path.join(SRC, "mob_sheep.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_sheep_sheared():
+    """剪毛羊（t749）：裸肤底 + 残羊毛块（顶带 + 背斑 + 散毛）。
+
+    机制等价 MC 剪羊毛后的羊（裸露皮肤 + 头顶/背部残留羊毛），非照搬 MC 资产（§9 override (a) 原创程序自绘）。
+    每面铺同图（同 mob_sheep 全脸 UV 方案）→ 顶带在每面顶部读作「头顶残毛帽」，背斑读作「剪剩毛丛」。
+    肤色沿用旧纯色 #d6b890（昼夜 tint / 红闪观感连续）；毛色与 mob_sheep 奶白羊毛同系（长毛↔剪毛视觉同源）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xd6, 0xb8, 0x90, 255)   # 裸肤主色 #d6b890
+    fill(img, base)
+
+    # 肤面阴影斑（裸皮 mottle，拟皮肤褶皱/肤色不均）
+    skin_sh = (0xc2, 0xa2, 0x76, 255)  # 肤阴影 #c2a276
+    blot(img, [
+        (3, 5), (8, 5), (12, 5),
+        (2, 12), (7, 12), (12, 13), (4, 14), (9, 14),
+    ], skin_sh)
+
+    wool = (0xf5, 0xf0, 0xe8, 255)      # 残羊毛（同 mob_sheep 奶白羊毛）
+    wool_sh = (0xd0, 0xc8, 0xc0, 255)   # 毛丛阴影（同 mob_sheep 浅灰卷曲纹）
+
+    # 头顶残毛带（顶 3 行满幅 + 第 4 行锯齿下沿 → 每面顶部都读作毛帽）
+    blot(img, [(x, y) for y in range(3) for x in range(TS)], wool)
+    blot(img, [
+        (0, 3), (1, 3), (4, 3), (5, 3), (9, 3), (10, 3), (13, 3), (14, 3),
+    ], wool)
+
+    # 背部残毛斑（中央 4×8 毛丛 + 阴影洞 + 边缘散毛 → 「剪剩的一撮」观感）
+    blot(img, [(x, y) for y in (7, 8, 9, 10) for x in range(4, 12)], wool)
+    blot(img, [
+        (3, 8), (12, 9),            # 左右散毛边
+        (5, 11), (11, 6),           # 下沿/上沿散毛
+    ], wool)
+    blot(img, [(5, 8), (8, 10), (10, 7)], wool_sh)  # 毛丛内阴影（层次）
+
+    out = os.path.join(SRC, "mob_sheep_sheared.png")
     img.save(out)
     print("wrote", os.path.relpath(out, HERE), img.size)
 
@@ -647,6 +688,7 @@ def main():
     make_pig()
     make_cow()
     make_sheep()
+    make_sheep_sheared()
     make_shambler()
     make_chicken()
     make_squid()

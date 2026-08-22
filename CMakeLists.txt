@@ -461,6 +461,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/mob_pig.png                # t240 猪/牛/羊生物贴图（build_mob.py 程序生成原创像素图，§9a）
         textures/mob_cow.png                # 三种 passive mob 各一张「全脸」贴图，MobModel 几何每面铺同图（非 MC UV 拆皮）
         textures/mob_sheep.png
+        textures/mob_sheep_sheared.png     # t749 剪毛羊贴图（裸肤 #d6b890 底 + 头顶/背部残羊毛块；build_mob.py；图鉴剪毛变体 + 游戏内 shearedAt 羊共用）
         textures/mob_shambler.png           # t282 蹒跚者（Shambler；机制等价 MC 僵尸，§9 改名）人形不死亡灵贴图（build_mob.py）
         textures/mob_chicken.png            # t398 鸡（Chicken；机制等价 MC 鸡，§9 原创）小型鸟白羽 + 棕褐斑贴图（build_mob.py）
         textures/mob_squid.png              # t399 鱿鱼（Squid；机制等价 MC squid，§9 原创）水生软体深褐橘斑贴图（build_mob.py）
