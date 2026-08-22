@@ -129,9 +129,10 @@ public:
     // t304 箭（弓弹药）：材料段 0x21A。可堆叠 64；非方块（材料段）→ 右键不放置。弓右键蓄力松开射出箭实体
     //   （复用 t283 Arrow 实体 + EntityManager::spawnArrowPlayer）；命中 mob 伤害（蓄力越高伤害越高，1..6 HP）。
     //   MaterialIcon 自绘箭头 + 杆 + 箭羽图标。创造调色板可取用（同木棒 / 铁锭等材料）；生存由合成获得
-    //   （铁锭 + 木棒 + 线 → 4 箭，机制等价 MC 1.0 箭配方燧石+棒+羽毛的本地化替代——本工程无燧石 / 羽毛，
-    //   用铁锭代箭头、线代羽毛）。名称 / 图标全原创（§9 区隔）。
-    static constexpr int ArrowId      = 0x21A; // 箭：弓弹药；铁锭+木棒+线合成 4 件；弓射出（t304）
+    //   （燧石 + 木棒 + 羽毛 → 4 箭，机制等价 MC 1.0 箭配方。t304 时本工程无燧石 / 羽毛，曾以「铁锭+木棒+线」
+    //   本地化替代；t398 鸡掉羽毛 / t761 沙砾掉燧石后两原料均已入库，t802 审计改回 MC 正统原料）。名称 /
+    //   图标全原创（§9 区隔）。
+    static constexpr int ArrowId      = 0x21A; // 箭：弓弹药；燧石+木棒+羽毛合成 4 件；弓射出（t304；t802 改回 MC 原料）
     // t305 树苗物品：材料段 0x21B。**树叶衰减 / 玩家破叶掉落**（playercontroller dropLeafDrops：破叶概率掉树苗物品
     //   + 木棒，机制等价 MC 1.0 破叶 5% 掉树苗）。可堆叠 64；非方块（材料段）→ 走 useBlock 种植（同种子模式：
     //   持树苗物品右键草地 / 泥土 → 在其上方一格种下 Sapling 方块，WorldClock tick 推进成长长成完整橡树）。
@@ -329,11 +330,12 @@ public:
     //   暗渊珠 + 燃烬粉 → 暗渊之眼（shapeless 配方，见 recipe.cpp）。
     static constexpr int BlazePowderId   = 0x244; // 燃烬粉：燃烬棒冶炼产物；与暗渊珠合成暗渊之眼（t726）
     // t726 燃烬棒（blaze_rod：材料段 0x245）：机制等价 MC 1.0 blaze rod —— 怒焰人（Blaze→Emberling）
-    //   死亡掉落（未来实体任务）；在熔炉冶炼成燃烬粉（BlazePowderId，机制等价 MC「blaze rod → blaze
-    //   powder」熔炉配方）。可堆叠 64（走材料段默认）；非方块（材料段）→ 右键不放置（可作临时火把燃料）。
+    //   死亡掉落（未来实体任务）；合成分解为燃烬粉（1 棒 → 2 粉，无序，t802 补——MC 1.0 正道是**合成**
+    //   分解非熔炉；t726 曾只接熔炉冶炼路径致「棒不能分解成粉」的用户报障，现双途径并存同产物）。
+    //   可堆叠 64（走材料段默认）；非方块（材料段）→ 右键不放置（可作临时火把燃料）。
     //   图标：MaterialIcon 自绘燃烬棒（橙黄棒身 + 端节，drawBlazeRod，§9 原创）；pack 映射 0x245 →
-    //   blaze_rod.png。暗渊珠 + 燃烬粉 → 暗渊之眼：燃烬粉由此棒冶炼得，构成「夜行者掉落 → 珠 / 组眼」链。
-    static constexpr int BlazeRodId      = 0x245; // 燃烬棒：怒焰人死亡掉落；熔炉冶炼为燃烬粉（t726）
+    //   blaze_rod.png。暗渊珠 + 燃烬粉 → 暗渊之眼：燃烬粉由此棒分解得，构成「夜行者掉落 → 珠 / 组眼」链。
+    static constexpr int BlazeRodId      = 0x245; // 燃烬棒：怒焰人死亡掉落；合成分解 / 熔炉冶炼为燃烬粉（t726；t802 补合成）
     // t726/t727 生物蛋（夜行者，SpawnEggNightwalkerId=0x246）：机制等价 MC 1.0 enderman spawn egg。
     //   创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobNightwalker（t727 夜行者实体）。
     //   可堆叠 64（走材料段默认，同其他生物蛋）。图标：MaterialIcon 自绘蛋形 + 夜行者黑紫配色斑点
@@ -395,11 +397,17 @@ public:
     // 在给定输入网格中找匹配配方。
     //   grid     = 行优先 id 数组（0=空格 / >0=物品 id）；
     //   gridSize = 输入合成台尺寸（2 = 背包 2×2 / 3 = 工作台 3×3）。
-    // 返回首个匹配的 Recipe*（无匹配 → nullptr）。匹配规则：
-    //   - 仅尝试 gridSize <= 输入尺寸的配方（2×2 配方在 3×3 输入里也能合；3×3 配方在 2×2 输入里不能）。
-    //   - shapeless：输入非空格的多重集 == 配方 pattern 非空格的多重集（与位置无关）。
-    //   - shaped：输入收缩到最小非空包围盒、配方 pattern（在自身 gridSize 上）收缩到最小非空包围盒；
-    //     二者包围盒尺寸相同且逐格 id 相同 → 匹配（MC「最小包围盒」规则，允许图案在网格内任意平移）。
+    // 返回首个匹配的 Recipe*（无匹配 → nullptr）。匹配规则（t802 起两阶段）：
+    //   - 第一轮**精确匹配**：仅尝试 gridSize <= 输入尺寸的配方（2×2 配方在 3×3 输入里也能合；3×3 配方
+    //     在 2×2 输入里不能）。
+    //     - shapeless：输入非空格的多重集 == 配方 pattern 非空格的多重集（与位置无关）。
+    //     - shaped：输入收缩到最小非空包围盒、配方 pattern（在自身 gridSize 上）收缩到最小非空包围盒；
+    //       二者包围盒尺寸相同且逐格 id 相同 → 匹配（MC「最小包围盒」规则，允许图案在网格内任意平移）。
+    //   - 第二轮**板材族等价回退**（机制等价 MC 1.0「木板是单一物品 + 木种 metadata，配方通配任意变种」；
+    //     本工程云杉木板 SprucePlanks 是独立 id → 无独立云杉产物的木制品链靠本轮回退命中，如木棒 / 工作
+    //     台 / 木剑等五件套 / 木碗 / 床 / 书架）：精确无果且输入含族内变体（等价表见 recipe.cpp）时，
+    //     把变体规范化为基材（SprucePlanks→Planks）重试精确匹配。云杉专属配方（云杉台阶 / 栅栏 / 门 / 船）
+    //     在第一轮优先命中，不会被橡木配方截胡。
     // 空输入（全 0）→ 恒 nullptr（无配方匹配空网格）。
     static const Recipe *match(const int *grid, int gridSize);
 
@@ -407,6 +415,13 @@ public:
     // 光标空 OR（同 id 且 heldCount + outputCount <= maxStack）→ true。maxStack 走 Hotbar::maxStackSize
     // （方块 64 / 工具 1）；此处由 caller 传 maxStack 解耦（本类不依赖 Hotbar）。
     static bool canTake(const Recipe &r, int heldId, int heldCount, int maxStack);
+
+    // t802 全配方审计 / 回归探针：配方总数 + 按索引只读访问（tools/redstone_matrix_test 遍历全部配方，
+    //   逐条断言「自身 pattern 在自身 gridSize 上经 match() 返回自身」——既防「加了配方但被更早配方遮蔽
+    //   （永不可合）」，也防未来匹配算法改动静默丢配方；count 下限断言防整段意外删除）。UI / 游戏逻辑
+    //   不消费本接口（合成入口仍唯 match()）。
+    static int recipeCount();
+    static const Recipe *recipeAt(int index); // 越界 → nullptr
 
     // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 的**对齐映射**（资源包加载前置；与 docs/item-ids.md 材料 /
     //   mob 掉落 / 生物蛋段「MC 1.0.0」列一致）。覆盖整个材料段 [MaterialIdBase, EnchantedBookId] = 0x200..0x227

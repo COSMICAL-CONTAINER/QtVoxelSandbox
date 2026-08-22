@@ -512,7 +512,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RottenFleshId),   // 腐肉：杀蹒跩者掉落（暗红腐块 + 绿斑霉点）
         int(RecipeRegistry::StringId),        // 线：杀蜘蛛掉落（浅色缠绕线团）
         // t304 箭（弓弹药）：材料段 0x21A，可堆叠 64。创造直接取用便于测试弓（仍需背包有箭才射得出）。
-        int(RecipeRegistry::ArrowId),         // 箭：弓弹药；铁锭+木棒+线合成 4 件（t304）
+        int(RecipeRegistry::ArrowId),         // 箭：弓弹药；燧石+木棒+羽毛合成 4 件（t304；t802 改回 MC 原料）
         // t305 树苗物品：材料段 0x21B，可堆叠 64。破叶概率掉落（生存）/ 创造直接取用。右键草地 / 泥土种植 →
         //   Sapling 方块（WorldClock tick 推进成长长成完整橡树）。机制等价 MC 1.0 橡树树苗；MaterialIcon 自绘图标。
         int(RecipeRegistry::SaplingItemId),   // 树苗物品：破叶掉落；右键草地/泥土种植（t305）

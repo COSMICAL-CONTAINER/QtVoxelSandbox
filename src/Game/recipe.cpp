@@ -421,8 +421,10 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Cobble), kStickId,                  int(BlockRegistry::Cobble),
         0, 0, 0 },
       int(BlockRegistry::CobbleFence), 3, 1, "cobble_fence" },
-    //   cobble_pressure_plate：2 圆石横排 → 1 圆石压力板（有序 2×2 背包栏；最小包围盒 2×1）。机制等价 MC 石压力板配方。
-    { int(RecipeRegistry::Table3x3), false,
+    //   cobble_pressure_plate：2 圆石横排 → 1 圆石压力板（有序 2×2 背包栏；最小包围盒 2×1）。机制等价 MC 石
+    //     压力板配方。t802 审计勘误：t627 注释声称「本族按 MC/木板口径统一 Inventory2x2」但本条代码漏改仍
+    //     Table3x3 → 背包 2×2 栏放 2 圆石不匹配（MC 里 2 材料压力板本就背包栏可合），改回 Inventory2x2。
+    { int(RecipeRegistry::Inventory2x2), false,
       { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), 0,
         0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::CobblePressurePlate), 1, 1, "cobble_pressure_plate" },
@@ -477,14 +479,16 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0,                        kStickId,                  RecipeRegistry::StringId,
         kStickId,                0,                          RecipeRegistry::StringId },
       int(ToolRegistry::Bow), 1, 1, "bow" },
-    // t304 箭：铁锭（顶）+ 木棒（中）+ 线（底）纵列 → 4 箭（有序 3×3，仅工作台）。机制等价 MC 1.0 箭配方
-    //   （燧石 + 棒 + 羽毛纵列 → 4 箭）的本地化替代——本工程无燧石 / 羽毛，用铁锭代箭头、线代羽毛。
-    //   最小包围盒 1×3（纵列），可在工作台任意一列竖放（shapedEqual 最小包围盒对齐 → 横放亦匹配）。
+    // t304/t802 箭：燧石（顶）+ 木棒（中）+ 羽毛（底）纵列 → 4 箭（有序 3×3，仅工作台）。机制等价 MC 1.0
+    //   箭配方（flint + stick + feather 纵列 → 4）。t304 时本工程无燧石 / 羽毛 → 曾以「铁锭+木棒+线」本地化
+    //   替代；t398（杀鸡掉羽毛）/ t761（挖沙砾掉燧石）后两原料均已入库，t802 全表审计改回 MC 正统原料
+    //   （燧石箭头比铁锭廉价——MC 箭本就是可早期量产的弹药）。最小包围盒 1×3（纵列），可在工作台任意一列
+    //   竖放（shapedEqual 最小包围盒对齐）。多重集 {Flint:1, Stick:1, Feather:1} 唯一 → 不冲突。
     //   产物 ArrowId（材料段 0x21A，maxStack=64；弓弹药）。
     { int(RecipeRegistry::Table3x3), false,
-      { RecipeRegistry::IronIngotId, 0, 0,
-        kStickId,                    0, 0,
-        RecipeRegistry::StringId,    0, 0 },
+      { RecipeRegistry::FlintId,    0, 0,
+        kStickId,                   0, 0,
+        RecipeRegistry::FeatherId,  0, 0 },
       RecipeRegistry::ArrowId, 4, 1, "arrow" },
     // t300 剪刀：2 铁锭对角（左下 + 右上）→ 1 剪刀（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0 剪刀配方
     //   （2 铁锭对角线）。最小包围盒 2×2（满），shapedEqual 在 2×2 输入内直接匹配；在 3×3 工作台则包围盒对齐后
@@ -860,9 +864,12 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     //   机制等价 MC 1.0 mushroom_stew 配方（bowl + red mushroom + brown mushroom 任意摆放）。3 原料各 1 件、
     //   多重集 {Bowl:1, Mushroom:1, BrownMushroom:1} 唯一 → shapeless 不与既有配方冲突。产物 = MushroomStewId
     //   （材料段，maxStack=1 不可堆叠；右键食 +10 饥饿，食完返空碗 —— finishEating 特判）。
+    //   t802 审计勘误：原 pattern 第三原料误放 [2]（3×3 顶行右格，越 2×2 子窗）——shapeless 只读多重集、
+    //   实际可合不受影响，但违反表头「2×2 配方仅用 [0..3] 子矩阵」约定（全表自匹配探针按约定抽取才可过），
+    //   挪到 [3]（2×2 左下格）对齐约定，零行为变化。
     { int(RecipeRegistry::Inventory2x2), true,
-      { RecipeRegistry::BowlId, int(BlockRegistry::Mushroom), int(BlockRegistry::BrownMushroom),
-        0,                       0,                            0,
+      { RecipeRegistry::BowlId, int(BlockRegistry::Mushroom), 0,
+        int(BlockRegistry::BrownMushroom), 0,                   0,
         0,                       0,                            0 },
       RecipeRegistry::MushroomStewId, 1, 1, "mushroom_stew" },
     // t726 暗渊之眼（ender_eye）：暗渊珠 + 燃烬粉 → 1 暗渊之眼（无序 2×2，背包栏 / 工作台均可）。
@@ -961,17 +968,87 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { int(BlockRegistry::Stone), 0, 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::StoneButton), 1, 1, "stone_button" },
-    // t724/t761 打火石配方：铁锭上 + 燧石下纵列 → 1 打火石（有序 2×2；最小包围盒 1×2）。
-    //   t724 时本工程无燧石材料（无砾石层 → 燧石无来源）→ 曾以「圆石+铁锭」占位本地化；t761 建沙砾方块
-    //   + 燧石物品（FlintId，挖沙砾概率掉落）后**改回正统配方**：铁锭 + 燧石（机制等价 MC 1.0 flint and
-    //   steel）。MC 1.0 原版是无序配方，本工程配方表统一走 2×2 网格最小包围盒（无独立 shapeless-2 形态
-    //   先例冲突）→ 取纵列形态（铁上燧下），包围盒内容 {IronIngot,Flint} 与杠杆（{Cobble,Stick}）/ t724
-    //   旧占位（{IronIngot,Cobble}）均不同 → shaped 逐格比对区分（不冲突）。打火石是右键点火工具：命中面
-    //   外空气格生 Fire 方块，耐久 64。
+    // ── t802 全表审计补缺（用户报「检查所有合成物品的问题」→ 逐族对照 MC 1.0：下列方块既存但配方表漏
+    //    注册，生存不可合成 = 族内断裂；形状照搬 MC，多重集唯一性逐条核过 → 与既有配方互不冲突）──
+    // chest：8 木板围圈（中空）→ 1 箱子（有序 3×3，仅工作台）。机制等价 MC 1.0 chest（8 planks 环，同熔炉
+    //   布局换木板）。Chest=22 方块 + 箱子 UI / 存储链（t22x）早已完整，唯配方漏注册——「箱子只能从地牢
+    //   捡、不能自己合」与 MC 相悖。最小包围盒 3×3（中心空），多重集 {Planks:8} 唯一（活板门 {板:6} 包围
+    //   盒 3×2）→ 不冲突；经 t802 板材族等价回退，8 云杉木板围圈同样合成。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), 0,                         int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks) },
+      int(BlockRegistry::Chest), 1, 1, "chest" },
+    // ladder：7 木棒 H 形（棒-空-棒 / 棒-棒-棒 / 棒-空-棒）→ 3 梯子（有序 3×3，仅工作台）。机制等价
+    //   MC 1.0 ladder（7 sticks → 3）。Ladder=62 方块既存（攀爬机制完整）但配方漏注册。多重集 {Stick:7}
+    //   唯一（画作 {棒:8,毛:1} 均异）→ 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { kStickId, 0,        kStickId,
+        kStickId, kStickId, kStickId,
+        kStickId, 0,        kStickId },
+      int(BlockRegistry::Ladder), 3, 1, "ladder" },
+    // sandstone：4 沙子 2×2 方阵 → 1 砂岩（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0 sandstone
+    //   （4 sand → 1）。Sandstone=41 既存（沙漠 / 砂岩层 worldgen）但配方漏注册——生存只能挖不能合。
+    //   多重集 {Sand:4} 唯一（TNT 为 {火药:5,沙:4}）→ 不冲突。
     { int(RecipeRegistry::Inventory2x2), false,
-      { RecipeRegistry::IronIngotId, 0, 0,
-        RecipeRegistry::FlintId,     0, 0,
+      { int(BlockRegistry::Sand), int(BlockRegistry::Sand), 0,
+        int(BlockRegistry::Sand), int(BlockRegistry::Sand), 0,
         0, 0, 0 },
+      int(BlockRegistry::Sandstone), 1, 1, "sandstone" },
+    // cut_sandstone：4 砂岩 2×2 方阵 → 4 切制砂岩（有序 2×2）。机制等价 MC cut sandstone（4 sandstone →
+    //   4；MC 1.2.4+ 内容，本工程取同语义补砂岩族）。多重集 {Sandstone:4} 唯一 → 不冲突。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone), 0,
+        int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone), 0,
+        0, 0, 0 },
+      int(BlockRegistry::CutSandstone), 4, 1, "cut_sandstone" },
+    // stone_brick：4 石头 2×2 方阵 → 4 石砖（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0 stone
+    //   brick（4 stone → 4）。石头经熔炉烧圆石产出（smelting）→ 生存链闭环。石砖三件套（砖 / 台阶 / 楼梯）
+    //   方块既存但配方全漏——本段补齐成族。多重集 {Stone:4} 唯一（石按钮 {石:1} / 石压力板 {石:2}）→ 不冲突。
+    { int(RecipeRegistry::Inventory2x2), false,
+      { int(BlockRegistry::Stone), int(BlockRegistry::Stone), 0,
+        int(BlockRegistry::Stone), int(BlockRegistry::Stone), 0,
+        0, 0, 0 },
+      int(BlockRegistry::StoneBrick), 4, 1, "stone_brick" },
+    // stone_brick_slab：3 石砖横排 → 6 石砖台阶（有序 3×3，仅工作台；最小包围盒 3×1）。复用木板 / 圆石
+    //   台阶配方形状。多重集 {StoneBrick:3} 唯一 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick),
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::StoneBrickSlab), 6, 1, "stone_brick_slab" },
+    // stone_brick_stairs：6 石砖阶梯（顶一 / 中两 / 底三）→ 4 石砖楼梯（有序 3×3，仅工作台）。复用圆石
+    //   楼梯配方形状。多重集 {StoneBrick:6} 唯一 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::StoneBrick), 0, 0,
+        int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick), 0,
+        int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick) },
+      int(BlockRegistry::StoneBrickStairs), 4, 1, "stone_brick_stairs" },
+    // dispenser：7 圆石 + 中心 1 弓 + 底中 1 红石 → 1 发射器（有序 3×3，仅工作台）。机制等价 MC 1.0
+    //   dispenser（7 cobble + bow + redstone；顶行圆石 / 中行 圆-弓-圆 / 底行 圆-红石-圆）。审计发现
+    //   机关族不对称：投掷器（t626）可合成而发射器漏注册。弓为工具段物品（可入合成格，MC 语义发射器
+    //   含弓、合成时消耗）。多重集 {Cobble:7, Bow:1, Redstone:1} 唯一 → 与熔炉 {石:8} / 投掷器 {石:7 缺
+    //   [1][4] 无副料} 互不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), int(ToolRegistry::Bow),     int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble), RecipeRegistry::RedstoneId, int(BlockRegistry::Cobble) },
+      int(BlockRegistry::Dispenser), 1, 1, "dispenser" },
+    // t802 燃烬粉分解：1 燃烬棒 → 2 燃烬粉（无序 2×2 / 3×3，单原料任意格）。机制等价 MC 1.0 blaze rod →
+    //   2 blaze powder（MC 正道是**合成**分解，1.0 无熔炉烧棒配方；t726 只接了熔炉路径 → 用户报「燃烬棒
+    //   不能分解成燃烬粉」）。熔炉路径并存保留（同产物双途径，机制等价 + 本工程既有扩展，不冲突）。
+    //   多重集 {BlazeRod:1} 唯一 → 不冲突。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::BlazeRodId, 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::BlazePowderId, 2, 1, "blaze_powder" },
+    // t724/t761/t802 打火石：1 铁锭 + 1 燧石 → 1 打火石（无序 2×2，背包栏 / 工作台均可）。
+    //   t724 时本工程无燧石（无砾石层）→ 曾以「圆石+铁锭」占位；t761 建沙砾 + 燧石后改回正统原料；
+    //   t802 勘误形状：t761 误写成有序纵列（铁上燧下）——MC 1.0 原版是**无序**配方（两原料任意摆放），
+    //   有序形态下玩家按 MC 习惯横摆 / 斜摆全不匹配（用户报「打火石合成不了」根因；纵列摆法本可合 =
+    //   部分成立，但形状判定与 MC 相悖）。多重集 {IronIngot:1, Flint:1} 唯一（杠杆 {圆石,棒} / 红石火把
+    //   {棒,红石} 均异）→ 无序不与既有配方冲突。打火石是右键点火工具：命中面外空气格生 Fire 方块，耐久 64。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::FlintId, 0,
+        0, 0, 0, 0, 0, 0 },
       int(ToolRegistry::FlintAndSteel), 1, 1, "flint_and_steel" },
 };
 
@@ -1099,6 +1176,41 @@ bool shapedEqual(const int *input, int inputN, const int *pattern)
     }
     return true;
 }
+
+// ── t802 板材族等价表（变体 id → 基材 id）──
+// 机制等价 MC 1.0「木板是单一物品 + 木种 metadata 变种，配方通配任意变种」（items id 5 通配 data）。
+// 本工程把云杉木板拆成独立方块 id（SprucePlanks=86，t466）→ 木制品链里**无独立云杉产物**的配方
+// （木棒 / 工作台 / 木剑等五件套 / 木碗 / 床 / 书架 / 木楼梯……原料写的都是 Planks）精确匹配永远认不了
+// 云杉木板——用户报「云杉原木→云杉木板→木剑等木制品链丢失」根因。修法 = 匹配器两阶段（见 match()）：
+// 精确优先（云杉专属配方 spruce_slab/fence/door/boat 不被橡木配方截胡），无果才把输入里的族内变体规范
+// 化为基材重试（语义即 MC 通配：云杉板合出与橡木板相同的「木」制品——MC 1.0 木制品本就单一 id 不分
+// 木种）。未来加新木种（如桦木）只在此表补一行，全部木制品配方自动获得通配能力（PLAN §2：机制收敛
+// 在匹配器单一权威，不在配方表复制 30+ 条平行变体——平行复制必带形状漂移风险）。
+constexpr struct { int variant; int base; } kIngredientEquivalents[] = {
+    { int(BlockRegistry::SprucePlanks), int(BlockRegistry::Planks) }, // 云杉木板 ≡ 木板（任意木板语义）
+};
+
+// 输入原料 id 的族内规范化：命中等价表 → 基材 id；否则原样返回。
+int normalizeIngredient(int id)
+{
+    for (const auto &eq : kIngredientEquivalents)
+        if (eq.variant == id) return eq.base;
+    return id;
+}
+
+// 单轮精确匹配（原 match 主体；空网格已由调用方排除）。返回首个命中配方或 nullptr。
+const RecipeRegistry::Recipe *matchExact(const int *grid, int gridSize)
+{
+    for (const RecipeRegistry::Recipe &r : kRecipes) {
+        if (r.gridSize > gridSize) continue; // 3×3 配方不在 2×2 输入里合
+        if (r.shapeless) {
+            if (shapelessEqual(grid, gridSize, r.pattern)) return &r;
+        } else {
+            if (shapedEqual(grid, gridSize, r.pattern)) return &r;
+        }
+    }
+    return nullptr;
+}
 } // namespace
 
 const RecipeRegistry::Recipe *RecipeRegistry::match(const int *grid, int gridSize)
@@ -1108,15 +1220,21 @@ const RecipeRegistry::Recipe *RecipeRegistry::match(const int *grid, int gridSiz
     for (int i = 0; i < gridSize * gridSize; ++i) if (grid[i] != 0) { any = true; break; }
     if (!any) return nullptr; // 空网格不匹配任何配方
 
-    for (const Recipe &r : kRecipes) {
-        if (r.gridSize > gridSize) continue; // 3×3 配方不在 2×2 输入里合
-        if (r.shapeless) {
-            if (shapelessEqual(grid, gridSize, r.pattern)) return &r;
-        } else {
-            if (shapedEqual(grid, gridSize, r.pattern)) return &r;
-        }
+    // 第一轮：精确匹配（既有行为零回归——云杉专属配方优先命中，不被等价回退截胡）。
+    if (const Recipe *r = matchExact(grid, gridSize))
+        return r;
+
+    // 第二轮（t802）：板材族等价回退 —— 输入含族内变体（如云杉木板）且精确无果时，规范化为基材重试
+    //   （机制等价 MC 1.0「任意木板」通配；云杉板合出通用木制品）。输入不含任何变体 → 规范化后不变，
+    //   短路返回 nullptr（不改变任何既有「无匹配」结果）。
+    int normalized[9] = { 0 };
+    bool changed = false;
+    for (int i = 0; i < gridSize * gridSize; ++i) {
+        normalized[i] = normalizeIngredient(grid[i]);
+        if (normalized[i] != grid[i]) changed = true;
     }
-    return nullptr;
+    if (!changed) return nullptr;
+    return matchExact(normalized, gridSize);
 }
 
 bool RecipeRegistry::canTake(const Recipe &r, int heldId, int heldCount, int maxStack)
@@ -1134,4 +1252,17 @@ int RecipeRegistry::mcMaterialId(int engineMaterialId)
     const int idx = engineMaterialId - MaterialIdBase;
     if (idx < 0 || idx >= kMcMaterialIdCount) return -1;
     return kMcMaterialId[idx];
+}
+
+// t802 全配方审计 / 回归探针（见 recipe.h 声明注释）：配方总数 + 按索引只读访问。sizeof 商式免引
+//   <iterator>（std::size）；表为 constexpr 数组，编译期长度定死。
+int RecipeRegistry::recipeCount()
+{
+    return int(sizeof(kRecipes) / sizeof(kRecipes[0]));
+}
+
+const RecipeRegistry::Recipe *RecipeRegistry::recipeAt(int index)
+{
+    if (index < 0 || index >= recipeCount()) return nullptr;
+    return &kRecipes[index];
 }

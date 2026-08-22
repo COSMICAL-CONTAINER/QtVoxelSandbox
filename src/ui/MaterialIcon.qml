@@ -1787,7 +1787,7 @@ Item {
             case 0x217: drawBone();           break // t299 骨头（杀骸骨掉落）
             case 0x218: drawRottenFlesh();    break // t299 腐肉（杀蹒跚者掉落）
             case 0x219: drawString();         break // t299 线（杀蜘蛛掉落）
-            case 0x21A: drawArrow();          break // t304 箭（弓弹药；铁锭+木棒+线合成 4 件）
+            case 0x21A: drawArrow();          break // t304 箭（弓弹药；燧石+木棒+羽毛合成 4 件；t802 改回 MC 原料）
             case 0x21B: drawSapling();        break // t305 树苗物品（破叶掉落；种植 → 树）
             case 0x221: drawCookedPorkchop(); break // t344 熟猪排（猪燃烧致死掉落）
             case 0x222: drawCookedBeef();     break // t344 熟牛肉（牛燃烧致死掉落）
