@@ -75,18 +75,38 @@ Item {
         { mobType: 10, name: "狼" }, { mobType: 11, name: "豹猫" },
         { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }, { mobType: 14, name: "蠹虫" },
         { mobType: 16, name: "夜行者" }, // t727 末影人→夜行者（§9 改名；生物图鉴条目 + 生物蛋 0x246 映射）
-        { mobType: 17, name: "燃烬者" }, // t728 烈焰人→燃烬者（§9 改名；生物图鉴条目 + 生物蛋 0x247 映射）
-        // t663 ⑥ 剪毛变体条目（同 mobType 异外观）：选中 → 右侧预览显对应剪后形态（shearedAt=true 的游戏内
-        //   外观镜像——羊 = t749 贴图裸肤 + 残羊毛（pack 本体层 / 程序 mob_sheep_sheared）、雪傀儡 = 纯雪头
-        //   （无南瓜））。「所有做好的生物形态都在图鉴里」。
-        { mobType: 3, name: "羊（剪毛后）", sheared: true },
-        { mobType: 12, name: "雪傀儡（剪头后）", sheared: true }
+        { mobType: 17, name: "燃烬者" } // t728 烈焰人→燃烬者（§9 改名；生物图鉴条目 + 生物蛋 0x247 映射）
+        // t751 条目合并：t663 ⑥ 曾把剪毛变体拆成独立条目（羊（剪毛后）/雪傀儡（剪头后）——同 mobType 双条
+        //   仅靠名字区分）。现改为**每生物单条**+右侧底部变体切换按钮（见预览区下方 variantPanel）：
+        //   羊 = 剪毛/未剪 toggle + 毛色 swatch（仅羊有颜色变体）、雪傀儡 = 戴头/剪头 toggle。
+        //   变体态存组件级属性（sheepSheared / snowGolemSheared / sheepWoolIndex），切换即时刷新预览。
     ]
     // 生物段选中（mobType；-1 = 未选）。与物品选中互斥（点物品格清空、点生物格不改 selectedId）。
-    //   t663 ⑥：selectedMobName 伴选（剪毛变体条目同 mobType 3/12 → 仅 mobType 不可区分；名字作
-    //   sheared 判据，selectedMobSheared 派生供预览切换裸羊 / 纯雪头形态）。
+    //   t751：剪毛变体条目已合并（每生物单条），selectedMobName 仅作显示名伴选（不再承担 sheared 判据——
+    //   变体态改由下方组件级属性承载，底部变体面板切换）。
     property int selectedMobFromSection: -1
     property string selectedMobName: ""
+    // ── t751 变体状态（组件级；底部变体面板读写，预览绑定消费 → 切换即时刷新）──
+    // 羊剪毛态（false=毛茸羊毛形态 / true=裸肤残毛形态；镜像游戏内 shearedAt 双态）。
+    property bool sheepSheared: false
+    // 雪傀儡剪头态（false=戴南瓜头 / true=纯雪头 + 刻面五官；镜像游戏内 snowGolemShearedAt 双态）。
+    property bool snowGolemSheared: false
+    // 羊毛色索引（0=白色不着色；1..15=染色 tint）。调色板与游戏内羊毛方块 16 色**同源**
+    //   （tools/build_wool.py WOOL_COLORS，白色=默认羊毛色 → 预览零 tint）。诚实边界：游戏内**没有**
+    //   染色羊机制（EntityManager 羊实体无毛色字段），图鉴侧做**预览着色**（贴图 tint 乘色），
+    //   游戏内羊毛染色留待后续（下方毛色行注明）。
+    property int sheepWoolIndex: 0
+    readonly property var woolPalette: [
+        { name: "白色", tint: "#ffffff" }, // 白=默认毛色，不着色（乘白恒等）
+        { name: "橙色", tint: "#de781e" }, { name: "品红", tint: "#b94ba5" },
+        { name: "淡蓝", tint: "#4696d2" }, { name: "黄色", tint: "#d2b428" },
+        { name: "柠绿", tint: "#5faf2d" }, { name: "粉红", tint: "#e191af" },
+        { name: "灰色", tint: "#464650" }, { name: "淡灰", tint: "#9b9ba0" },
+        { name: "青色", tint: "#418791" }, { name: "紫色", tint: "#823ca5" },
+        { name: "蓝色", tint: "#3746a5" }, { name: "棕色", tint: "#734b2d" },
+        { name: "绿色", tint: "#468237" }, { name: "红色", tint: "#962828" },
+        { name: "黑色", tint: "#1e1e26" }
+    ]
     // 生物蛋材料 id → mobType（与 PlayerController::placeBlock 生物蛋分流同源；entitymanager.h MobType 同值）。
     //   pig=1/cow=2/sheep=3/shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9。非蛋 id → -1（无映射）。
     function mobTypeForEgg(id) {
@@ -171,27 +191,33 @@ Item {
     // 最终贴图源：pack 命中 → pack；否则程序生成 mob_*.png（无 → 空串走纯色）。
     readonly property string selectedMobTexSource: root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
         : root.mobFallbackTexture(root.selectedMobType)
-    // 选中 mob 显示名：生物段选中 → selectedMobName（伴选态；剪毛变体带「（剪毛后）」后缀）；否则按
-    //   mobType 反查 mobModel 表（生物蛋路径，首条命中 = 常规形态名）。t663 ⑥ 同 mobType 双条目可区分。
-    readonly property string selectedMobDisplay: root.selectedMobFromSection >= 0 && root.selectedMobName !== ""
-        ? root.selectedMobName
-        : mobNameForType(root.selectedMobType)
-    // mobType → mobModel 表首条命中名（同 mobType 双条目时常规形态在前，剪毛变体在后 → 生物蛋路径
-    //   反查恒得常规形态名）。t663 ⑥。
+    // 选中 mob 显示名：生物段选中 → selectedMobName + 变体后缀（t751：剪毛/剪头/毛色态随底部变体面板
+    //   切换刷新）；否则按 mobType 反查 mobModel 表（生物蛋路径，t751 合并后每型单条恒得常规形态名）。
+    readonly property string selectedMobDisplay: (root.selectedMobFromSection >= 0 && root.selectedMobName !== ""
+        ? root.selectedMobName : mobNameForType(root.selectedMobType)) + root.mobVariantSuffix
+    // mobType → mobModel 表名（t751 条目合并后每型单条，直接命中）。
     function mobNameForType(t) {
         for (let i = 0; i < root.mobModel.length; ++i)
             if (root.mobModel[i].mobType === t)
                 return root.mobModel[i].name
         return ""
     }
-    // t663 ⑥ 剪毛变体态（选中条目带 sheared 标记——羊裸肤色 / 雪傀儡纯雪头；生物蛋路径恒 false）。
-    readonly property bool selectedMobSheared: {
-        if (root.selectedMobFromSection < 0) return false
-        for (let i = 0; i < root.mobModel.length; ++i)
-            if (root.mobModel[i].mobType === root.selectedMobFromSection
-                && root.mobModel[i].name === root.selectedMobName)
-                return root.mobModel[i].sheared === true
-        return false
+    // t751 变体态派生（预览各渲染分支单一判据；变体面板切换 → 本属性 NOTIFY → 头/贴图/毛色绑定即时刷新）。
+    //   生物蛋路径（selectedMobFromSection<0）恒 false = 常规形态（蛋只孵常规形态，机制对齐游戏内）。
+    readonly property bool selectedMobSheared:
+        root.selectedMobFromSection === 3 ? root.sheepSheared
+        : (root.selectedMobFromSection === 12 ? root.snowGolemSheared : false)
+    // t751 变体面板当前两段 toggle 的激活段（0=常规 / 1=剪后；羊与雪傀儡共用 toggle 控件，本属性供激活态高亮）。
+    readonly property bool mobVariantSheared: root.selectedMobFromSection === 3 ? root.sheepSheared
+        : root.snowGolemSheared
+    // t751 变体后缀（选中名行标注当前变体；毛色后缀仅毛茸态显示——裸肤不染色，着色不生效时不标注）。
+    readonly property string mobVariantSuffix: {
+        if (root.selectedMobFromSection === 3) {
+            if (root.sheepSheared) return "（剪毛后）"
+            return root.sheepWoolIndex > 0 ? " · " + root.woolPalette[root.sheepWoolIndex].name + "羊毛" : ""
+        }
+        if (root.selectedMobFromSection === 12) return root.snowGolemSheared ? "（剪头后）" : ""
+        return ""
     }
     // t749 剪毛羊 pack 本体层源（pack 启用且包内有 sheep/sheep.png → file:///；否则空串走程序贴图）。
     //   与 mobTextureSource(3) 的毛层合成路径分开——剪毛态要裸身 + 真脸（本体层），不要毛身。触碰 packActive。
@@ -519,7 +545,8 @@ Item {
                                                     }
                                                 }
                                             }
-                                            // t663 ⑥：伴选名字（同 mobType 的剪毛变体条目靠名字区分）。
+                                            // 选中生物段条目（t751 条目合并后每型单条；selectedMobName 仅作
+                                            //   显示名伴选，变体不再拆条目——改底部变体面板切换）。
                                             TapHandler { onTapped: { root.selectedMobFromSection = modelData.mobType; root.selectedMobName = modelData.name } }
                                         }
                                     }
@@ -721,11 +748,30 @@ Item {
                                                 //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
                                                 // t663 ⑥ → t749 改：剪毛羊变体去**纯色**改贴图（pack 本体层 / 程序
                                                 //   mob_sheep_sheared 裸肤 + 残羊毛块），贴图在身 → baseColor 白（同 t597）。
+                                                // ── t751 不变式（剪头雪傀儡「下半身错误」修复结论）── 身体（MobModel）
+                                                //   的贴图/颜色路由 = f(mobType, pack 态)，**与剪/戴变体无关**：唯一带
+                                                //   selectedMobSheared 的身体分支是羊（3）的裸肤贴图切换（机制等价游戏内
+                                                //   剪羊毛换裸皮）；雪傀儡（12）剪头仅切头 Model（下方南瓜 ↔ 纯雪头），
+                                                //   身体两态逐位一致。历史根因：t663 旧版把 baseColorMap 写成
+                                                //   `有贴图 && !selectedMobSheared` —— 任何剪后变体（含雪傀儡）在 pack 开时
+                                                //   身体贴图被一并剥成纯白，与戴头形态（snow_golem 贴图有纹）并排对比即
+                                                //   「下半身模型错误」（参照物戴头形态正确 = 贴图路由未受损）；t749 重写该
+                                                //   绑定已恢复路由，t751 变体切换化后以本不变式钉死防回归。
                                                 baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
                                                     : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
-                                                baseColor: (root.selectedMobSheared && root.selectedMobType === 3)
-                                                    || root.selectedMobTexSource !== "" ? "#ffffff"
-                                                    : root.mobFallbackColor(root.selectedMobType)
+                                                baseColor: {
+                                                    // t751 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
+                                                    //   （白底羊毛贴图 × 染色 = 染色羊毛，调色板与羊毛方块 16 色同源）。
+                                                    //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色（近整模乘色，
+                                                    //   脸区随乘为近似）；裸肤（剪毛后）不染色（对齐 MC 剪后裸肤无色）。
+                                                    //   生物蛋路径不 tint（变体仅生物段浏览，见 sheepWoolIndex 注）。
+                                                    if (root.selectedMobFromSection === 3 && !root.sheepSheared
+                                                        && root.sheepWoolIndex > 0)
+                                                        return root.woolPalette[root.sheepWoolIndex].tint
+                                                    return (root.selectedMobSheared && root.selectedMobType === 3)
+                                                        || root.selectedMobTexSource !== "" ? "#ffffff"
+                                                        : root.mobFallbackColor(root.selectedMobType)
+                                                }
                                                 // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
                                                 //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
                                                 alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared
@@ -940,7 +986,8 @@ Item {
                                         //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
                                         //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50 ——
                                         //   碰撞中心局部坐标，随父 Node scale 缩放）。
-                                        //   t663 ⑥：剪头变体（selectedMobSheared）→ 南瓜头隐藏、下方纯雪头接管。
+                                        //   t663 ⑥ → t751：剪头变体（底部「已剪头」toggle → selectedMobSheared）
+                                        //   → 南瓜头隐藏、下方纯雪头接管；身体两态不变（t751 不变式见材质注释）。
                                         Model {
                                             visible: root.selectedMobType === 12 && !root.selectedMobSheared
                                             geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
@@ -953,7 +1000,8 @@ Item {
                                                 alphaCutoff: 0.5
                                             }
                                         }
-                                        // t663 ⑥/⑦ 剪头后纯雪头 + 柔灰刻面眼嘴（镜像 Main.qml t663 ⑦ 游戏内形态：
+                                        // t663 ⑥/⑦ → t751 剪头后纯雪头 + 柔灰刻面眼嘴（底部「已剪头」toggle 触发；
+                                        //   镜像 Main.qml t663 ⑦ 游戏内形态：
                                         //   纯色雪白 #f0f4f8 同身体 + #4a5568 柔灰刻面五官——非近黑「骷髅」刻痕）。
                                         Model {
                                             visible: root.selectedMobType === 12 && root.selectedMobSheared
@@ -1061,6 +1109,98 @@ Item {
                                 // 生物段 → 「生物 / mobType N」；生物蛋 → 「生物蛋 / 0x…」；其余 → 方块类别 + id。
                                 text: root.selectedIsMob && root.selectedMobCategory !== "" ? root.selectedMobCategory
                                     : (root.selectedCategory + "    id: 0x" + (root.selectedId >= 0 ? root.selectedId.toString(16).toUpperCase() : "0"))
+                            }
+
+                            // ── t751 变体切换面板（右侧浏览界面底部；仅选中羊(3)/雪傀儡(12)生物段条目时显示）──
+                            //   羊：剪毛/未剪两段 toggle + 16 色毛色 swatch（仅羊有颜色变体）；雪傀儡：戴南瓜头/
+                            //   剪头两段 toggle。QML Column 布局器跳过 visible:false 子项 → 选其他 mob 时本面板
+                            //   不占位（其余 mob 的右侧预览观感零变化）。变体态见组件级 sheepSheared/
+                            //   snowGolemSheared/sheepWoolIndex（切换 → selectedMobSheared NOTIFY → 预览即时刷新）。
+                            Column {
+                                width: parent.width
+                                spacing: 6
+                                visible: root.selectedMobFromSection === 3 || root.selectedMobFromSection === 12
+
+                                Text {
+                                    text: "变体切换"
+                                    color: "#7fae7f"; font.pixelSize: 11; font.bold: true
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                }
+                                // 两段 toggle（激活段金边金字 = 选中格高亮同款 #ffd76a；非激活 = 返回按钮蓝字风）。
+                                Row {
+                                    spacing: 8
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    Repeater {
+                                        // 段标签随选中生物分流（羊=剪毛两态 / 雪傀儡=戴头两态）。
+                                        model: [ root.selectedMobFromSection === 3 ? "未剪羊毛" : "戴南瓜头",
+                                                 root.selectedMobFromSection === 3 ? "已剪毛" : "已剪头" ]
+                                        delegate: Rectangle {
+                                            width: 104; height: 26; radius: 6
+                                            color: variantSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
+                                            border.color: (index === 1) === root.mobVariantSheared ? "#ffd76a" : "#3a5a7a"
+                                            border.width: (index === 1) === root.mobVariantSheared ? 2 : 1
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData
+                                                color: (index === 1) === root.mobVariantSheared ? "#ffd76a" : "#7fb0e5"
+                                                font.pixelSize: 12
+                                            }
+                                            MouseArea {
+                                                id: variantSegHover
+                                                anchors.fill: parent; hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    // t751 写变体态（预览绑定 + 名行后缀即时刷新）。
+                                                    if (root.selectedMobFromSection === 3)
+                                                        root.sheepSheared = (index === 1)
+                                                    else
+                                                        root.snowGolemSheared = (index === 1)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // 毛色 swatch 行（仅羊）：16 色与游戏内羊毛方块调色板同源（build_wool.py
+                                //   WOOL_COLORS + 白）；选中格金框（同选中高亮语言）。
+                                Row {
+                                    spacing: 2
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    visible: root.selectedMobFromSection === 3
+                                    Repeater {
+                                        model: root.woolPalette
+                                        delegate: Rectangle {
+                                            width: 15; height: 15; radius: 3
+                                            color: modelData.tint
+                                            border.color: root.sheepWoolIndex === index ? "#ffd76a" : "#3a444f"
+                                            border.width: root.sheepWoolIndex === index ? 2 : 1
+                                            HoverHandler {
+                                                cursorShape: Qt.PointingHandCursor
+                                                onHoveredChanged: {
+                                                    // 复用格 tooltip 通道（格顶中心 + 名字守卫清除，同 mob 格模式）。
+                                                    const nm = "羊毛颜色 · " + modelData.name
+                                                    if (hovered) {
+                                                        root.hoveredName = nm
+                                                        root.hoveredId = -1
+                                                        const p = parent.mapToItem(panel, parent.width / 2, 0)
+                                                        root.hoveredTipPos = Qt.point(p.x, p.y)
+                                                    } else if (root.hoveredName === nm) {
+                                                        root.hoveredName = ""
+                                                        root.hoveredId = -1
+                                                    }
+                                                }
+                                            }
+                                            TapHandler { onTapped: root.sheepWoolIndex = index }
+                                        }
+                                    }
+                                }
+                                // 毛色诚实边界注（仅羊）：图鉴侧预览着色，游戏内羊染色机制未实现。
+                                Text {
+                                    visible: root.selectedMobFromSection === 3
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: "毛色为图鉴预览着色 · 游戏内羊染色待后续"
+                                    color: "#7fae7f"; font.pixelSize: 9
+                                }
                             }
                         }
                     }
