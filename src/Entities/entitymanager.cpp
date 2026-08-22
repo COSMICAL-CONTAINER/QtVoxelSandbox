@@ -3740,6 +3740,35 @@ void EntityManager::dropUnsupportedMechAfterBlast(const std::vector<World::Destr
         dropUnsupportedMechAroundCell(d.x, d.y, d.z, world);
 }
 
+// t774 爆炸伤害 mob（detonateStalker / detonateTntSphere 共用主体；见头文件 damageMobsFromExplosion 注释）。
+//   用户报告：「TNT 爆炸之后对生物没有伤害？只有对玩家才有伤害」——旧爆炸路径只 emit mobAttackedPlayer 伤
+//   玩家，球内 mob 零伤。本方法补 mob 侧：距离衰减受伤（同玩家侧公式/常量）+ 击退（同量级）+ 死亡走
+//   damageEntity 既有 mobDied 掉落链。同层直调（无迭代器失效：damageEntity/knockback 不增删槽）。
+void EntityManager::damageMobsFromExplosion(float ex, float ey, float ez, int skipIdx)
+{
+    if (kExplosionRadius <= 0.0f) return;
+    for (int i = 0; i < int(m_entities.size()); ++i) {
+        Entity &m = m_entities[size_t(i)];
+        if (!m.alive || m.kind != Mob || m.dead || i == skipIdx) continue; // 尸体/非 Mob（掉落物/primed TNT）/自爆源不吃爆炸伤
+        // mob 身体中心（e.pos）到爆心 3D 距离（同玩家侧 playerPos.y()+0.9 身体中心采样口径）。
+        const float dx = m.pos.x() - ex;
+        const float dy = m.pos.y() - ey;
+        const float dz = m.pos.z() - ez;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > kExplosionRadius) continue; // 半径外 → 0 伤（同玩家侧）
+        int dmg = int(std::round(float(kExplosionDamageMax) * (1.0f - dist / kExplosionRadius)));
+        if (dmg < 1) dmg = 1; // 半径内 → 至少 1HP（同玩家侧）
+        // 击退方向 = (mob − 爆心) XZ 归一（推离爆心，同玩家侧 applyHitKnockback 方向语义）；退化（正上/正下）→ +X 兜底。
+        float kbX = 1.0f, kbZ = 0.0f;
+        const float phlen = std::sqrt(dx * dx + dz * dz);
+        if (phlen > 1e-3f) { kbX = dx / phlen; kbZ = dz / phlen; }
+        damageEntity(i, dmg);                                                    // 扣血 + 红闪 + 归零 dead（→ mobDied 掉落链）
+        knockback(i, kbX, kbZ, kExplosionMobKnockbackStrength);                   // 击退冲量（对齐玩家侧爆炸击退 ~6 b/s）
+        qCInfo(lcEnt) << "explosion hit mob" << i << "type" << m.mobType
+                      << "dmg" << dmg << "dist" << double(dist);
+    }
+}
+
 // t284 Stalker 爆炸（aiStalker fuse 满时调；详见头文件 detonateStalker 注释）。机制等价 MC 苦力怕球形爆炸。
 //   分层（PLAN §2）：向下写 World（setWaterSilent 破坏方块 + worldChanged 重建 mesh）+ 发语义信号
 //   （explosion 音/视反馈、mobAttackedPlayer 伤害玩家）；只读 World::blockAt 判定破坏目标。无向上依赖。
@@ -3836,6 +3865,11 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
         m_wolfTarget = idx;
         emit mobAttackedPlayer(dmg, int(MobStalker), kbX, kbZ);
     }
+
+    // (b2) t774 爆炸伤害 mob：半径内活体 mob 同公式距离衰减受伤 + 击退 + 死亡走 mobDied 掉落链（跳过自爆源
+    //   idx 本体——已 exploded 待当帧移除，不吃自己的爆炸）。玩家链 (b) 原样保留（防双伤）。水中爆炸照样伤
+    //   （originInWater 只跳地形破坏，同玩家侧口径）。爆心 = e.pos（mob 身体中心，与破坏球心 cx0 格心近似）。
+    damageMobsFromExplosion(ex, ey, ez, idx);
 
     // (c) 爆炸音 / 视反馈（单一入口）：emit explosion（呈现层 Connections → AudioManager.playExplosion +
     //   BlockParticles.burstExplosion）。坐标 = 爆炸中心格（粒子在中心迸发；机制等价 MC 爆炸声/光在爆炸点）。
@@ -3962,6 +3996,11 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
             emit mobAttackedPlayer(dmg, int(MobTnt), kbX, kbZ);
         }
     }
+
+    // (c1b) t774 爆炸伤害 mob（同 Stalker (b2)；TNT 无自爆 mob 源 → skipIdx=-1）：半径内活体 mob 距离衰减受伤 +
+    //   击退 + 死亡走 mobDied 掉落链。爆心 = TNT 格中心（cx+0.5, cy+0.5, cz+0.5，同 (c) 玩家侧口径）。玩家链
+    //   (c) 原样保留（防双伤）。水中爆炸照样伤（同玩家侧）。
+    damageMobsFromExplosion(float(cx) + 0.5f, float(cy) + 0.5f, float(cz) + 0.5f, -1);
 
     // (c2) t494 爆炸推动 primed TNT 实体（用户「TNT 可爆炸推动点燃的 TNT 飞起」；机制等价 MC 爆炸把邻接 primed
     //   TNT 推开）：扫描活体 primed TNT，中心距爆炸中心（ex,ey,ez）≤ kExplosionRadius → 施加「远离爆炸中心」的

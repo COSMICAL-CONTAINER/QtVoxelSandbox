@@ -503,6 +503,16 @@ public:
     //   各 PrimedTnt fuse 到 0 再次 detonatePrimedTnt 引爆其球内 TNT，递归连锁引爆全部（踩沙漠神殿压力板 → 3×3 连锁全爆）；
     //   ④ 距离衰减伤玩家 + 击退；⑤ emit explosion（音/视单一入口）。分层：向下写 World（destroySphereSilent）+ 发语义信号。
     void detonateTntSphere(int cx, int cy, int cz, World *world, const QVector3D &playerPos);
+    // t774 爆炸伤害 mob（Stalker detonateStalker / TNT detonateTntSphere 两爆炸路径共用主体）：以爆炸中心
+    //   (ex,ey,ez) 为心、kExplosionRadius 为半径扫活体 Mob（跳过 dead 尸体 / 非 Mob / skipIdx 自爆源本体），
+    //   mob 身体中心（e.pos，同 t319 语义）到爆心 3D 距离 → dmg = round(kExplosionDamageMax·(1−dist/radius))、
+    //   半径内至少 1（**同玩家侧公式**：贴脸同伤、随距线性衰减、半径外 0）→ damageEntity（扣血 + 红闪 +
+    //   归零 dead → deathTimer 归零 emit mobDied 走既有死亡掉落链）+ knockback（(mob−爆心) XZ 归一方向、
+    //   kExplosionMobKnockbackStrength 强度——冲量对齐玩家侧爆炸击退量级）。水中爆炸照样伤 mob（同玩家侧：
+    //   originInWater 只跳地形破坏，不门控伤害）。玩家伤害**不走**本方法（两爆炸路径各自 emit
+    //   mobAttackedPlayer 既有链原样保留，防双伤）。同层直调 damageEntity / knockback（只改 health/vx/vz/vy，
+    //   不 acquire/release 槽 → 在 tick 的 aiStalker 迭代内调用安全，无迭代器失效）。
+    void damageMobsFromExplosion(float ex, float ey, float ez, int skipIdx);
     // t738 爆炸失撑火把掉落（Stalker / TNT 两爆炸路径共用）：destroyed 列表内每破坏格扫 6 邻的火把族
     //   （Torch / RedstoneTorch——附着语义一族），state 解码其唯一附着格（torchAttachOffset，掩熄灭位），
     //   该格已非 solid（爆炸把支撑块炸掉、火把本体在球外幸存）→ setWaterSilent 清火把 + 恒发
@@ -1987,6 +1997,10 @@ private:
     static constexpr float kExplosionPushSpeed      = 6.0f; // 爆炸水平冲量上限（blocks/s；距离衰减）
     static constexpr float kExplosionUpSpeed        = 7.0f; // 爆炸上抛冲量上限（blocks/s；距离衰减）
     static constexpr float kExplosionEntityFriction = 4.0f; // primed TNT 被推后的水平摩擦衰减率（1/s；exp(-rate·dt)）
+    // t774 爆炸击退 mob 强度（倍率；knockback strength 参数）。玩家侧爆炸击退走 applyHitKnockback（水平
+    //   kHitKnockbackHoriz=6.0 b/s，无距离衰减、恒方向推离爆心）；mob 侧 knockback 基速 kKnockbackHoriz=4.5
+    //   → 取 6.0/4.5≈1.33 使冲量 ≈6.0 b/s 对齐玩家侧量级（同爆炸同击退感）。
+    static constexpr float kExplosionMobKnockbackStrength = 1.33f; // 爆炸击退 mob 强度（×4.5 ≈ 6.0 b/s，对齐玩家侧）
     // t297 爆炸掉落：每个被爆炸破坏的方块以此概率掉落其物品实体（机制等价 MC 爆炸弹毁方块掉物；
     //   spec「~50% 成掉落物」）。掉落 id 走 BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。
     static constexpr float kExplosionDropChance = 0.25f;  // 破坏块掉落概率（~25%；连锁爆炸掉落物控量，原 50% 致 items 顶满 200 卡顿）

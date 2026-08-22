@@ -1797,6 +1797,79 @@ int main(int argc, char *argv[])
         QObject::disconnect(tntCons); // 消费端镜像仅限本组探针（全局计数连接保留）
     }
 
+    // ── P17 t774 TNT 爆炸伤害 mob 探针（Entities 层 EntityManager 直编，同末影眼先例）──
+    //   用户报告（R19.12）：「TNT 爆炸之后对生物没有伤害？只有对玩家才有伤害」——旧爆炸路径
+    //   （detonateTntSphere / detonateStalker）只 emit mobAttackedPlayer 伤玩家，球内 mob 零伤。修后
+    //   damageMobsFromExplosion 补 mob 侧（同公式距离衰减 + 击退 + 死亡走 mobDied 掉落链）。矩阵断言
+    //   （任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 距离单调：3 只猪距爆心 ~1 / ~2 / ~4 格（4 > 半径 3 在球外）——受伤恰 16 / 8 / 0 HP
+    //       （round(kExplosionDamageMax·(1−d/R))，同玩家侧公式/常量）；8 HP 猪吃满 8 伤 → dead + ~0.5s 死亡
+    //       动画后 mobDied 恰一次（掉落链入口）；球外猪全程无伤；
+    //   (b) 击退：幸存近猪被推离爆心（+X 方向位移 >> 游荡抖动；死亡猪尸体不推——只断言幸存者）；
+    //   (c) 玩家链不双伤：爆心 1 格处虚拟玩家脚位 → mobAttackedPlayer 恰发一次且伤害同公式（16），
+    //       后续远场爆炸不再新增（既有玩家链原样保留，新增 mob 侧不碰玩家）；
+    //   (d) 水中爆炸照样伤 mob：TNT 格置 Water（originInWater 只跳地形破坏）→ 距 ~1 格猪照样受伤。
+    {
+        const auto [x0, z0] = nextSlot();
+        const int ty = kRigY;
+        // 平台（防 spawn 即坠落；爆炸毁掉球内部分 → 猪跌落不影响水平击退断言；球外猪的平台幸存）。
+        for (int dx = 0; dx <= 6; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        EntityManager ents;
+        // 猪位 = 格心 + halfH=0.45（spawnMobCore 口径）；爆心 = TNT 格心 (x0+0.5, ty+0.5, z0+0.5)。
+        const int pigNear = ents.spawnMobTyped(x0 + 1, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 30); // 距 ~1.001 → 16 HP（幸存 → 击退断言）
+        const int pigMid  = ents.spawnMobTyped(x0 + 2, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 8);  // 距 ~2.001 → 8 HP → 恰死（死亡/掉落链断言）
+        const int pigFar  = ents.spawnMobTyped(x0 + 4, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 5);  // 距 ~4.000 > 3 → 球外 0 HP
+        int playerHits = 0, playerDmg = -1;
+        QObject::connect(&ents, &EntityManager::mobAttackedPlayer, &ents,
+                         [&](int amount, int type, float kx, float kz) {
+                             Q_UNUSED(type); Q_UNUSED(kx); Q_UNUSED(kz);
+                             ++playerHits; playerDmg = amount;
+                         });
+        int diedCount = 0, diedType = -1;
+        QObject::connect(&ents, &EntityManager::mobDied, &ents,
+                         [&](int x, int y, int z, int type, bool burned, bool baby) {
+                             Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(burned); Q_UNUSED(baby);
+                             ++diedCount; diedType = type;
+                         });
+        const float pigNearX0 = ents.posAt(pigNear).x();
+        // (c) 虚拟玩家脚位：爆心 +1 格 X、身体中心与爆心同高（脚 y = ty−0.4 → 中心 ty+0.5）→ 距 1.0 → 16 HP。
+        const QVector3D playerPos(x0 + 1.5f, ty - 0.4f, z0 + 0.5f);
+        ents.detonateTntSphere(x0, ty, z0, &w, playerPos);
+        bool ok = ents.healthAt(pigNear) == 30 - 16
+               && ents.healthAt(pigMid) == 0 && ents.deadAt(pigMid)
+               && ents.healthAt(pigFar) == 5 && !ents.deadAt(pigFar)
+               && playerHits == 1 && playerDmg == 16;
+        // (a2)+(b) tick 40×16ms（0.64s > kDeathTime 0.5s）：死亡链 mobDied 恰一次（pigMid，猪类型）；
+        //   幸存近猪被击退远离爆心。击退位移在**前 6 tick（0.096s）**取值：knockback vx≈6 b/s 指数衰减期
+        //   位移 ~0.4-0.55 格，而 aiWander 随机游荡同窗最坏反向 ~0.1 格 → 阈值 0.25 防偶发（全窗累计游荡
+        //   抖动会稀释单调性，短窗让击退主导）。方向 = (mob−爆心) XZ 归一 = +X。
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        float knockDx = 0.0f;
+        for (int t = 0; t < 40; ++t) {
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            if (t == 5) knockDx = ents.posAt(pigNear).x() - pigNearX0;
+        }
+        ok = ok && diedCount == 1 && diedType == int(EntityManager::MobPig)
+               && knockDx > 0.25f && knockDx < 1.5f         // 击退远离爆心（+X，短窗量级护栏）
+               && ents.healthAt(pigFar) == 5 && !ents.deadAt(pigFar); // 球外猪全程无伤
+        // (d) 水中爆炸照样伤 mob：爆心格置 Water（originInWater → 只跳地形破坏，不门控伤害）→ 距 ~1 格新猪照样 16 HP。
+        const int pigWat = ents.spawnMobTyped(x0 + 6, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 20);
+        w.setBlock(x0 + 5, ty, z0, BR::Water, 0);
+        ents.detonateTntSphere(x0 + 5, ty, z0, &w, farListener); // 玩家 = 远场 → 半径外不发 mobAttackedPlayer
+        ok = ok && ents.healthAt(pigWat) == 20 - 16 && !ents.deadAt(pigWat)
+               && playerHits == 1; // 既有玩家链未被新增 mob 侧双触发
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t774 TNT explosion damages mobs: 3 pigs at d~1/2/4 take 16/8/0 HP "
+                             "(player-side formula); 8HP pig dies -> mobDied exactly once (drop chain); "
+                             "survivor knocked away from blast; player hit chain fires exactly once "
+                             "(no double); underwater blast still damages mobs";
+        // 清场（平台 + 水格全清 + 2 tick 收敛）。
+        w.setBlock(x0 + 5, ty, z0, BR::Air);
+        for (int dx = 0; dx <= 6; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
