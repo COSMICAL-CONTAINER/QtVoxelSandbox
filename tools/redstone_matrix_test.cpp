@@ -641,7 +641,8 @@ int main(int argc, char *argv[])
         // 环上直格应是对向 2 位（EW）直轨形态（拐角规则不外溢到边格）。
         if (quint8(w.stateAt(cx, kRigY, cz - 1) & 0x0F) != quint8(BR::RailConnPx | BR::RailConnNx)) ok = false;
         // ── 通用绕圈跑法（骑乘 / 空车共用断言壳）──
-        const float rideH = 0.225f; // kCartRideH（MinecartManager 私有常量的文档值：轨格 cell 底 + 1/16 板 + 车底偏移）
+        const float rideH = 0.45f; // kCartRideH（MinecartManager 私有常量的文档值：轨格 cell 底 + 1/16 板 + 车底
+                                    //   偏移；t768 车斗加高 0.75 模型后底板下沿偏移 0.375 → 0.45。改几何须同步此镜像值）
         const int kTicks = 2400;    // 0.016s × 2400 ≈ 38.4s 仿真：骑乘 ~8 格/s 多圈 / 空车 4 格/s 续推多圈
         bool seenYaw[4] = { false, false, false, false }; // 空车过弯 yaw 基数覆盖（0/90/180/270）
         const auto runLaps = [&](MinecartManager &carts, int cartIdx, bool ridden) {

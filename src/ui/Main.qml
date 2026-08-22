@@ -4350,8 +4350,9 @@ Window {
             readonly property bool isRidingBoat: boats.revision >= 0
                                                  ? (player.boatManager ? player.boatManager.ridingIndex() >= 0 : false)
                                                  : false
-            // t565 骑矿车同坐姿（机制等价 MC 1.0 矿车骑乘坐姿；feet = 车中心 - 0.3 ≈ 轨面，与船同「坐进斗」
-            //   几何 → 复用同一 sitBlend / sitThigh / sitKnee / sitDrop）。同 isRidingBoat 的 revision 触碰模式。
+            // t565 骑矿车同坐姿（机制等价 MC 1.0 矿车骑乘坐姿；feet = 车中心 − kCartSeatDrop（t768：0.3125 =
+            //   底板面）踩车斗底板，与船同「坐进斗」几何 → 复用同一 sitBlend / sitThigh / sitKnee / sitDrop）。
+            //   同 isRidingBoat 的 revision 触碰模式。
             readonly property bool isRidingCart: carts.revision >= 0
                                                  ? (player.minecartManager ? player.minecartManager.ridingIndex() >= 0 : false)
                                                  : false
@@ -5859,9 +5860,12 @@ Window {
         // 触发：carts.count 随 spawnCart 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置 / 朝向随
         //   骑乘物理推进 bump revision → {revision; posAt / yawAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2）。
         // 外观（§9a 原创程序几何拼装，无 MC 资产）：斗形（四面车帮中间凹的敞口车斗）—— 1 块车底板
-        //   （宽 0.8 × 长 0.9）+ 4 面车帮壁（前后左右整圈上凸），整体 ~0.9×0.3×1.0（X 宽 × Y 高 × Z 长，长轴沿
-        //   行进方向 Z；与 kCartHalfW=0.45 / kCartHalfL=0.5 / kCartHalfH=0.45 命中盒 XZ 对齐）。NoLighting 必备
-        //   （可见 Model 红线；lit 材质在本 D3D11 后端不渲染）。
+        //   （宽 0.8 × 长 0.9）+ 4 面车帮壁（前后左右整圈上凸），整体 ~0.9×0.75×1.0（X 宽 × Y 高 × Z 长，长轴沿
+        //   行进方向 Z；与 kCartHalfW=0.45 / kCartHalfL=0.5 / kCartHalfH=0.45 命中盒 XZ 对齐）。t768 车斗加高：
+        //   本地 Y ±0.375（旧 ±0.15 仅 0.3 高，用户观感 ~0.25 扁盘）—— 底板下沿 −0.375 贴轨板上沿 +0.0125 微隙、
+        //   帮顶 +0.375，车斗凹槽深 ~0.66（MC 1.0 矿车 0.7± 高语义；底板/帮位与 Entities kCartRideH=0.45 /
+        //   Game kCartSeatDrop=0.3125 三层同值推导，改须同步）。NoLighting 必备（可见 Model 红线；lit 材质在
+        //   本 D3D11 后端不渲染）。
         // t732 重贴图：纯色 UnitCube → MinecartBox 贴图盒（铁灰壁 + 铆钉 + 木底板）：pack 命中
         //   entitySource("minecart") → 包贴图（布局 1）；miss → qrc 程序 entity_minecart（布局 0）。
         //   呈现层换装，骑乘 / 物理 / 槽位逻辑零改动。
@@ -5922,47 +5926,51 @@ Window {
                         cartHpSeen = cartHp // t735 ② 初始同步（防创建求值期误判受击）
                     }
 
-                    // 车底板（封闭整底）：宽 0.8 × 高 0.06 × 长 0.9，中心下方（车斗底贴轨面 —— 矿车中心已在轨面上
-                    //   kCartRideH=0.3，底板下沿 ~轨面 +0.03 不穿轨）。斗形「底」：封闭整面 + 骑乘玩家的「地板」。
-                    //   t732 MinecartBox piece 0：±Y 大面采木底板带（qrc 程序木条 / 包木底块）。
+                    // 车底板（封闭整底）：宽 0.8 × 厚 1/16 × 长 0.9，车斗底。t768：下沿本地 −0.375 = 轨板上沿
+                    //   （cell 底 +1/16）+0.0125 微隙防共面 z-fight —— 车心在轨面上方 kCartRideH=0.45
+                    //   （= 1/16 + 0.375 + 微隙，MinecartManager 同值推导）；板面（上沿 −0.3125）= 骑乘脚底
+                    //   kCartSeatDrop（playercontroller 同值）。斗形「底」：封闭整面 + 骑乘玩家的「地板」。
+                    //   t732 MinecartBox piece 0：±Y 大面采木底板带（qrc 程序板条 / 包木底块）。
                     Model {
                         geometry: MinecartBox { piece: 0; layout: cartPackHit ? 1 : 0 }
-                        position: Qt.vector3d(0, -0.12, 0)
-                        scale: Qt.vector3d(0.8, 0.06, 0.9)
+                        position: Qt.vector3d(0, -0.34375, 0)
+                        scale: Qt.vector3d(0.8, 0.0625, 0.9)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.24 × 长 0.9，贴 -X 边。斗形「帮」：四面整圈上凸中间凹。
+                    // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.75 × 长 0.9，贴 -X 边。t768 全高帮：本地 Y ±0.375
+                    //   （下沿贴轨板上沿 → 帮顶 +0.375，车斗凹槽深 ~0.66 明显）。斗形「帮」：四面整圈上凸中间凹。
                     //   t732 MinecartBox piece 1：外面采左壁窗（含亮卷边顶行），顶面 = 卷边条。
                     Model {
                         geometry: MinecartBox { piece: 1; layout: cartPackHit ? 1 : 0 }
-                        position: Qt.vector3d(-0.36, 0.03, 0)
-                        scale: Qt.vector3d(0.08, 0.24, 0.9)
+                        position: Qt.vector3d(-0.36, 0, 0)
+                        scale: Qt.vector3d(0.08, 0.75, 0.9)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // 右车帮（+X 纵长壁；与左对称）。t732 piece 2：外面采右壁窗。
                     Model {
                         geometry: MinecartBox { piece: 2; layout: cartPackHit ? 1 : 0 }
-                        position: Qt.vector3d(0.36, 0.03, 0)
-                        scale: Qt.vector3d(0.08, 0.24, 0.9)
+                        position: Qt.vector3d(0.36, 0, 0)
+                        scale: Qt.vector3d(0.08, 0.75, 0.9)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // 车头帮（-Z 端横壁，跨满宽 x∈[-0.4,0.4]；盖住四角 → 与纵壁端面共面无重叠，同船 t556 消闪烁手法）。
-                    //   t732 MinecartBox piece 3：端面大区（qrc 壁窗 / 包框栏端面）。
+                    //   t768 全高帮 ±0.375。t732 MinecartBox piece 3：端面大区（qrc 壁窗 / 包框栏端面）。
                     Model {
                         geometry: MinecartBox { piece: 3; layout: cartPackHit ? 1 : 0 }
-                        position: Qt.vector3d(0, 0.03, -0.41)
-                        scale: Qt.vector3d(0.8, 0.24, 0.08)
+                        position: Qt.vector3d(0, 0, -0.41)
+                        scale: Qt.vector3d(0.8, 0.75, 0.08)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // 车尾帮（+Z 端横壁；与车头对称，同 piece 3 —— ±Z 大面取同区，前后壁共用几何）。
                     Model {
                         geometry: MinecartBox { piece: 3; layout: cartPackHit ? 1 : 0 }
-                        position: Qt.vector3d(0, 0.03, 0.41)
-                        scale: Qt.vector3d(0.8, 0.24, 0.08)
+                        position: Qt.vector3d(0, 0, 0.41)
+                        scale: Qt.vector3d(0.8, 0.75, 0.08)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // F3+B 矿车碰撞箱（同 boat hitbox 模式；PLAN §2-F F3 调试叠层）：
                     //   kCartHalfW=0.45 / kCartHalfH=0.45 / kCartHalfL=0.5 → scale=(2·半W, 2·半H, 2·半L)+0.01 外扩避面重叠。
+                    //   t768 一致性：0.75 高模型 ⊂ 本地 ±0.45 命中盒（底板下沿 −0.375 / 帮顶 +0.375 均在框内）。
                     Model {
                         visible: window.showHitboxes
                         geometry: WireCube {}
