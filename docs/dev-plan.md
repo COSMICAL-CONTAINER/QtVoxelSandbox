@@ -2847,7 +2847,7 @@ t717-t732（16 项）。**严格顺序：t717 贴图批 → t718-t719 盔甲 3D 
 **t754** 成就界面返回按钮：最底部返回按钮现靠左对齐 → 改居中或右对齐（对齐项目既有 UI 惯例选定其一）。✅✅ 已完成（commit 8d15f2c：**根因比猜测深一层**——anchors.horizontalCenter 早就写了但按钮仍在 Column 声明体内（t678(e) 只改锚没移出）→ 锚到祖父 progressPanel=非法锚运行时静默忽略 → x 回退 0=Column 左缘+16px；修法=Rectangle 真移出 Column 成 progressPanel 直属子，居中+贴底 8 双双合法一次生效（括号平衡脚本证实父链）；惯例调研=暂停菜单族多数派居中（选项面板 :10166/统计面板 :10898 同款）；redstone_matrix_test 106 PASS/0 FAIL）。
 
 ### 🅶 死亡与出生点（t755-t756）
-**t755** 死亡状态硬锁与掉落：① 「你死了」弹窗出现后仍可移动、生命值错误显示半颗心 → 死亡瞬间锁输入（移动/跳跃/交互全禁）+ 生命归零显示；② 物品掉落缺失：死亡时背包物品应全部散落原地（现状 Esc 关弹窗后物品还在包里）——含 R19.4 遗留的**死亡护甲不掉落**缺口一并修（验收：生存死亡→弹窗锁死→重生后原地可拾回全部物品+装备）。
+**t755** 死亡状态硬锁与掉落：① 「你死了」弹窗出现后仍可移动、生命值错误显示半颗心 → 死亡瞬间锁输入（移动/跳跃/交互全禁）+ 生命归零显示；② 物品掉落缺失：死亡时背包物品应全部散落原地（现状 Esc 关弹窗后物品还在包里）——含 R19.4 遗留的**死亡护甲不掉落**缺口一并修（验收：生存死亡→弹窗锁死→重生后原地可拾回全部物品+装备）。✅✅ 已完成（commit 见 git log：**「仍可移动」排查结论=输入硬锁链本已完整无洞**（t655 C++ 闸门族 grab/setKey/beginMining/placeBlock/attackMob/drop/pickBlock + t691 QML 键盘第一闸 + 死亡态暂停叠层抑制 + tickImpl !m_captured 早退跳过 step/pollMouse——死亡屏下 Esc 只能走死亡按钮，grab() m_dead 拒绝兜底）；**「半颗心」根因=heal() 无 dead 守卫**：致死 tick 的 step() 在同步 died→onDied→release() 链后继续跑完，尾部饥饿回血 emit healed(1) 经呈现层路由把刚归零的 health 加回 1（takeDamage 有 m_dead 早退而 heal 漏对称守卫）→ heal 入口补 `if (m_dead) return`；**护甲不掉落根因=dropAllItems 漏 armor 槽段**：只遍历 hotbar/main/held 三段后 resetForMode 把 m_armorSlots 一并清空 → 补护甲 4 槽掉落循环（复用同一 dropStack lambda，附魔/实例名/耐久随实体走，先读后清）；t755 探针进 redstone_matrix_test（致死落库 0+dead+cause / heal 死亡免疫 / respawn 复位链）；redstone_matrix_test 107 PASS/0 FAIL）。
 **t756** 出生点生成修复：种子 42 出生在树里 → 出生点选择算法强制：出生格及头部格必须为 Air（清除树叶/原木占据），脚下方块为实体支撑且在地表（不接受树冠/洞顶）；任意种子回归验证（验收：连开 5 个不同种子均落在可站立的裸地表）。
 
 ### 🅷 末影之眼链路与物品补全（t757-t762）

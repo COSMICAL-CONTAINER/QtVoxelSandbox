@@ -769,6 +769,10 @@ add_executable(redstone_matrix_test
     src/Game/recipe.cpp
     src/Game/smelting.cpp
     src/Game/hotbar.cpp
+    # t755 死亡态硬锁探针附加：Game 层 PlayerState（致死落库 0 / heal 死亡免疫 / respawn 复位链；
+    # 只向下依赖 Core/Qt，不引入 PlayerController/World/QML）。
+    src/Game/playerstate.cpp
+    src/Game/playerstate.h
     src/World/chunk.cpp
     src/World/chunkmanager.cpp
     src/World/world.cpp

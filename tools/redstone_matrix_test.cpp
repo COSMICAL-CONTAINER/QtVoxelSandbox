@@ -15,6 +15,7 @@
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
 #include "hotbar.h"       // t763 附魔数值生效链探针（EPF 路由 / 耐久消耗概率 / 攻击伤 tooltip 源）
+#include "playerstate.h"  // t755 死亡态硬锁探针（致死落库 0 / heal 死亡免疫 / respawn 复位链）
 #include "world.h"
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
@@ -981,6 +982,34 @@ int main(int argc, char *argv[])
                           << "| enchant effect chain: sharpness 7+1.5=8.5 + tooltip text source; EPF routing "
                              "fire/emberling/pearl-tp/feather/protection; unbreaking-III wear over 400 hits in "
                              "[260,340], no-enchant control exact 50 (t763)";
+    }
+
+    // ── t755 死亡态硬锁探针（纯 Game 层 PlayerState，无 World/QML/PlayerController）：
+    //    ① 致死一击把 health 精确落库 0（死亡屏心条全空的前提——修前若落 1 即「半颗心」症状之一）；
+    //    ② heal() 死亡免疫：dead 态治疗被拒（修前无守卫 → 致死 tick 尾部饥饿回血 healed(1) 经呈现层
+    //       路由把 0 加回 1 = 用户报告的死亡屏半颗心根因）；③ respawn 复位链：清 dead + 拉满血饥 +
+    //       死因复位（重生后输入解锁 / 血量回满的前置状态链）。
+    {
+        PlayerState ps;
+        ps.setHealth(1);
+        ps.takeDamage(3, int(PlayerState::Fall));   // 致死一击（1-3 → clamp 0）
+        const bool lethalOk = !ps.dead() == false
+                              && ps.health() == 0
+                              && ps.deathCause() == int(PlayerState::Fall);
+        // heal 死亡免疫：dead 态任意治疗不改 health（保持 0，心条全空）。
+        ps.heal(5);
+        const bool healGuardOk = ps.health() == 0;
+        // respawn 复位链：清 dead + 满血 + 死因复位 Generic。
+        ps.respawn();
+        const bool respawnOk = !ps.dead()
+                               && ps.health() == ps.maxHealth()
+                               && ps.deathCause() == int(PlayerState::Generic);
+        const bool ok = lethalOk && healGuardOk && respawnOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| death hard-lock state chain: lethal hit lands health=0 + dead + cause; "
+                             "heal() rejected while dead (half-heart-after-death root); respawn clears "
+                             "dead + full restore (t755)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -4612,8 +4612,8 @@ void PlayerController::dropHeldCursorOne()
     throwItemInLook(id, 1, ench, name, dur);
 }
 
-// t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈）全部掉落为物品实体（死亡点
-//   = 脚底 m_pos），随后清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor 模式）；空栈跳过。
+// t175 死亡掉落：玩家死亡时把整个背包（hotbar 9 + main 27 + 光标手持栈 + t755 护甲 4 槽）全部掉落为
+//   物品实体（死亡点 = 脚底 m_pos），随后清空背包。每非空栈 → 1 实体携带整栈数量（同 dropHeldCursor 模式）；
 //   ItemEntityManager 无水平速度物理，靠散布到死亡格 3×3 邻域做视觉分离（轮回 9 格 pattern：>9 栈后
 //   回中心格可接受重叠）。光标手持栈一并掉落（onDied 已先 returnHeldToHotbar 归还背包合并，此处为
 //   防御双保险，held 通常已空）。最后 resetForMode(Survival) 清空 hotbar+main+held + bump revision →
@@ -4643,12 +4643,18 @@ void PlayerController::dropAllItems()
         emit spawnItem(cx + kScatter[idx % 9][0], cy, cz + kScatter[idx % 9][1], id, count, ench, name, dur);
         ++idx;
     };
-    // hotbar 9 槽 → main 27 槽 → 光标手持栈，逐栈掉落。
+    // hotbar 9 槽 → main 27 槽 → 光标手持栈 → 护甲 4 槽，逐栈掉落。
     for (int i = 0; i < m_hotbar->slotCount(); ++i)
         dropStack(m_hotbar->blockIdAt(i), m_hotbar->countAt(i), m_hotbar->enchantsAt(i), m_hotbar->customNameAt(i), m_hotbar->durabilityAt(i));
     for (int i = 0; i < m_hotbar->mainCount(); ++i)
         dropStack(m_hotbar->mainBlockIdAt(i), m_hotbar->mainCountAt(i), m_hotbar->mainEnchantsAt(i), m_hotbar->mainCustomNameAt(i), m_hotbar->mainDurabilityAt(i));
     dropStack(m_hotbar->heldBlock(), m_hotbar->heldCount(), m_hotbar->heldEnchants(), m_hotbar->heldCustomName(), m_hotbar->heldDurability()); // 光标手持栈（onDied 已归还，通常空）
+    // t755 护甲槽掉落（R19.4 遗留缺口）：旧版漏掉 m_armorSlots —— resetForMode(Survival) 会把护甲一并清空
+    //   （hotbar.cpp t345 分支），装备被静默销毁 → 死亡屏验收「重生后走回死亡点捡回全部物品 + 装备」不达。
+    //   复用同一 dropStack（附魔 / 实例名 / 耐久随实体走，同上方三段纪律）；必须在 resetForMode **之前**
+    //   读出（清空后 id 全 0，晚读即空掉落）。armorCount()=4 部位（头/胸/腿/脚），空槽 id=0 被 lambda 早退跳过。
+    for (int i = 0; i < m_hotbar->armorCount(); ++i)
+        dropStack(m_hotbar->armorBlockIdAt(i), m_hotbar->armorCountAt(i), m_hotbar->armorEnchantsAt(i), m_hotbar->armorCustomNameAt(i), m_hotbar->armorDurabilityAt(i));
     // 清空整个背包（hotbar + main + held）+ bump revision → QML 同步。仅 Survival 调（死亡仅在 Survival）。
     m_hotbar->resetForMode(int(Survival));
 }

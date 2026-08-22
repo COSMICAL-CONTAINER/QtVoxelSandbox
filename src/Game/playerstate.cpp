@@ -63,10 +63,15 @@ QString PlayerState::deathCauseText() const
     }
 }
 
-// 恢复生命：加 HP，clamp 到 maxHealth（进食/治疗，Phase 1.1 用）。
+// 恢复生命：加 HP，clamp 到 maxHealth（进食/治疗）。t755：死亡态早退 —— 致死那一击已把 health 归零，
+//   但致死 tick 的 step() 在同步 died→onDied→release() 链之后仍会把本帧剩余代码跑完，若饥饿回血分支
+//   （PlayerController step 尾部 m_regenTimer 跨过间隔 emit healed(1) → 呈现层路由本方法）恰好落在该
+//   尾部，会把刚清零的 health 从 0 加回 1 → 死亡屏心条显「半颗心」（用户报告）。与 takeDamage 的
+//   m_dead 早退（上方 :15）对称：死人不再被治疗，health 保持 0 直到 respawn() 拉满。
 void PlayerState::heal(int amount)
 {
     if (amount <= 0) return;
+    if (m_dead) return;              // t755 死亡态免疫治疗（同 takeDamage 早退纪律）
     const int nv = std::min(kMaxHealth, m_health + amount);
     if (nv == m_health) return;
     m_health = nv;
