@@ -1065,7 +1065,7 @@ void PlayerController::beginMining()
         float boatDist = 0.0f;
         const int boatIdx = m_boatManager->findBoatHit(eye, look, kReach, &boatDist);
         if (boatIdx >= 0 && boatDist <= m_hitDist) {
-            m_boatManager->hitBoatFromRay(eye, look, kReach, m_world); // t711：传 world 选非实心邻格掉落（防埋）
+            m_boatManager->hitBoatFromRay(eye, look, kReach, m_world, m_mode == Creative); // t711 传 world 选非实心邻格掉落（防埋）；t767 对齐创造瞬破不掉落
             m_attackCooldown = kAttackCooldown; // 挖船也走攻击冷却（防长按瞬秒多船）
             emit swingArm();
             return;
