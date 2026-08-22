@@ -846,15 +846,25 @@ bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &d
         notifyChanged();
         return true;
     }
-    // 摧毁（生存最后一击 / 创造瞬破）：移除该矿车 + 清骑乘态（若挖的是被骑的矿车）+ emit cartBroken
-    //   （→ 呈层 spawnItem 掉 MinecartId，可重放；机制等价 MC 1.0 攻击矿车 → 矿车破坏掉矿车物品）。
+    // 摧毁（生存最后一击 / 创造瞬破）：移除该矿车 + 清骑乘态（若挖的是被骑的矿车）；生存末击才 emit
+    //   cartBroken（→ 呈层 spawnItem 掉 MinecartId，可重放；机制等价 MC 1.0 生存攻击矿车 → 矿车破坏掉
+    //   矿车物品）。
     const QVector3D cp = c.pos;
     if (idx == m_riderCart) m_riderCart = -1; // 挖骑乘中的矿车 → 玩家自然下车
     releaseSlot(idx);
+    // t767 创造瞬破**无掉落**（对齐 t571①「主动破坏掉落仅生存」的载具族语义）：玩家攻击矿车属主动破坏，
+    //   创造模式单击只移除车体（同创造破块无掉落）。旧版全模式同路径 emit cartBroken → 创造打矿车仍掉
+    //   矿车物品（t735①注释里「非模式门控」说的是当年掉落观感的排查结论，掉落门控本就不存在——本任务
+    //   补上）。呈层 onCartBroken 只消费掉落 → 不发信号即无物品。提前 return 顺带跳过下方掉落格散布计算
+    //   （创造路径不再需要掉落点）。
+    if (instantBreak) {
+        notifyChanged();
+        return true;
+    }
     // t735 ① 掉落格散布（同船 t711 修法）：旧版掉「矿车中心格」—— 轨格非实心、玩家可与车同格 / 紧邻，
     //   掉落物常落在攻击者本人 kPickupDist 1.5 半径内 → 0.5s 免拾窗一过被 pickupScan 立即吸回（背包静默
-    //   +1）→ 用户全程看不到掉落物 = 观感「不掉落」（根因是掉落点选格与攻击者重合，非创造模式跳过掉落
-    //   —— hitCartFromRay 全模式同路径；同船 t661 排查结论的矿车族）。改掉「首个非实心水平邻格」随机
+    //   +1）→ 用户全程看不到掉落物 = 观感「不掉落」（根因是掉落点选格与攻击者重合，当年亦无创造掉落
+    //   门控——t767 起创造瞬破提前 return 无掉落，见上方；同船 t661 排查结论的矿车族）。改掉「首个非实心水平邻格」随机
     //   一格（邻格上方一格也须非实心，防掉进 1 格深坑壁内）；4 邻全实心（窄缝嵌车）→ 掉车中心格上一格
     //   （y+1，自重落顶不埋）。world 空（防御路径）→ 保留旧中心格行为。
     int dropX = int(std::floor(cp.x())), dropY = int(std::floor(cp.y())), dropZ = int(std::floor(cp.z()));

@@ -1449,6 +1449,10 @@ int Hotbar::maxStackSize(int id) const
     //   review 同步：Core 层 BlockRegistry::maxStackSize（掉落物合并用）已对 0x234/0x235 同步特判 1 ——
     //   两处保持同步（见 blockregistry.cpp maxStackSize 注释）。
     if (id == RecipeRegistry::OakBoatId || id == RecipeRegistry::SpruceBoatId) return 1;
+    // t767 矿车（MinecartId=0x23E，材料段）：不可堆叠（机制等价 MC 1.0 矿车 maxStack 1 —— 载具类实体
+    //   物品单件，同船族）。须在通用材料段判定**之前**特判（否则落 64——两车叠一槽）。Core 层
+    //   BlockRegistry::maxStackSize（掉落物合并用）已对 0x23E 同步特判 1 —— 两处保持同步（见该处注释）。
+    if (id == RecipeRegistry::MinecartId) return 1;
     // t507 蘑菇汤（MushroomStewId，材料段 0x23C）：不可堆叠（机制等价 MC 1.0 蘑菇汤 maxStack 1 —— 碗装液体
     //   食物不可叠；同铁桶族）。须在通用材料段判定**之前**特判（否则落 64）。食用后返空碗（finishEating 特判）。
     if (id == RecipeRegistry::MushroomStewId) return 1;

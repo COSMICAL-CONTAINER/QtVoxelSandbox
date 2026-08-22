@@ -1409,6 +1409,11 @@ int   BlockRegistry::maxStackSize(int itemId)
     //   **不可堆叠**（机制等价 MC 1.0 画 maxStack 1 —— 放置型实体物品单件）。Game 层 Hotbar::maxStackSize
     //   对 0x242 同步特判 maxStack=1，**两处须保持同步**（同船模式）。
     if (itemId == 0x242) return 1;
+    // t767 矿车（0x23E = Game 层 RecipeRegistry::MinecartId；Core 不能依赖 Game 故用字面量 + 同步注释）
+    //   **不可堆叠**（机制等价 MC 1.0 矿车 maxStack 1——载具实体单件，同船 0x234/0x235）。Game 层
+    //   Hotbar::maxStackSize 对 0x23E 同步特判 maxStack=1，**两处须保持同步**（掉落物合并路径按 1
+    //   跳过合并 → 两矿车各为独立实体；拾取按真实 cap 分槽）。
+    if (itemId == 0x23E) return 1;
     // 材料段 ≥ 0x200：可堆叠 64（木棒 / 煤 / 铁锭 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 / 线 / 皮革 / 墨囊 / 蛋 等 mob 掉落物 + 合成材料）。
     //   含护甲段（≥0x300）—— 护甲不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），按 64 合并无害（拾取 Hotbar.addStack 按
     //   真实 maxStack=1 分槽）。桶 / 蘑菇汤（材料段内 maxStack=1 的特例）同理 —— 仅玩家持有 / 丢弃，掉落实体阶段按 64 合并无数据错。
