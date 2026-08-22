@@ -6,11 +6,14 @@
 
 // t731 玩家皮肤盒几何（Renderer 层；Main.qml playerModel 第三人称 + CharacterPreview3D 背包预览共用）。
 //
-// 用途：玩家身体各部件（头/躯干/臂/腿）从共享皮肤贴图（程序皮肤 entity_skin_default/alex.png 64×32，
-// 或 pack 命中后 Core 侧裁切重排的 64×32 族）按 MC 标准 box-UV 采样对应部位纹素——与 ArmorLayerBox
+// 用途：玩家身体各部件（头/躯干/臂/腿）从共享皮肤贴图（程序皮肤 entity_skin_default/alex.png 128×64
+// （t747 高清重绘，布局 = 64×32 基准 ×2 → UV 分数不变），或 pack 命中后 Core 侧裁切重排的 64×32 族）
+// 按 MC 标准 box-UV 采样对应部位纹素——与 ArmorLayerBox
 // （t718）/ MobModel（R19 C3）同公式同坐标系换算：本工程左手系（+X 右 / +Y 上 / -Z 前）vs MC 右手系
 // （+Z 前）水平差 180° → 面 remap +X↔-X、+Z↔-Z；MC v 向下增 vs Qt 图像顶↔v=1 → v 翻。本工程 -Z 前
 // 采 MC +Z Front 区 = 皮肤脸区（程序/pack 皮肤脸都画在 Front，build_entities_pack.py draw_skin 实测）。
+//   t747：皮肤盒六面是绕盒连续展开条带，+X/+Y/-Z 三面旧 u 方向把「贴脸区边界的前缘（鬓角/耳发）」接反
+//   （头部耳朵前后反的根因），已按环形连续性修正——推导见 playerskinbox.cpp kFace 注释。
 // 几何是 ±0.5 居中单位盒（同 UnitCube/ArmorLayerBox 基准 → Main.qml 既有 position/scale 直接沿用）。
 //
 // piece 部位（MC 64×32 皮肤布局 textureOffset + size；与 build_entities_pack.py draw_skin 的

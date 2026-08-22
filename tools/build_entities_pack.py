@@ -21,11 +21,10 @@ Nightwalker / Blaze→燃烬者 Emberling）。
     铁灰壁（铆钉）+ 木底（棕板条）。
   - entity_enchant_book.png（64×32 整页区）：棕封 + 金边 + 白纸页（t732 附魔台悬浮书重贴图，
     供两页盒各取半区）。
-  - entity_skin_default.png（64×32 MC 皮肤布局）：头(0,0)8×8×8 / body(16,16)8×12×4 /
-    armR(40,16)4×12×4 / legR(0,16)4×12×4。蓝裤 + 棕发 + 肤色脸（程序版玩家默认皮肤，
-    t731 playerModel 第三人称贴图回退）。
-  - entity_skin_alex.png（64×32 同布局变体）：橙发 + 绿衣（细臂语义在本工程 UnitCube 拼装
-    模型上无区别，仅贴图配色）。
+  - entity_skin_default.png / entity_skin_alex.png（t747 升 **128×64 HD**：64×32 MC 皮肤布局 ×2 重绘，
+    发丝/眉眼（眼白+虹膜+瞳孔+高光）/布纹织理/缝线/鞋底加密；盒区比例不变 → UV 分数不变。侧脸鬓角按
+    模板方向贴脸区前缘，alex 右颊长发盖耳——侧脸前后方向的可视校验标记）：头(0,0) / body(32,32) /
+    armR(80,32) / legR(0,32)（均 ×2 基准坐标）。蓝衣棕发（default）/ 橙发绿衣棕裤（alex）。
 
 输出（覆盖写入 textures/；**不进图集**——实体贴图走独立 Texture）：
   entity_nightwalker.png / entity_nightwalker_eyes.png / entity_emberling.png /
@@ -64,17 +63,18 @@ def canvas():
 
 
 def rect(img, x0, y0, x1, y1, c):
+    # t747：钳制边界改随 img 实际尺寸（原用模块级 W/H=64×32，会截掉 128×64 HD 皮肤的下半）。
     px = img.load()
-    for y in range(max(0, y0), min(H, y1)):
-        for x in range(max(0, x0), min(W, x1)):
+    for y in range(max(0, y0), min(img.height, y1)):
+        for x in range(max(0, x0), min(img.width, x1)):
             px[x, y] = c
 
 
 def speckle(img, rng, x0, y0, x1, y1, c, density_num, density_den):
-    """区域内确定性撒点（密度 n/d）。"""
+    """区域内确定性撒点（密度 n/d）。t747：钳制随 img 实际尺寸（同 rect）。"""
     px = img.load()
-    for y in range(max(0, y0), min(H, y1)):
-        for x in range(max(0, x0), min(W, x1)):
+    for y in range(max(0, y0), min(img.height, y1)):
+        for x in range(max(0, x0), min(img.width, x1)):
             if px[x, y][3] > 0 and rng.next(1, density_den) <= density_num:
                 px[x, y] = c
 
@@ -213,48 +213,148 @@ def draw_enchant_book():
     return img
 
 
-# ── 玩家皮肤（t731 第三人称贴图）──
+# ── 玩家皮肤（t731 第三人称贴图；t747 升 128×64 高清重绘）──
+# 布局 = 64×32 MC 皮肤基准 ×2（盒区坐标全部 ×2，PlayerSkinBox 的 UV 是分数（分母钉 64×32）→ 同分数
+# 自动适配，无需改 C++）。细节加密（非最近邻放大）：1px 发丝 / 眉眼（眼白+虹膜+瞳孔+高光）/ 布纹织理 /
+# 缝线 / 鞋底。两侧脸区**按模板方向**画鬓角（贴脸区边界的前缘：右脸区 [0,16) 在大 u 端 x→16、左脸区
+# [32,48) 在小 u 端 x=32——t747 UV 修正后此处即渲染为脸颊前方），且左右发长不对称（alex 明显、default
+# 刘海微差）= 侧脸前后方向的常驻可视校验标记。
+SKIN_W, SKIN_H = 128, 64
+
+
+def _weave(img, x0, y0, x1, y1, base, lo, hi):
+    """布纹织理（4px 周期棋盘点：暗/亮经纬线交织；只覆不透明像素）。"""
+    px = img.load()
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            if px[x, y][3] > 0:
+                if (x + y) % 4 == 0:
+                    px[x, y] = lo
+                elif (x + y) % 4 == 2:
+                    px[x, y] = hi
+
+
+def _strands(img, xs, y0, y1, c_a, c_b):
+    """1px 波浪发丝列（每 3 行左右各偏 1px，读作发流）。"""
+    px = img.load()
+    for i, x in enumerate(xs):
+        c = c_a if i % 2 == 0 else c_b
+        for y in range(y0, y1):
+            xx = x + (1 if (y // 3) % 2 == 0 else 0)
+            if 0 <= xx < img.width:
+                px[xx, y] = c
+
+
 def draw_skin(variant):
-    """variant=default：蓝裤 + 棕发 + 肤色脸；variant=alex：橙发 + 绿衣。"""
-    img = canvas()
+    """variant=default：蓝衣 + 棕发 + 肤色脸；variant=alex：橙发（不对称长发）+ 绿衣 + 棕裤。"""
+    img = Image.new("RGBA", (SKIN_W, SKIN_H), (0, 0, 0, 0))
     rng = Rng(7311 if variant == "default" else 7312)
     if variant == "default":
         skin, skin_hi = (198, 156, 112, 255), (222, 178, 130, 255)
-        hair = (58, 40, 26, 255)
+        hair, hair_hi, hair_lo = (58, 40, 26, 255), (78, 56, 34, 255), (42, 28, 18, 255)
         shirt, shirt_d = (56, 132, 178, 255), (40, 100, 142, 255)
-        pants, pants_d = (52, 62, 128, 255), (38, 46, 96, 255)
-        shoe = (60, 50, 42, 255)
-    else:  # alex
+        pants, pants_d, pants_hi = (52, 62, 128, 255), (38, 46, 96, 255), (66, 78, 150, 255)
+        shoe, shoe_hi, sole = (60, 50, 42, 255), (82, 68, 54, 255), (40, 32, 26, 255)
+        iris, pupil = (70, 96, 150, 255), (28, 30, 38, 255)
+    else:  # alex：橙发不对称（右颊长发盖耳 + 额发偏右）+ 绿衣 + 棕裤 + 灰棕靴
         skin, skin_hi = (232, 188, 150, 255), (244, 206, 168, 255)
-        hair = (216, 122, 52, 255)
+        hair, hair_hi, hair_lo = (216, 122, 52, 255), (236, 152, 84, 255), (184, 96, 38, 255)
         shirt, shirt_d = (96, 158, 88, 255), (72, 126, 66, 255)
-        pants, pants_d = (128, 96, 72, 255), (100, 74, 54, 255)
-        shoe = (92, 70, 54, 255)
-    # 头 (0,0)8×8×8：顶=发 / 前=脸（发际 + 肤 + 眼）/ 侧=发+肤 / 背=发 / 底=肤。
-    paint_box(img, 0, 0, 8, 8, 8, top=hair, bot=skin, side=skin, front=skin, back=hair)
-    # 脸细节（前面 (8..16, 8..16)）：发际 2 行 + 双眼（白 + 瞳）+ 嘴影。
-    rect(img, 8, 8, 16, 10, hair)
-    rect(img, 9, 11, 11, 13, (255, 255, 255, 255))
-    rect(img, 13, 11, 15, 13, (255, 255, 255, 255))
-    rect(img, 10, 11, 11, 13, (56, 44, 38, 255))
-    rect(img, 14, 11, 15, 13, (56, 44, 38, 255))
-    rect(img, 11, 14, 13, 15, shade(skin, 0.82))
-    rect(img, 8, 15, 16, 16, skin_hi)
-    # 侧面发区（头顶到上段）。
-    rect(img, 0, 8, 8, 12, hair)
-    rect(img, 16, 8, 24, 12, hair)
-    rect(img, 24, 8, 32, 16, hair)
-    # body (16,16)8×12×4：上衣 + 下摆裤腰。
-    paint_box(img, 16, 16, 8, 12, 4, top=shirt, bot=pants_d, side=shirt_d, front=shirt, back=shirt_d)
-    rect(img, 16, 27, 40, 32, pants)                       # 侧带下段裤腰
-    speckle(img, rng, 16, 16, 40, 28, shirt_d, 1, 8)
-    # armR (40,16)4×12×4：袖（上衣色上半）+ 肤（手下半）。
-    paint_box(img, 40, 16, 4, 12, 4, top=shirt, bot=skin, side=shirt_d, front=shirt, back=shirt_d)
-    rect(img, 40, 23, 56, 32, skin)                        # 侧带下段手
-    rect(img, 40, 22, 56, 23, shade(shirt, 0.9))           # 袖口
-    # legR (0,16)4×12×4：裤 + 鞋底 2 行。
-    paint_box(img, 0, 16, 4, 12, 4, top=pants, bot=shoe, side=pants_d, front=pants, back=pants_d)
-    rect(img, 0, 30, 16, 32, shoe)
+        pants, pants_d, pants_hi = (128, 96, 72, 255), (100, 74, 54, 255), (144, 110, 82, 255)
+        shoe, shoe_hi, sole = (86, 72, 60, 255), (106, 90, 74, 255), (56, 46, 38, 255)
+        iris, pupil = (64, 124, 76, 255), (30, 32, 30, 255)
+    skin_lo = shade(skin, 0.84)
+
+    # ── 头 (0,0) 16×16×16：条带 y∈[16,32)——右脸区[0,16) 脸区[16,32) 左脸区[32,48) 后区[48,64) ──
+    paint_box(img, 0, 0, 16, 16, 16, top=hair, bot=skin_lo, side=skin, front=skin, back=hair)
+    # 顶区 [16,32)×[0,16)：前后向发丝 + 分缝线（default 缝在角色左侧 x≈27 / alex 右侧 x≈21——不对称标记）。
+    _strands(img, [18, 22, 26, 30], 0, 16, hair_lo, hair_hi)
+    rect(img, 27 if variant == "default" else 21, 2, 28 if variant == "default" else 22, 16, hair_lo)
+    rect(img, 16, 15, 32, 16, hair_hi)                      # 前缘（贴脸区发际）亮一行
+    # 脸区 [16,32)×[16,32)：发际 4 行 + 不对称额发（default：角色左侧(x 大端)多垂 2 行；alex：右侧垂到眉下）。
+    rect(img, 16, 16, 32, 20, hair)
+    if variant == "default":
+        rect(img, 26, 20, 32, 22, hair)                     # 角色左侧额发微垂（不对称标记）
+    else:
+        rect(img, 16, 20, 26, 22, hair)                     # 角色右侧额发压到眉上（alex 标志性偏分）
+    _strands(img, [17, 20, 23, 28, 31], 16, 20, hair_lo, hair_hi)
+    # 眉（1 行 2 段；脸区小 u 端 = 角色右侧（t747 模板实测）→ 低 x 段是右眉）。
+    rect(img, 17, 22, 23, 23, hair_lo)
+    rect(img, 25, 22, 31, 23, hair_lo)
+    # 眼（y23-25，各 4 宽：眼白 2 + 虹膜 2，瞳孔靠内侧 = 正视；高光 1px）。
+    rect(img, 17, 23, 21, 26, (238, 238, 238, 255))         # 右眼眼白
+    rect(img, 19, 23, 21, 25, iris)
+    rect(img, 20, 23, 21, 25, pupil)
+    rect(img, 17, 23, 18, 24, (252, 252, 252, 255))         # 右眼高光
+    rect(img, 27, 23, 31, 26, (238, 238, 238, 255))         # 左眼眼白
+    rect(img, 27, 23, 29, 25, iris)
+    rect(img, 27, 23, 28, 25, pupil)
+    rect(img, 30, 23, 31, 24, (252, 252, 252, 255))         # 左眼高光
+    # 鼻（y26-27 中部 6 宽）+ 鼻底阴影。
+    rect(img, 21, 26, 27, 28, shade(skin, 0.87))
+    rect(img, 21, 27, 22, 28, shade(skin, 0.74))
+    rect(img, 26, 27, 27, 28, shade(skin, 0.74))
+    # 嘴（y29 唇线 + y30 下唇亮）+ 下巴亮行。
+    rect(img, 20, 29, 28, 30, shade(skin, 0.70))
+    rect(img, 21, 30, 27, 31, shade(skin, 0.88))
+    rect(img, 17, 31, 31, 32, skin_hi)
+    # 右脸区 [0,16)：发 + 鬓角贴**前缘（大 u 端 x→16，贴脸区边界）**——t747 UV 修正后此渲染在脸颊
+    #   前方（耳朵方向正确性的常驻标记）。alex 右颊长发盖耳（垂到 y28）。
+    cheek_hair_end = 24 if variant == "default" else 28
+    rect(img, 0, 16, 16, cheek_hair_end, hair)
+    rect(img, 0, cheek_hair_end, 16, 32, skin)
+    rect(img, 14, 24, 16, 28, hair)                         # 鬓角主体（前缘 2 列）
+    rect(img, 15, 28, 16, 30, hair_lo)                      # 鬓角尾梢
+    _strands(img, [2, 6, 10], 16, cheek_hair_end, hair_lo, hair_hi)
+    # 左脸区 [32,48)：镜像——鬓角贴前缘（小 u 端 x=32）；两变体左颊都短发。
+    rect(img, 32, 16, 48, 24, hair)
+    rect(img, 32, 24, 48, 32, skin)
+    rect(img, 32, 24, 34, 28, hair)
+    rect(img, 32, 28, 33, 30, hair_lo)
+    _strands(img, [36, 40, 44], 16, 24, hair_lo, hair_hi)
+    # 后区 [48,64)：满发 + 波浪发丝。
+    _strands(img, [50, 54, 58, 62], 16, 32, hair_lo, hair_hi)
+    # 底区（颈）[32,48)×[0,16)：肤色 + 颌底阴影 2 行。
+    rect(img, 32, 14, 48, 16, shade(skin, 0.80))
+
+    # ── body (32,32) 16×24×8：条带 y∈[40,64)——右侧[32,40) 前[40,56) 左侧[56,64) 后[64,80) ──
+    paint_box(img, 32, 32, 16, 24, 8, top=shirt, bot=pants_d, side=shirt_d, front=shirt, back=shirt_d)
+    _weave(img, 32, 40, 80, 54, shirt, shade(shirt, 0.88), shade(shirt, 1.08))   # 上衣布纹
+    rect(img, 47, 40, 49, 42, skin)                         # 领口颈肤
+    rect(img, 44, 42, 52, 43, shirt_d)                      # 领圈
+    rect(img, 71, 40, 72, 54, shirt_d)                      # 背中缝
+    if variant != "default":
+        rect(img, 64, 40, 80, 52, hair)                     # alex 长发垂背（后区上衣段覆发）
+        _strands(img, [66, 70, 74, 78], 40, 52, hair_lo, hair_hi)
+        rect(img, 40, 52, 56, 53, shade(shirt, 1.10))       # 下摆亮行
+    rect(img, 32, 54, 80, 56, pants_d)                      # 腰带
+    rect(img, 47, 54, 49, 56, (168, 150, 90, 255))          # 皮带扣
+    rect(img, 32, 56, 80, 64, pants)                        # 下摆裤腰
+    speckle(img, rng, 32, 56, 80, 64, pants_d, 1, 8)
+    rect(img, 47, 56, 48, 60, pants_d)                      # 门襟线
+
+    # ── armR (80,32) 8×24×8：条带 [80,112)×[40,64)（袖 12 行 + 袖口 2 + 手 10）──
+    paint_box(img, 80, 32, 8, 24, 8, top=shirt, bot=skin, side=shirt_d, front=shirt, back=shirt_d)
+    _weave(img, 80, 41, 112, 52, shirt, shade(shirt_d, 1.05), shade(shirt, 1.08))
+    rect(img, 80, 40, 112, 41, shade(shirt, 0.85))          # 肩缝
+    rect(img, 80, 52, 112, 54, shade(shirt, 0.80))          # 袖口
+    rect(img, 80, 54, 112, 55, shade(skin, 0.88))           # 袖口投影
+    rect(img, 80, 55, 112, 64, skin)                        # 手
+    speckle(img, rng, 80, 55, 112, 64, skin_hi, 1, 12)
+    rect(img, 88, 57, 96, 59, shade(skin, 0.90))            # 指节（前区）
+    for y in (34, 36, 38):                                  # 掌心底区 [96,104)×[32,40)：指缝线
+        rect(img, 96, y, 104, y + 1, shade(skin, 0.90))
+
+    # ── legR (0,32) 8×24×8：条带 [0,32)×[40,64)（裤 16 行 + 靴 8 行；大腿段=subV[0,0.5]=y[40,52)）──
+    paint_box(img, 0, 32, 8, 24, 8, top=pants, bot=sole, side=pants_d, front=pants, back=pants_d)
+    speckle(img, rng, 0, 40, 32, 56, pants_d, 1, 10)
+    rect(img, 11, 40, 13, 56, shade(pants, 0.90))           # 前区挺缝线
+    rect(img, 8, 46, 16, 48, pants_hi)                      # 膝盖亮部（前区）
+    rect(img, 0, 56, 32, 58, shoe_hi)                       # 靴口
+    rect(img, 0, 58, 32, 62, shoe)
+    for x in range(9, 15, 2):                               # 靴带（前区）
+        rect(img, x, 58, x + 1, 59, shoe_hi)
+    rect(img, 0, 62, 32, 64, sole)                          # 鞋底
     return img
 
 
