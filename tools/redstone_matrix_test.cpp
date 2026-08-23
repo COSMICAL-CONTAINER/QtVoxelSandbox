@@ -2312,10 +2312,11 @@ int main(int argc, char *argv[])
     // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火焚毁）──
     //   用户报告（R19.12）：「打火石对着木头制品右键点燃 + 蔓延」「打火石对苦力怕右键引爆」「往火里丢
     //   物品被烧掉（参考岩浆）」。三段断言（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
-    //   (a) 木墙蔓延烧毁：石台上 6 连木板墙 + 端点火格 → 驱动 tickFire（每 5 调 = 1 判定窗，0.5s/窗）600 窗
-    //       （300s，逐邻独立 5%/窗 → 每块期望 ~10s，链式 ~60-120s + 余量）→ 全部木板被吞（blockAt 全非
-    //       Planks）、火最终无燃料自熄（全 Air）；烧毁走 setBlock(Fire) 放置语义 → blockBroken(Planks)
-    //       恒 0（烧毁无掉落，区别于破块链）；
+    //   (a) 木墙蔓延烧毁：石台上 6 连木板墙 + 端点火格 → 驱动 tickFire（每 5 调 = 1 判定窗，0.5s/窗）1000 窗
+    //       （500s；review-g #5 叠加补偿后逐邻独立 2.5%/窗 → 每块期望 ~20s、链式 ~2min，1000 窗 = 期望 25 次
+    //       点燃对 6 块需求 ≈ -3.9σ 裕量——600 窗在 2.5% 下裕量收窄到 ~0.6% 假 FAIL 率，按新概率调宽）→
+    //       全部木板被吞（blockAt 全非 Planks）、火最终无燃料自熄（全 Air）；烧毁走 setBlock(Fire) 放置
+    //       语义 → blockBroken(Planks) 恒 0（烧毁无掉落，区别于破块链）；
     //   (b) Stalker 打火石引爆：远场监听（>> kDetectRange 不追踪）+ playerTargetable=false（旧 !targetable
     //       门会清 fuseTimer 并跳过 aiStalker——本断言兼证 t804 的门豁免）→ igniteStalkerFlint 返 true；
     //       猪（非 Stalker）同调用返 false（类型拒）；点燃后原地 ~1.5s 引爆（爆炸恰一次、引爆时刻 ∈
@@ -2351,8 +2352,8 @@ int main(int argc, char *argv[])
         for (int dx = 0; dx <= 7; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
         for (int dx = 1; dx <= 6; ++dx) w.setBlock(x0 + dx, ty, z0, BR::Planks, 0);
         w.setBlock(x0, ty, z0, BR::Fire, 0);
-        for (int win = 0; win < 600; ++win)
-            for (int k = 0; k < 5; ++k) w.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）
+        for (int win = 0; win < 1000; ++win)
+            for (int k = 0; k < 5; ++k) w.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）；窗宽随 2.5% 调（见上注）
         int planksLeft = 0, firesLeft = 0;
         for (int dx = 0; dx <= 7; ++dx) {
             const quint8 b = w.blockAt(x0 + dx, ty, z0);
@@ -5329,8 +5330,9 @@ int main(int argc, char *argv[])
     //   (a) 门下格被邻火点燃的**那次 tickFire 调用内**，上格一并变 Fire —— 修前上格非火的 6 邻（隔一
     //       格对角），只能等下格火后续窗独立蔓延 → 首次观测下格 Fire 时上格仍是 WoodDoor → FAIL；
     //   (b) 对照石柱（不可燃）同布局永不被吞。
-    //   确定性：火源 6 邻仅门下格可燃（无燃料不熄灭路径被 hasFuel 门挡）→ 点燃只是时间问题（5%/窗，
-    //   上限 3000 窗，P(未燃)≈0.95^3000≈1e-67）；harness 只驱动 tickFire（无雨 / 无风灭混淆源）。
+    //   确定性：火源 6 邻仅门下格可燃（无燃料不熄灭路径被 hasFuel 门挡）→ 点燃只是时间问题（2.5%/窗
+    //   ——review-g #5 叠加补偿后；上限 3000 窗，P(未燃)≈0.975^3000≈e^-76）；harness 只驱动 tickFire
+    //   （无雨 / 无风灭混淆源）。
     {
         // rig 寻址：运行期扫描空区（P20 先例）。火源 + 门 2 格 + 石柱 2 格 + 隔离边 → 7×6×6。
         int x0 = -1, z0 = -1;
@@ -5964,6 +5966,168 @@ int main(int argc, char *argv[])
                              "incl. passive), shambler cage correctly suppressed by hostile global cap, "
                              "hostileCount stays 30 (MC 1.0 spawner not bound by ambient hostile cap; "
                              "same-type local cap + total kCap remain, manual check)";
+    }
+
+    // ── Review 2026-08-23 #5 火蔓延抑制层探针（① 新蔓延率统计 / ② 湿燃料防火带 / ③ 火自身邻水加速自熄 /
+    //    ④ 降雨露天自熄 + 屋檐对照）──
+    // 背景：t804 逐邻独立掷 5%/窗（提速 6×）且全程无雨 / 水抑制 → 多火源叠加（k 火格包围每窗 1-0.95^k，
+    //   k=2~3 → 10~14%/窗 ≈ 3~6s/块）下木建筑几十秒烧穿、雨天不灭火、水邻不阻蔓延（玩家误点火无反制，
+    //   且烧毁 setBlock(Fire) 无掉落不可逆）。review-g 修法 = 抑制层最小版（火语义重做留 dev-plan t843，
+    //   抑制判定收口 World::fireRainExposedAt / fireWaterNeighborAt 两函数供整体搬走）：
+    //   ① 叠加补偿：逐邻 5% → 2.5%（kFireSpreadPermille=25‰）；② 火格露天降雨 / 自身 6 邻含水 →
+    //   kFireSuppressExtinguishPct=40%/窗 加速自熄（压过燃料）+ 蔓延掷骰减半；③ 蔓延目标格 6 邻含水 →
+    //   湿燃料不点燃（水格周围 1 圈 = 防火带）。
+    // 四段断言（专用局部世界 seed 9，P30/P31 先例；seed 9 丘陵地形可达 y44+ 无保证净空层 → (a)-(c)
+    //   rig 带自凿清空（晴天态抑制判定不看 skyLight，埋地不混淆）；(d) 扫描真天空列 + skyLight 前置）：
+    // (a) 新率统计（晴天默认态，无抑制混淆源）：24 条独立泳道（火 + 贴邻木板），每窗点燃即复原木板再继续
+    //     → 每泳道每窗恰 1 个 Bernoulli 样本，800 窗 × 24 = 19200 样本 → 点燃率落 [2.0%, 3.0%]（期望 2.5%，
+    //     σ≈21.6/480 ≈ ±4.4σ 裕量；5% 旧值 → ~960 远超上界、t724 旧 0.83% → ~160 远低下界，两代旧率均
+    //     被排除）；末窗 24 火全存活（有燃料 + 晴天 → 无自熄路径，确定性——顺带锁「无抑制不误熄」）。
+    // (b) 湿燃料防火带（确定性）：火-木板-水一线（水邻木板、距火 2 格不抑制火格自身）→ 300 窗木板原样
+    //     + 火仍存活（火有燃料不熄、每次掷骰被湿燃料判定拦下——非概率断言）。
+    // (c) 火自身邻水加速自熄：火 6 邻含 水 + 燃料板（水在火正上方）→ 200 窗内火灭（P(幸存)=0.6^200≈1e-44；
+    //     燃料板可能被濒死火余烬（减半 1.2%）点燃，新火无燃料 5%/窗亦熄 → 终态两格均非 Fire）。
+    // (d) 降雨露天自熄 + 屋檐对照：tickWeather 大步长驱动状态机强制降水（Clear→降水必翻；雷态翻转回避
+    //     strikeLightning 随机落点——rig 木料此时尚未放置，雷击焚木走 setBlock(Air) 不产生 Fire 格，混不进
+    //     tickFire）→ 露天火（skyLightAt==15 + 该列 isPrecipitatingAt 前置校验）带燃料 200 窗内熄灭；
+    //     对照：同列隔 8 格加石板屋顶（火格 skyLight<15 前置校验）→ 若火熄则其燃料板必已被吞（火只可能
+    //     烧完燃料自然熄，不可能被雨杀——淋不到；杀错 = 抑制判定漏了遮挡门）。结束恢复 Clear（卫生）。
+    {
+        World wG5;
+        wG5.setWidth(96);
+        wG5.setDepth(96);
+        wG5.setHeight(48);
+        wG5.setSeed(9);
+        const int gy = 41; // rig 层（seed 9 丘陵地形可达 y44+——rig 带自凿清空，露天 rig 才用真天空列）
+        bool okA = false, okB = false, okC = false, okD = false;
+        double rateA = -1.0;
+        int firesA = -1;
+        QString diagA, diagD;
+
+        // ── (a) 新蔓延率统计（24 泳道 × 800 窗；晴天默认态）──
+        // seed 9 丘陵地形可达 y44+（固定「高空层」不存在）→ rig 带整片自凿清空（P31「凿进石里」先例；
+        //   (a)-(c) 不依赖露天——晴天态 fireRainExposedAt 全局早退不看 skyLight）。泳道网格 8 列(x 步 4)
+        //   × 3 行(z 步 3)：火(x)+板(x+1)，净空带外扩 1 格 → 泳道间互不邻接、每火恰 1 个可燃邻。
+        constexpr int kLanesG5 = 24;
+        const auto laneX = [](int k) { return 8 + 4 * (k % 8); };
+        const auto laneZ = [](int k) { return 4 + 3 * (k / 8); };
+        for (int k = 0; k < kLanesG5; ++k) {
+            const int fx = laneX(k), fz = laneZ(k);
+            for (int dx = -1; dx <= 2; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        wG5.setBlock(fx + dx, gy + dy, fz + dz, BR::Air, 0); // 凿净空（火/板全部 6 邻 + 上窜位）
+        }
+        int hitsA = 0;
+        for (int k = 0; k < kLanesG5; ++k) {
+            wG5.setBlock(laneX(k), gy, laneZ(k), BR::Fire, 0);       // 火源（邻木板恒有燃料 → 晴天无自熄路径）
+            wG5.setBlock(laneX(k) + 1, gy, laneZ(k), BR::Planks, 0); // 贴邻木板（唯一可燃邻；泳道间距 ≥3 隔离）
+        }
+        for (int win = 0; win < 800; ++win) {
+            for (int t = 0; t < 5; ++t) wG5.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）
+            for (int k = 0; k < kLanesG5; ++k) { // 点燃即复原（下窗再掷——每泳道每窗恰 1 样本）
+                if (wG5.blockAt(laneX(k) + 1, gy, laneZ(k)) == BR::Fire) {
+                    ++hitsA;
+                    wG5.setBlock(laneX(k) + 1, gy, laneZ(k), BR::Planks, 0);
+                }
+            }
+        }
+        firesA = 0;
+        for (int k = 0; k < kLanesG5; ++k)
+            if (wG5.blockAt(laneX(k), gy, laneZ(k)) == BR::Fire) ++firesA;
+        rateA = double(hitsA) / (double(kLanesG5) * 800.0);
+        okA = firesA == kLanesG5 && rateA >= 0.020 && rateA <= 0.030;
+        if (!okA)
+            diagA = QStringLiteral("hits %1 fires %2 rate %3%")
+                        .arg(hitsA).arg(firesA).arg(rateA * 100.0, 0, 'f', 2);
+
+        // ── (b) 湿燃料防火带（确定性：水邻木板永不被点燃）── rig 行 z=80（泳道网格 z≤11 之外）
+        for (int dx = 11; dx <= 15; ++dx)
+            for (int dz = 79; dz <= 81; ++dz)
+                for (int dy = -1; dy <= 2; ++dy)
+                    wG5.setBlock(dx, gy + dy, dz, BR::Air, 0); // 净空带（火/板/水全部 6 邻 + 上窜位）
+        wG5.setBlock(12, gy, 80, BR::Fire, 0);   // 火（水距火 2 格不在其 6 邻——火自身不被抑制）
+        wG5.setBlock(13, gy, 80, BR::Planks, 0); // 木板（右侧邻水 → 湿燃料）
+        wG5.setBlock(14, gy, 80, BR::Water, 0);  // 水（harness 不驱动 tickWaterFlow → 静止不漫）
+        for (int win = 0; win < 300; ++win)
+            for (int t = 0; t < 5; ++t) wG5.tickFire();
+        okB = wG5.blockAt(13, gy, 80) == BR::Planks  // 木板原样（掷骰被湿燃料判定拦下，非概率）
+             && wG5.blockAt(12, gy, 80) == BR::Fire; // 火有燃料仍存活（水不在火的 6 邻）
+
+        // ── (c) 火自身邻水加速自熄（火正上方邻水 + 侧邻燃料板）── rig 行 z=82
+        for (int dx = 11; dx <= 15; ++dx)
+            for (int dz = 81; dz <= 83; ++dz)
+                for (int dy = -1; dy <= 3; ++dy)
+                    wG5.setBlock(dx, gy + dy, dz, BR::Air, 0); // 净空带（含水悬位 gy+1 一并清）
+        wG5.setBlock(12, gy, 82, BR::Fire, 0);      // 火（6 邻：正上水 + 右燃料板 → 抑制态且有燃料）
+        wG5.setBlock(13, gy, 82, BR::Planks, 0);    // 燃料板（与 (b) 的水不相邻——对角非 6 邻）
+        wG5.setBlock(12, gy + 1, 82, BR::Water, 0); // 水悬在火正上方（harness 不跑流体 → 不落）
+        for (int win = 0; win < 200; ++win)
+            for (int t = 0; t < 5; ++t) wG5.tickFire();
+        okC = wG5.blockAt(12, gy, 82) != BR::Fire    // 火灭（40%/窗 × 200 窗，P(幸存)≈1e-44）
+             && wG5.blockAt(13, gy, 82) != BR::Fire; // 板若被余烬点燃，新火无燃料亦熄（终态非 Fire）
+
+        // ── (d) 降雨露天自熄 + 屋檐对照 ──
+        // 强制降水：大步长 tickWeather 驱动状态机（Clear→降水必翻；Thunder=3 翻转回避雷击）。rig 木料
+        //   尚未放置 → 即使路过雷态，雷击焚木 setBlock(Air) 不产生 Fire 格，混不进后续 tickFire。
+        bool precip = false;
+        for (int i = 0; i < 60 && !precip; ++i) {
+            wG5.tickWeather(1.0e6);
+            const int st = wG5.weatherState(); // World::Weather int 编码：Clear=0/Rain=1/Snow=2/Thunder=3
+            precip = (st == 1 || st == 2);
+        }
+        // rig 列：露天组 x=12..13 / 屋檐组 x=20..21 同 z —— 两列都须正降水（biomeAt 低频，两列同群系；
+        //   沙漠列恒 Clear 被跳过重扫）+ 放置格全空（露天真天空，不凿——skyLight 前置即证头顶无遮挡）。
+        //   z 从 12 起（泳道网格带 z≤11）且跳过 (b)/(c) rig 行 ±1（其火 / 水不混入本 rig 邻域）。
+        int zR = -1;
+        for (int z = 12; z < 92 && zR < 0; ++z) {
+            if (z >= 79 && z <= 83) continue; // (b)/(c) rig 行及其邻行
+            if (!wG5.isPrecipitatingAt(12, z) || !wG5.isPrecipitatingAt(20, z)) continue;
+            if (wG5.blockAt(12, gy, z) != BR::Air || wG5.blockAt(13, gy, z) != BR::Air) continue;
+            if (wG5.blockAt(20, gy, z) != BR::Air || wG5.blockAt(21, gy, z) != BR::Air) continue;
+            if (wG5.blockAt(20, gy + 2, z) != BR::Air) continue; // 屋顶位
+            zR = z;
+        }
+        if (precip && zR >= 0) {
+            wG5.setBlock(12, gy, zR, BR::Fire, 0);      // 露天火
+            wG5.setBlock(13, gy, zR, BR::Planks, 0);    // 露天燃料板
+            wG5.setBlock(20, gy, zR, BR::Fire, 0);      // 屋檐火（正上隔 1 格空气 + 石板）
+            wG5.setBlock(21, gy, zR, BR::Planks, 0);    // 屋檐燃料板
+            wG5.setBlock(20, gy + 2, zR, BR::Stone, 0); // 屋顶（火格头顶遮挡 → skyLight<15 淋不到）
+            const bool preSky = wG5.skyLightAt(12, gy, zR) >= 15 && wG5.skyLightAt(20, gy, zR) < 15;
+            for (int win = 0; win < 200; ++win)
+                for (int t = 0; t < 5; ++t) wG5.tickFire();
+            // 露天火：40%/窗 × 200 窗 → 必熄（setBlock Air）；屋檐火：不被雨杀——若熄必因燃料板已被吞
+            //   （自然烧完；板被吞后无燃料 5%/窗自熄），被雨误杀 = 板仍在却火没了 → FAIL。
+            okD = preSky && wG5.blockAt(12, gy, zR) == BR::Air
+                 && (wG5.blockAt(20, gy, zR) == BR::Fire || wG5.blockAt(21, gy, zR) != BR::Planks);
+            if (!okD)
+                diagD = QStringLiteral("precip %1 zR %2 preSky %3 openFire %4 roofFire %5 roofPlank %6")
+                            .arg(wG5.weatherState()).arg(zR).arg(preSky)
+                            .arg(int(wG5.blockAt(12, gy, zR)))
+                            .arg(int(wG5.blockAt(20, gy, zR)))
+                            .arg(int(wG5.blockAt(21, gy, zR)));
+            wG5.tickWeather(1.0e6); // 降水→Clear 必翻（卫生还原；后续无探针依赖，防御性）
+        } else {
+            diagD = QStringLiteral("precip %1 zR %2").arg(wG5.weatherState()).arg(zR);
+        }
+
+        const bool okG5 = okA && okB && okC && okD;
+        if (!okG5) {
+            qInfo().noquote() << "  [review-g #5 diag] A:" << okA << diagA
+                              << "| B:" << okB << "| C:" << okC
+                              << "| D:" << okD << diagD;
+        }
+        if (!okG5) ++totalFail;
+        qInfo().noquote() << (okG5 ? "PASS" : "FAIL")
+                          << "| review-g #5 fire suppression layer: per-neighbor spread compensated 5%->"
+                             "2.5% (19200-sample lane statistics inside 2.0-3.0% band, all fueled fires "
+                             "survive clear weather), water-adjacent target never ignites (moat firebreak, "
+                             "deterministic), water-adjacent fire self-extinguishes fast (~40%/window "
+                             "suppression beats fuel), open-sky rain kills fueled fire within 200 windows "
+                             "while roofed control fire only dies by consuming its own fuel (skyLight<15 "
+                             "not rained on); suppression predicates factored into "
+                             "fireRainExposedAt/fireWaterNeighborAt for t843 fire-semantics redo to adopt";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

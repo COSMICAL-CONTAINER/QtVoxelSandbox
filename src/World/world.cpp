@@ -1447,6 +1447,9 @@ void World::tickLavaFlow()
 //   lessons perf-fluid-scan：绝不全图扫描）。写入走 4 参数 setBlock（火格写入低频 —— 每窗至多每格 1 写，
 //   无需 lava 式批量收口；setBlock 发 blockBroken/blockPlaced → 破块粒子/音 + Main.qml fireHost delegate
 //   挂卸自动跟随）。
+//   Review 2026-08-23 #5 抑制层最小版（语义重做留 t843）：露天降雨 / 邻水 → 加速自熄 + 蔓延掷骰减半 +
+//   湿燃料（目标 6 邻含水）不点燃；逐邻蔓延 5%→2.5% 叠加补偿。抑制判定收口 fireRainExposedAt /
+//   fireWaterNeighborAt（紧随本函数，t843 整体搬走）。
 //   快照校验：迭代中 setBlock 会增删 m_fireCells（重入 noteFireWrite）→ 先拷贝键集再遍历；blockAt != Fire
 //   的陈旧项（防御：批量直写路径漏 note 时不崩）直接跳过不误判。
 void World::tickFire()
@@ -1468,40 +1471,57 @@ void World::tickFire()
         if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) continue; // 越界防御
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Fire) continue;     // 陈旧项跳过
 
-        // (a) 寿命：6 邻（kNb 已含下方 {0,-1,0}）均无可燃方块 → 火无燃料，按概率自熄（setBlock Air → blockBroken
-        //     粒子/音 + QML fireHost 收 delegate + noteFireWrite 移除索引）。机制等价 MC 无燃料火渐熄。
-        //     审查修 B13（t724-t729 复盘）：旧注释写「6 邻 + 下方」——kNb[6] 本身含下方，逻辑对注释误导，改准。
-        bool hasFuel = false;
+        // (a) 寿命 + 环境抑制：6 邻（kNb 已含下方 {0,-1,0}）均无可燃方块 → 火无燃料，按概率自熄（setBlock
+        //     Air → blockBroken 粒子/音 + QML fireHost 收 delegate + noteFireWrite 移除索引）。机制等价 MC
+        //     无燃料火渐熄。审查修 B13（t724-t729 复盘）：旧注释写「6 邻 + 下方」——kNb[6] 本身含下方，
+        //     逻辑对注释误导，改准。
+        //     Review 2026-08-23 #5：露天降雨（fireRainExposedAt）或自身 6 邻含水（燃料扫描顺带采集）→
+        //     抑制态，按 kFireSuppressExtinguishPct 加速自熄——**压过燃料**（被雨浇 / 水泡的火即使邻着
+        //     可燃物也在熄灭中：雨天 / 水桶是玩家对火势的反制手段）。抑制态幸存火不 continue：仍走 (b)
+        //     但掷骰减半（余烬被浇时偶尔溅火星，非硬停）；本窗掷中熄灭则不再外传。
+        bool hasFuel = false, waterAdjacent = false;
         for (const auto &n : kNb) {
             const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
             if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
-            if (BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) { hasFuel = true; break; }
+            const quint8 nbId = m_chunks.blockAt(nx, ny, nz);
+            if (BlockRegistry::flammable(nbId)) hasFuel = true;          // 燃料（可燃邻）
+            else if (nbId == BlockRegistry::Water) waterAdjacent = true; // #5 邻水（抑制源之一，同扫顺采免二次遍历）
+            if (hasFuel && waterAdjacent) break;                         // 两态齐知 → 早退
         }
-        if (!hasFuel) {
+        const bool rainExposed = fireRainExposedAt(x, y, z); // #5 露天降雨（晴天全局早退，近零开销）
+        const bool suppressed = rainExposed || waterAdjacent;
+        if (!hasFuel || suppressed) {
             const quint32 hv = hashVoxel(m_seed ^ 0xF177, x, y, z) ^ (quint32(m_fireIntervalIndex) * 2654435761u);
-            if ((hv % 100u) < unsigned(kFireExtinguishPct))
+            const int extinguishPct = suppressed ? kFireSuppressExtinguishPct : kFireExtinguishPct;
+            if ((hv % 100u) < unsigned(extinguishPct))
                 setBlock(x, y, z, BlockRegistry::Air);
-            continue; // 无燃料火本窗不做蔓延 / 上窜（燃料都不在，谈不上烧过去）
+            if (!hasFuel) continue; // 无燃料火本窗不做蔓延 / 上窜（燃料都不在，谈不上烧过去）
+            if (m_chunks.blockAt(x, y, z) != BlockRegistry::Fire) continue; // 抑制掷中已熄 → 本窗不再外传
         }
 
         // 安全阀：活跃火格超 cap → 本窗不再新增（既有火照常走 (a) 熄灭收敛；防链式大火烧穿重建预算）。
         if (int(m_fireCells.size()) > kFireCellCap) continue;
 
-        // (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPct（每邻每窗 5%），邻格为可燃方块 → 点燃（setBlock
-        //     Fire → blockPlaced + QML delegate 挂载 + noteFireWrite 入索引，下窗作为新火格继续判定 → 链式
-        //     烧穿木屋）。可燃物本体被火替换（机制等价 MC 火吞可燃物；非「可燃物旁生火」——蔓延即燃烧，
-        //     木块变火格，无掉落：setBlock(Fire) 走放置语义，不发 blockBroken / 不走挖块掉落链）。
-        //     t804 修「点不然木头」体感：旧版每窗只随机挑 1/6 邻掷 5% → 单块可燃物被吞期望 ~60s（5%×1/6
-        //     /0.5s），打火石点了火眼看木墙久不烧 → 用户报「打火石点不然木制品」。改逐邻独立掷 → 每块
-        //     ~10s（5%/0.5s，与头注释既有「~10s/格，烧穿木屋的链式节奏」文档对齐）。逐邻掷须邻间独立：
-        //     哈希混入邻格坐标（x*3+nx 等 6 邻互异）防同一掷值复用于多邻。kFireCellCap 安全阀不变。
+        // (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPermille（#5 叠加补偿后 2.5%/邻/窗；t804 逐邻独立掷修
+        //     「点不然木头」体感：旧版每窗只随机挑 1/6 邻掷 5% → 单块期望 ~60s，打火石点了火眼看木墙久
+        //     不烧 → 用户报「打火石点不然木制品」）。#5 叠加补偿：逐邻 5% 时被 k 个火格包围的块每窗
+        //     1-(1-p)^k（k=2~3 → 10~14%/窗 ≈ 3~6s/块），多火源下木屋几十秒烧穿且无反制 → 降到 2.5%
+        //     （k=2 → ~5%/窗 ≈ 10s/块；单点燃 ~20s/块，兼顾两体感）。抑制态幸存火掷骰减半
+        //     （kFireSpreadDampPermille）。#5 湿燃料：目标格自身 6 邻含水（fireWaterNeighborAt）→ 不点燃
+        //     （水格周围 1 圈 = 防火带；机制等价 MC 水邻难燃，玩家泼出的水即火势边界）。
+        //     可燃物本体被火替换（机制等价 MC 火吞可燃物；蔓延即燃烧，木块变火格，无掉落：setBlock(Fire)
+        //     走放置语义，不发 blockBroken / 不走挖块掉落链）。逐邻掷须邻间独立：哈希混入邻格坐标
+        //     （x*3+nx 等 6 邻互异）防同一掷值复用于多邻；掷基 1000（‰）承接 2.5% 半个百分点粒度。
+        //     kFireCellCap 安全阀不变。
+        const int spreadPermille = suppressed ? kFireSpreadDampPermille : kFireSpreadPermille;
         for (const auto &n : kNb) {
             const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
             if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
             if (!BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) continue;
+            if (fireWaterNeighborAt(nx, ny, nz)) continue; // #5 湿燃料（目标 6 邻含水）→ 防火带内不点燃
             const quint32 hv = hashVoxel(m_seed ^ 0xF179, x * 3 + nx, y * 3 + ny, z * 3 + nz)
                                ^ (quint32(m_fireIntervalIndex) * 2654435761u);
-            if ((hv % 100u) < unsigned(kFireSpreadPct)) {
+            if ((hv % 1000u) < unsigned(spreadPermille)) {
                 // 审查修 #16（Review 2026-08-23 低危）：门在可燃表内，火吞门只替换半格 → 另半扇孤立残留无
                 //   掉落。机制等价 MC「门作为整体燃烧」：写 Fire 前先快照目标格（t134 教训——setBlock 会把
                 //   state 重置为 0，先写后读就丢了上半 / 下半位），目标是门（isDoor 单一权威含云杉门；铁门
@@ -1527,6 +1547,33 @@ void World::tickFire()
                 setBlock(x, y + 1, z, BlockRegistry::Fire);
         }
     }
+}
+
+// Review 2026-08-23 #5 火环境抑制判定 ①：露天降雨（见 world.h 头注释）。判定序 = 便宜前置：晴天（全局
+//   Clear）首判早退——isPrecipitatingAt 内含 biomeAt（4 次 fBm×4 阶噪声，entitymanager t 节流先例），
+//   绝不为每火格在晴天白跑（lessons perf：环境判定先查全局态门）；越界防御次之；skyLight（数组读）先于
+//   群系解析。语义与 t385 作物浇雨（world.cpp tickCropGrowth）/ mob 雨灭火（entitymanager）同口径：
+//   skyLightAt>=15 = 头顶无遮挡（屋内 / 树冠下淋不到）。
+bool World::fireRainExposedAt(int x, int y, int z) const
+{
+    if (m_weather == Weather::Clear) return false; // 晴天全局早退（绝大多数窗零噪声开销）
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    if (m_chunks.skyLightAt(x, y, z) < 15) return false; // 头顶有遮挡 → 淋不到（露天判定，同作物 / mob 口径）
+    return isPrecipitatingAt(x, z); // 该列正降水（雨 / 雪 / 雷皆降水皆灭火；沙漠列恒 Clear 天然豁免）
+}
+
+// Review 2026-08-23 #5 火环境抑制判定 ②：本格 6 邻含 Water（见 world.h 头注释；OOB 方向跳过，边界火格
+//   靠世界内侧判）。一判定两用：火格自身（抑制态加速自熄）与蔓延目标格（湿燃料不点燃）——两侧水敏
+//   口径天然合一，t843 火语义重做时随 ① 整体搬走。
+bool World::fireWaterNeighborAt(int x, int y, int z) const
+{
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &n : kNb) {
+        const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
+        if (nx < 0 || ny < 0 || nz < 0 || nx >= m_width || ny >= m_height || nz >= m_depth) continue;
+        if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Water) return true;
+    }
+    return false;
 }
 
 // t236 小麦作物生长 tick（见 world.h 头注释）。机制等价 MC 1.0 小麦生长（random-tick 式散布概率升阶段）。

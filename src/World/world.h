@@ -314,18 +314,32 @@ public:
     //   m_waterCells / m_iceCells 模式——lessons perf-fluid-scan：绝不全图扫描）。快照校验（blockAt != Fire
     //   的陈旧项剔除）后每窗三 pass（散布确定性哈希 hashVoxel(seed^salt, x,y,z) ^ 窗口序号，PLAN §2-K，
     //   同 tickLavaFlow ignite pass —— 不同火格错峰判定）：
-    //   (a) 寿命：火格 6 邻 + 下方均**无可燃方块**（BlockRegistry::flammable 单一权威）→ 按 kFireExtinguishPct
-    //       自熄（setBlock Air → blockBroken 粒子/音 + QML fireHost 收 delegate）。机制等价 MC 无燃料火渐熄。
-    //   (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPct（t804：旧版每窗只随机挑 1/6 邻 → 单块可燃物期望
-    //       ~60s 才被吞，用户读作「打火石点不然木制品」），邻格为可燃方块 → 点燃为 Fire（setBlock Fire →
-    //       blockPlaced → QML delegate 挂载；可燃物本体被火替换 = 烧毁，无掉落）。机制等价 MC 火向相邻
-    //       可燃物概率蔓延（烧穿木屋的链式感）。
+    //   (a) 寿命 + 环境抑制（Review 2026-08-23 #5 抑制层最小版，语义重做留 t843——抑制判定收口在
+    //       fireRainExposedAt / fireWaterNeighborAt 两函数，t843 直接搬走复用）：露天降雨或自身 6 邻含水
+    //       → 按 kFireSuppressExtinguishPct 加速自熄（**压过燃料**：被雨浇 / 水泡的火即使邻着可燃物也在
+    //       熄灭中，雨天 / 水桶是玩家对火势的反制手段；抑制态幸存火仍走 (b) 但掷骰减半）；6 邻（含下方）
+    //       均无可燃方块（BlockRegistry::flammable 单一权威）→ 按 kFireExtinguishPct 自熄（setBlock Air →
+    //       blockBroken 粒子/音 + QML fireHost 收 delegate）。机制等价 MC 无燃料火渐熄 + 雨天 / 水邻灭火。
+    //   (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPermille（t804：旧版每窗只随机挑 1/6 邻 → 单块可燃物期望
+    //       ~60s 才被吞，用户读作「打火石点不然木制品」；#5 叠加补偿 5%→2.5%——被 k 火格包围每窗
+    //       1-(1-p)^k，5% 时 k=2~3 → 10~14%/窗 3~6s/块，多火源下木屋几十秒烧穿无反制），邻格为可燃方块
+    //       且**非湿燃料**（目标格 6 邻含水 → fireWaterNeighborAt 拦下：水格周围 1 圈即防火带，玩家泼水
+    //       反制火势的唯一手段）→ 点燃为 Fire（setBlock Fire → blockPlaced → QML delegate 挂载；可燃物
+    //       本体被火替换 = 烧毁，无掉落）。机制等价 MC 火向相邻可燃物概率蔓延 + 湿料难燃。
     //   (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 按 kFireRisePct 在上方生成火（火焰柱向上舔）。
     //   安全阀：m_fireCells > kFireCellCap（256）→ 本窗跳过 (b)/(c) 新增（防森林大火无限链烧穿 chunk mesh
     //   重建预算；既有火照常熄灭收敛）。写入走 4 参数 setBlock（发 blockBroken/blockPlaced → 粒子/音 +
     //   QML fireHost delegate 挂卸；火格写入量低频，无需 tickLavaFlow 式批量收口）。分层（PLAN §2）：
     //   World 层只读 m_chunks + BlockRegistry::flammable + 写栅格 + 发信号，不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickFire();
+    // Review 2026-08-23 #5 火环境抑制判定（纯读 m_chunks + 天气态，World 层零依赖；t843 火语义重做时把
+    //   这两判定 + 抑制常量整体搬走复用，不与 tickFire 三 pass 耦合——抑制层是独立可复用的正交关注点）：
+    // 露天降雨：火格自身 skyLightAt>=15（头顶无遮挡，同 t385 作物浇雨 / mob 雨灭火口径）且该列正降水
+    //   （isPrecipitatingAt：雨 / 雪 / 雷皆算降水——降水皆灭火；沙漠列恒 Clear 天然不抑制）。晴天全局早退。
+    bool fireRainExposedAt(int x, int y, int z) const;
+    // 本格 6 邻含 Water（OOB 方向跳过）。一判定两用（口径合一）：火格自身 → 抑制态加速自熄（水泡火灭）；
+    //   蔓延目标格 → 湿燃料不点燃（水格周围 1 圈 = 防火带，#5「水邻抑制」）。
+    bool fireWaterNeighborAt(int x, int y, int z) const;
     // t236 小麦作物生长 tick（spec「WorldClock tick 推进成长 随机/timed」）：由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kCropTickInterval×0.1s 做一次成长判定）。
     //   机制等价 MC 1.0 小麦生长：作物在耕地方块上、头顶光照足（skyLight ≥ kCropMinLight）时按**确定性散布概率**
@@ -1165,18 +1179,26 @@ private:
     //   才开一个判定窗（~每 kFireTickInterval×0.1s = 0.5s/窗）。窗口序号 m_fireIntervalIndex 每窗 +1 喂入
     //   hashVoxel 散布概率 → 不同火格不同窗错峰判定（非全部同步烧穿 / 熄灭，PLAN §2-K 精神，同 lava ignite）。
     //   kFireExtinguishPct=5：无燃料火每窗自熄概率（5% → 平均 ~10s 熄，可见可验收）。
-    //   kFireSpreadPct=5：每火格每窗对每个 6 邻可燃格的独立蔓延概率（t804 改逐邻独立掷；5% → 每块平均
-    //     ~10s 被吞，烧穿木屋的链式节奏）。
+    //   kFireSuppressExtinguishPct=40：抑制态（露天降雨 / 邻水，Review 2026-08-23 #5）火每窗自熄概率
+    //     （40% → 平均 ~1.25s 熄；**压过燃料**——被雨浇 / 水泡的火即使邻着可燃物也在熄灭中）。
+    //   kFireSpreadPermille=25：每火格每窗对每个 6 邻可燃格的独立蔓延概率（‰=2.5%；t804 改逐邻独立掷，
+    //     Review #5 叠加补偿 5%→2.5%：被 k 火格包围每窗 1-(1-p)^k，5% 时 k=2~3 → 10~14%/窗 3~6s/块，
+    //     多火源下木屋几十秒烧穿且无反制；2.5% 恢复整体节奏，单点燃 ~20s/块 保住「打火石点得燃」体感。
+    //     ‰ 粒度承接半个百分点档位）。
+    //   kFireSpreadDampPermille=12：抑制态幸存火（雨浇 / 水泡中未熄）蔓延概率（‰≈1.2%，约减半向下取整
+    //     —— 余烬被浇时偶尔溅火星）。
     //   kFireRisePct=3：火柱上窜概率（下方燃烧 + 上方空气 → 3% 概率上方生火，舔焰柱观感）。
     //   kFireCellCap=256：安全阀 —— 活跃火格超此数本窗不再**新增**（既有火照常熄灭收敛；防链式大火烧穿
     //   mesh 重建预算 / delegate 上限）。
     int m_fireTickCounter = 0;
     int m_fireIntervalIndex = 0;
-    static constexpr int kFireTickInterval  = 5;   // tickFire 节流间隔（WorldClock tick 单位 = 100ms → 0.5s/窗）
-    static constexpr int kFireExtinguishPct = 5;   // 无燃料火每窗自熄概率（%）
-    static constexpr int kFireSpreadPct     = 5;   // 每火格每窗向随机 6 邻可燃格蔓延概率（%）
-    static constexpr int kFireRisePct       = 3;   // 火柱上窜概率（下方 Fire + 上方 Air → 上方生火，%）
-    static constexpr int kFireCellCap       = 256; // 活跃火格安全阀（超出本窗不再新增蔓延 / 上窜火）
+    static constexpr int kFireTickInterval  = 5;    // tickFire 节流间隔（WorldClock tick 单位 = 100ms → 0.5s/窗）
+    static constexpr int kFireExtinguishPct = 5;    // 无燃料火每窗自熄概率（%）
+    static constexpr int kFireSuppressExtinguishPct = 40; // 抑制态（露天降雨 / 邻水）火每窗自熄概率（%，压过燃料）
+    static constexpr int kFireSpreadPermille   = 25; // 每火格每窗对每个 6 邻可燃格的独立蔓延概率（‰=2.5%）
+    static constexpr int kFireSpreadDampPermille = 12; // 抑制态幸存火蔓延概率（‰≈1.2%，约减半）
+    static constexpr int kFireRisePct       = 3;    // 火柱上窜概率（下方 Fire + 上方 Air → 上方生火，%）
+    static constexpr int kFireCellCap       = 256;  // 活跃火格安全阀（超出本窗不再新增蔓延 / 上窜火）
     // t468 结冰 tick 节流计数 + 常量：tickIceFreeze() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFreezeTickInterval
     //   才做一次冻结判定（~每 kFreezeTickInterval×0.1s = 5s 一窗）。窗口序号 m_freezeIntervalIndex 每窗 +1，喂入
     //   hashVoxel 散布概率 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K 精神）。kFreezePct=20（每窗 20% 暴露水源
