@@ -58,6 +58,7 @@ QString PlayerState::deathCauseText() const
     case Nightwalker:     return QStringLiteral("被夜行者重拳击杀"); // t727 近距蓄力重拳（末影人，§9 改名）
     case Emberling:       return QStringLiteral("被燃烬者的火球焚杀"); // t728 火球命中点燃（烈焰人，§9 改名）
     case EnderPearlTp:    return QStringLiteral("被暗渊珠传送撕碎"); // t758 暗渊珠落点传送的固定代价伤害（§9 原创文案）
+    case Anvil:           return QStringLiteral("被落下的铁砧砸死"); // t794 下落铁砧砸中玩家（机制等价 MC anvil crush 死因）
     case Generic:
     default:           return QStringLiteral("不明原因");
     }
