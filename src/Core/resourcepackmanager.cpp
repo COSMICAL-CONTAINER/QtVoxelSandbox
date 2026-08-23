@@ -1936,6 +1936,19 @@ void ensureBuiltLocked()
         //   cactus_*（tileFilenameMap 三条 54/55/163 同源），程序图集（pack 关）瓦片本就不透明不经过此路径。
         if (m.second.contains(QLatin1String("cactus"), Qt::CaseInsensitive))
             tile = solidifyTile(tile);
+        // t793 铁砧上部透明缝（用户「贴图下面是好的，上面的部分有透明的没有连上」——与仙人掌同根因）：
+        //   PIL 实测 demo 包 anvil 顶面瓦片各带 37.5% 透明孔（anvil_top / anvil_top_damaged_1 / _2 均为
+        //   6144/16384 像素 alpha<128，MC 铁砧模型顶面 footprint 比整格小、贴图按满格 16px 绘制故四周留空；
+        //   anvil_base 实测 0% 实心，solidify 幂等零行为差）→ 世界内三盒造型的砧台顶面（PartialBlockGeometry
+        //   Anvil case ③ 盒 +Y 用 topTile 113/115/116 整张铺面）透明孔被读作未连上的透明缝。铁砧语义
+        //   实心不透明（碰撞 ShapeFull + lightOpacity 15）→ 同仙人掌图集构建期 solidify（按文件名匹配
+        //   anvil*，tileFilenameMap 四条 113/114/115/116 同源）。程序态（pack 关）瓦片本就实心不经此路径；
+        //   图标侧铁砧三盒投影采合成图集，图集实心化后自动新（blockAtlasIconSource 无独立缓存族需换代）。
+        //   顺手核（PIL 实测全量已映射瓦片 alpha）：enchanting_table_top / endframe_top 均 0% 实心无同病
+        //   （两者侧瓦片顶部空白带已由 cropTopBlank 特判裁掉）；其余带 alpha 瓦片均为合法 cutout 语义
+        //   （cross 立绘 / 门 / 铁轨 / 玻璃 / 树叶 / spawner 铁笼）刻意保孔，不在此列。
+        if (m.second.contains(QLatin1String("anvil"), Qt::CaseInsensitive))
+            tile = solidifyTile(tile);
         // t716 ② 门窗 4 孔回归（橡木门只剩上 2 孔）根因修复：drawImage 默认 SourceOver 把瓦片**叠**在程序
         //   生成底图上 —— pack 瓦片的透明窗洞像素叠在底图上**露出底图门板/窗棂**而非真透明（机制：SourceOver
         //   透明源像素 = 保留目标）。实测：door_wood_upper 两窗带中带 1 恰落在底图程序窗洞 1 上（透出 → 显 2 孔）、
