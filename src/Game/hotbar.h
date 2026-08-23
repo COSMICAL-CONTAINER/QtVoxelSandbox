@@ -237,6 +237,13 @@ public:
     //     AnvilUI 判「书上附魔与 C 已有附魔冲突 → 不上（红字冲突）」。
     Q_INVOKABLE bool enchantApplicableTo(int enchantId, int itemId) const;
     Q_INVOKABLE bool enchantConflictsWith(int enchantIdA, int enchantIdB) const;
+    // t795 附魔台书架门槛公式桥接（透传 EnchantRegistry；QML 不能直接调 C++ 静态类）：
+    //   - enchantTierForBookshelves(bookshelves)：书架数 → 可选最高档位 1..3（**与游戏模式无关** —— 创造
+    //     同样须书架达标；附魔台 UI maxLevel 绑定此单一权威，杜绝 QML 本地副本漂移 / 创造旁路）。
+    //   - enchantOfferedLevel(bookshelves, tierIdx)：tierIdx 0..2 → 提供等级 1..30（档位附魔强度，进
+    //     selectEnchantsPreview 的 offeredLevel；顶格 30 仅满 15 书架可达）。
+    Q_INVOKABLE int enchantTierForBookshelves(int bookshelves) const;
+    Q_INVOKABLE int enchantOfferedLevel(int bookshelves, int tierIdx) const;
     // t590 附魔列表文本（tooltip / 槽位角标显示「物品有什么附魔」）：输入 4 槽 packed int（同
     //   ItemStack.enchants[4] 布局，即 enchantsAt / mainEnchantsAt / armorEnchantsAt 返回格式），
     //   逐槽拆包 id/level → 「锐锋 III」「效率 II」… 以换行连接；无附魔 → 空串。供各面板 tooltip

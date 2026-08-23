@@ -1820,6 +1820,17 @@ bool Hotbar::enchantConflictsWith(int enchantIdA, int enchantIdB) const
     return EnchantRegistry::conflictsWith(enchantIdA, enchantIdB);
 }
 
+// t795 附魔台书架门槛公式桥接（见头注释）：透传 EnchantRegistry 静态公式，QML 附魔台 UI 绑定调用。
+int Hotbar::enchantTierForBookshelves(int bookshelves) const
+{
+    return EnchantRegistry::tierForBookshelves(bookshelves);
+}
+
+int Hotbar::enchantOfferedLevel(int bookshelves, int tierIdx) const
+{
+    return EnchantRegistry::offeredLevelFor(bookshelves, tierIdx);
+}
+
 // t590 附魔列表文本（tooltip 显示「物品有什么附魔」）：输入 4 槽 packed int（同 ItemStack.enchants[4] 布局，
 //   即 enchantsAt / mainEnchantsAt / armorEnchantsAt 返回格式）→ 逐槽拆包 id/level → 「锐锋 III」「效率 II」
 //   … 以换行连接；无附魔 / 非附魔 id → 跳过该槽。工具 / 护甲 tooltip 附魔行显示用（PLAN §9：附魔名走注册表

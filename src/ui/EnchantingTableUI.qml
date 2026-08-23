@@ -400,21 +400,18 @@ Item {
     }
     // t649 档位解锁（MC 1.0 语义）：1 档恒解锁；2 档需 ≥5 书架；3 档需 ≥10 书架（用户口径「10 个左右书架
     //   才能附 123 级」）。旧版 floor(power/2)+1 令 2 书架即全档解锁（4 书架即顶档的根因之一）。
-    //   t694：创造模式全档解锁（tier 门禁放开——机制等价 MC 创造附魔台无视书架限制；用户实测「创造仍
-    //   档位锁」）。
-    readonly property int maxLevel: root.creativeMode ? 3
-                                    : (root.bookshelfPower >= 10) ? 3
-                                    : (root.bookshelfPower >= 5) ? 2 : 1
-    // t649 档位 offered 等级（附魔强度，进 selectEnchants）：offered(i) = floor(bs*20*i/33) + i，钳 [1,30]。
-    //   校准锚点（机制等价 MC 1.0「top slot = rand(1..8)+floor(power/2)+rand(0..power)，中低档递减」的确定性
-    //   近似——MC 每次点击随机，本实现显示值确定（附魔结果随机性由 selectEnchants 的 seed 承担）：
+    //   t694 曾加创造模式全档直通（creativeMode ? 3）；t795 按用户口径收口删除——**创造同样须书架达标**
+    //   （「哪怕是创造模式，也要摆满书架才能附魔最高等级」）。公式收编进
+    //   EnchantRegistry::tierForBookshelves 单一权威（与游戏模式无关，杜绝 QML 副本漂移），经 hotbar 桥接。
+    readonly property int maxLevel: root.hotbar ? root.hotbar.enchantTierForBookshelves(root.bookshelfPower) : 1
+    // t649 档位 offered 等级（附魔强度，进 selectEnchants）。t795 公式收编进
+    //   EnchantRegistry::offeredLevelFor 单一权威（floor(bs*20*(i+1)/33)+(i+1)，钳 [1,30]）：
     //     (a) 0-1 书架 → 三档 1..4 级（低；2/3 档被 maxLevel 门禁锁）
     //     (b) 4 书架 → 3 档 = 10（非旧版 24）
-    //     (c) 15 书架 → 3 档 = 30（满书架顶格）、1 档 = 10
-    //   offered 由 doEnchant 同式计算（offeredFor 函数单一权威，防两处漂移）。
+    //     (c) 15 书架 → 3 档 = 30（满书架顶格）、1 档 = 10 —— 顶格 30 仅满 15 书架可达
+    //   offered 由 doEnchant 同式计算（本函数单一权威，防两处漂移）；hotbar 未注入时退化 slotIdx+1（防御）。
     function offeredFor(slotIdx) {
-        const o = Math.floor(root.bookshelfPower * 20 * (slotIdx + 1) / 33) + (slotIdx + 1)
-        return Math.max(1, Math.min(30, o))
+        return root.hotbar ? root.hotbar.enchantOfferedLevel(root.bookshelfPower, slotIdx) : (slotIdx + 1)
     }
     // t549 槽 0 待附魔物（id / 耐久；触碰 enchantRev）。空槽 / 青金石 / 不可附魔 → 0。
     readonly property int enchantItemId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[0] || 0) : 0 }
@@ -434,9 +431,10 @@ Item {
     }
     // 当前 XP 等级（绑定 playerState.level NOTIFY levelChanged；低频，升级才发）。
     readonly property int playerLevel: playerState ? playerState.level : 0
-    // t694 创造模式免等级（同 t606③ 铁砧 creativeMode 先例）：player.mode === Creative → 三档全解锁
-    //   （书架 tier 门禁放开）+ XP 消耗全免（doEnchant 跳过 spendLevels；材料消耗照旧——保守只免经验，
-    //   机制等价 MC 创造附魔台免等级）。player 已由宿主注入（Main.qml player: player）。
+    // t694 创造模式免等级（同 t606③ 铁砧 creativeMode 先例）：player.mode === Creative → XP 消耗全免
+    //   （doEnchant 跳过 spendLevels）。t795 收口：创造**不免**两样——① 青金石照常须放槽 1 且照扣
+    //   （「哪怕是创造模式」也要放青金石才亮选项）；② 书架档位门禁照常（maxLevel 公式无模式参数，
+    //   创造也须摆满书架才有最高档）。player 已由宿主注入（Main.qml player: player）。
     readonly property bool creativeMode: root.player && root.player.mode === PlayerController.Creative
     // 「已附魔」flash 状态（点击成功附魔后短暂显绿，~600ms 淡出）。
     property bool justEnchanted: false
@@ -469,8 +467,9 @@ Item {
         const lapCost = root.lapisCosts[slotIdx] || 1
         // t694 等级消耗真收口（用户实测「生存 0 级也能附魔」）：删 t590 的 lvl0Tier1 豁免（1 档 0 级视为可附、
         //   扣 0 级跳过）—— 该豁免令生存 0 XP 玩家免费附魔，与 MC 1.0「附魔须 ≥ 显示的等级消耗」相反。
-        //   现语义：① 创造模式 → 全档免 XP（t606③ 铁砧先例：免等级不免材料，青金石照扣——保守只免经验）；
-        //   ② 生存 → 等级不足**真拒**（前置守卫 + spendLevels 双层；青金石恒校验，同 review L6 修法保留）。
+        //   现语义：① 创造模式 → 免 XP（t606③ 铁砧先例：免等级不免材料——t795 后青金石**创造也照扣**，
+        //   槽 1 没放足青金石恒拒，与 affordable 亮灯口径一致）；② 生存 → 等级不足**真拒**（前置守卫 +
+        //   spendLevels 双层；青金石恒校验，同 review L6 修法保留）。书架档位门禁在 maxLevel（无模式参数）。
         const freeXp = root.creativeMode
         if (!freeXp && root.playerLevel < lvlCost) return
         if (root.lapisCount < lapCost) return
@@ -680,11 +679,15 @@ Item {
                                 property int lvlCost: root.levelCosts[index]
                                 property int lapCost: root.lapisCosts[index]
                                 // t549 enabled 条件：槽 0 有「可附魔且未附魔」物品（itemReady；附魔来源 =
-                                //   UI 输入槽，非背包）+ 档位序号 < maxLevel（书架解锁）+ XP 等级 + 槽 1 青金石都够。
+                                //   UI 输入槽，非背包）+ 档位序号 < maxLevel（书架解锁；t795 创造同样须达标）
+                                //   + XP 等级 + 槽 1 青金石都够。
                                 property bool unlocked: index < root.maxLevel
-                                // t694 创造免等级（affordable 全绿）+ 生存真收口（删 lvl0Tier1 豁免——
-                                //   用户实测「生存 0 级也能附」；机制等价 MC 1.0 附魔须足额等级）。
-                                property bool affordable: root.creativeMode || (root.lapisCount >= lapCost && root.playerLevel >= lvlCost)
+                                // t795 lapis 门槛收口（用户根因）：青金石**恒须足额**才亮选项（「放置青金石
+                                //   之后才会显示高亮，哪怕是创造模式」）—— 旧版 creativeMode 短路 || 把
+                                //   lapisCount 校验一并跳过 → 创造放工具立即三档全亮。创造只免 XP 等级
+                                //   （t694 免等级语义保留），不免材料；与 doEnchant 的 lapis 校验 / 扣减口径一致。
+                                property bool affordable: root.lapisCount >= lapCost
+                                                          && (root.creativeMode || root.playerLevel >= lvlCost)
                                 property bool enabled1: root.itemReady && unlocked && affordable
                                 width: 190; height: 36
                                 color: enabled1 ? "#5a4a2a" : "#2a2018"
@@ -739,7 +742,7 @@ Item {
                 Text {
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "左槽放工具 / 武器 / 书 · 右槽放青金石（Shift+左键快速放入） · 书架解锁更高档 · 书附魔后成附魔书"
+                    text: "左槽放工具 / 武器 / 书 · 右槽放足青金石后选项才亮（创造亦须） · 书架解锁高档（创造亦须摆满） · 书附魔成附魔书"
                     color: "#aa9888"; font.pixelSize: 10
                 }
 
