@@ -22,6 +22,15 @@ struct Vtx {
     float r, g, b, a;
 };
 
+// t784 床模型子盒（cell-local [0,1]³）：低 3D 床「某一半（head/foot）」拆出的轴对齐子盒 + 各盒贴图瓦片。
+//   盒列表由 PartialBlockGeometry::bedHalfBoxes 单一权威产出，**游戏内 chunk mesh（append 床 case）与
+//   资源浏览器 3D 预览（Renderer/BedModelGeometry）共用** → 两处床模型几何同源，改床形只改一处
+//   （lessons「派生资产与源资产脱岗」同族预防：浏览器复刻游戏内模型必走本列表，不得另持盒布局副本）。
+struct BedHalfBox {
+    float x0, x1, y0, y1, z0, z1; // cell-local 子盒范围（facing 决定长轴：0/1→长 X、2/3→长 Z）
+    int tile;                     // 图集瓦片序号（planks 8 / 白 wool 38 / 床色被面瓦片）
+};
+
 // 逐块光场上下文（t151 真光场；由 chunkgeometry::buildMesh 按本块算好后传入）。
 //   light = 本格光场值 max(sky,block)/15（cross 植物 pushCrossQuad 用：cross 立于开敞格、本格即其光照）。
 //   face[6] = 6 向「面所朝邻格」光场值（pushBox 各盒面按外法线方向取；顺序同 partialblockgeometry.cpp
@@ -102,6 +111,13 @@ public:
                       const PartialLightCtx &light,
                       const PartialNeighborCtx &nb,
                       float tileW, float hx, float hy, float v0, float v1);
+
+    // t784 床模型盒列表单一权威：把「床的某一半」拆成 5~6 个轴对齐子盒（腿×2 / 木板床架 / 彩色被面床垫 /
+    //   床头板或床尾板 / 枕头仅 head 半）追加进 out（盒序稳定：腿→架→垫→板→枕）。blockId = 床色变体 id
+    //   （isBed 段任一，决定被面瓦片）；isHead = true 床头半（床头板 + 枕头）/ false 床尾半（床尾板）；
+    //   facing = state&3（head→foot 方向 0=+X 1=-X 2=+Z 3=-Z，同 bedPartnerOffset 编码）。消费方：
+    //   append 床 case（游戏内 chunk mesh）+ Renderer/BedModelGeometry（浏览器 3D 预览双格拼装）。
+    static void bedHalfBoxes(quint8 blockId, bool isHead, int facing, QVector<BedHalfBox> &out);
 
 private:
     PartialBlockGeometry() = delete; // 纯静态工具，无实例。
