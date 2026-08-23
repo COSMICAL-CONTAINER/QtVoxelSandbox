@@ -20,6 +20,8 @@ struct MobVtx {
 // 默认 backface 剔除下可见）。角点用符号三元组 (sx,sy,sz) ∈ {-1,+1} 表达 → 由 addBox 据盒心 + 半长缩放。
 // (u,v) ∈ {0,1}² 全脸铺贴图（与 CrackBox 同 UV 方案；与 blockcube cu/cv 同映射，但 u0=0/u1=1 整张非子区）。
 // 推导自 blockcube kFaceCorners（kH→+1、-kH→-1），保绕序 / 法线一致 → 与 Main.qml center 摆位自洽。
+// Review 2026-08-23 #13：本表 u/v 只供「全脸」模式直用；box-UV 模式（pack 开 / 燃烬者）的方向修正
+//   （t747 三面翻转）在 writeMobUV 内做——表不翻，程序 mob 贴图全脸朝向零回归。
 struct Sgn { int sx, sy, sz; float u, v; };
 const Sgn kFace[6][4] = {
     // +X（外法线 +X）
@@ -123,12 +125,18 @@ void mobFaceQtUV(int face, float u0, float v0, float w, float h, float d,
 // 写入一角的 UV：pack 关 → kFace 全脸 u,v；pack 开 → MC box-UV 子区（本盒 textureOffset + size）插值。
 //   s.u/s.v ∈ {0,1}² 是面内角点的归一化坐标（kFace 定义），pack 开时把子区 [umin,umax]×[vmin,vmax] 按 s 插值。
 //   t782：g_boxUvAlways（仅燃烬者）pack 关也走 box-UV——程序贴图即按 blaze 盒区布局自绘（见上全局注释）。
+//   Review 2026-08-23 #13：box-UV 分支内做 t747 三面翻转（+X/+Y/-Z 面的 u 取 1-s.u；推导全文见
+//   playerskinbox.cpp kFace 注释——MC box-UV 六面绕盒连续展开，旧 kFace 在这三面整面镜像，不对称 pack
+//   贴图会左右反）。翻转只落在本分支：kFace 表本身不动 → 全脸分支（pack 关）保持程序 mob 贴图既定
+//   朝向零回归（整张贴图铺面没有「布局」语义，翻了纯镜像）。当前全部 mob 贴图（程序 + demo pack）
+//   这三面内容对称/居中，翻转无可见差异；仅为不对称 pack 贴图修正方向。
 inline void writeMobUV(MobVtx &vt, const Sgn &s, int face, bool pack)
 {
     if (!pack && !g_boxUvAlways) { vt.u = s.u; vt.v = s.v; return; }
     float umin, vmin, umax, vmax;
     mobFaceQtUV(face, g_boxU0, g_boxV0, g_boxW, g_boxH, g_boxD, umin, vmin, umax, vmax);
-    vt.u = umin + s.u * (umax - umin);
+    const float su = (face == 0 || face == 2 || face == 5) ? 1.0f - s.u : s.u; // #13 三面翻转
+    vt.u = umin + su * (umax - umin);
     vt.v = vmin + s.v * (vmax - vmin);
 }
 

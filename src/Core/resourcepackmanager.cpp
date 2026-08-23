@@ -66,7 +66,8 @@ struct BuiltState {
     bool enabled = false;         // t415 镜像 settings.json resourcePackEnabled（缺省 false：避免无感切换）
     QString packPath;             // t415 镜像 settings.json resourcePack（空 = 走环境变量/默认探查）
     bool configLoaded = false;    // t415 config 是否已从 settings.json 加载（之后只信内存 + setter 持久化）
-    int revision = 0;             // t415 apply() 重建计数（保留；file:// 不挂查询串，仅作历史/调试用）
+    int revision = 0;             // t415 apply() 重建计数（++revision 驱动派生缓存换代：icon4_*/skin_* 文件名后缀
+                                  // + 64×32 族皮肤直返路径的 ?r= 查询串，Review #11/#12；atlas 本体不挂（t415c 注））
     QString itemDir;              // t420 包内物品图标目录（assets/minecraft/textures/item）绝对路径；空 = 无 item 覆盖
     QString entityDir;            // t421 包内生物贴图目录（assets/minecraft/textures/entity）绝对路径；空 = 无 entity 覆盖
     QString blockDir;             // t456 包内方块贴图目录（assets/minecraft/textures/block）绝对路径；blockItemIconSource 兜底探测（pack 把前贴图放 block/ 时）
@@ -2765,7 +2766,11 @@ QImage enchantBookOverlayTexture(bool packActive, const QString &entityDir, bool
                 p = dir.absoluteFilePath(QFileInfo(relPath).fileName());
             if (QFile::exists(p)) {
                 const QImage pack(p);
-                if (!pack.isNull()) {
+                // Review 2026-08-23 #14：宽度门与放置态同款收紧（Main.qml bookPackHit 的
+                //   entityTextureWidth("enchant_book") > 64）。布局 1 分区表（封面带 {0,0,11,10} / 纸页叠
+                //   {1,10,12,19}）钉死 demo 包排版——64×32 原尺寸排版包命中即按 demo 分区采样 = 图标采碎，
+                //   且与放置态（已收紧按 miss 处理走 qrc 布局 0）两态割裂。宽 ≤ 64 按 miss 回退程序贴图。
+                if (!pack.isNull() && pack.width() > 64) {
                     if (packLayout)
                         *packLayout = true;
                     return pack.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -3132,18 +3137,26 @@ bool ResourcePackManager::setPlayerSkin(const QString &name)
     return true;
 }
 
-// 复审 #8（2026-08-22）：slim（3px 臂/腿）皮肤布局探测。经典（4px）右臂盒区条带 u40..56（d=w=4）；
-//   slim 仅 u40..52（d=w=3）→ 探测区 u52..54 × v20..32（经典 = 臂背面左半，规范皮肤必不透明；slim =
-//   布局外空白）全列 alpha==0 → 判 slim。HD（base 整数倍）按 w/64 缩放坐标；64×64 老式布局上半 32 行
-//   与 64×32 base 同布局 → 探测坐标通用（裁切前后同结果）。保守方向：把该区当画布画了内容的 slim 皮肤
-//   误判 classic（退回 4px 采样 = 修复前行为，仅边缘条纹）；classic 皮肤该区全透明的极端自定义会误判
-//   slim（3px 采样丢 1px 边缘列，无镂空）——两向误判都不劣于修复前。
-static bool probeSlimSkinLayout(const QImage &tex)
+// 复审 #8（2026-08-22）：slim（3px 臂）皮肤布局探测。Review 2026-08-23 #1 修正（PIL 实测坐实旧探测区
+//   恒误判）：MC 1.8 标准 slim 布局是**臂 3 宽×12 高×4 深**（条带 2×(3+4)=14px，占 u40..54——与 classic
+//   仅差宽 1px）、**腿保持 4×12×4 不变**（占满 u0..16）。classic（4px）右臂盒区条带 2×(4+4)=16px 占
+//   u40..56，其中 Back 面区 [u0+2d+w, u0+2d+2w) = [52,56)。→ 探测区取 u[54,56) × v[20,32)（侧面/背面
+//   行区间 v0+d..v0+d+h = 16+4..16+4+12）：classic = 臂背面右半，规范皮肤必不透明（demo 包 steve 实测
+//   24 个不透明像素）；slim = 布局外空白（demo 包 alex 实测 0 个）——区分度完美。旧探测区 u[52,54) 落在
+//   slim 臂背面 [51,54) 内 → alex/steve 同为 24 不透明 → 对真实 slim 皮肤恒判 classic（修复整体无效的
+//   根因）。坐标派生互指：54 = 40 + 2×4 + 2×3（kPiecesSlim[2] 臂条带右缘）、56 = 40 + 2×4 + 2×4
+//   （playerskinbox.cpp kPiecesClassic[2] 臂条带右缘）——Renderer 侧盒区数值再变须同步此处。
+//   HD（base 整数倍）按 w/64 缩放坐标；64×64 老式布局上半 32 行与 64×32 base 同布局 → 探测坐标通用
+//   （裁切前后同结果）。保守方向：把该区当画布画了内容的 slim 皮肤误判 classic（退回 4px 采样 = 修复前
+//   行为，仅边缘条纹）；classic 皮肤该区全透明的极端自定义会误判 slim（3px 采样丢 1px 边缘列，无镂空）
+//   ——两向误判都不劣于修复前。矩阵探针（tools/redstone_matrix_test.cpp）：demo 包 alex→slim /
+//   steve→classic 实测断言 + 合成布局判定（防再次按错误布局假设回归）。
+bool probeSlimSkinLayout(const QImage &tex)
 {
     const int w = tex.width();
     if (w < 64) return false; // 异常小图 → 保守 classic
     const qreal sc = qreal(w) / 64.0;
-    const int x0 = int(52 * sc), x1 = int(54 * sc);
+    const int x0 = int(54 * sc), x1 = int(56 * sc);
     const int y0 = int(20 * sc), y1 = int(32 * sc);
     for (int y = y0; y < qMin(y1, tex.height()); ++y)
         for (int x = x0; x < qMin(x1, w); ++x)
@@ -3174,10 +3187,12 @@ static QString resolveSkinPackSrc(const QString &entityDir, const QString &kind)
 
 // t731 玩家皮肤 pack 源（含 64×64 老式布局 → 64×32 裁切重排）：skin（"default"/"alex"）→ entityKindMap
 //   的 skin_default（steve.png）/ skin_alex（alex.png）两级探测（子目录 → 扁平，同 entitySource）。
-//   命中后按贴图实际宽高判型：h == w/2（64×32 族）→ 原样返回 file:///；更高（64×64 老式布局——上半 32
+//   命中后按贴图实际宽高判型：h == w/2（64×32 族）→ 直返 pack 原路径 + ?r=<revision> 查询串（Review #12：
+//   URL 随 apply() 重建变 → QML Texture 重读，防原地换文件后陈旧）；更高（64×64 老式布局——上半 32
 //   行是 base 头/身/臂/腿区，与 64×32 兼容；下半是 1.8+ overlay）→ QImage 裁上半 w×(w/2) 落盘
-//   voxelsandbox_rp_skin_<kind>_r<revision>.png 缓存（apply() 重建随 skinPackFiles 清空重裁；revision
-//   后缀保证换包后 URL 变 → QML 重读，同皮革染色落盘模式）。miss / 解码 / 落盘失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
+//   voxelsandbox_rp_skin_<kind>_r<revision>.png 缓存（apply() 重建随 skinPackFiles 清空重裁 + 旧 revision
+//   文件删除（Review #11）；revision 后缀保证换包后 URL 变 → QML 重读，同皮革染色落盘模式）。miss / 解码 /
+//   落盘失败 → 空串 → 调用方回退程序皮肤 qrc:/textures/entity_skin_<default|alex>.png。
 //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
 QString ResourcePackManager::playerSkinSource(const QString &skin) const
 {
@@ -3209,7 +3224,11 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
     if (w <= 0 || h < w / 2)
         return {}; // 异常尺寸（非 2:1/1:1 族）→ 回退（降级）
     if (h == w / 2)
-        return QStringLiteral("file:///") + src; // 已是 64×32 族，无需裁切
+        // Review 2026-08-23 #12：直返路径拼 revision 查询串。64×32 族不落盘直接返 pack 原路径 →
+        //   apply() 重建（++revision）后 URL 若不变，QML Texture 按 URL 缓存继续用旧像素（同路径原地
+        //   换包内容的场景，皮肤陈旧直到重启）。查询串只参与 URL 区分、不参与文件寻址（QUrl 加载侧
+        //   取 localFile 时查询串被剥离——同 icon 族 revision 进文件名手法在「无落盘」路径的等价物）。
+        return QStringLiteral("file:///") + src + QStringLiteral("?r=%1").arg(s.revision);
     const QImage cropped = tex.copy(0, 0, w, w / 2);
     if (cropped.isNull())
         return {};
@@ -3224,6 +3243,24 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
             QStringLiteral("voxelsandbox_rp_skin_%1_r%2.png").arg(kind).arg(s.revision));
     if (!cropped.save(out, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
+    // Review 2026-08-23 #11：revision 逐版累积清理。apply() 每次 ++revision 且清 skinPackFiles → 本
+    //   kind 每次换包/重解析都会落一个新的 _r<rev>.png，旧 revision 文件与 t731 期无后缀旧名从此无人
+    //   引用却永久残留（AppLocalData 缓存逐年膨胀）。落盘成功后把同 kind（文件名前缀含 kind，另一
+    //   kind 的缓存不受波及）的其余缓存文件全部删除——刚写出的 out 除外（正是本次返回的 URL）。
+    //   已被 QML Texture 加载进显存的旧图不受删除影响（像素已驻留），URL 已随 revision 变化重绑。
+    {
+        const QString legacy = QDir(dir).absoluteFilePath(
+                QStringLiteral("voxelsandbox_rp_skin_%1.png").arg(kind));
+        if (QFile::exists(legacy))
+            QFile::remove(legacy);
+        const QStringList stale = QDir(dir).entryList(
+                { QStringLiteral("voxelsandbox_rp_skin_%1_r*.png").arg(kind) }, QDir::Files);
+        for (const QString &f : stale) {
+            const QString full = QDir(dir).absoluteFilePath(f);
+            if (full != out)
+                QFile::remove(full);
+        }
+    }
     s.skinPackFiles.insert(kind, out); // stateMutex 已持锁，安全
     return QStringLiteral("file:///") + out;
 }
