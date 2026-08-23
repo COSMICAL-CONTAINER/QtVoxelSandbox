@@ -626,7 +626,28 @@ QVariantList Hotbar::creativeMaterials() const
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落（生存获得途径）；打火石配方
         //   原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。创造调色板补全便于测试配方链；
         //   可堆叠 64（走材料段默认）；非方块 → 右键不放置。MaterialIcon 自绘深灰燧石碎片（drawFlint）。
-        int(RecipeRegistry::FlintId)          // 燧石：挖沙砾概率掉落；打火石配方原料（t761）
+        int(RecipeRegistry::FlintId),         // 燧石：挖沙砾概率掉落；打火石配方原料（t761）
+        // t788 染料段 16 色（材料段 0x24B..0x25A；机制等价 MC 1.0 dye 16 色）：生存获得 = 破坏对应花（红/黄/
+        //   蓝/白四色，blockregistry dropId）+ 熔炉烧仙人掌（绿）；染色链原料（染白羊毛/白床 → 对应色）。
+        //   创造调色板补全便于测试染色链；可堆叠 64（走材料段默认）；非方块 → 右键不放置。
+        //   MaterialIcon 自绘彩色粉末堆（drawDye，配色取 tools/build_wool.py 羊毛色板）。行序 = 羊毛 16 色
+        //   标准序（与 DyeIdBase 起连续段一致，矩阵测试 t788 探针核连续同列）。
+        int(RecipeRegistry::DyeWhiteId),      // 白色染料：白花破坏掉落；染白羊毛/白床（无害直染）
+        int(RecipeRegistry::DyeOrangeId),     // 橙色染料
+        int(RecipeRegistry::DyeMagentaId),    // 品红色染料
+        int(RecipeRegistry::DyeLightBlueId),  // 浅蓝色染料
+        int(RecipeRegistry::DyeYellowId),     // 黄色染料：黄花破坏掉落
+        int(RecipeRegistry::DyeLimeId),       // 柠绿色染料
+        int(RecipeRegistry::DyePinkId),       // 粉红色染料
+        int(RecipeRegistry::DyeGrayId),       // 灰色染料
+        int(RecipeRegistry::DyeLightGrayId),  // 浅灰色染料
+        int(RecipeRegistry::DyeCyanId),       // 青色染料
+        int(RecipeRegistry::DyePurpleId),     // 紫色染料
+        int(RecipeRegistry::DyeBlueId),       // 蓝色染料：蓝花破坏掉落
+        int(RecipeRegistry::DyeBrownId),      // 棕色染料
+        int(RecipeRegistry::DyeGreenId),      // 绿色染料：熔炉烧仙人掌
+        int(RecipeRegistry::DyeRedId),        // 红色染料：红花破坏掉落
+        int(RecipeRegistry::DyeBlackId)       // 黑色染料
     };
 }
 
@@ -1059,6 +1080,25 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggOcelotId) return QStringLiteral("生物蛋（豹猫）"); // 右键 → 生成野生豹猫
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
+        // t788 染料段 16 色（材料段 0x24B..0x25A；机制等价 MC 1.0 dye 16 色）：四花破坏掉落（红/黄/蓝/白）
+        //   + 熔炉烧仙人掌得绿；染白羊毛 / 白床成对应色。行序 = 羊毛 16 色标准序（与 DyeIdBase 起连续段一致）。
+        //   零 MC 专名（§9；「仙人掌绿」以通用词「绿色染料」表达）。
+        if (blockId == RecipeRegistry::DyeWhiteId)      return QStringLiteral("白色染料");   // 白花破坏掉落
+        if (blockId == RecipeRegistry::DyeOrangeId)     return QStringLiteral("橙色染料");
+        if (blockId == RecipeRegistry::DyeMagentaId)    return QStringLiteral("品红色染料");
+        if (blockId == RecipeRegistry::DyeLightBlueId)  return QStringLiteral("浅蓝色染料");
+        if (blockId == RecipeRegistry::DyeYellowId)     return QStringLiteral("黄色染料");   // 黄花破坏掉落
+        if (blockId == RecipeRegistry::DyeLimeId)       return QStringLiteral("柠绿色染料");
+        if (blockId == RecipeRegistry::DyePinkId)       return QStringLiteral("粉红色染料");
+        if (blockId == RecipeRegistry::DyeGrayId)       return QStringLiteral("灰色染料");
+        if (blockId == RecipeRegistry::DyeLightGrayId)  return QStringLiteral("浅灰色染料");
+        if (blockId == RecipeRegistry::DyeCyanId)       return QStringLiteral("青色染料");
+        if (blockId == RecipeRegistry::DyePurpleId)     return QStringLiteral("紫色染料");
+        if (blockId == RecipeRegistry::DyeBlueId)       return QStringLiteral("蓝色染料");   // 蓝花破坏掉落
+        if (blockId == RecipeRegistry::DyeBrownId)      return QStringLiteral("棕色染料");
+        if (blockId == RecipeRegistry::DyeGreenId)      return QStringLiteral("绿色染料");   // 熔炉烧仙人掌
+        if (blockId == RecipeRegistry::DyeRedId)        return QStringLiteral("红色染料");   // 红花破坏掉落
+        if (blockId == RecipeRegistry::DyeBlackId)      return QStringLiteral("黑色染料");
         return QString();
     }
     if (ToolRegistry::isTool(blockId)) return ToolRegistry::displayName(blockId);

@@ -1051,6 +1051,110 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { RecipeRegistry::IronIngotId, RecipeRegistry::FlintId, 0,
         0, 0, 0, 0, 0, 0 },
       int(ToolRegistry::FlintAndSteel), 1, 1, "flint_and_steel" },
+    // t788 染料染色链（32 条 shapeless 2×2）：染料 + 白色羊毛（Wool=27）→ 对应色羊毛；染料 + 白色床
+    //   （BedWhite=78）→ 对应色床。机制等价 MC 1.0 染料主干（dye + white wool/bed → colored）。
+    //   原料侧：染料由四花破坏掉落（红花→红 / 黄花→黄 / 蓝花→蓝 / 白花→白，blockregistry.cpp dropId）
+    //   + 熔炉烧仙人掌→绿染料（smelting.cpp）获得；白羊毛由杀羊 / 4 线合成（shaped），白床由 3 白羊毛 +
+    //   3 木板合成。**范围控制：只做 16 单色直染（白染料 + 白羊毛 → 白羊毛为无害直染，同 MC 骨粉语义），
+    //   混色（二级染料合成）不做**。羊毛色序 = 16 色标准序（白复用 Wool=27，其余 FirstWoolVariant=63 起连续）；
+    //   床色段散布（32..39 + 78..85）须逐条写 id。多重集 {DyeX, Wool} / {DyeX, BedWhite} 各条唯一（染料 id
+    //   互异）→ 无序不与既有配方冲突（床族是 6 原料 shaped 3×3，多重集大小不同即排除）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeWhiteId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::Wool),            1, 1, "dye_wool_white" },  // 白染料+白羊毛→白羊毛（无害直染，同 MC 骨粉）
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeOrangeId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolOrange),      1, 1, "dye_wool_orange" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeMagentaId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolMagenta),     1, 1, "dye_wool_magenta" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeLightBlueId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolLightBlue),   1, 1, "dye_wool_light_blue" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeYellowId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolYellow),      1, 1, "dye_wool_yellow" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeLimeId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolLime),        1, 1, "dye_wool_lime" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyePinkId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolPink),        1, 1, "dye_wool_pink" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGrayId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolGray),        1, 1, "dye_wool_gray" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeLightGrayId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolLightGray),   1, 1, "dye_wool_light_gray" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeCyanId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolCyan),        1, 1, "dye_wool_cyan" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyePurpleId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolPurple),      1, 1, "dye_wool_purple" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBlueId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolBlue),        1, 1, "dye_wool_blue" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBrownId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolBrown),       1, 1, "dye_wool_brown" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGreenId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolGreen),       1, 1, "dye_wool_green" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeRedId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolRed),         1, 1, "dye_wool_red" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBlackId, int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::WoolBlack),       1, 1, "dye_wool_black" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeWhiteId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedWhite),        1, 1, "dye_bed_white" },   // 白染料+白床→白床（无害直染）
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeOrangeId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedOrange),       1, 1, "dye_bed_orange" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeMagentaId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedMagenta),      1, 1, "dye_bed_magenta" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeLightBlueId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedLightBlue),    1, 1, "dye_bed_light_blue" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeYellowId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedYellow),       1, 1, "dye_bed_yellow" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeLimeId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedLime),         1, 1, "dye_bed_lime" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyePinkId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedPink),         1, 1, "dye_bed_pink" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGrayId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedGray),         1, 1, "dye_bed_gray" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeLightGrayId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedLightGray),    1, 1, "dye_bed_light_gray" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeCyanId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedCyan),         1, 1, "dye_bed_cyan" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyePurpleId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedPurple),       1, 1, "dye_bed_purple" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBlueId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedBlue),         1, 1, "dye_bed_blue" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBrownId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedBrown),        1, 1, "dye_bed_brown" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGreenId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedGreen),        1, 1, "dye_bed_green" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeRedId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedRed),          1, 1, "dye_bed_red" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBlackId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::BedBlack),        1, 1, "dye_bed_black" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1073,6 +1177,16 @@ static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材�
 // t471 青金石跨层契约（同 Coal/Iron/Copper/Gold 模式）：Core 层 blockregistry.cpp LapisOre 的 dropId 用字面量
 //   0x236（Core 不 include Game 头）；本处钉死 recipe.h 常量 == 字面量，防漂移致掉落断裂。
 static_assert(RecipeRegistry::LapisId         == 0x236, "LapisId 须与 BlockRegistry::LapisOre.dropId 字面量 0x236 一致");
+// t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
+//   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
+//   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId
+//   界标（染料段 0x24B..0x25A 连续 16 色，hotbar.cpp / MaterialIcon.qml 下标算术依赖此连续性）。
+static_assert(RecipeRegistry::DyeIdBase       == 0x24B, "DyeIdBase 须与 BlockRegistry::FlowerWhite.dropId 字面量 0x24B 一致");
+static_assert(RecipeRegistry::DyeWhiteId      == 0x24B, "DyeWhiteId 须与 BlockRegistry::FlowerWhite.dropId 字面量 0x24B 一致");
+static_assert(RecipeRegistry::DyeYellowId     == 0x24F, "DyeYellowId 须与 BlockRegistry::FlowerYellow.dropId 字面量 0x24F 一致");
+static_assert(RecipeRegistry::DyeBlueId       == 0x256, "DyeBlueId 须与 BlockRegistry::FlowerBlue.dropId 字面量 0x256 一致");
+static_assert(RecipeRegistry::DyeRedId        == 0x259, "DyeRedId 须与 BlockRegistry::FlowerRed.dropId 字面量 0x259 一致");
+static_assert(RecipeRegistry::DyeBlackId      == 0x25A, "DyeBlackId 须为染料段末位 0x25A（DyeIdBase+15）");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
 //   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x22E] = 47 项，

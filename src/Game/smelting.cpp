@@ -39,6 +39,9 @@ constexpr SmeltEntry kSmelt[] = {
     // 审查修 B4（t724-t729 复盘）：燃烬棒 → 燃烬粉（暗渊之眼合成链：杀燃烬者得棒 → 熔炉烧粉 → 粉 + 暗渊珠
     //   合眼）。t726 只在注释里声称此配方，本表漏行 → 生存模式棒放熔炉无反应、链路断裂。
     { RecipeRegistry::BlazeRodId,      RecipeRegistry::BlazePowderId,    "blaze_powder" }, // 燃烬棒 → 燃烬粉（暗渊之眼链）
+    // t788 染料链：仙人掌 → 绿色染料（机制等价 MC 1.0 cactus → green dye 冶炼）。绿染料是 16 色染料中唯一
+    //   非花来源（柠绿 / 其余花色之外靠本条补绿色正道）；沙漠群系采仙人掌 → 熔炉烧绿染料 → 染白羊毛 / 白床。
+    { int(BlockRegistry::Cactus),      RecipeRegistry::DyeGreenId,       "cactus_green" }, // 仙人掌 → 绿色染料（t788）
 };
 
 constexpr FuelEntry kFuel[] = {
@@ -92,6 +95,8 @@ constexpr SmeltXpEntry kSmeltXp[] = {
     { RecipeRegistry::GlassId,       0, "glass"    }, // 玻璃：沙子冶炼给 0 XP（无金属价值）
     // 审查修 B4 配套：燃烬粉 1 XP（同木炭量级 —— 非金属加工物；暗渊之眼链冶炼正途给 XP）。
     { RecipeRegistry::BlazePowderId, 1, "blaze_powder" }, // 燃烬粉：燃烬棒冶炼给 1 XP（暗渊之眼链）
+    // t788 染料链：绿色染料 1 XP（仙人掌冶炼产物，同木炭 / 燃烬粉量级 —— 非金属加工物）。
+    { RecipeRegistry::DyeGreenId,   1, "cactus_green" }, // 绿色染料：烧仙人掌给 1 XP（t788）
 };
 } // namespace
 
