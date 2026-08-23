@@ -4285,6 +4285,151 @@ int main(int argc, char *argv[])
                              "manual check)";
     }
 
+    // ── t791 骨粉催熟平衡探针（spec R19.12 🅵「3-4 个骨粉应催熟一株」；World::applyBonemeal 直调锁数值分布）──
+    // 背景：t447 原实现每骨粉 +1 阶段 → 0..7 共 8 阶段要 7 骨粉（用户实测「多个骨粉催不熟一株」）。t791 对齐
+    //   MC 骨粉「+2~5 阶段」推进语义、压缩上界为 +2..3 → 从阶段 0 恰 3-4 骨粉催熟（数学保证与哈希质量无关：
+    //   3 骨粉推进和 ∈ [6,9]，≥7 即 3 骨粉熟；2+2+2=6 时第 4 骨粉钳到 7 → uses ∈ {3,4} 恒成立）。树苗走 MC 1.0
+    //   sapling bone meal 45% 概率即时成树（概率判定非阶段推进）+ 支撑 / 主干畅通守卫（光照豁免）；浆果丛
+    //   +1 阶段封顶。rig 寻址：运行期扫描 y40..47 全净空 20×5 区（P20 先例——nextSlot 网格已被前序循环探针
+    //   耗尽；树苗须 y≤41 才容得下 4 格主干 + 2 格树冠余量 → 净空须验到 y47）。
+    {
+        bool ok = true;
+        int bx = -1, bz = -1;
+        for (int zz = 2; zz + 4 < 96 && bx < 0; zz += 3) {
+            for (int xx = 2; xx + 19 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 19 && clear; ++dx)
+                    for (int dz = 0; dz <= 4 && clear; ++dz)
+                        for (int dy = 40; dy <= 47 && clear; ++dy)
+                            if (w.blockAt(xx + dx, dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { bx = xx; bz = zz; }
+            }
+        }
+        if (bx < 0) {
+            qInfo().noquote() << "  [t791 diag] no clear 20x5x8 region at y=40..47";
+            ok = false;
+        } else {
+            const int gY = 40; // 地台层（耕地 / 泥土 / 圆石）
+            const int pY = 41; // 植物层（树苗 41 恰容 4 主干 + 2 树冠余量 ≤47）
+            // ① 树苗守卫负例（先于成树正例——正例树冠会在 y43+ 写叶混入守卫区）：石支撑（非草/泥土）+
+            //    主干列 y45 阻塞 → 30 骨粉仍不成树（返回 true = 使用即耗，树苗保留；MC 1.0 同）。
+            w.setBlock(bx, gY, bz + 3, BR::Cobble, 0);
+            w.setBlock(bx, pY, bz + 3, BR::Sapling, 0);
+            w.setBlock(bx + 2, gY, bz + 3, BR::Dirt, 0);
+            w.setBlock(bx + 2, pY, bz + 3, BR::Sapling, 0);
+            w.setBlock(bx + 2, 45, bz + 3, BR::Dirt, 0);
+            bool guardConsumed = true;
+            for (int i = 0; i < 30; ++i) {
+                guardConsumed = w.applyBonemeal(bx, pY, bz + 3) && guardConsumed;       // 石支撑
+                guardConsumed = w.applyBonemeal(bx + 2, pY, bz + 3) && guardConsumed;   // 主干阻塞
+            }
+            if (!guardConsumed || w.blockAt(bx, pY, bz + 3) != BR::Sapling
+                    || w.blockAt(bx + 2, pY, bz + 3) != BR::Sapling) {
+                qInfo().noquote() << "  [t791 diag] guard saplings: consumed" << guardConsumed
+                                  << "stillA" << (w.blockAt(bx, pY, bz + 3) == BR::Sapling)
+                                  << "stillB" << (w.blockAt(bx + 2, pY, bz + 3) == BR::Sapling);
+                ok = false;
+            }
+            // ② 树苗成树正例：6 株泥土支撑 + 净空 → 逐株骨粉到成树（≤60 次防死循环）；树基 Log 顶替树苗位。
+            //    锁分布：总投掷数 10..24（6 株 / 45% → 期望 ~13.3）且首掷即中与 ≥2 掷两态都出现（45% 非 0/100）。
+            int totalRolls = 0, firstTry = 0, slowGrow = 0;
+            for (int s = 0; s < 6; ++s) {
+                const int sx = bx + s * 3, sz = bz + 2;
+                w.setBlock(sx, gY, sz, BR::Dirt, 0);
+                w.setBlock(sx, pY, sz, BR::Sapling, 0);
+                int n = 0;
+                bool consumed = true;
+                while (w.blockAt(sx, pY, sz) == BR::Sapling && n < 60) {
+                    consumed = w.applyBonemeal(sx, pY, sz) && consumed; // 使用即耗（判定落空也 true）
+                    ++n; ++totalRolls;
+                }
+                if (!consumed || w.blockAt(sx, pY, sz) != BR::Log) {
+                    qInfo().noquote() << "  [t791 diag] sapling" << s << "rolls" << n
+                                      << "base" << w.blockAt(sx, pY, sz);
+                    ok = false;
+                }
+                if (n == 1) ++firstTry;
+                if (n >= 2) ++slowGrow;
+            }
+            if (totalRolls < 10 || totalRolls > 24 || firstTry < 1 || slowGrow < 1) {
+                qInfo().noquote() << "  [t791 diag] sapling distribution: rolls" << totalRolls
+                                  << "firstTry" << firstTry << "slow" << slowGrow;
+                ok = false;
+            }
+            // ③ 作物 +2..3 阶段 / 3-4 骨粉催熟（8 小麦 + 胡萝卜 + 马铃薯，耕地支撑同生产种植路径）：
+            //    每骨粉推进 ∈ {2,3}（钳顶 7 时 delta 可 <2 但 after 必为 7）；uses ∈ [3,4]；id 不漂移；
+            //    分布锁：推进 2 与 3 两值都出现 + uses 最小 3 / 最大 4（带内两端都达）。
+            int usesMin = 99, usesMax = 0, adv2 = 0, adv3 = 0;
+            const quint8 cropIds[10] = { BR::WheatCrop, BR::WheatCrop, BR::WheatCrop, BR::WheatCrop,
+                                         BR::WheatCrop, BR::WheatCrop, BR::WheatCrop, BR::WheatCrop,
+                                         BR::CarrotCrop, BR::PotatoCrop };
+            for (int c = 0; c < 10; ++c) {
+                const int cx = bx + c;
+                w.setBlock(cx, gY, bz, BR::Farmland, 0);
+                w.setBlock(cx, pY, bz, cropIds[c], 0);
+                int uses = 0;
+                bool consumed = true;
+                while (w.stateAt(cx, pY, bz) < BR::WheatCropStageMax && uses < 8) {
+                    const int before = w.stateAt(cx, pY, bz);
+                    consumed = w.applyBonemeal(cx, pY, bz) && consumed;
+                    const int after = w.stateAt(cx, pY, bz);
+                    ++uses;
+                    const int d = after - before;
+                    if (d == 2) ++adv2;
+                    else if (d == 3) ++adv3;
+                    else if (after != int(BR::WheatCropStageMax)) { // 钳顶例外（after==7 合法）
+                        qInfo().noquote() << "  [t791 diag] crop" << c << "advance" << d << "->" << after;
+                        ok = false;
+                    }
+                }
+                if (!consumed || w.stateAt(cx, pY, bz) != BR::WheatCropStageMax
+                        || w.blockAt(cx, pY, bz) != cropIds[c] || uses < 3 || uses > 4) {
+                    qInfo().noquote() << "  [t791 diag] crop" << c << "uses" << uses
+                                      << "state" << w.stateAt(cx, pY, bz);
+                    ok = false;
+                }
+                usesMin = std::min(usesMin, uses);
+                usesMax = std::max(usesMax, uses);
+            }
+            if (adv2 < 1 || adv3 < 1 || usesMin != 3 || usesMax != 4) {
+                qInfo().noquote() << "  [t791 diag] crop distribution: adv2" << adv2 << "adv3" << adv3
+                                  << "uses" << usesMin << "-" << usesMax;
+                ok = false;
+            }
+            // ③b 成熟作物负例：state==7 → 返 false（无效应不消耗）+ 阶段保持 7。
+            if (w.applyBonemeal(bx, pY, bz) || w.stateAt(bx, pY, bz) != BR::WheatCropStageMax) {
+                qInfo().noquote() << "  [t791 diag] mature crop bonemeal not a no-op";
+                ok = false;
+            }
+            // ④ 浆果丛 +1 阶段：0→1→2 后封顶返 false（MC sweet berry bush bone meal 单阶段推进）。
+            w.setBlock(bx + 12, pY, bz + 1, BR::SweetBerryBush, 0);
+            if (!w.applyBonemeal(bx + 12, pY, bz + 1) || w.stateAt(bx + 12, pY, bz + 1) != 1
+                    || !w.applyBonemeal(bx + 12, pY, bz + 1) || w.stateAt(bx + 12, pY, bz + 1) != 2
+                    || w.applyBonemeal(bx + 12, pY, bz + 1)
+                    || w.stateAt(bx + 12, pY, bz + 1) != 2) {
+                qInfo().noquote() << "  [t791 diag] berry bush stages wrong:"
+                                  << w.stateAt(bx + 12, pY, bz + 1);
+                ok = false;
+            }
+            // ⑤ 非目标负例：泥土 / 空气 → 返 false（机制等价 MC 骨粉对非生长目标无效应）。
+            w.setBlock(bx + 11, pY, bz + 1, BR::Dirt, 0);
+            if (w.applyBonemeal(bx + 11, pY, bz + 1) || w.applyBonemeal(bx + 13, pY, bz + 1)) {
+                qInfo().noquote() << "  [t791 diag] bonemeal applied to dirt/air";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t791 bonemeal balance: crops advance 2-3 stages per use so 3-4 bone meals "
+                             "mature a plant from stage 0 (10 plants locked uses 3..4, advance in {2,3} "
+                             "clamped at 7, id preserved, mature -> no-op no-consume), sapling 45% per use "
+                             "instant tree (trunk base Log, 6 saplings within 10-24 rolls, first-try and "
+                             "retry both observed) with support+clearance guards (cobble base / blocked "
+                             "trunk never grow yet still consumed), berry bush +1 stage to cap then no-op, "
+                             "non-targets false (survival consume + swing + stage texture swap = "
+                             "playercontroller/QML, manual check)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

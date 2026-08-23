@@ -381,6 +381,30 @@ public:
     //   每窗零写入、零 worldChanged。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickSweetBerryBushGrowth();
+    // t791 骨粉催熟统一入口（spec R19.12 🅵「3-4 个骨粉应催熟一株」）：手持骨粉右键命中格的机制判定 + 应用。
+    //   playercontroller 只管命中分流 / 消耗 / 挥手（Game 层），机制数值全收口在此 → 矩阵探针（redstone_
+    //   matrix_test）可直调 World 层锁数值分布。三类目标各对齐 MC 1.0 骨粉语义：
+    //   ① 未成熟作物（WheatCrop/CarrotCrop/PotatoCrop，state<WheatCropStageMax）→ **+2..3 阶段**（哈希二值，
+    //     上界钳到 max）。t447 原为每骨粉 +1 阶段 → 0..7 共 8 阶段要 7 骨粉（用户实测「多个骨粉催不熟」）；
+    //     t791 对齐 MC 骨粉「+2~5 阶段」的推进语义但压缩上界为 +2..3 → 从阶段 0 **恰 3-4 骨粉催熟**
+    //     （2+2+3=7 三骨粉；2+2+2=6→第四骨粉钳到 7），期望 ~3.5 次，落在 spec「3-4 次」带内（MC 的 +5
+    //     上界会让 2 骨粉催熟出带，故不取）。写入走 5 参数 setBlock（id 不变只 state 变 → 不发 broken/
+    //     placed、发 worldChanged 重建阶段贴图，同 t447 playercontroller 原路径）。
+    //   ② 树苗（Sapling）→ **45% 概率即时成树**（kBonemealSaplingPct；机制等价 MC 1.0 sapling bone meal
+    //     45% 成树——概率判定**非阶段推进**，树苗无生长阶段）。守卫同 tickSaplingGrowth 应用段：下方草地/
+    //     泥土 + 主干列畅通（trunkH 同源 hashColumn 4..6 + 树冠 2 格余量）；唯**光照守卫豁免**（骨粉是
+    //     强制生长不等天光）。长成 = 清树苗（静默）+ placeTreeAt 完整橡树 + recomputeLightAround +
+    //     worldChanged（逐句同 tickSaplingGrowth 应用段）。判定落空 / 守卫不满足仍算「用掉」（返 true 消耗，
+    //     MC 1.0 骨粉对树苗使用即耗）。树苗无阶段故不走 ① 的阶段推进。
+    //   ③ 未成熟浆果丛（SweetBerryBush，state<SweetBerryBushStageMax）→ **+1 阶段**（丛仅 3 阶段
+    //     0/1/2，一骨粉推一阶段，机制等价 MC sweet berry bush bone meal 单阶段推进；从 0 两骨粉催满）。
+    //   已成熟作物 / 已成熟丛 / 非三类目标 → 返 **false**（无效应不消耗，机制等价 MC 骨粉对成熟作物 /
+    //   非生长目标无效应；caller 据返值决定是否扣骨粉 + 挥手）。
+    //   确定性（PLAN §2-K）：骰子 = hashVoxel(seed ⊕ 使用序号, x, y, z)，使用序号 m_bonemealUseIndex 每次
+    //   有效使用 +1 → 同株连续骨粉推进值错峰（非每次同值）、同 seed 同使用序列可复现，无 Math.random / 时间源。
+    //   分层（PLAN §2）：World 层，读写 m_chunks + 发 worldChanged；不依赖 Renderer/Game/UI。非 Q_INVOKABLE
+    //   （仅 playercontroller / 矩阵探针 C++ 调，同 setBlockSilent）。
+    bool applyBonemeal(int x, int y, int z);
     // t468 结冰 tick（spec「寒冷群系(雪原 Snowy)暴露天空的水源(Water state==0)→冰；MC 规则：暴露天空 +
     //   寒冷生物群系→水变冰」）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部
     //   节流到 ~每 kFreezeTickInterval×0.1s = 5s 一窗）。机制等价 MC 1.0 random-tick 结冰：扫 Snowy 群系列，自顶
@@ -1174,6 +1198,14 @@ private:
     static constexpr int kBerryBushTickInterval = 50; // tickSweetBerryBushGrowth 节流间隔（100ms → 5s/窗）
     static constexpr int kBerryBushMinLight     = 9;  // 生长所需最低天光（/15；机制等价 MC 浆果丛 light level 9+）
     static constexpr int kBerryBushGrowPct      = 15; // 每窗每丛升阶段的散布概率（%；15% → 平均 ~33s/阶段）
+    // t791 骨粉催熟参数 + 使用序号（applyBonemeal 见公有段头注释）：作物每骨粉 +2..3 阶段（0..7 共 8 阶段 →
+    //   从阶段 0 恰 3-4 骨粉催熟、期望 ~3.5 次；MC 1.0 为 +2..5 阶段，压缩上界保 spec「3-4 个骨粉应催熟」带）；
+    //   树苗 45%/骨粉即时成树（MC 1.0 sapling bone meal 45%，概率成树非阶段推进）。m_bonemealUseIndex 每次
+    //   有效使用 +1 喂入 hashVoxel（seed ⊕ 序号 → 同株多次使用错峰、可复现，PLAN §2-K，同 m_cropIntervalIndex 模式）。
+    int m_bonemealUseIndex = 0;
+    static constexpr int kBonemealCropAdvanceMin = 2; // 作物每骨粉最少推进阶段数（+2..3 哈希二值的下界）
+    static constexpr int kBonemealCropAdvanceMax = 3; // 作物每骨粉最多推进阶段数（总和钳 WheatCropStageMax=7）
+    static constexpr int kBonemealSaplingPct    = 45; // 树苗每骨粉即时成树概率（%；MC 1.0 sapling bone meal 45%）
     // t325 树叶渐进衰减队列 + 节流计数 + 常量：tickLeafDecay() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kLeafDecayTickInterval 才开一个判定窗口（~每 kLeafDecayTickInterval×0.1s 一窗）。窗口序号
     //   m_leafDecayIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同叶错峰渐退（非全部同步消失）。

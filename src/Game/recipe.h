@@ -207,11 +207,14 @@ public:
     static constexpr int RawFishId         = 0x231; // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
     // t447 骨粉（bone meal）：材料段 0x232。**骨头合成产物**（1 骨头 → 3 骨粉，无序 2×2 / 3×3，机制等价 MC 1.0
     //   bone→3 bone meal）。可堆叠 64；非方块（材料段）→ 右键不放置，走 useBlock「催熟」分支（同桶 / 种子：在
-    //   selectedBlock Air 守卫之前分流）：右键命中**未成熟作物**（小麦 / 胡萝卜 / 马铃薯，state<WheatCropStageMax）
-    //   → 作物 state+1（即时催熟一阶段，机制等价 MC 1.0 骨粉右键作物 +1 age）。生存消耗 1 骨粉 / 创造不耗。
-    //   MaterialIcon 自绘骨粉图标（米白粉末堆 + 几粒骨碎，§9a 区隔原创）。创造调色板补全便于测试 / 装饰取用。
-    //   无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界 → -1 → 资源包回退引擎自绘）。
-    static constexpr int BonemealId        = 0x232; // 骨粉：骨头合成产物；右键未成熟作物 → 催熟一阶段（t447）
+    //   selectedBlock Air 守卫之前分流）：右键命中未成熟作物 / 树苗 / 未成熟浆果丛 → World::applyBonemeal
+    //   （t791 收口统一入口）：作物 **+2..3 阶段**（0..7 共 8 阶段 → 恰 3-4 骨粉催熟一株、期望 ~3.5 次；t447
+    //   原为 +1 阶段要 7 骨粉；MC 1.0 为 +2..5 阶段，压缩上界保 spec「3-4 个骨粉应催熟」带）；树苗 **45% 概率
+    //   即时成树**（MC 1.0 sapling bone meal 语义，概率成树非阶段推进，判定落空仍消耗）；浆果丛 **+1 阶段**。
+    //   生存消耗 1 骨粉 / 创造不耗。MaterialIcon 自绘骨粉图标（米白粉末堆 + 几粒骨碎，§9a 区隔原创）。创造调色板
+    //   补全便于测试 / 装饰取用。无 MC 1.0 mcMaterialId 映射（id > SpawnEggSquidId=0x22E，越 kMcMaterialId 表界
+    //   → -1 → 资源包回退引擎自绘）。
+    static constexpr int BonemealId        = 0x232; // 骨粉：骨头合成产物；右键作物 +2..3 阶段（3-4 个催熟）/ 树苗 45% 成树 / 浆果丛 +1 阶段（t447；t791 平衡）
     // t467 甜浆果（sweet berry）：材料段 0x233。机制等价 MC 1.0 sweet berries——雪原浆果灌木丛（SweetBerryBush）的
     //   采摘产物 + 可食食物。可堆叠 64；非方块（材料段）→ 右键不放置，走 useBlock「食用」分支（playercontroller
     //   beginEating/finishEating，长按右键累积进食进度满后消耗 1 浆果 + 恢复饥饿 kSweetBerryHungerAmount=2，机制等价
