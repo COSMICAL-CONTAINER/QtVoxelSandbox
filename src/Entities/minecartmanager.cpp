@@ -209,15 +209,47 @@ bool MinecartManager::dismount(World *world, QVector3D &outPlayerFeet)
     return true;
 }
 
-// 复审 #4：列内向下扫最近可达轨格（实现见头注释；pinCartY / pickTrackStep / tickRiddenCart / 探测轨
-//   占用四点共用单一权威）。遮挡判定 World::isCollidable（Core isCollidable 单一权威：轨 / 火把 / 水 /
-//   花草 ShapeNone 恒 false 不遮挡；LilyPad 特例可踩碰撞当遮挡 —— 矿车压睡莲列本就非法，可接受）。
+// 复审 #4 / 复审 #2（2026-08-23）：列内向下扫最近可达轨格。**严格版**（实心遮挡即断）自复审 #2 起仅
+//   探测轨占用一处消费 —— 隔板供电防线（地面车隔着实心地板点亮下方探测轨隧道由此拒）。骑乘族消费端
+//   （pinCartY / pickTrackStep / tickRiddenCart 前置钉定 / railSurfaceYAt / clampShift）走下方宽容版。
+//   遮挡判定 World::isCollidable（Core isCollidable 单一权威：轨 / 火把 / 水 / 花草 ShapeNone 恒 false
+//   不遮挡；LilyPad 特例可踩碰撞当遮挡 —— 矿车压睡莲列本就非法，可接受）。
 int MinecartManager::scanRailColumn(World *world, int cx, int topY, int cz) const
 {
     if (!world) return -1;
     for (int y = topY; y >= topY - 2 && y >= 0; --y) {
         if (BlockRegistry::isRail(world->blockAt(cx, y, cz))) return y;
-        if (world->isCollidable(cx, y, cz)) break; // 实心遮挡 → 更下方轨不可达（隔板供电 / 假支撑拒）
+        if (world->isCollidable(cx, y, cz)) break; // 实心遮挡 → 更下方轨不可达（隔板供电拒）
+    }
+    return -1;
+}
+
+// 复审 #2（2026-08-23）宽容版列扫描（骑乘族专用；语义见头注释）：与严格版唯一差异在「扫描顶格 = 实心」
+//   的一类 —— 坡道低顶净空（1 格隧道 / 紧凑螺旋 / 多层轨道下层坡段，t775 确立玩法）里车位居上：
+//   rise>0.55 时 floor(pos.y) = 轨Y+1 恰是天花板实心格，严格断扫 → 坡上死车 / 俯仰清零 / 采样失联
+//   （复审 #2 三症状同根因）。宽容规则：实心格正下方是轨 且 「轨Y + railRiseAt(fx,fz) + kCartRideH」
+//   与 pos.y 一致（≤kRideScanTol）→ 判该实心是「紧贴轨上沿的天花板」而非隔板，放行返回该轨。
+//   一致性校验承重（af9ec8e「地面车隔地板钉到下方轨」的回归防线全靠它）：
+//   - 地面车：pos.y = 地板Y + kCartGroundH(0.3875)，对地板下平轨骑乘高差 = 1 + 0.3875 − 0.45 = 0.9375
+//     >> 0.5 → 恒拒（隔板语义保留；例外仅地板下恰为 rise>~0.94 坡段 —— 轨面已贴近地板顶，判可达与
+//     渲染面一致，见 kRideScanTol 注释）；
+//   - 轨上车：pos.y 正是 pinCartY 用同一公式钉出 → 帧首扫描（fx 未变）差恰 0；stepCartAlongRail 子步
+//     中 / 俯仰 ±0.25 采样点的差 ≤ railRiseAt 值域 [0,1]（容差覆盖）。
+//   注：实心格下方是**空气**再下方才是轨（隔板 + 空隙 + 隧道轨）仍拒 —— 与隔板不可区分，低顶下坡采样
+//   前探偶发失联由 updateCartPitch 的归 0 兜底（纯呈现，<2 帧窗口）。
+int MinecartManager::scanRailColumnRiding(World *world, int cx, int cz, int topY, float fx, float fz, float refY) const
+{
+    if (!world) return -1;
+    for (int y = topY; y >= topY - 2 && y >= 0; --y) {
+        if (BlockRegistry::isRail(world->blockAt(cx, y, cz))) return y;
+        if (world->isCollidable(cx, y, cz)) {
+            // 宽容窗口：实心正下一格是轨 + 骑乘高一致 → 低顶净空放行；否则同严格版断扫。
+            if (y - 1 >= 0 && BlockRegistry::isRail(world->blockAt(cx, y - 1, cz))) {
+                const float h = float(y - 1) + railRiseAt(world, cx, y - 1, cz, fx, fz) + kCartRideH;
+                if (std::fabs(refY - h) <= kRideScanTol) return y - 1;
+            }
+            return -1;
+        }
     }
     return -1;
 }
@@ -230,10 +262,12 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
     //   pos.y = 轨Y+1+rise+0.30 → floor(pos.y)-1 = 轨**上方**空气层 → isRail 判不在轨上 → 拐角重选向 /
     //   S 倒行 / 推空车在坡顶 30% 段全部失联。与 tickRiddenCart 钉轨面 / t691 前置钉定同「列内向下扫、
     //   容差 2」语义 → 坡顶 / 坡脚 / 平轨一律解析到真轨格）。轨判定 isRail 家族（普通 / 动力 / 探测）。
-    //   复审 #4：扫描收口到 scanRailColumn（含实心遮挡断扫）。
+    //   复审 #4：扫描收口到 scanRailColumn（含实心遮挡断扫）。复审 #2：骑乘族改宽容版 scanRailColumnRiding
+    //   （低顶净空坡段车位居上时 floor(pos.y)=实心天花板 → 严格断扫会把坡中格心重选判死 → 坡上死车）。
     const int rx = int(std::floor(cartPos.x()));
     const int rz = int(std::floor(cartPos.z()));
-    const int ry = scanRailColumn(world, rx, int(std::floor(cartPos.y())), rz);
+    const int ry = scanRailColumnRiding(world, rx, rz, int(std::floor(cartPos.y())),
+                                        cartPos.x() - float(rx), cartPos.z() - float(rz), cartPos.y());
     if (ry < 0) return false; // 不在轨上（防御；含实心遮挡 → 列内轨不可达）
     const quint8 con = world->stateAt(rx, ry, rz);
     // 4 向连接位（RailConnPx/Nx/Pz/Nz）→ 位移向量；选与 (wantX,wantZ) 点积最大且**非反向**（dot ≥ 0）者
@@ -291,13 +325,15 @@ bool MinecartManager::pickTrackStep(World *world, const QVector3D &cartPos, floa
 // t708 钉轨面（共享 helper；实现见头注释）：矿车所在列向下扫最近轨格 → Y = cell 底 + 坡面高 + kCartRideH
 //   （t734 基准修真：轨板贴 cell 底 +1/16，去掉旧 +1.0 格顶叠加）。返钉到的轨格 Y（-1 = 列内无轨）。
 //   复审 #4：列扫描收口到 scanRailColumn（含实心遮挡断扫 —— 地面车隔着实心地板不再钉到地板下的轨）。
+//   复审 #2：骑乘 Y 钉定改宽容版（低顶净空坡段不判死车；地面车隔板拒由宽容版一致性校验承担，语义同旧）。
 //   t769：坡面高计算抽到 railRiseAt（Y 钉定 / 俯仰采样共用同一张面）。
 int MinecartManager::pinCartY(Cart &c, World *world)
 {
     if (!world) return -1;
     const int bcx = int(std::floor(c.pos.x()));
     const int bcz = int(std::floor(c.pos.z()));
-    const int y = scanRailColumn(world, bcx, int(std::floor(c.pos.y())), bcz);
+    const int y = scanRailColumnRiding(world, bcx, bcz, int(std::floor(c.pos.y())),
+                                       c.pos.x() - float(bcx), c.pos.z() - float(bcz), c.pos.y());
     if (y < 0) return -1;
     const float fx = c.pos.x() - float(bcx); // [0,1) cell 内横向位置
     const float fz = c.pos.z() - float(bcz);
@@ -309,8 +345,8 @@ int MinecartManager::pinCartY(Cart &c, World *world)
 // t769 轨格内坡面高（从 pinCartY 抽出的纯查询；头注释见 minecartmanager.h）：连接位定行进轴（mesher
 //   同源：EW（±X 连接）→ riseAtX、NS → riseAtZ；0 连接读 RailAxisEWFlag 轴偏好），格内 (fx,fz) 上邻轨
 //   抬升叠加（只抬 δ>0）。t691 轴判定的原注释语义保留：mesher 对直轨只读本轴 rise —— 垂直邻线探针命中
-//   不抬车。拐角 / 十字无坡（mesher 同判）；拐角取四角抬升双线性中心（t709 坡臂拐角曲面）；V 形凹谷
-//   （t710 两端皆 +1）取 2|轴-0.5|。
+//   不抬车。拐角 / 十字无坡（mesher 同判）；拐角取 armLift 四角抬升的双线性插值（复审 #3，见分支内
+//   注释）；V 形凹谷（t710 两端皆 +1）取 2|轴-0.5|。
 float MinecartManager::railRiseAt(World *world, int bcx, int y, int bcz, float fx, float fz)
 {
     const auto dlt = [&](int dx, int dz) {
@@ -330,12 +366,18 @@ float MinecartManager::railRiseAt(World *world, int bcx, int y, int bcz, float f
     const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
     float rise = 0.0f;
     if (isCorner) {
-        // t709 坡臂拐角：mesher 拐角 quad 沿臂侧整边抬升（armLift）→ 矿车在格中心取四角抬升的
-        //   双线性中心（坡底拐弯曲面过弯不跳变；平地拐角四角全 0 → rise 0 语义不变）。
+        // t709 坡臂拐角 + 复审 #3（2026-08-23）双轴插值：mesher 拐角 quad 角点高 = 该角触及的两侧臂抬升
+        //   之和（partialblockgeometry.cpp armLift：(0,0)=eW+eN / (1,0)=eE+eN / (1,1)=eE+eS / (0,1)=eW+eS，
+        //   双臂齐抬的峰角取和）。旧版取四边均值**常数** → 与相邻直臂格的线性坡面在格边界不连续（复审 #3：
+        //   俯仰采样窗跨界 atan2(-0.75,0.5)≈-56° 车头瞬甩 + 同帧 Y 钉面跳降 0.75）。改四角双线性后拐角内
+        //   随 (fx,fz) 连续、边界值与直臂 riseAtX/riseAtZ 严格衔接（渲染面 / 矿车 Y / 俯仰采样同一张面）；
+        //   平地拐角四角全 0 → rise 0 语义不变。
         const int dpx = dlt(1, 0), dnx = dlt(-1, 0), dpz = dlt(0, 1), dnz = dlt(0, -1);
         const float eE = dpx > 0 ? float(dpx) : 0.0f, eW = dnx > 0 ? float(dnx) : 0.0f;
         const float eS = dpz > 0 ? float(dpz) : 0.0f, eN = dnz > 0 ? float(dnz) : 0.0f;
-        rise = 0.25f * (eW + eE + eN + eS);
+        const float h00 = eW + eN, h10 = eE + eN, h11 = eE + eS, h01 = eW + eS;
+        rise = (h00 * (1.0f - fx) + h10 * fx) * (1.0f - fz)
+             + (h01 * (1.0f - fx) + h11 * fx) * fz;
     } else if (nConn < 3) { // 直轨才有坡（拐角 / 十字无坡，mesher 同判）
         if (ew) {
             const int dpx = dlt(1, 0);
@@ -359,12 +401,15 @@ float MinecartManager::railRiseAt(World *world, int bcx, int y, int bcz, float f
 }
 
 // t769 轨道面高度采样（头注释见 minecartmanager.h；俯仰角计算用 —— 采到的正是 pinCartY 所钉的同一张面）。
-bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY, float &outY) const
+//   复审 #2：列扫描改宽容版 —— 低顶净空坡段（天花板贴轨上沿）采样列同样从实心格起步，严格断扫会把
+//   坡中段俯仰采样整段判失联 → 45° 爬坡车头一帧跳回水平（复审 #2 症状②）。refY = 车当前 pos.y：采样点
+//   距车心 ≤0.25 → 两点轨面差 ≤坡度×0.25 ≤0.5（kRideScanTol 容差窗内）。
+bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY, float refY, float &outY) const
 {
     if (!world) return false;
     const int cx = int(std::floor(sx));
     const int cz = int(std::floor(sz));
-    const int y = scanRailColumn(world, cx, topY, cz);
+    const int y = scanRailColumnRiding(world, cx, cz, topY, sx - float(cx), sz - float(cz), refY);
     if (y < 0) return false;
     outY = float(y) + railRiseAt(world, cx, y, cz, sx - float(cx), sz - float(cz));
     return true;
@@ -378,16 +423,19 @@ bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY,
 //   翻转（S 反推 / 停驻重选向）→ 窗对调 → 符号自动翻转。平轨 / 拐角两采样等高 → 0。采样列无可达轨
 //   （死端前探 / 离轨防御）→ 归 0（水平摆）。railY = 车所在列轨层：采样列扫描窗 [railY+1, railY-1]
 //   覆盖坡步进 ±1（采样点距车心 ≤0.25 → 至多邻列）。
+//   复审 #3：真坡面上界 = 1:1 坡 ±45°（V 谷窗内 ≤~39° / 拐角双线性窗内 ≤45°）→ 钳 kCartPitchMaxDeg 防
+//   病态采样窗（探针跨界断层 / 拐角跨边界）冒 ±56° 级幻象俯仰（车头视觉猛甩）；纯呈现护栏，不改判据。
 void MinecartManager::updateCartPitch(Cart &c, World *world, int railY)
 {
     if (!world || railY < 0) { c.pitch = 0.0f; return; }
     float hF = 0.0f, hB = 0.0f;
     const bool okF = railSurfaceYAt(world, c.pos.x() + c.dirX * kCartPitchProbe,
-                                    c.pos.z() + c.dirZ * kCartPitchProbe, railY + 1, hF);
+                                    c.pos.z() + c.dirZ * kCartPitchProbe, railY + 1, c.pos.y(), hF);
     const bool okB = railSurfaceYAt(world, c.pos.x() - c.dirX * kCartPitchProbe,
-                                    c.pos.z() - c.dirZ * kCartPitchProbe, railY + 1, hB);
+                                    c.pos.z() - c.dirZ * kCartPitchProbe, railY + 1, c.pos.y(), hB);
     if (!okF || !okB) { c.pitch = 0.0f; return; }
-    c.pitch = qRadiansToDegrees(std::atan2(hF - hB, 2.0f * kCartPitchProbe));
+    const float deg = qRadiansToDegrees(std::atan2(hF - hB, 2.0f * kCartPitchProbe));
+    c.pitch = std::max(-kCartPitchMaxDeg, std::min(kCartPitchMaxDeg, deg));
 }
 
 // t708 沿轨推进（共享：被骑 / 空车被推同一物理；实现见头注释）。负速 = 倒行（沿 -dir，车头保持原朝向）。
@@ -423,17 +471,34 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
     }
     float remain = std::fabs(step);
     int guard = 0;
+    // 复审 #23：本 tick 贴轨收敛预算（格）。旧「一次钉回」在段中重选向后把 ~0.5 格横向偏移瞬时吃掉 →
+    //   被骑时玩家视点同步横跳一次（旧探针只验收终态测不出瞬移）。限速后每 tick 最多收
+    //   kCartCenterSnapPerTick，0.5 格偏移 ~5 tick（83ms）渐进钉回。取舍：另一修法「改 dir 同时钉 pos」
+    //   只是同一瞬移换个时点，不解决跳变，弃。预算制不影响正常行驶（恒在 .5 上 → 不消费）与收敛正确性
+    //   （预算只限速、方向不变；行进轴的到心落位仍精确钉格心，仅垂直轴渐进）。
+    float snapBudget = kCartCenterSnapPerTick;
     while (remain > 1e-5f && guard++ < 16) { // 子步循环（单帧跨多格；16 子步上限（boost×卡顿尖峰 dt 余量））
-        // t770 ② 弯道格内强制贴轨约束（与速度 / 方向 / 步长无关的几何连续约束）：把行进向的**垂直轴**钉到
-        //   所在格中心线（floor+0.5）。轨格模型 = 格心折线（直段沿轴中心线、拐角过格心转直角）→ 矿车合法
-        //   位置集合 = 这条折线；但方向重选并非只在到心时刻发生 —— 停驻重选向（tickRiddenCart 速度死区
-        //   归零帧）/ 被推起步（pushEmptyCart）都可能在**段中非心位**把 dir 掰向新轴（弯道格内 wish 略偏
-        //   即选中出口臂）→ 车沿平行偏移线行驶（用户报「慢速前进未触发旋转即脱轨」的几何根因；倒退经
-        //   ①持久化后同样受益）。每子步钉回中心线：正常行驶恒在 .5 上 → no-op 零开销；偏移只可能来自上述
-        //   重选（量 <0.5 格，且不出本格 → 不改变 floor 列解析），一次钉回即根除脱轨。90° 瞬转本身允许
-        //   （MC 亦近似瞬转），不允许的是位置脱离中心线 —— 本行就是「位置必须连续贴轨」的执行点。
-        if (std::fabs(tx) > 0.5f) c.pos.setZ(std::floor(c.pos.z()) + 0.5f);
-        else                      c.pos.setX(std::floor(c.pos.x()) + 0.5f);
+        // t770 ② 弯道格内强制贴轨约束（与速度 / 方向 / 步长无关的几何连续约束）+ 复审 #23 限速：把行进向
+        //   的**垂直轴向**所在格中心线（floor+0.5）收敛（非一次钉回，见上方预算注释）。轨格模型 = 格心
+        //   折线（直段沿轴中心线、拐角过格心转直角）→ 矿车合法位置集合 = 这条折线；但方向重选并非只在
+        //   到心时刻发生 —— 停驻重选向（tickRiddenCart 速度死区归零帧）/ 被推起步（pushEmptyCart）都可能
+        //   在**段中非心位**把 dir 掰向新轴（弯道格内 wish 略偏即选中出口臂）→ 车沿平行偏移线行驶（用户
+        //   报「慢速前进未触发旋转即脱轨」的几何根因；倒退经 ①持久化后同样受益）。每子步向中心线收敛：
+        //   正常行驶恒在 .5 上 → no-op 零开销；偏移只可能来自上述重选（量 <0.5 格，且不出本格 → 不改变
+        //   floor 列解析），渐进钉回根除脱轨且不瞬移。90° 瞬转本身允许（MC 亦近似瞬转），不允许的是位置
+        //   脱离中心线 —— 本段就是「位置必须连续贴轨」的执行点。
+        {
+            const bool axisX = std::fabs(tx) > 0.5f; // 行进轴 X → 收敛垂直轴 Z，反之收敛 X
+            const float cur = axisX ? c.pos.z() : c.pos.x();
+            const float want = std::floor(cur) + 0.5f;
+            const float d = want - cur;
+            const float m = std::min(std::fabs(d), snapBudget);
+            if (m > 0.0f) {
+                const float v = cur + (d >= 0.0f ? m : -m);
+                if (axisX) c.pos.setZ(v); else c.pos.setX(v);
+                snapBudget -= m;
+            }
+        }
         // t734 段终点重写 = 行进向上**前方最近的格心**（行进轴 floor/ceil 取 k+0.5，另一轴不动）。
         //   旧版「当前格心 + 行进向」在 16ms tick 下步长 ~0.06-0.21 < 段长下界 0.5 → `remain < segLen`
         //   恒真 → 跨格分支（连接重选 / 拐角转弯 / 尽头停）在稳定帧率下是**死代码**、仅 dt 卡顿尖峰偶发
@@ -565,8 +630,8 @@ void MinecartManager::resolveCartCollisions(World *world)
         return pickTrackStep(world, c.pos, wx, wz, pdx, pdz);
     };
     // 复审 #3 (a) 位移边界守卫：去穿插位移 s（沿轨轴带符号标量）若使车越过当前格边界，先以 pinCartY
-    //   同语义列扫描（自车当前 Y 向下 + 实心遮挡断扫）探测目标列有轨；无轨 → 钳制在当前格边界内。
-    //   返回允许执行的位移标量（0 = 不动；负 = 把已越线的半格拉回边界内）。
+    //   同语义列扫描（宽容版：自车当前 Y 向下 + 低顶净空放行 / 隔板拒）探测目标列有轨；无轨 → 钳制在
+    //   当前格边界内。返回允许执行的位移标量（0 = 不动；负 = 把已越线的半格拉回边界内）。
     const auto clampShift = [&](const Cart &c, float s) -> float {
         if (!world) return 0.0f;
         if (std::fabs(s) < 1e-6f) return s;
@@ -579,11 +644,18 @@ void MinecartManager::resolveCartCollisions(World *world)
         const int cx = int(std::floor(c.pos.x()));
         const int cz = int(std::floor(c.pos.z()));
         const int topY = int(std::floor(c.pos.y()));
-        if (scanRailColumn(world, cx, topY, cz) < 0) return 0.0f; // 本列无轨（离轨 / 地面车）→ 推不动
+        // 复审 #2：宽容版（与 pinCartY 严格同语义 —— 低顶净空坡上的去穿插不被隔板断扫误拒；
+        //   refY/格内坐标按位移落点取：下一帧 pinCartY 将以该落点解析）。
+        const auto colHasRail = [&](int colX, int colZ, float wx, float wz) {
+            return scanRailColumnRiding(world, colX, colZ, topY,
+                                        wx - float(colX), wz - float(colZ), c.pos.y()) >= 0;
+        };
+        if (!colHasRail(cx, cz, c.pos.x(), c.pos.z())) return 0.0f; // 本列无轨（离轨 / 地面车）→ 推不动
         const int step = (cellNxt > cellCur) ? 1 : -1;
         const int tx = axisX ? cx + step : cx;
         const int tz = axisX ? cz : cz + step;
-        if (scanRailColumn(world, tx, topY, tz) >= 0) return s; // 目标列有轨（当前 Y 可达）→ 放行
+        if (colHasRail(tx, tz, c.pos.x() + (axisX ? d * s : 0.0f),
+                       c.pos.z() + (axisX ? 0.0f : d * s))) return s; // 目标列有轨（当前 Y 可达）→ 放行
         const float bound = (step > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
         return (bound - cur) / d; // 钳到边界内（d=±1 → 同号同模换算）
     };
@@ -738,10 +810,13 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     // t691 轨格层前置钉定：boost / 坡道重力两处旧用 floor(pos.y)-1 派生轨层 —— 坡格上 pos.y = 轨Y+1+
     //   rise+0.30，rise≥0.7 时 floor-1 取到轨**上方**层（约 30% 位置错层 → boost 判定 / 坡修正读空气 →
     //   间歇性失效）。改为与下方钉轨面循环同源的「本列向下扫最近轨格」，全 tick 用同一 pinnedY。
-    //   复审 #4：扫描收口到 scanRailColumn（含实心遮挡断扫，与 pinCartY / 探测轨占用同语义）。
+    //   复审 #4：扫描收口到 scanRailColumn。复审 #2：骑乘前置钉定改宽容版（低顶净空坡段不误判离轨 →
+    //   坡上死车；地面车隔板拒由一致性校验承担，与 pinCartY 同语义）。
     const int railX = int(std::floor(c.pos.x()));
     const int railZ = int(std::floor(c.pos.z()));
-    const int railY = world ? scanRailColumn(world, railX, int(std::floor(c.pos.y())), railZ)
+    const int railY = world ? scanRailColumnRiding(world, railX, railZ, int(std::floor(c.pos.y())),
+                                                   c.pos.x() - float(railX), c.pos.z() - float(railZ),
+                                                   c.pos.y())
                             : -1; // -1 = 列内无轨
 
     // t734 ③ 离轨静止（防「矿车不在铁轨上仍可被骑着一路悬浮滑到地图边界」）：列内无轨（railY<0）→
@@ -881,8 +956,11 @@ void MinecartManager::updateDetectorRailOccupancy(World *world)
         if (!c.alive) continue; // 车被挖毁 / clearAll 释放 → 不记占用 → 下一帧离开沿自动断电
         const int bcx = int(std::floor(c.pos.x()));
         const int bcz = int(std::floor(c.pos.z()));
-        // 复审 #4：列扫描收口 scanRailColumn（含实心遮挡断扫）—— 地面静止车隔着实心地板不再点亮
-        //   下方探测轨隧道（MC 探测轨只响应压在自己身上的车；坡顶场景格与轨之间只隔空气不受影响）。
+        // 复审 #4：列扫描收口 scanRailColumn 严格版（复审 #2 起唯一严格消费端 —— 骑乘族已迁宽容版）：
+        //   含实心遮挡断扫 —— 地面静止车隔着实心地板不再点亮下方探测轨隧道（MC 探测轨只响应压在自己
+        //   身上的车；坡顶场景格与轨之间只隔空气不受影响）。已知边缘（复审 #2 处方接受）：低顶净空坡段
+        //   rise>0.55 处 floor(pos.y)=天花板实心格 → 严格断扫不点亮该段探测轨（隔板供电防线优先；平轨
+        //   天花板不受影响 —— pos.y 未跨轨层，首扫格即轨）。
         const int y = scanRailColumn(world, bcx, int(std::floor(c.pos.y())), bcz);
         if (y >= 0 && world->blockAt(bcx, y, bcz) == BlockRegistry::DetectorRail) {
             const quint8 ds = world->stateAt(bcx, y, bcz);

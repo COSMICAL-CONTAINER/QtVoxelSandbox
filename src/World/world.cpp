@@ -521,7 +521,9 @@ std::vector<BlockRegistry::BlockAABB> World::collisionAABBsAt(int x, int y, int 
 }
 
 // t775 点级碰撞占据查询（头注释见 world.h）：取点所在格的碰撞 sub-AABB，任一盒严格包含该点 → true。
-//   玩家（t160）/ mob（t254）窒息与矿车骑乘窒息（t775）共用本判据（旧三处各自内联，收敛单一权威）。
+//   玩家（t160）与矿车骑乘（t775）窒息共用本判据（PlayerController tickSuffocation 单链，旧两处内联
+//   收敛单一权威）。mob（t254）窒息**未迁移**：EntityManager 独立实现同判据（复审 #24 口径修正，
+//   见 world.h 头注释）。
 bool World::pointBlockedByCollision(float x, float y, float z) const
 {
     for (const BlockRegistry::BlockAABB &b
