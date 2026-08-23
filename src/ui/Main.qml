@@ -8750,6 +8750,8 @@ Window {
         //   观感更立体）。t786 类型化：cageMobType 由 addSpawnerVis 创建时读笼 state 经
         //   EntityManager::spawnerMobTypeForState 解码注入（与 tickSpawners 同一解码权威）——地牢加权池
         //   （僵尸/骷髅/蜘蛛/爬行者）/ 要塞银鱼 / 创造放置僵尸各显对应迷你模型（修「创造放置中间空白」）。
+        //   t787 蛋改型：生物蛋右键刷怪笼改 state（5 参数 setBlock 只发 worldChanged）→ cleanupVis 兜底
+        //   重读同步 cageMobType（下），13 蛋型迷你模型 / 贴图全表支持（见 delegate 摆位 / 贴图查表）。
         //   光照 NoLighting 全亮（笼在地底暗处，全亮保「内有活物」信号可读；同手持/掉落物先例）。维护三重
         //   （同 fire/portal 模式）：onBlockPlaced(40) 加 / onBlockBroken(40) 删 / onWorldChanged 兜底清孤儿；
         //   enterWorld 用 collectBlocksOfId(40) 重建（读档 blob 直写不经 blockPlaced）。分层（PLAN §2）：纯
@@ -8762,9 +8764,9 @@ Window {
                 if (spawnerObjs[key]) return
                 if (theWorld.blockAt(x, y, z) !== 40) return  // 真值校验（防陈旧信号挂假 delegate）
                 // t786 类型化：创建时读笼 state 解码笼内 mob 类型并注入 delegate（cageMobType）——解码走
-                //   EntityManager::spawnerMobTypeForState（与 tickSpawners 同一权威，t785 单源教训）。笼 type
-                //   只在放置 / 破坏时变（无原位改型），创建期读一次即可；delegate 生命周期内不再依赖任何
-                //   NOTIFY 绑定（t177/t498 教训：注入式初值最稳）。旧存档笼（state=0/1）同函数兼容分流。
+                //   EntityManager::spawnerMobTypeForState（与 tickSpawners 同一权威，t785 单源教训）。
+                //   t787 原位改型（生物蛋右键改笼）后 delegate 的 cageMobType 由 cleanupVis 兜底重读同步
+                //   （见下）；旧存档笼（state=0/1）同函数兼容分流。
                 const cageMobType = entityManager.spawnerMobTypeForState(theWorld.stateAt(x, y, z))
                 const o = spawnerDelegate.createObject(spawnerHost, {cellX: x, cellY: y, cellZ: z, cageMobType: cageMobType})
                 if (o) spawnerObjs[key] = o
@@ -8775,12 +8777,20 @@ Window {
                 if (o) { o.destroy(); delete spawnerObjs[key] }
             }
             // 兜底清孤儿（爆炸 / 系统改写）：blockAt != Spawner(40) 的条目销毁（blockBroken 之外的清除路径收口）。
+            //   t787 原位改型同步：幸存条目重读笼 state 解码，cageMobType 有变 → 重赋值（property 默认 NOTIFY
+            //   触发 delegate 内 geometry/贴图/摆位全部绑定即时重算 → 笼心迷你模型切换）。改型走 5 参数
+            //   setBlock（id 不变只 state 变）→ 发 worldChanged → 本函数被 onWorldChanged 调 → 此处收口，
+            //   无需独立信号（同 t177/t498 教训：改用 worldChanged 兜底重扫，不依赖新增 NOTIFY 链）。
             function cleanupVis() {
                 for (const key in spawnerObjs) {
                     const p = key.split(",")
                     const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
                     if (theWorld.blockAt(x, y, z) !== 40) {
                         spawnerObjs[key].destroy(); delete spawnerObjs[key]
+                    } else {
+                        const want = entityManager.spawnerMobTypeForState(theWorld.stateAt(x, y, z))
+                        if (spawnerObjs[key].cageMobType !== want)
+                            spawnerObjs[key].cageMobType = want
                     }
                 }
             }
@@ -8801,15 +8811,28 @@ Window {
                 // 格中心锚点（世界坐标）：笼壳与迷你 mob 共锚（壳 ±0.5 恰覆整格）。
                 position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
 
-                // t786 迷你 mob 摆位表（按 cageMobType 查）：各 MobModel 几何竖直跨度不同（脚 -0.90 /
-                //   蜘蛛 -0.30 / 银鱼 -0.15），统一归一到「体高 ~0.42 格、竖直居中于自旋轴」：
+                // t786/t787 迷你 mob 摆位表（按 cageMobType 查）：各 MobModel 几何竖直跨度不同，统一归一到
+                // 「体高 ~0.42 格、竖直居中于自旋轴」：
                 //     scale = 0.42/体高（蜘蛛另受宽约束 ~1.5 宽 → 0.50 取窄值；银鱼模型极矮 → 放大 1.30
                 //     补偿，观感同 shipped 0.45 但跨型一致）；
                 //     yOff = −scale·(脚y+顶y)/2（把模型中心移到轴心；自旋绕体心非绕脚，t760 原注释语义）。
+                //   t787 扩表（蛋改型 9 新型，脚y/顶y 取 MobModel 局部跨度 —— 同 Main.qml mobModelYOff
+                //   各型腿底值 + 各分支头顶值）：四足猪/牛/羊/狼/豹猫/鱿鱼 0.53-0.58、鸡几何无腿（腿是实体
+                //   delegate 独立子 Model，迷你态省略 → 按几何实际跨度 -0.11..0.38）、夜行者细长 2.57 高取
+                //   0.16（瘦影观感即其体型）、燃烬者单头盒 0.47。观感需人工目视（dev-plan 注记）。
                 function miniMobScale(t) {
                     if (t === EntityManager.MobSpider) return 0.50       // 体高 0.43、宽 ~1.5 → 宽约束取窄
                     if (t === EntityManager.MobSilverfish) return 1.30  // 体高 0.29 → 放大补齐观感高度
                     if (t === EntityManager.MobStalker) return 0.22     // 体高 1.90（含头顶）
+                    if (t === EntityManager.MobNightwalker) return 0.16 // 体高 2.57（三格高细长 → 瘦影）
+                    if (t === EntityManager.MobChicken) return 0.86     // 几何体高 0.49（无腿型）
+                    if (t === EntityManager.MobOcelot) return 0.58      // 体高 0.72（含耳尖）
+                    if (t === EntityManager.MobWolf) return 0.53        // 体高 0.79（含耳尖）
+                    if (t === EntityManager.MobSquid) return 0.54       // 体高 0.78（含触腕）
+                    if (t === EntityManager.MobPig) return 0.56         // 体高 0.75
+                    if (t === EntityManager.MobCow) return 0.47         // 体高 0.90（含角尖）
+                    if (t === EntityManager.MobSheep) return 0.55       // 体高 0.77
+                    if (t === EntityManager.MobEmberling) return 0.47   // 单头盒 0.90（环绕棒实体态独立、迷你省略）
                     return 0.25                                          // Shambler/Bones 人形体高 ~1.65-1.69
                 }
                 function miniMobYOff(t) {
@@ -8818,11 +8841,21 @@ Window {
                     if (t === EntityManager.MobStalker) return 0.011    // Stalker 体心在原点上方 → 下移补偿
                     if (t === EntityManager.MobSpider) return 0.043
                     if (t === EntityManager.MobSilverfish) return 0.007
-                    return 0
+                    if (t === EntityManager.MobPig) return 0.059        // 脚 -0.48 / 顶 0.27 → 体心偏上 → 下移
+                    if (t === EntityManager.MobCow) return 0.023        // 脚 -0.50 / 顶 0.40
+                    if (t === EntityManager.MobSheep) return 0.030      // 脚 -0.44 / 顶 0.33
+                    if (t === EntityManager.MobChicken) return -0.116   // 几何 -0.11..0.38（体心偏上）
+                    if (t === EntityManager.MobSquid) return 0.038      // 触腕底 -0.46 / 顶 0.32
+                    if (t === EntityManager.MobWolf) return 0.013       // 脚 -0.42 / 顶 0.37
+                    if (t === EntityManager.MobOcelot) return 0.023     // 脚 -0.40 / 顶 0.32
+                    if (t === EntityManager.MobNightwalker) return 0.019 // 脚 -1.40 / 顶 1.17
+                    return 0                                            // Emberling 单头盒居中（±0.45）
                 }
-                // t786 迷你 mob 眼表（MobModel 局部坐标；坐标/尺寸/色与各实体 delegate 眼层一致，仅随父缩放
+                // t786/t787 迷你 mob 眼表（MobModel 局部坐标；坐标/尺寸/色与各实体 delegate 眼层一致，仅随父缩放
                 //   微型化）：Shambler 赤红眼 / Bones 黑眼窝 / Stalker 深黑眼 / Spider 4 颗红眼 / Silverfish
-                //   黑点。pack 命中时 Repeater 整体 visible=false（贴图自带面部，同实体 delegate 语义）。
+                //   黑点 / Nightwalker 紫白魅眼横带（t787 蛋改型；实体 delegate 同款 #e8dcff）。其余型
+                //   （四足/鸡/鱿鱼/狼/豹猫/燃烬者）贴图自带面部 → 无眼层。pack 命中时 Repeater 整体
+                //   visible=false（贴图自带面部，同实体 delegate 语义）。
                 function miniEyeTable(t) {
                     const E = function(px, py, pz, sx, sy, color) {
                         return { pos: Qt.vector3d(px, py, pz), size: Qt.vector3d(sx, sy, 0.02), color: color }
@@ -8838,6 +8871,8 @@ Window {
                                 E(-0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020")]
                     if (t === EntityManager.MobSilverfish)
                         return [E(-0.05, 0.00, -0.35, 0.03, 0.03, "#101010"), E(0.05, 0.00, -0.35, 0.03, 0.03, "#101010")]
+                    if (t === EntityManager.MobNightwalker)
+                        return [E(0.00, 0.95, -0.21, 0.30, 0.12, "#e8dcff")] // 头前脸中位横带（实体 nwHead 眼层同位同色）
                     return []
                 }
 
@@ -8861,9 +8896,11 @@ Window {
                 //   半透明：PrincipledMaterial Blend 进透明 pass 按模型级深度排序，多体节相互重叠会自混合
                 //   出穿模伪影；MC 1.0 笼内小怪亦为不透明微型化——观感一致且无伪影）。walkPhase 恒 0（静态姿；
                 //   不接 entityManager 逐实体 revision——delegate 非实体，动感由自旋 + 浮沉承载即可）。
-                //   t786 类型化：几何 mobType=cageMobType（worldgen 加权池 僵尸/骷髅/蜘蛛/爬行者、要塞银鱼、
-                //   创造放置僵尸——与 tickSpawners 解码同源）；贴图/纯色与眼按型分流（下 MobModel 材质 +
-                //   Repeater 眼表，模式同 mobHost 各 Loader delegate 的 pack 感知回退链）。
+                //   t786/t787 类型化：几何 mobType=cageMobType（worldgen 加权池 僵尸/骷髅/蜘蛛/爬行者、要塞银鱼、
+                //   创造放置僵尸、t787 蛋改型全 13 型——与 tickSpawners 解码同源）；贴图/纯色与眼按型分流（下
+                //   MobModel 材质 + Repeater 眼表，模式同 mobHost 各 Loader delegate 的 pack 感知回退链）。
+                //   蛋改型即时切换链：state 变 → worldChanged → spawnerHost.cleanupVis 重赋 cageMobType →
+                //   本子树全部绑定（geometry mobType / 贴图查表 / 摆位 / 眼表）重算换型。
                 Node {
                     id: miniMobSpin
                     property real spinY: 0.0
@@ -8885,19 +8922,41 @@ Window {
                             NumberAnimation { from: 1.0; to: 0.0; duration: 2600 }
                         }
 
-                        // t786 贴图查表（创建期求值一次即终值——cageMobType 注入恒定，无 NOTIFY 依赖需求，
-                        //   t177/t498）：miniProgTex=程序贴图（Shambler/Silverfish 有，纯色型 null）；
+                        // t786/t787 贴图查表（cageMobType 参与条件判定 → 依赖注册可靠（t177/t498 修法形态）；
+                        //   蛋改型经 cleanupVis 重赋 cageMobType → 本块重算即时换贴图）：miniProgTex=程序
+                        //   贴图（Shambler/Silverfish + t787 四足/鸡/鱿鱼/狼/豹猫/夜行者/燃烬者 9 型）；
                         //   miniPackTex=pack 命中该型 entity PNG（QUrl 判空走 toString().length，t497 铁律；
-                        //   Silverfish 无 pack 映射同实体 delegate）。材质规则（下 baseColor）：贴图在身
-                        //   （pack 或程序）→ 近白 tint × 昼夜灰阶防压暗（t597）；纯色型 → 体色 × 灰阶
-                        //   （色值与各实体 delegate 一致：骨白 / 青绿 / 暗黑红）。
-                        property QtObject miniProgTex: spawnerRoot.cageMobType === EntityManager.MobShambler ? mobShamblerTex
-                                                       : (spawnerRoot.cageMobType === EntityManager.MobSilverfish ? mobSilverfishTex : null)
+                        //   Silverfish/Wolf/Ocelot 无 pack 映射同实体 delegate）。材质规则（下 baseColor）：
+                        //   贴图在身（pack 或程序）→ 近白 tint × 昼夜灰阶防压暗（t597）；无贴图型 → 体色 ×
+                        //   灰阶（色值与各实体 delegate 一致：骨白 / 青绿 / 暗黑红）。
+                        property QtObject miniProgTex: {
+                            const t = spawnerRoot.cageMobType
+                            if (t === EntityManager.MobShambler) return mobShamblerTex
+                            if (t === EntityManager.MobSilverfish) return mobSilverfishTex
+                            if (t === EntityManager.MobPig) return mobPigTex
+                            if (t === EntityManager.MobCow) return mobCowTex
+                            if (t === EntityManager.MobSheep) return mobSheepTex
+                            if (t === EntityManager.MobChicken) return mobChickenTex
+                            if (t === EntityManager.MobSquid) return mobSquidTex
+                            if (t === EntityManager.MobWolf) return mobWolfTex
+                            if (t === EntityManager.MobOcelot) return mobOcelotTex
+                            if (t === EntityManager.MobNightwalker) return mobNightwalkerTex
+                            if (t === EntityManager.MobEmberling) return mobEmberlingTex
+                            return null
+                        }
                         property QtObject miniPackTex: {
-                            if (spawnerRoot.cageMobType === EntityManager.MobShambler && mobShamblerPackTex.source.toString().length > 0) return mobShamblerPackTex
-                            if (spawnerRoot.cageMobType === EntityManager.MobBones && mobBonesPackTex.source.toString().length > 0) return mobBonesPackTex
-                            if (spawnerRoot.cageMobType === EntityManager.MobStalker && mobStalkerPackTex.source.toString().length > 0) return mobStalkerPackTex
-                            if (spawnerRoot.cageMobType === EntityManager.MobSpider && mobSpiderPackTex.source.toString().length > 0) return mobSpiderPackTex
+                            const t = spawnerRoot.cageMobType
+                            if (t === EntityManager.MobShambler && mobShamblerPackTex.source.toString().length > 0) return mobShamblerPackTex
+                            if (t === EntityManager.MobBones && mobBonesPackTex.source.toString().length > 0) return mobBonesPackTex
+                            if (t === EntityManager.MobStalker && mobStalkerPackTex.source.toString().length > 0) return mobStalkerPackTex
+                            if (t === EntityManager.MobSpider && mobSpiderPackTex.source.toString().length > 0) return mobSpiderPackTex
+                            if (t === EntityManager.MobPig && mobPigPackTex.source.toString().length > 0) return mobPigPackTex
+                            if (t === EntityManager.MobCow && mobCowPackTex.source.toString().length > 0) return mobCowPackTex
+                            if (t === EntityManager.MobSheep && mobSheepPackTex.source.toString().length > 0) return mobSheepPackTex
+                            if (t === EntityManager.MobChicken && mobChickenPackTex.source.toString().length > 0) return mobChickenPackTex
+                            if (t === EntityManager.MobSquid && mobSquidPackTex.source.toString().length > 0) return mobSquidPackTex
+                            if (t === EntityManager.MobNightwalker && mobNightwalkerPackTex.source.toString().length > 0) return mobNightwalkerPackTex
+                            if (t === EntityManager.MobEmberling && mobEmberlingPackTex.source.toString().length > 0) return mobEmberlingPackTex
                             return null
                         }
                         Model {

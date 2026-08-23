@@ -635,6 +635,11 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#d8d4c4"); // Bones：灰白骨色（机制等价 MC 骷髅；原创配色非照搬）
     } else if (mobType == MobStalker) {
         color = QStringLiteral("#5fa83a"); // Stalker：青绿色（机制等价 MC 苦力怕；原创配色非照搬）
+    } else if (mobType == MobSpider) {
+        // t787 修（探针暴露的 t786 潜伏缺口）：Spider 不在本色表 → 旧防御分支把它改写成 Shambler ——
+        //   地牢 worldgen 蜘蛛笼（SpawnerStateSpider）经 tickSpawners 刷出的是僵尸非蜘蛛（t786 探针只测
+        //   僵尸/骷髅两极性未覆盖）。补分支保型；色值同实体 delegate 暗黑红（playercontroller 蛋分支同板）。
+        color = QStringLiteral("#2a1a1a");
     } else if (mobType == MobSilverfish) {
         color = QStringLiteral("#c8c2b8"); // Silverfish：灰白甲壳色（机制等价 MC 银鱼；原创配色，t487）
     } else if (mobType == MobNightwalker) {
@@ -643,10 +648,34 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#e8b030"); // Emberling：橙黄焰色（机制等价 MC 烈焰人黄色焰体；原创配色，t728）
     } else {
         color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
-        if (mobType != MobShambler) mobType = MobShambler; // 防御：非 Bones/Stalker/Silverfish/Nightwalker/Emberling 一律按 Shambler
+        if (mobType != MobShambler) mobType = MobShambler; // 防御：非七敌对型一律按 Shambler
     }
     spawnMobTyped(x, y, z, mobType, color, health);
-    // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker/Silverfish 设 hostile=true；spawnHostileMob 仅收口语义入口。
+    // spawnMobTyped 内 switch 已对 Shambler/Bones/Stalker/Spider/Silverfish/Nightwalker/Emberling 设
+    //   hostile=true；spawnHostileMob 仅收口语义入口。
+}
+
+// t787 被动生物生成入口（spawnHostileMob 的被动镜像，见头文件注释）：配色与 PlayerController 蛋分支 /
+//   Main.qml 进世界散布（t374）同板（pig #f0a8b0 / cow #5a4030 / sheep #f5f0e8 / chicken #f5f0e4 / squid
+//   #6a4a3a / wolf #c8ccd4 / ocelot #e8c890 —— 纯占位串，被动型走 MobModel + 贴图不读 color；文档锚对齐）。
+//   血量 kDefaultMaxHealth（=10，MC 1.0 猪/牛/羊 5 心，同散布/蛋路径）；spawnMobCore 按型设 hostile=false。
+void EntityManager::spawnPassiveMob(int x, int y, int z, int mobType)
+{
+    QString color;
+    switch (mobType) {
+    case MobCow:      color = QStringLiteral("#5a4030"); break;
+    case MobSheep:    color = QStringLiteral("#f5f0e8"); break;
+    case MobChicken:  color = QStringLiteral("#f5f0e4"); break;
+    case MobSquid:    color = QStringLiteral("#6a4a3a"); break;
+    case MobWolf:     color = QStringLiteral("#c8ccd4"); break;
+    case MobOcelot:   color = QStringLiteral("#e8c890"); break;
+    case MobPig:      color = QStringLiteral("#f0a8b0"); break;
+    default:
+        color = QStringLiteral("#f0a8b0"); // 猪（兜底同型防御）
+        if (mobType != MobPig) mobType = MobPig; // 防御：非被动七型一律按 Pig（敌对型应走 spawnHostileMob）
+        break;
+    }
+    spawnMobTyped(x, y, z, mobType, color, kDefaultMaxHealth);
 }
 
 // t374 被动生物群系化类型选取：据群系 id（World::biomeIdAt 编码）按 kPassiveSpawnWeights 加权随机返
@@ -678,13 +707,25 @@ int EntityManager::spawnerMobTypeForState(int state) const
     const int typeBits = (int(quint8(state)) & int(BlockRegistry::SpawnerStateMobMask))
                          >> int(BlockRegistry::SpawnerStateMobShift);
     if (typeBits != 0) {
-        // t786 笼带显式类型：仅认可 spawn 的五种敌对（枚举漂移 / 手改存档的非法值回退 Shambler）。
+        // t786 笼带显式类型 + t787 蛋改型扩表：白名单 = 13 蛋型（pig/cow/sheep/shambler/bones/stalker/
+        //   spider/chicken/squid/nightwalker/emberling/wolf/ocelot —— 生物蛋右键刷怪笼写入，单一权威
+        //   RecipeRegistry::mobTypeForSpawnEgg）+ 无蛋的 Silverfish（要塞 worldgen 专属）。枚举漂移 / 手改
+        //   存档的非法值（哨兵 MobTest/Tnt/Anvil、golem、>18 越界）回退 Shambler。
         switch (typeBits) {
         case MobShambler:
         case MobBones:
         case MobStalker:
         case MobSpider:
         case MobSilverfish:
+        case MobPig:
+        case MobCow:
+        case MobSheep:
+        case MobChicken:
+        case MobSquid:
+        case MobWolf:
+        case MobOcelot:
+        case MobNightwalker:
+        case MobEmberling:
             return typeBits;
         default:
             return MobShambler;
@@ -733,6 +774,21 @@ bool EntityManager::hostileNearby(const QVector3D &center, float radius) const
         if (d.lengthSquared() <= r2) return true;
     }
     return false;
+}
+
+// t787 同型邻域计数（见头文件注释）：活体且未死、mobType 匹配的 Mob 在 3D 球内计数（3D 判定同
+//   hostileNearby 的 lengthSquared；区别于 hostileCountNear 的 XZ 水平距离）。供 tickSpawners 被动笼
+//   上限判定（机制等价 MC 1.0 刷怪笼「同类 6 只内才刷」按型判）。
+int EntityManager::mobTypeCountNear(const QVector3D &center, float radius, int mobType) const
+{
+    const float r2 = radius * radius;
+    int n = 0;
+    for (const Entity &e : m_entities) {
+        if (!e.alive || e.kind != Mob || e.dead || e.mobType != mobType) continue;
+        const QVector3D d = e.pos - center;
+        if (d.lengthSquared() <= r2) ++n;
+    }
+    return n;
 }
 
 // t280 第 i 个实体是否敌对（hostile=true 的活体 Mob）。越界 / 非敌对 → false。
@@ -1017,14 +1073,39 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                 }
                 if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
 
-                // spawn 1 只敌对 —— 类型由笼 state 决定（t786 类型化刷怪笼）。spawnerMobTypeForState 是
+                // spawn 1 只 —— 类型由笼 state 决定（t786 类型化刷怪笼）。spawnerMobTypeForState 是
                 //   唯一解码源（type 位=worldgen placeDungeons 加权随机 / placeStronghold 银鱼 / 创造放置
-                //   默认 Shambler；type 位零的旧存档笼按 bit0 分流银鱼/Shambler，见该函数注释）。机制等价
-                //   MC 1.0 刷怪笼刷**笼内类型**的怪（此前无 type 位时地牢笼是 Shambler/Bones 等概率随机）。
+                //   默认 Shambler / t787 生物蛋右键改型全蛋表；type 位零的旧存档笼按 bit0 分流银鱼/
+                //   Shambler，见该函数注释）。机制等价 MC 1.0 刷怪笼刷**笼内类型**的怪（此前无 type 位时
+                //   地牢笼是 Shambler/Bones 等概率随机）。t787 路由：敌对型走 spawnHostileMob（hostile
+                //   语义 + 敌对默认血量 + 计入 hostilesRunning 预算，同旧）；被动型（蛋改型写入）走
+                //   spawnPassiveMob —— 上限判据换「笼周同型计数 < kSpawnerLocalCap」（hostileNearby 只数
+                //   敌对、对被动笼恒 false → 不换判据会无限刷），不计入敌对预算（被动型不挤占敌对 cap）。
                 const int mobType = spawnerMobTypeForState(int(world->stateAt(x, y, z)));
-                spawnHostileMob(sx, sy, sz, mobType);
-                ++hostilesRunning;
-                dirty = true;
+                bool passiveType = false;
+                switch (mobType) {
+                case MobPig:
+                case MobCow:
+                case MobSheep:
+                case MobChicken:
+                case MobSquid:
+                case MobWolf:
+                case MobOcelot:
+                    passiveType = true;
+                    break;
+                default:
+                    break; // 敌对七型（Shambler/Bones/Stalker/Spider/Silverfish/Nightwalker/Emberling）
+                }
+                if (passiveType) {
+                    if (mobTypeCountNear(spawnerCenter, kSpawnerMobCheckRadius, mobType) < kSpawnerLocalCap) {
+                        spawnPassiveMob(sx, sy, sz, mobType);
+                        dirty = true;
+                    } // 同型已满（≥ kSpawnerLocalCap）→ 跳过本笼（下周期再试，同敌对笼 local cap 语义）
+                } else {
+                    spawnHostileMob(sx, sy, sz, mobType);
+                    ++hostilesRunning;
+                    dirty = true;
+                }
             }
             if (hostilesRunning >= kHostileMobCap) break;
         }
