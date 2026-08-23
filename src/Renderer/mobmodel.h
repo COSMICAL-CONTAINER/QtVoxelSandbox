@@ -25,10 +25,13 @@
 //   8 = Chicken（鸡；t398）：小型鸟——圆胖躯干 + 前伸小头 + 后翘尾 + **2 细腿**（biped walk cycle，机制等价
 //     MC 1.0 鸡两足鸟形态）。喙 / 鸡冠由 Main.qml delegate 补（纯色子 Model）。声音 mobType=8 越界兜底
 //     mob_idle（generic）。
-//   9 = Squid（鱿鱼；t399）：水生软体——圆胖躯干（ mantle ）+ 顶端小尖 + **8 触腕**（环绕身体底沿分布，机制
-//     等价 MC 1.0 squid 8 触腕；t750：顶端小尖仅 pack 态建——全脸 UV 下尖顶小盒铺整张贴图，读作头顶叠一只
-//     小鱿鱼，见 mobmodel.cpp 分支注释）。触腕绕各自顶端枢轴做 X 轴摆动（前后波浪式起伏，相位错开 → 游动时触腕飘动），
-//     walkPhase 驱动（squid 水中持续漂移 → moveSpeed 恒 >0 → 触腕常驻摆动）。眼由 Main.qml delegate 补（纯色子 Model）。
+//   9 = Squid（鱿鱼；t399）：水生软体——圆胖躯干（ mantle ）+ **8 触腕**（环绕身体底沿分布，机制
+//     等价 MC 1.0 squid 8 触腕）。t778：原「顶端小尖」盒已删——它复用 mantle texOffs，六面各采 mantle
+//     对应面整区（前脸区含眼纹素）→ 观感=头顶叠一只带眼小鱿鱼；pack 开关两态统一单 mantle + 8 腕
+//     （机制等价 MC 1.0 squid 单身八腕）。眼不再由呈现层补几何层（pack 态贴图前脸自带眼；程序贴图态
+//     无脸纹，鱿鱼=单一生物模型；实体 delegate / 刷怪笼迷你态 / 图鉴三处一致）。
+//     触腕绕各自顶端枢轴做 X 轴摆动（前后波浪式起伏，相位错开 → 游动时触腕飘动），
+//     walkPhase 驱动（squid 水中持续漂移 → moveSpeed 恒 >0 → 触腕常驻摆动）。
 //   10 = Wolf（狼；t480）：中型犬科——细长躯干 + 前伸尖头 + 双立耳 + **4 腿**（四足 walk cycle，机制等价
 //     MC 1.0 狼）。尾巴**不在本几何** —— 呈现层 QML 据血量旋转独立尾巴 Model（spec「尾巴角度示血量」；独立子
 //     Model 才能绕尾根枢独立旋转）。坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动。眼由 Main.qml delegate 补。

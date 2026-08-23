@@ -7817,11 +7817,16 @@ Window {
                     Loader {
                         active: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
                         sourceComponent: Component {
-                            // t399 Squid（鱿鱼；mobType 9）：MobModel 水生软体几何（圆胖躯干 + 顶端尖 + 8 触腕；机制等价
+                            // t399 Squid（鱿鱼；mobType 9）：MobModel 水生软体几何（圆胖躯干 + 8 触腕；机制等价
                             //   MC 1.0 squid，§9 原创模型 + 贴图）。passive → EntityManager AI 走 aiSquid（水里喷水推进游动）；
-                            //   死亡掉墨囊（onMobDied → spawnItem InkSacId）。受击红闪。眼为本 Model 子节点（纯色 NoLighting，
-                            //   同鸡眼模式 —— 单材质无法同几何双色，故眼独立子节点继承 bodyYaw + visible）。MobModel 躯干心
-                            //   (0,0.08,0) 半 (0.28,0.24,0.28) → 前面 z=-0.28；眼贴躯干前侧（z≈-0.29 略凸出防 z-fight）。
+                            //   死亡掉墨囊（onMobDied → spawnItem InkSacId）。受击红闪。MobModel 躯干心
+                            //   (0,0.08,0) 半 (0.28,0.24,0.28) → 前面 z=-0.28。
+                            // t778 眼层整删 + 尖顶删（mobmodel.cpp 同源修）：原 pack 关态补 2 颗黑点几何眼
+                            //   （t399 程序贴图 mob_squid 不画眼 → 眼靠几何盒），与「鱿鱼=单一生物模型」的终态冲突；
+                            //   现三处渲染（实体 delegate / 刷怪笼 miniEyeTable / ResourceBrowser 图鉴）统一无眼层——
+                            //   pack 态眼来自贴图前脸纹素（自带眼），程序贴图态无脸纹（纯斑纹软体观感）。
+                            //   几何尖顶盒同删（原 pack 态头顶 0.30 宽小盒复用 mantle texOffs → 六面各显 mantle
+                            //   对应面缩图 = 头顶叠一只带眼小鱿鱼），见 mobmodel.cpp t778 注释。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSquid
                                 geometry: MobModel {
@@ -7839,24 +7844,6 @@ Window {
                                     //   否则程序生成 mob_squid（tint 语义同旧版不变）。
                                     baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     baseColorMap: mobSquidPackTex.source.toString().length > 0 ? mobSquidPackTex : mobSquidTex
-                                }
-                                // 眼（2 颗黑点；躯干前侧偏前 z=-0.29、y=0.10、x=±0.10）。同鸡眼纯色子 Model 模式。
-                                //   终审修 L5：pack 命中时隐藏——pack 贴图前脸自带眼睛纹素，几何黑点眼再叠其上
-                                //   会成「贴图眼 + 黑点眼」双层眼（t731 玩家皮肤化删眼盒正是同理由，t730 未同步）；
-                                //   pack 关闭时保留（程序贴图 mob_squid 不画眼，眼睛全靠这两颗几何盒表达）。
-                                Model {
-                                    visible: mobSquidPackTex.source.toString().length === 0
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.10, 0.10, -0.29)
-                                    scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                }
-                                Model {
-                                    visible: mobSquidPackTex.source.toString().length === 0
-                                    geometry: UnitCube {}
-                                    position: Qt.vector3d(0.10, 0.10, -0.29)
-                                    scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                             }
                         }
@@ -8868,7 +8855,7 @@ Window {
                     if (t === EntityManager.MobChicken) return 0.86     // 几何体高 0.49（无腿型）
                     if (t === EntityManager.MobOcelot) return 0.58      // 体高 0.72（含耳尖）
                     if (t === EntityManager.MobWolf) return 0.53        // 体高 0.79（含耳尖）
-                    if (t === EntityManager.MobSquid) return 0.54       // 体高 0.78（含触腕）
+                    if (t === EntityManager.MobSquid) return 0.54       // 体高 0.78（含触腕；t778 删尖顶后 pack 开关两态同高）
                     if (t === EntityManager.MobPig) return 0.56         // 体高 0.75
                     if (t === EntityManager.MobCow) return 0.47         // 体高 0.90（含角尖）
                     if (t === EntityManager.MobSheep) return 0.55       // 体高 0.77

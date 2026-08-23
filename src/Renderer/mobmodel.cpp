@@ -403,7 +403,7 @@ void MobModel::rebuild()
 {
     std::vector<MobVtx> verts;
     std::vector<quint32> idx;
-    verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider/Squid = 10；其余 ≤8
+    verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider = 10 / Squid = 9（t778 删尖顶）；其余 ≤8
     idx.reserve(16 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
 
@@ -573,29 +573,26 @@ void MobModel::rebuild()
         // t616：细黄腿移至 Main.qml / ResourceBrowser 独立纯色 Model（本几何不再含腿；腿位参考旧值
         //   —— 髋枢 hipY=−0.05（躯干底面）、腿盒心 y=−0.225 半高 0.175 → 腿底 −0.40 贴 collision 底面）。
     } else if (m_mobType == 9) {
-        // t399 Squid（鱿鱼；机制等价 MC 1.0 squid，§9 原创模型 + 贴图）—— 水生软体：圆胖躯干（mantle）+ 顶端小尖 +
+        // t399 Squid（鱿鱼；机制等价 MC 1.0 squid，§9 原创模型 + 贴图）—— 水生软体：圆胖躯干（mantle）+
         //   **8 触腕**（环绕身体底沿八向分布，机制等价 MC 1.0 squid 8 触腕）。触腕绕各自顶端枢轴做 X 轴摆动（前后
         //   波浪式起伏，相位错开 → 游动时触腕飘动；walkPhase 驱动）。squid 水中持续漂移（moveSpeed 恒 >0）→ 触腕常驻
         //   摆动（区别于陆地 mob idle 时腿停）。mobModelYOff 见 Main.qml（触腕底本地 |y|≈0.46 贴 collision 底面）。
         //   局部原点 = 躯干中心；无「头朝 -Z」语义（squid 软体无固定前后，yawAt 仅驱动整体朝向 → 触腕环对称无所谓前）。
         // t730 UV（MC 1.8 squid base 64×32；demo 包 512×256 实测 = 8×）：mantle 12×16×12 @ (0,0)（六面像素区
         //   逐一实测 100% 不透明）+ 8 触腕**共用** 2×12×2 @ (48,0) 单区（vanilla 八触腕同 textureOffset，包内
-        //   仅画一根触腕）。本工程几何保原创比例（mantle 0.56×0.48×0.56 + 尖顶 0.30×0.26×0.30 + 触腕
-        //   0.09×0.30×0.09），UV 按 MC 原 size 采样 → pack 贴图各部对齐。尖端是 mantle 尖顶的延伸（vanilla
-        //   无独立尖顶盒）→ 复用 mantle texOffs（采样同区，视觉为 mantle 皮色）。pack 关时 writeMobUV 不读
-        //   texOffs（全脸 [0,1]² 程序贴图 mob_squid，零回归）。
+        //   仅画一根触腕）。本工程几何保原创比例（mantle 0.56×0.48×0.56 + 触腕 0.09×0.30×0.09），UV 按 MC 原
+        //   size 采样 → pack 贴图各部对齐。pack 关时 writeMobUV 不读 texOffs（全脸 [0,1]² 程序贴图 mob_squid，
+        //   零回归）。
+        // t778 修「头顶叠一只小鱿鱼」：原几何在 mantle 顶再建 0.30 宽「尖顶小盒」并**复用 mantle texOffs** →
+        //   pack 态小盒六面各采 mantle 对应面整区（前脸区含包贴图自带眼纹素）→ 观感 = 头顶叠一只带眼的缩小鱿鱼
+        //   （图鉴大图预览旋转时尤显；vanilla squid 本就是单 mantle 无独立尖顶）。t750 只修了 pack 关态（全脸 UV
+        //   下小盒六面铺整张程序贴图更明显 → 省略），pack 态残留 → 本任务尖顶盒**整删**：pack 开关两态统一为
+        //   单 mantle + 8 触腕（机制等价 MC 1.0 squid 单身八腕）；本几何为图鉴 / 游戏内 / 刷怪笼迷你态共享单源，
+        //   三处一并修复。眼亦不再由呈现层补几何黑点（Main.qml / ResourceBrowser t778 同步删）——pack 态贴图
+        //   前脸自带眼纹素，程序贴图态无脸纹（纯斑纹软体），鱿鱼=单一生物模型。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(0, 0, 12, 16, 12);
-        addBox( 0.00f,  0.08f,  0.00f, 0.28f, 0.24f, 0.28f, verts, idx, bMin, bMax); // 圆胖躯干（mantle 主体）
-        // t750 图鉴修复①「大鱿鱼正确但头顶叠一只小鱿鱼」：pack 关（全脸 UV）时每面铺整张 mob_squid →
-        //   0.30 宽的尖顶小盒六面各显一只压缩整图「小鱿鱼」叠在大鱿鱼头顶（图鉴预览用户报告）。pack 命中
-        //   走 box-UV（尖顶采 mantle 顶区皮色，游戏内 t730 已验证无歧义）→ 尖顶仅 pack 态保留、全脸态省略
-        //   （同下方猪鼻 if (g_packTextured) 条件盒先例）。本几何为图鉴 / 游戏内共享单源 → 两侧同步修复，
-        //   非图鉴侧私有拼装问题。
-        if (g_packTextured) {
-            setMobTex(0, 0, 12, 16, 12);
-            addBox( 0.00f,  0.45f,  0.00f, 0.15f, 0.13f, 0.15f, verts, idx, bMin, bMax); // 顶端小尖（mantle 尖顶）
-        }
+        addBox( 0.00f,  0.08f,  0.00f, 0.28f, 0.24f, 0.28f, verts, idx, bMin, bMax); // 圆胖躯干（mantle 主体；t778 起唯一躯干盒——尖顶已删）
         // 8 触腕（环绕躯干底沿八向分布，半径 0.20）：每条细垂直盒（half 0.045×0.15×0.045），顶端枢轴 y=-0.16（躯干底）。
         //   绕 X 轴摆动（前后波浪式起伏）：angle = 0.18·sin(walkPhase + i·π/4)，相位错开 → 触腕此起彼伏飘动（游动感）。
         //   摆幅 0.18 弧度（~10°）小于四足 kLegSwingAmp（触腕是飘动非大跨步）；pivZ = 各触腕 z（绕各自 z 线旋转）。

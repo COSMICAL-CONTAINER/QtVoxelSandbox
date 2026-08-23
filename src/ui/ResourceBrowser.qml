@@ -174,7 +174,7 @@ Item {
             case 6: return 0.05   // 潜行者 [-0.90, 0.81]（t616 拉高 ~1.7 格后近对称 → 微上提居中）
             case 7: return 0.08   // 蜘蛛 [-0.30, 0.13]
             case 8: return 0.01   // 鸡 [-0.40, 0.38]
-            case 9: return 0.0    // 鱿鱼 [-0.46, 0.58]（mantle 对称居中；t750 起 pack 关省略尖顶 → 顶 0.32，mantle 仍近对称）
+            case 9: return 0.07   // 鱿鱼 [-0.46, 0.32]（t778 删尖顶后 pack 开关两态统一；全跨度中心 -0.07 → 上提居中）
             case 10: return 0.05  // 狼 [-0.42, 0.37]
             case 11: return 0.05  // 豹猫 [-0.40, 0.33]
             case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
@@ -891,26 +891,17 @@ Item {
                                         //   抽共享组件须把十余条实体绑定参数化且回归面覆盖全部 17 种 mob——成本 /
                                         //   风险远超收益；按任务行「评估成本」走**浏览器侧 1:1 复刻**（同 t598 傀儡
                                         //   头 / t616 弓 + 鸡腿 / t663 羊眼先例），各块注明 Main.qml 锚点互指。几何级
-                                        //   差异（鱿鱼尖顶 / 蠹虫分节）已下沉 MobModel 共享层（mobmodel.cpp t750，
-                                        //   两侧同源无双份维护）。
-                                        // t750 ① 鱿鱼眼（2 颗黑点；镜像 Main.qml squid delegate t730 终审 L5：
-                                        //   pack 命中时隐藏——包贴图前脸自带眼纹素，几何黑点再叠成双层眼；pack 关
-                                        //   显示（程序贴图 mob_squid 不画眼，眼全靠几何盒））。「头顶小鱿鱼」叠加层
-                                        //   已在几何层修（pack 关省略尖顶盒，见 mobmodel.cpp t750 注释）。
-                                        Model {
-                                            visible: root.selectedMobType === 9 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.10, 0.10, -0.29)
-                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 9 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.10, 0.10, -0.29)
-                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
+                                        //   差异（蠹虫分节；鱿鱼尖顶 t778 已随「单一生物模型」终态删除）已下沉
+                                        //   MobModel 共享层（mobmodel.cpp，两侧同源无双份维护）。
+                                        // t778 鱿鱼眼层整删 + 尖顶删（镜像 Main.qml squid delegate 同源修）：
+                                        //   原 t750① 给图鉴补过 2 颗黑点几何眼（pack 关态显；程序贴图 mob_squid
+                                        //   不画眼 → 眼靠几何盒）——与「鱿鱼=单一生物模型（去小鱿鱼、去眼睛）」
+                                        //   终态冲突 → 删。眼只来自 pack 贴图前脸纹素（pack 命中态自带眼）；程序
+                                        //   贴图态无脸纹（纯斑纹软体观感）。「头顶小鱿鱼」叠加层根源 = mobmodel.cpp
+                                        //   pack 态尖顶小盒（复用 mantle texOffs → 六面各显 mantle 对应面缩图含
+                                        //   前脸眼纹），t750 只删了 pack 关态、pack 态残留 → 本任务几何层整删，
+                                        //   图鉴 / 游戏内 / 刷怪笼迷你态三处共享单源一并修复（见 mobmodel.cpp
+                                        //   t778 注释）。
                                         // t750 ② 狼尾（修复「像兔子」——缺尾缺眼的灰身立耳四足读作兔；镜像
                                         //   Main.qml wolfTailPivot：尾根 (0,0.16,0.38) + 竖细盒毛色 0.55 灰；图鉴
                                         //   静态取满血竖起 35°（游戏内随血量 35°..140°）。
