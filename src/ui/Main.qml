@@ -5147,17 +5147,15 @@ Window {
             }
         }
 
-        // t765 书架→附魔台「文字/符文」粒子流：EnchantGlyphFlow.qml 经 Loader 动态加载（同 runeLoader
+        // t765/t797 书架→附魔台「文字」粒子流：EnchantGlyphFlow.qml 经 Loader 动态加载（同 runeLoader
         //   模式；组件自身 Model+Timer 池不依赖 Particles3D，Loader 隔离仍保留 —— 失败仅 warn 不拖垮
-        //   主文档，§2-E）。**与 EnchantRunes（上块）的区别**：t649 是「playing 常驻」的彩色立方氛围
-        //   流（t697 用户明确要常驻）；本组件是**附魔台 UI 打开期间**的文字字形密集流（glyphs.png
-        //   程序原创字形贴图，机制等价 MC 开附魔台 UI 时有效书架向悬浮书持续喷 glyph 粒子；玩家不开
-        //   UI 则无）。t732 撤下的 GlyphLines 是书页静态字迹叠层，与此动态粒子流两回事（防误删）。
-        //   驱动：active = playing && enchantingTableOpen（**UI 关闭即停** —— 性能红线）；台坐标绑
-        //   window.enchantX/Y/Z = 当前所开台（MC 语义：只有被打开的台的书被喂符文；不遍历
-        //   enchantTablePositions —— 远处台喷了玩家也看不见，纯浪费）。有效书架位枚举在组件内
-        //   QML 侧扫（World::countBookshelvesAround 同规则，EnchantRunes t649 同先例 —— 不加 World
-        //   API，分层最干净）。分层（PLAN §2）：只读 World.blockAt 查书架位，绝不反向写栅格。
+        //   主文档，§2-E）。**与 EnchantRunes（上块）的区别**：t649 是彩色小立方氛围流（只跟最近一次
+        //   打开的台）；本组件是 glyphs.png 字形贴图的**白色小字**流，t797 起改**常驻**（用户定稿：放
+        //   书架即自动播放，不依赖附魔台 UI 开；UI 开时仅所开台发射率加密 uiBoost）。
+        //   驱动：tableModel 注入 enchantTablePositions（全图附魔台表，事件驱动 + 读档重建 + 孤儿清理
+        //   三重维护）—— 组件内逐台枚举有效书架位成「台×书架对」，放书架 ≤0.5s 起流、拆即停；
+        //   发射距离门 16 格（相机）+ 每书架 ~0.22/s 低频 + 池上限 36（性能红线，详见组件头注释）。
+        //   分层（PLAN §2）：只读 World.blockAt 查书架位，绝不反向写栅格。
         Loader {
             id: glyphFlowLoader
             active: true
@@ -5166,23 +5164,31 @@ Window {
                 // 领养进 particlesHost 锚点（t16：否则 3D Node parent=null → 孤儿不渲染）。
                 glyphFlowLoader.item.parent = particlesHost
                 glyphFlowLoader.item.world = theWorld
-                // billboard 朝向用真相机位（第三人称相机离眼 3.5 格，用 cam 比用 player.position 准）。
+                // billboard 朝向 + 发射距离门用真相机位（第三人称相机离眼 3.5 格，用 cam 比用
+                //   player.position 准）。
                 glyphFlowLoader.item.camNode = cam
+                // t797 常驻驱动：全图附魔台表（enchantTablePositions）—— 台增删（含读档重建的
+                //   clear+append）经 tableCount 绑定触发组件重扫；不再绑单个 enchantX/Y/Z（旧 t765
+                //   只驱动所开台，用户要「放书架即播」）。
+                glyphFlowLoader.item.tableModel = enchantTablePositions
+                glyphFlowLoader.item.tableCount = Qt.binding(function() { return enchantTablePositions.count })
+                // active = playing 常驻（**不再门控 enchantingTableOpen**，t797）；UI 开仅作所开台
+                //   的发射率加密信号（uiOpen/openTable*）+ 放/破方块 → 书架位重扫（editRev）。
                 glyphFlowLoader.item.active = Qt.binding(function() {
-                    return window.appState === "playing" && window.enchantingTableOpen
+                    return window.appState === "playing"
                 })
-                glyphFlowLoader.item.tableX = Qt.binding(function() { return window.enchantX })
-                glyphFlowLoader.item.tableY = Qt.binding(function() { return window.enchantY })
-                glyphFlowLoader.item.tableZ = Qt.binding(function() { return window.enchantZ })
-                // UI 开着时放/破书架 → 书架位重扫（同 EnchantRunes.editRev 模式）。
+                glyphFlowLoader.item.uiOpen = Qt.binding(function() { return window.enchantingTableOpen })
+                glyphFlowLoader.item.openTableX = Qt.binding(function() { return window.enchantX })
+                glyphFlowLoader.item.openTableY = Qt.binding(function() { return window.enchantY })
+                glyphFlowLoader.item.openTableZ = Qt.binding(function() { return window.enchantZ })
                 glyphFlowLoader.item.editRev = Qt.binding(function() { return window.worldEditRev })
-                console.info("[t765] EnchantGlyphFlow adopted into scene graph (parent=Node)")
+                console.info("[t797] EnchantGlyphFlow adopted into scene graph (parent=Node)")
             }
             onStatusChanged: {
                 if (status === Loader.Ready)
-                    console.info("[t765] EnchantGlyphFlow Loader status = Ready")
+                    console.info("[t797] EnchantGlyphFlow Loader status = Ready")
                 else if (status === Loader.Error)
-                    console.warn("[t765] EnchantGlyphFlow Loader status = Error — 字形粒子流已降级关闭（§2-E）")
+                    console.warn("[t797] EnchantGlyphFlow Loader status = Error — 字形粒子流已降级关闭（§2-E）")
             }
         }
 
