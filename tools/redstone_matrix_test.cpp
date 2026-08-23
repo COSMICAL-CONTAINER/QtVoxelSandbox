@@ -3783,6 +3783,230 @@ int main(int argc, char *argv[])
                              "manual check)";
     }
 
+    // ── t789 羊自然毛色探针（用户「羊刷出来只有白色羊毛，没有别的羊毛」）：Entities 层直编（同 t787 自建
+    //    临时对象模式，不动共享 nextSlot 分配器）：
+    //    ① 色板契约：sheepWoolTintForIndex(0..15) 全有名非空 + 关键色精确核对（白 #ffffff 恒等 / 黑
+    //       #1e1e26 / 棕 #734b2d——浏览器 woolPalette / build_wool.py 同值镜像，漂移即 FAIL）；
+    //    ② spawn 分布：多轮「刷 ~60 只 → clearAll 清场」累计 4800 样本按自然权重采样（kCap=64 是产品
+    //       硬上限单轮封顶；粉 0.164% 在小样本下断言天生 flaky，大样本压 P(漏粉)<0.05%）→ 白主导（>60%）
+    //       + 六自然色全出现（粉 ≥1，灰/浅灰/棕/黑另设 0.4× 下限带）+ 上溢带护栏（≤2.5×名义+0.02）
+    //       + 无表外色（只允许 {0,6,7,8,12,15}）+ 非 sheep mob（猪对照）恒 0 不受污染；
+    //    ③ 剪羊毛掉对应色：shearSheep 发 sheepSheared(x,y,z,woolIdx) 携带与 sheepWoolAt 一致的下标
+    //       （QML 层 sheepWoolDropId 映射在呈现层，C++ 锁信号载荷正确性）；已剪再剪不发（幂等回归，
+    //       只重剪同批已剪样本）；
+    //    ④ 死亡掉对应色：damageEntity 致死 → 带 World tick 越过死亡动画（EntityManager::tick 对 null world
+    //       整帧早退，deathTimer 不推进 → 必须传真世界）→ mobDied(...,woolIdx) 第 7 参 == 该羊下标；
+    //    ⑤ 幼崽继承父代色（tickBreeding 覆写随机色，同 ocelotVariant 先例；段前清场——②③④ 遗留被动
+    //       生物超 kPassiveMobCap=24 会钳死配对产崽）。渲染观感（毛层 tint 上羊身 /
+    //       pack 态 fur 染色 / 浏览器变体联动）需人工目视。
+    {
+        bool ok = true;
+        EntityManager em789;
+        // ① 色板契约（16 下标全覆盖 + 白恒等 + 两关键色锚点）。
+        for (int i = 0; i < 16; ++i) {
+            const QColor c = em789.sheepWoolTintForIndex(i);
+            if (!c.isValid()) {
+                qInfo().noquote() << "  [t789 diag] tint" << i << "invalid";
+                ok = false;
+            }
+        }
+        if (em789.sheepWoolTintForIndex(0) != QColor(QStringLiteral("#ffffff"))
+            || em789.sheepWoolTintForIndex(15) != QColor(QStringLiteral("#1e1e26"))
+            || em789.sheepWoolTintForIndex(12) != QColor(QStringLiteral("#734b2d"))) {
+            qInfo().noquote() << "  [t789 diag] palette anchors drifted (white/black/brown)";
+            ok = false;
+        }
+        // ② spawn 自然色分布：多轮清场重刷累计 kSheepTotal=4800 样本（名义权重 白 .8184 / 黑·灰·浅灰 .05
+        //    各 / 棕 .03 / 粉 .0016）。kCap=64 是产品硬上限 → 单轮 spawn 至 ~60 只（留猪对照位），clearAll
+        //    释放全部槽后再刷下一轮；粉期望 λ=4800×.0016≈7.9，P(全轮漏粉)<0.05%（单轮 600 样本 λ≈1 时
+        //    P(漏)≈37% 天生 flaky，故取大样本）。
+        constexpr int kSheepPerRound = 60;
+        constexpr int kSheepRounds = 80;   // 80 × 60 = 4800 样本
+        constexpr int kSheepTotal = kSheepPerRound * kSheepRounds;
+        int cnt[16] = {};
+        for (int round = 0; round < kSheepRounds && ok; ++round) {
+            em789.clearAll(); // 清场上轮（releaseSlot 全活体槽；幂等）
+            int spawnedThisRound = 0;
+            for (int i = 0; i < kSheepPerRound; ++i) {
+                const int slot = em789.spawnMobTyped(4, kRigY, 4, EntityManager::MobSheep,
+                                                     QStringLiteral("#f5f0e8"), 10);
+                if (slot < 0) { // cap 提前到顶（理论 60<64 不会触发；防御性 FAIL 而非静默缩样本）
+                    qInfo().noquote() << "  [t789 diag] sheep spawn capped at" << i
+                                      << "in round" << round;
+                    ok = false;
+                    break;
+                }
+                ++cnt[em789.sheepWoolAt(slot)];
+                ++spawnedThisRound;
+            }
+            if (spawnedThisRound != kSheepPerRound) break;
+        }
+        if (ok) {
+            // 猪（对照）：非 sheep 的 mob 毛色字段不受 spawnMobCore 写入污染。
+            const int pigSlot = em789.spawnMobTyped(6, kRigY, 4, EntityManager::MobPig,
+                                                    QStringLiteral("#ee9999"), 10);
+            if (pigSlot >= 0 && em789.sheepWoolAt(pigSlot) != 0) {
+                qInfo().noquote() << "  [t789 diag] non-sheep mob polluted:" << em789.sheepWoolAt(pigSlot);
+                ok = false;
+            }
+        }
+        const int naturalColors[6] = { 0, 6, 7, 8, 12, 15 };
+        const double nominal[6] = { 0.8184, 0.0016, 0.05, 0.05, 0.03, 0.05 }; // 与 kSheepNaturalWeights 同源序
+        if (cnt[0] * 100 < kSheepTotal * 60) { // 白主导 >60%
+            qInfo().noquote() << "  [t789 diag] white not dominant:" << cnt[0] << "/" << kSheepTotal;
+            ok = false;
+        }
+        for (int c = 0; c < 6; ++c) {
+            const int idx = naturalColors[c];
+            if (c > 0) {
+                // 下限带：粉 ≥1（λ≈7.9 下 P(0) 可忽略）；黑/灰/浅灰/棕另设 0.4× 名义下限（4800 样本下
+                //   0.4×5%=1920 vs σ≈31、0.4×3%=1152 vs σ≈25 —— 偏离 30σ+ 只可能是权重表漂移而非采样噪声）。
+                const double share = double(cnt[idx]) / double(kSheepTotal);
+                if ((idx == 6 && cnt[idx] < 1)
+                    || (idx != 6 && share < nominal[c] * 0.4)) {
+                    qInfo().noquote() << "  [t789 diag] natural color" << idx << "underflow:"
+                                      << cnt[idx] << "/" << kSheepTotal;
+                    ok = false;
+                }
+                // 上溢带护栏：≤2.5× 名义 + 0.02（查权重表静默漂移；白已单独断言主导）。
+                if (share > nominal[c] * 2.5 + 0.02) {
+                    qInfo().noquote() << "  [t789 diag] color" << idx << "share" << share
+                                      << "far over nominal" << nominal[c];
+                    ok = false;
+                }
+            }
+        }
+        for (int idx = 0; idx < 16; ++idx) {
+            bool isNatural = false;
+            for (int c = 0; c < 6; ++c) isNatural = isNatural || naturalColors[c] == idx;
+            if (!isNatural && cnt[idx] != 0) {
+                qInfo().noquote() << "  [t789 diag] non-natural color" << idx << "spawned" << cnt[idx];
+                ok = false;
+            }
+        }
+        // ③ 剪羊毛携对应色：抽 3 只活体羊，sheepSheared 载荷逐只 == 剪切对象的 sheepWoolAt（连接内按发射序
+        //    记录载荷，与外层记录的目标下标按序核对）；幂等回归：**只对已剪的同 3 只**再剪不再发信号
+        //    （旧版对全群重剪——未剪样本发新信号 = 探针自伤假 FAIL）。
+        {
+            constexpr int kShearSamples = 3;
+            int shearedCount = 0;
+            int payloadWool[kShearSamples] = {};
+            QObject::connect(&em789, &EntityManager::sheepSheared, &em789,
+                             [&](int sx, int sy, int sz, int woolIdx) {
+                                 Q_UNUSED(sx); Q_UNUSED(sy); Q_UNUSED(sz);
+                                 if (shearedCount < kShearSamples) payloadWool[shearedCount] = woolIdx;
+                                 ++shearedCount;
+                             });
+            int checked = 0;
+            int wantWool[kShearSamples] = {};
+            int shearedSlot[kShearSamples] = {};
+            for (int i = 0; i < em789.count() && checked < kShearSamples; ++i) {
+                if (!em789.aliveAt(i) || em789.mobTypeAt(i) != EntityManager::MobSheep) continue;
+                wantWool[checked] = em789.sheepWoolAt(i);
+                shearedSlot[checked] = i;
+                em789.shearSheep(i); // 同步直连 → 发射序 == 循环序，payloadWool 与 wantWool 按序对齐
+                ++checked;
+            }
+            // 幂等：仅重剪已剪样本 → 零新信号。
+            const int before = shearedCount;
+            for (int k = 0; k < checked; ++k) em789.shearSheep(shearedSlot[k]);
+            bool shearOk = checked == kShearSamples && shearedCount == before;
+            for (int k = 0; k < kShearSamples; ++k) shearOk = shearOk && payloadWool[k] == wantWool[k];
+            if (!shearOk) {
+                qInfo().noquote() << "  [t789 diag] shear payload/idempotence:" << checked
+                                  << "samples," << before << "-> after" << shearedCount
+                                  << "payloads" << payloadWool[0] << payloadWool[1] << payloadWool[2]
+                                  << "want" << wantWool[0] << wantWool[1] << wantWool[2];
+                ok = false;
+            }
+        }
+        // ④ 死亡掉对应色：取一只活体成体羊记录下标 → damageEntity 致死 → 带真实 World 驱动 tick 越过
+        //    死亡动画（EntityManager::tick 对 null world **整帧早退**，deathTimer 永不推进 → 旧版传 nullptr
+        //    = mobDied 恒不发 = 探针自伤假 FAIL；t774 先例同传真世界）→ mobDied 第 7 参 == 该羊下标。
+        {
+            World w789d; // 死亡段专用小世界（羊悬空 y=41 落地即 resting；死亡态冻结 AI/重力不位移）
+            w789d.setWidth(32);
+            w789d.setDepth(32);
+            w789d.setHeight(48);
+            w789d.setSeed(11);
+            int deathIdx = -1, deathWool = -1;
+            for (int i = 0; i < em789.count() && deathIdx < 0; ++i) {
+                if (em789.aliveAt(i) && !em789.deadAt(i) && !em789.isBabyAt(i)
+                    && em789.mobTypeAt(i) == EntityManager::MobSheep)
+                    deathIdx = i;
+            }
+            if (deathIdx < 0) {
+                qInfo() << "  [t789 diag] no live adult sheep left for death probe";
+                ok = false;
+            } else {
+                deathWool = em789.sheepWoolAt(deathIdx);
+                int diedPayload = -1, diedType = -1, diedCount = 0;
+                QObject::connect(&em789, &EntityManager::mobDied, &em789,
+                                 [&](int x, int y, int z, int type, bool burned, bool baby, int woolIdx) {
+                                     Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z);
+                                     Q_UNUSED(burned); Q_UNUSED(baby);
+                                     ++diedCount; diedType = type; diedPayload = woolIdx;
+                                 });
+                em789.damageEntity(deathIdx, em789.maxHealthAt(deathIdx));
+                const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+                for (int t = 0; t < 40 && diedCount == 0; ++t) // 0.64s > kDeathTime 0.5s → mobDied 已发
+                    em789.tick(0.016f, &w789d, farListener, 0.3f, 1.8f, false);
+                if (diedCount != 1 || diedType != EntityManager::MobSheep || diedPayload != deathWool) {
+                    qInfo().noquote() << "  [t789 diag] death drop payload:" << diedCount << diedType
+                                      << diedPayload << "expected wool" << deathWool;
+                    ok = false;
+                }
+            }
+        }
+        // ⑤ 幼崽继承：**清场后**构造两只求偶期成体羊 → tickBreeding → 幼崽 wool ∈ 双亲色集。
+        //    清场是硬前提：②③④ 段遗留 ~61 只被动生物 > kPassiveMobCap=24（产品种群上限，配对不再产崽）
+        //    → 不清场则 babies 恒 0（旧版此段因 spawn cap 整块跳过从未真正跑过，清场后才首次暴露）。
+        {
+            em789.clearAll();
+            World w789;
+            w789.setWidth(32);
+            w789.setDepth(32);
+            w789.setHeight(24);
+            w789.setSeed(7);
+            const auto pa = em789.spawnMobTyped(14, 12, 15, EntityManager::MobSheep,
+                                                QStringLiteral("#f5f0e8"), 10);
+            const auto pb = em789.spawnMobTyped(15, 12, 15, EntityManager::MobSheep,
+                                                QStringLiteral("#f5f0e8"), 10);
+            if (pa >= 0 && pb >= 0) {
+                // 两亲代 spawn 随机色不可控 → 继承断言收窄为「幼崽 ∈ 双亲色集」：仍能抓「羊幼崽走了
+                //   权重表随机重掷」（回归时幼崽色 81.8% 概率落白、与双亲集脱钩）的破链。
+                em789.enterLoveMode(pa);
+                em789.enterLoveMode(pb);
+                const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+                for (int t = 0; t < 20; ++t) // 0.32s：寻偶相遇 + 配对产崽（kBabyGrowTime 前幼崽仍在槽）
+                    em789.tick(0.016f, &w789, farListener, 0.3f, 1.8f, false);
+                const int setA = em789.sheepWoolAt(pa), setB = em789.sheepWoolAt(pb);
+                int babySeen = 0, babyWrong = 0;
+                for (int i = 0; i < em789.count(); ++i) {
+                    if (!em789.aliveAt(i) || !em789.isBabyAt(i) || em789.mobTypeAt(i) != EntityManager::MobSheep)
+                        continue;
+                    ++babySeen;
+                    const int wc = em789.sheepWoolAt(i);
+                    if (wc != setA && wc != setB) ++babyWrong; // 走了权重表随机 = 回归
+                }
+                if (babySeen < 1 || babyWrong != 0) {
+                    qInfo().noquote() << "  [t789 diag] baby inherit: babies" << babySeen
+                                      << "wrong" << babyWrong << "parents" << setA << setB;
+                    ok = false;
+                }
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t789 sheep natural colors: 16-entry tint palette valid with white-identity/"
+                             "black/brown anchors mirroring browser woolPalette, 4800 spawns over clear-all "
+                             "rounds follow natural weights (white >60% dominant, pink/gray/light-gray/"
+                             "brown/black all appear, no out-of-table colors, pigs unpolluted), shearSheep "
+                             "carries the sheep's own index and re-shear stays silent, mobDied payload "
+                             "equals the died sheep's index, breeding babies inherit a parent color (not "
+                             "rerolled)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

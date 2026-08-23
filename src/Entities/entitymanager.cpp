@@ -37,6 +37,30 @@ bool isJumpObstacle(World *world, int x, int y, int z)
     return !isCropBlock(bid);
 }
 
+// ── t789 羊自然毛色（机制等价 MC 1.0 自然刷出羊的毛色分布；近似权重表，万分位整数便于单源求和）──
+//   下标 = 羊毛 16 色标准序：白 0 / 粉 6 / 灰 7 / 浅灰 8 / 棕 12 / 黑 15。权重 = 白 8184 + 黑 500 +
+//   灰 500 + 浅灰 500 + 棕 300 + 粉 16 = 10000（≈ 白 81.8% / 黑·灰·浅灰各 5% / 棕 3% / 粉 0.164%，
+//   dev-plan t789 锚点值归一化；MC 原文白 81.836-81.875% 两口径均在此容差内）。**只有这 6 色自然出现**
+//   （其余 10 色是染料链 / 创造调色板的事），spawnMobCore 对 MobSheep 按 it 加权随机——一处收口全部
+//   生成路径（进世界散布 / 刷怪笼被动 / 生物蛋 / 繁殖幼崽——幼崽随后被 tickBreeding 覆写为父代色）。
+struct SheepWoolWeight { int index; int weight; };
+constexpr SheepWoolWeight kSheepNaturalWeights[] = {
+    { 0, 8184 }, { 15, 500 }, { 7, 500 }, { 8, 500 }, { 12, 300 }, { 6, 16 },
+};
+constexpr int kSheepNaturalWeightTotal = 10000; // Σweights（表改值须同步）
+
+// t789 羊毛 16 色 tint 色板（毛层贴图乘色，白 → #ffffff 恒等不着色）。同源链：tools/build_wool.py
+//   WOOL_COLORS（羊毛方块贴图程序生成色板）→ ResourceBrowser.qml woolPalette（t751 图鉴变体预览）→
+//   本表（游戏内毛层 tint）三处同值镜像——浏览器预览色 = 游戏内羊观感色。矩阵探针 t789 直调
+//   sheepWoolTintForIndex 钉死契约（漂移即 FAIL）。下标序 = 染料/羊毛标准序（白/橙/品红/淡蓝/黄/柠绿/
+//   粉/灰/浅灰/青/紫/蓝/棕/绿/红/黑）。
+constexpr const char *kSheepWoolTints[16] = {
+    "#ffffff", "#de781e", "#b94ba5", "#4696d2", "#d2b428", "#5faf2d",
+    "#e191af", "#464650", "#9b9ba0", "#418791", "#823ca5", "#3746a5",
+    "#734b2d", "#468237", "#962828", "#1e1e26",
+};
+
+
 // t670 白天寻阴凉（机制等价 MC 亡灵日间主动找树荫/洞口躲避日光）：在世界里找 (sx,sy,sz) 周围半径 kRadius 内
 //   最近（XZ 距离取小）的「遮荫可站列」。(x, z) 列候选：某脚位层 y（±1 内）下方实体（站得住）+ 身体格空气
 //   （mob 1.8 高占两格）+ 身体格 skyLight < kThresh（遮荫，燃烧判定是 skyLightAt>=15，14 留边缘余量）。
@@ -317,6 +341,19 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
                      : 0.0f;
     e.ambientTimer = kAmbientMin
                      + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAmbientMax - kAmbientMin);
+    // t789 羊自然毛色：spawn 时按 kSheepNaturalWeights 加权随机（白 ~81.8% 主导 + 黑/灰/浅灰 5% + 棕 3% +
+    //   粉 0.164%，机制等价 MC 1.0 自然刷羊色分布）。所有生成路径（进世界散布 / 刷怪笼被动 spawnPassiveMob /
+    //   生物蛋 / 繁殖幼崽）都经本核心 → 一处收口；幼崽的随机色随后被 tickBreeding 覆写为父代色（继承语义
+    //   同 ocelotVariant 先例）。加权随机同 pickPassiveMobType 的「逐段扣减」模式（bounded 返 quint32）。
+    if (mobType == MobSheep) {
+        auto *rng = QRandomGenerator::global();
+        int r = int(rng->bounded(kSheepNaturalWeightTotal)); // [0, 10000)
+        e.sheepWool = 0; // 兜底白（权重表合计恰 10000，循环内必命中；防表改漏时越界采样悬空）
+        for (const SheepWoolWeight &w : kSheepNaturalWeights) {
+            if (r < w.weight) { e.sheepWool = w.index; break; }
+            r -= w.weight;
+        }
+    }
     // t377 mob 随机护甲（仅 Shambler/Bones；spec「~80% no armor, ~20% a random piece/set」）。机制等价 MC 1.0
     //   僵尸/骷髅随机护甲。armorId = 0x300 + tier*4 + piece（与 ArmorRegistry id 段一致；本地常量避免跨层依赖
     //   Game/recipe.h —— Entities 层不向上 include）。tier 0..4（皮革/铁/铜/金/钻石）；piece 0..3（头/胸/腿/靴）。
@@ -1449,8 +1486,9 @@ bool EntityManager::shearedAt(int i) const
 
 // t300 剪羊毛（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）。
 //   未剪羊毛的活体 sheep → 翻 sheared=true + 设 regrowCooldown（防刚剪完立即吃草长回，spec「加重新长毛冷却」）+
-//   emit sheepSheared(坐标) 让呈现层 Connections 转发 ItemEntityManager.spawnItem 生成羊毛物品掉落实体
-//   （同 mobDied→spawnItem 模式；单向事件流，分层：Entities 层发语义事件、呈现层只消费）。bump revision
+//   emit sheepSheared(坐标, 毛色下标) 让呈现层 Connections 转发 ItemEntityManager.spawnItem 生成**对应色**
+//   羊毛掉落实体（t789：白→材料段 WoolId 0x20E / 有色→羊毛方块 63..77，机制等价 MC 剪彩色羊得对应色羊毛；
+//   同 mobDied→spawnItem 模式；单向事件流，分层：Entities 层发语义事件、呈现层只消费）。bump revision
 //   → QML delegate 据 shearedAt 翻羊为裸外观。已剪羊毛 / 非 sheep / dead / 越界 → 静默早退（机制等价 MC：
 //   剪羊毛只对有毛的活体羊生效，已裸的羊右键无反应）。
 void EntityManager::shearSheep(int i)
@@ -1464,10 +1502,35 @@ void EntityManager::shearSheep(int i)
     e.regrowCooldown = kRegrowCooldown; // 剪完到能吃草方块重新长毛的硬冷却
     // 羊毛掉落在羊当前格（floor(pos)，同 mobDied 坐标约定）→ 呈现层 spawnItem 在该格中心生成掉落实体。
     const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
-    qCInfo(lcEnt) << "sheep sheared at slot" << i << "pos" << e.pos << "-> dropped wool at" << dx << dy << dz;
-    emit sheepSheared(dx, dy, dz);
+    qCInfo(lcEnt) << "sheep sheared at slot" << i << "pos" << e.pos << "woolIndex" << e.sheepWool
+                  << "-> dropped wool at" << dx << dy << dz;
+    emit sheepSheared(dx, dy, dz, e.sheepWool); // t789：携毛色下标（呈现层据此选对应色羊毛掉落 id）
     ++m_revision;
     emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
+}
+
+// t789 第 i 只羊的羊毛色下标（0..15；仅 MobSheep 用）。非 sheep / 越界 → 0（白，QML 毛层 tint 恒等）。
+int EntityManager::sheepWoolAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSheep) return 0; // 仅 sheep 有毛色
+    return e.sheepWool;
+}
+
+// t789 第 i 只羊的毛层 tint 色（QML 毛茸 Model baseColor 乘色；白 → 恒等不着色，兼容旧观感）。委托
+//   sheepWoolTintForIndex（色板单一权威 kSheepWoolTints）。非 sheep / 越界 → 白。
+QColor EntityManager::sheepWoolTintAt(int i) const
+{
+    return sheepWoolTintForIndex(sheepWoolAt(i));
+}
+
+// t789 羊毛色下标 → tint 色（sheepWoolTintAt 的按值入口；矩阵测试直调钉「游戏内 tint = 浏览器 woolPalette
+//   = build_wool.py 色板」契约）。下标越界 → 钳 [0,15]（负下标落白、超界落黑，防御手改存档类输入）。
+QColor EntityManager::sheepWoolTintForIndex(int woolIndex) const
+{
+    const int idx = std::clamp(woolIndex, 0, 15);
+    return QColor(QLatin1String(kSheepWoolTints[idx]));
 }
 
 // t510 雪傀儡剪南瓜头（spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」；机制等价 MC 1.0
@@ -1811,7 +1874,9 @@ bool EntityManager::tickBreeding(qreal dt)
     //   传递语义，未来若野狼可配对则各按父代）。
     //   t481：PendingBaby 带 variant —— 猫幼崽继承父代毛色变体（配对仅驯服猫进求偶 → 恒 tamed=true；
     //   variant 取 e.ocelotVariant = 配对循环首个父母的变体，机制等价 MC 幼猫继承其一父母毛色）。
-    struct PendingBaby { float x, y, z; int mobType; QString color; bool tamed; int variant = 0; };
+    //   t789：PendingBaby 带 wool —— 羊幼崽继承父代羊毛色（自然色权重只管 spawn；繁殖链色稳定，机制等价
+    //   MC 幼畜继承父母毛色——本工程取首个父母色，同 ocelotVariant 继承先例，不做混色）。
+    struct PendingBaby { float x, y, z; int mobType; QString color; bool tamed; int variant = 0; int wool = 0; };
     std::vector<PendingBaby> pending;
     int remaining = kPassiveMobCap - passiveBreedableCount();
     const float rangeSq = kBreedRange * kBreedRange;
@@ -1838,7 +1903,7 @@ bool EntityManager::tickBreeding(qreal dt)
             const float bx = (e.pos.x() + m.pos.x()) * 0.5f;
             const float by = std::min(e.pos.y(), m.pos.y());
             const float bz = (e.pos.z() + m.pos.z()) * 0.5f;
-            pending.push_back({ bx, by, bz, e.mobType, e.color, e.wolfTamed, e.ocelotVariant });
+            pending.push_back({ bx, by, bz, e.mobType, e.color, e.wolfTamed, e.ocelotVariant, e.sheepWool });
             --remaining;
             dirty = true;
             qCInfo(lcEnt) << "breed pair: slots" << idx << "&" << j << "type" << e.mobType
@@ -1864,6 +1929,11 @@ bool EntityManager::tickBreeding(qreal dt)
                 //   ocelotVariantAt 选 3 色猫贴图 → 幼猫毛色与父母一致，机制等价 MC 幼猫继承父母毛色）。
                 baby.ocelotTamed = b.tamed;
                 baby.ocelotVariant = b.variant;
+            }
+            if (b.mobType == MobSheep) {
+                // t789：羊幼崽继承父代羊毛色（覆写 spawnMobCore 的自然随机色——繁殖产色不走权重表，
+                //   机制等价 MC 幼畜毛色随父母；幼崽剪/杀掉对应色与成体同链）。
+                baby.sheepWool = b.wool;
             }
         }
     }
@@ -5328,8 +5398,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   坐标 floor(pos) 与 spawnItem 整数格入口一致（dead 态 pos 冻结，与致死瞬间同位）。
                     //   t479 wasBaby = 致死瞬间快照（deathBaby）—— 幼崽死亡不掉落（呈现层 onMobDied 守卫跳战利品 +
                     //   XP）；0.5s 死亡动画窗口内 growTimer 可能到 0 长大，快照保「致死时是幼崽」语义（同 deathBurned）。
+                    //   t789 woolIndex = 羊毛色下标（仅 MobSheep 有意义；呈现层羊分支据此掉对应色羊毛）。
                     const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
-                    emit mobDied(dx, dy, dz, e.mobType, e.deathBurned, e.deathBaby);
+                    emit mobDied(dx, dy, dz, e.mobType, e.deathBurned, e.deathBaby,
+                                 e.mobType == MobSheep ? e.sheepWool : 0);
                     toRemove.push_back(idx);
                     dirty = true;
                 }

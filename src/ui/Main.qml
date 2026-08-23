@@ -1950,6 +1950,16 @@ Window {
         return Qt.rgba(r * k, g * k, b * k, 1.0)
     }
 
+    // t789 羊毛色下标 → 掉落物 id（剪羊毛 onSheepSheared / 杀羊 onMobDied 的 MobSheep 分支共用）：
+    //   白（0）= 0x20E 材料段羊毛物品（RecipeRegistry::WoolId——bed_red 简化配方原料链与杀白羊毛旧观感
+    //   均不变）；其余 15 色 = 羊毛方块段 63..77（BlockRegistry::WoolOrange=FirstWoolVariant + idx-1，
+    //   方块 id 即物品 id 可放置回 + t788 染料链同产物形态——剪/杀有色羊直接得对应色羊毛方块，机制等价
+    //   MC 1.0 剪彩色羊掉对应色羊毛）。⚠️ QML 不 import C++ 静态类故用字面量（同 onMobDied 段约定）；
+    //   下标序与 EntityManager::sheepWoolAt / kSheepWoolTints 同源（16 色标准序）。
+    function sheepWoolDropId(woolIdx) {
+        return (woolIdx > 0) ? (63 + woolIdx - 1) : 0x20E
+    }
+
     // t377 mob 护甲 tier 色（t719 起 UnitCube+tier 色路径退役——ArmorLayerBox + layer 贴图接管 mob 穿甲
     //   显示；tier 色板移入层贴图（t717 六档程序层 / pack 原色），tint 走 mobArmorTintT 近白保红闪）。
 
@@ -2198,7 +2208,9 @@ Window {
         //     0x217=骨头 / 0x218=腐肉 / 0x219=线（RecipeRegistry::BoneId / RottenFleshId / StringId，t299）。
         //     0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId 等，t398 鸡掉落）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
-        function onMobDied(x, y, z, mobType, burned, wasBaby) {
+        // t789 第 7 参 woolIdx = 羊毛色下标（仅 MobSheep 有意义，其余 mob 恒 0）：羊分支羊毛掉落据它选对应
+        //   色（sheepWoolDropId：白→0x20E 材料段 / 有色→羊毛方块 63..77）。
+        function onMobDied(x, y, z, mobType, burned, wasBaby, woolIdx) {
             progress.onMobKilled(mobType)  // progress 统计击杀 + 成就「怪物猎人」（敌对 mob）
             // t479 幼崽死亡不掉落（机制等价 MC 1.0 幼崽不掉落）：幼崽（baby）死亡 → 不掉战利品 + 不掉 XP。
             //   wasBaby = EntityManager 致死瞬间快照（deathBaby）—— 0.5s 死亡动画窗口内 growTimer 可能到 0 长大，
@@ -2249,7 +2261,9 @@ Window {
                 itemEntities.spawnItem(x, y, z, meat, 1)
             } else if (mobType === EntityManager.MobSheep) {
                 // 燃烧致死 → 熟羊肉（替代羊毛；机制等价 MC cooked mutton）；否则羊毛 ×1。
-                itemEntities.spawnItem(x, y, z, burned ? 0x223 : 0x20E, 1)
+                //   t789：按羊毛色掉对应色（sheepWoolDropId——白→0x20E 材料 / 有色→对应色羊毛方块，
+                //   机制等价 MC 杀彩色羊掉对应色羊毛；woolIdx 由 mobDied 信号携带）。
+                itemEntities.spawnItem(x, y, z, burned ? 0x223 : sheepWoolDropId(woolIdx), 1)
             } else if (mobType === EntityManager.MobBones) {
                 // t301 敌对掉落：骸骨（骷髅）→ 骨头 ×1-2 + 箭 ×0-2 + 弓（~50%）。
                 //   机制等价 MC 1.0 骷髅掉骨头 + 箭 + 有时弓（spec t301：弓 ~50% 概率非 100%，区别于被动掉落的恒定数量）。
@@ -2337,12 +2351,13 @@ Window {
             //   detonateStalker 的 explosionDroppedItem 单独发（t297）；MobStalker 常规击杀掉火药归本 onMobDied 上方分支（t485）。
         }
         // t300 剪羊毛掉落（spec「剪刀右键羊 → 羊变裸 + 掉羊毛物品」）：EntityManager shearSheep 内发
-        //   sheepSheared(x,y,z)（坐标 = 羊当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到
+        //   sheepSheared(x,y,z,woolIdx)（坐标 = 羊当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到
         //   ItemEntityManager.spawnItem 生成羊毛物品掉落实体（机制等价 MC 1.0 剪羊毛掉落羊毛；杀羊掉落羊毛
         //   归 onMobDied 的 MobSheep 分支，二者独立 —— 剪羊毛不杀羊、杀羊前已剪则死时不再多掉）。
-        //   0x20E = RecipeRegistry::WoolId（材料段羊毛物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
+        //   t789 woolIdx = 该羊羊毛色下标 → sheepWoolDropId 掉对应色（白 = 0x20E 材料段羊毛物品
+        //   RecipeRegistry::WoolId；有色 = 羊毛方块段 63..77。⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
         //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 fallingBlockDropped / mobDied 模式）。
-        function onSheepSheared(x, y, z) { itemEntities.spawnItem(x, y, z, 0x20E, 1) }
+        function onSheepSheared(x, y, z, woolIdx) { itemEntities.spawnItem(x, y, z, sheepWoolDropId(woolIdx), 1) }
         // t510 雪傀儡剪南瓜头掉落（spec「剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」）：EntityManager
         //   shearSnowGolem 内发 snowGolemSheared(x,y,z)（坐标 = golem 当前格 floor(pos)，与 spawnItem 整数格约定一致）
         //   → 转发到 ItemEntityManager.spawnItem 生成南瓜方块掉落实体（机制等价 MC 1.0 剪刀剪雪傀儡南瓜头 → 南瓜掉落）。
@@ -6801,6 +6816,8 @@ Window {
                                 // t300 剪羊毛态：shearedAt=false（未剪羊毛 / 已重新长毛）→ 显本毛茸贴图 Model；sheared=true
                                 //   时切到下方裸肤色 Model（互斥 visible，由 revision 触碰刷新）。机制等价 MC 1.0 剪羊毛后
                                 //   羊裸露皮肤。
+                                // t789 羊自然毛色：毛层 baseColor 乘 sheepWoolTintAt 毛色 tint（白恒等；自然权重见
+                                //   EntityManager kSheepNaturalWeights——白主导 + 粉/灰/浅灰/棕/黑少数）。
                                 visible: {
                                     const _r = entityManager.revision
                                     return _r >= 0 && entKind === EntityManager.Mob && entMobType === 3
@@ -6817,7 +6834,18 @@ Window {
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                    // t789 羊自然毛色 tint：毛层贴图 × 毛色 tint（sheepWoolTintAt；白 → #ffffff
+                                    //   恒等，白羊观感与旧版一致）再 × 昼夜明暗（tint × terrainLight 双乘 =
+                                    //   tintBySkyLight 语义的「贴图在身」分体版，t597 铁律：贴图在身 baseColor
+                                    //   只承载调制不压黑本体）。红闪仍红覆盖（优先于 tint）。
+                                    baseColor: {
+                                        const _r = entityManager.revision
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        const tint = (_r >= 0) ? entityManager.sheepWoolTintAt(index)
+                                                               : Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                                        const light = terrainLight(worldClock.skyLight)
+                                        return Qt.rgba(tint.r * light.r, tint.g * light.g, tint.b * light.b, 1.0)
+                                    }
                                     // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
                                     baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
                                     // t633 ③ 羊毛层透明镂空裁剪：sheep_fur.png 头前 / 体侧有挖空（毛层透出下层），
