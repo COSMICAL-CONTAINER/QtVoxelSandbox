@@ -5500,7 +5500,8 @@ void World::placeLavaLakes()
 //       圆石 + 苔石 + 石砖混合墙体；本工程无 mossy_cobble / stone_brick 方块故用 cobble + stone 二者混排）。
 //     - 内部 (0..W-1, 0..H-1, 0..D-1)：置 Air（清空原 stone / ore / cave air → 干净房间）。不动 Bedrock
 //       （基岩层不可破）。
-//     - 中央 (W/2, 1, D/2)：置 Spawner（地板上方一格 = 站立高度；玩家走过来触发刷怪）。
+//     - 中央 (W/2, 1, D/2)：置 Spawner（地板上方一格 = 站立高度；玩家走过来触发刷怪）。t786 起 state 带
+//       mob 类型（僵尸/骷髅/蜘蛛/爬行者加权随机——蠹虫不在地牢池，要塞专属；见步骤 3 权重表）。
 //     - 角落 (0, 1, 0)：置 Chest（t393 填战利品内容；本任务仅放置空箱方块，机制等价 MC 1.0 地牢箱子）。
 //
 //   空腔被实体墙天然封闭 → 房间内无天光 → 黑暗（机制等价 MC 1.0 地牢黑暗环境 + 刷怪笼刷怪条件）。
@@ -5582,7 +5583,26 @@ void World::placeDungeons()
             }
             // 3) 中央 Spawner（地板上方一格 = cy+1 = 站立高度）。覆盖原空气格；不动非空气（防 cave 重叠时
             //    误覆盖既有方块，但步骤 2 已清空气 → 此处恒为 Air，覆盖安全）。
-            m_chunks.setBlock(cx + kRoomW / 2, cy + 1, cz + kRoomD / 2, BlockRegistry::Spawner);
+            //    t786 类型化：地牢笼按 hash r 的 bit20-27（256 档）加权随机带 mob 类型 state（僵尸 40% /
+            //    骷髅 25% / 蜘蛛 20% / 爬行者 15%——机制等价 MC 1.0 地牢僵尸为主混合池；蠹虫不在地牢池，
+            //    要塞专属）。分层：World 不依赖 Entities → 表存 BlockRegistry 完整 state 常量（数值契约 =
+            //    EntityManager::MobType）；tickSpawners 经 EntityManager::spawnerMobTypeForState 解码同刷。
+            //    确定性（PLAN §2-K）：同 seed 同分布；r 低 20 位已被概率/jx/jz/cy 用走，bit20-27 独立采样。
+            static constexpr quint8 kDungeonSpawnerStates[4] = {
+                BlockRegistry::SpawnerStateShambler,  // 僵尸笼（102/256，最常见 → 创造放置默认亦此型）
+                BlockRegistry::SpawnerStateBones,     // 骷髅笼（64/256）
+                BlockRegistry::SpawnerStateSpider,    // 蜘蛛笼（51/256）
+                BlockRegistry::SpawnerStateStalker,   // 爬行者笼（39/256）
+            };
+            static constexpr int kDungeonSpawnerWeights[4] = { 102, 64, 51, 39 }; // 合计 256（改权重须保持和 256）
+            const int spawnerPick = int((r >> 20) & 0xFFu); // [0, 255]
+            quint8 spawnerState = BlockRegistry::SpawnerStateShambler; // 兜底（权重和 <256 时最常见型）
+            int spawnerAcc = 0;
+            for (int si = 0; si < 4; ++si) {
+                spawnerAcc += kDungeonSpawnerWeights[si];
+                if (spawnerPick < spawnerAcc) { spawnerState = kDungeonSpawnerStates[si]; break; }
+            }
+            m_chunks.setBlock(cx + kRoomW / 2, cy + 1, cz + kRoomD / 2, BlockRegistry::Spawner, spawnerState);
             // 4) 角落 Chest（与 Spawner 对角 = 角落 (0, 1, 0)）：t393 首开填充地牢战利品（ChestStore::populateDungeonLoot，
             //    由 Main.qml.openChest 据下面的 state 标记触发）。state 带 ChestStateDungeonFlag(bit2) 标「地牢生成箱」
             //    → World::isDungeonChest 返 true → 玩家首开时填充；玩家自放的箱子无此标记 → 不填（机制对齐 MC）。
@@ -6193,7 +6213,7 @@ void World::placeJungleTemple()
 //     - **西走廊**（5 宽，x -11..-7）→ **图书馆**（10×17，x -21..-12, z -8..8）：四壁 Bookshelf 书架墙（附魔台
 //       加成来源 t474）+ 中央书架岛 + 蛛网 + 石砖台阶装饰。
 //     - **南门洞**（x -1..1, z=7）→ **战利品/银鱼房**（17×11，x -8..8, z 8..18）：银鱼刷怪笼（Spawner +
-//       SpawnerStateSilverfishFlag → tickSpawners 刷 Silverfish）+ 战利品箱（Chest + ChestStateStrongholdFlag
+//       SpawnerStateSilverfish → tickSpawners 刷 Silverfish）+ 战利品箱（Chest + ChestStateStrongholdFlag
 //       → 首开填要塞战利品含末影之眼）。
 //     - **走廊装饰**：内部空间确定性散布 Cobweb 蛛网（~8%，仅 dy=1 贴地，不悬空；跳过全部设施房 → 不再
 //       误盖框架 / 平台 / 楼梯 —— t682 楼梯悬浮挡路根因是散布楼梯装饰，t713 移除楼梯装饰只留蛛网）。
@@ -6330,8 +6350,8 @@ void World::placeStronghold()
         //       石砖栏 / 北墙三面围死 → 静态无 air 邻（worldgen 后 tickLavaFlow 稳态不流，机制等价 MC 传送门
         //       房熔岩环沟）；岩浆与高台侧壁接触（高台石砖非木质）不触发焚毁；
         //    f) **银鱼刷怪笼**：环中心正上方 (0, 5, -18)（高台顶 y=4 之上 1 格）—— 机制等价 MC 1.0 要塞
-        //       传送门房楼梯尽头 / 传送门上方的 silverfish spawner；SpawnerStateSilverfishFlag → tickSpawners
-        //       刷 Silverfish（复用 t487 既有机制）。
+        //       传送门房楼梯尽头 / 传送门上方的 silverfish spawner；SpawnerStateSilverfish（显式银鱼 type）→
+        //       tickSpawners 刷 Silverfish（复用 t487 既有机制，t786 类型化升级）。
         // 4a) 高台（13×6 实心，dy 1..3）。
         for (int dx = -6; dx <= 6; ++dx) {
             for (int dz = -21; dz <= -16; ++dz) {
@@ -6381,8 +6401,9 @@ void World::placeStronghold()
                 put(pdx, 4, pdz, BlockRegistry::EndPortal, st); // 末地传送门框架（state 0=未放 / bit0=已放眼）
             }
         }
-        // 4f) 银鱼刷怪笼（环中心正上方，高台顶 y=4 之上 1 格）。
-        put(0, 5, -18, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
+        // 4f) 银鱼刷怪笼（环中心正上方，高台顶 y=4 之上 1 格）。t786 起写 SpawnerStateSilverfish
+        //     （bit1-5 显式银鱼 type + bit0 旧标记；旧存档 state=1 由解码端 bit0 兼容路径同刷银鱼）。
+        put(0, 5, -18, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
 
         // 5) 图书馆（x -21..-12, z -8..8 房间；内部 10×17）—— 书架墙（机制等价 MC 1.0 要塞图书馆：
         //    书架贴墙排布，附魔台加成来源 t474）+ 中央书架岛 + 蛛网装饰。书架替换房间内壁（东墙内壁 x=-12 +
@@ -6415,10 +6436,11 @@ void World::placeStronghold()
         }
 
         // 6) 银鱼刷怪笼 + 战利品箱（南房，x -8..8, z 8..18）：双刷怪笼（房间放大 → 两笼错位散布）+ 双宝箱
-        //    （tickSpawners 据 flag 刷 Silverfish，机制等价 MC 1.0 要塞银鱼刷怪笼）+ 宝箱靠角
-        //    （ChestStateStrongholdFlag → 首开填要塞战利品含末影之眼，激活传送门关键物品）。
-        put(-4, 1, 12, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
-        put(4, 1, 15, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfishFlag);
+        //    （t786 起写 SpawnerStateSilverfish 显式 type；tickSpawners 据解码刷 Silverfish，机制等价 MC 1.0
+        //    要塞银鱼刷怪笼）+ 宝箱靠角（ChestStateStrongholdFlag → 首开填要塞战利品含末影之眼，激活传送门
+        //    关键物品）。
+        put(-4, 1, 12, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
+        put(4, 1, 15, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
         put(6, 1, 17, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
         put(-6, 1, 17, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
         // 南房中央蛛网（阴湿地牢氛围；确定性）。

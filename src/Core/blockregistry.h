@@ -2074,11 +2074,35 @@ public:
     //   round-trip 保真。旧存档 / worldgen 传送门 state=0 → 未激活（玩家需放末影之眼激活）。
     static constexpr quint8 EndPortalStateActiveFlag = 0x01;
     // t487 刷怪笼 state bit0（值 1）=「银鱼刷怪笼」标记（worldgen placeStronghold 写入；地牢刷怪笼 state=0
-    //   无此位）。EntityManager::tickSpawners 据本位分流：bit0=1 → spawn Silverfish（要塞银鱼）；bit0=0 →
-    //   spawn Shambler/Bones（地牢默认）。**不影响** spawner 其它行为（玩家破坏即停止刷怪由 blockAt!=Spawner
-    //   自然实现，与 state 无关）。state 经 m_states 落 SQLite round-trip 保真（旧存档 spawner state=0 → 地牢
-    //   默认刷怪，非要塞银鱼，安全）。
+    //   无此位）。t786 起 bit0 语义降级为「旧版兼容标记」：type 位（bit1-5，下述 SpawnerStateMobShift/Mask）
+    //   非零时以 type 为准（要塞银鱼笼现写 SpawnerStateSilverfish = 29 = 银鱼 type|bit0，读端两态并存）；
+    //   type 位为零且 bit0=1 → 旧存档要塞银鱼笼（向后兼容）。**不影响** spawner 其它行为（玩家破坏即停止
+    //   刷怪由 blockAt!=Spawner 自然实现，与 state 无关）。
     static constexpr quint8 SpawnerStateSilverfishFlag = 0x01;
+    // t786 刷怪笼 type 位布局：bit1-5（值 0x3E）=「笼内 mob 类型」字段（存 EntityManager::MobType 枚举值，
+    //   左移 1 位）。分层（PLAN §2）：Core 不依赖 Entities → 本类只提供 bit 布局常量 + spawnerStateForMob(int)
+    //   原始 int 编码（数值契约 = EntityManager::MobType：4=Shambler 僵尸 / 5=Bones 骷髅 / 6=Stalker 爬行
+    //   追踪者 / 7=Spider 蜘蛛 / 14=Silverfish 银鱼，redstone_matrix_test t786 探针锁死防枚举漂移）；解码
+    //   （含合法 type 校验 + 旧存档兼容回退）单源在 EntityManager::spawnerMobTypeForState（QML delegate 与
+    //   tickSpawners 共用，见 t785 单一权威表教训）。旧存档兼容：type 位=0 且 bit0=1 → 旧要塞银鱼笼；
+    //   type 位=0 且 bit0=0 → 地牢旧笼，刷怪端确定性回退 Shambler（旧版地牢本是 Shambler/Bones 随机刷，
+    //   无从恢复原始随机序列 → 取地牢最常见型 Shambler 为默认；刻意不默认 Silverfish，避免旧地牢笼全变
+    //   银鱼笼）。state 经 m_states 落 SQLite round-trip 保真。
+    static constexpr quint8 SpawnerStateMobShift = 1;   // type 字段起始 bit
+    static constexpr quint8 SpawnerStateMobMask = 0x3E; // type 字段位掩码（bit1-5）
+    // t786 各类型刷怪笼完整 state 常量（type<<1 | bit0；bit0 仅银鱼笼沿用旧标记，其余恒 0）：
+    //   地牢 worldgen 加权随机（placeDungeons）/ 创造背包放置（PlayerController placeBlock，默认 Shambler
+    //   = 地牢最常见型）/ 要塞银鱼笼（placeStronghold 恒 SpawnerStateSilverfish）。
+    static constexpr quint8 SpawnerStateShambler = 0x08;   // (4<<1) 僵尸笼
+    static constexpr quint8 SpawnerStateBones = 0x0A;     // (5<<1) 骷髅笼
+    static constexpr quint8 SpawnerStateStalker = 0x0C;   // (6<<1) 追踪者笼
+    static constexpr quint8 SpawnerStateSpider = 0x0E;    // (7<<1) 蜘蛛笼
+    static constexpr quint8 SpawnerStateSilverfish = 0x1D; // (14<<1)|1 银鱼笼（bit0 兼容旧标记）
+    // t786 刷怪笼 type → state 编码（raw int 意为 EntityManager::MobType 枚举值；分层：Core 不引用枚举本体，
+    //   仅数值契约，矩阵测试锁死）。仅做位域编码（低 6 位内），**不校验** type 合法性（非法值由解码端
+    //   spawnerMobTypeForState 兜底回退——编码端早于类型表存在，保持无依赖纯函数）。placedState 见
+    //   PlayerController（创造放置）/ World placeDungeons、placeStronghold（worldgen）。
+    static quint8 spawnerStateForMob(int mobType) { return quint8((mobType << SpawnerStateMobShift) & SpawnerStateMobMask); }
     // t494 熔炉 state bit2（值 4）=「燃烧中」标记（机制等价 MC 1.0 熔炉冶炼进行时正面发光）。FurnaceUI
     //   冶炼 tick 在点燃（有燃料 + 有可冶炼输入）/熄火（燃料烧尽 / 输入断 / 取走）边界翻转本位：经
     //   PlayerController::setFurnaceLit 走 5 参数 setBlock（id 不变 → 只发 worldChanged 重建 mesh、不发

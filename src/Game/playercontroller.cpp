@@ -4084,6 +4084,13 @@ void PlayerController::placeBlock()
         //   用的悬空叶不被清。mesher / collision / 选中均不读 leaves state（ShapeFull + culled 立方面）→ 零回归。
         //   t714：云杉叶同语义（同族叶机制）。
         placeState = BlockRegistry::PersistentLeafBit;
+    } else if (m_selectedBlock == BlockRegistry::Spawner) {
+        // t786 玩家放置的刷怪笼带 mob 类型 state（此前无分支 → state=0 → 解码端兜底虽同 Shambler，但走的是
+        //   「旧存档笼」兼容路径；现显式写僵尸笼 —— 地牢加权池最常见型，机制等价 MC 1.0 空刷怪笼放置默认
+        //   僵尸系）。笼内迷你 mob delegate（spawnerHost）与 tickSpawners 均经 spawnerMobTypeForState 解码
+        //   同型 → 放下即显僵尸迷你模型 + 刷僵尸（用户报「创造模式背包的刷怪笼放下来中间是空白的」根因即
+        //   放置路径无 type → 笼内 delegate 恒蠹虫/空白不随型）。v1 无放置选型 UI（t787 刷怪蛋改型预留）。
+        placeState = BlockRegistry::spawnerStateForMob(EntityManager::MobShambler);
     }
     // t163(b) 同格双半砖合整（spec「同格下半砖上再放下半砖→合并为完整方块阻挡行走」）：
     //   右键 slab 时若点中的就是**同种** slab（木 / 石各自合并，不同材质不合 —— 机制等价 MC double slab 须同材质），

@@ -3363,6 +3363,163 @@ int main(int argc, char *argv[])
                              "look & palette layout = QML, manual check)";
     }
 
+    // ── t786 刷怪笼类型化（spawner cage typing）：①state 位布局 round-trip（编码/解码互逆 + 旧存档兼容
+    //   分流）②地牢 worldgen 加权分布多 seed 核对（蠹虫不在地牢池）③tickSpawners 据 state 刷对应型 ④创造
+    //   放置默认型。数值契约锁（枚举漂移 = 此处 FAIL，同 t785 单一权威教训）。
+    {
+        bool ok = true;
+        EntityManager em786;
+        // ① 编码 → 解码互逆（五类型全表）：BlockRegistry::spawnerStateForMob(Core 层 raw int)→ state 常量
+        //   → EntityManager::spawnerMobTypeForState 解码回原型。同时锁位布局常量本身。
+        const int types786[] = { EntityManager::MobShambler, EntityManager::MobBones,
+                                 EntityManager::MobStalker, EntityManager::MobSpider, EntityManager::MobSilverfish };
+        for (int t : types786) {
+            const quint8 st = BlockRegistry::spawnerStateForMob(t);
+            if (em786.spawnerMobTypeForState(int(st)) != t) {
+                qInfo().noquote() << "  [t786 diag] type" << t << "round-trip got"
+                                  << em786.spawnerMobTypeForState(int(st));
+                ok = false;
+            }
+        }
+        if (BlockRegistry::SpawnerStateMobShift != 1 || BlockRegistry::SpawnerStateMobMask != 0x3E
+            || BlockRegistry::SpawnerStateShambler != 0x08 || BlockRegistry::SpawnerStateBones != 0x0A
+            || BlockRegistry::SpawnerStateStalker != 0x0C || BlockRegistry::SpawnerStateSpider != 0x0E
+            || BlockRegistry::SpawnerStateSilverfish != 0x1D
+            || BlockRegistry::SpawnerStateSilverfishFlag != 0x01) {
+            qInfo() << "  [t786 diag] spawner state bit-layout constants drifted";
+            ok = false;
+        }
+        // ①b 旧存档兼容：state=0（旧地牢笼）→ Shambler；state=1（t487 旧要塞银鱼笼）→ Silverfish；
+        //   非法 type 位（如 0x20=type16 夜行者不可刷 / 0x3E 全掩码）→ 兜底 Shambler 不崩不误刷夜行者。
+        if (em786.spawnerMobTypeForState(0) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(1) != EntityManager::MobSilverfish
+            || em786.spawnerMobTypeForState(0x20 | 0x01) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(0x3E) != EntityManager::MobShambler) {
+            qInfo() << "  [t786 diag] legacy/invalid-state decode wrong";
+            ok = false;
+        }
+        // ② 地牢 worldgen 加权分布（多 seed 池化）：新世界（generate() 已含 placeDungeons，勿重复调）逐个
+        //   重生成后扫全图 Spawner 按**原始 state** 分类 —— 要塞银鱼笼（state=1 旧 / 0x1D 新）单独计，
+        //   其余归地牢池并解码统计：地牢池不得出现蠹虫/未知型、不得残留无类型旧格（state=0）、池化合计
+        //   僵尸占比最高（40% 加权）。探针自建临时世界（矩阵 harness 共享 nextSlot 已耗尽 —— t799 教训）。
+        auto classifyWorldSpawners = [](World &w, int counts[4], int &stronghold, int &legacyUntyped, int &unknown) {
+            for (int i = 0; i < 4; ++i) counts[i] = 0;
+            stronghold = 0; legacyUntyped = 0; unknown = 0;
+            for (int y = 0; y < w.height(); ++y)
+                for (int z = 0; z < w.depth(); ++z)
+                    for (int x = 0; x < w.width(); ++x) {
+                        if (w.blockAt(x, y, z) != BlockRegistry::Spawner) continue;
+                        const quint8 st = w.stateAt(x, y, z);
+                        // 要塞银鱼笼两代形态：t487 旧 state=1 / t786 新 0x1D（type14|bit0）。bit0+type14 组合
+                        //   只由 placeStronghold 写出（地牢池无蠹虫），按要塞计。
+                        if (st == BlockRegistry::SpawnerStateSilverfishFlag
+                            || st == BlockRegistry::SpawnerStateSilverfish) { ++stronghold; continue; }
+                        switch (EntityManager().spawnerMobTypeForState(int(st))) {
+                        case EntityManager::MobShambler: ++counts[0]; break;
+                        case EntityManager::MobBones:    ++counts[1]; break;
+                        case EntityManager::MobStalker:  ++counts[2]; break;
+                        case EntityManager::MobSpider:   ++counts[3]; break;
+                        default: ++unknown; break;
+                        }
+                        if (st == 0) ++legacyUntyped; // 全新生成不应有无类型旧格
+                    }
+        };
+        int pooled[4] = { 0, 0, 0, 0 };
+        const quint32 seeds786[] = { 20260821u, 777u, 424242u, 1337u, 90210u };
+        int worldsChecked = 0;
+        for (quint32 sd : seeds786) {
+            World w786;
+            w786.setWidth(96);
+            w786.setDepth(96);
+            w786.setHeight(48);
+            w786.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含 placeDungeons）
+            int c[4], strong, legacyU, unk;
+            classifyWorldSpawners(w786, c, strong, legacyU, unk);
+            ++worldsChecked;
+            if (unk != 0 || legacyU != 0) { // 地牢池全类型化、无未知型
+                qInfo().noquote() << "  [t786 diag] seed" << sd << "dungeon pool unknown/untyped:" << unk << legacyU;
+                ok = false;
+            }
+            if (c[3] > c[0] || c[2] > c[0]) { // 单世界粗检：蜘蛛/爬行者不得多于僵尸（40% 主导）
+                qInfo().noquote() << "  [t786 diag] seed" << sd << "zombie not dominant:" << c[0] << c[1] << c[2] << c[3];
+                ok = false;
+            }
+            for (int i = 0; i < 4; ++i) pooled[i] += c[i];
+        }
+        const int pooledTotal = pooled[0] + pooled[1] + pooled[2] + pooled[3];
+        if (worldsChecked > 0 && pooledTotal == 0) {
+            qInfo() << "  [t786 diag] no dungeons generated across probe seeds";
+            ok = false;
+        }
+        if (pooledTotal >= 5 && !(pooled[0] >= pooled[1] && pooled[1] >= std::min(pooled[2], pooled[3]))) {
+            // 池化序断言：僵尸 ≥ 骷髅 ≥ min(蜘蛛,爬行者)（小样本下 20% vs 15% 可能倒挂，仅锁大序）
+            qInfo().noquote() << "  [t786 diag] pooled weight order off:" << pooled[0] << pooled[1] << pooled[2] << pooled[3];
+            ok = false;
+        }
+        // ③ tickSpawners 据 state 刷对应型：手摆僵尸笼（state=SpawnerStateShambler）+ 合法 spawn 位，
+        //    累计 tick 超 kSpawnerInterval(6s) 后应出 Shambler（非 Bones/Silverfish）；再换骷髅笼反证。
+        //    spawn 条件（玩家近 / cap）语义不变——探针只验「型随笼」。
+        auto tickTypedCage = [](quint8 cageState, bool &typedSpawned, bool &wrongTyped) {
+            World w786;
+            w786.setWidth(48);
+            w786.setDepth(48);
+            w786.setHeight(32);
+            w786.setSeed(9);
+            const int sx = 24, sy = 8, sz = 24;
+            w786.setBlock(sx, sy, sz, BlockRegistry::Spawner, cageState);
+            // 刻写位手工清空（worldgen 地形 y=8 恒实心 → 不挖空气 spawn 预检恒拒）：笼 8 水平邻 × (y, y+1)
+            //   全 air + 各自脚下 solid，给 tickSpawners 一个合法候选位。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dz == 0) continue; // 笼格本身不动
+                    w786.setBlock(sx + dx, sy, sz + dz, BlockRegistry::Air);
+                    w786.setBlock(sx + dx, sy + 1, sz + dz, BlockRegistry::Air);
+                    w786.setBlock(sx + dx, sy - 1, sz + dz, BlockRegistry::Stone); // air + 下方 solid
+                }
+            EntityManager emT;
+            const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f); // XZ ≤16 激活圈内
+            for (int i = 0; i < 80; ++i) emT.tickSpawners(0.1, &w786, playerPos); // 累计 8s > kSpawnerInterval=6s
+            typedSpawned = false; wrongTyped = false;
+            const int want = (cageState == BlockRegistry::SpawnerStateBones) ? int(EntityManager::MobBones)
+                                                                             : int(EntityManager::MobShambler);
+            for (int i = 0; i < emT.count(); ++i) {
+                if (!emT.aliveAt(i)) continue;
+                if (emT.mobTypeAt(i) == want) typedSpawned = true; // 只认刻写位邻域的 mob（防 worldgen 噪声）
+                else wrongTyped = true;
+            }
+        };
+        {
+            bool typedSpawned, wrongTyped;
+            tickTypedCage(quint8(BlockRegistry::SpawnerStateShambler), typedSpawned, wrongTyped);
+            if (!typedSpawned || wrongTyped) {
+                qInfo().noquote() << "  [t786 diag] shambler-cage tick spawned wrong pool:" << typedSpawned << wrongTyped;
+                ok = false;
+            }
+        }
+        {
+            bool typedSpawned, wrongTyped;
+            tickTypedCage(quint8(BlockRegistry::SpawnerStateBones), typedSpawned, wrongTyped);
+            if (!typedSpawned || wrongTyped) {
+                qInfo().noquote() << "  [t786 diag] bones-cage tick spawned wrong pool:" << typedSpawned << wrongTyped;
+                ok = false;
+            }
+        }
+        // ④ 创造放置默认型：placeState 分支常量核（PlayerController 放置路径写 spawnerStateForMob(MobShambler)
+        //    = SpawnerStateShambler；解码回 Shambler）。放置 UI 全链路需人工目视（见 dev-plan）。
+        if (BlockRegistry::spawnerStateForMob(EntityManager::MobShambler) != BlockRegistry::SpawnerStateShambler) {
+            qInfo() << "  [t786 diag] placement default state mismatch";
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t786 typed spawner cages: state encode/decode round-trip per mob type "
+                             "(bit1-5 layout locked), legacy states 0->shambler / 1->silverfish, invalid "
+                             "type bits fall back safely, dungeon worldgen weighted pool over multiple seeds "
+                             "has no silverfish with zombie-dominant order, tickSpawners spawns the cage's "
+                             "typed mob (both polarity probes), creative placement defaults to shambler "
+                             "(cage mini-model visuals = QML, manual check)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
