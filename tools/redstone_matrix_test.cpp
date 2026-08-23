@@ -10,6 +10,9 @@
 //   运行：build/redstone_matrix_test.exe，全过 exit 0。
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDir>   // t777 探针（羊毛层合成器临时 PNG rig）
+#include <QImage> // t777 探针（fur/body 双 PNG 生成 + 合成结果像素断言）
+#include <QColor> // t777 探针（像素色对比）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 
@@ -26,6 +29,10 @@
 #include "resourcepackmanager.h"  // t785 生物蛋探针（生成式染色表 spawnEggTint 条目存在性直调）
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
+
+// t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
+//   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。
+extern QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath);
 
 namespace {
 
@@ -4005,6 +4012,69 @@ int main(int argc, char *argv[])
                              "carries the sheep's own index and re-shear stays silent, mobDied payload "
                              "equals the died sheep's index, breeding babies inherit a parent color (not "
                              "rerolled)";
+    }
+
+    // ── t777 羊 pack 态「多一双眼」根因合成器探针 ──
+    // 修法核心 = t749 毛层命中时 mobTextureSource(3) 返回合成贴图（毛身 + 本体层头区真脸）→ QML 眼 overlay
+    //   须隐（判据 sheepWoolFaceActive，Main.qml/ResourceBrowser 共用）。本探针锁合成器两端语义（纯函数、
+    //   临时 PNG rig，不触碰进程全局 BuiltState——那非本测试私有，实例化 ResourcePackManager 会读到宿主机
+    //   settings.json 的真实 pack 态 = 非密闭）：
+    //   ① 真 64×32 fur+body 双 PNG → 合成落盘成功 + 输出保 base 尺寸 + **头区 (0,0)-(28,14) = 本体层色**
+    //     （真脸覆写，眼 overlay 隐的依据）+ 毛身区（head 区外）= 毛层原色（毛身保留）；
+    //   ② body 源缺失 → 空串优雅降级（调用方回退毛层原样、头前无脸 → 眼 overlay 须保留的路径）。
+    // 腿 skin 色 overlay / 眼位修正是 QML 呈现层，无 C++ 可测路径（矩阵不链 Quick3D）。
+    {
+        bool ok = true;
+        QDir d777(QDir::temp().absoluteFilePath("t777_sheep_probe"));
+        d777.removeRecursively();
+        d777.mkpath(".");
+        // ① 真 64×32 双源（毛层米白 / 本体层棕，两色互异防「合成成功但没覆写」假 PASS）。
+        const QString furPath = d777.absoluteFilePath("fur.png");
+        const QString bodyPath = d777.absoluteFilePath("body.png");
+        QImage fur777(64, 32, QImage::Format_ARGB32);
+        fur777.fill(QColor(0xf0, 0xec, 0xe4));
+        QImage body777(64, 32, QImage::Format_ARGB32);
+        body777.fill(QColor(0x7a, 0x5a, 0x48));
+        if (!fur777.save(furPath, "PNG") || !body777.save(bodyPath, "PNG")) {
+            qInfo().noquote() << "  [t777 diag] failed to write temp source PNGs";
+            ok = false;
+        }
+        const QString comp = generateSheepWoolFaceFile(furPath, bodyPath);
+        if (comp.isEmpty()) {
+            qInfo().noquote() << "  [t777 diag] composite unexpectedly failed on valid 64x32 pair";
+            ok = false;
+        } else {
+            QImage out777(comp);
+            if (out777.isNull() || out777.width() != 64 || out777.height() != 32) {
+                qInfo().noquote() << "  [t777 diag] composite output not base 64x32:"
+                                  << (out777.isNull() ? -1 : out777.width())
+                                  << "x" << (out777.isNull() ? -1 : out777.height());
+                ok = false;
+            } else {
+                // 头区中心 (14,7) ∈ base (0,0)-(28,14) → 本体层色（真脸）；毛身区 (40,20)（body/leg 行）→ 毛层色。
+                if (out777.pixelColor(14, 7) != QColor(0x7a, 0x5a, 0x48)) {
+                    qInfo().noquote() << "  [t777 diag] head region not body-layer color:"
+                                      << out777.pixelColor(14, 7).name();
+                    ok = false;
+                }
+                if (out777.pixelColor(40, 20) != QColor(0xf0, 0xec, 0xe4)) {
+                    qInfo().noquote() << "  [t777 diag] wool body region not fur color:"
+                                      << out777.pixelColor(40, 20).name();
+                    ok = false;
+                }
+            }
+        }
+        // ② body 缺失 → 空串（降级：调用方回退毛层原样 = 无脸 → QML 眼 overlay 保留路径）。
+        if (!generateSheepWoolFaceFile(furPath, d777.absoluteFilePath("missing.png")).isEmpty()) {
+            qInfo().noquote() << "  [t777 diag] missing body source should degrade to empty, not succeed";
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t777 sheep wool-face compositor: valid 64x32 fur+body pair composites to "
+                             "base-size output with body-layer (real-face) pixels in head region (0,0)-"
+                             "(28,14) and fur pixels preserved in wool body/leg rows, missing body source "
+                             "degrades to empty (caller falls back to raw fur = eye overlay stays visible)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
