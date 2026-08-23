@@ -1007,7 +1007,9 @@ public:
         //   判定并入 Fire）。音色 GroupGrass（软质燃烧物）。不进创造调色板（maxStack=0 不可拾取/放置）。
         Fire           = 137, // 火焰：非实体光源格（光 15）；两片对角交叉双面 quad + 32 帧翻书动画；点燃 / 蔓延 / 自熄
         // ── t725 余烬门（NetherPortal；机制等价 MC 1.0 nether portal id 90，无对应物品形态）：黑曜石门框
-        //   （最小 4×5 外框、2×3 内腔）内以打火石点燃生成的**非实体传送门面片**格。lightEmission=11（机制
+        //   （外框 4×5 最小 .. 6×7 最大：内腔开口 2×3..4×5，t806 泛化大尺寸门；四角块可选——检测不查角 /
+        //   破角不碎门）内以打火石点燃生成的**非实体传送门面片**格（World::tryIgniteNetherPortal 单一权威，
+        //   点燃填满整个开口）。lightEmission=11（机制
         //   等价 MC 下界传送门微光），渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Fire t724 模式）→
         //   Main.qml portalHost 逐格 delegate 渲染：**竖直平面 quad**（非 fire 的交叉对角——门是平面），
         //   X 平面门（portal 沿 X 轴展开 / 面朝 ±Z）quad 不旋转，Z 平面门 quad 绕 Y 旋 90°；state=朝向
@@ -1016,8 +1018,10 @@ public:
         //   （32 帧 ×150ms 紫色漩涡，帧区采 UV 全 [0,1] + Texture scaleV=1/N，同 fireStripTex 模式）。
         //   solid=false / ShapeNone（无碰撞可穿入、不挡邻居面剔除、不可选体）、hardness=0（瞬破）、NoTool、
         //   requiresTool=false、dropId=0（破 = 门熄灭无掉落，spawnItem 对 id<=0 已守卫不产出）、maxStack=0
-        //   （不可进背包——只能打火石点燃产生，无物品形态）。**门完整性**：任一门格或其黑曜石门框格被破坏 →
-        //   同朝向连通域整门熄灭（playercontroller finishMiningAt 连锁，同 t721 画 flood-fill 先例）。
+        //   （不可进背包——只能打火石点燃产生，无物品形态）。**门完整性**：任一门格或其黑曜石门框**承重**格
+        //   （底梁/顶梁/边柱；角块除外）被破坏 → 同朝向连通域整门熄灭（World::removeNetherPortalAt /
+        //   breakNetherPortalsAround，t806 自 PlayerController 下沉 World 层；PlayerController finishMiningAt
+        //   连锁调用，同 t721 画 flood-fill 先例；连通域尺寸无关天然支持任意大小门）。
         //   **站立伤害 v1**（dev-plan 明确允许降级）：玩家处于门格内持续灼烧 1 伤害/秒（复用 Fire 掉落类别），
         //   **无下界维度**（本工程单维度，不做传送）。音色 GroupGrass（同 fire，软质熄灭）。不进创造调色板
         //   （maxStack=0 不可拾取/放置）。tickFire 生态**零交互**：flammable() 表不含本格（火不蔓延进门 /
