@@ -242,11 +242,15 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 
 ---
 
-## 4. 生物蛋段（id `0x20F .. 0x216`）
+## 4. 生物蛋段（id `0x20F .. 0x216` + 后续散段 `0x22C/0x22E/0x246/0x247/0x249/0x24A`）
 
-创造模式物品，右键地面 → 生成对应 mob。可堆叠 64。
+创造模式物品，右键地面 → 生成对应 mob。可堆叠 64。t785 蛋补全后全 13 蛋在创造背包材料 tab **连续同列**（蛋区聚合）；
+蛋→mob 类型单一权威表 = `RecipeRegistry::mobTypeForSpawnEgg`（playercontroller placeBlock 分流 / 图鉴 mobTypeForEgg 同源）。
+狼 / 豹猫蛋刷出的是**野生**个体（驯服走喂食链 t480/t481）。
 
-> §9 重命名对照（项目内名 → MC 1.0.0 等价机制）：Shambler / Bones / Stalker / Spider 为项目原创名，对齐 MC 1.0.0 四种敌对 mob 的**机制**；被动 mob（猪 / 牛 / 羊）沿用通用词。本表右列只标 MC 1.0.0 spawn egg 统一 id，不引用 MC mob 名。
+> §9 重命名对照（项目内名 → MC 1.0.0 等价机制）：Shambler / Bones / Stalker / Spider / Nightwalker / Emberling 为项目原创名，
+> 对齐 MC 1.0.0 对应敌对/中立 mob 的**机制**；被动 mob（猪 / 牛 / 羊 / 鸡 / 鱿鱼 / 狼 / 豹猫）沿用通用词（豹猫 1.2+ 才入 MC，
+> 本工程对齐机制非版本面）。本表右列只标 MC 1.0.0 spawn egg 统一 id，不引用 MC mob 名。
 
 | id (hex) | id (dec) | 内部 key | 中文名 | MC 1.0.0 |
 |---|---|---|---|---|
@@ -257,6 +261,12 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 | 0x214 | 532 | `spawn_egg_bones` | 生物蛋（骸骨） | 383（mob 元数据变体） |
 | 0x215 | 533 | `spawn_egg_stalker` | 生物蛋（潜行者） | 383（mob 元数据变体） |
 | 0x216 | 534 | `spawn_egg_spider` | 生物蛋（蜘蛛） | 383（mob 元数据变体） |
+| 0x22C | 556 | `spawn_egg_chicken` | 生物蛋（鸡） | 383（mob 元数据变体） |
+| 0x22E | 558 | `spawn_egg_squid` | 生物蛋（鱿鱼） | 383（mob 元数据变体） |
+| 0x246 | 582 | `spawn_egg_nightwalker` | 生物蛋（夜行者） | 383（mob 元数据变体） |
+| 0x247 | 583 | `spawn_egg_emberling` | 生物蛋（燃烬者） | 383（mob 元数据变体） |
+| 0x249 | 585 | `spawn_egg_wolf` | 生物蛋（狼） | 383（mob 元数据变体） |
+| 0x24A | 586 | `spawn_egg_ocelot` | 生物蛋（豹猫） | 383（mob 1.2+ 变体） |
 
 > 注：id `0x212 (530)` 是钻石（材料段，见上节），夹在生物蛋段间 —— 材料段是连续空间，生物蛋只是其中一段子集而非独立段。
 
