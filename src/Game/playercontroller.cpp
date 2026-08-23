@@ -3711,7 +3711,9 @@ void PlayerController::placeBlock()
         emit swingArm(); // 使用画作是一次「使用」动作 → 挥手（放不下也挥，机制等价 MC 使用物品；不消耗）
         return; // 画作（放置成功 / 非侧面 / 放不下 / 未命中）均不再走方块放置路径
     }
-    // t243 生物蛋 useBlock（spec「右键地面→生成对应生物」）：手持生物蛋（猪 / 牛 / 羊，材料段 0x20F..0x211）
+    // t243 生物蛋 useBlock（spec「右键地面→生成对应生物」）：手持生物蛋（全 13 蛋：猪/牛/羊/蹒跚者/骸骨/
+    //   潜行者/蜘蛛/鸡/鱿鱼/夜行者/燃烬者/狼/豹猫；t785 蛋表补全后经 RecipeRegistry::mobTypeForSpawnEgg
+    //   单一权威表判定 + 取 mob 类型）
     //   右键命中实体方块 → 在命中面相邻格生成对应 mob（EntityManager::spawnMobTyped）。机制等价 MC 1.0 spawn
     //   egg（机制对齐，非名词照搬）。蛋非方块（材料段）→ selectedBlock 经 hotbar 归 Air，须在下方
     //   `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子 / 面包分支模式）。**须命中**（spec「右键地面」——
@@ -3723,42 +3725,29 @@ void PlayerController::placeBlock()
     //   据蛋 id 选（pig/cow/sheep 走 MobModel + 贴图，color 仅 mobType 0 测试路径读，传占位串即可）。
     //   分层（PLAN §2）：生成属 Game/Physics（读射线命中 + 调 EntityManager），不改栅格语义（setBlock 入口）。
     if (m_hotbar && m_world && m_entityManager
-        && (heldItemId == RecipeRegistry::SpawnEggPigId
-            || heldItemId == RecipeRegistry::SpawnEggCowId
-            || heldItemId == RecipeRegistry::SpawnEggSheepId
-            || heldItemId == RecipeRegistry::SpawnEggShamblerId
-            || heldItemId == RecipeRegistry::SpawnEggBonesId
-            || heldItemId == RecipeRegistry::SpawnEggStalkerId
-            || heldItemId == RecipeRegistry::SpawnEggSpiderId
-            || heldItemId == RecipeRegistry::SpawnEggChickenId
-            || heldItemId == RecipeRegistry::SpawnEggSquidId
-            || heldItemId == RecipeRegistry::SpawnEggNightwalkerId
-            || heldItemId == RecipeRegistry::SpawnEggEmberlingId)) {
+        && RecipeRegistry::mobTypeForSpawnEgg(heldItemId) >= 0) { // t785 蛋判定收口单一权威表（全 13 蛋）
         if (m_hasHit) {
-            int mobType = 0;
-            QString color; // 占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color）
-            if (heldItemId == RecipeRegistry::SpawnEggPigId) {
-                mobType = EntityManager::MobPig;   color = QStringLiteral("#f0a8b0");
-            } else if (heldItemId == RecipeRegistry::SpawnEggCowId) {
-                mobType = EntityManager::MobCow;   color = QStringLiteral("#5a4030");
-            } else if (heldItemId == RecipeRegistry::SpawnEggSheepId) {
-                mobType = EntityManager::MobSheep; color = QStringLiteral("#f5f0e8");
-            } else if (heldItemId == RecipeRegistry::SpawnEggShamblerId) {
-                mobType = EntityManager::MobShambler; color = QStringLiteral("#4a6a3a"); // t287 敌对：暗绿腐肉（机制等价僵尸）
-            } else if (heldItemId == RecipeRegistry::SpawnEggBonesId) {
-                mobType = EntityManager::MobBones;    color = QStringLiteral("#d8d8d0"); // t287 敌对：灰白骨（机制等价骷髅）
-            } else if (heldItemId == RecipeRegistry::SpawnEggStalkerId) {
-                mobType = EntityManager::MobStalker;  color = QStringLiteral("#3a5a3a"); // t287 敌对：暗绿（机制等价苦力怕）
-            } else if (heldItemId == RecipeRegistry::SpawnEggChickenId) {
-                mobType = EntityManager::MobChicken;  color = QStringLiteral("#f5f0e4"); // t398 鸡：白羽（机制等价鸡；走 MobModel + 贴图）
-            } else if (heldItemId == RecipeRegistry::SpawnEggSquidId) {
-                mobType = EntityManager::MobSquid;    color = QStringLiteral("#6a4a3a"); // t399 鱿鱼：深褐橘斑（机制等价 squid；走 MobModel + 贴图）
-            } else if (heldItemId == RecipeRegistry::SpawnEggNightwalkerId) {
-                mobType = EntityManager::MobNightwalker; color = QStringLiteral("#2a1f2a"); // t727 夜行者：暗紫黑（机制等价末影人；走 MobModel + 贴图 + 瞪视激怒）
-            } else if (heldItemId == RecipeRegistry::SpawnEggEmberlingId) {
-                mobType = EntityManager::MobEmberling; color = QStringLiteral("#e8b030"); // t728 燃烬者：橙黄焰色（机制等价烈焰人；走 MobModel + 贴图 + 远程火球悬浮）
-            } else { // SpawnEggSpiderId
-                mobType = EntityManager::MobSpider;   color = QStringLiteral("#2a1a1a"); // t285 敌对：暗黑（机制等价蜘蛛）
+            // t785 mobType 改查 RecipeRegistry::mobTypeForSpawnEgg 单一权威表（与图鉴 mobTypeForEgg /
+            //   矩阵测试 t785 探针同源——加蛋只改一处表，防「加了蛋漏接生成」t728 B9 同类缺口）。
+            //   color 是占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color；仅 mobType 0 测试路径读——
+            //   现蛋全非 0），按各 mob 主色传作文档锚（与生成式蛋染色表 / MaterialIcon drawSpawnEgg 同色板）。
+            const int mobType = RecipeRegistry::mobTypeForSpawnEgg(heldItemId);
+            QString color;
+            switch (mobType) {
+            case EntityManager::MobPig:         color = QStringLiteral("#f0a8b0"); break;
+            case EntityManager::MobCow:         color = QStringLiteral("#5a4030"); break;
+            case EntityManager::MobSheep:       color = QStringLiteral("#f5f0e8"); break;
+            case EntityManager::MobShambler:    color = QStringLiteral("#4a6a3a"); break; // 敌对：暗绿腐肉（机制等价僵尸）
+            case EntityManager::MobBones:       color = QStringLiteral("#d8d8d0"); break; // 敌对：灰白骨（机制等价骷髅）
+            case EntityManager::MobStalker:     color = QStringLiteral("#3a5a3a"); break; // 敌对：暗绿（机制等价苦力怕）
+            case EntityManager::MobSpider:      color = QStringLiteral("#2a1a1a"); break; // 敌对：暗黑（机制等价蜘蛛）
+            case EntityManager::MobChicken:     color = QStringLiteral("#f5f0e4"); break; // 白羽（机制等价鸡）
+            case EntityManager::MobSquid:       color = QStringLiteral("#6a4a3a"); break; // 深褐橘斑（机制等价鱿鱼）
+            case EntityManager::MobNightwalker: color = QStringLiteral("#2a1f2a"); break; // t727 暗紫黑（机制等价末影人；瞪视激怒）
+            case EntityManager::MobEmberling:   color = QStringLiteral("#e8b030"); break; // t728 橙黄焰色（机制等价烈焰人；远程火球悬浮）
+            case EntityManager::MobWolf:        color = QStringLiteral("#c8ccd4"); break; // t785 浅灰蓝（机制等价狼；蛋刷野生）
+            case EntityManager::MobOcelot:      color = QStringLiteral("#e8c890"); break; // t785 奶油底褐纹（机制等价豹猫；蛋刷野生）
+            default: break; // 防御（入口条件已排除 -1；表值恒非空 mobType）
             }
             // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
             //   maxHealth 传 0 → spawnMobTyped 内部用 kDefaultMaxHealth（=10，MC 1.0 猪/牛/羊 5 心）；

@@ -123,7 +123,8 @@ struct BuiltState {
     QHash<int, QString> mobHeadIconFiles;
     // t749 羊「毛身+真脸」合成贴图缓存（mobTextureSource(3) 首次合成落盘后记；apply() 重建时清空重合成）。
     QString sheepWoolFaceFile;
-    // t645 生成式生物蛋 item 图标缓存：spawnEggId（0x20F..0x216/0x22C/0x22E）→落盘的两层染色蛋图标
+    // t645 生成式生物蛋 item 图标缓存：spawnEggId（0x20F..0x216/0x22C/0x22E + t785 蛋补全 0x246/0x247/
+    //   0x249/0x24A）→落盘的两层染色蛋图标
     //   file:// 路径。pack 无 pig_spawn_egg.png 等独立文件（demo 包实测 9 蛋全 miss）→ 生成式路径：
     //   item/spawn_egg.png（灰度蛋形 base）染 mob 主色 + item/spawn_egg_overlay.png（斑点叠层）染
     //   mob 副色 → SourceOver 合成 → 落盘 voxelsandbox_rp_egg_<id>.png（retintCopperTemplate 同机制，
@@ -839,9 +840,8 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod；结成暗渊之眼端剂）：
         //   pack item 目录有 ender_pearl.png / blaze_powder.png / blaze_rod.png 则接（alpha-test 透明底，
         //   机制等价 MC item icon）；包缺 → 安全跳过保自绘（drawEnderPearl / drawBlazePowder / drawBlazeRod）。
-        //   生物蛋（夜行者）无独立 pack 贴图（走引擎 MaterialIcon drawSpawnEgg 自绘；夜行者本体贴图经
-        //   entityKindMap "nightwalker" 单独映射到 enderman/enderman.png，见 entitySource —— 生物蛋 items
-        //   不占 itemFileNameMap）。
+        //   （夜行者/燃烬者生物蛋 0x246/0x247 的 pack 映射 t785 补——见下方 t785 蛋 4 行；本体贴图经
+        //   mobEntityMap 16/17 映射到 enderman/blaze 子目录。）
         {0x243, QStringLiteral("ender_pearl.png")},      // 暗渊珠（t726：杀夜行者掉落；暗渊之眼原料）
         {0x244, QStringLiteral("blaze_powder.png")},     // 燃烬粉（t726：燃烬棒冶炼产物；暗渊之眼原料）
         {0x245, QStringLiteral("blaze_rod.png")},        // 燃烬棒（t726：怒焰人死亡掉落；烧燃烬粉）
@@ -849,6 +849,13 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   （demo 包实存）；包缺 → 安全跳过回退 MaterialIcon drawFlint 自绘。来源 = 挖沙砾小概率掉落，
         //   打火石配方原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。
         {0x248, QStringLiteral("flint.png")},            // 燧石（t761：挖沙砾概率掉落；打火石配方原料）
+        // t785 生物蛋 pack 直连 4 行（狼/豹猫新 ids 0x249/0x24A + 夜行者/燃烬者 0x246/0x247 此前未接）：
+        //   现代包（1.11+ 蛋拆独立贴图）有 <mob>_spawn_egg.png 时直用；老包 miss → itemIconSource 走 t645
+        //   生成式两层染色回退（spawnEggTint 4 新行，配色仿各自 mob）——不再是「无映射恒自绘」。
+        {0x246, QStringLiteral("enderman_spawn_egg.png")}, // 生物蛋（夜行者；机制等价 enderman egg）
+        {0x247, QStringLiteral("blaze_spawn_egg.png")},    // 生物蛋（燃烬者；机制等价 blaze egg）
+        {0x249, QStringLiteral("wolf_spawn_egg.png")},     // 生物蛋（狼；t785 蛋补全）
+        {0x24A, QStringLiteral("ocelot_spawn_egg.png")},   // 生物蛋（豹猫；t785 蛋补全）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},
@@ -1328,46 +1335,6 @@ void retintCopperTemplate(QImage &img)
             scan[x] = qRgba((nr * a) / 255, (ng * a) / 255, (nb * a) / 255, a);
         }
     }
-}
-
-// t645 生成式生物蛋染色表（单一权威）：spawnEggId →（主色 base / 副色 overlay）。与 playercontroller.cpp
-//   生物蛋→mob 渲染色 + MaterialIcon.qml drawSpawnEgg 各 kind 主色同色板（猪粉 / 牛棕 / 羊白 / 蹒跚者绿 /
-//   骸骨骨白 / 潜行者暗绿 / 蜘蛛黑红 / 鸡白红 / 鱿鱼蓝灰）。pack 无 pig_spawn_egg.png 等独立文件（demo 包
-//   实测 9 蛋全 miss）→ 用两张两层模板（item/spawn_egg.png 灰度蛋形 + item/spawn_egg_overlay.png 斑点层）
-//   各染一色后 SourceOver 合成（机制等价 MC 1.0 spawn egg「base 色 + spot 色」两层模型）。返 nullptr = 非
-//   生物蛋段（生成式路径不介入）。
-struct EggTint { int base[3]; int spot[3]; };
-const EggTint *spawnEggTint(int itemId)
-{
-    static const EggTint kTints[] = {
-        // 0x20F 猪：粉壳 + 深粉斑（drawSpawnEgg pig shell #f0a8b0）
-        { { 0xf0, 0xa8, 0xb0 }, { 0xc8, 0x78, 0x88 } },
-        // 0x210 牛：棕壳 + 白斑（牛皮纹 cow shell #5a4030 / 白花斑 #f0e8d8）
-        { { 0x5a, 0x40, 0x30 }, { 0xf0, 0xe8, 0xd8 } },
-        // 0x211 羊：奶白壳 + 灰卷绒斑（sheep shell #f5f0e8 / curl #c8c0b8）
-        { { 0xf5, 0xf0, 0xe8 }, { 0xc8, 0xc0, 0xb8 } },
-        // 0x212（占位非蛋——id 表按段索引，须保持与蛋 id 对齐：见下方判段，本行不参与）
-        { { 0, 0, 0 }, { 0, 0, 0 } },
-        // 0x213 蹒跚者：暗绿腐肉壳 + 棕褐斑（shambler shell #4a6a3a / rot #6a4a2a）
-        { { 0x4a, 0x6a, 0x3a }, { 0x6a, 0x4a, 0x2a } },
-        // 0x214 骸骨：灰白骨壳 + 暗骨斑（bones shell #d8d8d0 / rib #989890）
-        { { 0xd8, 0xd8, 0xd0 }, { 0x98, 0x98, 0x90 } },
-        // 0x215 潜行者：深绿壳 + 浅绿迷彩斑（stalker shell #3a5a3a / speckle #5a7a4a）
-        { { 0x3a, 0x5a, 0x3a }, { 0x5a, 0x7a, 0x4a } },
-        // 0x216 蜘蛛：近黑壳 + 红眼斑（spider shell #2a1a1a / eye #c81818）
-        { { 0x2a, 0x1a, 0x1a }, { 0xc8, 0x18, 0x18 } },
-    };
-    if (itemId >= 0x20F && itemId <= 0x216 && itemId != 0x212)
-        return &kTints[itemId - 0x20F];
-    if (itemId == 0x22C) { // 鸡：白羽壳 + 红鸡冠斑（chicken shell #f5f0e4 / comb #c83030）
-        static const EggTint kChicken = { { 0xf5, 0xf0, 0xe4 }, { 0xc8, 0x30, 0x30 } };
-        return &kChicken;
-    }
-    if (itemId == 0x22E) { // 鱿鱼：深褐壳 + 暗触腕斑（squid shell #6a4a3a / dark #3a2a1a）
-        static const EggTint kSquid = { { 0x6a, 0x4a, 0x3a }, { 0x3a, 0x2a, 0x1a } };
-        return &kSquid;
-    }
-    return nullptr;
 }
 
 // t645 生成式生物蛋合成：spawn_egg.png（灰度蛋形 base）按亮度映射到主色梯度 + spawn_egg_overlay.png
@@ -2032,6 +1999,67 @@ void ensureBuiltLocked()
     }
 }
 } // namespace
+
+// t645 生成式生物蛋染色表（单一权威）：spawnEggId →（主色 base / 副色 overlay）。与 playercontroller.cpp
+//   生物蛋→mob 渲染色 + MaterialIcon.qml drawSpawnEgg 各 kind 主色同色板（猪粉 / 牛棕 / 羊白 / 蹒跚者绿 /
+//   骸骨骨白 / 潜行者暗绿 / 蜘蛛黑红 / 鸡白红 / 鱿鱼蓝灰）。pack 无 pig_spawn_egg.png 等独立文件（demo 包
+//   实测 9 蛋全 miss）→ 用两张两层模板（item/spawn_egg.png 灰度蛋形 + item/spawn_egg_overlay.png 斑点层）
+//   各染一色后 SourceOver 合成（机制等价 MC 1.0 spawn egg「base 色 + spot 色」两层模型）。返 nullptr = 非
+//   生物蛋段（生成式路径不介入）。t785 蛋补全扩 4 行（夜行者/燃烬者/狼/豹猫——配色仿各自 mob：
+//   夜行者黑底紫点 / 燃烬者金黄底深琥珀斑 / 狼浅灰蓝底深灰纹 / 豹猫奶油底褐纹）。
+//   **定义在全局作用域**（匿名 namespace 外）——t785 起声明提到 resourcepackmanager.h（矩阵测试 t785
+//   探针直调核对全蛋有条目，防「蛋 id 有了染色表漏行」→ pack miss 时显空白模板蛋；留匿名 ns 内会与
+//   头文件全局声明构成重载歧义）。
+const EggTint *spawnEggTint(int itemId)
+{
+    static const EggTint kTints[] = {
+        // 0x20F 猪：粉壳 + 深粉斑（drawSpawnEgg pig shell #f0a8b0）
+        { { 0xf0, 0xa8, 0xb0 }, { 0xc8, 0x78, 0x88 } },
+        // 0x210 牛：棕壳 + 白斑（牛皮纹 cow shell #5a4030 / 白花斑 #f0e8d8）
+        { { 0x5a, 0x40, 0x30 }, { 0xf0, 0xe8, 0xd8 } },
+        // 0x211 羊：奶白壳 + 灰卷绒斑（sheep shell #f5f0e8 / curl #c8c0b8）
+        { { 0xf5, 0xf0, 0xe8 }, { 0xc8, 0xc0, 0xb8 } },
+        // 0x212（占位非蛋——id 表按段索引，须保持与蛋 id 对齐：见下方判段，本行不参与）
+        { { 0, 0, 0 }, { 0, 0, 0 } },
+        // 0x213 蹒跚者：暗绿腐肉壳 + 棕褐斑（shambler shell #4a6a3a / rot #6a4a2a）
+        { { 0x4a, 0x6a, 0x3a }, { 0x6a, 0x4a, 0x2a } },
+        // 0x214 骸骨：灰白骨壳 + 暗骨斑（bones shell #d8d8d0 / rib #989890）
+        { { 0xd8, 0xd8, 0xd0 }, { 0x98, 0x98, 0x90 } },
+        // 0x215 潜行者：深绿壳 + 浅绿迷彩斑（stalker shell #3a5a3a / speckle #5a7a4a）
+        { { 0x3a, 0x5a, 0x3a }, { 0x5a, 0x7a, 0x4a } },
+        // 0x216 蜘蛛：近黑壳 + 红眼斑（spider shell #2a1a1a / eye #c81818）
+        { { 0x2a, 0x1a, 0x1a }, { 0xc8, 0x18, 0x18 } },
+    };
+    if (itemId >= 0x20F && itemId <= 0x216 && itemId != 0x212)
+        return &kTints[itemId - 0x20F];
+    if (itemId == 0x22C) { // 鸡：白羽壳 + 红鸡冠斑（chicken shell #f5f0e4 / comb #c83030）
+        static const EggTint kChicken = { { 0xf5, 0xf0, 0xe4 }, { 0xc8, 0x30, 0x30 } };
+        return &kChicken;
+    }
+    if (itemId == 0x22E) { // 鱿鱼：深褐壳 + 暗触腕斑（squid shell #6a4a3a / dark #3a2a1a）
+        static const EggTint kSquid = { { 0x6a, 0x4a, 0x3a }, { 0x3a, 0x2a, 0x1a } };
+        return &kSquid;
+    }
+    // t785 蛋补全 4 行（配色仿各自 mob 的蛋语义：黑底紫点 / 金黄底 / 浅灰蓝底深纹 / 奶油底褐纹；
+    //   与 MaterialIcon drawSpawnEgg 各 kind 主色同色板）。
+    if (itemId == 0x246) { // 夜行者：近黑紫壳 + 紫瞳斑（nightwalker shell #1a1426 / eye 紫 #8a50d8）
+        static const EggTint kNightwalker = { { 0x1a, 0x14, 0x26 }, { 0x8a, 0x50, 0xd8 } };
+        return &kNightwalker;
+    }
+    if (itemId == 0x247) { // 燃烬者：金黄焰壳 + 深琥珀棒斑（emberling shell #e8b830 / rod #a05818）
+        static const EggTint kEmberling = { { 0xe8, 0xb8, 0x30 }, { 0xa0, 0x58, 0x18 } };
+        return &kEmberling;
+    }
+    if (itemId == 0x249) { // 狼：浅灰蓝壳 + 深灰纹（wolf shell #c8ccd4 / marking #50565f）
+        static const EggTint kWolf = { { 0xc8, 0xcc, 0xd4 }, { 0x50, 0x56, 0x5f } };
+        return &kWolf;
+    }
+    if (itemId == 0x24A) { // 豹猫：奶油壳 + 褐斑纹（ocelot shell #e8c890 / rosette #7a4a20）
+        static const EggTint kOcelot = { { 0xe8, 0xc8, 0x90 }, { 0x7a, 0x4a, 0x20 } };
+        return &kOcelot;
+    }
+    return nullptr;
+}
 
 ResourcePackManager::ResourcePackManager(QObject *parent)
     : QObject(parent)

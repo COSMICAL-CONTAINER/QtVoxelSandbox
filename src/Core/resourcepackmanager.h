@@ -278,4 +278,12 @@ private:
     int m_animRevision = 0;
 };
 
+// t645 生成式生物蛋染色表条目（spawnEggId → 主色 base / 副色 spot；机制等价 MC spawn egg「base + spot」
+//   两层配色模型）。t785 蛋补全（夜行者/燃烬者/狼/豹猫）起把条目结构体 + 表查询声明提到头：矩阵测试
+//   （tools/redstone_matrix_test t785 探针）直调核对「每个蛋 id 都有染色条目」——防「蛋 id 有了、染色表
+//   漏行」致 pack miss 时该蛋显空白模板的回归；表本体与实现单一权威仍在 resourcepackmanager.cpp
+//   （itemIconSource 的 pack 文件 miss 生成式路径消费）。非蛋 id → nullptr。
+struct EggTint { int base[3]; int spot[3]; };
+const EggTint *spawnEggTint(int itemId);
+
 #endif // RESOURCEPACKMANAGER_H

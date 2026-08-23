@@ -495,6 +495,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpawnEggSpiderId),   // 生物蛋（蜘蛛）t285
         int(RecipeRegistry::SpawnEggChickenId),  // t398 生物蛋（鸡）：右键 → 生成鸡
         int(RecipeRegistry::SpawnEggSquidId),    // t399 生物蛋（鱿鱼）：右键 → 生成鱿鱼
+        // t785 蛋区补全（用户「末影人和烈焰人的生物蛋……应该和其他的生物蛋放在一起；狼和豹猫的生物蛋都没
+        //   有出现」）：夜行者/燃烬者蛋从暗渊链材料段尾**移入蛋区**（t727/t728 初版孤列在后，蛋区断裂），
+        //   狼/豹猫蛋新 ids 0x249/0x24A 补入 → 全部 13 蛋在创造背包材料 tab **连续同列**（矩阵测试 t785
+        //   探针核连续性）。配色仿各自 mob（MaterialIcon drawSpawnEgg + t645 生成式染色表 4 新行）。
+        //   蛋刷出的是**野生**狼/豹猫（驯服走喂食链，不直接产驯服态）。
+        int(RecipeRegistry::SpawnEggNightwalkerId), // 生物蛋（夜行者）：右键 → 生成夜行者（t727；t785 移入蛋区）
+        int(RecipeRegistry::SpawnEggEmberlingId),   // 生物蛋（燃烬者）：右键 → 生成燃烬者（t728；t785 移入蛋区）
+        int(RecipeRegistry::SpawnEggWolfId),        // t785 生物蛋（狼）：右键 → 生成野生狼
+        int(RecipeRegistry::SpawnEggOcelotId),      // t785 生物蛋（豹猫）：右键 → 生成野生豹猫
         // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
         //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
@@ -613,13 +622,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::EnderPearlId),       // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726/t727）
         int(RecipeRegistry::BlazePowderId),      // 燃烬粉：燃烬棒冶炼产物；与暗渊珠合成暗渊之眼（t726）
         int(RecipeRegistry::BlazeRodId),         // 燃烬棒：怒焰人死亡掉落；熔炉冶炼为燃烬粉（t726）
-        // t727 生物蛋（夜行者）：创造模式物品，右键地面 → 生成夜行者（MobNightwalker，末影人同源敌对潜行
-        //   者；3 格高、怕水、瞪视激怒、弹射物免疫）。机制等价 MC 1.0 enderman spawn egg；§9 改名。
-        int(RecipeRegistry::SpawnEggNightwalkerId), // 生物蛋（夜行者）：右键 → 生成夜行者（t727）
-        // t728 生物蛋（燃烬者）：创造模式物品，右键地面 → 生成燃烬者（MobEmberling，悬浮漂移 + 远程喷火球
-        //   + 火力免疫）。机制等价 MC 1.0 blaze spawn egg。审查修 B9（t724-t729 复盘）：t728 漏进创造调色板
-        //   → 蛋不可取得（recipe/placeBlock/图鉴都已接好，唯 hotbar 两处漏）；对齐夜行者蛋先例补行。
-        int(RecipeRegistry::SpawnEggEmberlingId), // 生物蛋（燃烬者）：右键 → 生成燃烬者（t728）
+        // （t785：夜行者/燃烬者生物蛋原列在此段之后——已移上方蛋区与其它蛋同列，见 SpawnEggSquidId 后注释。）
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落（生存获得途径）；打火石配方
         //   原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。创造调色板补全便于测试配方链；
         //   可堆叠 64（走材料段默认）；非方块 → 右键不放置。MaterialIcon 自绘深灰燧石碎片（drawFlint）。
@@ -1050,6 +1053,10 @@ QString Hotbar::nameForBlock(int blockId) const
         // t728 生物蛋（燃烬者）：审查修 B9（t724-t729 复盘）—— t728 漏显示名（nameForBlock 返空 → 调色板
         //   / 物品栏无名），对齐夜行者蛋先例补行。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::SpawnEggEmberlingId) return QStringLiteral("生物蛋（燃烬者）"); // 右键 → 生成燃烬者
+        // t785 生物蛋（狼/豹猫）：狼/豹猫驯服链（t480 喂肉驯狼 / t481 生鱼驯豹猫）配套生成蛋补入。
+        //   蛋刷出的是野生个体（驯服走喂食链）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::SpawnEggWolfId)   return QStringLiteral("生物蛋（狼）");   // 右键 → 生成野生狼
+        if (blockId == RecipeRegistry::SpawnEggOcelotId) return QStringLiteral("生物蛋（豹猫）"); // 右键 → 生成野生豹猫
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         return QString();

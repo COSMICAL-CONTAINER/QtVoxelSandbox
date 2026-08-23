@@ -350,6 +350,18 @@ public:
     //   「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。可堆叠 64（走材料段默认）；非方块 → 右键不放置。
     //   图标：MaterialIcon 自绘深灰燧石碎片（drawFlint，§9 原创）；pack 映射 0x248 → flint.png。
     static constexpr int FlintId = 0x248; // 燧石：挖沙砾概率掉落；打火石配方原料（t761）
+    // t785 生物蛋（狼，SpawnEggWolfId=0x249）：机制等价 MC 1.0 wolf spawn egg。创造模式物品，右键地面 →
+    //   EntityManager::spawnMobTyped 生成 MobWolf（t480 狼实体；**野生**——wolfTamed 默认 false，驯服走
+    //   喂生/熟肉链，蛋不直接产驯服态）。可堆叠 64（走材料段默认，同其他生物蛋）。图标：MaterialIcon 自绘
+    //   蛋形 + 浅灰蓝壳深灰纹（drawSpawnEgg("wolf")，§9 原创）；pack 映射 0x249 → wolf_spawn_egg.png（缺 →
+    //   t645 生成式两层染色回退）。无 MC 1.0 mcMaterialId 映射（id > 0x22E 越表界 → -1 → 回退）。
+    static constexpr int SpawnEggWolfId = 0x249; // 生物蛋（狼）：右键地面 → 生成野生狼（MobWolf）
+    // t785 生物蛋（豹猫，SpawnEggOcelotId=0x24A）：机制等价 MC 1.0 ocelot spawn egg（豹猫 1.2+ 才入 MC，
+    //   本工程对齐机制非版本面）。创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobOcelot
+    //   （t481 豹猫实体；**野生**——ocelotTamed 默认 false，驯服走生鱼喂食链）。可堆叠 64；图标：
+    //   MaterialIcon 自绘蛋形 + 奶油壳褐斑纹（drawSpawnEgg("ocelot")，§9 原创）；pack 映射 0x24A →
+    //   ocelot_spawn_egg.png（缺 → 生成式染色回退）。无 MC 1.0 mcMaterialId 映射（越表界 → -1 → 回退）。
+    static constexpr int SpawnEggOcelotId = 0x24A; // 生物蛋（豹猫）：右键地面 → 生成野生豹猫（MobOcelot）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
@@ -431,6 +443,17 @@ public:
     //   矿石方块）→ -1（资源包回退引擎自绘 MaterialIcon）。**生物蛋**：MC 1.0 是单一 id 383（spawn egg）+ metadata
     //   分 mob 变体，故引擎全部 spawn_egg（猪 / 牛 / 羊 / 蹒跚者 / 骸骨 / 潜行者 / 蜘蛛）→ 383。越界 → -1。
     static int mcMaterialId(int engineMaterialId);
+
+    // t785 生物蛋 id → mob 类型**单一权威表**（全 13 蛋）：非蛋 id → -1。此前蛋→mob 映射散在
+    //   PlayerController::placeBlock 蛋分流的内联 if 链 + ResourceBrowser mobTypeForEgg（QML）两处手抄
+    //   ——t728 审查修 B9 即「加了蛋漏接 placeBlock/调色板」同类缺口。本表收口三方同源：placeBlock 蛋
+    //   分流（mobType 取此）、图鉴 mobTypeForEgg（QML 字面量镜像 + 注释互指）、矩阵测试 t785 探针直调核对
+    //   （与 EntityManager::MobType 枚举同值断言——枚举值变而表漏改 = FAIL 暴露）。
+    //   返回值 = EntityManager::MobType 序（1 猪 / 2 牛 / 3 羊 / 4 蹒跚 / 5 骸骨 / 6 潜行 / 7 蜘蛛 /
+    //   8 鸡 / 9 鱿鱼 / 10 狼 / 11 豹猫 / 16 夜行者 / 17 燃烬者）。分层（PLAN §2）：Game → Entities 向下
+    //   合法（实现 recipe.cpp include entitymanager.h 用枚举直引防手抄漂移；头文件不引——recipe.h 被
+    //   Core 无关的纯表消费方包含，保持无 QObject 头依赖）。蛋刷出的狼 / 豹猫恒**野生**（tamed 默认 false）。
+    static int mobTypeForSpawnEgg(int itemId);
 
 private:
     RecipeRegistry() = delete; // 纯静态数据表，无实例。

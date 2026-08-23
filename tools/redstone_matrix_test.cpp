@@ -23,6 +23,7 @@
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
 #include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
+#include "resourcepackmanager.h"  // t785 生物蛋探针（生成式染色表 spawnEggTint 条目存在性直调）
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 
@@ -3276,6 +3277,90 @@ int main(int argc, char *argv[])
                              "[1,2,3]@0 -> [10,20,30]@15 with top 30 only at full 15, monotonic in-range; "
                              "hotbar bridge identical; world ring 0 -> 15 -> blocked half-step 14 -> 32 "
                              "placed capped 15 (t795; UI lapis-gated highlight = QML binding, manual check)";
+    }
+
+    // ── t785 生物蛋补全探针（用户「末影人和烈焰人的生物蛋……应该和其他的生物蛋放在一起，而且贴图也是仿照
+    //    他们的生物蛋，还有就是狼和豹猫的生物蛋都没有出现」；Game 层表 + Core 生成式染色表）：
+    //    ① 蛋 id→mobType 单一权威表 RecipeRegistry::mobTypeForSpawnEgg 全 13 蛋接通且与 EntityManager::MobType
+    //      枚举同值（t785 收口——此前映射散在 placeBlock 内联链 + QML 两处手抄，t728 审查修 B9 即此类
+    //      「加了蛋漏接」缺口；狼/豹猫/夜行者/燃烬者四新接为重点）；
+    //    ② 创造背包材料段 13 蛋**连续同列**（egg 区聚合无杂项穿插——夜行者/燃烬者蛋此前孤列在暗渊链材料后）；
+    //    ③ Hotbar::nameForBlock 13 蛋全有名（空名 = 调色板/tooltip 无名，t728 B9 同类缺口）；
+    //    ④ Core 生成式染色表 spawnEggTint 13 蛋全有条目 + 非蛋 id 不误命中（pack miss 时该蛋按 mob 配色
+    //      两层染色，而非空白模板）。蛋图标观感 / 蛋区排布为 QML 层，需人工目视。
+    {
+        bool ok = RecipeRegistry::SpawnEggNightwalkerId == 0x246   // t785 新 id 分配锁（重排破存档兼容）
+                  && RecipeRegistry::SpawnEggEmberlingId == 0x247
+                  && RecipeRegistry::SpawnEggWolfId == 0x249
+                  && RecipeRegistry::SpawnEggOcelotId == 0x24A;
+        const int allEggs[] = {
+            RecipeRegistry::SpawnEggPigId, RecipeRegistry::SpawnEggCowId, RecipeRegistry::SpawnEggSheepId,
+            RecipeRegistry::SpawnEggShamblerId, RecipeRegistry::SpawnEggBonesId, RecipeRegistry::SpawnEggStalkerId,
+            RecipeRegistry::SpawnEggSpiderId, RecipeRegistry::SpawnEggChickenId, RecipeRegistry::SpawnEggSquidId,
+            RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
+            RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
+        };
+        const int expectMob[] = {
+            EntityManager::MobPig, EntityManager::MobCow, EntityManager::MobSheep,
+            EntityManager::MobShambler, EntityManager::MobBones, EntityManager::MobStalker,
+            EntityManager::MobSpider, EntityManager::MobChicken, EntityManager::MobSquid,
+            EntityManager::MobNightwalker, EntityManager::MobEmberling,
+            EntityManager::MobWolf, EntityManager::MobOcelot,
+        };
+        const int eggCount = int(sizeof(allEggs) / sizeof(allEggs[0]));
+        for (int i = 0; i < eggCount; ++i) {
+            // ① 单一权威表 → mob 类型（枚举同值断言：枚举改动而表漏跟 = 此处 FAIL）
+            const int got = RecipeRegistry::mobTypeForSpawnEgg(allEggs[i]);
+            if (got != expectMob[i]) {
+                qInfo().noquote() << "  [t785 diag] egg 0x" + QString::number(allEggs[i], 16)
+                                  << "-> mobType" << got << "expected" << expectMob[i];
+                ok = false;
+            }
+            // ④ 生成式染色表条目存在（nullptr = pack miss 时无配色 → 空白模板蛋）
+            if (!spawnEggTint(allEggs[i])) {
+                qInfo().noquote() << "  [t785 diag] egg 0x" + QString::number(allEggs[i], 16)
+                                  << "missing spawnEggTint entry";
+                ok = false;
+            }
+        }
+        // 非蛋 id 两表恒「无」（防表越界误命中）：燧石（材料段非蛋）与 0x212（蛋段内夹的钻石占位）。
+        if (RecipeRegistry::mobTypeForSpawnEgg(RecipeRegistry::FlintId) != -1
+            || RecipeRegistry::mobTypeForSpawnEgg(0x212) != -1
+            || spawnEggTint(RecipeRegistry::FlintId) != nullptr
+            || spawnEggTint(0x212) != nullptr) {
+            qInfo().noquote() << "  [t785 diag] non-egg id falsely matched egg table";
+            ok = false;
+        }
+        // ②③ 创造背包蛋区连续同列 + 全蛋有名。
+        Hotbar hb785;
+        const QVariantList mats785 = hb785.creativeMaterials();
+        int eggMin = mats785.size(), eggMax = -1, eggSeen = 0;
+        for (int i = 0; i < mats785.size(); ++i) {
+            if (RecipeRegistry::mobTypeForSpawnEgg(mats785.at(i).toInt()) >= 0) {
+                eggMin = std::min(eggMin, i);
+                eggMax = std::max(eggMax, i);
+                ++eggSeen;
+            }
+        }
+        if (eggSeen != eggCount || eggMax - eggMin + 1 != eggCount) {
+            qInfo().noquote() << "  [t785 diag] creative egg block: seen" << eggSeen << "of" << eggCount
+                              << "span" << (eggMax - eggMin + 1) << "(expected contiguous)";
+            ok = false;
+        }
+        for (int i = 0; i < eggCount; ++i) {
+            if (hb785.nameForBlock(allEggs[i]).isEmpty()) {
+                qInfo().noquote() << "  [t785 diag] egg 0x" + QString::number(allEggs[i], 16)
+                                  << "has empty nameForBlock";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t785 spawn-egg completion: 13 eggs (nightwalker/emberling moved into the "
+                             "contiguous egg block + wolf 0x249 / ocelot 0x24A new) all map to correct "
+                             "EntityManager mob types via single-authority table, all present & contiguous "
+                             "in creative palette with names, all have generative tint entries (egg icon "
+                             "look & palette layout = QML, manual check)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
