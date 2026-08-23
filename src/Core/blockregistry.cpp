@@ -262,13 +262,17 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   cross 形广告牌方块（与 TallGrass / Sapling 同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）——
     //   非 1×1×1 整立方，spec「thin like tall grass」。solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone
     //   （**无碰撞** → 玩家穿过，机制等价 MC 花可踩过）、hardness=0（瞬破，同草丛 / 火把）、NoTool（空手可采且掉落）、
-    //   dropId=自身（破花掉同色花方块，可放回）、dropCount=1、maxStack=64。各面贴图=flower_<color>（tile 63..66；
-    //   透明底 + 绿茎 + 彩色花头，alphaCutoff cutout）。音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen
-    //   placeFlowers 在各群系草地低密度散布（机制等价 MC 各群系花点缀）。进创造调色板（每色独立取用）。
-    /* flower_red    */ {int(BlockRegistry::FlowerRed),                   63, 63, 63, 63, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerRed),     1, 64, "flower_red",    "红花"},
-    /* flower_yellow */ {int(BlockRegistry::FlowerYellow),                64, 64, 64, 64, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerYellow),  1, 64, "flower_yellow", "黄花"},
-    /* flower_blue   */ {int(BlockRegistry::FlowerBlue),                  65, 65, 65, 65, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerBlue),    1, 64, "flower_blue",   "蓝花"},
-    /* flower_white  */ {int(BlockRegistry::FlowerWhite),                 66, 66, 66, 66, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::FlowerWhite),   1, 64, "flower_white",  "白花"},
+    //   maxStack=64。各面贴图=flower_<color>（tile 63..66；透明底 + 绿茎 + 彩色花头，alphaCutoff cutout）。音色归
+    //   GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen placeFlowers 在各群系草地低密度散布（机制等价 MC 各群系花
+    //   点缀）。进创造调色板（每色独立取用）。
+    // t788 染料链：四花 dropId 改为**对应色染料物品**（材料段字面量，Core 不 include Game 头——跨层契约同
+    //   CoalOre 0x201 模式：recipe.cpp static_assert 钉死 RecipeRegistry::Dye*Id == 字面量，防漂移）：
+    //   红花→红染料 0x259 / 黄花→黄染料 0x24F / 蓝花→蓝染料 0x256 / 白花→白染料 0x24B。破坏即掉染料
+    //   （不再掉自身花方块——生存获得染料的正道；花本身仍可创造调色板取用 / 采集后染色链消耗染料）。
+    /* flower_red    */ {int(BlockRegistry::FlowerRed),                   63, 63, 63, 63, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x259,                          1, 64, "flower_red",    "红花"},
+    /* flower_yellow */ {int(BlockRegistry::FlowerYellow),                64, 64, 64, 64, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x24F,                          1, 64, "flower_yellow", "黄花"},
+    /* flower_blue   */ {int(BlockRegistry::FlowerBlue),                  65, 65, 65, 65, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x256,                          1, 64, "flower_blue",   "蓝花"},
+    /* flower_white  */ {int(BlockRegistry::FlowerWhite),                 66, 66, 66, 66, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false, 0x24B,                          1, 64, "flower_white",  "白花"},
     //   甘蔗（Sugarcane）：水边生长的可叠高细茎植物。**cross 形广告牌方块**（与花 / 草丛同走 cross 几何段，两片对角
     //   相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方，呈细茎观感。worldgen placeSugarcane 在水域邻接的
     //   草地 / 沙地旁确定性散布 1..3 格高柱（同 cactus 1-3 高模式；spec「grows up to 3 tall at waters edges」），每格仅

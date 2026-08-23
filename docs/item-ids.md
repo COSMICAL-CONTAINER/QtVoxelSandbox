@@ -234,9 +234,31 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 | 0x227 | 551 | `enchanted_book` | 附魔书占位 | —（1.4+；占位无真附魔） |
 | 0x237 | 567 | `paper` | 纸 | 339（3 甘蔗横排合成 → 3 纸） |
 | 0x238 | 568 | `book` | 书 | 340（3 纸 + 1 皮革合成 → 1 书；附魔台 / 附魔书 / 书架材料，t473） |
+| 0x24B | 587 | `dye_white` | 白色染料 | 351（metadata 15；白花破坏掉落，t788） |
+| 0x24C | 588 | `dye_orange` | 橙色染料 | 351（metadata 14） |
+| 0x24D | 589 | `dye_magenta` | 品红色染料 | 351（metadata 13） |
+| 0x24E | 590 | `dye_light_blue` | 浅蓝色染料 | 351（metadata 12） |
+| 0x24F | 591 | `dye_yellow` | 黄色染料 | 351（metadata 11；黄花破坏掉落） |
+| 0x250 | 592 | `dye_lime` | 柠绿色染料 | 351（metadata 10） |
+| 0x251 | 593 | `dye_pink` | 粉红色染料 | 351（metadata 9） |
+| 0x252 | 594 | `dye_gray` | 灰色染料 | 351（metadata 8） |
+| 0x253 | 595 | `dye_light_gray` | 浅灰色染料 | 351（metadata 7） |
+| 0x254 | 596 | `dye_cyan` | 青色染料 | 351（metadata 6） |
+| 0x255 | 597 | `dye_purple` | 紫色染料 | 351（metadata 5） |
+| 0x256 | 598 | `dye_blue` | 蓝色染料 | 351（metadata 4；蓝花破坏掉落） |
+| 0x257 | 599 | `dye_brown` | 棕色染料 | 351（metadata 3） |
+| 0x258 | 600 | `dye_green` | 绿色染料 | 351（metadata 2；熔炉烧仙人掌，t788） |
+| 0x259 | 601 | `dye_red` | 红色染料 | 351（metadata 1；红花破坏掉落） |
+| 0x25A | 602 | `dye_black` | 黑色染料 | 351（metadata 0） |
 
 > t393：`redstone` / `saddle` / `name_tag` / `enchanted_book` 为战利品表（loot table）专用物品 —— 地牢箱首开
 > 填充 + 预留钓鱼（t401）共用 `LootTable`（src/Game/loottable.*）。生存非合成获得（仅地牢战利品 / 创造调色板）。
+
+> t788 染料段（`0x24B..0x25A` 16 色连续，行序 = 羊毛 16 色标准序）：四花破坏掉落（红 `0x259` / 黄 `0x24F` /
+> 蓝 `0x256` / 白 `0x24B`，Core 层 dropId 字面量 ↔ recipe.cpp static_assert 跨层契约）+ 熔炉烧仙人掌 → 绿
+> `0x258`。染色链 32 条 shapeless 2×2 配方：染料 + 白羊毛（方块 27）→ 对应色羊毛（63..77）/ 染料 + 白床
+> （78）→ 对应色床（32..39+78..85）。**只做 16 单色直染，混色（二级染料）不做**（范围控制）。染料段无 MC
+> `mcMaterialId` 映射（id > 0x22E 越表界 → -1 → 资源包回退自绘；pack 染料贴图单张灰底无色分，色彩保真优先）。
 
 > 注：羊毛在两个段都有 —— 方块 `0x1B (27)` = 可放置的羊毛方块；材料 `0x20E (526)` = 杀羊掉落的羊毛物品（见下方「mob 掉落」）。橡树树苗同理：方块 `0x1C (28)` 可放置生长，物品 `0x21B (539)` 是种植原料（破叶 / 破树苗方块掉此物品）。
 

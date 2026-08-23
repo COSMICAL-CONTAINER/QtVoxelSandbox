@@ -3635,6 +3635,154 @@ int main(int argc, char *argv[])
                              "playercontroller/QML, manual check)";
     }
 
+    // ── t788 染料体系探针（Game 层静态查询为主：配方 / 掉落 / 冶炼 / 命名 / 调色板聚合，纯查表不用 rig ——
+    //    测试尾段新探针不动共享 nextSlot 分配器）：
+    //    ① 染料段 16 色连续（DyeIdBase=0x24B 起 DyeIdBase+i）且 Hotbar::nameForBlock 全有名（空名 =
+    //       调色板/tooltip 无名，t728 B9 同类缺口）；四花色染料名精确核对（红/黄/蓝/白）；
+    //    ② 四花破坏 dropId == 对应色染料常量（跨层契约：Core blockregistry 字面量 ↔ recipe.h 常量经
+    //       static_assert 钉死 + 此处运行期经 dropId 访问器复核）；
+    //    ③ 熔炉烧仙人掌 → 绿染料 + 冶炼 XP ≥ 1（kSmelt/kSmeltXp 两表都要接，B4「注释声称表漏行」同类缺口）；
+    //    ④ 染色链 32 条可合成：16 染料 × {白羊毛方块 Wool=27 / 白床 BedWhite=78} → 对应色羊毛（idx==0 复用
+    //       Wool，其余 FirstWoolVariant 起）/ 床（色段散布 32..39+78..85 查表）；抽 2 条换位摆证无序；
+    //       染料+错基（木板）不产染色羊毛（防等价表误扩）；
+    //    ⑤ 创造背包材料 tab 染料 16 色连续同列（染料区聚合，同 t785 蛋区连续性口径；图鉴 ResourceBrowser
+    //       由 creativeMaterials 自动派生 = 同源在列）；
+    //    ⑥ 32 条新配方已被 t802 全表自匹配回归自动覆盖（同表防丢，此处不重复）。染粉图标配色为 QML 层，
+    //       需人工目视。
+    {
+        // 染料 16 色（行序 = 羊毛 16 色标准序）
+        const int dyeIds[16] = {
+            RecipeRegistry::DyeWhiteId, RecipeRegistry::DyeOrangeId, RecipeRegistry::DyeMagentaId,
+            RecipeRegistry::DyeLightBlueId, RecipeRegistry::DyeYellowId, RecipeRegistry::DyeLimeId,
+            RecipeRegistry::DyePinkId, RecipeRegistry::DyeGrayId, RecipeRegistry::DyeLightGrayId,
+            RecipeRegistry::DyeCyanId, RecipeRegistry::DyePurpleId, RecipeRegistry::DyeBlueId,
+            RecipeRegistry::DyeBrownId, RecipeRegistry::DyeGreenId, RecipeRegistry::DyeRedId,
+            RecipeRegistry::DyeBlackId,
+        };
+        // 目标羊毛（idx==0 复用 Wool=27；其余 FirstWoolVariant=63 起 +idx-1）与目标床（色段散布 32..39 +
+        //   78..85 → 逐条常量查表：白 78 / 橙 33 / 品红 38 / 浅蓝 79 / 黄 34 / 柠绿 80 / 粉 81 / 灰 82 /
+        //   浅灰 83 / 青 36 / 紫 84 / 蓝 37 / 棕 85 / 绿 35 / 红 32 / 黑 39）。
+        const int woolTarget[16] = {
+            int(BR::Wool), int(BR::WoolOrange), int(BR::WoolMagenta), int(BR::WoolLightBlue),
+            int(BR::WoolYellow), int(BR::WoolLime), int(BR::WoolPink), int(BR::WoolGray),
+            int(BR::WoolLightGray), int(BR::WoolCyan), int(BR::WoolPurple), int(BR::WoolBlue),
+            int(BR::WoolBrown), int(BR::WoolGreen), int(BR::WoolRed), int(BR::WoolBlack),
+        };
+        const int bedTarget[16] = {
+            int(BR::BedWhite), int(BR::BedOrange), int(BR::BedMagenta), int(BR::BedLightBlue),
+            int(BR::BedYellow), int(BR::BedLime), int(BR::BedPink), int(BR::BedGray),
+            int(BR::BedLightGray), int(BR::BedCyan), int(BR::BedPurple), int(BR::BedBlue),
+            int(BR::BedBrown), int(BR::BedGreen), int(BR::BedRed), int(BR::BedBlack),
+        };
+        // ① 段连续性（常量重排 / 抽漏 = FAIL）+ 全有名 + 四花色名精确核对。
+        Hotbar hb788;
+        bool ok = RecipeRegistry::DyeIdBase == 0x24B;
+        for (int i = 0; i < 16; ++i) {
+            if (dyeIds[i] != RecipeRegistry::DyeIdBase + i) {
+                qInfo().noquote() << "  [t788 diag] dye segment not contiguous at" << i
+                                  << "got 0x" + QString::number(dyeIds[i], 16);
+                ok = false;
+            }
+            if (hb788.nameForBlock(dyeIds[i]).isEmpty()) {
+                qInfo().noquote() << "  [t788 diag] dye 0x" + QString::number(dyeIds[i], 16)
+                                  << "has empty nameForBlock";
+                ok = false;
+            }
+        }
+        ok = ok && hb788.nameForBlock(RecipeRegistry::DyeRedId) == QString::fromUtf8("红色染料")
+                  && hb788.nameForBlock(RecipeRegistry::DyeYellowId) == QString::fromUtf8("黄色染料")
+                  && hb788.nameForBlock(RecipeRegistry::DyeBlueId) == QString::fromUtf8("蓝色染料")
+                  && hb788.nameForBlock(RecipeRegistry::DyeWhiteId) == QString::fromUtf8("白色染料");
+        // ② 四花破坏 → 对应色染料（dropId 经 Core 访问器；字面量 ↔ 常量契约已由 recipe.cpp static_assert 钉死）。
+        ok = ok && BR::dropId(BR::FlowerRed) == RecipeRegistry::DyeRedId
+                  && BR::dropId(BR::FlowerYellow) == RecipeRegistry::DyeYellowId
+                  && BR::dropId(BR::FlowerBlue) == RecipeRegistry::DyeBlueId
+                  && BR::dropId(BR::FlowerWhite) == RecipeRegistry::DyeWhiteId;
+        if (!ok) {
+            qInfo().noquote() << "  [t788 diag] flower drops:"
+                              << BR::dropId(BR::FlowerRed) << BR::dropId(BR::FlowerYellow)
+                              << BR::dropId(BR::FlowerBlue) << BR::dropId(BR::FlowerWhite)
+                              << "expect" << RecipeRegistry::DyeRedId << RecipeRegistry::DyeYellowId
+                              << RecipeRegistry::DyeBlueId << RecipeRegistry::DyeWhiteId;
+        }
+        // ③ 熔炉烧仙人掌 → 绿染料 + XP（B4 同类缺口：两表任一漏行即 FAIL）。
+        if (SmeltingRegistry::smeltResult(int(BR::Cactus)) != RecipeRegistry::DyeGreenId
+            || SmeltingRegistry::smeltXpReward(RecipeRegistry::DyeGreenId) < 1) {
+            qInfo().noquote() << "  [t788 diag] cactus smelt:"
+                              << SmeltingRegistry::smeltResult(int(BR::Cactus))
+                              << "xp" << SmeltingRegistry::smeltXpReward(RecipeRegistry::DyeGreenId);
+            ok = false;
+        }
+        // ④ 染色链 32 条：染料+白羊毛 → 色羊毛 / 染料+白床 → 色床（2×2 无序，正摆 + 抽查换位摆）。
+        for (int i = 0; i < 16; ++i) {
+            int g[9] = { dyeIds[i], int(BR::Wool), 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+            if (!m || m->outputId != woolTarget[i]) {
+                qInfo().noquote() << "  [t788 diag] dye+wool" << i << "->"
+                                  << (m ? m->outputId : -1) << "expected" << woolTarget[i];
+                ok = false;
+            }
+            int gb[9] = { dyeIds[i], int(BR::BedWhite), 0, 0, 0, 0, 0, 0, 0 };
+            m = RecipeRegistry::match(gb, 2);
+            if (!m || m->outputId != bedTarget[i]) {
+                qInfo().noquote() << "  [t788 diag] dye+bed" << i << "->"
+                                  << (m ? m->outputId : -1) << "expected" << bedTarget[i];
+                ok = false;
+            }
+        }
+        // 换位摆抽查（无序位置无关：橙染羊毛基在左 / 绿染白床基在上）。
+        {
+            int g[9] = { int(BR::Wool), RecipeRegistry::DyeOrangeId, 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+            if (!m || m->outputId != int(BR::WoolOrange)) {
+                qInfo().noquote() << "  [t788 diag] swapped wool arrangement mismatch";
+                ok = false;
+            }
+            int gb[9] = { 0, int(BR::BedWhite), 0, RecipeRegistry::DyeGreenId, 0, 0, 0, 0, 0 };
+            m = RecipeRegistry::match(gb, 2);
+            if (!m || m->outputId != int(BR::BedGreen)) {
+                qInfo().noquote() << "  [t788 diag] swapped bed arrangement mismatch";
+                ok = false;
+            }
+        }
+        // 防等价表误扩：染料+木板（错基）不得产任何染色羊毛（kIngredientEquivalents 意外吃进染料即 FAIL）。
+        {
+            int g[9] = { RecipeRegistry::DyeRedId, int(BR::Planks), 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+            if (m && (m->outputId == int(BR::WoolRed) || m->outputId == int(BR::BedRed))) {
+                qInfo().noquote() << "  [t788 diag] dye+planks wrongly matched dye recipe";
+                ok = false;
+            }
+        }
+        // ⑤ 创造背包材料 tab 染料 16 色连续同列（图鉴 ResourceBrowser 由 creativeMaterials 派生 = 同源在列）。
+        {
+            const QVariantList mats788 = hb788.creativeMaterials();
+            int dyeMin = mats788.size(), dyeMax = -1, dyeSeen = 0;
+            for (int i = 0; i < mats788.size(); ++i) {
+                const int id = mats788.at(i).toInt();
+                if (id >= RecipeRegistry::DyeIdBase && id <= RecipeRegistry::DyeBlackId) {
+                    dyeMin = std::min(dyeMin, i);
+                    dyeMax = std::max(dyeMax, i);
+                    ++dyeSeen;
+                }
+            }
+            if (dyeSeen != 16 || dyeMax - dyeMin + 1 != 16) {
+                qInfo().noquote() << "  [t788 diag] creative dye block: seen" << dyeSeen
+                                  << "span" << (dyeMax - dyeMin + 1) << "(expected 16 contiguous)";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t788 dye system: 16 dye items 0x24B..0x25A contiguous & named, 4 flowers drop "
+                             "matching dyes (red/yellow/blue/white) via dropId, furnace cactus->green dye with "
+                             "XP, all 32 coloring recipes craftable (16 dye+white-wool -> colored wool, 16 "
+                             "dye+white-bed -> colored bed; shapeless spot-checked swapped, wrong-base "
+                             "rejected), dyes contiguous in creative palette (resource browser derived), "
+                             "recipes auto-covered by t802 full-table self-match (dye icon colors = QML, "
+                             "manual check)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

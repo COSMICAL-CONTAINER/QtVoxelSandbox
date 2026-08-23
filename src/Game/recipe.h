@@ -362,6 +362,34 @@ public:
     //   MaterialIcon 自绘蛋形 + 奶油壳褐斑纹（drawSpawnEgg("ocelot")，§9 原创）；pack 映射 0x24A →
     //   ocelot_spawn_egg.png（缺 → 生成式染色回退）。无 MC 1.0 mcMaterialId 映射（越表界 → -1 → 回退）。
     static constexpr int SpawnEggOcelotId = 0x24A; // 生物蛋（豹猫）：右键地面 → 生成野生豹猫（MobOcelot）
+    // t788 染料段（DyeIdBase=0x24B）：16 色染料 item 族，机制等价 MC 1.0 染料主干（dye item id 351）——
+    //   获得链：四花（红花 FlowerRed=49 / 黄花 FlowerYellow=50 / 蓝花 FlowerBlue=51 / 白花 FlowerWhite=52）
+    //   破坏直接掉对应色染料（Core 层 blockregistry.cpp dropId 字面量，见下 static_assert 跨层契约）；
+    //   绿染料额外走熔炉烧仙人掌（smelting.cpp kSmelt，Cactus=42 → DyeGreenId）。染色链：染料 + 白羊毛
+    //   （Wool=27）→ 对应色羊毛（15 色变体 FirstWoolVariant..LastWoolVariant）；染料 + 白床（BedWhite=78）
+    //   → 对应色床（32 条 shapeless 2×2 配方，见 recipe.cpp）。**范围控制：只做 16 单色直染，混色（二级
+    //   染料合成）不做**。行序 = 羊毛 16 色标准序（白 / 橙 / 品红 / 浅蓝 / 黄 / 柠绿 / 粉红 / 灰 / 浅灰 /
+    //   青 / 紫 / 蓝 / 棕 / 绿 / 红 / 黑），与 FirstWoolVariant 起的羊毛变体序严格一致（羊毛 = idx==0 ?
+    //   Wool : FirstWoolVariant+idx-1 的下标算术，床色散段 32..39+78..85 须查表）。可堆叠 64（走材料段
+    //   默认）；非方块 → 右键不放置。图标：MaterialIcon 自绘彩色粉末堆（drawDye，§9 原创，配色取
+    //   tools/build_wool.py 羊毛色板）；无 MC 1.0 mcMaterialId 映射（id > 0x22E 越表界 → -1 → 自绘回退）。
+    static constexpr int DyeIdBase   = 0x24B; // 染料段基址（白色起，羊毛 16 色标准序）
+    static constexpr int DyeWhiteId  = 0x24B; // 白色染料：白花破坏掉落（机制等价骨粉的直染用法）
+    static constexpr int DyeOrangeId = 0x24C; // 橙色染料
+    static constexpr int DyeMagentaId = 0x24D; // 品红色染料
+    static constexpr int DyeLightBlueId = 0x24E; // 浅蓝色染料
+    static constexpr int DyeYellowId = 0x24F; // 黄色染料：黄花破坏掉落
+    static constexpr int DyeLimeId   = 0x250; // 柠绿色染料
+    static constexpr int DyePinkId   = 0x251; // 粉红色染料
+    static constexpr int DyeGrayId   = 0x252; // 灰色染料
+    static constexpr int DyeLightGrayId = 0x253; // 浅灰色染料
+    static constexpr int DyeCyanId   = 0x254; // 青色染料
+    static constexpr int DyePurpleId = 0x255; // 紫色染料
+    static constexpr int DyeBlueId   = 0x256; // 蓝色染料：蓝花破坏掉落
+    static constexpr int DyeBrownId  = 0x257; // 棕色染料
+    static constexpr int DyeGreenId  = 0x258; // 绿色染料：熔炉烧仙人掌（Cactus=42）产物（机制等价仙人掌绿）
+    static constexpr int DyeRedId    = 0x259; // 红色染料：红花破坏掉落
+    static constexpr int DyeBlackId  = 0x25A; // 黑色染料
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

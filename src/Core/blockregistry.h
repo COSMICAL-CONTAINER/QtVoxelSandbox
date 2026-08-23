@@ -348,8 +348,9 @@ public:
         //   （与 TallGrass / Sapling 同走 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方，
         //   「thin like tall grass」（spec 原话）。机制等价 MC 1.0 花（poppy / dandelion 等），名称 / 贴图全原创自绘。
         //   solid=false（非实体 → 不挡邻居面剔除，同草丛）、shape=ShapeNone（**无碰撞** → 玩家穿过，机制等价 MC 花可踩过）、
-        //   hardness=0（瞬破，同草丛 / 火把）、NoTool（空手可采且掉落）、dropId=自身（破花掉同色花方块，可放回）、
-        //   dropCount=1、maxStack=64。各面贴图=flower_<color>（tile 63..66；透明底 + 茎 + 花头，alphaCutoff cutout）。
+        //   hardness=0（瞬破，同草丛 / 火把）、NoTool（空手可采且掉落）、**t788 起破花掉对应色染料物品**（材料段
+        //   0x24B..0x25A 字面量，见 blockregistry.cpp 行注释 + recipe.cpp static_assert 跨层契约；花方块本体仍可
+        //   创造调色板取用）、dropCount=1、maxStack=64。各面贴图=flower_<color>（tile 63..66；透明底 + 茎 + 花头，alphaCutoff cutout）。
         //   音色归 GroupGrass（软植物音，同草丛 / 蘑菇）。worldgen placeFlowers 在各群系草地低密度散布（plains 多彩 /
         //   forest 少量 / swamp 适量 / hills 稀疏；机制等价 MC 各群系花点缀）。进创造调色板（每色独立取用）。
         FlowerRed      = 49, // 红花（机制等价 MC 罂粟 poppy，标志性色）

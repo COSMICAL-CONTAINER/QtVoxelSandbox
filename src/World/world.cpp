@@ -2043,7 +2043,7 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 
 // t504 setBlock 编辑后枯死灌木失撑复检（见 world.h 头注释）。机制等价 MC 1.0 枯灌木失去下方支撑即坍落（同甘蔗 /
 //   仙人掌支撑校验族）；但坍落产物为 **木棒**（材料段 0x200）而非枯灌木自身（机制等价 MC dead bush 掉 0-2 木棒，
-//   不掉自身 —— 与破花掉花 / 破蘑菇掉蘑菇不同：枯灌木 dropId=0 故即便掉自身也无意义，故失撑走木棒）。
+//   不掉自身 —— 与蘑菇掉蘑菇不同（t788 起破花掉染料物品而非花方块）：枯灌木 dropId=0 故即便掉自身也无意义，故失撑走木棒）。
 //   t571 标注【自然失撑掉落：恒发（含创造）】。
 //   DeadBush 恒单格（无柱状生长），故仅清正上方 1 格（与 Cactus dropCactusColumn 逐柱不同）。
 //   玩家直破枯灌木（oldId==DeadBush → id==Air）走 finishMiningAt，dropId=0 → 无产物；仅失撑（破下方支撑方块，
@@ -2080,7 +2080,7 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     // 仅本格被破为 Air 且被破块非花 / 蘑菇时，查正上方是否花 / 蘑菇失撑。（被破块本身是花 / 蘑菇时跳过 ——
-    //   玩家直破花 / 蘑菇的掉落由通用 finishMiningAt drop 路径负责（dropId=自身），避免双重掉落。）
+    //   玩家直破花 / 蘑菇的掉落由通用 finishMiningAt drop 路径负责，避免双重掉落。）
     if (id != BlockRegistry::Air || BlockRegistry::isFlower(oldId)
         || BlockRegistry::isMushroom(oldId)) return;
     const int by = y + 1;
@@ -2092,7 +2092,10 @@ void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 
     m_chunks.setBlock(x, by, z, BlockRegistry::Air);
     noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 花 / 蘑菇非生长方块 → no-op，保持一致
     emit blockBroken(x, by, z, int(above));                 // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
-    emit blockDroppedAsItem(x, by, z, int(above));         // 呈掉落物实体（Main.qml spawnItem；dropId=自身）
+    // t788 起掉落物改走 dropId（与玩家直破同源）：花掉**对应色染料**（dropId=材料段染料字面量）、蘑菇掉自身
+    //   （蘑菇 dropId 不变=自身）。原实现直传方块 id → 花失撑掉花方块、玩家直破掉染料，两路不一致且留「破支撑
+    //   绕过染料链取花方块」的生存漏洞；统一走 dropId 后蘑菇行为逐位不变（回归无感），花对齐染色链正道。
+    emit blockDroppedAsItem(x, by, z, BlockRegistry::dropId(above)); // 呈掉落物实体（Main.qml spawnItem）
     recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
     emit worldChanged();        // 驱动 mesh 重建（cross 段消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
