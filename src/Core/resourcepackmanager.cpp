@@ -40,6 +40,12 @@ struct MobHeadRegion {
     //   若 mobTextureSource 命中会让 delegate 把 packTextured 几何 UV 采到未设定位 → 3D 贴图错乱；
     //   头像只读像素裁剪不涉几何 → 显式源只喂头像路径，3D 路径零改动（回归面最小）。
     const char *explicitSrc;
+    // t779 覆写盒（猪鼻）：MC 机制 = 部分五官不画在头脸里面在**独立贴图偏移盒**（猪鼻 beta ModelPig
+    //   nose 盒 offset(16,16) 4×3×1），头 Front 裁剪天然缺它 → 头像须把覆写盒 Front 再合成到头 Front
+    //   局部（贴放位 = 模型几何实证：鼻盒 x∈[-2,2] y∈[0,3) 相对头盒 → 脸列 2-5 / 行 4-6）。缺省无。
+    bool hasOverlay = false;
+    int ovU0 = 0, ovV0 = 0, ovW = 0, ovH = 0, ovD = 0; // 覆写盒 box-UV（贴图偏移 + 尺寸）
+    int ovX = 0, ovY = 0;                              // 贴到头 Front 的左上角（base 像素）
 };
 const QList<MobHeadRegion> &mobHeadRegions();
 QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath);
@@ -3316,7 +3322,12 @@ const QList<MobHeadRegion> &mobHeadRegions()
 {
     static const QList<MobHeadRegion> kRegions = {
         //          mob  u0  v0   w   h   d  texW texH body
-        /* 猪     */ {  1,  0,  0,  8,  8,  8,  64,  32, false },
+        // t779 猪鼻覆写：MC 猪鼻不在头脸里（beta ModelPig nose = 独立贴图偏移 (16,16) 4×3×1 盒）——头脸
+        //   (8,8)-(16,16) 只有 row11 双眼，鼻 Front (17,17)-(21,20)（demo 包×4 实测：鼻孔 row18 x17/x20
+        //   两暗点，盒区 (16,16)-(26,20) 与头脸右下角相接）→ 合成到脸局部 (2,4)（几何：鼻 x∈[-2,2] y∈[0,3)
+        //   相对头盒 (-4,-4,-8,8,8,8) → 脸列 2-5 / 行 4-6，眼 row3 正上方；机制等价 MC 猪脸 = 眼上鼻下）。
+        /* 猪     */ {  1,  0,  0,  8,  8,  8,  64,  32, false, nullptr,
+                        true, 16, 16, 4, 3, 1, 2, 4 },
         /* 牛     */ {  2,  0,  0,  8,  8,  6,  64,  32, false },
         /* 羊     */ {  3,  0,  0,  6,  6,  8,  64,  32, true  }, // t633：毛层头前无脸 → 本体层（有脸）
         /* 蹒跚者 */ {  4,  0,  0,  8,  8,  8,  64,  64, false },
@@ -3341,9 +3352,12 @@ const QList<MobHeadRegion> &mobHeadRegions()
         /* 雪傀儡 */ { 12,  0,  0,  8,  8,  8,  64,  64, false, nullptr },
         //   旧注「头是南瓜方块非 entity 贴图」对 demo 包不成立——snow_golem.png 头盒 (0,0)8×8×8 前面
         //   (8,8)-(16,16) 画有深色 derpy 脸（rows 13-14 竖排双眼实测）；映射走 mobEntityMap（snow_golem.png 扁平）。
-        /* 蠹虫   */ { 14,  0,  2,  8,  5,  2,  64,  32, false, "silverfish.png" },
-        //   蠹虫无标准头部盒（vanilla 多节虫模型碎盒）→ 取实证「头段」区前 (2,4)-(10,9)（甲壳 + 暗斑，
-        //   读作虫头）；显式源（同狼——mobEntityMap 不含 14，防 3D packTextured 误命中）。
+        /* 蠹虫   */ { 14,  0,  0,  8,  4,  0,  64,  32, false, "silverfish.png" },
+        //   t779 眼区修正（用户「蠹虫头像缺眼睛」）：旧条目 (0,2)8×5×2 → front (2,4)-(10,9) 实为第二体节
+        //   甲壳（demo 包×8 实测无眼）。虫头 = 首盒 (0,0)6×2×2（top (2,0)-(8,2) / right (0,2)-(2,4) /
+        //   front (2,2)-(8,4) 全不透明，余面空），双眼跨 top/front 边界（黑斑 (2,1)(4,1)(1,2)(2,2)(4,2)(5,2)
+        //   实测，row1 亮脊 (3,1) 居中）→ d=0 扁平区直取「头顶+脸」拼合区 (0,0)-(8,4)（含双眼）。显式源
+        //   （同狼——mobEntityMap 不含 14，防 3D packTextured 误命中）。
         /* 夜行者 */ { 16,  0,  0,  8,  6,  8,  64,  32, false, nullptr },
         //   头盒 (0,0)8×8×8 但 demo 包头前仅 rows 8-13 不透明（底部 2 行空）→ h=6 取 (8,8)-(16,14)（row12
         //   左右对称亮眼实测：x8-10 / x13-15）；映射走 mobEntityMap（enderman/enderman.png t727 既有序）。
@@ -3353,6 +3367,32 @@ const QList<MobHeadRegion> &mobHeadRegions()
         //   映射走 mobEntityMap（blaze/blaze.png t728 既有序）。
     };
     return kRegions;
+}
+
+// t779 头像裁剪布局查询（单一权威出口，声明见 .h MobHeadIconLayout 注释）：表条目 box-UV → Front 矩形
+//   （d=0 扁平区语义 = 直取 (u0,v0) w×h，蠹虫等非盒拼合区用）+ 覆写盒信息。generateMobHeadIconFile 与
+//   矩阵 t779 探针共用本函数——两处矩形永不漂移（同 t785 spawnEggTint 单一权威教训）。
+bool mobHeadIconLayout(int mobType, MobHeadIconLayout *out)
+{
+    if (!out)
+        return false;
+    for (const MobHeadRegion &r : mobHeadRegions()) {
+        if (r.mobType != mobType)
+            continue;
+        out->frontX = r.u0 + r.d;
+        out->frontY = r.v0 + r.d;
+        out->frontW = r.w;
+        out->frontH = r.h;
+        out->hasOverlay = r.hasOverlay;
+        out->ovSrcX = r.ovU0 + r.ovD;
+        out->ovSrcY = r.ovV0 + r.ovD;
+        out->ovW = r.ovW;
+        out->ovH = r.ovH;
+        out->ovPasteX = r.ovX;
+        out->ovPasteY = r.ovY;
+        return true;
+    }
+    return false;
 }
 
 // review D3-b 头像裁剪核心（从 mobHeadIconSource 抽出，供构建期预生成 + 查询期懒生成两路共用）：
@@ -3402,17 +3442,37 @@ QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &enti
     if (tex.isNull())
         return {}; // 解码失败 → 回退
     // base 像素矩形 → 实际像素（HD 包是 base 整数倍）→ 裁剪（边界内钳防越界读）。
+    //   t779 矩形改走 mobHeadIconLayout 单一权威（与矩阵探针同源，防公式漂移）。
+    MobHeadIconLayout lay;
+    if (!mobHeadIconLayout(region.mobType, &lay))
+        return {};
     const float scale = std::min(float(tex.width()) / float(region.texW),
                                  float(tex.height()) / float(region.texH));
-    const int fx0 = qRound(float(region.u0 + region.d) * scale);
-    const int fy0 = qRound(float(region.v0 + region.d) * scale);
-    const int fw  = qMax(1, qRound(float(region.w) * scale));
-    const int fh  = qMax(1, qRound(float(region.h) * scale));
+    const int fx0 = qRound(float(lay.frontX) * scale);
+    const int fy0 = qRound(float(lay.frontY) * scale);
+    const int fw  = qMax(1, qRound(float(lay.frontW) * scale));
+    const int fh  = qMax(1, qRound(float(lay.frontH) * scale));
     if (fx0 < 0 || fy0 < 0 || fx0 + fw > tex.width() || fy0 + fh > tex.height())
         return {}; // 越界（非整数倍贴图 / 数据错）→ 回退（降级）
     QImage head = tex.copy(fx0, fy0, fw, fh);
     if (head.isNull())
         return {};
+    // t779 覆写盒合成（猪鼻）：五官盒 Front（同贴图同 scale）贴到头 Front 局部贴放位。源/贴放越界（异形
+    //   包 / 数据错）→ 跳过覆写只出无鼻脸（降级：脸头像仍有效，好过整张回退体色块）。
+    if (lay.hasOverlay) {
+        const int ox0 = qRound(float(lay.ovSrcX) * scale);
+        const int oy0 = qRound(float(lay.ovSrcY) * scale);
+        const int ow  = qMax(1, qRound(float(lay.ovW) * scale));
+        const int oh  = qMax(1, qRound(float(lay.ovH) * scale));
+        const int px  = qRound(float(lay.ovPasteX) * scale);
+        const int py  = qRound(float(lay.ovPasteY) * scale);
+        if (ox0 >= 0 && oy0 >= 0 && ox0 + ow <= tex.width() && oy0 + oh <= tex.height()
+                && px >= 0 && py >= 0 && px + ow <= head.width() && py + oh <= head.height()) {
+            QPainter op(&head);
+            op.drawImage(px, py, tex.copy(ox0, oy0, ow, oh));
+            op.end();
+        }
+    }
     // 放大到 64×64 透明底（FastTransformation 保像素锐利；非 MC 资产——是 pack PNG 的运行期裁剪产物）。
     QImage icon(64, 64, QImage::Format_ARGB32_Premultiplied);
     icon.fill(Qt::transparent);
@@ -3433,6 +3493,17 @@ QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &enti
     if (!icon.save(out, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
     return out;
+}
+
+// t779 头像生成端到端口（声明见 .h）：表查条目 → 复用裁剪核心。显式 entityDir 不触碰进程全局
+//   BuiltState/settings（矩阵探针密闭 rig 入口，同 t777 generateSheepWoolFaceFile 语义）。
+QString generateMobHeadIconFor(int mobType, const QString &entityDirPath)
+{
+    for (const MobHeadRegion &r : mobHeadRegions()) {
+        if (r.mobType == mobType)
+            return generateMobHeadIconFile(r, entityDirPath);
+    }
+    return {};
 }
 
 // t749 羊「毛身 + 真脸」合成贴图生成（见文件顶 generateSheepWoolFaceFile 声明处设计注释；mobTextureSource(3)

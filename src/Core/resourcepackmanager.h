@@ -294,4 +294,20 @@ private:
 struct EggTint { int base[3]; int spot[3]; };
 const EggTint *spawnEggTint(int itemId);
 
+// t779 头像裁剪布局出口（猪鼻合成 / 蠹虫眼区修正的单一权威；矩阵测试 t779 探针直调锁矩形常量——
+//   防表改数值后「裁剪公式与探针各持一份」漂移）：mobType → 头 Front 裁剪矩形 + 可选覆写盒（猪鼻类
+//   五官画在独立贴图偏移盒，头脸不含 → 合成到头 Front 局部）的 Front 源矩形与贴放位（均 base 像素）。
+//   hasOverlay=false 时 ov* 字段无意义。返 false = 表无该 mobType 条目（QML 回退体色块）。
+struct MobHeadIconLayout {
+    int frontX = 0, frontY = 0, frontW = 0, frontH = 0; // 头 Front 裁剪矩形（base 像素）
+    bool hasOverlay = false;
+    int ovSrcX = 0, ovSrcY = 0, ovW = 0, ovH = 0;      // 覆写盒 Front 源矩形（base 像素）
+    int ovPasteX = 0, ovPasteY = 0;                    // 贴到头 Front 的左上角（base 像素，模型几何实证）
+};
+bool mobHeadIconLayout(int mobType, MobHeadIconLayout *out);
+
+// t779 头像生成端到端口（矩阵探针密闭入口）：显式 entityDir 直裁不触碰进程全局 BuiltState/settings
+//   （同 t777 generateSheepWoolFaceFile 探针 rig 语义）。返落盘绝对路径（空 = 表无条目 / 任一步失败）。
+QString generateMobHeadIconFor(int mobType, const QString &entityDirPath);
+
 #endif // RESOURCEPACKMANAGER_H

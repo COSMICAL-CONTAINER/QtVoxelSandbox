@@ -13,6 +13,7 @@
 #include <QDir>   // t777 探针（羊毛层合成器临时 PNG rig）
 #include <QImage> // t777 探针（fur/body 双 PNG 生成 + 合成结果像素断言）
 #include <QColor> // t777 探针（像素色对比）
+#include <QPainter> // t779 探针（合成源贴图矩形填色）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 
@@ -4075,6 +4076,126 @@ int main(int argc, char *argv[])
                              "base-size output with body-layer (real-face) pixels in head region (0,0)-"
                              "(28,14) and fur pixels preserved in wool body/leg rows, missing body source "
                              "degrades to empty (caller falls back to raw fur = eye overlay stays visible)";
+    }
+
+    // ── t779 头像裁剪修复探针（用户「猪头像缺鼻子、蠹虫头像缺眼睛」）──
+    // 根因：MC 机制 = 猪鼻画在独立贴图偏移盒 (16,16) 4×3×1（头脸 (8,8)-(16,16) 只有 row11 双眼）；
+    //   蠹虫旧条目取的是第二体节甲壳 (2,4)-(10,9)（无眼），真头 = 首盒 (0,0)6×2×2、双眼跨 top/front
+    //   边界（demo 包像素取证）。修法 = 猪「脸 + 鼻覆写盒合成」/ 蠹虫「头顶+脸拼合区直取」。
+    //   ① 布局常量锁（mobHeadIconLayout 单一权威——resourcepackmanager.cpp 生成器与探针同源，表数值
+    //     漂移 = 此处 FAIL，同 t785 单一权威教训）：猪 front(8,8)8×8 + 鼻覆写 src(17,17)4×3 贴 (2,4)；
+    //     蠹虫 front(0,0)8×4 无覆写；回归锁牛/蜘蛛/豹猫/夜行者 front 不变 + 表外 mobType 恒无条目。
+    //   ② 端到端合成（临时 PNG rig 直调 generateMobHeadIconFor，不触碰进程全局 BuiltState/settings，
+    //     同 t777 密闭语义）：合成猪 64×32（整图脸粉 A + 鼻 Front 深粉 B，走 pig/pig.png 主映射子目录
+    //     探测）→ 图标 64×64 中 A=脸底/B=鼻贴脸中下/C=下巴（旧实现无合成 → B 处仍 A，FAIL）；合成蠹虫
+    //     64×32 扁平（头区 (0,0)-(8,4) = C / 余 = D，走 explicitSrc 扁平探测）→ 图标含 C 横带居中 + 带外
+    //     透明（旧裁剪 (2,4)-(10,9) 全 D 区，FAIL）。图鉴图标本体观感（QML 缩放呈现）需人工目视。
+    {
+        bool ok = true;
+        // ① 布局常量锁（mob/…/paste 全字段；表加条目改数值 = 漂移即 FAIL）。
+        {
+            const struct {
+                int mob; int fx, fy, fw, fh; bool ov; int sx, sy, sw, sh, px, py;
+            } exp[] = {
+                //       front               overlay(src …, paste …)
+                {  1,  8,  8,  8,  8,  true,  17, 17, 4, 3, 2, 4 }, // 猪：脸 + 鼻覆写（眼 row3 上 / 鼻 row4-6 下）
+                { 14,  0,  0,  8,  4, false,   0,  0, 0, 0, 0, 0 }, // 蠹虫：头顶+脸拼合区（含双眼）
+                {  2,  6,  6,  8,  8, false,   0,  0, 0, 0, 0, 0 }, // 牛（d=6 → front (6,6)；回归锁）
+                {  7, 40, 12,  8,  8, false,   0,  0, 0, 0, 0, 0 }, // 蜘蛛（offset(32,4) d=8；回归锁）
+                { 11,  5,  5,  5,  4, false,   0,  0, 0, 0, 0, 0 }, // 豹猫（offset(1,1) 5×4×4；回归锁）
+                { 16,  8,  8,  8,  6, false,   0,  0, 0, 0, 0, 0 }, // 夜行者（h=6 底两行空；回归锁）
+            };
+            for (const auto &e : exp) {
+                MobHeadIconLayout lay;
+                if (!mobHeadIconLayout(e.mob, &lay)
+                        || lay.frontX != e.fx || lay.frontY != e.fy
+                        || lay.frontW != e.fw || lay.frontH != e.fh
+                        || lay.hasOverlay != e.ov || lay.ovSrcX != e.sx || lay.ovSrcY != e.sy
+                        || lay.ovW != e.sw || lay.ovH != e.sh
+                        || lay.ovPasteX != e.px || lay.ovPasteY != e.py) {
+                    qInfo().noquote() << "  [t779 diag] layout for mob" << e.mob << "mismatch (front"
+                                      << lay.frontX << lay.frontY << lay.frontW << lay.frontH
+                                      << "ov" << lay.hasOverlay << ")";
+                    ok = false;
+                }
+            }
+            MobHeadIconLayout none;
+            if (mobHeadIconLayout(99, &none)) { // 表外未知型恒无条目（防越段误命中）
+                qInfo().noquote() << "  [t779 diag] unknown mobType should have no entry";
+                ok = false;
+            }
+        }
+        // ② 端到端：猪鼻合成 + 蠹虫眼区。
+        QDir d779(QDir::temp().absoluteFilePath("t779_headicon_probe"));
+        d779.removeRecursively();
+        d779.mkpath(".");
+        QDir(d779.absoluteFilePath("pig")).mkpath("."); // 猪 explicitSrc 空 → mobEntityMap 主映射 pig/pig.png（子目录布局）
+        const QColor faceA(0xf0, 0xa0, 0xa8), snoutB(0xc0, 0x60, 0x70);   // 脸粉 / 鼻深粉（互异防假 PASS）
+        const QColor headC(0x88, 0x90, 0x88), bodyD(0x40, 0x48, 0x40);    // 虫头灰 / 体节深灰
+        QImage pigTex(64, 32, QImage::Format_ARGB32);
+        pigTex.fill(faceA);
+        {
+            QPainter p(&pigTex);
+            p.fillRect(17, 17, 4, 3, snoutB); // 鼻 Front (17,17)-(21,20)（MC 鼻盒 offset(16,16) 4×3×1 的脸面）
+            p.end();
+        }
+        QImage sfTex(64, 32, QImage::Format_ARGB32);
+        sfTex.fill(bodyD);
+        {
+            QPainter p(&sfTex);
+            p.fillRect(0, 0, 8, 4, headC);    // 虫头拼合区 (0,0)-(8,4)（头顶+脸，双眼所在）
+            p.end();
+        }
+        if (!pigTex.save(d779.absoluteFilePath("pig/pig.png"), "PNG")
+                || !sfTex.save(d779.absoluteFilePath("silverfish.png"), "PNG")) {
+            qInfo().noquote() << "  [t779 diag] failed to write temp source PNGs";
+            ok = false;
+        }
+        // 猪：8×8 脸 → 64×64 图标（×8 整倍块映射）：脸(3,1) 眼上方 = A；鼻贴放 (2,4)-(6,7) → 脸(4,5) = B
+        //   （旧实现无合成此处 A → FAIL）；脸(7,7) 下巴（覆写区外）= A。
+        const QString pigIcon = generateMobHeadIconFor(1, d779.absolutePath());
+        if (pigIcon.isEmpty()) {
+            qInfo().noquote() << "  [t779 diag] pig icon generation unexpectedly failed";
+            ok = false;
+        } else {
+            QImage ic(pigIcon);
+            if (ic.width() != 64 || ic.height() != 64) {
+                qInfo().noquote() << "  [t779 diag] pig icon not 64x64:" << ic.width() << "x" << ic.height();
+                ok = false;
+            } else if (ic.pixelColor(28, 12) != faceA || ic.pixelColor(36, 44) != snoutB
+                       || ic.pixelColor(60, 60) != faceA) {
+                qInfo().noquote() << "  [t779 diag] pig icon pixels wrong: forehead"
+                                  << ic.pixelColor(28, 12).name() << "snout" << ic.pixelColor(36, 44).name()
+                                  << "chin" << ic.pixelColor(60, 60).name();
+                ok = false;
+            }
+        }
+        // 蠹虫：8×4 头区 aspect 2 → 64×32 条带贴 (0,16)：带中 (36,36) = C；带外 (32,8) 透明。
+        //   （旧裁剪 (2,4)-(10,9) 全落 D 区 → 带中 D，FAIL。）
+        const QString sfIcon = generateMobHeadIconFor(14, d779.absolutePath());
+        if (sfIcon.isEmpty()) {
+            qInfo().noquote() << "  [t779 diag] silverfish icon generation unexpectedly failed";
+            ok = false;
+        } else {
+            QImage ic(sfIcon);
+            if (ic.width() != 64 || ic.height() != 64) {
+                qInfo().noquote() << "  [t779 diag] silverfish icon not 64x64:" << ic.width() << "x" << ic.height();
+                ok = false;
+            } else if (ic.pixelColor(36, 36) != headC || ic.pixelColor(32, 8).alpha() != 0) {
+                qInfo().noquote() << "  [t779 diag] silverfish icon pixels wrong: band"
+                                  << ic.pixelColor(36, 36).name() << "outside alpha"
+                                  << ic.pixelColor(32, 8).alpha();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t779 mob head icon crops: pig front (8,8)8x8 + snout overlay box (16,16)4x3x1 "
+                             "front (17,17)-(21,20) composited at face (2,4) (eyes row3 above snout rows4-6), "
+                             "silverfish front switched from body-segment (2,4)-(10,9) to head top+face band "
+                             "(0,0)-(8,4) containing both eyes, cow/spider/ocelot/nightwalker fronts locked "
+                             "unchanged, synthetic 64x32 rigs verify snout/eye pixels land in the 64x64 icons "
+                             "(icon look in browser = QML, manual check)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
