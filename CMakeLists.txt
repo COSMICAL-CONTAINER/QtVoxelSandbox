@@ -846,6 +846,11 @@ add_executable(redstone_matrix_test
     src/Entities/xporbmanager.h
     src/World/worldclock.cpp
     src/World/worldclock.h
+    # t822 铁砧附魔实机复现二探针附加：World 层 WorldStore（savePlayerData/loadPlayerData 真链 SQLite
+    #   round-trip —— t622 附魔/实例名序列化此前从未有自动化探针；探针用临时目录绝对路径库，
+    #   saves/ 不受影响。Qt6::Sql 随 target_link_libraries 补）。
+    src/World/worldstore.cpp
+    src/World/worldstore.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
@@ -862,4 +867,6 @@ target_link_libraries(redstone_matrix_test PRIVATE
     Qt6::Qml
     # t814 真消费端探针：PlayerController 是 QQuickItem 派生（Qt Quick）→ 链 Quick。
     Qt6::Quick
+    # t822 存档 round-trip 探针：WorldStore 的 SQLite 落盘读回。
+    Qt6::Sql
 )
