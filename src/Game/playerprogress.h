@@ -184,6 +184,11 @@ private:
     //   achievementUnlocked + achievementChanged + progressChanged（驱动 revision bump）；silent=true
     //   （loadVariant 读档回放用）→ 同父检查但零信号（caller 末尾单次 emit；review-M5 统一回放入口）。
     void unlock(const QString &id, bool silent = false);
+    // review #22（出生点/进度组，2026-08-23）：计数回放的「链式补前置」—— 沿 defs 祖先链自根向下逐级
+    //   unlock（根先解锁 → 每级父已先行解锁，前置检查恒过；已解锁级幂等 no-op）。仅用于「计数统计事实
+    //   蕴含全链祖先」的成就（farmer：本工程耕地只能由锄头右键产生 → 收获统计达阈 ⟹ 锄头线事实达成）；
+    //   计数不蕴含祖先的（sniper：10 次箭命中不蕴含首杀敌对怪）不走本链，保持 unlock 原前置语义。
+    void unlockWithAncestry(const QString &id, bool silent);
     // 累加统计并 flush（内部辅助：bump revision + emit progressChanged）。
     void bumpAndEmit();
 

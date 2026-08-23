@@ -55,7 +55,8 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
           int(BlockRegistry::Anvil) },
         // t752 ①「耕种时间到」：首次合成任意材质锄头（与「出击时间」「挖矿时间到」同族，挂合成台下并列）；
         //   「农夫」由独立根（t637）重挂其下。旧存档已解锁 farmer 不受影响——loadVariant 直插 m_unlocked
-        //   绕过父检查（仅新解锁事件走前置；同 t637 get_wood 重挂的兼容语义）。
+        //   绕过父检查（仅新解锁事件走前置；同 t637 get_wood 重挂的兼容语义）。计数回放（t619）则走
+        //   unlockWithAncestry 链式补前置（review #22：重挂后窄边缘档不再被父前置吞，见其实现头注释）。
         { "time_to_farm",   "crafting_table", "耕种时间到", "合成一把锄头开始耕种",
           int(ToolRegistry::HoeWood) },
         { "farmer",         "time_to_farm",   "农夫",       "收获 10 株成熟作物",
@@ -102,6 +103,35 @@ void PlayerProgress::unlock(const QString &id, bool silent)
     emit achievementUnlocked(id, name, desc);
     emit achievementChanged();
     bumpAndEmit();
+}
+
+// review #22（出生点/进度组，2026-08-23）：计数回放链式补前置。背景：t752 把 farmer 由独立根重挂
+//   「耕种时间到」（time_to_farm）下 → loadVariant 的 t619 计数回放 unlock("farmer", silent) 会撞上
+//   unlock 的父前置检查（playerprogress.cpp unlock 头段）——「cropsHarvested≥10 但锄头线未解锁」的旧档
+//   回放被静默吞（窄边缘：正常生存档收获必经锄头耕地 → time_to_farm 已解锁、回放本不吞；被吞档 = 创造
+//   放耕地后切生存收割等旁路）。修法取 Review 建议的「链式补前置」而非注释接受：本工程 worldgen 不生成
+//   耕地 / 作物，收获统计达阈 ⟹ 必经「开背包→获得原木→合成台→合成锄头」全链（旁路仅创造类，成就对创造
+//   本就廉价，同调色板口径接受），祖先事实已达成，自根向下补挂不虚发；且逐级解锁保树形一致（不出「子亮
+//   父锁」破相——review-M5 直插修补的同款原则）。sniper 回放**不**走本链：10 次箭命中不蕴含首杀敌对怪
+//   （可全射被动生物），其父前置吞没与实时 unlock 行为一致（非 t752 重挂引入的回归面），保持现状。
+void PlayerProgress::unlockWithAncestry(const QString &id, bool silent)
+{
+    // 沿 parentId 上溯收集祖先链（defs DFS 先序：父定义先于子，直接扫表逐级查父）。guard 上限 = 表长，
+    //   防 defs 数据错误成环时死循环（正常树深 < 表长）。
+    QStringList chain;
+    QString cur = id;
+    const auto &defs = achievementDefs();
+    for (int guard = 0; guard <= defs.size(); ++guard) {
+        const char *parent = nullptr;
+        for (const auto &d : defs) {
+            if (cur == QLatin1String(d.id)) { parent = d.parentId; break; }
+        }
+        chain.prepend(cur);
+        if (!parent) break; // 到根
+        cur = QLatin1String(parent);
+    }
+    for (const QString &step : chain)
+        unlock(step, silent); // 根先解锁 → 每级前置恒过；已解锁级幂等 no-op（unlock 首行早退）
 }
 
 void PlayerProgress::onBlockMined()    { ++m_blocksMined;   bumpAndEmit(); }
@@ -391,8 +421,10 @@ void PlayerProgress::loadVariant(const QVariantMap &data)
     // t619：读档后按既有统计回放「计数达阈值」型成就判定（旧档可能已满足但当时无该成就定义）。
     //   走 unlock(silent) 同一条前置依赖检查路径（父未解锁则忽略，机制等价 MC 1.0；review-M5）：
     //   合法存档（父已解锁）照常恢复；「计数够但父未解锁」的存档回放不再让子成就越级解锁。
+    //   review #22：farmer 改走 unlockWithAncestry（t752 重挂后窄边缘档被父前置静默吞 → 链式补前置，
+    //   见其实现头注释）；sniper 保持原 unlock（计数不蕴含父，吞没与实时行为一致）。
     if (m_arrowsHitMobs >= kSniperHits) unlock(QStringLiteral("sniper"), /*silent=*/true);
-    if (m_cropsHarvested >= kFarmerHarvests) unlock(QStringLiteral("farmer"), /*silent=*/true);
+    if (m_cropsHarvested >= kFarmerHarvests) unlockWithAncestry(QStringLiteral("farmer"), /*silent=*/true);
 
     emit achievementChanged();
     bumpAndEmit();

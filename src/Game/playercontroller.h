@@ -536,6 +536,12 @@ public:
     //   存档时板已是压下态，沿在存档前已消费过）。另做加载态方块视觉归一（压力板 / 按钮的 bit0 陈旧态，
     //   r2-B2/B3）。
     Q_INVOKABLE void finishWorldLoad();
+    // review #20（出生点/进度组，2026-08-23）：采用 World 选定出生列为重生点（仅当 m_spawnPos 仍为 kSpawn
+    //   常量 pristine 时；详见 .cpp 实现头注释）。Main.qml enterWorld 在 applyPlayerState 后调——读档路径
+    //   走 loadSavedState（无 respawn → 无 snapSpawnToGround 调用点），不补则重生点 / 指南针基准停在
+    //   kSpawn 常量直到首次死亡才被 respawn 顺带采用。**不动 m_pos**（读档位姿 = 存档点优先）；新世界路径
+    //   respawn→snap 已采用 → pristine 判据不中 → no-op。返回是否本次采用（QML 侧可忽略）。
+    Q_INVOKABLE bool adoptSpawnColumn();
     // t238 设饥饿值（存档加载用；与 PlayerState.setHunger 配对）：clamp 到 [0, kMaxHunger]；同步本类的
     //   Physics 层饥饿累积器 m_hunger + emit hungerUpdated（让 Main.qml 路由到 playerState.setHunger 把
     //   Game 层显值与 Physics 层值对齐——存档只持久化 playerState.hunger，本方法把同一值灌回 Physics 层
@@ -1101,9 +1107,11 @@ private:
     //   卡地形），但玩家从 80 摔到地表（落差 >3）会触发摔伤；本方法在世界就绪后把玩家贴真实地表，消除出生
     //   落差。分别在 componentComplete / setWorld / respawn 调，确保世界（width/height/seed）定稿后玩家始终
     //   贴地表。无世界 → no-op（m_pos 保持 kSpawnY 兜底）。只读 World::heightAt（向下依赖，不改栅格）。
-    //   t756：出生列改采用 World 选定列（见 .cpp 实现头注释）。
+    //   t756：出生列改采用 World 选定列（见 .cpp 实现头注释）；review #20 后「采用」段抽出为公共子例程
+    //   adoptSpawnColumn（读档路径单独复用），本方法 = 采用 + 位姿随行 + 贴地表 Y。
     void snapSpawnToGround();
-    // t756 世界换代复位重生点：World::seedChanged（regenerate / beginLoad / setSeed 均 emit）→ 旧
+    // t756 世界换代复位重生点：World::seedChanged（regenerate / beginLoad / setSeed / review #20 尺寸
+    //   setter 重建均 emit）→ 旧
     //   m_spawnPos 坐标不再指向当前世界（旧世界出生列 / 旧世界床位）→ 复位回 kSpawn pristine，下一次
     //   snapSpawnToGround 采用新世界的选定出生列。修启动序隐患：componentComplete 在菜单默认种子世界
     //   上先行采用过出生列（m_spawnPos 已改写非 pristine）→ enterWorld 换真种子重生时旧坐标误用。床位

@@ -791,6 +791,10 @@ add_executable(redstone_matrix_test
     # t805 船上岸回归探针附加：Entities 层 BoatManager（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留 +
     # 贴岸倒退；向下只依赖 Core+World，不引入 Game/QML）。
     src/Entities/boatmanager.cpp
+    # review #22 农夫计数回放链式补前置探针附加：Game 层 PlayerProgress（loadVariant 计数回放 →
+    # farmer 全祖先链解锁 + sniper 不补链对照；向下只依赖 Core/Qt，不引入 World/QML）。
+    src/Game/playerprogress.cpp
+    src/Game/playerprogress.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
