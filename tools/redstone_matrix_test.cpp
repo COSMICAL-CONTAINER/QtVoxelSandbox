@@ -31,6 +31,8 @@
 #include "playerstate.h"  // t755 死亡态硬锁探针（致死落库 0 / heal 死亡免疫 / respawn 复位链）
 #include "playerprogress.h" // review #22 农夫计数回放链式补前置探针（loadVariant → unlockWithAncestry）
 #include "world.h"
+#include "worldstore.h"   // t822 存档 round-trip 探针（真 WorldStore SQLite：savePlayerData/loadPlayerData
+                          //   玩家态 JSON 落盘读回；World 层直编，t622 序列化链首次自动化覆盖）
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
 #include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
@@ -6429,6 +6431,287 @@ int main(int argc, char *argv[])
                              "sub-2s-cooldown re-power both do not re-fire) - consumer leg never executed by "
                              "P15/t773 before, iron-door contrast explained (door = in-World state write, "
                              "TNT/dispenser = signal->QML->consumer)";
+    }
+
+    // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
+    //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
+    //   AnvilUI.qml + InventoryOps.js，11 放入路径）47/47 全过，但其 Hotbar 是 **QML 桩**
+    //   （build/_anvil_probe/VoxelSandbox/Hotbar.qml 语义复刻，非 C++ hotbar.cpp 本体），且
+    //   **存档序列化 round-trip（t622 gatherPlayerState/applyPlayerState 落盘 enchants/name）从未
+    //   有任何自动化探针**。本探针把两段桩外真链补进矩阵：
+    //   (A) 真 Hotbar VM 光标序列镜像（AnvilUI.slotLeft :253-261 与 takeProduct 落定段 :894-900 的
+    //       C++ 逐行等价——同一调用序：writeSlot 清源 → heldBlock → heldCount → heldDurability →
+    //       setHeldEnchants → heldCustomName；顺序敏感：setHeldBlock 切新 id 清附魔+清名，附魔回填必须
+    //       在其后）。含「同 id 早退」边角（光标已持同 id 素品、槽内附魔品的 pickup 序列——早退不清
+    //       字段、后续 setter 逐个覆写，探针断言实 VM 语义与桩一致）。类别覆盖工具 / 护甲 / 附魔书 +
+    //       四条满配多附魔（4 ench 全占用）。
+    //   (B) 真 WorldStore SQLite round-trip（Main.qml gatherPlayerState :665-688 的精确 map 形状
+    //       version 3 / applyPlayerState :634-655 的精确回灌调用）：hotbar 9 + main 27 + armor 4
+    //       每槽 id/count/durability/enchants[4]/name 落盘 → 关库重开 → 读回 → 灌入新 Hotbar VM
+    //       逐字段比对（含空槽）。存档库用临时目录绝对路径（dbPath 对绝对入参直通，不污染 saves/）。
+    //   全 PASS = 桩外真链同判完好，用户症状按 t814 版本戳方法论走复现文档分流。
+    bool okA_pickup = true, okA_sameId = true, okA_place = true, okA_return = true;
+    {
+        Hotbar vm;
+        const int pick = ToolRegistry::PickaxeIron;                  // 0x102
+        const int chest = RecipeRegistry::ArmorIdBase + 4 * ArmorRegistry::Iron + ArmorRegistry::Chestplate;
+        const int book = RecipeRegistry::EnchantedBookId;            // 0x227
+        const int eff3 = (EnchantRegistry::Efficiency << 8) | 3;
+        const int unb2 = (EnchantRegistry::Unbreaking << 8) | 2;
+        const int pickDur = ToolRegistry::maxDurability(pick) - 5;   // 磨损实例（非满耐久）
+        vm.setStack(2, pick, 1, pickDur, QVariantList{eff3, unb2, 0, 0}, "我的神镐");
+
+        // (A1) 普通拾取：光标空 → 槽 2 附魔镐上光标（AnvilUI.slotLeft 拾取臂逐行镜像）。
+        vm.setStack(2, 0, 0, 0);                                     // writeSlot 清源槽
+        vm.setHeldBlock(pick);                                       // 切新 id：清附魔/清名/满耐久
+        vm.setHeldCount(1);
+        vm.setHeldDurability(pickDur);                               // 覆写为槽内实例耐久
+        vm.setHeldEnchants(QVariantList{eff3, unb2, 0, 0});          // 覆写为槽内实例附魔
+        vm.setHeldCustomName(QStringLiteral("我的神镐"));
+        {
+            const QVariantList he = vm.heldEnchants();
+            okA_pickup = vm.heldBlock() == pick && vm.heldDurability() == pickDur
+                          && vm.heldCustomName() == QStringLiteral("我的神镐")
+                          && int(he.size()) == 4 && he.at(0).toInt() == eff3 && he.at(1).toInt() == unb2
+                          && he.at(2).toInt() == 0 && he.at(3).toInt() == 0;
+            if (!okA_pickup)
+                qInfo().noquote() << "  [t822 A1 diag] held=" << vm.heldBlock() << "dur=" << vm.heldDurability()
+                                  << "ench=" << he;
+        }
+        // (A2) 放入（resolveClick B 整栈放置臂镜像）：光标 → main 槽 5（铁砧 A 槽是 QML 本地数组，
+        //   入槽写的就是这些 VM 读值——readSlot/writeSlot 经同一组访问器）。
+        vm.mainSetStack(5, vm.heldBlock(), vm.heldCount(), vm.heldDurability(), vm.heldEnchants(), vm.heldCustomName());
+        vm.setHeldBlock(0);                                          // 光标清（AnvilUI r.heldId=0 分支）
+        {
+            const QVariantList me = vm.mainEnchantsAt(5);
+            okA_place = vm.mainBlockIdAt(5) == pick && vm.mainCountAt(5) == 1
+                         && vm.mainDurabilityAt(5) == pickDur
+                         && vm.mainCustomNameAt(5) == QStringLiteral("我的神镐")
+                         && int(me.size()) == 4 && me.at(0).toInt() == eff3 && me.at(1).toInt() == unb2
+                         && me.at(2).toInt() == 0 && me.at(3).toInt() == 0;
+            if (!okA_place)
+                qInfo().noquote() << "  [t822 A2 diag] main5=" << vm.mainBlockIdAt(5) << "dur=" << vm.mainDurabilityAt(5)
+                                  << "ench=" << me << "name=" << vm.mainCustomNameAt(5);
+        }
+        // (A3) 同 id 早退边角：光标持同 id **素品**（无附魔满耐久），拾取槽内**附魔品**——
+        //   setHeldBlock 早退不清字段，后续四个 setter 逐个覆写 → 附魔必须落上（桩同语义实链验证）。
+        vm.setHeldBlock(pick);
+        vm.setHeldCount(1);
+        vm.setHeldDurability(ToolRegistry::maxDurability(pick));
+        vm.setHeldEnchants(QVariantList{0, 0, 0, 0});
+        vm.setHeldCustomName(QString());
+        vm.setStack(6, pick, 1, pickDur, QVariantList{eff3, unb2, 0, 0}, "第二把");
+        vm.setStack(6, 0, 0, 0);                                     // 清源
+        vm.setHeldBlock(pick);                                       // 同 id → 早退（旧字段保留）
+        vm.setHeldCount(1);
+        vm.setHeldDurability(pickDur);
+        vm.setHeldEnchants(QVariantList{eff3, unb2, 0, 0});
+        vm.setHeldCustomName(QStringLiteral("第二把"));
+        {
+            const QVariantList he2 = vm.heldEnchants();
+            okA_sameId = he2.at(0).toInt() == eff3 && he2.at(1).toInt() == unb2
+                          && vm.heldDurability() == pickDur && vm.heldCustomName() == QStringLiteral("第二把");
+            if (!okA_sameId)
+                qInfo().noquote() << "  [t822 A3 diag] held dur=" << vm.heldDurability()
+                                  << "ench=" << he2 << "name=" << vm.heldCustomName();
+        }
+        // (A4) 关包归还（AnvilUI.returnAnvilToHotbar → addToAny 全参镜像）：护甲 + 附魔书整件归还，
+        //   空槽开新分支须写附魔 + 名（合并不搬实例元数据；cap=1 物品永不走合并）。
+        vm.mainSetStack(6, chest, 1, 40, QVariantList{(EnchantRegistry::Protection << 8) | 4, unb2, 0, 0}, "守护者");
+        vm.mainSetStack(7, book, 1, 0, QVariantList{(EnchantRegistry::Sharpness << 8) | 5, (EnchantRegistry::FireAspect << 8) | 1, 0, 0}, "");
+        const int leftChest = vm.addToAny(chest, 1, 40, QVariantList{(EnchantRegistry::Protection << 8) | 4, unb2, 0, 0}, "守护者");
+        const int leftBook = vm.addToAny(book, 1, 0, QVariantList{(EnchantRegistry::Sharpness << 8) | 5, (EnchantRegistry::FireAspect << 8) | 1, 0, 0}, "");
+        bool foundChest = false, foundBook = false;
+        for (int i = 0; i < vm.slotCount(); ++i) {
+            if (vm.blockIdAt(i) == chest) {
+                const QVariantList ce = vm.enchantsAt(i);
+                foundChest = vm.customNameAt(i) == QStringLiteral("守护者") && vm.durabilityAt(i) == 40
+                              && ce.at(0).toInt() == ((EnchantRegistry::Protection << 8) | 4) && ce.at(1).toInt() == unb2;
+            }
+            if (vm.blockIdAt(i) == book) {
+                const QVariantList be = vm.enchantsAt(i);
+                foundBook = be.at(0).toInt() == ((EnchantRegistry::Sharpness << 8) | 5)
+                             && be.at(1).toInt() == ((EnchantRegistry::FireAspect << 8) | 1);
+            }
+        }
+        okA_return = leftChest == 0 && leftBook == 0 && foundChest && foundBook;
+        if (!okA_return)
+            qInfo().noquote() << "  [t822 A4 diag] leftChest=" << leftChest << "leftBook=" << leftBook
+                              << "foundChest=" << foundChest << "foundBook=" << foundBook;
+        const bool okT822a = okA_pickup && okA_place && okA_sameId && okA_return;
+        if (!okT822a) ++totalFail;
+        qInfo().noquote() << (okT822a ? "PASS" : "FAIL")
+                          << "| t822a real-Hotbar anvil cursor chain (mock-VM residual divergence closed): "
+                             "AnvilUI.slotLeft/takeProduct/returnAnvilToHotbar call sequences mirrored onto the "
+                             "actual C++ Hotbar VM - pickup clears-then-refills cursor in order (setHeldBlock "
+                             "new-id wipes ench/name, setters after), same-id pickup early-return keeps stale "
+                             "fields then overwrites one-by-one (ench MUST land), full-stack place into main, "
+                             "addToAny close-panel return for armor piece + enchanted book (new-slot branch "
+                             "writes ench/name, cap-1 never merges); covered categories tool/armor/book + "
+                             "multi-ench (2-slot pick, 4-field arrays)";
+    }
+
+    // (B) 真 WorldStore SQLite round-trip：gatherPlayerState 精确形状落盘 → 关库重开 → applyPlayerState
+    //   精确调用回灌 → 全字段比对。四条满配剑（4 ench 全占用）覆盖多附魔上界。
+    bool okB_build = true, okB_round = true, okB_apply = true;
+    {
+        Hotbar vm2;
+        const int pick = ToolRegistry::PickaxeIron;
+        const int sword = ToolRegistry::SwordIron;
+        const int chest = RecipeRegistry::ArmorIdBase + 4 * ArmorRegistry::Iron + ArmorRegistry::Chestplate;
+        const int book = RecipeRegistry::EnchantedBookId;
+        const int eff3 = (EnchantRegistry::Efficiency << 8) | 3;
+        const int unb2 = (EnchantRegistry::Unbreaking << 8) | 2;
+        const int sharp3 = (EnchantRegistry::Sharpness << 8) | 3;
+        const int kb2 = (EnchantRegistry::Knockback << 8) | 2;
+        const int fire2 = (EnchantRegistry::FireAspect << 8) | 2;
+        const int unb3 = (EnchantRegistry::Unbreaking << 8) | 3;
+        const int prot4 = (EnchantRegistry::Protection << 8) | 4;
+        const int pickDur = ToolRegistry::maxDurability(pick) - 5;
+        const int swordDur = ToolRegistry::maxDurability(sword) - 9;
+        const int chestDur = ArmorRegistry::maxDurability(chest) - 17;
+        vm2.setStack(2, pick, 1, pickDur, QVariantList{eff3, unb2, 0, 0}, "我的神镐");
+        vm2.setStack(3, book, 1, 0, QVariantList{(EnchantRegistry::Sharpness << 8) | 5, (EnchantRegistry::FireAspect << 8) | 1, 0, 0}, "");
+        vm2.mainSetStack(5, sword, 1, swordDur, QVariantList{sharp3, kb2, fire2, unb3}, "勇者之剑");
+        vm2.mainSetStack(6, chest, 1, chestDur, QVariantList{prot4, unb2, 0, 0}, "守护者");
+        vm2.armorSetStack(1, chest, 1, chestDur - 3, QVariantList{(EnchantRegistry::Protection << 8) | 3, unb2, 0, 0}, "");
+
+        // gather（Main.qml gatherPlayerState :665-688 精确镜像：每槽五字段 + version 3）。
+        QVariantMap data;
+        QVariantList hotbarArr, mainArr, armorArr;
+        for (int i = 0; i < vm2.slotCount(); ++i) {
+            QVariantMap s;
+            s.insert(QStringLiteral("id"), vm2.blockIdAt(i));
+            s.insert(QStringLiteral("count"), vm2.countAt(i));
+            s.insert(QStringLiteral("durability"), vm2.durabilityAt(i));
+            s.insert(QStringLiteral("enchants"), vm2.enchantsAt(i));
+            s.insert(QStringLiteral("name"), vm2.customNameAt(i));
+            hotbarArr.append(s);
+        }
+        for (int i = 0; i < vm2.mainCount(); ++i) {
+            QVariantMap s;
+            s.insert(QStringLiteral("id"), vm2.mainBlockIdAt(i));
+            s.insert(QStringLiteral("count"), vm2.mainCountAt(i));
+            s.insert(QStringLiteral("durability"), vm2.mainDurabilityAt(i));
+            s.insert(QStringLiteral("enchants"), vm2.mainEnchantsAt(i));
+            s.insert(QStringLiteral("name"), vm2.mainCustomNameAt(i));
+            mainArr.append(s);
+        }
+        for (int i = 0; i < vm2.armorCount(); ++i) {
+            QVariantMap s;
+            s.insert(QStringLiteral("id"), vm2.armorBlockIdAt(i));
+            s.insert(QStringLiteral("count"), vm2.armorCountAt(i));
+            s.insert(QStringLiteral("durability"), vm2.armorDurabilityAt(i));
+            s.insert(QStringLiteral("enchants"), vm2.armorEnchantsAt(i));
+            s.insert(QStringLiteral("name"), vm2.armorCustomNameAt(i));
+            armorArr.append(s);
+        }
+        data.insert(QStringLiteral("version"), 3);
+        data.insert(QStringLiteral("px"), 40); data.insert(QStringLiteral("py"), 44); data.insert(QStringLiteral("pz"), 40);
+        data.insert(QStringLiteral("yaw"), 0); data.insert(QStringLiteral("pitch"), -42);
+        data.insert(QStringLiteral("mode"), 0);
+        data.insert(QStringLiteral("health"), 20); data.insert(QStringLiteral("hunger"), 20);
+        data.insert(QStringLiteral("xp"), 7);
+        data.insert(QStringLiteral("selectedSlot"), 2);
+        data.insert(QStringLiteral("hotbar"), hotbarArr);
+        data.insert(QStringLiteral("main"), mainArr);
+        data.insert(QStringLiteral("armor"), armorArr);
+
+        // 落盘 → 关库 → 重开 → 读回（临时目录绝对路径；dbPath 对绝对入参直通，不污染 saves/）。
+        WorldStore store;
+        const QString dbAbs = QDir::temp().absoluteFilePath(QStringLiteral("voxel_t822_probe.sqlite"));
+        QFile::remove(dbAbs);
+        okB_build = store.openWorld(dbAbs) && store.savePlayerData(data);
+        store.closeWorld();
+        QVariantMap back;
+        if (okB_build) {
+            okB_build = store.openWorld(dbAbs);
+            if (okB_build) back = store.loadPlayerData();
+            store.closeWorld();
+        }
+        QFile::remove(dbAbs);
+        if (!okB_build) {
+            qInfo().noquote() << "  [t822 B diag] open/save/reopen failed";
+        } else {
+            // JSON 读回逐字段（toInt 显式转换：JSON 数字经 toVariant 可能成 double，勿依赖 QVariant==）。
+            const auto slotEq = [](const QVariantMap &s, int id, int count, int dur, int e0, int e1, int e2, int e3, const QString &name) {
+                const QVariantList e = s.value(QStringLiteral("enchants")).toList();
+                return s.value(QStringLiteral("id")).toInt() == id
+                        && s.value(QStringLiteral("count")).toInt() == count
+                        && s.value(QStringLiteral("durability")).toInt() == dur
+                        && s.value(QStringLiteral("name")).toString() == name
+                        && int(e.size()) == 4 && e.at(0).toInt() == e0 && e.at(1).toInt() == e1
+                        && e.at(2).toInt() == e2 && e.at(3).toInt() == e3;
+            };
+            const QVariantList hb = back.value(QStringLiteral("hotbar")).toList();
+            const QVariantList mn = back.value(QStringLiteral("main")).toList();
+            const QVariantList ar = back.value(QStringLiteral("armor")).toList();
+            okB_round = int(hb.size()) == vm2.slotCount() && int(mn.size()) == vm2.mainCount() && int(ar.size()) == vm2.armorCount()
+                          && slotEq(hb.at(0).toMap(), 0, 0, 0, 0, 0, 0, 0, QString())
+                          && slotEq(hb.at(2).toMap(), pick, 1, pickDur, eff3, unb2, 0, 0, QStringLiteral("我的神镐"))
+                          && slotEq(hb.at(3).toMap(), book, 1, 0, (EnchantRegistry::Sharpness << 8) | 5, (EnchantRegistry::FireAspect << 8) | 1, 0, 0, QString())
+                          && slotEq(mn.at(5).toMap(), sword, 1, swordDur, sharp3, kb2, fire2, unb3, QStringLiteral("勇者之剑"))
+                          && slotEq(mn.at(6).toMap(), chest, 1, chestDur, prot4, unb2, 0, 0, QStringLiteral("守护者"))
+                          && slotEq(mn.at(26).toMap(), 0, 0, 0, 0, 0, 0, 0, QString())
+                          && slotEq(ar.at(1).toMap(), chest, 1, chestDur - 3, (EnchantRegistry::Protection << 8) | 3, unb2, 0, 0, QString());
+            if (!okB_round) {
+                qInfo().noquote() << "  [t822 B diag] hbN=" << hb.size() << "mnN=" << mn.size() << "arN=" << ar.size()
+                                  << " hb2=" << hb.at(2).toMap() << " mn5=" << mn.at(5).toMap() << " ar1=" << ar.at(1).toMap();
+            }
+            // apply（Main.qml applyPlayerState :634-655 精确镜像）→ 新 VM 逐字段与 vm2 比对。
+            Hotbar vm3;
+            for (int i = 0; i < 9; ++i) {
+                const QVariantMap s = hb.at(i).toMap();
+                vm3.setStack(i, s.value(QStringLiteral("id")).toInt(), s.value(QStringLiteral("count")).toInt(),
+                             s.contains(QStringLiteral("durability")) ? s.value(QStringLiteral("durability")).toInt() : -1,
+                             s.contains(QStringLiteral("enchants")) ? s.value(QStringLiteral("enchants")).toList() : QVariantList(),
+                             s.contains(QStringLiteral("name")) ? s.value(QStringLiteral("name")).toString() : QString());
+            }
+            for (int i = 0; i < 27; ++i) {
+                const QVariantMap s = mn.at(i).toMap();
+                vm3.mainSetStack(i, s.value(QStringLiteral("id")).toInt(), s.value(QStringLiteral("count")).toInt(),
+                                 s.contains(QStringLiteral("durability")) ? s.value(QStringLiteral("durability")).toInt() : -1,
+                                 s.contains(QStringLiteral("enchants")) ? s.value(QStringLiteral("enchants")).toList() : QVariantList(),
+                                 s.contains(QStringLiteral("name")) ? s.value(QStringLiteral("name")).toString() : QString());
+            }
+            for (int i = 0; i < 4; ++i) {
+                const QVariantMap s = ar.at(i).toMap();
+                vm3.armorSetStack(i, s.value(QStringLiteral("id")).toInt(), s.value(QStringLiteral("count")).toInt(),
+                                  s.contains(QStringLiteral("durability")) ? s.value(QStringLiteral("durability")).toInt() : -1,
+                                  s.contains(QStringLiteral("enchants")) ? s.value(QStringLiteral("enchants")).toList() : QVariantList(),
+                                  s.contains(QStringLiteral("name")) ? s.value(QStringLiteral("name")).toString() : QString());
+            }
+            const auto vmEq = [&vm2, &vm3](bool armor, int i) {
+                const int idA = armor ? vm2.armorBlockIdAt(i) : (i < 9 ? vm2.blockIdAt(i) : vm2.mainBlockIdAt(i - 9));
+                const int idB = armor ? vm3.armorBlockIdAt(i) : (i < 9 ? vm3.blockIdAt(i) : vm3.mainBlockIdAt(i - 9));
+                const int durA = armor ? vm2.armorDurabilityAt(i) : (i < 9 ? vm2.durabilityAt(i) : vm2.mainDurabilityAt(i - 9));
+                const int durB = armor ? vm3.armorDurabilityAt(i) : (i < 9 ? vm3.durabilityAt(i) : vm3.mainDurabilityAt(i - 9));
+                const QString nmA = armor ? vm2.armorCustomNameAt(i) : (i < 9 ? vm2.customNameAt(i) : vm2.mainCustomNameAt(i - 9));
+                const QString nmB = armor ? vm3.armorCustomNameAt(i) : (i < 9 ? vm3.customNameAt(i) : vm3.mainCustomNameAt(i - 9));
+                const QVariantList eA = armor ? vm2.armorEnchantsAt(i) : (i < 9 ? vm2.enchantsAt(i) : vm2.mainEnchantsAt(i - 9));
+                const QVariantList eB = armor ? vm3.armorEnchantsAt(i) : (i < 9 ? vm3.enchantsAt(i) : vm3.mainEnchantsAt(i - 9));
+                if (idA != idB || durA != durB || nmA != nmB || eA.size() != eB.size()) return false;
+                for (int k = 0; k < int(eA.size()); ++k) if (eA.at(k).toInt() != eB.at(k).toInt()) return false;
+                return true;
+            };
+            bool eq = true;
+            for (int i = 0; i < 9 && eq; ++i) eq = vmEq(false, i);
+            for (int i = 0; i < 27 && eq; ++i) eq = vmEq(false, i + 9);
+            for (int i = 0; i < 4 && eq; ++i) eq = vmEq(true, i);
+            okB_apply = eq;
+            if (!okB_apply)
+                qInfo().noquote() << "  [t822 B apply diag] applied VM differs from source VM (field mismatch above)";
+        }
+        const bool okT822b = okB_build && okB_round && okB_apply;
+        if (!okT822b) ++totalFail;
+        qInfo().noquote() << (okT822b ? "PASS" : "FAIL")
+                          << "| t822b real-WorldStore SQLite enchant round-trip (serialization leg never probed "
+                             "before): exact gatherPlayerState v3 map shape (hotbar9+main27+armor4, per-slot "
+                             "id/count/durability/enchants[4]/name) saved via savePlayerData -> close -> reopen -> "
+                             "loadPlayerData -> JSON field compare -> exact applyPlayerState calls into a fresh "
+                             "Hotbar -> all-slot field equality vs source VM; covered multi-ench 4/4-full sword, "
+                             "enchanted book, armor piece with partial durability + custom names + empty slots "
+                             "(db on temp-dir absolute path, saves/ untouched)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
