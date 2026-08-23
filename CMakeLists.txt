@@ -832,6 +832,20 @@ add_executable(redstone_matrix_test
     # farmer 全祖先链解锁 + sniper 不补链对照；向下只依赖 Core/Qt，不引入 World/QML）。
     src/Game/playerprogress.cpp
     src/Game/playerprogress.h
+    # t814 真消费端探针附加：Game 层 PlayerController 直编（firePowerTnt / fireDispenserAtQml 真方法执行
+    # —— 此前矩阵只对 World 原始信号计数，消费端从未被自动化测试跑过）。PlayerController 是 QQuickItem
+    # 派生 → 链 Qt6::Quick；随附其全部向下依赖（dispenserstore / loottable / raycast / xporbmanager /
+    # worldclock —— 均只向下依赖 Core/World/Entities，不引入 QML 场景）。
+    src/Game/playercontroller.cpp
+    src/Game/playercontroller.h
+    src/Game/dispenserstore.cpp
+    src/Game/dispenserstore.h
+    src/Game/loottable.cpp
+    src/Game/raycast.cpp
+    src/Entities/xporbmanager.cpp
+    src/Entities/xporbmanager.h
+    src/World/worldclock.cpp
+    src/World/worldclock.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
@@ -846,4 +860,6 @@ target_link_libraries(redstone_matrix_test PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Qml
+    # t814 真消费端探针：PlayerController 是 QQuickItem 派生（Qt Quick）→ 链 Quick。
+    Qt6::Quick
 )

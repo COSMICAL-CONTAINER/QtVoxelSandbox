@@ -9,6 +9,7 @@
 //   worldgen 断言（要塞传送门房净空 —— 独立小世界扫种子，不动主世界 rig）。
 //   运行：build/redstone_matrix_test.exe，全过 exit 0。
 #include <QCoreApplication>
+#include <QGuiApplication> // t814 真消费端探针：PlayerController 是 QQuickItem 派生 → 实例化需 Gui 应用对象
 #include <QDebug>
 #include <QDir>   // t777 探针（羊毛层合成器临时 PNG rig）
 #include <QImage> // t777 探针（fur/body 双 PNG 生成 + 合成结果像素断言）
@@ -37,6 +38,8 @@
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
+#include "playercontroller.h"     // t814 真消费端探针（Game 层 PlayerController 直编：firePowerTnt/fireDispenserAtQml）
+#include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
 //   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。review #6：第 3 参 revision 进文件名
@@ -75,19 +78,29 @@ struct RecvDef {
 
 int main(int argc, char *argv[])
 {
-    QCoreApplication app(argc, argv);
+    // t814：QCoreApplication → QGuiApplication —— Game 层 PlayerController 直编（QQuickItem 派生，
+    //   构造需 Gui 平台集成；无窗口创建，探针纯对象交互）。
+    QGuiApplication app(argc, argv);
 
     World w;
     w.setWidth(96);
-    w.setDepth(96);
+    w.setDepth(128); // t814：96 → 128 —— rig 位耗尽（slotIdx=125 > 96 深度的 124 位上限）后 nextSlot 落
+                     //   z≥96 越界区，setBlock 被静默拒绝 → 器件根本没放上 → 消费端探针全线假 FAIL。
+                     //   深度扩到 128：既有 slot 0..123 坐标不变（列距 22 / 行距 3 只向后延伸），新 probe
+                     //   落新增行（z=97 起）。世界生成按新深度 regenerate 一次（秒级）。
     w.setHeight(48); // 3 次 setter 各 regenerate 一次（几秒内）；生成快
 
     // rig 寻址（2D 网格防越界——首版 x 单排递增在 x>48 后 setBlock 全被越界拒绝 = 假 FAIL）：x 列距 22
-    //   （容纳 16 粉 + 源 + 接收器的最长探针 18 格）、z 行距 3；96×96 → 4 列 × ~31 行 = 124 rig 位。
+    //   （容纳 16 粉 + 源 + 接收器的最长探针 18 格）、z 行距 3；96×128 → 4 列 × 42 行 = 168 rig 位。
+    //   t814 教训：耗尽后 setBlock 静默拒绝（无返回值无告警）→ 器件没放上 → 下游探针全线假 FAIL 且
+    //   diag 指向消费端（真凶是选址）——故越界改为 qFatal 硬失败（响亮 > 静默腐烂）。
     int slotIdx = 0;
     const auto nextSlot = [&]() {
         const int col = slotIdx % 4, row = slotIdx / 4;
         ++slotIdx;
+        if (4 + row * 3 >= 128)
+            qFatal("rig grid exhausted: slot %d beyond 128-deep grid (4 cols x 42 rows = 168) - "
+                   "out-of-bounds setBlock is silently rejected = false FAIL farm", slotIdx);
         return QPair<int, int>(4 + col * 22, 4 + row * 3);
     };
 
@@ -6237,6 +6250,185 @@ int main(int argc, char *argv[])
                           << "(7-10 hex, git rev-parse --short HEAD); header regenerated every "
                              "build via cmake/WriteBuildStamp.cmake with content-change-only "
                              "rewrite so only buildinfo.cpp recompiles";
+    }
+
+    // ── P-t814 真消费端执行探针（Game 层 PlayerController 直编）──
+    //   用户报告（R19.13）：「激活红石粉/红石块/红石火把都不能点燃 TNT、不能触发发射器/投掷器」，但
+    //   t772（42 组合）/t773（3 探针）全 PASS 且用户同时确认铁门/铁活板门能开。分叉实证：铁门/铁活板门是
+    //   recomputePowerLocal **静默写 state**（纯 World 内闭环），TNT/发射器/投掷器走 **信号→QML 转发→
+    //   player.firePowerTnt/fireDispenserAtQml** —— 此前矩阵只对 World 原始信号计数（P15）/镜像 clearBlockSilent
+    //   （t773），**真 PlayerController 消费方法从未被任何自动化测试执行过**（QML 侧仅静态审计）。本探针把
+    //   Game 层 PlayerController 连同 EntityManager/DispenserStore/ItemEntityManager 装进矩阵，以 C++ 直接
+    //   连接精确镜像 Main.qml 双转发 handler（Connections{target:theWorld} 同线程直接调用语义），驱动用户
+    //   实测路径（器件先就位 → 后激活源）断言端到端效果：
+    //   (a) 拉杆扳开 → 邻 TNT：方块被 clearBlockSilent 清 + EntityManager 生 PrimedTnt 实体（格心坐标）；
+    //   (b) 红石块贴发射器（store 预填 3 箭）→ spawnArrowPlayer 生 1 箭 + 库存 3→2（右键 UI 装填后电力触发
+    //       的完整用户路径）；
+    //   (c) 拉杆贴投掷器（store 预填 5 粉）→ ItemEntityManager 生 1 掉落物 + 库存 5→4（dropper spawnItemAt
+    //       分支——m_itemEntities 注入态）；
+    //   (d) 空库存发射器通电 → 无任何实体生成（t607「空库存玩家机器无动作」设计语义，防误判为缺陷）；
+    //   (e) 沿语义：稳定通电下再制造电力活动（另一侧拉杆扳开再扳回）→ 不重复发射（fireDispenserAtQml 基线
+    //       集 unpowered→powered 沿检测，t689）；源拆除再快速复置 → 冷却窗内仍不发射（per-dispenser 2s 闸）。
+    //   任一 FAIL = 用户症状在消费端的复现点（World 层已由 P15/t773 洗冤）；全 PASS = 链完整，用户复测走
+    //   docs/test-reports/t814-redstone-repro-steps.md（版本戳核对 + 逐源×逐器件最简搭建）。
+    {
+        PlayerController pc;          // 真消费端（Game 层；C++ 直造不启 16ms 定时器——componentComplete 不触发）
+        EntityManager ents;           // spawnPrimedTnt / spawnArrowPlayer 断言源（不 tick → 实体冻结可数）
+        DispenserStore store;         // 库存分派断言源
+        ItemEntityManager items;      // 投掷器 spawnItemAt 掉落物断言源
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setDispenserStore(&store);
+        pc.setItemEntities(&items);
+        // Main.qml 双转发 handler 的 C++ 等价镜像（src/ui/Main.qml onPowerTntTriggered → player.firePowerTnt /
+        //   onPowerDispenserTriggered → player.fireDispenserAtQml；同线程直接连接 = QML handler 语义）。
+        QObject::connect(&w, &World::powerTntTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.firePowerTnt(x, y, z); });
+        QObject::connect(&w, &World::powerDispenserTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
+
+        // (a) TNT：拉杆贴合（器件先就位稳态 → 后扳拉杆，用户实测路径）。
+        bool okA = false;
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::TntBlock, 0);
+            tickN(w, 2);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Lever, 1); // 扳开（state bit0=1）
+            tickN(w, 4);
+            int primedIdx = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.isPrimedAt(i)) { primedIdx = i; break; }
+            okA = w.blockAt(x0, kRigY, z0) == BR::Air                    // firePowerTnt 清块
+                  && primedIdx >= 0                                     // PrimedTnt 实体在场
+                  && std::abs(ents.posAt(primedIdx).x() - (x0 + 0.5f)) < 1e-3f
+                  && std::abs(ents.posAt(primedIdx).y() - (kRigY + 0.5f)) < 1e-3f
+                  && std::abs(ents.posAt(primedIdx).z() - (z0 + 0.5f)) < 1e-3f;
+            if (!okA)
+                qInfo().noquote() << "  [t814 a diag] block=" << int(w.blockAt(x0, kRigY, z0))
+                                  << " primedIdx=" << primedIdx << " ents.count=" << ents.count();
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            ents.clearAll(); // 清引燃实体（防污染后续探针的实体计数）
+            tickN(w, 2);
+        }
+
+        // (b) 发射器：红石块贴合 + store 预填 3 箭（右键 UI 装填后电力触发的完整路径）。
+        bool okB = false, okBInv = false;
+        int arrowsAfterB = -1;
+        int bx0 = 0, bz0 = 0;
+        {
+            const auto [x0, z0] = nextSlot();
+            bx0 = x0; bz0 = z0;
+            w.setBlock(x0, kRigY, z0, BR::Dispenser, 0);
+            store.ensureDispenser(x0, kRigY, z0);
+            store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::ArrowId, 3);
+            tickN(w, 2);
+            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneBlock, 0);
+            tickN(w, 4);
+            int arrows = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++arrows;
+            arrowsAfterB = arrows;
+            okB = arrows == 1;
+            okBInv = store.slotIdAt(x0, kRigY, z0, 0) == RecipeRegistry::ArrowId
+                     && store.slotCountAt(x0, kRigY, z0, 0) == 2;
+            if (!okB || !okBInv)
+                qInfo().noquote() << "  [t814 b diag] arrows=" << arrows
+                                  << " slotId=" << store.slotIdAt(x0, kRigY, z0, 0)
+                                  << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0);
+        }
+
+        // (e) 沿语义（复用 (b) 机器——同 (x,z) 键同基线/冷却）：稳定通电下再制造电力活动（对侧拉杆扳开→
+        //     扳回两次触达）不重复发射；源拆→快速复置（真上升沿但 <2s 冷却）也不发射。
+        bool okE = false;
+        {
+            w.setBlock(bx0 - 1, kRigY, bz0, BR::Lever, 1); // 对侧第二源扳开 → 复算触达（升沿到已通电机）
+            tickN(w, 4);
+            w.setBlock(bx0 - 1, kRigY, bz0, BR::Lever, 0); // 扳回 → 降沿触达
+            tickN(w, 4);
+            int arrows2 = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++arrows2;
+            w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);   // 拆源（降沿）
+            tickN(w, 4);
+            w.setBlock(bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置（真上升沿，但冷却 2s 未过）
+            tickN(w, 4);
+            int arrows3 = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++arrows3;
+            okE = arrows2 == arrowsAfterB && arrows3 == arrowsAfterB
+                  && store.slotCountAt(bx0, kRigY, bz0, 0) == 2; // 库存不再扣（无第二次发射）
+            if (!okE)
+                qInfo().noquote() << "  [t814 e diag] arrowsAfterB=" << arrowsAfterB
+                                  << " arrowsAfterStable=" << arrows2 << " arrowsAfterRepower=" << arrows3
+                                  << " slotCount=" << store.slotCountAt(bx0, kRigY, bz0, 0);
+            // 清场
+            w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);
+            w.setBlock(bx0, kRigY, bz0, BR::Air, 0);
+            store.clearDispenser(bx0, kRigY, bz0);
+            ents.clearAll();
+            tickN(w, 2);
+        }
+
+        // (c) 投掷器：拉杆贴合 + store 预填 5 粉 → 掉落物弹出（dropper 只投不射，spawnItemAt 分支）。
+        bool okC = false, okCInv = false;
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::Dropper, 0);
+            store.ensureDispenser(x0, kRigY, z0);
+            store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::RedstoneId, 5);
+            tickN(w, 2);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Lever, 1);
+            tickN(w, 4);
+            okC = items.count() == 1;
+            okCInv = store.slotIdAt(x0, kRigY, z0, 0) == RecipeRegistry::RedstoneId
+                     && store.slotCountAt(x0, kRigY, z0, 0) == 4;
+            if (!okC || !okCInv)
+                qInfo().noquote() << "  [t814 c diag] items.count=" << items.count()
+                                  << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            store.clearDispenser(x0, kRigY, z0);
+            tickN(w, 2);
+        }
+
+        // (d) 空库存发射器通电 → 无动作（t607 设计语义：tracked 空库存 = 陷阱解除，无 fallback 箭）。
+        //   断言相对基线（快照本场景前 ents/items 计数）：绝对值依赖 (c) 掉落物持久性（ItemEntityManager
+        //   生命周期属呈现层语义，探针不该跨场景绑定）——「无**新**实体」才是本场景的语义内核。
+        bool okD = false;
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::Dispenser, 0);
+            store.ensureDispenser(x0, kRigY, z0); // 有条目但库存全空
+            tickN(w, 2);
+            const int entsBefore = ents.count(), itemsBefore = items.count();
+            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneBlock, 0);
+            tickN(w, 4);
+            int arrows = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++arrows;
+            okD = arrows == 0 && ents.count() == entsBefore && items.count() == itemsBefore; // 无新实体
+            if (!okD)
+                qInfo().noquote() << "  [t814 d diag] arrows=" << arrows
+                                  << " ents=" << ents.count() << "/" << entsBefore
+                                  << " items=" << items.count() << "/" << itemsBefore;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            store.clearDispenser(x0, kRigY, z0);
+            tickN(w, 2);
+        }
+
+        const bool okT814 = okA && okB && okBInv && okC && okCInv && okD && okE;
+        if (!okT814) ++totalFail;
+        qInfo().noquote() << (okT814 ? "PASS" : "FAIL")
+                          << "| t814 real-consumer probes: Main.qml forwarding mirrored onto actual "
+                             "PlayerController.firePowerTnt/fireDispenserAtQml (lever->TNT clears block + spawns "
+                             "primed entity at cell center; redstone-block->dispenser w/ 3 arrows fires 1 + "
+                             "decrements to 2; lever->dropper w/ 5 dust pops 1 item entity + decrements to 4; "
+                             "empty tracked dispenser powered = design no-op; stable-power re-touch and "
+                             "sub-2s-cooldown re-power both do not re-fire) - consumer leg never executed by "
+                             "P15/t773 before, iron-door contrast explained (door = in-World state write, "
+                             "TNT/dispenser = signal->QML->consumer)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
