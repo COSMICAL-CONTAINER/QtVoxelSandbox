@@ -422,9 +422,17 @@ void World::regenerate(int seed)
     emit worldChanged();
 }
 
-void World::setWidth(int w)  { if (w == m_width)  return; m_width = w;  generate(); emit widthChanged();  emit worldChanged(); }
-void World::setDepth(int d)  { if (d == m_depth)  return; m_depth = d;  generate(); emit depthChanged();  emit worldChanged(); }
-void World::setHeight(int h) { if (h == m_height) return; m_height = h; generate(); emit heightChanged(); emit worldChanged(); }
+// review #20（出生点/进度组）：尺寸 setter 补 emit seedChanged —— 信号语义扩位为「世界内容整体换代」
+//   （seed 数值变 **或** 尺寸重建）。消费端 PlayerController::onWorldSeedChanged 复位重生点正需要它：
+//   尺寸 setter 走 generate 重选出生列（findSpawnColumn），但旧世界的派生缓存（重生点坐标）不再指向新
+//   栅格，不 emit 则永留旧尺寸坐标（潜伏坑：生产路径 regenerate/beginLoad 均 emit 未踩中，setter 链
+//   目前仅测试工具连调）。取舍——不引入节流 / 单一 worldReset 信号：①消费端仅 onWorldSeedChanged 一处
+//   （幂等复位，零重建副作用；generate 本就每 setter 各跑一次，emit 不新增重建，三连发只是三次廉价复位）；
+//   ②seedChanged 兼任 Q_PROPERTY seed 的 NOTIFY，值未变的额外通知只致绑定重求值同值（Qt 允许，无害）；
+//   ③改单一 resize 入口要动 ~20 处测试调用点且无行为差异，不为潜伏坑扩 API 面。
+void World::setWidth(int w)  { if (w == m_width)  return; m_width = w;  generate(); emit widthChanged();  emit seedChanged(); emit worldChanged(); }
+void World::setDepth(int d)  { if (d == m_depth)  return; m_depth = d;  generate(); emit depthChanged();  emit seedChanged(); emit worldChanged(); }
+void World::setHeight(int h) { if (h == m_height) return; m_height = h; generate(); emit heightChanged(); emit seedChanged(); emit worldChanged(); }
 void World::setSeed(int s)   { if (s == m_seed)   return; m_seed = s;   generate(); emit seedChanged();   emit worldChanged(); }
 
 quint8 World::blockAt(int x, int y, int z) const

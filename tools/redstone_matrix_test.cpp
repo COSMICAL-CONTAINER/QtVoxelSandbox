@@ -27,6 +27,7 @@
 #include "recipe.h"       // t802 全配方审计探针（match 两阶段匹配 + recipeAt 全表自匹配回归）
 #include "smelting.h"     // t802 云杉链熔炉补缺探针（SpruceLog→木炭 + 云杉原木/木板燃料）
 #include "playerstate.h"  // t755 死亡态硬锁探针（致死落库 0 / heal 死亡免疫 / respawn 复位链）
+#include "playerprogress.h" // review #22 农夫计数回放链式补前置探针（loadVariant → unlockWithAncestry）
 #include "world.h"
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
@@ -1450,6 +1451,90 @@ int main(int argc, char *argv[])
                           << "| spawn column search: seeds {42,7,1337,2024,99} all resolve to standable "
                              "bare surface — solid/snow-layer support, feet+head cells air, heightmap=="
                              "heightAt (no trunk/canopy/water overhead) (t756)";
+    }
+
+    // ── review-d #20 尺寸 setter seedChanged 探针（World 层信号链；Review 2026-08-23 #20 潜伏坑半边）：
+    //    setWidth/setDepth/setHeight 重建世界（generate 内 findSpawnColumn 按新尺寸重选出生列）但修前不
+    //    emit seedChanged → 挂接该信号的世界派生缓存不被通知（PlayerController::onWorldSeedChanged 复位
+    //    重生点 → 旧尺寸出生列坐标残留指向新栅格）。断言：①三 setter 变值各发恰一次 seedChanged；
+    //    ②同值守卫静默（幂等）；③重建后出生列 getter 落在新尺寸界内（与 setter 链一致）。取舍：三连发
+    //    不节流（消费端幂等复位、generate 本就各跑一次，见 world.cpp setter 头注释）。PlayerController
+    //    侧采用链（adoptSpawnColumn / onWorldSeedChanged 复位）为 QQuickItem 派生类，不接入本 GUI-free
+    //    测试（QML enterWorld 接线人工目视）。
+    {
+        World wR20;
+        int seedSigs = 0;
+        QObject::connect(&wR20, &World::seedChanged, &wR20, [&]() { ++seedSigs; });
+        wR20.setWidth(32);   // 默认 16 → 32：generate + seedChanged ×1
+        wR20.setDepth(32);   // 16 → 32：×1
+        wR20.setHeight(48);  // 16 → 48：×1
+        const int afterThree = seedSigs;
+        wR20.setWidth(32);   // 同值守卫：不 generate 不 emit
+        const int sx20 = wR20.spawnColumnX(), sz20 = wR20.spawnColumnZ();
+        const bool ok = afterThree == 3 && seedSigs == 3
+                        && sx20 >= 0 && sx20 < 32 && sz20 >= 0 && sz20 < 32;
+        if (!ok)
+            qInfo().noquote() << "  [review-d #20 diag] afterThree" << afterThree
+                              << "final" << seedSigs << "spawnCol" << sx20 << sz20;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review-d #20 size setters emit seedChanged (world-identity reset "
+                             "notification: width/depth/height rebuild each notifies exactly once, "
+                             "same-value guard silent, spawn column getter in new bounds) "
+                             "(Review 2026-08-23 #20)";
+    }
+
+    // ── review-d #22 农夫计数回放链式补前置探针（Game 层 PlayerProgress；Review 2026-08-23 #22）：
+    //    t752 把 farmer 由独立根重挂 time_to_farm 下 → 「cropsHarvested≥10 但锄头线未解锁」的旧档计数
+    //    回放被 unlock 父前置静默吞（修前）。断言：①该档回放后 farmer + 全祖先链（time_to_farm/
+    //    crafting_table/get_wood/open_inventory）解锁；②树形一致（任何已解锁节点的父必已解锁——不出
+    //    「子亮父锁」破相）；③计数 9 对照不解锁；④sniper 回放不链式补前置（10 次箭命中不蕴含首杀，
+    //    父 monster_hunter 缺席仍吞——与实时 unlock 一致，非重挂回归面）；⑤档内已有中间祖先
+    //    （time_to_farm=true）时回放补齐其下 farmer 与其上祖先、已解锁级幂等。
+    {
+        PlayerProgress ppR22;
+        const auto loadStats = [&](const char *statKey, int statVal, const char *achKey) {
+            QVariantMap st; st.insert(QString::fromLatin1(statKey), statVal);
+            QVariantMap a;
+            if (achKey) a.insert(QString::fromLatin1(achKey), true);
+            QVariantMap data; data.insert("stats", st); data.insert("achievements", a);
+            ppR22.loadVariant(data);
+        };
+        // ① 计数达阈 + 全链未解锁 → 链式补全
+        loadStats("cropsHarvested", 10, nullptr);
+        const bool chainOk = ppR22.isUnlocked("farmer") && ppR22.isUnlocked("time_to_farm")
+                             && ppR22.isUnlocked("crafting_table") && ppR22.isUnlocked("get_wood")
+                             && ppR22.isUnlocked("open_inventory");
+        // ② 树形一致：每个已解锁且非根的 def，其父必已解锁
+        bool treeOk = true;
+        const QVariantList achR22 = ppR22.achievements();
+        for (const QVariant &v : achR22) {
+            const QVariantMap m = v.toMap();
+            if (m.value("unlocked").toBool() && !m.value("parentId").toString().isEmpty()
+                && !ppR22.isUnlocked(m.value("parentId").toString()))
+                treeOk = false;
+        }
+        // ③ 计数 9 对照：不解锁 farmer / 不补锄头线（回放只对达阈计数补链）
+        loadStats("cropsHarvested", 9, nullptr);
+        const bool belowOk = !ppR22.isUnlocked("farmer") && !ppR22.isUnlocked("time_to_farm");
+        // ④ sniper 回放保持原前置语义（不链式补：箭命中≠首杀）
+        loadStats("arrowsHitMobs", 10, nullptr);
+        const bool sniperOk = !ppR22.isUnlocked("sniper") && !ppR22.isUnlocked("monster_hunter");
+        // ⑤ 档内已有中间祖先：补齐上下 + 幂等
+        loadStats("cropsHarvested", 12, "time_to_farm");
+        const bool partialOk = ppR22.isUnlocked("farmer") && ppR22.isUnlocked("time_to_farm")
+                               && ppR22.isUnlocked("crafting_table") && ppR22.isUnlocked("get_wood")
+                               && ppR22.isUnlocked("open_inventory");
+        const bool ok = chainOk && treeOk && belowOk && sniperOk && partialOk;
+        if (!ok)
+            qInfo().noquote() << "  [review-d #22 diag] chain" << chainOk << "tree" << treeOk
+                              << "below" << belowOk << "sniper" << sniperOk << "partial" << partialOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review-d #22 farmer count replay chains ancestry: crops>=10 with hoe-line "
+                             "locked restores farmer + full ancestor chain tree-consistent, crops=9 no "
+                             "unlock, sniper replay stays parent-gated (arrow hits != first kill), "
+                             "mid-chain ancestor in save idempotent top-up (Review 2026-08-23 #22)";
     }
 
     // P14 审查 #2 火把翻转降沿 / 重亮升沿探针（t740 环粉可达性回归锁）：立在石块上的火把喂斜下环粉 → 灯亮；

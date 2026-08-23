@@ -740,7 +740,9 @@ signals:
     void widthChanged();
     void depthChanged();
     void heightChanged();
-    void seedChanged();
+    void seedChanged(); // 世界内容整体换代（seed 变 / regenerate / beginLoad / review #20 尺寸 setter 重建均
+                        // 发——尺寸重建时 seed 值未变，但旧世界派生缓存（重生点等）同样作废，消费端据此复位；
+                        // 兼任 Q_PROPERTY seed 的 NOTIFY，值未变的额外通知只致绑定重求值同值，无害）
     void worldChanged(); // 生成/编辑后发出 → 网格重建
     void weatherChanged(); // t385 天气态翻转（晴↔雨/雪/雷；驱动 QML 天空变暗 + 粒子切换）
     // t386 一次闪电击中（雷雨天随机触发）：携击中世界坐标 (x,y,z)。呈现层据此显屏幕白闪 + 雷声（playThunder）；

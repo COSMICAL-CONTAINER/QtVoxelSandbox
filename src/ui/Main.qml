@@ -544,6 +544,13 @@ Window {
         //   一次性抑制（玩家存档时踩着的陷阱板，读档首 tick 只建基线不误触发 TNT / 发射器）。须在
         //   applyPlayerState 之后调：抑制标记依赖位姿已灌存档值（首 tick footprint 采样在存档点）。
         player.finishWorldLoad()
+        // review #20（出生点/进度组，2026-08-23）：读档路径补出生列采用。上方 beginLoad 的 seedChanged 已把
+        //   重生点复位 pristine、finishLoad 的 findSpawnColumn 已按本世界体素解析出生列，但读档分支
+        //   applyPlayerState 走 loadSavedState（无 respawn → 无 snapSpawnToGround 调用点）→ 重生点 / 指南针
+        //   基准停在 kSpawn 常量 (80,80,80) 直到首次死亡才被 respawn 顺带采用（存档在远处时死亡被拉回世界
+        //   中心常量列，可能远离建家点）。显式补挂：只采用重生点、不动位姿（玩家仍从存档点进入世界）；
+        //   新世界路径 respawn→snap 已采用 → pristine 判据不中 → no-op。
+        player.adoptSpawnColumn()
         // t188 箱子按世界持久化 + 修跨世界泄漏：chestStore 跨世界长驻（同 hotbarVM），进世界前 loadAll
         //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
         //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
@@ -567,9 +574,10 @@ Window {
         carts.clearAll()    // t565 矿车同族实体（非体素不进存档），切世界必清（清骑乘态 + 空槽复用）
         // t312：清聊天历史（不持久化 / 不跨世界；新世界从空起）。
         chatMessages.clear()
-        // t240 进世界生成猪 / 牛 / 羊各一只于出生点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
-        //   生物蛋生成系统推迟到 t243，故本任务暂以固定 spawn 验证模型 + 贴图可见）。坐标取出生列 (40,40)
-        //   附近三格、Y = worldgen 地表 +1（落地上方一格 → 重力 tick 贴地表不摔伤）。§9 区隔：模型 / 贴图
+        // t240 进世界生成猪 / 牛 / 羊各一只于玩家进世界点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
+        //   生物蛋生成系统推迟到 t243，故本任务暂以固定 spawn 验证模型 + 贴图可见）。review #21 后坐标取
+        //   玩家进世界列（新世界=出生列 / 读档=存档点，见 spawnInitialMobs 头注释）附近三格、
+        //   Y = worldgen 地表 +1（落地上方一格 → 重力 tick 贴地表不摔伤）。§9 区隔：模型 / 贴图
         //   原创方块化（不照搬 MC），机制对齐 MC 1.0 passive mob（猪 / 牛 / 羊三种）。spawnMobTyped 第五参
         //   color 仅 mobType 0（测试生物）单色路径读，pig/cow/sheep 走 MobModel + 贴图 → 传占位串即可。
         spawnInitialMobs()
@@ -794,24 +802,31 @@ Window {
         audio.stopWaterFlow() // t223 水流声：回主菜单停（菜单态无声）
         audio.stopLavaFlow()  // t343 岩浆声：回主菜单停（同水流声）
     }
-    // t240 进世界生成猪 / 牛 / 羊各一只（出生点附近地表）。EntityManager 已注册 mobType 1/2/3 + spawnMobTyped
-    //   入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。坐标取出生列
-    //   （kSpawnX/Z，t276 大世界居中=80,80）附近三格、Y = theWorld.heightAt(x,z) + 1（worldgen 地表上方一格 →
-    //   重力 tick 贴地表，出生落差 0 不摔伤）。
-    //   §9 区隔：三种 mob 模型 / 贴图全原创方块化（不照搬 MC）；机制对齐 MC 1.0 passive mob 三种。
-    //   spawnMobTyped 第五参 color 仅 mobType 0（通用测试生物）单色路径读；pig/cow/sheep 走 MobModel + 贴图，
-    //   传占位串。maxHealth=10（MC 1.0 passive mob 5 心）。
+    // t240 进世界生成猪 / 牛 / 羊各一只（玩家进世界点附近地表）。EntityManager 已注册 mobType 1/2/3 +
+    //   spawnMobTyped 入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。
+    //   review #21（出生点/进度组，2026-08-23）：中心列改取**玩家实际进世界列**（player.feetPosition XZ 钳
+    //   边）——旧版固定 (76..84,76..78) 锚在 t276 前的常量出生列 (80,80)，而 t756 findSpawnColumn 的环形
+    //   扫描可把真实出生列带离整个环扫半径（保底动物与玩家互不可见，保底意义落空）；读档路径玩家从存档位
+    //   进入，锚出生列同样可能远离可见范围。取进世界时的脚下列：新世界 = 出生列（respawn→snap 已定位）、
+    //   读档 = 存档点，两路径统一「进世界必见三类」。Y = theWorld.heightAt(x,z) + 1（worldgen 地表上方
+    //   一格 → 重力 tick 贴地表，出生落差 0 不摔伤）。§9 区隔：三种 mob 模型 / 贴图全原创方块化（不照搬
+    //   MC）；机制对齐 MC 1.0 passive mob 三种。spawnMobTyped 第五参 color 仅 mobType 0（通用测试生物）
+    //   单色路径读；pig/cow/sheep 走 MobModel + 贴图，传占位串。maxHealth=10（MC 1.0 passive mob 5 心）。
     function spawnInitialMobs() {
-        // t276：出生点跟随大世界居中（kSpawnX/Z=80）。三 mob 散布在其左 / 前 / 右各两格。
-        // 猪（mobType 1）— 出生点左侧两格。
-        let h = theWorld.heightAt(76, 78)
-        if (h > 0) entityManager.spawnMobTyped(76, h + 1, 78, 1, "#f0a8b0", 10)
-        // 牛（mobType 2）— 出生点前方两格。
-        h = theWorld.heightAt(80, 76)
-        if (h > 0) entityManager.spawnMobTyped(80, h + 1, 76, 2, "#5a4030", 10)
-        // 羊（mobType 3）— 出生点右侧两格。
-        h = theWorld.heightAt(84, 78)
-        if (h > 0) entityManager.spawnMobTyped(84, h + 1, 78, 3, "#f5f0e8", 10)
+        // review #21：中心 = 玩家进世界列，钳到 [4, dim-5] → ±4 偏移列恒在界内（heightAt 是无界纯 fBm，
+        //   但越界列 blockAt 恒 Air → mob 悬空；钳中心而非钳各偏移列，保持三者相对方位观感）。
+        // 三 mob 散布在其左 / 前 / 右各两格（相对偏移 (-4,-2)/(0,-4)/(+4,-2) 沿用旧固定版散布）。
+        const pcx = Math.max(4, Math.min(theWorld.width - 5, Math.floor(player.feetPosition.x)))
+        const pcz = Math.max(4, Math.min(theWorld.depth - 5, Math.floor(player.feetPosition.z)))
+        // 猪（mobType 1）— 中心左侧两格。
+        let h = theWorld.heightAt(pcx - 4, pcz - 2)
+        if (h > 0) entityManager.spawnMobTyped(pcx - 4, h + 1, pcz - 2, 1, "#f0a8b0", 10)
+        // 牛（mobType 2）— 中心前方两格。
+        h = theWorld.heightAt(pcx, pcz - 4)
+        if (h > 0) entityManager.spawnMobTyped(pcx, h + 1, pcz - 4, 2, "#5a4030", 10)
+        // 羊（mobType 3）— 中心右侧两格。
+        h = theWorld.heightAt(pcx + 4, pcz - 2)
+        if (h > 0) entityManager.spawnMobTyped(pcx + 4, h + 1, pcz - 2, 3, "#f5f0e8", 10)
 
         // t374 群系化被动生物分布：在整张地图随机散布一群被动生物，每只类型按其所在群系加权选取
         //   （entityManager.pickPassiveMobType ← theWorld.biomeIdAt）。机制等价 MC 1.0 出生时被动生物群按群系
