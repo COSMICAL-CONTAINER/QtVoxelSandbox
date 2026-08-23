@@ -9120,10 +9120,12 @@ Window {
                         }
                         Model {
                             id: miniMobBody
-                            // t782 rodSpin：燃烬者迷你态棒组静态 45°（斜位读作环绕棒环；笼自旋已给动感，
+                            // t782 rodSpin：燃烬者迷你态棒组静态 48°（斜位读作环绕棒环；笼自旋已给动感，
                             //   静态角免逐帧 rebuild——迷你 delegate 非实体、无 revision 通道）。其余型恒 0。
+                            //   review #36：MobModel.setRodSpin 按 6° 网格量化（round(deg/6)·6）—— 静态值
+                            //   直接传 6 的倍数（原 45 会被量化成 48，改显式传 48 消除隐式改值）。
                             geometry: MobModel { mobType: spawnerRoot.cageMobType; walkPhase: 0; packTextured: miniMobSpin.miniPackTex !== null
-                                rodSpin: spawnerRoot.cageMobType === EntityManager.MobEmberling ? 45 : 0 }
+                                rodSpin: spawnerRoot.cageMobType === EntityManager.MobEmberling ? 48 : 0 }
                             position: Qt.vector3d(0, spawnerRoot.miniMobYOff(spawnerRoot.cageMobType), 0)
                             scale: Qt.vector3d(spawnerRoot.miniMobScale(spawnerRoot.cageMobType),
                                                spawnerRoot.miniMobScale(spawnerRoot.cageMobType),

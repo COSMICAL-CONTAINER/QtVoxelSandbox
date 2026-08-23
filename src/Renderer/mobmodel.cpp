@@ -330,18 +330,49 @@ MobModel::MobModel(QQuick3DObject *parent) : QQuick3DGeometry(parent)
     rebuild(); // 构造期用默认 mobType=Pig 建；QML 设 mobType / walkPhase / headPitch 时再 rebuild
 }
 
+namespace {
+// review #35（Review 2026-08-23 低危）：MobModel 合法 mobType 查表（单一权威）。旧版是 16 项手工 `!=` 连
+//   不等长链——rebuild 加新分支（如未来 mobType 19+）而忘改白名单时静默钳成猪几何、无任何告警（t782
+//   「猪模型套皮」根因同款）。表驱动后：新分支只需在此表补一行 true，漏补时下方 qWarning 即时暴露。
+//   表项与 rebuild 分支号一一对应（1 猪[else 兜底分支] / 2 牛 / 3 羊 / 4 Shambler / 5 Bones / 6 Stalker /
+//   7 Spider / 8 Chicken / 9 Squid / 10 Wolf / 11 Ocelot / 12 SnowGolem / 13 IronGolem / 14 Silverfish /
+//   16 Nightwalker / 17 Emberling）。
+//   刻意 false 的号位：0 MobTest（QML 走 UnitCube 不进本类）、15 MobTnt / 18 MobAnvil（死因哨兵 mobType，
+//   非真实 mob——仅 mobAttackedPlayer 载荷用，传入本类必是接线 bug）。
+constexpr bool kValidMobModelType[] = {
+    /* 0 Test */      false,
+    /* 1 Pig */       true,
+    /* 2 Cow */       true,
+    /* 3 Sheep */     true,
+    /* 4 Shambler */  true,
+    /* 5 Bones */     true,
+    /* 6 Stalker */   true,
+    /* 7 Spider */    true,
+    /* 8 Chicken */   true,
+    /* 9 Squid */     true,
+    /* 10 Wolf */     true,
+    /* 11 Ocelot */   true,
+    /* 12 SnowGolem */true,
+    /* 13 IronGolem */true,
+    /* 14 Silverfish */true,
+    /* 15 Tnt 哨兵 */ false,
+    /* 16 Nightwalker */ true,
+    /* 17 Emberling */   true,
+    /* 18 Anvil 哨兵 */  false,
+};
+} // namespace
+
 void MobModel::setMobType(int type)
 {
-    // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
-    //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
-    //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼) /
-    //   11 Ocelot(豹猫/猫；t481) / 12 SnowGolem(雪傀儡；feat) / 13 IronGolem(铁傀儡；feat) / 14 Silverfish(银鱼；t487) /
-    //   16 Nightwalker(夜行者；t727) / 17 Emberling(燃烬者；t728)。
-    //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    //   t782 关键修（「猪模型套皮」根因）：白名单此前止于 14——16/17 被**静默钳成 1（猪）**，夜行者/燃烬者
-    //   自 t727/t728 起三处消费端（实体 delegate / 图鉴预览 / 刷怪笼迷你）实际一直渲染猪几何套 mob 贴图
-    //   （rebuild 的 16/17 分支是死代码；t781 夜行者重做也因此未生效）。补 16/17 两项入表。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11 && type != 12 && type != 13 && type != 14 && type != 16 && type != 17) type = 1;
+    // 合法性查表（kValidMobModelType 单一权威）；越界 / 哨兵 / 未接线新类型 → qWarning 暴露 + 兜底 Pig
+    //   （保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube 不进本类）。t782 教训：静默钳猪
+    //   会让「夜行者 / 燃烬者渲染成猪」这类接线缺口无任何日志可循。
+    if (type < 0 || type >= int(sizeof(kValidMobModelType) / sizeof(kValidMobModelType[0]))
+        || !kValidMobModelType[type]) {
+        qWarning("MobModel: mobType %d has no geometry branch (not in kValidMobModelType); "
+                 "falling back to Pig geometry", type);
+        type = 1;
+    }
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -411,6 +442,9 @@ void MobModel::setPackTextured(bool on)
 //   `NumberAnimation on rodSpin`（0→360 无缝循环，帧率无关）。perf：量化 6°/步（60 步/圈 ≈ 27 步/s
 //   @2.2s/圈，视觉连续）防每帧微变 rebuild——同 setWalkPhase 量化动机，但步距更细（旋转是主视觉动画，
 //   腿摆 12 步/圈的粒度对连续旋转会显阶跃）。
+//   review #36（Review 2026-08-23 低危）量化契约：输入值按**最近取整**落到 6° 网格（round(deg/6)·6），
+//   有效值 = 6 的倍数（0/6/12/.../354/360 等价 0）。调用方传非 6 倍数会被无声改值（如 45 → 48）——
+//   静态摆角（刷怪笼迷你态）请直接传 6 的倍数；连续动画（NumberAnimation 0→360）无感。
 void MobModel::setRodSpin(float deg)
 {
     constexpr float kStep = 6.0f;

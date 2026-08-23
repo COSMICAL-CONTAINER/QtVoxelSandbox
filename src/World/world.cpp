@@ -472,6 +472,10 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；4 参数放置/挖掘主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
+    // review #27：余烬门门框失撑熄灭并入写入钩子族（本入口无变化早退 → 此处 oldId != id 恒真）；破 / 置换
+    //   本格非空内容 → 扫 6 邻门面熄灭（纯放置入 Air 格不触发，同玩家挖掘路径语义）。
+    if (oldId != BlockRegistry::Air)
+        breakNetherPortalsAround(x, y, z);
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
 }
@@ -581,6 +585,9 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；5 参数放置/开合主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
+    // review #27：余烬门门框失撑熄灭并入写入钩子族（同 4 参数版；state-only 写 oldId==id 不触发）。
+    if (oldId != BlockRegistry::Air && oldId != id)
+        breakNetherPortalsAround(x, y, z);
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
     return true;
 }
@@ -611,6 +618,10 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     pokeFluidDirty(x, y, z); // t380：沙着地可能覆盖水 / 邻接流体 → 标流体脏（驱动流体 tick 重扫）
     notePowerWrite(x, y, z, occ, id); // t656：红石电力脏标记（落体着地改变粉路通断 → 邻粉重算；红石族外 no-op）
+    // review #27：余烬门门框失撑熄灭并入写入钩子族。本入口 occ 守卫限 Air/水 → 仅「沙落填水格」（水被
+    //   置换出本格）触发；落进空气格不触发（纯放置语义）。
+    if (occ != BlockRegistry::Air && occ != id)
+        breakNetherPortalsAround(x, y, z);
     return true;
 }
 
@@ -659,6 +670,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     //   （recheck 刻意不含 checkGravityBlockOnEdit，防柱内重入，见其头注释）。
     recheckAttachmentsAfterClear(x, y, z, occ); // t494/t565/t527 + t445/t504/t507/t524 + 火把族（全量复检）
     checkGravityBlockOnEdit(x, y, z, occ, id); // t799：正上方沙/沙砾失撑坍落（TNT 点火清格 → 上方沙柱塌落砸在引燃 TNT 上）
+    breakNetherPortalsAround(x, y, z); // review #27：余烬门熄灭并入钩子族（TNT 点火清格邻接门面 → 熄门；occ==Air 时 6 邻无门亦快速 no-op）
     notePowerWrite(x, y, z, occ, id);       // t656：红石电力脏标记（TNT 被点火清 Air → 邻粉 / 邻接收器重算）
     return true;
 }
@@ -734,6 +746,11 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     //   真坍落才走整柱清除 + 中间 worldChanged（同 checkRailOnEdit 批量先例，批量终态不受破坏）。
     //   t527 雪层未挂本入口（雪层贴地生成、水上无雪），沙/砾可在水中失撑故挂）。
     checkGravityBlockOnEdit(x, y, z, lightOldId, id);
+    // review #27：余烬门门框失撑熄灭并入写入钩子族（焚毁 / 蒸发等「非空内容被置换」写触发；门面自清
+    //   经 m_inRemoveNetherPortal 守卫早退无重入）。快速路径 = 6 邻 blockAt 读（无门格即返），流体批量
+    //   热路径可承受（同 checkRailOnEdit / checkGravityBlockOnEdit 批量先例口径）。
+    if (lightOldId != BlockRegistry::Air && lightOldId != id)
+        breakNetherPortalsAround(x, y, z);
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -773,6 +790,10 @@ bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（系统静默写路径收口，同族）
     checkRailOnEdit(x, y, z, oldId, id);         // t565：铁轨连接重算
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检
+    // review #27：余烬门门框失撑熄灭并入写入钩子族（系统静默写路径——火吞可燃物 / 系统清格，同 5 参数
+    //   setBlock 谓词：本格非空内容被置换才触发）。
+    if (oldId != BlockRegistry::Air && oldId != id)
+        breakNetherPortalsAround(x, y, z);
     notePowerWrite(x, y, z, oldId, id);          // t656：红石电力脏标记
     return true;
 }
@@ -1999,6 +2020,7 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
         checkRailOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         checkSnowLayerOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         checkGravityBlockOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t799：爆炸破坏支撑 → 弹坑上缘沙/沙砾柱坍落（旧 QML 链不发信号 → 悬空残留）
+        breakNetherPortalsAround(d.x, d.y, d.z); // review #27：爆炸拆掉门面 6 邻非抗爆格（黑曜石框免疫）→ 邻接门面熄灭；d.oldId 必非 Air（破坏列表构造）
     }
     emit worldChanged();
     m_chunks.clearAllDirty();
@@ -2259,6 +2281,7 @@ void World::dropGravityColumn(int x, int y, int z)
         //   甘蔗整柱 / 雪层整柱由各 check 内部的 drop*Column 继续向上收）。不含重力复检（防柱内指数重入，
         //   见 recheckAttachmentsAfterClear 头注释）。caller 末尾 1 次 worldChanged 覆盖本扫的静默写。
         recheckAttachmentsAfterClear(x, cy, z, b);
+        breakNetherPortalsAround(x, cy, z); // review #27：坍落清格邻接门面 → 熄门（同钩子族口径；b 非空构造）
         any = true;
         ++cy;
     }
@@ -2643,17 +2666,26 @@ void World::removeNetherPortalAt(int px, int py, int pz, int axis)
         frontier.push_back({c.x, c.y - 1, c.z});
     }
     // 清域：setWaterSilent 静默清（主破坏格已由 caller 走 setBlock 清 + 发过一次事件；域内守卫防双清）。
+    //   review #27：置 m_inRemoveNetherPortal 守卫——setWaterSilent 已并入 breakNetherPortalsAround 钩子
+    //   族，置位期间钩子早退（本 BFS 一次收完整扇门，清域写不再嵌套触发二次连通域清除）。
+    m_inRemoveNetherPortal = true;
     for (const Cell &c : cells) {
         if (m_chunks.blockAt(c.x, c.y, c.z) != BlockRegistry::NetherPortal)
             continue; // 种子已被 caller 清 / 异轴守卫已滤（防御双清）
         setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
     }
+    m_inRemoveNetherPortal = false;
 }
 
 // t806 余烬门门框失撑熄灭（见 world.h 头注释；t725 自 PlayerController 下沉 World 层，逻辑同源）。
 //   破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门。恒熄（含创造）：门失效是结构后果非掉落。
+//   review #27：并入 World 写入钩子族（对照 checkEndPortalIntegrity 模式）—— 爆炸 / 焚毁 / 坍落 / 静默
+//   清格等一切「拆格」路径与玩家挖掘同口径熄门（此前钩子仅挂 playercontroller 一处，系统路径拆门框后
+//   门面残留）。快速路径 = 6 次 blockAt 邻读（无门格即返，流体批量热路径可承受，同 notePowerWrite 快
+//   路径量级）。removeNetherPortalAt 清域期间（m_inRemoveNetherPortal）早退防嵌套 BFS。
 void World::breakNetherPortalsAround(int x, int y, int z)
 {
+    if (m_inRemoveNetherPortal) return; // 连通域清除自管整扇门；其清域写不再重入本钩子
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &n : kNb) {
         const int px = x + n[0], py = y + n[1], pz = z + n[2];

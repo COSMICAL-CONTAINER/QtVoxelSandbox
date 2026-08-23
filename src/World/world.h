@@ -647,14 +647,20 @@ public:
     //   （门格之一，可能已被清 Air）按 axis flood-fill 收集整扇门（±u 门展开轴水平 / ±Y 垂直同 axis 的
     //   NetherPortal 格）→ 全部 setWaterSilent 清 Air（静默：多格逐格 blockBroken 会刷粒子/音风暴；
     //   worldChanged 仍逐格发 → 呈现层 portalHost cleanupVis 清孤儿）。尺寸无关（连通域天然覆盖任意
-    //   大小的门）。门无物品形态（dropId=0）→ 无掉落。供 PlayerController finishMiningAt 直挖门格分支调。
+    //   大小的门）。门无物品形态（dropId=0）→ 无掉落。供 breakNetherPortalsAround（World 写入钩子族）
+    //   与 PlayerController finishMiningAt 直挖门格分支调。置 m_inRemoveNetherPortal 守卫（见成员注释）。
     void removeNetherPortalAt(int px, int py, int pz, int axis);
 
     // t806 余烬门门框失撑熄灭（t725 下沉，逻辑同源）：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭
     //   整扇门。机制等价 MC「黑曜石门框任一**承重**格被破坏 → 传送门失效消失」：底梁 / 顶梁 / 边柱格均
     //   与门格 6 邻接 → 破任一即断结构；角块不与门格相邻（对角位）→ 破角不碎门（角块可选语义的自然
     //   推论，检测不查角 / 失撑不邻角两侧自洽）。恒熄（含创造，结构后果非掉落，同叶衰语义）。
-    //   供 PlayerController finishMiningAt 末尾调。
+    //   review #27：并入 World 写入钩子族（同 checkEndPortalIntegrity 模式）—— 全部静默 / 直写清格路径
+    //   （setBlock×2 / setBlockSilent / clearBlockSilent / setWaterSilent / setBlockFromEntity /
+    //   destroySphereSilent 逐破坏格 / dropGravityColumn 逐清格）对「本格原有非空内容被置换」的写都调
+    //   本钩子 → 爆炸 / 焚毁 / 坍落 / 流体置换等拆格路径与玩家挖掘同口径熄门（此前仅玩家路径调，
+    //   系统路径拆门框后门面残留）。纯放置（Air 格写入）不触发。m_inRemoveNetherPortal 置位期间早退
+    //   （连通域清除自管，防嵌套 BFS）。
     void breakNetherPortalsAround(int x, int y, int z);
 
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
@@ -1100,6 +1106,12 @@ private:
     //   不 emit worldChanged / 不 clearAllDirty；caller 末尾一次性 emit + clearDirty。把「每 tick 写 N 格
     //   → N 次 worldChanged 扇出重建」合并为「1 次重建」，消除活跃扩散期卡顿。通用机制（t351 岩浆可同用）。
     bool m_batchFluid = false;
+    // review #27（Review 2026-08-23 低危）：余烬门连通域熄灭重入守卫。breakNetherPortalsAround 并入 World
+    //   写入钩子族（setBlock×2 / setBlockSilent / clearBlockSilent / setWaterSilent / setBlockFromEntity /
+    //   destroySphereSilent / dropGravityColumn）后，removeNetherPortalAt 自身清门格走 setWaterSilent →
+    //   该写的钩子又会扫 6 邻发现「尚未清到的门格」再进 removeNetherPortalAt —— 嵌套 BFS 虽有界（门 ≤4×5）
+    //   但同一扇门被反复半清。置位期间钩子早退：连通域清除自管整扇门，一次平坦 BFS 收完。
+    bool m_inRemoveNetherPortal = false;
     // t380r perf：批量流体写延迟的光照重算缓冲（见 flushPendingLightEdits）。非批量（玩家/世界编辑）路径
     //   仍逐写即时 recomputeLightAround —— 光变化要立即反映；仅流体批量 tick 延迟合并。每项记录编辑坐标 +
     //   是否遮光变化（sky）—— 遮光变化须重 seed 天光列到顶（y1=H-1）。

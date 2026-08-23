@@ -1266,7 +1266,10 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   不查角两侧自洽）；破其它方块邻接门格（如门内放火把旁的门格）同样熄——门格邻格恒是结构格
     //   （黑曜石 / 门格 / 内腔空气），被破即失效，机制等价 MC 门框完整性。恒熄（含创造，结构后果非掉落，
     //   同叶衰语义）。
-    m_world->breakNetherPortalsAround(x, y, z);
+    //   review #27（Review 2026-08-23 低危）：钩子已并入 World 写入钩子族（setBlock×2 / setBlockSilent /
+    //   clearBlockSilent / setWaterSilent / setBlockFromEntity / destroySphereSilent / dropGravityColumn
+    //   —— 对照 checkEndPortalIntegrity 模式），本处 finishMiningAt 开头的 setBlock(Air) 已触发同一钩子，
+    //   显式调用删除（单一权威防双份语义漂移）。
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
@@ -1782,8 +1785,10 @@ void PlayerController::dropUnsupportedPaintingsAround(int x, int y, int z)
 // t725→t806 余烬门三件套（tryIgniteNetherPortal 点燃检测 / removeNetherPortalAt 连通域熄灭 /
 //   breakNetherPortalsAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化内腔 2×3..4×5 +
 //   四角可选；同末地门三件套模式）—— 实现见 world.cpp；调用点：placeBlock 打火石分支
-//   （World::tryIgniteNetherPortal）/ finishMiningAt 直挖门格分支（World::removeNetherPortalAt）/
-//   finishMiningAt 末尾连锁（World::breakNetherPortalsAround）。
+//   （World::tryIgniteNetherPortal）/ finishMiningAt 直挖门格分支（World::removeNetherPortalAt）。
+//   review #27：breakNetherPortalsAround 已并入 World 写入钩子族（setBlock×2 / setBlockSilent /
+//   clearBlockSilent / setWaterSilent / setBlockFromEntity / destroySphereSilent / dropGravityColumn
+//   —— 玩家挖掘经 setBlock 自动触发，系统路径同口径），finishMiningAt 不再显式调。
 
 // t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
 //   hurtFlash（EntityManager 内已驱动 QML 红闪绑定刷新）+ swingArm（挥臂反馈）+ emit mobAttacked（→
