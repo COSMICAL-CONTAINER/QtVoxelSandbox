@@ -1952,13 +1952,17 @@ Window {
     }
 
     // t789 羊毛色下标 → 掉落物 id（剪羊毛 onSheepSheared / 杀羊 onMobDied 的 MobSheep 分支共用）：
-    //   白（0）= 0x20E 材料段羊毛物品（RecipeRegistry::WoolId——bed_red 简化配方原料链与杀白羊毛旧观感
-    //   均不变）；其余 15 色 = 羊毛方块段 63..77（BlockRegistry::WoolOrange=FirstWoolVariant + idx-1，
-    //   方块 id 即物品 id 可放置回 + t788 染料链同产物形态——剪/杀有色羊直接得对应色羊毛方块，机制等价
-    //   MC 1.0 剪彩色羊掉对应色羊毛）。⚠️ QML 不 import C++ 静态类故用字面量（同 onMobDied 段约定）；
-    //   下标序与 EntityManager::sheepWoolAt / kSheepWoolTints 同源（16 色标准序）。
+    //   t834/review #7 起全 16 色统一**方块段**——白（0）= Wool 方块 27（BlockRegistry::Wool，方块 id 即物品 id
+    //   可放置回 + 3D BlockCube 掉落物；旧 0x20E 材料段物品退役——不可放置无方块来源，32 条染色配方与床配方的
+    //   原料都是羊毛**方块**，掉 0x20E = 生存染色链死链）；其余 15 色 = 羊毛方块段 63..77
+    //   （FirstWoolVariant + idx-1，t788 染料链同产物形态——剪/杀有色羊直接得对应色羊毛方块，机制等价
+    //   MC 1.0 剪彩色羊掉对应色羊毛）。review #33：下标钳 [0,15]（对齐 C++ tint 侧 clamp 防御对称——脏值 16+
+    //   会掉进床段 id）。⚠️ QML 不 import C++ 静态类故用字面量（同 onMobDied 段约定；27/63 两界标由
+    //   recipe.cpp 尾部 static_assert 钉死跨层契约）；下标序与 EntityManager::sheepWoolAt / kSheepWoolTints
+    //   同源（16 色标准序）。
     function sheepWoolDropId(woolIdx) {
-        return (woolIdx > 0) ? (63 + woolIdx - 1) : 0x20E
+        const idx = Math.max(0, Math.min(15, woolIdx))
+        return (idx > 0) ? (63 + idx - 1) : 27
     }
 
     // t377 mob 护甲 tier 色（t719 起 UnitCube+tier 色路径退役——ArmorLayerBox + layer 贴图接管 mob 穿甲
@@ -1982,6 +1986,15 @@ Window {
         const step = 2 * Math.PI / 12
         const q = Math.round(phase / step) * step
         return sign * 0.5 * Math.sin(q) * 57.2958
+    }
+
+    // review #34 羊腿罩配色：裸肤 #d6b890（图鉴 ResourceBrowser 腿罩同款）× 昼夜明暗（terrainLight；
+    //   t597 铁律：贴图在身 baseColor 只承载调制不压黑本体）。红闪仍红覆盖（同羊毛层/护甲 tint 优先级）。
+    function sheepLegCoverTint(entIdx) {
+        entityManager.revision
+        if (entIdx >= 0 && entityManager.hurtFlashAt(entIdx) > 0) return "#ff0000"
+        const light = terrainLight(worldClock.skyLight)
+        return Qt.rgba(0.839 * light.r, 0.722 * light.g, 0.565 * light.b, 1.0)
     }
 
     // ── t718 盔甲 layer 贴图源（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 采样源）──
@@ -2215,13 +2228,18 @@ Window {
         //   t299 敌对掉落（spec「敌对掉落物：骸骨→骨头 / 蹒跚者→腐肉 / 蜘蛛→线」）：骸骨 1-2 骨头 / 蹒跚者 1-2
         //   腐肉 / 蜘蛛 1-2 线；MobStalker（爆炸型）无常规掉落（爆炸破坏块掉落归 t297 explosionDroppedItem）。
         //   ⚠️ QML 无法直接 import RecipeRegistry（C++ 静态类），故用字面量 id（同 MaterialIcon.qml 约定）：
-        //     0x20B=生猪排 / 0x20C=生牛肉 / 0x20D=皮革 / 0x20E=羊毛（RecipeRegistry::RawPorkchopId 等）。
+        //     0x20B=生猪排 / 0x20C=生牛肉 / 0x20D=皮革（RecipeRegistry::RawPorkchopId 等）。0x20E=羊毛已
+        //     t834/review #7 退役（杀/剪白羊改掉 Wool 方块 27；常量仅存档兼容，无掉落源）。
         //     0x217=骨头 / 0x218=腐肉 / 0x219=线（RecipeRegistry::BoneId / RottenFleshId / StringId，t299）。
         //     0x228=羽毛 / 0x229=生鸡肉 / 0x22A=熟鸡肉（RecipeRegistry::FeatherId 等，t398 鸡掉落）。
         //     id 改动须同步 src/Game/recipe.h（单一权威）。
         // t789 第 7 参 woolIdx = 羊毛色下标（仅 MobSheep 有意义，其余 mob 恒 0）：羊分支羊毛掉落据它选对应
-        //   色（sheepWoolDropId：白→0x20E 材料段 / 有色→羊毛方块 63..77）。
-        function onMobDied(x, y, z, mobType, burned, wasBaby, woolIdx) {
+        //   色（sheepWoolDropId：t834/review #7 起全 16 色方块段——白→Wool 方块 27 / 有色→63..77）。
+        // review #32 第 8 参 sheared = 致死瞬间是否已剪毛（deathSheared 快照，同 deathBaby 模式）：
+        //   剪过毛的羊被打死不掉羊毛（机制等价 MC 1.0 sheared sheep 无羊毛掉落；烧死仍替换为熟羊肉——
+        //   熟羊肉是「肉」非「毛」，不受剪毛影响）。旧 7 参连接（Qt 新式信号槽允许槽参数少于信号）
+        //   依旧兼容；本 handler 是 QML 侧唯一消费端，签名同步为 8 参。
+        function onMobDied(x, y, z, mobType, burned, wasBaby, woolIdx, sheared) {
             progress.onMobKilled(mobType)  // progress 统计击杀 + 成就「怪物猎人」（敌对 mob）
             // t479 幼崽死亡不掉落（机制等价 MC 1.0 幼崽不掉落）：幼崽（baby）死亡 → 不掉战利品 + 不掉 XP。
             //   wasBaby = EntityManager 致死瞬间快照（deathBaby）—— 0.5s 死亡动画窗口内 growTimer 可能到 0 长大，
@@ -2271,10 +2289,16 @@ Window {
                 itemEntities.spawnItem(x, y, z, meat, 1)
                 itemEntities.spawnItem(x, y, z, meat, 1)
             } else if (mobType === EntityManager.MobSheep) {
-                // 燃烧致死 → 熟羊肉（替代羊毛；机制等价 MC cooked mutton）；否则羊毛 ×1。
-                //   t789：按羊毛色掉对应色（sheepWoolDropId——白→0x20E 材料 / 有色→对应色羊毛方块，
-                //   机制等价 MC 杀彩色羊掉对应色羊毛；woolIdx 由 mobDied 信号携带）。
-                itemEntities.spawnItem(x, y, z, burned ? 0x223 : sheepWoolDropId(woolIdx), 1)
+                // 燃烧致死 → 熟羊肉（机制等价 MC cooked mutton；肉不受剪毛影响，仍恒掉）。
+                //   review #32：已剪毛（sheared）→ 不掉羊毛（机制等价 MC 1.0 sheared sheep 无羊毛掉落；
+                //   sheared 为致死瞬间快照，0.5s 死亡动画窗口内剪毛竞态也保「致死时已剪」语义）。
+                //   t789/t834：未剪毛按羊毛色掉对应色（sheepWoolDropId——白→Wool 方块 27 / 有色→
+                //   对应色羊毛方块 63..77，机制等价 MC 杀彩色羊掉对应色羊毛；woolIdx 由 mobDied 信号携带）。
+                if (burned) {
+                    itemEntities.spawnItem(x, y, z, 0x223, 1)
+                } else if (!sheared) {
+                    itemEntities.spawnItem(x, y, z, sheepWoolDropId(woolIdx), 1)
+                }
             } else if (mobType === EntityManager.MobBones) {
                 // t301 敌对掉落：骸骨（骷髅）→ 骨头 ×1-2 + 箭 ×0-2 + 弓（~50%）。
                 //   机制等价 MC 1.0 骷髅掉骨头 + 箭 + 有时弓（spec t301：弓 ~50% 概率非 100%，区别于被动掉落的恒定数量）。
@@ -2365,8 +2389,9 @@ Window {
         //   sheepSheared(x,y,z,woolIdx)（坐标 = 羊当前格 floor(pos)，与 spawnItem 整数格约定一致）→ 转发到
         //   ItemEntityManager.spawnItem 生成羊毛物品掉落实体（机制等价 MC 1.0 剪羊毛掉落羊毛；杀羊掉落羊毛
         //   归 onMobDied 的 MobSheep 分支，二者独立 —— 剪羊毛不杀羊、杀羊前已剪则死时不再多掉）。
-        //   t789 woolIdx = 该羊羊毛色下标 → sheepWoolDropId 掉对应色（白 = 0x20E 材料段羊毛物品
-        //   RecipeRegistry::WoolId；有色 = 羊毛方块段 63..77。⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
+        //   t789 woolIdx = 该羊羊毛色下标 → sheepWoolDropId 掉对应色（t834/review #7 起全 16 色方块段：
+        //   白 = Wool 方块 27 / 有色 = 羊毛方块段 63..77，方块 id 即物品 id 可放置回。⚠️ QML 不 import C++ 静态类
+        //   故字面量，同 onMobDied 约定）。
         //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 fallingBlockDropped / mobDied 模式）。
         function onSheepSheared(x, y, z, woolIdx) { itemEntities.spawnItem(x, y, z, sheepWoolDropId(woolIdx), 1) }
         // t510 雪傀儡剪南瓜头掉落（spec「剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变无头 derpy 形态」）：EntityManager
@@ -6921,6 +6946,59 @@ Window {
                                         position: Qt.vector3d(0.055, 0.00, -0.36)
                                         scale: Qt.vector3d(0.028, 0.028, 0.02)
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                    }
+                                }
+                                // review #34 羊腿罩（t777 图鉴侧同款复刻进游戏）：有色羊整模贴图 × 毛色 tint 会
+                                //   连腿一起染（MobModel 单材质整模渲染；用户观感「彩色羊腿也变色」），图鉴
+                                //   ResourceBrowser.qml 早已用 4 个裸肤 #d6b890 腿罩盒盖住腿部防染。游戏内腿随
+                                //   walkPhase 绕髋摆（mobmodel.cpp addLegs，羊参 legY=-0.28/legHy=0.16/
+                                //   ±0.18/±0.26/0.09 → 髋枢 y=-0.12、腿心 (±0.18,-0.28,±0.26)、腿盒全尺寸
+                                //   (0.18,0.32,0.18)）→ 静态腿罩会在腿摆 ±0.5rad 时穿模露出染色腿脚 → 取舍：
+                                //   腿罩**随腿同摆**（髋枢 Node + eulerRotation.x = mobArmorLegSwingDeg(
+                                //   walkPhase, ±1)，t560 护甲腿同款量化相位契约——与几何腿同幅同相，摆动全程罩住；
+                                //   代价 = 毛茸态羊 delegate 多 4 组 Node/Model，羊量级小可忽略）。对角配对同
+                                //   addLegs：前左+后右 +sw（sign+1）/ 前右+后左 −sw（sign−1）。罩全尺寸
+                                //   (0.19,0.34,0.19) = 腿盒 +0.01/+0.02 防同面 z-fight（图鉴同款）。色走
+                                //   sheepLegCoverTint（裸肤 × 昼夜；红闪红覆盖）。白羊（tint 恒等）腿也换裸肤色
+                                //   ——与图鉴/裸态羊腿观感统一（机制等价 MC 羊腿不随毛色染）。
+                                Node { // 前左腿罩枢轴（-X,-Z；+sw 同相）
+                                    position: Qt.vector3d(-0.18, -0.12, -0.26)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), 1)) : 0 }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.16, 0)
+                                        scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: sheepLegCoverTint(index) }
+                                    }
+                                }
+                                Node { // 前右腿罩枢轴（+X,-Z；−sw 反相）
+                                    position: Qt.vector3d(0.18, -0.12, -0.26)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), -1)) : 0 }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.16, 0)
+                                        scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: sheepLegCoverTint(index) }
+                                    }
+                                }
+                                Node { // 后左腿罩枢轴（-X,+Z；−sw 反相）
+                                    position: Qt.vector3d(-0.18, -0.12, 0.26)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), -1)) : 0 }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.16, 0)
+                                        scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: sheepLegCoverTint(index) }
+                                    }
+                                }
+                                Node { // 后右腿罩枢轴（+X,+Z；+sw 同相）
+                                    position: Qt.vector3d(0.18, -0.12, 0.26)
+                                    eulerRotation.x: { const _r = entityManager.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), 1)) : 0 }
+                                    Model {
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, -0.16, 0)
+                                        scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: sheepLegCoverTint(index) }
                                     }
                                 }
                             }

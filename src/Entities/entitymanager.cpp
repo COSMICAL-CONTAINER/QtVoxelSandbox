@@ -309,6 +309,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     e.hurtFlash = 0.0f;
     e.deathTimer = 0.0f;
     e.deathBurned = false;
+    e.deathSheared = false; // review #32：槽复用防残留（同 deathBurned/deathBaby 防御重置）
     e.yawRad = 0.0f;
     e.wanderTimer = 0.0f; // 0 → tick 首帧选第一次向（避免所有 mob 同步起步）
     e.wanderSpeed = 0.0f;
@@ -1487,7 +1488,7 @@ bool EntityManager::shearedAt(int i) const
 // t300 剪羊毛（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）。
 //   未剪羊毛的活体 sheep → 翻 sheared=true + 设 regrowCooldown（防刚剪完立即吃草长回，spec「加重新长毛冷却」）+
 //   emit sheepSheared(坐标, 毛色下标) 让呈现层 Connections 转发 ItemEntityManager.spawnItem 生成**对应色**
-//   羊毛掉落实体（t789：白→材料段 WoolId 0x20E / 有色→羊毛方块 63..77，机制等价 MC 剪彩色羊得对应色羊毛；
+//   羊毛掉落实体（t834 起统一方块段：白→Wool 方块 27 / 有色→羊毛方块 63..77，机制等价 MC 剪彩色羊得对应色羊毛；
 //   同 mobDied→spawnItem 模式；单向事件流，分层：Entities 层发语义事件、呈现层只消费）。bump revision
 //   → QML delegate 据 shearedAt 翻羊为裸外观。已剪羊毛 / 非 sheep / dead / 越界 → 静默早退（机制等价 MC：
 //   剪羊毛只对有毛的活体羊生效，已裸的羊右键无反应）。
@@ -2003,6 +2004,9 @@ void EntityManager::damageEntity(int i, int amount)
         // t479 幼崽死亡快照：致死瞬间 e.baby（同 deathBurned 快照模式）—— mobDied 延迟到 deathTimer 归零才 emit，
         //   期间 tickBreeding 仍衰减 growTimer（dead 态不冻结），幼崽可能在 0.5s 窗口内长大 → 延迟读 e.baby 会漏判。
         e.deathBaby = e.baby;
+        // review #32 剪毛死亡快照：致死瞬间 e.sheared（同 deathBaby 模式）—— 呈现层据 mobDied 第 8 参跳过
+        //   剪毛羊的羊毛掉落（机制等价 MC 1.0 剪过毛的羊死时无毛可掉；t300 注释曾声称此语义但信号未携带）。
+        e.deathSheared = e.sheared;
         const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
         qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "entering death at" << dx << dy << dz
                       << (e.deathBurned ? "(burned)" : "")
@@ -5404,9 +5408,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   t479 wasBaby = 致死瞬间快照（deathBaby）—— 幼崽死亡不掉落（呈现层 onMobDied 守卫跳战利品 +
                     //   XP）；0.5s 死亡动画窗口内 growTimer 可能到 0 长大，快照保「致死时是幼崽」语义（同 deathBurned）。
                     //   t789 woolIndex = 羊毛色下标（仅 MobSheep 有意义；呈现层羊分支据此掉对应色羊毛）。
+                    //   review #32 sheared = 致死瞬间快照（deathSheared）—— 剪毛羊死亡不掉羊毛的呈现层守卫依据。
                     const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
                     emit mobDied(dx, dy, dz, e.mobType, e.deathBurned, e.deathBaby,
-                                 e.mobType == MobSheep ? e.sheepWool : 0);
+                                 e.mobType == MobSheep ? e.sheepWool : 0,
+                                 e.mobType == MobSheep && e.deathSheared);
                     toRemove.push_back(idx);
                     dirty = true;
                 }

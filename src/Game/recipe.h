@@ -92,7 +92,8 @@ public:
     static constexpr int RawPorkchopId  = 0x20B; // 生猪排：杀猪掉落（机制等价 MC 1.0 raw porkchop）
     static constexpr int RawBeefId      = 0x20C; // 生牛肉：杀牛掉落（机制等价 MC 1.0 raw beef）
     static constexpr int LeatherId      = 0x20D; // 皮革：杀牛掉落（机制等价 MC 1.0 leather）
-    static constexpr int WoolId         = 0x20E; // 羊毛：杀羊掉落（机制等价 MC 1.0 wool）
+    static constexpr int WoolId         = 0x20E; // 羊毛（t834 退役：剪/杀羊改掉 Wool 方块 27，本 id 无掉落源 /
+                                                 // 配方消费，仅保常量 + 名字/图标/pack 映射兼容旧存档物品）
     // t243 生物蛋（spawn eggs）：材料段 0x20F..0x211。创造模式物品，右键地面 → EntityManager::spawnMobTyped
     //   生成对应被动生物（猪 / 牛 / 羊；机制等价 MC 1.0 spawn egg）。三种蛋各映射一种 mobType（与
     //   EntityManager::MobType MobPig/Cow/Sheep 同值）；PlayerController::placeBlock 据本 id 分流走「使用」分支

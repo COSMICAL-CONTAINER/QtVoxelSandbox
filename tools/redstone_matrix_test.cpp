@@ -17,6 +17,7 @@
 #include <QJsonDocument> // Review #1 探针（settings.json resourcePack 皮肤路径解析）
 #include <QJsonObject>   // Review #1 探针（同上）
 #include <QStandardPaths> // Review #1 探针（settings.json 候选位置，同 resolveSettingsPath）
+#include <QFile>   // review-e 探针（派生缓存 _r<rev> 存在性 / 旧版清理断言）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 
@@ -35,8 +36,9 @@
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
-//   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。
-extern QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath);
+//   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。review #6：第 3 参 revision 进文件名
+//   `_r<rev>`（换包逐版缓存 + 清旧；探针传任意探针版号）。
+extern QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath, int revision);
 // Review 2026-08-23 #1 探针：slim 皮肤布局探测器（同上 extern 直连；签名纯 QImage 无需入头）。
 extern bool probeSlimSkinLayout(const QImage &tex);
 
@@ -3120,9 +3122,12 @@ int main(int argc, char *argv[])
             const int gSlabO[9] = { int(BR::Planks), int(BR::Planks), int(BR::Planks), 0, 0, 0, 0, 0, 0 };
             expectCraft(gSlabO, 3, int(BR::WoodSlab), 6, "3*planks->wood_slab(oak-exact)");
             // 等价回退广度抽样：云杉板+羊毛→红床 / 云杉板楼梯形→橡木楼梯 / 单云杉板→木按钮 /
-            //   云杉板+羊毛方块床形→白床（MC 任意木板语义的族外覆盖）。
-            const int gBed[9] = { SP, int(RecipeRegistry::WoolId), 0, 0 };
+            //   云杉板+羊毛方块床形→白床（MC 任意木板语义的族外覆盖）。t834/review #7 起床原料统一
+            //   Wool 方块 27（旧 0x20E 材料段物品退役、无掉落源——下方 expectNoMatch 钉死不再回头路）。
+            const int gBed[9] = { SP, int(BR::Wool), 0, 0 };
             expectCraft(gBed, 2, int(BR::BedRed), 1, "spruce_planks+wool->bed_red");
+            const int gBedOld[9] = { SP, int(RecipeRegistry::WoolId), 0, 0 };
+            expectNoMatch(gBedOld, 2, "t834 retired: spruce+wool_item(0x20E) no longer crafts bed_red");
             const int gStair[9] = { SP, 0, 0, SP, SP, 0, SP, SP, SP };
             expectCraft(gStair, 3, int(BR::WoodStairs), 4, "spruce_stairs-shape->wood_stairs");
             const int gBtn[9] = { SP, 0, 0, 0 };
@@ -3998,7 +4003,11 @@ int main(int argc, char *argv[])
             w789d.setSeed(11);
             int deathIdx = -1, deathWool = -1;
             for (int i = 0; i < em789.count() && deathIdx < 0; ++i) {
+                // review #32：须挑**未剪毛**样本——③ 段刚剪过 3 只，剪毛羊致死 mobDied 第 8 参 sheared=true
+                //   （QML 据此压掉羊毛掉落），本探针锁的是「正常羊毛掉落羊」的 woolIdx 载荷（剪毛样本的
+                //   true/false 对照见文件尾 review-e 探针）。
                 if (em789.aliveAt(i) && !em789.deadAt(i) && !em789.isBabyAt(i)
+                    && !em789.shearedAt(i)
                     && em789.mobTypeAt(i) == EntityManager::MobSheep)
                     deathIdx = i;
             }
@@ -4007,20 +4016,25 @@ int main(int argc, char *argv[])
                 ok = false;
             } else {
                 deathWool = em789.sheepWoolAt(deathIdx);
-                int diedPayload = -1, diedType = -1, diedCount = 0;
+                int diedPayload = -1, diedType = -1, diedCount = 0, diedSheared = -1;
                 QObject::connect(&em789, &EntityManager::mobDied, &em789,
-                                 [&](int x, int y, int z, int type, bool burned, bool baby, int woolIdx) {
+                                 [&](int x, int y, int z, int type, bool burned, bool baby,
+                                     int woolIdx, bool sheared) {
                                      Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z);
                                      Q_UNUSED(burned); Q_UNUSED(baby);
                                      ++diedCount; diedType = type; diedPayload = woolIdx;
+                                     diedSheared = sheared ? 1 : 0;
                                  });
                 em789.damageEntity(deathIdx, em789.maxHealthAt(deathIdx));
                 const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
                 for (int t = 0; t < 40 && diedCount == 0; ++t) // 0.64s > kDeathTime 0.5s → mobDied 已发
                     em789.tick(0.016f, &w789d, farListener, 0.3f, 1.8f, false);
-                if (diedCount != 1 || diedType != EntityManager::MobSheep || diedPayload != deathWool) {
+                // review #32 第 8 参 sheared：本样本未剪毛 → 恒 false（剪毛样本的 true 分支见 review-e 探针）。
+                if (diedCount != 1 || diedType != EntityManager::MobSheep || diedPayload != deathWool
+                    || diedSheared != 0) {
                     qInfo().noquote() << "  [t789 diag] death drop payload:" << diedCount << diedType
-                                      << diedPayload << "expected wool" << deathWool;
+                                      << diedPayload << "expected wool" << deathWool
+                                      << "sheared" << diedSheared;
                     ok = false;
                 }
             }
@@ -4099,7 +4113,7 @@ int main(int argc, char *argv[])
             qInfo().noquote() << "  [t777 diag] failed to write temp source PNGs";
             ok = false;
         }
-        const QString comp = generateSheepWoolFaceFile(furPath, bodyPath);
+        const QString comp = generateSheepWoolFaceFile(furPath, bodyPath, 1);
         if (comp.isEmpty()) {
             qInfo().noquote() << "  [t777 diag] composite unexpectedly failed on valid 64x32 pair";
             ok = false;
@@ -4125,7 +4139,7 @@ int main(int argc, char *argv[])
             }
         }
         // ② body 缺失 → 空串（降级：调用方回退毛层原样 = 无脸 → QML 眼 overlay 保留路径）。
-        if (!generateSheepWoolFaceFile(furPath, d777.absoluteFilePath("missing.png")).isEmpty()) {
+        if (!generateSheepWoolFaceFile(furPath, d777.absoluteFilePath("missing.png"), 1).isEmpty()) {
             qInfo().noquote() << "  [t777 diag] missing body source should degrade to empty, not succeed";
             ok = false;
         }
@@ -4212,7 +4226,7 @@ int main(int argc, char *argv[])
         }
         // 猪：8×8 脸 → 64×64 图标（×8 整倍块映射）：脸(3,1) 眼上方 = A；鼻贴放 (2,4)-(6,7) → 脸(4,5) = B
         //   （旧实现无合成此处 A → FAIL）；脸(7,7) 下巴（覆写区外）= A。
-        const QString pigIcon = generateMobHeadIconFor(1, d779.absolutePath());
+        const QString pigIcon = generateMobHeadIconFor(1, d779.absolutePath(), 1);
         if (pigIcon.isEmpty()) {
             qInfo().noquote() << "  [t779 diag] pig icon generation unexpectedly failed";
             ok = false;
@@ -4231,7 +4245,7 @@ int main(int argc, char *argv[])
         }
         // 蠹虫：8×4 头区 aspect 2 → 64×32 条带贴 (0,16)：带中 (36,36) = C；带外 (32,8) 透明。
         //   （旧裁剪 (2,4)-(10,9) 全落 D 区 → 带中 D，FAIL。）
-        const QString sfIcon = generateMobHeadIconFor(14, d779.absolutePath());
+        const QString sfIcon = generateMobHeadIconFor(14, d779.absolutePath(), 1);
         if (sfIcon.isEmpty()) {
             qInfo().noquote() << "  [t779 diag] silverfish icon generation unexpectedly failed";
             ok = false;
@@ -4322,7 +4336,7 @@ int main(int argc, char *argv[])
         }
         const struct { int mob; QColor center; } rigs[] = { { 10, wolfHead }, { 11, catFace } };
         for (const auto &e : rigs) {
-            const QString icon = generateMobHeadIconFor(e.mob, d780.absolutePath());
+            const QString icon = generateMobHeadIconFor(e.mob, d780.absolutePath(), 1);
             if (icon.isEmpty()) {
                 qInfo().noquote() << "  [t780 diag] mob" << e.mob << "icon generation unexpectedly failed";
                 ok = false;
@@ -5399,6 +5413,180 @@ int main(int argc, char *argv[])
                           << "| review#19 fence-to-anvil connection: R1 predicate (isCollidable||"
                              "isFullCube) draws rail arms toward anvil exactly like fence-fence; torch "
                              "(ShapeNone) still not connected";
+    }
+
+    // ── review-e 修复批探针（Review 2026-08-23 #6/#7/#8/#32 + dev-plan t834 生存链闭环）──
+    // (a) #7/#8 配方生存链：剪/杀白羊掉 Wool 方块（QML sheepWoolDropId 字面量 27——静态契约由 recipe.cpp 尾部
+    //     static_assert 钉死，此处运行期以**QML 同款字面量**喂 matcher 复核）→ 32 条染色配方（t788 已全测 16
+    //     dye+wool；此处锁「字面量 27 / 63+idx-1 与配方原料/产物逐位相等」的跨层契约）+ 红床简化配方（羊毛
+    //     方块版可合、旧 0x20E 版不再合）+ 红石灯（Glass 方块版可合、旧 0x204 物品版不再合）+ 两方块 dropId=
+    //     自身（放置-破坏回收闭环）+ 烧沙仍产 0x204（放置过境物品——生存玻璃唯一入口）。
+    // (b) #32 mobDied 第 8 参 sheared：剪毛羊致死 → sheared=true（QML 据此压掉羊毛掉落）；未剪对照 → false。
+    // (c) #6 派生缓存文件名带 revision + 逐版清理（mobhead / sheep_woolface 两族；同 t745 icon2 / Review #11
+    //     skin 族模式）。#33（QML Math.min/max 钳）与 #34（腿罩随腿摆）是纯 QML 呈现层，矩阵不链 Quick3D，
+    //     需人工目视（字面量界标 27/63 已由 (a) 锁住）。
+    // ⚠️ (c) 写共享 AppLocalData 目录（缓存生成器落盘路径固定）——探针会清掉 mobhead_1 / woolface 当前真身，
+    //     属自愈型副作用（下次构建期 ensureBuiltLocked / 懒生成重落盘），同 t777/t779/t780 先例。
+    {
+        bool ok = true;
+        // (a1) 跨层字面量契约：QML sheepWoolDropId 白→27 / 有色→63+idx-1 ↔ BlockRegistry 同值 ↔ 染色配方
+        //     原料/产物逐位相等（QML 掉什么，配方就吃什么、产什么色）。
+        {
+            const int qmlWhite = 27, qmlBase = 63; // Main.qml sheepWoolDropId 字面量镜像
+            if (int(BR::Wool) != qmlWhite || int(BR::FirstWoolVariant) != qmlBase) {
+                qInfo().noquote() << "  [review-e diag] literal drift: Wool" << int(BR::Wool)
+                                  << "FirstWoolVariant" << int(BR::FirstWoolVariant);
+                ok = false;
+            }
+            for (int i = 0; i < 16; ++i) {
+                const int dye = RecipeRegistry::DyeIdBase + i;
+                const int drop = (i > 0) ? (qmlBase + i - 1) : qmlWhite; // QML sheepWoolDropId 公式镜像
+                // 染色配方原料 = **白羊毛 27**（白羊掉落直连）；断言配方产出 == QML 有色羊掉落 id
+                //   （同 id 同方块：剪/杀有色羊得的羊毛 = 染料染出的羊毛，两路产物汇流同一方块段）。
+                int g[9] = { dye, qmlWhite, 0, 0, 0, 0, 0, 0, 0 };
+                const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+                if (!m || m->outputId != drop) {
+                    qInfo().noquote() << "  [review-e diag] dye" << i << "+white-wool" << qmlWhite << "->"
+                                      << (m ? m->outputId : -1) << "expected qmlDrop" << drop;
+                    ok = false;
+                }
+            }
+            // 红床：木板+Wool 方块（白羊毛掉落直连）→ BedRed；旧 0x20E 物品版不再合（退役不回头）。
+            int gBed[9] = { int(BR::Planks), int(BR::Wool), 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *mBed = RecipeRegistry::match(gBed, 2);
+            if (!mBed || mBed->outputId != int(BR::BedRed)) {
+                qInfo().noquote() << "  [review-e diag] bed_red from planks+wool-block ->"
+                                  << (mBed ? mBed->outputId : -1);
+                ok = false;
+            }
+            int gBedOld[9] = { int(BR::Planks), RecipeRegistry::WoolId, 0, 0, 0, 0, 0, 0, 0 };
+            if (RecipeRegistry::match(gBedOld, 2)) {
+                qInfo().noquote() << "  [review-e diag] retired wool item 0x20E still crafts a bed";
+                ok = false;
+            }
+            // 红石灯：4 红石十字 + 中心 Glass 方块 → RedstoneLamp；旧 0x204 物品中心版不再合。
+            int gLamp[9] = { 0, RecipeRegistry::RedstoneId, 0,
+                             RecipeRegistry::RedstoneId, int(BR::Glass), RecipeRegistry::RedstoneId,
+                             0, RecipeRegistry::RedstoneId, 0 };
+            const RecipeRegistry::Recipe *mLamp = RecipeRegistry::match(gLamp, 3);
+            if (!mLamp || mLamp->outputId != int(BR::RedstoneLamp)) {
+                qInfo().noquote() << "  [review-e diag] redstone_lamp from glass-block ->"
+                                  << (mLamp ? mLamp->outputId : -1);
+                ok = false;
+            }
+            int gLampOld[9] = { 0, RecipeRegistry::RedstoneId, 0,
+                                RecipeRegistry::RedstoneId, RecipeRegistry::GlassId, RecipeRegistry::RedstoneId,
+                                0, RecipeRegistry::RedstoneId, 0 };
+            if (RecipeRegistry::match(gLampOld, 3)) {
+                qInfo().noquote() << "  [review-e diag] retired glass item 0x204 center still crafts lamp";
+                ok = false;
+            }
+            // 生存回收闭环：Glass / Wool 破坏 dropId=自身（放置→破坏→回手入配方，Wool/床族自掉先例）；
+            //   熔炉烧沙仍产 0x204（放置过境物品 = 生存玻璃唯一入口，playercontroller t405 放置成 Glass）。
+            if (BR::dropId(BR::Glass) != int(BR::Glass) || BR::dropId(BR::Wool) != int(BR::Wool)) {
+                qInfo().noquote() << "  [review-e diag] self-drop broken: Glass->" << BR::dropId(BR::Glass)
+                                  << "Wool->" << BR::dropId(BR::Wool);
+                ok = false;
+            }
+            if (SmeltingRegistry::smeltResult(int(BR::Sand)) != RecipeRegistry::GlassId) {
+                qInfo().noquote() << "  [review-e diag] sand smelt ->"
+                                  << SmeltingRegistry::smeltResult(int(BR::Sand));
+                ok = false;
+            }
+        }
+        // (b) #32：两只成体羊（一剪一不剪）致死 → mobDied 各一发，sheared 载荷 true/false 对照；woolIdx 仍
+        //     携带（QML 剪毛分支压掉羊毛掉落、烧死分支仍给熟羊肉——呈现层语义，此处只锁信号载荷）。
+        {
+            EntityManager emE;
+            World wE;
+            wE.setWidth(32);
+            wE.setDepth(32);
+            wE.setHeight(48);
+            wE.setSeed(11);
+            const int a = emE.spawnMobTyped(14, 12, 15, EntityManager::MobSheep,
+                                            QStringLiteral("#f5f0e8"), 10);
+            const int b = emE.spawnMobTyped(16, 12, 15, EntityManager::MobSheep,
+                                            QStringLiteral("#f5f0e8"), 10);
+            if (a < 0 || b < 0) {
+                qInfo().noquote() << "  [review-e diag] failed to spawn probe sheep" << a << b;
+                ok = false;
+            } else {
+                emE.shearSheep(a); // a 剪毛 / b 对照
+                int died = 0, shearedSeen = -1, unshearedSeen = -1;
+                QObject::connect(&emE, &EntityManager::mobDied, &emE,
+                                 [&](int, int, int, int type, bool, bool, int, bool sheared) {
+                                     if (type != EntityManager::MobSheep) return;
+                                     ++died;
+                                     if (sheared) shearedSeen = 1; else unshearedSeen = 0;
+                                 });
+                emE.damageEntity(a, emE.maxHealthAt(a));
+                emE.damageEntity(b, emE.maxHealthAt(b));
+                const QVector3D farListenerE(-1000.0f, 10.0f, -1000.0f);
+                for (int t = 0; t < 40 && died < 2; ++t) // 0.64s > kDeathTime 0.5s
+                    emE.tick(0.016f, &wE, farListenerE, 0.3f, 1.8f, false);
+                if (died != 2 || shearedSeen != 1 || unshearedSeen != 0) {
+                    qInfo().noquote() << "  [review-e diag] sheared-death payload: died" << died
+                                      << "sheared" << shearedSeen << "unsheared" << unshearedSeen;
+                    ok = false;
+                }
+            }
+        }
+        // (c) #6：两族派生缓存文件名 _r<rev> 嵌版 + 换版清旧（含 t749 期无后缀旧名）。
+        {
+            QDir dE(QDir::temp().absoluteFilePath("review_e_cache_probe"));
+            dE.removeRecursively();
+            dE.mkpath(".");
+            const QString furPath = dE.absoluteFilePath("fur.png");
+            const QString bodyPath = dE.absoluteFilePath("body.png");
+            QImage fE(64, 32, QImage::Format_ARGB32), bE(64, 32, QImage::Format_ARGB32);
+            fE.fill(QColor(0xf0, 0xec, 0xe4));
+            bE.fill(QColor(0x7a, 0x5a, 0x48));
+            if (!fE.save(furPath, "PNG") || !bE.save(bodyPath, "PNG")) {
+                qInfo().noquote() << "  [review-e diag] failed to write temp rig PNGs";
+                ok = false;
+            }
+            const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+            // 预置无后缀旧名（t749 期格式）→ 调用后应被清。
+            const QString legacy = QDir(cacheDir).absoluteFilePath(
+                    QStringLiteral("voxelsandbox_rp_sheep_woolface.png"));
+            QImage legacyPx(2, 2, QImage::Format_ARGB32);
+            legacyPx.fill(Qt::black);
+            legacyPx.save(legacy, "PNG");
+            const QString p5 = generateSheepWoolFaceFile(furPath, bodyPath, 5);
+            const QString p6 = generateSheepWoolFaceFile(furPath, bodyPath, 6);
+            if (p5.isEmpty() || p6.isEmpty() || !p5.contains(QStringLiteral("_r5.png"))
+                    || !p6.contains(QStringLiteral("_r6.png")) || QFile::exists(p5)
+                    || !QFile::exists(p6) || QFile::exists(legacy)) {
+                qInfo().noquote() << "  [review-e diag] woolface rev cache: p5" << p5 << "exists"
+                                  << QFile::exists(p5) << "p6" << p6 << "exists" << QFile::exists(p6)
+                                  << "legacy-gone" << !QFile::exists(legacy);
+                ok = false;
+            }
+            // mobhead 族同模式（pig rig 子目录布局，同 t779）。
+            QDir(dE.absoluteFilePath("pig")).mkpath(".");
+            QImage pE(64, 32, QImage::Format_ARGB32);
+            pE.fill(QColor(0xf0, 0xa0, 0xa8));
+            pE.save(dE.absoluteFilePath("pig/pig.png"), "PNG");
+            const QString h5 = generateMobHeadIconFor(1, dE.absolutePath(), 5);
+            const QString h6 = generateMobHeadIconFor(1, dE.absolutePath(), 6);
+            if (h5.isEmpty() || h6.isEmpty() || !h5.contains(QStringLiteral("_r5.png"))
+                    || !h6.contains(QStringLiteral("_r6.png")) || QFile::exists(h5)
+                    || !QFile::exists(h6)) {
+                qInfo().noquote() << "  [review-e diag] mobhead rev cache: h5" << h5 << "exists"
+                                  << QFile::exists(h5) << "h6" << h6 << "exists" << QFile::exists(h6);
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review-e survival chains & death payload & rev-named caches: sheep wool drop "
+                             "literal 27/63+idx-1 feeds all 16 dye recipes and planks+wool->bed_red (retired "
+                             "0x20E no longer crafts anything), redstone lamp crafts from glass BLOCK (54, "
+                             "self-drop) not glass item 0x204 (sand smelt still yields placeable 0x204 "
+                             "transit), mobDied 8th param sheared=true suppresses wool drop on sheared "
+                             "sheep death (unsheared control false), mobhead/sheep-woolface derived cache "
+                             "filenames embed _r<revision> with per-revision stale cleanup incl. legacy "
+                             "unsuffixed names (QML clamp #33 / leg covers #34 = manual visual check)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -222,15 +222,15 @@ public:
     //   t749 起蠹虫带**头像专用显式源**——不进 mobEntityMap 以防 3D packTextured 误命中；狼/豹猫 t780 补齐
     //   几何 box-UV 后已入 mobEntityMap，显式源撤除）时，
     //   加载 pack entity 贴图、裁「头正面」（MC +Z Front 面 = (u0+d, v0+d)-(u0+d+w, v0+d+h) 像素矩形）
-    //   放大到 64×64 透明底 PNG，落盘 AppLocalData/voxelsandbox_rp_mobhead_<mobType>.png（缓存；apply() 重建时
-    //   随图集重生成）并返回 file:/// 路径。无 pack / 无映射 / 裁剪解码失败 → 空串（调用方回退程序贴图或体色块）。
+    //   放大到 64×64 透明底 PNG，落盘 AppLocalData/voxelsandbox_rp_mobhead_<mobType>_r<revision>.png（缓存；
+    //   apply() 重建时随图集重生成，revision 进文件名 → 换包后 URL 变 QML 重读，review #6）并返回 file:/// 路径。无 pack / 无映射 / 裁剪解码失败 → 空串（调用方回退程序贴图或体色块）。
     //   羊特例：主贴图是 sheep_fur.png（毛层，头前是纯白羊毛无脸）→ 头像改裁 sheep/sheep.png 本体层的头区
     //   （有真脸）。pack 关时的程序贴图回退在调用方（ResourceBrowser mobFallbackTexture，对齐 mobTextureSource
     //   的 pack/程序双态语义）。红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString mobHeadIconSource(int mobType) const;
 
     // t777 ②「pack 态羊多一双眼」显隐判据单一权威：毛层命中且「fur 毛身 + 本体层头区真脸」合成贴图已生效
-    //   （即 mobTextureSource(3) 返回的是 voxelsandbox_rp_sheep_woolface.png 而非毛层原样）→ 头前已有真脸，
+    //   （即 mobTextureSource(3) 返回的是 voxelsandbox_rp_sheep_woolface_r<revision>.png 而非毛层原样）→ 头前已有真脸，
     //   QML 眼 overlay 须隐（对齐牛等「pack 自带脸则隐 overlay 眼」语义）。pack 关 / 毛层未命中 / 合成失败
     //   （毛层原样返回，头前无脸）→ false，眼 overlay 保留（唯一脸）。只读缓存不生成（生成归
     //   mobTextureSource(3) 懒路径）。无 NOTIFY：QML 绑定须同时依赖 Texture.source（source 变化驱动重算时
@@ -315,8 +315,9 @@ struct MobHeadIconLayout {
 };
 bool mobHeadIconLayout(int mobType, MobHeadIconLayout *out);
 
-// t779 头像生成端到端口（矩阵探针密闭入口）：显式 entityDir 直裁不触碰进程全局 BuiltState/settings
-//   （同 t777 generateSheepWoolFaceFile 探针 rig 语义）。返落盘绝对路径（空 = 表无条目 / 任一步失败）。
-QString generateMobHeadIconFor(int mobType, const QString &entityDirPath);
+// t779 头像生成端到端口（矩阵探针密闭入口）：显式 entityDir + revision 直裁不触碰进程全局
+//   BuiltState/settings（同 t777 generateSheepWoolFaceFile 探针 rig 语义）。revision 只进落盘文件名
+//   （_r<rev> 后缀，review #6 缓存换代键；探针传任意值即可）。返落盘绝对路径（空 = 表无条目 / 任一步失败）。
+QString generateMobHeadIconFor(int mobType, const QString &entityDirPath, int revision);
 
 #endif // RESOURCEPACKMANAGER_H

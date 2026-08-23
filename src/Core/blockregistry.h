@@ -376,9 +376,10 @@ public:
         //   x-ray 空壳」）。碰撞 / 选中 / 射线阻挡不读 solid（走 shape / raycastAABBs / blockAt!=0），故 glass 仍可踩 /
         //   可瞄准 / 可破）。shape=ShapeFull（整立方实体碰撞 + 选中框；与 ice / sandstone 同走整格，**非**异形——不进
         //   PartialBlockGeometry）、hardness=0.3（同 MC 1.0 玻璃量级，薄脆）、toolType=Pickaxe（玻璃采掘归石族）、
-        //   requiresTool=false（空手可破且掉落——本工程无精准采集，玻璃可回收，便于沙子→玻璃→重放闭环）、dropId=0x204
-        //   （破玻璃掉玻璃**物品** RecipeRegistry::GlassId，材料段；Core 不依赖 Game 故用字面量 0x204，同 TallGrass 用
-        //   0x208 模式）、dropCount=1、maxStack=64。各面贴图=glass(68)（近白青底 + 暗边框 + 对角高光斜线，原创自绘 §9a；
+        //   requiresTool=false（空手可破且掉落——本工程无精准采集，玻璃可回收，便于沙子→玻璃→重放闭环）、dropId=自身
+        //   （review #8/t834：破玻璃掉玻璃**方块**（同 Wool/床自掉模式）——红石灯配方原料改接方块段 Glass 后，仍掉
+        //   材料段 0x204 会让方块段在生存无获取入口 = 配方死链；自掉后生存链 = 烧沙得 0x204（放置中转）→ 破坏回收
+        //   Glass 方块 → 入配方）、dropCount=1、maxStack=64。各面贴图=glass(68)（近白青底 + 暗边框 + 对角高光斜线，原创自绘 §9a；
         //   透明感由 glassOnly 段材质 opacity≈0.45 实现，纹理本身不透明——同 water 模式：纹理不透 + 材质半透）。
         //   音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）。**渲染**：mesher 路由进
         //   ChunkGeometry 的 glassOnly 段（独立半透材质 opacity:0.45 + NoLighting + 顶点色光照，机制等价 waterOnly /
@@ -386,8 +387,8 @@ public:
         //   邻实体剔（避免与实体面共面 z-fight）、邻 Glass 剔（玻璃-玻璃共面不重复绘制）、邻空气画（半透面，透视关键）。
         //   lightOpacity=0（玻璃透光——机制等价 MC 玻璃 lightOpacity 0；solid=false 已致全透，玻璃与其它 solid=false
         //   方块同）。进创造调色板走玻璃**方块**本 id（creativeBlocks，t800 从材料段物品 0x204 改道 —— item 图标
-        //   2D 平贴图 flatSpec，对齐 MC 玻璃物品图标语义）；玻璃物品 0x204 保留生存链（沙子冶炼产物 / 破玻璃掉落 /
-        //   红石灯配方原料），不再列材料段调色板。
+        //   2D 平贴图 flatSpec，对齐 MC 玻璃物品图标语义）；玻璃物品 0x204 保留生存中转角色（沙子冶炼产物 →
+        //   放置成方块；review #8 起不再掉落 / 不再入配方——红石灯原料改方块段 Glass），不再列材料段调色板。
         Glass          = 54, // 玻璃：沙子冶炼产物方块；透明整立方（solid=false + glassOnly 段半透渲染）。
         // ── t407 胡萝卜/马铃薯作物（crop）：机制等价 MC 1.0 carrot/potato 作物。**cross 形广告牌方块**（与 WheatCrop
         //   同走 PartialBlockGeometry 的 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）—— 非 1×1×1 整立方。

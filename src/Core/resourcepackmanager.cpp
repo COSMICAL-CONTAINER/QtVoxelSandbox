@@ -49,9 +49,12 @@ struct MobHeadRegion {
     int ovX = 0, ovY = 0;                              // 贴到头 Front 的左上角（base 像素）
 };
 const QList<MobHeadRegion> &mobHeadRegions();
-QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath);
+// review #6（2026-08-23）：两生成器落盘文件名均带 apply() revision（_r<rev> 后缀，同 skin_/icon4_ 族）——
+//   apply() 重建（换包/重解析）清缓存重生成，无 revision 时同路径落新图但 URL 不变 → QML Texture 按 URL
+//   缓存继续显示旧包像素直到重启。revision 由调用方传入（BuiltState.s.revision；矩阵探针密闭 rig 传探针值）。
+QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath, int revision);
 // t749 羊 3D 预览合成贴图：sheep_fur.png 毛身 + sheep.png 本体层头区（真脸）→ 落盘绝对路径（空 = 失败回退）。
-QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath);
+QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath, int revision);
 
 namespace {
 
@@ -2015,7 +2018,7 @@ void ensureBuiltLocked()
     //   （查询侧回退体色方块，降级语义不变）。
     if (!s.entityDir.isEmpty()) {
         for (const MobHeadRegion &r : mobHeadRegions()) {
-            const QString out = generateMobHeadIconFile(r, s.entityDir);
+            const QString out = generateMobHeadIconFile(r, s.entityDir, s.revision);
             if (!out.isEmpty())
                 s.mobHeadIconFiles.insert(r.mobType, out);
         }
@@ -3338,7 +3341,7 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
             const QString bodyPath = QFile::exists(bodySub) ? bodySub
                                   : (QFile::exists(bodyFlat) ? bodyFlat : QString());
             if (!bodyPath.isEmpty()) {
-                const QString out = generateSheepWoolFaceFile(QUrl(hit).toLocalFile(), bodyPath);
+                const QString out = generateSheepWoolFaceFile(QUrl(hit).toLocalFile(), bodyPath, s.revision);
                 if (!out.isEmpty()) {
                     s.sheepWoolFaceFile = out; // stateMutex 已持锁，安全
                     return QStringLiteral("file:///") + out;
@@ -3451,9 +3454,9 @@ bool mobHeadIconLayout(int mobType, MobHeadIconLayout *out)
 // review D3-b 头像裁剪核心（从 mobHeadIconSource 抽出，供构建期预生成 + 查询期懒生成两路共用）：
 //   给定头部区数据 + entity 目录 → 解析源贴图（羊走本体层 sheep/sheep.png；其余走 mobEntityMap 主映射，
 //   子目录 / 扁平两级探测）→ 按 base 比例裁 Front 像素区 → 放大 64×64 透明底 → 落盘
-//   AppLocalData/voxelsandbox_rp_mobhead_<mobType>.png → 返落盘绝对路径（空串 = 任一步失败，调用方回退）。
+//   AppLocalData/voxelsandbox_rp_mobhead_<mobType>_r<revision>.png → 返落盘绝对路径（空串 = 任一步失败，调用方回退）。
 //   纯函数（只读 entityDir + 写落盘文件；不触碰 BuiltState —— 缓存插入由调用方做，锁语义归 caller）。
-QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath)
+QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath, int revision)
 {
     const QDir entityDir(entityDirPath);
     QString srcPath;
@@ -3536,25 +3539,43 @@ QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &enti
     QPainter p(&icon);
     p.drawImage((64 - scaled.width()) / 2, (64 - scaled.height()) / 2, scaled);
     p.end();
-    // 落盘缓存（AppLocalDataLocation，同 atlasFile 目录）。
+    // 落盘缓存（AppLocalDataLocation，同 atlasFile 目录）。review #6：文件名带 revision（apply() 每次
+    //   ++revision → 换包重裁后落盘路径随版本变，QML Texture 按 file:/// URL 重读新图；无 revision 时
+    //   同路径落新图但 URL 不变 → 换包后图鉴头像陈旧直到重启，同 t745 icon2 / t731 skin 族先例）。
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty())
         return {}; // 无可写目录 → 回退（降级）
     QDir().mkpath(dir);
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_mobhead_%1.png").arg(region.mobType));
+            QStringLiteral("voxelsandbox_rp_mobhead_%1_r%2.png").arg(region.mobType).arg(revision));
     if (!icon.save(out, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
+    // review #6：revision 逐版累积清理（同 Review #11 skin 族）。apply() 每次 ++revision 且清 mobHeadIconFiles
+    //   → 本 mobType 每次换包/重解析都会落一个新的 _r<rev>.png；落盘成功后删同 mobType 的无后缀旧名与
+    //   其余 _r*.png（刚写出的 out 除外）——防 AppLocalData 缓存逐年膨胀。已进显存的旧图不受删除影响。
+    {
+        const QString legacy = QDir(dir).absoluteFilePath(
+                QStringLiteral("voxelsandbox_rp_mobhead_%1.png").arg(region.mobType));
+        if (QFile::exists(legacy))
+            QFile::remove(legacy);
+        const QStringList stale = QDir(dir).entryList(
+                { QStringLiteral("voxelsandbox_rp_mobhead_%1_r*.png").arg(region.mobType) }, QDir::Files);
+        for (const QString &f : stale) {
+            const QString full = QDir(dir).absoluteFilePath(f);
+            if (full != out)
+                QFile::remove(full);
+        }
+    }
     return out;
 }
 
-// t779 头像生成端到端口（声明见 .h）：表查条目 → 复用裁剪核心。显式 entityDir 不触碰进程全局
+// t779 头像生成端到端口（声明见 .h）：表查条目 → 复用裁剪核心。显式 entityDir + revision 不触碰进程全局
 //   BuiltState/settings（矩阵探针密闭 rig 入口，同 t777 generateSheepWoolFaceFile 语义）。
-QString generateMobHeadIconFor(int mobType, const QString &entityDirPath)
+QString generateMobHeadIconFor(int mobType, const QString &entityDirPath, int revision)
 {
     for (const MobHeadRegion &r : mobHeadRegions()) {
         if (r.mobType == mobType)
-            return generateMobHeadIconFile(r, entityDirPath);
+            return generateMobHeadIconFile(r, entityDirPath, revision);
     }
     return {};
 }
@@ -3567,7 +3588,7 @@ QString generateMobHeadIconFor(int mobType, const QString &entityDirPath)
 //   单贴图 MobModel 只有一套 box-UV（本体布局）→ 直用 sheep_fur.png 时头六面全采偏移区 = 用户
 //   「3D 预览完全不像羊」根因。合成 = fur 整张（毛身白）+ 本体层头区覆写 → 长毛羊身 + 真脸，两态兼顾
 //   （t593「无毛粉肉身」与本次「毛层无脸」两轮诉求一次满足；机制等价 MC 本体+毛层双层模型，单层几何近似）。
-QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath)
+QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath, int revision)
 {
     QImage fur(furPath), body(bodyPath);
     if (fur.isNull() || body.isNull())
@@ -3595,10 +3616,28 @@ QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPat
     if (dir.isEmpty())
         return {}; // 无可写目录 → 回退（降级）
     QDir().mkpath(dir);
+    // review #6：文件名带 revision（同 mobhead 族 / skin 族先例）——apply() 换包重合成后落盘路径随版本变
+    //   → QML Texture 按 file:/// URL 重读新图；无 revision 时同路径落新图但 URL 不变 → 换包后游戏内羊与
+    //   图鉴显示旧包毛身/脸直到重启（t777 眼 overlay / t789 毛色 tint 都架在这条链上，跟着陈旧）。
     const QString file = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_sheep_woolface.png"));
+            QStringLiteral("voxelsandbox_rp_sheep_woolface_r%1.png").arg(revision));
     if (!out.save(file, "PNG"))
         return {}; // 落盘失败 → 回退（降级）
+    // review #6：revision 逐版累积清理（同 Review #11 skin 族）：删 t749 期无后缀旧名 + 其余 _r*.png
+    //   （刚写出的 file 除外）。已进显存的旧图不受删除影响（URL 已随 revision 变化重绑）。
+    {
+        const QString legacy = QDir(dir).absoluteFilePath(
+                QStringLiteral("voxelsandbox_rp_sheep_woolface.png"));
+        if (QFile::exists(legacy))
+            QFile::remove(legacy);
+        const QStringList stale = QDir(dir).entryList(
+                { QStringLiteral("voxelsandbox_rp_sheep_woolface_r*.png") }, QDir::Files);
+        for (const QString &f : stale) {
+            const QString full = QDir(dir).absoluteFilePath(f);
+            if (full != file)
+                QFile::remove(full);
+        }
+    }
     return file;
 }
 
@@ -3623,7 +3662,7 @@ QString ResourcePackManager::mobHeadIconSource(int mobType) const
     const auto cached = s.mobHeadIconFiles.constFind(mobType);
     if (cached != s.mobHeadIconFiles.constEnd() && QFile::exists(cached.value()))
         return QStringLiteral("file:///") + cached.value();
-    const QString out = generateMobHeadIconFile(*region, s.entityDir);
+    const QString out = generateMobHeadIconFile(*region, s.entityDir, s.revision);
     if (out.isEmpty())
         return {};
     s.mobHeadIconFiles.insert(mobType, out);

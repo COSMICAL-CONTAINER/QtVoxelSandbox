@@ -272,17 +272,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       int(BlockRegistry::Torch), 4, 1, "torch_charcoal" },
     // t387 红床：木板+羊毛 → 1 红床（无序 2×2）。机制等价 MC 1.0 床配方（3 板 + 3 羊毛 → 床）的简化版
     //   （本工程用 1 板 + 1 羊毛 → 1 床，降低合成摩擦；色变用独立 id 故配方只产默认红床，其余色变体创造调色板
-    //   取用——本工程无染料系统）。羊毛原料用 RecipeRegistry::WoolId（材料段 0x20E，杀羊 / 剪羊毛掉落；创造调色板
-    //   亦有）→ 生存可由羊获得；2 原料任意位置即可（2×2 背包栏 / 3×3 工作台均可）。产物 BedRed（方块段，可放置）。
+    //   取用）。t834/review #7：羊毛原料改**方块段 Wool=27**（旧材料段 WoolId 0x20E 退役——白羊剪/杀掉落已改
+    //   Wool 方块，0x20E 无生存来源不可放置 = 死链；剪白羊→27→本配方 = 生存链闭环）；2 原料任意位置即可
+    //   （2×2 背包栏 / 3×3 工作台均可）。产物 BedRed（方块段，可放置）。
     { int(RecipeRegistry::Inventory2x2), true,
-      { int(BlockRegistry::Planks), RecipeRegistry::WoolId, 0, 0, 0, 0, 0, 0, 0 },
+      { int(BlockRegistry::Planks), int(BlockRegistry::Wool), 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::BedRed), 1, 1, "bed_red" },
     // ── t455 16 色床配方（机制等价 MC 1.0 床配方「3 同色羊毛 + 3 木板 → 该色床」）：每色一条有序 3×3 配方，
     //   顶行 3 同色羊毛方块 + 中行 3 木板 → 1 该色床。最小包围盒 3×2，仅工作台可合（gridSize=3）。原料为羊毛
     //   **方块** id（非材料段 wool 物品）→ 配方颜色严格匹配（3 红 wool → 红床，3 蓝 wool → 蓝床，机制等价 MC
-    //   「床颜色 = 羊毛颜色」）。white 用既有 Wool=27（剪/杀羊获得）；其余色羊毛由创造调色板取用（无染料系统）。
-    //   与既存简化红床配方（1 板+1 wool 物品，无序 2×2）不冲突：本配方包围盒 3×2 / 原料为方块段 wool，前者包围盒
-    //   不定 / 原料为材料段 wool 物品 → shapedEqual 不会误匹配。每色 wool→bed id 对齐 BlockRegistry::Id 枚举序。
+    //   「床颜色 = 羊毛颜色」）。white 用既有 Wool=27（t834 起剪/杀白羊掉落即 Wool 方块——生存链闭环，另经
+    //   简化红床配方无序合成亦可）；其余色羊毛由创造调色板取用或染料链产出（t788 染料+白羊毛→彩羊毛）。
+    //   与简化红床配方（1 板+1 Wool 方块，无序 2×2）不冲突：本配方包围盒 3×2 有序摆位，多重集亦异（3+3 vs
+    //   1+1）→ shapedEqual / shapelessEqual 均不误匹配。每色 wool→bed id 对齐 BlockRegistry::Id 枚举序。
     { int(RecipeRegistry::Table3x3), false,
       { int(BlockRegistry::Wool), int(BlockRegistry::Wool), int(BlockRegistry::Wool),
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
@@ -772,13 +774,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { int(BlockRegistry::IronBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
       RecipeRegistry::IronIngotId, 9, 1, "iron_ingot" },
     // t620 红石灯：4 红石粉十字 + 中心 1 玻璃 → 1 红石灯（有序 3×3，仅工作台）。机制对标 MC 1.0 redstone
-    //   lamp（glowstone + 4 redstone）—— 本工程无荧石，用玻璃作壳（玻璃 = 沙子冶炼产物 GlassId 0x204，
-    //   「透光壳内藏红石」语义）。最小包围盒 3×3 满铺（四角空 + 四边红石 + 中心玻璃），与指南针
-    //   （{IronIngot:4, Redstone:1} 十字）/ 钟（{GoldIngot:4, Redstone:1} 十字）同形但原料不同（本为
-    //   {Redstone:4, Glass:1}）→ 多重集唯一不冲突。产物 = RedstoneLamp（右键开关的可放置光源方块）。
+    //   lamp（glowstone + 4 redstone）—— 本工程无荧石，用玻璃作壳（「透光壳内藏红石」语义）。review #8：
+    //   玻璃原料改**方块段 Glass=54**（旧材料段 GlassId 0x204 已退出创造调色板 → 纯创造流程合成红石灯需绕
+    //   「熔炉烧沙」死胡同；Glass 方块 t834 起 dropId=自身 → 生存链 = 烧沙得 0x204 → 放置 → 破坏回收 Glass
+    //   方块 → 入配方，创造调色板直接取 Glass 方块，两模式同源）。最小包围盒 3×3 满铺（四角空 + 四边红石 +
+    //   中心玻璃），与指南针（{IronIngot:4, Redstone:1} 十字）/ 钟（{GoldIngot:4, Redstone:1} 十字）同形但
+    //   原料不同（本为 {Redstone:4, Glass:1}）→ 多重集唯一不冲突。产物 = RedstoneLamp（右键开关的可放置光源方块）。
     { int(RecipeRegistry::Table3x3), false,
       { 0,                         RecipeRegistry::RedstoneId, 0,
-        RecipeRegistry::RedstoneId, RecipeRegistry::GlassId,    RecipeRegistry::RedstoneId,
+        RecipeRegistry::RedstoneId, int(BlockRegistry::Glass),  RecipeRegistry::RedstoneId,
         0,                          RecipeRegistry::RedstoneId, 0 },
       int(BlockRegistry::RedstoneLamp), 1, 1, "redstone_lamp" },
     // t484 铁轨（rail）：6 铁锭 + 1 木棒（顶行 3 锭 + 中行 锭-棒-锭）→ 16 铁轨（有序 3×3，仅工作台）。
@@ -839,7 +843,7 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     // t565 白羊毛（wool）：4 线（2×2 满铺）→ 1 白羊毛（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0
     //   配方（4 string → 1 白羊毛；用户报「4 线合成白羊毛（背包 2×2 配方）」）。最小包围盒 2×2（满），
     //   shapedEqual 收缩后逐格比 → 2×2 背包栏 / 工作台角 2×2 均可合。产物 Wool=27（白色羊毛方块，可放置；
-    //   区别材料段 WoolId=0x20E 物品）。与雪球（无序 2×2）多重集 {String:4} 唯一 → 不冲突。
+    //   t834 起剪/杀白羊掉落同为此方块——本配方是线源副路）。与雪球（无序 2×2）多重集 {String:4} 唯一 → 不冲突。
     { int(RecipeRegistry::Inventory2x2), false,
       { RecipeRegistry::StringId, RecipeRegistry::StringId, 0,
         RecipeRegistry::StringId, RecipeRegistry::StringId, 0,
@@ -1187,12 +1191,14 @@ static_assert(RecipeRegistry::DyeYellowId     == 0x24F, "DyeYellowId 须与 Bloc
 static_assert(RecipeRegistry::DyeBlueId       == 0x256, "DyeBlueId 须与 BlockRegistry::FlowerBlue.dropId 字面量 0x256 一致");
 static_assert(RecipeRegistry::DyeRedId        == 0x259, "DyeRedId 须与 BlockRegistry::FlowerRed.dropId 字面量 0x259 一致");
 static_assert(RecipeRegistry::DyeBlackId      == 0x25A, "DyeBlackId 须为染料段末位 0x25A（DyeIdBase+15）");
-// t789 剪/杀有色羊掉落跨层契约（审查 r1912-tail 中危①补钉；同 Coal/Lapis/Dye 模式）：呈现层 Main.qml
-//   sheepWoolDropId 持 QML 裸字面量（QML 不 import C++ 静态类——白→0x20E 材料段羊毛物品 / 有色→羊毛方块
-//   63..77 即 FirstWoolVariant+idx-1）；本处钉死两界标 == 字面量，羊毛段或材料段迁移忘了同步 QML → 编译失败
-//   （防「剪彩色羊静默掉错方块且矩阵全绿」——矩阵探针只锁 woolIndex 载荷不锁 QML 映射）。
-static_assert(RecipeRegistry::WoolId          == 0x20E, "WoolId 须与 Main.qml sheepWoolDropId 白羊毛字面量 0x20E 一致");
+// t834/review #7 剪/杀羊掉落跨层契约（t789 原钉 0x20E 字面量，t834 掉落统一方块段后重钉）：呈现层 Main.qml
+//   sheepWoolDropId 持 QML 裸字面量（QML 不 import C++ 静态类——白→Wool 方块 27 / 有色→羊毛方块 63..77 即
+//   FirstWoolVariant+idx-1，全 16 色均为可放置方块段，3D BlockCube 掉落物）；本处钉死两界标 == 字面量，羊毛
+//   方块段迁移忘了同步 QML → 编译失败（防「剪羊静默掉错方块且矩阵全绿」——矩阵探针只锁 woolIndex 载荷不锁
+//   QML 映射）。WoolId 0x20E 同步退役（保留常量 + 名字/图标/pack 映射兼容旧档；不再有任何掉落源 / 配方消费）。
+static_assert(BlockRegistry::Wool           == 27,    "Wool 方块 id 须与 Main.qml sheepWoolDropId 白羊毛字面量 27 一致");
 static_assert(BlockRegistry::FirstWoolVariant == 63,    "FirstWoolVariant 须与 Main.qml sheepWoolDropId 有色羊毛基址字面量 63 一致");
+static_assert(RecipeRegistry::WoolId        == 0x20E, "WoolId 保留 0x20E（t834 退役：仅旧档物品名/图标兼容，勿再接掉落或配方）");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
 //   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x22E] = 47 项，
