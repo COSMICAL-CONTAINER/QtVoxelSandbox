@@ -10,6 +10,32 @@ find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Qml Quick3D Sql)
 
 qt_standard_project_setup()
 
+# t813 构建版本戳（R19.13 🅱 组）：每次 build 生成 build/generated/build_stamps.h
+#   （VOXEL_BUILD_STAMP 构建时间 YYYY-MM-DD HH:MM + VOXEL_BUILD_GIT 短哈希），经 src/Core/buildinfo.cpp
+#   单 TU 消化为 QString API（BuildInfo QML 单例）。三处机制（缺一不可）：
+#   1) configure 期 bootstrap（execute_process）：保证首个增量编译前头文件就存在；
+#   2) add_custom_target 每次构建恒跑（custom target 恒 out-of-date）→ 跨过分钟边界 / 换 commit
+#      即刷新 stamp；
+#   3) 脚本「内容变才覆写」（保 mtime）→ 未变不重编；变了也只重编唯一 include 该头的 buildinfo.cpp
+#      （其余 TU 只见 buildinfo.h 的 QString API，宏不外泄 → 不触发全量重编）。
+#   目的：主菜单角落 + F3 + 启动日志常驻「构建时间 @ 哈希」，用户复测前先核版本，
+#   终结「陈旧 exe 报已修 bug」争议（t740/t744/t792/t772/t805 六连疑）。
+#   生成头在 build/generated/（build/ 已 gitignore）→ 生成文件不入库，无需额外 ignore 条目。
+set(VOXEL_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${VOXEL_GENERATED_DIR}")
+set(VOXEL_STAMP_HEADER "${VOXEL_GENERATED_DIR}/build_stamps.h")
+execute_process(COMMAND "${CMAKE_COMMAND}"
+        "-DSTAMP_FILE=${VOXEL_STAMP_HEADER}"
+        "-DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteBuildStamp.cmake")
+add_custom_target(build_stamps
+    BYPRODUCTS "${VOXEL_STAMP_HEADER}"
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSTAMP_FILE=${VOXEL_STAMP_HEADER}"
+            "-DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteBuildStamp.cmake"
+    COMMENT "t813 refreshing build_stamps.h (build time + git short hash)")
+
 qt_add_executable(voxelsandbox
     main.cpp
     src/Core/blockregistry.cpp
@@ -31,6 +57,11 @@ qt_add_executable(voxelsandbox
     #   （实体 tick / mesh 重建 / 物理 / ...）瓶颈，不再猜。Core 叶子（只依赖 Qt Core/Qml）。
     src/Core/frameprofiler.cpp
     src/Core/frameprofiler.h
+    # t813 构建版本戳（Core 叶子，QML 单例）：stamp/gitHash/full 三只读属性读 CMake 每次
+    #   build 生成的 build_stamps.h（唯一 include 点在本 .cpp → stamp 刷新只重编此 TU）。
+    #   主菜单角落 / F3 / 启动日志三处消费；redstone_matrix_test 直编本源做格式探针。
+    src/Core/buildinfo.cpp
+    src/Core/buildinfo.h
     src/World/chunk.cpp
     src/World/chunk.h
     src/World/chunkmanager.cpp
@@ -226,7 +257,11 @@ target_include_directories(voxelsandbox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Audio
+    # t813 生成的 build_stamps.h 搜索路径（buildinfo.cpp 唯一消费）。
+    ${VOXEL_GENERATED_DIR}
 )
+# t813 头文件先于编译就绪（target 级顺序：build_stamps 全部完成后才编 voxelsandbox 对象）。
+add_dependencies(voxelsandbox build_stamps)
 
 qt_add_qml_module(voxelsandbox
     URI VoxelSandbox
@@ -767,6 +802,8 @@ add_executable(redstone_matrix_test
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
+    # t813 构建版本戳探针（stamp YYYY-MM-DD HH:MM 格式 / git 短哈希 7-10 hex；Core 叶子直编）。
+    src/Core/buildinfo.cpp
     src/Game/toolregistry.cpp
     src/Game/enchantregistry.cpp
     src/Game/armor.cpp
@@ -801,7 +838,10 @@ target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
     ${CMAKE_CURRENT_SOURCE_DIR}/src/World
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
+    # t813 生成的 build_stamps.h 搜索路径（buildinfo.cpp 消费；探针断言两宏格式）。
+    ${VOXEL_GENERATED_DIR}
 )
+add_dependencies(redstone_matrix_test build_stamps)
 target_link_libraries(redstone_matrix_test PRIVATE
     Qt6::Core
     Qt6::Gui

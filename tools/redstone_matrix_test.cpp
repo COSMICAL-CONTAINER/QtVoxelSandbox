@@ -18,6 +18,7 @@
 #include <QJsonObject>   // Review #1 探针（同上）
 #include <QStandardPaths> // Review #1 探针（settings.json 候选位置，同 resolveSettingsPath）
 #include <QFile>   // review-e 探针（派生缓存 _r<rev> 存在性 / 旧版清理断言）
+#include <QRegularExpression> // t813 探针（stamp / git 哈希格式正则）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 
@@ -35,6 +36,7 @@
 #include "resourcepackmanager.h"  // t785 生物蛋探针（生成式染色表 spawnEggTint 条目存在性直调）
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
+#include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
 //   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。review #6：第 3 参 revision 进文件名
@@ -6213,6 +6215,28 @@ int main(int argc, char *argv[])
                              "while roofed control fire only dies by consuming its own fuel (skyLight<15 "
                              "not rained on); suppression predicates factored into "
                              "fireRainExposedAt/fireWaterNeighborAt for t843 fire-semantics redo to adopt";
+    }
+
+    // ── t813 构建版本戳探针（Core 叶子直编）：锁 BuildInfo 两值非空 + 格式 ──
+    //   stamp = CMake 每次 build 生成的 "YYYY-MM-DD HH:MM"（16 字符）；gitHash = git
+    //   rev-parse --short HEAD（7-10 hex；git 缺失回退 "nogit" 会在此 FAIL —— 开发机 git
+    //   必在，缺 git 属环境异常，诚实暴露优于静默糊弄）。探针跑在矩阵测试 exe 里 = 顺带
+    //   验证「该 exe 的 stamp 随本次构建刷新」（构建-运行同刻，分钟差即重建链生效证据）。
+    {
+        const QString stamp = BuildInfo::instance()->stamp();
+        const QString ghash = BuildInfo::instance()->gitHash();
+        const QRegularExpression stampRe(QStringLiteral("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$"));
+        const QRegularExpression gitRe(QStringLiteral("^[0-9a-f]{7,10}$"));
+        const bool okStamp = stampRe.match(stamp).hasMatch();
+        const bool okGit = gitRe.match(ghash).hasMatch();
+        const bool okT813 = okStamp && okGit;
+        if (!okT813) ++totalFail;
+        qInfo().noquote() << (okT813 ? "PASS" : "FAIL")
+                          << "| t813 build stamps: stamp" << stamp
+                          << "(YYYY-MM-DD HH:MM) git" << ghash
+                          << "(7-10 hex, git rev-parse --short HEAD); header regenerated every "
+                             "build via cmake/WriteBuildStamp.cmake with content-change-only "
+                             "rewrite so only buildinfo.cpp recompiles";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

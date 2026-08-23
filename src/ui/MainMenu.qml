@@ -1,4 +1,6 @@
 import QtQuick
+// t41：QML 源在 src/ui/ 子目录，显式 import 自身模块以访问模块 C++ 类型（BuildInfo 单例）。
+import VoxelSandbox
 
 // 主菜单（t17 / t176）：启动时全屏首显（Main.qml 初始 appState="menu"）。提供「单人模式 / 退出」入口。
 // t176：「开始游戏」改为「单人模式」→ 进入世界列表（新建 / 选择存档）；「退出」不变。
@@ -115,5 +117,20 @@ Item {
         color: "#55606a"
         font.pixelSize: 12
         text: "Phase 1.0 — creative sandbox spike"
+    }
+
+    // t813 构建版本戳（右下角半透明小字，不抢眼）：构建时间 @ git 短哈希。
+    //   用户复测报障前先核此戳是否最新 commit —— 终结「陈旧 exe 报已修 bug」争议
+    //   （与 F3 调试屏 build 行 / 启动日志 build 行三处同源，BuildInfo 单一权威出口）。
+    //   值为编译期常量（BuildInfo.full CONSTANT）→ 绑定首求值即终值，零运行期开销。
+    Text {
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 8
+        color: "#4a545e"
+        opacity: 0.8
+        font.pixelSize: 11
+        text: BuildInfo.full
     }
 }
