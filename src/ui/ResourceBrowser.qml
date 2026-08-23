@@ -300,6 +300,14 @@ Item {
         && !root.hotbar.isTool(root.selectedId)
         && !root.hotbar.isMaterial(root.selectedId)
 
+    // t784 选中物是否「床」（isBed 单一权威谓词，覆盖既存 8 色 0x20..0x27 + 补齐 8 色 0x4E..0x55 两段）。
+    //   床在世界内是双格横置低 3D 异形（ShapeBed）——isPartialBlock/isCrossBlock/isMaterial 均否 → 旧版被
+    //   selectedIsCube 路由当整立方渲成「满格 BlockCube 六面同贴被面瓦片」的旋转立方（= 任务「仍是老模型」
+    //   根因）。本属性把床从整立方分支摘出，改走下方 BedModelGeometry 低 3D 床分支（几何与游戏内
+    //   partialblockgeometry 床 case 同源 bedHalfBoxes；16 色变体联动：调色板床条目各持独立 id →
+    //   blockId 绑 selectedId，选色即换被面瓦片，t751 变体联动同族——床色无共用模型控件故不设 variantPanel）。
+    readonly property bool selectedIsBed: root.hotbar && root.hotbar.isBed(root.selectedId)
+
     // 选中物类别标签（§9 通用词；§2 分层：谓词经 Hotbar VM）。t663 拆分「材料 / 护甲」混串：isMaterial 是
     //   渲染路由谓词（含护甲段 0x300..），类别标签须先判 isArmor → 护甲显「护甲」、纯材料显「材料」
     //   （此前玻璃 / 小麦种子 / 床全被 isMaterial 吞进「材料 / 护甲」混标，用户点名拆开）。
@@ -714,8 +722,9 @@ Item {
                                         fieldOfView: 45
                                     }
                                     Model {
-                                        // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel，两模型互斥不叠渲染）。
-                                        visible: root.selectedIsCube && !root.selectedIsMob
+                                        // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel；选中床 → 只显
+                                        //   BedModelGeometry 低 3D 床，三模型互斥不叠渲染）。
+                                        visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed
                                         // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
                                         geometry: BlockCube { blockId: root.selectedId }
                                         // 固定 -22° X 基倾（见顶面）+ userPitch 拖拽俯仰（t599）+ Y 自转
@@ -728,6 +737,23 @@ Item {
                                             //   其余不透明方块贴图 alpha=1 不受影响。
                                             alphaMode: PrincipledMaterial.Mask
                                             alphaCutoff: 0.5
+                                        }
+                                    }
+                                    // t784 床预览：游戏内低 3D 床模型（BedModelGeometry 双格拼装：床尾半 + 床头半，
+                                    //   盒布局复用游戏内 bedHalfBoxes 单一权威）替代旧满格 BlockCube 立方。贴图同源共享
+                                    //   图集（atlasSource → pack 开 = pack 床瓦片即时刷新）；腿/架/板贴 planks、枕头贴白
+                                    //   wool、床垫贴床色被面瓦片——与游戏内逐瓦片一致。scale 1.15：双格床长 2（对角投影
+                                    //   ~2.4）撑满镜头仍整床可见（单格高立方 1.0 的对比基准）；旋转/拖拽与方块分支共用
+                                    //   spinAngle/userPitch（床仍在 cubeView 内，DragHandler 手势不变）。
+                                    Model {
+                                        visible: root.selectedIsBed
+                                        geometry: BedModelGeometry { blockId: root.selectedId }
+                                        scale: Qt.vector3d(1.15, 1.15, 1.15)
+                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            // 床瓦片（planks/wool/被面）全不透明 → 无需 Mask（同 bed 盒贴图约定）。
+                                            baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
                                         }
                                     }
                                     // 生物预览（生物段 / 生物蛋选中）：MobModel 3D 模型替代大图标平图。

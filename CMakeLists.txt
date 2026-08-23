@@ -79,6 +79,10 @@ qt_add_executable(voxelsandbox
     src/Renderer/crackbox.h
     src/Renderer/blockcube.cpp
     src/Renderer/blockcube.h
+    # t784 床完整低 3D 模型几何（资源浏览器床条目预览）：盒布局复用 World 层 bedHalfBoxes 单一权威
+    #   （游戏内 chunk mesh 床 case 同源，双半拼双格床）→ 浏览器 / 游戏内床模型不各自漂移。
+    src/Renderer/bedmodelgeometry.cpp
+    src/Renderer/bedmodelgeometry.h
     src/Renderer/pickaxe.cpp
     src/Renderer/pickaxe.h
     # t233 锄 3D 几何（与 pickaxe.h 同层同风格，复制 addBox 模式仅改头部形状：锄刃 = 宽扁向前伸的横刃，
