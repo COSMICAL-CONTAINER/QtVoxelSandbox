@@ -394,6 +394,10 @@ Node {
             case 132: return "#7a7a7a" // monster_egg（怪物蛋，石砖灰；外表即石砖）
             // ── 云杉树叶（id 133）── t714 雪原云杉树冠针叶（深蓝绿）
             case 133: return "#3a6e55" // spruce_leaves（云杉树叶，深蓝绿针叶）
+            // ── t806 余烬门（id 138）── 门色紫：创建（burstPlace 逐门格）/ 破坏（burstBreak 直挖门格）粒子
+            //   原走 default 白（t513 表缺行）→ 改门主体紫（tools/build_portal.py mid=(122,32,178)=#7a20b2
+            //   条带主体色，对齐门方块紫漩涡贴图；余格连通域静默清不发粒子同画 t721 模式不变）。
+            case 138: return "#7a20b2" // nether_portal（余烬门面片，门主体紫）
             default: return "#ffffff" // 未来新方块兜底（显白便于察觉缺色并补表）
         }
     }

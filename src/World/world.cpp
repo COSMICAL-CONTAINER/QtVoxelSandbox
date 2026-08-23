@@ -2464,6 +2464,131 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
     }
 }
 
+// t806 余烬门点燃检测（见 world.h 头注释；t725 v1 写死 2×3 内腔的 PlayerController 版本泛化下沉 World
+//   层单一权威 —— 同末地门三件套（endPortalRingComplete / tryOpenEndPortal）模式）。MC 规则参数表
+//   （dev-spec t806；单一权威常量，改门尺寸只动这 4 行）：
+//     内腔开口宽 w ∈ [2, 4]（框外沿 4..6）、高 h ∈ [3, 5]（框外沿 5..7）；
+//     矩形开口、黑曜石框（底梁 w 格 / 顶梁 w 格 / 左右边柱各 h 格）；四角不检查（MC 1.0 角块可选）。
+// 检测流程（从「点燃格在开口哪一格」出发，任一点燃位同成门）：
+//   ① 下探底梁：自点燃格向下 ≤kMaxH(5) 步找黑曜石（点燃格可能在开口 3..5 层任意一层）。
+//   ② 左探左沿：自底梁上一层向 -u 扫 ≤kMaxW-1(3) 步空气（开口最宽 4 → 点燃列距左沿 ≤3；步进有界——
+//      OOB blockAt 返 Air 会让无界扫描滑出世界）。
+//   ③ 量宽 / 量高：自左沿列在开口底层向 +u 量连续空气列数、自左沿列向上量连续空气层数（步进有界，
+//      超限截断 → 随后矩形 / 顶梁校验对越界部分自然判败）。
+//   ④ 矩形 + 框架校验：开口 w×h 全空气（防 L 形 / 腔内异物）+ 梁柱全黑曜石。
+// 全命中 → 开口整面填 NetherPortal（state=axis；逐格 setBlock 发 blockPlaced → 呈现层 portalHost 逐格
+//   建 delegate + 放置音，机制对标 MC 点燃瞬间整门成形的多点事件）。
+// 越界 blockAt 返 Air ≠ Obsidian → 梁 / 柱校验自然判败（无 OOB 风险）。
+bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
+{
+    constexpr int kMinW = 2, kMaxW = 4;  // 内腔开口宽 2..4
+    constexpr int kMinH = 3, kMaxH = 5;  // 内腔开口高 3..5
+    const auto obs = [&](int x, int y, int z) -> bool {
+        return m_chunks.blockAt(x, y, z) == BlockRegistry::Obsidian;
+    };
+    const auto air = [&](int x, int y, int z) -> bool {
+        return m_chunks.blockAt(x, y, z) == BlockRegistry::Air;
+    };
+    // 单平面检测（u = 门展开轴水平单位向量）：找到含点燃格的黑曜石矩形开口 → 整面填门返 true。
+    const auto tryPlane = [&](int ux, int uz, quint8 axisState) -> bool {
+        // ① 下探底梁：自点燃格向下 ≤kMaxH 步（点燃格可能在开口任意一层）。
+        int yBase = -1;
+        for (int dy = 1; dy <= kMaxH; ++dy) {
+            if (obs(ix, iy - dy, iz)) { yBase = iy - dy; break; }
+        }
+        if (yBase < 0) return false;                        // 点燃柱下方无底梁 → 非门
+        // ② 左探开口左沿：自底梁上一层向 -u 扫空气（≤kMaxW-1 步；命中非空气格即停——边柱是黑曜石）。
+        int cx = ix, cz = iz;                               // 开口最左内柱（先假定点燃列即左沿）
+        for (int s = 1; s <= kMaxW - 1; ++s) {
+            if (!air(ix - s * ux, yBase + 1, iz - s * uz)) break;
+            cx = ix - s * ux; cz = iz - s * uz;
+        }
+        const int innerY0 = yBase + 1;                      // 开口底层
+        // ③ 量宽（左沿列右侧的连续空气列数；开口总宽 = w+1 含左沿列自身）与量高（左沿列向上连续空气层数）。
+        int wRight = 0;
+        while (wRight < kMaxW - 1 && air(cx + (wRight + 1) * ux, innerY0, cz + (wRight + 1) * uz))
+            ++wRight;
+        const int w = wRight + 1;
+        if (w < kMinW) return false;                        // 低于最小宽（孤立柱 / 双柱贴墙）→ 拒
+        int h = 0;
+        while (h < kMaxH && air(cx, innerY0 + h, cz)) ++h;
+        if (h < kMinH) return false;                        // 低于最小高（开口顶层非黑曜石顶梁）→ 拒
+        // ④ 矩形 + 框架校验：开口 w 列各格（底梁 / 开口 / 顶梁）全合规 + 左右边柱各 h 格黑曜石。
+        //    四角（底/顶梁两端外斜角）不在任何检查列内 → 角块可有可无（MC 1.0 语义）。
+        for (int c = 0; c < w; ++c) {
+            const int bx = cx + c * ux, bz = cz + c * uz;   // 开口第 c 列
+            if (!obs(bx, yBase, bz) || !obs(bx, innerY0 + h, bz)) return false; // 缺底 / 顶梁格
+            for (int r = 0; r < h; ++r)
+                if (!air(bx, innerY0 + r, bz)) return false;  // 非矩形（某列矮 / 腔内异物）→ 拒
+        }
+        for (int r = 0; r < h; ++r) {                       // 左右边柱（两翼各 h 格）
+            if (!obs(cx - ux, innerY0 + r, cz - uz)) return false;
+            if (!obs(cx + w * ux, innerY0 + r, cz + w * uz)) return false;
+        }
+        // 全命中 → 开口整面 w×h 填门面（state=axis：0=X 平面 / 1=Z 平面）。
+        for (int c = 0; c < w; ++c)
+            for (int r = 0; r < h; ++r)
+                setBlock(cx + c * ux, innerY0 + r, cz + c * uz, BlockRegistry::NetherPortal, axisState);
+        return true;
+    };
+    // 先试 X 平面（门沿 X 展开 / 面朝 ±Z），再试 Z 平面（门正交两向各试一次，机制等价 MC 检测顺序）。
+    if (tryPlane(1, 0, quint8(0))) return true;
+    return tryPlane(0, 1, quint8(1));
+}
+
+// t806 余烬门连通域熄灭（见 world.h 头注释；t725 自 PlayerController 下沉 World 层，逻辑逐行同源）。
+//   BFS 收集 ±u（门展开轴水平）/ ±Y 同 axis 的 NetherPortal 格 → 全部 setWaterSilent 清 Air（静默：
+//   多格逐格 blockBroken 会刷粒子/音风暴；worldChanged 仍逐格发 → 呈现层 portalHost cleanupVis 清孤儿）。
+//   尺寸无关：连通域天然覆盖任意大小门（2×3 最小 .. 4×5 最大）。门无物品形态（dropId=0）→ 无掉落。
+void World::removeNetherPortalAt(int px, int py, int pz, int axis)
+{
+    // 门展开轴 u（axis=0 → 门沿 X 展开 / 面朝 ±Z；axis=1 → 沿 Z 展开 / 面朝 ±X）。
+    const int ux = (axis == 0) ? 1 : 0;
+    const int uz = (axis == 0) ? 0 : 1;
+    struct Cell { int x, y, z; };
+    std::vector<Cell> cells;
+    std::vector<Cell> frontier{{px, py, pz}};
+    while (!frontier.empty()) {
+        const Cell c = frontier.back();
+        frontier.pop_back();
+        bool seen = false;
+        for (const Cell &s : cells) {
+            if (s.x == c.x && s.y == c.y && s.z == c.z) { seen = true; break; }
+        }
+        if (seen) continue;
+        const quint8 bid = m_chunks.blockAt(c.x, c.y, c.z);
+        const bool isSeed = (c.x == px && c.y == py && c.z == pz);
+        if (bid != BlockRegistry::NetherPortal && !isSeed) continue;      // 非门格 → 不入域
+        if (bid == BlockRegistry::NetherPortal && int(m_chunks.stateAt(c.x, c.y, c.z) & 1) != axis)
+            continue;                                                     // 异轴门（X/Z 面贴邻）→ 不连
+        cells.push_back(c);
+        // 4 向扩展（门平面内：±u 水平 + ±Y 垂直）。
+        frontier.push_back({c.x + ux, c.y, c.z + uz});
+        frontier.push_back({c.x - ux, c.y, c.z - uz});
+        frontier.push_back({c.x, c.y + 1, c.z});
+        frontier.push_back({c.x, c.y - 1, c.z});
+    }
+    // 清域：setWaterSilent 静默清（主破坏格已由 caller 走 setBlock 清 + 发过一次事件；域内守卫防双清）。
+    for (const Cell &c : cells) {
+        if (m_chunks.blockAt(c.x, c.y, c.z) != BlockRegistry::NetherPortal)
+            continue; // 种子已被 caller 清 / 异轴守卫已滤（防御双清）
+        setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
+    }
+}
+
+// t806 余烬门门框失撑熄灭（见 world.h 头注释；t725 自 PlayerController 下沉 World 层，逻辑同源）。
+//   破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门。恒熄（含创造）：门失效是结构后果非掉落。
+void World::breakNetherPortalsAround(int x, int y, int z)
+{
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &n : kNb) {
+        const int px = x + n[0], py = y + n[1], pz = z + n[2];
+        if (m_chunks.blockAt(px, py, pz) != BlockRegistry::NetherPortal) continue;
+        const int axis = int(m_chunks.stateAt(px, py, pz) & 1);
+        removeNetherPortalAt(px, py, pz, axis);
+    }
+}
+
 // ── t656/t657/t658 红石电力系统 v1（见 world.h notePowerWrite / tickRedstone 头注释）──
 
 // 红石族判定（粉 / 全部电源 / 全部接收器 —— notePowerWrite 触发筛选 + tickRedstone 接收器扫描共用）。

@@ -611,6 +611,31 @@ public:
     //   门面方块是普通方块 → 随存档正常持久化（spec「portal fills 应保存」）。
     bool tryOpenEndPortal(int cx, int cy, int cz);
 
+    // t806 余烬门点燃检测（机制等价 MC 1.0 nether portal frame 检测的泛化版；t725 v1 写死最小 2×3 门且
+    //   住在 PlayerController，本方法泛化后下沉 World 层单一权威 —— 同末地门三件套模式，PlayerController
+    //   打火石分支只做转发，矩阵测试可直编）。给定点燃格 (ix,iy,iz)（门框内腔空气格 = 打火石火苗位），
+    //   X 平面（门沿 X 展开 / 面朝 ±Z）与 Z 平面各试一次：下探底梁 → 左探开口左沿 → 量宽量高 → 矩形 +
+    //   框架校验。MC 规则参数表（dev-spec t806）：内腔开口宽 2..4 / 高 3..5（框外沿 4×5 最小 .. 6×7 最大）；
+    //   矩形开口、黑曜石底梁 / 顶梁 / 边柱；**四角不检查**（MC 1.0 门框角块可选 —— 角块不承结构，缺角可
+    //   点燃、破角不碎门）。任一不符（超 4×5 / 低于 2×3 / 缺梁缺柱 / 非矩形腔）→ 返 false（caller 回退
+    //   普通 Fire 点燃）。全命中 → 开口整面 w×h 各格 setBlock(NetherPortal, axis)（axis=0 X 平面 /
+    //   1=Z 平面；逐格发 blockPlaced → 呈现层 portalHost 逐格建 delegate + 放置音）。
+    bool tryIgniteNetherPortal(int ix, int iy, int iz);
+
+    // t806 余烬门连通域熄灭（t725 自 PlayerController 下沉 World 层单一权威，逻辑同源）：从 (px,py,pz)
+    //   （门格之一，可能已被清 Air）按 axis flood-fill 收集整扇门（±u 门展开轴水平 / ±Y 垂直同 axis 的
+    //   NetherPortal 格）→ 全部 setWaterSilent 清 Air（静默：多格逐格 blockBroken 会刷粒子/音风暴；
+    //   worldChanged 仍逐格发 → 呈现层 portalHost cleanupVis 清孤儿）。尺寸无关（连通域天然覆盖任意
+    //   大小的门）。门无物品形态（dropId=0）→ 无掉落。供 PlayerController finishMiningAt 直挖门格分支调。
+    void removeNetherPortalAt(int px, int py, int pz, int axis);
+
+    // t806 余烬门门框失撑熄灭（t725 下沉，逻辑同源）：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭
+    //   整扇门。机制等价 MC「黑曜石门框任一**承重**格被破坏 → 传送门失效消失」：底梁 / 顶梁 / 边柱格均
+    //   与门格 6 邻接 → 破任一即断结构；角块不与门格相邻（对角位）→ 破角不碎门（角块可选语义的自然
+    //   推论，检测不查角 / 失撑不邻角两侧自洽）。恒熄（含创造，结构后果非掉落，同叶衰语义）。
+    //   供 PlayerController finishMiningAt 末尾调。
+    void breakNetherPortalsAround(int x, int y, int z);
+
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
     //
     // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：

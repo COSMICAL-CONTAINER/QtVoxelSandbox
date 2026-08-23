@@ -1207,12 +1207,12 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         return; // 画特判收口：不走通用掉落 / 级联链
     }
     // t725 余烬门直挖熄灭（机制等价 MC 1.0 破坏传送门任一格 → 整扇门消失）：本格已被上方 setBlock 清 Air，
-    //   余格经 removeNetherPortalAt 按 brokenState 的 axis flood-fill 静默清（同画 t721 模式——多格逐格
-    //   blockBroken 会刷粒子/音风暴）。门无物品形态（dropId=0）→ 无掉落。之后**不再进通用掉落链**
-    //   （通用 dropId=0 路径 spawnItem 对 id<=0 已守卫不产出，但提前收口免无谓扫描；本格 setBlock 已发
-    //   一次 blockBroken 粒子/音）。门格不依赖门框（直挖是玩家拆门本身）→ 不再扫邻。
+    //   余格经 World::removeNetherPortalAt 按 brokenState 的 axis flood-fill 静默清（t806 自本类下沉 World 层
+    //   单一权威；同画 t721 模式——多格逐格 blockBroken 会刷粒子/音风暴）。门无物品形态（dropId=0）→ 无
+    //   掉落。之后**不再进通用掉落链**（通用 dropId=0 路径 spawnItem 对 id<=0 已守卫不产出，但提前收口免
+    //   无谓扫描；本格 setBlock 已发一次 blockBroken 粒子/音）。门格不依赖门框（直挖是玩家拆门本身）→ 不再扫邻。
     if (brokenId == BlockRegistry::NetherPortal) {
-        removeNetherPortalAt(x, y, z, int(brokenState & 1));
+        m_world->removeNetherPortalAt(x, y, z, int(brokenState & 1));
         emit playerMined(x, y, z, int(brokenId), drop);
         if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem(); // 同通用路径：生存破块工具 -1 耐久
         emit swingArm();
@@ -1260,11 +1260,13 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   （removePaintingAt 连通域移除，drop=true 恒发含创造）。机制等价 MC「画后面的墙被挖 → 画掉落」
     //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedPaintingsAround(x, y, z);
-    // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门。破**黑曜石门框**
-    //   任一格即断结构（门格只与门框格 / 门格相邻）；破其它方块邻接门格（如门内放火把旁的门格）同样熄
-    //   ——门格邻格恒是结构格（黑曜石 / 门格 / 内腔空气），被破即失效，机制等价 MC 门框完整性。恒熄
-    //   （含创造，结构后果非掉落，同叶衰语义）。
-    breakNetherPortalsAround(x, y, z);
+    // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门（t806 自本类下沉
+    //   World::breakNetherPortalsAround 单一权威；尺寸无关——连通域天然覆盖 2×3..4×5 任意门）。破**黑曜石
+    //   门框**任一承重格即断结构（门格只与门框格 / 门格相邻；角块与门格对角不邻 → 破角不碎门，与检测
+    //   不查角两侧自洽）；破其它方块邻接门格（如门内放火把旁的门格）同样熄——门格邻格恒是结构格
+    //   （黑曜石 / 门格 / 内腔空气），被破即失效，机制等价 MC 门框完整性。恒熄（含创造，结构后果非掉落，
+    //   同叶衰语义）。
+    m_world->breakNetherPortalsAround(x, y, z);
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
     //   但本方法在上方格单独读 cstate（上方作物自身的 state），与 brokenState 无关。
@@ -1773,129 +1775,11 @@ void PlayerController::dropUnsupportedPaintingsAround(int x, int y, int z)
     }
 }
 
-// t725 余烬门连通域熄灭（见 playercontroller.h 头注释；finishMiningAt 直挖门格 + 破门框黑曜石连锁共用）。
-//   同 removePaintingAt 模式：BFS 收集 ±u（门展开轴水平）/ ±Y 同 axis 的 NetherPortal 格 → 全部静默清。
-//   门无物品形态（dropId=0）→ 无掉落（区别于画的 spawnItem 1 件）。
-void PlayerController::removeNetherPortalAt(int px, int py, int pz, int axis)
-{
-    if (!m_world) return;
-    // 门展开轴 u（axis=0 → 门沿 X 展开 / 面朝 ±Z；axis=1 → 沿 Z 展开 / 面朝 ±X）。
-    const int ux = (axis == 0) ? 1 : 0;
-    const int uz = (axis == 0) ? 0 : 1;
-    struct Cell { int x, y, z; };
-    std::vector<Cell> cells;
-    std::vector<Cell> frontier{{px, py, pz}};
-    while (!frontier.empty()) {
-        const Cell c = frontier.back();
-        frontier.pop_back();
-        bool seen = false;
-        for (const Cell &s : cells) {
-            if (s.x == c.x && s.y == c.y && s.z == c.z) { seen = true; break; }
-        }
-        if (seen) continue;
-        const quint8 bid = m_world->blockAt(c.x, c.y, c.z);
-        const bool isSeed = (c.x == px && c.y == py && c.z == pz);
-        if (bid != BlockRegistry::NetherPortal && !isSeed) continue;          // 非门格 → 不入域
-        if (bid == BlockRegistry::NetherPortal && int(m_world->stateAt(c.x, c.y, c.z) & 1) != axis)
-            continue;                                                         // 异轴门（X/Z 面贴邻）→ 不连
-        cells.push_back(c);
-        // 4 向扩展（门平面内：±u 水平 + ±Y 垂直）。
-        frontier.push_back({c.x + ux, c.y, c.z + uz});
-        frontier.push_back({c.x - ux, c.y, c.z - uz});
-        frontier.push_back({c.x, c.y + 1, c.z});
-        frontier.push_back({c.x, c.y - 1, c.z});
-    }
-    // 清域：setWaterSilent 静默清（同 removePaintingAt —— 多格 blockBroken 粒子/音风暴规避；worldChanged
-    //   仍逐格发 → mesh / 呈现层 portalHost 清孤儿）。
-    for (const Cell &c : cells) {
-        if (m_world->blockAt(c.x, c.y, c.z) != BlockRegistry::NetherPortal)
-            continue; // 种子已被 caller 清 / 异轴守卫已滤（防御双清）
-        m_world->setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
-    }
-}
-
-// t725 余烬门门框失撑熄灭（见 playercontroller.h 头注释；finishMiningAt 破块后扫 6 邻）。
-//   恒熄（含创造）：门失效是结构后果非掉落（同叶衰语义，不依赖 drop 标志）。
-void PlayerController::breakNetherPortalsAround(int x, int y, int z)
-{
-    if (!m_world) return;
-    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-    for (const auto &n : kNb) {
-        const int px = x + n[0], py = y + n[1], pz = z + n[2];
-        if (m_world->blockAt(px, py, pz) != BlockRegistry::NetherPortal) continue;
-        const int axis = int(m_world->stateAt(px, py, pz) & 1);
-        removeNetherPortalAt(px, py, pz, axis);
-    }
-}
-
-// t725 余烬门点燃检测（见 playercontroller.h 头注释；placeBlock 打火石分支调）。
-//   v1 仅支持最小 2×3 门（dev-plan 降级：内腔恒 2 宽 × 3 高，不做大尺寸门）。检测流程（经典 MC 检测的
-//   简化版，从「点燃格在哪根内柱」出发）：
-//     ① 下探：自 (ix,iy,iz) 向下 ≤3 步找黑曜石底梁（点燃格可能是内腔 3 高任一层 → 底梁在下方 1..3 格；
-//        走 ≤3 步防越界，命中即得底梁顶面 yBase）。
-//     ② 内腔两柱：点燃列 + 其 ±u 邻列（先试 +u 再试 -u——玩家从任一侧点燃均可），两柱自 yBase+1 起连续
-//        3 格须全 Air（内腔净空，含点燃格自身）。
-//     ③ 顶梁：两柱 3 格正上方（yBase+4）均须黑曜石。
-//     ④ 边柱：两柱外侧（±u 再外一格）各 1 根黑曜石柱高 3（yBase+1..yBase+3）。
-//   全命中 → 6 格 setBlock(NetherPortal, axis)（axis=0 X 平面 / 1 Z 平面）返回 true。
-//   越界 blockAt 返 Air ≠ Obsidian → 自然判败（无 OOB 风险）。
-bool PlayerController::tryIgniteNetherPortal(int ix, int iy, int iz)
-{
-    if (!m_world) return false;
-    const auto obs = [&](int x, int y, int z) -> bool {
-        return m_world->blockAt(x, y, z) == BlockRegistry::Obsidian;
-    };
-    const auto air = [&](int x, int y, int z) -> bool {
-        return m_world->blockAt(x, y, z) == BlockRegistry::Air;
-    };
-    // 单平面检测（u = 门展开轴单位向量）：返回成功与否。
-    const auto tryPlane = [&](int ux, int uz, quint8 axisState) -> bool {
-        // ① 下探底梁：自点燃格向下最多 3 步（点燃格在内腔 3 高的任一层）。
-        int yBase = -1;
-        for (int dy = 1; dy <= 3; ++dy) {
-            if (obs(ix, iy - dy, iz)) { yBase = iy - dy; break; }
-        }
-        if (yBase < 0) return false;                        // 无底梁 → 非门
-        // ② 内腔两柱：点燃柱 ±u 各试一次（先 +u 后 -u），须底梁上 3 格全 Air。
-        //   注意底梁验证：两柱底（yBase）均须黑曜石（点燃柱底梁已由 ① 证得，只须再证邻柱底梁）。
-        const int innerY0 = yBase + 1;                      // 内腔底（3 高：innerY0..innerY0+2）
-        for (const int s : {1, -1}) {
-            const int ax = ix + s * ux, az = iz + s * uz;   // 邻内柱坐标
-            if (!obs(ax, yBase, az)) continue;              // 邻柱无底梁 → 试另一侧
-            bool ok = true;
-            for (int h = 0; h < 3 && ok; ++h) {
-                if (!air(ix, innerY0 + h, iz)               // 点燃柱 3 格（含点燃格自身）
-                    || !air(ax, innerY0 + h, az))           // 邻柱 3 格
-                    ok = false;
-            }
-            if (!ok) continue;                              // 内腔不净空 → 试另一侧
-            // ③ 顶梁：两柱 3 格正上方均黑曜石。
-            if (!obs(ix, innerY0 + 3, iz) || !obs(ax, innerY0 + 3, az)) continue;
-            // ④ 边柱：两内柱外侧各 1 根黑曜石柱高 3。
-            //   内侧边柱 = 邻柱再外一格（点燃柱是内柱 A、邻柱是内柱 B 时，门 2 宽内腔的两翼外侧）。
-            //   两内柱外侧坐标：点燃柱的 -s 侧 + 邻柱的 +s 侧。
-            const int e1x = ix - s * ux, e1z = iz - s * uz; // 点燃柱外侧边柱
-            const int e2x = ax + s * ux, e2z = az + s * uz; // 邻柱外侧边柱
-            bool pillars = true;
-            for (int h = 0; h < 3 && pillars; ++h) {
-                if (!obs(e1x, innerY0 + h, e1z) || !obs(e2x, innerY0 + h, e2z))
-                    pillars = false;
-            }
-            if (!pillars) continue;
-            // 全命中 → 填 6 格门面（state=axis：0=X 平面 / 1=Z 平面）。逐格 setBlock（发 blockPlaced →
-            //   portalHost 逐格建 delegate + 放置音；机制对标 MC 点燃瞬间整门成形的多点事件）。
-            for (int h = 0; h < 3; ++h) {
-                m_world->setBlock(ix, innerY0 + h, iz, BlockRegistry::NetherPortal, axisState);
-                m_world->setBlock(ax, innerY0 + h, az, BlockRegistry::NetherPortal, axisState);
-            }
-            return true;
-        }
-        return false;                                       // 两侧均不成门
-    };
-    // 先试 X 平面（门沿 X 展开 / 面朝 ±Z），再试 Z 平面。
-    if (tryPlane(1, 0, quint8(0))) return true;
-    return tryPlane(0, 1, quint8(1));
-}
+// t725→t806 余烬门三件套（tryIgniteNetherPortal 点燃检测 / removeNetherPortalAt 连通域熄灭 /
+//   breakNetherPortalsAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化内腔 2×3..4×5 +
+//   四角可选；同末地门三件套模式）—— 实现见 world.cpp；调用点：placeBlock 打火石分支
+//   （World::tryIgniteNetherPortal）/ finishMiningAt 直挖门格分支（World::removeNetherPortalAt）/
+//   finishMiningAt 末尾连锁（World::breakNetherPortalsAround）。
 
 // t242 攻击 mob（spec「玩家左键攻击生物→受伤音效 + 身体红闪 + 扣血」）：damageEntity 扣血 + 设
 //   hurtFlash（EntityManager 内已驱动 QML 红闪绑定刷新）+ swingArm（挥臂反馈）+ emit mobAttacked（→
@@ -3638,8 +3522,9 @@ void PlayerController::placeBlock()
     //   打火石非方块（工具段 id>=0x100）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流
     //   （同桶 / 剪刀 / 玻璃模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可点火。
     //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
-    //   t725 余烬门优先：先 tryIgniteNetherPortal 检测黑曜石门框（v1 最小 2×3 门，X/Z 平面各试）——命中 →
-    //   生成 6 格 NetherPortal 门面（机制等价 MC 1.0 黑曜石框内点燃传送门）；未命中 → 回退普通 Fire 点燃
+    //   t725 余烬门优先：先 World::tryIgniteNetherPortal 检测黑曜石门框（t806 泛化：内腔 2×3 最小 ..
+    //   4×5 最大、四角可选，X/Z 平面各试）——命中 → 开口整面填 NetherPortal 门面（机制等价 MC 1.0
+    //   黑曜石框内点燃传送门，v1 仅 2×3 的检测已下沉 World 层单一权威）；未命中 → 回退普通 Fire 点燃
     //   （原 t724 语义不变）。两路均消耗耐久 / 挥手（机制等价 MC 点燃失败生火同样耗打火石）。
     if (m_hotbar && m_world && heldItemId == int(ToolRegistry::FlintAndSteel)) {
         // t804 ② 优先「打火石点燃 Stalker」：在方块命中之外**独立**跑一条 mob 命中射线（findMobHit，同剪刀
@@ -3667,7 +3552,7 @@ void PlayerController::placeBlock()
             const int fx = m_hitBx + m_hitNx, fy = m_hitBy + m_hitNy, fz = m_hitBz + m_hitNz;
             if (fy >= 0 && fy < m_world->height()
                 && m_world->blockAt(fx, fy, fz) == BlockRegistry::Air) {
-                const bool portalLit = tryIgniteNetherPortal(fx, fy, fz); // t725 先试门框（成门 → 6 格 NetherPortal）
+                const bool portalLit = m_world->tryIgniteNetherPortal(fx, fy, fz); // t806 先试门框（成门 → 开口整面 NetherPortal）
                 if (!portalLit)
                     m_world->setBlock(fx, fy, fz, BlockRegistry::Fire, 0); // state=0（火无 state 语义）
                 if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（创造不耗）
