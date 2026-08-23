@@ -66,6 +66,15 @@
 //     cycle，walkPhase 驱动）。眼发光层 + 嘴由 Main.qml delegate 补（头心 (0,0.975,0)，独立 Model）。
 //     pack 命中 enderman/enderman.png（base **64×32**）→ head(0,0)/body(32,16)/四肢共用(56,0)2×30×2
 //     真实盒区 box-UV；pack 关 → 全脸 UV + mob_nightwalker 程序贴图。
+//   17 = Emberling（燃烬者；t728/t782）：悬浮**单头 + 4 根烈焰棒**——无身体（机制等价 MC 1.0 烈焰人
+//     「一头 + 环绕旋转棒」造型，§9 区隔改名 + 原创贴图）。头 = 单一略大方盒（0.88³，心 (0,+0.10,0)）；
+//     棒 = 4 根细长竖盒（0.10×1.10×0.10）绕身公转（半径 0.62、径向 90° 分布），公转角由 rodSpin 属性
+//     驱动（QML NumberAnimation 连续旋转；刷怪笼迷你态可静态角度）——同 walkPhase 的 rebuild 驱动模式。
+//     **两态均走 MC box-UV**（g_boxUvAlways）：头 head(0,0)8×8×8 / 棒 rod(0,16)2×8×2；pack 命中
+//     blaze/blaze.png（demo 包实为 **64×32** base，非 vanilla 64×64——t779 头像侧同实测）、pack 关走
+//     entity_emberling 程序贴图（64×32，build_entities_pack.py 按 blaze 布局自绘头区+棒条区，棒=烟灰
+//     暗黄竖纹贴图长条）。原点 = 碰撞中心（halfW=0.5/halfH=0.6），hover 悬浮由 Main.qml delegate 动画
+//     驱动（几何不动）。眼：贴图脸自带（pack 态 blaze 脸暗色眼纹 / 程序态白热焰核）→ 无 overlay 眼层。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。
@@ -120,6 +129,11 @@ class MobModel : public QQuick3DGeometry
     Q_PROPERTY(float attackPose READ attackPose WRITE setAttackPose NOTIFY attackPoseChanged)
     // pack 是否用 pack entity 贴图（MC box-UV 精确采样，R19 C3）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
     Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
+    // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
+    //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.62, -0.03, sin·0.62)，棒身恒竖直只轨道心公转）。
+    //   QML 用 NumberAnimation on rodSpin 驱动连续旋转（帧率无关；同 walkPhase 的 set→rebuild 模式，
+    //   量化 6°/步防每帧微变 rebuild）；刷怪笼迷你态可只给静态角（如 45°）。其余 mobType 不读（无棒组）。
+    Q_PROPERTY(float rodSpin READ rodSpin WRITE setRodSpin NOTIFY rodSpinChanged)
 
 public:
     explicit MobModel(QQuick3DObject *parent = nullptr);
@@ -143,6 +157,10 @@ public:
     bool packTextured() const { return m_packTextured; }
     void setPackTextured(bool on);
 
+    // t782 燃烬者棒组公转角（度）；仅 Emberling 用。
+    float rodSpin() const { return m_rodSpin; }
+    void setRodSpin(float deg);
+
 signals:
     void mobTypeChanged();
     void walkPhaseChanged();
@@ -150,6 +168,7 @@ signals:
     void aimPitchChanged();
     void attackPoseChanged();
     void packTexturedChanged();
+    void rodSpinChanged();
 
 private:
     void rebuild(); // 按 m_mobType / m_walkPhase / m_headPhase 选比例 + 动画角度建多盒几何。
@@ -160,6 +179,7 @@ private:
     float m_aimPitch = 0.0f;  // 右臂瞄准抬起（度，0=垂手）；仅 Bones 用；0 → 右臂走轴对齐快路径
     float m_attackPose = 0.0f; // t635 攻击抬臂（0..1，0=垂臂）；仅 IronGolem 用；0 → 双臂走轴对齐快路径
     bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
+    float m_rodSpin = 0.0f; // t782 燃烬者棒组公转角（度）；仅 Emberling 用；0 → 棒在 0/90/180/270° 轴位
 };
 
 #endif // MOBMODEL_H

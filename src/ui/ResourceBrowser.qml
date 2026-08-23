@@ -160,7 +160,7 @@ Item {
         if (t === 12 || t === 13) return 0.75
         if (t === 14) return 1.6
         if (t === 16) return 0.55 // t781 夜行者细肢人形高 2.70（[-1.40,1.30]）→ 缩到镜头内全身可见
-        if (t === 17) return 1.6 // t728 燃烬者悬浮火球头盒 ~0.45（[-0.225,0.225]）→ 放大 1.6 可辨（同蠹虫小体型）
+        if (t === 17) return 1.1 // t782 燃烬者头+4棒全模型 1.12 高 ×1.34 宽（[-0.58,0.54]/半径 0.67）→ 1.1 撑满可辨（旧单头盒 1.6 同footprint）
         return 1.0
     }
     // 预览模型垂直居中微调：几何局部原点 = 碰撞中心，mob 身体偏向 -Y → 上提让主体在镜头居中。
@@ -181,7 +181,7 @@ Item {
             case 13: return 0.30 // 铁傀儡 [-1.20, 0.58]（偏 -Y，上提 0.30 居中主体）
             case 14: return -0.30 // 蠹虫 [-0.15, 0.14]（t750 分节重做：背脊甲板顶 0.14；小虫贴地 → 下压 0.30 进镜头中心）
             case 16: return 0.06 // t781 夜行者 [-1.40, 1.30]（偏 -Y 0.05；×0.55 缩后上提居中主体）
-            case 17: return 0.0  // t728 燃烬者悬浮头盒 [-0.225, 0.225]（近对称居中，无需调整）
+            case 17: return 0.02 // t782 头+棒跨 [-0.58, 0.54]（体心 -0.02 → 上提居中；棒对称近居中微调）
         }
         return 0
     }
@@ -754,6 +754,14 @@ Item {
                                                 packTextured: root.selectedMobPackSrc !== ""
                                                     || (root.selectedMobSheared && root.selectedMobType === 3
                                                         && root.sheepBodyPackSrc !== "")
+                                                // t782 燃烬者棒组公转（度；头+4棒共享几何）：仅选燃烬者时给动画角
+                                                //   （其余型恒 0——绑定时表达式结果不变 → 不触发 rebuild，无逐帧开销；
+                                                //   时钟恒跑属零成本 NumberAnimation，2.2s/圈同游戏内转速）。
+                                                property real rodClock: 0
+                                                rodSpin: root.selectedMobType === 17 ? rodClock : 0
+                                                NumberAnimation on rodClock {
+                                                    from: 0; to: 360; duration: 2200; loops: Animation.Infinite
+                                                }
                                             }
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
@@ -984,30 +992,11 @@ Item {
                                                 baseColor: "#140f18" // 近黑紫（嘴缝/口腔）
                                             }
                                         }
-                                        // t750 ⑤ 燃烬者环绕竖棒（修复缺棒「多余白色身体」观感；1:1 镜像
-                                        //   Main.qml emberRods：4 根烟灰橙竖棒半径 0.52、2200ms/圈绕 Y 匀速旋转
-                                        //   ——单悬浮头 + 旋转棒是游戏内 t728 标志形态）。悬浮 bob 属游戏内游动
-                                        //   动画，图鉴自转已给动态 → 不复刻（观感锚点是旋转棒）。
-                                        Node {
-                                            visible: root.selectedMobType === 17
-                                            property real spin: 0
-                                            NumberAnimation on spin { from: 0; to: 360; duration: 2200; loops: Animation.Infinite }
-                                            eulerRotation.y: spin
-                                            Repeater {
-                                                model: 4
-                                                Model {
-                                                    geometry: UnitCube {}
-                                                    property real ang: index * 90
-                                                    position: Qt.vector3d(Math.cos(ang * 0.0174533) * 0.52, 0,
-                                                                          Math.sin(ang * 0.0174533) * 0.52)
-                                                    scale: Qt.vector3d(0.09, 1.15, 0.09)
-                                                    materials: PrincipledMaterial {
-                                                        lighting: PrincipledMaterial.NoLighting
-                                                        baseColor: "#e8b030" // 烟灰橙黄（同游戏内 / 蛋生成色）
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        // t782 燃烬者环绕棒组移入 MobModel 共享几何（mobType 17 分支：头 + 4 棒
+                                        //   径向 90° 分布 + rodSpin 公转，上 rodClock 动画驱动）——旧 t750 ⑤ 手搓
+                                        //   4 根 UnitCube 纯色 Repeater 删除（无贴图且与游戏内各持一份易漂移；
+                                        //   「单悬浮头 + 旋转贴图棒」观感同游戏内 t728/t782 标志形态）。悬浮 bob
+                                        //   属游戏内游动动画，图鉴自转 + 棒组公转已给动态 → 不复刻。
                                         // t616 骷髅弓箭手持弓（用户「能不能拿上弓箭」；同 t598 傀儡头补法——图鉴预览
                                         //   此前只显 MobModel，游戏内弓（Main.qml 肩枢 Node）漏显 = 无弓骷髅）：Bones 时在
                                         //   垂手旁挂 MobBowGeometry（静态持弓位 drawAmount=0，同 Main.qml t616 游戏内方案；

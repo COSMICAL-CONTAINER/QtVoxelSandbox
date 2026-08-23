@@ -6341,7 +6341,7 @@ Window {
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
                         if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
                         if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727/t781 Nightwalker（细肢人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
-                        if (entMobType === EntityManager.MobEmberling) return 0.0 // t728 Emberling（悬浮单头：MobModel 头盒中心=origin，halfH=0.6 → offset=0 头盒居中在碰撞盒内；整体悬浮由 hover 升空）
+                        if (entMobType === EntityManager.MobEmberling) return 0.0 // t782 Emberling（悬浮单头+4棒：MobModel 原点=碰撞中心，头心 +0.10/棒跨 [-0.58,+0.52] → offset=0 居中；整体悬浮由 hover 升空）
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
                         //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
@@ -7244,13 +7244,17 @@ Window {
                         sourceComponent: Component {
                             Node {
                                 id: emberNode
-                                // t728 燃烬者（Emberling，mobType 17；机制等价 MC 1.0 烈焰人，§9 改名 + 原创模型/贴图）：
-                                //   MobModel 单头盒（~0.9×0.9 悬浮，entity_emberling 黄焰贴图）+ 4 根竖直烟灰橙棒环绕
-                                //   头 Y 轴匀速旋转（用户原话「好几根竖直的棒子围绕它旋转」；机制等价 MC 烈焰人下摆
-                                //   旋转棒）。悬浮上下 sin 浮动（hover bob）：AI 只在 C++ 设水平漂移，竖直由本 delegate
-                                //   sin 动画驱动（机制等价 MC 烈焰人悬浮飘动）。
+                                // t728/t782 燃烬者（Emberling，mobType 17；机制等价 MC 1.0 烈焰人，§9 改名 +
+                                //   原创模型/贴图）：**仅一颗头 + 4 根烈焰棒**绕身公转，无身体（用户原话；对齐
+                                //   烈焰人造型语义）。头 + 棒全在 MobModel mobType 17 共享几何（t782 重做——t728
+                                //   旧版棒是本 delegate 手搓 4 个 UnitCube 纯色 Repeater，图鉴/刷怪笼各手抄且无贴图；
+                                //   且 setMobType 白名单缺 17 → 实际渲染猪几何「猪模型套皮」根因一并修）。棒带贴图
+                                //   （程序贴图烟灰暗黄竖纹条区 / pack 态 blaze 棒区，均 MC box-UV）。公转 = MobModel
+                                //   rodSpin 属性（度）由 NumberAnimation 连续驱动（帧率无关，0→360 无缝循环），
+                                //   几何侧 rebuild 挪棒（walkPhase 同模式）。悬浮上下 sin 浮动（hover bob）：AI 只在
+                                //   C++ 设水平漂移，竖直由本 delegate sin 动画驱动（机制等价 MC 烈焰人悬浮飘动）。
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobEmberling
-                                position: Qt.vector3d(0, mobModelYOff, 0) // t728 halfH=0.6 → offset=0（头盒居中碰撞盒）
+                                position: Qt.vector3d(0, mobModelYOff, 0) // halfH=0.6 → offset=0（原点=碰撞中心，头心 +0.10/棒跨 [-0.58,+0.52]）
                                 // 悬浮 bob 相位钟（恒跑 0→1→0 锯齿；程序化非受控动画，delegate 稀少零成本）。
                                 property real hoverPhase: 0
                                 SequentialAnimation on hoverPhase {
@@ -7262,41 +7266,26 @@ Window {
                                 property real hoverOff: Math.sin(emberNode.hoverPhase * 3.14159) * 0.14
                                 Node { // hover 浮动承载层（头 + 环绕棒整体上下浮动）
                                     position: Qt.vector3d(0, emberNode.hoverOff, 0)
-                                    Model { // 中心头盒（mobType 17；单头盒几何，无四肢）
+                                    Model { // 单头 + 4 烈焰棒（mobType 17 共享几何；头 0.88³ + 4 细长竖棒轨道半径 0.62）
                                         geometry: MobModel {
                                             mobType: 17
-                                            // t728 pack 命中 blaze → T 字 UV 展开；否则全脸 UV（entity_emberling）。
+                                            // pack 命中 blaze（demo 包实 64×32 base，t782 修正采样）→ MC box-UV；
+                                            // pack 关也 box-UV（entity_emberling 程序贴图即按 blaze 盒区布局自绘）。
                                             packTextured: mobEmberlingPackTex.source.toString().length > 0
                                             walkPhase: 0 // 无四肢不摆
+                                            // 棒组公转（度；0→360 无缝循环 2.2s/圈，同 t728 旧棒转速）——
+                                            //   连续动画帧率无关，几何侧量化 6°/步 rebuild。
+                                            NumberAnimation on rodSpin {
+                                                from: 0; to: 360; duration: 2200; loops: Animation.Infinite
+                                            }
                                         }
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
-                                            // 受击红闪 + 天光调制（同 Shambler 语义）。
+                                            // 受击红闪 + 天光调制（同 Shambler 语义；t782 起棒与头同材质——
+                                            //   受击/昼夜整只着色，修旧版棒恒亮橙不吃 tint）。
                                             baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
-                                            // t728 pack 命中 → pack blaze 身体贴图；否则 entity_emberling 黄焰头。
+                                            // pack 命中 → pack blaze 头+棒贴图；否则 entity_emberling（黄焰头+烟灰棒条）。
                                             baseColorMap: mobEmberlingPackTex.source.toString().length > 0 ? mobEmberlingPackTex : mobEmberlingTex
-                                        }
-                                    }
-                                    Node { // 环绕旋转竖棒组（绕头 Y 轴匀速旋转；用户「好几根竖直的棒子围绕它旋转」）
-                                        id: emberRods
-                                        property real spin: 0
-                                        NumberAnimation on spin {
-                                            from: 0; to: 360; duration: 2200; loops: Animation.Infinite
-                                        }
-                                        eulerRotation.y: emberRods.spin
-                                        Repeater { // 4 根竖直烟灰橙棒（半径 ~0.52、各 90° 相位）
-                                            model: 4
-                                            Model {
-                                                geometry: UnitCube {}
-                                                property real ang: index * 90
-                                                position: Qt.vector3d(Math.cos(ang * 0.0174533) * 0.52, 0,
-                                                                      Math.sin(ang * 0.0174533) * 0.52)
-                                                scale: Qt.vector3d(0.09, 1.15, 0.09) // 竖直细棒（伸过碰撞盒上下）
-                                                materials: PrincipledMaterial {
-                                                    lighting: PrincipledMaterial.NoLighting
-                                                    baseColor: "#e8b030" // 烟灰橙黄（同蛋生成色 / 程序贴图主色）
-                                                }
-                                            }
                                         }
                                     }
                                 }
@@ -8897,7 +8886,7 @@ Window {
                     if (t === EntityManager.MobPig) return 0.56         // 体高 0.75
                     if (t === EntityManager.MobCow) return 0.47         // 体高 0.90（含角尖）
                     if (t === EntityManager.MobSheep) return 0.55       // 体高 0.77
-                    if (t === EntityManager.MobEmberling) return 0.47   // 单头盒 0.90（环绕棒实体态独立、迷你省略）
+                    if (t === EntityManager.MobEmberling) return 0.38   // t782 头+4棒全跨 1.12（[-0.58,0.54]；棒随共享几何在笼内可见）
                     return 0.25                                          // Shambler/Bones 人形体高 ~1.65-1.69
                 }
                 function miniMobYOff(t) {
@@ -8914,7 +8903,8 @@ Window {
                     if (t === EntityManager.MobWolf) return 0.013       // 脚 -0.42 / 顶 0.37
                     if (t === EntityManager.MobOcelot) return 0.023     // 脚 -0.40 / 顶 0.32
                     if (t === EntityManager.MobNightwalker) return 0.008 // 脚 -1.40 / 顶 1.30（t781；−0.16·(−0.10)/2）
-                    return 0                                            // Emberling 单头盒居中（±0.45）
+                    if (t === EntityManager.MobEmberling) return 0.008 // t782 头+棒跨 [-0.58,0.54]（体心 -0.02 → −0.38·(−0.04)/2）
+                    return 0                                            // Shambler/Bones 等居中型
                 }
                 // t786/t787 迷你 mob 眼表（MobModel 局部坐标；坐标/尺寸/色与各实体 delegate 眼层一致，仅随父缩放
                 //   微型化）：Shambler 赤红眼 / Bones 黑眼窝 / Stalker 深黑眼 / Spider 4 颗红眼 / Silverfish
@@ -9031,7 +9021,10 @@ Window {
                         }
                         Model {
                             id: miniMobBody
-                            geometry: MobModel { mobType: spawnerRoot.cageMobType; walkPhase: 0; packTextured: miniMobSpin.miniPackTex !== null }
+                            // t782 rodSpin：燃烬者迷你态棒组静态 45°（斜位读作环绕棒环；笼自旋已给动感，
+                            //   静态角免逐帧 rebuild——迷你 delegate 非实体、无 revision 通道）。其余型恒 0。
+                            geometry: MobModel { mobType: spawnerRoot.cageMobType; walkPhase: 0; packTextured: miniMobSpin.miniPackTex !== null
+                                rodSpin: spawnerRoot.cageMobType === EntityManager.MobEmberling ? 45 : 0 }
                             position: Qt.vector3d(0, spawnerRoot.miniMobYOff(spawnerRoot.cageMobType), 0)
                             scale: Qt.vector3d(spawnerRoot.miniMobScale(spawnerRoot.cageMobType),
                                                spawnerRoot.miniMobScale(spawnerRoot.cageMobType),
