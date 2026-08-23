@@ -92,9 +92,11 @@ Item {
     // 雪傀儡剪头态（false=戴南瓜头 / true=纯雪头 + 刻面五官；镜像游戏内 snowGolemShearedAt 双态）。
     property bool snowGolemSheared: false
     // 羊毛色索引（0=白色不着色；1..15=染色 tint）。调色板与游戏内羊毛方块 16 色**同源**
-    //   （tools/build_wool.py WOOL_COLORS，白色=默认羊毛色 → 预览零 tint）。诚实边界：游戏内**没有**
-    //   染色羊机制（EntityManager 羊实体无毛色字段），图鉴侧做**预览着色**（贴图 tint 乘色），
-    //   游戏内羊毛染色留待后续（下方毛色行注明）。
+    //   （tools/build_wool.py WOOL_COLORS，白色=默认羊毛色 → 预览零 tint）。t789 起游戏内羊实体已有毛色
+    //   字段（EntityManager sheepWool / 自然权重 kSheepNaturalWeights：白主导 + 粉/灰/浅灰/棕/黑少数；
+    //   毛层 tint 走 sheepWoolTintForIndex 同值色板 + 剪/杀掉对应色羊毛）→ 本预览着色 = 游戏内观感
+    //   的所见即所得（三处色板镜像：build_wool.py / EntityManager kSheepWoolTints / 此处；矩阵测试
+    //   t789 探针钉死同值契约）。
     property int sheepWoolIndex: 0
     readonly property var woolPalette: [
         { name: "白色", tint: "#ffffff" }, // 白=默认毛色，不着色（乘白恒等）

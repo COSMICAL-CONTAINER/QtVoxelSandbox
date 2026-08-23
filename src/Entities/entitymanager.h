@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QColor>
 #include <QVector3D>
 #include <QElapsedTimer>
 #include <QtQml/qqml.h>
@@ -404,6 +405,18 @@ public:
     //   （机制等价 MC 1.0：剪羊毛只对有毛的羊生效，已裸的羊右键无反应）。bump revision → QML 翻羊为裸外观。
     //   Q_INVOKABLE 兼调试 + playercontroller placeBlock shears 分支双入口（playercontroller 是 C++ 直调）。
     Q_INVOKABLE void shearSheep(int i);
+    // t789 第 i 只羊的羊毛色下标（0..15，**16 色标准序**：0 白/1 橙/2 品红/3 淡蓝/4 黄/5 柠绿/6 粉/7 灰/
+    //   8 浅灰/9 青/10 紫/11 蓝/12 棕/13 绿/14 红/15 黑——行序同 RecipeRegistry 染料段与羊毛方块段）。仅
+    //   mobType==MobSheep 用；spawn 时按自然权重随机（白主导，见 spawnMobCore 的 kSheepNaturalWeights），
+    //   繁殖幼崽继承首个父代（同 ocelotVariant 先例）。非 sheep / 越界 → 0（白，兼容旧观感）。
+    Q_INVOKABLE int sheepWoolAt(int i) const;
+    // t789 第 i 只羊的毛层 tint 色（QML delegate 毛茸 Model 材质 baseColor 乘色；白 → #ffffff 恒等不着色，
+    //   裸态 sheared 不 tint——裸肤与毛色无关）。色板同源 tools/build_wool.py WOOL_COLORS + 浏览器 t751
+    //   woolPalette（图鉴预览与游戏内观感一致）。非 sheep / 越界 → 白。
+    Q_INVOKABLE QColor sheepWoolTintAt(int i) const;
+    // t789 羊毛色下标 → tint 色（sheepWoolTintAt 的按值入口；矩阵测试直调核对色板契约——浏览器 woolPalette
+    //   / build_wool.py 同值镜像，漂移即 FAIL）。下标越界 → 钳到 [0,15]。
+    Q_INVOKABLE QColor sheepWoolTintForIndex(int woolIndex) const;
     // t510 第 i 只 mob 是否**雪傀儡且已被剪南瓜头**（snowGolemSheared=true）。仅 mobType==MobSnowGolem 用（其余
     //   mob 恒 false）。QML delegate 据它切换雪傀儡外观：未剪=南瓜头；已剪=雪块头 + 刻面眼/嘴（t629 修：剪掉
     //   南瓜头露出里面的**雪头**，非无头 —— 机制等价 MC 1.0 剪雪傀儡 → 雪块头形态）。PlayerController 剪刀分支
@@ -790,7 +803,9 @@ signals:
     //   t479 wasBaby = **致死瞬间**快照（Entity.deathBaby）—— 幼崽死亡不掉落（呈现层 onMobDied 守卫跳过战利品 +
     //   XP，机制等价 MC 幼崽不掉落）。0.5s 死亡动画窗口内 tickBreeding 仍衰减 growTimer，幼崽可能在其中长大
     //   （baby→false），故延迟 emit 时读 e.baby 会漏判；快照保「致死时是幼崽」语义稳定（同 deathBurned 快照模式）。
-    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby);
+    //   t789 woolIndex = 羊毛色下标（仅 MobSheep 有意义，其余 mob 恒 0）：呈现层 onMobDied 的羊分支据此掉
+    //   对应色羊毛（白→材料段 WoolId 0x20E / 有色→羊毛方块 63..77）。
+    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby, int woolIndex);
     // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
     //   玩家处于攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
     //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones/Stalker/Spider）。呈现层（Main.qml）
@@ -826,9 +841,11 @@ signals:
     void arrowHitMob(int mobType);
     // t300 羊被剪羊毛（shearSheep 内发，仅未剪羊毛的活体 sheep 首次翻 sheared=true 时发）。坐标 = 羊当前格
     //   floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在羊身旁）。呈现层（Main.qml）Connections
-    //   据它转发 ItemEntityManager.spawnItem(0x20E=羊毛 ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：
+    //   据它转发 ItemEntityManager.spawnItem（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：
     //   Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 剪羊毛掉落羊毛物品。
-    void sheepSheared(int x, int y, int z);
+    //   t789 woolIndex = 该羊羊毛色下标（0..15）：呈现层据此掉对应色羊毛（白→材料段 WoolId 0x20E /
+    //   有色→羊毛方块 63..77，机制等价 MC 剪彩色羊得对应色羊毛）。
+    void sheepSheared(int x, int y, int z, int woolIndex);
     // t510 雪傀儡剪南瓜头（shearSnowGolem 内发，仅未剪南瓜头的活体 SnowGolem 首次翻 snowGolemSheared=true 时发）。
     //   坐标 = 雪傀儡当前格 floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在它身旁）。
     //   呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem(100=Pumpkin, 1)（南瓜方块掉落实体；
@@ -1046,6 +1063,12 @@ private:
         //   即长回；spec「加一个重新长毛冷却，免得刷屏」）。未剪羊毛的羊永远 sheared=false（默认状态）。
         bool  sheared = false;       // 是否已被剪羊毛（QML delegate 据它切换毛茸 vs 裸外观）
         float regrowCooldown = 0.0f; // 剪羊毛后到能吃草方块重新长毛的冷却倒计时（秒；仅 sheared=true 时推进 / 触发）
+        // t789 羊自然毛色（仅 mobType==MobSheep 用；其余 mob 留默认 0 不触发）：羊毛 16 色标准序下标（自然色
+        //   只取 {0 白, 6 粉, 7 灰, 8 浅灰, 12 棕, 15 黑}）。spawnMobCore 生成时按 kSheepNaturalWeights 自然权重
+        //   随机（白 ~81.8% 主导，机制等价 MC 1.0 自然刷羊分布）；繁殖幼崽被 tickBreeding 覆写为父代色（继承
+        //   语义同 ocelotVariant）。QML 毛茸 Model 据 sheepWoolTintAt 乘 tint；shearSheep / mobDied 携带它让
+        //   呈现层掉对应色羊毛（白→材料段 WoolId / 有色→对应色羊毛方块）。默认成员初始化清回（槽复用防残留）。
+        int   sheepWool = 0;         // 羊毛色下标 0..15（默认 0=白；仅 MobSheep 用）
         // t398 鸡下蛋态（仅 mobType==MobChicken 用；其余 mob 留默认 0 不触发）：
         //   eggTimer 到下次下蛋的倒计时（秒）；tick Mob 分支推进，<=0 → emit chickenLaidEgg + 重置随机周期
         //   （kEggLayMin..Max，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。spawn 时随机化初值防批量 spawn 的鸡同步下蛋。
