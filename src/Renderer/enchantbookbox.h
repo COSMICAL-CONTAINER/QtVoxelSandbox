@@ -9,7 +9,8 @@
 // 用途：悬浮书的左右页 / 书脊 / 翻页片从 UnitCube 纯色改为带 UV 的 ±0.5 居中单位盒（同
 // UnitCube/PlayerSkinBox 基准 → bookDelegate 既有 position/scale / 翻页枢轴动画直接沿用，
 // 机制零改动）。t679 时 pack 书贴图「整本书 UV 展开与两页盒映射不符」而留程序纯色——本类以
-// 像素实测分区解决该映射：两页盒各取封面 / 纸页区，不强求与原书 1:1（贴图分区重解读）。
+// 像素实测分区解决该映射：两页盒各取纸页区（t796 ②：两页都是纸页、镜像对称；封面区只留
+// item 图标叠层用），不强求与原书 1:1（贴图分区重解读）。
 //
 // 双布局（layout）：qrc 程序贴图与 demo 包书贴图分区实测不同（同 MinecartBox 双表先例）：
 //   0 = qrc 程序 entity_enchant_book.png（64×32 实测：左半 x[0,32) 棕封 + 金边（x[0,2) 金边竖条）
@@ -19,11 +20,15 @@
 //       x[24,34) y[10,19)；其余为不透明暗底，采样窗只落在实测亮区）。
 //
 // piece 部件（面序同 kFace：0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z；书脊沿 Z，页面 +Y 朝上）：
-//   0 封面页（左页：上面 = 封面 / 底面 = 封底（包）或同封面（qrc）；书脊侧 +X = 金边竖条）
+//   0 封面页（t796 ② 起放置态书不再消费——两页都采纸页区；分区保留供 item 图标叠层族 / 备用：
+//       上面 = 封面 / 底面 = 封底（包）或同封面（qrc）；书脊侧 +X = 金边竖条）
 //   1 纸页（右页：上下大面 = 纸页 + 符文行；书脊侧 -X = 暗化纸缘）
 //   2 书脊（可见 ±X 窄面 = 金边竖条（qrc，2×32 与窄面纵横比吻合）/ 书脊条（包））
 //   3 翻页片（上下大面 = qrc 符文行区 / 包翻页白页——t764 改：飞行页片须自带可见字迹/暗块，
 //       纯白纸贴白纸页肉眼不可辨；再配 Main.qml 暖 tint 与静态纸页拉明度差）
+//   4 纸页镜像（t796 ② 新增左页：与 piece 1 同区采样但 u0/u1 互换 = 左右镜像——左页几何
+//       u=0 在外缘 / u=1 在书脊（与右页相反），不互换会令暗化纸缘落到外缘；镜像后暗缘仍落
+//       书脊侧、符文行与右页镜像对称 = 真开书左右页互为镜像）
 //
 // 顶点格式：pos(3)+uv(2)=5 float；24 顶点 / 36 索引；CCW 朝外单面（默认 backface 剔除）。
 //
@@ -33,7 +38,8 @@ class EnchantBookBox : public QQuick3DGeometry
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(EnchantBookBox)
-    // 部件（0 封面页 / 1 纸页 / 2 书脊 / 3 翻页片；见类注释分区表）。setter 触发 rebuild。
+    // 部件（0 封面页（图标备用）/ 1 纸页 / 2 书脊 / 3 翻页片 / 4 纸页镜像；见类注释分区表）。
+    //   setter 触发 rebuild。
     Q_PROPERTY(int piece READ piece WRITE setPiece NOTIFY pieceChanged)
     // 贴图布局（0 = qrc 程序 64×32 / 1 = demo 包 8× 实测排版；见类注释双布局说明）。
     Q_PROPERTY(int layout READ layout WRITE setLayout NOTIFY layoutChanged)
