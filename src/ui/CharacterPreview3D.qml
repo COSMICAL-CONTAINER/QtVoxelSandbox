@@ -216,9 +216,12 @@ Item {
                     position: Qt.vector3d(0, 0.7, 0)
                     // t748：+ crouchBow 补偿父级 upperBody 的 −crouchBow 前倾（本预览镜像 Main.qml 玩家模型蹲姿，
                     //   同根修：旧 x = lookPitch 是身体系角 → 蹲姿预览头被鞠躬 −35° 拖向地面不跟 lookPitch）→
-                    //   蹲/站头的世界俯仰都 = lookPitch；站立（crouchBow=0）零变化。lookPitch 已钳 ±45，
-                    //   补偿后本地角 ∈ [−10, 80] 不再额外钳（颈限语义同 Main.qml headNode）。
-                    eulerRotation: Qt.vector3d(root.lookPitch + root.crouchBow, root.headYawLead, 0)
+                    //   蹲/站头的世界俯仰都 = lookPitch；站立（crouchBow=0）零变化。
+                    // Review 2026-08-23 #10：补 ±60° 颈限 clamp（对齐 Main.qml headNode 同款「补偿鞠躬量
+                    //   之后再钳」）——旧注释声称「lookPitch 已钳 ±45 故不再额外钳」，但补偿后本地角可达
+                    //   [−10, +80]，蹲姿仰视 +80° 超颈限（真人蹲下仰头受限），且与 Main.qml（钳 ±60）两处
+                    //   头姿不一致。钳后 [−10, +60]：站立零变化（lookPitch ∈ ±45），蹲姿仰视达颈限截断。
+                    eulerRotation: Qt.vector3d(Math.max(-60, Math.min(60, root.lookPitch + root.crouchBow)), root.headYawLead, 0)
 
                     // 头（≈0.5³）。相对颈枢：头心在颈上方 0.25（世界 y=1.55）。t731 皮肤化：PlayerSkinBox
                     //   {piece:0}（head 区 box-UV，-Z 前脸 = 皮肤脸区自带五官）+ 皮肤贴图。

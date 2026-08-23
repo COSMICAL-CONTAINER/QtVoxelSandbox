@@ -14,6 +14,9 @@
 #include <QImage> // t777 探针（fur/body 双 PNG 生成 + 合成结果像素断言）
 #include <QColor> // t777 探针（像素色对比）
 #include <QPainter> // t779 探针（合成源贴图矩形填色）
+#include <QJsonDocument> // Review #1 探针（settings.json resourcePack 皮肤路径解析）
+#include <QJsonObject>   // Review #1 探针（同上）
+#include <QStandardPaths> // Review #1 探针（settings.json 候选位置，同 resolveSettingsPath）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 
@@ -34,6 +37,8 @@
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
 //   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。
 extern QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath);
+// Review 2026-08-23 #1 探针：slim 皮肤布局探测器（同上 extern 直连；签名纯 QImage 无需入头）。
+extern bool probeSlimSkinLayout(const QImage &tex);
 
 namespace {
 
@@ -4614,6 +4619,135 @@ int main(int argc, char *argv[])
                              "(cornerless 3x4 lights + corner break keeps door), frame-member break collapses "
                              "whole door via connected-domain clear (particle color = QML blockColor, manual "
                              "check)";
+    }
+
+    // ── Review 2026-08-23 #1 slim 皮肤布局探测回归探针 ──
+    // 背景：复审 #8 的 slim 修复整体无效——旧探测区 u[52,54) 落在 slim 臂背面 [51,54) 内（PIL 实测
+    //   demo 包 alex/steve 该区同为 24 个不透明像素）→ 对真实 slim 皮肤恒判 classic；且 kPiecesSlim
+    //   盒区数值错（臂深 3 应为 4、腿不应缩 3px——数值锁在 playerskinbox.cpp static_assert，编译期拦）。
+    //   修正后探测区 u[54,56)：classic = 臂背面右半必不透明、slim = 布局外空白必透明（alex 0 / steve 24，
+    //   区分度完美）。本探针锁两层：
+    //   ① 合成布局判定（密闭，任意机器可跑）：按 MC box-UV 条带公式画「规范 classic/slim 右臂条带」
+    //     ——条带右缘 = u0 + 2d + 2w（classic 40+8+8=56 / slim 40+8+6=54），条带列 [40, 右缘) 全不透明、
+    //     其余全透明 → classic 必判 classic、slim 必判 slim。若有人把探测区改回条带内（如 [52,54)），
+    //     slim 合成图的 52/53 列不透明 → 误判 classic → FAIL；若改过头越出 classic 条带（如 [56,58)），
+    //     classic 也判 slim → FAIL。HD 2×（128×128，sc=2）与退化小图（32×16 → 保守 classic）同锁。
+    //   ② demo 包实测（有 pack 才跑，缺则记 note 跳过）：alex.png → slim、steve.png → classic——
+    //     真实皮肤布局假设的防线（①合成图按公式画，公式理解错则②用真图拦）。
+    {
+        bool ok = true;
+        // ① 合成条带（64×32 base 与 128×64 HD 2× 两档）。
+        const auto makeArmStrip = [](int w, int h, int stripEndPx) {
+            QImage img(w, h, QImage::Format_ARGB32);
+            img.fill(Qt::transparent);
+            QPainter p(&img);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0xd0, 0xa0, 0x70));
+            const qreal sx = qreal(w) / 64.0, sy = qreal(h) / 32.0;
+            // 右臂条带（base 像素 u∈[40,stripEnd) × v∈[16,32) 全不透明——侧面/背面带必paint，
+            //   含探测行 v∈[20,32)）。
+            p.drawRect(QRectF(40 * sx, 16 * sy, (stripEndPx - 40) * sx, 16 * sy));
+            return img;
+        };
+        const int classicEnd = 40 + 2 * 4 + 2 * 4; // = 56（Renderer kPiecesClassic[2] 同公式）
+        const int slimEnd = 40 + 2 * 4 + 2 * 3;    // = 54（Renderer kPiecesSlim[2] 同公式）
+        const QImage synClassic = makeArmStrip(64, 32, classicEnd);
+        const QImage synSlim = makeArmStrip(64, 32, slimEnd);
+        if (probeSlimSkinLayout(synClassic)) {
+            qInfo().noquote() << "  [#1 diag] synthetic classic strip (end u=56) misjudged slim";
+            ok = false;
+        }
+        if (!probeSlimSkinLayout(synSlim)) {
+            qInfo().noquote() << "  [#1 diag] synthetic slim strip (end u=54) misjudged classic";
+            ok = false;
+        }
+        // HD 2× 同布局（128×64；sc=2 坐标缩放路径）。
+        const QImage synClassicHd = makeArmStrip(128, 64, classicEnd);
+        const QImage synSlimHd = makeArmStrip(128, 64, slimEnd);
+        if (probeSlimSkinLayout(synClassicHd) || !probeSlimSkinLayout(synSlimHd)) {
+            qInfo().noquote() << "  [#1 diag] HD 2x (128x64) classification wrong";
+            ok = false;
+        }
+        // 退化小图（w<64）→ 保守 classic。
+        QImage tiny(32, 16, QImage::Format_ARGB32);
+        tiny.fill(Qt::transparent);
+        if (probeSlimSkinLayout(tiny)) {
+            qInfo().noquote() << "  [#1 diag] degenerate 32x16 not conservative-classic";
+            ok = false;
+        }
+        // ② demo 包真实皮肤：settings.json resourcePack 指向的包 → 该包 entity/alex.png + steve.png；
+        //   缺配置则试工程内 demo 包相对路径（exe 在 build/ → ../docs）。两候选都 miss → 记 note 跳过
+        //   （①仍守布局语义；不在无包机器上假 FAIL）。
+        QString packRoot;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString settingsCandidates[2] = {
+                QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("settings.json")),
+                QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                        .absoluteFilePath(QStringLiteral("settings.json")),
+            };
+            for (const QString &c : settingsCandidates) {
+                QFile f(c);
+                if (!f.open(QIODevice::ReadOnly))
+                    continue;
+                const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+                const QString p = obj.value(QLatin1String("resourcePack")).toString();
+                if (!p.isEmpty() && QDir(p).exists()) {
+                    packRoot = p;
+                    break;
+                }
+            }
+        }
+        QString alexPath, stevePath;
+        const auto entitySkin = [&packRoot](const char *name) {
+            return packRoot.isEmpty()
+                    ? QString()
+                    : QDir(packRoot).absoluteFilePath(
+                            QStringLiteral("assets/minecraft/textures/entity/") + QLatin1String(name));
+        };
+        alexPath = entitySkin("alex.png");
+        stevePath = entitySkin("steve.png");
+        if (alexPath.isEmpty() || !QFile::exists(alexPath) || !QFile::exists(stevePath)) {
+            const QString fallback = QDir(QStringLiteral("..")).absoluteFilePath(
+                    QStringLiteral("docs/Default HD 128x Demo 1.8.2.2"));
+            const QString a = QDir(fallback).absoluteFilePath(
+                    QStringLiteral("assets/minecraft/textures/entity/alex.png"));
+            const QString s = QDir(fallback).absoluteFilePath(
+                    QStringLiteral("assets/minecraft/textures/entity/steve.png"));
+            if (QFile::exists(a) && QFile::exists(s)) {
+                alexPath = a;
+                stevePath = s;
+            }
+        }
+        bool realChecked = false;
+        if (QFile::exists(alexPath) && QFile::exists(stevePath)) {
+            const QImage alex(alexPath), steve(stevePath);
+            if (alex.isNull() || steve.isNull()) {
+                qInfo().noquote() << "  [#1 diag] demo pack skin PNG decode failed";
+                ok = false;
+            } else {
+                realChecked = true;
+                if (!probeSlimSkinLayout(alex)) {
+                    qInfo().noquote() << "  [#1 diag] demo alex.png misjudged classic (slim regression)";
+                    ok = false;
+                }
+                if (probeSlimSkinLayout(steve)) {
+                    qInfo().noquote() << "  [#1 diag] demo steve.png misjudged slim (classic regression)";
+                    ok = false;
+                }
+            }
+        }
+        if (!realChecked)
+            qInfo().noquote() << "  [#1 note] demo pack skins not found - real-skin assertions skipped "
+                                 "(synthetic layout assertions still ran)";
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review#1 slim-skin probe region: synthetic MC-layout arm strips classify "
+                             "classic(end u=56)/slim(end u=54) at base 64x32 + HD 2x, degenerate 32x16 "
+                             "conservative-classic"
+                          << (realChecked
+                                  ? ", demo pack alex->slim / steve->classic (real PIL-verified layouts)"
+                                  : "");
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

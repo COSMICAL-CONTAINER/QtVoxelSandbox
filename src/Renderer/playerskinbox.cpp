@@ -58,9 +58,12 @@ constexpr int kMcFace[6] = { 1, 0, 2, 3, 5, 4 };
 
 // t731 皮肤部位盒区表（index = piece；MC textureOffset + size，见 playerskinbox.h 注释出处——与
 //   build_entities_pack.py draw_skin 的 paint_box 调用同源）。行：{ u0, v0, w, h, d }。
-//   复审 #8：slim（3px 臂/腿）布局第三/四行切 3px（Arm (40,16) 3×12×3、Leg (0,16) 3×12×3——slim
-//   皮肤臂/腿盒区仅占 u40..52 / u0..12，4px 采样在 u52..56 采到布局外透明列 → 镂空条纹）。Head/Body
-//   两布局同区不变。
+//   复审 #8 + Review 2026-08-23 #1 修正（PIL 实测坐实旧 slim 两行数值错）：MC 1.8 标准 slim 布局是
+//   **臂 3 宽×12 高×4 深**（条带 2×(3+4)=14px 占 u40..54，与 classic 仅差宽 1px——demo 包 alex 实测
+//   臂条带不透明列 u40..53、u54..55 全透明）、**腿保持 4×12×4 不变**（占满 u0..16，demo 包 alex 腿
+//   条带 u0..15 全不透明）。旧值 Arm/Leg 都是 3×12×3（d=3）：臂深错 1px（六面全错位）+ 腿条带 16px
+//   满宽被按 3px 采样（大面积采错列）。Core 侧 probeSlimSkinLayout 探测区 [54,56) 按本表条带右缘
+//   派生（互指，见 resourcepackmanager.cpp 注释）。
 struct BoxTex { float u0, v0, w, h, d; };
 constexpr std::array<BoxTex, 4> kPiecesClassic = {{
     {  0.0f,  0.0f, 8.0f,  8.0f, 8.0f }, // 0 Head（脸在 Front (8,8)-(16,16)）
@@ -71,9 +74,20 @@ constexpr std::array<BoxTex, 4> kPiecesClassic = {{
 constexpr std::array<BoxTex, 4> kPiecesSlim = {{
     {  0.0f,  0.0f, 8.0f,  8.0f, 8.0f }, // 0 Head（同 classic）
     { 16.0f, 16.0f, 8.0f, 12.0f, 4.0f }, // 1 Body（同 classic）
-    { 40.0f, 16.0f, 3.0f, 12.0f, 3.0f }, // 2 Arm slim 3px（左右共用）
-    {  0.0f, 16.0f, 3.0f, 12.0f, 3.0f }, // 3 Leg slim 3px（左右共用）
+    { 40.0f, 16.0f, 3.0f, 12.0f, 4.0f }, // 2 Arm slim：3宽×12高×4深（条带14px，仅宽比 classic 差 1px）
+    {  0.0f, 16.0f, 4.0f, 12.0f, 4.0f }, // 3 Leg slim：4宽×12高×4深（slim 腿不变，与 classic 同款）
 }};
+// Review 2026-08-23 #1 数值锁（同 t789 QML 契约 static_assert 先例）：slim 与 classic 的差异**只有
+//   臂宽 4→3**——臂深 d=4、腿整行不变。任何再按「slim = 臂腿都缩 3px」错误假设的回归在此编译期拦下；
+//   同时锁 classic 表防误改（其臂条带右缘 56 是 Core probeSlimSkinLayout 探测区坐标的派生源）。
+static_assert(kPiecesSlim[2].w == 3.0f && kPiecesSlim[2].h == 12.0f && kPiecesSlim[2].d == 4.0f,
+              "slim arm must be 3x12x4 (MC 1.8 slim: depth stays 4)");
+static_assert(kPiecesSlim[3].w == 4.0f && kPiecesSlim[3].h == 12.0f && kPiecesSlim[3].d == 4.0f,
+              "slim leg must equal classic 4x12x4 (MC 1.8 slim keeps legs)");
+static_assert(kPiecesClassic[2].w == 4.0f && kPiecesClassic[2].h == 12.0f && kPiecesClassic[2].d == 4.0f,
+              "classic arm must stay 4x12x4 (probeSlimSkinLayout region derives from this strip)");
+static_assert(kPiecesSlim[0].w == kPiecesClassic[0].w && kPiecesSlim[1].w == kPiecesClassic[1].w,
+              "slim layout only differs on arm/leg rows");
 
 // 某面 MC box-UV 像素矩形 → Qt UV 子区（armorlayerbox.cpp faceQtUV + subV 行区间裁切）。
 //   sub0/sub1 ∈ [0,1] 是盒高 h 的采样分数区间：含 h 的面（侧 d×h / 前后 w×h）v 行起终 =
