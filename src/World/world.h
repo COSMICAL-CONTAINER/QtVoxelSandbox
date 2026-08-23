@@ -892,7 +892,9 @@ private:
     //   同地牢分布（PLAN §2-K）。**Spawner 不存清单**：tickSpawners 在 EntityManager 内**扫玩家周围**Spawner
     //   块（按需扫描，player-near 才扫），故 World 无需维护 spawner 位置列表 —— 破坏即停止刷怪由 tickSpawners
     //   查 blockAt != Spawner 自然实现（无 setBlock 钩子）。存档 round-trip：Spawner 是普通方块 id，chunk blob
-    //   随存随读，加载后 tickSpawners 仍能扫到（同 Chest 物品存 ChestStore 独立于 chunk，Spawner 无状态）。
+    //   随存随读，加载后 tickSpawners 仍能扫到（同 Chest 物品存 ChestStore 独立于 chunk）。t786 起 Spawner
+    //   **state 带 mob 类型**（bit1-5，地牢加权随机 / 要塞恒银鱼 / 创造放置默认僵尸），state 随 m_states 落
+    //   SQLite round-trip 保真（旧存档无 type 位 → 解码端按 bit0 兼容分流，见 spawnerMobTypeForState）。
     void placeDungeons();
     // t484/t565 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（地板/轨道）+ 蜘蛛网 + 暴露矿石 +
     //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft；**t565 重做为连通网络**）。carveCaves / carveCaveEntrances /
@@ -946,7 +948,7 @@ private:
     //       3×3 岩浆盆（门面正下方一格）+ 12 EndPortal 框架环（中心 (0,4,-18) 标准 ±2 方形环；框架层不随
     //       t759 加高变动 → B5 反推 y=cy+4 假设与记录值零回归；~10% 预置末影之眼；
     //       t664 激活/完整性机制接线）+ 环中心上方银鱼刷怪笼（机制等价 MC 1.0 要塞传送门房上方 spawner）；
-    //     - **战利品/银鱼房**（17×11×8 房间）：双银鱼刷怪笼（Spawner + SpawnerStateSilverfishFlag →
+    //     - **战利品/银鱼房**（17×11×8 房间）：双银鱼刷怪笼（Spawner + SpawnerStateSilverfish 显式 type →
     //       tickSpawners 刷 Silverfish）+ 双战利品箱（Chest + ChestStateStrongholdFlag → 首开填要塞战利品
     //       含末影之眼）；
     //     - 走廊散布 Cobweb 蛛网（仅 dy=1 贴地不悬空；设施房整房跳过 —— t682 装饰覆盖框架的教训）。

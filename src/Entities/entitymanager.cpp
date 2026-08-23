@@ -670,6 +670,33 @@ int EntityManager::pickPassiveMobType(int biomeId) const
     return MobChicken;
 }
 
+// t786 刷怪笼 state → 笼内 mob 类型解码（见头文件注释；规则三段：type 位 / 旧 bit0 银鱼 / 兜底 Shambler）。
+//   纯函数于入参：编码在 Core 层 BlockRegistry::spawnerStateForMob（数值契约），本端是**唯一**解码源
+//   （tickSpawners 与 QML spawnerHost delegate 共用，防两套各写漂移——t785 单一权威教训）。
+int EntityManager::spawnerMobTypeForState(int state) const
+{
+    const int typeBits = (int(quint8(state)) & int(BlockRegistry::SpawnerStateMobMask))
+                         >> int(BlockRegistry::SpawnerStateMobShift);
+    if (typeBits != 0) {
+        // t786 笼带显式类型：仅认可 spawn 的五种敌对（枚举漂移 / 手改存档的非法值回退 Shambler）。
+        switch (typeBits) {
+        case MobShambler:
+        case MobBones:
+        case MobStalker:
+        case MobSpider:
+        case MobSilverfish:
+            return typeBits;
+        default:
+            return MobShambler;
+        }
+    }
+    // type 位零：t487 时代旧笼。bit0=1 → 旧要塞银鱼笼；bit0=0 → 旧地牢笼（旧版 Shambler/Bones 随机刷，
+    //   无从恢复原始序列 → 确定性回退最常见型 Shambler，刻意不回退 Silverfish 防旧地牢笼全变银鱼）。
+    if ((int(quint8(state)) & int(BlockRegistry::SpawnerStateSilverfishFlag)) != 0)
+        return MobSilverfish;
+    return MobShambler;
+}
+
 // t280 当前活体敌对生物数（hostile && !dead && kind==Mob）。供 spawn 调度上限判定。
 int EntityManager::hostileCount() const
 {
@@ -990,15 +1017,11 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                 }
                 if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
 
-                // spawn 1 只敌对（Shambler / Bones 等概率；机制等价 MC 1.0 刷怪笼等概率随机刷怪）。
-                //   t487：刷怪笼 state 带 SpawnerStateSilverfishFlag(bit0) → spawn Silverfish（要塞银鱼刷怪笼），
-                //   否则 Shambler/Bones（地牢默认）。读 world->stateAt 区分两类刷怪笼（worldgen placeStronghold
-                //   给要塞银鱼刷怪笼写 flag；placeDungeons 给地牢刷怪笼 state=0 无 flag）。
-                auto *rng = QRandomGenerator::global();
-                const quint8 spawnerState = world->stateAt(x, y, z);
-                const int mobType = ((spawnerState & BlockRegistry::SpawnerStateSilverfishFlag) != 0)
-                                    ? int(MobSilverfish)
-                                    : ((rng->bounded(2) == 0) ? int(MobShambler) : int(MobBones));
+                // spawn 1 只敌对 —— 类型由笼 state 决定（t786 类型化刷怪笼）。spawnerMobTypeForState 是
+                //   唯一解码源（type 位=worldgen placeDungeons 加权随机 / placeStronghold 银鱼 / 创造放置
+                //   默认 Shambler；type 位零的旧存档笼按 bit0 分流银鱼/Shambler，见该函数注释）。机制等价
+                //   MC 1.0 刷怪笼刷**笼内类型**的怪（此前无 type 位时地牢笼是 Shambler/Bones 等概率随机）。
+                const int mobType = spawnerMobTypeForState(int(world->stateAt(x, y, z)));
                 spawnHostileMob(sx, sy, sz, mobType);
                 ++hostilesRunning;
                 dirty = true;

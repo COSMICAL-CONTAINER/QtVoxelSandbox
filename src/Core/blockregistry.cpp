@@ -182,7 +182,8 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （BlockCube 铁笼壳 alphaMode:Mask + 笼内旋转迷你蠹虫）；若仍 solid=true 会被误剔邻居整面 → 笼四周露 x-ray 洞。
     //   碰撞 / 选中 / 射线走 shape=ShapeFull **不变**（整格可站 / 可选 / 可挖）；lightOpacity 随 solid=false 转全透 0
     //   （t742 铁活板门同款 cutout 语义：栅格孔真透明 → 孔后邻面采到本格天光，孔洞通透）。音色归 GroupStone（铁笼金属
-    //   敲击）。worldgen placeDungeons 地牢中央 / placeStronghold 传送门房放置（后者带 SpawnerStateSilverfishFlag 刷蠹虫）；
+    //   敲击）。worldgen placeDungeons 地牢中央（t786 起 state 加权带类型：僵尸/骷髅/蜘蛛/爬行者）/ placeStronghold
+    //   传送门房放置（后者 SpawnerStateSilverfish 刷蠹虫）；
     //   玩家可破坏以停止刷怪（EntityManager::tickSpawners 扫到该格 blockAt != Spawner 即跳过）。
     //   t760 进创造调色板（此前 worldgen 专属不可获得——见 Hotbar::creativeBlocks）。
     /* spawner      */ {int(BlockRegistry::Spawner),                    51, 51, 51, 51, false, BlockRegistry::ShapeFull,     5.0f, int(BlockRegistry::Pickaxe), 1, true,                             0, 0, 64, "spawner",      "刷怪笼"},

@@ -146,8 +146,9 @@ public:
     //   银鱼刷怪笼周期刷出。hostile=true → 走 tickHostileLife（白天暴露日光燃烧 / 黑暗刷怪调度）+ 默认 aiHostile
     //   （detect→chase→melee attack，近战追击玩家，区别于 Shambler 仅为小体型 + 快速）。§9 原创：名称 / 模型
     //   （MobModel 小型虫形：分节躯干 + 前伸小头 + 多对短腿）/ 贴图（程序生成灰白甲壳 + 体节纹）全原创，仅机制
-    //   对齐「小虫群涌追击」。要塞 placeStronghold 在传送门房放银鱼刷怪笼（Spawner state 带 SpawnerStateSilverfishFlag）→
-    //   tickSpawners 据该 flag 刷 Silverfish（区别于地牢 Shambler/Bones）。Entity hostilesCount / hostileNearby 均含 Silverfish。
+    //   对齐「小虫群涌追击」。要塞 placeStronghold 在传送门房放银鱼刷怪笼（Spawner state = SpawnerStateSilverfish
+    //   显式银鱼 type，t786 类型化）→ tickSpawners 据解码（spawnerMobTypeForState）刷 Silverfish（区别于地牢
+    //   加权池 Shambler/Bones/Spider/Stalker）。Entity hostilesCount / hostileNearby 均含 Silverfish。
     //   t727 夜行者（Nightwalker）= MobNightwalker(16)：机制等价 MC 1.0 末影人（Enderman）—— 3 格高（halfH=1.40 =
     //   2.9 高）细长人形敌对生物。hostile=true → 走 tickHostileLife（白天暴晒燃烧 / 远距消失 + 黑暗刷怪调度，
     //   同 Shambler/Bones/Stalker）。独特机制（PLAN §9 区隔，零 MC 专名）：
@@ -201,6 +202,15 @@ public:
     //   群系化被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
     //   分层（PLAN §2）：Entities 层，纯函数于入参（biome id）+ RNG 采样，不读 World / 不改实体数据。
     Q_INVOKABLE int pickPassiveMobType(int biomeId) const;
+    // t786 刷怪笼 state → 笼内 mob 类型解码（单一权威，t785 教训：编码在 BlockRegistry::spawnerStateForMob，
+    //   解码收口在此 —— C++ tickSpawners 与 QML spawnerHost delegate 共用，防两端各写一套漂移）。位布局见
+    //   BlockRegistry（bit1-5 = MobType 枚举值 <<1；bit0 = 旧要塞银鱼标记）。规则：
+    //     type 位非零 → 取 type；属 {Shambler,Bones,Stalker,Spider,Silverfish} 才认，非法值（枚举漂移 /
+    //       手改存档）回退 Shambler；
+    //     type 位零 且 bit0=1 → 旧存档要塞银鱼笼（t487 时代 state 恒 1）→ Silverfish；
+    //     type 位零 且 bit0=0 → 旧地牢笼 / 兜底 → Shambler（旧版地牢本 Shambler/Bones 随机无从恢复 → 取最
+    //       常见型确定性回退）。const 纯函数于入参，不读 World。
+    Q_INVOKABLE int spawnerMobTypeForState(int state) const;
     // t280 当前**活体**敌对生物数（hostile=true 且非 dead 的 Mob）。供刷怪调度判总数上限（kHostileMobCap）。
     //   含 Shambler/Bones；不含 passive（pig/cow/sheep/test）与 FallingBlock/Item。
     Q_INVOKABLE int hostileCount() const;

@@ -8743,14 +8743,17 @@ Window {
 
         // t760 刷怪笼渲染 host（同 portalHost / fireHost / paintingHost 的 createObject delegate 模式）：
         //   Spawner（40）t760 起渲染不走 chunk mesh（chunkgeometry 三处 PASS 已 skip —— terrain 立方是 opaque
-        //   整壳，会完全遮住笼内迷你蠹虫），每格刷怪笼一个 delegate = ①BlockCube 铁笼壳（±0.5 满格 per-face
+        //   整壳，会完全遮住笼内迷你 mob），每格刷怪笼一个 delegate = ①BlockCube 铁笼壳（±0.5 满格 per-face
         //   图集 UV → 各面 spawner tile 51；贴图 t760 改 cutout 栅格：铁栅 alpha=255 + 格间透明孔）+ alphaMode
-        //   Mask（孔硬边丢弃透视，同 cross/cutout 段契约）+ ②笼心缓慢自旋的迷你蠹虫（MobModel mobType 14 缩
-        //   0.45 + mobSilverfishTex，机制等价 MC 1.0 刷怪笼内旋转小怪剪影——本工程用真 3D 迷你模型，观感更
-        //   立体；地牢笼 / 要塞蠹虫笼统一显蠹虫剪影）。光照 NoLighting 全亮（笼在地底暗处，全亮保「内有活物」
-        //   信号可读；同手持/掉落物先例）。维护三重（同 fire/portal 模式）：onBlockPlaced(40) 加 /
-        //   onBlockBroken(40) 删 / onWorldChanged 兜底清孤儿；enterWorld 用 collectBlocksOfId(40) 重建（读档
-        //   blob 直写不经 blockPlaced）。分层（PLAN §2）：纯呈现层，只消费语义事件，绝不反向写栅格。
+        //   Mask（孔硬边丢弃透视，同 cross/cutout 段契约）+ ②笼心缓慢自旋的迷你 mob（MobModel 按 cageMobType
+        //   切型缩微型化 + 对应贴图/体色/眼，机制等价 MC 1.0 刷怪笼内旋转小怪剪影——本工程用真 3D 迷你模型，
+        //   观感更立体）。t786 类型化：cageMobType 由 addSpawnerVis 创建时读笼 state 经
+        //   EntityManager::spawnerMobTypeForState 解码注入（与 tickSpawners 同一解码权威）——地牢加权池
+        //   （僵尸/骷髅/蜘蛛/爬行者）/ 要塞银鱼 / 创造放置僵尸各显对应迷你模型（修「创造放置中间空白」）。
+        //   光照 NoLighting 全亮（笼在地底暗处，全亮保「内有活物」信号可读；同手持/掉落物先例）。维护三重
+        //   （同 fire/portal 模式）：onBlockPlaced(40) 加 / onBlockBroken(40) 删 / onWorldChanged 兜底清孤儿；
+        //   enterWorld 用 collectBlocksOfId(40) 重建（读档 blob 直写不经 blockPlaced）。分层（PLAN §2）：纯
+        //   呈现层，只消费语义事件，绝不反向写栅格。
         Node {
             id: spawnerHost
             property var spawnerObjs: ({})
@@ -8758,8 +8761,12 @@ Window {
                 const key = x + "," + y + "," + z
                 if (spawnerObjs[key]) return
                 if (theWorld.blockAt(x, y, z) !== 40) return  // 真值校验（防陈旧信号挂假 delegate）
-                // createObject 失败（返回 null）不落表——cleanupVis 遍历对 null .destroy() 会 TypeError。
-                const o = spawnerDelegate.createObject(spawnerHost, {cellX: x, cellY: y, cellZ: z})
+                // t786 类型化：创建时读笼 state 解码笼内 mob 类型并注入 delegate（cageMobType）——解码走
+                //   EntityManager::spawnerMobTypeForState（与 tickSpawners 同一权威，t785 单源教训）。笼 type
+                //   只在放置 / 破坏时变（无原位改型），创建期读一次即可；delegate 生命周期内不再依赖任何
+                //   NOTIFY 绑定（t177/t498 教训：注入式初值最稳）。旧存档笼（state=0/1）同函数兼容分流。
+                const cageMobType = entityManager.spawnerMobTypeForState(theWorld.stateAt(x, y, z))
+                const o = spawnerDelegate.createObject(spawnerHost, {cellX: x, cellY: y, cellZ: z, cageMobType: cageMobType})
                 if (o) spawnerObjs[key] = o
             }
             function removeSpawnerVis(x, y, z) {
@@ -8779,7 +8786,7 @@ Window {
             }
         }
 
-        // t760 刷怪笼 delegate 模板：spawnerHost.addSpawnerVis 经 createObject 实例化（cellX/Y/Z 注入）、
+        // t760 刷怪笼 delegate 模板：spawnerHost.addSpawnerVis 经 createObject 实例化（cellX/Y/Z/cageMobType 注入）、
         //   removeSpawnerVis/cleanupVis 用 .destroy() 回收（同 fireDelegate / portalDelegate 模式）。
         Component {
             id: spawnerDelegate
@@ -8788,8 +8795,51 @@ Window {
                 property int cellX: 0
                 property int cellY: 0
                 property int cellZ: 0
-                // 格中心锚点（世界坐标）：笼壳与迷你蠹虫共锚（壳 ±0.5 恰覆整格）。
+                // t786 笼内 mob 类型（EntityManager::MobType 枚举值，addSpawnerVis 创建时解码注入；默认 4=
+                //   Shambler 同解码端兜底）。驱动下方迷你模型几何 / 贴图 / 眼睛按型分流。
+                property int cageMobType: 4
+                // 格中心锚点（世界坐标）：笼壳与迷你 mob 共锚（壳 ±0.5 恰覆整格）。
                 position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
+
+                // t786 迷你 mob 摆位表（按 cageMobType 查）：各 MobModel 几何竖直跨度不同（脚 -0.90 /
+                //   蜘蛛 -0.30 / 银鱼 -0.15），统一归一到「体高 ~0.42 格、竖直居中于自旋轴」：
+                //     scale = 0.42/体高（蜘蛛另受宽约束 ~1.5 宽 → 0.50 取窄值；银鱼模型极矮 → 放大 1.30
+                //     补偿，观感同 shipped 0.45 但跨型一致）；
+                //     yOff = −scale·(脚y+顶y)/2（把模型中心移到轴心；自旋绕体心非绕脚，t760 原注释语义）。
+                function miniMobScale(t) {
+                    if (t === EntityManager.MobSpider) return 0.50       // 体高 0.43、宽 ~1.5 → 宽约束取窄
+                    if (t === EntityManager.MobSilverfish) return 1.30  // 体高 0.29 → 放大补齐观感高度
+                    if (t === EntityManager.MobStalker) return 0.22     // 体高 1.90（含头顶）
+                    return 0.25                                          // Shambler/Bones 人形体高 ~1.65-1.69
+                }
+                function miniMobYOff(t) {
+                    if (t === EntityManager.MobShambler) return -0.014
+                    if (t === EntityManager.MobBones) return -0.019
+                    if (t === EntityManager.MobStalker) return 0.011    // Stalker 体心在原点上方 → 下移补偿
+                    if (t === EntityManager.MobSpider) return 0.043
+                    if (t === EntityManager.MobSilverfish) return 0.007
+                    return 0
+                }
+                // t786 迷你 mob 眼表（MobModel 局部坐标；坐标/尺寸/色与各实体 delegate 眼层一致，仅随父缩放
+                //   微型化）：Shambler 赤红眼 / Bones 黑眼窝 / Stalker 深黑眼 / Spider 4 颗红眼 / Silverfish
+                //   黑点。pack 命中时 Repeater 整体 visible=false（贴图自带面部，同实体 delegate 语义）。
+                function miniEyeTable(t) {
+                    const E = function(px, py, pz, sx, sy, color) {
+                        return { pos: Qt.vector3d(px, py, pz), size: Qt.vector3d(sx, sy, 0.02), color: color }
+                    }
+                    if (t === EntityManager.MobShambler)
+                        return [E(-0.09, 0.62, -0.23, 0.07, 0.08, "#b01818"), E(0.09, 0.62, -0.23, 0.07, 0.08, "#b01818")]
+                    if (t === EntityManager.MobBones)
+                        return [E(-0.06, 0.62, -0.17, 0.06, 0.07, "#1a1a1a"), E(0.06, 0.62, -0.17, 0.06, 0.07, "#1a1a1a")]
+                    if (t === EntityManager.MobStalker)
+                        return [E(-0.09, 0.805, -0.29, 0.055, 0.065, "#1a1a1a"), E(0.09, 0.805, -0.29, 0.055, 0.065, "#1a1a1a")]
+                    if (t === EntityManager.MobSpider)
+                        return [E(-0.07, 0.04, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, 0.04, -0.51, 0.05, 0.05, "#ff2020"),
+                                E(-0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020")]
+                    if (t === EntityManager.MobSilverfish)
+                        return [E(-0.05, 0.00, -0.35, 0.03, 0.03, "#101010"), E(0.05, 0.00, -0.35, 0.03, 0.03, "#101010")]
+                    return []
+                }
 
                 // ① 铁笼壳：BlockCube 满格立方（blockId 40 → per-face 图集 UV 各面 spawner tile 51）。
                 //   scale 1.001 微放大：solid=false 后邻居实体面不再被剔除 → 邻面与本壳 ±0.5 面共面，
@@ -8806,11 +8856,14 @@ Window {
                     }
                 }
 
-                // ② 笼心迷你蠹虫：绕 Y 慢速自旋（4s/圈线性）+ 轻微上下浮沉（幅度 ~0.03 格，bookHost bob 先例
+                // ② 笼心迷你 mob：绕 Y 慢速自旋（4s/圈线性）+ 轻微上下浮沉（幅度 ~0.03 格，bookHost bob 先例
                 //   同款 yoyo 动画；机制等价 MC 1.0 刷怪笼内小怪旋转 + 浮沉剪影）。材质取**原样不透明**（弃
-                //   半透明：PrincipledMaterial Blend 进透明 pass 按模型级深度排序，蠹虫多体节相互重叠会自混合
+                //   半透明：PrincipledMaterial Blend 进透明 pass 按模型级深度排序，多体节相互重叠会自混合
                 //   出穿模伪影；MC 1.0 笼内小怪亦为不透明微型化——观感一致且无伪影）。walkPhase 恒 0（静态姿；
                 //   不接 entityManager 逐实体 revision——delegate 非实体，动感由自旋 + 浮沉承载即可）。
+                //   t786 类型化：几何 mobType=cageMobType（worldgen 加权池 僵尸/骷髅/蜘蛛/爬行者、要塞银鱼、
+                //   创造放置僵尸——与 tickSpawners 解码同源）；贴图/纯色与眼按型分流（下 MobModel 材质 +
+                //   Repeater 眼表，模式同 mobHost 各 Loader delegate 的 pack 感知回退链）。
                 Node {
                     id: miniMobSpin
                     property real spinY: 0.0
@@ -8832,29 +8885,62 @@ Window {
                             NumberAnimation { from: 1.0; to: 0.0; duration: 2600 }
                         }
 
-                        // MobModel 蠹虫（mobType 14）缩 0.45 微型化：模型脚位在原点（halfH=0.15/mobModelYOff=0
-                        // → 体高 ~0.3），position.y 提 -0.15×0.45 ≈ -0.067 使虫体**竖直居中**于自旋轴（自旋绕
-                        // 体心非绕脚）。眼 2 颗嵌套随父缩放（同 t487 实体蠹虫眼位：头前侧 (±0.05, 0, -0.35)）。
+                        // t786 贴图查表（创建期求值一次即终值——cageMobType 注入恒定，无 NOTIFY 依赖需求，
+                        //   t177/t498）：miniProgTex=程序贴图（Shambler/Silverfish 有，纯色型 null）；
+                        //   miniPackTex=pack 命中该型 entity PNG（QUrl 判空走 toString().length，t497 铁律；
+                        //   Silverfish 无 pack 映射同实体 delegate）。材质规则（下 baseColor）：贴图在身
+                        //   （pack 或程序）→ 近白 tint × 昼夜灰阶防压暗（t597）；纯色型 → 体色 × 灰阶
+                        //   （色值与各实体 delegate 一致：骨白 / 青绿 / 暗黑红）。
+                        property QtObject miniProgTex: spawnerRoot.cageMobType === EntityManager.MobShambler ? mobShamblerTex
+                                                       : (spawnerRoot.cageMobType === EntityManager.MobSilverfish ? mobSilverfishTex : null)
+                        property QtObject miniPackTex: {
+                            if (spawnerRoot.cageMobType === EntityManager.MobShambler && mobShamblerPackTex.source.toString().length > 0) return mobShamblerPackTex
+                            if (spawnerRoot.cageMobType === EntityManager.MobBones && mobBonesPackTex.source.toString().length > 0) return mobBonesPackTex
+                            if (spawnerRoot.cageMobType === EntityManager.MobStalker && mobStalkerPackTex.source.toString().length > 0) return mobStalkerPackTex
+                            if (spawnerRoot.cageMobType === EntityManager.MobSpider && mobSpiderPackTex.source.toString().length > 0) return mobSpiderPackTex
+                            return null
+                        }
                         Model {
-                            geometry: MobModel { mobType: 14; walkPhase: 0 }
-                            position: Qt.vector3d(0, -0.067, 0)
-                            scale: Qt.vector3d(0.45, 0.45, 0.45)
+                            id: miniMobBody
+                            geometry: MobModel { mobType: spawnerRoot.cageMobType; walkPhase: 0; packTextured: miniMobSpin.miniPackTex !== null }
+                            position: Qt.vector3d(0, spawnerRoot.miniMobYOff(spawnerRoot.cageMobType), 0)
+                            scale: Qt.vector3d(spawnerRoot.miniMobScale(spawnerRoot.cageMobType),
+                                               spawnerRoot.miniMobScale(spawnerRoot.cageMobType),
+                                               spawnerRoot.miniMobScale(spawnerRoot.cageMobType))
                             materials: PrincipledMaterial {
                                 lighting: PrincipledMaterial.NoLighting
-                                baseColorMap: mobSilverfishTex
-                                baseColor: "#ffffff"   // 全亮（笼在地底暗处，保「内有活物」信号可读）
+                                baseColorMap: miniMobSpin.miniPackTex !== null ? miniMobSpin.miniPackTex : miniMobSpin.miniProgTex
+                                baseColor: {
+                                    const tl = terrainLight(worldClock.skyLight)
+                                    const t = spawnerRoot.cageMobType
+                                    if (miniMobSpin.miniPackTex !== null || miniMobSpin.miniProgTex !== null)
+                                        return tl // 贴图在身（pack 或程序）：近白 tint × 昼夜灰阶（t597 防压暗）
+                                    if (t === EntityManager.MobBones)
+                                        return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 骨白（同实体 delegate）
+                                    if (t === EntityManager.MobStalker)
+                                        return Qt.rgba(0.37 * tl.r, 0.66 * tl.g, 0.23 * tl.b, 1.0) // 青绿（同实体 delegate）
+                                    if (t === EntityManager.MobSpider)
+                                        return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红（同实体 delegate）
+                                    return tl
+                                }
                             }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(-0.05, 0.00, -0.35)
-                                scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
-                            }
-                            Model {
-                                geometry: UnitCube {}
-                                position: Qt.vector3d(0.05, 0.00, -0.35)
-                                scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                            // 眼层：Repeater-for-3D（mobBurnFlames 先例）逐颗摆 UnitCube。坐标/尺寸/色查
+                            //   miniEyeTable（与各实体 delegate 眼位一致，随父缩放继承微型化）；pack 命中该型
+                            //   entity PNG 时隐（同实体 delegate visible 语义 —— pack 贴图自带面部细节）。
+                            Repeater {
+                                model: spawnerRoot.miniEyeTable(spawnerRoot.cageMobType)
+                                delegate: Node {
+                                    position: modelData.pos
+                                    scale: modelData.size
+                                    // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
+                                    //   onCompleted 显式 reparent 进 miniMobBody（mobBurnFlames 同款）。
+                                    Component.onCompleted: if (parent === null) parent = miniMobBody
+                                    visible: miniMobSpin.miniPackTex === null
+                                    Model {
+                                        geometry: UnitCube {}
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: modelData.color }
+                                    }
+                                }
                             }
                         }
                     }
