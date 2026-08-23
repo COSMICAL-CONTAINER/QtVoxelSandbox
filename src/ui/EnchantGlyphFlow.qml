@@ -121,13 +121,14 @@ Node {
     }
 
     // 从随机有效书架位 spawn 一颗字形粒子：起点 = 书架格中心朝台侧偏移（从书架「怀里」冒出），
-    //   终点 = 台上悬浮书心（台格中心 +0.85，对齐 bookDelegate 书心 y+0.82~0.85）；寿命 = 距离/速度
-    //   （钳制），弹道参数化 → t=1 恰落书心后淡尽（「涌入」不飞过头）。
+    //   终点 = 台上悬浮书心（t796 ① 书心 0.82→0.95 抬升同步：台格中心 +0.95，对齐 bookDelegate
+    //   书心 y+0.95±bob0.035）；寿命 = 距离/速度（钳制），弹道参数化 → t=1 恰落书心后淡尽
+    //   （「涌入」不飞过头）。
     function spawnGlyph() {
         const cells = root.shelfCells
         if (cells.length === 0) return
         const c = cells[Math.floor(Math.random() * cells.length)]
-        const tx = root.tableX + 0.5, tyv = root.tableY + 0.85, tz = root.tableZ + 0.5
+        const tx = root.tableX + 0.5, tyv = root.tableY + 0.95, tz = root.tableZ + 0.5
         // 起点在书架内侧（朝台方向半格出、书架上半身高度）：读作「从书架里涌出」而非凭空出现。
         let dx = tx - (c.x + 0.5), dz = tz - (c.z + 0.5)
         const hd = Math.max(0.001, Math.sqrt(dx * dx + dz * dz))

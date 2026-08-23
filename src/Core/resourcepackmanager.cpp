@@ -2680,6 +2680,9 @@ const QImage &programAtlas()
 //   entity 目录命中 enchant_book（entityKindMap 同一表，两级探测同 entitySource）→ 包书贴图（*packLayout
 //   置真，分区按 EnchantBookBox 布局 1 的 base 64×32 实测等比）；miss / 关 → qrc 程序 entity_enchant_book
 //   （布局 0 左右对半）。解码失败也回退程序贴图（图标永不因包图异常而空书）。
+//   t796 ② 起与放置态书**有意分叉**：放置态两页都采纸页区（EnchantBookBox piece 4 镜像，用户「一面
+//   书页一面书皮像翻完的书」），本图标保留「左封 + 右纸页」——封面贴图区自此只余本叠层消费（放置态
+//   不再出现），小图里棕封 + 白纸的对比反而更读作「台上摊着一本书」；两态贴图源与分区基准仍同源。
 QImage enchantBookOverlayTexture(bool packActive, const QString &entityDir, bool *packLayout)
 {
     if (packLayout)

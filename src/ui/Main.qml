@@ -8283,6 +8283,10 @@ Window {
         //   实测分区，解决 t679「整本书 UV 与两页盒不符」遗留）；miss → qrc 程序
         //   entity_enchant_book（布局 0：左页棕封金边纹章 / 右页纸页符文行 / 书脊金边条）。页面符文由
         //   贴图自带（t697 GlyphLines 叠层撤下 —— 叠层与贴图字迹会错位重影），翻页 / 浮沉 / 事件机制零改动。
+        //   t796 三修（用户报告①书浮动穿模进台体②一面书页一面书皮像翻完的书③静止只有上下浮动）：
+        //   ① 悬浮基准 0.82→0.95（bob 谷底全书最低点 y=0.803 > 台顶 0.75，安全隙 ~0.05，见 position 注释）；
+        //   ② 左页 piece 0（封面）→ piece 4（纸页镜像）——两页都采纸页区且镜像对称（封面区只留 item
+        //      图标叠层用）；③ 静息持续小幅翻页 flutter（页片 0↔14° 往复）与 bob 复合，完整翻页保留。
         Node {
             id: bookHost
             property var bookObjs: ({})
@@ -8327,9 +8331,14 @@ Window {
                 //   64×32 原尺寸 pack 命中即整面采空 → 宽 ≤ 64 按 miss 处理（qrc + 布局 0）。
                 property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
                                             && resourcePack.entityTextureWidth("enchant_book") > 64
-                // 悬浮位：台格中心 + 0.25 间隙内（矮盒顶 y+0.75 ↔ 格顶 y+1.0；书心 y+0.82，页尖
-                //   ~y+0.96 收在间隙内不凸到上一格）。
-                position: Qt.vector3d(cellX + 0.5, cellY + 0.82, cellZ + 0.5)
+                // t796 ① 悬浮位抬高 0.82→0.95（用户「书太低，上下浮动穿模进附魔台」）。穿模根因算账：
+                //   台顶 = 矮盒 0.75（kEnchantTop 同高）；全书最低点 = 书脊条底 y-0.035（position -0.02 +
+                //   半高 0.015）在 lean +20° 近端 z+0.23 处 → y' = -0.035·cos20° − 0.23·sin20° ≈ -0.112；
+                //   再叠 bob 谷底 -0.035 → 旧基准 0.82 时最低 y = 0.82−0.035−0.112 = 0.673 < 0.75，书脊
+                //   近端角穿入台体 0.077。新基准 0.95：谷底最低 y = 0.95−0.035−0.112 = 0.803，安全隙
+                //   ~0.05（≈0.8 像素格）全程可见不触台；页尖最高 0.95+0.035+0.222 ≈ 1.21（上方空气格，
+                //   机制等价 MC 书浮出格顶，不裁剪）。抬升后 EnchantGlyphFlow 粒子终点同步 0.95（涌入书心）。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.95, cellZ + 0.5)
 
                 // t764 ③ 整书 yaw 时刻朝向玩家（用户「书应朝人敞开」）：bookRoot 只承载 yaw
                 //   （eulerRotation.y = atan2(dx,dz) 使局部 +Z 正对玩家——+Z 是页面阅读正面，见
@@ -8374,13 +8383,14 @@ Window {
                         }
 
                         // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
-                        //   t732 EnchantBookBox piece 0（封面页）：上面采封面区（qrc 左半棕封金边纹章 / 包左封），
-                        //   书脊侧窄面 = 金边竖条。页面符文 / 纹章由贴图自带（t697 GlyphLines 叠层撤下：贴图字迹
-                        //   已覆盖「字太少 / 太白」诉求，叠层再压会错位重影）。
+                        //   t796 ② EnchantBookBox piece 4（纸页镜像）：上面采纸页区镜像采样（u 翻转）——
+                        //   旧 piece 0 采封面区令「一面书页一面书皮像翻完的书」（用户报告），现两页都是
+                        //   纸页且互为镜像（真开书左右页对称）；封面区不再出现在放置态书上，只留 item
+                        //   图标叠层（drawEnchantBookOverlay）用。页面符文 / 符章由贴图自带。
                         Node {
                             rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
                             Model {
-                                geometry: EnchantBookBox { piece: 0; layout: bookPackHit ? 1 : 0 }
+                                geometry: EnchantBookBox { piece: 4; layout: bookPackHit ? 1 : 0 }
                                 position: Qt.vector3d(-0.19, 0.0, 0.0)
                                 scale: Qt.vector3d(0.38, 0.022, 0.46)
                                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
@@ -8414,13 +8424,18 @@ Window {
                         //   c) 材质暖 tint #f2e8d5：白纸页贴白纸页肉眼不可辨（t732 后 piece 3 采图已带符文，
                         //      再叠暖调与静态页拉开明度）。
                         //   轴对齐盒无曲率 → 像素风下读作「页片摆动」（机制等价 MC 书页翻动，§9 原创简化）。
+                        //   t796 ③ 静息持续小幅翻页：加 flutter 属性（0↔14° 往复，见 pageFlutterAnim）——
+                        //   静止观感不再是「只有 bob 上下浮动」，页片外缘反复翘离纸面再贴回（总角 22→36°，
+                        //   页尖抬升 0.37·(sin36°−sin22°) ≈ 0.07 明显可辨），完整翻页（130° 大摆）仍由
+                        //   pageFlipTimer 随机触发，两动画互斥（大摆期间 flutter 清零防过冲穿左页）。
                         Node {
                             id: flipPivot
                             property real baseAngle: 22
                             property real flipAngle: 0.0
+                            property real flutter: 0.0
                             rotation: Rotation {
                                 axis: Qt.vector3d(0, 0, 1)
-                                angle: flipPivot.baseAngle + flipPivot.flipAngle
+                                angle: flipPivot.baseAngle + flipPivot.flipAngle + flipPivot.flutter
                             }
                             Model {
                                 geometry: EnchantBookBox { piece: 3; layout: bookPackHit ? 1 : 0 }
@@ -8435,6 +8450,8 @@ Window {
                 // t697 翻页循环（风翻页感，用户「翻页应循环」）：页片翻到左页 → 停 700ms → 翻回 → 停
                 //   900ms → 下一轮。每轮间隔 1.4-3.2s 随机（风不定时吹动；旧 2.5-6s 间隔稀疏，读作
                 //   「偶尔动一下」非循环风感）。Timer 驱动（repeat 恒真，interval 每轮随机重设）。
+                //   t796 ③：本大摆与 pageFlutterAnim（静息小幅翻页）互斥——onStarted 停 flutter 并清零
+                //   （14° 叠加会令落角 152+14=166° > 左页平面 158°，页片穿到左页背面），onCompleted 重启。
                 Timer {
                     id: pageFlipTimer
                     interval: 1600
@@ -8446,12 +8463,26 @@ Window {
                         pageFlipTimer.interval = 1400 + Math.floor(Math.random() * 1800)
                     }
                 }
+                // t796 ③ 静息持续小幅翻页（用户「静止的时候还会有翻书页的动画，不只有上下浮动」）：
+                //   页片绕书脊 0→14°→0 无限往复（起 ~0.8s / 落 ~0.9s 不对称 = 柔起缓落，非机械节拍），
+                //   与 bob 上下浮动复合成「悬浮 + 持续翻页」双动效；14° 小幅不会与右页/左页共面
+                //   （总角 22..36°，两页平面在 22°/158°）。
+                SequentialAnimation {
+                    id: pageFlutterAnim
+                    running: true; loops: Animation.Infinite
+                    NumberAnimation { target: flipPivot; property: "flutter"; from: 0.0; to: 14.0; duration: 800; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: flipPivot; property: "flutter"; from: 14.0; to: 0.0; duration: 900; easing.type: Easing.InOutQuad }
+                }
                 // 翻页动画：flipAngle 0→130（总角 22°→152° 翻越顶部、落左页面上方，见 flipPivot 注 a）
                 //   停 700ms（页片摊在封面可辨）→ 130→0 翻回右页 → 停 900ms（歇一拍再起下一轮，风翻页
                 //   的「吹—落—歇」节奏）。t764 ④：旧目标 316 的后半程扫书底（被台体遮挡）已废。
                 SequentialAnimation {
                     id: pageFlipAnim
                     running: false
+                    onStarted: { pageFlutterAnim.stop(); flipPivot.flutter = 0.0 }
+                    // onFinished（Animation::finished，自然播完发射）——不能用 onCompleted：那是
+                    // Component 的信号，Animation 没有 → QML 装载失败（t796 冒烟抓到：Main.qml 整体拒载）。
+                    onFinished: pageFlutterAnim.restart()
                     NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 130.0; duration: 550; easing.type: Easing.InOutQuad }
                     PauseAnimation { duration: 700 }
                     NumberAnimation { target: flipPivot; property: "flipAngle"; from: 130.0; to: 0.0; duration: 500; easing.type: Easing.InOutQuad }
