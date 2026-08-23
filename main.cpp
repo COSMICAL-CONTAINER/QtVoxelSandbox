@@ -18,6 +18,9 @@
 
 #include "frameprofiler.h"
 #include "resourcepackmanager.h"
+// t813 构建版本戳（Core 叶子）：启动日志自报家门 —— 每份 logs/voxelsandbox.log 首段即可
+//   核对「该日志由哪个构建产出」，与主菜单角落 / F3 显示同源（BuildInfo 单一权威出口）。
+#include "buildinfo.h"
 
 // t414 image provider：把 ResourcePackManager 合成的运行期图集（默认图集 + 包覆盖）以
 //   image://rp/atlas 暴露给 QML 的 terrain Texture。QtQuick 依赖留在此 app 胶水层（Core 不沾 QtQuick）。
@@ -104,6 +107,8 @@ int main(int argc, char *argv[])
         "qt.scenegraph.time.*=false\n");
 
     qInfo() << "=== voxelsandbox start ===";
+    // t813 构建版本戳：构建时间 + git 短哈希落日志（用户发来日志即可判新旧 exe）。
+    qInfo() << "build:" << BuildInfo::instance()->full();
     qInfo() << "log file:" << logFile.fileName();
     qInfo() << "graphics api (enum):" << int(QQuickWindow::graphicsApi());
 

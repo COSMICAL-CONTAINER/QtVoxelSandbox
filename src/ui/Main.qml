@@ -354,6 +354,10 @@ Window {
         const hh = Math.floor(totalMin / 60.0), mm = Math.floor(totalMin % 60.0)
         const timeStr = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm
         return "voxelsandbox  [F3 debug]"
+             // t813 构建版本戳：F3 首行下方常驻「构建时间 @ git 短哈希」（编译期常量，
+             //   10Hz 节流路径内读单例属性，零额外开销）—— 用户复测报障前先核版本，
+             //   与主菜单右下角小字 / 启动日志 build 行同源（BuildInfo 单一权威）。
+             + "\nbuild: " + BuildInfo.full
              + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
              + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
              + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
