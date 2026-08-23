@@ -62,7 +62,7 @@ Item {
         : []
 
     // ── 生物图鉴（feat）：左「生物」段列 mob，选中 → 右侧 View3D 旋转显示 MobModel 3D 模型（替代大图标平图）；
-    //   选中「生物蛋」材料（0x20F..0x216/0x22C/0x22E）同样直接显示对应 mob 模型。机制等价 MC 1.0 mob 形态，
+    //   选中「生物蛋」材料（0x20F..0x216/0x22C/0x22E + t785 补全 0x246/0x247/0x249/0x24A）同样直接显示对应 mob 模型。机制等价 MC 1.0 mob 形态，
     //   名称 §9 区隔（Shambler↔zombie / Bones↔skeleton / Stalker↔creeper）。雪傀儡/铁傀儡条目 I3 追加——
     //   本任务已接入：加 mobType 12/13 两行 + mobPreviewCentY + mobFallbackColor 分支（mobPreviewScale 12/13→0.75
     //   既存）。pack 命中 snow_golem.png / iron_golem.png → View3D 显带 pack 纹理的雪块身 / 铁块身 MobModel；
@@ -107,8 +107,10 @@ Item {
         { name: "绿色", tint: "#468237" }, { name: "红色", tint: "#962828" },
         { name: "黑色", tint: "#1e1e26" }
     ]
-    // 生物蛋材料 id → mobType（与 PlayerController::placeBlock 生物蛋分流同源；entitymanager.h MobType 同值）。
-    //   pig=1/cow=2/sheep=3/shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9。非蛋 id → -1（无映射）。
+    // 生物蛋材料 id → mobType（t785 起与 RecipeRegistry::mobTypeForSpawnEgg 单一权威表同源镜像——Core 层
+    //   QML 不能引 Game 头，字面量 + 注释互指；矩阵测试 t785 探针对 C++ 权威表全蛋断言防漂移）。
+    //   pig=1/cow=2/sheep=3/shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9/wolf=10/ocelot=11/
+    //   nightwalker=16/emberling=17。非蛋 id → -1（无映射）。
     function mobTypeForEgg(id) {
         switch (id) {
             case 0x20F: return 1; case 0x210: return 2; case 0x211: return 3;
@@ -116,6 +118,8 @@ Item {
             case 0x216: return 7; case 0x22C: return 8; case 0x22E: return 9;
             case 0x246: return 16; // t727 夜行者生物蛋（SpawnEggNightwalkerId；与 PlayerController placeBlock 同源）
             case 0x247: return 17; // t728 燃烬者生物蛋（SpawnEggEmberlingId；与 PlayerController placeBlock 同源）
+            case 0x249: return 10; // t785 狼生物蛋（SpawnEggWolfId；右键 → 生成野生狼）
+            case 0x24A: return 11; // t785 豹猫生物蛋（SpawnEggOcelotId；右键 → 生成野生豹猫）
         }
         return -1
     }

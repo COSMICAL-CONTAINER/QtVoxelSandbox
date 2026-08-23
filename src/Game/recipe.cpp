@@ -1,4 +1,5 @@
 #include "recipe.h"
+#include "entitymanager.h" // t785 mobTypeForSpawnEgg 直引 MobType 枚举（Game → Entities 向下合法）
 
 #include <algorithm> // std::min（当前未直接用，留作未来 consumeCount > 1 扩展）
 
@@ -1265,4 +1266,27 @@ const RecipeRegistry::Recipe *RecipeRegistry::recipeAt(int index)
 {
     if (index < 0 || index >= recipeCount()) return nullptr;
     return &kRecipes[index];
+}
+
+// t785 生物蛋 id → mob 类型单一权威表（见 recipe.h 声明注释）：全 13 蛋，非蛋 → -1。mobType 直引
+//   EntityManager::MobType 枚举（Game → Entities 向下合法；编译期钉死防手抄漂移——矩阵测试 t785 探针
+//   再对全表断言）。狼 / 豹猫蛋刷**野生**（wolfTamed/ocelotTamed 默认 false，驯服走喂食链）。
+int RecipeRegistry::mobTypeForSpawnEgg(int itemId)
+{
+    switch (itemId) {
+    case SpawnEggPigId:         return EntityManager::MobPig;
+    case SpawnEggCowId:         return EntityManager::MobCow;
+    case SpawnEggSheepId:       return EntityManager::MobSheep;
+    case SpawnEggShamblerId:    return EntityManager::MobShambler;
+    case SpawnEggBonesId:       return EntityManager::MobBones;
+    case SpawnEggStalkerId:     return EntityManager::MobStalker;
+    case SpawnEggSpiderId:      return EntityManager::MobSpider;
+    case SpawnEggChickenId:     return EntityManager::MobChicken;
+    case SpawnEggSquidId:       return EntityManager::MobSquid;
+    case SpawnEggNightwalkerId: return EntityManager::MobNightwalker; // t727 夜行者（末影人同源）
+    case SpawnEggEmberlingId:   return EntityManager::MobEmberling;   // t728 燃烬者（烈焰人同源）
+    case SpawnEggWolfId:        return EntityManager::MobWolf;        // t785 狼（野生）
+    case SpawnEggOcelotId:      return EntityManager::MobOcelot;      // t785 豹猫（野生）
+    default: return -1;
+    }
 }
