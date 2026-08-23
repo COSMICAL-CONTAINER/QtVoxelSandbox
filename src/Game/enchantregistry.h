@@ -134,6 +134,16 @@ public:
     //   category=None → 空 list。机制对齐 MC（加权随机 + 等级量级），非数值 1:1。
     static QVariantList selectEnchants(int category, int offeredLevel, int seed);
 
+    // t795 附魔台书架门槛公式（书架数 → 可选档位 / 提供等级；单一权威，QML 经 Hotbar 包装调用）：
+    //   - tierForBookshelves(bookshelves)：书架数 → 最高可选档位（1 档恒开；≥5 → 2 档；≥10 → 3 档）。
+    //     **与游戏模式无关**（函数无模式参数 —— 创造模式同样须书架达标才有高档，t795 收口；t694 的 QML
+    //     creativeMode 直通 3 档旁路删除，公式收编至此防两处漂移）。
+    //   - offeredLevelFor(bookshelves, tierIdx)：tierIdx 0..2 → 提供等级 floor(bs*20*(tier+1)/33)+(tier+1)，
+    //     钳 [1,30]。锚点：bs=0 → [1,2,3]；bs=4 → 3 档 10；bs=14 → 3 档 28；bs=15 → [10,20,30] —— 顶格 30
+    //     仅满 15 书架可达（书架数上限封顶；对 bs 单调不减）。tierIdx 越界钳回 [0,2]、bs 钳 [0,15]（防御）。
+    static int tierForBookshelves(int bookshelves);
+    static int offeredLevelFor(int bookshelves, int tierIdx);
+
     // 打包 / 拆包附魔到 ItemStack.enchants[4] 每槽的 int（(enchantId<<8)|level；0 = 空槽）。
     //   供 Hotbar 内部读写用（QML 边界走 QVariantList<int> 4 元素，每元素 = 本 pack 值）。
     static int pack(int enchantId, int level);

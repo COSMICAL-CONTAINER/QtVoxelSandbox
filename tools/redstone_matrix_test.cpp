@@ -11,6 +11,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <cmath>
+#include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -2974,6 +2975,99 @@ int main(int argc, char *argv[])
                              "size fixed to 2x2, arrow back to MC flint+stick+feather, spruce log smelts to "
                              "charcoal + spruce log/planks burn 15s, full-table self-match regression over"
                           << recipeTotal << "recipes";
+    }
+
+    // ── t795 附魔台门槛公式探针（Game 层公式 + Hotbar 桥接 + World 书架计数三层；UI 状态机「无 lapis 灰 /
+    //    lapis 足亮」在 QML 绑定层，本探针盖其 C++ 权威源，UI 显亮需人工目测）：
+    //    ① tierForBookshelves：0..4 → 1 档；5..9 → 2 档；10..15 → 3 档；**无模式旁路**（函数无模式参数——
+    //       创造同样须书架达标；t795 收口前的 QML creativeMode 直通 3 档已删）；
+    //    ② offeredLevelFor：bs=0 → [1,2,3]；bs=4 → 3 档 10；bs=14 → 3 档 28（<30）；bs=15 → [10,20,30]——
+    //       顶格 30 仅满 15 书架可达（书架封顶），全域对 bs 单调不减且在 [1,30]；
+    //    ③ Hotbar Q_INVOKABLE 桥接与静态函数同值（QML 绑定单一权威，防桥接层漂移）；
+    //    ④ World::countBookshelvesAround：净空环境 0；下层环带 15 书架 + 空气半步 → 15；堵 1 个半步格 →
+    //       该书架不计（14）；两层 32 位全放 → 封顶 15（书架数上限）。rig 用 y=46/47（其余探针全在
+    //       kRigY=41/42，地形/树冠 ~33，46+ 必空零串扰）。
+    {
+        bool ok = EnchantRegistry::tierForBookshelves(0) == 1
+                  && EnchantRegistry::tierForBookshelves(4) == 1
+                  && EnchantRegistry::tierForBookshelves(5) == 2
+                  && EnchantRegistry::tierForBookshelves(9) == 2
+                  && EnchantRegistry::tierForBookshelves(10) == 3
+                  && EnchantRegistry::tierForBookshelves(15) == 3
+                  && EnchantRegistry::tierForBookshelves(99) == 3;   // 超上限防御钳（同 15）
+        ok = ok && EnchantRegistry::offeredLevelFor(0, 0) == 1
+                  && EnchantRegistry::offeredLevelFor(0, 1) == 2
+                  && EnchantRegistry::offeredLevelFor(0, 2) == 3
+                  && EnchantRegistry::offeredLevelFor(4, 2) == 10    // 4 书架 3 档 10（t649 校准锚点 b）
+                  && EnchantRegistry::offeredLevelFor(14, 2) == 28   // 14 书架 < 30（封顶仅满 15）
+                  && EnchantRegistry::offeredLevelFor(15, 0) == 10
+                  && EnchantRegistry::offeredLevelFor(15, 1) == 20
+                  && EnchantRegistry::offeredLevelFor(15, 2) == 30;  // 满 15 书架 → [10,20,30]
+        for (int bs = 0; bs <= 15; ++bs)                            // 全域：值域 [1,30] + 对 bs 单调不减
+            for (int t = 0; t < 3; ++t) {
+                const int v = EnchantRegistry::offeredLevelFor(bs, t);
+                if (v < 1 || v > 30) ok = false;
+                if (bs > 0 && v < EnchantRegistry::offeredLevelFor(bs - 1, t)) ok = false;
+            }
+        Hotbar hb795;
+        ok = ok && hb795.enchantTierForBookshelves(9) == 2           // ③ QML 绑定入口同值
+                  && hb795.enchantTierForBookshelves(10) == 3
+                  && hb795.enchantOfferedLevel(15, 2) == 30;
+        // ④ World 环带计数 rig：附魔台位 (ecx,46,ecz)，环带 = 切比雪夫 2 × 两层（46/47）。rig 寻址：
+        //    **运行期扫描空区，不走 nextSlot()**（P20 先例——前序循环探针已把 4×31 slot 网格耗尽，此刻
+        //    nextSlot() 返回 z=97+ 越界 → setBlock 全被拒 = 假 FAIL，本探针首轮实测踩坑）。扫 y=46/47 两层
+        //    全净空的 5×5 区（其余探针全在 kRigY=41/42 + 生成石柱实测 ≤43，46+ 大概率空但按 P20 教训
+        //    不写死断言，扫不到 → 判 FAIL 不下断言防越界副作用）。
+        int ecx = -1, ecz = -1;
+        const int eY = 46;
+        for (int zz = 2; zz + 2 < 96 && ecx < 0; zz += 3) {
+            for (int xx = 2; xx + 2 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -2; dx <= 2 && clear; ++dx)
+                    for (int dz = -2; dz <= 2 && clear; ++dz)
+                        if (w.blockAt(xx + dx, eY, zz + dz) != BR::Air
+                            || w.blockAt(xx + dx, eY + 1, zz + dz) != BR::Air) clear = false;
+                if (clear) { ecx = xx; ecz = zz; }
+            }
+        }
+        ok = ok && ecx >= 0;
+        if (ecx < 0) {
+            qInfo().noquote() << "  [t795 diag] no clear 5x5 region at y=46/47";
+        } else {
+            const int emptyCnt = w.countBookshelvesAround(ecx, eY, ecz);
+            ok = ok && emptyCnt == 0;                                // 净空环境 → 0
+            int placed795 = 0;                                       // 下层环带前 15 位放书架（半步全空）
+            for (int dx = -2; dx <= 2 && placed795 < 15; ++dx)
+                for (int dz = -2; dz <= 2 && placed795 < 15; ++dz) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                    w.setBlock(ecx + dx, eY, ecz + dz, BR::Bookshelf, 0);
+                    ++placed795;
+                }
+            const int cnt15 = w.countBookshelvesAround(ecx, eY, ecz);
+            // 堵角位书架 (dx=-2,dz=-2)（放置序第 1 个）的半步格 (-1,-1)。半步 = (dx/2, dz/2) 向零取整：
+            //   边中点半步被 3 个环格共享（如 (1,0) 服务 (2,-1)/(2,0)/(2,1)——首轮实测堵它掉 3 本），角位
+            //   半步 (±1,±1) 只服务角书架自己 → 堵它精确 -1（首轮踩坑记录，防后人重试边中点）。
+            w.setBlock(ecx - 1, eY, ecz - 1, BR::Cobble, 0);
+            const int cnt14 = w.countBookshelvesAround(ecx, eY, ecz);
+            w.setBlock(ecx - 1, eY, ecz - 1, BR::Air, 0);            // 复原半步
+            for (int dy = 0; dy <= 1; ++dy)                          // 两层 32 位全放满 → 封顶 15
+                for (int dx = -2; dx <= 2; ++dx)
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                        w.setBlock(ecx + dx, eY + dy, ecz + dz, BR::Bookshelf, 0);
+                    }
+            const int cntCap = w.countBookshelvesAround(ecx, eY, ecz);
+            ok = ok && cnt15 == 15 && cnt14 == 14 && cntCap == 15;
+            if (emptyCnt != 0 || cnt15 != 15 || cnt14 != 14 || cntCap != 15)
+                qInfo().noquote() << "  [t795 diag] world ring count:" << emptyCnt << "->"
+                                  << cnt15 << "->" << cnt14 << "->" << cntCap;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| enchant gate: tier 1/2/3 at 0/5/10 bookshelves (no creative bypass), offered "
+                             "[1,2,3]@0 -> [10,20,30]@15 with top 30 only at full 15, monotonic in-range; "
+                             "hotbar bridge identical; world ring 0 -> 15 -> blocked half-step 14 -> 32 "
+                             "placed capped 15 (t795; UI lapis-gated highlight = QML binding, manual check)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -272,6 +272,23 @@ QVariantList EnchantRegistry::selectEnchants(int category, int offeredLevel, int
     return result;
 }
 
+// t795 附魔台书架门槛公式（单一权威；见头注释）。tierForBookshelves 与游戏模式无关 —— 创造模式同样
+//   须书架达标（1 档恒开；≥5 → 2；≥10 → 3）。offeredLevelFor：floor(bs*20*(tier+1)/33)+(tier+1) 钳 [1,30]
+//   （非负整数除法 == floor，与原 QML Math.floor 同式；bs=15 → [10,20,30]，顶格 30 仅满 15 书架）。
+int EnchantRegistry::tierForBookshelves(int bookshelves)
+{
+    if (bookshelves >= 10) return 3;
+    if (bookshelves >= 5) return 2;
+    return 1;
+}
+
+int EnchantRegistry::offeredLevelFor(int bookshelves, int tierIdx)
+{
+    const int t = std::clamp(tierIdx, 0, 2) + 1;   // 档位序号 0..2 → 1..3
+    const int bs = std::clamp(bookshelves, 0, 15); // World 计数本就 ≤15，防御钳
+    return std::clamp(bs * 20 * t / 33 + t, 1, 30);
+}
+
 int EnchantRegistry::pack(int enchantId, int level)
 {
     if (enchantId <= 0) return 0; // 0 = 空槽
