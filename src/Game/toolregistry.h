@@ -173,7 +173,12 @@ public:
 
     // 挖掘耗时（秒）= hardness / miningSpeedMul，地板 0.05s（防空手秒破致 t34 进度抖动 / 除零）。
     //   hardness<=0（火把瞬破 / air 越界）→ 0.05s 地板（air 越界实际不挖：canMine 已排除）。
-    static float miningTime(quint8 blockId, int itemId);
+    //   t798 效率附魔参数 efficiencyLevel（默认 0 = 无附魔，既有调用点签名不变）：机制等价 MC 1.0「效率只对
+    //   匹配工具-方块生效，且在工具基础速度上**加法**叠 level²+1」—— I +2 / II +5 / III +10 / IV +17 / V +26，
+    //   等级分档递增（非各级统一同倍）。匹配判定复用 miningSpeedMul：工具类型不匹配 / 采掘等级不够 → mul==1.0
+    //   → 效率零加成（镐附效率挖泥土 / 沙无提升；木镐附效率挖黑曜石仍 96s 慢挖）。t476 旧实现「miningTime 整体
+    //   ×(1+level) 且不查匹配」= 用户报「附任意效率像效率 V、挖土也快」根因（乘法对低等级偏强 + 全方块生效）。
+    static float miningTime(quint8 blockId, int itemId, int efficiencyLevel = 0);
 
     // 是否采掘掉落（破块后是否产出物品实体，供 t35 判定；掉落 id / 数量走 BlockRegistry::BlockDef）。
     //   t265：requiresTool=false（木 / 土 / 沙类）→ 恒 true（空手可采且掉落，速度受工具影响但产物不依赖工具）；

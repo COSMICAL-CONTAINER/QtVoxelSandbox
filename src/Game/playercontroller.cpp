@@ -2197,11 +2197,12 @@ void PlayerController::updateMining(float dt)
     // 速度：miningTime = hardness / speedMul（ToolRegistry），progress 增量 = dt / miningTime。
     // t141：基岩（hardness<0，canMine=false）现也走到此累积路径给反馈 —— miningTime 对 hardness<=0 走
     //   0.05s 地板（不除 hardness），故恒 >0，无除零；基岩 progress 快速达 1.0 但被完成守卫拦下不破。
-    const float miningTime = ToolRegistry::miningTime(bid, heldItemId);
-    // t476 效率附魔：挖掘速度 ×(1+level)（机制等价 MC efficiency mining speedup）。把 miningTime ÷ 此倍率
-    //   → progress 增量同比放大（每级约缩短一半挖掘时间，明显可测）。effMul >= 1（level 0 = 1.0 无加成）。
+    // t798 效率附魔收口进 miningTime 第 3 参（单一权威）：等级分档**加法**（I..V → 工具基础速 +2/+5/+10/+17/+26，
+    //   机制等价 MC 1.0 efficiency level²+1）且**只对匹配工具-方块生效**（镐附效率挖泥土 / 沙无加成；采掘等级
+    //   不够也不吃效率）。t476 旧式在此处「progress ×(1+level) 且不查匹配」全方块统一乘 = 用户报「附任意效率
+    //   像效率 V、挖土也快」根因（低等级乘法偏强 + 不匹配方块白吃加成）。effLvl 0 = 无附魔，行为同旧无附魔路径。
     const int effLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Efficiency) : 0;
-    const float effMul = 1.0f + float(effLvl);
+    const float miningTime = ToolRegistry::miningTime(bid, heldItemId, effLvl);
     // t763 水下挖掘惩罚 + 水中亲和（AquaAffinity）生效点（机制等价 MC 1.0「头入水挖掘 ×5 耗时，水中亲和
     //   免除」）。此前 AquaAffinity 已注册但**无任何生效点**（附魔了也白附）。判定：眼睛格入水（eyeInWater）
     //   且四件护甲水中亲和等级和 <=0 → miningTime ×kUnderwaterMiningTimeMul；带水中亲和 → 免除惩罚。
@@ -2210,7 +2211,7 @@ void PlayerController::updateMining(float dt)
     float timePenalty = 1.0f;
     if (eyeInWater() && (m_hotbar ? m_hotbar->armorEnchantLevelSum(EnchantRegistry::AquaAffinity) : 0) <= 0)
         timePenalty = kUnderwaterMiningTimeMul;
-    m_miningProgress += (dt * effMul) / (miningTime * timePenalty);
+    m_miningProgress += dt / (miningTime * timePenalty);
 
     // t165：不可挖方块（基岩 canMine=false）持续累积给「挥臂」反馈但**不显裂纹**（spec「一直不出现裂纹」）。
     //   可挖方块 progress 到 1.0 → 下方完成守卫 finishMiningAt 破块；不可挖方块 progress 到 1.0 **回绕**
