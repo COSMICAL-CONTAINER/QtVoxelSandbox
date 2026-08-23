@@ -732,17 +732,23 @@ public:
     void tickHostileLife(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness);
     // t392 刷怪笼周期刷怪（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tickHostileLife 同级）。
     //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 玩家在范围内时刷怪笼照样刷，世界模拟连续；同 tickHostileLife）。
-    //   机制等价 MC 1.0 刷怪笼（mob spawner）：玩家在 kSpawnerPlayerRange 内 + 该笼周 kSpawnerMobCheckRadius 内敌对
-    //   数 < kSpawnerLocalCap + 全局 hostileCount < kHostileMobCap 时，周期 spawn 1 只敌对（Shambler/Bones 等概率）。
+    //   机制等价 MC 1.0 刷怪笼（mob spawner）：玩家在 kSpawnerPlayerRange 内时，周期 spawn 1 只笼型 mob。
     //   t787 类型路由：笼 state 经 spawnerMobTypeForState 解码 —— 敌对型（Shambler/Bones/Stalker/Spider/
     //   Silverfish/Nightwalker/Emberling）走 spawnHostileMob（同旧）；被动型（Pig/Cow/Sheep/Chicken/Squid/
     //   Wolf/Ocelot，生物蛋改型写入）走 spawnPassiveMob，且上限判据换「笼周**同型**计数 mobTypeCountNear
     //   < kSpawnerLocalCap」（hostileNearby 对被动恒 false）—— 机制等价 MC 1.0 持生物蛋右键刷怪笼改型后
     //   笼刷该型（含被动型），「同类 6 只内才刷」按型判。被动 spawn 不计入 hostilesRunning 敌对预算。
+    //   review #31（Review 2026-08-23 低危）：闸门按笼型分流 —— 被动笼仅留**同型 local cap + 总 cap(kCap)**
+    //   （MC spawner 不受 ambient hostile cap 约束；旧入口全局敌对 cap + 区域 cap 早退对被动笼同样生效 →
+    //   夜里敌对满额时猪 / 羊笼全停）；敌对笼保留三重闸门（全局敌对 cap + 玩家周边区域 cap + 笼周敌对
+    //   local cap）。
+    //   review #30：spawn 位谓词按笼型分流 —— 鱿鱼（水生）找「本格 + 上格均 Water」的含水格（无需固体
+    //   底）；其余型保持「air + 上 air + 下 solid + 下非 Water/Lava」陆生谓词（旧版 MobSquid 复用陆生
+    //   谓词 → 鱿鱼全刷陆上慢爬 =「搁浅鱿鱼」）。
     //   **player-near 才扫**：内部 m_spawnAccumSpawner 节流（kSpawnerInterval 秒一次），满 → 扫玩家所在格周围
     //   ±kSpawnerScanRange 的立方体找 Spawner 方块（按需扫描，玩家不在范围 → 不扫 → 远场零开销），对每个找到的
-    //   笼：玩家 XZ 距离 ≤ kSpawnerPlayerRange + 笼周敌对 < kSpawnerLocalCap + 全局敌对 < kHostileMobCap + 找到合法
-    //   空气 spawn 位 → spawn 1 只敌对（找邻 8 格中首个「air + 下方 solid」的格子；全堵 → 跳过本笼）。
+    //   笼：玩家 XZ 距离 ≤ kSpawnerPlayerRange + 笼型闸门全过 + 找到合法 spawn 位 → spawn 1 只（找邻 8 格
+    //   首个合格格；全堵 → 跳过本笼）。
     //   **破笼即停**：tickSpawners 每周期读 blockAt 判格 == Spawner，玩家破坏后下次扫描自然跳过（无 setBlock 钩子，
     //   同 spec「spawner ... can be broken to stop」）。
     //   分层（PLAN §2）：Entities 层（同 tickHostileLife）只读 World（blockAt/isSolid）+ 自身实体数据；写
@@ -931,12 +937,16 @@ private:
         float fuse = 0.0f;         // 引信剩余秒（仅 primed 用；spawnPrimedTnt 设 kPrimedTntFuseSec，tick 递减 dt）
         // t794 下落铁砧砸伤态（仅 kind==FallingBlock && BlockRegistry::isAnvil(blockId) 读）：
         //   fallStartY = spawn 时刻实体中心 Y（落差 = fallStartY − 本 tick 扫掠底中心；伤害随落差增，
-        //   见 tick FallingBlock 分支 kAnvil* 常量注释）。anvilDamaged = 本次下落已结算过一拍砸伤
-        //   （「先伤后落」：着地还原方块前首个命中拍对当时压到的全体 mob + 玩家各结算一次，之后同一次
-        //   下落不再重复扣血 —— 每实体每次下落只伤一次）。spawn 入口（spawnFallingBlock /
+        //   见 tick FallingBlock 分支 kAnvil* 常量注释）。spawn 入口（spawnFallingBlock /
         //   spawnFallingBlockState）写入 fallStartY；DMI 兜底聚合初始化缺省（同 blockState 模式）。
         float fallStartY = 0.0f;   // 下落起点中心 Y（仅铁砧砸伤用；其余 FallingBlock 不读）
-        bool anvilDamaged = false; // 本次下落砸伤已结算（一次性拍；防多帧重复扣血）
+        // review #28（Review 2026-08-23 低危）：砸伤「每实体每次下落只伤一次」按**目标**记录 —— t794 旧实现
+        //   的落体侧一次性拍 anvilDamaged 只结算首个命中拍（先穿玩家后落猪身则猪免伤、台阶两猪只伤上面）。
+        //   改：落体结算时把**自己的 spawnSerial**（acquireSlot 全局单调计数，含 FallingBlock）写进目标——
+        //   mob 侧本字段 / 玩家侧 m_playerAnvilCrushSerial；同 serial 命中已标记目标 → 跳过，新落体（新
+        //   serial）对同一目标照常结算（真 MC 语义：每实体每次下落各伤一次）。槽复用换任后 std::move 覆盖
+        //   回默认 0（serial 从 1 起，0 恒无效）→ 不误免疫。仅 kind==Mob 的砸伤路径读写。
+        quint32 anvilCrushSerial = 0; // 已被哪一任下落铁砧结算过砸伤（落体 spawnSerial；0 = 未被结算）
         QString color = QStringLiteral("#ff5555"); // 渲染配色（醒目纯色）
         float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0；t249 击退小跳设正值（向上）
         bool resting = false;    // 是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
@@ -1227,6 +1237,10 @@ private:
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
     quint32 m_spawnSerialCounter = 0;
+    // review #28：玩家侧铁砧砸伤已结算标记（= 已伤过玩家的那一任下落铁砧的 spawnSerial；0 = 未被结算）。
+    //   玩家不在 m_entities 槽位 → 无 Entity.anvilCrushSerial 可挂，独立成员记录。同 mob 侧字段语义：
+    //   同一落体对玩家只结算一次，新落体（新 serial）照常结算。
+    quint32 m_playerAnvilCrushSerial = 0;
     int m_revision = 0;
     // perf：节流 entitiesChanged emit 的「待发」脏标记。mob 每帧 wander 致 dirty 几乎每帧 → emit 每帧触发全体
     //   delegate（count × ~12 revision 绑定）NOTIFY 激活 + MobModel 重建 = mob 卡顿主因。改：dirty 只置 m_pendingEmit，
@@ -1570,6 +1584,10 @@ private:
     //   落差基准 = Entity.fallStartY（spawn 中心）− 本 tick 扫掠底中心（min(pos.y,newY)），见 tick FallingBlock 分支。
     static constexpr float kAnvilMinFallBlocks = 2.0f; // 起伤落差（格；<2 格落地无砸伤）
     static constexpr int kAnvilCrushDamageCap = 40;    // 单次砸伤 HP 上限（20♥）
+    // review #29（Review 2026-08-23 低危）：铁砧砸伤 XZ 判定半宽 = 视觉足印 12/16 格的一半（6/16 = 0.375）。
+    //   旧实现用 FallingBlock halfW（恒 0.5）= 1×1 满格判定，宽于铁砧 0.75 视觉宽 → 贴格边站的 mob 被无
+    //   视觉接触砸中。仅铁砧砸伤测试用（其它 FallingBlock——沙/砾——落体放置判定仍 1×1 满格，不动）。
+    static constexpr float kAnvilCrushHalfW = 0.375f;  // 砸伤 XZ 半宽（12/16 视觉足印；≠ 落体 halfW 0.5）
     // t500 perf：mob AI / 环境扫描节流间隔（帧）。每 kAiTickInterval 帧每 mob 才跑一次「AI 决策 + 火烧 /
     //   仙人掌 / 窒息 / 吃草扫描」（错峰 idx % kAiTickInterval → 单帧 1/N mob 跑重活）。N=4 → 每 mob ~15Hz
     //   AI（MC 1.0 mob think 每 4-5 tick ≈ 12-15Hz 量级；机制对齐）。mob 物理（重力 / resting / 击退 / 推动）

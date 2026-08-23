@@ -1031,10 +1031,11 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
     }
 }
 
-// t392 刷怪笼周期刷怪（见头文件方法注释）。机制等价 MC 1.0 刷怪笼：玩家在范围内时周期 spawn 1 敌对 mob。
+// t392 刷怪笼周期刷怪（见头文件方法注释）。机制等价 MC 1.0 刷怪笼：玩家在范围内时周期 spawn 笼型 mob。
 //   实现策略 —— **按需扫描**：每 kSpawnerInterval 秒扫玩家所在格周围 ±kSpawnerScanRange 立方体找 Spawner 方块，
-//   对每个笼判「玩家近 + 笼周敌对 < 本地 cap + 全局敌对 < 全局 cap + 找到合法 spawn 位」四条件全过 → spawn 1 只。
-//   不维护 spawner 位置列表 → 破坏即停（blockAt != Spawner 自然跳过）、存档加载后仍能扫到（无 index 维护负担）。
+//   对每个笼按笼型分流闸门（review #31：被动笼 = 同型 local cap + 总 cap；敌对笼 = 全局敌对 cap + 区域
+//   cap + 笼周敌对 local cap）+ 找到合法 spawn 位 → spawn 1 只。不维护 spawner 位置列表 → 破坏即停
+//   （blockAt != Spawner 自然跳过）、存档加载后仍能扫到（无 index 维护负担）。
 void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &playerPos)
 {
     if (!world) return;
@@ -1043,11 +1044,11 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
     if (m_spawnAccumSpawner < kSpawnerInterval) return;
     m_spawnAccumSpawner = 0.0f;
 
-    // 全局敌对上限（与 tickHostileLife 共享 kHostileMobCap；防刷怪笼 + 黑暗刷怪叠加爆量）。
-    //   t562：再加**区域 cap**（同黑暗刷怪 —— 玩家周边敌对已饱和 → 刷怪笼也停刷，防两路叠加刷屏）。
-    const int hostiles = hostileCount();
-    if (hostiles >= kHostileMobCap || m_liveCount >= kCap
-        || hostileCountNear(playerPos, kHostileAreaRadius) >= kHostileLocalCap)
+    // review #31（Review 2026-08-23 低危）：入口只留**总 cap**（kCap，对被动 / 敌对笼共同生效）。旧入口的
+    //   全局敌对 cap + 玩家周边敌对区域 cap 早退对被动笼同样生效 → 夜里敌对满 30 时猪 / 羊笼全停。机制
+    //   等价 MC 1.0：spawner 不受 ambient hostile cap 约束（笼自有 local cap）→ 敌对闸门（全局 + 区域）全部
+    //   下沉到敌对笼分支（被动笼仅留同型 local cap）。入口计数 hostileCount 保留作敌对预算种子。
+    if (m_liveCount >= kCap)
         return;
 
     // 扫玩家所在格周围 ±kSpawnerScanRange 立方体（限 Y 到 [0, worldHeight)，防越界）。
@@ -1064,7 +1065,9 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
     const int z0 = std::max(0, pcz - kSpawnerScanRange);
     const int z1 = std::min(worldD - 1, pcz + kSpawnerScanRange);
 
-    int hostilesRunning = hostiles; // 本周期内已 spawn 的敌对数累加（防一周期刷出多笼 × N）
+    int hostilesRunning = hostileCount(); // 本周期内已存在的敌对数（敌对笼全局预算；被动笼不挤占、不读它）
+    bool hostileAreaCapped = false;       // review #31：玩家周边敌对区域 cap（惰性一次，首个敌对笼时算——原入口
+                                          //   早退条件之一，现仅敌对笼分支生效；被动笼不再被它压制）
     bool dirty = false;
 
     for (int y = y0; y <= y1; ++y) {
@@ -1076,49 +1079,11 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                 const float ddz = float(z) - playerPos.z();
                 if (ddx * ddx + ddz * ddz > kSpawnerPlayerRange * kSpawnerPlayerRange) continue;
 
-                // 笼周敌对数（kSpawnerMobCheckRadius 球内）：≥ kSpawnerLocalCap 则本笼跳过（防刷爆）。
-                const QVector3D spawnerCenter(float(x) + 0.5f, float(y) + 0.5f, float(z) + 0.5f);
-                if (hostileNearby(spawnerCenter, kSpawnerMobCheckRadius)) continue;
-
-                // 全局敌对 cap：本周期已刷够则停（防多笼同周期刷爆）。
-                if (hostilesRunning >= kHostileMobCap) break;
-
-                // 找合法 spawn 位（笼 8 水平邻 + 笼同格上方 / 下方共 10 候选；首个「air + 下方 solid」）。
-                //   spawnMobTyped 把 (x,y,z) 当格坐标、mob 中心放 (x+0.5, y+0.5, z+0.5)。机制等价 MC 刷怪笼
-                //   在笼旁刷怪（笼自身不可站立 → 邻格 spawn）。Y 优先笼同高（玩家走入触发高度）。
-                static const int kSpawnDx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
-                static const int kSpawnDz[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
-                int sx = -1, sy = -1, sz = -1;
-                for (int i = 0; i < 8; ++i) {
-                    const int cx = x + kSpawnDx[i];
-                    const int cz = z + kSpawnDz[i];
-                    if (cx < 0 || cz < 0 || cx >= worldW || cz >= worldD) continue;
-                    // 优先笼同高（y）、次之 y+1（玩家跳上触发高度）；二者均堵 → 跳过本邻位。
-                    for (int cyOff = 0; cyOff <= 1; ++cyOff) {
-                        const int cy = y + cyOff;
-                        if (cy < 0 || cy >= worldH - 1) continue;        // 须留一格空气在上（mob 占 2 格高）
-                        const quint8 here = world->blockAt(cx, cy, cz);
-                        const quint8 above = world->blockAt(cx, cy + 1, cz);
-                        const quint8 below = world->blockAt(cx, cy - 1, cz);
-                        if (here == BlockRegistry::Air && above == BlockRegistry::Air
-                            && world->isSolid(cx, cy - 1, cz) && below != BlockRegistry::Water
-                            && below != BlockRegistry::Lava) {
-                            sx = cx; sy = cy; sz = cz;
-                            break;
-                        }
-                    }
-                    if (sx >= 0) break;
-                }
-                if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
-
-                // spawn 1 只 —— 类型由笼 state 决定（t786 类型化刷怪笼）。spawnerMobTypeForState 是
-                //   唯一解码源（type 位=worldgen placeDungeons 加权随机 / placeStronghold 银鱼 / 创造放置
-                //   默认 Shambler / t787 生物蛋右键改型全蛋表；type 位零的旧存档笼按 bit0 分流银鱼/
-                //   Shambler，见该函数注释）。机制等价 MC 1.0 刷怪笼刷**笼内类型**的怪（此前无 type 位时
-                //   地牢笼是 Shambler/Bones 等概率随机）。t787 路由：敌对型走 spawnHostileMob（hostile
-                //   语义 + 敌对默认血量 + 计入 hostilesRunning 预算，同旧）；被动型（蛋改型写入）走
-                //   spawnPassiveMob —— 上限判据换「笼周同型计数 < kSpawnerLocalCap」（hostileNearby 只数
-                //   敌对、对被动笼恒 false → 不换判据会无限刷），不计入敌对预算（被动型不挤占敌对 cap）。
+                // 笼类型先解码（t786 类型化刷怪笼；spawnerMobTypeForState 是唯一解码源——type 位=
+                //   worldgen placeDungeons 加权随机 / placeStronghold 银鱼 / 创造放置默认 Shambler / t787
+                //   生物蛋右键改型全蛋表；type 位零的旧存档笼按 bit0 分流银鱼/Shambler，见该函数注释）。
+                //   机制等价 MC 1.0 刷怪笼刷**笼内类型**的怪。类型先于闸门 / 找位解码：被动 / 敌对走不同
+                //   闸门组（review #31）且鱿鱼走水格找位（review #30）。
                 const int mobType = spawnerMobTypeForState(int(world->stateAt(x, y, z)));
                 bool passiveType = false;
                 switch (mobType) {
@@ -1134,20 +1099,76 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                 default:
                     break; // 敌对七型（Shambler/Bones/Stalker/Spider/Silverfish/Nightwalker/Emberling）
                 }
+
+                // 闸门按笼型分流（review #31：MC spawner 不受 ambient hostile cap 约束——被动笼仅留同型
+                //   local cap；敌对笼保留三重闸门 = 全局 cap + 区域 cap + 笼周敌对计数）。
+                const QVector3D spawnerCenter(float(x) + 0.5f, float(y) + 0.5f, float(z) + 0.5f);
                 if (passiveType) {
-                    if (mobTypeCountNear(spawnerCenter, kSpawnerMobCheckRadius, mobType) < kSpawnerLocalCap) {
-                        spawnPassiveMob(sx, sy, sz, mobType);
-                        dirty = true;
-                    } // 同型已满（≥ kSpawnerLocalCap）→ 跳过本笼（下周期再试，同敌对笼 local cap 语义）
+                    // 被动笼：笼周**同型**计数 ≥ kSpawnerLocalCap 则跳过（t787 判据；hostileNearby 只数
+                    //   敌对、对被动笼恒 false，旧入口 / 旧笼周敌对闸门全撤——夜里敌对满额时被动笼照刷）。
+                    if (mobTypeCountNear(spawnerCenter, kSpawnerMobCheckRadius, mobType) >= kSpawnerLocalCap)
+                        continue;
+                } else {
+                    // 敌对笼：全局敌对 cap（本周期已刷够 → 跳过本笼继续扫，不再 break 整个扫描——被动笼
+                    //   在敌对预算耗尽后仍须能刷，review #31）+ 玩家周边区域 cap（t562，惰性一次）+ 笼周
+                    //   敌对数（kSpawnerMobCheckRadius 球内 ≥ kSpawnerLocalCap → 跳过防刷爆）。
+                    if (hostilesRunning >= kHostileMobCap) continue;
+                    if (!hostileAreaCapped)
+                        hostileAreaCapped =
+                            hostileCountNear(playerPos, kHostileAreaRadius) >= kHostileLocalCap;
+                    if (hostileAreaCapped) continue;
+                    if (hostileNearby(spawnerCenter, kSpawnerMobCheckRadius)) continue;
+                }
+
+                // 找合法 spawn 位（笼 8 水平邻 + 笼同格上方 / 下方共 10 候选；review #30 起按笼型分流谓词）。
+                //   spawnMobTyped 把 (x,y,z) 当格坐标、mob 中心放 (x+0.5, y+0.5, z+0.5)。机制等价 MC 刷怪笼
+                //   在笼旁刷怪（笼自身不可站立 → 邻格 spawn）。Y 优先笼同高（玩家走入触发高度）。
+                //   鱿鱼（review #30）：水生 mob 复用「空气 + 固体底」陆生谓词 → 全刷陆上慢爬（「搁浅鱿鱼」）。
+                //   改单独水格谓词：本格 + 上格均 Water（身体浸没；水柱即可，无需固体底——MC 鱿鱼笼旁水体
+                //   刷鱿鱼）。其余型保持「air + 上 air + 下 solid + 下非 Water/Lava」原谓词。
+                static const int kSpawnDx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+                static const int kSpawnDz[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+                const bool wantWater = (mobType == MobSquid);
+                int sx = -1, sy = -1, sz = -1;
+                for (int i = 0; i < 8; ++i) {
+                    const int cx = x + kSpawnDx[i];
+                    const int cz = z + kSpawnDz[i];
+                    if (cx < 0 || cz < 0 || cx >= worldW || cz >= worldD) continue;
+                    // 优先笼同高（y）、次之 y+1（玩家跳上触发高度）；二者均堵 → 跳过本邻位。
+                    for (int cyOff = 0; cyOff <= 1; ++cyOff) {
+                        const int cy = y + cyOff;
+                        if (cy < 0 || cy >= worldH - 1) continue;        // 须留一格空间在上（mob 占 2 格高/水柱同）
+                        const quint8 here = world->blockAt(cx, cy, cz);
+                        const quint8 above = world->blockAt(cx, cy + 1, cz);
+                        const quint8 below = world->blockAt(cx, cy - 1, cz);
+                        const bool okCell = wantWater
+                            ? (here == BlockRegistry::Water && above == BlockRegistry::Water)
+                            : (here == BlockRegistry::Air && above == BlockRegistry::Air
+                               && world->isSolid(cx, cy - 1, cz) && below != BlockRegistry::Water
+                               && below != BlockRegistry::Lava);
+                        if (okCell) {
+                            sx = cx; sy = cy; sz = cz;
+                            break;
+                        }
+                    }
+                    if (sx >= 0) break;
+                }
+                if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
+
+                // spawn 1 只 —— t787 路由：敌对型走 spawnHostileMob（hostile 语义 + 敌对默认血量 + 计入
+                //   hostilesRunning 预算，同旧）；被动型（蛋改型写入）走 spawnPassiveMob —— 上限判据「笼周
+                //   同型计数 < kSpawnerLocalCap」（hostileNearby 只数敌对、对被动笼恒 false → 不换判据会
+                //   无限刷），不计入敌对预算（被动型不挤占敌对 cap；review #31 起也不再被敌对闸门压制）。
+                if (passiveType) {
+                    spawnPassiveMob(sx, sy, sz, mobType);
+                    dirty = true;
                 } else {
                     spawnHostileMob(sx, sy, sz, mobType);
                     ++hostilesRunning;
                     dirty = true;
                 }
             }
-            if (hostilesRunning >= kHostileMobCap) break;
         }
-        if (hostilesRunning >= kHostileMobCap) break;
     }
 
     if (dirty) {
@@ -5267,41 +5288,43 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 dropCellY = cy; break; // 不完整方块（火把 / 半砖 / ...）→ 沙失撑变掉落物
             }
             // t794 下落铁砧砸伤（机制等价 MC 1.0 anvil crush；**先伤后落** —— 本检查在着地还原方块之前跑，
-            //   生物不挡下落体，铁砧穿过它落到下方方块格还原）：携带 Anvil 族 id 且本次下落未结算过砸伤
-            //   （anvilDamaged 一次性拍）时，用「本 tick 扫掠盒」做重叠测试 —— XZ = 铁砧 footprint
-            //   [pos±halfW]（1×1 满格），Y = [min(pos.y,newY)−halfH, pos.y+halfH]（本帧下落扫过的整段，
-            //   防高速下落一帧跨过薄身 mob 漏检）。命中目标族：全体活体 mob（damageEntity 扣血 + 红闪 +
-            //   归零 mobDied 链）+ 玩家（listener 脚位 AABB [±listenerHalfW]×[0,listenerHeight]；仅
-            //   playerTargetable —— 创造/观察者无敌跳过，机制等价 MC；发 mobAttackedPlayer 携 MobAnvil
-            //   哨兵 → 呈现层映射死因 DeathCause::Anvil + 护甲减伤链，同 MobTnt 爆炸先例；击退 = 玩家−铁砧
-            //   水平归一推离落点）。伤害 = 落差函数（kAnvil* 常量注释见 .h：dmg=(floor(落差)−1)×2，落差
-            //   = fallStartY − 扫掠底中心，2 格起伤 / 每多 1 格 +1♥ / 上限 40HP）；dmg≤0（落差不足）不置位
-            //   不结算，继续下落累积。结算后 anvilDamaged=true —— 同一次下落后续帧不再重复扣血（每实体
-            //   每次下落只伤一次；一拍内同时压到多目标则全体各结算一次）。
-            if (BlockRegistry::isAnvil(quint8(e.blockId)) && !e.anvilDamaged) {
+            //   生物不挡下落体，铁砧穿过它落到下方方块格还原）：携带 Anvil 族 id 时，用「本 tick 扫掠盒」做
+            //   重叠测试 —— XZ = 铁砧砸伤足印 [pos±kAnvilCrushHalfW]（review #29：12/16 视觉宽的一半 0.375，
+            //   非 FallingBlock halfW 0.5 满格——贴格边站的无视觉接触不再误伤），Y = [min(pos.y,newY)−halfH,
+            //   pos.y+halfH]（本帧下落扫过的整段，防高速下落一帧跨过薄身 mob 漏检）。命中目标族：全体活体
+            //   mob（damageEntity 扣血 + 红闪 + 归零 mobDied 链）+ 玩家（listener 脚位 AABB [±listenerHalfW]×
+            //   [0,listenerHeight]；仅 playerTargetable —— 创造/观察者无敌跳过，机制等价 MC；发 mobAttackedPlayer
+            //   携 MobAnvil 哨兵 → 呈现层映射死因 DeathCause::Anvil + 护甲减伤链，同 MobTnt 爆炸先例；击退 =
+            //   玩家−铁砧 水平归一推离落点）。伤害 = 落差函数（kAnvil* 常量注释见 .h：dmg=(floor(落差)−1)×2，
+            //   落差 = fallStartY − 扫掠底中心，2 格起伤 / 每多 1 格 +1♥ / 上限 40HP）；dmg≤0（落差不足）不结算，
+            //   继续下落累积。review #28：**按目标记录已结算** —— 命中即把本落体 spawnSerial 写进目标（mob 侧
+            //   Entity.anvilCrushSerial / 玩家侧 m_playerAnvilCrushSerial），同 serial 再压到同目标跳过 → 每
+            //   实体每次下落只伤一次（真语义；旧 t794 落体侧一次性拍只结算首个命中拍——先穿玩家后落猪身则
+            //   猪免伤、台阶两猪只伤上面那只）。铁砧继续下落，后续帧压到**未结算**目标照常结算。
+            if (BlockRegistry::isAnvil(quint8(e.blockId))) {
                 const float sweepLow = std::min(newY, e.pos.y());       // 本帧扫掠底中心
                 const float fallDist = e.fallStartY - sweepLow;         // 落差（格）
                 const int dmg = std::min(kAnvilCrushDamageCap,
                                          std::max(0, (int(qFloor(fallDist)) - 1) * 2));
                 if (dmg > 0 && fallDist >= kAnvilMinFallBlocks) {
-                    bool anyHit = false;
                     for (int mi = 0; mi < int(m_entities.size()); ++mi) {
-                        const Entity &m = m_entities[size_t(mi)];
+                        Entity &m = m_entities[size_t(mi)];
                         if (!m.alive || m.kind != Mob || m.dead) continue; // 空槽 / 非 mob / 尸体
-                        // AABB 重叠（XZ 分离 / Y 分离逐轴早退；铁砧半宽 halfW、mob 用各自 halfW/halfH）
-                        if (std::abs(m.pos.x() - e.pos.x()) >= e.halfW + m.halfW) continue;
-                        if (std::abs(m.pos.z() - e.pos.z()) >= e.halfW + m.halfW) continue;
+                        if (m.anvilCrushSerial == e.spawnSerial) continue; // 本落体已结算过它（review #28）
+                        // AABB 重叠（XZ 分离 / Y 分离逐轴早退；铁砧砸伤半宽 kAnvilCrushHalfW、mob 用各自 halfW/halfH）
+                        if (std::abs(m.pos.x() - e.pos.x()) >= kAnvilCrushHalfW + m.halfW) continue;
+                        if (std::abs(m.pos.z() - e.pos.z()) >= kAnvilCrushHalfW + m.halfW) continue;
                         if (m.pos.y() + m.halfH <= sweepLow - e.halfH
                             || m.pos.y() - m.halfH >= e.pos.y() + e.halfH) continue;
                         damageEntity(mi, dmg); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
-                        anyHit = true;
+                        m.anvilCrushSerial = e.spawnSerial; // 按目标记账：本落体对它已结算（review #28）
                     }
-                    if (playerTargetable) {
+                    if (playerTargetable && m_playerAnvilCrushSerial != e.spawnSerial) {
                         const float px = listener.x(), py = listener.y(), pz = listener.z();
-                        if (px + listenerHalfW > e.pos.x() - e.halfW
-                            && px - listenerHalfW < e.pos.x() + e.halfW
-                            && pz + listenerHalfW > e.pos.z() - e.halfW
-                            && pz - listenerHalfW < e.pos.z() + e.halfW
+                        if (px + listenerHalfW > e.pos.x() - kAnvilCrushHalfW
+                            && px - listenerHalfW < e.pos.x() + kAnvilCrushHalfW
+                            && pz + listenerHalfW > e.pos.z() - kAnvilCrushHalfW
+                            && pz - listenerHalfW < e.pos.z() + kAnvilCrushHalfW
                             && py + listenerHeight > sweepLow - e.halfH
                             && py < e.pos.y() + e.halfH) {
                             // 击退方向 = 玩家 − 铁砧 水平归一（推离落点；退化 → (1,0) 兜底同箭模式）
@@ -5310,10 +5333,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                             if (klen > 1e-3f) { kbX /= klen; kbZ /= klen; }
                             else { kbX = 1.0f; kbZ = 0.0f; }
                             emit mobAttackedPlayer(dmg, int(MobAnvil), kbX, kbZ);
-                            anyHit = true;
+                            m_playerAnvilCrushSerial = e.spawnSerial; // 玩家侧同记账（review #28）
                         }
                     }
-                    if (anyHit) e.anvilDamaged = true;
                 }
             }
             if (supportCellY >= 0) {

@@ -132,7 +132,8 @@ class MobModel : public QQuick3DGeometry
     // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
     //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.62, -0.03, sin·0.62)，棒身恒竖直只轨道心公转）。
     //   QML 用 NumberAnimation on rodSpin 驱动连续旋转（帧率无关；同 walkPhase 的 set→rebuild 模式，
-    //   量化 6°/步防每帧微变 rebuild）；刷怪笼迷你态可只给静态角（如 45°）。其余 mobType 不读（无棒组）。
+    //   量化 6°/步防每帧微变 rebuild；review #36 契约：输入按最近取整落 6° 网格，静态值请传 6 的倍数）；
+    //   刷怪笼迷你态只给静态角（48°）。其余 mobType 不读（无棒组）。
     Q_PROPERTY(float rodSpin READ rodSpin WRITE setRodSpin NOTIFY rodSpinChanged)
 
 public:

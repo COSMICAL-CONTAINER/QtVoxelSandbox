@@ -5589,6 +5589,383 @@ int main(int argc, char *argv[])
                              "unsuffixed names (QML clamp #33 / leg covers #34 = manual visual check)";
     }
 
+    // ── Review 2026-08-23 #27 余烬门熄灭钩子并入 World 写入族探针 ──
+    // 背景：旧熄门钩子只挂 playercontroller 挖掘路径（finishMiningAt 显式调 breakNetherPortalsAround），
+    //   爆炸 / TNT 点火 / 火焚 / 流体置换等系统静默写路径拆掉门框或门面后**门面残留**（玩家肉眼：框被炸掉
+    //   一角、紫门面悬空不灭）。review #27 修法 = 钩子下沉 World 写入族（setBlock×2 / setBlockSilent /
+    //   clearBlockSilent / setWaterSilent / setBlockFromEntity / destroySphereSilent 逐破坏格 /
+    //   dropGravityColumn 逐清格，谓词=本格原有非空内容被置换；removeNetherPortalAt 清域带
+    //   m_inRemoveNetherPortal 守卫防嵌套 BFS）。本探针逐入口驱动：
+    //   (a) 爆炸（destroySphereSilent r=1.5 打掉 4×5 门一角 4 门格；黑曜石框爆炸免疫——残 16 格靠钩子熄）
+    //   (b) setBlockSilent 置换门格（火吞系统写代表）；(c) clearBlockSilent 拆底梁（TNT 点火清格代表）；
+    //   (d) setWaterSilent 置换门格（流体蒸发 / 改道代表）；(e) 纯放置对照（旧格 Air → 不熄，机制等价
+    //   MC 放置不破门）；(f) 玩家挖掘路径回归（setBlock(Air) 拆柱 —— 旧 playercontroller 显式调用的等价
+    //   序列，现由 World 层钩子自覆盖）。每场景重建 4×5 Z 平面无角门（t806 ④ 无角合法）+ 点燃 20 格。
+    {
+        World wRf27;
+        wRf27.setWidth(48);
+        wRf27.setDepth(48);
+        wRf27.setHeight(32);
+        wRf27.setSeed(13);
+        bool okRf27 = true;
+        const int pY27 = 20;
+        const int px27 = 8, pz27 = 20; // 4×5 Z 平面门：门面 x=px27 平面，z∈[pz27,pz27+3]，y∈[pY27,pY27+4]
+        // 建无角 4×5 门框（t806 buildFrame 简化版；先清场盒防地形 / 上一场景残留）。
+        const auto buildPortal45 = [&]() {
+            for (int c = -3; c <= 7; ++c)
+                for (int r = -3; r <= 8; ++r)
+                    for (int d = -2; d <= 2; ++d)
+                        wRf27.setBlock(px27 + d, pY27 + r, pz27 + c, BR::Air, 0);
+            for (int c = 0; c < 4; ++c) { // 底梁 / 顶梁
+                wRf27.setBlock(px27, pY27 - 1, pz27 + c, BR::Obsidian, 0);
+                wRf27.setBlock(px27, pY27 + 5, pz27 + c, BR::Obsidian, 0);
+            }
+            for (int r = 0; r < 5; ++r) { // 左右边柱
+                wRf27.setBlock(px27, pY27 + r, pz27 - 1, BR::Obsidian, 0);
+                wRf27.setBlock(px27, pY27 + r, pz27 + 4, BR::Obsidian, 0);
+            }
+        };
+        // 本 rig 清场盒内门格计数（隔壁区域串数免疫）。
+        const auto countPortal27 = [&]() {
+            int n = 0;
+            for (int c = -3; c <= 7; ++c)
+                for (int r = -3; r <= 8; ++r)
+                    for (int d = -2; d <= 2; ++d)
+                        if (wRf27.blockAt(px27 + d, pY27 + r, pz27 + c) == BR::NetherPortal) ++n;
+            return n;
+        };
+        // 每场景起手式：重建 + 点燃 + 核对恰 20 门格。
+        const auto ignite20 = [&]() -> bool {
+            buildPortal45();
+            const bool lit = wRf27.tryIgniteNetherPortal(px27, pY27 + 1, pz27 + 1);
+            return lit && countPortal27() == 20;
+        };
+        // (a) 爆炸拆角：r=1.5 球心打门面角格 (px27,pY27,pz27) → 球内门格 4（dz²+dy²≤2.25），球外 16 格
+        //     旧代码残留（无钩子）、新代码被球内破坏格的逐格钩子连坐熄灭；黑曜石框爆炸免疫（skip 列表）→
+        //     拆门路径 = 门格自身被清。
+        {
+            const bool lit = ignite20();
+            const auto dv = wRf27.destroySphereSilent(px27, pY27, pz27, 1.5f);
+            const int left = countPortal27();
+            if (!lit || int(dv.size()) < 4 || left != 0) {
+                qInfo().noquote() << "  [review-f #27 diag] explosion teardown: lit" << lit
+                                  << "destroyed" << int(dv.size()) << "portal left" << left;
+                okRf27 = false;
+            }
+        }
+        // (b) setBlockSilent 置换门格（火吞可燃物等系统静默写代表）：门格被 Stone 置换 → 其余 19 格全熄。
+        {
+            const bool lit = ignite20();
+            wRf27.setBlockSilent(px27, pY27 + 2, pz27 + 3, BR::Stone, 0);
+            const int left = countPortal27();
+            if (!lit || wRf27.blockAt(px27, pY27 + 2, pz27 + 3) != BR::Stone || left != 0) {
+                qInfo().noquote() << "  [review-f #27 diag] setBlockSilent displace: lit" << lit
+                                  << "portal left" << left;
+                okRf27 = false;
+            }
+        }
+        // (c) clearBlockSilent 拆底梁中格（TNT 点火清格代表路径）：梁去 → 门面失框全熄。
+        {
+            const bool lit = ignite20();
+            wRf27.clearBlockSilent(px27, pY27 - 1, pz27 + 1);
+            const int left = countPortal27();
+            if (!lit || wRf27.blockAt(px27, pY27 - 1, pz27 + 1) != BR::Air || left != 0) {
+                qInfo().noquote() << "  [review-f #27 diag] clearBlockSilent beam: lit" << lit
+                                  << "portal left" << left;
+                okRf27 = false;
+            }
+        }
+        // (d) setWaterSilent 置换门格（流体蒸发 / 改道批量写代表）：门格被清 → 全熄。
+        {
+            const bool lit = ignite20();
+            wRf27.setWaterSilent(px27, pY27 + 3, pz27 + 2, BR::Air, 0);
+            const int left = countPortal27();
+            if (!lit || left != 0) {
+                qInfo().noquote() << "  [review-f #27 diag] setWaterSilent displace: lit" << lit
+                                  << "portal left" << left;
+                okRf27 = false;
+            }
+        }
+        // (e) 纯放置对照：门旁空气格放 Stone（旧格 Air → 钩子谓词不触发）→ 门健在恰 20（放置不破门，
+        //     机制等价 MC——只有拆 / 置换才破）。防钩子过度触发回归。
+        {
+            const bool lit = ignite20();
+            wRf27.setBlock(px27 + 1, pY27 + 2, pz27 + 1, BR::Stone, 0);
+            const int left = countPortal27();
+            if (!lit || left != 20) {
+                qInfo().noquote() << "  [review-f #27 diag] placement control: lit" << lit
+                                  << "portal left" << left;
+                okRf27 = false;
+            }
+        }
+        // (f) 玩家挖掘路径回归（拆右边柱中格 setBlock(Air)，旧 playercontroller 显式序列的 World 层等价）。
+        {
+            const bool lit = ignite20();
+            wRf27.setBlock(px27, pY27 + 2, pz27 + 4, BR::Air, 0);
+            const int left = countPortal27();
+            if (!lit || left != 0) {
+                qInfo().noquote() << "  [review-f #27 diag] dig pillar teardown: lit" << lit
+                                  << "portal left" << left;
+                okRf27 = false;
+            }
+        }
+        if (!okRf27) ++totalFail;
+        qInfo().noquote() << (okRf27 ? "PASS" : "FAIL")
+                          << "| review-f #27 portal extinguish joined World write family: displacement of "
+                             "non-air cell (explosion sphere per-voxel / setBlockSilent / clearBlockSilent / "
+                             "setWaterSilent / player dig setBlock) collapses whole connected portal domain "
+                             "(4x5 rig: 16 out-of-sphere cells die via hook, obsidian frame blast-immune), "
+                             "pure placement into air beside a lit door keeps all 20 cells (predicate "
+                             "guard), removeNetherPortalAt clear guarded against nested BFS";
+    }
+
+    // ── Review 2026-08-23 #28 铁砧砸伤按目标结算探针 ──
+    // 背景：旧 anvilDamaged 是**落体侧一次性拍**——下落铁砧首个命中帧置位后整次下落不再结算 → 铁砧先穿
+    //   玩家后落到猪身上则猪免伤、台阶两猪只伤上面那只。review #28 修法 = **按目标记账**：落体
+    //   spawnSerial 写进每个被结算目标（mob 侧 Entity.anvilCrushSerial / 玩家侧 m_playerAnvilCrushSerial），
+    //   同 serial 再压同目标跳过 → 真语义「每实体每次下落只伤一次」。rig：圈养猪（100HP，四邻墙防走脱）
+    //   列底 + 虚拟玩家 listener 悬列中段 → 一块铁砧从 y=15 落穿两者：(P) 猪恰扣 10HP（落差 5.x..6 格 →
+    //   (floor−1)×2=10；旧代码先结算玩家 → 猪 100 不动）+ 玩家恰 1 次 2HP（落差 2.x 格）；(Q) 着地后 20 帧
+    //   （< 窒息首扣 ~63 帧）两者读数不动（同落体不重复结算）；(R) 第二块铁砧（新 serial）→ 玩家再结算
+    //   一次（「每次下落」独立）+ 落在第一块上（着地还原链不受记账影响）。
+    {
+        World wRf28;
+        wRf28.setWidth(48);
+        wRf28.setDepth(48);
+        wRf28.setHeight(32);
+        wRf28.setSeed(13);
+        const int cx28 = 12, cz28 = 12, ty28 = 9;
+        for (int x = 10; x <= 15; ++x)
+            for (int z = 10; z <= 15; ++z) {
+                for (int y = 9; y <= 17; ++y) wRf28.setBlock(x, y, z, BR::Air, 0);
+                wRf28.setBlock(x, 8, z, BR::Stone, 0); // 平台（猪圈底 + 铁砧落点支撑）
+            }
+        // 圈栏（1 高即可——aiWander 无跳跃；猪恒留落点列，盒顶恒 ty+0.9）。
+        wRf28.setBlock(cx28 - 1, ty28, cz28, BR::Stone, 0);
+        wRf28.setBlock(cx28 + 1, ty28, cz28, BR::Stone, 0);
+        wRf28.setBlock(cx28, ty28, cz28 - 1, BR::Stone, 0);
+        wRf28.setBlock(cx28, ty28, cz28 + 1, BR::Stone, 0);
+        EntityManager emRf28;
+        int hits28 = 0, hit28a = 0;
+        QObject::connect(&emRf28, &EntityManager::mobAttackedPlayer, &emRf28,
+                         [&](int amount, int, float, float) {
+                             if (hits28 == 0) hit28a = amount;
+                             ++hits28;
+                         });
+        const int pig28 = emRf28.spawnMobTyped(cx28, ty28, cz28, EntityManager::MobPig,
+                                               QStringLiteral("#ffd0d0"), 100);
+        const QVector3D far28(-1000.0f, 10.0f, -1000.0f);
+        for (int t = 0; t < 90; ++t) // 猪落定（resting 盒顶 ty+0.9）
+            emRf28.tick(0.016f, &wRf28, far28, 0.3f, 1.8f, false);
+        bool okRf28 = pig28 >= 0 && emRf28.healthAt(pig28) == 100;
+        // (P) 一块铁砧 y=15（fallStart 15.5）：先穿玩家带 [12,13.8]（fallDist≥2 → 2HP），后压猪顶 9.9
+        //     （首个重叠帧 fallDist 5.1x → (floor 5−1)×2 = 8HP）——两目标各恰一次。
+        const QVector3D listener28(float(cx28) + 0.5f, 12.0f, float(cz28) + 0.5f);
+        emRf28.spawnFallingBlock(cx28, 15, cz28, int(BR::Anvil));
+        int pigAtCrush28 = -1;
+        for (int t = 0; t < 160; ++t) {
+            emRf28.tick(0.016f, &wRf28, listener28, 0.3f, 1.8f, true);
+            if (pigAtCrush28 < 0 && emRf28.healthAt(pig28) < 100)
+                pigAtCrush28 = emRf28.healthAt(pig28);
+            if (pigAtCrush28 >= 0 && hits28 >= 1 && wRf28.blockAt(cx28, ty28, cz28) == BR::Anvil)
+                break;
+        }
+        okRf28 = okRf28 && pigAtCrush28 == 92      // 猪被结算（旧一次性拍：先穿玩家 → 猪恒 100）；
+                                                   //   首个重叠帧落差 5.1x → (floor 5−1)×2 = 8HP
+                 && hits28 == 1 && hit28a == 2     // 玩家同落体恰一次 2HP
+                 && wRf28.blockAt(cx28, ty28, cz28) == BR::Anvil; // 先伤后落：着地还原于猪格
+        // (Q) 着地后 20 帧（< 窒息 63 帧首扣）读数不动：同落体不重复结算。
+        for (int t = 0; t < 20; ++t)
+            emRf28.tick(0.016f, &wRf28, listener28, 0.3f, 1.8f, true);
+        okRf28 = okRf28 && emRf28.healthAt(pig28) == pigAtCrush28 && hits28 == 1;
+        // (R) 第二块铁砧（新 spawnSerial）落第一块上方：玩家再结算一次（每「次下落」独立记账）。
+        emRf28.spawnFallingBlock(cx28, 15, cz28, int(BR::Anvil));
+        for (int t = 0; t < 160; ++t) {
+            emRf28.tick(0.016f, &wRf28, listener28, 0.3f, 1.8f, true);
+            if (wRf28.blockAt(cx28, ty28 + 1, cz28) == BR::Anvil) break;
+        }
+        okRf28 = okRf28 && hits28 == 2 && wRf28.blockAt(cx28, ty28 + 1, cz28) == BR::Anvil;
+        if (!okRf28) {
+            qInfo().noquote() << "  [review-f #28 diag] pig" << pig28 << "hp"
+                              << (pig28 >= 0 ? emRf28.healthAt(pig28) : -1)
+                              << "atCrush" << pigAtCrush28 << "| hits" << hits28
+                              << "amt" << hit28a << "| landed"
+                              << (wRf28.blockAt(cx28, ty28, cz28) == BR::Anvil)
+                              << (wRf28.blockAt(cx28, ty28 + 1, cz28) == BR::Anvil);
+        }
+        if (!okRf28) ++totalFail;
+        qInfo().noquote() << (okRf28 ? "PASS" : "FAIL")
+                          << "| review-f #28 anvil crush settles per target: one fall through virtual "
+                             "player band then penned pig damages BOTH exactly once each (pig 100->92 "
+                             "at first-overlap frame (floor(5.1x)-1)*2=8, player 1 hit 2HP — old "
+                             "one-shot falling-entity flag "
+                             "starved the later target), readings frozen for 20 post-land frames (no "
+                             "re-settlement within one fall, pre-suffocation window), second anvil with "
+                             "fresh serial re-settles player (per-fall independence) and stacks on first "
+                             "(restore chain intact)";
+    }
+
+    // ── Review 2026-08-23 #29 铁砧砸伤窄盒探针 ──
+    // 背景：旧砸伤 XZ 判定用落体 halfW(0.5)+目标 halfW 的满格宽 → 贴格边站（视觉上铁砧 12/16 宽没碰到）
+    //   也被砸。review #29 修法 = 铁砧砸伤足印独立常量 kAnvilCrushHalfW=0.375（12/16 视觉宽一半；沙 / 砾
+    //   等其余落体仍 0.5）。玩家 listener halfW=0.3 → 命中阈 0.375+0.3=0.675（旧 0.8）。断言：
+    //   (a) 列心偏 0.7（>0.675 新界、<0.8 旧界）→ 0 命中（旧代码必中的判别位）；(b) 偏 0.6 对照 → 恰一次
+    //   2HP（窄盒内仍正常结算，落差 2.x 格）。两列各自落定还原铁砧于平台顶。
+    {
+        World wRf29;
+        wRf29.setWidth(48);
+        wRf29.setDepth(48);
+        wRf29.setHeight(32);
+        wRf29.setSeed(13);
+        const int ty29 = 9;
+        for (int x = 26; x <= 36; ++x)
+            for (int z = 26; z <= 33; ++z) {
+                for (int y = 9; y <= 15; ++y) wRf29.setBlock(x, y, z, BR::Air, 0);
+                wRf29.setBlock(x, 8, z, BR::Stone, 0);
+            }
+        EntityManager emRf29;
+        int hits29 = 0, hit29a = 0;
+        QObject::connect(&emRf29, &EntityManager::mobAttackedPlayer, &emRf29,
+                         [&](int amount, int, float, float) {
+                             if (hits29 == 0) hit29a = amount;
+                             ++hits29;
+                         });
+        // (a) 列 (30,·,28) 心 30.5；listener X 偏 +0.7（31.2）→ 新窄盒外（≥0.675）→ 0 命中。
+        emRf29.spawnFallingBlock(30, 13, 28, int(BR::Anvil));
+        const QVector3D outside29(31.2f, float(ty29), 28.5f);
+        for (int t = 0; t < 140; ++t)
+            emRf29.tick(0.016f, &wRf29, outside29, 0.3f, 1.8f, true);
+        const bool okA29 = hits29 == 0 && wRf29.blockAt(30, ty29, 28) == BR::Anvil;
+        const int hitsAfterA29 = hits29; // (a) 阶段末命中数（判别用）
+        // (b) 列 (30,·,31) 心 30.5；listener X 偏 +0.6（31.1）→ 窄盒内（<0.675）→ 恰一次 2HP。
+        emRf29.spawnFallingBlock(30, 13, 31, int(BR::Anvil));
+        const QVector3D inside29(31.1f, float(ty29), 31.5f);
+        for (int t = 0; t < 140; ++t)
+            emRf29.tick(0.016f, &wRf29, inside29, 0.3f, 1.8f, true);
+        const bool okB29 = hits29 == 1 && hit29a == 2 && wRf29.blockAt(30, ty29, 31) == BR::Anvil;
+        const bool okRf29 = okA29 && okB29;
+        if (!okRf29) {
+            qInfo().noquote() << "  [review-f #29 diag] offset0.7 phase hits" << hitsAfterA29
+                              << "landedA" << (wRf29.blockAt(30, ty29, 28) == BR::Anvil)
+                              << "| offset0.6 final hits" << hits29 << "amt" << hit29a
+                              << "landedB" << (wRf29.blockAt(30, ty29, 31) == BR::Anvil);
+        }
+        if (!okRf29) ++totalFail;
+        qInfo().noquote() << (okRf29 ? "PASS" : "FAIL")
+                          << "| review-f #29 anvil crush narrow footprint: crush XZ test uses anvil "
+                             "visual half-width 0.375 (12/16) + listener 0.3 = 0.675 threshold — "
+                             "listener 0.7 off column axis untouched (old full-cell 0.8 box would hit), "
+                             "0.6 control hit exactly once for 2HP at 2-block fall, both anvils restore "
+                             "on platform (sand-family falling blocks keep 0.5, manual check)";
+    }
+
+    // ── Review 2026-08-23 #30 鱿鱼笼水格刷位探针 ──
+    // 背景：tickSpawners 找位谓词硬编码「air+上 air+下 solid」陆生条件 → 鱿鱼笼（生物蛋改型）复用后
+    //   只能刷在陆上（搁浅鱿鱼慢爬）。review #30 修法 = 鱿鱼走水格谓词（本格+上格均 Water，免固体底）。
+    //   rig：48×48 种子 9 世界（y=8 worldgen 恒实心），笼刻 MobSquid 型，唯一合格邻位 = (sx+1) 水柱两格，
+    //   其余 7 水平邻显式塞 Stone 双层（陆 / 水两谓词均不满足 → 无处可刷的旧代码 0 刷判别位）。一周期
+    //   tickSpawners(6.0) → 恰 1 只鱿鱼且落水柱格。
+    {
+        World wRf30;
+        wRf30.setWidth(48);
+        wRf30.setDepth(48);
+        wRf30.setHeight(32);
+        wRf30.setSeed(9);
+        const int sx30 = 24, sy30 = 8, sz30 = 24;
+        wRf30.setBlock(sx30, sy30, sz30, BR::Spawner,
+                       BlockRegistry::spawnerStateForMob(EntityManager::MobSquid));
+        // (sx+1,sz) 水柱两格（鱿鱼谓词：here+above 均 Water）；其余 7 水平邻 Stone 双层（worldgen 实心再
+        //   显式保险——两谓词全灭 → 旧代码必 0 刷）。
+        wRf30.setBlock(sx30 + 1, sy30, sz30, BR::Water, 0);
+        wRf30.setBlock(sx30 + 1, sy30 + 1, sz30, BR::Water, 0);
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz) {
+                if (dx == 0 && dz == 0) continue; // 笼格本身
+                if (dx == 1 && dz == 0) continue; // 水柱位
+                wRf30.setBlock(sx30 + dx, sy30, sz30 + dz, BR::Stone, 0);
+                wRf30.setBlock(sx30 + dx, sy30 + 1, sz30 + dz, BR::Stone, 0);
+            }
+        EntityManager emRf30;
+        const QVector3D player30(float(sx30) + 0.5f, float(sy30) + 0.5f, float(sz30) + 12.5f); // XZ 12.5 < 16 激活圈
+        emRf30.tickSpawners(6.0, &wRf30, player30); // 单周期（kSpawnerInterval=6s）
+        int squids30 = 0;
+        bool atWater30 = false;
+        for (int i = 0; i < emRf30.count(); ++i) {
+            if (!emRf30.aliveAt(i) || emRf30.mobTypeAt(i) != int(EntityManager::MobSquid)) continue;
+            ++squids30;
+            const QVector3D p = emRf30.posAt(i);
+            atWater30 = atWater30 || (int(p.x()) == sx30 + 1 && int(p.y()) == sy30
+                                      && int(p.z()) == sz30);
+        }
+        const bool okRf30 = squids30 == 1 && atWater30;
+        if (!okRf30) {
+            qInfo().noquote() << "  [review-f #30 diag] squids" << squids30
+                              << "atWater" << atWater30 << "| count" << emRf30.count()
+                              << "| waterCell"
+                              << (wRf30.blockAt(sx30 + 1, sy30, sz30) == BR::Water);
+        }
+        if (!okRf30) ++totalFail;
+        qInfo().noquote() << (okRf30 ? "PASS" : "FAIL")
+                          << "| review-f #30 squid cage spawns in water: squid-typed spawner uses water "
+                             "cell predicate (cell+above both Water, no solid floor needed) — exactly 1 "
+                             "squid in the sole 2-deep water column neighbor while all 7 other neighbors "
+                             "stone-filled (old land predicate would spawn nowhere / beached squid)";
+    }
+
+    // ── Review 2026-08-23 #31 被动笼不受敌对预算压制探针 ──
+    // 背景：旧 tickSpawners 入口全局敌对 cap（hostileCount()>=kHostileMobCap=30）+ 玩家周边区域 cap 早退
+    //   对**被动笼**同样生效 → 夜里敌对满 30 时猪 / 羊笼全停。review #31 修法 = 闸门按笼型分流：被动笼仅留
+    //   同型 local cap（kSpawnerLocalCap）+ 总 cap（kCap）；敌对笼保留三重闸门。机制等价 MC 1.0 spawner
+    //   不受 ambient hostile cap 约束。rig：96 宽世界（48 区域半径外可容远场种子），远场 (4..9,·,4..8) 预置
+    //   30 只蹒腚者（XZ 距玩家 ~57 > kHostileAreaRadius=48，全局敌对预算打满），玩家旁猪笼 + 蹒腚者笼各一
+    //   （邻位手工挖空 + 石底）。一周期 → 猪笼照刷恰 1（旧入口早退判别位：0 刷），蹒腚者笼被全局 cap 压制
+    //   0 刷，hostileCount 恒 30。
+    {
+        World wRf31;
+        wRf31.setWidth(96);
+        wRf31.setDepth(96);
+        wRf31.setHeight(48);
+        wRf31.setSeed(9);
+        const int py31 = 8, pz31 = 48;
+        const int pigX31 = 44, shamX31 = 52; // 两笼 XZ 距玩家 (48.5,48.5) 均 <16 激活圈
+        const int cages31[2] = { pigX31, shamX31 };
+        for (int cxi : cages31)
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dz == 0) continue; // 笼格本身
+                    wRf31.setBlock(cxi + dx, py31, pz31 + dz, BR::Air, 0);    // 陆生刷位：air×2
+                    wRf31.setBlock(cxi + dx, py31 + 1, pz31 + dz, BR::Air, 0);
+                    wRf31.setBlock(cxi + dx, py31 - 1, pz31 + dz, BR::Stone, 0); // + 石底（显式，同 t786 口径）
+                }
+        wRf31.setBlock(pigX31, py31, pz31, BR::Spawner,
+                       BlockRegistry::spawnerStateForMob(EntityManager::MobPig));
+        wRf31.setBlock(shamX31, py31, pz31, BR::Spawner,
+                       BlockRegistry::spawnerStateForMob(EntityManager::MobShambler));
+        EntityManager emRf31;
+        for (int i = 0; i < 30; ++i) // 远场敌对种子：打满全局 cap（kHostileMobCap=30）
+            emRf31.spawnHostileMob(4 + (i % 6), py31, 4 + (i / 6), EntityManager::MobShambler);
+        const QVector3D player31(48.5f, 8.5f, 48.5f);
+        emRf31.tickSpawners(6.0, &wRf31, player31); // 单周期
+        const QVector3D pigCage31(float(pigX31) + 0.5f, 8.5f, float(pz31) + 0.5f);
+        const QVector3D shamCage31(float(shamX31) + 0.5f, 8.5f, float(pz31) + 0.5f);
+        const int pigs31 = emRf31.mobTypeCountNear(pigCage31, 4.0f, EntityManager::MobPig);
+        const int shamsNear31 = emRf31.mobTypeCountNear(shamCage31, 4.0f, EntityManager::MobShambler);
+        const bool okRf31 = emRf31.hostileCount() == 30 && shamsNear31 == 0 && pigs31 == 1;
+        if (!okRf31) {
+            qInfo().noquote() << "  [review-f #31 diag] pigsNear" << pigs31
+                              << "shamsNear" << shamsNear31
+                              << "hostiles" << emRf31.hostileCount();
+        }
+        if (!okRf31) ++totalFail;
+        qInfo().noquote() << (okRf31 ? "PASS" : "FAIL")
+                          << "| review-f #31 passive cage ignores hostile budget: with global hostile "
+                             "pool maxed (30 far seeded shamblers >48 away, outside area radius), "
+                             "nearby pig cage still spawns exactly 1 (old entry gate starved ALL cages "
+                             "incl. passive), shambler cage correctly suppressed by hostile global cap, "
+                             "hostileCount stays 30 (MC 1.0 spawner not bound by ambient hostile cap; "
+                             "same-type local cap + total kCap remain, manual check)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
