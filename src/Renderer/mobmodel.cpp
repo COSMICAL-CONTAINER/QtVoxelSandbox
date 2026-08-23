@@ -71,6 +71,10 @@ constexpr float kLegSwingAmp = 0.5f;
 // 全局 UV 上下文（GUI 线程内 MobModel 生命周期，rebuild 串行设置每盒原点；无并发）：
 bool   g_packTextured = false;       // pack 关 → 全脸 [0,1]²（kFace 原 u,v）；pack 开 → MC box-UV
 float  g_texW = 64.0f, g_texH = 32.0f; // 当前 mob 贴图 base 尺寸（HD 包是 base 整数倍，UV 分数 = MC 像素 / base）
+// t782 燃烬者专用：**pack 关也走 MC box-UV**（程序贴图 entity_emberling.png 本身按 blaze 布局自绘——头区 +
+//   棒条区分区，build_entities_pack.py；全脸 UV 会把整张 64×32（含棒条区）拉上每张脸）。rebuild 开头按分支
+//   设置（仅 mobType 17 置 true），其余 mobType 恒 false（pack 关全脸，零回归）。
+bool   g_boxUvAlways = false;
 // 当前盒的 MC textureOffset(u0,v0) + size(w,h,d)（MC 像素；rebuild 在每个 addBox 前调 setMobTex 设）。
 float  g_boxU0 = 0, g_boxV0 = 0, g_boxW = 1, g_boxH = 1, g_boxD = 1;
 
@@ -118,9 +122,10 @@ void mobFaceQtUV(int face, float u0, float v0, float w, float h, float d,
 
 // 写入一角的 UV：pack 关 → kFace 全脸 u,v；pack 开 → MC box-UV 子区（本盒 textureOffset + size）插值。
 //   s.u/s.v ∈ {0,1}² 是面内角点的归一化坐标（kFace 定义），pack 开时把子区 [umin,umax]×[vmin,vmax] 按 s 插值。
+//   t782：g_boxUvAlways（仅燃烬者）pack 关也走 box-UV——程序贴图即按 blaze 盒区布局自绘（见上全局注释）。
 inline void writeMobUV(MobVtx &vt, const Sgn &s, int face, bool pack)
 {
-    if (!pack) { vt.u = s.u; vt.v = s.v; return; }
+    if (!pack && !g_boxUvAlways) { vt.u = s.u; vt.v = s.v; return; }
     float umin, vmin, umax, vmax;
     mobFaceQtUV(face, g_boxU0, g_boxV0, g_boxW, g_boxH, g_boxD, umin, vmin, umax, vmax);
     vt.u = umin + s.u * (umax - umin);
@@ -322,12 +327,13 @@ void MobModel::setMobType(int type)
     // 0（测试生物）/ 越界 → 兜底 Pig（保几何非空、bounds 合法；Main.qml 对 mobType 0 仍走 UnitCube，
     //   不进本类，故此处兜底仅防误设）。合法 mobType：1 猪 / 2 牛 / 3 羊 / 4 Shambler(僵尸) /
     //   5 Bones(骷髅) / 6 Stalker(苦力怕) / 7 Spider(蜘蛛) / 8 Chicken(鸡) / 9 Squid(鱿鱼) / 10 Wolf(狼) /
-    //   11 Ocelot(豹猫/猫；t481) / 12 SnowGolem(雪傀儡；feat) / 13 IronGolem(铁傀儡；feat) / 14 Silverfish(银鱼；t487)。
+    //   11 Ocelot(豹猫/猫；t481) / 12 SnowGolem(雪傀儡；feat) / 13 IronGolem(铁傀儡；feat) / 14 Silverfish(银鱼；t487) /
+    //   16 Nightwalker(夜行者；t727) / 17 Emberling(燃烬者；t728)。
     //   修：原仅接 1-5 且误标 5=Stalker（实际 enum 5=Bones）。
-    //   注：12 SnowGolem / 13 IronGolem 此前在 Main.qml 用 UnitCube 堆叠（不走 MobModel）；feat 接入资源包实体
-    //   贴图（snow_golem.png / iron_golem.png）改走 MobModel（T 字 UV 展开进 pack entity 贴图），南瓜头 / 眼 / 嘴
-    //   仍由 Main.qml delegate 补独立 Model（§9 区隔：南瓜头是单独的橙色南瓜模型，非贴图的一部分）。
-    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11 && type != 12 && type != 13 && type != 14) type = 1;
+    //   t782 关键修（「猪模型套皮」根因）：白名单此前止于 14——16/17 被**静默钳成 1（猪）**，夜行者/燃烬者
+    //   自 t727/t728 起三处消费端（实体 delegate / 图鉴预览 / 刷怪笼迷你）实际一直渲染猪几何套 mob 贴图
+    //   （rebuild 的 16/17 分支是死代码；t781 夜行者重做也因此未生效）。补 16/17 两项入表。
+    if (type != 1 && type != 2 && type != 3 && type != 4 && type != 5 && type != 6 && type != 7 && type != 8 && type != 9 && type != 10 && type != 11 && type != 12 && type != 13 && type != 14 && type != 16 && type != 17) type = 1;
     if (type == m_mobType) return;
     m_mobType = type;
     emit mobTypeChanged();
@@ -391,6 +397,22 @@ void MobModel::setPackTextured(bool on)
     rebuild();
 }
 
+// t782 燃烬者棒组公转角 setter（度）：值未变早退；变化 → rebuild 把 4 根棒挪到新轨道位（棒心
+//   (cos(i·90°+spin)·0.62, -0.03, sin(...)·0.62)，棒身恒竖直只轨道心公转——同 t728 旧 QML Repeater
+//   「父 Node eulerRotation.y 转 + 竖棒」的观感，机制等价 MC 烈焰人棒组环绕旋转）。QML 用
+//   `NumberAnimation on rodSpin`（0→360 无缝循环，帧率无关）。perf：量化 6°/步（60 步/圈 ≈ 27 步/s
+//   @2.2s/圈，视觉连续）防每帧微变 rebuild——同 setWalkPhase 量化动机，但步距更细（旋转是主视觉动画，
+//   腿摆 12 步/圈的粒度对连续旋转会显阶跃）。
+void MobModel::setRodSpin(float deg)
+{
+    constexpr float kStep = 6.0f;
+    const float q = std::round(deg / kStep) * kStep;
+    if (q == m_rodSpin) return;
+    m_rodSpin = q;
+    emit rodSpinChanged();
+    rebuild();
+}
+
 // 按 m_mobType 选比例建「躯干 + 头（俯仰）+ 4 腿（摆动）（+ 牛角随头转）」多盒几何；t282 加 Shambler 人形分支。
 // 局部原点 = 躯干中心；头朝 -Z（前）。比例经手调使每种 mob 在 ~1×1×1 碰撞立方（EntityManager radius=0.5）内可辨：
 //   - 猪：紧凑低矮、短腿、大头；   - 牛：高大长身 + 头顶两小角盒；  - 羊：圆胖躯干、小头、短腿。
@@ -409,10 +431,12 @@ void MobModel::rebuild()
 
     // R19 C3：设置 UV 模式（pack 关=全脸 / 开=MC box-UV 精确贴图）。g_texW/H 默认 64×32，各 mob 分支按其贴图
     //   base 尺寸覆写（zombie/snow_golem=64×64、iron_golem=128×128，其余四足/虫=64×32）。pack 关时 writeMobUV
-    //   不读 g_texW/H 或 setMobTex 设的 box texOffs（全脸 [0,1]²，零回归）。
+    //   不读 g_texW/H 或 setMobTex 设的 box texOffs（全脸 [0,1]²，零回归）。t782：g_boxUvAlways 默认 false，
+    //   仅燃烬者分支置 true（pack 关也 box-UV，程序贴图即按盒区布局自绘）。
     g_packTextured = m_packTextured;
     g_texW = 64.0f;
     g_texH = 32.0f;
+    g_boxUvAlways = false;
 
     if (m_mobType == 4) {
         // t282 Shambler（蹒跚者；机制等价 MC 1.0 僵尸，§9 区隔改名 + 原创模型/贴图）：
@@ -807,15 +831,36 @@ void MobModel::rebuild()
         setMobTex(56, 0, 2, 30, 2);
         addBoxRot( 0.10f, -0.85f,  0.00f, 0.07f, 0.55f, 0.07f, -0.35f,  0.00f, -legSw, verts, idx, bMin, bMax); // 右腿
     } else if (m_mobType == 17) {
-        // t728 燃烬者（Emberling；机制等价 MC 1.0 烈焰人 Blaze，§9 区隔 + 原创模型/贴图）：悬浮单头怒焰怨灵
-        //   —— 单一中心大圆头盒（~0.9 宽 ×0.9 高悬浮），无四肢（下端烟灰混合观感由 Main.qml delegate 环绕旋转
-        //   竖棒补视觉）。局部原点 = 碰撞中心（halfW=0.5/halfH=0.6 → 碰撞 1.0×1.2）；头盒中心在 origin →
-        //   Main.qml mobModelYOff = 0。hover 上下 sin 浮动由 Main.qml delegate 整体 Model 动画驱动（几何不动）。
-        //   R19 C3 UV（MC Blaze base 64×64）：烈焰人头 head(0,0)8×8×8 —— 单盒竣工整张；pack 命中 blaze.png 时头盒
-        //   按该布局粗对齐；pack 关走全脸 entity_emberling 程序生成贴图 [0,1]²，UV 不读。
-        g_texW = 64.0f; g_texH = 64.0f;
+        // t728/t782 燃烬者（Emberling；机制等价 MC 1.0 烈焰人 Blaze，§9 区隔 + 原创模型/贴图）：悬浮
+        //   **单头 + 4 根烈焰棒**——无身体（用户原话「仅一颗头 + 4 根烈焰棒绕身旋转」）。局部原点 = 碰撞
+        //   中心（halfW=0.5/halfH=0.6 → 碰撞 1.0×1.2）→ Main.qml mobModelYOff=0；整体悬浮（hover）由
+        //   Main.qml delegate 动画驱动（几何不动）。
+        //   t782 重做（t728 旧版 = 单头盒 + 棒组在 Main.qml 用 4 个 UnitCube 纯色 Repeater 手搓——图鉴/刷怪笼
+        //   各自手抄且无贴图；且 setMobType 白名单缺 17 → 实际渲染猪几何，「猪模型套皮」根因）：
+        //   头 + 4 棒全进本共享几何，三消费端（delegate / 图鉴 / 笼迷你）同源；棒带贴图。
+        //   几何参数：头 = 单一略大方盒 0.88³（心 (0,+0.10,0)，顶 +0.54 / 底 -0.34）；棒 ×4 = 细长竖盒
+        //   0.10×1.10×0.10（半 (0.05,0.55,0.05)，心 y=-0.03 → 跨 [-0.58,+0.52] 伸过碰撞盒上下沿，烈焰人
+        //   「棒长于头」比例），轨道半径 0.62（棒内缘 0.57 与头半 0.44 间隙 0.13 不穿模；外缘 0.67 微出
+        //   碰撞 halfW 0.5——纯视觉，hitbox/AI 不动），径向 90° 分布 + rodSpin 公转（棒身恒竖直只轨道心
+        //   转，QML NumberAnimation on rodSpin 连续驱动；迷你态静态角即可）。总跨 y [-0.58,+0.54]=1.12 <
+        //   碰撞 1.2。walkPhase 无四肢不读。
+        //   UV **两态均 MC box-UV**（g_boxUvAlways=true；MC Blaze 布局）：头 head(0,0)8×8×8 / 棒共用
+        //   rod(0,16)2×8×2。base **64×32**（t782 修 t728 误 64×64：demo 包 blaze/blaze.png 实为 64×32
+        //   base（256×128=×4 HD，resourcepackmanager t779 头像侧同实测；vanilla 64×64 在本工程包源不出现）
+        //   ——旧 64×64 误基把 V 按双倍采样错区，同 t781 夜行者 enderman 误基同族）；pack 关程序贴图
+        //   entity_emberling.png 同 64×32 blaze 布局（头区黄焰+白热核 / 棒条区烟灰暗黄竖纹，build_entities_pack.py）。
+        //   眼：贴图脸自带（pack 态 blaze 脸暗色眼纹 / 程序态白热焰核）→ 无 overlay 眼层（t777-t781 纪律）。
+        g_texW = 64.0f; g_texH = 32.0f;
+        g_boxUvAlways = true;
         setMobTex(0, 0, 8, 8, 8);
-        addBox( 0.00f,  0.00f,  0.00f, 0.45f, 0.45f, 0.45f, verts, idx, bMin, bMax);
+        addBox(0.00f, 0.10f, 0.00f, 0.44f, 0.44f, 0.44f, verts, idx, bMin, bMax); // 单头（略大方盒）
+        const float rodSpin = qDegreesToRadians(m_rodSpin);
+        for (int i = 0; i < 4; ++i) {
+            const float ang = qDegreesToRadians(float(i) * 90.0f) + rodSpin;
+            setMobTex(0, 16, 2, 8, 2);
+            addBox(std::cos(ang) * 0.62f, -0.03f, std::sin(ang) * 0.62f,
+                   0.05f, 0.55f, 0.05f, verts, idx, bMin, bMax); // 烈焰棒 ×4（竖直细长盒，轨道心公转）
+        }
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
         // R19 C3 UV（MC Cow base 64×32；U1 §2）：body(18,4)12×18×10 / head(0,0)8×8×6 / horn(22,0)1×3×1 / leg(0,16)4×12×4。
