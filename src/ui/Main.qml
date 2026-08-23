@@ -134,6 +134,7 @@ Window {
     property bool settingsOpen: false
     // pause-menu 暂停菜单「进度」按钮子态（5 行布局行2）：显成就列表（progress.achievements() delegate +
     //   revision 触碰刷新）。仅暂停叠层有意义（!captured）；Esc / 返回按钮关。纯呈现态，PLAN §2 分层（UI 层）。
+    //   t790：成就面板 = 右下角悬浮 dock（居中模态改版，详见 progressOverlay 头注）。
     property bool progressOpen: false
     // pause-menu 暂停菜单「统计」按钮子态（5 行布局行2）：显统计列表（progress.statsList() delegate +
     //   revision 触碰刷新）。同 progressOpen 模式（暂停叠层 !captured；Esc / 返回关）。纯呈现态。
@@ -10144,6 +10145,10 @@ Window {
         Rectangle {
             width: 420; height: 360; radius: 10
             anchors.centerIn: parent
+            // t790：进度（成就树）面板开时隐藏菜单本体 —— 成就面板已改右下角悬浮 + 撤自身整屏压暗，
+            //   菜单若残留会被悬浮面板半遮（右半被 760 宽面板盖住、左半透出）成残缺观感；隐菜单只留
+            //   0.55 压暗游戏背景 + 悬浮面板独占视野。返回（关面板）→ 菜单回归。
+            visible: !window.progressOpen
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
             Column {
                 anchors.centerIn: parent; spacing: 10
@@ -10578,6 +10583,11 @@ Window {
     //     发射独立根（见 playerprogress.cpp）。
     //   revision 触碰刷新：model / 树数据表达式显式读 progress.revision 且 revision 参与返回值（_r>=0 守卫
     //   恒真），防 qmlcachegen AOT 把裸触碰读当死代码消除（qml-touch 铁律）。
+    //   t790 布局改版（用户「成就弹窗太占位置」）：① 面板居中 760×560 模态 → **右下角悬浮 dock**（margin 16
+    //   贴边，让出屏幕中心）；② 撤本叠层自身 0.7 整屏压暗（原与暂停 0.55 叠加 ≈ 整屏黑 = 「太占位置」的
+    //   一半；透明点击吸收层保留，modal 语义不变）；③ 面板底改半透明 + #3a444f 描边（t783 浮层语言）与
+    //   主 UI（实心 #1e1e1e 菜单块）视觉区分；④ 树视口（可拖动区域）加半透明加深底 + 描边内嵌框；⑤ 暂停
+    //   菜单本体在本面板开时隐藏（防右下悬浮面板半遮居中菜单成残缺观感）。
     //   仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 自绘原创。
     //   成就名 / 描述 / 图标 id 均来自 Game 层 PlayerProgress（不引 MC 专名）。
     Item {
@@ -10595,16 +10605,29 @@ Window {
             enabled: window.progressOpen
             onActivated: window.progressOpen = false
         }
+        // t790：撤整屏 0.7 压暗 —— 面板改右下角悬浮后不再整屏接管（用户「太占位置」主诉：居中大面板 +
+        //   暂停 0.55 / 进度 0.7 双层压暗 ≈ 整屏黑）。保留全屏**透明**点击吸收层：modal 语义不变（点击
+        //   不穿透到背后暂停叠层 / 不误触发「点击恢复游戏」），必须走面板「返回」/ Esc 关闭。
         Rectangle {
             anchors.fill: parent
-            color: Qt.rgba(0, 0, 0, 0.7)
+            color: "transparent"
             MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
         }
         Rectangle {
             id: progressPanel
             width: 760; height: 560; radius: 10
-            anchors.centerIn: parent
-            color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
+            // t790：居中模态 → 右下角悬浮 dock（margin 16 贴边）—— 让出屏幕中心 / 左上视野（背后只剩
+            //   暂停叠层 0.55 压暗的游戏画面）。内部全部坐标系是面板局部（节点公式 / tooltip 钳制 /
+            //   clampPan / minimap / 返回按钮锚），移动面板零逻辑影响。
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 16
+            anchors.bottomMargin: 16
+            // t790 浮层视觉语言（t783 variantPanel 同款）：半透明 rgba 深钢蓝底（刻意 Rectangle rgba 而
+            //   非 Item opacity —— 后者连带淡化子控件）+ #3a444f 描边 —— 与主 UI（暂停菜单实心 #1e1e1e
+            //   居中块）拉开「悬浮层 vs 主 UI」视觉区分。
+            color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
+            border.color: "#3a444f"; border.width: 1
             // ── 树数据快照（触碰 revision；achievements() 携 col/row/iconId 布局字段）──
             //   review-L3 可见性门：面板关闭期间（progressOverlay.visible=false）返空 model —— 原绑定无条件
             //   触碰 progress.revision，而 playTime 每 ~0.5s flush 必 bump revision → 全天候（含面板关）每
@@ -10766,6 +10789,15 @@ Window {
                     //   「返回按钮离下边缘过远」）；改后按钮贴底 8px。
                     height: parent.height - 32 /*标题*/ - 18 /*副标题*/ - 38 /*按钮区+间距*/
                     clip: true
+                    // t790 拖拽画布底板（「可拖动区域背景与主 UI 视觉区分」）：半透明加深底 + #3a444f 描边
+                    //   内嵌框 —— 与面板底再拉一档层次，标示「这一块是可拖拽平移的画布」（副标题「拖拽查看」
+                    //   的视觉对应）。声明在 treeDragArea / treeCanvas 之前 = 绘制最底层，不挡节点 / 连线 / 交互。
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: Qt.rgba(0, 0, 0, 0.35)
+                        border.color: "#3a444f"; border.width: 1
+                    }
                     // 布局常量（列距 / 行距 / 边距 / 节点尺寸；树节点与连线共用同一公式）。
                     readonly property real kColW: 200
                     readonly property real kRowH: 110
@@ -11055,12 +11087,13 @@ Window {
                         anchors.margins: 8
                         width: 160; height: 120
                         z: 5
-                        // 半透明深灰底 + 描边（悬浮于树内容之上但不完全遮挡背后节点；面板同族配色）。
+                        // 半透明深底 + 描边（悬浮于树内容之上但不完全遮挡背后节点；t790 浮层语言同款
+                        //   rgba(0.059,0.078,0.102,0.85) + #3a444f —— 与面板 / 拖拽画布底板一家）。
                         Rectangle {
                             anchors.fill: parent
                             radius: 6
-                            color: Qt.rgba(0.07, 0.07, 0.07, 0.85)
-                            border.color: "#3a3a3a"; border.width: 1
+                            color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
+                            border.color: "#3a444f"; border.width: 1
                         }
                         // ── 几何映射（t753 核心）：树画布坐标 c ↔ minimap 坐标 m ──
                         //   正映射 m = off + c × fitScale（整树 bounding box 等比缩放居中）；
