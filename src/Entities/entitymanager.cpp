@@ -364,6 +364,7 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
     e.pushable = false; // 下落方块不被玩家推动（同掉落物变体）
     e.kind = FallingBlock;
     e.blockId = blockId;
+    e.fallStartY = e.pos.y(); // t794 铁砧砸伤落差基准（spawn 时刻中心 Y；沙/砾等族不读，无害写入）
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -388,6 +389,7 @@ void EntityManager::spawnFallingBlockState(int x, int y, int z, int blockId, int
     e.kind = FallingBlock;
     e.blockId = blockId;
     e.blockState = state; // t527：携带 state（积雪层层数 metadata；仅 SnowLayer 用）
+    e.fallStartY = e.pos.y(); // t794 铁砧砸伤落差基准（同 spawnFallingBlock；SnowLayer 不读无害）
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -5081,6 +5083,56 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (BlockRegistry::isFullCube(b)) { supportCellY = cy; break; } // 完整立方 → 着地支撑
                 dropCellY = cy; break; // 不完整方块（火把 / 半砖 / ...）→ 沙失撑变掉落物
             }
+            // t794 下落铁砧砸伤（机制等价 MC 1.0 anvil crush；**先伤后落** —— 本检查在着地还原方块之前跑，
+            //   生物不挡下落体，铁砧穿过它落到下方方块格还原）：携带 Anvil 族 id 且本次下落未结算过砸伤
+            //   （anvilDamaged 一次性拍）时，用「本 tick 扫掠盒」做重叠测试 —— XZ = 铁砧 footprint
+            //   [pos±halfW]（1×1 满格），Y = [min(pos.y,newY)−halfH, pos.y+halfH]（本帧下落扫过的整段，
+            //   防高速下落一帧跨过薄身 mob 漏检）。命中目标族：全体活体 mob（damageEntity 扣血 + 红闪 +
+            //   归零 mobDied 链）+ 玩家（listener 脚位 AABB [±listenerHalfW]×[0,listenerHeight]；仅
+            //   playerTargetable —— 创造/观察者无敌跳过，机制等价 MC；发 mobAttackedPlayer 携 MobAnvil
+            //   哨兵 → 呈现层映射死因 DeathCause::Anvil + 护甲减伤链，同 MobTnt 爆炸先例；击退 = 玩家−铁砧
+            //   水平归一推离落点）。伤害 = 落差函数（kAnvil* 常量注释见 .h：dmg=(floor(落差)−1)×2，落差
+            //   = fallStartY − 扫掠底中心，2 格起伤 / 每多 1 格 +1♥ / 上限 40HP）；dmg≤0（落差不足）不置位
+            //   不结算，继续下落累积。结算后 anvilDamaged=true —— 同一次下落后续帧不再重复扣血（每实体
+            //   每次下落只伤一次；一拍内同时压到多目标则全体各结算一次）。
+            if (BlockRegistry::isAnvil(quint8(e.blockId)) && !e.anvilDamaged) {
+                const float sweepLow = std::min(newY, e.pos.y());       // 本帧扫掠底中心
+                const float fallDist = e.fallStartY - sweepLow;         // 落差（格）
+                const int dmg = std::min(kAnvilCrushDamageCap,
+                                         std::max(0, (int(qFloor(fallDist)) - 1) * 2));
+                if (dmg > 0 && fallDist >= kAnvilMinFallBlocks) {
+                    bool anyHit = false;
+                    for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                        const Entity &m = m_entities[size_t(mi)];
+                        if (!m.alive || m.kind != Mob || m.dead) continue; // 空槽 / 非 mob / 尸体
+                        // AABB 重叠（XZ 分离 / Y 分离逐轴早退；铁砧半宽 halfW、mob 用各自 halfW/halfH）
+                        if (std::abs(m.pos.x() - e.pos.x()) >= e.halfW + m.halfW) continue;
+                        if (std::abs(m.pos.z() - e.pos.z()) >= e.halfW + m.halfW) continue;
+                        if (m.pos.y() + m.halfH <= sweepLow - e.halfH
+                            || m.pos.y() - m.halfH >= e.pos.y() + e.halfH) continue;
+                        damageEntity(mi, dmg); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
+                        anyHit = true;
+                    }
+                    if (playerTargetable) {
+                        const float px = listener.x(), py = listener.y(), pz = listener.z();
+                        if (px + listenerHalfW > e.pos.x() - e.halfW
+                            && px - listenerHalfW < e.pos.x() + e.halfW
+                            && pz + listenerHalfW > e.pos.z() - e.halfW
+                            && pz - listenerHalfW < e.pos.z() + e.halfW
+                            && py + listenerHeight > sweepLow - e.halfH
+                            && py < e.pos.y() + e.halfH) {
+                            // 击退方向 = 玩家 − 铁砧 水平归一（推离落点；退化 → (1,0) 兜底同箭模式）
+                            float kbX = px - e.pos.x(), kbZ = pz - e.pos.z();
+                            const float klen = std::sqrt(kbX * kbX + kbZ * kbZ);
+                            if (klen > 1e-3f) { kbX /= klen; kbZ /= klen; }
+                            else { kbX = 1.0f; kbZ = 0.0f; }
+                            emit mobAttackedPlayer(dmg, int(MobAnvil), kbX, kbZ);
+                            anyHit = true;
+                        }
+                    }
+                    if (anyHit) e.anvilDamaged = true;
+                }
+            }
             if (supportCellY >= 0) {
                 // 着地：在支撑方块上方一格放置 blockId（覆盖空气 / 水；t220 沙落水填堵水格）+ 标记移除。
                 //   t527：积雪层（blockId==SnowLayer）着地走 5 参数 setBlockFromEntity 带 state（保留层数 metadata）；
@@ -5089,6 +5141,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId), quint8(e.blockState));
                 else
                     world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId));
+                // t794 铁砧着地：**恒还原铁砧方块**（不改损坏阶段 / 不变掉落物 —— 机制等价 MC 1.0 铁砧落地
+                //   不碎成物品，最多砸坏自己进下一阶段；本工程简化不做阶段推进，落地还原原阶段）+ 发
+                //   fallingBlockLanded（呈现层播重铁落地音）。
+                if (BlockRegistry::isAnvil(quint8(e.blockId)))
+                    emit fallingBlockLanded(cx, supportCellY + 1, cz, e.blockId);
                 toRemove.push_back(idx);
                 dirty = true;
             } else if (dropCellY >= 0) {
@@ -5126,6 +5183,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         const int layers = std::min(int(e.blockState) + 1, int(BlockRegistry::SnowLayerStageMax) + 1);
                         emit snowLayerCollapseDropped(cx, dropCellY + 1, cz, 0x23D, layers);
                     }
+                    toRemove.push_back(idx);
+                    dirty = true;
+                } else if (BlockRegistry::isAnvil(quint8(e.blockId))) {
+                    // t794 铁砧落不完整方块（火把 / 半砖 / 雪层…）上：**还原铁砧方块**于该方块上方一格 ——
+                    //   与沙 t220「落部分方块碎成掉落物」语义分叉（机制等价 MC 1.0 铁砧落任何实体上都还原
+                    //   方块，不碎成物品；不改损坏阶段，落地恒还原原阶段。浮在部分方块上方不二次坍落 ——
+                    //   setBlockFromEntity 直写不经 checkGravityBlockOnEdit，破掉那格支撑才会再落，无死循环）。
+                    //   occ 守卫内（该格 air/水，列扫保证；被占罕见时静默消失，同沙兜底）+ 落地音事件。
+                    world->setBlockFromEntity(cx, dropCellY + 1, cz, quint8(e.blockId));
+                    emit fallingBlockLanded(cx, dropCellY + 1, cz, e.blockId);
                     toRemove.push_back(idx);
                     dirty = true;
                 } else {

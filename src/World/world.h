@@ -522,8 +522,9 @@ public:
     //   岩浆焚毁路径末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
-    // t799 重力方块（沙 / 沙砾）失撑坍落复检（机制等价 MC 1.0 falling sand/gravel「支撑失效即刻落」；
-    //   同甘蔗 / 雪层支撑校验族）。（x,y,z,oldId,id）= 本格刚发生的编辑。**放置路径与更新路径同判**
+    // t799 重力方块（沙 / 沙砾；t794 扩铁砧三阶段）失撑坍落复检（机制等价 MC 1.0 falling
+    //   sand/gravel/anvil「支撑失效即刻落」；同甘蔗 / 雪层支撑校验族）。（x,y,z,oldId,id）= 本格刚发生
+    //   的编辑。**放置路径与更新路径同判**
     //   （单一谓词 BlockRegistry::isGravityBlock + isFullCube 支撑判定，取代旧 Main.qml
     //   maybeTriggerFallingBlock 的 QML 侧触发——旧版依赖 blockPlaced/blockBroken 信号→QML→嵌套 setBlock
     //   的呈现层链路，脆弱且放置路径实测不触发「沙放火把上稳定站住」）。两分支：

@@ -175,7 +175,7 @@ public:
     //   分支（同 Arrow）。死亡掉 0-1 燃烬棒（BlazeRodId 0x245，t726）+ 3 XP（呈现层 onMobDied 分流）。死因
     //   DeathCause::Emberling「被燃烬者的火球焚杀」（t727 Nightwalker 先例）。§9 原创：名称 / 模型（MobModel
     //   中心头盒 + QML 环绕旋转竖棒）/ 贴图（t717 已建 entity_emberling 程序贴图 + pack blaze.png）全原创。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -742,6 +742,13 @@ signals:
     //   count=层数（每层 1 雪球，同玩家铲挖 state+1 语义）。坐标 = 掉落点（不完整方块上方一格，同
     //   fallingBlockDropped 约定）。呈现层转发 ItemEntityManager.spawnItem（同 fallingBlockDropped 模式）。
     void snowLayerCollapseDropped(int x, int y, int z, int itemId, int count);
+    // t794 下落铁砧着地重击音事件：FallingBlock（Anvil 族 id）着地还原方块时发（完整立方支撑分支 +
+    //   落不完整方块还原分支两处）。坐标 = 还原格（supportCellY+1 / dropCellY+1），blockId = 铁砧族真实
+    //   id（三损坏阶段各自保留）。呈现层（Main.qml）Connections 路由到 AudioManager.playBreak(blockId)
+    //   —— 铁砧 SoundType 归 GroupStone 金属质（blockregistry 音色映射）→ 重铁落地声（机制等价 MC 1.0
+    //   铁砧落地 anvil_land 重音；零 MC 资产，§9）。仅铁砧族发（沙/沙砾维持无着地音的旧观感 —— 大规模
+    //   塌落刷屏噪音不值当，且任务口径只要铁砧）。单向事件流（PLAN §2 分层，同 fallingBlockDropped 模式）。
+    void fallingBlockLanded(int x, int y, int z, int blockId);
     // t239 mob 死亡一次性事件。t449：**延迟到 deathTimer 归零**（≈500ms 倒地动画播完）才发，而非 damageEntity
     //   致死瞬间 —— 给「侧倒 + 白烟 → 掉落」的 MC 式过渡（旧实现红闪与掉落同帧太急）。damageEntity 致死时仅
     //   置 dead=true + deathTimer + 快照 deathBurned；tick 死亡态分支 deathTimer≤0 时 emit 本信号 + releaseSlot。
@@ -874,6 +881,14 @@ private:
         //     spawn 时不查占用（同格可叠多个 PrimedTnt，各自独立引爆）。复用 FallingBlock 重力（沙子般受重力下落）。
         bool primed = false;       // 是否 PrimedTnt（引燃态 TNT；复用 FallingBlock kind）
         float fuse = 0.0f;         // 引信剩余秒（仅 primed 用；spawnPrimedTnt 设 kPrimedTntFuseSec，tick 递减 dt）
+        // t794 下落铁砧砸伤态（仅 kind==FallingBlock && BlockRegistry::isAnvil(blockId) 读）：
+        //   fallStartY = spawn 时刻实体中心 Y（落差 = fallStartY − 本 tick 扫掠底中心；伤害随落差增，
+        //   见 tick FallingBlock 分支 kAnvil* 常量注释）。anvilDamaged = 本次下落已结算过一拍砸伤
+        //   （「先伤后落」：着地还原方块前首个命中拍对当时压到的全体 mob + 玩家各结算一次，之后同一次
+        //   下落不再重复扣血 —— 每实体每次下落只伤一次）。spawn 入口（spawnFallingBlock /
+        //   spawnFallingBlockState）写入 fallStartY；DMI 兜底聚合初始化缺省（同 blockState 模式）。
+        float fallStartY = 0.0f;   // 下落起点中心 Y（仅铁砧砸伤用；其余 FallingBlock 不读）
+        bool anvilDamaged = false; // 本次下落砸伤已结算（一次性拍；防多帧重复扣血）
         QString color = QStringLiteral("#ff5555"); // 渲染配色（醒目纯色）
         float vy = 0.0f;         // 垂直速度（blocks/s；向下为负）；落地后归 0；t249 击退小跳设正值（向上）
         bool resting = false;    // 是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
@@ -1491,6 +1506,12 @@ private:
     static constexpr int kCap = 64;            // 实体数上限（测试用，防溢出）
     static constexpr float kGravity = 28.0f;   // 重力加速度（blocks/s²；与玩家/掉落物同值，世界手感一致）
     static constexpr float kMaxFall = 78.4f;   // 终端下落速度（blocks/s；防无限加速）
+    // t794 下落铁砧砸伤常量（机制等价 MC 1.0 anvil crush：落差不足 kAnvilMinFallBlocks 格无伤（轻放不伤），
+    //   ≥2 格起伤，每多落 1 格 +1♥（2HP）—— dmg = (floor(落差) − 1) × 2，例：落 2 格 2HP / 落 4 格 6HP；
+    //   kAnvilCrushDamageCap = 单次砸伤 HP 上限（20♥，MC 1.0 铁砧砸伤 40HP 封顶，防高空秒杀数值溢出感）。
+    //   落差基准 = Entity.fallStartY（spawn 中心）− 本 tick 扫掠底中心（min(pos.y,newY)），见 tick FallingBlock 分支。
+    static constexpr float kAnvilMinFallBlocks = 2.0f; // 起伤落差（格；<2 格落地无砸伤）
+    static constexpr int kAnvilCrushDamageCap = 40;    // 单次砸伤 HP 上限（20♥）
     // t500 perf：mob AI / 环境扫描节流间隔（帧）。每 kAiTickInterval 帧每 mob 才跑一次「AI 决策 + 火烧 /
     //   仙人掌 / 窒息 / 吃草扫描」（错峰 idx % kAiTickInterval → 单帧 1/N mob 跑重活）。N=4 → 每 mob ~15Hz
     //   AI（MC 1.0 mob think 每 4-5 tick ≈ 12-15Hz 量级；机制对齐）。mob 物理（重力 / resting / 击退 / 推动）

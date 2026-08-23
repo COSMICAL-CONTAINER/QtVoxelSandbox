@@ -2598,10 +2598,15 @@ int main(int argc, char *argv[])
         //   dx10 火把+半空沙 / dx11 水+沙 / dx12 独立石柱+沙（爆炸用）。
         for (int dx = 0; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
         EntityManager ents;
+        // t794 审查防悬挂：gravityBlockFell 的 [&] 捕获引用本块栈局部（ents / fellSignals），块结束后连接若
+        //   仍挂在 w 上（旧 context=&w 与块同寿错配）→ 后续任何探针（t794 铁砧重力起）再发本信号即对悬空
+        //   引用求值 = UB。改挂本守卫对象（块结束析构 → 自动断连）；fallingBlockDropped 连接 context 本就是
+        //   &ents（随块析构自动断）无需改。
+        QObject gravSigGuard;
         // 复刻 Main.qml onGravityBlockFell 消费端（World 语义事件 → 下落实体）+ fallingBlockDropped → 计数。
         //   （旧版只计数不 spawn → ents 恒空 / itemDrops 恒 0 = 假 FAIL；消费端必须真转实体。）
         int fellSignals = 0, fellId = -1, itemDrops = 0;
-        QObject::connect(&w, &World::gravityBlockFell, &w,
+        QObject::connect(&w, &World::gravityBlockFell, &gravSigGuard,
                          [&](int x, int y, int z, int blockId) {
                              ++fellSignals; fellId = blockId;
                              ents.spawnFallingBlock(x, y, z, blockId);
@@ -2723,6 +2728,159 @@ int main(int argc, char *argv[])
                              "sand-column stacking on full support stays put, water column pierced "
                              "and sealed, explosion + TNT-prime silent write entries also trigger "
                              "the collapse - fixes 'sand sits stable on torch' user report";
+    }
+
+    // ── t794 铁砧重力探针（isGravityBlock 扩铁砧三阶段 + FallingBlock 砸伤 / 着地还原 / 落地音信号）──
+    //   用户报告（R19.12）：「铁砧应该要有重力效果，砸到下方的生物会扣血，砸到地面的时候会有声音。」
+    //   t799 重力链对铁砧开箱即用程度：失撑坍落 / 下落物理 100% 复用（BlockRegistry::isGravityBlock 谓词
+    //   加 isAnvil 即通，World 层零新代码）；本任务补的分叉语义 = ① 砸伤（dmg=(floor(落差)−1)×2，2 格起伤
+    //   每多 1 格 +1♥，先伤后落，每实体每次下落只伤一次）；② 着地恒还原铁砧方块（沙落部分方块变掉落物，
+    //   铁砧还原 —— 落火把上也还原不掉物品）；③ 落地音事件 fallingBlockLanded（仅铁砧族发）。矩阵断言：
+    //   (P) 砸猪数值 + 落差单调：圈养猪（四周墙围 —— aiWander 无跳跃、XZ 撞墙撤回 → 猪恒留落点列、盒顶
+    //       恒 ty+0.9，检测拍落差确定）上方铁砧落 3 格 → 恰扣 2HP（(2−1)×2），落 5 格 → 恰扣 6HP（(4−1)×2，
+    //       > A 单调；恰扣一次 = 一次性拍不多帧连扣）+ 着地还原铁砧于猪格（生物不挡下落体）；
+    //   (U) 更新路径：铁砧放完整立方上稳定（零信号）→ 挖支撑 → gravityBlockFell(id=Anvil) + 着地还原 +
+    //       landed 信号恰 1 次 + 零掉落物；
+    //   (T) 落火把（不完整方块）：还原铁砧于火把上方（**不掉物品** —— 与沙 t220 分叉）+ landed 信号 +
+    //       火把原位不动；
+    //   (L) 砸玩家：listener 站落点列 → mobAttackedPlayer 携 MobAnvil 哨兵，伤害 2HP → 6HP 随落差单调。
+    {
+        const int ty = kRigY;
+        // rig 寻址：11 宽 dx[-1,10]（圈养猪墙 x0-1 起 + 空隔 + 更新 / 火把 / 玩家列 + 边距）× 3 深 dz[-1,1]
+        //   （猪圈 z 向墙）× y[ty-1, ty+6]（平台下探 / 铁砧最高 ty+5）全净空。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 10 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 10 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 6 && clear; ++dy)
+                            if (w.blockAt(xx + dx, ty + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const bool rigOk = x0 >= 0;
+        if (!rigOk)
+            qInfo().noquote() << "  [t794 diag] no clear rig strip found (11 wide x 3 deep x y[ty-1,ty+6])";
+        // 平台（全列支撑底座；圈栏 / 各探针列共享一层）。
+        for (int dx = -1; dx <= 10; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(x0 + dx, ty - 1, z0 + dz, BR::Stone, 0);
+        EntityManager ents;
+        QObject sigGuard; // t794 信号守卫：块结束析构自动断连（防 [&] 捕获块局部悬挂，见 t799 gravSigGuard 同修）
+        int fellSignals = 0, fellId = -1, itemDrops = 0, landedSignals = 0, landedId = -1;
+        QObject::connect(&w, &World::gravityBlockFell, &sigGuard,
+                         [&](int x, int y, int z, int blockId) {
+                             ++fellSignals; fellId = blockId;
+                             ents.spawnFallingBlock(x, y, z, blockId); // 复刻 Main.qml onGravityBlockFell 消费端
+                         });
+        QObject::connect(&ents, &EntityManager::fallingBlockDropped, &ents,
+                         [&](int, int, int, int) { ++itemDrops; });
+        QObject::connect(&ents, &EntityManager::fallingBlockLanded, &ents,
+                         [&](int, int, int, int blockId) { ++landedSignals; landedId = blockId; });
+        int hitCount = 0, hitSrcType = -1, hitAmount0 = 0, hitAmount1 = 0;
+        QObject::connect(&ents, &EntityManager::mobAttackedPlayer, &ents,
+                         [&](int amount, int srcType, float, float) {
+                             if (hitCount == 0) hitAmount0 = amount;
+                             else if (hitCount == 1) hitAmount1 = amount;
+                             hitSrcType = srcType; ++hitCount;
+                         });
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        const auto tickFar = [&](int frames) {
+            for (int t = 0; t < frames; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        };
+        // 固定 80 帧落定预算：铁砧最高落 5 格 ≈ 36 帧着地；着地后立刻读数（猪被埋窒息 1HP/s 从着地起
+        //   ~63 帧后才首扣 → 80 帧内读数干净，数值不受窒息串扰）。
+        // (P) 圈养猪砸伤：A 列铁砧放 ty+3（放置即坍落，落 3 格）→ 恰 2HP；B 列 ty+5 → 恰 6HP。
+        bool okP = true;
+        int pigA = -1, pigB = -1;
+        {
+            const int ax = x0, bx = x0 + 2; // 两圈栏相邻共享中墙（x0+1）
+            const int wallsX[3] = { x0 - 1, x0 + 1, x0 + 3 };
+            for (int i = 0; i < 3; ++i) w.setBlock(wallsX[i], ty, z0, BR::Stone, 0);
+            w.setBlock(ax, ty, z0 - 1, BR::Stone, 0); w.setBlock(ax, ty, z0 + 1, BR::Stone, 0);
+            w.setBlock(bx, ty, z0 - 1, BR::Stone, 0); w.setBlock(bx, ty, z0 + 1, BR::Stone, 0);
+            pigA = ents.spawnMobTyped(ax, ty, z0, EntityManager::MobPig, QStringLiteral("#ffa0a0"), 10);
+            pigB = ents.spawnMobTyped(bx, ty, z0, EntityManager::MobPig, QStringLiteral("#a0ffa0"), 10);
+            tickFar(90); // 猪 resting 落定（盒顶 ty+0.9；圈内走不出列）
+            okP = pigA >= 0 && pigB >= 0
+                  && ents.healthAt(pigA) == 10 && ents.healthAt(pigB) == 10;
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(ax, ty + 3, z0, BR::Anvil, 0); // 下方空气 → 放置即坍落（World 层 ① 自检）
+            okP = okP && fellSignals == 1 && fellId == int(BR::Anvil);
+            tickFar(80);
+            okP = okP && itemDrops == 0 && landedSignals == 1 && landedId == int(BR::Anvil)
+                  && ents.healthAt(pigA) == 8       // 恰扣 2HP（(floor(2.1..2.27)−1)×2；恰一次 = 一次性拍）
+                  && w.blockAt(ax, ty, z0) == BR::Anvil; // 着地还原于猪格（先伤后落）
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(bx, ty + 5, z0, BR::Anvil, 0); // 落 5 格 → 恰 6HP
+            tickFar(80);
+            okP = okP && itemDrops == 0 && landedSignals == 1
+                  && ents.healthAt(pigB) == 4       // 10 − (floor(4.1..4.34)−1)×2 = 10 − 6（落差单调 > A 的 2）
+                  && w.blockAt(bx, ty, z0) == BR::Anvil;
+        }
+        // (U) 更新路径：放完整立方上稳定 → 挖支撑坍落 → 还原 + landed 恰 1 + 零掉落物。
+        bool okU = true;
+        {
+            const int ux = x0 + 5;
+            w.setBlock(ux, ty, z0, BR::Stone, 0);
+            fellSignals = 0;
+            w.setBlock(ux, ty + 1, z0, BR::Anvil, 0); // 铁砧放石头上 → 稳定（零信号）
+            okU = fellSignals == 0 && w.blockAt(ux, ty + 1, z0) == BR::Anvil;
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(ux, ty, z0, BR::Air, 0);       // 挖支撑 → World 层 ② 复检坍落
+            okU = okU && fellSignals == 1 && fellId == int(BR::Anvil)
+                  && w.blockAt(ux, ty + 1, z0) == BR::Air;
+            tickFar(80);                              // 1 格落差 → 落平台顶还原
+            okU = okU && itemDrops == 0 && landedSignals == 1 && landedId == int(BR::Anvil)
+                  && w.blockAt(ux, ty, z0) == BR::Anvil;
+        }
+        // (T) 落火把（不完整方块）：还原铁砧于火把上方一格（不掉物品 —— 与沙 t220「碎成掉落物」分叉）。
+        bool okT = true;
+        {
+            const int tx = x0 + 7;
+            w.setBlock(tx, ty, z0, BR::Torch, 0);
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(tx, ty + 3, z0, BR::Anvil, 0);  // 放置即坍落 → 落 2 格遇火把
+            okT = fellSignals == 1 && w.blockAt(tx, ty + 3, z0) == BR::Air;
+            tickFar(80);
+            okT = okT && itemDrops == 0 && landedSignals == 1 && landedId == int(BR::Anvil)
+                  && w.blockAt(tx, ty + 1, z0) == BR::Anvil // 还原于火把上方（恒还原方块）
+                  && w.blockAt(tx, ty, z0) == BR::Torch;    // 火把原位不动
+        }
+        // (L) 砸玩家：listener 脚位站落点列（playerTargetable=true）→ mobAttackedPlayer 携 MobAnvil 哨兵，
+        //     伤害随落差单调（ty+4 落 → 2HP；ty+6 落 → 6HP）。
+        bool okL = true;
+        {
+            const int lx = x0 + 9;
+            const QVector3D listener(float(lx) + 0.5f, float(ty), float(z0) + 0.5f);
+            hitCount = 0; hitSrcType = -1; hitAmount0 = 0; hitAmount1 = 0;
+            w.setBlock(lx, ty + 4, z0, BR::Anvil, 0);
+            for (int t = 0; t < 80; ++t) ents.tick(0.016f, &w, listener, 0.3f, 1.8f, true);
+            w.setBlock(lx, ty + 6, z0, BR::Anvil, 0); // 第一块已落 ty → 第二块落其上，仍砸穿玩家 AABB
+            for (int t = 0; t < 80; ++t) ents.tick(0.016f, &w, listener, 0.3f, 1.8f, true);
+            okL = hitCount == 2 && hitSrcType == int(EntityManager::MobAnvil)
+                  && hitAmount0 == 2 && hitAmount1 == 6 && hitAmount1 > hitAmount0;
+        }
+        const bool ok = rigOk && okP && okU && okT && okL;
+        if (!ok) {
+            qInfo().noquote() << "  [t794 diag] okP" << okP << "| okU" << okU << "| okT" << okT
+                              << "| okL" << okL << "| pigA hp" << (pigA >= 0 ? ents.healthAt(pigA) : -1)
+                              << "pigB hp" << (pigB >= 0 ? ents.healthAt(pigB) : -1)
+                              << "| hits" << hitCount << "amt0" << hitAmount0 << "amt1" << hitAmount1
+                              << "src" << hitSrcType << "| fell" << fellSignals << "id" << fellId
+                              << "| landed" << landedSignals << "lid" << landedId << "| items" << itemDrops;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t794 anvil gravity: anvil (3 damage stages) joins the sand/gravel gravity "
+                             "chain via the single isGravityBlock predicate (support-break and mid-air "
+                             "placement both collapse instantly), falling anvil crushes mobs and the "
+                             "player with distance-scaled damage (exactly 2HP at 3-block fall / 6HP at "
+                             "5-block, damage-first-then-land, once per entity per fall, player death "
+                             "cause via MobAnvil sentinel), lands by restoring the anvil block even on "
+                             "partial blocks like torches (never an item drop, unlike sand t220), and "
+                             "emits fallingBlockLanded for the heavy-metal landing sound";
     }
 
     // ── t800 物品栏归类清理探针（纯 Game 层 Hotbar 实例，无 World rig）：① 材料段调色板不再列羊毛物品

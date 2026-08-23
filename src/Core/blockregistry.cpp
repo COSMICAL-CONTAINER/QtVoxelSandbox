@@ -1634,11 +1634,13 @@ bool BlockRegistry::isFullCube(quint8 blockId)
     return def(blockId).shape == ShapeFull;
 }
 
-// t799 重力方块单一权威谓词（见 .h 注释）：沙（8）+ 沙砾（t761，139，「换皮沙子」机制等价 MC 1.0 gravel）。
+// t799 重力方块单一权威谓词（见 .h 注释）：沙（8）+ 沙砾（t761，139，「换皮沙子」机制等价 MC 1.0 gravel）+
+//   铁砧三阶段（t794，isAnvil 覆盖 Anvil/AnvilChipped/AnvilDamaged —— MC 1.0 铁砧同属 falling block 族：
+//   失撑坍落 / 下落实体语义与沙同链，仅着地语义分叉：恒还原方块不变掉落物，见 EntityManager tick）。
 //   失撑判定 / 下落实体语义全走本谓词，不再散落字面量。
 bool BlockRegistry::isGravityBlock(quint8 blockId)
 {
-    return blockId == Sand || blockId == Gravel;
+    return blockId == Sand || blockId == Gravel || isAnvil(blockId);
 }
 
 // t188 perf：流体类格子（Air/Water/Lava）判定，供 chunk 流体专用脏标记分类（见头注释）。

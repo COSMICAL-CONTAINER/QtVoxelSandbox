@@ -2167,6 +2167,11 @@ Window {
         //   多雪球，拾取 addStack 一次入多件，同玩家挖雪层模式）。单向事件流（PLAN §2 分层：Entities 发语义
         //   事件、呈现层只消费，同 fallingBlockDropped 模式）。
         function onSnowLayerCollapseDropped(x, y, z, itemId, count) { itemEntities.spawnItem(x, y, z, itemId, count) }
+        // t794 下落铁砧着地重击音：EntityManager FallingBlock（Anvil 族 id）着地还原方块时发（完整立方支撑
+        //   / 落不完整方块还原两分支）→ 播该方块 id 的 break 音（AudioManager 按 SoundType 材质组路由 ——
+        //   铁砧归 GroupStone 金属质 → 重铁落地声，机制等价 MC 1.0 铁砧落地 anvil_land；§9 零 MC 资产）。
+        //   仅铁砧族发本信号（沙/沙砾维持无着地音旧观感）。单向事件流（PLAN §2 分层，同上方两信号模式）。
+        function onFallingBlockLanded(x, y, z, blockId) { audio.playBreak(blockId) }
         // t297 爆炸掉落（EntityManager detonateStalker 内 ~50% 概率/破坏块发）：转发到
         //   ItemEntityManager.spawnItem 生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。itemId 已是
         //   BlockRegistry::dropId（Stone→Cobble 等，同玩家挖掘掉落）。同 fallingBlockDropped 模式：单向事件流
@@ -2386,6 +2391,7 @@ Window {
                 else if (mobType === EntityManager.MobIronGolem) cause = PlayerState.GolemSlain // t712：重拳直接击杀（旧落 Generic「不明原因」；摔落路径另走 GolemLaunchFall）
                 else if (mobType === EntityManager.MobNightwalker) cause = PlayerState.Nightwalker // t727 夜行者重拳（蓄力背后近战大伤害）
                 else if (mobType === EntityManager.MobEmberling) cause = PlayerState.Emberling // t728 燃烬者火球命中（Fireball tick mobAttackedPlayer 携 MobEmberling → 「被燃烬者的火球焚杀」）
+                else if (mobType === EntityManager.MobAnvil) cause = PlayerState.Anvil // t794 下落铁砧砸中（FallingBlock 砸伤分支携 MobAnvil 哨兵 → 「被落下的铁砧砸死」）
                 // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
                 //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
@@ -6185,12 +6191,19 @@ Window {
                         property bool isSnowFall: entBlockId === 44
                         property real slabH: isSnowFall ? Math.max(1.0/8.0, Math.min(1.0, (entBlockState + 1) / 8.0)) : 1.0
                         position: Qt.vector3d(0.0, isSnowFall ? (-0.5 + slabH / 2.0) : 0.0, 0.0) // 薄板底贴 cell 底（非雪 0）
-                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；雪层薄板按 slabH 缩放；其余 1.0。
+                        // t794 falling 铁砧观感：97=Anvil / 98=AnvilChipped / 99=AnvilDamaged（⚠️ QML 不 import
+                        //   C++ 静态类故字面量，同 torch=13 约定）。铁砧三盒异形（底座 12/16 宽）下落态退化为
+                        //   BlockCube 单立方 → XZ 缩到 12/16=0.75 贴近铁砧 footprint（满高 1.0：三盒占满 [0,1]）；
+                        //   侧贴图 anvil 瓦片自带头座分层 → 立方仍读作「铁砧形」而非满格方块（观感折衷，
+                        //   dev-plan t794 注明；精确三盒 falling 渲染留待后续需要再做）。
+                        property bool isAnvilFall: entBlockId === 97 || entBlockId === 98 || entBlockId === 99
+                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；雪层薄板按 slabH 缩放；铁砧 XZ 0.75；其余 1.0。
                         property bool entPrimed: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isPrimedAt(index)) : false }
                         property real entFuseProg: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.fuseProgressAt(index)) : 0 }
                         scale: {
                             if (entPrimed) return Qt.vector3d(0.98, 0.98, 0.98)          // PrimedTnt 引燃收缩
                             if (isSnowFall) return Qt.vector3d(1.0, slabH, 1.0)           // t527 雪层薄板（按层数缩放）
+                            if (isAnvilFall) return Qt.vector3d(0.75, 1.0, 0.75)          // t794 铁砧 12/16 足印缩宽（异形折衷）
                             return Qt.vector3d(1.0, 1.0, 1.0)                              // 沙石等满格立方
                         }
                         // t490 白闪脉冲相位（0..1 循环）。仅 primed 实体跑动画（非 primed 静止 0 不影响 baseColor）。

@@ -2211,8 +2211,9 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
-// t799 重力方块（沙 / 沙砾）整柱坍落 helper（头注释见 world.h）：自 (x,y,z) 起向上逐格清**连续重力方块**
-//   （BlockRegistry::isGravityBlock 单一权威；混合沙/沙砾柱各自保留 id）。每格：静默写 Air（m_chunks.setBlock
+// t799 重力方块（沙 / 沙砾；t794 扩铁砧三阶段）整柱坍落 helper（头注释见 world.h）：自 (x,y,z) 起向上逐格
+//   清**连续重力方块**（BlockRegistry::isGravityBlock 单一权威；混合沙/沙砾/铁砧柱各自保留 id）。每格：静默
+//   写 Air（m_chunks.setBlock
 //   直写 + 标脏，不经 World::setBlock → 不递归触发 checkGravityBlockOnEdit / 不重复发 broken/placed 链）+
 //   note*Write 索引维护（同雪柱坍落口径——重力方块非流体/冰/火/生长段，理论 no-op，保持入口一致防未来
 //   把某重力方块归入索引段后漏维护）+ emit blockBroken（破块粒子 / 音，机制等价 MC 失撑坍落反馈）+
@@ -2242,7 +2243,8 @@ void World::dropGravityColumn(int x, int y, int z)
     m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
-// t799 重力方块失撑复检（头注释见 world.h；机制等价 MC 1.0「沙放火把上立即落 / 支撑失效即刻落」）。
+// t799 重力方块失撑复检（头注释见 world.h；机制等价 MC 1.0「沙放火把上立即落 / 支撑失效即刻落」；t794
+//   铁砧三阶段同谓词入族——失撑判定与沙同判，着地语义分叉由 EntityManager tick 分派）。
 //   旧实现（t117/t220）：Main.qml maybeTriggerFallingBlock 消费 blockPlaced/blockBroken 信号在呈现层
 //   嵌套 setBlock(air)+spawnFallingBlock —— 放置路径实测不触发（用户报「沙放火把 / 睡莲 / 草丛 / 半砖上
 //   稳定站住，只有 >1 格落差才变掉落物」），且爆炸 / TNT 点火 / 焚毁等静默写入口完全绕过该 QML 链。
