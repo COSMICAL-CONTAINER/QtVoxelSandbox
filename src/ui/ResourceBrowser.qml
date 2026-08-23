@@ -159,7 +159,7 @@ Item {
     function mobPreviewScale(t) {
         if (t === 12 || t === 13) return 0.75
         if (t === 14) return 1.6
-        if (t === 16) return 0.55 // t727 夜行者细长人形高 ~2.6（[-1.40,1.17]）→ 缩到镜头内全身可见
+        if (t === 16) return 0.55 // t781 夜行者细肢人形高 2.70（[-1.40,1.30]）→ 缩到镜头内全身可见
         if (t === 17) return 1.6 // t728 燃烬者悬浮火球头盒 ~0.45（[-0.225,0.225]）→ 放大 1.6 可辨（同蠹虫小体型）
         return 1.0
     }
@@ -180,7 +180,7 @@ Item {
             case 12: return 0.0   // 雪傀儡 [-0.90, 0.90]（对称居中，无需上提）
             case 13: return 0.30 // 铁傀儡 [-1.20, 0.58]（偏 -Y，上提 0.30 居中主体）
             case 14: return -0.30 // 蠹虫 [-0.15, 0.14]（t750 分节重做：背脊甲板顶 0.14；小虫贴地 → 下压 0.30 进镜头中心）
-            case 16: return 0.13 // t727 夜行者 [-1.40, 1.17]（偏 -Y 0.12；×0.55 缩后上提居中主体）
+            case 16: return 0.06 // t781 夜行者 [-1.40, 1.30]（偏 -Y 0.05；×0.55 缩后上提居中主体）
             case 17: return 0.0  // t728 燃烬者悬浮头盒 [-0.225, 0.225]（近对称居中，无需调整）
         }
         return 0
@@ -790,7 +790,10 @@ Item {
                                                 }
                                                 // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
                                                 //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
-                                                alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared
+                                                // t781 夜行者：pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时
+                                                //   Mask 裁（Main.qml 实体 delegate / 刷怪笼迷你态同款；程序贴图全不透明）。
+                                                alphaMode: (root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared)
+                                                           || (root.selectedMobType === 16 && root.selectedMobPackSrc !== "")
                                                            ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
                                                 alphaCutoff: 0.5
                                             }
@@ -950,15 +953,18 @@ Item {
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
-                                        // t750 ④ 夜行者头前五官层（修复「黑影无脸」；镜像 Main.qml nwHead：
-                                        //   细长人形几何本体走共享 MobModel mobType 16，图鉴此前漏此层 = 无脸黑影）：
-                                        //   眼发光层头前 (0,0.95,-0.21) 铺竖眼贴图（pack 命中 enderman_eyes 切包内
+                                        // t750 ④ / t781 夜行者头前五官层（修复「黑影无脸」；镜像 Main.qml nwHead：
+                                        //   细肢人形几何本体走共享 MobModel mobType 16（t781 头心 0.975 半 0.28 →
+                                        //   前脸 z=-0.28），图鉴此前漏此层 = 无脸黑影）：
+                                        //   眼发光层头前 (0,1.00,-0.30) 铺竖眼贴图（pack 命中 enderman_eyes 切包内
                                         //   竖眼；Mask 裁透明底）+ 嘴非激怒态淡显暗唇（opacity 0.15，同游戏内静态）。
+                                        //   t781：pack 命中后身体贴图头前脸 row12 自带灰白双眼 → 隐 overlay 防四眼
+                                        //   （狼/豹猫 t780「pack 自带脸则隐」同规；程序贴图无脸纹 → 恒显）。
                                         Model {
-                                            visible: root.selectedMobType === 16
+                                            visible: root.selectedMobType === 16 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 0.95, -0.21)
-                                            scale: Qt.vector3d(0.30, 0.12, 0.03)
+                                            position: Qt.vector3d(0, 1.00, -0.30)
+                                            scale: Qt.vector3d(0.34, 0.13, 0.03)
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
                                                 baseColor: "#e8dcff" // 紫白魅眼底色（贴图缺失兜底，同游戏内）
@@ -970,8 +976,8 @@ Item {
                                         Model {
                                             visible: root.selectedMobType === 16
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 0.78, -0.20)
-                                            scale: Qt.vector3d(0.16, 0.05, 0.03)
+                                            position: Qt.vector3d(0, 0.72, -0.29)
+                                            scale: Qt.vector3d(0.18, 0.05, 0.03)
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
                                                 opacity: 0.15

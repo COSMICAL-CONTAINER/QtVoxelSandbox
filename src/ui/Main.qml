@@ -6340,7 +6340,7 @@ Window {
                         if (entMobType === EntityManager.MobWolf) return 0.42 - mobHalfH // t480 Wolf 犬科（腿底 0.42）
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
                         if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
-                        if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727 Nightwalker（细长人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
+                        if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727/t781 Nightwalker（细肢人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
                         if (entMobType === EntityManager.MobEmberling) return 0.0 // t728 Emberling（悬浮单头：MobModel 头盒中心=origin，halfH=0.6 → offset=0 头盒居中在碰撞盒内；整体悬浮由 hover 升空）
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
@@ -7153,13 +7153,13 @@ Window {
                         sourceComponent: Component {
                             Node {
                                 id: nwBody
-                                // t727 夜行者（Nightwalker，mobType 16；机制等价 MC 1.0 末影人，§9 改名 + 原创
-                                //   模型/贴图）：MobModel 细长人形几何（窄躯干 + 小竖头 + 长细臂垂到近膝大摆 +
-                                //   长细腿）+ mob_nightwalker 暗紫黑影贴图。独立眼睛发光层（头前小盒铺透明底
-                                //   紫白竖眼，pack 命中 enderman_eyes 切贴图）。激怒动画（spec「瞪视激怒」）：
-                                //   身体 yaw 微抖（±3°）+ 头部（眼/嘴层）上下颤抖 + 嘴随怒气渐张 —— 由 nwRage
-                                //   （enragedAt）/rageProg（nightwalkerRageProgressAt）驱动；非激怒静止（继承父
-                                //   delegate yaw，无额外抖动）。
+                                // t727/t781 夜行者（Nightwalker，mobType 16；机制等价 MC 1.0 末影人，§9 改名 + 原创
+                                //   模型/贴图）：MobModel t781 细肢人形几何（僵尸式正常躯干 + 正常略大头 + 极细
+                                //   双臂双腿嵌肩/髋连接，总高 2.70）+ mob_nightwalker 暗紫黑影贴图。独立眼睛发光层
+                                //   （头前小盒铺透明底紫白竖眼，pack 命中 enderman_eyes 切贴图）。激怒动画（spec
+                                //   「瞪视激怒」）：身体 yaw 微抖（±3°）+ 头部（眼/嘴层）上下颤抖 + 嘴随怒气渐张
+                                //   —— 由 nwRage（enragedAt）/rageProg（nightwalkerRageProgressAt）驱动；非激怒
+                                //   静止（继承父 delegate yaw，无额外抖动）。
                                 property real nwRage: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.enragedAt(index) ? 1 : 0) : 0 }
                                 // 抖动相位钟（恒跑 0→1 / 0.16s 锯齿；ScalarAnimation 而非 vector 子属性——后者 QML
                                 //   不支持。值源动画不可控 running（8363 先例是 false+手动 restart，不适合绑定驱动）
@@ -7186,10 +7186,16 @@ Window {
                                         baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                         // t727 pack 命中 → pack enderman 身体贴图；否则程序生成 mob_nightwalker。
                                         baseColorMap: mobNightwalkerPackTex.source.toString().length > 0 ? mobNightwalkerPackTex : mobNightwalkerTex
+                                        // t781：pack enderman 头前脸 rows 14-15 是透明下巴（底色 RGB 黄）——不透明
+                                        //   pass 会把 alpha=0 像素按 RGB 直接显 = 黄斑；Mask 裁透明（读作阴影嘴缝，
+                                        //   羊毛层 t663 ⑥ 同款）。程序贴图全不透明 → Mask 无影响。
+                                        alphaMode: PrincipledMaterial.Mask
+                                        alphaCutoff: 0.5
                                     }
                                 }
                                 // 头部独立层：眼睛发光层 + 嘴（spec「脑袋沿嘴巴张开上下颤抖」——激怒时整层上下抖 +
-                                //   嘴随怒气进度渐张下翻，读作张嘴嘶吼）。层 Node 头心本地 (0,0.95,0)（MobModel 头几何）。
+                                //   嘴随怒气进度渐张下翻，读作张嘴嘶吼）。层 Node 头心本地 (0,0.975,0)（t781 MobModel
+                                //   头几何：心 (0,0.975,0) 半 (0.28,0.325,0.28) → 前脸 z=-0.28、y[+0.65,+1.30]）。
                                 Node {
                                     id: nwHead
                                     // 激怒头部上下颤抖（±0.07 格，0.16s loop；相位与身体微抖错开 90° → 上下+左右
@@ -7198,7 +7204,12 @@ Window {
                                     position: Qt.vector3d(0, headBob, 0)
                                     Model { // 眼睛发光层（头前脸中位略凸防 z-fight；恒显——末影人标志性魅眼）
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(0, 0.95, -0.21); scale: Qt.vector3d(0.30, 0.12, 0.03)
+                                        // t781：pack 命中 enderman 身体贴图后头前脸 row12 自带灰白双眼（UV 修正后
+                                        //   才真正显；t727 旧 64×64 误基采样错区从未显过）→ 隐 overlay 防四眼
+                                        //   （t777 羊 / t780 狼豹猫「pack 自带脸则隐 overlay 眼」同规）；程序贴图
+                                        //   无脸纹 → overlay 恒显（紫白魅眼 = 夜行者标志）。
+                                        visible: mobNightwalkerPackTex.source.toString().length === 0
+                                        position: Qt.vector3d(0, 1.00, -0.30); scale: Qt.vector3d(0.34, 0.13, 0.03)
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: "#e8dcff" // 紫白魅眼底色（NoLighting 恒亮——夜里也醒目）
@@ -7214,7 +7225,7 @@ Window {
                                         id: nwMouth
                                         property real rageProg: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.nightwalkerRageProgressAt(index)) : 0 }
                                         geometry: UnitCube {}
-                                        position: Qt.vector3d(0, 0.78, -0.20); scale: Qt.vector3d(0.16, 0.05, 0.03)
+                                        position: Qt.vector3d(0, 0.72, -0.29); scale: Qt.vector3d(0.18, 0.05, 0.03)
                                         // 下翻角：怒气进度 0→1 映射 20°→45°（渐张；瞬移时刻最张）。
                                         eulerRotation: Qt.vector3d(nwBody.nwRage > 0 ? -(20 + rageProg * 25) : 0, 0, 0)
                                         materials: PrincipledMaterial {
@@ -8872,13 +8883,13 @@ Window {
                 //     yOff = −scale·(脚y+顶y)/2（把模型中心移到轴心；自旋绕体心非绕脚，t760 原注释语义）。
                 //   t787 扩表（蛋改型 9 新型，脚y/顶y 取 MobModel 局部跨度 —— 同 Main.qml mobModelYOff
                 //   各型腿底值 + 各分支头顶值）：四足猪/牛/羊/狼/豹猫/鱿鱼 0.53-0.58、鸡几何无腿（腿是实体
-                //   delegate 独立子 Model，迷你态省略 → 按几何实际跨度 -0.11..0.38）、夜行者细长 2.57 高取
-                //   0.16（瘦影观感即其体型）、燃烬者单头盒 0.47。观感需人工目视（dev-plan 注记）。
+                //   delegate 独立子 Model，迷你态省略 → 按几何实际跨度 -0.11..0.38）、夜行者 t781 细肢人形
+                //   2.70 高取 0.16（瘦影观感即其体型）、燃烬者单头盒 0.47。观感需人工目视（dev-plan 注记）。
                 function miniMobScale(t) {
                     if (t === EntityManager.MobSpider) return 0.50       // 体高 0.43、宽 ~1.5 → 宽约束取窄
                     if (t === EntityManager.MobSilverfish) return 1.30  // 体高 0.29 → 放大补齐观感高度
                     if (t === EntityManager.MobStalker) return 0.22     // 体高 1.90（含头顶）
-                    if (t === EntityManager.MobNightwalker) return 0.16 // 体高 2.57（三格高细长 → 瘦影）
+                    if (t === EntityManager.MobNightwalker) return 0.16 // 体高 2.70（t781 细肢人形三格高 → 瘦影；0.42/2.70≈0.156）
                     if (t === EntityManager.MobChicken) return 0.86     // 几何体高 0.49（无腿型）
                     if (t === EntityManager.MobOcelot) return 0.58      // 体高 0.72（含耳尖）
                     if (t === EntityManager.MobWolf) return 0.53        // 体高 0.79（含耳尖）
@@ -8902,7 +8913,7 @@ Window {
                     if (t === EntityManager.MobSquid) return 0.038      // 触腕底 -0.46 / 顶 0.32
                     if (t === EntityManager.MobWolf) return 0.013       // 脚 -0.42 / 顶 0.37
                     if (t === EntityManager.MobOcelot) return 0.023     // 脚 -0.40 / 顶 0.32
-                    if (t === EntityManager.MobNightwalker) return 0.019 // 脚 -1.40 / 顶 1.17
+                    if (t === EntityManager.MobNightwalker) return 0.008 // 脚 -1.40 / 顶 1.30（t781；−0.16·(−0.10)/2）
                     return 0                                            // Emberling 单头盒居中（±0.45）
                 }
                 // t786/t787 迷你 mob 眼表（MobModel 局部坐标；坐标/尺寸/色与各实体 delegate 眼层一致，仅随父缩放
@@ -8926,7 +8937,7 @@ Window {
                     if (t === EntityManager.MobSilverfish)
                         return [E(-0.05, 0.00, -0.35, 0.03, 0.03, "#101010"), E(0.05, 0.00, -0.35, 0.03, 0.03, "#101010")]
                     if (t === EntityManager.MobNightwalker)
-                        return [E(0.00, 0.95, -0.21, 0.30, 0.12, "#e8dcff")] // 头前脸中位横带（实体 nwHead 眼层同位同色）
+                        return [E(0.00, 1.00, -0.29, 0.34, 0.13, "#e8dcff")] // 头前脸中位横带（t781 头心 0.975 半 0.28；实体 nwHead 眼层同位同色）
                     return []
                 }
 
@@ -9041,6 +9052,12 @@ Window {
                                         return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红（同实体 delegate）
                                     return tl
                                 }
+                                // t781：夜行者 pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时 Mask 裁
+                                //   （实体 delegate 同款；程序贴图全不透明不受影响，其余型保持 Opaque 零回归）。
+                                alphaMode: spawnerRoot.cageMobType === EntityManager.MobNightwalker
+                                           && miniMobSpin.miniPackTex !== null
+                                           ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                alphaCutoff: 0.5
                             }
                             // 眼层：Repeater-for-3D（mobBurnFlames 先例）逐颗摆 UnitCube。坐标/尺寸/色查
                             //   miniEyeTable（与各实体 delegate 眼位一致，随父缩放继承微型化）；pack 命中该型

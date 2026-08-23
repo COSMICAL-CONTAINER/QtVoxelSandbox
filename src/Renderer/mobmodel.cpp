@@ -765,34 +765,47 @@ void MobModel::rebuild()
         addBoxRot(-0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, +sw, verts, idx, bMin, bMax);
         addBoxRot( 0.20f, -0.075f,  0.12f, 0.06f, 0.075f, 0.04f, 0.00f,  0.12f, -sw, verts, idx, bMin, bMax);
     } else if (m_mobType == 16) {
-        // t727 夜行者（Nightwalker；机制等价 MC 1.0 末影人 Enderman，§9 区隔 + 原创模型/贴图）：三格高（halfH=1.40
-        //   → 碰撞 2.9 高）细长人形 —— 窄躯干 + 小竖头 + 长细手臂垂到近膝（大幅摆动）+ 长细腿。局部原点 = 碰撞中心
-        //   （躯干中心）；腿底本地 |y|=1.40 贴 collision 底面（Main.qml mobModelYOff = 1.40 − halfH = 0 → 腿底贴地）。
-        //   头朝 -Z（前）。几何背脊纤细（末影人观感：暗黑瘦长黑影）。身体微颤（激怒动画）由 Main.qml delegate 对
-        //   整体 Model 做 ±3° yaw 抖动（QML 动画，几何不动）。眼睛发光层由 Main.qml delegate 独立 Model 补（纯色
-        //   紫白自发光 + pack 命中 enderman_eyes 贴图层，§9 原创）。
-        // R19 C3 UV（MC Enderman base 64×64；U1 无 enderman —— 采用 Humanoid 主骨架近似，pack 命中 enderman.png
-        //   时头/身/臂/腿按该布局粗对齐；pack 关走全脸 mob_nightwalker 程序生成贴图 [0,1]²，UV 不读）。
-        g_texW = 64.0f; g_texH = 64.0f;
-        // 躯干（细长柱）：y∈[-0.45, 0.45]，胸围窄（末影人瘦长）
-        setMobTex(16, 16, 8, 12, 4);
-        addBox( 0.00f,  0.00f,  0.00f, 0.13f, 0.45f, 0.11f, verts, idx, bMin, bMax);
-        // 头（小竖头，顶端塞在碰撞顶内）：y∈[0.73, 1.17]
+        // t727/t781 夜行者（Nightwalker；机制等价 MC 1.0 末影人 Enderman，§9 区隔 + 原创模型/贴图）。
+        //   t781 重做为「细肢人形」—— 僵尸式正常身体（非骨架：正常矩形躯干 + 正常略大头，比例对齐 Shambler
+        //   人形，替代 t727 旧版 0.26 宽「窄板条」躯干 + 小竖头）+ 极细四肢（臂全宽 0.12 / 腿全宽 0.14 ≈
+        //   躯干宽 1/4，读作瘦长黑影的「竹竿肢」）+ 四肢与躯干实体连接（臂顶嵌肩 / 腿顶嵌髋各 0.05；旧版
+        //   臂心 ±0.28 与躯干侧 ±0.13 间悬空 0.10 缝 = 「手不连身」）。不持武器。总高 2.70（脚底 -1.40 贴
+        //   collision 底面 → 头顶 +1.30；halfH=1.40 碰撞 2.80 ≈ 三格高，模型略短于碰撞同 MC 惯例——僵尸
+        //   1.95 碰撞 / 1.94 模型同理）。局部原点 = 碰撞中心（Main.qml mobModelYOff = 1.40 − halfH = 0）。
+        //   头朝 -Z（前）。身体微颤（激怒动画）由 Main.qml delegate 对整体 Model 做 ±3° yaw 抖动（QML
+        //   动画，几何不动）；眼睛发光层 / 嘴由 Main.qml delegate 独立 Model 补（头心本地 (0, 0.975, 0)，
+        //   实体 delegate / 图鉴 / 刷怪笼迷你三处锚点同源，§9 原创）。
+        // t781 比例表（脚底 -1.40 基准；单位 = 盒半长）：
+        //   腿 ×2：心 (±0.10, -0.85, 0) 半 (0.07, 0.55, 0.07) → y[-1.40,-0.30]，顶嵌躯干 0.05；髋枢 -0.35。
+        //   躯干：心 (0, +0.15, 0) 半 (0.26, 0.50, 0.14) → y[-0.35,+0.65]（0.52 宽正常矩形身）。
+        //   臂 ×2：心 (±0.29, +0.025, 0) 半 (0.06, 0.575, 0.06) → y[-0.55,+0.60]，顶嵌肩 0.05、手端 -0.55
+        //     落大腿中（膝 -0.85）；外缘 ±0.35 恰齐 halfW。肩枢 (·, +0.55, 0)。
+        //   头：心 (0, +0.975, 0) 半 (0.28, 0.325, 0.28) → y[+0.65,+1.30] 坐躯干顶（0.56 宽正常略大头）。
+        // R19 C3 UV（t781 修正）：MC Enderman base **64×32**（demo 包 enderman/enderman.png 256×128
+        //   实测 = 4×；旧版误设 64×64 → 全部 V 坐标按 2 倍高换算采样错区 = pack 态「套皮」花屏根因）。
+        //   盒区像素实测：head(0,0)8×8×8（前脸 rows 8-13 不透明、rows 14-15 透明下巴 → 消费方材质
+        //   alphaMode Mask 裁透明，防不透明 pass 显 alpha=0 像素底色 RGB 黄斑）/ body(32,16)8×12×4
+        //   （六面实测 100% 不透明）/ 四肢共用 limb(56,0)2×30×2（rows 2-31 全不透明；MC enderman
+        //   四肢同框同 texOffs）。pack 关走全脸 mob_nightwalker 程序生成贴图 [0,1]²，UV 不读。
+        g_texW = 64.0f; g_texH = 32.0f;
+        // 躯干（正常矩形僵尸身；t727 旧版 0.13 半宽「窄板条」→ t781 0.26 半宽正常身）
+        setMobTex(32, 16, 8, 12, 4);
+        addBox( 0.00f,  0.15f,  0.00f, 0.26f, 0.50f, 0.14f, verts, idx, bMin, bMax);
+        // 头（正常略大，坐躯干顶 +0.65；总高头顶 +1.30）
         setMobTex(0, 0, 8, 8, 8);
-        addBox( 0.00f,  0.95f,  0.00f, 0.19f, 0.22f, 0.19f, verts, idx, bMin, bMax);
-        // 长细臂（垂到近膝，大幅摆动 —— 臂随 walkPhase 绕肩枢 X 轴反相摆动，长臂扫摆）：肩枢 y=+0.35（胸侧），
-        //   臂长 1.25 → 手端 y≈−0.90（近膝）。X 偏移 ±0.28（窄肩外侧）。
-        const float armSw = kLegSwingAmp * 0.85f * std::sin(m_walkPhase); // 长臂大摆幅（walkPhase 驱动）
-        setMobTex(40, 16, 4, 12, 4);
-        addBoxRot(-0.28f, -0.275f,  0.00f, 0.05f, 0.63f, 0.05f,  0.35f,  0.00f, -armSw, verts, idx, bMin, bMax); // 左臂
-        setMobTex(40, 16, 4, 12, 4);
-        addBoxRot( 0.28f, -0.275f,  0.00f, 0.05f, 0.63f, 0.05f,  0.35f,  0.00f, +armSw, verts, idx, bMin, bMax); // 右臂
-        // 长细腿（2 条，绕髋 X 轴左右反相 biped walk cycle）：髋枢 y=−0.45（躯干底），腿长 0.95 → 腿底 −1.40 贴地。
+        addBox( 0.00f,  0.975f, 0.00f, 0.28f, 0.325f, 0.28f, verts, idx, bMin, bMax);
+        // 极细双臂（垂臂：随 walkPhase 绕肩枢 X 轴摆动，与同侧腿反相 = biped 步态；顶嵌肩 0.05 连接自然）
+        const float armSw = kLegSwingAmp * 0.85f * std::sin(m_walkPhase);
+        setMobTex(56, 0, 2, 30, 2);
+        addBoxRot(-0.29f,  0.025f, 0.00f, 0.06f, 0.575f, 0.06f, 0.55f,  0.00f, -armSw, verts, idx, bMin, bMax); // 左臂
+        setMobTex(56, 0, 2, 30, 2);
+        addBoxRot( 0.29f,  0.025f, 0.00f, 0.06f, 0.575f, 0.06f, 0.55f,  0.00f, +armSw, verts, idx, bMin, bMax); // 右臂
+        // 极细双腿（绕髋 X 轴左右反相 biped walk cycle；腿底 -1.40 贴 collision 底面）
         const float legSw = kLegSwingAmp * std::sin(m_walkPhase);
-        setMobTex(0, 16, 4, 12, 4);
-        addBoxRot(-0.09f, -0.925f,  0.00f, 0.06f, 0.475f, 0.06f, -0.45f,  0.00f, +legSw, verts, idx, bMin, bMax); // 左腿
-        setMobTex(0, 16, 4, 12, 4);
-        addBoxRot( 0.09f, -0.925f,  0.00f, 0.06f, 0.475f, 0.06f, -0.45f,  0.00f, -legSw, verts, idx, bMin, bMax); // 右腿
+        setMobTex(56, 0, 2, 30, 2);
+        addBoxRot(-0.10f, -0.85f,  0.00f, 0.07f, 0.55f, 0.07f, -0.35f,  0.00f, +legSw, verts, idx, bMin, bMax); // 左腿
+        setMobTex(56, 0, 2, 30, 2);
+        addBoxRot( 0.10f, -0.85f,  0.00f, 0.07f, 0.55f, 0.07f, -0.35f,  0.00f, -legSw, verts, idx, bMin, bMax); // 右腿
     } else if (m_mobType == 17) {
         // t728 燃烬者（Emberling；机制等价 MC 1.0 烈焰人 Blaze，§9 区隔 + 原创模型/贴图）：悬浮单头怒焰怨灵
         //   —— 单一中心大圆头盒（~0.9 宽 ×0.9 高悬浮），无四肢（下端烟灰混合观感由 Main.qml delegate 环绕旋转
