@@ -2612,10 +2612,15 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
                     if (d2 < bestD2) { bestD2 = d2; bx = gx; bz = gz; }
                 }
         }
-        // 脚下格在界内 + 为空气 + 下方实体支撑（SnowLayer solid → 可叠层；水非 solid → 水面不铺）→ 铺薄雪层（state=0）。
+        // 脚下格在界内 + 为空气 + 下方有实体面支撑（SnowLayer isCollidable → 可叠层；水 ShapeNone → 水面不
+        //   铺）→ 铺薄雪层（state=0）。审查修 #19（Review 2026-08-23 低危）：旧用 isSolid，t766 铁砧
+        //   solid=false 后雪傀儡立铁砧不铺雪；改 R1 口径（a890bfa，同 torchSupportBlock 公式）isCollidable ∨
+        //   isFullCube —— 铁砧 ShapeFull 恢复铺雪（isCollidable 的 state 参仅 shape 族判定内部 Q_UNUSED，
+        //   blockAt 无 state 传 0 安全）。
         if (footY >= 0 && footY < world->height()
             && world->blockAt(bx, footY, bz) == BlockRegistry::Air
-            && BlockRegistry::isSolid(world->blockAt(bx, footY - 1, bz))) {
+            && (BlockRegistry::isCollidable(world->blockAt(bx, footY - 1, bz), quint8(0))
+                || BlockRegistry::isFullCube(world->blockAt(bx, footY - 1, bz)))) {
             world->setWaterSilent(bx, footY, bz, BlockRegistry::SnowLayer, 0);
         }
     }

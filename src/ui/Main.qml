@@ -2010,6 +2010,16 @@ Window {
         return t === 0 ? armorL1T0 : t === 2 ? armorL1T2 : t === 3 ? armorL1T3 : t === 4 ? armorL1T4 : armorL1T1
     }
 
+    // 审查修 #18（Review 2026-08-23 低危）：手持立方（第一/第三人称两处 BlockCube）玻璃态判定 —— 玻璃贴图
+    //   76.6% 像素 alpha<128（demo pack glass.png PIL 实测），Mask+0.5 alpha-test 把它们全部 discard → 手持
+    //   玻璃坍成「空心框」。玻璃改走世界玻璃段（glassOnly 段）同款 Blend 0.45 半透（不丢弃纹素，不透明条纹
+    //   仍可见）；冰族（Ice/PackIce/BlueIce）贴图全不透（t495 实测 alpha=255）Mask 零丢弃无此病，且世界内冰
+    //   自 t495 走不透明 pass → 手持保持 Mask 与世界口径一致（半透手持 + 不透明世界会同物异貌，故不随建议
+    //   给冰上 Blend）。54 = BlockRegistry::Glass（Core 枚举，QML 无镜像故字面量 + 此注释互指，同 13=火把惯例）。
+    function heldCubeIsGlass(blockId) {
+        return blockId === 54
+    }
+
     // ── t731 玩家皮肤（playerModel 第三人称 + CharacterPreview3D 背包预览共用；PlayerSkinBox 采样源）──
     // 皮肤名（"default"/"alex"）：启动初值从 Core 读（playerSkin() = settings.json playerSkin 镜像，缺省
     //   default）；/skin 命令切换时由 runSkin 同步 → 下方贴图 source 绑定重算即时换肤。QML 侧仅镜像
@@ -2831,8 +2841,13 @@ Window {
                         //   alphaMode（Opaque 下 alpha 全忽略）→ 手持刷怪笼显暗蓝灰实心块（叶族 fancy 孔同理）。
                         //   不透明 tile（草/石/…）alpha 恒 255 → Mask 零丢弃外观不变；含 alpha 的 ShapeFull
                         //   （Spawner/叶）孔洞硬边丢弃透视。火把（13）/ 异形 / cross / 床仍走下方 billboard 分支。
-                        alphaMode: PrincipledMaterial.Mask
+                        // 审查修 #18（Review 2026-08-23 低危）：玻璃贴图 76.6% 像素 alpha<128，Mask+0.5 全部
+                        //   discard → 手持玻璃坍成「空心框」。玻璃改 Blend 0.45（世界玻璃段同款半透，不丢弃
+                        //   纹素——不透明条纹仍可见、半透区淡显，手持与世界内玻璃观感一致）。冰族贴图全不透
+                        //   （t495）保持 Mask 与世界不透明冰口径一致（见 window.heldCubeIsGlass 头注释）。
+                        alphaMode: window.heldCubeIsGlass(player.selectedBlock) ? PrincipledMaterial.Blend : PrincipledMaterial.Mask
                         alphaCutoff: 0.5
+                        opacity: window.heldCubeIsGlass(player.selectedBlock) ? 0.45 : 1.0 // 玻璃半透度对齐世界段；其余 1.0 同缺省
                     }
                 }
                 // t219 手持木板衍生方块（第一人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）在世界内非整立方
@@ -4660,12 +4675,16 @@ Window {
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColorMap: voxelAtlas
-                            opacity: playerModel.bodyOpacity
+                            // 审查修 #18：玻璃态 Blend 0.45（同第一人称 viewModelHand 手持立方——玻璃贴图
+                            //   76.6% 像素 alpha<128 被 Mask+0.5 全部 discard 坍成「空心框」；见 window.
+                            //   heldCubeIsGlass 头注释）；非玻璃 opacity 跟 bodyOpacity（可见态恒 1.0，
+                            //   观察者被 visible 绑定排除）。
+                            opacity: window.heldCubeIsGlass(player.selectedBlock) ? 0.45 : playerModel.bodyOpacity
                             // 审查修 L11：同第一人称 viewModelHand 手持立方 —— Mask + 0.5 alpha-test
                             //   （spawner cutout 栅格 / 叶族孔洞透空；不透明 tile 零丢弃外观不变）。
                             //   火把（13）/ 异形 / cross / 床走下方 billboard 分支。opacity 跟 bodyOpacity
                             //   （可见态恒 1.0，观察者被 visible 绑定排除）不与 Mask 冲突。
-                            alphaMode: PrincipledMaterial.Mask
+                            alphaMode: window.heldCubeIsGlass(player.selectedBlock) ? PrincipledMaterial.Blend : PrincipledMaterial.Mask
                             alphaCutoff: 0.5
                         }
                     }

@@ -95,6 +95,16 @@ int main(int argc, char *argv[])
     QObject::connect(&w, &World::powerDispenserTriggered, &w, [&](int x, int y, int z) {
         Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); ++dispFired;
     });
+    // ── 掉落物 / 雪层坍落信号记录器（审查修 #4/#15 探针 P24/P25 消费：附着物失撑坍落断言）──
+    //   同上同步计数模式；P24/P25 用前后差分（drops0 快照）隔离本探针的掉落事件。
+    int dropItemCount = 0, lastDropId = 0, lastDropX = -1, lastDropY = -1, lastDropZ = -1;
+    int snowFellCount = 0;
+    QObject::connect(&w, &World::blockDroppedAsItem, &w, [&](int x, int y, int z, int id) {
+        ++dropItemCount; lastDropId = id; lastDropX = x; lastDropY = y; lastDropZ = z;
+    });
+    QObject::connect(&w, &World::snowLayerFell, &w, [&](int x, int y, int z, int layers) {
+        Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(layers); ++snowFellCount;
+    });
 
     // ── 矩阵维度（t740 全量：任务点名 9 源 + 石/铁/金压力板 3 补充源；接收器 7 族）──
     const SourceDef sources[] = {
@@ -2050,13 +2060,16 @@ int main(int argc, char *argv[])
     //   把轴**对称**窄带（宽 0.2）只采瓦片中央子区 u∈[0.375,0.625] —— 与 W 片（整瓦铺 0.8 宽）同 texel
     //   密度（柄/焰世界宽两片一致），两片火把列共轴重合。矩阵断言（像素级视觉留人工目视，几何/UV 规则
     //   在 mesher 输出上可精确锁定）：
-    //   (a) 五形态（立地 + 四向墙插）每 quad 底边中点 == 柄根 B、顶边中点 == B+轴×0.8 —— 贴图中央火把列
-    //       （u=0.5 处）钉在两片共同火把轴上（t776 修前 S 片中点离轴 0.225 → FAIL）；
-    //   (b) 墙插两片宽度恰 {0.8 整瓦采样, 0.2 子区采样} 各一：0.2 片顶点 u 归一落 [0.375,0.625]（焰头
-    //       4px 列区）、0.8 片 u 归一铺满 [0,1] → 两片 texel 密度一致（0.8/1.0 == 0.2/0.25）；
+    //   (a) 五形态（立地 + 四向墙插）每 quad 顶边中点 == B+轴×0.8、底边中点钉柄根 —— 贴图中央火把列
+    //       （u=0.5 处）钉在两片共同火把轴上（t776 修前 S 片中点离轴 0.225 → FAIL）；审查修 #17 后 S 带
+    //       贴墙底角钳到格界 → 底边中点沿附着轴向格心内移 ≤0.05（W 片仍精确等于 B）；
+    //   (b) 墙插两片：W 片 0.8 整瓦采样（u 铺满 [0,1]）+ S 带顶边宽 0.2 子区采样（u∈[0.375,0.625] 焰头
+    //       4px 列区）、底边宽 [0.1,0.2]（#17 钳成梯形：0.2−0.075=0.125）→ 两片 texel 密度一致；
     //   (c) 杆向/亮端：底边（贴图底=柄端，v=0）恒 y=0.197 且离墙最近、顶边中点沿轴伸离墙（四向各验
     //       点积符号）+ 上倾 0.866×0.8；立地态底边 y=0、顶边 y=1、中点 (0.5,·,0.5)（亮端朝上）；
-    //   (d) 熄灭位（RedstoneTorchStateOffFlag）几何不变、瓦片换 170（暗红熄焰）：u 全落 tile 170 区。
+    //   (d) 熄灭位（RedstoneTorchStateOffFlag）几何不变、瓦片换 170（暗红熄焰）：u 全落 tile 170 区；
+    //   (e) 审查修 #17（Review 2026-08-23 低危）回归防线：S 带全部顶点附着轴坐标 ∈[0,1]（修前贴墙底角
+    //       1.075/-0.075 越界 0.075 穿入支撑格 —— 非满立方支撑（半砖/玻璃/铁砧）下可见穿模）。
     {
         // 镜像常量（partialblockgeometry RedstoneTorch case 同源；改几何须两处同步）。
         constexpr float kTLean = 0.5f, kTUpright = 0.866f, kTShaft = 0.80f;
@@ -2077,47 +2090,70 @@ int main(int argc, char *argv[])
             PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch, quint8(form),
                                          lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
             // 逐 quad（pushCrossQuad 每 quad 正反两组、每组 4 顶点同角同 UV → 步长 4 全组同断言）。
+            // 审查修 #17：S 带贴墙底角钳到格界（底边 0.2→0.125 梯形、底边中点内移 0.0375）→ W 片与
+            //   S 带分支断言（几何不同），先按 u 采样区分片型（#17 只动几何不动 UV）。
             int wPlanes = 0, ribbons = 0;
             for (int g = 0; g + 3 < verts.size(); g += 4) {
                 const Vtx &p0 = verts[g], &p1 = verts[g + 1], &p2 = verts[g + 2], &p3 = verts[g + 3];
                 const float mbx = (p0.x + p1.x) / 2, mbz = (p0.z + p1.z) / 2; // 底边中点（= 贴图 u=0.5 火把列）
                 const float mtx = (p2.x + p3.x) / 2, mtz = (p2.z + p3.z) / 2;
-                // (a) 火把列钉共同轴：底/顶边中点 == 柄根 / 轴端（W 片与 S 带中点重合 = 两片剪影重合）。
-                if (std::fabs(mbx - bx) > 1e-4f || std::fabs(p0.y - kTBaseY) > 1e-4f
-                    || std::fabs(mbz - bz) > 1e-4f
-                    || std::fabs(mtx - (bx + axx)) > 1e-4f || std::fabs(p2.y - (kTBaseY + ayy)) > 1e-4f
-                    || std::fabs(mtz - (bz + azz)) > 1e-4f) {
+                const float uu0 = (p0.u - onTile * tileW) / tileW, uu1 = (p1.u - onTile * tileW) / tileW;
+                const float wBot = std::sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)
+                                             + (p1.z - p0.z) * (p1.z - p0.z));
+                const float wTop = std::sqrt((p3.x - p2.x) * (p3.x - p2.x) + (p3.y - p2.y) * (p3.y - p2.y)
+                                             + (p3.z - p2.z) * (p3.z - p2.z));
+                const bool fullU = std::fabs(uu0) < 1e-4f && std::fabs(uu1 - 1.0f) < 1e-4f;
+                const bool subU = std::fabs(uu0 - 0.375f) < 1e-4f && std::fabs(uu1 - 0.625f) < 1e-4f;
+                if (fullU == subU) { // u 采样区不属于任一片型（或同时命中）
                     qInfo().noquote() << "  wall form" << form << "quad" << g / 4
-                                      << "off torch axis: base mid" << mbx << p0.y << mbz
-                                      << "top mid" << mtx << p2.y << mtz;
+                                      << "u-region wrong: w" << wBot << "uu" << uu0 << uu1;
                     ok = false;
                     continue;
                 }
-                // (c) 亮端离墙：底边 v=0（贴图底=柄端）且顶边中点比柄根伸离支撑（away·Δ>0）。
+                const bool isRibbon = subU;
+                if (isRibbon) {
+                    // S 带（#17 钳界后）：贴墙底角钳到本格格界 → 底边成梯形；顶边 / 垂直轴不动。
+                    const float mba = (ax != 0) ? mbx : mbz, rootA = (ax != 0) ? bx : bz;
+                    const float perpA = (ax != 0) ? mbz : mbx;
+                    bool sOk = std::fabs(perpA - 0.5f) < 1e-4f      // 垂直轴中点恒过格心（钳界不动垂直轴）
+                               && std::fabs(mba - rootA) <= 0.051f  // (a') 底边中点内移 ≤0.05（实测 0.0375）
+                               && wBot >= 0.099f && wBot <= 0.201f  // (b') 底边宽 [0.1,0.2]（实测 0.125）
+                               && std::fabs(wTop - 0.2f) < 1e-4f;   // 顶边仍 0.2（未钳）
+                    // (e) #17 回归防线：全部顶点附着轴坐标 ∈ [0,1]（修前贴墙底角越界 ±0.075 穿支撑格）。
+                    const float va[4] = { (ax != 0) ? p0.x : p0.z, (ax != 0) ? p1.x : p1.z,
+                                         (ax != 0) ? p2.x : p2.z, (ax != 0) ? p3.x : p3.z };
+                    for (int k = 0; k < 4 && sOk; ++k)
+                        if (va[k] < -1e-4f || va[k] > 1.0f + 1e-4f) sOk = false;
+                    if (!sOk) {
+                        qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                          << "S-ribbon clip wrong: mba" << mba << "root" << rootA
+                                          << "wBot" << wBot << "wTop" << wTop;
+                        ok = false;
+                        continue;
+                    }
+                } else if (std::fabs(mbx - bx) > 1e-4f || std::fabs(mbz - bz) > 1e-4f
+                           || std::fabs(wBot - 0.8f) > 1e-4f || std::fabs(wTop - 0.8f) > 1e-4f) {
+                    // W 片：底边中点 == 柄根（两轴精确）+ 上下边宽 0.8（整瓦，不钳）。
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "W-plane wrong: mid" << mbx << mbz << "w" << wBot << wTop;
+                    ok = false;
+                    continue;
+                }
+                // 公共 (a)/(c)：底边 y=柄根高 + 顶边中点 == 轴端（两片均精确 —— 钳界不动顶边）+ 亮端（v=0
+                //   柄端）沿轴伸离支撑（四向点积符号）+ 上倾 0.866×0.8。
                 const float away = -(ax * (mtx - mbx) + az * (mtz - mbz));
-                if (p0.v > 1e-4f || p1.v > 1e-4f || p2.v < 1.0f - 1e-4f || away <= 0.0f
+                if (std::fabs(p0.y - kTBaseY) > 1e-4f
+                    || std::fabs(mtx - (bx + axx)) > 1e-4f || std::fabs(mtz - (bz + azz)) > 1e-4f
+                    || std::fabs(p2.y - (kTBaseY + ayy)) > 1e-4f
+                    || p0.v > 1e-4f || p1.v > 1e-4f || p2.v < 1.0f - 1e-4f || away <= 0.0f
                     || std::fabs((p2.y - p0.y) - ayy) > 1e-4f) {
                     qInfo().noquote() << "  wall form" << form << "quad" << g / 4
-                                      << "bright-end dir wrong: v0" << p0.v << "v2" << p2.v
-                                      << "away" << away;
+                                      << "axis/bright-end wrong: base mid" << mbx << p0.y << mbz
+                                      << "top mid" << mtx << p2.y << mtz << "away" << away;
                     ok = false;
                     continue;
                 }
-                // (b) 两片各一：0.8 整瓦（u 归一铺满 [0,1]）/ 0.2 子区带（u 归一 [0.375,0.625]）。
-                const float wdt = std::sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)
-                                           + (p1.z - p0.z) * (p1.z - p0.z));
-                const float uu0 = (p0.u - onTile * tileW) / tileW, uu1 = (p1.u - onTile * tileW) / tileW;
-                const bool fullTile = std::fabs(wdt - 0.8f) < 1e-4f
-                                      && std::fabs(uu0) < 1e-4f && std::fabs(uu1 - 1.0f) < 1e-4f;
-                const bool ribbon = std::fabs(wdt - 0.2f) < 1e-4f
-                                    && std::fabs(uu0 - 0.375f) < 1e-4f && std::fabs(uu1 - 0.625f) < 1e-4f;
-                if (fullTile && !ribbon) ++wPlanes;
-                else if (ribbon && !fullTile) ++ribbons;
-                else {
-                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
-                                      << "width/uv-region wrong: w" << wdt << "uu" << uu0 << uu1;
-                    ok = false;
-                }
+                if (isRibbon) ++ribbons; else ++wPlanes;
             }
             if (wPlanes != 2 || ribbons != 2) { // 每 quad 正反两组 → 各计 2
                 qInfo().noquote() << "  wall form" << form << "plane mix wrong: W" << wPlanes << "S" << ribbons;
@@ -2159,11 +2195,11 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t776 wall redstone torch texture alignment: all 5 attach forms pin "
-                             "mid-edge torch column onto shared torch axis (base/top midpoints); wall "
-                             "W-plane 0.8 full-tile + S-ribbon 0.2 sub-region [0.375,0.625] same texel "
-                             "density; bright end away from wall (4 dirs signed) / up on floor; off "
-                             "flag swaps tile 170 with same geometry";
+                          << "| t776+review#17 wall redstone torch: 5 attach forms pin mid-edge torch "
+                             "column onto shared axis (top mid exact; W 0.8 full-tile / S-ribbon top 0.2 "
+                             "sub-region, bottom edge clipped to cell bounds = trapezoid <=0.05 shift), "
+                             "all S-ribbon verts within cell on attach axis (no 0.075 support penetration), "
+                             "bright end away from wall (4 dirs) / up on floor, off flag swaps tile 170";
     }
 
     // ── P20 t803 生物碰火燃烧探针（Entities 层 EntityManager 直编，同 t774 TNT 先例）──
@@ -5103,6 +5139,266 @@ int main(int argc, char *argv[])
             for (int dz = -2; dz <= -1; ++dz) w.setBlock(x0, kRigY, z0 + dz, BR::Air, 0);
             tickN(w, 2);
         }
+    }
+
+    // ── P24 复审 #4（2026-08-23 中危）重力坍落柱附着物级联掉落探针 ──
+    //   Review #4：dropGravityColumn 逐格 m_chunks.setBlock(Air) 直写绕过 check*OnEdit 编辑钩子族 +
+    //   无邻格火把失撑扫 → 沙柱坍落后柱顶火把 / 红石火把（照常发光供电）/ 甘蔗 / 雪层 / 花 / 压力板 / 铁轨
+    //   全部悬空残留（t794 铁砧并入重力族后受面扩大）。修后 dropGravityColumn 每清一格调
+    //   recheckAttachmentsAfterClear（正上方族 check*OnEdit + 6 邻火把 / 红石火把扫，与 clearBlockSilent
+    //   口径合一）。断言（8 柱 rig：石基座 + 2 高沙柱 + 各一附着物；拆基座触发整柱坍落）：
+    //   (a) 柱顶附着物随坍落清空：火把 / 铁轨 / 木压力板 / 花 → Air + blockDroppedAsItem；甘蔗×2 →
+    //       整柱级联（两格全清）；雪层 → Air + snowLayerFell；柱侧贴墙红石火把（state 编码附着本柱）
+    //       → Air + 掉落（修前全残留 → FAIL）；
+    //   (b) 沙柱本体全清（坍落完整性，非附着物断言的副作用核对）；
+    //   (c) 对照柱（基座不拆）火把原样保留（拆别柱不误伤）+ 全程 ≥7 次掉落信号（含甘蔗 2）+ ≥1 雪层坍落。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 网格已耗尽）。8 柱单排、列距 2（柱侧红石火把
+        //   占邻列不受扰：邻柱坍落扫到它时 state 解码支撑在另一侧 → 跳过）→ 需 17×3×7（含隔离边）。
+        //   首版 4×2 网格 14×11×7 实测扫不到（124 矩阵 rig 残块 + 生成石柱把大块净空切碎）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 15 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 15 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 5 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review#4 gravity-column attachments: no clear rig area found";
+        } else {
+            const int by = kRigY;
+            // 8 柱（单排列距 2）：0 火把 / 1 铁轨 / 2 木压力板 / 3 柱侧红石火把 / 4 甘蔗×2 / 5 花 / 6 雪层 /
+            //   7 对照火把。列距 2：柱 3 的红石火把在 colX[3]+1（与柱 4 隔 1 格），两柱坍落互不误清。
+            const int colX[8] = { x0, x0 + 2, x0 + 4, x0 + 6, x0 + 8, x0 + 10, x0 + 12, x0 + 14 };
+            for (int i = 0; i < 8; ++i) {
+                const int cz = z0;
+                w.setBlock(colX[i], by,     cz, BR::Stone, 0); // 基座
+                w.setBlock(colX[i], by + 1, cz, BR::Sand, 0);  // 沙柱 ×2（放置自检：下方满立方 → 稳）
+                w.setBlock(colX[i], by + 2, cz, BR::Sand, 0);
+            }
+            w.setBlock(colX[0], by + 3, z0, BR::Torch, 0);             // 柱顶立火把（state 0 贴地）
+            w.setBlock(colX[1], by + 3, z0, BR::Rail, 0);              // 柱顶铁轨
+            w.setBlock(colX[2], by + 3, z0, BR::WoodPressurePlate, 0); // 柱顶压力板
+            w.setBlock(colX[3] + 1, by + 2, z0, BR::RedstoneTorch, 1); // 柱侧贴墙红石火把（state 1=TorchOnNX 支撑 -X 本柱顶格）
+            w.setBlock(colX[4], by + 3, z0, BR::Sugarcane, 0);         // 甘蔗 ×2（级联整柱）
+            w.setBlock(colX[4], by + 4, z0, BR::Sugarcane, 0);
+            w.setBlock(colX[5], by + 3, z0, BR::FlowerRed, 0);         // 花
+            w.setBlock(colX[6], by + 3, z0, BR::SnowLayer, 0);         // 雪层（1 层）
+            w.setBlock(colX[7], by + 3, z0, BR::Torch, 0);             // 对照柱顶火把（基座不拆）
+            const int drops0 = dropItemCount, snow0 = snowFellCount;
+            // 触发：拆柱 0..6 的基座（对照柱 7 不拆）→ checkGravityBlockOnEdit ② → dropGravityColumn
+            //   → 每清一格 recheckAttachmentsAfterClear（柱顶格清完的复检带走全部附着物）。
+            for (int i = 0; i < 7; ++i) w.setBlock(colX[i], by, z0, BR::Air, 0);
+            tickN(w, 2);
+            bool ok = true;
+            // (a) 附着物清空（含甘蔗底格级联 + 柱侧红石火把）。
+            const int attY[7] = { by + 3, by + 3, by + 3, by + 2, by + 4, by + 3, by + 3 };
+            for (int i = 0; i < 7 && ok; ++i) {
+                const int ax = (i == 3) ? colX[3] + 1 : colX[i];
+                if (w.blockAt(ax, attY[i], z0) != BR::Air) {
+                    qInfo().noquote() << "  column" << i << "attachment survived at"
+                                      << ax << attY[i] << z0
+                                      << "id" << int(w.blockAt(ax, attY[i], z0));
+                    ok = false;
+                }
+            }
+            if (ok && w.blockAt(colX[4], by + 3, z0) != BR::Air) { // 甘蔗整柱级联（底格）
+                qInfo().noquote() << "  sugarcane column base survived";
+                ok = false;
+            }
+            // (b) 沙柱本体全清。
+            for (int i = 0; i < 7 && ok; ++i)
+                for (int dy = 1; dy <= 2 && ok; ++dy)
+                    if (w.blockAt(colX[i], by + dy, z0) != BR::Air) {
+                        qInfo().noquote() << "  column" << i << "sand cell survived at dy" << dy;
+                        ok = false;
+                    }
+            // (c) 对照柱原样 + 信号计数（火把1+轨1+板1+红石火把1+甘蔗2+花1 = 7 掉落 + 1 雪层坍落）。
+            if (ok && w.blockAt(colX[7], by + 3, z0) != BR::Torch) {
+                qInfo().noquote() << "  control torch disturbed";
+                ok = false;
+            }
+            const int drops = dropItemCount - drops0, snows = snowFellCount - snow0;
+            if (ok && (drops < 7 || snows < 1)) {
+                qInfo().noquote() << "  drop/snow signal counts low: drops" << drops << "snow" << snows;
+                ok = false;
+            }
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review#4 gravity-column attachments: base removal collapses sand "
+                                 "column and clears torch/rail/plate/flower (dropped), sugarcane cascade "
+                                 "(2 cells), snow layer (fell entity), side redstone torch (dropped); "
+                                 "control column untouched; >=7 drop signals + 1 snow-fell";
+            // 清场（坍落成功时柱 0..6 已全空；拆对照柱基座会再触发一次坍落 + 掉落 → 全格兜底清）。
+            for (int i = 0; i < 8; ++i)
+                for (int dy = 0; dy <= 4; ++dy)
+                    w.setBlock(colX[i], by + dy, z0, BR::Air, 0);
+            w.setBlock(colX[3] + 1, by + 2, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+    // ── P25 复审 #15（2026-08-23 低危）「支撑格被换成非满顶支撑 → 轨坍落」探针 ──
+    //   Review #15：checkRailOnEdit 失撑守卫旧要求 `id == Air`（仅挖掘 / 爆炸清格触发），本格被换成水
+    //   （冰融化 setWaterSilent 写 Water）/ 火（可燃支撑焚毁写 Fire）时轨悬浮到水蒸发。修后失撑判定只读
+    //   「本格现内容非 isTopFlushSupport 即坍落」。断言：
+    //   (a) 冰融成水（setWaterSilent 写 Water 入支撑格，真实融化 tickIceMelt 同入口）→ 正上方铁轨立即
+    //       坍落清 Air + blockDroppedAsItem(id=Rail)——修前 id==Water≠Air 守卫跳过 → 轨浮空 → FAIL；
+    //   (b) 焚毁路径（setBlock 写 Fire 入可燃支撑格 Planks，火吞支撑的等价写）→ 轨同样立即坍落；
+    //   (c) 对照：水写入非支撑邻格 → 轨保留（坍落只看唯一支撑位，不误伤邻写）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例）。3 组各 2 格宽（支撑+轨）+ 隔离边 → 9×4×5。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 96 && x0 < 0; zz += 3)
+            for (int xx = 4; xx + 7 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 7 && clear; ++dx)
+                    for (int dy = -1; dy <= 2 && clear; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review#15 rail support substitution: no clear rig area found";
+        } else {
+            const int by = kRigY;
+            // (a) 冰支撑 + 轨：setWaterSilent 模拟融化结果（Ice→Water）。
+            w.setBlock(x0, by, z0, BR::Ice, 0);
+            w.setBlock(x0, by + 1, z0, BR::Rail, 0);
+            const int drops0 = dropItemCount;
+            w.setWaterSilent(x0, by, z0, BR::Water, 0);
+            const bool aOk = w.blockAt(x0, by + 1, z0) == BR::Air
+                             && w.blockAt(x0, by, z0) == BR::Water
+                             && dropItemCount > drops0 && lastDropId == int(BR::Rail);
+            // (b) 木板支撑 + 轨：setBlock 写 Fire（可燃支撑焚毁等价写路径；harness 不跑 tickFire → 火静止）。
+            w.setBlock(x0 + 3, by, z0, BR::Planks, 0);
+            w.setBlock(x0 + 3, by + 1, z0, BR::Rail, 0);
+            const int drops1 = dropItemCount;
+            w.setBlock(x0 + 3, by, z0, BR::Fire, 0);
+            const bool bOk = w.blockAt(x0 + 3, by + 1, z0) == BR::Air
+                             && w.blockAt(x0 + 3, by, z0) == BR::Fire
+                             && dropItemCount > drops1 && lastDropId == int(BR::Rail);
+            // (c) 对照：石支撑 + 轨；水写进邻格（非支撑位）→ 轨保留。
+            w.setBlock(x0 + 6, by, z0, BR::Stone, 0);
+            w.setBlock(x0 + 6, by + 1, z0, BR::Rail, 0);
+            w.setWaterSilent(x0 + 7, by, z0, BR::Water, 0);
+            tickN(w, 2);
+            const bool cOk = w.blockAt(x0 + 6, by + 1, z0) == BR::Rail;
+            const bool ok = aOk && bOk && cOk;
+            if (!ok)
+                qInfo().noquote() << "  rail-after-substitution: melt" << aOk << "burn" << bOk
+                                  << "ctrl" << cOk;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review#15 rail support substitution: ice->water (setWaterSilent) and "
+                                 "planks->fire (setBlock) under rail both drop the rail immediately "
+                                 "(support loss reads current cell content, not just Air edits); "
+                                 "neighbor water write leaves rail intact";
+            // 清场
+            w.setBlock(x0, by, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, by, z0, BR::Air, 0);
+            w.setBlock(x0 + 6, by, z0, BR::Air, 0);
+            w.setBlock(x0 + 6, by + 1, z0, BR::Air, 0);
+            w.setWaterSilent(x0 + 7, by, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+    // ── P26 复审 #16（2026-08-23 低危）火吞木门整门联动探针 ──
+    //   Review #16：门在可燃表内，火蔓延 setBlock(Fire) 只替换点燃的半格 → 另半扇孤立残留无掉落。修后
+    //   写 Fire 前快照目标格（t134 教训：setBlock 重置 state），isDoor → 配对半扇（state bit3 上/下互补
+    //   y∓1）同为门时一并置 Fire（机制等价 MC 门整体燃烧，与 t134/t466 破门配对联动同构）。断言：
+    //   (a) 门下格被邻火点燃的**那次 tickFire 调用内**，上格一并变 Fire —— 修前上格非火的 6 邻（隔一
+    //       格对角），只能等下格火后续窗独立蔓延 → 首次观测下格 Fire 时上格仍是 WoodDoor → FAIL；
+    //   (b) 对照石柱（不可燃）同布局永不被吞。
+    //   确定性：火源 6 邻仅门下格可燃（无燃料不熄灭路径被 hasFuel 门挡）→ 点燃只是时间问题（5%/窗，
+    //   上限 3000 窗，P(未燃)≈0.95^3000≈1e-67）；harness 只驱动 tickFire（无雨 / 无风灭混淆源）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例）。火源 + 门 2 格 + 石柱 2 格 + 隔离边 → 7×6×6。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 96 && x0 < 0; zz += 3)
+            for (int xx = 4; xx + 5 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 5 && clear; ++dx)
+                    for (int dy = -1; dy <= 4 && clear; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review#16 door whole-burn linkage: no clear rig area found";
+        } else {
+            const int by = kRigY;
+            w.setBlock(x0, by, z0, BR::Fire, 0);              // 火源（邻门可燃 → 恒 hasFuel 不自熄）
+            w.setBlock(x0 + 1, by, z0, BR::WoodDoor, 0);      // 门下格（state bit3=0）
+            w.setBlock(x0 + 1, by + 1, z0, BR::WoodDoor, 8);  // 门上格（state bit3=1）
+            w.setBlock(x0 + 3, by, z0, BR::Stone, 0);         // 对照石柱（不可燃）
+            w.setBlock(x0 + 3, by + 1, z0, BR::Stone, 0);
+            bool lit = false;
+            for (int t = 0; t < 15000 && !lit; ++t) { // 每 5 次 tickFire = 1 窗（kFireTickInterval=5 节流）
+                w.tickFire();
+                if (w.blockAt(x0 + 1, by, z0) == BR::Fire) lit = true; // 首次观测下格燃即停（上格同窗已联动）
+            }
+            const bool aOk = lit && w.blockAt(x0 + 1, by + 1, z0) == BR::Fire;
+            const bool bOk = w.blockAt(x0 + 3, by, z0) == BR::Stone
+                             && w.blockAt(x0 + 3, by + 1, z0) == BR::Stone;
+            const bool ok = aOk && bOk;
+            if (!ok)
+                qInfo().noquote() << "  door whole-burn: lit" << lit
+                                  << "lower" << int(w.blockAt(x0 + 1, by, z0))
+                                  << "upper" << int(w.blockAt(x0 + 1, by + 1, z0))
+                                  << "stoneCtrl" << bOk;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review#16 door whole-burn: fire consuming one door half replaces the "
+                                 "paired half in the same spread event (upper is not 6-adjacent to the "
+                                 "original fire - only reachable via linkage); stone control never ignites";
+            // 清场（火 / 门残格 / 石柱；部分火格可能已自熄 → setBlock(Air) 对 Air no-op 无害）。
+            w.setBlock(x0, by, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, by, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, by + 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, by, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, by + 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+    // ── P27 复审 #19（2026-08-23 低危）栅栏向铁砧伸横档探针（mesher 同源直调，同 P11/P19 模式）──
+    //   Review #19：t766 铁砧 solid=false 后栅栏连接谓词仍 isFence||isSolid → 栅栏不向铁砧伸横档（同类：
+    //   画钉铁砧墙 / 雪傀儡立铁砧不铺雪，UI/实体侧改动矩阵不可锁，本探针锁 mesher 侧谓词）。修后连接
+    //   谓词 = isCollidable ∨ isFullCube（R1 口径 a890bfa）。断言（顶点数差分：每连接向 +2 盒横档）：
+    //   (a) +X 邻铁砧 → 顶点数 > 全空气基线（横档画出；修前 isSolid(Anvil)=false → 与基线同 → FAIL）；
+    //   (b) +X 邻铁砧 == +X 邻栅栏（连接量与栅栏互连完全一致）；
+    //   (c) +X 邻火把（ShapeNone）== 基线（非实体面仍不连——谓词放宽不至连空气族）。
+    {
+        const float tileW = 1.0f / 16.0f;
+        PartialLightCtx lctx; lctx.light = 1.0f;
+        for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+        const auto fenceVerts = [&](quint8 nbPosX) -> int {
+            PartialNeighborCtx nctx; // 其余三向缺省 0（Air）→ 只 +X 连接位在变
+            nctx.posX = nbPosX;
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::WoodFence, 0,
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            return int(verts.size()); // qsizetype → int 显式收窄（顶点数远小于 2^31）
+        };
+        const int baseN = fenceVerts(BR::Air);
+        const int anvilN = fenceVerts(BR::Anvil);
+        const int fenceN = fenceVerts(BR::WoodFence);
+        const int torchN = fenceVerts(BR::Torch);
+        const bool ok = anvilN > baseN && anvilN == fenceN && torchN == baseN;
+        if (!ok)
+            qInfo().noquote() << "  fence-connect vertex counts: base" << baseN << "anvil" << anvilN
+                              << "fence" << fenceN << "torch" << torchN;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review#19 fence-to-anvil connection: R1 predicate (isCollidable||"
+                             "isFullCube) draws rail arms toward anvil exactly like fence-fence; torch "
+                             "(ShapeNone) still not connected";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
