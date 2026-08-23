@@ -36,9 +36,10 @@ struct MobHeadRegion {
     int texW, texH;
     bool sheepBody; // true = 用 sheep/sheep.png（本体层）而非 mobEntityMap 主映射（毛层）
     // t749 头像专用显式 pack 源（相对 entity/ 的路径；缺省 nullptr = 走 mobEntityMap 主映射）。
-    //   狼/豹猫/蠹虫**不进 mobEntityMap**——它们 MobModel 几何分支无 setMobTex box-UV 数据（全脸 UV 模型），
-    //   若 mobTextureSource 命中会让 delegate 把 packTextured 几何 UV 采到未设定位 → 3D 贴图错乱；
-    //   头像只读像素裁剪不涉几何 → 显式源只喂头像路径，3D 路径零改动（回归面最小）。
+    //   供 mobType **不进 mobEntityMap** 的头像-only 映射——MobModel 几何分支无 setMobTex box-UV 数据
+    //   （全脸 UV 模型）时若 mobTextureSource 命中，delegate 会把 packTextured 几何 UV 采到未设定位 →
+    //   3D 贴图错乱；头像只读像素裁剪不涉几何 → 显式源只喂头像路径，3D 路径零改动（回归面最小）。
+    //   t780 起仅蠹虫(14) 在用（狼/豹猫补齐几何 box-UV 后入 mobEntityMap，显式源撤除）。
     const char *explicitSrc;
     // t779 覆写盒（猪鼻）：MC 机制 = 部分五官不画在头脸里面在**独立贴图偏移盒**（猪鼻 beta ModelPig
     //   nose 盒 offset(16,16) 4×3×1），头 Front 裁剪天然缺它 → 头像须把覆写盒 Front 再合成到头 Front
@@ -890,6 +891,10 @@ const QList<QPair<int, QString>> &itemFilenameMap()
     return kMap;
 }
 
+} // namespace（t780 拆段：mobEntityMap 提到全局作用域（声明见 resourcepackmanager.h）——矩阵测试 t780
+//   探针直调核对狼/豹猫条目存在 + 蠹虫仍不在（同 t785 spawnEggTint 提头动机：留匿名 ns 内会与头文件
+//   全局声明构成重载歧义）。同一 TU 内匿名 ns 多段 = 同一未命名 ns，前后段符号互通，行为不变。
+
 // t421「引擎 mob id（EntityManager::MobType）→ pack entity 子目录 + 标准贴图文件名」映射（功能性元数据，
 //   红线 §9 可随代码提交；贴图文件本身不进仓库）。mob id 取 EntityManager::MobType（pig=1/cow=2/sheep=3/
 //   shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9/snow_golem=12/iron_golem=13）。文件名用 MC 1.0 entity 子目录命名
@@ -923,6 +928,15 @@ const QList<QPair<int, QString>> &mobEntityMap()
         //   （mobTextureSource 两级探测，同雪傀儡）。像素实测布局：mantle 12×16×12 @ (0,0)（六面区 100% 不透明）
         //   + 8 触腕共用 2×12×2 @ (48,0) 单区（mobmodel.cpp setMobTex 镜像，单一权威在 Renderer）。
         {9, QStringLiteral("squid/squid.png")},  // MobSquid → entity/squid/squid.png（扁平回退 entity/squid.png）
+        // t780 狼/豹猫 pack 身体贴图（修「浏览器 3D 预览狼仍用兔子贴图 / 豹猫贴图不对——头对身错」）：
+        //   demo 包实存 entity/wolf/wolf.png（512×256 = base 64×32 的 8×）与 entity/cat/ocelot.png（256×128
+        //   = 4×；1.8+ 猫科合并 cat/ 目录，无驯服猫变体 PNG）。t749 时两型刻意不入本表（当时几何全脸 UV 无
+        //   box-UV 数据，防 packTextured 误命中 → 头像走 mobHeadRegions explicitSrc 显式源）；t780 补齐
+        //   mobmodel.cpp 狼/豹猫分支 box-UV（像素实测分区）后入表，3D packTextured 生效、explicitSrc 撤除
+        //   （头像回归 mobEntityMap 主映射同源）。狼躯干采 mane(21,0) 区（demo 包 body(18,14) 三面未涂满，
+        //   见 mobmodel.cpp t780 注释）；豹猫尾采 body 同纹（尾区未涂）——均为包内实测适配。
+        {10, QStringLiteral("wolf/wolf.png")},   // MobWolf → entity/wolf/wolf.png
+        {11, QStringLiteral("cat/ocelot.png")},  // MobOcelot → entity/cat/ocelot.png（未驯服豹猫；驯服猫走程序贴图）
         {12, QStringLiteral("snow_golem.png")},     // MobSnowGolem → entity/snow_golem.png（扁平；demo 包无子目录，mobTextureSource 子目录 miss 后回退扁平命中）
         {13, QStringLiteral("iron_golem/iron_golem.png")}, // MobIronGolem → entity/iron_golem/iron_golem.png（子目录；mobTextureSource 命中子目录）
         {16, QStringLiteral("enderman/enderman.png")}, // MobNightwalker → entity/enderman/enderman.png（t727 夜行者，机制等价 MC enderman，§9 改名；眼睛发光层走 entitySource("nightwalker_eyes") 独立取，不占本 body 表项）
@@ -930,6 +944,8 @@ const QList<QPair<int, QString>> &mobEntityMap()
     };
     return kMap;
 }
+
+namespace { // （t780 拆段续：与上方匿名 ns 同一未命名 ns）
 
 // t715「引擎状态效果枚举（PlayerState::StatusEffect 序：1=Poison/2=Slowness/3=Fire）→ pack mob_effect 文件名」
 //   映射（功能性元数据，红线 §9 可随代码提交；贴图文件本身不进仓库）。effectIconSource 逐枚举探测
@@ -3343,12 +3359,12 @@ const QList<MobHeadRegion> &mobHeadRegions()
         /* 鱿鱼   */ {  9,  0,  0, 12, 16, 12,  64,  32, false, nullptr },
         //   鱿鱼无「头部盒」——mantle 前面 (12,12)-(24,28) 带双眼（demo 包 rows 18-19 亮斑实测）当头像；
         //   映射走 mobEntityMap t730 既有序（squid/squid.png 扁平）。
-        /* 狼     */ { 10,  0,  0,  6,  6,  4,  64,  32, false, "wolf/wolf.png" },
-        //   头盒 (0,0)6×6×4 → 前 (4,4)-(10,10)（demo 包 row6 双黑瞳 + row9 浅鼻吻实测）；显式源 = 不进
-        //   mobEntityMap（见 MobHeadRegion::explicitSrc 注释——狼几何全脸 UV 无 box-UV 数据）。
-        /* 豹猫   */ { 11,  1,  1,  5,  4,  4,  64,  32, false, "cat/ocelot.png" },
+        /* 狼     */ { 10,  0,  0,  6,  6,  4,  64,  32, false, nullptr },
+        //   头盒 (0,0)6×6×4 → 前 (4,4)-(10,10)（demo 包 row6 双黑瞳 + row9 浅鼻吻实测）；t780 入 mobEntityMap
+        //   （wolf/wolf.png，几何补 box-UV 后 3D packTextured 生效）→ 显式源撤除，头像走主映射同源。
+        /* 豹猫   */ { 11,  1,  1,  5,  4,  4,  64,  32, false, nullptr },
         //   头盒 (1,1)5×4×4 → 前 (5,5)-(10,9)（row6 双黑点眼实测）；demo 包路径 entity/cat/ocelot.png（1.8+
-        //   猫科合并目录，非 ocelot/ 子目录）。
+        //   猫科合并目录，非 ocelot/ 子目录）；t780 入 mobEntityMap → 显式源撤除（同狼）。
         /* 雪傀儡 */ { 12,  0,  0,  8,  8,  8,  64,  64, false, nullptr },
         //   旧注「头是南瓜方块非 entity 贴图」对 demo 包不成立——snow_golem.png 头盒 (0,0)8×8×8 前面
         //   (8,8)-(16,16) 画有深色 derpy 脸（rows 13-14 竖排双眼实测）；映射走 mobEntityMap（snow_golem.png 扁平）。
@@ -3409,8 +3425,8 @@ QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &enti
         const QString flat = entityDir.absoluteFilePath(QStringLiteral("sheep.png"));
         srcPath = QFile::exists(sub) ? sub : (QFile::exists(flat) ? flat : QString());
     } else if (region.explicitSrc) {
-        // t749 头像专用显式源（狼 wolf/wolf.png / 豹猫 cat/ocelot.png / 蠹虫 silverfish.png）：两级探测同
-        //   主映射（子目录布局优先、扁平文件名兜底）。只喂头像——mobTextureSource 不读它（3D 路径零改动）。
+        // t749 头像专用显式源（t780 起仅蠹虫 silverfish.png 在用——狼/豹猫已入 mobEntityMap 走下分支）：
+        //   两级探测同主映射（子目录布局优先、扁平文件名兜底）。只喂头像——mobTextureSource 不读它。
         const QString rel = QString::fromLatin1(region.explicitSrc);
         const QString sub = entityDir.absoluteFilePath(rel);
         if (QFile::exists(sub)) {

@@ -219,7 +219,8 @@ public:
     Q_INVOKABLE QString mobTextureSource(int mobType) const;
 
     // t633 图鉴生物列表 2D 头像图标：pack 启用且 mobType 有头部 box-UV 区（mobmodel.cpp 同源 texOffs/size 表，
-    //   t749 起含狼/豹猫/蠹虫的**头像专用显式源**——它们不进 mobEntityMap 以防 3D packTextured 误命中）时，
+    //   t749 起蠹虫带**头像专用显式源**——不进 mobEntityMap 以防 3D packTextured 误命中；狼/豹猫 t780 补齐
+    //   几何 box-UV 后已入 mobEntityMap，显式源撤除）时，
     //   加载 pack entity 贴图、裁「头正面」（MC +Z Front 面 = (u0+d, v0+d)-(u0+d+w, v0+d+h) 像素矩形）
     //   放大到 64×64 透明底 PNG，落盘 AppLocalData/voxelsandbox_rp_mobhead_<mobType>.png（缓存；apply() 重建时
     //   随图集重生成）并返回 file:/// 路径。无 pack / 无映射 / 裁剪解码失败 → 空串（调用方回退程序贴图或体色块）。
@@ -293,6 +294,14 @@ private:
 //   （itemIconSource 的 pack 文件 miss 生成式路径消费）。非蛋 id → nullptr。
 struct EggTint { int base[3]; int spot[3]; };
 const EggTint *spawnEggTint(int itemId);
+
+// t421「引擎 mob id（EntityManager::MobType）→ pack entity 子路径」主映射（单一权威，功能性元数据；
+//   表本体 + 逐条注释在 resourcepackmanager.cpp）。t780 狼(10)/豹猫(11) 入表起把定义提到全局作用域
+//   （匿名 ns 外，cpp 内已拆段）并声明入头——矩阵测试 t780 探针直调核对两型条目存在 + 蠹虫(14) 仍
+//   不在（它几何全脸 UV 只走 mobHeadRegions explicitSrc 头像路径，误入表会让 3D packTextured 采到
+//   未设定位），防「几何补了 box-UV 但映射表漏行 / 无 box-UV 却入表」两类回归（同 t785 spawnEggTint
+//   提头动机）。
+const QList<QPair<int, QString>> &mobEntityMap();
 
 // t779 头像裁剪布局出口（猪鼻合成 / 蠹虫眼区修正的单一权威；矩阵测试 t779 探针直调锁矩形常量——
 //   防表改数值后「裁剪公式与探针各持一份」漂移）：mobType → 头 Front 裁剪矩形 + 可选覆写盒（猪鼻类

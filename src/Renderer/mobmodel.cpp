@@ -617,12 +617,19 @@ void MobModel::rebuild()
         //   才能绕尾根枢独立旋转，嵌在几何里的尾巴无法单独动）。腿底本地 y=−0.42 贴 collision 底面（halfH=0.45
         //   → Main.qml mobModelYOff=0.42−0.45=−0.03）。walkPhase 驱动 4 腿对角摆动（addLegs，同猪/牛/羊四足
         //   walk cycle）；坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动，几何本身不参与。
-        addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；狼体型特征）
+        // t780 pack UV（demo 包 wolf/wolf.png base 64×32，六面不透明度像素实测）：head(0,0)6×6×4（前脸 row6
+        //   双瞳实测，与 mobHeadRegions 狼头区同源）/ **body 采 mane(21,0)6×6×7**——vanilla body(18,14)6×6×8
+        //   在 demo 包 HD 重绘里 top/bottom/back 三面 0% 不透明（躯干区未涂满），mane 区六面 100% 灰白渐层
+        //   长毛 = 狼身唯一完整毛色区，躯干采它（观感灰狼毛皮，修「狼仍用兔子灰块贴图」）；耳采头 texOffs /
+        //   leg(0,18)2×8×2。尾巴在 QML 独立 Model（纯色毛色，不采本贴图）。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(21, 0, 6, 6, 7);
+        addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；采 mane 毛区）
+        setMobTex(0, 0, 6, 6, 4);
         addHeadRot( 0.00f,  0.12f, -0.52f, 0.14f, 0.15f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸略尖；鼻吻）
-        addBox(-0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（头顶小尖盒）
+        addBox(-0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（采头 texOffs）
         addBox( 0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
-        // R19 C3：wolf 无 pack 贴图映射（mobEntityMap 不含 10）→ pack 关全脸 UV，texOffs 占位（pack 关不读）。
-        addLegs(-0.26f,  0.16f,  0.18f,  0.24f, 0.08f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
+        addLegs(-0.26f,  0.16f,  0.18f,  0.24f, 0.08f, 0, 18, 2, 8, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
     } else if (m_mobType == 11) {
         // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
         //   前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体贴图同纹）+ 4 细腿。未驯服 = 丛林豹猫（斑点橙棕贴图）、
@@ -630,13 +637,20 @@ void MobModel::rebuild()
         //   据 ocelotVariantAt 切贴图，几何不变）。腿底本地 y=−0.40 贴 collision 底面（halfH=0.35 →
         //   Main.qml mobModelYOff=0.40−0.35=0.05）。walkPhase 驱动 4 腿对角摆动（addLegs，同狼四足 walk cycle）；
         //   坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动，几何本身不参与。
+        // t780 pack UV（demo 包 cat/ocelot.png base 64×32，六面不透明度像素实测）：head(1,1)5×4×4（row6 双
+        //   黑点眼实测，与 mobHeadRegions 豹猫头区同源）/ body(20,6)4×5×6（橙底深斑条纹六面 100%）/ 耳采头
+        //   texOffs / leg(0,18)2×4×2；尾区 (12,19) 侧面 0% 不透明（demo 包未涂）→ 尾采 body texOffs 随身
+        //   同纹（机制同程序态「随身体贴图同纹」语义）。驯服猫贴图（mob_cat_* 全脸）走 packTextured=false，
+        //   pack 贴图仅未驯服豹猫（demo 包 cat/ 目录无驯服猫变体 PNG）。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(20, 6, 4, 5, 6);
         addBox( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f, verts, idx, bMin, bMax); // 细长躯干（比狼更窄长；猫科体型）
+        addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；采 body 同纹）
+        setMobTex(1, 1, 5, 4, 4);
         addHeadRot( 0.00f,  0.12f, -0.46f, 0.11f, 0.12f, 0.14f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸圆润）
-        addBox(-0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（头顶小三角）
+        addBox(-0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（采头 texOffs）
         addBox( 0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
-        addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；随身体同纹）
-        // R19 C3：ocelot 无 pack 贴图映射（mobEntityMap 不含 11）→ pack 关全脸 UV，texOffs 占位（pack 关不读）。
-        addLegs(-0.24f,  0.16f,  0.16f,  0.20f, 0.06f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
+        addLegs(-0.24f,  0.16f,  0.16f,  0.20f, 0.06f, 0, 18, 2, 4, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
     } else if (m_mobType == 12) {
         // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
         //   局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊「躯干中心」）；腿底本地 y=−0.90 贴 collision 底面

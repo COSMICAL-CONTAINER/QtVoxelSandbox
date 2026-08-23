@@ -918,15 +918,16 @@ Item {
                                         }
                                         // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
                                         //   (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 眼贴头前 (±0.08,0.16,-0.71)）。
+                                        //   t780：pack 命中 → box-UV 贴图头前脸自带双瞳 → overlay 隐（t777 双眼教训）。
                                         Model {
-                                            visible: root.selectedMobType === 10
+                                            visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.08, 0.16, -0.71)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 10
+                                            visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.08, 0.16, -0.71)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
@@ -934,15 +935,16 @@ Item {
                                         }
                                         // t750 ③ 豹猫眼（修复「没有脸」；镜像 Main.qml ocelot delegate：头心
                                         //   (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 眼贴头前 (±0.07,0.15,-0.61)）。
+                                        //   t780：pack 命中 → 贴图头前脸自带眼点 → overlay 隐（同上）。
                                         Model {
-                                            visible: root.selectedMobType === 11
+                                            visible: root.selectedMobType === 11 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.07, 0.15, -0.61)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 11
+                                            visible: root.selectedMobType === 11 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.07, 0.15, -0.61)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
