@@ -231,7 +231,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/Main.qml
         src/ui/BlockParticles.qml
         src/ui/EnchantRunes.qml # t649 附魔台符文粒子（书架→台 漂浮字符；Model+Timer 池，无 Particles3D 依赖）
-        src/ui/EnchantGlyphFlow.qml # t765 书架→附魔台文字字形粒子流（UI 开期间 glyph sprite 飞向悬浮书；Model+Timer 池）
+        src/ui/EnchantGlyphFlow.qml # t765/t797 书架→附魔台白色小字形粒子流（常驻：台×书架对低频发射向书心渐隐；Model+Timer 池）
         src/ui/TorchSmoke.qml
         src/ui/WeatherParticles.qml
         src/ui/AmbientParticles.qml

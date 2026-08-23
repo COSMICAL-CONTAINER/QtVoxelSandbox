@@ -1,70 +1,78 @@
 import QtQuick
 import QtQuick3D
-// t765 书架→附魔台「文字/符文」粒子流（呈现层；PLAN §2 分层 —— 只读 World 书架位，不反向写栅格）。
+// t765/t797 书架→附魔台「文字」粒子流（呈现层；PLAN §2 分层 —— 只读 World 书架位，不反向写栅格）。
 //
-// 机制等价 MC 1.0 附魔台 glyph 粒子流：玩家打开附魔台 UI 期间，周围**有效书架位**向附魔台悬浮书
-//   持续喷小字符颗粒（贴图字形 + 染色 + 沿弧线飞向书心 + 淡出）；UI 关闭即停。
+// 机制等价 MC 1.0 附魔台 glyph 粒子流的**常驻版**（t797 用户定稿）：只要游玩中，附魔台旁的有效书架就
+//   持续向台漂出**白色小字形**（透明底字形图集 × 纯白染色）：缓慢漂移（一程 ~2-4s）+ 途中线性渐隐 +
+//   到达书心即透明回收（到达即删）—— **不依赖附魔台 UI 开关**（旧 t765 仅开 UI 才播且面片过大「像
+//   爆炸」，两项均按用户报告重做）。附魔台 UI 打开时**所开台**的书架发射率加密（×uiBoost，交互反馈）。
 //
-// 与既有两件「符文」视觉的区别（防后人误删/误并）：
-// - t649 EnchantRunes.qml：**常驻**的彩色立方符文漂流（t697 改 playing 常驻，用户明确要「非仅
-//   开 UI 时」）—— 那是氛围层，粒子是纯色小立方、无字形贴图。本组件是 UI 打开期间的**文字字形**
-//   密集流（glyph sprite），两套并存各司其职（氛围 vs 交互反馈），非重复实现。
-// - t732 撤下的 GlyphLines（Renderer/glyphlines.cpp）：书页上的**静态**符文字迹叠层，因贴图自带
-//   字迹会重影而撤。本组件是**动态粒子流**，与它两回事（dev-plan t765 行明示）。
+// 与既有「符文」视觉的区别（防后人误删/误并）：
+// - t649 EnchantRunes.qml：常驻彩色**小立方**氛围漂流（t697 起常驻）—— 纯色立方、无字形贴图、只跟
+//   「最近一次打开的台」（tableX 绑 window.enchantX 遗留值）。本组件是**全图所有台**的白色**文字字形**
+//   流（glyphs.png 字形图集），按台×书架对发射 —— 两套并存各司其职（立方氛围 vs 文字流向）。
+// - t732 撤下的 GlyphLines（Renderer/glyphlines.cpp）：书页上的静态符文字迹叠层，与动态粒子流两回事。
 //
-// 实现（EnchantRunes t649 同族：Model 池 + Timer 弹道，不依赖 Particles3D —— t385/t390 已证该模块
-//   运行期可能降级；经 Main.qml glyphFlowLoader 隔离加载 + 领养进 particlesHost，失败仅 warn，§2-E）：
-// - 粒子 = "#Rectangle" 内建面片 + glyphs.png 4×4 字形图集（tools/build_glyph_sprites.py 程序原创
-//   字形，零 MC 资产）按格采样（Texture.scaleU/V=0.25 + positionU/V 选格，t489 flipbook 同 API）；
-//   每池元素独立材质/贴图 → 每颗粒子随机字形 + 随机染色（紫/青/白系，同 EnchantRunes 色板）。
-// - 弹道 = 参数化飞行（start→书心 lerp + sinπt 弧线 + 收尾淡出）：t→1 恰落在书心（「涌入」感，
-//   不会飞过头），寿命 = 距离/速度；tick 内每颗面向相机转 billboard（正对可读的文字面）。
-// - 有效书架位枚举：QML 侧扫 World::countBookshelvesAround 同规则（水平切比雪夫 ==2 环带 × y/y+1
-//   两层 + 半步格 Air；blockAt 只读）。不加 World 新 API —— EnchantRunes t649 同先例，分层最干净
-//   （World 只读 invokable 已够用，逐位枚举纯属呈现层派生）。
-// - 驱动：active = 宿主绑「playing && 附魔台 UI 开」。MC 语义 = 只有所开台的书被喂符文（远处台
-//   喷了玩家也看不见）→ 台坐标绑 window.enchantX/Y/Z（当前所开台），不遍历 enchantTablePositions。
+// 实现（EnchantRunes t649 同族：Model 池 + Timer 弹道，不依赖 Particles3D —— t385/t390 已证该模块运行期
+//   可能降级；经 Main.qml glyphFlowLoader 隔离加载 + 领养进 particlesHost，失败仅 warn，§2-E）：
+// - 粒子 = "#Rectangle" 内建面片 + glyphs.png 4×4 字形图集（tools/build_glyph_sprites.py 程序原创字形，
+//   零 MC 资产）按格采样（Texture.scaleU/V=0.25 + positionU/V 选格，t489 flipbook 同 API）；每池元素独立
+//   材质/贴图 → 每颗随机字形；t797 起染色板改纯白系（用户「白色的文字就行」，透明底走 Blend）。
+// - 弹道 = 参数化飞行（start→书心 lerp + sinπt 轻弧 + 末端收敛横摆）：漂速 ~0.9 格/s → 一程 2-4s
+//   「缓慢漂向」；alpha = 前 12% 淡入 × (1-k) 线性渐隐 → t=1 恰落书心且已透明（到达即删，不与书页
+//   z-fight）；tick 内每颗面向相机 billboard（正对可读的文字面）。
+// - 台×书架对枚举：tableModel（Main.qml 注入 enchantTablePositions 全图附魔台表 —— 事件驱动 + 读档
+//   重建 + 孤儿清理三重维护）逐台套 World::countBookshelvesAround 同规则（水平切比雪夫 ==2 环带 ×
+//   y/y+1 两层 + 半步格 Air；blockAt 只读，不加 World API —— t649 先例）。editRev / 台表 count /
+//   active 变化重扫（放书架 ≤0.5s 内起流，拆书架/台即停）。
 //
-// 性能红线（t724 粒子风暴前例）：① UI 关闭 → spawnTimer 停（running 绑 shelfCells 非空 + active），
-//   在飞粒子由 tickTimer 推进至寿终（running 绑 active || liveCount>0 → 清空即全停，零常驻开销）；
-//   ② 全局发射率上限 maxPerTick（200ms 轮 ≤4 颗 = ≤20/s）+ 池硬上限 poolSize（满则静默丢，同
-//   BlockParticles 模式）—— 书架再多也封顶，常量均可调。
+// 性能红线（t724 粒子风暴前例）：① 无对（pairs 空）→ spawnTimer 停；在飞粒子由 tickTimer 推进至寿终
+//   （running 绑 active || liveCount>0 → 清空即全停，零常驻开销）；② 全局发射率上限 maxPerTick + 池硬
+//   上限 poolSize（满则静默丢，同 BlockParticles 模式）；③ 发射距离门 camEmitRangeSq：书架离相机
+//   >16 格的对不发射（远处看不见纯浪费）；④ 每书架低频 ~0.22/s（= 3-6s 一粒的随机常驻密度）。
 //
 // 坐标空间：经 Main.qml glyphFlowLoader.onLoaded 领养进 particlesHost 锚点（t16：否则 Loader 加载的
 //   3D Node parent=null → 孤儿不渲染）。粒子坐标即世界坐标（书架格 / 台格中心）。
 Node {
     id: root
 
-    // 宿主注入（Main.qml glyphFlowLoader.onLoaded）：World（blockAt 只读查书架）+ 相机（billboard
-    //   朝向）+ 所开附魔台方块坐标 + active（附魔台 UI 开）+ editRev（放/破方块版本号 —— 书架位重扫）。
+    // 宿主注入（Main.qml glyphFlowLoader.onLoaded）：World（blockAt 只读查书架）+ 相机（billboard 朝向 +
+    //   发射距离门）+ tableModel（enchantTablePositions 全图附魔台表）+ active（playing 常驻，**不依赖
+    //   附魔台 UI 开**，t797）+ uiOpen/openTable*（所开台 —— 发射率加密对象）+ editRev（放/破方块版本号）。
     property var world: null
     property var camNode: null
-    property int tableX: 0
-    property int tableY: 0
-    property int tableZ: 0
+    property var tableModel: null
+    // 绑 tableModel.count —— 增/删台（含读档重建的 clear+append、onWorldChanged 孤儿清理）触发重扫。
+    property int tableCount: 0
     property bool active: false
+    property bool uiOpen: false
+    property int openTableX: 0
+    property int openTableY: 0
+    property int openTableZ: 0
     property int editRev: 0
 
-    // ---- 可调常量（性能红线：发射率上限 + 池上限防粒子风暴；集中在此便于调参） ----
-    readonly property int poolSize: 36        // 池硬上限：全局 ≤20/s × 最长寿命 1.3s ≈ 26 稳态 + 余量
-    readonly property real ratePerShelf: 2.4  // 每有效书架每秒符文数（低频，机制等价 MC glyph 流密度）
-    readonly property int maxPerTick: 4       // 单轮（200ms）发射上限 → 全局 ≤20/s 封顶
-    readonly property real flightSpeed: 2.6   // 飞行速度（格/s）：2-3 格书架 → ~1s 飞抵书心
-    readonly property real flightLifeMin: 0.5 // 寿命钳制（近书架防闪瞬、远书架防拖尾过久）
-    readonly property real flightLifeMax: 1.3
-    readonly property real arcHeight: 0.30    // 弧线峰值（书架顶→书心的抛物拱，涌入感）
-    readonly property real glyphScaleMin: 0.10 // 字形面片边长（格）：~1.5-2.5 纹素级小字符
-    readonly property real glyphScaleMax: 0.16
+    // ---- 可调常量（性能红线：发射率/池上限/距离门防粒子风暴；集中在此便于调参） ----
+    readonly property int poolSize: 36          // 池硬上限：全局 ≤8/s × 最长寿命 4s ≈ 32 稳态 + 余量
+    readonly property real ratePerShelf: 0.22   // 每书架每秒字数（用户「3-6s 一粒」→ 低频常驻密度）
+    readonly property real uiBoost: 4.0         // 附魔台 UI 开时所开台书架的发射率倍率（加密反馈）
+    readonly property int maxPerTick: 4         // 单轮（500ms）发射上限 → 全局 ≤8/s 封顶
+    readonly property real camEmitRangeSq: 256  // 发射距离门 16²（格²）：书架离相机超此距不发射
+    readonly property real driftSpeed: 0.9      // 漂移速度（格/s）：2-3 格书架 → 一程 ~2-4s 缓慢漂向
+    readonly property real flightLifeMin: 1.8   // 寿命钳制（近书架防闪瞬、远书架防拖尾过久）
+    readonly property real flightLifeMax: 4.0
+    readonly property real arcHeight: 0.20      // 弧线峰值（慢漂下的轻拱，不夺目）
+    readonly property real glyphScaleMin: 0.055 // 字形面片边长（格）：t797 大减（旧 0.10-0.16「爆炸感」→ 小字）
+    readonly property real glyphScaleMax: 0.085
 
-    // 符文染色板（与 t649 EnchantRunes 同板：神秘紫系为主 + 冷青/亮白点缀；近白字形相乘染色）。
-    readonly property var tintColors: ["#b06ae8", "#8a4ad8", "#6ab8e8", "#e8e8f8", "#c88ae8"]
+    // 字形染色板：t797 用户定稿「白色的文字」—— 纯白为主 + 极轻冷调抖动（近白字形相乘仍读作白）。
+    readonly property var tintColors: ["#ffffff", "#f4f6ff", "#e9eeff"]
 
     property var pool: []
-    property int liveCount: 0   // 在飞数（UI 关后 tickTimer 据它判「清空即全停」）
+    property int liveCount: 0   // 在飞数（active 翻假后 tickTimer 据它判「清空即全停」）
 
-    // 参与书架位缓存（[{x,y,z},...]）。editRev / active / 台坐标变化时重扫（显式触碰是唯一刷新源，
-    //   同 EnchantRunes 模式 —— UI 开着放/破书架也能重算，t549 先例）。
-    property var shelfCells: []
+    // 台×书架对缓存（[{x,y,z, tx,ty,tz},...]：书架格 + 所属台格）。editRev / 台表 count / active 变化时
+    //   重扫（显式触碰是唯一刷新源，同 EnchantRunes 模式 —— 放/破书架或台即刻重算，t549 先例）。
+    property var pairs: []
 
     Component.onCompleted: {
         root.pool = []
@@ -76,60 +84,80 @@ Node {
                              sx: 0, sy: 0, sz: 0, ex: 0, ey: 0, ez: 0,
                              swayPhase: 0.0, arc: 0.0 })
         }
-        console.info("[t765] EnchantGlyphFlow ready; pool=" + root.poolSize
-                     + " (glyph-sprite Model+Timer pool; UI-open driven)")
+        console.info("[t797] EnchantGlyphFlow ready; pool=" + root.poolSize
+                     + " (ambient white glyph flow: all tables x shelves, cam-range gated)")
     }
 
-    // 重扫参与书架位（World::countBookshelvesAround 同规则：切比雪夫 ==2 环带 × y/y+1 两层 + 半步格
-    //   Air）。与 EnchantRunes.rescanShelves 同款复制（规则单一权威在 World::countBookshelvesAround
-    //   的注释契约里，两处 QML 呈现层各自内联同规则 —— 改规则须三处同步，此处显式注记）。
-    function rescanShelves() {
-        root.shelfCells = []
-        if (!root.world || !root.active) return
-        const tx = root.tableX, ty = root.tableY, tz = root.tableZ
-        for (let dy = 0; dy <= 1; ++dy) {
-            const yy = ty + dy
-            for (let dx = -2; dx <= 2; ++dx) {
-                for (let dz = -2; dz <= 2; ++dz) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) !== 2) continue
-                    if (root.world.blockAt(tx + dx, yy, tz + dz) !== 95 /* Bookshelf */) continue
-                    if (root.world.blockAt(tx + Math.trunc(dx / 2), yy, tz + Math.trunc(dz / 2)) !== 0) continue
-                    root.shelfCells.push({ x: tx + dx, y: yy, z: tz + dz })
+    // 重扫台×书架对：tableModel 逐台套 World::countBookshelvesAround 同规则（水平切比雪夫 ==2 环带 ×
+    //   y/y+1 两层 + 半步格 Air）。规则单一权威在 World::countBookshelvesAround 的注释契约里，QML 呈现层
+    //   内联同规则（EnchantRunes 同款复制 —— 改规则须多处同步，此处显式注记）。
+    function rescanPairs() {
+        root.pairs = []
+        if (!root.world || !root.active || !root.tableModel) return
+        const n = root.tableModel.count
+        for (let i = 0; i < n; ++i) {
+            const e = root.tableModel.get(i)
+            for (let dy = 0; dy <= 1; ++dy) {
+                const yy = e.y + dy
+                for (let dx = -2; dx <= 2; ++dx) {
+                    for (let dz = -2; dz <= 2; ++dz) {
+                        if (Math.max(Math.abs(dx), Math.abs(dz)) !== 2) continue
+                        if (root.world.blockAt(e.x + dx, yy, e.z + dz) !== 95 /* Bookshelf */) continue
+                        if (root.world.blockAt(e.x + Math.trunc(dx / 2), yy, e.z + Math.trunc(dz / 2)) !== 0) continue
+                        root.pairs.push({ x: e.x + dx, y: yy, z: e.z + dz, tx: e.x, ty: e.y, tz: e.z })
+                    }
                 }
             }
         }
     }
 
-    onActiveChanged:   rescanShelves()
-    onEditRevChanged:  rescanShelves()
-    onTableXChanged:   rescanShelves()
-    onTableYChanged:   rescanShelves()
-    onTableZChanged:   rescanShelves()
+    onActiveChanged:     rescanPairs()
+    onEditRevChanged:    rescanPairs()
+    onTableCountChanged: rescanPairs()
 
-    // 发射轮（200ms）：每轮 n = 钳制(书架数 × ratePerShelf × 0.2, 1, maxPerTick) —— 每书架低频
-    //   ~2.4/s、全局 ≤20/s 封顶（性能红线②）。UI 关 / 无书架 → running=false 零开销。
+    // 发射轮（500ms）：① 距离门 —— 书架离相机 >16 格的对剔除（远处不发射）；② 期望值法 —— 每近处对
+    //   ratePerShelf × 0.5s（所开台 ×uiBoost）累加出期望发射数，整数部分 + 按小数部分概率补 1（3-6s
+    //   一粒的**随机**低频，非整齐节拍）；③ 全局 maxPerTick 封顶。无对 → running=false 零开销。
     Timer {
         id: spawnTimer
-        interval: 200
+        interval: 500
         repeat: true
-        running: root.active && root.shelfCells.length > 0
+        running: root.active && root.pairs.length > 0
         onTriggered: {
-            const want = Math.round(root.shelfCells.length * root.ratePerShelf * 0.2)
-            const n = Math.max(1, Math.min(root.maxPerTick, want))
-            for (let i = 0; i < n; i++) root.spawnGlyph()
+            const camPos = root.camNode ? root.camNode.position : null   // JS 读 = 快照（不建绑定依赖）
+            const near = []
+            for (let i = 0; i < root.pairs.length; i++) {
+                const p = root.pairs[i]
+                if (camPos) {
+                    const dx = p.x + 0.5 - camPos.x, dz = p.z + 0.5 - camPos.z
+                    if (dx * dx + dz * dz > root.camEmitRangeSq) continue
+                }
+                near.push(p)
+            }
+            if (near.length === 0) return
+            let want = 0.0
+            for (let i = 0; i < near.length; i++) {
+                const p = near[i]
+                let r = root.ratePerShelf
+                if (root.uiOpen && p.tx === root.openTableX && p.ty === root.openTableY
+                        && p.tz === root.openTableZ)
+                    r *= root.uiBoost
+                want += r * 0.5
+            }
+            let n = Math.floor(want) + (Math.random() < (want % 1) ? 1 : 0)
+            n = Math.min(n, root.maxPerTick)
+            for (let i = 0; i < n; i++) root.spawnGlyph(near)
         }
     }
 
-    // 从随机有效书架位 spawn 一颗字形粒子：起点 = 书架格中心朝台侧偏移（从书架「怀里」冒出），
-    //   终点 = 台上悬浮书心（t796 ① 书心 0.82→0.95 抬升同步：台格中心 +0.95，对齐 bookDelegate
-    //   书心 y+0.95±bob0.035）；寿命 = 距离/速度（钳制），弹道参数化 → t=1 恰落书心后淡尽
-    //   （「涌入」不飞过头）。
-    function spawnGlyph() {
-        const cells = root.shelfCells
-        if (cells.length === 0) return
-        const c = cells[Math.floor(Math.random() * cells.length)]
-        const tx = root.tableX + 0.5, tyv = root.tableY + 0.95, tz = root.tableZ + 0.5
-        // 起点在书架内侧（朝台方向半格出、书架上半身高度）：读作「从书架里涌出」而非凭空出现。
+    // 从随机近处对 spawn 一颗白色小字形：起点 = 书架格中心朝台侧偏移（从书架「怀里」冒出），终点 =
+    //   所属台上悬浮书心（t796 ① 书心 0.82→0.95 抬升同步：台格中心 +0.95，对齐 bookDelegate 书心
+    //   y+0.95±bob0.035）；寿命 = 距离/漂速钳制 → 一程 ~2-4s，t=1 恰落书心且 alpha 已线性归零。
+    function spawnGlyph(list) {
+        if (list.length === 0) return
+        const c = list[Math.floor(Math.random() * list.length)]
+        const tx = c.tx + 0.5, tyv = c.ty + 0.95, tz = c.tz + 0.5
+        // 起点在书架内侧（朝台方向半格出、书架上半身高度）：读作「从书架里缓慢漂出」而非凭空出现。
         let dx = tx - (c.x + 0.5), dz = tz - (c.z + 0.5)
         const hd = Math.max(0.001, Math.sqrt(dx * dx + dz * dz))
         const sx = c.x + 0.5 + dx / hd * 0.45 + (Math.random() - 0.5) * 0.2
@@ -140,7 +168,7 @@ Node {
         const ey = tyv + (Math.random() - 0.5) * 0.06
         const ez = tz + (Math.random() - 0.5) * 0.10
         const dist = Math.sqrt((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy) + (ez - sz) * (ez - sz))
-        const life = Math.max(root.flightLifeMin, Math.min(root.flightLifeMax, dist / root.flightSpeed))
+        const life = Math.max(root.flightLifeMin, Math.min(root.flightLifeMax, dist / root.driftSpeed))
         const arr = root.pool
         for (let i = 0; i < arr.length; i++) {
             const p = arr[i]
@@ -169,8 +197,9 @@ Node {
         // 池满：静默丢（同 BlockParticles / EnchantRunes 模式，不 new 不阻塞）。
     }
 
-    // 弹道推进 Timer（~50fps）：参数化飞行 + 正弦弧 + billboard 朝相机 + 前 15% 淡入/末 25% 淡出；
-    //   t≥1 落书心即回收。running 绑 active || liveCount>0 —— UI 关后在飞颗粒放完即全停（零常驻）。
+    // 弹道推进 Timer（~50fps）：参数化飞行 + 正弦轻弧 + billboard 朝相机 + 前 12% 淡入 × (1-k) 全程
+    //   线性渐隐（t797「途中缓慢变透明」）；t≥1 落书心已全透明即回收（到达即删）。running 绑
+    //   active || liveCount>0 —— active 翻假后在飞颗粒放完即全停（零常驻）。
     Timer {
         id: tickTimer
         interval: 20
@@ -191,14 +220,15 @@ Node {
                     root.liveCount--
                     continue
                 }
-                // 参数化弹道：直线 lerp + sinπt 竖向弧（书架顶→书心抛物拱）+ 末端收敛的横向轻摆。
+                // 参数化弹道：直线 lerp + sinπt 轻弧（书架→书心缓拱）+ 末端收敛的横向轻摆。
                 const k = p.t
-                const swayA = Math.sin(p.swayPhase + k * 7.0) * 0.05 * (1.0 - k)
+                const swayA = Math.sin(p.swayPhase + k * 6.0) * 0.04 * (1.0 - k)
                 m.px = p.sx + (p.ex - p.sx) * k + swayA
                 m.py = p.sy + (p.ey - p.sy) * k + Math.sin(Math.PI * k) * p.arc
-                m.pz = p.sz + (p.ez - p.sz) * k + Math.cos(p.swayPhase + k * 7.0) * 0.05 * (1.0 - k)
-                // 淡入前 15% / 淡出末 25%（t→1 在书心处透明消隐，不与书页面 z-fight）。
-                m.glyphOpacity = Math.min(1.0, k / 0.15, (1.0 - k) / 0.25)
+                m.pz = p.sz + (p.ez - p.sz) * k + Math.cos(p.swayPhase + k * 6.0) * 0.04 * (1.0 - k)
+                // t797 渐隐律：前 12% 淡入 × (1-k) 线性渐隐 —— 全程缓慢变透明，t=1 在书心处恰归零
+                //   （到达即删，不与书页面 z-fight）。
+                m.glyphOpacity = Math.min(1.0, k / 0.12) * (1.0 - k)
                 // billboard：面片 +Z 朝相机（yaw=atan2(dx,dz)；pitch=-atan2(dy,水平距)，+Z 上仰为负角）。
                 //   camNode 未注入时保持 spawn 位姿（兜底：朝台飞行方向附近仍大致可读）。
                 if (camPos) {
@@ -211,7 +241,7 @@ Node {
     }
 
     // 池元素模板：#Rectangle 内建面片（自带 UV，t489 验证；勿用未注册的 PlaneGeometry）+ 字形图集
-    //   子区采样 + Blend 渐隐（透明底图集）。NoLighting（红线：可见 Model 必须 NoLighting）。
+    //   子区采样 + Blend 渐隐（透明底图集 → 透明背景）。NoLighting（红线：可见 Model 必须 NoLighting）。
     //   NoCulling（Material.NoCulling，Main.qml 手持图标先例）：billboard 瞬时翻转（相机掠过正上/
     //   正后方）时不出「消失半帧」。
     Component {
@@ -223,11 +253,11 @@ Node {
             property real px: 0.0
             property real py: 0.0
             property real pz: 0.0
-            property real scl: 0.12
+            property real scl: 0.07
             property real yawDeg: 0.0
             property real pitchDeg: 0.0
             property real glyphOpacity: 0.0
-            property color tint: "#b06ae8"
+            property color tint: "#ffffff"
             // 字形图集选格（alias 到本实例贴图的 UV 偏移；每池元素独立 Texture → 每颗粒子独立字形）。
             property alias texU: glyphTex.positionU
             property alias texV: glyphTex.positionV
@@ -237,7 +267,7 @@ Node {
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 cullMode: Material.NoCulling   // 双面（Main.qml 手持 billboard 图标同先例）：billboard 瞬时翻转不出消失半帧
-                baseColor: glyph.tint          // 近白字形 × 染色 = 各色符文
+                baseColor: glyph.tint          // 近白字形 × 白系染色 = 白色小字（透明底）
                 opacity: glyph.glyphOpacity
                 alphaMode: PrincipledMaterial.Blend   // 连续渐隐走 Blend（透明底图集）
                 baseColorMap: Texture {
