@@ -4198,6 +4198,93 @@ int main(int argc, char *argv[])
                              "(icon look in browser = QML, manual check)";
     }
 
+    // ── t780 狼/豹猫 pack 身体贴图映射探针（用户「浏览器 3D 预览狼仍用兔子贴图、豹猫贴图不对——头对身错」）──
+    // 根因：狼(10)/豹猫(11) 自 t749 起刻意不入 mobEntityMap（当时几何全脸 UV 无 box-UV 数据，防
+    //   packTextured 误命中）→ mobTextureSource 恒 miss → 3D 预览身体恒程序全脸 UV（灰身立耳四足读作
+    //   「兔子」），2D 头像却走 explicitSrc 正确显头 = 「头对身错」。修法 = mobmodel.cpp 补两分支 box-UV
+    //   （demo 包像素实测分区：狼身采 mane(21,0)——body(18,14) 三面未涂满；豹猫身 (20,6) 尾随身同纹）+
+    //   入主映射 + 头像 explicitSrc 撤除（主映射同源）+ Main.qml delegate / 图鉴 / 刷怪笼迷你态 pack 接线。
+    //   ① 映射锁（mobEntityMap t780 提头后可直调，同 t785 spawnEggTint）：10→wolf/wolf.png、11→
+    //     cat/ocelot.png 精确路径；14（蠹虫）仍**不在**表（几何全脸 UV 只走头像 explicitSrc——入表会让
+    //     3D packTextured 采到未设定位 = 贴图错乱回归）。
+    //   ② 头区布局锁（mobHeadIconLayout 单一权威）：狼 front(4,4)6×6（新增锁——t780 只改来源路径不改
+    //     裁剪区）/ 豹猫 front(5,5)5×4（t779 已锁，重申 explicitSrc 撤除不漂移）。
+    //   ③ 端到端（临时 PNG rig 直调 generateMobHeadIconFor，密闭不触碰进程全局 BuiltState/settings，
+    //     同 t777/t779 语义）：rig 按 mobEntityMap 子目录布局落 wolf/wolf.png + cat/ocelot.png → 两型
+    //     头像生成成功且中心像素正确 = explicitSrc 撤除后「region 条目 → mobEntityMap → 文件解析」链路
+    //     通（映射漏行 / 头区条目丢 → 空串 FAIL）。3D box-UV 采样观感（mobmodel.cpp 几何层）需人工目视。
+    {
+        bool ok = true;
+        // ① 映射锁（精确路径 + 蠹虫排除）。
+        {
+            bool wolfOk = false, ocelotOk = false, silverfishInMap = false;
+            for (const auto &m : mobEntityMap()) {
+                if (m.first == 10) wolfOk = (m.second == QStringLiteral("wolf/wolf.png"));
+                if (m.first == 11) ocelotOk = (m.second == QStringLiteral("cat/ocelot.png"));
+                if (m.first == 14) silverfishInMap = true;
+            }
+            if (!wolfOk || !ocelotOk || silverfishInMap) {
+                qInfo().noquote() << "  [t780 diag] map entries wrong: wolf" << wolfOk
+                                  << "ocelot" << ocelotOk << "silverfish-in-map" << silverfishInMap;
+                ok = false;
+            }
+        }
+        // ② 头区布局锁。
+        {
+            const struct { int mob; int fx, fy, fw, fh; } exp[] = {
+                { 10,  4,  4,  6,  6 }, // 狼：head(0,0)6×6×4 → front (4,4)-(10,10)
+                { 11,  5,  5,  5,  4 }, // 豹猫：head(1,1)5×4×4 → front (5,5)-(10,9)
+            };
+            for (const auto &e : exp) {
+                MobHeadIconLayout lay;
+                if (!mobHeadIconLayout(e.mob, &lay)
+                        || lay.frontX != e.fx || lay.frontY != e.fy
+                        || lay.frontW != e.fw || lay.frontH != e.fh) {
+                    qInfo().noquote() << "  [t780 diag] head layout mob" << e.mob << "mismatch (front"
+                                      << lay.frontX << lay.frontY << lay.frontW << lay.frontH << ")";
+                    ok = false;
+                }
+            }
+        }
+        // ③ 端到端：explicitSrc 撤除后主映射路径解析（子目录布局同 demo 包）。
+        QDir d780(QDir::temp().absoluteFilePath("t780_mobtex_probe"));
+        d780.removeRecursively();
+        d780.mkpath(".");
+        QDir(d780.absoluteFilePath("wolf")).mkpath(".");
+        QDir(d780.absoluteFilePath("cat")).mkpath(".");
+        const QColor wolfHead(0x9a, 0x8c, 0x88), catFace(0xdd, 0xd7, 0x7b); // 狼头灰 / 豹猫脸黄（互异防假 PASS）
+        QImage wolfTex(64, 32, QImage::Format_ARGB32), catTex(64, 32, QImage::Format_ARGB32);
+        wolfTex.fill(wolfHead);
+        catTex.fill(catFace);
+        if (!wolfTex.save(d780.absoluteFilePath("wolf/wolf.png"), "PNG")
+                || !catTex.save(d780.absoluteFilePath("cat/ocelot.png"), "PNG")) {
+            qInfo().noquote() << "  [t780 diag] failed to write temp source PNGs";
+            ok = false;
+        }
+        const struct { int mob; QColor center; } rigs[] = { { 10, wolfHead }, { 11, catFace } };
+        for (const auto &e : rigs) {
+            const QString icon = generateMobHeadIconFor(e.mob, d780.absolutePath());
+            if (icon.isEmpty()) {
+                qInfo().noquote() << "  [t780 diag] mob" << e.mob << "icon generation unexpectedly failed";
+                ok = false;
+                continue;
+            }
+            QImage ic(icon);
+            if (ic.width() != 64 || ic.height() != 64 || ic.pixelColor(32, 32) != e.center) {
+                qInfo().noquote() << "  [t780 diag] mob" << e.mob << "icon wrong:" << ic.width() << "x"
+                                  << ic.height() << "center" << ic.pixelColor(32, 32).name();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t780 wolf/ocelot pack body texture: mobEntityMap gains 10->wolf/wolf.png + "
+                             "11->cat/ocelot.png (silverfish 14 stays out - head-only explicitSrc path), "
+                             "head fronts locked (4,4)6x6 / (5,5)5x4, explicitSrc removal verified end-to-end "
+                             "via subdir-layout rigs resolving through the main map (3D box-UV look = QML, "
+                             "manual check)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

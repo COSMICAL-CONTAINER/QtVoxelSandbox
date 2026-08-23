@@ -3851,6 +3851,16 @@ Window {
         //   pack 命中 → MobModel box-UV 展开进该贴图（mantle 12×16×12 @ (0,0) + 8 触腕共用 2×12×2 @ (48,0)）+
         //   packTextured=true；pack 关 → source 空 → 回退 mobSquidTex（程序生成 mob_squid）。
         Texture { id: mobSquidPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(9) : ""; generateMipmaps: false }
+        // t780 狼 pack 身体贴图（entity/wolf/wolf.png，512×256 = base 8×）：pack 命中 → MobModel box-UV 展开
+        //   进该贴图（躯干采 mane(21,0) 毛区——demo 包 body(18,14) 三面未涂满，像素实测见 mobmodel.cpp t780 注释）
+        //   + packTextured=true；pack 关 → source 空 → 回退 mobWolfTex（程序生成 mob_wolf）。眼 overlay 隐
+        //   （pack 贴图前脸自带双瞳，t777 双眼教训）；尾独立 Model 保持纯色毛色（贴图无尾区可采）。
+        Texture { id: mobWolfPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(10) : ""; generateMipmaps: false }
+        // t780 豹猫 pack 身体贴图（entity/cat/ocelot.png，256×128 = base 4×；1.8+ 猫科合并 cat/ 目录）：
+        //   仅**未驯服豹猫**采它（demo 包无驯服猫变体 PNG，驯服猫恒走程序 mob_cat_* 全脸 UV + packTextured
+        //   =false）；pack 命中 → box-UV（头(1,1)/身(20,6)/腿(0,18)，尾随身同纹）。眼 overlay 随 pack 态隐
+        //   （贴图前脸自带眼点）。
+        Texture { id: mobOcelotPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(11) : ""; generateMipmaps: false }
         // t732 矿车贴图两态（同 mobSquidPackTex 模式）：pack 命中 entitySource("minecart")（demo 包扁平
         //   entity/minecart.png 512×256 = base 8×）→ cartPackTex + MinecartBox layout 1（demo 包实测分区）；
         //   pack 关 / 包缺 → cartTex（qrc 程序 entity_minecart 64×32，layout 0）。source 绑定读 active →
@@ -7862,10 +7872,14 @@ Window {
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobWolf
                                 property real wolfSit: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.wolfSittingAt(index) ? 1 : 0) : 0 }
+                                // t780 pack 命中判据（mobEntityMap 补 wolf/wolf.png + mobmodel.cpp box-UV）：pack 开且
+                                //   命中 → box-UV 采 pack 贴图（mane 毛区躯干）；QUrl 判空走 toString().length（t497 铁律）。
+                                readonly property bool wolfPackHit: mobWolfPackTex.source.toString().length > 0
                                 geometry: MobModel {
                                     mobType: 10
-                                    // 狼无 pack entity 贴图映射（同 Squid(9)，spec 未列 → 保程序生成 mob_wolf 全脸 UV）。
-                                    packTextured: false
+                                    // t780：pack 命中 → box-UV 展开 pack wolf.png（躯干采 mane 毛区，mobmodel.cpp t780
+                                    //   分区实测）；pack 关 → 程序生成 mob_wolf 全脸 UV（原行为不变）。
+                                    packTextured: wolfPackHit
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 // t480 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
@@ -7876,7 +7890,8 @@ Window {
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
-                                    baseColorMap: mobWolfTex
+                                    // t780 两态贴图：pack 命中 → pack wolf.png（box-UV）；否则程序 mob_wolf（全脸 UV）。
+                                    baseColorMap: wolfPackHit ? mobWolfPackTex : mobWolfTex
                                 }
                                 // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
                                 //   0.02 半 0.15×0.40 → 后上角）。eulerRotation.x 正 → +Y 端朝 +Z（尾向后竖）；满血 → 140−105×1=35°
@@ -7910,13 +7925,16 @@ Window {
                                 }
                                 // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 前面 z=-0.70；
                                 //   眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.71，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                                //   t780：pack 命中时贴图头前脸自带双瞳（demo 包 row6 实测）→ overlay 隐（t777 双眼教训）。
                                 Model {
+                                    visible: !wolfPackHit
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.08, 0.16, -0.71)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
+                                    visible: !wolfPackHit
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.08, 0.16, -0.71)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
@@ -7939,10 +7957,16 @@ Window {
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
                                 property real ocatSit: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.ocelotSittingAt(index) ? 1 : 0) : 0 }
+                                // t780 驯服态（revision 绑定即时刷新）+ 野生豹猫 pack 命中判据：pack 开且命中
+                                //   mobOcelotPackTex（cat/ocelot.png）且**未驯服** → box-UV 采 pack 斑点豹猫贴图；
+                                //   驯服猫恒程序贴图（demo 包无驯服猫变体 PNG）。QUrl 判空 toString().length（t497）。
+                                property bool ocatTamed: { const _r = entityManager.revision; return _r >= 0 && entityManager.ocelotTamedAt(index) }
+                                readonly property bool ocelotPackHit: !ocatTamed && mobOcelotPackTex.source.toString().length > 0
                                 geometry: MobModel {
                                     mobType: 11
-                                    // 豹猫/猫无 pack entity 贴图映射（同 Wolf/Squid，spec 未列 → 保程序生成贴图全脸 UV）。
-                                    packTextured: false
+                                    // t780：野生豹猫 pack 命中 → box-UV 展开 pack ocelot.png（头(1,1)/身(20,6)/腿(0,18)，
+                                    //   尾随身同纹，mobmodel.cpp t780 分区实测）；驯服猫 / pack 关 → 程序贴图全脸 UV（原行为）。
+                                    packTextured: ocelotPackHit
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
                                 }
                                 // t481 坐姿变换：坐 → 垂直压缩（1−0.22=0.78）+ 后倾（-18° 绕 X，鼻略抬）+ 略下沉 0.08 格 →
@@ -7954,27 +7978,30 @@ Window {
                                     lighting: PrincipledMaterial.NoLighting
                                     baseColor: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
                                     // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
-                                    //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。
+                                    //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。t780：未驯服且 pack 命中 → pack
+                                    //   cat/ocelot.png（box-UV 斑点豹猫）。
                                     baseColorMap: {
-                                        const _r = entityManager.revision
-                                        if (_r >= 0 && entityManager.ocelotTamedAt(index)) {
+                                        if (ocatTamed) {
                                             const v = entityManager.ocelotVariantAt(index)
                                             if (v === 0) return mobCatBlackTex
                                             if (v === 1) return mobCatGingerTex
                                             return mobCatCreamTex
                                         }
-                                        return _r >= 0 ? mobOcelotTex : null
+                                        return ocelotPackHit ? mobOcelotPackTex : mobOcelotTex
                                     }
                                 }
                                 // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 前面 z=-0.60；
                                 //   眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.61，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                                //   t780：pack 命中（野生豹猫）时贴图头前脸自带眼点 → overlay 隐（t777 双眼教训）。
                                 Model {
+                                    visible: !ocelotPackHit
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(-0.07, 0.15, -0.61)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
+                                    visible: !ocelotPackHit
                                     geometry: UnitCube {}
                                     position: Qt.vector3d(0.07, 0.15, -0.61)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
@@ -8953,7 +8980,8 @@ Window {
                         //   蛋改型经 cleanupVis 重赋 cageMobType → 本块重算即时换贴图）：miniProgTex=程序
                         //   贴图（Shambler/Silverfish + t787 四足/鸡/鱿鱼/狼/豹猫/夜行者/燃烬者 9 型）；
                         //   miniPackTex=pack 命中该型 entity PNG（QUrl 判空走 toString().length，t497 铁律；
-                        //   Silverfish/Wolf/Ocelot 无 pack 映射同实体 delegate）。材质规则（下 baseColor）：
+                        //   Silverfish 无 pack 映射同实体 delegate；Wolf/Ocelot t780 入映射——刷怪笼恒野生豹猫
+                        //   形态，直接采 pack wolf/ocelot 贴图）。材质规则（下 baseColor）：
                         //   贴图在身（pack 或程序）→ 近白 tint × 昼夜灰阶防压暗（t597）；无贴图型 → 体色 ×
                         //   灰阶（色值与各实体 delegate 一致：骨白 / 青绿 / 暗黑红）。
                         property QtObject miniProgTex: {
@@ -8982,6 +9010,10 @@ Window {
                             if (t === EntityManager.MobSheep && mobSheepPackTex.source.toString().length > 0) return mobSheepPackTex
                             if (t === EntityManager.MobChicken && mobChickenPackTex.source.toString().length > 0) return mobChickenPackTex
                             if (t === EntityManager.MobSquid && mobSquidPackTex.source.toString().length > 0) return mobSquidPackTex
+                            // t780：狼/豹猫入 mobEntityMap → 刷怪笼迷你态同采 pack 贴图（miniMobBody 恒野生形态，
+                            //   豹猫无需驯服分支）。
+                            if (t === EntityManager.MobWolf && mobWolfPackTex.source.toString().length > 0) return mobWolfPackTex
+                            if (t === EntityManager.MobOcelot && mobOcelotPackTex.source.toString().length > 0) return mobOcelotPackTex
                             if (t === EntityManager.MobNightwalker && mobNightwalkerPackTex.source.toString().length > 0) return mobNightwalkerPackTex
                             if (t === EntityManager.MobEmberling && mobEmberlingPackTex.source.toString().length > 0) return mobEmberlingPackTex
                             return null
