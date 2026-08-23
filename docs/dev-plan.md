@@ -2902,7 +2902,7 @@ t733-t766（34 项）。**建议顺序：t740 红石激活矩阵先行（排查�
 **t784** 床浏览器 3D 模型：仍是老模型 → 更新为当前游戏内低 3D 床模型（多色联动 t751 变体）。
 
 ### 🅳 生物蛋与刷怪笼（t785-t787）
-**t785** 生物蛋补全：末影人/烈焰人蛋未与其它蛋同列（贴图也须仿各自配色）、狼/豹猫蛋缺失 → 蛋表补全（生成式染色表扩展），全部蛋进创造背包蛋区。
+**t785** 生物蛋补全：末影人/烈焰人蛋未与其它蛋同列（贴图也须仿各自配色）、狼/豹猫蛋缺失 → 蛋表补全（生成式染色表扩展），全部蛋进创造背包蛋区。 ✅✅ 三缺口全实证：① 夜行者/燃烬者蛋（t727/t728）孤列在暗渊链材料之后（蛋区断裂）→ **移入蛋区**与其它蛋连续同列；且燃烬者蛋 0x247 MaterialIcon 漏 case 落 default 显木棒（t728 只加了 id/name/palette，recipe.h 注释声称的 drawSpawnEgg("emberling") 不存在）→ 补 kind。② 狼/豹猫蛋**整体缺失**（mob 实体 t480/t481 早就有，蛋 id 没有）→ 新 ids SpawnEggWolfId=0x249 / SpawnEggOcelotId=0x24A + nameForBlock 名 + placeBlock 接通（右键生成**野生**个体，驯服走喂食链）+ MaterialIcon drawSpawnEgg("wolf"/"ocelot") 自绘。③ 贴图仿各自配色：t645 生成式染色表扩 4 行（夜行者黑底紫点 #1a1426/#8a50d8、燃烬者金黄底深琥珀斑 #e8b830/#a05818、狼浅灰蓝底深灰纹 #c8ccd4/#50565f、豹猫奶油底褐纹 #e8c890/#7a4a20）+ itemFilenameMap 补 pack 直连 4 行（enderman/blaze/wolf/ocelot_spawn_egg.png，现代包有则用、老包 miss 走生成式染色——不再是「无映射恒自绘」）。**防回归收口**：蛋→mob 映射此前散在 placeBlock 内联 11 路 || 链 + ResourceBrowser mobTypeForEgg 两处手抄（t728 B9「加了蛋漏接」即此类）→ 收口 RecipeRegistry::mobTypeForSpawnEgg 单一权威表（recipe.cpp 直引 EntityManager::MobType 枚举防手抄漂移；placeBlock 蛋判定/mobType 改查此表，color 占位串转 switch）；EggTint+spawnEggTint 声明提到 resourcepackmanager.h（矩阵测试直调）。矩阵探针 t785：13 蛋 id→mobType 全对（枚举同值断言）+ 创造背包蛋区**连续同列**（span==13 无杂项穿插）+ 全蛋有名 + 染色表全有条目 + 非蛋 id（燧石/0x212 钻石占位）不误命中——**183 PASS/0 FAIL**（基线 182+1）。**需人工目视**：蛋区 13 蛋连续排布、夜行者（黑紫紫瞳）/燃烬者（金黄焰尖棒纹）/狼（灰蓝双耳）/豹猫（奶油褐斑）四蛋图标观感、四蛋右键各刷对应野生 mob、图鉴选狼/豹猫蛋显 3D 模型。
 **t786** 刷怪笼类型化：① 笼改为**带生物类型**（state 编码存储）；② 地底生成的笼不全是蠹虫 → 僵尸/骷髅/苦力怕/蜘蛛按权重随机（蠹虫限要塞）；③ 创造背包放置的笼中间空白 → 放下即显示对应迷你生物；④ tickSpawners 按类型刷怪。
 **t787** 生物蛋×刷怪笼交互：手持生物蛋对刷怪笼右键 → 笼变为刷该生物类型（改 state + 迷你模型即时切换），机制等价 MC。
 
