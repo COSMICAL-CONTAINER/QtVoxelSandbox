@@ -2082,10 +2082,11 @@ public:
     // t786 刷怪笼 type 位布局：bit1-5（值 0x3E）=「笼内 mob 类型」字段（存 EntityManager::MobType 枚举值，
     //   左移 1 位）。分层（PLAN §2）：Core 不依赖 Entities → 本类只提供 bit 布局常量 + spawnerStateForMob(int)
     //   原始 int 编码（数值契约 = EntityManager::MobType：4=Shambler 僵尸 / 5=Bones 骷髅 / 6=Stalker 爬行
-    //   追踪者 / 7=Spider 蜘蛛 / 14=Silverfish 银鱼，redstone_matrix_test t786 探针锁死防枚举漂移）；解码
-    //   （含合法 type 校验 + 旧存档兼容回退）单源在 EntityManager::spawnerMobTypeForState（QML delegate 与
-    //   tickSpawners 共用，见 t785 单一权威表教训）。旧存档兼容：type 位=0 且 bit0=1 → 旧要塞银鱼笼；
-    //   type 位=0 且 bit0=0 → 地牢旧笼，刷怪端确定性回退 Shambler（旧版地牢本是 Shambler/Bones 随机刷，
+    //   追踪者 / 7=Spider 蜘蛛 / 14=Silverfish 银鱼，redstone_matrix_test t786 探针锁死防枚举漂移；t787 起
+    //   合法 type 扩为全 13 蛋型 + Silverfish 共 14 型 —— 生物蛋右键刷怪笼改型写入，t787 探针锁全蛋表
+    //   round-trip）；解码（含合法 type 校验 + 旧存档兼容回退）单源在 EntityManager::spawnerMobTypeForState
+    //   （QML delegate 与 tickSpawners 共用，见 t785 单一权威表教训）。旧存档兼容：type 位=0 且 bit0=1 → 旧要塞
+    //   银鱼笼；type 位=0 且 bit0=0 → 地牢旧笼，刷怪端确定性回退 Shambler（旧版地牢本是 Shambler/Bones 随机刷，
     //   无从恢复原始随机序列 → 取地牢最常见型 Shambler 为默认；刻意不默认 Silverfish，避免旧地牢笼全变
     //   银鱼笼）。state 经 m_states 落 SQLite round-trip 保真。
     static constexpr quint8 SpawnerStateMobShift = 1;   // type 字段起始 bit

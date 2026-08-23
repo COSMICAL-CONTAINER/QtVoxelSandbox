@@ -3714,11 +3714,13 @@ void PlayerController::placeBlock()
     // t243 生物蛋 useBlock（spec「右键地面→生成对应生物」）：手持生物蛋（全 13 蛋：猪/牛/羊/蹒跚者/骸骨/
     //   潜行者/蜘蛛/鸡/鱿鱼/夜行者/燃烬者/狼/豹猫；t785 蛋表补全后经 RecipeRegistry::mobTypeForSpawnEgg
     //   单一权威表判定 + 取 mob 类型）
-    //   右键命中实体方块 → 在命中面相邻格生成对应 mob（EntityManager::spawnMobTyped）。机制等价 MC 1.0 spawn
-    //   egg（机制对齐，非名词照搬）。蛋非方块（材料段）→ selectedBlock 经 hotbar 归 Air，须在下方
+    //   右键命中实体方块 → 在命中面相邻格生成对应 mob（EntityManager::spawnMobTyped）。
+    //   t787 前置分流：命中格本身是刷怪笼（Spawner）→ 不刷 mob，改笼 type（state=spawnerStateForMob(蛋型)，
+    //   机制等价 MC 1.0 spawn egg 右键 spawner 改型；详见下方内联注释）。
+    //   蛋非方块（材料段）→ selectedBlock 经 hotbar 归 Air，须在下方
     //   `m_selectedBlock == Air` 守卫之前分流（同桶 / 锄 / 种子 / 面包分支模式）。**须命中**（spec「右键地面」——
     //   蛋需目标面定位生成点；瞄空气不生成）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可用。
-    //   生存消耗 1 蛋（创造不耗 → 无限生成，机制等价 MC 创造 spawn egg 不消耗）。
+    //   生存消耗 1 蛋（创造不耗 → 无限生成，机制等价 MC 创造 spawn egg 不消耗；改笼同语义）。
     //   生成位 = 命中面相邻格 (m_hitBx+nx, m_hitBy+ny, m_hitBz+nz)（同方块放置 tx/ty/tz 约定）→ 右键方块顶面在
     //   其上方一格生成、右键侧壁在玩家侧空气格生成；mob 半径 0.5、pos 存格中心 → spawnMobTyped 把 mob 放到该
     //   格中心，重力 tick 把它贴到地表（生成位高于地表时下落，机制等价 MC spawn egg 落地）。mobType / 占位配色
@@ -3732,34 +3734,53 @@ void PlayerController::placeBlock()
             //   color 是占位串（pig/cow/sheep 走 MobModel + 贴图，不读 color；仅 mobType 0 测试路径读——
             //   现蛋全非 0），按各 mob 主色传作文档锚（与生成式蛋染色表 / MaterialIcon drawSpawnEgg 同色板）。
             const int mobType = RecipeRegistry::mobTypeForSpawnEgg(heldItemId);
-            QString color;
-            switch (mobType) {
-            case EntityManager::MobPig:         color = QStringLiteral("#f0a8b0"); break;
-            case EntityManager::MobCow:         color = QStringLiteral("#5a4030"); break;
-            case EntityManager::MobSheep:       color = QStringLiteral("#f5f0e8"); break;
-            case EntityManager::MobShambler:    color = QStringLiteral("#4a6a3a"); break; // 敌对：暗绿腐肉（机制等价僵尸）
-            case EntityManager::MobBones:       color = QStringLiteral("#d8d8d0"); break; // 敌对：灰白骨（机制等价骷髅）
-            case EntityManager::MobStalker:     color = QStringLiteral("#3a5a3a"); break; // 敌对：暗绿（机制等价苦力怕）
-            case EntityManager::MobSpider:      color = QStringLiteral("#2a1a1a"); break; // 敌对：暗黑（机制等价蜘蛛）
-            case EntityManager::MobChicken:     color = QStringLiteral("#f5f0e4"); break; // 白羽（机制等价鸡）
-            case EntityManager::MobSquid:       color = QStringLiteral("#6a4a3a"); break; // 深褐橘斑（机制等价鱿鱼）
-            case EntityManager::MobNightwalker: color = QStringLiteral("#2a1f2a"); break; // t727 暗紫黑（机制等价末影人；瞪视激怒）
-            case EntityManager::MobEmberling:   color = QStringLiteral("#e8b030"); break; // t728 橙黄焰色（机制等价烈焰人；远程火球悬浮）
-            case EntityManager::MobWolf:        color = QStringLiteral("#c8ccd4"); break; // t785 浅灰蓝（机制等价狼；蛋刷野生）
-            case EntityManager::MobOcelot:      color = QStringLiteral("#e8c890"); break; // t785 奶油底褐纹（机制等价豹猫；蛋刷野生）
-            default: break; // 防御（入口条件已排除 -1；表值恒非空 mobType）
+            // t787 生物蛋×刷怪笼交互（用户「拿上生物蛋对着刷怪笼右键，就可以弄成刷这个生物的刷怪笼」；
+            //   机制等价 MC 1.0 spawn egg 右键 spawner 改型）：准星命中格本身是 Spawner → 不刷 mob，改写
+            //   该格 state = spawnerStateForMob(蛋对应 mobType)。走 5 参数 setBlock（id 不变只 state 变 →
+            //   不发 broken/placed，发 worldChanged → QML spawnerHost.cleanupVis 兜底重读 state 同步笼心
+            //   迷你模型 cageMobType 即时切换；tickSpawners 读 state 解码天然按新类型刷）。改同型时
+            //   World::setBlock「id+state 均无变化」守卫直接拒 → 无副作用（蛋照消耗，机制等价 MC 同型
+            //   蛋再点不重置计时）。非法类型防御：mobType 来自 t785 单一权威蛋表（13 型全合法），编码端
+            //   spawnerStateForMob 不校验（t786 契约——非法值由解码端兜底 Shambler）。生存扣 1 蛋 /
+            //   创造不耗（对齐下方蛋刷 mob 消耗语义）。分层（PLAN §2）：交互判定属 Game 层（读射线命中 +
+            //   写 World），类型编解码复用 Core/Entities 既有单源。
+            if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Spawner) {
+                m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Spawner,
+                                  BlockRegistry::spawnerStateForMob(mobType));
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 蛋（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 改笼也是一次「使用」动作 → 挥手（t29）
+            } else {
+                QString color;
+                switch (mobType) {
+                case EntityManager::MobPig:         color = QStringLiteral("#f0a8b0"); break;
+                case EntityManager::MobCow:         color = QStringLiteral("#5a4030"); break;
+                case EntityManager::MobSheep:       color = QStringLiteral("#f5f0e8"); break;
+                case EntityManager::MobShambler:    color = QStringLiteral("#4a6a3a"); break; // 敌对：暗绿腐肉（机制等价僵尸）
+                case EntityManager::MobBones:       color = QStringLiteral("#d8d8d0"); break; // 敌对：灰白骨（机制等价骷髅）
+                case EntityManager::MobStalker:     color = QStringLiteral("#3a5a3a"); break; // 敌对：暗绿（机制等价苦力怕）
+                case EntityManager::MobSpider:      color = QStringLiteral("#2a1a1a"); break; // 敌对：暗黑（机制等价蜘蛛）
+                case EntityManager::MobChicken:     color = QStringLiteral("#f5f0e4"); break; // 白羽（机制等价鸡）
+                case EntityManager::MobSquid:       color = QStringLiteral("#6a4a3a"); break; // 深褐橘斑（机制等价鱿鱼）
+                case EntityManager::MobNightwalker: color = QStringLiteral("#2a1f2a"); break; // t727 暗紫黑（机制等价末影人；瞪视激怒）
+                case EntityManager::MobEmberling:   color = QStringLiteral("#e8b030"); break; // t728 橙黄焰色（机制等价烈焰人；远程火球悬浮）
+                case EntityManager::MobWolf:        color = QStringLiteral("#c8ccd4"); break; // t785 浅灰蓝（机制等价狼；蛋刷野生）
+                case EntityManager::MobOcelot:      color = QStringLiteral("#e8c890"); break; // t785 奶油底褐纹（机制等价豹猫；蛋刷野生）
+                default: break; // 防御（入口条件已排除 -1；表值恒非空 mobType）
+                }
+                // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
+                //   maxHealth 传 0 → spawnMobTyped 内部用 kDefaultMaxHealth（=10，MC 1.0 猪/牛/羊 5 心）；
+                //   避开访问 EntityManager 私有常量（分层：Game 层不读 Entities 实现细节，仅传语义意图「默认血量」）。
+                const int sx = m_hitBx + m_hitNx, sy = m_hitBy + m_hitNy, sz = m_hitBz + m_hitNz;
+                m_entityManager->spawnMobTyped(sx, sy, sz, mobType, color, 0);
+                if (m_mode != Creative)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 蛋（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 使用蛋也是一次「使用」动作 → 挥手（t29）
             }
-            // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
-            //   maxHealth 传 0 → spawnMobTyped 内部用 kDefaultMaxHealth（=10，MC 1.0 猪/牛/羊 5 心）；
-            //   避开访问 EntityManager 私有常量（分层：Game 层不读 Entities 实现细节，仅传语义意图「默认血量」）。
-            const int sx = m_hitBx + m_hitNx, sy = m_hitBy + m_hitNy, sz = m_hitBz + m_hitNz;
-            m_entityManager->spawnMobTyped(sx, sy, sz, mobType, color, 0);
-            if (m_mode != Creative)
-                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 蛋（创造不耗）
-            m_lastPlaceMs = now;
-            emit swingArm(); // 使用蛋也是一次「使用」动作 → 挥手（t29）
         }
-        return; // 生物蛋（生成成功 / 未命中）均不再走方块放置路径
+        return; // 生物蛋（改笼 / 生成成功 / 未命中）均不再走方块放置路径
     }
     // t300 剪刀 useBlock（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）：
     //   手持剪刀（ToolRegistry::Shears，工具段 0x110）右键 → 在主选体射线之外**独立**跑一条「mob 命中射线」

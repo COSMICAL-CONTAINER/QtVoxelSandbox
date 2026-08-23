@@ -205,8 +205,10 @@ public:
     // t786 刷怪笼 state → 笼内 mob 类型解码（单一权威，t785 教训：编码在 BlockRegistry::spawnerStateForMob，
     //   解码收口在此 —— C++ tickSpawners 与 QML spawnerHost delegate 共用，防两端各写一套漂移）。位布局见
     //   BlockRegistry（bit1-5 = MobType 枚举值 <<1；bit0 = 旧要塞银鱼标记）。规则：
-    //     type 位非零 → 取 type；属 {Shambler,Bones,Stalker,Spider,Silverfish} 才认，非法值（枚举漂移 /
-    //       手改存档）回退 Shambler；
+    //     type 位非零 → 取 type；属「可刷型白名单」才认（t786 五敌对 {Shambler,Bones,Stalker,Spider,
+    //       Silverfish} + t787 生物蛋改型全蛋表 {Pig,Cow,Sheep,Chicken,Squid,Wolf,Ocelot,Nightwalker,
+    //       Emberling} = 13 蛋类型 + 无蛋的 Silverfish 共 14 型），非法值（枚举漂移 / 手改存档 —— 如
+    //       MobTest/SnowGolem/IronGolem/Tnt/Anvil 哨兵与 >18 越界值）回退 Shambler；
     //     type 位零 且 bit0=1 → 旧存档要塞银鱼笼（t487 时代 state 恒 1）→ Silverfish；
     //     type 位零 且 bit0=0 → 旧地牢笼 / 兜底 → Shambler（旧版地牢本 Shambler/Bones 随机无从恢复 → 取最
     //       常见型确定性回退）。const 纯函数于入参，不读 World。
@@ -223,6 +225,18 @@ public:
     //   （alive && kind==Mob && hostile && !dead）在其 3D 球内。机制等价 MC 1.0 床周 8 格内有敌对生物即不能睡。
     //   const 只读自身数据；无实体 / 无命中 → false。由 PlayerController::trySleepAt（placeBlock useBlock 床分支）调。
     Q_INVOKABLE bool hostileNearby(const QVector3D &center, float radius) const;
+    // t787 同型邻域计数：给定中心 center 与半径 radius（blocks），返回**活体且未死、mobType 与入参相同**的
+    //   Mob 在其 3D 球内的数量。供 tickSpawners 被动笼判「笼周同型是否已达 kSpawnerLocalCap」（hostileNearby
+    //   只数敌对，对被动笼恒 false → 被动型须按型计数防「每 6s 一只无限刷」；机制等价 MC 1.0 刷怪笼「同类
+    //   6 只内才刷」按型判上限）。const 只读自身数据。C++ 侧调用（非 QML 面板 API）。
+    int mobTypeCountNear(const QVector3D &center, float radius, int mobType) const;
+    // t787 被动生物生成入口（spawnHostileMob 的被动镜像）：委托 spawnMobTyped（配色表 + kDefaultMaxHealth =
+    //   10，MC 1.0 猪/牛/羊 5 心），spawnMobCore 按型设 hostile=false（被动）。供 tickSpawners 被动笼
+    //   （生物蛋改型，t787）刷被动型用 —— 蛋刷路径（PlayerController placeBlock 蛋分支）带显式 color 直调
+    //   spawnMobTyped，本入口收口「无 caller 配色上下文」的系统生成（同 spawnHostileMob 语义分层）。
+    //   mobType 仅被动七型 {Pig,Cow,Sheep,Chicken,Squid,Wolf,Ocelot} 合法（敌对型走 spawnHostileMob；
+    //   非法值防御回退 Pig，同 spawnHostileMob 回退 Shambler 模式）。达 kCap 委托内静默跳过。
+    Q_INVOKABLE void spawnPassiveMob(int x, int y, int z, int mobType);
     // t280 第 i 个实体是否**敌对**（hostile=true 的活体 Mob）。QML 据它对 Shambler/Bones 显燃烧火焰 Model
     //   （passive 永不燃烧 → 火焰仅敌对会显）。越界 / 非 hostile → false。
     Q_INVOKABLE bool isHostileAt(int i) const;
@@ -707,6 +721,11 @@ public:
     //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 玩家在范围内时刷怪笼照样刷，世界模拟连续；同 tickHostileLife）。
     //   机制等价 MC 1.0 刷怪笼（mob spawner）：玩家在 kSpawnerPlayerRange 内 + 该笼周 kSpawnerMobCheckRadius 内敌对
     //   数 < kSpawnerLocalCap + 全局 hostileCount < kHostileMobCap 时，周期 spawn 1 只敌对（Shambler/Bones 等概率）。
+    //   t787 类型路由：笼 state 经 spawnerMobTypeForState 解码 —— 敌对型（Shambler/Bones/Stalker/Spider/
+    //   Silverfish/Nightwalker/Emberling）走 spawnHostileMob（同旧）；被动型（Pig/Cow/Sheep/Chicken/Squid/
+    //   Wolf/Ocelot，生物蛋改型写入）走 spawnPassiveMob，且上限判据换「笼周**同型**计数 mobTypeCountNear
+    //   < kSpawnerLocalCap」（hostileNearby 对被动恒 false）—— 机制等价 MC 1.0 持生物蛋右键刷怪笼改型后
+    //   笼刷该型（含被动型），「同类 6 只内才刷」按型判。被动 spawn 不计入 hostilesRunning 敌对预算。
     //   **player-near 才扫**：内部 m_spawnAccumSpawner 节流（kSpawnerInterval 秒一次），满 → 扫玩家所在格周围
     //   ±kSpawnerScanRange 的立方体找 Spawner 方块（按需扫描，玩家不在范围 → 不扫 → 远场零开销），对每个找到的
     //   笼：玩家 XZ 距离 ≤ kSpawnerPlayerRange + 笼周敌对 < kSpawnerLocalCap + 全局敌对 < kHostileMobCap + 找到合法

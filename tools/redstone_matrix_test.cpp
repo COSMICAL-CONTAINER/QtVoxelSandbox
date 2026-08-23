@@ -3390,10 +3390,11 @@ int main(int argc, char *argv[])
             ok = false;
         }
         // ①b 旧存档兼容：state=0（旧地牢笼）→ Shambler；state=1（t487 旧要塞银鱼笼）→ Silverfish；
-        //   非法 type 位（如 0x20=type16 夜行者不可刷 / 0x3E 全掩码）→ 兜底 Shambler 不崩不误刷夜行者。
+        //   非法 type 位 → 兜底 Shambler 不崩不误刷。t787 注：旧样本 0x21（type16）扩表后是合法
+        //   Nightwalker（蛋改型）→ 非法样本换 0x27（type19 > MobAnvil=18 越界）；0x3E（type31）仍非法。
         if (em786.spawnerMobTypeForState(0) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(1) != EntityManager::MobSilverfish
-            || em786.spawnerMobTypeForState(0x20 | 0x01) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(0x26 | 0x01) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(0x3E) != EntityManager::MobShambler) {
             qInfo() << "  [t786 diag] legacy/invalid-state decode wrong";
             ok = false;
@@ -3518,6 +3519,120 @@ int main(int argc, char *argv[])
                              "has no silverfish with zombie-dominant order, tickSpawners spawns the cage's "
                              "typed mob (both polarity probes), creative placement defaults to shambler "
                              "(cage mini-model visuals = QML, manual check)";
+    }
+
+    // ── t787 生物蛋×刷怪笼交互（用户「拿上生物蛋对着刷怪笼右键，就可以弄成刷这个生物的刷怪笼」；机制等价
+    //    MC 1.0 spawn egg 右键 spawner 改型）：①全 13 蛋改型 round-trip（蛋表 → 编码 → 解码互逆，白名单
+    //    扩表锁死——加蛋漏接 = 此处 FAIL，t785 B9 缺口防线）②哨兵/越界 type 仍兜底 Shambler（扩表不含
+    //    MobTest/golem/Tnt/Anvil 哨兵，防「经笼凭空刷哨兵型」）③改型写入 + tickSpawners 按新类型刷
+    //    （被动型走 spawnPassiveMob 且 hostile=false；敌对型走原路径）④被动笼同型 local cap（4 只封顶，
+    //    mobTypeCountNear 判据——防无上限刷屏）。蛋消耗（Hotbar takeStack）/ 笼心迷你模型切换（QML
+    //    cleanupVis 重读链）在 PlayerController/QML 层，需人工目视（同 t786 ④ 注记）。
+    {
+        bool ok = true;
+        EntityManager em787;
+        // ① 全 13 蛋改型 round-trip（蛋 id 表同 t785 探针单一权威源）。
+        const int eggs787[] = {
+            RecipeRegistry::SpawnEggPigId, RecipeRegistry::SpawnEggCowId, RecipeRegistry::SpawnEggSheepId,
+            RecipeRegistry::SpawnEggShamblerId, RecipeRegistry::SpawnEggBonesId, RecipeRegistry::SpawnEggStalkerId,
+            RecipeRegistry::SpawnEggSpiderId, RecipeRegistry::SpawnEggChickenId, RecipeRegistry::SpawnEggSquidId,
+            RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
+            RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
+        };
+        for (int eggId : eggs787) {
+            const int mt = RecipeRegistry::mobTypeForSpawnEgg(eggId);
+            const quint8 st = BlockRegistry::spawnerStateForMob(mt);
+            if (mt < 0 || em787.spawnerMobTypeForState(int(st)) != mt) {
+                qInfo().noquote() << "  [t787 diag] egg 0x" + QString::number(eggId, 16)
+                                  << "-> mobType" << mt << "state" << st << "round-trip got"
+                                  << em787.spawnerMobTypeForState(int(st));
+                ok = false;
+            }
+        }
+        // ② 哨兵 / 越界 type 编码后解码仍兜底 Shambler（0=MobTest / 12 SnowGolem / 13 IronGolem / 15 Tnt /
+        //    18 Anvil / 19 越界 —— 均无蛋不可经笼改型写入，白名单拒绝）。
+        const int sentinels787[] = { 0, 12, 13, 15, 18, 19 };
+        for (int st_ : sentinels787) {
+            if (em787.spawnerMobTypeForState(int(BlockRegistry::spawnerStateForMob(st_))) != EntityManager::MobShambler) {
+                qInfo().noquote() << "  [t787 diag] sentinel type" << st_ << "not rejected by decode whitelist";
+                ok = false;
+            }
+        }
+        // ③ 改型写入 + tick 按新类型刷（同 t786 ③ 自建临时世界模式：先摆僵尸笼 = 创造放置路径，再按
+        //    PlayerController 蛋分支同款 5 参数 setBlock 改型 → stateAt 校验 → tickSpawners 累计超
+        //    kSpawnerInterval）。
+        auto retypeCageTick = [](int eggMobType, int &wantSpawned, int &wrongSpawned,
+                                 bool &wantHostile, bool &stateWritten, float seconds) {
+            World w787;
+            w787.setWidth(48);
+            w787.setDepth(48);
+            w787.setHeight(32);
+            w787.setSeed(9);
+            const int sx = 24, sy = 8, sz = 24;
+            w787.setBlock(sx, sy, sz, BlockRegistry::Spawner, BlockRegistry::SpawnerStateShambler);
+            // 刻写位手工清空（同 t786：worldgen y=8 恒实心 → 不挖空气 spawn 预检恒拒）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dz == 0) continue;
+                    w787.setBlock(sx + dx, sy, sz + dz, BlockRegistry::Air);
+                    w787.setBlock(sx + dx, sy + 1, sz + dz, BlockRegistry::Air);
+                    w787.setBlock(sx + dx, sy - 1, sz + dz, BlockRegistry::Stone);
+                }
+            // 蛋分支同款改型写（5 参数 setBlock：id 不变只 state 变 → 不发 placed/broken）。
+            w787.setBlock(sx, sy, sz, BlockRegistry::Spawner, BlockRegistry::spawnerStateForMob(eggMobType));
+            stateWritten = w787.stateAt(sx, sy, sz) == BlockRegistry::spawnerStateForMob(eggMobType);
+            EntityManager emT;
+            const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f);
+            const int ticks = int(seconds * 10.0f);
+            for (int i = 0; i < ticks; ++i) emT.tickSpawners(0.1, &w787, playerPos);
+            wantSpawned = 0; wrongSpawned = 0; wantHostile = false;
+            for (int i = 0; i < emT.count(); ++i) {
+                if (!emT.aliveAt(i)) continue;
+                if (emT.mobTypeAt(i) == eggMobType) {
+                    ++wantSpawned;
+                    wantHostile = wantHostile || emT.isHostileAt(i);
+                } else {
+                    ++wrongSpawned;
+                }
+            }
+        };
+        {
+            // 被动极性：猪蛋改僵尸笼 → 刷 Pig（≥1）且全部非敌对、无其它型。
+            int got = 0, wrong = 0; bool hostile = false, written = false;
+            retypeCageTick(EntityManager::MobPig, got, wrong, hostile, written, 8.0f);
+            if (!written || got < 1 || wrong != 0 || hostile) {
+                qInfo().noquote() << "  [t787 diag] pig-cage tick:" << written << got << wrong << hostile;
+                ok = false;
+            }
+        }
+        {
+            // 敌对极性：蜘蛛蛋改僵尸笼 → 刷 Spider 且敌对（原路径回归）。
+            int got = 0, wrong = 0; bool hostile = false, written = false;
+            retypeCageTick(EntityManager::MobSpider, got, wrong, hostile, written, 8.0f);
+            if (!written || got < 1 || wrong != 0 || !hostile) {
+                qInfo().noquote() << "  [t787 diag] spider-cage tick:" << written << got << wrong << hostile;
+                ok = false;
+            }
+        }
+        {
+            // ④ 被动笼同型 local cap：34s ≈ 5 个刷怪周期（kSpawnerInterval=6s）→ 前 4 周期各刷 1 只、
+            //    第 5 周期同型邻域已 ≥ kSpawnerLocalCap(4) → 恰好 4 只封顶（mobTypeCountNear 判据生效）。
+            int got = 0, wrong = 0; bool hostile = false, written = false;
+            retypeCageTick(EntityManager::MobPig, got, wrong, hostile, written, 34.0f);
+            if (got != 4 || wrong != 0) {
+                qInfo().noquote() << "  [t787 diag] passive local cap: pigs" << got << "wrong" << wrong
+                                  << "(expected exactly 4 = kSpawnerLocalCap)";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t787 spawn-egg x spawner retype: all 13 eggs round-trip through "
+                             "spawnerStateForMob/spawnerMobTypeForState (whitelist extended, sentinels/overflow "
+                             "still fall back to shambler), retype write via same-id setBlock then tickSpawners "
+                             "spawns the egg's type (pig passive+non-hostile / spider hostile polarity), passive "
+                             "cage capped at 4 same-type nearby (egg consumption + cage mini-model switch = "
+                             "playercontroller/QML, manual check)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
