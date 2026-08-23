@@ -228,6 +228,14 @@ public:
     //   的 pack/程序双态语义）。红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString mobHeadIconSource(int mobType) const;
 
+    // t777 ②「pack 态羊多一双眼」显隐判据单一权威：毛层命中且「fur 毛身 + 本体层头区真脸」合成贴图已生效
+    //   （即 mobTextureSource(3) 返回的是 voxelsandbox_rp_sheep_woolface.png 而非毛层原样）→ 头前已有真脸，
+    //   QML 眼 overlay 须隐（对齐牛等「pack 自带脸则隐 overlay 眼」语义）。pack 关 / 毛层未命中 / 合成失败
+    //   （毛层原样返回，头前无脸）→ false，眼 overlay 保留（唯一脸）。只读缓存不生成（生成归
+    //   mobTextureSource(3) 懒路径）。无 NOTIFY：QML 绑定须同时依赖 Texture.source（source 变化驱动重算时
+    //   mobTextureSource 已填好缓存，本查询读到即当前态）。
+    Q_INVOKABLE bool sheepWoolFaceActive() const;
+
     // 引擎图集瓦片尺寸（HD 图集 t668：16 → 64）。读 BlockRegistry::kAtlasTilePx **单一权威**（与 build_atlas.py
     //   TILE / chunkgeometry hx,hy / BlockCube kHx,kHy 四方同源——消除「瓦片尺寸魔数多份、改一处漏一份」回归类；
     //   blockregistry.h kAtlasTilePx 注释钉死四方）。包内贴图（常 128px）→ 64 降采样平滑；程序 16px → 64 近邻

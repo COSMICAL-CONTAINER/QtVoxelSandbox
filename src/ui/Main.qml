@@ -6865,7 +6865,15 @@ Window {
                                 //   「无眼」。修：① z 前推 -0.35（明确凸出面外 0.04，无 z-fight 恒显）；② 眼位下移
                                 //   y=0.00（毛层头前下 2/3 是透明镂空区，Mask 后看穿 → 白眼底在镂空「脸洞」上高
                                 //   对比可辨，黑瞳居中）；pack 关（程序 mob_sheep 全脸纹无脸）同位兼容。
+                                // t777 ② 修「pack 态羊多一双眼」：t749 起 mobTextureSource(3) 毛层命中改返**合成贴图**
+                                //   （毛身 + 本体层头区真脸）→ 头前已有真脸，恒显 overlay 眼叠上 = 两双眼（用户报障；
+                                //   牛等 pack 自带脸早已隐 overlay 眼，羊对齐同语义）。判据 resourcePack.sheepWoolFaceActive
+                                //   单一权威（Core，合成缓存生效与否）；合成失败回退毛层原样（头前无脸）→ 眼仍显保
+                                //   唯一脸；pack 关（程序贴图无脸）恒显不变。visible 依赖 mobSheepPackTex.source
+                                //   （sheepWoolFaceActive 无 NOTIFY，由 source 变化驱动重算）。
                                 Node {
+                                    visible: !(mobSheepPackTex.source.toString().length > 0
+                                               && resourcePack.sheepWoolFaceActive)
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
@@ -6937,7 +6945,11 @@ Window {
                                 }
                                 // 裸态眼同步（同毛茸态颈枢 Node 结构；复用 headPitchAt 绑头俯仰；t633 ③ 同步
                                 //   眼位/尺寸 —— z=-0.35 凸出面外 + y=0.00 头面下半，恒显不 z-fight）。
+                                // t777 ② 同毛茸态门控：pack 本体层命中（sheepBodyPackTex = sheep.png 裸身 +
+                                //   真脸）→ 贴图自带脸，隐 overlay 眼（防两双眼）；pack 关（程序
+                                //   mob_sheep_sheared 无脸）恒显。
                                 Node {
+                                    visible: sheepBodyPackTex.source.toString().length === 0
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)

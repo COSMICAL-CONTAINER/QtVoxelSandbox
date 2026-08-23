@@ -231,6 +231,16 @@ Item {
         const _r = root.packActive
         return _r >= 0 && root.resourcePack ? root.resourcePack.entitySource("sheep_body") : ""
     }
+    // t777 ② pack 真脸判据（羊眼 overlay 显隐的例外）：毛茸态合成贴图生效（resourcePack.sheepWoolFaceActive
+    //   单一权威，镜像 Main.qml 游戏内修法——毛身 + 本体层头区真脸在身）或剪毛态本体层命中
+    //   （sheepBodyPackSrc）→ 贴图自带真脸，overlay 眼隐（对齐牛等「pack 自带脸则隐眼」语义）；否则
+    //   （pack 关 / 毛层 miss / 合成失败回退毛层无脸）眼恒显（程序贴图无脸，眼是唯一脸）。依赖
+    //   selectedMobPackSrc / sheepBodyPackSrc / selectedMobSheared（任一变 → 重算；invokable 无 NOTIFY，
+    //   刷新由这些带 NOTIFY 的上游属性驱动）。
+    readonly property bool sheepPreviewPackFace: root.selectedMobSheared
+        ? root.sheepBodyPackSrc !== ""
+        : (root.selectedMobPackSrc !== "" && root.resourcePack
+           && root.resourcePack.sheepWoolFaceActive)
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -786,35 +796,78 @@ Item {
                                             }
                                         }
                                         // t663 ⑥ 羊眼 overlay（镜像 Main.qml t633 ③：sheep_fur.png 毛层头前无脸 →
-                                        //   眼恒显；颈枢 Node 绑 headPitch（图鉴静态 0 → 直立即可，直接定位））。
+                                        //   眼恒显；Main.qml 颈枢 Node 绑 headPitch，图鉴静态 0 → 直立，直接定位）。
                                         //   裸羊变体同显（裸肤色无脸）。
+                                        // t777 ① 修「预览眼埋进头内不显」：旧 z=-0.35 是把 Main.qml 颈枢**相对**坐标
+                                        //   （颈枢 (0,0.10,-0.29) + 眼相对 z -0.35）当绝对坐标用——头盒 z∈[-0.61,-0.29]
+                                        //   把眼整个包住 → 被头面遮挡恒不可见。烘焙正确绝对位：白眼底 z=-0.64（凸出
+                                        //   头前面 -0.61 外 0.03 无 z-fight）/ 黑瞳 z=-0.65（叠白眼底前），y=0.10。
+                                        // t777 ② pack 真脸门控：贴图自带脸（sheepPreviewPackFace）→ 隐 overlay 眼
+                                        //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。
                                         Model {
-                                            visible: root.selectedMobType === 3
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.055, 0.10, -0.35)
+                                            position: Qt.vector3d(-0.055, 0.10, -0.64)
                                             scale: Qt.vector3d(0.055, 0.055, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.055, 0.10, -0.35)
+                                            position: Qt.vector3d(0.055, 0.10, -0.64)
                                             scale: Qt.vector3d(0.055, 0.055, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.055, 0.10, -0.36)
+                                            position: Qt.vector3d(-0.055, 0.10, -0.65)
                                             scale: Qt.vector3d(0.028, 0.028, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.055, 0.10, -0.36)
+                                            position: Qt.vector3d(0.055, 0.10, -0.65)
                                             scale: Qt.vector3d(0.028, 0.028, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                        }
+                                        // t777 ① 羊腿 skin 层：MobModel 单材质把羊毛贴图（pack 毛层 / 程序 mob_sheep
+                                        //   全脸）与 t789 毛色 tint 铺满全身**含四腿** → 用户观感「脚被羊毛完全覆盖」。
+                                        //   语义：羊毛只覆躯干/头，腿是 skin 层 → 四腿位叠独立纯色羊皮 Model
+                                        //   （#d6b890，t749 前剪毛羊裸肤同源色）罩住毛贴图腿。图鉴静态（walkPhase
+                                        //   恒 0 → 四腿轴对齐，中心 (±0.18,-0.28,±0.26)、全长 (0.18,0.32,0.18)，
+                                        //   镜像 mobmodel.cpp 羊分支 addLegs 实参）→ 静态盒可精确罩合；尺寸外扩
+                                        //   0.01/0.02 防共面 z-fight（顶沿没入躯干 / 底沿探出 0.01，预览无地面）。
+                                        //   独立材质不吃毛色 tint（有色羊腿仍羊皮色，t789 协同：tint 只乘毛层）；
+                                        //   剪毛态同罩（裸肤腿读作平滑皮肤）。鸡腿 t616 同款「几何外独立腿 Model」先例。
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.18, -0.28, -0.26)
+                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.18, -0.28, -0.26)
+                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(-0.18, -0.28, 0.26)
+                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
+                                        }
+                                        Model {
+                                            visible: root.selectedMobType === 3
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0.18, -0.28, 0.26)
+                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
                                         }
                                         // t663 ⑤ 蠹虫眼（2 颗黑点贴头前；镜像 Main.qml t487 delegate 位
                                         //   (±0.05,0.00,-0.35) scale 0.03——头心 (0,0,-0.24) 半 (0.14,0.11,0.10)）。

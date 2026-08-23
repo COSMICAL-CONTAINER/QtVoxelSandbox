@@ -3296,6 +3296,16 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
     return {}; // 包内无该 entity 贴图 → 不覆盖（保留程序生成 / 纯色）；红线 §9：仅运行期读本地 pack PNG。
 }
 
+// t777 ② QML 眼 overlay 显隐判据（见 .h Q_INVOKABLE 注释）：合成缓存非空且 pack active → 真脸在身。
+//   只读不生成（生成归 mobTextureSource(3) 懒路径；QML 绑定依赖 Texture.source 变化重算，届时缓存已热）。
+bool ResourcePackManager::sheepWoolFaceActive() const
+{
+    QMutexLocker lock(&stateMutex());
+    ensureBuiltLocked();
+    const BuiltState &s = state();
+    return s.active && !s.sheepWoolFaceFile.isEmpty();
+}
+
 // t633 图鉴生物头像：mobType → 头部 box-UV 数据（u0, v0, w, h, d, 贴图 base 宽, 贴图 base 高）。
 //   与 mobmodel.cpp 各 mob 分支的 setMobTex 头部值同源（单一权威在 Renderer；此处 Core 不能 include Renderer，
 //   以注释互指 + 数值镜像——同 mobEntityMap 与 blockItemIconMap 的字面量模式）。裁剪区 = MC +Z Front 面
