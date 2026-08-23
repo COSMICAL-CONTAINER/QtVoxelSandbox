@@ -77,16 +77,16 @@ Item {
         { mobType: 16, name: "夜行者" }, // t727 末影人→夜行者（§9 改名；生物图鉴条目 + 生物蛋 0x246 映射）
         { mobType: 17, name: "燃烬者" } // t728 烈焰人→燃烬者（§9 改名；生物图鉴条目 + 生物蛋 0x247 映射）
         // t751 条目合并：t663 ⑥ 曾把剪毛变体拆成独立条目（羊（剪毛后）/雪傀儡（剪头后）——同 mobType 双条
-        //   仅靠名字区分）。现改为**每生物单条**+右侧底部变体切换按钮（见预览区下方 variantPanel）：
-        //   羊 = 剪毛/未剪 toggle + 毛色 swatch（仅羊有颜色变体）、雪傀儡 = 戴头/剪头 toggle。
+        //   仅靠名字区分）。现改为**每生物单条**+预览区下沿悬浮变体面板（见 previewArea 内 variantPanel，
+        //   t783 ② 迁入）：羊 = 剪毛/未剪 toggle + 毛色 swatch（仅羊有颜色变体）、雪傀儡 = 戴头/剪头 toggle。
         //   变体态存组件级属性（sheepSheared / snowGolemSheared / sheepWoolIndex），切换即时刷新预览。
     ]
     // 生物段选中（mobType；-1 = 未选）。与物品选中互斥（点物品格清空、点生物格不改 selectedId）。
     //   t751：剪毛变体条目已合并（每生物单条），selectedMobName 仅作显示名伴选（不再承担 sheared 判据——
-    //   变体态改由下方组件级属性承载，底部变体面板切换）。
+    //   变体态改由下方组件级属性承载，预览区悬浮变体面板切换）。
     property int selectedMobFromSection: -1
     property string selectedMobName: ""
-    // ── t751 变体状态（组件级；底部变体面板读写，预览绑定消费 → 切换即时刷新）──
+    // ── t751 变体状态（组件级；预览区悬浮变体面板读写，预览绑定消费 → 切换即时刷新）──
     // 羊剪毛态（false=毛茸羊毛形态 / true=裸肤残毛形态；镜像游戏内 shearedAt 双态）。
     property bool sheepSheared: false
     // 雪傀儡剪头态（false=戴南瓜头 / true=纯雪头 + 刻面五官；镜像游戏内 snowGolemShearedAt 双态）。
@@ -197,8 +197,8 @@ Item {
     // 最终贴图源：pack 命中 → pack；否则程序生成 mob_*.png（无 → 空串走纯色）。
     readonly property string selectedMobTexSource: root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
         : root.mobFallbackTexture(root.selectedMobType)
-    // 选中 mob 显示名：生物段选中 → selectedMobName + 变体后缀（t751：剪毛/剪头/毛色态随底部变体面板
-    //   切换刷新）；否则按 mobType 反查 mobModel 表（生物蛋路径，t751 合并后每型单条恒得常规形态名）。
+    // 选中 mob 显示名：生物段选中 → selectedMobName + 变体后缀（t751：剪毛/剪头/毛色态随预览区悬浮
+    //   变体面板切换刷新）；否则按 mobType 反查 mobModel 表（生物蛋路径，t751 合并后每型单条恒得常规形态名）。
     readonly property string selectedMobDisplay: (root.selectedMobFromSection >= 0 && root.selectedMobName !== ""
         ? root.selectedMobName : mobNameForType(root.selectedMobType)) + root.mobVariantSuffix
     // mobType → mobModel 表名（t751 条目合并后每型单条，直接命中）。
@@ -562,7 +562,7 @@ Item {
                                                 }
                                             }
                                             // 选中生物段条目（t751 条目合并后每型单条；selectedMobName 仅作
-                                            //   显示名伴选，变体不再拆条目——改底部变体面板切换）。
+                                            //   显示名伴选，变体不再拆条目——改预览区悬浮变体面板切换）。
                                             TapHandler { onTapped: { root.selectedMobFromSection = modelData.mobType; root.selectedMobName = modelData.name } }
                                         }
                                     }
@@ -656,8 +656,10 @@ Item {
                             anchors.margins: 10
                             spacing: 8
 
-                            // 预览区（View3D 与大图标互斥）。
+                            // 预览区（View3D 与大图标互斥）。t783 ②：变体切换控件（羊剪毛/毛色、雪傀儡剪头）
+                            //   悬浮于本预览区下沿内侧（见区内尾部 variantPanel），不再挂右列 Column 底部。
                             Item {
+                                id: previewArea
                                 width: parent.width; height: 300
 
                                 // t599 3D 预览鼠标拖拽旋转（用户「一直自动旋转，能不能拖拽看」）：在自动旋转基础上
@@ -1033,7 +1035,7 @@ Item {
                                         //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
                                         //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50 ——
                                         //   碰撞中心局部坐标，随父 Node scale 缩放）。
-                                        //   t663 ⑥ → t751：剪头变体（底部「已剪头」toggle → selectedMobSheared）
+                                        //   t663 ⑥ → t751：剪头变体（悬浮面板「已剪头」toggle → selectedMobSheared）
                                         //   → 南瓜头隐藏、下方纯雪头接管；身体两态不变（t751 不变式见材质注释）。
                                         Model {
                                             visible: root.selectedMobType === 12 && !root.selectedMobSheared
@@ -1047,7 +1049,7 @@ Item {
                                                 alphaCutoff: 0.5
                                             }
                                         }
-                                        // t663 ⑥/⑦ → t751 剪头后纯雪头 + 柔灰刻面眼嘴（底部「已剪头」toggle 触发；
+                                        // t663 ⑥/⑦ → t751 剪头后纯雪头 + 柔灰刻面眼嘴（悬浮面板「已剪头」toggle 触发；
                                         //   镜像 Main.qml t663 ⑦ 游戏内形态：
                                         //   纯色雪白 #f0f4f8 同身体 + #4a5568 柔灰刻面五官——非近黑「骷髅」刻痕）。
                                         Model {
@@ -1139,6 +1141,123 @@ Item {
                                         materialId: root.selectedId
                                     }
                                 }
+
+                                // ── t783 ② 变体切换悬浮面板（预览区下沿内侧，悬浮于 3D 动态图像上）──
+                                //   原 t751 面板挂右列 Column 底部：右列内容总高（预览 300 + 名 + 类别 + 变体面板
+                                //   ~86px）超视口 366px → Column 不裁剪溢出子项，变体面板纵向溢出越过预览矩形 /
+                                //   面板底缘压进 footer 行——footer 是主 Column 后声明兄弟（z 更高），返回按钮
+                                //   矩形盖住「已剪毛」toggle 右半 + 其 MouseArea 吃掉点击 = t783 ①「剪羊毛按钮
+                                //   点不了且与返回按钮重叠」根因；毛色圆点行 / 边界注则被推出面板底缘残显。
+                                //   修法：整组控件迁入预览区作锚定悬浮面板。锚定不参与 Column 布局 → 显隐
+                                //   不影响其余 mob 预览（原 Column 跳过 visible:false 语义等价）；右列回归
+                                //   300 + 名 + 类别 ≈ 360 ≤ 视口 366 恒不溢出（新增预览侧控件一律走本悬浮
+                                //   模式，勿再挂右列底部）。半透明底板（Rectangle rgba alpha，非 Item opacity
+                                //   ——后者连带淡化子控件）+ 描边圆角 = t790「浮层与主 UI 视觉区分」同款语言；
+                                //   z 10 悬浮于 View3D（后声明兄弟本就在上，显式 z 防后人插层翻序），只占预览
+                                //   区下沿 ~1/3，模型中心不盖死（底板半透模型下沿透出）。hover/点击态原样
+                                //   保留（toggle hover 底色 / swatch tooltip / 金框选中）。
+                                Rectangle {
+                                    id: variantPanel
+                                    visible: root.selectedMobFromSection === 3 || root.selectedMobFromSection === 12
+                                    z: 10
+                                    width: parent.width - 12
+                                    height: variantCol.implicitHeight + 10
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 6
+                                    radius: 8
+                                    color: Qt.rgba(0.059, 0.078, 0.102, 0.85) // #0f141a 半透明：模型下沿透出不死黑
+                                    border.color: "#3a444f"; border.width: 1
+                                    Column {
+                                        id: variantCol
+                                        width: parent.width - 10
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.top: parent.top
+                                        anchors.topMargin: 5
+                                        spacing: 5
+
+                                        Text {
+                                            text: "变体切换"
+                                            color: "#7fae7f"; font.pixelSize: 11; font.bold: true
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                        }
+                                        // 两段 toggle（激活段金边金字 = 选中格高亮同款 #ffd76a；非激活 = 返回按钮蓝字风）。
+                                        Row {
+                                            spacing: 8
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            Repeater {
+                                                // 段标签随选中生物分流（羊=剪毛两态 / 雪傀儡=戴头两态）。
+                                                model: [ root.selectedMobFromSection === 3 ? "未剪羊毛" : "戴南瓜头",
+                                                         root.selectedMobFromSection === 3 ? "已剪毛" : "已剪头" ]
+                                                delegate: Rectangle {
+                                                    width: 104; height: 26; radius: 6
+                                                    color: variantSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
+                                                    border.color: (index === 1) === root.mobVariantSheared ? "#ffd76a" : "#3a5a7a"
+                                                    border.width: (index === 1) === root.mobVariantSheared ? 2 : 1
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData
+                                                        color: (index === 1) === root.mobVariantSheared ? "#ffd76a" : "#7fb0e5"
+                                                        font.pixelSize: 12
+                                                    }
+                                                    MouseArea {
+                                                        id: variantSegHover
+                                                        anchors.fill: parent; hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            // t751 写变体态（预览绑定 + 名行后缀即时刷新）。
+                                                            if (root.selectedMobFromSection === 3)
+                                                                root.sheepSheared = (index === 1)
+                                                            else
+                                                                root.snowGolemSheared = (index === 1)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // 毛色 swatch 行（仅羊）：16 色与游戏内羊毛方块调色板同源（build_wool.py
+                                        //   WOOL_COLORS + 白）；选中格金框（同选中高亮语言）。
+                                        Row {
+                                            spacing: 2
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            visible: root.selectedMobFromSection === 3
+                                            Repeater {
+                                                model: root.woolPalette
+                                                delegate: Rectangle {
+                                                    width: 15; height: 15; radius: 3
+                                                    color: modelData.tint
+                                                    border.color: root.sheepWoolIndex === index ? "#ffd76a" : "#3a444f"
+                                                    border.width: root.sheepWoolIndex === index ? 2 : 1
+                                                    HoverHandler {
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onHoveredChanged: {
+                                                            // 复用格 tooltip 通道（格顶中心 + 名字守卫清除，同 mob 格模式）。
+                                                            const nm = "羊毛颜色 · " + modelData.name
+                                                            if (hovered) {
+                                                                root.hoveredName = nm
+                                                                root.hoveredId = -1
+                                                                const p = parent.mapToItem(panel, parent.width / 2, 0)
+                                                                root.hoveredTipPos = Qt.point(p.x, p.y)
+                                                            } else if (root.hoveredName === nm) {
+                                                                root.hoveredName = ""
+                                                                root.hoveredId = -1
+                                                            }
+                                                        }
+                                                    }
+                                                    TapHandler { onTapped: root.sheepWoolIndex = index }
+                                                }
+                                            }
+                                        }
+                                        // 毛色诚实边界注（仅羊）：图鉴侧预览着色，游戏内羊染色机制未实现。
+                                        Text {
+                                            visible: root.selectedMobFromSection === 3
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: "毛色为图鉴预览着色 · 游戏内羊染色待后续"
+                                            color: "#7fae7f"; font.pixelSize: 9
+                                        }
+                                    }
+                                }
                             }
 
                             // 选中名（中文 §9b）+ 类别标签 + id。
@@ -1158,97 +1277,12 @@ Item {
                                     : (root.selectedCategory + "    id: 0x" + (root.selectedId >= 0 ? root.selectedId.toString(16).toUpperCase() : "0"))
                             }
 
-                            // ── t751 变体切换面板（右侧浏览界面底部；仅选中羊(3)/雪傀儡(12)生物段条目时显示）──
-                            //   羊：剪毛/未剪两段 toggle + 16 色毛色 swatch（仅羊有颜色变体）；雪傀儡：戴南瓜头/
-                            //   剪头两段 toggle。QML Column 布局器跳过 visible:false 子项 → 选其他 mob 时本面板
-                            //   不占位（其余 mob 的右侧预览观感零变化）。变体态见组件级 sheepSheared/
-                            //   snowGolemSheared/sheepWoolIndex（切换 → selectedMobSheared NOTIFY → 预览即时刷新）。
-                            Column {
-                                width: parent.width
-                                spacing: 6
-                                visible: root.selectedMobFromSection === 3 || root.selectedMobFromSection === 12
-
-                                Text {
-                                    text: "变体切换"
-                                    color: "#7fae7f"; font.pixelSize: 11; font.bold: true
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                }
-                                // 两段 toggle（激活段金边金字 = 选中格高亮同款 #ffd76a；非激活 = 返回按钮蓝字风）。
-                                Row {
-                                    spacing: 8
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    Repeater {
-                                        // 段标签随选中生物分流（羊=剪毛两态 / 雪傀儡=戴头两态）。
-                                        model: [ root.selectedMobFromSection === 3 ? "未剪羊毛" : "戴南瓜头",
-                                                 root.selectedMobFromSection === 3 ? "已剪毛" : "已剪头" ]
-                                        delegate: Rectangle {
-                                            width: 104; height: 26; radius: 6
-                                            color: variantSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
-                                            border.color: (index === 1) === root.mobVariantSheared ? "#ffd76a" : "#3a5a7a"
-                                            border.width: (index === 1) === root.mobVariantSheared ? 2 : 1
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: modelData
-                                                color: (index === 1) === root.mobVariantSheared ? "#ffd76a" : "#7fb0e5"
-                                                font.pixelSize: 12
-                                            }
-                                            MouseArea {
-                                                id: variantSegHover
-                                                anchors.fill: parent; hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    // t751 写变体态（预览绑定 + 名行后缀即时刷新）。
-                                                    if (root.selectedMobFromSection === 3)
-                                                        root.sheepSheared = (index === 1)
-                                                    else
-                                                        root.snowGolemSheared = (index === 1)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // 毛色 swatch 行（仅羊）：16 色与游戏内羊毛方块调色板同源（build_wool.py
-                                //   WOOL_COLORS + 白）；选中格金框（同选中高亮语言）。
-                                Row {
-                                    spacing: 2
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    visible: root.selectedMobFromSection === 3
-                                    Repeater {
-                                        model: root.woolPalette
-                                        delegate: Rectangle {
-                                            width: 15; height: 15; radius: 3
-                                            color: modelData.tint
-                                            border.color: root.sheepWoolIndex === index ? "#ffd76a" : "#3a444f"
-                                            border.width: root.sheepWoolIndex === index ? 2 : 1
-                                            HoverHandler {
-                                                cursorShape: Qt.PointingHandCursor
-                                                onHoveredChanged: {
-                                                    // 复用格 tooltip 通道（格顶中心 + 名字守卫清除，同 mob 格模式）。
-                                                    const nm = "羊毛颜色 · " + modelData.name
-                                                    if (hovered) {
-                                                        root.hoveredName = nm
-                                                        root.hoveredId = -1
-                                                        const p = parent.mapToItem(panel, parent.width / 2, 0)
-                                                        root.hoveredTipPos = Qt.point(p.x, p.y)
-                                                    } else if (root.hoveredName === nm) {
-                                                        root.hoveredName = ""
-                                                        root.hoveredId = -1
-                                                    }
-                                                }
-                                            }
-                                            TapHandler { onTapped: root.sheepWoolIndex = index }
-                                        }
-                                    }
-                                }
-                                // 毛色诚实边界注（仅羊）：图鉴侧预览着色，游戏内羊染色机制未实现。
-                                Text {
-                                    visible: root.selectedMobFromSection === 3
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    text: "毛色为图鉴预览着色 · 游戏内羊染色待后续"
-                                    color: "#7fae7f"; font.pixelSize: 9
-                                }
-                            }
+                            // t783 ①②：t751 变体切换面板（剪毛/剪头 toggle + 16 色毛色圆点）原挂本列底部——
+                            //   右列内容总高超视口 366px，Column 不裁剪溢出子项 → 面板纵向溢出压进 footer，
+                            //   返回按钮（后声明兄弟 z 更高）盖住「已剪毛」toggle 吃掉点击 + 毛色行被推出
+                            //   面板底缘。已整组迁入预览区作下沿悬浮面板（见 previewArea 内 variantPanel）；
+                            //   右列现内容 = 预览 300 + 名 + 类别 ≈ 360 ≤ 366 恒不溢出——后续新增预览侧
+                            //   控件一律走预览区悬浮模式，勿再挂本列（布局不变式）。
                         }
                     }
                 }
