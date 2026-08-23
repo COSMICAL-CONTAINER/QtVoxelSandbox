@@ -568,7 +568,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RawFishId),         // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
         // t447 骨粉（机制等价 MC 1.0 bone meal；生存由骨头合成获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不走放置，走 useBlock 催熟分支。MaterialIcon 自绘骨粉图标。
-        int(RecipeRegistry::BonemealId),        // 骨粉：骨头合成产物；右键未成熟作物催熟一阶段（t447）
+        int(RecipeRegistry::BonemealId),        // 骨粉：骨头合成产物；右键作物 +2..3 阶段（t791：3-4 个催熟一株）/ 树苗 45% 成树 / 浆果丛 +1 阶段
         // t467 甜浆果（机制等价 MC 1.0 sweet berries；雪原浆果灌木丛采摘产物 + 食物）。生存由右键成熟浆果丛采摘
         //   得（2-3 浆果 + 丛回阶段 0 重长），创造调色板补全便于测试 / 装饰。可堆叠 64；非方块 → 右键不放置，
         //   走「食用」分支（长按右键累积进食 +2 饥饿）。MaterialIcon 自绘红色浆果簇图标。
@@ -1054,8 +1054,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼
         // t401 钓鱼获物（机制等价 MC 1.0 raw fish；钓竿拉起咬钩获物）。
         if (blockId == RecipeRegistry::RawFishId)       return QStringLiteral("生鱼");       // 钓鱼常见获物
-        // t447 骨粉（机制等价 MC 1.0 bone meal；骨头合成产物，右键未成熟作物催熟一阶段）。
-        if (blockId == RecipeRegistry::BonemealId)      return QStringLiteral("骨粉");       // 骨头合成产物；右键作物催熟
+        // t447 骨粉（机制等价 MC 1.0 bone meal；骨头合成产物，右键催熟生长类方块；t791 平衡 3-4 个催熟一株作物）。
+        if (blockId == RecipeRegistry::BonemealId)      return QStringLiteral("骨粉");       // 骨头合成产物；右键作物 / 树苗 / 浆果丛催熟
         // t467 甜浆果（机制等价 MC 1.0 sweet berries；雪原浆果灌木丛采摘产物 + 食物）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::SweetBerryId)    return QStringLiteral("甜浆果");     // 成熟浆果丛采摘得；可食（+2 饥饿）
         // t469 船物品（机制等价 MC 1.0 boat；5 木板 U 形合成；右键水面放置 + 骑乘）。零 MC 专名（§9）。

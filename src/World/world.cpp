@@ -3198,6 +3198,78 @@ void World::tickSweetBerryBushGrowth()
     ++m_berryBushIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同丛错峰）
 }
 
+// t791 骨粉催熟统一入口（见 world.h 头注释）。三类目标 MC 1.0 语义：作物 +2..3 阶段 / 树苗 45% 即时成树 /
+//   浆果丛 +1 阶段；骰子确定性（hashVoxel(seed ⊕ 使用序号) → 可复现、同株连续使用错峰，PLAN §2-K）。
+//   分层（PLAN §2）：World 层，读写 m_chunks + 发 worldChanged；不依赖 Renderer/Game/UI。
+bool World::applyBonemeal(int x, int y, int z)
+{
+    const quint8 id = m_chunks.blockAt(x, y, z);
+    const quint8 st = m_chunks.stateAt(x, y, z);
+    // 确定性骰子：seed 混使用序号（每次有效使用 +1）→ 同株连续骨粉推进值不同、同 seed 同使用序列结果一致。
+    //   全 int 运算避符号转换告警（hashVoxel 参数 int，同 tickCropGrowth 散布模式）。
+    const int mixedSeed = int(quint32(m_seed) ^ (quint32(m_bonemealUseIndex) * 0x9E3779B9u));
+    const quint32 roll = hashVoxel(mixedSeed, x, y, z);
+
+    // ① 未成熟作物：+2..3 阶段（钳到 WheatCropStageMax=7；三种作物共享阶段上界，blockregistry.h 注释）。
+    //    写入走 5 参数 setBlock（id 不变只 state 变 → 不发 broken/placed、发 worldChanged 重建阶段贴图，
+    //    同 t447 playercontroller 原路径——骨粉是玩家动作，非系统模拟，不走 setWaterSilent 批量静默路径）。
+    if (id == BlockRegistry::WheatCrop || id == BlockRegistry::CarrotCrop
+        || id == BlockRegistry::PotatoCrop) {
+        if (st >= BlockRegistry::WheatCropStageMax) return false; // 已成熟 → 无效应不消耗（MC 同）
+        const int advance = kBonemealCropAdvanceMin
+            + int((roll >> 8) % quint32(kBonemealCropAdvanceMax - kBonemealCropAdvanceMin + 1));
+        const int newSt = std::min(int(st) + advance, int(BlockRegistry::WheatCropStageMax));
+        setBlock(x, y, z, id, quint8(newSt));
+        ++m_bonemealUseIndex; // 有效使用 → 序号 +1（喂下次骰子）
+        return true;
+    }
+
+    // ② 树苗：45% 概率即时成树（概率判定非阶段推进——树苗无生长阶段，机制等价 MC 1.0 sapling bone meal）。
+    //    使用即耗：判定落空 / 守卫不满足也返 true（caller 据此扣 1 骨粉，MC 1.0 对树苗使用骨粉即消耗）。
+    if (id == BlockRegistry::Sapling) {
+        ++m_bonemealUseIndex; // 骨粉对树苗「使用即耗」（先 +1：骰子 roll 已取本使用序号的值）
+        // 守卫（同 tickSaplingGrowth，唯光照豁免——骨粉强制生长不等天光）：下方草地/泥土 + 高度容得下
+        //   最小树 + 主干列畅通（trunkH 同源 hashColumn 4..6，按世界高度钳制；树冠留 2 格余量）。
+        if (y == 0) return true; // 世界底无下方支撑（守卫不满足 → 不长，但骨粉已耗）
+        const quint8 below = m_chunks.blockAt(x, y - 1, z);
+        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt) return true;
+        const quint32 r = hashColumn(m_seed, x, z);
+        int trunkH = 4 + int((r >> 8) % 3u); // 4..6（与 worldgen / tickSaplingGrowth 同源：hashColumn >> 8）
+        const int maxTrunk = (m_height - 1) - y - 2; // 留 2 格树冠余量后主干上限
+        if (maxTrunk < 4) return true;               // 此位放不下最小树 → 永不成树（树苗保留，骨粉白耗）
+        if (trunkH > maxTrunk) trunkH = maxTrunk;
+        // 主干 + 树冠空间须畅通（树苗位 y 清后置原木，故查 y+1 起的 trunkH-1 + 树冠 ~3 格空间）。
+        bool clear = true;
+        for (int t = 1; t <= trunkH + 2; ++t) {
+            if (m_chunks.blockAt(x, y + t, z) != BlockRegistry::Air) { clear = false; break; }
+        }
+        if (!clear) return true; // 主干列阻塞 → 不长（树苗保留，骨粉白耗；MC 同——空间不足不成树）
+        // 45% 判定（roll 低 16 位 % 100 < kBonemealSaplingPct，同 tickSaplingGrowth 散布判式）。
+        if (int(roll & 0xFFFFu) % 100 < kBonemealSaplingPct) {
+            // 长成：清树苗（静默，无 broken/placed）+ placeTreeAt 完整橡树 + 局部光场重算 + worldChanged
+            //   （逐句同 tickSaplingGrowth 应用段；setVoxelIfAir 仅写空气格不覆盖玩家编辑）。
+            m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+            const quint32 lr = hashColumn(m_seed ^ 0x5BD1E995u, x, z); // 异或扰 leafRand 与密度字段（同 tickSaplingGrowth）
+            placeTreeAt(x, y - 1, z, trunkH, lr >> 16);
+            // 局部光场重算：树主体（Log/Leaves，solid=true）从原树苗（solid=false）转 opaque → 遮光变化 → 盒内重 flood。
+            recomputeLightAround(x, y, z, BlockRegistry::Sapling, BlockRegistry::Log);
+            emit worldChanged();      // 触发重建（per-chunk dirty 协作：仅含新生成树的 chunk 真正重建）
+            m_chunks.clearAllDirty(); // 重建完统一清脏（同 tickSaplingGrowth emit→clear 顺序）
+        }
+        return true;
+    }
+
+    // ③ 未成熟浆果丛：+1 阶段（丛仅 3 阶段 0/1/2，一骨粉推一阶段；MC sweet berry bush bone meal 单阶段推进）。
+    if (id == BlockRegistry::SweetBerryBush) {
+        if (st >= BlockRegistry::SweetBerryBushStageMax) return false; // 已成熟 → 无效应不消耗（MC 同）
+        setBlock(x, y, z, id, quint8(st + 1)); // id 不变 + state+1（同 ① 写入路径，驱动阶段贴图重建）
+        ++m_bonemealUseIndex;
+        return true;
+    }
+
+    return false; // 非三类目标 → 无效应不消耗（机制等价 MC 骨粉对非生长目标无效应）
+}
+
 // --- Perlin（2D fBm）---
 static double fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
 static double lerp(double a, double b, double t) { return a + t * (b - a); }
