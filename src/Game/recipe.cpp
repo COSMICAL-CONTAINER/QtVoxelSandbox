@@ -1187,6 +1187,12 @@ static_assert(RecipeRegistry::DyeYellowId     == 0x24F, "DyeYellowId 须与 Bloc
 static_assert(RecipeRegistry::DyeBlueId       == 0x256, "DyeBlueId 须与 BlockRegistry::FlowerBlue.dropId 字面量 0x256 一致");
 static_assert(RecipeRegistry::DyeRedId        == 0x259, "DyeRedId 须与 BlockRegistry::FlowerRed.dropId 字面量 0x259 一致");
 static_assert(RecipeRegistry::DyeBlackId      == 0x25A, "DyeBlackId 须为染料段末位 0x25A（DyeIdBase+15）");
+// t789 剪/杀有色羊掉落跨层契约（审查 r1912-tail 中危①补钉；同 Coal/Lapis/Dye 模式）：呈现层 Main.qml
+//   sheepWoolDropId 持 QML 裸字面量（QML 不 import C++ 静态类——白→0x20E 材料段羊毛物品 / 有色→羊毛方块
+//   63..77 即 FirstWoolVariant+idx-1）；本处钉死两界标 == 字面量，羊毛段或材料段迁移忘了同步 QML → 编译失败
+//   （防「剪彩色羊静默掉错方块且矩阵全绿」——矩阵探针只锁 woolIndex 载荷不锁 QML 映射）。
+static_assert(RecipeRegistry::WoolId          == 0x20E, "WoolId 须与 Main.qml sheepWoolDropId 白羊毛字面量 0x20E 一致");
+static_assert(BlockRegistry::FirstWoolVariant == 63,    "FirstWoolVariant 须与 Main.qml sheepWoolDropId 有色羊毛基址字面量 63 一致");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
 //   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x22E] = 47 项，
