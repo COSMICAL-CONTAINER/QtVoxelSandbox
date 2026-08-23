@@ -3795,22 +3795,13 @@ Window {
         //   build_entities_pack.py 程序生成 entity_emberling.png，§9a 区隔不照搬 MC）。MobModel 单头盒每面铺整张
         //   （pack 关全脸 [0,1]²；pack 开 blazing blaze.png 走 T 字 UV）。独立环绕竖棒由 delegate 补（纯色烟灰橙棒）。
         Texture { id: mobEmberlingTex; source: "qrc:/textures/entity_emberling.png"; generateMipmaps: false }
-        // t729 暗渊之眼（EnderEye）：小绿瞳珠实体贴图（build_mob.py 程序生成 16×16 entity_endereye.png —— 深绿珠身 +
-        //   暗绿竖瞳 + 白高光，对齐 EndEyeId 0x23A 材料段图标观感，§9a 原创不照搬 MC）。EnderEye 小珠 delegate 全脸
-        //   [0,1]² 铺整张。t757 改**满幅不透明**（旧版「圆珠 + 透明四角」在默认 alphaMode 的不透明 pass 下不吃
-        //   alpha，透明素落贴图 RGB 原值 → 黑角块 / pack 图标白块；满幅后任何 alpha 语义下都是整面绿珠）。
-        //   pack 命中 ender_eye.png 时切包内 item 贴图（endereyePackTex）；pack 关 / 包缺 → 本程序图。
-        Texture { id: endereyeTex; source: "qrc:/textures/entity_endereye.png"; generateMipmaps: false }
-        // t729 暗渊之眼 pack 实体贴图（item/ender_eye.png）：pack 启用且 resourcePack.itemIconSource(0x23A) 命中包内
-        //   ender_eye item 图 → source 为 file:/// URL（alpha-test 透明底小眼珠，机制等价 MC 末影之眼观感）；pack 关 /
-        //   包缺 → source 空 → delegate 回退 endereyeTex（程序生成小绿瞳珠）。同其他 pack 实体贴图两级探测语义
-        //   （t497 QUrl 判空铁律：Texture.source 是 QUrl —— 判空走 .source.toString().length，.length 恒 undefined）。
-        Texture { id: endereyePackTex; source: resourcePack.active ? resourcePack.itemIconSource(0x23A) : ""; generateMipmaps: false }
-        // t758 暗渊珠（EnderPearl）pack 实体贴图（item/ender_pearl.png，t726 itemFilenameMap 0x243 → ender_pearl.png）：
-        //   pack 启用且 resourcePack.itemIconSource(0x243) 命中 → source 为 file:/// URL（透明底小珠图标）；pack 关 /
-        //   包缺 → source 空 → delegate 回退**程序双色深绿小方珠**（纯色 Model 组合，同雪球 / 蛋 delegate 模式 ——
-        //   基础包无独立珍珠实体 PNG，程序回退不新增资产）。t497 QUrl 判空铁律：.source.toString().length。
-        Texture { id: enderpearlPackTex; source: resourcePack.active ? resourcePack.itemIconSource(0x243) : ""; generateMipmaps: false }
+        // t807 暗渊之眼/暗渊珠投掷物贴图退役：旧版投掷物专用三级贴图（endereyeTex 程序小绿瞳珠实体图 /
+        //   endereyePackTex / enderpearlPackTex 两级 pack item 图）不再声明 —— t807 把两者投掷物改**掉落物式渲染
+        //   语义**（BillboardQuad 单面 billboard + MaterialIcon item 图标，见 mobHost Repeater 内 EnderEye /
+        //   EnderPearl delegate）：MaterialIcon 内部自带「pack 命中 itemIconSource → 自绘 Canvas」两级（0x23A
+        //   drawEndEye / 0x243 drawEnderPearl），与掉落物 Repeater 材料段同源同图，修掉「六面立方铺同一张
+        //   item 图标 → 六面都是眼睛/珠」的贴图错渲染。entity_endereye.png（build_mob.py 产物）保留在 qrc 但
+        //   QML 不再引用（16×16 程序图零成本，不删图免连锁改 build_mob.py / CMake 资源清单）。
         // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
         //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
         Texture { id: mobNightwalkerEyesTex; source: "qrc:/textures/mob_nightwalker_eyes.png"; generateMipmaps: false }
@@ -8088,6 +8079,9 @@ Window {
                     // t482 雪球（Snowball）：雪傀儡抛出的远程弹丸。白色小球（雪傀儡远程攻击，机制等价 MC 1.0
                     //   snowball）。delegate Node 已摆 position（雪球世界坐标）+ 不转（雪球对称无需定向）。NoLighting
                     //   （红线：可见 Model 必须 NoLighting）。
+                    //   t807 同族排查结论（t803 教训顺手核对）：雪球/鸡蛋/火球（含箭）均为纯色自绘组合体（无贴图），
+                    //   不存在「同一张 item 图标铺满立方六面」的贴图错渲染病（那是旧版末影之眼/珍珠专属：六面都是
+                    //   眼睛/珠）；纯色小体各角度读作「球/弹」非「贴图方块」，维持原创体积模型不改。
                     Node {
                         visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Snowball) : false }
                         // 外层白球（近纯白 + 冷蓝阴影 → 读作「压实雪球」）。
@@ -8154,13 +8148,20 @@ Window {
                         }
                     }
                     // t729 暗渊之眼（EnderEye；机制等价 MC 1.0 末影之眼 ender eye —— 玩家右键 EndEyeId 掷出寻路要塞，
-                    //   §9 改名 + 原创模型/贴图）：小绿瞳珠（~0.28 立方铺 entity_endereye 小绿瞳珠贴图 / pack 命中时
-                    //   item ender_eye.png）+ 飞行自旋（秒珠绕 Y 慢转）。飞距判结（C++ tick 位移 + 结算）：80% 变掉落物
-                    //   （enderEyeBecameItem → 掉落物实体可捡回）→ 移除；20% 碎裂 —— 本 delegate 据 shatteringAt(index)
-                    //   翻 true 播 burstGlassShatter 玻璃碎屑 + 缩小 (shatterScale→0) + 淡出 (opacity→0)，归零后 C++
-                    //   释放槽（配合 kEnderEyeShatterTime 延迟移除让动画可见）。slot 复用（新眼 / 空槽）→ entShatter
-                    //   翻 false → 复位珠体（shatterScale/Fade 回 1.0），同 mob deathTilt/wasDead 复位模式。飞行略升由
-                    //   C++ 位移驱动（本 delegate 只做自旋 + 碎裂动画）。NoLighting（红线：可见 Model 必须 NoLighting）。
+                    //   §9 改名 + 原创模型/贴图）。t807 改**掉落物式贴图**：BillboardQuad 单面 billboard 恒正对相机铺
+                    //   item 图标（MaterialIcon 0x23A，内部两级：pack 命中 ender_eye.png / pack 关 drawEndEye 自绘），
+                    //   与掉落物 Repeater 材料段同源同图 —— 修掉旧版「六面立方铺同一张贴图 → 六面都是眼睛」的贴图
+                    //   错渲染（用户实测主诉）。飞行自旋改**面内 roll**（绕 billboard 自身 Z：eulerRotation.z = spin，
+                    //   fromEulerAngles 按 Z→X→Y 应用 → roll 先在图标自身平面内打转、再随相机朝向摆正，读作
+                    //   「翻滚的眼珠」；旧版绕 Y 转对恒正对相机的面片无视觉意义）。飞距判结（C++ tick 位移 +
+                    //   结算）：80% 变掉落物（enderEyeBecameItem → 掉落物实体可捡回）→ 移除；20% 碎裂 —— 本
+                    //   delegate 据 shatteringAt(index) 翻 true 播 burstGlassShatter 玻璃碎屑 + 缩小 (shatterScale→0)
+                    //   + 淡出 (shatterFade→0)，归零后 C++ 释放槽（配合 kEnderEyeShatterTime 延迟移除让动画可见）。
+                    //   slot 复用（新眼 / 空槽）→ entShatter 翻 false → 复位珠体（shatterScale/Fade 回 1.0），同 mob
+                    //   deathTilt/wasDead 复位模式。飞行略升由 C++ 位移驱动（本 delegate 只做面内自旋 + 碎裂动画）。
+                    //   alpha 契约沿掉落物材料段（t85 alpha-test）：alphaCutoff 0.5 + opacity 0.99 → 图标透明底像素
+                    //   丢弃、仅眼珠像素显。baseColor 乘 terrainLight 夜间变暗（同掉落物统一）。NoLighting（红线：
+                    //   可见 Model 必须 NoLighting）。
                     Node {
                         id: endereyeNode
                         visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.EnderEye) : false }
@@ -8193,70 +8194,70 @@ Window {
                                 NumberAnimation { target: endereyeNode; property: "shatterFade"; to: 0.0; duration: 400; easing.type: Easing.InQuad }
                             }
                         }
-                        // 飞行自旋（秒珠绕 Y 慢转，读作「滚动的小珠」）；碎裂窗口由缩放淡出覆盖视觉。
+                        // 飞行自旋（t807 面内 roll：billboard 恒正对相机，图标绕自身 Z 原地打转读作「翻滚的眼珠」）；
+                        //   碎裂窗口由缩放淡出覆盖视觉。
                         property real spin: 0
                         NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite }
-                        Node { // 珠体承载层（自旋 + 碎裂缩放协同作用）
-                            eulerRotation.y: endereyeNode.spin
+                        Node { // 珠体承载层（碎裂缩放作用层；billboard 朝相机旋转在 Model 上，均匀缩放与旋转可交换）
                             scale: Qt.vector3d(endereyeNode.shatterScale, endereyeNode.shatterScale, endereyeNode.shatterScale)
                             Model {
-                                geometry: UnitCube {}
-                                scale: Qt.vector3d(0.28, 0.28, 0.28)
+                                geometry: BillboardQuad {}
+                                scale: Qt.vector3d(0.30, 0.30, 0.30) // 同掉落物材料段 billboard 统一尺寸
+                                // billboard 朝相机（同掉落物材料段：世界欧拉 = 相机欧拉 → +Z 恒指回相机正面恒可见；
+                                //   本 delegate 根 Node 对 EnderEye 恒 (0,0,0) 旋转（bodyYaw/deathTilt 仅 Mob 态），
+                                //   无需抵消继承；roll=spin 面内自旋）。
+                                eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, endereyeNode.spin)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
-                                    // t729 pack 命中 → item ender_eye 贴图；pack 关 → entity_endereye 小绿瞳珠。
-                                    // t757 白贴图修复：① UnitCube 补 TexCoord0（旧版无 UV 属性，贴图材质采样未定义
-                                    //   → 白块/丢贴图）；② entity_endereye 改满幅不透明（透明四角在不透明 pass 落
-                                    //   RGB 原值）；③ alphaMode Mask —— pack item 图标是透明底 PNG，默认 alphaMode
-                                    //   不做裁剪（透明素吃 RGB 原值，多为白），Mask 裁掉 alpha<cutoff 素只显眼珠
-                                    //   （同 t727 夜行者眼层先例）。三态（pack 命中 / 关 / 边界 miss）都渲染正确：
-                                    //   满幅程序图全 alpha=1 不受 Mask 影响，pack 图标被裁成小眼珠。
-                                    baseColorMap: endereyePackTex.source.toString().length > 0 ? endereyePackTex : endereyeTex
-                                    alphaMode: PrincipledMaterial.Mask
                                     alphaCutoff: 0.5
+                                    opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                                    baseColor: terrainLight(worldClock.skyLight)
+                                    // MaterialIcon 内部两级：pack 命中 ender_eye.png item 图 / pack 关 drawEndEye
+                                    //   自绘（透明底），与掉落物材料段同一图标 —— 掉落物式渲染语义的图源单一权威。
+                                    baseColorMap: Texture {
+                                        flipV: false
+                                        sourceItem: MaterialIcon { materialId: 0x23A; width: 64; height: 64 }
+                                    }
                                 }
                             }
                         }
                     }
                     // t758 暗渊珠（EnderPearl；机制等价 MC 1.0 ender pearl —— 玩家右键 EnderPearlId 掷出受重力
-                    //   抛物飞行，落点把玩家传送过去；§9 区隔 + 原创视觉）：深绿小珠（~0.26 立方铺 item 暗渊珠
-                    //   贴图）+ 飞行自旋（绕 Y 慢转，读作「翻滚的珠子」）。命中（方块 / 寿命兜底）→ C++ emit
-                    //   enderPearlLanded → 呈现层路由 applyEnderPearlTeleport 传送（珠落即传，槽即时释放无碎裂
-                    //   动画）。贴图三态：pack 命中（ender_pearl.png 透明底图标 → alphaMode Mask 裁掉底色，t757
-                    //   教训）/ pack 关（程序回退双色深绿小方珠 —— 深绿主体 + 亮绿高光角，同雪球双层 delegate
-                    //   模式，基础包无独立珍珠 PNG 不新增资产）。NoLighting（红线：可见 Model 必须 NoLighting）。
+                    //   抛物飞行，落点把玩家传送过去；§9 区隔 + 原创视觉）。t807 改**掉落物式贴图**（同 EnderEye
+                    //   分支）：BillboardQuad 单面 billboard 恒正对相机铺 item 图标（MaterialIcon 0x243，内部两级：
+                    //   pack 命中 ender_pearl.png / pack 关 drawEnderPearl 自绘透明底）—— 修掉旧版 pack 命中时
+                    //   「六面立方铺同一张珍珠图标」同病（t807 主诉末影之眼的同族：立方六面都是珠），并顺带以
+                    //   item 图标替代程序双色深绿小方珠回退（与掉落物 Repeater 材料段同源同图，渲染语义统一）。
+                    //   飞行自旋改面内 roll（绕 billboard 自身 Z；珠形近圆对称 → 自旋仅高光微动，保留无害）。
+                    //   命中（方块 / 寿命兜底）→ C++ emit enderPearlLanded → 呈现层路由 applyEnderPearlTeleport
+                    //   传送（珠落即传，槽即时释放无碎裂动画）。alpha 契约沿掉落物材料段：alphaCutoff 0.5 +
+                    //   opacity 0.99（透明底像素丢弃）；baseColor 乘 terrainLight 夜间变暗（同掉落物统一）。
+                    //   NoLighting（红线：可见 Model 必须 NoLighting）。
                     Node {
                         id: enderpearlNode
                         visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.EnderPearl) : false }
+                        // 飞行自旋（t807 面内 roll：billboard 恒正对相机，图标绕自身 Z 打转；珠形近对称仅高光微动）。
                         property real spin: 0
                         NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
-                        eulerRotation.y: enderpearlNode.spin
-                        // pack 贴图态：item 暗渊珠图标（透明底 → Mask 裁剪；t497 QUrl 判空 .toString().length）。
                         Model {
-                            visible: enderpearlPackTex.source.toString().length > 0
-                            geometry: UnitCube {}
-                            scale: Qt.vector3d(0.26, 0.26, 0.26)
+                            geometry: BillboardQuad {}
+                            scale: Qt.vector3d(0.30, 0.30, 0.30) // 同掉落物材料段 billboard 统一尺寸
+                            // billboard 朝相机（同掉落物材料段：世界欧拉 = 相机欧拉；delegate 根对 EnderPearl 恒
+                            //   (0,0,0) 旋转，无需抵消继承；roll=spin 面内自旋）。
+                            eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, enderpearlNode.spin)
                             materials: PrincipledMaterial {
                                 lighting: PrincipledMaterial.NoLighting
-                                baseColorMap: enderpearlPackTex
-                                alphaMode: PrincipledMaterial.Mask
                                 alphaCutoff: 0.5
+                                opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                                baseColor: terrainLight(worldClock.skyLight)
+                                // MaterialIcon 内部两级：pack 命中 ender_pearl.png item 图 / pack 关 drawEnderPearl
+                                //   自绘（透明底），与掉落物材料段同一图标（t497 教训：QUrl 判空已在 MaterialIcon
+                                //   内部以 source.toString().length 正确处理，本处无需再两级探测）。
+                                baseColorMap: Texture {
+                                    flipV: false
+                                    sourceItem: MaterialIcon { materialId: 0x243; width: 64; height: 64 }
+                                }
                             }
-                        }
-                        // 程序回退态（pack 关 / 边界 miss）：双层深绿小方珠 —— 深绿主体 + 偏角亮绿高光
-                        //   （读作「深色圆珠带反光」非纯色块，同雪球内层高光模式）。
-                        Model {
-                            visible: enderpearlPackTex.source.toString().length <= 0
-                            geometry: UnitCube {}
-                            scale: Qt.vector3d(0.26, 0.26, 0.26)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1f8a4c" }
-                        }
-                        Model {
-                            visible: enderpearlPackTex.source.toString().length <= 0
-                            geometry: UnitCube {}
-                            position: Qt.vector3d(0.04, 0.04, 0.05)
-                            scale: Qt.vector3d(0.12, 0.12, 0.12)
-                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#7fe0a0" }
                         }
                     }
                 }
