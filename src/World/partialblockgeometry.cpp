@@ -225,7 +225,12 @@ int PartialBlockGeometry::append(
         //   仅立柱；玩家贴立柱碰撞即可挡）。
         pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.0f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
         const auto connects = [](quint8 blk) {
-            return BlockRegistry::isFence(blk) || BlockRegistry::isSolid(blk);
+            // 审查修 #19（Review 2026-08-23 低危）：t766 铁砧 solid=false 后旧谓词 isFence||isSolid 漏改 →
+            //   栅栏不再向铁砧伸横档。改 R1 口径（a890bfa，同 torchSupportBlock 公式）：isCollidable ∨
+            //   isFullCube —— 铁砧 ShapeFull 恢复连接；副作用 = 门 / 半砖 / 雪层等有碰撞异形块也连（本工程
+            //   「可碰撞即有实体面」既定简化，与火把附着同口径），空气 / 火把 / 水（ShapeNone）仍不连。
+            //   isCollidable 的 state 参仅 shape 族判定（内部 Q_UNUSED），邻探针无 state 传 0 安全。
+            return BlockRegistry::isCollidable(blk, quint8(0)) || BlockRegistry::isFullCube(blk);
         };
         const float yLo0 = 0.375f,  yLo1 = 0.5625f; // 下档（MC 6/16..9/16）
         const float yHi0 = 0.75f,   yHi1 = 0.9375f; // 上档（MC 12/16..15/16；t801 前为探入 1.5 区间的
@@ -814,15 +819,36 @@ int PartialBlockGeometry::append(
         //   瓦片中央子区 u∈[0.375,0.625]（build_rail_family 焰头 4px 列区 x6..9、柄 2px 居中 x7..8；
         //   170 熄灭态同布局）—— 与 W 片（整瓦铺 0.8 宽）**同 texel 密度**：柄/焰头的世界宽度两片一致，
         //   且两片的贴图中央火把列都钉在共同火把轴上（底/顶边中点 = 柄根/轴端）→ 正视 / 侧视 / 斜视均
-        //   读作同一把斜插火把（机制等价 MC 1.0 墙火把单一模型的两向投影）。贴墙内侧半带（柄根向墙内
-        //   ≤0.1）嵌进支撑实体块被其面遮挡 —— 支撑恒实体（失撑即掉落），无可见穿模。
+        //   读作同一把斜插火把（机制等价 MC 1.0 墙火把单一模型的两向投影）。
+        //   **审查修 #17（Review 2026-08-23 低危）**：t776 原注释假设「贴墙内侧半带嵌进支撑实体块被其面
+        //   遮挡，支撑恒实体无可见穿模」—— t766 铁砧 solid=false / 半砖 / 玻璃等非满立方支撑下该嵌入段
+        //   （柄根 0.975 + 半带 0.1 = 越界 0.075）直接可见。修法：四角在**附着轴**（ax≠0 钳 x、否则钳 z）
+        //   上钳到本格 [0,1] —— 实际只有贴墙底角越界（1.075→1.0），S 带底边变梯形（底宽 0.2→0.125、底
+        //   边中点内移 ≤0.0375），顶边 / 离墙侧 / W 片几何全部不变。取舍：**不**收紧墙插放置预检到满立方
+        //   ——那会禁掉「红石火把插半砖 / 铁砧侧」既有合法放置且救不了已放置存量，渲染侧单侧收口一次修全。
         constexpr float kRibbonHalf = 0.1f; // 窄带半宽 = kShaftLen 宽基准 0.8 × 子区宽 0.25 ÷ 2
         const float sx = -ax * kRibbonHalf, sz = -az * kRibbonHalf;
+        // 四角独立算好后按附着轴钳界（W 片底角恒在格内不受影响，只有 S 片贴墙底角实际越界）。
+        float s0x = bx - sx, s0z = bz - sz;                               // BL（贴墙底角）
+        float s1x = bx + sx, s1z = bz + sz;                               // BR（离墙底角）
+        float s2x = bx + sx + ux * kShaftLen, s2z = bz + sz + uz * kShaftLen; // TR
+        float s3x = bx - sx + ux * kShaftLen, s3z = bz - sz + uz * kShaftLen; // TL
+        if (ax != 0) { // 附着轴 = X：x 钳 [0,1]（z 恒 0.5±0 在格内）
+            s0x = std::min(1.f, std::max(0.f, s0x));
+            s1x = std::min(1.f, std::max(0.f, s1x));
+            s2x = std::min(1.f, std::max(0.f, s2x));
+            s3x = std::min(1.f, std::max(0.f, s3x));
+        } else {       // 附着轴 = Z：z 钳 [0,1]
+            s0z = std::min(1.f, std::max(0.f, s0z));
+            s1z = std::min(1.f, std::max(0.f, s1z));
+            s2z = std::min(1.f, std::max(0.f, s2z));
+            s3z = std::min(1.f, std::max(0.f, s3z));
+        }
         pushCrossQuad(verts, idx, lx, ly, lz,
-                      bx - sx, by, bz - sz,
-                      bx + sx, by, bz + sz,
-                      bx + sx + ux * kShaftLen, by + uy * kShaftLen, bz + sz + uz * kShaftLen,
-                      bx - sx + ux * kShaftLen, by + uy * kShaftLen, bz - sz + uz * kShaftLen,
+                      s0x, by, s0z,
+                      s1x, by, s1z,
+                      s2x, by + uy * kShaftLen, s2z,
+                      s3x, by + uy * kShaftLen, s3z,
                       torchTile, light, tileW, hx, hy, v0, v1,
                       0.375f, 0.625f);
         break;

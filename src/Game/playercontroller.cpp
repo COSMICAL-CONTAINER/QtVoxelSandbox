@@ -1618,11 +1618,15 @@ bool PlayerController::tryPlacePainting(int face)
     const int ax = m_hitBx + nx, ay = m_hitBy, az = m_hitBz + nz;
     // 锚格越界守卫（y 越界 blockAt 亦返 Air，但下方 wall 探测统一走 isSolid 越界安全；提前挡防写越界）。
     if (ay < 0 || ay >= m_world->height()) return false;
-    // 画层格合法性：本格 Air 且其正后方墙格（-法线）solid（贴墙格逐格独立判支撑 —— 墙面缺口 / 窗上不放）。
+    // 画层格合法性：本格 Air 且其正后方墙格（-法线）有实体面（贴墙格逐格独立判支撑 —— 墙面缺口 / 窗上不放）。
     const auto cellOk = [&](int px, int py, int pz) -> bool {
         if (py < 0 || py >= m_world->height()) return false;
         if (m_world->blockAt(px, py, pz) != BlockRegistry::Air) return false;
-        return BlockRegistry::isSolid(m_world->blockAt(px - nx, py, pz - nz));
+        // 审查修 #19（Review 2026-08-23 低危）：墙格支撑判定旧用 isSolid，t766 铁砧 solid=false 后画钉不上
+        //   铁砧墙。改 R1 口径（a890bfa，同 torchSupportBlock 公式）：isCollidable ∨ isFullCube —— 铁砧
+        //   ShapeFull 恢复可钉（isCollidable 的 state 参仅 shape 族判定内部 Q_UNUSED，探针无 state 传 0 安全）。
+        const quint8 wall = m_world->blockAt(px - nx, py, pz - nz);
+        return BlockRegistry::isCollidable(wall, quint8(0)) || BlockRegistry::isFullCube(wall);
     };
     if (!cellOk(ax, ay, az)) return false; // 锚格被占 / 墙非实体 → 放不下
     // ① 向右（u 向）贪心扩宽：连续 cellOk 的格数即 maxW（上限 4 = 最大画宽 4×4 格）。

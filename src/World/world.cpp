@@ -653,12 +653,11 @@ bool World::clearBlockSilent(int x, int y, int z)
     emit worldChanged(); // 驱动 mesh 重建（不发 blockPlaced / blockBroken —— 点火是系统事件非玩家动作）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
     pokeFluidDirty(x, y, z); // t380：邻接流体可能受影响 → 标流体脏（保守；TNT 不属流体通常无影响）
-    checkPressurePlateOnEdit(x, y, z, occ, id); // t494：压力板失撑（TNT 被引燃清 Air → 板上压力板失撑掉落）
-    // rv-low-batch2 补齐：点火静默清绕过 setBlock 编辑钩子族 → 邻轨连接 / 雪层坍落同样漏复检（机制同 t494
-    //   压力板漏检根因：清成 Air 改变邻轨连接位 / 正上方雪层失撑）。批量路径破坏后统一补调（见
-    //   destroySphereSilent 末尾同族补调注释）。
-    checkRailOnEdit(x, y, z, occ, id);      // t565：邻轨连接重算（清 Air → 邻轨断向 / 形态切换）
-    checkSnowLayerOnEdit(x, y, z, occ, id); // t527：正上方雪层失撑 → 整柱坍落为携带层数的下落实体
+    // 审查修 #4 口径合一：点火静默清绕过 setBlock 编辑钩子族 → 邻域附着物复检统一走 recheckAttachments-
+    //   AfterClear（旧版只补压力板 / 铁轨 / 雪层三项，仙人掌 / 枯灌木 / 花 / 甘蔗 / 火把族仍漏——同根因分散
+    //   补调；现与 dropGravityColumn 共一入口，未来新增附着物只扩 recheck 一处）。重力复检仍显式补调
+    //   （recheck 刻意不含 checkGravityBlockOnEdit，防柱内重入，见其头注释）。
+    recheckAttachmentsAfterClear(x, y, z, occ); // t494/t565/t527 + t445/t504/t507/t524 + 火把族（全量复检）
     checkGravityBlockOnEdit(x, y, z, occ, id); // t799：正上方沙/沙砾失撑坍落（TNT 点火清格 → 上方沙柱塌落砸在引燃 TNT 上）
     notePowerWrite(x, y, z, occ, id);       // t656：红石电力脏标记（TNT 被点火清 Air → 邻粉 / 邻接收器重算）
     return true;
@@ -1481,8 +1480,21 @@ void World::tickFire()
             if (!BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) continue;
             const quint32 hv = hashVoxel(m_seed ^ 0xF179, x * 3 + nx, y * 3 + ny, z * 3 + nz)
                                ^ (quint32(m_fireIntervalIndex) * 2654435761u);
-            if ((hv % 100u) < unsigned(kFireSpreadPct))
+            if ((hv % 100u) < unsigned(kFireSpreadPct)) {
+                // 审查修 #16（Review 2026-08-23 低危）：门在可燃表内，火吞门只替换半格 → 另半扇孤立残留无
+                //   掉落。机制等价 MC「门作为整体燃烧」：写 Fire 前先快照目标格（t134 教训——setBlock 会把
+                //   state 重置为 0，先写后读就丢了上半 / 下半位），目标是门（isDoor 单一权威含云杉门；铁门
+                //   不在可燃表走不到这，天然无铁门联动）→ 配对半扇（state bit3 上 / 下互补 y∓1）同为门时一并
+                //   置 Fire（同「无掉落替换」语义，与玩家破门的配对清联动 t134/t466 同构）。
+                const quint8 tgt = m_chunks.blockAt(nx, ny, nz);
+                const quint8 tgtState = m_chunks.stateAt(nx, ny, nz);
                 setBlock(nx, ny, nz, BlockRegistry::Fire);
+                if (BlockRegistry::isDoor(tgt)) {
+                    const int py = ((tgtState & 8) != 0) ? ny - 1 : ny + 1; // 配对半扇（上配下 y-1 / 下配上 y+1）
+                    if (py >= 0 && py < H && BlockRegistry::isDoor(m_chunks.blockAt(nx, py, nz)))
+                        setBlock(nx, py, nz, BlockRegistry::Fire);
+                }
+            }
         }
 
         // (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 概率上方生火（火焰柱向上舔；机制等价 MC 火向
@@ -2222,7 +2234,9 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 //   直写 + 标脏，不经 World::setBlock → 不递归触发 checkGravityBlockOnEdit / 不重复发 broken/placed 链）+
 //   note*Write 索引维护（同雪柱坍落口径——重力方块非流体/冰/火/生长段，理论 no-op，保持入口一致防未来
 //   把某重力方块归入索引段后漏维护）+ emit blockBroken（破块粒子 / 音，机制等价 MC 失撑坍落反馈）+
-//   recomputeLightAround（实体沙柱消失重 flood）+ emit gravityBlockFell（每格一信号一实体，着地各自还原）。
+//   recomputeLightAround（实体沙柱消失重 flood）+ emit gravityBlockFell（每格一信号一实体，着地各自还原）+
+//   recheckAttachmentsAfterClear（审查修 #4：清格后邻域附着物复检——柱顶 / 柱侧火把 / 铁轨 / 甘蔗等随支撑消失
+//   掉落 / 坍落，不再悬空残留）。
 //   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。空首格 → no-op。
 void World::dropGravityColumn(int x, int y, int z)
 {
@@ -2240,12 +2254,65 @@ void World::dropGravityColumn(int x, int y, int z)
         emit blockBroken(x, cy, z, int(b));               // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
         recomputeLightAround(x, cy, z, b, BlockRegistry::Air); // 沙柱遮光消失重 flood
         emit gravityBlockFell(x, cy, z, int(b));          // 呈现层转 spawnFallingBlock（每格一实体，保留真实 id）
+        // 审查修 #4：本格已清 Air → 补邻域附着物复检（正上方族 + 6 邻火把 / 红石火把）。柱中段清格时上方
+        //   仍是下一格沙 → 各 check 早退 no-op；只有清到**柱顶格**时柱顶 / 柱侧附着物才被本扫带走（含级联：
+        //   甘蔗整柱 / 雪层整柱由各 check 内部的 drop*Column 继续向上收）。不含重力复检（防柱内指数重入，
+        //   见 recheckAttachmentsAfterClear 头注释）。caller 末尾 1 次 worldChanged 覆盖本扫的静默写。
+        recheckAttachmentsAfterClear(x, cy, z, b);
         any = true;
         ++cy;
     }
     if (!any) return;
     emit worldChanged();      // 驱动 mesh 重建（沙柱消失）
     m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// 审查修 #4（Review 2026-08-23 中危；头注释见 world.h）：静默清格后的邻域附着物复检。dropGravityColumn
+//   每清一格调 + clearBlockSilent 末尾调（口径合一）。正上方族直接复用 setBlock 主入口的 check*OnEdit
+//   （自带早退——正上方非对应方块 → no-op 零写入零 emit——与掉落语义 / 批量收口 emit），6 邻火把 / 红石
+//   火把本层内联扫（原口径在 PlayerController::dropUnsupportedTorchesAround——Game 层私有，静默清格路径
+//   够不着；此处 World 层等价移植：state 解码唯一附着格 + torchSupportBlock 仍撑则保留，放置 / 掉落同
+//   口径不漂移）。火把清格走「静默直写 + 全套 note + blockBroken + blockDroppedAsItem(dropId) +
+//   recomputeLightAround」（火把是光源，移除须重 flood；红石火把是电力族，notePowerWrite 入脏集），
+//   不发自己的 worldChanged —— 两 caller（dropGravityColumn / clearBlockSilent）末尾的批量收口 emit
+//   覆盖（N 写 1 emit，同本族口径）。**不含 checkGravityBlockOnEdit**（见 world.h 头注释：柱内重入 =
+//   指数级递归重扫；重力延续由 dropGravityColumn 自身循环 / caller 显式补调负责）。
+void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
+{
+    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
+    const quint8 id = BlockRegistry::Air; // 清格复检恒按「本格现内容 = Air」口径（check 族签名第 5 参）
+    // ① 正上方附着族（各自内部守卫 id==Air + oldId 非本族 → 玩家直破路径不双掉，与 setBlock 主入口零差异）：
+    checkCactusOnEdit(x, y, z, oldId, id);         // t445：仙人掌失撑整柱掉落
+    checkDeadBushOnEdit(x, y, z, oldId, id);       // t504：枯灌木失撑掉木棒
+    checkFlowerMushroomOnEdit(x, y, z, oldId, id); // t507：花 / 蘑菇失撑掉 dropId
+    checkPressurePlateOnEdit(x, y, z, oldId, id);  // t494：压力板失撑掉落
+    checkSugarcaneOnEdit(x, y, z, oldId, id);      // t524：甘蔗失撑整柱掉落
+    checkSnowLayerOnEdit(x, y, z, oldId, id);      // t527：雪层失撑整柱坍落为携带层数的下落实体
+    checkRailOnEdit(x, y, z, oldId, id);           // t565/t733：铁轨失撑掉落 + 邻轨连接重算
+    // ② 6 邻火把 / 红石火把（火把非 solid 不撑他火把 → 单趟扫即足够，无级联）：
+    constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (const auto &d : kNb) {
+        const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
+        if (tx < 0 || ty < 0 || tz < 0 || tx >= m_width || ty >= m_height || tz >= m_depth) continue;
+        const quint8 tb = m_chunks.blockAt(tx, ty, tz);
+        // t638 ⑥：红石火把同火把附着编码（torchAttachOffset 掩熄灭位），一并扫。
+        if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
+        int ax, ay, az;
+        BlockRegistry::torchAttachOffset(m_chunks.stateAt(tx, ty, tz), ax, ay, az);
+        const int sx = tx + ax, sy = ty + ay, sz = tz + az;
+        if (sx != x || sy != y || sz != z) continue; // 附着格非本清格 → 本清格不是它的支撑（各清格各自复检）
+        if (BlockRegistry::torchSupportBlock(m_chunks.blockAt(sx, sy, sz), m_chunks.stateAt(sx, sy, sz)))
+            continue; // 附着格仍支撑（R1 口径 a890bfa 合成判定）→ 火把保留（同 L12：放置 / 掉落同口径）
+        m_chunks.setBlock(tx, ty, tz, BlockRegistry::Air); // 静默直写 + 标脏（含边界邻接）；不经 World::setBlock（无重入）
+        noteGrowthWrite(tx, ty, tz, tb, BlockRegistry::Air); // 火把非生长方块 → no-op，保持同族写入一致
+        noteFluidWrite(tx, ty, tz, tb, BlockRegistry::Air);  // 非流体 → no-op（同上）
+        noteIceWrite(tx, ty, tz, tb, BlockRegistry::Air);    // 非冰 → no-op（同上）
+        noteFireWrite(tx, ty, tz, tb, BlockRegistry::Air);   // 非火 → no-op（同上）
+        notePowerWrite(tx, ty, tz, tb, BlockRegistry::Air);  // 红石火把是电力族 → 邻网络下 tick 重算（t683 同口径）
+        emit blockBroken(tx, ty, tz, int(tb));               // 破块粒子 / 音（机制等价 MC 火把附着面移除脱落）
+        emit blockDroppedAsItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 掉落物（Main.qml spawnItem，count 恒 1）
+        recomputeLightAround(tx, ty, tz, tb, BlockRegistry::Air); // 火把是光源 → 移除须重 flood（清光源）
+    }
 }
 
 // t799 重力方块失撑复检（头注释见 world.h；机制等价 MC 1.0「沙放火把上立即落 / 支撑失效即刻落」；t794
@@ -2326,12 +2393,17 @@ void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
 //   坍落为掉落物，先于连接重算执行。
 void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
+    Q_UNUSED(id); // 审查修 #15 后失撑判定只读「本格现内容」（blockAt/stateAt），编辑后 id 不再参与判定；
+                  //   参数保留供 check*OnEdit 族签名一致（其余调用方 / 头注释均按 5 参契约）。
     bool changed = false;
     // t733 铁轨失撑掉落（R19.11「挖掉铁轨底部方块 → 铁轨不得浮空」；普通 / 动力 / 探测三族统一，isRail
-    //   单一权威）。守卫（同 checkPressurePlateOnEdit）：仅当本格刚被**清为 Air** 且被清块本身非铁轨——
-    //   玩家直破铁轨的掉落由 finishMiningAt 通用 drop 路径负责（三族 dropId=自身），此处再掉会双掉。
-    //   判定：正上方是铁轨、且本格（铁轨唯一支撑位，恒为正下方——轨不贴墙、无 state 附着编码可解）已非
-    //   有效支撑（isTopFlushSupport 单一权威：完整立方 ∨ 上半砖，t741；与红石粉 / 门族同语义）→ 铁轨立即
+    //   单一权威）。守卫：被编辑块本身非铁轨——玩家直破铁轨的掉落由 finishMiningAt 通用 drop 路径负责
+    //   （三族 dropId=自身），此处再掉会双掉。审查修 #15（Review 2026-08-23 低危）：旧守卫还要求
+    //   `id == Air`（仅挖掘 / 爆炸清格触发），**本格被换成非支撑方块**（冰融化成水 setWaterSilent 写
+    //   Water / 可燃物焚毁写 Fire / 放火把等异形方块）时不触发 → 冰融成水后轨悬浮到水蒸发。改为失撑
+    //   判定只看「本格现内容」：正上方是铁轨、且本格（铁轨唯一支撑位，恒为正下方——轨不贴墙、无 state
+    //   附着编码可解）已非有效支撑（isTopFlushSupport 单一权威：完整立方 ∨ 上半砖，t741；与红石粉 / 门族
+    //   同语义；水 / 火 / 火把等均非满顶支撑）→ 铁轨立即
     //   坍落为掉落物（连接位 / 动力轨通电位 / 探测轨压过位随方块清除一并丢弃，掉落物 = 自身物品）。
     //   机制等价 MC「铁轨支撑方块被移除即脱落，不浮空残留，不重新粘到别处」。t571②【自然失撑掉落：恒发
     //   （含创造）】—— World 层无 drop 标志概念，失撑坍落是结构后果（同板 / 甘蔗 / 仙人掌族）。
@@ -2344,7 +2416,7 @@ void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     //   **先掉轨再重算连接**：下方 13 格重算表覆盖被掉轨的全部水平邻（y+1 行在列）→ 邻轨连接位按
     //   「轨已消失」重算，不残留指向空位的连接形态。notePowerWrite 维护电力脏集（动力轨是接收器 /
     //   探测轨是源，isPowerFamilyBlock 含两者——轨被清后邻网络下 tick 重算，机制同 t683 爆炸补 note）。
-    if (id == BlockRegistry::Air && !BlockRegistry::isRail(oldId)) {
+    if (!BlockRegistry::isRail(oldId)) {
         const int ry = y + 1;
         if (x >= 0 && z >= 0 && x < m_width && z < m_depth && ry >= 0 && ry < m_height) {
             const quint8 rb = m_chunks.blockAt(x, ry, z);

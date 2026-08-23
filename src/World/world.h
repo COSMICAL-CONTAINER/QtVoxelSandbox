@@ -574,6 +574,24 @@ public:
     //   连续重力方块列 + 每格 emit gravityBlockFell。空首格 → no-op。见上方头注释。
     void dropGravityColumn(int x, int y, int z);
 
+    // 审查修 #4（Review 2026-08-23 中危）：静默清格后的邻域附着物复检（公共收口）。dropGravityColumn /
+    //   clearBlockSilent 这类「绕过 World::setBlock 直写 Air」的静默路径只维护了索引 / 光照，不触发
+    //   check*OnEdit 编辑钩子族 → 清格后失撑的附着物悬空残留（沙柱坍落后柱顶火把照常发光 / 柱顶铁轨
+    //   悬浮 / 柱侧贴墙红石火把照常供电——t794 铁砧并入重力族后受面扩大）。本函数对刚清成 Air 的
+    //   (x,y,z)（oldId = 清格前方块）补齐全部失撑复检，与 setBlock 主入口钩子族同口径：
+    //     · 正上方族：仙人掌 / 枯灌木 / 花·蘑菇 / 压力板 / 甘蔗 / 雪层 / 铁轨（各 check*OnEdit 自带
+    //       早退与批量收口 emit）；
+    //     · 6 邻火把 / 红石火把：state 解码唯一附着格 → torchSupportBlock（R1 口径 a890bfa）仍支撑则
+    //       保留，失撑则静默清 + blockBroken + blockDroppedAsItem（掉落走 dropId，呈现层转 spawnItem）+
+    //       notePowerWrite（红石火把是电力族）+ recomputeLightAround（火把是光源）。旧口径散在
+    //       PlayerController::dropUnsupportedTorchesAround（玩家挖掘）/ EntityManager 爆炸路径两处
+    //       Game/Entities 层，静默清格路径完全无此扫。
+    //   **不含 checkGravityBlockOnEdit**：dropGravityColumn 自身的向上循环即重力延续（柱内逐格清完再
+    //   重入会造成指数级递归重扫）；需要重力复检的 caller（clearBlockSilent / destroySphereSilent）
+    //   自行补调。供 dropGravityColumn 每清一格 + clearBlockSilent 末尾调（口径合一）。非 Q_INVOKABLE
+    //   （内部 helper）。分层（PLAN §2）：World 层，只读 / 写 m_chunks + lightField + 发信号。
+    void recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId);
+
     // t565 铁轨连接重算（机制等价 MC 1.0 rail 自动连接 + 转弯）。读 (x,y,z) 的水平 4 邻块 id 经
     //   BlockRegistry::railConnections（单一权威）算该 Rail 的连接 state；与当前 state 不同 → 静默直写
     //   新 state（m_chunks.setBlock(id,state) + 标脏，**不经 World::setBlock** → 不重入本检查、不发
