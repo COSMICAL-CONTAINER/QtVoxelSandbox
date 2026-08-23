@@ -804,8 +804,10 @@ signals:
     //   XP，机制等价 MC 幼崽不掉落）。0.5s 死亡动画窗口内 tickBreeding 仍衰减 growTimer，幼崽可能在其中长大
     //   （baby→false），故延迟 emit 时读 e.baby 会漏判；快照保「致死时是幼崽」语义稳定（同 deathBurned 快照模式）。
     //   t789 woolIndex = 羊毛色下标（仅 MobSheep 有意义，其余 mob 恒 0）：呈现层 onMobDied 的羊分支据此掉
-    //   对应色羊毛（白→材料段 WoolId 0x20E / 有色→羊毛方块 63..77）。
-    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby, int woolIndex);
+    //   对应色羊毛（t834 起统一方块段：白→Wool 方块 27 / 有色→羊毛方块 63..77）。
+    //   review #32（2026-08-23）sheared = **致死瞬间**快照（Entity.deathSheared，同 deathBaby 模式）——剪过毛
+    //   的羊死亡不掉羊毛（机制等价 MC 1.0 剪毛羊死时无毛可掉；呈现层羊分支守卫），非 MobSheep 恒 false。
+    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby, int woolIndex, bool sheared);
     // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
     //   玩家处于攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
     //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones/Stalker/Spider）。呈现层（Main.qml）
@@ -843,7 +845,7 @@ signals:
     //   floor(pos)（与 spawnItem 整数格约定一致，便于 ItemEntityManager 落在羊身旁）。呈现层（Main.qml）Connections
     //   据它转发 ItemEntityManager.spawnItem（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：
     //   Entities 层发语义事件、呈现层只消费，绝不反向写栅格）。机制等价 MC 1.0 剪羊毛掉落羊毛物品。
-    //   t789 woolIndex = 该羊羊毛色下标（0..15）：呈现层据此掉对应色羊毛（白→材料段 WoolId 0x20E /
+    //   t789 woolIndex = 该羊羊毛色下标（0..15）：呈现层据此掉对应色羊毛（t834 起统一方块段：白→Wool 方块 27 /
     //   有色→羊毛方块 63..77，机制等价 MC 剪彩色羊得对应色羊毛）。
     void sheepSheared(int x, int y, int z, int woolIndex);
     // t510 雪傀儡剪南瓜头（shearSnowGolem 内发，仅未剪南瓜头的活体 SnowGolem 首次翻 snowGolemSheared=true 时发）。
@@ -1010,6 +1012,10 @@ private:
         //   growTimer —— 幼崽可能在 kDeathTime≈0.5s 死亡动画窗口内长大（baby→false），故 mobDied 延迟 emit 时读
         //   e.baby 会漏判「致死时是幼崽」；快照保「幼崽死亡不掉落」语义稳定（机制等价 MC 幼崽死亡不掉物）。
         bool deathBaby = false;
+        // review #32 剪毛死亡快照：damageEntity 致死瞬间快照 e.sheared（同 deathBaby 模式）—— mobDied 延迟
+        //   emit 时携带，呈现层据它跳过剪毛羊的羊毛掉落（机制等价 MC 1.0 剪过毛的羊死时无毛可掉）。dead 态
+        //   AI 冻结使 sheared 理论不变，显式快照防未来「dead 期间动 sheared」的改动（同 deathBurned 稳定性论据）。
+        bool deathSheared = false;
         // t280 黑暗刷怪（敌对生物 Shambler/Bones 专用；passive / FallingBlock 留默认 false/0 不触发）：
         //   hostile=true 的 Mob 走 tickHostileLife 的燃烧 + 远距消失 + spawn 调度逻辑。passive（pig/cow/sheep/
         //   test）hostile=false → 不燃烧 / 不计入敌对上限 / 不远距消失（passive 永驻世界，机制等价 MC 被动生物
@@ -1067,7 +1073,7 @@ private:
         //   只取 {0 白, 6 粉, 7 灰, 8 浅灰, 12 棕, 15 黑}）。spawnMobCore 生成时按 kSheepNaturalWeights 自然权重
         //   随机（白 ~81.8% 主导，机制等价 MC 1.0 自然刷羊分布）；繁殖幼崽被 tickBreeding 覆写为父代色（继承
         //   语义同 ocelotVariant）。QML 毛茸 Model 据 sheepWoolTintAt 乘 tint；shearSheep / mobDied 携带它让
-        //   呈现层掉对应色羊毛（白→材料段 WoolId / 有色→对应色羊毛方块）。默认成员初始化清回（槽复用防残留）。
+        //   呈现层掉对应色羊毛（t834 起统一方块段：白→Wool 方块 / 有色→对应色羊毛方块）。默认成员初始化清回（槽复用防残留）。
         int   sheepWool = 0;         // 羊毛色下标 0..15（默认 0=白；仅 MobSheep 用）
         // t398 鸡下蛋态（仅 mobType==MobChicken 用；其余 mob 留默认 0 不触发）：
         //   eggTimer 到下次下蛋的倒计时（秒）；tick Mob 分支推进，<=0 → emit chickenLaidEgg + 重置随机周期

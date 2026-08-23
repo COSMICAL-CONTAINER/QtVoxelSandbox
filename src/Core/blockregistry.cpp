@@ -285,12 +285,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     // t405 玻璃（Glass）：透明整立方（机制等价 MC 1.0 玻璃 glass）。solid=false（**关键**：仅作 mesher 邻居面剔除依据 →
     //   相邻实体方块不剔面 → 透过半透玻璃可见背后的方块；碰撞 / 选中 / 射线走 shape=ShapeFull / raycastAABBs / blockAt!=0
     //   故 glass 仍可踩 / 可瞄准 / 可破）、shape=ShapeFull（整立方，**非**异形）、hardness=0.3（同 MC 1.0 玻璃量级）、
-    //   toolType=Pickaxe（石族）、requiresTool=false（空手可破且掉落——本工程无精准采集，玻璃可回收）、dropId=0x204
-    //   （破玻璃掉玻璃物品 RecipeRegistry::GlassId，Core 不依赖 Game 故字面量 0x204，同 TallGrass 用 0x208 模式）、
+    //   toolType=Pickaxe（石族）、requiresTool=false（空手可破且掉落——本工程无精准采集，玻璃可回收）、dropId=自身
+    //   （review #8/t834：破玻璃掉玻璃**方块**，同 Wool/床自掉模式——红石灯配方原料已改接方块段 Glass，若仍掉
+    //   材料段 0x204 则方块段在生存无获取入口 = 配方死链；自掉后生存链 = 烧沙得 0x204（可放置中转）→ 放置 →
+    //   破坏回收 Glass 方块 → 入配方）、
     //   dropCount=1、maxStack=64。各面贴图=glass(68)（近白青底 + 暗边框 + 对角高光斜线，原创自绘 §9a；纹理不透明，
     //   半透由 glassOnly 段材质 opacity 实现，同 water 模式）。音色归 GroupStone（玻璃质敲击）。渲染走 glassOnly 段
     //   （独立半透材质 opacity:0.45 + NoLighting）；地形段跳过 Glass。lightOpacity=0（solid=false → default 返 0，透光）。
-    /* glass        */ {int(BlockRegistry::Glass),                        68, 68, 68, 68, false, BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false,                            0x204, 1, 64, "glass",        "玻璃"},
+    /* glass        */ {int(BlockRegistry::Glass),                        68, 68, 68, 68, false, BlockRegistry::ShapeFull,     0.3f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::Glass),      1, 64, "glass",        "玻璃"},
     // ── t407 胡萝卜/马铃薯作物（CarrotCrop/PotatoCrop）：机制等价 MC 1.0 carrot/potato 作物。**cross 形广告牌方块**
     //   （与小麦作物同走 PartialBlockGeometry 的 cross 几何段，两片对角相交双面 quad，alpha 透明底 cutout）。
     //   种植：手持胡萝卜/马铃薯物品（CarrotId 0x22F / PotatoId 0x230）右键耕地 → 上方一格种本作物（playercontroller）。

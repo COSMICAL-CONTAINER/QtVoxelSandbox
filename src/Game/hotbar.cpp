@@ -510,9 +510,10 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RawPorkchopId),   // 生猪排：杀猪掉落（带骨肉排，浅粉红）
         int(RecipeRegistry::RawBeefId),       // 生牛肉：杀牛掉落（深红肉块）
         int(RecipeRegistry::LeatherId),       // 皮革：杀牛掉落（棕黄兽皮）
-        // t800 羊毛移出材料段调色板（用户「羊毛方块就放在方块里面，材料里面的羊毛物品多此一举」）：羊毛物品
-        //   0x20E 保留全部生存链（杀羊 / 剪羊毛掉落 + bed_red 简化配方原料），仅不再列创造材料 tab —— 建筑取色
-        //   走方块段 16 色 wool（creativeBlocks 早已在列，t788 染料链的染色基底也是白羊毛**方块**）。
+        // t800 羊毛移出材料段调色板（用户「羊毛方块就放在方块里面，材料里面的羊毛物品多此一举」）：t834/review #7
+        //   起羊毛物品 0x20E 全面退役（剪/杀白羊改掉 Wool 方块 27、bed_red 简化配方原料同步改方块段）→ 本 id
+        //   已无任何生存来源与消费（仅名字表 / 图标 / pack 映射保旧档兼容），创造建筑取色走方块段 16 色 wool
+        //   （creativeBlocks 早已在列，t788 染料链的染色基底也是白羊毛**方块**）。
         int(RecipeRegistry::DiamondId),       // t279 钻石：钻石矿挖掘掉落（需铁镐；机制等价 MC 1.0 钻石）
         // t299 敌对 mob 死亡掉落物（杀骸骨 / 蹒跚者 / 蜘蛛产出；机制等价 MC 1.0 敌对生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由敌对 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
