@@ -142,8 +142,11 @@ public:
     //   不依赖 Renderer/Physics；PlayerController（Game/Physics）只读消费。
     std::vector<BlockRegistry::BlockAABB> collisionAABBsAt(int x, int y, int z) const;
     // t775 点级碰撞占据查询：世界坐标点所在格的任一碰撞 sub-AABB **严格包含**该点 → true（点嵌进实体
-    //   方块的碰撞体）。窒息判定的原子查询（t160 玩家眼位 / t254 mob 头部原各自内联本判定，t775 收敛为
-    //   World 单一权威 —— 矩阵测试矿车骑乘窒息探针与 PlayerController 共用同源判据，防两处漂移）。
+    //   方块的碰撞体）。窒息判定的原子查询：t160 玩家眼位与 t775 矿车骑乘眼位（PlayerController
+    //   tickSuffocation 单链）自 t775 起收敛为本 World 单一权威（矩阵测试矿车骑乘窒息探针同源共用）。
+    //   复审 #24（2026-08-23）口径修正：t254 mob 头部窒息**未迁移** —— EntityManager 仍独立实现同判据
+    //   （头部点落头部格某 sub-AABB 内缘，aiTick 节流；见 entitymanager tick 窒息分支），注释按事实登记、
+    //   不为对齐注释做代码迁移。
     //   partial 块精确：点在格内但不在任何 sub-AABB 内缘（如上半砖下方的空气区）→ false（与碰撞同源，
     //   t575 收紧语义原样保留）。只读（collisionAABBsAt + 点盒判定）；分层（PLAN §2）：World 低层查询，
     //   Game / Entities / 测试直调。

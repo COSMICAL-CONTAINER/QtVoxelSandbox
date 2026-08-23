@@ -162,7 +162,8 @@ public:
     //   **复审 #3（2026-08-22）轨道守卫**：(a)/(b) 旧版都绕过轨道约束（轨道合法性只在 stepCartAlongRail
     //   格心重选时校验）—— 去穿插位移 / 冲量获速可把车直接送进**无轨列**，下一帧 pinCartY 返 -1 只清速度
     //   不回落 Y → 悬浮永久死车（死端追尾稳定复现）。现两路加守卫：(a) 位移越过当前格边界时先以
-    //   scanRailColumn（pinCartY 同语义列扫描，自车当前 Y）探测目标列有轨，无轨 → 钳制在当前格边界内
+    //   scanRailColumnRiding（pinCartY 同语义宽容列扫描，自车当前 Y；复审 #2 起与钉轨定共享低顶净空
+    //   放行 / 隔板拒）探测目标列有轨，无轨 → 钳制在当前格边界内
     //   （离轨 / 地面车本列无轨 → 位移恒 0，同 pushEmptyCart「无轨推不动」语义）；(b) 受冲量方向
     //   （A 沿 -n / B 沿 +n）无合法连接（pickTrackStep false：死端 / 离轨）→ 该车不吃冲量。
     //   任一车 speed/pos 被改 → notifyChanged（revision 触碰驱动 QML 位置刷新）。
@@ -255,24 +256,39 @@ private:
     bool pickTrackStep(World *world, const QVector3D &cartPos, float wantX, float wantZ,
                        int &outDx, int &outDz) const;
 
-    // 复审 #4（2026-08-22）：列内向下扫「最近**可达**轨格」（pinCartY / pickTrackStep / tickRiddenCart
-    //   前置钉定 / 探测轨占用四点共用语义，抽单一权威防各处漂移）：从 topY 向下最多 2 格找首个 Rail 族
-    //   格；扫描途中遇**可碰撞实心方块即断**（实心遮挡 → 更下方轨不可达 —— 地面静止车隔着实心地板点亮
-    //   下方探测轨隧道 / 把车（连人）钉到地板下方轨面的假支撑都由此拒；轨 / 火把 / 花草 / 水（无碰撞）
-    //   不遮挡，坡顶场景格与轨之间只隔空气不受影响）。返轨格 Y（-1 = 列内无可达轨）。只读 World。
+    // 复审 #4（2026-08-22）：列内向下扫「最近**可达**轨格」（探测轨占用专用；实现见 .cpp 头注释）：
+    //   从 topY 向下最多 2 格找首个 Rail 族格，途中遇**可碰撞实心方块即断**（实心遮挡 → 更下方轨不可达
+    //   —— 地面静止车隔着实心地板点亮下方探测轨隧道由此拒；轨 / 火把 / 花草 / 水（无碰撞）不遮挡）。
+    //   返轨格 Y（-1 = 列内无可达轨）。只读 World。
+    //   复审 #2（2026-08-23）：本严格版仅探测轨占用一处消费（隔板供电防线）；骑乘族四消费端（pinCartY /
+    //   pickTrackStep / tickRiddenCart 前置钉定 / railSurfaceYAt / clampShift）改走宽容版
+    //   scanRailColumnRiding（低顶净空坡道不判死），见下。
     int scanRailColumn(World *world, int cx, int topY, int cz) const;
+
+    // 复审 #2（2026-08-23）宽容版列扫描（骑乘族专用；严格版语义 + 唯一差异：扫描顶格实心且其正下一格
+    //   是轨、且「轨面 + 骑乘高」与 pos.y 一致（容差 kRideScanTol）→ 放行返回该轨）。判「实心紧贴轨上沿」
+    //   = 坡顶穿越 / 低顶净空的天花板而非隔板：坡道段 pos.y = 轨Y+rise+0.45，rise>0.55 时 floor(pos.y) =
+    //   轨Y+1 —— 紧凑螺旋 / 多层轨道下层坡段该格是上层地板（实心），严格断扫 → 坡上死车 / 俯仰清零 / 采样
+    //   失联三症状同根因。一致性校验是承重的（af9ec8e 隔板假支撑防线全靠它）：地面车 pos.y = 地板Y +
+    //   kCartGroundH，与地板下平轨骑乘高差恒 0.9375 >> 容差 → 拒；车在轨上时 pos.y 正是 pinCartY 用同一
+    //   公式钉出（帧首扫描 fx 未变 → 差恰 0；步内采样 ≤ railRiseAt 全值域）→ 收。topY/fx/fz = 查询列
+    //   扫描顶格与格内坐标（= 车 / 采样点 floor 与小数位），refY = 一致性基准高（车当前 pos.y）。只读 World。
+    int scanRailColumnRiding(World *world, int cx, int cz, int topY, float fx, float fz, float refY) const;
 
     // t769 轨格内坡面高（从 pinCartY 抽出的纯查询，Y 钉定 / 俯仰采样共用）：轨格 (bcx,y,bcz) 按连接位定
     //   行进轴（mesher 同源：EW（±X 连接）读 ±X 探针、NS 读 ±Z；0 连接读 RailAxisEWFlag 轴偏好），格内
     //   横向位置 (fx,fz) 上的邻轨抬升叠加（只抬 δ>0 —— 高端平铺、低端画坡；与 PartialBlockGeometry Rail
     //   case 的 riseAtX/riseAtZ 同公式同语义、同读 railProbeDelta → 渲染坡面 / 矿车 Y / 俯仰采样三者同一张面）。
-    //   拐角取四角抬升的双线性中心；V 形凹谷（两端皆 +1）取 2|轴-0.5|；十字无坡。只读 World。
+    //   复审 #3（2026-08-23）：拐角格改**四角双线性**（四角高 = mesher armLift 同式：触边两侧臂抬升之和），
+    //   旧「四边均值常数」与相邻直臂格线性坡面在格边界不连续（俯仰采样窗跨界 atan2(-0.75,0.5)≈-56° 车头
+    //   瞬甩 + Y 钉面跳降 0.75）。V 形凹谷（t710 两端皆 +1）取 2|轴-0.5|；十字无坡。只读 World。
     static float railRiseAt(World *world, int bcx, int y, int bcz, float fx, float fz);
 
-    // t769 轨道面高度采样（俯仰角计算用）：世界坐标 (sx,sz) 所在列自 topY 向下扫最近可达轨格（scanRailColumn
-    //   同语义）→ 轨格 Y + 格内坡面高（railRiseAt）。列内无可达轨 → 返 false。caller 传的 topY 应为车所在
-    //   轨层 +1（采样列与车列至多相邻 → 轨层差 ∈ [-1,+1]，扫描窗 [topY, topY-2] 恰覆盖）。
-    bool railSurfaceYAt(World *world, float sx, float sz, int topY, float &outY) const;
+    // t769 轨道面高度采样（俯仰角计算用）：世界坐标 (sx,sz) 所在列自 topY 向下扫最近可达轨格
+    //   （scanRailColumnRiding 宽容语义，refY = 车当前 pos.y 作一致性基准 —— 采样点距车心 ≤0.25，其轨面
+    //   与车钉定面同源连续，容差窗内）→ 轨格 Y + 格内坡面高（railRiseAt）。列内无可达轨 → 返 false。
+    //   caller 传的 topY 应为车所在轨层 +1（采样列与车列至多相邻 → 轨层差 ∈ [-1,+1]，扫描窗恰覆盖）。
+    bool railSurfaceYAt(World *world, float sx, float sz, int topY, float refY, float &outY) const;
 
     // t769 车身俯仰刷新（纯呈现）：以车心为基准、沿车头向 ±kCartPitchProbe 两点采样轨面高（railSurfaceYAt）
     //   → pitch = atan2(前-后, 2·probe)。railY = 车所在列轨层（pinCartY 返回值 / 被骑停驻帧的前置钉定 railY）。
@@ -287,9 +303,10 @@ private:
     //   t734 段终点重写 = 行进向上前方最近的格心（旧「当前格心+行进向」段长 >0.5，在 16ms tick 步长
     //   ~0.06-0.21 下跨格分支永不触发 = 连接重选/拐弯/尽头停全失效 → 直线冲出轨道；新取法每过一格心
     //   必重选，帧率无关）+ 格心起步先验（死端/离轨零位移即停）。
-    //   t770 ② 弯道格内强制贴轨约束：每子步把行进向的垂直轴钉到所在格中心线（floor+0.5）—— 停驻重选向 /
+    //   t770 ② 弯道格内强制贴轨约束：每子步把行进向的垂直轴向所在格中心线（floor+0.5）收敛 —— 停驻重选向 /
     //   被推起步等非到心时刻的方向重选不再让车带横向偏移驶出中心线（转向与速度/方向无关，位置几何连续；
-    //   正常行驶恒在 .5 上 → no-op）。
+    //   正常行驶恒在 .5 上 → no-op）。复审 #23：收敛由「一次钉回」改限速渐进（每 tick ≤kCartCenterSnapPerTick）
+    //   —— 段中重选向不再一次性横移 ~0.5 格（被骑时玩家视点同步跳）。
     void stepCartAlongRail(Cart &c, World *world, float dt);
 
     // t708 钉轨面（共享：被骑 tickRiddenCart / 空车 tickPushedCarts 同一 Y 钉定）：把矿车 Y 钉到所在列向下
@@ -318,6 +335,11 @@ private:
     // t734 非轨格（地面）放置的静止车：车底贴 cell 底（t768：0.375 底板下沿偏移 + 0.0125 微隙，无轨薄板层）。
     //   放宽放置（可放地上但推不动）后 spawnCart 非轨模式用；离轨静止由推进侧无轨守卫保证。
     static constexpr float kCartGroundH = 0.3875f;
+    // 复审 #2（2026-08-23）宽容列扫描一致性容差（格）：scanRailColumnRiding 判「实心紧贴轨上沿」时，
+    //   |pos.y − (轨Y + railRiseAt + kCartRideH)| ≤ 本值才放行。取 railRiseAt 全值域 [0,1]（V 谷 / 步内
+    //   stale 钉定跨半格坡差的最坏采样）；地面车对地板下轨（隔板在下 1 格、轨在下 2 格）的差 ≥ 1.9375 −
+    //   rise ∈ [0.9375, 1.9375] 恒被拒（af9ec8e 隔板假支撑防线，最坏 = 地板下恰为坡顶 rise=1 段）。
+    static constexpr float kRideScanTol = 0.5f;
     // 轨上矿车速度（blocks/s）：明显快于步行 4.3（机制等价 MC 1.0 矿车轨上 8 blocks/s）。
     static constexpr float kCartSpeed  = 8.0f;
     // t638 ⑤ 动力轨（GoldenRail）boost 档（blocks/s）：矿车驶上动力轨时的目标速度上限（kCartSpeed 的
@@ -355,6 +377,14 @@ private:
     //   坡中段窗全落坡格 → 1:1 坡恰 45°；跨段折缝（平↔坡）窗横跨两段 → 线性过渡（过渡带 ~0.5 格，与车速 /
     //   帧率无关 —— 轨面高分段线性且连续 → 俯仰随位置连续，无需时间平滑）。
     static constexpr float kCartPitchProbe = 0.25f;
+    // 复审 #3（2026-08-23）俯仰钳制（度）：真实轨面坡度上界 = 1:1 坡的 ±45°（V 谷段内局部坡 2:1 但 ±0.25
+    //   两点采样窗对称收窄后 ≤~39°；拐角双线性后窗内高差 ≤0.5 → 恰 45°）。旧版无钳：采样窗落在病态几何
+    //   （拐角均值常数跨边界 / 探针跨界断层）时冒出 ±56° 以上幻象俯仰 → 车头猛甩。纯呈现护栏（不改判据）。
+    static constexpr float kCartPitchMaxDeg = 45.0f;
+    // 复审 #23（2026-08-23）贴轨收敛限速（格/tick）：stepCartAlongRail 每子步把行进垂直轴钉向格心线时，
+    //   单 tick 收敛量上限（正常行驶恒在 .5 上 → no-op；段中重选向的横向偏移 ≤0.5 → ~5 tick 渐进钉回，
+    //   替旧「一次钉回」的 ~0.5 格瞬时横移 —— 被骑时玩家视点同步跳的根因）。取舍见 .cpp 实现处注释。
+    static constexpr float kCartCenterSnapPerTick = 0.1f;
     // 空车 / 松键摩擦衰减率（1/s）。
     static constexpr float kCartFriction = 2.0f;
 };

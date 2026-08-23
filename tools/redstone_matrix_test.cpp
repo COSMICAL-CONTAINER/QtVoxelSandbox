@@ -1074,10 +1074,28 @@ int main(int argc, char *argv[])
         bool sawYaw270 = false, sawYaw180 = false;
         if (okA) {
             // (b) 重推（wish 同爬行向量 = 大垂直分量）：停驻重选向选出口臂 → 修后贴轨沿东臂中心线行驶。
+            //   复审 #23 适配：贴轨收敛改限速（每 tick ≤kCartCenterSnapPerTick=0.1 格）→ 重推初期允许
+            //   「残留偏移按限速衰减」的过渡态（旧瞬时钉回一步到位；t770 修前的真脱轨 = 偏移**不衰减**
+            //   仍在此断言下 FAIL —— 防脱轨回归力保留）：过渡窗内须要么已贴线（≤0.05）要么以 ≥0.099/tick
+            //   衰减且不回升；窗后回到严格 onTrack。过渡窗长 = ceil(off0/0.1)+1（0.5 格上界 → ≤6 tick）。
+            const float off0 = lineDist(carts.posAt(0).x(), carts.posAt(0).z());
+            const int graceT = int(std::ceil(off0 / 0.1f)) + 1;
+            float prevOff = off0;
             for (int t = 0; t < 400 && okB; ++t) {
                 carts.tickRiddenCart(0.016, &w, 0.998f, 0.0625f, cp);
                 carts.tickPushedCarts(0.016, &w);
-                if (!onTrack(cp, t, "relaunch ")) { okB = false; break; }
+                const float off = lineDist(cp.x(), cp.z());
+                if (t < graceT) {
+                    if (off > 0.05f
+                        && (off > prevOff + 1e-6f
+                            || off > std::max(0.05f, off0 - 0.099f * float(t)) + 1e-6f)) {
+                        qInfo().noquote() << "  relaunch snap not converging at bounded rate, tick" << t
+                                          << "off" << off << "prev" << prevOff << "off0" << off0;
+                        okB = false;
+                        break;
+                    }
+                } else if (!onTrack(cp, t, "relaunch ")) { okB = false; break; }
+                prevOff = off;
                 if (cp.x() > float(x0) + 1.0f && cp.x() < float(x0) + 2.0f
                     && int(std::lround(carts.yawAt(0))) % 360 == 270) sawYaw270 = true;
                 if (cp.x() >= float(x0) + 2.0f) break; // 东行到位 → 切 (c) 反踩
@@ -4748,6 +4766,343 @@ int main(int argc, char *argv[])
                           << (realChecked
                                   ? ", demo pack alex->slim / steve->classic (real PIL-verified layouts)"
                                   : "");
+    }
+
+    // ── P21 复审 #2（2026-08-23）低顶净空坡道探针（MinecartManager 直编，同 P12b/P18 模式）──
+    //   Review #2：scanRailColumn「实心即断」× 坡道车位居上 —— 坡段 rise>0.55 时 floor(pos.y) = 轨Y+1
+    //   恰是贴坡天花板实心格 → 严格断扫返 -1 → 坡上死车 / 俯仰清零 / 采样失联三症状同根因（af9ec8e 的
+    //   断扫在平轨天花板不触发 —— P18 平轨 pos.y=R+0.45 首扫格即轨；本探针补坡道变体）。修后骑乘族走
+    //   宽容版（实心正下是轨 + 骑乘高一致 → 放行）。断言：
+    //   (a) 低顶坡道全程不失联：Y 恒钉轨面（wantSurf+rideH ±0.02，同 P12b 口径）+ 驶到顶死端格心停驻
+    //       + 停稳守卫（修前症状①：pinCartY/tickRiddenCart 判离轨 → 坡 55%+ 处冻死，到不了顶）；
+    //   (b) 俯仰全程连续：|Δpitch| ≤ 46°/tick + |pitch| ≤ 45.5°（钳制上界；修前症状②：采样列失联 →
+    //       一帧跳回水平 45° 突变）+ 坡中段均值 ~+45；
+    //   (c) af9ec8e 隔板回归防线：地面车（kCartGroundH=0.3875）站实心地板、地板下 1 格平轨 —— mount +
+    //       持续 W + 玩家推全链后钉死不动（宽容版一致性校验拒：差 1.9375 >> kRideScanTol 0.5）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 4×31 网格已耗尽）。需 7×3×6（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3)
+            for (int xx = 4; xx + 6 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 5 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review#2 low-headroom ramp: no clear rig area found";
+        } else {
+            const float rideH = 0.45f; // kCartRideH 镜像值（P11/P12b 同款）
+            // 轨：x0 低平 + x0+1 坡（东邻高一格）+ x0+2..x0+3 高平死端；天花板：x0/x0+1 上 Y+1（低顶）、
+            //   x0+2/x0+3 上 Y+2 —— 坡段 1 格净空（紧凑螺旋下层坡段等效布局）。
+            w.setBlock(x0,     kRigY,     z0, BR::Rail, 0);
+            w.setBlock(x0 + 1, kRigY,     z0, BR::Rail, 0);
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::Rail, 0);
+            w.setBlock(x0 + 3, kRigY + 1, z0, BR::Rail, 0);
+            w.setBlock(x0,     kRigY + 1, z0, BR::Stone, 0);
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Stone, 0);
+            w.setBlock(x0 + 2, kRigY + 2, z0, BR::Stone, 0);
+            w.setBlock(x0 + 3, kRigY + 2, z0, BR::Stone, 0);
+            const auto wantSurf = [&](float x) {
+                if (x < float(x0 + 1)) return float(kRigY);
+                if (x > float(x0 + 2)) return float(kRigY + 1);
+                return float(kRigY) + (x - float(x0 + 1));
+            };
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+            bool ok = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+            bool yOk = true, pitchCont = true, pitchClamped = true;
+            float prevPitch = 0.0f, slopeSum = 0.0f;
+            int slopeN = 0;
+            QVector3D cp;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOk = false; break; }
+                const float p = carts.pitchAt(0);
+                if (t > 0 && std::fabs(p - prevPitch) > 46.0f) pitchCont = false;
+                if (std::fabs(p) > 45.5f) pitchClamped = false;
+                if (cp.x() > float(x0 + 1) + 0.3f && cp.x() < float(x0 + 1) + 0.7f) { slopeSum += p; ++slopeN; }
+                prevPitch = p;
+            }
+            const QVector3D fin = carts.posAt(0);
+            ok = ok && yOk && pitchCont && pitchClamped
+                && slopeN >= 3 && std::fabs(slopeSum / float(slopeN) - 45.0f) < 2.5f
+                && std::fabs(fin.x() - float(x0 + 3) - 0.5f) < 0.01f
+                && std::fabs(fin.y() - float(kRigY + 1) - rideH) < 0.02f
+                && std::fabs(carts.pitchAt(0)) < 0.5f;
+            if (ok) { // 停稳守卫（顶死端格心）
+                for (int t = 0; t < 20 && ok; ++t) {
+                    carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016, &w);
+                    if ((cp - fin).length() > 1e-4f) ok = false;
+                }
+            }
+            if (!ok)
+                qInfo().noquote() << "  low-headroom uphill: final" << fin << "pitch" << carts.pitchAt(0)
+                                  << "yOk" << yOk << "pitchCont" << pitchCont << "clamp" << pitchClamped
+                                  << "slopeN" << slopeN
+                                  << "slopeMean" << (slopeN ? slopeSum / float(slopeN) : 0.0f);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review#2 low-headroom ramp (ceiling flush above slope rail): cart "
+                                 "stays pinned (no dead-cart at rise>0.55), reaches top dead-end, pitch "
+                                 "continuous & clamped, ~+45 mid-slope";
+            // (c) 隔板防线：清坡轨布局 → 地板（Y 实心）+ 地板下 1 格平轨（Y-1）+ 地面车（Y+1 空格）。
+            carts.clearAll();
+            for (int dx = 0; dx <= 3; ++dx) { // 清轨 / 天花板 / 高段（含越层残留）
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY + 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY + 2, z0, BR::Air, 0);
+            }
+            w.setBlock(x0, kRigY, z0, BR::Stone, 0);    // 地板（车格正下）
+            w.setBlock(x0, kRigY - 1, z0, BR::Rail, 0); // 地板下平轨（隔板场景：实心在车与轨之间）
+            carts.spawnCart(x0, kRigY + 1, z0, &w);     // 地面静止模式（车底贴 cell 底 kCartGroundH）
+            const QVector3D gp0 = carts.posAt(0);
+            bool guardOk = std::fabs(gp0.y() - (float(kRigY + 1) + 0.3875f)) < 1e-3f; // 地面车基准高
+            guardOk = guardOk && carts.tryMount(QVector3D(gp0.x(), gp0.y() + 1.5f, gp0.z()),
+                                                QVector3D(0, -1, 0), 4.0f);
+            QVector3D gcp;
+            for (int t = 0; t < 30; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, gcp); // 持续 W（宽容版若误放行 → 钉到下方轨）
+                carts.pushEmptyCart(&w, gcp, 1.0f, 0.0f);         // 玩家推（pickTrackStep 同一宽容扫描）
+                carts.tickPushedCarts(0.016, &w);
+            }
+            guardOk = guardOk && (gcp - gp0).length() < 1e-4f; // 全链后钉死不动（离轨静止守卫接管）
+            if (!guardOk)
+                qInfo().noquote() << "  floor-slab guard: cart moved/teleported, start" << gp0
+                                  << "after" << gcp;
+            if (!guardOk) ++totalFail;
+            qInfo().noquote() << (guardOk ? "PASS" : "FAIL")
+                              << "| review#2 af9ec8e floor-slab guard kept: ground cart above rail-under-"
+                                 "floor stays dead (lenient scan consistency rejects, gap 1.9375 >> tol)";
+            // 清场
+            carts.clearAll();
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+    // ── P22 复审 #3（2026-08-23）坡臂拐角俯仰/Y 连续探针（MinecartManager 直编）──
+    //   Review #3：railRiseAt 拐角格取四边均值常数 0.25·Σe → 与相邻直臂格线性坡面在格边界不连续 →
+    //   俯仰采样窗跨界 atan2(-0.75,0.5)≈-56° 车头瞬甩 + 同帧 Y 钉面跳降 0.75（t709 拐角 quad 沿臂整边
+    //   抬升，矿车常数不贴）。修后拐角改 armLift 四角双线性（与 mesher 同一角点公式）。断言（高臂骑乘
+    //   下坡过拐角入平臂）：
+    //   (a) Y 连续：每 tick |Δy| ≤ 0.55（修前拐角入口一帧 -0.75；修后拐角内连续、平臂边界残差 ≤0.5
+    //       = t709 mesher 面自身的台阶，复审 #3 已知接受项）；
+    //   (b) 俯仰连续：每 tick |Δpitch| ≤ 46° 且 |pitch| ≤ 45.5°（钳制；修前 -56° 瞬甩两项都破）；
+    //   (c) 过弯驶达南死端格心停驻 + 停稳守卫（连续性断言不放松「不出轨」底线）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例）。需 6×6×5（含隔离边；高臂格到 Y+2）。
+        int cx = -1, cz = -1;
+        for (int zz = 1; zz < 96 && cx < 0; zz += 3)
+            for (int xx = 4; xx + 5 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 4 && clear; ++dx)
+                    for (int dz = -1; dz <= 4 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { cx = xx; cz = zz; }
+            }
+        if (cx < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review#3 slope-arm corner: no clear rig area found";
+        } else {
+            const float rideH = 0.45f;
+            // 高臂（西行下坡）：东端死端 (cx+2,Y+1) + (cx+1,Y+1)；拐角 (cx,Y)（东邻高 1 + 南臂同层）；
+            //   南平臂 (cx,Y,cz+1..cz+3) 死端。坡面由拐角格补齐（t709「低格画坡」）。
+            w.setBlock(cx + 2, kRigY + 1, cz, BR::Rail, 0);
+            w.setBlock(cx + 1, kRigY + 1, cz, BR::Rail, 0);
+            w.setBlock(cx,     kRigY,     cz, BR::Rail, 0);
+            w.setBlock(cx,     kRigY,     cz + 1, BR::Rail, 0);
+            w.setBlock(cx,     kRigY,     cz + 2, BR::Rail, 0);
+            w.setBlock(cx,     kRigY,     cz + 3, BR::Rail, 0);
+            MinecartManager carts;
+            carts.spawnCart(cx + 2, kRigY + 1, cz, &w); // 单端连接（西）→ spawn 定向 -X 下坡向
+            bool mounted = carts.tryMount(QVector3D(float(cx + 2) + 0.5f, float(kRigY + 1) + 2.0f,
+                                                    float(cz) + 0.5f),
+                                          QVector3D(0, -1, 0), 4.0f);
+            QVector3D prev = carts.posAt(0);
+            bool yCont = true, pitchCont = true, pitchClamped = true, onFootprint = true;
+            float prevPitch = 0.0f;
+            QVector3D cp = prev;
+            for (int t = 0; t < 900 && onFootprint; ++t) {
+                // 骑乘驱动（追推跑法摩擦磨停点随机、退化 wish 在死端形成推-停振荡，终点不确定；骑手
+                //   连续供速 + 死端「停在格心、零溢出」给出确定性终点）。wish 沿臂正向：西行段 (-1,0)，
+                //   过拐角心（z 越过 cz+0.5）后切 (0,+1) —— 死端处 dot<0 被滤 → 停驻不动。
+                const bool southArm = cp.z() > float(cz) + 0.5f;
+                carts.tickRiddenCart(0.016, &w, southArm ? 0.0f : -1.0f,
+                                     southArm ? 1.0f : 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                cp = carts.posAt(0);
+                if (std::fabs(cp.y() - prev.y()) > 0.55f) yCont = false;   // (a) Y 连续（修前 -0.75）
+                const float p = carts.pitchAt(0);
+                if (t > 0 && std::fabs(p - prevPitch) > 46.0f) pitchCont = false; // (b) 俯仰连续（修前 ±56 瞬甩）
+                if (std::fabs(p) > 45.5f) pitchClamped = false;
+                prevPitch = p;
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                const bool onTrack = (bx >= cx && bx <= cx + 2 && bz == cz) // 高臂（含拐角列）
+                                     || (bx == cx && bz >= cz + 1 && bz <= cz + 3); // 南臂
+                if (!onTrack) { onFootprint = false; break; }
+                prev = cp;
+            }
+            const QVector3D fin = carts.posAt(0);
+            // 终点：死端格心停驻（沿臂 wish 在死端无 dot≥0 连接 → 停驻重选向保持静止；「轨尽头 → 停在
+            //   格心、零溢出」是 stepCartAlongRail 到心分支的既定语义）。
+            bool ok = mounted && yCont && pitchCont && pitchClamped && onFootprint
+                && std::fabs(fin.x() - (float(cx) + 0.5f)) < 0.01f
+                && std::fabs(fin.z() - (float(cz + 3) + 0.5f)) < 0.01f
+                && std::fabs(fin.y() - (float(kRigY) + rideH)) < 0.02f;
+            if (ok) {
+                for (int t = 0; t < 20 && ok; ++t) { // 停稳守卫（停止追推后钉死）
+                    carts.tickPushedCarts(0.016f, &w);
+                    if ((carts.posAt(0) - fin).length() > 1e-4f) ok = false;
+                }
+            }
+            if (!ok)
+                qInfo().noquote() << "  slope-arm corner: final" << fin << "rig cx" << cx << "cz" << cz
+                                  << "yCont" << yCont
+                                  << "pitchCont" << pitchCont << "clamp" << pitchClamped
+                                  << "onFootprint" << onFootprint;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review#3 slope-arm corner bilinear rise: Y step <=0.55/tick (was 0.75),"
+                                 " pitch continuous |d|<=46 (was ~56 snap) & clamped 45, parks at far dead-end";
+            // 清场
+            carts.clearAll();
+            w.setBlock(cx + 2, kRigY + 1, cz, BR::Air, 0);
+            w.setBlock(cx + 1, kRigY + 1, cz, BR::Air, 0);
+            w.setBlock(cx, kRigY, cz, BR::Air, 0);
+            for (int dz = 1; dz <= 3; ++dz) w.setBlock(cx, kRigY, cz + dz, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+    // ── P23 复审 #23（2026-08-23）段中重选向横向收敛限速探针（MinecartManager 直编，同 P12c 场景）──
+    //   Review #23：停驻重选向（minecartmanager tickRiddenCart 停驻分支）在**段中非心位**改 dir → 下一步
+    //   行贴轨约束把 ≤0.5 格横向偏移**一次钉回** → 一 tick ~0.5 格横向瞬移（被骑时玩家视点同步跳；旧
+    //   P12c 只验收终态测不出）。修后收敛限速每 tick ≤kCartCenterSnapPerTick(0.1)。断言：
+    //   (a) 蠕行进拐角格早段松键磨停 → 停驻点在格心之前、偏移 ∈[0.11,0.45]（>0.1 保证能分辨瞬移与限速）；
+    //   (b) 停驻位 +X wish 一 tick 重选向出口臂（yaw 270）；
+    //   (c) 重推期每 tick 横向（z，此时垂直于行进轴）位移 ≤0.101（修前首 tick = 全偏移 ≥0.11 → FAIL）
+    //       且限窗内收敛到格心线（|z−(z0+0.5)| ≤1e-3）；
+    //   (d) 沿东臂驶达死端格心停驻（限速不破坏到达性）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例）。L 形：南腿 2 直 + 拐角 + 东臂 3 直，需 6×6×5（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 96 && x0 < 0; zz += 3)
+            for (int xx = 4; xx + 5 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 4 && clear; ++dx)
+                    for (int dz = -3; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review#23 mid-cell relaunch snap rate: no clear rig area found";
+        } else {
+            const float rideH = 0.45f;
+            w.setBlock(x0, kRigY, z0 - 2, BR::Rail, 0); // 南死端（spawn 格）
+            w.setBlock(x0, kRigY, z0 - 1, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0,     BR::Rail, 0); // 拐角（南臂 + 东臂）
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0 + 2, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0 + 3, kRigY, z0, BR::Rail, 0); // 东死端
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0 - 2, &w);
+            const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0 - 2) + 0.5f);
+            bool ok = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+            QVector3D cp;
+            // (a) 蠕行（wish 大垂直分量 → proj≈0.0625 → targetV≈0.5 格/s，P12c(a) 同款）进拐角格后
+            //     再爬 2 tick 即松键 → 磨停点落在格心之前（偏移 ~0.2-0.4）。
+            bool entered = false;
+            int enteredTicks = -1;
+            for (int t = 0; t < 2500 && ok; ++t) {
+                const bool release = entered && (t - enteredTicks) > 2;
+                carts.tickRiddenCart(0.016, &w, release ? 0.0f : 0.998f,
+                                     release ? 0.0f : 0.0625f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (!entered && int(std::floor(cp.z())) == z0 && int(std::floor(cp.x())) == x0) {
+                    entered = true;
+                    enteredTicks = t;
+                }
+                if (release) break;
+            }
+            for (int t = 0; t < 250 && ok; ++t) { // 摩擦磨停
+                carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+            }
+            const float off0 = std::fabs(cp.z() - (float(z0) + 0.5f));
+            ok = ok && entered && int(std::floor(cp.x())) == x0 && int(std::floor(cp.z())) == z0
+                && cp.z() < float(z0) + 0.5f && off0 >= 0.11f && off0 <= 0.45f; // (a) 停驻偏移前置
+            if (!ok)
+                qInfo().noquote() << "  park position not mid-corner pre-center with usable offset:"
+                                  << cp << "off0" << off0 << "entered" << entered;
+            if (ok) {
+                // (b) 停驻位 +X 重选向（一 tick）：dir 掰向出口臂，yaw → 270。
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                ok = int(std::lround(carts.yawAt(0))) % 360 == 270;
+                if (!ok) qInfo().noquote() << "  reselect heading not +X (yaw 270), yaw" << carts.yawAt(0);
+            }
+            bool convOk = false;
+            if (ok) {
+                // (c) 重推期横向限速：z 是垂直轴（行进 +X）→ 每 tick |Δz| ≤0.101，直到钉回格心线。
+                bool rateOk = true;
+                float prevZ = cp.z();
+                int convLeft = -1; // -1 = 未开始判定（首 tick 的 prevZ 基准在 (b) 末）
+                for (int t = 0; t < 600; ++t) {
+                    carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016, &w);
+                    const float dz = std::fabs(cp.z() - prevZ);
+                    if (convLeft < 0) { // 收敛窗内：横向位移须限速（修前首 tick ≈ off0 全额瞬移）
+                        if (dz > 0.101f) { rateOk = false; break; }
+                        if (std::fabs(cp.z() - (float(z0) + 0.5f)) <= 1e-3f) convLeft = 0; // 已收敛
+                    } else if (++convLeft == 1) { break; } // 收敛后再验 1 tick（保持格心线）
+                    prevZ = cp.z();
+                }
+                convOk = rateOk && std::fabs(cp.z() - (float(z0) + 0.5f)) <= 1e-3f;
+                if (!convOk)
+                    qInfo().noquote() << "  lateral convergence violated rate cap or never converged:"
+                                      << "rateOk" << rateOk << "z" << cp.z() << "off0" << off0;
+                ok = ok && convOk;
+            }
+            if (ok) { // (d) 沿东臂驶达死端格心停驻 + 停稳守卫。
+                for (int t = 0; t < 600; ++t) {
+                    carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016, &w);
+                    if (cp.x() >= float(x0 + 3) + 0.5f) break;
+                }
+                const QVector3D fin = carts.posAt(0);
+                ok = std::fabs(fin.x() - (float(x0 + 3) + 0.5f)) < 0.01f
+                    && std::fabs(fin.z() - (float(z0) + 0.5f)) < 0.01f
+                    && std::fabs(fin.y() - (float(kRigY) + rideH)) < 0.02f;
+                if (ok) {
+                    for (int t = 0; t < 20 && ok; ++t) {
+                        carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                        carts.tickPushedCarts(0.016, &w);
+                        if ((carts.posAt(0) - fin).length() > 1e-4f) ok = false;
+                    }
+                }
+                if (!ok) qInfo().noquote() << "  did not park at east dead-end center, fin" << fin;
+            }
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review#23 mid-cell relaunch: lateral recenter capped at 0.1/tick (was "
+                                 "one-shot ~0.5 teleport), converges to centerline, still reaches east dead-end";
+            // 清场
+            carts.clearAll();
+            for (int dx = 0; dx <= 3; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            for (int dz = -2; dz <= -1; ++dz) w.setBlock(x0, kRigY, z0 + dz, BR::Air, 0);
+            tickN(w, 2);
+        }
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
