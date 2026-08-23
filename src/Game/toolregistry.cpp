@@ -56,7 +56,8 @@ constexpr ToolRegistry::ToolDef kTools[int(ToolRegistry::ToolCount)] = {
     //   机制对齐 MC 1.0 钻石镐采掘速度）。maxDurability=1561（MC 1.0 钻石镐耐久，铁 250 之上的最高耐久）。
     //   采掘 Obsidian 的唯一工具（Obsidian.minToolTier=4）。追加在末尾（与 ToolId 枚举同序；不重排保向后兼容）。
     //   **t762 挖掘速度参数表行（Obsidian）**：miningTime = hardness/speedMul = 96.0/8.0 = **12.0s**（无附魔钻石镐
-    //   采掘黑曜石时长，t762 验收值）；效率附魔再 ×(1+level) 加速（t476 链）；木 / 石 / 铁 / 金 / 铜镐 harvestLevel
+    //   采掘黑曜石时长，t762 验收值）；效率附魔再加法 +level²+1 加速（t798 MC 1.0 链：效率 V 8+26=34 → 96/34≈2.82s；
+    //   低档镐 mul 1.0 不吃效率）；木 / 石 / 铁 / 金 / 铜镐 harvestLevel
     //   1/2/3/1/2 < 4 → miningSpeedMul 恒 1.0（96s 极慢）+ canHarvest=false（无掉落，仅 AIR）——「仅钻石镐可挖」。
     /* PickaxeDiamond */ {int(BlockRegistry::Pickaxe), 4, 4, 8.0f, 1561, "pickaxe_diamond", "钻石镐"},
     // t557 金工具（机制等价 MC 1.0 gold tools：耐久 32 最脆、speedMul 12.0 最快 —— 「快而脆」）。**rv56 问题6 修正：
@@ -169,13 +170,21 @@ float ToolRegistry::miningSpeedMul(quint8 blockId, int itemId)
     return t->speedMul;                        // 匹配（且达标）→ tier 倍率
 }
 
-float ToolRegistry::miningTime(quint8 blockId, int itemId)
+float ToolRegistry::miningTime(quint8 blockId, int itemId, int efficiencyLevel)
 {
     const float hardness = BlockRegistry::hardness(blockId);
     // hardness<=0（火把瞬破 / air 越界）：走 0.05s 地板。air / 越界实际不会被挖（canMine 已排除），
     // 故此分支仅火把等 hardness=0 方块命中 → ≈ 瞬破（spec t88「hardness 0 瞬破」）。
     if (hardness <= 0.0f) return 0.05f;
-    const float mul = miningSpeedMul(blockId, itemId);
+    float mul = miningSpeedMul(blockId, itemId);
+    // t798 效率附魔（机制等价 MC 1.0 efficiency）：对**匹配工具-方块**（工具速度加成已激活，mul > 1）在工具
+    //   基础速度上**加法**叠 level²+1：I +2 / II +5 / III +10 / IV +17 / V +26（等级分档递增）。数值表
+    //   （木镐 speedMul 2 挖石头 hardness 1.5）：无附魔 0.750s / I 0.375s / II 0.214s / III 0.125s / IV 0.079s /
+    //   V 0.054s（floor 0.05 ≈ 瞬破，同 MC 1.0 效率 V 低档工具近瞬挖）。mul == 1.0（类型不匹配如镐挖泥土 / 沙，
+    //   或采掘等级不够如木镐挖黑曜石）→ 零加成：效率只放大「工具本已生效」的挖掘（t762 黑曜石 12s 探针不受扰）。
+    //   t476 旧式「耗时整体 ×(1+level) 且不查匹配」全方块统一乘 = 「附任意效率像效率 V + 挖土也快」根因。
+    if (efficiencyLevel > 0 && mul > 1.0f)
+        mul += float(efficiencyLevel * efficiencyLevel) + 1.0f;
     // 挖掘耗时 = hardness / speedMul（spec）。mul >= 1.0 → 耗时 <= hardness。
     const float t = hardness / std::max(mul, 0.0001f);
     return std::max(t, 0.05f); // 地板 0.05s 防秒破致 t34 进度抖动

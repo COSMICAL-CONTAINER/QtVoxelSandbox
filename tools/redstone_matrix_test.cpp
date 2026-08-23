@@ -1292,6 +1292,56 @@ int main(int argc, char *argv[])
                              "[260,340], no-enchant control exact 50 (t763)";
     }
 
+    // ── t798 效率附魔审计探针（纯 Core/Game 表查询，无 World/QML）：① 等级分档递增 —— 机制等价 MC 1.0
+    //    「效率在工具基础速上**加法**叠 level²+1」（I +2 / II +5 / III +10 / IV +17 / V +26）：木镐
+    //    （speedMul 2）挖石头（hardness 1.5）时长 0.750 / 0.375 / 0.214 / 0.125 / 0.079 / 0.054s 每级严格
+    //    递减（旧「耗时整体 ×(1+level)」各级统一乘 = 用户报「附任意效率像效率 V」根因）；② 匹配门控 ——
+    //    木镐效率 V 挖泥土 / 沙（Shovel 类）时长 == 无附魔（0.5s 恒定，镐附效率挖土零加成）；③ 交叉 ——
+    //    铁镐效率 III 挖石 1.5/16=0.094s（基础速 6 同吃加法分档）+ 木铲效率 I 挖土 0.5/3.2=0.156s（铲对
+    //    土匹配 → 有加成，方向性对照）；④ 采掘等级门控 —— 木镐效率 V 挖黑曜石仍 96s（mul 1.0 不吃效率，
+    //    t762「仅钻石镐 12s」语义零回归）。另：t763 表 12 附魔公式全复查 —— 锐锋 +0.5/级、亡灵 / 节肢
+    //    +2.5/级（对族）、击退 +50%/级、燃焰 4s/级、时运 ×(1+[0,level])（限矿）、保护族 EPF 通用 1 / 专项
+    //    2 每级、耐久按级概率跳过、精准采集 / 水中亲和 maxLevel 1 二值 —— 全部等级分档，无「统一不分档」
+    //    同病（仅效率旧实现犯，本任务已修）。
+    {
+        const auto woodPick   = int(ToolRegistry::PickaxeWood);
+        const auto ironPick   = int(ToolRegistry::PickaxeIron);
+        const auto woodShovel = int(ToolRegistry::ShovelWood);
+        auto mtClose = [](float got, float expect) { return std::abs(got - expect) < 1e-3f; };
+        // ① 等级分档（木镐挖石头）：有效速 2/4/7/12/19/28 → 六档严格递减。
+        const float stoneT[6] = {
+            ToolRegistry::miningTime(BR::Stone, woodPick, 0),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 1),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 2),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 3),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 4),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 5),
+        };
+        bool ok = mtClose(stoneT[0], 0.750f)
+                  && mtClose(stoneT[1], 0.375f)
+                  && mtClose(stoneT[2], 1.5f / 7.0f)
+                  && mtClose(stoneT[3], 0.125f)
+                  && mtClose(stoneT[4], 1.5f / 19.0f)
+                  && mtClose(stoneT[5], 1.5f / 28.0f)
+                  && stoneT[0] > stoneT[1] && stoneT[1] > stoneT[2] && stoneT[2] > stoneT[3]
+                  && stoneT[3] > stoneT[4] && stoneT[4] > stoneT[5]; // 分档递减 ≠ 统一顶级
+        // ② 匹配门控：木镐效率 V 挖泥土 / 沙 == 无附魔（恒 0.5s）。
+        ok = ok && ToolRegistry::miningTime(BR::Dirt, woodPick, 5) == ToolRegistry::miningTime(BR::Dirt, woodPick, 0)
+                  && mtClose(ToolRegistry::miningTime(BR::Dirt, woodPick, 0), 0.5f)
+                  && ToolRegistry::miningTime(BR::Sand, woodPick, 5) == ToolRegistry::miningTime(BR::Sand, woodPick, 0);
+        // ③ 交叉：铁镐效率 III 挖石 0.094s；木铲效率 I 挖土 0.156s（匹配方才吃加成）。
+        ok = ok && mtClose(ToolRegistry::miningTime(BR::Stone, ironPick, 3), 1.5f / 16.0f)
+                  && mtClose(ToolRegistry::miningTime(BR::Dirt, woodShovel, 1), 0.5f / 3.2f);
+        // ④ 采掘等级门控：木镐效率 V 挖黑曜石仍 96s（t762 不回归）。
+        ok = ok && mtClose(ToolRegistry::miningTime(BR::Obsidian, woodPick, 5), 96.0f);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| efficiency audit: wood pick stone tiered 0.750/0.375/0.214/0.125/0.079/0.054s "
+                             "(additive lvl^2+1 on tool base, MC 1.0); eff-V pick on dirt/sand == no-enchant 0.5s; "
+                             "iron pick eff-III stone 0.094s / wood shovel eff-I dirt 0.156s cross; wood pick "
+                             "eff-V obsidian still 96s harvest-gate (t798)";
+    }
+
     // ── t755 死亡态硬锁探针（纯 Game 层 PlayerState，无 World/QML/PlayerController）：
     //    ① 致死一击把 health 精确落库 0（死亡屏心条全空的前提——修前若落 1 即「半颗心」症状之一）；
     //    ② heal() 死亡免疫：dead 态治疗被拒（修前无守卫 → 致死 tick 尾部饥饿回血 healed(1) 经呈现层
