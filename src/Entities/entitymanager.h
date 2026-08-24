@@ -553,8 +553,13 @@ public:
     //   **非完整方块 + 可穿透 + 可堆叠**（spec）：halfW/halfH=0（玩家碰撞跳过 → 可穿过）、pushable=false、不查占用
     //   （同格可叠多个 PrimedTnt）。tick FallingBlock 分支据 primed 走 fuse 倒计 → 到 0 detonatePrimedTnt 引爆。
     //   fuseJitter = 引信错峰随机量（秒；0 = 无抖动）。链式引爆时传小随机 fuseJitter 避免同帧全部引爆（错峰）。
+    //   **t856 可选水平初速 velX/velZ**（blocks/s；默认 0）：发射器弹出路径传入「发射面朝向 × 弹出速度」——
+    //   primed tick 水平积分段（t494 爆炸推动同一段）积分 + 摩擦衰减（kExplosionEntityFriction）→ 弹出即定向
+    //   飞行 ~|v|/摩擦率 格后停下（机制等价 MC 发射器弹 TNT 小初速定向飞出落地爆）。默认 0 → 既有机关点火 /
+    //   电力点火 / 链式路径零水平位移行为逐字不变（不传入即旧行为，无隐式回归面）。
     //   分层（PLAN §2）：Entities 层自持实体数据 + acquireSlot；无向下依赖。达 kCap → 跳过 + 告警（防溢出）。
-    Q_INVOKABLE void spawnPrimedTnt(int x, int y, int z, float fuseSec = -1.0f);
+    Q_INVOKABLE void spawnPrimedTnt(int x, int y, int z, float fuseSec = -1.0f,
+                                    float velX = 0.0f, float velZ = 0.0f);
     // t490 引爆 PrimedTnt（tick fuse 到 0 调；机制等价 MC 1.0 TNT 爆炸）。与 detonateTntBlock 同源（球形破坏 +
     //   引燃邻接 TNT 链式 + 衰减伤玩家 + explosion 音/视），差异：中心是 PrimedTnt 实体 pos（floor）而非 TNT 方块格，
     //   引爆后实体移除（releaseSlot）。idx = PrimedTnt 槽索引；world/playerPos 由 tick 传入。

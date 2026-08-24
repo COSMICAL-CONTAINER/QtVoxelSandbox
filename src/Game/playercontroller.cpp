@@ -5337,8 +5337,9 @@ void PlayerController::fireDispenserAtQml(int x, int y, int z)
 //   spawnSnowball damage=0（与玩家手抛一致：0 伤 + 红闪 + 击退 + 减速）；鸡蛋 → spawnEgg（0 伤 + 命中碎裂 +
 //   1/8 孵小鸡 + 击退）；剑类（ToolRegistry type==Sword）弹射：掉落物实体定向弹出 + 发射方向 3 格内命中活体
 //   mob → damageEntity(attackDamage) 一次 + 沿发射方向击退（机制等价 MC 发射器弹射武器命中伤害；红闪 / 死亡
-//   掉落走 damageEntity 内既有链）；其余物品 → spawnItemAt 定点定向弹出掉落物（排出口 + 朝向初速 + 0.5s 免拾窗
-//   + t468 弹出水平速度抛物）。
+//   掉落走 damageEntity 内既有链）；**t856 TNT → 发射即点燃**：发射面邻格 spawnPrimedTnt（标准引信 + 朝向定向
+//   初速；红石直接邻接 TNT 的原地引爆链并存不动，见分支注释）；其余物品 → spawnItemAt 定点定向弹出掉落物
+//   （排出口 + 朝向初速 + 0.5s 免拾窗 + t468 弹出水平速度抛物）。
 bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3D &dir, quint8 blockId)
 {
     if (!m_dispenserStore || !m_entityManager) return false;
@@ -5401,6 +5402,20 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   弹鸡蛋可砸出小鸡 —— 机关「蛋孵化器」玩法）。t608 命中 mob 击退（与雪球同逻辑，entitymanager Egg
         //   分支处理）。速度复用发射器雪球速度（同为轻抛物弹丸）。
         m_entityManager->spawnEgg(origin, dir * kDispenserSnowballSpeed);
+    } else if (!BlockRegistry::isDropper(blockId) && itemId == BlockRegistry::TntBlock) {
+        // t856 发射器弹 TNT：发射即点燃（MC 1.0 dispenser 语义）——在**发射面邻格**（发射器格 + 朝向一格）生成
+        //   PrimedTnt 实体，走 spawnPrimedTnt 既有链（fuseProgress 白闪 / 重力落地坐支撑顶 / 引爆链式引燃 / QML
+        //   delegate 全复用）。**标准引信**（不传 fuseSec → kPrimedTntFuseSec ~5s）——「短引信落地爆」即标准
+        //   引信自然落地爆，不另设短引信；链式短 fuse（kChainFuseSec）是爆炸链式引燃专用口径，与本路径无关。
+        //   **定向初速** = 发射面朝向 × kDispenserTntPopSpeed（对齐箭 / 掉落物既有弹射语义——沿 state 朝向出膛；
+        //   spawnPrimedTnt 新增的 velX/velZ 可选参消费，primed tick 水平积分后 ~1 格落地）。**两路径并存边界**
+        //   （注释即契约）：TNT 方块被红石**直接邻接激活**（firePowerTnt：拉杆/红石块/粉贴 TNT）仍是**原地引爆**
+        //   （清方块 + 原格 spawnPrimedTnt，既有链零改动）；只有 TNT **放进发射器库存**经发射才变「弹出点燃实体」
+        //   ——机制等价 MC 两条触发路径并存。投掷器不放行本分支（isDropper 前置排除）：dropper「只投不射」口径
+        //   下 TNT 走上方全部物品分支 = 普通掉落物弹出**不点燃**（机制等价 MC dropper 弹 TNT 是物品非引燃实体）。
+        m_entityManager->spawnPrimedTnt(x + int(dir.x()), y, z + int(dir.z()),
+                                        -1.0f, dir.x() * kDispenserTntPopSpeed,
+                                        dir.z() * kDispenserTntPopSpeed);
     } else {
         const ToolRegistry::ToolDef *td = ToolRegistry::tool(itemId);
         if (td && td->type == BlockRegistry::Sword) {
