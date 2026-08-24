@@ -201,10 +201,11 @@ public:
     //   皮肤 qrc:/textures/entity_skin_<default|alex>.png。
     //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
     Q_INVOKABLE QString playerSkinSource(const QString &skin) const;
-    // 复审 #8（2026-08-22）玩家皮肤 slim（3px 臂/腿）布局查询（呈现层 PlayerSkinBox.slim 联动）：
-    //   pack 命中的皮肤按臂区尾 alpha 探测（经典右臂条带 u40..56、slim u40..52 → 探测区 u52..54×
-    //   v20..32 全透明判 slim；缓存 skinSlimFlags，apply() 重建时清）。pack 未启用 / miss → false
-    //   （classic 4px —— 程序皮肤按 4px 绘制）。QML 函数内读 active/skinName → 绑定依赖齐全。
+    // 复审 #8（2026-08-22；Review 2026-08-23 #1 修正探测区）玩家皮肤 slim（仅臂宽 3px）布局查询（呈现层
+    //   PlayerSkinBox.slim 联动）：pack 命中的皮肤按臂区尾 alpha 探测——右臂条带 classic 宽 16px 占 u40..56、
+    //   slim 宽 14px 占 u40..54 → 探测区 u[54,56)×v[20,32)：classic 该区 = 臂背面必不透明、slim 该区 = 条带外
+    //   必透明；高度不足 32 行的残图保守 classic（缓存 skinSlimFlags，apply() 重建时清）。pack 未启用 / miss →
+    //   false（classic 4px——程序皮肤按 4px 绘制）。QML 函数内读 active/skinName → 绑定依赖齐全。
     Q_INVOKABLE bool playerSkinSlim(const QString &skin) const;
 
     // t421 生物模型贴图覆盖：pack 启用且 mobType 在「引擎 mob id → pack entity 子目录/文件名」映射内、且包内

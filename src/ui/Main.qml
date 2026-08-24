@@ -2100,8 +2100,9 @@ Window {
         return "qrc:/textures/entity_skin_" + (skinName === "alex" ? "alex" : "default") + ".png"
     }
 
-    // 复审 #8（2026-08-22）：pack 皮肤 slim（3px 臂/腿）布局判定（PlayerSkinBox.slim 联动）——slim
-    //   布局臂/腿盒区仅 3px 宽，经典 4px 采样采到布局外透明列 → 臂/腿镂空条纹，切 3px 盒区修复。pack
+    // 复审 #8（2026-08-22；Review 2026-08-23 #1 修正数值）：pack 皮肤 slim（仅臂宽 3px）布局判定
+    //   （PlayerSkinBox.slim 联动）——slim 布局**只有臂盒区**宽 3px（腿保持 4px，MC 1.8 slim 腿不变），
+    //   经典 4px 臂采样采到布局外透明列 → 臂镂空条纹，切 3px 臂盒修复。pack
     //   命中才探测（Core 侧臂区尾 alpha 探测，playerSkinSource 顺带建缓存）；miss / 未启用 → false
     //   （classic 4px——程序皮肤按 4px 绘制）。函数内读 active + skinName → 绑定依赖齐全（同
     //   skinFinalUrl 模式：pack 开关 / 换肤即时刷新）。

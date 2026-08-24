@@ -786,7 +786,15 @@ Item {
                                         eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
                                         Model {
                                             geometry: MobModel {
-                                                mobType: root.selectedMobType
+                                                // Review 2026-08-24 #6：selectedMobType 在未选生物/生物蛋时
+                                                //   是 -1（合法「无选择」哨兵——mobPreviewCentY/Scale 同把 -1 当
+                                                //   预期输入优雅返 0）。本 Node 只 visible 门控（对象恒实例化、
+                                                //   绑定恒求值），裸传 -1 会让 setMobType 的越界 qWarning
+                                                //   （review #35 诊断信号）在每次选非生物条目时误报「接线 bug」，
+                                                //   污染真信号。钳到 1（Pig，同 setMobType 越界兜底）——不可见态
+                                                //   几何无观感；取 Loader active 门控的代价是 delegate 常驻变
+                                                //   按需重建（开图鉴翻条目更重），故取一行钳制。
+                                                mobType: Math.max(1, root.selectedMobType)
                                                 // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
                                                 //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
                                                 packTextured: root.selectedMobPackSrc !== ""

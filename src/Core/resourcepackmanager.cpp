@@ -1715,6 +1715,21 @@ void ensureBuiltLocked()
     s.mobHeadIconFiles.clear(); // t633 reset 生物头像裁剪缓存（pack 切换 / 重解析 → 重裁）
     s.spawnEggIconFiles.clear(); // t645 reset 生成式生物蛋图标缓存（pack 切换 / 重解析 → 重染）
     s.animItems.clear(); // t585 reset 动画帧序列态（pack 切换 / 重解析 → 重探测帧数）
+    // Review 2026-08-23 #11 残口（Review 2026-08-24 低危①）：skin 族落盘清理此前只挂在 64×64 裁切路径
+    //   （playerSkinSource 落盘成功后）——从 64×64 包切到 64×32 包走直返不落盘也不清理，旧 _r*.png 与
+    //   legacy 文件永久残留。挪到本 reset 段（持锁必经：首次构建 / 每次 apply() 强制重建都过此处）：重建时
+    //   全部旧世代 skin 派生文件必是陈旧派生物（文件名嵌 revision、新世代必换名；64×32 直返族更是全代不
+    //   再落盘）→ 无差别清（含 t731 期无后缀 legacy 旧名；前缀专属本族不波及 leather/mobhead 等邻族）。
+    //   已进显存的旧图不受删除影响（像素已驻留，URL 已随世代/查询串变化重绑）。
+    {
+        const QString skinDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (!skinDir.isEmpty()) {
+            const QStringList staleSkins = QDir(skinDir).entryList(
+                    { QStringLiteral("voxelsandbox_rp_skin_*.png") }, QDir::Files);
+            for (const QString &f : staleSkins)
+                QFile::remove(QDir(skinDir).absoluteFilePath(f));
+        }
+    }
     s.skinPackFiles.clear(); // t731 reset pack 皮肤裁切缓存（pack 切换 / 重解析 → 重裁）
     s.skinSlimFlags.clear(); // 复审 #8 reset slim 布局探测缓存（pack 切换 / 重解析 → 重探测）
     s.sheepWoolFaceFile.clear(); // t749 reset 羊合成贴图缓存（pack 切换 / 重解析 → 重合成）
@@ -2037,6 +2052,21 @@ void ensureBuiltLocked()
 }
 } // namespace
 
+// Review 2026-08-24 #5：pack 原文件直返 URL 统一构造（cache-bust 收口）。五族直返路径（playerSkinSource
+//   64×32 族皮肤 / entitySource 两级探测 / mobTextureSource 两级探测 / effectIconSource / paintingSource）
+//   返回的是 pack 内原路径——apply() 重解析后若 pack 原路径不变（同路径原地换包内容），file:/// URL 不变
+//   → QML Image/Texture 按 URL 缓存继续用旧像素直到重启（Review 2026-08-23 #12 皮肤族实证的同款病，
+//   当时只修了皮肤一族）。修法 = 查询串挂 apply() revision：只参与 URL 区分、不参与文件寻址（QUrl 加载侧
+//   取 localFile 时查询串被剥离——mobTextureSource 羊/夜行者分支拿命中 URL 取 localFile 喂合成器靠这条）；
+//   apply() 每次 bump（且先于重建，见 apply 内 #4 注）→ 重建后查询串必变 → QML 重读新像素。
+//   留全局作用域（不进匿名 ns）：矩阵探针 extern 直调锁契约（查询串存在 / 随 revision 变 / localFile 剥离），
+//   generateMobHeadIconFor 先例。落盘派生缓存族（skin 裁切 / mobhead / woolface 等）不走本函数——它们的
+//   revision 进**文件名**，同效更稳。
+QString packFileUrl(const QString &localPath, int revision)
+{
+    return QStringLiteral("file:///") + localPath + QStringLiteral("?r=%1").arg(revision);
+}
+
 // t645 生成式生物蛋染色表（单一权威）：spawnEggId →（主色 base / 副色 overlay）。与 playercontroller.cpp
 //   生物蛋→mob 渲染色 + MaterialIcon.qml drawSpawnEgg 各 kind 主色同色板（猪粉 / 牛棕 / 羊白 / 蹒跚者绿 /
 //   骸骨骨白 / 潜行者暗绿 / 蜘蛛黑红 / 鸡白红 / 鱿鱼蓝灰）。pack 无 pig_spawn_egg.png 等独立文件（demo 包
@@ -2161,9 +2191,14 @@ void ResourcePackManager::apply()
     {
         QMutexLocker lock(&stateMutex());
         BuiltState &s = state();
+        // Review 2026-08-24 #4：++revision 必须先于重建。构建期派生缓存（mobhead 头像预生成等，见
+        //   ensureBuiltLocked 末尾）以 s.revision 落盘 _r<rev>.png；启动后首次构建走懒查询路径
+        //   （revision=0、不自增）——旧序（重建后 ++）下用户第一次切包重建仍用旧 rev 同名覆盖 _r0.png →
+        //   mobHeadIconSource 缓存命中直返同一 URL → QML Image 不重载（图鉴旧包头像，第二次切包起才自愈）。
+        //   先 bump → 首个切包即落 _r1.png，URL 变即重载；查询期的 ?r= 查询串（packFileUrl）同源受益。
+        ++s.revision;           // cache-bust：世代号先于重建换代（派生缓存文件名 / 直返查询串必变）
         s.built = false;        // 强制重建（用当前 s.enabled/s.packPath，setter 已持久化）
         ensureBuiltLocked();
-        ++s.revision;           // cache-bust：atlasSource 查询串变 → QML Texture 重载
         newActive = s.active;
     }
     // t420 广播到全部实例（含 ToolIcon/MaterialIcon 内持有的实例）：同步 m_active + emit activeChanged，
@@ -2958,7 +2993,7 @@ QString ResourcePackManager::effectIconSource(int effectType) const
     for (const QString &name : names) {
         const QString p = QDir(s.effectDir).absoluteFilePath(name);
         if (QFile::exists(p))
-            return QStringLiteral("file:///") + p;
+            return packFileUrl(p, s.revision); // Review 2026-08-24 #5：直返带 ?r= cache-bust（同路径原地换包后 QML 重读）
     }
     return {};
 }
@@ -2981,7 +3016,7 @@ QString ResourcePackManager::paintingSource(int index) const
     const QString p = QDir(s.paintingDir).absoluteFilePath(names.at(index) + QStringLiteral(".png"));
     if (!QFile::exists(p))
         return {};
-    return QStringLiteral("file:///") + p;
+    return packFileUrl(p, s.revision); // Review 2026-08-24 #5：直返带 ?r= cache-bust（同路径原地换包后 QML 重读）
 }
 
 // t717 画作程序回退贴图名（index → default_painting_<name>.png；与 paintingNames 单一权威同表）。
@@ -3032,14 +3067,17 @@ QString ResourcePackManager::entitySource(const QString &kind) const
     if (relPath.isEmpty())
         return {};
     const QDir entityDir(s.entityDir);
-    const auto probe = [&entityDir](const QString &rp) -> QString {
+    // Review 2026-08-24 #5：探测直返统一走 packFileUrl（带 ?r=<revision> cache-bust——同路径原地换包 +
+    //   apply() 重解析下 URL 不变会让 QML Texture 按 URL 缓存继续用旧像素，皮肤族 #12 同款病）。
+    const int rev = s.revision;
+    const auto probe = [&entityDir, rev](const QString &rp) -> QString {
         const QString sub = entityDir.absoluteFilePath(rp);
         if (QFile::exists(sub))
-            return QStringLiteral("file:///") + sub;
+            return packFileUrl(sub, rev);
         const QFileInfo fi(rp);
         const QString flat = entityDir.absoluteFilePath(fi.fileName());
         if (QFile::exists(flat))
-            return QStringLiteral("file:///") + flat;
+            return packFileUrl(flat, rev);
         return {};
     };
     return probe(relPath); // 两级探测（子目录 → 扁平）；miss 返空回退程序贴图
@@ -3163,7 +3201,9 @@ bool ResourcePackManager::setPlayerSkin(const QString &name)
 //   HD（base 整数倍）按 w/64 缩放坐标；64×64 老式布局上半 32 行与 64×32 base 同布局 → 探测坐标通用
 //   （裁切前后同结果）。保守方向：把该区当画布画了内容的 slim 皮肤误判 classic（退回 4px 采样 = 修复前
 //   行为，仅边缘条纹）；classic 皮肤该区全透明的极端自定义会误判 slim（3px 采样丢 1px 边缘列，无镂空）
-//   ——两向误判都不劣于修复前。矩阵探针（tools/redstone_matrix_test.cpp）：demo 包 alex→slim /
+//   ——两向误判都不劣于修复前。Review 2026-08-24 低危③：高度不足 32 行的残图（64×16 等）旧实现探测行
+//   区间整体落画布外 → 循环零次空真判 slim，已补高度下界守卫 → 保守 classic（矩阵探针 64×16 用例同锁）。
+//   矩阵探针（tools/redstone_matrix_test.cpp）：demo 包 alex→slim /
 //   steve→classic 实测断言 + 合成布局判定（防再次按错误布局假设回归）。
 bool probeSlimSkinLayout(const QImage &tex)
 {
@@ -3172,7 +3212,11 @@ bool probeSlimSkinLayout(const QImage &tex)
     const qreal sc = qreal(w) / 64.0;
     const int x0 = int(54 * sc), x1 = int(56 * sc);
     const int y0 = int(20 * sc), y1 = int(32 * sc);
-    for (int y = y0; y < qMin(y1, tex.height()); ++y)
+    // Review 2026-08-24 低危③：高度下界守卫。64×16 等残图（探测行区间 [y0,y1) 整段落在画布外）旧实现
+    //   循环零次执行 → 空真判 slim（与上方「保守方向 classic」注释相反）。规范皮肤高 ≥ 32 行（64×32 base /
+    //   64×64 老式 / HD 整数倍同缩放）；高度不足 → 不构成布局证据，保守 classic。
+    if (tex.height() < y1) return false;
+    for (int y = y0; y < y1; ++y)
         for (int x = x0; x < qMin(x1, w); ++x)
             if (qAlpha(tex.pixel(x, y)) != 0) return false; // 任一实色像素 → classic
     return true; // 探测区全透明 → slim
@@ -3238,11 +3282,11 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
     if (w <= 0 || h < w / 2)
         return {}; // 异常尺寸（非 2:1/1:1 族）→ 回退（降级）
     if (h == w / 2)
-        // Review 2026-08-23 #12：直返路径拼 revision 查询串。64×32 族不落盘直接返 pack 原路径 →
-        //   apply() 重建（++revision）后 URL 若不变，QML Texture 按 URL 缓存继续用旧像素（同路径原地
-        //   换包内容的场景，皮肤陈旧直到重启）。查询串只参与 URL 区分、不参与文件寻址（QUrl 加载侧
-        //   取 localFile 时查询串被剥离——同 icon 族 revision 进文件名手法在「无落盘」路径的等价物）。
-        return QStringLiteral("file:///") + src + QStringLiteral("?r=%1").arg(s.revision);
+        // Review 2026-08-23 #12：64×32 族不落盘直接返 pack 原路径。Review 2026-08-24 #5：直返 URL 构造
+        //   收口 packFileUrl（?r=<revision> 查询串随 apply() 重建变 → QML Texture 重读，防同路径原地换包
+        //   内容后陈旧直到重启；查询串只参与 URL 区分、不参与文件寻址——QUrl 加载侧取 localFile 时查询串
+        //   被剥离）。entitySource / mobTextureSource / effectIconSource / paintingSource 四族直返同源。
+        return packFileUrl(src, s.revision);
     const QImage cropped = tex.copy(0, 0, w, w / 2);
     if (cropped.isNull())
         return {};
@@ -3262,6 +3306,8 @@ QString ResourcePackManager::playerSkinSource(const QString &skin) const
     //   引用却永久残留（AppLocalData 缓存逐年膨胀）。落盘成功后把同 kind（文件名前缀含 kind，另一
     //   kind 的缓存不受波及）的其余缓存文件全部删除——刚写出的 out 除外（正是本次返回的 URL）。
     //   已被 QML Texture 加载进显存的旧图不受删除影响（像素已驻留），URL 已随 revision 变化重绑。
+    //   Review 2026-08-24 低危①：ensureBuiltLocked reset 段已做全族无差别清扫（含「64×64 包 → 64×32
+    //   包直返不落盘」的换代残留），此处同 kind 兜底保留 = 双保险。
     {
         const QString legacy = QDir(dir).absoluteFilePath(
                 QStringLiteral("voxelsandbox_rp_skin_%1.png").arg(kind));
@@ -3324,14 +3370,17 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
     const QDir entityDir(s.entityDir);
     // 单候选两级探测：1) 子目录布局（entity/<mob>/<mob>.png，现网大多数包）：MC 1.0 标准；
     //   2) 扁平回退（entity/<mob>.png，旧 / HD 包常省略子目录）：取文件名（去子目录）。miss 返空串。
-    const auto probe = [&entityDir](const QString &rp) -> QString {
+    //   Review 2026-08-24 #5：直返统一走 packFileUrl（?r= cache-bust）。命中 URL 带 ?r= 查询串——下游
+    //   QUrl(hit).toLocalFile() 喂合成器时查询串被剥离，文件寻址不受影响。
+    const int rev = s.revision;
+    const auto probe = [&entityDir, rev](const QString &rp) -> QString {
         const QString sub = entityDir.absoluteFilePath(rp);
         if (QFile::exists(sub))
-            return QStringLiteral("file:///") + sub;
+            return packFileUrl(sub, rev);
         const QFileInfo fi(rp);
         const QString flat = entityDir.absoluteFilePath(fi.fileName());
         if (QFile::exists(flat))
-            return QStringLiteral("file:///") + flat;
+            return packFileUrl(flat, rev);
         return {};
     };
     // review L15：主候选 miss 后的兜底候选 —— 羊。t593 主映射改 sheep/sheep_fur.png（毛层），但扁平布局
