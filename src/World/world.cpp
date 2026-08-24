@@ -491,6 +491,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     //   本格非空内容 → 扫 6 邻门面熄灭（纯放置入 Air 格不触发，同玩家挖掘路径语义）。
     if (oldId != BlockRegistry::Air)
         breakNetherPortalsAround(x, y, z);
+    checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
 }
@@ -607,6 +608,8 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     // review #27：余烬门门框失撑熄灭并入写入钩子族（同 4 参数版；state-only 写 oldId==id 不触发）。
     if (oldId != BlockRegistry::Air && oldId != id)
         breakNetherPortalsAround(x, y, z);
+    checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径；
+    //   画格自清重入由 m_inRemovePainting 守卫，放置入 Air 格的画锚写天然 no-op——墙格恒非 Air）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
     return true;
 }
@@ -690,6 +693,8 @@ bool World::clearBlockSilent(int x, int y, int z)
     recheckAttachmentsAfterClear(x, y, z, occ); // t494/t565/t527 + t445/t504/t507/t524 + 火把族（全量复检）
     checkGravityBlockOnEdit(x, y, z, occ, id); // t799：正上方沙/沙砾失撑坍落（TNT 点火清格 → 上方沙柱塌落砸在引燃 TNT 上）
     breakNetherPortalsAround(x, y, z); // review #27：余烬门熄灭并入钩子族（TNT 点火清格邻接门面 → 熄门；occ==Air 时 6 邻无门亦快速 no-op）
+    // t837① 画作失撑由 recheckAttachmentsAfterClear 内 checkPaintingSupportOnEdit 覆盖（TNT 引燃时画挂
+    //   TNT 墙 → 随清格整画掉落）。
     notePowerWrite(x, y, z, occ, id);       // t656：红石电力脏标记（TNT 被点火清 Air → 邻粉 / 邻接收器重算）
     return true;
 }
@@ -768,8 +773,13 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     // review #27：余烬门门框失撑熄灭并入写入钩子族（焚毁 / 蒸发等「非空内容被置换」写触发；门面自清
     //   经 m_inRemoveNetherPortal 守卫早退无重入）。快速路径 = 6 邻 blockAt 读（无门格即返），流体批量
     //   热路径可承受（同 checkRailOnEdit / checkGravityBlockOnEdit 批量先例口径）。
-    if (lightOldId != BlockRegistry::Air && lightOldId != id)
+    // review #27 + t837①：门 / 画作失撑复检（门框 / 画墙被置换为非实体 → 各自整域消失 / 掉落）。纯放置
+    //   （Air 格写入）不触发——门框 / 画墙恒原非 Air。快速路径 = 数次 blockAt 邻读（无门格 / 画格即返），
+    //   流体批量热路径可承受（同 notePowerWrite 快路径量级）。
+    if (lightOldId != BlockRegistry::Air && lightOldId != id) {
         breakNetherPortalsAround(x, y, z);
+        checkPaintingSupportOnEdit(x, y, z, lightOldId, id);
+    }
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
     m_chunks.clearAllDirty(); // t155g：两段重建完统一清脏
@@ -814,6 +824,7 @@ bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
     //   setBlock 谓词：本格非空内容被置换才触发）。
     if (oldId != BlockRegistry::Air && oldId != id)
         breakNetherPortalsAround(x, y, z);
+    checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（系统静默写同族收口）
     notePowerWrite(x, y, z, oldId, id);          // t656：红石电力脏标记
     return true;
 }
@@ -2671,6 +2682,7 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
     checkSnowLayerOnEdit(x, y, z, oldId, id);      // t527：雪层失撑整柱坍落为携带层数的下落实体
     checkRailOnEdit(x, y, z, oldId, id);           // t565/t733：铁轨失撑掉落 + 邻轨连接重算
     checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑级联掉落（静默清格公共复检收口）
+    checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（静默清格公共复检收口）
     // ② 6 邻火把 / 红石火把（火把非 solid 不撑他火把 → 单趟扫即足够，无级联）：
     bool torchDropped = false; // review24 #2：本扫是否实际掉落 ≥1 火把（决定收口 emit 是否发——无掉落零 emit）
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
@@ -3080,6 +3092,111 @@ void World::breakNetherPortalsAround(int x, int y, int z)
         if (m_chunks.blockAt(px, py, pz) != BlockRegistry::NetherPortal) continue;
         const int axis = int(m_chunks.stateAt(px, py, pz) & 1);
         removeNetherPortalAt(px, py, pz, axis);
+    }
+}
+
+// t837① 画作连通域移除（t721 自 PlayerController 下沉 World 层，见 world.h 头注释；BFS / 矩形圈定逻辑
+//   逐行同源——终审修 M1 的「锚格反解矩形只清本画」语义原样迁移）。掉落走 blockDroppedAsItem（t851
+//   dropUnsupportedDoorsAbove 同链；Main.qml spawnItem 掉画作物品 0x242 = dropId(Painting)）。
+void World::removePaintingAt(int px, int py, int pz, int face, bool drop)
+{
+    int ux = 0, uz = 0;
+    BlockRegistry::paintingRightOffset(face, ux, uz);
+    const quint8 faceBits = quint8((face & 3) << BlockRegistry::PaintingStateFaceShift);
+    // BFS 收集连通域（种子 (px,py,pz) 允许已被清 Air —— 直挖路径主破坏格先走 setBlock；邻格侧种子恒是画）。
+    struct Cell { int x, y, z; };
+    struct Rect { int ax, ay, az, w, h; }; // 画矩形：锚格(左上) + 沿 u 宽 w + 向下高 h
+    std::vector<Cell> cells;
+    std::vector<Rect> rects;
+    std::vector<Cell> frontier{{px, py, pz}};
+    while (!frontier.empty()) {
+        const Cell c = frontier.back();
+        frontier.pop_back();
+        bool seen = false;
+        for (const Cell &s : cells) {
+            if (s.x == c.x && s.y == c.y && s.z == c.z) { seen = true; break; }
+        }
+        if (seen) continue;
+        const quint8 bid = m_chunks.blockAt(c.x, c.y, c.z);
+        const bool isSeed = (c.x == px && c.y == py && c.z == pz);
+        if (bid != BlockRegistry::Painting && !isSeed) continue;        // 非画格 → 不入域
+        if (bid == BlockRegistry::Painting
+            && quint8(m_chunks.stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateFaceMask) != faceBits)
+            continue;                                                    // 异面画（共格平面对墙）→ 不连
+        cells.push_back(c);
+        if (bid == BlockRegistry::Painting
+            && (m_chunks.stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateAnchorFlag)) {
+            // 锚格 index 反解本画矩形（终审修 M1：画身份由锚格承载，供下方按矩形圈定清理范围）。
+            Rect r{c.x, c.y, c.z, 1, 1};
+            BlockRegistry::paintingSize(int(m_chunks.stateAt(c.x, c.y, c.z)
+                                            & BlockRegistry::PaintingStateIndexMask), r.w, r.h);
+            rects.push_back(r);
+        }
+        // 4 向扩展（画面平面内：±u 水平 + ±Y 垂直）。
+        frontier.push_back({c.x + ux, c.y, c.z + uz});
+        frontier.push_back({c.x - ux, c.y, c.z - uz});
+        frontier.push_back({c.x, c.y + 1, c.z});
+        frontier.push_back({c.x, c.y - 1, c.z});
+    }
+    // 矩形包含判定：格沿 u 的偏移 du ∈ [0,w) 且 y ∈ (ay-h, ay]（画自锚格向下展开 h 格）。
+    const auto inRect = [ux, uz](const Rect &r, int x, int y, int z) {
+        const int du = (x - r.ax) * ux + (z - r.az) * uz;
+        return du >= 0 && du < r.w && y <= r.ay && y > r.ay - r.h;
+    };
+    // 目标矩形 = 含种子坐标的锚格矩形（直挖清的是非锚格时，本画锚格仍在域内 → 仍可反解定位）。
+    const Rect *target = nullptr;
+    for (const Rect &r : rects) {
+        if (inRect(r, px, py, pz)) { target = &r; break; }
+    }
+    // 掉落：整张画只 1 件画作物品（机制等价 MC 破画掉 1 个 painting item）。落点 = 种子格（玩家瞄的格）。
+    if (drop)
+        emit blockDroppedAsItem(px, py, pz, BlockRegistry::dropId(BlockRegistry::Painting));
+    // 清域（终审修 M1：只清目标画）：target 命中 → 仅清该矩形内格（邻画在其自身矩形外 → 完好保留）；
+    //   无 target（种子 = 被 caller 先清的锚格，本画矩形已不可反解）→ 清域内不被任何已识别矩形覆盖的
+    //   残余格（邻画格已被其锚格矩形覆盖 → 跳过）。setWaterSilent 静默清（不发 blockBroken —— 多格画的
+    //   逐格粒子/音会刷成风暴；主破坏格由 caller finishMiningAt 顶部的 setBlock 已清 + 已发一次事件；
+    //   失撑路径种子格也在此静默清，同火把失撑模式）。worldChanged 仍逐格发 → mesh / 呈现层 paintingHost
+    //   清孤儿（onWorldChanged 校验）。m_inRemovePainting 置位防 setWaterSilent 的画作钩子重入。
+    m_inRemovePainting = true;
+    for (const Cell &c : cells) {
+        if (target) {
+            if (!inRect(*target, c.x, c.y, c.z)) continue; // 邻画的格 → 不清（终审修 M1）
+        } else {
+            bool covered = false;
+            for (const Rect &r : rects) {
+                if (inRect(r, c.x, c.y, c.z)) { covered = true; break; } // 邻画矩形内 → 不清
+            }
+            if (covered) continue;
+        }
+        if (c.x == px && c.y == py && c.z == pz && m_chunks.blockAt(c.x, c.y, c.z) != BlockRegistry::Painting)
+            continue; // 种子已被 caller 清（防御双清）
+        setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
+    }
+    m_inRemovePainting = false;
+}
+
+// t837① 画作支撑墙失撑掉落复检（见 world.h 头注释；checkTrapdoorDoorSupportOnEdit 同款钩子族模式）。
+void World::checkPaintingSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); // 守卫按「编辑后本格是否仍有效画墙」（id 谓词）判——oldId 保留供 checkXxxOnEdit 族签名一致
+    if (m_inRemovePainting) return; // 连通域清除自管整张画；其清域写不再重入本钩子
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth || y < 0 || y >= m_height) return;
+    // 本格新内容仍是有效画墙（R1 口径：isCollidable ∨ isFullCube，与 tryPlacePainting cellOk 同源）→
+    //   画保留（置换为另一实体墙块 / state-only 写不动支撑）。
+    if (BlockRegistry::isCollidable(id, m_chunks.stateAt(x, y, z)) || BlockRegistry::isFullCube(id))
+        return;
+    // 扫 4 水平邻的画（画的支撑墙恒在水平向；画格与其墙格同层）——任一画的墙格 == 本格 → 整画掉落。
+    constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (const auto &o : kHoriz) {
+        const int px = x + o[0], py = y, pz = z + o[1];
+        if (px < 0 || pz < 0 || px >= m_width || pz >= m_depth) continue;
+        if (m_chunks.blockAt(px, py, pz) != BlockRegistry::Painting) continue;
+        const quint8 st = m_chunks.stateAt(px, py, pz);
+        const int face = int(st & BlockRegistry::PaintingStateFaceMask) >> BlockRegistry::PaintingStateFaceShift;
+        int wx = 0, wz = 0;
+        BlockRegistry::paintingWallOffset(face, wx, wz);
+        if (px + wx == x && pz + wz == z)
+            removePaintingAt(px, py, pz, face, /*drop=*/true); // 恒掉（含创造，t571 自然失撑语义）
     }
 }
 

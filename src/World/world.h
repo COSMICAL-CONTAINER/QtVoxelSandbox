@@ -726,6 +726,30 @@ public:
     //   （连通域清除自管，防嵌套 BFS）。
     void breakNetherPortalsAround(int x, int y, int z);
 
+    // t837① 画作连通域移除（t721 自 PlayerController 下沉 World 层单一权威，t806 removeNetherPortalAt 同
+    //   模式；逻辑逐行同源）：从 (px,py,pz)（画格之一，可能已被清 Air）按 face flood-fill 收集候选域
+    //   （±u 观察者右向水平 / ±Y 垂直同 face 的 Painting 格），域内锚格（bit7）用 index 反解矩形
+    //   （paintingSize → w×h，锚格=左上）界定画身份——只清「种子坐标所在矩形」那一张（同面相邻两画平面
+    //   相邻，纯连通 BFS 会并域误清；种子=被清锚格时退清域内不被任何已识别矩形覆盖的残余格，邻画不
+    //   误伤）。drop 时 emit blockDroppedAsItem 1× dropId(Painting)（整张画只掉 1 件；Main.qml spawnItem
+    //   同链）。清格走 setWaterSilent（静默：多格逐格 blockBroken 会刷粒子/音风暴；worldChanged 仍逐格发
+    //   → 呈现层 paintingHost cleanupVis 清孤儿）。供 checkPaintingSupportOnEdit（写入钩子族）与
+    //   PlayerController finishMiningAt 直挖画格分支调。置 m_inRemovePainting 守卫（见成员注释）。
+    void removePaintingAt(int px, int py, int pz, int face, bool drop);
+
+    // t837① 画作支撑墙失撑掉落复检（写入钩子族，checkTrapdoorDoorSupportOnEdit 同款模式）：本格
+    //   (x,y,z) 刚发生编辑且**新内容已非有效画墙**（R1 口径 isCollidable ∨ isFullCube——与 tryPlacePainting
+    //   cellOk 同源；墙被破为 Air / 置换为水 / 火把等非实体均属失撑）→ 扫 4 水平邻的 Painting，其支撑墙格
+    //   （paintingWallOffset 解码）== 本格 → 整张画 removePaintingAt（drop=true 恒发，含创造；t571 自然
+    //   失撑掉落语义）。机制等价 MC「画附着面任一支撑破坏 → 整画掉落」——多格画（1×2 等）每个画格各自
+    //   的墙格都在扫描域内（4 水平邻含 u 向 / 法线向），破任一承重墙格即整画掉落，不残留单面。
+    //   置换为另一有效墙块（如木板→石头）→ 画保留（支撑仍有效）；纯放置（Air 格写入）天然 no-op（画格
+    //   的墙格恒非 Air）。t837① 前：失撑钩子仅挂玩家挖掘路径（dropUnsupportedPaintingsAround），爆炸 /
+    //   焚毁（t843 可燃墙烧穿）/ 岩浆吞墙等系统拆墙路径拆支撑后画残留单面悬空（用户「背面看不到画」根因
+    //   ——BillboardQuad 单面 + 背面剔除，从破洞侧看无画）。m_inRemovePainting 置位期间早退（连通域清除
+    //   自管，防嵌套 BFS）。
+    void checkPaintingSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
     //
     // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：
@@ -1183,6 +1207,10 @@ private:
     //   该写的钩子又会扫 6 邻发现「尚未清到的门格」再进 removeNetherPortalAt —— 嵌套 BFS 虽有界（门 ≤21×21，t848）
     //   但同一扇门被反复半清。置位期间钩子早退：连通域清除自管整扇门，一次平坦 BFS 收完。
     bool m_inRemoveNetherPortal = false;
+    // t837① 画作连通域移除重入守卫（m_inRemoveNetherPortal 同模式）：checkPaintingSupportOnEdit 并入
+    //   World 写入钩子族后，removePaintingAt 自身清画格走 setWaterSilent → 该写的钩子又会扫 4 水平邻发现
+    //   「尚未清到的画格」再进 removePaintingAt —— 嵌套半清。置位期间钩子早退：连通域清除自管整张画。
+    bool m_inRemovePainting = false;
     // t380r perf：批量流体写延迟的光照重算缓冲（见 flushPendingLightEdits）。非批量（玩家/世界编辑）路径
     //   仍逐写即时 recomputeLightAround —— 光变化要立即反映；仅流体批量 tick 延迟合并。每项记录编辑坐标 +
     //   是否遮光变化（sky）—— 遮光变化须重 seed 天光列到顶（y1=H-1）。

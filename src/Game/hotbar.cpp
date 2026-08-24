@@ -172,7 +172,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::GoldenRail:    return "icon_golden_rail.png";    // 动力铁轨（pack powered_rail；矿车加速）
     case BlockRegistry::DetectorRail:  return "icon_detector_rail.png";  // 探测铁轨（pack detector_rail；矿车驶过通电视觉）
     case BlockRegistry::RedstoneTorch: return "icon_redstone_torch.png"; // 红石火把（pack 常亮态贴图；装饰光源 光 7）
-    case BlockRegistry::RedstoneDust:  return "icon_redstone_dust.png";  // t660 红石粉导线（flat 2D 断电线向贴图；红石 tab 方块形态条目）
+    case BlockRegistry::RedstoneDust:  return "icon_redstone_dust.png";  // t660 红石粉导线（手绘 flat 线向；t815 起**仅兜底**——常路径走 isPackDerivedIconFamily 程序图集 flat 重渲，与 build_redstone_dust.py 瓦片同源恒新；本 qrc 稿是旧版画稿保留兜底）
     // t760 刷怪笼 item 图标（build_cube_icons.py 程序生成立方投影；贴图虽 t760 改 cutout 栅格，图标烘焙时
     //   透明孔被不透明均值色填实 → 实心铁笼立方图标）。此前此处无 case → iconSourceForBlock 回退链 route③
     //   落 nullptr → 空串 → 中键复制 / 创造背包拿到「透明 item」（pickBlock 写 id 本身没错，纯图标查表缺失）。
@@ -191,9 +191,13 @@ const char *iconFileForBlock(quint8 id)
 //   pack 风格立方图 → pack 关必须程序图集重渲（否则 pack 关显 pack 风格，违反总纲）。
 // t800 Glass 入列（语义外延，非 FROM_PACK 家族）：玻璃方块**无 qrc 手绘图**（iconFileForBlock 返 nullptr）→
 //   若不入本族，pack 关 / pack 未覆盖玻璃瓦片时 iconSourceForBlock 回退链走到末层空串 = 玻璃条目无图标。
-//   入族后走 blockAtlasIconSource(id,false) 从程序图集运行期重渲 **flat 2D 平贴图**（用户「玻璃 item 贴图是
-//   2D 的，不是 3D」；对齐 MC 玻璃物品图标=平面贴图语义），pack 开且覆盖瓦片时则由回退链 ① 出包风格平贴图
-//   —— 两态同规格（flatSpec 瓦片 68）。渲染恒成功，无「退显 qrc」兜底需求。
+//   入族后走 blockAtlasIconSource(id,false) 从程序图集运行期重渲。t800 当时渲 flat 2D 平贴；**t838① 需求反转
+//   改回 dimetric 3D 立方投影**（atlasIconSpecForBlock 删 Glass flatSpec case → 落 ShapeFull 默认；用户要 3D），
+//   pack 开且覆盖玻璃瓦片时由回退链 ① 出包风格 3D 图——两态同规格（瓦片 68 立方投影）。渲染恒成功。
+// t815 RedstoneDust 入列（语义外延，非 FROM_PACK 家族）：红石粉有 qrc 手绘图但它是 t660 的独立画稿，与
+//   build_redstone_dust.py 瓦片生成器不同源——瓦片 t692 改版后手绘稿不同步 = pick-block 图标旧版（用户报障）。
+//   入族走程序图集 flat 重渲（瓦片 166 同源恒新）；粉瓦片未映射 pack → pack 态亦落程序瓦片，两态一致。
+//   旧手绘 qrc 稿退居渲染失败的兜底层（iconFileForBlock 保留）。
 bool isPackDerivedIconFamily(quint8 id)
 {
     switch (id) {
@@ -231,7 +235,8 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::StonePressurePlate: // t644 plate
     case BlockRegistry::IronPressurePlate:  // t644 plate
     case BlockRegistry::GoldPressurePlate:  // t644 plate
-    case BlockRegistry::Glass:           // t800 flat 2D（见上注 —— 无 qrc 手绘图，程序图集重渲是唯一原生路径）
+    case BlockRegistry::Glass:           // t800 入族 / t838① 画法回 3D 立方投影（见上注——无 qrc 手绘图，程序图集重渲是唯一原生路径）
+    case BlockRegistry::RedstoneDust:    // t815 入族（见上注——qrc 手绘稿与瓦片生成器不同源已陈旧，图集重渲恒同源）
         return true;
     default:
         return false;
@@ -473,7 +478,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::IronOreDropId), // 铁原矿
         int(RecipeRegistry::IronIngotId),   // 铁锭
         // t800 玻璃移出材料段调色板（用户「玻璃应该放在方块那边而不是材料这边」）：条目改走方块段 Glass=54
-        //   （creativeBlocks 冰族后），item 图标同步改 2D 平贴图（atlasIconSpecForBlock flatSpec）。玻璃物品
+        //   （creativeBlocks 冰族后），item 图标走程序图集运行期重渲（t838① 起 dimetric 3D 立方投影）。玻璃物品
         //   0x204 保留全部生存链（沙子熔炉冶炼产物 / 破玻璃方块掉落 / 红石灯配方原料 / 右键放置），仅不再列
         //   创造材料 tab —— 方块段可直接取用，材料段再列同物即冗余。
         int(RecipeRegistry::BucketEmptyId), // t174 铁桶（空）
@@ -790,10 +795,9 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::PackIce),                                    // 浮冰（更滑变种；半透；可放置）
              int(BlockRegistry::BlueIce),                                    // 蓝冰（最滑变种；半透；可放置）
              // t800 玻璃从材料段物品（0x204）改经方块段进调色板（用户「玻璃应该放在方块那边」）：与冰族同列
-             //   （同为透明整立方半透渲染族）。item 图标改 2D 平贴图（atlasIconSpecForBlock flatSpec 用玻璃瓦片
-             //   68 —— pack 态采包 glass.png / 程序态采 default_glass 平贴，对齐 MC 玻璃物品图标=平面贴图语义，
-             //   非 3D 立方投影）。玻璃物品 0x204 仍作生存链中转（冶炼产物 / 破玻璃掉落 / 红石灯原料），不在
-             //   材料 tab 重复列出。
+             //   （同为透明整立方半透渲染族）。item 图标 t800 当时改 2D 平贴，**t838① 需求反转回 dimetric 3D
+             //   立方投影**（atlasIconSpecForBlock 删 Glass flatSpec → 落 ShapeFull 默认；缓存族 icon4→icon5 换代）。
+             //   玻璃物品 0x204 仍作生存链中转（冶炼产物 / 破玻璃掉落 / 红石灯原料），不在材料 tab 重复列出。
              int(BlockRegistry::Glass),                                      // 玻璃（沙子冶炼产物；透明整立方；可放置）
              // t466 云杉木制品链（机制等价 MC 1.0 spruce 木制品；名称 / 贴图原创自绘 §9a）。复用既有木制品机制，
              //   仅换 id + 贴图（深色木纹 spruce_planks 区别橡木 planks）。云杉原木→4 云杉木板；云杉木板→台阶/栅栏/门。

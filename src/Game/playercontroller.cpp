@@ -1240,9 +1240,11 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     if (brokenId == BlockRegistry::Painting) {
         const int face = (brokenState & BlockRegistry::PaintingStateFaceMask)
                          >> BlockRegistry::PaintingStateFaceShift;
-        removePaintingAt(x, y, z, face, /*drop=*/drop);
+        // t837①：removePaintingAt 已自本类下沉 World 层单一权威（t806 removeNetherPortalAt 同模式；Game 层
+        //   调 World 向下合法）。掉落改由 World 侧 blockDroppedAsItem 信号驱动（Main.qml spawnItem 同链）。
+        m_world->removePaintingAt(x, y, z, face, /*drop=*/drop);
         // 画作无支撑依赖其它画（画格连通域已随 removePaintingAt 全清）→ 无需再扫邻；但破的画格本身
-        // 背后的墙仍在（画破不动墙），跳过 dropUnsupportedPaintingsAround（无意义扫描）。
+        // 背后的墙仍在（画破不动墙），画作失撑钩子对画格自清无重入（m_inRemovePainting 守卫）。
         emit playerMined(x, y, z, int(brokenId), drop);
         if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem(); // 同通用路径：生存破块工具 -1 耐久
         emit swingArm();
@@ -1299,10 +1301,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   若已非完整立方（含本格刚被置 Air）→ 机关直接掉落为物品。机制等价 MC「机关附着面被移除即脱落」
     //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedMechAround(x, y, z);
-    // t721 画作支撑墙失撑掉落：破块后扫 4 水平邻的画，其支撑墙格 == 本破块格 → 整张画掉落 1 件
-    //   （removePaintingAt 连通域移除，drop=true 恒发含创造）。机制等价 MC「画后面的墙被挖 → 画掉落」
-    //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
-    dropUnsupportedPaintingsAround(x, y, z);
+    // t837① 画作支撑墙失撑掉落已并入 World 写入钩子族（checkPaintingSupportOnEdit 单一权威，爆炸 /
+    //   焚毁 / 岩浆吞墙 / 玩家挖掘同口径；本处显式调用删除，t725 余烬门 review #27 同模式）。
     // t851 活板门 / 门失撑掉落：正上方活板门（四邻+下方全失实体面）/ 门下扇（失去齐平地面）→ 级联
     //   掉落为物品。支撑判定与放置预检同谓词；门直破本体走上方配对联动不经此（防双掉）。
     dropUnsupportedDoorsAround(x, y, z);
@@ -1764,110 +1764,10 @@ bool PlayerController::tryPlacePainting(int face)
     return true;
 }
 
-// t721 画作移除主体（见 playercontroller.h 头注释；直挖 + 失撑共用）。flood-fill 同 face 的 Painting
-// 连通域（±u 水平 / ±Y 垂直 —— 画恒占一个垂直于法线的格子平面，u = 观察者右向）只用于**圈出候选格**，
-// 不再等同「整张画的格子集」。终审修 M1：同面相邻两张画的格子本来就平面相邻，纯连通 BFS 会把邻画
-// 并进同一域（破 1 张清 2 张、整片只掉 1 件 → 生存物品损失）；画身份由锚格承载 —— 域内每个锚格（bit7）
-// 用其 index 反解矩形（paintingSize → w×h，锚格=左上、沿 u 扩 w、向下扩 h），只清「种子坐标所在矩形」
-// 那一张画。种子已被 caller 清掉且恰是锚格（矩形不可反解）时，退清「域内不被任何已识别矩形覆盖」的
-// 残余格（= 被毁那张画的余格；邻画已被各自锚格矩形完整覆盖 → 不误伤，机制等价 MC painting 逐实体独立）。
-void PlayerController::removePaintingAt(int px, int py, int pz, int face, bool drop)
-{
-    if (!m_world) return;
-    int ux = 0, uz = 0;
-    BlockRegistry::paintingRightOffset(face, ux, uz);
-    const quint8 faceBits = quint8((face & 3) << BlockRegistry::PaintingStateFaceShift);
-    // BFS 收集连通域（种子 (px,py,pz) 允许已被清 Air —— 直挖路径主破坏格先走 setBlock；邻格侧种子恒是画）。
-    struct Cell { int x, y, z; };
-    struct Rect { int ax, ay, az, w, h; }; // 画矩形：锚格(左上) + 沿 u 宽 w + 向下高 h
-    std::vector<Cell> cells;
-    std::vector<Rect> rects;
-    std::vector<Cell> frontier{{px, py, pz}};
-    while (!frontier.empty()) {
-        const Cell c = frontier.back();
-        frontier.pop_back();
-        bool seen = false;
-        for (const Cell &s : cells) {
-            if (s.x == c.x && s.y == c.y && s.z == c.z) { seen = true; break; }
-        }
-        if (seen) continue;
-        const quint8 bid = m_world->blockAt(c.x, c.y, c.z);
-        const bool isSeed = (c.x == px && c.y == py && c.z == pz);
-        if (bid != BlockRegistry::Painting && !isSeed) continue;        // 非画格 → 不入域
-        if (bid == BlockRegistry::Painting
-            && quint8(m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateFaceMask) != faceBits)
-            continue;                                                    // 异面画（共格平面对墙）→ 不连
-        cells.push_back(c);
-        if (bid == BlockRegistry::Painting
-            && (m_world->stateAt(c.x, c.y, c.z) & BlockRegistry::PaintingStateAnchorFlag)) {
-            // 终审修 M1（兼消 L4 死存储）：锚格 index 反解本画矩形，供下方按矩形圈定清理范围（旧代码只存
-            //   anchorIndex 不读 —— 掉落恒 1 件与 index 无关，头注释却暗示其驱动掉落，误导）。
-            Rect r{c.x, c.y, c.z, 1, 1};
-            BlockRegistry::paintingSize(int(m_world->stateAt(c.x, c.y, c.z)
-                                            & BlockRegistry::PaintingStateIndexMask), r.w, r.h);
-            rects.push_back(r);
-        }
-        // 4 向扩展（画面平面内：±u 水平 + ±Y 垂直）。
-        frontier.push_back({c.x + ux, c.y, c.z + uz});
-        frontier.push_back({c.x - ux, c.y, c.z - uz});
-        frontier.push_back({c.x, c.y + 1, c.z});
-        frontier.push_back({c.x, c.y - 1, c.z});
-    }
-    // 矩形包含判定：格沿 u 的偏移 du ∈ [0,w) 且 y ∈ (ay-h, ay]（画自锚格向下展开 h 格）。
-    const auto inRect = [ux, uz](const Rect &r, int x, int y, int z) {
-        const int du = (x - r.ax) * ux + (z - r.az) * uz;
-        return du >= 0 && du < r.w && y <= r.ay && y > r.ay - r.h;
-    };
-    // 目标矩形 = 含种子坐标的锚格矩形（直挖清的是非锚格时，本画锚格仍在域内 → 仍可反解定位）。
-    const Rect *target = nullptr;
-    for (const Rect &r : rects) {
-        if (inRect(r, px, py, pz)) { target = &r; break; }
-    }
-    // 掉落：整张画只 1 件 PaintingId（机制等价 MC 破画掉 1 个 painting item）。落点 = 种子格（玩家瞄的格）。
-    if (drop)
-        emit spawnItem(px, py, pz, RecipeRegistry::PaintingId, 1);
-    // 清域（终审修 M1：只清目标画）：target 命中 → 仅清该矩形内格（邻画在其自身矩形外 → 完好保留）；
-    //   无 target（种子 = 被 caller 先清的锚格，本画矩形已不可反解）→ 清域内不被任何已识别矩形覆盖的
-    //   残余格（邻画格已被其锚格矩形覆盖 → 跳过）。setWaterSilent 静默清（不发 blockBroken —— 多格画的
-    //   逐格粒子/音会刷成风暴；主破坏格由 caller finishMiningAt 顶部的 setBlock 已清 + 已发一次事件；
-    //   失撑路径种子格也在此静默清，同火把失撑模式）。worldChanged 仍逐格发 → mesh / 呈现层 paintingHost
-    //   清孤儿（onWorldChanged 校验）。
-    for (const Cell &c : cells) {
-        if (target) {
-            if (!inRect(*target, c.x, c.y, c.z)) continue; // 邻画的格 → 不清（终审修 M1）
-        } else {
-            bool covered = false;
-            for (const Rect &r : rects) {
-                if (inRect(r, c.x, c.y, c.z)) { covered = true; break; } // 邻画矩形内 → 不清
-            }
-            if (covered) continue;
-        }
-        if (c.x == px && c.y == py && c.z == pz && m_world->blockAt(c.x, c.y, c.z) != BlockRegistry::Painting)
-            continue; // 种子已被 caller 清（防御双清）
-        m_world->setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
-    }
-}
-
-// t721 画作支撑墙失撑掉落（见 playercontroller.h 头注释；finishMiningAt 破块后扫 4 水平邻）。
-//   画格的支撑墙 = 画格 - 法线（paintingWallOffset）—— 墙格被破（刚置 Air / Water）→ 该画整张掉落。
-//   drop=true 恒发（含创造；t571 自然失撑掉落语义）。
-void PlayerController::dropUnsupportedPaintingsAround(int x, int y, int z)
-{
-    if (!m_world) return;
-    constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
-    for (const auto &o : kHoriz) {
-        const int px = x + o[0], py = y, pz = z + o[1];
-        if (m_world->blockAt(px, py, pz) != BlockRegistry::Painting) continue;
-        const quint8 st = m_world->stateAt(px, py, pz);
-        const int face = (st & BlockRegistry::PaintingStateFaceMask) >> BlockRegistry::PaintingStateFaceShift;
-        int wx = 0, wz = 0;
-        BlockRegistry::paintingWallOffset(face, wx, wz);
-        // 支撑墙格 == 刚破的格（blockAt 已非 solid —— 直接比坐标，破格可能已置 Air/水等）→ 失撑掉落。
-        if (px + wx == x && pz + wz == z)
-            removePaintingAt(px, py, pz, face, /*drop=*/true);
-    }
-}
-
+// t837① 画作移除主体（removePaintingAt）与失撑掉落（dropUnsupportedPaintingsAround → World::
+//   checkPaintingSupportOnEdit）已整体下沉 World 层单一权威（t806 余烬门三件套同模式——失撑钩子并入
+//   World 写入钩子族后，爆炸 / 焚毁 / 岩浆吞墙等系统拆墙路径与玩家挖掘同口径掉画，此前仅玩家路径覆盖）。
+//   实现见 world.cpp；调用点：finishMiningAt 直挖画格分支（World::removePaintingAt）。
 // t725→t806 余烬门三件套（tryIgniteNetherPortal 点燃检测 / removeNetherPortalAt 连通域熄灭 /
 //   breakNetherPortalsAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 +
 //   四角可选；同末地门三件套模式）—— 实现见 world.cpp；调用点：placeBlock 打火石分支
@@ -3745,12 +3645,19 @@ void PlayerController::placeBlock()
     //   不改栅格语义（setBlock 入口）。渲染走呈现层 paintingHost（Main.qml，贴图不进图集）。
     if (m_hotbar && m_world && heldItemId == RecipeRegistry::PaintingId) {
         bool placed = false;
-        if (m_hasHit && m_hitNy == 0 && m_hitNx != 0) {
-            // 命中 ±X 侧面：法线 (±1,0,0) → face 0=+X / 1=-X（horizontalFacing 同源编码）。
-            placed = tryPlacePainting((m_hitNx > 0) ? 0 : 1);
-        } else if (m_hasHit && m_hitNy == 0 && m_hitNz != 0) {
-            // 命中 ±Z 侧面：face 2=+Z / 3=-Z。
-            placed = tryPlacePainting((m_hitNz > 0) ? 2 : 3);
+        if (m_hasHit && m_hitNy == 0) {
+            // t837② 朝向 = **玩家水平朝向的反方向**（画面背对墙、面向玩家来向；机制等价 MC 1.0 painting 用
+            //   玩家 yaw 定朝向——ItemHanging 的 direction 取自玩家朝向，非命中面法线）。旧实现取命中面法线：
+            //   正对点击两向一致无恙，但**斜角 / 掠射命中**（瞄墙时射线先中突出棱 / 墙角柱的侧面）时命中面法线
+            //   与玩家视线近乎垂直 → 画面贴到侧面 = 用户症状「放置时有时直接显示背面」（画面侧对 / 背对玩家）。
+            //   取玩家朝向反方向后画面恒面向玩家；锚格 = 命中格 + 画面法线（玩家侧），其支撑墙 = 命中格本身
+            //   （tryPlacePainting cellOk 逐格复检墙格实体性，斜角命中时锚格自动落玩家正视侧）。
+            //   face 编码 = 墙面外法线 4 向（0=+X 1=-X 2=+Z 3=-Z，horizontalFacing 同源）。
+            const QVector3D look = lookDirection();
+            const int face = (qAbs(look.x()) >= qAbs(look.z()))
+                                 ? (look.x() > 0 ? 1 : 0)   // 看 +X → 画面朝 -X（face 1）
+                                 : (look.z() > 0 ? 3 : 2);  // 看 +Z → 画面朝 -Z（face 3）
+            placed = tryPlacePainting(face);
         }
         if (placed && m_mode != Creative)
             m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 画（创造不耗）
@@ -4435,25 +4342,23 @@ void PlayerController::placeBlock()
         }
         if (!hasAttach) return; // 无任何实体面依附 → 悬空 / 叠活板门 → 拒（不挥）
     }
-    // t394 枯死的灌木放置预检：仅可放在沙子正上方（机制等价 MC 1.0 dead bush 生于沙地）。
-    //   目标格的下方须为 Sand；否则拒绝放置（不挥）。与种子 / 树苗「须草地 / 泥土」同支撑语义。
-    if (m_selectedBlock == BlockRegistry::DeadBush) {
-        if (m_world->blockAt(tx, ty - 1, tz) != BlockRegistry::Sand) return;
-    }
-    // t397 花放置预检：仅可放在草地 / 泥土 / 耕地正上方（机制等价 MC 1.0 花生于草地 / 泥土）。
-    //   目标格的下方须为 Grass / Dirt / Farmland；否则拒绝放置（不挥）。与树苗「须草地 / 泥土」同支撑语义。
-    if (BlockRegistry::isFlower(m_selectedBlock)) {
-        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
-        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
-            && below != BlockRegistry::Farmland) return;
-    }
-    // t507 蘑菇放置预检（红 Mushroom / 白 BrownMushroom）：仅可放在草地 / 泥土正上方（机制等价 MC 1.0 蘑菇
-    //   生于草地 / 泥土 / 阴暗处，本工程不强制光照判定）。目标格下方须为 Grass / Dirt；否则拒（不挥）。
-    //   与花同支撑语义（蘑菇族与花共用 cross 几何 + 失撑掉落校验，但放置支撑更宽：MC 蘑菇亦可生于石头 / 倒木
-    //   等阴暗面，本工程简化仅草地 / 泥土）。经 isMushroom 单一权威谓词覆盖红 / 白两蘑菇（同 isFlower 段模式）。
-    if (BlockRegistry::isMushroom(m_selectedBlock)) {
-        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
-        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt) return;
+    // t847 cross 植物族放置预检统一收口（草丛 / 花族 / 蘑菇族 / 枯灌木；取代原 DeadBush / Flower / Mushroom
+    //   三处分散内联判定 + 补齐此前**完全无预检**的 TallGrass）：
+    //   ① 目标格须 ==Air —— **水下拒绝**（主选体射线不挡水（t165）→ 瞄水面时射线穿水命中水底实块 → 目标格
+    //      落水格本身，通用放置门放行水格（排开流体语义）→ 旧版草丛 / 花 / 蘑菇直接「种进水」；同甘蔗 t547③
+    //      口径，机制等价 MC 1.0 陆生植物不可生于水中）。
+    //   ② 下方须合法着地面 —— BlockRegistry::plantGroundBlock 单一权威（草丛→泥土/草方块：不能草上叠草 /
+    //      不能放树叶上 / 不能悬空；花→泥土/草方块/耕地；蘑菇→泥土/草方块；枯灌木→沙子。地面集与失撑
+    //      掉落链同源，别两套判定——改地面集只改 Core 谓词一处）。
+    //   拒绝 = 不挥不消耗（同仙人掌 / 铁轨 / 木梯预检口径：非法放置位 no-op）。
+    if (m_selectedBlock == BlockRegistry::TallGrass
+        || m_selectedBlock == BlockRegistry::DeadBush
+        || BlockRegistry::isFlower(m_selectedBlock)
+        || BlockRegistry::isMushroom(m_selectedBlock)) {
+        if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // ① 水下 / 被占 → 拒（不挥）
+        if (!BlockRegistry::plantGroundBlock(quint8(m_selectedBlock),
+                                             m_world->blockAt(tx, ty - 1, tz)))
+            return; // ② 非法着地面 → 拒（不挥）
     }
     // t397/t423/t547 甘蔗放置预检：
     //   （1）目标格须为**空气** —— 不能种在水里（t547③「能种在水里面不对」根因：主选体射线**不挡水**（t165）→ 瞄
