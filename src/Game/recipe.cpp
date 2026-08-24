@@ -1204,6 +1204,14 @@ static_assert(BlockRegistry::LastWoolVariant == 77,    "LastWoolVariant 须为�
 static_assert(BlockRegistry::FirstWoolVariant + 14 == BlockRegistry::LastWoolVariant,
               "15 色羊毛变体段须连续无洞（FirstWoolVariant+14 == LastWoolVariant）——段中插位 = 全部下标算术错位");
 static_assert(RecipeRegistry::WoolId        == 0x20E, "WoolId 保留 0x20E（t834 退役：仅旧档物品名/图标兼容，勿再接掉落或配方）");
+// t823 GlyphFlow 跨层契约（t834 剪羊毛同模式）：呈现层 EnchantGlyphFlow.qml rescanPairs 持 QML 裸字面量
+//   95（书架判定 !==95，EnchantRunes.qml 同）+ Main.qml 附魔台表三处 id===94（blockPlaced/broken 分支 +
+//   collectBlocksOfId 重建）—— QML 不 import C++ 静态类；本处钉死两 id == 字面量，方块段重排忘了同步
+//   QML → 编译失败（防「附魔台/书架 id 迁移后字流与悬浮书表静默失效且矩阵全绿」—— 矩阵探针只锁 C++
+//   权威，QML 字面量只有编译期断言能拦，t789 QML literal contract 同理）。环带规则本体（切比雪夫==2 环带
+//   × y/y+1 两层 + 半步格 Air）由 redstone_matrix_test t823 镜像 tripwire 探针锁与 C++ 权威同值。
+static_assert(BlockRegistry::EnchantingTable == 94, "EnchantingTable 须与 Main.qml / EnchantGlyphFlow 链的 id===94 字面量一致");
+static_assert(BlockRegistry::Bookshelf       == 95, "Bookshelf 须与 EnchantGlyphFlow.qml / EnchantRunes.qml 的 !==95 字面量一致");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob
 //   掉落 / 生物蛋段「MC 1.0.0」列一致）。行索引 = engineMaterialId - MaterialIdBase（覆盖 [0x200, 0x22E] = 47 项，
