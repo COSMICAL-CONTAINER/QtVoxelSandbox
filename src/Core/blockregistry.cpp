@@ -1014,6 +1014,39 @@ bool BlockRegistry::isDoor(quint8 blockId)
     return blockId == WoodDoor || blockId == SpruceDoor || blockId == IronDoor;
 }
 
+// t850 活板门族统一谓词（单一权威）：WoodTrapdoor（连续段内）/ IronTrapdoor（t723 段外并入，同 isDoor
+//   把段外 IronDoor 并入的模式）。供 shapeBoxes ShapeTrapdoor 分流 / World 失撑复检 / playercontroller
+//   放置预检统一读「是否活板门」，避免各处硬编码 WoodTrapdoor id 判定漂移。
+bool BlockRegistry::isTrapdoor(quint8 blockId)
+{
+    return blockId == WoodTrapdoor || blockId == IronTrapdoor;
+}
+
+// t851 活板门依附面判定（单一权威，见 .h 注释）：isCollidable 且排除活板门/门自身 —— MC 1.0 附着语义
+//   「依附实体方块面」，附着物自身不互相依附（同火把 torchSupportBlock 排除火把的先例口径：火把非
+//   solid 天然不算，活板门/门是碰撞实体必须显式排除，否则「板套板悬浮叠」绕过校验）。
+bool BlockRegistry::trapdoorSupportBlock(quint8 blockId, quint8 state)
+{
+    if (isTrapdoor(blockId) || isDoor(blockId)) return false; // 附着族自身不算面（防板套板 / 板贴门）
+    return isCollidable(blockId, state);
+}
+
+// t849 铁砧三件套窄形盒（单一权威，见 .h 注释；机制等价 MC 1.0 anvil 异形 VoxelShape：底座/腰柱/顶台
+//   三轴对齐盒并集，XZ 0.75 足印 = 12/16 宽）。坐标逐字镜像 partialblockgeometry 铁砧 case 的三盒布局
+//   （渲染/碰撞/选中三消费端同源——改铁砧造型只动两处且互为镜像，同 bedHalfBoxes t784 单一权威模式）：
+//   ① 宽基座 x[2,14] y[0,4] z[2,14]（12×4×12）② 窄腰柱 x[6,10] y[4,10] z[6,10]（4×6×4）
+//   ③ 宽顶砧台 x[2,14] y[10,16] z[3,13]（12×6×10）。三损坏阶段共用（Anvil/AnvilChipped/AnvilDamaged
+//   同造型，仅顶面贴图分阶段——与渲染 case 一致）。
+std::vector<BlockRegistry::BlockAABB> BlockRegistry::anvilShapeBoxes()
+{
+    constexpr float s = 1.0f / 16.0f;
+    return {
+        BlockAABB{ 2*s, 0.0f, 2*s, 14*s, 4*s, 14*s }, // ① 宽基座
+        BlockAABB{ 6*s, 4*s, 6*s, 10*s, 10*s, 10*s }, // ② 窄腰柱
+        BlockAABB{ 2*s, 10*s, 3*s, 14*s, 1.0f, 13*s } // ③ 宽顶砧台（满高到格顶 1.0）
+    };
+}
+
 // t720 画作统一谓词（单一权威，见 blockregistry.h 注释）：单 id 裸相等。mesher 双 PASS 跳过 /
 // playercontroller 放置·破坏·失撑判定 / raycast 薄盒路由均读本谓词。
 bool BlockRegistry::isPainting(quint8 blockId)
@@ -1605,6 +1638,18 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
     //   选中框，瞄准/破块按整格无 0.25 误差烦恼）、raycast 整格命中（isFullCube=true）—— 三者解耦。
     if (blockId == EnchantingTable)
         return {BlockAABB{0, 0, 0, 1, 0.75f, 1}};
+    // t849 铁砧碰撞收窄为三盒窄形（anvilShapeBoxes 单一权威：底座/腰柱/顶台三段，XZ 12/16 足印）——
+    //   玩家可走进边缘缝隙（spec「整格挡人 → 0.75 宽」）。机制等价 MC 1.0 anvil 异形 VoxelShape。
+    //   铁砧 def.shape=ShapeFull（solid=false 异形渲染先例：mesher 邻居剔除 / 重力族 / 满遮等共享语义
+    //   依赖它，lessons-learned t639「别翻转共享谓词修单消费者」）→ 在此 id 特例分流，不动共享谓词。
+    if (isAnvil(blockId))
+        return anvilShapeBoxes();
+    // t849 仙人掌碰撞贴实际形状：渲染是 0.8 居中细柱（partialblockgeometry kCactusInset 1/16 内缩）→
+    //   碰撞盒同 0.8 居中（此前 ShapeFull 整格——玩家贴仙人掌半身即「接触」，与视觉不符）。接触伤害
+    //   判定走 EntityManager/PlayerController 环境 tick 的 collisionAABBsAt 点测 → 收窄后须真站进柱内
+    //   才受伤（机制等价 MC 仙人掌 hitbox 14/16 内缩语义）。放置预检 / 失撑链不读本函数，零回归。
+    if (blockId == Cactus)
+        return {BlockAABB{0.1f, 0.0f, 0.1f, 0.9f, 1.0f, 0.9f}};
     // t359 活版门开态碰撞 = 整高竖直板（同 shapeBoxes，无特例覆盖）。机制等价「半门 / 1 格高 ledge」：
     //   开活板门铰链侧整高 [0,1] 竖直板可站立于顶（y=1.0）+ 蹲行走 → 不再穿透。
     //   t335 曾对此返「铰链侧 3/16 宽 × 3/16 高的唇边」(板身穿过)，但唇边太薄（0.1875 < 玩家 footprint
@@ -1628,6 +1673,15 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     //   不可越」分离语义）。isFence 覆盖木/圆石/云杉三变体。
     if (isFence(blockId))
         return {BlockAABB{0.3f, 0, 0.3f, 0.7f, 1.0f, 0.7f}};
+    // t849 铁砧选中框贴三盒窄形（spec「黑色边框按整格显示 → 窄 AABB，对齐 t801 栅栏 selection 特例
+    //   模式」）：anvilShapeBoxes 单一权威（与碰撞/渲染同源）→ 选中框贴实际铁砧轮廓（底座+腰柱+顶台
+    //   三段黑边框），不再满格。机制等价 MC 铁砧 outline 按异形模型。
+    if (isAnvil(blockId))
+        return anvilShapeBoxes();
+    // t849 仙人掌选中框贴 0.8 细柱：渲染是 0.8 居中柱（kCactusInset 同源）→ 选中框同形（此前整格黑边
+    //   超出实际柱身 2 像素边距的悬空错位观感，同栅栏 t801 / 耕地 t639⑦ 先例）。
+    if (blockId == Cactus)
+        return {BlockAABB{0.1f, 0, 0.1f, 0.9f, 1.0f, 0.9f}};
     // t720 画作选中框：贴墙薄板（与 raycastAABBs Painting 分支同盒——瞄准画显示贴墙薄框而非满格黑边，
     //   机制等价 MC 画选中框贴画面）。ShapeNone → shapeBoxes 空，此处特例给形状。
     if (blockId == Painting)
@@ -1783,6 +1837,16 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
     //   shapeBoxes 原盒，玩家/怪物跳跃越障语义零改动）。isFence 覆盖木/圆石/云杉三变体。
     if (isFence(blockId))
         return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 1.0f, 0.7f}};
+    // t849 铁砧射线窄形三盒（与 anvilShapeBoxes 同源）：铁砧 isFullCube=true（ShapeFull）→ raycast.cpp
+    //   的 fullCell 判定整格命中、sub-AABB 段不生效——本特例盒**单独不够**，fullCell 特判同步收口在
+    //   raycast.cpp（t639 耕地先例：`isFullCube(b) && b != Farmland` 局部特例）。此处供 sub-AABB 段
+    //   （startPartial 起点 / filter 路径）与未来消费者同源读取。
+    if (isAnvil(blockId))
+        return anvilShapeBoxes();
+    // t849 仙人掌射线贴 0.8 细柱：同铁砧模式——isFullCube(Cactus)=true → fullCell 特判在 raycast.cpp
+    //   收口；此处盒与 selection/collision 同源（瞄柱外环隙的射线穿过命中后方）。
+    if (blockId == Cactus)
+        return {BlockAABB{0.1f, 0.0f, 0.1f, 0.9f, 1.0f, 0.9f}};
     const Shape sh = def(blockId).shape;
     if (sh == ShapeFull)
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // 整格：射线进格即中（等同旧行为）

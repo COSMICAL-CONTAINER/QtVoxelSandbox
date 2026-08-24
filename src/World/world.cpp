@@ -602,6 +602,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；5 参数放置/开合主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
+    checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑掉落复检（支撑被破 / 被换非实体 → 掉落成物品）
     checkFireOnEdit(x, y, z); // t843：6 邻立地火失撑即时熄灭（同 4 参数版钩子族收口）
     // review #27：余烬门门框失撑熄灭并入写入钩子族（同 4 参数版；state-only 写 oldId==id 不触发）。
     if (oldId != BlockRegistry::Air && oldId != id)
@@ -808,6 +809,7 @@ bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（系统静默写路径收口，同族）
     checkRailOnEdit(x, y, z, oldId, id);         // t565：铁轨连接重算
     checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检
+    checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑掉落复检（系统静默写路径同族收口）
     // review #27：余烬门门框失撑熄灭并入写入钩子族（系统静默写路径——火吞可燃物 / 系统清格，同 5 参数
     //   setBlock 谓词：本格非空内容被置换才触发）。
     if (oldId != BlockRegistry::Air && oldId != id)
@@ -2242,6 +2244,7 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
         checkRailOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         checkSnowLayerOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
         checkGravityBlockOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t799：爆炸破坏支撑 → 弹坑上缘沙/沙砾柱坍落（旧 QML 链不发信号 → 悬空残留）
+        checkTrapdoorDoorSupportOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t851：爆炸拆支撑 → 上方活板门/门失撑级联掉落（同族口径）
         breakNetherPortalsAround(d.x, d.y, d.z); // review #27：爆炸拆掉门面 6 邻非抗爆格（黑曜石框免疫）→ 邻接门面熄灭；d.oldId 必非 Air（破坏列表构造）
     }
     emit worldChanged();
@@ -2384,6 +2387,118 @@ void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 i
     recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
     emit worldChanged();        // 驱动 mesh 重建（薄板消失）
     m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t851 活板门 / 门失撑掉落复检（支撑校验族，checkPressurePlateOnEdit 同款模式；见 .h 头注释）。
+//   （x,y,z,oldId,id）= 本格刚发生的编辑。本格编辑后不再是本族方块（破为 Air / 换成火把等非依附面
+//   内容——state-only 开合写 id==id 天然早退）→ 两路扫：
+//   ② 正上方：活板门（须依附任一实体面）/ 门下扇（须站齐平地面 isTopFlushSupport——同 placeBlock t741
+//      口径，天然拒门叠门：Door 非完整立方非上半砖）失去本格支撑 → 级联掉落。
+//   ③ 四水平邻的活板门：其**侧撑**可能正是本格（贴墙浮空板拆墙场景）→ 依附面全失则级联掉落。
+//   被破块本身是本族时跳过（玩家直破的掉落由 finishMiningAt 通用路径 + 门配对联动负责，防双重掉落；
+//   同压力板 / 甘蔗 oldId 守卫模式）。依附判定走 BlockRegistry::trapdoorSupportBlock 单一权威
+//   （isCollidable 且排除活板门/门自身——与放置预检同谓词零漂移，「板套板悬浮叠」两侧一致拒）。
+void World::checkTrapdoorDoorSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); // 守卫按「编辑后本格是否仍本族」（id 谓词）判——oldId 保留供 checkXxxOnEdit 族签名一致
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // 单格依附面快照谓词：活板门在 (bx,by,bz) 是否仍依附任一实体面（下方 + 四侧；trapdoorSupportBlock
+    //   单一权威——排除活板门/门自身）。
+    const auto hasAttach = [&](int bx, int by, int bz) -> bool {
+        if (by - 1 >= 0 && BlockRegistry::trapdoorSupportBlock(m_chunks.blockAt(bx, by - 1, bz),
+                                                               m_chunks.stateAt(bx, by - 1, bz)))
+            return true;
+        static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (const auto &d : kNb) {
+            const int nx = bx + d[0], nz = bz + d[1];
+            if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+            if (BlockRegistry::trapdoorSupportBlock(m_chunks.blockAt(nx, by, nz),
+                                                    m_chunks.stateAt(nx, by, nz)))
+                return true;
+        }
+        return false;
+    };
+    const int by = y + 1;
+    if (by >= 0 && by < m_height) {
+        const quint8 above = m_chunks.blockAt(x, by, z);
+        if (BlockRegistry::isTrapdoor(above)) {
+            if (!hasAttach(x, by, z))
+                dropUnsupportedDoorsAbove(x, by, z); // 板失撑 → 自身 + 其上门级联掉落
+        } else if (BlockRegistry::isDoor(above) && (m_chunks.stateAt(x, by, z) & 8) == 0) {
+            // 门下扇：须齐平支撑（isTopFlushSupport 单一权威——完整立方 / 上半砖顶面）。
+            if (!BlockRegistry::isTopFlushSupport(id, m_chunks.stateAt(x, y, z)))
+                dropUnsupportedDoorsAbove(x, by, z);
+        }
+    }
+    // ③ 贴墙板拆墙：**本层**四水平邻的活板门若依附面全失（其侧撑可能正是本格）→ 各自级联掉落。
+    static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (const auto &d : kNb) {
+        const int nx = x + d[0], nz = z + d[1];
+        if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+        if (y < 0 || y >= m_height) continue;
+        if (BlockRegistry::isTrapdoor(m_chunks.blockAt(nx, y, nz)) && !hasAttach(nx, y, nz))
+            dropUnsupportedDoorsAbove(nx, y, nz);
+    }
+}
+
+// t851 失撑级联掉落（见 .h 头注释）：从 (x,y,z) 的本族方块起向上逐格清「连续活板门柱 / 连续双格门」，
+//   各格发 blockBroken（粒子/音）+ blockDroppedAsItem（dropId=自身物品形态）+ 光照重 flood，末尾一次
+//   worldChanged + clearAllDirty（N 写 1 emit 批量收口，同 dropSugarcaneColumn）。静默直写不经
+//   World::setBlock → 无重入。机制等价 MC 1.0 附着方块支撑移除即脱落为物品。【自然失撑掉落：恒发
+//   （含创造）】—— 破坏支撑是因、附着物脱落是果（t571 族标注口径）。
+void World::dropUnsupportedDoorsAbove(int x, int y, int z)
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    if (y < 0 || y >= m_height) return;
+    bool any = false;
+    int cy = y;
+    while (cy < m_height) {
+        const quint8 b = m_chunks.blockAt(x, cy, z);
+        if (b == BlockRegistry::Air) break; // 结构到顶（连续柱扫到空气即止）
+        if (BlockRegistry::isDoor(b)) {
+            // 门：先清配对半扇（本格是下扇→上扇 cy+1；本格是上扇→下扇 cy-1），两格各发一次信号
+            //   （每格一个掉落物实体——MC 1.0 破坏双格门亦出 2 个掉落物），随后 cy 推进越过上扇继续
+            //   向上扫下一扇门的下扇（门叠门通天链逐扇脱落）。
+            const bool lowerIsThis = (m_chunks.stateAt(x, cy, z) & 8) == 0; // bit3=1 上扇 / 0 下扇
+            const int uy = lowerIsThis ? cy + 1 : cy - 1;
+            if (uy >= 0 && uy < m_height && BlockRegistry::isDoor(m_chunks.blockAt(x, uy, z))) {
+                m_chunks.setBlock(x, uy, z, BlockRegistry::Air); // 静默直写 + 标脏（不经 World::setBlock 无重入）
+                noteGrowthWrite(x, uy, z, b, BlockRegistry::Air); // 门非生长方块 → no-op，保持同族写入一致
+                noteFluidWrite(x, uy, z, b, BlockRegistry::Air);
+                noteIceWrite(x, uy, z, b, BlockRegistry::Air);
+                noteFireWrite(x, uy, z, b, BlockRegistry::Air);
+                emit blockBroken(x, uy, z, int(b));               // 破块粒子 / 音
+                emit blockDroppedAsItem(x, uy, z, BlockRegistry::dropId(b)); // 呈掉落物（Main.qml spawnItem）
+                recomputeLightAround(x, uy, z, b, BlockRegistry::Air);
+                any = true;
+            }
+            m_chunks.setBlock(x, cy, z, BlockRegistry::Air);
+            noteGrowthWrite(x, cy, z, b, BlockRegistry::Air);
+            noteFluidWrite(x, cy, z, b, BlockRegistry::Air);
+            noteIceWrite(x, cy, z, b, BlockRegistry::Air);
+            noteFireWrite(x, cy, z, b, BlockRegistry::Air);
+            emit blockBroken(x, cy, z, int(b));
+            emit blockDroppedAsItem(x, cy, z, BlockRegistry::dropId(b));
+            recomputeLightAround(x, cy, z, b, BlockRegistry::Air);
+            any = true;
+            cy = lowerIsThis ? cy + 2 : cy + 1; // 下扇起点 → 跳过已清的上扇；上扇起点 → 上扇已清、下一步即上一扇下扇
+            continue;
+        }
+        if (!BlockRegistry::isTrapdoor(b)) break; // 非本族（如沙柱）→ 级联到此为止
+        m_chunks.setBlock(x, cy, z, BlockRegistry::Air); // 活板门：清自身后向上续扫（活板门套活板门悬浮叠链）
+        noteGrowthWrite(x, cy, z, b, BlockRegistry::Air);
+        noteFluidWrite(x, cy, z, b, BlockRegistry::Air);
+        noteIceWrite(x, cy, z, b, BlockRegistry::Air);
+        noteFireWrite(x, cy, z, b, BlockRegistry::Air);
+        emit blockBroken(x, cy, z, int(b));
+        emit blockDroppedAsItem(x, cy, z, BlockRegistry::dropId(b));
+        recomputeLightAround(x, cy, z, b, BlockRegistry::Air);
+        any = true;
+        ++cy;
+    }
+    if (!any) return;
+    emit worldChanged();      // 驱动 mesh 重建（N 写 1 emit 批量收口）
+    m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
 // t524 甘蔗整柱坍落为掉落物（见 world.h 头注释）。机制等价 MC 1.0 甘蔗失去下方支撑即整柱破坏掉落。
@@ -2534,6 +2649,7 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
     checkSugarcaneOnEdit(x, y, z, oldId, id);      // t524：甘蔗失撑整柱掉落
     checkSnowLayerOnEdit(x, y, z, oldId, id);      // t527：雪层失撑整柱坍落为携带层数的下落实体
     checkRailOnEdit(x, y, z, oldId, id);           // t565/t733：铁轨失撑掉落 + 邻轨连接重算
+    checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑级联掉落（静默清格公共复检收口）
     // ② 6 邻火把 / 红石火把（火把非 solid 不撑他火把 → 单趟扫即足够，无级联）：
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &d : kNb) {

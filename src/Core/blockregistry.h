@@ -1247,6 +1247,16 @@ public:
     //   单 id 故裸相等判定即可，仍提供谓词作单一权威（未来追加新材质门时一处同步）。
     static bool isDoor(quint8 blockId);
 
+    // t850 活板门族统一谓词（单一权威）：WoodTrapdoor（段内）/ IronTrapdoor（t723 段外并入，同
+    //   isDoor 把 IronDoor 并入的模式）。供 shapeBoxes ShapeTrapdoor 分流 / World 失撑复检 / 放置预检
+    //   统一读「是否活板门」，避免各处硬编码 WoodTrapdoor id 判定漂移。
+    static bool isTrapdoor(quint8 blockId);
+    // t851 活板门依附面判定（单一权威，torchSupportBlock 同款模式）：可作活板门依附面的方块 =
+    //   isCollidable 且**非活板门 / 非门**（MC 1.0 附着语义须实体方块面——活板门/门自身虽是碰撞实体，
+    //   但不算他板的依附面，「板套板悬浮叠」「板贴门板」均拒）。供放置预检（playercontroller）与
+    //   失撑复检（World checkTrapdoorDoorSupportOnEdit）同读，放置与掉落口径零漂移。
+    static bool trapdoorSupportBlock(quint8 blockId, quint8 state);
+
     // t235 cross 广告牌方块段哨兵：id ∈ [FirstCross, LastCross] 走 PartialBlockGeometry 的 cross 几何
     //   （两片对角十字相交的双面 quad，机制等价 MC 草丛 / 花 / 作物的 cross 模型）。与 [FirstPartial, LastPartial]
     //   的「轴对齐盒体异形」**不同类** —— cross 是对角双面平面（非盒组合），故独立成段（避免与 partial 盒体几何混在
@@ -1772,6 +1782,10 @@ public:
     //   air/torch → 空；常规整立方 → 单盒 {0,0,0,1,1,1}；异形 → 形状对应的多盒（stairs 2 盒 等）。
     //   越界 / air 行 → 空。机制等价 MC「方块 VoxelShape」（机制对齐，非名词照搬）。
     static std::vector<BlockAABB> collisionAABBs(quint8 blockId, quint8 state);
+    // t849 铁砧三件套窄形盒（单一权威，见 .cpp 注释）：三阶段共用一套盒（机制等价 MC 1.0 anvil 异形
+    //   碰撞/选中框）。供 collisionAABBs / selectionAABBs / raycastAABBs 三消费者同读（四消费者铁律：
+    //   渲染已走 partialblockgeometry 铁砧 case 三盒，本函数补齐其余三个消费端；heightmap 排除在 chunk.cpp）。
+    static std::vector<BlockAABB> anvilShapeBoxes();
     // t146 方块选中框 sub-AABB（cell-local [0,1]^3；选中框线框按此画棱）。当前与 collisionAABBs 同数据
     //   （异形方块 VoxelShape 与 outline shape 多数一致）；分离接口备将来分歧（如某些方块选中框略放宽）。
     //   Main.qml 的 SelectionWireBoxes 几何据本方法画每个 sub-AABB 的 12 棱（贴合实际形状，非全格）。

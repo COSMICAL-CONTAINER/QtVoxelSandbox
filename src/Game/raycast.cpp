@@ -185,7 +185,14 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
         //   （0.9375..1.0）穿过命中后方方块（可透视开耕地旁 / 后方箱子；同木梯 t501 / 铁轨 t638③ 透视模式）。
         //   仅影响 this 判定；isFullCube(Farmland) 保持 true（entitymanager 支撑 / 雪层放置 / 光照遮挡等仍按
         //   整块语义，三者解耦同碰撞 / 选中）。
-        const bool fullCell = (BlockRegistry::isFullCube(b) && b != BlockRegistry::Farmland)
+        // t849 铁砧 / 仙人掌透视选体（t639 同款局部特例，不翻 isFullCube 共享谓词）：铁砧三盒窄形 /
+        //   仙人掌 0.8 细柱（raycastAABBs 同源特例）—— 选体 / 相机模式按窄形 sub-AABB 精确命中，射线从
+        //   足印外环隙（铁砧 XZ 边缘 2/16、仙人掌四侧 1.6/16 缝隙）穿过命中后方方块。仅影响 this 判定；
+        //   isFullCube 两 id 保持 true（重力族支撑判定 / mesher 邻居剔除等仍按整块语义，lessons-learned
+        //   四消费者铁律：逐消费者特例、共享谓词不动）。
+        const bool fullCell = (BlockRegistry::isFullCube(b) && b != BlockRegistry::Farmland
+                                                    && !BlockRegistry::isAnvil(b)
+                                                    && b != BlockRegistry::Cactus)
                               || b == BlockRegistry::Water
                               || b == BlockRegistry::Lava || !preciseMode;
         if (fullCell) {

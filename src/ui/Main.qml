@@ -6268,7 +6268,9 @@ Window {
                     //   sin(phase·π) 脉冲（参考 :5212 Stalker 蓄力发白 lerp 模式）。
                     Model {
                         id: fallingBlockModel
+                        // t849：铁砧三阶段（97/98/99）改走下方 fallingAnvilLoader 三盒窄形，不再进本立方。
                         visible: entKind === EntityManager.FallingBlock
+                                 && entBlockId !== 97 && entBlockId !== 98 && entBlockId !== 99
                         geometry: BlockCube {
                             blockId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockIdAt(index)) : 0 }
                             world: theWorld
@@ -6288,19 +6290,14 @@ Window {
                         property bool isSnowFall: entBlockId === 44
                         property real slabH: isSnowFall ? Math.max(1.0/8.0, Math.min(1.0, (entBlockState + 1) / 8.0)) : 1.0
                         position: Qt.vector3d(0.0, isSnowFall ? (-0.5 + slabH / 2.0) : 0.0, 0.0) // 薄板底贴 cell 底（非雪 0）
-                        // t794 falling 铁砧观感：97=Anvil / 98=AnvilChipped / 99=AnvilDamaged（⚠️ QML 不 import
-                        //   C++ 静态类故字面量，同 torch=13 约定）。铁砧三盒异形（底座 12/16 宽）下落态退化为
-                        //   BlockCube 单立方 → XZ 缩到 12/16=0.75 贴近铁砧 footprint（满高 1.0：三盒占满 [0,1]）；
-                        //   侧贴图 anvil 瓦片自带头座分层 → 立方仍读作「铁砧形」而非满格方块（观感折衷，
-                        //   dev-plan t794 注明；精确三盒 falling 渲染留待后续需要再做）。
-                        property bool isAnvilFall: entBlockId === 97 || entBlockId === 98 || entBlockId === 99
-                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；雪层薄板按 slabH 缩放；铁砧 XZ 0.75；其余 1.0。
+                        // t490 PrimedTnt 引燃收缩 scale 0.98（机制等价 MC TNT 引燃收缩）；雪层薄板按 slabH 缩放；其余 1.0。
+                        //   t849 铁砧不再走本立方（旧 t794 XZ 0.75 单立方折衷退役）—— 铁砧由下方 fallingAnvilLoader
+                        //   三盒窄形渲染，fallingBlockModel.visible 已排除铁砧。
                         property bool entPrimed: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.isPrimedAt(index)) : false }
                         property real entFuseProg: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.fuseProgressAt(index)) : 0 }
                         scale: {
                             if (entPrimed) return Qt.vector3d(0.98, 0.98, 0.98)          // PrimedTnt 引燃收缩
                             if (isSnowFall) return Qt.vector3d(1.0, slabH, 1.0)           // t527 雪层薄板（按层数缩放）
-                            if (isAnvilFall) return Qt.vector3d(0.75, 1.0, 0.75)          // t794 铁砧 12/16 足印缩宽（异形折衷）
                             return Qt.vector3d(1.0, 1.0, 1.0)                              // 沙石等满格立方
                         }
                         // t490 白闪脉冲相位（0..1 循环）。仅 primed 实体跑动画（非 primed 静止 0 不影响 baseColor）。
@@ -6378,6 +6375,85 @@ Window {
                             }
                             vertexColorsEnabled: !fallingBlockModel.entPrimed  // primed 白闪不叠顶点色光场
                         }
+                    }
+                    // t849 下落铁砧三盒窄形渲染（97=Anvil / 98=AnvilChipped / 99=AnvilDamaged；QML 不 import
+                    //   C++ 静态类故字面量，同 torch=13 约定）：三盒坐标逐字镜像 partialblockgeometry 铁砧 case
+                    //   （宽基座 12×4×12 + 窄腰柱 4×6×4 + 宽顶砧台 12×6×10，16 像素格 /16 折格），机制等价
+                    //   MC 铁砧异形下落实体（旧 t794「XZ 0.75 单立方」折衷退役——下落观感与落地后的地形方块一致）。
+                    //   每盒独立 BlockCube（per-face 图集 UV：顶面自动取 def.topTile 113/115/116 → 三阶段裂纹
+                    //   肉眼可辨，与地形同贴图链）；子块缩放 = 盒尺寸、position = 盒中心（BlockCube ±0.5 居中基准，
+                    //   cell-local [0,1] → local [-0.5,+0.5]）。delegate Node position 已含 pos.y-halfH(0.5)（FallingBlock
+                    //   halfH=0.5 → 组原点 = 格底），组内 y 直接用格内高度-0.5。光照/昼夜/软影走 BlockCube world 链
+                    //   （同 fallingBlockModel）。Loader 门控（[perf] 同款：非铁砧下落实体零额外节点）+ onLoaded
+                    //   领养进 delegate（t16 孤儿不渲染教训）。NoLighting（红线：可见 Model 必须 NoLighting）。
+                    //   红石破坏支撑 / TNT 炸飞铁砧的下落全程均走本实体（checkGravityBlockOnEdit 单一入口）。
+                    Loader {
+                        active: entKind === EntityManager.FallingBlock
+                                && (fallingBlockModel.entBlockId === 97 || fallingBlockModel.entBlockId === 98
+                                    || fallingBlockModel.entBlockId === 99)
+                        sourceComponent: Component {
+                            Node {
+                                // 三盒并排（cell-local [0,1]³ → 各自子 Model 缩放摆位；Node 原点 = 格底中心）。
+                                //   ① 宽基座 x/z [2,14]/16 × y [0,4]/16
+                                Model {
+                                    geometry: BlockCube {
+                                        blockId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockIdAt(index)) : 0 } // = fallingBlockModel.entBlockId 同源
+                                        world: theWorld
+                                        worldPos: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.posAt(index)) : Qt.vector3d(0, 0, 0) }
+                                        sunDir: worldClock.sunDir
+                                        shadowsEnabled: window.shadowsEnabled
+                                        dayMul: window.skyDayMul
+                                    }
+                                    position: Qt.vector3d(0.0, -0.5 + 2.0/16.0, 0.0)                 // 盒中心 y=2/16
+                                    scale: Qt.vector3d(12.0/16.0, 4.0/16.0, 12.0/16.0)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColorMap: voxelAtlas
+                                        baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                                        vertexColorsEnabled: true
+                                    }
+                                }
+                                //   ② 窄腰柱 x/z [6,10]/16 × y [4,10]/16
+                                Model {
+                                    geometry: BlockCube {
+                                        blockId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockIdAt(index)) : 0 } // = fallingBlockModel.entBlockId 同源
+                                        world: theWorld
+                                        worldPos: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.posAt(index)) : Qt.vector3d(0, 0, 0) }
+                                        sunDir: worldClock.sunDir
+                                        shadowsEnabled: window.shadowsEnabled
+                                        dayMul: window.skyDayMul
+                                    }
+                                    position: Qt.vector3d(0.0, -0.5 + 7.0/16.0, 0.0)                 // 盒中心 y=7/16
+                                    scale: Qt.vector3d(4.0/16.0, 6.0/16.0, 4.0/16.0)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColorMap: voxelAtlas
+                                        baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                                        vertexColorsEnabled: true
+                                    }
+                                }
+                                //   ③ 宽顶砧台 x [2,14]/16 × z [3,13]/16 × y [10,16]/16（顶面 topTile 阶段裂纹）
+                                Model {
+                                    geometry: BlockCube {
+                                        blockId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.blockIdAt(index)) : 0 } // = fallingBlockModel.entBlockId 同源
+                                        world: theWorld
+                                        worldPos: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.posAt(index)) : Qt.vector3d(0, 0, 0) }
+                                        sunDir: worldClock.sunDir
+                                        shadowsEnabled: window.shadowsEnabled
+                                        dayMul: window.skyDayMul
+                                    }
+                                    position: Qt.vector3d(0.0, -0.5 + 13.0/16.0, -1.0/16.0)          // 盒中心 y=13/16、z 偏 -1/16（z [3,13]）
+                                    scale: Qt.vector3d(12.0/16.0, 6.0/16.0, 10.0/16.0)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColorMap: voxelAtlas
+                                        baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                                        vertexColorsEnabled: true
+                                    }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
                     }
                     // Mob（原 t95 测试生物；t239 生物基类；t240 猪牛羊模型 + 贴图）：
                     //   - mobType 0（通用测试生物）：仍走 UnitCube 单色立方（保 t95 行为不变，spec「mobType 0 不进 MobModel」）；
