@@ -8157,6 +8157,27 @@ Window {
                                         }
                                     }
                                 }
+                                // t831 驯服项链（spec「驯服后脖子有项链」；机制等价 MC 1.0 驯服狼红项圈）：颈根
+                                //   水平扁环带（UnitCube 细横盒，x 半 0.21 微出躯干侧缘 ±0.18 → 两侧读作「环颈」；
+                                //   z 心 -0.30 = 头后缘 -0.24 与躯干前缘 -0.40 的嵌接区）。仅驯服狼可见
+                                //   （wolfTamedAt；revision 绑定即时显/隐——驯服瞬间即现项链）。纯视觉，无碰撞 /
+                                //   交互语义；随父坐姿变换（压缩 + 后倾）继承。项圈红 #c22828 × 昼夜灰阶（夜间随
+                                //   场景变暗，同尾巴毛色乘法）；受击红闪统一 #ff0000（同身体语义）。
+                                Model {
+                                    visible: { const _r = entityManager.revision; return _r >= 0 && entityManager.wolfTamedAt(index) }
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0, 0.16, -0.30) // 颈根（头-躯干嵌接区）
+                                    scale: Qt.vector3d(0.42, 0.06, 0.07) // 横扁环带（x 微出躯干侧缘读作环颈）
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: {
+                                            const _r = entityManager.revision
+                                            const tl = terrainLight(worldClock.skyLight)
+                                            if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                            return _r >= 0 ? Qt.rgba(0.76 * tl.r, 0.16 * tl.g, 0.16 * tl.b, 1.0) : "#000000"
+                                        }
+                                    }
+                                }
                                 // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前面 z=-0.60
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.61，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
@@ -9191,10 +9212,13 @@ Window {
                 if (o) { o.destroy(); delete spawnerObjs[key] }
             }
             // 兜底清孤儿（爆炸 / 系统改写）：blockAt != Spawner(40) 的条目销毁（blockBroken 之外的清除路径收口）。
-            //   t787 原位改型同步：幸存条目重读笼 state 解码，cageMobType 有变 → 重赋值（property 默认 NOTIFY
-            //   触发 delegate 内 geometry/贴图/摆位全部绑定即时重算 → 笼心迷你模型切换）。改型走 5 参数
-            //   setBlock（id 不变只 state 变）→ 发 worldChanged → 本函数被 onWorldChanged 调 → 此处收口，
-            //   无需独立信号（同 t177/t498 教训：改用 worldChanged 兜底重扫，不依赖新增 NOTIFY 链）。
+            //   t833① 改型重建（用户报「生物蛋改型后迷你模型颜色消失」）：旧 t787 路径是原位改 cageMobType 赋值，
+            //   依赖「property NOTIFY → geometry.mobType / 贴图查表 / 摆位 / 眼表 Repeater」整条绑定链即时重算——
+            //   链上任一环陈旧（MobModel 材质 / 眼层 delegate / 静态子树绑定族，t498/t177 教训）即迷你模型外观
+            //   错（换型后颜色丢失的呈现症状）。改走本工程世界同步视觉的统一模式（torch/fire/portal host 同款）：
+            //   cageMobType 有变 → **销毁旧 delegate + 按当前栅格真值整体重建**（addSpawnerVis 重读 state 解码注入
+            //   createObject）—— 全新子树无中间态、无绑定链依赖，对任一陈旧通道免疫。改型是罕见事件（右键一次），
+            //   重建开销可忽略；onWorldChanged 幂等（无变不重建）。
             function cleanupVis() {
                 for (const key in spawnerObjs) {
                     const p = key.split(",")
@@ -9203,8 +9227,11 @@ Window {
                         spawnerObjs[key].destroy(); delete spawnerObjs[key]
                     } else {
                         const want = entityManager.spawnerMobTypeForState(theWorld.stateAt(x, y, z))
-                        if (spawnerObjs[key].cageMobType !== want)
-                            spawnerObjs[key].cageMobType = want
+                        if (spawnerObjs[key].cageMobType !== want) {
+                            // t833① 改型：销毁重建（勿原位赋值 cageMobType —— 见上注释）。
+                            spawnerObjs[key].destroy(); delete spawnerObjs[key]
+                            addSpawnerVis(x, y, z)
+                        }
                     }
                 }
             }

@@ -48,6 +48,8 @@
 //   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。review #6：第 3 参 revision 进文件名
 //   `_r<rev>`（换包逐版缓存 + 清旧；探针传任意探针版号）。
 extern QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath, int revision);
+// t829② 夜行者下巴补全合成器（resourcepackmanager.cpp 文件级自由函数；探针密闭 rig 直调，同上先例）。
+extern QString generateNightwalkerChinFile(const QString &texPath, int revision);
 // Review 2026-08-23 #1 探针：slim 皮肤布局探测器（同上 extern 直连；签名纯 QImage 无需入头）。
 extern bool probeSlimSkinLayout(const QImage &tex);
 
@@ -8552,6 +8554,395 @@ int main(int argc, char *argv[])
                                  "1HP pig dies with burned=true (cooked-drop entry); attackMob->ignite("
                                  "4s*level) wiring static-verified";
         }
+    }
+
+    // ── P-t828 水下窒息 + 鱿鱼浮力（R19.13 生物组；专用局部世界 wA：pit 水柜 + 干 pit 对照）──
+    //    (a) 猪（3HP）沉水 pit 底部：头位浸水 → 15s 呼吸耗尽 → 1HP/s 窒息掉血（20s 窗扣 ~4HP → 死或 ≤1）；
+    //        同构干 pit（同壁高同基底、只少水）对照猪满血不动（呼吸不启动）。机制等价玩家 t202 溺水节奏。
+    //    (b) 鱿鱼（10HP）同水 pit：浮力项 → 不贴底（中心 y 明显高于池底 restY；旧缓沉行为恒贴底）；
+    //        且水生豁免溺水（20s 后仍满血）。
+    //    rig 高度：局部 World setter 触发 worldgen（地形 ~57-71 + 树冠 ≤81）→ rig 平面取 y84+（地形之上
+    //    确定性净空，P31「自凿净空」精神的免凿版——直接摆更高）。pit 结构：y84 石基底（30×30）+ 两口
+    //    12×12 pit 开口（水 pit x10..21/z10..21 填水 y85..87；干 pit x24..35/z24..35 全空）+ 口外 y85..88
+    //    全石壁（壁顶 89 > 鱿鱼水面 bob 峰脚位 ~88.05 → 三种 mob 都爬不出，水平出界被 mobAabbHitsSolid
+    //    撤回）；水位恒定（探针不 tick world，流体静置）。
+    {
+        World wA;
+        wA.setWidth(44); wA.setDepth(44); wA.setHeight(96); wA.setSeed(21);
+        for (int x = 8; x < 38; ++x)
+            for (int z = 8; z < 38; ++z) wA.setBlock(x, 84, z, BR::Stone, 0);
+        for (int x = 8; x < 38; ++x)
+            for (int z = 8; z < 38; ++z)
+                for (int y = 85; y <= 88; ++y) {
+                    const bool inWaterPit = (x >= 10 && x < 22 && z >= 10 && z < 22);
+                    const bool inDryPit = (x >= 24 && x < 36 && z >= 24 && z < 36);
+                    const quint8 b = inWaterPit
+                        ? ((y <= 87) ? BR::Water : BR::Air)
+                        : (inDryPit ? BR::Air : BR::Stone);
+                    wA.setBlock(x, y, z, b, 0);
+                }
+        EntityManager emA;
+        const QVector3D farListener(-1000.0f, 90.0f, -1000.0f);
+        const int drownPig = emA.spawnMobTyped(15, 85, 15, EntityManager::MobPig,
+                                               QStringLiteral("#ee9999"), 3);
+        const int dryPig = emA.spawnMobTyped(29, 85, 29, EntityManager::MobPig,
+                                             QStringLiteral("#ee9999"), 3);
+        const int squid = emA.spawnMobTyped(13, 86, 13, EntityManager::MobSquid,
+                                            QStringLiteral("#6a4a3a"), 10);
+        bool ok = drownPig >= 0 && dryPig >= 0 && squid >= 0;
+        if (ok) {
+            // (a)+(b) 同场推进 20s（1250 tick）：猪窒息窗 15+4s、鱿鱼浮力窗充裕。
+            for (int t = 0; t < 1250; ++t) emA.tick(0.016f, &wA, farListener, 0.3f, 1.8f, false);
+            const int dHp = emA.healthAt(drownPig);
+            const bool dDead = emA.deadAt(drownPig);
+            const int dryHp = emA.healthAt(dryPig);
+            const float sqY = emA.posAt(squid).y();
+            const int sqHp = emA.healthAt(squid);
+            // 溺水猪：3HP − 1HP/s（自 15s 起）→ 20s 内扣 ~4HP → 死或 ≤1；对照猪满血 3。
+            ok = ok && (dDead || dHp <= 1);
+            ok = ok && dryHp == 3;
+            // 鱿鱼：浮离池底（旧缓沉恒贴底 restY 85.45；浮力后 bob 在 ~86.4..88.5 → 下界 86.2 区分）+
+            //   满血（水生豁免溺水）。
+            ok = ok && sqY >= 86.2f && sqHp == 10 && !emA.deadAt(squid);
+            if (!ok)
+                qInfo().noquote() << "  t828 diag: drownPig hp" << dHp << "dead" << dDead
+                                  << "| dryPig hp" << dryHp
+                                  << "| squid y" << sqY << "hp" << sqHp;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t828 drowning + squid buoyancy: submerged pig loses HP after 15s "
+                             "breath (1HP/s, dry control stays full), squid buoyed off pool floor "
+                             "(no bottom-resting) and exempt from drowning";
+    }
+
+    // ── P-t829 末影人三修（专用局部世界 wB 平石台；rig y84+ 地形之上，t828 同款免凿高台）──
+    //    (a) 碰水即伤 + 瞬移逃离：夜行者站 1 深水洼 → 首触 tick 扣 1HP + 8..16 格瞬移离开（4s 窗 hp<满
+    //        且位移 ≥6；旧实现「连续满 1s 才扣」在瞬移先发节奏下恒凑不满 = 水伤死代码——用户「水中平安
+    //        无事」根因，t829③ 改首触即伤）；
+    //    (b) 箭命中 race 修复：玩家箭命中夜行者 → 强制瞬移（绕过冷却）+ 箭一并消耗——1.6s 后场内零 Arrow
+    //        残留（旧「dodge 后箭继续飞 / 冷却内零反应穿身」两面都锁）、夜行者未被箭扣血（弹射免疫）；
+    //    (c) 下巴补全合成器：合成 256×128 rig（头盒区底带透明 + 上部不透明脸 / 眼亮行）→ 输出头区全不透明
+    //        + 列向延拓色（下巴带 == 其列上方最近不透明色）+ 眼行原样保留 + 头区外像素不动 + 坏输入返空。
+    {
+        World wB;
+        wB.setWidth(48); wB.setDepth(48); wB.setHeight(96); wB.setSeed(22);
+        for (int x = 2; x < 46; ++x)
+            for (int z = 2; z < 46; ++z) wB.setBlock(x, 84, z, BR::Stone, 0);
+        EntityManager emB;
+        const QVector3D farListener(-1000.0f, 90.0f, -1000.0f);
+        bool ok = true;
+        // (a) 水洼 4×4（x22..25, z22..25）y85 一层水（台面顶 85.0 → 夜行者脚位 85.0 恰在水格）。
+        for (int x = 22; x < 26; ++x)
+            for (int z = 22; z < 26; ++z) wB.setBlock(x, 85, z, BR::Water, 0);
+        const int nw1 = emB.spawnMobTyped(23, 86, 23, EntityManager::MobNightwalker,
+                                          QStringLiteral("#2a1f2a"), 10);
+        if (nw1 < 0) {
+            ok = false;
+        } else {
+            const QVector3D p0 = emB.posAt(nw1);
+            // playerTargetable=true（真实 Survival 语义）：敌对 mob 走 mobType 分发链进 aiNightwalker
+            //   （怕水扣血/瞬移在其内）——false 会走 t290 观察者门控的 aiWander 回退，永远到不了水伤段
+            //   （首跑踩坑：moved 0 + hp 10）。listener 远在 -1000 → detect/stare 够不着，只余游荡。
+            //   位移断言取**全程最大 XZ 位移**（逐 tick 采样）：瞬移方向随机、后续跳可能把净位移拉回
+            //   原点附近（实测首跳 13 格后二跳回 4.6）——净位移断言 flaky，峰值断言确定性捕获首次瞬移。
+            float maxMoved = 0.0f;
+            for (int t = 0; t < 250; ++t) {
+                emB.tick(0.016f, &wB, farListener, 0.3f, 1.8f, true);
+                const QVector3D pt = emB.posAt(nw1);
+                maxMoved = std::max(maxMoved,
+                                    QVector3D(pt.x() - p0.x(), 0.0f, pt.z() - p0.z()).length());
+            }
+            ok = ok && emB.healthAt(nw1) < 10 && maxMoved >= 6.0f;
+            if (!ok)
+                qInfo().noquote() << "  t829a diag: nw hp" << emB.healthAt(nw1)
+                                  << "maxMoved" << maxMoved;
+        }
+        // (b) 箭 deflection：独立管理器 + 独立台面区（避开 (a) 残留水洼 / 夜行者）。箭 y 86.4 = 夜行者
+        //     站姿中心（85+1.4）；24 b/s 飞 ~8 格重力跌落 ~1.3 格仍在其 ±(1.4+0.4) 命中带内。
+        EntityManager emB2;
+        const int nw2 = emB2.spawnMobTyped(34, 85, 6, EntityManager::MobNightwalker,
+                                           QStringLiteral("#2a1f2a"), 10);
+        if (nw2 < 0) {
+            ok = false;
+        } else {
+            const QVector3D p0 = emB2.posAt(nw2);
+            emB2.spawnArrowPlayer(QVector3D(26.5f, 86.4f, 6.5f), QVector3D(24.0f, 0.0f, 0.0f), 5);
+            // 1.6s 窗：命中（~0.35s）即 dodge 位移 ≥8；取全程最大 XZ 位移（同 (a)——瞬移方向随机，净
+            //   位移可能被后续跳拉回）。箭在命中帧即被消耗（t829①）——零 Arrow 断言无需等寿命 despawn。
+            float maxMoved2 = 0.0f;
+            for (int t = 0; t < 100; ++t) {
+                emB2.tick(0.016f, &wB, farListener, 0.3f, 1.8f, false);
+                const QVector3D pt = emB2.posAt(nw2);
+                maxMoved2 = std::max(maxMoved2,
+                                     QVector3D(pt.x() - p0.x(), 0.0f, pt.z() - p0.z()).length());
+            }
+            int arrows = 0;
+            for (int i = 0; i < emB2.count(); ++i)
+                if (emB2.aliveAt(i) && emB2.kindAt(i) == EntityManager::Arrow) ++arrows;
+            ok = ok && arrows == 0 && emB2.healthAt(nw2) == 10 && maxMoved2 >= 6.0f;
+            if (!ok)
+                qInfo().noquote() << "  t829b diag: arrows" << arrows << "nw hp"
+                                  << emB2.healthAt(nw2) << "maxMoved" << maxMoved2;
+        }
+        // (c) 下巴合成器密闭 rig。
+        {
+            QDir dC(QDir::temp().absoluteFilePath("t829_chin_probe"));
+            dC.removeRecursively();
+            dC.mkpath(".");
+            const QString srcPath = dC.absoluteFilePath("enderman.png");
+            QImage src(256, 128, QImage::Format_ARGB32);
+            src.fill(Qt::transparent); // 全透底（含头区外「躯干带」原样保留断言用）
+            // 头盒区 = base (0,0)-(32,16) → HD (0,0)-(128,64)：top 面不透明暗色岛 + 脸窗（眼亮行 / 底带透）。
+            const QRgb dark = qRgb(24, 18, 30);
+            const QRgb eye = qRgb(232, 220, 255);
+            for (int x = 32; x < 64; ++x)
+                for (int y = 0; y < 32; ++y) src.setPixel(x, y, dark);      // top 面不透明
+            for (int x = 32; x < 64; ++x)
+                for (int y = 32; y < 48; ++y) src.setPixel(x, y, dark);     // 脸上部
+            for (int x = 40; x < 56; ++x)
+                for (int y = 36; y < 40; ++y) src.setPixel(x, y, eye);      // 眼亮行（须原样保留）
+            // 脸底带（HD y48..63 = base v12..15）留透明 → 合成须列向延拓填充。
+            src.save(srcPath, "PNG");
+            const QString outPath = generateNightwalkerChinFile(srcPath, 77);
+            bool cOk = !outPath.isEmpty();
+            if (cOk) {
+                QImage out(outPath);
+                cOk = !out.isNull() && out.size() == src.size();
+                if (cOk) {
+                    for (int y = 0; y < 64 && cOk; ++y)
+                        for (int x = 0; x < 128; ++x)
+                            if (qAlpha(out.pixel(x, y)) != 255) { cOk = false; break; } // 头区全不透明
+                    // 下巴带（y48..63, x32..63）== 列上方最近不透明色（本 rig 脸上部恒 dark → 全 dark）。
+                    for (int y = 48; y < 64 && cOk; ++y)
+                        for (int x = 32; x < 64; ++x)
+                            if (out.pixel(x, y) != dark) { cOk = false; break; }
+                    // 眼行原样保留（合成不得动既有不透明像素）。
+                    for (int x = 40; x < 56 && cOk; ++x)
+                        for (int y = 36; y < 40; ++y)
+                            if (out.pixel(x, y) != eye) { cOk = false; break; }
+                    // 头区外不动（仍透明——合成只补头盒区，防把延拓拉进躯干带）。
+                    cOk = cOk && qAlpha(out.pixel(200, 100)) == 0 && qAlpha(out.pixel(10, 80)) == 0;
+                }
+            }
+            // 坏输入：缺文件 → 返空（优雅降级，调用方回退原样）。
+            cOk = cOk && generateNightwalkerChinFile(dC.absoluteFilePath("missing.png"), 77).isEmpty();
+            if (!cOk) qInfo().noquote() << "  t829c diag: chin synth contract broken";
+            ok = ok && cOk;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t829 nightwalker trio: water contact deals first-touch damage + "
+                             "teleport escape, player arrow hit forces teleport dodge and consumes "
+                             "the arrow (no pass-through, no cooldown-blind window, mob unhurt), "
+                             "chin-filler compositor fills head-box transparent band via column "
+                             "extension preserving eyes and out-of-region pixels";
+    }
+
+    // ── P-t830 燃烬者主世界自然刷新摘除（专用局部世界 wF **height 96**：共享 w 高 48 时 heightAt ~57-71
+    //    越 surface 界 → surface 尝试恒败只剩稀有洞穴气袋（实测 60 周期仅 3 刷）——高度 96 下地表 spawn
+    //    真实成立。tickHostileLife skyBrightness=0 全域黑暗）──
+    //    统计采样：~40+ 个自然刷新事件（每 2.2s 周期 ≤1 只，周期末清场防敌对区域 cap 12 饱和停刷）→
+    //    断言零 Emberling（旧 6 份表 P(40 采样零燃烬) = (5/6)^40 ≈ 4.6e-4 → 回归必被逮）+ ≥3 型多样
+    //    （防「摘除时错删整池」的反向回归）。手动刷路径（蛋 / 笼 spawnHostileMob）不经本表——t787 探针
+    //    已锁笼路径含 Emberling，不受影响。ring [24,40] 全落界内（listener 居中 50,50）。
+    {
+        World wF;
+        wF.setWidth(100); wF.setDepth(100); wF.setHeight(96); wF.setSeed(26);
+        EntityManager em830;
+        const QVector3D P830(50.0f, float(wF.heightAt(50, 50) + 2), 50.0f);
+        int samples = 0, ember = 0, distinct = 0;
+        bool seen[20] = {};
+        for (int round = 0; round < 60 && samples < 40; ++round) {
+            for (int t = 0; t < 140; ++t)
+                em830.tickHostileLife(0.016f, &wF, P830, 0.0f); // 一个 spawn 周期（kSpawnInterval 2s）+ 余量
+            for (int i = 0; i < em830.count(); ++i) {
+                if (!em830.aliveAt(i) || em830.deadAt(i)) continue;
+                if (em830.kindAt(i) != EntityManager::Mob) continue;
+                const int mt = em830.mobTypeAt(i);
+                ++samples;
+                if (mt == EntityManager::MobEmberling) ++ember;
+                if (mt >= 0 && mt < 20 && !seen[mt]) { seen[mt] = true; ++distinct; }
+                em830.damageEntity(i, em830.maxHealthAt(i)); // 清场（dead → 不计 cap / 下轮不再采）
+            }
+        }
+        bool ok = samples >= 40 && ember == 0 && distinct >= 3;
+        if (!ok)
+            qInfo().noquote() << "  t830 diag: samples" << samples << "ember" << ember
+                              << "distinct" << distinct;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t830 emberling removed from natural dark-spawn pool: " << samples
+                          << " natural spawns sampled with zero Emberling (>=3 distinct hostile "
+                             "types prove pool alive; eggs/spawner manual paths untouched)";
+    }
+
+    // ── P-t831 狼/豹猫驯服全链补全（专用局部世界 wC 平石台；Entities 层直测，Game 层 useBlock 接线静态审）──
+    //    (a) 驯服成功 → 爱心（inLoveAt 真）→ kTameHeartDuration 4s 衰减后收心；
+    //    (b) healTamedPet：受伤驯服狼回血钳上限；满血 / 未驯服 → false（caller 不消耗）；
+    //    (c) 坐态冻结（toggleWolfSit 后近旁玩家 1s 零位移）↔ 站态跟随（2s 位移 ≥2）；
+    //    (d) 跟随态距玩家 > kWolfTeleportDist → 瞬移到玩家近旁（1s 内 ≤10 格）；
+    //    (e) 豹猫驯服同爱心链。
+    {
+        World wC;
+        wC.setWidth(44); wC.setDepth(44); wC.setHeight(96); wC.setSeed(23); // rig y84+ 地形之上（t828 同款）
+        for (int x = 2; x < 42; ++x)
+            for (int z = 2; z < 42; ++z) wC.setBlock(x, 84, z, BR::Stone, 0);
+        EntityManager emC;
+        const int wolf = emC.spawnMobTyped(8, 85, 8, EntityManager::MobWolf,
+                                           QStringLiteral("#c8ccd4"), 10);
+        bool ok = wolf >= 0;
+        if (ok) {
+            // (a) 驯服循环（~33%/次；P(200 次全败)≈2e-36）。
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && !tamed; ++attempt)
+                tamed = emC.tameWolf(wolf);
+            ok = ok && tamed && emC.wolfTamedAt(wolf) && emC.inLoveAt(wolf); // 驯服即爱心
+            for (int t = 0; t < 344; ++t) // 5.5s > 4s 爱心时长
+                emC.tick(0.016f, &wC, QVector3D(10.5f, 86.0f, 10.5f), 0.3f, 1.8f, true);
+            ok = ok && !emC.inLoveAt(wolf); // 收心
+            // (b) 喂食回血。
+            emC.damageEntity(wolf, 4);
+            ok = ok && emC.healthAt(wolf) == 6;
+            ok = ok && emC.healTamedPet(wolf, 4) && emC.healthAt(wolf) == 10; // 6→10
+            ok = ok && !emC.healTamedPet(wolf, 4);                            // 满血 → false
+            const int wildCtl = emC.spawnMobTyped(4, 85, 4, EntityManager::MobWolf,
+                                                  QStringLiteral("#c8ccd4"), 10);
+            ok = ok && wildCtl >= 0 && !emC.healTamedPet(wildCtl, 4);         // 未驯服 → false
+            // (c) 坐态冻结。
+            emC.toggleWolfSit(wolf);
+            ok = ok && emC.wolfSittingAt(wolf);
+            const QVector3D p0 = emC.posAt(wolf);
+            for (int t = 0; t < 64; ++t)
+                emC.tick(0.016f, &wC, QVector3D(11.5f, 86.0f, 8.5f), 0.3f, 1.8f, true); // 3 格外玩家
+            ok = ok && (emC.posAt(wolf) - p0).length() < 0.05f; // 坐 → 不动（游荡 / 跟随全停）
+            // (c2) 站态跟随。
+            emC.toggleWolfSit(wolf);
+            ok = ok && !emC.wolfSittingAt(wolf);
+            for (int t = 0; t < 125; ++t)
+                emC.tick(0.016f, &wC, QVector3D(15.5f, 86.0f, 8.5f), 0.3f, 1.8f, true); // 7 格外玩家
+            ok = ok && (emC.posAt(wolf) - p0).length() >= 2.0f; // 站 → 跟随走近
+            // (d) 过远瞬移（listener y 取台面层 86 → 瞬移落点扫到台面而非台面下自然地形）。
+            const QVector3D far(36.5f, 86.0f, 36.5f);
+            for (int t = 0; t < 64; ++t)
+                emC.tick(0.016f, &wC, far, 0.3f, 1.8f, true);
+            const float dXZ = QVector3D(emC.posAt(wolf).x() - far.x(), 0.0f,
+                                        emC.posAt(wolf).z() - far.z()).length();
+            ok = ok && dXZ <= 10.0f; // >24 → 瞬移 2..5 环 + 漂移余量
+            if (!ok)
+                qInfo().noquote() << "  t831 diag: tamed" << emC.wolfTamedAt(wolf)
+                                  << "heart" << emC.inLoveAt(wolf) << "hp" << emC.healthAt(wolf)
+                                  << "dist" << dXZ;
+        }
+        // (e) 豹猫驯服爱心链。
+        const int ocelot = emC.spawnMobTyped(20, 85, 20, EntityManager::MobOcelot,
+                                             QStringLiteral("#e8c890"), 10);
+        if (ocelot >= 0) {
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && !tamed; ++attempt)
+                tamed = emC.tameOcelot(ocelot);
+            ok = ok && tamed && emC.ocelotTamedAt(ocelot) && emC.inLoveAt(ocelot);
+        } else {
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t831 taming chain completion: tame success shows heart (decays 4s), "
+                             "healTamedPet restores injured pet (full/wild reject), sitting freezes "
+                             "movement vs standing follows owner, >24-block gap teleports pet to "
+                             "owner side, ocelot taming shows heart too (collar/sit-toggle GUI glue "
+                             "static-reviewed)";
+    }
+
+    // ── P-t832 染料染羊 + 长回自然色重掷（专用局部世界 wD 草平台）──
+    //    染（sheepWoolAt=染下标）→ 剪毛载荷 = 染色（一次性语义上半）→ 吃草长回 = 重掷自然权重恢复自然色
+    //    （确定性断言：长回色 ∈ 自然色集 {0,6,7,8,12,15}——染 10 紫 ∉ 集，重掷绝不再现 10）；非羊拒染。
+    {
+        World wD;
+        wD.setWidth(44); wD.setDepth(44); wD.setHeight(96); wD.setSeed(24); // rig y84 地形之上
+        for (int x = 8; x < 36; ++x)
+            for (int z = 8; z < 36; ++z) wD.setBlock(x, 84, z, BR::Grass, 0); // 28×28 草平台
+        EntityManager emD;
+        const int sheep = emD.spawnMobTyped(22, 85, 22, EntityManager::MobSheep,
+                                            QStringLiteral("#f5f0e8"), 10);
+        bool ok = sheep >= 0;
+        if (ok) {
+            int shearPayload = -1, shearCount = 0;
+            QObject::connect(&emD, &EntityManager::sheepSheared, &emD,
+                             [&](int, int, int, int woolIdx) {
+                                 if (shearCount == 0) shearPayload = woolIdx;
+                                 ++shearCount;
+                             });
+            ok = ok && emD.dyeSheep(sheep, 10) && emD.sheepWoolAt(sheep) == 10; // 染紫
+            emD.shearSheep(sheep);
+            ok = ok && shearCount == 1 && shearPayload == 10 && emD.shearedAt(sheep); // 剪毛得染色
+            const QVector3D farListener(-1000.0f, 90.0f, -1000.0f);
+            for (int t = 0; t < 750; ++t) // 12s：regrowCooldown 6s + 扫描 1s + 余量
+                emD.tick(0.016f, &wD, farListener, 0.3f, 1.8f, false);
+            const int regrown = emD.sheepWoolAt(sheep);
+            const bool natural = regrown == 0 || regrown == 6 || regrown == 7
+                                 || regrown == 8 || regrown == 12 || regrown == 15;
+            ok = ok && !emD.shearedAt(sheep) && natural && regrown != 10; // 长回自然色（绝不再现染紫）
+            if (!ok)
+                qInfo().noquote() << "  t832 diag: sheared" << emD.shearedAt(sheep)
+                                  << "regrown" << regrown << "payload" << shearPayload;
+            const int pig = emD.spawnMobTyped(30, 85, 30, EntityManager::MobPig,
+                                              QStringLiteral("#ee9999"), 10);
+            ok = ok && pig >= 0 && !emD.dyeSheep(pig, 5); // 非羊拒染
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t832 dye-on-sheep: dyeSheep sets wool color, shear payload carries "
+                             "the dyed color (one-shot semantics), regrow rerolls natural weights "
+                             "(never the dyed color again), non-sheep rejected";
+    }
+
+    // ── P-t833 刷怪笼被动实刷 + 鱿鱼水格路径（专用局部世界 wE 平石台 + 水柱）──
+    //    蛋改型语义下的被动笼（pig state / squid state）经 tickSpawners 真刷：猪笼出猪（血 10 = 被动默认，
+    //    敌对路由是 20——极性锁）；鱿鱼笼走水格谓词（here+above Water）在水柱内出鱿鱼。笼位 state 用
+    //    BlockRegistry::spawnerStateForMob 单一权威编码。迷你模型换型视觉（t833① 重建修）不进矩阵（无
+    //    Quick3D），留人工目视。
+    {
+        World wE;
+        wE.setWidth(40); wE.setDepth(40); wE.setHeight(96); wE.setSeed(25); // rig y84 地形之上
+        for (int x = 2; x < 38; ++x)
+            for (int z = 2; z < 38; ++z) wE.setBlock(x, 84, z, BR::Stone, 0);
+        // 猪笼 (14,85,14)；鱿鱼笼 (24,85,24) + 南侧 3 宽 2 深水柱 (23..25, 85..86, 25)。
+        wE.setBlock(14, 85, 14, BR::Spawner, BR::spawnerStateForMob(EntityManager::MobPig));
+        wE.setBlock(24, 85, 24, BR::Spawner, BR::spawnerStateForMob(EntityManager::MobSquid));
+        for (int x = 23; x <= 25; ++x)
+            for (int y = 85; y <= 86; ++y) wE.setBlock(x, y, 25, BR::Water, 0);
+        EntityManager emE;
+        const QVector3D nearPlayer(14.5f, 86.0f, 15.5f); // 猪笼旁（两笼均 <16 激活半径：猪笼 1.4 / 鱿鱼笼 ~14.1）
+        emE.tickSpawners(6.5f, &wE, nearPlayer); // ≥ kSpawnerInterval 6 → 完整刷怪周期
+        emE.tickSpawners(6.5f, &wE, nearPlayer); // 第二周期（首个候选位被前轮占用时兜底）
+        int pigs = 0, squids = 0;
+        bool squidInWater = false;
+        for (int i = 0; i < emE.count(); ++i) {
+            if (!emE.aliveAt(i) || emE.deadAt(i) || emE.kindAt(i) != EntityManager::Mob) continue;
+            if (emE.mobTypeAt(i) == EntityManager::MobPig) {
+                ++pigs;
+                if (emE.healthAt(i) != 10) pigs = -100; // 被动默认血 10（敌对路由 20 → 极性破）
+            } else if (emE.mobTypeAt(i) == EntityManager::MobSquid) {
+                ++squids;
+                const QVector3D sp = emE.posAt(i);
+                // +0.01 nudge：浮点 feet 85.45-0.45 可能落 84.9999 → 截断 84（石）；nudge 同引擎
+                //   resting 复探的 FP-robust 手法（lessons「resting 态支撑格复探」条）。
+                if (wE.blockAt(int(sp.x()), int(sp.y() - 0.45f + 0.01f), int(sp.z())) == BR::Water)
+                    squidInWater = true;
+            }
+        }
+        // 鱿鱼笼距 nearPlayer ~14.1 < 16 激活半径 ✓（激活是 XZ 距离）。
+        bool ok = pigs >= 1 && squids >= 1 && squidInWater;
+        if (!ok)
+            qInfo().noquote() << "  t833 diag: pigs" << pigs << "squids" << squids
+                              << "squidInWater" << squidInWater;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t833 passive spawners really spawn: pig cage produces 10-HP pigs "
+                             "(passive polarity) and squid cage spawns through the water-column "
+                             "predicate (spawn lands submerged); cage mini-model retype visual is "
+                             "manual-check (rebuilt-on-retype fix)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

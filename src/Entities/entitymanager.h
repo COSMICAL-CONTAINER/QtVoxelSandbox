@@ -437,6 +437,15 @@ public:
     //   bump revision → QML 翻雪傀儡为雪头外观（t629）。Q_INVOKABLE 兼调试 + PlayerController 剪刀分支双入口
     //   （playercontroller 是 C++ 直调）。
     Q_INVOKABLE void shearSnowGolem(int i);
+    // t832 染料染羊（spec「手持染料对羊右键 → 羊染成对应色」；机制等价 MC 1.0 染羊 + 「一次性」语义）：
+    //   第 i 只活体 sheep → sheepWool = woolIndex（0..15 羊毛 16 色标准序）+ sheepWoolDyed=true + sheared=false
+    //   （染色即长毛观感，已剪裸羊染色后立即显染毛）+ bump revision（QML 毛层 tint 即时切色）+ 返 true。
+    //   **一次性语义**：剪毛得该染色的羊毛（shearSheep 载荷 = sheepWoolAt）；吃草长回时由 tick 长毛分支据
+    //   sheepWoolDyed **重掷自然权重**恢复自然原色并清标记（t789 kSheepNaturalWeights 单一权威）。
+    //   非 sheep / dead / 越界 / woolIndex 越界 [0,16) → 返 false（caller 不消耗染料）。染料 id→下标换算由
+    //   caller（PlayerController，Game 层）做：woolIndex = dyeItemId − RecipeRegistry::DyeIdBase（行序同源，
+    //   Entities 不向上依赖物品 id，PLAN §2）。Q_INVOKABLE 兼调试 + PlayerController 染料分支双入口。
+    Q_INVOKABLE bool dyeSheep(int i, int woolIndex);
     // t400 触发求偶期（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding 的 love mode）。
     //   第 i 个**成体**可繁殖 mob（pig/cow/sheep/chicken）+ 非冷却 + 未在求偶 → 进求偶期（loveTimer=kLoveDuration）
     //   + bump revision（QML 显心）+ 返 true。幼崽 / 冷却中 / 已求偶 / 非可繁殖 mob / dead / 越界 → 返 false。
@@ -504,6 +513,13 @@ public:
     //   越界 → 静默 no-op（野豹猫右键无反应，机制等价 MC 只有驯服猫可命令坐/站）。Q_INVOKABLE 兼调试 +
     //   PlayerController 空手分支双入口。
     Q_INVOKABLE void toggleOcelotSit(int i);
+    // t831 手持食物喂食回血（spec「手持食物右键已驯服个体 → 喂食回血」；机制等价 MC 1.0 受伤驯服狼吃肉回血
+    //   优先于繁殖）：第 i 只**已驯服**活体（狼 wolfTamed / 猫 ocelotTamed）+ 血量低于上限 → health 回 amount
+    //   （钳到上限）+ bump revision（QML 心条刷新）+ 返 true（caller 消耗 1 食物）。满血 / 未驯服 / dead /
+    //   越界 → 返 false（caller 不消耗，改走幼崽加速 / 求偶繁殖分支）。食物种类匹配由 caller 判（狼 = 生/熟肉
+    //   isWolfMeatItem / 猫 = 生鱼，Game 层物品 id，PLAN §2 不向上依赖）。Q_INVOKABLE 兼调试 +
+    //   PlayerController 肉 / 生鱼分支双入口。
+    Q_INVOKABLE bool healTamedPet(int i, int amount);
     // t480 设置驯服狼的防御目标（主人攻击的 mob；C++ 直调，PlayerController::attackMob 命中后调，Game→Entities
     //   向下依赖）。**共享目标**：所有驯服且站立的狼都追击它（机制等价 MC 1.0 驯服狼群攻主人攻击的目标）。
     //   索引经 slot-reuse 稳定（release 不 shift）；目标死亡 / 移除由 aiWolf 每 AI tick 校验清除。越界 → 忽略。
@@ -1112,6 +1128,15 @@ private:
         //   语义同 ocelotVariant）。QML 毛茸 Model 据 sheepWoolTintAt 乘 tint；shearSheep / mobDied 携带它让
         //   呈现层掉对应色羊毛（t834 起统一方块段：白→Wool 方块 / 有色→对应色羊毛方块）。默认成员初始化清回（槽复用防残留）。
         int   sheepWool = 0;         // 羊毛色下标 0..15（默认 0=白；仅 MobSheep 用）
+        // t832 染料染羊标记（仅 MobSheep 用）：true = 当前 sheepWool 是玩家染料所染（非自然色）。剪毛得染
+        //   色（一次性语义）后吃草长回时据它**重掷自然权重**恢复自然原色并清标记（未染的羊长回保持原色，
+        //   不重掷——自然羊剪后长回应同色，机制等价 MC 1.0 染色只影响本次毛）。dyeSheep 置 true；regrow 消费。
+        bool  sheepWoolDyed = false; // 当前毛色是否染料所染（regrow 重掷自然色的依据）
+        // t828 mob 水下呼吸态（仅非水生 Mob 用；鱿鱼豁免）：头部格浸水 → mobAirTimer 累积（呼吸时间，机制
+        //   等价玩家 t202 的 15s air）；耗尽后 mobDrownTimer 推进 → 每 kMobDrownInterval 扣 1HP（窒息节奏同
+        //   玩家溺水 1HP/s）。头出水双清零（气泡恢复）。放火烧/仙人掌同区的节流块内以累积 aiDt 推进（t500）。
+        float mobAirTimer = 0.0f;    // 头部浸水累积时间（秒；≥kMobBreathSeconds 后开始溺水扣血）
+        float mobDrownTimer = 0.0f;  // 呼吸耗尽后的溺水扣血累积（秒；每 kMobDrownInterval 扣 1HP）
         // t398 鸡下蛋态（仅 mobType==MobChicken 用；其余 mob 留默认 0 不触发）：
         //   eggTimer 到下次下蛋的倒计时（秒）；tick Mob 分支推进，<=0 → emit chickenLaidEgg + 重置随机周期
         //   （kEggLayMin..Max，机制等价 MC 1.0 鸡 5-10 分钟下一枚蛋）。spawn 时随机化初值防批量 spawn 的鸡同步下蛋。
@@ -1149,6 +1174,11 @@ private:
         bool  ocelotTamed = false;       // 是否已驯服（生鱼驯服；QML ocelotTamedAt 读）
         bool  ocelotSitting = false;     // 是否坐着留守（右键切换；QML ocelotSittingAt 读）
         int   ocelotVariant = 0;         // 驯服猫毛色变体（0..2；随机；QML ocelotVariantAt 读）
+        // t831 驯服成功爱心态（仅狼/豹猫驯服瞬间用）：tameWolf / tameOcelot 成功路径置 kTameHeartDuration，
+        //   QML 心形 Model 经 inLoveAt（loveTimer>0 **或** tameHeartTimer>0）显示——驯服冒爱心动画（机制等价
+        //   MC 1.0 驯服成功的心形粒子）。与 loveTimer 分离：不触发求偶寻偶 AI / 繁殖配对（驯服 ≠ love mode），
+        //   仅承载「头顶心形可见」这一呈现态。tickBreeding 衰减段统一递减（归零收心）。
+        float tameHeartTimer = 0.0f;     // 驯服爱心倒计时（秒；>0 → QML 心形显；狼/豹猫共用）
         // t250 环境音态（仅 Mob kind 用；FallingBlock/Item 留默认不触发）：
         float stepAccum = 0.0f;  // walkPhase 半步累加器（弧度）；行走时累加 moveSpeed*dt*kWalkFreq，≥π → emit mobStep
         float ambientTimer = 0.0f; // 到下次 idle 叫声的倒计时（秒）；≤0 → emit mobAmbient + 重置随机周期
@@ -1789,6 +1819,13 @@ private:
     static constexpr float kSquidSwimIntervalMin = 1.5f;  // 喷水推进周期下限（秒）
     static constexpr float kSquidSwimIntervalMax = 3.0f;  // 喷水推进周期上限（秒）
     static constexpr float kSquidSwimSpeed       = 0.8f;  // 水中水平漂游速度（blocks/s；慢漂非疾游）
+    // t828 水生浮力常量（spec「水生生物默认上浮不沉底」；机制等价 MC 1.0 squid 水中中性浮力）：
+    //   - kSquidBuoyancy：鱿鱼水中的净浮力加速度（blocks/s²，正=向上）。替代通用缓沉（kWaterGravity=6 下沉）
+    //     → 水中持续轻浮上涌，头出水面后 mobInWater=false 落回普通重力 → 在水面下小幅 bobbing 悬停，
+    //     不再贴底爬行。取 3.0（≈ kWaterGravity 半）：上涌温和，配合 kSquidRiseMax 钳制形成稳定悬浮层。
+    //   - kSquidRiseMax：上浮速度上限（blocks/s）。钳制防喷水脉冲 + 浮力叠加把鱿鱼顶出水面过高（跳面搁浅）。
+    static constexpr float kSquidBuoyancy = 3.0f;  // 鱿鱼水中净浮力加速度（blocks/s²；正=上浮）
+    static constexpr float kSquidRiseMax  = 1.6f;  // 鱿鱼上浮速度上限（blocks/s；钳制防跃出水面）
     // t400 繁殖常量（spec t400「同种 2 只喂对应食物 → 生幼崽；种群上限防泛滥」；机制对齐 MC 1.0 breeding：
     //   喂食触发 love mode → 同种配对产幼崽 + 5 分钟冷却 + 幼崽 20 分钟长大；数值为本工程小世界量身调，
     //   非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
@@ -2177,6 +2214,16 @@ private:
     static constexpr float kWaterGravity  = 6.0f;  // 水中重力（缓沉；同玩家 kWaterGravity ≈ kGravity×0.21）
     static constexpr float kWaterSinkMax  = 3.0f;  // 水中最大下沉速度（钳制；同玩家 kWaterSinkMax）
     static constexpr float kWaterFlowPush = 4.0f;  // 流水水平推力（blocks/s；同玩家 kWaterFlowPush）
+    // t828 mob 水下窒息常量（spec「生物水下有呼吸时间，太久不浮上来掉血」；机制等价玩家 t202 溺水节奏——
+    //   玩家 10 气泡 × kAirInterval 1.5s = 15s 空气，归零后每 kDrownInterval 1s 扣 1HP）：
+    //   - kMobBreathSeconds：mob 头部浸水到开始扣血的呼吸时间（秒）。取 15 与玩家满气时长一致（同节奏）。
+    //   - kMobDrownInterval：呼吸耗尽后每扣 1HP 的间隔（秒）= 玩家 kDrownInterval 1s（窒息 1HP/s）。
+    //   水生生物（鱿鱼）豁免（机制等价 MC 1.0 水生 mob 不溺水）；头部判定 = 身体中心上方半高格（头位）。
+    static constexpr float kMobBreathSeconds = 15.0f; // mob 头部浸水呼吸时间（秒；同玩家满气 15s）
+    static constexpr float kMobDrownInterval = 1.0f;  // 呼吸耗尽后溺水扣血间隔（秒；1HP/s 同玩家）
+    // t831 驯服爱心常量（spec「驯服动画冒爱心」）：驯服成功瞬间头顶心形显示时长。取 4s（明显可读，又不至于
+    //   覆盖后续喂食反馈太长）。与求偶 loveTimer 分离（不触发寻偶 AI / 繁殖配对，仅呈现态）。
+    static constexpr float kTameHeartDuration = 4.0f; // 驯服成功爱心显示时长（秒）
 };
 
 #endif // ENTITYMANAGER_H

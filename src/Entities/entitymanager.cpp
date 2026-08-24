@@ -51,6 +51,19 @@ constexpr SheepWoolWeight kSheepNaturalWeights[] = {
 };
 constexpr int kSheepNaturalWeightTotal = 10000; // Σweights（表改值须同步）
 
+// t832 抽出「自然权重掷一次羊毛色」（spawnMobCore 生成 + 染色羊长回重掷共用同一权威；逐段扣减同
+//   pickPassiveMobType 模式）。返 0..15 自然色下标（兜底白——表合计恰 10000 必命中，防表改漏悬空）。
+int rollNaturalSheepWool()
+{
+    auto *rng = QRandomGenerator::global();
+    int r = int(rng->bounded(kSheepNaturalWeightTotal));
+    for (const SheepWoolWeight &w : kSheepNaturalWeights) {
+        if (r < w.weight) return w.index;
+        r -= w.weight;
+    }
+    return 0;
+}
+
 // t789 羊毛 16 色 tint 色板（毛层贴图乘色，白 → #ffffff 恒等不着色）。同源链：tools/build_wool.py
 //   WOOL_COLORS（羊毛方块贴图程序生成色板）→ ResourceBrowser.qml woolPalette（t751 图鉴变体预览）→
 //   本表（游戏内毛层 tint）三处同值镜像——浏览器预览色 = 游戏内羊观感色。矩阵探针 t789 直调
@@ -349,13 +362,8 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     //   生物蛋 / 繁殖幼崽）都经本核心 → 一处收口；幼崽的随机色随后被 tickBreeding 覆写为父代色（继承语义
     //   同 ocelotVariant 先例）。加权随机同 pickPassiveMobType 的「逐段扣减」模式（bounded 返 quint32）。
     if (mobType == MobSheep) {
-        auto *rng = QRandomGenerator::global();
-        int r = int(rng->bounded(kSheepNaturalWeightTotal)); // [0, 10000)
-        e.sheepWool = 0; // 兜底白（权重表合计恰 10000，循环内必命中；防表改漏时越界采样悬空）
-        for (const SheepWoolWeight &w : kSheepNaturalWeights) {
-            if (r < w.weight) { e.sheepWool = w.index; break; }
-            r -= w.weight;
-        }
+        e.sheepWool = rollNaturalSheepWool(); // t832 抽出共用（染羊长回重掷同权威）
+        e.sheepWoolDyed = false;              // 自然生成非染色（槽复用防残留）
     }
     // t377 mob 随机护甲（仅 Shambler/Bones；spec「~80% no armor, ~20% a random piece/set」）。机制等价 MC 1.0
     //   僵尸/骷髅随机护甲。armorId = 0x300 + tier*4 + piece（与 ArmorRegistry id 段一致；本地常量避免跨层依赖
@@ -1009,13 +1017,13 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
                 const float effLight = std::max(effSkyL, float(blkL));
                 if (effLight >= kSpawnLightThreshold) continue; // spec「light<阈值(7)」
-                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker / Nightwalker / Emberling；t284 加 Stalker；
-                //   t727 加 Nightwalker 夜行者；t728 加 Emberling 燃烬者 —— 低份额 ~1/6、其余既有敌对摊余）。
-                //   spawnMobTyped 内 kCap 守卫；达 cap 静默跳过。机制等价 MC 1.0 黑暗刷怪池（僵尸 / 骷髅 / 苦力怕 /
-                //   末影人 / 烈焰人）。
-                const int pickMob = rng->bounded(6); // 6 份：Emberling 1/6、Shambler 2/6、其余各 1/6
-                const int spawnType = (pickMob == 5) ? MobEmberling
-                                    : (pickMob == 0 || pickMob == 1) ? MobShambler
+                // 合格点：spawn 一个敌对（Shambler / Bones / Stalker / Nightwalker；t284 加 Stalker；
+                //   t727 加 Nightwalker 夜行者）。t830 燃烬者（Emberling）**摘除主世界自然刷新**（R19.13：
+                //   烈焰人语义属下界，当前只有主世界 → 不该自然刷；生物蛋 / 刷怪笼改型等手动刷保留——
+                //   spawnHostileMob / 被动笼路由不经本表）。下界更新后再恢复入池。份额：Shambler 2/5、
+                //   其余各 1/5（原 6 份表去掉 Emberling 后归一，机制等价 MC 1.0 主世界黑暗刷怪池不含烈焰人）。
+                const int pickMob = rng->bounded(5); // 5 份：Shambler 2/5、Bones/Stalker/Nightwalker 各 1/5
+                const int spawnType = (pickMob == 0 || pickMob == 1) ? MobShambler
                                     : (pickMob == 2) ? MobBones
                                     : (pickMob == 3) ? MobStalker : MobNightwalker;
                 spawnHostileMob(cx, cy, cz, spawnType);
@@ -1546,6 +1554,47 @@ void EntityManager::shearSheep(int i)
     emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
 }
 
+// t832 染料染羊（spec「手持染料对羊右键 → 羊染成对应色」；机制等价 MC 1.0 染羊 + 一次性语义）。染即长毛
+//   （已剪裸羊 sheared 翻 false——染料染在皮肤上重新长出染色的毛，QML 毛层 tint 据 sheepWoolAt 即时切色）；
+//   sheepWoolDyed=true 记「当前色是染的」→ 剪毛掉该染色（shearSheep 载荷）+ 吃草长回时重掷自然权重恢复
+//   自然原色（tick 长毛分支消费标记）。非 sheep / dead / 越界 / woolIndex 越界 → false（caller 不消耗染料）。
+bool EntityManager::dyeSheep(int i, int woolIndex)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    if (woolIndex < 0 || woolIndex > 15) return false; // 羊毛 16 色标准序外 → 拒（防御手改存档类输入）
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobSheep) return false; // 仅 sheep 可染
+    if (e.dead || !e.alive) return false;                     // 尸体 / 空槽不可染
+    e.sheepWool = woolIndex;
+    e.sheepWoolDyed = true; // 长回重掷自然色的依据（自然生成 false / 染色 true）
+    e.sheared = false;      // 染即长毛（染料涂在毛上，观感立即显染色毛层）
+    e.regrowCooldown = 0.0f; // 新长的毛不吃草重掷（剪后才会走长回重掷链）
+    qCInfo(lcEnt) << "sheep dyed at slot" << i << "woolIndex" << woolIndex;
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 毛层 tint / 毛茸外观刷新
+    return true;            // caller 据返值消耗 1 染料（生存）
+}
+
+// t831 手持食物喂食回血（spec「手持食物右键已驯服个体 → 喂食回血」；机制等价 MC 1.0 受伤驯服狼吃肉回血
+//   优先于繁殖）。已驯服（狼 wolfTamed / 猫 ocelotTamed）+ 血量低于上限 → health 回 amount（钳上限）+ 返
+//   true；满血 → false（caller 改走幼崽加速 / 求偶繁殖分支，不消耗）。未驯服 / dead / 越界 → false。
+bool EntityManager::healTamedPet(int i, int amount)
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    if (amount <= 0) return false; // 防御（负治疗无意义）
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.dead || !e.alive) return false;
+    const bool tamed = (e.mobType == MobWolf && e.wolfTamed)
+                       || (e.mobType == MobOcelot && e.ocelotTamed);
+    if (!tamed) return false;              // 仅驯服个体可喂食回血
+    if (e.health >= e.maxHealth) return false; // 满血 → 不回（caller 走繁殖分支）
+    e.health = std::min(e.maxHealth, e.health + amount);
+    qCInfo(lcEnt) << "tamed pet healed at slot" << i << "->" << e.health << "/" << e.maxHealth;
+    ++m_revision;
+    emit entitiesChanged(); // bump → QML 心条刷新（尾巴角度据 healthAt 同步翘起）
+    return true;            // caller 据返值消耗 1 食物（生存）
+}
+
 // t789 第 i 只羊的羊毛色下标（0..15；仅 MobSheep 用）。非 sheep / 越界 → 0（白，QML 毛层 tint 恒等）。
 int EntityManager::sheepWoolAt(int i) const
 {
@@ -1695,6 +1744,7 @@ bool EntityManager::tameWolf(int i)
     e.chasing = false;     // 清野狼敌对追踪残留（驯服即停攻玩家，防下帧 aiWolf 仍追咬）
     e.chaseTimer = 0.0f;
     e.attackCooldown = 0.0f; // 清咬击冷却（驯服后无攻击语义残留）
+    e.tameHeartTimer = kTameHeartDuration; // t831 驯服成功爱心（QML 心形经 inLoveAt 显；tickBreeding 衰减）
     qCInfo(lcEnt) << "wolf tamed at slot" << i << "pos" << e.pos;
     ++m_revision;
     emit entitiesChanged(); // bump → QML 据 wolfTamedAt 切狼行为态
@@ -1764,6 +1814,7 @@ bool EntityManager::tameOcelot(int i)
     e.ocelotVariant = int(QRandomGenerator::global()->bounded(3)); // 随机毛色变体 0..2（黑 / 姜黄 / 奶油）
     e.chasing = false;     // 清野豹猫残留追踪态（驯服即转跟随，防下帧误走敌对分支）
     e.chaseTimer = 0.0f;
+    e.tameHeartTimer = kTameHeartDuration; // t831 驯服成功爱心（QML 心形经 inLoveAt 显；tickBreeding 衰减）
     qCInfo(lcEnt) << "ocelot tamed at slot" << i << "pos" << e.pos << "variant" << e.ocelotVariant;
     ++m_revision;
     emit entitiesChanged(); // bump → QML 据 ocelotTamedAt 切猫外观 / 跟随态
@@ -1792,7 +1843,7 @@ bool EntityManager::inLoveAt(int i) const
     if (i < 0 || i >= int(m_entities.size())) return false;
     const Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || !e.alive) return false;
-    return e.loveTimer > 0.0f;
+    return e.loveTimer > 0.0f || e.tameHeartTimer > 0.0f; // t831：求偶或驯服爱心期均显心（呈现合一）
 }
 
 // t400 第 i 个 mob 的模型缩放（幼崽 kBabyScale=0.5 / 成体 1.0）。QML delegate Node scale 绑它。
@@ -1890,6 +1941,12 @@ bool EntityManager::tickBreeding(qreal dt)
         if (e.loveTimer > 0.0f) {
             e.loveTimer -= float(dt);
             if (e.loveTimer <= 0.0f) { e.loveTimer = 0.0f; dirty = true; } // 退求偶 → 收心（QML 隐心）
+        }
+        // t831 驯服爱心衰减（tameWolf / tameOcelot 成功置 kTameHeartDuration；与求偶 loveTimer 分离——仅呈现态，
+        //   不触发寻偶 AI / 配对）。归零收心（inLoveAt 转 false → QML 隐心形）。
+        if (e.tameHeartTimer > 0.0f) {
+            e.tameHeartTimer -= float(dt);
+            if (e.tameHeartTimer <= 0.0f) { e.tameHeartTimer = 0.0f; dirty = true; } // 爱心到期 → 收心
         }
         if (e.breedCooldown > 0.0f) {
             e.breedCooldown -= float(dt);
@@ -3566,20 +3623,31 @@ bool EntityManager::aiNightwalker(int idx, Entity &e, float dt, World *world, co
 
     bool moved = false;
 
-    // ---- (1) 怕水（机制等价 MC 末影人怕水）：身体中心格 / 脚位格 == Water → 每秒扣 1HP + 瞬移逃离 ----
+    // ---- (1) 怕水（机制等价 MC 末影人怕水）：身体中心格 / 脚位格 == Water → 扣血 + 瞬移逃离 ----
     //   body 中心格（深水悬浮）+ 脚位格（浅水站立齐腰）任一水 → 判定「碰到水」。timeSlice dt（AI 节流帧传
     //   累积 aiDt）→ 平均每秒扣 1HP（同火烧 burning 模式）。
+    //   t829③ 碰水即伤 + 瞬移逃离（用户「当前水中平安无事」的真正根因）：旧版「累计连续满 1s 才扣」在
+    //   瞬移先发（kNightwalkerTeleportCooldown 0.6s 冷却、每 aiTick 试跳）的节奏下永远凑不满 1 秒 —— 瞬移
+    //   把夜行者带离水域、离水分支又把累积器清零 → 水伤恒死代码。改 MC 语义「末影人碰水即受伤并传送离开」：
+    //   **首个接触 tick 即扣 1HP**；其后每持续接触满 kNightwalkerWaterDamageTick 再扣一次（持续浸泡才连续
+    //   掉血；瞬移逃离成功即中断）。离水重置 → 每次独立接触都是「首触即伤」。
     const int fx = qFloor(e.pos.x()), fz = qFloor(e.pos.z());
     const int bodyY = qFloor(e.pos.y());                 // mob 中心格（头身中段）
     const int feetY = qFloor(e.pos.y() - e.halfH);       // 脚位格（AABB 底面）
     const bool inWater = (bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Water)
                       || (feetY >= 0 && world->blockAt(fx, feetY, fz) == BlockRegistry::Water);
     if (inWater) {
-        e.waterDamageAccum += dt;
-        if (e.waterDamageAccum >= kNightwalkerWaterDamageTick) {
-            e.waterDamageAccum = 0.0f;
-            damageEntity(idx, 1); // 每秒 1HP（红闪 + 归零 mobDied；复用受击链）
+        if (e.waterDamageAccum <= 0.0f) {
+            damageEntity(idx, 1); // 首触即伤（红闪 + 归零 mobDied；复用受击链）
+            e.waterDamageAccum = kNightwalkerWaterDamageTick; // 距下一次水伤的倒计时
             if (e.dead) return false; // 水伤致死 → 本帧不再动（尸体走死亡动画）
+        } else {
+            e.waterDamageAccum -= dt; // 持续接触计时（瞬移逃出即被离水分支重置）
+            if (e.waterDamageAccum <= 0.0f) {
+                damageEntity(idx, 1); // 持续浸泡：每满 kNightwalkerWaterDamageTick 再扣 1HP
+                e.waterDamageAccum = kNightwalkerWaterDamageTick;
+                if (e.dead) return false;
+            }
         }
         if (e.teleportCooldown <= 0.0f
             && teleportEntity(idx, e, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
@@ -4841,12 +4909,28 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (next.x() >= ex2 && next.x() <= m.pos.x() + m.halfW + kArrowHitHalfW
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kArrowHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kArrowHitHalfW) {
-                        // t727 夜行者弹射物免疫（spec「弓箭…攻击不到会瞬移」；机制等价 MC 末影人远程免疫）：命中的
-                        //   是夜行者 → 不扣血 / 不击退 / 不落定（箭穿过），夜行者瞬移躲避（dodge，若冷却到）。arrow 不
-                        //   remove → 继续飞行（穿过夜行者原站位，机制等价「射不中会瞬移逃开的怪」）。
+                        // t727 夜行者弹射物免疫（spec「弓箭…攻击不到会瞬移」；机制等价 MC 末影人远程免疫）。
+                        //   t829① race 修复：命中即**强制瞬移**（绕过 teleportCooldown——旧版冷却内 arrow 命中只
+                        //   nightwalkerDodge 早退 = 箭无声穿身零反馈，用户「有时不瞬移直接穿过」）；瞬移落定则
+                        //   **箭一并移除**（remove=true，机制等价 MC 末影人对投射物的「弹开并消耗」——不再保留
+                        //   穿透原站位继续飞的箭，杜绝 dodge 后箭继续命中其后 mob / 落地可拾的间接收益）。瞬移
+                        //   全试失败（被围 / 地形不允许，teleportEntity 返 false）→ 退化为普通命中（扣血 + 击退 +
+                        //   箭消失）——「命中必有结算」，两者都不再出现零反馈穿身。近战路径 nightwalkerDodge 的
+                        //   冷却门 + caller 30% 掷骰保留不变（近战节奏另管）。
                         if (m.mobType == MobNightwalker) {
-                            nightwalkerDodge(mi, world);
-                            break; // 穿过（不落定）；夜行者已瞬移走，本帧不再判定其它 mob（箭继续飞行）
+                            Entity &nm = m_entities[size_t(mi)];
+                            if (!teleportEntity(mi, nm, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
+                                // 瞬移失败兜底：普通命中（伤害 / 击退 / 音 / 移除，同下常规分支语义）。
+                                damageEntity(mi, e.arrowDamage);
+                                const float fhx = e.vx, fhz = e.vz;
+                                const float flen = std::sqrt(fhx * fhx + fhz * fhz);
+                                if (flen > 1e-3f) knockback(mi, fhx / flen, fhz / flen, kArrowKnockbackStrength);
+                                emit arrowHitMob(m.mobType);
+                            }
+                            qCInfo(lcEnt) << "player arrow deflected by nightwalker" << mi
+                                          << (m_entities[size_t(mi)].pos != m.pos ? "(teleport dodge)" : "(forced hit)");
+                            remove = true; // 箭命中夜行者即消耗（瞬移闪避或普通命中皆移除，t829①）
+                            break;        // 本帧不再判定其它 mob
                         }
                         damageEntity(mi, e.arrowDamage); // 扣血 + 红闪 + 归零 mobDied（内含 dead/越界/amount 守）
                         // t553 箭命中击退（机制对齐 MC 1.0 箭命中推开生物；用户「雪球应像箭一样击退」的参照 ——
@@ -5799,6 +5883,37 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 仙人掌扎伤可能本帧致死 → 本帧不再走 AI / 重力（同上方 dead 分支语义，防死尸位移）。
             if (e.dead) continue;
 
+            // t828 mob 水下窒息（spec「生物水下有呼吸时间，太久不浮上来掉血」；机制等价玩家 t202 溺水——
+            //   15s 呼吸耗尽后 1HP/s，节奏同玩家 10 气泡×1.5s + kDrownInterval 1s）。头部判定 = 身体中心上方
+            //   半高处格（floor(pos.y + halfH·0.8)——矮 mob（spider halfH 0.3）头位=身位、高 mob（夜行者 1.4）
+            //   头位在顶段，贴 MC「头浸水才耗气」；比中心格更贴「头」。**鱿鱼豁免**（水生不溺水，机制等价
+            //   MC 1.0 squid）。节流帧用累积 aiDt（t500：状态累积器必须累积 dt，平均速率与每帧一致）。头出水
+            //   → 双计时器清零（呼吸恢复，机制等价玩家出水气泡回满）。掉血走 damageEntity 受击链（红闪 +
+            //   归零 mobDied 掉落）；致死本帧 continue 由下方 AI 段前的 dead 分支兜（同火/仙人掌语义）。
+            if (e.mobType != MobSquid) {
+                const int dHeadY = qFloor(e.pos.y() + e.halfH * 0.8f);
+                const bool dHeadInWater = dHeadY >= 0
+                                          && world->blockAt(qFloor(e.pos.x()), dHeadY, qFloor(e.pos.z()))
+                                                 == BlockRegistry::Water;
+                if (dHeadInWater) {
+                    e.mobAirTimer += float(aiDt);
+                    if (e.mobAirTimer >= kMobBreathSeconds) {
+                        e.mobDrownTimer += float(aiDt);
+                        if (e.mobDrownTimer >= kMobDrownInterval) {
+                            e.mobDrownTimer -= kMobDrownInterval;
+                            if (!e.dead) {
+                                damageEntity(idx, 1); // 溺水 1HP/s（复用受击链）
+                                dirty = true;
+                            }
+                        }
+                    }
+                } else if (e.mobAirTimer > 0.0f || e.mobDrownTimer > 0.0f) {
+                    e.mobAirTimer = 0.0f;
+                    e.mobDrownTimer = 0.0f; // 头出水 → 呼吸恢复（清累积，下次浸水重新计 15s）
+                }
+                if (e.dead) continue; // 溺死本帧不再走 AI / 重力（同火伤 / 仙人掌语义，防死尸位移）
+            }
+
             // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。
             // t241 羊吃草门控：eatTimer>0（吃草周期内）→ 跳过 wander + 强制 idle 站立（腿停 + 头俯仰），仅推进
             //   吃草周期；否则走 AI wander，并据 idle + 扫描冷却决定是否开吃草周期。
@@ -5957,6 +6072,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         if (gy >= 0 && world->blockAt(gx, gy, gz) == BlockRegistry::Grass) {
                             world->setWaterSilent(gx, gy, gz, BlockRegistry::Dirt, 0); // 草方块→泥土（静默写）
                             e.sheared = false;       // 重新长毛（QML 据 shearedAt 翻回毛茸外观）
+                            // t832 染色羊长回恢复自然原色（一次性语义）：染料染的毛剪掉后，长回的是**自然色**
+                            //   ——重掷 kSheepNaturalWeights（t789 权重表单一权威，同 spawn 生成路径）+ 清染色
+                            //   标记。未染的羊（sheepWoolDyed=false）长回保持原色不重掷（自然羊剪后长回同色）。
+                            if (e.sheepWoolDyed) {
+                                e.sheepWool = rollNaturalSheepWool();
+                                e.sheepWoolDyed = false;
+                                qCInfo(lcEnt) << "dyed sheep regrew natural wool at" << e.pos
+                                              << "color index" << e.sheepWool;
+                            }
                             e.regrowCooldown = 0.0f; // 未剪羊毛不再推进（下次剪切重置）
                             dirty = true;            // bump → QML 翻外观
                             qCInfo(lcEnt) << "sheep regrew wool at" << e.pos
@@ -6229,6 +6353,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // t670 越障跳滑流着地兜底清（防某条路径漏清后 resting mob 持续漂移）。
             e.jumpGX = 0.0f;
             e.jumpGZ = 0.0f;
+            // t828 鱿鱼浮力打破 resting：水中的鱿鱼有持续净上涌（下方重力分流 +kSquidBuoyancy），不应贴底
+            //   静置——但支撑复探对「水底固体」恒真 → 无此打破则下方浮力分支永不可达（resting continue 先于
+            //   重力），鱿鱼仍贴底。脚位格在水 → 翻 resting=false 走浮力上升（头出水面落回普通重力 bobbing）。
+            if (e.kind == Mob && e.mobType == MobSquid) {
+                const int sqFeetY = qFloor(e.pos.y() - e.halfH);
+                if (sqFeetY >= 0 && world->blockAt(cx, sqFeetY, cz) == BlockRegistry::Water) {
+                    e.resting = false;
+                    dirty = true;
+                }
+            }
+            if (e.resting) {
             // aiTick：复探支撑。
             // t362 改「footprint 任一列有支撑」（旧版仅中心列 cx/cz）：mob 走下 1 格台阶时，中心先越过台阶沿、
             //   但后半 footprint 仍压在更高支撑块上。旧版即判失支撑 → 重力把整格 snap 下沉到低地 → 此时 trailing
@@ -6279,6 +6414,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
             e.resting = false; // 支撑消失 → 续落（vy 已 0，从静止重新加速）
             dirty = true;
+            }
         }
 
         // t298 水中浮力判定：仅 Mob kind（vestigial Item 不涉水物理）。脚位（AABB 底面）格 == Water → mobInWater。
@@ -6292,8 +6428,18 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //   （kWaterSinkMax << kMaxFall，防加速穿水底）；机制等价玩家 t174 水中浮力（mobs 不按空格故无上浮，
         //   仅被动缓沉到水底 resting）。离水走原重力 + 终端下落。
         if (mobInWater) {
-            e.vy -= kWaterGravity * float(dt);
-            if (e.vy < -kWaterSinkMax) e.vy = -kWaterSinkMax;
+            if (e.kind == Mob && e.mobType == MobSquid) {
+                // t828 水生浮力（spec「水生生物默认上浮不沉底」；机制等价 MC 1.0 squid 中性浮力）：鱿鱼水中
+                //   重力反转为净浮力加速度（+kSquidBuoyancy，向上）+ 上浮速度上限钳制（kSquidRiseMax，防喷水
+                //   脉冲叠加把鱿鱼顶出水面过高）→ 持续轻浮上涌；头出水面后 mobInWater=false 落回普通重力拉回
+                //   → 在水面下小幅 bobbing 悬停（不再缓沉贴底爬行）。喷水脉冲（aiSquid vy=kSquidSwimUp）被
+                //   钳制后仍保持「上涌快、回沉慢」的节律游动感。
+                e.vy += kSquidBuoyancy * float(dt);
+                if (e.vy > kSquidRiseMax) e.vy = kSquidRiseMax;
+            } else {
+                e.vy -= kWaterGravity * float(dt);
+                if (e.vy < -kWaterSinkMax) e.vy = -kWaterSinkMax;
+            }
         } else {
             e.vy -= kGravity * float(dt);
             if (e.vy < -kMaxFall) e.vy = -kMaxFall;
