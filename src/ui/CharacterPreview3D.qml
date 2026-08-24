@@ -229,7 +229,7 @@ Item {
                         geometry: PlayerSkinBox { piece: 0 }
                         position: Qt.vector3d(0, 0.25, 0)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                     }
                     // t731 眼子 Model 移除（t52 四件白底/瞳）：皮肤脸区纹素自带五官，独立眼盒会叠画成双层眼。
                     // 头盔（装备槽 0 有护甲时叠头；z 探出 +0.06，脸仍露，同 Main.qml playerArmorHead）。
@@ -247,7 +247,7 @@ Item {
                     geometry: PlayerSkinBox { piece: 1 }
                     position: Qt.vector3d(0, 0.35, 0)
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                 }
                 Model {
                     visible: root.chestArmor !== 0
@@ -264,18 +264,18 @@ Item {
                     position: Qt.vector3d(-0.375, 0.7, 0)
                     eulerRotation: Qt.vector3d(Math.sin(root.player ? root.player.walkPhase : 0) * 22 * root.walkBlend * root.swingAmp, 0, 0)
                     // t731 整臂皮肤盒（袖+手合并为 piece:2 整臂盒：arm 区覆盖整臂含手；中心 -0.35 长 0.7，
-                    //   同 Main.qml playerModel 双臂；护甲袖 (0.30,0.52,0.30) 包上臂不变）。
+                    //   同 Main.qml playerModel 双臂；护甲袖 t854 起全臂高 (0,-0.35)@(0.30,0.74,0.30)）。
                     Model {
                         geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                     }
                     Model {
                         visible: root.chestArmor !== 0
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.30, 0.52, 0.30)
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.30, 0.74, 0.30)   // t854 胸甲袖=全臂高（MC layer_1 袖盒与臂同高；旧 (0,-0.25)@(0.30,0.52,0.30) 只盖上臂）
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.armorColor(root.chestArmor) }
                     }
                     // t731 旧手段 Model 移除：并入上方整臂皮肤盒（arm 区底 2px 行即手纹素）。
@@ -284,18 +284,18 @@ Item {
                     position: Qt.vector3d(0.375, 0.7, 0)
                     eulerRotation: Qt.vector3d(-Math.sin(root.player ? root.player.walkPhase : 0) * 22 * root.walkBlend * root.swingAmp, 0, 0)
                     // t731 整臂皮肤盒（袖+手合并为 piece:2 整臂盒：arm 区覆盖整臂含手；中心 -0.35 长 0.7，
-                    //   同 Main.qml playerModel 双臂；护甲袖 (0.30,0.52,0.30) 包上臂不变）。
+                    //   同 Main.qml playerModel 双臂；护甲袖 t854 起全臂高 (0,-0.35)@(0.30,0.74,0.30)）。
                     Model {
                         geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                     }
                     Model {
                         visible: root.chestArmor !== 0
                         geometry: UnitCube {}
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.30, 0.52, 0.30)
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.30, 0.74, 0.30)   // t854 胸甲袖=全臂高（MC layer_1 袖盒与臂同高；旧 (0,-0.25)@(0.30,0.52,0.30) 只盖上臂）
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: root.armorColor(root.chestArmor) }
                     }
                     // t731 旧手段 Model 移除：并入上方整臂皮肤盒（arm 区底 2px 行即手纹素）。
@@ -316,7 +316,7 @@ Item {
                     geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                 }
                 Model {
                     visible: root.legsArmor !== 0
@@ -334,7 +334,7 @@ Item {
                         geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                     }
                     Model {
                         visible: root.legsArmor !== 0
@@ -362,7 +362,7 @@ Item {
                     geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                 }
                 Model {
                     visible: root.legsArmor !== 0
@@ -379,7 +379,7 @@ Item {
                         geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: previewSkinTex; alphaCutoff: 0.5; opacity: 0.99 }   // t855 alpha 契约（同 Main.qml 皮肤件）：透明通道尊重贴图 alpha，防 slim/classic 布局差列鬼影
                     }
                     Model {
                         visible: root.legsArmor !== 0
