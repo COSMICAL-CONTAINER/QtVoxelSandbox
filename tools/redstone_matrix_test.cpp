@@ -6781,6 +6781,276 @@ int main(int argc, char *argv[])
                              "(db on temp-dir absolute path, saves/ untouched)";
     }
 
+    // ── t809 空车身体推送过拐角探针（pushEmptyCart 选向，MinecartManager 直编，P12c 同款 L 形场景）──
+    //   用户报告（R19.13）：空车沿直段长按 W 连推（视点 / 输入不随拐角转向），推到拐弯处来回振荡「推不动」。
+    //   根因：pushEmptyCart 旧版把 wish 直接当选向向量 → 车过拐角后停在与 wish 垂直的臂上，两臂点积同为 0
+    //   平局 → kDirs 枚举序破平局（Px 先于 Nx、Pz 先于 Nz）→ 拐角出口朝枚举序败者（-X / -Z）时选中**指回
+    //   拐角**的臂 → 车滑回拐角、到心重选（运动向）又把车送回来路 → 推一下退一格的往返振荡，永不抵达死端。
+    //   修后选向 = away（车−玩家，权重 1.0）+ wish（0.5）+ dir（0.25）合成向量（身体推开语义，机制等价
+    //   MC 玩家撞静止矿车 → 车沿轨被推离玩家）。断言（修前 FAIL / 修后 PASS）：
+    //   rig：L 形（南腿死端 1 + 直段 1 + 拐角[出口 -X = 枚举序败者] + 西臂 2 = 西死端）；
+    //   玩家模型 = 贴身追随（每帧玩家位 = 车上一帧位，P11(d) 先例）+ wish 恒北（0,-1) —— 长按 W 视点不转；
+    //   (a) 车抵达西死端格心 ±0.05 且贴中心线（|z−(z0-2+0.5)| ≤0.05，t770 ② 钉轨）；
+    //   (b) 抵达后 100 tick 停驻不动（死端无沿合成向的可走连接 → 不再被推走）；
+    //   (c) 全程 5 格 L 形 footprint 内 + Y 钉轨面；
+    //   (d) 振荡诊断计数：从西臂滑回拐角的次数（修前每循环 +1 不收敛；修后 0）。
+    {
+        // rig 寻址：运行期扫描空区（P20/P23 先例——nextSlot() 网格已被上方探针耗尽）。需 6×5×5 净空
+        //   （含隔离边；x 从 x0-2 到 x0、z 从 z0-2 到 z0）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 93 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 1 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -3; dx <= 1 && clear; ++dx)
+                    for (int dz = -3; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t809 L-push corner: no clear rig area found";
+        } else {
+            const float rideH = 0.45f; // kCartRideH 文档值（P11 同款镜像注释）
+            // 摆轨：臂与腿先放、拐角最后放（邻齐一次成形，P16 先例）；拐角出口 = -X（枚举序败者）。
+            w.setBlock(x0,     kRigY, z0,     BR::Rail, 0); // 南死端（spawn 格）
+            w.setBlock(x0,     kRigY, z0 - 1, BR::Rail, 0); // 直段
+            w.setBlock(x0 - 1, kRigY, z0 - 2, BR::Rail, 0); // 西臂 1
+            w.setBlock(x0 - 2, kRigY, z0 - 2, BR::Rail, 0); // 西死端
+            w.setBlock(x0,     kRigY, z0 - 2, BR::Rail, 0); // 拐角（南臂 + 西臂）
+            const quint8 cCon = quint8(w.stateAt(x0, kRigY, z0 - 2) & 0x0F);
+            bool ok = cCon == quint8(BR::RailConnPz | BR::RailConnNx); // 拐角 = 两垂直臂位（rig 自检）
+            if (!ok) qInfo().noquote() << "  t809 corner con" << int(cCon) << "expect Pz|Nx";
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);
+            QVector3D player = carts.posAt(0);
+            int lastBx = int(std::floor(player.x())), lastBz = int(std::floor(player.z()));
+            const auto onL = [&](int bx, int bz) {
+                return (bx == x0 && bz >= z0 - 2 && bz <= z0) || (bz == z0 - 2 && bx >= x0 - 2 && bx <= x0 - 1);
+            };
+            int arrivedTick = -1, cornerBacks = 0;
+            QVector3D arrivePos;
+            bool yOk = true;
+            for (int t = 0; t < 1500 && ok; ++t) {
+                carts.pushEmptyCart(&w, player, 0.0f, -1.0f); // 长按 W 朝北：wish 恒定不随拐角转（用户场景）
+                carts.tickPushedCarts(0.016, &w);
+                const QVector3D cp = carts.posAt(0);
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                if (!onL(bx, bz)) {
+                    qInfo().noquote() << "  t809 cart left L at tick" << t << "pos" << cp;
+                    ok = false;
+                    break;
+                }
+                if (std::fabs(cp.y() - (float(kRigY) + rideH)) > 0.01f) yOk = false;
+                if (lastBz == z0 - 2 && lastBx == x0 - 1 && bx == x0) ++cornerBacks; // 西臂滑回拐角（振荡签名）
+                if (arrivedTick < 0 && bx == x0 - 2 && bz == z0 - 2 && cp.x() <= float(x0 - 2) + 0.55f) {
+                    arrivedTick = t;
+                    arrivePos = cp;
+                }
+                lastBx = bx; lastBz = bz;
+                player = cp; // 贴身追随（P11(d) 先例：玩家追着车、静止即续推）
+                if (arrivedTick >= 0 && t - arrivedTick >= 100) break; // 停驻观察窗已满
+            }
+            // (a) 抵达 + 中心线；(b) 停驻 100 tick 位移 <0.05（观察窗内不被推走）。
+            if (ok && arrivedTick >= 0) {
+                ok = std::fabs(arrivePos.z() - (float(z0 - 2) + 0.5f)) <= 0.05f
+                    && std::fabs(carts.posAt(0).x() - arrivePos.x()) < 0.05f
+                    && std::fabs(carts.posAt(0).z() - arrivePos.z()) < 0.05f;
+            } else if (ok) {
+                qInfo().noquote() << "  t809 cart never reached west dead-end (oscillation?), final"
+                                  << carts.posAt(0) << "cornerBacks" << cornerBacks;
+            }
+            ok = ok && arrivedTick >= 0 && yOk && cornerBacks == 0;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t809 empty-cart body-push through corner (exit toward enum-order loser):"
+                                 " reaches west dead-end center + parks, no oscillation; arrivedTick"
+                              << arrivedTick << "cornerBacks" << cornerBacks;
+            // 清场
+            carts.clearAll();
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0 - 1, BR::Air);
+            for (int dx = 0; dx <= 2; ++dx) w.setBlock(x0 - dx, kRigY, z0 - 2, BR::Air);
+            tickN(w, 2);
+        }
+    }
+
+    // ── t810 满动力轨环线骑乘速度曲线探针（tickRiddenCart 动力段 boost，MinecartManager 直编，P11 环场景）──
+    //   用户报告（R19.13）：满动力轨环线骑乘过弯速度骤减（两条动力轨喂入也救不回）；同轨空车匀速圈跑。
+    //   根因：tickRiddenCart 动力段旧版按 **proj 幅度**（wish·dir 投影）改写目标速 → 过弯后玩家视点未跟上
+    //   新行进向的窗口 proj≈0 → 弹射档 2.8 接管 → boost 12.8 以 ~3 格/s² 拉垮到爬行速；空车路径
+    //   （tickPushedCarts t735 ④）按运动符号全额 boost 无此症（对照即定位）。修后无输入且车在动 → 沿 speed
+    //   符号全额 boost；前进输入 → 全 boost 不按 proj 打折；反踩刹车 → 玩家意图优先。
+    //   rig：5×5 环 = 四角普通轨 + 每边 3 格动力轨直段（动力轨不拐弯 t771 → 拐角必普通轨；3×3 环拐角占比
+    //   50% 是病态几何 —— 拐角摩擦本身就把均衡速压到 ~9，非用户场景）+ 环内 3×3 除心外 8 格红石块直供
+    //   全部 12 条动力轨（tickRedstone 置 bit4，直写 state 会被电力重算清掉 → 必须真源供）；
+    //   wish 模型 = 相位制：A 段无输入（proj≡0 —— 纯动力轨维持力断言，无视点模型、修前修后分离度最大：
+    //   修前弹射档 2.7 每 tick 接管全部动力格 → 均衡速崩到 ~3）；B 段采样保持（每 16 tick 重采为当前车头向
+    //   yaw 反推 dir —— 玩家过弯后 ~0.26s 转回镜头的滞后模型；从 yaw 采样而非位移：位移采样在小环上会采到
+    //   跨拐角对角向、再下一拐角后成反向刹车，是探针伪影非玩家行为。旧 P11(c) 每 tick 动态随行进向 → proj
+    //   恒 1，把本缺陷完全掩蔽，故须新探针）；
+    //   (a) 环 footprint + Y 钉轨面 + 跨格单位轴对齐（P11 同款）；
+    //   (b) A 段速度曲线（|Δpos|/dt，预热 60 tick 后统计）：minA ≥5.0 且 meanA ≥8.0（修后均衡 ~7.2/10.4
+    //       —— boost 12.8 − 拐角普通轨摩擦小谷；修前崩到 0.6/2.0 → 双断言 FAIL）；
+    //   (c) B 段滞后输入曲线：minB ≥6.0 且 meanB ≥10.0（修后 ~7.9/11.0；修前滞窗动力格弹射档拉垮到
+    //       2.5/8.9）；A+B 共 1600 tick（25.6s）内 ≥13 圈（修后 ~17 圈 / 修前 8 圈，16 格/圈）；
+    //   (d) 刹车守卫：C 段 wish 反车头向（每 tick 跟随）60 tick 内 |v| 一度 <7（proj<0 不被 boost 角力）；
+    //   (e) 恢复守卫：D 段 wish 车头向 300 tick 内 v 回 ≥11（全 boost 档恢复力）。
+    {
+        // rig 寻址：运行期扫描空区（P20/P23 先例）。5×5 环（环心 ±2）+ 1 格隔离边 → 需 7×7×5 净空
+        //   （隔离边防邻 rig 红石元件误供本环动力轨）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 92 && x0 < 0; zz += 2)
+            for (int xx = 3; xx + 6 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -3; dx <= 3 && clear; ++dx)
+                    for (int dz = -3; dz <= 3 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t810 powered-ring speed curve: no clear rig area found";
+        } else {
+            const int cx = x0 + 3, cz = z0 + 3; // 环心（环 = max(|dx|,|dz|)==2 的 16 格）
+            const float rideH = 0.45f;          // kCartRideH 文档值（P11 同款镜像注释）
+            // 摆环：四边直段动力轨（每边 3 格）+ 四角普通轨（拐角必普通轨 t771）；
+            //   环内 3×3 除心外 8 格红石块（每条动力轨至少一格 4 邻直供，t740 语义），最后放。
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) {
+                    const int ax = std::abs(dx), az = std::abs(dz);
+                    const int m = std::max(ax, az);
+                    if (m == 2)
+                        w.setBlock(cx + dx, kRigY, cz + dz, (ax == 2 && az == 2) ? BR::Rail : BR::GoldenRail, 0);
+                }
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (dx != 0 || dz != 0)
+                        w.setBlock(cx + dx, kRigY, cz + dz, BR::RedstoneBlock, 0);
+            tickN(w, 4);
+            // rig 自检：12 格动力轨全通电 + 四拐角连接位 = 各自两邻臂（P11 corner 表）。
+            bool ok = true;
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) {
+                    const int ax = std::abs(dx), az = std::abs(dz);
+                    if (std::max(ax, az) == 2 && !(ax == 2 && az == 2)
+                        && (w.stateAt(cx + dx, kRigY, cz + dz) & BR::GoldenRailStateOnFlag) == 0)
+                        ok = false;
+                }
+            const struct { int x, z; quint8 wantCon; } wantC[4] = {
+                { cx - 2, cz - 2, quint8(BR::RailConnPx | BR::RailConnPz) },
+                { cx + 2, cz - 2, quint8(BR::RailConnNx | BR::RailConnPz) },
+                { cx - 2, cz + 2, quint8(BR::RailConnPx | BR::RailConnNz) },
+                { cx + 2, cz + 2, quint8(BR::RailConnNx | BR::RailConnNz) },
+            };
+            for (const auto &c : wantC)
+                if (quint8(w.stateAt(c.x, kRigY, c.z) & 0x0F) != c.wantCon) ok = false;
+            if (!ok) qInfo().noquote() << "  t810 rig self-check failed (power/corner con)";
+            const auto isRing = [&](int x, int z) {
+                const int ax = std::abs(x - cx), az = std::abs(z - cz);
+                return std::max(ax, az) == 2;
+            };
+            MinecartManager carts;
+            carts.spawnCart(cx, kRigY, cz - 2, &w); // 北边中点（动力轨 EW 直位 → spawn 定向 ±X）
+            const QVector3D mountOrigin(float(cx) + 0.5f, float(kRigY) + 2.0f, float(cz - 2) + 0.5f);
+            ok = ok && carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+            // 相位：A 无输入巡航 [0,900)（proj≡0：修前弹射档接管 → 均衡速崩到 ~3；修后沿运动向全 boost
+            //   → 均衡 ~11）| B 滞后输入巡航 [900,1600)（wish 每 16 tick 重采车头向 —— 真实玩家过弯滞后）
+            //   | C 倒踩刹车 [1600,1660)（wish = 反车头向每 tick 跟随）| D 恢复 [1660,2000)（wish = 车头向）。
+            const int kLag = 16, kWarmup = 60, kNoInput = 900, kCruise = 1600, kBrake = 60, kRecover = 340;
+            float wishX = 0.0f, wishZ = 0.0f;
+            QVector3D prev = carts.posAt(0);
+            int lastBx = int(std::floor(prev.x())), lastBz = int(std::floor(prev.z()));
+            double sumA = 0.0, sumB = 0.0;
+            int nA = 0, nB = 0, laps = 0;
+            float minA = 1e9f, minB = 1e9f, maxRecoverV = 0.0f;
+            bool yOk = true, adjOk = true, brakeDipped = false;
+            // wish 采样保持：每 kLag tick 把 wish 重采为车头向（yaw 反推 dir —— 见头注释「从 yaw 采样」段）。
+            const auto headingWish = [&carts](float &wx, float &wz) {
+                const float yr = carts.yawAt(0) * 3.14159265358979f / 180.0f;
+                wx = -std::sin(yr);
+                wz = -std::cos(yr);
+            };
+            for (int t = 0; t < kCruise + kBrake + kRecover && ok; ++t) {
+                if (t < kNoInput) {
+                    wishX = 0.0f;
+                    wishZ = 0.0f; // A：无输入（proj≡0，纯动力轨维持力断言）
+                } else if (t < kCruise) {
+                    if (t % kLag == 0) headingWish(wishX, wishZ); // B：采样保持重采（滞后 ~0.26s）
+                } else if (t < kCruise + kBrake) {
+                    headingWish(wishX, wishZ); // C：反车头向每 tick 跟随（不受起步时刻过拐角巧合干扰）
+                    wishX = -wishX;
+                    wishZ = -wishZ;
+                } else {
+                    headingWish(wishX, wishZ); // D：车头向每 tick 跟随（proj≈1）
+                }
+                QVector3D cp;
+                carts.tickRiddenCart(0.016, &w, wishX, wishZ, cp);
+                carts.tickPushedCarts(0.016, &w);
+                const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
+                const float dl = std::sqrt(ddx * ddx + ddz * ddz);
+                const float v = dl / 0.016f;
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                if (!isRing(bx, bz)) {
+                    qInfo().noquote() << "  t810 cart left ring at tick" << t << "pos" << cp;
+                    ok = false;
+                    break;
+                }
+                if (std::fabs(cp.y() - (float(kRigY) + rideH)) > 0.01f) yOk = false;
+                if (bx != lastBx || bz != lastBz) {
+                    const int ndx = bx - lastBx, ndz = bz - lastBz;
+                    if (std::abs(ndx) + std::abs(ndz) != 1) adjOk = false; // 跨格必单位轴对齐
+                    if (bx == cx && bz == cz - 2 && t < kCruise) ++laps;   // 每入北边中点格 = 1 圈
+                    lastBx = bx; lastBz = bz;
+                }
+                if (t < kWarmup) {
+                    // 预热（起步加速不计曲线）
+                } else if (t < kNoInput) {
+                    sumA += double(v);
+                    ++nA;
+                    if (v < minA) minA = v;
+                } else if (t < kCruise) {
+                    sumB += double(v);
+                    ++nB;
+                    if (v < minB) minB = v;
+                } else if (t < kCruise + kBrake) {
+                    if (v < 7.0f) brakeDipped = true; // (d) 刹车压速（proj<0 不被 boost 角力）
+                } else if (t >= kCruise + kBrake + 60) {
+                    if (v > maxRecoverV) maxRecoverV = v; // (e) 恢复段峰值（留 60 tick 起步余量）
+                }
+                prev = cp;
+            }
+            const double meanA = nA > 0 ? sumA / double(nA) : 0.0;
+            const double meanB = nB > 0 ? sumB / double(nB) : 0.0;
+            // A 段：无输入均衡速 —— 修后动力段沿运动向全额 boost（拐角普通轨摩擦小谷）；修前弹射档 2.8
+            //   把均衡速崩到 ~2（实测 0.6/2.0 → 双断言锁）。B 段：滞后输入下均值仍近 boost 档（输入不打折
+            //   语义；修前滞窗动力格弹射档拉垮实测 minB 2.5/meanB 8.9）。阈值取修前修后实测值中位。
+            ok = ok && yOk && adjOk && nA > 0 && nB > 0
+                && minA >= 5.0f && meanA >= 8.0
+                && minB >= 6.0f && meanB >= 10.0
+                && laps >= 13 && brakeDipped && maxRecoverV >= 11.0f;
+            if (!ok)
+                qInfo().noquote() << "  t810 speed curve: minA" << minA << "meanA" << meanA
+                                  << "minB" << minB << "meanB" << meanB << "laps" << laps
+                                  << "yOk" << yOk << "adjOk" << adjOk << "brakeDipped" << brakeDipped
+                                  << "maxRecoverV" << maxRecoverV;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t810 powered-ring ridden speed curve (no-input + lagged input, was corner"
+                                 " collapse to catapult gear): minA" << minA << "meanA" << float(meanA)
+                              << "minB" << minB << "meanB" << float(meanB) << "laps" << laps
+                              << "; brake honored + recovers to boost";
+            // 清场（环 16 格 + 环内 8 红石块）
+            carts.clearAll();
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    if (std::max(std::abs(dx), std::abs(dz)) > 0)
+                        w.setBlock(cx + dx, kRigY, cz + dz, BR::Air);
+            tickN(w, 2);
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
