@@ -1056,6 +1056,12 @@ private:
     //   **t609 扩展**：压力板 4 水平邻格为**发射器或投掷器**均触发（同触发同冷却，机制等价 MC dropper /
     //   dispenser 同属机关）；投掷器走 dispenseFromDispenser 的 Dropper 分支（全部物品弹出掉落物，无
     //   fallback 箭——worldgen 不生成投掷器陷阱）。
+public:
+    // review24 #9 起为 public（同 firePowerTnt/fireDispenserAtQml 的 t814 先例——仅访问段平移，零行为
+    //   风险）：矩阵探针 C++ 直造本对象不启 16ms 定时器 → tick() 不跑 → 本函数开头的 per-dispenser
+    //   冷却递减永不被驱动（「2s 冷却」在探针里退化为 contains 即拦，kDispenserCooldown 回归改 0 探针
+    //   仍全 PASS）。探针直调本函数 = tick 的等价递减驱动（探针态 m_plateJustPressed 恒空 → 只推进冷却，
+    //   无实体物理副作用）。QML 侧本不受访问段限制，public 仅为 C++ 消费端（矩阵探针）直调。
     void scanDispenserTraps(float dt);
 public:
     // t656/t658 红石电力触发的 QML 入口（World 层 tickRedstone 检出通电上升沿发 powerTntTriggered /

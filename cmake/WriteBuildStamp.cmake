@@ -24,8 +24,9 @@ endif()
 # 同一分钟内的重复构建内容不变 → 不覆写 → 不重编（Exe 未变，stamp 亦无需变）。
 string(TIMESTAMP STAMP_VALUE "%Y-%m-%d %H:%M")
 
-# git 短哈希：构建时的 HEAD。git 缺失 / 非仓库时回退 "nogit"（构建不因此失败，
-# 但矩阵探针 t813 会 FAIL —— 开发机 git 必在，缺 git 属环境异常，诚实暴露优于静默糊弄）。
+# git 短哈希：构建时的 HEAD。git 缺失 / 非仓库 / 超时（TIMEOUT 5——仓库锁 / 杀软挂起时防 configure 与
+#   build target 两次执行无限卡死；超时 RESULT_VARIABLE 非 0 → 与缺 git 同走 nogit 回退）时回退 "nogit"
+#   （构建不因此失败；矩阵探针 t813 对 nogit 判 SKIP——环境缺失非格式回归，review24 低危对齐两层语义）。
 set(GIT_VALUE "nogit")
 execute_process(
     COMMAND git rev-parse --short HEAD
@@ -34,6 +35,7 @@ execute_process(
     RESULT_VARIABLE git_rc
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
+    TIMEOUT 5
 )
 if(git_rc EQUAL 0 AND NOT git_out STREQUAL "")
     set(GIT_VALUE "${git_out}")

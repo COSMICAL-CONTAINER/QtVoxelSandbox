@@ -372,6 +372,12 @@ constexpr bool kValidMobModelType[] = {
     /* 17 Emberling */   true,
     /* 18 Anvil 哨兵 */  false,
 };
+// review24 低危收尾（#35）：表长钉死到头常量（t782 根因复刻防线——MobType 枚举中部插值 / 尾部新增忘补
+//   表行时，本断言 + 矩阵探针「kValidMobTypeCount == EntityManager::MobAnvil+1」两级编译期拦截；Renderer
+//   在 Entities 之下不得 include entitymanager.h（PLAN §2），枚举侧互钉落在上层测试 TU）。MobType 实值经
+//   核：MobTest=0 .. MobAnvil=18 共 19 值（entitymanager.h）。
+static_assert(int(sizeof(kValidMobModelType) / sizeof(kValidMobModelType[0])) == MobModel::kValidMobTypeCount,
+              "kValidMobModelType 表长必须 == MobModel::kValidMobTypeCount——新增 mobType 须补表行 + 同步头常量");
 } // namespace
 
 void MobModel::setMobType(int type)

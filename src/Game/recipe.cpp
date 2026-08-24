@@ -1198,6 +1198,11 @@ static_assert(RecipeRegistry::DyeBlackId      == 0x25A, "DyeBlackId 须为染料
 //   QML 映射）。WoolId 0x20E 同步退役（保留常量 + 名字/图标/pack 映射兼容旧档；不再有任何掉落源 / 配方消费）。
 static_assert(BlockRegistry::Wool           == 27,    "Wool 方块 id 须与 Main.qml sheepWoolDropId 白羊毛字面量 27 一致");
 static_assert(BlockRegistry::FirstWoolVariant == 63,    "FirstWoolVariant 须与 Main.qml sheepWoolDropId 有色羊毛基址字面量 63 一致");
+// review24 低危收尾：上界 + 连续性补钉（旧只钉下界 63）——63..77 段紧邻床段，未来插入新方块 / 重排色序 →
+//   Main.qml FirstWoolVariant+idx-1 下标算术与 woolPalette 静默错色且矩阵全绿，两断言编译期拦下。
+static_assert(BlockRegistry::LastWoolVariant == 77,    "LastWoolVariant 须为有色羊毛段末位 77（与 Main.qml 有色羊毛段上界字面量一致）");
+static_assert(BlockRegistry::FirstWoolVariant + 14 == BlockRegistry::LastWoolVariant,
+              "15 色羊毛变体段须连续无洞（FirstWoolVariant+14 == LastWoolVariant）——段中插位 = 全部下标算术错位");
 static_assert(RecipeRegistry::WoolId        == 0x20E, "WoolId 保留 0x20E（t834 退役：仅旧档物品名/图标兼容，勿再接掉落或配方）");
 
 // t348 引擎材料段 id → MC Java 1.0.0 物品数字 id 对齐表（资源包前置；单一权威，与 docs/item-ids.md 材料 / mob

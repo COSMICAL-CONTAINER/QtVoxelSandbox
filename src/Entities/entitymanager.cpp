@@ -5577,8 +5577,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         if (std::abs(m.pos.z() - e.pos.z()) >= kAnvilCrushHalfW + m.halfW) continue;
                         if (m.pos.y() + m.halfH <= sweepLow - e.halfH
                             || m.pos.y() - m.halfH >= e.pos.y() + e.halfH) continue;
-                        damageEntity(mi, dmg); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
+                        // review24 低危收尾（#28 残口）：**先记账后扣血**——damageEntity 今日只 emit 不增删
+                        //   槽，但未来 QML handler 若同步 spawn 会 push_back realloc → 上面取的 `Entity &m`
+                        //   悬垂 UB；记账在前则「本落体已结算」事实先落盘（damageEntity 早退 / 命中 handler
+                        //   均无悬垂窗）。语义等价：旧版记账本就在 damage 无条件之后（不区分 damage 是否
+                        //   实际生效），换序不改变任何可达状态。
                         m.anvilCrushSerial = e.spawnSerial; // 按目标记账：本落体对它已结算（review #28）
+                        damageEntity(mi, dmg); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
                     }
                     if (playerTargetable && m_playerAnvilCrushSerial != e.spawnSerial) {
                         const float px = listener.x(), py = listener.y(), pz = listener.z();

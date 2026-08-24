@@ -857,6 +857,10 @@ target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Game
     ${CMAKE_CURRENT_SOURCE_DIR}/src/World
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
+    # review24 低危收尾（#35）：Renderer 头（mobmodel.h）——探针持「白名单长度 ↔ MobType 上界」跨层
+    #   static_assert（测试 TU 合法 include 全栈；Renderer 自身在 Entities 之下不得反向 include）。
+    #   只用头内 constexpr，不链 mobmodel.cpp、不引 Quick3D 符号。
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer
     # t813 生成的 build_stamps.h 搜索路径（buildinfo.cpp 消费；探针断言两宏格式）。
     ${VOXEL_GENERATED_DIR}
 )
@@ -867,6 +871,9 @@ target_link_libraries(redstone_matrix_test PRIVATE
     Qt6::Qml
     # t814 真消费端探针：PlayerController 是 QQuickItem 派生（Qt Quick）→ 链 Quick。
     Qt6::Quick
+    # review24 低危收尾（#35）：mobmodel.h（QQuick3DGeometry 派生）的 include 路径经 Quick3D target
+    #   传播——探针只用头内 constexpr 做跨层 static_assert，不调任何 Quick3D 符号。
+    Qt6::Quick3D
     # t822 存档 round-trip 探针：WorldStore 的 SQLite 落盘读回。
     Qt6::Sql
 )
