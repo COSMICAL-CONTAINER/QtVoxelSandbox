@@ -1432,6 +1432,73 @@ int main(int argc, char *argv[])
                              "dead + full restore (t755)";
     }
 
+    // ── t852 死亡掉落链探针（Game 层 PlayerController + Hotbar 直编，t814 真消费端模式；spawnItem 消费端
+    //    = Main.qml onSpawnItem → itemEntities.spawnItem 的等价直连计数）：
+    //    ① 四段全掉——hotbar 9 / main 27 / 光标手持栈 / 护甲 4 槽逐非空栈各发 1 个 spawnItem（整栈一实体，
+    //       3×3 邻域散布），附魔 / 实例名 / 耐久末三参全透传（死亡掉落再捡回保真的 C++ 本体面）；
+    //    ② 掉落即清——resetForMode(Survival) 后四段全空（用户报「死亡后背包物品都在、不掉落」的回归面在
+    //       QML 路由层：t690 曾在 onDied 写 `window.<面板id>`（QML id 非 Window 属性 → 恒 undefined →
+    //       TypeError 静默掐断死亡处理器）→ dropAllItems 从未被调。本探针锁 C++ 本体链恒掉恒清；QML 路由
+    //       修复的静态契约钉在 Main.qml onDied 头注释 + try/finally 收口，行为面人工目视）；
+    //    ③ 幂等——背包已空时再调零发射（死亡只掉一次，无重复实体）。
+    {
+        PlayerController pc;   // 无窗口直造（componentComplete 不触发，无 16ms 定时器；m_pos=出生常量 80,80,80）
+        Hotbar hb;
+        pc.setHotbar(&hb);
+        // 装填四段：hotbar 槽 0 = 泥土 64；槽 1 = 钻石剑（锐锋 III + 改名「屠龙」+ 磨损耐久 800）；
+        // main 槽 0 = 木棍 32；护甲槽 0 = 钻石头盔（保护 II + 耐久 300）；光标手持 = 石头 3。
+        const int sharp3   = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+        const int prot2    = EnchantRegistry::pack(int(EnchantRegistry::Protection), 2);
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const int diaHelm  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 0; // 钻石头盔（t763 同式）
+        hb.setStack(0, BR::Dirt, 64);
+        hb.setStack(1, diaSword, 1, 800, QVariantList{sharp3, 0, 0, 0}, QString::fromUtf8("屠龙"));
+        hb.mainSetStack(0, RecipeRegistry::StickId, 32);
+        hb.armorSetStack(0, diaHelm, 1, 300, QVariantList{prot2, 0, 0, 0}, QString());
+        hb.setHeldBlock(int(BR::Stone));
+        hb.setHeldCount(3);
+        // 消费端直连（等价 Main.qml onSpawnItem 转发；同线程直接连接 = QML handler 语义）：记录全参 + 落点。
+        QVector<int> gotId, gotCount, gotDur, gotX, gotZ;
+        QVector<QVariantList> gotEnch;
+        QVector<QString> gotName;
+        QObject::connect(&pc, &PlayerController::spawnItem, &pc,
+                         [&](int x, int, int z, int id, int count, const QVariantList &ench,
+                             const QString &name, int dur) {
+            gotX.push_back(x); gotZ.push_back(z);
+            gotId.push_back(id); gotCount.push_back(count);
+            gotEnch.push_back(ench); gotName.push_back(name); gotDur.push_back(dur);
+        });
+        pc.dropAllItems();   // 死亡本体链（Main.qml onDied 主链同调）
+        // ① 发射序列：hotbar（泥 64 → 剑 1）→ main（棍 32）→ held（石 3）→ armor（盔 1），逐栈一实体 +
+        //    剑 / 盔的附魔首元、实例名、磨损耐久逐参断言（t590/t622/t686 三参透传的死亡路径回归面）。
+        const bool emitOk = gotId.size() == 5
+                && gotId[0] == int(BR::Dirt) && gotCount[0] == 64
+                && gotId[1] == diaSword && gotCount[1] == 1
+                && gotDur[1] == 800 && gotEnch[1].size() == 4 && gotEnch[1][0].toInt() == sharp3
+                && gotName[1] == QString::fromUtf8("屠龙")
+                && gotId[2] == RecipeRegistry::StickId && gotCount[2] == 32
+                && gotId[3] == int(BR::Stone) && gotCount[3] == 3
+                && gotId[4] == diaHelm && gotCount[4] == 1
+                && gotDur[4] == 300 && gotEnch[4][0].toInt() == prot2;
+        // 散布面：死亡格（m_pos=80,80,80 → cx=cz=80）3×3 邻域内（|dx| ≤ 1 且 |dz| ≤ 1）。
+        bool scatterOk = emitOk;
+        for (int i = 0; i < gotX.size() && scatterOk; ++i)
+            scatterOk = std::abs(gotX[i] - 80) <= 1 && std::abs(gotZ[i] - 80) <= 1;
+        // ② 掉落即清：hotbar / main / 护甲三段全空 + 光标手持清（resetForMode(Survival) + heldStack 归零）。
+        const bool clearedOk = hb.blockIdAt(0) == 0 && hb.blockIdAt(1) == 0
+                && hb.mainBlockIdAt(0) == 0 && hb.armorBlockIdAt(0) == 0
+                && hb.heldBlock() == 0;
+        // ③ 幂等：空背包再调 → 零新发射（计数不变）。
+        pc.dropAllItems();
+        const bool idempotentOk = gotId.size() == 5;
+        const bool ok = emitOk && scatterOk && clearedOk && idempotentOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| death drop chain: hotbar+main+held+armor all scatter-dropped (3x3) with "
+                             "ench/name/durability passthrough, inventory cleared on drop, second call "
+                             "emits nothing (t852)";
+    }
+
     // ── t756 出生点选择探针（World 层 findSpawnColumn 多种子回归；独立小世界逐种子重生成，不动主世界
     //    rig）：种子 42（用户报告「出生在树里」的复现种子）+ 4 个互异回归种子，断言每个世界记录的出生列
     //    均为「可站立裸地表」：① 支撑格完整立方或积雪层（实体支撑，树叶/原木/草丛/水面薄物均不合规）；
