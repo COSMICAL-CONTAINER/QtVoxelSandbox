@@ -206,10 +206,7 @@ public:
 
 signals:
     void entitiesChanged(); // spawn / 未来 remove 触发；驱动 count/revision + QML 绑定刷新
-    // t804 掉落物火焚毁信号（焚毁瞬间 emit，实体槽已释放）：参数 = 焚毁时实体中心世界坐标。呈现层
-    //   （Main.qml Connections → particleLoader.burstDeathSmoke）据此在焚毁点迸白烟（同 mob 死亡烟模式，
-    //   机制等价 MC 掉落物在火中烧尽的烟）。岩浆瞬毁（t343）不发（岩浆吞物无烟，区别于火焚）。
-    void itemBurned(qreal x, qreal y, qreal z);
+    // （t804 itemBurned 火焚烟粒子信号已随 t844 需求反转退役：入火改瞬灭无动画无烟，与岩浆同款语义。）
 
 private:
     struct ItemEntity {
@@ -237,11 +234,7 @@ private:
         //   >0 = 显式保真，破箱掉落的磨损工具丢出再捡耐久不复原）。放 alive 之前（tail-default 契约同
         //   name）。显式默认 -1 抑制 -Wmissing-field-initializers。
         int durability = -1;
-        // t804 火焚倒计（秒；0 = 未触火）：实体中心格 == Fire 时置 kItemFireBurnSec 并逐帧递减，归零 →
-        //   焚毁（releaseSlot + emit itemBurned 烟粒子）；离开火格即清 0（未烧尽可存活——短窗内抢回 /
-        //   火被拆均能救，机制等价 MC 掉落物入火短暂燃烧后才消失；区别于岩浆瞬毁 t343）。放 alive 之前
-        //   （聚合初始化 {pos,itemId,count,spawnMs} 不显式列 → 取默认 0，tail-default 契约同上）。
-        float fireBurn = 0.0f;
+        // （t804 fireBurn 火焚倒计字段已随 t844 需求反转退役：入火改瞬灭，无点燃窗可倒计。）
         // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
         //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
         //   取默认 true（C++ 聚合初始化尾字段缺省即 default member init）。掉落物被拾取（removeAt /
@@ -335,10 +328,7 @@ private:
     //   maxStack，溢出走新 spawn）。合并方向：新 spawn 往已有实体合，不动已有 pos（避免视觉跳变）。
     //   kMergeRadius=2.0：2 格（爆炸散布广，1 格命中率低致顶满；2 格兼顾合并率与视觉聚集）。
     static constexpr float kMergeRadius = 2.0f;
-    // t804 火焚时长（秒）：掉落物中心进 Fire 格 → fireBurn 置此值并逐帧倒计，归零焚毁（releaseSlot +
-    //   emit itemBurned 烟粒子）。0.8s 窗内拾取 / 火被拆 / 被冲离火格均可救回（机制等价 MC 掉落物入火
-    //   短暂燃烧后才消失——「往火里丢东西别瞬间蒸发」的用户语义；区别于岩浆瞬毁 t343 不留窗）。
-    static constexpr float kItemFireBurnSec = 0.8f;
+    // （t804 kItemFireBurnSec 火焚时长常量已随 t844 需求反转退役：入火瞬灭无窗。）
 };
 
 #endif // ITEMENTITYMANAGER_H

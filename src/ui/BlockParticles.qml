@@ -394,6 +394,11 @@ Node {
             case 132: return "#7a7a7a" // monster_egg（怪物蛋，石砖灰；外表即石砖）
             // ── 云杉树叶（id 133）── t714 雪原云杉树冠针叶（深蓝绿）
             case 133: return "#3a6e55" // spruce_leaves（云杉树叶，深蓝绿针叶）
+            // ── 火焰（id 137）── t845 火灭粒子白修：火自熄 / 失撑熄灭 / 被挖扑灭走 blockBroken(137) →
+            //   burstBreak 碎屑色，余烬火 / 直燃立地火生成走 blockPlaced(137) → burstPlace——旧缺行落
+            //   default 白（t806 传送门同款病：新方块先显白 = 缺色信号）→ 补火焰橙红系主体色（对齐
+            //   build_fire.py orange=(232,96,16)=#e86010 外焰主色调）。
+            case 137: return "#e86010" // fire（火焰，外焰橙红）
             // ── t806 余烬门（id 138）── 门色紫：创建（burstPlace 逐门格）/ 破坏（burstBreak 直挖门格）粒子
             //   原走 default 白（t513 表缺行）→ 改门主体紫（tools/build_portal.py mid=(122,32,178)=#7a20b2
             //   条带主体色，对齐门方块紫漩涡贴图；余格连通域静默清不发粒子同画 t721 模式不变）。

@@ -2117,16 +2117,8 @@ Window {
     // 触发由 PlayerController 发 spawnItem 信号，下面 Connections 转发到 spawnItem()（单向事件流）。
     ItemEntityManager { id: itemEntities }
 
-    // t804 掉落物火焚烟粒子（itemBurned 语义事件 → 粒子呈现；单向事件流，PLAN §2 分层）：掉落物在
-    //   Fire 格烧尽（0.8s 点燃窗后焚毁）瞬间 ItemEntityManager 发 itemBurned(x,y,z) → 在焚毁点迸白烟
-    //   （burstDeathSmoke 同 mob 死亡烟模式；机制等价 MC 掉落物在火中烧尽的烟）。岩浆瞬毁（t343）不
-    //   发此信号（岩浆吞物无烟，两者语义刻意不同）。
-    Connections {
-        target: itemEntities
-        function onItemBurned(x, y, z) {
-            if (particleLoader.item) particleLoader.item.burstDeathSmoke(x, y, z)
-        }
-    }
+    // （t804 onItemBurned 火焚白烟粒子转发已随 t844 需求反转退役：入火改瞬灭无动画无烟——岩浆瞬灭
+    //   t343 同款语义，burstDeathSmoke 仅余 mob 死亡 / TNT 爆炸烟雾两个调用方。）
 
     // t95 统一实体管理器（Entities 层）：为后续 Mob/AI 系统铺垫的统一实体基类（pos / 半径 / 可推动
     // 标志 / 渲染外观）。本轮持有测试生物（pushable=true，纯色方块），玩家走碰可推动；掉落物
@@ -3805,6 +3797,14 @@ Window {
         //   chunk-mesh 烘焙子区）→ 必须 scaleV=1/N 把采样窗压到单帧高 + positionV=k/N 平移到帧 k。
         //   （水/岩浆 delegate 不存在——它们的 quad UV 已在 mesher 里烘焙为 v∈[0,1/N]，故只 positionV。）
         //   帧数 N=32 与 BlockRegistry::kFireStripFrames 同源单一权威（fireStripFrames CONSTANT）。
+        //   t842 顶部毛刺修（实测结论：qrc fire_strip.png 与包 fire_0.png 帧图**顶部两行均全透明**
+        //   〔PIL 逐帧测量，内容自第 2-3 行始、底行近满宽〕——毛刺不是帧画溢出，而是**采样窗上沿边界
+        //   混叠**：BillboardQuad 顶边几何 v=1 经 scaleV/positionV 映射恰落在窗界 (k+1)/N 上，Repeat
+        //   环绕下双线性滤波把**相邻帧（k+1 或环绕到 0）的近满宽不透明底行**掺进 quad 顶 1-2 屏幕像素
+        //   （α≈127 过 alphaCutoff 0.1 门）= 火焰上方悬浮的 2-3px「叉」痕。修法 = **帧窗上沿内收 1 纹素**
+        //   （1/(N·16)，16=帧行像素）：quad 顶边采样点退到窗界下方整纹素处，双线性 4 点全部落在本帧
+        //   顶部行内（实测全透明）→ 毛刺消失；底沿保持钉在 k/N 不动（火焰底行贴格底的既有观感零回归，
+        //   整帧内容仅纵向微拉伸 1/16 无感）。燃烧面火 overlay（burningDelegate）共享本纹理同享修复。
         Texture {
             id: fireStripTex
             source: resourcePack.fireStripSource
@@ -3812,6 +3812,7 @@ Window {
             tilingModeHorizontal: Texture.Repeat
             tilingModeVertical: Texture.Repeat
             scaleV: 1.0 / resourcePack.fireStripFrames
+                    - 1.0 / (resourcePack.fireStripFrames * 16) // t842 上沿内收 1 纹素（防窗界双线性混叠）
             positionV: window.fireAnimFrame / resourcePack.fireStripFrames
         }
         // t725 余烬门条带纹理（portalHost delegate 材质级 flipbook）：同 fireStripTex 模式（source 走
