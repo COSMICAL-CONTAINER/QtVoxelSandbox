@@ -717,7 +717,8 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   lightEmission 特例行返 15（见 lightEmission switch）。
     /* fire           */ {int(BlockRegistry::Fire),               0,  0, 0,  0, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),   0, false,                             0, 0,  0, "fire",         "火焰"},
     // ── t725 余烬门（NetherPortal；机制等价 MC 1.0 nether portal id 90，属性注释见 blockregistry.h Id 枚举
-    //   NetherPortal 行）：黑曜石门框（最小 4×5 外框 / 2×3 内腔）内点燃的非实体传送门面片格。tile 全 0
+    //   NetherPortal 行）：黑曜石门框（内腔 2×3 最小 .. 21×21 最大 = 外框 23×23 封顶，t806 泛化 + t848
+    //   上限对齐 MC 1.0）内点燃的非实体传送门面片格。tile 全 0
     //   （占位无消费方——渲染走 portalHost 独立 Texture portalStripSource 翻书条带，不进图集 / chunk mesh，
     //   mesher 双 PASS 跳过同 Fire t724 模式）；solid=false / ShapeNone（无碰撞可穿入、不挡邻居面剔除、
     //   不可选体）；hardness=0 瞬破（破任一门格 = 整门熄灭，连锁见 playercontroller finishMiningAt）、

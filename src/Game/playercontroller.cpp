@@ -1296,7 +1296,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedPaintingsAround(x, y, z);
     // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门（t806 自本类下沉
-    //   World::breakNetherPortalsAround 单一权威；尺寸无关——连通域天然覆盖 2×3..4×5 任意门）。破**黑曜石
+    //   World::breakNetherPortalsAround 单一权威；尺寸无关——连通域天然覆盖 2×3..21×21 任意门，t848）。破**黑曜石
     //   门框**任一承重格即断结构（门格只与门框格 / 门格相邻；角块与门格对角不邻 → 破角不碎门，与检测
     //   不查角两侧自洽）；破其它方块邻接门格（如门内放火把旁的门格）同样熄——门格邻格恒是结构格
     //   （黑曜石 / 门格 / 内腔空气），被破即失效，机制等价 MC 门框完整性。恒熄（含创造，结构后果非掉落，
@@ -1818,7 +1818,7 @@ void PlayerController::dropUnsupportedPaintingsAround(int x, int y, int z)
 }
 
 // t725→t806 余烬门三件套（tryIgniteNetherPortal 点燃检测 / removeNetherPortalAt 连通域熄灭 /
-//   breakNetherPortalsAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化内腔 2×3..4×5 +
+//   breakNetherPortalsAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 +
 //   四角可选；同末地门三件套模式）—— 实现见 world.cpp；调用点：placeBlock 打火石分支
 //   （World::tryIgniteNetherPortal）/ finishMiningAt 直挖门格分支（World::removeNetherPortalAt）。
 //   review #27：breakNetherPortalsAround 已并入 World 写入钩子族（setBlock×2 / setBlockSilent /
@@ -3566,8 +3566,9 @@ void PlayerController::placeBlock()
     //   打火石非方块（工具段 id>=0x100）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流
     //   （同桶 / 剪刀 / 玻璃模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可点火。
     //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
-    //   t725 余烬门优先：先 World::tryIgniteNetherPortal 检测黑曜石门框（t806 泛化：内腔 2×3 最小 ..
-    //   4×5 最大、四角可选，X/Z 平面各试）——命中 → 开口整面填 NetherPortal 门面（机制等价 MC 1.0
+    //   t725 余烬门优先：先 World::tryIgniteNetherPortal 检测黑曜石门框（t806 泛化 + t848 上限：内腔
+    //   2×3 最小 .. 21×21 最大 = 框外沿 23×23（MC 1.0 上限）、四角可选、边柱可共享，X/Z 平面各试）——
+    //   命中 → 开口整面填 NetherPortal 门面（机制等价 MC 1.0
     //   黑曜石框内点燃传送门，v1 仅 2×3 的检测已下沉 World 层单一权威）；未命中 → 回退普通 Fire 点燃
     //   （原 t724 语义不变）。两路均消耗耐久 / 挥手（机制等价 MC 点燃失败生火同样耗打火石）。
     //   t841/t846 前置守卫：命中已是立地火 / 燃烧态方块 → 幂等拒绝（不消耗不挥手，火上不可叠火）；命中

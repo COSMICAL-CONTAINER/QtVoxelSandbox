@@ -4758,8 +4758,10 @@ int main(int argc, char *argv[])
     // ── t806 余烬门尺寸泛化探针（World 层直调：点燃检测 / 连通域熄灭 t806 已自 PlayerController 下沉 World
     //    单一权威——同末地门三件套模式，矩阵可直编；粒子改门色紫是 QML blockColor 表（呈现层单一权威）→
     //    需人工目视，此处不测）：
-    //    ① 2×3 最小门（X 平面 / 带角）通过 + 门格恰 6 + state=0；② 4×5 最大门（Z 平面）通过 + 门格恰 20
-    //    （点燃填满整个开口）+ state=1；③ 超限拒：内腔 5 宽 / 6 高均拒且零门格；④ 缺角通过（MC 1.0 角块
+    //    ① 2×3 最小门（X 平面 / 带角）通过 + 门格恰 6 + state=0；② 4×5 门（Z 平面；t806 时代上限，t848
+    //    放宽后仅常规尺寸——更大门全覆盖在 t848 探针）通过 + 门格恰 20（点燃填满整个开口）+ state=1；
+    //    ③ 超限拒（t848 尺寸表）：内腔 22 宽 / 22 高均拒且零门格（t806 时代此处断言 5 宽 / 6 高拒——
+    //    t848 放宽后那些已是合法门，本 rig 世界的 32 高也放不下 22 高门 → 升 64）；④ 缺角通过（MC 1.0 角块
     //    可选）+ 破角不碎门（角块不承结构且与门格对角不邻）；⑤ 缺承重框格拒：底梁 / 顶梁 / 边柱各破一格
     //    均拒；⑥ 非矩形（腔内异物）拒；⑦ 低于最小（1 宽 / 2 高）拒；⑧ 点燃位无关性：4×5 开口四角 + 中部
     //    任一格点燃同成门；⑨ 破框碎门：破任一承重框格（镜像 finishMiningAt 的 setBlock(Air)+
@@ -4769,7 +4771,7 @@ int main(int argc, char *argv[])
         World w806;
         w806.setWidth(48);
         w806.setDepth(48);
-        w806.setHeight(32);
+        w806.setHeight(64); // t848：③ 超限样本升 22 高（清场盒 y 至 pY+25）→ 原 32 高放不下
         w806.setSeed(13);
         bool ok = true;
         const int pY = 20; // 门框基线层（开口 y=pY..pY+h-1；不轻信「y 以上必空」——buildFrame 先显式清场兜底）
@@ -4845,14 +4847,16 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        // ③ 超限拒：内腔 5 宽 / 6 高（超 4×5 上限）均拒且零门格。
+        // ③ 超限拒（t848 尺寸表）：内腔 22 宽 / 22 高（超 21×21 上限，框外沿 23×23 封顶）均拒且零门格。
+        //    t806 时代断言 5 宽 / 6 高拒——恰是用户「再大点不着」的设计根源（用户期望 MC 语义的更大门），
+        //    t848 放宽后移交本处只验新上限。
         {
-            buildFrame(8, 14, 1, 0, 5, 3, true); // 5 宽（X 平面）
-            bool bad = w806.tryIgniteNetherPortal(10, pY + 1, 14) || cellsInBox(8, 14, 1, 0, 5, 3) != 0;
-            buildFrame(8, 22, 1, 0, 2, 6, true); // 6 高
-            bad = bad || w806.tryIgniteNetherPortal(9, pY + 1, 22) || cellsInBox(8, 22, 1, 0, 2, 6) != 0;
+            buildFrame(8, 14, 1, 0, 22, 3, true); // 22 宽（X 平面）
+            bool bad = w806.tryIgniteNetherPortal(19, pY + 1, 14) || cellsInBox(8, 14, 1, 0, 22, 3) != 0;
+            buildFrame(8, 22, 1, 0, 2, 22, true); // 22 高
+            bad = bad || w806.tryIgniteNetherPortal(9, pY + 1, 22) || cellsInBox(8, 22, 1, 0, 2, 22) != 0;
             if (bad) {
-                qInfo().noquote() << "  [t806 diag] oversize 5w/6h not rejected";
+                qInfo().noquote() << "  [t806 diag] oversize 22w/22h not rejected";
                 ok = false;
             }
         }
@@ -4933,8 +4937,9 @@ int main(int argc, char *argv[])
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t806 portal frame generalization: ignite fills whole 2x3..4x5 inner opening "
-                             "(2x3 min X-plane 6 cells state=0 / 4x5 max Z-plane 20 cells state=1, ignition "
-                             "position-independent at 5 sample cells), oversized 5w/6h + below-min 1w/2h + "
+                             "(2x3 min X-plane 6 cells state=0 / 4x5 Z-plane 20 cells state=1, ignition "
+                             "position-independent at 5 sample cells), oversized 22w/22h (t848-era cap; "
+                             "t806-era 5w/6h now legal) + below-min 1w/2h + "
                              "non-rectangular + missing beam/pillar rejected with zero cells, corners optional "
                              "(cornerless 3x4 lights + corner break keeps door), frame-member break collapses "
                              "whole door via connected-domain clear (particle color = QML blockColor, manual "
@@ -7562,6 +7567,195 @@ int main(int argc, char *argv[])
                 for (int dy = 0; dy <= 3; ++dy)
                     w.setBlock(bx + dx, fy + dy, bz + dz, BR::Air, 0);
         tickN(w, 2);
+    }
+
+    // ── t848 余烬门尺寸上限 23×23 探针（World 层直调；t806 泛化门的用户实测回归）──
+    //   背景（用户 8-24 实测）：t806 内腔上限 4 宽×5 高，实测「最大只有 4×4 能点燃，再大激活不了」——
+    //   5 宽内腔在 ③ 量宽被旧上限 kMaxW-1=3 截断 → w 恒测 4 → ④ 右柱校验打到第 5 内腔列（空气格）判败。
+    //   t806 探针盲区 = ⑧ 只测「上限内 4×5 四角点燃位」、③ 反把 5 宽当「超限拒」断言——验的是「设计上限
+    //   合规」不是「用户期望的更大门」（用户期望 = MC 1.0 语义：内腔上限 21×21 / 框外沿 23×23）。
+    //   t848 修：内腔 2×3 最小 .. 21×21 最大（22+ 超限拒点）+ 相邻双门共用中间竖柱各自成门（柱检查只验
+    //   黑曜石不验独占）。rig 独立世界 64×64×64（21 高门 + 清场盒 ±3 需 y 5..32，t806 的 32 高 rig 放不下）：
+    //   ① 用户复现位 5×4 内腔（X 平面带角）→ 成门恰 20 格（修复前此位拒点 = 用户症状本体）；
+    //   ② 21×21 最大内腔 X 平面，点燃位 = 开口右上角（同时压满 ① 下探 21 步 + ② 左探 20 步两扫描上界）
+    //      → 成门恰 441 格（= 内腔面积）+ state=0；
+    //   ③ 21×21 最大内腔 Z 平面 → 成门恰 441 + state=1（正交轴向各证一次）；
+    //   ④ 超限拒：22 宽 / 22 高内腔均拒且零门格（量宽 / 量高 21 截断 → 柱 / 梁校验打内腔空气格）；
+    //   ⑤ 2×3 最小门仍可（放宽上限不动下限）；
+    //   ⑥ 共用竖柱双门：3×4 + 3×4 共享中柱 → 先点 A（B 侧零误填）→ 再点 B（A 门 12 格健在互不干扰）→
+    //      破共享柱中格 → 双门同熄（共享柱对两门都是承重格，批 F 熄灭钩子按连通域各自收域）；
+    //   ⑦ 缺角 21×21 最大门 → 成门 441（四角可选语义在超大门保持）；
+    //   ⑧ 破框碎门（批 F 钩子超大门回归）：⑦ 门破底梁中格（镜像 finishMiningAt setBlock(Air)+
+    //      breakNetherPortalsAround 序列）→ 整门 441 格全熄（连通域熄灭尺寸无关）。
+    {
+        World w848;
+        w848.setWidth(64);
+        w848.setDepth(64);
+        w848.setHeight(64);
+        w848.setSeed(13);
+        bool ok848 = true;
+        const int pY848 = 8; // 门框基线层（开口 y=pY848..pY848+h-1；清场盒兜底防地形干扰）
+        // 建门框（t806 buildFrame 同源，基线层换本 rig）：开口左下角 (x0,pY848,z0) 沿 u=(ux,uz) 展开
+        //   w 列 × h 层全 Air；底 / 顶梁（开口正下 / 正上各 w 格，不含角）+ 左右边柱（两翼各 h 格，不含角）
+        //   全黑曜石；corners=true 补四角。清场盒 = 框外沿 ±3 × 门法向 ±2（含 y ±(h+3)）。
+        const auto buildFrame848 = [&](int x0, int z0, int ux, int uz, int w, int h, bool corners) {
+            const int vx = uz, vz = ux; // 门法线向（清深 ±2）
+            for (int c = -3; c <= w + 3; ++c)
+                for (int r = -3; r <= h + 3; ++r)
+                    for (int d = -2; d <= 2; ++d)
+                        w848.setBlock(x0 + c * ux + d * vx, pY848 + r, z0 + c * uz + d * vz, BR::Air, 0);
+            for (int c = 0; c < w; ++c) {
+                w848.setBlock(x0 + c * ux, pY848 - 1, z0 + c * uz, BR::Obsidian, 0);
+                w848.setBlock(x0 + c * ux, pY848 + h, z0 + c * uz, BR::Obsidian, 0);
+            }
+            for (int r = 0; r < h; ++r) {
+                w848.setBlock(x0 - ux, pY848 + r, z0 - uz, BR::Obsidian, 0);
+                w848.setBlock(x0 + w * ux, pY848 + r, z0 + w * uz, BR::Obsidian, 0);
+            }
+            if (corners) {
+                const int cs[2] = {-1, w};
+                for (const int ci : cs)
+                    for (const int ry : {-1, h})
+                        w848.setBlock(x0 + ci * ux, pY848 + ry, z0 + ci * uz, BR::Obsidian, 0);
+            }
+        };
+        // 本 rig 清场盒内门格计数（t806 cellsInBox 同源；隔壁 rig 残留门不串数）。
+        const auto cellsInBox848 = [&](int x0, int z0, int ux, int uz, int w, int h) -> int {
+            int n = 0;
+            for (int c = -3; c <= w + 3; ++c)
+                for (int r = -3; r <= h + 3; ++r)
+                    for (int d = -2; d <= 2; ++d)
+                        if (w848.blockAt(x0 + c * ux + d * uz, pY848 + r, z0 + c * uz + d * ux)
+                            == BR::NetherPortal)
+                            ++n;
+            return n;
+        };
+
+        // ① 用户复现位：5×4 内腔（X 平面带角）开口中格点燃 → 成门恰 20 格。
+        {
+            buildFrame848(6, 6, 1, 0, 5, 4, true);
+            const bool lit = w848.tryIgniteNetherPortal(8, pY848 + 1, 6);
+            const int n = cellsInBox848(6, 6, 1, 0, 5, 4);
+            if (!lit || n != 20) {
+                qInfo().noquote() << "  [t848 diag] user-repro 5x4 interior:" << lit << "cells" << n;
+                ok848 = false;
+            }
+        }
+        // ② 21×21 最大内腔（X 平面带角），点燃位 = 开口右上角（压满两扫描上界）→ 441 格 + state=0。
+        {
+            buildFrame848(6, 16, 1, 0, 21, 21, true);
+            const bool lit = w848.tryIgniteNetherPortal(26, pY848 + 20, 16);
+            const int n = cellsInBox848(6, 16, 1, 0, 21, 21);
+            const int st = int(w848.stateAt(6, pY848, 16) & 1);
+            if (!lit || n != 441 || st != 0) {
+                qInfo().noquote() << "  [t848 diag] 21x21 X-plane max gate:" << lit << "cells" << n
+                                  << "state" << st;
+                ok848 = false;
+            }
+        }
+        // ③ 21×21 最大内腔（Z 平面带角），点燃位 = 开口中格 → 441 格 + state=1。
+        {
+            buildFrame848(34, 6, 0, 1, 21, 21, true);
+            const bool lit = w848.tryIgniteNetherPortal(34, pY848 + 10, 16);
+            const int n = cellsInBox848(34, 6, 0, 1, 21, 21);
+            const int st = int(w848.stateAt(34, pY848, 6) & 1);
+            if (!lit || n != 441 || st != 1) {
+                qInfo().noquote() << "  [t848 diag] 21x21 Z-plane max gate:" << lit << "cells" << n
+                                  << "state" << st;
+                ok848 = false;
+            }
+        }
+        // ④ 超限拒：内腔 22 宽 / 22 高（超 21×21 上限，框外沿 23×23 封顶）均拒且零门格。
+        {
+            buildFrame848(6, 40, 1, 0, 22, 3, true); // 22 宽（X 平面）
+            bool bad = w848.tryIgniteNetherPortal(17, pY848 + 1, 40)
+                       || cellsInBox848(6, 40, 1, 0, 22, 3) != 0;
+            buildFrame848(40, 40, 0, 1, 2, 22, true); // 22 高（Z 平面）
+            bad = bad || w848.tryIgniteNetherPortal(40, pY848 + 1, 41)
+                        || cellsInBox848(40, 40, 0, 1, 2, 22) != 0;
+            if (bad) {
+                qInfo().noquote() << "  [t848 diag] oversize 22w/22h not rejected";
+                ok848 = false;
+            }
+        }
+        // ⑤ 2×3 最小门（X 平面带角）→ 成门恰 6 格（放宽上限不动下限）。
+        {
+            buildFrame848(6, 48, 1, 0, 2, 3, true);
+            const bool lit = w848.tryIgniteNetherPortal(7, pY848 + 1, 48);
+            const int n = cellsInBox848(6, 48, 1, 0, 2, 3);
+            if (!lit || n != 6) {
+                qInfo().noquote() << "  [t848 diag] 2x3 min gate:" << lit << "cells" << n;
+                ok848 = false;
+            }
+        }
+        // ⑥ 共用竖柱双门：A（内腔 x sX..sX+2）与 B（x sX+4..sX+6）共享中柱 x=sX+3（各 3 宽×4 高，X 平面）。
+        //    两个 buildFrame848 的清场盒会互 wipe 邻门框 → 单清场盒 + 显式放 union 框。
+        {
+            const int sX = 12, sZ = 56;
+            for (int x = sX - 4; x <= sX + 11; ++x)
+                for (int y = pY848 - 4; y <= pY848 + 7; ++y)
+                    for (int z = sZ - 2; z <= sZ + 2; ++z)
+                        w848.setBlock(x, y, z, BR::Air, 0);
+            for (int g = 0; g < 3; ++g) { // 每门 3 内腔列的底 / 顶梁
+                w848.setBlock(sX + g, pY848 - 1, sZ, BR::Obsidian, 0);
+                w848.setBlock(sX + g, pY848 + 4, sZ, BR::Obsidian, 0);
+                w848.setBlock(sX + 4 + g, pY848 - 1, sZ, BR::Obsidian, 0);
+                w848.setBlock(sX + 4 + g, pY848 + 4, sZ, BR::Obsidian, 0);
+            }
+            for (int r = 0; r < 4; ++r) { // 三竖柱：A 左 / 共享 / B 右（各 h=4 格）
+                w848.setBlock(sX - 1, pY848 + r, sZ, BR::Obsidian, 0);
+                w848.setBlock(sX + 3, pY848 + r, sZ, BR::Obsidian, 0);
+                w848.setBlock(sX + 7, pY848 + r, sZ, BR::Obsidian, 0);
+            }
+            const auto countRect848 = [&](int x0, int w, int h) -> int { // 双门 interior 精确计数（X 平面）
+                int n = 0;
+                for (int c = 0; c < w; ++c)
+                    for (int r = 0; r < h; ++r)
+                        if (w848.blockAt(x0 + c, pY848 + r, sZ) == BR::NetherPortal) ++n;
+                return n;
+            };
+            const bool litA = w848.tryIgniteNetherPortal(sX + 1, pY848 + 1, sZ);
+            const int onlyA = countRect848(sX, 3, 4) + countRect848(sX + 4, 3, 4); // 点 A 后：A=12 / B=0
+            const bool litB = w848.tryIgniteNetherPortal(sX + 5, pY848 + 1, sZ);
+            const int bothA = countRect848(sX, 3, 4), bothB = countRect848(sX + 4, 3, 4); // 双门共存各 12
+            w848.setBlock(sX + 3, pY848 + 1, sZ, BR::Air, 0); // 破共享柱中格（finishMiningAt 同款先清格）
+            w848.breakNetherPortalsAround(sX + 3, pY848 + 1, sZ);
+            const int after = countRect848(sX, 3, 4) + countRect848(sX + 4, 3, 4); // 双门同熄归零
+            if (!litA || !litB || onlyA != 12 || bothA != 12 || bothB != 12 || after != 0) {
+                qInfo().noquote() << "  [t848 diag] shared-pillar double door: litA" << litA
+                                  << "litB" << litB << "afterA" << onlyA << "A" << bothA
+                                  << "B" << bothB << "afterBreak" << after;
+                ok848 = false;
+            }
+        }
+        // ⑦ 缺角 21×21 最大门（X 平面无角）→ 成门恰 441 格；⑧ 破底梁中格 → 整门全熄（批 F 钩子超大门回归）。
+        {
+            buildFrame848(24, 34, 1, 0, 21, 21, false);
+            const bool lit = w848.tryIgniteNetherPortal(34, pY848 + 10, 34);
+            const int n = cellsInBox848(24, 34, 1, 0, 21, 21);
+            if (!lit || n != 441) {
+                qInfo().noquote() << "  [t848 diag] cornerless 21x21 max gate:" << lit << "cells" << n;
+                ok848 = false;
+            }
+            w848.setBlock(34, pY848 - 1, 34, BR::Air, 0); // 底梁中格（finishMiningAt 同款先清格）
+            w848.breakNetherPortalsAround(34, pY848 - 1, 34);
+            if (cellsInBox848(24, 34, 1, 0, 21, 21) != 0) {
+                qInfo().noquote() << "  [t848 diag] max-gate beam break left"
+                                  << cellsInBox848(24, 34, 1, 0, 21, 21) << "cells";
+                ok848 = false;
+            }
+        }
+        if (!ok848) ++totalFail;
+        qInfo().noquote() << (ok848 ? "PASS" : "FAIL")
+                          << "| t848 portal size cap 23x23: interior 2x3..21x21 (frame outer 4x5..23x23 "
+                             "MC 1.0 cap; t806-era width-cap truncated measurement -> pillar probe hit "
+                             "interior air = user 'only 4x4 ignites'), user-repro 5x4 lights 20 cells, "
+                             "21x21 max lights on both planes 441 cells each (= interior area, top-right "
+                             "ignite pins 21-step down + 20-step left scan bounds), 22w/22h rejected "
+                             "zero cells, 2x3 min unchanged, shared middle pillar double door lights "
+                             "independently (12 then 12+12) and collapses together on shared-pillar "
+                             "break, cornerless 21x21 lights, bottom-beam break collapses whole "
+                             "441-cell door via write-family extinguish hook";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
