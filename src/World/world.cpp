@@ -2609,9 +2609,13 @@ void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
                                                 probe(1, 0), probe(-1, 0),
                                                 probe(0, 1), probe(0, -1));
     // t638：探测轨 bit4（通电视觉）/ t658 动力轨 bit4（通电贴图）不参与连接 —— 合并回写（连接重算不清
-    //   「被压过」/「通电」亮态标记）。t666：轴偏好位 bit5 守恒写回（孤轨轴向保活）。
+    //   「被压过」/「通电」亮态标记）。t666：轴偏好位 bit5 守恒写回（孤轨轴向保活）。t812：转辙器位
+    //   bit6（弯向记忆）/ bit7（通电记忆）守恒写回——T 交叉的切弯记忆不被邻块编辑重算冲掉（动力 / 探测
+    //   轨 bit6/7 恒 0，并入无害）。
     const quint8 preserved = quint8(curState
         & (BlockRegistry::RailAxisEWFlag
+           | BlockRegistry::RailSwitchCurveFlag
+           | BlockRegistry::RailSwitchPoweredFlag
            | (rb == BlockRegistry::DetectorRail ? BlockRegistry::DetectorRailStateOnFlag : 0)
            | (rb == BlockRegistry::GoldenRail ? BlockRegistry::GoldenRailStateOnFlag : 0)));
     con = quint8(con | preserved);
@@ -2942,6 +2946,9 @@ bool World::isPowerFamilyBlock(quint8 id)
         || id == BR::RedstoneTorch                       // 反相电源（t657）
         || id == BR::RedstoneLamp                        // 接收器：灯（t658）
         || id == BR::GoldenRail                          // 接收器：动力轨（t658）
+        || id == BR::Rail                                // 接收器：普通轨 T 交叉转辙器（t812；非转辙器
+                                                         //   形态接收器分支 no-op——入族保编辑可达性，
+                                                         //   同动力轨全族入族先例）
         || BR::isTnt(id)                                 // 接收器：TNT（t658）
         || BR::isDispenser(id) || BR::isDropper(id)      // 接收器：发射器 / 投掷器（t658）
         || id == BR::IronDoor                            // 接收器：铁门（t722，仅红石驱动开合）
@@ -3228,7 +3235,9 @@ bool World::recomputePowerLocal()
         if (BlockRegistry::isTnt(b) || BlockRegistry::isRedstoneLamp(b) || b == BlockRegistry::GoldenRail
             || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b)
             || b == BlockRegistry::IronDoor            // t722 铁门（仅红石驱动开合；上下两格各自入集，接收器分支内同翻）
-            || b == BlockRegistry::IronTrapdoor)       // t723 铁活板门（仅红石驱动开合；单格）
+            || b == BlockRegistry::IronTrapdoor        // t723 铁活板门（仅红石驱动开合；单格）
+            || b == BlockRegistry::Rail)               // t812 普通轨转辙器（T 交叉升沿切弯；非转辙器
+                                                       //   形态分支内 no-op）
             receivers.insert(packGrowthCell(x, y, z));
     };
     for (const quint64 k : region) {
@@ -3358,6 +3367,38 @@ bool World::recomputePowerLocal()
             if (on != powered) {
                 m_chunks.setBlock(x, y, z, b, quint8(powered ? (st | 1) : (st & quint8(~1))));
                 any = true;
+            }
+        } else if (b == BlockRegistry::Rail) {
+            // t812 普通轨 T 交叉转辙器（机制等价 MC 1.0 rail junction：岔尖与贯穿轴某一侧连成弯，红石
+            //   切到另一侧，断电保持位置不回弹）。上升沿（bit7 通电记忆 0→1）→ railSwitchToggledState
+            //   切弯（bit6 翻转 + 连接位重写；Core 单一权威，与 railConnections T 分支同布局分解）；
+            //   下降沿只清 bit7 弯向保持。非转辙器形态（直 / 拐角 / 四向全连——0/1/2/4 臂）helper 返
+            //   原 state → no-op（电力对普通轨仅 T 交叉生效）。连接位变化经 m_chunks.setBlock 标脏 +
+            //   tickRedstone 末尾 worldChanged → mesher 象限 / 矿车 pickTrackStep 同帧读到新弯向（三
+            //   消费端同源 state，t771 架构）。源覆盖 = isReceivingPower（红石块 / 火把 / 拉杆 / 按钮 /
+            //   压力板 / 粉，6 正交邻）——本层一处接入全源生效。
+            const bool was = (st & BlockRegistry::RailSwitchPoweredFlag) != 0;
+            if (powered != was) {
+                const quint8 ns = powered
+                    ? BlockRegistry::railSwitchToggledState(
+                          b, st, true,
+                          BlockRegistry::RailProbe{ m_chunks.blockAt(x + 1, y, z),
+                                                    m_chunks.blockAt(x + 1, y + 1, z),
+                                                    m_chunks.blockAt(x + 1, y - 1, z) },
+                          BlockRegistry::RailProbe{ m_chunks.blockAt(x - 1, y, z),
+                                                    m_chunks.blockAt(x - 1, y + 1, z),
+                                                    m_chunks.blockAt(x - 1, y - 1, z) },
+                          BlockRegistry::RailProbe{ m_chunks.blockAt(x, y, z + 1),
+                                                    m_chunks.blockAt(x, y + 1, z + 1),
+                                                    m_chunks.blockAt(x, y - 1, z + 1) },
+                          BlockRegistry::RailProbe{ m_chunks.blockAt(x, y, z - 1),
+                                                    m_chunks.blockAt(x, y + 1, z - 1),
+                                                    m_chunks.blockAt(x, y - 1, z - 1) })
+                    : quint8(st & quint8(~BlockRegistry::RailSwitchPoweredFlag)); // 降沿：只清记忆，不回弹
+                if (ns != st) {
+                    m_chunks.setBlock(x, y, z, b, ns);
+                    any = true;
+                }
             }
         } else if (BlockRegistry::isTnt(b)) {
             // t658 TNT：通电**上升沿**触发一次（点燃后清 Air 由信号消费端做——同一链路防双触发）。
