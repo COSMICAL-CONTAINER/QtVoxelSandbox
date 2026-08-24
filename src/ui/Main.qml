@@ -2875,21 +2875,31 @@ Window {
                 readonly property real bowPullZ: player.bowDrawing ? player.bowDrawProgress * 0.06 : 0.0
                 eulerRotation: Qt.vector3d(viewModelHand.baseTilt + viewModelHand.swingAngle + viewModelHand.eatTilt + viewModelHand.bowPullTilt, 0, 0)
 
-                // 上臂袖段（t73 蓝袖子）：覆盖肩-肘（上半段），上衣色 #3a6a9a（hurtTint 0.227/0.416/0.604，与
-                //   第三人称左/右臂袖段同色）。原第一人称手臂单肉色无袖子（蓝袖子只在第三人称）→ 加此段对齐。
-                //   作 viewModelHand 子节点 → 随挥动同步旋转。UnitCube + NoLighting（同地形/线框已验证可见路径）。
+                // t855 整臂皮肤盒（旧蓝袖 + 肤色两 UnitCube 段退役）：第一人称手臂改 PlayerSkinBox{piece:2}
+                //   （arm 区 box-UV 覆盖整臂——上段袖纹素 + 底 ~2px 行手纹素，同第三人称左右臂整臂盒）+
+                //   playerSkinTex / skinIsSlim（= 第三人称同一贴图源 + 同 slim/classic 判定 → /skin 切肤 /
+                //   pack 开关 / Alex 3px 臂布局三态即时同步；旧两段固定色不随皮肤选 =「手持模型与当前皮肤
+                //   不同步」根因）。挥手/进食/拉弓动画驱动本 Node（swingAngle/eatDropY/bowPull*）→ 皮肤臂
+                //   作为子节点自动跟随（挥手与皮肤同源）。
+                // 几何对齐旧两段合并包络（袖 y∈[-0.19,-0.01] ∪ 手 y∈[-0.06,0.10] → 中心 -0.045 长 0.29；
+                //   粗 0.12 沿用 t81 加粗观感，z 深度未动 → 不穿模契约不变）。eulerRotation.x=180：皮肤盒
+                //   local +Y = 袖端（肩），第一人称手臂从屏幕下缘伸出 = 袖在下、手在上 → 翻转使手纹素
+                //   （strip 底行）朝 +Y（上/前）。tint 同第三人称皮肤件（近白透贴图 + hurt 红闪）。
                 Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0, -0.10, 0)     // t91：袖段下移（旧 +0.02 在上=右上蓝，应袖近躯干在下）
-                    scale: Qt.vector3d(0.12, 0.18, 0.12)   // t81：加粗（0.09→0.12），手明显变大（零穿模：z 深度未动）
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.227, 0.416, 0.604) }
-                }
-                // 前臂/手（肤色 #caa472；肘下手段）。原整臂一色，t73 拆为袖+手两段（上半蓝袖、下半肤色手）。
-                Model {
-                    geometry: UnitCube {}
-                    position: Qt.vector3d(0, 0.02, 0)     // t91：手段上移（旧 -0.10 在下，应手前伸在上=左上肤色）
-                    scale: Qt.vector3d(0.11, 0.16, 0.11)  // t81：加粗+加长 Y（0.085/0.12→0.11/0.16），手变长变大
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 0.792, 0.643, 0.447) }
+                    geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
+                    position: Qt.vector3d(0, -0.045, 0)
+                    eulerRotation: Qt.vector3d(180, 0, 0)
+                    scale: Qt.vector3d(0.12, 0.29, 0.12)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0)
+                        baseColorMap: playerSkinTex
+                        // t855 alpha 契约（同手持 billboard）：<1 强制走透明通道 → 贴图 alpha 被尊重——
+                        //   slim/classic 布局差列（demo 包 alex u[54,56) alpha=0 但 RGB=steve 肤色）不再以
+                        //   Opaque 路径整列显成「一半 Steve 一半 Alex」的鬼影列；正常不透明纹素零影响。
+                        alphaCutoff: 0.5
+                        opacity: 0.99
+                    }
                 }
                 // 手持方块（t73 可见性修复；t156 位置重定）：持有方块（selectedBlock≠0）时，手前显该方块。
                 //   t156：手臂 baseTilt 由 100° 改 -34.56° 后，旧 z=-0.11 在屏幕上落到「手下方」（绕肩旋转使
@@ -3982,6 +3992,11 @@ Window {
         // t731 玩家皮肤贴图（playerModel 全部件共享单实例；CharacterPreview3D 预览另持独立实例——Texture 是
         //   场景资源不跨 View3D 共享）：source 两态 pack/程序（skinFinalUrl），/skin 换肤（skinName 变）或
         //   pack 开关（activeChanged）→ 绑定重算即时刷新。运行期读本地 gitignored pack PNG（红线 §9）。
+        //   t855 三消费端同源：第三人称左右臂 + 第一人称 viewModelHand 皮肤臂（+ 其挥手动画随 Node 自动
+        //   跟随）全读本实例 + skinIsSlim() 同判定——杜绝「左右臂/手持与当前皮肤不同步」。t855 alpha 契约：
+        //   消费材质 alphaCutoff 0.5 + opacity 0.99（观察者半透除外）——slim/classic 布局差列（如 demo 包
+        //   alex u[54,56)：alpha=0 但 RGB=steve 肤色）Opaque 路径会整列显成异色鬼影（「后臂一半 Steve 一半
+        //   Alex」现象类），透明通道下被 alpha 正确丢弃。
         Texture { id: playerSkinTex; source: window.skinFinalUrl(); generateMipmaps: false }
 
         // t218 火把手持/掉落贴图：火把在世界内是异形（torchHost 木柄+火焰小立方，非 1×1×1 立方体），
@@ -4590,7 +4605,7 @@ Window {
                         geometry: PlayerSkinBox { piece: 0 }
                         position: Qt.vector3d(0, 0.25, 0)
                         scale: Qt.vector3d(0.5, 0.5, 0.5)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                     }
                     // t377/t452/t498/t718 头盔（装备槽 0）：作 headNode 子节点 → 随头部俯仰。visible 绑装备槽 0 是否有护甲。
                     //   t718 升级 layer 贴图壳：几何换 ArmorLayerBox{piece:0}（±0.5 单位盒 + MC armor layer_1
@@ -4635,7 +4650,7 @@ Window {
                     geometry: PlayerSkinBox { piece: 1 }
                     position: Qt.vector3d(0, 0.35, 0)
                     scale: Qt.vector3d(0.5, 0.7, 0.3)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                 }
                 // t377/t452/t498/t718 胸甲（装备槽 1）：作 upperBody 子节点 → 随鞠躬前倾。t452 放大包裹躯干
                 //   （X 探 0.04 / Y 探 0.02 / Z 探 0.07）；t718 几何换 ArmorLayerBox{piece:1}（layer_1 胸甲区
@@ -4673,13 +4688,13 @@ Window {
                     }
                     // t731 整臂皮肤盒（袖+手两 Model 合并）：皮肤 arm 区 (40,16) 4×12×4 覆盖整臂含手（底部
                     //   ~2px 行即手区），分两 Model 采样会切断袖→手纹素连续 → 单整臂盒 piece:2。区间 = 旧袖
-                    //   span(-0.5..0) ∪ 旧手 span(-0.5..-0.7) → 中心 -0.35、长 0.7；护甲袖 (0.30,0.52,0.30)
-                    //   包上臂不变（t718 盔甲层照常叠显/遮挡）。
+                    //   span(-0.5..0) ∪ 旧手 span(-0.5..-0.7) → 中心 -0.35、长 0.7；护甲袖 (t854 起全臂高
+                    //   (0,-0.35)@(0.30,0.74,0.30)，见下方袖壳注)。
                     Model {
                         geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                     }
                     // t498 二轮复盘/t718：左臂胸甲袖（装备槽 1 胸甲覆盖手臂；机制等价 MC 1.0 chestplate 覆盖躯干+双臂）。
                     //   作 leftArmPivot 子节点 → 随左臂行走摆动。略大于袖段（X/Z 探 0.02 包裹袖）。t718 几何换
@@ -4691,8 +4706,11 @@ Window {
                         property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(1) : 0
                         visible: armId !== 0
                         geometry: ArmorLayerBox { piece: 2 }
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.30, 0.52, 0.30)
+                        // t854 MC 语义对齐：胸甲袖 = 全臂高（MC layer_1 袖盒 4×12×4 与臂同高 12px，铁甲袖
+                        //   到腕）；旧 (0,-0.25)@(0.30,0.52,0.30) 只盖上臂 ~73% → 臂盒 (0,-0.35)@(0.25,0.7,0.25)
+                        //   改同位全包 + 各向外扩 ~0.02（两端探 0.02 盖肩帽/腕口，同躯干壳口径）。
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.30, 0.74, 0.30)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: playerModel.armorTintT(playerModel.hurt)
@@ -4719,7 +4737,7 @@ Window {
                         geometry: PlayerSkinBox { piece: 2; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.35, 0)
                         scale: Qt.vector3d(0.25, 0.7, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                     }
                     // t498 二轮复盘/t718：右臂胸甲袖（同左臂 playerArmorSleeveL，镜像；覆盖右袖，随右臂行走/挖掘挥动）。
                     //   t718 几何换 ArmorLayerBox{piece:2} + layer 贴图（同左袖）。
@@ -4728,8 +4746,11 @@ Window {
                         property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(1) : 0
                         visible: armId !== 0
                         geometry: ArmorLayerBox { piece: 2 }
-                        position: Qt.vector3d(0, -0.25, 0)
-                        scale: Qt.vector3d(0.30, 0.52, 0.30)
+                        // t854 MC 语义对齐：胸甲袖 = 全臂高（MC layer_1 袖盒 4×12×4 与臂同高 12px，铁甲袖
+                        //   到腕）；旧 (0,-0.25)@(0.30,0.52,0.30) 只盖上臂 ~73% → 臂盒 (0,-0.35)@(0.25,0.7,0.25)
+                        //   改同位全包 + 各向外扩 ~0.02（两端探 0.02 盖肩帽/腕口，同躯干壳口径）。
+                        position: Qt.vector3d(0, -0.35, 0)
+                        scale: Qt.vector3d(0.30, 0.74, 0.30)
                         materials: PrincipledMaterial {
                             lighting: PrincipledMaterial.NoLighting
                             baseColor: playerModel.armorTintT(playerModel.hurt)
@@ -5009,7 +5030,7 @@ Window {
                     geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                 }
                 // t377/t452/t718 左护腿-大腿段（装备槽 2）：作大腿枢轴子节点 → 随大腿行走 / 蹲下摆动。t452 放大
                 //   （X/Z 探 0.025、Y 探 0.02）使第三人称可见；小腿段见 leftKneePivot 内 playerArmorCalfL（MC 护腿
@@ -5043,7 +5064,7 @@ Window {
                         geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                     }
                     // t452/t718 左护腿-小腿段（装备槽 2）：作膝盖枢轴子节点 → 随小腿 / 蹲下弯折。与大腿段 playerArmorLegL
                     //   共享装备槽 2（护腿覆盖整条腿）；放大同大腿段（探 0.025），第三人称小腿护甲清晰可见。t718 几何换
@@ -5099,7 +5120,7 @@ Window {
                     geometry: PlayerSkinBox { piece: 3; subV0: 0; subV1: 0.5; slim: window.skinIsSlim() }
                     position: Qt.vector3d(0, -0.15, 0)
                     scale: Qt.vector3d(0.25, 0.3, 0.25)
-                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                 }
                 // t377/t452/t718 右护腿-大腿段（装备槽 2）：镜像左大腿护腿（t452 放大；小腿段见 rightKneePivot）。
                 //   t718 几何换 ArmorLayerBox{piece:3} + layer 贴图（同左侧）。t498 绑定改表达式形式（见头盔注）。
@@ -5128,7 +5149,7 @@ Window {
                         geometry: PlayerSkinBox { piece: 3; subV0: 0.5; subV1: 1; slim: window.skinIsSlim() }
                         position: Qt.vector3d(0, -0.15, 0)
                         scale: Qt.vector3d(0.25, 0.3, 0.25)
-                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; opacity: playerModel.bodyOpacity }
+                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0); baseColorMap: playerSkinTex; alphaCutoff: 0.5; opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity }
                     }
                     // t452/t718 右护腿-小腿段（装备槽 2）：镜像左小腿护腿（随小腿 / 蹲下弯折；与右大腿段共享槽 2）。
                     //   t718 几何换 ArmorLayerBox{piece:3} + layer 贴图（同左侧）。
@@ -7295,7 +7316,44 @@ Window {
                                     property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
                                     visible: armId !== 0
                                     geometry: ArmorLayerBox { piece: 1 }
-                                    position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.48, 0.50, 0.30)
+                                    // t854 躯干壳全盖：MobModel mobType 4 躯干心 (0,0.05) 半 (0.22,0.30,0.12)
+                                    //   → y∈[-0.25,0.35]。旧 (0,0.12)@(0.48,0.50,0.30) 只盖 y∈[-0.13,0.37]
+                                    //   （肚段 [-0.25,-0.13] 露本体）→ 改同位全高 0.60+探 0.04（X/Z 同口径外扩）。
+                                    position: Qt.vector3d(0, 0.05, 0); scale: Qt.vector3d(0.48, 0.64, 0.30)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(mobArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                // t854 胸甲袖壳（piece 2 × 2，绑胸甲槽）：MC layer_1 胸甲 = 躯干+双臂一体壳——
+                                //   旧版 mob 只画躯干壳（「胸甲没覆盖手臂」）→ 补双袖。Shambler 双臂前伸横置
+                                //   （mobmodel.cpp 臂盒心 (±0.33,0.23,-0.37) 半 (0.10,0.10,0.25)，静态僵尸姿态）
+                                //   → 袖壳同位包裹，eulerRotation.x=90° 使袖条带 12px 高轴沿臂长（local +Y =
+                                //   袖肩端 → 世界 +Z 朝躯干侧）+ 各向外扩 ~0.02（layer 外扩语义）。材质同胸甲
+                                //   （layer_1 臂区 box-UV），机制等价 MC 僵尸甲袖随前伸臂。
+                                Model { // 左胸甲袖（随左前伸臂）
+                                    visible: mobArmorChest.armId !== 0
+                                    geometry: ArmorLayerBox { piece: 2 }
+                                    position: Qt.vector3d(-0.33, 0.23, -0.37)
+                                    eulerRotation: Qt.vector3d(90, 0, 0)
+                                    scale: Qt.vector3d(0.24, 0.54, 0.24)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(mobArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                Model { // 右胸甲袖（镜像）
+                                    visible: mobArmorChest.armId !== 0
+                                    geometry: ArmorLayerBox { piece: 2 }
+                                    position: Qt.vector3d(0.33, 0.23, -0.37)
+                                    eulerRotation: Qt.vector3d(90, 0, 0)
+                                    scale: Qt.vector3d(0.24, 0.54, 0.24)
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
                                         baseColor: mobArmorTintT(index)
@@ -7308,9 +7366,9 @@ Window {
                                 //   烘焙在几何里 → 护腿/靴为静态盒（近似的视觉提示）」）→ 用户「盔甲像固定没跟腿动画」。
                                 //   修：分左/右两腿各作「髋枢 Node」子节点 —— 枢 y=−0.25 与 mobmodel.cpp mobType 4
                                 //   （Shambler）腿枢 hipY 一致，eulerRotation.x = mobArmorLegSwingDeg(walkPhase, ±1) 与
-                                //   MobModel 几何腿同幅同相（同一量化相位，见 mobArmorLegSwingDeg 注释）。盒位/尺寸沿用
-                                //   旧静态盒（护腿整块 (0,-0.30,0)@(0.46,0.40,0.26) / 靴 (0,-0.82,0)@(0.46,0.16,0.26)）
-                                //   按腿拆半到腿心 ±0.11、半宽 0.10（贴 Shambler 腿几何 half 0.11）。随枢旋转 → 腿摆时
+                                //   MobModel 几何腿同幅同相（同一量化相位，见 mobArmorLegSwingDeg 注释）。盒位/尺寸
+                                //   t560 期沿用旧静态盒按腿拆半；t854 按 MC layer_1 腿件语义重定（全腿高，见各盒
+                                //   行内注）。随枢旋转 → 腿摆时
                                 //   盔甲同步摆动（不再固定）。NoLighting（红线）；t719 几何换 ArmorLayerBox{piece:3/4/5}
                                 //   + layer 贴图（护腿 layer_1 腿区、靴 layer_2 右/左靴区——MC 靴独立层）。
                                 Node { // 左腿盔甲枢轴（髋 y=−0.25；腿心 x=−0.11）
@@ -7324,7 +7382,7 @@ Window {
                                     Model { // 左护腿
                                         visible: parent.legArmId !== 0
                                         geometry: ArmorLayerBox { piece: 3 }
-                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.20, 0.40, 0.26)
+                                        position: Qt.vector3d(0, -0.325, 0); scale: Qt.vector3d(0.26, 0.70, 0.28)   // t854 全腿高：腿 local y∈[0,-0.65]（髋枢到腿底）→ 壳同位全高 0.65+探 0.05；旧 (0,-0.05)@(0.20,0.40,0.26) 只盖髋下 40% 且 X 比腿（0.22）还窄
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7336,7 +7394,7 @@ Window {
                                     Model { // 左靴
                                         visible: parent.bootArmId !== 0
                                         geometry: ArmorLayerBox { piece: 5 }
-                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.20, 0.16, 0.26)
+                                        position: Qt.vector3d(0, -0.50, -0.03); scale: Qt.vector3d(0.26, 0.34, 0.30)   // t854 靴=脚+踝段（比腿件短、包住脚部）：y∈[-0.67,-0.33] 盖腿底 0.65-0.33 踝段；z 前探 0.03 成靴头（同玩家靴先例）；旧 (0,-0.57)@(0.20,0.16,0.26) 只盖脚底 0.16 一小截
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7357,7 +7415,7 @@ Window {
                                     Model { // 右护腿
                                         visible: parent.legArmId !== 0
                                         geometry: ArmorLayerBox { piece: 3 }
-                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.20, 0.40, 0.26)
+                                        position: Qt.vector3d(0, -0.325, 0); scale: Qt.vector3d(0.26, 0.70, 0.28)   // t854 全腿高：腿 local y∈[0,-0.65]（髋枢到腿底）→ 壳同位全高 0.65+探 0.05；旧 (0,-0.05)@(0.20,0.40,0.26) 只盖髋下 40% 且 X 比腿（0.22）还窄
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7369,7 +7427,7 @@ Window {
                                     Model { // 右靴
                                         visible: parent.bootArmId !== 0
                                         geometry: ArmorLayerBox { piece: 4 }
-                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.20, 0.16, 0.26)
+                                        position: Qt.vector3d(0, -0.50, -0.03); scale: Qt.vector3d(0.26, 0.34, 0.30)   // t854 靴=脚+踝段（比腿件短、包住脚部）：y∈[-0.67,-0.33] 盖腿底 0.65-0.33 踝段；z 前探 0.03 成靴头（同玩家靴先例）；旧 (0,-0.57)@(0.20,0.16,0.26) 只盖脚底 0.16 一小截
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7742,6 +7800,24 @@ Window {
                                             }
                                         }
                                     }
+                                    // t854 右胸甲袖壳（piece 2，绑胸甲槽 bonesArmorChest）：右臂随瞄准绕本枢
+                                    //   addBoxRot 抬起（mobmodel.cpp review M10）→ 袖壳挂**同一肩枢 Node** 同枢
+                                    //   同角 → 刚体随臂+弓抬起（不挂则满拉时臂转出袖、袖浮在垂手位）。臂心相对
+                                    //   肩枢 = (0.20,-0.045,-0.02)−(0.20,0.28,-0.02) = (0,-0.325,0)；竖臂 →
+                                    //   无旋转（同左侧袖）；全高 0.65+探 0.05、粗 0.10+外扩 0.04。
+                                    Model {
+                                        visible: bonesArmorChest.armId !== 0
+                                        geometry: ArmorLayerBox { piece: 2 }
+                                        position: Qt.vector3d(0, -0.325, 0)
+                                        scale: Qt.vector3d(0.14, 0.70, 0.14)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: mobArmorTintT(index)
+                                            baseColorMap: window.armorLayerTex(bonesArmorChest.armId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
+                                    }
                                 }
                                 // t377/t719 Bones 随机护甲（4 部位；同 Shambler，但 Bones 身形瘦 → 护甲盒按比例缩窄，贴骨身）。
                                 //   作 mob Model 子节点继承 bodyYaw + 父 visible；MobModel 局部坐标（瘦躯干 half 0.14 / 细腿 0.06）。
@@ -7766,7 +7842,27 @@ Window {
                                     property int armId: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
                                     visible: armId !== 0
                                     geometry: ArmorLayerBox { piece: 1 }
-                                    position: Qt.vector3d(0, 0.12, 0); scale: Qt.vector3d(0.34, 0.50, 0.24)
+                                    // t854 躯干壳全盖（同 Shambler 段修法）：Bones 躯干 y∈[-0.25,0.35]（脊柱/肋笼
+                                    //   本地范围，mobmodel.cpp t370 注）→ 同位全高 0.60+探 0.04；旧 (0,0.12)@(…,0.50,…)
+                                    //   只盖 y∈[-0.13,0.37] 露下腹。
+                                    position: Qt.vector3d(0, 0.05, 0); scale: Qt.vector3d(0.34, 0.64, 0.24)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: mobArmorTintT(index)
+                                        baseColorMap: window.armorLayerTex(bonesArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                // t854 左胸甲袖壳（piece 2，绑胸甲槽；右袖见上方弓肩枢 Node 内）：Bones 双臂
+                                //   自然下垂竖直（mobmodel.cpp t616：左臂盒心 (-0.20,-0.045,-0.02) 半
+                                //   (0.05,0.325,0.05) → y∈[-0.37,0.28] 竖杆）→ 竖袖壳同位全高 0.65+探 0.05、
+                                //   粗 0.10+外扩 0.04；无旋转（盒 local +Y=袖肩端已朝上，条带 12px 高轴沿臂）。
+                                Model { // 左胸甲袖
+                                    visible: bonesArmorChest.armId !== 0
+                                    geometry: ArmorLayerBox { piece: 2 }
+                                    position: Qt.vector3d(-0.20, -0.045, -0.02)
+                                    scale: Qt.vector3d(0.14, 0.70, 0.14)
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
                                         baseColor: mobArmorTintT(index)
@@ -7791,7 +7887,7 @@ Window {
                                     Model { // 左护腿
                                         visible: parent.legArmId !== 0
                                         geometry: ArmorLayerBox { piece: 3 }
-                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.14, 0.40, 0.20)
+                                        position: Qt.vector3d(0, -0.325, 0); scale: Qt.vector3d(0.16, 0.70, 0.16)   // t854 全腿高（同 Shambler 段修法）：细骨腿 local y∈[0,-0.65]、径 0.12 → 全高 0.65+探 0.05、外扩 0.04；旧 (0,-0.05)@(0.14,0.40,0.20) 只盖髋下 40%
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7803,7 +7899,7 @@ Window {
                                     Model { // 左靴
                                         visible: parent.bootArmId !== 0
                                         geometry: ArmorLayerBox { piece: 5 }
-                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.14, 0.16, 0.20)
+                                        position: Qt.vector3d(0, -0.50, -0.02); scale: Qt.vector3d(0.16, 0.34, 0.18)   // t854 靴=脚+踝段（同 Shambler 段修法）：y∈[-0.67,-0.33] 包踝+脚、z 前探成靴头；旧 (0,-0.57)@(0.14,0.16,0.20) 只盖脚底一小截
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7824,7 +7920,7 @@ Window {
                                     Model { // 右护腿
                                         visible: parent.legArmId !== 0
                                         geometry: ArmorLayerBox { piece: 3 }
-                                        position: Qt.vector3d(0, -0.05, 0); scale: Qt.vector3d(0.14, 0.40, 0.20)
+                                        position: Qt.vector3d(0, -0.325, 0); scale: Qt.vector3d(0.16, 0.70, 0.16)   // t854 全腿高（同 Shambler 段修法）：细骨腿 local y∈[0,-0.65]、径 0.12 → 全高 0.65+探 0.05、外扩 0.04；旧 (0,-0.05)@(0.14,0.40,0.20) 只盖髋下 40%
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
@@ -7836,7 +7932,7 @@ Window {
                                     Model { // 右靴
                                         visible: parent.bootArmId !== 0
                                         geometry: ArmorLayerBox { piece: 4 }
-                                        position: Qt.vector3d(0, -0.57, 0); scale: Qt.vector3d(0.14, 0.16, 0.20)
+                                        position: Qt.vector3d(0, -0.50, -0.02); scale: Qt.vector3d(0.16, 0.34, 0.18)   // t854 靴=脚+踝段（同 Shambler 段修法）：y∈[-0.67,-0.33] 包踝+脚、z 前探成靴头；旧 (0,-0.57)@(0.14,0.16,0.20) 只盖脚底一小截
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: mobArmorTintT(index)
