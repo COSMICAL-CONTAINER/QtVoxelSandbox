@@ -3379,11 +3379,16 @@ void PlayerController::placeBlock()
         bool fed = false;
         if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobWolf
             && m_entityManager->wolfTamedAt(mobIdx)) {
-            // t479 幼崽喂食分流（机制等价 MC 喂幼崽加速长大 / 喂成体进求偶）：幼崽 → feedBaby；成体 → enterLoveMode。
-            if (m_entityManager->isBabyAt(mobIdx))
+            if (m_entityManager->isBabyAt(mobIdx)) {
+                // t479 幼崽喂食分流（机制等价 MC 喂幼崽加速长大）：幼崽 → feedBaby。
                 fed = m_entityManager->feedBaby(mobIdx);
-            else
+            } else if (m_entityManager->healthAt(mobIdx) < m_entityManager->maxHealthAt(mobIdx)) {
+                // t831 喂食回血（机制等价 MC 1.0 受伤驯服狼吃肉回血**优先于**繁殖；spec「手持食物右键已
+                //   驯服个体 → 喂食回血」）：受伤 → healTamedPet 回 4HP（肉量化，钳上限）；满血才走求偶。
+                fed = m_entityManager->healTamedPet(mobIdx, 4);
+            } else {
                 fed = m_entityManager->enterLoveMode(mobIdx);
+            }
         }
         if (fed) {
             if (m_mode != Creative)
@@ -3416,9 +3421,13 @@ void PlayerController::placeBlock()
                 m_entityManager->tameOcelot(mobIdx);
                 fed = true; // 喂鱼动作发生（无论驯中与否）→ 消耗生鱼
             } else {
-                // t479 幼崽喂食分流（机制等价 MC 喂幼崽加速长大 / 喂成体进求偶）：幼崽 → feedBaby；成体 → enterLoveMode。
+                // t479 幼崽喂食分流（机制等价 MC 喂幼崽加速长大 / 喂成体进求偶）：幼崽 → feedBaby；
+                //   t831 受伤成体 → healTamedPet 回血（4HP，同狼肉量化；机制等价 MC 受伤驯服宠物吃食回血
+                //   优先于繁殖）；满血成体 → enterLoveMode 求偶。
                 if (m_entityManager->isBabyAt(mobIdx))
                     fed = m_entityManager->feedBaby(mobIdx);
+                else if (m_entityManager->healthAt(mobIdx) < m_entityManager->maxHealthAt(mobIdx))
+                    fed = m_entityManager->healTamedPet(mobIdx, 4);
                 else
                     fed = m_entityManager->enterLoveMode(mobIdx);
             }
@@ -3445,6 +3454,16 @@ void PlayerController::placeBlock()
         if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobOcelot
             && m_entityManager->ocelotTamedAt(mobIdx)) {
             m_entityManager->toggleOcelotSit(mobIdx); // 已驯服猫 → 坐/站切换（不消耗物品）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 命令坐/站也是一次「使用」动作 → 挥手（t29）
+            return; // 坐/站切换 → 不再走放置路径
+        }
+        // t831 空手右键驯服狼 → 坐/站切换（spec「玩家空手右键坐下/站起切换」；机制等价 MC 1.0 驯服狼空手
+        //   右键命令——t480 落地时狼的坐站切换挂在骨头分支，空手路径漏（猫有空手分支、狼没有 → 本任务补齐
+        //   全链对称）。命中未驯服狼 / 非狼 / 无命中 → 无操作（fall-through，同猫分支语义）。
+        if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobWolf
+            && m_entityManager->wolfTamedAt(mobIdx)) {
+            m_entityManager->toggleWolfSit(mobIdx); // 已驯服狼 → 坐/站切换（不消耗物品）
             m_lastPlaceMs = now;
             emit swingArm(); // 命令坐/站也是一次「使用」动作 → 挥手（t29）
             return; // 坐/站切换 → 不再走放置路径
@@ -3783,6 +3802,31 @@ void PlayerController::placeBlock()
             }
         }
         return; // 生物蛋（改笼 / 生成成功 / 未命中）均不再走方块放置路径
+    }
+    // t832 染料染羊 useBlock（spec「手持染料对羊右键 → 羊染成对应色」；机制等价 MC 1.0 染羊，一次性语义：
+    //   剪毛得该染色，吃草长回恢复自然原色）。手持染料（RecipeRegistry 染料段 DyeIdBase..DyeBlackId，16 色
+    //   羊毛标准序）右键 → 独立 mob 命中射线（findMobHit，同剪刀 / 喂食路径）→ 命中活体 sheep →
+    //   EntityManager::dyeSheep（sheepWool = 染料下标 + 染色标记 + 即时显染色毛层）+ 生存消耗 1 染料。
+    //   命中非羊 / 无命中 / dyeSheep 拒（越界等）→ return（染料无其他 useBlock 用途——染色配方在工作台 /
+    //   铁砧网格内，不占右键）。染料非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air`
+    //   守卫之前分流（同骨头 / 蛋 / 剪刀分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative /
+    //   Survival 均可染（生存扣 1 染料 / 创造不耗）。分层（PLAN §2）：染羊属 Game/Physics（读射线 + 调
+    //   EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager
+        && heldItemId >= RecipeRegistry::DyeIdBase && heldItemId <= RecipeRegistry::DyeBlackId) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0 && m_entityManager->mobTypeAt(mobIdx) == EntityManager::MobSheep) {
+            // 染料 id → 羊毛 16 色下标（行序同源：RecipeRegistry 染料段与羊毛变体段严格同序）。
+            const int woolIdx = heldItemId - RecipeRegistry::DyeIdBase;
+            if (m_entityManager->dyeSheep(mobIdx, woolIdx) && m_mode != Creative)
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 染料（创造不耗）
+            m_lastPlaceMs = now;
+            emit swingArm(); // 染羊也是一次「使用」动作 → 挥手（t29）
+        }
+        return; // 染料（染羊成功 / 命中非羊 / 无命中）均不再走方块放置路径
     }
     // t300 剪刀 useBlock（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）：
     //   手持剪刀（ToolRegistry::Shears，工具段 0x110）右键 → 在主选体射线之外**独立**跑一条「mob 命中射线」

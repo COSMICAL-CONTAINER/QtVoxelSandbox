@@ -55,6 +55,10 @@ const QList<MobHeadRegion> &mobHeadRegions();
 QString generateMobHeadIconFile(const MobHeadRegion &region, const QString &entityDirPath, int revision);
 // t749 羊 3D 预览合成贴图：sheep_fur.png 毛身 + sheep.png 本体层头区（真脸）→ 落盘绝对路径（空 = 失败回退）。
 QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPath, int revision);
+// t829 夜行者下巴补全合成贴图：enderman.png 头盒 box-UV 六面区（base (0,0)-(32,16)）内的透明纹素用
+//   该列上方最近不透明纹素向下复制填充（列向延拓）→ 落盘绝对路径（空 = 失败回退原样）。矩阵探针密闭
+//   rig 同 extern 直调（generateSheepWoolFaceFile 先例）。
+QString generateNightwalkerChinFile(const QString &texPath, int revision);
 
 namespace {
 
@@ -134,6 +138,12 @@ struct BuiltState {
     QHash<int, QString> mobHeadIconFiles;
     // t749 羊「毛身+真脸」合成贴图缓存（mobTextureSource(3) 首次合成落盘后记；apply() 重建时清空重合成）。
     QString sheepWoolFaceFile;
+    // t829 夜行者「下巴补全」合成贴图缓存（mobTextureSource(16) 首次合成落盘后记；apply() 重建时清空重合成）。
+    //   demo 包 enderman.png 头前脸底部（base v12..16 两行）+ 头底面全透明 → Mask 材质裁出「下巴大块透明」
+    //   （t781 曾以 Mask 防 RGB 黄斑，t816-t821 用户实测仍透）。合成 = 把头盒 box-UV 六面区内的透明纹素用
+    //   该列上方最近不透明纹素向下复制填充（列向延拓保纹理连续）→ 全不透明头 → Mask 无洞。见
+    //   generateNightwalkerChinFile（t749 generateSheepWoolFaceFile 同族运行期派生缓存）。
+    QString nightwalkerChinFile;
     // t645 生成式生物蛋 item 图标缓存：spawnEggId（0x20F..0x216/0x22C/0x22E + t785 蛋补全 0x246/0x247/
     //   0x249/0x24A）→落盘的两层染色蛋图标
     //   file:// 路径。pack 无 pig_spawn_egg.png 等独立文件（demo 包实测 9 蛋全 miss）→ 生成式路径：
@@ -1708,6 +1718,7 @@ void ensureBuiltLocked()
     s.skinPackFiles.clear(); // t731 reset pack 皮肤裁切缓存（pack 切换 / 重解析 → 重裁）
     s.skinSlimFlags.clear(); // 复审 #8 reset slim 布局探测缓存（pack 切换 / 重解析 → 重探测）
     s.sheepWoolFaceFile.clear(); // t749 reset 羊合成贴图缓存（pack 切换 / 重解析 → 重合成）
+    s.nightwalkerChinFile.clear(); // t829 reset 夜行者下巴合成贴图缓存（pack 切换 / 重解析 → 重合成）
 
     // 底图 = qrc 程序生成图集（零 MC 资产进 qrc）。即便无包，合成图集也 = 默认。
     QImage base(QStringLiteral(":/textures/atlas.png"));
@@ -3348,6 +3359,18 @@ QString ResourcePackManager::mobTextureSource(int mobType) const
                 }
             }
         }
+        // t829 夜行者下巴补全（仅 mobType 16）：demo 包 enderman.png 头盒区透明纹素（下巴 / 头底）列向
+        //   延拓填充为不透明 → 消「下巴大块透明」（t781 Mask 的副作用；详见 generateNightwalkerChinFile 注释）。
+        //   缓存命中 O(1)；miss 合成落盘一次；失败 → 原样返回（= t781 现状 Mask 裁洞，不劣化）。
+        if (mobType == 16) {
+            if (!s.nightwalkerChinFile.isEmpty() && QFile::exists(s.nightwalkerChinFile))
+                return QStringLiteral("file:///") + s.nightwalkerChinFile;
+            const QString out = generateNightwalkerChinFile(QUrl(hit).toLocalFile(), s.revision);
+            if (!out.isEmpty()) {
+                s.nightwalkerChinFile = out; // stateMutex 已持锁，安全
+                return QStringLiteral("file:///") + out;
+            }
+        }
         return hit;
     }
     if (relPath.startsWith(QStringLiteral("sheep/"))) {
@@ -3632,6 +3655,73 @@ QString generateSheepWoolFaceFile(const QString &furPath, const QString &bodyPat
             QFile::remove(legacy);
         const QStringList stale = QDir(dir).entryList(
                 { QStringLiteral("voxelsandbox_rp_sheep_woolface_r*.png") }, QDir::Files);
+        for (const QString &f : stale) {
+            const QString full = QDir(dir).absoluteFilePath(f);
+            if (full != file)
+                QFile::remove(full);
+        }
+    }
+    return file;
+}
+
+// t829 夜行者「下巴补全」合成贴图（见上方声明注释；t749 generateSheepWoolFaceFile 同族运行期派生缓存）。
+//   PIL 实测（R19.13 t829②，demo 包 256×128=×4 HD）：头前脸（base u[8,16) v[8,16)）底部 ~2 行全透明 +
+//   头底面（base u[16,24) v[0,8)）100% 透明 —— t781 以 Mask 裁掉这些纹素后模型「头部-身体连接处（下巴）
+//   大块透明」。修 = 头盒六面区（base (0,0)-(32,16)——top/bottom/right/front/left/back 全部盒窗口）内的
+//   透明纹素逐列向上找最近不透明纹素复制填充（列向延拓：纹理连续、无横向接缝）；不改变任何既有不透明
+//   像素（眼 / 瞳特征原样保留）。全列无任何不透明纹素（异常包）→ 该列填头区主色（整区平均，防御兜底）。
+//   区外像素（躯干 / 四肢条带等）不动——非头区透明（如 body top 空带）按原样保留（躯干区被几何覆盖面
+//   少、且列向延拓跨区会把脸纹拉进躯干，不做）。
+QString generateNightwalkerChinFile(const QString &texPath, int revision)
+{
+    QImage tex(texPath);
+    if (tex.isNull())
+        return {};
+    // 自身 HD 倍率（base 64×32；异形非整数倍 → 回退原样，同 t749 furS 口径）。
+    const float s = std::min(float(tex.width()) / 64.0f, float(tex.height()) / 32.0f);
+    if (s <= 0.0f)
+        return {};
+    QImage out = tex.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    // 头盒六面区 = base (0,0)-(32,16)（top u[8,16)v[0,8) / bottom u[16,24)v[0,8) / 侧面四连 u[0,32)v[8,16)）。
+    const int hx0 = 0, hx1 = qRound(32 * s);
+    const int hy0 = 0, hy1 = qRound(16 * s);
+    // 先算头区不透明像素平均色（全列无 不透明纹素时的兜底填充色；正常包恒有 —— 头顶 / 脸区主体不透明）。
+    qint64 sumR = 0, sumG = 0, sumB = 0, opaqueCount = 0;
+    for (int y = hy0; y < hy1; ++y) {
+        for (int x = hx0; x < hx1; ++x) {
+            const QRgb c = out.pixel(x, y);
+            if (qAlpha(c) >= 128) {
+                sumR += qRed(c); sumG += qGreen(c); sumB += qBlue(c); ++opaqueCount;
+            }
+        }
+    }
+    if (opaqueCount == 0)
+        return {}; // 头区全空（异常包）→ 回退原样（Mask 行为同现状，不劣化）
+    const QRgb headAvg = qRgb(int(sumR / opaqueCount), int(sumG / opaqueCount), int(sumB / opaqueCount));
+    // 列向延拓：头区内每列，自上而下把透明纹素用「上方最近不透明纹素」填充（上方全透 → 用头区平均色）。
+    for (int x = hx0; x < hx1; ++x) {
+        QRgb lastOpaque = headAvg; // 该列上方最近不透明色（列首即透 → 平均色兜底）
+        for (int y = hy0; y < hy1; ++y) {
+            const QRgb c = out.pixel(x, y);
+            if (qAlpha(c) >= 128) {
+                lastOpaque = c;
+            } else {
+                out.setPixel(x, y, qRgb(qRed(lastOpaque), qGreen(lastOpaque), qBlue(lastOpaque)));
+            }
+        }
+    }
+    // 落盘（AppLocalDataLocation；revision 进文件名做 cache-bust + 旧世代清理，同 t749 review #6 模式）。
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty())
+        return {};
+    QDir().mkpath(dir);
+    const QString file = QDir(dir).absoluteFilePath(
+            QStringLiteral("voxelsandbox_rp_nightwalker_chin_r%1.png").arg(revision));
+    if (!out.save(file, "PNG"))
+        return {};
+    {
+        const QStringList stale = QDir(dir).entryList(
+                { QStringLiteral("voxelsandbox_rp_nightwalker_chin_r*.png") }, QDir::Files);
         for (const QString &f : stale) {
             const QString full = QDir(dir).absoluteFilePath(f);
             if (full != file)
