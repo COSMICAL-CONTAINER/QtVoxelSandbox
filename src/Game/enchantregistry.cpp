@@ -116,11 +116,14 @@ int EnchantRegistry::categoryForItem(int itemId)
     if (ToolRegistry::isTool(itemId)) {
         const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
         if (!t) return None;
-        // 剑 → 武器；镐 / 锄 / 斧 / 铲 → 工具；弓 / 剪刀 / 钓鱼竿 → None（专属附魔本任务不做）。
+        // 剑 → 武器；镐 / 斧 / 铲 → 工具；**锄 → None（t824：MC 1.0 锄无适用附魔 → 不可附魔）**；
+        // 弓 / 剪刀 / 钓鱼竿 → None（专属附魔本任务不做）。
+        //   锄判 None 连带收口三处门：① 附魔台槽 0 拒入（itemEnchantCategory==0）；② 本表 isApplicableForItem
+        //   的 mask 门（None & 任意 mask = 0）→ 铁砧书合并逐条拒；③ selectEnchantsForItem 空候选 → 不给选项。
         if (t->type == int(BlockRegistry::Sword)) return Weapon;
-        if (t->type == int(BlockRegistry::Pickaxe) || t->type == int(BlockRegistry::Hoe)
-            || t->type == int(BlockRegistry::Axe) || t->type == int(BlockRegistry::Shovel)) return Tool;
-        return None; // Bow / Shears / FishingRod
+        if (t->type == int(BlockRegistry::Pickaxe) || t->type == int(BlockRegistry::Axe)
+            || t->type == int(BlockRegistry::Shovel)) return Tool;
+        return None; // 锄 / Bow / Shears / FishingRod
     }
     // t615 书（BookId=0x238）→ BookItem：附魔台附书载体（全池随机 → 产附魔书 EnchantedBookId）。
     //   注：附魔书物品（EnchantedBookId=0x227）**不**返回 BookItem（书已附魔不可再附，itemReady 域外）。
@@ -157,7 +160,7 @@ bool EnchantRegistry::isApplicableForItem(int enchantId, int itemId)
         case Fortune:
             return isPick || isShovel; // 时运：镐/铲（锄 / 斧拒）
         default:
-            break; // 效率（全工具）/ 耐久（全适用）等：mask 已过 → 适用
+            break; // 效率（镐/斧/铲——锄经 categoryForItem=None 已在 mask 门拒）/ 耐久（全适用）等：mask 已过 → 适用
         }
         return true;
     }
@@ -187,27 +190,30 @@ bool EnchantRegistry::conflictsWith(int enchantId, int otherEnchantId)
     return a->exclusiveGroup != 0 && a->exclusiveGroup == b->exclusiveGroup;
 }
 
-// 附魔选择（机制等价 MC 1.0 附魔台加权随机 + offered-level 量级）。纯函数。
-//   offeredLevel 1..30（来自 t474 书架加成映射到三槽的提供等级）；seed 任意 int。
+// t824 附魔选择（按**具体物品**过滤，附魔台三档选项池单一权威；机制等价 MC 1.0 附魔台加权随机 +
+//   offered-level 量级）。纯函数。offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 任意 int。
+//   与旧 selectEnchants(category,..) 的差别仅在候选池：isApplicableForItem(enchantId, itemId) 逐条精判
+//   （镐 / 铲不出亡灵杀手；胸甲不出摔落保护；锄 / 弓空池）替代大类 mask 门。书（BookId）mask 全过 →
+//   仍全池随机（附书 / 战利品附魔书同入口，loottable 复用）。
 //   步骤：
-//     1) 候选 = 适用该类别的附魔（appliesToMask & category）。
+//     1) 候选 = 适用该物品的附魔（isApplicableForItem 精判，1..14 扫一遍）。
 //     2) 附魔数 count：offeredLevel 越高越多（1..3）；钳到候选数。
 //     3) 加权不放回抽样 count 个（同 MC rarity weight；命中后从候选移除 + 剔除同互斥组的余下候选）。
 //     4) 每个附魔等级：clamp(round(maxLevel * offeredLevel / 30) + 种子扰动, 1, maxLevel)。
 //        maxLevel=1（精准采集 / 水上亲和）恒为 1。
-QVariantList EnchantRegistry::selectEnchants(int category, int offeredLevel, int seed)
+QVariantList EnchantRegistry::selectEnchantsForItem(int itemId, int offeredLevel, int seed)
 {
     QVariantList result;
+    const int category = categoryForItem(itemId);
     if (category == None) return result;
     // 钳 offeredLevel 到 [1, 30]（防御；UI 应保证）。
     const int lvl = std::clamp(offeredLevel, 1, 30);
 
-    // 1) 候选池：适用该类别的附魔（1..14 扫一遍）。
+    // 1) 候选池：适用该**物品**的附魔（t824 isApplicableForItem 精判；书载体 mask 含 BookItem 全过）。
     std::vector<const EnchantDef *> candidates;
     candidates.reserve(8);
     for (int i = 1; i < int(EnchantCount); ++i) {
-        const EnchantDef *e = &kEnchants[size_t(i)];
-        if ((e->appliesToMask & category) != 0) candidates.push_back(e);
+        if (isApplicableForItem(i, itemId)) candidates.push_back(&kEnchants[size_t(i)]);
     }
     if (candidates.empty()) return result;
 
@@ -327,4 +333,20 @@ QString EnchantRegistry::levelSuffix(int level)
     case 5:  return QStringLiteral("V");
     default: return level > 5 ? QString::number(level) : QString();
     }
+}
+
+// t825 手持武器攻击伤害（显示与实战同源单一权威；见头注释）。基础走 ToolRegistry::attackDamage（剑 tier
+//   倍率 / 斧 tier+1 / 余徒手 1），锐锋 +0.5*级。attackMob 以此为起点再叠对族加成 / 暴击；tooltip 攻击行
+//   经 Hotbar::displayAttackDamage 取整同值 —— 两处消费一个公式，杜绝「实战加了显示没加」漂移。
+float EnchantRegistry::weaponAttackDamage(int itemId, const int *enchants)
+{
+    return float(ToolRegistry::attackDamage(itemId))
+         + 0.5f * float(findLevel(enchants, int(Sharpness)));
+}
+
+// t826 击退附魔强度（单一权威；见头注释）。每级 +3.0 倍冲量：无附魔 1.0（~1.1 格）/ I 4.0（~4.5 格）/
+//   II 7.0（~7.9 格），量级对齐 MC 1.0「击退 I 明显推离 / II 飞出数格」。负级防御钳 0。
+float EnchantRegistry::knockbackStrength(int level)
+{
+    return 1.0f + 3.0f * float(std::max(0, level));
 }

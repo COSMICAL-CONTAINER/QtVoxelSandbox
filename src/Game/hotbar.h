@@ -220,16 +220,22 @@ public:
     //   - isEnchantable(itemId)：物品是否可附魔（category != None）。附魔台 UI 门控「选项槽 enabled」用。
     //   - enchantDisplayName(enchantId) / enchantMaxLevel(enchantId) / enchantLevelText(level)：附魔名 / 最大等级 /
     //     等级罗马数字后缀（如「III」）；tooltip / 附魔台显示「锐锋 III」用。
-    //   - selectEnchantsPreview(category, offeredLevel, seed)：纯查询（不改槽态）—— 给定类别 + 提供等级 + 种子
-    //     返回 EnchantRegistry::selectEnchants 结果（QVariantMap list {id,level}）。附魔台 UI 选项槽预览「这次会
-    //     附上哪些」+ 点击时 enchantSelected 用同 seed 复算写入（预览 = 写入，机制等价 MC「点槽即所见即所得」）。
+    //   - selectEnchantsPreviewForItem(itemId, offeredLevel, seed)：纯查询（不改槽态）—— 给定**物品** +
+    //     提供等级 + 种子返回 EnchantRegistry::selectEnchantsForItem 结果（QVariantMap list {id,level}，
+    //     候选池按物品逐条精判：镐不出亡灵杀手 / 锄空池，t824）。附魔台 UI 选项槽预览「这次会附上哪些」+
+    //     点击时 enchantSelected 用同 seed 复算写入（预览 = 写入，机制等价 MC「点槽即所见即所得」）。
     Q_INVOKABLE int itemEnchantCategory(int itemId) const;
     Q_INVOKABLE bool isEnchantable(int itemId) const;
     Q_INVOKABLE QString enchantDisplayName(int enchantId) const;
     Q_INVOKABLE int enchantMaxLevel(int enchantId) const;
     Q_INVOKABLE QString enchantLevelText(int level) const;
-    Q_INVOKABLE QVariantList selectEnchantsPreview(int category, int offeredLevel, int seed) const;
+    Q_INVOKABLE QVariantList selectEnchantsPreviewForItem(int itemId, int offeredLevel, int seed) const;
     Q_INVOKABLE QString enchantListText(const QVariantList &packed) const;
+    // t825 显示伤害桥接（与实战同源）：round(EnchantRegistry::weaponAttackDamage(itemId, enchants))——
+    //   基础攻击（ToolRegistry 单一权威）+ 锐锋 ×0.5/级。attackMob 同一权威函数算实战值 → 显示 = 实战的
+    //   目标无关部分（对族加成 / 暴击在实战侧叠加，显示不预告）。九处 tooltip 攻击行统一走本桥接，
+    //   杜绝各 QML 持公式副本漂移。enchants = 4 槽 packed int 数组（enchantsAt 等返回格式；缺省仅基础）。
+    Q_INVOKABLE int displayAttackDamage(int itemId, const QVariantList &enchants) const;
     // t615 附魔适用 / 冲突精判（透传 EnchantRegistry；铁砧敲附魔书逐条过滤用）：
     //   - enchantApplicableTo(enchantId, itemId)：附魔是否适用**具体物品**（剑类附魔不上镐 / 摔落保护仅靴 /
     //     水上亲和仅头盔等；dev-plan §3 表逐条）。AnvilUI 把书上附魔逐条试写 C 时判「不适用 → 不上（灰显）」。
@@ -292,7 +298,10 @@ public:
     //   - armorProtectionFactor(cause)：受击减伤 EPF（0..~20），据 PlayerState::DeathCause 序数取匹配保护族
     //     累加（通用 Protection 每级 1 EPF + 匹配专项每级 2 EPF）。呈现层（Main.qml）在 takeDamage 前按 EPF
     //     算减伤比例（ratio = min(0.85, (armorRatio + epf*0.04))），与既有护甲值减伤叠加。
+    //   - selectedItemEnchants(outEnchants[4])（t825）：选中槽物品 4 槽附魔 packed 快照（空槽 / 越界全 0）。
+    //     attackMob 伤害公式与 tooltip 显示经 EnchantRegistry::weaponAttackDamage 同源消费（显示 = 实战）。
     int selectedItemEnchantLevel(int enchantId) const;
+    void selectedItemEnchants(int outEnchants[4]) const;
     int armorEnchantLevelSum(int enchantId) const;
     Q_INVOKABLE int armorProtectionFactor(int cause) const;
 
@@ -445,11 +454,12 @@ public:
     Q_INVOKABLE QVariantList creativeArmor() const;
     Q_INVOKABLE void damageArmor();
     // t475 附魔选中槽物品（附魔台点选项槽 → 写附魔元数据到目标物品）。机制等价 MC 1.0 附魔台点槽即附魔。
-    //   offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 该槽随机种子（与 selectEnchantsPreview 同 seed →
-    //   预览 = 写入）。流程：取选中槽物品 → category = itemEnchantCategory(id)；category==None / 空槽 / 已有附魔
-    //   → no-op（UI 应已门控；MC 1.0 不允许重复附魔已附魔物品）。selectEnchants(category, offeredLevel, seed) →
-    //   写入 item.enchants[4]（清空旧 + 填新；最多 4 个）。bumpRevision + 补发 selectedSlotChanged（附魔显示刷新）。
-    //   不改 id / count / durability（附魔是叠加元数据，非替换物品）。返回 true = 已附魔；false = 不附魔物品 / 已有附魔。
+    //   offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 该槽随机种子（与 selectEnchantsPreviewForItem
+    //   同 seed → 预览 = 写入）。流程：取选中槽物品；categoryForItem==None（含锄，t824）/ 空槽 / 已有附魔
+    //   → no-op（UI 应已门控；MC 1.0 不允许重复附魔已附魔物品）。selectEnchantsForItem(itemId, offered, seed)
+    //   （t824 按物品过滤候选池）→ 写入 item.enchants[4]（清空旧 + 填新；最多 4 个）。bumpRevision + 补发
+    //   selectedSlotChanged（附魔显示刷新）。不改 id / count / durability（附魔是叠加元数据，非替换物品）。
+    //   返回 true = 已附魔；false = 不附魔物品 / 已有附魔。
     Q_INVOKABLE bool enchantSelected(int offeredLevel, int seed);
     // t377 在世界中右键手持护甲 → 装备 / 互换（spec t377「held armor RIGHT-CLICK = equip/swap」）。
     //   取当前选中槽护甲：空对应部位槽 → 直接装备；占用 → 先把旧件换回选中槽（手持），再装备新件。
