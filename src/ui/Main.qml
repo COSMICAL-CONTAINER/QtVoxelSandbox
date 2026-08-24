@@ -134,7 +134,8 @@ Window {
     property bool settingsOpen: false
     // pause-menu 暂停菜单「进度」按钮子态（5 行布局行2）：显成就列表（progress.achievements() delegate +
     //   revision 触碰刷新）。仅暂停叠层有意义（!captured）；Esc / 返回按钮关。纯呈现态，PLAN §2 分层（UI 层）。
-    //   t790：成就面板 = 右下角悬浮 dock（居中模态改版，详见 progressOverlay 头注）。
+    //   t840：成就面板回**居中模态**（t790 右下角 dock 是理解偏差——用户原意是「新建」右下角快捷悬浮栏
+    //   achQuickDock 承担计数/最近解锁，大面板位置不动；详见 progressOverlay 头注）。
     property bool progressOpen: false
     // pause-menu 暂停菜单「统计」按钮子态（5 行布局行2）：显统计列表（progress.statsList() delegate +
     //   revision 触碰刷新）。同 progressOpen 模式（暂停叠层 !captured；Esc / 返回关）。纯呈现态。
@@ -580,6 +581,9 @@ Window {
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
+        // t840 成就快捷悬浮栏（achQuickDock）会话名单重置：读档回放走 silent unlock（零信号）→ 名单只反映
+        //   本会话实况解锁；enterWorld 是进世界唯一入口，在此清 = 上一世界残留必被清（退出路径无需重复清）。
+        achQuickDock.recentNames = []
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -2205,6 +2209,9 @@ Window {
         target: progress
         function onAchievementUnlocked(id, name, desc) {
             window.showInfoToast("成就解锁：" + name)
+            // t840 快捷悬浮栏（achQuickDock）「最近解锁」名单驱动：最新在前截 3（真时序；enterWorld 重置，
+            //   名单空时悬浮栏回退定义序末 3 个已解锁 —— 读档回放 silent 无信号的近似显示）。
+            achQuickDock.recentNames = [name].concat(achQuickDock.recentNames).slice(0, 3)
         }
     }
 
@@ -10419,9 +10426,9 @@ Window {
         Rectangle {
             width: 420; height: 360; radius: 10
             anchors.centerIn: parent
-            // t790：进度（成就树）面板开时隐藏菜单本体 —— 成就面板已改右下角悬浮 + 撤自身整屏压暗，
-            //   菜单若残留会被悬浮面板半遮（右半被 760 宽面板盖住、左半透出）成残缺观感；隐菜单只留
-            //   0.55 压暗游戏背景 + 悬浮面板独占视野。返回（关面板）→ 菜单回归。
+            // t790 引入、t840 居中回滚后语义仍成立：进度（成就树）面板 760×560 居中，与居中 420×360 菜单
+            //   同轴叠放 —— 菜单残留会透在半透明面板底上成脏观感（字影叠字影）；隐菜单只留 0.55 暂停压暗
+            //   + 0.7 进度压暗 + 居中面板独占视野。返回（关面板）→ 菜单回归。
             visible: !window.progressOpen
             color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
             Column {
@@ -10857,11 +10864,12 @@ Window {
     //     发射独立根（见 playerprogress.cpp）。
     //   revision 触碰刷新：model / 树数据表达式显式读 progress.revision 且 revision 参与返回值（_r>=0 守卫
     //   恒真），防 qmlcachegen AOT 把裸触碰读当死代码消除（qml-touch 铁律）。
-    //   t790 布局改版（用户「成就弹窗太占位置」）：① 面板居中 760×560 模态 → **右下角悬浮 dock**（margin 16
-    //   贴边，让出屏幕中心）；② 撤本叠层自身 0.7 整屏压暗（原与暂停 0.55 叠加 ≈ 整屏黑 = 「太占位置」的
-    //   一半；透明点击吸收层保留，modal 语义不变）；③ 面板底改半透明 + #3a444f 描边（t783 浮层语言）与
-    //   主 UI（实心 #1e1e1e 菜单块）视觉区分；④ 树视口（可拖动区域）加半透明加深底 + 描边内嵌框；⑤ 暂停
-    //   菜单本体在本面板开时隐藏（防右下悬浮面板半遮居中菜单成残缺观感）。
+    //   t790 曾把本面板改右下角悬浮 dock（用户原意被理解偏：要的是**新建**右下角快捷悬浮栏承担计数 /
+    //   最近解锁，大面板仍居中）。t840 纠偏回滚：① 面板回 anchors.centerIn 居中模态（760×560）；② 恢复
+    //   本叠层自身 0.7 整屏压暗（居中大模态观感；与暂停 0.55 叠加 ≈ 0.87 压暗为 t790 之前原设计）。t790
+    //   可保留项：③ 面板底半透明 + #3a444f 描边（t783 浮层语言）；④ 树视口半透明加深底内嵌框；⑤ 暂停
+    //   菜单本体在本面板开时隐藏（居中大面板与居中菜单同轴重叠）。右下角快捷计数悬浮栏见 achQuickDock
+    //   （t840 新建，独立 HUD 常驻件）。
     //   仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 自绘原创。
     //   成就名 / 描述 / 图标 id 均来自 Game 层 PlayerProgress（不引 MC 专名）。
     Item {
@@ -10879,27 +10887,23 @@ Window {
             enabled: window.progressOpen
             onActivated: window.progressOpen = false
         }
-        // t790：撤整屏 0.7 压暗 —— 面板改右下角悬浮后不再整屏接管（用户「太占位置」主诉：居中大面板 +
-        //   暂停 0.55 / 进度 0.7 双层压暗 ≈ 整屏黑）。保留全屏**透明**点击吸收层：modal 语义不变（点击
-        //   不穿透到背后暂停叠层 / 不误触发「点击恢复游戏」），必须走面板「返回」/ Esc 关闭。
+        // t840：恢复 0.7 整屏压暗（t790 右下悬浮期曾撤）—— 面板回居中大模态，压暗给足模态感（与暂停叠层
+        //   0.55 叠加 ≈ 0.87 是 t790 之前原观感）。点击吸收 MouseArea 保留：点击不穿透到背后暂停叠层 /
+        //   不误触发「点击恢复游戏」，必须走面板「返回」/ Esc 关闭。
         Rectangle {
             anchors.fill: parent
-            color: "transparent"
+            color: Qt.rgba(0, 0, 0, 0.7)
             MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
         }
         Rectangle {
             id: progressPanel
             width: 760; height: 560; radius: 10
-            // t790：居中模态 → 右下角悬浮 dock（margin 16 贴边）—— 让出屏幕中心 / 左上视野（背后只剩
-            //   暂停叠层 0.55 压暗的游戏画面）。内部全部坐标系是面板局部（节点公式 / tooltip 钳制 /
-            //   clampPan / minimap / 返回按钮锚），移动面板零逻辑影响。
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 16
-            anchors.bottomMargin: 16
-            // t790 浮层视觉语言（t783 variantPanel 同款）：半透明 rgba 深钢蓝底（刻意 Rectangle rgba 而
-            //   非 Item opacity —— 后者连带淡化子控件）+ #3a444f 描边 —— 与主 UI（暂停菜单实心 #1e1e1e
-            //   居中块）拉开「悬浮层 vs 主 UI」视觉区分。
+            // t840：回居中模态（t790 曾改右下角悬浮 dock margin 16，理解偏差回滚）。内部全部坐标系是
+            //   面板局部（节点公式 / tooltip 钳制 / clampPan / minimap / 返回按钮锚），位置改动零逻辑影响。
+            anchors.centerIn: parent
+            // t790 浮层视觉语言（t783 variantPanel 同款；t840 位置回滚后保留）：半透明 rgba 深钢蓝底
+            //   （刻意 Rectangle rgba 而非 Item opacity —— 后者连带淡化子控件）+ #3a444f 描边 —— 与主 UI
+            //   （暂停菜单实心 #1e1e1e 居中块）拉开「悬浮层 vs 主 UI」视觉区分。
             color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
             border.color: "#3a444f"; border.width: 1
             // ── 树数据快照（触碰 revision；achievements() 携 col/row/iconId 布局字段）──
@@ -12610,6 +12614,120 @@ Window {
             id: infoToastTimer
             interval: 3000
             onTriggered: window.infoToastVisible = false
+        }
+    }
+
+    // t840 成就快捷悬浮栏（右下角 HUD 常驻件，新建）：t790 把进度大面板挪来右下角是理解偏差，已回滚居中；
+    //   用户原意 = 像小地图一样**可鼠标拖动**的快捷件，随时看到「已解锁 N / M」计数与最近解锁。数据与
+    //   暂停菜单进度面板同源（progress VM：achievements() + revision 触碰刷新）。
+    //   显隐：仅 playing 态（appState）——菜单 / worldlist 不显。默认右下角 toast 带上方（右距 20 / 底距 150，
+    //   避开 hotbar 底栏与 3s toast 闪烁带）；MouseArea drag 整体拖动 + drag.min/max 视口钳制（首次拖动断
+    //   默认锚定绑定 = 用户接管位置，会话态不入存档；窗口缩放越界时钳回）。z=120：暂停叠层(100)之上 ——
+    //   游玩态指针被游戏捕获，拖动实际发生在暂停态，若在叠层(100)之下会被其全屏 MouseArea 挡住无法拖；
+    //   背包叠层(150)/进度面板(155)之下（面板开时被压暗属预期）。hover 展开（可选加分项，已做）：常驻只显
+    //   一行计数（游玩零干扰），悬停展开「最近解锁」名单 —— 名单双源：会话内 progress.achievementUnlocked
+    //   信号名单优先（真时序，最新在前 ≤3；enterWorld 重置），空则回退定义序末 3 个已解锁（读档回放 silent
+    //   无信号、成就无时间戳 → 定义序末尾 ≈ 最新推进的近似）。纯呈现层（PLAN §2 UI 层），§9 自绘原创
+    //   （通用词「成就」；Rectangle+Text，无 MC PNG）。
+    Item {
+        id: achQuickDock
+        visible: window.appState === "playing"
+        z: 120
+        width: 200
+        clip: true   // 收起态把展开名单区裁掉（高度塌到 36，不靠 visible 切换 —— Column 对不可见子仍占位）
+        // 高度：收起 36（一行计数）；hover 展开到内容实际高（计数行 + 「最近解锁」名单 + 上下边距 8）。
+        height: dockDragArea.containsMouse ? dockContent.implicitHeight + 16 : 36
+        // 默认右下角（toast 带上方）：x/y 默认绑定随窗口缩放跟随 + 展开时底边不动向上长高；首次拖动被
+        //   MouseArea 改写即断开（会话态接管）。
+        x: parent.width - width - 20
+        y: parent.height - height - 150
+        // 会话内最近解锁名单（最新在前 ≤3；achievementUnlocked 信号驱动 + enterWorld 重置）。
+        property var recentNames: []
+        // 计数 + 回退名单快照：可见性门 + revision 触碰（review-L3 / qml-touch 铁律 —— 非 playing 早退不读
+        //   revision（revision 每 ~0.5s playTime flush 必 bump，关门防全天候重算）；门内 _r>=0 恒真守卫防
+        //   qmlcachegen AOT 把裸触碰读当死代码消除）。
+        readonly property var dockData: {
+            if (!visible) return { unlocked: 0, total: 0, recent: [] }
+            const _r = progress.revision
+            const list = _r >= 0 ? progress.achievements() : []
+            let unlocked = 0
+            const unlockedNames = []
+            for (let i = 0; i < list.length; ++i) {
+                if (list[i].unlocked) { ++unlocked; unlockedNames.push(list[i].name) }
+            }
+            let recent = recentNames.slice(0, 3)
+            if (recent.length === 0) recent = unlockedNames.slice(-3).reverse()
+            return { unlocked: unlocked, total: list.length, recent: recent }
+        }
+        // 拖动 + 点击吸收一体的 MouseArea：drag.target 整体拖动（10px 阈值内算点击被吸收 —— 防透传到背后
+        //   暂停叠层误「点击恢复游戏」）；drag.min/max = 视口内钳制。cursor 四向箭头提示可拖。
+        MouseArea {
+            id: dockDragArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeAllCursor
+            drag.target: achQuickDock
+            drag.minimumX: 0
+            drag.minimumY: 0
+            drag.maximumX: achQuickDock.parent.width - achQuickDock.width
+            drag.maximumY: achQuickDock.parent.height - achQuickDock.height
+            onClicked: {}   // 吸收点击（不透传背后暂停叠层）
+        }
+        // 背景（t783/t790 浮层语言同款：半透明深钢蓝 + #3a444f 描边）。
+        Rectangle {
+            anchors.fill: parent
+            radius: 8
+            color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
+            border.color: "#3a444f"; border.width: 1
+        }
+        // 内容列：常驻计数行 + 展开名单区（收起态整块被 root clip 裁掉）。
+        Column {
+            id: dockContent
+            x: 10; y: 8
+            width: parent.width - 20
+            spacing: 4
+            // 常驻计数行：✦ + 「成就 N / M」+ hover 才显的拖动提示（游玩态零噪音）。
+            Row {
+                spacing: 6
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✦"; color: "#e5c07f"; font.pixelSize: 14; font.bold: true
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "成就 " + achQuickDock.dockData.unlocked + " / " + achQuickDock.dockData.total
+                    color: "#e8e8e8"; font.pixelSize: 13; font.bold: true
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: dockDragArea.containsMouse
+                    text: "（可拖动）"; color: "#8a94a0"; font.pixelSize: 11
+                }
+            }
+            // 展开名单区：单 Text 多行拼接（免 Repeater + 免不可见子占位问题）。
+            Column {
+                width: parent.width
+                spacing: 2
+                Text { text: "最近解锁"; color: "#8a94a0"; font.pixelSize: 11 }
+                Text {
+                    width: parent.width
+                    text: achQuickDock.dockData.recent.length > 0
+                          ? achQuickDock.dockData.recent.map(function(n) { return "· " + n }).join("\n")
+                          : "· 暂无解锁成就"
+                    color: "#cfe3cf"; font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+            }
+        }
+        // 窗口缩放后钳回视口（拖动已断默认绑定，越界不自动跟随；只越界才写 x/y —— 未拖动时默认绑定不受扰）。
+        Connections {
+            target: achQuickDock.parent
+            function onWidthChanged() { achQuickDock.clampIntoView() }
+            function onHeightChanged() { achQuickDock.clampIntoView() }
+        }
+        function clampIntoView() {
+            if (x > parent.width - width) x = Math.max(0, parent.width - width)
+            if (y > parent.height - height) y = Math.max(0, parent.height - height)
         }
     }
 
