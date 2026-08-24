@@ -1448,11 +1448,15 @@ void World::tickLavaFlow()
             noteFireWrite(b.x, b.y, b.z, oldId, BlockRegistry::Air);  // t724：木类非火 → no-op，保持一致（若焚毁邻火格上木则由本 tick 侧 guard 兜底）
             m_pendingLightEdits.push_back({b.x, b.y, b.z, true});      // 木→air 天光通（遮光块消失，sky），延迟联合 reflood
             emit blockBroken(b.x, b.y, b.z, int(oldId));               // 焚毁破块粒子 / 音（机制等价 MC 燃烧破块反馈）
-            checkCactusOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // ② 失撑复检（正上方 Cactus 整柱坍落，同 setBlock 路径）
-            checkDeadBushOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t504：枯灌木失撑复检（正上方枯灌木掉落，同 setBlock 路径）
-            checkSugarcaneOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t524：甘蔗失撑复检（正上方甘蔗整柱坍落，同 setBlock 路径）
-            checkSnowLayerOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t527：积雪层失撑复检（正上方雪层整柱坍落，同 setBlock 路径）
+            // review24 #3 口径合一：旧版逐焚毁格只补 cactus / deadbush / sugarcane / snowlayer 四钩子 →
+            //   岩浆焚毁铁轨支撑后轨悬浮（#15 病征的另一入口）、压力板 / 花 / 活板门族同样漏。改调
+            //   recheckAttachmentsAfterClear 单一入口（含上述四钩子 + rail / plate / flower / trapdoor /
+            //   6 邻火把——未来新增附着物只扩 recheck 一处）；重力复检仍显式补调（recheck 刻意不含，防
+            //   重入）。recheck 内各族实际掉落时自 emit worldChanged（check* 兄弟口径）→ 批量段中一次
+            //   中间重建（同 setWaterSilent 挂 checkRailOnEdit 的既有先例），批量终态不受破坏。
+            recheckAttachmentsAfterClear(b.x, b.y, b.z, oldId);
             checkGravityBlockOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t799：沙/沙砾失撑复检（焚毁木支撑 → 正上方沙柱坍落，同 setBlock 路径）
+            breakNetherPortalsAround(b.x, b.y, b.z); // review24 #3：岩浆焚毁门面邻格可燃木 → 熄门（与火吞噬同块木同语义；#27 钩此前漏挂本路径——oldId 必非 Air 木类）
             pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
         }
         m_batchFluid = false;
@@ -1609,7 +1613,10 @@ void World::tickFire()
             if (BlockRegistry::isDoor(id)) {
                 const int py = ((st & 8) != 0) ? y - 1 : y + 1; // 配对半扇（上配下 y-1 / 下配上 y+1）
                 if (py >= 0 && py < H && BlockRegistry::isDoor(m_chunks.blockAt(x, py, z))
-                    && !m_burningCells.contains(packGrowthCell(x, py, z)))
+                    && !m_burningCells.contains(packGrowthCell(x, py, z))
+                    && !fireWaterNeighborAt(x, py, z)) // review24 #1：湿对偶跳过——点燃后才泼到半扇上的水同样
+                                                       //   保住该半扇（整扇湿判拦的是点燃入口，这里拦烧尽收尾；
+                                                       //   无此守卫则「干半扇烧尽 → 湿半扇连带 Air」防火带破）
                     setBlock(x, py, z, BlockRegistry::Air); // 同窗收尾（对偶已自行烧毁 → 已非门不命中；
                                                             //   对偶在燃 → 留它本窗自烧，不误发 broken）
             }
@@ -1685,19 +1692,31 @@ bool World::igniteFlammableAt(int x, int y, int z)
     if (fireWaterNeighborAt(x, y, z)) return false;  // #5 湿燃料防火带（**三入口统一口径**收口在此：直燃 / 火格
                                                      //   蔓延 / 同态蔓延——水邻可燃物不可点燃，泼出的水即火势
                                                      //   边界；review-g #5 确定性 verdict 随 t843 语义迁移保持）
+    // review24 #1 整扇湿判提前：门两半各占一格，水通常只邻其中一半（护城河沿的门 / 船坞门）——只按本格
+    //   湿判放行干半扇时，门整扇联动点燃 + (d) 烧毁收尾的「对偶仍是门 → 同窗 Air」兜底会把被水保护的
+    //   湿半扇连带焚毁（不可逆，恰是防火带承诺要阻止的损害）。门作为整体燃烧（#16）→ 防火带同按整扇判：
+    //   主目标**或其配对半扇**含水 → 整扇不燃（蔓延 / 直燃 / 同态三入口都经本函数 → 一处拦全部）。
+    if (BlockRegistry::isDoor(id)) {
+        const quint8 stPair = m_chunks.stateAt(x, y, z);
+        const int pyPair = ((stPair & 8) != 0) ? y - 1 : y + 1;
+        if (pyPair >= 0 && pyPair < m_height
+            && BlockRegistry::isDoor(m_chunks.blockAt(x, pyPair, z))
+            && fireWaterNeighborAt(x, pyPair, z))
+            return false; // 配对半扇含水 → 整扇不燃（湿半扇所在门格永不被点燃焚毁）
+    }
     const quint64 k = packGrowthCell(x, y, z);
     if (m_burningCells.contains(k)) return false;    // 已在燃 → 幂等 no-op
     m_burningCells.insert(k, quint8(burnWindowsFor(id)));
     emit blockIgnited(x, y, z);
-    // 门整扇联动：本格 state bit3 判上/下半扇 → 配对半扇 y∓1 仍为门且**非湿**（湿半扇不点燃——水泼到半扇
-    //   上即保住该半扇进燃烧态；被跳过的湿半扇由 (d) 烧毁收尾的「对偶仍是门 → 同窗 Air」兜底整扇语义）→
-    //   一并点燃（同窗同计时 → 同窗烧毁；(d) 烧毁收尾再兜后补放的半门）。
+    // 门整扇联动：本格 state bit3 判上/下半扇 → 配对半扇 y∓1 仍为门（非湿由上方整扇湿判提前保证——任一
+    //   半扇含水已整扇 return false，review24 #1）→ 一并点燃（同窗同计时 → 同窗烧毁；(d) 烧毁收尾再兜
+    //   后补放的半门）。
     if (BlockRegistry::isDoor(id)) {
         const quint8 st = m_chunks.stateAt(x, y, z);
         const int py = ((st & 8) != 0) ? y - 1 : y + 1;
         if (py >= 0 && py < m_height) {
             const quint8 pid = m_chunks.blockAt(x, py, z);
-            if (BlockRegistry::isDoor(pid) && !fireWaterNeighborAt(x, py, z)) {
+            if (BlockRegistry::isDoor(pid)) {
                 const quint64 pk = packGrowthCell(x, py, z);
                 if (!m_burningCells.contains(pk)) {
                     m_burningCells.insert(pk, quint8(burnWindowsFor(pid)));
@@ -2235,16 +2254,16 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
             //   编辑钩子 → 炸掉红石族（粉 / 源 / 接收器）或粉旁石块后 m_powerDirty 不含该格 → 邻粉 / 灯 /
             //   轨电力不重算（幽灵电：灯恒亮 / 轨恒加速）直到玩家再编辑。逐破坏块 O(1)（同上三 note 口径）。
     }
-    // rv-low-batch2 补齐：爆炸批量直写绕过 setBlock 编辑钩子族 → 邻轨连接 / 雪层坍落漏复检（同 tickLavaFlow
-    //   焚毁路径逐块调 checkXxxOnEdit 的模式）。对每个破坏格补 checkRailOnEdit（球内破坏改变邻轨连接位 →
-    //   直 / 拐角 / 十字形态重算）+ checkSnowLayerOnEdit（破坏格正上方雪层失撑 → 整柱坍落为携带层数的下落
-    //   实体）。两检查自带早退（非 Rail / 正上方非 SnowLayer → no-op 零写入零 emit），球 ≤343 格 O(1) × N，
-    //   爆炸稀有可忽略。各自的 emit worldChanged / snowLayerFell 与下方收口 emit 叠加无害（重建幂等）。
+    // review24 #3 口径合一：爆炸批量直写绕过 setBlock 编辑钩子族 → 旧版逐破坏格只补 rail / snow /
+    //   trapdoor 三钩子（+ 火把族由 EntityManager 单独兜底），仙人掌 / 枯灌木 / 花 / 压力板 / 甘蔗失撑
+    //   仍悬空残留。改调 recheckAttachmentsAfterClear 单一入口（含上述三钩子 + 缺失各族 + 6 邻火把 /
+    //   红石火把扫——未来新增附着物只扩 recheck 一处）；重力复检仍显式补调（recheck 刻意不含
+    //   checkGravityBlockOnEdit，防柱内重入，见其头注释）。recheck 内各族自带早退（非对应族 → no-op
+    //   零写入零 emit），真掉落时自 emit worldChanged 与下方收口 emit 叠加无害（重建幂等，球 ≤343 格，
+    //   爆炸稀有可忽略）。
     for (const DestroyedVoxel &d : destroyed) {
-        checkRailOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
-        checkSnowLayerOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);
+        recheckAttachmentsAfterClear(d.x, d.y, d.z, d.oldId);
         checkGravityBlockOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t799：爆炸破坏支撑 → 弹坑上缘沙/沙砾柱坍落（旧 QML 链不发信号 → 悬空残留）
-        checkTrapdoorDoorSupportOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t851：爆炸拆支撑 → 上方活板门/门失撑级联掉落（同族口径）
         breakNetherPortalsAround(d.x, d.y, d.z); // review #27：爆炸拆掉门面 6 邻非抗爆格（黑曜石框免疫）→ 邻接门面熄灭；d.oldId 必非 Air（破坏列表构造）
     }
     emit worldChanged();
@@ -2633,10 +2652,12 @@ void World::dropGravityColumn(int x, int y, int z)
 //   火把本层内联扫（原口径在 PlayerController::dropUnsupportedTorchesAround——Game 层私有，静默清格路径
 //   够不着；此处 World 层等价移植：state 解码唯一附着格 + torchSupportBlock 仍撑则保留，放置 / 掉落同
 //   口径不漂移）。火把清格走「静默直写 + 全套 note + blockBroken + blockDroppedAsItem(dropId) +
-//   recomputeLightAround」（火把是光源，移除须重 flood；红石火把是电力族，notePowerWrite 入脏集），
-//   不发自己的 worldChanged —— 两 caller（dropGravityColumn / clearBlockSilent）末尾的批量收口 emit
-//   覆盖（N 写 1 emit，同本族口径）。**不含 checkGravityBlockOnEdit**（见 world.h 头注释：柱内重入 =
-//   指数级递归重扫；重力延续由 dropGravityColumn 自身循环 / caller 显式补调负责）。
+//   recomputeLightAround」（火把是光源，移除须重 flood；红石火把是电力族，notePowerWrite 入脏集）；
+//   实际掉落 ≥1 个火把时末尾自 emit worldChanged + clearAllDirty（review24 #2：红石火把是 chunk mesh
+//   几何，clearBlockSilent 的收口 emit 在本函数**之前** → 不自 emit 则火把格错过重建信号 = 幽灵网格
+//   残留；同 ① check* 兄弟「真有写入才 emit」口径，无掉落零 emit）。**不含
+//   checkGravityBlockOnEdit**（见 world.h 头注释：柱内重入 = 指数级递归重扫；重力延续由
+//   dropGravityColumn 自身循环 / caller 显式补调负责）。
 void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
@@ -2651,6 +2672,7 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
     checkRailOnEdit(x, y, z, oldId, id);           // t565/t733：铁轨失撑掉落 + 邻轨连接重算
     checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑级联掉落（静默清格公共复检收口）
     // ② 6 邻火把 / 红石火把（火把非 solid 不撑他火把 → 单趟扫即足够，无级联）：
+    bool torchDropped = false; // review24 #2：本扫是否实际掉落 ≥1 火把（决定收口 emit 是否发——无掉落零 emit）
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &d : kNb) {
         const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
@@ -2673,6 +2695,18 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
         emit blockBroken(tx, ty, tz, int(tb));               // 破块粒子 / 音（机制等价 MC 火把附着面移除脱落）
         emit blockDroppedAsItem(tx, ty, tz, BlockRegistry::dropId(tb)); // 掉落物（Main.qml spawnItem，count 恒 1）
         recomputeLightAround(tx, ty, tz, tb, BlockRegistry::Air); // 火把是光源 → 移除须重 flood（清光源）
+        torchDropped = true;
+    }
+    // review24 #2：火把 / 红石火把是 chunk mesh 几何（partialblockgeometry）——实际掉落 ≥1 时自 emit
+    //   worldChanged + clearAllDirty（与 ① check* 兄弟同口径）。旧版「不发自己的 worldChanged、靠两 caller
+    //   末尾批量收口覆盖」对 dropGravityColumn 成立（emit 在循环后）但对 clearBlockSilent 不成立（其
+    //   worldChanged/clearAllDirty 在 recheck **之前**已收口）→ 红石火把格直写标脏后错过本次重建信号 =
+    //   视觉幽灵火把残留（掉落物已生成，一把火把两处可见）。caller 侧多发一次幂等 worldChanged 无害
+    //   （dropGravityColumn 柱顶至多掉 1 趟 → 至多 1 次叠加 emit，同 destroySphereSilent 逐格调 check*
+    //   的既有先例；clearBlockSilent 的主 emit 在前、本 emit 在后 → 后者才是携带火把清格的重建信号）。
+    if (torchDropped) {
+        emit worldChanged();      // 驱动 mesh 重建（火把段消失）
+        m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 check* 兄弟末尾）
     }
 }
 

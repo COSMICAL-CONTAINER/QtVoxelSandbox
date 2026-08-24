@@ -638,13 +638,17 @@ public:
     //       早退与批量收口 emit）；
     //     · 6 邻火把 / 红石火把：state 解码唯一附着格 → torchSupportBlock（R1 口径 a890bfa）仍支撑则
     //       保留，失撑则静默清 + blockBroken + blockDroppedAsItem（掉落走 dropId，呈现层转 spawnItem）+
-    //       notePowerWrite（红石火把是电力族）+ recomputeLightAround（火把是光源）。旧口径散在
-    //       PlayerController::dropUnsupportedTorchesAround（玩家挖掘）/ EntityManager 爆炸路径两处
-    //       Game/Entities 层，静默清格路径完全无此扫。
+    //       notePowerWrite（红石火把是电力族）+ recomputeLightAround（火把是光源）+ 实际掉落 ≥1 时自
+    //       emit worldChanged/clearAllDirty（review24 #2：红石火把是 chunk mesh 几何，clearBlockSilent
+    //       收口 emit 在 recheck 之前 → 不自 emit 即幽灵网格残留；同 check* 兄弟「真有写入才 emit」）。
+    //       旧口径散在 PlayerController::dropUnsupportedTorchesAround（玩家挖掘）/ EntityManager 爆炸
+    //       路径两处 Game/Entities 层，静默清格路径完全无此扫。
     //   **不含 checkGravityBlockOnEdit**：dropGravityColumn 自身的向上循环即重力延续（柱内逐格清完再
-    //   重入会造成指数级递归重扫）；需要重力复检的 caller（clearBlockSilent / destroySphereSilent）
-    //   自行补调。供 dropGravityColumn 每清一格 + clearBlockSilent 末尾调（口径合一）。非 Q_INVOKABLE
-    //   （内部 helper）。分层（PLAN §2）：World 层，只读 / 写 m_chunks + lightField + 发信号。
+    //   重入会造成指数级递归重扫）；需要重力复检的 caller（clearBlockSilent / destroySphereSilent /
+    //   tickLavaFlow 焚毁）自行补调。供 dropGravityColumn 每清一格 + clearBlockSilent /
+    //   destroySphereSilent 逐破坏格 / tickLavaFlow 逐焚毁格调（review24 #3 口径合一——一切静默清格
+    //   路径单一收口）。非 Q_INVOKABLE（内部 helper）。分层（PLAN §2）：World 层，只读 / 写 m_chunks +
+    //   lightField + 发信号。
     void recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId);
 
     // t565 铁轨连接重算（机制等价 MC 1.0 rail 自动连接 + 转弯）。读 (x,y,z) 的水平 4 邻块 id 经
