@@ -637,7 +637,8 @@ int PartialBlockGeometry::append(
         //       转弯形态）→ 降级 X 向直线。t666 规则集②已保证这类连接位对非普通轨不产生，此直落仅防御。修症状④。
         //       t771：拐角的**配对臂**轨种不限（普通 / 动力 / 探测邻均可让普通轨格成弯——连接位由
         //       railConnections 规则①统一判定），弯道贴图仍只呈现在普通轨格（本 case 分支不变）。
-        //     → 3/4 连接：普通轨 → tile 137 十字 / T（T 以十字瓦片近似，机制等价 MC rail crossing）。
+        //     → 3/4 连接：t812 起连接计算不再产出多臂（四向全连→直线一对 / T 交叉→转辙器弯 2 位，走
+        //       上两分支）；本 case 的 tile 137 十字分支仅剩旧存档陈旧 state 防御（见下）。
         //   t667 坡度（机制等价 MC 1.0 铁轨爬坡；渲染约定「低端画坡、高端平铺」）：
         //   直轨读本 cell 的 nb.railDelta*（chunkgeometry 按三高探针填的邻轨高度差）——quad 对应端边抬高 1 格
         //   成斜段（如 +X 邻轨升 1 → quad 的 +X 端 y = yr+1），同层端保持 yr（斜坡跨整 cell 由低端轨一格画完）；
@@ -698,6 +699,9 @@ int PartialBlockGeometry::append(
                                 && BlockRegistry::railCornerArms(con, armXD, armZD);
         if (!straightOnly && nConn >= 3) {
             // 十字 / T（3+ 连接）：tile 137 整片（T 以十字瓦片近似）。无坡。
+            //   t812 起 railConnections 不再产出 3+/4 位连接（四向全连→直线一对、T 交叉→转辙器弯 2 位，
+            //   见 blockregistry.h 规则 5）——本分支仅剩**旧存档陈旧 state**（t812 前铺的十字轨，读档
+            //   未经编辑复检）防御性渲染；任意邻块编辑重算后即落新形态。保留分支防旧档渲染空洞。
             pushRailFlat(137, 0.f, 0.f, 1.f, 0.f, 1.f, 1.f, 0.f, 1.f);
         } else if (cornerArms) {
             // 拐角（恰好 1 X + 1 Z 连接，仅普通轨）。tile 136 象限映射（t737 重写；基准确认见上方注释段）：

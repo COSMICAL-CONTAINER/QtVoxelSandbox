@@ -2065,9 +2065,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
 //      （弯道形态只呈现在普通轨格上，机制等价 MC 1.0；但它们可作普通轨拐角的配对臂）。
 //   ② 非普通轨（动力 / 探测）：直线投影 —— 优先「对向贯穿轴」；否则保持既有轴偏好向的单端连接；
 //      否则任取单端；均无 → 0。绝不产生垂直 2 位 / 十字。
-//   ③ 普通轨：贯穿轴优先（保持既有轴偏好：既有对向双连接 / 既有单向 / 轴偏好位 bit5）；
-//      对轴仅在**两端都有轨**时并入（十字）；单端对轴 stub 永不并入（真 MC：直轨侧旁垂直轨不互连成 T）。
+//   ③ 普通轨：贯穿轴优先（保持既有轴偏好：既有对向双连接 / 既有单向 / 轴偏好位 bit5）。
 //   ④ 0 连接 → 0（轴偏好位由调用方按 curState 守恒写回 —— 孤轨轴向保活）。
+//   ⑤ t812 3+ 臂交汇（普通轨 only，规则③前拦截）：四向全连 → 直线一对（轴偏好级联，直线优先于弯，
+//      十字多臂输出退役）；三向 T 交叉 → 转辙器弯道 2 位（稳定优先：既有合法弯保持；否则 bit6
+//      RailSwitchCurveFlag 选侧）。红石升沿切弯由 World 电力层走 railSwitchToggledState（事件驱动，
+//      与本布局驱动重算分离）。
 quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
                                       const RailProbe &px, const RailProbe &nx,
                                       const RailProbe &pz, const RailProbe &nz)
@@ -2090,28 +2093,8 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
 
     const bool isNormal = (selfId == Rail);
 
-    // ① 拐角：普通轨 && 恰好 1 X 臂 + 1 Z 臂。t771 起配对臂**轨种不限** —— isRail 家族任一（普通 / 动力 /
-    //   探测）均可作臂（机制等价 MC 1.0「弯道形态只呈现在普通轨格上，但配对邻轨可以是任意轨种」：普通×
-    //   动力相邻 → 普通轨侧成弯；动力-普通-动力垂直链 → 中间普通轨成弯。t771 前臂限定 id==Rail → 跨轨种
-    //   垂直邻被规则③整个丢弃 → 只有普通×普通能弯（用户实测报告根因））。动力 / 探测轨**自身**仍永不弯
-    //   （isNormal 守卫 + 规则②直线投影恒直）。t709：臂高放宽 —— 同层 / 上 / 下一格的轨均可配对（机制等价
-    //   MC 1.0 坡底拐弯：下坡轨降到交界格再转弯，旧版要求两臂同层 → 坡臂不配对 → 交界格只渲染单臂
-    //   stub —— 用户实测「拐角处方向相反 / 轨道断头」根因）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 →
-    //   不构成拐角 → bothX/bothZ 直线优先（t710「单格凹谷不允许直化」由本优先序保证：凹谷双上臂恒走
-    //   EW/NS 直线 + 双端画坡，永不被垂直邻带歪成拐角）。t771 起臂存在性即 hasP*（三高任一轨）—— 反向
-    //   守卫（!hasN*）随 nArm==2 垂直配对自动成立，不再显式判。
-    if (isNormal) {
-        const int nArm = int(hasPX) + int(hasNX) + int(hasPZ) + int(hasNZ);
-        if (nArm == 2 && ((hasPX || hasNX) && (hasPZ || hasNZ))) {
-            if (hasPX && hasPZ) return quint8(RailConnPx | RailConnPz);
-            if (hasPX && hasNZ) return quint8(RailConnPx | RailConnNz);
-            if (hasNX && hasPZ) return quint8(RailConnNx | RailConnPz);
-            return quint8(RailConnNx | RailConnNz);
-        }
-    }
-
     // 轴偏好（直轨优先保持）：既有对向 X 连接 → EW；对向 Z → NS；单 X 位 → EW；单 Z 位 → NS；
-    // 无连接 → bit5 轴偏好位（孤轨放置轴向）。
+    // 无连接 → bit5 轴偏好位（孤轨放置轴向）。（t812 提前到规则⑤之前——四向全连的直线选轴读它。）
     const quint8 c = curState & 0x0F;
     bool ewPref;
     if ((c & (RailConnPx | RailConnNx)) == (RailConnPx | RailConnNx)) ewPref = true;
@@ -2119,6 +2102,49 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
     else if (c & (RailConnPx | RailConnNx)) ewPref = true;
     else if (c & (RailConnPz | RailConnNz)) ewPref = false;
     else ewPref = (curState & RailAxisEWFlag) != 0;
+
+    if (isNormal) {
+        const int nArm = int(hasPX) + int(hasNX) + int(hasPZ) + int(hasNZ);
+        // ① 拐角：普通轨 && 恰好 1 X 臂 + 1 Z 臂。t771 起配对臂**轨种不限** —— isRail 家族任一（普通 / 动力 /
+        //   探测）均可作臂（机制等价 MC 1.0「弯道形态只呈现在普通轨格上，但配对邻轨可以是任意轨种」）。
+        //   动力 / 探测轨**自身**仍永不弯（isNormal 守卫 + 规则②直线投影恒直）。t709：臂高放宽 —— 同层 /
+        //   上 / 下一格的轨均可配对（坡底拐弯）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 → 不构成拐角 →
+        //   bothX/bothZ 直线优先（t710「单格凹谷不允许直化」由该优先序保证）。t771 起臂存在性即 hasP*
+        //   （三高任一轨）—— 反向守卫（!hasN*）随 nArm==2 垂直配对自动成立，不再显式判。
+        if (nArm == 2 && ((hasPX || hasNX) && (hasPZ || hasNZ))) {
+            if (hasPX && hasPZ) return quint8(RailConnPx | RailConnPz);
+            if (hasPX && hasNZ) return quint8(RailConnPx | RailConnNz);
+            if (hasNX && hasPZ) return quint8(RailConnNx | RailConnPz);
+            return quint8(RailConnNx | RailConnNz);
+        }
+        // ⑤ t812 3+ 臂交汇（普通轨 only；详见头注释规则 5）——「一坨不知道咋走」的收口：不再输出
+        //    多臂十字 / T，连接关系确定且稳定。
+        if (nArm >= 3) {
+            if (nArm == 4) {
+                // 四向全连：直线优先于弯——轴偏好级联取一对直位（既有贯穿轴 / 既有单端轴 / bit5；全新
+                //   state=0 → NS）。输出确定 → 重算恒同值 = 不闪变；旧 t565 十字 4 位输出在此退役
+                //   （mesher 十字贴图分支仅剩旧存档陈旧 state 防御位）。矿车沿贯穿轴直行穿过（对向
+                //   直位的反向滤自然放行直行，pickTrackStep 通用点积环无需特判）。
+                return ewPref ? quint8(RailConnPx | RailConnNx)
+                              : quint8(RailConnPz | RailConnNz);
+            }
+            // 三向 T 交叉（nArm==3 必为一对贯穿 + 单端岔尖）＝转辙器：弯道 2 位（岔尖 + 贯穿轴一侧）。
+            //   布局分解与 railSwitchToggledState 同源（贯穿对 + 岔尖 + 正/负端）。
+            const bool throughX = hasPX && hasNX;
+            const quint8 stem = throughX ? quint8(hasPZ ? RailConnPz : RailConnNz)
+                                         : quint8(hasPX ? RailConnPx : RailConnNx);
+            const quint8 posEnd = throughX ? RailConnPx : RailConnPz; // 贯穿轴正端（+X / +Z）
+            const quint8 negEnd = throughX ? RailConnNx : RailConnNz;
+            // 稳定优先：既有连接位已是本布局合法弯（含岔尖 + 恰一贯穿端）→ 原样保持（转辙记忆 /
+            //   切弯后不被无关邻编辑翻回；「激活前连接稳定不闪变」）。否则按 bit6 选侧（新轨 / 岔尖
+            //   重接：0 → 正端 / 1 → 负端）。
+            const bool hasStem = (c & stem) != 0;
+            const bool hasPos = (c & posEnd) != 0, hasNeg = (c & negEnd) != 0;
+            if (hasStem && (hasPos != hasNeg)) return c;
+            return (curState & RailSwitchCurveFlag)
+                ? quint8(stem | negEnd) : quint8(stem | posEnd);
+        }
+    }
 
     // ② 非普通轨（动力 / 探测）：直线投影（永不拐角 / 十字）。
     if (!isNormal) {
@@ -2134,10 +2160,11 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
         return 0;
     }
 
-    // ③ 普通轨非拐角：贯穿轴 + 对轴成双并入。
+    // ③ 普通轨非拐角非交汇（≤2 臂无垂直对）：贯穿轴 + 对轴成双并入。
+    //   t812：旧「对轴两端都有轨 → 十字 4 位」分支退役——四向全连已在规则⑤直线化拦截，本路径
+    //   bothX&&bothZ 不可达（保留注释防回归：交汇形态必须经规则⑤的稳定选轴，不得再产多臂）。
     const bool bothX = hasPX && hasNX, bothZ = hasPZ && hasNZ;
     bool throughX;
-    if (bothX && bothZ) return quint8(RailConnPx | RailConnNx | RailConnPz | RailConnNz); // 十字
     if (bothX) throughX = true;
     else if (bothZ) throughX = false;
     else if (ewPref && (hasPX || hasNX)) throughX = true;  // 单向 X（含既有轴偏）
@@ -2194,6 +2221,39 @@ bool BlockRegistry::railCornerArms(quint8 con, int &outXD, int &outZD)
     outXD = cpx ? 1 : -1;
     outZD = cpz ? 1 : -1;
     return true;
+}
+
+// t812 转辙器切弯（纯函数单一权威；实现见头注释）：普通轨 + 3 臂 T 交叉 → bit6 翻转 + 连接位重写为
+//   「岔尖 + 另一贯穿端」+ bit7 按 powered 置/清（bit5 轴偏好原样保留）。非普通轨 / 非 T 交叉 →
+//   返 curState 原值（调用方 no-op：电力对直轨 / 拐角 / 四向全连轨无作用，机制等价 MC 转辙器只在
+//   junction 上生效）。布局分解（贯穿对 + 岔尖 + 正/负端）与 railConnections 规则⑤ T 分支逐字同源。
+quint8 BlockRegistry::railSwitchToggledState(quint8 selfId, quint8 curState, bool powered,
+                                             const RailProbe &px, const RailProbe &nx,
+                                             const RailProbe &pz, const RailProbe &nz)
+{
+    if (selfId != Rail) return curState; // 动力 / 探测轨不转辙（自身永不弯）
+    const auto anyRail = [](const RailProbe &p) {
+        return isRail(p.same) || isRail(p.up) || isRail(p.down);
+    };
+    const bool hasPX = anyRail(px), hasNX = anyRail(nx);
+    const bool hasPZ = anyRail(pz), hasNZ = anyRail(nz);
+    const int nArm = int(hasPX) + int(hasNX) + int(hasPZ) + int(hasNZ);
+    if (nArm != 3) return curState; // 0/1/2 臂（直 / 拐角）或 4 臂（全连直线）→ 非转辙器
+    const bool throughX = hasPX && hasNX;
+    const quint8 stem = throughX ? quint8(hasPZ ? RailConnPz : RailConnNz)
+                                 : quint8(hasPX ? RailConnPx : RailConnNx);
+    const quint8 posEnd = throughX ? RailConnPx : RailConnPz;
+    const quint8 negEnd = throughX ? RailConnNx : RailConnNz;
+    // 切弯 = bit6 翻转后的指向（0=正端 ↔ 1=负端），连接位直接重写（不经 railConnections 的「保持既有
+    //   合法弯」——那会把弯钉死在旧侧，切不动；两入口语义见 railSwitchToggledState 头注释）。
+    const bool toNeg = (curState & RailSwitchCurveFlag) == 0;
+    quint8 ns = quint8(curState & ~(RailConnPx | RailConnNx | RailConnPz | RailConnNz)); // 保 bit4..7
+    ns = quint8(ns | stem | (toNeg ? negEnd : posEnd));
+    if (toNeg) ns = quint8(ns | RailSwitchCurveFlag);
+    else       ns = quint8(ns & quint8(~RailSwitchCurveFlag));
+    if (powered) ns = quint8(ns | RailSwitchPoweredFlag);
+    else         ns = quint8(ns & quint8(~RailSwitchPoweredFlag));
+    return ns;
 }
 
 // t225 箱子前面（锁面）所朝 Face（state 低 2 位解码，与 horizontalFacing 同源 0=+X 1=-X 2=+Z 3=-Z）。

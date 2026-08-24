@@ -1957,8 +1957,17 @@ public:
     //   3) 非普通轨（动力 / 探测）：直线投影最优先 —— 只保留「对向贯穿轴」或单端直连位，永不拐角 /
     //      十字（动力 / 探测轨**自身**坐弯位 → 自动直连最近两平行邻或轴偏好单端）。与普通轨垂直相邻时
     //      普通轨侧照常成弯（t771：弯道格永远是普通轨、臂可以是任意轨种）。
-    //   4) 3+ 连接的普通轨 = T / 十字：贯穿轴保持 + 对轴两端都有连接才并入另一轴（单端对轴 stub 不并，
-    //      防「拐角旁边直轨被带歪」，用户实测症状③）。拐角收到「第三邻成直线贯通」→ 重直化（贯穿轴）。
+    //   4) 3+ 连接的普通轨（t812 重写）：**不再输出十字 / T 多臂**——
+    //      · 四向全连（4 臂）：直线优先，按轴偏好级联（既有贯穿轴 → 既有单端轴 → bit5）取一对直位
+    //        （EW 或 NS），稳定不闪变（重算恒同值；车沿贯穿轴直行穿过，机制等价 MC 1.0 十字口的
+    //        plain rail 表现为一根直轨）。旧 t565 的 4 位十字输出退役（mesher 十字贴图分支仅剩旧存档
+    //        陈旧 state 防御）。
+    //      · 三向交汇（T 交叉：一对贯穿 + 单端岔尖）＝**转辙器**：输出弯道 2 位（岔尖 + 贯穿轴一侧）。
+    //        稳定优先：既有连接位已是本布局合法弯（含岔尖位 + 恰一贯穿端）→ 原样保持；否则按 bit6
+    //        （RailSwitchCurveFlag：0 → 正端 / 1 → 负端）选弯。红石通电上升沿切换弯向（World 电力层
+    //        接收器分支，见 RailSwitchCurveFlag / railSwitchToggledState）——压力板 / 按钮 / 拉杆 /
+    //        红石块 / 粉 / 火把经 isReceivingPower 全覆盖。机制等价 MC 1.0 rail junction 转辙器。
+    //      动力 / 探测轨 3+ 邻仍走规则②直线投影（自身永不弯 / 不转辙——弯道与转辙只呈现在普通轨格）。
     //   t638：连接判定扩为 isRail 家族（普通 / 动力 / 探测轨互连）；t771：普通轨拐角的配对臂同步扩为
     //   家族任一轨种（普通×动力 / 动力-普通-动力垂直链均成弯；动力 / 探测轨自身仍永直）。
     //   t667 坡度：连接位不存坡度方向（无新 state 位）—— 同层 +y±1 三高探针只是**存在性**，坡向由
@@ -1972,6 +1981,21 @@ public:
     //   清 = NS（Z 轴）。放置时按玩家面向写；重算时守恒（0 连接保持；有连接时镜像当前轴，让孤轨展示
     //   最后形态，机制等价 MC 跌落轨保留 metadata）。mesher 在 0 连接时读本位选直轨方向。
     static constexpr quint8 RailAxisEWFlag = 0x20;
+    // t812 转辙器弯向位（bit6，仅普通轨）：普通轨 3 臂交汇（一对贯穿 + 单端岔尖）= **转辙器**（机制等价
+    //   MC rail junction：岔尖与贯穿轴某一侧连成弯道，红石通电沿切到另一侧，断电保持位置不回弹）。本位
+    //   记「当前弯向」：0 = 弯向贯穿轴**正端**（+X / +Z，布局相对语义——贯穿轴是 X 时正端 = Px、是 Z 时
+    //   = Pz）；1 = 弯向**负端**。连接位（低 4 位）才是消费端权威（mesher 象限 / pickTrackStep 车转向读
+    //   连接位）；本位是「切弯方向记忆」——World::tickRedstone 接收器分支通电上升沿翻转本位 + 同步重写
+    //   连接位（railSwitchToggledState 单一权威），邻块编辑重算（railConnections T 分支）优先**保持既有
+    //   合法弯**（连接稳定不闪变）、形态失效（岔尖被破 / 直化重来）时按本位重选。存档 round-trip 保真；
+    //   动力 / 探测轨 bit6 恒 0（非转辙器，无人写入）。collisionAABBs / selectionAABBs 不读（ShapeNone）
+    //   → 复用零回归（同 RailAxisEWFlag 段外复用模式）。
+    static constexpr quint8 RailSwitchCurveFlag = 0x40;
+    // t812 转辙器通电记忆位（bit7，仅普通轨）：转辙器「上一电力态」——通电上升沿（0→1）切弯 + 置本位；
+    //   断电下降沿只清本位**不回弹弯向**（MC 语义：转辙器保持位置）。没有本位则稳定通电期间每次电力
+    //   复算触达都会误判「新上升沿」反复切弯（振荡）——本位是升沿检测的跨 tick 记忆。断电后（本位=0）
+    //   再通电 → 新上升沿 → 再切弯（反复扳拉杆 = 弯道来回切换）。存档 round-trip 保真。
+    static constexpr quint8 RailSwitchPoweredFlag = 0x80;
     // 三高探针：每个水平方向（±X / ±Z）的邻格在上/中/下三层的方块 id（0 = 空气 / 非轨）。
     //   坡度（t667）存在性判定即查 up / down 层（邻居轨坐在 1 格高台阶上 / 邻居轨低 1 格）。
     struct RailProbe {
@@ -2001,6 +2025,17 @@ public:
     //   （用户实测「左转显右转贴图」）；统一到 Core 单表后，两侧语义同源，杜绝同类错位（机制等价 MC 1.0
     //   rail corner 单一 metadata → 贴图 / 寻路同解码）。
     static bool railCornerArms(quint8 con, int &outXD, int &outZD);
+    // t812 转辙器切弯（纯函数单一权威，见 RailSwitchCurveFlag / RailSwitchPoweredFlag 头注释）：普通轨 +
+    //   4 向三高探针 → 若本轨是 3 臂 T 交叉（转辙器形态），返回「切换到另一条弯」后的完整 state：bit6
+    //   翻转 + 低 4 位连接重写为「岔尖 + 另一贯穿端」+ bit7 按 powered 置/清 + bit5 轴偏好原样保留。
+    //   非普通轨 / 非 T 交叉（0/1/2 臂拐角直轨 / 四向全连直线）→ 返 curState 原值（调用方 no-op——
+    //   电力对非转辙器轨无作用）。唯一调用方：World::recomputePowerLocal 接收器分支（通电上升沿）。
+    //   与 railConnections T 分支的关系：后者是**布局驱动**（邻块编辑复检，保持合法弯优先），本函数是
+    //   **事件驱动**（红石升沿强制切弯）——两处共享同一 T 布局分解（贯穿对 + 岔尖）与 bit6 正/负端
+    //   语义，杜绝漂移（同 railCornerArms 单表先例）。
+    static quint8 railSwitchToggledState(quint8 selfId, quint8 curState, bool powered,
+                                         const RailProbe &px, const RailProbe &nx,
+                                         const RailProbe &pz, const RailProbe &nz);
     // 由放置命中面外法线（指向玩家侧）推火把附着方向。torch target = hitBlock + normal，故 normal +X
     //   → 火把在 hitBlock 的 +X 侧 → 其支撑 = 火把的 -X 邻 = hitBlock（TorchOnNX）。ny>0 → TorchFloor。
     //   无法线（不应发生）→ TorchFloor 兜底。placeBlock 据此写 state；与 torchPlaced 信号传出的命中面

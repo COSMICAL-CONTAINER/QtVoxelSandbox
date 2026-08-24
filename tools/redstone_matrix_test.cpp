@@ -7758,6 +7758,198 @@ int main(int argc, char *argv[])
                              "441-cell door via write-family extinguish hook";
     }
 
+    // ── P-t812 铁轨四向连接优先级 + 红石变道探针（R19.13 🅰；t771 三消费端同源架构的交汇形态收口）──
+    //   用户报告：「普通铁轨周围 3+ 轨连接时一坨不知道咋走」。断言四组（任一 FAIL = 用户症状在当前
+    //   HEAD 的复现点）：
+    //   (a) 四向全连（4 臂）：不再输出十字多臂——直线优先出一对直位（全新 state=0 → NS），且邻块编辑
+    //       复检后恒同值（不闪变）；非拐角（railCornerArms 拒）；
+    //   (b) T 交叉（3 臂 = 一对贯穿 + 单端岔尖）＝转辙器：默认弯向（bit6=0 → 贯穿轴正端；mesher tile 136
+    //       拐角贴图走 railCornerArms 同源象限）；激活前稳定（放源块 / 邻编辑不闪变）；拉杆升沿切弯 →
+    //       断电保持 → 再升沿再切；红石块 / 压力板两源同语义（isReceivingPower 全源覆盖）；
+    //   (c) 矿车过 T 交叉按当前弯向走：默认弯向出口侧 → 通电切弯后改走另一侧 → 断电后仍按保持的弯向走。
+    {
+        // ── (a) 四向全连 → 直线一对 + 不闪变 ──
+        {
+            const auto [x0, z0] = nextSlot();
+            // 四臂轨先铺、中心轨最后（邻齐后一次成形）；全部 state=0（无轴偏好）→ 期望 NS 直线对。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0 - 1, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);
+            tickN(w, 2);
+            const quint8 con4 = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            int axd = 0, azd = 0;
+            bool ok = con4 == quint8(BR::RailConnPz | BR::RailConnNz)   // 直线一对（NS）
+                      && con4 != quint8(BR::RailConnPx | BR::RailConnNx | BR::RailConnPz | BR::RailConnNz) // 十字退役
+                      && !BR::railCornerArms(con4, axd, azd);           // 非拐角形态
+            // 不闪变：邻块编辑（在东臂上方放 / 破石头——复检范围覆盖中心轨且不动轨布局）后 con 恒同值。
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Stone, 0);
+            const quint8 con4a = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Air, 0);
+            const quint8 con4b = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            ok = ok && con4a == con4 && con4b == con4;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t812 four-way junction = straight pair not multi-arm cross: con"
+                              << int(con4) << "after edit" << int(con4a) << int(con4b)
+                              << "(stable across neighbor-edit recompute)";
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0 - 1, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // ── (b) T 交叉转辙器：默认弯向 + 稳定 + 升沿切弯 + 断电保持 + 多源 ──
+        //   布局：J=(x0,z0) 普通轨；贯穿对 = ±Z 两臂；岔尖 = +X 臂；-X 空位放源（拉杆/红石块/压力板）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0 + 1, BR::Rail, 0);   // +Z 贯穿臂
+            w.setBlock(x0, kRigY, z0 - 1, BR::Rail, 0);   // -Z 贯穿臂
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);   // +X 岔尖
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);       // 转辙器 J（最后放）
+            tickN(w, 2);
+            const auto jCon = [&]() { return quint8(w.stateAt(x0, kRigY, z0) & 0x0F); };
+            const auto jState = [&]() { return w.stateAt(x0, kRigY, z0); };
+            // 拐角贴图同源断言（P16 cornerQuadrantOk 同款最小版）：T 弯 2 位 → railCornerArms 解码成功 +
+            //   mesher 直调产 tile 136 拐角 quad（u 落 136 瓦片窗）。
+            const auto cornerTile136 = [](quint8 con) {
+                int xd = 0, zd = 0;
+                if (!BR::railCornerArms(con, xd, zd)) return false;
+                QVector<Vtx> verts; QVector<quint32> idx;
+                PartialLightCtx lctx; lctx.light = 1.0f;
+                for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+                PartialNeighborCtx nctx;
+                nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = 0;
+                const float tileW = 1.0f / 16.0f;
+                PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::Rail, con, lctx, nctx,
+                                             tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+                int n136 = 0;
+                for (const Vtx &v : verts) {
+                    const float uu = (v.u - 136.0f * tileW) / tileW;
+                    if (uu >= 0.0f && uu <= 1.0f) ++n136;
+                }
+                return n136 >= 4; // 一片拐角 quad（4 顶点）在 136 窗
+            };
+            const quint8 kDef = quint8(BR::RailConnPx | BR::RailConnPz);   // 默认弯：岔尖(+X) + 贯穿正端(+Z)
+            const quint8 kAlt = quint8(BR::RailConnPx | BR::RailConnNz);   // 切弯后：岔尖 + 贯穿负端(-Z)
+            bool ok = jCon() == kDef && cornerTile136(jCon());
+            // 激活前稳定：-X 空位放拉杆（OFF）——邻编辑复检覆盖 J，弯向必须保持（不闪变）。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 0);
+            tickN(w, 2);
+            ok = ok && jCon() == kDef;
+            // 拉杆升沿 → 切弯（bit6 翻转 + bit7 通电记忆置位）。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 1);
+            tickN(w, 4);
+            ok = ok && jCon() == kAlt
+                 && (jState() & BR::RailSwitchCurveFlag) != 0
+                 && (jState() & BR::RailSwitchPoweredFlag) != 0
+                 && cornerTile136(jCon());
+            // 断电 → 弯向保持（bit7 清、bit6/连接位不动）。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 0);
+            tickN(w, 4);
+            ok = ok && jCon() == kAlt
+                 && (jState() & BR::RailSwitchCurveFlag) != 0
+                 && (jState() & BR::RailSwitchPoweredFlag) == 0;
+            // 再升沿 → 再切回默认侧（转辙器来回扳）。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 1);
+            tickN(w, 4);
+            ok = ok && jCon() == kDef;
+            // 红石块源：拆拉杆（降沿）→ 放红石块（升沿切弯）→ 拆红石块（降沿保持）。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            tickN(w, 4);
+            w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+            tickN(w, 4);
+            ok = ok && jCon() == kAlt;
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            tickN(w, 4);
+            ok = ok && jCon() == kAlt;
+            // 压力板源：压下（state bit0）升沿切弯；松开降沿保持。
+            w.setBlock(x0 - 1, kRigY, z0, BR::WoodPressurePlate, 1);
+            tickN(w, 4);
+            ok = ok && jCon() == kDef;
+            w.setBlock(x0 - 1, kRigY, z0, BR::WoodPressurePlate, 0);
+            tickN(w, 4);
+            ok = ok && jCon() == kDef;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t812 T-junction switch: default curve" << int(kDef)
+                              << "tile136 corner, stable pre-power, lever/redstone-block/pressure-plate"
+                                 " rising edges toggle curve, falling edges hold position (MC junction"
+                                 " semantics; con now" << int(jCon()) << ")";
+            // 清场
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0 - 1, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // ── (c) 矿车过 T 交叉按当前弯向走（空车追推跑法，同 P11(d)/t771(d)：pushEmptyCart + 每帧 wish 随行进向）──
+        //   布局同 (b)（独立槽）：J=(x0,z0)，岔尖 +X（spawn 位），贯穿 ±Z 死端臂。默认弯 kDef=Px|Pz →
+        //   岔尖进车出 +Z；通电切到 kAlt=Px|Nz → 出 -Z；断电后保持 → 仍出 -Z。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0 + 1, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0 - 1, BR::Rail, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 0); // 源（先 OFF）
+            tickN(w, 2);
+            const auto jCon = [&]() { return quint8(w.stateAt(x0, kRigY, z0) & 0x0F); };
+            // 跑一趟：岔尖 (x0+1,z0) spawn → 推向 J → 按当前弯向出到贯穿死端臂格心停（死端反向滤停）。
+            //   返终停格 (bx,bz)；停在岔尖 / 进错臂都由期望值比对抓出。
+            const auto runJunctionCart = [&]() {
+                MinecartManager carts;
+                carts.spawnCart(x0 + 1, kRigY, z0, &w); // 岔尖轨 con=Nx → spawn 定向 -X（朝 J）
+                QVector3D prev = carts.posAt(0);
+                float wishX = -1.0f, wishZ = 0.0f;
+                for (int t = 0; t < 900; ++t) {
+                    carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着推（静止即续推）
+                    carts.tickPushedCarts(0.016f, &w);
+                    const QVector3D cp = carts.posAt(0);
+                    const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
+                    const float dl = std::sqrt(ddx * ddx + ddz * ddz);
+                    if (dl > 1e-4f) { wishX = ddx / dl; wishZ = ddz / dl; }
+                    prev = cp;
+                }
+                return QPair<int, int>(int(std::floor(prev.x())), int(std::floor(prev.z())));
+            };
+            // ① 默认弯（kDef=Px|Pz）：岔尖进 J（行 -X，Px 反向滤）→ Pz dot=0 胜 → 出 +Z 死端停格心。
+            bool ok = jCon() == quint8(BR::RailConnPx | BR::RailConnPz);
+            const auto end1 = runJunctionCart();
+            ok = ok && end1.first == x0 && end1.second == z0 + 1;
+            // ② 拉杆升沿切弯（kAlt=Px|Nz）→ 新车改出 -Z 死端。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 1);
+            tickN(w, 4);
+            ok = ok && jCon() == quint8(BR::RailConnPx | BR::RailConnNz);
+            const auto end2 = runJunctionCart();
+            ok = ok && end2.first == x0 && end2.second == z0 - 1;
+            // ③ 断电保持（kAlt 不回弹）→ 新车仍出 -Z。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 0);
+            tickN(w, 4);
+            ok = ok && jCon() == quint8(BR::RailConnPx | BR::RailConnNz);
+            const auto end3 = runJunctionCart();
+            ok = ok && end3.first == x0 && end3.second == z0 - 1;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t812 cart through T-junction follows current curve: default exits"
+                                 " +Z dead end" << (end1.second == z0 + 1)
+                              << ", after power toggle exits -Z" << (end2.second == z0 - 1)
+                              << ", after power off holds -Z" << (end3.second == z0 - 1);
+            // 清场
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0 - 1, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

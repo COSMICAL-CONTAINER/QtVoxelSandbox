@@ -635,6 +635,8 @@ public:
     //   BlockRegistry::railConnections（单一权威）算该 Rail 的连接 state；与当前 state 不同 → 静默直写
     //   新 state（m_chunks.setBlock(id,state) + 标脏，**不经 World::setBlock** → 不重入本检查、不发
     //   broken/placed）+ 末尾 1 次 worldChanged（批量收口）。非 Rail 格 / state 未变 → no-op。
+    //   t812：普通轨 T 交叉 = 转辙器（railConnections 规则⑤输出弯 2 位；切弯走 tickRedstone 接收器
+    //   分支 railSwitchToggledState）；bit6 弯向 / bit7 通电记忆随重算守恒写回（详见 .cpp 注释）。
     //   供 checkRailOnEdit（编辑复检）与 placeMineshaft（worldgen 铺轨后统一算连接）共用。
     void recomputeRailConnections(int x, int y, int z, bool &outChanged);
 
