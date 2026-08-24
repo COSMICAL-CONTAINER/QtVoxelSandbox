@@ -2993,7 +2993,7 @@ t767-t807（41 项）。**建议顺序：t792 铁砧 UI 附魔丢失最高优先
 
 ### 🅵 投掷物与钓鱼（t835-t836）
 **t835** 末影珍珠传送修复增强：① 落在**铁轨上/墙上不传送**（碰撞判定漏非整方块面）→ 任何接触（含岩浆）必传送；② 落水/岩浆 → **缓慢沉到液体底再传送**；③ 一路不碰墙地直落虚空 → 不传送；④ 抛距加长；⑤ **疾跑抛更远**（初速乘疾跑系数）。
-**t836** 🕐 **这版本实现**：钓鱼系统整改——钓鱼线渲染（竿→浮漂可见）、任意位置右键甩竿（不再限定水里才出红点）、可钩住动物、水中上钩粒子/浮漂动静/上钩判定全套（先调研 MC 1.0 钓鱼机制再列实施子任务；鱼肉获取链随本项打通）。用户明示「下一个版本想看到这些的实现」。
+**t836** 钓鱼系统整改（**用户 8-25 指示：本版本做完，不再拖下版本**）：钓鱼线渲染（竿→浮漂可见）、任意位置右键甩竿（不再限定水里才出红点）、可钩住动物、水中上钩粒子/浮漂动静/上钩判定全套（先调研 MC 1.0 钓鱼机制再列实施子任务；鱼肉获取链随本项打通）。
 
 ### 🅶 画作/玻璃/垃圾桶（t837-t839）
 **t837** 画作背面与朝向：① 1×2 画挖非承重方块后**背面看不到画**（画应随支撑破坏整体掉落，不残留单面）；② 放置时**有时直接显示背面**（朝向计算取反/墙面判定漏方向）。
@@ -3027,11 +3027,32 @@ t767-t807（41 项）。**建议顺序：t792 铁砧 UI 附魔丢失最高优先
 **t853** 死亡输入锁全套：① 死后**视角还能转动/晃动** → 死亡态锁鼠标视角；② 移动/打开背包全锁；③ 「你死了」UI 出现即**自动释放鼠标指针**（现状须按 ESC 才能点按钮）；④ 死亡态按 ESC **不打开暂停菜单**——只能点「立即重生」/「回到主菜单」两按钮（ESC 至多无效或再次释放指针）。 ✅✅ 已完成（①③ 本体修复=t852 同一根因：onDied 被 TypeError 掐断 → release() 不跑（指针锁死=captured 残留 true → pollMouse 持续转视角）→ 修复后 release 在 finally 最先段执行=死亡屏出现即指针自由可点按钮；**单一权威**钉死：playerState.dead（Game 层 Q_PROPERTY）= QML 输入路由唯一判定（keyInput 闸门/WheelHandler/pauseOverlay.visible/chatDisplay.visible 全读它），PlayerController.m_dead 是 C++ 物理闸门镜像（dropAllItems 置位/respawn 复位）不进 QML，两层经 onDied→dropAllItems 单点同步。① 纵深防御：pollMouse() 加 m_dead 早 return（兜「死亡但 captured 残留」的任何漏 release 路径，同 grab()/setKey() 的 t655 闸门族）。② 既有 t655 全套闸门此前被同一根因架空（m_dead 未置）→ 修复后自然恢复：C++ setKey/placeBlock/attack/eat/bow/grab 全拒 + QML keyInput 死亡闸门吞 E/WASD/1-9/Q/F5 + WheelHandler 滚轮锁。④ keyInput 死亡闸门把 **Esc 从放行表移除**（t691 旧「死亡态 Esc 开暂停叠层」语义退役，注释同步改写）——死亡态 ESC 键盘层直接吞掉；pauseOverlay.visible 本就含 !playerState.dead（双保险，防未来暂停路径漏判）；聊天 T/Enter 仍放行（t691 遗言语义不动，chatInput 自持焦点其 ESC 关聊天不受影响）。矩阵随 t852 探针 215 PASS/0 FAIL；exe 冒烟 10s 无 QML 错误。**需人工目视**：死亡屏出现瞬间光标即可见且直接可点两按钮（不按 ESC）；死亡态晃鼠标视角不动、WASD/E/Q/滚轮全无效、ESC 无暂停菜单弹出；T 开聊天仍可发遗言。
 
 ### 🅽 装备与玩家模型（t854-t855）
-**t854** mob 护甲覆盖修：僵尸/骷髅穿装备——胸甲**没覆盖手臂**（MC layer_1 = 躯干+双臂一体壳）、铁裤**只有膝盖段有护甲**（layer_1 腿件应全腿高）、靴子**没全覆盖**（layer_2 靴壳包脚+踝）→ ArmorLayerBox 盒几何覆盖范围对齐 MC 分层（t718 盒复查，逐件目视核）。
-**t855** Steve/Alex 手臂混搭修：F5 第三人称从背后看**后手臂一半是 Steve 一半是 Alex 的手**（左右臂贴图源/UV 混绑——Alex 3px 臂 vs Steve 4px 臂采样区错位）+ **第一人称手持模型与当前皮肤不同步**（viewModelHand 固定贴图不随皮肤选择变）→ 单一皮肤源贯通三处（第一人称/第三人称左右臂/挥手动画）。
+**t854** mob 护甲覆盖修：僵尸/骷髅穿装备——胸甲**没覆盖手臂**（MC layer_1 = 躯干+双臂一体壳）、铁裤**只有膝盖段有护甲**（layer_1 腿件应全腿高）、靴子**没全覆盖**（layer_2 靴壳包脚+踝）→ ArmorLayerBox 盒几何覆盖范围对齐 MC 分层（t718 盒复查，逐件目视核）。 ✅✅ 已完成（e6b2681）：根因=ArmorLayerBox C++ 盒几何（±0.5 单位盒 + MC box-UV）本身无误，**覆盖范围全由 QML delegate 的 position/scale 决定**——t377/t560 期 mob 护甲盒按「视觉提示」拍的尺寸系统性偏离 MC 分层语义。修法（Main.qml Shambler/Bones 两段 delegate）：① 胸甲壳全盖躯干（(0,0.05)@全高 0.60+探 0.04——MobModel 躯干 y∈[-0.25,0.35]，旧 (0,0.12)@0.50 露肚段）+ **补双袖壳 ArmorLayerBox{piece:2} 绑胸甲槽**（MC layer_1 胸甲=躯干+双臂一体壳，旧版 mob 完全没有袖）；Shambler 前伸横臂袖壳 eulerRotation.x=90° 使 12px 袖条带高轴沿臂长（机制等价 MC 僵尸甲袖随前伸臂），Bones 垂直竖臂无旋转、**右袖挂弓肩枢 Node 同枢同角**（刚体随 addBoxRot 瞄准抬臂，review M10 模式——静态袖会被满拉抬臂穿出）；② 护腿全腿高（腿 local y∈[0,-0.65] → (0,-0.325)@0.70；旧 (0,-0.05)@0.40 只盖髋下 40% 且 X 0.20 比腿 0.22 还窄=部分嵌进腿内）；③ 靴=脚+踝段（(0,-0.50,-0.03)@(0.26,0.34,0.30)，y∈[-0.67,-0.33] 包踝+脚、z 前探成靴头同玩家靴先例；旧 (0,-0.57)@0.16 只盖脚底一小截）；Bones 按细骨比例缩窄同修。**玩家侧同修（共用语义 blessed）**：playerModel + CharacterPreview3D 胸甲袖 0.52→全臂高 (0,-0.35)@(0.30,0.74,0.30)（MC layer_1 袖盒 4×12×4 与臂同高 12px 到腕；玩家躯干/腿/靴三件原已达标不动）。纯 QML 改动零新探针（C++ 几何未动），矩阵 240 PASS / 0 FAIL 不变，exe 冒烟 12s 无 QML 错误。**需人工目视**：① 蹒跚者（僵尸）穿全套铁甲——胸甲壳盖住整条前伸双臂（袖到手端）+ 躯干全高无露肚；② 骸骨（骷髅）穿铁甲——垂臂两袖全臂高、瞄准拉弓时右袖随臂抬起不脱袖；③ 铁裤全腿高（走动摆腿时护腿跟腿整段摆）；④ 靴子包脚+踝有靴头（前伸超出脚尖）；⑤ 玩家 F5 自穿胸甲袖到腕（不再只包上臂）。
+**t855** Steve/Alex 手臂混搭修：F5 第三人称从背后看**后手臂一半是 Steve 一半是 Alex 的手**（左右臂贴图源/UV 混绑——Alex 3px 臂 vs Steve 4px 臂采样区错位）+ **第一人称手持模型与当前皮肤不同步**（viewModelHand 固定贴图不随皮肤选择变）→ 单一皮肤源贯通三处（第一人称/第三人称左右臂/挥手动画）。 ✅✅ 已完成（e6b2681）：① 「后臂一半 Steve 一半 Alex」根因实证（PIL 实测 demo 包 alex.png）：slim 臂条带右缘 u=54，其外 u[54,56) 两列 **alpha=0 但 RGB=steve 肤色 (170,125,102)**——按 classic 4px 采样时臂背面 [52,56) 采到这两列，且皮肤材质 opacity 1.0 走 Opaque 路径 **alpha 被忽略 → steve 色 RGB 整列不透明显出**（从背后看=背面=混搭观感的确切来源）。采样区错位本体已被 Review #8/#1 系列修复（probeSlimSkinLayout 探测区 u[54,56) + kPiecesSlim 臂 3×12×4，矩阵已有探针锁 Core 侧），本任务收口剩余两环：**(a) 皮肤材质 alpha 契约**——Main.qml 8 件身体部位 + CharacterPreview3D 8 件 + 第一人称臂全部加 alphaCutoff 0.5 + opacity 0.99（观察者 0.35 路径保留，同 t718 护甲壳既有模式）：任何布局差列今后按 alpha 丢弃而非显成异色鬼影列（纵深防御，兼防探测保守误判向）；**(b) 第一人称手持皮肤化**——viewModelHand 固定色两段 UnitCube（蓝袖+肤色）退役，改 PlayerSkinBox{piece:2} 整臂盒 + playerSkinTex + skinIsSlim() 同判定（= 第三人称左右臂同一贴图源同一 slim 判定；/skin 切肤、pack 开关、slim 布局三态即时同步到手持），eulerRotation.x=180 使手纹素（strip 底行）朝上（手臂从屏幕下缘伸出=袖下手上），挥手/进食/拉弓动画驱动父 Node 自动跟随（挥手与皮肤同源达成）；几何对齐旧两段合并包络（中心 -0.045 长 0.29、粗 0.12 沿用，z 深度未动→不穿模契约不变）。纯 QML 改动零新探针（PlayerSkinBox/探测 Core 侧均未动、既有 #1 探针+static_assert 已锁），矩阵 240 PASS / 0 FAIL 不变，exe 冒烟 12s 无 QML 错误。**需人工目视**：① /skin alex + demo 包 → F5 背面双臂全 Alex（无 steve 肤色条纹）；② /skin 切换 → 第一人称手持手臂即时换肤（Alex=绿袖细臂、default=蓝袖，与第三人称一致）；③ 第一人称挥手/进食/拉弓动画正常；④ 背包 3D 预览人物与游戏内皮肤一致。
 
 ### 🅱 组追加（t856）
 **t856** 发射器发射点燃 TNT：发射器内放 TNT + 激活 → 弹出**已点燃的 TNT 实体**（MC 1.0 dispenser 语义：发射即点燃，短引信落地爆），现有 spawnPrimedTnt 链接通 dispenser 发射路径。
 
 ### 📎 R19.13 范围与顺序（v2，含 8-24 增补）
 t808-t856（49 项；t836 钓鱼为下版本占位）。**建议顺序：t813 构建版本戳最先（三项争议复现的前置）→ t814 红石实机复现 → t822 铁砧附魔复现二 → t852/t853 死亡双修（掉落回归+输入锁，用户痛点）→ t809/t810 矿车玩法阻塞双修 → t811 生物乘坐 → t843-led 火语义组（t841-t846，重做大件）→ t848 传送门无限 → t812 铁轨变道 → t840 成就纠偏 → t834 剪羊毛 → t849-t851 铁砧/活板门组 → t816-t821 浏览器视觉组 → t824-t827 附魔组 → t828-t833 生物组 → t854/t855 装备模型 → t835 珍珠 → t856 发射器 TNT → t815/t837-t839/t847 杂项收尾**。每项独立 commit + dev-plan ✅✅；全部完成后 code review + 统计报告。实机复现类（t814/t822/t823）与新观测类（t848 的 5×4 失败、t852 回归定位）产出无论真缺陷还是旧 exe，都须用户在新版本戳上口头确认后才关单。
+
+---
+
+## R19.14 性能起步批（t857-t860，4 项；2026-08-24 立项，基于 docs/vulkan-rhi-and-simd-survey-2026-08-21.md 调研）
+
+**立项背景**：Vulkan/SIMD 调研结论——瓶颈在主线程 CPU（9FPS 时 main*131ms / render 5.0ms），切 Vulkan 后端帧率≈0 提升。本批只做调研推荐的第 0 步快赢 + 第 1 步中最廉价独立项（C6），全部无后端依赖；C3 halo 快照/C2 单遍多段/C1 meshing 线程化/SIMD 双 TU 分派等 4-10 周级大项**不在本批**，待本批验收后单独立项。
+
+### 🅰 渲染真值与合批（t857-t858）
+**t857** F3 渲染统计换真值：`~drawEst`（Main.qml:345 估算值）改 `view3d.renderStats.drawCallCount / drawVertexCount / renderPassCount / renderTime`（View3D RenderStats QML 原生类型，无需新 C++）；顺带修 F3 顶点求和只覆盖 9 chunk 的显示偏差（t178-correctness.md:87 登记项）。验收：F3 显示值与 RenderStats 真值一致、不再随估算公式漂移。
+**t858** 掉落物/经验球 instancing 试点：掉落物 + 经验球两类刚体 delegate（数量大、无逐部件动画）改 `Model.instancing` + C++ `QQuick3DInstancing` 子类喂实例表（位置/旋转/缩放/光照 tint），每类压成 1 Model/1 draw；mob 不适用（48 模板逐部件动画，调研已明确排除）。验收：地面 50+ 掉落物场景 F3 drawCallCount 可见下降、渲染观感无回归（拾取判定纯 C++ 侧不受渲染层影响）；若与 alpha 契约/光照 tint 冲突则降级回退并记录。
+
+### 🅱 CPU 分配修复（t859）
+**t859** collisionAABBsAt 堆分配消除：`World::collisionAABBsAt` 按值返回 `std::vector<BlockAABB>`（world.h:135）= 玩家 3 轴 × ~12 格/tick + 60 mob 各自调 = 每帧数百次堆分配；改 out-param（调用方栈上 small_buffer / 复用 vector）+ 全部调用点（playercontroller footprint + mob 四谓词）同步。验收：零警告构建、矩阵全 PASS、行为零变（纯分配路径改写，F3 帧分解 main 桶改善为加分项非门槛）。
+
+### 🅲 试验项（t860，可降级）
+**t860** cutout 段折叠试验：地形材质已 `alphaMode: Mask`（Main.qml:3888），alpha test 不需要独立半透段 → 尝试 cutout 段（树苗/草丛/花）并入 terrain 不透明段，6 段减 1（600 Model 满配 → 500）；**风险前置**：受 chunkgeometry.h:67-70 D3D11 alphaCutoff 契约（仅 opacity<1 生效）制约，需实测剔除排序/贴图渗色；任何观感回归（草丛边缘/树苗阴影）即降级关闭记录结论。验收：若保留 → cutout 类方块观感无回归 + F3 drawCall 下降；若关闭 → 调研文档登记结论。
+
+### 📎 R19.14 范围与说明
+- 顺带项（并入 t857 提交）：lessons-learned.md 两处勘误（:119「Vulkan 已生效」陈旧条目、:39「greedy 默认开」与代码不符）。
+- **明确不做**：Vulkan 后端切换（路线 A，1-2 天回归项，单独排期）；C3/C2/C1/SIMD（4-10 周级，验收本批后立项）；C4 自定义材质（与 B1 重复投资，调研已排除）；C5 图集 mipmap（渗色坑）。
+- 每项独立 commit + dev-plan ✅✅；全部完成后 code review + 统计报告。
