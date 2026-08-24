@@ -7283,6 +7283,146 @@ int main(int argc, char *argv[])
                              "TNT/dispenser = signal->QML->consumer)";
     }
 
+    // ── P-t856 发射器弹点燃 TNT 探针（Game 层真消费端，t814 模式）──
+    //   MC 1.0 dispenser 语义：发射器内 TNT 经激活（拉杆，激活链 t772/t814 已锁、本任务零改动）→ 弹出
+    //   **已点燃** TNT 实体（PrimedTnt），标准引信落地爆。断言四组：
+    //   (a) 弹出位 = 发射面邻格格心（state 0 → +X，源贴背面保发射面净空）+ **标准引信**（fuseProgress==1.0
+    //       钉满值 kPrimedTntFuseSec ~5s——链式短 fuse 1.2s 会给 0.24，缩短立现形）+ 引信在跑（tick 0.25s
+    //       后 progress 递减）+ **定向初速**（tick 后 +X 位移 ≈ v·dt，钉弹射方向=发射面朝向）+ 库存 3→2；
+    //   (b) 二次激活 <2s 冷却 → 无第二发（信号确发的零发射 = 冷却拦，t814 ② 口径）+ 库存不再扣；
+    //       冷却过 2s 后再造沿 → 必再弹（+1 实体 / 库存 2→1，t814 ③ 口径）——冷却闸对 TNT 分支不回归；
+    //   (c) 投掷器 + TNT → 普通掉落物弹出**不点燃**（dropper 只投不射口径——两路径边界的另一侧：dropper
+    //       弹 TNT 是物品非引燃实体）+ 库存照扣；
+    //   (d) 红石直接邻接 TNT 原地引爆（firePowerTnt 清方块 + 原格生成）不回归由 t814 (a) 既有探针复跑覆盖。
+    {
+        PlayerController pc;
+        EntityManager ents;
+        DispenserStore store;
+        ItemEntityManager items;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setDispenserStore(&store);
+        pc.setItemEntities(&items);
+        QObject::connect(&w, &World::powerDispenserTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
+        const auto primedCount = [&ents]() {
+            int n = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.isPrimedAt(i)) ++n;
+            return n;
+        };
+
+        // (a) 装填 3 TNT 的发射器 + 背面拉杆激活 → 弹出 PrimedTnt @ 发射面邻格 + 标准引信 + 定向初速。
+        bool okA = false, okAFuse = false, okAMove = false;
+        int tx0 = 0, tz0 = 0;
+        {
+            const auto [x0, z0] = nextSlot();
+            tx0 = x0; tz0 = z0;
+            placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0); // state 0 → 朝 +X（chestFrontFace 解码）
+            store.ensureDispenser(x0, kRigY, z0);
+            store.setSlot(x0, kRigY, z0, 0, BR::TntBlock, 3);
+            tickN(w, 2);
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1); // 源贴背面 → 发射面 x0+1 保持净空
+            tickN(w, 4);
+            int idx = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.isPrimedAt(i)) { idx = i; break; }
+            okA = idx >= 0
+                  && std::abs(ents.posAt(idx).x() - (x0 + 1.5f)) < 1e-3f // 发射面邻格（x0+1）格心
+                  && std::abs(ents.posAt(idx).y() - (kRigY + 0.5f)) < 1e-3f
+                  && std::abs(ents.posAt(idx).z() - (z0 + 0.5f)) < 1e-3f
+                  && store.slotIdAt(x0, kRigY, z0, 0) == BR::TntBlock
+                  && store.slotCountAt(x0, kRigY, z0, 0) == 2;          // 库存 3→2（激活一次消耗 1）
+            if (idx >= 0) {
+                // 标准引信：满值（progress==1.0）；再 tick 0.25s → 引信递减（<1.0）+ +X 定向位移（初速 4×0.25≈1 格）。
+                const float progBefore = ents.fuseProgressAt(idx);
+                const float xBefore = ents.posAt(idx).x();
+                ents.tick(0.25, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                okAFuse = progBefore >= 0.999f && ents.isPrimedAt(idx)
+                          && ents.fuseProgressAt(idx) < progBefore;     // 引信计时在跑
+                okAMove = ents.isPrimedAt(idx)
+                          && ents.posAt(idx).x() > xBefore + 0.5f;      // 弹射方向 = 发射面朝向（+X）
+            }
+            if (!okA || !okAFuse || !okAMove)
+                qInfo().noquote() << "  [t856 a diag] primedIdx=" << idx
+                                  << " pos=" << (idx >= 0 ? ents.posAt(idx) : QVector3D())
+                                  << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0)
+                                  << " fuse=" << (idx >= 0 ? ents.fuseProgressAt(idx) : -1.0f)
+                                  << " okAFuse=" << okAFuse << " okAMove=" << okAMove;
+        }
+
+        // (b) 冷却闸不回归（t814 (e) ②③ 压缩版，分派物换 TNT）：2s 内真上升沿 → 冷却拦（零发射且信号确发）；
+        //     冷却驱动过 2s 再造沿 → 必再弹。
+        bool okB = false;
+        {
+            w.setBlock(tx0 - 1, kRigY, tz0, BR::Lever, 0); // 扳回 → 降沿（清 fireDispenserAtQml 沿基线）
+            tickN(w, 4);
+            const int dispBeforeRepower = dispFired;
+            placeRigBlock(w, tx0 - 1, kRigY, tz0, BR::Lever, 1); // 复置 = 真上升沿，但冷却 2s 未过
+            tickN(w, 4);
+            const bool noRefire = primedCount() == 1                      // 仍只有首发（无第二发）
+                                  && store.slotCountAt(tx0, kRigY, tz0, 0) == 2 // 库存不再扣
+                                  && dispFired > dispBeforeRepower;       // 信号确发（零发射 = 冷却拦非信号丢）
+            pc.scanDispenserTraps(2.5f); // 等价递减驱动：一次耗尽 2s 冷却（探针态沿表空零副作用，t814 ③ 同款）
+            w.setBlock(tx0 - 1, kRigY, tz0, BR::Lever, 0);
+            tickN(w, 4);
+            placeRigBlock(w, tx0 - 1, kRigY, tz0, BR::Lever, 1); // 新上升沿 + 冷却已过 → 必再弹
+            tickN(w, 4);
+            okB = noRefire && primedCount() == 2
+                  && store.slotCountAt(tx0, kRigY, tz0, 0) == 1;          // 库存 2→1（真扣一发）
+            if (!okB)
+                qInfo().noquote() << "  [t856 b diag] noRefire=" << noRefire
+                                  << " primed=" << primedCount()
+                                  << " slotCount=" << store.slotCountAt(tx0, kRigY, tz0, 0)
+                                  << " sig=" << (dispFired > dispBeforeRepower);
+            // 清场（实体留在探针私有 ents 内冻结，不外泄）
+            w.setBlock(tx0 - 1, kRigY, tz0, BR::Air, 0);
+            w.setBlock(tx0, kRigY, tz0, BR::Air, 0);
+            store.clearDispenser(tx0, kRigY, tz0);
+            tickN(w, 2);
+        }
+
+        // (c) 投掷器 + TNT → 普通掉落物弹出不点燃（dropper 全物品分支先于 TNT 分派，两路径边界另一侧）。
+        bool okC = false;
+        {
+            const auto [x0, z0] = nextSlot();
+            const int itemsBefore = items.count(); // 相对基线（review24 低危口径）
+            const int primedBefore = primedCount();
+            placeRigBlock(w, x0, kRigY, z0, BR::Dropper, 0);
+            store.ensureDispenser(x0, kRigY, z0);
+            store.setSlot(x0, kRigY, z0, 0, BR::TntBlock, 2);
+            tickN(w, 2);
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1);
+            tickN(w, 4);
+            okC = items.count() == itemsBefore + 1                     // 弹出 1 掉落物（TNT 物品形态）
+                  && primedCount() == primedBefore                     // 零 PrimedTnt（不点燃）
+                  && store.slotCountAt(x0, kRigY, z0, 0) == 1;         // 库存照扣
+            if (!okC)
+                qInfo().noquote() << "  [t856 c diag] items=" << items.count() << "/" << itemsBefore
+                                  << " primed=" << primedCount() << "/" << primedBefore
+                                  << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            store.clearDispenser(x0, kRigY, z0);
+            tickN(w, 2);
+        }
+
+        const bool okT856 = okA && okAFuse && okAMove && okB && okC;
+        if (!okT856) ++totalFail;
+        qInfo().noquote() << (okT856 ? "PASS" : "FAIL")
+                          << "| t856 dispenser fires primed TNT: lever behind a 3-TNT dispenser pops a "
+                             "PrimedTnt at the facing-adjacent cell center (state 0 -> +X, source kept off "
+                             "the firing face), full standard fuse (fuseProgress==1.0 pins "
+                             "kPrimedTntFuseSec, chain-fuse 1.2s would read 0.24), fuse ticking + "
+                             "directional +X drift after one 0.25s entity tick pins pop-along-facing "
+                             "velocity, stock 3->2; sub-2s-cooldown re-edge fires nothing while "
+                             "powerDispenserTriggered still emits, cooldown driven past 2s then re-edge "
+                             "MUST re-pop (+1 entity, stock 2->1); dropper w/ TNT pops a plain item drop "
+                             "with zero primed entities (dropper = item-only, the other side of the "
+                             "two-path boundary); redstone-direct-adjacent in-place priming regression is "
+                             "covered by the t814(a) probe above";
+    }
+
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
     //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
     //   AnvilUI.qml + InventoryOps.js，11 放入路径）47/47 全过，但其 Hotbar 是 **QML 桩**

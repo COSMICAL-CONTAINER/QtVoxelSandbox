@@ -1097,7 +1097,10 @@ private:
     //   方块后 arrowPickupScan 可拾 +1 箭 —— 机制等价 MC 1.0 发射器箭可打生物可拾取；旧版 spawnArrow 命中玩家
     //   不可拾，t608 修）；雪球（SnowballId）→ spawnSnowball 投掷物（damage=0 与玩家手抛一致：0 伤 + 红闪 +
     //   击退 + 减速；旧版 1HP 实伤，t608 统一 0）；鸡蛋（EggId）→ spawnEgg 投掷物（t583：命中碎裂 + 1/8 概率
-    //   孵小鸡 + 击退，机制等价 MC 1.0 发射器弹鸡蛋）；剑（ToolRegistry type==Sword）→ 定向弹出掉落物实体 +
+    //   孵小鸡 + 击退，机制等价 MC 1.0 发射器弹鸡蛋）；**t856 TNT（TntBlock）→ 发射即点燃**：发射面邻格
+    //   spawnPrimedTnt（标准引信 ~5s + 朝向定向初速 kDispenserTntPopSpeed，落地爆；红石直接邻接 TNT 的原地
+    //   引爆链（firePowerTnt）并存不动——放进发射器才弹出，机制等价 MC 两路径）；剑（ToolRegistry
+    //   type==Sword）→ 定向弹出掉落物实体 +
     //   发射方向射线命中 mob 时造成 ToolRegistry::attackDamage 一次（机制等价 MC 1.0 发射器弹射武器）；其余
     //   物品 → spawnItemAt 定点定向弹出掉落物（排出口 + 朝向初速 kDispenserPopSpeed + 0.5s 免拾窗）。发射方向
     //   = 发射器 state（chestFrontFace 编码）解出的朝向外向，与排出口贴图朝向一致（机制等价 MC 发射器朝排出口
@@ -1640,6 +1643,11 @@ private:
     // t609 投掷器弹出掉落物速度（blocks/s）：低于发射器 kDispenserPopSpeed——轻量出口的温和弹出（机制等价
     //   MC 1.0 dropper 弹出距离短于 dispenser 弹射；只投不射的机关口径）。
     static constexpr float kDropperPopSpeed         = 4.0f;  // 投掷器弹出掉落物速度（blocks/s）
+    // t856 发射器弹 TNT 初速（blocks/s）：弹出即点燃的 PrimedTnt 实体沿发射面朝向定向弹出。primed tick 水平
+    //   积分带摩擦衰减（EntityManager::kExplosionEntityFriction=4/s）→ 飞行距离 ≈ |v|/摩擦率 = 1 格即落（机制
+    //   等价 MC 发射器弹 TNT 小初速抛出、贴出口落地；标准引信 ~5s 内自然落地爆，不另设短引信）。略低于掉落物
+    //   kDispenserPopSpeed——TNT 弹远即无意义（机关陷阱口径：贴面落定炸）。
+    static constexpr float kDispenserTntPopSpeed    = 4.0f;  // 发射器弹 TNT 定向初速（blocks/s）
     // t628 按钮按下到自动弹回的时长（秒；机制等价 MC 1.0 stone button 按下 ~1s / 20 game ticks 后弹回）。
     //   placeBlock isManualIgniter 分支右键按下按钮（置 state bit0）时写入 m_buttonRecoverCells；
     //   updateButtonRecovery 每 tick 递减，到期清 bit0（按钮弹回 + worldChanged 重建 mesh）。拉杆不启用

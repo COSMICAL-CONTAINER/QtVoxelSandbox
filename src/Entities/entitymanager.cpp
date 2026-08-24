@@ -4380,7 +4380,9 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
 // t490 生成 PrimedTnt（引燃态 TNT 实体；见 entitymanager.h 头注释）。复用 FallingBlock kind + blockId=TntBlock
 //   + primed=true + fuseTicks。位置存 (x+0.5, y+0.5, z+0.5)。halfW/halfH=0（玩家碰撞跳过 → 可穿过）+ pushable=false
 //   + 不查占用（同格可叠多个）。tick FallingBlock 分支据 primed 走 fuse 倒计 → detonatePrimedTnt 引爆。
-void EntityManager::spawnPrimedTnt(int x, int y, int z, float fuseSec)
+//   t856：velX/velZ 非零 → 写入 e.vx/e.vz（primed tick 水平积分段 t494 消费）——发射器弹出路径的定向初速；
+//   默认 0 → 既有机关点火 / 电力点火 / 链式路径零水平位移行为不变。
+void EntityManager::spawnPrimedTnt(int x, int y, int z, float fuseSec, float velX, float velZ)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); primed TNT spawn skipped at" << x << y << z;
@@ -4397,6 +4399,10 @@ void EntityManager::spawnPrimedTnt(int x, int y, int z, float fuseSec)
     e.blockId = BlockRegistry::TntBlock; // 携带 TNT 方块 id（QML delegate BlockCube 据它取 TNT 贴图）
     e.primed = true;          // 标 PrimedTnt（tick 走 fuse 倒计而非着地放置）
     e.fuse = (fuseSec > 0.0f) ? fuseSec : kPrimedTntFuseSec; // 引信（caller 传链式错峰 / 默认 5s）
+    if (velX != 0.0f || velZ != 0.0f) { // t856 定向初速（默认 0 跳过 → 既有路径行为不变）
+        e.vx = velX;
+        e.vz = velZ;
+    }
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
