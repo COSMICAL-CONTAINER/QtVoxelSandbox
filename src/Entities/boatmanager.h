@@ -78,6 +78,17 @@ public:
     // 玩家当前骑的船索引（-1 = 未骑）。PlayerController.step 据它判骑乘分支。
     Q_INVOKABLE int ridingIndex() const { return m_riderBoat; }
 
+    // ── t811 生物乘客座位（mob 自动登乘机制；C++ 直调，EntityManager::tickVehicleRiding 用，同层互调）──
+    // 第 i 个船 seat 号座位（0/1）的生物乘客槽索引（EntityManager 槽；-1 = 空）。越界 / 空槽 → -1。
+    int mobPassengerAt(int i, int seat) const;
+    // 第 i 个船已占生物座位数（0/1/2）。乘员总数 = 玩家（ridingIndex==i ? 1 : 0）+ 它；登乘扫描与玩家
+    //   tryMount 满员判定共读（限 2：玩家 + 1 生物，或 2 生物满员拒玩家）。
+    int mobSeatCount(int i) const;
+    // 记生物乘客到 seat 号座位（覆盖写；空座选择 / 满员由 caller tickVehicleRiding 判）。越界静默。
+    void seatMob(int i, int seat, int mobIdx);
+    // 清 seat 号座位（对账：mob 死 / 槽复用 / 反向链断；或释放路径）。越界静默。
+    void clearMobPassenger(int i, int seat);
+
     // 第 i 个船的世界坐标（呈现层 delegate 绑它摆位）。越界返回 (0,0,0)。
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个船的变体（Oak/Spruce；呈现层据它选贴图）。越界返回 Oak。
@@ -177,6 +188,9 @@ private:
                              //   倒计时（秒）；>0 且前方是「 hull 层挡 / 抬高一格通」的可登台阶 → 限速爬升
                              //   （kBoatBeachClimbRate/s）。低速撞岸不写 → 船被满高岸块挡停（机制等价 MC 1.0
                              //   船撞岸停住 / 有速度才勉强上滩）。仅登岸爬升期间递减，无台阶即清零。
+        int mobPassenger[2] = {-1, -1}; // t811 生物乘客槽索引 ×2 座（EntityManager 槽；-1 = 空。船乘员总限 2
+                             //   = 玩家 1 + 生物座；双向链载具侧，见 mobPassengerAt。数组 DMI → 槽复用
+                             //   spawnBoat 的 Boat b{} 默认清回）。
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Boat> m_boats;

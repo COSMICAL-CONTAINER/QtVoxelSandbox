@@ -1,5 +1,7 @@
 #include "entitymanager.h"
 #include "world.h" // tick / resolvePlayerPush / aiWander 只读 World::isSolid/blockAt/width/depth（向下依赖；PLAN §2 Entities→World 合规）
+#include "minecartmanager.h" // t811 tickVehicleRiding 读矿车座位/位置（同层互调，Entities 内；无环 — 载具管理器不反指本类）
+#include "boatmanager.h"     // t811 tickVehicleRiding 读船座位/位置（同上）
 #include "frameprofiler.h" // t500 perf：mob 桶子分解探针（mobLoop/mobAI/mobPhys/mobHostile/mobSpawn）
 
 #include <QLoggingCategory>
@@ -1454,6 +1456,19 @@ int EntityManager::mobTypeAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0;
     return m_entities[size_t(i)].mobType;
+}
+
+// t811 骑乘读口（头注释见 .h；越界 / 非 Mob 安全默认 -1）。
+int EntityManager::rideCartAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size()) || m_entities[size_t(i)].kind != Mob) return -1;
+    return m_entities[size_t(i)].rideCart;
+}
+
+int EntityManager::rideBoatAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size()) || m_entities[size_t(i)].kind != Mob) return -1;
+    return m_entities[size_t(i)].rideBoat;
 }
 
 // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。越界 → 0。
@@ -4415,6 +4430,9 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
     bool dirty = false;
     for (auto &e : m_entities) {
         if (!e.alive || !e.pushable || e.dead) continue; // t256 空槽 + 掉落物等非推动 + t239 dead mob 跳过
+        // t811 载具骑乘态跳过：mob 位置钉载具座位（tickVehicleRiding 权威），玩家推挤会把钉位实体推出
+        //   车斗 → 视觉脱离 + 下帧钉回的反复拉扯；骑乘期玩家从旁走过不应扰动乘员（同 dead 不推语义）。
+        if ((e.rideCart >= 0 && m_cartMgr) || (e.rideBoat >= 0 && m_boatMgr)) continue;
 
         const float ehw = e.halfW; // 实体 XZ 半宽（圆碰撞半径）
         const float ehh = e.halfH; // 实体 Y 半高（垂直区间）
@@ -4479,6 +4497,165 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
                 e.resting = false; // 无世界可查 → 保守解除（world=null 时 tick 早 return，不影响）
             }
             dirty = true;
+        }
+    }
+    if (dirty) { ++m_revision; emit entitiesChanged(); }
+}
+
+namespace {
+// ── t811 载具骑乘常量（tickVehicleRiding 用；机制口径见 .h tickVehicleRiding 头注释）──
+// 矿车座位底板偏移：mob 脚底相对矿车中心下移量 = 车底板面（坐车斗内脚踩板面）。与 PlayerController.step
+//   骑车分支的 kCartSeatDrop 同值同义（MinecartManager private 跨类不可读 → 本层同值命名常量，同
+//   playercontroller.cpp kCartSeatDrop 先例；改须两处 + Main.qml 车斗底板 piece 三处同步）。
+const float kEmCartSeatFloorDrop = 0.3125f;
+// 登乘判定距离（XZ 平面，格）：矿车 0.8 / 船 1.0（船体更长更宽 → 阈值放宽）。垂直容差 kEmBoardDy 防
+//   楼上 / 桥下误登（隔层载具不吸人）。
+const float kEmBoardCartDist = 0.8f;
+const float kEmBoardBoatDist = 1.0f;
+const float kEmBoardDy = 1.5f;
+// 船双座侧向偏移（格）：座位 0 = 船右舷 +0.3 / 座位 1 = 左舷 −0.3（沿船 right 向；两乘员并肩不重叠）。
+const float kEmBoatSeatSide = 0.3f;
+} // namespace
+
+// t811 载具管理器注入（头注释见 .h；幂等指针写）。
+void EntityManager::setVehicleManagers(MinecartManager *carts, BoatManager *boats)
+{
+    m_cartMgr = carts;
+    m_boatMgr = boats;
+}
+
+// t811 骑乘收口 pass（头注释见 .h）：座位对账 → 骑乘钉位/自释放 → 登乘扫描。纯自身 + 只读载具管理器。
+void EntityManager::tickVehicleRiding()
+{
+    if (m_entities.empty()) return;
+    if (!m_cartMgr && !m_boatMgr) return; // 无载具场景（未注入 / 矩阵测试）：mob 照常 AI，不乘不冻
+
+    // Pass A 座位对账（载具侧 → mob 侧）：座位指向的 mob 已死 / 已释放 / 槽复用换任（kind 不再 Mob /
+    //   反向链断）→ 清座。防「幽灵乘客」占座拒载（mob 死亡动画期 alive=true 但 dead → 座立即让出可再接客，
+    //   尸体本身不走 AI 不受影响）。mob 侧 rideX 字段届时由其自身死亡 / 释放路径自然失效（dead 分支冻结 +
+    //   槽复用 DMI 清回）。
+    if (m_cartMgr) {
+        const int n = m_cartMgr->count();
+        for (int i = 0; i < n; ++i) {
+            const int p = m_cartMgr->mobPassengerAt(i); // 空槽 → -1 天然跳过
+            if (p < 0) continue;
+            const bool linkOk = p < int(m_entities.size()) && m_entities[size_t(p)].alive
+                                && m_entities[size_t(p)].kind == Mob && !m_entities[size_t(p)].dead
+                                && m_entities[size_t(p)].rideCart == i;
+            if (!linkOk) m_cartMgr->clearMobPassenger(i);
+        }
+    }
+    if (m_boatMgr) {
+        const int n = m_boatMgr->count();
+        for (int i = 0; i < n; ++i) {
+            for (int s = 0; s < 2; ++s) {
+                const int p = m_boatMgr->mobPassengerAt(i, s);
+                if (p < 0) continue;
+                const bool linkOk = p < int(m_entities.size()) && m_entities[size_t(p)].alive
+                                    && m_entities[size_t(p)].kind == Mob && !m_entities[size_t(p)].dead
+                                    && m_entities[size_t(p)].rideBoat == i;
+                if (!linkOk) m_boatMgr->clearMobPassenger(i, s);
+            }
+        }
+    }
+
+    bool dirty = false;
+    for (int idx = 0; idx < int(m_entities.size()); ++idx) {
+        Entity &e = m_entities[size_t(idx)];
+        if (!e.alive || e.kind != Mob || e.dead) continue; // 空槽 / 非 mob / 尸体不参与钉位与登乘
+
+        // Pass B 矿车骑乘：反向链完好 → 钉车座位（车动它动）；链断（车被挖 / clearAll / 槽复用）→ 自释放
+        //   原地恢复 AI（下车唯一路径 = 载具被破坏；释放位 = 最后钉位 ≈ 车消失处）。
+        if (e.rideCart >= 0) {
+            const int ci = e.rideCart;
+            if (m_cartMgr && ci < m_cartMgr->count() && m_cartMgr->aliveAt(ci)
+                && m_cartMgr->mobPassengerAt(ci) == idx) {
+                const QVector3D cp = m_cartMgr->posAt(ci);
+                const QVector3D pin(cp.x(), cp.y() - kEmCartSeatFloorDrop + e.halfH, cp.z());
+                if (e.pos != pin) { e.pos = pin; dirty = true; }
+            } else {
+                e.rideCart = -1;
+                e.resting = false; // 解除静止让重力复探支撑面：钉位 Y（车座位）常高于地面 → 不解除则复探
+                                   //   支撑仍实体 → 悬在座位高度不落地（t115 推动解除 resting 同因）。
+                dirty = true;
+            }
+            continue;
+        }
+
+        // Pass B 船骑乘：同上，座位 0/1 沿船 right 向侧偏（yaw 度 → right = (cosθ,0,−sinθ)，-Z 前约定下
+        //   θ=0 面北右 = +X；mob 中心 = 脚底（船心）+ halfH）。
+        if (e.rideBoat >= 0) {
+            const int bi = e.rideBoat;
+            if (m_boatMgr && bi < m_boatMgr->count() && m_boatMgr->aliveAt(bi)
+                && m_boatMgr->mobPassengerAt(bi, e.rideBoatSeat) == idx) {
+                const QVector3D bp = m_boatMgr->posAt(bi);
+                const float yawRad = qDegreesToRadians(m_boatMgr->yawAt(bi));
+                const float side = (e.rideBoatSeat == 0) ? kEmBoatSeatSide : -kEmBoatSeatSide;
+                const QVector3D pin(bp.x() + std::cos(yawRad) * side,
+                                    bp.y() + e.halfH,
+                                    bp.z() - std::sin(yawRad) * side);
+                if (e.pos != pin) { e.pos = pin; dirty = true; }
+            } else {
+                e.rideBoat = -1;
+                e.resting = false; // 同矿车自释放：重力复探支撑面（船座位高于地面 / 水面落点由重力 + 浮力接手）。
+                dirty = true;
+            }
+            continue;
+        }
+
+        // Pass C 登乘扫描（非骑乘 mob）：最近可乘载具。矿车 1 座（生物占 / 玩家骑均满）；船总乘员限 2
+        //   （玩家占 1 座时只剩 1 生物座）。两类都在近旁优先矿车（先扫）—— 机制口径简单可预期。
+        if (m_cartMgr) {
+            const int n = m_cartMgr->count();
+            int best = -1;
+            float bestD2 = kEmBoardCartDist * kEmBoardCartDist;
+            for (int i = 0; i < n; ++i) {
+                if (!m_cartMgr->aliveAt(i)) continue;
+                if (m_cartMgr->mobPassengerAt(i) >= 0) continue;    // 生物已占座 → 满
+                if (m_cartMgr->ridingIndex() == i) continue;        // 玩家正骑 → 满（乘员总数限 1）
+                const QVector3D d = m_cartMgr->posAt(i) - e.pos;
+                if (std::abs(d.y()) > kEmBoardDy) continue;
+                const float dxz2 = d.x() * d.x() + d.z() * d.z();
+                if (dxz2 < bestD2) { bestD2 = dxz2; best = i; }
+            }
+            if (best >= 0) {
+                m_cartMgr->seatMob(best, idx);
+                e.rideCart = best;
+                e.rideBoat = -1;
+                // 姿态锁定：清行走驱动（walkPhase 冻结）+ 残余动量（击退 / 越障滑流 / 垂直速度），骑乘态
+                //   从静止位开始钉。resting 不动（钉位跳过 tick 物理段，不读它）。
+                e.moveSpeed = 0.0f;
+                e.vx = 0.0f; e.vz = 0.0f; e.vy = 0.0f;
+                e.jumpGX = 0.0f; e.jumpGZ = 0.0f;
+                dirty = true;
+                continue;
+            }
+        }
+        if (m_boatMgr) {
+            const int n = m_boatMgr->count();
+            int best = -1, bestSeat = 0;
+            float bestD2 = kEmBoardBoatDist * kEmBoardBoatDist;
+            for (int i = 0; i < n; ++i) {
+                if (!m_boatMgr->aliveAt(i)) continue;
+                const int playerSeats = (m_boatMgr->ridingIndex() == i) ? 1 : 0;
+                if (playerSeats + m_boatMgr->mobSeatCount(i) >= 2) continue; // 满员（玩家+1生物 / 2生物）
+                const int freeSeat = (m_boatMgr->mobPassengerAt(i, 0) < 0) ? 0 : 1;
+                const QVector3D d = m_boatMgr->posAt(i) - e.pos;
+                if (std::abs(d.y()) > kEmBoardDy) continue;
+                const float dxz2 = d.x() * d.x() + d.z() * d.z();
+                if (dxz2 < bestD2) { bestD2 = dxz2; best = i; bestSeat = freeSeat; }
+            }
+            if (best >= 0) {
+                m_boatMgr->seatMob(best, bestSeat, idx);
+                e.rideBoat = best;
+                e.rideBoatSeat = bestSeat;
+                e.rideCart = -1;
+                e.moveSpeed = 0.0f;
+                e.vx = 0.0f; e.vz = 0.0f; e.vy = 0.0f;
+                e.jumpGX = 0.0f; e.jumpGZ = 0.0f;
+                dirty = true;
+                continue;
+            }
         }
     }
     if (dirty) { ++m_revision; emit entitiesChanged(); }
@@ -5443,6 +5620,21 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; } // 红闪结束 → bump 让 QML 翻回 baseColor
                 }
                 continue; // dead：不走 AI / 重力
+            }
+
+            // t811 载具骑乘态冻结：mob 坐上矿车/船后 AI / 物理 / 环境判定**全停**（不动不漂、姿态锁定 ——
+            //   登乘时已清 moveSpeed，walkPhase 冻结在中位）。位置钉载具座位由 tickVehicleRiding 负责
+            //   （PlayerController 在载具物理之后调 → 同帧随车不滞后）。掉血 / 死亡照常：damageEntity 是
+            //   外部路径（玩家攻击 / 箭 / 火）不经本循环，dead 翻 true 后走上文死亡分支 → 尸体 / 掉落留在
+            //   载具处（spec「骑乘中被箭射死 → 尸体/掉落在载具处释放」）。仅保 hurtFlash 衰减（受击红闪
+            //   自然褪去）。dead 优先于本守卫（上文先判）。守卫只看 rideX 字段：对账释放（车被挖）发生在
+            //   tickVehicleRiding → 下一 tick 本守卫自然放行（mob 恢复 AI），至多冻结一帧可忽略。
+            if ((e.rideCart >= 0 && m_cartMgr) || (e.rideBoat >= 0 && m_boatMgr)) {
+                if (e.hurtFlash > 0.0f) {
+                    e.hurtFlash -= float(dt);
+                    if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; }
+                }
+                continue; // 骑乘态：AI / 重力 / resting / 击退 / jumpG / 流推 / 火 / 仙人掌 / 窒息全跳（防漂移）
             }
 
             // t500 perf：mob AI / 环境扫描错峰节流 —— 每 kAiTickInterval 帧（按 idx 错峰）跑一次「火烧 / 仙人掌 /

@@ -114,9 +114,40 @@ bool BoatManager::tryMount(const QVector3D &origin, const QVector3D &dir, float 
     const int idx = findBoatHit(origin, dir, maxDist, &dist);
     if (idx < 0) return false;
     if (idx == m_riderBoat) return false; // 命中当前骑的船 → no-op（不重复上）
+    // t811 满员拒载：船乘员总数限 2（玩家 1 + 生物座 2）—— 两座皆生物 → 拒玩家上（返 false 不改态；
+    //   t508 换船路径同守卫：瞄满员船换船被拒，留在原船）。玩家 + 1 生物 / 空船 / 1 生物照常可上。
+    if (idx >= 0 && idx < int(m_boats.size())
+        && m_boats[size_t(idx)].mobPassenger[0] >= 0 && m_boats[size_t(idx)].mobPassenger[1] >= 0)
+        return false;
     m_riderBoat = idx;
     notifyChanged();
     return true;
+}
+
+// ── t811 生物乘客座位（mob 自动登乘；头注释见 .h。越界 / 空槽安全默认，无 QML 消费不 bump revision）──
+int BoatManager::mobPassengerAt(int i, int seat) const
+{
+    if (i < 0 || i >= int(m_boats.size()) || !m_boats[size_t(i)].alive) return -1;
+    if (seat < 0 || seat > 1) return -1;
+    return m_boats[size_t(i)].mobPassenger[seat];
+}
+
+int BoatManager::mobSeatCount(int i) const
+{
+    if (i < 0 || i >= int(m_boats.size()) || !m_boats[size_t(i)].alive) return 0;
+    return int(m_boats[size_t(i)].mobPassenger[0] >= 0) + int(m_boats[size_t(i)].mobPassenger[1] >= 0);
+}
+
+void BoatManager::seatMob(int i, int seat, int mobIdx)
+{
+    if (i < 0 || i >= int(m_boats.size()) || seat < 0 || seat > 1) return;
+    m_boats[size_t(i)].mobPassenger[seat] = mobIdx;
+}
+
+void BoatManager::clearMobPassenger(int i, int seat)
+{
+    if (i < 0 || i >= int(m_boats.size()) || seat < 0 || seat > 1) return;
+    m_boats[size_t(i)].mobPassenger[seat] = -1;
 }
 
 bool BoatManager::dismount(World *world, QVector3D &outPlayerFeet)

@@ -7051,6 +7051,207 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t811 生物自动乘坐矿车探针（EntityManager + MinecartManager 直编；登乘 / 满员拒载 / AI 冻结钉位
+    //   随车 / 挖车释放 / 玩家占用不接客，全链一次过）──
+    //   机制（R19.13 spec）：非骑乘 mob 走进矿车 ≤0.8 格自动登乘（乘员总数限 1：玩家 XOR 生物）；骑乘期
+    //   AI / 物理全冻结、位置钉车座位（车动它动）；下车唯一路径 = 车被挖（对账自释放原地，恢复 AI）。
+    //   rig：直轨 6 格（北向 z0-5..z0）+ 3 宽石板地板 kRigY-1（mob 落脚 / 释放后重力落点）；驱动序镜像
+    //   PlayerController 真序（mob 桶 tick → 钉位① → step 内车物理 pushEmptyCart+tickPushedCarts → 钉位②）。
+    //   断言：(a) 生于车格 → 首 pass 即登乘 + moveSpeed 归 0（姿态锁定）；(b) 推动期每 tick 钉位误差 <0.01
+    //   （含 Y 座位公式 车心−0.3125+halfH）且车总位移 ≥3 格（确在动）；(c) 停驻后 100 tick 零漂移；
+    //   (d) hitCartFromRay 挖车 → 下一 pass rideCart==-1 + 存活 + 重力落定地板顶（kRigY+halfH）；
+    //   (e) 第二 mob 同格不登（生物占座满员）+ 玩家 tryMount 满员车被拒；(f) 玩家骑乘的车不接 mob。
+    {
+        // rig 选址：运行期扫描空区（t809 先例——nextSlot 网格已被上方探针耗尽）。需 7×4×6 净空。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 93 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 1 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 1 && clear; ++dx)
+                    for (int dz = -6; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t811 mob ride cart: no clear rig area found";
+        } else {
+            const float seatDrop = 0.3125f; // kCartSeatDrop 同值（playercontroller.cpp 骑车分支同款镜像常量）
+            // 3 宽石板地板（kRigY-1）+ 中列直轨 6 格（kRigY；北向 z0-5..z0）。
+            for (int dz = -5; dz <= 0; ++dz)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+                    if (dx == 0) w.setBlock(x0, kRigY, z0 + dz, BR::Rail, 0);
+                }
+            MinecartManager carts;
+            EntityManager ents;
+            ents.setVehicleManagers(&carts, nullptr);
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const int mobA = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#ff5555"), 10);
+            QVector3D player = carts.posAt(0);
+            bool boarded = false, pinOk = true, speedLocked = true;
+            float travel = 0.0f;
+            int parkedTicks = 0;
+            QVector3D lastCart = carts.posAt(0);
+            for (int t = 0; t < 1500 && parkedTicks < 100; ++t) {
+                ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();                        // 钉位①（mob 桶内，游戏同序）
+                carts.pushEmptyCart(&w, player, 0.0f, -1.0f);     // 长按 W 朝北推（t809 玩家模型）
+                carts.tickPushedCarts(0.016, &w);
+                ents.tickVehicleRiding();                        // 钉位②（step 后，同帧随车）
+                const QVector3D cp = carts.posAt(0);
+                const QVector3D mp = ents.posAt(mobA);
+                if (ents.rideCartAt(mobA) >= 0) {
+                    boarded = true;
+                    if (std::fabs(mp.x() - cp.x()) > 0.01f
+                        || std::fabs(mp.y() - (cp.y() - seatDrop + 0.5f)) > 0.01f
+                        || std::fabs(mp.z() - cp.z()) > 0.01f) pinOk = false;
+                    if (ents.moveSpeedAt(mobA) != 0.0f) speedLocked = false;
+                    const float d = QVector3D(cp - lastCart).length();
+                    if (d > 1e-4f) travel += d; else ++parkedTicks; // 停驻窗（车停后钉位零漂计数）
+                }
+                lastCart = cp;
+                player = cp; // 贴身追随（t809 先例：玩家追着车、静止即续推）
+            }
+            // (d) 挖车释放（从车正上方垂直下挖；instantBreak 免耐久轮）→ 对账自释放 + 重力 / 落定重接手。
+            //   isSolid 语义 = 非 air 实存（world.h 注）→ 轨格本身是「实体支撑」：释放 mob（resting 已清）
+            //   下一物理 tick 落定扫描命中轨格 → 贴其 cell 顶（kRigY+1）+ halfH —— 与引擎既有落定公式一致
+            //   （非本任务新增行为），断言按它写死。
+            const QVector3D cp = carts.posAt(0);
+            const bool hit = carts.hitCartFromRay(QVector3D(cp.x(), cp.y() + 3.0f, cp.z()),
+                                                  QVector3D(0.0f, -1.0f, 0.0f), 8.0f, nullptr, true);
+            ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+            ents.tickVehicleRiding();
+            const bool released = hit && !carts.aliveAt(0) && ents.rideCartAt(mobA) == -1 && ents.aliveAt(mobA);
+            ents.tick(0.016, &w, player, 0.3f, 1.8f, false); // 释放后首个物理 tick：重力落定重接手
+            ents.tickVehicleRiding();
+            const float settleY = ents.posAt(mobA).y();
+            const bool settleOk = std::fabs(settleY - (float(kRigY) + 1.5f)) <= 0.06f;
+            // (e) 满员拒载：新车（槽复用 0）+ mobB 占座 → mobC 同格不登 + 玩家 tryMount 被拒。
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const int mobB = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#55ff55"), 10);
+            const int mobC = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#5555ff"), 10);
+            for (int t = 0; t < 8; ++t) {
+                ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();
+            }
+            const bool fullOk = ents.rideCartAt(mobB) == 0 && ents.rideCartAt(mobC) == -1
+                                && !carts.tryMount(carts.posAt(0) + QVector3D(0.0f, 3.0f, 0.0f),
+                                                   QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+            // (f) 玩家占用不接客：挖掉满员车（mobB 释放）→ 重放车 → 玩家骑 → mobD 同格不登。
+            carts.hitCartFromRay(carts.posAt(0) + QVector3D(0.0f, 3.0f, 0.0f),
+                                 QVector3D(0.0f, -1.0f, 0.0f), 8.0f, nullptr, true);
+            ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+            ents.tickVehicleRiding();
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const bool playerRode = carts.tryMount(carts.posAt(0) + QVector3D(0.0f, 3.0f, 0.0f),
+                                                   QVector3D(0.0f, -1.0f, 0.0f), 8.0f)
+                                    && carts.ridingIndex() == 0;
+            const int mobD = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#ffff55"), 10);
+            for (int t = 0; t < 8; ++t) {
+                ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();
+            }
+            const bool playerOccupyOk = playerRode && ents.rideCartAt(mobD) == -1;
+            const bool ok = boarded && pinOk && speedLocked && travel >= 3.0f && parkedTicks >= 100
+                            && released && settleOk && fullOk && playerOccupyOk;
+            if (!ok)
+                qInfo().noquote() << "  t811 cart: boarded" << boarded << "pinOk" << pinOk
+                                  << "speedLocked" << speedLocked << "travel" << travel
+                                  << "parked" << parkedTicks << "released" << released
+                                  << "settleY" << settleY << "fullOk" << fullOk
+                                  << "playerOccupyOk" << playerOccupyOk;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t811 mob auto-rides minecart: board+freeze-pin follows cart"
+                                 " (seatY = cartY-0.3125+halfH), 100-tick park zero-drift, destroy"
+                                 " releases + resettles, full cart refuses 2nd mob & player,"
+                                 " player-ridden cart takes no mob; travel" << travel;
+            // 清场
+            carts.clearAll();
+            ents.clearAll();
+            for (int dz = -5; dz <= 0; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air, 0);
+                w.setBlock(x0, kRigY, z0 + dz, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
+    }
+
+    // ── t811 生物自动乘坐船探针（EntityManager + BoatManager 直编；双座登乘 / 满员 / 玩家拒载 / 挖船释放）──
+    //   rig：凿进天然石 3 宽水道（t805 模式：fy=44 石板 + 45..47 凿空 + 45 层铺水 → 水面顶 46；船浮 46）。
+    //   断言：(a) mob A/B 生于船格 → 双双登乘（A 先扫 → 座 0 / B 座 1），双钉位横向分离 ~0.6（右舷 +0.3 /
+    //   左舷 −0.3，yaw=0 时 right=+X）且 Y = 船位+halfH；(b) mob C 同格不登（2 生物 = 满员 2）；
+    //   (c) 满员船玩家 tryMount 被拒（返 false 且 ridingIndex 不变）；(d) hitBoatFromRay 挖船 → A/B
+    //   双双 rideBoat==-1 且存活（原地释放恢复 AI）。
+    {
+        const int bx = 40, bz = 10; // t805 rig（bx=6,bz=6,x≤39）之外的开阔石区
+        const int fy = 44;          // 石板层；水面 = 45；水面顶 = 46
+        for (int dx = 0; dx <= 4; ++dx)
+            for (int dz = -1; dz <= 1; ++dz) {
+                w.setBlock(bx + dx, fy, bz + dz, BR::Stone, 0);
+                w.setBlock(bx + dx, fy + 1, bz + dz, BR::Air, 0);
+                w.setBlock(bx + dx, fy + 2, bz + dz, BR::Air, 0);
+                w.setBlock(bx + dx, fy + 3, bz + dz, BR::Air, 0);
+            }
+        for (int dx = 0; dx <= 4; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, bz + dz, BR::Water, 0);
+        BoatManager boats;
+        EntityManager ents;
+        ents.setVehicleManagers(nullptr, &boats);
+        const bool spawned = boats.spawnBoat(bx + 2, fy + 1, bz, BoatManager::Oak);
+        const QVector3D bp0 = boats.posAt(0);
+        const int mA = ents.spawnMobTyped(bx + 2, fy + 1, bz, 0, QStringLiteral("#ff5555"), 10);
+        const int mB = ents.spawnMobTyped(bx + 2, fy + 1, bz, 0, QStringLiteral("#55ff55"), 10);
+        const int mC = ents.spawnMobTyped(bx + 2, fy + 1, bz, 0, QStringLiteral("#5555ff"), 10);
+        QVector3D pA, pB;
+        for (int t = 0; t < 12; ++t) {
+            boats.tick(0.016, &w); // 船浮水常开（游戏序：boat 桶在 mob 桶前）
+            ents.tick(0.016, &w, bp0, 0.3f, 1.8f, false);
+            ents.tickVehicleRiding();
+            pA = ents.posAt(mA);
+            pB = ents.posAt(mB);
+        }
+        const QVector3D bpNow = boats.posAt(0);
+        const float sepAB = QVector3D(pA - pB).length();
+        const bool dualSeat = spawned && ents.rideBoatAt(mA) == 0 && ents.rideBoatAt(mB) == 0
+                              && sepAB >= 0.45f && sepAB <= 0.75f          // 双座横向分离 ~0.6
+                              && std::fabs(pA.y() - (bpNow.y() + 0.5f)) <= 0.02f
+                              && std::fabs(pB.y() - (bpNow.y() + 0.5f)) <= 0.02f;
+        const bool fullOk = ents.rideBoatAt(mC) == -1;
+        const bool playerRefused = !boats.tryMount(bpNow + QVector3D(0.0f, 3.0f, 0.0f),
+                                                   QVector3D(0.0f, -1.0f, 0.0f), 8.0f)
+                                   && boats.ridingIndex() == -1;
+        const bool broke = boats.hitBoatFromRay(bpNow + QVector3D(0.0f, 3.0f, 0.0f),
+                                                QVector3D(0.0f, -1.0f, 0.0f), 8.0f, nullptr, true);
+        ents.tick(0.016, &w, bp0, 0.3f, 1.8f, false);
+        ents.tickVehicleRiding();
+        const bool released = broke && !boats.aliveAt(0)
+                              && ents.rideBoatAt(mA) == -1 && ents.rideBoatAt(mB) == -1
+                              && ents.aliveAt(mA) && ents.aliveAt(mB);
+        const bool ok = dualSeat && fullOk && playerRefused && released;
+        if (!ok)
+            qInfo().noquote() << "  t811 boat: dualSeat" << dualSeat << "sepAB" << sepAB
+                              << "fullOk" << fullOk << "playerRefused" << playerRefused
+                              << "released" << released
+                              << "pA" << pA << "pB" << pB << "boatY" << bpNow.y();
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t811 mob auto-rides boat: dual seats (+/-0.3 sides, pinY = boatY+halfH),"
+                             " 3rd mob refused (cap 2), player tryMount refused when full, break"
+                             " releases both in place; seatGap" << sepAB;
+        // 清场
+        ents.clearAll();
+        boats.clearAll();
+        for (int dx = 0; dx <= 4; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dy = 0; dy <= 3; ++dy)
+                    w.setBlock(bx + dx, fy + dy, bz + dz, BR::Air, 0);
+        tickN(w, 2);
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

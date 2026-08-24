@@ -177,9 +177,31 @@ bool MinecartManager::tryMount(const QVector3D &origin, const QVector3D &dir, fl
     const int idx = findCartHit(origin, dir, maxDist, &dist);
     if (idx < 0) return false;
     if (idx == m_riderCart) return false; // 命中当前骑的矿车 → no-op（不重复上）
+    // t811 满员拒载：矿车乘员总数限 1（玩家 XOR 生物）—— 生物已占座 → 拒玩家上（返 false 不改态；
+    //   机制等价 t811 spec「矿车限 1 只」总数口径：玩家占了 mob 不上，mob 占了玩家也不上）。
+    if (idx >= 0 && idx < int(m_carts.size()) && m_carts[size_t(idx)].mobPassenger >= 0) return false;
     m_riderCart = idx;
     notifyChanged();
     return true;
+}
+
+// ── t811 生物乘客座位（mob 自动登乘；头注释见 .h。越界 / 空槽安全默认，无 QML 消费不 bump revision）──
+int MinecartManager::mobPassengerAt(int i) const
+{
+    if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return -1;
+    return m_carts[size_t(i)].mobPassenger;
+}
+
+void MinecartManager::seatMob(int i, int mobIdx)
+{
+    if (i < 0 || i >= int(m_carts.size())) return;
+    m_carts[size_t(i)].mobPassenger = mobIdx;
+}
+
+void MinecartManager::clearMobPassenger(int i)
+{
+    if (i < 0 || i >= int(m_carts.size())) return;
+    m_carts[size_t(i)].mobPassenger = -1;
 }
 
 bool MinecartManager::dismount(World *world, QVector3D &outPlayerFeet)

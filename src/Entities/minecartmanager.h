@@ -80,6 +80,17 @@ public:
     // 玩家当前骑的矿车索引（-1 = 未骑）。PlayerController.step 据它判骑乘分支。
     Q_INVOKABLE int ridingIndex() const { return m_riderCart; }
 
+    // ── t811 生物乘客座位（mob 自动登乘机制；C++ 直调，EntityManager::tickVehicleRiding 用，同层互调）──
+    // 第 i 个矿车的生物乘客槽索引（EntityManager 槽；-1 = 无生物乘坐）。越界 / 空槽 → -1。矿车乘员总数限 1
+    //   （玩家 XOR 生物）：mobPassenger >= 0 时玩家 tryMount 拒载（tryMount 内守卫）；玩家骑乘（ridingIndex
+    //   == i）时登乘扫描跳过。双向链的载具侧：mob 侧 Entity.rideCart 指回本槽，由 EntityManager 对账维护。
+    int mobPassengerAt(int i) const;
+    // 记生物乘客（i = 车槽，mobIdx = EntityManager 槽）。覆盖写（满员 / 玩家占用由 caller tickVehicleRiding
+    //   判）；越界静默。无 QML 消费（渲染由 mob delegate 位置驱动）→ 不 bump revision。
+    void seatMob(int i, int mobIdx);
+    // 清生物乘客座（对账：mob 死 / 槽复用 / 反向链断；或释放路径）。越界静默。
+    void clearMobPassenger(int i);
+
     // 第 i 个矿车的世界坐标（呈现层 delegate 绑它摆位）。越界返回 (0,0,0)。
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个矿车的朝向（度；车头方向，呈现层矿车 Model eulerRotation.y）。越界返回 0。
@@ -213,6 +224,8 @@ private:
         float pitch = 0.0f;  // t769 车身俯仰角（度；正 = 车头上扬。坡上贴合轨面，纯呈现量 —— 见 pitchAt 注释）
         int hp = 0;           // t735 ② 剩余耐久击数（spawnCart 置 kCartHitPoints；创造 instantBreak 不看它）。
                               //   非 default-member-init 常量（kCartHits 定义于类后半部，spawnCart 显式赋值）。
+        int mobPassenger = -1; // t811 生物乘客槽索引（EntityManager 槽；-1 = 无。矿车乘员限 1：玩家 XOR 生物；
+                              //   双向链载具侧，见 mobPassengerAt。DMI → 槽复用 spawnCart 的 Cart c{} 默认清回）。
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Cart> m_carts;
