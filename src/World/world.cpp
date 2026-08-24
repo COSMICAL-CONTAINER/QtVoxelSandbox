@@ -2785,23 +2785,35 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
 
 // t806 余烬门点燃检测（见 world.h 头注释；t725 v1 写死 2×3 内腔的 PlayerController 版本泛化下沉 World
 //   层单一权威 —— 同末地门三件套（endPortalRingComplete / tryOpenEndPortal）模式）。MC 规则参数表
-//   （dev-spec t806；单一权威常量，改门尺寸只动这 4 行）：
-//     内腔开口宽 w ∈ [2, 4]（框外沿 4..6）、高 h ∈ [3, 5]（框外沿 5..7）；
+//   （dev-spec t806 + t848 上限对齐 MC 1.0；单一权威常量，改门尺寸只动这 2 行）：
+//     内腔开口宽 w ∈ [2, 21]（框外沿 4..23）、高 h ∈ [3, 21]（框外沿 5..23）——t806 时代上限 4×5，
+//     t848 放宽至 21×21 内腔 = 23×23 框外沿（MC 1.0 传送门最大尺寸）；22+ 超限拒点；
 //     矩形开口、黑曜石框（底梁 w 格 / 顶梁 w 格 / 左右边柱各 h 格）；四角不检查（MC 1.0 角块可选）。
+//     边柱只验「本格是黑曜石」不验独占 → 相邻两门共用中间一竖列黑曜石时各自独立成门（t848 共享柱
+//     语义；state=axis 按各自门面朝向独立编码，连通域熄灭按 axis+连通域天然互不干扰）。
 // 检测流程（从「点燃格在开口哪一格」出发，任一点燃位同成门）：
-//   ① 下探底梁：自点燃格向下 ≤kMaxH(5) 步找黑曜石（点燃格可能在开口 3..5 层任意一层）。
-//   ② 左探左沿：自底梁上一层向 -u 扫 ≤kMaxW-1(3) 步空气（开口最宽 4 → 点燃列距左沿 ≤3；步进有界——
-//      OOB blockAt 返 Air 会让无界扫描滑出世界）。
-//   ③ 量宽 / 量高：自左沿列在开口底层向 +u 量连续空气列数、自左沿列向上量连续空气层数（步进有界，
-//      超限截断 → 随后矩形 / 顶梁校验对越界部分自然判败）。
+//   ① 下探底梁：自点燃格向下 ≤kPortalMaxInteriorH(21) 步找黑曜石（点燃格可能在开口 3..21 层任意一层）。
+//   ② 左探左沿：自底梁上一层向 -u 扫 ≤kPortalMaxInteriorW-1(20) 步空气（开口最宽 21 → 点燃列距左沿
+//      ≤20；步进有界——OOB blockAt 返 Air 会让无界扫描滑出世界）。
+//   ③ 量宽 / 量高：自左沿列在开口底层向 +u 量连续空气列数、自左沿列向上量连续空气层数（步进以 21 为界
+//      截断 → 22+ 超限开口量出恒 21，随后 ④ 柱 / 梁校验打在实为内腔空气的「假框位」上自然判败 = 超限
+//      拒点。t806 时代此处以旧上限 kMaxW-1=3 截断 → 5 宽内腔恒测 4 → ④ 右柱校验打第 5 内腔列判败，
+//      即用户实测「4×4 以上点不着」的根因位）。
 //   ④ 矩形 + 框架校验：开口 w×h 全空气（防 L 形 / 腔内异物）+ 梁柱全黑曜石。
 // 全命中 → 开口整面填 NetherPortal（state=axis；逐格 setBlock 发 blockPlaced → 呈现层 portalHost 逐格
-//   建 delegate + 放置音，机制对标 MC 点燃瞬间整门成形的多点事件）。
+//   建 delegate + 放置音，机制对标 MC 点燃瞬间整门成形的多点事件）。t848 性能注：检测 O(w×h) ≤ 441 格
+//   读；点燃写 ≤ 441 格 setBlock（一次 21×21 满门 ~441 次写入钩子族扇出，一次性代价同一次小规模爆炸可
+//   接受；Air→门格纯放置不触发 breakNetherPortalsAround → 填门不自扰；每次写后 clearAllDirty 即时收口
+//   → 无脏 chunk 累积风暴）。
 // 越界 blockAt 返 Air ≠ Obsidian → 梁 / 柱校验自然判败（无 OOB 风险）。
 bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
 {
-    constexpr int kMinW = 2, kMaxW = 4;  // 内腔开口宽 2..4
-    constexpr int kMinH = 3, kMaxH = 5;  // 内腔开口高 3..5
+    // t848 尺寸单一权威常量：内腔宽 2..21 / 高 3..21（框外沿 4×5 最小 .. 23×23 最大 = MC 1.0 上限）。
+    //   t806 旧上限 4×5 时用户实测「4×4 以上点不着」：5 宽内腔在 ③ 量宽被旧 kMaxW-1=3 截断 → w 恒测 4 →
+    //   ④ 右柱校验打到更宽内腔的空气格判败（4×5 本身并未失效——t806 探针 ⑧ 已证其四角点燃位全过，
+    //   盲区在从未测过「用户期望的更大门」）。
+    constexpr int kMinW = 2, kPortalMaxInteriorW = 21; // 内腔开口宽 2..21
+    constexpr int kMinH = 3, kPortalMaxInteriorH = 21; // 内腔开口高 3..21
     const auto obs = [&](int x, int y, int z) -> bool {
         return m_chunks.blockAt(x, y, z) == BlockRegistry::Obsidian;
     };
@@ -2810,27 +2822,27 @@ bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
     };
     // 单平面检测（u = 门展开轴水平单位向量）：找到含点燃格的黑曜石矩形开口 → 整面填门返 true。
     const auto tryPlane = [&](int ux, int uz, quint8 axisState) -> bool {
-        // ① 下探底梁：自点燃格向下 ≤kMaxH 步（点燃格可能在开口任意一层）。
+        // ① 下探底梁：自点燃格向下 ≤kPortalMaxInteriorH 步（点燃格可能在开口任意一层）。
         int yBase = -1;
-        for (int dy = 1; dy <= kMaxH; ++dy) {
+        for (int dy = 1; dy <= kPortalMaxInteriorH; ++dy) {
             if (obs(ix, iy - dy, iz)) { yBase = iy - dy; break; }
         }
         if (yBase < 0) return false;                        // 点燃柱下方无底梁 → 非门
-        // ② 左探开口左沿：自底梁上一层向 -u 扫空气（≤kMaxW-1 步；命中非空气格即停——边柱是黑曜石）。
+        // ② 左探开口左沿：自底梁上一层向 -u 扫空气（≤kPortalMaxInteriorW-1 步；命中非空气格即停——边柱是黑曜石）。
         int cx = ix, cz = iz;                               // 开口最左内柱（先假定点燃列即左沿）
-        for (int s = 1; s <= kMaxW - 1; ++s) {
+        for (int s = 1; s <= kPortalMaxInteriorW - 1; ++s) {
             if (!air(ix - s * ux, yBase + 1, iz - s * uz)) break;
             cx = ix - s * ux; cz = iz - s * uz;
         }
         const int innerY0 = yBase + 1;                      // 开口底层
         // ③ 量宽（左沿列右侧的连续空气列数；开口总宽 = w+1 含左沿列自身）与量高（左沿列向上连续空气层数）。
         int wRight = 0;
-        while (wRight < kMaxW - 1 && air(cx + (wRight + 1) * ux, innerY0, cz + (wRight + 1) * uz))
+        while (wRight < kPortalMaxInteriorW - 1 && air(cx + (wRight + 1) * ux, innerY0, cz + (wRight + 1) * uz))
             ++wRight;
         const int w = wRight + 1;
         if (w < kMinW) return false;                        // 低于最小宽（孤立柱 / 双柱贴墙）→ 拒
         int h = 0;
-        while (h < kMaxH && air(cx, innerY0 + h, cz)) ++h;
+        while (h < kPortalMaxInteriorH && air(cx, innerY0 + h, cz)) ++h;
         if (h < kMinH) return false;                        // 低于最小高（开口顶层非黑曜石顶梁）→ 拒
         // ④ 矩形 + 框架校验：开口 w 列各格（底梁 / 开口 / 顶梁）全合规 + 左右边柱各 h 格黑曜石。
         //    四角（底/顶梁两端外斜角）不在任何检查列内 → 角块可有可无（MC 1.0 语义）。
@@ -2858,7 +2870,7 @@ bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
 // t806 余烬门连通域熄灭（见 world.h 头注释；t725 自 PlayerController 下沉 World 层，逻辑逐行同源）。
 //   BFS 收集 ±u（门展开轴水平）/ ±Y 同 axis 的 NetherPortal 格 → 全部 setWaterSilent 清 Air（静默：
 //   多格逐格 blockBroken 会刷粒子/音风暴；worldChanged 仍逐格发 → 呈现层 portalHost cleanupVis 清孤儿）。
-//   尺寸无关：连通域天然覆盖任意大小门（2×3 最小 .. 4×5 最大）。门无物品形态（dropId=0）→ 无掉落。
+//   尺寸无关：连通域天然覆盖任意大小门（2×3 最小 .. 21×21 最大，t848）。门无物品形态（dropId=0）→ 无掉落。
 void World::removeNetherPortalAt(int px, int py, int pz, int axis)
 {
     // 门展开轴 u（axis=0 → 门沿 X 展开 / 面朝 ±Z；axis=1 → 沿 Z 展开 / 面朝 ±X）。

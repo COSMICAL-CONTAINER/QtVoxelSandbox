@@ -675,9 +675,11 @@ public:
     //   住在 PlayerController，本方法泛化后下沉 World 层单一权威 —— 同末地门三件套模式，PlayerController
     //   打火石分支只做转发，矩阵测试可直编）。给定点燃格 (ix,iy,iz)（门框内腔空气格 = 打火石火苗位），
     //   X 平面（门沿 X 展开 / 面朝 ±Z）与 Z 平面各试一次：下探底梁 → 左探开口左沿 → 量宽量高 → 矩形 +
-    //   框架校验。MC 规则参数表（dev-spec t806）：内腔开口宽 2..4 / 高 3..5（框外沿 4×5 最小 .. 6×7 最大）；
-    //   矩形开口、黑曜石底梁 / 顶梁 / 边柱；**四角不检查**（MC 1.0 门框角块可选 —— 角块不承结构，缺角可
-    //   点燃、破角不碎门）。任一不符（超 4×5 / 低于 2×3 / 缺梁缺柱 / 非矩形腔）→ 返 false（caller 回退
+    //   框架校验。MC 规则参数表（dev-spec t806 + t848 上限对齐 MC 1.0）：内腔开口宽 2..21 / 高 3..21
+    //   （框外沿 4×5 最小 .. 23×23 最大）；矩形开口、黑曜石底梁 / 顶梁 / 边柱（边柱只验黑曜石不验独占 →
+    //   相邻两门共用中间竖柱各自成门，t848 共享柱语义）；**四角不检查**（MC 1.0 门框角块可选 —— 角块不
+    //   承结构，缺角可点燃、破角不碎门）。任一不符（超 21×21 / 低于 2×3 / 缺梁缺柱 / 非矩形腔）→ 返
+    //   false（caller 回退
     //   普通 Fire 点燃）。全命中 → 开口整面 w×h 各格 setBlock(NetherPortal, axis)（axis=0 X 平面 /
     //   1=Z 平面；逐格发 blockPlaced → 呈现层 portalHost 逐格建 delegate + 放置音）。
     bool tryIgniteNetherPortal(int ix, int iy, int iz);
@@ -1156,7 +1158,7 @@ private:
     // review #27（Review 2026-08-23 低危）：余烬门连通域熄灭重入守卫。breakNetherPortalsAround 并入 World
     //   写入钩子族（setBlock×2 / setBlockSilent / clearBlockSilent / setWaterSilent / setBlockFromEntity /
     //   destroySphereSilent / dropGravityColumn）后，removeNetherPortalAt 自身清门格走 setWaterSilent →
-    //   该写的钩子又会扫 6 邻发现「尚未清到的门格」再进 removeNetherPortalAt —— 嵌套 BFS 虽有界（门 ≤4×5）
+    //   该写的钩子又会扫 6 邻发现「尚未清到的门格」再进 removeNetherPortalAt —— 嵌套 BFS 虽有界（门 ≤21×21，t848）
     //   但同一扇门被反复半清。置位期间钩子早退：连通域清除自管整扇门，一次平坦 BFS 收完。
     bool m_inRemoveNetherPortal = false;
     // t380r perf：批量流体写延迟的光照重算缓冲（见 flushPendingLightEdits）。非批量（玩家/世界编辑）路径

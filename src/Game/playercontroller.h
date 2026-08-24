@@ -995,7 +995,7 @@ private:
     //   机制等价 MC「画后面的墙被挖 → 画掉落」。同 dropUnsupportedTorchesAround 模式（仅扫 4 水平
     //   邻——画的支撑墙恒在水平向；画不撑他画 → 单趟扫足够无级联）。
     void dropUnsupportedPaintingsAround(int x, int y, int z);
-    // t725→t806 余烬门三件套已整体下沉 World 层单一权威（t806 泛化内腔 2×3..4×5 + 四角可选；同末地门
+    // t725→t806 余烬门三件套已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 + 四角可选；同末地门
     //   三件套模式，World 层可被矩阵测试直编）：World::tryIgniteNetherPortal（点燃检测，placeBlock 打火石
     //   分支调）/ World::removeNetherPortalAt（连通域熄灭，finishMiningAt 直挖门格分支调）/
     //   World::breakNetherPortalsAround（门框失撑熄灭，finishMiningAt 末尾调）。声明与契约见 world.h。

@@ -1008,8 +1008,9 @@ public:
         //   判定并入 Fire）。音色 GroupGrass（软质燃烧物）。不进创造调色板（maxStack=0 不可拾取/放置）。
         Fire           = 137, // 火焰：非实体光源格（光 15）；两片对角交叉双面 quad + 32 帧翻书动画；点燃 / 蔓延 / 自熄
         // ── t725 余烬门（NetherPortal；机制等价 MC 1.0 nether portal id 90，无对应物品形态）：黑曜石门框
-        //   （外框 4×5 最小 .. 6×7 最大：内腔开口 2×3..4×5，t806 泛化大尺寸门；四角块可选——检测不查角 /
-        //   破角不碎门）内以打火石点燃生成的**非实体传送门面片**格（World::tryIgniteNetherPortal 单一权威，
+        //   （内腔开口 2×3 最小 .. 21×21 最大 = 框外沿 4×5 .. 23×23，t806 泛化 + t848 上限对齐 MC 1.0；
+        //   四角块可选——检测不查角 / 破角不碎门；边柱可共享——相邻门共用竖柱各自成门）内以打火石点燃
+        //   生成的**非实体传送门面片**格（World::tryIgniteNetherPortal 单一权威，
         //   点燃填满整个开口）。lightEmission=11（机制
         //   等价 MC 下界传送门微光），渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Fire t724 模式）→
         //   Main.qml portalHost 逐格 delegate 渲染：**竖直平面 quad**（非 fire 的交叉对角——门是平面），
