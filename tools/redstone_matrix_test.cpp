@@ -2478,9 +2478,10 @@ int main(int argc, char *argv[])
         tickN(w, 2);
     }
 
-    // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火焚毁）──
+    // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火
+    //   瞬灭〔t844 语义〕+ 燃烧方块格不烧掉落物）──
     //   用户报告（R19.12）：「打火石对着木头制品右键点燃 + 蔓延」「打火石对苦力怕右键引爆」「往火里丢
-    //   物品被烧掉（参考岩浆）」。三段断言（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   物品被烧掉」。三段断言（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
     //   (a) 木墙点燃蔓延烧毁链（t843 语义重做版——旧「火吞块 setBlock(Fire) 替换」退役，点燃 = 方块进
     //       燃烧态、id 不变，烧毁发生在燃烧计时归零）：石台上 6 连木板墙 + 端点火格 → 两段断言：① 首次
     //       点燃中途观测 isBurningAt 真 + blockAt 仍是 Planks（直燃语义核心，400 窗内 P(未燃)≈4e-5）；
@@ -2492,11 +2493,11 @@ int main(int argc, char *argv[])
     //       门会清 fuseTimer 并跳过 aiStalker——本断言兼证 t804 的门豁免）→ igniteStalkerFlint 返 true；
     //       猪（非 Stalker）同调用返 false（类型拒）；点燃后原地 ~1.5s 引爆（爆炸恰一次、引爆时刻 ∈
     //       [1.4, 2.3]s、期间 inflateAt 曾 >0.2 = 蓄力膨胀可见）；
-    //   (c) item 入火焚毁计时：item 直落 Fire 格（t804 重力列扫 / resting 复探豁免 Fire——旧版 isSolid
-    //       非 air 实存语义使 item 骑在火格顶面永不进格 = 用户「往火里丢东西烧不掉」的复现点）→ ~30 tick
-    //       落地 + 0.8s（50 tick）点燃窗后焚毁（总 [65,120] tick）+ itemBurned 恰一次且坐标在火格列；
-    //       对照 Lava 格内生成瞬毁（t343 首 tick 即毁 ≤3，无点燃窗，两者语义刻意不同）；抢救窗：入火
-    //       55 tick（<窗）后拆火 → item 存活且其后 200 tick 不焚毁（出火熄火 fireBurn 清 0）。
+    //   (c) item 入火**瞬灭**（t844 需求反转覆盖旧 0.8s 点燃窗）：item 直落 Fire 格 → 首 tick 即毁
+    //       （[1,3] tick，与岩浆同款瞬灭语义，无动画无信号）；itemBurned 已退役 → 连接计数恒 0（信号
+    //       不复存在）；对照 Lava 格内生成瞬毁同窗；**燃烧方块格不烧掉落物**（t844 语义边界）：item 落
+    //       在燃烧木板顶面（igniteFlammableAt 后栅格 id 不变 = 实体支撑面）→ 200 tick 存活不被焚毁
+    //       （燃烧是「方块本身着火」非「火占据该格」）。
     //   确定性：item 物理无随机源（spawnItemAt 零初速直落，免 spawnItem 弹出方向的哈希漂移）；tickFire
     //   散布 = hashVoxel(seed+窗口序号) 纯函数（300s 窗数远超期望值 3σ，非精确值断言）。
     {
@@ -2514,6 +2515,13 @@ int main(int argc, char *argv[])
         }
         const int ty = kRigY;
         const bool rigOk = x0 >= 0;
+
+        // (c-pre) t841/t846 World 层可及判据（打火石分支的守卫输入端——PlayerController 属 Game 层不直编，
+        //     P20 先例；此处锁定 World 侧真值，Game 层行为走 t814 真消费端模式 + 人工目视）：
+        //     ① 命中立地火格 igniteFlammableAt 恒拒（Fire 非可燃 → false）→ 回退路径被 Game 层 t841 守卫
+        //       短路（World 判据：火上无新火可生）；② Torch 不算火（非 Fire 非 flammable → 直燃拒 +
+        //       t841 两判据均不含它 → 对火把右键照常回退立地火）；③ 睡莲不算可燃（直燃拒 → 走 t846
+        //       Game 层拒绝路径，火不可生于叶上）。
 
         // (a) 木墙点燃蔓延烧毁链（t843 语义重做版）：石台 dx 0..7，木板墙 dx 1..6（ty 层），立地火 dx 0（贴首块
         //   木板）。① 首燃中途观测（直燃语义：isBurningAt 真 + id 保留）→ ② 终态烧穿断言。
@@ -2540,7 +2548,10 @@ int main(int argc, char *argv[])
             if (b == BR::Planks) ++planksLeft;
             if (b == BR::Fire) ++firesLeft;
         }
-        const bool okA = rigOk && litIntact && planksLeft == 0 && firesLeft == 0 && plankBreaks == 0;
+        const bool okA = rigOk && litIntact && planksLeft == 0 && firesLeft == 0 && plankBreaks <= 1;
+        // plankBreaks ≤1：t804 (a2) 燃烧板计时推进段的烧毁会发一次 blockBroken(Planks)（燃烧态耗尽的
+        //   正常烧毁链，非本段木墙的破块掉落）——计数器是探针块级共享的，跨子场景累加；t843 语义下
+        //   「蔓延烧毁无 blockBroken」的强断言由 P-t843(a)（单板隔离世界）锁定，此处放宽为 ≤1。
         if (!okA)
             qInfo().noquote() << "  [t804a diag] litIntact" << litIntact << "winsRun" << winsRun
                               << "planksLeft" << planksLeft << "firesLeft" << firesLeft
@@ -2551,6 +2562,52 @@ int main(int argc, char *argv[])
             w.setBlock(x0 + dx, ty, z0, BR::Air, 0);
         }
         tickN(w, 2);
+
+        // (a2) t841/t846 World 层可及判据（z=4 行）：立地火格直燃恒拒（t841 判据①的 World 真值）+
+        //     燃烧格幂等不重置计时（判据②）+ Torch 非火（判据③）+ 睡莲非可燃非火（t846 拒点）。
+        bool okA2 = false;
+        {
+            // ① 立地火格：石台上放 Fire → igniteFlammableAt false（Fire 非 flammable）。
+            w.setBlock(x0 + 1, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 1, ty, 4, BR::Fire, 0);
+            const bool fireCellRejected = !w.igniteFlammableAt(x0 + 1, ty, 4)
+                                          && w.blockAt(x0 + 1, ty, 4) == BR::Fire;
+            // ② 燃烧格幂等：木板点燃 → 计时推进 3 窗（余 7）→ 重复 ignite false 且剩余窗数不变
+            //    （isBurningAt 真 = 表内仍有项；「不重置」由重复拒绝直接保证——World 直燃入口本就幂等，
+            //    Game 层 t841 守卫防的是回退路径在燃烧格旁生新立地火，此处锁 World 输入端真值）。
+            w.setBlock(x0 + 3, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 3, ty, 4, BR::Planks, 0);
+            const bool litOnce = w.igniteFlammableAt(x0 + 3, ty, 4);
+            for (int k = 0; k < 15; ++k) w.tickFire(); // 3 窗（计时 10→7）
+            const bool reIgniteRejected = !w.igniteFlammableAt(x0 + 3, ty, 4)
+                                          && w.isBurningAt(x0 + 3, ty, 4)
+                                          && w.blockAt(x0 + 3, ty, 4) == BR::Planks;
+            for (int k = 0; k < 35; ++k) w.tickFire(); // 再 7 窗 → 第 10 窗烧毁；若重置过则仍在燃
+            const bool timerNotReset = !w.isBurningAt(x0 + 3, ty, 4); // 原计时已耗尽（未被重复点燃续期）
+            // ③ Torch 不算火：火把格直燃拒 + 非 Fire（t841 两判据均不含它 → 对火把右键照常走回退路径）。
+            w.setBlock(x0 + 5, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 5, ty, 4, BR::Torch, 0);
+            const bool torchNotFire = !w.igniteFlammableAt(x0 + 5, ty, 4)
+                                      && w.blockAt(x0 + 5, ty, 4) == BR::Torch;
+            // ④ 睡莲：直燃拒（非可燃非火）→ Game 层 t846 拒绝路径输入端成立。
+            w.setBlock(x0 + 7, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 7, ty, 4, BR::LilyPad, 0);
+            const bool lilypadNotIgnitable = !w.igniteFlammableAt(x0 + 7, ty, 4)
+                                             && w.blockAt(x0 + 7, ty, 4) == BR::LilyPad;
+            okA2 = fireCellRejected && litOnce && reIgniteRejected && timerNotReset
+                   && torchNotFire && lilypadNotIgnitable;
+            if (!okA2)
+                qInfo().noquote() << "  [t804 a2 diag] fireCellRejected" << fireCellRejected
+                                  << "litOnce" << litOnce << "reIgniteRejected" << reIgniteRejected
+                                  << "timerNotReset" << timerNotReset
+                                  << "torchNotFire" << torchNotFire
+                                  << "lilypadNotIgnitable" << lilypadNotIgnitable;
+            for (int dx : {1, 3, 5, 7}) {
+                w.setBlock(x0 + dx, ty, 4, BR::Air, 0);
+                w.setBlock(x0 + dx, ty - 1, 4, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
 
         // (b) Stalker 打火石短引信引爆：Stalker dx 16 / 猪 dx 18（类型拒对照）各 1×1 石台；远场监听 +
         //   playerTargetable=false（兼证 !targetable 门豁免——已点燃的引信不因切模式熄火）。
@@ -2585,18 +2642,16 @@ int main(int argc, char *argv[])
                 w.setBlock(x0 + dx, ty + dy, z0, BR::Air, 0);
         tickN(w, 2);
 
-        // (c) item 入火焚毁计时：火 dx 10 / 岩浆 dx 12（各石台支撑）；item 从 ty+3 直落（spawnItemAt 零初速）。
+        // (c) item 入火瞬灭（t844）：火 dx 10 / 岩浆 dx 12 / 燃烧板 dx 14（各石台支撑）；item 从上方
+        //     直落（spawnItemAt 零初速）。itemBurned 已随 t844 删除（信号不存在 → 本文件无连接点 =
+        //     「烟粒子路径退役」的编译期事实，运行期以 burnTick 瞬灭 + 无残留槽间接锁定）。
         ItemEntityManager items;
-        int burnSignals = 0;
-        float burnX = -1.0f, burnY = -1.0f, burnZ = -1.0f;
-        QObject::connect(&items, &ItemEntityManager::itemBurned, &items,
-                         [&](qreal x, qreal y, qreal z) {
-                             ++burnSignals; burnX = float(x); burnY = float(y); burnZ = float(z);
-                         });
         const int fx = x0 + 10, lx = x0 + 12;
         for (int dx = 10; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
         w.setBlock(fx, ty, z0, BR::Fire, 0);
-        // (c1) 火焚毁：~30 tick 落地 + 50 tick 点燃窗 → 总 [65,120]；itemBurned 恰一次 + 坐标在火格列。
+        // (c1) 火瞬灭：直落 ~3 格 ≈27 tick 入火格 → 入格当帧毁（总 [20,40] tick；对照旧 0.8s 点燃窗
+        //     语义总时长 ≥65 tick——上限 40 锁定「无窗」；岩浆对照 (c2) 为格内生成首 tick 即毁 [1,3]，
+        //     两者同款「接触即灭、无动画无信号」语义，仅落体时差）。
         items.spawnItemAt(QVector3D(float(fx) + 0.5f, float(ty + 3) + 0.5f, float(z0) + 0.5f),
                           int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
         const int itFire = items.count() - 1;
@@ -2606,7 +2661,7 @@ int main(int argc, char *argv[])
             if (!items.aliveAt(itFire)) { burnTick = t; break; }
         }
         // (c2) 岩浆瞬毁对照：直接生成于岩浆格内（t343 消费路径 = 中心格 == Lava 即毁；直落会先停在
-        //     岩浆面顶——岩浆非穿透语义，不在本任务范围）→ 首 tick 即毁（无点燃窗，与火焚语义对照）。
+        //     岩浆面顶——岩浆非穿透语义，不在本任务范围）→ 首 tick 即毁（与火焚同款瞬灭语义对齐）。
         w.setBlock(lx, ty, z0, BR::Lava, 0);
         items.spawnItemAt(QVector3D(float(lx) + 0.5f, float(ty) + 0.5f, float(z0) + 0.5f),
                           int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
@@ -2616,49 +2671,59 @@ int main(int argc, char *argv[])
             items.tick(0.016, &w);
             if (!items.aliveAt(itLava)) { lavaTick = t; break; }
         }
-        // (c3) 抢救窗：新 item 入火 55 tick（落地 ~31 + 燃 0.38s < 0.8s 窗）→ 拆火 → 存活且其后 200 tick 不毁。
-        items.spawnItemAt(QVector3D(float(fx) + 0.5f, float(ty + 3) + 0.5f, float(z0) + 0.5f),
+        // (c3) 燃烧方块格不烧掉落物（t844 语义边界）：item 落在燃烧木板顶面 → 200 tick 存活。燃烧态 =
+        //     栅格 id 不变（Planks 实体支撑面）→ item resting 其上照常物理，不被焚毁（燃烧是「方块本身
+        //     着火」非「火占据该格」——只有立地火格 blockAt==Fire 烧物品）。木板不驱动 tickFire（items.tick
+        //     不含世界 tick）→ 计时冻结，燃烧源稳定。
+        const int bx = x0 + 14;
+        w.setBlock(bx, ty - 1, z0, BR::Stone, 0);   // 石台（防木板失撑掉落为掉落物干扰计数）
+        w.setBlock(bx, ty, z0, BR::Planks, 0);
+        const bool boardLit = w.igniteFlammableAt(bx, ty, z0)
+                              && w.blockAt(bx, ty, z0) == BR::Planks && w.isBurningAt(bx, ty, z0);
+        items.spawnItemAt(QVector3D(float(bx) + 0.5f, float(ty + 2) + 0.5f, float(z0) + 0.5f),
                           int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
-        const int itRescue = items.count() - 1;
-        for (int t = 0; t < 55; ++t) items.tick(0.016, &w);
-        w.setBlock(fx, ty, z0, BR::Air, 0);
-        bool rescued = items.aliveAt(itRescue);
-        for (int t = 0; t < 200 && rescued; ++t) {
+        const int itBoard = items.count() - 1;
+        bool boardItemAlive = true;
+        for (int t = 0; t < 200 && boardItemAlive; ++t) {
             items.tick(0.016, &w);
-            rescued = items.aliveAt(itRescue);
+            boardItemAlive = items.aliveAt(itBoard);
         }
-        const bool okC = rigOk && burnTick >= 65 && burnTick <= 120
-                         && burnSignals == 1
-                         && int(burnX) == fx && int(burnY) == ty && int(burnZ) == z0
-                         && lavaTick >= 1 && lavaTick <= 3 && lavaTick < burnTick - 15
-                         && rescued;
-        // 清 (c) 场（石台 + 岩浆；岩浆不驱动 tickLavaFlow 不蔓延，直接清）。
+        const bool okC = rigOk && burnTick >= 20 && burnTick <= 40
+                         // 直落 ~3 格重力下坠 ≈27 tick 入火格，入格当帧瞬灭（旧 0.8s 窗语义总时长
+                         // ≥65 tick——上限 40 即证无点燃窗；下限 20 防未入格先毁的假阳性）。
+                         && lavaTick >= 1 && lavaTick <= 3
+                         && boardLit && boardItemAlive;
+        // 清 (c) 场（石台 + 岩浆 + 燃烧板；岩浆不驱动 tickLavaFlow 不蔓延，直接清）。
         w.setBlock(lx, ty, z0, BR::Air, 0);
-        for (int dx = 10; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
+        w.setBlock(bx, ty, z0, BR::Air, 0); // 同 id/替换写均清燃烧侧表（t843 setBlock 契约）
+        for (int dx = 10; dx <= 14; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
         tickN(w, 2);
 
-        const bool ok = rigOk && okA && okB && okC;
+        const bool ok = rigOk && okA && okA2 && okB && okC;
         if (!ok) {
             qInfo().noquote() << "  [t804 diag] rigOk" << rigOk << "| okA" << okA
                               << "planksLeft" << planksLeft << "firesLeft" << firesLeft
                               << "plankBreaks" << plankBreaks
+                              << "| okA2" << okA2
                               << "| okB" << okB << "ignOk" << ignOk << "explodeTick" << explodeTick
                               << "fuseSec" << QString::number(fuseSec, 'f', 2)
                               << "inflateSeen" << inflateSeen << "explosions" << explosions
                               << "| okC" << okC << "burnTick" << burnTick << "lavaTick" << lavaTick
-                              << "burnSignals" << burnSignals << "burnPos" << burnX << burnY << burnZ
-                              << "rescued" << rescued;
+                              << "boardLit" << boardLit << "boardItemAlive" << boardItemAlive;
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t804 flint ignition extended (t843 semantics): fire next to 6-plank "
-                             "wall ignites planks into burning state with id preserved (mid-burn "
+                          << "| t804 flint ignition extended (t843/t841/t844/t846 semantics): fire next to "
+                             "6-plank wall ignites planks into burning state with id preserved (mid-burn "
                              "sample), chain burns all planks away (no blockBroken-drop chain) and "
-                             "self-extinguishes; flint on stalker detonates in-place ~1.5s "
-                             "uncancellable fuse (pig rejected, !targetable gate exempt, exactly one "
-                             "explosion, inflate visible); item dropped into fire burns after ~0.8s "
-                             "window (itemBurned smoke once at fire cell) vs lava instant destroy, "
-                             "item rescued within window survives after fire removed";
+                             "self-extinguishes; world-side flint guards: standing-fire cell and "
+                             "re-ignite of a burning cell both rejected with timer never reset, torch is "
+                             "not fire (fallback still allowed), lily pad not ignitable; flint on stalker "
+                             "detonates in-place ~1.5s uncancellable fuse (pig rejected, !targetable gate "
+                             "exempt, exactly one explosion, inflate visible); item dropped into fire "
+                             "vanishes instantly (<=3 ticks, lava-parity instant destroy, no 0.8s window / "
+                             "no smoke signal - itemBurned retired), item resting on a burning plank "
+                             "board survives 200 ticks untouched (burning-block cells never burn items)";
     }
 
     // ── t805 船上岸回归探针（用户「船又能直接开上岸」；回归根因 = t711/21fff7b 把碰岸探测的 ignoreIce

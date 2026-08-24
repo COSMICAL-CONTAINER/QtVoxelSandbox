@@ -3570,6 +3570,8 @@ void PlayerController::placeBlock()
     //   4×5 最大、四角可选，X/Z 平面各试）——命中 → 开口整面填 NetherPortal 门面（机制等价 MC 1.0
     //   黑曜石框内点燃传送门，v1 仅 2×3 的检测已下沉 World 层单一权威）；未命中 → 回退普通 Fire 点燃
     //   （原 t724 语义不变）。两路均消耗耐久 / 挥手（机制等价 MC 点燃失败生火同样耗打火石）。
+    //   t841/t846 前置守卫：命中已是立地火 / 燃烧态方块 → 幂等拒绝（不消耗不挥手，火上不可叠火）；命中
+    //   睡莲 → 无效点火位拒绝（不消耗不挥手，水域禁火——火不可悬浮水上）。
     if (m_hotbar && m_world && heldItemId == int(ToolRegistry::FlintAndSteel)) {
         // t804 ② 优先「打火石点燃 Stalker」：在方块命中之外**独立**跑一条 mob 命中射线（findMobHit，同剪刀
         //   剪羊 / 攻击选中模式）。命中活体 Stalker → EntityManager::igniteStalkerFlint（置不可逆短引信态：
@@ -3593,20 +3595,37 @@ void PlayerController::placeBlock()
             }
         }
         if (m_hasHit) {
+            // t841 火上不能叠火（先于一切点燃判定）：命中格已是立地火（Fire）/ 处于燃烧态（isBurningAt）
+            //   → 幂等拒绝：不点燃 / 不消耗耐久 / 不挥手 / 不刷新任何计时（spec 三态覆盖之①②；③ Torch
+            //   不算火——火把是独立光源方块非火焰，不在两判据内，对火把右键仍走下方回退立地火路径）。
+            //   旧病灶：命中 Fire 格 igniteFlammableAt 必拒（非可燃）→ 落入回退路径在命中面外法线邻格
+            //   **再放一团新火** = 用户「火上面可以再放火」；燃烧格重复右键同病（World 直燃幂等拒不重置
+            //   计时，但回退路径照常生成立地火）。
+            const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+            if (hitId == BlockRegistry::Fire || m_world->isBurningAt(m_hitBx, m_hitBy, m_hitBz))
+                return; // 幂等拒绝（纯 no-op）
             // t843 直燃优先（第 4 次语义重做，机制对齐 MC 1.0 fire-on-face）：命中的是**可燃方块** → 该
             //   方块本身点燃进燃烧态（World::igniteFlammableAt：栅格 id 不变 + 面火 overlay + 计时烧毁 +
             //   同态蔓延），火不出现在旁边（用户「火在旁边烧、木制品点不燃」的根因修）；门整扇联动收口在
-            //   World 侧。命中非可燃（石/土/已在燃/已是火）→ igniteFlammableAt 返 false 落回下方立地火
-            //   路径（「只有打火石点空地/非可燃面才生成 3D 立地火焰」）。两路均消耗耐久 + 挥手。
+            //   World 侧。命中非可燃（石/土）→ igniteFlammableAt 返 false 落回下方立地火路径（「只有
+            //   打火石点空地/非可燃面才生成 3D 立地火焰」；已是火/已在燃已被上方 t841 守卫拦截）。
+            //   两路均消耗耐久 + 挥手。
             if (m_world->igniteFlammableAt(m_hitBx, m_hitBy, m_hitBz)) {
                 if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（创造不耗）
                 m_lastPlaceMs = now;
                 emit swingArm(); // 点燃是一次「使用」动作 → 挥手（t29）
                 return;
             }
+            // t846 水域禁火：命中睡莲 → 拒绝且不消耗（ShapeNone 但 isCollidable 特例 → 射线整格可中、
+            //   法线朝上 → 回退路径会在叶上方空气格放火 = 「火悬浮水上」的用户症状本体；机制等价 MC 火
+            //   不可置于水面）。落火生成链其余入口本已闭合：tickFire (c) 上窜须上方 ==Air、(d) 余烬火只
+            //   替换可燃块、火球点燃须 ==Air（审查修 B12/B3）、回退路径落火格 ==Air 门天然拒含水格——
+            //   打火石对荷叶是唯一漏点，此处收口后「火方块不存在于水面」全链成立。
+            if (hitId == BlockRegistry::LilyPad)
+                return; // 拒绝（无效点火位，与「目标被占」同语义：不消耗不挥手）
             const int fx = m_hitBx + m_hitNx, fy = m_hitBy + m_hitNy, fz = m_hitBz + m_hitNz;
             if (fy >= 0 && fy < m_world->height()
-                && m_world->blockAt(fx, fy, fz) == BlockRegistry::Air) {
+                && m_world->blockAt(fx, fy, fz) == BlockRegistry::Air) { // ==Air 门：含水落火格天然被拒
                 const bool portalLit = m_world->tryIgniteNetherPortal(fx, fy, fz); // t806 先试门框（成门 → 开口整面 NetherPortal）
                 if (!portalLit)
                     m_world->setBlock(fx, fy, fz, BlockRegistry::Fire, 0); // state=0（火无 state 语义）

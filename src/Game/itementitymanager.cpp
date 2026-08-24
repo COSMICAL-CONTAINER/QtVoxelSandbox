@@ -415,29 +415,20 @@ void ItemEntityManager::tick(qreal dt, World *world)
             dirty = true;
             continue;
         }
-        // t724→t804 掉落物落入火焰**短延迟**焚毁（机制等价 MC 1.0 掉落物入火燃烧片刻后消失）：实体中心格
-        //   == Fire → 首触置 fireBurn=kItemFireBurnSec（0.8s 点燃窗——刚丢进火里的东西短窗内尚可抢回，
-        //   用户语义「往火里丢东西被烧掉，参考岩浆，但别瞬间蒸发」），逐帧倒计归零 → releaseSlot 释放槽
-        //   （slot-reuse，同岩浆 / 仙人掌路径）+ emit itemBurned（呈现层在焚毁点迸白烟）。离开火格（火熄 /
-        //   被冲走 / 拾取失败弹开）→ fireBurn 清 0 熄火（未烧尽可存活，机制等价 MC 出火即停烧）。
-        //   对比：岩浆（上方分支 t343）保持瞬毁——岩浆吞物不留窗，火焚给 0.8s 抢救窗，两者语义刻意不同。
+        // t844 掉落物入火**瞬灭**（需求反转，覆盖 t804③ 的 0.8s 点燃窗；机制等价 MC 1.0 掉落物接触火
+        //   即刻消失，与上方岩浆瞬毁 t343 同款语义——无销毁动画、无烟粒子、无抢回窗）。实体中心格 ==
+        //   Fire → releaseSlot 释放该槽（slot-reuse，同岩浆路径），本迭代即结束（continue）；末尾
+        //   dirty=true 触发 emit entitiesChanged → QML delegate 隐藏。旧 fireBurn 倒计 / itemBurned
+        //   烟粒子信号随本语义一并退役（呈现层 Connections 已同步移除）。
+        //   **语义边界（燃烧方块格不烧掉落物）**：本判定只认立地火格（blockAt == Fire）；燃烧态方块格
+        //   （m_burningCells 侧表瞬态，栅格 id 不变）不在此列——燃烧是「方块本身着火」（面火 overlay 贴
+        //   其表面），非「火占据该格」，掉落物落在燃块顶面 = 落在实体面上，照常物理，不被焚毁。MC 同款：
+        //   物品须进入 fire 格才烧，站在着火的木板上不掉耐久。
         if (cy >= 0 && world->blockAt(cx, cy, cz) == BlockRegistry::Fire) {
             const int idx = int(&e - &m_entities.front());
-            if (e.fireBurn <= 0.0f) {
-                e.fireBurn = kItemFireBurnSec; // 首触火 → 点燃（倒计起点）
-            } else {
-                e.fireBurn -= float(dt);
-                if (e.fireBurn <= 0.0f) {
-                    const QVector3D burnPos = e.pos; // 先存坐标再释放槽（releaseSlot 只翻 alive，pos 仍在，
-                                                     // 但语义上取「焚毁瞬间位置」存档更稳）
-                    releaseSlot(idx);
-                    emit itemBurned(burnPos.x(), burnPos.y(), burnPos.z()); // t804 烟粒子信号（槽已释放）
-                    dirty = true;
-                    continue;
-                }
-            }
-        } else if (e.fireBurn > 0.0f) {
-            e.fireBurn = 0.0f; // 离开火格 → 熄火（点燃窗作废，出火未烧尽即存活）
+            releaseSlot(idx);
+            dirty = true;
+            continue;
         }
         // t445 ⑤ 掉落物落到 / 触碰仙人掌被摧毁（spec「Q 丢物落到仙人掌→被顶掉/销毁」）：实体中心下方一格 ==
         //   Cactus（即落在仙人掌顶上 / 贴其侧下落）→ 摧毁释放该槽。机制等价 MC 1.0 掉落物接触仙人掌即消失
