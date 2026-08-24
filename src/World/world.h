@@ -2,6 +2,7 @@
 #define WORLD_H
 
 #include <QObject>
+#include <QHash> // t843 燃烧态侧表 m_burningCells（坐标→剩余燃烧窗数）
 #include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）/ quint64（树叶衰减队列键）
 #include <QtQml/qqml.h>
 
@@ -308,38 +309,62 @@ public:
     //   hashVoxel + 窗口序号 点燃焚毁（setBlock Air，发 blockBroken 触发破块粒子 / 音）。t344 完整着火系统（玩家扣血 /
     //   屏覆盖 / 熟肉掉落）留后续；本任务仅「邻岩浆木类概率焚毁」。
     Q_INVOKABLE void tickLavaFlow();
-    // t724 火焰方块系统 tick（机制等价 MC 1.0 fire：点燃 / 蔓延 / 自熄 / 上窜）：由呈现层 Main.qml 经
-    //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kFireTickInterval×0.1s = 0.5s 一窗）。
-    //   遍历火焰方格位置索引 m_fireCells（O(火格数)，noteFireWrite 增量维护 + finishLoad 全图重建，同
+    // t724 火焰方块系统 tick（机制等价 MC 1.0 fire：点燃 / 蔓延 / 自熄 / 上窜；t843 第 4 次语义重做后
+    //   火格与燃烧格双轨）：由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部
+    //   节流到 ~每 kFireTickInterval×0.1s = 0.5s 一窗）。遍历火焰方格位置索引 m_fireCells + 燃烧侧表
+    //   m_burningCells（各 O(格数)，noteFireWrite 增量维护 + finishLoad 全图重建 / beginLoad 清空，同
     //   m_waterCells / m_iceCells 模式——lessons perf-fluid-scan：绝不全图扫描）。快照校验（blockAt != Fire
-    //   的陈旧项剔除）后每窗三 pass（散布确定性哈希 hashVoxel(seed^salt, x,y,z) ^ 窗口序号，PLAN §2-K，
-    //   同 tickLavaFlow ignite pass —— 不同火格错峰判定）：
-    //   (a) 寿命 + 环境抑制（Review 2026-08-23 #5 抑制层最小版，语义重做留 t843——抑制判定收口在
-    //       fireRainExposedAt / fireWaterNeighborAt 两函数，t843 直接搬走复用）：露天降雨或自身 6 邻含水
+    //   / !flammable 的陈旧项剔除）后每窗四 pass（散布确定性哈希 hashVoxel(seed^salt, x,y,z) ^ 窗口序号，
+    //   PLAN §2-K，同 tickLavaFlow ignite pass —— 不同火格错峰判定）：
+    //   (a) 失撑即灭 + 寿命 + 环境抑制（Review 2026-08-23 #5 抑制层，t843 接入双轨）：失撑（自身 6 邻无
+    //       实体且下方非火柱——fireSupportedAt）→ **立即**熄灭（t843 失撑链核：3D 立地火支撑消失即刻灭，
+    //       非等概率衰减；checkFireOnEdit 编辑路径同口径即时版）；露天降雨或自身 6 邻含水
     //       → 按 kFireSuppressExtinguishPct 加速自熄（**压过燃料**：被雨浇 / 水泡的火即使邻着可燃物也在
     //       熄灭中，雨天 / 水桶是玩家对火势的反制手段；抑制态幸存火仍走 (b) 但掷骰减半）；6 邻（含下方）
     //       均无可燃方块（BlockRegistry::flammable 单一权威）→ 按 kFireExtinguishPct 自熄（setBlock Air →
     //       blockBroken 粒子/音 + QML fireHost 收 delegate）。机制等价 MC 无燃料火渐熄 + 雨天 / 水邻灭火。
-    //   (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPermille（t804：旧版每窗只随机挑 1/6 邻 → 单块可燃物期望
-    //       ~60s 才被吞，用户读作「打火石点不然木制品」；#5 叠加补偿 5%→2.5%——被 k 火格包围每窗
-    //       1-(1-p)^k，5% 时 k=2~3 → 10~14%/窗 3~6s/块，多火源下木屋几十秒烧穿无反制），邻格为可燃方块
-    //       且**非湿燃料**（目标格 6 邻含水 → fireWaterNeighborAt 拦下：水格周围 1 圈即防火带，玩家泼水
-    //       反制火势的唯一手段）→ 点燃为 Fire（setBlock Fire → blockPlaced → QML delegate 挂载；可燃物
-    //       本体被火替换 = 烧毁，无掉落）。机制等价 MC 火向相邻可燃物概率蔓延 + 湿料难燃。
+    //   (b) 蔓延：对 6 邻**逐格**独立掷 kFireSpreadPermille（t804 逐邻独立掷修「点不然木头」体感；#5 叠加
+    //       补偿 5%→2.5%），邻格为可燃方块且**非湿燃料**（目标格 6 邻含水 → fireWaterNeighborAt 拦下：水格
+    //       周围 1 圈即防火带，玩家泼水反制火势的唯一手段）→ **点燃为燃烧态**（t843：旧「setBlock(Fire)
+    //       吞块」退役——可燃物本体保留 + 进燃烧态，机制对齐 MC fire-on-face；点燃走 igniteFlammableAt
+    //       单一入口，门整扇联动收口其中）。
     //   (c) 上窜：下方格 == Fire（火柱）且上方为空气 → 按 kFireRisePct 在上方生成火（火焰柱向上舔）。
-    //   安全阀：m_fireCells > kFireCellCap（256）→ 本窗跳过 (b)/(c) 新增（防森林大火无限链烧穿 chunk mesh
-    //   重建预算；既有火照常熄灭收敛）。写入走 4 参数 setBlock（发 blockBroken/blockPlaced → 粒子/音 +
-    //   QML fireHost delegate 挂卸；火格写入量低频，无需 tickLavaFlow 式批量收口）。分层（PLAN §2）：
-    //   World 层只读 m_chunks + BlockRegistry::flammable + 写栅格 + 发信号，不依赖 Renderer/Physics/Game。
+    //   (d) t843 燃烧态推进（快照遍历 m_burningCells）：计时-1 → 归零即**烧毁**（无掉落：烧穿位在
+    //       kFireCellCap 内燃起 3D 余烬火 setBlock(Fire)——链式烧穿的能量来源，机制等价 MC 烧穿位留火；
+    //       cap 外直接 Air）；抑制态（露天降雨 fireRainExposedAt / 6 邻水 fireWaterNeighborAt——#5 三谓词
+    //       接入）按 kFireSuppressExtinguishPct 掷**浇熄**（火灭**块存**：被雨浇 / 水泼的燃块保住本体）；
+    //       每窗向 6 邻可燃格掷 kFireSpreadPermille **同态蔓延**（独立盐值，与火格掷骰不相关）。
+    //   安全阀：m_fireCells + m_burningCells 合计 > kFireCellCap（256）→ 本窗跳过 (b)/(c)/(d) 新增与烧穿
+    //       flare（防森林大火无限链烧穿 chunk mesh 重建预算；既有火照常熄灭收敛）。写入走 4 参数 setBlock
+    //       （发 blockBroken/blockPlaced → 粒子/音 + QML fireHost delegate 挂卸；火格写入量低频，无需
+    //       tickLavaFlow 式批量收口）。分层（PLAN §2）：World 层只读 m_chunks + BlockRegistry::flammable +
+    //       写栅格 + 发信号，不依赖 Renderer/Physics/Game。
     Q_INVOKABLE void tickFire();
-    // Review 2026-08-23 #5 火环境抑制判定（纯读 m_chunks + 天气态，World 层零依赖；t843 火语义重做时把
-    //   这两判定 + 抑制常量整体搬走复用，不与 tickFire 三 pass 耦合——抑制层是独立可复用的正交关注点）：
+    // Review 2026-08-23 #5 火环境抑制判定（纯读 m_chunks + 天气态，World 层零依赖；t843 火语义重做已整体
+    //   接入：火格（tickFire a/b）与燃烧格（tickFire d）两侧共用，抑制层是独立可复用的正交关注点）：
     // 露天降雨：火格自身 skyLightAt>=15（头顶无遮挡，同 t385 作物浇雨 / mob 雨灭火口径）且该列正降水
     //   （isPrecipitatingAt：雨 / 雪 / 雷皆算降水——降水皆灭火；沙漠列恒 Clear 天然不抑制）。晴天全局早退。
     bool fireRainExposedAt(int x, int y, int z) const;
     // 本格 6 邻含 Water（OOB 方向跳过）。一判定两用（口径合一）：火格自身 → 抑制态加速自熄（水泡火灭）；
     //   蔓延目标格 → 湿燃料不点燃（水格周围 1 圈 = 防火带，#5「水邻抑制」）。
     bool fireWaterNeighborAt(int x, int y, int z) const;
+    // t843 可燃物直燃：把 (x,y,z) 处的可燃方块点燃进入**燃烧态**（不替换方块 id——侧表 m_burningCells 记
+    //   剩余燃烧窗数；机制对齐 MC 1.0 fire-on-face：打火石右键可燃方块 = 方块本身着火，火不出现在旁边）。
+    //   入口三处共用：① 打火石右键可燃方块（PlayerController placeBlock 打火石分支）② tickFire (b) 火格
+    //   蔓延（旧语义 setBlock(Fire) 吞块退役——可燃邻进同态而非被火替换）③ tickFire (d) 燃烧格同态蔓延。
+    //   门整扇联动（Review #16 燃烧态迁移版）：目标是门（isDoor 单一权威）→ 配对半扇（state bit3 上/下
+    //   互补 y∓1）同为门且非湿时一并点燃（门作为整体燃烧，与玩家破门配对清 t134/t466 同构；湿半扇跳过，
+    //   由烧毁收尾兜底整扇语义）。
+    //   幂等：已在燃 → return false（不重置计时）；非可燃 / 越界 / 已是 Fire → false。
+    //   #5 湿燃料防火带收口在此（三入口统一口径）：目标 6 邻含水（fireWaterNeighborAt）→ false 不点燃
+    //   （水格周围 1 圈 = 防火带，确定性；直燃 / 火格蔓延 / 同态蔓延三路同判）。
+    //   emit blockIgnited(x,y,z)（每点燃格一信号；呈现层 burningHost 挂面火 overlay delegate）。
+    //   分层（PLAN §2）：只写 World 层侧表 + 发信号，不依赖 Renderer/Physics/Game/Entities。
+    Q_INVOKABLE bool igniteFlammableAt(int x, int y, int z);
+    // t843 (x,y,z) 处方块是否处于燃烧态（m_burningCells 侧表真值查询 + 防御：块已被换成非可燃 → 视未燃）。
+    //   消费方：QML burningHost delegate 真值校验、玩家 / mob 接触点燃判定（PlayerController::step /
+    //   EntityManager::tick 火烧段）、矩阵探针。
+    Q_INVOKABLE bool isBurningAt(int x, int y, int z) const;
     // t236 小麦作物生长 tick（spec「WorldClock tick 推进成长 随机/timed」）：由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kCropTickInterval×0.1s 做一次成长判定）。
     //   机制等价 MC 1.0 小麦生长：作物在耕地方块上、头顶光照足（skyLight ≥ kCropMinLight）时按**确定性散布概率**
@@ -753,6 +778,12 @@ signals:
     // 编辑语义事件（id：broken 带被破的原方块 id；placed 带新放方块 id）。
     void blockBroken(int x, int y, int z, int id);
     void blockPlaced(int x, int y, int z, int id);
+    // t843 可燃方块被点燃进入燃烧态（World::igniteFlammableAt 每点燃格发一次；栅格 id 不变——燃烧态是
+    //   World 层运行期侧表，非栅格写入）。呈现层（Main.qml burningHost）据本信号挂**面火 overlay** delegate
+    //   （方块外表覆火焰贴图层）；摘除走 onBlockBroken（烧毁 / 被挖）+ onWorldChanged cleanupVis 兜底（爆炸 /
+    //   系统改写）。燃烧态不进存档（侧表运行期态）→ 读档后自然熄灭（dev-spec t843 明示可接受）。
+    //   分层（PLAN §2）：World 低层只发语义事件，不反向依赖 Game/Entities/Renderer（同 blockDroppedAsItem 模式）。
+    void blockIgnited(int x, int y, int z);
     // t445 世界侧产出的掉落物（仙人掌失撑 / 邻接方块即整柱坍落为掉落物）：携世界坐标 + 方块 id。
     //   呈现层（Main.qml）据本信号 spawnItem 生成掉落实体（同 player.spawnItem / fallingBlockDropped 模式：
     //   World 低层只发语义事件，不反向依赖 Game/Entities）。仅仙人掌走此路径（玩家破块走 player.spawnItem）。
@@ -1200,7 +1231,14 @@ private:
     static constexpr int kFireSpreadPermille   = 25; // 每火格每窗对每个 6 邻可燃格的独立蔓延概率（‰=2.5%）
     static constexpr int kFireSpreadDampPermille = 12; // 抑制态幸存火蔓延概率（‰≈1.2%，约减半）
     static constexpr int kFireRisePct       = 3;    // 火柱上窜概率（下方 Fire + 上方 Air → 上方生火，%）
-    static constexpr int kFireCellCap       = 256;  // 活跃火格安全阀（超出本窗不再新增蔓延 / 上窜火）
+    static constexpr int kFireCellCap       = 256;  // 活跃火格安全阀（火格+燃烧格合计超出 → 本窗不再新增 / 烧穿 flare）
+    // t843 燃烧态常量（可燃物直燃；燃烧计时以 0.5s 判定窗为单位存 m_burningCells 值）：
+    //   kBurnWindowsWood=10：木类可燃块（原木/木板/门/活板门/书架/栅栏/半砖/台阶）燃烧 10 窗 = 5s 后烧毁。
+    //   kBurnWindowsLight=4：轻质可燃块（树叶/树苗/草丛）4 窗 = 2s 闪燃（机制等价 MC 树叶速燃）。
+    //   两档取值权衡：木类 5s 足够肉眼看清「方块在烧」且同态蔓延掷骰 ~10 次（2.5%/窗 → 每邻 ~22% 被
+    //   点燃，叠加烧穿位余烬火持续掷骰 → 链式烧穿可靠）；轻质 2s 保「点草丛一燎而过」的爽快体感。
+    static constexpr int kBurnWindowsWood  = 10; // 木类可燃块燃烧窗数（×0.5s = 5s 烧毁）
+    static constexpr int kBurnWindowsLight = 4;  // 轻质可燃块（叶/苗/草）燃烧窗数（×0.5s = 2s 闪燃）
     // t468 结冰 tick 节流计数 + 常量：tickIceFreeze() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFreezeTickInterval
     //   才做一次冻结判定（~每 kFreezeTickInterval×0.1s = 5s 一窗）。窗口序号 m_freezeIntervalIndex 每窗 +1，喂入
     //   hashVoxel 散布概率 → 不同格不同窗错峰冻结（非瞬时全冻，PLAN §2-K 精神）。kFreezePct=20（每窗 20% 暴露水源
@@ -1316,6 +1354,15 @@ private:
     //   m_iceCells 模式，lessons perf-fluid-scan）。写入路径经 noteFireWrite 增量维护；generate/beginLoad
     //   清空、finishLoad 全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。
     std::unordered_set<quint64> m_fireCells;
+    // t843 燃烧态侧表：可燃方块点燃后「坐标 → 剩余燃烧窗数」。**不替换栅格 id**（面火 overlay 是呈现层
+    //   delegate；mesher / 存档 / state 位全不动）——选侧表而非 state 复用位的取舍：① 可燃族 state 位各有
+    //   语义（门开合 / 朝向、台阶顶底、叶距），挪用即破坏渲染与存档兼容；② 燃烧是运行期瞬态，读档后消失
+    //   = 自然熄灭（dev-spec t843 明示可接受），不进存档反而省了序列化迁移。维护：igniteFlammableAt 插入 /
+    //   tickFire (d) 计时-1 与烧毁摘除 / setBlock 写调用清除（写 = 新方块实例）/ beginLoad+rebuildFireCells
+    //   清空（世界重置）；防御：tick (d) 每窗校验 blockAt 仍 flammable + isBurningAt 查询时同校验（静默
+    //   直写路径替换块后 ≤1 窗内自愈）。键编码复用 packGrowthCell（同 m_fireCells 模式，lessons
+    //   perf-fluid-scan：只对在燃格 tick，绝不全图扫描）。
+    QHash<quint64, quint8> m_burningCells;
     // t495 perf：普通冰（Ice=45，不含 PackIce/BlueIce —— 那些永不融化）方格位置索引 —— 融化 tick（tickIceMelt）
     //   遍历此集（O(冰格数)）替代全图扫描（O(W×D×H)=3.28M）。写入路径经 noteIceWrite 增量维护；generate/beginLoad
     //   清空、finishLoad 全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无冰
@@ -1383,7 +1430,25 @@ private:
     //   setVoxelIfAir / clearBlockSilent）在 m_chunks.setBlock 后调本方法。
     void noteFireWrite(int x, int y, int z, quint8 oldId, quint8 newId);
     // t724 perf：全图扫描重建火焰方格集合（generate / finishLoad 末调一次；运行期由 noteFireWrite 维护）。
+    //   t843：兼清燃烧侧表 m_burningCells（generate / 读档 = 世界重置，燃烧态运行期瞬态随之作废 =
+    //   读档自然熄灭）。
     void rebuildFireCells();
+    // t843 3D 立地火支撑判定（纯读）：火格 (x,y,z) 自身 6 邻任一「实体可依附面」（isSolid **或**
+    //   isCollidable——门/活板门等薄板族 solid=false 但碰撞实体，火可贴门面烧；草丛/树苗 ShapeNone 不算）
+    //   或正下方是 Fire（火柱链——(c) 上窜火的连续性支撑；柱基熄 → 上方逐窗失撑级联塌）→ 有撑。机制
+    //   对齐 MC 1.0 火须依附实体面（fire canPlace）。消费方：tickFire (a) 失撑即灭 + checkFireOnEdit
+    //   编辑路径即时版。
+    bool fireSupportedAt(int x, int y, int z) const;
+    // t843 燃烧计时档位（可燃块点燃时的剩余窗数；火系统策略非方块身份 → 收口 World 层而非 BlockRegistry）：
+    //   木类族（与 BlockRegistry::flammable 表对齐分组，新可燃方块默认归木类档）kBurnWindowsWood=10 窗
+    //   （5s）；轻质族（叶/苗/草）kBurnWindowsLight=4 窗（2s 闪燃，机制等价 MC 树叶速燃）。
+    static int burnWindowsFor(quint8 blockId);
+    // t843 setBlock 编辑后立地火失撑复检（同 checkRailOnEdit 编辑钩子族模式）：本格 (x,y,z) 刚发生编辑 →
+    //   扫其 6 邻的 Fire 格，任一失撑（fireSupportedAt 假——支撑方块的消失必然发生在其 6 邻之内）→
+    //   **立即** setBlock Air 熄灭（不等下一判定窗；t843「失撑链核」：破支撑块 → 火当场灭，非等窗概率
+    //   衰减）。递归有界（每次熄灭移除一个 Fire 格，单调递减）。供 4/5 参数 setBlock 末尾各调一次
+    //   （编辑路径收口；tickFire (a) 的逐窗校验兜底静默直写路径）。
+    void checkFireOnEdit(int x, int y, int z);
     // 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞传送门坐标回写 m_strongholdPortal*（beginLoad 只清
     //   不重建 → 旧版读档后坐标丢失/陈旧，暗渊之眼飞错方向）。finishLoad 末调一次；实现见 world.cpp 注释。
     void rebindStrongholdPortalFromVoxels();

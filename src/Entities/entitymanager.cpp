@@ -5712,6 +5712,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (footY >= 0 && world->blockAt(fx, footY, fz) == BlockRegistry::Fire) touchingLava = true;
                 if (!touchingLava && bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Fire)
                     touchingLava = true;
+                // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值，玩家侧 step 同款三格
+                //   判定）：脚下一格（站在燃烧木板/原木顶面）+ 脚位 / 身体格（穿入燃烧的草丛等非实心可燃物）。
+                if (footY - 1 >= 0 && world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
+                if (!touchingLava && footY >= 0 && world->isBurningAt(fx, footY, fz)) touchingLava = true;
+                if (!touchingLava && bodyY >= 0 && world->isBurningAt(fx, bodyY, fz)) touchingLava = true;
                 if (touchingLava) {
                     if (e.fireTimer < kFireDuration) { e.fireTimer = kFireDuration; dirty = true; } // 翻入着火 → bump（QML 显火焰）
                     // t803：**不再清零 e.fireDamageTimer**（对齐玩家侧 t351 修复）。旧版在火 / 岩浆内每 AI tick
