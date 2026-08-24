@@ -178,9 +178,10 @@ public:
     void resolvePlayerPush(World *world, const QVector3D &playerFeet, float playerHalfW, float playerHeight,
                            qreal dt, float &outPushX, float &outPushZ);
 
-    // t708 ④ 空车被玩家推动：玩家水平 AABB（脚底 ±kPlayerHalfW）与静止空矿车 footprint 重叠 + wish 沿
-    //   轨轴有分量 → 把矿车沿轨道推进（按 wish 与该轨格连接向点积最大者定朝向与速度；车无碰撞盒，
-    //   推走即让出，不阻断玩家行走）。无世界 / 无输入 / 无重叠 / 已滑行的车 → no-op。返 false = 未推动。
+    // t708 ④ 空车被玩家推动（t809 修选向）：玩家水平 AABB（脚底 ±kPlayerHalfW）与静止空矿车 footprint
+    //   重叠 → 把矿车沿轨道推离玩家（选向 = away 为主 / wish 次之 / dir 兜底的合成向量在轨连接位上取点积
+    //   最大者；t809 前纯 wish 选向在 wish⊥轨轴时按枚举序破平局 → 拐角推车往返振荡「推不动」）；车无
+    //   碰撞盒，推走即让出，不阻断玩家行走。无世界 / 无输入 / 无重叠 / 已滑行的车 → no-op。返 false = 未推动。
     //   由 PlayerController.step 走路分支调（wish = 玩家世界向移动意图）。
     bool pushEmptyCart(World *world, const QVector3D &playerFeet, float wishX, float wishZ);
 

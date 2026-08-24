@@ -752,10 +752,20 @@ void MinecartManager::resolvePlayerPush(World *world, const QVector3D &playerFee
 }
 
 // t708 ④ 空车被玩家推动（PlayerController.step 走路 / 飞 / 观察者分支统一调；实现见头注释）：玩家脚底
-//   水平 AABB（±kCartPushReach）与静止空矿车重叠 + wish 沿轨轴有分量 → 把矿车沿「与 wish 点积最大的轨
-//   连接向」推走（speed = kCartPushSpeed，车头转向该连接向 → 之后 tickPushedCarts 磨擦渐停 / 下坡顺坡滑）。
+//   水平 AABB（±kCartPushReach）与静止空矿车重叠 → 把矿车沿轨推**离玩家**。t809 修选向：旧版把 wish 直接
+//   当选向向量 → 玩家长按 W 连推（视点/输入不随拐角转）时，车过拐角后停在与 wish 垂直的臂上，两臂点积
+//   同为 0 平局 → 按 kDirs 枚举序（Px 先于 Nx、Pz 先于 Nz）破平局：拐角出口朝枚举序败者（-X / -Z）时选中
+//   **指回拐角**的臂 → 车滑回拐角、到心重选（运动向）又把车送回来路 → 推一下退一格的往返振荡 = 用户报
+//   「推到拐弯处推不动了」。修 = 三级合成选向向量（身体推开语义，机制等价 MC 玩家撞静止矿车 → 车沿轨
+//   被推离玩家身体）：
+//     ① away（车心 − 玩家脚底，水平归一，权重 1.0）—— 推开主方向（玩家在车哪侧，车就往对侧轨臂走；
+//        远离向与轨轴垂直时点积 0，自然退给下两级）；
+//     ② wish（权重 0.5）—— 输入意图次之（玩家面朝 + 按键方向；直段与 away 同向叠加）；
+//     ③ dir（权重 0.25）—— 运动连续性兜底（前 tick 行进向；玩家贴车同位（away≈0）且松向输入时仍沿
+//        原行进向续推，不因合成向量归零而卡停）。
+//   权重比保证 away 主导（1.0 > 0.5+0.25 合计的任一分量单独翻转不足以越过 away 与另一级的同向和）。
 //   已滑行的车（speed≠0）不二次推（防静止站位无限叠速）；被骑的车不推。pickTrackStep 滤 dot<0 / 无轨 →
-//   纯反向或无沿 wish 的可走连接 → 不推（wish 垂直于轨轴推不动 —— 机制等价 MC 推静止矿车须沿轨轴）。
+//   纯反向或无可走连接 → 不推（机制等价 MC 推静止矿车须沿轨轴有可达连接）。
 bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, float wishX, float wishZ)
 {
     if (!world) return false;
@@ -771,8 +781,16 @@ bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, f
         const float dx = std::fabs(playerFeet.x() - c.pos.x());
         const float dz = std::fabs(playerFeet.z() - c.pos.z());
         if (dx > kCartPushReach || dz > kCartPushReach) continue; // 玩家未实际贴住车
+        // t809 三级合成选向（见函数头注释）：away（推开主向）+ wish（输入意图）+ dir（运动连续兜底）。
+        //   away 归一（玩家贴车同位 → 水平距 <1e-4 → away 置 0，退给 wish/dir 两级）。
+        float ax = c.pos.x() - playerFeet.x();
+        float az = c.pos.z() - playerFeet.z();
+        const float al = std::sqrt(ax * ax + az * az);
+        if (al > 1e-4f) { ax /= al; az /= al; } else { ax = 0.0f; az = 0.0f; }
+        const float selX = ax + 0.5f * nwx + 0.25f * c.dirX;
+        const float selZ = az + 0.5f * nwz + 0.25f * c.dirZ;
         int ndx = 0, ndz = 0;
-        if (!pickTrackStep(world, c.pos, nwx, nwz, ndx, ndz)) continue; // 无沿 wish 的可走连接 → 推不动
+        if (!pickTrackStep(world, c.pos, selX, selZ, ndx, ndz)) continue; // 无沿合成向的可走连接 → 推不动
         c.dirX = float(ndx);
         c.dirZ = float(ndz);
         c.speed = kCartPushSpeed;
@@ -839,24 +857,39 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         // wish 归一后与 dir 点积 → 前进 / 后退意图 [-1,1]（侧向分量投影 0 → 不侧移，轨约束）。
         proj = (wishX / wishLen) * c.dirX + (wishZ / wishLen) * c.dirZ;
     }
-    // t638 ⑤ / t658 修 动力轨加速（spec「动力轨 = 矿车经过提速」，机制等价 MC 1.0 powered rail boost）：
-    //   **通电才加速**（t658 前恒 boost —— 无红石系统时代的简化；红石电力系统 v1 落地后改为读轨 state 的
-    //   GoldenRailStateOnFlag（bit4，World::tickRedstone 电力重算置 / 清）。机制等价 MC：断电动力轨 = 普通轨
-    //   （仅承载不加速），通电动力轨才 boost / 弹射）。矿车当前所在轨格为 GoldenRail 且通电 → 投影改写：
-    //   (a) 有前进输入 → 上限提升（proj × boost/kCart → 目标速达 kCartBoostSpeed）；(b) 无输入 → 弹射档
-    //   0.35（机制等价 MC 动力轨是「发射器」：停着的矿车驶上动力轨即被弹射向前，无需玩家踩 W）；(c) 反踩
-    //   刹车（proj<0）→ 不改写（玩家减速意图优先，动力不反向推）。轨格判定同 pickTrackStep（中心下一格）。
-    //   t691：轨层读前置钉定的 railY（非 floor(pos.y)-1）。
+    // t638 ⑤ / t658 修 / t810 修 动力轨加速（spec「动力轨 = 矿车经过提速」，机制等价 MC 1.0 powered rail
+    //   boost）：**通电才加速**（t658 前恒 boost —— 无红石系统时代的简化；红石电力系统 v1 落地后改为读轨
+    //   state 的 GoldenRailStateOnFlag（bit4，World::tickRedstone 电力重算置 / 清）。机制等价 MC：断电动力轨
+    //   = 普通轨（仅承载不加速），通电动力轨才 boost / 弹射）。矿车当前所在轨格为 GoldenRail 且通电 → 目标
+    //   速改写（t810 修：旧版改写的是 **proj 幅度**（proj>0 → proj×boost/kCart → 目标 = proj×boost；proj≈0
+    //   → 弹射档 0.35 → 目标 2.8）→ 过弯后玩家视点/输入向未跟上新行进向的窗口（wish⊥dir → proj≈0）动力段
+    //   被弹射档 2.8 接管，boost 12.8 以 ~3 格/s²一路拉垮到爬行速，下一拐角再砍一刀 = 用户报「骑乘过弯速度
+    //   骤减、两条动力轨喂入也救不回」；空车路径（tickPushedCarts t735 ④）按**运动符号**全额 boost 无此症
+    //   ——同场同轨空车匀速圈跑的对照即根因定位）。修后直接改写 targetV 三分支（机制等价 MC：动力轨供能
+    //   看**车速方向**不看玩家视角）：
+    //   (a) 无输入（proj≈0）且车在动 → 沿当前 speed 符号全额 boost（对齐空车路径 t735 ④；视点滞后窗口
+    //       不再掉速 —— 过弯接近匀速）；
+    //   (b) 有前进输入（proj>0）→ 全 boost 档（不再按 proj 幅度打折 —— 视线偏 30° 也不衰减；proj=1 时与
+    //       旧版同值，纯放宽）；
+    //   (c) 反踩刹车（proj<0）→ 不改写（玩家减速意图优先，动力不反向推、也不与刹车角力）；
+    //   (d) 无输入且停驻 → 弹射档 0.35×kCartSpeed（t658 语义保留：机制等价 MC 动力轨是「发射器」，停着的
+    //       矿车驶上动力轨即被弹射向前，无需玩家踩 W）。
+    //   轨格判定同 pickTrackStep（中心下一格）；t691：轨层读前置钉定的 railY（非 floor(pos.y)-1）。
+    float targetV = proj * kCartSpeed;
     {
         const quint8 gb = (world && railY >= 0) ? world->blockAt(railX, railY, railZ) : quint8(BlockRegistry::Air);
         const bool railPowered = (gb == BlockRegistry::GoldenRail)
             && (world->stateAt(railX, railY, railZ) & BlockRegistry::GoldenRailStateOnFlag) != 0; // t658 通电位
         if (railPowered) {
             if (proj > 1e-3f) {
-                proj = proj * (kCartBoostSpeed / kCartSpeed); // 有输入 → 上限提升（proj≤1 → ≤boost）
-            } else if (proj > -1e-3f) {
-                proj = 0.35f; // 无输入 → 弹射档（机制等价 MC 动力轨弹射停着的矿车）
-            } // proj < -0.001（反踩刹车）→ 不改写：玩家减速意图优先
+                targetV = kCartBoostSpeed; // (b) 前进输入 → 全 boost 档
+            } else if (proj < -1e-3f) {
+                // (c) 反踩刹车 → 不改写：玩家减速意图优先
+            } else if (std::fabs(c.speed) > 1e-3f) {
+                targetV = (c.speed >= 0.0f ? 1.0f : -1.0f) * kCartBoostSpeed; // (a) 沿当前运动向全 boost
+            } else {
+                targetV = 0.35f * kCartSpeed; // (d) 停驻弹射档（机制等价 MC 动力轨弹射停着的矿车）
+            }
         }
     }
     // t667 坡道重力（机制等价 MC 矿车上坡减速 / 下坡自加速、静止车在下坡上溜车）：
@@ -865,7 +898,7 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     //   kCartUphillMul 收窄（须玩家输入推力才能爬）。行进侧按 speed 符号取（负速 = 朝 -dir 走：反向推进、
     //   倒行下坡同样加速倒溜）。静止车在下坡上 → 下坡标志放行下方 movement 闸门起步溜。渲染几何的坡面
     //   高度与矿车 Y 同读 railProbeDelta（钉轨面段），两者粒度一致。t691：轨层读前置钉定 railY。
-    float targetV = proj * kCartSpeed;
+    //   t810：targetV 声明上移至动力轨段前（该段先改写、坡道段在其上继续叠加）。
     bool slopeDownAuto = false; // 静止车下坡起步溜的闸门标志（speed==0 且行进侧下坡 → 允许移动）
     if (world && railY >= 0) {
         const int gs = (c.speed >= 0.0f) ? 1 : -1;
