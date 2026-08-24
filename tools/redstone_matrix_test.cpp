@@ -8945,6 +8945,171 @@ int main(int argc, char *argv[])
                              "manual-check (rebuilt-on-retype fix)";
     }
 
+    // ── P-r24#1 门整扇湿判防火带（Review 2026-08-24 中危 #1；专用局部世界 seed 31，P-t830 局部世界先例）──
+    //   7b83fbd 防火带只判主目标湿 → 门配对联动点燃无湿判：火从干半扇侧掷中 → 被水保护的湿半扇被连带
+    //   焚毁（不可逆）。修后 igniteFlammableAt 把湿判提前为「主目标**或其配对半扇**含水 → 整扇不燃」，
+    //   且 (d) 烧毁收尾的「对偶仍是门 → 同窗 Air」兜底对湿对偶跳过（点燃后才泼水的边角同样护住）。
+    //   两段断言（真实 tickFire 驱动；晴天无雨混淆源）：
+    // (a) 蔓延窗：火贴干半扇（下格 6 邻）、水贴湿半扇（上格侧邻，非火的 6 邻不抑制火）→ 600 窗后两半门
+    //     格恒 WoodDoor 且从未进燃烧态（整扇湿判拦下每一次掷骰——非概率断言）+ 火仍存活（证掷骰每窗
+    //     都在发生，拦截面真实可达）；
+    // (b) 烧尽收尾兜底（确定性，无概率）：干扇两半点燃 → 同 id 写清除上扇燃烧态（t843 契约：显式写 =
+    //     换新实例清侧表）→ 上扇侧放水 → 下扇 10 窗烧尽时 (d) 兜底须被湿判拦下 → 上扇存活（修前兜底
+    //     setBlock(Air) 焚毁湿半扇）。
+    {
+        World wD1;
+        wD1.setWidth(40); wD1.setDepth(40); wD1.setHeight(96); wD1.setSeed(31);
+        const int gy1 = 81; // rig 层（96 高度地形之上；整带自凿清空防丘陵地形撞 rig）
+        for (int x = 10; x <= 16; ++x)
+            for (int z = 10; z <= 16; ++z)
+                for (int y = 79; y <= 84; ++y)
+                    wD1.setBlock(x, y, z, BR::Air, 0);
+        // (a) rig：火(12) - 门下(13,81) - 门上(13,82)，水(14,82) 只贴门上（对门下是对角 → 干湿分明）。
+        wD1.setBlock(12, gy1, 12, BR::Fire, 0);         // 火源（6 邻仅门下格可燃 → 恒 hasFuel 不自熄；水距 2 格对角不抑制）
+        wD1.setBlock(13, gy1, 12, BR::WoodDoor, 0);     // 门下格（state bit3=0；干半扇——水不在其 6 邻）
+        wD1.setBlock(13, gy1 + 1, 12, BR::WoodDoor, 8); // 门上格（state bit3=1；湿半扇——水正右侧邻）
+        wD1.setBlock(14, gy1 + 1, 12, BR::Water, 0);    // 水（harness 不驱动 tickWaterFlow → 静止不漫）
+        for (int win = 0; win < 600; ++win)
+            for (int t = 0; t < 5; ++t) wD1.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval=5）
+        const bool okA = wD1.blockAt(13, gy1, 12) == BR::WoodDoor      // 干半扇存活（从未点燃）
+                      && wD1.blockAt(13, gy1 + 1, 12) == BR::WoodDoor  // 湿半扇存活（整扇不燃）
+                      && !wD1.isBurningAt(13, gy1, 12)                 // 且从未进燃烧态（非概率断言）
+                      && !wD1.isBurningAt(13, gy1 + 1, 12)
+                      && wD1.blockAt(12, gy1, 12) == BR::Fire;         // 火仍存活（掷骰每窗发生，拦截面可达）
+        // (b) rig（隔 2 行 z=14，与 (a) 火源 / 水均非 6 邻互不干扰）。
+        wD1.setBlock(13, gy1, 14, BR::WoodDoor, 0);
+        wD1.setBlock(13, gy1 + 1, 14, BR::WoodDoor, 8);
+        const bool litB = wD1.igniteFlammableAt(13, gy1, 14); // 干扇直燃（两半全干 → 整扇放行 + 联动点燃）
+        const bool linkedB = litB && wD1.isBurningAt(13, gy1 + 1, 14);
+        wD1.setBlock(13, gy1 + 1, 14, BR::WoodDoor, 8); // 同 id 写：清上扇燃烧侧表（t843 契约）→ 制造「下扇在燃、上扇不在燃」不对称
+        const bool unlitUpper = !wD1.isBurningAt(13, gy1 + 1, 14);
+        wD1.setBlock(14, gy1 + 1, 14, BR::Water, 0);    // 上扇侧放水（非下扇 6 邻 → 下扇不被浇熄，烧尽链保留）
+        for (int win = 0; win < 40; ++win)
+            for (int t = 0; t < 5; ++t) wD1.tickFire(); // kBurnWindowsWood=10 → 下扇第 10 窗烧尽（余量 ×4）
+        const bool okB = linkedB && unlitUpper
+                      && wD1.blockAt(13, gy1, 14) != BR::WoodDoor       // 下扇已烧尽（Fire flare 或 Air）
+                      && wD1.blockAt(13, gy1 + 1, 14) == BR::WoodDoor;  // 湿上扇存活（兜底被湿判拦下；修前被 Air）
+        const bool ok = okA && okB;
+        if (!ok)
+            qInfo().noquote() << "  r24#1 diag: aLower" << int(wD1.blockAt(13, gy1, 12))
+                              << "aUpper" << int(wD1.blockAt(13, gy1 + 1, 12))
+                              << "aFire" << int(wD1.blockAt(12, gy1, 12))
+                              << "bLit" << litB << "bLower" << int(wD1.blockAt(13, gy1, 14))
+                              << "bUpper" << int(wD1.blockAt(13, gy1 + 1, 14));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review24#1 door whole-panel wet firebreak: fire licking the dry half "
+                             "never ignites either half while water touches the other half (600 "
+                             "windows, door intact, never burning), and a half ignited before water "
+                             "arrived burns out without consuming its now-wet pair (burn-completion "
+                             "fallback skips wet dual)";
+    }
+
+    // ── P-r24#2 clearBlockSilent 红石火把幽灵网格（Review 2026-08-24 中危 #2；专用局部世界 seed 32）──
+    //   recheck 火把分支旧版不 emit，而 clearBlockSilent 的 worldChanged/clearAllDirty 在 recheck
+    //   **之前** → 红石火把（chunk mesh 几何）清格标脏后错过重建信号 = 幽灵火把残留。修后火把分支在
+    //   「实际掉落 ≥1」时自 emit。断言（信号时序序：掉落信号之后必须还能观测到 worldChanged——修前
+    //   唯一 worldChanged 在掉落之前 → 时序断言 FAIL）：TNT 顶立红石火把（TorchFloor state=0，支撑 =
+    //   正下方 TNT 格）→ clearBlockSilent 清 TNT → 火把格变 Air + 掉落物信号 + 之后仍有重建信号。
+    {
+        World wT2;
+        wT2.setWidth(40); wT2.setDepth(40); wT2.setHeight(96); wT2.setSeed(32);
+        for (int x = 10; x <= 14; ++x)
+            for (int z = 10; z <= 14; ++z)
+                for (int y = 79; y <= 84; ++y)
+                    wT2.setBlock(x, y, z, BR::Air, 0);
+        wT2.setBlock(12, 81, 12, BR::TntBlock, 0);        // TNT（ShapeFull → 可承火把，torchSupportBlock 真）
+        wT2.setBlock(12, 82, 12, BR::RedstoneTorch, 0);   // 红石火把立柱（state TorchFloor=0 → 附着格 = 下方 TNT）
+        int seq2 = 0, torchDropSeq = 0, worldSeqAfterDrop = 0, torchDrops = 0;
+        QObject::connect(&wT2, &World::blockDroppedAsItem, &wT2,
+                         [&](int x, int y, int z, int id) {
+                             ++seq2;
+                             if (x == 12 && y == 82 && z == 12 && id == int(BR::RedstoneTorch)) {
+                                 torchDropSeq = seq2;
+                                 ++torchDrops;
+                             }
+                         });
+        QObject::connect(&wT2, &World::worldChanged, &wT2, [&]() {
+            ++seq2;
+            if (torchDropSeq > 0) worldSeqAfterDrop = seq2; // 掉落之后到来的重建信号（修前恒 0 → FAIL）
+        });
+        wT2.clearBlockSilent(12, 81, 12); // TNT 点火清格（静默路径；recheck 火把扫应连带掉火把 + 自 emit）
+        const bool ok = torchDrops == 1                          // 恰 1 次火把掉落（无双掉）
+                     && torchDropSeq > 0
+                     && worldSeqAfterDrop > torchDropSeq         // 掉落后仍有 worldChanged（重建信号不再缺席）
+                     && wT2.blockAt(12, 82, 12) == BR::Air       // 火把格已清（网格无残留依据）
+                     && wT2.blockAt(12, 81, 12) == BR::Air;      // TNT 格已清（清格本体成立）
+        if (!ok)
+            qInfo().noquote() << "  r24#2 diag: drops" << torchDrops << "dropSeq" << torchDropSeq
+                              << "worldAfterDrop" << worldSeqAfterDrop
+                              << "torch" << int(wT2.blockAt(12, 82, 12));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review24#2 clearBlockSilent redstone-torch ghost mesh: torch standing "
+                             "on TNT drops exactly once when TNT ignition clears the block, torch "
+                             "cell becomes Air, and a worldChanged (rebuild signal) is observed "
+                             "AFTER the drop (torch branch self-emits on actual drop)";
+    }
+
+    // ── P-r24#3 静默清格两兄弟路径附着物复检（Review 2026-08-24 中危 #3；专用局部世界 seed 33）──
+    //   「口径合一」漏改 destroySphereSilent（爆炸）与 tickLavaFlow（岩浆焚毁）：(a) 爆炸掀支撑后
+    //   压力板 / 铁轨须随 recheckAttachmentsAfterClear 掉落不悬浮（压力板 = 修前爆炸路径漏的族；
+    //   铁轨 = 指令指定锁点；r=0.9 球心距 1 的附着物在球外幸存 → 只能靠钩子掉落，t733 探针同手法）；
+    // (b) 岩浆焚毁木板支撑（8%/窗确定性哈希，≤400 窗必中）→ 焚毁循环内 recheck 须把轨掉落（修前
+    //   tickLavaFlow 不含 checkRailOnEdit → 轨悬浮）。岩浆稳态早退（m_lavaDirty）用标记格翻转逐窗
+    //   重标脏驱动（pokeFluidDirty 7 邻扫含岩浆源）；每窗 35 调 tickLavaFlow ≥ 节流 30 保证恰 1 窗。
+    {
+        World wX3;
+        wX3.setWidth(48); wX3.setDepth(40); wX3.setHeight(96); wX3.setSeed(33);
+        for (int x = 10; x <= 30; ++x)
+            for (int z = 10; z <= 16; ++z)
+                for (int y = 79; y <= 84; ++y)
+                    wX3.setBlock(x, y, z, BR::Air, 0);
+        int plateDrops = 0, railDrops = 0;
+        QObject::connect(&wX3, &World::blockDroppedAsItem, &wX3,
+                         [&](int, int, int, int id) {
+                             if (id == int(BR::WoodPressurePlate)) ++plateDrops;
+                             else if (id == int(BR::Rail)) ++railDrops;
+                         });
+        // (a) 爆炸：石支撑 + 板（x=12）与 石支撑 + 轨（x=18）两组，r=0.9 各炸支撑。
+        wX3.setBlock(12, 81, 12, BR::Stone, 0);
+        wX3.setBlock(12, 82, 12, BR::WoodPressurePlate, 0); // 板（距球心 1 > r=0.9 → 球外幸存，靠钩子掉）
+        wX3.setBlock(18, 81, 12, BR::Stone, 0);
+        wX3.setBlock(18, 82, 12, BR::Rail, 0);              // 轨（同上球外幸存）
+        wX3.destroySphereSilent(12, 81, 12, 0.9f);          // 炸掉板支撑 → recheck 压力板分支掉板
+        wX3.destroySphereSilent(18, 81, 12, 0.9f);          // 炸掉轨支撑 → recheck 铁轨分支掉轨
+        const bool okA = wX3.blockAt(12, 82, 12) == BR::Air
+                      && wX3.blockAt(18, 82, 12) == BR::Air
+                      && plateDrops == 1 && railDrops == 1;
+        // (b) 岩浆焚毁：石地板(y=79) + 岩浆源(14,80) + 木板支撑(13,80) + 轨(13,81) + 标记格(14,81，岩浆
+        //     正上方——翻转 Stone↔Air 逐窗重标脏；岩浆不上升 → 标记格恒空可翻转；贴轨仅触发连接重算
+        //     no-op，孤轨无连接零写入）。焚毁 8%/窗 → ≤400 窗必中（P(400 窗全空)≈0.92^400≈e^-33）。
+        wX3.setBlock(13, 79, 12, BR::Stone, 0);
+        wX3.setBlock(14, 79, 12, BR::Stone, 0);             // 岩浆 / 木板下方地板（岩浆 grounded 不下落）
+        wX3.setBlock(13, 80, 12, BR::Planks, 0);            // 木板支撑（isWoodLike → 岩浆 ignite pass 目标）
+        wX3.setBlock(13, 81, 12, BR::Rail, 0);              // 轨（满顶支撑 Planks 上；焚毁后须掉落不悬浮）
+        wX3.setBlock(14, 80, 12, BR::Lava, 0);              // 岩浆源（贴木板 → 每窗 8% 焚毁掷骰）
+        bool burned = false;
+        for (int win = 0; win < 400 && !burned; ++win) {
+            wX3.setBlock(14, 81, 12, (win & 1) ? BR::Air : BR::Stone, 0); // 标记翻转（真实变化 → poke 标脏岩浆）
+            for (int t = 0; t < 35; ++t) wX3.tickLavaFlow(); // 35 调 ≥ 节流 30 → 恰 1 个流/焚毁窗
+            burned = wX3.blockAt(13, 80, 12) != BR::Planks;   // 木板被焚毁（Air / 被岩浆漫入）
+        }
+        const bool okB = burned && wX3.blockAt(13, 81, 12) == BR::Air && railDrops == 2; // 轨掉落（(a)1 + (b)1）
+        const bool ok = okA && okB;
+        if (!ok)
+            qInfo().noquote() << "  r24#3 diag: plateCell" << int(wX3.blockAt(12, 82, 12))
+                              << "railCellA" << int(wX3.blockAt(18, 82, 12))
+                              << "plateDrops" << plateDrops << "railDrops" << railDrops
+                              << "burned" << burned << "railCellB" << int(wX3.blockAt(13, 81, 12));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review24#3 silent-clear sibling paths recheck attachments: explosion "
+                             "dropping support drops the out-of-sphere pressure plate AND rail (no "
+                             "floating residue), lava burning a plank support drops the rail on top "
+                             "(burn loop now routes through recheckAttachmentsAfterClear)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
