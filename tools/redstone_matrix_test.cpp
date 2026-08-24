@@ -8188,6 +8188,65 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t821 床头/尾 z-fighting 盒几何探针（bedHalfBoxes 单一权威直调；World 层静态函数，无 rig 依赖）──
+    //    用户报「浏览器 3D 床预览，床头/尾羊毛与床身模板接触面重叠闪烁」：旧版床垫长轴满 [0,1] → 床垫外
+    //    端面与床头/尾板外面同格边共面同法线（z 区间重叠）→ z-fight；枕头外端同病。断言（16 床色 × 4
+    //    facing × head/foot = 128 rig）：
+    //    (a) 盒数 ≥5（foot：2 腿+床架+床垫+板）/ ≥6（head 多枕头）；
+    //    (b) 床垫 + 枕头长轴**外端**内缩 kBedBoardThick 恰达板内面（不触格边 = 与板外面不再共面）；
+    //    (c) 床垫长轴**内端**仍满触格边（两半对接连续，t496「中间不空」契约不随本修复回归）；
+    //    (d) 外端存在贴格边、顶至 boardTop 的 planks 板盒（内缩后外端仍有板封口，无可见缺口）。
+    {
+        bool okA = true, okB = true, okC = true, okD = true;
+        const int planksT821 = BR::tileIndex(quint8(BR::Planks), BR::PosX);
+        const int woolT821 = BR::tileIndex(quint8(BR::Wool), BR::PosX);
+        const float thick821 = BR::kBedBoardThick;
+        int bedChecks = 0;
+        for (int id = 0; id < int(BR::Count); ++id) {
+            if (!BR::isBed(quint8(id))) continue;
+            const int bedT = BR::tileIndex(quint8(id), BR::PosX);
+            for (int f = 0; f < 4; ++f) {
+                const bool longX = (f == 0 || f == 1);
+                const bool frontPos = (f == 0 || f == 2);
+                for (int h = 0; h <= 1; ++h) {
+                    const bool isHead = (h == 1);
+                    const bool outerPos = isHead ? !frontPos : frontPos;
+                    const float boardTop = isHead ? BR::kBedHeadboardTop : BR::kBedFootboardTop;
+                    QVector<BedHalfBox> bx;
+                    PartialBlockGeometry::bedHalfBoxes(quint8(id), isHead, f, bx);
+                    ++bedChecks;
+                    if (bx.size() < (isHead ? 6 : 5)) okA = false;
+                    const auto lo = [&](const BedHalfBox &b) { return longX ? b.x0 : b.z0; };
+                    const auto hi = [&](const BedHalfBox &b) { return longX ? b.x1 : b.z1; };
+                    for (const BedHalfBox &b : bx) {
+                        if (b.tile != bedT && b.tile != woolT821) continue;
+                        const float outerC = outerPos ? hi(b) : lo(b);
+                        const float innerC = outerPos ? lo(b) : hi(b);
+                        const float wantOuter = outerPos ? 1.f - thick821 : thick821;
+                        const float wantInner = outerPos ? 0.f : 1.f;
+                        if (std::abs(outerC - wantOuter) > 1e-4f) okB = false;
+                        if (b.tile == bedT && std::abs(innerC - wantInner) > 1e-4f) okC = false;
+                    }
+                    bool boardFound = false;
+                    for (const BedHalfBox &b : bx) {
+                        if (b.tile != planksT821) continue;
+                        const float outerC = outerPos ? hi(b) : lo(b);
+                        const bool atEdge = std::abs(outerC - (outerPos ? 1.f : 0.f)) < 1e-4f;
+                        if (atEdge && std::abs(b.y1 - boardTop) < 1e-4f) boardFound = true;
+                    }
+                    if (!boardFound) okD = false;
+                }
+            }
+        }
+        const bool ok821 = okA && okB && okC && okD && bedChecks == 128;
+        if (!ok821) ++totalFail;
+        qInfo().noquote() << (ok821 ? "PASS" : "FAIL")
+                          << "| t821 bed board z-fight: mattress/pillow outer end inset to board inner face,"
+                             " mattress inner end joins at cell boundary, board caps outer end (16 colors x 4"
+                             " facings x head/foot ="
+                          << bedChecks << "rigs; a/b/c/d =" << okA << okB << okC << okD << ")";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

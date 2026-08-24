@@ -25,32 +25,37 @@ t496 贴图重设计（配合 partialblockgeometry.cpp ShapeBed 3D 模型）：
 import os
 from PIL import Image, ImageDraw
 
+# t821 床色板与羊毛色板**同源对齐**（用户「床上羊毛色与实际色羊毛不一致」）：旧版 t387 首 8 色
+#   （red/orange/yellow/green/cyan/magenta/black）是手挑近似值，与 build_wool.py WOOL_COLORS 逐通道有差
+#   （PIL 实测：red +10/+5/+5、orange −22/−25/0、yellow −20/−10/0、green −10/0/−5、cyan −10/−5/−5、
+#   magenta −15/−5/−15、black +8/+8/+6；blue 及 t455 追加 8 色 + white 本就同值）→ 同名色床/羊毛并排
+#   色感漂移。修：直接 **import build_wool.WOOL_COLORS**（同目录单一权威，改羊毛色板床自动跟随，零第二
+#   份色板可漂移）；white 沿用羊毛白 (240,240,238)（= default_wool.png 主体奶白，build_wool.WOOL）。
+#   条目顺序仅决定生成循环次序（key=文件名后缀，无索引耦合），保持 t387 前 8 + t455 后 8 的既有排列。
+from build_wool import WOOL_COLORS as _WOOL_COLORS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
 TS = 16  # 贴图边长（像素）
 
-# 床色变体（plain 纯色，§9 区隔；非 MC 资产）。key = 文件名后缀，value = 被面基色 RGB。
-# 前 8 色（红 / 橙 / 黄 / 绿 / 青 / 蓝 / 品红 / 黑）覆盖暖 / 冷 / 中性，保留既有观感（tile 43..50，零回归）。
-# t455 补全 16 色床：追加 white / light_blue / lime / pink / gray / light_gray / purple / brown
-#   （tile 94..101），用与 build_wool.py 相同的标准 16 色色板（羊毛↔床同色视觉一致），机制等价 MC 1.0 床 16 色变体。
 BED_COLORS = [
-    ("red",         (160,  45,  45)),
-    ("orange",      (200,  95,  30)),
-    ("yellow",      (190, 170,  40)),
-    ("green",        (60, 130,  50)),
-    ("cyan",         (55, 130, 140)),
-    ("blue",         (55,  70, 165)),
-    ("magenta",     (170,  70, 150)),
-    ("black",        (38,  38,  44)),
-    # t455 新增 8 色（与 build_wool.py WOOL_COLORS 同色板，羊毛↔床同色一致）：
+    ("red",         dict(_WOOL_COLORS)["red"]),
+    ("orange",      dict(_WOOL_COLORS)["orange"]),
+    ("yellow",      dict(_WOOL_COLORS)["yellow"]),
+    ("green",       dict(_WOOL_COLORS)["green"]),
+    ("cyan",        dict(_WOOL_COLORS)["cyan"]),
+    ("blue",        dict(_WOOL_COLORS)["blue"]),
+    ("magenta",     dict(_WOOL_COLORS)["magenta"]),
+    ("black",       dict(_WOOL_COLORS)["black"]),
+    # t455 新增 8 色 + white（与 build_wool.py 同色板，羊毛↔床同色一致）：
     ("white",       (240, 240, 238)),
-    ("light_blue",  ( 70, 150, 210)),
-    ("lime",        ( 95, 175,  45)),
-    ("pink",        (225, 145, 175)),
-    ("gray",        ( 70,  70,  80)),
-    ("light_gray",  (155, 155, 160)),
-    ("purple",      (130,  60, 165)),
-    ("brown",       (115,  75,  45)),
+    ("light_blue",  dict(_WOOL_COLORS)["light_blue"]),
+    ("lime",        dict(_WOOL_COLORS)["lime"]),
+    ("pink",        dict(_WOOL_COLORS)["pink"]),
+    ("gray",        dict(_WOOL_COLORS)["gray"]),
+    ("light_gray",  dict(_WOOL_COLORS)["light_gray"]),
+    ("purple",      dict(_WOOL_COLORS)["purple"]),
+    ("brown",       dict(_WOOL_COLORS)["brown"]),
 ]
 
 
