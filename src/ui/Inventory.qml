@@ -687,17 +687,21 @@ Item {
                         }
                     }
 
-                    // 点击销毁槽 → 丢弃当前光标手持栈（setHeldBlock(0) 一并清 id+count）。
+                    // 点击销毁槽 → 销毁「当前鼠标持有 / 单件」（t839 语义收窄）。
                     // 仅左键：右键全归 root 右键 TapHandler 独占（t79 拿半/均分手势），避免再抢右键 grab（t138）。
-                    //   t700 语义澄清（用户口径：① 平时拖一组上去 = 清空整组；② shift+左键 = 把背包里拿出来的
-                    //   全部清空）：两者都是**光标整栈**操作、差异仅手势（拖放释放 vs 键修饰点击）→ 统一整组清空
-                    //   （t653③ 的「普通左键只丢 1 个」分档废弃 —— 用户实测期望整组消失，逐个丢弃用拖到面板外
-                    //   丢世界实体的既有路径）。Shift+左键保留同语义（显式批量手势约定）。
+                    //   t700 语义（光标整组清空：拖放释放 / 键修饰点击统一）保留为第一优先；t839 补第二档：
+                    //   光标空手点击 → 清**当前选中槽单格**（setStack(selectedSlot, 0, 0) 只清这一槽——用户
+                    //   「只应销毁当前鼠标持有/单件」；绝不批量清快捷栏 1-9）。Shift 与普通左键同语义（销毁面
+                    //   收窄后修饰键不再改变作用范围）。
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
                         onTapped: {
-                            if (!root.hotbar || root.hotbar.heldBlock === 0) return
-                            root.hotbar.heldBlock = 0   // 整组清空（setHeldBlock(0) 同步清 count / 耐久 / 附魔 / 名）
+                            if (!root.hotbar) return
+                            if (root.hotbar.heldBlock !== 0) {
+                                root.hotbar.heldBlock = 0   // ① 光标持有 → 整组销毁（setHeldBlock(0) 同步清 count / 耐久 / 附魔 / 名）
+                            } else {
+                                root.hotbar.setStack(root.hotbar.selectedSlot, 0, 0)   // ② 光标空 → 仅当前选中槽单格
+                            }
                         }
                     }
                 }

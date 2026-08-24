@@ -2543,8 +2543,10 @@ struct AtlasIconSpec {
 
 // 方块 id → 图标形状规格。瓦片一律取 BlockRegistry::def 单一权威（topTile/sideTile/frontTile/bottomTile），
 //   不另持映射副本；几何按 def.shape 泛化（整立方 / 台阶 / 楼梯 / 栅栏 / 压力板 / 门 / 活板门 / 积雪层）+
-//   少数放置态特型方块（仙人掌细柱 / 附魔台矮盒 / 祭坛框 / 铁砧三段）显式覆盖。床（ShapeBed）与
-//   RedstoneDust 不进（床走 blockItemIconMap 2D pack 床图 / 手绘；红石粉瓦片未映射 pack 且已有手绘 flat 图）。
+//   少数放置态特型方块（仙人掌细柱 / 附魔台矮盒 / 祭坛框 / 铁砧三段）显式覆盖。床（ShapeBed）不进
+//   （床走 blockItemIconMap 2D pack 床图 / 手绘）。RedstoneDust t815 起入 flat（与瓦片生成器同源，见 case 注）；
+//   Glass t838① 回 ShapeFull 默认 dimetric 立方投影（t800 平贴是当时的错向，用户要 3D；玻璃半透瓦片直投
+//   保留 alpha 边缘，同 t800 前的立方观感）。
 AtlasIconSpec atlasIconSpecForBlock(int blockId)
 {
     AtlasIconSpec spec;
@@ -2589,11 +2591,12 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
     case BlockRegistry::DetectorRail:
         flatSpec(d.topTile);
         return spec;
-    case BlockRegistry::Glass:
-        // t800 玻璃 item 图标改 2D 平贴图（用户「玻璃的 item 贴图是 2D 的，不是 3D 的」）：对齐 MC 玻璃物品
-        //   图标 = 平面 glass 瓦片语义，不走 ShapeFull 默认 dimetric 立方投影。pack 态采包 glass.png（瓦片 68
-        //   已由 tileFilenameMap 映射）/ 程序态采 default_glass 平贴，两态同规格（保留瓦片 alpha 边缘）。
-        //   玻璃进创造调色板改走方块段（creativeBlocks，hotbar.cpp t800 注），本规格随之被方块 id 54 命中。
+    case BlockRegistry::RedstoneDust:
+        // t815 红石粉 item 图标改走图集 flat 平贴（tile 166 dust_line_off = def.topTile 单一权威）：旧路径是
+        //   t660 手绘 qrc icon_redstone_dust.png（独立 64×64 画稿，与 build_redstone_dust.py 瓦片生成器
+        //   **不同源**）——瓦片族 t692 亮度渐变改版后手绘稿不再同步 = 用户「pick-block 拿到的红石粉贴图是
+        //   旧版」根因。改运行期图集渲染（t745 统一贴图原则）后图标与瓦片恒同源，瓦片再改版自动跟随。
+        //   粉瓦片未映射 pack（灰度可着色瓦片不接包，见 tileFilenameMap 注）→ pack 态亦落程序瓦片，两态一致。
         flatSpec(d.topTile);
         return spec;
     case BlockRegistry::WheatCrop:
@@ -2959,12 +2962,14 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     if (dir.isEmpty())
         return {};
     QDir().mkpath(dir);
-    // t764/t745 文件族 icon → icon2 → icon3 → icon4：画法版本或缓存键策略变更须换缓存名，否则老缓存在
-    //   pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
+    // t764/t745 文件族 icon → icon2 → icon3 → icon4 → icon5：画法版本或缓存键策略变更须换缓存名，否则老缓存
+    //   在 pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
     //   t800 换 icon4：玻璃（54）画法 dimetric 立方 → flat 2D 平贴（此前中键拾取玻璃方块 / pack 态已落盘的
     //   icon3_54_* 是旧立方投影，不换名则永久复用旧观感）。
+    //   t815/t838 换 icon5：① 玻璃（54）需求反转回 dimetric 立方（t800 落盘的 icon4_54_* 是 flat 平贴）；
+    //   ② 红石粉（130）新入 flat 图集渲染族（此前无该路径缓存，一并换代防未来混淆）。
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_icon4_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
+            QStringLiteral("voxelsandbox_rp_icon5_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
     if (!img.save(out, "PNG"))
         return {};
     {

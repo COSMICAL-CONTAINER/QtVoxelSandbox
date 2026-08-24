@@ -983,26 +983,19 @@ private:
     //   t571 标注【自然失撑掉落：恒发（含创造）】。
     void dropUnsupportedDustAbove(int x, int y, int z);
     // t720 画作放置主体（placeBlock 画物品分支调；机制等价 MC 1.0 painting 放置）：face = 墙面外法线
-    //   （0=+X 1=-X 2=+Z 3=-Z，horizontalFacing 同源编码）。流程：锚格 = 命中格 + 法线（左上角）；
+    //   （0=+X 1=-X 2=+Z 3=-Z，horizontalFacing 同源编码；t837② 起由**玩家水平朝向反方向**推导——机制
+    //   等价 MC 1.0 ItemHanging 用玩家 yaw 定朝向，斜角命中侧棱不再把画面贴侧面）。流程：锚格 = 命中格 +
+    //   法线（左上角）；
     //   对该面测最大可用矩形（向「观察者右」u 向贪心扩宽 maxW、向下逐行扫 maxH，每格须 Air 且其墙格
     //   solid，上界 4×4）；随机选一张 w≤maxW && h≤maxH 的画（27 张等权）→ 锚格 setBlock(Painting,
     //   anchor|face|index) + 其余格 setWaterSilent。无合格画 / 锚格被占 → false（caller 不消耗物品）。
     //   纯 Game/Physics（读射线 + 写 World），不改栅格语义。
     bool tryPlacePainting(int face);
-    // t721 画作破坏主体（finishMiningAt 直挖 + dropUnsupportedPaintingsAround 失撑共用）：从 (px,py,pz)
-    //   （画格之一，可能已被清 Air）按 face flood-fill 收集候选格（±u 水平 / ±Y 垂直同 face 的 Painting
-    //   格）；终审修 M1：连通域不等于整张画（同面相邻两画平面相邻会被并入），画身份由域内锚格反解矩形
-    //   （index → paintingSize w×h）承载 —— 只清种子坐标所在矩形那一张（种子=被清锚格时退清域内不被
-    //   任何已识别矩形覆盖的残余格，邻画不误伤）。drop 时 spawnItem 1× PaintingId（整张画只掉 1 件）→
-    //   目标格 setWaterSilent 清 Air（静默：避免 N 格 blockBroken 粒子/音风暴；主破坏格由 caller 走
-    //   setBlock 已清 + 已发一次事件）。drop 标志区分：直挖 = 生存才掉（主动破坏），失撑 = 恒掉（含创造，
-    //   t571 自然掉落语义）。
-    void removePaintingAt(int px, int py, int pz, int face, bool drop);
-    // t721 画作支撑墙失撑掉落：破块后扫 4 水平邻的 Painting，解码其 state 朝向定位支撑墙格
-    //   （paintingWallOffset），若支撑 == 刚破的格 → removePaintingAt（drop=true 恒掉，含创造）。
-    //   机制等价 MC「画后面的墙被挖 → 画掉落」。同 dropUnsupportedTorchesAround 模式（仅扫 4 水平
-    //   邻——画的支撑墙恒在水平向；画不撑他画 → 单趟扫足够无级联）。
-    void dropUnsupportedPaintingsAround(int x, int y, int z);
+    // t837① 画作移除主体（removePaintingAt）与支撑墙失撑掉落（原 dropUnsupportedPaintingsAround）已整体
+    //   下沉 World 层单一权威（t806 余烬门三件套同模式；失撑钩子并入 World 写入钩子族后，爆炸 / 焚毁 /
+    //   岩浆吞墙等系统拆墙路径与玩家挖掘同口径掉画）。World::removePaintingAt 连通域清整张画（种子格
+    //   ±u/±Y 同 face 域 + 锚格反解矩形只清本画，同面邻画不误伤）；drop 时经 blockDroppedAsItem 掉
+    //   1× PaintingId。声明与契约见 world.h。
     // t725→t806 余烬门三件套已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 + 四角可选；同末地门
     //   三件套模式，World 层可被矩阵测试直编）：World::tryIgniteNetherPortal（点燃检测，placeBlock 打火石
     //   分支调）/ World::removeNetherPortalAt（连通域熄灭，finishMiningAt 直挖门格分支调）/

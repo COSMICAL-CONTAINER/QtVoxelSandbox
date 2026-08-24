@@ -1197,6 +1197,20 @@ bool BlockRegistry::isMushroom(quint8 blockId)
     return blockId == Mushroom || blockId == BrownMushroom;
 }
 
+// t847 cross 植物族「合法着地面」单一权威（见 blockregistry.h 声明处头注释；放置预检与失撑链地面集同源）。
+bool BlockRegistry::plantGroundBlock(quint8 plantId, quint8 groundId)
+{
+    if (isFlower(plantId))
+        return groundId == Dirt || groundId == Grass || groundId == Farmland; // MC 1.0 花含耕地（tilledField）
+    if (isMushroom(plantId))
+        return groundId == Dirt || groundId == Grass;   // 本工程简化口径（MC 蘑菇亦可生于阴暗石面，不收）
+    if (plantId == TallGrass)
+        return groundId == Dirt || groundId == Grass;   // 草丛只生于泥土 / 草方块（不能草上叠草 / 放树叶上）
+    if (plantId == DeadBush)
+        return groundId == Sand;                        // 枯灌木沙地限定（MC 1.0 dead bush 语义）
+    return false;
+}
+
 // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理 + mesher cross 路由分流
 //   （已并入 isCrossBillboard；本谓词专供爬升逻辑读「是否梯」，避免把「cross 渲染」与「可爬」语义耦合——
 //   未来若有不可爬的 cross 方块，爬升仍只读本谓词不误判）。单 id 故裸相等判定。

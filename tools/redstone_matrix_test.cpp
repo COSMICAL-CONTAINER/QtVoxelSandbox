@@ -3487,7 +3487,7 @@ int main(int argc, char *argv[])
     //    ② 方块段调色板含玻璃 Glass=54（移入）且白羊毛 + 15 色变体全在列（建筑取色不受影响）；③ 两物品生存链
     //    完好 —— nameForBlock 仍返中文名（杀羊掉羊毛 / 破玻璃掉玻璃的 tooltip / 图鉴名源）；④ 玻璃方块图标可
     //    解析（iconSourceForBlock(54) 非空 —— Glass 无 qrc 手绘图，pack 关态靠 isPackDerivedIconFamily 程序
-    //    图集重渲 flat 2D，回退链断链 = 空图标 = FAIL 面）。注：④ 在本测试二进制只验「URL 解析链通」——测试
+    //    图集重渲（t838(1) 起 dimetric 3D 立方投影），回退链断链 = 空图标 = FAIL 面）。注：④ 在本测试二进制只验「URL 解析链通」——测试
     //    target 无 qrc 资源（atlas 加载失败会打一条预期内 qWarning），瓦片像素内容留给实机人工目视；测试进程
     //    落盘的空图不毒害实机缓存（App 侧缓存命中只认进程内 map，恒重渲覆写，见 blockAtlasIconSource L9/L10）。
     {
@@ -3522,8 +3522,8 @@ int main(int argc, char *argv[])
                           << "| t800 inventory categorization: wool item (0x20E) and glass item (0x204) "
                              "removed from creative materials palette, glass block (54) present in blocks "
                              "palette alongside white wool + 15 color variants, both item names still "
-                             "resolve for survival drop chains, glass block icon resolves via flat-2D "
-                             "runtime re-render";
+                             "resolve for survival drop chains, glass block icon resolves via runtime atlas "
+                             "re-render (t838(1) dimetric 3D cube projection; flat-2D was the t800 misdirection)";
     }
 
     // ── t801 栅栏视觉高度探针（Core 表查询 + mesher 同源直调，P11/P19 模式；纯静态断言无 rig，不占
@@ -9662,6 +9662,202 @@ int main(int argc, char *argv[])
                              "teleport; (4) flat throw v=24 drops ~24 blocks (light gravity 12), 45deg ~50 blocks; "
                              "(5) sprint 1.3x speed -> range ratio 1.27..1.33 + Survival tp self-damage (5, "
                              "EnderPearlTp) exactly once per teleport";
+    }
+
+    // ── t837(1) 画作支撑失撑 World 钩子族探针（World rig 直编；setBlock / clearBlockSilent 双入口 + M1 邻画
+    //    不误伤 + 墙体置换保留）：1x2 画（锚格 top state=0x80|face|index / 非锚格 bottom state=faceBits）贴
+    //    face 0（+X 外法线）墙（-X 邻 Stone/TNT 两格）。断言面：
+    //    (a) 破**非锚格背后**的墙（用户复现位）→ 整画两格全清 + 恰 1 件掉落（dropId(Painting) 运行期同源读）；
+    //    (b) 破锚格背后的墙 → 同样整画掉落（任一支撑破坏 → 整画掉，MC 语义）；
+    //    (c) 墙置换为另一完整立方（Stone->Planks）→ 画保留零掉落（支撑仍有效，防误清）；
+    //    (d) 直调 World::removePaintingAt（finishMiningAt 直挖画格同路径）→ 整画清 + 1 件；
+    //    (e) clearBlockSilent（TNT 点火清格等系统路径，recheckAttachmentsAfterClear 收口）→ 整画掉落；
+    //    (f) M1 钉契约：同面并排两 1x1 画，破其一的墙 → 只掉那一张，邻画完好（连通域 ≠ 整画，锚格矩形圈定）。
+    {
+        // 运行期查 1x2 与 1x1 的画作 index（paintingSize 单一权威，免本表持字面量副本）。
+        int idx1x2 = -1, idx1x1 = -1;
+        for (int i = 0; i < BR::PaintingCount; ++i) {
+            int pw = 1, ph = 1;
+            BR::paintingSize(i, pw, ph);
+            if (idx1x2 < 0 && pw == 1 && ph == 2) idx1x2 = i;
+            if (idx1x1 < 0 && pw == 1 && ph == 1) idx1x1 = i;
+        }
+        const quint8 faceBits = 0; // face 0（+X 外法线）→ 非锚格 state=0（bit7=0）
+        const int paintingDropId = BR::dropId(BR::Painting);
+        const auto buildPainting = [&](int x0, int z0, int idx, BR::Id wallId) {
+            // 墙两格（y41/y40）+ 画两格（墙 +X 侧）；锚格 top 带 0x80|index。
+            w.setBlock(x0, 41, z0, wallId, 0);
+            w.setBlock(x0, 40, z0, wallId, 0);
+            w.setBlock(x0 + 1, 41, z0, BR::Painting,
+                       quint8(BR::PaintingStateAnchorFlag | faceBits | quint8(idx & BR::PaintingStateIndexMask)));
+            w.setBlock(x0 + 1, 40, z0, BR::Painting, faceBits);
+        };
+        // (a) 破非锚格背后的墙（底部墙格）→ 整画掉落。
+        {
+            const auto [x0, z0] = nextSlot();
+            buildPainting(x0, z0, idx1x2, BR::Stone);
+            const int drops0 = dropItemCount;
+            w.setBlock(x0, 40, z0, BR::Air, 0); // 用户复现位：挖掉画下半背后那块「非承重」墙
+            const bool ok = w.blockAt(x0 + 1, 40, z0) == quint8(BR::Air)
+                        && w.blockAt(x0 + 1, 41, z0) == quint8(BR::Air)
+                        && dropItemCount == drops0 + 1 && lastDropId == paintingDropId;
+            if (!ok) {
+                qInfo().noquote() << "  [t837a diag] bottomCell"
+                                  << int(w.blockAt(x0 + 1, 40, z0)) << "topCell" << int(w.blockAt(x0 + 1, 41, z0))
+                                  << "drops" << (dropItemCount - drops0) << "lastDropId" << lastDropId
+                                  << "expect" << paintingDropId;
+            }
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t837 painting support (a): dig wall behind NON-anchor cell of 1x2 painting "
+                                 "-> whole painting drops as ONE item (no residual single face)";
+        }
+        // (b) 破锚格背后的墙 → 同样整画掉落。
+        {
+            const auto [x0, z0] = nextSlot();
+            buildPainting(x0, z0, idx1x2, BR::Stone);
+            const int drops0 = dropItemCount;
+            w.setBlock(x0, 41, z0, BR::Air, 0);
+            const bool ok = w.blockAt(x0 + 1, 40, z0) == quint8(BR::Air)
+                        && w.blockAt(x0 + 1, 41, z0) == quint8(BR::Air)
+                        && dropItemCount == drops0 + 1 && lastDropId == paintingDropId;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t837 painting support (b): dig wall behind anchor cell -> whole 1x2 painting "
+                                 "drops (ANY support face break drops the entire painting, MC semantics)";
+        }
+        // (c) 墙置换为另一完整立方 → 画保留（支撑仍有效）。
+        {
+            const auto [x0, z0] = nextSlot();
+            buildPainting(x0, z0, idx1x2, BR::Stone);
+            const int drops0 = dropItemCount;
+            w.setBlock(x0, 41, z0, BR::Planks, 0); // Stone -> Planks（均完整立方）
+            const bool ok = w.blockAt(x0 + 1, 41, z0) == quint8(BR::Painting)
+                        && w.blockAt(x0 + 1, 40, z0) == quint8(BR::Painting)
+                        && dropItemCount == drops0;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t837 painting support (c): wall replaced by another full cube -> painting "
+                                 "survives, zero drops (support recheck keeps valid walls)";
+        }
+        // (d) 直调 World::removePaintingAt（直挖画格路径）→ 整画清 + 1 件。
+        {
+            const auto [x0, z0] = nextSlot();
+            buildPainting(x0, z0, idx1x2, BR::Stone);
+            const int drops0 = dropItemCount;
+            w.removePaintingAt(x0 + 1, 40, z0, 0, /*drop=*/true); // 从非锚格种子（直挖下半格同型）
+            const bool ok = w.blockAt(x0 + 1, 40, z0) == quint8(BR::Air)
+                        && w.blockAt(x0 + 1, 41, z0) == quint8(BR::Air)
+                        && dropItemCount == drops0 + 1 && lastDropId == paintingDropId;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t837 painting remove (d): World::removePaintingAt from non-anchor seed clears "
+                                 "the whole 1x2 painting + drops exactly one item";
+        }
+        // (e) clearBlockSilent（TNT 点火清格 -> recheckAttachmentsAfterClear 收口）→ 整画掉落。
+        {
+            const auto [x0, z0] = nextSlot();
+            buildPainting(x0, z0, idx1x2, BR::TntBlock);
+            const int drops0 = dropItemCount;
+            w.clearBlockSilent(x0, 40, z0); // 点火清格同型系统路径（TNT 墙被引燃）
+            const bool ok = w.blockAt(x0 + 1, 40, z0) == quint8(BR::Air)
+                        && w.blockAt(x0 + 1, 41, z0) == quint8(BR::Air)
+                        && dropItemCount == drops0 + 1 && lastDropId == paintingDropId;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t837 painting support (e): clearBlockSilent (TNT-ignite style system clear) "
+                                 "-> painting drops via recheckAttachmentsAfterClear single entry";
+        }
+        // (f) M1 邻画不误伤：同面并排两 1x1 画（face 0 的 u = -Z），破其一的墙 → 只掉那一张。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, 41, z0, BR::Stone, 0);       // 画 A 墙
+            w.setBlock(x0, 41, z0 - 1, BR::Stone, 0);   // 画 B 墙（u 向相邻）
+            w.setBlock(x0 + 1, 41, z0, BR::Painting,
+                       quint8(BR::PaintingStateAnchorFlag | quint8(idx1x1 & BR::PaintingStateIndexMask)));
+            w.setBlock(x0 + 1, 41, z0 - 1, BR::Painting,
+                       quint8(BR::PaintingStateAnchorFlag | quint8(idx1x1 & BR::PaintingStateIndexMask)));
+            const int drops0 = dropItemCount;
+            w.setBlock(x0, 41, z0, BR::Air, 0);         // 只破画 A 的墙
+            const bool ok = w.blockAt(x0 + 1, 41, z0) == quint8(BR::Air)          // A 掉
+                        && w.blockAt(x0 + 1, 41, z0 - 1) == quint8(BR::Painting)  // B 完好
+                        && dropItemCount == drops0 + 1 && lastDropId == paintingDropId;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t837 painting M1 pin (f): two adjacent 1x1 paintings share a wall plane - "
+                                 "breaking one support drops ONLY that painting, neighbor intact";
+        }
+    }
+
+    // ── t847 植物放置谓词探针（Core 纯函数真值表 + World 花失撑掉落链 t788 回归钉）：plantGroundBlock
+    //    单一权威——草丛→泥土/草方块（拒草上叠草 / 树叶 / 沙 / 耕地 / 水）；花→泥土/草方块/耕地（MC 1.0
+    //    BlockFlower.canBlockStay 同集含 tilledField）；蘑菇→泥土/草方块；枯灌木→沙子。掉落链：破花下
+    //    泥土 → 花 dropId 掉落（t788 染料链不回归；dropId 运行期读，免字面量副本）。放置预检本体在
+    //    PlayerController 私有 placeBlock（t841 P20 先例：谓词面 + 失撑面矩阵化，放置拒绝人工目视收口）。
+    {
+        const bool okGround =
+               BR::plantGroundBlock(BR::TallGrass, BR::Dirt)
+            && BR::plantGroundBlock(BR::TallGrass, BR::Grass)
+            && !BR::plantGroundBlock(BR::TallGrass, BR::TallGrass)   // 不能草上叠草
+            && !BR::plantGroundBlock(BR::TallGrass, BR::Leaves)      // 不能放树叶上
+            && !BR::plantGroundBlock(BR::TallGrass, BR::Sand)
+            && !BR::plantGroundBlock(BR::TallGrass, BR::Farmland)
+            && !BR::plantGroundBlock(BR::TallGrass, BR::Water)       // 水下拒绝（着地面谓词面）
+            && BR::plantGroundBlock(BR::FlowerRed, BR::Dirt)
+            && BR::plantGroundBlock(BR::FlowerRed, BR::Grass)
+            && BR::plantGroundBlock(BR::FlowerRed, BR::Farmland)     // MC 花可放耕地
+            && !BR::plantGroundBlock(BR::FlowerRed, BR::Sand)
+            && BR::plantGroundBlock(BR::Mushroom, BR::Dirt)
+            && BR::plantGroundBlock(BR::Mushroom, BR::Grass)
+            && !BR::plantGroundBlock(BR::Mushroom, BR::Farmland)
+            && BR::plantGroundBlock(BR::DeadBush, BR::Sand)          // 枯灌木沙地限定
+            && !BR::plantGroundBlock(BR::DeadBush, BR::Dirt)
+            && !BR::plantGroundBlock(BR::Stone, BR::Dirt);           // 非植物 → 恒 false（谓词域守卫）
+        // 失撑链回归钉：花失撑掉 dropId（t788 起花掉对应染料；本探针运行期读表比对，与玩家直破同源）。
+        const auto [x0, z0] = nextSlot();
+        placeRigBlock(w, x0, 41, z0, BR::Dirt, 0);
+        placeRigBlock(w, x0, 42, z0, BR::FlowerRed, 0);
+        const int drops0 = dropItemCount;
+        w.setBlock(x0, 41, z0, BR::Air, 0); // 破花下泥土
+        const bool okDrop = w.blockAt(x0, 42, z0) == quint8(BR::Air)
+                     && dropItemCount == drops0 + 1
+                     && lastDropId == BR::dropId(BR::FlowerRed);
+        const bool ok = okGround && okDrop;
+        if (!ok) {
+            qInfo().noquote() << "  [t847 diag] okGround" << okGround << "okDrop" << okDrop
+                              << "lastDropId" << lastDropId << "expect" << BR::dropId(BR::FlowerRed);
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t847 plant placement predicate: plantGroundBlock single authority truth table "
+                             "(tallgrass dirt/grass only - no grass-on-grass/leaves/water; flowers +farmland; "
+                             "mushrooms dirt/grass; dead bush sand-only) + flower lost-support drop stays on "
+                             "dropId chain (t788 dye linkage)";
+    }
+
+    // ── t815/t838 item 图标路径探针（Game 层 Hotbar 闭合直调，t800 探针同模式；测试二进制无 qrc → 图集
+    //    渲染落盘空图，URL 链路断言有效、像素内容留实机人工目视）：(1) 红石粉（130）pick-block 图标改走
+    //    isPackDerivedIconFamily 程序图集 flat 重渲（file:/// 运行期缓存，非 qrc 手绘旧稿——「贴图旧版」
+    //    根因钉死在回退链位置：旧稿只余渲染失败兜底）；(2) 玻璃（54）缓存族换代 icon4->icon5（URL 家族名
+    //    断言；t800 flat -> t838(1) dimetric 3D 的画法切换靠换代兜底，防 AppLocalData 旧 flat 缓存被复用）。
+    {
+        Hotbar hb;
+        const QString dustIcon = hb.iconSourceForBlock(int(BR::RedstoneDust));
+        const QString glassIcon = hb.iconSourceForBlock(int(BR::Glass));
+        const bool ok = dustIcon.startsWith(QStringLiteral("file:///"))
+                     && !dustIcon.contains(QStringLiteral("icon_redstone_dust"))
+                     && glassIcon.startsWith(QStringLiteral("file:///"))
+                     && glassIcon.contains(QStringLiteral("voxelsandbox_rp_icon5_"))
+                     && dustIcon.contains(QStringLiteral("voxelsandbox_rp_icon5_"));
+        if (!ok) {
+            qInfo().noquote() << "  [t815/t838 diag] dustIcon" << dustIcon << "| glassIcon" << glassIcon;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t815/t838 item icon paths: redstone dust pick-block icon resolves via runtime "
+                             "atlas flat re-render (file:/// cache, stale hand-drawn qrc retired to last-resort "
+                             "fallback), glass icon cache family bumped icon4->icon5 for the flat->dimetric-3D "
+                             "draw switch";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

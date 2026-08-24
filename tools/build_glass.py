@@ -8,6 +8,11 @@ t405 沙子冶炼产物：玻璃是熔炉烧沙子（SmeltingRegistry 沙子→�
 「透明」由 ChunkGeometry 的 glassOnly 段材质 opacity≈0.45 实现，同 water 模式：纹理不透 + 材质半透）。
 纹理提供玻璃的「质感细节」而非透明度：
   近白青底 + 暗边框（表玻璃块边棱）+ 一道对角高光斜线（表玻璃反光）+ 细密亮暗噪点（表玻璃微观不平整）。
+t838② 边框增实（用户「玻璃方块边缘太透明」）：边框自 1px 浅灰环（delta 仅 ~46/255，经材质 opacity 0.45
+  洗后与底面几乎不可辨）加宽加深为 **2px 双色环**——外圈 1px 深棱（delta ~120/255）+ 内圈 1px 过渡棱
+  （delta ~60/255）。材质半透是均匀乘子（整面 ×0.45）→ 边框对比度按比例保留：外棱在半透后仍明显深于
+  面心，玻璃块的棱线读感「实」起来。pack 态瓦片（包内 glass.png）不适用 solidify（玻璃合法半透），
+  本增实仅程序态自绘。
 
 输出（覆盖写入 textures/）：
   default_glass.png   （tile 68，玻璃各面贴图）
@@ -62,32 +67,41 @@ def line(canvas, x0, y0, x1, y1, rgb):
             y += sy
 
 
-def draw_glass():
-    """近白青底 + 暗边框 + 对角高光斜线 + 细密噪点（表玻璃质感；透明由材质 opacity 承担）。"""
-    c = glass_base()
-    # 暗边框（表玻璃块边棱；一圈 1 像素暗框，区别于纯色面）。
-    edge = np.array([168.0, 184.0, 198.0])
+def draw_edge(c):
+    """t838② 边框增实：2px 双色环——外圈深棱 + 内圈过渡棱（各画一圈 1px 环；两次调用同函数供噪点后回画）。"""
+    edge_outer = np.array([96.0, 118.0, 142.0])   # 外圈深棱（近蓝灰；对比底面 delta ~120/255）
+    edge_inner = np.array([152.0, 170.0, 188.0])  # 内圈过渡棱（delta ~60/255，深棱到面心的缓冲带）
+    # 外圈（贴瓦片最外 1px）。
     for i in range(TS):
-        px(c, i, 0, edge)
-        px(c, i, TS - 1, edge)
-        px(c, 0, i, edge)
-        px(c, TS - 1, i, edge)
-    # 一道亮对角高光斜线（左上→右下，表玻璃反光；与 build_ice 的折线裂纹区分——玻璃用单一干净反光更「玻璃」）。
+        px(c, i, 0, edge_outer)
+        px(c, i, TS - 1, edge_outer)
+        px(c, 0, i, edge_outer)
+        px(c, TS - 1, i, edge_outer)
+    # 内圈（第 2 圈 1px；四角由外圈覆盖）。
+    for i in range(1, TS - 1):
+        px(c, i, 1, edge_inner)
+        px(c, i, TS - 2, edge_inner)
+        px(c, 1, i, edge_inner)
+        px(c, TS - 2, i, edge_inner)
+
+
+def draw_glass():
+    """近白青底 + 2px 双色暗边框（t838② 增实）+ 对角高光斜线 + 细密噪点（透明由材质 opacity 承担）。"""
+    c = glass_base()
+    draw_edge(c)
+    # 一道亮对角高光斜线（左上→右下，表玻璃反光；与 build_ice 的折线裂纹区分——玻璃用单一干净反光更「玻璃」；
+    #   起止收在 2px 边框内侧（2,3 → 11,12）不被棱线截断）。
     gloss = np.array([248.0, 252.0, 255.0])
     line(c, 2, 3, 11, 12, gloss)
-    # 细密亮暗噪点（表玻璃微观不平整 / 微反光颗粒；低密度以免喧宾夺主）。
+    # 细密亮暗噪点（表玻璃微观不平整 / 微反光颗粒；低密度以免喧宾夺主；范围含边框行——下方回画覆盖）。
     lite = np.array([232.0, 240.0, 246.0])
     dark = np.array([196.0, 210.0, 222.0])
     mask = _RNG.random((TS, TS)) < 0.10
     c[mask, 0:3] = lite
     mask2 = _RNG.random((TS, TS)) < 0.08
     c[mask2, 0:3] = dark
-    # 边框覆盖回画（噪点可能盖到边框像素，重画一圈保证边棱连贯）。
-    for i in range(TS):
-        px(c, i, 0, edge)
-        px(c, i, TS - 1, edge)
-        px(c, 0, i, edge)
-        px(c, TS - 1, i, edge)
+    # 边框覆盖回画（噪点可能盖到边框像素，重画两圈保证棱线连贯）。
+    draw_edge(c)
     return c
 
 

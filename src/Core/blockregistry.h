@@ -1101,6 +1101,16 @@ public:
     //   故显式并判（同 isIce / isBed 段不连续并判模式）；改族时一处同步谓词即可。
     static bool isMushroom(quint8 blockId);
 
+    // t847 cross 植物族「合法着地面」单一权威（放置预检消费；机制等价 MC 1.0 各植物原生地面集）：
+    //   草丛 TallGrass → 泥土 / 草方块（MC 1.0 tall grass 只生于草地 / 泥土——不能草上叠草 / 放树叶上）；
+    //   花族 → 泥土 / 草方块 / 耕地（MC 1.0 BlockFlower.canBlockStay 同集：dirt / grass / tilledField）；
+    //   蘑菇族 → 泥土 / 草方块（本工程简化口径，见 playercontroller 放置预检原注释）；
+    //   枯灌木 DeadBush → 沙子（MC 1.0 dead bush 沙地限定）。
+    //   与失撑掉落链（World::checkFlowerMushroomOnEdit / dropUnsupportedCropsAround 的「下方唯一支撑被破
+    //   → 整株掉落」）互为表里：放置侧枚举合法面、失撑侧任何下方破坏即掉——地面集只在本函数一处定义，
+    //   两侧永不漂移（改地面集只改这里）。plantId 非本族植物 → 恒 false（谓词只服务植物放置面）。
+    static bool plantGroundBlock(quint8 plantId, quint8 groundId);
+
     // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理判定
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
     //   （同 isBed / isCrossBillboard 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（改 id 时一处同步）。
