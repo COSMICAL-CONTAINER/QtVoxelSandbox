@@ -561,6 +561,22 @@ public:
     //   供 4/5 参数 setBlock + clearBlockSilent 末尾各调一次（编辑路径收口）。非 Q_INVOKABLE（内部 helper）。
     void checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t851 活板门 / 门失撑掉落复检（支撑校验族，checkPressurePlateOnEdit 同款模式）。机制等价 MC 1.0
+    //   附着语义：活板门须依附任一实体方块面（下方 isCollidable 或四侧水平邻 isCollidable——与放置预检
+    //   playercontroller 同谓词口径）、门下扇须站齐平支撑（isTopFlushSupport 单一权威，同 t741 放置口径）。
+    //   本格编辑后不再是本族（破为 Air / 换成火把等非支撑内容；state-only 开合写 id==id 天然早退）→
+    //   查正上方：活板门失撑 / 门下扇失去齐平支撑 → dropUnsupportedDoorsAbove 级联掉落。被破块本身是
+    //   本族时跳过（玩家直破的掉落由 finishMiningAt 通用路径 + 门配对联动负责，防双重掉落——同压力板 /
+    //   甘蔗 oldId 守卫模式）。供 4/5 参数 setBlock + setBlockSilent 末尾各调一次（编辑路径收口，
+    //   玩家挖掘 / 红石破坏 / 爆炸 / 火焚全入口覆盖——红石拆支撑即走本钩子）。非 Q_INVOKABLE。
+    void checkTrapdoorDoorSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+    // t851 失撑级联掉落：自 (x,y,z) 起向上逐格清「连续活板门柱 / 连续双格门」（门两半各发一次信号、
+    //   各掉一件——MC 双格门出 2 掉落物；门叠门通天链逐扇脱落），每格 blockBroken + blockDroppedAsItem
+    //   （dropId=自身物品形态）+ recomputeLightAround，末尾一次 worldChanged + clearAllDirty（N 写 1 emit，
+    //   同 dropSugarcaneColumn 批量收口）。静默直写不经 World::setBlock → 无重入。【自然失撑掉落：恒发
+    //   （含创造）】（t571 族口径）。非 Q_INVOKABLE。
+    void dropUnsupportedDoorsAbove(int x, int y, int z);
+
     // t524 甘蔗整柱坍落为掉落物（机制等价 MC 1.0 甘蔗失去下方支撑即整柱破坏掉落；同仙人掌支撑校验族）。
     //   自 (x,y,z) 起向上逐格：凡 Sugarcane → 静默写 Air（m_chunks.setBlock 直写 + 标脏，**不**经 World::setBlock
     //   → 不递归触发本逻辑 / 不重复发 blockBroken 链）+ emit blockBroken（破块粒子 / 音）+ emit blockDroppedAsItem

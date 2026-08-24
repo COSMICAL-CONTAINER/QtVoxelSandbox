@@ -941,6 +941,11 @@ private:
     //   木梯非 solid → 不撑他木梯 → 单趟扫即足够（无级联）。仅扫 6 邻（破块点周围），不重判贴墙（贴墙由
     //   placeBlock 预检保证，失撑只看 state 记录的那一面支撑墙）。
     void dropUnsupportedLaddersAround(int x, int y, int z);
+    // t851 破块后扫**正上方**活板门 / 门下扇：支撑被本破块清掉（活板门下方+四侧全失实体面 / 门失去齐平
+    //   地面 isTopFlushSupport）→ World::dropUnsupportedDoorsAbove 级联掉落为物品。支撑判定与 placeBlock
+    //   预检同谓词（isCollidable / isTopFlushSupport）→ 放置与掉落口径零漂移；玩家直破门/板本体走
+    //   finishMiningAt 掉落链不经此（防双掉）。【自然失撑掉落：恒发（含创造）】。
+    void dropUnsupportedDoorsAround(int x, int y, int z);
     // t662 破块后扫 6 邻机关方块（Lever / WoodButton / StoneButton）：若其**附着格**（state bit[3:1] 编码，
     //   BlockRegistry::mechAttachOffset）已非完整立方（含本格刚被置 Air）→ 机关直接掉落为物品（同火把 /
     //   木梯失撑语义，机制等价 MC「按钮 / 拉杆附着面被移除即脱落」）。机关无碰撞不撑他机关 → 单趟扫即足够。

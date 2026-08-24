@@ -3205,6 +3205,244 @@ int main(int argc, char *argv[])
                              "emits fallingBlockLanded for the heavy-metal landing sound";
     }
 
+    // ── t849/t850/t851 铁砧·仙人掌·活板门三件套探针（Core 表查询 + World rig + 玩家碰撞点测，P11 模式）──
+    //   t849：铁砧三阶段（Anvil/AnvilChipped/AnvilDamaged）非整格三件套收窄 —— ① collision/selection/raycast
+    //         三消费端走 anvilShapeBoxes 三盒窄形（XZ 12/16 足印，底座/腰柱/顶台三段，与 mesher 铁砧 case
+    //         同源镜像）→ 足印外环隙可站人/可透视；② heightmap 排除 → 列顶实面落到下方支撑块（PCF 阴影/
+    //         天光列不再被铁砧整格抬高）；仙人掌同查（0.8 居中细柱三件套 + heightmap 排除）。
+    //   t850：活板门两材质（木/铁）× 两态（合/开）阴影按薄板形状 —— 合态列顶=下方支撑面（板顶 0.1875 由
+    //         solidTopOffset 表达，heightmap 不再指向薄板格）；开态列顶=贴边竖板仍由 solidTopOffset 给满高
+    //         （heightmap 排除后自动落到下方支撑，开态竖板遮挡由既有 solidTopOffset(ShapeTrapdoor,open)=1.0
+    //         在 columnTopSurfaceY 组合表达——但该组合仅在「活板门是 heightmap 顶」时生效，排除后列顶恒为
+    //         支撑块 → 本探针锁「排除后列顶=支撑块顶」契约，开/合两态一致）。
+    //   t851：① 放置预检（PlayerController 直编不可达 placeBlock 射线段 → World 层谓词直验 + 失撑链全链
+    //         断言；放置拒绝的人工目视项见报告）：活板门须依附实体面（isCollidable 下方或四侧）、门须
+    //         isTopFlushSupport 齐平地面（t741 既有谓词天然拒门叠门——Door 非完整立方非上半砖）；
+    //         ② 失撑级联：拆支撑 → 正上方活板门柱/双格门（含叠门通天链）逐格 blockBroken+
+    //         blockDroppedAsItem；红石路径（setBlockSilent 静默写）与玩家路径（setBlock 编辑钩子）同收口。
+    {
+        constexpr float kEps = 1e-4f;
+        const auto boxesTopOf = [](const std::vector<BR::BlockAABB> &bs) {
+            float t = -1.0f;
+            for (const auto &b : bs) if (b.maxY > t) t = b.maxY;
+            return t;
+        };
+        // ── (A) Core 三件套窄形值锁：铁砧三阶段 + 仙人掌（collision=selection=raycast 同源 anvilShapeBoxes /
+        //     0.8 柱；足印 XZ [2/16,14/16] / [1.6/16,14.4/16]）。
+        bool okA = true;
+        const quint8 anvils[3] = { BR::Anvil, BR::AnvilChipped, BR::AnvilDamaged };
+        for (quint8 aid : anvils) {
+            const auto col = BR::collisionAABBs(aid, 0);
+            const auto sel = BR::selectionAABBs(aid, 0);
+            const auto ray = BR::raycastAABBs(aid, 0);
+            okA = okA && col.size() == 3 && sel.size() == 3 && ray.size() == 3; // 三盒窄形（底座/腰柱/顶台）
+            if (!okA || col.empty() || sel.empty()) break;
+            float footMinX = 1e9f, footMaxX = -1e9f;
+            for (const auto &b : col) {
+                footMinX = std::min(footMinX, b.minX);
+                footMaxX = std::max(footMaxX, b.maxX);
+            }
+            okA = okA
+                  && std::fabs(footMinX - 2.0f / 16.0f) < kEps && std::fabs(footMaxX - 14.0f / 16.0f) < kEps // 12/16 足印
+                  && std::fabs(col[0].minY) < kEps && std::fabs(col[0].maxY - 4.0f / 16.0f) < kEps           // 底座 y[0,4]
+                  && std::fabs(col[1].maxY - 10.0f / 16.0f) < kEps                                            // 腰柱到 y10
+                  && std::fabs(boxesTopOf(col) - 1.0f) < kEps                                                  // 顶台满高
+                  && std::fabs(boxesTopOf(sel) - 1.0f) < kEps && std::fabs(boxesTopOf(ray) - 1.0f) < kEps;
+            if (!okA) {
+                qInfo().noquote() << "  [t849 diag] anvil" << int(aid) << "col" << col.size()
+                                  << "sel" << sel.size() << "ray" << ray.size()
+                                  << "footX" << footMinX << ".." << footMaxX;
+                break;
+            }
+        }
+        {
+            const auto ccol = BR::collisionAABBs(BR::Cactus, 0);
+            const auto csel = BR::selectionAABBs(BR::Cactus, 0);
+            okA = okA && ccol.size() == 1 && csel.size() == 1
+                  && std::fabs(ccol[0].minX - 0.1f) < kEps && std::fabs(ccol[0].maxX - 0.9f) < kEps // 0.8 居中柱
+                  && std::fabs(csel[0].maxY - 1.0f) < kEps;
+        }
+        // ── (B) World 窄形行为 rig：铁砧缝隙可站人（点测）+ 可入缝（碰撞盒不覆盖环隙）+ heightmap 排除 +
+        //     PCF 列顶落支撑面；仙人掌/活板门 heightmap 排除同核（开/合两态列顶一致=支撑面）。
+        //     rig 取净空区（t794 模式）：8 宽 × 3 深 × y[ty,ty+6] 全 Air（防 worldgen 地形/树冠抬高
+        //     heightmap 使断言空转）；平台自建。
+        bool okB = true;
+        int brokenB = 0, dropsB = 0;
+        QObject sigGuardB;
+        {
+            World w849;
+            w849.setWidth(48); w849.setDepth(48); w849.setHeight(96);
+            w849.setSeed(20260824u);
+            const auto clearArea = [&](int ox, int oz, int oy) {
+                for (int dx = 0; dx < 8; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int yy = oy - 1; yy <= oy + 6; ++yy)
+                            if (w849.blockAt(ox + dx, yy, oz + dz) != BR::Air) return false;
+                return true;
+            };
+            int x0 = -1, z0 = -1, ty = -1;
+            for (int yy = 68; yy + 7 < 96 && x0 < 0; ++yy) // 地表 ~66、树冠 +10 → 从 68 起找地上净空带
+                for (int zz = 4; zz < 44 && x0 < 0; zz += 2)
+                    for (int xx = 4; xx + 8 < 48 && x0 < 0; xx += 2)
+                        if (clearArea(xx, zz, yy)) { x0 = xx; z0 = zz; ty = yy; }
+            okB = x0 >= 0;
+            if (x0 < 0)
+                qInfo().noquote() << "  [t849 diag] (B) no clear rig area";
+            QObject::connect(&w849, &World::blockBroken, &sigGuardB,
+                             [&](int, int, int, int) { ++brokenB; });
+            QObject::connect(&w849, &World::blockDroppedAsItem, &sigGuardB,
+                             [&](int, int, int, int) { ++dropsB; });
+            const int ax = x0, az = z0;
+            // 平台 + 铁砧 + 仙人掌 + 活板门四列（各自独立列、互不相邻防侧撑串扰：间距 ≥2 格）。
+            w849.setBlock(ax, ty, az, BR::Stone, 0);          // 铁砧列支撑
+            w849.setBlock(ax + 3, ty, az, BR::Stone, 0);      // 仙人掌列支撑（Stone 非 Sand——band 下方悬空，
+                                                               //   Sand 是重力块放置即坍落，列顶断言会空转）
+            w849.setBlock(ax + 6, ty, az, BR::Stone, 0);      // 活板门列支撑
+            w849.setBlock(ax, ty + 1, az, BR::Anvil, 0);
+            // ① 缝隙可入：铁砧足印外环隙中心 (ax+0.03, ty+1.5, az+0.5) —— x∈[14/16,1] 环隙（整格时代被挡）。
+            okB = okB && !w849.pointBlockedByCollision(float(ax) + 0.97f, float(ty) + 1.5f, float(az) + 0.5f);
+            // ② 砧身内仍挡：腰柱中心点 (ax+0.5, ty+1.5, az+0.5) 须在碰撞盒内（挡人语义保留）。
+            okB = okB && w849.pointBlockedByCollision(float(ax) + 0.5f, float(ty) + 1.5f, float(az) + 0.5f);
+            // ③ heightmap 排除：铁砧列 hm 应停在 Stone 行（ty），PCF 列顶 = ty + solidTopOffset(Stone)=ty+1；
+            //    仙人掌列同（hm=沙行）。修前 hm 抬到异形行（ty+1）→ 列顶 ty+2 整格误暗一环。
+            w849.setBlock(ax + 3, ty + 1, az, BR::Cactus, 0);
+            w849.setBlock(ax + 6, ty + 1, az, BR::WoodTrapdoor, 0); // 合态（state bit0=0）
+            okB = okB && w849.heightmapAt(ax, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax, az) - float(ty + 1)) < kEps
+                  && w849.heightmapAt(ax + 3, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 3, az) - float(ty + 1)) < kEps;
+            // ④ t850 活板门两态列顶一致（都落到 Stone 顶 ty+1——薄板不入列顶；solidTopOffset 开态竖板满高
+            //    仅在板是列顶时参与，排除后本探针锁「列顶恒支撑面」契约）：
+            okB = okB && w849.heightmapAt(ax + 6, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 6, az) - float(ty + 1)) < kEps;
+            w849.setBlock(ax + 6, ty + 1, az, BR::WoodTrapdoor, 0x01); // 开态（bit0=1，朝向位默认）
+            okB = okB && w849.heightmapAt(ax + 6, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 6, az) - float(ty + 1)) < kEps;
+            w849.setBlock(ax + 6, ty + 1, az, BR::IronTrapdoor, 0x00); // 铁活板门合态同口径
+            okB = okB && w849.heightmapAt(ax + 6, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 6, az) - float(ty + 1)) < kEps;
+        }
+        // ── (C) t851 失撑级联 rig：① 空中叠放活板门（无实体面依附）→ 直写模拟绕过预检的脏世界，
+        //     拆其唯一侧撑 → 板+其上门级联掉；② 门叠门通天（3 扇门叠柱站同一石台上）→ 拆石台 →
+        //     3 扇 6 格全掉（6 blockDroppedAsItem）；③ 有撑门不受邻破影响（零误伤）。
+        bool okC = true;
+        int dropsC1 = 0, dropsC2 = 0, dropsC3 = 0;
+        QObject sigGuardC;
+        {
+            World w851;
+            w851.setWidth(48); w851.setDepth(48); w851.setHeight(96);
+            w851.setSeed(777u);
+            QObject::connect(&w851, &World::blockDroppedAsItem, &sigGuardC,
+                             [&](int, int, int, int) { ++dropsC1; ++dropsC2; ++dropsC3; });
+            // rig：净空带搜索（(B) 同款——地表 ~66、树冠更高 → 从 68 起找 8 宽 × 3 深 × 8 高全 Air 带；
+            //   三个子 rig 分占带内不相交列：C1 用 bx0..bx0+1、C2 用 bx0+3、C3 用 bx0+5..bx0+6）。
+            const auto clearBand = [&](int ox, int oz, int oy) {
+                for (int dx = 0; dx < 8; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int yy = oy - 1; yy <= oy + 6; ++yy)
+                            if (w851.blockAt(ox + dx, yy, oz + dz) != BR::Air) return false;
+                return true;
+            };
+            int bx0 = -1, bz0 = -1, ty = -1;
+            for (int yy = 68; yy + 7 < 96 && bx0 < 0; ++yy)
+                for (int zz = 4; zz < 44 && bx0 < 0; zz += 2)
+                    for (int xx = 4; xx + 8 < 48 && bx0 < 0; xx += 2)
+                        if (clearBand(xx, zz, yy)) { bx0 = xx; bz0 = zz; ty = yy; }
+            if (bx0 < 0) {
+                okC = false;
+                qInfo().noquote() << "  [t851 diag] no clear band for rig";
+            }
+
+            // ① 活板门贴墙浮空（合法放置形态）：墙在 -X 侧。拆墙 → 板失撑掉 1 件。
+            {
+                dropsC1 = dropsC2 = dropsC3 = 0;
+                const int px = bx0, pz = bz0; // 带内 x0..x0+1 列（净空已由带搜索保证）
+                if (px < 0) {
+                    okC = false;
+                    qInfo().noquote() << "  [t851 diag] (C1) skipped (no band)";
+                } else {
+                    w851.setBlock(px, ty, pz, BR::Stone, 0);      // 墙（唯一侧撑）
+                    w851.setBlock(px + 1, ty, pz, BR::WoodTrapdoor, 0x02 | 0x01); // 板（开态贴 -X 边；state 仅视觉）
+                    dropsC1 = 0;
+                    w851.setBlock(px, ty, pz, BR::Air, 0);        // 拆墙 → setBlock 编辑钩子 ③ 复检
+                    okC = okC && dropsC1 == 1 && w851.blockAt(px + 1, ty, pz) == BR::Air;
+                }
+            }
+            // ② 门叠门通天：石台上 3 扇木门叠柱（ty..ty+5）。拆石台 → 6 格全掉（每格一件）。
+            {
+                dropsC1 = dropsC2 = dropsC3 = 0;
+                const int dx2 = bx0 + 3, dz2 = bz0; // 带内 x0+3 列（净空已由带搜索保证）
+                if (dx2 < 0) {
+                    okC = false;
+                    qInfo().noquote() << "  [t851 diag] (C2) skipped (no band)";
+                } else {
+                    w851.setBlock(dx2, ty - 1, dz2, BR::Stone, 0);
+                    for (int door = 0; door < 3; ++door) {
+                        w851.setBlock(dx2, ty + door * 2, dz2, BR::WoodDoor, quint8(0));      // 下扇 bit3=0
+                        w851.setBlock(dx2, ty + door * 2 + 1, dz2, BR::WoodDoor, quint8(8)); // 上扇 bit3=1
+                    }
+                    dropsC2 = 0;
+                    w851.setBlockSilent(dx2, ty - 1, dz2, BR::Air, 0); // 红石/系统静默拆支撑（setBlockSilent 收口路径）
+                    okC = okC && dropsC2 == 6;
+                    for (int yy = ty; yy <= ty + 5; ++yy)
+                        okC = okC && w851.blockAt(dx2, yy, dz2) == BR::Air;
+                }
+            }
+            // ③ 零误伤：正常门（站石台）旁挖无关方块 → 门不动。
+            {
+                dropsC1 = dropsC2 = dropsC3 = 0;
+                const int nx = bx0 + 5, nz = bz0; // 带内 x0+5..x0+6 列（净空已由带搜索保证）
+                if (nx < 0) {
+                    okC = false;
+                    qInfo().noquote() << "  [t851 diag] (C3) skipped (no band)";
+                } else {
+                    w851.setBlock(nx, ty - 1, nz, BR::Stone, 0);
+                    w851.setBlock(nx, ty, nz, BR::SpruceDoor, quint8(1));
+                    w851.setBlock(nx, ty + 1, nz, BR::SpruceDoor, quint8(9));
+                    dropsC3 = 0;
+                    w851.setBlock(nx + 1, ty, nz, BR::Air, 0); // 挖旁边无关格（原为本就空的格也行——写 Air 幂等）
+                    okC = okC && dropsC3 == 0
+                          && w851.blockAt(nx, ty, nz) == BR::SpruceDoor
+                          && w851.blockAt(nx, ty + 1, nz) == BR::SpruceDoor;
+                }
+            }
+        }
+        // ── (D) t849② 选中框/射线窄形 + t851 放置预检谓词静态断言（World 层谓词直验——placeBlock 的射线
+        //     段在 PlayerController 私有方法内，矩阵不可达；放置拒绝行为人工目视收口，P20 先例）。
+        bool okD = true;
+        {
+            // 活板门依附面判定（trapdoorSupportBlock 单一权威——playercontroller 预检 / World 复检同读）：
+            //   实体面（Stone）判允；air 判拒；**活板门/门自身判拒**（附着族不互相依附——板套板悬浮叠两侧一致拒）。
+            okD = okD && BR::trapdoorSupportBlock(BR::Stone, 0)
+                  && !BR::trapdoorSupportBlock(BR::Air, 0)
+                  && !BR::trapdoorSupportBlock(BR::WoodTrapdoor, 0x00)
+                  && !BR::trapdoorSupportBlock(BR::IronTrapdoor, 0x01)
+                  && !BR::trapdoorSupportBlock(BR::WoodDoor, 0);
+            // 门叠门拒放口径：isTopFlushSupport(WoodDoor)=false（Door 非完整立方非上半砖）→ t741 门放置
+            //    分支天然拒「门上叠门通天」。
+            okD = okD && !BR::isTopFlushSupport(BR::WoodDoor, 0);
+            // isCollidable 本身对活板门恒真（碰撞实体语义不动——玩家仍站板顶）；依附判定走排除版谓词。
+            okD = okD && BR::isCollidable(BR::WoodTrapdoor, 0x00);
+        }
+        const bool ok = okA && okB && okC && okD;
+        if (!ok) {
+            qInfo().noquote() << "  [t849 diag] okA" << okA << "| okB" << okB << "| okC" << okC
+                              << "| okD" << okD << "| c1drops" << dropsC1 << "| c2drops" << dropsC2
+                              << "| c3drops" << dropsC3;
+        }
+        if (!ok) ++totalFail;
+        Q_UNUSED(brokenB); Q_UNUSED(dropsB); // (B) 信号计数仅烟囱守卫（heightmap 断言是主面）
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t849/t850/t851 anvil+cactus non-full-cube trio + trapdoor thin-plate shadow "
+                             "+ attach support: anvil 3-stage collision/selection/raycast narrow to the "
+                             "three-box footprint (12/16 base/waist/top, gap walkable via point probe, "
+                             "waist still blocks), cactus trio at 0.8 centered column, all three families "
+                             "excluded from heightmap so PCF column-top lands on the support block "
+                             "(trapdoor open/closed wood+iron alike), wall-mounted trapdoor falls when its "
+                             "sole side support breaks, 3-door sky tower collapses into 6 item drops on "
+                             "silent support clear, intact door untouched by neighbor edits";
+    }
+
     // ── t800 物品栏归类清理探针（纯 Game 层 Hotbar 实例，无 World rig）：① 材料段调色板不再列羊毛物品
     //    （0x20E）与玻璃物品（0x204）——用户「羊毛 item 多此一举（方块栏已有羊毛方块）」「玻璃应放方块那边」；
     //    ② 方块段调色板含玻璃 Glass=54（移入）且白羊毛 + 15 色变体全在列（建筑取色不受影响）；③ 两物品生存链

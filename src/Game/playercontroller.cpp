@@ -1295,6 +1295,9 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   （removePaintingAt 连通域移除，drop=true 恒发含创造）。机制等价 MC「画后面的墙被挖 → 画掉落」
     //   （同火把 / 木梯失撑语义）。t571 标注【自然失撑掉落：恒发（含创造）】。
     dropUnsupportedPaintingsAround(x, y, z);
+    // t851 活板门 / 门失撑掉落：正上方活板门（四邻+下方全失实体面）/ 门下扇（失去齐平地面）→ 级联
+    //   掉落为物品。支撑判定与放置预检同谓词；门直破本体走上方配对联动不经此（防双掉）。
+    dropUnsupportedDoorsAround(x, y, z);
     // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门（t806 自本类下沉
     //   World::breakNetherPortalsAround 单一权威；尺寸无关——连通域天然覆盖 2×3..21×21 任意门，t848）。破**黑曜石
     //   门框**任一承重格即断结构（门格只与门框格 / 门格相邻；角块与门格对角不邻 → 破角不碎门，与检测
@@ -1512,6 +1515,46 @@ void PlayerController::dropUnsupportedLaddersAround(int x, int y, int z)
         emit spawnItem(tx, ty, tz, BlockRegistry::dropId(BlockRegistry::Ladder),
                        std::max(1, BlockRegistry::dropCount(BlockRegistry::Ladder)));
     }
+}
+
+// t851 破块后扫 (x,y,z) 的**正上方**活板门 / 门下扇：支撑被本破块清掉（活板门四邻+下方全失依附面 /
+//   门失去齐平地面）→ 级联掉落为物品。机制等价 MC「附着方块支撑面被移除即脱落」（同火把 t214 / 木梯
+//   t501 失撑语义；【自然失撑掉落：恒发（含创造）】t571 口径）。依附判定与放置预检同谓词
+//   （trapdoorSupportBlock 单一权威 / isTopFlushSupport）→ 放置与掉落口径零漂移。级联本体在
+//   World::dropUnsupportedDoorsAbove（单一权威——静默直写 + 批量收口；玩家直破门/板走 finishMiningAt
+//   掉落链不经此处，防双掉）。贴墙板拆墙的侧撑丢失由 World::checkTrapdoorDoorSupportOnEdit ③ 覆盖。
+void PlayerController::dropUnsupportedDoorsAround(int x, int y, int z)
+{
+    if (!m_world) return;
+    const int uy = y + 1;
+    const quint8 ub = m_world->blockAt(x, uy, z);
+    if (!BlockRegistry::isTrapdoor(ub) && !BlockRegistry::isDoor(ub)) return;
+    // 门仅下扇入口（上扇由 finishMiningAt 配对联动负责，防双掉）；活板门恒单格。
+    if (BlockRegistry::isDoor(ub) && (m_world->stateAt(x, uy, z) & 8) != 0) return;
+    bool supported = false;
+    if (BlockRegistry::isTrapdoor(ub)) {
+        // 活板门：下方或四侧任一依附面（trapdoorSupportBlock 单一权威——排除活板门/门自身）仍在 → 不掉。
+        const auto attachOk = [this](int ax, int ay, int az) {
+            return BlockRegistry::trapdoorSupportBlock(m_world->blockAt(ax, ay, az), m_world->stateAt(ax, ay, az));
+        };
+        supported = (y - 1 >= 0) && attachOk(x, y - 1, z); // 下方依附面（贴地放）
+        if (!supported) {
+            static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (const auto &d : kNb) {
+                const int nx = x + d[0], nz = z + d[1];
+                if (nx < 0 || nz < 0 || nx >= m_world->width() || nz >= m_world->depth()) continue;
+                if (attachOk(nx, uy, nz)) { // 四侧依附面（贴墙浮空放）
+                    supported = true;
+                    break;
+                }
+            }
+        }
+    } else {
+        // 门下扇：站齐平支撑（完整立方 / 上半砖顶面 —— isTopFlushSupport 单一权威，与放置预检同谓词）。
+        supported = BlockRegistry::isTopFlushSupport(m_world->blockAt(x, y, z), m_world->stateAt(x, y, z));
+    }
+    if (supported) return; // 支撑仍在 → 不掉
+    m_world->dropUnsupportedDoorsAbove(x, uy, z); // World 层级联掉落（含门配对半扇 + 上方叠柱）
 }
 
 // t662 破块后扫 (x,y,z) 的 6 邻机关方块（Lever / WoodButton / StoneButton）：解码每机关 state 的附着面
@@ -4294,6 +4337,29 @@ void PlayerController::placeBlock()
             || m_world->blockAt(tx - 1, ty, tz) != BlockRegistry::Air
             || m_world->blockAt(tx, ty, tz + 1) != BlockRegistry::Air
             || m_world->blockAt(tx, ty, tz - 1) != BlockRegistry::Air) return;
+    }
+    // t851 活板门放置支撑预检（木 / 铁活板门族统一，机制等价 MC 1.0 trapdoor 须依附实体方块面）：目标格
+    //   **下方依附面**（trapdoorSupportBlock）或**四侧水平邻任一依附面**才可放；否则拒（不挥）。
+    //   「活板门套活板门悬浮叠」（下板非实体依附、四邻无实体的空中叠柱）与「板贴门板」均被拒——
+    //   trapdoorSupportBlock 单一权威排除活板门/门自身（isCollidable 虽真但附着语义须实体方块面，
+    //   torchSupportBlock 排除火把同款口径）。判定谓词与 World 失撑复检
+    //   checkTrapdoorDoorSupportOnEdit 零漂移。IronTrapdoor 经 isTrapdoor 谓词并入本分支（t723 起
+    //   仅红石驱动开合，放置支撑语义与木活板门一致）。
+    if (BlockRegistry::isTrapdoor(m_selectedBlock)) {
+        const auto attachOk = [this](int ax, int ay, int az) {
+            return BlockRegistry::trapdoorSupportBlock(m_world->blockAt(ax, ay, az), m_world->stateAt(ax, ay, az));
+        };
+        bool hasAttach = attachOk(tx, ty - 1, tz); // 下方依附面（贴地放）
+        if (!hasAttach) {
+            static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (const auto &d : kNb) {
+                if (attachOk(tx + d[0], ty, tz + d[1])) { // 四侧依附面（贴墙浮空放）
+                    hasAttach = true;
+                    break;
+                }
+            }
+        }
+        if (!hasAttach) return; // 无任何实体面依附 → 悬空 / 叠活板门 → 拒（不挥）
     }
     // t394 枯死的灌木放置预检：仅可放在沙子正上方（机制等价 MC 1.0 dead bush 生于沙地）。
     //   目标格的下方须为 Sand；否则拒绝放置（不挥）。与种子 / 树苗「须草地 / 泥土」同支撑语义。
