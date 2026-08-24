@@ -149,7 +149,7 @@ void PlayerSkinBox::setSubV1(qreal v)
     rebuild();
 }
 
-// 复审 #8：slim 布局切换（Arm/Leg 盒区 4px → 3px；见 kPiecesSlim 注释）。幂等（同值 no-op）。
+// 复审 #8：slim 布局切换（仅臂宽 4→3；腿不变——见 kPiecesSlim 注释 + static_assert 数值锁）。幂等（同值 no-op）。
 void PlayerSkinBox::setSlim(bool s)
 {
     if (s == m_slim) return;

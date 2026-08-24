@@ -43,9 +43,11 @@ class PlayerSkinBox : public QQuick3DGeometry
     // 盒高采样分数区间 [subV0,subV1]（腿分段用；0/1 = 整段）。含 h 的面 v 行区间按它裁。
     Q_PROPERTY(qreal subV0 READ subV0 WRITE setSubV0 NOTIFY subV0Changed)
     Q_PROPERTY(qreal subV1 READ subV1 WRITE setSubV1 NOTIFY subV1Changed)
-    // slim（3px 臂/腿）布局皮肤（复审 #8）：true 时 Arm/Leg 盒区切 3px（Arm (40,16) 3×12×3、Leg
-    //   (0,16) 3×12×3——经典 4px 采样会采到 slim 布局外 u52..56 透明列 → 臂/腿镂空条纹）；Head/Body
-    //   不变。判型在 Core ResourcePackManager::playerSkinSlim（臂区尾 alpha 探测），QML 绑定联动；
+    // slim（仅臂宽 3px）布局皮肤（复审 #8；Review 2026-08-23 #1 修正数值）：true 时**只有臂盒区**宽 4→3
+    //   （Arm (40,16) 3×12×4——MC 1.8 slim 臂深不变仍是 4；Leg 保持 (0,16) 4×12×4 不缩，「臂腿都缩 3px」
+    //   的旧假设已在 playerskinbox.cpp static_assert 编译期锁死）。经典 4px 臂采样会采到 slim 布局外
+    //   u54..56 透明列 → 臂镂空条纹；Head/Body 不变。判型在 Core ResourcePackManager::playerSkinSlim
+    //   （臂区尾 alpha 探测，探测区 u[54,56) 与 kPiecesClassic 臂条带右缘 56 互推），QML 绑定联动；
     //   自家 qrc 程序皮肤按 4px 绘制 → 恒 false（默认）。setter 触发 rebuild 重选盒区。
     Q_PROPERTY(bool slim READ slim WRITE setSlim NOTIFY slimChanged)
 

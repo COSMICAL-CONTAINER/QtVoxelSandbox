@@ -20,6 +20,7 @@
 #include <QStandardPaths> // Review #1 探针（settings.json 候选位置，同 resolveSettingsPath）
 #include <QFile>   // review-e 探针（派生缓存 _r<rev> 存在性 / 旧版清理断言）
 #include <QRegularExpression> // t813 探针（stamp / git 哈希格式正则）
+#include <QUrl>    // Review 2026-08-24 #5 探针（packFileUrl 查询串剥离断言：QUrl::toLocalFile）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
@@ -52,6 +53,8 @@ extern QString generateSheepWoolFaceFile(const QString &furPath, const QString &
 extern QString generateNightwalkerChinFile(const QString &texPath, int revision);
 // Review 2026-08-23 #1 探针：slim 皮肤布局探测器（同上 extern 直连；签名纯 QImage 无需入头）。
 extern bool probeSlimSkinLayout(const QImage &tex);
+// Review 2026-08-24 #5 探针：pack 原文件直返 URL 构造器（?r=<revision> cache-bust；同上 extern 直连）。
+extern QString packFileUrl(const QString &localPath, int revision);
 
 namespace {
 
@@ -5241,6 +5244,14 @@ int main(int argc, char *argv[])
             qInfo().noquote() << "  [#1 diag] degenerate 32x16 not conservative-classic";
             ok = false;
         }
+        // Review 2026-08-24 低危③：高度下界守卫——64×16 残图（宽达标但探测行区间 v[20,32) 整段在画布外）
+        //   旧实现循环零次执行 → 空真判 slim（与保守方向相反）；守卫后必保守 classic。
+        QImage stubR24(64, 16, QImage::Format_ARGB32);
+        stubR24.fill(Qt::transparent);
+        if (probeSlimSkinLayout(stubR24)) {
+            qInfo().noquote() << "  [#1 diag] 64x16 stub vacuously judged slim (height floor guard missing)";
+            ok = false;
+        }
         // ② demo 包真实皮肤：settings.json resourcePack 指向的包 → 该包 entity/alex.png + steve.png；
         //   缺配置则试工程内 demo 包相对路径（exe 在 build/ → ../docs）。两候选都 miss → 记 note 跳过
         //   （①仍守布局语义；不在无包机器上假 FAIL）。
@@ -5309,8 +5320,8 @@ int main(int argc, char *argv[])
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| review#1 slim-skin probe region: synthetic MC-layout arm strips classify "
-                             "classic(end u=56)/slim(end u=54) at base 64x32 + HD 2x, degenerate 32x16 "
-                             "conservative-classic"
+                             "classic(end u=56)/slim(end u=54) at base 64x32 + HD 2x, degenerate 32x16 + "
+                             "64x16 stub (probe rows off-canvas) conservative-classic"
                           << (realChecked
                                   ? ", demo pack alex->slim / steve->classic (real PIL-verified layouts)"
                                   : "");
@@ -6110,6 +6121,147 @@ int main(int argc, char *argv[])
                              "sheep death (unsheared control false), mobhead/sheep-woolface derived cache "
                              "filenames embed _r<revision> with per-revision stale cleanup incl. legacy "
                              "unsuffixed names (QML clamp #33 / leg covers #34 = manual visual check)";
+    }
+
+    // ── Review 2026-08-24 #4/#5 apply() 重建序 + pack 直返 URL cache-bust 探针 ──
+    // #4 背景：mobhead 头像是构建期预生成（ensureBuiltLocked 以 s.revision 落盘 _r<rev>.png）；启动后首次
+    //   构建走懒查询路径（revision=0、不自增）。旧序 apply() = ensureBuiltLocked()（用旧 rev 生成）→
+    //   ++s.revision：第一次切包重建仍写 _r0.png 同名覆盖 → mobHeadIconSource 缓存命中直返同一 URL →
+    //   QML Image 不重载（图鉴旧包头像；第二次切包写 _r1.png 才自愈）。修法 = ++s.revision 移到重建之前。
+    // #5 背景：五族 pack 原文件直返（playerSkinSource 64×32 族 / entitySource / mobTextureSource /
+    //   effectIconSource / paintingSource）不带 revision——同路径原地换包内容 + apply() 重解析下 URL 不变
+    //   → QML 按 URL 缓存继续用旧像素（Review 2026-08-23 #12 皮肤族同款病，当时只修了皮肤一族）。修法 =
+    //   packFileUrl(path, revision) 统一挂 ?r= 查询串。
+    // 锁法：apply()/五族查询都持进程全局 BuiltState（读宿主机 settings/pack，不可密闭实例化——t777/t779
+    //   先例），三层代替：
+    //   ① #4 密闭 rig 时序模拟：懒构建(rev0) → 首次切包重建(bump 后 rev1) → 两代 URL 必不同（同 URL =
+    //     QML 按 URL 缓存直返旧像素 = #4 病征本体；任意机器可跑）。
+    //   ② 源序钉：直读 resourcepackmanager.cpp（滤 // 注释行后按函数切片）——apply() 体内 "++s.revision"
+    //     必须先于 "ensureBuiltLocked()"（把 ++ 挪回重建之后在文本序上即时 FAIL）；五个查询函数体内必经
+    //     packFileUrl（防后续再加「裸 file:/// 直返 pack 原文件」的新路径漏 cache-bust）。源文件不可读
+    //     （无源部署）→ 记 note 跳过②（①③仍跑，不在无源机器上假 FAIL）。
+    //   ③ #5 纯函数契约：查询串存在 / 随 revision 变 / QUrl::toLocalFile 剥离查询串（mobTextureSource
+    //     羊/夜行者分支拿命中 URL 取 localFile 喂合成器靠这条——查询串不得污染文件寻址）。
+    {
+        bool ok = true;
+        // ① #4 时序模拟（pig rig 子目录布局，同 review-e (c) 模式）。
+        QDir dR24(QDir::temp().absoluteFilePath("review24_45_probe"));
+        dR24.removeRecursively();
+        dR24.mkpath(".");
+        QDir(dR24.absoluteFilePath("pig")).mkpath(".");
+        QImage pR24(64, 32, QImage::Format_ARGB32);
+        pR24.fill(QColor(0xf0, 0xa0, 0xa8));
+        if (!pR24.save(dR24.absoluteFilePath("pig/pig.png"), "PNG")) {
+            qInfo().noquote() << "  [r24#4 diag] failed to write temp rig PNG";
+            ok = false;
+        } else {
+            const QString lazyUrl = generateMobHeadIconFor(1, dR24.absolutePath(), 0);  // 启动懒构建（rev0）
+            const QString applyUrl = generateMobHeadIconFor(1, dR24.absolutePath(), 1); // 首次切包重建（bump 后 rev1）
+            if (lazyUrl.isEmpty() || applyUrl.isEmpty() || lazyUrl == applyUrl
+                    || !lazyUrl.contains(QStringLiteral("_r0.png"))
+                    || !applyUrl.contains(QStringLiteral("_r1.png"))) {
+                qInfo().noquote() << "  [r24#4 diag] lazy/apply generation URL pair: lazy" << lazyUrl
+                                  << "apply" << applyUrl;
+                ok = false;
+            }
+        }
+        // ③ #5 纯函数契约。
+        const QString pu1 = packFileUrl(QStringLiteral("E:/probe/pack/pig.png"), 7);
+        const QString pu2 = packFileUrl(QStringLiteral("E:/probe/pack/pig.png"), 8);
+        if (!pu1.startsWith(QStringLiteral("file:///")) || !pu1.endsWith(QStringLiteral("?r=7"))
+                || pu1 == pu2
+                || QUrl(pu1).toLocalFile() != QStringLiteral("E:/probe/pack/pig.png")) {
+            qInfo().noquote() << "  [r24#5 diag] packFileUrl contract: pu1" << pu1 << "pu2" << pu2
+                              << "localFile" << QUrl(pu1).toLocalFile();
+            ok = false;
+        }
+        // ② 源序钉：源文件定位（exe 在 build/ → ../src；嵌套一层再 ../../ 兜底）。
+        QString rpmSrcPath;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString candidates[2] = {
+                QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                        QStringLiteral("src/Core/resourcepackmanager.cpp")),
+                QDir(exeDir + QStringLiteral("/../..")).absoluteFilePath(
+                        QStringLiteral("src/Core/resourcepackmanager.cpp")),
+            };
+            for (const QString &c : candidates) {
+                if (QFile::exists(c)) { rpmSrcPath = c; break; }
+            }
+        }
+        bool srcChecked = false;
+        if (rpmSrcPath.isEmpty()) {
+            qInfo().noquote() << "  [r24 note] resourcepackmanager.cpp not found near exe - source-order "
+                                 "assertions (apply bump-before-rebuild / five-family packFileUrl) skipped "
+                                 "(sealed-rig + pure-contract parts still ran)";
+        } else {
+            QFile srcF(rpmSrcPath);
+            if (!srcF.open(QIODevice::ReadOnly)) {
+                ok = false;
+                qInfo().noquote() << "  [r24 diag] failed to open source" << rpmSrcPath;
+            } else {
+                srcChecked = true;
+                // 滤 // 注释行（探测目标是语句文本序，注释里的标识符会干扰 indexOf；本文件注释全为行注释）。
+                QString codeText;
+                const QString rawText = QString::fromUtf8(srcF.readAll());
+                for (const QString &line : rawText.split(QLatin1Char('\n'))) {
+                    if (line.trimmed().startsWith(QLatin1String("//")))
+                        continue;
+                    codeText += line;
+                    codeText += QLatin1Char('\n');
+                }
+                // 函数体切片：从函数头到下一个列 0 闭括号（本文件成员函数体无列 0 嵌套闭括号）。
+                const auto funcBody = [&codeText](const QString &header, QString *out) -> bool {
+                    const int h = codeText.indexOf(header);
+                    if (h < 0)
+                        return false;
+                    const int end = codeText.indexOf(QStringLiteral("\n}"), h);
+                    *out = codeText.mid(h, end < 0 ? 6000 : int(end) - h);
+                    return true;
+                };
+                // #4：apply() 体内 ++s.revision 先于 ensureBuiltLocked()。
+                QString applyBody;
+                if (!funcBody(QStringLiteral("ResourcePackManager::apply()"), &applyBody)) {
+                    ok = false;
+                    qInfo().noquote() << "  [r24#4 diag] apply() body not found in source";
+                } else {
+                    const int bump = applyBody.indexOf(QStringLiteral("++s.revision"));
+                    const int build = applyBody.indexOf(QStringLiteral("ensureBuiltLocked"));
+                    if (bump < 0 || build < 0 || bump > build) {
+                        ok = false;
+                        qInfo().noquote() << "  [r24#4 diag] apply() order: bumpIdx" << bump
+                                          << "rebuildIdx" << build
+                                          << "(++s.revision must precede ensureBuiltLocked)";
+                    }
+                }
+                // #5：五族查询函数体内必经 packFileUrl。
+                const char *families[5] = {
+                    "ResourcePackManager::playerSkinSource(",
+                    "ResourcePackManager::entitySource(",
+                    "ResourcePackManager::mobTextureSource(",
+                    "ResourcePackManager::effectIconSource(",
+                    "ResourcePackManager::paintingSource(",
+                };
+                for (const char *fam : families) {
+                    QString body;
+                    if (!funcBody(QString::fromLatin1(fam), &body)
+                            || !body.contains(QStringLiteral("packFileUrl("))) {
+                        ok = false;
+                        qInfo().noquote() << "  [r24#5 diag] family function missing packFileUrl direct-return"
+                                          << fam;
+                    }
+                }
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review24 #4/#5 pack cache-bust timing: sealed pig rig lazy(rev0) vs first-apply "
+                             "rebuild(rev1) mobhead URLs differ (same URL = QML URL-cache stale), packFileUrl "
+                             "appends ?r=<rev> that changes with revision and strips from QUrl::toLocalFile"
+                          << (srcChecked
+                                  ? ", source pin: apply() bumps revision BEFORE ensureBuiltLocked() rebuild "
+                                    "+ all five direct-return families route through packFileUrl"
+                                  : " (source pin skipped - no source tree next to exe)");
     }
 
     // ── Review 2026-08-23 #27 余烬门熄灭钩子并入 World 写入族探针 ──
