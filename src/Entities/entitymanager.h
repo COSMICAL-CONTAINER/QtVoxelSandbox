@@ -62,6 +62,8 @@
 // 的 Repeater）只读 count/posAt/colorAt/yawAt/walkPhaseAt/headPitchAt/healthAt/...，自发渲染，绝不反向写
 // （PLAN §2 分层：呈现层只消费 Entities 数据，同 blockBroken→粒子 / spawnItem→掉落物 模式）。
 class World; // 前向声明（tick / resolvePlayerPush / aiWander 只读 World::isSolid/blockAt；完整定义在 .cpp include）
+class MinecartManager; // t811 前向声明（tickVehicleRiding 读矿车座位 / 位置；完整定义在 .cpp include）
+class BoatManager;     // t811 前向声明（tickVehicleRiding 读船座位 / 位置；完整定义在 .cpp include）
 class EntityManager : public QObject
 {
     Q_OBJECT
@@ -394,6 +396,10 @@ public:
     Q_INVOKABLE float headPitchAt(int i) const;
     // t239 mob 子类 id（t240 pig/cow/sheep；t242 据它选掉落物、t243 spawn egg 据 it 选生成类型）。越界→0。
     Q_INVOKABLE int mobTypeAt(int i) const;
+    // t811 第 i 个 mob 乘坐的矿车 / 船槽索引（-1 = 未乘；载具管理器槽位号）。骑乘期 AI 冻结 + 位置钉座位
+    //   （tickVehicleRiding）；越界 / 非 Mob → -1。矩阵探针 + QML 坐姿切换预留读口（同 moveSpeedAt 模式）。
+    Q_INVOKABLE int rideCartAt(int i) const;
+    Q_INVOKABLE int rideBoatAt(int i) const;
     // t300 第 i 只 mob 是否**已被剪羊毛**（仅 mobType==MobSheep 用；其余 mob 永远 false）。QML delegate 据它切换
     //   羊的「毛茸」外观 vs 「裸」外观（sheared=true → 裸粉色身；false → mob_sheep 贴图毛茸身）。越界 / 非 sheep → false。
     //   revision 在剪羊毛 / 重新长毛时 bump 让 QML 绑定刷新（同 hurtFlash / chasing 模式）。
@@ -764,6 +770,27 @@ public:
     QVector3D m_playerEye = QVector3D(0, 0, 0);
     QVector3D m_playerLook = QVector3D(0, 0, -1); // 默认 -Z（无输入时防零向量点积）
     bool m_playerSightValid = false;
+
+    // ── t811 生物自动乘坐矿车/船（mob ride vehicles）──
+    // 载具管理器注入（Game/Physics 层 PlayerController 每 tick 调；Game→Entities 向下依赖，同 setPlayerSight
+    //   先例）。EntityManager 据它读矿车 / 船的座位与位置（登乘扫描 + 骑乘钉位 + 双向对账）；载具管理器
+    //   **不**反向持 EntityManager 指针（跨管理器耦合单向收口在本层内，无环）。null（未注入 / 矩阵测试等
+    //   无载具场景）→ tickVehicleRiding 早退（mob 照常 AI，不乘不冻）。幂等指针写，每帧调安全。
+    void setVehicleManagers(MinecartManager *carts, BoatManager *boats);
+    // 骑乘收口 pass（C++ 直调，非 Q_INVOKABLE 同 tick 模式）：**载具物理之后**由 PlayerController 调（两处：
+    //   mob 桶 tick 后常开一次——暂停期船漂移仍钉；step() 后再补一次——mob 同帧随车，不滞后一帧）。
+    //   三段（无载具注入 / 无实体 → 早退，纯自身数据写 + 只读载具管理器，无 World 依赖）：
+    //   Pass A 座位对账：载具侧座位指向的 mob 已死 / 已释放 / 槽被复用 / 反向链断 → 清座（防幽灵乘客占座拒载）。
+    //   Pass B 骑乘钉位：rideCart/rideBoat 有效的 mob 位置钉到载具座位（矿车 = 车中心 − 车底板偏移 + halfH；
+    //     船 = 船中心 ± 右向座位偏移 + halfH，随车 / 船移动「车动它动」）；反向链断（车被挖 / clearAll /
+    //     槽复用换任）→ 自释放原地（rideX=-1，恢复 AI）——下车唯一路径 = 载具被破坏。
+    //   Pass C 登乘扫描：非骑乘活体 mob 找最近可乘载具（矿车 XZ ≤0.8 / 船 ≤1.0，垂直 ≤1.5）：矿车 1 座
+    //     （生物占 / 玩家骑均满）；船总乘员限 2（玩家 1 + 生物座，两座皆生物 = 满拒玩家上——玩家侧
+    //     tryMount 守卫）。登乘 = 写双向链 + 停 walkPhase（moveSpeed 清 0，姿态锁定）。
+    void tickVehicleRiding();
+    // t811 载具管理器（setVehicleManagers 注入；null = 无载具场景 → 骑乘收口全跳过）。
+    MinecartManager *m_cartMgr = nullptr;
+    BoatManager *m_boatMgr = nullptr;
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
@@ -1233,6 +1260,17 @@ private:
         float windupTimer = 0.0f;     // 瞬移背后后的攻击蓄力（秒；达 kNightwalkerWindup 出重拳）
         float teleportCooldown = 0.0f;// 瞬移冷却（秒；>0 不可 dodge，防 spam）
         float waterDamageAccum = 0.0f;// 怕水扣血累积（秒；接触水时累加，每 kNightwalkerWaterDamageTick 扣 1HP）
+        // t811 载具骑乘态（仅 kind==Mob 用；其余实体留默认 -1 不触发）——生物自动乘坐矿车/船：
+        //   rideCart >= 0 = 正乘矿车（值 = MinecartManager 槽索引）；rideBoat >= 0 = 正乘船（值 = BoatManager
+        //   槽索引），二者互斥（登乘入口清对方）。载具侧持反向链（Cart.mobPassenger / Boat.mobPassenger[2]），
+        //   双向对账（tickVehicleRiding Pass A/B）：任一侧失效（mob 死 / 槽复用 / 车被挖）→ 解除骑乘。
+        //   骑乘期 tick Mob 分支 AI / 物理 / 环境判定全冻结（位置钉载具座位），掉血 / 死亡照常（dead 走
+        //   死亡分支 → 尸体 / 掉落留在载具处）；下车唯一路径 = 载具被破坏（对账自释放原地，恢复 AI）。
+        //   rideBoatSeat = 船上座位号（0/1，登乘时分配首个空座；仅 rideBoat>=0 时读）。DMI 兜底（槽复用 /
+        //   新实体默认 -1/0，同 spawnSerial 模式）；放 struct 末尾区保既有聚合初始化不错位（t256 元教训）。
+        int rideCart = -1;     // 乘坐的矿车槽索引（-1 = 未乘；仅 Mob 用）
+        int rideBoat = -1;     // 乘坐的船槽索引（-1 = 未乘；仅 Mob 用）
+        int rideBoatSeat = 0;  // 船座位号 0/1（仅 rideBoat>=0 时读；登乘时分配）
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。

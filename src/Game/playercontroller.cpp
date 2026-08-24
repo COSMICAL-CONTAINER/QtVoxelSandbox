@@ -793,8 +793,15 @@ void PlayerController::tickImpl()
         // 逐帧喂目光（常开：菜单/暂停时玩家仍“在”场景，夜行者瞪视计时不受捕获态门控 —— 眼位/目光
         //   position()/lookDirection() 只读世界定位，无写副作用，常开安全，同 playerPos 下发 tick 语义）。
         m_entityManager->setPlayerSight(position(), lookDirection());
+        // t811 载具管理器注入（mob 自动乘坐矿车/船）：tickVehicleRiding 登乘/钉位/对账读它（Game→Entities
+        //   向下，同 setPlayerSight 先例；幂等指针写）。无载具场景传 null 同样安全（tickVehicleRiding 早退）。
+        m_entityManager->setVehicleManagers(m_minecartManager, m_boatManager);
         m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival);
     }
+    // t811 骑乘收口第 1 处（mob 桶内、tick 后、常开）：暂停 / 菜单期 step() 不跑（车不推进），但
+    //   BoatManager::tick 常开（船浮水 / 动量滑行）→ 乘船 mob 须在此钉位才不与漂移船视觉脱离（世界模拟
+    //   连续性约定）。第 2 处在 step() 后（profPhys 内）补钉 —— 见该处注释。
+    if (m_entityManager) m_entityManager->tickVehicleRiding();
     // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见 EntityManager::tickHostileLife 头注释）。独立于玩家
     //   捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续；同 entityManager.tick）。
     //   skyLight 取自 m_worldClock（Q_PROPERTY 注入；[0,1] 昼夜乘子）。m_worldClock=null → 跳过（无昼夜 → 无 spawn）。
@@ -861,6 +868,11 @@ void PlayerController::tickImpl()
     // 完玩家与世界碰撞后调 —— 用已贴墙的玩家 AABB 做圆-vs-AABB 推解，把穿透量传给实体（swept 碰撞解析
     // 玩家位移传给实体，spec）。m_height 用当前 AABB 高（蹲下变矮 → 推动区间随之收，与碰撞同源）。
     if (m_entityManager) m_entityManager->resolvePlayerPush(m_pos, kHalfW, m_height, m_world);
+    // t811 骑乘收口第 2 处（step() 后补钉）：step 内矿车 / 船骑乘物理（tickRiddenCart / tickPushedCarts /
+    //   resolveCartCollisions / tickRiddenBoat）已推进完载具位置，此刻再钉一次 → 乘员同帧随车（不滞后一
+    //   帧；第 1 处（mob 桶）钉的是 step 前位置，对刚被推进的车差一帧 → 此处覆盖钉到最新位）。登乘扫描 /
+    //   对账幂等，双调安全。
+    if (m_entityManager) m_entityManager->tickVehicleRiding();
     } // /profPhys
     { FrameProfiler::Scope profRay("ray");
     updateRaycast();   // 沿视线 DDA 选体 → 更新线框命中态
