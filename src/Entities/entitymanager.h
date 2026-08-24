@@ -330,12 +330,15 @@ public:
     // t758 暗渊珠投射物（玩家右键 EnderPearlId 掷出；机制等价 MC 1.0 ender pearl —— 右键掷出受重力抛物飞行，
     //   落点把掷出者传送过去 + 传送附带伤害）：在 origin 处生成携带 3D 速度 vel（blocks/s，含 vy 抛物）的小珠
     //   实体。kind=EnderPearl、pushable=false（玩家走碰不推）、halfW/halfH=kEnderPearlHalfDim（深绿小珠视觉 +
-    //   碰撞最小；命中判定走点格不读它）。tick 内 EnderPearl 分支：重力改 vy（抛物，同雪球）+ 速度位移 +
-    //   **方块命中即结算**（emit enderPearlLanded(命中格) → 呈现层路由 PlayerController.applyEnderPearlTeleport
-    //   扫安全落点瞬移玩家 + 扣传送伤害）+ 移除；寿命到期视作「悬空落点」同样结算（B11 向下找支撑传送，防极端
-    //   上抛珍珠永久滞留）；越界（世界外 / 虚空）静默移除**不传送**（防传到不可玩位置）。**不做 mob 命中**（取舍：
-    //   珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送掷者，伤害分支 v1 不做）。vx/vy/vz 复用 3D
-    //   速度（不走 Mob 击退衰减分支，无冲突）。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
+    //   碰撞最小；命中判定走点格不读它）。tick 内 EnderPearl 分支：轻重力改 vy（t835④ kEnderPearlGravity=12
+    //   抛物）+ 速度位移 + **方块接触即结算**（t835① 判据=本格任意方块实存（铁轨/火把/压力板等无碰撞盒
+    //   非整格同样算接触）→ emit enderPearlLanded(命中格) → 呈现层路由 PlayerController.applyEnderPearlTeleport
+    //   扫安全落点瞬移玩家 + 扣传送伤害）+ 移除；t835② 入水/岩浆改缓沉（终速 kEnderPearlWaterSink/LavaSink +
+    //   水平阻尼），沉到液体底接触底面才结算；寿命到期视作「悬空落点」同样结算（B11 向下找支撑传送，防极端
+    //   上抛珍珠永久滞留；液体缓沉期暂停倒计）；越界（世界外 / 虚空）静默移除**不传送**（t835③ 防传到不可玩
+    //   位置）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送掷者，
+    //   伤害分支 v1 不做）。vx/vy/vz 复用 3D 速度（不走 Mob 击退衰减分支，无冲突）。达 kCap → 跳过 + 告警
+    //   （防溢出）。返槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnEnderPearl(const QVector3D &origin, const QVector3D &vel);
     // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
@@ -1984,13 +1987,28 @@ private:
     // t758 暗渊珠投射物常量（机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行，落点把掷出者传送到落点 +
     //   传送附带伤害）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
     //   - kEnderPearlLifetime：最长飞行秒（寿命兜底「命中」—— 悬空到期视作落点结算传送，落点列向下找支撑，
-    //     防极端上抛珍珠永久滞留堆积）。取 8（> 满初速 12 的 45° 全弧滞空 ~1.7s，正常抛掷方块落点先到，
-    //     兜底不抢戏）。
+    //     防极端上抛珍珠永久滞留堆积）。取 8（> t835④ 新物理下满初速 24 的 45° 全弧滞空 ~2.9s，正常抛掷
+    //     方块落点先到，兜底不抢戏）。t835②：液体缓沉期**暂停倒计**（深水柱缓沉可超 8s，防到期把掷出者
+    //     半水传送——到期语义是「悬空兜底」，液体里本就在缓沉有落点，不属于悬空）。
     //   - kEnderPearlHalfDim：半宽 / 半高（blocks；深绿小珠视觉 + 碰撞最小；命中判定走点格不读它，同火球）。
+    //   - t835④ kEnderPearlGravity：珠专属轻重力 12（blocks/s²；机制等价 MC 1.0 投掷物重力 0.03/tick²=12
+    //     vs 玩家/世界 kGravity=28 —— MC 投掷物本就比玩家轻重力 → 弧平远）。与 Game 层初速 12→24（见
+    //     kPlayerPearlSpeed）双调：平抛 ~10 格 / 45° 满抛 ~48 格，对齐 MC 珍珠 ~30-50 格投掷距离；旧共用
+    //     kGravity=28 时 45° 满抛仅 ~5 格（「珍珠扔不远」的物理面，t835④「抛距加长」）。
+    //   - t835② kEnderPearlWaterSink / kEnderPearlLavaSink：液体缓沉终速（blocks/s，向下为负取绝对值；
+    //     机制等价 MC 投掷物入液后受强阻尼缓沉）。入水/岩浆不立即传送：重力压 vy 到 −sink 终速缓沉，沉到
+    //     液体底（底面方块接触）才结算传送。岩浆更粘 → 终速更慢（同向 MC 岩浆阻力 > 水）。
+    //   - t835② kEnderPearlLiquidDrag：液体水平阻力率（1/s；入液后水平速度指数衰减 ~0.2s 基本停 →
+    //     「滑入几格后竖直缓沉」而非全程匀速滑入）。
     //   传送伤害常量在 Game 层（PlayerController::kEnderPearlTpDamage —— 伤害发射属 Game/Physics，单一权威
-    //   置于消费点近旁；初速常量在 Game 层掷出分支本地（kPlayerPearlSpeed，同雪球先例））。
-    static constexpr float kEnderPearlLifetime   = 8.0f;  // 暗渊珠最长飞行（秒；寿命兜底命中传送）
+    //   置于消费点近旁；初速/疾跑系数常量在 Game 层掷出分支本地（kPlayerPearlSpeed/kPearlSprintFactor，
+    //   同雪球先例））。
+    static constexpr float kEnderPearlLifetime   = 8.0f;  // 暗渊珠最长飞行（秒；寿命兜底命中传送；液体缓沉期暂停）
     static constexpr float kEnderPearlHalfDim    = 0.14f; // 暗渊珠半宽/半高（blocks）
+    static constexpr float kEnderPearlGravity    = 12.0f; // t835④ 珠专属轻重力（blocks/s²；MC 投掷物 12 vs 世界 28）
+    static constexpr float kEnderPearlWaterSink  = 1.5f;  // t835② 水中缓沉终速（blocks/s）
+    static constexpr float kEnderPearlLavaSink   = 0.7f;  // t835② 岩浆缓沉终速（blocks/s；更粘更慢）
+    static constexpr float kEnderPearlLiquidDrag = 5.0f;  // t835② 液体水平阻力率（1/s；~0.2s 水平速度基本停）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）

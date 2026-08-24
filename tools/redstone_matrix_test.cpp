@@ -9348,6 +9348,182 @@ int main(int argc, char *argv[])
                              "(burn loop now routes through recheckAttachmentsAfterClear)";
     }
 
+    // ── P-t835 暗渊珠五项修探针（Entities 层 EntityManager 直编 + Game 层 applyEnderPearlTeleport 直调，
+    //    同 t774 / t852 先例；独立小世界 96×40×96 不动主世界 rig——96 高世界地形+树冠最高 ~81，y≥84 天空
+    //    带免凿，rig 地板摆 y=83 顶面 84）：
+    //    (a) ①任意接触必传送：铁轨 / 火把（无碰撞盒非整格）+ 木压力板（薄碰撞盒）三柱，珠垂直落上 →
+    //        enderPearlLanded 落点 = **非整格自身格**（旧 collisionAABBsAt 点测穿过它落到下方支撑格 = 根因）；
+    //        Game 侧 applyEnderPearlTeleport：轨/火把格 → 玩家立**其格内**（y=84，穿模贴脚同 MC）；板格 →
+    //        立其顶（y=85，薄盒是碰撞支撑）；Survival 传送自伤恰发一次 (5, EnderPearlTp)。
+    //    (b) ②液体缓沉：水柱 5 深 / 岩浆柱 4 深——入液不即时传送（40 tick 仍存活且已入液），稳态下沉速度带
+    //        水 ~1.5 b/s / 岩浆 ~0.7 b/s（岩浆明显更慢），最终沉到液体底接触底面格才传送（落点=底面格，
+    //        Game 侧从底面格传送 → 玩家立于水格 y=84——旧 isSolid 把水当实心全列 abort 的回归面）。
+    //    (c) ③虚空/出界不传送：整柱清空到 y=0 的虚空列，珠一路无接触落出底部 → 移除且零 landed；
+    //        水平飞出 XZ 边界同（出界消散，MC 珍珠入虚空有去无回）。
+    //    (d) ④抛距加长：平抛 v=24（镜像 kPlayerPearlSpeed）自 6 格高 → 理论落距 24 格（t=√(2·6/12)=1s，
+    //        kEnderPearlGravity=12 轻重力直证）；45° 满抛 → ~50 格带（旧 12+重力 28 只 ~5 格）。
+    //    (e) ⑤疾跑加成：平抛 v=24 与 v=24×1.3（镜像 kPearlSprintFactor，对齐 t51 Sprint ×1.3）落距比
+    //        ∈[1.27,1.33]；镜像常量值锁（Game 层掷出分支本地 constexpr 探针不可达，P18 镜像同步模式）。
+    {
+        // 镜像常量（与实现侧私有/函数本地常量文档值同步，改值须两处同步；P18 镜像模式——Entities 层
+        //   kEnderPearlGravity / Game 层掷珠分支 kPlayerPearlSpeed/kPearlSprintFactor 均探针不可达）：
+        constexpr float kMirrorPearlGravity = 12.0f;       // EntityManager::kEnderPearlGravity（t835④ 珠轻重力；MC 投掷物 12 vs 世界 28）
+        constexpr float kMirrorPearlSpeed = 24.0f;        // kPlayerPearlSpeed（t835④ 12→24；MC 投掷物 1.5 b/t=30 量级）
+        constexpr float kMirrorPearlSprintFactor = 1.3f;  // kPearlSprintFactor（t835⑤ 疾跑初速系数；t51 Sprint ×1.3 同源）
+        Q_UNUSED(kMirrorPearlGravity); // 带断言（平抛 6 格落差 t=√(2·6/12)=1s → 落距=初速）即其数值锁；显式引用免 -Wunused
+        World wP;
+        wP.setWidth(96); wP.setDepth(40); wP.setHeight(96); wP.setSeed(77);
+        EntityManager ents;
+        int landedCount = 0; int lastLx = -1, lastLy = -1, lastLz = -1;
+        QObject::connect(&ents, &EntityManager::enderPearlLanded, &ents,
+                         [&](int x, int y, int z) { ++landedCount; lastLx = x; lastLy = y; lastLz = z; });
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        const auto tickPearls = [&](int n) { for (int i = 0; i < n; ++i) ents.tick(0.016f, &wP, farListener, 0.3f, 1.8f, false); };
+        const int floorY = 83; // rig 地板格（顶面 y=84）；上方 y≥84 全空带
+        bool ok = true;
+
+        // ---- (a) ①非整格接触：轨 / 火把 / 木压力板三柱 ----
+        struct DecorRig { int x; quint8 id; float tpFootY; const char *name; };
+        const DecorRig decors[] = {
+            { 6, BR::Rail,               84.0f, "rail" },     // 无碰撞盒 → 立格内 y=84（穿模贴脚同 MC）
+            { 9, BR::Torch,              84.0f, "torch" },    // 同上
+            { 12, BR::WoodPressurePlate, 85.0f, "plate" },    // 薄碰撞盒是支撑 → 立其顶 y=85
+        };
+        const int az = 6;
+        bool okA = true;
+        for (const DecorRig &d : decors) {
+            wP.setBlock(d.x, floorY, az, BR::Stone, 0);   // 支撑地板
+            wP.setBlock(d.x, floorY + 1, az, d.id, 0);    // 非整格本体（轨/火把贴地、板贴支撑面）
+            const int before = landedCount;
+            const int pearl = ents.spawnEnderPearl(QVector3D(d.x + 0.5f, 88.0f, az + 0.5f), QVector3D(0, 0, 0));
+            tickPearls(80); // 88→入格 ~45 tick 内必中
+            // Entities 半面：落点 = 非整格自身格（floorY+1）——旧判据穿过它落进下方支撑格（floorY）。
+            if (landedCount != before + 1 || lastLx != d.x || lastLy != floorY + 1 || lastLz != az) {
+                okA = false;
+                qInfo().noquote() << "  t835(a) diag:" << d.name << "landed" << landedCount - before
+                                  << "at" << lastLx << lastLy << lastLz << "(expect 1 at" << d.x << floorY + 1 << az << ")";
+            }
+            Q_UNUSED(pearl);
+        }
+        // Game 半面：applyEnderPearlTeleport 直调（Survival）——轨/火把立格内、板立其顶 + 自伤恰一次 (5, EnderPearlTp)。
+        PlayerController pc;
+        pc.setWorld(&wP);
+        pc.setMode(PlayerController::Survival);
+        int dmgHits = 0, dmgHp = -1, dmgCause = -1;
+        QObject::connect(&pc, &PlayerController::fallDamageTaken, &pc,
+                         [&](int hp, int cause) { ++dmgHits; dmgHp = hp; dmgCause = cause; });
+        for (const DecorRig &d : decors) {
+            pc.applyEnderPearlTeleport(d.x, floorY + 1, az); // 落点 = 珠接触格（ Entities 半面同参）
+            const float gotY = pc.feetPosition().y();
+            if (qAbs(gotY - d.tpFootY) > 0.01f) {
+                okA = false;
+                qInfo().noquote() << "  t835(a) tp diag:" << d.name << "footY" << gotY << "(expect" << d.tpFootY << ")";
+            }
+        }
+        okA = okA && dmgHits == 3 && dmgHp == 5 && dmgCause == int(PlayerState::EnderPearlTp);
+        ok = ok && okA;
+
+        // ---- (b) ②液体缓沉：水柱（5 深）/ 岩浆柱（4 深）----
+        const int wz = 10, lz2 = 14; // 两柱 z 錯開
+        for (int y = floorY + 1; y <= floorY + 5; ++y) wP.setBlock(20, y, wz, BR::Water, 0);
+        wP.setBlock(20, floorY, wz, BR::Stone, 0);
+        for (int y = floorY + 1; y <= floorY + 4; ++y) wP.setBlock(24, y, lz2, BR::Lava, 0);
+        wP.setBlock(24, floorY, lz2, BR::Stone, 0);
+        // 水：40 tick 仍存活（不即时传送）且已入液；稳态带 |dy|/tick ∈ [0.019,0.027]（1.5 b/s·dt±余量）；沉底传送。
+        const int beforeW = landedCount;
+        const int pearlW = ents.spawnEnderPearl(QVector3D(20.5f, 91.0f, wz + 0.5f), QVector3D(0, 0, 0));
+        tickPearls(40);
+        const float yW40 = ents.posAt(pearlW).y();
+        bool okW = ents.aliveAt(pearlW) && yW40 < 89.0f && yW40 > 84.0f; // 已入液未到底未传送
+        float sinkW = 0.0f;
+        for (int t = 0; t < 100 && ents.aliveAt(pearlW); ++t) {
+            const float y0 = ents.posAt(pearlW).y();
+            tickPearls(1);
+            sinkW = y0 - ents.posAt(pearlW).y(); // 末次采样（稳态：远离入液减速段与底面）
+        }
+        okW = okW && sinkW > 0.019f && sinkW < 0.027f;    // 稳态缓沉 ~1.5 b/s
+        tickPearls(300);                                  // 沉底 + 传送余量（5 格 @1.5 b/s ≈ 250 tick 总）
+        okW = okW && !ents.aliveAt(pearlW) && landedCount == beforeW + 1
+                 && lastLx == 20 && lastLy == floorY && lastLz == wz; // 落点 = 液体底面格
+        // Game 半面：从水底格传送 → 玩家立水格 y=84（水无碰撞可立入；旧 isSolid 把水当实心全列 abort）。
+        pc.applyEnderPearlTeleport(20, floorY, wz);
+        okW = okW && qAbs(pc.feetPosition().y() - float(floorY + 1)) < 0.01f
+                 && qAbs(pc.feetPosition().x() - 20.5f) < 0.01f;
+        // 岩浆：同构更慢（0.7 b/s 稳态带更窄）+ 沉底传送（①岩浆接触同样必传送，传送不点燃——MC 1.0 语义）。
+        const int beforeL = landedCount;
+        const int pearlL = ents.spawnEnderPearl(QVector3D(24.5f, 90.0f, lz2 + 0.5f), QVector3D(0, 0, 0));
+        tickPearls(80); // 入液 + 减速收敛（vy 4.9→0.7 需 ~22 tick）
+        bool okL = ents.aliveAt(pearlL);
+        float sinkL = 0.0f;
+        for (int t = 0; t < 100 && ents.aliveAt(pearlL); ++t) {
+            const float y0 = ents.posAt(pearlL).y();
+            tickPearls(1);
+            sinkL = y0 - ents.posAt(pearlL).y();
+        }
+        okL = okL && sinkL > 0.008f && sinkL < 0.014f     // 稳态缓沉 ~0.7 b/s
+                 && sinkW > sinkL + 0.004f;               // 水明显快于岩浆（1.5 vs 0.7）
+        tickPearls(500);                                  // 4 格 @0.7 b/s ≈ 357 tick + 余量
+        okL = okL && !ents.aliveAt(pearlL) && landedCount == beforeL + 1
+                 && lastLx == 24 && lastLy == floorY && lastLz == lz2;
+        ok = ok && okW && okL;
+
+        // ---- (c) ③虚空 / 出界不传送 ----
+        const int vz = 18;
+        for (int y = 0; y < 96; ++y) wP.setBlock(30, y, vz, BR::Air, 0); // 整柱清到 y=0（虚空列）
+        const int beforeV = landedCount;
+        const int pearlV = ents.spawnEnderPearl(QVector3D(30.5f, 90.0f, vz + 0.5f), QVector3D(0, 0, 0));
+        tickPearls(300); // 90→0 自由落 ~242 tick，越 y<0 出界移除
+        bool okV = !ents.aliveAt(pearlV) && landedCount == beforeV; // 移除且零传送
+        const int pearlX = ents.spawnEnderPearl(QVector3D(94.5f, 90.0f, vz + 0.5f), QVector3D(30.0f, 0, 0));
+        tickPearls(10);  // ~0.5 格/tick → 3 tick 内飞出 x>96 出界移除
+        okV = okV && !ents.aliveAt(pearlX) && landedCount == beforeV;
+        ok = ok && okV;
+
+        // ---- (d) ④抛距 + (e) ⑤疾跑比（平抛走廊：地板 x=8..70 @ z=26，顶面 y=84；自 y=90 平抛落距 6 格落差）----
+        const int rz = 26;
+        for (int x = 4; x <= 72; ++x) wP.setBlock(x, floorY, rz, BR::Stone, 0);
+        struct RangeShot { float speed; };
+        const RangeShot shots[] = { { kMirrorPearlSpeed }, { kMirrorPearlSpeed * kMirrorPearlSprintFactor } };
+        float rangeCells[2] = { -1.0f, -1.0f };
+        for (int s = 0; s < 2; ++s) {
+            const int before = landedCount;
+            const int pearl = ents.spawnEnderPearl(QVector3D(8.5f, 90.0f, rz + 0.5f),
+                                                   QVector3D(shots[s].speed, 0, 0));
+            tickPearls(120); // 6 格落差 t=1s=62 tick，余量足
+            if (!ents.aliveAt(pearl) && landedCount == before + 1)
+                rangeCells[s] = float(lastLx - 8);
+        }
+        // ④：v=24 落距 ~24 格（理论 24.0，dt 步进/格量化余量 ±2.5；旧物理 12+重力 28 仅 ~4.5 格 → 带断言分得开）。
+        bool okD = rangeCells[0] >= 21.5f && rangeCells[0] <= 26.5f;
+        // ⑤：疾跑 ×1.3 → 落距比 ∈[1.27,1.33]（同落差同重力 → 落距比 = 初速比；格量化 ±1 格已含在带内）。
+        bool okE = rangeCells[1] >= 27.0f && rangeCells[1] <= 34.0f
+                && rangeCells[0] > 0.0f
+                && rangeCells[1] / rangeCells[0] >= 1.27f && rangeCells[1] / rangeCells[0] <= 1.33f;
+        // ④补充：45° 满抛 v=24 → ~50 格带（自 y=86 上升弧越世界顶 y≥96 = 空气无碰撞照飞；旧物理只 ~5 格）。
+        const int before45 = landedCount;
+        const int pearl45 = ents.spawnEnderPearl(QVector3D(8.5f, 86.0f, rz + 0.5f),
+                                                 QVector3D(24.0f * 0.7071f, 24.0f * 0.7071f, 0));
+        tickPearls(260); // 满弧 ~2.9s ≈ 183 tick + 余量
+        okD = okD && !ents.aliveAt(pearl45) && landedCount == before45 + 1
+                 && float(lastLx - 8) >= 35.0f && float(lastLx - 8) <= 58.0f;
+        ok = ok && okD && okE;
+        if (!ok) {
+            qInfo().noquote() << "  t835 diag: okA" << okA << "okW" << okW << "okL" << okL << "okV" << okV
+                              << "okD" << okD << "okE" << okE << "| ranges" << rangeCells[0] << rangeCells[1]
+                              << "sinkW" << sinkW << "sinkL" << sinkL << "| last landed" << lastLx << lastLy << lastLz
+                              << "| dmg" << dmgHits << dmgHp << dmgCause;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t835 ender pearl five fixes: (1) any-contact teleports - pearl lands ON rail/torch/"
+                             "plate cell itself and player stands in-cell (y=84) / on plate top (y=85); (2) water/"
+                             "lava slow-sink (1.5 / 0.7 b/s steady band) then teleport at liquid-bottom cell, "
+                             "player placed in water cell; (3) void & out-of-bounds fall removes pearl with ZERO "
+                             "teleport; (4) flat throw v=24 drops ~24 blocks (light gravity 12), 45deg ~50 blocks; "
+                             "(5) sprint 1.3x speed -> range ratio 1.27..1.33 + Survival tp self-damage (5, "
+                             "EnderPearlTp) exactly once per teleport";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
