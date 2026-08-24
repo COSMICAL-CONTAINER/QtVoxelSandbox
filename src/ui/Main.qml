@@ -9550,47 +9550,65 @@ Window {
         //   掉落物留在死亡点，玩家走回死亡点拾取（机制等价 MC 死亡掉落 + 全局出生点）。
         function onDied() {
             progress.onDeath()  // progress 统计死亡次数
-            if (window.inventoryOpen) window.inventoryOpen = false
-            if (window.craftingTableOpen) window.craftingTableOpen = false
-            if (window.furnaceOpen) window.furnaceOpen = false
-            if (window.chestOpen) window.chestOpen = false
-            if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
-            // t650：死亡也关附魔台 / 铁砧 / 发射器三面板（此前漏关——onDied 只关四旧面板）。归还顺序在
-            //   returnHeldToHotbar / dropAllItems **之前**：closeEnchantingTable / closeAnvil 内的显式同步
-            //   归还（本批加）把 A/B 输入槽物品先收回背包 → dropAllItems 统一死亡掉落（修「铁砧放着东西死亡
-            //   → 物品不随尸体掉落、面板死亡屏下滞留 → 回主菜单换世界即永久消失」漏洞链）。发射器槽内容
-            //   属方块（同箱子，不掉落），仅关面板归还光标。
-            if (window.enchantingTableOpen) window.closeEnchantingTable()
-            if (window.anvilOpen) window.closeAnvil()
-            if (window.dispenserOpen) window.closeDispenser()
-            // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。上方仅设
-            //   craftingTableOpen / inventoryOpen = false —— 面板 onVisibleChanged→returnCraftToHotbar 依赖
-            //   visible 绑定重求值（可被引擎推迟），会晚于本处 returnHeldToHotbar / dropAllItems → 材料
-            //   不随尸体掉落、掉进已重置的空背包（正是 t650 要杀的竞态）。直调幂等（槽空零迭代）。
-            window.craftingTablePanel.returnCraftToHotbar()
-            window.survivalPanel.returnCraftToHotbar()
-            window.inventoryPanel.returnCraftToHotbar()
-            // pause-menu：死亡关暂停菜单子面板（设置 / 进度 / 统计；防死亡态遗留，死亡屏 z=180 盖在其上）。
-            if (window.settingsOpen) window.settingsOpen = false
-            if (window.progressOpen) window.progressOpen = false
-            if (window.statsOpen) window.statsOpen = false
-            window.returnHeldToHotbar()
-            player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
-            // t443 死亡掉部分 XP（spec「死亡地点掉部分 XP，约 1 只怪量」）：在死亡点 spawn 1 个经验球
-            //   （量约 1 只被动 mob = 1-3 XP）。XP 清零已在 PlayerState.takeDamage 致死分支完成（Game 层规则，
-            //   先于本 onDied 触发）；此处仅 spawn 球（呈现层编排，需死亡位置 + XpOrbManager；PLAN §2 分层：
-            //   Game 层持 XP 数值 / 死亡规则，呈现层持位置 + 实体生成）。坐标同 dropAllItems 死亡格（脚底
-            //   floor），球与掉落物同处便于玩家走回拾取。机制对齐项目决策（MC 死亡掉经验，本工程简化为定量
-            //   「约 1 只被动 mob」而非 level 比例，spec 明示）。
-            const dp = player.feetPosition
-            xpOrbs.spawnOrb(Math.floor(dp.x), Math.floor(dp.y), Math.floor(dp.z),
-                            1 + Math.floor(Math.random() * 3))  // 1-3 XP（约 1 只被动 mob 量）
-            player.release()           // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
-            // t312 死亡播报：聊天栏推一条系统消息（机制等价 MC 1.0 死亡消息「<player> <death reason>」）。
-            //   文案 = 玩家名 + 空格 + playerState.deathCauseText（如「玩家 从高处坠落」）。deathCauseText 是
-            //   Q_PROPERTY（非 Q_INVOKABLE）→ 属性访问不带括号；带括号会抛 TypeError 致播报静默失败（lessons：
-            //   QML/JS 信号处理器内异常被吞、功能静默退化）。t313 死亡屏与本期聊天用同一份 Game 层权威文案。
-            window.appendChatMessage("", window.playerName + " " + playerState.deathCauseText, true)
+            // t852 死亡主链铁律：下方 try 块是**辅助段**（关面板 + 把散落各 UI 的物品收回背包，目的只是
+            //   让它们随 dropAllItems 统一掉落）——辅助段任何异常不得吞掉死亡契约本体（掉落全背包 + 清空
+            //   + 释放指针 + C++ 置 m_dead 输入闸门）。回归史（R19.13 用户报「死亡不掉落 + 背包物品都在」
+            //   定位）：t690 在此段写 `window.<面板id>`——QML id 不是 Window 对象属性 → 恒 undefined →
+            //   `undefined.returnCraftToHotbar()` 抛 TypeError（t603「window.progress 恒 undefined」同款病）
+            //   → QML 信号处理器异常被静默吞掉（t312 教训）、处理器在辅助段中断 → dropAllItems / release
+            //   从未执行 = 四症状一根因：① 背包不清不掉落（t852 本体）；② 指针锁死、须按 ESC 才能点死亡屏
+            //   按钮（t853③）；③ m_dead 未置位 → grab/setKey/placeBlock 等 t655 闸门全开，尸体还能转视角 /
+            //   走动（t853①②）。修法：面板引用改**裸 id**（同 saveAndExitToWorldList 内 708-710 已验证形态，
+            //   QML 同文件 id 直接裸名解析）+ 主链入 finally（单点 UI 异常至多丢「合成格归还」一条支线，
+            //   死亡契约恒执行——本处是「处理器异常静默退化」教训在死亡链上的结构性收口）。
+            try {
+                if (window.inventoryOpen) window.inventoryOpen = false
+                if (window.craftingTableOpen) window.craftingTableOpen = false
+                if (window.furnaceOpen) window.furnaceOpen = false
+                if (window.chestOpen) window.chestOpen = false
+                if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
+                // t650：死亡也关附魔台 / 铁砧 / 发射器三面板（此前漏关——onDied 只关四旧面板）。归还顺序在
+                //   returnHeldToHotbar / dropAllItems **之前**：closeEnchantingTable / closeAnvil 内的显式同步
+                //   归还（本批加）把 A/B 输入槽物品先收回背包 → dropAllItems 统一死亡掉落（修「铁砧放着东西死亡
+                //   → 物品不随尸体掉落、面板死亡屏下滞留 → 回主菜单换世界即永久消失」漏洞链）。发射器槽内容
+                //   属方块（同箱子，不掉落），仅关面板归还光标。
+                if (window.enchantingTableOpen) window.closeEnchantingTable()
+                if (window.anvilOpen) window.closeAnvil()
+                if (window.dispenserOpen) window.closeDispenser()
+                // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。上方仅设
+                //   craftingTableOpen / inventoryOpen = false —— 面板 onVisibleChanged→returnCraftToHotbar 依赖
+                //   visible 绑定重求值（可被引擎推迟），会晚于本处 returnHeldToHotbar / dropAllItems → 材料
+                //   不随尸体掉落、掉进已重置的空背包（正是 t650 要杀的竞态）。直调幂等（槽空零迭代）。
+                //   t852：裸 id 引用（window.<面板id> 恒 undefined → TypeError，见函数头注释）。
+                craftingTablePanel.returnCraftToHotbar()
+                survivalPanel.returnCraftToHotbar()
+                inventoryPanel.returnCraftToHotbar()
+                // pause-menu：死亡关暂停菜单子面板（设置 / 进度 / 统计；防死亡态遗留，死亡屏 z=180 盖在其上）。
+                if (window.settingsOpen) window.settingsOpen = false
+                if (window.progressOpen) window.progressOpen = false
+                if (window.statsOpen) window.statsOpen = false
+                window.returnHeldToHotbar()
+            } finally {
+                // 死亡主链（顺序敏感）：dropAllItems（掉落 + 清空 + 置 m_dead → t655 闸门生效 / 视角冻结）
+                //   与 release（释放指针 → 死亡屏按钮可直接点，t853③）是契约本体，最先执行；XP 球 / 播报
+                //   是花絮殿后（花絮自身异常不再反噬指针释放——release 先于一切花絮）。
+                player.dropAllItems()     // t175：死亡掉落整个背包到死亡点 + 清空背包
+                player.release()          // 释放指针 → 光标可见（点「立即重生 / 回主菜单」按钮）
+                // t443 死亡掉部分 XP（spec「死亡地点掉部分 XP，约 1 只怪量」）：在死亡点 spawn 1 个经验球
+                //   （量约 1 只被动 mob = 1-3 XP）。XP 清零已在 PlayerState.takeDamage 致死分支完成（Game 层规则，
+                //   先于本 onDied 触发）；此处仅 spawn 球（呈现层编排，需死亡位置 + XpOrbManager；PLAN §2 分层：
+                //   Game 层持 XP 数值 / 死亡规则，呈现层持位置 + 实体生成）。坐标同 dropAllItems 死亡格（脚底
+                //   floor），球与掉落物同处便于玩家走回拾取。机制对齐项目决策（MC 死亡掉经验，本工程简化为定量
+                //   「约 1 只被动 mob」而非 level 比例，spec 明示）。
+                const dp = player.feetPosition
+                xpOrbs.spawnOrb(Math.floor(dp.x), Math.floor(dp.y), Math.floor(dp.z),
+                                1 + Math.floor(Math.random() * 3))  // 1-3 XP（约 1 只被动 mob 量）
+                // t312 死亡播报：聊天栏推一条系统消息（机制等价 MC 1.0 死亡消息「<player> <death reason>」）。
+                //   文案 = 玩家名 + 空格 + playerState.deathCauseText（如「玩家 从高处坠落」）。deathCauseText 是
+                //   Q_PROPERTY（非 Q_INVOKABLE）→ 属性访问不带括号；带括号会抛 TypeError 致播报静默失败（lessons：
+                //   QML/JS 信号处理器内异常被吞、功能静默退化）。t313 死亡屏与本期聊天用同一份 Game 层权威文案。
+                window.appendChatMessage("", window.playerName + " " + playerState.deathCauseText, true)
+            }
         }
     }
 
@@ -10008,15 +10026,16 @@ Window {
             if (e.isAutoRepeat) return                               // 忽略自动重复（否则长按空格反复触发双击→飞行闪烁）
             // t655 死亡态输入闸门（第一道，最先判）：死亡屏期间只接受死亡屏按钮（立即重生 / 回主菜单，
             //   MouseArea 直达不受键盘层影响）+ 聊天显示（chatDisplay 死亡态 z=185 恒可见，不受键盘层管）
-            //   + **t691 放行 T / Enter（开聊天，机制等价 MC 死亡界面可看 / 发聊天）与 Esc（开暂停叠层，
-            //   死亡态暂停可见 —— 下方 chatOpen 分支的 !dead 条件同步放开）**。其余一切游戏键（E 背包 /
-            //   1-9 hotbar / Q 丢弃 / WASD / Shift / G / M / F5）在死亡态全部吞掉。
-            //   根因（用户报告）：死亡屏纯视觉叠加，E 仍能 openInventory（叠在死亡屏下）再关包时
-            //   closeInventory 内 player.grab() 把 captured 抢回来 → 尸体能走 / 能打 / takeDamage 对
-            //   dead 早退 → 无敌。键盘层拦「开不了一点」+ PlayerController.grab 的 m_dead 拒绝（C++ 兜底，
-            //   见 playercontroller.cpp）双保险。
+            //   + **t691 放行 T / Enter（开聊天，机制等价 MC 死亡界面可看 / 发聊天；下方 chatOpen 分支的
+            //   !dead 条件同步放开）**。其余一切游戏键（E 背包 / 1-9 hotbar / Q 丢弃 / WASD / Shift / G /
+            //   M / F5 / 滚轮见 WheelHandler）在死亡态全部吞掉。死亡态单一权威 = playerState.dead（Game 层
+            //   Q_PROPERTY，本闸门 / WheelHandler / pauseOverlay.visible / chatDisplay.visible 全读它）；
+            //   PlayerController.m_dead 是 C++ 物理闸门镜像（dropAllItems 置位 / respawn 复位），不进 QML。
+            //   t853④：Esc 不再放行（t691 旧「死亡态 Esc 开暂停叠层」语义退役）——死亡屏是唯一交互面，
+            //   只能点两按钮。暂停叠层 visible 本就排除 dead（!playerState.dead 条件），键盘层再显式吞掉
+            //   Esc = 双保险（防任何未来暂停路径漏判；死亡态按 ESC 至多无效）。
             if (playerState.dead && e.key !== Qt.Key_T && e.key !== Qt.Key_Return
-                    && e.key !== Qt.Key_Enter && e.key !== Qt.Key_Escape) {
+                    && e.key !== Qt.Key_Enter) {
                 e.accepted = true; return
             }
             // t312 聊天栏打开：T / Enter（playing 且非死亡态且无背包/工作台/熔炉/箱子面板开）。机制等价

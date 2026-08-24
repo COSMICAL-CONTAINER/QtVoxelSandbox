@@ -551,6 +551,11 @@ QPoint PlayerController::windowCenterGlobal() const
 void PlayerController::pollMouse()
 {
     if (!m_window) return;
+    // t853① 死亡态锁视角（纵深防御）：正常链 onDied → dropAllItems 置 m_dead + release（captured=false →
+    //   tickImpl 的 !m_captured 早 return 已跳过本函数）。本闸门兜「死亡但 captured 残留 true」的任何漏
+    //   release 路径（QML 死亡处理器异常被吞 / 未来新增死亡入口漏调 release）——尸体视角冻结，死亡屏
+    //   期间鼠标不再转镜头。同 grab() / setKey() 的 t655 m_dead 闸门族（单一镜像权威，respawn 复位）。
+    if (m_dead) return;
     const QPoint c = windowCenterGlobal();
     const QPoint p = QCursor::pos();
     const int dx = p.x() - c.x(), dy = p.y() - c.y();
