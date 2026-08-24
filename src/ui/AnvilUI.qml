@@ -1672,7 +1672,9 @@ Item {
                 }
             }
         }
-        const total = Math.round(base + 0.5 * sharp)
+        // t825 显示与实战同源：displayAttackDamage = round(EnchantRegistry::weaponAttackDamage)
+        //   （基础 + 锐锋 ×0.5/级；attackMob 同一权威函数算实战值）。
+        const total = root.hotbar.displayAttackDamage(root.hoveredItemId, e || [])
         return "+" + total + " 攻击"
     }
     Rectangle {

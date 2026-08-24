@@ -23,10 +23,11 @@
 //   弓 / 剪刀 / 钓鱼竿的专属附魔（力量 / 无限 / 经验修补 …）属另一套机制，本任务（t475）不做。
 //
 // 附魔选择（机制等价 MC 1.0 附魔台「按 offered level + 随机种子从适用池加权抽 1–3 个附魔 + 各自等级」）：
-//   selectEnchants(category, offeredLevel, seed) 给定物品类别 + 提供等级（1..30，来自 t474 书架加成）+
-//   每槽随机种子，返回 [{id, level}, ...]（已剔除互斥冲突，如锐锋 / 亡灵杀手 / 节肢克星三选一）。
-//   offeredLevel 越高 → 附魔数越多（1→3）+ 单附魔等级越高（趋近 maxLevel）。纯函数（无副作用 / 无 IO），
-//   附魔台 UI 点选项槽时调 → 把结果写入目标物品 ItemStack.enchants（Hotbar::enchantSelected）。
+//   selectEnchantsForItem(itemId, offeredLevel, seed) 给定物品 + 提供等级（1..30，来自 t474 书架加成）+
+//   每槽随机种子，返回 [{id, level}, ...]（已剔除互斥冲突，如锐锋 / 亡灵杀手 / 节肢克星三选一）。候选池按
+//   isApplicableForItem 逐物品精判（t824：镐不出亡灵杀手 / 锄不给选项）。offeredLevel 越高 → 附魔数越多
+//   （1→3）+ 单附魔等级越高（趋近 maxLevel）。纯函数（无副作用 / 无 IO），附魔台 UI 点选项槽时调 → 把结果
+//   写入目标物品 ItemStack.enchants（Hotbar::enchantSelected）。
 //
 // §4 法律 + §9：附魔名用**通用描述词**（锐锋 / 亡灵杀手 / 节肢克星 / 击退 / 燃焰 / 效率 / 精准采集 / 时运 /
 //   耐久 / 保护 / 火焰保护 / 摔落保护 / 弹射物保护 / 水上亲和）—— 非 MC 专名（sharpness / Smite / … 仅为
@@ -39,7 +40,7 @@ class EnchantRegistry
 public:
     // 物品类别（决定哪些附魔适用）。用位掩码表达「适用面」（耐久适用多类）。t615 细化适用域：
     //   - Weapon（剑）+ 斧：锐锋族三选一互斥（机制等价 MC「斧可附武器系附魔」）；击退 / 燃焰仅剑。
-    //   - Tool（镐/锄/斧/铲）：效率全适用；精准采集 = 镐·铲·斧；时运 = 镐·铲。
+    //   - Tool（镐/斧/铲）：效率全适用；精准采集 = 镐·铲·斧；时运 = 镐·铲（**锄 t824 起判 None 不可附魔**）。
     //   - Armor：保护/火焰保护/弹射物保护全护甲；摔落保护仅靴；水上亲和仅头盔；保护系四者互斥（组 2/3 见 .cpp）。
     //   - BookItem（书，t615 附魔台附书载体）：全附魔池随机（机制等价 MC enchanted book 全池）。
     //   耐久（Unbreaking）适用**全部三类 + 书**（Weapon|Tool|Armor|BookItem）。
@@ -100,7 +101,7 @@ public:
     // t615 附魔是否适用**具体物品**（据 ToolRegistry 类型 / ArmorRegistry 部位精判，非仅大类）：
     //   - 锐锋族（1/2/3）：剑 + 斧（Axe）。
     //   - 击退（4）/ 燃焰（5）：仅剑。
-    //   - 效率（6）：镐 / 锄 / 斧 / 铲。
+    //   - 效率（6）：镐 / 斧 / 铲（锄 t824 起 categoryForItem=None 不可附魔）。
     //   - 精准采集（7）：镐 / 铲 / 斧。时运（8）：镐 / 铲。
     //   - 耐久（9）：全部工具 + 全部护甲。
     //   - 保护（10）/ 火焰保护（11）/ 弹射物保护（13）：全护甲。摔落保护（12）：仅靴。水上亲和（14）：仅头盔。
@@ -120,19 +121,25 @@ public:
 
     // 物品类别（单一权威：据 item id 查 ToolRegistry / ArmorRegistry；决定哪些附魔适用）。
     //   - 护甲段（ArmorRegistry::isArmor）→ Armor。
-    //   - 工具段（ToolRegistry::isTool）→ 据 ToolDef.type：Sword→Weapon / Pickaxe·Hoe·Axe·Shovel→Tool /
+    //   - 工具段（ToolRegistry::isTool）→ 据 ToolDef.type：Sword→Weapon / Pickaxe·Axe·Shovel→Tool /
+    //     **Hoe→None（t824：锄 MC 1.0 无适用附魔 → 不可附魔——附魔台槽 0 拒入 / 铁砧书合并拒）** /
     //     Bow·Shears·FishingRod → None（本任务不做弓 / 剪刀 / 钓竿专属附魔）。
     //   - t615 书（RecipeRegistry::BookId）→ BookItem（附魔台附书载体：全池随机 → 产附魔书）。
     //   - 方块段 / 材料段（含附魔书物品本身——书不可再附）/ 越界 → None（不可附魔）。
     // 返回 Category 位值（None / Weapon / Tool / Armor / BookItem）；非位掩码叠加（单类别）。
     static int categoryForItem(int itemId);
 
-    // 附魔选择（机制等价 MC 1.0 附魔台）。纯函数：给定物品类别 + 提供等级 + 随机种子 → 返回
-    //   [{id: int, level: int}, ...]（QVariantMap list；已剔互斥冲突、已剔重复、等级钳到 maxLevel）。
-    //   offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 任意 int（每槽种子 → 同槽同 seed 同结果，
-    //   重投时 seed 变 → 选项换）。附魔数 = 1..3（offeredLevel 越高越多）；单附魔等级随 offeredLevel 趋 maxLevel。
-    //   category=None → 空 list。机制对齐 MC（加权随机 + 等级量级），非数值 1:1。
-    static QVariantList selectEnchants(int category, int offeredLevel, int seed);
+    // t824 附魔选择（按**具体物品**过滤；附魔台三档选项池单一权威）。机制等价 MC 1.0 附魔台。纯函数：
+    //   给定物品 id + 提供等级 + 随机种子 → 返回 [{id: int, level: int}, ...]（QVariantMap list；已剔互斥
+    //   冲突、已剔重复、等级钳到 maxLevel）。
+    //   候选池 = isApplicableForItem(enchantId, itemId) 逐条精判（**非旧版大类 mask 门**——旧 selectEnchants
+    //   按 Category 过滤令镐 / 铲可出亡灵杀手（mask=Weapon|Tool 含 Tool 位）、胸甲可出摔落保护、锄可出效率，
+    //   即用户报「镐子附上亡灵杀手」根因）。对齐 t763/t798 适用表：镐/铲→效率·耐久·时运·精准；斧→+锐锋族
+    //   （无时运）；剑→锐锋族·击退·燃焰·耐久；护甲按部位（靴+摔落保护 / 头盔+水上亲和）；书（BookId）→
+    //   全 14 附魔池（附书 / 战利品附魔书同入口）；锄 / 弓 / 剪刀 / 钓竿 → 空 list（不给选项）。
+    //   offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 任意 int（同槽同 seed 同结果，重投换 seed
+    //   换选项）。附魔数 = 1..3（offeredLevel 越高越多）；单附魔等级随 offeredLevel 趋 maxLevel。
+    static QVariantList selectEnchantsForItem(int itemId, int offeredLevel, int seed);
 
     // t795 附魔台书架门槛公式（书架数 → 可选档位 / 提供等级；单一权威，QML 经 Hotbar 包装调用）：
     //   - tierForBookshelves(bookshelves)：书架数 → 最高可选档位（1 档恒开；≥5 → 2 档；≥10 → 3 档）。
@@ -159,6 +166,18 @@ public:
     // 等级 → 罗马数字后缀字符串（如 level=3 → "III"；level=1 → "I"）。供 tooltip / 附魔台显示「锐锋 III」。
     //   level<=0 → 空串；level 1..5 → I/II/III/IV/V；>5 → 阿拉伯数字（防御）。
     static QString levelSuffix(int level);
+
+    // t825 手持武器攻击伤害（**显示与实战同源单一权威**）：ToolRegistry::attackDamage 基础 + 锐锋 ×0.5/级
+    //   （目标无关部分）。PlayerController::attackMob 以此为起点（再叠亡灵 / 节肢对族加成 → 暴击 ×1.5 →
+    //   下限 1）；全部 tooltip 攻击行经 Hotbar::displayAttackDamage 取整显示 round(本值)。修「附锋利后显示
+    //   仍基础值」类公式漂移：改加成系数只改这里，战斗与九处 UI 显示同步变。enchants 空指针 → 仅基础。
+    static float weaponAttackDamage(int itemId, const int *enchants);
+
+    // t826 击退附魔强度（单一权威）：strength = 1 + 3.0*level（无附魔 1.0 / I 4.0 / II 7.0）。
+    //   EntityManager::knockback 水平总位移 ≈ kKnockbackHoriz×strength/kKnockbackDrag = 1.125 格×strength
+    //   → 无附魔 ~1.1 格 / I ~4.5 格 / II ~7.9 格（MC 1.0 量级：I 明显推离 / II 飞出 ~8 格）。旧版
+    //   1+0.5*级 令 II 仅 ~2.3 格（基线 1.1 格 +50%/级）—— 与游荡抖动同量级 → 用户实测「附了没感觉」。
+    static float knockbackStrength(int level);
 
 private:
     EnchantRegistry() = delete; // 纯静态数据表，无实例。

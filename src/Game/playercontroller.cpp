@@ -1902,14 +1902,16 @@ void PlayerController::attackMob(int entityIndex)
     const int mobType = m_entityManager->mobTypeAt(entityIndex);
     // t476 武器附魔伤害加成（机制等价 MC 1.0 剑附魔：锐锋通用 + 亡灵 / 节肢对族）。在暴击乘算**之前**叠入 base，
     //   即暴击对「base + 附魔加成」整体 ×1.5（与 MC crit 对总伤乘算一致）。base 用 float 累加附魔加成后取整。
+    //   t825 起点收口：基础 + 锐锋走 EnchantRegistry::weaponAttackDamage 单一权威（tooltip 攻击行经
+    //   Hotbar::displayAttackDamage 取整同值 —— 显示 = 实战的目标无关部分，公式永不漂移）。
     //   - 锐锋 Sharpness：+0.5*level HP（spec「0.5*level per hit」）。
     //   - 亡灵杀手 UndeadSlay：对亡灵族（Shambler 蹒跚者 / Bones 骸骨）+2.5*level HP。
     //   - 节肢克星 ArthropodSlay：对节肢族（Spider 蜘蛛）+2.5*level HP。
-    //   互斥组 1 已保证锐锋 / 亡灵 / 节肢三选一（selectEnchants 剔冲突）→ 同一武器至多一类伤害加成生效。
-    float dmg = float(ToolRegistry::attackDamage(heldItemId));
+    //   互斥组 1 已保证锐锋 / 亡灵 / 节肢三选一（选择器剔冲突）→ 同一武器至多一类伤害加成生效。
+    int heldEnch[4] = {0, 0, 0, 0};
+    if (m_hotbar) m_hotbar->selectedItemEnchants(heldEnch);
+    float dmg = EnchantRegistry::weaponAttackDamage(heldItemId, heldEnch);
     if (m_hotbar) {
-        const int sharp = m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Sharpness);
-        if (sharp > 0) dmg += 0.5f * float(sharp);
         const bool undead = (mobType == int(EntityManager::MobShambler) || mobType == int(EntityManager::MobBones));
         const bool arthropod = (mobType == int(EntityManager::MobSpider));
         if (undead)     dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::UndeadSlay));
@@ -1927,9 +1929,11 @@ void PlayerController::attackMob(int entityIndex)
         kbx = look.x();
         kbz = look.z();
     }
-    // t476 击退附魔：每级 +50% 击退冲量（机制等价 MC knockback 附魔 +击退距离）。knockback 内归一方向 × strength。
+    // t476/t826 击退附魔：强度 = EnchantRegistry::knockbackStrength 单一权威（无附魔 1.0 / I 4.0 / II 7.0
+    //   → 水平总位移 ~1.1 / ~4.5 / ~7.9 格，MC 1.0 量级；旧 1+0.5*级 II 仅 ~2.3 格 = 与游荡抖动同量级
+    //   → 用户实测「附击退打生物无感」根因）。knockback 内归一方向 × strength。
     const int kbLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Knockback) : 0;
-    const float kbStrength = 1.0f + 0.5f * float(kbLvl);
+    const float kbStrength = EnchantRegistry::knockbackStrength(kbLvl);
     m_entityManager->damageEntity(entityIndex, dmgInt);
     m_entityManager->knockback(entityIndex, kbx, kbz, kbStrength);
     // t727 夜行者近战命中概率瞬移（spec「攻击到有概率触发传送」；机制等价 MC 1.0 末影人被打中概率瞬移闪避）。

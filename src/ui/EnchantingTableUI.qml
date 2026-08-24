@@ -501,9 +501,11 @@ Item {
         if (remainLapis > 0) InventoryOps.writeSlot(root, "enchant", 1, root.lapisId, remainLapis, 0)
         else                  InventoryOps.writeSlot(root, "enchant", 1, 0, 0, 0)
         // 3) 同 seed 复算选择 → 写入槽 0 附魔元数据（保留耐久）。t615 书 → id 翻附魔书 + 全池随机
-        //   （itemEnchantCategory(BookId)=BookItem=8 → selectEnchants 全 14 附魔候选）。
+        //    （itemEnchantCategory(BookId)=BookItem=8 → 全 14 附魔候选）。
+        //    t824 候选池按**物品**过滤（selectEnchantsPreviewForItem 单一权威）：镐不出亡灵杀手 /
+        //    靴不出水上亲和 / 锄空池（categoryForItem=None 连 itemReady 门一起拒，锄根本进不了槽 0）。
         const cat = root.hotbar.itemEnchantCategory(root.enchantItemId)
-        const picks = root.hotbar.selectEnchantsPreview(cat, offered, Math.abs(seed) | 0)
+        const picks = root.hotbar.selectEnchantsPreviewForItem(root.enchantItemId, offered, Math.abs(seed) | 0)
         const newEnch = [0, 0, 0, 0]
         for (let i = 0; i < picks.length && i < 4; ++i) {
             const m = picks[i]
@@ -1270,7 +1272,9 @@ Item {
                 }
             }
         }
-        const total = Math.round(base + 0.5 * sharp)
+        // t825 显示与实战同源：displayAttackDamage = round(EnchantRegistry::weaponAttackDamage)
+        //   （基础 + 锐锋 ×0.5/级；attackMob 同一权威函数算实战值）。
+        const total = root.hotbar.displayAttackDamage(root.hoveredItemId, e || [])
         return "+" + total + " 攻击"
     }
     Rectangle {

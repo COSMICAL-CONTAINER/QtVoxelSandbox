@@ -12323,7 +12323,9 @@ Window {
                                 if (((eArr[i] || 0) >> 8) === 1) { sharp = eArr[i] & 0xFF; break } // EnchantRegistry::Sharpness = 1
                             }
                         }
-                        const atk = Math.round(hotbarVM.itemAttackDamage(id) + 0.5 * sharp)
+                        // t825 显示与实战同源：displayAttackDamage = round(weaponAttackDamage)，
+                        //   attackMob 同一权威函数算实战值（公式只活在 EnchantRegistry 一处）。
+                        const atk = hotbarVM.displayAttackDamage(id, Array.isArray(eArr) ? eArr : [])
                         tip += "\n\n攻击: " + atk + (sharp > 0 ? "（锐锋 " + hotbarVM.enchantLevelText(sharp) + " +" + (0.5 * sharp) + "）" : "")
                     }
                     return _r >= 0 ? tip : ""

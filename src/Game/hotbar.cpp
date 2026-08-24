@@ -1852,9 +1852,19 @@ QString Hotbar::enchantLevelText(int level) const
     return EnchantRegistry::levelSuffix(level);
 }
 
-QVariantList Hotbar::selectEnchantsPreview(int category, int offeredLevel, int seed) const
+QVariantList Hotbar::selectEnchantsPreviewForItem(int itemId, int offeredLevel, int seed) const
 {
-    return EnchantRegistry::selectEnchants(category, offeredLevel, seed);
+    // t824：候选池按物品逐条精判（透传 EnchantRegistry 单一权威；镐不出亡灵杀手 / 锄空池）。
+    return EnchantRegistry::selectEnchantsForItem(itemId, offeredLevel, seed);
+}
+
+// t825 显示伤害桥接（与实战同源）：round(weaponAttackDamage)——基础 + 锐锋 ×0.5/级（见头注释）。
+//   QVariantList → int[4]（缺项 / 越界槽补 0）；JS 数组经 Q_INVOKABLE 自动转 QVariantList。
+int Hotbar::displayAttackDamage(int itemId, const QVariantList &enchants) const
+{
+    int e[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 4 && i < int(enchants.size()); ++i) e[i] = enchants.at(i).toInt();
+    return qRound(EnchantRegistry::weaponAttackDamage(itemId, e));
 }
 
 // t615 附魔适用 / 冲突精判（透传 EnchantRegistry；铁砧敲附魔书逐条过滤，详见 .h 注释）。
@@ -2161,10 +2171,20 @@ bool Hotbar::anvilCanRepairMaterial(int itemId, int materialId) const
 }
 
 // t476 选中槽物品附魔等级（供 Game 层 attack / mining calc point 直读）。空槽 / 越界 / 非可附魔 → 0。
+//   扫 4 槽 packed int，首个 id 匹配槽的 level。
+//   机制等价 MC「读 item enchantments list 取某附魔等级」。同附魔不重复（selectEnchants 已剔），首个即唯一。
 int Hotbar::selectedItemEnchantLevel(int enchantId) const
 {
     if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return 0;
     return EnchantRegistry::findLevel(m_slots[size_t(m_selectedSlot)].enchants, enchantId);
+}
+
+// t825 选中槽物品 4 槽附魔 packed 快照（attackMob 伤害公式同源消费；空槽 / 越界全 0）。
+void Hotbar::selectedItemEnchants(int outEnchants[4]) const
+{
+    for (int i = 0; i < 4; ++i) outEnchants[i] = 0;
+    if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return;
+    for (int i = 0; i < 4; ++i) outEnchants[i] = m_slots[size_t(m_selectedSlot)].enchants[i];
 }
 
 // t476 4 装备槽某附魔等级之和（耐久 / 保护族 EPF 累加用；空槽不计）。
@@ -2203,22 +2223,21 @@ int Hotbar::armorProtectionFactor(int cause) const
 }
 
 // t475 附魔选中槽物品（附魔台点选项槽 → 写附魔元数据）。机制等价 MC 1.0 附魔台点槽即附魔。
-//   选中槽空 / 非可附魔 / 已有附魔 → no-op（返 false；UI 应已门控，MC 1.0 不允许重复附魔已附魔物品）。
-//   否则 selectEnchants(category, offeredLevel, seed) → 清空旧 enchants[4] + 填新（最多 4 个）。
-//   不改 id / count / durability（附魔是叠加元数据，非替换物品）。
+//   选中槽空 / 非可附魔（含锄，t824 categoryForItem=None）/ 已有附魔 → no-op（返 false；UI 应已门控，
+//   MC 1.0 不允许重复附魔已附魔物品）。否则 selectEnchantsForItem（t824 按物品过滤候选池）→ 清空旧
+//   enchants[4] + 填新（最多 4 个）。不改 id / count / durability（附魔是叠加元数据，非替换物品）。
 bool Hotbar::enchantSelected(int offeredLevel, int seed)
 {
     if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return false;
     ItemStack &s = m_slots[size_t(m_selectedSlot)];
     if (s.id == 0 || s.count <= 0) return false;
-    const int category = EnchantRegistry::categoryForItem(s.id);
-    if (category == EnchantRegistry::None) return false;
+    if (EnchantRegistry::categoryForItem(s.id) == EnchantRegistry::None) return false;
     // MC 1.0：已附魔物品不能再进附魔台（防重复附魔刷属性）。
     bool hasEnchant = false;
     for (int i = 0; i < 4; ++i) if (s.enchants[i] != 0) { hasEnchant = true; break; }
     if (hasEnchant) return false;
 
-    const QVariantList picks = EnchantRegistry::selectEnchants(category, offeredLevel, seed);
+    const QVariantList picks = EnchantRegistry::selectEnchantsForItem(s.id, offeredLevel, seed);
     // 清空旧 + 填新（selectEnchants 已 ≤ 4 个 + 已剔互斥 / 重复）。
     for (int i = 0; i < 4; ++i) s.enchants[i] = 0;
     for (int i = 0; i < int(picks.size()) && i < 4; ++i) {

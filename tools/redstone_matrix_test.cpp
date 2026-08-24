@@ -22,6 +22,7 @@
 #include <QRegularExpression> // t813 探针（stamp / git 哈希格式正则）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
+#include <vector>   // t824 探针 std::vector<int>（池允许集）
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -8245,6 +8246,312 @@ int main(int argc, char *argv[])
                              " mattress inner end joins at cell boundary, board caps outer end (16 colors x 4"
                              " facings x head/foot ="
                           << bedChecks << "rigs; a/b/c/d =" << okA << okB << okC << okD << ")";
+    }
+
+    // ── t824 附魔台选项池物品过滤探针（R19.13；Game 层表 + Hotbar 桥接，无 World/QML）──
+    //    用户报告：「镐子附上亡灵杀手（对镐无意义）」。根因：选项池按大类 mask 过滤（亡灵杀手
+    //    appliesToMask=Weapon|Tool|BookItem 含 Tool 位 → 镐 / 铲全过门；摔落保护 mask=Armor → 胸甲也过门）。
+    //    t824 收口 selectEnchantsForItem：候选 = isApplicableForItem 逐物品精判（对齐 t763/t798 适用表）。
+    //    断言：
+    //    (a) 全 seed 扫池（offered 2/12/30 × seed 0..399）逐物品收集出现过的附魔 id：
+    //        钻石镐 / 铲 ⊆ {效率,精准,时运,耐久}（**亡灵杀手等武器系绝迹** + 池非空四元全在）；
+    //        钻石斧 ⊆ 锐锋族+效率+精准+耐久（无时运）；钻石剑 ⊆ 锐锋族+击退+燃焰+耐久（无效率/采集系）；
+    //        胸甲 ⊆ 保护/火焰保护/弹射物保护/耐久（无摔落/水上亲和）；靴 + 摔落保护；头盔 + 水上亲和；
+    //        锄 / 弓 / 剪刀 → 恒空（MC 1.0 锄无适用附魔 → 不给选项；categoryForItem 判 None）；
+    //        书 → 全 14 附魔都在池（附书全池语义不回归）；
+    //    (b) Hotbar 桥接 selectEnchantsPreviewForItem == EnchantRegistry 直调（同 seed 同产物）；
+    //    (c) enchantSelected 对锄返 false（附魔台点档 no-op，不白扣 XP / 青金石）+ 对剑 true 且产物全在剑池
+    //        + 已附魔再点返 false（防重复附魔闸不回归）。
+    {
+        Hotbar hb;
+        const int diaPick   = int(ToolRegistry::PickaxeDiamond);
+        const int diaShovel = int(ToolRegistry::DiamondShovel);
+        const int diaAxe    = int(ToolRegistry::DiamondAxe);
+        const int diaSword  = int(ToolRegistry::DiamondSword);
+        const int diaHoe    = int(ToolRegistry::DiamondHoe);
+        const int bowId     = int(ToolRegistry::Bow);
+        const int shearsId  = int(ToolRegistry::Shears);
+        const int bookId    = RecipeRegistry::BookId;
+        const int diaChest  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 1;
+        const int diaBoots  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 3;
+        const int diaHelm   = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 0;
+        const int E  = int(EnchantRegistry::Efficiency),    ST = int(EnchantRegistry::SilkTouch);
+        const int F  = int(EnchantRegistry::Fortune),       U  = int(EnchantRegistry::Unbreaking);
+        const int SH = int(EnchantRegistry::Sharpness),     UD = int(EnchantRegistry::UndeadSlay);
+        const int AR = int(EnchantRegistry::ArthropodSlay), KB = int(EnchantRegistry::Knockback);
+        const int FA = int(EnchantRegistry::FireAspect),    P  = int(EnchantRegistry::Protection);
+        const int FP = int(EnchantRegistry::FireProtection), PR = int(EnchantRegistry::ProjectileProt);
+        const int FF = int(EnchantRegistry::FeatherFall),   AA = int(EnchantRegistry::AquaAffinity);
+        // 全 seed 扫池：seen[1..14] = 该物品选项池中出现过的附魔 id（1200 次抽取 → 稀有权重 1 的精准采集
+        //   也在书池 / 采集池中以概率 1-(1-p)^2400 ≈ 1 覆盖，假阴性率 < e^-30）。
+        const auto poolOf = [&](int itemId, bool seen[15]) {
+            for (int i = 0; i < 15; ++i) seen[i] = false;
+            const int offeredList[3] = {2, 12, 30};
+            for (int oi = 0; oi < 3; ++oi)
+                for (int seed = 0; seed < 400; ++seed) {
+                    const QVariantList picks = EnchantRegistry::selectEnchantsForItem(itemId, offeredList[oi], seed);
+                    for (const QVariant &v : picks) seen[v.toMap().value(QStringLiteral("id")).toInt()] = true;
+                }
+        };
+        // 池 ⊆ 允许集 且 期望集全出现（防「过滤过头 → 空池 / 半池」反向回归）。
+        const auto poolIs = [&](int itemId, const std::vector<int> &allowed, bool requireAll) {
+            bool seen[15];
+            poolOf(itemId, seen);
+            for (int i = 1; i < 15; ++i) {
+                const bool allowedHas = std::find(allowed.begin(), allowed.end(), i) != allowed.end();
+                if (seen[i] && !allowedHas) return false; // 出现了不允许的（如镐出亡灵杀手 = 用户症状）
+                if (requireAll && allowedHas && !seen[i]) return false; // 允许的没出现（池被砍空）
+            }
+            return true;
+        };
+        const std::vector<int> miningPool = {E, ST, F, U};                 // 镐 / 铲
+        const std::vector<int> axePool    = {SH, UD, AR, E, ST, U};        // 斧（锐锋族 + 采集系无时运）
+        const std::vector<int> swordPool  = {SH, UD, AR, KB, FA, U};       // 剑
+        const std::vector<int> chestPool  = {P, FP, PR, U};                // 胸甲 / 护腿
+        const std::vector<int> bootsPool  = {P, FP, PR, U, FF};            // 靴 + 摔落保护
+        const std::vector<int> helmPool   = {P, FP, PR, U, AA};            // 头盔 + 水上亲和
+        std::vector<int> bookPool;
+        for (int i = 1; i < 15; ++i) bookPool.push_back(i);               // 书 = 全 14 池
+        bool ok = poolIs(diaPick, miningPool, true)
+               && poolIs(diaShovel, miningPool, true)
+               && poolIs(diaAxe, axePool, true)
+               && poolIs(diaSword, swordPool, true)
+               && poolIs(diaChest, chestPool, true)
+               && poolIs(diaBoots, bootsPool, true)
+               && poolIs(diaHelm, helmPool, true)
+               && poolIs(bookId, bookPool, true);
+        // 锄 / 弓 / 剪刀 → 恒空池 + 类别 None（附魔台槽 0 拒入的三重门之一）。
+        bool seenHoe[15];
+        poolOf(diaHoe, seenHoe);
+        for (int i = 1; i < 15; ++i) ok = ok && !seenHoe[i];
+        ok = ok && EnchantRegistry::categoryForItem(diaHoe) == EnchantRegistry::None
+               && EnchantRegistry::selectEnchantsForItem(bowId, 12, 7).isEmpty()
+               && EnchantRegistry::selectEnchantsForItem(shearsId, 12, 7).isEmpty();
+        // (b) 桥接 == 直调（同 seed 同产物；防 QML 侧再持副本）。
+        const QVariantList viaBridge = hb.selectEnchantsPreviewForItem(diaSword, 17, 4242);
+        const QVariantList direct    = EnchantRegistry::selectEnchantsForItem(diaSword, 17, 4242);
+        ok = ok && viaBridge.size() == direct.size() && !direct.isEmpty();
+        for (int i = 0; ok && i < int(direct.size()); ++i)
+            ok = viaBridge.at(i).toMap().value(QStringLiteral("id")) == direct.at(i).toMap().value(QStringLiteral("id"))
+              && viaBridge.at(i).toMap().value(QStringLiteral("level")) == direct.at(i).toMap().value(QStringLiteral("level"));
+        // (c) enchantSelected：锄拒（no-op 不落附魔）；剑成且产物 ⊆ 剑池；已附魔再点拒。
+        hb.setStack(0, diaHoe, 1);
+        hb.setSelectedSlot(0);
+        ok = ok && !hb.enchantSelected(10, 99);
+        hb.setStack(0, diaSword, 1);
+        ok = ok && hb.enchantSelected(10, 99);
+        bool swordEnchOk = false, anyEnch = false;
+        const QVariantList gotEnch = hb.enchantsAt(0);
+        for (int i = 0; i < 4; ++i) {
+            const int packed = gotEnch.at(i).toInt();
+            if (packed == 0) continue;
+            anyEnch = true;
+            swordEnchOk = std::find(swordPool.begin(), swordPool.end(),
+                                    EnchantRegistry::packEnchantId(packed)) != swordPool.end();
+            if (!swordEnchOk) break;
+        }
+        ok = ok && anyEnch && swordEnchOk && !hb.enchantSelected(10, 100); // 已附魔 → 拒
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t824 enchant pool filtered per item: pick/shovel subset {eff,silk,fortune,"
+                             "unbreaking} (no undead-slay on pick = user symptom), axe adds sharpness-family "
+                             "w/o fortune, sword weapon-only, chest w/o feather-fall, boots+feather/helm+aqua, "
+                             "hoe/bow/shears empty + category None, book keeps full 14; bridge==direct; "
+                             "enchantSelected rejects hoe & already-enchanted";
+    }
+
+    // ── t825 锋利最终伤害显示 = 实战同源探针（R19.13；Game 层公式 + Hotbar 桥接）──
+    //    用户报告：「钻石剑附锋利后伤害显示仍 +7」。静态复核：实际伤害链（attackMob t476/t763）与九处
+    //    tooltip 攻击行均已含锐锋加成 —— 本任务把公式收口 EnchantRegistry::weaponAttackDamage 单一权威
+    //    （attackMob 起点 + displayAttackDamage 桥接取整），「显示 = 实战的目标无关部分」结构化成立。
+    //    断言：① 权威公式精确值（钻石剑 7 + 0.5/级：0/7.0、I/7.5、III/8.5；木剑 V = 4+2.5 = 6.5）；
+    //    ② 显示桥接 = round(权威)（含 .5 半上取整与 JS Math.round 同侧：I → 8）；③ 无附魔 / 非武器不虚增。
+    {
+        Hotbar hb;
+        const int diaSword  = int(ToolRegistry::DiamondSword);
+        const int woodSword = int(ToolRegistry::SwordWood);
+        const int sharp1 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 1);
+        const int sharp3 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+        const int sharp5 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 5);
+        const int zero[4] = {0, 0, 0, 0};
+        const int e1[4] = {sharp1, 0, 0, 0};
+        const int e3[4] = {sharp3, 0, 0, 0};
+        const int e5[4] = {sharp5, 0, 0, 0};
+        const auto close = [](float got, float expect) { return std::abs(got - expect) < 1e-4f; };
+        bool ok = close(EnchantRegistry::weaponAttackDamage(diaSword, nullptr), 7.0f)
+               && close(EnchantRegistry::weaponAttackDamage(diaSword, zero), 7.0f)
+               && close(EnchantRegistry::weaponAttackDamage(diaSword, e1), 7.5f)
+               && close(EnchantRegistry::weaponAttackDamage(diaSword, e3), 8.5f)
+               && close(EnchantRegistry::weaponAttackDamage(woodSword, e5), 6.5f);
+        // 显示桥接 = round(weaponAttackDamage)：0/7、I/8（round(7.5) 半上，同 JS Math.round(7.5)=8）、III/9、
+        //   木剑 V/round(6.5)=7；空附魔数组 / 缺项 → 仅基础（防 QML 传 null/[] 崩）。
+        ok = ok && hb.displayAttackDamage(diaSword, QVariantList{}) == 7
+               && hb.displayAttackDamage(diaSword, QVariantList{sharp1, 0, 0, 0}) == 8
+               && hb.displayAttackDamage(diaSword, QVariantList{sharp3, 0, 0, 0}) == 9
+               && hb.displayAttackDamage(woodSword, QVariantList{sharp5, 0, 0, 0}) == 7
+               && hb.displayAttackDamage(diaSword, QVariantList{sharp5}) == 10; // 缺项补 0 → 7+2.5 = round 10
+        // 同源逐级枚举：display == qRound(authority) 对级 0..5 全成立（公式只活在一处的运行时证据）。
+        for (int lvl = 0; lvl <= 5; ++lvl) {
+            const int e[4] = {EnchantRegistry::pack(int(EnchantRegistry::Sharpness), lvl), 0, 0, 0};
+            const QVariantList qvl = QVariantList{e[0], 0, 0, 0};
+            ok = ok && hb.displayAttackDamage(diaSword, qvl)
+                      == qRound(EnchantRegistry::weaponAttackDamage(diaSword, e));
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t825 display==combat damage single source: weaponAttackDamage 7/7.5/8.5 (dia "
+                             "sword lvl 0/I/III), wood sword V 6.5; Hotbar::displayAttackDamage rounds same "
+                             "authority (8 at .5 half-up, 9 at III, level sweep 0..5 equality); empty/partial "
+                             "enchant arrays degrade to base";
+    }
+
+    // ── t826 击退附魔实战强度探针（R19.13；公式面 + Entities 层真位移，t774 爆炸击退同款 rig）──
+    //    用户报告：「附击退打生物无击退」。根因：旧强度 1+0.5*级 令 II 仅 ~2.3 格总位移（基线 ~1.1 格），
+    //    与 AI 游荡抖动同量级 → 实战「无感」。t826 收口 EnchantRegistry::knockbackStrength 单一权威
+    //    （1+3.0*级：I/II = 4.0/7.0 → 总位移 ~4.5/~7.9 格，MC 1.0 量级）。
+    //    断言：① 公式面 0/1/2 级 = 1.0/4.0/7.0（负级防御钳）；② 物理面 —— 真 EntityManager 三猪各吃一档
+    //    knockback(+X)，8 tick（0.128s）位移严格按级递增且落量级带（理论 0.90/3.60/6.30 格 ≈
+    //    v0*(1-e^-0.512)/4，v0 = 4.5*strength；游荡噪声 ±0.15）。
+    {
+        bool ok = std::abs(EnchantRegistry::knockbackStrength(0) - 1.0f) < 1e-5f
+               && std::abs(EnchantRegistry::knockbackStrength(1) - 4.0f) < 1e-5f
+               && std::abs(EnchantRegistry::knockbackStrength(2) - 7.0f) < 1e-5f
+               && std::abs(EnchantRegistry::knockbackStrength(-3) - 1.0f) < 1e-5f;
+        // rig：运行期扫空区（P20/t809 先例 —— nextSlot 网格已耗尽）。需 18×5 净空（dy -1..+3 含地板层）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 93 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 17 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 17 && clear; ++dx)
+                    for (int dz = -2; dz <= 2 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t826 knockback by level: no clear rig area found";
+        } else {
+            // 石平台（防 spawn 即坠；3 行宽防侧移跌落）。
+            for (int dx = 0; dx <= 17; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+            EntityManager ents;
+            const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+            // 三猪错开 3 格；**从远端猪先击**（II 位移朝 +X，先行者让出跑道防相互推挤）。
+            const int pig2 = ents.spawnMobTyped(x0 + 7, kRigY, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+            const int pig1 = ents.spawnMobTyped(x0 + 4, kRigY, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+            const int pig0 = ents.spawnMobTyped(x0 + 1, kRigY, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+            ok = ok && pig0 >= 0 && pig1 >= 0 && pig2 >= 0;
+            // 落定窗（0.96s）：spawn 瞬时悬空 0.05 格 + resting 复探按 AI 相位错峰 —— 不先 tick 落定的话，
+            //   个别猪在他人测量窗内正处「下落 / 半嵌地板」态，mobAabbHitsSolid 把水平击退位移全撤回
+            //   （首轮实测 I 级猪 dx 0.39 vs 期望 1.83 的根因）。60 tick 后全部 resting 贴面再测。
+            for (int t = 0; t < 60; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            const int pigs[3] = {pig2, pig1, pig0};                 // 击序：II → I → 0（远端先走）
+            const float strengths[3] = {EnchantRegistry::knockbackStrength(2),
+                                       EnchantRegistry::knockbackStrength(1),
+                                       EnchantRegistry::knockbackStrength(0)};
+            float dxPos[3] = {-1.0f, -1.0f, -1.0f};                 // [0]=II [1]=I [2]=无附魔
+            for (int k = 0; ok && k < 3; ++k) {
+                const QVector3D startP = ents.posAt(pigs[k]);
+                ents.knockback(pigs[k], 1.0f, 0.0f, strengths[k]);  // +X 方向击退（强度 = attackMob 同式）
+                for (int t = 0; t < 8; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+                const QVector3D endP = ents.posAt(pigs[k]);
+                dxPos[k] = endP.x() - startP.x();
+                qInfo().noquote() << "  [t826 diag] pig" << k << "idx" << pigs[k] << "start" << startP
+                                  << "end" << endP << "dx" << dxPos[k];
+            }
+            // 短窗（0.128s）位移 ≈ v0×0.016×(1-0.936^8)/0.064 ≈ 0.10×v0（总位移 v0/kKnockbackDrag ≈ 40% 在
+            //   窗内；短窗让击退主导、游荡噪声 ≤±0.15）：理论 II/I/0 = 3.19/1.83/0.46。
+            ok = ok && dxPos[2] > 0.15f && dxPos[2] < 0.80f       // 无附魔基线 ~0.46 格
+                 && dxPos[1] > 1.35f && dxPos[1] < 2.35f          // I ~1.83 格
+                 && dxPos[0] > 2.65f && dxPos[0] < 3.75f          // II ~3.19 格
+                 && dxPos[2] < dxPos[1] && dxPos[1] < dxPos[0];   // 严格按级递增（用户症状的反面）
+            if (!ok) qInfo().noquote() << "  t826 displacements II/I/base =" << dxPos[0] << dxPos[1] << dxPos[2];
+            // 清场（地板全清 + 2 tick 收敛）。
+            for (int dx = 0; dx <= 17; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air);
+            tickN(w, 2);
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t826 knockback enchant scales in combat: strength 1.0/4.0/7.0 (lvl 0/I/II, "
+                             "negative clamped); real EntityManager displacement over 0.128s strictly "
+                             "increasing ~0.9/3.6/6.3 blocks (old +50%/lvl was ~1.4/2.0 = wander-noise level, "
+                             "user saw no knockback)";
+    }
+
+    // ── t827 燃焰点燃链探针（R19.13 附魔全效果审计的「重点疑」实测项；EntityManager 直编）──
+    //    attackMob → ignite(level*4s) 静态接线已核（playercontroller t476 链）；本探针锁点燃 → 火烧推进
+    //    → 扣血 → 致死 burned 掉落链的运行时行为。kFireExtinguishChance=0.15（每次火伤结算随机提前熄灭）
+    //    → 断言取「多样本计数下界」防偶发：① 点燃即 isBurningAt（对照猪恒 false）；② 10 只 3HP 猪 1.76s 内
+    //    ≥5 只实际扣血（每只 P(扣) = 0.85，P(<5) ≈ 3e-5）；③ 6 只 1HP 猪 ≥1 只烧死（首脉冲 ~1.05s +
+    //    0.5s 死亡动画 → mobDied burned=true ~1.55s 在窗内；P(全不成) = 0.15^6 ≈ 1e-5）。游荡 ≤1.76 格 →
+    //    地板 7 行宽（dz -3..+3）+ 出生位留 ≥2 格边距，防侧移跌落污染对照。
+    {
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 125 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 15 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 15 && clear; ++dx)
+                    for (int dz = -3; dz <= 3 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t827 fire-aspect ignite: no clear rig area found";
+        } else {
+            for (int dx = 0; dx <= 15; ++dx)
+                for (int dz = -3; dz <= 3; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+            EntityManager ents;
+            const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+            int diedBurned = 0, diedTotal = 0;
+            QObject::connect(&ents, &EntityManager::mobDied, &ents,
+                             [&](int, int, int, int, bool burned, bool) {
+                                 ++diedTotal; if (burned) ++diedBurned;
+                             });
+            // 10 只计量猪（3HP，中央两行错开）+ 6 只 1HP 判死猪 + 1 只对照猪（10HP 不点燃）。
+            int meter[10];
+            for (int i = 0; i < 10; ++i)
+                meter[i] = ents.spawnMobTyped(x0 + 1 + (i % 5) * 3, kRigY, z0 + (i < 5 ? -1 : 1),
+                                              EntityManager::MobPig, QStringLiteral("#ee9999"), 3);
+            int frail[6];
+            for (int i = 0; i < 6; ++i)
+                frail[i] = ents.spawnMobTyped(x0 + 1 + i * 2, kRigY, z0, EntityManager::MobPig,
+                                              QStringLiteral("#ee9999"), 1);
+            const int control = ents.spawnMobTyped(x0 + 13, kRigY, z0, EntityManager::MobPig,
+                                                   QStringLiteral("#ee9999"), 10);
+            bool ok = control >= 0 && !ents.isBurningAt(control);
+            for (int i = 0; i < 10; ++i) ok = ok && meter[i] >= 0;
+            for (int i = 0; i < 6; ++i) ok = ok && frail[i] >= 0;
+            // 点燃全部实验猪（燃焰 II = 8s 同长；对照不点）。点燃即燃（视觉火焰 Model 据点）。
+            for (int i = 0; i < 10; ++i) ents.ignite(meter[i], 8.0f);
+            for (int i = 0; i < 6; ++i) ents.ignite(frail[i], 8.0f);
+            bool allBurning = true;
+            for (int i = 0; i < 10; ++i) allBurning = allBurning && ents.isBurningAt(meter[i]);
+            for (int i = 0; i < 6; ++i) allBurning = allBurning && ents.isBurningAt(frail[i]);
+            ok = ok && allBurning && !ents.isBurningAt(control);
+            // 1.76s（110 tick）：首火伤脉冲（~1.05s）+ 死亡动画 0.5s（mobDied ~1.55s）均在窗内。
+            for (int t = 0; t < 110; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            int damaged = 0;
+            for (int i = 0; i < 10; ++i)
+                if (ents.healthAt(meter[i]) < 3 || ents.deadAt(meter[i])) ++damaged; // 3HP 计量猪扣血 / 烧死均计
+            ok = ok && damaged >= 5                       // ≥5/10 实际吃到火伤（P(<5) ≈ 3e-5）
+                 && ents.healthAt(control) == 10 && !ents.deadAt(control) // 对照猪无伤
+                 && diedTotal >= 1 && diedBurned >= 1;    // ≥1 只 1HP 猪烧死且走 burned 掉落链
+            if (!ok) qInfo().noquote() << "  t827 fire diag: damaged" << damaged << "/10, died" << diedTotal
+                                       << "burned" << diedBurned << "control hp" << ents.healthAt(control);
+            for (int dx = 0; dx <= 15; ++dx)
+                for (int dz = -3; dz <= 3; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air);
+            tickN(w, 2);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t827 fire-aspect ignite chain: ignite->isBurningAt immediate (control "
+                                 "stays unlit), 1s-interval fire damage lands on >=5/10 meter pigs in 2.2s, "
+                                 "1HP pig dies with burned=true (cooked-drop entry); attackMob->ignite("
+                                 "4s*level) wiring static-verified";
+        }
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
