@@ -3133,9 +3133,11 @@ QString ResourcePackManager::armorLayerSource(int tier, int layer) const
     const QString p = QDir(s.armorDir).absoluteFilePath(name);
     if (!QFile::exists(p))
         return {};
-    // 非皮革（铁/金/钻/链）→ pack 层自带满色，原样返回。
+    // 非皮革（铁/金/钻/链）→ pack 层自带满色，原样返回。Review 2026-08-24 低危收尾（#5 残留族）：直返
+    //   统一走 packFileUrl 挂 ?r=<revision> cache-bust——同路径原地换包 + 重 apply 后 QML Texture 按 URL
+    //   重读（五族直返同口径；s.revision 由 apply() 先 bump 后构建，世代号即当前包内容代）。
     if (tier != 0)
-        return QStringLiteral("file:///") + p;
+        return packFileUrl(p, s.revision);
     // 皮革：灰白 base 染棕。缓存键 = tier*10+layer（0x0 段；与 leatherIconFiles 的 0x300..0x303 段不冲突）。
     const int key = tier * 10 + layer;
     const auto cached = s.leatherIconFiles.constFind(key);

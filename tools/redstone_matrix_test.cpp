@@ -8,6 +8,9 @@
 //   Entities 层 MinecartManager 源码直编（两者向下只依赖 Core+World，不引入 Game/QML）；t759 附加 World 层
 //   worldgen 断言（要塞传送门房净空 —— 独立小世界扫种子，不动主世界 rig）。
 //   运行：build/redstone_matrix_test.exe，全过 exit 0。
+//   环境依赖（review24 低危登记）：QGuiApplication——PlayerController 是 QQuickItem 派生，实例化需
+//   Gui 平台集成（无窗口创建）；headless Linux 无 offscreen 平台插件时直接 fatal，本文件全部 211+ 探针
+//   被动继承该要求（CI / 无头环境须装 qt qpa offscreen 插件或设 QT_QPA_PLATFORM）。
 #include <QCoreApplication>
 #include <QGuiApplication> // t814 真消费端探针：PlayerController 是 QQuickItem 派生 → 实例化需 Gui 应用对象
 #include <QDebug>
@@ -44,6 +47,17 @@
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
 #include "playercontroller.h"     // t814 真消费端探针（Game 层 PlayerController 直编：firePowerTnt/fireDispenserAtQml）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
+#include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
+                                   //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
+                                   //   PLAN §2 低层永不 include 高层；互钉只能落在本测试 TU，它合法 include 全栈）
+
+// review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
+//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（0..MobAnvil=18，
+//   实值经核：MobTest=0 .. MobAnvil=18 共 19 值）。枚举中部插值 / 尾部新增忘补表行时本断言编译期拦截
+//   （t782「整表错位静默钳猪」根因的复刻防线）。
+static_assert(MobModel::kValidMobTypeCount == EntityManager::MobAnvil + 1,
+              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobAnvil）——"
+              "新增 mobType 须同步 kValidMobModelType 表 + mobmodel.h kValidMobTypeCount");
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
 //   进了 .h 因 EggTint 是头内类型，本函数签名纯 QString 无需入头）。review #6：第 3 参 revision 进文件名
@@ -105,11 +119,26 @@ int main(int argc, char *argv[])
     int slotIdx = 0;
     const auto nextSlot = [&]() {
         const int col = slotIdx % 4, row = slotIdx / 4;
-        ++slotIdx;
+        // review24 低危（探针族）：耗尽检查移到 ++ 之前——旧版先 ++ 再检查，qFatal 报的编号比真失败的
+        //   slot 大 1（off-by-one，diag 误导排查）；现报真实失败位号。
         if (4 + row * 3 >= 128)
             qFatal("rig grid exhausted: slot %d beyond 128-deep grid (4 cols x 42 rows = 168) - "
                    "out-of-bounds setBlock is silently rejected = false FAIL farm", slotIdx);
+        ++slotIdx;
         return QPair<int, int>(4 + col * 22, 4 + row * 3);
+    };
+
+    // review24 低危（探针族）：rig 器件放置回读校验。World::setBlock 对「越界拒绝 / 同 id 无变化早退」均
+    //   静默（返回 false 无告警）——nextSlot 的 qFatal 只防了坐标越界这一条静默拒绝路径；器件没放上时
+    //   下游断言全线假 FAIL 且 diag 指向消费端（t814 教训同源）。关键器件放置（t814 真消费端探针的
+    //   机器 / 源铺设）走本帮手：放置后回读 blockAt 钉落位，落位失败响亮退出。同 id 早退时格子本已是
+    //   目标 id → 回读照过（不误伤；清理用的 Air 写不需本帮手）。
+    const auto placeRigBlock = [](World &world, int x, int y, int z, BR::Id id, quint8 st) {
+        world.setBlock(x, y, z, id, st);
+        if (world.blockAt(x, y, z) != quint8(id))
+            qFatal("rig placement silently rejected at (%d,%d,%d) id=%d state=%d - device never "
+                   "landed, downstream assertions are a false-FAIL farm",
+                   x, y, z, int(id), int(st));
     };
 
     // ── 信号计数器（等价 Main.qml 转发消费端；直接连接同步计数）──
@@ -7015,24 +7044,29 @@ int main(int argc, char *argv[])
 
     // ── t813 构建版本戳探针（Core 叶子直编）：锁 BuildInfo 两值非空 + 格式 ──
     //   stamp = CMake 每次 build 生成的 "YYYY-MM-DD HH:MM"（16 字符）；gitHash = git
-    //   rev-parse --short HEAD（7-10 hex；git 缺失回退 "nogit" 会在此 FAIL —— 开发机 git
-    //   必在，缺 git 属环境异常，诚实暴露优于静默糊弄）。探针跑在矩阵测试 exe 里 = 顺带
-    //   验证「该 exe 的 stamp 随本次构建刷新」（构建-运行同刻，分钟差即重建链生效证据）。
+    //   rev-parse --short HEAD（7-10 hex）。git 缺失 / 超时（TIMEOUT 5）回退 "nogit" 判 **SKIP**
+    //   （review24 低危：旧版硬套 hex 正则判 FAIL，与 WriteBuildStamp.cmake「无 git 诚实回退、构建不因此
+    //   失败」自相矛盾——无 .git 源码导出包 / CI 缓存构建会矩阵恒红；环境缺失≠格式回归，SKIP 单列不算
+    //   FAIL 不算 PASS）；stamp 格式恒断（真回归照 FAIL）——SKIP 行也带 stamp 值供人工核。探针跑在矩阵
+    //   测试 exe 里 = 顺带验证「该 exe 的 stamp 随本次构建刷新」（构建-运行同刻，分钟差即重建链生效证据）。
     {
         const QString stamp = BuildInfo::instance()->stamp();
         const QString ghash = BuildInfo::instance()->gitHash();
         const QRegularExpression stampRe(QStringLiteral("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$"));
         const QRegularExpression gitRe(QStringLiteral("^[0-9a-f]{7,10}$"));
         const bool okStamp = stampRe.match(stamp).hasMatch();
+        const bool noGit = ghash == QStringLiteral("nogit"); // CMake 诚实回退值（无 .git / git 超时）
         const bool okGit = gitRe.match(ghash).hasMatch();
-        const bool okT813 = okStamp && okGit;
+        const bool okT813 = okStamp && (noGit || okGit); // stamp 破 = 真回归仍 FAIL；仅 git 缺失 → SKIP
         if (!okT813) ++totalFail;
-        qInfo().noquote() << (okT813 ? "PASS" : "FAIL")
+        qInfo().noquote() << ((noGit && okStamp) ? "SKIP" : (okT813 ? "PASS" : "FAIL"))
                           << "| t813 build stamps: stamp" << stamp
                           << "(YYYY-MM-DD HH:MM) git" << ghash
                           << "(7-10 hex, git rev-parse --short HEAD); header regenerated every "
                              "build via cmake/WriteBuildStamp.cmake with content-change-only "
-                             "rewrite so only buildinfo.cpp recompiles";
+                             "rewrite so only buildinfo.cpp recompiles; git==\"nogit\" judged SKIP "
+                             "(CMake honest fallback = environment without git, not a format "
+                             "regression; stamp format still asserted, stamp break stays FAIL)";
     }
 
     // ── P-t814 真消费端执行探针（Game 层 PlayerController 直编）──
@@ -7070,13 +7104,14 @@ int main(int argc, char *argv[])
         QObject::connect(&w, &World::powerDispenserTriggered, &pc,
                          [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
 
-        // (a) TNT：拉杆贴合（器件先就位稳态 → 后扳拉杆，用户实测路径）。
+        // (a) TNT：拉杆贴合（器件先就位稳态 → 后扳拉杆，用户实测路径）。器件放置走 placeRigBlock
+        //     （回读钉落位——setBlock 越界 / 同 id 早退都静默吞放置，review24 低危）。
         bool okA = false;
         {
             const auto [x0, z0] = nextSlot();
-            w.setBlock(x0, kRigY, z0, BR::TntBlock, 0);
+            placeRigBlock(w, x0, kRigY, z0, BR::TntBlock, 0);
             tickN(w, 2);
-            w.setBlock(x0 + 1, kRigY, z0, BR::Lever, 1); // 扳开（state bit0=1）
+            placeRigBlock(w, x0 + 1, kRigY, z0, BR::Lever, 1); // 扳开（state bit0=1）
             tickN(w, 4);
             int primedIdx = -1;
             for (int i = 0; i < ents.count(); ++i)
@@ -7102,11 +7137,11 @@ int main(int argc, char *argv[])
         {
             const auto [x0, z0] = nextSlot();
             bx0 = x0; bz0 = z0;
-            w.setBlock(x0, kRigY, z0, BR::Dispenser, 0);
+            placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0);
             store.ensureDispenser(x0, kRigY, z0);
             store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::ArrowId, 3);
             tickN(w, 2);
-            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneBlock, 0);
+            placeRigBlock(w, x0 + 1, kRigY, z0, BR::RedstoneBlock, 0);
             tickN(w, 4);
             int arrows = 0;
             for (int i = 0; i < ents.count(); ++i)
@@ -7121,30 +7156,55 @@ int main(int argc, char *argv[])
                                   << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0);
         }
 
-        // (e) 沿语义（复用 (b) 机器——同 (x,z) 键同基线/冷却）：稳定通电下再制造电力活动（对侧拉杆扳开→
-        //     扳回两次触达）不重复发射；源拆→快速复置（真上升沿但 <2s 冷却）也不发射。
-        bool okE = false;
+        // (e) 沿语义 + 冷却**时间**语义（review24 #9 重做——旧断言两层误 PASS 面：① 探针不启 16ms 定时器
+        //     → 冷却递减（tick→scanDispenserTraps 开头）从不运行 → 「sub-2s-cooldown」实际只验 contains 即拦，
+        //     kDispenserCooldown 回归改 0 探针照样 PASS；② arrows 持平在「信号根本没发」时也恒真）。三段：
+        //     ① 稳定通电下再制造电力活动（对侧拉杆扳开→扳回）不重复发射（沿检测基线集 t689）；
+        //     ② 拆源→快速复置 = 真上升沿但 <2s 冷却 → 不发射，**且断言 powerDispenserTriggered 信号确有发出**
+        //        （头部全局 dispFired 计数差分——区分「冷却拦截」与「信号未发」两种零发射）；
+        //     ③ 直调 pc.scanDispenserTraps(2.5f) 推进冷却过 2s 过期（tick 的等价递减驱动，探针态沿表恒空
+        //        零副作用）→ 再造真上升沿 → **必须再发射**（箭 +1 / 库存 2→1 正向断言——冷却时长回归改 0
+        //        ②不触发、改 ∞ ③不触发，两个方向都在此现形）。
+        bool okE = false, okE2 = false;
         {
-            w.setBlock(bx0 - 1, kRigY, bz0, BR::Lever, 1); // 对侧第二源扳开 → 复算触达（升沿到已通电机）
+            placeRigBlock(w, bx0 - 1, kRigY, bz0, BR::Lever, 1); // 对侧第二源扳开 → 复算触达（升沿到已通电机）
             tickN(w, 4);
-            w.setBlock(bx0 - 1, kRigY, bz0, BR::Lever, 0); // 扳回 → 降沿触达
+            w.setBlock(bx0 - 1, kRigY, bz0, BR::Lever, 0);       // 扳回 → 降沿触达
             tickN(w, 4);
             int arrows2 = 0;
             for (int i = 0; i < ents.count(); ++i)
                 if (ents.kindAt(i) == EntityManager::Arrow) ++arrows2;
-            w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);   // 拆源（降沿）
+            w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);         // 拆源（降沿）
             tickN(w, 4);
-            w.setBlock(bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置（真上升沿，但冷却 2s 未过）
+            const int dispBeforeRepower = dispFired;             // 信号计数基线（复置段必须发出 ≥1 次）
+            placeRigBlock(w, bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置（真上升沿，但冷却 2s 未过）
             tickN(w, 4);
             int arrows3 = 0;
             for (int i = 0; i < ents.count(); ++i)
                 if (ents.kindAt(i) == EntityManager::Arrow) ++arrows3;
             okE = arrows2 == arrowsAfterB && arrows3 == arrowsAfterB
-                  && store.slotCountAt(bx0, kRigY, bz0, 0) == 2; // 库存不再扣（无第二次发射）
-            if (!okE)
+                  && store.slotCountAt(bx0, kRigY, bz0, 0) == 2  // 库存不再扣（无第二次发射）
+                  && dispFired > dispBeforeRepower;              // 信号确发出（零发射 = 冷却拦，非信号没发）
+            // ③ 冷却过期后再造上升沿 → 必须再发射（时间维度正向断言）。
+            pc.scanDispenserTraps(2.5f); // 等价递减驱动：一次耗尽 2s 冷却（探针不启定时器，直调推进；沿表空）
+            w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);         // 降沿（清 fireDispenserAtQml 沿基线）
+            tickN(w, 4);
+            const int dispBeforeExpire = dispFired;
+            placeRigBlock(w, bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置 = 新上升沿 + 冷却已过
+            tickN(w, 4);
+            int arrows4 = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++arrows4;
+            okE2 = arrows4 == arrows3 + 1                        // 再发射恰一次
+                   && store.slotCountAt(bx0, kRigY, bz0, 0) == 1 // 库存 2→1（真扣一发）
+                   && dispFired > dispBeforeExpire;              // 信号链全通（fire 非信号缺失）
+            if (!okE || !okE2)
                 qInfo().noquote() << "  [t814 e diag] arrowsAfterB=" << arrowsAfterB
-                                  << " arrowsAfterStable=" << arrows2 << " arrowsAfterRepower=" << arrows3
-                                  << " slotCount=" << store.slotCountAt(bx0, kRigY, bz0, 0);
+                                  << " stable=" << arrows2 << " repower=" << arrows3
+                                  << " afterCooldown=" << arrows4
+                                  << " slotCount=" << store.slotCountAt(bx0, kRigY, bz0, 0)
+                                  << " sigRepower=" << (dispFired > dispBeforeRepower)
+                                  << " sigExpire=" << (dispFired > dispBeforeExpire);
             // 清场
             w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);
             w.setBlock(bx0, kRigY, bz0, BR::Air, 0);
@@ -7154,20 +7214,25 @@ int main(int argc, char *argv[])
         }
 
         // (c) 投掷器：拉杆贴合 + store 预填 5 粉 → 掉落物弹出（dropper 只投不射，spawnItemAt 分支）。
+        //   review24 低危（探针族）：items 断言改**相对基线**——(a) 的失撑补口未来可能生成掉落物而 (a) 只
+        //   ents.clearAll() 不清 items，绝对值 ==1 依赖未言明的前序清场前提（拉杆附着语义一变即环境性假
+        //   FAIL）；(d) 本就是相对基线还注释了为什么，现统一口径。
         bool okC = false, okCInv = false;
         {
             const auto [x0, z0] = nextSlot();
-            w.setBlock(x0, kRigY, z0, BR::Dropper, 0);
+            const int itemsBeforeC = items.count(); // 相对基线（弹前快照）
+            placeRigBlock(w, x0, kRigY, z0, BR::Dropper, 0);
             store.ensureDispenser(x0, kRigY, z0);
             store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::RedstoneId, 5);
             tickN(w, 2);
-            w.setBlock(x0 + 1, kRigY, z0, BR::Lever, 1);
+            placeRigBlock(w, x0 + 1, kRigY, z0, BR::Lever, 1);
             tickN(w, 4);
-            okC = items.count() == 1;
+            okC = items.count() == itemsBeforeC + 1; // 相对本场景恰弹 1（新增量断言，不绑前序清场）
             okCInv = store.slotIdAt(x0, kRigY, z0, 0) == RecipeRegistry::RedstoneId
                      && store.slotCountAt(x0, kRigY, z0, 0) == 4;
             if (!okC || !okCInv)
-                qInfo().noquote() << "  [t814 c diag] items.count=" << items.count()
+                qInfo().noquote() << "  [t814 c diag] items=" << items.count()
+                                  << "/" << itemsBeforeC
                                   << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0);
             w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
             w.setBlock(x0, kRigY, z0, BR::Air, 0);
@@ -7181,11 +7246,11 @@ int main(int argc, char *argv[])
         bool okD = false;
         {
             const auto [x0, z0] = nextSlot();
-            w.setBlock(x0, kRigY, z0, BR::Dispenser, 0);
+            placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0);
             store.ensureDispenser(x0, kRigY, z0); // 有条目但库存全空
             tickN(w, 2);
             const int entsBefore = ents.count(), itemsBefore = items.count();
-            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneBlock, 0);
+            placeRigBlock(w, x0 + 1, kRigY, z0, BR::RedstoneBlock, 0);
             tickN(w, 4);
             int arrows = 0;
             for (int i = 0; i < ents.count(); ++i)
@@ -7201,7 +7266,7 @@ int main(int argc, char *argv[])
             tickN(w, 2);
         }
 
-        const bool okT814 = okA && okB && okBInv && okC && okCInv && okD && okE;
+        const bool okT814 = okA && okB && okBInv && okC && okCInv && okD && okE && okE2;
         if (!okT814) ++totalFail;
         qInfo().noquote() << (okT814 ? "PASS" : "FAIL")
                           << "| t814 real-consumer probes: Main.qml forwarding mirrored onto actual "
@@ -7209,7 +7274,11 @@ int main(int argc, char *argv[])
                              "primed entity at cell center; redstone-block->dispenser w/ 3 arrows fires 1 + "
                              "decrements to 2; lever->dropper w/ 5 dust pops 1 item entity + decrements to 4; "
                              "empty tracked dispenser powered = design no-op; stable-power re-touch and "
-                             "sub-2s-cooldown re-power both do not re-fire) - consumer leg never executed by "
+                             "sub-2s-cooldown re-power both do not re-fire, each zero-fire leg gated by "
+                             "powerDispenserTriggered emission-count delta so cooldown-block vs signal-lost "
+                             "are distinguished; cooldown driven past 2s expiry via scanDispenserTraps "
+                             "equivalent-decrement then a true re-edge MUST re-fire +1 arrow/stock 2->1, "
+                             "pinning the cooldown duration both directions) - consumer leg never executed by "
                              "P15/t773 before, iron-door contrast explained (door = in-World state write, "
                              "TNT/dispenser = signal->QML->consumer)";
     }
@@ -7226,6 +7295,11 @@ int main(int argc, char *argv[])
     //       在其后）。含「同 id 早退」边角（光标已持同 id 素品、槽内附魔品的 pickup 序列——早退不清
     //       字段、后续 setter 逐个覆写，探针断言实 VM 语义与桩一致）。类别覆盖工具 / 护甲 / 附魔书 +
     //       四条满配多附魔（4 ench 全占用）。
+    //   ⚠ 同步义务（review24 #10）：A 段是 AnvilUI.qml 调用序的**手工镜像**——改 slotLeft / takeProduct /
+    //   returnAnvilToHotbar 的 setter 调用序（增删 / 换序，典型丢失形态如漏 heldDurability）时**必须同步
+    //   本探针 A1-A4**，否则探针按旧序继续 PASS 掩盖真回归；本段也刻意不镜像 InventoryOps.resolveClick
+    //   的 JS 分派（那层由 t792 qml.exe 实机探针覆盖）。中期方案（暂不做）：qml.exe 挂真 Hotbar C++ 对象
+    //   替换 t792 桩，消掉拼接缝。
     //   (B) 真 WorldStore SQLite round-trip（Main.qml gatherPlayerState :665-688 的精确 map 形状
     //       version 3 / applyPlayerState :634-655 的精确回灌调用）：hotbar 9 + main 27 + armor 4
     //       每槽 id/count/durability/enchants[4]/name 落盘 → 关库重开 → 读回 → 灌入新 Hotbar VM
@@ -7399,8 +7473,12 @@ int main(int argc, char *argv[])
         data.insert(QStringLiteral("armor"), armorArr);
 
         // 落盘 → 关库 → 重开 → 读回（临时目录绝对路径；dbPath 对绝对入参直通，不污染 saves/）。
+        //   review24 #10：文件名拼 PID——固定名两实例并发时 Windows 对被占用文件的 QFile::remove 静默
+        //   失败 → 两进程共库互相 INSERT OR REPLACE 覆盖 / 环境性假 FAIL（数据形状相同还可能巧合双 PASS
+        //   掩盖竞态）；PID 后缀按进程隔离（本进程退出后的遗留文件仍由两次 remove + 下轮覆盖清）。
         WorldStore store;
-        const QString dbAbs = QDir::temp().absoluteFilePath(QStringLiteral("voxel_t822_probe.sqlite"));
+        const QString dbAbs = QDir::temp().absoluteFilePath(
+                QStringLiteral("voxel_t822_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
         QFile::remove(dbAbs);
         okB_build = store.openWorld(dbAbs) && store.savePlayerData(data);
         store.closeWorld();
@@ -7465,13 +7543,17 @@ int main(int argc, char *argv[])
             const auto vmEq = [&vm2, &vm3](bool armor, int i) {
                 const int idA = armor ? vm2.armorBlockIdAt(i) : (i < 9 ? vm2.blockIdAt(i) : vm2.mainBlockIdAt(i - 9));
                 const int idB = armor ? vm3.armorBlockIdAt(i) : (i < 9 ? vm3.blockIdAt(i) : vm3.mainBlockIdAt(i - 9));
+                // review24 #10 顺带：补比 count 字段——「JSON→VM 灌入丢 count」回归此前在 VM 级漏检
+                //   （JSON 级 slotEq 可兜存档层，VM 级补齐后两段都有防线）。
+                const int cntA = armor ? vm2.armorCountAt(i) : (i < 9 ? vm2.countAt(i) : vm2.mainCountAt(i - 9));
+                const int cntB = armor ? vm3.armorCountAt(i) : (i < 9 ? vm3.countAt(i) : vm3.mainCountAt(i - 9));
                 const int durA = armor ? vm2.armorDurabilityAt(i) : (i < 9 ? vm2.durabilityAt(i) : vm2.mainDurabilityAt(i - 9));
                 const int durB = armor ? vm3.armorDurabilityAt(i) : (i < 9 ? vm3.durabilityAt(i) : vm3.mainDurabilityAt(i - 9));
                 const QString nmA = armor ? vm2.armorCustomNameAt(i) : (i < 9 ? vm2.customNameAt(i) : vm2.mainCustomNameAt(i - 9));
                 const QString nmB = armor ? vm3.armorCustomNameAt(i) : (i < 9 ? vm3.customNameAt(i) : vm3.mainCustomNameAt(i - 9));
                 const QVariantList eA = armor ? vm2.armorEnchantsAt(i) : (i < 9 ? vm2.enchantsAt(i) : vm2.mainEnchantsAt(i - 9));
                 const QVariantList eB = armor ? vm3.armorEnchantsAt(i) : (i < 9 ? vm3.enchantsAt(i) : vm3.mainEnchantsAt(i - 9));
-                if (idA != idB || durA != durB || nmA != nmB || eA.size() != eB.size()) return false;
+                if (idA != idB || cntA != cntB || durA != durB || nmA != nmB || eA.size() != eB.size()) return false;
                 for (int k = 0; k < int(eA.size()); ++k) if (eA.at(k).toInt() != eB.at(k).toInt()) return false;
                 return true;
             };
