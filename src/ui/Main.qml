@@ -517,6 +517,15 @@ Window {
                 fireHost.addFireVis(fcells[fi], fcells[fi + 1], fcells[fi + 2])
             console.info("[t724] fire rebuild on load: " + (fcells.length / 3) + " cells")
         }
+        // t843 燃烧 delegate 清理（只清不重建）：燃烧态是 World 层运行期侧表不进存档（beginLoad 已清
+        //   m_burningCells）→ 读档后燃烧自然熄灭（dev-spec t843 明示可接受）；此处清上一世界残留的
+        //   面火 overlay delegate（跨世界 delegate 永驻 = 卡顿教训，hardReset+清 delegate 收口）。
+        {
+            for (const key in burningHost.burningObjs) {
+                burningHost.burningObjs[key].destroy()
+                delete burningHost.burningObjs[key]
+            }
+        }
         // t725 余烬门读档重建（同 t724 火焰模式）：读档 blob 直写不经 blockPlaced → 事件驱动的 portalHost
         //   读档后恒空；先清上一世界残留 delegate 再按本世界真值重建（门 delegate 朝向读格 state，重建即对）。
         {
@@ -8849,6 +8858,120 @@ Window {
             }
         }
 
+        // t843 燃烧方块渲染 host（同 fireHost / paintingHost 的 createObject delegate 模式）：可燃方块
+        //   点燃进燃烧态（World 侧表 m_burningCells，栅格 id 不变 → 不走 chunk mesh）→ 每燃格一个
+        //   delegate = **面火 overlay**（4 侧面 + 顶面共 5 片 quad，各贴格面外 0.505 微偏移——面片在方块
+        //   自身表面之外 5mm 防 z-fight，被实体邻块挡住的面片自然深度剔除；底面不铺（贴地不可见，MC 同
+        //   款取舍），机制对齐 MC fire-on-face「方块外表覆一层火焰贴图」）。贴图复用 fireStripTex（32 帧
+        //   flipbook 翻书同源 → 燃烧动画与立地火同帧同步）；材质契约同 fireDelegate：NoLighting（自发光）+
+        //   NoCulling（双面）+ Mask cutout（alphaCutoff 0.1，火焰像素 0/255 硬边）。
+        //   维护三重（同 fireHost 模式）：onBlockIgnited 加（addBurningVis 内 isBurningAt 真值校验）/
+        //   onBlockBroken 删（烧毁 setBlock 替换 + 被挖，任何块破坏都摘——燃烧块被挖火随块走）/
+        //   onWorldChanged 兜底清孤儿（爆炸 / 系统改写）。燃烧态不进存档 → enterWorld 只清不重建
+        //   （读档后燃烧自然熄灭，dev-spec t843 明示可接受）。分层（PLAN §2）：纯呈现层，只消费语义事件。
+        Node {
+            id: burningHost
+            property var burningObjs: ({})
+            function addBurningVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                if (burningObjs[key]) return
+                if (!theWorld.isBurningAt(x, y, z)) return  // 真值校验（防陈旧信号挂假 delegate）
+                burningObjs[key] = burningDelegate.createObject(burningHost, {cellX: x, cellY: y, cellZ: z})
+            }
+            function removeBurningVis(x, y, z) {
+                const key = x + "," + y + "," + z
+                const o = burningObjs[key]
+                if (o) { o.destroy(); delete burningObjs[key] }
+            }
+            // 兜底清孤儿（爆炸 / 浇熄摘表 / 系统改写）：isBurningAt 假的条目销毁。
+            function cleanupVis() {
+                for (const key in burningObjs) {
+                    const p = key.split(",")
+                    const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
+                    if (!theWorld.isBurningAt(x, y, z)) {
+                        burningObjs[key].destroy(); delete burningObjs[key]
+                    }
+                }
+            }
+        }
+
+        // t843 燃烧方块 delegate 模板（burningHost.addBurningVis 经 createObject 实例化）：5 片面火 quad
+        //   （±X / ±Z 侧面各绕 Y 对齐轴向 + 顶面绕 X 转平），各偏移面外 0.005。
+        Component {
+            id: burningDelegate
+            Node {
+                id: burnRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                // 格中心（世界坐标）；5 片 quad 自中心按面法线偏移。
+                position: Qt.vector3d(cellX + 0.5, cellY + 0.5, cellZ + 0.5)
+                // +X 面火（BillboardQuad 默认 XY 面 → 绕 Y 90° 立到 X 向，偏移面外 0.505）。
+                Model {
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0.505, 0, 0)
+                    eulerRotation: Qt.vector3d(0, 90, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting   // 自发光（火焰层）
+                        cullMode: Material.NoCulling              // 双面
+                        alphaMode: PrincipledMaterial.Mask        // cutout（同 fireDelegate 契约）
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex               // 共享条带（scaleV/positionV 材质级翻书）
+                    }
+                }
+                // -X 面火。
+                Model {
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(-0.505, 0, 0)
+                    eulerRotation: Qt.vector3d(0, 90, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        cullMode: Material.NoCulling
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex
+                    }
+                }
+                // +Z 面火（默认朝向不旋转）。
+                Model {
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0, 0, 0.505)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        cullMode: Material.NoCulling
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex
+                    }
+                }
+                // -Z 面火。
+                Model {
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0, 0, -0.505)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        cullMode: Material.NoCulling
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex
+                    }
+                }
+                // 顶面火（绕 X 90° 转平，偏移格顶 0.505）。
+                Model {
+                    geometry: BillboardQuad {}
+                    position: Qt.vector3d(0, 0.505, 0)
+                    eulerRotation: Qt.vector3d(90, 0, 0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        cullMode: Material.NoCulling
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.1
+                        baseColorMap: fireStripTex
+                    }
+                }
+            }
+        }
+
         // t725 余烬门渲染 host（同 fireHost / paintingHost 的 createObject delegate 模式）：NetherPortal
         //   方块（138）的贴图是 32 帧条带 flipbook + 软半透明紫面（非图集瓦片）→ 渲染不走 chunk mesh
         //   （chunkgeometry 三处 PASS 已 skip），每格门面一个 delegate = **单片竖直平面 quad**（BillboardQuad
@@ -9638,6 +9761,9 @@ Window {
             // t724：火焰熄灭 / 被挖（挖火 = 扑灭）→ 销毁视觉 delegate（id=137=BlockRegistry::Fire；World::tickFire
             //   自熄 setBlock Air 也走本信号 → delegate 挂卸自动跟随 C++ 索引）。挖火无掉落（dropId=0，C++ 侧）。
             if (id === 137) fireHost.removeFireVis(x, y, z)
+            // t843：燃烧方块被破坏（计时烧毁 setBlock 替换 / 玩家挖 / 爆炸）→ 摘面火 overlay（火随块走；
+            //   烧毁位燃起的余烬火经 blockPlaced(137) 挂立地火 delegate，视觉无缝衔接）。
+            burningHost.removeBurningVis(x, y, z)
             // t725：余烬门熄灭 → 销毁视觉 delegate（id=138=BlockRegistry::NetherPortal；直挖门格走 setBlock
             //   发本信号，连通域其余格走 setWaterSilent 静默不发——由 onWorldChanged portalHost.cleanupVis
             //   兜底清）。挖门无掉落（dropId=0，C++ 侧）。
@@ -9802,6 +9928,12 @@ Window {
         function onGravityBlockFell(x, y, z, blockId) {
             entityManager.spawnFallingBlock(x, y, z, blockId)
         }
+        // t843：可燃方块被点燃进燃烧态（World::blockIgnited——打火石直燃 / 火格蔓延 / 同态蔓延三入口）→
+        //   挂面火 overlay delegate（addBurningVis 内 isBurningAt 真值校验防陈旧信号）。摘除走
+        //   onBlockBroken（烧毁 / 被挖）+ onWorldChanged cleanupVis（爆炸 / 浇熄摘表 / 系统改写兜底）。
+        function onBlockIgnited(x, y, z) {
+            burningHost.addBurningVis(x, y, z)
+        }
         // t88：worldgen 重生（seed 变 / 初始生成）清除旧火把 → 伪光源列表校验清理。worldgen 不发
         // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
         // torchPositions，把已不再是火把的条目删掉。setBlock 编辑也会触发 worldChanged，但此时
@@ -9829,6 +9961,9 @@ Window {
             paintingHost.cleanupVis()
             // t724：同步清火焰视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同 paintingHost）。
             fireHost.cleanupVis()
+            // t843：同步清燃烧方块面火 overlay 孤儿（浇熄摘表（火灭块存，栅格不变无 blockBroken）/
+            //   爆炸改写 / 静默直写替换块的 ≤1 窗自愈期兜底；isBurningAt 侧表真值单一权威）。
+            burningHost.cleanupVis()
             // t725：同步清余烬门视觉 delegate 孤儿（门框破坏连锁 / 连通域静默清不经 blockBroken 的路径
             //   收口；removeNetherPortalAt 的 setWaterSilent 只发 worldChanged → 此处兜底）。
             portalHost.cleanupVis()

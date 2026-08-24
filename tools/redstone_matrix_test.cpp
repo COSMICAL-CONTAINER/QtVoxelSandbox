@@ -2481,11 +2481,13 @@ int main(int argc, char *argv[])
     // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火焚毁）──
     //   用户报告（R19.12）：「打火石对着木头制品右键点燃 + 蔓延」「打火石对苦力怕右键引爆」「往火里丢
     //   物品被烧掉（参考岩浆）」。三段断言（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
-    //   (a) 木墙蔓延烧毁：石台上 6 连木板墙 + 端点火格 → 驱动 tickFire（每 5 调 = 1 判定窗，0.5s/窗）1000 窗
-    //       （500s；review-g #5 叠加补偿后逐邻独立 2.5%/窗 → 每块期望 ~20s、链式 ~2min，1000 窗 = 期望 25 次
-    //       点燃对 6 块需求 ≈ -3.9σ 裕量——600 窗在 2.5% 下裕量收窄到 ~0.6% 假 FAIL 率，按新概率调宽）→
-    //       全部木板被吞（blockAt 全非 Planks）、火最终无燃料自熄（全 Air）；烧毁走 setBlock(Fire) 放置
-    //       语义 → blockBroken(Planks) 恒 0（烧毁无掉落，区别于破块链）；
+    //   (a) 木墙点燃蔓延烧毁链（t843 语义重做版——旧「火吞块 setBlock(Fire) 替换」退役，点燃 = 方块进
+    //       燃烧态、id 不变，烧毁发生在燃烧计时归零）：石台上 6 连木板墙 + 端点火格 → 两段断言：① 首次
+    //       点燃中途观测 isBurningAt 真 + blockAt 仍是 Planks（直燃语义核心，400 窗内 P(未燃)≈4e-5）；
+    //       ② 继续驱动至 1000 窗（500s；2.5%/邻/窗 → 每块期望 ~20s + 5s 燃烧计时 + 余烬火衔接 → 链式
+    //       ~2.5min，1000 窗 = 期望 25 次点燃对 6 块需求 ≈ -3.9σ 裕量）→ 全部木板被吞（blockAt 全非
+    //       Planks）、火最终无燃料自熄（全 Air）；烧毁走 setBlock(Fire) 放置语义 → blockBroken(Planks)
+    //       恒 0（烧毁无掉落，区别于破块链）；
     //   (b) Stalker 打火石引爆：远场监听（>> kDetectRange 不追踪）+ playerTargetable=false（旧 !targetable
     //       门会清 fuseTimer 并跳过 aiStalker——本断言兼证 t804 的门豁免）→ igniteStalkerFlint 返 true；
     //       猪（非 Stalker）同调用返 false（类型拒）；点燃后原地 ~1.5s 引爆（爆炸恰一次、引爆时刻 ∈
@@ -2513,7 +2515,8 @@ int main(int argc, char *argv[])
         const int ty = kRigY;
         const bool rigOk = x0 >= 0;
 
-        // (a) 木墙点燃蔓延烧毁链：石台 dx 0..7，木板墙 dx 1..6（ty 层），火 dx 0（贴首块木板）。
+        // (a) 木墙点燃蔓延烧毁链（t843 语义重做版）：石台 dx 0..7，木板墙 dx 1..6（ty 层），立地火 dx 0（贴首块
+        //   木板）。① 首燃中途观测（直燃语义：isBurningAt 真 + id 保留）→ ② 终态烧穿断言。
         //   blockBroken 计数只滤 Planks（火自熄 Fire→Air 也发 blockBroken 但 oldId==Fire，排除）。
         int plankBreaks = 0;
         QObject::connect(&w, &World::blockBroken, &w,
@@ -2521,15 +2524,27 @@ int main(int argc, char *argv[])
         for (int dx = 0; dx <= 7; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
         for (int dx = 1; dx <= 6; ++dx) w.setBlock(x0 + dx, ty, z0, BR::Planks, 0);
         w.setBlock(x0, ty, z0, BR::Fire, 0);
-        for (int win = 0; win < 1000; ++win)
-            for (int k = 0; k < 5; ++k) w.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）；窗宽随 2.5% 调（见上注）
+        bool litIntact = false; // ① 首燃观测：进燃烧态且栅格 id 仍是 Planks（燃烧是侧表瞬态不改 id）
+        int winsRun = 0;
+        for (int win = 0; win < 400 && !litIntact; ++win) { // 2.5%/窗 → P(400 窗未燃)≈4e-5
+            for (int k = 0; k < 5; ++k) w.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）
+            ++winsRun;
+            if (w.isBurningAt(x0 + 1, ty, z0))
+                litIntact = w.blockAt(x0 + 1, ty, z0) == BR::Planks; // 中途采样在 10 窗燃烧计时内必命中
+        }
+        for (int win = winsRun; win < 1000; ++win) // ② 继续烧穿（点燃 ~40 窗/链环 + 10 窗燃烧 + 余烬火衔接）
+            for (int k = 0; k < 5; ++k) w.tickFire();
         int planksLeft = 0, firesLeft = 0;
         for (int dx = 0; dx <= 7; ++dx) {
             const quint8 b = w.blockAt(x0 + dx, ty, z0);
             if (b == BR::Planks) ++planksLeft;
             if (b == BR::Fire) ++firesLeft;
         }
-        const bool okA = planksLeft == 0 && firesLeft == 0 && plankBreaks == 0;
+        const bool okA = rigOk && litIntact && planksLeft == 0 && firesLeft == 0 && plankBreaks == 0;
+        if (!okA)
+            qInfo().noquote() << "  [t804a diag] litIntact" << litIntact << "winsRun" << winsRun
+                              << "planksLeft" << planksLeft << "firesLeft" << firesLeft
+                              << "plankBreaks" << plankBreaks;
         // 清 (a) 场（石台 + 残火/灰烬；正常应为全 Air，仍防御性清）。
         for (int dx = 0; dx <= 7; ++dx) {
             w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
@@ -2636,12 +2651,14 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t804 flint ignition extended: fire next to 6-plank wall burns all planks "
-                             "away (no blockBroken-drop chain) and self-extinguishes; flint on stalker "
-                             "detonates in-place ~1.5s uncancellable fuse (pig rejected, !targetable gate "
-                             "exempt, exactly one explosion, inflate visible); item dropped into fire "
-                             "burns after ~0.8s window (itemBurned smoke once at fire cell) vs lava "
-                             "instant destroy, item rescued within window survives after fire removed";
+                          << "| t804 flint ignition extended (t843 semantics): fire next to 6-plank "
+                             "wall ignites planks into burning state with id preserved (mid-burn "
+                             "sample), chain burns all planks away (no blockBroken-drop chain) and "
+                             "self-extinguishes; flint on stalker detonates in-place ~1.5s "
+                             "uncancellable fuse (pig rejected, !targetable gate exempt, exactly one "
+                             "explosion, inflate visible); item dropped into fire burns after ~0.8s "
+                             "window (itemBurned smoke once at fire cell) vs lava instant destroy, "
+                             "item rescued within window survives after fire removed";
     }
 
     // ── t805 船上岸回归探针（用户「船又能直接开上岸」；回归根因 = t711/21fff7b 把碰岸探测的 ignoreIce
@@ -5492,13 +5509,16 @@ int main(int argc, char *argv[])
         }
     }
 
-    // ── P26 复审 #16（2026-08-23 低危）火吞木门整门联动探针 ──
-    //   Review #16：门在可燃表内，火蔓延 setBlock(Fire) 只替换点燃的半格 → 另半扇孤立残留无掉落。修后
-    //   写 Fire 前快照目标格（t134 教训：setBlock 重置 state），isDoor → 配对半扇（state bit3 上/下互补
-    //   y∓1）同为门时一并置 Fire（机制等价 MC 门整体燃烧，与 t134/t466 破门配对联动同构）。断言：
-    //   (a) 门下格被邻火点燃的**那次 tickFire 调用内**，上格一并变 Fire —— 修前上格非火的 6 邻（隔一
-    //       格对角），只能等下格火后续窗独立蔓延 → 首次观测下格 Fire 时上格仍是 WoodDoor → FAIL；
-    //   (b) 对照石柱（不可燃）同布局永不被吞。
+    // ── P26 复审 #16（2026-08-23 低危）火吞木门整门联动探针（t843 语义重做版）──
+    //   Review #16：门在可燃表内，火蔓延只点燃半格 → 另半扇孤立残留无掉落。t843 重做后语义：点燃 = 进
+    //   燃烧态（栅格 id 不变），联动迁移到 igniteFlammableAt 单一入口——目标是门 → 配对半扇（state bit3
+    //   上/下互补 y∓1）同为门且非湿时一并点燃（同窗同计时 → 同窗烧毁）。断言：
+    //   (a) 门下格被邻火点燃的**那次 tickFire 调用内**，上格一并进燃烧态（isBurningAt 真且两半 id 仍是
+    //       WoodDoor）——修前上格非火的 6 邻（隔一格对角），只能等下格燃烧的后续窗同态蔓延 → 首次观测
+    //       下格燃烧时上格未燃 → FAIL；
+    //   (b) 两半同计时同窗烧毁（终态均非 WoodDoor）且 blockBroken(WoodDoor) 恒 0（烧毁无掉落——余烬火
+    //       setBlock(Fire) 放置语义，Air 收尾在对称同烧下不触发）；
+    //   (c) 对照石柱（不可燃）同布局永不被吞。
     //   确定性：火源 6 邻仅门下格可燃（无燃料不熄灭路径被 hasFuel 门挡）→ 点燃只是时间问题（2.5%/窗
     //   ——review-g #5 叠加补偿后；上限 3000 窗，P(未燃)≈0.975^3000≈e^-76）；harness 只驱动 tickFire
     //   （无雨 / 无风灭混淆源）。
@@ -5526,22 +5546,43 @@ int main(int argc, char *argv[])
             bool lit = false;
             for (int t = 0; t < 15000 && !lit; ++t) { // 每 5 次 tickFire = 1 窗（kFireTickInterval=5 节流）
                 w.tickFire();
-                if (w.blockAt(x0 + 1, by, z0) == BR::Fire) lit = true; // 首次观测下格燃即停（上格同窗已联动）
+                if (w.isBurningAt(x0 + 1, by, z0)) lit = true; // 首次观测下格进燃烧态即停（上格同调用已联动）
             }
-            const bool aOk = lit && w.blockAt(x0 + 1, by + 1, z0) == BR::Fire;
+            // t843 语义重做版断言：点燃 = 燃烧态（World 侧表，栅格 id 不变——门两半仍 WoodDoor），整扇
+            //   联动 = 同一 igniteFlammableAt 调用内配对半扇一并进燃烧态（上格与火源隔一格对角，非 6 邻
+            //   ——仅联动可达；同态蔓延是后续窗的事，首窗观测只可能来自联动，旧探针的隔离手法原样保留）。
+            const bool aOk = lit && w.blockAt(x0 + 1, by, z0) == BR::WoodDoor
+                             && w.isBurningAt(x0 + 1, by + 1, z0)
+                             && w.blockAt(x0 + 1, by + 1, z0) == BR::WoodDoor;
+            // 驱至烧毁收尾：两半同计时同窗归零 → 一半先烧成余烬火、另一半见对偶非门自走 setBlock(Fire)
+            //   （无 Air 收尾路径 → blockBroken(WoodDoor) 恒 0；对偶「仍是未燃门」的 Air 收尾只在不对称
+            //   场景触发，对称同烧不命中——见 world.cpp (d) pass 烧毁收尾注释）。
+            int doorBreaks = 0;
+            QObject::connect(&w, &World::blockBroken, &w,
+                             [&](int, int, int, int oldId) { if (oldId == int(BR::WoodDoor)) ++doorBreaks; });
+            bool consumed = false;
+            for (int t = 0; t < 15000 && !consumed; ++t) {
+                w.tickFire();
+                if (w.blockAt(x0 + 1, by, z0) != BR::WoodDoor
+                    && w.blockAt(x0 + 1, by + 1, z0) != BR::WoodDoor) consumed = true;
+            }
             const bool bOk = w.blockAt(x0 + 3, by, z0) == BR::Stone
                              && w.blockAt(x0 + 3, by + 1, z0) == BR::Stone;
-            const bool ok = aOk && bOk;
+            const bool ok = aOk && consumed && doorBreaks == 0 && bOk;
             if (!ok)
                 qInfo().noquote() << "  door whole-burn: lit" << lit
                                   << "lower" << int(w.blockAt(x0 + 1, by, z0))
                                   << "upper" << int(w.blockAt(x0 + 1, by + 1, z0))
+                                  << "consumed" << consumed << "doorBreaks" << doorBreaks
                                   << "stoneCtrl" << bOk;
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                              << "| review#16 door whole-burn: fire consuming one door half replaces the "
-                                 "paired half in the same spread event (upper is not 6-adjacent to the "
-                                 "original fire - only reachable via linkage); stone control never ignites";
+                              << "| review#16 door whole-burn (t843 semantics): fire lighting one door "
+                                 "half enters it into burning state with id preserved and ignites the "
+                                 "paired half in the same call (upper is not 6-adjacent to the fire - "
+                                 "only reachable via linkage); both halves burn out same-window via "
+                                 "ember flare (no blockBroken = no-drop burn), stone control never "
+                                 "ignites";
             // 清场（火 / 门残格 / 石柱；部分火格可能已自熄 → setBlock(Air) 对 Air no-op 无害）。
             w.setBlock(x0, by, z0, BR::Air, 0);
             w.setBlock(x0 + 1, by, z0, BR::Air, 0);
@@ -6195,7 +6236,9 @@ int main(int argc, char *argv[])
         for (int win = 0; win < 800; ++win) {
             for (int t = 0; t < 5; ++t) wG5.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）
             for (int k = 0; k < kLanesG5; ++k) { // 点燃即复原（下窗再掷——每泳道每窗恰 1 样本）
-                if (wG5.blockAt(laneX(k) + 1, gy, laneZ(k)) == BR::Fire) {
+                // t843 语义重做：命中 = 木板进燃烧态（isBurningAt 侧表真值，栅格 id 不变）；复原 = 同 id
+                //   setBlock no-op 写（新契约：任何显式写调用含同 id 写都清燃烧侧表——见 world.cpp setBlock）。
+                if (wG5.isBurningAt(laneX(k) + 1, gy, laneZ(k))) {
                     ++hitsA;
                     wG5.setBlock(laneX(k) + 1, gy, laneZ(k), BR::Planks, 0);
                 }
@@ -6220,8 +6263,11 @@ int main(int argc, char *argv[])
         wG5.setBlock(14, gy, 80, BR::Water, 0);  // 水（harness 不驱动 tickWaterFlow → 静止不漫）
         for (int win = 0; win < 300; ++win)
             for (int t = 0; t < 5; ++t) wG5.tickFire();
-        okB = wG5.blockAt(13, gy, 80) == BR::Planks  // 木板原样（掷骰被湿燃料判定拦下，非概率）
-             && wG5.blockAt(12, gy, 80) == BR::Fire; // 火有燃料仍存活（水不在火的 6 邻）
+        // t843：防火带语义不变（湿燃料 igniteFlammableAt 内统一拒绝——蔓延 / 直燃三入口同判），断言加
+        //   isBurningAt 反证（id 不变语义下 blockAt==Planks 单独不再充分——燃烧态也保持 Planks）。
+        okB = wG5.blockAt(13, gy, 80) == BR::Planks   // 木板原样（掷骰被湿燃料判定拦下，非概率）
+             && !wG5.isBurningAt(13, gy, 80)          // 且从未进燃烧态（确定性防火带）
+             && wG5.blockAt(12, gy, 80) == BR::Fire;  // 火有燃料仍存活（水不在火的 6 邻）
 
         // ── (c) 火自身邻水加速自熄（火正上方邻水 + 侧邻燃料板）── rig 行 z=82
         for (int dx = 11; dx <= 15; ++dx)
@@ -6297,6 +6343,207 @@ int main(int argc, char *argv[])
                              "while roofed control fire only dies by consuming its own fuel (skyLight<15 "
                              "not rained on); suppression predicates factored into "
                              "fireRainExposedAt/fireWaterNeighborAt for t843 fire-semantics redo to adopt";
+    }
+
+    // ── P-t843 可燃物直燃语义重做探针（专用局部世界 wT，P30/P31/review-g#5 先例）──
+    //   dev-plan t843：打火石右键可燃方块 = 方块本身点燃（燃烧态 = World 侧表 m_burningCells 瞬态，
+    //   栅格 id 不变；面火 overlay 走 blockIgnited → QML burningHost）；燃烧计时归零 → 烧毁无掉落
+    //   （t724 语义保持）；蔓延 = 相邻可燃进同态（火格掷骰 + 燃烧格同态掷骰）；批 G 三抑制谓词整体
+    //   接入（湿燃料防火带收口在 igniteFlammableAt 三入口统一拒绝；燃烧中变湿 = 浇熄火灭块存）；
+    //   接触燃烧方块 = 着火（mob 侧实证；玩家侧同款三格判定复制在 PlayerController::step——Game 层
+    //   直编不可达（captured 物理闸门 + 私有 step，P20 注释先例），同构代码 + 人工目视收口）；3D 立
+    //   地火失撑 = 编辑钩子同调用内立即熄灭。
+    //   wT：48×48×96 seed 21，gy=88 高空净空层（heightAt ∈57..71 + 树冠 ~+10，88 全空免凿；review-g#5
+    //   凿净空先例在此免除——Air→Air 早退不重算光照）。六段断言：
+    //   (a) 直燃进态 + 精确计时 + 非可燃拒：ignite(Planks) 真 / isBurningAt 真 / id 保留 / 重复 ignite
+    //       false（幂等不重置）；ignite(Stone) false（打火石回退立地火路径的 World 侧判据）；恰 9 窗
+    //       仍在燃（计时 10→1）、第 10 窗烧毁 → cap 内燃起余烬火（blockAt==Fire）→ 余烬无燃料 5%/窗
+    //       自熄（≤600 窗终态 Air，P(幸存)≈0.95^600≈4e-14）；
+    //   (b) 湿燃料防火带（确定性）：水邻木板 ignite 拒（false）+ 300 窗从未燃烧 + 块存；燃烧中变湿
+    //       浇熄（火灭块存）：先点燃**后**贴水（顺序即语义：贴水在先会被防火带拒）→ 40%/窗浇熄（双板
+    //       60 窗均灭 P≈(0.6^60)²≈3e-27；烧穿尾部 P(0.6^10)≈0.6%/板，双板同穿≈3.6e-5 → 断言 ≥1 板
+    //       块存）；
+    //   (c) 同态蔓延存在性：10 泳道（燃板 A + 贴邻新板 B，全场无 Fire 格——纯燃烧格掷骰）每窗复原 B +
+    //       重燃 A → 400 窗 ≥1 次 B 被燃板点燃（P(全未中)=0.975^4000≈3e-44；率值统计已由 review-g#5(a)
+    //       锁定，此处只证燃烧格自身掷骰通路存在）；
+    //   (d) mob 接触着火：石框围 1×1 燃烧木板上的猪（脚下一格 footY-1 命中）→ 40 tick（< 首次火伤结算
+    //       1s → 无随机熄灭 / 伤害混淆）内 EntityManager::isBurningAt(猪) 真；
+    //   (e) 立地火失撑即时灭 + 有撑对照：破火下石支撑 → **同一 setBlock 调用内**火格变 Air
+    //       （checkFireOnEdit 编辑钩子，无 tickFire 参与——即时性本身是断言）；对照（石撑 + 邻燃料板）
+    //       1 窗后仍 Fire（有燃料火无自熄掷骰路径——确定性非概率）；
+    //   (f) 燃烧中替换 / 同 id 复原清态：燃板 setBlock(Stone) 替换 → isBurningAt 假；再点燃后同 id
+    //       setBlock(Planks) no-op 写 → isBurningAt 假（review-g#5(a) 每窗复原所依赖契约的显式锁定）。
+    {
+        World wT;
+        wT.setWidth(48);
+        wT.setDepth(48);
+        wT.setHeight(96);
+        wT.setSeed(21);
+        const int gy = 88;
+        bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
+        QString diagT843;
+        const auto win843 = [&wT](int n) { for (int i = 0; i < n; ++i) for (int t = 0; t < 5; ++t) wT.tickFire(); };
+
+        // ── (a) 直燃进态 + 精确计时（gy 层 z=6 行 x=7 板 / x=9 石对照）──
+        {
+            const int px = 7, pz = 6;
+            wT.setBlock(px, gy - 1, pz, BR::Stone, 0);  // 石台（余烬火支撑 + 与后段隔离）
+            wT.setBlock(px, gy, pz, BR::Planks, 0);
+            wT.setBlock(9, gy, pz, BR::Stone, 0);       // 非可燃对照（距板 2 格非 6 邻）
+            const bool igFirst = wT.igniteFlammableAt(px, gy, pz);
+            const bool idKept = wT.blockAt(px, gy, pz) == BR::Planks;
+            const bool igAgain = wT.igniteFlammableAt(px, gy, pz);   // 重复 → false（幂等）
+            const bool igStone = wT.igniteFlammableAt(9, gy, pz);    // 石 → false（回退立地火路径）
+            win843(9);                                                // 计时 10→1：恰 9 窗仍在燃
+            const bool stillBurningAt9 = wT.isBurningAt(px, gy, pz)
+                                         && wT.blockAt(px, gy, pz) == BR::Planks;
+            win843(1);                                                // 第 10 窗：归零烧毁 → 余烬火
+            const bool burntAt10 = !wT.isBurningAt(px, gy, pz)
+                                   && wT.blockAt(px, gy, pz) == BR::Fire;
+            win843(600);                                              // 余烬无燃料 5%/窗自熄
+            const bool emberDied = wT.blockAt(px, gy, pz) == BR::Air;
+            okA = igFirst && idKept && !igAgain && !igStone && stillBurningAt9 && burntAt10
+                  && emberDied && wT.blockAt(9, gy, pz) == BR::Stone;
+            wT.setBlock(px, gy - 1, pz, BR::Air, 0);
+            wT.setBlock(9, gy, pz, BR::Air, 0);
+        }
+
+        // ── (f) 燃烧中替换 / 同 id 复原清态（z=10 行）──
+        {
+            const int px = 7, pz = 10;
+            wT.setBlock(px, gy, pz, BR::Planks, 0);
+            wT.igniteFlammableAt(px, gy, pz);
+            wT.setBlock(px, gy, pz, BR::Stone, 0);      // 替换 → 燃烧作废
+            const bool clearedByReplace = !wT.isBurningAt(px, gy, pz);
+            wT.setBlock(px, gy, pz, BR::Planks, 0);     // 换回木 + 重新点燃
+            const bool reignited = wT.igniteFlammableAt(px, gy, pz) && wT.isBurningAt(px, gy, pz);
+            wT.setBlock(px, gy, pz, BR::Planks, 0);     // 同 id no-op 写 → 复原契约：燃烧清除
+            const bool clearedByNoop = !wT.isBurningAt(px, gy, pz);
+            okF = clearedByReplace && reignited && clearedByNoop;
+            wT.setBlock(px, gy, pz, BR::Air, 0);
+        }
+
+        // ── (b) 湿燃料防火带 + 燃烧中变湿浇熄（z=6 行）──
+        {
+            // (b1) 防火带：水邻木板直燃被拒（确定性——三入口统一口径收口在 igniteFlammableAt）。
+            wT.setBlock(16, gy, 6, BR::Planks, 0);
+            wT.setBlock(17, gy, 6, BR::Water, 0);       // 木板 6 邻含水 → 湿燃料
+            const bool wetRejected = !wT.igniteFlammableAt(16, gy, 6)
+                                     && !wT.isBurningAt(16, gy, 6);
+            win843(300);                                // 无燃格 → tickFire 早退，窗口空转（保序）
+            const bool wetNeverBurnt = !wT.isBurningAt(16, gy, 6)
+                                       && wT.blockAt(16, gy, 6) == BR::Planks;
+            // (b2) 浇熄（火灭块存）：先点燃（此刻无水——顺序即语义）后贴水 → 40%/窗浇熄掷骰。
+            wT.setBlock(22, gy, 6, BR::Planks, 0);
+            wT.setBlock(26, gy, 6, BR::Planks, 0);
+            const bool d1 = wT.igniteFlammableAt(22, gy, 6);
+            const bool d2 = wT.igniteFlammableAt(26, gy, 6);
+            wT.setBlock(23, gy, 6, BR::Water, 0);
+            wT.setBlock(27, gy, 6, BR::Water, 0);
+            bool bothOut = false;
+            for (int win = 0; win < 60 && !bothOut; ++win) {
+                win843(1);
+                bothOut = !wT.isBurningAt(22, gy, 6) && !wT.isBurningAt(26, gy, 6);
+            }
+            const int intact = int(wT.blockAt(22, gy, 6) == BR::Planks)
+                               + int(wT.blockAt(26, gy, 6) == BR::Planks);
+            okB = wetRejected && wetNeverBurnt && d1 && d2 && bothOut && intact >= 1;
+            wT.setBlock(16, gy, 6, BR::Air, 0);
+            wT.setBlock(17, gy, 6, BR::Air, 0);
+            wT.setBlock(22, gy, 6, BR::Air, 0);
+            wT.setBlock(23, gy, 6, BR::Air, 0);
+            wT.setBlock(26, gy, 6, BR::Air, 0);
+            wT.setBlock(27, gy, 6, BR::Air, 0);
+        }
+
+        // ── (c) 同态蔓延存在性（z=14 行，10 泳道 A@4+3k / B@A+1，全场无 Fire 格）──
+        {
+            constexpr int kLanesT = 10;
+            int hits = 0;
+            for (int k = 0; k < kLanesT; ++k) {
+                wT.setBlock(4 + 3 * k, gy, 14, BR::Planks, 0);
+                wT.setBlock(5 + 3 * k, gy, 14, BR::Planks, 0);
+                wT.igniteFlammableAt(4 + 3 * k, gy, 14); // A 初始入燃态
+            }
+            for (int win = 0; win < 400; ++win) {
+                win843(1);
+                for (int k = 0; k < kLanesT; ++k) {
+                    if (wT.isBurningAt(5 + 3 * k, gy, 14)) { // B 被燃板 A 点燃 → 计数 + 复原
+                        ++hits;
+                        wT.setBlock(5 + 3 * k, gy, 14, BR::Planks, 0);
+                    }
+                    wT.setBlock(4 + 3 * k, gy, 14, BR::Planks, 0); // 复原 A + 重燃（计时恒 10，
+                    wT.igniteFlammableAt(4 + 3 * k, gy, 14);       // 每窗恰 1 次掷骰样本）
+                }
+            }
+            okC = hits >= 1;
+            for (int k = 0; k < kLanesT; ++k) { // 清场（含清燃烧态）
+                wT.setBlock(4 + 3 * k, gy, 14, BR::Air, 0);
+                wT.setBlock(5 + 3 * k, gy, 14, BR::Air, 0);
+            }
+        }
+
+        // ── (d) mob 接触着火（z=6 行 x=38：石框围 1×1 燃烧木板上的猪）──
+        {
+            EntityManager entsT;
+            wT.setBlock(38, gy, 6, BR::Planks, 0);
+            wT.igniteFlammableAt(38, gy, 6); // 燃烧板（ents.tick 不驱动 tickFire → 计时冻结，接触源稳定）
+            for (int dx = 37; dx <= 39; ++dx)
+                for (int dz = 5; dz <= 7; ++dz) { // 石框（gy+1 环 + gy+2 盖：猪定身在燃烧板正上）
+                    if (dx == 38 && dz == 6) continue;
+                    wT.setBlock(dx, gy + 1, dz, BR::Stone, 0);
+                    wT.setBlock(dx, gy + 2, dz, BR::Stone, 0);
+                }
+            const int pig = entsT.spawnMobTyped(38, gy + 1, 6, EntityManager::MobPig,
+                                                QStringLiteral("#ee9999"), 20);
+            const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+            for (int t = 0; t < 40; ++t) // 0.64s：首个 aiTick ≤4 帧；首次火伤 1s 后 → 无伤害 / 随机熄灭混淆
+                entsT.tick(0.016f, &wT, farListener, 0.3f, 1.8f, false);
+            okD = pig >= 0 && entsT.isBurningAt(pig) && entsT.aliveAt(pig)
+                  && wT.isBurningAt(38, gy, 6); // 板仍在燃（接触源未耗尽）
+            for (int dx = 37; dx <= 39; ++dx)
+                for (int dz = 5; dz <= 7; ++dz)
+                    for (int dy = 0; dy <= 2; ++dy)
+                        wT.setBlock(dx, gy + dy, dz, BR::Air, 0); // 清场（燃烧板 + 石框，dy=0 含燃烧态清除）
+        }
+
+        // ── (e) 立地火失撑即时灭（编辑钩子）+ 有撑有燃料对照（z=14 行 x=36/40）──
+        {
+            wT.setBlock(36, gy - 1, 14, BR::Stone, 0);
+            wT.setBlock(36, gy, 14, BR::Fire, 0);       // 石撑立地火
+            wT.setBlock(36, gy - 1, 14, BR::Air, 0);    // 破支撑 → 同调用内 checkFireOnEdit 即时灭
+            const bool instantOut = wT.blockAt(36, gy, 14) == BR::Air;
+            wT.setBlock(40, gy - 1, 14, BR::Stone, 0);
+            wT.setBlock(40, gy, 14, BR::Fire, 0);       // 对照：有撑 + 邻燃料板
+            wT.setBlock(41, gy, 14, BR::Planks, 0);
+            win843(1);                                  // 1 窗：有燃料 → 无自熄掷骰（确定性存活）
+            const bool ctrlAlive = wT.blockAt(40, gy, 14) == BR::Fire;
+            okE = instantOut && ctrlAlive;
+            wT.setBlock(40, gy - 1, 14, BR::Air, 0);
+            wT.setBlock(40, gy, 14, BR::Air, 0);
+            wT.setBlock(41, gy, 14, BR::Air, 0);
+        }
+
+        const bool okT843 = okA && okB && okC && okD && okE && okF;
+        if (!okT843) {
+            diagT843 = QStringLiteral("A:%1 B:%2 C:%3 D:%4 E:%5 F:%6")
+                           .arg(okA).arg(okB).arg(okC).arg(okD).arg(okE).arg(okF);
+            qInfo().noquote() << "  [t843 diag]" << diagT843;
+        }
+        if (!okT843) ++totalFail;
+        qInfo().noquote() << (okT843 ? "PASS" : "FAIL")
+                          << "| t843 direct-ignite fire semantics: flint right-click on flammable "
+                             "enters burning state with id preserved (side-table transient, "
+                             "surface-fire overlay via blockIgnited), exact 10-window wood timer "
+                             "(9 windows burning, 10th burns to ember flare, ember dies fuel-less), "
+                             "stone rejected (falls back to standing fire), wet-fuel firebreak "
+                             "rejected at ignite (unified 3-entry gate) while burning-turned-wet "
+                             "douses with block intact, burning-cell same-state spread proven "
+                             "without any fire cell, mob on burning plank ignites within 40 ticks "
+                             "(player leg = same predicate copy in step, manual visual), standing "
+                             "fire loses support = extinguished inside the same setBlock call "
+                             "(checkFireOnEdit hook) while fueled+supported control survives "
+                             "deterministically, replace/same-id-noop write clears burning state";
     }
 
     // ── t813 构建版本戳探针（Core 叶子直编）：锁 BuildInfo 两值非空 + 格式 ──

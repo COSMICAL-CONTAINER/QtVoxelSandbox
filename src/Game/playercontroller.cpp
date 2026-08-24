@@ -3593,6 +3593,17 @@ void PlayerController::placeBlock()
             }
         }
         if (m_hasHit) {
+            // t843 直燃优先（第 4 次语义重做，机制对齐 MC 1.0 fire-on-face）：命中的是**可燃方块** → 该
+            //   方块本身点燃进燃烧态（World::igniteFlammableAt：栅格 id 不变 + 面火 overlay + 计时烧毁 +
+            //   同态蔓延），火不出现在旁边（用户「火在旁边烧、木制品点不燃」的根因修）；门整扇联动收口在
+            //   World 侧。命中非可燃（石/土/已在燃/已是火）→ igniteFlammableAt 返 false 落回下方立地火
+            //   路径（「只有打火石点空地/非可燃面才生成 3D 立地火焰」）。两路均消耗耐久 + 挥手。
+            if (m_world->igniteFlammableAt(m_hitBx, m_hitBy, m_hitBz)) {
+                if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 点燃是一次「使用」动作 → 挥手（t29）
+                return;
+            }
             const int fx = m_hitBx + m_hitNx, fy = m_hitBy + m_hitNy, fz = m_hitBz + m_hitNz;
             if (fy >= 0 && fy < m_world->height()
                 && m_world->blockAt(fx, fy, fz) == BlockRegistry::Air) {
@@ -6717,6 +6728,12 @@ void PlayerController::step(qreal dt)
         if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::Fire) touchingLava = true;
         if (!touchingLava && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::Fire)
             touchingLava = true;
+        // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值）。三格判定：脚位（穿入燃烧的
+        //   草丛/树苗等非实心可燃物）、眼位（上半身没入）、**脚下一格**（站在燃烧的木板/原木顶面——实体
+        //   块玩家进不去，但踩在着火的木板上当然算接触，机制等价 MC 站燃块着火）。
+        if (footY - 1 >= 0 && m_world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
+        if (!touchingLava && footY >= 0 && m_world->isBurningAt(fx, footY, fz)) touchingLava = true;
+        if (!touchingLava && eyeY >= 0 && m_world->isBurningAt(fx, eyeY, fz)) touchingLava = true;
         if (touchingLava) {
             m_fireTimer = EntityManager::kFireDuration; // 持续重燃（离开前 fireTimer 不衰减）；不动 m_fireDmgTimer（t351）
         }
