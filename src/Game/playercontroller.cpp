@@ -574,6 +574,14 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
     if (o == m_window) {
         if (e->type() == QEvent::KeyPress) {
             auto *k = static_cast<QKeyEvent *>(e);
+            // t853③ / review24 #8：Esc 在捕获态**无条件** release——刻意不判 m_dead。正常死亡链
+            //   （Main.qml onDied 的 finally）已 release（本分支不触发）；但任何「死亡而 captured 残留」
+            //   的纵深场景（未来新增死亡入口漏调 release / QML 死亡处理器辅助段在 try 内首行前就被掐断的
+            //   病理形态）下，这是死亡屏按钮（立即重生 / 回主菜单）唯一可达的指针逃生口——光标不可见则
+            //   按钮点不到。若按 QML keyInput 闸门的「死亡态 ESC 不放行」口径在此加 m_dead 拒绝 → 纵深
+            //   场景真死锁（视角冻结 + 指针不可见 + ESC 无效 + 按钮不可点）。两闸门分工：QML 闸门只吞
+            //   到达 QML 的 Esc（管暂停菜单路由，死亡态不开菜单）；本 C++ 分支管指针逃生（Main.qml 侧
+            //   有同义注释）。
             if (k->key() == Qt::Key_Escape && m_captured) { release(); return true; }
         } else if (e->type() == QEvent::WindowDeactivate || e->type() == QEvent::FocusOut) {
             if (m_captured) release(); // 切走绝不留「锁住的光标」

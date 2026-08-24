@@ -9819,8 +9819,7 @@ Window {
         //   玩家随后在死亡界面点「立即重生」→ respawnPlayer → 传回固定出生点（kSpawn，非原地复活）；
         //   掉落物留在死亡点，玩家走回死亡点拾取（机制等价 MC 死亡掉落 + 全局出生点）。
         function onDied() {
-            progress.onDeath()  // progress 统计死亡次数
-            // t852 死亡主链铁律：下方 try 块是**辅助段**（关面板 + 把散落各 UI 的物品收回背包，目的只是
+            // t852 死亡主链铁律：下方 try/finally 是**辅助段**（关面板 + 把散落各 UI 的物品收回背包，目的只是
             //   让它们随 dropAllItems 统一掉落）——辅助段任何异常不得吞掉死亡契约本体（掉落全背包 + 清空
             //   + 释放指针 + C++ 置 m_dead 输入闸门）。回归史（R19.13 用户报「死亡不掉落 + 背包物品都在」
             //   定位）：t690 在此段写 `window.<面板id>`——QML id 不是 Window 对象属性 → 恒 undefined →
@@ -9829,36 +9828,49 @@ Window {
             //   从未执行 = 四症状一根因：① 背包不清不掉落（t852 本体）；② 指针锁死、须按 ESC 才能点死亡屏
             //   按钮（t853③）；③ m_dead 未置位 → grab/setKey/placeBlock 等 t655 闸门全开，尸体还能转视角 /
             //   走动（t853①②）。修法：面板引用改**裸 id**（同 saveAndExitToWorldList 内 708-710 已验证形态，
-            //   QML 同文件 id 直接裸名解析）+ 主链入 finally（单点 UI 异常至多丢「合成格归还」一条支线，
-            //   死亡契约恒执行——本处是「处理器异常静默退化」教训在死亡链上的结构性收口）。
+            //   QML 同文件 id 直接裸名解析）+ 主链入 finally（死亡契约恒执行）。
+            //   review24 #7：处理器**首行也不得留在 try 外**——progress.onDeath() 曾在 try 之前，该行一旦抛
+            //   TypeError（API 改名类笔误，t312 同款形态）会在保护伞之前掐断整个 onDied，四症状整套复发。
+            //   统计属辅助非契约 → 入 try 首行：即使抛，finally 掉落/释放链仍恒执行（统计丢失可接受）。
+            //   review24 低危：辅助段内部再分两级防「一行异常吞掉其余行」——① 纯 bool 面板标志清理移入
+            //   finally 首部（任何辅助异常都拦不住标志复位，防重生后面板叠显）；② 每一处槽位归还独立 try
+            //   （合成格 / 附魔 / 铁砧槽物品**不在 hotbar/main 里**，归还被跳过即随尸体永久消失；held 栈有
+            //   dropAllItems 兜底，无需包）。
             try {
-                if (window.inventoryOpen) window.inventoryOpen = false
-                if (window.craftingTableOpen) window.craftingTableOpen = false
-                if (window.furnaceOpen) window.furnaceOpen = false
-                if (window.chestOpen) window.chestOpen = false
-                if (window.chatOpen) window.chatOpen = false   // t312：死亡关聊天（死亡屏接管光标）
+                progress.onDeath()  // progress 统计死亡次数（review24 #7：入 try 首行——辅助非契约，见头注释）
                 // t650：死亡也关附魔台 / 铁砧 / 发射器三面板（此前漏关——onDied 只关四旧面板）。归还顺序在
                 //   returnHeldToHotbar / dropAllItems **之前**：closeEnchantingTable / closeAnvil 内的显式同步
                 //   归还（本批加）把 A/B 输入槽物品先收回背包 → dropAllItems 统一死亡掉落（修「铁砧放着东西死亡
                 //   → 物品不随尸体掉落、面板死亡屏下滞留 → 回主菜单换世界即永久消失」漏洞链）。发射器槽内容
-                //   属方块（同箱子，不掉落），仅关面板归还光标。
-                if (window.enchantingTableOpen) window.closeEnchantingTable()
-                if (window.anvilOpen) window.closeAnvil()
-                if (window.dispenserOpen) window.closeDispenser()
-                // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。上方仅设
-                //   craftingTableOpen / inventoryOpen = false —— 面板 onVisibleChanged→returnCraftToHotbar 依赖
-                //   visible 绑定重求值（可被引擎推迟），会晚于本处 returnHeldToHotbar / dropAllItems → 材料
-                //   不随尸体掉落、掉进已重置的空背包（正是 t650 要杀的竞态）。直调幂等（槽空零迭代）。
+                //   属方块（同箱子，不掉落），仅关面板归还光标。review24 低危：各行独立 try（closeAnvil 内
+                //   归还的 A/B 槽物同样不在背包、跳过即消失，与合成格同级；close* 尾部 player.grab() 在
+                //   dropAllItems 置 m_dead 之前执行、随后 finally 的 release 覆盖之，顺序安全）。
+                if (window.enchantingTableOpen) { try { window.closeEnchantingTable() } catch (e) {} }
+                if (window.anvilOpen) { try { window.closeAnvil() } catch (e) {} }
+                if (window.dispenserOpen) { try { window.closeDispenser() } catch (e) {} }
+                // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。直调幂等
+                //   （槽空零迭代），不依赖面板 visible 绑定重求值（引擎可推迟，会晚于 returnHeldToHotbar /
+                //   dropAllItems → 材料不随尸体掉落、掉进已重置的空背包——正是 t650 要杀的竞态）。
                 //   t852：裸 id 引用（window.<面板id> 恒 undefined → TypeError，见函数头注释）。
-                craftingTablePanel.returnCraftToHotbar()
-                survivalPanel.returnCraftToHotbar()
-                inventoryPanel.returnCraftToHotbar()
+                //   review24 低危：三行各自独立 try（一行抛不吞其余两行与 returnHeldToHotbar 的归还机会）。
+                try { craftingTablePanel.returnCraftToHotbar() } catch (e) {}
+                try { survivalPanel.returnCraftToHotbar() } catch (e) {}
+                try { inventoryPanel.returnCraftToHotbar() } catch (e) {}
+                window.returnHeldToHotbar()
+            } finally {
+                // 纯 bool 面板标志复位（review24 低危移入 finally 首部）：任何辅助异常都拦不住——标志残留时
+                //   「立即重生」路径不清理 → 重生后背包 / 设置 / 统计面板叠显。t312：死亡关聊天（死亡屏接管
+                //   光标）。仍先于 dropAllItems / release（与旧 try 段同相对序）；面板 visible 绑定触发的延迟
+                //   二次归还幂等（槽已被上方直调清空，t690(c) 同判）。
+                if (window.inventoryOpen) window.inventoryOpen = false
+                if (window.craftingTableOpen) window.craftingTableOpen = false
+                if (window.furnaceOpen) window.furnaceOpen = false
+                if (window.chestOpen) window.chestOpen = false
+                if (window.chatOpen) window.chatOpen = false
                 // pause-menu：死亡关暂停菜单子面板（设置 / 进度 / 统计；防死亡态遗留，死亡屏 z=180 盖在其上）。
                 if (window.settingsOpen) window.settingsOpen = false
                 if (window.progressOpen) window.progressOpen = false
                 if (window.statsOpen) window.statsOpen = false
-                window.returnHeldToHotbar()
-            } finally {
                 // 死亡主链（顺序敏感）：dropAllItems（掉落 + 清空 + 置 m_dead → t655 闸门生效 / 视角冻结）
                 //   与 release（释放指针 → 死亡屏按钮可直接点，t853③）是契约本体，最先执行；XP 球 / 播报
                 //   是花絮殿后（花絮自身异常不再反噬指针释放——release 先于一切花絮）。
@@ -10315,7 +10327,14 @@ Window {
             //   PlayerController.m_dead 是 C++ 物理闸门镜像（dropAllItems 置位 / respawn 复位），不进 QML。
             //   t853④：Esc 不再放行（t691 旧「死亡态 Esc 开暂停叠层」语义退役）——死亡屏是唯一交互面，
             //   只能点两按钮。暂停叠层 visible 本就排除 dead（!playerState.dead 条件），键盘层再显式吞掉
-            //   Esc = 双保险（防任何未来暂停路径漏判；死亡态按 ESC 至多无效）。
+            //   Esc = 双保险（防任何未来暂停路径漏判）。
+            //   review24 #8 语义钉死（勿按旧注释口径收紧 C++）：本闸门只吞「**到达 QML 的** Esc」（效果 =
+            //   死亡态 Esc 不开暂停菜单，至多无效）。若死亡时指针仍被 captured（正常链 finally 已 release；
+            //   任何未来漏 release 的纵深场景下），该 Esc 在 C++ PlayerController::eventFilter 的 Esc 分支
+            //   （m_captured 即 release，**刻意不判 m_dead**）就被吃掉并释放指针——那是死亡屏按钮（立即
+            //   重生 / 回主菜单）唯一可达的指针逃生口。若按「死亡态 ESC 无效」给该 C++ 分支加 m_dead
+            //   拒绝 → 纵深场景真死锁（视角冻结 + 指针不可见 + ESC 无效 + 按钮不可点）。分工：QML 闸门管
+            //   菜单路由，C++ eventFilter 管指针逃生（playercontroller.cpp ESC 分支旁有同义注释）。
             if (playerState.dead && e.key !== Qt.Key_T && e.key !== Qt.Key_Return
                     && e.key !== Qt.Key_Enter) {
                 e.accepted = true; return

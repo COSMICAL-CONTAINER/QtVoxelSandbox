@@ -1464,19 +1464,20 @@ int main(int argc, char *argv[])
         hb.setHeldBlock(int(BR::Stone));
         hb.setHeldCount(3);
         // 消费端直连（等价 Main.qml onSpawnItem 转发；同线程直接连接 = QML handler 语义）：记录全参 + 落点。
-        QVector<int> gotId, gotCount, gotDur, gotX, gotZ;
+        QVector<int> gotId, gotCount, gotDur, gotX, gotY, gotZ;
         QVector<QVariantList> gotEnch;
         QVector<QString> gotName;
         QObject::connect(&pc, &PlayerController::spawnItem, &pc,
-                         [&](int x, int, int z, int id, int count, const QVariantList &ench,
+                         [&](int x, int y, int z, int id, int count, const QVariantList &ench,
                              const QString &name, int dur) {
-            gotX.push_back(x); gotZ.push_back(z);
+            gotX.push_back(x); gotY.push_back(y); gotZ.push_back(z);
             gotId.push_back(id); gotCount.push_back(count);
             gotEnch.push_back(ench); gotName.push_back(name); gotDur.push_back(dur);
         });
         pc.dropAllItems();   // 死亡本体链（Main.qml onDied 主链同调）
         // ① 发射序列：hotbar（泥 64 → 剑 1）→ main（棍 32）→ held（石 3）→ armor（盔 1），逐栈一实体 +
-        //    剑 / 盔的附魔首元、实例名、磨损耐久逐参断言（t590/t622/t686 三参透传的死亡路径回归面）。
+        //    剑 / 盔的附魔首元 + .size()==4 全槽形状（review24 低危补口：盔侧原只断首元，剑/盔对称）、
+        //    实例名、磨损耐久逐参断言（t590/t622/t686 三参透传的死亡路径回归面）。
         const bool emitOk = gotId.size() == 5
                 && gotId[0] == int(BR::Dirt) && gotCount[0] == 64
                 && gotId[1] == diaSword && gotCount[1] == 1
@@ -1485,11 +1486,14 @@ int main(int argc, char *argv[])
                 && gotId[2] == RecipeRegistry::StickId && gotCount[2] == 32
                 && gotId[3] == int(BR::Stone) && gotCount[3] == 3
                 && gotId[4] == diaHelm && gotCount[4] == 1
-                && gotDur[4] == 300 && gotEnch[4][0].toInt() == prot2;
+                && gotDur[4] == 300 && gotEnch[4].size() == 4 && gotEnch[4][0].toInt() == prot2;
         // 散布面：死亡格（m_pos=80,80,80 → cx=cz=80）3×3 邻域内（|dx| ≤ 1 且 |dz| ≤ 1）。
+        //   review24 低危补口：y 落点此前匿名丢弃——现断 y 恰为死亡格 y=80（cy=floor(m_pos.y()) 直传，
+        //   「脚底整数格」契约）。精确等值（非 ±1 带）：若回归改为眼位（脚底+1.62 → floor 81）或 +1 抬升，
+        //   带断言放行、等值断言捕获。
         bool scatterOk = emitOk;
         for (int i = 0; i < gotX.size() && scatterOk; ++i)
-            scatterOk = std::abs(gotX[i] - 80) <= 1 && std::abs(gotZ[i] - 80) <= 1;
+            scatterOk = std::abs(gotX[i] - 80) <= 1 && std::abs(gotZ[i] - 80) <= 1 && gotY[i] == 80;
         // ② 掉落即清：hotbar / main / 护甲三段全空 + 光标手持清（resetForMode(Survival) + heldStack 归零）。
         const bool clearedOk = hb.blockIdAt(0) == 0 && hb.blockIdAt(1) == 0
                 && hb.mainBlockIdAt(0) == 0 && hb.armorBlockIdAt(0) == 0
@@ -1500,9 +1504,9 @@ int main(int argc, char *argv[])
         const bool ok = emitOk && scatterOk && clearedOk && idempotentOk;
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| death drop chain: hotbar+main+held+armor all scatter-dropped (3x3) with "
-                             "ench/name/durability passthrough, inventory cleared on drop, second call "
-                             "emits nothing (t852)";
+                          << "| death drop chain: hotbar+main+held+armor all scatter-dropped (3x3, y=death "
+                             "cell) with full 4-slot ench shape/name/durability passthrough, inventory "
+                             "cleared on drop, second call emits nothing (t852)";
     }
 
     // ── t756 出生点选择探针（World 层 findSpawnColumn 多种子回归；独立小世界逐种子重生成，不动主世界
