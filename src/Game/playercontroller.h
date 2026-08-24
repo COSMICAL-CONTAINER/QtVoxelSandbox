@@ -443,14 +443,17 @@ public:
     //   用户口径「打飞 4 格以上摔伤」）；同 applyHitKnockback 的 m_vel.y 直写模式（无双重力）。
     Q_INVOKABLE void applyGolemLaunch(float dirX, float dirZ);
     // t758 暗渊珠落点传送（机制等价 MC 1.0 ender pearl 落地把掷出者传过去 + 传送附带伤害）：EntityManager
-    //   enderPearlLanded(x,y,z)（珍珠命中格 floor(next)）经 Main.qml Connections 路由调本方法（同
-    //   emberFireballHitPlayer→applyStatusEffect 模式）。安全落点 = B11 模式向下找最近「非实体立位（脚位 +
-    //   头位双格查，玩家高 ~1.8）+ 下方 solid 支撑」：命中格本身实体（撞地 / 撞墙）→ 首个支撑即命中格 → 立
-    //   其顶；悬空寿命到期 → 向下扫到地表。全列无可立位（深坑实心柱 / 一格窄缝）→ 不传送（珍珠白耗，防传
+    //   enderPearlLanded(x,y,z)（珍珠接触格 floor(next)；t835① 任意方块接触含铁轨/薄板等非整格）经
+    //   Main.qml Connections 路由调本方法（同 emberFireballHitPlayer→applyStatusEffect 模式）。安全落点 =
+    //   B11 模式向下找最近「非碰撞立位（脚位 + 头位双格查，玩家高 ~1.8）+ 下方碰撞支撑」—— t835① 判据
+    //   从 isSolid（非 air 实存）改 collisionAABBsAt 有盒：铁轨/火把/水等无碰撞盒格可立入（玩家穿模贴脚
+    //   同 MC）、薄碰撞盒（压力板/台阶）照旧立其顶：命中格本身有碰撞（撞地 / 撞墙）→ 首个支撑即命中格 →
+    //   立 其顶；悬空寿命到期 → 向下扫到地表。全列无可立位（深坑实心柱 / 一格窄缝）→ 不传送（珍珠白耗，防传
     //   到不可玩位置）。瞬移 = loadSavedState 模式（m_pos 直写格中心 + 清 m_vel/m_knockback + **m_peakY 重置**
     //   防瞬移落差误判摔伤 + emit positionChanged）；骑乘中先下坐骑（同 respawn；防传后仍挂在远处坐骑上）。
     //   传送伤害 kEnderPearlTpDamage **仅 Survival 发**（fallDamageTaken 链 → 护甲减伤 → takeDamage，死因
-    //   EnderPearlTp「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 创造无敌）。死亡态（掷出后珍珠飞行
+    //   EnderPearlTp「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 创造无敌）。传送不附带点燃（MC 1.0
+    //   无珍珠传送着火；传送后立于岩浆走既有岩浆接触伤害链）。死亡态（掷出后珍珠飞行
     //   中被怪打死）不传（尸体原地）。分层（PLAN §2）：本方法属 Game/Physics（读 World 扫落点 + 写玩家态），
     //   落点语义由 Entities 层经信号向下传。
     Q_INVOKABLE void applyEnderPearlTeleport(int x, int y, int z);

@@ -5391,39 +5391,64 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             continue; // EnderEye 不走 Mob AI / resting / 击退衰减
         }
 
-        // --- EnderPearl（t758 暗渊珠投掷物）：重力抛物 + 方块/寿命兜底命中 → 落点结算传送 ---
-        //   机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行（同雪球骨架），命中即结算 —— emit
-        //   enderPearlLanded(落点格) → 呈现层路由 PlayerController.applyEnderPearlTeleport（安全落点扫描 +
-        //   瞬移玩家 + 传送伤害，机制语义收口在 Game 层）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，
-        //   撞 mob 穿过 —— MC 对 mob 命中亦仅传送掷者，伤害分支 v1 不做，同头文件注释）。
+        // --- EnderPearl（t758 暗渊珠投掷物；t835 五项修）：轻重力抛物 + 任意接触命中 + 液体缓沉 + 出界/虚空不传 ---
+        //   机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行（t835④ 珠专属轻重力 kEnderPearlGravity=12，
+        //   MC 投掷物 0.03/tick²=12 vs 世界 28），接触即结算 —— emit enderPearlLanded(落点格) → 呈现层路由
+        //   PlayerController.applyEnderPearlTeleport（安全落点扫描 + 瞬移玩家 + 传送伤害，机制语义收口在
+        //   Game 层）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送
+        //   掷者，伤害分支 v1 不做，同头文件注释）。t835 三项 tick 侧改动：
+        //   ① 任意接触必传送：命中判据从 collisionAABBsAt 点在盒内（t762 引入）放宽为**本格任意方块实存**
+        //   （blockAt 非空且非豁免族）。旧判据漏两族 —— (a) 铁轨/火把/草丛等 ShapeNone 无碰撞盒方块：珠点
+        //   穿过该格不命中，落进下方支撑格 → 落点格=支撑格内部 → Game 层立位扫描把非整格方块当实心全列
+        //   abort（「落铁轨不传送」的根因，t803 isSolid 实体侧消费者逐一豁免的同族反向）；(b) 压力板/台阶
+        //   等薄碰撞盒：珠点一 tick 跨过薄盒带（薄板厚 0.06 << 速度 0.4 格/tick）点不在盒内 → 同 (a) 穿透
+        //   落到下方格。新判据按「格内有没有东西」判接触 —— 机制等价 MC 1.0 珍珠对任何具形方块（含轨道、
+        //   薄板）都算落地。豁免四族：Air（无物）/ Water·Lava（② 缓沉族，沉到底接触底面才传送）/ NetherPortal
+        //   （t762 门面无碰撞可穿入——珠穿门格不被拦停，保旧语义）/ Fire（效果格无实体，同门面族；MC 1.0
+        //   投掷物 raytrace 对火/无碰撞格亦穿过）。
+        //   ② 液体缓沉：珠所在格为 Water/Lava → 不立即传送，重力把 vy 压到缓沉终速（−kEnderPearlWaterSink/
+        //   LavaSink）+ 水平强阻尼（kEnderPearlLiquidDrag）→ 缓慢沉到液体底（底面方块接触 = ① 判据）才结算
+        //   传送。寿命倒计暂停（深水柱缓沉可超 8s，防到期把掷出者半水传送）。机制等价 MC 投掷物入液强阻尼
+        //   缓沉；岩浆更粘 → 终速更慢。岩浆接触同样必传送（①）—— 传送本身**不附带点燃**（MC 1.0 珍珠传送
+        //   无着火；「传送 5 格内着火」是 1.x 后期机制，不做）。传送后玩家若立于岩浆格，走既有岩浆接触伤害
+        //   链（现状保持）。
+        //   ③ 虚空/出界不传送：一路无接触落出世界底（y<0）/ 飞出 XZ 边界 → 静默移除**不传送**（防把玩家传
+        //   到界外/虚空不可玩位置；珍珠白耗。机制取舍：MC 珍珠入虚空同样有去无回）。寿命兜底（悬空到期）
+        //   仍传送（B11 落点列向下找支撑）。
         if (e.kind == EnderPearl) {
-            e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
-            e.vy -= kGravity * float(dt); // 抛物：重力改 vy（与世界重力同值 → 弧自然，同雪球）
+            // ② 液体缓沉态判定按**当前格**（本 tick 起点所在格）：进入液体格的下一 tick 起接管物理。
+            const quint8 curId = world->blockAt(qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()));
+            const bool inLiquid = (curId == BlockRegistry::Water || curId == BlockRegistry::Lava);
+            if (inLiquid) {
+                // 缓沉：重力压 vy 到 −sink 终速 + 水平指数阻尼（~0.2s 基本停 → 竖直缓沉）；寿命暂停（见②）。
+                const float sink = (curId == BlockRegistry::Lava) ? kEnderPearlLavaSink : kEnderPearlWaterSink;
+                e.vy = qMax(e.vy - kEnderPearlGravity * float(dt), -sink);
+                const float dragMul = qMax(0.0f, 1.0f - kEnderPearlLiquidDrag * float(dt));
+                e.vx *= dragMul;
+                e.vz *= dragMul;
+            } else {
+                e.arrowLife -= float(dt); // 寿命倒计（复用 arrowLife；仅空中递减，液体缓沉期暂停）
+                e.vy -= kEnderPearlGravity * float(dt); // ④ 轻重力抛物（12 vs 世界 28，MC 投掷物同源）
+            }
             const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
             bool remove = false;
-            bool landed = false; // 命中结算（方块命中 / 寿命兜底）→ emit enderPearlLanded（传送掷出者）
+            bool landed = false; // 命中结算（接触 / 寿命兜底）→ emit enderPearlLanded（传送掷出者）
             // 寿命兜底命中：悬空到期视作落点结算（落点列向下找支撑传送，防极端上抛珍珠永久滞留堆积）。
             if (e.arrowLife <= 0.0f) { remove = true; landed = true; }
-            // 方块命中 → 即结算（撞地 / 撞墙：落点 = 命中格，Game 层扫描从命中格起向下找支撑 → 立命中块顶）。
-            //   **t762 余烬门无交互修正（t725 链复核项⑩）**：旧判据 World::isSolid（语义=「非 air 实存」）会把
-            //   NetherPortal（ShapeNone 无碰撞面片）当实心 → 珠掷过门格被「拦停」并把掷出者传送进门框，与
-            //   「门面无碰撞可穿入」（箭走 collisionAABBsAt 点测已穿门）不一致。改用与箭 M7 修复同源的
-            //   collisionAABBsAt 点在盒内判定：门 / 火把 / 火焰（ShapeNone 无碰撞盒）/ 水（无盒）不再拦珠 ——
-            //   投掷物统一「只与真碰撞体交互」；完整立方 / 半砖 / 楼梯等碰撞盒照常命中（行为不变）。
+            // ① 任意接触命中 → 即结算（撞地 / 撞墙 / 踩铁轨/薄板：落点 = 接触格，Game 层扫描从该格起向下
+            //   找碰撞支撑 → 立位）。豁免族见分支头注释（液体 ② / 门面 / 火效果格）。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-                bool hitBlock = false;
-                if (by >= 0) {
-                    for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(bx, by, bz)) {
-                        if (next.x() > b.minX && next.x() < b.maxX
-                            && next.y() > b.minY && next.y() < b.maxY
-                            && next.z() > b.minZ && next.z() < b.maxZ) { hitBlock = true; break; }
-                    }
+                const quint8 hitId = world->blockAt(bx, by, bz);
+                if (hitId != BlockRegistry::Air && hitId != BlockRegistry::Water
+                    && hitId != BlockRegistry::Lava && hitId != BlockRegistry::NetherPortal
+                    && hitId != BlockRegistry::Fire) {
+                    remove = true;
+                    landed = true;
                 }
-                if (hitBlock) { remove = true; landed = true; }
             }
-            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 静默移除**不传送**（防把玩家传到界外 / 虚空不可玩位置；
-            //   珍珠白耗。机制取舍：MC 珍珠入虚空同样有去无回）。
+            // 越界兜底（t835③：飞出世界 XZ 边界 / 跌出底部 = 虚空直落）→ 静默移除**不传送**（防把玩家传到
+            //   界外 / 虚空不可玩位置；珍珠白耗。机制取舍：MC 珍珠入虚空同样有去无回）。
             if (!remove) {
                 if (next.x() < 0.0f || next.z() < 0.0f
                     || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {

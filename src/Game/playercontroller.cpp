@@ -2025,12 +2025,18 @@ void PlayerController::applyGolemLaunch(float dirX, float dirZ)
 }
 
 // t758 暗渊珠落点传送（机制等价 MC 1.0 ender pearl 落地把掷出者传过去 + 传送代价；见头文件注释）。
-//   EntityManager.enderPearlLanded(x,y,z)（珍珠命中格）经 Main.qml Connections 路由调本方法。流程：
+//   EntityManager.enderPearlLanded(x,y,z)（珍珠接触格）经 Main.qml Connections 路由调本方法。流程：
 //   (1) 防御：无世界 / 死亡态（掷出后珍珠飞行中被怪打死）→ 不传（尸体原地）；
 //   (2) 落点列钳到世界内（信号坐标本就在界内 —— 越界移除不发本信号；防御性再钳一次）；
-//   (3) B11 安全落点扫描：自命中格向下找首个 solid 支撑 → 立位 = 支撑上一格，复查脚位 + 头位（玩家
-//       ~1.8 高占两格）非实体 —— 撞地 / 撞墙时首个支撑即命中格（立其顶）；悬空寿命到期则扫到地表；
-//       立位不足（一格窄缝）继续向下找；全列无可立位 → 不传送（珍珠白耗，防传到不可玩位置）；
+//   (3) B11 安全落点扫描：自命中格向下找首个碰撞支撑 → 立位 = 支撑上一格，复查脚位 + 头位（玩家
+//       ~1.8 高占两格）无碰撞格 —— 撞地 / 撞墙时首个支撑即命中格（立其顶）；悬空寿命到期则扫到地表；
+//       立位不足（一格窄缝）继续向下找；全列无可立位 → 不传送（珍珠白耗，防传到不可玩位置）。
+//       **t835① 判据改「本格有碰撞盒」（collisionAABBsAt 非空）**：旧 World::isSolid（语义=「非 air 实存」）
+//       把铁轨/火把/压力板/水等无碰撞盒（或薄碰撞盒上下格错读）方块当实心 → 珠穿非整格落进下方支撑格 /
+//       液体沉底时，立位复查全灭 → 扫描到底 abort =「落铁轨/水上不传送」根因的 Game 层半面。改碰撞盒口径：
+//       无碰撞盒格 = 可立入（玩家脚踩其下碰撞支撑，铁轨/火把贴脚穿模同 MC 观感）；水格可立入（沉底传送
+//       落水，走既有游泳/溺水链）；薄碰撞盒格（压力板/台阶/睡莲）照旧当支撑立其顶。传送本身不附带点燃
+//       （MC 1.0 珍珠传送无着火，「5 格内着火」是 1.x 后期；传送后立于岩浆走既有岩浆接触伤害链）。
 //   (4) 瞬移（loadSavedState 模式）：骑乘先下坐骑（同 respawn；防传后仍挂远处坐骑）→ m_pos 直写格中心
 //       脚位 + 清 m_vel / m_knockback + **m_peakY 重置**（防下一 tick 误判「瞬移落差」摔伤）+ emit
 //       positionChanged（相机跟随刷新）；
@@ -2042,19 +2048,24 @@ void PlayerController::applyEnderPearlTeleport(int x, int y, int z)
     // 落点列钳到世界内（防御；信号坐标本就在界内）。
     const int lx = qBound(0, x, int(m_world->width()) - 1);
     const int lz = qBound(0, z, int(m_world->depth()) - 1);
-    int yy = y; // 自命中格向下扫（y 越上界无害：isSolid 越界返 Air 安全，同 endereye 落物扫描）
+    // t835① 单一判据：本格有碰撞盒 = 支撑/阻挡（支撑扫描与脚/头复查共用；与玩家 step 物理同源的碰撞口径，
+    //   替换旧 isSolid「非 air 实存」—— 见方法头注释 (3)）。collisionAABBsAt 越界返空盒表 → 空气语义安全。
+    const auto cellBlocked = [this](int cx, int cy, int cz) {
+        return !m_world->collisionAABBsAt(cx, cy, cz).empty();
+    };
+    int yy = y; // 自命中格向下扫（y 越上界无害：越界无碰撞盒 → 视作开放，同 endereye 落物扫描）
     int footY = -1;
     while (yy >= 0) {
-        if (m_world->isSolid(lx, yy, lz)) {
+        if (cellBlocked(lx, yy, lz)) {
             const int f = yy + 1; // 立位 = 支撑上一格
-            // 脚位 + 头位双格复查（玩家高 ~1.8 占两格；head 越 height 上界 → isSolid 返 Air 视作开放）。
-            if (!m_world->isSolid(lx, f, lz) && !m_world->isSolid(lx, f + 1, lz)) {
+            // 脚位 + 头位双格复查（玩家高 ~1.8 占两格；head 越 height 上界 → 无碰撞盒 → 视作开放）。
+            if (!cellBlocked(lx, f, lz) && !cellBlocked(lx, f + 1, lz)) {
                 footY = f;
                 break;
             }
             --yy; // 该支撑上方立位不足（一格窄缝 / 顶上有梁）→ 继续向下找下一支撑
         } else {
-            --yy; // 空格 → 继续下扫
+            --yy; // 无碰撞格（空气 / 液体 / 铁轨火把族）→ 继续下扫
         }
     }
     if (footY < 0) {
@@ -3255,8 +3266,9 @@ void PlayerController::placeBlock()
     }
     // t758 暗渊珠投掷传送（任务行：右键掷暗渊珠 → 抛物线飞行 → 落点把玩家传送过去；机制等价 MC 1.0
     //   ender pearl）：手持 EnderPearlId（0x243，t726 杀夜行者掉落）右键 → spawnEnderPearl 从眼位沿视线
-    //   方向以 kPlayerPearlSpeed 抛出（重力抛物弹丸，完全同雪球 t505 模式 —— 无蓄力右键即抛）。命中方块 /
-    //   寿命兜底 → EntityManager emit enderPearlLanded(落点格) → 呈现层路由 applyEnderPearlTeleport（安全
+    //   方向以 kPlayerPearlSpeed 抛出（t835④ 高初速 + Entities 层轻重力抛物；无蓄力右键即抛；t835⑤ 疾跑
+    //   态初速 ×1.3）。任意方块接触（t835① 含铁轨/薄板等非整格）/ 入液缓沉到底（t835②）/ 寿命兜底 →
+    //   EntityManager emit enderPearlLanded(落点格) → 呈现层路由 applyEnderPearlTeleport（安全
     //   落点扫描 + 瞬移 + 传送伤害，机制语义收口在 Game 层）。**不做 mob 命中**（珍珠只传送掷出者自己，撞
     //   mob 穿过 —— 取舍见 EntityManager 头文件注释）。**不要求 m_hasHit**（瞄准的是抛物弹道非方块命中格）；
     //   暗渊珠非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流（同雪球 /
@@ -3264,15 +3276,21 @@ void PlayerController::placeBlock()
     //   暗渊珠 / 创造不耗（传送伤害亦仅 Survival，见 applyEnderPearlTeleport）。分层（PLAN §2）：掷出属
     //   Game/Physics（读视线 + 调 EntityManager），不改栅格语义。
     if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::EnderPearlId) {
-        // vel = 视线方向 × kPlayerPearlSpeed。速度取 12（对齐 kPlayerSnowballSpeed 手感 —— 珍珠与雪球同为
-        //   轻抛物弹丸，机制等价 MC 1.0 珍珠 / 雪球投掷速度同量级）。本地常量（同 kPlayerSnowballSpeed 模式，
-        //   Entities 层速度常量不跨层读）。
-        constexpr float kPlayerPearlSpeed = 12.0f; // 玩家掷暗渊珠速度（blocks/s；对齐掷雪球手感）
+        // vel = 视线方向 × kPlayerPearlSpeed（t835④：12 → 24；机制等价 MC 1.0 投掷物初速 1.5 blocks/tick=30
+        //   量级）。配 Entities 层珠专属轻重力 kEnderPearlGravity=12（MC 投掷物 0.03/tick²=12 vs 世界 28）→
+        //   平抛 ~10 格 / 45° 满抛 ~48 格，对齐 MC 珍珠 ~30-50 格投掷距离；旧 12+共用重力 28 时 45° 满抛
+        //   仅 ~5 格（「珍珠扔不远」）。雪球 / 蛋 / 眼仍 12 不动（各自手感已锚定）。本地常量（同
+        //   kPlayerSnowballSpeed 模式，Entities 层速度常量不跨层读；矩阵探针以镜像常量同步，改值须两处同步）。
+        constexpr float kPlayerPearlSpeed = 24.0f; // t835④ 玩家掷暗渊珠速度（blocks/s；MC 投掷物 1.5 b/t=30 量级）
+        // t835⑤ 疾跑加成：疾跑态掷出 → 初速 ×1.3（对齐 t51 Sprint 移速 ×1.3 语义 —— 同一疾跑系数贯穿移动/
+        //   投掷，机制等价 MC 疾跑投掷抛得更远）。矩阵探针以镜像常量同步（改值须两处同步）。
+        constexpr float kPearlSprintFactor = 1.3f; // t835⑤ 疾跑掷珠初速系数（×1.3，同 t51 Sprint 移速因子）
+        const float throwSpeed = kPlayerPearlSpeed * (m_moveState == Sprint ? kPearlSprintFactor : 1.0f);
         const QVector3D eye = position();
         const QVector3D look = lookDirection();
         // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球模式）。
         const QVector3D origin = eye + look * 0.5f;
-        m_entityManager->spawnEnderPearl(origin, look * kPlayerPearlSpeed);
+        m_entityManager->spawnEnderPearl(origin, look * throwSpeed);
         if (m_mode != Creative)
             m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 暗渊珠（创造不耗）
         m_lastPlaceMs = now;
