@@ -3880,6 +3880,111 @@ int main(int argc, char *argv[])
                              "placed capped 15 (t795; UI lapis-gated highlight = QML binding, manual check)";
     }
 
+    // ── t823 书架→附魔台字流口径 tripwire（用户报「没看到文字流」实机核查产物；矩阵不链 Quick3D →
+    //    QML 枚举无法直测，改**冻结镜像** EnchantGlyphFlow.qml rescanPairs 的逐行语义与本权威锁同值：
+    //    权威规则改动而 QML 副本未跟 → 镜像与权威失配 FAIL，提醒同步 EnchantGlyphFlow.qml（及同规则
+    //    第二副本 EnchantRunes.qml）。镜像与权威**有意分歧仅一处**：不设 15 上限 —— 字流发射按全部
+    //    有效对（每 pair 独立发射，>15 书架照常出字），15 封顶是附魔强度档位语义非视觉语义。
+    //    同时钉用户搭法口径三态（复现文档 docs/test-reports/t823-glyphflow-repro.md 第 2 节同图）：
+    //    ① 单层地面环带即有效 —— **无需两层高**（用户重点怀疑项，t795 只证计数 15 未按字流口径钉）；
+    //    ② 贴身环带（切比雪夫==1，8 格全放）恒 0 —— 与附魔档位同口径：能吃到书架档位加成的搭法必然
+    //      出字流、不出流的搭法也吃不到档位（两处同源，附魔台 UI 里看书架档位 = 字流搭法自检入口）；
+    //    ③ 半步格被堵 → 该书架不计（视觉与档位同步减）。rig 同 t795：运行期扫描净空 5×5 区（P20
+    //    教训不走 nextSlot）；y 带取 44/45（**世界高 48 → y∈[0,47]**，首轮踩坑 y=50/51 越界静默拒 = 全
+    //    探针假 FAIL 的 t814 同款病；t795 残架在 46/47 不冲突，扫描自带避开）。末尾复原 Air。
+    {
+        // 冻结镜像（改动此函数 = 改 QML 副本语义，须三处同步：World 权威 / 本镜像 / QML 两副本）：
+        //   Math.trunc(dx/2) ≡ C++ 整除向零（dx∈{-2,0,2} 商恰整数，两写法同值）；QML !==95/!==0 由
+        //   recipe.cpp t823 static_assert 钉 95/94 字面量，此处镜像走谓词等价。
+        const auto mirrorShelfPairs = [](const World &world, int x, int y, int z) {
+            int pairs = 0;
+            for (int dy = 0; dy <= 1; ++dy) {
+                const int yy = y + dy;
+                for (int dx = -2; dx <= 2; ++dx)
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                        if (!BR::isBookshelf(world.blockAt(x + dx, yy, z + dz))) continue;
+                        if (world.blockAt(x + dx / 2, yy, z + dz / 2) != quint8(BR::Air)) continue;
+                        ++pairs;
+                    }
+            }
+            return pairs;
+        };
+        int gx = -1, gz = -1;
+        const int gY = 44;
+        for (int zz = 2; zz + 2 < 96 && gx < 0; zz += 3)
+            for (int xx = 2; xx + 2 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -2; dx <= 2 && clear; ++dx)
+                    for (int dz = -2; dz <= 2 && clear; ++dz)
+                        if (w.blockAt(xx + dx, gY, zz + dz) != BR::Air
+                            || w.blockAt(xx + dx, gY + 1, zz + dz) != BR::Air) clear = false;
+                if (clear) { gx = xx; gz = zz; }
+            }
+        bool ok = gx >= 0;
+        if (gx < 0) {
+            qInfo().noquote() << "  [t823 diag] no clear 5x5 region at y=44/45";
+        } else {
+            const auto clearRing = [&]() {
+                for (int dy = 0; dy <= 1; ++dy)
+                    for (int dx = -2; dx <= 2; ++dx)
+                        for (int dz = -2; dz <= 2; ++dz) {
+                            w.setBlock(gx + dx, gY + dy, gz + dz, BR::Air, 0);
+                            if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                                w.setBlock(gx + dx / 2, gY + dy, gz + dz / 2, BR::Air, 0);
+                        }
+            };
+            // ① 净空 → 双侧 0（镜像 == 权威基线）。
+            const int m0 = mirrorShelfPairs(w, gx, gY, gz), a0 = w.countBookshelvesAround(gx, gY, gz);
+            // ② 贴身环带 8 格全放书架（切比雪夫==1）→ 双侧 0：不出流 = 也不加档（用户搭法口径钉）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (dx != 0 || dz != 0)
+                        w.setBlock(gx + dx, gY, gz + dz, BR::Bookshelf, 0);
+            const int mAdj = mirrorShelfPairs(w, gx, gY, gz), aAdj = w.countBookshelvesAround(gx, gY, gz);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (dx != 0 || dz != 0)
+                        w.setBlock(gx + dx, gY, gz + dz, BR::Air, 0);
+            // ③ 单层地面环带 16 格全放（上层恒空）→ 镜像 16（不封顶）/ 权威 15（封顶）——**单层即满**，
+            //    且有意分歧（视觉不封顶）一并钉死：满环带 + UI 开 = 字流最密场景。
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                        w.setBlock(gx + dx, gY, gz + dz, BR::Bookshelf, 0);
+            const int m16 = mirrorShelfPairs(w, gx, gY, gz), a16 = w.countBookshelvesAround(gx, gY, gz);
+            // ④ 堵两角书架半步（(±1,±1) 各只服务自己的角书架，t795 边中点教训）→ 双侧 -2。
+            w.setBlock(gx - 1, gY, gz - 1, BR::Cobble, 0);
+            w.setBlock(gx + 1, gY, gz + 1, BR::Cobble, 0);
+            const int m14 = mirrorShelfPairs(w, gx, gY, gz), a14 = w.countBookshelvesAround(gx, gY, gz);
+            w.setBlock(gx - 1, gY, gz - 1, BR::Air, 0);
+            w.setBlock(gx + 1, gY, gz + 1, BR::Air, 0);
+            // ⑤ 单列两层高（一角 dy0/dy1 叠放）→ 双侧 2：两层架每层独立计，第二层同样要自己的半步空。
+            clearRing();
+            w.setBlock(gx - 2, gY,     gz - 2, BR::Bookshelf, 0);
+            w.setBlock(gx - 2, gY + 1, gz - 2, BR::Bookshelf, 0);
+            const int mStack = mirrorShelfPairs(w, gx, gY, gz), aStack = w.countBookshelvesAround(gx, gY, gz);
+            clearRing();   // 复原净空（好公民：t795 未清是历史，新探针不留脏 rig）
+            ok = ok && m0 == 0 && a0 == 0
+                 && mAdj == 0 && aAdj == 0
+                 && m16 == 16 && a16 == 15
+                 && m14 == 14 && a14 == 14
+                 && mStack == 2 && aStack == 2;
+            if (!ok)
+                qInfo().noquote() << "  [t823 diag] mirror/authority: empty " << m0 << "/" << a0
+                                  << " adjacent " << mAdj << "/" << aAdj
+                                  << " ring16 " << m16 << "/" << a16
+                                  << " blocked2 " << m14 << "/" << a14
+                                  << " stack " << mStack << "/" << aStack;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t823 glyph-flow rule tripwire: QML rescanPairs mirror == world authority "
+                             "(empty 0/0, adjacent ring 0/0 = no flow no tier, single ground layer 16 pairs "
+                             "vs capped 15 = one-layer suffices + visual uncapped by design, blocked half-step "
+                             "-2 both sides, two-high stack 2/2)";
+    }
+
     // ── t785 生物蛋补全探针（用户「末影人和烈焰人的生物蛋……应该和其他的生物蛋放在一起，而且贴图也是仿照
     //    他们的生物蛋，还有就是狼和豹猫的生物蛋都没有出现」；Game 层表 + Core 生成式染色表）：
     //    ① 蛋 id→mobType 单一权威表 RecipeRegistry::mobTypeForSpawnEgg 全 13 蛋接通且与 EntityManager::MobType
