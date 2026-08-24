@@ -2029,6 +2029,24 @@ Window {
         return Qt.rgba(0.839 * light.r, 0.722 * light.g, 0.565 * light.b, 1.0)
     }
 
+    // t816 羊脸罩判据/配色：游戏内羊自然毛色（t789 白主导 + 粉/灰/浅灰/棕/黑少数）非白时，整模贴图 ×
+    //   sheepWoolTintAt 会连**头前脸**一起染（MobModel 单材质整模渲染 = 图鉴 t816 同病）→ 脸=skin 层不
+    //   tint（机制等价 MC 染色羊脸恒粉褐肤色）：sheepTintDyed 判「当前毛色非白」（tint 任一分量 <0.999，
+    //   白 = 恒等不罩，零回归）；sheepFaceCoverTint = 裸肤 #d6b890 × 昼夜（sheepLegCoverTint 同款，红闪
+    //   红覆盖）。revision 触碰刷新（tint 随羊而变）。
+    function sheepTintDyed(entIdx) {
+        entityManager.revision
+        if (entIdx < 0) return false
+        const t = entityManager.sheepWoolTintAt(entIdx)
+        return t.r < 0.999 || t.g < 0.999 || t.b < 0.999
+    }
+    function sheepFaceCoverTint(entIdx) {
+        entityManager.revision
+        if (entIdx >= 0 && entityManager.hurtFlashAt(entIdx) > 0) return "#ff0000"
+        const light = terrainLight(worldClock.skyLight)
+        return Qt.rgba(0.839 * light.r, 0.722 * light.g, 0.565 * light.b, 1.0)
+    }
+
     // ── t718 盔甲 layer 贴图源（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 采样源）──
     // tier（0 皮/1 铁/2 铜/3 金/4 钻）→ 程序层贴图文件名前缀（t717 tools/build_armor_layers.py 五档；
     //   与 resourcepackmanager armorLayerPackName 同源字面量——QML 侧不 include C++，注释互指钉死）。
@@ -7029,12 +7047,27 @@ Window {
                                 //   单一权威（Core，合成缓存生效与否）；合成失败回退毛层原样（头前无脸）→ 眼仍显保
                                 //   唯一脸；pack 关（程序贴图无脸）恒显不变。visible 依赖 mobSheepPackTex.source
                                 //   （sheepWoolFaceActive 无 NOTIFY，由 source 变化驱动重算）。
+                                // t816 羊脸罩（游戏内侧同步，图鉴 ResourceBrowser 同款）：非白毛色（sheepTintDyed）
+                                //   时整模贴图 × 毛色 tint 连**头前脸**一起染 → 脸罩以裸肤色盖住头前面（脸=skin 层
+                                //   不 tint，机制等价 MC 染色羊脸恒粉褐）。罩在眼 Node 内 → 随 headPitch 低头同转
+                                //   （图鉴静态无此需求）；罩盖贴图脸（pack 真脸亦盖）→ 眼在罩显时须恒显（每颗眼
+                                //   Model 的 visible 加 || sheepTintDyed(index) 分支）。头前面 z=-0.61（世界系）→
+                                //   罩相对颈枢 (0,0.10,-0.29) 为 z=-0.325、厚 0.02（pitch=0 时世界 [-0.625,-0.605]，
+                                //   前凸 0.015 / 后没入 0.005 无共面 z-fight，同图鉴）。
                                 Node {
                                     visible: !(mobSheepPackTex.source.toString().length > 0
                                                && resourcePack.sheepWoolFaceActive)
+                                             || sheepTintDyed(index)
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
+                                    Model {
+                                        visible: sheepTintDyed(index)
+                                        geometry: UnitCube {}
+                                        position: Qt.vector3d(0, 0.00, -0.325)
+                                        scale: Qt.vector3d(0.14, 0.16, 0.02)
+                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: sheepFaceCoverTint(index) }
+                                    }
                                     Model {
                                         geometry: UnitCube {}
                                         position: Qt.vector3d(-0.055, 0.00, -0.35)
@@ -8124,20 +8157,21 @@ Window {
                                         }
                                     }
                                 }
-                                // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 前面 z=-0.70；
-                                //   眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.71，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                                // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前面 z=-0.60
+                                //   （t819 头后移贴胸，眼随移）；眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.61，同 t52
+                                //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
                                 //   t780：pack 命中时贴图头前脸自带双瞳（demo 包 row6 实测）→ overlay 隐（t777 双眼教训）。
                                 Model {
                                     visible: !wolfPackHit
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.08, 0.16, -0.71)
+                                    position: Qt.vector3d(-0.08, 0.16, -0.61)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: !wolfPackHit
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.08, 0.16, -0.71)
+                                    position: Qt.vector3d(0.08, 0.16, -0.61)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
@@ -8191,20 +8225,21 @@ Window {
                                         return ocelotPackHit ? mobOcelotPackTex : mobOcelotTex
                                     }
                                 }
-                                // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 前面 z=-0.60；
-                                //   眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.61，同 t52 贴脸防 z-fight）。同猪眼纯色子 Model 模式。
+                                // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前面 z=-0.52
+                                //   （t819 头后移贴胸，眼随移）；眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.53，同 t52
+                                //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
                                 //   t780：pack 命中（野生豹猫）时贴图头前脸自带眼点 → overlay 隐（t777 双眼教训）。
                                 Model {
                                     visible: !ocelotPackHit
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(-0.07, 0.15, -0.61)
+                                    position: Qt.vector3d(-0.07, 0.15, -0.53)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: !ocelotPackHit
                                     geometry: UnitCube {}
-                                    position: Qt.vector3d(0.07, 0.15, -0.61)
+                                    position: Qt.vector3d(0.07, 0.15, -0.53)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }

@@ -160,7 +160,7 @@ Item {
         if (t === 12 || t === 13) return 0.75
         if (t === 14) return 1.6
         if (t === 16) return 0.55 // t781 夜行者细肢人形高 2.70（[-1.40,1.30]）→ 缩到镜头内全身可见
-        if (t === 17) return 1.1 // t782 燃烬者头+4棒全模型 1.12 高 ×1.34 宽（[-0.58,0.54]/半径 0.67）→ 1.1 撑满可辨（旧单头盒 1.6 同footprint）
+        if (t === 17) return 1.1 // t782/t818 燃烬者头+4棒全模型 1.10 高 ×1.14 宽（[-0.58,0.52]/半径 0.57；t818 头 0.88³→0.7³ + 轨道 0.62→0.52）→ 1.1 撑满可辨
         return 1.0
     }
     // 预览模型垂直居中微调：几何局部原点 = 碰撞中心，mob 身体偏向 -Y → 上提让主体在镜头居中。
@@ -241,6 +241,13 @@ Item {
         ? root.sheepBodyPackSrc !== ""
         : (root.selectedMobPackSrc !== "" && root.resourcePack
            && root.resourcePack.sheepWoolFaceActive)
+    // t816 羊染脸纠偏派生态：毛茸态 + 选中了非白毛色 → 整模 baseColor 乘 tint 会连**头前脸**一起染
+    //   （MobModel 单材质整模渲染）→ 叠一块皮肤色「脸罩」Model 盖住头前面（#d6b890，t777 腿罩同款语义：
+    //   脸/腿=skin 层不 tint，仅躯干毛层乘色，机制等价 MC 染色羊脸不随毛色染）。罩住贴图脸（pack 真脸
+    //   亦盖）→ 眼 overlay 须在罩上恒显（见眼 visible 的 || sheepFacePatched 分支）。白毛（tint 恒等）/
+    //   剪毛态（裸肤不染色）不罩 = 原观感零回归。
+    readonly property bool sheepFacePatched:
+        root.selectedMobFromSection === 3 && !root.sheepSheared && root.sheepWoolIndex > 0
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -283,8 +290,9 @@ Item {
     //   可越 360（eulerRotation 角度语义等价）—— 统一不改写（动画运行期 DragHandler 不会同时写）。
     property real spinAngle: 0
     // t599 鼠标拖拽旋转态：dragging = DragHandler 活动中（暂停自转）；userPitch = 拖拽累计俯仰角偏移
-    //   （叠加在 -22° 基倾上，Y 拖上/下看顶/底）；松手 resume 动画把 spinAngle lerp 回自转相位（无跳变）。
-    //   yaw 由 spinAngle 本身承载（拖拽水平位移直接写入 spinAngle，自转从松手角度继续）。
+    //   （叠加在 -22° 基倾上；t820 起上拖看底 / 下拖看顶——「推球面」直觉，旧版符号反）。松手 resume
+    //   动画把 spinAngle lerp 回自转相位（无跳变）。yaw 由 spinAngle 本身承载（拖拽水平位移直接写入
+    //   spinAngle，自转从松手角度继续）。
     property bool previewDragging: false
     property real userPitch: 0
 
@@ -673,9 +681,11 @@ Item {
                                 // t599 3D 预览鼠标拖拽旋转（用户「一直自动旋转，能不能拖拽看」）：在自动旋转基础上
                                 //   加 DragHandler —— 按住拖时暂停自转（previewDragging → NumberAnimation running=false），
                                 //   水平位移增量写 spinAngle（yaw，度；1px = 0.6° 手感系数）、垂直位移增量累计
-                                //   userPitch（pitch，度；上拖看顶 / 下拖看底，限 ±60° 防过翻）；松手 pitch 由
-                                //   resumePitchAnim 平滑归零（400ms OutCubic 回标准 -22° 3/4 视角），yaw 由自转从当前
-                                //   角度无缝续转（NumberAnimation on spinAngle 重启从当前值推进，无跳变）。
+                                //   userPitch（pitch，度；限 ±60° 防过翻）；松手 pitch 由 resumePitchAnim 平滑归零
+                                //   （400ms OutCubic 回标准 -22° 3/4 视角），yaw 由自转从当前角度无缝续转。
+                                //   t820 修「上下拖动方向反」：旧版 userPitch - dy*0.6（上拖 pitch 增 → 模型顶
+                                //   远离镜头 = 看到的是底）与直觉相反 → 符号取反 userPitch + dy*0.6（上拖看底 /
+                                //   下拖看顶，= 拖动方向与模型表面同向移动的「推球面」直觉；左右 yaw 已对不动）。
                                 //   方块与生物 3D 预览共用（同一 spinAngle/userPitch）；enabled 限定 3D 预览可见时
                                 //   （大图标态不抢手势；左侧网格在其外不受影响）。translation 是只读累计值 →
                                 //   lastX/lastY 记上次值取增量（拖拽结束归零基准，下次拖从 0 差起）。
@@ -703,7 +713,7 @@ Item {
                                         lastX = translation.x
                                         lastY = translation.y
                                         root.spinAngle = (root.spinAngle + dx * 0.6 + 360) % 360
-                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))
+                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch + dy * 0.6)) // t820 符号取反（旧 -dy 方向反）
                                     }
                                 }
                                 // 整立方方块 → 内嵌 View3D 旋转 BlockCube。
@@ -812,11 +822,12 @@ Item {
                                                 baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
                                                     : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
                                                 baseColor: {
-                                                    // t751 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
+                                                    // t751/t816 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
                                                     //   （白底羊毛贴图 × 染色 = 染色羊毛，调色板与羊毛方块 16 色同源）。
-                                                    //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色（近整模乘色，
-                                                    //   脸区随乘为近似）；裸肤（剪毛后）不染色（对齐 MC 剪后裸肤无色）。
-                                                    //   生物蛋路径不 tint（变体仅生物段浏览，见 sheepWoolIndex 注）。
+                                                    //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色；t816 起 tint 只落
+                                                    //   躯干/头毛——脸区由 sheepFacePatched 皮肤色脸罩盖住不染色（腿 = t777
+                                                    //   四腿皮肤罩，同为 skin 层不 tint），对齐 MC 染色羊脸/腿不随毛色染；
+                                                    //   裸肤（剪毛后）不染色。生物蛋路径不 tint（变体仅生物段浏览）。
                                                     if (root.selectedMobFromSection === 3 && !root.sheepSheared
                                                         && root.sheepWoolIndex > 0)
                                                         return root.woolPalette[root.sheepWoolIndex].tint
@@ -834,6 +845,20 @@ Item {
                                                 alphaCutoff: 0.5
                                             }
                                         }
+                                        // t816 羊脸罩（染脸纠偏）：有色毛（sheepFacePatched）时整模贴图 × 毛色 tint
+                                        //   会连头前**脸区**一起染 → 本罩以皮肤色 #d6b890（t777 腿罩同款色）盖住
+                                        //   头前面，脸=skin 层不随毛色染（机制等价 MC 染色羊：脸恒粉褐肤色）。
+                                        //   头盒心 (0,0.10,-0.45) 半 (0.14,0.16,0.16) → 前脸 z=-0.61；罩 z 心
+                                        //   -0.615 厚 0.02 → [-0.625,-0.605]（前凸 0.015 / 后没入 0.005，无共面
+                                        //   z-fight；图鉴静态 headPitch=0 → 罩不挂颈枢）。罩盖贴图脸（pack 真脸
+                                        //   亦盖）→ 下方眼 overlay 在罩显时恒显（visible || sheepFacePatched）。
+                                        Model {
+                                            visible: root.sheepFacePatched
+                                            geometry: UnitCube {}
+                                            position: Qt.vector3d(0, 0.10, -0.615)
+                                            scale: Qt.vector3d(0.14, 0.16, 0.02)
+                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
+                                        }
                                         // t663 ⑥ 羊眼 overlay（镜像 Main.qml t633 ③：sheep_fur.png 毛层头前无脸 →
                                         //   眼恒显；Main.qml 颈枢 Node 绑 headPitch，图鉴静态 0 → 直立，直接定位）。
                                         //   裸羊变体同显（裸肤色无脸）。
@@ -842,30 +867,31 @@ Item {
                                         //   把眼整个包住 → 被头面遮挡恒不可见。烘焙正确绝对位：白眼底 z=-0.64（凸出
                                         //   头前面 -0.61 外 0.03 无 z-fight）/ 黑瞳 z=-0.65（叠白眼底前），y=0.10。
                                         // t777 ② pack 真脸门控：贴图自带脸（sheepPreviewPackFace）→ 隐 overlay 眼
-                                        //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。
+                                        //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。t816 例外：脸罩
+                                        //   在身（sheepFacePatched）时贴图脸被罩盖 → 眼须在罩上恒显（否则染色羊无眼）。
                                         Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.055, 0.10, -0.64)
                                             scale: Qt.vector3d(0.055, 0.055, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.055, 0.10, -0.64)
                                             scale: Qt.vector3d(0.055, 0.055, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.055, 0.10, -0.65)
                                             scale: Qt.vector3d(0.028, 0.028, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.055, 0.10, -0.65)
                                             scale: Qt.vector3d(0.028, 0.028, 0.02)
@@ -956,36 +982,38 @@ Item {
                                             }
                                         }
                                         // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
-                                        //   (0,0.12,-0.52) 半 (0.14,0.15,0.18) → 眼贴头前 (±0.08,0.16,-0.71)）。
+                                        //   (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前脸 z=-0.60 → 眼贴头前
+                                        //   (±0.08,0.16,-0.61)（t819 头后移贴胸，眼随移）。
                                         //   t780：pack 命中 → box-UV 贴图头前脸自带双瞳 → overlay 隐（t777 双眼教训）。
                                         Model {
                                             visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.08, 0.16, -0.71)
+                                            position: Qt.vector3d(-0.08, 0.16, -0.61)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
                                             visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.08, 0.16, -0.71)
+                                            position: Qt.vector3d(0.08, 0.16, -0.61)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         // t750 ③ 豹猫眼（修复「没有脸」；镜像 Main.qml ocelot delegate：头心
-                                        //   (0,0.12,-0.46) 半 (0.11,0.12,0.14) → 眼贴头前 (±0.07,0.15,-0.61)）。
+                                        //   (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前脸 z=-0.52 → 眼贴头前
+                                        //   (±0.07,0.15,-0.53)（t819 头后移贴胸，眼随移）。
                                         //   t780：pack 命中 → 贴图头前脸自带眼点 → overlay 隐（同上）。
                                         Model {
                                             visible: root.selectedMobType === 11 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.07, 0.15, -0.61)
+                                            position: Qt.vector3d(-0.07, 0.15, -0.53)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
                                             visible: root.selectedMobType === 11 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.07, 0.15, -0.61)
+                                            position: Qt.vector3d(0.07, 0.15, -0.53)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }

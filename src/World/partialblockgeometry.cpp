@@ -1169,15 +1169,24 @@ void PartialBlockGeometry::bedHalfBoxes(quint8 blockId, bool isHead, int facing,
     //   格边界处对接成连续木框，无中间断口（与床垫 (c) 同样满长轴，保证床体中段不空）。
     push(0.f, 1.f, legTop, plankTop, 0.f, 1.f, planksTile);
 
-    // (c) 彩色被面床垫（t496 填实中间空隙）：床色贴图（被面包裹的床垫）。**沿床长轴满 [0,1]**（两半在格边界
-    //   处对接成一张连续床垫 → 中间无空隙，spec t496「床头床尾中间羊毛处空隙要填实」），仅沿宽轴内缩 [ins,1-ins]
-    //   留出两侧床架边缘可见（被面侧边凹入床框，机制等价 MC 床垫嵌入床架）。y[plankTop, matTop]。
+    // (c) 彩色被面床垫（t496 填实中间空隙）：床色贴图（被面包裹的床垫）。**沿床长轴 [mA,mB]**（内端满到格
+    //   边界 → 两半对接成一张连续床垫，spec t496「床头床尾中间羊毛处空隙要填实」；t821 外端内缩一个板厚，
+    //   见下），仅沿宽轴内缩 [ins,1-ins] 留出两侧床架边缘可见（被面侧边凹入床框，机制等价 MC 床垫嵌入床架）。
+    //   y[plankTop, matTop]。
     //   旧版床垫四边都内缩 → 沿长轴两端各空 ins(2/16) → 两半对接时长轴边界处出现 4/16 宽空缝（用户复盘
     //   「中间空」）；改满长轴后床垫在格边界连续，空缝消失。
+    //   **t821 床头/尾 z-fighting 修复（用户「床头/尾羊毛与床身模板接触面重叠闪烁」）**：旧版长轴满 [0,1] →
+    //   床垫**外端面**与床头/尾板外侧面在同一格边共面且同向法线（z 区间 [ins,1-ins] ⊂ [0,1] 重叠）→ 旋转
+    //   预览时被面色与板色逐像素互抢 = 闪烁。修：床垫外端内缩一个 boardThick 收到**板内面**（与板内面贴合
+    //   是反向法线 + 背面剔除 → 无共面竞争片元）；板全高（床头 9/16 / 床尾 7/16 均 > 床垫顶 5/16）封住外端
+    //   → 无可见缺口；内端（格边界侧）仍满到边界，t496 两半对接连续语义不变。
+    const float boardThick = BlockRegistry::kBedBoardThick; //（(d) 板厚；提前声明供床垫/枕头内缩共用）
+    const float mA = outerPositive ? 0.f : boardThick;           // 床垫长轴低角（外端在 0 → 内缩板厚）
+    const float mB = outerPositive ? 1.f - boardThick : 1.f;     // 床垫长轴高角（外端在 1 → 内缩板厚）
     if (f == 0 || f == 1)
-        push(0.f, 1.f, plankTop, matTop, ins, 1.f - ins, bedTile); // 长 X 轴满 [0,1]，宽 Z 轴内缩
+        push(mA, mB, plankTop, matTop, ins, 1.f - ins, bedTile); // 长 X 轴：外端内缩 + 宽 Z 轴内缩
     else
-        push(ins, 1.f - ins, plankTop, matTop, 0.f, 1.f, bedTile); // 长 Z 轴满 [0,1]，宽 X 轴内缩
+        push(ins, 1.f - ins, plankTop, matTop, mA, mB, bedTile); // 长 Z 轴：外端内缩 + 宽 X 轴内缩
 
     // (d) 床头板（head 半）/ 床尾板（foot 半）：外端竖立木板。床头板高（kBedHeadboardTop 9/16），
     //   床尾板矮（kBedFootboardTop 7/16），机制等价 MC 床头板高于床尾板。板厚 kBedBoardThick(2/16 = kBedInset)
@@ -1185,7 +1194,6 @@ void PartialBlockGeometry::bedHalfBoxes(quint8 blockId, bool isHead, int facing,
     //   板 y[plankTop, boardTop] —— 坐在床架平台上（不覆盖腿区，腿区 y[0,legTop] 在板下方独立可见）。
     //   仅外端有板（head 外端 = 床头板 / foot 外端 = 床尾板）；内端（格边界侧）无板 → 两半对接处床垫连续过渡。
     //   外端低角走 (a) 同一 outerLow（per-f 显式），保证 f=1/3 板也落床端而非格边界。
-    const float boardThick = BlockRegistry::kBedBoardThick;
     const float boardTop = isHead ? BlockRegistry::kBedHeadboardTop : BlockRegistry::kBedFootboardTop;
     if (longAxisIsX) {
         const float bx0 = outerLow(outerPositive, boardThick); // 长轴 X → 板竖立在 X 外端（与腿同 X 端），跨越全 z 宽
@@ -1203,9 +1211,14 @@ void PartialBlockGeometry::bedHalfBoxes(quint8 blockId, bool isHead, int facing,
         const float pLen = 0.375f;  // 枕头沿床长方向占 6/16（床头端 3/8，留出大半被面）
         const float pEdge = ins;    // 枕头沿宽轴内缩 = 床垫内缩（与床垫侧边平齐）
         const float l0 = outerLow(outerPositive, pLen); // 长轴低角（0 或 1-pLen）
+        // t821：枕头长轴外端同床垫内缩一个板厚 —— 旧版枕头外端面（[l0,l0+pLen] 起于格边）与床头板外面
+        //   共面同法线（枕 y[matTop,5.5/16] ⊂ 床头板 y[plankTop,9/16]）→ 同款 z-fight 闪烁；内缩后枕外端
+        //   贴板内面（反向法线无竞争），床头板 9/16 > 枕顶 7/16 封口无缺口。
+        const float pA = outerPositive ? l0 : l0 + boardThick;               // 外端在 0 → 低角内缩板厚
+        const float pB = outerPositive ? l0 + pLen - boardThick : l0 + pLen; // 外端在 1 → 高角内缩板厚
         if (longAxisIsX)
-            push(l0, l0 + pLen, matTop, BlockRegistry::kBedPillowTop, pEdge, 1.f - pEdge, woolTile);
+            push(pA, pB, matTop, BlockRegistry::kBedPillowTop, pEdge, 1.f - pEdge, woolTile);
         else
-            push(pEdge, 1.f - pEdge, matTop, BlockRegistry::kBedPillowTop, l0, l0 + pLen, woolTile);
+            push(pEdge, 1.f - pEdge, matTop, BlockRegistry::kBedPillowTop, pA, pB, woolTile);
     }
 }

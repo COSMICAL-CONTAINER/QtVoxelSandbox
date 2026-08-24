@@ -120,6 +120,18 @@ void mobFaceQtUV(int face, float u0, float v0, float w, float h, float d,
     umax = mcToQtU(mu1);
     vmin = mcToQtV(mv1); // MC v 终点（图像更下）→ Qt v 更小
     vmax = mcToQtV(mv0); // MC v 起点（图像更上）→ Qt v 更大
+    // t817 半纹素 UV guard（盒区间接缝串色修复）：PIL 实测 demo 包 enderman.png 全部透明纹素底色为
+    //   纯黄 RGB(228,228,0)（贴图作者用黄作透明填充色）。box-UV 面矩形边缘若恰好贴在「不透明区 ↔ 透明
+    //   填充区」边界（如头部 Top 面是不透明孤岛、身体 Top 面上缘 v=16 毗邻空带），双线性过滤会在面边缘
+    //   混入相邻透明纹素的黄色 RGB —— alpha≥0.5 的混合片元透过 Mask 显出黄色细线，落在 3D 模型两个面的
+    //   交界处（= 用户报「夜行者两面交界黄线」根因；UV 无重叠，串色全部来自边界双线性外溢）。修：每面
+    //   UV 矩形四边内缩半个 base 纹素（0.5/g_texW、0.5/g_texH）——HD 包是 base 整数倍，半 base 纹素 ≥
+    //   半 HD 纹素，任意整数倍包采样都不越出本面矩形（瓦片图集同款 gutter 手法，lessons t54/t148）。
+    //   内容损失每边半纹素（8px 面 ~6%）不可辨；只落 box-UV 分支（全脸 UV 整张铺面无边界语义，零回归）。
+    umin += 0.5f / g_texW;
+    umax -= 0.5f / g_texW;
+    vmin += 0.5f / g_texH;
+    vmax -= 0.5f / g_texH;
 }
 
 // 写入一角的 UV：pack 关 → kFace 全脸 u,v；pack 开 → MC box-UV 子区（本盒 textureOffset + size）插值。
@@ -688,14 +700,25 @@ void MobModel::rebuild()
         //   在 demo 包 HD 重绘里 top/bottom/back 三面 0% 不透明（躯干区未涂满），mane 区六面 100% 灰白渐层
         //   长毛 = 狼身唯一完整毛色区，躯干采它（观感灰狼毛皮，修「狼仍用兔子灰块贴图」）；耳采头 texOffs /
         //   leg(0,18)2×8×2。尾巴在 QML 独立 Model（纯色毛色，不采本贴图）。
+        // t819 修「缝隙 + 耳串狼头贴图」（demo 包 PIL 复测）：① 耳旧版复用头 texOffs(0,0)——头 box-UV 六面
+        //   矩形里 front/back 面含**脸纹**（row6 双瞳 + 棕鼻吻），整面贴到 0.07 宽的耳四面 = 每只耳朵一张
+        //   迷你狼脸（=「耳朵上是狼头贴图」根因）→ 耳改采 mane(21,0) 毛区（灰狼耳=毛色，采样窗与头区分离）。
+        //   ② 身体采样 PIL 复测为 mane 毛区（六面灰白渐层无脸纹，t780 结论成立）——用户观感「身上部分是
+        //   狼头」实为头盒前伸过多：旧头心 z=-0.52 → 头前缘 -0.70 探出身体前缘 -0.40 达 0.30、下巴下方
+        //   z∈[-0.70,-0.40] 全悬空 = 读作「头浮在身前 / 缝隙」→ 头后移到 z=-0.42（前缘 -0.60 保留 0.20 吻部
+        //   自然悬垂、后缘 -0.24 深嵌胸口 0.16，t781 夜行者「四肢与躯干实体连接嵌接」同族纪律）；QML 两侧
+        //   眼 overlay z 同步 -0.71→-0.61。③ 腿嵌髋 0.03→0.05（腿顶 -0.10→-0.08 深入躯干底 -0.13；摆动
+        //   ±0.5rad 腿顶角起伏 0.038 < 0.05 全程不露缝；腿底仍 -0.42 贴 collision 底面）+ legOffX 0.18→0.16
+        //   收进身体轮廓（旧版腿心恰在身侧缘 ±0.18 → 半条腿悬在身侧外读作「位置不对」）。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(21, 0, 6, 6, 7);
         addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；采 mane 毛区）
         setMobTex(0, 0, 6, 6, 4);
-        addHeadRot( 0.00f,  0.12f, -0.52f, 0.14f, 0.15f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸略尖；鼻吻）
-        addBox(-0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（采头 texOffs）
-        addBox( 0.08f,  0.30f, -0.50f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
-        addLegs(-0.26f,  0.16f,  0.18f,  0.24f, 0.08f, 0, 18, 2, 8, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长，比猪腿瘦）
+        addHeadRot( 0.00f,  0.12f, -0.42f, 0.14f, 0.15f, 0.18f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸略尖；t819 后移贴胸消下巴悬空）
+        setMobTex(21, 0, 6, 6, 7);
+        addBox(-0.08f,  0.30f, -0.40f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（t819 采 mane 毛区，与头脸区分区）
+        addBox( 0.08f,  0.30f, -0.40f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
+        addLegs(-0.25f, 0.17f, 0.16f, 0.24f, 0.08f, 0, 18, 2, 8, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长；t819 嵌髋 0.05 + 收进轮廓）
     } else if (m_mobType == 11) {
         // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
         //   前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体贴图同纹）+ 4 细腿。未驯服 = 丛林豹猫（斑点橙棕贴图）、
@@ -708,15 +731,21 @@ void MobModel::rebuild()
         //   texOffs / leg(0,18)2×4×2；尾区 (12,19) 侧面 0% 不透明（demo 包未涂）→ 尾采 body texOffs 随身
         //   同纹（机制同程序态「随身体贴图同纹」语义）。驯服猫贴图（mob_cat_* 全脸）走 packTextured=false，
         //   pack 贴图仅未驯服豹猫（demo 包 cat/ 目录无驯服猫变体 PNG）。
+        // t819 同狼修（同一 UV 表同病）：① 耳旧版复用头 texOffs(1,1) → 耳面采样头 box-UV 含脸纹（row6 双
+        //   黑点眼）矩形 = 耳朵显迷你猫脸 → 改采 body(20,6) 斑纹毛区（与头区分离）。② 头后移贴胸：旧心
+        //   z=-0.46 前缘 -0.60 探出身体前缘 -0.36 达 0.24、下巴悬空 → 移到 -0.38（前缘 -0.52 保留 0.16 吻部
+        //   悬垂、后缘 -0.24 嵌胸 0.12）；QML 两侧眼 overlay z 同步 -0.61→-0.53。③ 腿嵌髋 0.03→0.05（腿顶
+        //   -0.08 深入躯干底 -0.11；腿底仍 -0.40 贴 collision 底面）+ legOffX 0.16→0.14 收进轮廓（身半宽 0.15）。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(20, 6, 4, 5, 6);
         addBox( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f, verts, idx, bMin, bMax); // 细长躯干（比狼更窄长；猫科体型）
         addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；采 body 同纹）
         setMobTex(1, 1, 5, 4, 4);
-        addHeadRot( 0.00f,  0.12f, -0.46f, 0.11f, 0.12f, 0.14f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸圆润）
-        addBox(-0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（采头 texOffs）
-        addBox( 0.06f,  0.26f, -0.44f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
-        addLegs(-0.24f,  0.16f,  0.16f,  0.20f, 0.06f, 0, 18, 2, 4, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿
+        addHeadRot( 0.00f,  0.12f, -0.38f, 0.11f, 0.12f, 0.14f, m_headPitch, verts, idx, bMin, bMax); // 头（前伸圆润；t819 后移贴胸消下巴悬空）
+        setMobTex(20, 6, 4, 5, 6);
+        addBox(-0.06f,  0.26f, -0.36f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（t819 采 body 毛区，与头脸区分区）
+        addBox( 0.06f,  0.26f, -0.36f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
+        addLegs(-0.23f, 0.17f, 0.14f, 0.20f, 0.06f, 0, 18, 2, 4, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿（t819 嵌髋 0.05 + 收进轮廓）
     } else if (m_mobType == 12) {
         // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
         //   局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊「躯干中心」）；腿底本地 y=−0.90 贴 collision 底面
@@ -880,11 +909,12 @@ void MobModel::rebuild()
         //   t782 重做（t728 旧版 = 单头盒 + 棒组在 Main.qml 用 4 个 UnitCube 纯色 Repeater 手搓——图鉴/刷怪笼
         //   各自手抄且无贴图；且 setMobType 白名单缺 17 → 实际渲染猪几何，「猪模型套皮」根因）：
         //   头 + 4 棒全进本共享几何，三消费端（delegate / 图鉴 / 笼迷你）同源；棒带贴图。
-        //   几何参数：头 = 单一略大方盒 0.88³（心 (0,+0.10,0)，顶 +0.54 / 底 -0.34）；棒 ×4 = 细长竖盒
-        //   0.10×1.10×0.10（半 (0.05,0.55,0.05)，心 y=-0.03 → 跨 [-0.58,+0.52] 伸过碰撞盒上下沿，烈焰人
-        //   「棒长于头」比例），轨道半径 0.62（棒内缘 0.57 与头半 0.44 间隙 0.13 不穿模；外缘 0.67 微出
-        //   碰撞 halfW 0.5——纯视觉，hitbox/AI 不动），径向 90° 分布 + rodSpin 公转（棒身恒竖直只轨道心
-        //   转，QML NumberAnimation on rodSpin 连续驱动；迷你态静态角即可）。总跨 y [-0.58,+0.54]=1.12 <
+        //   几何参数：头 = 单一方盒 0.7³（t818 缩小：t782 初版 0.88³ 用户观感「头过大」→ 半长 0.44→0.35；
+        //   心 (0,+0.10,0) 不变 → 顶 +0.45 / 底 -0.25）；棒 ×4 = 细长竖盒 0.10×1.10×0.10（半 (0.05,0.55,0.05)，
+        //   心 y=-0.03 → 跨 [-0.58,+0.52] 伸过碰撞盒上下沿，烈焰人「棒长于头」比例），轨道半径 0.52（t818
+        //   随头同步收 0.62→0.52：棒内缘 0.47 与头半 0.35 间隙 0.12 不穿模；外缘 0.57 微出碰撞 halfW 0.5
+        //   ——纯视觉，hitbox/AI 不动），径向 90° 分布 + rodSpin 公转（棒身恒竖直只轨道心
+        //   转，QML NumberAnimation on rodSpin 连续驱动；迷你态静态角即可）。总跨 y [-0.58,+0.52]=1.10 <
         //   碰撞 1.2。walkPhase 无四肢不读。
         //   UV **两态均 MC box-UV**（g_boxUvAlways=true；MC Blaze 布局）：头 head(0,0)8×8×8 / 棒共用
         //   rod(0,16)2×8×2。base **64×32**（t782 修 t728 误 64×64：demo 包 blaze/blaze.png 实为 64×32
@@ -895,13 +925,13 @@ void MobModel::rebuild()
         g_texW = 64.0f; g_texH = 32.0f;
         g_boxUvAlways = true;
         setMobTex(0, 0, 8, 8, 8);
-        addBox(0.00f, 0.10f, 0.00f, 0.44f, 0.44f, 0.44f, verts, idx, bMin, bMax); // 单头（略大方盒）
+        addBox(0.00f, 0.10f, 0.00f, 0.35f, 0.35f, 0.35f, verts, idx, bMin, bMax); // 单头（t818 缩小 0.7³）
         const float rodSpin = qDegreesToRadians(m_rodSpin);
         for (int i = 0; i < 4; ++i) {
             const float ang = qDegreesToRadians(float(i) * 90.0f) + rodSpin;
             setMobTex(0, 16, 2, 8, 2);
-            addBox(std::cos(ang) * 0.62f, -0.03f, std::sin(ang) * 0.62f,
-                   0.05f, 0.55f, 0.05f, verts, idx, bMin, bMax); // 烈焰棒 ×4（竖直细长盒，轨道心公转）
+            addBox(std::cos(ang) * 0.52f, -0.03f, std::sin(ang) * 0.52f,
+                   0.05f, 0.55f, 0.05f, verts, idx, bMin, bMax); // 烈焰棒 ×4（竖直细长盒，轨道心公转；t818 半径 0.52）
         }
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。
