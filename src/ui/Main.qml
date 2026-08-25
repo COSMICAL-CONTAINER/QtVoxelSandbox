@@ -2465,6 +2465,17 @@ Window {
         //   外 / 虚空）移除不发本信号（珍珠白耗）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费
         //   路由到 Game 层方法，同 emberFireballHitPlayer→applyStatusEffect 模式）。
         function onEnderPearlLanded(x, y, z) { player.applyEnderPearlTeleport(x, y, z) }
+        // t836 钓鱼浮标咬钩（EntityManager Bobber Water 态等待到点、进咬钩窗口沿发；坐标 = 浮标 float 世界坐标）：
+        //   转发到 BlockParticles.burstWaterSplash 在浮标位迸发水花粒子（水色上溅；机制等价 MC 1.0 咬钩水花 +
+        //   「浮标下沉 ~0.5s 窗口」的视觉提示）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费）。
+        function onBobberBit(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstWaterSplash(x, y, z)
+        }
+        // t836 钓鱼浮标鱼跑（咬钩窗口过期、玩家未及时收竿沿发；坐标同上）：小股水花提示「鱼跑了」（幅度小于
+        //   咬钩；机制等价 MC 错过窗口鱼逃的轻反馈）。之后 Entities 层内部重掘认等待，呈现层无后续动作。
+        function onBobberEscaped(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstWaterEscape(x, y, z)
+        }
         // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
         //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
         //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
@@ -2644,9 +2655,13 @@ Window {
         // t622：第 7 参携实例名（铁砧改名物品丢弃；其余掉落不传 → 转发缺省空）。
         // t686：第 8 参携实例耐久（死亡掉落磨损工具；其余掉落不传 → undefined → 转发缺省 -1 → 拾取归满耐久）。
         function onSpawnItem(x, y, z, id, count, enchants, name, durability) { itemEntities.spawnItem(x, y, z, id, count, enchants, name, durability) }
-        // t401 钓获物（拉起咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标整数格）→ 转发到 manager 生成
-        //   掉落实体（同 spawnItem / mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
-        function onFishCaught(itemId, count, x, y, z) { itemEntities.spawnItem(x, y, z, itemId, count) }
+        // t401/t836 钓获物（收竿咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标 float 世界坐标 + 朝玩家
+        //   水平弹向 dirX/dirZ（归一）+ 弹速）→ 转发到 manager **定点定向弹出**（spawnItemAt，t608 发射器先例；
+        //   机制等价 MC 1.0 钓获物从浮标飞向玩家——掉落物 tick 重力接手画弧线，玩家走近拾取；同 spawnItem /
+        //   mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
+        function onFishCaught(itemId, count, px, py, pz, dirX, dirZ, speed) {
+            itemEntities.spawnItemAt(Qt.vector3d(px, py, pz), itemId, count, dirX, dirZ, speed)
+        }
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。
@@ -4382,19 +4397,85 @@ Window {
             }
         }
 
-        // t401 钓鱼浮标（仅 player.fishing 时显）：小立方体浮在水面（player.bobberPosition），咬钩时下沉一点
-        //   （hasBite → y -0.12，表「鱼扯浮标」）。NoLighting（同地形 / 线框已验证可见路径）。红顶 + 白底表浮标。
-        //   分层（PLAN §2）：呈现层只读 player.fishing / bobberPosition / hasBite（Game 层算时序），不反向写。
-        Model {
+        // t401/t836 钓鱼浮标 + 鱼线（仅 player.fishing 时显）：浮标 = 红顶立方 + 白杆小段（ bobberPosition 是
+        //   EntityManager 浮标实体的 Game 层每 tick 镜像——飞行段随抛物移动 / 水中浮定 / 钉 mob 跟随），咬钩时
+        //   整体下沉 0.15（hasBite →「鱼扯浮标」）。鱼线 = 竿尖 → 浮标的细长盒（UnitCube 沿 Y 拉长 + 手写
+        //   axis-angle 四元数把本地 +Y 旋到连线方向；position=中点、scale=(细,长,细)）。NoLighting（同地形 /
+        //   线框已验证可见路径）。分层（PLAN §2）：呈现层只读 player.fishing / bobberPosition / hasBite
+        //   （Game 层镜像实体态），不反向写。
+        Node {
             visible: player.fishing
             position: Qt.vector3d(player.bobberPosition.x,
-                                  player.bobberPosition.y - (player.hasBite ? 0.12 : 0.0),
+                                  player.bobberPosition.y - (player.hasBite ? 0.15 : 0.0),
                                   player.bobberPosition.z)
-            scale: Qt.vector3d(0.14, 0.14, 0.14)
+            // 红顶浮头（水上可见段）
+            Model {
+                position: Qt.vector3d(0, 0.05, 0)
+                scale: Qt.vector3d(0.16, 0.10, 0.16)
+                geometry: UnitCube {}
+                materials: PrincipledMaterial {
+                    lighting: PrincipledMaterial.NoLighting
+                    baseColor: "#d83838" // 浮标红（与 ToolIcon 浮标红顶同色）
+                }
+            }
+            // 白杆水下半段（浮定水面时的「杆身」，飞行段亦随整体）
+            Model {
+                position: Qt.vector3d(0, -0.08, 0)
+                scale: Qt.vector3d(0.05, 0.18, 0.05)
+                geometry: UnitCube {}
+                materials: PrincipledMaterial {
+                    lighting: PrincipledMaterial.NoLighting
+                    baseColor: "#e8e4dc" // 浮标白杆（水下段）
+                }
+            }
+        }
+        // t836 竿尖锚点（世界系手部近似位）：脚底 + 上 1.40 + 右手侧 0.36 + 水平视线前 0.18。锚点常量近似
+        //   第一人称 viewModelHand（相机本地 (0.36,-0.12,-0.39) ≈ 眼右下 → 世界系即右手侧 + 视线前）与 F5
+        //   第三人称手臂挂点（躯干侧上）——**两 cameraMode 共用一手部锚**（世界系单锚，肉眼观感「线从手
+        //   出发」一致；精确逐模式锚点留人工目视调，需目视清单项）。yaw 约定同实体（-Z 前，dir=(-sin,-cos)）。
+        function fishingRodTipWorld() {
+            const yawR = player.yaw * Math.PI / 180
+            const lookX = -Math.sin(yawR), lookZ = -Math.cos(yawR)  // 水平视线
+            const rightX = Math.cos(yawR), rightZ = -Math.sin(yawR) // 右手侧（look × up）
+            const f = player.feetPosition
+            return Qt.vector3d(f.x + rightX * 0.36 + lookX * 0.18,
+                               f.y + 1.40,
+                               f.z + rightZ * 0.36 + lookZ * 0.18)
+        }
+        // t836 鱼线定向四元数：把本地 +Y 旋到方向 (dx,dy,dz)——**手写 axis-angle 公式**（q = (cos(θ/2),
+        //   sin(θ/2)·axis)，axis = up×d 归一；平行/反平行时 axis 任选正交轴），零 API 赌注（不依赖 vector3d
+        //   值类型方法 / 未用过的新构造签名）。零向量 → 单位四元数（线缩为点，不可见，防御）。
+        function fishingLineQuat(dx, dy, dz) {
+            const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
+            if (len < 1e-5) return Qt.quaternion(1, 0, 0, 0)
+            const cosT = Math.max(-1.0, Math.min(1.0, dy / len))  // cos θ = dot(up, d)（up=(0,1,0)）
+            const theta = Math.acos(cosT)
+            let ax = dz / len, az = -dx / len                       // axis = up × d = (dz, 0, -dx)（未归一）
+            let alen = Math.sqrt(ax * ax + az * az)
+            if (alen < 1e-5) { ax = 1.0; az = 0.0; alen = 1.0 }    // 平行/反平行 → 任选正交轴 (1,0,0)
+            ax /= alen; az /= alen
+            const s = Math.sin(theta / 2)
+            return Qt.quaternion(Math.cos(theta / 2), ax * s, 0.0, az * s)
+        }
+        // t836 鱼线（竿尖 → 浮标连线可见）：细长盒沿本地 +Y 拉长到连线长（scale.y = 距离），position = 中点，
+        //   rotation = fishingLineQuat(浮标 − 竿尖)。每帧随 fishingChanged（bobberPosition 镜像刷新）重算。
+        //   浮标在陆 / 飞行 / 钉 mob 段同样生效（线永远连手 → 浮标）。
+        Model {
+            visible: player.fishing
+            property vector3d tip: view3d.fishingRodTipWorld()
+            property vector3d bob: player.bobberPosition
+            property real lineLen: Math.max(0.05, Math.sqrt(
+                (bob.x - tip.x) * (bob.x - tip.x)
+                + (bob.y - tip.y) * (bob.y - tip.y)
+                + (bob.z - tip.z) * (bob.z - tip.z)))
+            position: Qt.vector3d((tip.x + bob.x) / 2, (tip.y + bob.y) / 2, (tip.z + bob.z) / 2)
+            scale: Qt.vector3d(0.022, lineLen, 0.022)
+            rotation: view3d.fishingLineQuat(bob.x - tip.x, bob.y - tip.y, bob.z - tip.z)
             geometry: UnitCube {}
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
-                baseColor: "#d83838" // 浮标红（与 ToolIcon 浮标红顶同色）
+                baseColor: "#e8e4dc" // 线白（浅灰白，水面/地面上可见）
+                opacity: 0.85        // 微透（细线的柔化观感；>0 走透明通道无碍单薄几何）
             }
         }
 

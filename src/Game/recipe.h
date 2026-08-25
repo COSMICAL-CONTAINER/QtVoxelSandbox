@@ -394,6 +394,15 @@ public:
     static constexpr int DyeGreenId  = 0x258; // 绿色染料：熔炉烧仙人掌（Cactus=42）产物（机制等价仙人掌绿）
     static constexpr int DyeRedId    = 0x259; // 红色染料：红花破坏掉落
     static constexpr int DyeBlackId  = 0x25A; // 黑色染料
+    // t836 熟鱼（cooked fish）：材料段 0x25B（染料段 0x25A 之上首个空闲号）。机制等价 MC 1.0 cooked fish ——
+    //   **生鱼（RawFishId 0x231）熔炉冶炼产物**（kSmelt + kSmeltXp 两表都接，t788 教训：漏一张 = 链断）。
+    //   可食 +4 饥饿（**本工程口径 = 生鱼 +2 的两倍**；MC 1.0 cooked fish 原值 +6，此处按「熟 = 生的两倍」
+    //   本地化取值，注释钉死口径防后世误校对）。喂豹猫**仍只认生鱼**（MC 1.0 口径：豹猫不吃熟鱼——
+    //   playercontroller 生鱼分支只 gate RawFishId，本 id 不接；狼 / 豹猫驯服链不动）。可堆叠 64（材料段默认）；
+    //   非方块 → 右键不放置，走「食用」分支。图标：MaterialIcon 自绘熟鱼（drawCookedFish = 生鱼鱼形的暖棕
+    //   烤色调变体，§9 原创）；pack 映射 itemFilenameMap 0x25B → cooked_cod.png（MC 1.0 cooked fish =
+    //   modern cooked_cod；包缺 → 安全跳过回退自绘）。创造材料 tab 排生鱼旁（hotbar creativeMaterials）。
+    static constexpr int CookedFishId = 0x25B; // 熟鱼：生鱼熔炉冶炼产物；食 +4 饥饿（t836）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

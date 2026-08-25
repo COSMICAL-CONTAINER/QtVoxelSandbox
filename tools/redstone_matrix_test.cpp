@@ -9965,6 +9965,360 @@ int main(int argc, char *argv[])
                              "draw switch";
     }
 
+    // ── P-t836 钓鱼系统整改探针（Entities 层 EntityManager 直编 + Game 层 PlayerController/Hotbar 真消费端，
+    //    t835/t856 同模式；独立小世界 48×48×96 seed 77（t835 实测该种子地形+树冠 ≤81，y≥84 天空带免凿——
+    //    t769 教训：不假设「某高度以上必空」，此为已核种子的实测带）+ 水池 / 猪平台 rig 摆 y=83 起）──
+    //    (a) 抛物线（轻重力 12 落差带）+ 落水浮定（XZ 收格心 / Y = 液面 − 浸没 0.125 精确断言）；
+    //    (b) 确定性等待：bobberWaitSeconds 两端恰可达（h=0 → 5.00 / h=2500 → 30.00）+ 分布带（600 序号
+    //        min<6 / max>29）+ 行为级（真实 settle 后按 hashVoxel 预计算的等待值 ±1 tick 咬钩——公式即驱动）；
+    //    (c) 咬钩窗口窗内收 = 获物 + 耐久 -1（fishCaught 载荷：池内物品 id + 浮标位 + 朝玩家弹向 + 弹速镜像
+    //        4.5）；窗过 = 鱼跑（escaped 信号 + hasBite 翻 false）+ 重等（第二咬可达）+ 此后空收无消耗；
+    //    (d) 钩 mob：pc 真甩竿飞行段命中猪（bobberHookedMobAt 绑定）→ 收竿拉拽（猪位移朝玩家 >0.03 +
+    //        耐久 -5 + 猪血量不变 + 零 fishCaught——钩中不伤害不获物口径）；陆上静止浮标冻结（Ground 态）；
+    //    (e) 熟鱼链：kSmelt + kSmeltXp 两表都接（t788 教训）+ 食用 +4（生鱼 +2 对照）+ 名「熟鱼」+
+    //        pack 映射源码钉（0x25B → cooked_cod.png）+ 创造 tab 源码钉 + 豹猫仍只认生鱼（源码钉 gate）。
+    {
+        // 镜像常量（P18 模式，改值须两处同步；Entities 层 kBobberWaitHashSalt / kBobberBiteWindowSec 与
+        //   Game 层 kFishCatchFlySpeed 均探针不可达私有）：
+        constexpr quint32 kMirrorBobberSalt = 0xF15Cu;   // EntityManager::kBobberWaitHashSalt（等待掷骰盐）
+        constexpr float kMirrorBiteWindow = 0.5f;        // EntityManager::kBobberBiteWindowSec（咬钩窗口秒）
+        constexpr float kMirrorCatchSpeed = 4.5f;        // PlayerController::kFishCatchFlySpeed（获物弹速）
+        World wF;
+        wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(77);
+        EntityManager ents;
+        int bitCount = 0, escCount = 0;
+        QObject::connect(&ents, &EntityManager::bobberBit, &ents,
+                         [&](float, float, float) { ++bitCount; });
+        QObject::connect(&ents, &EntityManager::bobberEscaped, &ents,
+                         [&](float, float, float) { ++escCount; });
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickB = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wF, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83; // rig 地板格（t835 实测 seed 77 地形 ≤81 → 84+ 全空带）
+
+        // ---- (a) 抛物 + 落水浮定（Entities 直编）----
+        // 水池：3×3 石底 fy + 1 深水 fy+1（液面 = fy+1+1.0−0.125 = fy+1.875；源 state=0 → surf 1.0）。
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wF.setBlock(x, fy, z, BR::Stone, 0);
+                wF.setBlock(x, fy + 1, z, BR::Water, 0);
+            }
+        bool okA = false;
+        {
+            // a1 抛物：v=(8,0,0) 自 (10.5, fy+4, 12.5)（空带无遮挡）——4 tick（dt=0.05 → t=0.2s）落差 =
+            //   ½·g·t² = ½·12·0.04 = 0.24（轻重力 12 直证；世界重力 28 会给 0.56 出带）。
+            const int b1 = ents.spawnBobber(QVector3D(10.5f, float(fy + 4), 12.5f), QVector3D(8.0f, 0.0f, 0.0f), 901);
+            tickB(4, 0.05f);
+            const float yDrop = float(fy + 4) - ents.posAt(b1).y();
+            const bool okAry = ents.aliveAt(b1)
+                               && qAbs(yDrop - 0.24f) < 0.06f
+                               && ents.posAt(b1).x() > 11.9f; // 水平位移 ≈ 8×0.2 = 1.6（弧线在飞）
+            ents.removeEntityAt(b1);
+            // a2 落水浮定：水池正上方垂直落（v=0）→ 穿入顶水格 settle 到格心 + 液面 − 0.125（浮力平衡半浸）。
+            const int b2 = ents.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0), 902);
+            for (int t = 0; t < 60 && ents.aliveAt(b2); ++t) tickB(1, 0.05f); // 落定 + 水中静置（等待期不咬）
+            const QVector3D p2 = ents.posAt(b2);
+            const bool okAset = ents.aliveAt(b2)
+                                && qAbs(p2.x() - 6.5f) < 1e-3f
+                                && qAbs(p2.y() - (float(fy + 1) + 0.875f)) < 1e-3f
+                                && qAbs(p2.z() - 6.5f) < 1e-3f;
+            ents.removeEntityAt(b2);
+            // a3 陆上静止：石台正上垂直落 → Ground 贴面冻结（后续 tick 位置不变；Ground 不钩 mob / 不进等待）。
+            wF.setBlock(12, fy, 18, BR::Stone, 0);
+            const int b3 = ents.spawnBobber(QVector3D(12.5f, float(fy + 4), 18.5f), QVector3D(0, 0, 0), 903);
+            for (int t = 0; t < 60 && ents.aliveAt(b3); ++t) tickB(1, 0.05f);
+            const QVector3D p3a = ents.posAt(b3);
+            tickB(20, 0.05f);
+            const QVector3D p3b = ents.posAt(b3);
+            const bool okAgr = ents.aliveAt(b3) && p3a == p3b
+                               && qAbs(p3b.y() - float(fy + 1)) < 1.0f; // 停在石台上表面一带（贴命中面）
+            ents.removeEntityAt(b3);
+            wF.setBlock(12, fy, 18, BR::Air, 0);
+            okA = okAry && okAset && okAgr;
+            if (!okA)
+                qInfo().noquote() << "  [t836 a diag] okAry" << okAry << "okAset" << okAset << "(pos" << p2
+                                  << ") okAgr" << okAgr << "(pos" << p3b << ")";
+        }
+
+        // ---- (b) 确定性等待：公式两端 + 分布带 + 行为级公式即驱动 ----
+        bool okB = false;
+        {
+            const bool okEnds = qAbs(EntityManager::bobberWaitSeconds(0u) - 5.0f) < 1e-4f
+                                && qAbs(EntityManager::bobberWaitSeconds(2500u) - 30.0f) < 1e-3f
+                                && EntityManager::bobberWaitSeconds(1u) > 5.0f
+                                && EntityManager::bobberWaitSeconds(2499u) < 30.0f;
+            float wMin = 1e9f, wMax = -1e9f;
+            for (quint32 s = 0; s < 600u; ++s) {
+                const float wv = EntityManager::bobberWaitSeconds(
+                    wF.hashVoxel(int(quint32(wF.seed()) ^ kMirrorBobberSalt ^ s), 5, 84, 6));
+                wMin = std::min(wMin, wv);
+                wMax = std::max(wMax, wv);
+            }
+            const bool okDist = wMin > 4.99f && wMin < 6.0f && wMax > 29.0f && wMax < 30.01f;
+            // 行为级：pc 真甩竿（serial 1）入水池 → settle 后按 hashVoxel 预计算等待值，±1 tick 内咬钩。
+            //   轨迹（tick 逐步核）：眼 (3.5, fy+2.62) pitch −20 → 原点 (3.876, 85.483) vel (14.10, −5.13)；
+            //   tick1 next=(4.581, 85.197) 格 (4,85) 空气；tick2 next=(5.286, 84.882) 格 (5,84) 水 → settle
+            //   (5.5, 84.875, 6.5)（XZ 收格心 / 液面 1.0 − 浸没 0.125）。
+            PlayerController pc;
+            Hotbar hb;
+            hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+            hb.setSelectedSlot(0);
+            pc.setWorld(&wF);
+            pc.setEntityManager(&ents);
+            pc.setHotbar(&hb);
+            pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+            pc.useFishingRod(); // 甩竿（serial → 1）
+            int bobC = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bobC = i; break; }
+            const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+            bool okCast = pc.fishing() && bobC >= 0;
+            for (int t = 0; t < 40 && okCast; ++t) {
+                tickB(1, 0.05f);
+                if (!ents.aliveAt(bobC)) { okCast = false; break; }
+                if (ents.posAt(bobC) == settlePos) break; // settled（精确浮点：0.5/0.875 均二进制精确）
+            }
+            okCast = okCast && ents.posAt(bobC) == settlePos;
+            // settle 格 (5, fy+1, 6) + serial 1 → 预计算等待（镜像盐 = 实现盐，P18 双钉）。
+            const float waitSec = EntityManager::bobberWaitSeconds(
+                wF.hashVoxel(int(quint32(wF.seed()) ^ kMirrorBobberSalt ^ 1u), 5, fy + 1, 6));
+            int ticksToBite = 0;
+            bool okWaitTime = false;
+            for (ticksToBite = 0; ticksToBite < 660; ++ticksToBite) {
+                if (ents.bobberHasBiteAt(bobC)) break;
+                tickB(1, 0.05f);
+            }
+            if (ents.bobberHasBiteAt(bobC) && ticksToBite < 660) {
+                const float got = float(ticksToBite) * 0.05f;
+                okWaitTime = qAbs(got - waitSec) <= 0.06f; // ±1 tick（公式即驱动的行为级直证）
+            }
+            okB = okEnds && okDist && okCast && okWaitTime;
+            if (!okB)
+                qInfo().noquote() << "  [t836 b diag] okEnds" << okEnds << "okDist" << okDist << "(" << wMin << ".."
+                                  << wMax << ") okCast" << okCast << "okWaitTime" << okWaitTime << "(got"
+                                  << ticksToBite * 0.05f << "s expect" << waitSec << "s)";
+            if (bobC >= 0) ents.removeEntityAt(bobC); // 清场（防 (c) 的「首个 Bobber」搜索误拾本浮标）
+        }
+
+        // ---- (c) 咬钩窗口：窗内收 = 获物 + 耐久 -1；窗过 = 鱼跑重等 + 空收无消耗 ----
+        bool okC = false;
+        {
+            PlayerController pc;
+            Hotbar hb;
+            const int rodDur = ToolRegistry::maxDurability(ToolRegistry::FishingRod); // 64（MC 1.0 钓竿）
+            hb.setStack(0, ToolRegistry::FishingRod, 1, rodDur);
+            hb.setSelectedSlot(0);
+            pc.setWorld(&wF);
+            pc.setEntityManager(&ents);
+            pc.setHotbar(&hb);
+            pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+            int caughtCount = 0, caughtId = 0; float cpx = 0, cpy = 0, cpz = 0, cdx = 0, cdz = 0, csp = 0;
+            QObject::connect(&pc, &PlayerController::fishCaught, &pc,
+                             [&](int itemId, int, float px, float py, float pz, float dx, float dz, float speed) {
+                                 ++caughtCount; caughtId = itemId;
+                                 cpx = px; cpy = py; cpz = pz; cdx = dx; cdz = dz; csp = speed;
+                             });
+            // c1 窗内收：甩竿（serial 1）→ settle（同 (b) 轨迹：格 (5,84,6)，pos (5.5, 84.875, 6.5)）→
+            //   drive 到咬钩即收 → fishCaught 恰一次 + 耐久 64→63 + 载荷（池内 id + 浮标位 + 朝玩家水平弹向 +
+            //   弹速镜像 4.5）+ fishing 态复位。
+            pc.useFishingRod();
+            int b1 = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { b1 = i; break; }
+            const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+            bool okc1 = b1 >= 0;
+            for (int t = 0; t < 40 && okc1; ++t) {
+                tickB(1, 0.05f);
+                if (!ents.aliveAt(b1)) { okc1 = false; break; }
+                if (ents.posAt(b1) == settlePos) break;
+            }
+            okc1 = okc1 && ents.posAt(b1) == settlePos;
+            for (int t = 0; t < 660 && okc1 && !ents.bobberHasBiteAt(b1); ++t) tickB(1, 0.05f);
+            const QVector3D bobPos = ents.posAt(b1);
+            okc1 = okc1 && ents.bobberHasBiteAt(b1);
+            pc.useFishingRod(); // 窗内收竿
+            const int dur1 = hb.durabilityAt(0);
+            // 弹向断言：dir 点乘（玩家 − 浮标）水平归一 > 0.9（朝玩家）；弹速 = 镜像 kFishCatchFlySpeed。
+            const float toPX = 3.5f - bobPos.x(), toPZ = 6.5f - bobPos.z();
+            const float toPLen = std::sqrt(toPX * toPX + toPZ * toPZ);
+            const bool poolIds[] = {
+                RecipeRegistry::RawFishId == caughtId, RecipeRegistry::LeatherId == caughtId,
+                RecipeRegistry::StringId == caughtId, RecipeRegistry::BoneId == caughtId,
+                RecipeRegistry::RottenFleshId == caughtId, RecipeRegistry::StickId == caughtId,
+                RecipeRegistry::InkSacId == caughtId, RecipeRegistry::SaddleId == caughtId,
+                RecipeRegistry::NameTagId == caughtId, RecipeRegistry::DiamondId == caughtId };
+            bool idInPool = false;
+            for (bool b : poolIds) idInPool = idInPool || b;
+            okc1 = okc1 && caughtCount == 1 && idInPool && dur1 == rodDur - 1 && !pc.fishing()
+                   && !ents.aliveAt(b1) // 浮标实体已收走
+                   && qAbs(cpx - bobPos.x()) < 1e-3f && qAbs(cpy - bobPos.y()) < 1e-3f
+                   && qAbs(cpz - bobPos.z()) < 1e-3f
+                   && qAbs(csp - kMirrorCatchSpeed) < 1e-3f
+                   && (toPLen < 1e-3f || (cdx * toPX + cdz * toPZ) / toPLen > 0.9f);
+            // c2 窗过 = 鱼跑重等 + 空收无消耗：再甩（serial 2）→ 咬 → drive 过窗（0.5s + 余量）→ escaped 信号 +
+            //   hasBite 翻 false → 继续 drive 到第二次咬（重等可达，cap 31s）→ 再过窗 → 此刻收 = 真空收
+            //   （无咬无获物 + 耐久不变）。
+            const int escBefore = escCount, bitBefore = bitCount;
+            pc.useFishingRod();
+            int b2 = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { b2 = i; break; }
+            bool okc2 = b2 >= 0;
+            for (int t = 0; t < 40 && okc2; ++t) {
+                tickB(1, 0.05f);
+                if (!ents.aliveAt(b2)) { okc2 = false; break; }
+                if (ents.posAt(b2) == settlePos) break;
+            }
+            okc2 = okc2 && ents.posAt(b2) == settlePos;
+            for (int t = 0; t < 660 && okc2 && !ents.bobberHasBiteAt(b2); ++t) tickB(1, 0.05f);
+            okc2 = okc2 && ents.bobberHasBiteAt(b2);
+            tickB(int(kMirrorBiteWindow / 0.05f) + 2, 0.05f); // 0.6s > 0.5s 窗 → 鱼跑
+            const bool okEsc = escCount == escBefore + 1 && !ents.bobberHasBiteAt(b2) && bitCount == bitBefore + 1;
+            bool okRewait = false;
+            for (int t = 0; t < 620 && ents.aliveAt(b2); ++t) {
+                if (ents.bobberHasBiteAt(b2)) { okRewait = true; break; }
+                tickB(1, 0.05f);
+            }
+            tickB(int(kMirrorBiteWindow / 0.05f) + 2, 0.05f); // 第二次咬钩窗口亦过期 → 收 = 空收
+            const int durBeforeEmpty = hb.durabilityAt(0);
+            pc.useFishingRod(); // 无咬空收
+            okc2 = okc2 && okEsc && okRewait && caughtCount == 1 && hb.durabilityAt(0) == durBeforeEmpty
+                   && !pc.fishing() && !ents.aliveAt(b2);
+            okC = okc1 && okc2;
+            if (!okC)
+                qInfo().noquote() << "  [t836 c diag] okc1" << okc1 << "(caught" << caughtCount << "id" << caughtId
+                                  << "dur" << rodDur - 1 << ") okc2" << okc2 << "(okEsc" << okEsc << "okRewait"
+                                  << okRewait << "esc" << escCount - escBefore << ")";
+        }
+
+        // ---- (d) 钩 mob：真甩竿飞行段命中 → 收竿拉拽 + 耐久 -5 + 不伤害 ----
+        bool okD = false;
+        {
+            // 猪平台（3×3，防落定 1.5s 游荡期间走下台）+ 猪；玩家站 x 13.5 平台按猪实时位姿瞄准。
+            wF.setBlock(13, fy, 6, BR::Stone, 0);
+            for (int x = 15; x <= 17; ++x)
+                for (int z = 5; z <= 7; ++z)
+                    wF.setBlock(x, fy, z, BR::Stone, 0);
+            const int pig = ents.spawnMobTyped(16, fy + 1, 6, EntityManager::MobPig,
+                                               QStringLiteral("#e8a0a0"), 10);
+            tickB(30, 0.05f); // 猪落定（重力 rest 到石面）
+            PlayerController pc;
+            Hotbar hb;
+            const int rodDur = ToolRegistry::maxDurability(ToolRegistry::FishingRod);
+            hb.setStack(0, ToolRegistry::FishingRod, 1, rodDur);
+            hb.setSelectedSlot(0);
+            pc.setWorld(&wF);
+            pc.setEntityManager(&ents);
+            pc.setHotbar(&hb);
+            pc.loadSavedState(13.5f, float(fy + 1), 6.5f, -90.0f, 0.0f, 2 /* Survival */);
+            int caughtCount = 0;
+            QObject::connect(&pc, &PlayerController::fishCaught, &pc,
+                             [&](int, int, float, float, float, float, float, float) { ++caughtCount; });
+            // 按猪实时中心位姿算 yaw/pitch（水平 look = (ux,uz) → yaw = atan2(-ux,-uz)；pitch = atan2(dy, 水平距)）。
+            const QVector3D pp = ents.posAt(pig);
+            const float eyeY = float(fy + 1) + 1.62f;
+            const float ux = pp.x() - 13.5f, uz = pp.z() - 6.5f;
+            const float hLen = std::sqrt(ux * ux + uz * uz);
+            const float yawDeg = qRadiansToDegrees(std::atan2(-ux, -uz));
+            const float pitchDeg = qRadiansToDegrees(std::atan2(pp.y() - eyeY, hLen));
+            pc.loadSavedState(13.5f, float(fy + 1), 6.5f, yawDeg, pitchDeg, 2);
+            pc.useFishingRod(); // 甩向猪
+            int bb = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bb = i; break; }
+            bool okHook = bb >= 0;
+            for (int t = 0; t < 40 && okHook; ++t) {
+                if (ents.bobberHookedMobAt(bb) == pig) break;
+                tickB(1, 0.05f);
+                if (!ents.aliveAt(bb)) { okHook = false; break; }
+            }
+            okHook = okHook && ents.bobberHookedMobAt(bb) == pig;
+            const float pigX0 = ents.posAt(pig).x();
+            const int pigHp0 = ents.healthAt(pig);
+            const int dur0 = hb.durabilityAt(0);
+            pc.useFishingRod(); // 收竿 → 拉拽
+            tickB(1, 0.016f);  // 一帧物理：猪被拉向玩家（vx = −6 朝 −X…方向断言按位移点积）
+            const float pigX1 = ents.posAt(pig).x();
+            const float moved = pigX1 - pigX0;
+            // 期望位移方向：猪在玩家 +X 侧 → 被拉向 −X（toward = pigX0 − 玩家x 的符号取反）。
+            const float toward = (pigX0 - 13.5f) >= 0.0f ? -1.0f : 1.0f;
+            okD = okHook && caughtCount == 0 && hb.durabilityAt(0) == dur0 - 5
+                  && ents.healthAt(pig) == pigHp0          // 钩中不伤害
+                  && moved * toward > 0.03f                  // 位移朝玩家 > 0.03（6 b/s 冲量 × 一帧）
+                  && !pc.fishing() && !ents.aliveAt(bb);
+            if (!okD)
+                qInfo().noquote() << "  [t836 d diag] okHook" << okHook << "dur" << hb.durabilityAt(0) - dur0
+                                  << "hp" << ents.healthAt(pig) << "/" << pigHp0 << "moved" << moved
+                                  << "toward" << toward;
+            ents.removeEntityAt(pig); // 清场（探针私有 ents 冻结不外泄）
+            wF.setBlock(13, fy, 6, BR::Air, 0);
+            for (int x = 15; x <= 17; ++x)
+                for (int z = 5; z <= 7; ++z)
+                    wF.setBlock(x, fy, z, BR::Air, 0);
+        }
+
+        // ---- (e) 熟鱼链（kSmelt + kSmeltXp 两表 + 食用值 + 名 + pack/创造 tab 源码钉 + 豹猫 gate 钉）----
+        bool okE = false;
+        {
+            Hotbar hbF;
+            const bool okCore = RecipeRegistry::CookedFishId == 0x25B
+                                && SmeltingRegistry::smeltResult(RecipeRegistry::RawFishId) == RecipeRegistry::CookedFishId
+                                && SmeltingRegistry::smeltXpReward(RecipeRegistry::CookedFishId) == 1
+                                && PlayerController::foodHungerAmount(RecipeRegistry::CookedFishId) == 4
+                                && PlayerController::foodHungerAmount(RecipeRegistry::RawFishId) == 2
+                                && hbF.nameForBlock(RecipeRegistry::CookedFishId) == QStringLiteral("熟鱼")
+                                && hbF.nameForBlock(RecipeRegistry::RawFishId) == QStringLiteral("生鱼");
+            // 源码钉（QML/源内字面量契约，t789 QML-literal 模式）：pack 映射行 + 创造 tab 行 + 豹猫生鱼 gate
+            //   （熟鱼不接豹猫喂食 = MC 1.0 口径）。exe 在 build/ → ../src 或 ../../src 兜底（r24#5 同款）。
+            bool okSrc = false;
+            {
+                const QString exeDir = QCoreApplication::applicationDirPath();
+                const QString rpmPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                            QStringLiteral("src/Core/resourcepackmanager.cpp"));
+                const QString hbPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                           QStringLiteral("src/Game/hotbar.cpp"));
+                const QString pcpPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                            QStringLiteral("src/Game/playercontroller.cpp"));
+                if (QFile::exists(rpmPath) && QFile::exists(hbPath) && QFile::exists(pcpPath)) {
+                    QFile f1(rpmPath), f2(hbPath), f3(pcpPath);
+                    if (f1.open(QIODevice::ReadOnly) && f2.open(QIODevice::ReadOnly) && f3.open(QIODevice::ReadOnly)) {
+                        const QString t1 = QString::fromUtf8(f1.readAll());
+                        const QString t2 = QString::fromUtf8(f2.readAll());
+                        const QString t3 = QString::fromUtf8(f3.readAll());
+                        // 滤注释行后查语句（防「注释里有、代码里没有」的假 PASS；豹猫 gate 行在代码区）。
+                        QString t3code;
+                        for (const QString &line : t3.split(QLatin1Char('\n'))) {
+                            if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                            t3code += line; t3code += QLatin1Char('\n');
+                        }
+                        okSrc = t1.contains(QStringLiteral("{0x25B, QStringLiteral(\"cooked_cod.png\")}"))
+                                && t2.contains(QStringLiteral("int(RecipeRegistry::CookedFishId)"))
+                                && t3code.contains(QStringLiteral("heldItemId == RecipeRegistry::RawFishId"));
+                    }
+                }
+            }
+            okE = okCore && okSrc;
+            if (!okE)
+                qInfo().noquote() << "  [t836 e diag] okCore" << okCore << "okSrc" << okSrc;
+        }
+
+        const bool okT836 = okA && okB && okC && okD && okE;
+        if (!okT836) ++totalFail;
+        qInfo().noquote() << (okT836 ? "PASS" : "FAIL")
+                          << "| t836 fishing overhaul: bobber is an EntityManager projectile (light-gravity "
+                             "parabola, hook-on-flight vs mob AABB, water settle at surface-minus-dip with "
+                             "state-aware liquid height, ground rest frozen, out-of-bounds despawn) driven from "
+                             "Game layer cast-anywhere/reel (EntityManager-carries-entity + "
+                             "PlayerController-settles-semantics split, pearl/drop precedent); deterministic "
+                             "5-30s wait via hashVoxel(seed^salt^castSerial) with exact reachable endpoints and "
+                             "+-1tick behavioral match, 0.5s bite window (in-window reel = fishingPool loot "
+                             "toward-player spawnItemAt + rod -1, expired = escaped signal + re-roll + empty "
+                             "reel costs nothing), hooked-mob reel pulls at ~6 b/s with -5 durability and zero "
+                             "damage; cooked fish 0x25B closes the chain (raw->cooked in BOTH kSmelt+kSmeltXp, "
+                             "+4 hunger vs raw +2, name/tab/pack-mapping pinned, ocelot still raw-only)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

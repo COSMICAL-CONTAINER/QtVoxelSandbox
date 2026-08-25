@@ -360,7 +360,10 @@ public:
     // t263 消耗选中槽工具 1 点耐久（生存挖掘完成 / 锄耕地调用）。非工具 / 空槽 → no-op；
     //   耐久归零 → 清空槽（工具破损消失）+ emit slotsChanged + emit toolBroken（t315 破损音）。创造模式由
     //   caller 不调本方法（不消耗）。
-    Q_INVOKABLE void damageSelectedItem();
+    // t263 消耗选中槽工具耐久（playercontroller 生存挖掘完成 / 锄耕地调用）。创造由 caller 不调（不消耗）。
+    //   t836 增 times 参数（默认 1）：一次使用消耗多点耐久的机制用（钩住生物收竿 -5——MC 1.0 口径「钩到实体
+    //   远比钓获损竿」）；每点独立走 Unbreaking 掷骰 + 破损清槽（清槽后槽空 → 后续次数自然 no-op）。
+    Q_INVOKABLE void damageSelectedItem(int times = 1);
     // t474 跨槽材料消耗（附魔台每次附魔扣 1/2/3 青金石；青金石在 hotbar / 主栏任意槽散堆）：
     //   consumeMaterial(id, n)：扫全部 hotbar + 主栏槽，凑足 n 件 id 物品即扣（按槽逐个 takeStack，
     //   槽满扣后清空 id 移到下一槽）；凑不足则**回滚已扣**（恢复原态）+ 返 false（caller 不应推进附魔）。
@@ -489,6 +492,9 @@ signals:
     void armorBroken(int itemId);
 
 private:
+    // t836 damageSelectedItem 的单点消耗本体（原 t263 主体；外层 times 循环在 damageSelectedItem）。
+    //   非工具 / 空槽 → no-op；Unbreaking 掷骰 → -1 / 破损清槽（详见 hotbar.cpp 头注释）。
+    void damageSelectedOnce();
     // 9 槽物品栈。t49：构造期全空（创造物品改由调色板点取→放入 hotbar 槽；不再预置 8 满栈）。
     std::vector<ItemStack> m_slots;
     int m_selectedSlot = 0;

@@ -86,6 +86,10 @@ int PlayerController::foodHungerAmount(int itemId)
     if (itemId == RecipeRegistry::CookedBeefId)     return 8; // 熟牛肉 +8 hunger（MC 1.0 cooked beef / steak）
     if (itemId == RecipeRegistry::CookedMuttonId)   return 6; // 熟羊肉 +6 hunger（MC cooked mutton）
     if (itemId == RecipeRegistry::CookedChickenId)  return 6; // 熟鸡肉 +6 hunger（MC 1.0 cooked chicken）
+    // t836 熟鱼 +4 hunger（**本工程口径 = 生鱼 +2 的两倍**；MC 1.0 cooked fish 原值 +6，此处按「熟 = 生的两倍」
+    //   本地化取值——recipe.h CookedFishId 注释同源钉死，防后世按 wiki 误校对）。喂豹猫仍只认生鱼（MC 1.0
+    //   口径：豹猫不吃熟鱼——下方生鱼分支只 gate RawFishId）。
+    if (itemId == RecipeRegistry::CookedFishId)     return 4; // 熟鱼 +4 hunger（生鱼两倍；t836）
     return 0;
 }
 
@@ -2395,77 +2399,126 @@ void PlayerController::cancelBowDraw()
     emit bowDrawChanged();
 }
 
-// t401 钓鱼竿抛 / 拉切换（手持钓竿右键按下边缘触发；机制等价 MC 1.0 右键钓竿抛 / 收）。单次切换非长按：
-//   未钓 → 抛浮标入水（视线 DDA HitWater 命中首个水格 → 浮标落水面；命中非水 / 无水 → 不抛）；已钓 → 拉起
-//   （咬钩则按 LootTable::fishingPool 抽一件获物落为掉落实体 + 生存钓竿 -1 耐久，否则空收）。
+// t401/t836 钓鱼竿甩 / 收切换（手持钓竿右键按下边缘触发；机制等价 MC 1.0 右键钓竿甩 / 收 + hook 拉拽）。
+//   单次切换非长按：未钓 → 任意位置甩竿（沿视线初速抛出 EntityManager::spawnBobber 投射实体——旧 t401
+//   「水射线定点放置」退役；浮标落水才进等待机，落陆静止可收回）；已钓 → 收竿，按浮标态三分支结算：
+//   ① 钩住生物（bobberHookedMobAt ≥ 0）→ pullMobToward 拉向玩家（kFishHookPullSpeed + 实体侧微上抛，
+//     **不伤害**）+ 生存钓竿 -5 耐久（kFishHookDurabilityCost）；② 咬钩窗口内（bobberHasBiteAt）→
+//   LootTable::fishingPool 抽一件获物，emit fishCaught（浮标位 + 朝玩家弹向 + 弹速 → 呈现层 spawnItemAt
+//   定向弹出，机制等价 MC 获物飞向玩家）+ 生存钓竿 -1 耐久；③ 空收（无咬钩 / 浮标在陆）→ 无获物无消耗。
+//   分层（PLAN §2）：浮标物理 / 咬钩时序在 Entities 层；本方法只发指令（spawnBobber / removeEntityAt）收
+//   信号（三查询）结算 Game 层语义（获物 / 拉拽 / 耐久），掉落物 / 暗渊珠同款「实体在 Entities、语义在 Game」。
 void PlayerController::useFishingRod()
 {
-    if (m_dead) return; // t655 死亡态输入闸门：尸体不抛竿
+    if (m_dead) return; // t655 死亡态输入闸门：尸体不甩竿
     if (m_fishing) {
-        // 拉起：快照咬钩态 / 浮标位（cancelFishing 会清），再据咬钩决定获物 / 空收。
-        const bool bite = m_hasBite;
-        const QVector3D bp = m_bobberPos;
-        cancelFishing(); // 收浮标（无论获物否；拉起即结束）
-        emit swingArm(); // 拉起挥手反馈（一次「使用」动作）
-        if (!bite) return; // 未咬钩 → 空收（无获物 / 不损耐久）
+        // 收竿：先快照浮标态（removeEntityAt 会清），再据态结算获物 / 拉拽 / 空收。
+        const bool valid = m_bobberEntityIdx >= 0 && m_entityManager
+                           && m_bobberEntityIdx < m_entityManager->count()
+                           && m_entityManager->aliveAt(m_bobberEntityIdx)
+                           && m_entityManager->kindAt(m_bobberEntityIdx) == int(EntityManager::Bobber);
+        bool bite = false;
+        int hooked = -1;
+        QVector3D bp;
+        if (valid) {
+            bp = m_entityManager->posAt(m_bobberEntityIdx);
+            bite = m_entityManager->bobberHasBiteAt(m_bobberEntityIdx);
+            hooked = m_entityManager->bobberHookedMobAt(m_bobberEntityIdx);
+            m_entityManager->removeEntityAt(m_bobberEntityIdx); // 收浮标（无论获物否；收竿即结束）
+        }
+        m_bobberEntityIdx = -1;
+        m_fishing = false;
+        m_hasBite = false;
+        emit fishingChanged();
+        emit swingArm(); // 收竿挥手反馈（一次「使用」动作）
+        if (!valid) return; // 浮标已消散（出界 / 寿命）→ 无结算
+        if (hooked >= 0) {
+            // ① 钩住生物：拉向玩家 + 生存 -5 耐久；不伤害（MC 1.0 hook 拉拽口径）。
+            m_entityManager->pullMobToward(hooked, m_pos, kFishHookPullSpeed);
+            if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem(kFishHookDurabilityCost);
+            return;
+        }
+        if (!bite) return; // ③ 空收（未咬钩 / 浮标在陆）→ 无获物 / 不损耐久
         if (!m_world) return;
-        // 咬钩 → 按 fishingPool 抽一件获物（roll 1 次；RNG 用运行期随机 → 每次拉起不同）。
+        // ② 咬钩 → 按 fishingPool 抽一件获物（roll 1 次；RNG 用运行期随机 → 每次收竿不同——战利品非
+        //   世界生成，不涉 PLAN §2-K）。获物从浮标位**弹向玩家**（水平归一方向 + 定向初速 → 呈现层
+        //   spawnItemAt；掉落物 tick 重力接手画出弧线，玩家走近拾取）。
         const auto &pool = LootTable::fishingPool();
         const quint32 seed = QRandomGenerator::global()->generate();
         const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, 1, seed);
         if (!stacks.empty() && stacks[0].itemId != 0 && stacks[0].count > 0) {
-            // 获物落为掉落实体（浮标整数格；Main.qml Connections 转发到 ItemEntityManager.spawnItem）。
-            const int bx = int(std::floor(bp.x()));
-            const int by = int(std::floor(bp.y()));
-            const int bz = int(std::floor(bp.z()));
-            emit fishCaught(stacks[0].itemId, stacks[0].count, bx, by, bz);
+            float dx = m_pos.x() - bp.x();
+            float dz = m_pos.z() - bp.z();
+            const float dl = std::sqrt(dx * dx + dz * dz);
+            if (dl > 1e-3f) { dx /= dl; dz /= dl; }
+            else { dx = 0.0f; dz = 0.0f; } // 玩家恰在浮标正上/下方 → 无水平弹速（原地落下即可拾）
+            emit fishCaught(stacks[0].itemId, stacks[0].count,
+                            bp.x(), bp.y(), bp.z(), dx, dz, kFishCatchFlySpeed);
             // 生存钓竿 -1 耐久（归零自动清槽，同弓 / 镐）；创造不消耗（无限源）。
             if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
         }
         return;
     }
-    // 抛竿：沿视线 DDA（HitWater）找首个水格；无世界 / 无水命中（墙挡在前 / 射程内无水）→ 不抛。
-    if (!m_world) return;
-    const RayHit hit = raycastVoxel(*m_world, position(), lookDirection(), kFishCastRange, RayFilter::HitWater);
-    if (!hit.valid) return;
-    if (m_world->blockAt(hit.bx, hit.by, hit.bz) != quint8(BlockRegistry::Water)) return; // 命中非水 → 不抛
-    // 浮标落水格顶面（略下沉表「浮在水面」）；m_biteTimer 随机咬钩倒计时（kFishBiteMin..Max 秒）。
-    m_bobberPos = QVector3D(float(hit.bx) + 0.5f, float(hit.by) + 0.875f, float(hit.bz) + 0.5f);
+    // 甩竿（任意位置可甩——不再限定水里；无世界 / 无实体管理器 → 不甩）。
+    if (!m_world || !m_entityManager) return;
+    ++m_fishCastSerial; // 甩竿序号（确定性等待掷骰错峰：同世界同序号同等待值）
+    const QVector3D eye = position();
+    const QVector3D look = lookDirection();
+    const int slot = m_entityManager->spawnBobber(eye + look * kFishCastOriginOffset,
+                                                  look * kFishCastSpeed, m_fishCastSerial);
+    if (slot < 0) return; // 实体槽满（kCap）→ 甩竿失败，不进钓鱼态
+    m_bobberEntityIdx = slot;
+    m_bobberPos = eye; // 首帧镜像（甩出点；后续 tick 由实体位置刷新）
     m_fishing = true;
     m_hasBite = false;
-    m_biteTimer = kFishBiteMin + float(QRandomGenerator::global()->generateDouble()) * (kFishBiteMax - kFishBiteMin);
     emit fishingChanged();
-    emit swingArm(); // 抛竿挥手反馈
+    emit swingArm(); // 甩竿挥手反馈
 }
 
-// t401 持续钓鱼：每 tick 累积咬钩倒计时。换槽（持物不再是钓竿）→ cancel。机制等价 MC 1.0 抛竿后等若干秒咬钩。
-//   m_biteTimer 两阶段复用：>0 = 等待咬钩倒计时（→0 即咬钩，重置为 kFishBiteWindow）；咬钩后 >0 = 咬钩窗口
-//   （→0 即窗口过期、鱼跑了 → cancelFishing 空收）。仅 captured 时跑（pause 早 return 之前已 cancelFishing）。
+// t401/t836 持续钓鱼（每 tick 调，captured 时）：换槽（持物不再是钓竿）→ cancel；浮标实体失效（出界 /
+//   寿命消散——aliveAt/kindAt 双查）→ 自动收竿态；否则镜像实体侧浮标位置 / 咬钩态（值变才 emit，QML 浮标
+//   Model / 鱼线绑 bobberPosition 跟随）。咬钩时序本体在 EntityManager（Bobber Water 态推进），本方法零计时。
 void PlayerController::updateFishing(float dt)
 {
+    Q_UNUSED(dt); // t836 起不推进任何计时（时序在实体侧）；保留签名兼容 tickImpl 调用点
     if (!m_fishing) return;
     // 换槽（持物不再是钓竿）→ 收浮标（机制等价 MC 切物品即收竿）。
     if (!m_hotbar || m_hotbar->selectedItemId() != int(ToolRegistry::FishingRod)) { cancelFishing(); return; }
-    m_biteTimer -= dt;
-    if (m_biteTimer > 0.0f) return;
-    if (!m_hasBite) {
-        // 等待阶段到点 → 咬钩：进入咬钩窗口（m_biteTimer 重置为窗口时长，m_hasBite=true）。
-        m_hasBite = true;
-        m_biteTimer = kFishBiteWindow;
-        emit fishingChanged(); // 呈现层据 hasBite 让浮标下沉 / 抖动
-    } else {
-        // 咬钩窗口过期（玩家未及时拉）→ 鱼跑了 → 空收。
-        cancelFishing();
+    // 浮标实体失效（出界 / 寿命兜底消散 / 系统清理）→ 自动收竿态（浮标已不在，无实体可清）。
+    const bool valid = m_bobberEntityIdx >= 0 && m_entityManager
+                       && m_bobberEntityIdx < m_entityManager->count()
+                       && m_entityManager->aliveAt(m_bobberEntityIdx)
+                       && m_entityManager->kindAt(m_bobberEntityIdx) == int(EntityManager::Bobber);
+    if (!valid) {
+        m_bobberEntityIdx = -1;
+        m_fishing = false;
+        m_hasBite = false;
+        emit fishingChanged();
+        return;
+    }
+    // 镜像实体侧浮标位置 / 咬钩态（Game 层只读拉取；呈现层绑 Q_PROPERTY 消费——不反向写实体）。
+    const QVector3D p = m_entityManager->posAt(m_bobberEntityIdx);
+    const bool bite = m_entityManager->bobberHasBiteAt(m_bobberEntityIdx);
+    if (p != m_bobberPos || bite != m_hasBite) {
+        m_bobberPos = p;
+        m_hasBite = bite;
+        emit fishingChanged();
     }
 }
 
-// t401 清钓鱼态（拉起后 / 换槽（持物不再是钓竿）/ 失焦 / 暂停 / 重生）。无钓鱼态时静默（不发信号）。
+// t401/t836 清钓鱼态（失焦 / 暂停 / 重生 / 换槽路径收口）：移除浮标实体（若在）+ 清镜像态。无钓鱼态时静默。
 void PlayerController::cancelFishing()
 {
     if (!m_fishing) return;
+    if (m_bobberEntityIdx >= 0 && m_entityManager
+        && m_bobberEntityIdx < m_entityManager->count()
+        && m_entityManager->aliveAt(m_bobberEntityIdx)
+        && m_entityManager->kindAt(m_bobberEntityIdx) == int(EntityManager::Bobber)) {
+        m_entityManager->removeEntityAt(m_bobberEntityIdx);
+    }
+    m_bobberEntityIdx = -1;
     m_fishing = false;
     m_hasBite = false;
-    m_biteTimer = 0.0f;
     emit fishingChanged();
 }
 
@@ -3334,6 +3387,8 @@ void PlayerController::placeBlock()
     //   喂成功 → 生存消耗 1 生鱼 + 挥手；未喂（无豹猫 / 冷却 / 已求偶）→ return（生鱼无其他 useBlock 用途，
     //   不放置）。生鱼非方块 → 须在 `m_selectedBlock == Air` 守卫之前分流（同骨头 / 肉 / 桶分支模式）。spectator
     //   已被入口 canPlace() 守卫拦截。分层（PLAN §2）：喂食属 Game/Physics（读射线 + 调 EntityManager），不改栅格语义。
+    //   t836 口径钉死：豹猫 / 猫**只吃生鱼**（本分支 gate RawFishId；熟鱼 CookedFishId 不接——MC 1.0 豹猫不吃
+    //   熟鱼，狼 / 豹猫驯服繁殖链不动）。
     if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::RawFishId) {
         const QVector3D eye = position();
         const QVector3D look = lookDirection();

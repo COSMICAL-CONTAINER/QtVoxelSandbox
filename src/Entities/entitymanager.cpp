@@ -673,6 +673,89 @@ int EntityManager::spawnEnderPearl(const QVector3D &origin, const QVector3D &vel
     emit entitiesChanged();
     return slot;
 }
+
+// t836 生成钓鱼浮标投射物（玩家右键甩竿；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+ kind=Bobber +
+//   pushable=false + 寿命 + 甩竿序号 castSerial（确定性等待掷骰错峰源；鱼跑重掷时实体内自增）。halfW/halfH=
+//   kBobberHalfDim（小浮标视觉 + 碰撞最小；命中判定走点格不读它）。渲染不走 mobHost Repeater（Main.qml 的
+//   player.fishing 专属 delegate 绑 PlayerController 镜像的 bobberPosition），但 revision 照 bump（Game 层镜像
+//   读 posAt 需要数据新鲜度；Repeater 内无 Bobber 分支 → 无 delegate 开销）。达 kCap → 跳过 + 告警（防溢出）。
+//   返浮标槽索引（Game 层 m_bobberEntityIdx 跟踪）；达 kCap → -1。
+int EntityManager::spawnBobber(const QVector3D &origin, const QVector3D &vel, quint32 castSerial)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); bobber spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = kBobberHalfDim; // 小浮标视觉 + 碰撞最小
+    e.halfH = kBobberHalfDim;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 珠）
+    e.kind = Bobber;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 Flying 段 3D 速度（Bobber 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kBobberLifetime; // 寿命兜底（挂机防永滞；正常由收竿移除）
+    e.bobberState = kBobberStFlying;
+    e.bobberSerial = castSerial;   // 掷骰序号（等待值在落水 settle 时算）
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    ++m_revision;
+    emit entitiesChanged();
+    return slot;
+}
+
+// t836 确定性等待掷骰（纯函数；矩阵探针直调锁 [5,30] 两端恰可达：h=0 → 5.00s / h=2500 → 30.00s）。
+float EntityManager::bobberWaitSeconds(quint32 h)
+{
+    // % 2501 → [0,2500] → ×0.01 → [0,25.00]s 加在 5s 基线上 → [5.00, 30.00]s（MC 1.0 wiki 口径区间）。
+    return kBobberWaitMinSec + float(h % 2501u) * 0.01f;
+}
+
+// t836 收竿拉拽（见头文件注释）：钩住 mob 收竿时把 mob 拉向玩家——水平速度 = speed × 归一(玩家-mob) 方向 +
+// 微上抛（kBobberHookPullUp）+ 解除 resting（重力分支接手）。不伤害（钩中 0 伤害，MC 口径；不调 damageEntity
+// → 无红闪无扣血，纯位移冲量）。非 Mob / dead / 越界 / 零距（玩家与 mob 重合）→ 静默早退 / yaw 兜底方向。
+void EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float speed)
+{
+    if (mobIdx < 0 || mobIdx >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(mobIdx)];
+    if (!e.alive || e.kind != Mob || e.dead) return;
+    float dx = towardPos.x() - e.pos.x();
+    float dz = towardPos.z() - e.pos.z();
+    float len = std::sqrt(dx * dx + dz * dz);
+    if (!(std::isfinite(len) && len > 1e-3f)) {
+        // 玩家与 mob 水平重合 → 用 mob 朝向兜底（同 knockback 零向量防御；拉拽方向退化不致 NaN）。
+        dx = -std::sin(e.yawRad);
+        dz = -std::cos(e.yawRad);
+        len = 1.0f;
+    }
+    dx /= len;
+    dz /= len;
+    e.vx = dx * speed;
+    e.vz = dz * speed;
+    e.vy = kBobberHookPullUp;  // 微上抛（拉离地面的观感；峰值 ~0.14 格）
+    e.resting = false;         // 解除静止 → tick 重力分支处理上抛→减速→下落→着地
+    ++m_revision;
+    emit entitiesChanged();
+    qCInfo(lcEnt) << "mob" << mobIdx << "hook-pulled toward player speed=" << speed;
+}
+
+// t836 浮标咬钩态查询（Game 层收竿结算读；越界 / 非活体 Bobber → false，同 aliveAt 越界安全语义）。
+bool EntityManager::bobberHasBiteAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Bobber) return false;
+    return e.bobberHasBite;
+}
+
+// t836 浮标已钩 mob 槽索引查询（收竿拉拽目标；越界 / 非活体 Bobber / 未钩 → -1）。
+int EntityManager::bobberHookedMobAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return -1;
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Bobber) return -1;
+    return e.bobberState == kBobberStHooked ? e.bobberHookedIdx : -1;
+}
 //   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
 //   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
 void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
@@ -5478,6 +5561,168 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 dirty = true;
             }
             continue; // EnderPearl 不走 Mob AI / resting / 击退衰减
+        }
+
+        // --- Bobber（t836 钓鱼浮标投射物）：轻重力抛物 + 飞行段钩 mob + 落水浮定待咬 / 落陆静止 + 出界消散 ---
+        //   机制等价 MC 1.0 fishing bobber：右键甩竿抛出（Game 层沿视线初速），四态机（kBobberSt*）：
+        //     Flying：轻重力 kBobberGravity 抛物（投掷物家族 12 vs 世界 28，同暗渊珠）→ ① 飞行段与 mob AABB
+        //       （外扩 kBobberHookHitPad）相交 → Hooked 钉在 mob 身上（**不伤害**；玩家不可钩自己——玩家不是
+        //       EntityManager 实体天然排除；已钩 mob 被新浮标命中 = 换绑，旧浮标脱钩转 Flying 下落——spec「已钩
+        //       新浮标重钩=换绑」）；② next 格是 Water → 浮定水面（浮力平衡半浸：XZ 收格心、Y = 液面 −
+        //       kBobberFloatDip；液面按水 state 折算，源=1.0 / 流=(8−s)/8，mesher renderTop 同口径）+ 掷确定性
+        //       等待（hashVoxel(seed ^ 盐 ^ 甩竿序号)，PLAN §2-K 禁随机源，t791 骨粉同模式）→ Water 态；
+        //       ③ 实体方块接触（豁免族同 t835 珍珠：Air/水/岩浆/门面/火）→ 贴命中面静止（Ground，不推进 next
+        //       ——浮标停在接触面前一位置，MC 浮标砸哪停哪的近似）；④ 岩浆格 → 同 Ground 静止（岩浆面浮住；
+        //       MC 口径岩浆里无鱼可钓，不进入等待机）；⑤ 出界（XZ 越界 / y<0 虚空）→ 消散移除（Game 层
+        //       updateFishing 镜像检测 alive 失效 → 自动收竿态）。
+        //     Water：bobberBiteTimer 两阶段（等待 →0 咬钩 → 窗口 →0 逃走重掷，见 Entity 字段注释）；咬钩沿 /
+        //       逃走沿各 emit bobberBit / bobberEscaped（呈现层水花粒子）；重掷 = 序号 ++（新一轮确定性值）。
+        //       水格被排干 / 填方（blockAt != Water）→ 转 Flying 零速下落（自然落到下方支撑转 Ground）。
+        //     Ground：静止（不再钩 mob——**只在飞行段钩**，spec 明示取舍：MC 语义近似，落地静止浮标是死线
+        //       不是渔具；收竿 = 空收无消耗回收）。
+        //     Hooked：pos 钉 mob 身上每帧跟随（mob 中心 + 0.55×半高的体侧）；mob 死 / 移除 / 槽复用换任
+        //       （spawnSerial 比对，snowballThrowerSerial 双查先例）→ 脱钩转 Flying 零速下落。
+        //   寿命（arrowLife 复用）全态递减 → 0 消散（挂机兜底，见 kBobberLifetime 注释）。
+        if (e.kind == Bobber) {
+            e.arrowLife -= float(dt);
+            if (e.arrowLife <= 0.0f) { toRemove.push_back(idx); dirty = true; continue; }
+
+            if (e.bobberState == kBobberStHooked) {
+                // 钉 mob 跟随；目标失效（死 / 移除 / 槽复用换任）→ 脱钩转 Flying 零速下落。
+                const bool validTarget = e.bobberHookedIdx >= 0 && e.bobberHookedIdx < int(m_entities.size());
+                if (validTarget) {
+                    const Entity &m = m_entities[size_t(e.bobberHookedIdx)];
+                    if (m.alive && m.kind == Mob && !m.dead && m.spawnSerial == e.bobberHookedSerial) {
+                        e.pos = QVector3D(m.pos.x(), m.pos.y() + m.halfH * 0.55f, m.pos.z());
+                        dirty = true;
+                        continue; // 保持 Hooked（不走下方 Flying 物理）
+                    }
+                }
+                e.bobberState = kBobberStFlying;
+                e.bobberHookedIdx = -1;
+                e.bobberHookedSerial = 0;
+                e.vx = e.vy = e.vz = 0.0f;
+                dirty = true;
+                continue; // 脱钩本帧冻结，下帧起 Flying 下落
+            }
+
+            if (e.bobberState == kBobberStWater) {
+                const int wbx = qFloor(e.pos.x()), wby = qFloor(e.pos.y()), wbz = qFloor(e.pos.z());
+                if (world->blockAt(wbx, wby, wbz) != BlockRegistry::Water) {
+                    // 水没了（被舀 / 填方 / 流走）→ 浮标失浮转 Flying 零速下落。
+                    e.bobberState = kBobberStFlying;
+                    e.bobberHasBite = false;
+                    e.bobberBiteTimer = 0.0f;
+                    e.vx = e.vy = e.vz = 0.0f;
+                    dirty = true;
+                    continue;
+                }
+                e.bobberBiteTimer -= float(dt);
+                if (e.bobberBiteTimer > 0.0f) continue; // 等待 / 窗口计时中
+                if (!e.bobberHasBite) {
+                    // 等待到点 → 咬钩（进入窗口；呈现层水花 + 浮标下沉视觉由 hasBite 镜像驱动）。
+                    e.bobberHasBite = true;
+                    e.bobberBiteTimer = kBobberBiteWindowSec;
+                    emit bobberBit(e.pos.x(), e.pos.y(), e.pos.z());
+                    dirty = true;
+                } else {
+                    // 窗口过期 → 鱼跑了：小水花提示 + 重掷新确定性等待（序号 ++ → 新值）。
+                    e.bobberHasBite = false;
+                    ++e.bobberSerial;
+                    e.bobberBiteTimer = bobberWaitSeconds(world->hashVoxel(
+                        int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), wbx, wby, wbz));
+                    emit bobberEscaped(e.pos.x(), e.pos.y(), e.pos.z());
+                    dirty = true;
+                }
+                continue; // Water 不走 Flying 物理
+            }
+
+            if (e.bobberState == kBobberStGround) {
+                continue; // 陆上静止（等收竿回收；寿命在分支头递减）
+            }
+
+            // --- Flying：抛物 + 钩定 / 落水 / 接触 / 出界 ---
+            e.vy -= kBobberGravity * float(dt);
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+
+            // ① 飞行段钩 mob（点 vs AABB 外扩；取首个命中）。**只在 Flying 段**（Ground 静止浮标不钩，见头注释）。
+            {
+                int hit = -1;
+                for (size_t j = 0; j < m_entities.size(); ++j) {
+                    const Entity &m = m_entities[j];
+                    if (!m.alive || m.kind != Mob || m.dead) continue;
+                    const float pad = m.halfW + kBobberHookHitPad;
+                    if (std::abs(next.x() - m.pos.x()) > pad || std::abs(next.z() - m.pos.z()) > pad) continue;
+                    if (next.y() < m.pos.y() - m.halfH - kBobberHookHitPad
+                        || next.y() > m.pos.y() + m.halfH + kBobberHookHitPad) continue;
+                    hit = int(j);
+                    break;
+                }
+                if (hit >= 0) {
+                    // 换绑：同 mob 已被其它浮标钩住 → 旧浮标脱钩转 Flying 零速下落（spec「已钩新浮标重钩=换绑」）。
+                    for (size_t j = 0; j < m_entities.size(); ++j) {
+                        Entity &o = m_entities[j];
+                        if (int(j) == idx || !o.alive || o.kind != Bobber) continue;
+                        if (o.bobberState == kBobberStHooked && o.bobberHookedIdx == hit) {
+                            o.bobberState = kBobberStFlying;
+                            o.bobberHookedIdx = -1;
+                            o.bobberHookedSerial = 0;
+                            o.vx = o.vy = o.vz = 0.0f;
+                        }
+                    }
+                    const Entity &m = m_entities[size_t(hit)];
+                    e.bobberState = kBobberStHooked;
+                    e.bobberHookedIdx = hit;
+                    e.bobberHookedSerial = m.spawnSerial; // 代际快照（槽复用换任检测）
+                    e.pos = QVector3D(m.pos.x(), m.pos.y() + m.halfH * 0.55f, m.pos.z());
+                    dirty = true;
+                    continue;
+                }
+            }
+
+            const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+            const quint8 nid = world->blockAt(bx, by, bz);
+
+            // ② 出界（XZ 越界 / 虚空直落）→ 消散（Game 层镜像检测自动收竿；浮标白耗，MC 口径甩飞了就没了）。
+            if (next.x() < 0.0f || next.z() < 0.0f || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                toRemove.push_back(idx);
+                dirty = true;
+                continue;
+            }
+
+            // ③ 落水 → 浮定水面（浮力平衡半浸）+ 掷确定性等待（首掷用甩竿序号）。
+            if (nid == BlockRegistry::Water) {
+                const quint8 wst = world->stateAt(bx, by, bz);
+                const float surf = wst == 0 ? 1.0f : (8.0f - float(std::min(int(wst), 7))) / 8.0f; // mesher renderTop 同口径
+                e.pos = QVector3D(float(bx) + 0.5f, float(by) + surf - kBobberFloatDip, float(bz) + 0.5f);
+                e.vx = e.vy = e.vz = 0.0f;
+                e.bobberState = kBobberStWater;
+                e.bobberHasBite = false;
+                e.bobberBiteTimer = bobberWaitSeconds(world->hashVoxel(
+                    int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), bx, by, bz));
+                dirty = true;
+                continue;
+            }
+
+            // ④ 岩浆面浮住（MC 口径岩浆无鱼可钓——不进等待机，按静止处理；不沉不烧，浮标是软木不是可燃物）。
+            if (nid == BlockRegistry::Lava) {
+                e.bobberState = kBobberStGround;
+                e.vx = e.vy = e.vz = 0.0f;
+                dirty = true;
+                continue;
+            }
+
+            // ⑤ 实体接触（非豁免族：门面 NetherPortal 穿过 / Fire 效果格穿过，同 t835 珍珠口径）→ 贴面静止。
+            if (nid != BlockRegistry::Air && nid != BlockRegistry::NetherPortal && nid != BlockRegistry::Fire) {
+                e.bobberState = kBobberStGround;
+                e.vx = e.vy = e.vz = 0.0f;
+                dirty = true;
+                continue;
+            }
+
+            e.pos = next; // 空中继续飞行
+            dirty = true;
+            continue; // Bobber 不走 Mob AI / resting / 击退衰减
         }
 
         // --- FallingBlock（t117/t220）：重力 + 着地放置 / 变掉落物 + 移除（无 resting 态；落到底即转为方块或掉落物）---

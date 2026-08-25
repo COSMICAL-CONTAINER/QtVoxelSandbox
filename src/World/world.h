@@ -52,6 +52,11 @@ public:
     void setDepth(int d);
     void setHeight(int h);
     void setSeed(int s);
+    // t836 起升 public（原 private 仅 worldgen 内用）：体素级整数哈希（seed/x/y/z → 确定性伪随机）。纯 const
+    //   函数无状态、向下零依赖——Entities 层钓鱼浮标的确定性等待掷骰（seed ^ 盐 ^ 甩竿序号 → 5-30s 等待，
+    //   PLAN §2-K 禁运行期随机源，t791 骨粉同模式）经本函数复用**同一哈希权威**，防各层各写一份漂移。
+    //   实现不变（仍在 world.cpp）；调用方须自带盐值与消费方解耦。
+    quint32 hashVoxel(int seed, int x, int y, int z) const;
 
     // 越界返回 0（空气）。跨 chunk 由 ChunkManager 路由；网格与物理都用它。
     Q_INVOKABLE quint8 blockAt(int x, int y, int z) const;
@@ -1169,7 +1174,7 @@ private:
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
     void setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state); // t310：带 state（草变种 worldgen）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
-    quint32 hashVoxel(int seed, int x, int y, int z) const;   // 整数哈希（体素级 seed/x/y/z）→ 矿石散布用
+    // hashVoxel 已升 public（t836；声明见顶部 public 段注释）——钓浮标等待掷骰等跨层确定性消费共用同一权威。
     // t380：块编辑后标记流体脏（驱动 tickWaterFlow/tickLavaFlow 早退）。查编辑格 + 6 正交邻是否含
     //   Water/Lava → 设对应 m_waterDirty/m_lavaDirty=true（见 m_*Dirty 字段头注释）。blockAt 越界返 Air
     //   安全（不需 bounds 检查）。编辑是 click-rate → 6 次 blockAt 可忽略。

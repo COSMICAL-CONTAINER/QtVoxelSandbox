@@ -86,6 +86,18 @@ Node {
     function burstGlassShatter(px, py, pz) {
         burstFloat(px, py, pz, 8, "#6fce9c", 0.07, 1.8, 1.2, 1.6, 0.6, 6.0)
     }
+    // t836 钓鱼浮标咬钩水花（机制等价 MC 1.0 咬钩时浮标位水花上溅——「窗口开了」的视觉提示，配浮标下沉）：
+    //   水色液滴 + 强上抛（水花柱感 vYBase 3.2）+ 中横向散 + 较强重力（液滴落回水面，12 vs 碎屑 14 略飘）。
+    //   原点 = 浮标 float 世界坐标（不加 +0.5，同 burstSnowball 模式）。色 #4a7fd8 取 blockColor 水蓝亮一档
+    //   （#3f6fd8 提亮，水花反光感）。数量 10（咬钩是钓鱼主反馈，比碎块 8 略多）。
+    function burstWaterSplash(px, py, pz) {
+        burstFloat(px, py, pz, 10, "#4a7fd8", 0.06, 3.2, 1.6, 1.4, 0.55, 12.0)
+    }
+    // t836 钓鱼浮标鱼跑小水花（咬钩窗口过期「鱼跑了」轻反馈）：同水色但**幅度减半**（数量 5 / 起跳弱 /
+    //   横向小）——与咬钩水花形成大小对比，玩家可从粒子里分辨「咬了」vs「跑了」。
+    function burstWaterEscape(px, py, pz) {
+        burstFloat(px, py, pz, 5, "#4a7fd8", 0.05, 1.6, 0.8, 0.8, 0.4, 12.0)
+    }
 
     // 通用方块中心迸发（坐标先 +0.5 到方块中心）。gravity 缺省 14（碎屑强落；t449 加可选参数供烟雾上飘）。
     function burst(x, y, z, count, color, scale, vYBase, vYVar, hScale, life) {

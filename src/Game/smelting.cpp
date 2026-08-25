@@ -42,6 +42,10 @@ constexpr SmeltEntry kSmelt[] = {
     // t788 染料链：仙人掌 → 绿色染料（机制等价 MC 1.0 cactus → green dye 冶炼）。绿染料是 16 色染料中唯一
     //   非花来源（柠绿 / 其余花色之外靠本条补绿色正道）；沙漠群系采仙人掌 → 熔炉烧绿染料 → 染白羊毛 / 白床。
     { int(BlockRegistry::Cactus),      RecipeRegistry::DyeGreenId,       "cactus_green" }, // 仙人掌 → 绿色染料（t788）
+    // t836 鱼肉获取链：生鱼 → 熟鱼（机制等价 MC 1.0 raw fish → cooked fish 冶炼；kSmeltXp 表同步接——t788
+    //   教训漏一张 = 链断：只进本表不进 XP 表则烤得出鱼但不给经验，反之亦然）。钓鱼获生鱼 → 熔炉烤熟 →
+    //   高价食物（+4 = 生鱼 +2 的两倍，本工程口径见 recipe.h CookedFishId 注释）。
+    { RecipeRegistry::RawFishId,       RecipeRegistry::CookedFishId,     "cooked_fish" }, // 生鱼 → 熟鱼（t836 钓鱼链）
 };
 
 constexpr FuelEntry kFuel[] = {
@@ -97,6 +101,8 @@ constexpr SmeltXpEntry kSmeltXp[] = {
     { RecipeRegistry::BlazePowderId, 1, "blaze_powder" }, // 燃烬粉：燃烬棒冶炼给 1 XP（暗渊之眼链）
     // t788 染料链：绿色染料 1 XP（仙人掌冶炼产物，同木炭 / 燃烬粉量级 —— 非金属加工物）。
     { RecipeRegistry::DyeGreenId,   1, "cactus_green" }, // 绿色染料：烧仙人掌给 1 XP（t788）
+    // t836 鱼肉获取链：熟鱼 1 XP（生鱼冶炼产物，同木炭 / 燃烬粉 / 绿染料量级 —— 非金属加工食物；两表同接）。
+    { RecipeRegistry::CookedFishId, 1, "cooked_fish" }, // 熟鱼：烤生鱼给 1 XP（t836）
 };
 } // namespace
 

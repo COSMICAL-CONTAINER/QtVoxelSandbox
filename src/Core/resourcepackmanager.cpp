@@ -822,6 +822,9 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   （demo 包 1.8 系含 textures/item/poisonous_potato.png）。包内缺则安全跳过（保留自绘 drawPoisonPotato）。
         {0x241, QStringLiteral("poisonous_potato.png")}, // 毒马铃薯（t669：绿皮毒薯；食后 60% 中毒）
         {0x231, QStringLiteral("cod.png")},             // 生鱼（MC 1.0 raw fish = modern cod）
+        // t836 熟鱼（CookedFishId=0x25B；机制等价 MC 1.0 cooked fish = modern cooked_cod）：pack item 目录通常有
+        //   cooked_cod.png。包内缺则安全跳过（保留自绘 MaterialIcon drawCookedFish）。
+        {0x25B, QStringLiteral("cooked_cod.png")},      // 熟鱼（t836：生鱼熔炉烤制；pack 启用用包内贴图，回落自绘）
         // t645 用户审计补映射（pack item/ 目录 435 文件与既有映射差集；这些物品已实现但映射漏 → pack 启用仍走
         //   MaterialIcon 自绘）。demo 包实测 9 文件全在；包内缺则安全跳过回退自绘（机制同既有段）。
         //   0x238 book.png 是普通书（书配方产物 / 附魔台材料）——勿与 0x227 enchanted_book.png 混淆（已接）。
