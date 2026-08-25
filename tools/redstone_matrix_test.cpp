@@ -8631,6 +8631,74 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t867 压力板掉落物贴板探针（ItemEntityManager 直编，t804 掉落物探针模式）──
+    //   用户报告（R19.15）：「掉落物落在压力板上悬上方一格」。根因（t867）：ItemEntityManager 落地列扫
+    //   把任何非空气格当**整格高**支撑（World::isSolid 语义）→ 板上掉落物 restY = 板格+1+0.3 悬空。修 =
+    //   列扫 / resting 复探 / 冰面摩擦面判定收口 World::supportTopYAt（碰撞 sub-AABB 真顶；t865 同族单一
+    //   权威）。矩阵断言（任一 FAIL = 用户症状在当前 HEAD 复现）：
+    //   (a) 板上掉落物紧贴板面：resting 且中心 Y = 板格 + 1/16（ShapePlate 盒真顶）+ kRestOffset(0.3)
+    //       （旧象 = 板格+1+0.3 悬一格）；
+    //   (b) 满格支撑回归对照：同 rig 相邻列石块顶的掉落物仍停 块格+1+0.3（收口不改变整格落定高度）；
+    //   (c) 挖板后失支撑穿透：拆板 → 掉落物解除 resting 续落到石块顶（块格+1+0.3）——薄支撑消失的
+    //       重力跟随（板不承载的另一半语义）。
+    {
+        // rig 选址：运行期扫描空区（t865 先例）。需 5×1×4 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 4 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 4 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t867 items rest on pressure plate top: no clear rig area found";
+        } else {
+            const float restOff = 0.3f; // kRestOffset（itementitymanager.h 私有常量文档值）
+            const float plateTop = 1.0f / 16.0f; // ShapePlate 盒真顶（blockregistry shapeBoxes）
+            // 石基座两列 + 左列压力板：左 = 板路径 (a)/(c)，右 = 满格对照 (b)。
+            w.setBlock(x0,     kRigY - 1, z0, BR::Stone, 0);
+            w.setBlock(x0 + 2, kRigY - 1, z0, BR::Stone, 0);
+            w.setBlock(x0,     kRigY,     z0, BR::WoodPressurePlate, 0);
+            ItemEntityManager items;
+            // (a) 板上：零初速直落（spawnItemAt 免 spawnItem 弹出方向哈希；t804 确定性同款）。
+            items.spawnItemAt(QVector3D(float(x0) + 0.5f, float(kRigY) + 1.5f, float(z0) + 0.5f),
+                              BR::Torch, 1, 0.0f, 0.0f, 0.0f);
+            // (b) 满格对照（不同 itemId：t490fix 就近合并半径 2.0 恰等于两列间距，同 id 会被并成一实体）。
+            items.spawnItemAt(QVector3D(float(x0 + 2) + 0.5f, float(kRigY) + 1.5f, float(z0) + 0.5f),
+                              BR::Stone, 1, 0.0f, 0.0f, 0.0f);
+            for (int t = 0; t < 60; ++t) items.tick(0.016f, &w); // 1s 落定 + 余量
+            const bool okA = items.restingAt(0)
+                && std::fabs(items.posAt(0).y() - (float(kRigY) + plateTop + restOff)) <= 0.02f;
+            const bool okB = items.restingAt(1)
+                && std::fabs(items.posAt(1).y() - (float(kRigY - 1) + 1.0f + restOff)) <= 0.02f;
+            // (c) 拆板 → 板上物品失支撑穿透轨…落到石基座顶（复探两格窗见不到碰撞支撑 → 解除 resting 续落）。
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            for (int t = 0; t < 60; ++t) items.tick(0.016f, &w);
+            const bool okC = items.restingAt(0)
+                && std::fabs(items.posAt(0).y() - (float(kRigY - 1) + 1.0f + restOff)) <= 0.02f;
+            const bool ok = okA && okB && okC;
+            if (!ok)
+                qInfo().noquote() << "  t867 plateY" << items.posAt(0).y() << "restingA"
+                                  << items.restingAt(0) << "| fullY" << items.posAt(1).y()
+                                  << "restingB" << items.restingAt(1);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t867 item rests glued to pressure plate top (restY = plate 1/16 +"
+                                 " 0.3, was floating a full block above), full-block rest height"
+                                 " unchanged, plate removal drops item onto pedestal (thin support"
+                                 " vanishes -> gravity re-settles)";
+            // 清场
+            items.clearAll();
+            w.setBlock(x0,     kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 2, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t848 余烬门尺寸上限 23×23 探针（World 层直调；t806 泛化门的用户实测回归）──
     //   背景（用户 8-24 实测）：t806 内腔上限 4 宽×5 高，实测「最大只有 4×4 能点燃，再大激活不了」——
     //   5 宽内腔在 ③ 量宽被旧上限 kMaxW-1=3 截断 → w 恒测 4 → ④ 右柱校验打到第 5 内腔列（空气格）判败。

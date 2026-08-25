@@ -5143,11 +5143,11 @@ void PlayerController::updatePressurePlates()
                        int(std::floor(p.z())), /*byItem=*/false);
         }
     }
-    // (3) 掉落物（t743 ② 修触发格计算——旧实现查错格导致「掉落物放上无反应」）。掉落物静止中心 =
-    //   支撑格顶 + kRestOffset(0.3)（ItemEntityManager 列扫把任何非空气格当**整格高**支撑——薄板也算，
-    //   World::isSolid 语义），故 floor(pos.y()) 恒 = 支撑格 + 1（板上空气格）——旧代码查该空气格 → 板
-    //   格永远 miss → 掉落物从未触发过任何板（金板 t627「仅掉落物」设计实际从未生效，同根因）。修正：
-    //   板格 = floor(pos.y()) - 1（支撑格），且仅对**已着地**（resting）实体判定——着地 = 与板面真实
+    // (3) 掉落物（t743 ② 修触发格计算——旧实现查错格导致「掉落物放上无反应」；t867 薄支撑前掉落物悬板
+    //   上方一格、板格派生按整格支撑写死）。掉落物静止中心 = 支撑真顶 + kRestOffset(0.3)（ItemEntityManager
+    //   列扫 t867 起收口 World::supportTopYAt 碰撞真顶——旧版把任何非空气格当**整格高**支撑，World::isSolid
+    //   语义），满格支撑 floor(pos.y()) = 支撑格+1（板上空气格）、薄支撑（压力板 1/16 真顶）= 板格自身——
+    //   统一查自身格 + 下一格两格（见循环内注释）。且仅对**已着地**（resting）实体判定——着地 = 与板面真实
     //   接触（机制等价 MC 1.0 物品实体压下木板）；飞行掠过 / 浮水（resting=false）不触发。拾走 →
     //   alive=false 出表 → 离开沿松板（持续压住不产沿风暴，t743 口径）。木/圆石板（全触发）与金板
     //   （仅掉落物）由此源驱动；石/铁板对掉落物不敏感（pressurePlateAccepts 单一权威——t743 对齐
@@ -5158,7 +5158,13 @@ void PlayerController::updatePressurePlates()
             if (!m_itemEntities->aliveAt(i)) continue;                 // 跳过空槽（slot-reuse）
             if (!m_itemEntities->restingAt(i)) continue;               // 仅着地实体（板面接触；飞行 / 浮水不压板）
             const QVector3D p = m_itemEntities->posAt(i);
-            addIfPlate(int(std::floor(p.x())), int(std::floor(p.y())) - 1, int(std::floor(p.z())), /*byItem=*/true);
+            // t867 薄支撑跟随：静止中心 = 支撑真顶 + kRestOffset(0.3)（ItemEntityManager 列扫 t867 起收口
+            //   World::supportTopYAt 碰撞真顶）→ 满格支撑 floor(pos.y()) = 支撑格+1（板上空气格，查下一格）；
+            //   薄支撑（压力板 1/16 真顶）floor(pos.y()) = 板格**自身**（中心落进板格内，查自身格）。两形态
+            //   统一查两格（至多一格是板——另一格是空气 / 板下实块，不误触发）。
+            const int py = int(std::floor(p.y()));
+            addIfPlate(int(std::floor(p.x())), py,     int(std::floor(p.z())), /*byItem=*/true);
+            addIfPlate(int(std::floor(p.x())), py - 1, int(std::floor(p.z())), /*byItem=*/true);
         }
     }
     // 边沿检测 + 踩下视觉（state bit0）：新进集合 = 踩下沿（m_plateJustPressed + 置位）；移出集合 = 离开沿
