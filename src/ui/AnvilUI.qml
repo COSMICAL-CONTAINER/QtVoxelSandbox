@@ -203,7 +203,10 @@ Item {
         // review rv3：durability 缺省经 InventoryOps 归一为 -1（自动）；本地槽只存实例值（>0）或 0，
         //   防 -1 残留进 anvilDur（returnAnvilToHotbar 的 `-1 || 0` 为真值会透传 -1 → addStack 视作新实例）。
         root.anvilDur[index] = (durability > 0) ? durability : 0
-        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        // t874 序列归一终局防御：C++ 返回的附魔列表是序列对象（Array.isArray 恒 false）→ 旧
+        //   `Array.isArray && length===4 ? e : [0,0,0,0]` 守卫会把带附魔物品的放入静默清成白板
+        //   （「放入铁砧附魔直接没了」的写出半边；读入半边在 InventoryOps.readSlot 已归一）。
+        const e = InventoryOps.list4(enchants)
         // t699：var 属性 NOTIFY 可靠性 —— 旧版 `const arr = root.anvilEnch; arr[index] = ...; root.anvilEnch = arr`
         //   把**同一数组引用**重新赋回（QVariant 值比较相等 → anvilEnchChanged 不发 → 只依赖 anvilEnch、不触
         //   anvilRev 的绑定永不重算，读到陈旧内层）。改为**新外层引用**（[...slice] 保序复制后替换 index 元素）
@@ -1200,6 +1203,9 @@ Item {
                             font.pixelSize: 13; font.bold: true
                         }
                         // t647 附魔光晕（主栏槽）：同 SurvivalInventory 主栏光晕。触碰 mainRevision 重算。
+                        //   t874：读 C++ mainEnchantsAt 返回的是**序列对象**（Array.isArray 恒 false）→ 旧
+                        //   Array.isArray 守卫令光晕恒不亮（附魔物品在背包行无紫光 = 用户误判附魔已丢的
+                        //   视觉半边）；序列下标可读，改真值守卫。
                         Rectangle {
                             anchors.fill: parent
                             visible: {
@@ -1664,7 +1670,9 @@ Item {
                     else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
                     else if (parts[0] === "anvil")  e = (idx === 2) ? (_ar >= 0 ? root.productEnch : null)
                                                                     : (_ar >= 0 ? root.enchAt(idx) : null)
-                    if (Array.isArray(e)) {
+                    if (e) {
+                        // t874：e 可为 C++ 序列对象（VM enchantsAt / mainEnchantsAt 返回，Array.isArray 恒
+                        //   false —— 旧守卫令 hotbar/main 悬停锐锋攻击行恒缺失）；序列下标可读，真值守卫。
                         for (let i = 0; i < 4; ++i) {
                             if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // Sharpness = 1
                         }
