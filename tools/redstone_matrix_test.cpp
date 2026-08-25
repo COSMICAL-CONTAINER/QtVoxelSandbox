@@ -13416,6 +13416,74 @@ Item {
                              "short of a 12.5-block target under light gravity)";
     }
 
+    // ── P-t883 夜行者对鱼钩瞬移探针（行为级）──
+    //    真甩竿命中夜行者（t836(d) 直瞄轨迹，3 格内必中）→ ① 全程不钩定（bobberHookedMobAt 恒 -1，钩不住
+    //    夜行者族）；② 夜行者被强制瞬移（位移 >4 格——瞬移带 8-16 格 vs 游荡步进 <1 格/秒可分辨）；③ 浮标
+    //    穿过原站位继续飞 / 落定（实体仍活，不被消耗——鱼钩是软线不是箭）；对照：猪在 3 格直瞄必钩（t836(d)
+    //    已钉，不重摆）。闪避后夜行者掉下平台（瞬移落点在平台外）也只断言位移量不断言落点。
+    {
+        World wN;
+        wN.setWidth(48); wN.setDepth(48); wN.setHeight(96); wN.setSeed(80);
+        EntityManager ents;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickN = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wN, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        wN.setBlock(13, fy, 6, BR::Stone, 0); // 玩家立足柱
+        for (int x = 15; x <= 17; ++x)
+            for (int z = 5; z <= 7; ++z) wN.setBlock(x, fy, z, BR::Stone, 0); // 夜行者平台
+        // 夜行者（t727 口径 spawnMobTyped 直摆；halfH 1.40 三格高，halfW 0.35——3 格直瞄命中盒大）
+        const int nw = ents.spawnMobTyped(16, fy + 1, 6, EntityManager::MobNightwalker,
+                                          QStringLiteral("#1a1426"), 40);
+        // settle 16 tick（夜行者 halfH 1.40 → 重心出生位高，落定穿行 ~1 格需 ~7 tick；5 tick 会抓到中途
+        //   下坠位（实测 84.35）导致瞄准错位。16+甩钩 ≤3 tick 仍 < 首游荡窗 30 tick，确定性保持）
+        tickN(16, 0.05f);
+        const QVector3D nw0 = ents.posAt(nw);
+        const float eyeY = float(fy + 1) + 1.62f;
+        const float ux = nw0.x() - 13.5f, uz = nw0.z() - 6.5f;
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wN);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        pc.loadSavedState(13.5f, float(fy + 1), 6.5f,
+                          qRadiansToDegrees(std::atan2(-ux, -uz)),
+                          qRadiansToDegrees(std::atan2(nw0.y() - eyeY, std::sqrt(ux * ux + uz * uz))), 2);
+        pc.useFishingRod(); // 甩向夜行者（3 格直瞄，飞行 ≤3 tick 必进命中盒）
+        int bob = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
+        bool noHook = bob >= 0;
+        bool teleported = false;
+        for (int t = 0; t < 24 && noHook; ++t) {
+            tickN(1, 0.05f);
+            if (ents.bobberHookedMobAt(bob) == nw) { noHook = false; break; } // 钩上了 = FAIL
+            const QVector3D np = ents.posAt(nw);
+            if ((np - nw0).length() > 4.0f) teleported = true; // 强制瞬移带 8-16 格（游荡 <1 格/秒可分辨）
+            if (!ents.aliveAt(bob)) break; // 穿过后落定 / 出界消散皆可（浮标不被消耗即不再追认）
+        }
+        const bool okT883 = noHook && teleported;
+        if (!okT883) ++totalFail;
+        if (!okT883)
+            qInfo().noquote() << "  [t883 diag] noHook" << noHook << "teleported" << teleported
+                              << "nwPos" << ents.posAt(nw) << "from" << nw0
+                              << "hooked" << (bob >= 0 ? ents.bobberHookedMobAt(bob) : -2);
+        qInfo().noquote() << (okT883 ? "PASS" : "FAIL")
+                          << "| t883 nightwalker vs fishhook: flying-bobber hook scan treats a "
+                             "MobNightwalker hit as a projectile encounter -- forced teleport dodge "
+                             "(bypassing teleportCooldown, same t829 arrow-chain fix so a cooldown-"
+                             "window hit can never pass through silently) and the bobber never "
+                             "latches (hook state machine unreachable for the nightwalker family; "
+                             "MC 1.0 enderman projectile-immunity parity for the fishing rod); the "
+                             "bobber itself is NOT consumed (soft line, unlike the arrow's "
+                             "remove=true) and keeps flying through the vacated spot; behavioral "
+                             "rig: direct 3-block aim at a settled nightwalker -> zero hook across "
+                             "24 ticks + displacement >4 blocks (teleport band 8-16 vs wander <1/s)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

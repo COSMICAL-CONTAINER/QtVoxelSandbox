@@ -5597,7 +5597,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //     Flying：轻重力 kBobberGravity 抛物（投掷物家族 12 vs 世界 28，同暗渊珠）→ ① 飞行段与 mob AABB
         //       （外扩 kBobberHookHitPad）相交 → Hooked 钉在 mob 身上（**不伤害**；玩家不可钩自己——玩家不是
         //       EntityManager 实体天然排除；已钩 mob 被新浮标命中 = 换绑，旧浮标脱钩转 Flying 下落——spec「已钩
-        //       新浮标重钩=换绑」）；② next 格是 Water → 浮定水面（浮力平衡半浸：XZ 收格心、Y = 液面 −
+        //       新浮标重钩=换绑」；**t883 夜行者例外**：命中夜行者 → 强制瞬移闪避（同箭链 t829①）且永不钩定——
+        //       钩不住夜行者族，浮标穿过继续飞）；② next 格是 Water → 浮定水面（浮力平衡半浸：XZ 收格心、Y = 液面 −
         //       kBobberFloatDip；液面按水 state 折算，源=1.0 / 流=(8−s)/8，mesher renderTop 同口径）+ 掷确定性
         //       等待（hashVoxel(seed ^ 盐 ^ 甩竿序号)，PLAN §2-K 禁随机源，t791 骨粉同模式）→ Water 态；
         //       ③ 实体方块接触（豁免族同 t835 珍珠：Air/水/岩浆/门面/火）→ 贴命中面静止（Ground，不推进 next
@@ -5735,6 +5736,21 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (std::abs(next.x() - m.pos.x()) > pad || std::abs(next.z() - m.pos.z()) > pad) continue;
                     if (next.y() < m.pos.y() - m.halfH - kBobberHookHitPad
                         || next.y() > m.pos.y() + m.halfH + kBobberHookHitPad) continue;
+                    // t883 夜行者对鱼钩=投射物：**强制瞬移闪避**（同箭链 t829①——绕 teleportCooldown，防
+                    //   「命中零反馈穿身」）且**绝不钩定**（钩不住夜行者族；机制等价 MC 1.0 末影人对投射物
+                    //   远程免疫的鱼钩口径——spec「鱼钩对夜行者算投射物→瞬移闪避（同箭链）」）。闪避成功 →
+                    //   浮标穿过原站位继续飞（软线不消耗不落定，区别于箭的 remove=true——钩是线不是命中体）；
+                    //   瞬移全试失败（被围/地形不允许）→ 免疫依旧（穿过），下帧原位重试。
+                    if (m.mobType == MobNightwalker) {
+                        Entity &nm = m_entities[j];
+                        const QVector3D oldPos = nm.pos; // 快照旧位（同箭分支 B-L1：teleportEntity 改同一对象）
+                        const bool dodged = teleportEntity(int(j), nm, world,
+                                                           kNightwalkerTeleportMin, kNightwalkerTeleportMax);
+                        qCInfo(lcEnt) << "bobber deflected by nightwalker" << int(j)
+                                      << (dodged ? "(teleport dodge)" : "(teleport failed; immune pass-through)")
+                                      << "from" << oldPos;
+                        break; // 本帧不钩（hit 保持 -1）——浮标继续飞行（下方出界/落水/岩浆/推进分支照走）
+                    }
                     hit = int(j);
                     break;
                 }
