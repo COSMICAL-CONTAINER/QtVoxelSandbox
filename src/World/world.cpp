@@ -3790,27 +3790,29 @@ bool World::recomputePowerLocal()
         // t657 附着块供电判定 —— **排除火把自身**（机制等价 MC：火把不向其所附着的方块供能 —— 否则
         //   亮火把给自己的支撑供电 → 反相熄灭 → 失电重亮 → 永久振荡（自反馈）。isReceivingPowerEx 沿
         //   isReceivingPower 逻辑但跳过火把格 (x,y,z)（该火把自身）。
-        // t740 再排除**基座环粉**（火把 4 个斜下格的通电粉）：t740 斜下供粉后，立在方块顶面的火把喂
-        //   亮的地面环粉同时是支撑块的水平 6 邻 → 无形状语义的 v1 读法会把火把自己的输出当输入 →
-        //   反相熄灭 → 环粉断电 → 重亮 → 振荡（用户「灯闪 / 时亮时不亮」形态）。MC 里粉按连接形状
-        //   供电（点 / 切向线不向侧邻块灌电）——环粉永不回灌支撑；v1 无形状位 → 直接排除火把斜下
-        //   4 格的粉。支撑仍可被同层线 / 其它侧的源供电（NOT 门输入路径不变）。
+        // t740 基座环粉 → **t869 形状输出语义**：旧 t740 对「火把斜下 4 格的粉」整体豁免（修「灯闪 / 时亮时
+        //   不亮」= 装饰环粉被火把喂亮后回灌支撑的无稳态振荡），但整体豁免把**所有**贴基座粉都判哑——
+        //   粉线终止于 / 拐入支撑块的 NOT 门输入与时钟回路一并失效（用户实测「红石高频 / 无限电路上版本
+        //   有、本版没了」的回归根因，2026-08-21 3686e27 引入）。MC 真语义是**形状**的：粉只向其所指
+        //   （开放端）方块供电、贯穿直线的侧向不供电 → 改用 BlockRegistry::redstoneDustPowersNeighbor
+        //   （连接位反推开放端）：端点 / 拐角朝块 → 供能（时钟 / NOT 门恢复）；贯穿直线贴块而过 → 不供能
+        //   （t740 装饰环场景保持稳定）；源（拉杆 / 红石块…）不受形状影响照常供能。
         const bool attachPowered = [&]() {
             static constexpr int kNb2[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
             const int sx = x + ax, sy = y + ay, sz = z + az;
             for (const auto &d : kNb2) {
                 const int nx = sx + d[0], ny = sy + d[1], nz = sz + d[2];
                 if (nx == x && ny == y && nz == z) continue; // 跳过火把自身（防自反馈振荡）
-                if (powerSourceLevel(nx, ny, nz) > 0) return true; // 真实源（拉杆 / 红石块…）在环位也照常供电
-                // t740：仅排除**粉**在基座环位的回灌（见上注）——源不受形状语义影响，仍可 NOT 门输入。
-                if (ny == y - 1 && qAbs(nx - x) + qAbs(nz - z) == 1) continue;
+                if (powerSourceLevel(nx, ny, nz) > 0) return true; // 真实源（拉杆 / 红石块…）在任意位也照常供电
                 const quint8 nb = m_chunks.blockAt(nx, ny, nz);
                 if (BlockRegistry::isRedstoneDust(nb)
-                    && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0)
+                    && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0
+                    && BlockRegistry::redstoneDustPowersNeighbor(m_chunks.stateAt(nx, ny, nz),
+                                                                 sx - nx, sz - nz)) // t869：形状输出（开放端朝块才计）
                     return true;
             }
             return false;
-        }(); // 附着块被供电（含粉 / 源；不含本火把与其基座环输出）
+        }(); // 附着块被供电（含形状达的粉 / 源；不含本火把与其非所指粉）
         const bool off = (st & BlockRegistry::RedstoneTorchStateOffFlag) != 0;
         if (attachPowered != off) {
             // 供电 → 置熄灭位；失电 → 清熄灭位重亮。附着位（低 3 位）不动。

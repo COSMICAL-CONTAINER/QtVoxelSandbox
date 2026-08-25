@@ -1946,6 +1946,20 @@ public:
     static constexpr quint8 RedstoneDustConnNx = 0x02; // 高半字节 bit1 = -X
     static constexpr quint8 RedstoneDustConnPz = 0x04; // 高半字节 bit2 = +Z
     static constexpr quint8 RedstoneDustConnNz = 0x08; // 高半字节 bit3 = -Z
+    // t869 红石粉**形状输出**判定（纯函数单一权威；机制等价 MC 1.0「粉只向其所指（开放端）相邻方块供电，
+    //   贯穿直线的侧向不供电」）：粉 cell（state st，含高 4 位连接位）是否向水平偏移 (dx,dz)（恰一轴 ±1）
+    //   处的**非粉方块**输出电力。规则（MC 形状语义，v1 无独立朝向位、以连接位反推）：
+    //   · 目标向已有邻粉（连接位置位）→ 不输出（粉连粉，不向粉后方块灌电）；
+    //   · 粉是贯穿直线（对向两连接位同置，沿 X 或 Z）且目标向**垂直于**直线 → 不输出（直线侧面不供电——
+    //     t740「贴基座环装饰粉误触发 NOT 门」的正确修法即此，非整体豁免）；
+    //   · **无连接 dot（单格粉）→ 不输出**（无指向的孤立粉不构成回路；单格装饰粉贴火把基座保持稳定，
+    //     P4/P14 探针钉死的 t740 反闪烁语义；对齐现代 MC「dot 无输出侧」）；
+    //   · 其余（端点粉 / 拐角粉的开放侧）→ 输出（MC 1.0：粉线**终止于**或**拐入**方块时向其供电——
+    //     火把时钟 / NOT 门输入的经典布线形态）。
+    //   垂直 / 对角偏移 → false（MC 粉不向支撑块竖直供电、对角无形状关系）。唯一消费方：World 火把
+    //   反相 attachPowered 读（t869 起基座环粉按形状计——恢复无稳态时钟同时保持装饰环稳定）；一般接收器
+    //   （灯 / TNT / 轨）读 isReceivingPower 仍为全向 6 邻（v1 简化，t869 范围只收口火把反馈路径）。
+    static bool redstoneDustPowersNeighbor(quint8 st, int dx, int dz);
     // t656 动力铁轨通电位（bit4，值 16 —— 与探测轨 DetectorRailStateOnFlag 同位不同块互不干扰）：
     //   机制等价 MC 1.0 powered rail 受红石信号激活。World::tickRedstone 电力重算时置 / 清本位
     //   （邻格电力 >0 → 置位 + mesher 换 rail_golden_on(159) 通电贴图 —— t638 留图集备用的瓦片终于有
