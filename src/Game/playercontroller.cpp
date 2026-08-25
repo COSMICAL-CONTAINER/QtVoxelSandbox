@@ -2497,8 +2497,8 @@ void PlayerController::cancelBowDraw()
 // t401/t836 钓鱼竿甩 / 收切换（手持钓竿右键按下边缘触发；机制等价 MC 1.0 右键钓竿甩 / 收 + hook 拉拽）。
 //   单次切换非长按：未钓 → 任意位置甩竿（沿视线初速抛出 EntityManager::spawnBobber 投射实体——旧 t401
 //   「水射线定点放置」退役；浮标落水才进等待机，落陆静止可收回）；已钓 → 收竿，按浮标态三分支结算：
-//   ① 钩住生物（bobberHookedMobAt ≥ 0）→ pullMobToward 拉向玩家（kFishHookPullSpeed + 实体侧微上抛，
-//     **不伤害**）+ 生存钓竿 -5 耐久（kFishHookDurabilityCost）；② 咬钩窗口内（bobberHasBiteAt）→
+//   ① 钩住生物（bobberHookedMobAt ≥ 0）→ pullMobToward 拉向玩家（t882 调制：速度 / 上抛随距离增强 +
+//     收杆角度系数——正对满力、侧背向卸力；**不伤害**）+ 生存钓竿 -5 耐久（kFishHookDurabilityCost）；② 咬钩窗口内（bobberHasBiteAt）→
 //   LootTable::fishingPool 抽一件获物，emit fishCaught（浮标位 + 朝玩家弹向 + 弹速 → 呈现层 spawnItemAt
 //   定向弹出，机制等价 MC 获物飞向玩家）+ 生存钓竿 -1 耐久；③ 空收（无咬钩 / 浮标在陆）→ 无获物无消耗。
 //   分层（PLAN §2）：浮标物理 / 咬钩时序在 Entities 层；本方法只发指令（spawnBobber / removeEntityAt）收
@@ -2531,7 +2531,33 @@ void PlayerController::useFishingRod()
             // ① 钩住生物：拉向玩家 + 生存 -5 耐久；不伤害（MC 1.0 hook 拉拽口径）。R19.13 终审 B-L2：拉拽
             //   实际生效才扣耐久（pullMobToward 返 bool）——目标已在收竿同帧死亡（死亡动画 0.5s 窗内、浮标
             //   tick 尚未跑脱钩验证）时拉拽 no-op，按空收处理（无获物不消耗），不再白损 5 耐久。
-            const bool pulled = m_entityManager->pullMobToward(hooked, m_pos, kFishHookPullSpeed);
+            // t882 拉拽反馈增强（用户「没看到生物被拉起来飞」）：
+            //   a) 拉力随距离增强——speed = kFishHookPullSpeed + kFishHookPullGain × min(dist, 32)（越远越猛）；
+            //   b) 上抛弧随距离加大——upSpeed = kFishHookLiftBase + kFishHookLiftGain × min(dist, 32)（远距
+            //      拉拽峰值 ~1.3 格 + 空中无摩擦 → 被钩生物明显飞起 / 空中钩起直接拽飞）；
+            //   c) 收杆角度调制——玩家视线与线方向（浮标→玩家）的水平 |cos| 越小越卸力（正对目标拉 = 满力，
+            //      侧 / 背向衰减到 kFishHookAngleMin）。距离取玩家—浮标水平距（拉拽语义 = 沿线收线长度）。
+            float dxp = m_pos.x() - bp.x();
+            float dzp = m_pos.z() - bp.z();
+            const float dist = std::sqrt(dxp * dxp + dzp * dzp);
+            const float dc = std::min(dist, kFishLineMaxLen);
+            float pullSpeed = kFishHookPullSpeed + kFishHookPullGain * dc;
+            float liftSpeed = kFishHookLiftBase + kFishHookLiftGain * dc;
+            {
+                const QVector3D look = lookDirection();
+                const float llen = std::sqrt(look.x() * look.x() + look.z() * look.z());
+                if (llen > 1e-4f && dist > 1e-3f) {
+                    // 线方向单位向量（浮标→玩家）= (dxp,dzp)/dist；正对目标时 look ≈ 其反向量 → |cos|≈1 满力。
+                    //   look 先归一到水平单位（俯仰不参与角度调制——瞄水下生物的俯视角不应卸力）。
+                    const float cosA = std::fabs((look.x() / llen) * (dxp / dist)
+                                                 + (look.z() / llen) * (dzp / dist));
+                    const float angleFactor = kFishHookAngleMin
+                                              + (1.0f - kFishHookAngleMin) * std::min(cosA, 1.0f);
+                    pullSpeed *= angleFactor;
+                    liftSpeed *= angleFactor;
+                }
+            }
+            const bool pulled = m_entityManager->pullMobToward(hooked, m_pos, pullSpeed, liftSpeed);
             if (pulled && m_mode == Survival && m_hotbar)
                 m_hotbar->damageSelectedItem(kFishHookDurabilityCost);
             return;

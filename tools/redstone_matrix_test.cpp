@@ -13259,6 +13259,163 @@ Item {
                              "loadSavedState cancels fishing by savegame semantics)";
     }
 
+    // ── P-t882 拉拽反馈增强探针（行为级：距离缩放 / 上抛弧；源码钉：角度调制——yaw 无 WRITE，收杆改向
+    //    行为级不可达 headless，t836(g) 同取舍）──
+    //    (a) 近距钩猪（~3 格直瞄，t836(d) 轨迹）→ 收竿一帧物理位移 movedN + 耐久 -5；
+    //    (b) 远距钩猪（~12.5 格：直瞄会中途落地够不着 → 仰角 12..34° 扫描，每次失败换新猪重摆——首游荡窗
+    //        30 tick 内完成甩钩的确定性口径）→ 收竿 movedF > movedN×1.25（6+0.35d 距离缩放）+ 猪升起
+    //        riseF > 0.06（2.8+0.18d 上抛弧——旧基值 2.8 只升 ~0.045，用户「没看到生物被拉起来飞」）；
+    //    (c) 源码钉：useFishingRod 体内距离增益（kFishHookPullGain/kFishHookLiftGain）+ 角度调制
+    //        （angleFactor 乘 speed 与 lift 两支）语句面。
+    {
+        World wP;
+        wP.setWidth(48); wP.setDepth(48); wP.setHeight(96); wP.setSeed(79);
+        EntityManager ents;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickP = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wP, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wP);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+
+        // ---- (a) 近距（~3 格直瞄）：基速 ≈ 6+0.35×3 ≈ 7.1 ----
+        wP.setBlock(13, fy, 6, BR::Stone, 0); // 玩家立足柱
+        for (int x = 15; x <= 17; ++x)
+            for (int z = 5; z <= 7; ++z) wP.setBlock(x, fy, z, BR::Stone, 0);
+        const int pigN = ents.spawnMobTyped(16, fy + 1, 6, EntityManager::MobPig,
+                                            QStringLiteral("#e8a0a0"), 10);
+        tickP(5, 0.05f); // 短窗 settle（t836(d) 加固口径：甩钩链压进首游荡窗 30 tick 内）
+        {
+            const QVector3D pp = ents.posAt(pigN);
+            const float eyeY = float(fy + 1) + 1.62f;
+            const float ux = pp.x() - 13.5f, uz = pp.z() - 6.5f;
+            pc.loadSavedState(13.5f, float(fy + 1), 6.5f,
+                              qRadiansToDegrees(std::atan2(-ux, -uz)),
+                              qRadiansToDegrees(std::atan2(pp.y() - eyeY, std::sqrt(ux * ux + uz * uz))), 2);
+        }
+        pc.useFishingRod();
+        int bobN = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bobN = i; break; }
+        bool okNear = bobN >= 0;
+        for (int t = 0; t < 40 && okNear; ++t) {
+            if (ents.bobberHookedMobAt(bobN) == pigN) break;
+            tickP(1, 0.05f);
+            if (!ents.aliveAt(bobN)) { okNear = false; break; }
+        }
+        okNear = okNear && ents.bobberHookedMobAt(bobN) == pigN;
+        const float pigNX0 = ents.posAt(pigN).x();
+        const int durN0 = hb.durabilityAt(0);
+        pc.useFishingRod(); // 收竿拉拽
+        tickP(1, 0.016f);   // 一帧物理：位移 = 拉速 × dt（≈7.1×0.016≈0.11）
+        const float movedN = std::fabs(ents.posAt(pigN).x() - pigNX0);
+        okNear = okNear && movedN > 0.03f && hb.durabilityAt(0) == durN0 - 5;
+        ents.removeEntityAt(pigN);
+        for (int x = 15; x <= 17; ++x)
+            for (int z = 5; z <= 7; ++z) wP.setBlock(x, fy, z, BR::Air, 0);
+
+        // ---- (b) 远距（~12.5 格）：仰角扫描甩中 → 位移/升幅随距离增强 ----
+        for (int x = 25; x <= 27; ++x)
+            for (int z = 5; z <= 7; ++z) wP.setBlock(x, fy, z, BR::Stone, 0);
+        bool okFar = false;
+        float movedF = 0.0f, riseF = 0.0f, usedPitch = -1.0f;
+        QString farDiag;
+        for (int pi = 6; pi <= 17 && !okFar; ++pi) {
+            const float pitch = float(pi) * 2.0f; // 12°..34°（直瞄平射 ~13 格处已落到台下，必须仰射）
+            // 每次尝试换新猪（短窗确定性：settle+甩+飞 ≤1.3s < 首游荡窗 1.5s——重试不叠猪龄）
+            const int pigF = ents.spawnMobTyped(26, fy + 1, 6, EntityManager::MobPig,
+                                                QStringLiteral("#e8a0a0"), 10);
+            tickP(5, 0.05f);
+            pc.loadSavedState(13.5f, float(fy + 1), 6.5f, -90.0f, pitch, 2);
+            pc.useFishingRod();
+            int bobF = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bobF = i; break; }
+            bool hooked = false;
+            if (bobF >= 0) {
+                for (int t = 0; t < 40; ++t) {
+                    if (ents.bobberHookedMobAt(bobF) == pigF) { hooked = true; break; }
+                    tickP(1, 0.05f);
+                    if (!ents.aliveAt(bobF)) break;
+                }
+            }
+            if (hooked) {
+                const float pigFX0 = ents.posAt(pigF).x();
+                const float pigFY0 = ents.posAt(pigF).y();
+                const int durF0 = hb.durabilityAt(0);
+                pc.useFishingRod(); // 收竿拉拽（远距：≈6+0.35×12.5 ≈ 10.4 b/s + 上抛 ≈2.8+2.25）
+                tickP(1, 0.016f);
+                movedF = std::fabs(ents.posAt(pigF).x() - pigFX0);
+                riseF = ents.posAt(pigF).y() - pigFY0;
+                usedPitch = pitch;
+                okFar = movedF > movedN * 1.25f && riseF > 0.06f
+                        && hb.durabilityAt(0) == durF0 - 5;
+                if (!okFar)
+                    farDiag = QStringLiteral("movedF=%1 movedN=%2 riseF=%3").arg(movedF).arg(movedN).arg(riseF);
+            } else {
+                pc.useFishingRod(); // 空收浮标（重试下一仰角）
+            }
+            ents.removeEntityAt(pigF);
+        }
+        for (int x = 25; x <= 27; ++x)
+            for (int z = 5; z <= 7; ++z) wP.setBlock(x, fy, z, BR::Air, 0);
+        wP.setBlock(13, fy, 6, BR::Air, 0);
+
+        // ---- (c) 角度调制 / 距离增益源码钉（yaw 无 WRITE，改向行为级不可达 headless）----
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString pcpPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                        QStringLiteral("src/Game/playercontroller.cpp"));
+            QFile f(pcpPath);
+            if (f.open(QIODevice::ReadOnly)) {
+                const QString t = QString::fromUtf8(f.readAll());
+                const int b0 = t.indexOf(QStringLiteral("void PlayerController::useFishingRod()"));
+                const int b1 = t.indexOf(QStringLiteral("void PlayerController::updateFishing"));
+                if (b0 >= 0 && b1 > b0) {
+                    QString body;
+                    for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n'))) {
+                        if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                        body += line; body += QLatin1Char('\n');
+                    }
+                    okPin = body.contains(QStringLiteral("kFishHookPullGain * dc"))
+                            && body.contains(QStringLiteral("kFishHookLiftGain * dc"))
+                            && body.contains(QStringLiteral("pullSpeed *= angleFactor;"))
+                            && body.contains(QStringLiteral("liftSpeed *= angleFactor;"))
+                            && body.contains(QStringLiteral(
+                                   "pullMobToward(hooked, m_pos, pullSpeed, liftSpeed)"));
+                }
+            }
+        }
+        const bool okT882 = okNear && okFar && okPin;
+        if (!okT882) ++totalFail;
+        if (!okT882)
+            qInfo().noquote() << "  [t882 diag] okNear" << okNear << "movedN" << movedN
+                              << "okFar" << okFar << "pitch" << usedPitch << farDiag
+                              << "okPin" << okPin;
+        qInfo().noquote() << (okT882 ? "PASS" : "FAIL")
+                          << "| t882 hook-reel feedback: pull strength scales with line length (speed "
+                             "+= 0.35 x dist-capped-32 -> far pig displaces >1.25x near pig in the "
+                             "first physics tick after the reel) and the launch arc grows with it "
+                             "(lift base 2.8 + 0.18 x dist -> far-pig rise > 0.06/tick vs old flat "
+                             "0.045 -- 'yanked visibly into the air'), both modulated by reel angle "
+                             "(look-vs-line |cos| factor, facing the target = full power, sideways/"
+                             "over-shoulder decays to 0.4x; pitch excluded via horizontal renorm -- "
+                             "angled-down water casts must not lose force; angle branch pinned at "
+                             "source level since yaw has no WRITE and re-aiming mid-hook is "
+                             "unreachable headless); impulse constants moved wholly to the Game "
+                             "layer (pullMobToward now takes speed+upSpeed, Entities layer holds no "
+                             "impulse constants - kBobberHookPullUp retired); far-cast rig sweeps "
+                             "elevation 12-34 deg with a fresh pig per attempt (flat aim falls "
+                             "short of a 12.5-block target under light gravity)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
