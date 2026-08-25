@@ -520,20 +520,30 @@ void ItemEntityManager::tick(qreal dt, World *world)
             // 瀑布：fall through 到重力分支（水穿透列扫 → 随水柱下沉）
         }
 
-        // === 重力分支（空气 + 瀑布）：t60 原逻辑，列扫已修正「水穿透」 ===
-        // 已落地：复探支撑格（cellY = floor(pos.y) - 1，即静止中心下方那一格）。水不再算支撑
-        //   （isSolid && blockAt != Water）→ 水填满下方时解除 resting 续落 / 下帧转浮水分支。
-        //   t804 火同水穿透：World::isSolid 是「非 air 实存」语义（火焰 / 岩浆皆实存）→ 不豁免 Fire 的
-        //   话掉落物会**停在火格顶面**（中心永不进火格 → 火焚永不触发——用户「往火里丢东西烧不掉」
-        //   根因；同 t803 mob 侧 mobFootprintHasSupport 豁免 Fire 的教训：isSolid 的实体侧消费者须
-        //   逐个豁免非实心光源格，别翻转共享谓词）。
+        // === 重力分支（空气 + 瀑布）：t60 原逻辑，t867 起列扫改支撑真顶（World::supportTopYAt 单一权威）===
+        // 已落地：复探支撑（中心格及其下一格两格窗 —— t867 薄支撑中心落进支撑格内：板上静止中心 =
+        //   板顶 1/16 + kRestOffset(0.3) → floor(pos.y()) 恰 = 板格自身；满格支撑则中心在上一格 → 下探一格。
+        //   任一格有碰撞支撑（真顶 ≥0；水/火/无碰撞族 -1 = 穿透语义由落地扫描同源承担）→ 保持静止。
+        //   旧版 isSolid（非 air）把压力板 / 轨 / 薄板当满格支撑 + 恒「下一格」单窗 → 与新落地高度不一致
+        //   会振荡，本窗随落地公式同源对齐。水填满下方 → 解除 resting 续落 / 下帧转浮水分支。
         if (e.resting) {
-            const int supportY = qFloor(e.pos.y()) - 1; // 静止中心下方那一格（= 支撑方块 cellY）
-            // 三目两支统一为 quint8（blockAt 返回 quint8，false 支显式强转枚举避 -Wextra 枚举/非枚举混用告警）。
-            const quint8 sb = (supportY >= 0) ? world->blockAt(cx, supportY, cz) : quint8(BlockRegistry::Air);
-            if (sb != BlockRegistry::Water && sb != BlockRegistry::Fire
-                && world->isSolid(cx, supportY, cz)) continue; // 仍实体 → 保持静止（火同水：非支撑，穿透入格）
-            e.resting = false; // 支撑消失（被挖 / 被水填）→ 续落（vy 已 0，从静止重新加速）
+            // 两格窗 + 下贴：取窗口内首个「真顶 ≤ 当前底（pos.y − kRestOffset + 容差）」的支撑 ——
+            //   支撑还在但变矮（薄支撑被拆、下方换成矮盒）→ 下贴新真顶（对齐 mob 侧 review D1-b 行走贴面
+            //   语义：t867 拆板后物品从板面高滑落到基座顶，不悬 1/16）；真顶高于当前底（支撑上方长出
+            //   更高体）不算当前支撑、不动。窗口内无任何可站支撑 → 解除 resting 续落（防挖空悬空）。
+            const int feetCell = qFloor(e.pos.y());
+            float snapTop = -1.0f;
+            for (int scy = feetCell; scy >= feetCell - 1; --scy) {
+                if (scy < 0) break;
+                const float top = world->supportTopYAt(cx, scy, cz);
+                if (top >= 0.0f && top <= e.pos.y() - kRestOffset + 0.05f) { snapTop = top; break; }
+            }
+            if (snapTop >= 0.0f) {
+                const float restY = snapTop + kRestOffset;
+                if (restY < e.pos.y() - 1e-3f) { e.pos.setY(restY); dirty = true; } // 下贴矮了的支撑面
+                continue; // 仍有支撑 → 保持静止
+            }
+            e.resting = false; // 支撑消失（被挖 / 被水填 / 换无碰撞格）→ 续落（vy 已 0，从静止重新加速）
             dirty = true;
         }
 
@@ -542,25 +552,26 @@ void ItemEntityManager::tick(qreal dt, World *world)
         if (e.vy < -kMaxFall) e.vy = -kMaxFall;
         const float newY = e.pos.y() + e.vy * float(dt);
 
-        // 下移路径自顶向下扫实体所在列首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
-        //   t271 关键修正：水视作穿透（isSolid && blockAt != Water）→ 掉落物穿水面入水，下帧转浮水分支
-        //   （机制等价 t220「水不挡沙」），而非粘在水面当着地。
-        //   t804：火同水穿透（同上方 resting 复探的 Fire 豁免）→ 掉落物落进火格（中心在火格内 →
-        //   tick 头部火焚判定接管），而非骑在火格顶面。
+        // 下移路径自顶向下扫实体所在列首个支撑真顶（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
+        //   t271 关键修正：水视作穿透 → 掉落物穿水面入水，下帧转浮水分支（机制等价 t220「水不挡沙」）。
+        //   t804：火同水穿透 → 掉落物落进火格（中心在火格内 → tick 头部火焚判定接管），而非骑在火格顶面。
+        //   t867：收口 World::supportTopYAt（碰撞 sub-AABB 真顶单一权威）—— 压力板 / 睡莲等薄板真顶承接
+        //   （板上掉落物紧贴板面，不再悬上方一格；用户报「压力板掉落物贴板」），轨 / 火把 / 花草无碰撞族
+        //   -1 穿透到下方真支撑；岩浆（ShapeNone）不再被 isSolid 当落点 → 掉落物落入岩浆格由头部瞬毁
+        //   判定接管（旧 isSolid 把岩浆当整格 → 高处落入的物品骑在岩浆面上不焚毁的隐性缺陷一并修复）。
         const int topCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
         int botCell = qFloor(newY);
         if (botCell > topCell) botCell = topCell; // 防浮点噪声致 botCell>topCell（vy≈0 时 newY 微高于 pos.y）
-        int solidCellY = -1;
+        float supportTop = -1.0f;
         for (int scy = topCell; scy >= botCell; --scy) {
             if (scy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
-            const quint8 b = world->blockAt(cx, scy, cz);
-            if (b != BlockRegistry::Water && b != BlockRegistry::Fire
-                && world->isSolid(cx, scy, cz)) { solidCellY = scy; break; }
+            const float top = world->supportTopYAt(cx, scy, cz);
+            if (top >= 0.0f) { supportTop = top; break; }
         }
 
-        if (solidCellY >= 0) {
-            // 落地：贴支撑方块顶面 + 静止偏移。钳 newY 防穿越（newY 可能已低于顶面）。
-            const float restY = float(solidCellY + 1) + kRestOffset;
+        if (supportTop >= 0.0f) {
+            // 落地：贴支撑真顶 + 静止偏移。钳 newY 防穿越（newY 可能已低于顶面）。
+            const float restY = supportTop + kRestOffset;
             if (newY <= restY || e.vy < 0.0f) {
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }
@@ -585,7 +596,13 @@ void ItemEntityManager::tick(qreal dt, World *world)
             if (!world->isCollidable(qFloor(px), hcy, qFloor(tryZ))) pz = tryZ;
             if (px != e.pos.x() || pz != e.pos.z()) { e.pos.setX(px); e.pos.setZ(pz); dirty = true; }
             if (e.resting) {
-                const int supportY = qFloor(e.pos.y()) - 1; // 支撑面格（同 resting 复探约定）
+                // t867：支撑面格与 resting 复探同源两格窗（薄支撑中心落进支撑格内 → 支撑格 = 自身格；
+                //   满格支撑 → 下一格），取首个有碰撞真顶者作摩擦面判定（冰面滑 / 常规磨）。
+                const int fc = qFloor(e.pos.y());
+                int supportY = fc - 1;
+                if (fc >= 0
+                    && world->supportTopYAt(qFloor(e.pos.x()), fc, qFloor(e.pos.z())) >= 0.0f)
+                    supportY = fc;
                 // 三目两支统一 quint8（blockAt 返 quint8，false 支显式强转枚举避 -Wextra 枚举/非枚举混用告警）。
                 const quint8 sb = (supportY >= 0) ? world->blockAt(qFloor(e.pos.x()), supportY, qFloor(e.pos.z()))
                                                    : quint8(BlockRegistry::Air);
