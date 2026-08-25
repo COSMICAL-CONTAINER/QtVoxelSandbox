@@ -7865,6 +7865,120 @@ int main(int argc, char *argv[])
                              "window stays blocked (single-path double-fire guard intact)";
     }
 
+    // ── P-t869 红石无稳态电路（时钟）复刻探针（World 层，t740 回归定位）──
+    //   用户实测：「红石高频 / 无限电路上版本有、本版没了」。考古结论：v1 电网从未支持过*合法*无稳态——
+    //   t740（3686e27，2026-08-21）为修「灯闪 / 时亮时不亮」把「火把斜下 4 格的粉」整体豁免出
+    //   attachPowered 读，装饰环误触发**和**粉输入 NOT 门 / 时钟回路一并哑火（用户记忆中的「上版本有」
+    //   即 t740 前的整体回灌振荡）。t812 转辙器 bit7 / t689 沿检测 / t707 BFS 均无涉（各自升 / 降沿对称）。
+    //   修复 = MC **形状输出**语义（BlockRegistry::redstoneDustPowersNeighbor，连接位反推开放端）：
+    //   粉终止于 / 拐入方块 → 供能（时钟 / NOT 门恢复）；贯穿直线贴块而过 → 不供能（t740 装饰环保持
+    //   稳定——原修案的正确形态）。断言三段：
+    //   (a) **火把时钟**：石块 + 立顶火把 + 单格粉 stub 贴基座侧（火把斜下自喂 → stub 形状指向基座 →
+    //       火把熄 → stub 断电 → 重亮 …… 自持振荡）。24 tick 内火把态翻转 ≥4 次 + stub 电力出现 0↔非0
+    //       交替（t740 豁免下恒 0 次翻转 = 用户症状）；
+    //   (b) **粉线 NOT 门**（稳定反相）：拉杆(on) → 粉×3 线终止于基座侧 → 基座恒被供 → 火把持续熄灭
+    //       （tick 6/12/20 采样 OffFlag 恒置位——非振荡，锁存反相）；
+    //   (c) **贯穿直线稳定对照**（t740 反闪烁保持）：粉直线贴基座侧而过（中格对向双连 = 贯穿形）→
+    //       20 tick 火把恒亮（装饰环不再误触发——豁免换成形状后原修案语义仍在）。
+    {
+        bool okClock = false, okNot = false, okStable = false;
+        // (a) 火把时钟：x0=Stone(基座) x0/y+1=Torch x0+1..x0+2=粉 stub 两格（近格连接朝远格 = 端点形 →
+        //     开放端指向基座 → 供能；单格 dot 不输出（P4/P14 稳定语义），须两格才成回路）。
+        {
+            const auto [x0, z0] = nextSlot();
+            placeRigBlock(w, x0, kRigY, z0, BR::Stone, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);
+            w.setBlock(x0 + 2, kRigY, z0, BR::RedstoneDust, 0);
+            tickN(w, 2);
+            placeRigBlock(w, x0, kRigY + 1, z0, BR::RedstoneTorch, 0); // 最后放火把 → 起振
+            int flips = 0, powerFlips = 0;
+            bool prevOff = false, prevPow = false;
+            for (int t = 0; t < 24; ++t) {
+                w.tickRedstone();
+                const bool off = (w.stateAt(x0, kRigY + 1, z0) & BR::RedstoneTorchStateOffFlag) != 0;
+                const bool pow = (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) > 0;
+                if (t > 0) {
+                    if (off != prevOff) ++flips;
+                    if (pow != prevPow) ++powerFlips;
+                }
+                prevOff = off; prevPow = pow;
+            }
+            okClock = flips >= 4 && powerFlips >= 4; // 自持振荡（t740 豁免下恒 0 → FAIL = 用户症状）
+            if (!okClock)
+                qInfo().noquote() << "  [t869 a diag] flips=" << flips << " powerFlips=" << powerFlips;
+            // 清场
+            w.setBlock(x0, kRigY + 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 2, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (b) 粉线 NOT 门（稳定反相）：Stone x1 / Torch 其上 / 粉 x1+1..x1+3 / Lever(on) x1+4。
+        {
+            const auto [x1, z1] = nextSlot();
+            placeRigBlock(w, x1, kRigY, z1, BR::Stone, 0);
+            for (int i = 1; i <= 3; ++i) w.setBlock(x1 + i, kRigY, z1, BR::RedstoneDust, 0);
+            placeRigBlock(w, x1 + 4, kRigY, z1, BR::Lever, 1);
+            tickN(w, 2);
+            placeRigBlock(w, x1, kRigY + 1, z1, BR::RedstoneTorch, 0);
+            bool off6 = false, off12 = false, off20 = false;
+            for (int t = 1; t <= 20; ++t) {
+                w.tickRedstone();
+                const bool off = (w.stateAt(x1, kRigY + 1, z1) & BR::RedstoneTorchStateOffFlag) != 0;
+                if (t == 6) off6 = off;
+                if (t == 12) off12 = off;
+                if (t == 20) off20 = off;
+            }
+            okNot = off6 && off12 && off20; // 持续熄灭（线保供，锁存反相非振荡）
+            if (!okNot)
+                qInfo().noquote() << "  [t869 b diag] off6=" << off6 << " off12=" << off12
+                                  << " off20=" << off20;
+            // 清场
+            w.setBlock(x1, kRigY + 1, z1, BR::Air, 0);
+            w.setBlock(x1 + 4, kRigY, z1, BR::Air, 0);
+            for (int i = 1; i <= 3; ++i) w.setBlock(x1 + i, kRigY, z1, BR::Air, 0);
+            w.setBlock(x1, kRigY, z1, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (c) 贯穿直线稳定对照：Stone x2 / Torch 其上 / 粉直线 (x2+1, z2-1..z2+1)（中格对向双连）/
+        //     Lever(on) (x2+1, z2+2)。直线贴基座 +X 侧而过 → 形状侧向不供 → 火把恒亮。
+        {
+            const auto [x2, z2] = nextSlot();
+            placeRigBlock(w, x2, kRigY, z2, BR::Stone, 0);
+            for (int dz = -1; dz <= 1; ++dz) w.setBlock(x2 + 1, kRigY, z2 + dz, BR::RedstoneDust, 0);
+            placeRigBlock(w, x2 + 1, kRigY, z2 + 2, BR::Lever, 1);
+            tickN(w, 2);
+            placeRigBlock(w, x2, kRigY + 1, z2, BR::RedstoneTorch, 0);
+            bool anyOff = false;
+            for (int t = 0; t < 20; ++t) {
+                w.tickRedstone();
+                if (w.stateAt(x2, kRigY + 1, z2) & BR::RedstoneTorchStateOffFlag) anyOff = true;
+            }
+            okStable = !anyOff; // 贯穿形侧向不供（装饰环稳定，t740 原修案语义保持）
+            if (!okStable)
+                qInfo().noquote() << "  [t869 c diag] anyOff=" << anyOff;
+            // 清场
+            w.setBlock(x2, kRigY + 1, z2, BR::Air, 0);
+            w.setBlock(x2 + 1, kRigY, z2 + 2, BR::Air, 0);
+            for (int dz = -1; dz <= 1; ++dz) w.setBlock(x2 + 1, kRigY, z2 + dz, BR::Air, 0);
+            w.setBlock(x2, kRigY, z2, BR::Air, 0);
+            tickN(w, 2);
+        }
+        const bool okT869 = okClock && okNot && okStable;
+        if (!okT869) ++totalFail;
+        qInfo().noquote() << (okT869 ? "PASS" : "FAIL")
+                          << "| t869 redstone astable circuits restored via dust shape semantics: torch-on-block "
+                             "+ 2-cell dust stub at the base side self-oscillates (>=4 state flips + power "
+                             "alternation in 24 ticks; the t740 blanket base-ring exemption pinned it at 0 "
+                             "flips = the reported regression), lever-driven 3-dust line ENDING at the support "
+                             "holds the torch inverted (latched NOT gate), while a straight dust line PASSING "
+                             "the support side stays silent (through-line has no side output) and a lone dot "
+                             "has no output at all - both t740 anti-flicker shapes remain stable; "
+                             "archaeology: t740 3686e27 killed both the accidental ring flicker AND every "
+                             "dust-fed NOT/clock input, t812 bit7 / t689 edges / t707 BFS "
+                             "cleared of involvement";
+    }
+
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
     //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
     //   AnvilUI.qml + InventoryOps.js，11 放入路径）47/47 全过，但其 Hotbar 是 **QML 桩**

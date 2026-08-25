@@ -1272,6 +1272,27 @@ bool BlockRegistry::isRedstoneDust(quint8 blockId)
     return blockId == RedstoneDust;
 }
 
+// t869 红石粉形状输出判定（纯函数，规则见 .h 头注释）：连接位（state 高 4 位）反推「开放端」——目标向
+//   无邻粉且非贯穿直线侧向 → 输出。端点 / 拐角开放侧输出（粉终止于或拐入方块 = MC 供能形态）；贯穿
+//   直线侧向不输出（装饰环贴基座不误触发，t740 场景）；**无连接 dot（单格粉）不输出**（无指向的孤立
+//   粉不构成回路——单格装饰粉贴火把基座保持稳定，P4/P14 探针钉死的 t740 反闪烁语义）。
+bool BlockRegistry::redstoneDustPowersNeighbor(quint8 st, int dx, int dz)
+{
+    const quint8 conn = quint8((st >> 4) & 0x0F);
+    if (conn == 0) return false; // dot（无任何连接）：无指向 → 不向任何侧输出（单格粉不构成回路）
+    const bool px = (conn & RedstoneDustConnPx) != 0;
+    const bool nx = (conn & RedstoneDustConnNx) != 0;
+    const bool pz = (conn & RedstoneDustConnPz) != 0;
+    const bool nz = (conn & RedstoneDustConnNz) != 0;
+    const bool straightX = px && nx; // 沿 X 贯穿直线（两侧都是粉）
+    const bool straightZ = pz && nz; // 沿 Z 贯穿直线
+    if (dx == 1 && dz == 0)  return !px && !straightZ; // 目标 +X：该向开放且非 Z 直线侧
+    if (dx == -1 && dz == 0) return !nx && !straightZ; // 目标 -X
+    if (dx == 0 && dz == 1)  return !pz && !straightX; // 目标 +Z：该向开放且非 X 直线侧
+    if (dx == 0 && dz == -1) return !nz && !straightX; // 目标 -Z
+    return false; // 垂直 / 对角 / 退化偏移：无形状输出语义（MC 粉不向支撑块竖直供电）
+}
+
 // t739 红石粉支撑判定（单一权威，见 .h 头注释）：完整立方 或 上半砖（state bit0=1，顶面与格顶齐平）。
 //   下半砖 / 楼梯 / 耕地 / 粉自身等顶面非满格高 → 不可撑粉（机制等价 MC 1.0 粉只能铺满顶高面）。
 //   t741 起语义抽为 isTopFlushSupport 通用谓词（粉铺顶面 = 顶面齐平支撑的特例），本函数委托保持
