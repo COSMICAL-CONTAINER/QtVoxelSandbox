@@ -146,6 +146,9 @@ Item {
         113,  // 木按钮（WoodButton，t628）
         114,  // 石按钮（StoneButton，t628）
         112,  // 拉杆（Lever，t628）
+        107,  // 发射器（Dispenser，t868① 从方块 tab 挪入 —— 红石机关盒，机关件组紧随拉杆/按钮；
+              //   方块 tab 的 filteredPalette 按 redstoneIds 排除自动隐藏，无残留双显）
+        117,  // 投掷器（Dropper，t868① 从方块 tab 挪入 —— 与发射器同族机关盒）
         0x224,// 红石粉物品（RedstoneId，t701 从方块形态 130 换成材料物品 —— 与材料 tab 同一贴图；材料 tab 不再重复列）
         129,  // 红石火把（RedstoneTorch，t638；t657 起反相器电源）
         122,  // 红石块（RedstoneBlock，t620；t657 起恒电源）
@@ -240,9 +243,10 @@ Item {
         return []
     }
 
-    // t861 归类契约钉（表项位置/成员静态断言，QML 无 static_assert → 组件完成期一次性自检）：
+    // t861/t868① 归类契约钉（表项位置/成员静态断言，QML 无 static_assert → 组件完成期一次性自检）：
     //   矿车物品（0x23E）必须恰在红石 tab 表内且不在工具段追加表 vehicleIds 内——两处同改漏一边即
-    //   「矿车消失 / 双显」（t654③ 当年「找不到矿车」教训的同型回归面）。失败走 console.error 响亮暴露。
+    //   「矿车消失 / 双显」（t654③ 当年「找不到矿车」教训的同型回归面）。t868① 同钉：发射器（107）/
+    //   投掷器（117）必须在红石表内（方块 tab 据本表排除自动隐藏）。失败走 console.error 响亮暴露。
     Component.onCompleted: {
         let ok = true
         const inRedstone = redstoneIds.indexOf(0x23E) !== -1
@@ -255,7 +259,11 @@ Item {
         if (redstoneIds[redstoneIds.length - 1] !== 0x23E) {
             console.error("[t861] minecart item (0x23E) expected as the tail entry of redstoneIds"); ok = false
         }
-        if (!ok) throw new Error("t861 creative palette categorization contract broken")
+        if (redstoneIds.indexOf(107) === -1) { console.error("[t868] dispenser (107) missing from " +
+                                                             "redstoneIds"); ok = false }
+        if (redstoneIds.indexOf(117) === -1) { console.error("[t868] dropper (117) missing from " +
+                                                             "redstoneIds"); ok = false }
+        if (!ok) throw new Error("creative palette categorization contract broken (t861/t868)")
     }
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
