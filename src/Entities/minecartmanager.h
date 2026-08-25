@@ -210,6 +210,13 @@ public:
     //   车 → 邻轨空车占用每帧被误判离开沿（清位）又在下个 pass 重置 → 电力抖动——统一帧级重扫一并消除。
     void updateDetectorRailOccupancy(World *world);
 
+    // t866② 环境摧毁检查（每帧一次，tickPushedCarts 开头调——骑乘 / 非骑乘帧都必经）：扫全部活体矿车
+    //   （含被骑 / 乘生物车）的 AABB 覆盖格（半宽 kCartHalfW/半高 kCartHalfH/半长 kCartHalfL 的格集合），
+    //   任一格为仙人掌 / 岩浆 → destroyCartEnvironmental（机制等价 MC 1.0 矿车碰仙人掌 / 岩浆即毁掉矿车
+    //   物品、乘员自动下来——spec t866②）。停驶车同查（被推进 / 坠落 / 飞出轨道后落在仙人掌上同样摧毁；
+    //   仙人掌向格内生长 / 车被推入也覆盖）。虚空（pos.y<0）→ 无掉落直接移除（同 mob void-loss 兜底）。
+    void checkCartEnvironment(World *world);
+
 signals:
     void entitiesChanged();                        // spawn / 挖毁 / 骑乘物理推进触发；驱动 count/revision + QML 绑定刷新
     void cartBroken(int x, int y, int z);          // 矿车被「挖」（攻击，生存末击）→ 呈层据它 spawnItem 掉 MinecartId 物品；t767 起创造瞬破不发（主动破坏掉落仅生存，t571①）
@@ -226,6 +233,10 @@ private:
                               //   非 default-member-init 常量（kCartHits 定义于类后半部，spawnCart 显式赋值）。
         int mobPassenger = -1; // t811 生物乘客槽索引（EntityManager 槽；-1 = 无。矿车乘员限 1：玩家 XOR 生物；
                               //   双向链载具侧，见 mobPassengerAt。DMI → 槽复用 spawnCart 的 Cart c{} 默认清回）。
+        bool derailed = false; // t863 出轨 / 坠落自由物理态：轨端飞出（③ 速度足）/ 支撑被挖（②）/ 轨末端被推离
+                              //   （④）→ 水平 dir×speed 平抛 + 重力 fallVy，落地（轨面重挂 / 地面真顶贴面）退出。
+                              //   地面静止车（t734 放宽放置）恒 false（支撑复探保贴面，仅失支撑才转 true）。
+        float fallVy = 0.0f;  // t863 自由物理垂直速度（blocks/s，向下为负；kCartFallGravity 驱动）。
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Cart> m_carts;
@@ -384,6 +395,38 @@ private:
     // t735 ③ 行进矿车轻推玩家的冲量强度（blocks/s，写入 m_knockback 通道）。轻推 = 明显小于受击击退
     //   6.0 / 衰减率同 kHitKnockbackDrag → 总位移 ≈ 2.0/4.5 ≈ 0.44 格（推开让位，不弹飞）。
     static constexpr float kCartBumpSpeed = 2.0f;
+
+    // t866② 击毁矿车的通用尾部（hitCartFromRay 末击 / 环境摧毁共用）：清玩家骑乘态（若挖 / 毁的是被骑
+    //   车）+ releaseSlot + survivalDrop 时按 t735① 非实心邻格散布掉落格 emit cartBroken（创造瞬破 /
+    //   虚空不掉）。生物乘员不在此处理 —— releaseSlot 置 alive=false 后 EntityManager::tickVehicleRiding
+    //   对账链（mobPassengerAt 指空槽）自动自释放恢复 AI（乘员自动下来的 Entities 侧半边）。返 true。
+    bool destroyCartTail(int idx, World *world, bool survivalDrop);
+
+    // t735 ① 掉落格散布（destroyCartTail 用）：掉「首个非实心水平邻格」随机一格（邻格上方一格也须非实
+    //   心，防掉进 1 格深坑壁内）；4 邻全实心 → 掉车中心格上一格；无 world → 保留中心格。
+    static void scatterDropCell(const QVector3D &cp, World *world,
+                                int &dropX, int &dropY, int &dropZ);
+
+    // ── t863 坡道物理四修的私有实现面 ──
+
+    // t863① 坡上失速反溜起步（tickRiddenCart 死区归零点 / tickPushedCarts 摩擦归零点共调）：车头向
+    //   ±kCartPitchProbe 两点轨面采样高差 > 0.05（车头朝上坡面 —— 平面 / 车头朝下都不触发；下坡起步溜
+    //   由既有 slopeDownAuto 承担）→ 置反溜起步速（-kCartSlopeDownSpeed×0.05，沿 -dir 倒行；下一 tick
+    //   行进侧 = -dir 是下坡 → slope<0 → 目标 -kCartSlopeDownSpeed 加速倒溜到坡脚）。机制等价 MC 1.0
+    //   矿车上坡失速滑回（不悬停半空）。返 true = 已置起步速（caller 不再 continue 停驻）。
+    bool tryStallSlideback(Cart &c, World *world, int railY);
+
+    // t863② 地面 / 薄支撑真顶探测（出轨物理 + 停驻支撑复探共用）：列 [topCellY, topCellY-1] 内最高的
+    //   「碰撞真顶（World::supportTopYAt）≤ refBottom + 0.05」（在脚下或齐平的支撑面；更高的不算——那是
+    //   嵌入不是支撑）。无 → -1（失支撑，caller 转 derailed 坠落）。t865/t867 同族单一权威。
+    float groundSupportTopWithin(World *world, float x, float z, int topCellY, float refBottom) const;
+
+    // t863③ 自由物理 tick（出轨 / 坠落态；被骑与空车共用）：水平 = dir×speed（带符号，撞可碰撞格清零）
+    //   + 重力 fallVy（kCartFallGravity，同 item/mob 手感）+ 落地扫描（自底扫落径）：轨面（本帧前底严格
+    //   在轨面上方 → 重挂轨道态，速度保留；站轨被推离不误挂）或地面真顶（贴面落定 fallVy=0，速度保留滑
+    //   行 + kCartFriction 摩擦）。虚空（pos.y<0）→ destroyCartTail 无掉落移除（mob void-loss 同款）。
+    void tickDerailedCart(int idx, Cart &c, World *world, float dt);
+
     // t735 ③ 矿车碾过玩家的掉速率（1/s，指数衰减）：接触期间车速按此衰减（有阻力但不挡停 —— 机制等价
     //   矿车推着实体前进，推开后恢复动力轨 / 重力供能）。
     static constexpr float kCartBumpDrag = 2.0f;
@@ -403,6 +446,17 @@ private:
     static constexpr float kCartCenterSnapPerTick = 0.1f;
     // 空车 / 松键摩擦衰减率（1/s）。
     static constexpr float kCartFriction = 2.0f;
+    // ── t863 坡道物理四修常量 ──
+    // ③ 轨端飞出最低速度（blocks/s）：到心 / 起步重选失败（死端）时 |speed| ≥ 它 → 出轨平抛（保持水平
+    //   速度 + 重力）；不足 → 停驻（原「轨尽头停」语义）。MC 1.0 矿车冲出轨道末端继续飞行，慢车停驻。
+    static constexpr float kCartLaunchMinSpeed = 3.0f;
+    // ③ 自由物理重力 / 终端速度（与 ItemEntityManager / EntityManager 同值：世界重力手感一致，
+    //   lessons「重力/跳跃常量」条）。
+    static constexpr float kCartFallGravity = 28.0f;
+    static constexpr float kCartFallMax = 78.4f;
+    // ① 坡上失速反溜起步速度（blocks/s）：死区归零点上坡面 → 置 -kCartSlopeDownSpeed×5%（同下坡起步
+    //   溜 0.05 系数；后续由坡道重力目标 -kCartSlopeDownSpeed 接管加速）。
+    static constexpr float kCartStallKick = 0.5f;
 };
 
 #endif // MINECARTMANAGER_H

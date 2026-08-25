@@ -437,6 +437,102 @@ bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY,
     return true;
 }
 
+// t863① 坡上失速反溜起步（头注释见 .h）：车头向 ±kCartPitchProbe 两点轨面采样高差判「车头朝上坡面」。
+// 采样列扫描窗 [railY+1, railY-1]（采样点距车心 ≤0.25 → 至多邻列，坡步进 ±1 恒覆盖）；任一端失联
+//（死端前探 / 拐角）→ 不起步（保守停驻，机制等价 MC 坡顶平段停）。
+bool MinecartManager::tryStallSlideback(Cart &c, World *world, int railY)
+{
+    if (!world || railY < 0) return false;
+    float hF = 0.0f, hB = 0.0f;
+    if (!railSurfaceYAt(world, c.pos.x() + c.dirX * kCartPitchProbe,
+                        c.pos.z() + c.dirZ * kCartPitchProbe, railY + 1, c.pos.y(), hF))
+        return false;
+    if (!railSurfaceYAt(world, c.pos.x() - c.dirX * kCartPitchProbe,
+                        c.pos.z() - c.dirZ * kCartPitchProbe, railY + 1, c.pos.y(), hB))
+        return false;
+    if (hF - hB <= 0.05f) return false;     // 平面 / 车头朝下坡（后者由 slopeDownAuto 既有起步溜承担）
+    c.speed = -kCartStallKick;              // 反溜起步（沿 -dir 倒行；下坡侧重力目标接管加速）
+    return true;
+}
+
+// t863② 地面 / 薄支撑真顶探测（头注释见 .h）：t865/t867 同族 —— World::supportTopYAt 碰撞真顶单一权威。
+float MinecartManager::groundSupportTopWithin(World *world, float x, float z,
+                                              int topCellY, float refBottom) const
+{
+    if (!world) return -1.0f;
+    const int cx = int(std::floor(x)), cz = int(std::floor(z));
+    for (int y = topCellY; y >= topCellY - 1 && y >= 0; --y) {
+        const float top = world->supportTopYAt(cx, y, cz);
+        if (top >= 0.0f && top <= refBottom + 0.05f) return top; // 脚下 / 齐平的支撑面（更高 = 嵌入非支撑）
+    }
+    return -1.0f;
+}
+
+// t863③ 自由物理 tick（出轨 / 坠落态；头注释见 .h）。被骑（tickRiddenCart 首段分流）与空车
+//（tickPushedCarts 循环首段分流）共用：水平 dir×speed 平抛 + 重力 + 落地（轨面重挂 / 地面真顶贴面）。
+void MinecartManager::tickDerailedCart(int idx, Cart &c, World *world, float dt)
+{
+    if (!world) { c.speed = 0.0f; return; }
+    // ── 垂直：重力 + 落地扫描（自底扫落径，防大 dt 穿薄层；lessons「子步防穿墙」精神）──
+    c.fallVy -= kCartFallGravity * float(dt);
+    if (c.fallVy < -kCartFallMax) c.fallVy = -kCartFallMax;
+    const float newY = c.pos.y() + c.fallVy * float(dt);
+    const float botFrom = c.pos.y() - kCartGroundH; // 本帧前车底
+    const float botTo = newY - kCartGroundH;
+    const int cx = int(std::floor(c.pos.x())), cz = int(std::floor(c.pos.z()));
+    bool landed = false; // 本帧落定地面（摩擦适用；轨面重挂则直接退出本函数）
+    for (int cy = int(std::floor(botFrom)); cy >= int(std::floor(botTo)); --cy) {
+        if (cy < 0) break;
+        // (a) 轨面重挂：本帧前车底**严格在轨面上方**（> +0.01 余量 —— 站轨被推离〔④〕的车 bot ≈ 轨面
+        //     不满足，不误挂）且本帧落径穿过骑乘面 → 重挂轨道态（速度 / 朝向保留，stepCartAlongRail
+        //     下一格心重选连接向；机制等价 MC 1.0 飞出的矿车落回轨道继续跑）。
+        if (BlockRegistry::isRail(world->blockAt(cx, cy, cz))) {
+            const float rideTop = float(cy)
+                + railRiseAt(world, cx, cy, cz, c.pos.x() - float(cx), c.pos.z() - float(cz))
+                + kCartRideH;
+            if (botFrom > rideTop + 0.01f && botTo <= rideTop) {
+                c.derailed = false;
+                c.fallVy = 0.0f;
+                c.pos.setY(rideTop);
+                updateCartPitch(c, world, cy);
+                return;
+            }
+            continue; // 轨格但未下穿骑乘面（同格站轨）→ 不当地面支撑（supportTopYAt 轨 -1 同义），继续下扫
+        }
+        // (b) 地面真顶：落径穿过 → 贴面落定（速度保留滑行，摩擦下方统一施）。
+        const float top = world->supportTopYAt(cx, cy, cz);
+        if (top >= 0.0f && botTo <= top) {
+            c.pos.setY(top + kCartGroundH);
+            c.fallVy = 0.0f;
+            landed = true;
+            break;
+        }
+    }
+    if (!landed) {
+        c.pos.setY(newY); // 自由下落继续
+        // 虚空：跌出世界底部 → 无掉落移除（mob void-loss 同款兜底；防永久下落每帧刷 emit）。
+        if (c.pos.y() < 0.0f) { destroyCartTail(idx, world, /*survivalDrop=*/false); return; }
+    }
+    // ── 水平：dir×speed 积分 + 撞可碰撞格清零（车身格 = 中心下一格；撞墙清速度顺墙停）──
+    if (std::fabs(c.speed) > 1e-4f) {
+        const float nx = c.pos.x() + c.dirX * c.speed * float(dt);
+        const float nz = c.pos.z() + c.dirZ * c.speed * float(dt);
+        const int byc = int(std::floor(c.pos.y() - 0.1f)); // 车身腰位格（撞半格高台阶也挡）
+        if (world->isCollidable(int(std::floor(nx)), byc, cz)) c.speed = 0.0f;
+        else c.pos.setX(nx);
+        if (std::fabs(c.speed) > 1e-4f) {
+            if (world->isCollidable(int(std::floor(c.pos.x())), byc, int(std::floor(nz)))) c.speed = 0.0f;
+            else c.pos.setZ(nz);
+        }
+    }
+    // 落地 / 接地摩擦（每 tick 落定 snap 重置 fallVy → 接地恒走 landed 路径）：exp 衰减 + 死区停驻。
+    if (landed && std::fabs(c.speed) > 1e-4f) {
+        const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
+        c.speed -= c.speed * alpha;
+        if (std::fabs(c.speed) < 0.02f) c.speed = 0.0f;
+    }
+}
+
 // t769 车身俯仰刷新（坡道平行轨面，纯呈现 —— 不反馈物理；头注释见 minecartmanager.h）：以车心为基准、
 //   沿车头向（dir，负速倒行车头不变 → 俯仰跟车头不跟行进）±kCartPitchProbe 两点采样轨面高 →
 //   pitch = atan2(前-后, 2·probe)（正 = 车头上扬 —— 与 EntityManager::arrowPitchAt 同约定，QML
@@ -461,9 +557,39 @@ void MinecartManager::updateCartPitch(Cart &c, World *world, int railY)
 }
 
 // t708 沿轨推进（共享：被骑 / 空车被推同一物理；实现见头注释）。负速 = 倒行（沿 -dir，车头保持原朝向）。
+//   t863③ 轨端飞出：死端（到心 / 起步重选失败）时 |speed| ≥ kCartLaunchMinSpeed → 转 derailed 自由物理
+//   （水平 dir×speed 平抛保持 + 重力下坠，不自动暂停；机制等价 MC 1.0 矿车冲出轨道末端飞行）；
+//   速度不足 → 停驻（原「轨尽头停」语义保留）。
 void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
 {
     if (!world) { c.speed = 0.0f; return; }
+    const auto deadEnd = [&](float tvx, float tvz) {
+        // t863③ 坡顶飞出（spec「坡顶前端无轨 + 速度够 → 飞出做平抛，速度不足才停驻」）：**坡顶死端**（本
+        //   格后邻轨低一格 = 刚爬升到顶，行进向前端无轨）+ |speed| ≥ kCartLaunchMinSpeed → 出轨平抛
+        //   （水平 dir×speed 保持 + 重力下坠，不自动暂停；机制等价 MC 1.0 矿车冲出爬坡顶端飞行）。平轨
+        //   死端 / 速度不足 → 停驻（原「轨尽头停」语义保留 —— 车站死端接住矿车的既有玩法面，t769/t811
+        //   等死端停驻探针不动；平端交互由 t863④ 玩家推离承担）。
+        if (std::fabs(c.speed) >= kCartLaunchMinSpeed) {
+            const int bcx = int(std::floor(c.pos.x())), bcz = int(std::floor(c.pos.z()));
+            const int bry = scanRailColumnRiding(world, bcx, bcz, int(std::floor(c.pos.y())),
+                                                 c.pos.x() - float(bcx), c.pos.z() - float(bcz),
+                                                 c.pos.y());
+            if (bry >= 0) {
+                // 后邻（行进反侧）三高探针：轨低一格（delta -1）= 爬升到顶的死端。
+                const int back = BlockRegistry::railProbeDelta(
+                    { world->blockAt(bcx - int(tvx), bry, bcz - int(tvz)),
+                      world->blockAt(bcx - int(tvx), bry + 1, bcz - int(tvz)),
+                      world->blockAt(bcx - int(tvx), bry - 1, bcz - int(tvz)) });
+                if (back == -1) {
+                    c.derailed = true;  // 坡顶飞出（下一 tick 起 tickDerailedCart 自由物理）
+                    c.fallVy = 0.0f;
+                    c.pitch = 0.0f;     // 自由飞行无轨面俯仰（落地重挂 / 贴面后重算）
+                    return;
+                }
+            }
+        }
+        c.speed = 0.0f;     // 平死端 / 速度不足 → 停驻
+    };
     const float step = c.speed * float(dt);
     if (std::fabs(step) < 1e-5f) return;
     // 带符号行进单位向量：正行（speed>0）沿 +dir；倒行（speed<0）沿 -dir（车头 dir 不翻转 —— 保持朝向
@@ -481,7 +607,7 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
         const float ccz = std::floor(c.pos.z()) + 0.5f;
         if (std::fabs(c.pos.x() - ccx) < 1e-4f && std::fabs(c.pos.z() - ccz) < 1e-4f) {
             int vdx = 0, vdz = 0;
-            if (!pickTrackStep(world, c.pos, tx, tz, vdx, vdz)) { c.speed = 0.0f; return; }
+            if (!pickTrackStep(world, c.pos, tx, tz, vdx, vdz)) { deadEnd(tx, tz); return; }
             // t770 ①：起步重选向结果**双符号持久化**（旧版 sgn<0 不写回 dir → 倒退起步过弯只改本帧局部
             //   tx/tz，下一帧 travel 仍按旧轴横切出轨）：正行 dir=新臂（t737 车头同步语义）；倒行 dir=
             //   **新臂取反**（车头回指弯道 = 倒车出弯的正确头向；travel = dir×sgn = 新臂，下一帧重算不回退）。
@@ -548,7 +674,7 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
             remain -= segLen;
             int ndx = 0, ndz = 0;
             if (!pickTrackStep(world, c.pos, tx, tz, ndx, ndz)) {
-                c.speed = 0.0f; // 轨尽头 → 停（速度清零；正行 W 再推也停，须反推 / 上轨延伸）
+                deadEnd(tx, tz); // t863③：坡顶 + 速度足飞出；否则停驻（原「轨尽头 → 停」）
                 break;
             }
             // t770 ①：到心重选结果双符号持久化（同上方起步先验）：正行 dir=新臂（t737 车头同步）；倒行
@@ -577,17 +703,52 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
 {
     if (!world || dt <= 0.0) return;
     if (m_carts.empty()) return; // 无矿车 → 零开销（非骑乘帧常见路径；空向量 ⇔ 从未有过车 ⇔ 占用表必空，无需收边沿）
+    // t866② 环境摧毁检查（帧级收口：骑乘 / 非骑乘帧 PlayerController 都必调本 tick → 全车种仙人掌 /
+    //   岩浆 / 虚空检查在推进前结算 —— 碰仙人掌的车本帧即毁 + 掉落，不再推进物理）。
+    checkCartEnvironment(world);
+    if (m_liveCount <= 0) { // 环境检查可能已毁完全部车 → 占用表按「上一帧 − 本帧」收离开沿后早退
+        updateDetectorRailOccupancy(world);
+        return;
+    }
     bool moved = false;
     for (size_t i = 0; i < m_carts.size(); ++i) {
         Cart &c = m_carts[i];
         if (!c.alive) continue;
         if (int(i) == m_riderCart) continue; // 被骑的走 tickRiddenCart 专属物理（boost / 停驻重选向；占用统一在帧首 pass）
+        // t863③ 出轨 / 坠落自由物理（轨端飞出 / 支撑被挖 / 轨末端被推离）：平抛 + 落地重挂 / 贴面。
+        if (c.derailed) {
+            const float bx = c.pos.x(), bz = c.pos.z(), by = c.pos.y();
+            tickDerailedCart(int(i), c, world, float(dt));
+            if (!c.alive || std::fabs(c.pos.x() - bx) > 1e-4f || std::fabs(c.pos.z() - bz) > 1e-4f
+                || std::fabs(c.pos.y() - by) > 1e-4f)
+                moved = true;
+            continue;
+        }
+        // t863② 停驻 / 滑行统一支撑复探：列内有轨 → pinCartY 钉面（幂等，fx 不变同值）；无轨 → 地面真顶
+        //   贴面（World::supportTopYAt，t865/t867 同族）或失支撑转 derailed 坠落（挖掉下方轨 / 支撑的
+        //   矿车受重力转下落，机制等价 MC；地面静止车恒贴面保 t734 放宽放置语义）。
+        const int ry = pinCartY(c, world);
+        if (ry < 0) {
+            const float bot = c.pos.y() - kCartGroundH;
+            const float gtop = groundSupportTopWithin(world, c.pos.x(), c.pos.z(),
+                                                      int(std::floor(bot)), bot);
+            if (gtop >= 0.0f) {
+                if (std::fabs(c.pos.y() - (gtop + kCartGroundH)) > 1e-4f) {
+                    c.pos.setY(gtop + kCartGroundH); // 支撑变矮 / 换薄体 → 下贴新真顶
+                    moved = true;
+                }
+            } else {
+                c.derailed = true; // 失支撑 → 坠落（本帧起自由物理）
+                c.fallVy = 0.0f;
+                c.speed = 0.0f;
+                moved = true;
+                continue;
+            }
+        }
         if (std::fabs(c.speed) < 1e-3f) continue; // 静置空车不自动起步
         // 滑行物理：行进侧邻轨高度差判定（同 tickRiddenCart 坡道重力公式；空车无输入 → 只做滑行不抬速）。
         //   下坡（δ=-1）→ 重力抵摩擦 → 本帧不衰减（顺坡滑）；平 / 上坡 / 无轨（INT_MIN）→ 磨擦渐停。
-        const float bx = c.pos.x(), bz = c.pos.z(); // 水平位移检测基准
-        const int ry = pinCartY(c, world);
-        if (ry < 0) { c.speed = 0.0f; continue; } // 无轨列 → 防御停
+        const float bx = c.pos.x(), bz = c.pos.z(); // 水平位移检测基准（ry 已在上方支撑复探段取得）
         const int gs = (c.speed >= 0.0f) ? 1 : -1;
         const int cx = int(std::floor(c.pos.x()));
         const int cz = int(std::floor(c.pos.z()));
@@ -610,7 +771,12 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
         } else if (slope == INT_MIN || slope >= 0) { // 平 / 上坡：摩擦衰减（帧率无关 exp 衰减）
             const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
             c.speed -= c.speed * alpha;
-            if (std::fabs(c.speed) < 0.02f) { c.speed = 0.0f; continue; } // 磨擦停稳（死区）
+            if (std::fabs(c.speed) < 0.02f) {
+                c.speed = 0.0f;
+                // t863① 坡上失速反溜：车头朝上坡面 → 反溜起步（沿 -dir 倒行滑回坡脚，不悬停半空；
+                //   机制等价 MC 1.0 矿车上坡失速滑回）。平面 / 采样失联 → 照旧停驻（t708 保守闸门保留）。
+                if (!tryStallSlideback(c, world, ry)) continue; // 磨擦停稳（死区）
+            }
         } // 下坡（slope<0）→ 不衰减（顺坡滑）；动力段已先行接管（boost 12.8 > 溜坡 10，语义不冲突）
         stepCartAlongRail(c, world, float(dt));
         // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）；t769 返回值带出新轨层 → 俯仰随坡刷新。
@@ -812,7 +978,33 @@ bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, f
         const float selX = ax + 0.5f * nwx + 0.25f * c.dirX;
         const float selZ = az + 0.5f * nwz + 0.25f * c.dirZ;
         int ndx = 0, ndz = 0;
-        if (!pickTrackStep(world, c.pos, selX, selZ, ndx, ndz)) continue; // 无沿合成向的可走连接 → 推不动
+        if (!pickTrackStep(world, c.pos, selX, selZ, ndx, ndz)) {
+            // t863④ 轨末端推离（spec「轨末端静止车可被玩家推离轨道进入自由物理」）：合成推向前方主轴
+            //   无轨（真轨端）或本就出轨 / 地面车 → 自由物理推（derailed 水平推出，下方有地面则贴地滑
+            //   行渐停、无地面坠落）。轨上但前方主轴**有轨**（三高探针）→ 是反向推（dot<0 滤）或拐角
+            //   选向问题 → 不推离（旧语义防振荡）。主轴 = 合成向量绝对值更大的一轴（轨向四向对齐）。
+            const int pcx = int(std::floor(c.pos.x())), pcz = int(std::floor(c.pos.z()));
+            const int pry = scanRailColumnRiding(world, pcx, pcz, int(std::floor(c.pos.y())),
+                                                 c.pos.x() - float(pcx), c.pos.z() - float(pcz),
+                                                 c.pos.y());
+            int ax = 0, az = 0;
+            if (std::fabs(selX) >= std::fabs(selZ)) ax = (selX >= 0.0f) ? 1 : -1;
+            else                                     az = (selZ >= 0.0f) ? 1 : -1;
+            if (pry >= 0) {
+                const auto railAhead = BlockRegistry::isRail(world->blockAt(pcx + ax, pry, pcz + az))
+                    || BlockRegistry::isRail(world->blockAt(pcx + ax, pry + 1, pcz + az))
+                    || BlockRegistry::isRail(world->blockAt(pcx + ax, pry - 1, pcz + az));
+                if (railAhead) continue; // 前方有轨：非轨端（反向 / 拐角），不推离
+            }
+            c.dirX = float(ax);
+            c.dirZ = float(az);
+            c.speed = kCartPushSpeed;
+            c.derailed = true; // 出轨自由物理（本帧起平抛 / 贴地滑行；站轨 1/16 落差由落地扫描承接）
+            c.fallVy = 0.0f;
+            cartYawFromDir(c.dirX, c.dirZ, c.yaw);
+            pushed = true;
+            continue;
+        }
         c.dirX = float(ndx);
         c.dirZ = float(ndz);
         c.speed = kCartPushSpeed;
@@ -829,6 +1021,16 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     if (m_riderCart < 0 || m_riderCart >= int(m_carts.size())) { outCartPos = QVector3D(); return; }
     Cart &c = m_carts[size_t(m_riderCart)];
     if (!c.alive) { outCartPos = QVector3D(); return; }
+
+    // t863③ 出轨 / 坠落自由物理（轨端飞出 / 支撑被挖）：被骑车平抛坠落，玩家经 outCartPos 随车
+    //   （同帧同步座位，不掉队）；落地重挂轨道 / 贴面后恢复骑乘轨物理。输入（wish）飞行中不消费
+    //   （机制等价 MC 矿车空中无操控）。
+    if (c.derailed) {
+        tickDerailedCart(m_riderCart, c, world, float(dt));
+        outCartPos = c.pos;
+        notifyChanged();
+        return;
+    }
 
     // t736：探测轨占用 / 离开沿不再在本函数处理 —— 统一移到 tickPushedCarts 末尾的
     //   updateDetectorRailOccupancy（全车种帧级收口；PlayerController 骑乘分支在调完本函数后必调
@@ -860,11 +1062,21 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                             : -1; // -1 = 列内无轨
 
     // t734 ③ 离轨静止（防「矿车不在铁轨上仍可被骑着一路悬浮滑到地图边界」）：列内无轨（railY<0）→
-    //   钉死速度、跳过全部输入物理与推进 —— 不重选向 / 不 lerp 起步 / 不坡道溜 / 不位移。旧版速度照常
-    //   按输入 lerp 起步 + 段内推进不验轨 → 离轨车仍全速直线滑行。地面放置（t734 放宽）/ 轨被拆 / 冲出
-    //   轨端的矿车由此统一静止：可 Shift 下车（dismount 不经本函数）+ 左键拾取（hitCartFromRay）。
+    //   t863② 起分两支：地面真顶有支撑 → 钉死速度停驻（t734 放宽放置的地面静止语义保留 —— 可 Shift
+    //   下车 + 左键拾取，不重选向 / 不 lerp 起步 / 不位移）；失支撑（下方轨 / 支撑被挖）→ 转坠落自由
+    //   物理（受重力转下落，玩家随车；机制等价 MC 矿车失去支撑坠落）。
     if (railY < 0) {
-        c.speed = 0.0f;
+        const float bot = c.pos.y() - kCartGroundH;
+        const float gtop = groundSupportTopWithin(world, c.pos.x(), c.pos.z(),
+                                                  int(std::floor(bot)), bot);
+        if (gtop >= 0.0f) {
+            c.speed = 0.0f;
+            if (std::fabs(c.pos.y() - (gtop + kCartGroundH)) > 1e-4f) c.pos.setY(gtop + kCartGroundH);
+        } else {
+            c.derailed = true;
+            c.fallVy = 0.0f;
+            tickDerailedCart(m_riderCart, c, world, float(dt));
+        }
         outCartPos = c.pos;
         notifyChanged();
         // t736：离轨车的探测轨占用由 tickPushedCarts 末尾的统一 pass 以「上一帧占用 − 本帧占用」收边沿
@@ -945,7 +1157,13 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
         const float rate = (std::fabs(targetV) > 1e-3f) ? kCartAccel : kCartFriction;
         const float alpha = 1.0f - std::exp(-rate * float(dt));
         c.speed += (targetV - c.speed) * alpha;
-        if (std::fabs(c.speed) < 0.02f) c.speed = 0.0f; // 死区归零（防微速漂移）
+        if (std::fabs(c.speed) < 0.02f) {
+            c.speed = 0.0f; // 死区归零（防微速漂移）
+            // t863① 坡上失速反溜：停驻点在坡面（车头朝上坡）→ 反溜起步滑回坡脚，不悬停半空（机制等价
+            //   MC 1.0）。W 持续时 targetV>0 速度恒正不进死区 → 不与爬坡输入打架；S 刹停 / 松键滑停自然
+            //   接入。平面 / 采样失联 → 照旧停驻。
+            tryStallSlideback(c, world, railY);
+        }
     }
 
     // 沿轨推进：以「格中心到格中心」的插值段推进（跨格时重选连接向 → 拐角自动转弯）。
@@ -1071,46 +1289,86 @@ bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &d
         notifyChanged();
         return true;
     }
-    // 摧毁（生存最后一击 / 创造瞬破）：移除该矿车 + 清骑乘态（若挖的是被骑的矿车）；生存末击才 emit
-    //   cartBroken（→ 呈层 spawnItem 掉 MinecartId，可重放；机制等价 MC 1.0 生存攻击矿车 → 矿车破坏掉
-    //   矿车物品）。
-    const QVector3D cp = c.pos;
-    if (idx == m_riderCart) m_riderCart = -1; // 挖骑乘中的矿车 → 玩家自然下车
+    // 摧毁（生存最后一击 / 创造瞬破）：destroyCartTail（t866② 起与仙人掌 / 岩浆环境摧毁共用尾部 ——
+    //   清骑乘态 + 释放槽 + 生存掉落散布 + emit cartBroken；t767 创造瞬破 survivalDrop=false 无掉落）。
+    return destroyCartTail(idx, world, /*survivalDrop=*/!instantBreak);
+}
+
+// t735 ① 掉落格散布（destroyCartTail 用；头注释见 .h）：掉「首个非实心水平邻格」随机一格（邻格上方
+//   一格也须非实心，防掉进 1 格深坑壁内）；4 邻全实心（窄缝嵌车）→ 掉车中心格上一格（自重落顶不埋）；
+//   world 空（防御路径）→ 保留中心格。随机取 QRandomGenerator（t735① 同船 t711 修法先例）。
+void MinecartManager::scatterDropCell(const QVector3D &cp, World *world,
+                                      int &dropX, int &dropY, int &dropZ)
+{
+    dropX = int(std::floor(cp.x()));
+    dropY = int(std::floor(cp.y()));
+    dropZ = int(std::floor(cp.z()));
+    if (!world) return;
+    static constexpr int kDropNb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    int cand[4] = {-1, -1, -1, -1};
+    int nCand = 0;
+    for (int n = 0; n < 4; ++n) {
+        const int nx = dropX + kDropNb[n][0], nz = dropZ + kDropNb[n][1];
+        if (!world->isCollidable(nx, dropY, nz) && !world->isCollidable(nx, dropY + 1, nz))
+            cand[nCand++] = n;
+    }
+    if (nCand > 0) {
+        const int nb = cand[QRandomGenerator::global()->bounded(nCand)];
+        dropX += kDropNb[nb][0];
+        dropZ += kDropNb[nb][1];
+    } else {
+        dropY += 1; // 4 邻全实心（窄缝嵌车）→ 掉头顶上一格（自重落顶，不埋）
+    }
+}
+
+// t866② 击毁通用尾部（头注释见 .h）：清玩家骑乘态 + 释放槽 + 生存掉落（散布格 emit cartBroken → 呈层
+//   spawnItem 掉 MinecartId）。生物乘员由对账链自动释放（tickVehicleRiding Pass A/B：座位指空槽 / 反向
+//   链断 → mob 自恢复 AI 原地 + resting 解除重力落地 = 「乘员自动下来」）。
+bool MinecartManager::destroyCartTail(int idx, World *world, bool survivalDrop)
+{
+    if (idx < 0 || idx >= int(m_carts.size()) || !m_carts[size_t(idx)].alive) return false;
+    const QVector3D cp = m_carts[size_t(idx)].pos;
+    if (idx == m_riderCart) m_riderCart = -1; // 挖 / 毁骑乘中的矿车 → 玩家自然下车（重力接手）
     releaseSlot(idx);
-    // t767 创造瞬破**无掉落**（对齐 t571①「主动破坏掉落仅生存」的载具族语义）：玩家攻击矿车属主动破坏，
-    //   创造模式单击只移除车体（同创造破块无掉落）。旧版全模式同路径 emit cartBroken → 创造打矿车仍掉
-    //   矿车物品（t735①注释里「非模式门控」说的是当年掉落观感的排查结论，掉落门控本就不存在——本任务
-    //   补上）。呈层 onCartBroken 只消费掉落 → 不发信号即无物品。提前 return 顺带跳过下方掉落格散布计算
-    //   （创造路径不再需要掉落点）。
-    if (instantBreak) {
-        notifyChanged();
-        return true;
+    if (survivalDrop) {
+        int dropX = 0, dropY = 0, dropZ = 0;
+        scatterDropCell(cp, world, dropX, dropY, dropZ);
+        emit cartBroken(dropX, dropY, dropZ);
     }
-    // t735 ① 掉落格散布（同船 t711 修法）：旧版掉「矿车中心格」—— 轨格非实心、玩家可与车同格 / 紧邻，
-    //   掉落物常落在攻击者本人 kPickupDist 1.5 半径内 → 0.5s 免拾窗一过被 pickupScan 立即吸回（背包静默
-    //   +1）→ 用户全程看不到掉落物 = 观感「不掉落」（根因是掉落点选格与攻击者重合，当年亦无创造掉落
-    //   门控——t767 起创造瞬破提前 return 无掉落，见上方；同船 t661 排查结论的矿车族）。改掉「首个非实心水平邻格」随机
-    //   一格（邻格上方一格也须非实心，防掉进 1 格深坑壁内）；4 邻全实心（窄缝嵌车）→ 掉车中心格上一格
-    //   （y+1，自重落顶不埋）。world 空（防御路径）→ 保留旧中心格行为。
-    int dropX = int(std::floor(cp.x())), dropY = int(std::floor(cp.y())), dropZ = int(std::floor(cp.z()));
-    if (world) {
-        static constexpr int kDropNb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-        int cand[4] = {-1, -1, -1, -1};
-        int nCand = 0;
-        for (int n = 0; n < 4; ++n) {
-            const int nx = dropX + kDropNb[n][0], nz = dropZ + kDropNb[n][1];
-            if (!world->isCollidable(nx, dropY, nz) && !world->isCollidable(nx, dropY + 1, nz))
-                cand[nCand++] = n;
-        }
-        if (nCand > 0) {
-            const int nb = cand[QRandomGenerator::global()->bounded(nCand)];
-            dropX += kDropNb[nb][0];
-            dropZ += kDropNb[nb][1];
-        } else {
-            dropY += 1; // 4 邻全实心（窄缝嵌车）→ 掉头顶上一格（自重落顶，不埋）
-        }
-    }
-    emit cartBroken(dropX, dropY, dropZ);
     notifyChanged();
     return true;
+}
+
+// t866② 环境摧毁检查（头注释见 .h）：全部活体矿车 AABB 覆盖格扫仙人掌 / 岩浆 → destroyCartTail（生存
+//   掉落语义：碰仙人掌掉矿车物品；岩浆同样 emit —— 掉落物落进岩浆格由 ItemEntityManager 头部瞬毁判
+//   定接管，净效果 = 毁无物，机制等价 MC）。虚空（pos.y<0）→ 无掉落移除（mob void-loss 同款兜底）。
+void MinecartManager::checkCartEnvironment(World *world)
+{
+    if (!world) return;
+    for (size_t i = 0; i < m_carts.size(); ++i) {
+        const Cart &c = m_carts[i];
+        if (!c.alive) continue;
+        if (c.pos.y() < 0.0f) { // 虚空：跌出世界底部 → 移除（防永久下落刷 emit）
+            destroyCartTail(int(i), world, /*survivalDrop=*/false);
+            continue;
+        }
+        // AABB 覆盖格（对轴外接 + **朝向定向**：行进轴 = 斗长轴 kCartHalfL（1.0 长），垂直轴 = 斗宽
+        //   kCartHalfW —— 旧版 X 恒半宽 0.45 把 +X 行进的车前沿截短半格 → 轨端推入仙人掌格的接触
+        //   永不触发；定向后车头探入前方格 = 真接触。仙人掌碰撞盒 0.1 内缩 → 邻格车不共享格，共享格
+        //   即接触）。
+        const bool axisX = std::fabs(c.dirX) > 0.5f;
+        const float ex = axisX ? kCartHalfL : kCartHalfW;
+        const float ez = axisX ? kCartHalfW : kCartHalfL;
+        const int x0 = int(std::floor(c.pos.x() - ex)), x1 = int(std::floor(c.pos.x() + ex));
+        const int y0 = int(std::floor(c.pos.y() - kCartHalfH)), y1 = int(std::floor(c.pos.y() + kCartHalfH));
+        const int z0 = int(std::floor(c.pos.z() - ez)), z1 = int(std::floor(c.pos.z() + ez));
+        bool hostile = false;
+        for (int y = y0; y <= y1 && !hostile; ++y)
+            for (int z = z0; z <= z1 && !hostile; ++z)
+                for (int x = x0; x <= x1 && !hostile; ++x) {
+                    const quint8 b = world->blockAt(x, y, z);
+                    if (b == BlockRegistry::Cactus || b == BlockRegistry::Lava) hostile = true;
+                }
+        if (hostile) destroyCartTail(int(i), world, /*survivalDrop=*/true);
+    }
 }

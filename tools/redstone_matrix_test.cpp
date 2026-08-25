@@ -1001,7 +1001,9 @@ int main(int argc, char *argv[])
         bool yContB = true;
         float slopePitchB = 0.0f; int slopePitchN2 = 0;
         for (int t = 0; t < 400; ++t) {
-            carts.pushEmptyCart(&w, player, -1.0f, 0.0f); // 玩家追着车向西推
+            // t863④ 适配：车进低死端格后停推（追推会把死端车推离轨道出轨——本探针验下坡贴面 / 俯仰）。
+            if (player.x() > float(x0) + 1.0f)
+                carts.pushEmptyCart(&w, player, -1.0f, 0.0f); // 玩家追着车向西推
             carts.tickPushedCarts(0.016, &w);
             player = carts.posAt(0);
             if (std::fabs(player.y() - (wantSurf(player.x()) + rideH)) > 0.02f) {
@@ -1934,7 +1936,10 @@ int main(int argc, char *argv[])
             bool reachedCorner = false, reachedEnd = false, turnOk = false, yawOk = false;
             bool inFootprint = true, yOk = true;
             for (int t = 0; t < 900 && inFootprint; ++t) {
-                carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着推（静止即续推）
+                // t863④ 适配：到达死端格后停推（追推会把死端车推离轨道出轨——本探针验拐角语义非推离；
+                //   停推后余速滑到死端格心停驻）。
+                if (int(std::floor(prev.x())) != x0 + 1 || int(std::floor(prev.z())) != z0 + 1)
+                    carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着推（静止即续推）
                 carts.tickPushedCarts(0.016f, &w);
                 const QVector3D cp = carts.posAt(0);
                 const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
@@ -8123,7 +8128,10 @@ int main(int argc, char *argv[])
             QVector3D arrivePos;
             bool yOk = true;
             for (int t = 0; t < 1500 && ok; ++t) {
-                carts.pushEmptyCart(&w, player, 0.0f, -1.0f); // 长按 W 朝北：wish 恒定不随拐角转（用户场景）
+                // t863④ 适配：抵达西死端格后停推（追推会把死端车推离轨道——本探针验拐角选向非推离；
+                //   停推后余速滑到格心停驻，观察窗看稳态）。
+                if (!(int(std::floor(player.x())) == x0 - 2 && int(std::floor(player.z())) == z0 - 2))
+                    carts.pushEmptyCart(&w, player, 0.0f, -1.0f); // 长按 W 朝北：wish 恒定不随拐角转（用户场景）
                 carts.tickPushedCarts(0.016, &w);
                 const QVector3D cp = carts.posAt(0);
                 const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
@@ -8388,7 +8396,10 @@ int main(int argc, char *argv[])
             for (int t = 0; t < 1500 && parkedTicks < 100; ++t) {
                 ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
                 ents.tickVehicleRiding();                        // 钉位①（mob 桶内，游戏同序）
-                carts.pushEmptyCart(&w, player, 0.0f, -1.0f);     // 长按 W 朝北推（t809 玩家模型）
+                // t863④ 适配：车进北死端格后停推（追推会把死端车推离轨道——本探针验登乘 / 钉位 / 释放，
+                //   停推后余速滑到死端格心停驻，停驻窗看钉位零漂）。
+                if (int(std::floor(player.z())) > z0 - 5)
+                    carts.pushEmptyCart(&w, player, 0.0f, -1.0f); // 长按 W 朝北推（t809 玩家模型）
                 carts.tickPushedCarts(0.016, &w);
                 ents.tickVehicleRiding();                        // 钉位②（step 后，同帧随车）
                 const QVector3D cp = carts.posAt(0);
@@ -8698,6 +8709,145 @@ int main(int argc, char *argv[])
             tickN(w, 2);
         }
     }
+
+    // ── t863 矿车坡道物理四修探针（MinecartManager 直编，P12b 同款坡 rig 族）──
+    //   用户报告（R19.15 玩法阻塞）：① 上坡失速悬停半空（应反向滑落）；② 悬停 / 停驻态挖掉下方轨 /
+    //   支撑不受重力（应坠落）；③ 坡顶前端无轨 + 速度够自动暂停（应飞出平抛）；④ 轨末端静止车推不动
+    //   （应可被玩家推离轨道进入自由物理）。矩阵断言（任一 FAIL = 用户症状在当前 HEAD 复现）：
+    //   (a) ① 被骑车爬坡中途松键 → 摩擦死区 → 反溜起步滑回坡脚停驻（不悬停坡面）；
+    //   (b) ② 高架轨（支撑 + 轨被拆）→ 停驻车失支撑转坠落，落到下方接住地板贴面停驻（不冻结半空）；
+    //   (c) ③ 坡顶死端（后邻轨低一格 = 爬升到顶 + 前端无轨）+ 速度足 → 飞出平抛落到轨端外接地板
+    //       （机制等价 MC 1.0 轨端飞行，速度不足才停驻——平死端停靠面由 t769/t811 既有探针钉）；
+    //   (d) ④ 平死端静止车被玩家朝端外推 → 推离轨道出轨，贴地滑行落到轨端外地板（进入自由物理）。
+    {
+        // rig 选址：运行期扫描空区（t867 先例）。需 10×1×4 净空（含隔离边 + 落地板区）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 9 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 9 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t863 ramp physics four fixes: no clear rig area found";
+        } else {
+            const float rideH = 0.45f;    // kCartRideH 镜像（P12b 同款）
+            const float groundH = 0.3875f; // kCartGroundH 镜像（出轨贴地落定中心偏移）
+            // ── (a) 上坡失速反溜：x0 低平 + x0+1..x0+4 四格连坡（东邻逐格 +1）+ x0+5 高平死端。
+            //    松键滑行余量 = 初速 4.8 / 摩擦 2 ≈ 2.4 格 < 坡长 4 格 → 停驻点必落坡面（非坡顶）。──
+            for (int i = 0; i <= 5; ++i)
+                w.setBlock(x0 + i, kRigY + ((i >= 5) ? 4 : (i >= 1) ? (i - 1) : 0), z0, BR::Rail, 0);
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+            bool okA = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+            QVector3D cp;
+            bool reachedSlope = false;
+            for (int t = 0; t < 300 && !reachedSlope; ++t) { // W 爬坡到坡中（x∈[x0+1.2, x0+1.6]）
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (cp.x() > float(x0 + 1) + 0.2f) reachedSlope = true;
+            }
+            for (int t = 0; t < 600; ++t) { // 松键：摩擦死区 → 反溜起步 → 倒行滑回坡脚
+                carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+            }
+            const QVector3D fa = carts.posAt(0);
+            okA = okA && reachedSlope
+                && fa.x() < float(x0) + 1.0f                      // 滑回低平段（坡脚前；不悬停坡面）
+                && std::fabs(fa.y() - (float(kRigY) + rideH)) < 0.02f; // 贴低平轨面停驻
+            if (!okA) qInfo().noquote() << "  t863(a) slideback final" << fa << "reached" << reachedSlope;
+            // 清 (a)：销毁被骑车（instantBreak 免掉落 + 清骑乘态）+ 拆坡 / 高平轨（低平 x0 留作 (d)）。
+            carts.hitCartFromRay(QVector3D(fa.x(), fa.y() + 3.0f, fa.z()), QVector3D(0, -1, 0), 4.0f, &w, true);
+            for (int i = 1; i <= 5; ++i)
+                w.setBlock(x0 + i, kRigY + ((i >= 5) ? 4 : (i - 1)), z0, BR::Air, 0);
+
+            // ── (b) 支撑被挖坠落：高架轨（支撑浮空 @kRigY+2 顶 / 轨 @kRigY+3）+ 接住地板 @kRigY-1。──
+            w.setBlock(x0 + 4, kRigY + 2, z0, BR::Stone, 0);  // 浮空支撑（石块不落）
+            w.setBlock(x0 + 4, kRigY + 3, z0, BR::Rail, 0);   // 高架轨
+            w.setBlock(x0 + 4, kRigY - 1, z0, BR::Stone, 0);  // 接住地板（顶 = kRigY）
+            carts.spawnCart(x0 + 4, kRigY + 3, z0, &w);       // 停驻高架轨（(a) 车已毁 → 槽 0 复用）
+            const float y0b = carts.posAt(0).y();
+            w.setBlock(x0 + 4, kRigY + 3, z0, BR::Air, 0);     // 挖轨
+            w.setBlock(x0 + 4, kRigY + 2, z0, BR::Air, 0);     // 挖支撑
+            for (int t = 0; t < 120; ++t) carts.tickPushedCarts(0.016, &w);
+            const QVector3D fb = carts.posAt(0);
+            const bool okB = carts.aliveAt(0)
+                && y0b > float(kRigY + 3)                       // 起始确实在高架轨面
+                && std::fabs(fb.y() - (float(kRigY) + groundH)) < 0.02f // 坠落到接住地板贴面停驻
+                && std::fabs(fb.x() - float(x0 + 4) - 0.5f) < 0.05f;    // 原列坠落（无水平速度）
+            if (!okB) qInfo().noquote() << "  t863(b) fall final" << fb << "y0" << y0b;
+            // 清 (b)：销毁坠落车 + 拆接住地板。
+            carts.hitCartFromRay(QVector3D(fb.x(), fb.y() + 3.0f, fb.z()), QVector3D(0, -1, 0), 4.0f, &w, true);
+            w.setBlock(x0 + 4, kRigY - 1, z0, BR::Air, 0);
+
+            // ── (c) 坡顶死端飞出：x0 低平 + x0+1 坡（东邻 x0+2@Y+1 **最后一格** —— 后邻低一格 = 坡顶）+
+            //        轨端外接地板（x0+3..x0+5 @kRigY，顶 = Y+1 同轨面高）。被骑 W 冲顶 → 飞出平抛落板。──
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);       // 坡（东邻高格轨 → 抬升）
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::Rail, 0);   // 坡顶死端（东端无轨）
+            for (int i = 3; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Stone, 0); // 落地板
+            carts.spawnCart(x0, kRigY, z0, &w);               // （(b) 车已毁 → 槽 0 复用）
+            const QVector3D mountC(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+            const bool rodeC = carts.tryMount(mountC, QVector3D(0, -1, 0), 4.0f);
+            bool flewC = false;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (cp.x() > float(x0 + 2) + 0.6f && cp.y() < float(kRigY + 1) + rideH - 0.03f)
+                    flewC = true; // 过坡顶格心后低于轨面 = 平抛下坠（不自动暂停）
+            }
+            const QVector3D fc = carts.posAt(0);
+            const bool okC = rodeC && flewC
+                && fc.x() > float(x0 + 3)                       // 落到轨端外地板（滑行渐停位）
+                && fc.x() < float(x0 + 6)
+                && std::fabs(fc.y() - (float(kRigY + 1) + groundH)) < 0.02f;
+            if (!okC) qInfo().noquote() << "  t863(c) launch final" << fc << "flew" << flewC
+                                          << "x0" << x0 << "z0" << z0
+                                          << "blocks" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                          << int(w.blockAt(x0 + 2, kRigY + 1, z0))
+                                          << int(w.blockAt(x0 + 3, kRigY, z0));
+            // 清 (c)：拆坡 / 坡顶轨 / 落地板（低平 x0 轨留作 (d)）。
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::Air, 0);
+            for (int i = 3; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+
+            // ── (d) 轨末端推离：x0 单轨死端（孤轨）+ 端外接地板（x0+1..x0+3 @kRigY-1，顶 = kRigY）。
+            //        静止车被玩家朝 +X 端外推 → 出轨推离 → 贴地滑行落板停驻。──
+            for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+            carts.spawnCart(x0, kRigY, z0, &w);               // （(c) 车留板上；槽 1 —— (c) 车滑停在 x0+5 附近不挡本段）
+            QVector3D pusher = carts.posAt(1) + QVector3D(-0.4f, 0.0f, 0.0f); // 玩家在西侧贴住
+            for (int t = 0; t < 300; ++t) {
+                carts.pushEmptyCart(&w, pusher, 1.0f, 0.0f);  // 朝 +X（端外向）推
+                carts.tickPushedCarts(0.016, &w);
+                if (carts.posAt(1).x() > float(x0) + 0.6f) break; // 已离轨格
+                pusher.setX(carts.posAt(1).x() - 0.4f);        // 追着推
+            }
+            for (int t = 0; t < 200; ++t) carts.tickPushedCarts(0.016, &w); // 滑行渐停
+            const QVector3D fd = carts.posAt(1);
+            const bool okD = fd.x() > float(x0) + 0.6f                          // 推离轨道
+                && std::fabs(fd.y() - (float(kRigY) + groundH)) < 0.02f         // 贴地（地板顶 + groundH）
+                && std::fabs(fd.z() - float(z0) - 0.5f) < 0.05f;                // 不侧漂
+            if (!okD) qInfo().noquote() << "  t863(d) push-off final" << fd;
+            const bool ok = okA && okB && okC && okD;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t863 ramp physics: uphill stall slides back to foot, mined support"
+                                 " drops parked cart onto catch floor, crest dead-end launches at speed"
+                                 " onto beyond-end floor, dead-end cart pushable off the rail into free"
+                                 " physics";
+            // 清场
+            carts.clearAll();
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+
 
     // ── t848 余烬门尺寸上限 23×23 探针（World 层直调；t806 泛化门的用户实测回归）──
     //   背景（用户 8-24 实测）：t806 内腔上限 4 宽×5 高，实测「最大只有 4×4 能点燃，再大激活不了」——
