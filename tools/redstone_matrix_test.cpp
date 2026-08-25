@@ -8406,19 +8406,22 @@ int main(int argc, char *argv[])
                 player = cp; // 贴身追随（t809 先例：玩家追着车、静止即续推）
             }
             // (d) 挖车释放（从车正上方垂直下挖；instantBreak 免耐久轮）→ 对账自释放 + 重力 / 落定重接手。
-            //   isSolid 语义 = 非 air 实存（world.h 注）→ 轨格本身是「实体支撑」：释放 mob（resting 已清）
-            //   下一物理 tick 落定扫描命中轨格 → 贴其 cell 顶（kRigY+1）+ halfH —— 与引擎既有落定公式一致
-            //   （非本任务新增行为），断言按它写死。
+            //   t865 支撑收口后轨格（ShapeNone 无碰撞）不承载 → 释放 mob（resting 已清）穿透轨格、落定
+            //   石板地板顶（kRigY−1 石块真顶 = kRigY）+ halfH —— 旧断言钉的 kRigY+1.5（轨当满格悬上一格）
+            //   正是 t865「支撑判定把非整格当满格」修掉的行为。释放自座位高（≈kRigY+0.64）落 ~0.64 格
+            //   需数 tick → 驱动至多 40 tick（0.64s，落定 + 余量）再量。
             const QVector3D cp = carts.posAt(0);
             const bool hit = carts.hitCartFromRay(QVector3D(cp.x(), cp.y() + 3.0f, cp.z()),
                                                   QVector3D(0.0f, -1.0f, 0.0f), 8.0f, nullptr, true);
             ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
             ents.tickVehicleRiding();
             const bool released = hit && !carts.aliveAt(0) && ents.rideCartAt(mobA) == -1 && ents.aliveAt(mobA);
-            ents.tick(0.016, &w, player, 0.3f, 1.8f, false); // 释放后首个物理 tick：重力落定重接手
-            ents.tickVehicleRiding();
+            for (int t = 0; t < 40; ++t) { // 释放后物理 tick：重力穿透轨格落定地板 + AI 复活（listener 远，纯游荡）
+                ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();
+            }
             const float settleY = ents.posAt(mobA).y();
-            const bool settleOk = std::fabs(settleY - (float(kRigY) + 1.5f)) <= 0.06f;
+            const bool settleOk = std::fabs(settleY - (float(kRigY) + 0.5f)) <= 0.02f;
             // (e) 满员拒载：新车（槽复用 0）+ mobB 占座 → mobC 同格不登 + 玩家 tryMount 被拒。
             carts.spawnCart(x0, kRigY, z0, &w);
             const int mobB = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#55ff55"), 10);
@@ -8541,6 +8544,91 @@ int main(int argc, char *argv[])
                 for (int dy = 0; dy <= 3; ++dy)
                     w.setBlock(bx + dx, fy + dy, bz + dz, BR::Air, 0);
         tickN(w, 2);
+    }
+
+    // ── t865 生物贴轨行走 + 草丛误跳探针（EntityManager 直编，t803 追击走廊模式）──
+    //   用户报告（R19.15）：「生物走铁轨悬浮上方一格」（支撑判定把非整格当满格抬高）+「僵尸遇草丛跳过去」
+    //   （草丛/花等无碰撞植物被 isJumpObstacle 当墙）。根因（t865）：mob 三谓词（mobAabbHitsSolid /
+    //   mobFootprintHasSupport / mobSupportTopY / isJumpObstacle）消费 isSolid（非 air 实存）而非碰撞语义 →
+    //   轨 / 火把 / 草丛等 ShapeNone 无碰撞格被当满格墙 + 满格支撑。修 = 收口 World::isCollidable /
+    //   World::supportTopYAt（碰撞 sub-AABB 真顶单一权威）。矩阵断言（任一 FAIL = 用户症状在当前 HEAD 复现）：
+    //   (a) 贴轨行走：僵尸（Shambler，追击确定性 +X）沿 10 格直轨走廊追玩家 —— 全程脚底 Y 恒 ≈ 地面顶
+    //       （kRigY，穿透轨格踩地面——轨板厚 1/16 视觉贴合）且到达走廊远端（旧象：轨=墙 → 越障跳翻上轨 →
+    //       悬浮轨上一格 feet=kRigY+1）；
+    //   (b) 草丛直走：同走廊铺 4 格草丛（无轨）—— 全程无起跳（feet 恒 ≈ 地面，越障跳从未触发）且到达
+    //       远端（旧象：草丛=墙 → 起跳翻过 = 用户「僵尸遇草丛跳过去」）。
+    {
+        // rig 选址：运行期扫描空区（t809/t811 先例）。需 13×1×5 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 12 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 12 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t865 mob walks rails/grass at true surface: no clear rig area found";
+        } else {
+            EntityManager ents;
+            // (a) 贴轨走廊：石地板 x0..x0+10 @kRigY-1 + 直轨中列 x0..x0+10 @kRigY；僵尸 x0 追 +X（虚拟玩家
+            //     脚位走廊远端，kDetectRange=16 内）。断言全程 feet == kRigY（±0.02）且 maxX ≥ x0+8。
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Rail, 0);
+            }
+            const int zA = ents.spawnMobTyped(x0, kRigY, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D railTarget(float(x0) + 10.5f, float(kRigY), float(z0) + 0.5f);
+            // 预热 40 tick：spawn 高度（cell+0.5 中心）对 1.8 高 mob 脚位偏低 → 首拍嵌入地板下沉 ~0.85 再
+            //   snap 回真支撑顶（引擎既定落定链，非本任务对象）；预热后才开始记录 feet 偏差（否则把该
+            //   出生暂态误计为「跳」）。
+            for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, railTarget, 0.3f, 1.8f, true);
+            float railMaxFeetOff = 0.0f, railMaxX = -1e9f;
+            for (int t = 0; t < 300; ++t) { // 4.8s：10 格追击 ~3.6s（kChaseSpeed 2.8）+ 余量
+                ents.tick(0.016f, &w, railTarget, 0.3f, 1.8f, true);
+                const QVector3D p = ents.posAt(zA);
+                railMaxFeetOff = std::max(railMaxFeetOff, std::fabs(p.y() - 0.9f - float(kRigY)));
+                railMaxX = std::max(railMaxX, p.x());
+            }
+            const bool okA = railMaxFeetOff <= 0.02f && railMaxX >= float(x0) + 8.0f;
+            // 清 (a) 场（轨全拆；地板留作 (b) 走廊，僵尸留在 ents 内随后续段自然游荡，不参与断言）。
+            for (int dx = 0; dx <= 10; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            // (b) 草丛走廊：地板中段铺 4 格草丛（x0+3..x0+6）；新僵尸自 x0 追 +X。断言全程 feet == kRigY
+            //     （越障跳从未把脚抬离地面 = 草丛直走过）且到达远端。
+            for (int dx = 3; dx <= 6; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::TallGrass, 0);
+            const int zB = ents.spawnMobTyped(x0, kRigY, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D grassTarget(float(x0) + 10.5f, float(kRigY), float(z0) + 0.5f);
+            for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, grassTarget, 0.3f, 1.8f, true); // 预热（同上）
+            float grassMaxFeetOff = 0.0f, grassMaxX = -1e9f;
+            for (int t = 0; t < 300; ++t) {
+                ents.tick(0.016f, &w, grassTarget, 0.3f, 1.8f, true);
+                const QVector3D p = ents.posAt(zB);
+                grassMaxFeetOff = std::max(grassMaxFeetOff, std::fabs(p.y() - 0.9f - float(kRigY)));
+                grassMaxX = std::max(grassMaxX, p.x());
+            }
+            const bool okB = grassMaxFeetOff <= 0.02f && grassMaxX >= float(x0) + 8.0f;
+            const bool ok = okA && okB;
+            if (!ok)
+                qInfo().noquote() << "  t865 rail: feetOff" << railMaxFeetOff << "maxX" << railMaxX
+                                  << "| grass: feetOff" << grassMaxFeetOff << "maxX" << grassMaxX;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t865 mobs walk rails at true surface (feet on floor through 1/16 rail"
+                                 " plate, no full-block lift) and stride through tall grass without"
+                                 " jumping (no-collision blocks are neither wall nor support)";
+            // 清场
+            ents.clearAll();
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
     }
 
     // ── t848 余烬门尺寸上限 23×23 探针（World 层直调；t806 泛化门的用户实测回归）──

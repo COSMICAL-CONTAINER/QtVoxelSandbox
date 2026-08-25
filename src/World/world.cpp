@@ -546,6 +546,25 @@ std::vector<BlockRegistry::BlockAABB> World::collisionAABBsAt(int x, int y, int 
     return out;
 }
 
+// t865/t867 统一支撑顶面查询（头注释见 world.h）：碰撞 sub-AABB 真顶为单一权威 —— 整立方快路径
+//   （isFullCube 且非 Farmland/附魔台矮盒特例）零 AABB 构建；SnowLayer 按 state 真顶（与盒同源的快路径
+//   特例，免为薄层建盒）；其余（slab/stairs/fence/plate/door/trapdoor/bed/lily-pad/矮盒特例）走
+//   collisionAABBs 取最高盒 maxY；无碰撞格（轨/火把/花草/作物/火/水/岩浆）盒空 → -1 不承载。
+float World::supportTopYAt(int x, int y, int z) const
+{
+    const quint8 id = m_chunks.blockAt(x, y, z);
+    if (id == BlockRegistry::Air) return -1.0f;
+    if (id == BlockRegistry::SnowLayer)
+        return float(y) + BlockRegistry::snowLayerHeight(m_chunks.stateAt(x, y, z));
+    if (BlockRegistry::isFullCube(id) && id != BlockRegistry::Farmland
+        && id != BlockRegistry::EnchantingTable)
+        return float(y) + 1.0f;
+    float top = -1.0f;
+    for (const BlockRegistry::BlockAABB &b : BlockRegistry::collisionAABBs(id, m_chunks.stateAt(x, y, z)))
+        if (b.maxY > top) top = b.maxY;
+    return (top < 0.0f) ? -1.0f : float(y) + top;
+}
+
 // t775 点级碰撞占据查询（头注释见 world.h）：取点所在格的碰撞 sub-AABB，任一盒严格包含该点 → true。
 //   玩家（t160）与矿车骑乘（t775）窒息共用本判据（PlayerController tickSuffocation 单链，旧两处内联
 //   收敛单一权威）。mob（t254）窒息**未迁移**：EntityManager 独立实现同判据（复审 #24 口径修正，

@@ -157,6 +157,18 @@ public:
     //   t575 收紧语义原样保留）。只读（collisionAABBsAt + 点盒判定）；分层（PLAN §2）：World 低层查询，
     //   Game / Entities / 测试直调。
     bool pointBlockedByCollision(float x, float y, float z) const;
+    // t865/t867 统一支撑顶面查询（实体「可站立支撑」单一权威）：格 (x,y,z) 的支撑顶面世界 Y；非支撑返 -1。
+    //   语义 = 碰撞 sub-AABB 真顶（BlockRegistry::collisionAABBs 最高盒 maxY，+y）：整立方 cell+1 / 下半砖
+    //   +0.5 / 压力板 / 睡莲 +1/16 / 栅栏 +1.5 / 床 ~+0.31 / 上半砖 / 楼梯 / 门 +1.0；SnowLayer 按 state 走
+    //   snowLayerHeight 真顶（快路径特例，与盒同源）；**无碰撞格**（轨 / 火把 / 草丛 / 花 / 作物 / 火 / 水 /
+    //   岩浆 ShapeNone 族）返 -1 —— 不承载，实体穿透到下方真支撑（机制等价 MC 无碰撞方块不站立）。
+    //   Farmland +0.9375 / 附魔台 +0.75（ShapeFull 但碰撞矮盒特例，快路径按 id 排除走盒）。
+    //   消费端（t865/t867 前）：mob 落地扫描 mobSupportTopY + mob 水平碰撞 mobAabbHitsSolid + 越障跳
+    //   isJumpObstacle + 掉落物落地 / resting 复探（ItemEntityManager tick）—— 旧族把 isSolid（非 air 实存）
+    //   当支撑 → 轨 / 压力板等非整格被抬满格一格（用户报「生物走铁轨悬浮上方一格」「压力板掉落物悬空」
+    //   同根因）。性能：整立方快路径零 AABB 构建（地形绝大多数），仅异形格付 vector 构建。
+    //   分层（PLAN §2）：World 低层只读查询（BlockRegistry + ChunkManager），Game / Entities / 测试直调。
+    float supportTopYAt(int x, int y, int z) const;
 
     // t121 天光 heightmap（PLAN §2-H「per-column 天光——自顶向下首个实体」）：世界坐标列首个非空气的 y
     //（越界 / 空列 → -1）。mesher 据此判顶点见天（ly >= hm → 天光 1.0）/ 地下（暗 0.2）。经 ChunkManager
