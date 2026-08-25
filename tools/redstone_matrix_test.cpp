@@ -7433,10 +7433,11 @@ int main(int argc, char *argv[])
         //     → 冷却递减（tick→scanDispenserTraps 开头）从不运行 → 「sub-2s-cooldown」实际只验 contains 即拦，
         //     kDispenserCooldown 回归改 0 探针照样 PASS；② arrows 持平在「信号根本没发」时也恒真）。三段：
         //     ① 稳定通电下再制造电力活动（对侧拉杆扳开→扳回）不重复发射（沿检测基线集 t689）；
-        //     ② 拆源→快速复置 = 真上升沿但 <2s 冷却 → 不发射，**且断言 powerDispenserTriggered 信号确有发出**
+        //     ② 拆源→快速复置 = 真上升沿但 <1s 冷却 → 不发射，**且断言 powerDispenserTriggered 信号确有发出**
         //        （头部全局 dispFired 计数差分——区分「冷却拦截」与「信号未发」两种零发射）；
-        //     ③ 直调 pc.scanDispenserTraps(2.5f) 推进冷却过 2s 过期（tick 的等价递减驱动，探针态沿表恒空
-        //        零副作用）→ 再造真上升沿 → **必须再发射**（箭 +1 / 库存 2→1 正向断言——冷却时长回归改 0
+        //     ③ 直调 pc.scanDispenserTraps(2.5f) 推进冷却过 0.5s 过期（tick 的等价递减驱动，探针态沿表恒空
+        //        零副作用；t868② 冷却 2.0→1.0s 后本值仍 >1.5× 新冷却，两向断言语义不变）
+        //        → 再造真上升沿 → **必须再发射**（箭 +1 / 库存 2→1 正向断言——冷却时长回归改 0
         //        ②不触发、改 ∞ ③不触发，两个方向都在此现形）。
         //     review25 #8：② 段前先 scanDispenserTraps(1e-3f) 走一步真实递减再复置——配合 fireDispenserAt
         //        门改 contains && value>0，0 值冷却在递减步即被 erase → 「常量回归改 0」时复置沿会发射、
@@ -7454,7 +7455,7 @@ int main(int argc, char *argv[])
             tickN(w, 4);
             const int dispBeforeRepower = dispFired;             // 信号计数基线（复置段必须发出 ≥1 次）
             pc.scanDispenserTraps(1e-3f);                        // review25 #8：走一步真实递减再复置——0 值冷却即被 erase，常量回归改 0 时下复置沿必发射 → ② FAIL
-            placeRigBlock(w, bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置（真上升沿，但冷却 2s 未过）
+            placeRigBlock(w, bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置（真上升沿，但冷却 0.5s 未过）
             tickN(w, 4);
             int arrows3 = 0;
             for (int i = 0; i < ents.count(); ++i)
@@ -7463,7 +7464,7 @@ int main(int argc, char *argv[])
                   && store.slotCountAt(bx0, kRigY, bz0, 0) == 2  // 库存不再扣（无第二次发射）
                   && dispFired > dispBeforeRepower;              // 信号确发出（零发射 = 冷却拦，非信号没发）
             // ③ 冷却过期后再造上升沿 → 必须再发射（时间维度正向断言）。
-            pc.scanDispenserTraps(2.5f); // 等价递减驱动：一次耗尽 2s 冷却（探针不启定时器，直调推进；沿表空）
+            pc.scanDispenserTraps(2.5f); // 等价递减驱动：一次耗尽 0.5s 冷却（探针不启定时器，直调推进；沿表空）
             w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);         // 降沿（清 fireDispenserAtQml 沿基线）
             tickN(w, 4);
             const int dispBeforeExpire = dispFired;
@@ -7551,9 +7552,9 @@ int main(int argc, char *argv[])
                              "primed entity at cell center; redstone-block->dispenser w/ 3 arrows fires 1 + "
                              "decrements to 2; lever->dropper w/ 5 dust pops 1 item entity + decrements to 4; "
                              "empty tracked dispenser powered = design no-op; stable-power re-touch and "
-                             "sub-2s-cooldown re-power both do not re-fire, each zero-fire leg gated by "
+                             "sub-0.5s-cooldown re-power both do not re-fire, each zero-fire leg gated by "
                              "powerDispenserTriggered emission-count delta so cooldown-block vs signal-lost "
-                             "are distinguished; cooldown driven past 2s expiry via scanDispenserTraps "
+                             "are distinguished; cooldown driven past 0.5s expiry via scanDispenserTraps "
                              "equivalent-decrement then a true re-edge MUST re-fire +1 arrow/stock 2->1, "
                              "pinning the cooldown duration both directions) - consumer leg never executed by "
                              "P15/t773 before, iron-door contrast explained (door = in-World state write, "
@@ -7566,8 +7567,8 @@ int main(int argc, char *argv[])
     //   (a) 弹出位 = 发射面邻格格心（state 0 → +X，源贴背面保发射面净空）+ **标准引信**（fuseProgress==1.0
     //       钉满值 kPrimedTntFuseSec ~5s——链式短 fuse 1.2s 会给 0.24，缩短立现形）+ 引信在跑（tick 0.25s
     //       后 progress 递减）+ **定向初速**（tick 后 +X 位移 ≈ v·dt，钉弹射方向=发射面朝向）+ 库存 3→2；
-    //   (b) 二次激活 <2s 冷却 → 无第二发（信号确发的零发射 = 冷却拦，t814 ② 口径）+ 库存不再扣；
-    //       冷却过 2s 后再造沿 → 必再弹（+1 实体 / 库存 2→1，t814 ③ 口径）——冷却闸对 TNT 分支不回归；
+    //   (b) 二次激活 <0.5s 冷却 → 无第二发（信号确发的零发射 = 冷却拦，t814 ② 口径）+ 库存不再扣；
+    //       冷却过 0.5s 后再造沿 → 必再弹（+1 实体 / 库存 2→1，t814 ③ 口径）——冷却闸对 TNT 分支不回归；
     //   (c) 投掷器 + TNT → 普通掉落物弹出**不点燃**（dropper 只投不射口径——两路径边界的另一侧：dropper
     //       弹 TNT 是物品非引燃实体）+ 库存照扣；
     //   (d) review25 #11 排出口占用门：发射面邻格被实体方块堵住 → 不在墙格内 spawn（primed 水平积分不查
@@ -7634,19 +7635,19 @@ int main(int argc, char *argv[])
                                   << " okAFuse=" << okAFuse << " okAMove=" << okAMove;
         }
 
-        // (b) 冷却闸不回归（t814 (e) ②③ 压缩版，分派物换 TNT）：2s 内真上升沿 → 冷却拦（零发射且信号确发）；
-        //     冷却驱动过 2s 再造沿 → 必再弹。
+        // (b) 冷却闸不回归（t814 (e) ②③ 压缩版，分派物换 TNT）：0.5s 内真上升沿 → 冷却拦（零发射且信号确发）；
+        //     冷却驱动过 0.5s 再造沿 → 必再弹。
         bool okB = false;
         {
             w.setBlock(tx0 - 1, kRigY, tz0, BR::Lever, 0); // 扳回 → 降沿（清 fireDispenserAtQml 沿基线）
             tickN(w, 4);
             const int dispBeforeRepower = dispFired;
-            placeRigBlock(w, tx0 - 1, kRigY, tz0, BR::Lever, 1); // 复置 = 真上升沿，但冷却 2s 未过
+            placeRigBlock(w, tx0 - 1, kRigY, tz0, BR::Lever, 1); // 复置 = 真上升沿，但冷却 0.5s 未过
             tickN(w, 4);
             const bool noRefire = primedCount() == 1                      // 仍只有首发（无第二发）
                                   && store.slotCountAt(tx0, kRigY, tz0, 0) == 2 // 库存不再扣
                                   && dispFired > dispBeforeRepower;       // 信号确发（零发射 = 冷却拦非信号丢）
-            pc.scanDispenserTraps(2.5f); // 等价递减驱动：一次耗尽 2s 冷却（探针态沿表空零副作用，t814 ③ 同款）
+            pc.scanDispenserTraps(2.5f); // 等价递减驱动：一次耗尽 0.5s 冷却（探针态沿表空零副作用，t814 ③ 同款）
             w.setBlock(tx0 - 1, kRigY, tz0, BR::Lever, 0);
             tickN(w, 4);
             placeRigBlock(w, tx0 - 1, kRigY, tz0, BR::Lever, 1); // 新上升沿 + 冷却已过 → 必再弹
@@ -7770,8 +7771,8 @@ int main(int argc, char *argv[])
                              "the firing face), full standard fuse (fuseProgress==1.0 pins "
                              "kPrimedTntFuseSec, chain-fuse 1.2s would read 0.24), fuse ticking + "
                              "directional +X drift after one 0.25s entity tick pins pop-along-facing "
-                             "velocity, stock 3->2; sub-2s-cooldown re-edge fires nothing while "
-                             "powerDispenserTriggered still emits, cooldown driven past 2s then re-edge "
+                             "velocity, stock 3->2; sub-0.5s-cooldown re-edge fires nothing while "
+                             "powerDispenserTriggered still emits, cooldown driven past 0.5s then re-edge "
                              "MUST re-pop (+1 entity, stock 2->1); dropper w/ TNT pops a plain item drop "
                              "with zero primed entities (dropper = item-only, the other side of the "
                              "two-path boundary); blocked firing face (review25 #11) pops TNT at the "
@@ -7781,6 +7782,87 @@ int main(int argc, char *argv[])
                              "swallow), stock decremented on every path; "
                              "redstone-direct-adjacent in-place priming regression is "
                              "covered by the t814(a) probe above";
+    }
+
+    // ── P-t868 高频红石逐沿发射探针（Game 层真消费端，t814/t856 模式）──
+    //   用户实测：「发射器高频红石只能激活一次」（旧 2.0s 冷却把第二个上升沿整只吞掉）。修复 = 冷却缩短
+    //   2.0→0.5s 且语义重钉「短防抖闸」（拦同 tick 双路径双发），非节流窗。断言三段：
+    //   (a) 高频沿序列连发：拉杆快速循环（扳开→0.7s→扳回→扳开；0.7s = 真实帧驱动的冷却递减——
+    //       scanDispenserTraps(0.016f)×44 ≈ 60Hz 帧，等价生产里 tick() 每帧推进冷却）。旧 2.0s 常量下
+    //       0.7s < 2.0s → 第二沿被吞（fired 恒 1 = 用户症状）；新 0.5s 下 0.7s > 0.5s → 必再发（≥2）。
+    //   (b) 防抖闸仍有效：同一冷却窗内（只 tickN 推进世界、无帧驱动递减）再造真上升沿 → 不多发
+    //       （t814 (e)② 同口径；t869 火把环时钟落地前的独立驱动——本探针不依赖无稳态电路存在）。
+    //   (c) 库存对账：发射次数 == 库存扣减量（无凭空箭 / 无吞库存）。
+    {
+        PlayerController pc;
+        EntityManager ents;
+        DispenserStore store;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setDispenserStore(&store);
+        QObject::connect(&w, &World::powerDispenserTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
+
+        bool okClock = false, okDebounce = false, okStock = false;
+        const auto arrowCount = [&ents]() {
+            int n = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++n;
+            return n;
+        };
+        {
+            const auto [x0, z0] = nextSlot();
+            placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0);   // state 0 → 朝 +X
+            store.ensureDispenser(x0, kRigY, z0);
+            store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::ArrowId, 4);
+            tickN(w, 2);
+
+            // (a) 高频沿序列：沿#1（扳开）→ 帧驱动 0.7s → 沿#2（扳回+再扳开）→ 必再发。
+            const int arrows0 = arrowCount();
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1);   // 上升沿 #1 → 发射 1
+            tickN(w, 4);
+            const int afterFirst = arrowCount();
+            for (int f = 0; f < 44; ++f) pc.scanDispenserTraps(0.016f); // 0.704s 帧驱动（>0.5s 新冷却 / <2.0s 旧冷却）
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 0);         // 降沿（清 fireDispenserAtQml 沿基线）
+            tickN(w, 4);
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1);   // 上升沿 #2 → 旧 2.0s 冷却吞 / 新 0.5s 过闸
+            tickN(w, 4);
+            const int fired = arrowCount() - arrows0;
+            okClock = afterFirst == arrows0 + 1 && fired >= 2;    // 首沿恰 1 发 + 第二沿必再发（旧常量恒 1 → FAIL）
+            okStock = store.slotCountAt(x0, kRigY, z0, 0) == 4 - fired; // 库存对账（发射数==扣减数）
+            if (!okClock || !okStock)
+                qInfo().noquote() << "  [t868 a diag] first=" << (afterFirst - arrows0)
+                                  << " fired=" << fired
+                                  << " stock=" << store.slotCountAt(x0, kRigY, z0, 0);
+
+            // (b) 防抖闸：冷却窗内（仅 tickN，无帧驱动递减——冷却表项保持 ~0.5s）再造真上升沿 → 不多发。
+            pc.scanDispenserTraps(1e-3f);                        // review25 #8：走一步真实递减（0 值冷却即被 erase）
+            w.setBlock(x0 - 1, kRigY, z0, BR::Lever, 0);         // 降沿
+            tickN(w, 4);
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1);   // <0.5s 新升沿 → 防抖闸拦（不发射）
+            tickN(w, 4);
+            const int firedB = arrowCount() - arrows0;
+            okDebounce = firedB == fired                          // 与 (a) 末尾持平（无新发射）
+                         && store.slotCountAt(x0, kRigY, z0, 0) == 4 - fired;
+            if (!okDebounce)
+                qInfo().noquote() << "  [t868 b diag] fired=" << firedB
+                                  << " expect=" << fired
+                                  << " stock=" << store.slotCountAt(x0, kRigY, z0, 0);
+            // 清场
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            store.clearDispenser(x0, kRigY, z0);
+            ents.clearAll();
+            tickN(w, 2);
+        }
+        const bool okT868 = okClock && okDebounce && okStock;
+        if (!okT868) ++totalFail;
+        qInfo().noquote() << (okT868 ? "PASS" : "FAIL")
+                          << "| t868 high-frequency redstone re-fires per rising edge: rapid lever cycling "
+                             "(edge -> 0.7s frame-driven cooldown decay -> re-edge) MUST re-fire (the old 2.0s "
+                             "cooldown swallowed every sub-2s edge = the reported fires-once symptom), stock "
+                             "decremented exactly once per shot; a fresh re-edge inside the 0.5s debounce "
+                             "window stays blocked (single-path double-fire guard intact)";
     }
 
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──

@@ -1190,6 +1190,10 @@ private:
     //   对探针不可见）。冷却内同发射器不再射（防每帧刷屏满天箭，
     //   机制等价 MC 发射器触发间隔）。换世界时 clearAllTrapsState() 清空（防跨世界串扰）。无发射器陷阱场景
     //   恒空（零开销）。
+    //   t868② 冷却语义重钉：**短防抖闸**而非节流窗——kDispenserCooldown 0.5s 只拦「同沿抖动 / 同 tick
+    //   双路径双发」（板沿 + 电力沿同帧触达同一台机器），**不再吞高频红石的连续上升沿**：快速拉杆循环 /
+    //   时钟电路的每个间隔 ≥0.5s 的新上升沿都过闸正常发射；MC 同名语义即「触发间隔下限」，非「沿间隔
+    //   上限」。旧 2.0s 会把 2s 内的第二个上升沿整只吞掉 = 用户实测「只能激活一次」。
     QHash<quint64, float> m_dispenserCooldowns;
     // t689 发射器 / 投掷器电力基线集：上一 tick 已通电的机器（打包坐标键，同 m_dispenserCooldowns 的
     //   x<<32|z 编码）。fireDispenserAtQml 收到 World 的「电力复算触达」信号时读 isReceivingPower 与本集
