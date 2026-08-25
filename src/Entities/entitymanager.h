@@ -371,11 +371,12 @@ public:
     //   「浮标入水后等 5-30s」区间；确定性来源 = World::hashVoxel(seed ^ 盐 ^ 甩竿序号)（PLAN §2-K，t791 同模式）。
     static float bobberWaitSeconds(quint32 h);
     // t836 收竿拉拽（钩住生物收竿时 Game 层调）：把第 mobIdx 只 mob 拉向 towardPos（玩家脚位）——水平速度
-    //   = speed × 归一方向（指向玩家）+ 小幅上抛（vy = kBobberHookPullUp，机制等价 MC 1.0 钩住生物收竿被拉
-    //   向玩家 + 微上抬）+ 解除 resting（重力分支接手上抛→下落）。**不伤害**（钩中 0 伤害，MC 口径）。
+    //   = speed × 归一方向（指向玩家）+ 上抛 vy = upSpeed（t882 起由 Game 层按距离 / 收杆角度调制传入；
+    //   基值镜像见 Game 层 kFishHookLiftBase——机制等价 MC 1.0 钩住生物收竿被拉向玩家 + 上抬，越远越猛
+    //   / 空中钩起直接拽飞）+ 解除 resting（重力分支接手上抛→下落）。**不伤害**（钩中 0 伤害，MC 口径）。
     //   返 bool：拉拽**实际生效**才 true（R19.13 终审 B-L2：目标 dead / 非 Mob / 越界 → false，caller 据此
     //   不扣钓竿耐久——旧版 void 无条件扣 5 = 对垂死 mob 收竿白损耐久）。bump revision（QML 位移绑定刷新）。
-    bool pullMobToward(int mobIdx, const QVector3D &towardPos, float speed);
+    bool pullMobToward(int mobIdx, const QVector3D &towardPos, float speed, float upSpeed);
     // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
     //   槽）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。
@@ -2108,8 +2109,9 @@ private:
     //   - kBobberWaitHashSalt：等待掷骰的哈希盐（与火 / 作物 / 骨粉等既有 hashVoxel 消费者解耦）。
     //   - kBobberHookHitPad：飞行段钩 mob 的 AABB 外扩（blocks；浮标是点，外扩后命中盒覆盖 mob 体型边缘）。
     //   - kBobberSt*：四态机枚举值（私有数字编码，不入 Q_ENUM，纯内部状态机，同 kSleepPhase* 模式）。
-    //   拉拽冲量常量（kBobberHookPullUp）与甩速（Game 层 kFishCastSpeed）分居两层：伤害 / 冲量发射属
-    //   Game/Physics 单一权威在 PlayerController；本层只持浮标物理。
+    //   t882 起拉拽冲量常量（速度基值 / 距离增益 / 上抛基值与增益 / 角度系数）全数上移 Game 层
+    //   （PlayerController kFishHook* / kFishLineMaxLen）：伤害 / 冲量发射属 Game 单一权威；本层只持浮标
+    //   物理，pullMobToward 只收调制结果（speed / upSpeed 参数）。
     static constexpr float kBobberGravity      = 12.0f;  // 浮标轻重力（blocks/s²；投掷物家族同源，vs 世界 28）
     static constexpr float kBobberHalfDim      = 0.10f;  // 浮标半宽/半高（blocks）
     static constexpr float kBobberLifetime     = 180.0f; // 浮标寿命兜底（秒；挂机防永滞，正常由收竿移除）
@@ -2126,7 +2128,8 @@ private:
     static constexpr float kBobberFloatDip     = 0.125f; // 浮定水面浸没深度（blocks；半浸观感）
     static constexpr quint32 kBobberWaitHashSalt = 0xF15Cu; // 等待掷骰哈希盐（与其它 hashVoxel 消费者解耦）
     static constexpr float kBobberHookHitPad   = 0.15f;  // 钩 mob 命中盒外扩（blocks）
-    static constexpr float kBobberHookPullUp   = 2.8f;   // 收竿拉拽上抛分量（blocks/s；微上抬，峰值 ~0.14 格）
+    // （t882 起 kBobberHookPullUp 退役：上抛基值 2.8 上移 Game 层 kFishHookLiftBase——拉拽冲量全数由
+    //   PlayerController 调制后经 pullMobToward(speed, upSpeed) 参数传入，本层不再持冲量常量。）
     static constexpr int kBobberStFlying = 0;  // 抛物飞行（含出膛初速段）
     static constexpr int kBobberStWater  = 1;  // 水中浮定（等待 → 咬钩 → 逃走循环）
     static constexpr int kBobberStGround = 2;  // 陆上静止（贴命中面停住，等收竿收回）

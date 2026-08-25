@@ -695,10 +695,11 @@ float EntityManager::bobberWaitSeconds(quint32 h)
     return kBobberWaitMinSec + float(h % 2501u) * 0.01f;
 }
 
-// t836 收竿拉拽（见头文件注释）：钩住 mob 收竿时把 mob 拉向玩家——水平速度 = speed × 归一(玩家-mob) 方向 +
-// 微上抛（kBobberHookPullUp）+ 解除 resting（重力分支接手）。不伤害（钩中 0 伤害，MC 口径；不调 damageEntity
-// → 无红闪无扣血，纯位移冲量）。非 Mob / dead / 越界 / 零距（玩家与 mob 重合）→ 静默早退 / yaw 兜底方向。
-bool EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float speed)
+// t836 收竿拉拽（见 .h 头注释）：钩住 mob 收竿时把 mob 拉向玩家——水平速度 = speed × 归一(玩家-mob) 方向 +
+//   上抛 vy = upSpeed（t882：由 Game 层按距离 / 收杆角度调制传入，基值对齐旧 kBobberHookPullUp 观感）+
+//   解除 resting（重力分支接手上抛→减速→下落→着地）。不伤害（钩中 0 伤害，MC 口径；不调 damageEntity
+//   → 无红闪无扣血，纯位移冲量）。非 Mob / dead / 越界 / 零距（玩家与 mob 重合）→ 静默早退 / yaw 兜底方向。
+bool EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float speed, float upSpeed)
 {
     // 返 bool（R19.13 终审 B-L2）：拉拽实际生效才 true——目标 dead（死亡动画 0.5s 窗内、浮标 tick 尚未跑
     //   脱钩验证）/ 非 Mob / 越界早退返 false，caller 据此不扣钓竿耐久（对垂死 mob 收竿 = 空收，无获物无消耗）。
@@ -718,11 +719,11 @@ bool EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float 
     dz /= len;
     e.vx = dx * speed;
     e.vz = dz * speed;
-    e.vy = kBobberHookPullUp;  // 微上抛（拉离地面的观感；峰值 ~0.14 格）
-    e.resting = false;         // 解除静止 → tick 重力分支处理上抛→减速→下落→着地
+    e.vy = upSpeed;           // t882 上抛分量（距离 / 角度调制后的传入值；拉离地面 + 空中拽飞弧高来源）
+    e.resting = false;        // 解除静止 → tick 重力分支处理上抛→减速→下落→着地
     ++m_revision;
     emit entitiesChanged();
-    qCInfo(lcEnt) << "mob" << mobIdx << "hook-pulled toward player speed=" << speed;
+    qCInfo(lcEnt) << "mob" << mobIdx << "hook-pulled toward player speed=" << speed << "up=" << upSpeed;
     return true;
 }
 

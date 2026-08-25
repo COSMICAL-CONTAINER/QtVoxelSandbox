@@ -425,8 +425,9 @@ public:
     // t401/t836 钓鱼竿甩 / 收（手持钓竿右键按下边缘触发，单次切换非长按）：未钓 → **任意位置甩竿**（沿视线
     //   初速 kFishCastSpeed 抛出 Bobber 投射实体——抛物飞行 / 落水浮定进等待机 / 落陆静止 / 飞行段可钩 mob；
     //   旧 t401「水射线定点放置」退役）；已钓 → 收竿（① 咬钩窗口内 → 按 LootTable::fishingPool 抽一件获物，
-    //   从浮标位弹向玩家（spawnItemAt 定向初速）+ 生存钓竿 -1 耐久；② 钩住生物 → mob 拉向玩家（冲量
-    //   kFishHookPullSpeed + 微上抬，**不伤害**）+ 生存钓竿 -5 耐久；③ 否则空收无消耗无获物）。机制等价
+    //   从浮标位弹向玩家（spawnItemAt 定向初速）+ 生存钓竿 -1 耐久；② 钩住生物 → mob 拉向玩家（t882 调制
+    //   冲量：速度 / 上抛随距离增强 + 收杆角度系数——正对满力、侧背向卸力；**不伤害**）+ 生存钓竿 -5 耐久；
+    //   ③ 否则空收无消耗无获物）。机制等价
     //   MC 1.0 右键钓竿甩 / 收 + hook 实体（耐久口径：钓获 -1 / 钩生物 -5 / 空收 0）。创造不消耗耐久。
     //   分流：eventFilter RightButton press 据持物 == FishingRod 调本方法而非 placeBlock（钓竿非方块，
     //   selectedBlock 已守 Air）。分层：浮标物理 / 咬钩时序在 EntityManager（Bobber kind）；本方法只发指令
@@ -1735,6 +1736,18 @@ private:
     //   「玩家—浮标」关系，收口在收竿语义所在的 Game 层（Entities 层 tick 的 playerPos 是远置哑元探针位，
     //   不承载玩家真实位；分层：Entities 承载浮标物理，Game 收口语义）。
     static constexpr float kFishLineMaxLen        = 32.0f;
+    // t882 拉拽反馈增强常量（收杆拉力随距离增强 + 收杆角度调制 + 上抛弧随距离加大——用户「没看到生物被
+    //   拉起来飞」）：冲量全数收口 Game 层（Entities 层 pullMobToward 只收调制结果，同 kFishCastSpeed 分层）。
+    //   - kFishHookPullGain：拉拽水平速度随距离的增益（blocks/s per block；距离按 kFishLineMaxLen=32 封顶
+    //     → 32 格远拉 = 6 + 0.35×32 ≈ 17.2 b/s，近 2 格 ≈ 6.7 b/s——「越远越猛」）。
+    //   - kFishHookLiftBase / kFishHookLiftGain：上抛分量基值（2.8 = 旧 Entities 层 kBobberHookPullUp 观感
+    //     原值）/ 距离增益（32 格 → 2.8+5.76 ≈ 8.6 b/s → 峰值 ~1.3 格——「空中钩起直接拽飞」的弧高来源）。
+    //   - kFishHookAngleMin：收杆角度系数下限（正对目标拉 = 满力 1.0；侧向 / 背向衰减到 0.4——玩家拉杆
+    //     朝向与线方向夹角越大越卸力，机制等价 MC「收杆方向影响拉拽」的可感近似）。
+    static constexpr float kFishHookPullGain     = 0.35f;
+    static constexpr float kFishHookLiftBase     = 2.8f;
+    static constexpr float kFishHookLiftGain     = 0.18f;
+    static constexpr float kFishHookAngleMin     = 0.4f;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
     // t388/t457 睡觉机制常量（机制对齐 MC 1.0 床：fade 后跳清晨、床周有敌对即拒绝；数值为本工程小世界量身调）。
