@@ -4437,6 +4437,9 @@ void World::generate()
     m_lavaCells.clear();
     m_iceCells.clear();      // t495：全新世界 → 清普通冰方格索引（worldgen freezeSurfaceWater 直写 chunk → 末尾 rebuildIceCells 全图重建）
     m_fireCells.clear();     // t724：全新世界 → 清火焰方格索引（worldgen 无火 → 稳态空集零开销；玩家点燃经 noteFireWrite 增量维护）
+    m_burningCells.clear();  // review25 #1：全新世界 → 清燃烧侧表（regenerate/setSeed/setWidth/setDepth/setHeight 直调 generate 不经
+                             //   beginLoad/rebuildFireCells → 漏清则旧世界燃烧坐标污染新世界：isBurningAt 假阳性点燃无辜可燃块 +
+                             //   tickFire 倒计时继续烧毁替换（无掉落不可逆）+ 该格打火石被守卫拦成 no-op）
     m_powerDirty.clear();    // t656：全新世界 → 清红石电力脏集（worldgen 无红石电路 → 稳态空集零开销）
     fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）

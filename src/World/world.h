@@ -1418,7 +1418,9 @@ private:
     //   tickFire (d) 计时-1 与烧毁摘除 / setBlock 写调用清除（写 = 新方块实例）/ beginLoad+rebuildFireCells
     //   清空（世界重置）；防御：tick (d) 每窗校验 blockAt 仍 flammable + isBurningAt 查询时同校验（静默
     //   直写路径替换块后 ≤1 窗内自愈）。键编码复用 packGrowthCell（同 m_fireCells 模式，lessons
-    //   perf-fluid-scan：只对在燃格 tick，绝不全图扫描）。
+    //   perf-fluid-scan：只对在燃格 tick，绝不全图扫描）。generate / beginLoad / rebuildFireCells 清空
+    //   （review25 #1：regenerate/setSeed/setWidth/setDepth/setHeight 均直调 generate，漏清则旧世界燃烧
+    //   坐标污染新世界）。
     QHash<quint64, quint8> m_burningCells;
     // t495 perf：普通冰（Ice=45，不含 PackIce/BlueIce —— 那些永不融化）方格位置索引 —— 融化 tick（tickIceMelt）
     //   遍历此集（O(冰格数)）替代全图扫描（O(W×D×H)=3.28M）。写入路径经 noteIceWrite 增量维护；generate/beginLoad
