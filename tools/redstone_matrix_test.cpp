@@ -6389,6 +6389,50 @@ int main(int argc, char *argv[])
                                           << fam;
                     }
                 }
+                // review25 #7 扩面：图标/atlas/strip 族（itemIconSource 主返回 + 蛋/铜派生缓存 /
+                //   emptyArmorSlotSource / blockItemIconSource（主返回 + 床染色族）/ atlasSource 固定名合成
+                //   图集 / 四条 strip 固定名合成条带）——d6051e6 的「直返族已闭环」叙事漏掉的高频族，本批
+                //   补收口。钉法分两档：7 个小函数（atlas/4 strip/emptyArmor）体短且全返回路径都该 bust →
+                //   必经 packFileUrl + **禁**裸 QStringLiteral("file:///") 构造（防「主路径改了回退漏改」的
+                //   半改态）；itemIconSource/blockItemIconSource 体长且含 leather/_r 文件名族的合法裸直返 →
+                //   钉主返回裸直返语句的**不存在**（"file:///") + path / + foundPath 的构造被禁）。
+                const char *smallFamilies[6] = {
+                    "ResourcePackManager::atlasSource(",
+                    "ResourcePackManager::waterStripSource(",
+                    "ResourcePackManager::lavaStripSource(",
+                    "ResourcePackManager::fireStripSource(",
+                    "ResourcePackManager::portalStripSource(",
+                    "ResourcePackManager::emptyArmorSlotSource(",
+                };
+                for (const char *fam : smallFamilies) {
+                    QString body;
+                    if (!funcBody(QString::fromLatin1(fam), &body)
+                            || !body.contains(QStringLiteral("packFileUrl("))
+                            || body.contains(QStringLiteral("QStringLiteral(\"file:///\")"))) {
+                        ok = false;
+                        qInfo().noquote() << "  [r25#7 diag] icon/atlas/strip family missing packFileUrl or"
+                                             " still has bare file:/// construction"
+                                          << fam;
+                    }
+                }
+                const char *longFamilies[2] = {
+                    "ResourcePackManager::itemIconSource(",
+                    "ResourcePackManager::blockItemIconSource(",
+                };
+                const char *longBare[2] = {
+                    "QStringLiteral(\"file:///\") + path",
+                    "QStringLiteral(\"file:///\") + foundPath",
+                };
+                for (int i = 0; i < 2; ++i) {
+                    QString body;
+                    if (!funcBody(QString::fromLatin1(longFamilies[i]), &body)
+                            || !body.contains(QStringLiteral("packFileUrl("))
+                            || body.contains(QString::fromLatin1(longBare[i]))) {
+                        ok = false;
+                        qInfo().noquote() << "  [r25#7 diag] long icon family missing packFileUrl main return"
+                                          << longFamilies[i];
+                    }
+                }
             }
         }
         if (!ok) ++totalFail;
@@ -6399,6 +6443,8 @@ int main(int argc, char *argv[])
                           << (srcChecked
                                   ? ", source pin: apply() bumps revision BEFORE ensureBuiltLocked() rebuild "
                                     "+ all five direct-return families route through packFileUrl"
+                                    "+ review25 #7: icon/atlas/strip families (6 small + 2 long) bust"
+                                    " ?r=<rev> with bare file:/// direct-returns banned"
                                   : " (source pin skipped - no source tree next to exe)");
     }
 
@@ -10470,6 +10516,348 @@ int main(int argc, char *argv[])
                              "unreachable headless, tradeoff declared); "
                              "cooked fish 0x25B closes the chain (raw->cooked in BOTH kSmelt+kSmeltXp, "
                              "+4 hunger vs raw +2, name/tab/pack-mapping pinned, ocelot still raw-only)";
+    }
+
+    // ── Review 2026-08-25 #2 浇熄摘侧表信号探针（blockDoused 恰一次 + 坐标 + 火灭块存）──
+    // 背景：浇熄设计为「火灭块存」——tickFire 抑制掷中后 m_burningCells.remove 直摘：栅格不变（无
+    //   blockBroken）、侧表直摘（无 worldChanged）→ QML 面火 overlay 两条摘除链（onBlockBroken /
+    //   onWorldChanged→cleanupVis）都不触发 = 假火 delegate 永久残留。setBlock 同 id 无变化早退清表
+    //   （t843 特意放早退前）同根因第二实例。修法 = 新增 blockDoused(x,y,z) 精确信号驱动
+    //   removeBurningVis（取舍：不选补发 worldChanged——那会触发 cleanupVis 全量对账，浇熄是常见
+    //   事件不该付全量 mesh 重查的价）。锁法（三段）：
+    //   (a) 同 id 早退路径（确定性）：点燃木板 → setBlock(Planks)（同 id no-op 写）→ 恰发一次
+    //       blockDoused + 坐标正确 + isBurningAt=false + 栅格块仍存；
+    //   (b) 有变化路径不重发：点燃 → setBlock(Air)（blockBroken + worldChanged 已覆盖）→ 计数不增；
+    //   (c) tickFire 浇熄掷中路径：点燃（干）→ 邻注水 → 推窗至掷中（40%/窗 vs 木板 10 窗烧毁，
+    //       先掷中概率 99.4%/候选；烧毁即换候选重试，40 候选下假 FAIL 率 ~1e-85）→ 恰一次 + 坐标 +
+    //       块存 + 全程零 blockBroken（火灭块存 ≠ 烧毁语义钉死）。
+    {
+        // rig 选址：运行期扫描空区（t809 先例——尾部探针不占 nextSlot 网格）。需 11×6×8 候选带。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 10 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 10 && clear; ++dx)
+                    for (int dz = 0; dz < 7 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review25 #2 douse signal: no clear rig area found";
+        } else {
+            bool ok = true;
+            int doused = 0, dX = -1, dY = -1, dZ = -1, brokenCnt = 0;
+            QMetaObject::Connection cD = QObject::connect(
+                    &w, &World::blockDoused, &w,
+                    [&](int x, int y, int z) { ++doused; dX = x; dY = y; dZ = z; });
+            QMetaObject::Connection cB = QObject::connect(
+                    &w, &World::blockBroken, &w, [&](int, int, int, int) { ++brokenCnt; });
+
+            // (a) 同 id 无变化早退清表（确定性路径）。
+            placeRigBlock(w, x0, kRigY, z0, BR::Planks, 0);
+            const bool ignitedA = w.igniteFlammableAt(x0, kRigY, z0) && w.isBurningAt(x0, kRigY, z0);
+            doused = 0;
+            const bool noChangeRet = !w.setBlock(x0, kRigY, z0, BR::Planks); // 同 id → false 早退
+            const bool okA = ignitedA && noChangeRet && doused == 1 && dX == x0 && dY == kRigY && dZ == z0
+                             && !w.isBurningAt(x0, kRigY, z0)
+                             && w.blockAt(x0, kRigY, z0) == BR::Planks; // 火灭块存（栅格不动）
+
+            // (b) 有变化路径不重发（blockBroken + worldChanged 覆盖，blockDoused 不掺和）。
+            const bool ignitedB = w.igniteFlammableAt(x0, kRigY, z0) && w.isBurningAt(x0, kRigY, z0);
+            doused = 0;
+            brokenCnt = 0;
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            const bool okB = ignitedB && doused == 0 && brokenCnt >= 1
+                             && !w.isBurningAt(x0, kRigY, z0);
+
+            // (c) tickFire 抑制浇熄掷中（候选搜索：找到即断言，失败候选（10 窗内未掷中先烧毁）清扫换位）。
+            bool okC = false;
+            int usedCand = -1;
+            for (int cand = 0; cand < 40 && !okC; ++cand) {
+                usedCand = cand;
+                const int tx = x0 + (cand % 5) * 2;        // 步距 2：候选板格与水格互不占位
+                const int tz = z0 + cand / 5;
+                placeRigBlock(w, tx, kRigY, tz, BR::Planks, 0);
+                if (!w.igniteFlammableAt(tx, kRigY, tz)) { // 干格点燃（水后注——湿燃料不可点燃是入口守卫）
+                    w.setBlock(tx, kRigY, tz, BR::Air, 0);
+                    continue;
+                }
+                w.setBlock(tx + 1, kRigY, tz, BR::Water, 0); // 点燃后注水邻 → 进抑制态
+                doused = 0;
+                brokenCnt = 0;
+                for (int t = 0; t < 60 && doused == 0; ++t) w.tickFire(); // 60 调 = 12 窗（interval 5）
+                const bool survived = w.blockAt(tx, kRigY, tz) == BR::Planks;
+                if (doused == 1 && survived && dX == tx && dY == kRigY && dZ == tz
+                        && !w.isBurningAt(tx, kRigY, tz) && brokenCnt == 0) {
+                    okC = true; // 恰一次 + 坐标 + 块存 + 零 broken（浇熄非烧毁）
+                } else {
+                    w.setBlock(tx + 1, kRigY, tz, BR::Air, 0); // 清水 + 清格（烧毁 flare/Air 残留归一）
+                    w.setBlock(tx, kRigY, tz, BR::Air, 0);
+                }
+            }
+            ok = okA && okB && okC;
+            if (!ok)
+                qInfo().noquote() << "  [r25#2 diag] okA" << okA << "okB" << okB << "okC" << okC
+                                  << "cand" << usedCand << "doused" << doused << "broken" << brokenCnt;
+            QObject::disconnect(cD);
+            QObject::disconnect(cB);
+            // 清场（候选带全扫 Air——水格 + 板格 + flare 残留一并）。
+            for (int dx = 0; dx <= 10; ++dx)
+                for (int dz = 0; dz < 7; ++dz)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        if (w.blockAt(x0 + dx, kRigY + dy, z0 + dz) != BR::Air)
+                            w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+            tickN(w, 2);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review25 #2 douse signal: same-id setBlock early-exit and tickFire"
+                                 " suppress-roll removal each emit blockDoused exactly once with correct"
+                                 " coords and block-preserved (no blockBroken), change-path stays silent"
+                                 " (broken+worldChanged cover it); probabilistic roll closed via"
+                                 " candidate search (40 tries, ~1e-85 false rate)";
+        }
+    }
+
+    // ── Review 2026-08-25 #3 tickVehicleRiding emit 节流探针（不直发 / pending 由 tick 收口接住）──
+    // 背景：t811 tickVehicleRiding 末尾 `if (dirty) { ++m_revision; emit entitiesChanged(); }` 直发，且
+    //   每帧被调两次（playercontroller mob 桶常开 + step 后补钉）——乘客跟车每帧 dirty → 最坏每帧 2 次
+    //   全量 revision+emit（激活全体实体 delegate revision 绑定 + 行走 MobModel 全几何重建 = t500 已修的
+    //   22ms/帧卡顿模式复发；矩阵探针只断言钉位行为，emit 面探针盲区）。修法 = dirty 只置 m_pendingEmit
+    //   复用 tick 末尾 kEmitEveryN（~20Hz）收口。锁法：
+    //   (a) 直调相（隔离验证）：spawnCart + spawnMob + 仅 tickVehicleRiding×2/帧 + 推车物理（车动 → 钉位
+    //       每帧变 → 每帧 dirty）跑 20 帧**不调 ents.tick** → entitiesChanged 零 emit（旧直发版首帧登乘
+    //       即 emit → 回归即红；20 帧移动场景旧版 ≥10 emit）；
+    //   (b) 收口相：接续 ents.tick×6（含相位门 %3）→ ≥1 emit（pending 被 tick 接住 = 钉位变更最终可见，
+    //       t811 呈现语义不丢）且 ≤ 3（= 6/3 + 1 节流上界——防「换一处直发」的复发面）；
+    //   (c) 钉位行为不回归：全程 mob 钉车座位（t811 座位公式误差 <0.01）。
+    {
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 1 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 1 && clear; ++dx)
+                    for (int dz = -6; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review25 #3 riding emit throttle: no clear rig area found";
+        } else {
+            const float seatDrop = 0.3125f; // kCartSeatDrop 同值镜像（t811 探针同款）
+            for (int dz = -5; dz <= 0; ++dz)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    placeRigBlock(w, x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+                    if (dx == 0) placeRigBlock(w, x0, kRigY, z0 + dz, BR::Rail, 0);
+                }
+            MinecartManager carts;
+            EntityManager ents;
+            ents.setVehicleManagers(&carts, nullptr);
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const int mob = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#ff5555"), 10);
+            int emitted = 0;
+            QMetaObject::Connection cE = QObject::connect(
+                    &ents, &EntityManager::entitiesChanged, &ents, [&]() { ++emitted; });
+            // (a) 直调相：20 帧只跑骑乘收口 + 车物理（登乘 + 跟车每帧 dirty），不调 ents.tick → 恒 0 emit。
+            QVector3D player = carts.posAt(0);
+            bool boarded = false;
+            for (int t = 0; t < 20; ++t) {
+                ents.tickVehicleRiding();
+                carts.pushEmptyCart(&w, player, 0.0f, -1.0f); // 长按 W 朝北推（t811 玩家模型）
+                carts.tickPushedCarts(0.016, &w);
+                ents.tickVehicleRiding();
+                player = carts.posAt(0);
+                if (ents.rideCartAt(mob) >= 0) boarded = true;
+            }
+            const int directEmits = emitted;
+            // (c) 钉位公式（车座位 = 车心 − seatDrop + halfH(0.5)）。
+            const QVector3D cp = carts.posAt(0);
+            const QVector3D mp = ents.posAt(mob);
+            const bool pinOk = boarded && std::fabs(mp.x() - cp.x()) <= 0.01f
+                               && std::fabs(mp.y() - (cp.y() - seatDrop + 0.5f)) <= 0.01f
+                               && std::fabs(mp.z() - cp.z()) <= 0.01f;
+            // (b) 收口相：6 帧 tick（相位门 %3 → 恰 2 次对齐）接住 pending。
+            const int beforeFlush = emitted;
+            for (int t = 0; t < 6; ++t) {
+                ents.tick(0.016, &w, player, 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();
+                carts.pushEmptyCart(&w, player, 0.0f, -1.0f);
+                carts.tickPushedCarts(0.016, &w);
+                ents.tickVehicleRiding();
+                player = carts.posAt(0);
+            }
+            const int flushEmits = emitted - beforeFlush;
+            const bool ok = directEmits == 0 && pinOk && flushEmits >= 1 && flushEmits <= 3;
+            if (!ok)
+                qInfo().noquote() << "  [r25#3 diag] direct" << directEmits << "pinOk" << pinOk
+                                  << "flush" << flushEmits;
+            QObject::disconnect(cE);
+            carts.clearAll();
+            ents.clearAll();
+            for (int dz = -5; dz <= 0; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air, 0);
+                w.setBlock(x0, kRigY, z0 + dz, BR::Air, 0);
+            }
+            tickN(w, 2);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review25 #3 riding emit throttle: tickVehicleRiding never emits"
+                                 " entitiesChanged directly (20 dirty frames -> 0 emits; old code >=1 on"
+                                 " first boarding frame), pending flushed through tick's kEmitEveryN gate"
+                                 " (6 ticks -> 1..3 emits), seat-pin formula intact (dx/dy/dz < 0.01)";
+        }
+    }
+
+    // ── Review 2026-08-25 #4 鱿鱼持续浮力天花板碰撞探针（封顶水柱上浮贴顶不穿出）──
+    // 背景：垂直积分段只为下落设计——浮力 vy>0 自由上移分支无向上阻挡 → 头顶穿入固体格（冰面/封顶水池）
+    //   后**中心**落入固体格那帧，落地扫描 restY(格顶+halfH) 高于当前位置 → mobNewY<=restY 成立把整段
+    //   setY(restY) 抬到方块顶上（穿顶）。修法 = vy>0 时对头顶格取碰撞盒最低底（collisionAABBsAt 口径，
+    //   与落定分支对称；ShapeNone 无盒族照穿过），头将穿入 → 钳 pos.y=ceilBottom−halfH、vy=0 贴顶悬停。
+    //   rig：封闭水箱（5×5 石底 + 石壁环 3 层 + 内腔 3×3 水×3 + 5×5 石顶）——石壁防鱿鱼水平漂游出腔
+    //   （aiSquid 有 XZ 漂游 + 碰撞撤回）。锁法：spawn 鱿鱼于中层水 → tick 400 帧 →
+    //   (a) 不穿出：末位 pos.y + halfH ≤ 顶格下沿 + 0.02（旧版被整段抬到格顶上 ≈ +1.47 → 红）；
+    //   (b) 贴顶稳定：末 60 帧 Y 带 ≤ 0.05（浮力再积再钳的贴顶悬停，非振荡/继续上穿）；
+    //   (c) 确有上浮：末位 > 初始位（防「误杀浮力」的反向回归）。
+    {
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 4 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 4 && clear; ++dx)
+                    for (int dz = 0; dz <= 4 && clear; ++dz)
+                        for (int dy = -1; dy <= 4 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review25 #4 squid ceiling: no clear rig area found";
+        } else {
+            const int yB = kRigY;                  // 箱底（石）；水 yB+1..yB+3；顶 yB+4（石）
+            for (int dx = 0; dx <= 4; ++dx)
+                for (int dz = 0; dz <= 4; ++dz) {
+                    placeRigBlock(w, x0 + dx, yB, z0 + dz, BR::Stone, 0);        // 底
+                    placeRigBlock(w, x0 + dx, yB + 4, z0 + dz, BR::Stone, 0);    // 顶
+                    const bool wall = (dx == 0 || dx == 4 || dz == 0 || dz == 4);
+                    for (int dy = 1; dy <= 3; ++dy) {
+                        if (wall) placeRigBlock(w, x0 + dx, yB + dy, z0 + dz, BR::Stone, 0);
+                        else     placeRigBlock(w, x0 + dx, yB + dy, z0 + dz, BR::Water, 0);
+                    }
+                }
+            EntityManager ents;
+            const int sq = ents.spawnMobTyped(x0 + 2, yB + 2, z0 + 2, EntityManager::MobSquid,
+                                              QStringLiteral("#306090"), 10);
+            const float halfH = 0.45f; // MobSquid 半高（spawnMobCore 表）
+            const float ceilBottom = float(yB + 4);
+            const float startY = ents.posAt(sq).y();
+            float loY = 1e9f, hiY = -1e9f;
+            for (int t = 0; t < 400; ++t) {
+                ents.tick(0.016, &w, QVector3D(x0 + 2.5f, yB + 2.5f, z0 + 2.5f), 0.3f, 1.8f, false);
+                if (t >= 340) {
+                    const float y = ents.posAt(sq).y();
+                    loY = std::min(loY, y);
+                    hiY = std::max(hiY, y);
+                }
+            }
+            const float endY = ents.posAt(sq).y();
+            const bool ok = ents.aliveAt(sq)
+                            && endY + halfH <= ceilBottom + 0.02f   // (a) 不穿出（旧版 ≈ ceil+1.45 → 红）
+                            && (hiY - loY) <= 0.05f                 // (b) 贴顶稳定带
+                            && endY > startY - 0.01f;               // (c) 浮力仍在（上升到顶）
+            if (!ok)
+                qInfo().noquote() << "  [r25#4 diag] endY" << endY << "ceilBottom" << ceilBottom
+                                  << "band" << (hiY - loY) << "startY" << startY
+                                  << "alive" << ents.aliveAt(sq);
+            ents.clearAll();
+            for (int dx = 0; dx <= 4; ++dx)
+                for (int dz = 0; dz <= 4; ++dz)
+                    for (int dy = 0; dy <= 4; ++dy)
+                        w.setBlock(x0 + dx, yB + dy, z0 + dz, BR::Air, 0);
+            tickN(w, 2);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review25 #4 squid ceiling: sustained buoyancy in a capped water box"
+                                 " clamps at head-level collision bottom (pos.y+halfH stays below ceiling"
+                                 " underface +0.02, 60-tick stability band <=0.05, still rises from spawn ="
+                                 " buoyancy intact); old code teleported squid whole-body above the ceiling"
+                                 " (restY snap ~1.45 above the clamp)";
+        }
+    }
+
+    // ── Review 2026-08-25 #5 珍珠无碰撞植物族穿过探针（草丛格穿过 / 铁轨格仍命中对照）──
+    // 背景：t835 命中判据「本格任意方块实存（5 id 豁免表）」把 TallGrass/花/蘑菇/树苗/枯灌木/作物
+    //   （ShapeNone 无碰撞盒）也当命中 → 草地/农田平抛弧线数格内被草截断传送（反噬 t835「更远投掷」
+    //   目标；本工程箭按空碰撞盒穿过植物）。修法 = 判据改「本格存在碰撞 sub-AABB」（判据本质化：旧
+    //   5 id 豁免族全 ShapeNone 无盒 → 语义天然保留；铁轨/压力板/台阶等薄盒族仍命中 → t835「落铁轨
+    //   必传送」不回归；未来新无碰撞方块自动正确）。锁法：两列对照直落 ——
+    //   (a) 草丛列（石上 TallGrass）：珠穿过草格、命中**下方石格**才 enderPearlLanded（旧「任意实存」
+    //       判据在草格即结算 → 落点 y = 草格 ≠ 石格 → 红）；
+    //   (b) 铁轨列（石上 Rail）：珠在**轨格**即命中（薄盒存在 → t835 落轨传送语义钉死）。
+    {
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 3 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 3 && clear; ++dx)
+                    for (int dz = 0; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 4 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review25 #5 pearl plants: no clear rig area found";
+        } else {
+            // 两列相隔 3（x0 草丛列 / x0+3 铁轨列；互不邻接防编辑钩子串扰）。
+            placeRigBlock(w, x0, kRigY, z0, BR::Stone, 0);
+            placeRigBlock(w, x0, kRigY + 1, z0, BR::TallGrass, 0);
+            placeRigBlock(w, x0 + 3, kRigY, z0, BR::Stone, 0);
+            placeRigBlock(w, x0 + 3, kRigY + 1, z0, BR::Rail, 0);
+            EntityManager ents;
+            int landedCnt = 0;
+            int lx[2] = { -1, -1 }, ly[2] = { -1, -1 };
+            QMetaObject::Connection cL = QObject::connect(
+                    &ents, &EntityManager::enderPearlLanded, &ents,
+                    [&](int x, int y, int z) {
+                        Q_UNUSED(z);
+                        if (landedCnt < 2) { lx[landedCnt] = x; ly[landedCnt] = y; }
+                        ++landedCnt;
+                    });
+            ents.spawnEnderPearl(QVector3D(x0 + 0.5f, kRigY + 3.5f, z0 + 0.5f),
+                                 QVector3D(0.0f, -2.0f, 0.0f));
+            ents.spawnEnderPearl(QVector3D(x0 + 3.5f, kRigY + 3.5f, z0 + 0.5f),
+                                 QVector3D(0.0f, -2.0f, 0.0f));
+            for (int t = 0; t < 200 && landedCnt < 2; ++t)
+                ents.tick(0.016, &w, QVector3D(x0 + 2.0f, kRigY + 3.0f, z0 + 0.5f), 0.3f, 1.8f, false);
+            // 各列落点归位断言（x 匹配列；y = 期望格）。
+            bool grassPassed = false, railHit = false;
+            for (int i = 0; i < 2 && i < landedCnt; ++i) {
+                if (lx[i] == x0 && ly[i] == kRigY) grassPassed = true;        // 草丛列：石格才结算
+                if (lx[i] == x0 + 3 && ly[i] == kRigY + 1) railHit = true;    // 铁轨列：轨格即结算
+            }
+            const bool ok = landedCnt == 2 && grassPassed && railHit;
+            if (!ok)
+                qInfo().noquote() << "  [r25#5 diag] landed" << landedCnt << "lx" << lx[0] << lx[1]
+                                  << "ly" << ly[0] << ly[1];
+            QObject::disconnect(cL);
+            ents.clearAll();
+            w.setBlock(x0, kRigY + 1, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, kRigY + 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review25 #5 pearl plant pass-through: pearl falling through a"
+                                 " TallGrass cell (ShapeNone, no collision box) keeps flying and"
+                                 " lands on the stone cell below (old any-block-here criterion"
+                                 " triggered on the grass cell), while a Rail cell (thin collision"
+                                 " box present) still triggers landing in-cell (t835 rail-teleport"
+                                 " semantics preserved)";
+        }
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

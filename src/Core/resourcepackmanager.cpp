@@ -2068,16 +2068,20 @@ void ensureBuiltLocked()
 }
 } // namespace
 
-// Review 2026-08-24 #5：pack 原文件直返 URL 统一构造（cache-bust 收口）。五族直返路径（playerSkinSource
+// Review 2026-08-24 #5：pack 原文件直返 URL 统一构造（cache-bust 收口）。首批五族直返路径（playerSkinSource
 //   64×32 族皮肤 / entitySource 两级探测 / mobTextureSource 两级探测 / effectIconSource / paintingSource）
 //   返回的是 pack 内原路径——apply() 重解析后若 pack 原路径不变（同路径原地换包内容），file:/// URL 不变
 //   → QML Image/Texture 按 URL 缓存继续用旧像素直到重启（Review 2026-08-23 #12 皮肤族实证的同款病，
 //   当时只修了皮肤一族）。修法 = 查询串挂 apply() revision：只参与 URL 区分、不参与文件寻址（QUrl 加载侧
 //   取 localFile 时查询串被剥离——mobTextureSource 羊/夜行者分支拿命中 URL 取 localFile 喂合成器靠这条）；
 //   apply() 每次 bump（且先于重建，见 apply 内 #4 注）→ 重建后查询串必变 → QML 重读新像素。
+//   Review 2026-08-25 #7 扩面：d6051e6 的「直返族已闭环」叙事大于实际覆盖——真正的高频族当时仍裸 file:/
+//   //，本批补齐：itemIconSource 主返回 + 蛋/铜派生缓存 / emptyArmorSlotSource / blockItemIconSource
+//   （主返回 + 床染色缓存与回退族）/ atlasSource（固定名合成图集原地覆写）/ 四条 strip（固定名合成条带，
+//   同病）。落盘派生缓存族中文件名已嵌 _r<revision> 的（skin 裁切 / mobhead / leather 等）URL 随文件名变，
+//   无需本函数（保持裸直返）。
 //   留全局作用域（不进匿名 ns）：矩阵探针 extern 直调锁契约（查询串存在 / 随 revision 变 / localFile 剥离），
-//   generateMobHeadIconFor 先例。落盘派生缓存族（skin 裁切 / mobhead / woolface 等）不走本函数——它们的
-//   revision 进**文件名**，同效更稳。
+//   generateMobHeadIconFor 先例。
 QString packFileUrl(const QString &localPath, int revision)
 {
     return QStringLiteral("file:///") + localPath + QStringLiteral("?r=%1").arg(revision);
@@ -2231,12 +2235,17 @@ QString ResourcePackManager::atlasSource() const
     if (!m_active)
         return QStringLiteral("qrc:/textures/atlas.png");
     QMutexLocker lock(&stateMutex());
-    return QStringLiteral("file:///") + state().atlasFile;
+    // review25 #7：atlasFile 是固定名 voxelsandbox_rp_atlas.png（apply 原地覆写，URL 永不变）→ 裸
+    //   file:/// 下 QML voxelAtlas Texture 按 URL 缓存旧图集直到重启。挂 ?r=<revision>（apply 先 bump
+    //   后重建 → 切包后 URL 必变强制重载；qrc 回退内容烤进二进制无需 bust）。
+    return packFileUrl(state().atlasFile, state().revision);
 }
 
 // t489 流体条带贴图源（材质级 flipbook；详见 .h Q_PROPERTY 注释）。
 //   active 且条带落盘成功 → file:///<AppLocalData>/voxelsandbox_<x>_strip.png（包内帧覆盖的合成条带）；
 //   否则 qrc:/textures/<x>_strip.png（程序生成条带）。条带落盘路径为空（包缺 / 落盘失败）→ 回退 qrc。
+//   review25 #7：四条 strip 与 atlasSource 同病同修——固定名落盘原地覆写，挂 ?r=<revision>（切包重合成
+//   后 URL 必变，QML Texture 不再吃 URL 缓存旧帧；qrc 程序生成条带恒定无需 bust）。
 QString ResourcePackManager::waterStripSource() const
 {
     if (!m_active)
@@ -2244,7 +2253,7 @@ QString ResourcePackManager::waterStripSource() const
     QMutexLocker lock(&stateMutex());
     const QString &f = state().waterStripFile;
     return f.isEmpty() ? QStringLiteral("qrc:/textures/water_strip.png")
-                       : QStringLiteral("file:///") + f;
+                       : packFileUrl(f, state().revision);
 }
 
 QString ResourcePackManager::lavaStripSource() const
@@ -2254,7 +2263,7 @@ QString ResourcePackManager::lavaStripSource() const
     QMutexLocker lock(&stateMutex());
     const QString &f = state().lavaStripFile;
     return f.isEmpty() ? QStringLiteral("qrc:/textures/lava_strip.png")
-                       : QStringLiteral("file:///") + f;
+                       : packFileUrl(f, state().revision);
 }
 
 // t724 火焰条带贴图源（同 water/lava 模式）：fireHost delegate 的两片交叉 quad 共享此 Texture 做
@@ -2266,7 +2275,7 @@ QString ResourcePackManager::fireStripSource() const
     QMutexLocker lock(&stateMutex());
     const QString &f = state().fireStripFile;
     return f.isEmpty() ? QStringLiteral("qrc:/textures/fire_strip.png")
-                       : QStringLiteral("file:///") + f;
+                       : packFileUrl(f, state().revision);
 }
 
 // t725 余烬门条带贴图源（同 fire 模式）：portalHost delegate 的竖直平面 quad 共享此 Texture 做
@@ -2278,7 +2287,7 @@ QString ResourcePackManager::portalStripSource() const
     QMutexLocker lock(&stateMutex());
     const QString &f = state().portalStripFile;
     return f.isEmpty() ? QStringLiteral("qrc:/textures/portal_strip.png")
-                       : QStringLiteral("file:///") + f;
+                       : packFileUrl(f, state().revision);
 }
 
 QImage ResourcePackManager::compositeAtlas()
@@ -2335,7 +2344,7 @@ QString ResourcePackManager::itemIconSource(int itemId) const
         if (const EggTint *tint = spawnEggTint(itemId)) {
             const auto cached = s.spawnEggIconFiles.constFind(itemId);
             if (cached != s.spawnEggIconFiles.constEnd() && QFile::exists(cached.value()))
-                return QStringLiteral("file:///") + cached.value();
+                return packFileUrl(cached.value(), s.revision); // review25 #7：固定名派生缓存挂 ?r= 防陈旧
             QImage base(s.itemDir + QStringLiteral("/spawn_egg.png"));
             QImage overlay(s.itemDir + QStringLiteral("/spawn_egg_overlay.png"));
             if (base.isNull() || overlay.isNull())
@@ -2353,7 +2362,7 @@ QString ResourcePackManager::itemIconSource(int itemId) const
             if (!base.save(out, "PNG"))
                 return {}; // 落盘失败 → 回退自绘（降级）
             state().spawnEggIconFiles.insert(itemId, out); // stateMutex 已持锁，安全
-            return QStringLiteral("file:///") + out;
+            return packFileUrl(out, s.revision); // review25 #7：固定名 voxelsandbox_rp_egg_<id>.png 原地覆写 → 挂 ?r=
         }
         // t588/t613 铜物品回退：映射的 copper_* 不存在（1.8 等老包无铜）→ 用铁对应贴图染铜（同皮革 / 床
         //   retint 机制；t613 起含铜护甲四件 + 描边带压暗）。首次命中：加载 iron_* → retintCopperTemplate
@@ -2365,7 +2374,7 @@ QString ResourcePackManager::itemIconSource(int itemId) const
             return {}; // 包内无该 item 贴图 → 不覆盖（保留自绘 Canvas）；红线 §9：仅运行期读本地 pack PNG。
         const auto cached = s.copperIconFiles.constFind(itemId);
         if (cached != s.copperIconFiles.constEnd() && QFile::exists(cached.value()))
-            return QStringLiteral("file:///") + cached.value();
+            return packFileUrl(cached.value(), s.revision); // review25 #7：固定名派生缓存挂 ?r= 防陈旧
         const QString ironPath = QDir(s.itemDir).absoluteFilePath(QString::fromLatin1(ironName));
         if (!QFile::exists(ironPath))
             return {}; // 铁贴图也缺（极端老包）→ 回退自绘
@@ -2383,7 +2392,7 @@ QString ResourcePackManager::itemIconSource(int itemId) const
         if (!iron.save(out, "PNG"))
             return {}; // 落盘失败 → 回退自绘（降级）
         state().copperIconFiles.insert(itemId, out); // stateMutex 已持锁，安全
-        return QStringLiteral("file:///") + out;
+        return packFileUrl(out, s.revision); // review25 #7：固定名 voxelsandbox_rp_copper_<id>.png 原地覆写 → 挂 ?r=
     }
 
     // R19 B1 皮革护甲 retint（同床 retint 机制）：pack 的 leather_helmet/chestplate/leggings/boots.png
@@ -2419,7 +2428,10 @@ QString ResourcePackManager::itemIconSource(int itemId) const
         return QStringLiteral("file:///") + out;
     }
 
-    return QStringLiteral("file:///") + path;
+    // review25 #7 主返回：pack 原文件直返（热栏 / 图鉴最常用图标入口，消费端 ToolIcon/MaterialIcon 的
+    //   Image 未设 cache:false）——同路径原地换包内容 + apply() 重解析下 URL 不变 → QML 按 URL 缓存旧像素
+    //   直到重启。挂 ?r=<revision>（apply 先 bump 后重建 → URL 必变强制重载）。
+    return packFileUrl(path, s.revision);
 }
 
 // t497 生存背包空护甲槽图标源（pack 内 empty_armor_slot_<piece>.png）。piece = ArmorRegistry::ArmorPiece
@@ -2445,7 +2457,8 @@ QString ResourcePackManager::emptyArmorSlotSource(int armorPiece) const
     const QString path = QDir(s.itemDir).absoluteFilePath(QString::fromLatin1(filename));
     if (!QFile::exists(path))
         return {};
-    return QStringLiteral("file:///") + path;
+    // review25 #7：pack 原文件直返挂 ?r=<revision>（同 itemIconSource 主返回口径，防原地换包陈旧）。
+    return packFileUrl(path, s.revision);
 }
 
 QString ResourcePackManager::blockItemIconSource(int blockId)
@@ -2486,34 +2499,36 @@ QString ResourcePackManager::blockItemIconSource(int blockId)
     //   床 item icon 各色不同 / 各色羊毛染色）。命中缓存直接返（首次染色后落盘，后续 O(1)）。非床段直接返
     //   foundPath（工作台 / 熔炉等原样用 pack 2D 图标，不染色）。bedIconFiles 随 atlasFile 同目录，已 mkpath。
     if (const BedTint *tint = bedTintForBlock(blockId)) {
-        // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+        // 命中缓存（pack 未重解析期间稳定）→ 直接返。review25 #7：床染色缓存是固定名
+        //   voxelsandbox_rp_bed_<id>.png（原地覆写）→ 挂 ?r=<revision> 防切包后 URL 缓存旧床色。
         const auto it = s.bedIconFiles.constFind(blockId);
         if (it != s.bedIconFiles.constEnd() && QFile::exists(it.value()))
-            return QStringLiteral("file:///") + it.value();
+            return packFileUrl(it.value(), s.revision);
         // 加载红床模板 bed.png 并按目标色重染。解码失败 → 回退返未染色的 foundPath（红床，可接受降级）。
         QImage bed(foundPath);
         if (bed.isNull())
-            return QStringLiteral("file:///") + foundPath;
+            return packFileUrl(foundPath, s.revision); // review25 #7：直返挂 ?r=
         bed = bed.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         retintBedTemplate(bed, tint->r, tint->g, tint->b);
         // 落盘到 AppLocalDataLocation（与 atlasFile 同目录，ensureBuiltLocked 已 mkpath；此处再保底）。
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         if (dir.isEmpty())
-            return QStringLiteral("file:///") + foundPath; // 无可写目录 → 回退红床（不染色，降级）
+            return packFileUrl(foundPath, s.revision); // 无可写目录 → 回退红床（不染色，降级）
         QDir().mkpath(dir);
         const QString out = QDir(dir).absoluteFilePath(
             QStringLiteral("voxelsandbox_rp_bed_%1.png").arg(blockId));
         if (!bed.save(out, "PNG"))
-            return QStringLiteral("file:///") + foundPath; // 落盘失败 → 回退红床（降级）
+            return packFileUrl(foundPath, s.revision); // 落盘失败 → 回退红床（降级）
         // 记缓存（mutable：s 是 state() 引用但 bedIconFiles 需写；stateMutex 已持锁，安全）。
         state().bedIconFiles.insert(blockId, out);
-        return QStringLiteral("file:///") + out;
+        return packFileUrl(out, s.revision); // review25 #7：固定名落盘挂 ?r=
     }
 
     // t746 叶段整块删除：叶（Leaves/SpruceLeaves）已移出 blockItemIconMap → 本函数对叶恒返空串，
     //   调用方（Hotbar::iconSourceForBlock）落到 t745 回退链 ②/③ 的 blockAtlasIconSource 3D 立方投影。
 
-    return QStringLiteral("file:///") + foundPath;
+    // review25 #7 主返回：pack 原文件直返挂 ?r=<revision>（同 itemIconSource 主返回口径，防原地换包陈旧）。
+    return packFileUrl(foundPath, s.revision);
 }
 
 // ───────────────────────── t745 方块 item 图标运行期 pack 渲染（统一贴图原则总纲机制） ─────────────────────────

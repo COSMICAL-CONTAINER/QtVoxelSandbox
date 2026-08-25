@@ -455,8 +455,14 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     // t843：燃烧态清除放在无变化早退**之前**——任何对本格的显式写调用（含同 id no-op 写，如测试复原）
     //   都视为换上新方块实例 → 燃烧作废（栅格 id 从不因燃烧改变，早退路径不清则陈旧燃烧态挂在复原块上）。
-    m_burningCells.remove(packGrowthCell(x, y, z));
-    if (oldId == id) return false; // 无变化
+    //   review25 #2：同 id 早退路径（oldId==id）无任何其它信号（无 broken/placed/worldChanged）→ 清表时
+    //   补发 blockDoused 精确驱动 QML 面火 overlay 摘除（否则 delegate 泄漏成假燃块）；有变化路径随后必发
+    //   broken/placed + worldChanged（cleanupVis 兜底），不重复发。
+    const bool wasBurning = m_burningCells.remove(packGrowthCell(x, y, z)) > 0;
+    if (oldId == id) {
+        if (wasBurning) emit blockDoused(x, y, z);
+        return false; // 无变化
+    }
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（→5 参数 id,0 重置 state）
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
@@ -564,8 +570,12 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     const quint8 oldState = m_chunks.stateAt(x, y, z);
     // t843：燃烧态清除放在无变化早退之前（同 4 参数版：任何显式写调用 = 换新实例，燃烧作废）。
-    m_burningCells.remove(packGrowthCell(x, y, z));
-    if (oldId == id && oldState == state) return false; // id 与 state 均无变化
+    //   review25 #2：同 id+state 早退路径无任何其它信号 → 清表时补发 blockDoused（同 4 参数版口径）。
+    const bool wasBurning = m_burningCells.remove(packGrowthCell(x, y, z)) > 0;
+    if (oldId == id && oldState == state) {
+        if (wasBurning) emit blockDoused(x, y, z);
+        return false; // id 与 state 均无变化
+    }
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
     noteGrowthWrite(x, y, z, oldId, id); // t425：维护生长方格索引（生长 tick 据 it 遍历，免全图扫描）
     noteFluidWrite(x, y, z, oldId, id);  // perf：维护流体方格索引（流体 tick 据它遍历，免全图扫描）
@@ -1598,11 +1608,14 @@ void World::tickFire()
         // 抑制浇熄（#5 三谓词接入燃烧轨）：露天降雨 / 自身 6 邻水 → 按 kFireSuppressExtinguishPct 掷浇熄。
         //   **火灭块存**：摘侧表项但不动栅格（被雨浇 / 水泼的燃块保住本体——玩家反制手段；对照火格抑制 =
         //   连火一起熄，因火格本身就是暂态）。
+        //   review25 #2：本摘表路径栅格不变（无 blockBroken）+ 侧表直摘（无 worldChanged）→ 补发
+        //   blockDoused(x,y,z) 精确驱动 QML 面火 overlay 摘除（否则假火 delegate 永久残留 / 泄漏）。
         if (fireRainExposedAt(x, y, z) || fireWaterNeighborAt(x, y, z)) {
             const quint32 hv = hashVoxel(m_seed ^ 0xF17D, x, y, z)
                                ^ (quint32(m_fireIntervalIndex) * 2654435761u);
             if ((hv % 100u) < unsigned(kFireSuppressExtinguishPct)) {
                 m_burningCells.remove(it.key());
+                emit blockDoused(x, y, z);
                 continue;
             }
         }

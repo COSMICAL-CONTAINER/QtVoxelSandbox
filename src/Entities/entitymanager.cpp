@@ -4818,7 +4818,14 @@ void EntityManager::tickVehicleRiding()
             }
         }
     }
-    if (dirty) { ++m_revision; emit entitiesChanged(); }
+    // review25 #3：dirty 只置 m_pendingEmit，绝不在此直发 entitiesChanged——本 pass 每帧被调两次
+    //   （playercontroller mob 桶 tick 后常开 + step() 后补钉），乘客跟车时每帧都 dirty，直发 = 最坏
+    //   每帧 2 次全量 revision+emit（激活全体实体 delegate revision 绑定 + 行走 MobModel 全几何重建
+    //   ——t500 已修的 22ms/帧卡顿模式复发）。复用 EntityManager::tick 末尾的 kEmitEveryN（~20Hz）
+    //   收口：本帧两个调用点都在 tick 收口之后跑（playercontroller 内 tick → tickVehicleRiding 序）
+    //   → pending 由**下一帧** tick 的相位门接住（≤kEmitEveryN 帧 ≈ 50ms 延迟，钉位呈现层无感）；
+    //   m_pendingEmit 持续脏确保变更不丢。
+    if (dirty) m_pendingEmit = true;
 }
 
 // 重力 + AI wander + 地面静止（机制同 ItemEntityManager::tick；向下只读 World::isSolid/blockAt）。
@@ -5493,15 +5500,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //   PlayerController.applyEnderPearlTeleport（安全落点扫描 + 瞬移玩家 + 传送伤害，机制语义收口在
         //   Game 层）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送
         //   掷者，伤害分支 v1 不做，同头文件注释）。t835 三项 tick 侧改动：
-        //   ① 任意接触必传送：命中判据从 collisionAABBsAt 点在盒内（t762 引入）放宽为**本格任意方块实存**
-        //   （blockAt 非空且非豁免族）。旧判据漏两族 —— (a) 铁轨/火把/草丛等 ShapeNone 无碰撞盒方块：珠点
-        //   穿过该格不命中，落进下方支撑格 → 落点格=支撑格内部 → Game 层立位扫描把非整格方块当实心全列
-        //   abort（「落铁轨不传送」的根因，t803 isSolid 实体侧消费者逐一豁免的同族反向）；(b) 压力板/台阶
-        //   等薄碰撞盒：珠点一 tick 跨过薄盒带（薄板厚 0.06 << 速度 0.4 格/tick）点不在盒内 → 同 (a) 穿透
-        //   落到下方格。新判据按「格内有没有东西」判接触 —— 机制等价 MC 1.0 珍珠对任何具形方块（含轨道、
-        //   薄板）都算落地。豁免四族：Air（无物）/ Water·Lava（② 缓沉族，沉到底接触底面才传送）/ NetherPortal
-        //   （t762 门面无碰撞可穿入——珠穿门格不被拦停，保旧语义）/ Fire（效果格无实体，同门面族；MC 1.0
-        //   投掷物 raytrace 对火/无碰撞格亦穿过）。
+        //   ① 有形接触必传送：命中判据从 collisionAABBsAt 点在盒内（t762 引入）放宽为**本格任意方块实存**
+        //   （5 id 豁免 + review25 #5 补无碰撞植物族豁免，见命中处注释——本工程 Rail/Torch 是 ShapeNone
+        //   无碰撞盒但属 t835 有意命中的具形方块，格级接触判据保持）。
+        //   旧点在盒判据漏两族 —— (a) 铁轨/火把等 ShapeNone 无碰撞盒方块：珠点穿过该格不命中，落进下方
+        //   支撑格 → 落点格=支撑格内部 → Game 层立位扫描把非整格方块当实心全列 abort（「落铁轨不传送」的
+        //   根因，t803 isSolid 实体侧消费者逐一豁免的同族反向）；(b) 压力板/台阶等薄碰撞盒：珠点一 tick
+        //   跨过薄盒带（薄板厚 0.06 << 速度 0.4 格/tick）点不在盒内 → 同 (a) 穿透落到下方格。格级判据按
+        //   「格内有没有东西」判接触 —— 机制等价 MC 1.0 珍珠对任何具形方块（含轨道、薄板）都算落地、
+        //   对无碰撞格（空气 / 液体② / 门面 / 火 / 植物族）穿过（植物穿过与箭的「空碰撞盒即穿」同义；
+        //   箭是点在盒内、珍珠按格接触，差异是 t835 防薄盒穿透漏传送的有意取舍）。
         //   ② 液体缓沉：珠所在格为 Water/Lava → 不立即传送，重力把 vy 压到缓沉终速（−kEnderPearlWaterSink/
         //   LavaSink）+ 水平强阻尼（kEnderPearlLiquidDrag）→ 缓慢沉到液体底（底面方块接触 = ① 判据）才结算
         //   传送。寿命倒计暂停（深水柱缓沉可超 8s，防到期把掷出者半水传送）。机制等价 MC 投掷物入液强阻尼
@@ -5531,14 +5539,28 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             bool landed = false; // 命中结算（接触 / 寿命兜底）→ emit enderPearlLanded（传送掷出者）
             // 寿命兜底命中：悬空到期视作落点结算（落点列向下找支撑传送，防极端上抛珍珠永久滞留堆积）。
             if (e.arrowLife <= 0.0f) { remove = true; landed = true; }
-            // ① 任意接触命中 → 即结算（撞地 / 撞墙 / 踩铁轨/薄板：落点 = 接触格，Game 层扫描从该格起向下
-            //   找碰撞支撑 → 立位）。豁免族见分支头注释（液体 ② / 门面 / 火效果格）。
+            // ① 有形接触命中 → 即结算（撞地 / 撞墙 / 踩铁轨/薄板：落点 = 接触格，Game 层扫描从该格起向下
+            //   找碰撞支撑 → 立位）。review25 #5 取**修法①**（豁免表补无碰撞植物族）：review 建议的修法②
+            //   「本格有碰撞盒才命中」经核不成立——本工程 Rail / Torch 都是 ShapeNone 无碰撞盒（t835 探针
+            //   钉死「落轨格 / 落火把格必传送」，格级接触是 t835 对「点在薄盒内一 tick 跨过即漏」的有意
+            //   判据），改盒存在性判据会砸 t835 基线。取①：t835「本格任意方块实存」判据保留，豁免表在
+            //   原 5 id（Air / Water·Lava ② / NetherPortal / Fire）基础上补**无碰撞植物族**——着生植物
+            //   （isGroundPlant：草丛 / 花×4 / 蘑菇×2）+ 枯灌木 + 树苗 + 作物（isCropBlock：小麦 / 胡萝卜 /
+            //   马铃薯）+ 浆果丛 + 甘蔗，全族 ShapeNone 无碰撞、MC 1.0 投掷物 raytrace 穿过、本工程箭亦按
+            //   空碰撞盒穿过 → 珍珠平抛弧线下降段不再被草丛截断在数格内（review25 #5 反噬 t835「更远
+            //   投掷」目标的病根）。铁轨 / 火把 / 压力板 / 台阶等仍按格命中（t835 语义不动）。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
                 const quint8 hitId = world->blockAt(bx, by, bz);
+                const bool plantPass = BlockRegistry::isGroundPlant(hitId)
+                                       || hitId == BlockRegistry::DeadBush
+                                       || hitId == BlockRegistry::Sapling
+                                       || isCropBlock(hitId)
+                                       || hitId == BlockRegistry::SweetBerryBush
+                                       || hitId == BlockRegistry::Sugarcane;
                 if (hitId != BlockRegistry::Air && hitId != BlockRegistry::Water
                     && hitId != BlockRegistry::Lava && hitId != BlockRegistry::NetherPortal
-                    && hitId != BlockRegistry::Fire) {
+                    && hitId != BlockRegistry::Fire && !plantPass) {
                     remove = true;
                     landed = true;
                 }
@@ -6751,6 +6773,36 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         }
         const float mobNewY = e.pos.y() + e.vy * float(dt);
 
+        // review25 #4 上浮天花板碰撞（vy>0 向上分支——垂直积分段原只为下落设计）：t828 持续浮力
+        //   （鱿鱼 kSquidBuoyancy）使 vy 恒正，自由上移分支（下方 else 分支）原无任何向上阻挡检查 →
+        //   头顶穿入固体格（冰面 / 封顶水池）后**中心**落入固体格的那一帧，落地扫描 mobSupportTopY
+        //   命中该格、restY=格顶+halfH 高于当前位置 → mobNewY<=restY 成立把整段 setY(restY) 抬到方块
+        //   顶上（穿顶 / snap 上顶，冰湖场景必现）。对称修：vy>0 时对头顶格（头位 = 中心+halfH，自
+        //   floor(pos.y+halfH) 扫到 floor(mobNewY+halfH)，与落地扫描同用中心列 cx,cz）取碰撞 sub-AABB
+        //   的**最低盒底**为天花板面；头顶将穿入 → 贴顶悬停（钳 pos.y=ceilBottom-halfH、vy=0，浮力
+        //   下帧再积再钳 = 稳定贴顶）。口径与落定分支对称复用 collisionAABBsAt（ShapeNone 无盒族——
+        //   草丛/火/水/门面——天然穿过，薄盒/异形盒按真形阻挡）。钳住后跳过下方落定扫描（本帧位移
+        //   已定，扫描的 restY 判定对向上钳制无意义）。
+        bool ceilingClamped = false;
+        if (e.vy > 0.0f) {
+            const float headTopNew = mobNewY + e.halfH;
+            const int headCellFrom = qFloor(e.pos.y() + e.halfH);
+            const int headCellTo = qFloor(headTopNew);
+            float ceilBottom = -1.0f;
+            for (int cy = headCellFrom; cy <= headCellTo && ceilBottom < 0.0f; ++cy) {
+                if (cy < 0) continue;
+                for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(cx, cy, cz)) {
+                    if (ceilBottom < 0.0f || b.minY < ceilBottom) ceilBottom = b.minY;
+                }
+            }
+            if (ceilBottom >= 0.0f && headTopNew > ceilBottom) {
+                const float clampY = ceilBottom - e.halfH;
+                if (e.pos.y() != clampY) { e.pos.setY(clampY); dirty = true; }
+                if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }
+                ceilingClamped = true;
+            }
+        }
+
         // 下移路径自顶向下扫实体所在列，找首个实体方块（防大 dt 穿过薄层；lessons「子步防穿墙」精神）。
         const int mobTopCell = qFloor(e.pos.y()); // 当前中心所在格（一般为空气）
         int mobBotCell = qFloor(mobNewY);
@@ -6760,6 +6812,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //   1/8 薄雪层上被整格顶起悬空一格格」（用户报雪傀儡「卡在空中悬浮在积雪层上一格」）：旧 mobSolidY+1
         //   恒按满格顶承接，落在薄层上中心被抬到层顶+halfH ≈ 层上方 0.9 格 = 视觉悬空。restTopY<0 = 本段
         //   无支撑（含只扫到水）→ 自由下落（原 mobSolidY<0 路径）。
+        if (!ceilingClamped) {
         float restTopY = -1.0f;
         for (int cy = mobTopCell; cy >= mobBotCell; --cy) {
             if (cy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
@@ -6784,6 +6837,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             e.pos.setY(mobNewY); // 自由下落（无命中）
             dirty = true;
         }
+        } // /!ceilingClamped（review25 #4：上浮贴顶帧跳过落定扫描——mobNewY 已被钳制替代）
 
         // t239 void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推/走离边界外无支撑）→ 标记移除（防永久下落）。
         if (e.kind == Mob && e.pos.y() < 0.0f) { toRemove.push_back(idx); dirty = true; }

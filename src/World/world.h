@@ -833,10 +833,21 @@ signals:
     void blockPlaced(int x, int y, int z, int id);
     // t843 可燃方块被点燃进入燃烧态（World::igniteFlammableAt 每点燃格发一次；栅格 id 不变——燃烧态是
     //   World 层运行期侧表，非栅格写入）。呈现层（Main.qml burningHost）据本信号挂**面火 overlay** delegate
-    //   （方块外表覆火焰贴图层）；摘除走 onBlockBroken（烧毁 / 被挖）+ onWorldChanged cleanupVis 兜底（爆炸 /
-    //   系统改写）。燃烧态不进存档（侧表运行期态）→ 读档后自然熄灭（dev-spec t843 明示可接受）。
+    //   （方块外表覆火焰贴图层）；摘除走 onBlockBroken（烧毁 / 被挖）+ onBlockDoused（浇熄摘表 / 同 id 写
+    //   清表——两条无其它信号的路径，见 blockDoused）+ onWorldChanged cleanupVis 兜底（爆炸 / 系统改写）。
+    //   燃烧态不进存档（侧表运行期态）→ 读档后自然熄灭（dev-spec t843 明示可接受）。
     //   分层（PLAN §2）：World 低层只发语义事件，不反向依赖 Game/Entities/Renderer（同 blockDroppedAsItem 模式）。
     void blockIgnited(int x, int y, int z);
+    // review25 #2 燃烧态被**浇熄摘侧表**（栅格不变、无 blockBroken/worldChanged 的两条路径）：① tickFire
+    //   (d) 抑制浇熄掷中（露天雨浇 / 6 邻水，「火灭块存」——燃块本体保留，玩家反制手段）；② setBlock 同 id
+    //   无变化早退的清表（任何显式写调用 = 换新方块实例 → 燃烧作废，t843 语义；该路径除本信号外不发任何
+    //   其它信号）。两路径直摘 m_burningCells 而栅格 id 不变 → blockBroken / worldChanged 均不触发 → 呈现层
+    //   面火 overlay delegate 若无本信号将永久贴在已不燃烧的方块上（假火视觉 + delegate 泄漏，直到世界里
+    //   任意其它编辑凑巧发 worldChanged）。Main.qml burningHost 据本信号精确摘 removeBurningVis（与挂载
+    //   onBlockIgnited 对称）；有栅格变化的摘除（烧毁 / 被挖 / 爆炸）不走本信号（blockBroken + worldChanged
+    //   已覆盖，不重复发）。每摘一格发一次（坐标精确，无全量对账开销——浇熄是常见事件，不值得付 cleanupVis
+    //   全量 mesh 重查的价，review25 #2 取舍）。
+    void blockDoused(int x, int y, int z);
     // t445 世界侧产出的掉落物（仙人掌失撑 / 邻接方块即整柱坍落为掉落物）：携世界坐标 + 方块 id。
     //   呈现层（Main.qml）据本信号 spawnItem 生成掉落实体（同 player.spawnItem / fallingBlockDropped 模式：
     //   World 低层只发语义事件，不反向依赖 Game/Entities）。仅仙人掌走此路径（玩家破块走 player.spawnItem）。

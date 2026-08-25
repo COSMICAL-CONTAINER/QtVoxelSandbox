@@ -844,6 +844,8 @@ public:
     //   Pass C 登乘扫描：非骑乘活体 mob 找最近可乘载具（矿车 XZ ≤0.8 / 船 ≤1.0，垂直 ≤1.5）：矿车 1 座
     //     （生物占 / 玩家骑均满）；船总乘员限 2（玩家 1 + 生物座，两座皆生物 = 满拒玩家上——玩家侧
     //     tryMount 守卫）。登乘 = 写双向链 + 停 walkPhase（moveSpeed 清 0，姿态锁定）。
+    //   emit 纪律（review25 #3）：dirty 只置 m_pendingEmit（复用 tick 的 kEmitEveryN ~20Hz 收口），本 pass
+    //     不直接 emit——每帧双调 + 乘客跟车每帧 dirty，直发即 t500 卡顿模式复发（见 .cpp 尾注释）。
     void tickVehicleRiding();
     // t811 载具管理器（setVehicleManagers 注入；null = 无载具场景 → 骑乘收口全跳过）。
     MinecartManager *m_cartMgr = nullptr;
