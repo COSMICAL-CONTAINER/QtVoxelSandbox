@@ -5311,10 +5311,15 @@ void PlayerController::updateButtonRecovery(float dt)
 //   按列坐标键 (x,z) 打包——发射器每柱唯一故 (x,z) 足以定位；Y 不进键防高位重叠）内 → 返 false 不动作；
 //   触发成功（含神殿陷阱 fallback 射箭）→ 写冷却 + 返 true。方向 = 机器 state 朝向外向（chestFrontFace 解码；
 //   state=0 旧存档 → +X 兜底）。库存路径（t579/t607/t609）与 fallback 语义同旧 scanDispenserTraps 逐字保留。
+//   t868②：冷却语义 = **短防抖闸**（0.5s，见 kDispenserCooldown 注释）——只拦同 tick 双路径双发，不吞
+//   高频红石的新上升沿；沿语义本身在 fireDispenserAtQml（t689 基线集），快速拉杆 / 时钟每沿必过闸逐沿发射。
 bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
 {
-    constexpr float kDispenserCooldown = 2.0f; // 每机器触发间隔（秒；防抖：板沿 + 拉杆沿都过本闸，机制等价 MC 发射器触发间隔。
-                                               //   review25 #8 阴性验证已过：本值改 0 → 矩阵 t814(e)/t856 双 FAIL——勿动）
+    // t868② 冷却缩短 2.0 → **0.5s**（用户「冷却太长 + 高频红石只能激活一次」）：语义重钉为**短防抖闸**
+    //   （拦同 tick 双路径双发 / 沿抖动），非节流窗——快速拉杆 / 按钮循环 / 时钟电路的每个新上升沿间隔
+    //   ≥0.5s 即全过闸，逐沿发射；MC 同名语义 = 触发间隔下限。review25 #8 阴性验证口径保持：本值改 0 →
+    //   t814(e)/t856(b) 双 FAIL（勿动）；改回 ≥2.0s → t868 高频沿探针 FAIL（旧症状复现）。
+    constexpr float kDispenserCooldown = 0.5f;
     const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
     // review25 #8：冷却门看**值**（contains && value > 0）而非纯 contains——若只查存在性，常量回归改 0（或
     //   任何 ≤0 写入）时表项永驻、该机器永久哑火且矩阵探针的「时长下界钉死」断言失效（0 冷却仍被 contains
