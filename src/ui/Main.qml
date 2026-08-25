@@ -12559,14 +12559,16 @@ Window {
                     if (hotbarBar.hoveredSlot >= 0 && hotbarVM.itemAttackDamage(id) > 1) {
                         const eArr = hotbarVM.enchantsAt(hotbarBar.hoveredSlot)
                         let sharp = 0
-                        if (Array.isArray(eArr)) {
+                        // t874：eArr 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫令锐锋加成行恒缺失
+                        //   （附魔「看似没生效」的视觉半边）；序列下标可读，真值守卫。
+                        if (eArr) {
                             for (let i = 0; i < 4; ++i) {
                                 if (((eArr[i] || 0) >> 8) === 1) { sharp = eArr[i] & 0xFF; break } // EnchantRegistry::Sharpness = 1
                             }
                         }
                         // t825 显示与实战同源：displayAttackDamage = round(weaponAttackDamage)，
                         //   attackMob 同一权威函数算实战值（公式只活在 EnchantRegistry 一处）。
-                        const atk = hotbarVM.displayAttackDamage(id, Array.isArray(eArr) ? eArr : [])
+                        const atk = hotbarVM.displayAttackDamage(id, eArr || [])
                         tip += "\n\n攻击: " + atk + (sharp > 0 ? "（锐锋 " + hotbarVM.enchantLevelText(sharp) + " +" + (0.5 * sharp) + "）" : "")
                     }
                     return _r >= 0 ? tip : ""

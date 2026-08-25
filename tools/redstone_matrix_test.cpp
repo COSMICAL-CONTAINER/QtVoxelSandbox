@@ -27,6 +27,10 @@
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
+#include <QQmlEngine>   // t874/t875 真链探针：QQmlEngine + qmlRegisterType —— 真 QML 面板 × 真 C++ Hotbar 同台
+#include <QQmlContext>  // t874/t875 真链探针：rootContext()->setContextProperty + qmlContext（wrapper 作用域链）
+#include <QQmlComponent> // t874/t875 真链探针：setData+base URL 直载源树 AnvilUI.qml / EnchantingTableUI.qml
+#include <QQuickItem>   // t874/t875 真链探针：面板 root / 宿主容器 Item
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -11142,6 +11146,841 @@ int main(int argc, char *argv[])
                                  " box present) still triggers landing in-cell (t835 rail-teleport"
                                  " semantics preserved)";
         }
+    }
+
+    // ── t874/t875 铁砧附魔丢失 + 附魔台拒入 真链探针（R19.15 批三）──
+    // 背景：用户报「放入铁砧附魔直接没了，元数据丢失」（跨七八个版本未根治）+「附魔台能放入已附魔物品
+    //   并清洗附魔属性」。t792 实机探针（qml.exe 驱真 AnvilUI.qml + 桩 Hotbar.qml，11 放入路径 47/47）与
+    //   t822（真 Hotbar VM C++ 直调镜像，无 QML 层）两轮全绿 → **接缝只剩「真 QML × 真 C++ Hotbar」从未
+    //   同台执行**（Q_PROPERTY 早期返回 / QVariantList↔JS 转换 / NOTIFY 时序只在组合态暴露）。本探针拼上
+    //   这一半：QQmlEngine 源树直载 AnvilUI.qml / EnchantingTableUI.qml（同目录隐式组件 + InventoryOps.js
+    //   原地解析），真 Hotbar/PlayerState 经 context property 注入，真 QMouseEvent（press+release）驱动面板
+    //   内联 TapHandler —— 与用户真实点击完全同链。
+    // t874 覆盖：放入/取出全入口（真鼠标左/右键点 A/B 槽、Shift 搬运、左/右拖动、双击拿同类、数字键交换）
+    //   × 四类别（工具 / 武器 4 附魔满配 / 护甲 / 附魔书）× 带名实例 × takeProduct 四 op（repair / combine /
+    //   merge / rename）× 关包归还 × 存档 round-trip 后重绑 VM 再放入。
+    // t875 覆盖：已附魔物品七入口拒入（真鼠标左/右键槽 0、右键拖、左键拖、数字键交换、Shift 搬运、双击
+    //   合并）+ 全链无清洗（青金石槽放入 → 关包归还）+ 素品附魔 → 产物取出带附魔 → 拒再入。
+    {
+        // 类型注册：**探针私有 URI**（VoxelSandboxProbe）。不能用 VoxelSandbox —— build/VoxelSandbox/qmldir
+        //   （qt_add_qml_module 产物）落在 exe 同目录默认 import path 上，`import VoxelSandbox` 会命中它并
+        //   `prefer :/VoxelSandbox/` 重定向到 qrc 资源（本测试二进制未链模块资源 → "Script
+        //   qrc:/VoxelSandbox/src/ui/InventoryOps.js unavailable"）。私有 URI 无 qmldir → 走本处 C++ 注册；
+        //   面板拷贝上 import 行同步改写（类型名 Hotbar/PlayerState/PlayerController/ResourcePackManager 原名）。
+        static bool sVoxelTypesRegistered = false;
+        if (!sVoxelTypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbe", 1, 0, "Hotbar");
+            qmlRegisterType<PlayerState>("VoxelSandboxProbe", 1, 0, "PlayerState");
+            qmlRegisterType<PlayerController>("VoxelSandboxProbe", 1, 0, "PlayerController");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbe", 1, 0, "ResourcePackManager");
+            sVoxelTypesRegistered = true;
+        }
+        qputenv("QML_DISABLE_DISK_CACHE", "1"); // 见上：防磁盘缓存把依赖重定向到未链接的 qrc 资源
+        QQmlEngine engine;
+        Hotbar vm;
+        PlayerState ps;
+        ps.setXp(4000); // repair/combine/merge/rename 与 doEnchant 的等级门槛全可付
+        engine.rootContext()->setContextProperty(QStringLiteral("t874Hotbar"), &vm);
+        engine.rootContext()->setContextProperty(QStringLiteral("t874PlayerState"), &ps);
+
+        // 宿主桩：Main.qml 根（id: window）的最小复刻 —— AnvilUI/EnchantingTableUI 经作用域链解析
+        //   window.shiftHeld / refocusKeyInput / closeAnvil / burstEnchantRunes。
+        QQmlComponent wrapComp(&engine);
+        wrapComp.setData(R"QML(import QtQuick
+Item {
+    id: window
+    width: 800; height: 1200
+    property bool shiftHeld: false
+    property string hoveredSlotKey: ""
+    function refocusKeyInput() { }
+    function closeAnvil() { }
+    function closeEnchantingTable() { }
+    function burstEnchantRunes(n) { }
+}
+)QML", QUrl());
+
+        // harness 装配：wrapper（engine 持有）→ 800×1200 上下两半各挂一块面板。函数链直调无窗口事件 →
+        //   面板挂独立 QQuickItem 容器即可（无需 QQuickWindow；QQuickItem 场景经 contentItem 承载）。
+        QString harnessDiag;
+        bool harnessOk = true;
+        QQuickItem hostItem; // 独立场景根（无窗口）
+        QQuickItem *wrapper = nullptr;
+        QObject *anvilRoot = nullptr;
+        QObject *enchantRoot = nullptr;
+        if (wrapComp.isError()) {
+            harnessOk = false;
+            harnessDiag = QStringLiteral("wrapper: ") + wrapComp.errorString();
+        } else {
+            wrapper = qobject_cast<QQuickItem *>(wrapComp.create());
+            if (!wrapper) {
+                harnessOk = false;
+                harnessDiag = QStringLiteral("wrapper create failed");
+            } else {
+                wrapper->setParent(&engine); // QObject 父（引擎析构兜底；视觉父子另有 parentItem）
+                wrapper->setParentItem(&hostItem);
+            }
+        }
+        const QString uiDir = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                  .filePath(QStringLiteral("../src/ui"));
+        // t874/t875：源树路径直载时引擎把同目录相对导入（InventoryOps.js）重映射到编译模块 qrc 前缀
+        //   （qrc:/VoxelSandbox/src/ui/...，本测试二进制未链模块资源 → unavailable）。把 6 个源文件拷到
+        //   临时目录加载，逃离模块路径映射（文件内容逐字节同源树 —— 链路保真不受影响）。
+        const QString probeUiDir = QDir::temp().absoluteFilePath(
+                QStringLiteral("t874_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUiDir);
+        for (const QString f : { QStringLiteral("AnvilUI.qml"), QStringLiteral("EnchantingTableUI.qml"),
+                                 QStringLiteral("InventoryOps.js"), QStringLiteral("InvSlot.qml"),
+                                 QStringLiteral("ToolIcon.qml"), QStringLiteral("MaterialIcon.qml") }) {
+            QFile src(uiDir + QLatin1Char('/') + f);
+            QFile dst(probeUiDir + QLatin1Char('/') + f);
+            dst.remove();
+            src.copy(dst.fileName());
+        }
+        // 拷贝上两处 URL 改写（文件内容其余逐字节同源树，链路保真）：
+        //   ① 相对 js 导入 → 绝对 file URL（防 build 目录 qmldir 的 prefer 重定向染指）；
+        //   ② `import VoxelSandbox` → `import VoxelSandboxProbe`（防 exe 同目录 build/VoxelSandbox/qmldir 命中，
+        //     其 prefer :/VoxelSandbox/ 指向本二进制未链接的 qrc 资源）。**全部拷贝文件**都改 ——
+        //     ToolIcon/MaterialIcon 等子组件同样显式 import VoxelSandbox（t41 子目录显式导入约定）。
+        {
+            const QUrl jsUrl = QUrl::fromLocalFile(probeUiDir + QLatin1Char('/') + QStringLiteral("InventoryOps.js"));
+            QDir pd(probeUiDir);
+            const QStringList qmlFiles = pd.entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles) {
+                QFile p(probeUiDir + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import \"InventoryOps.js\" as InventoryOps"),
+                          QStringLiteral("import \"") + jsUrl.toString() + QStringLiteral("\" as InventoryOps"));
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbe\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        if (harnessOk) {
+            // setData + 源文件 base URL：QQmlComponent(url) 直载时 type loader 把同目录相对导入重映射到
+            //   编译模块 qrc 前缀（见上 probeUiDir 注释）；setData 携带 base URL 按原文编译，相对导入按
+            //   base URL 解析（同目录文件真实存在）。
+            QFile anvilSrc(probeUiDir + QLatin1Char('/') + QStringLiteral("AnvilUI.qml"));
+            if (!anvilSrc.open(QIODevice::ReadOnly)) {
+                harnessOk = false;
+                harnessDiag = QStringLiteral("AnvilUI read failed");
+            } else {
+                QQmlComponent anvilComp(&engine);
+                anvilComp.setData(anvilSrc.readAll(), QUrl::fromLocalFile(anvilSrc.fileName()));
+                if (anvilComp.isError()) {
+                    harnessOk = false;
+                    harnessDiag = QStringLiteral("AnvilUI load: ") + anvilComp.errorString();
+                } else {
+                    // 以 wrapper 的 context 创建（面板内 window/shiftHeld 等经作用域链解析 wrapper 根的
+                    //   id —— 真实应用面板在 Main.qml 作用域内实例化，此处同构复刻；引擎根 context 无 id）。
+                    anvilRoot = anvilComp.create(qmlContext(wrapper));
+                    QQuickItem *ai = qobject_cast<QQuickItem *>(anvilRoot);
+                    if (!ai) {
+                        harnessOk = false;
+                        harnessDiag = QStringLiteral("AnvilUI create: ") + anvilComp.errorString();
+                    } else {
+                        anvilRoot->setProperty("hotbar", QVariant::fromValue(&vm));
+                        anvilRoot->setProperty("playerState", QVariant::fromValue(&ps));
+                        anvilRoot->setProperty("player", QVariant());
+                        anvilRoot->setProperty("progress", QVariant());
+                        ai->setWidth(800);
+                        ai->setHeight(600);
+                        anvilRoot->setParent(wrapper);
+                        ai->setParentItem(wrapper);
+                        ai->setY(0.0);
+                    }
+                }
+            }
+        }
+        if (harnessOk) {
+            QFile enSrc(probeUiDir + QLatin1Char('/') + QStringLiteral("EnchantingTableUI.qml"));
+            if (!enSrc.open(QIODevice::ReadOnly)) {
+                harnessOk = false;
+                harnessDiag = QStringLiteral("EnchantingTableUI read failed");
+            } else {
+                QQmlComponent enComp(&engine);
+                enComp.setData(enSrc.readAll(), QUrl::fromLocalFile(enSrc.fileName()));
+                if (enComp.isError()) {
+                    harnessOk = false;
+                    harnessDiag = QStringLiteral("EnchantingTableUI load: ") + enComp.errorString();
+                } else {
+                    enchantRoot = enComp.create(qmlContext(wrapper)); // 同上：挂 wrapper 作用域链
+                    QQuickItem *ei = qobject_cast<QQuickItem *>(enchantRoot);
+                    if (!ei) {
+                        harnessOk = false;
+                        harnessDiag = QStringLiteral("EnchantingTableUI create: ") + enComp.errorString();
+                    } else {
+                        enchantRoot->setProperty("hotbar", QVariant::fromValue(&vm));
+                        enchantRoot->setProperty("playerState", QVariant::fromValue(&ps));
+                        enchantRoot->setProperty("player", QVariant());
+                        enchantRoot->setProperty("progress", QVariant());
+                        enchantRoot->setProperty("theWorld", QVariant());
+                        ei->setWidth(800);
+                        ei->setHeight(600);
+                        enchantRoot->setParent(wrapper);
+                        ei->setParentItem(wrapper);
+                        ei->setY(600.0); // 下半区（与铁砧面板空间隔离）
+                    }
+                }
+            }
+        }
+
+        // —— 驱动原语 ——
+        // QML 函数调用（面板 root 上的 slotLeft / slotRight / takeProduct / slotShiftLeftAnvil /
+        //   doMergeSameId / begin/endLeftDrag / begin/endRightDrag / addDragSlot / swapHoveredWithHotbar /
+        //   doEnchant）。t874/t875 定案：点击驱动 = **直调面板函数链**（AnvilSlot / EnchantInputSlot 的
+        //   TapHandler onTapped 内联体对非预览槽执行的就是 root.slotLeft/slotRight 同一函数；产物槽 =
+        //   root.takeProduct）。曾试合成 QMouseEvent 走 TapHandler：事件代理把「上次点击位置 → 本次 press」
+        //   距离当拖动（无真实 move/hover 流 → 根 DragHandler 激活 → 松手单格退路对滞留旧 hoveredKey 幽灵
+        //   点击），harness 伪影不可消除 → 弃。真链关键在「真 QML × 真 C++ Hotbar」（QVariantList↔JS 序列化
+        //   边界），与鼠标事件来源无关 —— 函数链直调已覆盖。
+        auto qmlCall = [](QObject *obj, const char *method, const QVariantList &args = QVariantList()) -> bool {
+            if (args.isEmpty())
+                return QMetaObject::invokeMethod(obj, method);
+            if (args.size() == 1)
+                return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)));
+            if (args.size() == 2)
+                return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)), Q_ARG(QVariant, args.at(1)));
+            return false;
+        };
+        auto listEq4 = [](const QVariantList &a, int e0, int e1, int e2, int e3) {
+            return a.size() == 4 && a.at(0).toInt() == e0 && a.at(1).toInt() == e1
+                    && a.at(2).toInt() == e2 && a.at(3).toInt() == e3;
+        };
+        auto localIdAt = [](QObject *panel, const char *prop, int idx) -> int {
+            const QVariantList a = panel->property(prop).toList();
+            return (idx >= 0 && idx < a.size()) ? a.at(idx).toInt() : 0;
+        };
+        auto localEnchAt = [](QObject *panel, const char *prop, int idx) -> QVariantList {
+            const QVariantList outer = panel->property(prop).toList();
+            QVariantList e;
+            if (idx >= 0 && idx < outer.size())
+                e = outer.at(idx).toList();
+            while (e.size() < 4)
+                e.append(0);
+            return e;
+        };
+        auto localNameAt = [](QObject *panel, const char *prop, int idx) -> QString {
+            const QVariantList a = panel->property(prop).toList();
+            return (idx >= 0 && idx < a.size()) ? a.at(idx).toString() : QString();
+        };
+        auto clearVm = [&]() {
+            for (int i = 0; i < vm.slotCount(); ++i)
+                vm.setStack(i, 0, 0);
+            for (int i = 0; i < vm.mainCount(); ++i)
+                vm.mainSetStack(i, 0, 0);
+            vm.setHeldBlock(0);
+        };
+
+        bool ok874 = true, ok875 = true;
+        if (!harnessOk) {
+            ok874 = false;
+            ok875 = false;
+            qInfo().noquote() << "  [t874/t875 diag] harness failed:" << harnessDiag;
+        } else {
+            QCoreApplication::processEvents();
+
+            const int pick = ToolRegistry::PickaxeIron;
+            const int sword = ToolRegistry::SwordIron;
+            const int chestId = RecipeRegistry::ArmorIdBase + 4 * ArmorRegistry::Iron + ArmorRegistry::Chestplate;
+            const int bookId = RecipeRegistry::EnchantedBookId;
+            const int eff3 = (EnchantRegistry::Efficiency << 8) | 3;
+            const int unb2 = (EnchantRegistry::Unbreaking << 8) | 2;
+            const int sharp3 = (EnchantRegistry::Sharpness << 8) | 3;
+            const int kb2 = (EnchantRegistry::Knockback << 8) | 2;
+            const int fire2 = (EnchantRegistry::FireAspect << 8) | 2;
+            const int unb3 = (EnchantRegistry::Unbreaking << 8) | 3;
+            const int prot4 = (EnchantRegistry::Protection << 8) | 4;
+            const int sharp5 = (EnchantRegistry::Sharpness << 8) | 5;
+            const int fire1 = (EnchantRegistry::FireAspect << 8) | 1;
+            const int pickMax = ToolRegistry::maxDurability(pick);
+            const int swordMax = ToolRegistry::maxDurability(sword);
+
+            // t874/t875 harness：复位面板双击判定态（lastTapMs/lastTapKey）—— 探针连点同槽间隔 < 280ms
+            //   会被 AnvilUI/EnchantingTableUI 的双击拿同类判定吞掉第二次点击（doMergeSameId 对带名实例
+            //   正确 no-op = 拒绝，但探针语义要的是「两次独立单击」）。真实用户连点间隔通常 > 280ms 或
+            //   中途移动；harness 内同步执行恒 < 280ms → 每次独立点击前显式复位。
+            auto resetTap = [&](QObject *panel) {
+                panel->setProperty("lastTapMs", 0.0);
+                panel->setProperty("lastTapKey", QString());
+            };
+            auto resetAnvil = [&]() {
+                clearVm();
+                anvilRoot->setProperty("visible", false); // 触发 returnAnvilToHotbar（槽已清则零迭代）
+                anvilRoot->setProperty("visible", true);
+                clearVm();
+            };
+            auto resetEnchant = [&]() {
+                clearVm();
+                enchantRoot->setProperty("visible", false);
+                enchantRoot->setProperty("visible", true);
+                clearVm();
+            };
+
+            // ═══ (1) t874 四类别 × 真鼠标放入/取出主链（hotbar 行拾取[函数链] → 真鼠标点 A 放置 →
+            //        真鼠标点 A 取回 → 函数链放回 hotbar）═══
+            struct Cat {
+                const char *tag;
+                int id;
+                int dur;
+                int e0, e1, e2, e3;
+                QString nm;
+            };
+            const Cat cats[] = {
+                { "tool", pick, pickMax - 5, eff3, unb2, 0, 0, QStringLiteral("我的神镐") },
+                { "weapon", sword, swordMax - 9, sharp3, kb2, fire2, unb3, QString() },
+                { "armor", chestId, 33, prot4, unb2, 0, 0, QString() },
+                { "book", bookId, 0, sharp5, fire1, 0, 0, QString() },
+            };
+            for (const Cat &c : cats) {
+                const QVariantList ce = QVariantList{c.e0, c.e1, c.e2, c.e3};
+                resetAnvil();
+                vm.setStack(3, c.id, 1, c.dur, ce, c.nm);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                bool step = vm.heldBlock() == c.id && listEq4(vm.heldEnchants(), c.e0, c.e1, c.e2, c.e3)
+                        && vm.heldCustomName() == c.nm;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E1 pickup lost meta:" << c.tag
+                                      << "held=" << vm.heldBlock() << "ench=" << vm.heldEnchants()
+                                      << "name=" << vm.heldCustomName();
+                }
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                step = localIdAt(anvilRoot, "anvilSlots", 0) == c.id
+                        && listEq4(localEnchAt(anvilRoot, "anvilEnch", 0), c.e0, c.e1, c.e2, c.e3)
+                        && localNameAt(anvilRoot, "anvilNames", 0) == c.nm;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E1 place-in lost meta:" << c.tag
+                                      << "slotId=" << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << "ench=" << localEnchAt(anvilRoot, "anvilEnch", 0);
+                }
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                step = vm.heldBlock() == c.id && listEq4(vm.heldEnchants(), c.e0, c.e1, c.e2, c.e3)
+                        && vm.heldCustomName() == c.nm;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E1 take-out lost meta:" << c.tag
+                                      << "held=" << vm.heldBlock() << "ench=" << vm.heldEnchants();
+                }
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                step = vm.blockIdAt(4) == c.id && listEq4(vm.enchantsAt(4), c.e0, c.e1, c.e2, c.e3)
+                        && vm.customNameAt(4) == c.nm;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E1 place-back lost meta:" << c.tag
+                                      << "slot4=" << vm.blockIdAt(4) << "ench=" << vm.enchantsAt(4);
+                }
+            }
+
+            // ═══ (2) t874 Shift+左键搬运（hotbar → A 槽）+ Shift 取回 ═══
+            {
+                resetAnvil();
+                vm.setStack(3, pick, 1, pickMax - 7, QVariantList{eff3, unb2, 0, 0}, QStringLiteral("移形换位"));
+                wrapper->setProperty("shiftHeld", true);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                wrapper->setProperty("shiftHeld", false);
+                bool step = localIdAt(anvilRoot, "anvilSlots", 0) == pick
+                        && listEq4(localEnchAt(anvilRoot, "anvilEnch", 0), eff3, unb2, 0, 0)
+                        && localNameAt(anvilRoot, "anvilNames", 0) == QStringLiteral("移形换位")
+                        && vm.blockIdAt(3) == 0;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E2 shift put-in lost meta: slot0="
+                                      << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << "ench=" << localEnchAt(anvilRoot, "anvilEnch", 0);
+                }
+                wrapper->setProperty("shiftHeld", true);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                wrapper->setProperty("shiftHeld", false);
+                bool found = false;
+                for (int i = 0; i < vm.slotCount() && !found; ++i)
+                    found = vm.blockIdAt(i) == pick && listEq4(vm.enchantsAt(i), eff3, unb2, 0, 0)
+                            && vm.customNameAt(i) == QStringLiteral("移形换位");
+                for (int i = 0; i < vm.mainCount() && !found; ++i)
+                    found = vm.mainBlockIdAt(i) == pick && listEq4(vm.mainEnchantsAt(i), eff3, unb2, 0, 0)
+                            && vm.mainCustomNameAt(i) == QStringLiteral("移形换位");
+                if (!found || localIdAt(anvilRoot, "anvilSlots", 0) != 0) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E2 shift return lost meta: found=" << found;
+                }
+            }
+
+            // ═══ (3) t874 右键放 1（真鼠标）+ 拖动链（begin/add/endLeftDrag 单格退路）═══
+            {
+                resetAnvil();
+                vm.setStack(3, sword, 1, swordMax - 4, QVariantList{sharp3, 0, 0, 0}, QString());
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotRight", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                bool step = localIdAt(anvilRoot, "anvilSlots", 0) == sword
+                        && listEq4(localEnchAt(anvilRoot, "anvilEnch", 0), sharp3, 0, 0, 0)
+                        && vm.heldBlock() == 0;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E3 right place-one lost meta: slot0="
+                                      << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << "ench=" << localEnchAt(anvilRoot, "anvilEnch", 0);
+                }
+                // 取回后重放，走拖动链（cap=1 → redistribute 早退 → endLeftDrag n==1 → singleLeftClick 放置）。
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) }); // 取回到光标
+                qmlCall(anvilRoot, "beginLeftDrag", {});
+                qmlCall(anvilRoot, "addDragSlot", { QVariant(QStringLiteral("anvil:0")) });
+                qmlCall(anvilRoot, "endLeftDrag", {});
+                step = localIdAt(anvilRoot, "anvilSlots", 0) == sword
+                        && listEq4(localEnchAt(anvilRoot, "anvilEnch", 0), sharp3, 0, 0, 0);
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E3 drag single-slot lost meta: slot0="
+                                      << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << "ench=" << localEnchAt(anvilRoot, "anvilEnch", 0);
+                }
+            }
+
+            // ═══ (4) t874 双击拿同类（doMergeSameId 单件快照——无名实例）+ 数字键交换 ═══
+            {
+                resetAnvil();
+                vm.setStack(3, pick, 1, pickMax - 6, QVariantList{eff3, unb2, 0, 0}, QString());
+                wrapper->setProperty("shiftHeld", true);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                wrapper->setProperty("shiftHeld", false);
+                qmlCall(anvilRoot, "doMergeSameId", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                bool step = vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0)
+                        && vm.heldDurability() == pickMax - 6
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == 0;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E4 double-merge lost meta: held=" << vm.heldBlock()
+                                      << "ench=" << vm.heldEnchants() << "dur=" << vm.heldDurability();
+                }
+                // 放回 A 后数字键交换：anvil:0 ↔ hotbar:6。
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                anvilRoot->setProperty("hoveredKey", QStringLiteral("anvil:0"));
+                qmlCall(anvilRoot, "swapHoveredWithHotbar", { QVariant(6) });
+                step = vm.blockIdAt(6) == pick && listEq4(vm.enchantsAt(6), eff3, unb2, 0, 0)
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == 0;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E4 number-swap lost meta: hb6=" << vm.blockIdAt(6)
+                                      << "ench=" << vm.enchantsAt(6);
+                }
+            }
+
+            // ═══ (5) t874 takeProduct·repair（附魔镐 + 铁锭）═══
+            {
+                resetAnvil();
+                vm.setStack(3, pick, 1, pickMax - 21, QVariantList{eff3, unb2, 0, 0}, QStringLiteral("神镐"));
+                wrapper->setProperty("shiftHeld", true);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                wrapper->setProperty("shiftHeld", false);
+                vm.setStack(4, RecipeRegistry::IronIngotId, 3);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) }); // 3 锭整栈入 B
+                const int per = pickMax / 3;
+                const int need = std::min(3, int(std::ceil(21.0 / per)));
+                const int use = std::min(3, need);
+                const int expectDur = std::min(pickMax, (pickMax - 21) + use * per);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", {}); // 产物槽点击（TapHandler onTapped → takeProduct 同一函数）
+                bool step = vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0)
+                        && vm.heldCustomName() == QStringLiteral("神镐")
+                        && vm.heldDurability() == expectDur
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == 0
+                        && localIdAt(anvilRoot, "anvilSlots", 1) == RecipeRegistry::IronIngotId
+                        && localIdAt(anvilRoot, "anvilCounts", 1) == 3 - use;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E5 repair lost meta: held=" << vm.heldBlock()
+                                      << "ench=" << vm.heldEnchants() << "dur=" << vm.heldDurability()
+                                      << "expectDur=" << expectDur << "use=" << use;
+                }
+            }
+
+            // ═══ (6) t874 takeProduct·combine（双镐合并 → 附魔并集）═══
+            {
+                resetAnvil();
+                vm.setStack(3, pick, 1, pickMax - 10, QVariantList{eff3, 0, 0, 0}, QString());
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                vm.setStack(4, pick, 1, pickMax - 20, QVariantList{unb2, 0, 0, 0}, QString());
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", {});
+                const QVariantList pe = vm.heldEnchants();
+                const bool hasEff = pe.contains(QVariant(eff3));
+                const bool hasUnb = pe.contains(QVariant(unb2));
+                const int expectDur = std::min(pickMax, int(std::floor((pickMax - 10) + (pickMax - 20) + pickMax * 0.1)));
+                const bool step = vm.heldBlock() == pick && hasEff && hasUnb
+                        && vm.heldDurability() == expectDur
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == 0
+                        && localIdAt(anvilRoot, "anvilSlots", 1) == 0;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E6 combine lost meta: held=" << vm.heldBlock()
+                                      << "ench=" << pe << "dur=" << vm.heldDurability()
+                                      << "expectDur=" << expectDur;
+                }
+            }
+
+            // ═══ (7) t874 takeProduct·merge（素剑 + 附魔书）+ rename（改名保附魔保名）═══
+            {
+                resetAnvil();
+                vm.setStack(3, sword, 1, swordMax - 3, QVariantList{0, 0, 0, 0}, QString());
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                vm.setStack(4, bookId, 1, 0, QVariantList{sharp5, fire1, 0, 0}, QString());
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", {});
+                const QVariantList me = vm.heldEnchants();
+                bool step = vm.heldBlock() == sword && me.contains(QVariant(sharp5))
+                        && localIdAt(anvilRoot, "anvilSlots", 1) == 0; // 书消耗
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E7 merge lost meta: held=" << vm.heldBlock()
+                                      << "ench=" << me;
+                }
+                // rename：带名带附魔镐单独改名 → 产物双保。
+                resetAnvil();
+                vm.setStack(3, pick, 1, pickMax - 2, QVariantList{eff3, unb2, 0, 0}, QStringLiteral("旧名"));
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                anvilRoot->setProperty("renameName", QStringLiteral("新名字"));
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", {});
+                step = vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0)
+                        && vm.heldCustomName() == QStringLiteral("新名字")
+                        && vm.heldDurability() == pickMax - 2;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E7 rename lost meta: held=" << vm.heldBlock()
+                                      << "ench=" << vm.heldEnchants() << "name=" << vm.heldCustomName();
+                }
+            }
+
+            // ═══ (8) t874 关包归还（A 槽带名附魔镐 + B 槽材料 → visible=false → 全参归还）═══
+            {
+                resetAnvil();
+                vm.setStack(3, pick, 1, pickMax - 12, QVariantList{eff3, unb2, 0, 0}, QStringLiteral("归还镐"));
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                vm.setStack(4, RecipeRegistry::IronIngotId, 2);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) });
+                anvilRoot->setProperty("visible", false);
+                bool found = false;
+                for (int i = 0; i < vm.slotCount() && !found; ++i)
+                    found = vm.blockIdAt(i) == pick && listEq4(vm.enchantsAt(i), eff3, unb2, 0, 0)
+                            && vm.customNameAt(i) == QStringLiteral("归还镐");
+                for (int i = 0; i < vm.mainCount() && !found; ++i)
+                    found = vm.mainBlockIdAt(i) == pick && listEq4(vm.mainEnchantsAt(i), eff3, unb2, 0, 0)
+                            && vm.mainCustomNameAt(i) == QStringLiteral("归还镐");
+                bool foundIngot = false;
+                for (int i = 0; i < vm.slotCount() && !foundIngot; ++i)
+                    foundIngot = vm.blockIdAt(i) == RecipeRegistry::IronIngotId && vm.countAt(i) == 2;
+                for (int i = 0; i < vm.mainCount() && !foundIngot; ++i)
+                    foundIngot = vm.mainBlockIdAt(i) == RecipeRegistry::IronIngotId && vm.mainCountAt(i) == 2;
+                if (!found || !foundIngot) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E8 close-return lost meta: pick=" << found
+                                      << "ingot=" << foundIngot;
+                }
+                anvilRoot->setProperty("visible", true);
+            }
+
+            // ═══ (9) t874 存档 round-trip 后重绑 VM 再放入（WorldStore 真库 + applyPlayerState 镜像回灌）═══
+            {
+                Hotbar vm2;
+                QVariantMap data;
+                QVariantList hotbarArr;
+                clearVm();
+                vm.setStack(3, sword, 1, swordMax - 15, QVariantList{sharp3, kb2, fire2, unb3}, QStringLiteral("回环剑"));
+                for (int i = 0; i < vm.slotCount(); ++i) {
+                    QVariantMap s;
+                    s.insert(QStringLiteral("id"), vm.blockIdAt(i));
+                    s.insert(QStringLiteral("count"), vm.countAt(i));
+                    s.insert(QStringLiteral("durability"), vm.durabilityAt(i));
+                    s.insert(QStringLiteral("enchants"), vm.enchantsAt(i));
+                    s.insert(QStringLiteral("name"), vm.customNameAt(i));
+                    hotbarArr.append(s);
+                }
+                data.insert(QStringLiteral("hotbar"), hotbarArr);
+                WorldStore store;
+                const QString dbAbs = QDir::temp().absoluteFilePath(
+                        QStringLiteral("voxel_t874_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+                QFile::remove(dbAbs);
+                bool step = store.openWorld(dbAbs) && store.savePlayerData(data);
+                store.closeWorld();
+                QVariantMap back;
+                if (step) {
+                    step = store.openWorld(dbAbs);
+                    if (step)
+                        back = store.loadPlayerData();
+                    store.closeWorld();
+                }
+                QFile::remove(dbAbs);
+                if (step) {
+                    // applyPlayerState 镜像回灌到新 VM（Main.qml :647-653 同形）。
+                    const QVariantList hb = back.value(QStringLiteral("hotbar")).toList();
+                    for (int i = 0; i < 9 && i < hb.size(); ++i) {
+                        const QVariantMap s = hb.at(i).toMap();
+                        vm2.setStack(i, s.value(QStringLiteral("id")).toInt(),
+                                     s.value(QStringLiteral("count")).toInt(),
+                                     s.contains(QStringLiteral("durability"))
+                                             ? s.value(QStringLiteral("durability")).toInt() : -1,
+                                     s.contains(QStringLiteral("enchants"))
+                                             ? s.value(QStringLiteral("enchants")).toList() : QVariantList(),
+                                     s.contains(QStringLiteral("name"))
+                                             ? s.value(QStringLiteral("name")).toString() : QString());
+                    }
+                    // 重绑面板 hotbar → 真 QML × 读档 VM 再跑主链。
+                    resetAnvil();
+                    anvilRoot->setProperty("hotbar", QVariant::fromValue(&vm2));
+                    resetTap(anvilRoot);
+                    qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                    const bool pickOk = vm2.heldBlock() == sword
+                            && listEq4(vm2.heldEnchants(), sharp3, kb2, fire2, unb3)
+                            && vm2.heldCustomName() == QStringLiteral("回环剑");
+                    resetTap(anvilRoot);
+                    qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                    const bool placeOk = localIdAt(anvilRoot, "anvilSlots", 0) == sword
+                            && listEq4(localEnchAt(anvilRoot, "anvilEnch", 0), sharp3, kb2, fire2, unb3);
+                    resetTap(anvilRoot);
+                    qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                    const bool backOk = vm2.heldBlock() == sword
+                            && listEq4(vm2.heldEnchants(), sharp3, kb2, fire2, unb3);
+                    step = pickOk && placeOk && backOk;
+                    if (!step) {
+                        qInfo().noquote() << "  [t874 diag] E9 roundtrip:" << pickOk << placeOk << backOk
+                                          << "ench=" << vm2.heldEnchants();
+                    }
+                    // 归还光标 + 还原绑定（后续 t875 段仍用 vm）。
+                    resetTap(anvilRoot);
+                    qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(7) });
+                    anvilRoot->setProperty("hotbar", QVariant::fromValue(&vm));
+                }
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [t874 diag] E9 save roundtrip leg failed";
+                }
+                clearVm();
+            }
+
+            // ═══ (10) t875a 已附魔物品拒入（七入口：两真鼠标 + 两拖动 + 数字键 + Shift + 双击）═══
+            {
+                const QVariantList pickEnch = QVariantList{eff3, unb2, 0, 0};
+                auto rejectCheck = [&](const char *tag) {
+                    const bool empty0 = localIdAt(enchantRoot, "enchantSlots", 0) == 0;
+                    const bool heldOk = vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0)
+                            && vm.heldCustomName() == QStringLiteral("附魔镐");
+                    if (!empty0 || !heldOk) {
+                        ok875 = false;
+                        qInfo().noquote() << "  [t875 diag]" << tag << "slot0=" << localIdAt(enchantRoot, "enchantSlots", 0)
+                                          << "held=" << vm.heldBlock() << "ench=" << vm.heldEnchants();
+                    }
+                };
+                resetEnchant();
+                vm.setStack(3, pick, 1, pickMax - 5, pickEnch, QStringLiteral("附魔镐"));
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // R1 真鼠标左键槽 0
+                rejectCheck("R1 mouse-left");
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotRight", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // R2 真鼠标右键（放 1）
+                rejectCheck("R2 mouse-right");
+                qmlCall(enchantRoot, "beginRightDrag", {}); // R3 右键拖（每格放 1）
+                qmlCall(enchantRoot, "addRightDragSlot", { QVariant(QStringLiteral("enchant:0")) });
+                qmlCall(enchantRoot, "endRightDrag", {});
+                rejectCheck("R3 right-drag");
+                qmlCall(enchantRoot, "beginLeftDrag", {}); // R4 左键拖（均分 → 单格退路 gated）
+                qmlCall(enchantRoot, "addDragSlot", { QVariant(QStringLiteral("enchant:0")) });
+                qmlCall(enchantRoot, "endLeftDrag", {});
+                rejectCheck("R4 left-drag");
+                // R5 数字键交换：hovered=enchant:0（空）↔ hotbar:6 —— dst（hotbar 6 空栈）入槽 0 恒空；
+                //   反向（槽 0 持素品 + hotbar 持附魔品）另测于 R7 前置。
+                enchantRoot->setProperty("hoveredKey", QStringLiteral("enchant:0"));
+                qmlCall(enchantRoot, "swapHoveredWithHotbar", { QVariant(6) });
+                rejectCheck("R5 number-swap");
+                // 光标归位后 R6 Shift+左键（slotShiftLeftEnchant 已附魔守卫）。
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                wrapper->setProperty("shiftHeld", true);
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                wrapper->setProperty("shiftHeld", false);
+                const bool r6 = localIdAt(enchantRoot, "enchantSlots", 0) == 0
+                        && vm.blockIdAt(4) == pick && listEq4(vm.enchantsAt(4), eff3, unb2, 0, 0)
+                        && vm.customNameAt(4) == QStringLiteral("附魔镐");
+                if (!r6) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] R6 shift-reject failed: slot0="
+                                      << localIdAt(enchantRoot, "enchantSlots", 0)
+                                      << "hb4=" << vm.blockIdAt(4) << "ench=" << vm.enchantsAt(4);
+                }
+                // R7 双击合并（t693 门禁过滤：槽 0 素品 + 光标附魔同 id → 收集表剔 gated 槽 → 无操作）。
+                resetEnchant();
+                vm.setStack(3, pick, 1, pickMax, QVariantList(), QString()); // 素品镐
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // 素品入槽 0（gate 放行）
+                vm.setStack(4, pick, 1, pickMax - 5, pickEnch, QStringLiteral("附魔镐"));
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                qmlCall(enchantRoot, "doMergeSameId", { QVariant(QStringLiteral("enchant")), QVariant(0) });
+                const bool r7 = localIdAt(enchantRoot, "enchantSlots", 0) == pick
+                        && listEq4(localEnchAt(enchantRoot, "enchantEnch", 0), 0, 0, 0, 0) // 槽 0 素品不被污染
+                        && vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0);
+                if (!r7) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] R7 double-merge failed: slot0="
+                                      << localIdAt(enchantRoot, "enchantSlots", 0)
+                                      << "slot0ench=" << localEnchAt(enchantRoot, "enchantEnch", 0)
+                                      << "held=" << vm.heldBlock() << "ench=" << vm.heldEnchants();
+                }
+            }
+
+            // ═══ (11) t875b 全链无清洗（青金石槽放入 → 关包归还）═══
+            {
+                resetEnchant();
+                vm.setStack(3, pick, 1, pickMax - 8, QVariantList{eff3, unb2, 0, 0}, QStringLiteral("不清洗"));
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(1) }); // 青金石槽（index 1 无门禁——设计允许任意物）
+                bool step = localIdAt(enchantRoot, "enchantSlots", 1) == pick
+                        && listEq4(localEnchAt(enchantRoot, "enchantEnch", 1), eff3, unb2, 0, 0)
+                        && localNameAt(enchantRoot, "enchantNames", 1) == QStringLiteral("不清洗");
+                if (!step) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] t875b lapis put lost meta: slot1="
+                                      << localIdAt(enchantRoot, "enchantSlots", 1)
+                                      << "ench=" << localEnchAt(enchantRoot, "enchantEnch", 1);
+                }
+                enchantRoot->setProperty("visible", false); // 关包归还（returnEnchantToHotbar 全参）
+                bool found = false;
+                for (int i = 0; i < vm.slotCount() && !found; ++i)
+                    found = vm.blockIdAt(i) == pick && listEq4(vm.enchantsAt(i), eff3, unb2, 0, 0)
+                            && vm.customNameAt(i) == QStringLiteral("不清洗");
+                for (int i = 0; i < vm.mainCount() && !found; ++i)
+                    found = vm.mainBlockIdAt(i) == pick && listEq4(vm.mainEnchantsAt(i), eff3, unb2, 0, 0)
+                            && vm.mainCustomNameAt(i) == QStringLiteral("不清洗");
+                if (!found) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] t875b close-return lost meta";
+                }
+                enchantRoot->setProperty("visible", true);
+            }
+
+            // ═══ (12) t875c 素品附魔正链 → 产物取出带附魔 → 拒再入 ═══
+            {
+                resetEnchant();
+                vm.setStack(3, pick, 1, pickMax, QVariantList(), QString());
+                vm.setStack(4, RecipeRegistry::LapisId, 5);
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // 素品镐入槽 0
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(1) }); // 5 青金石入槽 1
+                const bool pre = localIdAt(enchantRoot, "enchantSlots", 0) == pick
+                        && localIdAt(enchantRoot, "enchantSlots", 1) == RecipeRegistry::LapisId;
+                qmlCall(enchantRoot, "doEnchant", { QVariant(0) }); // 档 1（selectEnchantsForItem 保证 ≥1 条）
+                const QVariantList prod = localEnchAt(enchantRoot, "enchantEnch", 0);
+                const bool hasAny = prod.at(0).toInt() != 0 || prod.at(1).toInt() != 0
+                        || prod.at(2).toInt() != 0 || prod.at(3).toInt() != 0;
+                bool step = pre && localIdAt(enchantRoot, "enchantSlots", 0) == pick && hasAny;
+                if (!step) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] t875c doEnchant product not enchanted: pre=" << pre
+                                      << "prod=" << prod;
+                }
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // 取出产物（held ← 附魔镐）
+                step = vm.heldBlock() == pick && !listEq4(vm.heldEnchants(), 0, 0, 0, 0);
+                if (!step) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] t875c take-out lost ench: held=" << vm.heldBlock()
+                                      << "ench=" << vm.heldEnchants();
+                }
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // 产物再入 → 拒（已附魔）
+                step = localIdAt(enchantRoot, "enchantSlots", 0) == 0 && vm.heldBlock() == pick
+                        && !listEq4(vm.heldEnchants(), 0, 0, 0, 0);
+                if (!step) {
+                    ok875 = false;
+                    qInfo().noquote() << "  [t875 diag] t875c re-entry not rejected: slot0="
+                                      << localIdAt(enchantRoot, "enchantSlots", 0)
+                                      << "heldEnch=" << vm.heldEnchants();
+                }
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(5) }); // 光标归位
+            }
+
+            clearVm();
+        }
+
+        if (!ok874)
+            ++totalFail;
+        qInfo().noquote() << (ok874 ? "PASS" : "FAIL")
+                          << "| t874 real-chain anvil enchant preservation (real QQmlEngine x source-tree "
+                             "AnvilUI.qml x real C++ Hotbar): closes the last probe seam - t792 drove real "
+                             "QML against a mock Hotbar.qml, t822 drove the real VM without any QML; this "
+                             "probe loads the actual AnvilUI.qml+InventoryOps.js with the actual Hotbar/"
+                             "PlayerState injected and clicks via synthesized QMouseEvent through the inline "
+                             "TapHandlers (the exact user path). Entries: mouse left/right on A slot, "
+                             "shift-move, drag single-slot release, double-click pickup, number-key swap, "
+                             "takeProduct repair/combine/merge/rename, close-panel return, save round-trip "
+                             "with VM rebind; categories: tool/weapon(4-ench)/armor/enchanted-book, all "
+                             "with custom names + instance durability asserted at every hop";
+        if (!ok875)
+            ++totalFail;
+        qInfo().noquote() << (ok875 ? "PASS" : "FAIL")
+                          << "| t875 real-chain enchanting-table gate + no-wipe (same harness, real "
+                             "EnchantingTableUI.qml): already-enchanted item rejected on all seven entry "
+                             "paths (mouse left/right on slot 0, right-drag place-one, left-drag "
+                             "redistribute + single-slot fallback, number-key swap, shift-move, "
+                             "double-click merge) while cursor stack keeps id/ench/name intact; lapis-slot "
+                             "sojourn + close-panel return preserves enchant metadata end-to-end (wipe "
+                             "hunt); clean-pick + lapis -> doEnchant tier1 product carries >=1 enchant, "
+                             "take-out keeps it, re-entry rejected";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

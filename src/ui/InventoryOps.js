@@ -24,6 +24,26 @@
 //   均分行为与抽取前一致（人工肉眼，逐面板复测）。
 .pragma library
 
+// ── t874 序列归一（附魔静默清零根因修复）──
+// C++ Q_INVOKABLE 返回 QVariantList（Hotbar::heldEnchants / enchantsAt / mainEnchantsAt /
+//   armorEnchantsAt）在 QML 侧拿到的是**序列对象**（Array-like：length / 下标可读，但
+//   Array.isArray 恒为 false）—— 与真 JS 数组不同源。下游所有 `Array.isArray(enchants) && length===4`
+//   守卫（各面板 localWriteSlot / 附魔台 localCanPlace 门禁 / 光晕判定）会把序列当非法输入兜底成
+//   [0,0,0,0] = **物品进本地槽（铁砧 / 附魔台 / 箱子 / 熔炉 / 合成格 / 发射器）附魔被静默清零**。
+//   这正是「放入铁砧附魔直接没了」「附魔台能放入已附魔物品并清洗」跨七八个版本的根因：
+//   探针链两头不见此环 —— t792 的桩 Hotbar.qml 返回真 JS 数组、t822 纯 C++ 直调不经 JS 序列化，
+//   只有「真 QML × 真 C++ Hotbar」同台时（= 玩家实机）才触发。
+//   本函数把任何 4 槽附魔列表形态（真数组 / C++ 序列 / undefined / 越界）统一归一为真 JS Array<int>(4)。
+//   数据保持方向（列表传回 C++ setHeldEnchants / setStack）两种形态都能转 QVariantList，不受影响；
+//   受影响的只是 JS 侧 Array.isArray 判定 —— 故只需在「读边界」归一。
+function list4(v) {
+    if (!v || typeof v.length !== "number") return [0, 0, 0, 0]
+    const out = [0, 0, 0, 0]
+    for (let i = 0; i < 4; ++i)
+        out[i] = (i < v.length && v[i] !== undefined) ? v[i] : 0
+    return out
+}
+
 // ── 左键整组栈操作（t38）：给定目标槽当前 (curId, curCount, curDur, curEnch, curName) 与光标手持栈
 //    (heldBlock, heldCount, heldDurability, heldEnchants, heldCustomName)，返回应写入的
 //    {slotId, slotCount, slotDur, slotEnch, slotName, heldId, heldCount, heldDur, heldEnch, heldName}；null = 无操作。
@@ -41,9 +61,9 @@ function resolveClick(root, curId, curCount, curDur, curEnch, curName) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
     const heldDur = root.hotbar.heldDurability                            // t263 工具耐久随实例走
-    const heldEnch = root.hotbar.heldEnchants()                           // t475 工具 / 护甲附魔随实例走
+    const heldEnch = list4(root.hotbar.heldEnchants())                    // t475 工具 / 护甲附魔随实例走（t874 序列归一：C++ 返回是序列对象，Array.isArray 恒 false）
     const heldName = root.hotbar.heldCustomName                           // t622 实例名随物品走（空串 = 默认名）
-    const cEnch = curEnch ? curEnch : [0,0,0,0]                           // t475 本地组兜底 4 个 0
+    const cEnch = list4(curEnch)                                          // t874 序列归一（curEnch 可来自 VM 读 / 本地槽，形态不定）
     const cName = (curName === undefined || curName === null) ? "" : curName // t622 本地组兜底空串
     if (heldId === 0) {
         if (curId === 0) return null                                       // 空手点空槽：无操作
@@ -86,9 +106,9 @@ function resolveRightClick(root, curId, curCount, curDur, curEnch, curName) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
     const heldDur = root.hotbar.heldDurability
-    const heldEnch = root.hotbar.heldEnchants()
+    const heldEnch = list4(root.hotbar.heldEnchants())                    // t874 序列归一（同 resolveClick）
     const heldName = root.hotbar.heldCustomName
-    const cEnch = curEnch ? curEnch : [0,0,0,0]
+    const cEnch = list4(curEnch)                                          // t874 序列归一
     const cName = (curName === undefined || curName === null) ? "" : curName
     if (heldId === 0) {
         if (curId === 0) return null                                     // 空手点空槽：无操作
@@ -138,21 +158,24 @@ function resolveRightClick(root, curId, curCount, curDur, curEnch, curName) {
 //      同 enchants 语义——整件搬运路径保真；本地组钩子不返 name → 兜底空串（下游 cName 归一）。**铁砧 / 附魔台
 //      的本地组（anvil/enchant）持名**（AnvilUI/EnchantingTableUI 的 localReadSlot/localWriteSlot 显式透传）。
 function readSlot(root, group, index) {
-    if (group === "main")   return { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index), durability: root.hotbar.mainDurabilityAt(index), enchants: root.hotbar.mainEnchantsAt(index), name: root.hotbar.mainCustomNameAt(index) }
-    if (group === "hotbar") return { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index), durability: root.hotbar.durabilityAt(index), enchants: root.hotbar.enchantsAt(index), name: root.hotbar.customNameAt(index) }
+    let r = null
+    if (group === "main")        r = { id: root.hotbar.mainBlockIdAt(index), count: root.hotbar.mainCountAt(index), durability: root.hotbar.mainDurabilityAt(index), enchants: root.hotbar.mainEnchantsAt(index), name: root.hotbar.mainCustomNameAt(index) }
+    else if (group === "hotbar") r = { id: root.hotbar.blockIdAt(index), count: root.hotbar.countAt(index), durability: root.hotbar.durabilityAt(index), enchants: root.hotbar.enchantsAt(index), name: root.hotbar.customNameAt(index) }
     // t377 装备槽（4 护甲槽：头/胸/腿/脚；index = 部位）。InventoryOps 路由护甲槽读，供 slotShiftLeft「Shift+左键
     //   装备中的护甲 → 整件归还背包」用（同 main/hotbar 经 VM 统一）。t475 含 .enchants（护甲可附魔）。
     //   t622 含 .name（护甲可被铁砧改名 → 装备 / 脱下搬运保真）。
-    if (group === "armor") return { id: root.hotbar.armorBlockIdAt(index), count: root.hotbar.armorCountAt(index), durability: root.hotbar.armorDurabilityAt(index), enchants: root.hotbar.armorEnchantsAt(index), name: root.hotbar.armorCustomNameAt(index) }
-    if (root.localReadSlot) {
-        const r = root.localReadSlot(group, index)
-        // t475 本地组钩子不返 enchants → 补默认 4 个 0（统一结构，下游无 null 判定）。
-        if (!r.enchants) r.enchants = [0, 0, 0, 0]
-        // t622 本地组钩子不返 name → 补默认空串（统一结构）。
-        if (r.name === undefined || r.name === null) r.name = ""
-        return r
+    else if (group === "armor")  r = { id: root.hotbar.armorBlockIdAt(index), count: root.hotbar.armorCountAt(index), durability: root.hotbar.armorDurabilityAt(index), enchants: root.hotbar.armorEnchantsAt(index), name: root.hotbar.armorCustomNameAt(index) }
+    else if (root.localReadSlot) {
+        r = root.localReadSlot(group, index)
+        if (r.name === undefined || r.name === null) r.name = ""   // t622 本地组钩子不返 name → 补默认空串
+    } else {
+        r = { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
     }
-    return { id: 0, count: 0, durability: 0, enchants: [0, 0, 0, 0], name: "" }
+    // t874 序列归一：main/hotbar/armor 的 enchants 来自 C++ Q_INVOKABLE（序列对象）+ 本地组钩子可能不返 ——
+    //   统一归一为真 JS Array(4)。readSlot 是**所有槽读的单一咽喉**（resolveClick / placeOne / redistribute /
+    //   shift / swap / doMerge 全经它），在此归一 → 下游 Array.isArray 守卫（面板 localWriteSlot 等）恒见真数组。
+    r.enchants = list4(r.enchants)
+    return r
 }
 function writeSlot(root, group, index, id, count, durability, enchants, name) {
     // t263 durability 缺省 -1（=自动：工具满耐久 / 非工具 0）；resolveClick 等显式传实例耐久时保真。
@@ -245,7 +268,7 @@ function beginLeftDrag(root) {
     root.dragHeldId = root.hotbar.heldBlock
     root.dragHeldCount = root.hotbar.heldCount
     root.dragHeldDurability = root.hotbar.heldDurability
-    root.dragHeldEnchants = root.hotbar.heldEnchants()
+    root.dragHeldEnchants = list4(root.hotbar.heldEnchants())   // t874 序列归一（松手回填 / canPlace 参数下游全按数组判定）
     root.dragHeldName = root.hotbar.heldCustomName
     root.dragSlots = []
     root.dragOriginal = ({})                        // t98：重置原始栈快照
@@ -446,7 +469,7 @@ function placeOneInSlot(root, group, index) {
     const heldId = root.hotbar.heldBlock
     const heldCount = root.hotbar.heldCount
     const heldDur = root.hotbar.heldDurability
-    const heldEnch = root.hotbar.heldEnchants()
+    const heldEnch = list4(root.hotbar.heldEnchants())               // t874 序列归一（canPlace / 空槽开新写入下游按数组判定）
     const heldName = root.hotbar.heldCustomName               // t622 实例名随物品走
     if (heldId === 0 || heldCount <= 0) return false    // 空手：无物可放
     const cur = readSlot(root, group, index)
