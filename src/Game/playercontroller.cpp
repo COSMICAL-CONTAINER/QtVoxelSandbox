@@ -2596,6 +2596,17 @@ void PlayerController::updateFishing(float dt)
     }
     // 镜像实体侧浮标位置 / 咬钩态（Game 层只读拉取；呈现层绑 Q_PROPERTY 消费——不反向写实体）。
     const QVector3D p = m_entityManager->posAt(m_bobberEntityIdx);
+    // t881 鱼线最大长度断线（MC 32 格口径，kFishLineMaxLen 头注释）：玩家眼位到浮标 3D 距离超限 → 浮标
+    //   消散移除 + 钓鱼态复位（无获物 / 无耐久 / 无挥手——线被扯断不是收竿动作）。放在镜像写之前：断线
+    //   帧不再镜像陈旧位。检测在 Game 层（Entities 层 tick 不持玩家真实位；线长是「玩家—浮标」收竿域语义）。
+    if ((p - position()).length() > kFishLineMaxLen) {
+        m_entityManager->removeEntityAt(m_bobberEntityIdx);
+        m_bobberEntityIdx = -1;
+        m_fishing = false;
+        m_hasBite = false;
+        emit fishingChanged();
+        return;
+    }
     const bool bite = m_entityManager->bobberHasBiteAt(m_bobberEntityIdx);
     if (p != m_bobberPos || bite != m_hasBite) {
         m_bobberPos = p;

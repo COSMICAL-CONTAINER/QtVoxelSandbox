@@ -1728,6 +1728,13 @@ private:
     static constexpr float kFishCatchFlySpeed     = 4.5f;
     static constexpr float kFishHookPullSpeed     = 6.0f;
     static constexpr int   kFishHookDurabilityCost = 5;
+    // t881 鱼线最大长度（blocks；玩家眼位到浮标的 3D 距离超此值断线——机制等价 MC 1.0 钓竿 ~32 格线长上限）。
+    //   断线 = 浮标消散移除 + 钓鱼态复位，**无获物 / 无耐久消耗 / 无挥手**（线被扯断不是玩家收竿动作）。
+    //   甩程本身 ≤~19 格（kFishCastSpeed × 轻重力 12 的 45° 满甩）永远到不了 32 → 触发面只有两个：玩家甩后
+    //   走远 / 被钩 mob 拖着浮标（Hooked 跟随其位）游远。检测在 Game 层 updateFishing 镜像段——线长语义是
+    //   「玩家—浮标」关系，收口在收竿语义所在的 Game 层（Entities 层 tick 的 playerPos 是远置哑元探针位，
+    //   不承载玩家真实位；分层：Entities 承载浮标物理，Game 收口语义）。
+    static constexpr float kFishLineMaxLen        = 32.0f;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
     // t388/t457 睡觉机制常量（机制对齐 MC 1.0 床：fade 后跳清晨、床周有敌对即拒绝；数值为本工程小世界量身调）。
