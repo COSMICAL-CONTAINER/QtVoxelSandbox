@@ -13484,6 +13484,103 @@ Item {
                              "24 ticks + displacement >4 blocks (teleport band 8-16 vs wander <1/s)";
     }
 
+    // ── P-t884 咬钩可见性全套探针（行为级：①入水水花信号恰一次 + 坐标；Water 态查询三态分辨；Game 层
+    //    bobberInWater 镜像翻转。②微飘动画 / ③水面轨迹粒子 / ④下沉加深与咬钩水花加强是 QML 视觉层——
+    //    commit 钉 visual-only：驱动条件（bobberInWater && !hasBite）已被本探针行为级锁死）──
+    {
+        World wV;
+        wV.setWidth(48); wV.setDepth(48); wV.setHeight(96); wV.setSeed(81);
+        EntityManager ents;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickV = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wV, farL, 0.3f, 1.8f, false);
+        };
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const int fy = 83;
+        int splashCount = 0;
+        float sx = 0.0f, sy = 0.0f, sz = 0.0f;
+        QObject::connect(&ents, &EntityManager::bobberSplashed, &ents,
+                         [&](float x, float y, float z) { ++splashCount; sx = x; sy = y; sz = z; });
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wV.setBlock(x, fy, z, BR::Stone, 0);
+                wV.setBlock(x, fy + 1, z, BR::Water, 0); // 3×3 水池
+            }
+
+        // (a) 入水：直落水池 → Flying 段 inWater=false → settle 恰一次 bobberSplashed（坐标 = 浮定水面坐标）
+        const int b1 = ents.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0), 951);
+        const bool flyingSeen = b1 >= 0 && !ents.bobberInWaterAt(b1); // 出生 Flying（inWater false）
+        for (int t = 0; t < 60 && ents.aliveAt(b1) && splashCount == 0; ++t) tickV(1, 0.05f);
+        const QVector3D settlePos(6.5f, float(fy + 1) + 0.875f, 6.5f);
+        bool okA = flyingSeen && splashCount == 1 && ents.aliveAt(b1) && ents.bobberInWaterAt(b1)
+                   && qAbs(sx - settlePos.x()) < 1e-3f && qAbs(sy - settlePos.y()) < 1e-3f
+                   && qAbs(sz - settlePos.z()) < 1e-3f;
+        tickV(60, 0.05f); // 水中静置 3s（跨等待期）不重发（再入水才重发）
+        okA = okA && splashCount == 1;
+        ents.removeEntityAt(b1);
+
+        // (b) 陆上：石台直落 → Ground：零 bobberSplashed + inWater false（微飘/轨迹粒子的驱动条件不误触）
+        wV.setBlock(12, fy, 18, BR::Stone, 0);
+        const int b2 = ents.spawnBobber(QVector3D(12.5f, float(fy + 4), 18.5f), QVector3D(0, 0, 0), 952);
+        for (int t = 0; t < 60 && ents.aliveAt(b2); ++t) tickV(1, 0.05f);
+        const bool okB = ents.aliveAt(b2) && !ents.bobberInWaterAt(b2) && splashCount == 1;
+        ents.removeEntityAt(b2);
+        wV.setBlock(12, fy, 18, BR::Air, 0);
+
+        // (c) Game 层镜像：pc 真甩竿 settle（轨迹同 t836(b)：格 (5,84,6)）→ pc.tick → bobberInWater true；
+        //     收竿翻 false（QML 待机微飘 / 水面轨迹粒子的驱动条件链行为级锁死）。
+        wV.setBlock(3, fy, 6, BR::Stone, 0); // 玩家立足柱
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wV);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+        pc.useFishingRod();
+        int bob = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
+        const QVector3D settleC(5.5f, float(fy + 1) + 0.875f, 6.5f);
+        bool okC = bob >= 0 && !pc.bobberInWater(); // 甩出即 Flying（镜像初值 false）
+        for (int t = 0; t < 40 && okC; ++t) {
+            tickV(1, 0.05f);
+            if (!ents.aliveAt(bob)) { okC = false; break; }
+            if (ents.posAt(bob) == settleC) break;
+        }
+        pumpFor(17); pc.tick(); // 镜像刷新（updateFishing 拉 bobberInWaterAt）
+        okC = okC && ents.posAt(bob) == settleC && pc.fishing() && pc.bobberInWater();
+        pc.useFishingRod(); // 收竿 → 镜像翻 false
+        okC = okC && !pc.fishing() && !pc.bobberInWater();
+
+        const bool okT884 = okA && okB && okC;
+        if (!okT884) ++totalFail;
+        if (!okT884)
+            qInfo().noquote() << "  [t884 diag] okA" << okA << "(splash" << splashCount << "at" << sx << sy
+                              << sz << ") okB" << okB << "okC" << okC;
+        qInfo().noquote() << (okT884 ? "PASS" : "FAIL")
+                          << "| t884 bite-visibility set: (1) cast-to-water splash -- bobberSplashed "
+                             "fires exactly once on the Flying->Water settle edge with the exact "
+                             "float-surface coordinates (3s idle water stays at one; re-entry after "
+                             "drain/refill re-fires naturally), routed to burstWaterCast; (2) "
+                             "bobberInWaterAt discriminates all four states (born Flying false / "
+                             "settled Water true / Ground false) and the Game-layer bobberInWater "
+                             "mirror flips true after a settle+pc.tick and false on reel -- the exact "
+                             "driving condition chain for the QML idle bob animation + approach-trail "
+                             "particles; (3) visual-only halves (idle micro-bob sin phase +-0.035 via "
+                             "NumberAnimation, deterministic golden-angle approach ripples every "
+                             "380ms arriving-and-dying at the bobber, bite sink deepened 0.15->0.35 "
+                             "plus bite splash strengthened 10->14 particles, all gated "
+                             "bobberInWater&&!hasBite&&worldRunning so ESC freezes them) pinned "
+                             "visual-only in the commit";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

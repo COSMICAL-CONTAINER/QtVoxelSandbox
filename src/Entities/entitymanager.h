@@ -366,6 +366,10 @@ public:
     //   Bobber → false / -1（同 aliveAt 越界安全语义）。
     Q_INVOKABLE bool bobberHasBiteAt(int i) const;
     Q_INVOKABLE int bobberHookedMobAt(int i) const;
+    // t884 浮标是否在水中浮定态（Water 态——待机 / 咬钩窗口循环中；区别 Flying / Ground / Hooked）。供 Game
+    //   层镜像 bobberInWater（QML 待机微飘 / 水面轨迹粒子的驱动条件——只在水面待咬段播，陆上静止 / 飞行 /
+    //   钉 mob 段不播）。越界 / 非活体 Bobber → false（同 bobberHasBiteAt 越界安全语义）。
+    Q_INVOKABLE bool bobberInWaterAt(int i) const;
     // t836 确定性等待掷骰（纯函数，矩阵探针直调锁两端可达）：h → kBobberWaitMinSec + (h % 2501) × 0.01
     //   ∈ [5.00, 30.00] 秒（h%2501∈[0,2500] → 两端恰可达：0 → 5.00 / 2500 → 30.00）。机制等价 MC 1.0
     //   「浮标入水后等 5-30s」区间；确定性来源 = World::hashVoxel(seed ^ 盐 ^ 甩竿序号)（PLAN §2-K，t791 同模式）。
@@ -992,6 +996,11 @@ signals:
     // t836 钓鱼浮标鱼跑（咬钩窗口过期、玩家未及时收竿时发）：坐标 = 浮标 float 世界坐标（呈现层据它迸发小股
     //   水花提示「鱼跑了」）。之后 Entities 层内部重掷新确定性等待（甩竿序号自增），无需呈现层参与。
     void bobberEscaped(float x, float y, float z);
+    // t884 甩竿入水水花（Bobber Flying → Water 浮定沿发；坐标 = 浮定水面坐标（格心 + 液面 − kBobberFloatDip））：
+    //   呈现层（Main.qml）转发 BlockParticles.burstWaterCast 在入水点迸小水花——「甩到了」的可见反馈（用户
+    //   「完全看不到水花/上钩动画导致钓不到」①）。排水 / 填方后重新落水会再次浮定 → 再发（自然的再入水）。
+    //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费；陆上 Ground / 钉 mob 不发）。
+    void bobberSplashed(float x, float y, float z);
     // t728 燃烬者火球命中玩家着火（机制等价 MC 1.0 烈焰人火球点燃玩家）：Fireball tick 命中玩家时发 —— 伤害
     //   5 走 mobAttackedPlayer（见上，死因 Emberling），着火由本信号另行驱动（呈现层 Main.qml 路由到
     //   player.applyStatusEffect(EffectFire, 秒数, 1)，刷新 m_fireTimer）。单次命中两者成对发（QML 均消费）；

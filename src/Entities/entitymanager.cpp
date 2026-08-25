@@ -745,6 +745,15 @@ int EntityManager::bobberHookedMobAt(int i) const
     return e.bobberState == kBobberStHooked ? e.bobberHookedIdx : -1;
 }
 
+// t884 浮标水中浮定态查询（Game 层镜像 bobberInWater 用；见 .h 头注释）：越界 / 非活体 Bobber → false。
+bool EntityManager::bobberInWaterAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Bobber) return false;
+    return e.bobberState == kBobberStWater;
+}
+
 // t889 暂停期墙钟顺延（语义见 .h 声明处头注释）：活体槽 arrowSpawnMs 整体 +ms。ms<=0 早退（幂等防御）。
 //   只动墙钟字段，不动位置 / 速度 / bobber 计时（那些走 dt，tick 停即冻结），无 revision bump（纯寿命
 //   簿记，无呈现变化）。
@@ -5793,6 +5802,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.bobberHasBite = false;
                 e.bobberBiteTimer = bobberWaitSeconds(world->hashVoxel(
                     int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), bx, by, bz));
+                emit bobberSplashed(e.pos.x(), e.pos.y(), e.pos.z()); // t884 ① 入水水花（浮定沿；呈现层 burstWaterCast）
                 dirty = true;
                 continue;
             }

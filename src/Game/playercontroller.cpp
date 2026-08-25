@@ -2524,6 +2524,7 @@ void PlayerController::useFishingRod()
         m_bobberEntityIdx = -1;
         m_fishing = false;
         m_hasBite = false;
+        m_bobberInWater = false;
         emit fishingChanged();
         emit swingArm(); // 收竿挥手反馈（一次「使用」动作）
         if (!valid) return; // 浮标已消散（出界 / 寿命）→ 无结算
@@ -2595,6 +2596,7 @@ void PlayerController::useFishingRod()
     m_bobberPos = eye; // 首帧镜像（甩出点；后续 tick 由实体位置刷新）
     m_fishing = true;
     m_hasBite = false;
+    m_bobberInWater = false; // 甩出即 Flying（入水浮定后 updateFishing 镜像翻 true）
     emit fishingChanged();
     emit swingArm(); // 甩竿挥手反馈
 }
@@ -2617,6 +2619,7 @@ void PlayerController::updateFishing(float dt)
         m_bobberEntityIdx = -1;
         m_fishing = false;
         m_hasBite = false;
+        m_bobberInWater = false;
         emit fishingChanged();
         return;
     }
@@ -2630,13 +2633,16 @@ void PlayerController::updateFishing(float dt)
         m_bobberEntityIdx = -1;
         m_fishing = false;
         m_hasBite = false;
+        m_bobberInWater = false;
         emit fishingChanged();
         return;
     }
     const bool bite = m_entityManager->bobberHasBiteAt(m_bobberEntityIdx);
-    if (p != m_bobberPos || bite != m_hasBite) {
+    const bool inWater = m_entityManager->bobberInWaterAt(m_bobberEntityIdx);
+    if (p != m_bobberPos || bite != m_hasBite || inWater != m_bobberInWater) {
         m_bobberPos = p;
         m_hasBite = bite;
+        m_bobberInWater = inWater;
         emit fishingChanged();
     }
 }
@@ -2654,6 +2660,7 @@ void PlayerController::cancelFishing()
     m_bobberEntityIdx = -1;
     m_fishing = false;
     m_hasBite = false;
+    m_bobberInWater = false;
     emit fishingChanged();
 }
 
