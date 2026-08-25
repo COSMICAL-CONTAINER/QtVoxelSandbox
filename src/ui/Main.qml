@@ -13073,6 +13073,10 @@ Window {
                 }
             }
         }
+        // review25 #15：dock 自身高度变化钳位——首次拖动断 y 绑定贴底后 hover 展开（36 → ~90+）使底边
+        //   溢出视口（「最近解锁」名单下沿出屏；收起自愈但展开窗内不可见）。clampIntoView 只越界才写 y
+        //   （未拖动时 y 默认绑定随 height 联动不触发写入 = 绑定不受扰；拖动后断绑定的会话态由本钳位接管）。
+        onHeightChanged: clampIntoView()
         // 窗口缩放后钳回视口（拖动已断默认绑定，越界不自动跟随；只越界才写 x/y —— 未拖动时默认绑定不受扰）。
         Connections {
             target: achQuickDock.parent

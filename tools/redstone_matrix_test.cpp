@@ -6990,6 +6990,117 @@ int main(int argc, char *argv[])
                              "while roofed control fire only dies by consuming its own fuel (skyLight<15 "
                              "not rained on); suppression predicates factored into "
                              "fireRainExposedAt/fireWaterNeighborAt for t843 fire-semantics redo to adopt";
+
+    // ── Review 2026-08-25 #9 雨浇门对偶半扇守卫探针（world.cpp 门烧尽收尾补 fireRainExposedAt）──
+    //   场景（review 原文）：露天门整扇点燃后某半扇被雨浇熄掷中「火灭块存」，对偶随后烧尽时收尾守卫旧只判
+    //   !fireWaterNeighborAt → 被雨救下的半扇仍被连带清 Air + 误发 blockBroken（水泼保得住、雨浇保不住——
+    //   抑制源行为不对称）。确定性构造走「点燃时无对偶、后补放的半门」收尾面（world.cpp (d) 注释自列；避开
+    //   双半扇同窗浇熄竞态掷骰）：① 转降雨（tickWeather 大步长，review-g #5 (d) 同款；rig 木料未放 → 雷态
+    //   路过无焚木混淆）后布列——各列全列凿空（seed 9 地形可达 y44+，t769 教训不假设高空必空）+ 石板屋顶
+    //   （gy+2，挡天光 → 下扇整程不被雨掷浇熄）+ 门下扇（上格 Air → 联动不触发，只点下扇，10 窗计时）；
+    //   ② 烧 9/10 窗（45 tickFire；屋顶护体 → 降雨下零浇熄掷骰）；③ 撤顶（skyLight 重 flood 回 15）+ 后补
+    //   门上扇（bit3=1，非燃烧态——守卫的判击对象）→ 第 10 窗下扇烧尽收尾查对偶：仍是门 / 未在燃 / 无水邻 /
+    //   露天真（fireRainExposedAt）→ 修复后半扇 WoodDoor 原样保住，未修则连带 Air + blockBroken。
+    //   断言：① burnout 列（下扇非 WoodDoor = 烧尽路径；第 10 窗 40% 浇熄掷中的存活列不算）上扇一律仍
+    //   WoodDoor；② 第 10 窗 WoodDoor blockBroken 恒 0（烧毁走 setBlock(Fire) 放置语义无 broken → 对偶
+    //   连带 Air 是唯一 broken 源，守卫的直证）；③ 场景 ≥1 列（多列铺开压浇熄掷骰；hashVoxel 固定 seed →
+    //   结果确定性，本轮实测锁定）。非降水列 / 撤顶后仍不露天列被前置校验剔除（守卫本就不该触发）。
+    {
+        World wR9;
+        wR9.setWidth(96); wR9.setDepth(96); wR9.setHeight(48); wR9.setSeed(9);
+        const int gy9 = 41; // rig 层（review-g #5 同款 seed 9 布局带）
+        constexpr int kColsR9 = 20;
+        const auto colXR9 = [](int k) { return 8 + 3 * k; }; // 列距 3 → 门互不 6 邻（同态蔓延不串列）
+        // 先转降雨（rig 木料未放，雷态路过只可能落自然火——列布局后再无 tickWeather 调用）。
+        for (int i = 0; i < 60; ++i) {
+            wR9.tickWeather(1.0e6);
+            const int st = wR9.weatherState();
+            if (st == 1 || st == 2) break; // Rain/Snow（Thunder=3 继续翻——rig 未放木料无雷击焚木面）
+        }
+        // z 带：20 列里降水覆盖 ≥8 才用（biomeAt 低频，成带存在；isPrecipitatingAt 全局 Clear 恒 false →
+        //   必须在降雨态下扫，review-g #5 (d) 先例）。
+        int zR9 = -1;
+        for (int z = 12; z < 92 && zR9 < 0; z += 2) {
+            int n = 0;
+            for (int k = 0; k < kColsR9; ++k)
+                if (wR9.isPrecipitatingAt(colXR9(k), z)) ++n;
+            if (n >= 8) zR9 = z;
+        }
+        bool okKeep = false, okNoBreak = false, okScenario = false;
+        int burnouts9 = 0, used9 = 0;
+        QString diag9 = QStringLiteral("precip z not found");
+        if (zR9 >= 0) {
+            diag9.clear();
+            // ① 布列：全列凿空（gy-1..47——屋顶以上到世界顶全清，保证撤顶后列内天光直达）→ 屋顶 → 门下扇 → 点燃。
+            for (int k = 0; k < kColsR9; ++k) {
+                const int x = colXR9(k);
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int y = gy9 - 1; y <= 47; ++y)
+                            wR9.setBlock(x + dx, y, zR9 + dz, BR::Air, 0);
+                wR9.setBlock(x, gy9 + 2, zR9, BR::Stone, 0); // 屋顶（skyLight<15 → 下扇不吃雨浇熄掷骰）
+                wR9.setBlock(x, gy9, zR9, BR::WoodDoor, 0);  // 门下扇（bit3=0；上格 Air → 联动不触发）
+                wR9.igniteFlammableAt(x, gy9, zR9);
+            }
+            // ② 烧 9/10 窗：计时 10→1（晴天 / 屋顶双保险下零浇熄路径）。
+            for (int t = 0; t < 45; ++t) wR9.tickFire();
+            // ③ 撤顶 + 后补上扇（此刻上下扇皆露天真——下扇仅剩 1 窗计时，第 10 窗才有浇熄掷骰 40%/列）。
+            for (int k = 0; k < kColsR9; ++k) {
+                const int x = colXR9(k);
+                wR9.setBlock(x, gy9 + 2, zR9, BR::Air, 0);
+                wR9.setBlock(x, gy9 + 1, zR9, BR::WoodDoor, 8);
+            }
+            // 前置校验（剔除非降水 / 不露天 / 下扇已非燃 / 上扇已燃的列——守卫对它们本就不该触发）。
+            bool part9[kColsR9] = {};
+            for (int k = 0; k < kColsR9; ++k) {
+                const int x = colXR9(k);
+                part9[k] = wR9.isPrecipitatingAt(x, zR9)
+                           && wR9.skyLightAt(x, gy9 + 1, zR9) >= 15
+                           && wR9.blockAt(x, gy9, zR9) == BR::WoodDoor
+                           && wR9.isBurningAt(x, gy9, zR9)
+                           && wR9.blockAt(x, gy9 + 1, zR9) == BR::WoodDoor
+                           && !wR9.isBurningAt(x, gy9 + 1, zR9);
+                if (part9[k]) ++used9;
+            }
+            int doorBreaks9 = 0; // 只计第 10 窗（布列 / 撤顶 / 后补的 setBlock 无 WoodDoor→Air；清理在计数窗外）
+            QObject::connect(&wR9, &World::blockBroken, &wR9,
+                             [&](int, int, int, int oldId) { if (oldId == int(BR::WoodDoor)) ++doorBreaks9; });
+            for (int t = 0; t < 5; ++t) wR9.tickFire(); // 第 10 窗：浇熄掷骰（40%）或烧尽收尾
+            okKeep = true;
+            for (int k = 0; k < kColsR9; ++k) {
+                if (!part9[k]) continue;
+                const int x = colXR9(k);
+                if (wR9.blockAt(x, gy9, zR9) != BR::WoodDoor) { // 烧尽（余烬 Fire / Air 均非门）
+                    ++burnouts9;
+                    if (wR9.blockAt(x, gy9 + 1, zR9) != BR::WoodDoor) okKeep = false; // 对偶被连带清 = 守卫缺
+                }
+            }
+            okNoBreak = doorBreaks9 == 0;
+            okScenario = burnouts9 >= 1;
+            if (!okKeep || !okNoBreak || !okScenario)
+                diag9 = QStringLiteral("zR9 %1 used %2 burnouts %3 breaks %4 keep %5")
+                            .arg(zR9).arg(used9).arg(burnouts9).arg(doorBreaks9).arg(okKeep);
+            // 清理（探针世界即弃；计数已收口）
+            for (int k = 0; k < kColsR9; ++k) {
+                const int x = colXR9(k);
+                wR9.setBlock(x, gy9, zR9, BR::Air, 0);
+                wR9.setBlock(x, gy9 + 1, zR9, BR::Air, 0);
+            }
+        }
+        const bool okR9 = okKeep && okNoBreak && okScenario;
+        if (!okR9) ++totalFail;
+        qInfo().noquote() << (okR9 ? "PASS" : "FAIL")
+                          << "| review25 #9 rain-saved door half survives burn-out cleanup: with rain forced "
+                             "upfront (big-step tickWeather), each column burns a lone lower door half under "
+                             "a stone roof (roof keeps skyLight<15 so no douse rolls) for 9 of 10 windows, "
+                             "then roof removed + paired upper half placed + sky reflooded to 15 right "
+                             "before the final window so burn-out cleanup sees an un-burnt rain-exposed "
+                             "pair; every burnout column keeps the upper half as WoodDoor, zero WoodDoor "
+                             "blockBroken during the final window (stray pair-clear-to-Air is the only "
+                             "possible broken source), >=1 burnout scenario asserted across 20 spread "
+                             "columns (40%/window douse roll on the now-exposed lower half is the only "
+                             "skip path; hashVoxel-seeded so the outcome is deterministic)";
+    }
     }
 
     // ── P-t843 可燃物直燃语义重做探针（专用局部世界 wT，P30/P31/review-g#5 先例）──
@@ -7448,7 +7559,10 @@ int main(int argc, char *argv[])
     //       冷却过 2s 后再造沿 → 必再弹（+1 实体 / 库存 2→1，t814 ③ 口径）——冷却闸对 TNT 分支不回归；
     //   (c) 投掷器 + TNT → 普通掉落物弹出**不点燃**（dropper 只投不射口径——两路径边界的另一侧：dropper
     //       弹 TNT 是物品非引燃实体）+ 库存照扣；
-    //   (d) 红石直接邻接 TNT 原地引爆（firePowerTnt 清方块 + 原格生成）不回归由 t814 (a) 既有探针复跑覆盖。
+    //   (d) review25 #11 排出口占用门：发射面邻格被实体方块堵住 → 不在墙格内 spawn（primed 水平积分不查
+    //       碰撞 → 墙格 spawn = ~5s 后就地爆穿墙波及发射器自身）；沿朝向再探一格生成，仍堵 → 退化普通
+    //       掉落物弹出（不点燃；MC 堵口不弹的近似取舍——物品形态可回收，不静默吞 TNT）；
+    //   (e) 红石直接邻接 TNT 原地引爆（firePowerTnt 清方块 + 原格生成）不回归由 t814 (a) 既有探针复跑覆盖。
     {
         PlayerController pc;
         EntityManager ents;
@@ -7474,6 +7588,9 @@ int main(int argc, char *argv[])
             const auto [x0, z0] = nextSlot();
             tx0 = x0; tz0 = z0;
             placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0); // state 0 → 朝 +X（chestFrontFace 解码）
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0); // 凿空发射面（review25 #11 起 spawn 前查占用；新 rig 行
+                                                        //   z≥97 地形可达 y41（t814 深度扩展带）→ 不凿则探针
+                                                        //   走「堵口退化」分支非本段口径）
             store.ensureDispenser(x0, kRigY, z0);
             store.setSlot(x0, kRigY, z0, 0, BR::TntBlock, 3);
             tickN(w, 2);
@@ -7562,7 +7679,79 @@ int main(int argc, char *argv[])
             tickN(w, 2);
         }
 
-        const bool okT856 = okA && okAFuse && okAMove && okB && okC;
+        // (d) review25 #11 排出口占用门：发射面邻格被实体方块堵住 → 不在墙格内 spawn TNT（primed 水平积分
+        //     不查碰撞 → 墙格内 spawn = ~5s 后就地爆穿墙并波及发射器自身）。两段：
+        //     d1 邻格墙、再探格空 → PrimedTnt 生成在再探格（x0+2）格心（沿朝向弹出到可达空位）+ 库存照扣；
+        //     d2 邻格 + 再探格都墙 → 零 PrimedTnt + 掉落物 +1（退化物品形态不点燃）+ 库存照扣。
+        bool okD1 = false, okD2 = false;
+        {
+            // d1：堵一格 → 弹到 x0+2（再探格空）。
+            const auto [xa, za] = nextSlot();
+            placeRigBlock(w, xa, kRigY, za, BR::Dispenser, 0); // state 0 → 朝 +X
+            w.setBlock(xa + 2, kRigY, za, BR::Air, 0); // 凿空再探格（z≥97 新行地形可达 y41；墙格由下方覆写）
+            store.ensureDispenser(xa, kRigY, za);
+            store.setSlot(xa, kRigY, za, 0, BR::TntBlock, 3);
+            placeRigBlock(w, xa + 1, kRigY, za, BR::Stone, 0); // 堵口墙（发射面邻格）
+            tickN(w, 2);
+            placeRigBlock(w, xa - 1, kRigY, za, BR::Lever, 1); // 源贴背面
+            tickN(w, 4);
+            int idxD = -1;
+            for (int i = 0; i < ents.count(); ++i) // 找「再探格格心」的 PrimedTnt（ents 内有 (a)/(b) 冻结残留）
+                if (ents.isPrimedAt(i)
+                    && std::abs(ents.posAt(i).x() - (xa + 2.5f)) < 1e-3f
+                    && std::abs(ents.posAt(i).y() - (kRigY + 0.5f)) < 1e-3f
+                    && std::abs(ents.posAt(i).z() - (za + 0.5f)) < 1e-3f) { idxD = i; break; }
+            bool noneInWall = true; // 墙格（xa+1）内不得有任何新 PrimedTnt（旧版就地 spawn 的位置）
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.isPrimedAt(i) && std::abs(ents.posAt(i).x() - (xa + 1.5f)) < 1e-3f
+                    && std::abs(ents.posAt(i).z() - (za + 0.5f)) < 1e-3f)
+                    noneInWall = false;
+            okD1 = idxD >= 0 && noneInWall
+                   && store.slotIdAt(xa, kRigY, za, 0) == BR::TntBlock
+                   && store.slotCountAt(xa, kRigY, za, 0) == 2; // 库存 3→2
+            if (!okD1)
+                qInfo().noquote() << "  [t856 d1 diag] pos=" << (idxD >= 0 ? ents.posAt(idxD) : QVector3D())
+                                  << " expect=(" << xa + 2.5f << "," << kRigY + 0.5f << "," << za + 0.5f << ")"
+                                  << " noneInWall=" << noneInWall
+                                  << " slotCount=" << store.slotCountAt(xa, kRigY, za, 0)
+                                  << " b1=" << int(w.blockAt(xa + 1, kRigY, za))
+                                  << " cb1=" << w.collisionAABBsAt(xa + 1, kRigY, za).size()
+                                  << " b2=" << int(w.blockAt(xa + 2, kRigY, za))
+                                  << " cb2=" << w.collisionAABBsAt(xa + 2, kRigY, za).size();
+            w.setBlock(xa - 1, kRigY, za, BR::Air, 0);
+            w.setBlock(xa, kRigY, za, BR::Air, 0);
+            w.setBlock(xa + 1, kRigY, za, BR::Air, 0);
+            store.clearDispenser(xa, kRigY, za);
+            tickN(w, 2);
+
+            // d2：堵两格（邻格 + 再探格）→ 退化普通掉落物弹出（不点燃）。
+            const auto [xb, zb] = nextSlot();
+            const int itemsBefore = items.count();
+            const int primedBefore = primedCount();
+            placeRigBlock(w, xb, kRigY, zb, BR::Dispenser, 0);
+            store.ensureDispenser(xb, kRigY, zb);
+            store.setSlot(xb, kRigY, zb, 0, BR::TntBlock, 2);
+            placeRigBlock(w, xb + 1, kRigY, zb, BR::Stone, 0);
+            placeRigBlock(w, xb + 2, kRigY, zb, BR::Stone, 0);
+            tickN(w, 2);
+            placeRigBlock(w, xb - 1, kRigY, zb, BR::Lever, 1);
+            tickN(w, 4);
+            okD2 = primedCount() == primedBefore              // 零 PrimedTnt（不在墙格 / 再探格内引爆实体）
+                  && items.count() == itemsBefore + 1          // TNT 以掉落物形态弹出（可回收，不静默吞）
+                  && store.slotCountAt(xb, kRigY, zb, 0) == 1; // 库存照扣
+            if (!okD2)
+                qInfo().noquote() << "  [t856 d2 diag] items=" << items.count() << "/" << itemsBefore
+                                  << " primed=" << primedCount() << "/" << primedBefore
+                                  << " slotCount=" << store.slotCountAt(xb, kRigY, zb, 0);
+            w.setBlock(xb - 1, kRigY, zb, BR::Air, 0);
+            w.setBlock(xb, kRigY, zb, BR::Air, 0);
+            w.setBlock(xb + 1, kRigY, zb, BR::Air, 0);
+            w.setBlock(xb + 2, kRigY, zb, BR::Air, 0);
+            store.clearDispenser(xb, kRigY, zb);
+            tickN(w, 2);
+        }
+
+        const bool okT856 = okA && okAFuse && okAMove && okB && okC && okD1 && okD2;
         if (!okT856) ++totalFail;
         qInfo().noquote() << (okT856 ? "PASS" : "FAIL")
                           << "| t856 dispenser fires primed TNT: lever behind a 3-TNT dispenser pops a "
@@ -7574,7 +7763,12 @@ int main(int argc, char *argv[])
                              "powerDispenserTriggered still emits, cooldown driven past 2s then re-edge "
                              "MUST re-pop (+1 entity, stock 2->1); dropper w/ TNT pops a plain item drop "
                              "with zero primed entities (dropper = item-only, the other side of the "
-                             "two-path boundary); redstone-direct-adjacent in-place priming regression is "
+                             "two-path boundary); blocked firing face (review25 #11) pops TNT at the "
+                             "next cell along facing when only the adjacent cell is walled (never "
+                             "inside the wall cell), fully-walled exit degrades to a plain item drop "
+                             "with zero primed entities (MC-approximate: recoverable item over silent "
+                             "swallow), stock decremented on every path; "
+                             "redstone-direct-adjacent in-place priming regression is "
                              "covered by the t814(a) probe above";
     }
 
@@ -10051,6 +10245,10 @@ int main(int argc, char *argv[])
     //        无消耗干净收场 + 镜像惰性（clearAll 后 fishing 态仍在，tick/收竿才收）+ updateFishing 失效
     //        自动收竿源序钉（pc.tick 的 captured 门在无窗探针不可达——直调会先走 !m_captured 早退分支的
     //        cancelFishing 掩盖镜像路径，行为级不可达、以 t836(e) 源码钉手法锁语句面，取舍声明）。
+    //    (h) review25 #12 Ground 态支撑复查：挖掉贴靠方块 → ≤40 tick 转 Flying 下坠（旧版悬空滞留至
+    //        180s 寿命兜底）；
+    //    (i) review25 #13 实体格命中门：1 格墙后贴壁猪 + 高速飞行浮标（next 一跳入墙格且在猪外扩命中
+    //        盒内）→ 贴面 Ground 不隔墙钩（旧序先钩后碰会隔墙钩住）。
     {
         // 镜像常量（P18 模式，改值须两处同步；Entities 层 kBobberWaitHashSalt / kBobberBiteWindowSec 与
         //   Game 层 kFishCatchFlySpeed 均探针不可达私有）：
@@ -10276,7 +10474,12 @@ int main(int argc, char *argv[])
                     wF.setBlock(x, fy, z, BR::Stone, 0);
             const int pig = ents.spawnMobTyped(16, fy + 1, 6, EntityManager::MobPig,
                                                QStringLiteral("#e8a0a0"), 10);
-            tickB(30, 0.05f); // 猪落定（重力 rest 到石面）
+            // review25 探针加固（基线潜伏 flake，与本批游戏侧改动无关）：mob 游荡走运行期 QRandomGenerator
+            //   （aiPig wanderTimer 1.5-3.5s 随机）→ 旧版 30 tick（1.5s）settle 窗内猪已可游走（实测偶发
+            //   x≈17.9 平台边缘半身悬空 → 甩钩窗内再走一步跌出平台 → 钩空假 FAIL）。改**短窗 settle**
+            //   （5 tick 重力落定；出生位=格心精确），甩竿+飞行+钩定 ≤15 tick < 首个游荡窗下界 30 tick
+            //   → 猪在整个命中窗内钉在出生位（确定性）。
+            tickB(5, 0.05f);
             PlayerController pc;
             Hotbar hb;
             const int rodDur = ToolRegistry::maxDurability(ToolRegistry::FishingRod);
@@ -10329,7 +10532,7 @@ int main(int argc, char *argv[])
             ents.removeEntityAt(pig);
             const int pig2 = ents.spawnMobTyped(16, fy + 1, 6, EntityManager::MobPig,
                                                 QStringLiteral("#e8a0a0"), 10);
-            tickB(30, 0.05f); // 新猪落定（重力 rest 到石面；1.5s 游荡仍在 3×3 平台内）
+            tickB(5, 0.05f); // 短窗 settle（同段首 pig 加固口径：首游荡窗 30 tick 前完成甩钩）
             const QVector3D pp2 = ents.posAt(pig2);
             const float eyeY2 = float(fy + 1) + 1.62f;
             const float ux2 = pp2.x() - 13.5f, uz2 = pp2.z() - 6.5f;
@@ -10348,6 +10551,8 @@ int main(int argc, char *argv[])
                 if (!ents.aliveAt(bb2)) { okD2 = false; break; }
             }
             okD2 = okD2 && ents.bobberHookedMobAt(bb2) == pig2;
+            const bool hooked2Now = bb2 >= 0 && ents.bobberHookedMobAt(bb2) == pig2; // 收竿前现场（甩中与否）
+            const QVector3D pig2End = ents.posAt(pig2);
             ents.damageEntity(pig2, 999); // 打死（dead=true；槽仍 alive，死亡动画窗内）
             const int durD2 = hb.durabilityAt(0);
             pc.useFishingRod();           // 垂死目标收竿 → 拉拽 no-op
@@ -10357,7 +10562,8 @@ int main(int argc, char *argv[])
             if (!okD)
                 qInfo().noquote() << "  [t836 d diag] okHook" << okHook << "dur" << hb.durabilityAt(0) - dur0
                                   << "hp" << pigHpAfter << "/" << pigHp0 << "moved" << moved
-                                  << "toward" << toward << "okD2(dead-mob no-cost)" << okD2;
+                                  << "toward" << toward << "okD2(dead-mob no-cost)" << okD2
+                                  << "hooked2Now" << hooked2Now << "pig2End" << pig2End;
             ents.removeEntityAt(pig2); // 清场（探针私有 ents 冻结不外泄）
             wF.setBlock(13, fy, 6, BR::Air, 0);
             for (int x = 15; x <= 17; ++x)
@@ -10497,7 +10703,79 @@ int main(int argc, char *argv[])
                 qInfo().noquote() << "  [t836 g diag] okBeh" << okBeh << "okPin" << okPin;
         }
 
-        const bool okT836 = okA && okB && okC && okD && okE && okF && okG;
+        // ---- (h) review25 #12 Ground 态支撑复查：挖掉贴靠方块 → 若干 tick 内转 Flying 下落 ----
+        //      旧版 Ground 恒 continue（零复查）→ 挖掉贴靠方块后浮标悬空滞留至 180s 寿命兜底。修复 =
+        //      贴靠格快照（进态时记录）+ 每 kBobberGroundRecheckEvery tick 一查 blockAt。断言三段：
+        //      落定冻结（20 tick 位置不变）→ 挖支撑 → ≤40 tick 内 y 下坠 >0.05（复查节流 ≤10 tick + 重力
+        //      积累 ~4 tick）且实体仍活。
+        bool okH = false;
+        {
+            wF.setBlock(20, fy, 8, BR::Stone, 0); // 石台（贴靠格）
+            const int bh = ents.spawnBobber(QVector3D(20.5f, float(fy + 4), 8.5f), QVector3D(0, 0, 0), 921);
+            for (int t = 0; t < 80 && ents.aliveAt(bh); ++t) tickB(1, 0.05f); // 落到石台 → Ground
+            const QVector3D phA = ents.posAt(bh);
+            tickB(20, 0.05f);
+            const QVector3D phB = ents.posAt(bh);
+            const bool frozen = ents.aliveAt(bh) && phA == phB && phA.y() > float(fy); // 冻结于台面上方
+            wF.setBlock(20, fy, 8, BR::Air, 0); // 挖掉贴靠方块（Ground 复查的触发源）
+            bool fell = false;
+            for (int t = 0; t < 40 && ents.aliveAt(bh); ++t) {
+                tickB(1, 0.05f);
+                if (ents.posAt(bh).y() < phA.y() - 0.05f) { fell = true; break; }
+            }
+            okH = frozen && fell;
+            if (!okH)
+                qInfo().noquote() << "  [t836 h diag] frozen" << frozen << "phA" << phA << "phB" << phB
+                                  << "fell" << fell << "pos" << ents.posAt(bh);
+            if (bh >= 0) ents.removeEntityAt(bh);
+        }
+
+        // ---- (i) review25 #13 实体格命中门：1 格墙后贴壁 mob 飞行浮标不隔墙钩 ----
+        //      旧序先用 next 点测 mob AABB（外扩 kBobberHookHitPad）再查方块碰撞 → next 跨入墙格且已进
+        //      墙后 mob 外扩命中盒时被隔墙钩住（Hooked 钉位 + 收竿拉拽可拉 mob 穿墙）。rig：石坑困猪（四壁
+        //      2 高 + 坑底，开口向上），knockback 把猪压在 -X 壁（= 浮标来向的 1 格墙）上 → 猪 AABB 贴壁 →
+        //      外扩命中盒左沿伸到墙格前 0.15（≈23.85）——浮标 spawn 于 (23.96, pigY, 7.5) v=(18,0,0)（步长
+        //      0.9/tick）首 tick next=(24.86,·)：已入墙格且在命中盒内。断言：不钩（bobberHookedMobAt==-1）
+        //      + 贴面停在墙前（pos.x ∈ (23,24)）——修复序实体格命中门先于钩 mob，贴面 Ground 不钩。
+        bool okI = false;
+        {
+            wF.setBlock(25, fy, 7, BR::Stone, 0); // 坑底
+            for (int yy = fy + 1; yy <= fy + 2; ++yy) {
+                wF.setBlock(24, yy, 7, BR::Stone, 0); // -X 壁 = 浮标来向 1 格墙
+                wF.setBlock(26, yy, 7, BR::Stone, 0);
+                wF.setBlock(25, yy, 6, BR::Stone, 0);
+                wF.setBlock(25, yy, 8, BR::Stone, 0);
+            }
+            const int pigI = ents.spawnMobTyped(25, fy + 1, 7, EntityManager::MobPig,
+                                                QStringLiteral("#e8a0a0"), 10);
+            tickB(30, 0.05f);                    // 落定（坑内 1×1 活动域）
+            ents.knockback(pigI, -1.0f, 0.0f);   // 压向 -X 壁 → AABB 贴壁钉住（命中盒伸入墙格带）
+            tickB(10, 0.05f);                    // 滑到贴壁静止
+            const QVector3D pigP = ents.posAt(pigI);
+            const bool pinned = pigP.x() >= 25.35f && pigP.x() <= 25.60f; // 贴壁带（halfW±漂移；diag 半断言）
+            const int bi = ents.spawnBobber(QVector3D(23.96f, pigP.y(), 7.5f),
+                                            QVector3D(18.0f, 0.0f, 0.0f), 922);
+            tickB(3, 0.05f);
+            okI = pinned && bi >= 0 && ents.aliveAt(bi)
+                  && ents.bobberHookedMobAt(bi) == -1 // 不隔墙钩
+                  && ents.posAt(bi).x() < 24.0f       // 贴面停在墙前（未穿入墙格）
+                  && ents.posAt(bi).x() > 23.0f;
+            if (!okI)
+                qInfo().noquote() << "  [t836 i diag] pinned" << pinned << "pigX" << pigP.x()
+                                  << "hooked" << (bi >= 0 ? ents.bobberHookedMobAt(bi) : -2)
+                                  << "bobPos" << (bi >= 0 ? ents.posAt(bi) : QVector3D());
+            if (bi >= 0) ents.removeEntityAt(bi);
+            ents.removeEntityAt(pigI);
+            wF.setBlock(25, fy, 7, BR::Air, 0);
+            for (int yy = fy + 1; yy <= fy + 2; ++yy) {
+                wF.setBlock(24, yy, 7, BR::Air, 0);
+                wF.setBlock(26, yy, 7, BR::Air, 0);
+                wF.setBlock(25, yy, 6, BR::Air, 0);
+                wF.setBlock(25, yy, 8, BR::Air, 0);
+            }
+        }
+
+        const bool okT836 = okA && okB && okC && okD && okE && okF && okG && okH && okI;
         if (!okT836) ++totalFail;
         qInfo().noquote() << (okT836 ? "PASS" : "FAIL")
                           << "| t836 fishing overhaul: bobber is an EntityManager projectile (light-gravity "
@@ -10513,7 +10791,13 @@ int main(int argc, char *argv[])
                              "damage, dead-target reel = pull no-op with NO durability charge; externally-"
                              "cleared bobber keeps lazy fishing state then reels clean (no loot, no cost) with "
                              "updateFishing invalid-to-auto-reel pinned at source level (pc.tick captured gate "
-                             "unreachable headless, tradeoff declared); "
+                             "unreachable headless, tradeoff declared); ground-rest bobber rechecks its "
+                             "support cell on a 10-tick throttle and falls (review25 #12: mined support -> "
+                             "flying within 40 ticks, no more hovering until the 180s lifetime bail); "
+                             "solid-cell hit gate precedes mob hooking (review25 #13: wall-pinned pig "
+                             "behind a 1-thick wall with a fast bobber whose next point lands inside the "
+                             "wall cell and the padded pig AABB grounds at the wall face instead of "
+                             "hooking through it); "
                              "cooked fish 0x25B closes the chain (raw->cooked in BOTH kSmelt+kSmeltXp, "
                              "+4 hunger vs raw +2, name/tab/pack-mapping pinned, ocelot still raw-only)";
     }

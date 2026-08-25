@@ -1549,7 +1549,10 @@ void PlayerController::dropUnsupportedDoorsAround(int x, int y, int z)
         const auto attachOk = [this](int ax, int ay, int az) {
             return BlockRegistry::trapdoorSupportBlock(m_world->blockAt(ax, ay, az), m_world->stateAt(ax, ay, az));
         };
-        supported = (y - 1 >= 0) && attachOk(x, y - 1, z); // 下方依附面（贴地放）
+        supported = attachOk(x, y, z); // 下方依附面 = 活板门（uy=y+1）自身的 by-1，即刚被挖的格（World 侧
+                                       //   checkTrapdoorDoorSupportOnEdit 同口径；review25 #10 修 off-by-one——
+                                       //   旧查 y-1 是挖掉格的再下一格，被 finishMiningAt 开头 setBlock(Air) 触发
+                                       //   的 World 钩子先行收口所时序掩蔽；blockAt 越界安全返 Air 无需下界守卫）
         if (!supported) {
             static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
             for (const auto &d : kNb) {
@@ -5381,9 +5384,27 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   （清方块 + 原格 spawnPrimedTnt，既有链零改动）；只有 TNT **放进发射器库存**经发射才变「弹出点燃实体」
         //   ——机制等价 MC 两条触发路径并存。投掷器不放行本分支（isDropper 前置排除）：dropper「只投不射」口径
         //   下 TNT 走上方全部物品分支 = 普通掉落物弹出**不点燃**（机制等价 MC dropper 弹 TNT 是物品非引燃实体）。
-        m_entityManager->spawnPrimedTnt(x + int(dir.x()), y, z + int(dir.z()),
-                                        -1.0f, dir.x() * kDispenserTntPopSpeed,
-                                        dir.z() * kDispenserTntPopSpeed);
+        //   review25 #11 **排出口占用门**：贴墙安装的发射器激活时目标邻格是实体方块——primed 水平积分刻意不查
+        //   碰撞（见 primed tick 注释）→ TNT 会在墙格内就地引爆，炸穿墙并波及发射器自身。spawn 前查目标邻格
+        //   碰撞盒（collisionAABBsAt 空 = 可生成；水 / 无碰撞族照常）：空 → 原位 spawn；非空 → 沿朝向**再探一格**
+        //   （MC「弹出到可达空位」的近似）；仍非空 → **退化为普通掉落物弹出**（不点燃；MC 堵口不弹的近似取舍——
+        //   物品形态保库存语义完整，比静默吞 TNT 更可观察可回收）。
+        const auto primedCellClear = [this](int cx, int cy, int cz) {
+            return m_world && m_world->collisionAABBsAt(cx, cy, cz).empty();
+        };
+        const int tdx = int(dir.x()), tdz = int(dir.z());
+        const float popVX = dir.x() * kDispenserTntPopSpeed, popVZ = dir.z() * kDispenserTntPopSpeed;
+        if (primedCellClear(x + tdx, y, z + tdz)) {
+            m_entityManager->spawnPrimedTnt(x + tdx, y, z + tdz, -1.0f, popVX, popVZ);
+        } else if (primedCellClear(x + 2 * tdx, y, z + 2 * tdz)) {
+            m_entityManager->spawnPrimedTnt(x + 2 * tdx, y, z + 2 * tdz, -1.0f, popVX, popVZ);
+        } else if (m_itemEntities) {
+            m_itemEntities->spawnItemThrown(origin, itemId, 1, dir.x(), 0.0f, dir.z(), kDispenserPopSpeed,
+                                            slotEnch, slotName, slotDur);
+        } else {
+            emit spawnItem(int(std::floor(origin.x())), int(std::floor(origin.y())),
+                           int(std::floor(origin.z())), itemId, 1, slotEnch, slotName);
+        }
     } else {
         const ToolRegistry::ToolDef *td = ToolRegistry::tool(itemId);
         if (td && td->type == BlockRegistry::Sword) {

@@ -695,7 +695,9 @@ int EntityManager::spawnBobber(const QVector3D &origin, const QVector3D &vel, qu
     e.vx = vel.x(); // 复用 vx/vy/vz 作 Flying 段 3D 速度（Bobber 不走 Mob 击退衰减分支，无冲突）
     e.vy = vel.y();
     e.vz = vel.z();
-    e.arrowLife = kBobberLifetime; // 寿命兜底（挂机防永滞；正常由收竿移除）
+    e.arrowLife = kBobberLifetime; // 寿命次级镜像（dt 递减；墙钟 kBobberLifetimeMs 为真值源，review25 #14）
+    e.arrowSpawnMs = m_clock.elapsed(); // review25 #14：寿命墙钟起点（同箭 60s despawn 先例——dt 钳 50ms 卡顿
+                                        //   下 arrowLife 只慢不快（挂机浮标滞留 >180s），墙钟不依赖 dt 必然到期）
     e.bobberState = kBobberStFlying;
     e.bobberSerial = castSerial;   // 掷骰序号（等待值在落水 settle 时算）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
@@ -4080,10 +4082,13 @@ bool EntityManager::aiEmberling(int idx, Entity &e, float dt, World *world, cons
 
 // t738 爆炸失撑火把掉落（Stalker detonateStalker / TNT detonateTntSphere 两爆炸路径共用；头文件注释
 //   详述语义）。实现同 PlayerController::dropUnsupportedTorchesAround 的判定（火把族 state 解码唯一附着
-//   格 → 非 solid 即掉），差异仅在写入口与掉落通道：爆炸是系统事件 → setWaterSilent 静默清（无破块粒子 /
-//   音 spam，同球形破坏口径）+ 恒发 explosionDroppedItem（呈现层 spawnItem，机制等价 MC 爆炸震落墙上
-//   火把成物品）。去重：首扫清格后 blockAt=Air → 破坏列表邻格复扫不再命中火把族 → 不双掉。越界格
-//   blockAt 返 Air 天然跳过。
+//   格 → 非 solid 即掉）。**反馈通道现状（review25 #16 如实登记，替代 t738 原设想的静默通道叙事）**：
+//   destroySphereSilent 每清一格已先在 World::recheckAttachmentsAfterClear ② 内用同判把 6 邻失撑火把
+//   掉落（blockBroken + blockDroppedAsItem——每火把一组破块粒子 / 音 / worldEditRev++，t738 头注释原要
+//   避免的 spam；有界：每爆炸每火把恰一次，接受现状——给 recheck 加系统事件旁路会分裂两套掉落口径，
+//   得不偿失）→ 本函数复扫时 blockAt 已 Air → setWaterSilent + explosionDroppedItem 通道仅在 recheck
+//   不及的残余格生效（防御性双保险）。功能正确（双掉被「先清者留 Air、后扫者判跳」挡住）。去重：首扫
+//   清格后 blockAt=Air → 破坏列表邻格复扫不再命中火把族 → 不双掉。越界格 blockAt 返 Air 天然跳过。
 void EntityManager::dropUnsupportedTorchesAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed,
                                                      World *world)
 {
@@ -5601,18 +5606,31 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //       kBobberFloatDip；液面按水 state 折算，源=1.0 / 流=(8−s)/8，mesher renderTop 同口径）+ 掷确定性
         //       等待（hashVoxel(seed ^ 盐 ^ 甩竿序号)，PLAN §2-K 禁随机源，t791 骨粉同模式）→ Water 态；
         //       ③ 实体方块接触（豁免族同 t835 珍珠：Air/水/岩浆/门面/火）→ 贴命中面静止（Ground，不推进 next
-        //       ——浮标停在接触面前一位置，MC 浮标砸哪停哪的近似）；④ 岩浆格 → 同 Ground 静止（岩浆面浮住；
+        //       ——浮标停在接触面前一位置，MC 浮标砸哪停哪的近似）；review25 #13 本接触门**前置到 ① 钩 mob
+        //       之前**（实体格命中即 Ground 不钩——防隔墙钩，见 Flying 段注释）；④ 岩浆格 → 同 Ground 静止（岩浆面浮住；
         //       MC 口径岩浆里无鱼可钓，不进入等待机）；⑤ 出界（XZ 越界 / y<0 虚空）→ 消散移除（Game 层
         //       updateFishing 镜像检测 alive 失效 → 自动收竿态）。
         //     Water：bobberBiteTimer 两阶段（等待 →0 咬钩 → 窗口 →0 逃走重掷，见 Entity 字段注释）；咬钩沿 /
         //       逃走沿各 emit bobberBit / bobberEscaped（呈现层水花粒子）；重掷 = 序号 ++（新一轮确定性值）。
         //       水格被排干 / 填方（blockAt != Water）→ 转 Flying 零速下落（自然落到下方支撑转 Ground）。
         //     Ground：静止（不再钩 mob——**只在飞行段钩**，spec 明示取舍：MC 语义近似，落地静止浮标是死线
-        //       不是渔具；收竿 = 空收无消耗回收）。
+        //       不是渔具；收竿 = 空收无消耗回收）。review25 #12：贴靠格节流复查（kBobberGroundRecheckEvery
+        //       tick 一查）——支撑被挖 / 被爆 → 转 Flying 零速下落（与 Water 排水路径对称，不再悬空滞留）。
         //     Hooked：pos 钉 mob 身上每帧跟随（mob 中心 + 0.55×半高的体侧）；mob 死 / 移除 / 槽复用换任
         //       （spawnSerial 比对，snowballThrowerSerial 双查先例）→ 脱钩转 Flying 零速下落。
-        //   寿命（arrowLife 复用）全态递减 → 0 消散（挂机兜底，见 kBobberLifetime 注释）。
+        //   寿命墙钟 kBobberLifetimeMs 真值源 + arrowLife（dt 递减）次级镜像 → 到 0 消散（挂机兜底，review25 #14
+        //   同箭 60s despawn 先例；等待 / 咬钩窗口计时保持 dt——确定性掷骰的 tick 语义依赖，见分支头注释）。
         if (e.kind == Bobber) {
+            // review25 #14 寿命墙钟真值源（同箭 kArrowDespawnMs 先例 / ItemEntityManager 拾取延迟 m_clock 模式）：
+            //   dt 在调用方钳 50ms，真实帧耗时超限时 dt 累计只慢不快 → 旧版 arrowLife 递减在卡顿下漂移（挂机
+            //   浮标滞留 >180s）；墙钟不依赖 dt 必然到期。下方 arrowLife dt 递减保留为次级镜像（先到先收，
+            //   正常路径二者同窗到期）。**等待 / 咬钩窗口计时刻意保持 dt**：bobberWaitSeconds 掷骰的 tick 语义
+            //   是确定性探针的依赖（t836 b ±1 tick 行为级直证），且窗口变慢方向对玩家有利——取舍见 review25 #14。
+            if (m_clock.elapsed() - e.arrowSpawnMs >= kBobberLifetimeMs) {
+                toRemove.push_back(idx);
+                dirty = true;
+                continue;
+            }
             e.arrowLife -= float(dt);
             if (e.arrowLife <= 0.0f) { toRemove.push_back(idx); dirty = true; continue; }
 
@@ -5667,12 +5685,50 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
 
             if (e.bobberState == kBobberStGround) {
+                // review25 #12 贴靠格节流复查（每 kBobberGroundRecheckEvery tick 一查，与 Water 态每 tick
+                //   复查 blockAt!=Water 对称的降频版——Ground 是静置态，多浮标场景省格查询）：支撑被挖 / 被
+                //   爆 / 被浇成水 → 转 Flying 零速下落（自然落到下方支撑转 Ground / 入水转 Water；旧版恒
+                //   continue → 挖掉贴靠方块后浮标悬空滞留至 180s 寿命兜底）。贴靠格 = 进态时快照（bobberGround*
+                //   命中实体格 / 岩浆格）；支撑仍在（含岩浆面——岩浆格是有效贴靠）→ 继续静止。Fire 同 Air 处理
+                //   （火格对本投射物是穿透豁免族——贴靠格烧穿成火 = 无面可贴，下落）。
+                if (m_tickPhase % kBobberGroundRecheckEvery == 0) {
+                    const quint8 sup = world->blockAt(e.bobberGroundCellX, e.bobberGroundCellY,
+                                                      e.bobberGroundCellZ);
+                    if (sup == BlockRegistry::Air || sup == BlockRegistry::Water
+                        || sup == BlockRegistry::Fire) {
+                        e.bobberState = kBobberStFlying;
+                        e.vx = e.vy = e.vz = 0.0f;
+                        dirty = true;
+                        continue; // 本帧冻结，下帧起 Flying 下落（同脱钩 / 排水路径口径）
+                    }
+                }
                 continue; // 陆上静止（等收竿回收；寿命在分支头递减）
             }
 
             // --- Flying：抛物 + 钩定 / 落水 / 接触 / 出界 ---
             e.vy -= kBobberGravity * float(dt);
             const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+            const quint8 nid = world->blockAt(bx, by, bz);
+
+            // ⑤ 实体接触**前置到钩 mob 之前**（review25 #13 从原「钩 mob → 出界 → 落水 → 岩浆 → 接触」序尾
+            //   提前）：next 已进入非豁免实体格（Air / 水 / 岩浆 / 门面 / 火穿过——豁免族与下方 ③④ 分流同源，
+            //   条件 ≡ 原 ⑤ 在 ③④ continue 之后的有效口径，纯重排无判据变化）→ 贴面静止**且不钩 mob**。旧序
+            //   先用 next 点测 mob AABB 再查方块碰撞 → 浮标 next 跨入墙格且已进墙后 mob 外扩命中盒（步长 >0.85
+            //   格 / 贴壁 mob 命中盒伸入墙格）时被**隔墙钩住**，Hooked 钉位 + 收竿拉拽可把 mob 拉过墙；实体格
+            //   命中门先行 = 钩定只发生在可穿透格（近似视线门：实体方块挡在中间就不钩）。水 / 岩浆 / 出界仍在
+            //   其后各自分支（水中生物照旧飞行段可钩——t836 语义不变，仅实体格命中让位）。贴靠格快照进
+            //   bobberGround*（Ground 态节流复查用，review25 #12）。
+            if (nid != BlockRegistry::Air && nid != BlockRegistry::Water && nid != BlockRegistry::Lava
+                && nid != BlockRegistry::NetherPortal && nid != BlockRegistry::Fire) {
+                e.bobberState = kBobberStGround;
+                e.bobberGroundCellX = qint16(bx);
+                e.bobberGroundCellY = qint16(by);
+                e.bobberGroundCellZ = qint16(bz);
+                e.vx = e.vy = e.vz = 0.0f;
+                dirty = true;
+                continue; // 贴命中面前一位置静止（不推进 next——浮标停在接触面前，MC 浮标砸哪停哪的近似）
+            }
 
             // ① 飞行段钩 mob（点 vs AABB 外扩；取首个命中）。**只在 Flying 段**（Ground 静止浮标不钩，见头注释）。
             {
@@ -5709,9 +5765,6 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
             }
 
-            const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
-            const quint8 nid = world->blockAt(bx, by, bz);
-
             // ② 出界（XZ 越界 / 虚空直落）→ 消散（Game 层镜像检测自动收竿；浮标白耗，MC 口径甩飞了就没了）。
             if (next.x() < 0.0f || next.z() < 0.0f || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
                 toRemove.push_back(idx);
@@ -5734,22 +5787,18 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
 
             // ④ 岩浆面浮住（MC 口径岩浆无鱼可钓——不进等待机，按静止处理；不沉不烧，浮标是软木不是可燃物）。
+            //   贴靠格快照 = 岩浆格（Ground 复查按「岩浆仍是有效贴靠」判，review25 #12）。
             if (nid == BlockRegistry::Lava) {
                 e.bobberState = kBobberStGround;
+                e.bobberGroundCellX = qint16(bx);
+                e.bobberGroundCellY = qint16(by);
+                e.bobberGroundCellZ = qint16(bz);
                 e.vx = e.vy = e.vz = 0.0f;
                 dirty = true;
                 continue;
             }
 
-            // ⑤ 实体接触（非豁免族：门面 NetherPortal 穿过 / Fire 效果格穿过，同 t835 珍珠口径）→ 贴面静止。
-            if (nid != BlockRegistry::Air && nid != BlockRegistry::NetherPortal && nid != BlockRegistry::Fire) {
-                e.bobberState = kBobberStGround;
-                e.vx = e.vy = e.vz = 0.0f;
-                dirty = true;
-                continue;
-            }
-
-            e.pos = next; // 空中继续飞行
+            e.pos = next; // 空中继续飞行（非豁免实体接触已在前置 ⑤ 收口，此处仅剩 Air / 门面 / Fire 穿过格）
             dirty = true;
             continue; // Bobber 不走 Mob AI / resting / 击退衰减
         }
