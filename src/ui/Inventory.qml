@@ -123,9 +123,11 @@ Item {
     // t508 船物品 id 表（spec「船归工具 tab，非材料 tab」）：OakBoatId=0x234 / SpruceBoatId=0x235。原入材料段
     //   （creativeMaterials），用户报「创造背包船归材料 tab，应放工具 tab」→ 改入工具段。下文 filteredPalette：
     //   工具 tab（currentTab===1）末尾追加；材料 tab（currentTab===2）显式排除（防双显）。
-    // t654③：矿车（MinecartId=0x23E，t565）并入本表 → 工具 tab 末尾追加（用户「全物品栏找不到矿车」——
-    //   t645 只加了名/图标没进调色板）。语义同船：功能性载具（右键铁轨放置 + 骑乘），归工具 tab。
-    readonly property var vehicleIds: [0x234, 0x235, 0x23E]
+    //   t654③：矿车（MinecartId=0x23E，t565）曾并入本表 → 工具 tab 末尾追加。
+    //   t861：矿车从本表移出 → 改列红石 tab（redstoneIds 末尾，用户「矿车应归红石栏」——矿车是铁轨 +
+    //   红石机关系统的载具件，与动力轨 / 探测轨 / 发射器同页；机制等价 MC 创造页矿车在红石/交通组）。
+    //   船保留工具段不动；0x23E 不在 creativeMaterials → 移出本表无双显风险。
+    readonly property var vehicleIds: [0x234, 0x235]
 
     // t651⑤ 红石 tab 方块 id 表（镜像 BlockRegistry 方块段常量；Q_INVOKABLE 无 id 常量暴露，QML 端集中维护，
     //   同 foodIds 模式）：机关件（5 压力板 / 木·石按钮 / 拉杆）+ 红石系（红石火把 / 红石块 / 红石灯）+
@@ -153,7 +155,9 @@ Item {
         103,  // 铁轨（Rail，t701 挪入 —— 轨族与动力/探测轨同页）
         127,  // 动力铁轨（GoldenRail，t638；t658 起通电才 boost）
         128,  // 探测铁轨（DetectorRail，t638；t658 起输出电力信号）
-        104   // TNT（TntBlock，t701 挪入 —— 红石机关引爆端；与拉杆/按钮/压力板机关同页）
+        104,  // TNT（TntBlock，t701 挪入 —— 红石机关引爆端；与拉杆/按钮/压力板机关同页）
+        0x23E // 矿车物品（MinecartId，t861 从工具 tab 挪入 —— 铁轨系统载具件，与轨族/发射器同页；
+              //   右键铁轨放置 + 骑乘；图标走 MaterialIcon 0x23E 自绘分支，非方块段条目）
     ]
 
     // t632 预设附魔书表（每种附魔一本，hotbar.creativeEnchantedBooks() 权威）：调色板条目是 int id 段
@@ -234,6 +238,24 @@ Item {
         if (root.currentTab === 5) return root.redstoneIds.slice()
         // 生存物品栏（tab 6）已在函数开头早退。
         return []
+    }
+
+    // t861 归类契约钉（表项位置/成员静态断言，QML 无 static_assert → 组件完成期一次性自检）：
+    //   矿车物品（0x23E）必须恰在红石 tab 表内且不在工具段追加表 vehicleIds 内——两处同改漏一边即
+    //   「矿车消失 / 双显」（t654③ 当年「找不到矿车」教训的同型回归面）。失败走 console.error 响亮暴露。
+    Component.onCompleted: {
+        let ok = true
+        const inRedstone = redstoneIds.indexOf(0x23E) !== -1
+        const inVehicle = vehicleIds.indexOf(0x23E) !== -1
+        if (!inRedstone) { console.error("[t861] minecart item (0x23E) missing from redstoneIds - " +
+                                         "creative redstone tab loses the cart entry"); ok = false }
+        if (inVehicle) { console.error("[t861] minecart item (0x23E) still in vehicleIds - " +
+                                       "cart double-displays across tool+redstone tabs"); ok = false }
+        // 红石 tab 表尾条目必须是矿车（钉「挪到红石栏」的落位语义；前插新机关件时更新本断言即可）。
+        if (redstoneIds[redstoneIds.length - 1] !== 0x23E) {
+            console.error("[t861] minecart item (0x23E) expected as the tail entry of redstoneIds"); ok = false
+        }
+        if (!ok) throw new Error("t861 creative palette categorization contract broken")
     }
 
     // 当前悬停方块的中文名（调色板/hotbar 槽 hover 时更新；§9 override (b) 中文通用词）。
