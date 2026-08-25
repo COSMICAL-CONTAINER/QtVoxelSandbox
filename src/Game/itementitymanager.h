@@ -175,6 +175,12 @@ public:
     // 时钟未启 → true（保守可拾，防卡死、防延迟机制误伤合法拾取）。
     bool isPickupReady(int i) const;
 
+    // t889 暂停期墙钟顺延（硬暂停复跑时由 PlayerController::setWorldRunning 调，传暂停时长 ms）：活体槽
+    //   spawnMs（拾取延迟 / 5min 自然寿命的**墙钟真值源**）整体 +ms —— 等价「暂停期墙钟不走」，长暂停
+    //   不会一次性烧穿寿命 / 免拾窗（机制等价 MC Java 单机 ESC 暂停一切计时冻结；旧注释「暂停期照常流逝」
+    //   语义随 t889 退役）。ms<=0 早退（幂等防御）；纯寿命簿记无 revision bump。
+    void deferWallClocks(qint64 ms);
+
     // t60 掉落物重力 / t271 水冲走掉落物：每帧推进所有实体的物理（由 PlayerController::tick 每帧调，
     //   常开、独立于捕获态——菜单/暂停时世界照常模拟）。**C++ 直调**（非 QML 调 → 不挂 Q_INVOKABLE，
     //   避开 moc 对 World* 前向类型的 metatype 处理）。world 为 null / 无实体 → 早 return（保守不动作）。
@@ -280,9 +286,10 @@ private:
         m_freeSlots.push_back(idx);
         --m_liveCount;
     }
-    // t320 自然寿命到期驱逐（每帧 tick 调，独立于 world —— 菜单 / 暂停时仍消失）。扫所有活体，age（m_clock.elapsed()
+    // t320 自然寿命到期驱逐（每帧 tick 调，独立于 world）。扫所有活体，age（m_clock.elapsed()
     //   − spawnMs）> kDespawnMs → releaseSlot（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。任一驱逐
     //   → bump revision + emit entitiesChanged（驱动 QML 隐藏对应 delegate）。空集合 / 无到期 → no-op。
+    //   t889：硬暂停（ESC）期 tick 不跑 + 复跑 deferWallClocks 顺延 spawnMs → 暂停期不老化；GUI 开（软档）照常。
     void despawnExpired();
     // t354 批量 emit 收口（见 beginBatch 注释）：实体集每次变更（spawn / setCount / remove / tick dirty /
     //   despawn dirty）统一走此。++revision 恒做（delegate 触碰 revision 取最新值）；emit 仅在非批（depth<=0）时发，

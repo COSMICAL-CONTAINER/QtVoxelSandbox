@@ -18,6 +18,18 @@ float WorldClock::periodSecs() const
     return m_debugFast ? kFastSecs : kDaySecs;
 }
 
+// t889 暂停总闸（语义见 .h Q_PROPERTY(bool running) 头注释）：停/复跑 QTimer。幂等（同值早退）；
+//   停表不改 m_elapsedMs（时间冻结而非清零），复跑从冻结点继续。单一入口 —— Main.qml 绑定驱动，
+//   ESC 暂停 / 回主菜单停表，返回游戏 / 进世界复跑。
+void WorldClock::setRunning(bool running)
+{
+    if (m_running == running) return;
+    m_running = running;
+    if (m_running) m_timer.start();
+    else           m_timer.stop();
+    emit runningChanged();
+}
+
 // 天光乘子（PLAN §2-H）：纯函数 dayPhase → [0,1]。余弦曲线保证 noon=1、midnight=0、
 // dawn/dusk=0.5 的平滑过渡（无跳变）。QML 端再据 floor（#0b1026 / 0.25）做昼↔夜 lerp。
 float WorldClock::skyLight() const

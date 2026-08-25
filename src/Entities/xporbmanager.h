@@ -70,6 +70,11 @@ public:
     // 第 i 个球携带的 XP 数量（呈现层据此调色 / 大小：大球更显眼）。越界返回 0。
     Q_INVOKABLE int amountAt(int i) const;
 
+    // t889 暂停期墙钟顺延（硬暂停复跑时由 PlayerController::setWorldRunning 调，传暂停时长 ms）：活体槽
+    //   spawnMs（5min 寿命的**墙钟真值源**）整体 +ms —— 等价「暂停期墙钟不走」（机制等价 MC Java 单机
+    //   ESC 全冻结；与 EntityManager / ItemEntityManager 同族三管理器统一规则）。ms<=0 早退；纯簿记无 emit。
+    void deferWallClocks(qint64 ms);
+
     // 存档 / 切世界：清空所有球（防上一世界经验球残留进新世界）。t437：改「释放全部活体槽位」而非
     //   「清空 vector」——保 slot-reuse 单调不变量（count 不降）。根因同 ItemEntityManager/EntityManager：
     //   旧 m_orbs.clear() 把 count→0，QML xpOrbHost Repeater 随之→0，但 reparent 进 xpOrbHost 的 3D delegate

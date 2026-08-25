@@ -102,6 +102,15 @@ class PlayerController : public QQuickItem
     // 修 1.5 格通道蹲行穿墙——眼位在天花板半砖格空气段时不再退化 invalid）。
     Q_PROPERTY(float cameraDistance READ cameraDistance NOTIFY cameraDistanceChanged)
     Q_PROPERTY(bool captured READ captured NOTIFY capturedChanged)
+    // t889 两档暂停语义·世界模拟总闸（与 captured「玩家输入闸」**解耦**，机制等价 MC Java 单机）：
+    //   - 软档（worldRunning=true 且 !captured）：背包/工作台/熔炉/箱子/附魔台/铁砧/发射器面板、聊天、
+    //     死亡屏 —— **世界照跑**（World tick / 实体 / 昼夜不停）且玩家**物理与状态照跑**（重力/摔伤/燃烧/
+    //     溺水/窒息/饥饿照常，step() 无输入推进），但玩家不接受移动/挖掘/交互输入（captured=false）。
+    //   - 硬档（worldRunning=false）：仅 ESC 暂停菜单（及主菜单等非 playing 态）—— 一切停（tickImpl 早退
+    //     于实体桶；WorldClock.running 同门停表）。玩家输入闸与世界闸分离 = 「开背包照烧照坠但不能动」。
+    //   由 Main.qml 绑 window.worldRunning（单一权威派生）。默认 true（C++ 无 UI 场景全速，测试直调不受影响）。
+    //   WRITE 附带：硬暂停起算 / 复跑顺延三管理器墙钟寿命（箭/浮标/掉落物/经验球暂停期不老化，t885）。
+    Q_PROPERTY(bool worldRunning READ worldRunning WRITE setWorldRunning NOTIFY worldRunningChanged)
     Q_PROPERTY(bool onGround READ onGround NOTIFY onGroundChanged)
     Q_PROPERTY(bool flying READ flying NOTIFY flyingChanged)
     // 第三人称模型动画驱动（t45）：moveSpeed = 当前行走速度（仅走路模式非零，供 QML 驱动腿/臂摆动频率）；
@@ -289,6 +298,9 @@ public:
     QVector3D spawnPoint() const { return m_spawnPos; }
     float cameraDistance() const { return m_cameraDistance; } // 第三人称相机距离（钳制后；t40）
     bool captured() const { return m_captured; }
+    // t889 世界模拟总闸（语义见 Q_PROPERTY(bool worldRunning) 头注释）。
+    bool worldRunning() const { return m_worldRunning; }
+    void setWorldRunning(bool running);
     bool onGround() const { return m_onGround; }
     bool flying() const { return m_flying; }
     float moveSpeed() const { return m_moveSpeed; } // 当前行走速度（仅走路模式非零；t45 QML 腿/臂摆频）
@@ -591,6 +603,8 @@ signals:
     void lookChanged();
     void cameraDistanceChanged(); // 第三人称相机距离变（t40；值真变才发，免抖动）
     void capturedChanged();
+    // t889：worldRunning 翻转时发（Main.qml 绑定 / 测试观测）。
+    void worldRunningChanged();
     void onGroundChanged();
     void flyingChanged();
     void eyeInWaterChanged(); // t201 眼位水态翻转（驱动水下蓝滤镜叠层显隐；值真变才发，免每帧抖 QML 绑定）
@@ -784,13 +798,18 @@ signals:
     //   发射器路径（神殿陷阱 fallback 箭不算玩家机关成就）。同 cropHarvested 单向事件流模式。
     void dispenserFired();
 
+public:
+    // t889 整帧驱动入口（原 private slot）：QTimer(16ms) 连接它；矩阵探针（redstone_matrix_test）亦直调
+    //   驱动完整 tickImpl（两档暂停语义行为级断言需要整帧路径 —— 软档 step / 硬档早退都住在 tickImpl 内，
+    //   单独调 step 绕不过门控）。公开化仅扩大可见性，运行期唯一 caller 仍是 QTimer 与测试。
+    void tick();
+
 protected:
     void componentComplete() override;
     bool eventFilter(QObject *obj, QEvent *ev) override;
 
 private slots:
     void onWindowChanged(QQuickWindow *win);
-    void tick();
 
 private:
     // t178：tick() 包一层计时（累加主线程 CPU 耗时，~60 tick 算 1s 平均 → m_simMs → emit perfChanged），
@@ -1235,6 +1254,11 @@ private:
     CameraMode m_cameraMode = FirstPerson; // F5 相机模式（默认第一人称，t27）
     float m_cameraDistance = 0.0f;         // 第三人称相机距离（钳制后；FirstPerson 恒 0；t40）
     bool m_captured = false, m_onGround = false;
+    // t889 世界模拟总闸（语义见 Q_PROPERTY 头注释）：默认 true；false = tickImpl 早退于实体桶（硬暂停）。
+    bool m_worldRunning = true;
+    // t889 硬暂停墙钟：setWorldRunning(false) 起算，复跑时 elapsed 作 deferWallClocks 顺延量（箭/浮标/
+    //   掉落物/经验球暂停期不老化）。仅翻转沿有意义；不被 tick restart（同 m_evtClock 纪律）。
+    QElapsedTimer m_pauseClock;
     QHash<int, bool> m_keys;
     bool m_flying = false;          // 创造模式飞行子状态（双击空格切换；进创造默认走）
     float m_moveSpeed = 0.0f;       // 当前行走速度（仅走路模式非零；驱动 QML 腿/臂摆动频率，t45）
