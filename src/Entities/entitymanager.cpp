@@ -13,12 +13,10 @@
 namespace {
 Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未在 main.cpp 过滤，落 log 可见
 
-// t642 作物格判定（WheatCrop / CarrotCrop / PotatoCrop）：cross 形非实体植物（ShapeNone，无碰撞盒），
-//   mob 应直接穿越（MC 1.0 怪走过作物只减速不跳踩）。World::isSolid 语义 = 「非 air 实存」（world.h 注释：
-//   blockAt != 0），作物 blockAt≠0 恒 true → 若不做显式排除，mob 横向移动把作物当墙（mobAabbHitsSolid）、
-//   跳跃分支把作物当 1 格墙（aiHostile/aiArcher/aiStalker 越障跳）→ 用户「僵尸跳起来踩在作物上走」。
-//   统一在此排除：mobAabbHitsSolid（移动不挡）+ isJumpObstacle（跳跃不触发）。耕地（Farmland）本身仍
-//   是实体方块（t639 isFullCube=true，mob 支撑依赖）—— 仅在作物格被排除；耕地若真高出 1 格仍是跳墙。
+// t642 作物格判定（WheatCrop / CarrotCrop / PotatoCrop）：cross 形非实体植物（ShapeNone，无碰撞盒）。
+//   t865 起 mob 的碰撞 / 支撑 / 越障三谓词已收口 World::isCollidable（枚举豁免退役），本判定仍被两处
+//   消费：①耕作踩踏判定（mob 踩过作物格减速 / t642 慢走语义）；②下落沙落作物格穿透变掉落物（沙不落
+//   在无碰撞植物上）。纯 id 表查询，与碰撞权威解耦。
 bool isCropBlock(int blockId)
 {
     return blockId == BlockRegistry::WheatCrop
@@ -26,17 +24,18 @@ bool isCropBlock(int blockId)
         || blockId == BlockRegistry::PotatoCrop;
 }
 
-// t642 越障跳判据「前方脚位是墙」：isSolid（非 air 实存）且**非作物格**。作物可穿越 → 不应触发跳跃
-//   （机制等价 MC 怪在耕地/作物上不跳，只是慢走）。水保持原行为（旧 isSolid 恒 true → 照旧跳，非本任务范围）。
-//   t803 火焰同作物排除：Fire 可穿入（mobAabbHitsSolid 已豁免）→ 不应触发现有火格上「越障跳」（否则
-//   mob 被火格弹跳翻过 / 跳过火格，绕开点燃判据 = 用户「碰火不燃」的另一路径）。
+// t642 → t865 越障跳判据「前方脚位是墙」收口（单一权威 = World::isCollidable）：
+//   无碰撞格（轨 / 火把 / 草丛 / 花 / 树苗 / 作物 / 火 —— ShapeNone 无碰撞盒族）**不是墙** → mob 直接
+//   走过不跳（机制等价 MC 怪跨过草丛 / 花不跳踩；t642 作物豁免与 t803 火焰豁免的同族收口 —— 枚举式
+//   豁免漏了草丛/花 = 用户报「僵尸遇草丛跳过去」的根因；改碰撞权威后枚举表退役，新增无碰撞方块零漏）。
+//   水保留旧口径（isSolid 恒 true → 照旧当沟壑跳过，t642 明示非彼任务范围的行为不动）。
+//   碰撞实体（含半砖 / 楼梯 / 压力板 / 门 / 栅栏等薄形碰撞体）仍按墙跳（per-cell 粒度，旧语义）。
 bool isJumpObstacle(World *world, int x, int y, int z)
 {
     if (!world || y < 0) return false;
     const quint8 bid = world->blockAt(x, y, z);
-    if (bid == BlockRegistry::Air) return false;
-    if (bid == BlockRegistry::Fire) return false; // t803 火焰非障碍（ShapeNone 无碰撞，同作物族可穿入不跳）
-    return !isCropBlock(bid);
+    if (bid == BlockRegistry::Water) return true; // 水仍当沟壑跳过（t642 口径保留）
+    return world->isCollidable(x, y, z);
 }
 
 // ── t789 羊自然毛色（机制等价 MC 1.0 自然刷出羊的毛色分布；近似权重表，万分位整数便于单源求和）──
@@ -155,26 +154,18 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
                 //   **仅豁免薄层（≤0.5）**：8 级中的高 4 级（5/8..8/8）视觉与碰撞上已是矮墙 / 满格 —— MC 1.0 中
                 //   厚雪层（≥1/2）对实体是真实障碍（mob 跳不上 / 不穿）。旧无条件豁免让 8/8 满格雪层（塌落叠层
                 //   setSnowLayerMerge 可叠出 state=7）被 mob 直线穿墙。垂直落地扫描不受影响（mobSupportTopY
-                //   按层真顶承接，非豁免路径）。
+                //   按层真顶承接，非豁免路径）。雪层有碰撞 → 不在下方的无碰撞豁免里，须显式薄层分支。
                 if (bid == BlockRegistry::SnowLayer
                     && BlockRegistry::snowLayerHeight(world->stateAt(x, y, z)) <= 0.5f)
                     continue;
-                // t642 作物可穿越：cross 形非实体植物（ShapeNone 无碰撞盒），mob 应直接走过（同雪层豁免
-                //   「视穿透」族：World::isSolid 语义=非 air → 作物/草丛类恒当墙，须显式排除）。含掉落沙 /
-                //   击退 / 流水推动等所有 mobAabbHitsSolid 消费路径（沙落作物格穿透到下方耕地，机制等价 MC）。
-                if (isCropBlock(bid)) continue;
-                // t803 火焰视穿透（同作物 / 水「视穿透」族）：Fire 是 ShapeNone 无碰撞盒的光源格（blockregistry
-                //   solid=false），但 World::isSolid 语义=「非 air 实存」把火当整墙 → mobAabbHitsSolid 恒 true →
-                //   **mob 永远走不进火格**（水平移动在火格边界被逐轴撤回）。根因链：t724 的 mob 火点燃判据只采样
-                //   mob 自身脚位 / 身体格 == Fire（entitymanager tick 火烧段），而碰撞把 mob 挡在火格边界外
-                //   （脚位格 = 邻格）→ 触碰判定永假 = 用户实测「僵尸碰火不燃烧」。玩家侧不受影响（玩家碰撞走
-                //   collisionAABBsAt 的 shape 语义，Fire ShapeNone 无盒）。豁免后 mob 踏入火格 → 脚位格==Fire
-                //   → 走 t344 火烧链（点燃 / 火伤 / 随机熄灭 / 死亡掉熟肉），机制等价 MC 实体穿火着火。
-                if (bid == BlockRegistry::Fire) continue;
-                // t333 水视穿透（同 t271 掉落物 / t220 水不挡沙）：World::isSolid 语义=「非 air」含 Water，
-                //   会把水当墙 → mob 横向进不了水 + 流水推力被水格自身撤回（t333 根因「怪水上走 + 不被推」）。
-                //   水非实体碰撞 → 排除后 mob 可入水游 / 被流水沿流推动，仍撞石头/泥土等真实体方块。
-                if (bid != BlockRegistry::Water && world->isSolid(x, y, z)) return true;
+                // t865 无碰撞格整体视穿透（单一权威 = World::isCollidable，与 mobSupportTopY 落地承接 /
+                //   玩家 collisionAABBsAt 同源）：轨 / 火把 / 草丛 / 花 / 树苗 / 作物 / 火 / 水（ShapeNone 无
+                //   碰撞盒族）不再挡 mob 横向移动 —— 旧版 isSolid（非 air 实存）把它们当整墙，枚举豁免表
+                //   （t642 作物 / t803 火 / t333 水）漏了轨与火把（mob 被轨列挡住 → 越障跳翻上轨 → 悬浮轨上
+                //   一格的另一路径）。含掉落沙 / 击退 / 流水推动等所有 mobAabbHitsSolid 消费路径。碰撞实体
+                //   （半砖 / 门 / 活板门 / 压力板等）仍当整格墙挡（per-cell 粒度，旧语义不变）。
+                if (!world->isCollidable(x, y, z)) continue;
+                return true;
             }
     return false;
 }
@@ -190,9 +181,13 @@ bool mobFeetInWater(World *world, float cx, float cy, float cz, float halfH)
     return world->blockAt(int(std::floor(cx)), fy, int(std::floor(cz))) == BlockRegistry::Water;
 }
 
-// t362 mob 落地支撑复探：footprint XZ 任一列在支撑层 supportY 有实体（非水）方块 → true。
+// t362 mob 落地支撑复探：footprint XZ 任一列在支撑层 supportY 有可站立支撑 → true。
 //   取样同 mobAabbHitsSolid（floor(min)..ceil(max)-1，严格覆盖排除仅贴面列）。只读 World。
 //   用于替代旧版「仅中心列」支撑复探 —— 见 tick 内 resting 复探注释（修「mob 下 1 格台阶卡死」根因）。
+//   t865：支撑语义收口 World::isCollidable（有碰撞 sub-AABB = 可站立，与 mobSupportTopY 落地承接 /
+//   玩家 collisionAABBsAt 同源）—— 旧版 isSolid（非 air）把轨 / 火把 / 花草 / 作物 / 火都当「有支撑」，
+//   与 mobSupportTopY 的穿透（-1）不一致 → 停在无碰撞格上方的复探保 resting 悬空。水 / 火 / 无碰撞
+//   格不再算支撑（t333/t803 旧显式豁免由碰撞权威统一覆盖）；雪层 / 薄板 / 半砖有碰撞 → 照常支撑。
 bool mobFootprintHasSupport(World *world, float cx, float cz, int supportY, float halfW)
 {
     if (!world || supportY < 0) return false; // 无世界 / 脚位已在 y=0 之下（无支撑层可查）→ 无支撑
@@ -202,31 +197,18 @@ bool mobFootprintHasSupport(World *world, float cx, float cz, int supportY, floa
     const int z1 = int(std::ceil(cz + halfW)) - 1;
     for (int z = z0; z <= z1; ++z)
         for (int x = x0; x <= x1; ++x)
-            // t333 水视穿透（同 mobAabbHitsSolid）：水格不算实体支撑 → 怪不把水面当地面站着。
-            // t803 火焰视穿透（同上）：火格非支撑（ShapeNone 无碰撞）→ footprint 压火格不触发「有支撑」
-            //   复探，mob 落进火格沉到下方真支撑（同 mobSupportTopY 火焰 -1 配对）。
-            if (world->blockAt(x, supportY, z) != BlockRegistry::Water
-                && world->blockAt(x, supportY, z) != BlockRegistry::Fire
-                && world->isSolid(x, supportY, z))
+            if (world->isCollidable(x, supportY, z))
                 return true;
     return false;
 }
-// t629 列支撑顶面高度（世界 Y；无效支撑返回 -1）：完整方块 = cell+1；SnowLayer 按 state 走
-//   snowLayerHeight（1/8..1.0，单一权威）取薄层真顶；水 / air（不可立）返回 -1（caller 当无支撑跳过）。
-//   供 mob 落地扫描按真实层高贴面 —— 修「落在 1/8 薄雪层上被整格顶起悬空一格格」（旧 mobSolidY+1 恒按
-//   满格顶承接）。与玩家侧 collisionAABBsAt sub-AABB 精度对齐（t575 模式的 mob 侧落地版）。
+// t629 列支撑顶面高度（世界 Y；无效支撑返回 -1）：t865 起收口 World::supportTopYAt（碰撞 sub-AABB 真顶
+//   单一权威 —— 整立方 cell+1 / SnowLayer 按 state 真顶 / 下半砖 +0.5 / 压力板 +1/16 / 无碰撞族（轨 /
+//   火把 / 花草 / 作物 / 火 / 水）-1 穿透到下方真支撑）。供 mob 落地扫描按真实层高贴面 —— 修「落在 1/8
+//   薄雪层上被整格顶起悬空一格格」（t629）与「落在轨列上被满格顶起悬浮一格」（t865，同一病根族：
+//   支撑判定把非整格当满格）。与玩家侧 collisionAABBsAt sub-AABB 精度对齐（t575 模式的 mob 侧落地版）。
 float mobSupportTopY(World *world, int x, int y, int z)
 {
-    if (!world) return -1.0f;
-    const quint8 id = world->blockAt(x, y, z);
-    if (id == BlockRegistry::Water) return -1.0f; // 水非支撑（t333 穿透语义，落地扫描跳过水格）
-    if (id == BlockRegistry::Fire) return -1.0f;  // t803 火非支撑：ShapeNone 无碰撞（同水穿透语义）→ mob 落
-                                                  //   进火格沉到下方真支撑块，不悬停在火格顶（着火判据 = 脚位
-                                                  //   格==Fire，须真落入火格才点燃——见 mobAabbHitsSolid t803 注）
-    if (id == BlockRegistry::SnowLayer)
-        return float(y) + BlockRegistry::snowLayerHeight(world->stateAt(x, y, z)); // 薄层真顶
-    if (!world->isSolid(x, y, z)) return -1.0f;
-    return float(y) + 1.0f;
+    return world ? world->supportTopYAt(x, y, z) : -1.0f;
 }
 } // namespace
 
