@@ -7594,7 +7594,10 @@ int main(int argc, char *argv[])
         };
 
         // (a) 装填 3 TNT 的发射器 + 背面拉杆激活 → 弹出 PrimedTnt @ 发射面邻格 + 标准引信 + 定向初速。
-        bool okA = false, okAFuse = false, okAMove = false;
+        //   t871：弹出速度调小（kDispenserTntPopSpeed 4.0→1.6）→ 摩擦积分总位移 ≈0.43 格，TNT 落定在
+        //   **发射面邻格内**（用户「出现在发射口前一格即可」）；方向断言阈值随之下调（+0.5 → +0.15，
+        //   0.25s 位移 v(1-e^-1)/4≈0.354），并新增落点格断言（驱动 1.05s 后 floor(x) == x0+1）。
+        bool okA = false, okAFuse = false, okAMove = false, okRest = false;
         int tx0 = 0, tz0 = 0;
         {
             const auto [x0, z0] = nextSlot();
@@ -7618,21 +7621,31 @@ int main(int argc, char *argv[])
                   && store.slotIdAt(x0, kRigY, z0, 0) == BR::TntBlock
                   && store.slotCountAt(x0, kRigY, z0, 0) == 2;          // 库存 3→2（激活一次消耗 1）
             if (idx >= 0) {
-                // 标准引信：满值（progress==1.0）；再 tick 0.25s → 引信递减（<1.0）+ +X 定向位移（初速 4×0.25≈1 格）。
+                // 标准引信：满值（progress==1.0）；细步驱动 0.25s（16×0.015625——生产帧率级步长；单步 0.25s
+                //   的粗欧拉一步跳 0.4 格失真）→ 引信递减（<1.0）+ +X 定向位移（t871 初速 1.6 → ≈0.26 格）。
                 const float progBefore = ents.fuseProgressAt(idx);
                 const float xBefore = ents.posAt(idx).x();
-                ents.tick(0.25, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                for (int i = 0; i < 16; ++i)
+                    ents.tick(0.015625, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
                 okAFuse = progBefore >= 0.999f && ents.isPrimedAt(idx)
                           && ents.fuseProgressAt(idx) < progBefore;     // 引信计时在跑
                 okAMove = ents.isPrimedAt(idx)
-                          && ents.posAt(idx).x() > xBefore + 0.5f;      // 弹射方向 = 发射面朝向（+X）
+                          && ents.posAt(idx).x() > xBefore + 0.15f;     // 弹射方向 = 发射面朝向（+X；t871 阈值随新初速下调）
+                // t871 落点：续细步驱动 0.8s（总 1.05s < 引信 5s）→ 摩擦耗尽水平动量 → 落定格必须在邻格内
+                //   （连续极限总位移 = v/摩擦率 = 0.4 格 → 落定 ≈x0+1.91；旧 4.0 → 1.0 格 → 落到 x0+2 红此断言）。
+                for (int i = 0; i < 51; ++i)
+                    ents.tick(0.015625, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                okRest = ents.isPrimedAt(idx)
+                         && int(std::floor(ents.posAt(idx).x())) == x0 + 1  // 仍在发射面邻格（t871 口径）
+                         && ents.posAt(idx).x() < float(x0) + 2.0f;
             }
-            if (!okA || !okAFuse || !okAMove)
+            if (!okA || !okAFuse || !okAMove || !okRest)
                 qInfo().noquote() << "  [t856 a diag] primedIdx=" << idx
                                   << " pos=" << (idx >= 0 ? ents.posAt(idx) : QVector3D())
                                   << " slotCount=" << store.slotCountAt(x0, kRigY, z0, 0)
                                   << " fuse=" << (idx >= 0 ? ents.fuseProgressAt(idx) : -1.0f)
-                                  << " okAFuse=" << okAFuse << " okAMove=" << okAMove;
+                                  << " okAFuse=" << okAFuse << " okAMove=" << okAMove
+                                  << " okRest=" << okRest;
         }
 
         // (b) 冷却闸不回归（t814 (e) ②③ 压缩版，分派物换 TNT）：0.5s 内真上升沿 → 冷却拦（零发射且信号确发）；
@@ -7763,7 +7776,7 @@ int main(int argc, char *argv[])
             tickN(w, 2);
         }
 
-        const bool okT856 = okA && okAFuse && okAMove && okB && okC && okD1 && okD2;
+        const bool okT856 = okA && okAFuse && okAMove && okRest && okB && okC && okD1 && okD2;
         if (!okT856) ++totalFail;
         qInfo().noquote() << (okT856 ? "PASS" : "FAIL")
                           << "| t856 dispenser fires primed TNT: lever behind a 3-TNT dispenser pops a "
@@ -7771,7 +7784,10 @@ int main(int argc, char *argv[])
                              "the firing face), full standard fuse (fuseProgress==1.0 pins "
                              "kPrimedTntFuseSec, chain-fuse 1.2s would read 0.24), fuse ticking + "
                              "directional +X drift after one 0.25s entity tick pins pop-along-facing "
-                             "velocity, stock 3->2; sub-0.5s-cooldown re-edge fires nothing while "
+                             "velocity (t871: pop speed 4.0->1.6), and after 1.05s of driven ticks the "
+                             "primed TNT settles INSIDE the facing-adjacent cell (floor==x0+1, the "
+                             "'one cell past the muzzle' user contract; the old 4.0 speed landed two "
+                             "cells out), stock 3->2; sub-0.5s-cooldown re-edge fires nothing while "
                              "powerDispenserTriggered still emits, cooldown driven past 0.5s then re-edge "
                              "MUST re-pop (+1 entity, stock 2->1); dropper w/ TNT pops a plain item drop "
                              "with zero primed entities (dropper = item-only, the other side of the "

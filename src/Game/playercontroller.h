@@ -1693,11 +1693,11 @@ private:
     // t609 投掷器弹出掉落物速度（blocks/s）：低于发射器 kDispenserPopSpeed——轻量出口的温和弹出（机制等价
     //   MC 1.0 dropper 弹出距离短于 dispenser 弹射；只投不射的机关口径）。
     static constexpr float kDropperPopSpeed         = 4.0f;  // 投掷器弹出掉落物速度（blocks/s）
-    // t856 发射器弹 TNT 初速（blocks/s）：弹出即点燃的 PrimedTnt 实体沿发射面朝向定向弹出。primed tick 水平
-    //   积分带摩擦衰减（EntityManager::kExplosionEntityFriction=4/s）→ 飞行距离 ≈ |v|/摩擦率 = 1 格即落（机制
-    //   等价 MC 发射器弹 TNT 小初速抛出、贴出口落地；标准引信 ~5s 内自然落地爆，不另设短引信）。略低于掉落物
-    //   kDispenserPopSpeed——TNT 弹远即无意义（机关陷阱口径：贴面落定炸）。
-    static constexpr float kDispenserTntPopSpeed    = 4.0f;  // 发射器弹 TNT 定向初速（blocks/s）
+    // t856 发射器弹 TNT 初速（blocks/s）；**t871 调小 4.0 → 1.6**（用户「弹太远——出现在发射口前一格
+    //   即可」）：primed tick 水平积分带摩擦衰减（EntityManager::kExplosionEntityFriction=4/s）→ 离散积分
+    //   总位移 ≈ v/摩擦率×收敛因子 ≈ 0.43 格 → 落定在**发射面邻格内**（x0+1.93 < x0+2，格心 +0.5 起步）。
+    //   旧 4.0 位移 ≈ 1.08 格 → 弹到第二格（x0+2.58）。标准引信 / 落地链不变（贴面落定炸，机关陷阱口径）。
+    static constexpr float kDispenserTntPopSpeed    = 1.6f;  // 发射器弹 TNT 定向初速（blocks/s；t871 贴邻格落定）
     // t628 按钮按下到自动弹回的时长（秒；机制等价 MC 1.0 stone button 按下 ~1s / 20 game ticks 后弹回）。
     //   placeBlock isManualIgniter 分支右键按下按钮（置 state bit0）时写入 m_buttonRecoverCells；
     //   updateButtonRecovery 每 tick 递减，到期清 bit0（按钮弹回 + worldChanged 重建 mesh）。拉杆不启用
