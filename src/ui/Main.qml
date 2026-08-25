@@ -9185,6 +9185,7 @@ Window {
         //   NoCulling（双面）+ Mask cutout（alphaCutoff 0.1，火焰像素 0/255 硬边）。
         //   维护三重（同 fireHost 模式）：onBlockIgnited 加（addBurningVis 内 isBurningAt 真值校验）/
         //   onBlockBroken 删（烧毁 setBlock 替换 + 被挖，任何块破坏都摘——燃烧块被挖火随块走）/
+        //   onBlockDoused 删（review25 #2：浇熄摘表 / 同 id 写清表——无其它信号的两条路径）/
         //   onWorldChanged 兜底清孤儿（爆炸 / 系统改写）。燃烧态不进存档 → enterWorld 只清不重建
         //   （读档后燃烧自然熄灭，dev-spec t843 明示可接受）。分层（PLAN §2）：纯呈现层，只消费语义事件。
         Node {
@@ -10274,9 +10275,16 @@ Window {
         }
         // t843：可燃方块被点燃进燃烧态（World::blockIgnited——打火石直燃 / 火格蔓延 / 同态蔓延三入口）→
         //   挂面火 overlay delegate（addBurningVis 内 isBurningAt 真值校验防陈旧信号）。摘除走
-        //   onBlockBroken（烧毁 / 被挖）+ onWorldChanged cleanupVis（爆炸 / 浇熄摘表 / 系统改写兜底）。
+        //   onBlockBroken（烧毁 / 被挖）+ onBlockDoused（浇熄摘表 / 同 id 写清表——两条无其它信号的
+        //   路径）+ onWorldChanged cleanupVis（爆炸 / 系统改写兜底）。
         function onBlockIgnited(x, y, z) {
             burningHost.addBurningVis(x, y, z)
+        }
+        // review25 #2：燃烧态被浇熄摘侧表（tickFire 抑制掷中「火灭块存」/ setBlock 同 id 早退清表）——
+        //   栅格不变故无 blockBroken、侧表直摘故无 worldChanged → 原两条摘除链都不触发，面火 overlay
+        //   永久残留成假燃块（delegate 泄漏）。本信号精确摘（与 onBlockIgnited 挂载对称）。
+        function onBlockDoused(x, y, z) {
+            burningHost.removeBurningVis(x, y, z)
         }
         // t88：worldgen 重生（seed 变 / 初始生成）清除旧火把 → 伪光源列表校验清理。worldgen 不发
         // blockBroken（m_chunks.setBlock 直写），故旧火把位置不会经 onBlockBroken 移除；此处扫描
@@ -10305,8 +10313,9 @@ Window {
             paintingHost.cleanupVis()
             // t724：同步清火焰视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同 paintingHost）。
             fireHost.cleanupVis()
-            // t843：同步清燃烧方块面火 overlay 孤儿（浇熄摘表（火灭块存，栅格不变无 blockBroken）/
-            //   爆炸改写 / 静默直写替换块的 ≤1 窗自愈期兜底；isBurningAt 侧表真值单一权威）。
+            // t843：同步清燃烧方块面火 overlay 孤儿（爆炸改写 / 静默直写替换块的 ≤1 窗自愈期兜底；
+            //   isBurningAt 侧表真值单一权威。浇熄摘表已走 onBlockDoused 精确信号（review25 #2）——
+            //   本兜底不再承担那条路径，只兜「无信号的栅格改写」族）。
             burningHost.cleanupVis()
             // t725：同步清余烬门视觉 delegate 孤儿（门框破坏连锁 / 连通域静默清不经 blockBroken 的路径
             //   收口；removeNetherPortalAt 的 setWaterSilent 只发 worldChanged → 此处兜底）。
