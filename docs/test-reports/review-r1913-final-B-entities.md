@@ -18,7 +18,7 @@
 |---|------|------|----------|------|
 | M1 | 20a0efa；src/Entities/entitymanager.cpp:5861-5895 | 铁砧砸伤 review24 换序只封了 mob 引用 `m` 的悬垂窗口（记账 5861 先于 damageEntity 5862），**外层落体引用 `e` 的窗口未封**：mob 循环内 damageEntity 的 `emit entitiesChanged()`（2195）若经任一 QML handler 同步触发实体 spawn → acquireSlot push_back → vector realloc → `e` 悬垂，其后玩家段（5864-5877 读 e.pos/e.spawnSerial）与着地段（5883-5895 读 e.blockId/e.blockState/e.pos）继续解引用 = UB。注释自认"damageEntity 今日只 emit 不增删槽"，**今日无实际触发路径**（entitiesChanged 消费者是绑定刷新，不 spawn），故为防御性收口不完整而非现行 bug——与 5238 行终审修（"spawn 可 push_back → 本循环内 Entity& 悬垂"同款已知模式）不一致的残留。 | 未来把任何 spawn 挂进 entitiesChanged 链（或 mobDied 之外的同步实体创建）时，铁砧落地帧崩溃/内存损坏 | 玩家段前重取引用（`Entity &e = m_entities[size_t(idx)];`，5238 先例）或进入砸伤段前对 e 的 pos/blockId/spawnSerial 做值快照 |
 
-> **M1 处置（R19.13 收尾批 fix(review-r1913-final)）——已修**：进砸伤段前值快照 `aPos/aBlockId/aBlockState/aSerial/aHalfH`（emit 链不改本落体数据 → 快照 == 搬家后活值），mob 循环逐迭代 AABB 复检、玩家段、着地/塌落段全读快照；「继续下落」分支是唯一写点 → 分支内重取引用 `Entity &eNow = m_entities[size_t(idx)]` 再写（快照管读、重取管写）。非铁砧落体无 emit 窗口，行为零变。
+> **M1 处置（R19.13 收尾批 fix(review-r1913-final) 6f49f77)——已修**：进砸伤段前值快照 `aPos/aBlockId/aBlockState/aSerial/aHalfH`（emit 链不改本落体数据 → 快照 == 搬家后活值），mob 循环逐迭代 AABB 复检、玩家段、着地/塌落段全读快照；「继续下落」分支是唯一写点 → 分支内重取引用 `Entity &eNow = m_entities[size_t(idx)]` 再写（快照管读、重取管写）。非铁砧落体无 emit 窗口，行为零变。
 
 ### 低
 
@@ -28,7 +28,7 @@
 | L2 | 0a1acb5；src/Game/playercontroller.cpp:2435-2439 + src/Entities/entitymanager.cpp:717-721 | 收竿拉拽扣耐久不校验目标存活：hooked ≥ 0 时无条件 `pullMobToward` + 耐久 -5；若钩住的 mob 在收竿同帧已死（死亡动画 0.5s 窗内、浮标 tick 尚未跑脱钩验证），pullMobToward 的 `e.dead` 守卫静默早退 → 拉拽无效果但仍扣 5 耐久。 | 对垂死 mob 收竿 | pullMobToward 改返 bool（拉拽生效才 true），false 时按空收处理不扣耐久 |
 | L3 | 全局（非本批引入）；src/Entities/entitymanager.{h,cpp} 标识符 `EnderPearl/EnderEye/NetherPortal/enderPearlLanded` 等 | IP 门登记项：MC 词根（Ender*/Nether*）仍作标识符——R19.12 备忘已登记"遗留 MC 词根改名批"的既有遗留；本批（含 f28ff44 大量触碰 EnderPearl 分支）**未新增**任何 MC 专有名词（新增 Bobber/kBobberSt*/sheepWoolDyed/mobAirTimer/healTamedPet 等均通用词或原创，条目中文名"暗渊珠/余烬门"已换、代码词根未跟）。src/Core/resourcepackmanager.* 的 zombie/skeleton/creeper/enderman 文件名映射为资源包兼容层的功能性元数据（t419 起既有，§9 注释明示），同属登记不改判。 | — | 改名批尽快收口：EnderPearl→暗渊珠词根、NetherPortal→余烬门词根（只动本工程标识符，资源包映射表保留——它是读外部包的目录约定） |
 
-> **L1/L2 处置（R19.13 收尾批 fix(review-r1913-final)）——已修**：L1 日志改比 `teleport` 前快照的 `oldPos`（消除同对象自比较恒 false，瞬移成功如实记 "(teleport dodge)"）；L2 `pullMobToward` 改返 bool（拉拽实际生效才 true），caller 据此垂死 mob 收竿不扣 5 耐久（按空收处理），矩阵探针 t836(d2) 行为级锁死（钩住→打死→收竿→耐久不变）。
+> **L1/L2 处置（R19.13 收尾批 fix(review-r1913-final) 6f49f77)——已修**：L1 日志改比 `teleport` 前快照的 `oldPos`（消除同对象自比较恒 false，瞬移成功如实记 "(teleport dodge)"）；L2 `pullMobToward` 改返 bool（拉拽实际生效才 true），caller 据此垂死 mob 收竿不扣 5 耐久（按空收处理），矩阵探针 t836(d2) 行为级锁死（钩住→打死→收竿→耐久不变）。
 > **L3 登记不修**：MC 词根改名批已立项遗留（R19.12 备忘），本批未新增词根类，非本批收口范围。
 
 ---
@@ -91,7 +91,7 @@
 
 ---
 
-## R19.13 收尾批处置记录（fix(review-r1913-final)）
+## R19.13 收尾批处置记录（fix(review-r1913-final) 6f49f77)
 
 - **M1 已修**：铁砧砸伤段外层落体引用 `e` 值快照（aPos/aBlockId/aBlockState/aSerial/aHalfH）+ 继续下落分支重取引用写回（:5238 先例同款）。
 - **L1 已修**：夜行者日志 oldPos 快照比对。
