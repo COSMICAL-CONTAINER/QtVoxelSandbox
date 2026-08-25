@@ -8847,6 +8847,88 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t864 矿车互卡悬浮探针（MinecartManager 直编；PlayerController 骑乘帧同序驱动）──
+    //   用户报告（R19.15 玩法阻塞）：「上坡被前方矿车卡住时悬浮原地一直向上——碰撞卡阻时应停驻 / 滑回，
+    //   不向上漂」。驱动序镜像 PlayerController 骑乘分支（tickRiddenCart → tickPushedCarts →
+    //   resolveCartCollisions）。断言：
+    //   (a) 无上漂：被卡车全程 Y 恒贴轨面（±0.1——旧症状「一直向上」= Y 持续抬升脱离轨面）；
+    //   (b) 卡阻终态 = 停驻 / 滑回：被卡车不越过前车（A.x < B.x 恒成立），且全程存在「首次接触后回落」
+    //       （反溜 / 被顶回——碰撞冲量 + 死区 + t863① 反溜链把卡阻车送回坡下，不在坡面悬停）。
+    {
+        // rig 选址：运行期扫描空区。需 8×1×4 净空。坡：x0..x0+1 低平 + x0+2 坡（东邻高 1）+
+        //   x0+3..x0+4 高平（B 停驻死端）；A 被骑从坡脚冲。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 7 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 7 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t864 cart-cart uphill jam: no clear rig area found";
+        } else {
+            const float rideH = 0.45f;
+            const auto wantSurf = [&](float x) {
+                if (x < float(x0 + 1)) return float(kRigY);
+                if (x > float(x0 + 2)) return float(kRigY + 1);
+                return float(kRigY) + (x - float(x0 + 1));
+            };
+            // 3 格轨：x0 低平 + x0+1 坡（东邻高 1）+ x0+2 坡顶死端（B 停驻格）。A 被卡在坡面格 →
+            //   松手 / 下车后有梯度可反溜（t863①）；高平延长段会让被卡点落在无梯度平段（平段停驻
+            //   语义，非本症状）—— 首版 5 格 rig 实测踩坑。
+            for (int i = 0; i <= 2; ++i)
+                w.setBlock(x0 + i, kRigY + ((i >= 2) ? 1 : 0), z0, BR::Rail, 0);
+            MinecartManager carts;
+            // B 停驻**坡顶死端格**（x0+2@Y+1：后邻低一格的爬升顶、东端无轨）→ A 被卡在坡面格
+            //   （x0+1）上有梯度 → 松手 / 下车后摩擦死区 + t863① 反溜可触发放回（高平面被卡无梯度
+            //   不反溜——那是平段停驻语义，非本症状）。
+            carts.spawnCart(x0 + 2, kRigY + 1, z0, &w);       // B：坡顶死端静止车（挡路；槽 0）
+            carts.spawnCart(x0, kRigY, z0, &w);               // A：坡脚车（槽 1）
+            const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+            bool ok = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+            QVector3D cp;
+            float maxLift = 0.0f;      // Y 超出轨面的最大量（上漂签名；容 0.1 内的接触抖动）
+            bool neverPassed = true;
+            for (int t = 0; t < 900; ++t) { // (a) W 持续冲坡 - 卡阻：供能不断的极限压测（旧症状「一直向上」）
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp); // W 持续（卡阻供能不断）
+                carts.tickPushedCarts(0.016, &w);
+                carts.resolveCartCollisions(&w);
+                const QVector3D a = carts.posAt(1), b = carts.posAt(0);
+                maxLift = std::max(maxLift, float(a.y() - (wantSurf(a.x()) + rideH)));
+                if (a.x() >= b.x() - 0.05f) neverPassed = false;   // A 越过 / 并入 B = 穿透
+            }
+            const bool okA = maxLift <= 0.1f && neverPassed;    // 无上漂（贴轨面）+ 不穿透
+            // (b) 无动力被卡（下车后空车留坡面）：A 已停在接触位附近（W 段终点），无持续供能 → 坡面
+            //     摩擦死区 + t863① 反溜链把卡阻车送回坡脚（「停驻 / 滑回」，不悬停坡面）。
+            carts.dismount(nullptr, cp);                        // 下车（A 变空车；玩家位丢弃）
+            for (int t = 0; t < 600; ++t) { // 9.6s：摩擦 - 死区 - 反溜 - 滑回
+                carts.tickPushedCarts(0.016, &w);
+                carts.resolveCartCollisions(&w);
+            }
+            const QVector3D fa = carts.posAt(1);
+            const bool okB = fa.x() < float(x0) + 1.0f                           // 滑回低平段（坡脚）
+                && std::fabs(fa.y() - (float(kRigY) + rideH)) < 0.02f            // 贴低平轨面停驻
+                && carts.posAt(0).x() > float(x0) + 1.9f;                        // B 仍在坡顶格（未被顶下山）
+            ok = ok && okA && okB;
+            if (!ok)
+                qInfo().noquote() << "  t864 maxLift" << maxLift << "neverPassed" << neverPassed
+                                  << "slidebackFinal" << fa;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t864 uphill cart-cart jam: blocked cart stays glued to rail surface"
+                                 " (no upward drift), never penetrates the blocker, and falls back after"
+                                 " first contact (stall/slide-back, no mid-air hover)";
+            // 清场
+            carts.clearAll();
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY + ((i >= 2) ? 1 : 0), z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
 
 
     // ── t848 余烬门尺寸上限 23×23 探针（World 层直调；t806 泛化门的用户实测回归）──
