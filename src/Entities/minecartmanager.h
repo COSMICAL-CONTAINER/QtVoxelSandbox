@@ -338,11 +338,13 @@ private:
     static constexpr float kCartHalfW  = 0.45f;  // 矿车 footprint 半宽（X；footprint 宽 0.9，匹配车斗）
     static constexpr float kCartHalfL  = 0.50f;  // 矿车 footprint 半长（Z；footprint 长 1.0）
     static constexpr float kCartHalfH  = 0.45f;  // 矿车命中盒半高（0.9 高，含车帮）
-    // t734 贴轨修真 / t768 车斗加高重推：矿车中心距**轨格 cell 底**的骑乘高度。轨面真基准 = 轨格 cell 底
-    //   + 薄板厚 1/16（PartialBlockGeometry Rail case 的 yr=1/16 常量，板贴 cell 底防 z-fight）。t768 车斗
-    //   0.75 高模型（本地 ±0.375；旧 0.3 高扁平车观感 ~0.25 格）→ 中心 = 板顶 1/16 + 底板下沿偏移 0.375 +
-    //   0.0125 微隙（防底板与轨板共面 z-fight）= 0.45（t734 旧值 0.225 = 旧底板 −0.15 时代推导）。偏移远离
-    //   整数格边界 → floor(pos.y) 定格列无 ULP 取整风险（lessons「resting 复探 FP 边界」条）；坡中段
+    // t734 贴轨修真 / t768 车斗加高重推 / t862① 底板微调：矿车中心距**轨格 cell 底**的骑乘高度。轨面真基准 =
+    //   轨格 cell 底 + 薄板厚 1/16（PartialBlockGeometry Rail case 的 yr=1/16 常量，板贴 cell 底防 z-fight）。
+    //   t768 车斗 0.75 高模型（本地 ±0.375；旧 0.3 高扁平车观感 ~0.25 格）→ 中心 = 板顶 1/16 + 底板下沿偏移 +
+    //   微隙（防底板与轨板共面 z-fight）= 0.45（t734 旧值 0.225 = 旧底板 −0.15 时代推导）。t862① 起呈现层底板
+    //   下沿 −0.3775（0.3775 + 0.01 微隙，四棱共面内缩批同步加厚下探 0.0025 —— 见 Main.qml 底板 piece 注释），
+    //   数值链 = 1/16 + 0.3775 + 0.01 = 0.45 不变、kCartSeatDrop 板面 −0.3125 不变（物理常量零改动，纯视觉重排）。
+    //   偏移远离整数格边界 → floor(pos.y) 定格列无 ULP 取整风险（lessons「resting 复探 FP 边界」条）；坡中段
     //   floor(pos.y) 提前跨 cell 由 scanRailColumn 向下 2 格窗兜住（与旧值同语义）。骑乘脚底 kCartSeatDrop
     //   （playercontroller 同值命名常量 = 底板面 −0.3125）与 Main.qml 底板 piece 三层同值推导，改须同步。
     static constexpr float kCartRideH  = 0.45f;
