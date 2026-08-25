@@ -1165,6 +1165,30 @@ void PlayerController::beginMining()
         float mobDist = 0.0f;
         const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
         if (mobIdx >= 0 && mobDist <= m_hitDist) {
+            // t866① 载具乘员攻击改判（用户报「矿车载生物时打矿车 → 打到生物 → 生物永远下不来」）：乘骑
+            //   mob 被钉在载具座位（AABB 与车 / 船体重叠）→ 射线恒先中乘员。攻击语义归**载具本体**：进
+            //   矿车耐久 / 船击毁链（末击摧毁 → 车毁 → 对账链自动释放乘员恢复 AI = 「乘员自动下来」；玩家
+            //   骑的被毁车自然下车）。乘员本体不掉血 —— 攻击意图是拆载具不是打乘客（机制等价 MC 打船 /
+            //   打车载实体先伤载具）。冷却门内吞点击（不误伤乘员，同下方车 / 船分支口径）。
+            const int rideCart = m_entityManager->rideCartAt(mobIdx);
+            if (rideCart >= 0 && m_minecartManager) {
+                if (m_attackCooldown <= 0.0f) {
+                    m_minecartManager->hitCartFromRay(eye, look, kReach, m_world,
+                                                      /*instantBreak=*/m_mode == Creative);
+                    m_attackCooldown = kAttackCooldown; // 拆载具同攻击冷却（连击定耐久节奏）
+                    emit swingArm();
+                }
+                return;
+            }
+            const int rideBoat = m_entityManager->rideBoatAt(mobIdx);
+            if (rideBoat >= 0 && m_boatManager) {
+                if (m_attackCooldown <= 0.0f) {
+                    m_boatManager->hitBoatFromRay(eye, look, kReach, m_world, m_mode == Creative);
+                    m_attackCooldown = kAttackCooldown;
+                    emit swingArm();
+                }
+                return;
+            }
             attackMob(mobIdx);
             return;
         }

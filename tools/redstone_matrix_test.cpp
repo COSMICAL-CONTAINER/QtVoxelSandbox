@@ -8929,6 +8929,164 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
+    //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
+    //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；
+    //   ②「矿车运动中碰仙人掌应变掉落物、乘员自动下来；岩浆同样」（矿车原无环境摧毁链）。矩阵断言：
+    //   (a1) 生存攻击乘骑车：命中乘员改判进矿车耐久链（hpAt 3→2）+ 乘员不掉血 + 仍在车（末击摧毁释放
+    //        链由 t811 探针 (d) 已覆盖，此处钉改判面）；
+    //   (a2) 创造攻击乘骑车：瞬毁 + cartBroken 不发（创造无掉落）+ 乘员对账自动释放（rideCart==-1、
+    //        存活、不掉血）；
+    //   (b)  仙人掌：轨端前方一格仙人掌 → 空车被推到末格中心（AABB 前沿探入仙人掌格）→ 下一
+    //        tickPushedCarts 环境检查即毁 + cartBroken 发（生存掉落语义）；
+    //   (c)  岩浆：静止车格被岩浆灌入（setBlock Lava）→ 下一 tick 即毁（同链；掉落物落岩浆由
+    //        ItemEntityManager 瞬毁判定收尾，净效果 = 毁无物）。
+    {
+        // rig 选址：运行期扫描空区（t867 先例）。需 8×1×4 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 7 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 7 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t866 vehicle attack/environment destroy: no clear rig area found";
+        } else {
+            // ── (a) 攻击重路由 ── 行为级（captured 门内 beginMining 不可直驱，t889 源码钉补接线面）：
+            // 石基座 + 单轨 + 矿车 + mob 登乘（tickVehicleRiding 扫描 ≤0.8 格）。
+            w.setBlock(x0, kRigY - 1, z0, BR::Stone, 0);
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);
+            MinecartManager carts;
+            EntityManager ents;
+            ents.setVehicleManagers(&carts, nullptr);
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const int mob = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#ff5555"), 50);
+            for (int t = 0; t < 8 && ents.rideCartAt(mob) < 0; ++t) {
+                ents.tick(0.016f, &w, carts.posAt(0) + QVector3D(0, 3, 0), 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();
+            }
+            int brokenCount = 0;
+            QObject::connect(&carts, &MinecartManager::cartBroken, &carts,
+                             [&](int, int, int) { ++brokenCount; });
+            const QVector3D cp0 = carts.posAt(0);
+            const QVector3D eye(cp0.x(), cp0.y() + 4.0f, cp0.z());
+            const QVector3D down(0.0f, -1.0f, 0.0f);
+            const int mobHp0 = ents.healthAt(mob);
+            // (a0) 前置钉：乘骑 mob 的 AABB 与车体重叠 → 攻击射线恒先中乘员（改判是**承重**的——
+            //      无它则攻击打在 mob 上、矿车耐久链永不可达 = 用户症状根因链）。
+            const bool okA0 = ents.findMobHit(eye, down, 4.0f, nullptr) == mob;
+            // (a1) 生存击（= 改判后 beginMining 调的同一调用面）：hp 3→2 + 乘员不掉血 + 仍在车。
+            carts.hitCartFromRay(eye, down, 4.0f, &w, /*instantBreak=*/false);
+            const bool okA1 = ents.rideCartAt(mob) == 0 && carts.aliveAt(0)
+                              && carts.hpAt(0) == 2
+                              && ents.healthAt(mob) == mobHp0
+                              && brokenCount == 0;
+            // (a2) 创造击：瞬毁 + 乘员对账自动释放 + 无掉落信号（t767 创造无掉落）。
+            carts.hitCartFromRay(eye, down, 4.0f, &w, /*instantBreak=*/true);
+            ents.tick(0.016f, &w, cp0 + QVector3D(0, 3, 0), 0.3f, 1.8f, false);
+            ents.tickVehicleRiding(); // 对账：座位指空槽 → mob 自释放
+            const bool okA2 = !carts.aliveAt(0) && ents.rideCartAt(mob) == -1
+                              && ents.aliveAt(mob) && ents.healthAt(mob) == mobHp0
+                              && brokenCount == 0;
+            // (a3) 源码钉（t889 先例）：beginMining mob 分支的重路由接线——乘骑判定（rideCartAt/rideBoatAt）
+            //      → 改判进 hitCartFromRay / hitBoatFromRay（含冷却门 + swingArm）→ attackMob 前被
+            //      return 截住（乘员本体不吃伤害）。滤注释体（注释里的字面量不参与）。
+            bool okA3 = false;
+            {
+                const QString exeDir = QCoreApplication::applicationDirPath();
+                const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+                QFile sf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+                const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
+                const int b0 = t.indexOf(QStringLiteral("void PlayerController::beginMining()"));
+                const int b1 = t.indexOf(QStringLiteral("void PlayerController::endMining()"));
+                if (b0 < 0 || b1 <= b0) {
+                    qInfo().noquote() << "  t866 (a3) beginMining slice miss";
+                } else {
+                    QString body;
+                    for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n')))
+                        if (!line.trimmed().startsWith(QLatin1String("//"))) {
+                            body += line; body += QLatin1Char('\n');
+                        }
+                    // 重路由语句面：乘骑判定 + 双载具分支调用 + 乘员分支 return 先于 attackMob。
+                    const int iRideC = body.indexOf(QStringLiteral("m_entityManager->rideCartAt(mobIdx)"));
+                    const int iRideB = body.indexOf(QStringLiteral("m_entityManager->rideBoatAt(mobIdx)"));
+                    const int iHitC  = body.indexOf(QStringLiteral("m_minecartManager->hitCartFromRay(eye, look, kReach, m_world,"));
+                    const int iHitB  = body.indexOf(QStringLiteral("m_boatManager->hitBoatFromRay(eye, look, kReach, m_world,"));
+                    const int iAtk   = body.indexOf(QStringLiteral("attackMob(mobIdx);"));
+                    okA3 = iRideC >= 0 && iRideB > iRideC && iHitC > iRideC && iHitB > iRideB
+                           && iAtk > iHitC && iAtk > iHitB;
+                }
+            }
+            // 清 (a) 场。
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+
+            // ── (b) 仙人掌（Entities 层直编）：x0..x0+2 轨 + x0+3 仙人掌（轨端前格）；空车推到末格中心。──
+            for (int dx = 0; dx <= 2; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Rail, 0);
+            }
+            w.setBlock(x0 + 3, kRigY - 1, z0, BR::Sand, 0); // 仙人掌基座（沙）
+            w.setBlock(x0 + 3, kRigY, z0, BR::Cactus, 0);
+            carts.spawnCart(x0, kRigY, z0, &w); // 槽复用 → 槽 0
+            QVector3D pusher = carts.posAt(0);
+            bool reached = false;
+            for (int t = 0; t < 400 && !reached; ++t) { // 玩家追着 +X 推（t809 模式）
+                carts.pushEmptyCart(&w, pusher, 1.0f, 0.0f);
+                carts.tickPushedCarts(0.016, &w);
+                pusher = carts.posAt(0);
+                if (!carts.aliveAt(0)) { reached = true; break; }           // 环境检查已毁
+            }
+            // t863④ 续推：到位 / 死端前磨停（首版 reached 窗口被磨停点 6.4 误触提前退出的实测坑）后
+            //   继续追推 → 轨末端推离（derailed 出轨）→ 贴地滑入仙人掌格 → 环境摧毁 + 掉落信号。
+            for (int t = 0; t < 300 && carts.aliveAt(0); ++t) {
+                carts.pushEmptyCart(&w, pusher, 1.0f, 0.0f);
+                carts.tickPushedCarts(0.016, &w);
+                pusher = carts.posAt(0);
+            }
+            const bool okB = !carts.aliveAt(0) && brokenCount >= 1; // 摧毁 + 生存掉落信号
+            // 清 (b) 场。
+            for (int dx = 0; dx <= 2; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            }
+            w.setBlock(x0 + 3, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+
+            // ── (c) 岩浆（Entities 层直编）：地面静止车 + 格内灌岩浆 → 下一 tick 环境检查即毁。──
+            w.setBlock(x0, kRigY - 1, z0, BR::Stone, 0);
+            carts.spawnCart(x0, kRigY - 1, z0, &w); // 非轨地面静止车（kCartGroundH 贴 cell 底）
+            const int lavaBroken0 = brokenCount;
+            w.setBlock(x0, kRigY - 1, z0, BR::Lava, 0); // 基座格换岩浆 → 车 AABB 覆盖该格
+            carts.tickPushedCarts(0.016, &w);
+            const bool okC = !carts.aliveAt(0) && brokenCount == lavaBroken0 + 1;
+            const bool ok = okA0 && okA1 && okA2 && okA3 && okB && okC;
+            if (!ok)
+                qInfo().noquote() << "  t866 a0" << okA0 << "a1" << okA1 << "hp" << carts.hpAt(0)
+                                  << "a2" << okA2 << "a3(src)" << okA3
+                                  << "rideC" << ents.rideCartAt(mob) << "b" << okB
+                                  << "c" << okC << "broken" << brokenCount;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t866 attack on passenger-carrying cart routes to cart durability"
+                                 " (mob unharmed, still seated), creative hit destroys + passenger"
+                                 " auto-released, moving cart touching cactus breaks into dropped"
+                                 " item, lava cell destroys cart same chain";
+            // 清场
+            carts.clearAll();
+            ents.clearAll();
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
 
 
     // ── t848 余烬门尺寸上限 23×23 探针（World 层直调；t806 泛化门的用户实测回归）──
