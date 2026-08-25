@@ -2496,6 +2496,13 @@ Window {
         function onBobberEscaped(x, y, z) {
             if (particleLoader.item) particleLoader.item.burstWaterEscape(x, y, z)
         }
+        // t884① 甩竿入水水花（EntityManager Bobber Flying→Water 浮定沿发 bobberSplashed；坐标 = 浮定水面
+        //   坐标）：转发 BlockParticles.burstWaterCast 在入水点迸小水花——「甩到了」的第一可见反馈（用户
+        //   「完全看不到水花/上钩动画导致钓不到」①；幅度档 < 咬钩水花——咬钩才是主信号）。单向事件流
+        //   （PLAN §2 分层：Entities 发语义事件、呈现层只消费）。
+        function onBobberSplashed(x, y, z) {
+            if (particleLoader.item) particleLoader.item.burstWaterCast(x, y, z)
+        }
         // t281 敌对 mob 近战攻击 / t283 骷髅箭 / t284 Stalker 爆炸命中玩家（spec「attack」）：EntityManager 发
         //   mobAttackedPlayer(amount, mobType, kbX, kbZ) → 仅 Survival 应用伤害（Creative/Spectator 无伤跳过，机制
         //   等价 MC 创造/观察者无敌）。复用 PlayerState.takeDamage → damaged 红闪 / 视角晃 / 受伤音链（同
@@ -4421,15 +4428,32 @@ Window {
         }
 
         // t401/t836 钓鱼浮标 + 鱼线（仅 player.fishing 时显）：浮标 = 红顶立方 + 白杆小段（ bobberPosition 是
-        //   EntityManager 浮标实体的 Game 层每 tick 镜像——飞行段随抛物移动 / 水中浮定 / 钉 mob 跟随），咬钩时
-        //   整体下沉 0.15（hasBite →「鱼扯浮标」）。鱼线 = 竿尖 → 浮标的细长盒（UnitCube 沿 Y 拉长 + 手写
-        //   axis-angle 四元数把本地 +Y 旋到连线方向；position=中点、scale=(细,长,细)）。NoLighting（同地形 /
-        //   线框已验证可见路径）。分层（PLAN §2）：呈现层只读 player.fishing / bobberPosition / hasBite
+        //   EntityManager 浮标实体的 Game 层每 tick 镜像——飞行段随抛物移动 / 水中浮定 / 钉 mob 跟随）。咬钩时
+        //   整体下沉（hasBite →「鱼扯浮标」；t884④ 0.15→0.35 明显下沉 + bobberBit 水花加强——可读的「现在
+        //   右键」信号）。鱼线 = 竿尖 → 浮标的细长盒（UnitCube 沿 Y 拉长 + 手写 axis-angle 四元数把本地 +Y
+        //   旋到连线方向；position=中点、scale=(细,长,细)）。NoLighting（同地形 / 线框已验证可见路径）。
+        //   分层（PLAN §2）：呈现层只读 player.fishing / bobberPosition / hasBite / bobberInWater
         //   （Game 层镜像实体态），不反向写。
+        //   t884② 待机水面微飘：仅水中待咬段（bobberInWater && !hasBite）给 ±0.035 极小幅 sin 起伏
+        //   （NumberAnimation 循环驱动相位；视觉层偏移——物理位不动，不污染 Entities 层 Water 态 blockAt
+        //   复查）。陆上 / 飞行 / 咬钩段不飘（咬钩下沉分支接管视觉）。
         Node {
+            id: fishingBobber
             visible: player.fishing
+            // t884② 微飘相位（0..2π 循环；running 绑定——只在水面待咬段驱动，其余段冻结在最后相位不显）
+            property real bobPhase: 0
+            NumberAnimation on bobPhase {
+                from: 0; to: Math.PI * 2; duration: 1900; loops: Animation.Infinite
+                // 硬暂停（ESC，window.worldRunning=false）停飘——暂停一切计时（t889 语义）；软档 GUI 开照飘。
+                running: player.fishing && player.bobberInWater && !player.hasBite
+                         && window.worldRunning
+            }
             position: Qt.vector3d(player.bobberPosition.x,
-                                  player.bobberPosition.y - (player.hasBite ? 0.15 : 0.0),
+                                  player.bobberPosition.y
+                                      - (player.hasBite ? 0.35
+                                          : (player.bobberInWater
+                                             ? Math.sin(fishingBobber.bobPhase) * 0.035
+                                             : 0.0)),
                                   player.bobberPosition.z)
             // 红顶浮头（水上可见段）
             Model {
@@ -4450,6 +4474,25 @@ Window {
                     lighting: PrincipledMaterial.NoLighting
                     baseColor: "#e8e4dc" // 浮标白杆（水下段）
                 }
+            }
+        }
+        // t884③ 上钩前水面轨迹粒子（等待期每 380ms 一拍）：BlockParticles.burstWaterApproach 从浮标周边
+        //   确定性螺旋角出生水色微粒、沿径向游向浮标、抵达即消（「前端生成、尾端消除——像有东西游向鱼钩」；
+        //   节律相位驱动非随机源，PLAN §2-K 呈现层纪律）。仅水中待咬段运行（bobberInWater && !hasBite——
+        //   咬钩 / 鱼跑后停拍，窗口期保持「水面突然安静」的对比）。坐标取实时镜像 bobberPosition（浮定后
+        //   静止 ≈ 浮标位）。
+        Timer {
+            interval: 380; repeat: true
+            // 硬暂停（ESC）停拍（t889 全停语义）；软档 GUI 开照常（世界照跑）。
+            running: player.fishing && player.bobberInWater && !player.hasBite
+                     && window.worldRunning
+            property int ph: 0
+            onTriggered: {
+                ++ph
+                if (particleLoader.item)
+                    particleLoader.item.burstWaterApproach(player.bobberPosition.x,
+                                                           player.bobberPosition.y,
+                                                           player.bobberPosition.z, ph)
             }
         }
         // t836 竿尖锚点（世界系手部近似位）：脚底 + 上 1.40 + 右手侧 0.36 + 水平视线前 0.18。锚点常量近似

@@ -89,14 +89,42 @@ Node {
     // t836 钓鱼浮标咬钩水花（机制等价 MC 1.0 咬钩时浮标位水花上溅——「窗口开了」的视觉提示，配浮标下沉）：
     //   水色液滴 + 强上抛（水花柱感 vYBase 3.2）+ 中横向散 + 较强重力（液滴落回水面，12 vs 碎屑 14 略飘）。
     //   原点 = 浮标 float 世界坐标（不加 +0.5，同 burstSnowball 模式）。色 #4a7fd8 取 blockColor 水蓝亮一档
-    //   （#3f6fd8 提亮，水花反光感）。数量 10（咬钩是钓鱼主反馈，比碎块 8 略多）。
+    //   （#3f6fd8 提亮，水花反光感）。t884④ 咬钩水花加强（用户「完全看不到水花」）：10→14 颗、起跳 3.2→4.0、
+    //   横向 1.4→1.7——咬钩是「现在右键」的主信号，与入水水花 / 鱼跑水花拉开明显档差。
     function burstWaterSplash(px, py, pz) {
-        burstFloat(px, py, pz, 10, "#4a7fd8", 0.06, 3.2, 1.6, 1.4, 0.55, 12.0)
+        burstFloat(px, py, pz, 14, "#4a7fd8", 0.06, 4.0, 1.8, 1.7, 0.6, 12.0)
     }
     // t836 钓鱼浮标鱼跑小水花（咬钩窗口过期「鱼跑了」轻反馈）：同水色但**幅度减半**（数量 5 / 起跳弱 /
     //   横向小）——与咬钩水花形成大小对比，玩家可从粒子里分辨「咬了」vs「跑了」。
     function burstWaterEscape(px, py, pz) {
         burstFloat(px, py, pz, 5, "#4a7fd8", 0.05, 1.6, 0.8, 0.8, 0.4, 12.0)
+    }
+    // t884① 甩竿入水水花（浮标 Flying→Water 浮定沿，Entities 发 bobberSplashed → Main.qml 转发；机制等价
+    //   MC 1.0 浮标砸进水面的入水水花——「甩到了」的第一反馈）。幅度档：入水（本函数）< 咬钩（上）——
+    //   咬钩才是「该收竿」的主信号。原点 = 浮定水面坐标（不加 +0.5）。
+    function burstWaterCast(px, py, pz) {
+        burstFloat(px, py, pz, 7, "#4a7fd8", 0.055, 2.4, 1.2, 1.2, 0.5, 12.0)
+    }
+    // t884③ 上钩前水面轨迹粒子（等待期 Main.qml Timer 周期调，ph = 单调相位计数）：从浮标周边确定性螺旋角
+    //   （黄金角 2.39996 rad 步进——无随机源，节律可复现；PLAN §2-K 呈现层纪律同口径）出生的水色微粒，
+    //   沿径向朝浮标游动、抵达即寿终（life = 半径/速度，「前端生成、尾端消除」——像有东西游向鱼钩）。
+    //   gravity=0（贴水面直线游，非抛物）；第二颗取径向 25% 处 + 稍慢 = 拖尾观感。半径 / 速度按相位微变
+    //   （确定性抖动）防整齐划一。
+    function burstWaterApproach(px, py, pz, ph) {
+        const ang = (ph % 16) * 2.39996                       // 黄金角螺旋步进（确定性）
+        const rad = 0.9 + 0.14 * ((ph * 7) % 4)               // 半径 0.9..1.32（确定性抖动）
+        const cx = px + Math.cos(ang) * rad
+        const cz = pz + Math.sin(ang) * rad
+        let dx = px - cx, dz = pz - cz
+        const dl = Math.sqrt(dx * dx + dz * dz)
+        if (dl < 1e-4) return                                  // 浮标恰在生成点（防御）
+        dx /= dl; dz /= dl
+        const sp = 1.3 + 0.12 * (ph % 3)                       // 速度 1.3..1.54（确定性抖动）
+        spawnParticle(cx, py + 0.02, cz, dx * sp, -0.04, dz * sp, "#4a7fd8", 0.05,
+                      dl / sp + 0.06, 0.0)                     // 首颗：抵达浮标处寿终
+        spawnParticle(cx + dx * dl * 0.25, py + 0.02, cz + dz * dl * 0.25,
+                      dx * sp * 0.8, -0.03, dz * sp * 0.8, "#4a7fd8", 0.045,
+                      dl / sp * 0.75, 0.0)                     // 拖尾颗：同径 25% 处起步稍慢
     }
 
     // 通用方块中心迸发（坐标先 +0.5 到方块中心）。gravity 缺省 14（碎屑强落；t449 加可选参数供烟雾上飘）。

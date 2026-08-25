@@ -197,6 +197,10 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(bool fishing READ fishing NOTIFY fishingChanged)
     Q_PROPERTY(QVector3D bobberPosition READ bobberPosition NOTIFY fishingChanged)
     Q_PROPERTY(bool hasBite READ hasBite NOTIFY fishingChanged)
+    // t884 浮标水中浮定态镜像（updateFishing 每 tick 拉 bobberInWaterAt；同 fishingChanged 通知族——三镜像
+    //   同变一次发）。QML 据它只在「水面待咬段」播待机微飘 + 水面轨迹粒子（陆上静止 / 飞行 / 钉 mob / 咬钩
+    //   下沉段都不播——咬钩段由 hasBite 分支接管视觉）。
+    Q_PROPERTY(bool bobberInWater READ bobberInWater NOTIFY fishingChanged)
     // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
     // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
@@ -334,10 +338,12 @@ public:
     // t304 弓拉弓态（Q_PROPERTY：bowDrawing / bowDrawProgress）。仅持弓右键蓄力时为真。
     bool bowDrawing() const { return m_bowDrawing; }
     float bowDrawProgress() const; // 蓄力进度 0..1（钳到 [0,1]；满弓=1）
-    // t401 钓鱼态（Q_PROPERTY：fishing / bobberPosition / hasBite）。仅持钓竿右键抛出浮标时 fishing 为真。
+    // t401 钓鱼态（Q_PROPERTY：fishing / bobberPosition / hasBite / t884 bobberInWater）。仅持钓竿右键抛出
+    //   浮标时 fishing 为真。
     bool fishing() const { return m_fishing; }
     QVector3D bobberPosition() const { return m_bobberPos; }
     bool hasBite() const { return m_hasBite; }
+    bool bobberInWater() const { return m_bobberInWater; }
 
     // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
     // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
@@ -1438,6 +1444,7 @@ private:
     bool m_fishing = false;
     QVector3D m_bobberPos;
     bool m_hasBite = false;
+    bool m_bobberInWater = false; // t884 浮标水中浮定态镜像（updateFishing 拉 bobberInWaterAt 刷新）
     int m_bobberEntityIdx = -1;
     quint32 m_fishCastSerial = 0;
 
