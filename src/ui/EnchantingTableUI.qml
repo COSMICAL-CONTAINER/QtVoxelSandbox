@@ -165,7 +165,9 @@ Item {
         // review rv3：durability 缺省经 InventoryOps 归一为 -1（自动）；本地槽只存实例值（>0）或 0，
         //   防 -1 残留进 enchantDur（returnEnchantToHotbar 的 `-1 || 0` 为真值会透传 -1 → addStack 视作新实例）。
         root.enchantDur[index] = (durability > 0) ? durability : 0
-        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        // t874 序列归一终局防御（同 AnvilUI.localWriteSlot）：C++ 返回的附魔列表 Array.isArray 恒 false →
+        //   旧守卫把带附魔物品写入槽 0 时静默清零（「附魔台放入已附魔物品被清洗」的写出半边）。
+        const e = InventoryOps.list4(enchants)
         const arr = root.enchantEnch.slice()   // t699：新外层引用保 var NOTIFY（同引用重赋不发信号）
         arr[index] = e.slice()
         root.enchantEnch = arr
@@ -194,14 +196,17 @@ Item {
         if (!root.hotbar) return true
         if (root.hotbar.itemEnchantCategory(id) === 0) return false   // 不可附魔物不入槽 0
         let hasEnch = false
-        const e = Array.isArray(enchants) ? enchants : []
-        for (let i = 0; i < 4; ++i) {
+        // t874：enchants 形参可为 C++ 序列对象（Array.isArray 恒 false）→ 旧 `Array.isArray ? : []`
+        //   回退臂把带附魔形参当空 → 拒入门失效（「已附魔物品能放入附魔台」的判定半边根因，与
+        //   InventoryOps 序列归一同根）。序列下标可读，直接按 length 下界遍历。
+        const e = enchants
+        for (let i = 0; e && i < 4 && i < e.length; ++i) {
             if ((e[i] || 0) !== 0) { hasEnch = true; break }
         }
         // t693：形参无附魔且物品 == 当前光标手持物 → 查 VM 光标附魔（caller 传参缺附魔的兜底权威）。
         if (!hasEnch && root.hotbar.heldBlock === id) {
             const he = root.hotbar.heldEnchants()
-            if (Array.isArray(he)) {
+            if (he && he.length >= 4) {
                 for (let i = 0; i < 4; ++i) {
                     if ((he[i] || 0) !== 0) { hasEnch = true; break }
                 }
@@ -267,6 +272,10 @@ Item {
         const cur = InventoryOps.readSlot(root, group, index)
         const r = InventoryOps.resolveClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
+        // t875 门禁收敛：放置/互换写入前问 localCanPlace（原门禁只在 EnchantInputSlot 内联 TapHandler，
+        //   面板级 dispatch 是无门禁旁路 —— 任何经 slotLeft 路由到 enchant 槽的调用都绕过 t648 拒入；
+        //   收敛后内联 handler 与本处查同一权威，双保险无行为差）。拒 → no-op（光标不动，物品不丢）。
+        if (!InventoryOps.canPlace(root, group, index, r.slotId, r.slotCount, r.slotEnch)) return
         InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
@@ -278,6 +287,8 @@ Item {
         const cur = InventoryOps.readSlot(root, group, index)
         const r = InventoryOps.resolveRightClick(root, cur.id, cur.count, cur.durability, cur.enchants, cur.name)
         if (!r) return
+        // t875 门禁收敛（同 slotLeft 注释）：右键放一同样过 localCanPlace。
+        if (!InventoryOps.canPlace(root, group, index, r.slotId, r.slotCount, r.slotEnch)) return
         InventoryOps.writeSlot(root, group, index, r.slotId, r.slotCount, r.slotDur, r.slotEnch, r.slotName)
         root.hotbar.heldBlock = r.heldId
         root.hotbar.heldCount = r.heldCount
