@@ -572,6 +572,9 @@ QVariantList Hotbar::creativeMaterials() const
         // t401 钓鱼获物（机制等价 MC 1.0 raw fish；生存由钓竿拉起咬钩获物获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘鱼形图标。
         int(RecipeRegistry::RawFishId),         // 生鱼：钓竿拉起获物（机制等价 MC 1.0 raw fish；钓鱼常见获物）
+        // t836 熟鱼（生鱼熔炉冶炼产物；机制等价 MC 1.0 cooked fish——钓鱼 → 烤鱼 → +4 饥饿高价食物链闭环）。
+        //   排生鱼旁（钓获物组）；可堆叠 64；右键走「食用」分支。MaterialIcon 自绘熟鱼（暖棕烤色调）。
+        int(RecipeRegistry::CookedFishId),      // 熟鱼：生鱼熔炉烤制；食 +4 饥饿（t836 钓鱼链）
         // t447 骨粉（机制等价 MC 1.0 bone meal；生存由骨头合成获得，创造调色板补全便于测试 / 装饰）。
         //   可堆叠 64；非方块 → 右键不走放置，走 useBlock 催熟分支。MaterialIcon 自绘骨粉图标。
         int(RecipeRegistry::BonemealId),        // 骨粉：骨头合成产物；右键作物 +2..3 阶段（t791：3-4 个催熟一株）/ 树苗 45% 成树 / 浆果丛 +1 阶段
@@ -1059,6 +1062,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggSquidId) return QStringLiteral("生物蛋（鱿鱼）"); // 右键地面 → 生成鱿鱼
         // t401 钓鱼获物（机制等价 MC 1.0 raw fish；钓竿拉起咬钩获物）。
         if (blockId == RecipeRegistry::RawFishId)       return QStringLiteral("生鱼");       // 钓鱼常见获物
+        // t836 熟鱼（生鱼熔炉烤制；机制等价 MC 1.0 cooked fish）。
+        if (blockId == RecipeRegistry::CookedFishId)    return QStringLiteral("熟鱼");       // 生鱼烤制；食 +4 饥饿
         // t447 骨粉（机制等价 MC 1.0 bone meal；骨头合成产物，右键催熟生长类方块；t791 平衡 3-4 个催熟一株作物）。
         if (blockId == RecipeRegistry::BonemealId)      return QStringLiteral("骨粉");       // 骨头合成产物；右键作物 / 树苗 / 浆果丛催熟
         // t467 甜浆果（机制等价 MC 1.0 sweet berries；雪原浆果灌木丛采摘产物 + 食物）。零 MC 专名（§9）。
@@ -1564,7 +1569,16 @@ int Hotbar::itemAttackDamage(int itemId) const
 //   t640① 耐久异常防御：消耗前把槽内工具的**非法耐久值**归一（<=0 未初始化 / >max 越界 → 满耐久新工具，
 //   同 setStack normalizeDurability 语义）——任何写入路径意外落 0 / 越界时，工具不会被「首次使用即归零
 //   清槽」（用户「所有锄头一锄就废」类报告根因：新锄以 0 耐久进槽）；正常已耗耐久（(0, max]）原样保真。
-void Hotbar::damageSelectedItem()
+//   t836 增 times 次数包装（默认 1 = 旧行为逐字不变）：一次使用消耗多点耐久（钩生物收竿 -5）——每点独立
+//   走 Unbreaking 掷骰 + 破损清槽（清槽后槽空 → 后续次数自然 no-op，不溢出不清空已空槽）。
+void Hotbar::damageSelectedItem(int times)
+{
+    const int n = times < 1 ? 1 : times; // 防御：≤0 按一次（缺省调用语义）
+    for (int k = 0; k < n; ++k) damageSelectedOnce();
+}
+
+// 单点消耗本体（原 damageSelectedItem 主体逐字保留；times 包装只在外层循环）。
+void Hotbar::damageSelectedOnce()
 {
     if (m_selectedSlot < 0 || m_selectedSlot >= int(m_slots.size())) return;
     ItemStack &s = m_slots[size_t(m_selectedSlot)];

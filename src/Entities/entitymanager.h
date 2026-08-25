@@ -92,7 +92,7 @@ public:
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
     // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
-    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, EnderEye, EnderPearl }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 EnderEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 EnderPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, EnderEye, EnderPearl, Bobber }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 EnderEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 EnderPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）；t836 加 Bobber（钓鱼浮标投射物，玩家右键甩竿抛出，轻重力抛物 → 落水浮定 / 落陆静止 / 飞行段可钩 mob，渲染走 Main.qml player.fishing 专属 delegate 非本 Repeater）
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -340,6 +340,38 @@ public:
     //   伤害分支 v1 不做）。vx/vy/vz 复用 3D 速度（不走 Mob 击退衰减分支，无冲突）。达 kCap → 跳过 + 告警
     //   （防溢出）。返槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnEnderPearl(const QVector3D &origin, const QVector3D &vel);
+    // t836 钓鱼浮标投射物（玩家右键甩竿抛出；机制等价 MC 1.0 fishing bobber）：在 origin 处生成携带 3D 速度
+    //   vel（blocks/s，初速沿玩家视线 = Game 层 kFishCastSpeed）的小浮标实体。kind=Bobber、pushable=false（玩家
+    //   走碰不推）、halfW/halfH=kBobberHalfDim（小浮标视觉 + 碰撞最小）。castSerial = 甩竿序号（Game 层每次甩竿
+    //   ++；喂入确定性等待掷骰 seed ⊕ 序号 → 同世界同序号同等待值，t791 骨粉 / PLAN §2-K 同模式；鱼跑重掷时
+    //   序号在实体内自增 → 每轮新值）。tick 内 Bobber 分支四态机（bobberState）：
+    //     · Flying：轻重力 kBobberGravity 抛物 → 飞行段与 mob AABB 相交即钩定（Hooked，玩家不可钩自己——玩家
+    //       不是 EntityManager 实体天然排除；已钩 mob 被新浮标命中 = 换绑，旧浮标脱钩下落）→ 落水（Water 格）
+    //       浮定水面（浮力平衡半浸：液面 - kBobberFloatDip，XZ 收格心）+ 掷确定性等待 → 落实体方块贴面静止
+    //       （Ground，可再甩收回）；出界 / 虚空消散。
+    //     · Water：等待（bobberWaitSeconds ∈ [5,30]s，MC 1.0 口径）→ 咬钩窗口 kBobberBiteWindowSec（0.5s，浮标
+    //       下沉重置视觉）emit bobberBit（呈现层水花粒子）→ 窗口过 emit bobberEscaped（鱼跑提示）+ 重掷新等待。
+    //     · Ground：静止（不再钩 mob——只在飞行段钩，MC 语义近似取舍）。
+    //     · Hooked：钉在 mob 身上跟随；mob 死 / 移除 / 槽复用换任 → 脱钩转 Flying 下落。
+    //   寿命 kBobberLifetime 兜底（玩家挂机防浮标永滞；到期消散后 Game 层 updateFishing 镜像检测自动收竿）。
+    //   收竿 / 获物 / 拉拽 / 耐久语义全收口在 Game 层（PlayerController::useFishingRod 拉 bobberHasBiteAt /
+    //   bobberHookedMobAt 查询后结算；掉落物 / 暗渊珠「Entities 承载实体 + Game 收口语义」同款分层）。
+    //   达 kCap → 跳过 + 告警（防溢出）。返浮标槽索引（Game 层记 m_bobberEntityIdx 跟踪）；达 kCap → -1。
+    Q_INVOKABLE int spawnBobber(const QVector3D &origin, const QVector3D &vel, quint32 castSerial);
+    // t836 供 Game 层收竿结算查询（拉起时读三值决定 获物 / 拉拽 / 空收）：bobberHasBiteAt = 咬钩窗口内
+    //   （收竿 = 获物）；bobberHookedMobAt = 已钩 mob 槽索引（-1 无；收竿 = 拉拽该 mob）。越界 / 非活体
+    //   Bobber → false / -1（同 aliveAt 越界安全语义）。
+    Q_INVOKABLE bool bobberHasBiteAt(int i) const;
+    Q_INVOKABLE int bobberHookedMobAt(int i) const;
+    // t836 确定性等待掷骰（纯函数，矩阵探针直调锁两端可达）：h → kBobberWaitMinSec + (h % 2501) × 0.01
+    //   ∈ [5.00, 30.00] 秒（h%2501∈[0,2500] → 两端恰可达：0 → 5.00 / 2500 → 30.00）。机制等价 MC 1.0
+    //   「浮标入水后等 5-30s」区间；确定性来源 = World::hashVoxel(seed ^ 盐 ^ 甩竿序号)（PLAN §2-K，t791 同模式）。
+    static float bobberWaitSeconds(quint32 h);
+    // t836 收竿拉拽（钩住生物收竿时 Game 层调）：把第 mobIdx 只 mob 拉向 towardPos（玩家脚位）——水平速度
+    //   = speed × 归一方向（指向玩家）+ 小幅上抛（vy = kBobberHookPullUp，机制等价 MC 1.0 钩住生物收竿被拉
+    //   向玩家 + 微上抬）+ 解除 resting（重力分支接手上抛→下落）。**不伤害**（钩中 0 伤害，MC 口径）。非 Mob /
+    //   dead / 越界 → 静默早退。bump revision（QML 位移绑定刷新）。
+    void pullMobToward(int mobIdx, const QVector3D &towardPos, float speed);
     // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
     //   槽）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。
@@ -934,6 +966,13 @@ signals:
     //   传送伤害，机制语义收口在 Game 层；单向事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费路由，
     //   同 emberFireballHitPlayer 模式）。越界（世界外 / 跌出底部）移除不发本信号（珍珠白耗，防传到不可玩位置）。
     void enderPearlLanded(int x, int y, int z);
+    // t836 钓鱼浮标咬钩（浮标在水中等待到点、进入咬钩窗口时发）：坐标 = 浮标 float 世界坐标（呈现层据它在
+    //   浮标位迸发水花粒子 + 竿尖微动可选）。机制等价 MC 1.0「浮标短暂下沉 ~0.5s 窗口」的起始沿。单向事件流
+    //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费；收竿获物语义收口在 Game 层拉 bobberHasBiteAt 查询）。
+    void bobberBit(float x, float y, float z);
+    // t836 钓鱼浮标鱼跑（咬钩窗口过期、玩家未及时收竿时发）：坐标 = 浮标 float 世界坐标（呈现层据它迸发小股
+    //   水花提示「鱼跑了」）。之后 Entities 层内部重掷新确定性等待（甩竿序号自增），无需呈现层参与。
+    void bobberEscaped(float x, float y, float z);
     // t728 燃烬者火球命中玩家着火（机制等价 MC 1.0 烈焰人火球点燃玩家）：Fireball tick 命中玩家时发 —— 伤害
     //   5 走 mobAttackedPlayer（见上，死因 Emberling），着火由本信号另行驱动（呈现层 Main.qml 路由到
     //   player.applyStatusEffect(EffectFire, 秒数, 1)，刷新 m_fireTimer）。单次命中两者成对发（QML 均消费）；
@@ -1105,6 +1144,23 @@ private:
         float enderEyeDistLeft = 0.0f; // 剩余飞行距离（blocks；仅 kind==EnderEye 用）
         float enderEyeShatter = 0.0f;  // 碎裂态倒计时（秒；仅 kind==EnderEye 用；>0 = 正在碎裂动画，归零移除）
         float enderEyeCruiseY = 0.0f;  // t757 远段巡航高度（blocks；仅 kind==EnderEye 远段用，spawn 时定死不随地形变）
+        // t836 钓鱼浮标态（仅 kind==Bobber 用；其余实体留默认不读；全部带 DMI——聚合初始化缺省 + 槽复用
+        //   move 入槽覆盖回默认，t811/t477 教训）：
+        //   bobberState 四态机（kBobberSt* 常量）：Flying 抛物飞行 / Water 水中浮定待咬 / Ground 陆上静止 /
+        //   Hooked 钉在 mob 身上。vx/vy/vz 复用作 Flying 段 3D 速度（同 Arrow / Snowball 约定）；
+        //   arrowLife 复用作寿命倒计（kBobberLifetime 兜底消散）。
+        //   bobberBiteTimer 两阶段复用（同旧 t401 m_biteTimer 语义）：!hasBite 时 = 等待倒计时（→0 即咬钩，
+        //   重置窗口）；hasBite 时 = 咬钩窗口倒计（→0 即鱼跑，重掷新等待）。等待值 = bobberWaitSeconds
+        //   （World::hashVoxel(seed ^ 盐 ^ bobberSerial) 确定性，PLAN §2-K）。
+        //   bobberSerial = 甩竿序号（spawn 时 = Game 层 castSerial；鱼跑重掷时 ++ → 每轮新确定性值）。
+        //   bobberHookedIdx / bobberHookedSerial = 已钩 mob 槽索引 + 代际快照（槽复用换任检测，同
+        //   snowballThrowerSerial 双查先例——mob 被移除后槽复用出新生物时不再误当钩住目标）。
+        int   bobberState = 0;        // 四态机（kBobberStFlying=0/Water=1/Ground=2/Hooked=3；仅 Bobber 用）
+        float bobberBiteTimer = 0.0f; // 等待 / 咬钩窗口倒计时（秒；两阶段复用，见上）
+        bool  bobberHasBite = false;  // 咬钩窗口内（收竿 = 获物）
+        quint32 bobberSerial = 0;     // 甩竿序号（确定性等待掷骰的错峰源；鱼跑重掷 ++）
+        int   bobberHookedIdx = -1;   // 已钩 mob 槽索引（-1 = 无；仅 Hooked 态读）
+        quint32 bobberHookedSerial = 0; // 已钩 mob 代际快照（与槽内 spawnSerial 比对防槽复用误绑）
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         float cactusDamageTimer = 0.0f; // t394 仙人掌接触伤害累积（mob AABB 接触 Cactus 时累加，每 kCactusDamageInterval 扣 1HP；离开归零）
         // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
@@ -2014,6 +2070,36 @@ private:
     static constexpr float kEnderPearlWaterSink  = 1.5f;  // t835② 水中缓沉终速（blocks/s）
     static constexpr float kEnderPearlLavaSink   = 0.7f;  // t835② 岩浆缓沉终速（blocks/s；更粘更慢）
     static constexpr float kEnderPearlLiquidDrag = 5.0f;  // t835② 液体水平阻力率（1/s；~0.2s 水平速度基本停）
+    // t836 钓鱼浮标常量（机制对齐 MC 1.0 钓鱼：甩竿抛物 → 浮标入水等 5-30s → 咬钩 0.5s 窗口内收竿获物）。
+    //   - kBobberGravity：浮标专属轻重力 12（blocks/s²；对齐 t835④ 投掷物家族轻重力——MC 投掷物 0.03/t²=12
+    //     vs 世界 28；弧线自然、甩距由 Game 层 kFishCastSpeed=15 决定 → 45° 满甩 ~19 格）。
+    //   - kBobberHalfDim：半宽/半高（blocks；小浮标视觉 + 碰撞最小；命中判定走点格不读它）。
+    //   - kBobberLifetime：寿命兜底（秒；玩家挂机防浮标永滞——正常路径由收竿移除；等待 / 逃走循环下多轮
+    //     5-30s 等待 + 玩家反应时间，180s ≈ 6+ 轮全额等待，够宽容；到期消散后 Game 层镜像检测自动收竿）。
+    //   - kBobberWaitMinSec / kBobberWaitMaxSec：入水到咬钩的确定性等待区间（秒；MC 1.0 wiki 口径 5-30s。
+    //     掷骰 = bobberWaitSeconds(hashVoxel(seed ^ kBobberWaitHashSalt ^ 甩竿序号))，PLAN §2-K 禁运行期随机源，
+    //     t791 骨粉同模式）。
+    //   - kBobberBiteWindowSec：咬钩后可收竿获物的窗口（秒；MC 1.0 浮标短暂下沉 ~0.5s，错过鱼跑重等）。
+    //   - kBobberFloatDip：浮标浮定水面的浸没深度（blocks；浮力平衡半浸观感 = 液面下压 1/8）。
+    //   - kBobberWaitHashSalt：等待掷骰的哈希盐（与火 / 作物 / 骨粉等既有 hashVoxel 消费者解耦）。
+    //   - kBobberHookHitPad：飞行段钩 mob 的 AABB 外扩（blocks；浮标是点，外扩后命中盒覆盖 mob 体型边缘）。
+    //   - kBobberSt*：四态机枚举值（私有数字编码，不入 Q_ENUM，纯内部状态机，同 kSleepPhase* 模式）。
+    //   拉拽冲量常量（kBobberHookPullUp）与甩速（Game 层 kFishCastSpeed）分居两层：伤害 / 冲量发射属
+    //   Game/Physics 单一权威在 PlayerController；本层只持浮标物理。
+    static constexpr float kBobberGravity      = 12.0f;  // 浮标轻重力（blocks/s²；投掷物家族同源，vs 世界 28）
+    static constexpr float kBobberHalfDim      = 0.10f;  // 浮标半宽/半高（blocks）
+    static constexpr float kBobberLifetime     = 180.0f; // 浮标寿命兜底（秒；挂机防永滞，正常由收竿移除）
+    static constexpr float kBobberWaitMinSec   = 5.0f;   // 入水到咬钩等待下界（秒；MC 1.0 口径）
+    static constexpr float kBobberWaitMaxSec   = 30.0f;  // 入水到咬钩等待上界（秒；MC 1.0 口径）
+    static constexpr float kBobberBiteWindowSec= 0.5f;   // 咬钩窗口（秒；窗口内收竿获物，错过鱼跑）
+    static constexpr float kBobberFloatDip     = 0.125f; // 浮定水面浸没深度（blocks；半浸观感）
+    static constexpr quint32 kBobberWaitHashSalt = 0xF15Cu; // 等待掷骰哈希盐（与其它 hashVoxel 消费者解耦）
+    static constexpr float kBobberHookHitPad   = 0.15f;  // 钩 mob 命中盒外扩（blocks）
+    static constexpr float kBobberHookPullUp   = 2.8f;   // 收竿拉拽上抛分量（blocks/s；微上抬，峰值 ~0.14 格）
+    static constexpr int kBobberStFlying = 0;  // 抛物飞行（含出膛初速段）
+    static constexpr int kBobberStWater  = 1;  // 水中浮定（等待 → 咬钩 → 逃走循环）
+    static constexpr int kBobberStGround = 2;  // 陆上静止（贴命中面停住，等收竿收回）
+    static constexpr int kBobberStHooked = 3;  // 钉在 mob 身上（跟随其位置）
     static constexpr float kIronGolemDetectRange   = 12.0f; // 铁傀儡敌对侦测范围（blocks；XZ）
     static constexpr float kIronGolemAttackRange   = 2.0f;  // 铁傀儡近战攻击 XZ 距离（blocks）
     static constexpr int   kIronGolemAttackDamage  = 8;     // 铁傀儡重拳伤害（HP；高伤害）

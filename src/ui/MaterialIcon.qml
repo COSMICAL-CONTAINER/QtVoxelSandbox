@@ -1596,6 +1596,38 @@ Item {
                 R(7, 10, 1, 1, bodyLite)       // 眼上反光
             }
 
+            // t836 熟鱼（0x25B）：生鱼熔炉烤制产物。鱼形与 drawRawFish 同构（§9 区隔：纯原创抽象鱼形），
+            //   配色换**暖棕烤色调**（熟 vs 生的第一识别特征——MC 熟鱼图标同思路：鱼形不变、变焦糖色）。
+            //   配色：body #b07a48（烤棕鱼身）/ bodyLite #e0b888（腹部受光焦黄）/ bodyDark #6e4522（背脊暗 +
+            //   描边）/ fin #5a381c（鳍，深棕）/ eye #1a1a22（眼，与生鱼同）/ sear #8a5a2e（烤纹条纹，表烤痕）。
+            const drawCookedFish = () => {
+                const body = "#b07a48", bodyLite = "#e0b888", bodyDark = "#6e4522", fin = "#5a381c"
+                const eye = "#1a1a22", sear = "#8a5a2e"
+                // 鱼身（左头右尾水平椭圆；与 drawRawFish 同布局——同鱼形仅换烤色 + 烤纹）
+                R(6, 9, 11, 6, body)           // 主体 rows 9..14
+                R(7, 8, 9, 1, body)            // 顶沿（背部）
+                R(7, 15, 9, 1, body)           // 底沿（腹部）
+                R(5, 10, 2, 4, body)           // 头部前突（嘴部）
+                R(5, 11, 1, 2, bodyDark)       // 嘴尖暗
+                R(6, 9, 11, 1, bodyDark)       // 背脊暗线
+                R(7, 15, 9, 1, bodyLite)       // 腹部受光亮（焦黄）
+                R(8, 13, 8, 1, bodyLite)       // 腹侧亮带
+                // 烤纹（三条斜向深色条纹，表「烤过」——与生鱼的银蓝无纹形成第一眼区分）
+                R(9, 10, 1, 4, sear)
+                R(12, 10, 1, 4, sear)
+                R(15, 10, 1, 4, sear)
+                // 尾鳍（右侧分叉，上 / 下两片三角）
+                R(17, 7, 4, 3, fin)            // 上尾鳍
+                R(17, 14, 4, 3, fin)           // 下尾鳍
+                R(17, 10, 2, 4, bodyDark)      // 尾柄（连鱼身的窄收口）
+                // 背鳍（顶部三角，表鱼背鳍）
+                R(9, 6, 5, 2, fin)
+                R(10, 5, 3, 1, fin)
+                // 眼（头部圆点）
+                R(6, 10, 2, 2, eye)
+                R(7, 10, 1, 1, bodyLite)       // 眼上反光
+            }
+
             // t510 雪球（0x23D）：雪傀儡死亡掉落 0-15 个。机制等价 MC 1.0 snowball 图标；纯原创自绘（§9a）。
             //   MC 风格雪球 = 冷白圆形雪团 + 左上高光 + 散布冰晶亮点（表雪粒反光）+ 边缘冷蓝阴影（表球体积）。
             //   配色：snow #f0f4f8（冷白主体，同 SnowGolem 配色）/ snowLite #ffffff（左上高光，纯白反光）/
@@ -1885,6 +1917,7 @@ Item {
             case 0x230: drawPotato();             break // t400 马铃薯（猪繁殖食物；喂成体猪 → 求偶）
             case 0x241: drawPoisonPotato();       break // t669 毒马铃薯（绿皮毒薯；食后 60% 中毒）
             case 0x231: drawRawFish();            break // t401 生鱼（钓竿拉起获物；机制等价 MC 1.0 raw fish）
+            case 0x25B: drawCookedFish();         break // t836 熟鱼（生鱼熔炉烤制；食 +4 饥饿；机制等价 MC 1.0 cooked fish）
             case 0x232: drawBonemeal();           break // t447 骨粉（骨头合成产物；右键未成熟作物催熟一阶段）
             case 0x233: drawSweetBerry();         break // t467 甜浆果（成熟浆果丛采摘得；可食 +2 饥饿）
             case 0x234: drawBoat(false);          break // t469 橡木船（5 橡木木板合成；右键水面放船 + 骑乘）
