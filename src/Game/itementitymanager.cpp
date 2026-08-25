@@ -390,12 +390,23 @@ bool ItemEntityManager::isPickupReady(int i) const
     return (m_clock.elapsed() - m_entities[size_t(i)].spawnMs) >= kPickupDelayMs;
 }
 
+// t889 暂停期墙钟顺延（语义见 .h 声明处头注释）：活体槽 spawnMs 整体 +ms。ms<=0 早退（幂等防御）。
+void ItemEntityManager::deferWallClocks(qint64 ms)
+{
+    if (ms <= 0) return;
+    for (auto &e : m_entities) {
+        if (e.alive) e.spawnMs += ms;
+    }
+}
+
 // t60 掉落物重力 / t271 水冲走掉落物（每帧由 PlayerController::tick 调）。对每个实体先判中心格是否
 //   为 Water，分流「浮水 + 随流」与「空气重力」两条路径。详见 .h 头注（分层 / 机制 / 关键修正）。
 // 单帧最大下移 = kMaxFall*0.05 ≈ 3.9 格（dt 钳 50ms）→ 列扫 ≤4 格，cheap；≤200 实体全程 O(数百)。
 void ItemEntityManager::tick(qreal dt, World *world)
 {
-    // t320 寿命到期驱逐先于物理（独立于 world —— 菜单 / 暂停时世界不模拟但掉落物照常老化消失）。
+    // t320 寿命到期驱逐先于物理。t889 前注释「菜单/暂停时照常老化消失」语义已退役 —— 硬暂停
+    //   （ESC）期本 tick 不被 PlayerController 调用 + 复跑时 deferWallClocks 顺延 spawnMs → 掉落物
+    //   暂停期不老化（机制等价 MC Java 单机 ESC 全冻结）；GUI 面板开（软档）时 tick 照跑、照常老化。
     despawnExpired();
     if (!world || m_entities.empty()) return;
     bool dirty = false;

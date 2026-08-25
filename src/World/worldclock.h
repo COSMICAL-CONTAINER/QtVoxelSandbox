@@ -78,6 +78,12 @@ class WorldClock : public QObject
     //   （跨天时发，独立于 moonPhaseChanged —— moonPhase 8 天才变，F3 day count 每 1 天一刷需独立信号）。
     //   单调递增（时间单向，PLAN §2-H），供 F3 叠层 + 调试展示。Game 层时间源派生（只读）。
     Q_PROPERTY(qint64 dayCount READ dayCount NOTIFY dayChanged)
+    // t889 两档暂停语义（第二档·硬暂停总闸）：running=false → 停 100ms QTimer（时间/昼夜/太阳/月相/
+    //   dayCount 全冻结，ticked 不再发 → Main.qml onTicked 桥接的全部 World tick（火/水/岩浆/生长/天气/
+    //   红石）与熔炉/云漂移同停）。机制等价 MC Java 单机：**仅 ESC 暂停菜单停表**；开背包/GUI/聊天/死亡屏
+    //   不停（世界照跑，玩家照烧/照坠/照溺）。默认 true（C++ 无 UI 场景恒跑，测试直调各 tick 不受影响）。
+    //   由 Main.qml 绑 window.worldRunning（单一权威派生，见该属性注释）；Game 层时间源自身不感知 UI 态。
+    Q_PROPERTY(bool running READ running WRITE setRunning NOTIFY runningChanged)
 
 public:
     explicit WorldClock(QObject *parent = nullptr);
@@ -97,6 +103,11 @@ public:
     // t464 完整天数（floor(elapsed/period)；跨天时更新 + emit dayChanged）。F3 叠层「day count」读它。
     //   m_dayCount 初值 -1（哨兵，保首 tick 必 emit）；clamp 到 ≥0 暴露给 QML（首 tick 前的极短窗口不显 -1）。
     qint64 dayCount() const { return m_dayCount < 0 ? 0 : m_dayCount; }
+
+    // t889 暂停总闸（见 Q_PROPERTY(bool running) 头注释）：停/复跑 100ms QTimer。幂等；停表期间
+    //   m_elapsedMs 不推进（phase/dayCount 不漂），复跑即从冻结点继续，无 catch-up 跳变。
+    bool running() const { return m_running; }
+    void setRunning(bool running);
 
     // 调试加速键（呈现层按键调）：切 ~30s 周期，便于肉眼快速看一圈昼夜。仅调试便利、
     // 不影响生产节律常量（kDaySecs 不变；切换的是运行期所用周期）。
@@ -136,6 +147,8 @@ signals:
     void dayChanged();
     // t389：跨天时发（驱动月 Model 切 moon_<phase>.png 贴图）；非每 tick → 仅 8 次周期切换刷新。
     void moonPhaseChanged();
+    // t889：running 翻转时发（QML 绑定刷新；语义见 Q_PROPERTY(bool running) 头注释）。
+    void runningChanged();
     // t87 游戏时间 tick：每 kTickMs（100ms）发一次，携带本 tick 推进的秒数（恒 kTickMs/1000=0.1）。
     // 用途：熔炉冶炼等「按游戏时间推进」的系统据此 tick（FurnaceUI.tick）。与昼夜相位解耦——本信号
     // 每 tick 无条件发（不似 dayPhaseChanged 仅 phase 真变才发），保证冶炼节律稳定 10Hz。
@@ -184,6 +197,7 @@ private:
     float m_phase = 0.f;      // 0..1 循环相位（由 m_elapsedMs 派生，避免浮点累积漂移）
     qint64 m_elapsedMs = 0;   // 累计已流逝毫秒（phase = (elapsed mod period) / period）
     bool m_debugFast = false;
+    bool m_running = true;    // t889 暂停总闸（默认跑；false = QTimer 停 → 时间全冻结，见属性头注释）
     // t389 月相态：m_dayCount = floor(elapsed/period)（已过完整天数），m_moonPhase = dayCount%8。
     //   初值 m_dayCount=-1 → 首 tick 必算 + emit（保证呈现层首帧即拿到正确 phase，非靠默认 0 兜底）。
     qint64 m_dayCount = -1;

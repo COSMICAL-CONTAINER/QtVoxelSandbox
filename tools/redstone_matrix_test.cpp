@@ -50,6 +50,8 @@
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
 #include "playercontroller.h"     // t814 真消费端探针（Game 层 PlayerController 直编：firePowerTnt/fireDispenserAtQml）
+#include "worldclock.h"           // t889 暂停语义探针（WorldClock.running 停表行为级 + 源码钉）
+#include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
@@ -12158,6 +12160,229 @@ Item {
                              "implementation), 12 spawns tracked by emittedTotal/liveCount, blocked "
                              "half-step -1 pair, table-row removal -> zero pairs + spawn timer idle "
                              "(data chain proven live; pixel-side remains qml.exe/manual)";
+    }
+
+    // ---- t889 暂停语义统一（两档：GUI 开=世界照跑玩家照坠但不动；ESC=全停；t885 鱼线持久前置）----
+    //      门控矩阵钉子（行为级 + 源码钉双层）：
+    //        (a) 软档（!captured + worldRunning=true，GUI 面板开等价）：pc.tick() step 照跑（玩家坠、XZ 冻结）、
+    //            掉落物照落、钓鱼态不自动收（旧代码此分支 cancelFishing）+ 浮标照 tick；
+    //        (b) 硬档（worldRunning=false，ESC 暂停菜单等价）：pc.tick() 早退于实体桶 —— 玩家位 / 掉落物 /
+    //            浮标位置全冻结（精确等值），钓鱼态保活（不收、只是不 tick），复跑续钓；
+    //        (c) WorldClock.running 行为级：默认 true；false 停表（ticked 零发）→ true 复跑；
+    //        (d) 墙钟顺延：deferWallClocks 把 spawnMs 推后（掉落物免拾窗 ready→not-ready 翻转复验）+
+    //            setWorldRunning 复跑连调三管理器（源码钉）；
+    //        (e) release() 体无 cancelFishing（t885：开背包 / ESC / 失焦不收竿。行为级不可达 —— 无窗口
+    //            rig 进不去 captured 态，t836(e) 同取舍源码钉）；
+    //        (f) Main.qml 门控钉：window.worldRunning 派生属性 + worldClock.running / player.worldRunning
+    //            绑定 + pauseOverlay 取反消费 + keyInput 未捕获守卫 + onTicked 桥无 captured/面板门（GUI 开
+    //            时火 / 水 / 生长照跑的源头证）。
+    {
+        bool okA = true, okB = true, okC = true, okD = true, okE = true, okF = true;
+        QString diag889;
+        // 泵事件循环等待墙钟（QTimer 需事件循环投递；每片 ≤10ms 防饿死）
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+
+        // ---- (c) WorldClock.running 行为级 ----
+        {
+            WorldClock wc;
+            int ticksOn = 0, ticksOff = 0;
+            QObject::connect(&wc, &WorldClock::ticked, &wc, [&](qreal) {
+                if (wc.running()) ++ticksOn; else ++ticksOff;
+            });
+            pumpFor(350);          // 默认 running=true（100ms QTimer → ≥3 tick）
+            wc.setRunning(false);
+            pumpFor(350);          // 停表窗口：ticked 零发（ticksOff 恒 0）
+            wc.setRunning(true);
+            pumpFor(350);          // 复跑窗口
+            okC = wc.running() && ticksOn >= 4 && ticksOff == 0;
+            if (!okC)
+                diag889 += QStringLiteral("(c) running=%1 on=%2 off=%3; ")
+                               .arg(wc.running()).arg(ticksOn).arg(ticksOff);
+        }
+
+        // ---- (a)/(b) PlayerController 两档 + 实体桶 + 钓鱼（行为级）----
+        {
+            World w9;
+            w9.setWidth(48); w9.setDepth(48); w9.setHeight(96); w9.setSeed(77);
+            EntityManager ents;
+            ItemEntityManager items;
+            Hotbar hb;
+            hb.setStack(0, ToolRegistry::FishingRod, 1,
+                        ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+            hb.setSelectedSlot(0);
+            PlayerController pc;
+            pc.setWorld(&w9);
+            pc.setEntityManager(&ents);
+            pc.setItemEntities(&items);
+            pc.setHotbar(&hb);
+            // 石板地板（fy=83 空带，同 t836 rig 口径）：玩家列 (6,6) 与掉落物列 (20,20) 各 5×5
+            const int fy = 83;
+            for (int x = 4; x <= 8; ++x)
+                for (int z = 4; z <= 8; ++z) w9.setBlock(x, fy, z, BR::Stone, 0);
+            for (int x = 18; x <= 22; ++x)
+                for (int z = 18; z <= 22; ++z) w9.setBlock(x, fy, z, BR::Stone, 0);
+            // 玩家：生存、悬空 6 格（面对下坠）；默认 !captured = GUI 开等价软档
+            pc.loadSavedState(6.5f, float(fy + 6), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+            const QVector3D startEye = pc.position();
+            // 甩竿（t836 先例：useFishingRod 无 captured 门，直调成活）
+            pc.useFishingRod();
+            int bobIdx = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bobIdx = i; break; }
+            if (!(pc.fishing() && bobIdx >= 0)) { okA = false; diag889 += QStringLiteral("(a) cast failed; "); }
+            // 掉落物：远处列悬空（离玩家 14 格 > 拾取半径 1.5 → pickupScan 不干扰）
+            items.spawnItem(20, fy + 4, 20, BR::Cobble, 1);
+            int itemIdx = -1;
+            for (int i = 0; i < items.count(); ++i)
+                if (items.aliveAt(i) && items.posAt(i).x() > 19.0f) { itemIdx = i; break; }
+            if (itemIdx < 0) { okA = false; diag889 += QStringLiteral("(a) item spawn failed; "); }
+            const float itemY0 = itemIdx >= 0 ? items.posAt(itemIdx).y() : 0.0f;
+            // (a) 软档：12 tick（间隔真 17ms 泵 dt）→ 眼位下坠 + XZ 冻结 + 掉落物下落 + 钓鱼态保持
+            for (int i = 0; i < 12; ++i) { pumpFor(17); pc.tick(); }
+            if (okA) {
+                const float dyEye = float(startEye.y() - pc.position().y());
+                const float dyItem = float(itemY0 - items.posAt(itemIdx).y());
+                okA = pc.position().y() < startEye.y() - 0.05f                       // 照坠（step 软档推进）
+                      && pc.position().x() == startEye.x()
+                      && pc.position().z() == startEye.z()                            // 无输入不动（XZ 冻结）
+                      && dyItem > 0.05f                                              // 掉落物照落（实体桶照跑）
+                      && pc.fishing() && ents.aliveAt(bobIdx);                        // t885：GUI 开不收竿
+                if (!okA)
+                    diag889 += QStringLiteral("(a) dyEye=%1 dyItem=%2 fish=%3 bobAlive=%4 xyz=(%5,%6,%7); ")
+                                   .arg(dyEye).arg(dyItem).arg(pc.fishing())
+                                   .arg(bobIdx >= 0 && ents.aliveAt(bobIdx))
+                                   .arg(pc.position().x()).arg(pc.position().y()).arg(pc.position().z());
+            }
+            // (b) 硬档：ESC 等价 → 全冻结（位置精确等值）+ 钓鱼态保活 + 复跑续钓
+            if (okB) {
+                pc.setWorldRunning(false);
+                const QVector3D frozenEye = pc.position();
+                const QVector3D frozenItem = itemIdx >= 0 ? items.posAt(itemIdx) : QVector3D();
+                const QVector3D frozenBob = bobIdx >= 0 ? ents.posAt(bobIdx) : QVector3D();
+                for (int i = 0; i < 12; ++i) { pumpFor(17); pc.tick(); }
+                okB = pc.position() == frozenEye
+                      && (itemIdx < 0 || items.posAt(itemIdx) == frozenItem)
+                      && (bobIdx < 0 || ents.posAt(bobIdx) == frozenBob)
+                      && pc.fishing();                                               // 鱼线保活过暂停（t885）
+                pc.setWorldRunning(true);                                            // 复跑（墙钟顺延在 pc 内）
+                pumpFor(17); pc.tick();
+                okB = okB && pc.fishing() && (bobIdx < 0 || ents.aliveAt(bobIdx));   // 续钓不掉线
+                if (!okB) diag889 += QStringLiteral("(b) hard-tier regression; ");
+            }
+            // 好公民：清场（探针不留脏 rig；独立小世界随作用域析构）
+            ents.clearAll();
+            items.clearAll();
+        }
+
+        // ---- (d) 墙钟顺延行为级：掉落物免拾窗 ready→not-ready 翻转复验 ----
+        {
+            ItemEntityManager items2;
+            items2.spawnItem(3, 60, 3, BR::Cobble, 1);
+            int idx = -1;
+            for (int i = 0; i < items2.count(); ++i)
+                if (items2.aliveAt(i)) { idx = i; break; }
+            if (idx < 0) { okD = false; diag889 += QStringLiteral("(d) spawn failed; "); }
+            else {
+                pumpFor(650);                       // kPickupDelayMs=500 → ready
+                const bool readyBefore = items2.isPickupReady(idx);
+                items2.deferWallClocks(100000);      // 顺延 100s → spawnMs 推后 → 免拾窗重开
+                const bool readyAfter = items2.isPickupReady(idx);
+                items2.deferWallClocks(0);           // ms<=0 早退（幂等防御面）
+                okD = readyBefore && !readyAfter;
+                if (!okD) diag889 += QStringLiteral("(d) ready=%1 after=%2; ")
+                                         .arg(readyBefore).arg(readyAfter);
+            }
+        }
+
+        // ---- (e)/(f) 源码钉（行为级不可达 / QML 门控面）----
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            auto readSrc = [&root](const QString &rel) {
+                QFile f(root + QLatin1Char('/') + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString t = readSrc(QStringLiteral("src/Game/playercontroller.cpp"));
+            // 滤注释体（t836(e) 同手法）：源码钉只看语句面，注释里的字面量（如「不再 cancelFishing」）不参与
+            const auto stripComments = [](const QString &body) {
+                QString out;
+                for (const QString &line : body.split(QLatin1Char('\n'))) {
+                    if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                    out += line; out += QLatin1Char('\n');
+                }
+                return out;
+            };
+            // (e) release() 体（滤注释后）无 cancelFishing 调用（甩竿后开背包 / ESC / 失焦不收竿；
+            //     收竿只走主动 / 换持物 / 重生 / 换世界四入口）
+            {
+                const int b0 = t.indexOf(QStringLiteral("void PlayerController::release()"));
+                const int b1 = t.indexOf(QStringLiteral("void PlayerController::setCaptured"));
+                if (b0 < 0 || b1 <= b0) { okE = false; diag889 += QStringLiteral("(e) slice miss; "); }
+                else {
+                    okE = !stripComments(t.mid(b0, b1 - b0)).contains(QStringLiteral("cancelFishing"));
+                    if (!okE) diag889 += QStringLiteral("(e) release still cancels fishing; ");
+                }
+            }
+            // (d 尾) setWorldRunning 复跑连调三管理器 deferWallClocks（调用面钉）
+            {
+                const int s0 = t.indexOf(QStringLiteral("void PlayerController::setWorldRunning"));
+                const int s1 = t.indexOf(QStringLiteral("QPoint PlayerController::windowCenterGlobal"));
+                if (s0 < 0 || s1 <= s0) { okD = false; diag889 += QStringLiteral("(d) slice miss; "); }
+                else {
+                    const QString sb = t.mid(s0, s1 - s0);
+                    okD = okD && sb.contains(QStringLiteral("m_entityManager->deferWallClocks"))
+                          && sb.contains(QStringLiteral("m_itemEntities->deferWallClocks"))
+                          && sb.contains(QStringLiteral("m_xpOrbManager->deferWallClocks"));
+                }
+            }
+            // (f) Main.qml 门控面
+            {
+                const QString q = readSrc(QStringLiteral("src/ui/Main.qml"));
+                if (q.isEmpty()) { okF = false; diag889 += QStringLiteral("(f) read miss; "); }
+                const bool fProp  = q.contains(QStringLiteral("readonly property bool worldRunning"));
+                const bool fClock = q.contains(QStringLiteral("WorldClock { id: worldClock; running: window.worldRunning }"));
+                const bool fBind  = q.contains(QStringLiteral("worldRunning: window.worldRunning"));
+                const bool fPause = q.contains(QStringLiteral("visible: !window.worldRunning"));
+                const bool fKey   = q.contains(QStringLiteral("if (!player.captured) { e.accepted = true; return }"));
+                // onTicked 桥（World tick 全家）无 captured / 面板门 —— GUI 开时火 / 水 / 生长照跑的源头证
+                const int c0 = q.indexOf(QStringLiteral("function onTicked(dt)"));
+                const int c1 = q.indexOf(QStringLiteral("// 光标位置追踪层"), c0);
+                bool fBridge = false;
+                if (c0 < 0 || c1 <= c0) { diag889 += QStringLiteral("(f) onTicked slice miss; "); }
+                else {
+                    const QString body = q.mid(c0, c1 - c0);
+                    fBridge = !body.contains(QStringLiteral("captured"))
+                              && !body.contains(QStringLiteral("inventoryOpen"));
+                }
+                okF = okF && fProp && fClock && fBind && fPause && fKey && fBridge;
+                if (!(fProp && fClock && fBind && fPause && fKey && fBridge))
+                    diag889 += QStringLiteral("(f) prop=%1 clock=%2 bind=%3 pause=%4 key=%5 bridge=%6; ")
+                                   .arg(fProp).arg(fClock).arg(fBind).arg(fPause).arg(fKey).arg(fBridge);
+            }
+        }
+
+        const bool ok889 = okA && okB && okC && okD && okE && okF;
+        if (!ok889) ++totalFail;
+        if (!diag889.isEmpty())
+            qInfo().noquote() << "  [t889 diag]" << diag889;
+        qInfo().noquote() << (ok889 ? "PASS" : "FAIL")
+                          << "| t889 pause-semantics unification, two tiers (Java singleplayer parity): soft "
+                             "tier (!captured + worldRunning=true, any GUI panel open equivalent) keeps world "
+                             "running -- pc.tick() step() falls (Y drops, XZ frozen), item entity falls, "
+                             "fishing persists with bobber alive; hard tier (worldRunning=false, ESC menu "
+                             "equivalent) freezes player/item/bobber exact-equal with fishing line kept alive "
+                             "across pause+resume; WorldClock.running stops/starts the 100ms ticked gate "
+                             "behaviorally; deferWallClocks pushes spawnMs (pickup-window ready->not-ready "
+                             "flip) and setWorldRunning rebases all three managers; release() body has no "
+                             "cancelFishing (t885 line persistence); Main.qml gate pins (worldRunning "
+                             "derived property + worldClock.running / player.worldRunning bindings + "
+                             "pauseOverlay negated consume + keyInput !captured guard + onTicked bridge "
+                             "free of captured/panel gates)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -754,6 +754,13 @@ public:
     //   非 Mob / dead / 越界 / duration<=0 → 静默早退。bump revision（QML 显火焰 Model）。
     Q_INVOKABLE void ignite(int i, float duration);
 
+    // t889 暂停期墙钟顺延（硬暂停复跑时由 PlayerController::setWorldRunning 调，传暂停时长 ms）：把所有
+    //   活体槽的 arrowSpawnMs（箭 60s despawn / 浮标 180s 寿命的**墙钟真值源**，review25 #14）整体 +ms ——
+    //   等价「暂停期墙钟不走」：复跑后 age 不含暂停段，长暂停不会一次性烧穿寿命（t885：ESC 挂机后鱼线
+    //   仍在）。机制等价 MC Java 单机 ESC 暂停（一切计时冻结）。dt 镜像（arrowLife）本就随 tick 停而冻结，
+    //   无需处理。空场 / 全空槽 → 零迭代零开销。分层（PLAN §2）：Entities 层自持数据自改，Game 层只发指令。
+    void deferWallClocks(qint64 ms);
+
     // 玩家推动解析（C++ 直调；PlayerController::tick 每帧调，captured 时）。
     //   playerFeet=玩家脚底中心，halfW=玩家 AABB 半宽，height=玩家 AABB 高，world=只读世界（钳制穿墙用）。
     //   对每个 pushable 实体：垂直区间与玩家 AABB 重叠时，按「AABB(XZ) vs 实体圆(XZ)」求穿透，把实体

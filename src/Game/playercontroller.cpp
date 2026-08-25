@@ -96,6 +96,12 @@ int PlayerController::foodHungerAmount(int itemId)
 PlayerController::PlayerController(QQuickItem *parent) : QQuickItem(parent)
 {
     connect(this, &QQuickItem::windowChanged, this, &PlayerController::onWindowChanged);
+    // t889 兜底起表：QElapsedTimer 是 POD（默认构造**不**初始化内部时刻）——componentComplete 才 start
+    //   的旧序在「无窗直接构造」（矩阵测试 rig）下首 tick 的 m_clock.restart() 会拿到垃圾基线（dt 可为
+    //   负天文值 → 重力反演一步传送到 -1e21）。构造即起表，componentComplete 再 start 幂等（重置基线，
+    //   生产路径行为不变）；m_evtClock 同理（双击窗口时间戳基线）。
+    m_clock.start();
+    m_evtClock.start();
     m_timer.setTimerType(Qt::PreciseTimer);
     m_timer.setInterval(16); // ~60Hz：鼠标视角 + 物理
     connect(&m_timer, &QTimer::timeout, this, &PlayerController::tick);
@@ -527,7 +533,11 @@ void PlayerController::release()
     cancelMining();                           // t34：暂停 / 失焦 → 清累积挖掘态（spec：失焦清零）
     cancelEating();                           // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零）
     cancelBowDraw();                          // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零）
-    cancelFishing();                          // t401：暂停 / 失焦 → 收浮标（spec：失焦清零）
+    // t885/t889：**不再 cancelFishing** —— 释放指针（开背包 / ESC / 失焦）一律**不收竿**：鱼线持久
+    //   （浮标是 EntityManager 实体，GUI 开（软档）照常 tick——待机 / 咬钩继续；ESC（硬档）tick 停 +
+    //   setWorldRunning 复跑顺延墙钟寿命 → 挂机后鱼线仍在）。收竿只走玩家主动再按钓竿（useFishingRod）、
+    //   换持物（updateFishing 失效自收）或重生 / 换世界（respawn / loadWorld 显式 cancelFishing）。
+    //   旧 t401「失焦清零收浮标」语义随 t889 两档暂停统一退役（机制对齐 MC Java：GUI 不打断钓鱼）。
     cancelSleep();                            // t388：暂停 / 失焦 → 中断睡觉 fade（未跳清晨即醒）
     m_leftDown = false;                       // t44：暂停 / 失焦 → 视同松手（切断续挖）
     m_rightDown = false;                      // t267：暂停 / 失焦 → 视同松手（切断连食）
@@ -544,6 +554,25 @@ void PlayerController::setCaptured(bool c)
     if (m_captured == c) return;
     m_captured = c;
     emit capturedChanged();
+}
+
+// t889 世界模拟总闸（语义见 .h Q_PROPERTY 头注释）：false = 记暂停起点（复跑算顺延量）；true = 把暂停
+//   时长补给三管理器的墙钟寿命（箭 60s / 浮标 180s / 掉落物 5min / 经验球 5min 暂停期不老化 —— 机制等价
+//   MC Java 单机 ESC 暂停一切计时冻结；t885：ESC 挂机后鱼线仍在）。dt 类计时（燃烧 / 挖掘 / 咬钩窗口 /
+//   实体物理）随 tick 停而天然冻结，无需顺延。翻转才 emit（QML 绑定纪律）。
+void PlayerController::setWorldRunning(bool running)
+{
+    if (m_worldRunning == running) return;
+    m_worldRunning = running;
+    if (!m_worldRunning) {
+        m_pauseClock.start();
+    } else {
+        const qint64 pausedMs = m_pauseClock.elapsed();
+        if (m_entityManager)  m_entityManager->deferWallClocks(pausedMs);
+        if (m_itemEntities)   m_itemEntities->deferWallClocks(pausedMs);
+        if (m_xpOrbManager)   m_xpOrbManager->deferWallClocks(pausedMs);
+    }
+    emit worldRunningChanged();
 }
 
 QPoint PlayerController::windowCenterGlobal() const
@@ -757,7 +786,26 @@ void PlayerController::tickImpl()
         }
     }
     } // /profEnv
-    // perf「item/xp/boat/mob」桶：实体 tick（每帧常开，与捕获态无关 —— 菜单 / 暂停时仍推进）。
+    // t889 两档暂停语义·硬档总闸（worldRunning=false 仅 ESC 暂停菜单 / 非 playing 态，Main.qml 绑定驱动）：
+    //   世界模拟**全停** —— 下方 item/xp/boat/mob/pickup 五桶（掉落物 / 经验球 / 船 / 矿车 / mob AI / 刷怪 /
+    //   压力板 / 陷阱 / 按钮）与 phys/ray/input 段（step 物理 / 射线 / 使用类累积）一并不跑（机制等价 MC
+    //   Java 单机 ESC 暂停一切；WorldClock.running 同门停表 → 火 / 水 / 岩浆 / 生长 / 天气 / 熔炉也停）。
+    //   输入累积态在此清零（幂等；release() 已清过一遍 —— 兜任何未经过 release 的置假路径）。**钓鱼态不清**
+    //   （t885：鱼线保活过暂停 —— 浮标实体不入 tick 自然冻结，墙钟寿命由 setWorldRunning 复跑时顺延）。
+    //   上方 env 桶（水/岩浆滤镜态 + 声景扫描）保留常跑：纯读已冻结的世界与静止的玩家，值不变、零副作用。
+    if (!m_worldRunning) {
+        cancelMining();
+        cancelEating();
+        cancelBowDraw();
+        cancelSleep();
+        if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
+        if (m_moveSpeed != 0.0f || m_horizSpeed != 0.0f) {
+            m_moveSpeed = 0.0f; m_horizSpeed = 0.0f; emit moveSpeedChanged();
+        }
+        return;
+    }
+    // perf「item/xp/boat/mob」桶：实体 tick（t889 后门控 = worldRunning：GUI 面板开（软档）照跑、仅硬暂停停；
+    //   旧注释「菜单 / 暂停时仍推进」的『暂停』指旧 !captured 语义，随 t889 收敛为本 worldRunning 闸）。
     //   高水位 slot-reuse（ItemEntityManager kCap=200 / EntityManager 64 / XpOrb 64）→ 即便活体少，
     //   vector::size() 停在高水位，每帧遍历所有槽跳空 —— 「段数无关 + 每帧固定」开销头号怀疑项。
     { FrameProfiler::Scope s("item");
@@ -851,17 +899,37 @@ void PlayerController::tickImpl()
     updateButtonRecovery(dt);
     } // /profPickup
     if (!m_captured) {
-        cancelMining(); // 暂停（含背包开 / 失焦）：清累积挖掘态（spec：失焦清零）
-        cancelEating(); // t267：暂停 / 失焦 → 清进食累积态（spec：失焦清零，未完成不消耗）
-        cancelBowDraw(); // t304：暂停 / 失焦 → 清弓拉弓态（spec：失焦清零，未射出不消耗箭 / 耐久）
-        cancelFishing(); // t401：暂停 / 失焦 → 收浮标（spec：失焦清零；浮标 / 倒计时作废）
-        cancelSleep();   // t388：暂停 / 失焦 → 中断睡觉 fade（未跳清晨即醒）
-        // t253：暂停 / 背包开时清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
+        cancelMining(); // GUI 开（含背包 / 聊天 / 死亡屏）/ 失焦：清累积挖掘态（spec：失焦清零）
+        cancelEating(); // t267：同上 → 清进食累积态（spec：失焦清零，未完成不消耗）
+        cancelBowDraw(); // t304：同上 → 清弓拉弓态（spec：失焦清零，未射出不消耗箭 / 耐久）
+        // t885/t889：**不 cancelFishing**（GUI 开鱼线持久；同 release() 头注释 —— 收竿只走主动 / 换持物 /
+        //   重生 / 换世界四入口）。t388 cancelSleep 亦不在此（release 已清；本块只剩软档入口 = 开 GUI 必经
+        //   release，硬档已在 worldRunning 闸清）。
+        // t253：清 mob 目标框（updateRaycast 仅 captured 时跑 → 不清则残留旧目标）。
         if (m_targetedMob >= 0) { m_targetedMob = -1; emit targetedMobChanged(); }
-        // t45：暂停时清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
-        // t159：同步清 speed（实际水平速度，暂停即 0；F3 报 0 而非陈旧值）。仅值真变时发，免每 tick 抖动。
+        // t45：清行走动画驱动（moveSpeed→0；walkPhase 不动，QML 据此 sin*0=0 → 四肢归中性位）。
+        // t159：同步清 speed（实际水平速度；F3 报 0 而非陈旧值）。仅值真变时发，免每 tick 抖动。
         if (m_moveSpeed != 0.0f || m_horizSpeed != 0.0f) {
             m_moveSpeed = 0.0f; m_horizSpeed = 0.0f; emit moveSpeedChanged();
+        }
+        // t889 软档（GUI 开 / 聊天 / 死亡屏，worldRunning=true 已过硬档闸）：**玩家物理与状态照跑**（机制
+        //   等价 MC Java 开背包不暂停世界）—— step() 以零输入推进（release 清 m_keys → wish=0：不移动不跳，
+        //   但重力 / 水沉 / 惯性 / 水流推 / 击退衰减照常），其末段的摔伤 / 窒息 / 溺水 / 火烧 / 饥饿 / 中毒
+        //   全部继续 → 「开背包照坠 / 照烧 / 照溺但不能动」。骑乘分支同跑（矿车 / 船 GUI 开时沿轨滑行）。
+        //   死亡（m_dead）例外：尸体冻结（死亡屏属软档世界照跑，但尸体不再受物理 —— 同旧语义）。
+        //   不跑 pollMouse / updateRaycast / 挖 / 吃 / 拉（视角与交互是输入域，GUI 开即冻结）。
+        if (!m_dead) {
+            { FrameProfiler::Scope profPhys("phys");
+            step(dt);
+            // 同 captured 路径的骑乘收口（step 内载具物理推进完 → 乘员同帧钉位；GUI 开时被骑矿车 / 船
+            //   由实体桶 tick 与 step 骑乘分支继续推进，乘员须随车）。玩家推动实体同理（击退 / 惯性位移
+            //   仍可推 mob —— 世界照跑）。
+            if (m_entityManager) m_entityManager->resolvePlayerPush(m_pos, kHalfW, m_height, m_world);
+            if (m_entityManager) m_entityManager->tickVehicleRiding();
+            } // /profPhys
+            // t885：GUI 开时钓鱼照跑 —— 浮标实体已在 mob 桶照常 tick（待机 / 咬钩时序继续），此处 Game 层
+            //   镜像（bobberPosition / hasBite → QML 鱼线与提示）随行刷新；失效自收（换持物 / 浮标消散）同。
+            { FrameProfiler::Scope profInput("input"); updateFishing(float(dt)); }
         }
         return;
     }

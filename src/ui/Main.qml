@@ -159,6 +159,23 @@ Window {
     //   不进存档（存档只有 worldName，非玩家名；worldName 是世界标识 ≠ 玩家身份）。
     readonly property string playerName: "玩家"
 
+    // t889 两档暂停语义·世界模拟总闸（单一权威派生；机制等价 MC Java 单机「GUI 不暂停、仅 ESC 暂停」）：
+    //   - 软档 true = playing 且（captured 正常玩 || 任一 GUI 面板开 || 聊天开 || 死亡屏）—— 世界照跑
+    //     （WorldClock.running / player.worldRunning 均绑本属性 → 火 / 水 / 实体 / 昼夜 / 熔炉照 tick），
+    //     玩家物理照跑但输入冻结（PlayerController 软档分支：step 零输入推进，照坠 / 照烧 / 照溺）。
+    //   - 硬档 false = playing 且 !captured 且无任何面板 / 聊天 / 死亡（= 恰为 ESC 暂停叠层可见条件）或
+    //     非 playing 态（主菜单 / worldlist / 加载）—— 一切停（时钟停表 + tickImpl 早退）。
+    //   取反即 pauseOverlay.visible（下方叠层直接绑 !worldRunning，同源无漂移）。设置 / 进度 / 统计 /
+    //   资源查看器是暂停叠层**子态**（面板标志全 false）→ 天然落硬档，语义正确。
+    readonly property bool worldRunning: {
+        if (window.appState !== "playing") return false
+        if (player.captured) return true
+        // !captured 的软档例外：GUI 面板 / 聊天 / 死亡屏 → 世界继续（Java 语义）
+        return window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen
+                || window.chestOpen || window.enchantingTableOpen || window.anvilOpen
+                || window.dispenserOpen || window.chatOpen || playerState.dead
+    }
+
     // t110 Shift/数字键守卫所需 window 级态：
     //   - shiftHeld：Shift 按下态（keyInput Keys.onPressed/Released 始终追踪，**不论背包是否开**）。
     //     各背包面板的槽 TapHandler 读此属性 → 区分普通左键 vs Shift+左键搬运。不放进各面板是因为 Shift
@@ -1711,7 +1728,10 @@ Window {
     // dayPhase 0..1 循环（0=正午 / 0.5=子夜）；skyLight [0,1] 是纯函数派生的天光乘子，供下面
     // SceneEnvironment.clearColor 与 DirectionalLight.brightness lerp 昼(#9ec6e8/1.5)↔夜(#0b1026/0.25)。
     // 呈现层只读消费、绝不反向写时间（PLAN §2 分层）。F6 切调试加速（~30s 一周期）便于肉眼验收。
-    WorldClock { id: worldClock }
+    // t889：世界模拟总闸绑 window.worldRunning（两档暂停语义）—— 硬档（ESC 菜单 / 非-playing）停表 →
+    //   昼夜 / 太阳 / 月相 / dayCount 冻结 + ticked 停发（下方 Connections 桥接的火/水/岩浆/生长/天气/
+    //   红石/熔炉/云漂移全停）；软档（GUI 面板 / 聊天 / 死亡屏）照跑（Java：开背包世界继续）。
+    WorldClock { id: worldClock; running: window.worldRunning }
 
     // t414 资源包加载器（Core 层，QML 门面）：启动期解析资源包（settings.json "resourcePack" /
     //   环境变量 / 默认探查），把包内方块贴图缩放到 TILE=16 覆盖程序生成图集对应瓦片。active=true 时
@@ -2597,6 +2617,9 @@ Window {
         minecartManager: carts
         // t579：注入发射器内容存储（踩压力板触发发射器取内容物发射 / 扣库存；同 peer VM 注入模式）。
         dispenserStore: dispenserStore
+        // t889：世界模拟总闸绑 window.worldRunning —— 硬档 tickImpl 早退（实体桶 / step 全停）+ 复跑顺延
+        //   墙钟寿命；软档 step 零输入照跑（照坠 / 照烧 / 照溺）。见 PlayerController .h 属性头注释。
+        worldRunning: window.worldRunning
         selectedBlock: hotbarVM.selectedBlockId
         selectedItem: hotbarVM.selectedItemId
     }
@@ -10697,6 +10720,11 @@ Window {
                 }
                 e.accepted = true; return
             }
+            // t889 软档输入冻结（GUI 开时世界照跑但玩家不动）：未捕获（面板 / 聊天 / 暂停 / 死亡）时移动键
+            //   **不透传** player.setKey —— t889 起 step() 在 GUI 开时照跑（照坠 / 照烧），若 W/A/S/D/空格
+            //   照旧入 m_keys，玩家会在背包界面里走路（旧代码 step 不跑故无害，t889 后成为必须的守卫）。
+            //   Shift / 数字键已有 bagOpen 守卫（t110），本守卫是移动键的同类兜底（覆盖暂停 / 死亡态）。
+            if (!player.captured) { e.accepted = true; return }
             player.setKey(e.key, true)
         }
         Keys.onReleased: (e) => {
@@ -10711,6 +10739,9 @@ Window {
                     || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen   // t549：与 press 守卫对称
                 if (bagOpen) return
             }
+            // t889 松键侧对称守卫（press 侧同注释）：未捕获时不透传（release() 已清 m_keys，透传只会
+            //   写入 (key,false) 冗余项；守卫保持两闸同口径，防未来在未捕获态重建键态）。
+            if (!player.captured) return
             player.setKey(e.key, false)
         }
 
@@ -10752,14 +10783,13 @@ Window {
     // t78：死亡态（playerState.dead）也抑制本叠层 —— 死亡时同样 !captured，但应由死亡界面（z=180）接管，
     //   不让「点击恢复」的暂停叠层透出（死亡必须走按钮，不可点击恢复）。
     // t312：聊天栏打开时（同为 !captured 态）抑制本叠层 —— 聊天 input（z=170）接管光标打字。
+    // t889：visible 改绑 !window.worldRunning（两档暂停语义的**定义式**：本叠层可见 = 恰好硬档条件 ——
+    //   playing 且 !captured 且无面板 / 聊天 / 死亡。原七条件表达式上移为 window.worldRunning 单一权威，
+    //   此处取反消费，同源无漂移；语义等价重写，行为不变）。
     Item {
         id: pauseOverlay
         anchors.fill: parent
-        visible: window.appState === "playing" && !player.captured
-                 && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
-                 && !window.enchantingTableOpen && !window.anvilOpen && !window.dispenserOpen   // t549：三 UI 开时抑制暂停叠层
-                 && !playerState.dead
-                 && !window.chatOpen
+        visible: !window.worldRunning
         z: 100
         Rectangle {
             anchors.fill: parent

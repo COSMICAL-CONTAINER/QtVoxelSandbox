@@ -761,6 +761,18 @@ int EntityManager::bobberHookedMobAt(int i) const
     if (!e.alive || e.kind != Bobber) return -1;
     return e.bobberState == kBobberStHooked ? e.bobberHookedIdx : -1;
 }
+
+// t889 暂停期墙钟顺延（语义见 .h 声明处头注释）：活体槽 arrowSpawnMs 整体 +ms。ms<=0 早退（幂等防御）。
+//   只动墙钟字段，不动位置 / 速度 / bobber 计时（那些走 dt，tick 停即冻结），无 revision bump（纯寿命
+//   簿记，无呈现变化）。
+void EntityManager::deferWallClocks(qint64 ms)
+{
+    if (ms <= 0) return;
+    for (Entity &e : m_entities) {
+        if (e.alive) e.arrowSpawnMs += ms;
+    }
+}
+
 //   spawnMobTyped 内 switch 据 mobType 设 hostile=true（兜底）。spec「黑暗刷怪调度」周期 spawn 调用它。
 //   mobType 非 Shambler/Bones → 仍生成但非敌对语义（防御；正常 caller 只传这两种）。
 void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)

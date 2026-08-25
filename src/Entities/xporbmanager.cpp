@@ -111,7 +111,8 @@ void XpOrbManager::tick(qreal dt, const QVector3D &playerCenter, World *world)
     if (dirty) notifyChanged();
 }
 
-// 寿命到期驱逐（见头注释）。每帧 tick 起始调，先于磁吸。
+// 寿命到期驱逐（见头注释）。每帧 tick 起始调，先于磁吸。t889：硬暂停（ESC）期本 tick 不被
+//   PlayerController 调用 + 复跑 deferWallClocks 顺延 spawnMs → 暂停期不老化；GUI 开（软档）照常。
 void XpOrbManager::despawnExpired()
 {
     if (m_orbs.empty()) return;
@@ -127,4 +128,13 @@ void XpOrbManager::despawnExpired()
         }
     }
     if (dirty) notifyChanged();
+}
+
+// t889 暂停期墙钟顺延（语义见 .h 声明处头注释）：活体槽 spawnMs 整体 +ms。ms<=0 早退（幂等防御）。
+void XpOrbManager::deferWallClocks(qint64 ms)
+{
+    if (ms <= 0) return;
+    for (Orb &o : m_orbs) {
+        if (o.alive) o.spawnMs += ms;
+    }
 }
