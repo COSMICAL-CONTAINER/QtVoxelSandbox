@@ -7270,6 +7270,9 @@ int main(int argc, char *argv[])
         //     ③ 直调 pc.scanDispenserTraps(2.5f) 推进冷却过 2s 过期（tick 的等价递减驱动，探针态沿表恒空
         //        零副作用）→ 再造真上升沿 → **必须再发射**（箭 +1 / 库存 2→1 正向断言——冷却时长回归改 0
         //        ②不触发、改 ∞ ③不触发，两个方向都在此现形）。
+        //     review25 #8：② 段前先 scanDispenserTraps(1e-3f) 走一步真实递减再复置——配合 fireDispenserAt
+        //        门改 contains && value>0，0 值冷却在递减步即被 erase → 「常量回归改 0」时复置沿会发射、
+        //        ② 断言 FAIL（纯 contains 门下 0 表项永驻恒拦，下界不可见）。
         bool okE = false, okE2 = false;
         {
             placeRigBlock(w, bx0 - 1, kRigY, bz0, BR::Lever, 1); // 对侧第二源扳开 → 复算触达（升沿到已通电机）
@@ -7282,6 +7285,7 @@ int main(int argc, char *argv[])
             w.setBlock(bx0 + 1, kRigY, bz0, BR::Air, 0);         // 拆源（降沿）
             tickN(w, 4);
             const int dispBeforeRepower = dispFired;             // 信号计数基线（复置段必须发出 ≥1 次）
+            pc.scanDispenserTraps(1e-3f);                        // review25 #8：走一步真实递减再复置——0 值冷却即被 erase，常量回归改 0 时下复置沿必发射 → ② FAIL
             placeRigBlock(w, bx0 + 1, kRigY, bz0, BR::RedstoneBlock, 0); // 复置（真上升沿，但冷却 2s 未过）
             tickN(w, 4);
             int arrows3 = 0;

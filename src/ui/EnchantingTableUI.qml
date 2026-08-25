@@ -1250,6 +1250,7 @@ Item {
         if (!root.hotbar || !root.hoveredItemId) return ""
         if (root.hotbar.itemAttackDamage(root.hoveredItemId) <= 1) return ""
         const base = root.hotbar.itemAttackDamage(root.hoveredItemId)
+        let e = null // review25 #6：声明在函数体顶部（块作用域 let 出嵌套 if 则消费行 displayAttackDamage(..., e || []) 抛 ReferenceError）
         let sharp = 0
         const _sr = root.hotbar.slotRevision
         const _mr = root.hotbar.mainRevision
@@ -1260,7 +1261,6 @@ Item {
             if (parts.length === 2) {
                 const idx = parseInt(parts[1], 10)
                 if (!Number.isNaN(idx)) {
-                    let e = null
                     if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
                     else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
                     else if (parts[0] === "enchant") e = _er >= 0 ? root.enchAt(idx) : null

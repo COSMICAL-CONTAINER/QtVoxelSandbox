@@ -1166,7 +1166,9 @@ private:
     QElapsedTimer m_clock;
     QElapsedTimer m_evtClock; // 事件时间戳（双击检测；不被 tick restart）
     // t486 发射器陷阱 per-dispenser 冷却：打包坐标键（dispenserCell）→ 剩余冷却秒。玩家踩压力板触发发射器
-    //   射箭后写 kDispenserCooldown 秒；每 tick 递减 dt，到期移除。冷却内同发射器不再射（防每帧刷屏满天箭，
+    //   射箭后写 kDispenserCooldown 秒；每 tick 递减 dt，**≤0 即 erase**（review25 #8：门是 contains &&
+    //   value > 0 双条件，零/负值冷却不拦——否则「常量回归改 0」时表项永驻、contains 恒拦，冷却时长下界
+    //   对探针不可见）。冷却内同发射器不再射（防每帧刷屏满天箭，
     //   机制等价 MC 发射器触发间隔）。换世界时 clearAllTrapsState() 清空（防跨世界串扰）。无发射器陷阱场景
     //   恒空（零开销）。
     QHash<quint64, float> m_dispenserCooldowns;

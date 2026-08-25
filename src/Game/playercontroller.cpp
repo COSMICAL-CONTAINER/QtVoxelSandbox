@@ -5212,9 +5212,14 @@ void PlayerController::updateButtonRecovery(float dt)
 //   state=0 旧存档 → +X 兜底）。库存路径（t579/t607/t609）与 fallback 语义同旧 scanDispenserTraps 逐字保留。
 bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
 {
-    constexpr float kDispenserCooldown = 2.0f; // 每机器触发间隔（秒；防抖：板沿 + 拉杆沿都过本闸，机制等价 MC 发射器触发间隔）
+    constexpr float kDispenserCooldown = 2.0f; // 每机器触发间隔（秒；防抖：板沿 + 拉杆沿都过本闸，机制等价 MC 发射器触发间隔。
+                                               //   review25 #8 阴性验证已过：本值改 0 → 矩阵 t814(e)/t856 双 FAIL——勿动）
     const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
-    if (m_dispenserCooldowns.contains(key)) return false; // 该机器冷却中 → 不动作
+    // review25 #8：冷却门看**值**（contains && value > 0）而非纯 contains——若只查存在性，常量回归改 0（或
+    //   任何 ≤0 写入）时表项永驻、该机器永久哑火且矩阵探针的「时长下界钉死」断言失效（0 冷却仍被 contains
+    //   拦下复置沿 → 探针照 PASS）。零/负值冷却无合法语义（递减循环本就 erase 非正值），故 >0 才拦是真实
+    //   门控语义，非仅为探针服务。
+    if (m_dispenserCooldowns.contains(key) && m_dispenserCooldowns.value(key) > 0.0f) return false; // 该机器冷却中 → 不动作
     // t608 发射方向 = 发射器 state 朝向外向（chestFrontFace 解码 → 轴向单位向量；单一方向源）。
     const quint8 dispState = m_world->stateAt(dx, dy, dz);
     float fdx = 0.0f, fdz = 0.0f;
