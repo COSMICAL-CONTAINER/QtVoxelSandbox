@@ -7979,6 +7979,54 @@ int main(int argc, char *argv[])
                              "cleared of involvement";
     }
 
+    // ── P-t870 红石粉中键复制给物品 id 探针（t815 返修：根因不在图标源在 id）──
+    //   用户二报「复制红石粉仍非红石粉图标」。根因：pickBlock 把**方块形态** 130 写进 hotbar →
+    //   ① 图标走方块段路径（图集瓦片重渲，连接形随电力态变）；② 与红石 tab / 材料段的粉条目（0x224）
+    //   id 失配（切槽判定 / 双显面）。t815 只修了 130 的图标渲染源，没修「该给什么 id」。
+    //   修 = pickItemIdForBlock 单一权威（130 → 0x224，与 dropId 同源；其余恒自身）。
+    //   断言：(a) 行为级——映射函数直调（dust→0x224；石头/发射器/红石矿石恒自身——矿石 pick 给
+    //   矿石本体非掉落物，MC 语义）；(b) 源码钉——pickBlock 经 pickItemIdForBlock 路由（captured /
+    //   射线门内不可行为直驱，t889/a3 先例）。
+    {
+        // (a) 行为级：映射单一权威直调。
+        const bool okMap = PlayerController::pickItemIdForBlock(quint8(BR::RedstoneDust))
+                               == RecipeRegistry::RedstoneId
+                           && PlayerController::pickItemIdForBlock(quint8(BR::Stone)) == int(BR::Stone)
+                           && PlayerController::pickItemIdForBlock(quint8(BR::Dispenser)) == int(BR::Dispenser)
+                           && PlayerController::pickItemIdForBlock(quint8(BR::RedstoneOre)) == int(BR::RedstoneOre);
+        // (b) 源码钉：pickBlock 函数体（滤注释）内 pickItemIdForBlock 路由存在且先于 pickIdToHotbar 落位。
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile sf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
+            const int b0 = t.indexOf(QStringLiteral("void PlayerController::pickBlock()"));
+            const int b1 = t.indexOf(QStringLiteral("void PlayerController::pickIdToHotbar(int id)"));
+            if (b0 < 0 || b1 <= b0) {
+                qInfo().noquote() << "  t870 pickBlock slice miss";
+            } else {
+                QString body;
+                for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n')))
+                    if (!line.trimmed().startsWith(QLatin1String("//"))) {
+                        body += line; body += QLatin1Char('\n');
+                    }
+                const int iRoute = body.indexOf(QStringLiteral("pickIdToHotbar(pickItemIdForBlock(id));"));
+                okPin = iRoute >= 0;
+            }
+        }
+        const bool okT870 = okMap && okPin;
+        if (!okT870) ++totalFail;
+        qInfo().noquote() << (okT870 ? "PASS" : "FAIL")
+                          << "| t870 pick-block on redstone dust yields the dust ITEM id: mapping authority "
+                             "returns RedstoneId(0x224) for the wire block (130) and identity for stone/"
+                             "dispenser/redstone-ore (ore picks its block, not the drop), and pickBlock "
+                             "routes through pickItemIdForBlock before the hotbar write (source pin - the "
+                             "t815 icon-source-only fix never touched the id, hotbar held the block-form id "
+                             "so the icon came from the block-segment atlas and never matched the redstone-"
+                             "tab/material entries)";
+    }
+
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
     //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
     //   AnvilUI.qml + InventoryOps.js，11 放入路径）47/47 全过，但其 Hotbar 是 **QML 桩**
