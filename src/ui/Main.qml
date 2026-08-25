@@ -6254,46 +6254,57 @@ Window {
                         cartHpSeen = cartHp // t735 ② 初始同步（防创建求值期误判受击）
                     }
 
-                    // 车底板（封闭整底）：宽 0.8 × 厚 1/16 × 长 0.9，车斗底。t768：下沿本地 −0.375 = 轨板上沿
+                    // 车底板（封闭整底）：宽 0.775 × 厚 0.065 × 长 0.875，车斗底。t768：下沿本地 −0.375 = 轨板上沿
                     //   （cell 底 +1/16）+0.0125 微隙防共面 z-fight —— 车心在轨面上方 kCartRideH=0.45
                     //   （= 1/16 + 0.375 + 微隙，MinecartManager 同值推导）；板面（上沿 −0.3125）= 骑乘脚底
                     //   kCartSeatDrop（playercontroller 同值）。斗形「底」：封闭整面 + 骑乘玩家的「地板」。
                     //   t732 MinecartBox piece 0：±Y 大面采木底板带（qrc 程序板条 / 包木底块）。
+                    //   t862① 消共面：XZ 各内缩 0.0125（0.8→0.775 / 0.9→0.875，四侧缘没入车帮体内 —— 旧
+                    //   ±X/±Z 侧缘面与帮外表面共面 = 底边沿闪烁带）+ 加厚下探 0.0025（底缘 −0.3775 低于帮底
+                    //   −0.375 → 帮底面没入底板体内，仰视底缝不再共面）；板面 −0.3125 骑乘脚底契约不动。
                     Model {
                         geometry: MinecartBox { piece: 0; layout: cartPackHit ? 1 : 0 }
-                        position: Qt.vector3d(0, -0.34375, 0)
-                        scale: Qt.vector3d(0.8, 0.0625, 0.9)
+                        position: Qt.vector3d(0, -0.345, 0)
+                        scale: Qt.vector3d(0.775, 0.065, 0.875)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.75 × 长 0.9，贴 -X 边。t768 全高帮：本地 Y ±0.375
+                    // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.75 × 长 0.875，贴 -X 边。t768 全高帮：本地 Y ±0.375
                     //   （下沿贴轨板上沿 → 帮顶 +0.375，车斗凹槽深 ~0.66 明显）。斗形「帮」：四面整圈上凸中间凹。
-                    //   t732 MinecartBox piece 1：外面采左壁窗（含亮卷边顶行），顶面 = 卷边条。
+                    //   t732 MinecartBox piece 1：外面采亮壁窗（含亮卷边顶行），内面采暗窗（t862② 内外语义），
+                    //   顶面 = 卷边条。
+                    //   t862① 消共面：Z 跨 0.9→0.875（±Z 端面没入端帮体内 —— 旧与端帮大面共面 = 四根竖直棱
+                    //   闪烁的纵帮半边）；X 外表面 ±0.40 极值保留（外轮廓不变）。
                     Model {
                         geometry: MinecartBox { piece: 1; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(-0.36, 0, 0)
-                        scale: Qt.vector3d(0.08, 0.75, 0.9)
+                        scale: Qt.vector3d(0.08, 0.75, 0.875)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 右车帮（+X 纵长壁；与左对称）。t732 piece 2：外面采右壁窗。
+                    // 右车帮（+X 纵长壁；与左对称，t862① 同款 Z 内缩）。t732 piece 2：外面采亮壁窗。
                     Model {
                         geometry: MinecartBox { piece: 2; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0.36, 0, 0)
-                        scale: Qt.vector3d(0.08, 0.75, 0.9)
+                        scale: Qt.vector3d(0.08, 0.75, 0.875)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 车头帮（-Z 端横壁，跨满宽 x∈[-0.4,0.4]；盖住四角 → 与纵壁端面共面无重叠，同船 t556 消闪烁手法）。
-                    //   t768 全高帮 ±0.375。t732 MinecartBox piece 3：端面大区（qrc 壁窗 / 包框栏端面）。
+                    // 车头帮（-Z 端横壁，X 跨 0.775 × 高 0.725 × 厚 0.08）。t768 全高帮 ±0.375；t732 piece 3：
+                    //   端面大区（qrc 壁窗 / 包框栏端面）。
+                    //   t862① 消共面（四根竖直棱 z-fighting 主修）：旧「跨满宽 0.8 盖住四角」的端帮 ±X 面与
+                    //   纵帮外表面恰共面（重叠竖条 = 移动视角闪烁的棱边）、端帮顶面与纵帮顶面共面（顶角片）。
+                    //   改三层内缩 ε=0.0125：X 跨 0.8→0.775（±X 面没入纵帮体内）、Y 高 0.75→0.725（顶面
+                    //   低于纵帮顶 0.0125、底面高于帮底 → 顶 / 底角片不再共面）；Z 跨 ±0.45 极值保留（外
+                    //   轮廓不变）。纵帮半边（Z 内缩）见上 —— 两半合计消掉全部共面对。
                     Model {
                         geometry: MinecartBox { piece: 3; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0, 0, -0.41)
-                        scale: Qt.vector3d(0.8, 0.75, 0.08)
+                        scale: Qt.vector3d(0.775, 0.725, 0.08)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 车尾帮（+Z 端横壁；与车头对称，同 piece 3 —— ±Z 大面取同区，前后壁共用几何）。
+                    // 车尾帮（+Z 端横壁；与车头对称，同 piece 3 —— ±Z 大面取同区，前后壁共用几何；t862① 同款内缩）。
                     Model {
                         geometry: MinecartBox { piece: 3; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0, 0, 0.41)
-                        scale: Qt.vector3d(0.8, 0.75, 0.08)
+                        scale: Qt.vector3d(0.775, 0.725, 0.08)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // F3+B 矿车碰撞箱（同 boat hitbox 模式；PLAN §2-F F3 调试叠层）：
