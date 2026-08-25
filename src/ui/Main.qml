@@ -5406,6 +5406,13 @@ Window {
                 glyphFlowLoader.item.openTableY = Qt.binding(function() { return window.enchantY })
                 glyphFlowLoader.item.openTableZ = Qt.binding(function() { return window.enchantZ })
                 glyphFlowLoader.item.editRev = Qt.binding(function() { return window.worldEditRev })
+                // t873 自检：注入完成快照（链路第一跳核验点）—— 四个宿主依赖非空 + 当前台表行数。
+                //   读档 / 放破台后的行数变化由组件 rescanPairs 的 [t873] 行跟进；此处 null 即「链断在注入」。
+                console.info("[t873] EnchantGlyphFlow injected: world=" + (glyphFlowLoader.item.world !== null)
+                             + " cam=" + (glyphFlowLoader.item.camNode !== null)
+                             + " tableModel=" + (glyphFlowLoader.item.tableModel !== null)
+                             + " tables=" + enchantTablePositions.count
+                             + " active=" + (window.appState === "playing"))
                 console.info("[t797] EnchantGlyphFlow adopted into scene graph (parent=Node)")
             }
             onStatusChanged: {

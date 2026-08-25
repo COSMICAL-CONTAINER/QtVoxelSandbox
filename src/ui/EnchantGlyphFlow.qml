@@ -61,8 +61,14 @@ Node {
     readonly property real flightLifeMin: 1.8   // 寿命钳制（近书架防闪瞬、远书架防拖尾过久）
     readonly property real flightLifeMax: 4.0
     readonly property real arcHeight: 0.20      // 弧线峰值（慢漂下的轻拱，不夺目）
-    readonly property real glyphScaleMin: 0.055 // 字形面片边长（格）：t797 大减（旧 0.10-0.16「爆炸感」→ 小字）
-    readonly property real glyphScaleMax: 0.085
+    // 字形面片边长（格）：t873 标定。#Rectangle 内建面片基尺寸是 **100×100 单位**（实测 scale 0.07 →
+    //   7.005 格宽 = 0.07×100，非 1×1）—— 下方池模板 scale 已 ÷100，本组数值即真实「格」数。历史：
+    //   t765 旧值 0.10-0.16 直乘 100 基 = 10-16 格宽「像爆炸」；t797 缩到 0.055-0.085 仍直乘 = 5.5-8.5
+    //   格白幕（两轮都治不好的真因）。÷100 后 0.055-0.085 实测在 5-8 格视距下笔画 ~0.5px **亚像素不
+    //   可见**（探针像素级实证），故按可读性重标定为 0.18-0.28（18-28px @ 7 格视距、笔画 1.5-2px，
+    //   机制对标 MC 字形粒子 ~1/4 格的白字）。
+    readonly property real glyphScaleMin: 0.18
+    readonly property real glyphScaleMax: 0.28
 
     // 字形染色板：t797 用户定稿「白色的文字」—— 纯白为主 + 极轻冷调抖动（近白字形相乘仍读作白）。
     readonly property var tintColors: ["#ffffff", "#f4f6ff", "#e9eeff"]
@@ -73,6 +79,11 @@ Node {
     // 台×书架对缓存（[{x,y,z, tx,ty,tz},...]：书架格 + 所属台格）。editRev / 台表 count / active 变化时
     //   重扫（显式触碰是唯一刷新源，同 EnchantRunes 模式 —— 放/破书架或台即刻重算，t549 先例）。
     property var pairs: []
+
+    // t873 自检计数器：累计发射颗数（诊断「发射器在跑但肉眼看不见」vs「根本没在跑」——前者查渲染侧，
+    //   后者查数据链；配合下方各 [t873] 日志一次运行即可读出链断在哪一跳）。
+    property int emittedTotal: 0
+    property int tickSample: 0   // 发射轮采样计数（每 ~8s 落一行日志）
 
     Component.onCompleted: {
         root.pool = []
@@ -93,7 +104,13 @@ Node {
     //   内联同规则（EnchantRunes 同款复制 —— 改规则须多处同步，此处显式注记）。
     function rescanPairs() {
         root.pairs = []
-        if (!root.world || !root.active || !root.tableModel) return
+        if (!root.world || !root.active || !root.tableModel) {
+            // t873 自检：前置门未齐（读档早期 / 菜单态）—— 折损点直接落日志，不再静默早退。
+            console.info("[t873] rescan aborted: world=" + (root.world !== null)
+                         + " active=" + root.active
+                         + " tableModel=" + (root.tableModel !== null))
+            return
+        }
         const n = root.tableModel.count
         for (let i = 0; i < n; ++i) {
             const e = root.tableModel.get(i)
@@ -109,6 +126,9 @@ Node {
                 }
             }
         }
+        // t873 自检：每次重扫落一行「台数 × 对数」——0 台 / 0 对即链断在数据侧（表空或搭法不满足环带规则），
+        //   非 0 却看不见则链断在渲染/视觉侧（发射、材质、尺寸）。
+        console.info("[t873] rescanPairs: tables=" + n + " pairs=" + root.pairs.length)
     }
 
     onActiveChanged:     rescanPairs()
@@ -147,6 +167,13 @@ Node {
             let n = Math.floor(want) + (Math.random() < (want % 1) ? 1 : 0)
             n = Math.min(n, root.maxPerTick)
             for (let i = 0; i < n; i++) root.spawnGlyph(near)
+            // t873 自检：发射节拍采样（每 ~8s 一行，不逐轮刷屏）：近处对数 / 期望值 / 实发 / 累计 ——
+            //   want>0 而 spawn=0 = 池满；want=0 = 距离门全剔或速率归零。
+            root.tickSample++
+            if (root.tickSample % 16 === 1)
+                console.info("[t873] spawn tick: nearPairs=" + near.length + " want=" + want.toFixed(2)
+                             + " spawned=" + n + " totalEmitted=" + root.emittedTotal
+                             + " poolFree=" + (root.poolSize - liveCount))
         }
     }
 
@@ -192,6 +219,7 @@ Node {
             m.texV = (3 - row) * 0.25
             m.visible = true
             root.liveCount++
+            root.emittedTotal++
             return
         }
         // 池满：静默丢（同 BlockParticles / EnchantRunes 模式，不 new 不阻塞）。
@@ -263,7 +291,10 @@ Node {
             property alias texV: glyphTex.positionV
             position: Qt.vector3d(glyph.px, glyph.py, glyph.pz)
             eulerRotation: Qt.vector3d(glyph.pitchDeg, glyph.yawDeg, 0)
-            scale: Qt.vector3d(glyph.scl, glyph.scl, 1)
+            // t873 根因修正：#Rectangle 基尺寸 100×100 单位（实测 scale 0.07 → 7.005 格宽，非 1×1）——
+            //   ÷100 恢复 scl「字形面片边长（格）」语义。旧直乘 = 5.5-8.5 格宽巨型半透明白幕，t765
+            //   「像爆炸」→t797 数值缩小两轮均无效的真因（基尺寸假设错 100×，从未像素级验证）。
+            scale: Qt.vector3d(glyph.scl / 100.0, glyph.scl / 100.0, 1)
             materials: PrincipledMaterial {
                 lighting: PrincipledMaterial.NoLighting
                 cullMode: Material.NoCulling   // 双面（Main.qml 手持 billboard 图标同先例）：billboard 瞬时翻转不出消失半帧
