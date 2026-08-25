@@ -9927,17 +9927,33 @@ int main(int argc, char *argv[])
         const bool okDrop = w.blockAt(x0, 42, z0) == quint8(BR::Air)
                      && dropItemCount == drops0 + 1
                      && lastDropId == BR::dropId(BR::FlowerRed);
-        const bool ok = okGround && okDrop;
+        // t847 收口（R19.13 终审 C-M1）：草丛失撑链补钉——t847 只把草丛收进放置预检（泥土/草限定）而
+        //   World 失撑族没跟，挖掉下方泥土后草丛悬空永存；修后 isGroundPlant 单一权威两面共用（放置预检
+        //   与 checkFlowerMushroomOnEdit 同谓词）。破草丛下泥土 → 草丛清 Air + dropId（0x208 种子族，运行
+        //   期读表）掉落，与玩家直破同源。
+        const auto [x1, z1] = nextSlot();
+        placeRigBlock(w, x1, 41, z1, BR::Dirt, 0);
+        placeRigBlock(w, x1, 42, z1, BR::TallGrass, 0);
+        const int drops1 = dropItemCount;
+        w.setBlock(x1, 41, z1, BR::Air, 0); // 破草丛下泥土
+        const bool okDropGrass = w.blockAt(x1, 42, z1) == quint8(BR::Air)
+                       && dropItemCount == drops1 + 1
+                       && lastDropId == BR::dropId(BR::TallGrass);
+        const bool ok = okGround && okDrop && okDropGrass;
         if (!ok) {
             qInfo().noquote() << "  [t847 diag] okGround" << okGround << "okDrop" << okDrop
-                              << "lastDropId" << lastDropId << "expect" << BR::dropId(BR::FlowerRed);
+                              << "lastDropId" << lastDropId << "expect" << BR::dropId(BR::FlowerRed)
+                              << "okDropGrass" << okDropGrass << "(grassDrop"
+                              << BR::dropId(BR::TallGrass) << ")";
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t847 plant placement predicate: plantGroundBlock single authority truth table "
                              "(tallgrass dirt/grass only - no grass-on-grass/leaves/water; flowers +farmland; "
                              "mushrooms dirt/grass; dead bush sand-only) + flower lost-support drop stays on "
-                             "dropId chain (t788 dye linkage)";
+                             "dropId chain (t788 dye linkage) + tallgrass lost-support now symmetric with the "
+                             "placement-side family (isGroundPlant shared by precheck and the World hook; digs "
+                             "out ground -> grass clears and drops its dropId)";
     }
 
     // ── t815/t838 item 图标路径探针（Game 层 Hotbar 闭合直调，t800 探针同模式；测试二进制无 qrc → 图集
@@ -9975,8 +9991,16 @@ int main(int argc, char *argv[])
     //        4.5）；窗过 = 鱼跑（escaped 信号 + hasBite 翻 false）+ 重等（第二咬可达）+ 此后空收无消耗；
     //    (d) 钩 mob：pc 真甩竿飞行段命中猪（bobberHookedMobAt 绑定）→ 收竿拉拽（猪位移朝玩家 >0.03 +
     //        耐久 -5 + 猪血量不变 + 零 fishCaught——钩中不伤害不获物口径）；陆上静止浮标冻结（Ground 态）；
+    //        d2 垂死 mob 收竿（R19.13 终审 B-L2）：钩住后打死猪（死亡动画窗内、不 tick ents → 脱钩验证未
+    //        跑）→ 收竿拉拽 no-op → 耐久**不扣**（旧版无条件 -5 白损）；
     //    (e) 熟鱼链：kSmelt + kSmeltXp 两表都接（t788 教训）+ 食用 +4（生鱼 +2 对照）+ 名「熟鱼」+
     //        pack 映射源码钉（0x25B → cooked_cod.png）+ 创造 tab 源码钉 + 豹猫仍只认生鱼（源码钉 gate）。
+    //    (f) 出界消散（R19.13 终审 C-M2 补断言面，此前文案声称零断言）：XZ 飞越边界 + 极端 y（y<0 虚空）
+    //        → ents.tick 若干 → 浮标槽释放（despawn；边界路径非 180s 寿命路径）；
+    //    (g) Game 层镜像（C-M2）：外部清场（ents.clearAll = 出界/寿命/系统清理的等价构造）→ 收竿无获物
+    //        无消耗干净收场 + 镜像惰性（clearAll 后 fishing 态仍在，tick/收竿才收）+ updateFishing 失效
+    //        自动收竿源序钉（pc.tick 的 captured 门在无窗探针不可达——直调会先走 !m_captured 早退分支的
+    //        cancelFishing 掩盖镜像路径，行为级不可达、以 t836(e) 源码钉手法锁语句面，取舍声明）。
     {
         // 镜像常量（P18 模式，改值须两处同步；Entities 层 kBobberWaitHashSalt / kBobberBiteWindowSec 与
         //   Game 层 kFishCatchFlySpeed 均探针不可达私有）：
@@ -10247,11 +10271,44 @@ int main(int argc, char *argv[])
                   && ents.healthAt(pig) == pigHp0          // 钩中不伤害
                   && moved * toward > 0.03f                  // 位移朝玩家 > 0.03（6 b/s 冲量 × 一帧）
                   && !pc.fishing() && !ents.aliveAt(bb);
+            // d2 垂死 mob 收竿（R19.13 终审 B-L2）：老猪已被拉拽 + 累计游荡 ~3s 位置不可控（平台 rig 的
+            //   1.5s 游荡安全窗只保单次落定）→ 换新猪平台中心重摆（同段首手法）。钩住后打死（死亡动画
+            //   0.5s 窗内、探针不 tick ents → 浮标脱钩验证未跑，bobberHookedMobAt 仍指猪）→ 收竿：
+            //   pullMobToward 对 dead 早退返 false → 按空收处理，耐久**不扣**（旧版 void 无条件 -5 = 白损）。
+            const int pigHpAfter = ents.healthAt(pig); // diag 用（d2 换猪后老猪槽已释放，先存值）
+            ents.removeEntityAt(pig);
+            const int pig2 = ents.spawnMobTyped(16, fy + 1, 6, EntityManager::MobPig,
+                                                QStringLiteral("#e8a0a0"), 10);
+            tickB(30, 0.05f); // 新猪落定（重力 rest 到石面；1.5s 游荡仍在 3×3 平台内）
+            const QVector3D pp2 = ents.posAt(pig2);
+            const float eyeY2 = float(fy + 1) + 1.62f;
+            const float ux2 = pp2.x() - 13.5f, uz2 = pp2.z() - 6.5f;
+            const float hLen2 = std::sqrt(ux2 * ux2 + uz2 * uz2);
+            pc.loadSavedState(13.5f, float(fy + 1), 6.5f,
+                              qRadiansToDegrees(std::atan2(-ux2, -uz2)),
+                              qRadiansToDegrees(std::atan2(pp2.y() - eyeY2, hLen2)), 2);
+            pc.useFishingRod(); // 甩向新猪
+            int bb2 = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bb2 = i; break; }
+            bool okD2 = bb2 >= 0;
+            for (int t = 0; t < 40 && okD2; ++t) {
+                if (ents.bobberHookedMobAt(bb2) == pig2) break;
+                tickB(1, 0.05f);
+                if (!ents.aliveAt(bb2)) { okD2 = false; break; }
+            }
+            okD2 = okD2 && ents.bobberHookedMobAt(bb2) == pig2;
+            ents.damageEntity(pig2, 999); // 打死（dead=true；槽仍 alive，死亡动画窗内）
+            const int durD2 = hb.durabilityAt(0);
+            pc.useFishingRod();           // 垂死目标收竿 → 拉拽 no-op
+            okD2 = okD2 && !pc.fishing() && !ents.aliveAt(bb2) && caughtCount == 0
+                   && hb.durabilityAt(0) == durD2; // 空收口径：无获物不扣耐久（B-L2 修）
+            okD = okD && okD2;
             if (!okD)
                 qInfo().noquote() << "  [t836 d diag] okHook" << okHook << "dur" << hb.durabilityAt(0) - dur0
-                                  << "hp" << ents.healthAt(pig) << "/" << pigHp0 << "moved" << moved
-                                  << "toward" << toward;
-            ents.removeEntityAt(pig); // 清场（探针私有 ents 冻结不外泄）
+                                  << "hp" << pigHpAfter << "/" << pigHp0 << "moved" << moved
+                                  << "toward" << toward << "okD2(dead-mob no-cost)" << okD2;
+            ents.removeEntityAt(pig2); // 清场（探针私有 ents 冻结不外泄）
             wF.setBlock(13, fy, 6, BR::Air, 0);
             for (int x = 15; x <= 17; ++x)
                 for (int z = 5; z <= 7; ++z)
@@ -10303,19 +10360,111 @@ int main(int argc, char *argv[])
                 qInfo().noquote() << "  [t836 e diag] okCore" << okCore << "okSrc" << okSrc;
         }
 
-        const bool okT836 = okA && okB && okC && okD && okE;
+        // ---- (f) 出界消散（R19.13 终审 C-M2：PASS 文案曾含 "out-of-bounds despawn" 而无对应断言——
+        //      Review24 #9「描述超断言」病复发处，补上）：XZ 飞越边界 + 极端 y（y<0 虚空）→ ents.tick
+        //      若干 → 浮标槽释放（aliveAt 翻 false = 槽 despawn；8 tick 内出界 = 边界路径非 180s 寿命路径）。----
+        bool okF = false;
+        {
+            // f1 XZ 飞越：世界 48 宽，自 (44.5, fy+4, 6.5) 以 30 b/s +X → 第 3 tick x>48 出界（轻重力下
+            //   y 仍在空带，不落水 / 不着地 / 无 mob 可钩 → 唯一出路是边界消散）。
+            const int bOut = ents.spawnBobber(QVector3D(44.5f, float(fy + 4), 6.5f),
+                                              QVector3D(30.0f, 0.0f, 0.0f), 911);
+            bool okXz = bOut >= 0 && ents.aliveAt(bOut);
+            for (int t = 0; t < 8 && okXz; ++t) {
+                tickB(1, 0.05f);
+                if (!ents.aliveAt(bOut)) break;
+            }
+            okXz = okXz && !ents.aliveAt(bOut);
+            // f2 极端 y（虚空直落）：y<0 → 首 tick 即消散。
+            const int bLow = ents.spawnBobber(QVector3D(6.5f, -10.0f, 6.5f), QVector3D(0, 0, 0), 912);
+            tickB(1, 0.05f);
+            const bool okLow = bLow >= 0 && !ents.aliveAt(bLow);
+            okF = okXz && okLow;
+            if (!okF)
+                qInfo().noquote() << "  [t836 f diag] okXz" << okXz << "okLow" << okLow;
+        }
+
+        // ---- (g) Game 层镜像（R19.13 终审 C-M2：updateFishing 每 tick 镜像路径此前零执行）----
+        //      行为半边（探针可达）：甩竿后外部清场（ents.clearAll = 出界 / 寿命消散 / 换世界清场的等价
+        //      构造）→ ① 镜像惰性（清场即刻 fishing 态仍在——Game 层不主动扫描，tick / 收竿才收）；
+        //      ② 收竿走 valid=false 分支 = 干净收场（无获物 / 无耐久消耗 / fishing 复位 / 浮标槽已空）。
+        //      自动收竿半边（pc.tick 驱动 updateFishing）：tickImpl 的 captured 门在无窗测试二进制不可达
+        //      （直调 pc.tick 会先走 !m_captured 早退分支的 cancelFishing，掩盖镜像路径本体）→ 源序钉
+        //      （t836(e) 手法）：滤注释后锁 updateFishing 函数体内「aliveAt/kindAt 双查 + 失效自动收竿」
+        //      语句面。取舍：行为级不可达已声明，源码钉防语句面漂移（review 建议的退路）。----
+        bool okG = false;
+        {
+            PlayerController pc;
+            Hotbar hb;
+            const int rodDur = ToolRegistry::maxDurability(ToolRegistry::FishingRod);
+            hb.setStack(0, ToolRegistry::FishingRod, 1, rodDur);
+            hb.setSelectedSlot(0);
+            pc.setWorld(&wF);
+            pc.setEntityManager(&ents);
+            pc.setHotbar(&hb);
+            pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+            int caughtCount = 0;
+            QObject::connect(&pc, &PlayerController::fishCaught, &pc,
+                             [&](int, int, float, float, float, float, float, float) { ++caughtCount; });
+            pc.useFishingRod(); // 甩竿（飞行中即可——镜像检测与浮标态无关）
+            int bg = -1;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bg = i; break; }
+            bool okBeh = pc.fishing() && bg >= 0;
+            ents.clearAll(); // 浮标消散等价构造（releaseSlot，不发 removeEntityAt）
+            okBeh = okBeh && pc.fishing(); // ① 镜像惰性：清场即刻态不塌（tick / 收竿才收）
+            const int durG = hb.durabilityAt(0);
+            pc.useFishingRod(); // 收竿 → valid=false（aliveAt 双查失败）→ 自动收竿态
+            okBeh = okBeh && !pc.fishing() && !ents.aliveAt(bg) && caughtCount == 0
+                    && hb.durabilityAt(0) == durG; // ② 干净收场：无获物无消耗
+            // 源序钉：锁 updateFishing 函数体内的失效检测 + 自动收竿语句面（captured 门不可达的退路）。
+            bool okPin = false;
+            {
+                const QString exeDir = QCoreApplication::applicationDirPath();
+                const QString pcpPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                            QStringLiteral("src/Game/playercontroller.cpp"));
+                QFile f(pcpPath);
+                if (f.open(QIODevice::ReadOnly)) {
+                    const QString t = QString::fromUtf8(f.readAll());
+                    const int b0 = t.indexOf(QStringLiteral("void PlayerController::updateFishing(float dt)"));
+                    const int b1 = t.indexOf(QStringLiteral("void PlayerController::cancelFishing"));
+                    if (b0 >= 0 && b1 > b0) {
+                        QString body;
+                        for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n'))) {
+                            if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                            body += line; body += QLatin1Char('\n');
+                        }
+                        okPin = body.contains(QStringLiteral("m_entityManager->aliveAt(m_bobberEntityIdx)"))
+                                && body.contains(QStringLiteral(
+                                       "kindAt(m_bobberEntityIdx) == int(EntityManager::Bobber)"))
+                                && body.contains(QStringLiteral("m_fishing = false;"))
+                                && body.contains(QStringLiteral("emit fishingChanged();"));
+                    }
+                }
+            }
+            okG = okBeh && okPin;
+            if (!okG)
+                qInfo().noquote() << "  [t836 g diag] okBeh" << okBeh << "okPin" << okPin;
+        }
+
+        const bool okT836 = okA && okB && okC && okD && okE && okF && okG;
         if (!okT836) ++totalFail;
         qInfo().noquote() << (okT836 ? "PASS" : "FAIL")
                           << "| t836 fishing overhaul: bobber is an EntityManager projectile (light-gravity "
                              "parabola, hook-on-flight vs mob AABB, water settle at surface-minus-dip with "
-                             "state-aware liquid height, ground rest frozen, out-of-bounds despawn) driven from "
+                             "state-aware liquid height, ground rest frozen, out-of-bounds despawn ASSERTED: "
+                             "xz flyout within 8 ticks + void-y first-tick slot release) driven from "
                              "Game layer cast-anywhere/reel (EntityManager-carries-entity + "
                              "PlayerController-settles-semantics split, pearl/drop precedent); deterministic "
                              "5-30s wait via hashVoxel(seed^salt^castSerial) with exact reachable endpoints and "
                              "+-1tick behavioral match, 0.5s bite window (in-window reel = fishingPool loot "
                              "toward-player spawnItemAt + rod -1, expired = escaped signal + re-roll + empty "
                              "reel costs nothing), hooked-mob reel pulls at ~6 b/s with -5 durability and zero "
-                             "damage; cooked fish 0x25B closes the chain (raw->cooked in BOTH kSmelt+kSmeltXp, "
+                             "damage, dead-target reel = pull no-op with NO durability charge; externally-"
+                             "cleared bobber keeps lazy fishing state then reels clean (no loot, no cost) with "
+                             "updateFishing invalid-to-auto-reel pinned at source level (pc.tick captured gate "
+                             "unreachable headless, tradeoff declared); "
+                             "cooked fish 0x25B closes the chain (raw->cooked in BOTH kSmelt+kSmeltXp, "
                              "+4 hunger vs raw +2, name/tab/pack-mapping pinned, ocelot still raw-only)";
     }
 

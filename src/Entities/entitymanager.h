@@ -369,9 +369,10 @@ public:
     static float bobberWaitSeconds(quint32 h);
     // t836 收竿拉拽（钩住生物收竿时 Game 层调）：把第 mobIdx 只 mob 拉向 towardPos（玩家脚位）——水平速度
     //   = speed × 归一方向（指向玩家）+ 小幅上抛（vy = kBobberHookPullUp，机制等价 MC 1.0 钩住生物收竿被拉
-    //   向玩家 + 微上抬）+ 解除 resting（重力分支接手上抛→下落）。**不伤害**（钩中 0 伤害，MC 口径）。非 Mob /
-    //   dead / 越界 → 静默早退。bump revision（QML 位移绑定刷新）。
-    void pullMobToward(int mobIdx, const QVector3D &towardPos, float speed);
+    //   向玩家 + 微上抬）+ 解除 resting（重力分支接手上抛→下落）。**不伤害**（钩中 0 伤害，MC 口径）。
+    //   返 bool：拉拽**实际生效**才 true（R19.13 终审 B-L2：目标 dead / 非 Mob / 越界 → false，caller 据此
+    //   不扣钓竿耐久——旧版 void 无条件扣 5 = 对垂死 mob 收竿白损耐久）。bump revision（QML 位移绑定刷新）。
+    bool pullMobToward(int mobIdx, const QVector3D &towardPos, float speed);
     // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
     //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
     //   槽）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。

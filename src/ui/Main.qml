@@ -10014,7 +10014,10 @@ Window {
             //   （合成格 / 附魔 / 铁砧槽物品**不在 hotbar/main 里**，归还被跳过即随尸体永久消失；held 栈有
             //   dropAllItems 兜底，无需包）。
             try {
-                progress.onDeath()  // progress 统计死亡次数（review24 #7：入 try 首行——辅助非契约，见头注释）
+                // review-r1913-final D-M1：onDeath 独立 try 包（与下方三行 returnCraftToHotbar 同款对称）——
+                //   它若抛 TypeError 会跳过 try 段剩余全部行（含三面板 close* 的槽位归还），独立包后单行异常
+                //   不再吞掉归还链；统计自身丢失可接受（辅助非契约）。
+                try { progress.onDeath() } catch (e) {}
                 // t650：死亡也关附魔台 / 铁砧 / 发射器三面板（此前漏关——onDied 只关四旧面板）。归还顺序在
                 //   returnHeldToHotbar / dropAllItems **之前**：closeEnchantingTable / closeAnvil 内的显式同步
                 //   归还（本批加）把 A/B 输入槽物品先收回背包 → dropAllItems 统一死亡掉落（修「铁砧放着东西死亡
@@ -10037,8 +10040,9 @@ Window {
             } finally {
                 // 纯 bool 面板标志复位（review24 低危移入 finally 首部）：任何辅助异常都拦不住——标志残留时
                 //   「立即重生」路径不清理 → 重生后背包 / 设置 / 统计面板叠显。t312：死亡关聊天（死亡屏接管
-                //   光标）。仍先于 dropAllItems / release（与旧 try 段同相对序）；面板 visible 绑定触发的延迟
-                //   二次归还幂等（槽已被上方直调清空，t690(c) 同判）。
+                //   光标）。review-r1913-final D-M1：补齐 t650 三面板（enchantingTable/anvil/dispenser）——
+                //   try 首行任何异常（现已独立包，防御再进一层）或 close* 自身失败时，三标志也不残留 true
+                //   （幂等复位；visible 绑定的延迟二次归还已有 t690(c) 幂等判）。
                 if (window.inventoryOpen) window.inventoryOpen = false
                 if (window.craftingTableOpen) window.craftingTableOpen = false
                 if (window.furnaceOpen) window.furnaceOpen = false
@@ -10048,6 +10052,10 @@ Window {
                 if (window.settingsOpen) window.settingsOpen = false
                 if (window.progressOpen) window.progressOpen = false
                 if (window.statsOpen) window.statsOpen = false
+                // t650 三面板标志（review-r1913-final D-M1 补）：与上八标志同段幂等复位。
+                if (window.enchantingTableOpen) window.enchantingTableOpen = false
+                if (window.anvilOpen) window.anvilOpen = false
+                if (window.dispenserOpen) window.dispenserOpen = false
                 // 死亡主链（顺序敏感）：dropAllItems（掉落 + 清空 + 置 m_dead → t655 闸门生效 / 视角冻结）
                 //   与 release（释放指针 → 死亡屏按钮可直接点，t853③）是契约本体，最先执行；XP 球 / 播报
                 //   是花絮殿后（花絮自身异常不再反噬指针释放——release 先于一切花絮）。

@@ -1111,6 +1111,13 @@ public:
     //   两侧永不漂移（改地面集只改这里）。plantId 非本族植物 → 恒 false（谓词只服务植物放置面）。
     static bool plantGroundBlock(quint8 plantId, quint8 groundId);
 
+    // t847 收口（R19.13 终审 C-M1）：「着地生长植物族」成员判定 = 草丛 / 花族 / 蘑菇族（共用失撑钩子
+    //   World::checkFlowerMushroomOnEdit 的三族；枯灌木不在内——其失撑走 checkDeadBushOnEdit 掉木棒的
+    //   独立口径）。放置预检（PlayerController placeBlock）与失撑钩子（World）两面共用本谓词锁族成员集，
+    //   防「放置面收进新族、失撑面漏跟」的对称破洞——t847 只把草丛收进放置预检而失撑族没跟，挖掉下方
+    //   泥土后草丛悬空永存，正是该病首例。加新着地植物时：改本谓词 + plantGroundBlock 两处即两面齐动。
+    static bool isGroundPlant(quint8 blockId);
+
     // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理判定
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移
     //   （同 isBed / isCrossBillboard 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（改 id 时一处同步）。

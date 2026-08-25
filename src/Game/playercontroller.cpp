@@ -2433,9 +2433,12 @@ void PlayerController::useFishingRod()
         emit swingArm(); // 收竿挥手反馈（一次「使用」动作）
         if (!valid) return; // 浮标已消散（出界 / 寿命）→ 无结算
         if (hooked >= 0) {
-            // ① 钩住生物：拉向玩家 + 生存 -5 耐久；不伤害（MC 1.0 hook 拉拽口径）。
-            m_entityManager->pullMobToward(hooked, m_pos, kFishHookPullSpeed);
-            if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem(kFishHookDurabilityCost);
+            // ① 钩住生物：拉向玩家 + 生存 -5 耐久；不伤害（MC 1.0 hook 拉拽口径）。R19.13 终审 B-L2：拉拽
+            //   实际生效才扣耐久（pullMobToward 返 bool）——目标已在收竿同帧死亡（死亡动画 0.5s 窗内、浮标
+            //   tick 尚未跑脱钩验证）时拉拽 no-op，按空收处理（无获物不消耗），不再白损 5 耐久。
+            const bool pulled = m_entityManager->pullMobToward(hooked, m_pos, kFishHookPullSpeed);
+            if (pulled && m_mode == Survival && m_hotbar)
+                m_hotbar->damageSelectedItem(kFishHookDurabilityCost);
             return;
         }
         if (!bite) return; // ③ 空收（未咬钩 / 浮标在陆）→ 无获物 / 不损耐久
@@ -4405,11 +4408,11 @@ void PlayerController::placeBlock()
     //   ② 下方须合法着地面 —— BlockRegistry::plantGroundBlock 单一权威（草丛→泥土/草方块：不能草上叠草 /
     //      不能放树叶上 / 不能悬空；花→泥土/草方块/耕地；蘑菇→泥土/草方块；枯灌木→沙子。地面集与失撑
     //      掉落链同源，别两套判定——改地面集只改 Core 谓词一处）。
+    //   t847 收口（R19.13 终审 C-M1）：族成员判定改走 BlockRegistry::isGroundPlant 单一权威（草丛 / 花 /
+    //   蘑菇三族与 World 失撑钩子 checkFlowerMushroomOnEdit **共用同一谓词**——旧版两面各写一份并判，
+    //   放置面收进草丛而失撑面漏跟，挖掉下方泥土后草丛悬空永存；枯灌木失撑走掉木棒的独立口径故仍显式并判）。
     //   拒绝 = 不挥不消耗（同仙人掌 / 铁轨 / 木梯预检口径：非法放置位 no-op）。
-    if (m_selectedBlock == BlockRegistry::TallGrass
-        || m_selectedBlock == BlockRegistry::DeadBush
-        || BlockRegistry::isFlower(m_selectedBlock)
-        || BlockRegistry::isMushroom(m_selectedBlock)) {
+    if (BlockRegistry::isGroundPlant(m_selectedBlock) || m_selectedBlock == BlockRegistry::DeadBush) {
         if (m_world->blockAt(tx, ty, tz) != BlockRegistry::Air) return; // ① 水下 / 被占 → 拒（不挥）
         if (!BlockRegistry::plantGroundBlock(quint8(m_selectedBlock),
                                              m_world->blockAt(tx, ty - 1, tz)))
