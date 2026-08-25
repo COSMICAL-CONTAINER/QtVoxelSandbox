@@ -447,6 +447,11 @@ public:
     //   切到该槽（手持 = 新方块，原选中槽内容保留）；当前选中槽本就空 → 直接写入它；仅满背包（无空槽）才
     //   回退替换当前选中槽。取代旧「恒覆盖选中槽」（防丢失原手持）。
     Q_INVOKABLE void pickBlock();
+    // t870 中键复制「方块 → 玩家应得物品 id」单一权威（纯静态映射，探针直调）：红石粉导线（130）→
+    //   红石粉物品（0x224，与 dropId 同源）；其余方块恒返自身（MC pick-block 给方块本体）。
+    //   修「复制红石粉拿到非红石粉图标」——根因是 hotbar 被写进方块形态 130（图标走方块段瓦片且与
+    //   红石 tab / 材料段的 0x224 条目 id 失配），t815 只修图标源没修 id。
+    static int pickItemIdForBlock(quint8 blockId);
     // t653② pick-block 抽出的「切槽 / 复制入槽」主体（方块与生物蛋共用）：hotbar 已有同 id → 切槽；
     //   全无 → 复制满栈入空槽优先（t291/t453 语义原样）。私有，仅 pickBlock 调。
     void pickIdToHotbar(int id);

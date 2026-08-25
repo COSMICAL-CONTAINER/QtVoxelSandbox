@@ -4947,7 +4947,20 @@ void PlayerController::pickBlock()
     if (!m_hasHit) return;
     const quint8 id = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
     if (id == BlockRegistry::Air) return; // 命中空气 → 无可拾取
-    pickIdToHotbar(int(id));
+    // t870：红石粉中键复制给**物品** 0x224（与破坏掉落同源——dust dropId=0x224），非方块形态 130。
+    //   旧版直接写 130 → hotbar 槽持「方块形态 id」：图标走方块段图集重渲（连接形瓦片随电力态变——
+    //   用户「复制出来的不是红石粉图标」t815 只修了图标源没修 id 本身）+ 与红石 tab / 材料段的粉条目
+    //   （0x224）不同 id（切槽判定失配、双显）。映射收口在 pickItemIdForBlock（单一权威，探针直调）。
+    pickIdToHotbar(pickItemIdForBlock(id));
+}
+
+// t870 中键复制「方块 → 玩家应得物品 id」单一权威（见 pickBlock 内注释）：红石粉导线（RedstoneDust=130）
+//   → 红石粉物品（RedstoneId=0x224，与 dropId 同源）；其余方块恒返自身（MC pick-block 给方块本体）。
+//   纯静态映射，无 World/实例依赖（探针直调断言）。
+int PlayerController::pickItemIdForBlock(quint8 blockId)
+{
+    if (blockId == BlockRegistry::RedstoneDust) return RecipeRegistry::RedstoneId;
+    return int(blockId);
 }
 
 // t653② 抽出「切槽 / 复制入槽」主体（方块与生物蛋共用；t291/t453 语义原样迁移）：
