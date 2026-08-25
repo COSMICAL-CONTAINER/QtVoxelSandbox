@@ -5494,8 +5494,10 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   PrimedTnt 实体，走 spawnPrimedTnt 既有链（fuseProgress 白闪 / 重力落地坐支撑顶 / 引爆链式引燃 / QML
         //   delegate 全复用）。**标准引信**（不传 fuseSec → kPrimedTntFuseSec ~5s）——「短引信落地爆」即标准
         //   引信自然落地爆，不另设短引信；链式短 fuse（kChainFuseSec）是爆炸链式引燃专用口径，与本路径无关。
-        //   **定向初速** = 发射面朝向 × kDispenserTntPopSpeed（对齐箭 / 掉落物既有弹射语义——沿 state 朝向出膛；
-        //   spawnPrimedTnt 新增的 velX/velZ 可选参消费，primed tick 水平积分后 ~1 格落地）。**两路径并存边界**
+        //   **定向初速** = 发射面朝向 × kDispenserTntPopSpeed（t871 调小 1.6：摩擦积分总位移 ≈0.43 格 →
+        //   TNT 落定在发射面邻格内（用户「出现在发射口前一格即可」，旧 4.0 弹到第二格）；对齐箭 / 掉落物
+        //   既有弹射语义——沿 state 朝向出膛；spawnPrimedTnt 的 velX/velZ 可选参消费，primed tick 水平积分后
+        //   落定）。**两路径并存边界**
         //   （注释即契约）：TNT 方块被红石**直接邻接激活**（firePowerTnt：拉杆/红石块/粉贴 TNT）仍是**原地引爆**
         //   （清方块 + 原格 spawnPrimedTnt，既有链零改动）；只有 TNT **放进发射器库存**经发射才变「弹出点燃实体」
         //   ——机制等价 MC 两条触发路径并存。投掷器不放行本分支（isDropper 前置排除）：dropper「只投不射」口径
