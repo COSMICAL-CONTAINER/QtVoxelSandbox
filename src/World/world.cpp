@@ -1638,9 +1638,14 @@ void World::tickFire()
                 const int py = ((st & 8) != 0) ? y - 1 : y + 1; // 配对半扇（上配下 y-1 / 下配上 y+1）
                 if (py >= 0 && py < H && BlockRegistry::isDoor(m_chunks.blockAt(x, py, z))
                     && !m_burningCells.contains(packGrowthCell(x, py, z))
-                    && !fireWaterNeighborAt(x, py, z)) // review24 #1：湿对偶跳过——点燃后才泼到半扇上的水同样
+                    && !fireWaterNeighborAt(x, py, z) // review24 #1：湿对偶跳过——点燃后才泼到半扇上的水同样
                                                        //   保住该半扇（整扇湿判拦的是点燃入口，这里拦烧尽收尾；
                                                        //   无此守卫则「干半扇烧尽 → 湿半扇连带 Air」防火带破）
+                    && !fireRainExposedAt(x, py, z)) // review25 #9：雨浇对偶同护——对偶半扇已被雨掷中浇熄
+                                                     //   （(d) 抑制掷骰「火灭块存」）或本身露天淋雨时，本半扇
+                                                     //   烧尽收尾不得连带清 Air（与点燃入口/浇熄掷骰同判
+                                                     //   fireRainExposedAt；无此守卫则水泼保得住、雨浇保不住
+                                                     //   ——抑制源行为不对称，露天门整扇无一生还）
                     setBlock(x, py, z, BlockRegistry::Air); // 同窗收尾（对偶已自行烧毁 → 已非门不命中；
                                                             //   对偶在燃 → 留它本窗自烧，不误发 broken）
             }

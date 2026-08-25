@@ -346,14 +346,17 @@ public:
     //   ++；喂入确定性等待掷骰 seed ⊕ 序号 → 同世界同序号同等待值，t791 骨粉 / PLAN §2-K 同模式；鱼跑重掷时
     //   序号在实体内自增 → 每轮新值）。tick 内 Bobber 分支四态机（bobberState）：
     //     · Flying：轻重力 kBobberGravity 抛物 → 飞行段与 mob AABB 相交即钩定（Hooked，玩家不可钩自己——玩家
-    //       不是 EntityManager 实体天然排除；已钩 mob 被新浮标命中 = 换绑，旧浮标脱钩下落）→ 落水（Water 格）
+    //       不是 EntityManager 实体天然排除；已钩 mob 被新浮标命中 = 换绑，旧浮标脱钩下落；review25 #13 实体格
+    //       命中门先行——next 已进入非豁免实体格即贴面 Ground 不钩，防隔墙钩）→ 落水（Water 格）
     //       浮定水面（浮力平衡半浸：液面 - kBobberFloatDip，XZ 收格心）+ 掷确定性等待 → 落实体方块贴面静止
     //       （Ground，可再甩收回）；出界 / 虚空消散。
     //     · Water：等待（bobberWaitSeconds ∈ [5,30]s，MC 1.0 口径）→ 咬钩窗口 kBobberBiteWindowSec（0.5s，浮标
     //       下沉重置视觉）emit bobberBit（呈现层水花粒子）→ 窗口过 emit bobberEscaped（鱼跑提示）+ 重掷新等待。
-    //     · Ground：静止（不再钩 mob——只在飞行段钩，MC 语义近似取舍）。
+    //     · Ground：静止（不再钩 mob——只在飞行段钩，MC 语义近似取舍；review25 #12 节流复查贴靠格，支撑被挖
+    //       → 转 Flying 零速下落，不再悬空滞留至寿命兜底）。
     //     · Hooked：钉在 mob 身上跟随；mob 死 / 移除 / 槽复用换任 → 脱钩转 Flying 下落。
-    //   寿命 kBobberLifetime 兜底（玩家挂机防浮标永滞；到期消散后 Game 层 updateFishing 镜像检测自动收竿）。
+    //   寿命 kBobberLifetimeMs 墙钟兜底（review25 #14，同箭 60s despawn 先例——dt 累计卡顿漂移只慢不快；等待 /
+    //   咬钩窗口计时保持 dt——确定性掷骰的 tick 语义依赖；到期消散后 Game 层 updateFishing 镜像检测自动收竿）。
     //   收竿 / 获物 / 拉拽 / 耐久语义全收口在 Game 层（PlayerController::useFishingRod 拉 bobberHasBiteAt /
     //   bobberHookedMobAt 查询后结算；掉落物 / 暗渊珠「Entities 承载实体 + Game 收口语义」同款分层）。
     //   达 kCap → 跳过 + 告警（防溢出）。返浮标槽索引（Game 层记 m_bobberEntityIdx 跟踪）；达 kCap → -1。
@@ -617,8 +620,13 @@ public:
     //   （Torch / RedstoneTorch——附着语义一族），state 解码其唯一附着格（torchAttachOffset，掩熄灭位），
     //   该格已非 solid（爆炸把支撑块炸掉、火把本体在球外幸存）→ setWaterSilent 清火把 + 恒发
     //   explosionDroppedItem（支撑脱落是必然事件，不走 ~50% 破坏掉落概率门；机制等价 MC 爆炸震落墙上
-    //   火把）。同玩家挖支撑块的 PlayerController::dropUnsupportedTorchesAround 语义（爆炸版）。去重：
-    //   清后格为 Air → 邻格重复扫到时非火把族 → 不双掉。分层：向下写 World（setWaterSilent）+ 发语义信号。
+    //   火把）。同玩家挖支撑块的 PlayerController::dropUnsupportedTorchesAround 语义（爆炸版）。
+    //   **反馈通道现状（review25 #16 如实登记）**：destroySphereSilent 每清一格已先经 World 侧
+    //   recheckAttachmentsAfterClear ② 用同判掉落（blockBroken + blockDroppedAsItem——每火把一组破块
+    //   粒子 + 音，有界 spam，接受现状不旁路），本函数复扫时 blockAt 已 Air → setWaterSilent +
+    //   explosionDroppedItem 通道仅在 recheck 不及的残余格生效（防御性双保险）。功能正确：双掉被
+    //   「先清者留 Air、后扫者判跳」挡住。去重：清后格为 Air → 邻格重复扫到时非火把族 → 不双掉。
+    //   分层：向下写 World（setWaterSilent）+ 发语义信号。
     void dropUnsupportedTorchesAfterBlast(const std::vector<World::DestroyedVoxel> &destroyed, World *world);
     // t739 爆炸失撑红石粉掉落（Stalker / TNT 两爆炸路径共用）：destroyed 列表内每破坏格查其**正上方**
     // 的红石粉导线，若该破坏格（粉的唯一支撑位）已非有效支撑（isDustSupport：整立方 / 上半砖；被炸为
@@ -1051,13 +1059,13 @@ private:
         // t283 Arrow（箭矢投射物）专用：vx/vy/vz 复用作 3D 速度（Arrow 不走 Mob 击退衰减分支，无冲突），
         //   arrowLife = 寿命倒计时（秒；tick Arrow 分支递减，<=0 或命中 / 越界 → releaseSlot 移除）。
         //   非 Arrow 实体 arrowLife=0 不读。
-        float arrowLife = 0.0f;  // 箭寿命倒计时（秒；仅 kind==Arrow 用）
+        float arrowLife = 0.0f;  // 箭寿命倒计时（秒；kind==Arrow 用；Bobber 复用作寿命次级镜像，墙钟为准）
         // 任务（弓箭 60s 必 despawn）：箭 spawn 时刻墙钟（m_clock.elapsed()）。tick Arrow 分支用它做硬上限 ——
         //   任何箭（玩家 / 骷髅 / 飞行 / 嵌入）自 spawn 起 60s 必 despawn（机制等价 MC 箭 60s 消失）。这是对
         //   arrowLife dt-累加 despawn 的安全网 + 真值源（dt 累加在低帧率 / dt=0 / 节流帧漂移时可能滞后，墙钟
         //   不依赖 dt → 必然 60s 移除，杜绝用户报告「骷髅箭插墙 / 落地不消失」）。spawn 时写入；非 Arrow 默认 0。
         //   放 arrowLife 之后（聚合初始化未显式列它 → 默认 0；DMI 兜底，同 alive 放末尾的 lessons t256 模式）。
-        qint64 arrowSpawnMs = 0; // 箭 spawn 墙钟 ms（仅 kind==Arrow 用；tick 算 age 做硬 60s despawn）
+        qint64 arrowSpawnMs = 0; // 箭 spawn 墙钟 ms（Arrow 硬 60s despawn 真值源；Bobber 复用作 180s 寿命墙钟，review25 #14）
         // t304 玩家射出的箭（spawnArrowPlayer）专用：arrowFromPlayer=true 的箭命中 **mob**（damageEntity +
         //   mobAttacked 语义事件）；false（骷髅 spawnArrow 射出）命中 **玩家**（mobAttackedPlayer，t283 旧路径）。
         //   机制等价 MC 1.0「玩家箭打怪、怪箭打玩家」（敌我判别由发射者决定，非箭本身阵营）。非 Arrow 默认 false。
@@ -1164,6 +1172,12 @@ private:
         quint32 bobberSerial = 0;     // 甩竿序号（确定性等待掷骰的错峰源；鱼跑重掷 ++）
         int   bobberHookedIdx = -1;   // 已钩 mob 槽索引（-1 = 无；仅 Hooked 态读）
         quint32 bobberHookedSerial = 0; // 已钩 mob 代际快照（与槽内 spawnSerial 比对防槽复用误绑）
+        // review25 #12 Ground 态贴靠格快照（进入态时记录命中实体格 / 岩浆格；仅 Ground 分支节流复查读——
+        //   支撑被挖 / 被爆 / 变水 → 转 Flying 零速下落，与 Water 态排水路径对称。qint16 足容世界尺寸；
+        //   blockAt 越界安全返 Air → 陈旧快照最多误判失撑转下落，无越界风险）。
+        qint16 bobberGroundCellX = 0;
+        qint16 bobberGroundCellY = 0;
+        qint16 bobberGroundCellZ = 0;
         float suffocationTimer = 0.0f; // t254 窒息累积计时（头部嵌实体方块时累加，每 kSuffocationInterval 秒扣 1HP；机制同玩家 t160）
         float cactusDamageTimer = 0.0f; // t394 仙人掌接触伤害累积（mob AABB 接触 Cactus 时累加，每 kCactusDamageInterval 扣 1HP；离开归零）
         // t281 敌对 AI 态（仅 hostile=true 的 Mob 用；passive / FallingBlock 留默认不触发）：
@@ -2092,6 +2106,13 @@ private:
     static constexpr float kBobberGravity      = 12.0f;  // 浮标轻重力（blocks/s²；投掷物家族同源，vs 世界 28）
     static constexpr float kBobberHalfDim      = 0.10f;  // 浮标半宽/半高（blocks）
     static constexpr float kBobberLifetime     = 180.0f; // 浮标寿命兜底（秒；挂机防永滞，正常由收竿移除）
+    static constexpr qint64 kBobberLifetimeMs  = 180000; // review25 #14：寿命墙钟上限（ms；真值源——dt 钳 50ms
+                                                          //   卡顿下 arrowLife 只慢不快，墙钟必然到期；同箭
+                                                          //   kArrowDespawnMs 先例，spawn 记 arrowSpawnMs）
+    static constexpr int kBobberGroundRecheckEvery = 10; // review25 #12：Ground 态贴靠格复查节流（tick 数；每
+                                                          //   到相位复查一次 blockAt——挖掉贴靠方块后 ≤ 此 tick
+                                                          //   数内转 Flying 下落；与 Water 态每 tick 复查对称的
+                                                          //   降频版，Ground 是静置态不值得每 tick 查）
     static constexpr float kBobberWaitMinSec   = 5.0f;   // 入水到咬钩等待下界（秒；MC 1.0 口径）
     static constexpr float kBobberWaitMaxSec   = 30.0f;  // 入水到咬钩等待上界（秒；MC 1.0 口径）
     static constexpr float kBobberBiteWindowSec= 0.5f;   // 咬钩窗口（秒；窗口内收竿获物，错过鱼跑）

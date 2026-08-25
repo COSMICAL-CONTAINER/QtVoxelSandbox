@@ -1665,10 +1665,13 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
     //   依赖它，lessons-learned t639「别翻转共享谓词修单消费者」）→ 在此 id 特例分流，不动共享谓词。
     if (isAnvil(blockId))
         return anvilShapeBoxes();
-    // t849 仙人掌碰撞贴实际形状：渲染是 0.8 居中细柱（partialblockgeometry kCactusInset 1/16 内缩）→
-    //   碰撞盒同 0.8 居中（此前 ShapeFull 整格——玩家贴仙人掌半身即「接触」，与视觉不符）。接触伤害
-    //   判定走 EntityManager/PlayerController 环境 tick 的 collisionAABBsAt 点测 → 收窄后须真站进柱内
-    //   才受伤（机制等价 MC 仙人掌 hitbox 14/16 内缩语义）。放置预检 / 失撑链不读本函数，零回归。
+    // t849 仙人掌碰撞贴实际形状：渲染是 0.8 居中细柱（partialblockgeometry kCactusInset=0.1 内缩——
+    //   (1−0.8)/2，非 1/16）→ 碰撞盒同 0.8 居中（此前 ShapeFull 整格——玩家贴仙人掌半身即被挡，与视觉
+    //   不符；本盒只管**实体阻挡**——玩家停在柱面外）。**接触伤害不走本收窄盒**（review25 #17 注释更正，
+    //   旧文「收窄后须真站进柱内才受伤」失实）：玩家侧是 PlayerController 环境 tick 的**满格 AABB +
+    //   kTouchSkin 容差皮**重叠判定（刻意外扩——被柱面碰撞挡住即算接触，权威注释见 playercontroller.cpp
+    //   仙人掌伤害段，多轮回归史：按内缩盒对齐会把侧撞挡在 0.1 缝外的接触漏判 =「侧撞不扣血」回归）；
+    //   mob 侧为 EntityManager 格邻接判定。**勿按本盒「对齐」伤害口径**。放置预检 / 失撑链不读本函数，零回归。
     if (blockId == Cactus)
         return {BlockAABB{0.1f, 0.0f, 0.1f, 0.9f, 1.0f, 0.9f}};
     // t359 活版门开态碰撞 = 整高竖直板（同 shapeBoxes，无特例覆盖）。机制等价「半门 / 1 格高 ledge」：
