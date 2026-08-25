@@ -13191,6 +13191,74 @@ Item {
                              "free of captured/panel gates)";
     }
 
+    // ── P-t881 鱼线最大长度探针（32 格断线，行为级）──
+    //    pc 真甩竿 → settle（近距 ~2 格）→ pc.tick 线仍持；applyEnderPearlTeleport 把玩家拉到 ~53 格
+    //    （loadSavedState 会 cancelFishing 不可用——传送是唯一不撞钓鱼态的移位口）→ 传送本身不断线
+    //    （检测在 updateFishing）→ 首 pc.tick 断线：浮标槽释放 + fishing 复位 + 耐久不变 + 零 fishCaught。
+    {
+        World wL;
+        wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(78);
+        EntityManager ents;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickL = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wL, farL, 0.3f, 1.8f, false);
+        };
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const int fy = 83; // rig 地板格（seed 78 未生成地形 → 全空带，手摆）
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wL.setBlock(x, fy, z, BR::Stone, 0);
+                wL.setBlock(x, fy + 1, z, BR::Water, 0); // 3×3 水池（settle 用）
+            }
+        wL.setBlock(3, fy, 6, BR::Stone, 0);  // 玩家立足柱（pc.tick step 物理需要）
+        wL.setBlock(44, fy, 42, BR::Stone, 0); // 传送目标立足柱（距浮标 (5.5,6.5) 水平 √(39²+36²)≈53 > 32）
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wL);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+        int caught = 0;
+        QObject::connect(&pc, &PlayerController::fishCaught, &pc,
+                         [&](int, int, float, float, float, float, float, float) { ++caught; });
+        pc.useFishingRod(); // 甩竿（serial 1，轨迹同 t836(b)：settle (5.5, fy+1.875, 6.5)）
+        int bob = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
+        bool ok = pc.fishing() && bob >= 0;
+        const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+        for (int t = 0; t < 40 && ok; ++t) {
+            tickL(1, 0.05f);
+            if (!ents.aliveAt(bob)) { ok = false; break; }
+            if (ents.posAt(bob) == settlePos) break;
+        }
+        ok = ok && ents.posAt(bob) == settlePos;
+        pumpFor(17); pc.tick(); // 近距镜像 tick（~2 格）→ 线仍持（fishing 保持 + 浮标活）
+        ok = ok && pc.fishing() && ents.aliveAt(bob);
+        const int dur0 = hb.durabilityAt(0);
+        pc.applyEnderPearlTeleport(44, fy + 2, 42); // 玩家 → (44.5, fy+1, 42.5)（传送不撞钓鱼态）
+        ok = ok && pc.fishing();                    // 传送本身不断线（检测在 updateFishing 镜像段）
+        pumpFor(17); pc.tick();                     // → 断线
+        ok = ok && !pc.fishing() && !ents.aliveAt(bob) && caught == 0
+              && hb.durabilityAt(0) == dur0;        // 无获物 / 无耐久（扯断≠收竿）
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t881 fishing line max length: eye-to-bobber 3D distance beyond 32 blocks "
+                             "snaps the line on the next updateFishing mirror tick (bobber entity removed, "
+                             "fishing state cleared, zero fishCaught, zero rod durability cost -- a snapped "
+                             "line is not a reel); near-distance tick keeps the line (behavioral: real cast "
+                             "-> settle -> pc.tick holds; ender-pearl teleport hauls the player ~53 blocks "
+                             "away without touching fishing state -- the only headless repositioning path, "
+                             "loadSavedState cancels fishing by savegame semantics)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
