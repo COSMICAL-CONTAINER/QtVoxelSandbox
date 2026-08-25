@@ -8,7 +8,7 @@
 ## 中危（1）
 
 ### M1 死亡链 finally 面板标志复位漏了 t650 三面板 —— 与本批自我声明「任何辅助异常都拦不住标志复位」不符
-> **已修（R19.13 收尾批 fix(review-r1913-final)，review 建议二选一 → 做更彻底的 both）**：① finally 标志复位段补 `enchantingTableOpen/anvilOpen/dispenserOpen` 三行幂等复位（置于既有 8 标志同段）；② `progress.onDeath()` 包独立 `try/catch`（与三行 returnCraftToHotbar 同款对称）——单行异常不再跳过 try 段的三个 close*()（附魔/铁砧槽物归还链保住）。
+> **已修（R19.13 收尾批 fix(review-r1913-final) 6f49f77，review 建议二选一 → 做更彻底的 both）**：① finally 标志复位段补 `enchantingTableOpen/anvilOpen/dispenserOpen` 三行幂等复位（置于既有 8 标志同段）；② `progress.onDeath()` 包独立 `try/catch`（与三行 returnCraftToHotbar 同款对称）——单行异常不再跳过 try 段的三个 close*()（附魔/铁砧槽物归还链保住）。
 - **提交**：19e5577（review24 #7/#8）
 - **位置**：`src/ui/Main.qml:10016-10050`（onDied try/finally）；对照 `respawnPlayer()` `:958-963`（不关任何面板）
 - **问题**：finally 首部只复位 8 个标志（inventory/crafting/furnace/chest/chat/settings/progress/stats），**不含 enchantingTableOpen / anvilOpen / dispenserOpen**。这三个标志的清零只存在于 try 段的 `close*()` 调用里（`:10025-10027`）。而 try **首行** `progress.onDeath()`（`:10017`）没有独立 try 包裹——它一旦抛 TypeError（t603「window.progress 恒 undefined」/ t690「window.面板id 恒 undefined」同款笔误形态，本工程已两度实发），异常直接跳过 try 段剩余全部行：三个 close* 被跳过 → ① 三面板标志残留 true（`respawnPlayer` 不清理 → 重生后附魔/铁砧/发射器面板叠显，且 respawnPlayer 的 `grab()` 与面板开态混合）；② `returnEnchantToHotbar()/returnAnvilToHotbar()` 不执行 → 附魔/铁砧输入槽物品**不在 hotbar/main/held 里，dropAllItems 不覆盖 → 随尸体永久消失**（注释自评「归还被跳过即随尸体永久消失」）。finally 的死亡契约本体（dropAllItems/release/XP/播报）不受影响——review24 #7 的主目标仍达成。
@@ -72,7 +72,7 @@
 
 ---
 
-## R19.13 收尾批处置记录（fix(review-r1913-final)）
+## R19.13 收尾批处置记录（fix(review-r1913-final) 6f49f77)
 
 - **M1 已修**：finally 补三面板幂等复位 + progress.onDeath() 独立 try（both，详见 finding 处标记）。
 - **L1 登记不修**：鱼线竿尖单锚近似（注释已声明，目视清单项销口时按模式分锚）。

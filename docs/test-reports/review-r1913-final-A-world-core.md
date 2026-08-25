@@ -7,7 +7,7 @@
 ## 中危（1）
 
 ### M1 armorLayerSource 皮革族与 itemIconSource 皮革图标段落盘缓存无 revision、直返裸 `file:///` —— #5 同构 cache-bust 病残留
-> **已修（R19.13 收尾批 fix(review-r1913-final)）**：两族文件名挂 `_r%1(s.revision)`（`voxelsandbox_rp_leather_<id>_r<rev>.png` / `voxelsandbox_rp_leather_layer_<n>_r<rev>.png`，skin/mobhead 先例）；皮革段全部回退直返（解码失败 / 无可写目录 / 落盘失败）改走 `packFileUrl(path, s.revision)` 挂查询串；缓存命中路径随文件名世代变化自然 cache-bust。reset 段清扫扩皮革族（见 L3，一并修）。
+> **已修（R19.13 收尾批 fix(review-r1913-final) 6f49f77)**：两族文件名挂 `_r%1(s.revision)`（`voxelsandbox_rp_leather_<id>_r<rev>.png` / `voxelsandbox_rp_leather_layer_<n>_r<rev>.png`，skin/mobhead 先例）；皮革段全部回退直返（解码失败 / 无可写目录 / 落盘失败）改走 `packFileUrl(path, s.revision)` 挂查询串；缓存命中路径随文件名世代变化自然 cache-bust。reset 段清扫扩皮革族（见 L3，一并修）。
 - **提交**：20a0efa（收尾只改了非皮革直返族）
 - **位置**：`src/Core/resourcepackmanager.cpp:3163-3168`（`voxelsandbox_rp_leather_layer_<layer>.png` 文件名无 `_r`；3153/3156/3161/3166/3168 五处裸 `file:///` 返回）、`:2398`（皮革图标 `voxelsandbox_rp_leather_<id>.png` 同病）
 - **问题**：packFileUrl 头注释（`:2066-2067`）宣称"落盘派生缓存族……revision 进文件名，同效更稳"，但皮革两族文件名均不含 revision。apply() 清 `leatherIconFiles`（`:1715`）后重染**同名覆盖**，URL 不变 → QML Texture 按 URL 缓存继续用旧像素。
@@ -53,7 +53,7 @@
 
 ---
 
-## R19.13 收尾批处置记录（fix(review-r1913-final)）
+## R19.13 收尾批处置记录（fix(review-r1913-final) 6f49f77)
 
 - **M1 已修**：皮革两族文件名挂 `_r<revision>` + 回退直返走 packFileUrl；同 L3 一并扩 reset 段五前缀清扫。
 - **L1 登记不修**：门配对 bit3 互补/同材质校验（异常存档态防御，留 `doorPartnerAt()` 收口批）。

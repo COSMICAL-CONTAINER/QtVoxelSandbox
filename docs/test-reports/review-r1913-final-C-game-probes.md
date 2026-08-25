@@ -15,7 +15,7 @@
 
 ### 中-1 t847 草丛放置预检与失撑掉落链不对称（四族中恰缺新增的那族）
 
-> **已修（R19.13 收尾批 fix(review-r1913-final)）**：新增 Core 谓词 `BlockRegistry::isGroundPlant`（草丛/花/蘑菇族成员单一权威），放置预检（playercontroller）与失撑钩子（World::checkFlowerMushroomOnEdit，四 setBlock 钩子入口全覆盖）两面共用——加族必两面齐动，杜绝再漂移。t847 探针补失撑列（破草丛下泥土 → 清 Air + dropId 掉落，运行期读表）。附带同族口径（支撑被置换不掉）按指示**登记不扩**：花/蘑菇自 t507 起同只对 id==Air 生效，保持同族一致优先，world.cpp 钩子头注释已记。
+> **已修（R19.13 收尾批 fix(review-r1913-final) 6f49f77)**：新增 Core 谓词 `BlockRegistry::isGroundPlant`（草丛/花/蘑菇族成员单一权威），放置预检（playercontroller）与失撑钩子（World::checkFlowerMushroomOnEdit，四 setBlock 钩子入口全覆盖）两面共用——加族必两面齐动，杜绝再漂移。t847 探针补失撑列（破草丛下泥土 → 清 Air + dropId 掉落，运行期读表）。附带同族口径（支撑被置换不掉）按指示**登记不扩**：花/蘑菇自 t507 起同只对 id==Air 生效，保持同族一致优先，world.cpp 钩子头注释已记。
 
 - **提交**：7437d5a
 - **位置**：
@@ -29,7 +29,7 @@
 
 ### 中-2 P-t836 一条探针锁五个行为面：描述超断言 + updateFishing 镜像路径零执行
 
-> **已修（R19.13 收尾批 fix(review-r1913-final)）**：补 (f) 出界消散**真断言**（XZ 飞越 8 tick 内出界 + y<0 首 tick 槽释放，与 180s 寿命路径区分）；补 (g) 两半边——行为半边（探针可达）：clearAll 清浮标后 ① 镜像惰性（fishing 态不塌）② 收竿走 valid=false 干净收场（无获物/无耐久/fishing 复位）；自动收竿半边（pc.tick 驱动 updateFishing）因 tickImpl 的 captured 门在无窗测试二进制**不可达**（直调 pc.tick 先走 !m_captured 早退分支的 cancelFishing，会掩盖镜像路径本体）→ 按预案改**源序钉**（t836(e) 手法：滤注释锁 updateFishing 函数体内 aliveAt/kindAt 双查 + m_fishing=false + emit fishingChanged 语句面），取舍在探针注释与 PASS 文案声明。另补 d2 垂死 mob 收竿不扣耐久断言（随 B-L2）。PASS 文案与断言已对齐（"out-of-bounds despawn ASSERTED"）。
+> **已修（R19.13 收尾批 fix(review-r1913-final) 6f49f77)**：补 (f) 出界消散**真断言**（XZ 飞越 8 tick 内出界 + y<0 首 tick 槽释放，与 180s 寿命路径区分）；补 (g) 两半边——行为半边（探针可达）：clearAll 清浮标后 ① 镜像惰性（fishing 态不塌）② 收竿走 valid=false 干净收场（无获物/无耐久/fishing 复位）；自动收竿半边（pc.tick 驱动 updateFishing）因 tickImpl 的 captured 门在无窗测试二进制**不可达**（直调 pc.tick 先走 !m_captured 早退分支的 cancelFishing，会掩盖镜像路径本体）→ 按预案改**源序钉**（t836(e) 手法：滤注释锁 updateFishing 函数体内 aliveAt/kindAt 双查 + m_fishing=false + emit fishingChanged 语句面），取舍在探针注释与 PASS 文案声明。另补 d2 垂死 mob 收竿不扣耐久断言（随 B-L2）。PASS 文案与断言已对齐（"out-of-bounds despawn ASSERTED"）。
 
 - **提交**：0a1acb5
 - **位置**：`tools/redstone_matrix_test.cpp:9968-10320`；PASS 文案 `:10308-10319` 明言 "out-of-bounds despawn"，但 (a)-(e) 无任何对应断言。
@@ -95,7 +95,7 @@
 
 ---
 
-## R19.13 收尾批处置记录（fix(review-r1913-final)）
+## R19.13 收尾批处置记录（fix(review-r1913-final) 6f49f77)
 
 - **中-1 已修**：`isGroundPlant` 单一权威两面共用 + t847 探针失撑列（详见 finding 处标记）；"支撑置换"附带口径登记不扩（同族一致优先）。dev-plan t847 记录未改动——修复后"地面集与失撑链互为表里"陈述已成立（草丛对称缺口即本次闭合项）。
 - **中-2 已修**：(f) 真断言 + (g) 行为半边 + 源序钉取舍声明（详见 finding 处标记）。
