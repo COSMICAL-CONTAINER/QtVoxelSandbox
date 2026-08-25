@@ -1211,6 +1211,13 @@ bool BlockRegistry::plantGroundBlock(quint8 plantId, quint8 groundId)
     return false;
 }
 
+// t847 收口（R19.13 终审 C-M1，见 blockregistry.h 声明处头注释）：着地生长植物族成员 = 草丛 / 花族 /
+//   蘑菇族。放置预检与 World 失撑钩子两面共用的族成员单一权威——两面各写一份并判就会漂移（t847 病）。
+bool BlockRegistry::isGroundPlant(quint8 blockId)
+{
+    return isFlower(blockId) || isMushroom(blockId) || blockId == TallGrass;
+}
+
 // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理 + mesher cross 路由分流
 //   （已并入 isCrossBillboard；本谓词专供爬升逻辑读「是否梯」，避免把「cross 渲染」与「可爬」语义耦合——
 //   未来若有不可爬的 cross 方块，爬升仍只读本谓词不误判）。单 id 故裸相等判定。

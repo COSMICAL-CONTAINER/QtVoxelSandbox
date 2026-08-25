@@ -714,11 +714,13 @@ float EntityManager::bobberWaitSeconds(quint32 h)
 // t836 收竿拉拽（见头文件注释）：钩住 mob 收竿时把 mob 拉向玩家——水平速度 = speed × 归一(玩家-mob) 方向 +
 // 微上抛（kBobberHookPullUp）+ 解除 resting（重力分支接手）。不伤害（钩中 0 伤害，MC 口径；不调 damageEntity
 // → 无红闪无扣血，纯位移冲量）。非 Mob / dead / 越界 / 零距（玩家与 mob 重合）→ 静默早退 / yaw 兜底方向。
-void EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float speed)
+bool EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float speed)
 {
-    if (mobIdx < 0 || mobIdx >= int(m_entities.size())) return;
+    // 返 bool（R19.13 终审 B-L2）：拉拽实际生效才 true——目标 dead（死亡动画 0.5s 窗内、浮标 tick 尚未跑
+    //   脱钩验证）/ 非 Mob / 越界早退返 false，caller 据此不扣钓竿耐久（对垂死 mob 收竿 = 空收，无获物无消耗）。
+    if (mobIdx < 0 || mobIdx >= int(m_entities.size())) return false;
     Entity &e = m_entities[size_t(mobIdx)];
-    if (!e.alive || e.kind != Mob || e.dead) return;
+    if (!e.alive || e.kind != Mob || e.dead) return false;
     float dx = towardPos.x() - e.pos.x();
     float dz = towardPos.z() - e.pos.z();
     float len = std::sqrt(dx * dx + dz * dz);
@@ -737,6 +739,7 @@ void EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float 
     ++m_revision;
     emit entitiesChanged();
     qCInfo(lcEnt) << "mob" << mobIdx << "hook-pulled toward player speed=" << speed;
+    return true;
 }
 
 // t836 浮标咬钩态查询（Game 层收竿结算读；越界 / 非活体 Bobber → false，同 aliveAt 越界安全语义）。
@@ -5008,6 +5011,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         //   冷却门 + caller 30% 掷骰保留不变（近战节奏另管）。
                         if (m.mobType == MobNightwalker) {
                             Entity &nm = m_entities[size_t(mi)];
+                            // R19.13 终审 B-L1：m 是槽引用，teleportEntity 改的就是同一对象——日志若比
+                            //   m_entities[mi].pos != m.pos 是同对象自比较恒 false（瞬移成功也记 forced hit）。
+                            //   瞬移前快照旧位，日志改比快照（真实判据：位置变了 = 闪避成功）。
+                            const QVector3D oldPos = nm.pos;
                             if (!teleportEntity(mi, nm, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
                                 // 瞬移失败兜底：普通命中（伤害 / 击退 / 音 / 移除，同下常规分支语义）。
                                 damageEntity(mi, e.arrowDamage);
@@ -5017,7 +5024,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                                 emit arrowHitMob(m.mobType);
                             }
                             qCInfo(lcEnt) << "player arrow deflected by nightwalker" << mi
-                                          << (m_entities[size_t(mi)].pos != m.pos ? "(teleport dodge)" : "(forced hit)");
+                                          << (m_entities[size_t(mi)].pos != oldPos ? "(teleport dodge)" : "(forced hit)");
                             remove = true; // 箭命中夜行者即消耗（瞬移闪避或普通命中皆移除，t829①）
                             break;        // 本帧不再判定其它 mob
                         }
@@ -5838,8 +5845,20 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   Entity.anvilCrushSerial / 玩家侧 m_playerAnvilCrushSerial），同 serial 再压到同目标跳过 → 每
             //   实体每次下落只伤一次（真语义；旧 t794 落体侧一次性拍只结算首个命中拍——先穿玩家后落猪身则
             //   猪免伤、台阶两猪只伤上面那只）。铁砧继续下落，后续帧压到**未结算**目标照常结算。
-            if (BlockRegistry::isAnvil(quint8(e.blockId))) {
-                const float sweepLow = std::min(newY, e.pos.y());       // 本帧扫掠底中心
+            // review-r1913-final B-M1：封**外层落体引用 e** 的悬垂窗口。下方砸伤段 damageEntity 的
+            //   entitiesChanged emit 若经任一 QML handler 同步 spawn → acquireSlot push_back → vector
+            //   realloc → e 悬垂；review24 #28 换序只封了 mob 引用 m，e 在 mob 循环逐迭代的 AABB 复检、
+            //   玩家段与着地 / 塌落段仍被解引用（:5238 孵化先例同款已知模式）。修：进砸伤段前值快照本落体
+            //   的判伤 / 还原字段（emit 链不改本落体数据 → 快照 == 搬家后的活值，逐位相同），其后 mob 循环 /
+            //   玩家段 / 着地段全读快照；继续下落分支有写回 → 该分支内重取引用再写。非铁砧落体无 emit
+            //   窗口，快照 == 活值，行为零变。
+            const QVector3D aPos = e.pos;
+            const quint8 aBlockId = quint8(e.blockId);
+            const quint8 aBlockState = quint8(e.blockState);
+            const quint32 aSerial = e.spawnSerial;
+            const float aHalfH = e.halfH;
+            if (BlockRegistry::isAnvil(aBlockId)) {
+                const float sweepLow = std::min(newY, aPos.y());       // 本帧扫掠底中心
                 const float fallDist = e.fallStartY - sweepLow;         // 落差（格）
                 const int dmg = std::min(kAnvilCrushDamageCap,
                                          std::max(0, (int(qFloor(fallDist)) - 1) * 2));
@@ -5847,35 +5866,35 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     for (int mi = 0; mi < int(m_entities.size()); ++mi) {
                         Entity &m = m_entities[size_t(mi)];
                         if (!m.alive || m.kind != Mob || m.dead) continue; // 空槽 / 非 mob / 尸体
-                        if (m.anvilCrushSerial == e.spawnSerial) continue; // 本落体已结算过它（review #28）
+                        if (m.anvilCrushSerial == aSerial) continue; // 本落体已结算过它（review #28）
                         // AABB 重叠（XZ 分离 / Y 分离逐轴早退；铁砧砸伤半宽 kAnvilCrushHalfW、mob 用各自 halfW/halfH）
-                        if (std::abs(m.pos.x() - e.pos.x()) >= kAnvilCrushHalfW + m.halfW) continue;
-                        if (std::abs(m.pos.z() - e.pos.z()) >= kAnvilCrushHalfW + m.halfW) continue;
-                        if (m.pos.y() + m.halfH <= sweepLow - e.halfH
-                            || m.pos.y() - m.halfH >= e.pos.y() + e.halfH) continue;
+                        if (std::abs(m.pos.x() - aPos.x()) >= kAnvilCrushHalfW + m.halfW) continue;
+                        if (std::abs(m.pos.z() - aPos.z()) >= kAnvilCrushHalfW + m.halfW) continue;
+                        if (m.pos.y() + m.halfH <= sweepLow - aHalfH
+                            || m.pos.y() - m.halfH >= aPos.y() + aHalfH) continue;
                         // review24 低危收尾（#28 残口）：**先记账后扣血**——damageEntity 今日只 emit 不增删
                         //   槽，但未来 QML handler 若同步 spawn 会 push_back realloc → 上面取的 `Entity &m`
                         //   悬垂 UB；记账在前则「本落体已结算」事实先落盘（damageEntity 早退 / 命中 handler
                         //   均无悬垂窗）。语义等价：旧版记账本就在 damage 无条件之后（不区分 damage 是否
                         //   实际生效），换序不改变任何可达状态。
-                        m.anvilCrushSerial = e.spawnSerial; // 按目标记账：本落体对它已结算（review #28）
+                        m.anvilCrushSerial = aSerial; // 按目标记账：本落体对它已结算（review #28）
                         damageEntity(mi, dmg); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
                     }
-                    if (playerTargetable && m_playerAnvilCrushSerial != e.spawnSerial) {
+                    if (playerTargetable && m_playerAnvilCrushSerial != aSerial) {
                         const float px = listener.x(), py = listener.y(), pz = listener.z();
-                        if (px + listenerHalfW > e.pos.x() - kAnvilCrushHalfW
-                            && px - listenerHalfW < e.pos.x() + kAnvilCrushHalfW
-                            && pz + listenerHalfW > e.pos.z() - kAnvilCrushHalfW
-                            && pz - listenerHalfW < e.pos.z() + kAnvilCrushHalfW
-                            && py + listenerHeight > sweepLow - e.halfH
-                            && py < e.pos.y() + e.halfH) {
+                        if (px + listenerHalfW > aPos.x() - kAnvilCrushHalfW
+                            && px - listenerHalfW < aPos.x() + kAnvilCrushHalfW
+                            && pz + listenerHalfW > aPos.z() - kAnvilCrushHalfW
+                            && pz - listenerHalfW < aPos.z() + kAnvilCrushHalfW
+                            && py + listenerHeight > sweepLow - aHalfH
+                            && py < aPos.y() + aHalfH) {
                             // 击退方向 = 玩家 − 铁砧 水平归一（推离落点；退化 → (1,0) 兜底同箭模式）
-                            float kbX = px - e.pos.x(), kbZ = pz - e.pos.z();
+                            float kbX = px - aPos.x(), kbZ = pz - aPos.z();
                             const float klen = std::sqrt(kbX * kbX + kbZ * kbZ);
                             if (klen > 1e-3f) { kbX /= klen; kbZ /= klen; }
                             else { kbX = 1.0f; kbZ = 0.0f; }
                             emit mobAttackedPlayer(dmg, int(MobAnvil), kbX, kbZ);
-                            m_playerAnvilCrushSerial = e.spawnSerial; // 玩家侧同记账（review #28）
+                            m_playerAnvilCrushSerial = aSerial; // 玩家侧同记账（review #28）
                         }
                     }
                 }
@@ -5884,15 +5903,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 // 着地：在支撑方块上方一格放置 blockId（覆盖空气 / 水；t220 沙落水填堵水格）+ 标记移除。
                 //   t527：积雪层（blockId==SnowLayer）着地走 5 参数 setBlockFromEntity 带 state（保留层数 metadata）；
                 //   其余 FallingBlock（沙/圆石等）走 4 参数 state=0。
-                if (e.blockId == BlockRegistry::SnowLayer)
-                    world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId), quint8(e.blockState));
+                if (aBlockId == BlockRegistry::SnowLayer)
+                    world->setBlockFromEntity(cx, supportCellY + 1, cz, aBlockId, aBlockState);
                 else
-                    world->setBlockFromEntity(cx, supportCellY + 1, cz, quint8(e.blockId));
+                    world->setBlockFromEntity(cx, supportCellY + 1, cz, aBlockId);
                 // t794 铁砧着地：**恒还原铁砧方块**（不改损坏阶段 / 不变掉落物 —— 机制等价 MC 1.0 铁砧落地
                 //   不碎成物品，最多砸坏自己进下一阶段；本工程简化不做阶段推进，落地还原原阶段）+ 发
                 //   fallingBlockLanded（呈现层播重铁落地音）。
-                if (BlockRegistry::isAnvil(quint8(e.blockId)))
-                    emit fallingBlockLanded(cx, supportCellY + 1, cz, e.blockId);
+                if (BlockRegistry::isAnvil(aBlockId))
+                    emit fallingBlockLanded(cx, supportCellY + 1, cz, int(aBlockId));
                 toRemove.push_back(idx);
                 dirty = true;
             } else if (dropCellY >= 0) {
@@ -5908,12 +5927,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   - 其它不完整方块（半砖 / 火把等）→ 按 state+1 掉雪球（同玩家铲挖：每层 1 雪球；空手沙规则不适用
                 //     —— 塌落是系统事件非挖掘，直接给产出）。发 snowLayerCollapseDropped（itemId=SnowballId 字面
                 //     0x23D，count=层数）由呈现层 spawnItem（同 fallingBlockDropped 模式）。
-                if (e.blockId == BlockRegistry::SnowLayer) {
+                if (aBlockId == BlockRegistry::SnowLayer) {
                     const quint8 below = world->blockAt(cx, dropCellY, cz);
                     if (below == BlockRegistry::SnowLayer) {
                         // 叠层合并：下方 state + 携带 state+1 层（state 0..7 = 1..8 层）；clamp 到 8。
                         const int belowLayers = int(world->stateAt(cx, dropCellY, cz)) + 1;
-                        const int carryLayers = int(e.blockState) + 1;
+                        const int carryLayers = int(aBlockState) + 1;
                         const int total = std::min(belowLayers + carryLayers,
                                                    int(BlockRegistry::SnowLayerStageMax) + 1);
                         // 写回合并层数（-1 回 state 编码）。setBlockFromEntity occ 守卫会拒（下方非 air）→ 用
@@ -5927,23 +5946,23 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                             emit snowLayerCollapseDropped(cx, dropCellY + 1, cz, 0x23D, overflow);
                     } else {
                         // 其它不完整方块（半砖 / 火把…）→ 全部层数掉雪球（state+1 个，同铲挖语义）。
-                        const int layers = std::min(int(e.blockState) + 1, int(BlockRegistry::SnowLayerStageMax) + 1);
+                        const int layers = std::min(int(aBlockState) + 1, int(BlockRegistry::SnowLayerStageMax) + 1);
                         emit snowLayerCollapseDropped(cx, dropCellY + 1, cz, 0x23D, layers);
                     }
                     toRemove.push_back(idx);
                     dirty = true;
-                } else if (BlockRegistry::isAnvil(quint8(e.blockId))) {
+                } else if (BlockRegistry::isAnvil(aBlockId)) {
                     // t794 铁砧落不完整方块（火把 / 半砖 / 雪层…）上：**还原铁砧方块**于该方块上方一格 ——
                     //   与沙 t220「落部分方块碎成掉落物」语义分叉（机制等价 MC 1.0 铁砧落任何实体上都还原
                     //   方块，不碎成物品；不改损坏阶段，落地恒还原原阶段。浮在部分方块上方不二次坍落 ——
                     //   setBlockFromEntity 直写不经 checkGravityBlockOnEdit，破掉那格支撑才会再落，无死循环）。
                     //   occ 守卫内（该格 air/水，列扫保证；被占罕见时静默消失，同沙兜底）+ 落地音事件。
-                    world->setBlockFromEntity(cx, dropCellY + 1, cz, quint8(e.blockId));
-                    emit fallingBlockLanded(cx, dropCellY + 1, cz, e.blockId);
+                    world->setBlockFromEntity(cx, dropCellY + 1, cz, aBlockId);
+                    emit fallingBlockLanded(cx, dropCellY + 1, cz, int(aBlockId));
                     toRemove.push_back(idx);
                     dirty = true;
                 } else {
-                    emit fallingBlockDropped(cx, dropCellY + 1, cz, e.blockId);
+                    emit fallingBlockDropped(cx, dropCellY + 1, cz, int(aBlockId));
                     toRemove.push_back(idx);
                     dirty = true;
                 }
@@ -5951,9 +5970,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 // 全列无支撑且已跌出世界底部 → 移除（防永久下落；正常世界 y=0 有石头层不触发）。
                 toRemove.push_back(idx);
                 dirty = true;
-            } else if (newY != e.pos.y()) {
-                e.pos.setY(newY); // 继续自由下落（穿过 air / 水）
-                dirty = true;
+            } else {
+                // B-M1：本分支写回实体（唯一写点）→ 上方铁砧砸伤段的 emit 可能已 realloc，**重取引用**再
+                //   读写（快照管只读面、重取管写回；非铁砧路径无 emit 窗口，重取 == 原引用，零行为差）。
+                Entity &eNow = m_entities[size_t(idx)];
+                if (newY != eNow.pos.y()) {
+                    eNow.pos.setY(newY); // 继续自由下落（穿过 air / 水）
+                    dirty = true;
+                }
             }
             continue; // 不走 Mob 的 AI / resting / 重力逻辑
         }

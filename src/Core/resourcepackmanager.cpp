@@ -1722,15 +1722,28 @@ void ensureBuiltLocked()
     //   （playerSkinSource 落盘成功后）——从 64×64 包切到 64×32 包走直返不落盘也不清理，旧 _r*.png 与
     //   legacy 文件永久残留。挪到本 reset 段（持锁必经：首次构建 / 每次 apply() 强制重建都过此处）：重建时
     //   全部旧世代 skin 派生文件必是陈旧派生物（文件名嵌 revision、新世代必换名；64×32 直返族更是全代不
-    //   再落盘）→ 无差别清（含 t731 期无后缀 legacy 旧名；前缀专属本族不波及 leather/mobhead 等邻族）。
+    //   再落盘）→ 无差别清（含 t731 期无后缀 legacy 旧名；review-r1913-final 起清扫面扩至全部落盘派生族，
+    //   逐前缀各清各的、互不误伤，见下方块内注释）。
     //   已进显存的旧图不受删除影响（像素已驻留，URL 已随世代/查询串变化重绑）。
     {
         const QString skinDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         if (!skinDir.isEmpty()) {
-            const QStringList staleSkins = QDir(skinDir).entryList(
-                    { QStringLiteral("voxelsandbox_rp_skin_*.png") }, QDir::Files);
-            for (const QString &f : staleSkins)
-                QFile::remove(QDir(skinDir).absoluteFilePath(f));
+            // review-r1913-final A-M1 + A-L3：reset 段无差别清扫扩到**全部落盘派生缓存族**（逐前缀，不波及
+            //   邻族）：skin 族既有 + 皮革两族（图标 voxelsandbox_rp_leather_<id> / 层贴图 _leather_layer_<n>，
+            //   A-M1 起文件名挂 _r 世代，apply() 清缓存重染落新名 → 旧代必残留）+ mobhead / 羊合成脸 / 夜行者
+            //   下巴（A-L3：旧版逐版清理挂「生成成功后」，包缺贴图生成失败的 mobType 其 _r 旧代永久残留——
+            //   此处兜底；缓存路径表已在上方逐项 clear，无 URL 引用悬空，纯磁盘卫生）。
+            const char *stalePatterns[] = {
+                "voxelsandbox_rp_skin_*.png",
+                "voxelsandbox_rp_leather_*.png",
+                "voxelsandbox_rp_mobhead_*.png",
+                "voxelsandbox_rp_sheep_woolface_*.png",
+                "voxelsandbox_rp_nightwalker_chin_*.png" };
+            for (const char *pat : stalePatterns) {
+                const QStringList stale = QDir(skinDir).entryList({ QString::fromLatin1(pat) }, QDir::Files);
+                for (const QString &f : stale)
+                    QFile::remove(QDir(skinDir).absoluteFilePath(f));
+            }
         }
     }
     s.skinPackFiles.clear(); // t731 reset pack 皮肤裁切缓存（pack 切换 / 重解析 → 重裁）
@@ -2376,28 +2389,31 @@ QString ResourcePackManager::itemIconSource(int itemId) const
     // R19 B1 皮革护甲 retint（同床 retint 机制）：pack 的 leather_helmet/chestplate/leggings/boots.png
     //   （0x300..0x303，皮革 tier 四件）是白底可染色 base（MC 皮革染色 = 灰白 base × 染料；未叠皮革棕 overlay）
     //   → 直接用即显白底。命中皮革 tier 时重染成皮革棕梯度（retintLeatherTemplate，与 MaterialIcon drawArmor
-    //   皮革 palettes[0] 同色板）落盘 voxelsandbox_rp_leather_<id>.png，返染色图 file:// 路径 → 皮革护甲图标显皮革棕。
+    //   皮革 palettes[0] 同色板）落盘 voxelsandbox_rp_leather_<id>_r<rev>.png，返染色图 file:// 路径 → 皮革护甲图标显皮革棕。
     //   命中缓存直接返（首次染色后落盘，后续 O(1)）。非皮革 tier（铁/金/钻石/铜）原样返 pack 图，不 retint。
     if (itemId >= 0x300 && itemId <= 0x303) {
-        // 命中缓存（pack 未重解析期间稳定）→ 直接返。
+        // 命中缓存（pack 未重解析期间稳定）→ 直接返。R19.13 终审 A-M1：落盘文件名挂 _r<revision>
+        //   （skin / mobhead 先例）——apply() 重建清缓存后重染落**新世代名**，file:/// URL 随世代变 → QML
+        //   重读新像素（旧版同名覆盖、URL 不变 → 原地换包后皮革图标陈旧直到重启，Review #12/#5 同款病）。
         const auto it = s.leatherIconFiles.constFind(itemId);
         if (it != s.leatherIconFiles.constEnd() && QFile::exists(it.value()))
             return QStringLiteral("file:///") + it.value();
         // 加载皮革 base 贴图并重染成皮革棕。解码失败 → 回退返未染色的白底 base（可接受降级，仍能辨识护甲形状）。
+        //   回退直返统一走 packFileUrl 挂 revision 查询串（A-M1：与五族直返同口径防陈旧）。
         QImage leather(path);
         if (leather.isNull())
-            return QStringLiteral("file:///") + path;
+            return packFileUrl(path, s.revision);
         leather = leather.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         retintLeatherTemplate(leather);
         // 落盘到 AppLocalDataLocation（与 atlasFile 同目录，ensureBuiltLocked 已 mkpath；此处再保底）。
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         if (dir.isEmpty())
-            return QStringLiteral("file:///") + path; // 无可写目录 → 回退白底（不染色，降级）
+            return packFileUrl(path, s.revision); // 无可写目录 → 回退白底（不染色，降级）
         QDir().mkpath(dir);
         const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_leather_%1.png").arg(itemId));
+            QStringLiteral("voxelsandbox_rp_leather_%1_r%2.png").arg(itemId).arg(s.revision));
         if (!leather.save(out, "PNG"))
-            return QStringLiteral("file:///") + path; // 落盘失败 → 回退白底（降级）
+            return packFileUrl(path, s.revision); // 落盘失败 → 回退白底（降级）
         // 记缓存（mutable：s 是 state() 引用但 leatherIconFiles 需写；stateMutex 已持锁，安全）。
         state().leatherIconFiles.insert(itemId, out);
         return QStringLiteral("file:///") + out;
@@ -3125,8 +3141,8 @@ int ResourcePackManager::entityTextureWidth(const QString &kind) const
 //   等价恒走回退，t718 已产程序铜层 armor_copper_*）。
 //   t718 接 TODO：皮革 pack 层是灰白可染色 base（demo 包实测 leather_layer_*.png 主体 (202,202,202) 灰白，
 //   1.8.2 包未叠棕 overlay）→ 3D 直接用即显白。命中皮革 tier（0）时按 retintLeatherTemplate 染皮革棕梯度
-//   （同 itemIconSource 皮革图标路径 R19 B1），落盘 voxelsandbox_rp_leather_layer_<n>.png 缓存（apply() 重建时
-//   随 leatherIconFiles 一并清空重染）。解码/落盘失败 → 回退原样返回白底 base（可辨识护甲形状的降级）。
+//   （同 itemIconSource 皮革图标路径 R19 B1），落盘 voxelsandbox_rp_leather_layer_<n>_r<rev>.png 缓存（apply()
+//   重建时随 leatherIconFiles 一并清空重染；文件名嵌 revision → 换包后 URL 变、QML 重读）。解码/落盘失败 → 回退原样返回白底 base（可辨识护甲形状的降级）。
 //   红线 §9：仅运行期读本地 gitignored pack PNG，不 bake 进 qrc/VCS。
 QString ResourcePackManager::armorLayerSource(int tier, int layer) const
 {
@@ -3147,23 +3163,25 @@ QString ResourcePackManager::armorLayerSource(int tier, int layer) const
     if (tier != 0)
         return packFileUrl(p, s.revision);
     // 皮革：灰白 base 染棕。缓存键 = tier*10+layer（0x0 段；与 leatherIconFiles 的 0x300..0x303 段不冲突）。
+    //   R19.13 终审 A-M1：落盘文件名挂 _r<revision>（同 itemIconSource 皮革段 / skin / mobhead 先例）——
+    //   apply() 重建后新世代落新名，URL 变 → QML Texture 重读；回退直返统一 packFileUrl 挂查询串。
     const int key = tier * 10 + layer;
     const auto cached = s.leatherIconFiles.constFind(key);
     if (cached != s.leatherIconFiles.constEnd() && QFile::exists(cached.value()))
         return QStringLiteral("file:///") + cached.value();
     QImage leather(p);
     if (leather.isNull())
-        return QStringLiteral("file:///") + p; // 解码失败 → 回退白底（降级）
+        return packFileUrl(p, s.revision); // 解码失败 → 回退白底（降级）
     leather = leather.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     retintLeatherTemplate(leather);
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (dir.isEmpty())
-        return QStringLiteral("file:///") + p; // 无可写目录 → 回退白底（降级）
+        return packFileUrl(p, s.revision); // 无可写目录 → 回退白底（降级）
     QDir().mkpath(dir);
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_leather_layer_%1.png").arg(layer));
+            QStringLiteral("voxelsandbox_rp_leather_layer_%1_r%2.png").arg(layer).arg(s.revision));
     if (!leather.save(out, "PNG"))
-        return QStringLiteral("file:///") + p; // 落盘失败 → 回退白底（降级）
+        return packFileUrl(p, s.revision); // 落盘失败 → 回退白底（降级）
     s.leatherIconFiles.insert(key, out); // stateMutex 已持锁，安全
     return QStringLiteral("file:///") + out;
 }

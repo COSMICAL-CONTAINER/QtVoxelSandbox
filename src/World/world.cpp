@@ -2363,22 +2363,24 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 
 // t507 setBlock 编辑后花 / 蘑菇失撑复检（见 world.h 头注释）。机制等价 MC 1.0 花 / 蘑菇失去下方支撑即掉自身
 //   （同甘蔗 / 仙人掌 / 枯灌木支撑校验族）。花 / 蘑菇恒单格（无柱状生长，与 Cactus dropCactusColumn 不同），故
-//   仅清正上方 1 格。破下方支撑（id==Air 且 oldId 非 flower/mushroom）→ 正上方是 Flower/Mushroom/BrownMushroom
-//   → 静默清 Air + emit 破块反馈 + 掉落物（dropId=自身）+ 重 flood 光。玩家直破花 / 蘑菇（oldId==flower/mushroom
-//   → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身方块），避免双重掉落。经 isFlower / isMushroom 单一
-//   权威谓词覆盖花 4 色 + 红 / 白两蘑菇（不各处自写 id 判定，同 isBed / isIce 段不连续并判模式）。
+//   仅清正上方 1 格。破下方支撑（id==Air 且 oldId 非族内植物）→ 正上方是族内植物（花 / 蘑菇 / 草丛）
+//   → 静默清 Air + emit 破块反馈 + 掉落物（dropId=自身）+ 重 flood 光。玩家直破族内植物（oldId∈族
+//   → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身方块），避免双重掉落。族成员判定经
+//   BlockRegistry::isGroundPlant 单一权威谓词（t847 收口 R19.13 终审 C-M1：t847 只把草丛收进放置预检、
+//   失撑族没跟 → 挖掉下方泥土后草丛悬空永存；放置 / 失撑两面共用谓词锁族成员集，加族必两面齐动）。
+//   同族既有口径（登记不扩）：本钩子只对 id==Air 的编辑生效——支撑被置换成非合法着地面（锄地变耕地）
+//   不掉，花 / 蘑菇自 t507 起同口径（保持同族统一，置换面留后续整族一批）。
 //   t571 标注【自然失撑掉落：恒发（含创造）】。
 void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
-    // 仅本格被破为 Air 且被破块非花 / 蘑菇时，查正上方是否花 / 蘑菇失撑。（被破块本身是花 / 蘑菇时跳过 ——
-    //   玩家直破花 / 蘑菇的掉落由通用 finishMiningAt drop 路径负责，避免双重掉落。）
-    if (id != BlockRegistry::Air || BlockRegistry::isFlower(oldId)
-        || BlockRegistry::isMushroom(oldId)) return;
+    // 仅本格被破为 Air 且被破块非族内植物时，查正上方是否族内植物失撑。（被破块本身是族内植物时跳过 ——
+    //   玩家直破花 / 蘑菇 / 草丛的掉落由通用 finishMiningAt drop 路径负责，避免双重掉落。）
+    if (id != BlockRegistry::Air || BlockRegistry::isGroundPlant(oldId)) return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     const quint8 above = m_chunks.blockAt(x, by, z);
-    if (!BlockRegistry::isFlower(above) && !BlockRegistry::isMushroom(above)) return;
+    if (!BlockRegistry::isGroundPlant(above)) return;
     // 花 / 蘑菇失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
     m_chunks.setBlock(x, by, z, BlockRegistry::Air);
     noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 花 / 蘑菇非生长方块 → no-op，保持一致
@@ -2714,8 +2716,8 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
     //   末尾批量收口覆盖」对 dropGravityColumn 成立（emit 在循环后）但对 clearBlockSilent 不成立（其
     //   worldChanged/clearAllDirty 在 recheck **之前**已收口）→ 红石火把格直写标脏后错过本次重建信号 =
     //   视觉幽灵火把残留（掉落物已生成，一把火把两处可见）。caller 侧多发一次幂等 worldChanged 无害
-    //   （dropGravityColumn 柱顶至多掉 1 趟 → 至多 1 次叠加 emit，同 destroySphereSilent 逐格调 check*
-    //   的既有先例；clearBlockSilent 的主 emit 在前、本 emit 在后 → 后者才是携带火把清格的重建信号）。
+    //   （每实际掉落格至多 1 次自 emit——check 族柱顶 ≤1 趟 + 火把族逐侧挂格各 1 次；同 destroySphereSilent
+    //   逐格调 check* 的既有先例；clearBlockSilent 的主 emit 在前、本 emit 在后 → 后者才是携带火把清格的重建信号）。
     if (torchDropped) {
         emit worldChanged();      // 驱动 mesh 重建（火把段消失）
         m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 check* 兄弟末尾）
