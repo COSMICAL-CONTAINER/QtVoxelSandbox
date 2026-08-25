@@ -11983,6 +11983,183 @@ Item {
                              "take-out keeps it, re-entry rejected";
     }
 
+    // ── t873 书架→附魔台字流真链探针（用户「新版仍不见文字流」实机二查；t823 冻结镜像的实装版）──
+    // 背景：t823 用**冻结镜像**（C++ 复刻 rescanPairs 逐行语义）钉了规则口径，但镜像 ≠ 实装 —— 用户换新
+    //   exe 仍报看不见，链路断点只剩「真 QML 组件从未被自动化执行」这一跳。本探针照 t874 真链模式：
+    //   QQmlEngine 直载源树 EnchantGlyphFlow.qml（无相对导入 / 无 VoxelSandbox import → 免临时目录改写，
+    //   仅 QtQuick/QtQuick3D 模块导入），真 World 独立小世界 + 真 ListModel 台表按 Main.qml
+    //   glyphFlowLoader.onLoaded 同款注入（world/tableModel/active/editRev；camNode 留 null —— 组件对
+    //   null cam 本就全通距离门，真实应用由 billboard 分支兜底；tableCount 静态注入场景间以 editRev
+    //   显式触碰重扫，真实应用拆台也走 worldEditRev++ 同一触发面）。断言四态：
+    //   ① 净空基线 0 对、空表发射零计数；② 单层地面满环带 16 书架 → 真 QML rescanPairs 产 16 对（与
+    //   t823 镜像/权威 16/15 同 rig 口径互证——此处钉的是 QML **实装**本身）；③ 连发 12 颗 →
+    //   emittedTotal/liveCount 计数一致；④ 堵半步 -1 对 + 删台归零且发射器停摆（500ms Timer running
+    //   翻假——「无对即停摆」性能红线的实机钉子）。组件头注释宣称的「数据链完好」自此有自动化实证；
+    //   渲染侧（字形贴图/尺寸/billboard）属 qml.exe/肉眼域，由 [t873] 运行期日志 + 实测文档覆盖。
+    {
+        bool ok873 = true;
+        QString diag873;
+        World wG;
+        wG.setWidth(40); wG.setDepth(40); wG.setHeight(48); wG.setSeed(21);
+        // 净空 5×5 扫描（y 带 44/45，同 t823：世界高 48 → y∈[0,47]；含半步格）。
+        const int gY = 44;
+        int gx = -1, gz = -1;
+        const auto areaClear = [&](int x, int z) {
+            for (int dy = 0; dy <= 1; ++dy)
+                for (int dx = -2; dx <= 2; ++dx)
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                        if (wG.blockAt(x + dx, gY + dy, z + dz) != BR::Air) return false;
+                        if (wG.blockAt(x + dx / 2, gY + dy, z + dz / 2) != BR::Air) return false;
+                    }
+            return true;
+        };
+        for (int zz = 4; zz + 2 < 36 && gx < 0; zz += 2)
+            for (int xx = 4; xx + 2 < 36 && gx < 0; xx += 2)
+                if (areaClear(xx, zz)) { gx = xx; gz = zz; }
+        if (gx < 0) {
+            ok873 = false;
+            diag873 = QStringLiteral("no clear 5x5 rig at y=44/45");
+        } else {
+            QQmlEngine gEngine;
+            // 真源树组件直载（base URL = 源文件 → 无相对导入需解析，模块导入走 Qt 安装 qml 目录）。
+            const QString glyphPath = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                          .filePath(QStringLiteral("../src/ui/EnchantGlyphFlow.qml"));
+            // 真 ListModel 台表（Main.qml enchantTablePositions 运行期同类物）：经桩根的 JS 助手增删行，
+            //   避免 C++ 直调 QQmlListModel 的 QJSValue 签名猜测。组件只消费 tableModel.count/.get(i)，
+            //   与真实注入面同构。
+            QQmlComponent stubComp(&gEngine);
+            stubComp.setData(QByteArrayLiteral(
+                                 "import QtQuick\n"
+                                 "Item {\n"
+                                 "    property alias tableModel: lm\n"
+                                 "    ListModel { id: lm }\n"
+                                 "    function addEntry(x, y, z) { lm.append({x: x, y: y, z: z}) }\n"
+                                 "    function removeFirstRow() { lm.remove(0, 1) }\n"
+                                 "}\n"), QUrl());
+            QQmlComponent glyphComp(&gEngine, QUrl::fromLocalFile(glyphPath));
+            QObject *stub = nullptr;
+            QObject *gRoot = nullptr;
+            if (stubComp.isError()) {
+                ok873 = false;
+                diag873 = QStringLiteral("table stub load: ") + stubComp.errorString();
+            } else if (glyphComp.isError()) {
+                ok873 = false;
+                diag873 = QStringLiteral("EnchantGlyphFlow load: ") + glyphComp.errorString();
+            } else {
+                stub = stubComp.create();
+                gRoot = glyphComp.create();
+                if (!stub || !gRoot) {
+                    ok873 = false;
+                    diag873 = QStringLiteral("create failed (stub=%1 glyph=%2)")
+                                  .arg(stub != nullptr).arg(gRoot != nullptr);
+                } else {
+                    stub->setParent(&gEngine);
+                    gRoot->setParent(&gEngine);
+                    // Main.qml glyphFlowLoader.onLoaded 同款注入。
+                    gRoot->setProperty("world", QVariant::fromValue(&wG));
+                    gRoot->setProperty("tableModel",
+                                       QVariant::fromValue(stub->property("tableModel").value<QObject *>()));
+                    gRoot->setProperty("active", true);
+
+                    auto addTable = [&](int x, int y, int z) {
+                        QMetaObject::invokeMethod(stub, "addEntry", Q_ARG(QVariant, x),
+                                                  Q_ARG(QVariant, y), Q_ARG(QVariant, z));
+                    };
+                    auto pairsOf = [&]() -> int {
+                        return gRoot->property("pairs").toList().size();
+                    };
+                    auto touchRescan = [&]() {
+                        gRoot->setProperty("editRev", gRoot->property("editRev").toInt() + 1);
+                    };
+                    // 发射器停摆实证：组件内 500ms 那颗 Timer 即 spawnTimer（tickTimer 是 20ms）——
+                    //   running 绑定 active && pairs.length>0，删台归零后应翻假。
+                    auto spawnTimerRunning = [&]() -> bool {
+                        const QList<QObject *> kids = gRoot->findChildren<QObject *>();
+                        for (QObject *k : kids) {
+                            const QVariant iv = k->property("interval");
+                            if (iv.isValid() && iv.toInt() == 500) {
+                                const QVariant rv = k->property("running");
+                                if (rv.isValid())
+                                    return rv.toBool();
+                            }
+                        }
+                        return false; // 找不到 Timer 视为停摆（不误报，加载失败另有 FAIL 行）
+                    };
+
+                    // ① 净空基线：0 对 + 空表发射零计数。
+                    addTable(gx, gY, gz);
+                    touchRescan();
+                    const int p0 = pairsOf();
+                    QMetaObject::invokeMethod(gRoot, "spawnGlyph",
+                                              Q_ARG(QVariant, QVariant(QVariantList())));
+                    const bool spawnEmptyNoop = gRoot->property("emittedTotal").toInt() == 0;
+                    if (p0 != 0 || !spawnEmptyNoop) {
+                        ok873 = false;
+                        diag873 += QStringLiteral("(a) baseline pairs=%1 noop=%2; ")
+                                       .arg(p0).arg(spawnEmptyNoop);
+                    }
+
+                    // ② 单层地面满环带 16 书架（半步格已净空）→ 真 QML rescanPairs 应产 16 对。
+                    for (int dx = -2; dx <= 2; ++dx)
+                        for (int dz = -2; dz <= 2; ++dz)
+                            if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                                wG.setBlock(gx + dx, gY, gz + dz, BR::Bookshelf, 0);
+                    touchRescan();
+                    const int p16 = pairsOf();
+                    if (p16 != 16) {
+                        ok873 = false;
+                        diag873 += QStringLiteral("(b) full-ring pairs=%1 want 16; ").arg(p16);
+                    }
+
+                    // ③ 连发 12 颗：emittedTotal/liveCount 与池占用同步走。
+                    const QVariantList pairArr = gRoot->property("pairs").toList();
+                    for (int i = 0; i < 12; ++i)
+                        QMetaObject::invokeMethod(gRoot, "spawnGlyph", Q_ARG(QVariant, QVariant(pairArr)));
+                    const int em12 = gRoot->property("emittedTotal").toInt();
+                    const int live12 = gRoot->property("liveCount").toInt();
+                    if (em12 != 12 || live12 != 12) {
+                        ok873 = false;
+                        diag873 += QStringLiteral("(c) emitted=%1 live=%2 want 12/12; ").arg(em12).arg(live12);
+                    }
+
+                    // ④ 堵一角书架半步格 → 重扫 -1 对（视觉与档位同步减，t823 ③ 同口径钉到实装）；
+                    //    删台行 → 归零 + 发射器停摆（拆台即停承诺）。
+                    wG.setBlock(gx - 1, gY, gz - 1, BR::Cobble, 0);
+                    touchRescan();
+                    const int pBlocked = pairsOf();
+                    wG.setBlock(gx - 1, gY, gz - 1, BR::Air, 0);
+                    QMetaObject::invokeMethod(stub, "removeFirstRow");
+                    touchRescan();
+                    const int pGone = pairsOf();
+                    const bool emitterIdle = !spawnTimerRunning();
+                    if (pBlocked != 15 || pGone != 0 || !emitterIdle) {
+                        ok873 = false;
+                        diag873 += QStringLiteral("(d) blocked=%1 gone=%2 idle=%3; ")
+                                       .arg(pBlocked).arg(pGone).arg(emitterIdle);
+                    }
+                }
+            }
+            // 好公民：复原环带（探针不留脏 rig；独立小世界随作用域析构，此步为对称纪律）。
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                        wG.setBlock(gx + dx, gY, gz + dz, BR::Air, 0);
+        }
+        if (!ok873)
+            ++totalFail;
+        if (!diag873.isEmpty())
+            qInfo().noquote() << "  [t873 diag]" << diag873;
+        qInfo().noquote() << (ok873 ? "PASS" : "FAIL")
+                          << "| t873 glyph-flow real-chain probe (real QQmlEngine loads source-tree "
+                             "EnchantGlyphFlow.qml x real World rig x injected ListModel): empty baseline "
+                             "0 pairs + no-op spawn, single ground ring -> real QML rescanPairs yields 16 "
+                             "(t823 mirror/authority 16/15 same rig cross-checked against the actual "
+                             "implementation), 12 spawns tracked by emittedTotal/liveCount, blocked "
+                             "half-step -1 pair, table-row removal -> zero pairs + spawn timer idle "
+                             "(data chain proven live; pixel-side remains qml.exe/manual)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
