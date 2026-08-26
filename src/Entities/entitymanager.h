@@ -42,11 +42,13 @@
 //     撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角。机制等价 MC passive mob 的「游荡 + 停驻」
 //     循环（随机选向 + 时间片），非确定性（生物 AI 非世界生成，不涉 §2-K）。
 //   - **t241 行走动画相位 walkPhase**：tick 内 moveSpeed>0（行走）时推进 walkPhase（fmod 2π）；idle / 吃草 /
-//     死亡 → 冻结（腿停于上次相位）。walkPhaseAt(i) 供 QML 驱动 MobModel 腿摆（每 active 帧 bump revision 让
-//     绑定刷新；idle 时 EntityManager 返回同一 float → MobModel.setWalkPhase 早退不重建）。
-//   - **t241 羊吃草 AI**（仅 mobType==MobSheep）：idle 且扫描冷却到 → 检测前方一格草丛（TallGrass），找到则
+//     死亡 → **归零**（t897 ②：腿回中立位；旧「冻结于上次相位」让停步 mob 腿卡半步中间）。walkPhaseAt(i)
+//     供 QML 驱动 MobModel 腿摆（每 active 帧 bump revision 让绑定刷新；相位不变时 EntityManager 返回同一
+//     float → MobModel.setWalkPhase 早退不重建）。
+//   - **t241/t897 羊吃草 AI**（仅 mobType==MobSheep）：idle 且扫描冷却到 → 检测**脚下草方块**（自身列支撑格
+//     ==Grass；t897 ① 从「前方一格草丛 TallGrass」收紧——纯草地无草丛也吃、朝向不再参与），找到则
 //     进入吃草周期（eatTimer=kEatDuration，期间强制 idle 站立 + 头部俯仰动画）。周期推进到 apply 阈值时
-//     消耗草丛：草丛→空气 + 其下草方块→泥土（机制等价 MC 羊吃草：草丛消失、下方草地变泥土）。写入走
+//     消耗脚下草方块：Grass→泥土（机制等价 MC 1.0 羊吃草方块：草地变泥土；长毛归 t300 独立链）。写入走
 //     World::setWaterSilent（通用静默 state 写入口；非玩家破块 → 不发 broken/placed，免粒子 / 音 / 掉落噪音，
 //     同水流蔓延 / 作物生长模式）。headPitchAt(i) 据吃草进度返 sin(πp) 包络（负值=低头），供 QML 驱动羊头俯仰。
 //   - **血量 / 受击 / 死亡态**：maxHealth/health（默认 10 = MC 1.0 猪/牛/羊 5 心）；damageEntity(i, amount)
@@ -1804,8 +1806,9 @@ private:
     static constexpr float kEatDuration = 1.2f;    // 吃草周期总时长（秒；头低→嚼→抬 包络）；期间强制 idle 站立
     static constexpr float kEatApplyAt  = 0.5f;    // 周期内消耗草丛的时刻（秒；近 sin(πp) 包络峰 → 头最低时嚼）
     static constexpr float kEatCooldown = 2.0f;    // 吃完一棵后到下次扫描的冷却（秒；防连续吃完一片）
-    static constexpr float kEatScanInterval = 1.0f; // 空扫描（前方无草）后到下次扫描的间隔（秒；节流扫描开销）
-    static constexpr float kEatReach = 0.7f;       // 检测前方草丛的水平距离（block；头部前方 ~ 半格多）
+    static constexpr float kEatScanInterval = 1.0f; // 空扫描（脚下非草方块）后到下次扫描的间隔（秒；节流扫描开销）
+    // （t897 ① kEatReach 前向外推退役：吃草目标从「身前草丛」收紧为「脚下草方块」—— 自身列无前向偏移，
+    //   blockAt 越界自身返 Air ≠ Grass 天然安全。）
     static constexpr float kEatHeadPitch = -0.6f;  // 吃草头部俯仰峰值（弧度，负=低头；headPitchAt 据 sin(πp) 调制）
     // t300 剪羊毛后吃草方块重新长毛的冷却 / 扫描常量（机制等价 MC 1.0「羊吃草方块重新长毛」；数值为本工程小
     //   世界量身调，非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）：
