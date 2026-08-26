@@ -250,6 +250,12 @@ load-time remap（读旧 id 经映射表换新 id）；本任务的映射层（`
 | 0x258 | 600 | `dye_green` | 绿色染料 | 351（metadata 2；熔炉烧仙人掌，t788） |
 | 0x259 | 601 | `dye_red` | 红色染料 | 351（metadata 1；红花破坏掉落） |
 | 0x25A | 602 | `dye_black` | 黑色染料 | 351（metadata 0） |
+| 0x25C | 604 | `fire_charge` | 烈焰弹 | 385（fire charge，1.2+；本工程对齐机制非版本面） |
+
+> t891② 烈焰弹（材料段 0x25C，熟鱼 0x25B 之上首个空闲号）：燃烬粉 + 煤炭/木炭 + 火药 → **3 发**（无序 2×2，
+> 背包 / 工作台均可）；右键发射火球（复用燃烬者火球投射链）撞击**必生火**（命中格可燃 → 直燃进燃烧态；
+> 非可燃 → 来向空气格立地火）；玩家侧火球不自击（所有者豁免）。可堆叠 64；图标 MaterialIcon 自绘
+> drawFireCharge（暗壳火核球，§9 原创）+ pack 映射 fire_charge.png；mcMaterialId 越表界 → -1 → 回退自绘。
 
 > t393：`redstone` / `saddle` / `name_tag` / `enchanted_book` 为战利品表（loot table）专用物品 —— 地牢箱首开
 > 填充 + 预留钓鱼（t401）共用 `LootTable`（src/Game/loottable.*）。生存非合成获得（仅地牢战利品 / 创造调色板）。
