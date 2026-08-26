@@ -14786,6 +14786,73 @@ Item {
                              "after the night/monster semantic gates)";
     }
 
+    // ── P-t900 垃圾桶语义终版（VM 行为级 + 源码钉；用户 8-25 定稿）──
+    //   定稿原话：「普通左键=清光标持有（t839 语义保持）+ shift+左键=清空整个背包」。QML 点击路由不可由
+    //   本 harness 直驱（Inventory.qml 需全模块场景）→ 双腿：
+    //   (a) 行为级：Hotbar VM 填满（hotbar 9 + main 27 + 光标持有）→ 执行 QML shift 分支的同序清空序列
+    //       （setStack 9 + mainSetStack 27 + setHeldBlock(0)）→ 全槽读空（证明该调用面足以清空整个背包，
+    //       无隐藏残留槽态）；普通左键两档语义（清光标 / 选中槽单格）为 t839 既有语义，本探针不重复钉。
+    //   (b) 源码钉：Inventory.qml 销毁槽块（滤注释）——MouseArea（TapHandler 不分辨修饰键，t700 教训）+
+    //       ShiftModifier 分流分支含 9 槽 setStack 循环 + mainCount 槽 mainSetStack 循环 + 光标清空 +
+    //       普通左键两档（heldBlock 整组 / 选中槽单格）保留。
+    {
+        Hotbar hb;
+        for (int s = 0; s < 9; ++s) hb.setStack(s, int(BR::Cobble), 32);
+        for (int m = 0; m < hb.mainCount(); ++m) hb.mainSetStack(m, int(BR::Planks), 16);
+        hb.setHeldBlock(int(BR::Glass));
+        hb.setHeldCount(8);
+        // QML shift 分支同序清空序列（Inventory.qml 销毁槽 MouseArea onClicked ShiftModifier 支）。
+        for (int s = 0; s < 9; ++s) hb.setStack(s, 0, 0);
+        for (int m = 0; m < hb.mainCount(); ++m) hb.mainSetStack(m, 0, 0);
+        hb.setHeldBlock(0);
+        bool okA = hb.heldBlock() == 0 && hb.heldCount() == 0;
+        for (int s = 0; s < 9 && okA; ++s)
+            if (hb.blockIdAt(s) != 0 || hb.countAt(s) != 0) okA = false;
+        for (int m = 0; m < hb.mainCount() && okA; ++m)
+            if (hb.mainBlockIdAt(m) != 0 || hb.mainCountAt(m) != 0) okA = false;
+        if (!okA)
+            qInfo().noquote() << "  [t900 diag] held=" << hb.heldBlock()
+                              << " h0=" << hb.blockIdAt(0) << " m0=" << hb.mainBlockIdAt(0);
+
+        // (b) 源码钉（t879/t893 先例：断言销毁槽块的路由文本；锚定 destroyWrap 块而非全文件首
+        //     MouseArea——面板根遮罩自身也是 MouseArea）。
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile qf(root + QStringLiteral("/src/ui/Inventory.qml"));
+            const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+            const int i0 = t.indexOf(QStringLiteral("id: destroyWrap"));
+            if (i0 < 0) {
+                qInfo().noquote() << "  [t900 pin diag] destroyWrap block miss";
+            } else {
+                const QString seg = t.mid(i0, 4000); // 销毁槽块（图标 Canvas + 注释 + 点击处理器全在内，实测
+                                                      //   跨度 ~3.7k 字符；注释未滤 → 负向断言用元素声明形
+                                                      //   「TapHandler {」防注释文本误中）
+                okPin = seg.contains(QStringLiteral("MouseArea"))                       // TapHandler 不分辨修饰键（t700）→ MouseArea
+                        && seg.contains(QStringLiteral("mouse.modifiers & Qt.ShiftModifier")) // shift 分流分支
+                        && seg.contains(QStringLiteral("root.hotbar.mainSetStack(m, 0, 0)"))   // main 27 槽清空
+                        && seg.indexOf(QStringLiteral("setStack(s, 0, 0)"))
+                               < seg.indexOf(QStringLiteral("mainSetStack(m, 0, 0)"))  // hotbar 9 槽先行
+                        && seg.contains(QStringLiteral("root.hotbar.heldBlock = 0"))   // 光标清空 + 普通左键档①
+                        && seg.contains(QStringLiteral("root.hotbar.setStack(root.hotbar.selectedSlot, 0, 0)")) // 档②
+                        && !seg.contains(QStringLiteral("TapHandler {"));              // 旧事件源元素形态退役（块内）
+            }
+            if (!okPin)
+                qInfo().noquote() << "  [t900 pin diag] block found=" << (i0 >= 0)
+                                  << " seg checks failed";
+        }
+        const bool okT900 = okA && okPin;
+        if (!okT900) ++totalFail;
+        qInfo().noquote() << (okT900 ? "PASS" : "FAIL")
+                          << "| t900 trash-slot final semantics (user 8-25): plain left click keeps t839 tiers "
+                             "(cursor-held stack destroyed / selected single slot cleared when empty-handed), "
+                             "shift+left-click clears the ENTIRE inventory (behavioral leg proves the exact QML "
+                             "call sequence - 9 setStack + 27 mainSetStack + heldBlock reset - leaves zero "
+                             "residue in every slot read; source pin proves the MouseArea modifier split and "
+                             "retires the old TapHandler form - TapHandler cannot see modifiers, t700 lesson)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
