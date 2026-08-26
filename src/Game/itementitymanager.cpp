@@ -455,6 +455,8 @@ void ItemEntityManager::tick(qreal dt, World *world)
         // t271 瀑布：水格下方为空气 = 水柱下落 → 不上浮（随水柱下沉，落入下方水池后转浮水）。
         const bool waterfall = inWater
             && (cy - 1 < 0 || world->blockAt(cx, cy - 1, cz) == BlockRegistry::Air);
+        // review26 #2：resting 且复探仍有支撑 → 跳过重力分支但保走水平积分（见下方 resting 块）。
+        bool groundedRest = false;
 
         if (inWater) {
             // 水中 → 非着地（浮 / 随水柱下沉，resting 恒 false）。
@@ -545,12 +547,18 @@ void ItemEntityManager::tick(qreal dt, World *world)
             if (snapTop >= 0.0f) {
                 const float restY = snapTop + kRestOffset;
                 if (restY < e.pos.y() - 1e-3f) { e.pos.setY(restY); dirty = true; } // 下贴矮了的支撑面
-                continue; // 仍有支撑 → 保持静止
+                // review26 #2（下半）：有支撑的 resting 物品不再整段跳过 —— 残余水平速度仍走下方水平积分
+                //   + 支撑面摩擦（下方 t468 摩擦注释声明的设计行为：常规地面 ~0.5s 停、冰面数秒长滑；
+                //   旧 continue 让着地后滑动只剩落定那一拍 ≈ 「物品被钉在落点」的另一半根因，与上方
+                //   薄支撑脚位格豁免合成完整修法）。仅跳过重力分支（resting 无垂直运动）。
+                groundedRest = true;
+            } else {
+                e.resting = false; // 支撑消失（被挖 / 被水填 / 换无碰撞格）→ 续落（vy 已 0，从静止重新加速）
+                dirty = true;
             }
-            e.resting = false; // 支撑消失（被挖 / 被水填 / 换无碰撞格）→ 续落（vy 已 0，从静止重新加速）
-            dirty = true;
         }
 
+        if (!groundedRest) {
         // 重力 + 下移（vy 向下为负）。
         e.vy -= kGravity * float(dt);
         if (e.vy < -kMaxFall) e.vy = -kMaxFall;
@@ -585,6 +593,7 @@ void ItemEntityManager::tick(qreal dt, World *world)
             e.pos.setY(newY); // 自由下落（无命中）
             dirty = true;
         }
+        } // !groundedRest（resting 有支撑：免重力，仅水平积分 + 摩擦）
 
         // t468 水平速度积分 + 摩擦（spec「冰上丢弃物品会一直滑动往前」）。仅非水实体（水实体由 flow drift 处理
         //   水平；瀑布实体 inWater=true 也跳过）。生成时带初始弹出 vx/vz（机制等价 MC 破块 / 丢弃弹出），每 tick
@@ -593,11 +602,24 @@ void ItemEntityManager::tick(qreal dt, World *world)
         //   （保留水平动量，机制等价 MC 物品空中弧线）。停止阈值 0.05 防微观抖动永久微移。
         if (!inWater && (std::fabs(e.vx) > 1e-4f || std::fabs(e.vz) > 1e-4f)) {
             const int hcy = qFloor(e.pos.y()); // 当前中心所在格（水平碰撞用，垂直已解算）
+            // review26 #2（t867 半改态收尾）：薄支撑脚位格豁免（mob 侧 mobAabbHitsSolid 豁免的物品同根）。
+            //   静息中心 = 真顶 + kRestOffset(0.3)，顶面 <0.7 的薄支撑（压力板 1/16 / 睡莲 / 合活板门
+            //   0.1875 / 下半砖 0.5 / 床 0.31）中心落进支撑格内部 → hcy = 支撑格自身 → isCollidable 恒
+            //   true → 带初始弹出速度也滑不动（物品被「钉」在落点，冰面滑摩擦特性在这些支撑上同失效；
+            //   旧版 restY 恒 cell+1+0.3 → hcy=上方空气格可滑）。判据与 resting 复探同源（上方两格窗）：
+            //   目标格碰撞真顶（supportTopYAt 单一权威）≤ 当前底（pos.y−kRestOffset+0.05 容差）= 正站
+            //   其顶 → 不挡；走向满格墙仍挡（真顶 > 底），沿墙滑动语义不变。
+            const float hFeetY = e.pos.y() - kRestOffset;
+            auto hBlocked = [&](int bx, int bz) {
+                if (!world->isCollidable(bx, hcy, bz)) return false;
+                const float top = world->supportTopYAt(bx, hcy, bz);
+                return !(top >= 0.0f && top <= hFeetY + 0.05f);
+            };
             float px = e.pos.x(), pz = e.pos.z();
             const float tryX = px + e.vx * float(dt);
-            if (!world->isCollidable(qFloor(tryX), hcy, cz)) px = tryX;
+            if (!hBlocked(qFloor(tryX), cz)) px = tryX;
             const float tryZ = pz + e.vz * float(dt);
-            if (!world->isCollidable(qFloor(px), hcy, qFloor(tryZ))) pz = tryZ;
+            if (!hBlocked(qFloor(px), qFloor(tryZ))) pz = tryZ;
             if (px != e.pos.x() || pz != e.pos.z()) { e.pos.setX(px); e.pos.setZ(pz); dirty = true; }
             if (e.resting) {
                 // t867：支撑面格与 resting 复探同源两格窗（薄支撑中心落进支撑格内 → 支撑格 = 自身格；
