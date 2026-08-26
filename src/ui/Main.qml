@@ -353,7 +353,16 @@ Window {
     //   100ms 延迟对调试叠层零影响（人眼读字 ~200ms 起跳），但 main thread binding 工作量直降 6×。
     //   F3 未显（f3Visible=false）时 f3RefreshTimer.running=false → 零开销。
     function buildF3Text() {
-        // 同原 F3 text 绑定 body（不动逻辑，仅从「绑定 body」抽成「函数 body」）。
+        // t895 ② 主块严格对齐 MC 1.0 F3 行结构（逐行核对增删）：
+        //   L1 标题行带版本（MC "Minecraft 1.0.0" → "voxelsandbox (构建戳)" —— t813 版本戳语义保留并入
+        //      标题行，不再单独占一行）；L2 fps 行（MC "60 fps, 0 chunk updates" → 本工程无 chunk updates
+        //      计数、以 ms/frame 补位，不虚构数据）；L3-L5 x/y/z 三行（MC "x: 123.456 // 123 // 11" =
+        //      坐标 // 所在格 // 格内 16 取余；y 行 MC 口径显眼位（眼睛高度），第三段省 —— 本工程无
+        //      chunk-section 段内 y 语义不虚构）；L6 f 朝向行（MC "f: 2 (-Z) (yaw / pitch)"：基数码用 MC
+        //      表 +Z→0 / −X→1 / −Z→2 / +X→3，轴向前向取 yaw 水平投影主轴）；L7 biome 行（MC 1.0 有）；
+        //   L8 bl/ol 光照行（MC 脚下格方块光/天光原始等级 —— World Q_INVOKABLE 真值，无数据虚构）。
+        //   空行以下为本工程诊断尾段（PLAN §2-F 验收铁律：fps/pos/chunk 网格统计叠层不可删 —— MC 没有
+        //   但工程验收必需，取舍钉死：MC 行在前、工程诊断在后，读者先见 MC 标准面再见工程扩展面）。
         const vx = window.meshVertices, tr = window.meshTriangles
         const modeName = player.mode === PlayerController.Spectator ? "SPECTATOR"
                        : player.mode === PlayerController.Creative ? "CREATIVE" : "SURVIVAL"
@@ -366,30 +375,43 @@ Window {
         const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
         const drawEst = window.visibleSegmentCount + itemLive + mobLive + torchPositions.count + 6
         const meshMode = window.greedyMeshing ? "greedy" : "culled"
+        // MC x/y/z/f 行数据：眼位（MC F3 显眼位）；格 = floor；格内 16 取余（负坐标 JS & 补码同 MC 正余数）。
+        const ex = player.position.x, ey = player.position.y, ez = player.position.z
+        const bx = Math.floor(ex), by = Math.floor(ey), bz = Math.floor(ez)
         const fpx = Math.floor(player.feetPosition.x), fpz = Math.floor(player.feetPosition.z)
+        const fpy = Math.floor(player.feetPosition.y)
+        // 朝向：yaw 水平前向 (−sin, −cos)（lookDirection pitch=0 退化式）；主轴定基数码（MC 表）。
+        const yawRad = player.yaw * Math.PI / 180.0
+        const ffx = -Math.sin(yawRad), ffz = -Math.cos(yawRad)
+        let fIdx = 2, fAx = "-Z"
+        if (Math.abs(ffx) > Math.abs(ffz)) { fIdx = ffx > 0 ? 3 : 1; fAx = ffx > 0 ? "+X" : "-X" }
+        else { fIdx = ffz > 0 ? 0 : 2; fAx = ffz > 0 ? "+Z" : "-Z" }
         const biomeNames = ["Plains", "Hills", "Desert", "Forest", "Snowy", "Swamp"]
         const bid = theWorld.biomeIdAt(fpx, fpz)
         const biomeName = (bid >= 0 && bid < biomeNames.length) ? biomeNames[bid] : ("?" + bid)
+        const footBl = theWorld.blockLightAt(fpx, fpy, fpz), footOl = theWorld.skyLightAt(fpx, fpy, fpz)
         const dayPhase = worldClock.dayPhase
         const totalMin = ((12.0 + dayPhase * 24.0) % 24.0) * 60.0
         const hh = Math.floor(totalMin / 60.0), mm = Math.floor(totalMin % 60.0)
         const timeStr = (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm
-        return "voxelsandbox  [F3 debug]"
-             // t813 构建版本戳：F3 首行下方常驻「构建时间 @ git 短哈希」（编译期常量，
-             //   10Hz 节流路径内读单例属性，零额外开销）—— 用户复测报障前先核版本，
-             //   与主菜单右下角小字 / 启动日志 build 行同源（BuildInfo 单一权威）。
-             + "\nbuild: " + BuildInfo.full
-             + "\nfps: " + window.fps + "  frame: " + frameMs.toFixed(1) + "ms  cpu sim: " + player.simMs.toFixed(2) + "ms"
-             + "\npos: " + player.position.x.toFixed(2) + "  " + player.position.y.toFixed(2) + "  " + player.position.z.toFixed(2)
-             + "  (feet " + player.feetPosition.x.toFixed(1) + "," + player.feetPosition.y.toFixed(1) + "," + player.feetPosition.z.toFixed(1) + ")"
-             + "\nyaw: " + Math.round(player.yaw) + "  pitch: " + Math.round(player.pitch) + "  look " + camName
-             + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  move: " + moveName + "  ground: " + (player.onGround ? "yes" : "no")
+        // ── MC 1.0 标准面（L1-L8）──
+        return "voxelsandbox (" + BuildInfo.full + ")"
+             + "\n" + window.fps + " fps, " + frameMs.toFixed(1) + " ms/frame, " + player.simMs.toFixed(2) + " ms sim"
+             + "\nx: " + ex.toFixed(3) + " // " + bx + " // " + (bx & 15)
+             + "\ny: " + ey.toFixed(5) + " // " + by
+             + "\nz: " + ez.toFixed(3) + " // " + bz + " // " + (bz & 15)
+             + "\nf: " + fIdx + " (" + fAx + ") (" + Math.round(player.yaw) + " / " + Math.round(player.pitch) + ")"
+             + "\nbiome: " + biomeName
+             + "\nbl: " + footBl + " ol: " + footOl
+        // ── 工程诊断尾段（§2-F 验收必需；空行分隔）──
+             + "\n"
+             + "\nmode: " + modeName + (player.flying ? " (fly)" : "") + "  move: " + moveName + "  look " + camName
+             + "  ground: " + (player.onGround ? "yes" : "no") + "  feet: " + fpx + "," + fpy + "," + fpz
              + "\nspeed: " + player.speed.toFixed(2) + " b/s"
              + (player.flying || player.mode === PlayerController.Spectator
                 ? "  fly: " + player.flySpeed.toFixed(1) + " b/s (x" + player.flySpeedMul.toFixed(2) + ")"
                 : "")
              + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
-             + "\nbiome: " + biomeName + "  (col " + fpx + "," + fpz + ")"
              + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
              + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
              + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
@@ -12510,43 +12532,46 @@ Window {
     //   - **biome 行**：玩家**脚底所在格**的群系（theWorld.biomeIdAt(floor(feetX), floor(feetZ)) → 通用名 Plains/Hills/
     //     Desert/Forest/Snowy/Swamp）。仅消费 World 层 Q_INVOKABLE（不反向写；PLAN §2 分层：UI ← World 向下读）。
     //   不涉及 lighting / alphaMode（PLAN §2-H / t439-t442 不变量不动）。
-    Text {
+    // t895 ① 黄绿文字重叠修：主 F3 块（黄）与 FrameProfiler 报告（绿）此前各自绝对定位（绿块钉死
+    //   y=62+200，注释还写「主块约 12 行」）—— 主块逐轮增行（biome/time/draw-calls/…约 20 行）后
+    //   越过 200px 与绿块叠印。改 Column 布局分列（子项自动纵向排布，主块多高绿块跟多低，行数增减
+    //   永不重叠）。两 Text 显隐条件相同（f3Visible 门控）→ 上移到 Column 一处。
+    Column {
         visible: window.appState === "playing" && window.f3Visible
         x: 12; y: 62
         z: 50
-        color: "#ffff00"                        // 单色（黄）+ 黑描边，亮/暗背景均高对比可读
-        style: Text.Outline; styleColor: "#000000"
-        font.pixelSize: 12; font.family: "monospace"
-        // perf-t520 节流：原 text 绑定读 60Hz player.position/feetPosition/yaw/pitch/speed/onGround/hasHit/hitBlock +
-        //   theWorld.biomeIdAt(...) Q_INVOKABLE + liveCount() ×3 Q_INVOKABLE + worldClock.dayPhase/skyLight（100Hz）→
-        //   整块 ~30 行字符串每帧重算（每秒 ~60 次）。改读 window.f3Text 单一 string（由 f3RefreshTimer 10Hz 刷新，
-        //   buildF3Text() 内读最新值），重算频率降 6×。F3 是调试叠层，100ms 延迟零影响。
-        text: window.f3Text
+        spacing: 10
+        Text {
+            color: "#ffff00"                        // 单色（黄）+ 黑描边，亮/暗背景均高对比可读
+            style: Text.Outline; styleColor: "#000000"
+            font.pixelSize: 12; font.family: "monospace"
+            // perf-t520 节流：text 只读 f3Text 单一 string（f3RefreshTimer 10Hz 刷新），
+            //   重算频率 60Hz→10Hz（详 buildF3Text 头注释）。
+            text: window.f3Text
+        }
+        // perf 帧时间分解叠层（FrameProfiler：C++ 各热路径 Scope 累加 → 每 ~1s flush 报告字符串）。
+        //   tick 行 = 60Hz tickImpl 各阶段 ms/frame（env/item/xp/boat/mob/pickup/phys/ray/input）；
+        //   win 行 = 1s 窗口内 mesh 总 ms（含 rebuild 次数）+ world tick 各总 ms；
+        //   frame 行 = 帧时间切分桶（main_total / render_cpu，ms/frame）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
+        //     - main_total = frameSwapped 间隔（GUI 线程帧周期；含 sim + QML binding/scenegraph update + 同步等待）；
+        //     - render_cpu = beforeRendering → afterRendering（渲染线程 CPU 侧编码 + GPU 提交阻塞；**非**真 GPU 时间，
+        //       QtQuick3D 路径无公开 GPU 计时查询，render_cpu 含 GPU stall 但不等同纯 GPU 时间，已在报告中标注）。
+        //     threaded render loop 下 frame ≈ max(main_total, render_cpu)：
+        //       - main_total >> render_cpu → 主线程 bound（QML binding / 物理 tick / scene-graph update）；
+        //       - render_cpu >> main_total → 渲染线程 bound（GPU 提交 / draw-call 多 / 渲染队列长）。
+        //     max 一侧标 *（视觉提示瓶颈侧）。
+        //   mob sub 行 = mob 桶拆分（ai/phys/hostile/spawn/loop）。
+        //   诊断 <10 FPS 时读此叠层定位「每帧固定开销」花在哪（实体 tick / mesh 重建 / 物理 / QML binding / 渲染），
+        //   不再猜。F3 关时不显；报告内容亦每秒落 logs/voxelsandbox.log（grep vo.prof）。
+        Text {
+            color: "#00ff88"
+            style: Text.Outline; styleColor: "#000000"
+            font.pixelSize: 11; font.family: "monospace"
+            text: FrameProfiler.report   // 单例直接按类型名引用（QML_SINGLETON，不可在 QML 实例化）
+        }
     }
 
-    // perf 帧时间分解叠层（FrameProfiler：C++ 各热路径 Scope 累加 → 每 ~1s flush 报告字符串）。
-    //   tick 行 = 60Hz tickImpl 各阶段 ms/frame（env/item/xp/boat/mob/pickup/phys/ray/input）；
-    //   win 行 = 1s 窗口内 mesh 总 ms（含 rebuild 次数）+ world tick 各总 ms；
-    //   perf-t520 frame 行 = 帧时间切分桶（main_total / render_cpu，ms/frame）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
-    //     - main_total = frameSwapped 间隔（GUI 线程帧周期；含 sim + QML binding/scenegraph update + 同步等待）；
-    //     - render_cpu = beforeRendering → afterRendering（渲染线程 CPU 侧编码 + GPU 提交阻塞；**非**真 GPU 时间，
-    //       QtQuick3D 路径无公开 GPU 计时查询，render_cpu 含 GPU stall 但不等同纯 GPU 时间，已在报告中标注）。
-    //     threaded render loop 下 frame ≈ max(main_total, render_cpu)：
-    //       - main_total >> render_cpu → 主线程 bound（QML binding / 物理 tick / scene-graph update）；
-    //       - render_cpu >> main_total → 渲染线程 bound（GPU 提交 / draw-call 多 / 渲染队列长）。
-    //     max 一侧标 *（视觉提示瓶颈侧）。
-    //   mob sub 行 = mob 桶拆分（ai/phys/hostile/spawn/loop）。
-    //   诊断 <10 FPS 时读此叠层定位「每帧固定开销」花在哪（实体 tick / mesh 重建 / 物理 / QML binding / 渲染），
-    //   不再猜。F3 关时不显；报告内容亦每秒落 logs/voxelsandbox.log（grep vo.prof）。
-    Text {
-        visible: window.appState === "playing" && window.f3Visible
-        x: 12; y: 62 + 200   // 在主 F3 块下方（主块约 12 行 × ~16px）
-        z: 50
-        color: "#00ff88"
-        style: Text.Outline; styleColor: "#000000"
-        font.pixelSize: 11; font.family: "monospace"
-        text: FrameProfiler.report   // 单例直接按类型名引用（QML_SINGLETON，不可在 QML 实例化）
-    }
+    // （perf 帧时间分解叠层的头注释与 Text 已并入上方 F3 Column 第二子项 —— t895 ① 布局分列修复。）
 
     // Hotbar（9 槽，1.0 风格）：底部居中，方形凹槽槽框 + 选中槽选框（凸起边框，随 selectedSlot 位移）。
     // 全部槽框/选框/准星为本项目自绘原创（Rectangle 组合，无外部 MC PNG；§9 override (a)）。
