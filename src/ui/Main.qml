@@ -2685,13 +2685,10 @@ Window {
         // t622：第 7 参携实例名（铁砧改名物品丢弃；其余掉落不传 → 转发缺省空）。
         // t686：第 8 参携实例耐久（死亡掉落磨损工具；其余掉落不传 → undefined → 转发缺省 -1 → 拾取归满耐久）。
         function onSpawnItem(x, y, z, id, count, enchants, name, durability) { itemEntities.spawnItem(x, y, z, id, count, enchants, name, durability) }
-        // t401/t836 钓获物（收竿咬钩 → player 发 fishCaught，携获物 id + 数量 + 浮标 float 世界坐标 + 朝玩家
-        //   水平弹向 dirX/dirZ（归一）+ 弹速）→ 转发到 manager **定点定向弹出**（spawnItemAt，t608 发射器先例；
-        //   机制等价 MC 1.0 钓获物从浮标飞向玩家——掉落物 tick 重力接手画弧线，玩家走近拾取；同 spawnItem /
-        //   mobDied 模式；单向事件流：Game 层发语义事件、呈现层只消费）。
-        function onFishCaught(itemId, count, px, py, pz, dirX, dirZ, speed) {
-            itemEntities.spawnItemAt(Qt.vector3d(px, py, pz), itemId, count, dirX, dirZ, speed)
-        }
+        // t401/t836/t886 钓获物：**t886 起掉落物实体在 Game 层 C++ 直调 spawnItemThrown 生成**（抛物解弹向
+        //   玩家中心 + 弹出点抬升出水面上空气格——浮水分支不吞弧线；发射器 / 投掷器 C++ 直调先例），经验球
+        //   同帧经 m_xpOrbManager 直调 spawnOrb（1-6 XP）。fishCaught 信号为**通知性**（矩阵探针 / 未来 UI），
+        //   本层不再转发 spawn——双重生成防线（旧 onFishCaught → spawnItemAt 转发随 t886 退役）。
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。

@@ -102,6 +102,21 @@ struct RecvDef {
     bool signalBased;               // TNT / 发射器 / 投掷器 = 上升沿信号
 };
 
+// t886 获物弹速抛物解镜像（PlayerController useFishingRod 获物分支；P18 双钉——改值须两处同步）：
+//   弹出点 = 浮标位 +0.35 抬升（kFishCatchRiseOffset，出水面上空气格）；目标 = 玩家脚位 +0.9（m_height 1.8
+//   之半）；T = clamp(0.45+0.055D, 0.5, 1.4)；vy = Δy/T + 14T（½g，g=28 掉落物重力镜像）；返 |v|。
+float fishCatchSpeedMirror(const QVector3D &bobPos, const QVector3D &playerFeet)
+{
+    const float spY = bobPos.y() + 0.35f;
+    const float dx = playerFeet.x() - bobPos.x();
+    const float dz = playerFeet.z() - bobPos.z();
+    const float dy = (playerFeet.y() + 0.9f) - spY;
+    const float D = std::sqrt(dx * dx + dz * dz);
+    const float T = std::max(0.5f, std::min(1.4f, 0.45f + 0.055f * D));
+    const float vy = dy / T + 14.0f * T;
+    return std::sqrt((dx / T) * (dx / T) + (dz / T) * (dz / T) + vy * vy);
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -11043,8 +11058,8 @@ int main(int argc, char *argv[])
     //    (a) 抛物线（轻重力 12 落差带）+ 落水浮定（XZ 收格心 / Y = 液面 − 浸没 0.125 精确断言）；
     //    (b) 确定性等待：bobberWaitSeconds 两端恰可达（h=0 → 5.00 / h=2500 → 30.00）+ 分布带（600 序号
     //        min<6 / max>29）+ 行为级（真实 settle 后按 hashVoxel 预计算的等待值 ±1 tick 咬钩——公式即驱动）；
-    //    (c) 咬钩窗口窗内收 = 获物 + 耐久 -1（fishCaught 载荷：池内物品 id + 浮标位 + 朝玩家弹向 + 弹速镜像
-    //        4.5）；窗过 = 鱼跑（escaped 信号 + hasBite 翻 false）+ 重等（第二咬可达）+ 此后空收无消耗；
+    //    (c) 咬钩窗口窗内收 = 获物 + 耐久 -1（fishCaught 载荷：池内物品 id + 浮标位 + 朝玩家弹向 + t886 抛物解
+    //        弹速镜像）；窗过 = 鱼跑（escaped 信号 + hasBite 翻 false）+ 重等（第二咬可达）+ 此后空收无消耗；
     //    (d) 钩 mob：pc 真甩竿飞行段命中猪（bobberHookedMobAt 绑定）→ 收竿拉拽（猪位移朝玩家 >0.03 +
     //        耐久 -5 + 猪血量不变 + 零 fishCaught——钩中不伤害不获物口径）；陆上静止浮标冻结（Ground 态）；
     //        d2 垂死 mob 收竿（R19.13 终审 B-L2）：钩住后打死猪（死亡动画窗内、不 tick ents → 脱钩验证未
@@ -11063,10 +11078,10 @@ int main(int argc, char *argv[])
     //        盒内）→ 贴面 Ground 不隔墙钩（旧序先钩后碰会隔墙钩住）。
     {
         // 镜像常量（P18 模式，改值须两处同步；Entities 层 kBobberWaitHashSalt / kBobberBiteWindowSec 与
-        //   Game 层 kFishCatchFlySpeed 均探针不可达私有）：
+        //   Game 层获物抛物解均探针不可达私有）：
         constexpr quint32 kMirrorBobberSalt = 0xF15Cu;   // EntityManager::kBobberWaitHashSalt（等待掷骰盐）
         constexpr float kMirrorBiteWindow = 0.5f;        // EntityManager::kBobberBiteWindowSec（咬钩窗口秒）
-        constexpr float kMirrorCatchSpeed = 4.5f;        // PlayerController::kFishCatchFlySpeed（获物弹速）
+        // t886 获物弹速 = 抛物解镜像 fishCatchSpeedMirror（文件级 helper，t886 探针共用）。
         World wF;
         wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(77);
         EntityManager ents;
@@ -11223,7 +11238,7 @@ int main(int argc, char *argv[])
             okc1 = okc1 && ents.bobberHasBiteAt(b1);
             pc.useFishingRod(); // 窗内收竿
             const int dur1 = hb.durabilityAt(0);
-            // 弹向断言：dir 点乘（玩家 − 浮标）水平归一 > 0.9（朝玩家）；弹速 = 镜像 kFishCatchFlySpeed。
+            // 弹向断言：dir 点乘（玩家 − 浮标）水平归一 > 0.9（朝玩家）；弹速 = t886 抛物解镜像（|v| 随距离自适应）。
             const float toPX = 3.5f - bobPos.x(), toPZ = 6.5f - bobPos.z();
             const float toPLen = std::sqrt(toPX * toPX + toPZ * toPZ);
             const bool poolIds[] = {
@@ -11238,7 +11253,7 @@ int main(int argc, char *argv[])
                    && !ents.aliveAt(b1) // 浮标实体已收走
                    && qAbs(cpx - bobPos.x()) < 1e-3f && qAbs(cpy - bobPos.y()) < 1e-3f
                    && qAbs(cpz - bobPos.z()) < 1e-3f
-                   && qAbs(csp - kMirrorCatchSpeed) < 1e-3f
+                   && qAbs(csp - fishCatchSpeedMirror(bobPos, QVector3D(3.5f, float(fy + 1), 6.5f))) < 1e-2f
                    && (toPLen < 1e-3f || (cdx * toPX + cdz * toPZ) / toPLen > 0.9f);
             // c2 窗过 = 鱼跑重等 + 空收无消耗：再甩（serial 2）→ 咬 → drive 过窗（0.5s + 余量）→ escaped 信号 +
             //   hasBite 翻 false → 继续 drive 到第二次咬（重等可达，cap 31s）→ 再过窗 → 此刻收 = 真空收
@@ -11598,7 +11613,8 @@ int main(int argc, char *argv[])
                              "PlayerController-settles-semantics split, pearl/drop precedent); deterministic "
                              "5-30s wait via hashVoxel(seed^salt^castSerial) with exact reachable endpoints and "
                              "+-1tick behavioral match, 0.5s bite window (in-window reel = fishingPool loot "
-                             "toward-player spawnItemAt + rod -1, expired = escaped signal + re-roll + empty "
+                             "thrown to the player as a ballistic spawnItemThrown (t886: solved arc, "
+                             "distance-adaptive speed) + rod -1, expired = escaped signal + re-roll + empty "
                              "reel costs nothing), hooked-mob reel pulls at ~6 b/s with -5 durability and zero "
                              "damage, dead-target reel = pull no-op with NO durability charge; externally-"
                              "cleared bobber keeps lazy fishing state then reels clean (no loot, no cost) with "
@@ -13579,6 +13595,115 @@ Item {
                              "plus bite splash strengthened 10->14 particles, all gated "
                              "bobberInWater&&!hasBite&&worldRunning so ESC freezes them) pinned "
                              "visual-only in the commit";
+    }
+
+    // ── P-t886 鱼获反馈探针（行为级：获物抛物弹出落玩家旁可捡 + 经验球 1-6 XP）──
+    //    pc 真 Consumer 端（ItemEntityManager + XpOrbManager 都注入）：甩竿 → settle → drive 到咬钩 → 收竿 →
+    //    ① 掉落物实体已生成于浮标位 +0.35 抬升点（水面上空气格——浮水分支不吞弧线）；
+    //    ② 推掉落物物理 3s（60 tick × 0.05）→ 落定在玩家中心 2.2 格内（抛物解准确弹向玩家，可捡）；
+    //    ③ 经验球恰一枚、量 ∈[1,6]（MC 1.0 钓鱼 1-6 XP）、落浮标格中心（+0.5）；
+    //    ④ 弹速 = 抛物解 |v| 镜像（近距 ≈8.1，随距离自适应）+ 耐久 -1（口径不变）。
+    {
+        World wC;
+        wC.setWidth(48); wC.setDepth(48); wC.setHeight(96); wC.setSeed(82);
+        EntityManager ents;
+        ItemEntityManager items;
+        XpOrbManager orbs;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickC = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wC, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        // 落地带：石地板 x 3..8 / z 4..8（弹道短/过长都接得住；不含水池列外的虚空）+ 3×3 水池（5..7,5..7）
+        for (int x = 3; x <= 8; ++x)
+            for (int z = 4; z <= 8; ++z) wC.setBlock(x, fy, z, BR::Stone, 0);
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) wC.setBlock(x, fy + 1, z, BR::Water, 0);
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wC);
+        pc.setEntityManager(&ents);
+        pc.setItemEntities(&items);
+        pc.setXpOrbManager(&orbs);
+        pc.setHotbar(&hb); // t886：耐久 -1 断言需要（首跑红真因——漏注入 → damageSelectedItem 的
+                           //   m_hotbar 门静默 false，探针 diag 三值全对唯独 dur=0 暴露）
+        pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+        int caughtCount = 0; float csp = 0.0f;
+        QObject::connect(&pc, &PlayerController::fishCaught, &pc,
+                         [&](int, int, float, float, float, float, float, float speed) {
+                             ++caughtCount; csp = speed;
+                         });
+        pc.useFishingRod();
+        int bob = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
+        const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+        bool okCast = bob >= 0;
+        for (int t = 0; t < 40 && okCast; ++t) {
+            tickC(1, 0.05f);
+            if (!ents.aliveAt(bob)) { okCast = false; break; }
+            if (ents.posAt(bob) == settlePos) break;
+        }
+        okCast = okCast && ents.posAt(bob) == settlePos;
+        for (int t = 0; t < 660 && okCast && !ents.bobberHasBiteAt(bob); ++t) tickC(1, 0.05f);
+        okCast = okCast && ents.bobberHasBiteAt(bob);
+        const QVector3D bobPos = ents.posAt(bob);
+        const int dur0 = hb.durabilityAt(0);
+        pc.useFishingRod(); // 窗内收竿 → C++ 直调 spawnItemThrown + spawnOrb（t886 主路径）
+        // ① 掉落物已生成于抬升弹出点（浮标位 + 0.35 出水面上空气格）
+        int item = -1;
+        for (int i = 0; i < items.count(); ++i)
+            if (items.aliveAt(i)) { item = i; break; }
+        const QVector3D spawnExp(bobPos.x(), bobPos.y() + 0.35f, bobPos.z());
+        bool okItem = item >= 0 && caughtCount == 1
+                      && qAbs(items.posAt(item).x() - spawnExp.x()) < 1e-2f
+                      && qAbs(items.posAt(item).y() - spawnExp.y()) < 1e-2f
+                      && qAbs(items.posAt(item).z() - spawnExp.z()) < 1e-2f;
+        // ② 推掉落物物理 3s → 落定在玩家中心 2.2 格内（抛物解落点 = 玩家中心；积分步进误差余量）
+        for (int t = 0; t < 60 && okItem; ++t) items.tick(0.05, &wC);
+        const QVector3D playerCenter(3.5f, float(fy + 1) + 0.9f, 6.5f);
+        okItem = okItem && items.aliveAt(item)
+                 && (items.posAt(item) - playerCenter).length() < 2.2f;
+        // ③ 经验球恰一枚、量 [1,6]、落浮标格中心；④ 弹速 = 抛物解镜像 + 耐久 -1
+        int orb = -1;
+        for (int i = 0; i < orbs.count(); ++i)
+            if (orbs.aliveAt(i)) { orb = i; break; }
+        const QVector3D orbExp(std::floor(bobPos.x()) + 0.5f, std::floor(bobPos.y()) + 0.5f,
+                               std::floor(bobPos.z()) + 0.5f);
+        const float vmagExp = fishCatchSpeedMirror(bobPos, QVector3D(3.5f, float(fy + 1), 6.5f));
+        const bool okOrb = orb >= 0 && orbs.amountAt(orb) >= 1 && orbs.amountAt(orb) <= 6
+                           && qAbs(orbs.posAt(orb).x() - orbExp.x()) < 1e-2f
+                           && qAbs(orbs.posAt(orb).y() - orbExp.y()) < 1e-2f
+                           && qAbs(orbs.posAt(orb).z() - orbExp.z()) < 1e-2f
+                           && qAbs(csp - vmagExp) < 1e-2f
+                           && hb.durabilityAt(0) == dur0 - 1;
+        const bool okT886 = okCast && okItem && okOrb;
+        if (!okT886) ++totalFail;
+        if (!okT886)
+            qInfo().noquote() << "  [t886 diag] okCast" << okCast << "okItem" << okItem << "(itemPos"
+                              << (item >= 0 ? items.posAt(item) : QVector3D()) << ") okOrb" << okOrb
+                              << "(orbAmt" << (orb >= 0 ? orbs.amountAt(orb) : -1) << "orbPos"
+                              << (orb >= 0 ? orbs.posAt(orb) : QVector3D()) << "orbExp" << orbExp
+                              << "csp" << csp << "exp" << vmagExp
+                              << "dur" << hb.durabilityAt(0) - dur0 << ")";
+        qInfo().noquote() << (okT886 ? "PASS" : "FAIL")
+                          << "| t886 catch feedback: the loot item is spawned C++-side (dispenser/dropper "
+                             "direct-call precedent) as a solved ballistic throw from the bobber - spawn "
+                             "point lifted +0.35 into the air cell above the water surface (the bobber "
+                             "floats INSIDE the top water cell; spawning in place would hit the item "
+                             "float-water branch which zeroes vy and glues the drop to the surface, "
+                             "killing the arc), target = player center, flight time clamp(0.45+0.055D, "
+                             "0.5,1.4), vy = dy/T + g*T/2 (g=28 item gravity mirror) - after 3s of "
+                             "item physics the drop rests within 2.2 blocks of the player center "
+                             "(accurately catchable); one xp orb of 1-6 amount spawns at the bobber "
+                             "cell center (MC 1.0 fishing 1-6 XP; runtime RNG same license as the "
+                             "loot pool roll); fishCaught speed payload equals the solved |v| mirror "
+                             "and the QML onFishCaught forwarder is retired (signal is now "
+                             "informational - double-spawn guard); rod -1 unchanged. Matrix probe "
+                             "drives a real PlayerController with ItemEntityManager + XpOrbManager "
+                             "injected";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

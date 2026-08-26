@@ -2566,19 +2566,38 @@ void PlayerController::useFishingRod()
         if (!bite) return; // ③ 空收（未咬钩 / 浮标在陆）→ 无获物 / 不损耐久
         if (!m_world) return;
         // ② 咬钩 → 按 fishingPool 抽一件获物（roll 1 次；RNG 用运行期随机 → 每次收竿不同——战利品非
-        //   世界生成，不涉 PLAN §2-K）。获物从浮标位**弹向玩家**（水平归一方向 + 定向初速 → 呈现层
-        //   spawnItemAt；掉落物 tick 重力接手画出弧线，玩家走近拾取）。
+        //   世界生成，不涉 PLAN §2-K）。t886 获物从浮标位**抛物线弹向玩家**（准确可捡）：C++ 直调
+        //   spawnItemThrown（t608 发射器 / t542 投掷器先例——免 QML 信号往返，掉落物重力 / 摩擦 / 免拾窗
+        //   同一链）。抛物解：目标 = 玩家中心（磁吸拾取同心，m_height*0.5）；飞行时 T = clamp(0.45+0.055D,
+        //   0.5, 1.4)（近快远慢的可见弧）；vy = Δy/T + ½·g·T（g = kFishCatchItemGravity 镜像 28）→ 精确
+        //   落点解。**弹出点抬升 kFishCatchRiseOffset 到水面上方空气格**——浮标浮定在顶水格内
+        //   （y=格顶−0.125），原位生成会落进掉落物浮水分支（vy 清零 + 恒速上浮贴水面）把弧线整个吞掉；
+        //   抬升后中心格 = 空气 → 弧线全程生效，落回水里自然转浮水。
         const auto &pool = LootTable::fishingPool();
         const quint32 seed = QRandomGenerator::global()->generate();
         const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, 1, seed);
         if (!stacks.empty() && stacks[0].itemId != 0 && stacks[0].count > 0) {
-            float dx = m_pos.x() - bp.x();
-            float dz = m_pos.z() - bp.z();
-            const float dl = std::sqrt(dx * dx + dz * dz);
-            if (dl > 1e-3f) { dx /= dl; dz /= dl; }
-            else { dx = 0.0f; dz = 0.0f; } // 玩家恰在浮标正上/下方 → 无水平弹速（原地落下即可拾）
+            const QVector3D spawnPos = bp + QVector3D(0.0f, kFishCatchRiseOffset, 0.0f);
+            const QVector3D target = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
+            const float ddx = target.x() - spawnPos.x();
+            const float ddy = target.y() - spawnPos.y();
+            const float ddz = target.z() - spawnPos.z();
+            const float dHoriz = std::sqrt(ddx * ddx + ddz * ddz);
+            const float T = std::clamp(0.45f + 0.055f * dHoriz, 0.5f, 1.4f);
+            const QVector3D v(ddx / T, ddy / T + 0.5f * kFishCatchItemGravity * T, ddz / T);
+            const float vmag = v.length();
+            if (m_itemEntities)
+                m_itemEntities->spawnItemThrown(spawnPos, stacks[0].itemId, stacks[0].count,
+                                                v.x(), v.y(), v.z(), vmag); // dir×|v| 归一乘回 = 原向量
+            float hdx = 0.0f, hdz = 0.0f;
+            if (dHoriz > 1e-3f) { hdx = ddx / dHoriz; hdz = ddz / dHoriz; } // 正上/下重合 → 无水平弹向（原地落下即可拾）
             emit fishCaught(stacks[0].itemId, stacks[0].count,
-                            bp.x(), bp.y(), bp.z(), dx, dz, kFishCatchFlySpeed);
+                            bp.x(), bp.y(), bp.z(), hdx, hdz, vmag); // 通知性（探针 / 未来 UI；QML 不再转发 spawn）
+            // t886 经验球 1-6 XP（机制等价 MC 1.0 钓鱼 1-6 XP；战利品非世界生成 → 运行期随机同 fishingPool
+            //   掷骰口径）。落浮标所在格中心（spawnOrb 内 +0.5），磁吸半径内玩家走近拾取。
+            if (m_xpOrbManager)
+                m_xpOrbManager->spawnOrb(qFloor(bp.x()), qFloor(bp.y()), qFloor(bp.z()),
+                                         1 + QRandomGenerator::global()->bounded(6));
             // 生存钓竿 -1 耐久（归零自动清槽，同弓 / 镐）；创造不消耗（无限源）。
             if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
         }
