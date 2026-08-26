@@ -2694,6 +2694,10 @@ void PlayerController::sleepAdvanceToDawn()
     emit spawnPointChanged();   // t567 HUD 指南针指针重算（出生点 → 床位）
     m_sleepPhase = kSleepPhaseWaking;
     m_sleepPhaseTimer = 0.0f;
+    // t898 进 Waking 即出床瞬移（fade-in 渐显期玩家已站床边，机制等价 MC 醒来站床侧；模型躺姿门
+    //   sleepLying 同步翻 false —— 补发 sleepingChanged 驱动 QML 重算（sleeping 本值未变，通知合法））。
+    leaveBedTeleport();
+    emit sleepingChanged();
     // 离开 Settled（隐藏起床按钮）；fade/lie 保持满值（Waking 内从 1 渐降到 0）。
     if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
 }
@@ -2715,7 +2719,40 @@ void PlayerController::trySleepAt(int bx, int by, int bz)
             return;
         }
     }
-    // 通过 → 进 Lying 阶段（玩家相机降低 + 渐黑过渡；spec「右键床→玩家躺下→渐黑过渡 ~1s fade」）。
+    // 通过 → 瞬移上床躺平（t898 用户 8-25 澄清：睡下时人物**直接瞬移到床上躺平、视角/相机移到床位置**，
+    //   对齐 MC「非原地睡觉」）。床占两格：state bit3 定本格 head/foot、bit[1:0]=head→foot 方向 D
+    //   （bedPartnerOffset 单一权威解码配对格）。落位推导：
+    //   - m_pos（=模型 / 相机锚的 feetPosition）瞬移到**床脚端**：foot 格心沿 D 前移 0.4（朝床尾外缘方向；
+    //     模型平躺后身长 1.8 沿 -D 伸向床头，占 [foot−1.4D, foot+0.4D] 恰嵌 2.0 床长 [foot−1.5D, foot+0.5D]，
+    //     头 / 脚各距床头 / 床尾外缘 0.1，机制等价 MC 躺满床），Y=床顶 by+1（床 ShapeFull）。
+    //   - yaw 转到 front=D（从枕头看向床尾，MC 躺床视线朝床尾）→ 第三人称模型（F5）绑 feetPosition +
+    //     sleepLying 门控的 +90° X 欧拉即「瞬移 + 平躺仰卧」（Main.qml playerModel；+90 使 +Y 头向旋向模型
+    //     背后 = -D = 床头方向、脸朝上）。
+    //   - 第一人称相机锚随 position() 走到床（Main.qml cam 再按 sleepLie 沿 -look 平移 1.4 到床头格心 +
+    //     竖直降到床面上方 ~0.27，t898 参数）。
+    const quint8 bedState = m_world->stateAt(bx, by, bz);
+    int pdx = 0, pdz = 0;
+    BlockRegistry::bedPartnerOffset(bedState, pdx, pdz); // 本格 → 配对另一半偏移（head↔foot 对称同式）
+    const bool hitIsHead = (bedState & 8) != 0;
+    const int footX = hitIsHead ? bx + pdx : bx; // head 格 +offset 得 foot；foot 格本格即 foot
+    const int footZ = hitIsHead ? bz + pdz : bz;
+    static constexpr float kBedDirX[4] = { 1.0f, -1.0f, 0.0f, 0.0f }; // head→foot 四向（state bit[1:0] 编码序）
+    static constexpr float kBedDirZ[4] = { 0.0f, 0.0f, 1.0f, -1.0f };
+    const int bedDir = bedState & 3;
+    m_pos = QVector3D(float(footX) + 0.5f + 0.4f * kBedDirX[bedDir],
+                      float(by) + 1.0f,
+                      float(footZ) + 0.5f + 0.4f * kBedDirZ[bedDir]);
+    m_vel = QVector3D(0, 0, 0);
+    m_knockback = QVector3D(0, 0, 0); // 瞬移清残余冲量（防醒后被睡前陈旧击退拽走；同 respawn 语义）
+    m_peakY = m_pos.y();              // 掉落基准重置（瞬移落差不算摔伤）
+    m_yaw = std::atan2(-kBedDirX[bedDir], -kBedDirZ[bedDir]) / kDeg; // front=(-sin,-cos)=D → 朝床尾
+    m_pitch = 0.0f;                   // 躺床视线水平沿床轴（上仰由 QML lieTilt 表达）
+    if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); } // 清走路摆臂（防躺床腿摆）
+    m_sleepOutDone = false;           // 出床瞬移待触发（Waking 入口 / 中断取消走 leaveBedTeleport）
+    emit positionChanged();           // 相机 / 第三人称模型瞬移跟随（同 respawn 尾）
+    emit yawChanged();
+    emit pitchChanged();
+    // 进 Lying 阶段（渐黑过渡；spec「右键床→玩家躺下→渐黑过渡 ~1s fade」——躺位 / 视角已在上方瞬移完成）。
     m_sleeping = true;
     m_sleepPhase = kSleepPhaseLying;
     m_sleepPhaseTimer = 0.0f;
@@ -2778,6 +2815,10 @@ void PlayerController::updateSleep(float dt)
 void PlayerController::cancelSleep()
 {
     if (!m_sleeping) return;
+    // t898 中断式瞬醒同样出床（受惊醒 / 暂停 / 重生 / 读档不应把玩家留在床上摆站姿）；Waking 末正常完成
+    //   路径已瞬移过（m_sleepOutDone 门 → 此处 no-op，防双跳）。respawn / loadSavedState 随后自写 m_pos，
+    //   先瞬移无害（顺序：cancelSleep 在前）。
+    leaveBedTeleport();
     m_sleeping = false;
     m_sleepPhase = kSleepPhaseNone;
     m_sleepPhaseTimer = 0.0f;
@@ -2804,8 +2845,48 @@ void PlayerController::wakeUpFromBed()
     if (!m_sleeping || m_sleepPhase != kSleepPhaseSettled) return;
     m_sleepPhase = kSleepPhaseWaking;
     m_sleepPhaseTimer = 0.0f;
+    // t898 进 Waking 即出床瞬移（同 sleepAdvanceToDawn；sleepLying 翻 false 补发 sleepingChanged）。
+    leaveBedTeleport();
+    emit sleepingChanged();
     if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
     // fade/lie 保持满值（Waking 内从 1 渐降到 0）；不调 skipToDawn / 不设 spawn（区别于 sleepAdvanceToDawn）。
+}
+
+// t898 出床瞬移（MC 下床语义）：床头 / 床脚两格的水平 4 邻里按固定序（点击格先行、+X/-X/+Z/-Z）扫**首个
+//   可站位格**（身体两格 !isCollidable + 下方 isCollidable 支撑）→ m_pos 瞬移该格格心（Y=床层 by：站床同层
+//   地面）。全邻不可站 → 保持床顶（by+1 已在床顶上，重力接管站床顶；不瞬移进墙体 / 虚空）。速度 / 击退清零
+//   + m_peakY 重置（瞬移落差不算摔伤，同 respawn 语义）。幂等：m_sleepOutDone 门（trySleepAt 复位）。
+void PlayerController::leaveBedTeleport()
+{
+    if (!m_world || m_sleepOutDone) return;
+    m_sleepOutDone = true;
+    static constexpr int kSideX[4] = { 1, -1, 0, 0 };
+    static constexpr int kSideZ[4] = { 0, 0, 1, -1 };
+    const quint8 bedState = m_world->stateAt(m_sleepBx, m_sleepBy, m_sleepBz);
+    int pdx = 0, pdz = 0;
+    BlockRegistry::bedPartnerOffset(bedState, pdx, pdz);
+    const int cells[2][2] = { { m_sleepBx, m_sleepBz },                   // 点击格（head 或 foot）
+                              { m_sleepBx + pdx, m_sleepBz + pdz } };     // 配对另一半
+    for (int c = 0; c < 2; ++c) {
+        for (int s = 0; s < 4; ++s) {
+            const int x = cells[c][0] + kSideX[s], z = cells[c][1] + kSideZ[s];
+            if (m_world->isCollidable(x, m_sleepBy, z)) continue;         // 脚位格须可通过
+            if (m_world->isCollidable(x, m_sleepBy + 1, z)) continue;     // 头位格须可通过（1.8 身高）
+            if (!m_world->isCollidable(x, m_sleepBy - 1, z)) continue;    // 下方须有支撑（不瞬移进虚空）
+            m_pos = QVector3D(float(x) + 0.5f, float(m_sleepBy), float(z) + 0.5f);
+            m_vel = QVector3D(0, 0, 0);
+            m_knockback = QVector3D(0, 0, 0);
+            m_peakY = m_pos.y();
+            emit positionChanged(); // 相机 / 第三人称模型瞬移跟随
+            return;
+        }
+    }
+    // 全邻不可站 → fallback 保持床顶躺位格心（站床顶；不穿墙 / 不下沉）。
+    m_pos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
+    m_vel = QVector3D(0, 0, 0);
+    m_knockback = QVector3D(0, 0, 0);
+    m_peakY = m_pos.y();
+    emit positionChanged();
 }
 
 // t715 施加状态效果（/effect 命令入口；机制见头注释）：转交对应时序源，tickImpl 统一推进 + 快照广播。

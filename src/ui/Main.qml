@@ -2862,13 +2862,22 @@ Window {
             // 首个实体命中距离；无命中=3.5，命中则贴在面前）→ 相机贴墙不穿入。Math.min 为安全钳（值已 ≤3.5）。
             position: {
                 let eye = player.position
-                // t457/t496 二轮复盘 睡觉躺下（第一人称视角降低）：sleepLie 0→1 平滑降低相机 Y（从站立眼位 1.62 降到
-                //   床垫顶 + 枕头高 ~0.62，机制等价 MC 躺床第一人称视点降到床高平视）。与 sleepFade 同步 ramp
-                //   （Lying 阶段 0→1）。仅 sleeping 时 sleepLie 非 0（非睡觉恒 0 → 不影响常规视角）。三模式都加。
-                //   t496 二轮复盘：旧降量 1.4 把眼位降到 0.22（近地 / 入床下实体方块）→ 用户「镜头落到底黑屏」。
-                //   改降量 1.0 → 眼位 0.62（床垫顶 0.31 之上 + 枕头高，平视床面不穿地，机制等价 MC 床高平视躺姿）。
-                if (player.sleepLie > 0.0)
-                    eye = Qt.vector3d(eye.x, eye.y - player.sleepLie * 1.0, eye.z)
+                // t898 睡觉瞬移躺床（用户 8-25 澄清：睡下人物直接瞬移躺床、视角/相机移到床位置）：m_pos 已被
+                //   trySleepAt 瞬移到床脚端躺位 → position() 随行到床顶。sleepLie 0→1（Lying 阶段与渐黑同步 ramp）
+                //   再把第一人称锚点平移到**床头**：水平沿 -look 移 1.4 格（look 睡时已转床轴朝床尾 → -look 指
+                //   向床头；床脚端躺位 + 1.4 = 床头格心），竖直降 1.35 → 眼位 = 床顶 + 0.27（床垫上枕头高，平视
+                //   床尾不穿地不黑屏——t496「镜头落到底」教训保持，降量以瞬移后 m_pos.y=床顶为基准重标）。
+                //   机制等价 MC 躺床视点落床头。三模式都加（第三人称相机目标同随 position 到床）。look 取水平
+                //   分量归一（躺床视线沿床轴水平；pitch 睡时已清 0，归一防陈旧非零分量放大偏移）。
+                if (player.sleepLie > 0.0) {
+                    const lv = player.lookVector
+                    const hl = Math.hypot(lv.x, lv.z)
+                    const ux = hl > 1e-4 ? lv.x / hl : 0.0
+                    const uz = hl > 1e-4 ? lv.z / hl : 0.0
+                    eye = Qt.vector3d(eye.x - ux * player.sleepLie * 1.4,
+                                      eye.y - player.sleepLie * 1.35,
+                                      eye.z - uz * player.sleepLie * 1.4)
+                }
                 const look = player.lookVector
                 const m = player.cameraMode
                 if (m === PlayerController.FirstPerson) return eye
@@ -2907,6 +2916,7 @@ Window {
                 id: viewModelHand
                 visible: player.cameraMode === PlayerController.FirstPerson
                          && player.mode !== PlayerController.Spectator
+                         && !player.sleeping // t898 睡觉藏手（躺床视点无手持，机制等价 MC 睡觉不显手）
                 // t52/t73 手不穿模（渲染于地形之上）：旧 pivot z=-0.4 + baseTilt 65° + scale 0.16 使手指尖伸到
                 //   相机本地 z≈-0.49，深于玩家 AABB 半宽 0.3（实体方块最近可到 z=-0.3）→ 手被前方邻块遮挡 / 穿进墙。
                 //   t52 注释写了修法但代码没改（仍 z=-0.4/tilt65/scale0.16）；t73 落实：pivot 收到 z=-0.2、baseTilt
@@ -4616,7 +4626,13 @@ Window {
             id: playerModel
             visible: player.cameraMode !== PlayerController.FirstPerson
             position: player.feetPosition
-            eulerRotation: Qt.vector3d(0, player.yaw, 0)
+            // t898 睡觉瞬移躺平（用户 8-25 澄清，对齐 MC）：睡下时玩家模型直接瞬移到床上躺平——m_pos 已被
+            //   trySleepAt 瞬移到床脚端躺位（position 绑定随行），sleepLying 门（sleeping && 非 Waking）瞬切
+            //   +90° X 欧拉：绕 +x 转 +90 把 +Y（头向）旋向模型背后（= -front = 床头方向）、脸（-Z）朝上 =
+            //   仰卧躺床（F5 第三人称可见；1.8 身长沿床轴恰嵌 2.0 床长，落位推导见 playercontroller.cpp
+            //   trySleepAt 注释）。yaw 已被 trySleepAt 转到床轴（front = head→foot，躺着看床尾）。非睡觉
+            //   恒 0 → 站姿零回归；进 Waking（出床瞬移已发生）翻 false，fade-in 渐显期模型已站床边。
+            eulerRotation: Qt.vector3d(player.sleepLying ? 90.0 : 0.0, player.yaw, 0)
 
             // 半透幽灵态（各 body Part 的材质读此属性）：观察者半透 0.35，其余不透明。
             readonly property real bodyOpacity: player.mode === PlayerController.Spectator ? 0.35 : 1.0

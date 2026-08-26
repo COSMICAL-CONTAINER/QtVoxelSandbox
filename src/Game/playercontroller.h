@@ -379,6 +379,13 @@ public:
     float sleepFade() const { return m_sleepFade; }    // 0..1 全屏黑叠层透明度（阶段派生，updateSleep 每 tick 写）
     float sleepLie() const { return m_sleepLie; }      // 0..1 躺下量（阶段派生；驱动 QML 相机降低 + 上仰）
     bool sleepSettled() const { return m_sleepSettled; } // true=全黑入睡阶段（QML 显「起床」按钮）
+    // t898 躺床姿态门（派生只读：sleeping && 非 Waking 阶段）：QML 第三人称玩家模型据此**瞬切平躺**
+    // （eulerRotation.x=+90：+Y 头向旋向模型背后 = 床头方向、脸朝上，机制等价 MC 躺床仰卧）。用户 8-25
+    // 澄清：睡下时人物**直接瞬移到床上躺平**（非原地睡觉）——m_pos 已在 trySleepAt 瞬移到床脚端，模型绑
+    // feetPosition 即随行。进 Waking（跳清晨 / 按钮醒）翻 false：出床瞬移（leaveBedTeleport）发生在 Waking
+    // 入口，fade-in 渐显期模型已站床边，不显「躺地上」。NOTIFY 复用 sleepingChanged（sleeping 翻转与进
+    // Waking 两类时刻都发，后者是值为真的补发——QML 重算无害）。
+    bool sleepLying() const { return m_sleeping && m_sleepPhase != kSleepPhaseWaking; }
 
     // t388 睡觉取消（受惊醒）：受击时立即清睡觉态（瞬切 sleeping=false + 隐藏黑叠层，spec「受惊醒」）。
     //   呈现层 Connections 据玩家受击（fallDamageTaken / mobAttackedPlayer）路由调本方法。非睡觉态静默。
@@ -387,6 +394,12 @@ public:
     // t457 平滑起床（Q_INVOKABLE；QML「起床」按钮调）：从 Settled 阶段平滑过渡到 Waking（fade 1→0 渐显），
     //   不跳清晨（玩家选择立即醒 = 仍处夜晚）。非 Settled 阶段调无效（防重入）。spec「按则立即醒」。
     Q_INVOKABLE void wakeUpFromBed();
+    // t898 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调；public 化同 t814 firePowerTnt 先例
+    //   ——矩阵探针 C++ 直调钉瞬移 / 回位坐标，仅访问段平移零行为差）：夜间 + 床周无怪物 → **瞬移上床躺平**
+    //   （m_pos → 床脚端格心 / yaw → 沿床轴向床尾看，用户 8-25 澄清对齐 MC）；否则 emit sleepRefused（白天 /
+    //   附近有怪物）。分层（PLAN §2）：Game/Physics 层判定（读 worldClock.isNight + entityManager.hostileNearby，
+    //   均向下依赖）。
+    void trySleepAt(int bx, int by, int bz);
 
     // t715 施加状态效果（/effect 命令入口；后续中毒来源 / 药水等复用）。effect = PlayerState::StatusEffect
     //   枚举值（QML 传 PlayerState.EffectPoison 等）；seconds<=0 → 清除该效果；level 恒 ≥1（v1 中毒/缓慢均
@@ -962,14 +975,17 @@ private:
     // t401/t836 清钓鱼态（收竿后 useFishingRod 已自理 / 换槽 / 失焦 / 暂停 / 重生）：移除浮标实体（若在）+
     //   清镜像态。无钓鱼态时静默（不发信号）。
     void cancelFishing();
-    // t388/t457 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）：夜间 + 床周无怪物 → 进 Lying 阶段
-    //   （m_sleeping=true，相机降低 + 渐黑过渡）；否则 emit sleepRefused（白天 / 附近有怪物，机制等价 MC 1.0 床
-    //   拒绝提示）。分层（PLAN §2）：Game/Physics 层判定（读 worldClock.isNight + entityManager.hostileNearby，均向下依赖）。
-    void trySleepAt(int bx, int by, int bz);
+    // t388/t457 尝试在命中床 (bx,by,bz) 入睡（public 化见 wakeUpFromBed 旁声明；原私有声明随 t898 探针
+    //   直调需求平移）：夜间 + 床周无怪物 → 瞬移上床躺平；否则 emit sleepRefused。
     // t388/t457 持续睡觉三阶段状态机（tickImpl 调）：Lying（躺下渐黑 ~1s）→ Settled（全黑显起床按钮，自动跳清晨）
     //   → Waking（跳清晨后 fade 回显清晨场景）。设重生点发生在 Settled→Waking 跳清晨瞬间（m_spawnPos=床位）。
     //   sleepFade/Lie/Settled 阶段派生，值真变才 emit（驱动 QML 黑叠层 + 相机躺姿 + 起床按钮）。
     void updateSleep(float dt);
+    // t898 出床瞬移（MC 下床语义）：Waking 入口（sleepAdvanceToDawn / wakeUpFromBed）与中断式取消
+    //   （cancelSleep：受惊醒 / 暂停 / 重生 / 读档）共用。床头 / 床脚两格水平 4 邻里按固定序扫首个可站位格
+    //   （身体两格无碰撞 + 下方可碰撞支撑）→ m_pos 瞬移该格格心（Y=床层，站床同层地面）；全邻不可站 →
+    //   保持在床顶（不下沉入地形 / 不穿墙）。幂等（m_sleepOutDone 门，trySleepAt 复位）。
+    void leaveBedTeleport();
     // t457 自动跳清晨（Settled 阶段计时满调）：worldClock.skipToDawn + 设 m_spawnPos=床位 + 进 Waking 阶段。
     //   与 wakeUpFromBed（按钮，不跳清晨）共用 Waking fade-in，区别仅在是否调 skipToDawn + 设 spawn。
     void sleepAdvanceToDawn();
@@ -1372,6 +1388,9 @@ private:
     float m_sleepLie = 0.0f;         // 0..1 躺下量（阶段派生；驱动 QML 相机降低 + 上仰）
     bool m_sleepSettled = false;     // true=全黑入睡阶段（QML 显起床按钮）
     qint32 m_sleepBx = 0, m_sleepBy = 0, m_sleepBz = 0;
+    bool m_sleepOutDone = false;     // t898 出床瞬移已做（幂等门）：trySleepAt 复位 false；leaveBedTeleport 置
+                                     //   true —— Waking 入口已瞬移后，Waking 末 cancelSleep 再调不再瞬移（防
+                                     //   双跳）；受惊醒 / 暂停等中断路径首次调即瞬移出床（MC 下床语义）。
     bool m_dead = false;             // t175 死亡态镜像（dropAllItems 置 true / respawn 置 false）：抑制死亡后
                                      //   pickupScan（玩家尸体停死亡点，否则 0.5s 免拾窗过后掉落物被自动捡回空背包）。
                                      //   t655 死亡态输入闸门同样以此镜像为单一权威：grab / setKey / beginMining /

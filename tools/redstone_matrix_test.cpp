@@ -14720,6 +14720,72 @@ Item {
                              "freeze kept the last phase forever, legs stuck mid-stride)";
     }
 
+    // ── P-t898 睡觉瞬移躺床 / 出床回位探针（Game 层真消费端，t814 模式）──
+    //   用户 8-25 澄清：睡下时人物**直接瞬移到床上躺平、视角/相机移到床位置**（对齐 MC，非原地睡觉）；
+    //   醒来瞬移回床边（MC 下床语义）。断言三组：
+    //   (a) 夜间 trySleepAt：m_pos 瞬移到床脚端躺位——foot 格 (x0,z0) state D=+X（head 在 x0-1）→ 躺位
+    //       (x0+0.9, y+1, z0+0.5)（foot 格心 +0.4·D：1.8 身长嵌 2.0 床长）、yaw 转床轴朝床尾（D=+X →
+    //       front=+X → yaw=-90）、sleeping/sleepLying（躺姿门）真；
+    //   (b) wakeUp（中断式瞬醒，public Q_INVOKABLE）：出床瞬移到床周首个可站位格（本 rig：foot +X 邻
+    //       (x0+1) 地板支撑 / 头身两格净空 → feet=(x0+1.5, y, z0+0.5)，Y=床层站地面）、sleeping/sleepLying 假；
+    //   (c) 白天拒绝零位移副作用：setPhase(0)=正午 → trySleepAt 被拒（瞬移必须在夜间/无怪物两道语义门之后，
+    //       被拒不产生位移）。
+    {
+        PlayerController pc;
+        WorldClock clock;
+        EntityManager ents; // 空管理器：hostileNearby 恒 false（怪物拒绝路径不触发）
+        pc.setWorld(&w);
+        pc.setWorldClock(&clock);
+        pc.setEntityManager(&ents);
+        clock.setPhase(0.5f); // 子夜（skyLight<0.5 → isNight；setPhase 即时重派生）
+
+        const auto [x0, z0] = nextSlot();
+        const int y = kRigY;
+        // 工作体积先清空再搭（t897/review#5 教训：高空「必空」不是生成器不变量；确定性净空带）。
+        for (int dx = -2; dx <= 3; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dy = 0; dy <= 3; ++dy)
+                    w.setBlock(x0 + dx, y + dy, z0 + dz, BR::Air, 0);
+        for (int dx = -2; dx <= 3; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                placeRigBlock(w, x0 + dx, y - 1, z0 + dz, BR::Stone, 0); // 支撑地板（床 + 出床站位同层）
+        placeRigBlock(w, x0, y, z0, BR::BedWhite, quint8(0));     // foot：D=+X（bit[1:0]=0）→ head 在 x0-1
+        placeRigBlock(w, x0 - 1, y, z0, BR::BedWhite, quint8(8)); // head（bit3=1）
+
+        pc.trySleepAt(x0, y, z0);
+        const QVector3D lie = pc.feetPosition();
+        const bool okA = pc.sleeping() && pc.sleepLying()
+                         && std::abs(lie.x() - (x0 + 0.9f)) < 1e-3f
+                         && std::abs(lie.y() - (y + 1.0f)) < 1e-3f
+                         && std::abs(lie.z() - (z0 + 0.5f)) < 1e-3f
+                         && std::abs(pc.yaw() - (-90.0f)) < 1e-3f;
+        pc.wakeUp();
+        const QVector3D out = pc.feetPosition();
+        const bool okB = !pc.sleeping() && !pc.sleepLying()
+                         && std::abs(out.x() - (x0 + 1.5f)) < 1e-3f
+                         && std::abs(out.y() - float(y)) < 1e-3f
+                         && std::abs(out.z() - (z0 + 0.5f)) < 1e-3f;
+        clock.setPhase(0.0f); // 正午（/time 特权指令允许设相，PLAN §2-H 与睡觉单向不冲突）
+        const QVector3D beforeDay = pc.feetPosition();
+        pc.trySleepAt(x0, y, z0);
+        const bool okC = !pc.sleeping() && pc.feetPosition() == beforeDay;
+        const bool okT898 = okA && okB && okC;
+        if (!okT898)
+            qInfo().noquote() << "  [t898 diag] lie=" << lie.x() << lie.y() << lie.z()
+                              << "yaw=" << pc.yaw() << " out=" << out.x() << out.y() << out.z()
+                              << " sleeping=" << pc.sleeping() << " lying=" << pc.sleepLying();
+        if (!okT898) ++totalFail;
+        qInfo().noquote() << (okT898 ? "PASS" : "FAIL")
+                          << "| t898 bed-sleep teleport: right-click bed at night teleports the player "
+                             "flat onto the bed (feet pinned to the foot-cell end offset 0.4 along the "
+                             "head->foot axis so the 1.8-block body nests inside the 2-block bed, Y = bed "
+                             "top, yaw rotated to the bed axis looking toward the foot, lying-pose gate "
+                             "on), interrupt-style wake teleports out to the first standable cell beside "
+                             "the bed at floor level (MC get-out-of-bed semantics, pose gate off), and a "
+                             "daytime refusal produces zero displacement side effects (teleport strictly "
+                             "after the night/monster semantic gates)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
