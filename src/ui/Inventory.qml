@@ -720,18 +720,29 @@ Item {
                         }
                     }
 
-                    // 点击销毁槽 → 销毁「当前鼠标持有 / 单格（= 整槽清空，**非只销毁 1 件**；t839 语义收窄。
-                    //   review-r1913-final D-L2 登记：用户原话「单件」若实指只销毁 1 件，口径待用户裁定后再改）」。
-                    // 仅左键：右键全归 root 右键 TapHandler 独占（t79 拿半/均分手势），避免再抢右键 grab（t138）。
-                    //   t700 语义（光标整组清空：拖放释放 / 键修饰点击统一）保留为第一优先；t839 补第二档：
-                    //   光标空手点击 → 清**当前选中槽单格**（setStack(selectedSlot, 0, 0) 只清这一槽——用户
-                    //   「只应销毁当前鼠标持有/单件」；绝不批量清快捷栏 1-9）。Shift 与普通左键同语义（销毁面
-                    //   收窄后修饰键不再改变作用范围）。
-                    TapHandler {
+                    // t900 垃圾桶语义终版（用户 8-25 定稿原话：「普通左键=清光标持有 + shift+左键=清空整个背包」）：
+                    //   - 普通左键（无 Shift）：t839 语义保持——① 光标持有 → 整组销毁（heldBlock=0 同步清 count/
+                    //     耐久/附魔/名）；② 光标空手 → 清当前选中槽单格（setStack(selectedSlot,0,0)，绝批量）。
+                    //   - Shift+左键：清空**整个背包**——hotbar 9 槽 + main 27 槽 + 光标持有全清（恢复批量清空档，
+                    //     创造/生存同语义）。
+                    // 事件源选型：TapHandler 不分辨修饰键（t700 教训）→ 改 MouseArea（mouse.modifiers 直读
+                    //   ShiftModifier 分流）。仅收左键（acceptedButtons LeftButton）——右键仍全归 root 右键
+                    //   TapHandler 独占（t79 拿半/均分手势，t138 无 DragHandler 抢右键 grab 语义保持：
+                    //   MouseArea 对非收键 press 直接忽略传播，不抢右键）。
+                    MouseArea {
+                        anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
-                        onTapped: {
+                        onClicked: (mouse) => {
                             if (!root.hotbar) return
-                            if (root.hotbar.heldBlock !== 0) {
+                            if ((mouse.modifiers & Qt.ShiftModifier) !== 0) {
+                                // Shift+左键：清空整个背包（hotbar 9 + main 27 + 光标持有）。
+                                for (let s = 0; s < 9; ++s)
+                                    root.hotbar.setStack(s, 0, 0)
+                                for (let m = 0; m < root.hotbar.mainCount; ++m)
+                                    root.hotbar.mainSetStack(m, 0, 0)
+                                if (root.hotbar.heldBlock !== 0)
+                                    root.hotbar.heldBlock = 0
+                            } else if (root.hotbar.heldBlock !== 0) {
                                 root.hotbar.heldBlock = 0   // ① 光标持有 → 整组销毁（setHeldBlock(0) 同步清 count / 耐久 / 附魔 / 名）
                             } else {
                                 root.hotbar.setStack(root.hotbar.selectedSlot, 0, 0)   // ② 光标空 → 仅当前选中槽单格
