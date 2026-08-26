@@ -1102,7 +1102,8 @@ public:
     static bool isMushroom(quint8 blockId);
 
     // t847 cross 植物族「合法着地面」单一权威（放置预检消费；机制等价 MC 1.0 各植物原生地面集）：
-    //   草丛 TallGrass → 泥土 / 草方块（MC 1.0 tall grass 只生于草地 / 泥土——不能草上叠草 / 放树叶上）；
+    //   草丛 TallGrass → **仅草方块**（t903 收紧：旧「泥土 / 草方块」→ 用户定稿泥土也不行，对齐 MC 草丛
+    //   只生于草地；失撑链同口径——支撑被置换成泥土等非草面即掉，见 checkFlowerMushroomOnEdit）；
     //   花族 → 泥土 / 草方块 / 耕地（MC 1.0 BlockFlower.canBlockStay 同集：dirt / grass / tilledField）；
     //   蘑菇族 → 泥土 / 草方块（本工程简化口径，见 playercontroller 放置预检原注释）；
     //   枯灌木 DeadBush → 沙子（MC 1.0 dead bush 沙地限定）。

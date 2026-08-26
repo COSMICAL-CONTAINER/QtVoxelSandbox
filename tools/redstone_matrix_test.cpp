@@ -11310,13 +11310,14 @@ int main(int argc, char *argv[])
     }
 
     // ── t847 植物放置谓词探针（Core 纯函数真值表 + World 花失撑掉落链 t788 回归钉）：plantGroundBlock
-    //    单一权威——草丛→泥土/草方块（拒草上叠草 / 树叶 / 沙 / 耕地 / 水）；花→泥土/草方块/耕地（MC 1.0
-    //    BlockFlower.canBlockStay 同集含 tilledField）；蘑菇→泥土/草方块；枯灌木→沙子。掉落链：破花下
-    //    泥土 → 花 dropId 掉落（t788 染料链不回归；dropId 运行期读，免字面量副本）。放置预检本体在
-    //    PlayerController 私有 placeBlock（t841 P20 先例：谓词面 + 失撑面矩阵化，放置拒绝人工目视收口）。
+    //    单一权威——草丛→**仅草方块**（t903 收紧：泥土也不行，用户定稿对齐 MC；拒草上叠草 / 树叶 / 沙 /
+    //    耕地 / 水 / 泥土）；花→泥土/草方块/耕地（MC 1.0 BlockFlower.canBlockStay 同集含 tilledField）；
+    //    蘑菇→泥土/草方块；枯灌木→沙子。掉落链：破花下泥土 → 花 dropId 掉落（t788 染料链不回归；dropId
+    //    运行期读，免字面量副本）。放置预检本体在 PlayerController 私有 placeBlock（t841 P20 先例：谓词面 +
+    //    失撑面矩阵化，放置拒绝人工目视收口）。
     {
         const bool okGround =
-               BR::plantGroundBlock(BR::TallGrass, BR::Dirt)
+               !BR::plantGroundBlock(BR::TallGrass, BR::Dirt)     // t903 收紧：泥土也不行（仅草方块）
             && BR::plantGroundBlock(BR::TallGrass, BR::Grass)
             && !BR::plantGroundBlock(BR::TallGrass, BR::TallGrass)   // 不能草上叠草
             && !BR::plantGroundBlock(BR::TallGrass, BR::Leaves)      // 不能放树叶上
@@ -11364,7 +11365,8 @@ int main(int argc, char *argv[])
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t847 plant placement predicate: plantGroundBlock single authority truth table "
-                             "(tallgrass dirt/grass only - no grass-on-grass/leaves/water; flowers +farmland; "
+                             "(tallgrass grass-only per t903 tightening - dirt rejected too, no "
+                             "grass-on-grass/leaves/water; flowers +farmland; "
                              "mushrooms dirt/grass; dead bush sand-only) + flower lost-support drop stays on "
                              "dropId chain (t788 dye linkage) + tallgrass lost-support now symmetric with the "
                              "placement-side family (isGroundPlant shared by precheck and the World hook; digs "
@@ -14929,6 +14931,61 @@ Item {
                              "(top=26 dry / side=2 dirt / front=27 wet-top) and cache family bumped "
                              "icon6->icon7 so stale on-disk icons regenerate; visual confirmation pending "
                              "user playtest";
+    }
+
+    // ── P-t903 草丛支撑置换失撑探针（World 层行为级；放置面真值表已随 t847 探针收紧同步钉）──
+    //   用户定稿「只能放草方块（泥土也不行）」+ 失撑链同口径：草丛唯一合法支撑 = 草方块 → 支撑被**置换**为
+    //   非草面（非破 Air）也失撑掉落。三腿：
+    //   (a) 羊吃草路径：setWaterSilent(Grass→Dirt)（t897 羊吃消耗走本入口）→ 正上方草丛清 Air +
+    //       blockDroppedAsItem 掉 dropId(TallGrass)（种子族，运行期读表）；
+    //   (b) 通用置换路径：setBlockSilent(Dirt→Farmland) 锄地语义 → 草丛同掉（任意非草面置换）；
+    //   (c) 阴性对照（族口径不扩大）：花下泥土置换成耕地（花合法面含 Farmland）→ 花**不**掉（t507
+    //       「置换不掉」族口径对花 / 蘑菇保留，只草丛收口）。
+    {
+        const auto [x0, z0] = nextSlot();
+        placeRigBlock(w, x0, kRigY, z0, BR::Grass, 0);
+        placeRigBlock(w, x0, kRigY + 1, z0, BR::TallGrass, 0);
+        const int dropsA0 = dropItemCount;
+        const quint8 lastA0 = lastDropId;
+        Q_UNUSED(lastA0);
+        w.setWaterSilent(x0, kRigY, z0, BR::Dirt, 0); // 羊吃草消耗路径（t897 同入口）
+        const bool okA = w.blockAt(x0, kRigY + 1, z0) == quint8(BR::Air)
+                     && dropItemCount == dropsA0 + 1
+                     && lastDropId == BR::dropId(BR::TallGrass);
+
+        const auto [x1, z1] = nextSlot();
+        placeRigBlock(w, x1, kRigY, z1, BR::Grass, 0);
+        placeRigBlock(w, x1, kRigY + 1, z1, BR::TallGrass, 0);
+        const int dropsB0 = dropItemCount;
+        w.setBlockSilent(x1, kRigY, z1, BR::Farmland, 0); // 任意非草面置换（锄地语义）
+        const bool okB = w.blockAt(x1, kRigY + 1, z1) == quint8(BR::Air)
+                     && dropItemCount == dropsB0 + 1
+                     && lastDropId == BR::dropId(BR::TallGrass);
+
+        const auto [x2, z2] = nextSlot();
+        placeRigBlock(w, x2, kRigY, z2, BR::Dirt, 0);
+        placeRigBlock(w, x2, kRigY + 1, z2, BR::FlowerRed, 0);
+        const int dropsC0 = dropItemCount;
+        w.setBlockSilent(x2, kRigY, z2, BR::Farmland, 0); // 花合法面含耕地 → 不掉（族口径保留）
+        const bool okC = w.blockAt(x2, kRigY + 1, z2) == quint8(BR::FlowerRed)
+                     && dropItemCount == dropsC0;
+
+        const bool okT903 = okA && okB && okC;
+        if (!okT903)
+            qInfo().noquote() << "  [t903 diag] okA" << okA << "okB" << okB << "okC" << okC
+                              << "a=" << int(w.blockAt(x0, kRigY + 1, z0))
+                              << "b=" << int(w.blockAt(x1, kRigY + 1, z1))
+                              << "c=" << int(w.blockAt(x2, kRigY + 1, z2));
+        if (!okT903) ++totalFail;
+        qInfo().noquote() << (okT903 ? "PASS" : "FAIL")
+                          << "| t903 tallgrass support-replacement lost-support: grass block's only legal "
+                             "support is another grass block (placement tightened, dirt rejected), and the "
+                             "lost-support hook now drops the tall grass when its support is REPLACED by any "
+                             "non-grass face - the sheep-graze path (setWaterSilent Grass->Dirt, t897 entry) "
+                             "and the generic silent replacement (Dirt->Farmland hoe semantics) both clear the "
+                             "plant and drop its dropId, while the flower negative control stays put on "
+                             "replaced-but-still-legal farmland (family replacement-caliber kept for flowers/"
+                             "mushrooms, only tallgrass tightened)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
