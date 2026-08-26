@@ -135,7 +135,9 @@ Item {
     function localWriteSlot(group, index, id, count, durability, enchants, name) {
         if (group !== "dispenser" || !root.dispenserStore) return
         root.dispenserStore.setSlot(root.dispenserX, root.dispenserY, root.dispenserZ, index, id, count,
-                                    (Array.isArray(enchants) && enchants.length === 4) ? enchants : [],
+                                    // review26 #9：enchants 可为 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫
+                                    //   兜 [] 把带附魔放入静默清白板（t874 AnvilUI 同根，list4 归一终局防御）。
+                                    InventoryOps.list4(enchants),
                                     (typeof name === "string") ? name : "",
                                     (durability > 0) ? durability : -1)
     }
@@ -349,7 +351,8 @@ Item {
                                     const _r = root.dispCoordRev
                                     if (_r < 0 || dId === 0 || !root.dispenserStore) return false
                                     const e = root.dispenserStore.slotEnchantsAt(root.dispenserX, root.dispenserY, root.dispenserZ, index)
-                                    return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                    // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫光晕恒不亮。
+                                    return !!e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                                 }
                                 color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                                 radius: 3
@@ -508,7 +511,7 @@ Item {
                             visible: {
                                 const _r = root.hotbar.mainRevision
                                 if (_r < 0 || mainId === 0) return false
-                                return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                                return !!mainEnch && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0) // review26 #9：mainEnch 是 C++ 序列（Array.isArray 恒 false），真值守卫
                             }
                             color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                             radius: 3
@@ -815,7 +818,7 @@ Item {
         if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
         else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
         else return ""
-        if (!Array.isArray(e)) return ""
+        if (!e) return ""   // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫攻击行恒缺（t874 同根）
         let sharp = 0
         for (let i = 0; i < 4; ++i) {
             if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // EnchantRegistry::Sharpness = 1

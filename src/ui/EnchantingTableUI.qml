@@ -1275,7 +1275,7 @@ Item {
                     if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
                     else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
                     else if (parts[0] === "enchant") e = _er >= 0 ? root.enchAt(idx) : null
-                    if (Array.isArray(e)) {
+                    if (e) {   // review26 #9：e 是 C++ 序列对象（hotbar/main 分支，Array.isArray 恒 false）→ 旧守卫锐锋括号恒缺（t874 同根；enchant 本地槽分支是真数组，真值守卫两兼容）
                         for (let i = 0; i < 4; ++i) {
                             if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // Sharpness = 1
                         }

@@ -5646,7 +5646,9 @@ Window {
                     property int entCount: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.countAt(index)) : 0 }
                     // t590 实体附魔（触碰 revision → 玩家丢弃带附魔工具 / 护甲后重算；方块 / 材料段掉落恒全 0）。
                     property var entEnch: { const _r = itemEntities.revision; return _r >= 0 ? (itemEntities.enchantsAt(index)) : [0,0,0,0] }
-                    property bool entHasEnch: Array.isArray(entEnch) && ((entEnch[0] || 0) !== 0 || (entEnch[1] || 0) !== 0 || (entEnch[2] || 0) !== 0 || (entEnch[3] || 0) !== 0)
+                    // review26 #9：entEnch 是 C++ 序列对象（itemEntities.enchantsAt 返回，Array.isArray 恒
+                    //   false）→ 旧守卫令掉落物附魔光晕恒不亮（t874 同根，序列下标可读，真值守卫）。
+                    property bool entHasEnch: !!entEnch && ((entEnch[0] || 0) !== 0 || (entEnch[1] || 0) !== 0 || (entEnch[2] || 0) !== 0 || (entEnch[3] || 0) !== 0)
                     property real rotY: 0       // 绕 Y 旋转角（度）
                     property real bobY: 0       // 上下浮动偏移（格）
                     eulerRotation: Qt.vector3d(0, rotY, 0)

@@ -137,7 +137,9 @@ Item {
         root.craftCounts[index] = count
         // dur 归一（同 anvil rv3 模式：只存实例值 >0 或 0，防 -1 残留）。
         root.craftDur[index] = (durability > 0) ? durability : 0
-        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        // review26 #9：enchants 可为 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫把带附魔放入静默清
+        //   白板 + e.slice() 对序列 undefined（t874 AnvilUI 同根，list4 归一终局防御）。
+        const e = InventoryOps.list4(enchants)
         const arr = root.craftEnch.slice()     // t699：新外层引用保 var NOTIFY（同引用重赋不发信号）
         arr[index] = e.slice()
         root.craftEnch = arr
@@ -643,7 +645,7 @@ Item {
                             visible: {
                                 const _r = root.hotbar.mainRevision
                                 if (_r < 0 || mainId === 0) return false
-                                return Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                                return !!mainEnch && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0) // review26 #9：mainEnch 是 C++ 序列（Array.isArray 恒 false），真值守卫
                             }
                             color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                             radius: 3
@@ -950,7 +952,7 @@ Item {
         if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
         else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
         else return ""
-        if (!Array.isArray(e)) return ""
+        if (!e) return ""   // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫攻击行恒缺（t874 同根）
         let sharp = 0
         for (let i = 0; i < 4; ++i) {
             if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // EnchantRegistry::Sharpness = 1
