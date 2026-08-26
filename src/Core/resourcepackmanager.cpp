@@ -2630,12 +2630,16 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
         flatSpec(d.topTile);
         return spec;
     case BlockRegistry::RedstoneDust:
-        // t815 红石粉 item 图标改走图集 flat 平贴（tile 166 dust_line_off = def.topTile 单一权威）：旧路径是
-        //   t660 手绘 qrc icon_redstone_dust.png（独立 64×64 画稿，与 build_redstone_dust.py 瓦片生成器
-        //   **不同源**）——瓦片族 t692 亮度渐变改版后手绘稿不再同步 = 用户「pick-block 拿到的红石粉贴图是
-        //   旧版」根因。改运行期图集渲染（t745 统一贴图原则）后图标与瓦片恒同源，瓦片再改版自动跟随。
-        //   粉瓦片未映射 pack（灰度可着色瓦片不接包，见 tileFilenameMap 注）→ pack 态亦落程序瓦片，两态一致。
-        flatSpec(d.topTile);
+        // t815 红石粉 item 图标改走图集 flat 平贴：旧路径是 t660 手绘 qrc icon_redstone_dust.png
+        //   （独立 64×64 画稿，与 build_redstone_dust.py 瓦片生成器**不同源**）——瓦片族 t692 亮度渐变改版
+        //   后手绘稿不再同步 = 用户「pick-block 拿到的红石粉贴图是旧版」根因。改运行期图集渲染（t745
+        //   统一贴图原则）后图标与瓦片恒同源，瓦片再改版自动跟随。
+        // t880 图标改**粉堆**瓦片 167（dust_dot_off「红粉堆」——用户「红石粉图标是矿石粉堆形状，不是
+        //   一条线」）：旧用 d.topTile(166) = dust_line_off 线向导线瓦片（放置态连线观感）→ 图标读作
+        //   「一条线」。167 是点态粉堆瓦片（mesher 无邻接导线时的孤立点放置也用它）—— item 图标语义
+        //   = 一小堆粉（机制等价 MC redstone dust item icon 粉堆）。粉瓦片未映射 pack（灰度可着色瓦片
+        //   不接包，见 tileFilenameMap 注）→ pack 态亦落程序瓦片，两态一致。
+        flatSpec(167); // dust_dot_off（红粉堆；t880 粉堆形）
         return spec;
     case BlockRegistry::WheatCrop:
         flatSpec(36); // wheat_stage_7 成熟阶段瓦片（tileFilenameMap 36 同源）

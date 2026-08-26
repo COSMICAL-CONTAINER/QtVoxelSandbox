@@ -2017,6 +2017,16 @@ Window {
         return (idx > 0) ? (63 + idx - 1) : 27
     }
 
+    // t880 「有 3D 模型的物品」掉落物 3D 化判据（掉落物 delegate + 资源查看器共用的家族表；字面量 =
+    //   BlockRegistry id，QML 不 import C++ 枚举——同 sheepWoolDropId 约定）。家族：木/铁活板门（20/136）、
+    //   火把（13）、台阶四族（木 15 / 云杉 87 / 圆石 58 / 石砖 109）、雪层（44）、草丛（24）、附魔台（94）。
+    //   **明确不做**（机制等价 MC 平贴语义保留 billboard）：木楼梯（16）掉落物 / 全部铁轨 / 工具·材料·装备
+    //   （ResourceBrowser 查看器侧楼梯**上 3D**——查看器谓词另行并入 16，见该文件 selectedIsItem3D）。
+    function isItem3DFamily(id) {
+        return id === 13 || id === 20 || id === 136 || id === 15 || id === 87
+            || id === 58 || id === 109 || id === 44 || id === 24 || id === 94
+    }
+
     // t377 mob 护甲 tier 色（t719 起 UnitCube+tier 色路径退役——ArmorLayerBox + layer 贴图接管 mob 穿甲
     //   显示；tier 色板移入层贴图（t717 六档程序层 / pack 原色），tint 走 mobArmorTintT 近白保红闪）。
 
@@ -5648,6 +5658,61 @@ Window {
                             alphaCutoff: 0.0   // 火把（id 13）/ 异形段（isPartialBlock）/ cross 段（isCrossBlock）/ 床段（isBed，t496）走下方 billboard 分支
                         }
                     }
+                    // t880 异形物品 3D 掉落物（「有 3D 模型的物品」掉落物 3D 化）：活板门/火把/台阶/雪层/
+                    //   草丛/附魔台走 ItemShapeGeometry 真实 3D 形状（几何与 World partialblockgeometry 形状
+                    //   同源、形心居中），替代旧 BillboardQuad 平面图标。继承 entRoot 自转（真 3D 各角度可辨，
+                    //   无 billboard 朝相补偿）；scale 0.3 同方块段/材料段统一。附魔台（94）叠静态小书
+                    //   （EnchantBookBox 两页 V 形，pack 书贴图两态与放置态 bookDelegate 同源——掉落物上的
+                    //   书是迷你版「台上有书」读感）。Mask+0.5 + opacity 0.99：活板门孔 / cross 透明底 / 火把
+                    //   窗透明像素 cutout；不透明瓦片不受影响（同手持 billboard alpha-test 契约）。
+                    //   木楼梯（16）掉落物**不进**（MC 平贴语义保留 billboard——isItem3DFamily 注释）。
+                    Model {
+                        visible: isItem3DFamily(entRoot.entId)
+                        geometry: ItemShapeGeometry { blockId: entRoot.entId }
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        position: Qt.vector3d(0, entRoot.bobY, 0)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            alphaMode: PrincipledMaterial.Mask
+                            alphaCutoff: 0.5
+                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（cutout 族）
+                            baseColor: terrainLight(worldClock.skyLight)
+                            baseColorMap: voxelAtlas
+                        }
+                        // t880 附魔台掉落物顶悬浮小书（两页 V；enchantBookPackTex 两态与放置态同源，
+                        //   宽 ≤64 pack 按 miss 处理走 qrc 布局 0——bookDelegate bookPackHit 同判据）。
+                        //   材质经显式 id 引用判据（t610 教训：材质 parent 解析到 Model，parent.parent
+                        //   在构造期求值为 null → TypeError）。
+                        Node {
+                            id: dropBookNode
+                            visible: entRoot.entId === 94
+                            position: Qt.vector3d(0, 0.14, 0)
+                            property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
+                                                        && resourcePack.entityTextureWidth("enchant_book") > 64
+                            Model { // 左页（纸页镜像 piece 4；外缘下倾 -22°）
+                                geometry: EnchantBookBox { piece: 4; layout: dropBookNode.bookPackHit ? 1 : 0 }
+                                position: Qt.vector3d(-0.088, 0.035, 0)
+                                eulerRotation: Qt.vector3d(0, 0, -22)
+                                scale: Qt.vector3d(0.19, 0.03, 0.23)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: terrainLight(worldClock.skyLight)
+                                    baseColorMap: dropBookNode.bookPackHit ? enchantBookPackTex : enchantBookTex
+                                }
+                            }
+                            Model { // 右页（纸页 piece 1；+22° 镜像成 V）
+                                geometry: EnchantBookBox { piece: 1; layout: dropBookNode.bookPackHit ? 1 : 0 }
+                                position: Qt.vector3d(0.088, 0.035, 0)
+                                eulerRotation: Qt.vector3d(0, 0, 22)
+                                scale: Qt.vector3d(0.19, 0.03, 0.23)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: terrainLight(worldClock.skyLight)
+                                    baseColorMap: dropBookNode.bookPackHit ? enchantBookPackTex : enchantBookTex
+                                }
+                            }
+                        }
+                    }
                     // t219 木板衍生方块掉落实体：异形段（台阶/楼梯/栅栏/压力板/门/活板门）非整立方 → BillboardQuad
                     //   平图标（dimetric 立体图标 icon_wood_*.png），非 BlockCube 满格木板立方（异形各面 tile=planks
                     //   → BlockCube 渲成「一块木板」与木板不可辨）。机制同火把 / 材料段掉落 billboard（朝相机单面 +Z）：
@@ -5657,7 +5722,8 @@ Window {
                     //   Texture inline 读 per-entity entId（每个掉落物各显示自己的异形图标）。
                     // t496 二轮复盘 床掉落亦走本 billboard 分支（bed 图标而非满格被面色立方）。
                     Model {
-                        visible: hotbarVM.isPartialBlock(entRoot.entId) || hotbarVM.isCrossBlock(entRoot.entId) || hotbarVM.isBed(entRoot.entId)
+                        visible: (hotbarVM.isPartialBlock(entRoot.entId) || hotbarVM.isCrossBlock(entRoot.entId) || hotbarVM.isBed(entRoot.entId))
+                                  && !isItem3DFamily(entRoot.entId) // t880 3D 家族走上方 ItemShapeGeometry 分支
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -5673,27 +5739,8 @@ Window {
                             }
                         }
                     }
-                    // t218 火把掉落实体：火把非立方 → BillboardQuad 平图标（细立柱），非 BlockCube 6 面立方
-                    //   （肉眼「贴火把的小立方」非「火把」）。机制同材料段 billboard（朝相机单面 +Z）：本 Model 是
-                    //   entRoot（绕 Y 自转 rotY）子节点，本地 yaw 减 rotY 抵消继承 → 世界旋转 = 相机旋转 → +Z 恒
-                    //   指回相机、正面恒可见（火把图标始终正对玩家，不随 entRoot 自转「转背面」）。scale 0.24×0.42
-                    //   非等比细高（火把像素约占图 0.75 高 → 渲染火把 ~0.31 高，与方块段 0.3 立方相当、但细）。
-                    //   baseColor 乘 terrainLight(skyLight) 夜间变暗（同方块段 / 材料段掉落物统一）。
-                    //   alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约（透明底不丢弃会被当不透明黑）。
-                    Model {
-                        visible: entRoot.entId === 13
-                        geometry: BillboardQuad {}
-                        scale: Qt.vector3d(0.24, 0.42, 1.0)
-                        position: Qt.vector3d(0, entRoot.bobY, 0)
-                        eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y - entRoot.rotY, 0)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            alphaCutoff: 0.5
-                            opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
-                            baseColor: terrainLight(worldClock.skyLight)
-                            baseColorMap: torchIconTex
-                        }
-                    }
+                    // t218 火把掉落实体 → t880 起整段退役：火把（13）入 isItem3DFamily 走上方
+                    //   ItemShapeGeometry 细立柱 3D 分支（真 3D 各角度可辨，替代本 BillboardQuad 平图标）。
                     // 工具段（t75 改用 PickaxeGeometry 3D 镐形，不再 CrackBox 兜底；t233 加 HoeGeometry 锄形；
                     //   t264 加 AxeGeometry / ShovelGeometry / SwordGeometry 斧铲剑形）：
                     //   旧 CrackBox + ToolIcon(透明底 RGB0) 贴图无 alphaCutoff → 透明底被当不透明黑 → 6 面黑立方体
