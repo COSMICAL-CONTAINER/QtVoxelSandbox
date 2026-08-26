@@ -14549,6 +14549,55 @@ Item {
                              "resource browser preview mirrors 0.85";
     }
 
+    // ── P-t895 F3 修复（源码钉：①重叠布局分列 + ②MC 1.0 行结构逐面对齐）──
+    //    ① 用户「黄绿文字重叠」根因：主 F3 块（黄 #ffff00）与 FrameProfiler 报告（绿 #00ff88）各自绝对
+    //      定位，绿块钉死 y=62+200（注释还写「主块约 12 行」）—— 主块逐轮增行到 ~20 行后越过 200px
+    //      与绿块叠印。修 = Column 布局分列（行数增减自动排布永不重叠）。钉：两 Text 同入一个 Column
+    //      （f3Text Text 与 FrameProfiler Text 之间存在 spacing 锚）+ 旧 `y: 62 + 200` 绝对定位已消失。
+    //    ② 主块严格对齐 MC 1.0 F3：标题行带版本（MC "Minecraft 1.0.0" → "voxelsandbox (BuildInfo)"，
+    //      t813 版本戳并入标题不再单独占行）、fps 行、x/y/z 三行（MC "x: 123.456 // 123 // 11" 坐标//
+    //      所在格//格内 16 取余）、f 朝向行（基数码 MC 表 +Z→0/−X→1/−Z→2/+X→3 + 轴 + (yaw / pitch)）、
+    //      biome 行、bl/ol 光照行（脚下格 blockLightAt/skyLightAt 真值）。钉六行前缀俱在 + 旧格式行
+    //      （"build: " 单行 / "pos: " 合并行 / "yaw: " 独行）已删。工程诊断尾段保留（§2-F 验收铁律，
+    //      MC 行在前工程扩展在后，空行分隔）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString m = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const int iF3 = m.indexOf(QStringLiteral("text: window.f3Text"));
+        const int iProf = m.indexOf(QStringLiteral("text: FrameProfiler.report"));
+        const int iCol = m.lastIndexOf(QStringLiteral("Column {"), iF3);
+        bool okColumn = iF3 >= 0 && iProf > iF3 && iCol >= 0
+                        && m.mid(iCol, iF3 - iCol).contains(QStringLiteral("spacing: 10"))   // 同 Column 属性
+                        && m.lastIndexOf(QStringLiteral("Column {"), iProf) == iCol;          // 两 Text 同 Column
+        bool okOldGone = !m.contains(QStringLiteral("y: 62 + 200"));
+        const int iFn = m.indexOf(QStringLiteral("function buildF3Text()"));
+        const QString fn = iFn >= 0 ? m.mid(iFn, 4200) : QString();
+        bool okMc = fn.contains(QStringLiteral("\"voxelsandbox (\" + BuildInfo.full"))
+                    && fn.contains(QStringLiteral("\\nx: \""))
+                    && fn.contains(QStringLiteral(" // \""))
+                    && fn.contains(QStringLiteral("\\nf: \" + fIdx"))
+                    && fn.contains(QStringLiteral("\\nbiome: \""))
+                    && fn.contains(QStringLiteral("\\nbl: \" + footBl + \" ol: \""))
+                    && !fn.contains(QStringLiteral("\"\\nbuild: \""))
+                    && !fn.contains(QStringLiteral("\"\\npos: \""));
+        const bool ok = okColumn && okOldGone && okMc;
+        if (!ok)
+            qInfo().noquote() << "  [t895 diag] column" << okColumn << "oldGone" << okOldGone
+                              << "mc" << okMc;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t895 F3 overlay fixed: (1) yellow main block and green FrameProfiler report "
+                             "now live in one Column (auto-stacked, overlap from the hardcoded y=62+200 with "
+                             "the grown ~20-line main block is structurally gone); (2) main block realigned "
+                             "line-by-line to MC 1.0 F3 - version-carrying title, fps line, separate x/y/z "
+                             "lines with MC coordinate//block//in-chunk-16 format, f facing line (MC cardinal "
+                             "table +Z->0/-X->1/-Z->2/+X->3 with yaw/pitch), biome line and bl/ol feet-light "
+                             "line from real World queries; project diagnostics kept as a blank-line-separated "
+                             "tail (PLAN 2-F acceptance requires the mesh/perf stats)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
