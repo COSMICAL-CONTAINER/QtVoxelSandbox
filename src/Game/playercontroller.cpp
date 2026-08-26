@@ -7081,9 +7081,62 @@ void PlayerController::step(qreal dt)
         if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::Fire) touchingLava = true;
         if (!touchingLava && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::Fire)
             touchingLava = true;
-        // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值）。三格判定：脚位（穿入燃烧的
-        //   草丛/树苗等非实心可燃物）、眼位（上半身没入）、**脚下一格**（站在燃烧的木板/原木顶面——实体
-        //   块玩家进不去，但踩在着火的木板上当然算接触，机制等价 MC 站燃块着火）。
+        // t888 接触语义对齐 MC（t890 复核收口）：旧判定只查「玩家**中心**所在列的 3 格」（foot-1/foot/eye）
+        //   → 贴着燃烧方块**侧壁**走（玩家 AABB 半宽 0.3，身体在邻格、中心列不含燃烧格）永不点燃——用户实测
+        //   「贴着燃烧方块侧面走不点燃」。修法 = 仙人掌接触伤害判据族先例（misc 三轮：满格 AABB + 容差皮，
+        //   遍历玩家 XZ 覆盖格 ±1 正交邻）：把「燃烧方块接触」扩为 **AABB 接触** —— 玩家 AABB（半宽 0.3 ×
+        //   身高）与燃烧格满格盒 [c,c+1]³ 做「含容差皮」的重叠测试；Fire 格同口径并入（立地火也是「火源」，
+        //   MC 里 entity AABB 触 fire 的 inFire 判据本就是 AABB 相交）。kTouchSkin 容差皮吸收碰撞 snap 的
+        //   1e-4 缝（playercontroller kTouchSkin 先例注释：moveAxis 把身体 snap 在障碍面外 eps 缝上，
+        //   含边界比较恒 false 的同款病灶）。岩浆保持中心列判定不动（MC 岩浆是流体接触 = 中心进液格语义，
+        //   且泡岩浆已有独立伤害链，不掺入 AABB 面——防贴墙走被隔壁岩浆误点燃）。
+        if (!touchingLava) {
+            constexpr float kTouchSkin = 0.002f; // 容差皮 ≫1e-4 snap 缝、≪0.3 半宽（同仙人掌判据族取值）
+            const float pMinX = m_pos.x() - 0.3f, pMaxX = m_pos.x() + 0.3f;
+            const float pMinZ = m_pos.z() - 0.3f, pMaxZ = m_pos.z() + 0.3f;
+            const float pMinY = m_pos.y(),         pMaxY = m_pos.y() + m_height;
+            const int xLo = int(std::floor(pMinX)), xHi = int(std::floor(pMaxX));
+            const int zLo = int(std::floor(pMinZ)), zHi = int(std::floor(pMaxZ));
+            const int yLo = footY, yHi2 = int(std::floor(pMaxY));
+            auto fireCellAt = [&](int xx, int yy, int zz) -> bool { // 火源格：立地火 或 燃烧态可燃方块
+                if (yy < 0 || yy >= m_world->height()) return false;
+                const quint8 id = m_world->blockAt(xx, yy, zz);
+                return id == BlockRegistry::Fire || m_world->isBurningAt(xx, yy, zz);
+            };
+            for (int yy = yLo; yy <= yHi2 && !touchingLava; ++yy) {
+                for (int cx = xLo; cx <= xHi && !touchingLava; ++cx) {
+                    for (int cz = zLo; cz <= zHi && !touchingLava; ++cz) {
+                        // 自身格 + 水平 4 邻（±1 扫描已含）：贴燃烧方块侧壁走时身体被挡在邻格边界，
+                        //   燃烧格不在 footprint 内 → 必须扫到正交邻格（misc 三轮仙人掌同款扩圈）。
+                        static constexpr int kNb4[5][2] = {{0,0},{1,0},{-1,0},{0,1},{0,-1}};
+                        for (const auto &o : kNb4) {
+                            const int nx = cx + o[0], nz = cz + o[1];
+                            if (!fireCellAt(nx, yy, nz)) continue;
+                            // 满格 AABB 重叠（XZ 含容差皮；Y 严格——上下层擦边不算接触，站顶分支单独兜）。
+                            const float cMinX = float(nx), cMaxX = float(nx) + 1.0f;
+                            const float cMinZ = float(nz), cMaxZ = float(nz) + 1.0f;
+                            const float cMinY = float(yy), cMaxY = float(yy) + 1.0f;
+                            const bool overlap = pMinX <= cMaxX + kTouchSkin && pMaxX >= cMinX - kTouchSkin
+                                              && pMinZ <= cMaxZ + kTouchSkin && pMaxZ >= cMinZ - kTouchSkin
+                                              && pMinY < cMaxY && pMaxY > cMinY;
+                            if (overlap) { touchingLava = true; break; } // 复用火烧链（变量名沿 t344）
+                        }
+                    }
+                }
+            }
+            // 站顶分支（t716 仙人掌先例同构）：站在燃烧方块顶面——碰撞 snap 使脚底停在支撑面**上缘**
+            //   eps 缝（pMinY == cMaxY + ~1e-4），主循环 Y 严格判定漏；脚下支撑格单独含边界复探
+            //   （该分支只查 footY-1 一层支撑面，无斜对角 / 上层误伤面，XZ 仍受满格 AABB 过滤）。
+            if (!touchingLava) {
+                for (int cx = xLo; cx <= xHi && !touchingLava; ++cx)
+                    for (int cz = zLo; cz <= zHi && !touchingLava; ++cz)
+                        if (fireCellAt(cx, footY - 1, cz))
+                            touchingLava = true; // 支撑面即火源 = 接触（站燃块顶必点燃，t843 三格判定的超集）
+            }
+        }
+        // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值）。三格判定已被上方 t888 AABB
+        //   接触扫描覆盖（自身格 ⊂ 扫描域；脚下一格由站顶分支兜）→ 保留原三行作**中心列快速路径**冗余
+        //   （命中即短路省全扫；语义不变，双保险）。
         if (footY - 1 >= 0 && m_world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
         if (!touchingLava && footY >= 0 && m_world->isBurningAt(fx, footY, fz)) touchingLava = true;
         if (!touchingLava && eyeY >= 0 && m_world->isBurningAt(fx, eyeY, fz)) touchingLava = true;

@@ -6193,8 +6193,47 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (footY >= 0 && world->blockAt(fx, footY, fz) == BlockRegistry::Fire) touchingLava = true;
                 if (!touchingLava && bodyY >= 0 && world->blockAt(fx, bodyY, fz) == BlockRegistry::Fire)
                     touchingLava = true;
+                // t888 接触语义对齐 MC（t890 复核收口，玩家侧 step 同批）：旧三格判定只查 mob **中心列**
+                //   → 贴燃烧方块侧壁走的 mob（身体在邻格、中心不含燃烧格）永不点燃。修法 = 满格 AABB 接触
+                //   扫描（玩家侧 kTouchSkin 容差皮先例）：mob AABB（halfW/halfH）与 Fire/燃烧格满格盒重叠
+                //   即接触；扫自身 XZ 覆盖格 + 正交 4 邻（侧壁贴走时燃烧格在邻格）。岩浆保持中心列判定不动
+                //   （流体接触语义 + 泡岩浆独立伤害链，防隔墙误燃）。
+                if (!touchingLava) {
+                    constexpr float kTouchSkin = 0.002f; // ≫1e-4 snap 缝、≪半宽（玩家侧判据族同值）
+                    const float mMinX = e.pos.x() - e.halfW, mMaxX = e.pos.x() + e.halfW;
+                    const float mMinZ = e.pos.z() - e.halfW, mMaxZ = e.pos.z() + e.halfW;
+                    const float mMinY = e.pos.y() - e.halfH, mMaxY = e.pos.y() + e.halfH;
+                    const int xLo = qFloor(mMinX), xHi = qFloor(mMaxX);
+                    const int zLo = qFloor(mMinZ), zHi = qFloor(mMaxZ);
+                    const int yHi = qFloor(mMaxY);
+                    static constexpr int kNb4[5][2] = {{0,0},{1,0},{-1,0},{0,1},{0,-1}};
+                    for (int yy = footY; yy <= yHi && !touchingLava; ++yy) {
+                        if (yy < 0) continue;
+                        for (int cx = xLo; cx <= xHi && !touchingLava; ++cx) {
+                            for (int cz = zLo; cz <= zHi && !touchingLava; ++cz) {
+                                for (const auto &o : kNb4) {
+                                    const int nx = cx + o[0], nz = cz + o[1];
+                                    if (nx < 0 || nz < 0 || nx >= int(worldW) || nz >= int(worldD)
+                                        || yy >= world->height()) continue;
+                                    const quint8 nid = world->blockAt(nx, yy, nz);
+                                    const bool fireSrc = nid == BlockRegistry::Fire
+                                                         || world->isBurningAt(nx, yy, nz);
+                                    if (!fireSrc) continue;
+                                    const float cMinX = float(nx), cMaxX = float(nx) + 1.0f;
+                                    const float cMinZ = float(nz), cMaxZ = float(nz) + 1.0f;
+                                    const float cMinY = float(yy), cMaxY = float(yy) + 1.0f;
+                                    if (mMinX <= cMaxX + kTouchSkin && mMaxX >= cMinX - kTouchSkin
+                                        && mMinZ <= cMaxZ + kTouchSkin && mMaxZ >= cMinZ - kTouchSkin
+                                        && mMinY < cMaxY && mMaxY > cMinY) {
+                                        touchingLava = true; break; // 复用火烧链（变量名沿 t344）
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值，玩家侧 step 同款三格
-                //   判定）：脚下一格（站在燃烧木板/原木顶面）+ 脚位 / 身体格（穿入燃烧的草丛等非实心可燃物）。
+                //   判定）。t888 后为**中心列快速路径**冗余（AABB 扫描已覆盖其语义；命中短路省全扫）。
                 if (footY - 1 >= 0 && world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
                 if (!touchingLava && footY >= 0 && world->isBurningAt(fx, footY, fz)) touchingLava = true;
                 if (!touchingLava && bodyY >= 0 && world->isBurningAt(fx, bodyY, fz)) touchingLava = true;
