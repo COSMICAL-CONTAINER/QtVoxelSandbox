@@ -14646,13 +14646,30 @@ Item {
     //      TallGrass 诱饵（旧「前方草丛」逻辑的触发面）—— 新逻辑羊不吃（平台 0 Dirt + 诱饵草丛**全数
     //      完好**；旧逻辑会消耗掉一棵草丛 → 双重判别面）。② 静止走路动画归零（t897 ②）：猪游荡期
     //      walkPhase 推进（观测到非 0）后必在某次 idle 后归 0（旧「冻结于上次相位」下非 0 值永不回 0）。
+    //    **flake 修复（主Agent 复跑抓红）**：旧 rig 平台裸放（7×7 无栏），羊 RNG 游走期走出平台缘坠落
+    //    到自然地表（log 见「sheep ate grass block at 28 64 25」—— y64 野草地）→ 平台内 Dirt 计数 0 =
+    //    经典 mob 游走几何漂移（t836/t882 同款教训）。修法 = **几何围栏**：两平台各加 2 格高石墙环
+    //    （1 格会被 mob 越障跳翻过——isJumpObstacle 前方 1 格墙 + 上方空气即跳；2 格上方仍是墙 → 不跳，
+    //    羊被物理钉在栏内，只能吃栏内 Grass）。窗口同步放宽 2400→3600 帧（57.6s，覆盖 RNG 掷骰节律的
+    //    多轮 idle/吃草/冷却循环）。围栏后「吃到」的判定不再依赖几何停留（栏内全是 Grass，任何一次
+    //    idle 吃草都落在断言面内）。
     {
         World wG;
         wG.setWidth(36); wG.setDepth(36); wG.setHeight(96); wG.setSeed(31); // 平台 rig y84/85（局部覆写）
-        for (int x = 8; x <= 14; ++x)
-            for (int z = 8; z <= 14; ++z) wG.setBlock(x, 84, z, BR::Grass, 0);   // 草平台（零草丛）
-        for (int x = 20; x <= 26; ++x)
-            for (int z = 20; z <= 26; ++z) wG.setBlock(x, 84, z, BR::Stone, 0);  // 石平台
+        // 草围栏（外环 7..15 周界 2 高石墙；栏内地表 8..14² 全 Grass、零草丛；墙下垫石防浮空）。
+        for (int x = 7; x <= 15; ++x)
+            for (int z = 7; z <= 15; ++z) {
+                const bool wall = (x == 7 || x == 15 || z == 7 || z == 15);
+                wG.setBlock(x, 84, z, wall ? BR::Stone : BR::Grass, 0);
+                if (wall) { wG.setBlock(x, 85, z, BR::Stone, 0); wG.setBlock(x, 86, z, BR::Stone, 0); }
+            }
+        // 石围栏（外环 19..27 周界 2 高石墙；栏内 20..26² 石板 + 诱饵草丛环）。
+        for (int x = 19; x <= 27; ++x)
+            for (int z = 19; z <= 27; ++z) {
+                const bool wall = (x == 19 || x == 27 || z == 19 || z == 27);
+                wG.setBlock(x, 84, z, BR::Stone, 0);
+                if (wall) { wG.setBlock(x, 85, z, BR::Stone, 0); wG.setBlock(x, 86, z, BR::Stone, 0); }
+            }
         int baitCount = 0;
         for (int x = 21; x <= 25; ++x)
             for (int z = 21; z <= 25; ++z)
@@ -14663,7 +14680,7 @@ Item {
         const int pig = em.spawnMobTyped(9, 85, 13, EntityManager::MobPig, QStringLiteral("#ee9999"), 10);
         const QVector3D farListener(-1000.0f, 90.0f, -1000.0f);
         bool sawWalk = false, sawReset = false;
-        for (int t = 0; t < 2400; ++t) {   // 38s：吃草（扫描 ≤1s + 周期 1.2s + 冷却 2s 多轮）+ 游荡走停交替
+        for (int t = 0; t < 3600; ++t) {   // 57.6s：吃草（扫描 ≤1s + 周期 1.2s + 冷却 2s 多轮）+ 游荡走停交替
             em.tick(0.016f, &wG, farListener, 0.3f, 1.8f, false);
             if (pig >= 0 && !sawWalk) {
                 if (em.walkPhaseAt(pig) != 0.0f) sawWalk = true;
@@ -14671,8 +14688,8 @@ Item {
                 sawReset = true;
             }
         }
-        // 断言面：草平台 ≥1 格 Dirt（吃了）；石平台 0 Dirt + 诱饵环 24 棵全在（没吃、也没消耗草丛）；
-        // 猪走过后归零。
+        // 断言面：草栏内 ≥1 格 Dirt（吃了——栏内全 Grass，任何 idle 吃草都落此面）；石栏内 0 Dirt +
+        // 诱饵环 24 棵全在（没吃、也没消耗草丛）；猪走过后归零。
         int grassDirt = 0, stoneDirt = 0, baitLeft = 0;
         for (int x = 8; x <= 14; ++x)
             for (int z = 8; z <= 14; ++z)
