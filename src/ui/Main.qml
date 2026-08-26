@@ -4278,7 +4278,11 @@ Window {
                     dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     glassOnly: true
                 }
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
+                // t899 玻璃透明度再增实（用户 8-27 仍觉不够透）：opacity 0.45→**0.30**（迭代史：t405 初版
+                //   0.45 + 1px 浅棱 → t838② 边框增实 2px 双色环（用户「边缘太透明」）→ t899 用户反转「整体
+                //   不够透、框感重」→ 增透 + 棱环收回单圈 1px 中等棱 delta~65，见 tools/build_glass.py 文件头
+                //   迭代史双钉）。透明度（材质 opacity）与框感（棱环宽度/深度）两条正交轴分开调。
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.30; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
             }
         }
 
