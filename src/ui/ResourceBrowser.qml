@@ -290,7 +290,8 @@ Item {
     //   可越 360（eulerRotation 角度语义等价）—— 统一不改写（动画运行期 DragHandler 不会同时写）。
     property real spinAngle: 0
     // t599 鼠标拖拽旋转态：dragging = DragHandler 活动中（暂停自转）；userPitch = 拖拽累计俯仰角偏移
-    //   （叠加在 -22° 基倾上；t820 起上拖看底 / 下拖看顶——「推球面」直觉，旧版符号反）。松手 resume
+    //   （叠加在 -22° 基倾上，Y 拖上/下看顶/底——t877 恢复 t599 原方向；**用户确认方向，勿再改**：
+    //   t820 曾按「推球面」直觉取反符号，用户两轮实测均判反 → 本符号为用户定稿）。松手 resume
     //   动画把 spinAngle lerp 回自转相位（无跳变）。yaw 由 spinAngle 本身承载（拖拽水平位移直接写入
     //   spinAngle，自转从松手角度继续）。
     property bool previewDragging: false
@@ -688,14 +689,15 @@ Item {
                                 // t599 3D 预览鼠标拖拽旋转（用户「一直自动旋转，能不能拖拽看」）：在自动旋转基础上
                                 //   加 DragHandler —— 按住拖时暂停自转（previewDragging → NumberAnimation running=false），
                                 //   水平位移增量写 spinAngle（yaw，度；1px = 0.6° 手感系数）、垂直位移增量累计
-                                //   userPitch（pitch，度；限 ±60° 防过翻）；松手 pitch 由 resumePitchAnim 平滑归零
-                                //   （400ms OutCubic 回标准 -22° 3/4 视角），yaw 由自转从当前角度无缝续转。
-                                //   t820 修「上下拖动方向反」：旧版 userPitch - dy*0.6（上拖 pitch 增 → 模型顶
-                                //   远离镜头 = 看到的是底）与直觉相反 → 符号取反 userPitch + dy*0.6（上拖看底 /
-                                //   下拖看顶，= 拖动方向与模型表面同向移动的「推球面」直觉；左右 yaw 已对不动）。
-                                //   方块与生物 3D 预览共用（同一 spinAngle/userPitch）；enabled 限定 3D 预览可见时
-                                //   （大图标态不抢手势；左侧网格在其外不受影响）。translation 是只读累计值 →
-                                //   lastX/lastY 记上次值取增量（拖拽结束归零基准，下次拖从 0 差起）。
+                                //   userPitch（pitch，度；上拖看顶 / 下拖看底，限 ±60° 防过翻）；松手 pitch 由
+                                //   resumePitchAnim 平滑归零（400ms OutCubic 回标准 -22° 3/4 视角），yaw 由自转从当前
+                                //   角度无缝续转（NumberAnimation on spinAngle 重启从当前值推进，无跳变）。
+                                //   t877 恢复 t599 原符号（userPitch - dy*0.6）：t820 曾按「推球面」直觉取反
+                                //   （+dy），用户两轮实测均判「上下反了」→ 回退原方向并**写死定稿**——
+                                //   【用户确认方向，勿再改】（任何方向直觉推导都不得再翻转此符号；左右 yaw
+                                //   未动）。方块与生物 3D 预览共用（同一 spinAngle/userPitch）；enabled 限定
+                                //   3D 预览可见时（大图标态不抢手势；左侧网格在其外不受影响）。translation
+                                //   是只读累计值 → lastX/lastY 记上次值取增量（拖拽结束归零基准，下次拖从 0 差起）。
                                 DragHandler {
                                     id: previewDrag
                                     target: null // 不拖动对象本身，只读位移（增量驱动旋转）
@@ -720,7 +722,9 @@ Item {
                                         lastX = translation.x
                                         lastY = translation.y
                                         root.spinAngle = (root.spinAngle + dx * 0.6 + 360) % 360
-                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch + dy * 0.6)) // t820 符号取反（旧 -dy 方向反）
+                                        // t877 用户定稿符号（t599 原方向）：上拖看顶 / 下拖看底。
+                                        //   【用户确认方向，勿再改】——t820 的 +dy 取反已按用户实测回退。
+                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))
                                     }
                                 }
                                 // 整立方方块 → 内嵌 View3D 旋转 BlockCube。
