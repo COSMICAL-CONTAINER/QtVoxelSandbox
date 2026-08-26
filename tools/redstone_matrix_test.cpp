@@ -14640,6 +14640,69 @@ Item {
                              "sites, pinned by source pin plus behavioral VM quantity probe";
     }
 
+    // ── P-t897 羊两修（行为级：吃草门 = 脚下草方块 + 静止 walkPhase 归零）──
+    //    ① 吃草动画只在**脚下草方块**触发（t897 ①）：草方块平台（**全场零草丛**）上的羊照常开吃草周期
+    //      —— 周期 apply 段把脚下 Grass 写成 Dirt（观测：平台内出现 Dirt 格）。阴性对照：石平台上围一圈
+    //      TallGrass 诱饵（旧「前方草丛」逻辑的触发面）—— 新逻辑羊不吃（平台 0 Dirt + 诱饵草丛**全数
+    //      完好**；旧逻辑会消耗掉一棵草丛 → 双重判别面）。② 静止走路动画归零（t897 ②）：猪游荡期
+    //      walkPhase 推进（观测到非 0）后必在某次 idle 后归 0（旧「冻结于上次相位」下非 0 值永不回 0）。
+    {
+        World wG;
+        wG.setWidth(36); wG.setDepth(36); wG.setHeight(96); wG.setSeed(31); // 平台 rig y84/85（局部覆写）
+        for (int x = 8; x <= 14; ++x)
+            for (int z = 8; z <= 14; ++z) wG.setBlock(x, 84, z, BR::Grass, 0);   // 草平台（零草丛）
+        for (int x = 20; x <= 26; ++x)
+            for (int z = 20; z <= 26; ++z) wG.setBlock(x, 84, z, BR::Stone, 0);  // 石平台
+        int baitCount = 0;
+        for (int x = 21; x <= 25; ++x)
+            for (int z = 21; z <= 25; ++z)
+                if (!(x == 23 && z == 23)) { wG.setBlock(x, 85, z, BR::TallGrass, 0); ++baitCount; } // 草丛诱饵环
+        EntityManager em;
+        const int sheepG = em.spawnMobTyped(11, 85, 11, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        const int sheepS = em.spawnMobTyped(23, 85, 23, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        const int pig = em.spawnMobTyped(9, 85, 13, EntityManager::MobPig, QStringLiteral("#ee9999"), 10);
+        const QVector3D farListener(-1000.0f, 90.0f, -1000.0f);
+        bool sawWalk = false, sawReset = false;
+        for (int t = 0; t < 2400; ++t) {   // 38s：吃草（扫描 ≤1s + 周期 1.2s + 冷却 2s 多轮）+ 游荡走停交替
+            em.tick(0.016f, &wG, farListener, 0.3f, 1.8f, false);
+            if (pig >= 0 && !sawWalk) {
+                if (em.walkPhaseAt(pig) != 0.0f) sawWalk = true;
+            } else if (pig >= 0 && sawWalk && !sawReset && em.walkPhaseAt(pig) == 0.0f) {
+                sawReset = true;
+            }
+        }
+        // 断言面：草平台 ≥1 格 Dirt（吃了）；石平台 0 Dirt + 诱饵环 24 棵全在（没吃、也没消耗草丛）；
+        // 猪走过后归零。
+        int grassDirt = 0, stoneDirt = 0, baitLeft = 0;
+        for (int x = 8; x <= 14; ++x)
+            for (int z = 8; z <= 14; ++z)
+                if (wG.blockAt(x, 84, z) == BR::Dirt) ++grassDirt;
+        for (int x = 20; x <= 26; ++x)
+            for (int z = 20; z <= 26; ++z)
+                if (wG.blockAt(x, 84, z) == BR::Dirt) ++stoneDirt;
+        for (int x = 21; x <= 25; ++x)
+            for (int z = 21; z <= 25; ++z)
+                if (!(x == 23 && z == 23) && wG.blockAt(x, 85, z) == BR::TallGrass) ++baitLeft;
+        const bool ok = sheepG >= 0 && sheepS >= 0 && pig >= 0
+                        && grassDirt >= 1 && stoneDirt == 0
+                        && baitLeft == baitCount && sawWalk && sawReset;
+        if (!ok)
+            qInfo().noquote() << "  [t897 diag] grassDirt" << grassDirt << "stoneDirt" << stoneDirt
+                              << "bait" << baitLeft << "/" << baitCount
+                              << "sawWalk" << sawWalk << "sawReset" << sawReset
+                              << "sheepG" << sheepG << "sheepS" << sheepS << "pig" << pig;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t897 sheep fixes: graze animation now keys on the grass block UNDERFOOT "
+                             "(the own-column support cell - sheep on a pure grass-block platform with zero "
+                             "tall grass starts eating cycles and turns the block below to dirt), while the "
+                             "negative control keeps every bait tall-grass plant intact on a stone platform "
+                             "with zero dirt conversions (old front-column tall-grass logic would have "
+                             "consumed a plant); stationary walk animation resets to zero - the pig's "
+                             "walkPhase observed advancing later reads exactly 0 after an idle phase (old "
+                             "freeze kept the last phase forever, legs stuck mid-stride)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

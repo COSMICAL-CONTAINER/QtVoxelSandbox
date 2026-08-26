@@ -4540,40 +4540,34 @@ float EntityManager::fuseProgressAt(int i) const
     return p > 1.0f ? 1.0f : p;
 }
 
-// t241 羊吃草：检测 / 消耗 entity 前方一格草丛（机制等价 MC 羊吃草：草丛消失 + 其下草方块变泥土）。
-//   目标列 = 沿 yaw 朝向 reach=0.7 前方（头部前方）；草丛格 y = 身体格（floor(pos.y − radius)，草丛生于地
-//   表上方一格 = 羊身体所在格）；其下地表格 = bodyY − 1（草方块 Grass）。OOB → 安全返 false（blockAt 越界
-//   返 air ≠ TallGrass，setWaterSilent 越界返 false，均不副作用）。
-//   consume=true：草丛→Air（静默写，setWaterSilent 通用入口；非玩家破块 → 不发 broken/placed → 免粒子 / 音 /
-//     掉落噪音，同水流蔓延 / 作物生长模式）；其下若 Grass → Dirt（机制等价 MC 草地变泥土）。
-//   consume=false：仅检测（决定是否开吃草周期）。返回前方是否找到草丛。
+// t241/t897 羊吃草：检测 / 消耗**脚下草方块**（机制等价 MC 1.0 羊低头吃草方块：Grass → Dirt）。
+//   t897 ① 语义收紧（用户「吃草动画只在脚下草方块触发」）：旧目标 = 身前 reach 0.7 一格的**草丛**
+//   （TallGrass；消耗草丛 + 其下草方块变泥土）→ ①纯草方块地表（无草丛的草原 / 人造平台）羊永不
+//   开吃草动画；②吃不吃取决于朝向（正对草丛才吃）观感怪。改目标 = **自身列脚下方块**（AABB 底面
+//   下一格 = 支撑格，与 t300 重新长毛链 / 脚步声同列口径）== Grass —— 草丛（TallGrass）不再参与
+//   吃草语义（kEatReach 前向外推随之退役）。consume=true：草方块 → 泥土（静默写 setWaterSilent，
+//   非玩家破块 → 不发 broken/placed → 免粒子 / 音 / 掉落噪音，同水流蔓延 / t300 长毛链模式；长毛
+//   归 t300 链，本处不越权翻 sheared）。consume=false：仅检测（决定是否开吃草周期）。越界 / 非
+//   草方块 → 安全返 false（blockAt 越界返 Air ≠ Grass；pos 已被物理边界 clamp，自身列恒在界内）。
 bool EntityManager::sheepEatGrass(Entity &e, World *world, float worldW, float worldD,
                                   bool consume)
 {
     if (!world) return false;
-    // 前方列坐标（沿 yaw 朝向 reach 距离）：dir = (-sin, 0, -cos)（与 aiWander / player wishHoriz 同约定）。
-    const float fx = e.pos.x() - std::sin(e.yawRad) * kEatReach;
-    const float fz = e.pos.z() - std::cos(e.yawRad) * kEatReach;
-    const int cx = qFloor(fx);
-    const int cz = qFloor(fz);
-    // 身体格 y（草丛生于地表上方一格 = 此格）；地表格 = bodyY − 1（草方块）。
-    const int bodyY = qFloor(e.pos.y() - e.halfH); // t252: e.radius → e.halfH（底面 y）
+    Q_UNUSED(worldW);
+    Q_UNUSED(worldD); // 脚下自身列（pos 被边界 clamp 恒在界内）；保留签名兼容两处调用点
+    // 脚下方块（自身列）：bodyY = AABB 底面所在格；支撑格 = bodyY − 1（草方块）。
+    const int cx = qFloor(e.pos.x());
+    const int cz = qFloor(e.pos.z());
+    const int bodyY = qFloor(e.pos.y() - e.halfH); // t252: e.halfH（底面 y）
     const int groundY = bodyY - 1;
-    // 越界 / 非法 y → 安全返 false（blockAt 亦返 air，但显式守避免 floor 滚动到负域读 chunk 边界外）。
-    if (cx < 0 || cz < 0 || cx >= int(worldW) || cz >= int(worldD)) return false;
-    if (bodyY < 1 || groundY < 0) return false;
+    if (groundY < 0) return false;
 
-    if (world->blockAt(cx, bodyY, cz) != BlockRegistry::TallGrass) return false; // 前方非草丛 → 不吃
+    if (world->blockAt(cx, groundY, cz) != BlockRegistry::Grass) return false; // 脚下非草方块 → 不吃
 
     if (consume) {
-        // 草丛→空气（静默写；setWaterSilent 是 World 的通用静默 state 写入口 —— 名字历史遗留 water-first，
-        //   实现支持任意 id+state，已由 tickCropGrowth 复用写入小麦作物 state）。
-        world->setWaterSilent(cx, bodyY, cz, BlockRegistry::Air, 0);
-        // 其下草方块→泥土（机制等价 MC 羊吃草后草地变泥土；非草方块不动）。
-        if (world->blockAt(cx, groundY, cz) == BlockRegistry::Grass)
-            world->setWaterSilent(cx, groundY, cz, BlockRegistry::Dirt, 0);
-        qCInfo(lcEnt) << "sheep ate tall grass at" << cx << bodyY << cz
-                      << "(grass block below -> dirt)";
+        // 草方块 → 泥土（静默写；机制等价 MC 1.0 羊吃草后草地变泥土）。
+        world->setWaterSilent(cx, groundY, cz, BlockRegistry::Dirt, 0);
+        qCInfo(lcEnt) << "sheep ate grass block at" << cx << groundY << cz << "(-> dirt)";
     }
     return true;
 }
@@ -6375,7 +6369,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const bool isSheep = (e.mobType == MobSheep);
             const bool eating = isSheep && e.eatTimer > 0.0f;
             if (eating) {
-                // 吃草周期：推进计时；到 apply 阈值时消耗前方草丛（草丛→空气 + 下草→泥土）；周期内强制 idle。
+                // 吃草周期：推进计时；到 apply 阈值时消耗脚下草方块（Grass→Dirt，t897 ①）；周期内强制 idle。
                 // t500 perf：节流帧用 aiDt（累积值）推进 → 平均速率与原每帧路径一致。
                 e.eatTimer -= float(aiDt);
                 const float eatElapsed = kEatDuration - e.eatTimer;
@@ -6390,7 +6384,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     e.eatCooldown = kEatCooldown; // 吃完一棵后冷却（防连续吃完一片）
                 }
                 e.wanderSpeed = 0.0f;
-                e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 冻结于上次值）
+                e.moveSpeed = 0.0f; // 站立吃草 → 腿停（walkPhase 由 t897 ② 静止归零链回正）
                 dirty = true;       // headPitch 随 eatTimer 变 → 每帧 bump 让 QML 头俯仰绑定刷新
             } else if (e.hostile) {
                 // t290 观察者交互门控：玩家不可锁定（创造/观察者）→ 敌对 Mob 不 detect/chase/attack/shoot，
@@ -6495,7 +6489,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(aiDt);
                 if (aiWander(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
-                    // idle 且扫描冷却到：前方有草丛 → 开吃草周期（headPitch 动画 + 中段消耗）；无 → 重置短冷却再等。
+                    // idle 且扫描冷却到：脚下是草方块 → 开吃草周期（headPitch 动画 + 中段消耗）；无 → 重置短冷却再等。
+                    //   t897 ①：目标 = 脚下草方块（旧「身前草丛」收紧——纯草地无草丛也吃、不吃不吃在看朝向）。
                     if (sheepEatGrass(e, world, worldW, worldD, /*consume=*/false)) {
                         e.eatTimer = kEatDuration; // 进入周期（apply 阈值时才真正消耗，保低头→嚼→抬头 时序）
                         e.eatApplied = false;
@@ -6641,10 +6636,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
 
             // t241 行走动画相位推进：moveSpeed>0（行走 / 被推）→ walkPhase 前进（fmod 2π，QML 据它驱动腿摆）；
-            //   idle / 吃草 / 撞墙 → 冻结（moveSpeed=0 不进，腿停于上次相位）。每推进帧 bump dirty 让绑定刷新。
+            //   **t897 ②：静止（idle / 吃草 / 撞墙 / 骑乘）→ walkPhase 归零**（腿回中立位）—— 旧「冻结于
+            //   上次相位」让停步的 mob 腿卡在半步中间（用户「静止卡住」）；归零 = QML walkPhase 0 的腿摆角 0
+            //   （四腿站直，机制等价 MC 停步回正）。非零才清（已 0 的稳态 mob 零额外 dirty）。
             //   t250 mob 走路声：相位推进量同步累加进 stepAccum，每半步（π=一次脚落）听者范围内 emit mobStep
             //   （mobType + 脚下方块 id 供 AudioManager 按材质组选 step clip）。半步语义同 player QML 端
             //   「Δphase≥π 播一次脚步音」，搬进 C++ 避逐 mob 追踪 walkPhase（多 mob 在 QML 追踪不现实）。
+            //   归零时 stepAccum 同步清（防残留半步累加在下次起步瞬发一声鬼脚步）。
             if (e.moveSpeed > 0.0f) {
                 const float advance = e.moveSpeed * float(dt) * kWalkFreq;
                 e.walkPhase = std::fmod(e.walkPhase + advance, 6.2831853f);
@@ -6661,6 +6659,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         emit mobStep(e.mobType, int(sid));
                     }
                 }
+                dirty = true;
+            } else if (e.walkPhase != 0.0f) {
+                e.walkPhase = 0.0f;  // t897 ② 静止归零（腿回中立位，不再冻结半步）
+                e.stepAccum = 0.0f;
                 dirty = true;
             }
 
