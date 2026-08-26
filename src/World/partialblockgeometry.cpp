@@ -364,10 +364,12 @@ int PartialBlockGeometry::append(
         // t742 铁活板门 per-face 薄侧边 = 铁块贴图（iron_block，同 t722 铁门薄边先例——铁皮包边观感；用户
         //   「前后左右四侧面应是铁块，而非六面全格子板」）：大面（合态=±Y 顶/底、开态=板面 ±X/±Z 对）保留
         //   iron_trapdoor 格子板（四孔栅格 cutout 透视只在顶/底大面），四个薄侧边走 iron_block。木活板门
-        //   ironSideTile=-1 → pushBox sideTile 不生效、全面同贴图（零回归，仅铁活板门变）。
+        //   t879② 起大面贴图 180（四镂空板）→ 薄侧边（3/16 板厚）走 planks(8)（木板包边，机制等价 MC 木
+        //   活板门板厚边 = 木板；同铁活板门 per-face 语言）。两族 sideTile 分流，pushBox sideTile 机制复用。
         const bool open = (state & 1) != 0;
         const int ironSideTile = (blockId == BlockRegistry::IronTrapdoor)
-            ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX) : -1;
+            ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX)
+            : BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX);
         if (!open) {
             // 合态水平薄板：大面法线轴 Y（顶/底=格子板）→ sideLargeAxis=1，±X/±Z 四立侧边贴 iron_block。
             pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 0.1875f, 0.f, 1.f,

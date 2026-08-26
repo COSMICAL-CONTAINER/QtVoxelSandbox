@@ -713,6 +713,10 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {176, QStringLiteral("door_iron_upper.png")},  // door_iron_upper（t717 铁门上半：门板+格栅窗）
         {177, QStringLiteral("door_iron_lower.png")},  // door_iron_lower（t717 铁门下半：门板+锁孔板）
         {178, QStringLiteral("iron_trapdoor.png")},    // iron_trapdoor（t717 铁活板门：格子板+栅格孔）
+        // t879② 木活板门大面贴图：tile 180 → pack trapdoor_oak.png（1.8 老命名，demo 包族）。包内缺 / 老包
+        //   无此文件 → 安全跳过保程序 default_wood_trapdoor.png（四镂空板）。木活板门走 cutout 段——包图
+        //   自带孔 alpha 照常透视（vanilla 木活板门贴图即四孔）。
+        {180, QStringLiteral("trapdoor_oak.png")},     // wood_trapdoor（t879② 木活板门：木板四镂空板）
         // t761 沙砾：tile 179 gravel → pack 内 gravel.png（demo 包实存）。非 pack 回落程序生成
         //   default_gravel.png（tools/build_gravel.py 自绘灰砾石 + 卵石碎砾斑）。包内缺 PNG 时安全跳过。
         {179, QStringLiteral("gravel.png")},           // gravel（t761 沙砾：灰砾石+卵石碎砾斑）
@@ -2697,7 +2701,19 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
             addBox(0.0, 0.5, 0.0, 1.0, 1.0, 3.0 / 16.0, topT, topT, topT);
             break;
         case BlockRegistry::ShapeTrapdoor:
-            addBox(0.0, 0.0, 0.0, 1.0, 3.0 / 16.0, 1.0, topT, sideT, frontT);
+            // t879① 活板门薄侧边贴图（修「铁活板门侧边贴图资源查看器里还没改对」）：泛化 case 旧用
+            //   sideT（= def.sideTile = 活板门大面瓦片）→ 薄侧边被画成格子板/镂空板（孔洞在窄侧边上碎成
+            //   抽象条），与放置态 t742 per-face（薄边 = 材质块）不一致——查看器/背包大图标两态（pack
+            //   路径 ① / 程序重渲路径 ②）都走本 spec = 侧边恒错。修：与 World mesher trapdoor case 同源
+            //   分流——铁活板门薄边 = iron_block(112)、木活板门薄边 = planks(8)；大面（顶/左前）保持
+            //   topT（镂空板 drawIsoFace 非 opaque 跳过底填 → 孔洞保留透视）。
+            addBox(0.0, 0.0, 0.0, 1.0, 3.0 / 16.0, 1.0, topT,
+                   blockId == BlockRegistry::IronTrapdoor
+                       ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX)
+                       : BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX),
+                   blockId == BlockRegistry::IronTrapdoor
+                       ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX)
+                       : BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX));
             break;
         case BlockRegistry::ShapeSnowLayer: // 1 层雪 1/8 高（state 0 基底观感）
             addBox(0.0, 0.0, 0.0, 1.0, 0.125, 1.0, topT, sideT, frontT);
@@ -2996,14 +3012,17 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     if (dir.isEmpty())
         return {};
     QDir().mkpath(dir);
-    // t764/t745 文件族 icon → icon2 → icon3 → icon4 → icon5：画法版本或缓存键策略变更须换缓存名，否则老缓存
+    // t764/t745 文件族 icon → icon2 → icon3 → icon4 → icon5 → icon6：画法版本或缓存键策略变更须换缓存名，否则老缓存
     //   在 pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
     //   t800 换 icon4：玻璃（54）画法 dimetric 立方 → flat 2D 平贴（此前中键拾取玻璃方块 / pack 态已落盘的
     //   icon3_54_* 是旧立方投影，不换名则永久复用旧观感）。
     //   t815/t838 换 icon5：① 玻璃（54）需求反转回 dimetric 立方（t800 落盘的 icon4_54_* 是 flat 平贴）；
     //   ② 红石粉（130）新入 flat 图集渲染族（此前无该路径缓存，一并换代防未来混淆）。
+    //   t879 换 icon6：活板门族（20 木 / 103 铁）图标画法变更——① ShapeTrapdoor 泛化 case 薄侧边贴图改
+    //   per-face 分流（铁=iron_block / 木=planks，修「铁活板门侧边贴图查看器里还没改对」）；② 木活板门大面
+    //   贴图 planks(8) → 180 四镂空板（改观感）。已落盘 icon5_20_* / icon5_103_* 是旧画法，不换名则永久复用。
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_icon5_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
+            QStringLiteral("voxelsandbox_rp_icon6_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
     if (!img.save(out, "PNG"))
         return {};
     {

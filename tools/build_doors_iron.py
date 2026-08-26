@@ -172,10 +172,53 @@ def save(arr, name):
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def draw_wood_trapdoor():
+    """木活板门（t879②）：橡木板色四镂空板——同铁活板门（tile 178）构图语言：边框 + 中央十字格条 +
+    2×2 四孔栅格真透明（孔位与铁活板门一一对应：x/y ∈ [3,5] 与 [10,12]，3×3 孔）。
+
+    t879② 用户「木活板门现在像木压力板」：旧贴图 = planks(8) 整面实心（与压力板同观感）。改独立
+    瓦片 180（default_wood_trapdoor）：木板色底 + 深棕边框/格条 + 四孔 alpha=0 真透明（cutout
+    透视，与铁活板门同族四镂空造型）。色板取 default_wood.png 木板族（浅棕底 + 深棕压条），
+    噪点用固定 mask（确定性，无随机源——_RNG 是铁脚本共享态，木版独立固定图案）。"""
+    base = np.array([160.0, 124.0, 76.0])    # 橡木木板浅棕底（build_bookshelf.py 同源色板）
+    dark = np.array([124.0, 92.0, 52.0])     # 深棕压条（边框 / 十字格条）
+    darker = np.array([96.0, 70.0, 38.0])    # 外缘暗化（同 bookshelf 顶底横带色）
+    c = np.zeros((TS, TS, 4), dtype=np.float64)
+    c[..., 0:3] = base
+    c[..., 3] = 255.0
+    # 轻噪点（固定图案：棋盘间隔采样，确定性）。
+    c[1::3, 2::3, 0:3] = dark * 1.06
+    # 外框（2px：外缘暗化 + 内压条，同铁活板门框语言）。
+    for i in range(TS):
+        for k in (0, 1):
+            c[k, i, 0:3] = darker if k == 0 else dark
+            c[TS - 1 - k, i, 0:3] = darker if k == 0 else dark
+            c[i, k, 0:3] = darker if k == 0 else dark
+            c[i, TS - 1 - k, 0:3] = darker if k == 0 else dark
+    # 中央十字格条（孔阵分隔，压条深棕）：竖条 x[6,9]、横条 y[6,9]（同铁活板门位）。
+    for y in range(TS):
+        for x in (6, 7, 8):
+            c[y, x, 0:3] = dark
+    for x in range(TS):
+        for y in (6, 7, 8):
+            c[y, x, 0:3] = dark
+    # 四栅格孔（2×2 孔阵，真透明 alpha=0——与铁活板门 tile 178 孔位一一对应）。
+    for y0 in (3, 10):
+        for x0 in (3, 10):
+            c[y0:y0 + 3, x0:x0 + 3, 0:3] = darker
+            c[y0:y0 + 3, x0:x0 + 3, 3] = 0.0
+    # 四角框内 1px 亮点（木钉观感，同铁活板门铆钉位）。
+    for (rx, ry) in ((2, 2), (TS - 3, 2), (2, TS - 3), (TS - 3, TS - 3)):
+        c[ry, rx, 0:3] = base * 1.18
+        c[ry + 1, rx, 0:3] = dark
+    return c
+
+
 def main():
     save(draw_upper(), "default_door_iron_upper")     # tile 176
     save(draw_lower(), "default_door_iron_lower")     # tile 177
     save(draw_trapdoor(), "default_iron_trapdoor")    # tile 178
+    save(draw_wood_trapdoor(), "default_wood_trapdoor")  # tile 180（t879② 木活板门四镂空板）
 
 
 if __name__ == "__main__":
