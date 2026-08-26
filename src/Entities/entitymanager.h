@@ -315,7 +315,12 @@ public:
     //   **mob 命中**（damageEntity(5) 扣血 + 设 fireTimer 着火）+ 寿命 / 越界兜底移除（同雪球）。
     //   QML delegate 据 kindAt==Fireball 走橙黄火球自发光 Model。机制等价 MC 1.0 烈焰人火球；名称 / 视觉全原创
     //   （§9 区隔）。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
-    Q_INVOKABLE int spawnFireball(const QVector3D &origin, const QVector3D &vel);
+    //   t891② 烈焰弹复用本链：第 3 参 igniteChancePct 覆写 per-entity 撞击点燃概率（默认 20 = 既有
+    //   Emberling 行为零改动；玩家烈焰弹传 100 撞击必生火）。玩家侧火球 fireballShooter 恒 -1 → Fireball
+    //   tick 的玩家命中分支对其跳过（低头发射自伤防；机制等价 MC 投射物所有者豁免），mob 命中照常（5HP +
+    //   点燃——MC fire charge 弹命中生物伤害 + 着火）。撞击点燃改打火石同源口径：命中格可燃 → 直燃进
+    //   燃烧态（igniteFlammableAt）；非可燃 → 火球来向空气格置立地火（==Air 门）。
+    Q_INVOKABLE int spawnFireball(const QVector3D &origin, const QVector3D &vel, int igniteChancePct = 20);
     // t729 暗渊之眼投射物（玩家右键 EndEyeId 掷出；机制等价 MC 1.0 末影之眼 ender eye —— 右键掷出寻路要塞）：
     //   在 origin 处生成携带 3D 速度 vel（blocks/s，初速朝最近要塞末地传送门方向，速度 ~kEnderEyeSpeed=4）的
     //   小绿瞳珠实体。kind=EnderEye、pushable=false（玩家走碰不推）、halfW/halfH=0.16（小珠视觉 + 碰撞最小）。
@@ -1124,6 +1129,12 @@ private:
         //   带 serial 防槽复用后误把新生物当发射者（rv-low-batch1 雪球同因）。默认 -1 / 0（无发射者 → 不排除）。
         int fireballShooter = -1;          // 火球发射者槽索引（仅 kind==Fireball；-1 = 无 / 玩家侧）
         quint32 fireballShooterSerial = 0; // 火球发射者代际快照（与命中时槽内实体的 spawnSerial 比对）
+        // t891② 火球撞击点燃概率（%，per-entity——t505「同一实体类不同发射者不同语义用 per-entity 字段」
+        //   先例）：Emberling 喷火默认 kFireballIgniteChance=20（概率点燃）；玩家烈焰弹（FireChargeId 右键
+        //   发射）传 100 = 撞击必生火（MC fire charge 落地放火语义）。写入 igniteChancePct 参数（spawnFireball
+        //   第 3 参，默认 20 保持既有调用零改动）。命中的点燃口径见 Fireball tick 分支注释（打火石同源）。
+        //   类尾常量 kFireballIgniteChance 在本结构体之后声明（DMI 处不可见）→ 字面量 20 + 两侧注释互指。
+        int fireballIgnitePct = 20; // 撞击点燃概率 %（Emberling 20 / 玩家烈焰弹 100；镜像 kFireballIgniteChance）
         // t239 生物基类（AI / 血量 / 受击 / 死亡）——仅 Mob kind 使用（FallingBlock/Item 留默认 0/false）：
         int mobType = 0;         // mob 子类 id（0=通用测试；t240 pig/cow/sheep；t280 Shambler/Bones；drop/模型据它分流）
         int maxHealth = 0;       // 血量上限（满血）；takeDamage clamp 到 [0, maxHealth]
@@ -2053,6 +2064,10 @@ private:
     static constexpr float kFireballLifetime      = 4.0f;  // 火球最长存活（秒；直线飞行兜底移除）
     static constexpr float kFireballHitHalfW      = 0.3f;  // 火球 vs 玩家/mob 命中盒 XZ/Y 外扩（blocks）
     static constexpr int   kFireballIgniteChance  = 20;    // 方块命中点燃概率（%）
+    // t891② 镜像钉：spawnFireball 默认参（=20）与 Entity::fireballIgnitePct DMI（=20）是本常量的字面量
+    //   镜像（两者声明点在本常量之前 / 结构体内不可见）—— 改值须三处同步。
+    static_assert(kFireballIgniteChance == 20,
+                  "kFireballIgniteChance 改值须同步 spawnFireball 默认参与 Entity::fireballIgnitePct DMI（三处镜像）");
     // t729 暗渊之眼投射物常量（机制等价 MC 1.0 末影之眼 ender eye：右键掷出、直线寻路要塞、飞距后落地变掉落物 /
     //   小概率碎裂无掉落）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
     //   - kEnderEyeSpeed：飞行速度（blocks/s；恒定模长，两段共用，玩家可侧身看它飞）。

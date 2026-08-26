@@ -1461,11 +1461,25 @@ void World::tickLavaFlow()
             const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
             if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
             const quint8 nb = m_chunks.blockAt(nx, ny, nz);
-            if (!isWoodLike(nb)) continue;
-            // 散布概率判定（hashVoxel + 窗口序号 → 确定性伪随机，PLAN §2-K）。命中即焚毁。
+            // t891① 入口门 = isWoodLike ∪ flammable（可燃全表）：点燃面向**全部可燃方块**（dev-plan
+            //   「邻可燃方块点燃」——书架 / 树苗 / 草丛此前岩浆完全不碰，机制补齐）；焚毁目标集保持原
+            //   isWoodLike（焚毁语义 / 节奏零回归，非木类可燃不进 burnTargets）。
+            if (!(isWoodLike(nb) || BlockRegistry::flammable(nb))) continue;
+            // 散布概率判定（hashVoxel + 窗口序号 → 确定性伪随机，PLAN §2-K）。t891① 单掷双义（**点燃优先**）：
+            //   掷中 → 先走 igniteFlammableAt 单一入口把该邻格**点燃进燃烧态**（栅格 id 不变 + blockIgnited
+            //   面火 overlay + 计时烧毁 + 同态蔓延——核此前岩浆路径只有「焚毁」没有「点燃」，机制补齐 MC 1.0
+            //   岩浆点燃相邻可燃物语义；湿燃料防火带 / 门整扇湿判收口在入口内部，三入口同口径）；点燃成功
+            //   （或已在燃——幂等拒 / 对偶联动早燃）→ 本窗**焚毁让位**（烧毁终局由 tickFire (d) 燃烧计时独家
+            //   承担，防一格两份消耗的双触发）；入口拒（非可燃木类如箱子 / 湿燃料）→ 回落既有**焚毁**路径
+            //   （原语义与节奏保留——同盐同率，箱子 / 湿板的焚毁行为零回归）。盐值 0x1A7A 不变 → 事件发生
+            //   率与既有节奏完全一致，仅命中后的语义分层。**焚毁目标仍限 isWoodLike**（非木类可燃——书架 /
+            //   树苗 / 草丛——掷中且点燃被拒（湿）→ 本窗跳过不焚毁，等下窗再试点燃）。
             const quint32 hv = hashVoxel(m_seed ^ 0x1A7A, nx, ny, nz) ^ (quint32(m_lavaIgniteIndex) * 2654435761u);
-            if ((hv % 100u) < unsigned(kLavaIgnitePct))
-                burnTargets.push_back({nx, ny, nz});
+            if ((hv % 100u) < unsigned(kLavaIgnitePct)) {
+                if (igniteFlammableAt(nx, ny, nz) || isBurningAt(nx, ny, nz)) continue;
+                if (isWoodLike(nb))
+                    burnTargets.push_back({nx, ny, nz});
+            }
         }
     }
     // t488：box=活动盒是否命中（1=盒过滤快照 / 0=全量兜底）—— 看 cells 数量对比即可知盒收窄了多少扫描范围。

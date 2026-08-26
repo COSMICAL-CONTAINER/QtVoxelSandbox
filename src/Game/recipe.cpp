@@ -1055,6 +1055,20 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { RecipeRegistry::IronIngotId, RecipeRegistry::FlintId, 0,
         0, 0, 0, 0, 0, 0 },
       int(ToolRegistry::FlintAndSteel), 1, 1, "flint_and_steel" },
+    // t891② 烈焰弹（fire charge）：燃烬粉 + 煤炭 + 火药 → **3 发**（无序 2×2，背包栏 / 工作台均可）。
+    //   机制等价 MC fire charge（1.2+ 入 MC，本工程对齐机制非版本面）：三料等权任意摆放、一次 3 发。
+    //   木炭替代煤炭同权（MC 1.2 原版 coal/charcoal 通配）→ 两条配方并列。多重集
+    //   {BlazePowder:1, Coal:1, Gunpowder:1} / {BlazePowder:1, Charcoal:1, Gunpowder:1} 各自唯一
+    //   （暗渊之眼 {Pearl,BP} 二料 / TNT {GP:5,Sand:4} 多件）→ 不与既有配方冲突。右键发射火球
+    //   （复用 Fireball 投射链）撞击生火（playercontroller placeBlock 烈焰弹段；ignite 口径打火石同源）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::BlazePowderId, RecipeRegistry::CoalId, RecipeRegistry::GunpowderId,
+        0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::FireChargeId, 3, 1, "fire_charge_coal" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::BlazePowderId, RecipeRegistry::CharcoalId, RecipeRegistry::GunpowderId,
+        0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::FireChargeId, 3, 1, "fire_charge_charcoal" },
     // t788 染料染色链（32 条 shapeless 2×2）：染料 + 白色羊毛（Wool=27）→ 对应色羊毛；染料 + 白色床
     //   （BedWhite=78）→ 对应色床。机制等价 MC 1.0 染料主干（dye + white wool/bed → colored）。
     //   原料侧：染料由四花破坏掉落（红花→红 / 黄花→黄 / 蓝花→蓝 / 白花→白，blockregistry.cpp dropId）
@@ -1181,6 +1195,9 @@ static_assert(RecipeRegistry::GoldIngotId     == 0x21F, "GoldIngotId 须为材�
 // t471 青金石跨层契约（同 Coal/Iron/Copper/Gold 模式）：Core 层 blockregistry.cpp LapisOre 的 dropId 用字面量
 //   0x236（Core 不 include Game 头）；本处钉死 recipe.h 常量 == 字面量，防漂移致掉落断裂。
 static_assert(RecipeRegistry::LapisId         == 0x236, "LapisId 须与 BlockRegistry::LapisOre.dropId 字面量 0x236 一致");
+// t891② 烈焰弹 id 钉位（工程惯例）：0x25C = 熟鱼 0x25B 之上首个空闲号（不重排既有材料段——存档权威）。
+//   Core 层 resourcepackmanager.cpp itemFilenameMap 与 QML MaterialIcon case 用同一字面量 → 三处互钉。
+static_assert(RecipeRegistry::FireChargeId    == 0x25C, "FireChargeId 须为材料段 0x25C（itemFilenameMap / MaterialIcon case 0x25C 同字面量互钉）");
 // t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
 //   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
 //   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId

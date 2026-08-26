@@ -403,6 +403,18 @@ public:
     //   烤色调变体，§9 原创）；pack 映射 itemFilenameMap 0x25B → cooked_cod.png（MC 1.0 cooked fish =
     //   modern cooked_cod；包缺 → 安全跳过回退自绘）。创造材料 tab 排生鱼旁（hotbar creativeMaterials）。
     static constexpr int CookedFishId = 0x25B; // 熟鱼：生鱼熔炉冶炼产物；食 +4 饥饿（t836）
+    // t891② 烈焰弹（fire_charge：材料段 0x25C，染料段之上首个空闲号）。机制等价 MC fire charge（1.2+
+    //   入 MC，本工程对齐机制非版本面）：**右键发射火球**（复用 EntityManager 燃烬者火球投射链 t728 ——
+    //   kind=Fireball 直线弹道 / 撞击点燃 / mob 命中 5HP+着火；玩家侧差异经 per-entity 字段表达：
+    //   fireballIgnitePct=100 撞击**必生火**（Emberling 20% 概率感保留）+ fireballShooter=-1 玩家侧豁免
+    //   玩家命中（低头发射不自伤，MC 投射物所有者豁免同语义））。撞击点燃口径 = 打火石同源：命中格可燃
+    //   → 直燃进燃烧态（igniteFlammableAt，t843 语义）；非可燃 → 来向空气格置立地火。**合成**：燃烬粉 +
+    //   煤炭（或木炭）+ 火药 → **3 发**（无序 2×2，背包 / 工作台均可；MC 原配方三料等权）。可堆叠 64
+    //   （材料段默认）；非方块 → 右键不走放置，走发射分支（playercontroller placeBlock 烈焰弹段）。
+    //   图标：MaterialIcon 自绘烈焰弹（drawFireCharge 暗壳火核球，§9 原创）；pack 映射 itemFilenameMap
+    //   0x25C → fire_charge.png（现代包有；缺则安全跳过回退自绘）。mcMaterialId 越表界（>0x22E）→ -1 →
+    //   资源包回退自绘（同 SnowballId 越界模式）。
+    static constexpr int FireChargeId = 0x25C; // 烈焰弹：燃烬粉+煤炭/木炭+火药合成 3 发；右键发射火球撞击生火（t891）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

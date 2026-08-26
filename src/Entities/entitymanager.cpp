@@ -542,7 +542,7 @@ int EntityManager::spawnEgg(const QVector3D &origin, const QVector3D &vel)
 //   点-in-AABB 不读 halfW）。entity.mobType 设 MobEmberling（火球命中玩家时 mobAttackedPlayer 携它在 QML 映射死因
 //   尾追 Emberling）。bump revision → QML Repeater 追加 delegate（Fireball 分支橙黄自发光小球 Model）。达 kCap →
 //   跳过 + 告警（防溢出）。返新火球槽索引（调试用）；达 kCap → -1。
-int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel)
+int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel, int igniteChancePct)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); fireball spawn skipped at" << origin;
@@ -559,6 +559,7 @@ int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel)
     e.vy = vel.y();
     e.vz = vel.z();
     e.arrowLife = kFireballLifetime;
+    e.fireballIgnitePct = igniteChancePct; // t891② per-entity 撞击点燃概率（默认 20；玩家烈焰弹 100）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     ++m_revision;
     emit entitiesChanged();
@@ -5303,7 +5304,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   （玩家脚位）近似）内。命中 → 伤害 kEmberlingFireballDamage=5（mobAttackedPlayer 携 MobEmberling →
             //   死因尾追 Emberling）+ emit emberFireballHitPlayer()（呈现层 ignite 玩家）+ 移除火球。受击全局节流
             //   （m_playerHitCooldown）串行化（同箭命中玩家模式，防连发灼烧叠加瞬死）。
-            if (!remove && playerTargetable && m_playerHitCooldown <= 0.0f) {
+            //   t891②：**玩家侧火球不判玩家命中**（fireballShooter==-1 = 无 mob 发射者 → 玩家烈焰弹）。出生点
+            //   在眼位前 0.5、恰在玩家外扩命中盒（halfW 0.3 + 0.3 = 0.6）内 → 低头 / 俯角发射首帧必自击
+            //   5HP + 点燃；MC 投射物对所有者豁免同语义。Emberling 喷火恒走 flushPendingShots 写 shooter>=0
+            //   → 本豁免对其零影响。
+            if (!remove && e.fireballShooter >= 0 && playerTargetable && m_playerHitCooldown <= 0.0f) {
                 const float px = listener.x(), py = listener.y(), pz = listener.z();
                 const float pEx = px - listenerHalfW - kFireballHitHalfW;
                 const float pEy = py - kFireballHitHalfW;
@@ -5354,8 +5359,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     }
                 }
             }
-            // 方块命中 → 消失 + ~20% 概率点燃（机制等价 MC 1.0 火球命中方块消失；若命中格 / 邻格可燃 → 点燃，接
-            //   t724 火系统）。mob / 玩家命中已早退，贴墙目标不会先撞墙。仅未命目标的飞行火球走此。
+            // 方块命中 → 消失 + 点燃掷骰（Emberling ~20% / 玩家烈焰弹 100% = 撞击必生火——per-entity
+            //   fireballIgnitePct，t891②；机制等价 MC 1.0 火球命中方块消失，可燃则燃）。mob / 玩家命中已
+            //   早退，贴墙目标不会先撞墙。仅未命目标的飞行火球走此。
             if (!remove) {
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
                 // 审查修 B12（t724-t729 复盘）：命中判定并入水格 —— 旧版只判 isSolid（水非 solid）→ 火球
@@ -5364,21 +5370,28 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (by >= 0 && (world->isSolid(bx, by, bz) || hitWater)) {
                     remove = true;
                     hitBlock = true;
-                    // ~20% 点燃（机制等价 MC 火球落地引燃邻近方块）：命中格 / 水平 4 邻 / 上或下格任一为实体方块
-                    //   （可燃度近似「实体方块即可延烧」）→ 在「命中格正上方空位」置 Fire（t724 火系统；选顶面延烧，
-                    //   确定性落点避免乱放火）。若上方被占（命中格上方非 air）→ 放弃点燃（无安全落火面）。
-                    // 审查修 B12：水命中不点燃（熄灭）；点燃目标格收紧为 == Air（旧 !isSolid 会把火放进
-                    //   水 / 岩浆 / 火把等非实体格 → 短暂水中火焰）。
-                    if (!hitWater && QRandomGenerator::global()->bounded(100) < kFireballIgniteChance) {
-                        const int tx = qFloor(next.x()), ty = qFloor(next.y()) + 1, tz = qFloor(next.z());
-                        if (ty < world->height() && world->blockAt(tx, ty, tz) == BlockRegistry::Air) {
-                            // 命中块正上方是空位 → 落火（命中块顶面是实体 → 延烧成立；t724 火系统承接）。
-                            // 审查修 B3（t724-t729 复盘）：点燃改走 5 参数 setBlock（同打火石点火 / tickFire
-                            //   蔓延路径）—— 旧 setWaterSilent 只发 worldChanged 不发 blockPlaced → Main.qml
-                            //   fireHost 的 delegate 永不挂载 = 隐形火（火真实存在并继续蔓延，玩家看到
-                            //   「火从空气中冒出来」）。火球命中低频，无粒子风暴风险。
-                            world->setBlock(tx, ty, tz, BlockRegistry::Fire, 0);
-                            qCInfo(lcEnt) << "emberling fireball ignited at" << tx << ty << tz;
+                    // t891② 点燃改**打火石同源口径**（机制对齐 MC 火弹落地放火 + t843 直燃语义；掷骰读
+                    //   per-entity fireballIgnitePct——Emberling 保持 ~20% 概率感、玩家烈焰弹 100% 必生火）：
+                    //   ① 命中格**可燃** → igniteFlammableAt 单一入口直燃进燃烧态（栅格 id 不变 + 面火
+                    //      overlay + 计时烧毁 + 同态蔓延；湿燃料防火带 / 门整扇湿判收口在入口内，与
+                    //      打火石 / tickFire 蔓延三入口同口径）；
+                    //   ② 非可燃 → 火球**来向格**（e.pos 所在格 = 撞面前最后的空气侧格）为 Air 时置立地火
+                    //      （setBlock 5 参数 → blockPlaced → Main.qml fireHost 挂 delegate，审查修 B3 同款；
+                    //      ==Air 门拦含水 / 被占格）。旧「命中格正上方置火」（顶面延烧启发式）被 ① 取代
+                    //      ——打墙面时火贴墙燃（MC 观感）而非浮上墙顶。
+                    //   审查修 B12：水命中不点燃（熄灭）；落火目标格 == Air 门不变。
+                    if (!hitWater
+                        && QRandomGenerator::global()->bounded(100) < e.fireballIgnitePct) {
+                        if (!world->igniteFlammableAt(bx, by, bz)) {
+                            const int px = qFloor(e.pos.x()), py = qFloor(e.pos.y()), pz = qFloor(e.pos.z());
+                            if (py >= 0 && py < world->height()
+                                && world->blockAt(px, py, pz) == BlockRegistry::Air) {
+                                // 来向格是空气 → 落火（撞面外的空气侧；t724 火系统承接蔓延）。
+                                world->setBlock(px, py, pz, BlockRegistry::Fire, 0);
+                                qCInfo(lcEnt) << "fireball ignited at" << px << py << pz;
+                            }
+                        } else {
+                            qCInfo(lcEnt) << "fireball ignited flammable block at" << bx << by << bz;
                         }
                     }
                 }

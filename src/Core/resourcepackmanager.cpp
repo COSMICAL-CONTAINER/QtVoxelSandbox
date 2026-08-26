@@ -877,6 +877,9 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   （demo 包实存）；包缺 → 安全跳过回退 MaterialIcon drawFlint 自绘。来源 = 挖沙砾小概率掉落，
         //   打火石配方原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。
         {0x248, QStringLiteral("flint.png")},            // 燧石（t761：挖沙砾概率掉落；打火石配方原料）
+        // t891② 烈焰弹（FireChargeId=0x25C；机制等价 MC fire charge item）：现代包 item 目录通常有
+        //   fire_charge.png。包内缺则安全跳过（保留自绘 MaterialIcon drawFireCharge）。右键发射火球撞击生火。
+        {0x25C, QStringLiteral("fire_charge.png")},      // 烈焰弹（t891②：合成 3 发；pack 启用用包内贴图，回落自绘）
         // t785 生物蛋 pack 直连 4 行（狼/豹猫新 ids 0x249/0x24A + 夜行者/燃烬者 0x246/0x247 此前未接）：
         //   现代包（1.11+ 蛋拆独立贴图）有 <mob>_spawn_egg.png 时直用；老包 miss → itemIconSource 走 t645
         //   生成式两层染色回退（spawnEggTint 4 新行，配色仿各自 mob）——不再是「无映射恒自绘」。
