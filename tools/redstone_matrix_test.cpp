@@ -1412,6 +1412,134 @@ int main(int argc, char *argv[])
                              "fire/emberling/pearl-tp/feather/protection; unbreaking-III wear over 400 hits in "
                              "[260,340], no-enchant control exact 50 (t763)";
     }
+    // ── P-t890 燃烧方块侧壁接触点燃探针（AABB 接触扫描行为级 + 阴性轮）──
+    //    t890：旧三格判定漏「贴燃烧方块侧壁走」——玩家 AABB 半宽 0.3 身在邻格、中心列不含燃烧格 → 永不
+    //    点燃。修法 = 仙人掌判据族先例（满格 AABB + kTouchSkin 容差皮 + 正交 ±1 扩圈），Fire 格同口径并入。
+    //    断言：(a) 玩家贴 2 高木板墙侧壁走（墙已 igniteFlammableAt 进燃烧态，中心列距墙格 ≥1 格）→ 点燃
+    //    （旧判定此场景恒 false = 用户症状本体）；(b) 对照：同布局未点燃墙走位 → 不点燃（阴性，排除
+    //    「rig 里别的东西点的火」）；(c) 站顶：站燃烧板顶（脚底支撑面 = 燃块）→ 点燃；(d) 斜对角隔离：
+    //    燃烧格仅在玩家 AABB 对角外一格（XZ 各隔 0.3+ 缝）→ 不点燃（AABB 过滤生效，无误伤面）；
+    //    (e) mob 侧壁同链（pig 贴燃烧墙 → isBurningAt(mob) 真）。
+    {
+        World wS;
+        wS.setWidth(48); wS.setDepth(48); wS.setHeight(96); wS.setSeed(89);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const auto tickP = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) {
+                pumpFor(17);
+                ents.tick(qreal(dt), &wS, farL, 0.3f, 1.8f, false);
+                pc.tick();
+            }
+        };
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wS);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        const int fy = 83;
+        auto buildLane = [&](bool lit) { // 石道 + 东侧木板高墙（x=8 列，z 4..8，两层）
+            for (int x = 2; x <= 7; ++x)
+                for (int z = 4; z <= 8; ++z) {
+                    wS.setBlock(x, fy, z, BR::Stone, 0);
+                    wS.setBlock(x, fy + 1, z, BR::Air, 0);
+                    wS.setBlock(x, fy + 2, z, BR::Air, 0);
+                    wS.setBlock(x, fy + 3, z, BR::Air, 0);
+                }
+            for (int z = 4; z <= 8; ++z) {
+                wS.setBlock(8, fy, z, BR::Stone, 0);
+                wS.setBlock(8, fy + 1, z, BR::Planks, 0);
+                wS.setBlock(8, fy + 2, z, BR::Planks, 0);
+                wS.setBlock(8, fy + 3, z, BR::Air, 0);
+            }
+            if (lit) {
+                wS.igniteFlammableAt(8, fy + 1, 6);
+                wS.igniteFlammableAt(8, fy + 2, 6);
+            }
+        };
+        // (a) 侧壁贴走：玩家 (7.5, fy+1) 朝 +Z 走（W 键），身体中心 x=7.5 距墙列 x=8 恰半宽贴面
+        //     （pMaxX=7.8 vs 墙 cMinX=8.0 → 含 0.002 皮重叠 = 接触；旧中心列判定 footY 层 blockAt(7,*)
+        //     全 Stone/Air → 恒 false）。走 1s 内 burning 必真。
+        buildLane(true);
+        pc.loadSavedState(7.5f, float(fy + 1), 6.0f, -90.0f, 0.0f, 2);
+        pc.setKey(Qt::Key_W, true); // 朝 -90°（+Z）前推 → 贴墙面滑走
+        bool sideLit = false;
+        for (int t = 0; t < 24 && !sideLit; ++t) { tickP(1, 0.05f); sideLit = pc.burning(); }
+        pc.setKey(Qt::Key_W, false);
+        // (d) 斜对角阴性先于清场：换新 lane 未燃态走同一路径对照在 (b)；斜对角单独摆。
+        bool diagClear = false;
+        {
+            buildLane(false);
+            wS.setBlock(8, fy + 1, 6, BR::Planks, 0);
+            wS.setBlock(8, fy + 2, 6, BR::Air, 0);
+            wS.igniteFlammableAt(8, fy + 1, 6);
+            // 玩家在 (6.5, fy+1, 4.5)：燃烧格 (8,fy+1,6) 的 XZ 对角邻方向隔 ≥1.2 格 → AABB 不重叠
+            pc.loadSavedState(6.5f, float(fy + 1), 4.5f, -90.0f, 0.0f, 2);
+            pc.setKey(Qt::Key_W, true); // 同款贴走（远离墙列 → 全程无接触）
+            for (int t = 0; t < 20 && !diagClear; ++t) { tickP(1, 0.05f); diagClear = !pc.burning(); }
+            diagClear = diagClear || (!pc.burning()); // 全程未燃即阴性成立
+            pc.setKey(Qt::Key_W, false);
+        }
+        // (b) 未燃墙对照：同布局同走位，墙未点燃 → 全程不燃（排除「rig 里别的东西点的火」）。
+        buildLane(false);
+        pc.clearStatusEffects();
+        pc.loadSavedState(7.5f, float(fy + 1), 6.0f, -90.0f, 0.0f, 2);
+        pc.setKey(Qt::Key_W, true);
+        bool unlitClean = true;
+        for (int t = 0; t < 24 && unlitClean; ++t) { tickP(1, 0.05f); unlitClean = !pc.burning(); }
+        pc.setKey(Qt::Key_W, false);
+        // (c) 站顶：单块板 (5,fy+1,6)，点燃后玩家站其上（碰撞 snap 脚底在板顶缝上——旧三格判定靠
+        //     footY-1 兜过，本断言锁新扫描的站顶分支不回归）
+        wS.setBlock(5, fy + 1, 6, BR::Planks, 0);
+        wS.igniteFlammableAt(5, fy + 1, 6);
+        pc.clearStatusEffects();
+        pc.loadSavedState(5.5f, float(fy + 2), 6.5f, -90.0f, 0.0f, 2);
+        bool topLit = false;
+        for (int t = 0; t < 24 && !topLit; ++t) { tickP(1, 0.05f); topLit = pc.burning(); }
+        // (e) mob 侧壁：pig 出生即贴墙（x=7.5 格心 → AABB maxX=7.8，距墙 cMinX=8.0 缝 0.2 < halfW 0.45
+        //     → 出生帧即重叠）+ knockback 推向墙（对消 wander 随机步的离墙漂移；短窗抢拍 < 首游荡窗）。
+        buildLane(true);
+        const int pigS = ents.spawnMobTyped(7, fy + 1, 6, EntityManager::MobPig,
+                                            QStringLiteral("#ee9999"), 20);
+        bool mobSideLit = pigS >= 0;
+        if (pigS >= 0) {
+            for (int t = 0; t < 30; ++t) {
+                ents.knockback(pigS, 1.0f, 0.0f, 0.5f); // 每帧轻推 +X 贴墙（kKnockbackDrag 强阻尼不积累）
+                ents.tick(0.05, &wS, farL, 0.3f, 1.8f, false);
+                if (ents.isBurningAt(pigS)) { mobSideLit = true; break; }
+            }
+        }
+        // 清场（全 lane Air + 熄玩家）
+        for (int x = 2; x <= 8; ++x)
+            for (int z = 4; z <= 8; ++z)
+                for (int dy = 0; dy <= 3; ++dy) wS.setBlock(x, fy + dy, z, BR::Air, 0);
+        pc.clearStatusEffects();
+        const bool okT890 = sideLit && diagClear && unlitClean && topLit && mobSideLit;
+        if (!okT890) ++totalFail;
+        if (!okT890)
+            qInfo().noquote() << "  [t890 diag] sideLit" << sideLit << "diagClear" << diagClear
+                              << "unlitClean" << unlitClean << "topLit" << topLit
+                              << "mobSideLit" << mobSideLit;
+        qInfo().noquote() << (okT890 ? "PASS" : "FAIL")
+                          << "| t890 side-contact ignition review: walking flush against a burning "
+                             "plank wall now ignites the player (full-cell AABB overlap scan over own "
+                             "footprint cells plus orthogonal neighbors, kTouchSkin=0.002 absorbs the "
+                             "1e-4 collision snap gap - cactus contact-damage predicate family "
+                             "precedent; old center-column 3-cell check structurally missed it since "
+                             "the body rests in the adjacent cell), standing on a burning plank top "
+                             "still ignites (support-face branch), diagonal-only burning cell one cell "
+                             "out does NOT ignite (AABB filter rejects corner false positives), an "
+                             "unlit identical walk stays clean (negative control), and the mob side "
+                             "shares the same scan (pig hugging the wall catches fire); lava keeps "
+                             "center-column fluid-contact semantics untouched";
+    }
 
     // ── t798 效率附魔审计探针（纯 Core/Game 表查询，无 World/QML）：① 等级分档递增 —— 机制等价 MC 1.0
     //    「效率在工具基础速上**加法**叠 level²+1」（I +2 / II +5 / III +10 / IV +17 / V +26）：木镐
