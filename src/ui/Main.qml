@@ -2049,22 +2049,13 @@ Window {
         return Qt.rgba(0.839 * light.r, 0.722 * light.g, 0.565 * light.b, 1.0)
     }
 
-    // t816 羊脸罩判据/配色：游戏内羊自然毛色（t789 白主导 + 粉/灰/浅灰/棕/黑少数）非白时，整模贴图 ×
-    //   sheepWoolTintAt 会连**头前脸**一起染（MobModel 单材质整模渲染 = 图鉴 t816 同病）→ 脸=skin 层不
-    //   tint（机制等价 MC 染色羊脸恒粉褐肤色）：sheepTintDyed 判「当前毛色非白」（tint 任一分量 <0.999，
-    //   白 = 恒等不罩，零回归）；sheepFaceCoverTint = 裸肤 #d6b890 × 昼夜（sheepLegCoverTint 同款，红闪
-    //   红覆盖）。revision 触碰刷新（tint 随羊而变）。
-    function sheepTintDyed(entIdx) {
-        entityManager.revision
-        if (entIdx < 0) return false
-        const t = entityManager.sheepWoolTintAt(entIdx)
-        return t.r < 0.999 || t.g < 0.999 || t.b < 0.999
-    }
-    function sheepFaceCoverTint(entIdx) {
+    // t876 头盒配色（sheepSkinHead subset 1 的材质用）：自然羊头色 = 贴图原色（pack 合成贴图本体层头区
+    //   真脸 / 程序 mob_sheep_head 裸肤+毛帽）× 昼夜明暗，**不吃毛色 tint**（t816 脸罩方案退役——头盒
+    //   直接采样本体层纹理源，毛色 tint 只作用躯干毛层 subset 0）。红闪仍红覆盖（受击整羊变红）。
+    function sheepHeadLightTint(entIdx) {
         entityManager.revision
         if (entIdx >= 0 && entityManager.hurtFlashAt(entIdx) > 0) return "#ff0000"
-        const light = terrainLight(worldClock.skyLight)
-        return Qt.rgba(0.839 * light.r, 0.722 * light.g, 0.565 * light.b, 1.0)
+        return terrainLight(worldClock.skyLight)
     }
 
     // ── t718 盔甲 layer 贴图源（玩家 + 人形 mob 护甲壳共用；ArmorLayerBox 采样源）──
@@ -3914,6 +3905,10 @@ Window {
         Texture { id: mobPigTex;   source: "qrc:/textures/mob_pig.png";   generateMipmaps: false }
         Texture { id: mobCowTex;   source: "qrc:/textures/mob_cow.png";   generateMipmaps: false }
         Texture { id: mobSheepTex; source: "qrc:/textures/mob_sheep.png"; generateMipmaps: false }
+        // t876 羊头贴图（自然羊头色：裸肤脸 + 头顶羊毛帽 + 吻部暗带；build_mob.py 程序生成原创像素图）：
+        //   毛茸态羊 sheepSkinHead subset 1（头盒）的 pack 关态纹理源——不吃毛色 tint（机制等价 MC 羊头
+        //   = skin 层恒自然色；替代 t816 脸罩）。pack 开态头盒采 mobSheepPackTex 合成贴图的本体层头区。
+        Texture { id: mobSheepHeadTex; source: "qrc:/textures/mob_sheep_head.png"; generateMipmaps: false }
         // t282 蹒跩者（Shambler；机制等价 MC 1.0 僵尸，§9 改名 + 原创贴图）：暗绿腐肉底 + 霉斑 + 腐痕 +
         //   破布残片 + 缝合痕（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC 皮肤）。MobModel 人形几何
         //   （躯干/头/双臂前伸/双腿）每面铺整张贴图 [0,1]×[0,1]（同猪牛羊全脸 UV）；实心无 alpha → 不透明材质。
@@ -7185,6 +7180,10 @@ Window {
                                 }
                                 geometry: MobModel {
                                     mobType: 3
+                                    // t876 头盒分离 subset：true → 几何输出 subset 0（躯干+4 腿毛层）+ subset 1
+                                    //   （头盒），materials 数组按下标分配——头盒材质换绑本体层头区纹理源且不吃
+                                    //   毛色 tint（机制等价 MC 羊头 = skin 层恒自然色；t816 脸罩遮盖方案退役）。
+                                    sheepSkinHead: true
                                     // t421 pack 命中 entity 贴图 → T 字 UV 展开；否则全脸 UV（程序生成 mob_sheep）。
                                     packTextured: mobSheepPackTex.source.toString().length > 0
                                     walkPhase: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
@@ -7192,29 +7191,51 @@ Window {
                                 }
                                 position: Qt.vector3d(0, mobModelYOff, 0) // t252 腿底贴 collision 底面
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
-                                materials: PrincipledMaterial {
-                                    lighting: PrincipledMaterial.NoLighting
-                                    // t789 羊自然毛色 tint：毛层贴图 × 毛色 tint（sheepWoolTintAt；白 → #ffffff
-                                    //   恒等，白羊观感与旧版一致）再 × 昼夜明暗（tint × terrainLight 双乘 =
-                                    //   tintBySkyLight 语义的「贴图在身」分体版，t597 铁律：贴图在身 baseColor
-                                    //   只承载调制不压黑本体）。红闪仍红覆盖（优先于 tint）。
-                                    baseColor: {
-                                        const _r = entityManager.revision
-                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                        const tint = (_r >= 0) ? entityManager.sheepWoolTintAt(index)
-                                                               : Qt.rgba(1.0, 1.0, 1.0, 1.0)
-                                        const light = terrainLight(worldClock.skyLight)
-                                        return Qt.rgba(tint.r * light.r, tint.g * light.g, tint.b * light.b, 1.0)
+                                // t876 双材质：[0] = subset 0 毛层（躯干+腿）× 毛色 tint；[1] = subset 1 头盒
+                                //   （本体层头区自然色，不吃 tint——sheepHeadLightTint 只乘昼夜/红闪）。
+                                materials: [
+                                    PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        // t789 羊自然毛色 tint：毛层贴图 × 毛色 tint（sheepWoolTintAt；白 → #ffffff
+                                        //   恒等，白羊观感与旧版一致）再 × 昼夜明暗（tint × terrainLight 双乘 =
+                                        //   tintBySkyLight 语义的「贴图在身」分体版，t597 铁律：贴图在身 baseColor
+                                        //   只承载调制不压黑本体）。红闪仍红覆盖（优先于 tint）。t876 起只落
+                                        //   躯干+腿 subset（头 subset 独立材质，脸/头不再被染色）。
+                                        baseColor: {
+                                            const _r = entityManager.revision
+                                            if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                            const tint = (_r >= 0) ? entityManager.sheepWoolTintAt(index)
+                                                                   : Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                                            const light = terrainLight(worldClock.skyLight)
+                                            return Qt.rgba(tint.r * light.r, tint.g * light.g, tint.b * light.b, 1.0)
+                                        }
+                                        // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
+                                        //   t876：合成贴图的本体层头区由 subset 1 头材质消费，本材质头区不再被
+                                        //   采样（subset 0 只含躯干+腿索引）。
+                                        baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
+                                        // t633 ③ 羊毛层透明镂空裁剪：sheep_fur.png 头前 / 体侧有挖空（毛层透出下层），
+                                        //   默认 Opaque 把透明像素渲成黑块（用户观感「全白无眼」的一部分——黑脸块盖
+                                        //   在脸上）。Mask+0.5 丢弃透明像素（镂空看穿 = MC 毛层语义）。pack 关的
+                                        //   mob_sheep.png 程序贴图全不透明 → Mask 对它无影响（安全）。
+                                        alphaMode: mobSheepPackTex.source.toString().length > 0 ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                        alphaCutoff: 0.5
+                                    },
+                                    PrincipledMaterial {
+                                        // t876 subset 1 头盒：采样本体层贴图头区（自然羊头色）。pack 开 →
+                                        //   mobSheepPackTex 合成贴图（mobTextureSource(3) = 毛身 + 本体层头区
+                                        //   真脸，box-UV head(0,0)6×6×8 直采真脸区）；pack 关 → 程序
+                                        //   mob_sheep_head（裸肤脸 + 头顶羊毛帽 + 吻部暗带，全脸 UV）。baseColor
+                                        //   只乘昼夜/红闪（sheepHeadLightTint），**不吃毛色 tint**——t777 契约
+                                        //   「脸=skin 层不 tint」的贴图化实现（t816 脸罩已删，无遮盖层）。
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: sheepHeadLightTint(index)
+                                        baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepHeadTex
+                                        // 合成贴图头区不透明（本体层整幅移植）；程序 mob_sheep_head 全不透明
+                                        //   → Mask 两态均无可见影响，与毛层材质统一防异形包透明残留。
+                                        alphaMode: mobSheepPackTex.source.toString().length > 0 ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                        alphaCutoff: 0.5
                                     }
-                                    // t421 pack 命中 → 切 pack entity 贴图；否则程序生成 mob_sheep。
-                                    baseColorMap: mobSheepPackTex.source.toString().length > 0 ? mobSheepPackTex : mobSheepTex
-                                    // t633 ③ 羊毛层透明镂空裁剪：sheep_fur.png 头前 / 体侧有挖空（毛层透出下层），
-                                    //   默认 Opaque 把透明像素渲成黑块（用户观感「全白无眼」的一部分——黑脸块盖
-                                    //   在脸上）。Mask+0.5 丢弃透明像素（镂空看穿 = MC 毛层语义）。pack 关的
-                                    //   mob_sheep.png 程序贴图全不透明 → Mask 对它无影响（安全）。
-                                    alphaMode: mobSheepPackTex.source.toString().length > 0 ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
-                                    alphaCutoff: 0.5
-                                }
+                                ]
                                 // rv-low-batch1 眼睛恢复（同猪/牛模式）。t593：pack 命中改走 sheep_fur.png 羊毛层
                                 //   （头前是纯白羊毛无脸）→ 眼睛**恒显**（不再 pack 门控：原「pack 贴图自带脸」仅对
                                 //   cow/pig 成立，羊 fur 层无脸）。羊吃草时 MobModel 头绕颈枢俯仰 → 眼放「颈枢 Node」
@@ -7229,29 +7250,17 @@ Window {
                                 //   （毛身 + 本体层头区真脸）→ 头前已有真脸，恒显 overlay 眼叠上 = 两双眼（用户报障；
                                 //   牛等 pack 自带脸早已隐 overlay 眼，羊对齐同语义）。判据 resourcePack.sheepWoolFaceActive
                                 //   单一权威（Core，合成缓存生效与否）；合成失败回退毛层原样（头前无脸）→ 眼仍显保
-                                //   唯一脸；pack 关（程序贴图无脸）恒显不变。visible 依赖 mobSheepPackTex.source
-                                //   （sheepWoolFaceActive 无 NOTIFY，由 source 变化驱动重算）。
-                                // t816 羊脸罩（游戏内侧同步，图鉴 ResourceBrowser 同款）：非白毛色（sheepTintDyed）
-                                //   时整模贴图 × 毛色 tint 连**头前脸**一起染 → 脸罩以裸肤色盖住头前面（脸=skin 层
-                                //   不 tint，机制等价 MC 染色羊脸恒粉褐）。罩在眼 Node 内 → 随 headPitch 低头同转
-                                //   （图鉴静态无此需求）；罩盖贴图脸（pack 真脸亦盖）→ 眼在罩显时须恒显（每颗眼
-                                //   Model 的 visible 加 || sheepTintDyed(index) 分支）。头前面 z=-0.61（世界系）→
-                                //   罩相对颈枢 (0,0.10,-0.29) 为 z=-0.325、厚 0.02（pitch=0 时世界 [-0.625,-0.605]，
-                                //   前凸 0.015 / 后没入 0.005 无共面 z-fight，同图鉴）。
+                                //   唯一脸；pack 关（程序贴图 mob_sheep_head 无脸纹）恒显不变。visible 依赖
+                                //   mobSheepPackTex.source（sheepWoolFaceActive 无 NOTIFY，由 source 变化驱动重算）。
+                                // t816 脸罩退役：t876 起头盒是独立 subset + 独立材质（本体层头区自然色，不吃
+                                //   毛色 tint），染脸问题在贴图绑定层根治——不再叠加任何遮盖层，眼显隐门控
+                                //   回归 t777 ② 单一判据（无「罩在身须恒显眼」例外分支）。
                                 Node {
                                     visible: !(mobSheepPackTex.source.toString().length > 0
                                                && resourcePack.sheepWoolFaceActive)
-                                             || sheepTintDyed(index)
                                     position: Qt.vector3d(0, 0.10, -0.29)
                                     property real headPitch: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.headPitchAt(index)) : 0 }
                                     eulerRotation: Qt.vector3d(headPitch, 0, 0)
-                                    Model {
-                                        visible: sheepTintDyed(index)
-                                        geometry: UnitCube {}
-                                        position: Qt.vector3d(0, 0.00, -0.325)
-                                        scale: Qt.vector3d(0.14, 0.16, 0.02)
-                                        materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: sheepFaceCoverTint(index) }
-                                    }
                                     Model {
                                         geometry: UnitCube {}
                                         position: Qt.vector3d(-0.055, 0.00, -0.35)
