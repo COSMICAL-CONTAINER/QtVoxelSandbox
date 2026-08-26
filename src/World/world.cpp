@@ -799,6 +799,11 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     //   真坍落才走整柱清除 + 中间 worldChanged（同 checkRailOnEdit 批量先例，批量终态不受破坏）。
     //   t527 雪层未挂本入口（雪层贴地生成、水上无雪），沙/砾可在水中失撑故挂）。
     checkGravityBlockOnEdit(x, y, z, lightOldId, id);
+    // t903：植物族失撑复检亦挂本入口——羊吃草 Grass→Dirt 经此静默写（t897），草丛唯一合法支撑 = 草方块
+    //   （plantGroundBlock 收紧后）→ 支撑被置换为泥土等非草面时正上方草丛须掉落（用户定稿「只能放草方块」
+    //   的失撑同口径）。非族格快速路径 = 单次 blockAt + isGroundPlant（同 checkRailOnEdit /
+    //   checkGravityBlockOnEdit 批量先例，流体批量热路径可承受；真掉落才走中间 worldChanged）。
+    checkFlowerMushroomOnEdit(x, y, z, lightOldId, id);
     // review #27：余烬门门框失撑熄灭并入写入钩子族（焚毁 / 蒸发等「非空内容被置换」写触发；门面自清
     //   经 m_inRemoveNetherPortal 守卫早退无重入）。快速路径 = 6 邻 blockAt 读（无门格即返），流体批量
     //   热路径可承受（同 checkRailOnEdit / checkGravityBlockOnEdit 批量先例口径）。
@@ -2419,19 +2424,31 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 //   → id==Air）走 finishMiningAt 通用 drop 路径（dropId=自身方块），避免双重掉落。族成员判定经
 //   BlockRegistry::isGroundPlant 单一权威谓词（t847 收口 R19.13 终审 C-M1：t847 只把草丛收进放置预检、
 //   失撑族没跟 → 挖掉下方泥土后草丛悬空永存；放置 / 失撑两面共用谓词锁族成员集，加族必两面齐动）。
-//   同族既有口径（登记不扩）：本钩子只对 id==Air 的编辑生效——支撑被置换成非合法着地面（锄地变耕地）
-//   不掉，花 / 蘑菇自 t507 起同口径（保持同族统一，置换面留后续整族一批）。
+//   同族既有口径（登记不扩）：本钩子对花 / 蘑菇只在 id==Air 的编辑生效——支撑被置换成非合法着地面（锄地
+//   变耕地）不掉，花 / 蘑菇自 t507 起同口径（保持同族统一，置换面留后续整族一批）。
+//   t903 失撑同口径收紧（**只草丛**，花 / 蘑菇置换面口径保留）：草丛唯一合法支撑 = 草方块
+//   （plantGroundBlock 单一权威收紧后）→ 本格被**置换为非草面**（羊吃草 Grass→Dirt 经 setWaterSilent /
+//   锄地变耕地 / 任意替换）且正上方是草丛 → 草丛失撑掉落（dropId=自身种子）。为覆盖羊吃草路径，
+//   setWaterSilent 亦挂本钩子（同审查修 L6 给 checkRailOnEdit 补挂的先例——非族格单次 blockAt 早退，
+//   流体批量热路径可承受）。
 //   t571 标注【自然失撑掉落：恒发（含创造）】。
 void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
-    // 仅本格被破为 Air 且被破块非族内植物时，查正上方是否族内植物失撑。（被破块本身是族内植物时跳过 ——
-    //   玩家直破花 / 蘑菇 / 草丛的掉落由通用 finishMiningAt drop 路径负责，避免双重掉落。）
-    if (id != BlockRegistry::Air || BlockRegistry::isGroundPlant(oldId)) return;
+    // 被破 / 被置换块本身是族内植物时跳过 —— 玩家直破花 / 蘑菇 / 草丛的掉落由通用 finishMiningAt drop
+    // 路径负责，避免双重掉落。
+    if (BlockRegistry::isGroundPlant(oldId)) return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     const quint8 above = m_chunks.blockAt(x, by, z);
     if (!BlockRegistry::isGroundPlant(above)) return;
+    // 失撑判据：①本格被破为 Air（t507 全族口径）；②t903 草丛置换面 —— 正上方是草丛且本格被置换为非合法
+    //   着地面（plantGroundBlock 单一权威；Air 亦非合法面，①是②对草丛的子集——①保留为花 / 蘑菇的 Air 路径，
+    //   ②只对草丛收口）。
+    const bool supportBroken = id == BlockRegistry::Air;
+    const bool grassOnNonGrass = above == BlockRegistry::TallGrass
+                                 && !BlockRegistry::plantGroundBlock(BlockRegistry::TallGrass, id);
+    if (!supportBroken && !grassOnNonGrass) return;
     // 花 / 蘑菇失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
     m_chunks.setBlock(x, by, z, BlockRegistry::Air);
     noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 花 / 蘑菇非生长方块 → no-op，保持一致

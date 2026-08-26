@@ -1205,7 +1205,8 @@ bool BlockRegistry::plantGroundBlock(quint8 plantId, quint8 groundId)
     if (isMushroom(plantId))
         return groundId == Dirt || groundId == Grass;   // 本工程简化口径（MC 蘑菇亦可生于阴暗石面，不收）
     if (plantId == TallGrass)
-        return groundId == Dirt || groundId == Grass;   // 草丛只生于泥土 / 草方块（不能草上叠草 / 放树叶上）
+        return groundId == Grass;                        // t903 收紧：仅草方块（旧「泥土/草方块」→ 用户定稿泥土也不行，
+                                                          //   对齐 MC 草丛只生于草地；失撑链同口径见 checkFlowerMushroomOnEdit）
     if (plantId == DeadBush)
         return groundId == Sand;                        // 枯灌木沙地限定（MC 1.0 dead bush 语义）
     return false;
