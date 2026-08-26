@@ -11380,14 +11380,14 @@ int main(int argc, char *argv[])
         Hotbar hb;
         const QString dustIcon = hb.iconSourceForBlock(int(BR::RedstoneDust));
         const QString glassIcon = hb.iconSourceForBlock(int(BR::Glass));
-        // t879 换代 icon5->icon6（活板门族画法变更：ShapeTrapdoor 薄侧边 per-face + 木大面 180 四镂空板；
-        //   URL 家族名断言随缓存名同步——测试二进制无 qrc → 图集渲染落盘空图，URL 链路断言有效、
-        //   像素内容留实机人工目视）。
+        // t879 换代 icon5->icon6、t902 换代 icon6->icon7（耕地图标面修正：side/front 钉 dirt——旧泛化把
+        //   frontTile=湿耕地瓦片画上左前面；URL 家族名断言随缓存名同步——测试二进制无 qrc → 图集渲染
+        //   落盘空图，URL 链路断言有效、像素内容留实机人工目视）。
         const bool ok = dustIcon.startsWith(QStringLiteral("file:///"))
                      && !dustIcon.contains(QStringLiteral("icon_redstone_dust"))
                      && glassIcon.startsWith(QStringLiteral("file:///"))
-                     && glassIcon.contains(QStringLiteral("voxelsandbox_rp_icon6_"))
-                     && dustIcon.contains(QStringLiteral("voxelsandbox_rp_icon6_"));
+                     && glassIcon.contains(QStringLiteral("voxelsandbox_rp_icon7_"))
+                     && dustIcon.contains(QStringLiteral("voxelsandbox_rp_icon7_"));
         if (!ok) {
             qInfo().noquote() << "  [t815/t838 diag] dustIcon" << dustIcon << "| glassIcon" << glassIcon;
         }
@@ -11395,8 +11395,8 @@ int main(int argc, char *argv[])
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t815/t838 item icon paths: redstone dust pick-block icon resolves via runtime "
                              "atlas flat re-render (file:/// cache, stale hand-drawn qrc retired to last-resort "
-                             "fallback), glass icon cache family bumped icon5->icon6 (t879 trapdoor pair draw "
-                             "switch rides the same bump)";
+                             "fallback), glass icon cache family bumped icon6->icon7 (t879 trapdoor draw switch "
+                             "and t902 farmland face fix ride the same bump)";
     }
 
     // ── P-t836 钓鱼系统整改探针（Entities 层 EntityManager 直编 + Game 层 PlayerController/Hotbar 真消费端，
@@ -14888,6 +14888,47 @@ Item {
                              "slightly dimmed - MC semantics: a painting's back is a wooden board, fixing "
                              "the fully-transparent back visible through glass walls (source pin on the "
                              "paintingDelegate block; visual confirmation pending user playtest)";
+    }
+
+    // ── P-t902 耕地图标面源码钉（纯视觉项轻量源码钉；atlasIconSpecForBlock 是文件内 static，行为级不可
+    //    直调 → 钉 case 存在 + def 字段契约）──
+    //   用户「两面都是耕地」根因：Farmland def.frontTile 字段被 mesher 复用为**湿态顶面瓦片 27**（无 -Z
+    //   前面语义），ShapeFull 泛化 addBox(topT, sideT, frontT) 把它喂给图标左前面 → 顶=干耕 + 左前=湿耕 +
+    //   右=泥。修法 = 显式 case 钉 side/front=sideT（dirt 单一权威）。双腿：(a) def 契约（top=26 / side=2 /
+    //   front=27——字段复用事实本身钉死，泛化路径对耕地必错）；(b) 源码钉 spec 的 Farmland case 用
+    //   (topT, sideT, sideT) 且先于 ShapeFull 泛化（boxes 非空则泛化不跑）。
+    {
+        const BR::BlockDef &fd = BR::def(BR::Farmland);
+        const bool okDef = fd.topTile == 26 && fd.sideTile == 2 && fd.frontTile == 27;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rf(root + QStringLiteral("/src/Core/resourcepackmanager.cpp"));
+        const QString t = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+        const int iCase = t.indexOf(QStringLiteral("case BlockRegistry::Farmland:"));
+        bool okPin = false;
+        if (iCase < 0) {
+            qInfo().noquote() << "  [t902 pin diag] Farmland case miss in atlasIconSpecForBlock";
+        } else {
+            const QString seg = t.mid(iCase, 1600); // case 块（注释 + addBox 全在内）
+            const int box = seg.indexOf(QStringLiteral("addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, topT, sideT, sideT)"));
+            okPin = box > 0
+                    && seg.indexOf(QStringLiteral("case BlockRegistry::Cactus:")) > box; // 在泛化前（② 特型段）
+        }
+        const bool okT902 = okDef && okPin;
+        if (!okT902) {
+            ++totalFail;
+            qInfo().noquote() << "  [t902 diag] def" << fd.topTile << fd.sideTile << fd.frontTile
+                              << "pin" << okPin;
+        }
+        qInfo().noquote() << (okT902 ? "PASS" : "FAIL")
+                          << "| t902 farmland item icon faces: explicit spec case pins side AND front faces "
+                             "to the dirt side-tile (single authority def.sideTile) with only the top "
+                             "carrying the tilled texture - the generic ShapeFull path fed the mesher-reused "
+                             "frontTile (wet-farmland top tile 27) into the icon's left-front face, so the "
+                             "icon read as farmland on both visible faces; def field-reuse contract pinned "
+                             "(top=26 dry / side=2 dirt / front=27 wet-top) and cache family bumped "
+                             "icon6->icon7 so stale on-disk icons regenerate; visual confirmation pending "
+                             "user playtest";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

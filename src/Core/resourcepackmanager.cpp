@@ -2661,6 +2661,17 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
     };
     const int topT = d.topTile, sideT = d.sideTile, frontT = d.frontTile;
     switch (blockId) {
+    case BlockRegistry::Farmland:
+        // t902 耕地图标面修正（用户「两面都是耕地」）：Farmland 的 def.frontTile 字段被 mesher 复用为
+        //   **湿态顶面瓦片**（27 farmland_wet——见 build_atlas.py 注：Farmland 无 -Z 前面语义，frontTile
+        //   唯一消费点是 tileFor 的湿态顶面），ShapeFull 泛化 addBox(topT, sideT, frontT) 把它喂给图标的
+        //   **左前面**（renderAtlasIcon 左前 0.80 明暗面贴 frontTile）→ 图标顶=干耕地 + 左前=湿耕地 +
+        //   右=泥土 = 用户读到「两面都是耕地」。item 图标语义 = 顶面耕地 / 其余面泥土（机制对齐 MC
+        //   farmland item）——显式钉 side/front 都用 sideT（= def.sideTile = dirt(2)，单一权威不另写死）。
+        //   pack-off 态走 legacy qrc icon_farmland.png（build_cube_icons.py 本就顶=干耕/侧=泥，正确不受影响）；
+        //   本 spec 消费面 = pack-on 重渲 + 资源查看器大图标。缓存族 icon6→icon7 随本画法变更换代。
+        addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, topT, sideT, sideT);
+        break;
     case BlockRegistry::Cactus: // 放置态 14/16 细柱（PartialBlockGeometry Cactus case；顶面 topTile 余 side）
         addBox(0.0625, 0.0, 0.0625, 0.9375, 1.0, 0.9375, topT, sideT, sideT);
         break;
@@ -3019,7 +3030,7 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     if (dir.isEmpty())
         return {};
     QDir().mkpath(dir);
-    // t764/t745 文件族 icon → icon2 → icon3 → icon4 → icon5 → icon6：画法版本或缓存键策略变更须换缓存名，否则老缓存
+    // t764/t745 文件族 icon → icon2 → icon3 → icon4 → icon5 → icon6 → icon7：画法版本或缓存键策略变更须换缓存名，否则老缓存
     //   在 pack revision 未变时被永久复用（AppLocalData 里的旧 icon_*.png 成了无失效机制的陈旧派生物）。
     //   t800 换 icon4：玻璃（54）画法 dimetric 立方 → flat 2D 平贴（此前中键拾取玻璃方块 / pack 态已落盘的
     //   icon3_54_* 是旧立方投影，不换名则永久复用旧观感）。
@@ -3028,8 +3039,11 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     //   t879 换 icon6：活板门族（20 木 / 103 铁）图标画法变更——① ShapeTrapdoor 泛化 case 薄侧边贴图改
     //   per-face 分流（铁=iron_block / 木=planks，修「铁活板门侧边贴图查看器里还没改对」）；② 木活板门大面
     //   贴图 planks(8) → 180 四镂空板（改观感）。已落盘 icon5_20_* / icon5_103_* 是旧画法，不换名则永久复用。
+    //   t902 换 icon7：耕地（Farmland=23）图标面修正——显式 case 钉 side/front=dirt（旧 ShapeFull 泛化把
+    //   frontTile=湿耕地瓦片画上左前面 = 用户「两面都是耕地」）。已落盘 icon6_23_*（pack 覆盖态）是旧
+    //   画法，不换名则永久复用。
     const QString out = QDir(dir).absoluteFilePath(
-            QStringLiteral("voxelsandbox_rp_icon6_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
+            QStringLiteral("voxelsandbox_rp_icon7_%1%2_r%3.png").arg(blockId).arg(modeSuffix).arg(revisionAtSnapshot));
     if (!img.save(out, "PNG"))
         return {};
     {
