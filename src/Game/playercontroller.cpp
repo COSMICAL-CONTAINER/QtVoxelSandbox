@@ -3299,6 +3299,29 @@ void PlayerController::placeBlock()
         emit swingArm(); // 抛雪球也是一次「使用」动作 → 挥手（t29）
         return; // 雪球（抛出成功）不再走方块放置路径
     }
+    // t891② 烈焰弹发射（机制等价 MC fire charge 右键发射火球撞击生火）：手持 FireChargeId（材料段 0x25C，
+    //   t891 新物品：燃烬粉+煤/炭+火药合成 3 发）右键 → spawnFireball 从眼位沿视线方向直线射出（复用燃烬者
+    //   火球投射链 t728——kind=Fireball 直线弹道无重力 / 撞击点燃 / mob 命中 5HP+着火 / 寿命越界兜底全既有；
+    //   玩家侧差异走 per-entity 字段：igniteChancePct=100 撞击**必生火**（Emberling 默认 20% 不动），且玩家侧
+    //   火球 fireballShooter=-1 → Entities 层玩家命中分支对其豁免（低头发射不自伤，MC 投射物所有者豁免同语义）。
+    //   撞击点燃口径 = 打火石同源（Entities 层 Fireball tick 内收口）：命中格可燃 → igniteFlammableAt 直燃进
+    //   燃烧态；非可燃 → 来向空气格置立地火。速度取 12（同 kPlayerSnowballSpeed 本地常量先例——Entities 层
+    //   速度常量 private 不跨层读；MC fire charge 弹速与投掷物同档）。**不要求 m_hasHit**（瞄准弹道非方块格）；
+    //   材料段非方块 → 须在 `m_selectedBlock == Air` 守卫之前分流（同雪球 / 蛋分支模式）。spectator 已被入口
+    //   canPlace() 守卫拦截；Creative / Survival 均可发。生存消耗 1 弹 / 创造不耗。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::FireChargeId) {
+        constexpr float kPlayerFireballSpeed = 12.0f; // 玩家烈焰弹初速（blocks/s；同 kPlayerSnowballSpeed 档）
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球模式）。
+        const QVector3D origin = eye + look * 0.5f;
+        m_entityManager->spawnFireball(origin, look * kPlayerFireballSpeed, 100); // 撞击必生火（t891②）
+        if (m_mode != Creative)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 烈焰弹（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 发射也是一次「使用」动作 → 挥手（t29）
+        return; // 烈焰弹（发射成功）不再走方块放置路径
+    }
     // t583 鸡蛋投掷（用户「鸡蛋还不能投掷出来，应该可以丢出来然后可以砸出来小鸡」；机制等价 MC 1.0 egg
     //   投掷）：手持鸡蛋（EggId，材料段）右键 → spawnEgg 从眼位沿视线方向以 kPlayerEggSpeed 抛出（抛物弹丸，
     //   完全同雪球 t505 模式 —— 无蓄力右键即抛）。命中（方块 / mob）→ 碎裂 + **1/8 概率在命中处孵 1 只小鸡**

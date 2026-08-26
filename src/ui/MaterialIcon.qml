@@ -1817,6 +1817,34 @@ Item {
                 R(23, 17, 1, 1, core)            // 底端亮芯
             }
 
+            // t891② 烈焰弹（0x25C）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球撞击生火。MC 风格
+            //   fire charge = 暗壳火核球（深灰石壳包裹的橙黄火球，壳面裂纹透火光——「装在壳里的火」一眼可读，
+            //   与雪球冷白 / 暗渊珠青绿区分）。机制等价 MC fire charge；纯原创自绘（§9a）。
+            //   配色：shell #3a3236（暗石壳）/ shellLite #5a4e52（受光壳缘）/ core #e87828（火核主橙）/
+            //   coreHot #f8c050（核心亮黄）/ crack #b85018（裂纹透火）/ spark #fff0b0（高光点）。
+            const drawFireCharge = () => {
+                const shell = "#3a3236", shellLite = "#5a4e52"
+                const core = "#e87828", coreHot = "#f8c050", crack = "#b85018", spark = "#fff0b0"
+                // 球形外廓（rows 6..18，同暗渊珠球体语言）：壳体主体 + 受光上缘
+                R(9, 6, 6, 1, shellLite)         // 球顶（受光）
+                R(7, 7, 10, 1, shellLite)
+                R(6, 8, 12, 8, shell)            // 壳体主体 rows 8..15
+                R(7, 16, 10, 1, shell)
+                R(8, 17, 8, 2, shell)            // 球底暗影（体积感）
+                R(9, 19, 6, 1, shell)
+                // 火核透光（壳面中央十字裂口露出的橙黄火光——「壳里包着火」的核心特征）
+                R(9, 9, 6, 1, coreHot)           // 核心亮带（横）
+                R(11, 8, 2, 2, coreHot)          // 核心亮块（竖）
+                R(8, 10, 8, 4, core)             // 火核主体（rows 10..13）
+                R(10, 14, 4, 2, crack)           // 下部裂纹（透暗火）
+                R(13, 13, 2, 1, crack); R(8, 14, 1, 2, crack)
+                // 裂纹细线（壳面向四周放射的透光缝）
+                R(6, 11, 2, 1, crack); R(16, 11, 2, 1, crack)
+                R(10, 7, 1, 1, crack); R(13, 16, 1, 2, crack)
+                // 高光点（左上受光 + 右下反光）
+                R(8, 8, 1, 1, spark); R(15, 15, 1, 1, spark)
+            }
+
             // t761 燧石（0x248）：挖沙砾小概率掉落；打火石配方原料（铁上燧下）。燧石 = 敲击起火的深灰
             //   **贝壳状断口石片**——斜置深灰石片主体 + 受光棱面亮边 + 断口缺口暗锯齿（一眼读作「锋利的
             //   石头碎片」而非圆砾石——区别沙砾方块的灰砾堆观感）。纯原创自绘（§9a）。
@@ -1940,6 +1968,7 @@ Item {
             case 0x246: drawSpawnEgg("nightwalker"); break // t727 生物蛋（夜行者；右键 → 生成夜行者）
             case 0x247: drawSpawnEgg("emberling");  break // t785 生物蛋（燃烬者；右键 → 生成燃烬者；t728 漏 case 落 default 显木棒，本任务补）
             case 0x248: drawFlint();             break // t761 燧石（挖沙砾概率掉落；打火石配方原料）
+            case 0x25C: drawFireCharge();        break // t891② 烈焰弹（燃烬粉+煤/炭+火药合成；右键发射火球撞击生火）
             case 0x249: drawSpawnEgg("wolf");    break // t785 生物蛋（狼；右键 → 生成野生狼）
             case 0x24A: drawSpawnEgg("ocelot");  break // t785 生物蛋（豹猫；右键 → 生成野生豹猫）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）

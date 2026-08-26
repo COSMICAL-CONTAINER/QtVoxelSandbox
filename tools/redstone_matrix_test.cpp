@@ -31,6 +31,7 @@
 #include <QQmlContext>  // t874/t875 真链探针：rootContext()->setContextProperty + qmlContext（wrapper 作用域链）
 #include <QQmlComponent> // t874/t875 真链探针：setData+base URL 直载源树 AnvilUI.qml / EnchantingTableUI.qml
 #include <QQuickItem>   // t874/t875 真链探针：面板 root / 宿主容器 Item
+#include <QQuickWindow> // t891 探针：pc 挂窗置 captured（placeBlock 入口门；grab 载体，无 show）
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -10980,7 +10981,11 @@ int main(int argc, char *argv[])
         for (int win = 0; win < 400 && !burned; ++win) {
             wX3.setBlock(14, 81, 12, (win & 1) ? BR::Air : BR::Stone, 0); // 标记翻转（真实变化 → poke 标脏岩浆）
             for (int t = 0; t < 35; ++t) wX3.tickLavaFlow(); // 35 调 ≥ 节流 30 → 恰 1 个流/焚毁窗
-            burned = wX3.blockAt(13, 80, 12) != BR::Planks;   // 木板被焚毁（Air / 被岩浆漫入）
+            // t891① 语义更新：岩浆掷中邻木 → **点燃进燃烧态**（id 不变，焚毁让位给燃烧计时终局）→
+            //   燃烧 10 窗后烧毁（setBlock Fire/Air）——本循环驱动 tickLavaFlow（点燃）+ tickFire（推进
+            //   燃烧计时至烧毁），「burned」= 木板格不再是 Planks（被点燃烧尽）。
+            wX3.tickFire();
+            burned = wX3.blockAt(13, 80, 12) != BR::Planks;   // 木板被点燃烧毁（燃烧终局 / 岩浆漫入）
         }
         const bool okB = burned && wX3.blockAt(13, 81, 12) == BR::Air && railDrops == 2; // 轨掉落（(a)1 + (b)1）
         const bool ok = okA && okB;
@@ -14139,6 +14144,250 @@ Item {
                              "ticking while GUI open)";
     }
 
+    // ── P-t891 点火源扩展探针（① 岩浆邻燃 / ② 烈焰弹全链）──
+    //    (a) 岩浆邻燃：木板贴岩浆源 → 首个命中窗**点燃进燃烧态**（isBurningAt 真 + id 保留 = 直燃语义；
+    //        核此前只有焚毁没有点燃）→ 持续驱动至烧毁（blockAt 变非 Planks，燃烧计时终局独家承担焚毁——
+    //        单掷双义防一格两份消耗）；湿对照（板邻水）→ 同窗数内不点燃也不焚毁（防火带收口在入口内）；
+    //        书架（非 isWoodLike 但 flammable）→ 也被点燃（入口门扩到可燃全表）。确定性：tickLavaFlow
+    //        散布 = hashVoxel(seed+窗口序号) 纯函数；8%/窗 → 240 窗 P(未命中)≈2e-10（上限裕量充足）。
+    //    (b) 烈焰弹全链（真 pc）：setStack 手持烈焰弹 → 右键发射 → Fireball 实体出生眼位前
+    //        （kindAt==Fireball）→ 飞行撞墙消失 → 撞击必生火：打石墙 = 来向空气格置立地火（blockAt==Fire，
+    //        100% per-entity 点燃概率）；打木板墙 = 板进燃烧态（id 不变，igniteFlammableAt 直燃口径）；
+    //        创造不耗 + 挥手信号；生存消耗 1 弹；低头发射不自伤（玩家侧火球 shooter 豁免——发射后 HP 满 =
+    //        无 mobAttackedPlayer 伤害，pc 无 PlayerState 注入以「burning 未翻转」间接证）；合成配方
+    //        match 双证（煤版 / 木炭版各合 3 发）+ FireChargeId 0x25C 钉位 + 创造调色板含烈焰弹。
+    {
+        World wL;
+        wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(91);
+        const int fy = 83;
+        bool okA = true;
+        // (a1) 干木板贴岩浆 → 点燃（直燃语义）→ 续驱至烧毁。驱动：每窗翻转标记格 poke 岩浆脏
+        //     （m_lavaDirty 稳态早退——setBlock 直写不 poke，须显式重标脏；r24#3(b) 同款手法）。
+        for (int z = 4; z <= 6; ++z) {
+            wL.setBlock(6, fy, z, BR::Stone, 0);
+            wL.setBlock(5, fy, z, BR::Lava, 0); // 岩浆源列（不驱动流动也参与 ignite pass 扫描）
+        }
+        wL.setBlock(6, fy, 5, BR::Planks, 0); // 木板贴岩浆（x=5 的 +X 邻）
+        int lavaWins = 0;
+        bool sawLit = false;
+        for (; lavaWins < 240 && !sawLit; ++lavaWins) {
+            wL.setBlock(5, fy + 1, 4, (lavaWins & 1) ? BR::Air : BR::Stone, 0); // 标记翻转 poke 脏
+            for (int t = 0; t < 35; ++t) wL.tickLavaFlow(); // 35 调 ≥ 节流 30 → 恰 1 真窗（r24#3 同款）
+            sawLit = wL.isBurningAt(6, fy, 5); // 点燃观测在窗内即时取（防同窗后段已烧毁漏采）
+        }
+        const bool litByLava = sawLit;
+        bool burnedAway = false;
+        if (litByLava) {
+            for (int t = 0; t < 120 && !burnedAway; ++t) { // 燃烧计时 10 窗 + 余烬衔接
+                wL.tickFire();
+                if (wL.blockAt(6, fy, 5) != BR::Planks) burnedAway = true;
+            }
+        }
+        okA = okA && litByLava && burnedAway;
+        // (a2) 湿对照：**书架**邻岩浆且邻水 → 恒静（防火带强断言）。用书架而非木板：木板是 isWoodLike，
+        //     掷中且湿拒后会**回落旧焚毁路径**（焚毁无水守卫 = 既有语义，板被烧掉）→ 断言面混入旧路径；
+        //     书架非 isWoodLike（掷中且湿拒 → 本窗跳过不焚毁）→ 240 窗后仍完好未燃 = 防火带在点燃入口
+        //     恒拒的纯净信号（无 tickFire 驱动 → 曾点燃会驻留燃烧态被末态捕获）。
+        for (int z = 4; z <= 6; ++z) {
+            wL.setBlock(12, fy, z, BR::Stone, 0);
+            wL.setBlock(11, fy, z, BR::Lava, 0);
+            wL.setBlock(13, fy, z, BR::Water, 0); // 水在书架另一侧 → 书架湿
+        }
+        wL.setBlock(12, fy, 5, BR::Bookshelf, 0);
+        for (int t = 0; t < 240; ++t) {
+            wL.setBlock(11, fy + 1, 4, (t & 1) ? BR::Air : BR::Stone, 0); // 标记翻转 poke 脏
+            for (int k = 0; k < 35; ++k) wL.tickLavaFlow(); // 35 调 ≥ 节流 30 → 恰 1 真窗
+        }
+        const bool wetQuiet = wL.blockAt(12, fy, 5) == BR::Bookshelf
+                              && !wL.isBurningAt(12, fy, 5);
+        okA = okA && wetQuiet;
+        // (a3) 书架（flammable 非 isWoodLike）→ 点燃（入口门扩全表）
+        for (int z = 4; z <= 6; ++z) {
+            wL.setBlock(20, fy, z, BR::Stone, 0);
+            wL.setBlock(19, fy, z, BR::Lava, 0);
+        }
+        wL.setBlock(20, fy, 5, BR::Bookshelf, 0);
+        bool shelfLit = false;
+        for (int t = 0; t < 240 && !shelfLit; ++t) {
+            wL.setBlock(19, fy + 1, 4, (t & 1) ? BR::Air : BR::Stone, 0); // 标记翻转 poke 脏
+            for (int k = 0; k < 35; ++k) wL.tickLavaFlow(); // 35 调 ≥ 节流 30 → 恰 1 真窗
+            shelfLit = wL.isBurningAt(20, fy, 5); // 窗内即时观测（同 a1）
+        }
+        okA = okA && shelfLit;
+        // 清 (a) 场
+        for (int x : {5, 6, 11, 12, 13, 19, 20})
+            for (int z = 4; z <= 6; ++z)
+                for (int dy = 0; dy <= 2; ++dy) wL.setBlock(x, fy + dy, z, BR::Air, 0);
+
+        // (b) 烈焰弹全链（真 pc rig：石地 + 石靶墙 + 木靶墙）
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pcF;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        for (int x = 1; x <= 14; ++x)
+            for (int z = 4; z <= 8; ++z) {
+                wL.setBlock(x, fy, z, BR::Stone, 0);
+                for (int dy = 1; dy <= 3; ++dy) wL.setBlock(x, fy + dy, z, BR::Air, 0);
+            }
+        for (int dy = 1; dy <= 2; ++dy) // 石靶墙 x=13（两层高）
+            for (int z = 4; z <= 8; ++z) wL.setBlock(13, fy + dy, z, BR::Stone, 0);
+        pcF.setWorld(&wL);
+        pcF.setEntityManager(&ents);
+        pcF.setHotbar(&hb);
+        // placeBlock 的 !m_captured 入口门（headless 无指针锁定）：探针 pc 无窗口（QQuickItem 裸构造，
+        //   window()=null → grab() 早退）→ 直调公开 Q_INVOKABLE setCaptured 不可用（private 非槽）。
+        //   captured 是 Q_PROPERTY(bool captured READ ...) 只读 → QML 写不进。t886/t881 探针的
+        //   useFishingRod 不吃此门，placeBlock 吃——headless 唯一通道 = 手动把 pc 挂进一个 QQuickWindow
+        //   （setParentItem 挂 window contentItem → windowChanged → onWindowChanged 设 m_window）再调
+        //   grab()（m_window 就绪后 setCaptured(true) 走通）。窗仅作指针捕获载体（无 show，光标覆写
+        //   只作用于本测试进程无副作用；进程退出析构配对 release）。
+        QQuickWindow probeWin;
+        pcF.setParentItem(probeWin.contentItem());
+        pcF.grab();
+        // 配方 match 双证 + id 钉位 + 创造调色板
+        const int gridCoal[9] = { RecipeRegistry::BlazePowderId, RecipeRegistry::CoalId,
+                                  RecipeRegistry::GunpowderId, 0, 0, 0, 0, 0, 0 };
+        const int gridChar[9] = { RecipeRegistry::BlazePowderId, RecipeRegistry::CharcoalId,
+                                  RecipeRegistry::GunpowderId, 0, 0, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *rc = RecipeRegistry::match(gridCoal, 2);
+        const RecipeRegistry::Recipe *rch = RecipeRegistry::match(gridChar, 2);
+        bool inPalette = false;
+        const QVariantList mats = hb.creativeMaterials();
+        for (const QVariant &v : mats)
+            if (v.toInt() == RecipeRegistry::FireChargeId) { inPalette = true; break; }
+        const bool okRecipe = rc && rch && rc->outputId == RecipeRegistry::FireChargeId
+                              && rc->outputCount == 3 && rch->outputCount == 3
+                              && RecipeRegistry::FireChargeId == 0x25C && inPalette;
+        // 发射链 A：创造模式瞄石墙（水平直射 z=6 行）
+        hb.setStack(0, RecipeRegistry::FireChargeId, 5, 0);
+        hb.setSelectedSlot(0);
+        const QVector3D eyeP(2.5f, float(fy + 1), 6.5f);
+        const QVector3D dirV = (QVector3D(13.5f, float(fy + 1) + 0.5f, 6.5f)
+                                - QVector3D(eyeP.x(), eyeP.y() + 1.62f, eyeP.z())).normalized();
+        pcF.loadSavedState(eyeP.x(), eyeP.y(), eyeP.z(),
+                           qRadiansToDegrees(std::atan2(-dirV.x(), -dirV.z())),
+                           qRadiansToDegrees(std::asin(dirV.y())), 1 /* Creative */);
+        pumpFor(17); pcF.tick(); // settle（碰撞落位）
+        int swingSeen = 0;
+        QObject::connect(&pcF, &PlayerController::swingArm, &pcF, [&]() { ++swingSeen; });
+        const int beforeCount = ents.count();
+        pcF.placeBlock(); // 右键发射
+        int fbIdx = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Fireball)) { fbIdx = i; break; }
+        const bool spawnedOk = fbIdx >= 0 && ents.count() > beforeCount
+                               && hb.blockIdAt(0) == RecipeRegistry::FireChargeId
+                               && hb.countAt(0) == 5 /* 创造不耗 */ && swingSeen >= 1;
+        // 推实体 tick 至撞击（~11 格 / 12b/s ≈ 0.95s ≈ 60 tick @dt0.05；上限 80 裕量）
+        int fireAtWall = -1;
+        for (int t = 0; t < 80 && fireAtWall < 0; ++t) {
+            ents.tick(0.05, &wL, farL, 0.3f, 1.8f, false);
+            if (!ents.aliveAt(fbIdx)) { // 消失 = 撞击结算完成（石墙非可燃 → 来向格立地火）
+                const QVector3D last = ents.posAt(fbIdx);
+                const int lx = qFloor(last.x()), ly = qFloor(last.y()), lz = qFloor(last.z());
+                static constexpr int kNb7[7][3] = {{0,0,0},{-1,0,0},{1,0,0},{0,1,0},{0,-1,0},{0,0,-1},{0,0,1}};
+                for (const auto &o : kNb7) {
+                    const int qx = lx + o[0], qy = ly + o[1], qz = lz + o[2];
+                    if (qy >= 0 && wL.blockAt(qx, qy, qz) == BR::Fire) { fireAtWall = t; break; }
+                }
+            }
+        }
+        // 发射链 B：生存模式瞄木板墙（换靶重发；验消耗 + 直燃口径）。链 A 的火球已飞出（撞墙消失或
+        //   寿命兜底）→ 本段「首个 Fireball」扫描会命中链 A 残留（若寿命未到）→ 先排空实体桶。
+        hb.setStack(0, RecipeRegistry::FireChargeId, 3, 0);
+        for (int dy = 1; dy <= 2; ++dy)
+            for (int z = 4; z <= 8; ++z) wL.setBlock(11, fy + dy, z, BR::Planks, 0);
+        pcF.clearStatusEffects();
+        // 链 A 火球已结算消失（fireAtWall ≥ 0 实证）→ 链 B 的首个活 Fireball 即新弹。**不可按 idx 排除
+        //   链 A 残弹**——EntityManager 是 slot-reuse（t256），新火球大概率恰好复用链 A 的槽位。
+        const QVector3D dirW = (QVector3D(11.5f, float(fy + 1) + 0.5f, 6.5f)
+                                - QVector3D(eyeP.x(), eyeP.y() + 1.62f, eyeP.z())).normalized();
+        pcF.loadSavedState(eyeP.x(), eyeP.y(), eyeP.z(),
+                           qRadiansToDegrees(std::atan2(-dirW.x(), -dirW.z())),
+                           qRadiansToDegrees(std::asin(dirW.y())), 2 /* Survival */);
+        pumpFor(320); pcF.tick(); // > 放置 CD 200ms（链 A 发射已刷新 m_lastPlaceMs——不泵则本发被吞）
+        pcF.placeBlock();
+        int fb2 = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Fireball)) { fb2 = i; break; }
+        bool impactSettled = false;
+        for (int t = 0; t < 80 && !impactSettled && fb2 >= 0; ++t) {
+            ents.tick(0.05, &wL, farL, 0.3f, 1.8f, false);
+            if (!ents.aliveAt(fb2)) impactSettled = true; // 消失 = 撞击结算完成
+        }
+        // 直燃口径的燃烧态是**持续态**（id 不变）→ 撞击后仍可复验（不依赖窗内时序）
+        bool plankStillBurning = false;
+        for (int dx = 9; dx <= 13 && !plankStillBurning; ++dx)
+            for (int dy = 0; dy <= 3 && !plankStillBurning; ++dy)
+                for (int z = 4; z <= 8 && !plankStillBurning; ++z)
+                    if (wL.isBurningAt(dx, fy + dy, z)) plankStillBurning = true;
+        const bool survivalConsumed = hb.blockIdAt(0) == RecipeRegistry::FireChargeId
+                                      && hb.countAt(0) == 2; // 3-1
+        // (c) 玩家侧豁免（行为级）：直下发射——火球出生点在玩家外扩命中盒内（眼位下方 0.5，XZ 偏移 0 <
+        //     0.6），无豁免则首帧必自击（5HP + 点燃）。豁免（fireballShooter==-1 玩家侧 → 玩家命中分支
+        //     跳过）生效 → 全程零 mobAttackedPlayer，火球正常坠地生火（石地板 → 来向格立地火）。
+        int playerHits = 0;
+        QObject::connect(&ents, &EntityManager::mobAttackedPlayer, &ents,
+                         [&](int, int, float, float) { ++playerHits; });
+        const int fbD = ents.spawnFireball(QVector3D(3.5f, float(fy + 1) + 1.62f - 0.5f, 6.5f),
+                                            QVector3D(0.0f, -12.0f, 0.0f), 100);
+        bool downSettled = false;
+        for (int t = 0; t < 40 && !downSettled; ++t) {
+            // playerTargetable=true + listener=玩家脚位 → 玩家命中分支真实求值（豁免是唯一免击原因）
+            ents.tick(0.05, &wL, QVector3D(3.5f, float(fy + 1), 6.5f), 0.3f, 1.8f, true);
+            if (fbD >= 0 && !ents.aliveAt(fbD)) downSettled = true;
+        }
+        const bool exemptOk = playerHits == 0 && downSettled
+                              && wL.blockAt(3, fy + 1, 6) == BR::Fire; // 坠地生火（地板上方来向格）
+        // 清场
+        for (int x = 1; x <= 14; ++x)
+            for (int z = 4; z <= 8; ++z)
+                for (int dy = 0; dy <= 3; ++dy) wL.setBlock(x, fy + dy, z, BR::Air, 0);
+        pcF.clearStatusEffects();
+        probeWin.deleteLater(); // 捕获载体窗随探针作用域收尾（release 光标覆写配对）
+        pcF.release();
+        const bool okT891 = okA && spawnedOk && okRecipe && fireAtWall >= 0
+                            && plankStillBurning && survivalConsumed && exemptOk;
+        if (!okT891) ++totalFail;
+        if (!okT891)
+            qInfo().noquote() << "  [t891 diag] okA" << okA << "litByLava" << litByLava
+                              << "burnedAway" << burnedAway << "wetQuiet" << wetQuiet
+                              << "shelfLit" << shelfLit << "| spawnedOk" << spawnedOk
+                              << "fbIdx" << fbIdx << "count" << ents.count()
+                              << "| okRecipe" << okRecipe << "inPalette" << inPalette
+                              << "| fireAtWall" << fireAtWall << "plankStillBurning" << plankStillBurning
+                              << "survivalConsumed" << survivalConsumed
+                              << "exemptOk" << exemptOk << "playerHits" << playerHits
+                              << "cnt0" << hb.countAt(0) << "id0" << hb.blockIdAt(0);
+        qInfo().noquote() << (okT891 ? "PASS" : "FAIL")
+                          << "| t891 ignition sources extended: (a) lava neighbor ignition -- a wood "
+                             "plank hugging a lava source now ENTERS the burning state on the first "
+                             "hit window (id preserved = direct-burn semantics via the shared "
+                             "igniteFlammableAt entry; the core path previously only incinerated), "
+                             "then burns away through the burn-timer endgame exclusively (single-roll "
+                             "dual-meaning: ignite wins over incinerate, no double consumption), a "
+                             "water-backed bookshelf stays intact and unburned (damp-fuel firewall at "
+                             "the ignite entry; a wet plank would fall to the legacy incinerate path "
+                             "which has no water guard - out of scope), "
+                             "and a bookshelf (flammable but outside the old isWoodLike set) now "
+                             "catches too (entry gate widened to the full flammable table); "
+                             "(b) fire charge item: real-PC right-click launches a Fireball along the "
+                             "look direction (reusing the emberling projectile chain), stone-wall hit "
+                             "places standing fire in the approach air cell (100% per-entity ignite "
+                             "chance, flint-and-steel-homolog caliber), plank wall enters burning "
+                             "state directly, survival consumes one charge while creative does not, "
+                             "straight-down launch never self-hits (behavioral: player-side fireball "
+                             "spawned INSIDE the player's expanded hitbox with playerTargetable=true "
+                             "yields zero mobAttackedPlayer and settles into floor fire - owner "
+                             "exemption via shooter==-1 skip), "
+                             "recipes blaze-powder+coal/charcoal+gunpowder -> 3 charges both match and "
+                             "the item sits in the creative material palette at id 0x25C";
+    }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;

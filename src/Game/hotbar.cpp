@@ -636,6 +636,10 @@ QVariantList Hotbar::creativeMaterials() const
         //   原料（t724 占位「圆石+铁锭」→ t761 改回正统「燧石+铁锭」）。创造调色板补全便于测试配方链；
         //   可堆叠 64（走材料段默认）；非方块 → 右键不放置。MaterialIcon 自绘深灰燧石碎片（drawFlint）。
         int(RecipeRegistry::FlintId),         // 燧石：挖沙砾概率掉落；打火石配方原料（t761）
+        // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球
+        //   撞击生火。排暗渊链材料后（燃烬粉是配方原料——合成链相邻）。可堆叠 64；非方块 → 右键不走放置，
+        //   走发射分支。MaterialIcon 自绘烈焰弹（drawFireCharge，§9 原创）。
+        int(RecipeRegistry::FireChargeId),    // 烈焰弹：燃烬粉+煤/炭+火药合成 3 发；右键发射火球撞击生火（t891②）
         // t788 染料段 16 色（材料段 0x24B..0x25A；机制等价 MC 1.0 dye 16 色）：生存获得 = 破坏对应花（红/黄/
         //   蓝/白四色，blockregistry dropId）+ 熔炉烧仙人掌（绿）；染色链原料（染白羊毛/白床 → 对应色）。
         //   创造调色板补全便于测试染色链；可堆叠 64（走材料段默认）；非方块 → 右键不放置。
@@ -1090,6 +1094,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggOcelotId) return QStringLiteral("生物蛋（豹猫）"); // 右键 → 生成野生豹猫
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
+        // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球
+        //   撞击生火。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::FireChargeId) return QStringLiteral("烈焰弹"); // 右键发射火球撞击生火（t891②）
         // t788 染料段 16 色（材料段 0x24B..0x25A；机制等价 MC 1.0 dye 16 色）：四花破坏掉落（红/黄/蓝/白）
         //   + 熔炉烧仙人掌得绿；染白羊毛 / 白床成对应色。行序 = 羊毛 16 色标准序（与 DyeIdBase 起连续段一致）。
         //   零 MC 专名（§9；「仙人掌绿」以通用词「绿色染料」表达）。
