@@ -7095,7 +7095,8 @@ void PlayerController::step(qreal dt)
             m_fireDmgTimer += float(dt);
             if (m_fireDmgTimer >= EntityManager::kFireDamageInterval) {
                 m_fireDmgTimer -= EntityManager::kFireDamageInterval;
-                // 先掷随机提前熄灭（机制等价 MC 火 random extinguish）；不熄才扣 1HP 火伤。
+                // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭，掷骰退化为永假分支保留结构——
+                //   雨灭走 mob/世界侧独立路径；若未来接 Peaceful 难度再复用本口）。不熄才扣 1HP 火伤。
                 if (QRandomGenerator::global()->generateDouble() < double(EntityManager::kFireExtinguishChance)) {
                     m_fireTimer = 0.0f;
                     m_fireDmgTimer = 0.0f;
