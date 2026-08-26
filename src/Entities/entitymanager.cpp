@@ -5808,7 +5808,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // ③ 落水 → 浮定水面（浮力平衡半浸）+ 掷确定性等待（首掷用甩竿序号）。
             if (nid == BlockRegistry::Water) {
                 const quint8 wst = world->stateAt(bx, by, bz);
-                const float surf = wst == 0 ? 1.0f : (8.0f - float(std::min(int(wst), 7))) / 8.0f; // mesher renderTop 同口径
+                // t892 液面走 BlockRegistry::waterSurfaceFrac 单一权威（源 7/8 / 流 (8−s)/8）——与 mesher
+                //   renderTop 同口径（浮标浮定高度随可视水面同步降，不再各写一份 1.0）。
+                const float surf = BlockRegistry::waterSurfaceFrac(wst);
                 e.pos = QVector3D(float(bx) + 0.5f, float(by) + surf - kBobberFloatDip, float(bz) + 0.5f);
                 e.vx = e.vy = e.vz = 0.0f;
                 e.bobberState = kBobberStWater;

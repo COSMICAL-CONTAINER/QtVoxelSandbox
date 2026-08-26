@@ -194,7 +194,8 @@ public:
     //
     //   t271 入水（中心格 == Water）：
     //     (a) **浮水面**（buoyancy，非瀑布）：扫该列自中心格向上找「最顶水格」（其上为非水 = 水面），
-    //         目标静止 Y = surfCellY + 1 - kItemFloatOffset（中心贴水面、留在水格内防 floor 抖出空气→
+    //         目标静止 Y = surfCellY + waterSurfaceFrac(顶水格 state) - kItemFloatOffset（t892：液面走
+    //         单一权威，源 7/8；中心贴水面、留在水格内防 floor 抖出空气→
     //         下帧误判离水→重力回落的振荡）。中心在目标下方 → 以恒速 kItemRiseSpeed 上浮（机制等价 MC
     //         掉落物水中缓浮）；到水面 → 钳到目标、vy=0。**瀑布例外**（水格下方为空气 = 水柱下落）→ 不上浮，
     //         fall-through 到重力分支随水柱下沉（机制等价 MC 掉落物被瀑布带下；落入下方水池后转浮水）。

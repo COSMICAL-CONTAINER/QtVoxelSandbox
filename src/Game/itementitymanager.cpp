@@ -468,7 +468,11 @@ void ItemEntityManager::tick(qreal dt, World *world)
                     if (world->blockAt(cx, surfCellY + 1, cz) != BlockRegistry::Water) break;
                     ++surfCellY;
                 }
-                const float restY = float(surfCellY + 1) - kItemFloatOffset; // 中心贴水面、留水格内
+                // t892：水面 = 顶水格 + BlockRegistry::waterSurfaceFrac（单一权威，源 7/8）− 下沉量 ——
+                //   掉落物浮定高度随可视静水位同步降（旧口径 surfCellY+1 满格会让物品悬在降位水面上方）。
+                const float restY = float(surfCellY)
+                    + BlockRegistry::waterSurfaceFrac(world->stateAt(cx, surfCellY, cz))
+                    - kItemFloatOffset; // 中心贴水面、留水格内
                 if (e.pos.y() < restY - 1e-3f) {
                     e.vy = kItemRiseSpeed; // 恒速上浮（机制等价 MC 掉落物水中缓浮）
                     float newY = e.pos.y() + e.vy * float(dt);
