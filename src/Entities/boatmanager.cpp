@@ -253,6 +253,33 @@ float BoatManager::boatFootprintSupportTop(World *world, float px, float py, flo
     return topY;
 }
 
+// t892 冰面同层格顶扫（见 .h 注释）：footprint 覆盖格（**外扩 kShoreProbe 前瞻**，同碰岸探测裕度）在
+//   船中心层 ±1 层的冰族格顶（最高者）；无冰 → -1。
+//   外扩的原因：X 半宽 0.5 的船逼近冰缘时被位移碰撞停在 x≈冰界−0.5（冰格尚未进 footprint）——snap-up
+//   若只扫本 footprint 则永见不到冰（鸡蛋死锁：碰撞挡住 → 进不了 footprint → 不 snap → 下一帧仍被挡）。
+//   前瞻 0.15 让贴缘（触而未入）即可 snap，机制同碰岸探测的接触裕度。
+//   扫两层的原因：snap-up 后船中心层升到冰上方空气层（46.2 → cy=46），冰留在 cy-1=45 —— 只扫中心层会
+//   失持 → Y 回钉 surfY 落回被挡层，snap-oscillation（t805 冰道实测卡 13.50）；跨沿骑跨期（中心列仍是水、
+//   foundWater 真）须靠 cy-1 层的冰持续供给 iceTop 才能稳在冰面稳态，直到 footprint 覆盖跌破落下阈转
+//   陆档（支撑扫描接管，同稳态 46.2）。
+float BoatManager::boatFootprintIceTopAt(World *world, float px, float py, float pz) const
+{
+    if (!world) return -1.0f;
+    const int x0 = int(std::floor(px - kBoatHalfW - kShoreProbe));
+    const int x1 = int(std::floor(px + kBoatHalfW + kShoreProbe));
+    const int z0 = int(std::floor(pz - kBoatHalfLen - kShoreProbe));
+    const int z1 = int(std::floor(pz + kBoatHalfLen + kShoreProbe));
+    const int cy = int(std::floor(py)); // 船中心层（降位静水 = 水面格；冰面与水同层）
+    float topY = -1.0f;
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z)
+            for (int dy = 0; dy >= -1; --dy) {
+                if (BlockRegistry::isIce(world->blockAt(x, cy + dy, z)))
+                    topY = std::max(topY, float(cy + dy) + 1.0f);
+            }
+    return topY;
+}
+
 float BoatManager::boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const
 {
     if (!world) return 0.0f;
@@ -344,7 +371,10 @@ float BoatManager::waterSurfaceY(World *world, float px, float pz, float fallbac
     }
     if (topWaterY < 0) return fallbackY;
     if (outFoundWater) *outFoundWater = true;
-    return float(topWaterY) + 1.0f - kBoatDraft;
+    // t892：水线 = 顶水格 + waterSurfaceFrac（单一权威，源 7/8）− 吃水 —— 船水线随可视静水位同步降
+    //   （旧口径顶水格 +1 满格会让船浮在降位水面上方 1/8）。
+    return float(topWaterY)
+        + BlockRegistry::waterSurfaceFrac(world->stateAt(cx, topWaterY, cz)) - kBoatDraft;
 }
 
 quint8 BoatManager::blockBelowBoat(World *world, const QVector3D &boatPos) const
@@ -439,7 +469,10 @@ void BoatManager::tick(qreal dt, World *world)
         bool foundWater = false;
         const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
         if (foundWater) {
-            const float frac = boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f);
+            // t892 探测层锚点 −0.5（船水线下半 hull 所在格 = 水面格）：旧 −1.0 假设船中心恰在水面格**顶**
+            //   （y−1 floor 进水面格）；静水降位 7/8 后船中心 45.875 → y−1=44.875 floor 到水底石板层 →
+            //   覆盖率 / 碰岸探测全读错层。−0.5 对「格顶 46」与「格内 45.875」两种船位都 floor 到水面格。
+            const float frac = boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 0.5f);
             if (b.floating ? frac < kBoatWaterFractionFall : frac < kBoatWaterFractionRise)
                 foundWater = false; // 未浮 <浮起阈 / 已浮 <落下阈 → 按陆档处理（不掉进水岸夹缝）
         }
@@ -543,8 +576,9 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     const float surfY = waterSurfaceY(world, b.pos.x(), b.pos.z(), b.pos.y(), &foundWater);
     // rev2 迟滞双阈：浮起 ≥ kBoatWaterFractionRise（4/6=0.6667 过）；已浮态落下须 < kBoatWaterFractionFall
     //   （3/6 及以下）；带间（0.5~0.66）维持上一档 —— 防覆盖格数 4↔6 跳变处反复切档 Y 抖动。
+    //   t892 探测层锚点 −0.5（同 tick 段：船水线下半所在格 = 水面格，格顶 / 格内两船位都 floor 对）。
     if (foundWater) {
-        const float frac = boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 1.0f);
+        const float frac = boatFootprintWaterFraction(world, b.pos.x(), b.pos.z(), b.pos.y() - 0.5f);
         if (b.floating ? frac < kBoatWaterFractionFall : frac < kBoatWaterFractionRise)
             foundWater = false; // <浮起阈（未浮）/ <落下阈（已浮）→ 陆档（不掉水岸夹缝）
     }
@@ -623,19 +657,23 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
     //   t661 四轮「上滩冲量」：高速（≥ kBoatBeachSpeed，未达撞毁）撞岸 → 写 beachTimer（无水重力段据此
     //   限速爬上 ≤1 格高的岸沿，机制等价 MC 1.0 带速的船能冲上滩 / 低速撞岸只停住）。每次撞岸沿刷新计时。
     if (foundWater && world) {
-        // 四向探测：footprint 中心沿该方向前探 kShoreProbe 后，水面同高层（y-1）是否被挡。
+        // 四向探测：footprint 中心沿该方向前探 kShoreProbe 后，水面同高层（船水线下半格，t892 锚点 −0.5）
+        //   是否被挡。
         //   probe 取 0.15（略小于半宽 0.5 / 半长 0.7 的接触裕度）：贴岸（footprint 已触岸）时朝岸侧必命中，
         //   背岸侧（后方是水）不命中 → 背向分量永不清除。
+        //   t892：旧锚点 −1.0 在静水降位（船中心 45.875）下 floor 到水底石板层 → 四向全「岸」→ 速度每帧
+        //   清零船焊死。−0.5 对格顶 / 格内两船位都 floor 进水面格（同层沙岸 / 冰面语义保持）。
         //   review L10：探测传 ignoreIce=true（冰面豁免，见 boatFootprintBlocked 注释）—— 冰顶与水面同层，
         //   船须能越过冰缘滑上冰面（t611 冰面加速入口）；沙 / 草岸等真岸不豁免（防搁浅语义保持）。
         //   review rev2-C2：同传 ignoreLilyPad=true（睡莲豁免）—— 叶浮水面同层且探测边（0.65）大于撞碎扫描
         //   边（0.5），不豁免则叶先当岸清速 → 速度每帧只重建 ~0.5 永达不到撞碎阈值 3.0 → 船楔死叶前、
         //   撞碎永不触发。豁免后高速船保速驶入叶格撞碎（smashLilyPads 已在探测前跑）；低速船由位移碰撞
         //   （不传本参）挡在叶前（慢速 = 阻挡，机制等价 MC 慢速船被叶阻）。
-        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
-        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, b.pos.y() - 1.0f, b.pos.z(), /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
-        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() + kShoreProbe, /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
-        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), b.pos.y() - 1.0f, b.pos.z() - kShoreProbe, /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const float probeLayerY = b.pos.y() - 0.5f; // 水面同高层（船水线下半所在格）
+        const bool blockedPosX = boatFootprintBlocked(world, b.pos.x() + kShoreProbe, probeLayerY, b.pos.z(), /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const bool blockedNegX = boatFootprintBlocked(world, b.pos.x() - kShoreProbe, probeLayerY, b.pos.z(), /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const bool blockedPosZ = boatFootprintBlocked(world, b.pos.x(), probeLayerY, b.pos.z() + kShoreProbe, /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
+        const bool blockedNegZ = boatFootprintBlocked(world, b.pos.x(), probeLayerY, b.pos.z() - kShoreProbe, /*ignoreIce*/ true, /*ignoreLilyPad*/ true);
         const bool hitShore = (blockedPosX && b.vx > 0.0f) || (blockedNegX && b.vx < 0.0f)
                            || (blockedPosZ && b.vz > 0.0f) || (blockedNegZ && b.vz < 0.0f);
         if (hitShore) {
@@ -743,7 +781,19 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
                 b.beachTimer = 0.0f;
             }
         }
-        if (!climbing) b.pos.setY(surfY); // 常规浮水：Y 钉水面（爬升期 Y 已高于 surfY，不回钉）
+        if (!climbing) {
+            // t892 冰面同层 snap-up（详 boatFootprintIceTopAt 注释）：冰顶比降位液面高 ~0.325 ≤ snap →
+            //   直接贴冰面稳态（下一帧 floor(pos.y) 升到冰上方空气层，位移碰撞不再被冰格挡死冰缘）；
+            //   无冰 / 高差 > snap → 常规钉水面。仅骑乘路径（空船漂移无驱动力，摩擦即停不涉及）。
+            //   判据取 **≥**（非 >）：贴稳态后 iceRestY == pos.y，取 > 会在「snap 上去 / 回钉 surfY」间
+            //   逐帧振荡（t805 冰道实测卡冰缘 13.50）—— ≥ 使稳态自持，直到覆盖跌破落下阈转陆档。
+            const float iceTop = world ? boatFootprintIceTopAt(world, b.pos.x(), b.pos.y(), b.pos.z()) : -1.0f;
+            const float iceRestY = (iceTop >= 0.0f) ? iceTop + kBoatHullBottom : -1.0f;
+            if (iceRestY >= b.pos.y() && iceRestY - b.pos.y() <= kBoatBeachSnap)
+                b.pos.setY(iceRestY);
+            else
+                b.pos.setY(surfY); // 常规浮水：Y 钉水面（爬升期 Y 已高于 surfY，不回钉）
+        }
     } else {
         // 无水重力落地（同 tick 段：footprint 支撑顶 → 贴稳态 / 冲量爬岸 / 下落钳不穿）。
         const float supportTop = world ? boatFootprintSupportTop(world, b.pos.x(), b.pos.y(), b.pos.z()) : -1.0f;

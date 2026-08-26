@@ -11438,7 +11438,7 @@ int main(int argc, char *argv[])
         const int fy = 83; // rig 地板格（t835 实测 seed 77 地形 ≤81 → 84+ 全空带）
 
         // ---- (a) 抛物 + 落水浮定（Entities 直编）----
-        // 水池：3×3 石底 fy + 1 深水 fy+1（液面 = fy+1+1.0−0.125 = fy+1.875；源 state=0 → surf 1.0）。
+        // 水池：3×3 石底 fy + 1 深水 fy+1（液面 = fy+1+0.875−0.125 = fy+1.75；t892 源 state=0 → surf 7/8）。
         for (int x = 5; x <= 7; ++x)
             for (int z = 5; z <= 7; ++z) {
                 wF.setBlock(x, fy, z, BR::Stone, 0);
@@ -11461,7 +11461,7 @@ int main(int argc, char *argv[])
             const QVector3D p2 = ents.posAt(b2);
             const bool okAset = ents.aliveAt(b2)
                                 && qAbs(p2.x() - 6.5f) < 1e-3f
-                                && qAbs(p2.y() - (float(fy + 1) + 0.875f)) < 1e-3f
+                                && qAbs(p2.y() - (float(fy + 1) + 0.75f)) < 1e-3f
                                 && qAbs(p2.z() - 6.5f) < 1e-3f;
             ents.removeEntityAt(b2);
             // a3 陆上静止：石台正上垂直落 → Ground 贴面冻结（后续 tick 位置不变；Ground 不钩 mob / 不进等待）。
@@ -11512,12 +11512,12 @@ int main(int argc, char *argv[])
             int bobC = -1;
             for (int i = 0; i < ents.count(); ++i)
                 if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bobC = i; break; }
-            const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+            const QVector3D settlePos(5.5f, float(fy + 1) + 0.75f, 6.5f);
             bool okCast = pc.fishing() && bobC >= 0;
             for (int t = 0; t < 40 && okCast; ++t) {
                 tickB(1, 0.05f);
                 if (!ents.aliveAt(bobC)) { okCast = false; break; }
-                if (ents.posAt(bobC) == settlePos) break; // settled（精确浮点：0.5/0.875 均二进制精确）
+                if (ents.posAt(bobC) == settlePos) break; // settled（精确浮点：0.5/0.75 均二进制精确）
             }
             okCast = okCast && ents.posAt(bobC) == settlePos;
             // settle 格 (5, fy+1, 6) + serial 1 → 预计算等待（镜像盐 = 实现盐，P18 双钉）。
@@ -11566,7 +11566,7 @@ int main(int argc, char *argv[])
             int b1 = -1;
             for (int i = 0; i < ents.count(); ++i)
                 if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { b1 = i; break; }
-            const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+            const QVector3D settlePos(5.5f, float(fy + 1) + 0.75f, 6.5f);
             bool okc1 = b1 >= 0;
             for (int t = 0; t < 40 && okc1; ++t) {
                 tickB(1, 0.05f);
@@ -13585,12 +13585,12 @@ Item {
         int caught = 0;
         QObject::connect(&pc, &PlayerController::fishCaught, &pc,
                          [&](int, int, float, float, float, float, float, float) { ++caught; });
-        pc.useFishingRod(); // 甩竿（serial 1，轨迹同 t836(b)：settle (5.5, fy+1.875, 6.5)）
+        pc.useFishingRod(); // 甩竿（serial 1，轨迹同 t836(b)：settle (5.5, fy+1.75, 6.5)）
         int bob = -1;
         for (int i = 0; i < ents.count(); ++i)
             if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
         bool ok = pc.fishing() && bob >= 0;
-        const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+        const QVector3D settlePos(5.5f, float(fy + 1) + 0.75f, 6.5f);
         for (int t = 0; t < 40 && ok; ++t) {
             tickL(1, 0.05f);
             if (!ents.aliveAt(bob)) { ok = false; break; }
@@ -13873,7 +13873,7 @@ Item {
         const int b1 = ents.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0), 951);
         const bool flyingSeen = b1 >= 0 && !ents.bobberInWaterAt(b1); // 出生 Flying（inWater false）
         for (int t = 0; t < 60 && ents.aliveAt(b1) && splashCount == 0; ++t) tickV(1, 0.05f);
-        const QVector3D settlePos(6.5f, float(fy + 1) + 0.875f, 6.5f);
+        const QVector3D settlePos(6.5f, float(fy + 1) + 0.75f, 6.5f);
         bool okA = flyingSeen && splashCount == 1 && ents.aliveAt(b1) && ents.bobberInWaterAt(b1)
                    && qAbs(sx - settlePos.x()) < 1e-3f && qAbs(sy - settlePos.y()) < 1e-3f
                    && qAbs(sz - settlePos.z()) < 1e-3f;
@@ -13904,7 +13904,7 @@ Item {
         int bob = -1;
         for (int i = 0; i < ents.count(); ++i)
             if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
-        const QVector3D settleC(5.5f, float(fy + 1) + 0.875f, 6.5f);
+        const QVector3D settleC(5.5f, float(fy + 1) + 0.75f, 6.5f);
         bool okC = bob >= 0 && !pc.bobberInWater(); // 甩出即 Flying（镜像初值 false）
         for (int t = 0; t < 40 && okC; ++t) {
             tickV(1, 0.05f);
@@ -13980,7 +13980,7 @@ Item {
         int bob = -1;
         for (int i = 0; i < ents.count(); ++i)
             if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
-        const QVector3D settlePos(5.5f, float(fy + 1) + 0.875f, 6.5f);
+        const QVector3D settlePos(5.5f, float(fy + 1) + 0.75f, 6.5f);
         bool okCast = bob >= 0;
         for (int t = 0; t < 40 && okCast; ++t) {
             tickC(1, 0.05f);
@@ -14387,6 +14387,90 @@ Item {
                              "exemption via shooter==-1 skip), "
                              "recipes blaze-powder+coal/charcoal+gunpowder -> 3 charges both match and "
                              "the item sits in the creative material palette at id 0x25C";
+    }
+
+    // ── P-t892 静止水位降低探针（液面单一权威 + 消费方四方同源行为级）──
+    //    用户报告：「耕地比水还低」透视错乱——耕地矮盒顶 15/16 而水满格 1.0 漫过其顶。修复 = 静水表面降
+    //    到 7/8（MC 1.0 语义：比方块顶低 2 像素），**单一权威 BlockRegistry::waterSurfaceFrac**（源 7/8 /
+    //    流 (8−min(s,7))/8），消费方四方同读：mesher renderTop（视觉水面）/ 浮标浮定 / 掉落物浮面 / 船水线
+    //    ——统一改源头，严禁消费点各自内联 1.0（否则物浮在可视水面上/下方 1/8，视觉物理分裂）。
+    //    断言：(a) 单一权威数值钉（源 7/8、流分档、越界 clamp）；(b) 掉落物静水浮面 = 顶水格 + 7/8 − 0.05
+    //    下沉（镜像常量 kItemFloatOffset=0.05，P18 模式）；(c) 船静水水线 = 顶水格 + 7/8 − 吃水 0（tick 浮水
+    //    lerp 收敛）；(d) 眼位液面分数判：眼在 7/8..1.0 空段 → 不算水下（蓝雾与可视液面同步），液面下 → 水下，
+    //    柱内格（上方仍是水 → 满块）→ 水下。
+    //    阴性轮：回退 waterSurfaceFrac(0) → 1.0 则 (a) 源值钉红 + (b)(c) 高度断言红（+1/8 偏差超容差）+
+    //    (d) 空段判红（恢复满格恒水下）——四方同红即「单一权威生效」的证明。
+    {
+        World wS;
+        // 48×48×96 seed 77 = t836 已证净空带（地形 ≤81 → 82+ 全空；小世界也会自动 worldgen，rig 层须避开
+        //   自然地形——首跑 seed 892 物品落在 y≈45 天然地表上红）。
+        wS.setWidth(48); wS.setDepth(48); wS.setHeight(96); wS.setSeed(77);
+        const int ty = 83;                       // 石底格；静水 ty+1（state=0）
+        for (int x = 4; x <= 8; ++x)
+            for (int z = 4; z <= 8; ++z) {
+                wS.setBlock(x, ty, z, BR::Stone, 0);
+                wS.setBlock(x, ty + 1, z, BR::Water, 0);
+            }
+        wS.setBlock(4, ty + 2, 4, BR::Water, 0);  // (d) 柱内格：该列上方仍是水 → 满块口径
+        // (a) 单一权威数值钉：源 7/8（低 2 像素）；st1 与源同高 7/8；分档 (8−s)/8；越界 clamp 到最低档。
+        const bool okA = qAbs(BR::waterSurfaceFrac(0) - 0.875f) < 1e-6f
+                         && qAbs(BR::waterSurfaceFrac(1) - 0.875f) < 1e-6f
+                         && qAbs(BR::waterSurfaceFrac(2) - 0.75f) < 1e-6f
+                         && qAbs(BR::waterSurfaceFrac(4) - 0.5f) < 1e-6f
+                         && qAbs(BR::waterSurfaceFrac(7) - 0.125f) < 1e-6f
+                         && qAbs(BR::waterSurfaceFrac(200) - 0.125f) < 1e-6f;
+        // (b) 掉落物浮面：出生水上 → 落水浮定 restY = 顶水格 + 7/8 − 0.05（旧满格口径 +1.0 → 红）。
+        ItemEntityManager items;
+        items.spawnItem(6, ty + 4, 6, BR::Cobble, 1);
+        for (int t = 0; t < 400; ++t) items.tick(0.05, &wS);   // 20s：落 + 浮 + 静置（寿命 300s 内）
+        int it = -1;
+        for (int i = 0; i < items.count(); ++i)
+            if (items.aliveAt(i)) { it = i; break; }
+        const bool okB = it >= 0
+                         && qAbs(items.posAt(it).y() - (float(ty + 1) + 0.875f - 0.05f)) < 2e-3f;
+        // (c) 船水线：spawn 于水格 → tick 浮水 lerp 收敛到 顶水格 + 7/8 − 吃水 0（旧口径 +1.0 → 红）。
+        BoatManager boats;
+        const bool boatSpawned = boats.spawnBoat(7, ty + 1, 7, BoatManager::Oak);
+        for (int t = 0; t < 600; ++t) boats.tick(0.016, &wS);   // 9.6s（kBoatAccel 恒速钳到 |dy| → 精确收敛）
+        int bt = -1;
+        for (int i = 0; i < boats.count(); ++i)
+            if (boats.aliveAt(i)) { bt = i; break; }
+        const bool okC = boatSpawned && bt >= 0
+                         && qAbs(boats.posAt(bt).y() - (float(ty + 1) + 0.875f)) < 1e-3f;
+        // (d) 眼位液面分数判（PlayerController 直读 eyeInWater）：眼 y=ty+1.92（7/8..1.0 空段）→ false；
+        //     眼 y=ty+1.5（液面下）→ true；柱内列 (4,4) 同眼高 → true（上方是水 → 满块）。
+        PlayerController pc;
+        pc.setWorld(&wS);
+        pc.loadSavedState(6.5f, float(ty + 1) + 0.92f - 1.62f, 6.5f, 0.0f, 0.0f, 1);
+        const bool bandDry = !pc.eyeInWater();
+        pc.loadSavedState(6.5f, float(ty + 1) + 0.5f - 1.62f, 6.5f, 0.0f, 0.0f, 1);
+        const bool belowWet = pc.eyeInWater();
+        pc.loadSavedState(4.5f, float(ty + 1) + 0.92f - 1.62f, 4.5f, 0.0f, 0.0f, 1);
+        const bool columnWet = pc.eyeInWater();
+        const bool okD = bandDry && belowWet && columnWet;
+        const float itemY = (it >= 0) ? items.posAt(it).y() : -99.0f;   // diag 前取值（清场后槽失效）
+        const float boatY = (bt >= 0) ? boats.posAt(bt).y() : -99.0f;
+        // 清场（即用即清，防串扰后续探针）。
+        for (int x = 4; x <= 8; ++x)
+            for (int z = 4; z <= 8; ++z)
+                for (int dy = 0; dy <= 2; ++dy) wS.setBlock(x, ty + dy, z, BR::Air, 0);
+        wS.setBlock(4, ty + 2, 4, BR::Air, 0);
+        items.clearAll();
+        boats.clearAll();
+        const bool ok = okA && okB && okC && okD;
+        if (!ok)
+            qInfo().noquote() << "  [t892 diag] okA" << okA << "| okB" << okB << "itemY" << itemY
+                              << "| okC" << okC << "boatY" << boatY
+                              << "| okD" << okD << "bandDry" << bandDry
+                              << "belowWet" << belowWet << "columnWet" << columnWet;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t892 still-water surface lowered to 7/8 (2px below block top, MC semantics): "
+                             "single-authority waterSurfaceFrac (source 7/8 / flow (8-s)/8 / clamp) drives all "
+                             "four consumers in lockstep - mesher renderTop (visual surface; farmland 15/16 now "
+                             "stands above water, fixing the reported perspective clash), item float restY, boat "
+                             "waterline and the eye-in-water liquid-fraction check (eye in the 1/8 air band above "
+                             "a still surface is no longer underwater; column-interior cells stay full-block wet)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

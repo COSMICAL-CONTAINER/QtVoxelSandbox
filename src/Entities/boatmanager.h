@@ -258,6 +258,14 @@ private:
     //     远低于船 Y → 重力把贴岸的船拽下沉嵌岸缝。改取全列最高 → 岸块（与水面同层或高 1）是最高支撑
     //     → 船贴岸沿搁浅而非坠海。
     float boatFootprintSupportTop(World *world, float px, float py, float pz) const;
+    // t892 冰面同层格顶扫：footprint 覆盖格在**船中心层**（floor(pos.y)；降位静水 = 水面格）的冰族格顶
+    //   （cellY+1；无冰 → -1）。供浮水 Y 段的冰面小高差 snap-up：静水降位 7/8 后冰顶（46.0）比液面
+    //   （45.875）高 ~0.325 ≤ kBoatBeachSnap —— 冰是船可行驶表面（L10 碰岸豁免同源），无冲量也应能
+    //   从水面滑上冰面；否则 floor(pos.y) 落进冰格 → 位移碰撞把船挡死在冰缘（t805 冰道回归）。**仅冰族**
+    //   （isIce 单一权威）：沙岸等非冰支撑不 snap —— 沙由碰岸探测清朝向速度（footprint 不再深入），
+    //   盲目 snap 会把船「吸上」沙唇，破坏 t661 上岸需冲量语义。空船 tick() 漂移无驱动力（摩擦即停）
+    //   不涉及，仅骑乘路径调用。
+    float boatFootprintIceTopAt(World *world, float px, float py, float pz) const;
     // t630 船 footprint 水域覆盖率（0..1）：footprint 覆盖格中「该列有水柱」的格数占比（列从支撑层
     //   probeY 向上扫 kWaterProbeDepth 格内有 Water 即算水列 —— 覆盖浅水 / 深水，取覆盖即可）。采样同
     //   boatFootprintBlocked（floor(±半宽/半长) 格扫）。t630「2/3 支撑阈值」用：覆盖率 ≥ 2/3 才判「船浮
@@ -267,7 +275,8 @@ private:
     //   时浮起需 6/8=0.75 严一整档）改为**固定 2×3 几何采样点**（X ±0.25 / Z −0.45,0,0.45，恒 6 点等权）
     //   → 2/3 = 4/6 稳定成立（见 .cpp 实现注释）。
     float boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const;
-    // 算船当前 XZ 列的水面 Y（找最顶水格 + 1 - kBoatDraft；无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
+    // 算船当前 XZ 列的水面 Y（找最顶水格 + waterSurfaceFrac - kBoatDraft，t892 液面单一权威源 7/8；
+    //   无水 → 返当前 py 不浮）。用于浮水 lerp 目标。
     //   t508 二轮复盘：outFoundWater（可空）写真是否找到水柱 —— tick 据此判「浮水」vs「无水重力落地」
     //     （旧版用船中心格 == Water 判 hasWater，但船浮水面时中心格常是水上空气格 → 误判无水 → 重力把船拽下水，
     //     用户报②「放水上直接飞到水下」真因）。waterSurfaceY 内已扫水柱，复用其结论更准。

@@ -1768,6 +1768,20 @@ public:
     static constexpr int kNetherPortalStripFrames = 32;
     static constexpr int kFluidStripFramePx = 16;
 
+    // t892 水面高度（cell-local Y 分数，0..1）**单一权威**：水源(state==0) = 7/8 —— 表面比方块顶
+    //   低 2 像素（机制等价 MC 1.0 静水 14/16 液面；连带耕地(15/16)不再被满格水「漫过顶」）；流水
+    //   (state>0) = (8−min(s,7))/8（越远越矮，口径不变）。消费方四方同读本函数——mesher renderTop
+    //   （chunkgeometry 水段顶面/侧壁区间）、浮标浮定（entitymanager Bobber Water 态）、掉落物浮面
+    //   （itementitymanager restY）、船水线（boatmanager waterSurfaceY）——改水位必须四方同步走本
+    //   函数，严禁消费点各自内联 1.0（否则物浮在可视水面上/下方 1/8，视觉物理分裂）。
+    //   岩浆不走本函数（mesher 内 maxLevel=4 通用折算，源满格口径保持）。
+    static constexpr float waterSurfaceFrac(quint8 state)
+    {
+        if (state == 0) return 7.0f / 8.0f;                 // 源：14/16（MC 静水位，比顶低 2px）
+        const int s = (int(state) > 7) ? 7 : int(state);    // 流：越界 clamp 兜底（→ 最低一级而非负值）
+        return (8.0f - float(s)) / 8.0f;
+    }
+
     // 方块是否实体（参与碰撞 / culled 面剔除）。air 恒 false；torch 亦 false（非实体、不挡邻居面）；
     // 其余填表 solid=true。越界/未知 id 返回 false。mesher 邻居面剔除走本谓词（单一权威），
     //   切勿在渲染层另写 `!= 0`（会把 torch 当 solid → 误剔邻居面 → 透明 bug，见 t130）。

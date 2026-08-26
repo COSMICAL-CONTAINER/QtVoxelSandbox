@@ -715,22 +715,26 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
             const float hxs = m_lavaOnly ? (0.5f / float(BlockRegistry::kFluidStripFramePx))
                                          : (0.5f / float(2 * BlockRegistry::kFluidStripFramePx));
             const float stripV0 = hys, stripV1 = frameH - hys;                    // v 子区（帧 0 区，内缩）
-            // state → 液面高度（cell-local Y，0..1）。源 1.0；流 (maxLevel-level)/maxLevel（越远越矮）。
-            //   state 越界 clamp 兜底防负值（极端坏数据 → 最低一级液面而非负值）。
+            // state → 液面高度（cell-local Y，0..1）。**t892 水走 BlockRegistry::waterSurfaceFrac 单一权威**：
+            //   水源(st==0)=7/8（表面比方块顶低 2 像素，机制等价 MC 1.0 静水 14/16；连带耕地 15/16 顶不再
+            //   被满格水漫过——用户「耕地比水还低」透视错乱随之消失）；流(st>0)=(8−min(s,7))/8（口径不变）。
+            //   岩浆（m_lavaOnly，maxLevel=4）保持本地折算：源满格 1.0 / 流 (4−s)/4（岩浆无 t892 降位语义）。
             auto surfH = [maxLevel](quint8 state) -> float {
+                if (maxLevel == 8) return BlockRegistry::waterSurfaceFrac(state); // 水：单一权威（源 7/8）
                 if (state == 0) return 1.0f;
                 const int s = (int(state) > maxLevel - 1) ? (maxLevel - 1) : int(state);
                 return (float(maxLevel) - float(s)) / float(maxLevel);
             };
-            // t350 renderTop：流体格的**实际渲染**顶高（含竖向柱连续性修正）。源(st==0)=1.0；
-            //   流(st>0) 的 slab 高 = surfH(state)，但若**正上方为同种流体**（竖向柱 / 下落流的中段）→ 1.0（满块）。
+            // t350 renderTop：流体格的**实际渲染**顶高（含竖向柱连续性修正）。**t892 起判序反转：先查正上方
+            //   同种流体再折液面**——水源(7/8)也要参与柱连续（深水湖内部源格上方仍是水 → 满块 1.0，仅
+            //   柱顶格露空气位降 7/8）；流(st>0) 的 slab 高 = surfH(state)，上方同种流体（竖向柱 / 下落流
+            //   中段）→ 1.0（满块）。
             //   修「竖向堆叠流格间露出空气带」：流 slab 仅占 cell 下部，上方留空；两流格上下堆叠时，下格侧壁止于
             //   其 slab 顶、上格侧壁起于本 cell 底 → slab 顶与本 cell 底之间一段无侧壁 → 透视见空气带。被上方同种
             //   流体覆盖的流格属柱内 → 渲染满高，侧壁贯通相邻格 → 柱连续无缝。顶格（上方 air）保 slab 液面高。
             //   blockAtWorld 越界返 Air → 顶格不触发满高修正。t351：流体判定由硬编码 Water 改为 fluidId（水 / 岩浆通用）。
             auto renderTop = [&](quint8 state, int ax, int ay, int az) -> float {
-                if (state == 0) return 1.0f;
-                if (blockAtWorld(ax, ay + 1, az) == fluidId) return 1.0f; // 上方有同种流体 → 柱内满块
+                if (blockAtWorld(ax, ay + 1, az) == fluidId) return 1.0f; // 上方有同种流体 → 柱内满块（t892 起先判）
                 return surfH(state);
             };
             for (int ly = 0; ly < H; ++ly) {
@@ -742,7 +746,9 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         float myTop = renderTop(st, wx, ly, wz); // t350：上方有水 → 满高（柱连续无缝）
                         // t639⑤ 耕地邻面水面 cap：水源 / 流格水平 4 向邻格 == Farmland（耕地矮盒顶
                         //   15/16=0.9375）→ 本格液面 cap 到 15/16，消除「满高 1.0 水面邻耕地凸出 1/16」
-                        //   观感破绽（水不漫过耕地顶，接缝齐平）。流水更低液面（<=7/8=0.875）min 后不变。
+                        //   观感破绽（水不漫过耕地顶，接缝齐平）。**t892 起对暴露液面为 no-op**（水源已降
+                        //   7/8 < 15/16，「耕地比水还低」透视错乱随水位下降根治）；仅剩柱内满块（上方同种
+                        //   流体 → renderTop 1.0）邻耕地的情形仍被本 cap 压平 —— 保留防柱内格回归。
                         if (blockAtWorld(wx + 1, ly, wz) == BlockRegistry::Farmland
                             || blockAtWorld(wx - 1, ly, wz) == BlockRegistry::Farmland
                             || blockAtWorld(wx, ly, wz + 1) == BlockRegistry::Farmland
@@ -784,8 +790,10 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 //   透视不再穿透到背后的实体方块 / 水底（水体「满」而非「空壳」），机制等价 MC
                                 //   流水贴着实体方块显侧壁。流水格被占（t198 setBlock 覆盖水→实体）后邻接流水 N
                                 //   朝新实体面不再被 `isSolid→continue` 抹掉其 water_flow 侧壁贴图。
-                                //   水源（state=0，满高 1.0）邻实体仍**剔除**：满格实体完全遮挡，画了只在实体面上
-                                //   叠一层半透水色（z-fight / 渗色观感），无视觉收益且会把所有水-地形接缝染蓝。
+                                //   水源（state=0，t892 起液面 7/8）邻实体仍**剔除**：本面只有从实体内部
+                                //   才可见（不可达），画了只在实体面上叠一层半透水色（z-fight / 渗色观感），
+                                //   无视觉收益且会把所有水-地形接缝染蓝；7/8 上方露出的 1/8 空段由实体自身
+                                //   满高侧面覆盖，无透视洞。
                                 if (occludesNeighborFace(nb)) { // t746 叶邻不剔（叶孔后应见水侧壁而非 void）
                                     if (st == 0) continue; // 水源满高：邻实体完全遮挡 → 剔除（原行为）
                                     // 流水降水面：画 [0,myTop] 满侧（yLo=0,yHi=myTop 已是默认）保持贴图可见

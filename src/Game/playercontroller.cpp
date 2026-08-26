@@ -5851,12 +5851,19 @@ float PlayerController::flySpeed() const
 
 // t159 水下判定：眼位格 == Water。眼位 = position()（脚底 + eyeHeight，与相机同源）。只读 World::blockAt
 //   （向下依赖，不改栅格；蹲下眼位降低随之变）。无世界 → false（保守不减速）。
+//   t892 液面分数判：眼位落在**水面格的液面上方空段**（静水 7/8 上 1/8 / 流更矮）且上方非水 → 不算水下
+//   （视觉水面已降位，蓝雾/水下口径与可视液面同步——单一权威 waterSurfaceFrac 同源；柱内格上方是水
+//   → 满块，眼位必在水里）。
 bool PlayerController::eyeInWater() const
 {
     if (!m_world) return false;
     const QVector3D eye = position();
-    return m_world->blockAt(int(std::floor(eye.x())), int(std::floor(eye.y())), int(std::floor(eye.z())))
-           == BlockRegistry::Water;
+    const int ex = int(std::floor(eye.x())), ey = int(std::floor(eye.y())), ez = int(std::floor(eye.z()));
+    if (m_world->blockAt(ex, ey, ez) != BlockRegistry::Water) return false;
+    if (m_world->blockAt(ex, ey + 1, ez) != BlockRegistry::Water
+        && eye.y() - float(ey) > BlockRegistry::waterSurfaceFrac(m_world->stateAt(ex, ey, ez)))
+        return false; // 眼位在降位液面上方的空气段 → 不算水下
+    return true;
 }
 
 // t351 岩浆中判定（见 .h 头注释）：眼位格 == Lava（与 eyeInWater 平行；水/岩浆互斥）。只读 World::blockAt。
