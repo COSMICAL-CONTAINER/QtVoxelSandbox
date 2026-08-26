@@ -56,6 +56,7 @@
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
                                    //   PLAN §2 低层永不 include 高层；互钉只能落在本测试 TU，它合法 include 全栈）
+#include "itemshapegeometry.h"    // t880 异形物品 3D 模型族探针（ItemShapeGeometry 几何契约直调：顶点数/bounds）
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
 //   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（0..MobAnvil=18，
@@ -8126,6 +8127,66 @@ int main(int argc, char *argv[])
                              "with real alpha holes in tiles 178/180, and both trapdoors route to the cutout "
                              "pass (source pin - holes need alphaCutoff to see through); iron side tiles use "
                              "iron_block / wood planks per family (mesher + runtime icon spec + offline icon)";
+    }
+
+    // ── P-t880 异形物品 3D 模型族（ItemShapeGeometry 行为级 + 红石粉粉堆源码钉）──
+    //    (a) 几何契约：每族 blockId 建形状后断言**顶点数 + 形心居中 bounds**——活板门 24 顶点（单薄板，
+    //        yMax=3/32）/ 台阶 24（半高盒 yMax=0.25）/ 楼梯 48（两盒）/ 雪层 24（yMax=1/16）/ 火把 24
+    //        （细柱 xMax=1/16 —— cell [7/16,9/16] 居中即 ±1/16）/ 草丛 16 顶点（2 对角片 × 双面 2 pass，
+    //        双面 = 4 quad → 16）+ 每片索引 12×2（cross 双面发）。这些断言钉「形状真建了 + 形心居中口径」，
+    //        防退化成满立方（24 顶点但 bounds ±0.5 —— bounds 断言抓它）。
+    //    (b) 红石粉 item 图标改粉堆瓦片 167（dust_dot_off；旧 166 线向 = 「一条线」观感根因）——运行期
+    //        spec 内部函数不可直调 → 源码钉 flatSpec(167) 落位（滤注释）。
+    {
+        bool ok = true;
+        {
+            ItemShapeGeometry g;
+            struct Expect { int blockId; int vCount; float yMax; float xMax; };
+            const Expect exp[] = {
+                { int(BR::WoodTrapdoor), 24, 3.0f / 32.0f + 0.001f, 0.501f },
+                { int(BR::WoodSlab),     24, 0.25f + 0.001f,        0.501f },
+                { int(BR::WoodStairs),   48, 0.501f,                0.501f },
+                { int(BR::SnowLayer),    24, 1.0f / 16.0f + 0.001f, 0.501f },
+                { int(BR::Torch),        24, 0.313f,                1.0f / 16.0f + 0.001f },
+                { int(BR::TallGrass),    16, 0.501f,                0.501f },
+                { int(BR::EnchantingTable), 24, 0.376f,             0.501f },
+            };
+            for (const Expect &e : exp) {
+                g.setBlockId(e.blockId);
+                const QByteArray vd = g.vertexData();
+                const int vCount = int(vd.size()) / 20; // stride = pos3+uv2 = 5 float = 20B（类注释契约）
+                const QVector3D bMax = g.boundsMax();
+                if (vCount != e.vCount || bMax.y() > e.yMax || bMax.x() > e.xMax) {
+                    ok = false;
+                    qInfo().noquote() << "  t880 diag: id" << e.blockId << "v" << vCount
+                                      << "expect" << e.vCount << "yMax" << bMax.y() << "xMax" << bMax.x();
+                }
+            }
+        }
+        // (b) 源码钉：红石粉 flatSpec 用粉堆瓦片 167（非 def.topTile 166 线向）。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile rf(root + QStringLiteral("/src/Core/resourcepackmanager.cpp"));
+            const QString t = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+            const int i0 = t.indexOf(QStringLiteral("case BlockRegistry::RedstoneDust:"));
+            const int i1 = t.indexOf(QStringLiteral("case BlockRegistry::WheatCrop:"), i0);
+            if (i0 < 0 || i1 <= i0) {
+                ok = false;
+                qInfo().noquote() << "  t880 pin slice miss (dust flatSpec)";
+            } else {
+                const QString seg = t.mid(i0, i1 - i0);
+                ok = ok && seg.contains(QStringLiteral("flatSpec(167)"))
+                     && !seg.contains(QStringLiteral("flatSpec(d.topTile)"));
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t880 item 3D family: ItemShapeGeometry builds real partial shapes (trapdoor "
+                             "plate / slab half-box / stairs two-box / snow 1/8 / torch 2/16-column / grass "
+                             "double-sided cross / enchant 0.75 box) centered on each shape's mid-height with "
+                             "vertex-count + bounds contracts pinned per family, and the redstone dust item icon "
+                             "renders the dust-dot pile tile 167 instead of the wire line 166 (source pin)";
     }
 
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──

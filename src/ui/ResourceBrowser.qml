@@ -248,6 +248,15 @@ Item {
     //   整模，零回归）。
     readonly property bool sheepSkinHeadActive:
         root.selectedMobFromSection === 3 && !root.sheepSheared
+    // t880 「有 3D 模型的物品」3D 预览判据（家族 = Main.qml isItem3DFamily 掉落物家族 ∪ 木楼梯 16——
+    //   查看器楼梯**上 3D**、掉落物按 MC 平贴语义保留 billboard，两处差集即 16）：活板门（20/136）/
+    //   火把（13）/ 台阶四族（15/87/58/109）/ 木楼梯（16）/ 雪层（44）/ 草丛（24）/ 附魔台（94，带书）→
+    //   ItemShapeGeometry 真实 3D 形状旋转预览（替代大图标平面图）。字面量 = BlockRegistry id（QML
+    //   不 import C++ 枚举；两侧家族表注释互指——加族员须同步两处）。
+    readonly property bool selectedIsItem3D: root.selectedId === 13 || root.selectedId === 20
+        || root.selectedId === 136 || root.selectedId === 15 || root.selectedId === 87
+        || root.selectedId === 58 || root.selectedId === 109 || root.selectedId === 16
+        || root.selectedId === 44 || root.selectedId === 24 || root.selectedId === 94
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -352,7 +361,7 @@ Item {
     //   供 previewDragging / visible / selectedIsCube / selectedIsMob 四个变化源共用（提为具名函数，勿把
     //   signal handler 当函数调 —— onXxxChanged 带函数体后不可再被外部调用，运行期 TypeError）。
     function restartSpinIfIdle() {
-        if (!previewDragging && visible && (selectedIsCube || selectedIsMob)) {
+        if (!previewDragging && visible && (selectedIsCube || selectedIsMob || selectedIsItem3D)) {
             spinAnim.from = spinAngle          // 锚当前拖拽角度（无跳变核心）
             spinAnim.to = spinAngle + 360      // 同向续转（值域可 >360，eulerRotation 角度语义等价）
             spinAnim.start()
@@ -393,6 +402,19 @@ Item {
     Texture {
         id: mobSheepHeadTex
         source: "qrc:/textures/mob_sheep_head.png"
+        generateMipmaps: false
+    }
+    // t880 附魔台 3D 预览悬浮书贴图（两态，镜像 Main.qml enchantBookTex/enchantBookPackTex）：pack 命中
+    //   entity/enchant_book → 包书（布局 1，宽 >64 实测分区）；否则 qrc 程序书（布局 0 左右对半）。
+    Texture {
+        id: enchantBookTexBrowser
+        source: "qrc:/textures/entity_enchant_book.png"
+        generateMipmaps: false
+    }
+    Texture {
+        id: enchantBookPackTexBrowser
+        source: root.resourcePack && root.resourcePack.active
+            ? root.resourcePack.entitySource("enchant_book") : ""
         generateMipmaps: false
     }
     // t750 夜行者眼睛发光层两态贴图（镜像 Main.qml mobNightwalkerEyesTex / nightwalkerEyesPackTex）：
@@ -734,7 +756,7 @@ Item {
                                 View3D {
                                     id: cubeView
                                     anchors.fill: parent
-                                    visible: root.selectedIsCube || root.selectedIsMob
+                                    visible: root.selectedIsCube || root.selectedIsMob || root.selectedIsItem3D
                                     // View3D 默认 Offscreen 渲染（FBO 合成），嵌面板预览正确。
                                     PerspectiveCamera {
                                         position: Qt.vector3d(0, 0, 3.2)
@@ -744,7 +766,8 @@ Item {
                                     }
                                     Model {
                                         // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel；选中床 → 只显
-                                        //   BedModelGeometry 低 3D 床，三模型互斥不叠渲染）。
+                                        //   BedModelGeometry 低 3D 床；t880 异形物品 → 只显 ItemShapeGeometry，
+                                        //   多模型互斥不叠渲染）。
                                         visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed
                                         // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
                                         geometry: BlockCube { blockId: root.selectedId }
@@ -775,6 +798,62 @@ Item {
                                             lighting: PrincipledMaterial.NoLighting
                                             // 床瓦片（planks/wool/被面）全不透明 → 无需 Mask（同 bed 盒贴图约定）。
                                             baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                        }
+                                    }
+                                    // t880 异形物品 3D 预览：活板门/火把/台阶/木楼梯/雪层/草丛/附魔台 →
+                                    //   ItemShapeGeometry 真实 3D 形状（几何与 World partialblockgeometry 形状
+                                    //   同源、形心居中），替代大图标平面图。旋转/拖拽与方块分支共用
+                                    //   spinAngle/userPitch（DragHandler 手势不变）。Mask+0.5：活板门孔 / cross
+                                    //   透明底 / 火把窗 cutout 正确；不透明瓦片不受影响（同方块分支契约）。
+                                    //   火把（13）形状细小（2/16 柱）→ scale 1.6 放到近立方视觉量级；其余 1.0
+                                    //   （参数视觉钉死，待用户目视确认）。
+                                    Node {
+                                        visible: root.selectedIsItem3D
+                                        property bool item3DTorch: root.selectedId === 13
+                                        scale: item3DTorch ? Qt.vector3d(1.6, 1.6, 1.6) : Qt.vector3d(1.0, 1.0, 1.0)
+                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
+                                        Model {
+                                            geometry: ItemShapeGeometry { blockId: root.selectedId }
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                alphaMode: PrincipledMaterial.Mask
+                                                alphaCutoff: 0.5
+                                                baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                            }
+                                        }
+                                        // t880 附魔台预览**上面要有书**：台顶（形心居中系 y=+0.375）叠静态
+                                        //   敞开书（EnchantBookBox 两页 V 形——纸页 + 镜像纸页，机制等价放置态
+                                        //   bookDelegate 静息造型；贴图两态 pack 命中（entitySource("enchant_book")
+                                        //   宽 >64 → 布局 1 包书分区）/ qrc 程序书（布局 0），Main.qml bookPackHit
+                                        //   同判据）。页 0.38 宽 × 0.46 深 × 0.03 厚，各绕 Z 外倾 ±22° 成 V，
+                                        //   书心 y=+0.46（台顶上浮 ~0.08「悬浮书」观感）。
+                                        Node {
+                                            id: etBookNode
+                                            visible: root.selectedId === 94
+                                            position: Qt.vector3d(0, 0.46, 0)
+                                            property bool etBookPackHit: enchantBookPackTexBrowser.source.toString().length > 0
+                                                                         && root.resourcePack
+                                                                         && root.resourcePack.entityTextureWidth("enchant_book") > 64
+                                            Model { // 左页（纸页镜像 piece 4；-22° 外缘下倾）
+                                                geometry: EnchantBookBox { piece: 4; layout: etBookNode.etBookPackHit ? 1 : 0 }
+                                                position: Qt.vector3d(-0.176, 0.045, 0)
+                                                eulerRotation: Qt.vector3d(0, 0, -22)
+                                                scale: Qt.vector3d(0.38, 0.03, 0.46)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColorMap: etBookNode.etBookPackHit ? enchantBookPackTexBrowser : enchantBookTexBrowser
+                                                }
+                                            }
+                                            Model { // 右页（纸页 piece 1；+22° 镜像成 V）
+                                                geometry: EnchantBookBox { piece: 1; layout: etBookNode.etBookPackHit ? 1 : 0 }
+                                                position: Qt.vector3d(0.176, 0.045, 0)
+                                                eulerRotation: Qt.vector3d(0, 0, 22)
+                                                scale: Qt.vector3d(0.38, 0.03, 0.46)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColorMap: etBookNode.etBookPackHit ? enchantBookPackTexBrowser : enchantBookTexBrowser
+                                                }
+                                            }
                                         }
                                     }
                                     // 生物预览（生物段 / 生物蛋选中）：MobModel 3D 模型替代大图标平图。
@@ -1190,7 +1269,8 @@ Item {
                                 Item {
                                     anchors.centerIn: parent
                                     width: 200; height: 200
-                                    visible: !root.selectedIsCube && !root.selectedIsMob
+                                    visible: !root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed
+                                             && !root.selectedIsItem3D // t880 异形物品 3D 家族走 cubeView 预览
                                     // 大图标背景圆角板（与 View3D 区视觉分隔）。
                                     Rectangle {
                                         anchors.centerIn: parent

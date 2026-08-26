@@ -109,6 +109,7 @@ qt_add_executable(voxelsandbox
     src/Renderer/crackbox.cpp
     src/Renderer/crackbox.h
     src/Renderer/blockcube.cpp
+    src/Renderer/itemshapegeometry.cpp   # t880 方块异形物品 3D 模型几何（掉落物 + 资源查看器共用；活板门/火把/台阶/楼梯/雪层/cross/附魔台）
     src/Renderer/blockcube.h
     # t784 床完整低 3D 模型几何（资源浏览器床条目预览）：盒布局复用 World 层 bedHalfBoxes 单一权威
     #   （游戏内 chunk mesh 床 case 同源，双半拼双格床）→ 浏览器 / 游戏内床模型不各自漂移。
@@ -762,6 +763,14 @@ set_target_properties(voxelsandbox PROPERTIES
     MACOSX_BUNDLE ON
 )
 
+# t880：Main.qml qmlcachegen AOT 产物超 PE/COFF 32768 段上限（每 AOT 函数一段；Main.qml 13.5k 行 + 本批
+#   t876/t878/t880 增量后越限 → as 报 "too many sections (32768)"）。-mbig-obj 抬段上限到 2^31（GAS 选项；
+#   本工具链 g++ 驱动不识别裸 -mbig-obj，须 -Wa,-mbig-obj 传汇编器）。仅 Windows/MinGW 有此限制
+#   （MSVC/ELF 无段上限），MINGW 门控。
+if(MINGW)
+    target_compile_options(voxelsandbox PRIVATE -Wa,-mbig-obj)
+endif()
+
 target_link_libraries(voxelsandbox PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -853,6 +862,10 @@ add_executable(redstone_matrix_test
     #   saves/ 不受影响。Qt6::Sql 随 target_link_libraries 补）。
     src/World/worldstore.cpp
     src/World/worldstore.h
+    # t880 异形物品 3D 族探针：ItemShapeGeometry 几何契约直调（顶点数 / bounds 行为级断言）——
+    #   QQuick3DGeometry 实例化需 Qt6::Quick3D 链接（已在下方 target_link_libraries）。
+    src/Renderer/itemshapegeometry.cpp
+    src/Renderer/itemshapegeometry.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
