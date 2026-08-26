@@ -8058,6 +8058,76 @@ int main(int argc, char *argv[])
                              "tab/material entries)";
     }
 
+    // ── P-t879 活板门双修（行为级 + 源码钉；专用断言不建 rig）──
+    //    (a) 木活板门 def 贴图契约：大面（top/bottom）= 180 四镂空板、薄侧边（side/front）= planks(8)
+    //        —— 旧全 8（planks 整面实心）= 用户「像木压力板」根因；
+    //    (b) 图集契约：AtlasTileCount==181 且 qrc atlas.png 宽 == 181×64（瓦片已随 180 重生——
+    //        陈旧图集 180×64 即红）+ tile 180 / 178 含 alpha 孔（四镂空真透明，cutout 语义的贴图前提）；
+    //    (c) 源码钉：chunkgeometry isCutoutTrapX 同时含 IronTrapdoor 与 WoodTrapdoor（cutout 段
+    //        路由——木活板门孔须 alphaCutoff 透视；驱动 ChunkGeometry 需渲染后端，行为级不可密闭，
+    //        t870/t889 源码钉先例）+ mesher trapdoor case 木/铁 sideTile 分流（planks/iron_block）。
+    {
+        const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
+        const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
+                           && wtd.sideTile == 8 && wtd.frontTile == 8;
+        bool okAtlas = BR::AtlasTileCount == 181;
+        // 测试二进制无 qrc（t815/t838 探针同因：图集资源不在测试 target）→ 直读源树 textures/atlas.png
+        //   （构建机源树布局，与源码钉同根路径解析）。
+        const QString exeDirA = QCoreApplication::applicationDirPath();
+        const QString rootA = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
+        QImage atlas(QDir(rootA).absoluteFilePath(QStringLiteral("textures/atlas.png")));
+        if (atlas.isNull() || atlas.width() != 181 * 64) {
+            okAtlas = false;
+            qInfo().noquote() << "  t879 diag: atlas w =" << (atlas.isNull() ? -1 : atlas.width());
+        } else {
+            int holes180 = 0, holes178 = 0;
+            for (int y = 0; y < 64; ++y) {
+                if (qAlpha(atlas.pixel(180 * 64 + 20, y)) < 255) ++holes180;   // 孔列 x=4（16 尺度 [3,5] → 64 尺度 x 12..23 中点）
+                if (qAlpha(atlas.pixel(178 * 64 + 20, y)) < 255) ++holes178;
+            }
+            okAtlas = okAtlas && holes180 >= 8 && holes178 >= 8; // 每列两段 3×4px 孔 → ≥8 半透明行
+        }
+        // (c) 源码钉（滤注释后断言路由谓词文本）。
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile cf(root + QStringLiteral("/src/World/chunkgeometry.cpp"));
+            const QString t = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
+            const int i0 = t.indexOf(QStringLiteral("isCutoutTrapX ="));
+            if (i0 < 0) {
+                qInfo().noquote() << "  t879 pin slice miss (chunkgeometry)";
+            } else {
+                const QString seg = t.mid(i0, 240);
+                okPin = seg.contains(QStringLiteral("IronTrapdoor")) && seg.contains(QStringLiteral("WoodTrapdoor"));
+            }
+            QFile pf(root + QStringLiteral("/src/World/partialblockgeometry.cpp"));
+            const QString t2 = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const int j0 = t2.indexOf(QStringLiteral("const int ironSideTile ="));
+            if (j0 < 0) {
+                qInfo().noquote() << "  t879 pin slice miss (partialblockgeometry)";
+                okPin = false;
+            } else {
+                const QString seg2 = t2.mid(j0, 400);
+                okPin = okPin && seg2.contains(QStringLiteral("tileIndex(BlockRegistry::Planks"))
+                                              && seg2.contains(QStringLiteral("IronBlock"));
+            }
+        }
+        const bool okT879 = okDef && okAtlas && okPin;
+        if (!okT879) {
+            ++totalFail;
+            qInfo().noquote() << "  t879 diag: def" << wtd.topTile << wtd.bottomTile << wtd.sideTile
+                              << wtd.frontTile << "atlas" << okAtlas << "pin" << okPin;
+        }
+        qInfo().noquote() << (okT879 ? "PASS" : "FAIL")
+                          << "| t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 "
+                             "(four-hole plank board, alpha cutout - the old all-planks solid plate read as "
+                             "a wooden pressure plate) with plank thin edges, atlas regenerated to 181 tiles "
+                             "with real alpha holes in tiles 178/180, and both trapdoors route to the cutout "
+                             "pass (source pin - holes need alphaCutoff to see through); iron side tiles use "
+                             "iron_block / wood planks per family (mesher + runtime icon spec + offline icon)";
+    }
+
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
     //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
     //   AnvilUI.qml + InventoryOps.js，11 放入路径）47/47 全过，但其 Hotbar 是 **QML 桩**
@@ -11110,11 +11180,14 @@ int main(int argc, char *argv[])
         Hotbar hb;
         const QString dustIcon = hb.iconSourceForBlock(int(BR::RedstoneDust));
         const QString glassIcon = hb.iconSourceForBlock(int(BR::Glass));
+        // t879 换代 icon5->icon6（活板门族画法变更：ShapeTrapdoor 薄侧边 per-face + 木大面 180 四镂空板；
+        //   URL 家族名断言随缓存名同步——测试二进制无 qrc → 图集渲染落盘空图，URL 链路断言有效、
+        //   像素内容留实机人工目视）。
         const bool ok = dustIcon.startsWith(QStringLiteral("file:///"))
                      && !dustIcon.contains(QStringLiteral("icon_redstone_dust"))
                      && glassIcon.startsWith(QStringLiteral("file:///"))
-                     && glassIcon.contains(QStringLiteral("voxelsandbox_rp_icon5_"))
-                     && dustIcon.contains(QStringLiteral("voxelsandbox_rp_icon5_"));
+                     && glassIcon.contains(QStringLiteral("voxelsandbox_rp_icon6_"))
+                     && dustIcon.contains(QStringLiteral("voxelsandbox_rp_icon6_"));
         if (!ok) {
             qInfo().noquote() << "  [t815/t838 diag] dustIcon" << dustIcon << "| glassIcon" << glassIcon;
         }
@@ -11122,8 +11195,8 @@ int main(int argc, char *argv[])
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t815/t838 item icon paths: redstone dust pick-block icon resolves via runtime "
                              "atlas flat re-render (file:/// cache, stale hand-drawn qrc retired to last-resort "
-                             "fallback), glass icon cache family bumped icon4->icon5 for the flat->dimetric-3D "
-                             "draw switch";
+                             "fallback), glass icon cache family bumped icon5->icon6 (t879 trapdoor pair draw "
+                             "switch rides the same bump)";
     }
 
     // ── P-t836 钓鱼系统整改探针（Entities 层 EntityManager 直编 + Game 层 PlayerController/Hotbar 真消费端，

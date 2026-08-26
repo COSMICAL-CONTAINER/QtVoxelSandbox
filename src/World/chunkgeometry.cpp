@@ -565,10 +565,11 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   下半门板不透明贴图 cutout 无副作用（alpha 全 255 不 discard），保同一方块单段渲染）。
                     const bool isDoorX = BlockRegistry::isDoor(b);
                     // t723 铁活板门栅格孔：iron_trapdoor(178) 贴图两列栅格孔真透明（同门窗 t638① 语义）→
-                    //   走 cutout 段（alphaMode:Mask）透视孔后。木活板门贴图不透明留 terrain 段（分族渲染：
-                    //   同 shape 不同段，互不影响——WoodTrapdoor 无 alpha 通道像素，cutout 反而无害，但保守
-                    //   只把带透明的铁活板门挪走，木活板门零回归）。
-                    const bool isCutoutTrapX = (b == BlockRegistry::IronTrapdoor);
+                    //   走 cutout 段（alphaMode:Mask）透视孔后。t879② 木活板门大面贴图改 180 四镂空板
+                    //   （孔 alpha=0 真透明）→ 同族入 cutout 段（两活板门同段渲染，分族注释退役；其余
+                    //   partial 盒体贴图不透明仍留 terrain 段零回归）。
+                    const bool isCutoutTrapX = (b == BlockRegistry::IronTrapdoor
+                                                || b == BlockRegistry::WoodTrapdoor);
                     // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
                     //   （半透材质 opacity:0.99 + alphaCutoff:0.5 cutout 透明间隙）；partial 盒体（slab/stairs/...）
                     //   贴图不透明 → 留地形段（不透明材质 opacity=1）。两段互斥：地形段若同时发 cross → opacity=1

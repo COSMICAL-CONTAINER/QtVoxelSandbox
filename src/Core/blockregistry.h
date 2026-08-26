@@ -1722,7 +1722,13 @@ public:
     //   t761：179=gravel（沙砾各面贴图；Gravel(139) 各面=本 tile）。灰砾石底 + 深浅卵石碎砾斑（无层理，
     //       区别于成岩纹理——沙砾是松散碎砾堆积）；tools/build_gravel.py 程序生成（§9 override (a)；
     //       零 MC 资产）。pack {179→gravel.png}。
-    static constexpr int AtlasTileCount = 180;
+    //   t879②：180=wood_trapdoor（木活板门大面贴图；WoodTrapdoor 各面=本 tile——旧 planks(8) 整面实心
+    //       与木压力板同观感 = 用户「木活板门像木压力板」根因）。橡木板色四镂空板：边框 + 十字格条 +
+    //       2×2 四孔栅格真透明（cutout，与 iron_trapdoor(178) 同族四镂空造型、孔位一一对应）。
+    //       tools/build_doors_iron.py draw_wood_trapdoor 程序生成（§9 override (a)；零 MC 资产）。
+    //       pack {180→trapdoor_oak.png}（1.8 老命名；缺则安全跳过保程序瓦片）。薄侧边（3/16 板厚）走
+    //       planks(8)（mesher trapdoor case sideTile，机制等价 MC 木活板门板厚边 = 木板）。
+    static constexpr int AtlasTileCount = 181;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

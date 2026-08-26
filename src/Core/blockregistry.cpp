@@ -57,7 +57,7 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* wood_fence     */ {int(BlockRegistry::WoodFence),         8,  8, 8,  8, false, BlockRegistry::ShapeFence,    2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodFence),         1, 64, "wood_fence",         "木栅栏"}, // t265 斧加速；中心立柱 0.4 见方（t801 视觉 1.0 高 / 碰撞 1.5 不可越）+ 四向横档连邻居（t209）；state=0
     /* wood_pressure_plate */ {int(BlockRegistry::WoodPressurePlate), 8, 8, 8, 8, false, BlockRegistry::ShapePlate, 2.0f, int(BlockRegistry::Axe), 0, false, int(BlockRegistry::WoodPressurePlate), 1, 64, "wood_pressure_plate", "木板压力板"}, // t265 斧加速；贴地薄板；state=0
     /* wood_door      */ {int(BlockRegistry::WoodDoor),        143,144,144,144, false, BlockRegistry::ShapeDoor,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodDoor),          1,  1, "wood_door",          "木板门"}, // t265 斧加速；两格高；maxStack=1；state bit3=上格 bit2=开 bit[1:0]=朝向；t620 上下半 per-face（topTile=upper143/bottomTile=lower144，door case 据 bit3 选；手持/掉落 sideTile=lower）
-    /* wood_trapdoor  */ {int(BlockRegistry::WoodTrapdoor),      8,  8, 8,  8, false, BlockRegistry::ShapeTrapdoor, 2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodTrapdoor),      1, 64, "wood_trapdoor",      "木活板门"}, // t265 斧加速；state bit0=开/合 bit[2:1]=开时朝向
+    /* wood_trapdoor  */ {int(BlockRegistry::WoodTrapdoor),    180,180,  8,  8, false, BlockRegistry::ShapeTrapdoor, 2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WoodTrapdoor),      1, 64, "wood_trapdoor",      "木活板门"}, // t265 料加速；t879② 大面贴图 180（四镂空板，cutout——旧 planks(8) 整面实心像木压力板）；薄侧边 8（planks，mesher sideTile）；state bit0=开/合 bit[2:1]=开时朝向
     // ── t148 水（静水）：机制等价 MC 1.0 静水。solid=false（不挡邻居面剔除 → 相邻地形仍画自己的面）、
     //   shape=ShapeNone（**无碰撞 sub-AABB** → 玩家穿过，spec「物理 v1 穿过」；与 torch 同走 ShapeNone 路径）、
     //   **hardness=-1.0**（负值 → ToolRegistry::canMine 自动 false：任何模式/工具不可破，防创造秒破水；
@@ -1770,6 +1770,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
     switch (blockId) {
     case WoodTrapdoor: // 审查修 L7：合 = 半遮 7 / 开 = 全透（与 IronTrapdoor 统一口径）。旧「合=15 满遮」
+                       //   t879② 起大面贴图 180 四孔真透明 → 合态半遮（板体为主）与铁活板门口径一致。
                        //   与铁活板门恒 0 分裂。cutout 呈现取舍如实说明：活板门贴图带栅格孔（cutout 真透明）
                        //   —— 满遮 15 会截断天光种子柱（t742 实测铁门「孔后放方块全黑」）、恒 0 则关着的门
                        //   完全不挡天光（与 MC 活板门挡光不符）→ 折衷取 7（同台阶族占空比口径）：关态下方

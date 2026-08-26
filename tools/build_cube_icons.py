@@ -693,6 +693,23 @@ def load_pack_face(filename, alpha="fill"):
     return arr
 
 
+def load_program_face(filename, alpha="fill"):
+    """t879② 读 textures/ 程序瓦片 → FACE_RES² RGBA float（load_pack_face 的程序源版——同一
+    alpha="keep"/"fill" 策略；木活板门图标大面保孔 + 侧 planks 用，贴图源为程序瓦片非 pack）。"""
+    p = os.path.join(SRC, filename + ".png")
+    img = Image.open(p).convert("RGBA").resize((FACE_RES, FACE_RES), Image.NEAREST)
+    arr = np.asarray(img, dtype=np.float64)
+    if alpha == "fill":
+        a = arr[..., 3]
+        opaque = a >= 128
+        if not opaque.all():
+            fill = arr[opaque][:, 0:3].mean(axis=0) if opaque.any() \
+                else np.array([90.0, 90.0, 90.0])
+            arr[~opaque, 0:3] = fill
+            arr[..., 3] = 255.0
+    return arr
+
+
 def render_flat_pack(filename):
     """pack 平面 2D 图标（透明底保留 alpha，同 render_flat_2d；铁轨 / 红石火把 cross 族用）。"""
     p = os.path.join(PACK_BLOCK, filename)
@@ -1152,11 +1169,26 @@ def main():
         print("wrote", os.path.relpath(out_path, HERE), img.size)
     # t145/t163(d)/t169 不完整方块 3D dimetric 立体图标：6 类木制半方块全部走 render_partial_3d
     #   （按实际形状投影，3D 顶+两侧明暗）。t169 把 door/fence 从 flat 2D 升级为 3D —— 6 类同为立体图标。
+    # t879② 木活板门图标同步四镂空板：大面 default_wood_trapdoor（保孔 alpha=keep——渲染器非 opaque
+    #   贴图跳过底填、孔洞透底）+ 薄侧边 default_wood（planks 板厚边，与放置态 mesher sideTile 同源）。
+    #   从 PARTIALS_3D 表摘出（旧走 render_partial_3d + load_face 实心化 → 孔被填成实心板像木压力板）。
     for out_name, shape in PARTIALS_3D:
+        if out_name == "wood_trapdoor":
+            continue  # t879② 走下方 keep-alpha 专用渲染
         img = render_partial_3d(shape)
         out_path = os.path.join(SRC, "icon_" + out_name + ".png")
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t879② 木活板门图标（trapdoor 薄板形状 + 大面保孔 + planks 薄边）：render_pack_box 复用（boxes
+    #   传程序形状、贴图改读 textures/ 程序源 → load_program_face keep alpha）。与铁活板门 FROM_PACK
+    #   trapdoor 模式同构图（顶保孔 + 侧材质块），贴图源为程序瓦片（pack 态另有运行期图集重渲覆盖）。
+    trap_top = load_program_face("default_wood_trapdoor", alpha="keep")
+    trap_side = load_program_face("default_wood")
+    icon_wood_trap = render_pack_box(_partial_shape_boxes("trapdoor"), trap_top, trap_side,
+                                     cy_local=W / 2.0 - (1.0 - _partial_y_mid("trapdoor")) * v)
+    tp = os.path.join(SRC, "icon_wood_trapdoor.png")
+    icon_wood_trap.save(tp)
+    print("wrote", os.path.relpath(tp, HERE), icon_wood_trap.size)
     # t412 圆石变体 3D dimetric 立体图标：同 shape 几何，fill 换 default_cobble（机制等价木制半方块图标流程）。
     for out_name, shape in PARTIALS_3D_COBBLE:
         img = render_partial_3d(shape, "default_cobble", "default_cobble")

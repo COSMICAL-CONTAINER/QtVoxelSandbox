@@ -386,6 +386,11 @@ TILES = [
     #   中灰砾石底 + 深浅卵石碎砾斑（颗粒比沙的细噪点更大更稀疏——砾石粒 > 沙粒，肉眼可辨）；
     #   tools/build_gravel.py 程序生成（§9 override (a)；零 MC 资产）。pack {179→gravel.png}。
     "default_gravel",                # 179 gravel（沙砾：灰砾石 + 卵石碎砾斑；t761）
+    # t879② 木活板门四镂空板（tile 180）：橡木色底 + 深棕边框/十字格条 + 2×2 四孔栅格真透明（cutout 透视，
+    #   与铁活板门 178 同族四镂空造型；孔位一一对应 x/y ∈ [3,5]∪[10,12]）。WoodTrapdoor 各面贴图改指本 tile
+    #   （旧 planks(8) 整面实心 = 用户「木活板门像木压力板」）。tools/build_doors_iron.py draw_wood_trapdoor。
+    #   pack 关态程序瓦片；pack 映射 {180→trapdoor_oak.png}（demo 包老命名）。
+    "default_wood_trapdoor",         # 180 wood_trapdoor（木活板门：木板色四镂空板；t879②）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
