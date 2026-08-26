@@ -129,6 +129,13 @@ class MobModel : public QQuick3DGeometry
     Q_PROPERTY(float attackPose READ attackPose WRITE setAttackPose NOTIFY attackPoseChanged)
     // pack 是否用 pack entity 贴图（MC box-UV 精确采样，R19 C3）；pack 关 / 包内无贴图 → false（全脸 UV + 程序生成贴图）。
     Q_PROPERTY(bool packTextured READ packTextured WRITE setPackTextured NOTIFY packTexturedChanged)
+    // t876 羊头分离子集（仅 mobType 3 羊读）：true → 羊几何输出**两个 subset**——subset 0 = 躯干 + 4 腿
+    //   （毛层，QML materials[0] 吃毛色 tint），subset 1 = 头盒（materials[1] 换绑本体层头区纹理源、
+    //   **不吃 tint**——机制等价 MC 羊头 = skin 层恒自然色，毛色 tint 只作用躯干毛层；t816 脸罩方案的
+    //   替代——头盒采样本体层贴图头区而非叠加皮肤色脸罩遮盖）。false（默认）→ 无 subset 整段单绘制
+    //   （旧单材质路径；剪毛态 / 刷怪笼迷你 / 其余 mobType 零回归）。materials 数少于 subset 时按
+    //   QtQuick3D 文档「末材质兜余下 subset」退化（单材质仍整模可渲染）。
+    Q_PROPERTY(bool sheepSkinHead READ sheepSkinHead WRITE setSheepSkinHead NOTIFY sheepSkinHeadChanged)
     // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
     //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.62, -0.03, sin·0.62)，棒身恒竖直只轨道心公转）。
     //   QML 用 NumberAnimation on rodSpin 驱动连续旋转（帧率无关；同 walkPhase 的 set→rebuild 模式，
@@ -165,6 +172,10 @@ public:
     bool packTextured() const { return m_packTextured; }
     void setPackTextured(bool on);
 
+    // t876 羊头分离子集开关；仅 mobType 3 读（其余 mobType 恒单段绘制）。
+    bool sheepSkinHead() const { return m_sheepSkinHead; }
+    void setSheepSkinHead(bool on);
+
     // t782 燃烬者棒组公转角（度）；仅 Emberling 用。
     float rodSpin() const { return m_rodSpin; }
     void setRodSpin(float deg);
@@ -176,6 +187,7 @@ signals:
     void aimPitchChanged();
     void attackPoseChanged();
     void packTexturedChanged();
+    void sheepSkinHeadChanged();
     void rodSpinChanged();
 
 private:
@@ -187,6 +199,7 @@ private:
     float m_aimPitch = 0.0f;  // 右臂瞄准抬起（度，0=垂手）；仅 Bones 用；0 → 右臂走轴对齐快路径
     float m_attackPose = 0.0f; // t635 攻击抬臂（0..1，0=垂臂）；仅 IronGolem 用；0 → 双臂走轴对齐快路径
     bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
+    bool m_sheepSkinHead = false; // t876 羊头分离子集（仅 mobType 3；false → 无 subset 单段绘制零回归）
     float m_rodSpin = 0.0f; // t782 燃烬者棒组公转角（度）；仅 Emberling 用；0 → 棒在 0/90/180/270° 轴位
 };
 

@@ -182,6 +182,43 @@ def make_sheep_sheared():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_sheep_head():
+    """羊头贴图（t876）：自然羊头色 = 裸肤脸 + 头顶羊毛帽 + 下部吻部暗带（全脸 UV，头盒每面铺同图）。
+
+    机制等价 MC 羊头 = skin 层恒自然色（毛色 tint 只作用躯干毛层，脸/头永不染色；t777 契约的贴图化版）。
+    mobmodel.cpp 羊分支 sheepSkinHead=true 时头盒为独立 subset，QML materials[1] 换绑本贴图（pack 关态）；
+    pack 开态头盒直采 mobTextureSource(3) 合成贴图（毛身 + 本体层头区真脸）的本体层头区。
+    无眼纹（眼由 Main.qml / ResourceBrowser overlay 眼层补，与 mob_sheep 毛层贴图同语义）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xd6, 0xb8, 0x90, 255)   # 裸肤主色 #d6b890（同 mob_sheep_sheared / 旧纯色羊头）
+    fill(img, base)
+
+    # 肤面阴影斑（皮肤褶皱/肤色不均，同 mob_sheep_sheared 肤 mottle 色系）
+    skin_sh = (0xc2, 0xa2, 0x76, 255)  # 肤阴影 #c2a276
+    blot(img, [
+        (2, 6), (7, 5), (12, 7),
+        (4, 10), (10, 11), (13, 13),
+    ], skin_sh)
+
+    # 头顶羊毛帽（顶 3 行满幅 + 第 4 行锯齿下沿 → 每面顶部读作毛帽，机制等价 MC 羊头绒帽）
+    wool = (0xf5, 0xf0, 0xe8, 255)      # 奶白羊毛（同 mob_sheep 主色）
+    wool_sh = (0xd0, 0xc8, 0xc0, 255)   # 毛卷阴影（同 mob_sheep 卷曲纹）
+    blot(img, [(x, y) for y in range(3) for x in range(TS)], wool)
+    blot(img, [
+        (1, 3), (2, 3), (5, 3), (6, 3), (9, 3), (10, 3), (13, 3), (14, 3),
+    ], wool)
+    blot(img, [(3, 1), (8, 0), (12, 2), (0, 2)], wool_sh)  # 毛帽内卷曲阴影
+
+    # 吻部暗带（底 2 行略深肤 → 读作口鼻部，避免整脸平色）
+    muzzle = (0xc8, 0xa8, 0x7e, 255)  # 深一档肤色 #c8a87e
+    blot(img, [(x, y) for y in (14, 15) for x in range(TS)], muzzle)
+
+    out = os.path.join(SRC, "mob_sheep_head.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def make_shambler():
     """蹒跩者（Shambler；机制等价 MC 1.0 僵尸，§9 改名 + 原创贴图非照搬）：
     暗绿腐肉底 + 深绿霉斑 + 棕色腐痕 + 青蓝/赭褐「破布」残片 + 深色缝合痕（读作「不死亡灵腐尸」）。
@@ -689,6 +726,7 @@ def main():
     make_cow()
     make_sheep()
     make_sheep_sheared()
+    make_sheep_head()
     make_shambler()
     make_chicken()
     make_squid()

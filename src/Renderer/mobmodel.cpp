@@ -454,6 +454,17 @@ void MobModel::setPackTextured(bool on)
     rebuild();
 }
 
+// t876 羊头分离子集开关 setter（仅 mobType 3 读）：值变 → rebuild 重排盒序（躯干+腿在前、头盒最后）并按新值
+//   输出 / 撤销 subset（clear() 会清 subset，rebuild 内按本标志重新 addSubset）。QML 绑定固定 true（毛茸态羊
+//   delegate）或固定 false（剪毛态 / 迷你态），运行期不翻转（羊的两态走互斥 delegate 各自持 MobModel）。
+void MobModel::setSheepSkinHead(bool on)
+{
+    if (on == m_sheepSkinHead) return;
+    m_sheepSkinHead = on;
+    emit sheepSkinHeadChanged();
+    rebuild();
+}
+
 // t782 燃烬者棒组公转角 setter（度）：值未变早退；变化 → rebuild 把 4 根棒挪到新轨道位（棒心
 //   (cos(i·90°+spin)·0.62, -0.03, sin(...)·0.62)，棒身恒竖直只轨道心公转——同 t728 旧 QML Repeater
 //   「父 Node eulerRotation.y 转 + 竖棒」的观感，机制等价 MC 烈焰人棒组环绕旋转）。QML 用
@@ -488,6 +499,9 @@ void MobModel::rebuild()
     verts.reserve(16 * 24); // 至多 Bones 镂空骨架 = 14 盒（脊柱+胸骨+8 肋+头+左臂+2 腿）；Spider = 10 / Squid = 9（t778 删尖顶）；其余 ≤8
     idx.reserve(16 * 36);
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
+    // t876 羊头 subset 边界：头盒索引段起点（-1 = 本分支未设 / 无头分离）。仅 mobType 3 且 sheepSkinHead
+    //   时在尾部 addSubset 消费（subset 0 = [0, start) 躯干+腿毛层、subset 1 = [start, end) 头盒）。
+    int sheepHeadIdxStart = -1;
 
     // R19 C3：设置 UV 模式（pack 关=全脸 / 开=MC box-UV 精确贴图）。g_texW/H 默认 64×32，各 mob 分支按其贴图
     //   base 尺寸覆写（zombie/snow_golem=64×64、iron_golem=128×128，其余四足/虫=64×32）。pack 关时 writeMobUV
@@ -956,12 +970,17 @@ void MobModel::rebuild()
     } else if (m_mobType == 3) {
         // 羊：圆胖躯干、小头、短腿。机制等价 MC 羊形态（非名词照搬）。
         // R19 C3 UV（MC Sheep base 64×32；U1 §3）：body(28,8)8×16×6 / head(0,0)6×6×8 / leg(0,16)4×12×4。
+        // t876 头盒分离 subset：sheepSkinHead=true 时盒序 = 躯干 + 4 腿（subset 0，毛层 × 毛色 tint）在前、
+        //   头盒最后（subset 1，QML materials[1] 换绑本体层头区纹理源 mob_sheep_head / pack 合成贴图头区，
+        //   不吃 tint——机制等价 MC 羊头 = skin 层恒自然色；替代 t816 脸罩遮盖方案）。盒序调整不改变顶点数
+        //   与观感（不透明 + 深度测试下绘制序无关）；false → 无 subset 整段单绘制（剪毛态 / 迷你态零回归）。
         g_texW = 64.0f; g_texH = 32.0f;
         setMobTex(28, 8, 8, 16, 6);
         addBox(0.00f, 0.05f, 0.00f, 0.30f, 0.28f, 0.42f, verts, idx, bMin, bMax); // 躯干（圆胖）
-        setMobTex(0, 0, 6, 6, 8);
-        addHeadRot(0.00f, 0.10f, -0.45f, 0.14f, 0.16f, 0.16f, m_headPitch, verts, idx, bMin, bMax); // 小头（吃草时俯仰）
         addLegs(-0.28f, 0.16f, 0.18f, 0.26f, 0.09f, 0, 16, 4, 12, 4, m_walkPhase, verts, idx, bMin, bMax); // 4 短腿
+        sheepHeadIdxStart = int(idx.size()); // 头盒索引段起点（subset 1 边界；sheepSkinHead 才消费）
+        setMobTex(0, 0, 6, 6, 8);
+        addHeadRot(0.00f, 0.10f, -0.45f, 0.14f, 0.16f, 0.16f, m_headPitch, verts, idx, bMin, bMax); // 小头（吃草时俯仰；subset 1）
     } else {
         // 猪（默认 / 兜底）：紧凑低矮、短腿、大头。机制等价 MC 猪形态（非名词照搬）。
         // R19 C3 UV（MC Pig base 64×32；U1 §1）：body(28,8)10×16×8 / head(0,0)8×8×8 / leg(0,16)4×6×4。
@@ -1004,5 +1023,15 @@ void MobModel::rebuild()
                  int(offsetof(MobVtx, u)), QQuick3DGeometry::Attribute::F32Type);
     addAttribute(QQuick3DGeometry::Attribute::IndexSemantic,
                  0, QQuick3DGeometry::Attribute::U32Type);
+    // t876 羊头分离 subset（仅 mobType 3 + sheepSkinHead）：subset 0 = 躯干 + 4 腿（毛层，materials[0] 吃
+    //   毛色 tint）、subset 1 = 头盒（materials[1] 换绑本体层头区纹理源，不吃 tint）。addSubset 的
+    //   offset/count 单位 = 索引数（IndexSemantic U32）。subset bounds 取整体 AABB（保守超集——subset 边界
+    //   只进 Qt 拾取，游戏内 mob 命中走 C++ AABB 不受影响；头盒含 headPitch 旋转，解析子盒 bounds 会随
+    //   相位变，超集最稳）。无 subset（其余 mobType / 剪毛态）→ 整段单绘制，零回归。
+    if (m_mobType == 3 && m_sheepSkinHead && sheepHeadIdxStart > 0
+        && sheepHeadIdxStart < int(idx.size())) {
+        addSubset(0, sheepHeadIdxStart, bMin, bMax, QStringLiteral("wool"));
+        addSubset(sheepHeadIdxStart, int(idx.size()) - sheepHeadIdxStart, bMin, bMax, QStringLiteral("head"));
+    }
     update();
 }

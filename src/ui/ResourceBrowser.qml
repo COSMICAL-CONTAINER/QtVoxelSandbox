@@ -241,13 +241,13 @@ Item {
         ? root.sheepBodyPackSrc !== ""
         : (root.selectedMobPackSrc !== "" && root.resourcePack
            && root.resourcePack.sheepWoolFaceActive)
-    // t816 羊染脸纠偏派生态：毛茸态 + 选中了非白毛色 → 整模 baseColor 乘 tint 会连**头前脸**一起染
-    //   （MobModel 单材质整模渲染）→ 叠一块皮肤色「脸罩」Model 盖住头前面（#d6b890，t777 腿罩同款语义：
-    //   脸/腿=skin 层不 tint，仅躯干毛层乘色，机制等价 MC 染色羊脸不随毛色染）。罩住贴图脸（pack 真脸
-    //   亦盖）→ 眼 overlay 须在罩上恒显（见眼 visible 的 || sheepFacePatched 分支）。白毛（tint 恒等）/
-    //   剪毛态（裸肤不染色）不罩 = 原观感零回归。
-    readonly property bool sheepFacePatched:
-        root.selectedMobFromSection === 3 && !root.sheepSheared && root.sheepWoolIndex > 0
+    // t876 羊头分离 subset 判据（t816 脸罩退役）：毛茸态羊预览 MobModel 开 sheepSkinHead → 几何输出
+    //   subset 0（躯干+腿毛层）+ subset 1（头盒），materials[1] 换绑本体层头区纹理源（pack 开 →
+    //   mobPrevTex 合成贴图头区真脸 / pack 关 → mobSheepHeadTex 程序羊头贴图）且**不吃毛色 tint**
+    //   （机制等价 MC 羊头 = skin 层恒自然色，毛色 tint 只落躯干毛层）。剪毛态 / 非羊不分离（单材质
+    //   整模，零回归）。
+    readonly property bool sheepSkinHeadActive:
+        root.selectedMobFromSection === 3 && !root.sheepSheared
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -385,6 +385,13 @@ Item {
         id: mobShearedTex
         source: root.sheepBodyPackSrc !== "" ? root.sheepBodyPackSrc
                                              : "qrc:/textures/mob_sheep_sheared.png"
+        generateMipmaps: false
+    }
+    // t876 羊头贴图（自然羊头色：裸肤脸 + 头顶羊毛帽 + 吻部暗带；build_mob.py 程序生成，镜像 Main.qml
+    //   mobSheepHeadTex）：毛茸态羊预览 sheepSkinHead subset 1（头盒）的 pack 关态纹理源，不吃毛色 tint。
+    Texture {
+        id: mobSheepHeadTex
+        source: "qrc:/textures/mob_sheep_head.png"
         generateMipmaps: false
     }
     // t750 夜行者眼睛发光层两态贴图（镜像 Main.qml mobNightwalkerEyesTex / nightwalkerEyesPackTex）：
@@ -795,6 +802,9 @@ Item {
                                                 //   几何无观感；取 Loader active 门控的代价是 delegate 常驻变
                                                 //   按需重建（开图鉴翻条目更重），故取一行钳制。
                                                 mobType: Math.max(1, root.selectedMobType)
+                                                // t876 羊头分离 subset：毛茸态羊 → 头盒独立 subset（materials[1]
+                                                //   换绑本体层头区、不吃毛色 tint）；剪毛态 / 非羊 → false 单段绘制。
+                                                sheepSkinHead: root.sheepSkinHeadActive
                                                 // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
                                                 //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
                                                 packTextured: root.selectedMobPackSrc !== ""
@@ -809,63 +819,67 @@ Item {
                                                     from: 0; to: 360; duration: 2200; loops: Animation.Infinite
                                                 }
                                             }
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
-                                                // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
-                                                //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
-                                                //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
-                                                //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
-                                                // t663 ⑥ → t749 改：剪毛羊变体去**纯色**改贴图（pack 本体层 / 程序
-                                                //   mob_sheep_sheared 裸肤 + 残羊毛块），贴图在身 → baseColor 白（同 t597）。
-                                                // ── t751 不变式（剪头雪傀儡「下半身错误」修复结论）── 身体（MobModel）
-                                                //   的贴图/颜色路由 = f(mobType, pack 态)，**与剪/戴变体无关**：唯一带
-                                                //   selectedMobSheared 的身体分支是羊（3）的裸肤贴图切换（机制等价游戏内
-                                                //   剪羊毛换裸皮）；雪傀儡（12）剪头仅切头 Model（下方南瓜 ↔ 纯雪头），
-                                                //   身体两态逐位一致。历史根因：t663 旧版把 baseColorMap 写成
-                                                //   `有贴图 && !selectedMobSheared` —— 任何剪后变体（含雪傀儡）在 pack 开时
-                                                //   身体贴图被一并剥成纯白，与戴头形态（snow_golem 贴图有纹）并排对比即
-                                                //   「下半身模型错误」（参照物戴头形态正确 = 贴图路由未受损）；t749 重写该
-                                                //   绑定已恢复路由，t751 变体切换化后以本不变式钉死防回归。
-                                                baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
-                                                    : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
-                                                baseColor: {
-                                                    // t751/t816 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
-                                                    //   （白底羊毛贴图 × 染色 = 染色羊毛，调色板与羊毛方块 16 色同源）。
-                                                    //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色；t816 起 tint 只落
-                                                    //   躯干/头毛——脸区由 sheepFacePatched 皮肤色脸罩盖住不染色（腿 = t777
-                                                    //   四腿皮肤罩，同为 skin 层不 tint），对齐 MC 染色羊脸/腿不随毛色染；
-                                                    //   裸肤（剪毛后）不染色。生物蛋路径不 tint（变体仅生物段浏览）。
-                                                    if (root.selectedMobFromSection === 3 && !root.sheepSheared
-                                                        && root.sheepWoolIndex > 0)
-                                                        return root.woolPalette[root.sheepWoolIndex].tint
-                                                    return (root.selectedMobSheared && root.selectedMobType === 3)
-                                                        || root.selectedMobTexSource !== "" ? "#ffffff"
-                                                        : root.mobFallbackColor(root.selectedMobType)
+                                            // t876 双材质（仅羊毛茸态有 subset 1，其余 mobType 单段用 [0]）：
+                                            //   [0] = 身体（毛层 × 毛色 tint）；[1] = 羊头 subset（本体层头区自然色）。
+                                            materials: [
+                                                PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
+                                                    // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
+                                                    //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
+                                                    //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
+                                                    //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
+                                                    // t663 ⑥ → t749 改：剪毛羊变体去**纯色**改贴图（pack 本体层 / 程序
+                                                    //   mob_sheep_sheared 裸肤 + 残羊毛块），贴图在身 → baseColor 白（同 t597）。
+                                                    // ── t751 不变式（剪头雪傀儡「下半身错误」修复结论）── 身体（MobModel）
+                                                    //   的贴图/颜色路由 = f(mobType, pack 态)，**与剪/戴变体无关**：唯一带
+                                                    //   selectedMobSheared 的身体分支是羊（3）的裸肤贴图切换（机制等价游戏内
+                                                    //   剪羊毛换裸皮）；雪傀儡（12）剪头仅切头 Model（下方南瓜 ↔ 纯雪头），
+                                                    //   身体两态逐位一致。历史根因：t663 旧版把 baseColorMap 写成
+                                                    //   `有贴图 && !selectedMobSheared` —— 任何剪后变体（含雪傀儡）在 pack 开时
+                                                    //   身体贴图被一并剥成纯白，与戴头形态（snow_golem 贴图有纹）并排对比即
+                                                    //   「下半身模型错误」（参照物戴头形态正确 = 贴图路由未受损）；t749 重写该
+                                                    //   绑定已恢复路由，t751 变体切换化后以本不变式钉死防回归。
+                                                    baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
+                                                        : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
+                                                    baseColor: {
+                                                        // t751/t876 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
+                                                        //   （白底羊毛贴图 × 染色 = 染色羊毛，调色板与羊毛方块 16 色同源）。
+                                                        //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色；t876 起 tint 只落
+                                                        //   subset 0 躯干毛层（头 subset 独立材质本体层自然色、腿 = t777
+                                                        //   四腿皮肤罩，同为 skin 层不 tint），对齐 MC 染色羊脸/腿不随毛色染
+                                                        //   （t816 脸罩方案退役——头盒直接换绑纹理源，非遮盖）；
+                                                        //   裸肤（剪毛后）不染色。生物蛋路径不 tint（变体仅生物段浏览）。
+                                                        if (root.selectedMobFromSection === 3 && !root.sheepSheared
+                                                            && root.sheepWoolIndex > 0)
+                                                            return root.woolPalette[root.sheepWoolIndex].tint
+                                                        return (root.selectedMobSheared && root.selectedMobType === 3)
+                                                            || root.selectedMobTexSource !== "" ? "#ffffff"
+                                                            : root.mobFallbackColor(root.selectedMobType)
+                                                    }
+                                                    // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
+                                                    //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
+                                                    // t781 夜行者：pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时
+                                                    //   Mask 裁（Main.qml 实体 delegate / 刷怪笼迷你态同款；程序贴图全不透明）。
+                                                    alphaMode: (root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared)
+                                                               || (root.selectedMobType === 16 && root.selectedMobPackSrc !== "")
+                                                               ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                                    alphaCutoff: 0.5
+                                                },
+                                                PrincipledMaterial {
+                                                    // t876 subset 1 羊头：本体层头区自然色，不吃毛色 tint（镜像
+                                                    //   Main.qml 游戏内侧）。pack 开 → mobPrevTex 合成贴图头区（box-UV
+                                                    //   head(0,0)6×6×8 直采本体层真脸）；pack 关 → mobSheepHeadTex
+                                                    //   程序羊头贴图（全脸 UV）。无 subset 1 的 mobType / 剪毛态本材质
+                                                    //   不被消费（materials 多于 subset → 多余材质忽略）。
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColor: "#ffffff" // 贴图在身 → 白透原色（t597）
+                                                    baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : mobSheepHeadTex
+                                                    alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== ""
+                                                               ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                                    alphaCutoff: 0.5
                                                 }
-                                                // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
-                                                //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
-                                                // t781 夜行者：pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时
-                                                //   Mask 裁（Main.qml 实体 delegate / 刷怪笼迷你态同款；程序贴图全不透明）。
-                                                alphaMode: (root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared)
-                                                           || (root.selectedMobType === 16 && root.selectedMobPackSrc !== "")
-                                                           ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
-                                                alphaCutoff: 0.5
-                                            }
-                                        }
-                                        // t816 羊脸罩（染脸纠偏）：有色毛（sheepFacePatched）时整模贴图 × 毛色 tint
-                                        //   会连头前**脸区**一起染 → 本罩以皮肤色 #d6b890（t777 腿罩同款色）盖住
-                                        //   头前面，脸=skin 层不随毛色染（机制等价 MC 染色羊：脸恒粉褐肤色）。
-                                        //   头盒心 (0,0.10,-0.45) 半 (0.14,0.16,0.16) → 前脸 z=-0.61；罩 z 心
-                                        //   -0.615 厚 0.02 → [-0.625,-0.605]（前凸 0.015 / 后没入 0.005，无共面
-                                        //   z-fight；图鉴静态 headPitch=0 → 罩不挂颈枢）。罩盖贴图脸（pack 真脸
-                                        //   亦盖）→ 下方眼 overlay 在罩显时恒显（visible || sheepFacePatched）。
-                                        Model {
-                                            visible: root.sheepFacePatched
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 0.10, -0.615)
-                                            scale: Qt.vector3d(0.14, 0.16, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
+                                            ]
                                         }
                                         // t663 ⑥ 羊眼 overlay（镜像 Main.qml t633 ③：sheep_fur.png 毛层头前无脸 →
                                         //   眼恒显；Main.qml 颈枢 Node 绑 headPitch，图鉴静态 0 → 直立，直接定位）。
@@ -875,31 +889,31 @@ Item {
                                         //   把眼整个包住 → 被头面遮挡恒不可见。烘焙正确绝对位：白眼底 z=-0.64（凸出
                                         //   头前面 -0.61 外 0.03 无 z-fight）/ 黑瞳 z=-0.65（叠白眼底前），y=0.10。
                                         // t777 ② pack 真脸门控：贴图自带脸（sheepPreviewPackFace）→ 隐 overlay 眼
-                                        //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。t816 例外：脸罩
-                                        //   在身（sheepFacePatched）时贴图脸被罩盖 → 眼须在罩上恒显（否则染色羊无眼）。
+                                        //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。t876：t816 脸罩
+                                        //   退役（头 subset 独立材质自然色），眼显隐回归单一判据、无罩例外分支。
                                         Model {
-                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.055, 0.10, -0.64)
                                             scale: Qt.vector3d(0.055, 0.055, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.055, 0.10, -0.64)
                                             scale: Qt.vector3d(0.055, 0.055, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(-0.055, 0.10, -0.65)
                                             scale: Qt.vector3d(0.028, 0.028, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 3 && (!root.sheepPreviewPackFace || root.sheepFacePatched)
+                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                             geometry: UnitCube {}
                                             position: Qt.vector3d(0.055, 0.10, -0.65)
                                             scale: Qt.vector3d(0.028, 0.028, 0.02)
