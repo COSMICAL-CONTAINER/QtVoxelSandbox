@@ -482,13 +482,16 @@ Item {
 
     // t653① 中键复制一整组到光标（创造 pick 语义，背包内任意槽位通用）：把槽内容**复制**到光标（源槽不动
     //   —— 创造凭空复制，机制等价 MC 创造背包中键取整组）；实例元数据（耐久 / 附魔 / 名）随实例复制保真。
-    //   旧光标手持（若有）先归还虚空（创造语义，同调色板换拿 t136/t356）。count 钳 maxStackSize（源槽超
-    //   maxStack 的异常栈不会复制出超限光标栈）。仅创造背包面板有本手势（本面板 visible 已由宿主绑 Creative）。
+    //   旧光标手持（若有）先归还虚空（创造语义，同调色板换拿 t136/t356）。
+    //   t896 数量语义收紧：复制的是**一整组 maxStackSize(id)**，非源槽当前数量 —— 旧 min(count, maxStack)
+    //   复制源槽数量：源槽 2 件 → 光标得 2、源槽仍 2 → 放回 = 4（用户「2变4 翻倍」观感，且非「整组」语义）。
+    //   满组 = maxStackSize 单一权威（工具 / 桶 / 护甲 1 件恰 1，方块 / 材料 64）；源槽超 maxStack 的异常栈
+    //   也被钳回合法上限（不会复制出超限光标栈，原防御语义保留）。
     function copyStackToCursor(id, count, durability, enchants, name) {
         if (!root.hotbar || id === 0 || count <= 0) return
         if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
         root.hotbar.heldBlock = id
-        root.hotbar.heldCount = Math.min(count, root.hotbar.maxStackSize(id))
+        root.hotbar.heldCount = root.hotbar.maxStackSize(id)
         root.hotbar.heldDurability = (durability > 0) ? durability : 0
         const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants.slice() : [0, 0, 0, 0]
         root.hotbar.setHeldEnchants(e)
@@ -890,16 +893,18 @@ Item {
                                     //   换拿（旧物回虚空 → 新物上手，MC 创造调色板语义）。t356：同走 returnHeldToVoidRequested。
                                     if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
                                     root.hotbar.heldBlock = modelData
-                                    // t174：count 走 maxStackSize（单一权威）—— 工具 1 / 桶 1（不可堆叠）/ 方块·材料 64。
-                                    //   旧 `isTool ? 1 : 64` 对桶（材料段 0x206/0x207 maxStack=1）误给 64（放入槽被 setStack
-                                    //   钳到 1，但光标浮动图标会短暂显 64）→ 统一走 maxStackSize 修正。
-                                    root.hotbar.heldCount = root.hotbar.maxStackSize(modelData)
+                                    // t896 左键拿取**默认 1 个**（用户定稿语义）：调色板左键 = 单件上手，要整组走中键
+                                    //   （中键 = 复制一整组，见下方 TapHandler）。工具 / 桶本就 maxStack=1 → 行为不变；
+                                    //   方块 / 材料 64 类从满栈改单件。t174 的 maxStackSize 单一权威保留在中键与
+                                    //   copyStackToCursor（数量口径仍单一权威，只是左键语义取 1）。
+                                    root.hotbar.heldCount = 1
                                     root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
                                 }
                             }
                             // t653① 中键 = 复制一整组到光标（创造 pick 语义）：与左键同取调色板无限源（满栈
                             //   maxStackSize），差异仅「不受 t318 原格归还 toggle 影响」（中键恒拿取，MC 中键
                             //   就是纯复制）。预设附魔书（哨兵）走同款专用拿取。
+                            //   t896：中键 = 整组（maxStackSize）—— 左键已改默认 1 个，整组需求全走中键。
                             TapHandler {
                                 acceptedButtons: Qt.MiddleButton
                                 enabled: modelData !== 0
