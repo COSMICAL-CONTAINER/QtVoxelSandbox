@@ -135,7 +135,10 @@ Window {
     // pause-menu 暂停菜单「进度」按钮子态（5 行布局行2）：显成就列表（progress.achievements() delegate +
     //   revision 触碰刷新）。仅暂停叠层有意义（!captured）；Esc / 返回按钮关。纯呈现态，PLAN §2 分层（UI 层）。
     //   t840：成就面板回**居中模态**（t790 右下角 dock 是理解偏差——用户原意是「新建」右下角快捷悬浮栏
-    //   achQuickDock 承担计数/最近解锁，大面板位置不动；详见 progressOverlay 头注）。
+    //   承担计数/最近解锁，大面板位置不动；详见 progressOverlay 头注）。
+    //   t887 二次纠偏：t840 新建的右下角快捷悬浮栏本身也是误解（用户「成就小地图」实指进度面板右上角的
+    //   treeMinimap 可拖动）→ 整体删除（含 enterWorld 名单重置 + onAchievementUnlocked 名单驱动）；
+    //   可拖动语义改落在 treeMinimap（见其头注）。
     property bool progressOpen: false
     // pause-menu 暂停菜单「统计」按钮子态（5 行布局行2）：显统计列表（progress.statsList() delegate +
     //   revision 触碰刷新）。同 progressOpen 模式（暂停叠层 !captured；Esc / 返回关）。纯呈现态。
@@ -598,9 +601,6 @@ Window {
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
-        // t840 成就快捷悬浮栏（achQuickDock）会话名单重置：读档回放走 silent unlock（零信号）→ 名单只反映
-        //   本会话实况解锁；enterWorld 是进世界唯一入口，在此清 = 上一世界残留必被清（退出路径无需重复清）。
-        achQuickDock.recentNames = []
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -2249,9 +2249,6 @@ Window {
         target: progress
         function onAchievementUnlocked(id, name, desc) {
             window.showInfoToast("成就解锁：" + name)
-            // t840 快捷悬浮栏（achQuickDock）「最近解锁」名单驱动：最新在前截 3（真时序；enterWorld 重置，
-            //   名单空时悬浮栏回退定义序末 3 个已解锁 —— 读档回放 silent 无信号的近似显示）。
-            achQuickDock.recentNames = [name].concat(achQuickDock.recentNames).slice(0, 3)
         }
     }
 
@@ -11407,8 +11404,9 @@ Window {
     //   最近解锁，大面板仍居中）。t840 纠偏回滚：① 面板回 anchors.centerIn 居中模态（760×560）；② 恢复
     //   本叠层自身 0.7 整屏压暗（居中大模态观感；与暂停 0.55 叠加 ≈ 0.87 压暗为 t790 之前原设计）。t790
     //   可保留项：③ 面板底半透明 + #3a444f 描边（t783 浮层语言）；④ 树视口半透明加深底内嵌框；⑤ 暂停
-    //   菜单本体在本面板开时隐藏（居中大面板与居中菜单同轴重叠）。右下角快捷计数悬浮栏见 achQuickDock
-    //   （t840 新建，独立 HUD 常驻件）。
+    //   菜单本体在本面板开时隐藏（居中大面板与居中菜单同轴重叠）。
+    //   t887 二次纠偏：t840 据此新建的右下角常驻快捷悬浮栏仍是误解——用户「成就小地图」实指本面板右上角
+    //   treeMinimap 应可拖动 → 该悬浮栏整体删除，可拖动语义落在 treeMinimap（见其头注）。
     //   仅 playing && progressOpen 显；z=155（高于暂停 100，低于死亡 180）。纯呈现（PLAN §2 UI 层），§9 自绘原创。
     //   成就名 / 描述 / 图标 id 均来自 Game 层 PlayerProgress（不引 MC 专名）。
     Item {
@@ -11895,8 +11893,14 @@ Window {
                     //   （已解锁微亮）、连线=浅灰正交折线（复用主画布三段公式 × fitScale）、当前视口=
                     //   #ffd76a 亮色矩形框。全部走属性绑定：只在树结构（visibleTree / baseW/H）或视口
                     //   四元组（contentX/Y/viewScale/视口尺寸）变化时重算，非逐帧动画（低频重绘）。
-                    //   声明在 treeCanvas 之后 + z=5 → 视觉与输入均在树内容之上（minimap 区域的拖拽/
-                    //   点击不落入 treeDragArea，不误平移树）。
+                    //   t887 可拖动（用户「成就小地图」真意——t840 据此误解新建的右下角常驻快捷悬浮栏
+                    //   achQuickDock 已整体删除，可拖动语义落回本件）：**拖手柄语义** = minimap 边缘
+                    //   环带拖动改 x/y（中央跳转区原语义保留），首次拖动断默认锚定绑定（用户接管位置，
+                    //   会话态不入存档——与旧 dock 同口径：纯呈现态，重开面板回默认位）；可拖出面板
+                    //   边界（父 treeViewport clip 只裁内容层不裁本件；progressOverlay 全屏无裁剪），
+                    //   越界钳制只防整块丢出可视区。z=5 → 视觉与输入均在树内容之上（minimap 区域的
+                    //   拖拽/点击不落入 treeDragArea，不误平移树）。hover 光标变化保留（手柄区四向箭头
+                    //   / 中央区手型，用户认可项）。
                     Item {
                         id: treeMinimap
                         anchors.top: parent.top
@@ -11912,6 +11916,16 @@ Window {
                             color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
                             border.color: "#3a444f"; border.width: 1
                         }
+                        // t887 首次拖动断剩余锚定绑定（drag.target 写 x/y 只断 x/y 自身绑定，anchors.top/
+                        //   right/margins 是另一套约束——不摘除则写 x/y 无效）。断锚后钳位与 drag.min/max
+                        //   同口径（只越界才写）：未拖动时锚定绑定不受扰，窗口/面板尺寸变化也钳回可视区。
+                        function clampIntoOverlay() {
+                            const minX = 24 - width, maxX = progressOverlay.width - 24
+                            const minY = 24 - height, maxY = progressOverlay.height - 24
+                            if (x > maxX || x < minX) x = Math.max(minX, Math.min(x, maxX))
+                            if (y > maxY || y < minY) y = Math.max(minY, Math.min(y, maxY))
+                        }
+                        onXChanged: if (!anchors.top && !anchors.right) clampIntoOverlay()
                         // ── 几何映射（t753 核心）：树画布坐标 c ↔ minimap 坐标 m ──
                         //   正映射 m = off + c × fitScale（整树 bounding box 等比缩放居中）；
                         //   反映射 c = (m − off) / fitScale（点击跳转用）。
@@ -11940,6 +11954,24 @@ Window {
                             treeViewport.contentX = treeViewport.width / 2 - cx * treeViewport.viewScale
                             treeViewport.contentY = treeViewport.height / 2 - cy * treeViewport.viewScale
                             treeViewport.clampPan()
+                        }
+                        // ── t887 拖手柄层（声明在内容层之前 = 绘制底层；输入由顶层交互区分派）：──
+                        //   minimap 四周 10px 环带 = 移动手柄（中央仍是原点击/拖动跳转区）。MouseArea
+                        //   drag 改 x/y；首次 drag.target 写 x/y 即断 x/y 默认锚定绑定（用户接管会话态，
+                        //   不入存档——重开面板回默认位）。可整块拖出面板边界（本件不在任何 clip 祖先内
+                        //   —— treeViewport clip 只作用于其内容子树，见头注），drag.min/max 仅防丢出
+                        //   可视区。hover 光标变化保留：手柄区四向箭头 SizeAllCursor（移动语义）。
+                        readonly property int mmDragGrip: 10
+                        MouseArea {
+                            id: minimapMoveArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.SizeAllCursor
+                            drag.target: treeMinimap
+                            drag.minimumX: -treeMinimap.width + 24
+                            drag.minimumY: -treeMinimap.height + 24
+                            drag.maximumX: progressOverlay.width - 24
+                            drag.maximumY: progressOverlay.height - 24
                         }
                         // 内容层（连线 + 节点 + 视口框；clip 钳制越界部分 —— 居中态视口框可超出树界）。
                         Item {
@@ -12012,14 +12044,23 @@ Window {
                                 border.color: "#ffd76a"; border.width: 1
                             }
                         }
-                        // 交互层（最后声明 = 输入最顶层）：点击即跳视口中心；按住拖动持续平移（拖动
-                        //   期间逐点 jumpTo —— 与点击同路径，顺带获得「拖动 minimap 框浏览全树」手感）。
+                        // 交互层（最后声明 = 输入最顶层）：中央跳转区（内缩手柄环带宽）点击即跳视口中心、
+                        //   按住拖动持续平移（拖动期间逐点 jumpTo —— 与点击同路径，顺带获得「拖动 minimap
+                        //   框浏览全树」手感）；边缘环带留给外层 minimapMoveArea 拖手柄。hover 光标变化
+                        //   保留：中央区手型 PointingHandCursor（用户认可项）。
                         MouseArea {
                             anchors.fill: parent
+                            anchors.margins: treeMinimap.mmDragGrip
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onPressed: (mouse) => parent.jumpTo(mouse.x, mouse.y)
-                            onPositionChanged: (mouse) => { if (pressed) parent.jumpTo(mouse.x, mouse.y) }
+                            onPressed: (mouse) => {
+                                // 坐标系换回 minimap 全局（本区被 margins 内缩 mouse.x/y 相对内缩区）。
+                                parent.jumpTo(mouse.x + treeMinimap.mmDragGrip, mouse.y + treeMinimap.mmDragGrip)
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (!pressed) return
+                                parent.jumpTo(mouse.x + treeMinimap.mmDragGrip, mouse.y + treeMinimap.mmDragGrip)
+                            }
                         }
                     }
                 }
@@ -13157,124 +13198,6 @@ Window {
             id: infoToastTimer
             interval: 3000
             onTriggered: window.infoToastVisible = false
-        }
-    }
-
-    // t840 成就快捷悬浮栏（右下角 HUD 常驻件，新建）：t790 把进度大面板挪来右下角是理解偏差，已回滚居中；
-    //   用户原意 = 像小地图一样**可鼠标拖动**的快捷件，随时看到「已解锁 N / M」计数与最近解锁。数据与
-    //   暂停菜单进度面板同源（progress VM：achievements() + revision 触碰刷新）。
-    //   显隐：仅 playing 态（appState）——菜单 / worldlist 不显。默认右下角 toast 带上方（右距 20 / 底距 150，
-    //   避开 hotbar 底栏与 3s toast 闪烁带）；MouseArea drag 整体拖动 + drag.min/max 视口钳制（首次拖动断
-    //   默认锚定绑定 = 用户接管位置，会话态不入存档；窗口缩放越界时钳回）。z=120：暂停叠层(100)之上 ——
-    //   游玩态指针被游戏捕获，拖动实际发生在暂停态，若在叠层(100)之下会被其全屏 MouseArea 挡住无法拖；
-    //   背包叠层(150)/进度面板(155)之下（面板开时被压暗属预期）。hover 展开（可选加分项，已做）：常驻只显
-    //   一行计数（游玩零干扰），悬停展开「最近解锁」名单 —— 名单双源：会话内 progress.achievementUnlocked
-    //   信号名单优先（真时序，最新在前 ≤3；enterWorld 重置），空则回退定义序末 3 个已解锁（读档回放 silent
-    //   无信号、成就无时间戳 → 定义序末尾 ≈ 最新推进的近似）。纯呈现层（PLAN §2 UI 层），§9 自绘原创
-    //   （通用词「成就」；Rectangle+Text，无 MC PNG）。
-    Item {
-        id: achQuickDock
-        visible: window.appState === "playing"
-        z: 120
-        width: 200
-        clip: true   // 收起态把展开名单区裁掉（高度塌到 36，不靠 visible 切换 —— Column 对不可见子仍占位）
-        // 高度：收起 36（一行计数）；hover 展开到内容实际高（计数行 + 「最近解锁」名单 + 上下边距 8）。
-        height: dockDragArea.containsMouse ? dockContent.implicitHeight + 16 : 36
-        // 默认右下角（toast 带上方）：x/y 默认绑定随窗口缩放跟随 + 展开时底边不动向上长高；首次拖动被
-        //   MouseArea 改写即断开（会话态接管）。
-        x: parent.width - width - 20
-        y: parent.height - height - 150
-        // 会话内最近解锁名单（最新在前 ≤3；achievementUnlocked 信号驱动 + enterWorld 重置）。
-        property var recentNames: []
-        // 计数 + 回退名单快照：可见性门 + revision 触碰（review-L3 / qml-touch 铁律 —— 非 playing 早退不读
-        //   revision（revision 每 ~0.5s playTime flush 必 bump，关门防全天候重算）；门内 _r>=0 恒真守卫防
-        //   qmlcachegen AOT 把裸触碰读当死代码消除）。
-        readonly property var dockData: {
-            if (!visible) return { unlocked: 0, total: 0, recent: [] }
-            const _r = progress.revision
-            const list = _r >= 0 ? progress.achievements() : []
-            let unlocked = 0
-            const unlockedNames = []
-            for (let i = 0; i < list.length; ++i) {
-                if (list[i].unlocked) { ++unlocked; unlockedNames.push(list[i].name) }
-            }
-            let recent = recentNames.slice(0, 3)
-            if (recent.length === 0) recent = unlockedNames.slice(-3).reverse()
-            return { unlocked: unlocked, total: list.length, recent: recent }
-        }
-        // 拖动 + 点击吸收一体的 MouseArea：drag.target 整体拖动（10px 阈值内算点击被吸收 —— 防透传到背后
-        //   暂停叠层误「点击恢复游戏」）；drag.min/max = 视口内钳制。cursor 四向箭头提示可拖。
-        MouseArea {
-            id: dockDragArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.SizeAllCursor
-            drag.target: achQuickDock
-            drag.minimumX: 0
-            drag.minimumY: 0
-            drag.maximumX: achQuickDock.parent.width - achQuickDock.width
-            drag.maximumY: achQuickDock.parent.height - achQuickDock.height
-            onClicked: {}   // 吸收点击（不透传背后暂停叠层）
-        }
-        // 背景（t783/t790 浮层语言同款：半透明深钢蓝 + #3a444f 描边）。
-        Rectangle {
-            anchors.fill: parent
-            radius: 8
-            color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
-            border.color: "#3a444f"; border.width: 1
-        }
-        // 内容列：常驻计数行 + 展开名单区（收起态整块被 root clip 裁掉）。
-        Column {
-            id: dockContent
-            x: 10; y: 8
-            width: parent.width - 20
-            spacing: 4
-            // 常驻计数行：✦ + 「成就 N / M」+ hover 才显的拖动提示（游玩态零噪音）。
-            Row {
-                spacing: 6
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "✦"; color: "#e5c07f"; font.pixelSize: 14; font.bold: true
-                }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "成就 " + achQuickDock.dockData.unlocked + " / " + achQuickDock.dockData.total
-                    color: "#e8e8e8"; font.pixelSize: 13; font.bold: true
-                }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: dockDragArea.containsMouse
-                    text: "（可拖动）"; color: "#8a94a0"; font.pixelSize: 11
-                }
-            }
-            // 展开名单区：单 Text 多行拼接（免 Repeater + 免不可见子占位问题）。
-            Column {
-                width: parent.width
-                spacing: 2
-                Text { text: "最近解锁"; color: "#8a94a0"; font.pixelSize: 11 }
-                Text {
-                    width: parent.width
-                    text: achQuickDock.dockData.recent.length > 0
-                          ? achQuickDock.dockData.recent.map(function(n) { return "· " + n }).join("\n")
-                          : "· 暂无解锁成就"
-                    color: "#cfe3cf"; font.pixelSize: 12
-                    elide: Text.ElideRight
-                }
-            }
-        }
-        // review25 #15：dock 自身高度变化钳位——首次拖动断 y 绑定贴底后 hover 展开（36 → ~90+）使底边
-        //   溢出视口（「最近解锁」名单下沿出屏；收起自愈但展开窗内不可见）。clampIntoView 只越界才写 y
-        //   （未拖动时 y 默认绑定随 height 联动不触发写入 = 绑定不受扰；拖动后断绑定的会话态由本钳位接管）。
-        onHeightChanged: clampIntoView()
-        // 窗口缩放后钳回视口（拖动已断默认绑定，越界不自动跟随；只越界才写 x/y —— 未拖动时默认绑定不受扰）。
-        Connections {
-            target: achQuickDock.parent
-            function onWidthChanged() { achQuickDock.clampIntoView() }
-            function onHeightChanged() { achQuickDock.clampIntoView() }
-        }
-        function clampIntoView() {
-            if (x > parent.width - width) x = Math.max(0, parent.width - width)
-            if (y > parent.height - height) y = Math.max(0, parent.height - height)
         }
     }
 
