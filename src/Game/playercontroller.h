@@ -680,10 +680,11 @@ signals:
     //   显隐 / 位置 / 下沉。fishing / bobberPosition / hasBite 三者同变一次性发（少抖动 QML 绑定；bobberPosition
     //   每 tick 随实体移动刷新——飞行 / 钉 mob 跟随段位置连续变化，与 mob delegate revision 高频同量级可接受）。
     void fishingChanged();
-    // t401/t836 钓获物（收竿咬钩时按 LootTable::fishingPool 抽一件获物，从浮标位弹向玩家）：携获物 id + 数量 +
-    //   浮标 float 世界坐标 + 水平弹向（dirX/dirZ 归一，指向玩家）+ 弹速（kFishCatchFlySpeed）。Main.qml
-    //   Connections 转发到 ItemEntityManager.spawnItemAt（定点定向弹出，t608 发射器先例——机制等价 MC 1.0
-    //   钓获物从浮标飞向玩家；同 spawnItem / mobDied 单向事件流模式）。
+    // t401/t836/t886 钓获物（收竿咬钩时按 LootTable::fishingPool 抽一件获物，从浮标位抛物线弹向玩家）：携获物
+    //   id + 数量 + 浮标 float 世界坐标 + 水平弹向（dirX/dirZ 归一，指向玩家）+ 弹速（= 抛物解 |v|，随距离
+    //   自适应——近快远慢的可见弧）。**t886 起掉落物实体在 Game 层 C++ 直调 spawnItemThrown 生成**（t608 发射器
+    //   / t542 投掷器先例——免 QML 信号往返、掉落物物理同一链）；本信号改为**通知性**（矩阵探针 / 未来 UI
+    //   消费，QML 不再转发 spawn——双重生成防线）。经验球同帧经 m_xpOrbManager 直调 spawnOrb（1-6 XP）。
     void fishCaught(int itemId, int count, float px, float py, float pz, float dirX, float dirZ, float speed);
     // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍发一次）：携嘴部世界坐标（= 玩家眼位 position()，
     //   float 坐标非方块格 —— 进食屑粒从玩家嘴部迸发而非方块中心）。呈现层 Connections 转发到
@@ -1726,14 +1727,14 @@ private:
     //   kFishCastOriginOffset：甩竿生成位 = 眼位 + 视线 × 0.4（略出身体表面，防贴脸生成即碰墙 / 即钩近身 mob）。
     //   kFishCastSpeed：甩竿初速（blocks/s，沿视线含俯仰分量）× 投射物轻重力 12 → 45° 满甩 ~19 格 / 平视 ~11 格
     //     （MC 1.0 钓竿甩距量级）。等待 5-30s / 咬钩窗口 0.5s 见 EntityManager kBobberWait*/kBobberBiteWindowSec。
-    //   kFishCatchFlySpeed：钓获物从浮标位弹向玩家的定向初速（blocks/s；spawnItemAt，t608 发射器先例——机制
-    //     等价 MC 1.0 钓获物飞向玩家）。
-    //   kFishHookPullSpeed：钩住生物收竿的拉拽水平冲量（blocks/s，~6 b/s 一次冲量 + 实体侧微上抛；MC 1.0 口径）。
+    //   kFishHookPullSpeed：钩住生物收竿的拉拽水平冲量基值（t882 起按距离 / 收杆角度调制——见 kFishHook*
+    //     常量组；MC 1.0 口径）。
     //   kFishHookDurabilityCost：钩住生物收竿的钓竿耐久消耗（-5；钓获 -1 走 damageSelectedItem() 缺省；MC 1.0 口径
     //     ——钩获物损坏远大于空收，空收 0）。
     static constexpr float kFishCastOriginOffset  = 0.4f;
     static constexpr float kFishCastSpeed         = 15.0f;
-    static constexpr float kFishCatchFlySpeed     = 4.5f;
+    // （kFishCatchFlySpeed 4.5 随 t886 退役——弹速改按落点抛物解算 |v|（kFishCatch* 常量组 + useFishingRod
+    //   获物分支注释），不再持固定弹速常量。）
     static constexpr float kFishHookPullSpeed     = 6.0f;
     static constexpr int   kFishHookDurabilityCost = 5;
     // t881 鱼线最大长度（blocks；玩家眼位到浮标的 3D 距离超此值断线——机制等价 MC 1.0 钓竿 ~32 格线长上限）。
@@ -1755,6 +1756,15 @@ private:
     static constexpr float kFishHookLiftBase     = 2.8f;
     static constexpr float kFishHookLiftGain     = 0.18f;
     static constexpr float kFishHookAngleMin     = 0.4f;
+    // t886 鱼获反馈常量（掉落物从鱼钩处抛物线弹向玩家 + 1-6 XP 经验球）：
+    //   - kFishCatchRiseOffset：获物弹出点抬升（blocks；浮标浮定在顶水格内 y=格顶−0.125，原位生成会落进
+    //     ItemEntityManager 浮水分支（vy 清零 + 恒速上浮贴水面）把整个抛物弧吞掉——抬到水面上方空气格
+    //     （格顶+0.225）弧线全程生效，落回水里自然转浮水）。
+    //   - kFishCatchItemGravity：掉落物重力镜像（28 = ItemEntityManager::kGravity；P18 双钉——改值须两处同步）。
+    //     抛物解：目标 = 玩家中心；飞行时 T = clamp(0.45+0.055D, 0.5, 1.4)；vy = Δy/T + ½gT；v = (Δxz/T, vy)。
+    //   （kFishCatchFlySpeed 4.5 随 t886 退役：弹速不再是常量——按落点抛物解算 |v|，远近自适应。）
+    static constexpr float kFishCatchRiseOffset  = 0.35f;
+    static constexpr float kFishCatchItemGravity = 28.0f;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
     // t388/t457 睡觉机制常量（机制对齐 MC 1.0 床：fade 后跳清晨、床周有敌对即拒绝；数值为本工程小世界量身调）。
