@@ -14859,6 +14859,37 @@ Item {
                              "retires the old TapHandler form - TapHandler cannot see modifiers, t700 lesson)";
     }
 
+    // ── P-t901 画作背面木板源码钉（t837 未愈返修；纯视觉项轻量源码钉，t781/t893 先例）──
+    //   用户「背面仍全透明」根因：画面 BillboardQuad 默认背面剔除 → 墙后侧（玻璃墙 / 透视支撑后）看画，
+    //   quad 被剔 = 无像素。修法 = 第二张反向法线 quad（绕 Y 180°）贴木板背板（MC 语义：画作背面木板）。
+    //   QML delegate 渲染不可由本 harness 直驱 → 源码钉 paintingDelegate 块：背 quad 的 180° 欧拉 +
+    //   default_wood.png（= 图集 tile 8 planks 同源）+ 背面略压暗 baseColor 存在。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+        const int i0 = t.indexOf(QStringLiteral("id: paintingDelegate"));
+        bool okT901 = false;
+        if (i0 < 0) {
+            qInfo().noquote() << "  [t901 pin diag] paintingDelegate block miss";
+        } else {
+            const QString seg = t.mid(i0, 4300); // delegate 块（双 quad + 材质全在内，实测跨度 ~4.3k）
+            const int back0 = seg.indexOf(QStringLiteral("Qt.vector3d(0, 180, 0)")); // 背 quad 反向法线欧拉
+            const int wood = seg.indexOf(QStringLiteral("qrc:/textures/default_wood.png"));
+            const int dim = seg.indexOf(QStringLiteral("0.72, 0.72, 0.72"));
+            okT901 = back0 > 0 && wood > back0 && dim > wood;   // 三件同块依序（背 quad → 木板贴图 → 压暗）
+        }
+        if (!okT901) ++totalFail;
+        qInfo().noquote() << (okT901 ? "PASS" : "FAIL")
+                          << "| t901 painting back board: second reverse-normal quad (Y+180 euler, "
+                             "backface-culled pair so no coplanar z-fight, offset 1/64 wall-ward) carries "
+                             "the plank board texture default_wood.png (same source file as atlas tile 8) "
+                             "slightly dimmed - MC semantics: a painting's back is a wooden board, fixing "
+                             "the fully-transparent back visible through glass walls (source pin on the "
+                             "paintingDelegate block; visual confirmation pending user playtest)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

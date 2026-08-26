@@ -9325,6 +9325,30 @@ Window {
                         }
                     }
                 }
+                // t901 背面木板 quad（t837 未愈返修：用户「背面仍全透明」）：BillboardQuad 默认背面剔除 →
+                //   从墙后侧看（玻璃墙 / 半透明支撑后）画面 quad 被剔 = 背面全透明。修法 = 第二张 quad 反向
+                //   法线（绕 Y +180°，其 +Z 朝墙）贴**画框木板材质**（MC 语义：画作背面是木板框背板）——
+                //   走 qrc 程序木板贴图 default_wood.png（= 图集 tile 8 planks 同源文件；pack 的 per-tile 文件
+                //   不暴露给 QML（包块瓦片进合成图集），pack 态背面保持程序木板，与画族程序回退先例一致）。
+                //   两 quad 各自背面剔除、法线相反：任一像素至多一张朝相机 → 无共面 z-fight；背面板再向墙
+                //   侧收 1/64（-0.453125，仍离墙面 3/64）双保险。XY 中心 / scale 与正面同（同框大小）。
+                Model {
+                    geometry: BillboardQuad {}
+                    eulerRotation: Qt.vector3d(0, 180, 0)
+                    position: Qt.vector3d(-(paintingRoot.artW - 1) / 2,
+                                          -(paintingRoot.artH - 1) / 2,
+                                          1.0 / 16.0 - 0.5 - 1.0 / 64.0)
+                    scale: Qt.vector3d(paintingRoot.artW, paintingRoot.artH, 1.0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColorMap: Texture {
+                            source: "qrc:/textures/default_wood.png"
+                            generateMipmaps: false
+                        }
+                        // 略压暗（背光面语义，防与正面抢视觉焦点；NoLighting 无光照可差 → baseColor 手动降）。
+                        baseColor: Qt.rgba(0.72, 0.72, 0.72, 1.0)
+                    }
+                }
                 // 画框视觉：贴图自带 2px 内框（build_paintings.py FRAME）→ 不另画框边，零额外 Model。
             }
         }
