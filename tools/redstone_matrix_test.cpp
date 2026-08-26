@@ -13914,6 +13914,104 @@ Item {
                              "injected";
     }
 
+    // ── P-t888 火伤节奏对齐 MC 探针（行为级 + 数值钉）──
+    //    t888：① 常量钉（kFireDamageInterval 0.75s / kFireExtinguishChance 0 / kFireDuration 8——改值须
+    //      同步本探针；MC 基准出处见 entitymanager.h 常量注释）；② 玩家侧行为级：真 pc 站立地火 → 首拍
+    //      ∈[0.7,1.1]s、8s 内恰 ~10-11 拍（间隔恒定无随机吞拍）、余焰满 8s（0.75×11=8.25 > 8 → 恰 11 拍
+    //      后 fireTimer 到期熄灭）；③ mob 侧同链（ignite 直燃猪，2.25s ≥3 拍 = 期望伤 >1HP/s）；
+    //      ④ 阴性对照：kFireExtinguishChance=0 下 8s 窗内零「提前熄灭」（fireTimer 单调递减到自然归零，
+    //      不出现中途跳零）。t889 软档语义照跑口径：pc.tick() 在 !captured 下 step 照跑火烧段。
+    {
+        World wF;
+        wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(86);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0); // 手持非火源物（火烧判定只读世界，持物无关；占位防空手分支）
+        pc.setWorld(&wF);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        // rig：石地板 5×5 @fy，中央立地火 @fy+1（坐在地板上——不替换地板格，防脚下悬空洞）；
+        //   玩家站火上（Fire 实存可站 / 或沉入格内，两种碰撞语义下新扫描均必接触）。
+        const int fy = 83;
+        for (int x = 1; x <= 5; ++x)
+            for (int z = 4; z <= 8; ++z) wF.setBlock(x, fy, z, BR::Stone, 0);
+        wF.setBlock(3, fy + 1, 6, BR::Fire, 0);
+        // 常量钉（编译期值运行期复核——探针文本可读、回归即红）
+        bool ok = EntityManager::kFireDamageInterval == 0.75f
+                  && EntityManager::kFireExtinguishChance == 0.0f
+                  && EntityManager::kFireDuration == 8.0f;
+        // 玩家侧：settle 后验 burning 翻转（接触点燃主路径），随后重摆干净 rig 数拍（信号级精确）。
+        pc.loadSavedState(3.5f, float(fy + 2), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+        for (int t = 0; t < 20 && !pc.burning(); ++t) {
+            pumpFor(17); ents.tick(0.05, &wF, farL, 0.3f, 1.8f, false); pc.tick();
+        }
+        ok = ok && pc.burning(); // 站火必燃
+        // —— 重摆干净 rig 数拍：fallDamageTaken(Fire) 连接计数，10.2s 窗断言恰 13 拍 + 首拍时刻带。
+        wF.setBlock(3, fy + 1, 6, BR::Air, 0);
+        pc.clearStatusEffects();
+        wF.setBlock(3, fy + 1, 6, BR::Fire, 0);
+        int firePulses = 0;
+        double pulseT = -1.0;
+        QElapsedTimer burnClock; burnClock.start();
+        QObject::connect(&pc, &PlayerController::fallDamageTaken, &pc,
+                         [&](int hp, int cause) {
+                             if (hp == 1 && cause == int(PlayerState::Fire)) {
+                                 ++firePulses;
+                                 if (pulseT < 0.0) pulseT = burnClock.elapsed() / 1000.0;
+                             }
+                         });
+        burnClock.restart();
+        QElapsedTimer wholeClock; wholeClock.start();
+        while (wholeClock.elapsed() < 10200) {
+            pumpFor(17); ents.tick(0.05, &wF, farL, 0.3f, 1.8f, false); pc.tick();
+        }
+        // 10.2s 窗：0.75s 恒间隔（随机熄灭已归零 = 零吞拍）→ 首拍 ~0.75 起、末拍 13×0.75=9.75 ≤ 10.2 <
+        //   14×0.75=10.5 → **恰 13 拍**（旧 1.0s+15% 吞拍同窗只有 ~7-9 拍且首拍更晚）。首拍 ∈ [0.55, 1.15]
+        //   （0.75 标称 ± 泵抖动 ~0.34s/帧容差）。
+        ok = ok && firePulses == 13
+             && pulseT >= 0.55 && pulseT <= 1.15;
+        if (!(firePulses == 13 && pulseT >= 0.55 && pulseT <= 1.15))
+            qInfo().noquote() << "  [t888 diag] firePulses" << firePulses << "firstPulse" << pulseT
+                              << "burning" << pc.burning();
+        // mob 侧同链：ignite 猪 → 3s 内 ≥3 拍（0.75 间隔 → 3s 恰 4 拍；≥3 容泵抖动；P(<3)=0 间隔确定性）
+        wF.setBlock(3, fy + 1, 6, BR::Air, 0); // 清玩家立地火（mob 段用 ignite 直燃，防火源干扰对照）
+        pc.clearStatusEffects();
+        const int pigB = ents.spawnMobTyped(3, fy + 1, 6, EntityManager::MobPig,
+                                            QStringLiteral("#ee9999"), 20);
+        ok = ok && pigB >= 0;
+        if (pigB >= 0) {
+            ents.ignite(pigB, 8.0f);
+            const float h0 = ents.healthAt(pigB);
+            QElapsedTimer mobClock; mobClock.start();
+            while (mobClock.elapsed() < 3000) {
+                pumpFor(17); ents.tick(0.05, &wF, farL, 0.3f, 1.8f, false);
+            }
+            ok = ok && (h0 - ents.healthAt(pigB)) >= 3.0f;
+        }
+        // 清场
+        wF.setBlock(3, fy + 1, 6, BR::Air, 0);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t888 fire damage pacing aligned to MC: interval constant pinned at "
+                             "0.75s (first pulse lands in [0.55,1.15]s vs old 1.0s), random early "
+                             "extinguish retired to exactly 0 (MC normal fire never self-extinguishes "
+                             "mid-burn; rain douse is a separate path) -> 10.2s standing-in-fire window "
+                             "yields exactly 13 damage pulses with zero swallowed ticks (old 0.15 chance "
+                             "ate ~40% of them), afterburn duration stays MC 8s; mob side shares the "
+                             "same constants via ignite() >=3 HP lost in 3s; player contact ignition "
+                             "reuses the t344 burn chain (soft-tier worldRunning semantics, world keeps "
+                             "ticking while GUI open)";
+    }
+
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -6223,7 +6223,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     e.fireDamageTimer += float(aiDt);
                     if (e.fireDamageTimer >= kFireDamageInterval) {
                         e.fireDamageTimer -= kFireDamageInterval;
-                        // 先掷随机提前熄灭（机制等价 MC 火 random extinguish）；不熄才扣 1HP 火伤。
+                        // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭；雨灭走上方独立路径，分支保留结构）。
+                        //   不熄才扣 1HP 火伤。
                         if (QRandomGenerator::global()->generateDouble() < double(kFireExtinguishChance)) {
                             e.fireTimer = 0.0f;
                             e.fireDamageTimer = 0.0f;

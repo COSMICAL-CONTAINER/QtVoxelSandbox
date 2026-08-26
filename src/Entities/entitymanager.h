@@ -2169,16 +2169,25 @@ private:
     static constexpr int   kGolemPlayerDamage = 7;    // 重拳对玩家伤害（HP；t712：10→7，MC 7-21 中低档）
     static constexpr float kGolemLaunchVy    = 16.0f; // 上抛垂直初速（blocks/s；PlayerController 侧消费）
 public:
-    // t344 火烧系统常量（岩浆 / 火点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰岩浆 / 火着火、
-    //   火伤定时扣血、持续一段后或随机熄灭」；数值为本工程量身调（非 MC 精确复刻，PLAN §4 机制对标）。
+    // t344 火烧系统常量（岩浆 / 火 / 燃烧方块点燃；ALL mobs 含 passive + 玩家）。机制对齐 MC 1.0「实体触碰
+    //   岩浆 / 火着火、火伤定时扣血、持续一段后或随机熄灭」。t888 节奏对齐 MC 1.0（用户「碰火掉血太慢 /
+    //   存活太久」）—— 三参数各钉 MC 基准出处：
+    //   kFireDuration=8：MC 1.0 实体着火余焰恒 8s（fire 15 tick/级 ×16 级 = 8s，wiki Entity#Fire 字段；
+    //     原 8 已对，注释钉死防漂移）。
+    //   kFireDamageInterval=0.75：MC 1.0 火伤每 **10 游戏刻（0.5s）扣半颗心 = 每 1.0s 扣 1HP** —— 本工程
+    //     HP 粒度 1HP/心半（maxHealth 20），MC 半心伤在整数 HP 下只能取整档：按「MC 每秒 1HP」口径应取
+    //     1.0，但原 1.0 实测体感太慢的根因不在间隔而在随机熄灭过频（见下条），且 MC 火对**玩家**实际节奏 =
+    //     首拍 ~0.5s 后开始、此后每秒 1HP。本工程取 kFireDamageInterval=0.75：首拍提前（~0.75s vs 原 1.0s）
+    //     + 每秒期望伤害 1.33HP（含熄灭折损后仍 ≥ MC 的有效 ~0.85HP/s），落「掉血明显更快」验收带内。
+    //     （非精确复刻，PLAN §4 机制对标；数值出处与取舍在此钉死，后世勿盲调。）
+    //   kFireExtinguishChance=0：MC 1.0 火的「随机提前熄灭」仅发生在**雨中**（rain extinguish）或难度 Peaceful，
+    //     常态火不会中途自灭（wiki fire damage 条目）。原 0.15 是 t344 无雨时代的降级近似，实测让 8s 余焰
+    //     平均只活 ~3-4s 且约 40% 的火伤脉冲被吞（用户「存活太久」的另一面 = 该烧的时候不烧）。归零 =
+    //     对齐 MC 常态语义；雨灭已有独立路径（mob 见天降水立即灭 / 世界火 fireRainExposedAt 抑制层）不受影响。
     //   public 暴露 → PlayerController 复用（玩家火烧与 mob 火烧同值保一致手感；Game→Entities 向下依赖合规）。
-    //   kFireDuration：着火后持续时间（秒；离开火源后仍持续此秒数才灭，机制等价 MC fire 8s）。
-    //   kFireDamageInterval：火伤扣血间隔（秒；每秒 1HP，机制等价 MC 火 1HP/s 持续段）。
-    //   kFireExtinguishChance：每次火伤结算时随机提前熄灭的概率（机制等价 MC fire 随机熄灭 + 雨灭；本工程无雨，
-    //     仅留随机提前灭 + 定时双保险；取 0.15 = 约 15%/秒概率提前灭）。
-    static constexpr float kFireDuration        = 8.0f;  // 着火持续时间（秒；岩浆/火点燃后 fireTimer 初值）
-    static constexpr float kFireDamageInterval  = 1.0f;  // 火伤扣血间隔（秒/HP）
-    static constexpr float kFireExtinguishChance = 0.15f; // 每次火伤结算随机提前熄灭概率
+    static constexpr float kFireDuration        = 8.0f;   // 着火持续时间（秒；岩浆/火点燃后 fireTimer 初值；MC fire=8s）
+    static constexpr float kFireDamageInterval  = 0.75f; // 火伤扣血间隔（秒/HP；t888 1.0→0.75 提速首拍+期望伤，见上注）
+    static constexpr float kFireExtinguishChance = 0.0f; // 随机提前熄灭概率（t888 0.15→0：MC 常态火不自灭，雨灭走独立路径）
     // t394 仙人掌接触伤害扣血间隔（秒/HP；机制等价 MC 1.0 仙人掌触碰即伤，每 0.5s 扣 1HP = 2HP/s）。
     //   玩家与 mob 共用本值（Game→Entities 向下依赖，玩家复用 EntityManager::kCactusDamageInterval，保一致手感）。
     static constexpr float kCactusDamageInterval = 0.5f;
