@@ -465,6 +465,16 @@ void MobModel::setSheepSkinHead(bool on)
     rebuild();
 }
 
+// t878② 坐姿开关 setter（仅 mobType 10/11 读）：值变 → rebuild 摆坐 / 站布局。QML 绑 wolfSittingAt /
+//   ocelotSittingAt（布尔，toggle 即时切姿）。替代旧 Main.qml「整模 y 压缩 + x 前倾」变换（用户判非坐姿）。
+void MobModel::setSitPose(bool on)
+{
+    if (on == m_sitPose) return;
+    m_sitPose = on;
+    emit sitPoseChanged();
+    rebuild();
+}
+
 // t782 燃烬者棒组公转角 setter（度）：值未变早退；变化 → rebuild 把 4 根棒挪到新轨道位（棒心
 //   (cos(i·90°+spin)·0.62, -0.03, sin(...)·0.62)，棒身恒竖直只轨道心公转——同 t728 旧 QML Repeater
 //   「父 Node eulerRotation.y 转 + 竖棒」的观感，机制等价 MC 烈焰人棒组环绕旋转）。QML 用
@@ -731,6 +741,27 @@ void MobModel::rebuild()
         //   ±0.5rad 腿顶角起伏 0.038 < 0.05 全程不露缝；腿底仍 -0.42 贴 collision 底面）+ legOffX 0.18→0.16
         //   收进身体轮廓（旧版腿心恰在身侧缘 ±0.18 → 半条腿悬在身侧外读作「位置不对」）。
         g_texW = 64.0f; g_texH = 32.0f;
+        if (m_sitPose) {
+            // t878② 狼坐姿（机制等价 MC 坐狼：臀落地 + 胸抬起 + 头微仰看玩家 + 后腿前折 + 前腿垂直撑地）。
+            //   躯干绕后髋枢（髋顶 (0,-0.08,+0.24)）+40° 上仰；下沉 0.18 用「枢轴下移 0.18」实现（绕
+            //   平移后的枢轴旋转 = 原旋转后整体下移，旋转/平移可复合）。各件坐标由站姿值绕枢轴解析
+            //   推得（视觉参数钉死，待用户目视确认；Main.qml 眼/项圈/尾 overlay 坐标与本头位成对契约）。
+            setMobTex(21, 0, 6, 6, 7);
+            addBoxRot( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f,
+                      -0.26f, 0.24f, 0.6981317f, verts, idx, bMin, bMax); // 躯干（+40° 上仰 + 下沉 0.18：臀落地胸抬）
+            setMobTex(0, 0, 6, 6, 4);
+            addHeadRot( 0.00f,  0.30f, -0.12f, 0.14f, 0.15f, 0.18f,
+                        m_headPitch + 0.3490659f, verts, idx, bMin, bMax); // 头（随胸抬起高位 + 净 +20° 微仰「看玩家」）
+            setMobTex(21, 0, 6, 6, 7);
+            addBox(-0.08f,  0.46f, -0.16f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（随头高位）
+            addBox( 0.08f,  0.46f, -0.16f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
+            setMobTex(0, 18, 2, 8, 2);
+            addBox(-0.16f, -0.28f,  0.10f, 0.08f, 0.14f, 0.08f, verts, idx, bMin, bMax); // 后腿前折平收臀下（y[-0.42,-0.14] 贴地）
+            addBox( 0.16f, -0.28f,  0.10f, 0.08f, 0.14f, 0.08f, verts, idx, bMin, bMax);
+            setMobTex(0, 18, 2, 8, 2);
+            addBox(-0.16f, -0.185f, -0.128f, 0.08f, 0.235f, 0.08f, verts, idx, bMin, bMax); // 前腿垂直撑地（伸长 0.34→0.47：髋随胸抬 +0.25）
+            addBox( 0.16f, -0.185f, -0.128f, 0.08f, 0.235f, 0.08f, verts, idx, bMin, bMax);
+        } else {
         setMobTex(21, 0, 6, 6, 7);
         addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；采 mane 毛区）
         setMobTex(0, 0, 6, 6, 4);
@@ -739,6 +770,7 @@ void MobModel::rebuild()
         addBox(-0.08f,  0.30f, -0.40f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（t819 采 mane 毛区，与头脸区分区）
         addBox( 0.08f,  0.30f, -0.40f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
         addLegs(-0.25f, 0.17f, 0.16f, 0.24f, 0.08f, 0, 18, 2, 8, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长；t819 嵌髋 0.05 + 收进轮廓）
+        }
     } else if (m_mobType == 11) {
         // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
         //   前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体贴图同纹）+ 4 细腿。未驯服 = 丛林豹猫（斑点橙棕贴图）、
@@ -757,6 +789,27 @@ void MobModel::rebuild()
         //   悬垂、后缘 -0.24 嵌胸 0.12）；QML 两侧眼 overlay z 同步 -0.61→-0.53。③ 腿嵌髋 0.03→0.05（腿顶
         //   -0.08 深入躯干底 -0.11；腿底仍 -0.40 贴 collision 底面）+ legOffX 0.16→0.14 收进轮廓（身半宽 0.15）。
         g_texW = 64.0f; g_texH = 32.0f;
+        if (m_sitPose) {
+            // t878② 豹猫/猫坐姿（同狼模式：躯干 +40° 绕后髋枢 (0,-0.06,+0.20) 上仰 + 下沉 0.16（枢轴下移
+            //   实现）+ 头高位微仰 + 后腿前折 + 前腿垂直撑地 + 竖尾（坐猫尾巴竖起贴臀）。坐标由站姿值绕
+            //   枢轴解析推得（视觉参数钉死，待用户目视确认）。
+            setMobTex(20, 6, 4, 5, 6);
+            addBoxRot( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f,
+                      -0.22f, 0.20f, 0.6981317f, verts, idx, bMin, bMax); // 躯干（+40° 上仰 + 下沉 0.16）
+            setMobTex(1, 1, 5, 4, 4);
+            addHeadRot( 0.00f,  0.28f, -0.12f, 0.11f, 0.12f, 0.14f,
+                        m_headPitch + 0.2967060f, verts, idx, bMin, bMax); // 头（高位 + 净 +23° 微仰「看玩家」）
+            setMobTex(20, 6, 4, 5, 6);
+            addBox(-0.06f,  0.42f, -0.17f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（随头高位）
+            addBox( 0.06f,  0.42f, -0.17f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
+            addBox( 0.00f, -0.02f,  0.44f, 0.04f, 0.12f, 0.04f, verts, idx, bMin, bMax); // 竖尾（坐猫尾竖起贴臀）
+            setMobTex(0, 18, 2, 4, 2);
+            addBox(-0.14f, -0.26f,  0.08f, 0.06f, 0.14f, 0.06f, verts, idx, bMin, bMax); // 后腿前折平收臀下（y[-0.40,-0.12] 贴地）
+            addBox( 0.14f, -0.26f,  0.08f, 0.06f, 0.14f, 0.06f, verts, idx, bMin, bMax);
+            setMobTex(0, 18, 2, 4, 2);
+            addBox(-0.14f, -0.182f, -0.106f, 0.06f, 0.218f, 0.06f, verts, idx, bMin, bMax); // 前腿垂直撑地（伸长 0.34→0.436）
+            addBox( 0.14f, -0.182f, -0.106f, 0.06f, 0.218f, 0.06f, verts, idx, bMin, bMax);
+        } else {
         setMobTex(20, 6, 4, 5, 6);
         addBox( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f, verts, idx, bMin, bMax); // 细长躯干（比狼更窄长；猫科体型）
         addBox( 0.00f,  0.18f,  0.36f, 0.04f, 0.05f, 0.16f, verts, idx, bMin, bMax); // 长尾（身后 +Z 后伸上翘；采 body 同纹）
@@ -766,6 +819,7 @@ void MobModel::rebuild()
         addBox(-0.06f,  0.26f, -0.36f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（t819 采 body 毛区，与头脸区分区）
         addBox( 0.06f,  0.26f, -0.36f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
         addLegs(-0.23f, 0.17f, 0.14f, 0.20f, 0.06f, 0, 18, 2, 4, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿（t819 嵌髋 0.05 + 收进轮廓）
+        }
     } else if (m_mobType == 12) {
         // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
         //   局部原点 = 碰撞中心（mobModelYOff=0，区别于猪牛羊「躯干中心」）；腿底本地 y=−0.90 贴 collision 底面

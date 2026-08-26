@@ -1963,7 +1963,10 @@ private:
     static constexpr int   kWolfAttackDamage   = 4;     // 狼咬击伤害（HP）
     static constexpr float kWolfAttackCooldown = 1.0f;  // 咬击间隔（秒）
     static constexpr float kFollowMinDist      = 2.5f;  // 跟随到位 XZ 距离（blocks）
-    static constexpr float kWolfTeleportDist   = 24.0f; // 距主人过远瞬移阈值（blocks；XZ）
+    // t878⑤ 瞬移阈值 24→12：MC 语义驯服宠物距玩家 >12 格瞬移到玩家旁（用户实测 24 太远 —— 玩家跑开
+    //   （4.3 > 狼 3.5）后回头看不见狼、12~24 区间无瞬移动作，被读作「离远不瞬移跟随」；12 也让狼被
+    //   一格台阶卡住时（chase 无跳步）更快被拉回主人身边）。矩阵 t831/t878 探针按 12 断言。
+    static constexpr float kWolfTeleportDist   = 12.0f; // 距主人过远瞬移阈值（blocks；XZ）
     static constexpr float kWolfTameChance     = 0.33f; // 骨头驯服概率（spec ~33%）
     // t481 豹猫/猫常量（spec「丛林生成 + 生鱼驯服变猫 3 色 + 跟随坐站 + 驱赶 Stalker + 繁殖」；机制对齐
     //   MC 1.0 豹猫：丛林群系生成、生鱼驯服、驯服猫跟随 + 坐、驱赶苦力怕；数值为本工程量身调，非 MC 精确
@@ -1978,7 +1981,7 @@ private:
     //     → 可逃掉但玩家追上仍有威胁（机制等价 MC 苦力怕被猫吓跑速度）。
     static constexpr float kOcelotTameChance    = 0.33f; // 生鱼驯服概率（spec ~1/3）
     static constexpr float kOcelotFollowSpeed   = 4.0f;  // 驯服猫跟随速度（blocks/s）
-    static constexpr float kOcelotTeleportDist  = 24.0f; // 距主人过远瞬移阈值（blocks；XZ）
+    static constexpr float kOcelotTeleportDist  = 12.0f; // 距主人过远瞬移阈值（blocks；XZ；t878⑤ 同狼 24→12）
     static constexpr float kStalkerFleeRange    = 6.0f;  // 豹猫/猫驱赶 Stalker 半径（blocks）
     static constexpr float kStalkerFleeSpeed    = 4.0f;  // Stalker 逃离速度（blocks/s）
     // t482/t483 防御造物常量（spec「雪傀儡抛雪球打敌对 / 行走留雪 / 热雨融化；铁傀儡大力攻击 + 击退 / 死掉
