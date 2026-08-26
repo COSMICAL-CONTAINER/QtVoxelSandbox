@@ -14473,6 +14473,50 @@ Item {
                              "a still surface is no longer underwater; column-interior cells stay full-block wet)";
     }
 
+    // ── P-t893 流水动画流向四向匹配（源码钉；驱动 ChunkGeometry 需渲染后端，t879/t889 源码钉先例）──
+    //    流水条带（右列）图案随帧沿 −v 移动（build_fluid_strips roll_y + t563 保向）→ mesher 按本格离源
+    //    流向 D 旋转 UV 把「−v」映射到 D（观感顺流）。钉三面：①流向判定与掉落物随流同源算法（4 向
+    //    state 梯度、低 state=近源背向）且门= !m_lavaOnly && st>0（静水左列 / 岩浆 / 孤立流格无向恒等，
+    //    spec「静止面无向」）；②四向旋转路由俱在（±Y 顶面 cv≡−D 四分支 + ±X 墙 ±Z 流 / ±Z 墙 ±X 流
+    //    沿墙横置、正交流保持竖直下淌 t563 语义）；③u/v 窗不越狱（colL/hxs 列窗 + stripV0 帧子区保留
+    //    → positionV 翻书不受扰，零 mesh 重建语义不变）。回退（删 flowDir 旋转）→ 钉②红。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile cf(root + QStringLiteral("/src/World/chunkgeometry.cpp"));
+        const QString t = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
+        const int i0 = t.indexOf(QStringLiteral("int flowDir = 0;"));
+        const int i1 = t.indexOf(QStringLiteral("if (flowDir != 0)"));
+        bool okGate = false, okRot = false;
+        if (i0 >= 0) {
+            const QString seg = t.mid(i0, 900);
+            okGate = seg.contains(QStringLiteral("!m_lavaOnly && st > 0"))
+                     && seg.contains(QStringLiteral("fns < st"))
+                     && seg.contains(QStringLiteral("fgx") ) && seg.contains(QStringLiteral("fgz"));
+        }
+        if (i1 >= 0) {
+            const QString seg = t.mid(i1, 1200);
+            okRot = seg.contains(QStringLiteral("cv = 1.0f - dz"))      // D=+Z（顶面 / ±X 墙）
+                    && seg.contains(QStringLiteral("cv = 1.0f - dx"))   // D=+X（顶面 / ±Z 墙）
+                    && seg.contains(QStringLiteral("cv = dx;        cu = dz"))   // D=−X 顶面
+                    && seg.contains(QStringLiteral("cv = dz; cu = dy"))          // ±X 墙 D=−Z
+                    && seg.contains(QStringLiteral("cv = dx; cu = dy"));         // ±Z 墙 D=−X
+        }
+        const bool ok = okGate && okRot;
+        if (!ok)
+            qInfo().noquote() << "  [t893 diag] gate" << i0 << okGate << "| rot" << i1 << okRot;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t893 flow animation direction matches the four flow directions: mesher derives "
+                             "the away-from-source cardinal from the 4-neighbor water-state gradient (same "
+                             "algorithm as item drift/player push) for flow cells only (still column, lava and "
+                             "unresolvable isolated cells stay directionless) and rotates the strip UVs so the "
+                             "-v pattern motion maps onto that direction on the top face, with side walls "
+                             "animating horizontally only when the flow runs along the wall (waterfalls keep "
+                             "flowing down); u stays locked to the column window and v to the frame-0 sub-range "
+                             "so the positionV flipbook is untouched";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

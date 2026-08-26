@@ -759,6 +759,32 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         const float colL = m_lavaOnly ? 0.0f : ((st == 0) ? 0.0f : 0.5f); // 左列(still) / 右列(flow)
                         const float colW = m_lavaOnly ? 1.0f : 0.5f;                     // 单列宽（岩浆整宽 / 水半宽）
                         const float u0 = colL + hxs, u1 = colL + colW - hxs;
+                        // t893 流向四向动画匹配：流水条带（右列）图案随帧沿 −v 方向移动（build_fluid_strips
+                        //   roll_y 下移 + t563 帧内容保向）→ 把「−v 方向」映射到本格**离源流向** D 即观感顺流。
+                        //   流向判定与 ItemEntityManager 掉落物随流 / PlayerController t211 玩家水流推力同源
+                        //   算法：4 向水邻居 state 梯度（低 state = 近源 → 流向背它），量化到主轴四向。
+                        //   静止源（st==0 左列）/ 岩浆 / 孤立流格（无更低 state 邻居，不可判）→ 无向恒等
+                        //   （spec「静止面无向」）。仅重排/翻转角点坐标：u 仍锁列窗 [u0,u1]、v 仍锁帧 0 子区
+                        //   → positionV 翻书不受扰，零 mesh 重建语义不变。
+                        int flowDir = 0; // 0=无向 / 1=+X / 2=−X / 3=+Z / 4=−Z
+                        if (!m_lavaOnly && st > 0) {
+                            float fgx = 0.0f, fgz = 0.0f;
+                            constexpr int flowDirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                            for (const auto &fd : flowDirs) {
+                                const int fnx = wx + fd[0], fnz = wz + fd[1];
+                                if (blockAtWorld(fnx, ly, fnz) == fluidId) {
+                                    const quint8 fns = stateAtWorld(fnx, ly, fnz);
+                                    if (fns < st) { // 该邻居更近源 → 流向朝远离它
+                                        fgx -= float(fd[0]) * float(st - fns);
+                                        fgz -= float(fd[1]) * float(st - fns);
+                                    }
+                                }
+                            }
+                            if (std::fabs(fgx) > 1e-4f || std::fabs(fgz) > 1e-4f) {
+                                if (std::fabs(fgx) >= std::fabs(fgz)) flowDir = fgx > 0.0f ? 1 : 2;
+                                else flowDir = fgz > 0.0f ? 3 : 4;
+                            }
+                        }
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];
                             const int nwx = wx + F.dir[0], nwy = ly + F.dir[1], nwz = wz + F.dir[2];
@@ -826,6 +852,24 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
                                 else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
                                 else { cu = dx; cv = dz; }                        // ±Y
+                                // t893 流向旋转：把「−v 方向」（图案随帧移动向）映射到流向 D → 观感顺流。
+                                //   顶/底面（±Y）：cv 轴 ≡ −D；侧面仅当流向有**沿墙水平分量**才把动画轴横置
+                                //   （±X 墙看 ±Z 流、±Z 墙看 ±X 流），否则保持竖直向下（瀑布 / 正交流贴墙
+                                //   「往下淌」，t563 语义）。cu 取被替换轴（u 方向不影响动画向，正交即可）。
+                                if (flowDir != 0) {
+                                    if (f == 2 || f == 3) {          // ±Y 面
+                                        if (flowDir == 3) cv = 1.0f - dz;      // D=+Z：−v ≡ +Z
+                                        else if (flowDir == 4) { /* D=−Z：cv=dz 恒等 */ }
+                                        else if (flowDir == 1) { cv = 1.0f - dx; cu = dz; } // D=+X
+                                        else              { cv = dx;        cu = dz; }     // D=−X
+                                    } else if (f == 0 || f == 1) {    // ±X 墙（沿墙水平轴 = Z）
+                                        if (flowDir == 3) { cv = 1.0f - dz; cu = dy; }      // D=+Z
+                                        else if (flowDir == 4) { cv = dz; cu = dy; }        // D=−Z
+                                    } else {                          // ±Z 墙（沿墙水平轴 = X）
+                                        if (flowDir == 1) { cv = 1.0f - dx; cu = dy; }      // D=+X
+                                        else if (flowDir == 2) { cv = dx; cu = dy; }        // D=−X
+                                    }
+                                }
                                 // t391 水面波动/透明度润色（spec「水面有波动质感、非死板」）：仅水段顶面（+Y，f==2）
                                 //   叠加一层**空间正弦涟漪**——每顶点据世界角点 (wx+dx, wz+dz) 算 sin（k=1.1，
                                 //   周期 ~5.7 格，对角涟漪）；相邻 cell 共享同一角点 → 涟漪跨格连续（非逐格跳变）。
