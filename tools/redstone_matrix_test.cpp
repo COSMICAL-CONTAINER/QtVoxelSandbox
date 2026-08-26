@@ -10765,7 +10765,13 @@ int main(int argc, char *argv[])
             emD.shearSheep(sheep);
             ok = ok && shearCount == 1 && shearPayload == 10 && emD.shearedAt(sheep); // 剪毛得染色
             const QVector3D farListener(-1000.0f, 90.0f, -1000.0f);
-            for (int t = 0; t < 750; ++t) // 12s：regrowCooldown 6s + 扫描 1s + 余量
+            // t897 后长回窗必须按「wander 依赖」定宽（探针鲁棒性，同 t897 flake 教训）：t897①把吃草收紧到
+            //   「自身列支撑 == Grass」后，羊 idle 站在出生列几乎必然**早期**吃掉出生列草（→Dirt）——等 6s
+            //   regrowCooldown 到期扫描时，羊脚下的支撑格已是 Dirt → 长回改走「wander 挪到邻列 Grass」
+            //   路径（RNG 游走 + 每秒复扫）。旧窗 750 tick（12s）只盖「冷却 + 扫描 + 余量」，没盖 wander
+            //   多轮 → 复跑 1/2~2/3 概率假红（sheared 恒 true）。窗 750→1600 tick（25.6s ≈ 6s 冷却 +
+            //   ~10 轮 wander 周期 + ~19 次复扫，长窗行为断言「窗口覆盖节律多轮」口径）。
+            for (int t = 0; t < 1600; ++t) // 25.6s：regrowCooldown 6s + wander 多轮 + 复扫余量
                 emD.tick(0.016f, &wD, farListener, 0.3f, 1.8f, false);
             const int regrown = emD.sheepWoolAt(sheep);
             const bool natural = regrown == 0 || regrown == 6 || regrown == 7
