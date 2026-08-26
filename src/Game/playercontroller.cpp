@@ -3480,7 +3480,10 @@ void PlayerController::placeBlock()
     //   同剪刀剪羊 / 喂食路径）。命中狼（mobType==MobWolf）：
     //   - 未驯服 → EntityManager::tameWolf（~33% 概率驯服；**无论成败骨头都消耗**，机制等价 MC 喂骨 ——
     //     生存 takeStack 1 骨头、创造不耗）。
-    //   - 已驯服 → EntityManager::toggleWolfSit（坐/站切换，不消耗骨头）。
+    //   - 已驯服 → **无操作**（t878①：旧版此处 toggleWolfSit 坐/站切换 = 「驯服后不跟随」的用户侧根因 ——
+    //     驯服 ~33% 概率需多点几次骨头，成功那一咬之后用户通常**再补点几下骨头**（不知已驯成），每一下
+    //     都翻转坐态 → 狼坐下留守、被读作「驯服后不跟随」。机制等价 MC 1.0：骨头对已驯服狼无作用，坐/站
+    //     命令**只走空手右键**（见下方 heldItemId==0 分支，t831 已备）；消耗/挥手亦不发（无动作）。
     //   命中非狼 / 无命中 → return（骨头无其他 useBlock 用途，不放置方块）。**不要求 m_hasHit**（瞄的是 mob
     //   实体，同剪刀 / 喂食模式）。骨头非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air`
     //   守卫之前分流（同桶 / 锄 / 蛋分支模式）。spectator 已被入口 canPlace() 守卫拦截。
@@ -3496,13 +3499,12 @@ void PlayerController::placeBlock()
                 m_entityManager->tameWolf(mobIdx);
                 if (m_mode != Creative)
                     m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 骨头（创造不耗 → 无限驯）
-            } else {
-                m_entityManager->toggleWolfSit(mobIdx); // 已驯服 → 坐/站切换（不消耗骨头）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 喂骨是一次「使用」动作 → 挥手（t29）
             }
-            m_lastPlaceMs = now;
-            emit swingArm(); // 喂骨 / 命令坐站都是一次「使用」动作 → 挥手（t29）
+            // 已驯服 → no-op（t878①）：不消耗、不挥手、不切坐态（MC 1.0 骨头对驯服狼无作用）。
         }
-        return; // 骨头（驯服成功失败 / 切换坐站 / 未命中狼）均不再走方块放置路径
+        return; // 骨头（驯服成功失败 / 驯服后无操作 / 未命中狼）均不再走方块放置路径
     }
     // t480 狼肉食繁殖 useBlock（spec「喂驯服狼生/熟肉 → love mode 产幼崽」；机制等价 MC 1.0 喂驯服狼肉繁殖）：
     //   手持生/熟肉（RawPorkchop/RawBeef/RawChicken/CookedPorkchop/CookedBeef/CookedMutton/CookedChicken，材料段
@@ -5056,10 +5058,12 @@ void PlayerController::pickIdToHotbar(int id)
 }
 
 // t653② mobType → 生物蛋物品 id 映射（机制等价 MC 创造中键 pick mob → 对应 spawn egg；零 MC 专名 §9）。
-//   仅 9 种有蛋物品的 mob 有映射（t243/t287/t285/t398/t399）；狼/雪傀儡/铁傀儡/蠹虫无蛋物品 → 0（caller
-//   落回方块分支）。蛋 id 与 RecipeRegistry 命名常量同源（此处字面量与 playercontroller 生物蛋右键生成
-//   分支的 id 判定同表）。
-int PlayerController::mobTypeEggId(int mobType) const
+//   t878④ 通查全部蛋族补全 4 缺口：狼/豹猫（t785 造蛋物品时本表漏跟 = 用户「中键复制不了狼/豹猫生物蛋」
+//   根因——pickBlock 落回后方块分支）+ 夜行者/燃烬者（t785 蛋区同批）。现覆盖**全部 13 种蛋物品**
+//   （RecipeRegistry SpawnEgg*Id 全集，矩阵探针双向往返钉死——加蛋不跟表即红）。仍无蛋物品的 mob
+//   （Test/雪傀儡/铁傀儡/蠹虫/Tnt 哨兵）→ 0（caller 落回方块分支）。蛋 id 与 RecipeRegistry 命名常量同源
+//   （此处字面量与 playercontroller 生物蛋右键生成分支的 id 判定同表）。
+int PlayerController::mobTypeEggId(int mobType)
 {
     switch (mobType) {
     case EntityManager::MobPig:      return RecipeRegistry::SpawnEggPigId;
@@ -5071,7 +5075,11 @@ int PlayerController::mobTypeEggId(int mobType) const
     case EntityManager::MobSpider:   return RecipeRegistry::SpawnEggSpiderId;
     case EntityManager::MobChicken:  return RecipeRegistry::SpawnEggChickenId;
     case EntityManager::MobSquid:    return RecipeRegistry::SpawnEggSquidId;
-    default: return 0; // 无蛋物品的 mob（Test/Wolf/Golem/Silverfish/Tnt 哨兵）
+    case EntityManager::MobNightwalker: return RecipeRegistry::SpawnEggNightwalkerId; // t878④
+    case EntityManager::MobEmberling:   return RecipeRegistry::SpawnEggEmberlingId;   // t878④
+    case EntityManager::MobWolf:     return RecipeRegistry::SpawnEggWolfId;           // t878④（中键复制狼蛋）
+    case EntityManager::MobOcelot:   return RecipeRegistry::SpawnEggOcelotId;         // t878④（中键复制豹猫蛋）
+    default: return 0; // 无蛋物品的 mob（Test/Golem/Silverfish/Tnt 哨兵）
     }
 }
 

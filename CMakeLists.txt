@@ -518,6 +518,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/entity_emberling.png       # t717 燃烬者（Emberling；机制等价 MC blaze，§9 改名）64×32 贴图（黄焰头+白热核+烟灰棒；t728 接入）
         textures/mob_fireball.png           # t728 燃烬者火球程序生成贴图（build_mob.py；16×16 橙黄自发光火球，与 Main.qml 火球 delegate 配色同源）
         textures/entity_endereye.png        # t729 暗渊之眼实体贴图（build_mob.py；16×16 小绿瞳珠：深绿珠身+暗绿竖瞳+白高光，EndEyeId 0x23A 寻路要塞）
+        textures/mob_heart.png              # t878③ 爱心粒子贴图（build_mob.py；16×16 透明底像素心红 #ff3a5a：求偶/驯服爱心 BillboardQuad 升腾渐隐动画用，替代旧静态菱形立方）
         textures/entity_squid.png           # t717 鱿鱼 64×32 实体 UV 贴图（深蓝头+浅肚+触腕条；t730 自拼 3D 接入）
         textures/entity_minecart.png        # t717 矿车 64×32 贴图（铁灰壁+铆钉+木底板；t732 矿车斗重贴图；t768 底板带扩满重画为橡木板 course）
         textures/entity_enchant_book.png    # t717 附魔书 64×32 贴图（棕封金边+白纸页；t732 悬浮书重贴图）

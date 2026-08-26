@@ -136,6 +136,12 @@ class MobModel : public QQuick3DGeometry
     //   （旧单材质路径；剪毛态 / 刷怪笼迷你 / 其余 mobType 零回归）。materials 数少于 subset 时按
     //   QtQuick3D 文档「末材质兜余下 subset」退化（单材质仍整模可渲染）。
     Q_PROPERTY(bool sheepSkinHead READ sheepSkinHead WRITE setSheepSkinHead NOTIFY sheepSkinHeadChanged)
+    // t878② 犬科/猫科坐姿（仅 mobType 10 狼 / 11 豹猫读）：true → 几何摆**坐姿**——躯干绕后髋枢上仰
+    //   （臀落地、胸抬起）、头/耳随胸抬起并微仰（「头抬起看玩家」）、后腿前折平收臀下（「后腿折叠」）、
+    //   前腿垂直伸长撑地（坐姿胸前掌落地）。false（默认）→ 站姿（原四足布局零回归）。替代 Main.qml
+    //   旧「整模压缩 + 前倾」变换（用户判「身体前倾趴下」非坐）。QML 呈现层叠加件（眼/项圈/尾）另按
+    //   坐姿头位偏移（数值与几何坐姿头位成对契约，见 Main.qml 注释互指）。
+    Q_PROPERTY(bool sitPose READ sitPose WRITE setSitPose NOTIFY sitPoseChanged)
     // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
     //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.62, -0.03, sin·0.62)，棒身恒竖直只轨道心公转）。
     //   QML 用 NumberAnimation on rodSpin 驱动连续旋转（帧率无关；同 walkPhase 的 set→rebuild 模式，
@@ -176,6 +182,10 @@ public:
     bool sheepSkinHead() const { return m_sheepSkinHead; }
     void setSheepSkinHead(bool on);
 
+    // t878② 坐姿开关；仅 mobType 10/11 读（其余 mobType 恒站姿）。
+    bool sitPose() const { return m_sitPose; }
+    void setSitPose(bool on);
+
     // t782 燃烬者棒组公转角（度）；仅 Emberling 用。
     float rodSpin() const { return m_rodSpin; }
     void setRodSpin(float deg);
@@ -188,6 +198,7 @@ signals:
     void attackPoseChanged();
     void packTexturedChanged();
     void sheepSkinHeadChanged();
+    void sitPoseChanged();
     void rodSpinChanged();
 
 private:
@@ -200,6 +211,7 @@ private:
     float m_attackPose = 0.0f; // t635 攻击抬臂（0..1，0=垂臂）；仅 IronGolem 用；0 → 双臂走轴对齐快路径
     bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
     bool m_sheepSkinHead = false; // t876 羊头分离子集（仅 mobType 3；false → 无 subset 单段绘制零回归）
+    bool m_sitPose = false; // t878② 坐姿（仅 mobType 10/11；false → 站姿零回归）
     float m_rodSpin = 0.0f; // t782 燃烬者棒组公转角（度）；仅 Emberling 用；0 → 棒在 0/90/180/270° 轴位
 };
 

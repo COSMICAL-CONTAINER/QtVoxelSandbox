@@ -462,8 +462,11 @@ public:
     // t653② pick-block 抽出的「切槽 / 复制入槽」主体（方块与生物蛋共用）：hotbar 已有同 id → 切槽；
     //   全无 → 复制满栈入空槽优先（t291/t453 语义原样）。私有，仅 pickBlock 调。
     void pickIdToHotbar(int id);
-    // t653② mobType → 生物蛋物品 id 映射（9 种有蛋 mob；无蛋 mob（狼/傀儡/蠹虫）→ 0 = 无蛋可 pick）。
-    int mobTypeEggId(int mobType) const;
+    // t653② mobType → 生物蛋物品 id 映射。t878④ 通查全部蛋族：覆盖 RecipeRegistry 全部 13 种蛋（含 t785
+    //   补的狼/豹猫/夜行者/燃烬者——旧表漏跟 = 「中键复制不了狼/豹猫生物蛋」根因）；无蛋 mob（Test/傀儡/
+    //   蠹虫/Tnt 哨兵）→ 0 = 无蛋可 pick（caller 落回方块分支）。static 纯映射（无实例态，矩阵探针直调
+    //   双向往返断言钉死「加蛋必跟表」）。
+    static int mobTypeEggId(int mobType);
     // t296 玩家受击击退（机制等价 MC 1.0 玩家被僵尸 / 箭 / 苦力怕爆炸击退 —— 命中后向被攻击方向小弹 + 水平推）。
     //   EntityManager.mobAttackedPlayer(amount, mobType, kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml
     //   Connections 据它调本方法。仅 Survival 生效（Creative/Spectator 无敌不弹；mobAttackedPlayer 经 t290 门控

@@ -10377,12 +10377,33 @@ int main(int argc, char *argv[])
                 emC.tick(0.016f, &wC, QVector3D(15.5f, 86.0f, 8.5f), 0.3f, 1.8f, true); // 7 格外玩家
             ok = ok && (emC.posAt(wolf) - p0).length() >= 2.0f; // 站 → 跟随走近
             // (d) 过远瞬移（listener y 取台面层 86 → 瞬移落点扫到台面而非台面下自然地形）。
+            //   t878⑤ 阈值 24→12（MC 语义 >12 格瞬移）：35 格远距照触发；中距 16 格（旧 24 阈值内、新 12 外）
+            //   也须瞬移；近距 6 格**不瞬移**（走跟非跳变——单 AI 窗内位移 ≪ 瞬移跳距，可分辨）。
             const QVector3D far(36.5f, 86.0f, 36.5f);
             for (int t = 0; t < 64; ++t)
                 emC.tick(0.016f, &wC, far, 0.3f, 1.8f, true);
-            const float dXZ = QVector3D(emC.posAt(wolf).x() - far.x(), 0.0f,
-                                        emC.posAt(wolf).z() - far.z()).length();
-            ok = ok && dXZ <= 10.0f; // >24 → 瞬移 2..5 环 + 漂移余量
+            const QVector3D posAfterFar = emC.posAt(wolf);
+            const float dXZ = QVector3D(posAfterFar.x() - far.x(), 0.0f,
+                                        posAfterFar.z() - far.z()).length();
+            ok = ok && dXZ <= 10.0f; // >12 → 瞬移 2..5 环 + 漂移余量
+            // (d2) 中距 16 格（12 < 16 < 24）→ 一并瞬移（t878⑤ 新语义；旧 24 阈值此处不瞬移 = 探针对旧值红）。
+            const QVector3D mid(20.5f, 86.0f, 8.5f); // 距 far 玩家位 ~16+ 格
+            const float midGap = QVector3D(mid.x() - posAfterFar.x(), 0.0f,
+                                           mid.z() - posAfterFar.z()).length();
+            if (ok && midGap > 13.0f && midGap < 23.0f) { // 只在几何成立时驱动（防瞬移落点贴边使 gap 出带）
+                const QVector3D beforeMid = emC.posAt(wolf);
+                for (int t = 0; t < 8; ++t) // 8 帧 ≤ 2 个 AI 窗（kAiTickInterval=4）；走跟位移 ≤0.5
+                    emC.tick(0.016f, &wC, mid, 0.3f, 1.8f, true);
+                ok = ok && (emC.posAt(wolf) - beforeMid).length() > 5.0f; // 跳变 = 瞬移（走跟 8 帧 ≈ 0.45）
+            }
+            // (d3) 近距 6 格 → 不瞬移（8 帧内位移 ≤1.0 = 走跟，非 ≥5 跳变）。
+            {
+                const QVector3D nearP(posAfterFar.x() + 6.0f, 86.0f, posAfterFar.z());
+                const QVector3D beforeNear = emC.posAt(wolf);
+                for (int t = 0; t < 8; ++t)
+                    emC.tick(0.016f, &wC, nearP, 0.3f, 1.8f, true);
+                ok = ok && (emC.posAt(wolf) - beforeNear).length() < 1.0f; // 无瞬移跳变
+            }
             if (!ok)
                 qInfo().noquote() << "  t831 diag: tamed" << emC.wolfTamedAt(wolf)
                                   << "heart" << emC.inLoveAt(wolf) << "hp" << emC.healthAt(wolf)
@@ -10401,11 +10422,64 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t831 taming chain completion: tame success shows heart (decays 4s), "
+                          << "| t831/t878 taming chain: tame success shows heart (decays 4s), "
                              "healTamedPet restores injured pet (full/wild reject), sitting freezes "
-                             "movement vs standing follows owner, >24-block gap teleports pet to "
-                             "owner side, ocelot taming shows heart too (collar/sit-toggle GUI glue "
+                             "movement vs standing follows owner, >12-block gap teleports pet to "
+                             "owner side (mid-gap 16 also jumps, near-gap 6 does not - t878⑤ 24->12), "
+                             "ocelot taming shows heart too (collar/sit-toggle GUI glue "
                              "static-reviewed)";
+    }
+
+    // ── P-t878④ 中键 pick-block 生物蛋映射全蛋族补全（纯静态映射直调；Game 层）──
+    //    mobTypeEggId（PlayerController 静态单一权威）必须覆盖 RecipeRegistry **全部 13 种蛋**（t785 造狼/
+    //    豹猫/夜行者/燃烬者蛋时旧表漏跟 = 用户「中键复制不了狼/豹猫生物蛋」根因）。断言三向：
+    //    (a) 4 新映射精确命中（狼/豹猫/夜行者/燃烬者）；
+    //    (b) 蛋族完备性：遍历全部 mobType 收集映射，**恰好**等于 13 蛋全集（加蛋不跟表 → 集合差非空即红）；
+    //    (c) 单射：无两个 mobType 映射同一蛋 id（防复制粘贴错位）。
+    {
+        bool ok = true;
+        ok = ok && PlayerController::mobTypeEggId(EntityManager::MobWolf)
+                  == RecipeRegistry::SpawnEggWolfId;
+        ok = ok && PlayerController::mobTypeEggId(EntityManager::MobOcelot)
+                  == RecipeRegistry::SpawnEggOcelotId;
+        ok = ok && PlayerController::mobTypeEggId(EntityManager::MobNightwalker)
+                  == RecipeRegistry::SpawnEggNightwalkerId;
+        ok = ok && PlayerController::mobTypeEggId(EntityManager::MobEmberling)
+                  == RecipeRegistry::SpawnEggEmberlingId;
+        const int kAllEggs[] = {
+            RecipeRegistry::SpawnEggPigId,      RecipeRegistry::SpawnEggCowId,
+            RecipeRegistry::SpawnEggSheepId,    RecipeRegistry::SpawnEggShamblerId,
+            RecipeRegistry::SpawnEggBonesId,    RecipeRegistry::SpawnEggStalkerId,
+            RecipeRegistry::SpawnEggSpiderId,   RecipeRegistry::SpawnEggChickenId,
+            RecipeRegistry::SpawnEggSquidId,    RecipeRegistry::SpawnEggNightwalkerId,
+            RecipeRegistry::SpawnEggEmberlingId, RecipeRegistry::SpawnEggWolfId,
+            RecipeRegistry::SpawnEggOcelotId,
+        };
+        const int kEggCount = int(sizeof(kAllEggs) / sizeof(kAllEggs[0]));
+        std::vector<int> mapped;
+        for (int mt = 0; mt <= EntityManager::MobAnvil; ++mt) {
+            const int egg = PlayerController::mobTypeEggId(mt);
+            if (egg != 0) mapped.push_back(egg);
+        }
+        std::sort(mapped.begin(), mapped.end());
+        ok = ok && int(mapped.size()) == kEggCount;
+        for (size_t i = 0; ok && i + 1 < mapped.size(); ++i)
+            ok = ok && mapped[i] != mapped[i + 1]; // 单射（排序后相邻重复 = 冲突）
+        for (int i = 0; ok && i < kEggCount; ++i)
+            ok = ok && std::binary_search(mapped.begin(), mapped.end(), kAllEggs[i]);
+        if (!ok) {
+            qInfo().noquote() << "  t878 diag: mapped" << int(mapped.size()) << "eggs, expect" << kEggCount
+                              << "wolfEgg" << PlayerController::mobTypeEggId(EntityManager::MobWolf)
+                              << "ocelotEgg" << PlayerController::mobTypeEggId(EntityManager::MobOcelot);
+            ++totalFail;
+        }
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t878 pick-block egg map completion: mobTypeEggId covers ALL 13 spawn-egg "
+                             "items (wolf/ocelot/nightwalker/emberling added - the t785 egg batch never "
+                             "followed this table, which is why creative middle-click could not copy "
+                             "wolf/ocelot eggs), set-equality against the RecipeRegistry egg family plus "
+                             "injectivity pin 'new egg must follow the table' (a future egg without a "
+                             "mapping row turns this red)";
     }
 
     // ── P-t832 染料染羊 + 长回自然色重掷（专用局部世界 wD 草平台）──

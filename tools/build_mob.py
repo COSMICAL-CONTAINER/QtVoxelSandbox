@@ -721,6 +721,37 @@ def make_endereye():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_heart():
+    """爱心粒子贴图（t878③）：16×16 透明底像素心（机制等价 MC 求偶/驯服心形粒子；§9 原创自绘）。
+
+    Main.qml 求偶/驯服爱心指示：3 颗 BillboardQuad 相位错开升腾 + 渐隐（替代旧静态单菱形立方）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0xff, 0x3a, 0x5a, 255)     # 心主色 #ff3a5a（同旧求偶红心）
+    deep = (0xc2, 0x18, 0x3f, 255)     # 心底缘暗红 #c2183f
+    hi = (0xff, 0x9f, 0xb8, 255)       # 左上高光 #ff9fb8
+
+    def span(y, x0, x1, rgb):
+        blot(img, [(x, y) for x in range(x0, x1 + 1)], rgb)
+
+    # 心形轮廓（两瓣顶 + 收尖底；宽 12 高 9，居中）
+    span(4, 3, 5, base);  span(4, 10, 12, base)
+    span(5, 2, 6, base);  span(5, 9, 13, base)
+    span(6, 2, 13, base)
+    span(7, 2, 13, base)
+    span(8, 3, 12, base)
+    span(9, 4, 11, base)
+    span(10, 5, 10, deep)
+    span(11, 6, 9, deep)
+    span(12, 7, 8, deep)
+    # 左上瓣高光（2 像素点）
+    blot(img, [(4, 5), (5, 5)], hi)
+
+    out = os.path.join(SRC, "mob_heart.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -740,6 +771,7 @@ def main():
     make_nightwalker_eyes()
     make_fireball()
     make_endereye()
+    make_heart()
 
 
 if __name__ == "__main__":
