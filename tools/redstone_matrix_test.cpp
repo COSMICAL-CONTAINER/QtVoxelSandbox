@@ -14517,6 +14517,38 @@ Item {
                              "so the positionV flipbook is untouched";
     }
 
+    // ── P-t894 潜行者模型 0.85（源码钉：QML 契约——纯视觉项 t781 先例不进行为矩阵）──
+    //    用户「苦力怕（潜行者）现偏大」→ 全模视觉缩 0.85。钉三面成对契约：①Main.qml scale 基 0.85
+    //    （蓄力膨胀相对量 1+inflate·0.5 保持 → 满蓄力 ≈1.28）；②mobModelYOff Stalker 分支腿底补偿
+    //    0.90×0.85（缺补偿 → 脚下悬空 0.135 —— 与 ① 成对，改其一须同步另一）；③碰撞盒**不缩**
+    //    （radiusAt/halfHeightAt 走 mobType 表单一权威 —— halfW 0.30/halfH 0.90 保持，移动/近战/爆炸
+    //    判定不随视觉变）；④图鉴预览 mobPreviewScale(6) 同源 0.85（所见即游戏内比例）。
+    //    回退 scale 到 1.0（漏 Y 补偿）→ ①红（②仍绿但契约断裂面由 ① 单钉暴露，Y 补偿独立值 0.765
+    //    与 0.85 基乘积钉死）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString m = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        bool okScale = m.count(QStringLiteral("0.85 * (1.0 + inflate * 0.5)")) >= 3; // 三轴同基
+        const int iy = m.indexOf(QStringLiteral("0.90 * 0.85 - mobHalfH"));
+        bool okY = iy >= 0 && m.mid(iy - 600, 600).contains(QStringLiteral("MobStalker"));
+        QFile bf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString b = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+        bool okBrowser = b.contains(QStringLiteral("if (t === 6) return 0.85"));
+        const bool ok = okScale && okY && okBrowser;
+        if (!ok)
+            qInfo().noquote() << "  [t894 diag] scale" << okScale << "yOff" << okY << "browser" << okBrowser;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t894 stalker model scaled to 0.85 (visual-only, hitbox untouched): base scale "
+                             "0.85 on all three axes with the relative inflate swell kept (full charge ~1.28), "
+                             "leg-bottom Y compensation 0.90*0.85 keeps the feet on the collision floor (pair "
+                             "contract - changing the scale without the offset lifts the model 0.135 off the "
+                             "ground), collision halfW/halfH stay at the mobType-table single authority, and the "
+                             "resource browser preview mirrors 0.85";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

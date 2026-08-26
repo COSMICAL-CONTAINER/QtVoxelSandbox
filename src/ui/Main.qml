@@ -6722,8 +6722,12 @@ Window {
                         if (entMobType === 3) return 0.44 - mobHalfH   // sheep
                         // t282 Shambler（人形）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0，腿底贴 collision 底面）。
                         if (entMobType === EntityManager.MobShambler) return 0.90 - mobHalfH
-                        // t284 Stalker（潜行者/苦力怕）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0）。
-                        if (entMobType === EntityManager.MobStalker) return 0.90 - mobHalfH
+                        // t284 Stalker（潜行者/苦力怕）：MobModel 腿底本地 |y|=0.90（halfH=0.90）。
+                        //   t894 视觉缩到 0.85（用户「现偏大」）：腿底缩后 0.90×0.85=0.765 → offset 以**缩后**
+                        //   腿底贴 collision 底面（否则脚下悬空 0.135）。**只缩视觉不缩碰撞盒**（halfW/halfH
+                        //   0.30/0.90 保持 —— 移动/近战/爆炸判定不随视觉变，取舍钉死：碰撞以 mobType 表为
+                        //   单一权威，视觉体格归 QML 呈现层）。
+                        if (entMobType === EntityManager.MobStalker) return 0.90 * 0.85 - mobHalfH
                         if (entMobType === EntityManager.MobBones) return 0.90 - mobHalfH   // t287 Bones 人形（腿底 0.90）
                         if (entMobType === EntityManager.MobSpider) return 0.30 - mobHalfH  // t285 Spider 宽矮（腿底 0.30）
                         if (entMobType === EntityManager.MobChicken) return 0.40 - mobHalfH // t398 Chicken 小型鸟（腿底 0.40）
@@ -7906,7 +7910,10 @@ Window {
                                     mobModelYOff,
                                     Math.sin(Date.now() * 0.061) * 0.02 * inflate)
                                 // 蓄力膨胀：scale 随 inflate 增长（0 → 1.0、满蓄力 → 1.5；机制等价 MC 苦力怕膨胀）。
-                                scale: Qt.vector3d(1.0 + inflate * 0.5, 1.0 + inflate * 0.5, 1.0 + inflate * 0.5)
+                                //   t894 基础视觉体格 0.85（用户「模型偏大」，MC 口径缩格）：满蓄力 0.85×1.5≈1.28。
+                                //   仅视觉缩放 —— 碰撞盒（radiusAt/halfHeightAt）与 Y 贴地补偿（mobModelYOff
+                                //   Stalker 分支 0.90×0.85）成对出现，改其一须同步另一（图鉴预览同源 0.85）。
+                                scale: Qt.vector3d(0.85 * (1.0 + inflate * 0.5), 0.85 * (1.0 + inflate * 0.5), 0.85 * (1.0 + inflate * 0.5))
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     // t421 pack 命中 → 切 pack entity 贴图（baseColor 仍作 tint 调制贴图：受击红 / 蓄力白）；
