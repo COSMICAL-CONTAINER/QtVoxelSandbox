@@ -14598,6 +14598,48 @@ Item {
                              "tail (PLAN 2-F acceptance requires the mesh/perf stats)";
     }
 
+    // ── P-t896 创造拿取/复制语义（源码钉 QML 数量契约 + Hotbar VM 行为级数量钉）──
+    //    用户定稿：①调色板**左键拿取默认 1 个**（旧满栈 64 上手）；②**中键 = 复制一整组** —— 对背包物品
+    //    （hotbar / 主栏 / 合成 / 护甲槽）中键复制的是 maxStackSize(id) 整组，非源槽当前数量（旧
+    //    min(count,maxStack) 复制 2 件 → 放回 = 4 的「2变4 翻倍」）。钉：Inventory.qml 左键 TapHandler
+    //    heldCount=1 / 中键 TapHandler maxStackSize(modelData) / copyStackToCursor maxStackSize(id)
+    //    （min(count,…) 旧式必须消失）+ Hotbar::maxStackSize 行为级（方块 64 / 工具·桶 1 / 附魔书 1 ——
+    //    整组语义的数量单一权威，QML 三处全读它）。回退任一处（左键回 64 / 复制回源槽数）→ 对应钉红。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile inf(root + QStringLiteral("/src/ui/Inventory.qml"));
+        const QString s = inf.open(QIODevice::ReadOnly) ? QString::fromUtf8(inf.readAll()) : QString();
+        const int iFn = s.indexOf(QStringLiteral("function copyStackToCursor"));
+        const QString fn = iFn >= 0 ? s.mid(iFn, 900) : QString();
+        bool okCopy = fn.contains(QStringLiteral("heldCount = root.hotbar.maxStackSize(id)"))
+                      && !fn.contains(QStringLiteral("Math.min(count"));
+        // 调色板两 TapHandler：第一个（左键）heldCount=1；第二个（中键）maxStackSize(modelData)。
+        const int iTake1 = s.indexOf(QStringLiteral("root.hotbar.heldBlock = modelData"));
+        const int iTake2 = iTake1 >= 0 ? s.indexOf(QStringLiteral("root.hotbar.heldBlock = modelData"), iTake1 + 10) : -1;
+        bool okLeft = iTake1 >= 0 && s.mid(iTake1, 700).contains(QStringLiteral("heldCount = 1"));
+        bool okMid = iTake2 >= 0 && s.mid(iTake2, 400).contains(QStringLiteral("maxStackSize(modelData)"));
+        // 行为级数量钉：整组语义的数量权威（方块/材料 64；桶·附魔书 1 —— 工具段同 1 由桶代表不可堆叠类）。
+        Hotbar hbT896;
+        const bool okVm = hbT896.maxStackSize(BR::Stone) == 64
+                          && hbT896.maxStackSize(RecipeRegistry::RedstoneId) == 64
+                          && hbT896.maxStackSize(RecipeRegistry::BucketEmptyId) == 1
+                          && hbT896.maxStackSize(RecipeRegistry::EnchantedBookId) == 1;
+        const bool ok = okCopy && okLeft && okMid && okVm;
+        if (!ok)
+            qInfo().noquote() << "  [t896 diag] copy" << okCopy << "left" << okLeft
+                              << "mid" << okMid << "vm" << okVm;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t896 creative take/copy semantics: palette left-click now takes ONE item by "
+                             "default (full-stack pickup moves to middle-click), and middle-click on any "
+                             "inventory slot clones a FULL maxStackSize stack to the cursor instead of the "
+                             "slot's current count (the old min(count,max) clone let a 2-item slot become 4 "
+                             "when placed back - the reported 2-becomes-4 doubling); quantity authority stays "
+                             "Hotbar::maxStackSize (blocks 64, tools/buckets/armor 1) read by all three QML "
+                             "sites, pinned by source pin plus behavioral VM quantity probe";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
