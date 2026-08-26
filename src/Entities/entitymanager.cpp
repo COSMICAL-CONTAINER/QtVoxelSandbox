@@ -28,14 +28,26 @@ bool isCropBlock(int blockId)
 //   无碰撞格（轨 / 火把 / 草丛 / 花 / 树苗 / 作物 / 火 —— ShapeNone 无碰撞盒族）**不是墙** → mob 直接
 //   走过不跳（机制等价 MC 怪跨过草丛 / 花不跳踩；t642 作物豁免与 t803 火焰豁免的同族收口 —— 枚举式
 //   豁免漏了草丛/花 = 用户报「僵尸遇草丛跳过去」的根因；改碰撞权威后枚举表退役，新增无碰撞方块零漏）。
-//   水保留旧口径（isSolid 恒 true → 照旧当沟壑跳过，t642 明示非彼任务范围的行为不动）。
-//   碰撞实体（含半砖 / 楼梯 / 压力板 / 门 / 栅栏等薄形碰撞体）仍按墙跳（per-cell 粒度，旧语义）。
-bool isJumpObstacle(World *world, int x, int y, int z)
+//   水保留旧口径（isSolid 恒 true → 照旧当沟壑跳过，t642 明示非彼任务范围的行为不动）；review26 #3：
+//   岩浆同列 ditch-jump——两流体皆 ShapeNone 无碰撞，岩浆落 isCollidable 分支恒 false = 不当沟壑 →
+//   被动生物 / 跟随狼猫径直走进岩浆殉死（旧版岩浆恒跳；t865 收口时行为翻转且与水的保留口径自相矛盾）。
+//   碰撞实体（含半砖 / 楼梯 / 压力板 / 门 / 栅栏等薄形碰撞体）仍按墙跳（per-cell 粒度，旧语义）——
+//   例外（review26 #1）：feetY ≥ 0 且前方格碰撞真顶 ≤ 脚位 + 容差 = 与脚下同高的矮支撑（mob 已站其
+//   同类真顶上：下半砖地面 / 耕地 / 压力板走廊），非墙不跳（否则 t865 落定链把脚位 snap 进矮支撑格
+//   内部后 fy=脚位格恒命中自身同类 → 全程兔跳）。真顶高于脚位（走进矮墙 / 上台阶）仍照旧跳。
+//   feetY = 调用点 mob 当前脚位世界 Y（e.pos.y()−e.halfH）；默认 -1 = 不启用高度判（按整格口径）。
+bool isJumpObstacle(World *world, int x, int y, int z, float feetY)
 {
     if (!world || y < 0) return false;
     const quint8 bid = world->blockAt(x, y, z);
-    if (bid == BlockRegistry::Water) return true; // 水仍当沟壑跳过（t642 口径保留）
-    return world->isCollidable(x, y, z);
+    if (bid == BlockRegistry::Water || bid == BlockRegistry::Lava)
+        return true; // 水 / 岩浆当沟壑跳过（t642 口径保留 + review26 #3 岩浆同列）
+    if (!world->isCollidable(x, y, z)) return false;
+    if (feetY >= 0.0f) {
+        const float top = world->supportTopYAt(x, y, z);
+        if (top >= 0.0f && top <= feetY + 1e-3f) return false; // 正站其顶的同高矮支撑 → 非墙
+    }
+    return true;
 }
 
 // ── t789 羊自然毛色（机制等价 MC 1.0 自然刷出羊的毛色分布；近似权重表，万分位整数便于单源求和）──
@@ -163,8 +175,21 @@ bool mobAabbHitsSolid(World *world, float cx, float cy, float cz, float halfW, f
                 //   碰撞盒族）不再挡 mob 横向移动 —— 旧版 isSolid（非 air 实存）把它们当整墙，枚举豁免表
                 //   （t642 作物 / t803 火 / t333 水）漏了轨与火把（mob 被轨列挡住 → 越障跳翻上轨 → 悬浮轨上
                 //   一格的另一路径）。含掉落沙 / 击退 / 流水推动等所有 mobAabbHitsSolid 消费路径。碰撞实体
-                //   （半砖 / 门 / 活板门 / 压力板等）仍当整格墙挡（per-cell 粒度，旧语义不变）。
+                //   （半砖 / 门 / 活板门 / 压力板等）当墙挡的语义见下方脚位格豁免（review26 #1）。
                 if (!world->isCollidable(x, y, z)) continue;
+                // review26 #1（t865 半改态收尾）：脚位格薄支撑豁免。t865 落定链把 feet(miny) snap 到矮
+                //   碰撞支撑**真顶**（下半砖 +0.5 / 耕地 +0.9375 / 压力板 1/16 / 附魔台 0.75 / 合活板门
+                //   0.1875 …）后脚位落进支撑格内部 → y0=floor(feet)=支撑格自身 → 该格 isCollidable 恒
+                //   true → 任何水平试探恒命中 → 逐轴撤回 → mob 原地冻结（wander/chase 全灭；t865 只给
+                //   SnowLayer≤0.5 留豁免，其余矮碰撞体全中招——本条把雪层豁免推广为通用「正站其顶」豁免）。
+                //   判据：y==y0（仅脚位格——上方身体格的真顶恒 > miny，天然不满足）且碰撞真顶
+                //   （supportTopYAt 单一权威）≤ 脚位 + 1e-3 容差（盒顶不高于脚底 = AABB 无严格重叠，与
+                //   XZ 侧 ceil(max)-1 贴面排除同原则）→ 视穿透。走向矮墙时 feet−y=0 < 盒高 → 真顶 > miny
+                //   → 不豁免，「碰撞实体仍当墙挡」旧语义不变（只豁免已站上去的）。
+                if (y == y0) {
+                    const float top = world->supportTopYAt(x, y, z);
+                    if (top >= 0.0f && top <= miny + 1e-3f) continue;
+                }
                 return true;
             }
     return false;
@@ -2917,7 +2942,7 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
                 const int fx = qFloor(e.pos.x() + fdx * 0.66f);
                 const int fz = qFloor(e.pos.z() + fdz * 0.66f);
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz)
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
                     && !world->isSolid(fx, fy + 1, fz)
                     && !world->isSolid(fx, fy + 2, fz)
                     && !world->isSolid(fx, fy + 3, fz)) {
@@ -3004,7 +3029,7 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
                 const int fx = qFloor(e.pos.x() + fdx * 0.66f);
                 const int fz = qFloor(e.pos.z() + fdz * 0.66f);
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz)             // 前方脚位是墙（作物格排除，可穿越不跳）
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // 前方脚位是墙（作物格排除，可穿越不跳）
                     && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（翻上去后脚位）
                     && !world->isSolid(fx, fy + 2, fz)                // 头位可容（golem 2.4 高 → 再上方两格须空气）
                     && !world->isSolid(fx, fy + 3, fz)) {
@@ -3096,7 +3121,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                 const int fx = qFloor(e.pos.x() + fdx * 0.6f);
                 const int fz = qFloor(e.pos.z() + fdz * 0.6f);
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz)
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
                     && !world->isSolid(fx, fy + 1, fz)
                     && !world->isSolid(fx, fy + 2, fz)) {
                     e.vy = kJumpSpeed;
@@ -3207,7 +3232,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
         if (fy >= 0
-            && isJumpObstacle(world, fx, fy, fz)             // t642 前方脚位是墙（作物格排除，可穿越不跳）
+            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // t642 前方脚位是墙（作物格排除，可穿越不跳）
             && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（mob 翻上去后脚位）
             && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高，再上方须空气）
             e.vy = kJumpSpeed;
@@ -3304,7 +3329,7 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
                 const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
                 const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz)
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
                     && !world->isSolid(fx, fy + 1, fz)
                     && !world->isSolid(fx, fy + 2, fz)) {
                     e.vy = kJumpSpeed;
@@ -3412,7 +3437,7 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
         const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
         const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
         if (fy >= 0
-            && isJumpObstacle(world, fx, fy, fz)                    // t642 前方脚位是墙（作物格排除）
+            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)    // t642 前方脚位是墙（作物格排除）
             && !world->isSolid(fx, fy + 1, fz)                       // 墙顶可落
             && !world->isSolid(fx, fy + 2, fz)) {                    // 头位可容（mob ~1.8 高）
             e.vy = kJumpSpeed;
@@ -3662,7 +3687,7 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
         if (fy >= 0
-            && isJumpObstacle(world, fx, fy, fz)   // t642 前方脚位是墙（作物格排除，可穿越不跳）
+            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)   // t642 前方脚位是墙（作物格排除，可穿越不跳）
             && !world->isSolid(fx, fy + 1, fz)
             && !world->isSolid(fx, fy + 2, fz)) {
             e.vy = kJumpSpeed;

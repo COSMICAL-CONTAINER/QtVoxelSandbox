@@ -9245,6 +9245,196 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── review26 #1 mob 矮碰撞支撑行走探针（EntityManager 直编，t865 追击走廊模式）──
+    //   Review 2026-08-26 #1：t865 把支撑/落定收口到碰撞真顶后，mob 脚位落进矮支撑格内部（下半砖 +0.5 /
+    //   耕地 +0.9375）→ 水平碰撞 mobAabbHitsSolid 的 y0=脚位格=支撑格自身 → isCollidable 恒 true → 逐轴
+    //   撤回 → 原地冻结（农田生物全员站桩）。修 = 脚位格薄支撑豁免（碰撞真顶 ≤ 脚位+1e-3 → 视穿透）+
+    //   越障跳同口径（前方格真顶 ≤ 脚位 → 非墙不跳，防全程兔跳）。矩阵断言（任一 FAIL = 症状复现）：
+    //   (a) 下半砖地面：僵尸沿 10 格下半砖走廊追击 —— 全程脚底 Y ≈ 砖真顶（kRigY+0.5，贴面行走非冻结
+    //       非兔跳）且到达走廊远端（旧象 = 起步即冻结 maxX≈x0）；
+    //   (b) 耕地地面：同走廊铺耕地 —— 脚底 ≈ kRigY+0.9375（耕地矮盒真顶）且到达远端。
+    {
+        // rig 选址：运行期扫描空区（t865 先例）。需 13×1×5 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 12 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 12 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review26-1 mob walks short-support floors: no clear rig area found";
+        } else {
+            EntityManager ents;
+            // (a) 下半砖走廊：石地板 x0..x0+10 @kRigY-1 + 下半砖（CobbleSlab state0 真顶 +0.5）同列 @kRigY；
+            //     僵尸自 x0 上方一格半落下（免嵌入出生）追 +X。断言全程 feet ≈ kRigY+0.5（±0.02）且 maxX ≥ x0+8。
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::CobbleSlab, 0);
+            }
+            const int zA = ents.spawnMobTyped(x0, kRigY + 2, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D slabTarget(float(x0) + 10.5f, float(kRigY) + 0.5f, float(z0) + 0.5f);
+            for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, slabTarget, 0.3f, 1.8f, true); // 预热落定
+            float slabMaxFeetOff = 0.0f, slabMaxX = -1e9f;
+            for (int t = 0; t < 300; ++t) { // 4.8s：10 格追击 ~3.6s（kChaseSpeed 2.8）+ 余量
+                ents.tick(0.016f, &w, slabTarget, 0.3f, 1.8f, true);
+                const QVector3D p = ents.posAt(zA);
+                slabMaxFeetOff = std::max(slabMaxFeetOff, std::fabs(p.y() - 0.9f - (float(kRigY) + 0.5f)));
+                slabMaxX = std::max(slabMaxX, p.x());
+            }
+            const bool okA = slabMaxFeetOff <= 0.02f && slabMaxX >= float(x0) + 8.0f;
+            // 清 (a) 场（拆砖铺耕地；地板留作 (b)）。
+            for (int dx = 0; dx <= 10; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Farmland, 0);
+            // (b) 耕地走廊：耕地矮盒真顶 +0.9375；新僵尸同款。断言全程 feet ≈ kRigY+0.9375 且 maxX ≥ x0+8。
+            const int zB = ents.spawnMobTyped(x0, kRigY + 2, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D farmTarget(float(x0) + 10.5f, float(kRigY) + 0.9375f, float(z0) + 0.5f);
+            for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, farmTarget, 0.3f, 1.8f, true); // 预热落定
+            float farmMaxFeetOff = 0.0f, farmMaxX = -1e9f;
+            for (int t = 0; t < 300; ++t) {
+                ents.tick(0.016f, &w, farmTarget, 0.3f, 1.8f, true);
+                const QVector3D p = ents.posAt(zB);
+                farmMaxFeetOff = std::max(farmMaxFeetOff, std::fabs(p.y() - 0.9f - (float(kRigY) + 0.9375f)));
+                farmMaxX = std::max(farmMaxX, p.x());
+            }
+            const bool okB = farmMaxFeetOff <= 0.02f && farmMaxX >= float(x0) + 8.0f;
+            const bool ok = okA && okB;
+            if (!ok)
+                qInfo().noquote() << "  review26-1 slab: feetOff" << slabMaxFeetOff << "maxX" << slabMaxX
+                                  << "| farmland: feetOff" << farmMaxFeetOff << "maxX" << farmMaxX;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review26-1 mobs stride across bottom-slab and farmland floors at"
+                                 " true support tops (feet snapped inside the support cell are exempt"
+                                 " from the foot-cell horizontal scan; no freeze, no bunny-hop)";
+            // 清场
+            ents.clearAll();
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
+    }
+
+    // ── review26 #2 掉落物贴薄支撑水平滑动探针（ItemEntityManager 直编，t867 探针模式）──
+    //   Review 2026-08-26 #2：物品静息中心 = 真顶 + kRestOffset(0.3)，下半砖（真顶 +0.5）中心落在砖格
+    //   内部 → 摩擦段水平碰撞探测 hcy=qFloor(pos.y())=砖格自身 → isCollidable 恒 true → 带初始弹出速度
+    //   也滑不动（物品被钉死在落点）。修 = 水平碰撞探测与 resting 复探同源：目标格真顶 ≤ 当前底+容差
+    //   = 正站其顶不挡。矩阵断言：(a) 砖面带 +X 初速掉落物滑行 ≥1.5 格（旧象 = 位移 0）；(b) 满格墙
+    //   仍挡（滑到墙前停，不进墙格——豁免不过界）。
+    {
+        // rig 选址：运行期扫描空区（t867 先例）。需 6×1×4 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 5 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 5 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review26-2 item slides on slab floor: no clear rig area found";
+        } else {
+            const float restOff = 0.3f;  // kRestOffset（itementitymanager.h 私有常量文档值）
+            const float slabTop = 0.5f;  // 下半砖（state0）碰撞盒真顶
+            // 石基座 x0..x0+3 @kRigY-1 + 下半砖面 x0..x0+2 @kRigY + 满格石墙 x0+3 @kRigY（墙顶 +1 > 物品
+            //   底 +0.5 → 不豁免，仍挡）。物品自砖面上方带 +X 初速 20（总滑程 ≈ 20/6 ≈ 3.3 格 → 必抵墙前）。
+            for (int dx = 0; dx <= 3; ++dx) w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+            for (int dx = 0; dx <= 2; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::CobbleSlab, 0);
+            w.setBlock(x0 + 3, kRigY, z0, BR::Stone, 0);
+            ItemEntityManager items;
+            // spawnItemAt 末三参 = (dirX, dirZ, speed)（方向 × 速率，t608 发射器排出口口径）：+X 弹出 20。
+            //   生成点取砖面静息高（slabTop+kRestOffset）——首拍即落定贴面滑行（免高落差 +X 弹出飞越
+            //   1 格墙控制位形：本探针钉的是贴面滑动碰撞，不是抛物线）。
+            items.spawnItemAt(QVector3D(float(x0) + 0.5f, float(kRigY) + slabTop + restOff,
+                                        float(z0) + 0.5f),
+                              BR::Torch, 1, 1.0f, 0.0f, 20.0f);
+            for (int t = 0; t < 150; ++t) items.tick(0.016f, &w); // 2.4s：落定 + 滑行 + 摩擦停
+            const float finalX = items.posAt(0).x();
+            const bool ok = items.restingAt(0)
+                && std::fabs(items.posAt(0).y() - (float(kRigY) + slabTop + restOff)) <= 0.02f
+                && (finalX - (float(x0) + 0.5f)) >= 1.5f   // (a) 滑起来了（旧象位移 = 0）
+                && finalX < float(x0 + 3);                 // (b) 满格墙仍挡（不进墙格）
+            if (!ok)
+                qInfo().noquote() << "  review26-2 finalX" << finalX << "resting" << items.restingAt(0)
+                                  << "y" << items.posAt(0).y();
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review26-2 item with horizontal pop velocity slides across a"
+                                 " bottom-slab floor (resting cell exempt when support top is at the"
+                                 " item's feet) and full blocks ahead still stop it";
+            // 清场
+            items.clearAll();
+            for (int dx = 0; dx <= 3; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
+    }
+
+    // ── review26 #3 岩浆沟壑越障跳探针（EntityManager 直编，t865 追击走廊模式）──
+    //   Review 2026-08-26 #3：t865 收口后 isJumpObstacle 只对 Water 保留 ditch-jump，岩浆（ShapeNone →
+    //   isCollidable=false）落到 false = 不当沟壑 → mob 径直走进脚位岩浆格（点燃殉死）。修 = Water/Lava
+    //   同列沟壑跳。矩阵断言：僵尸沿石走廊追击，脚位层中段一格岩浆源 —— 途径时脚底离地（跳跃触发，
+    //   maxFeetY ≥ 地面+0.4；旧象 = 不跳恒贴地走进岩浆）且到达远端。
+    {
+        // rig 选址：运行期扫描空区（t865 先例）。需 10×1×5 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 9 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 9 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review26-3 mob jumps lava ditch: no clear rig area found";
+        } else {
+            EntityManager ents;
+            // 石地板 x0..x0+8 @kRigY-1（顶 = kRigY）+ 脚位层中段一格岩浆源 (x0+4, kRigY)（坐在地板上，
+            //   与 mob 脚位同层 —— isJumpObstacle 前方探针的检出位形；探针不 tick World，岩浆不外溢）。
+            for (int dx = 0; dx <= 8; ++dx) w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+            w.setBlock(x0 + 4, kRigY, z0, BR::Lava, 0);
+            const int zC = ents.spawnMobTyped(x0, kRigY + 1, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D lavaTarget(float(x0) + 8.5f, float(kRigY), float(z0) + 0.5f);
+            for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, lavaTarget, 0.3f, 1.8f, true); // 预热落定
+            float maxFeetY = -1e9f, lavaMaxX = -1e9f;
+            for (int t = 0; t < 300; ++t) {
+                ents.tick(0.016f, &w, lavaTarget, 0.3f, 1.8f, true);
+                const QVector3D p = ents.posAt(zC);
+                maxFeetY = std::max(maxFeetY, p.y() - 0.9f);
+                lavaMaxX = std::max(lavaMaxX, p.x());
+            }
+            const bool ok = maxFeetY >= float(kRigY) + 0.4f   // 越障跳触发（跳跃顶点 ≈ 地面+1.26）
+                && lavaMaxX >= float(x0) + 6.0f;              // 越过岩浆格到达远端
+            if (!ok)
+                qInfo().noquote() << "  review26-3 maxFeetY" << maxFeetY << "maxX" << lavaMaxX;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| review26-3 mob jumps over a foot-level lava cell like water"
+                                 " ditches (lava joins the ditch-jump list; was walked straight into)";
+            // 清场（岩浆先拆再 tickN，免流体外溢）
+            ents.clearAll();
+            for (int dx = 0; dx <= 8; ++dx) w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 4, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t863 矿车坡道物理四修探针（MinecartManager 直编，P12b 同款坡 rig 族）──
     //   用户报告（R19.15 玩法阻塞）：① 上坡失速悬停半空（应反向滑落）；② 悬停 / 停驻态挖掉下方轨 /
     //   支撑不受重力（应坠落）；③ 坡顶前端无轨 + 速度够自动暂停（应飞出平抛）；④ 轨末端静止车推不动
@@ -14010,11 +14200,23 @@ Item {
                       && qAbs(items.posAt(item).x() - spawnExp.x()) < 1e-2f
                       && qAbs(items.posAt(item).y() - spawnExp.y()) < 1e-2f
                       && qAbs(items.posAt(item).z() - spawnExp.z()) < 1e-2f;
-        // ② 推掉落物物理 3s → 落定在玩家中心 2.2 格内（抛物解落点 = 玩家中心；积分步进误差余量）
-        for (int t = 0; t < 60 && okItem; ++t) items.tick(0.05, &wC);
+        // ② 推掉落物物理 3s：抛物解落点 = 玩家中心 —— 断言**首次触底点**（resting 首次 true）距玩家中心
+        //    < 2.2（积分步进误差余量）。review26 #2 起落定后残余水平速度按 t468 支撑面摩擦继续滑行
+        //    （弹速 ~8 / 摩擦 6 ≈ 1.4 格 + 本 rig 落地带西缘就在玩家脚边 → 终点会滑出平台落到下层
+        //    地形）—— 终点位不再钉「可捡半径」，触底点才是抛物解准确性的锚（滑行是引擎 t468 既定
+        //    摩擦语义，非弹道偏差）。
+        QVector3D touchdown(0.0f, 0.0f, 0.0f);
+        bool touchedDown = false;
+        for (int t = 0; t < 60 && okItem; ++t) {
+            items.tick(0.05, &wC);
+            if (!touchedDown && items.aliveAt(item) && items.restingAt(item)) {
+                touchedDown = true;
+                touchdown = items.posAt(item);
+            }
+        }
         const QVector3D playerCenter(3.5f, float(fy + 1) + 0.9f, 6.5f);
-        okItem = okItem && items.aliveAt(item)
-                 && (items.posAt(item) - playerCenter).length() < 2.2f;
+        okItem = okItem && touchedDown && items.aliveAt(item)
+                 && (touchdown - playerCenter).length() < 2.2f;
         // ③ 经验球恰一枚、量 [1,6]、落浮标格中心；④ 弹速 = 抛物解镜像 + 耐久 -1
         int orb = -1;
         for (int i = 0; i < orbs.count(); ++i)
