@@ -3113,7 +3113,7 @@ t808-t856（49 项；t836 钓鱼为下版本占位）。**建议顺序：t813 �
 **t886** 鱼获反馈：掉落物**从鱼钩处抛物线弹向玩家**（准确可捡）；钓鱼**掉落经验球**（MC 1.0 钓鱼 1-6 XP）。✅✅ 已完成（0444b2f）：获物改 Game 层 C++ 直调 spawnItemThrown（发射器/投掷器先例，QML onFishCaught 转发退役防双生成）——抛物解：目标=玩家中心、T=clamp(0.45+0.055D,0.5,1.4)、vy=Δy/T+½gT（g=28 镜像）→ 精确落点；**弹出点抬升 0.35 出水面上空气格**（浮标浮在顶水格内，原位生成落掉落物浮水分支 vy 清零吞弧线）；经验球 1-6 XP 直调 spawnOrb 落浮标格中心；kFishCatchFlySpeed 4.5 退役（弹速=解算 |v| 远近自适应）。探针：真 pc（三管理器注入）行为级——掉落物出生于抬升点、3s 物理后落玩家中心 2.2 格内、恰一 orb 量∈[1,6]、弹速=公式镜像、耐久 -1（首跑红教训：漏 setHotbar 注入唯 dur=0 暴露）；t836(c) 弹速断言改公式镜像（文件级 fishCatchSpeedMirror 双钉）。矩阵 273→274。
 
 ### 🅵 成就 UI 纠偏（t887）
-**t887** t840 纠偏二（用户澄清）：① **移除 achQuickDock 常驻悬浮窗**（新 UI 是误解）；② **进度面板右上角 treeMinimap 改为可拖动**（拖出手柄语义，可在面板内/外自由放置，像小地图一样）；保留 hover 光标变化效果（用户认可）。
+**t887** t840 纠偏二（用户澄清）：① **移除 achQuickDock 常驻悬浮窗**（新 UI 是误解）；② **进度面板右上角 treeMinimap 改为可拖动**（拖出手柄语义，可在面板内/外自由放置，像小地图一样）；保留 hover 光标变化效果（用户认可）。✅✅ 已完成（8d10666）：① achQuickDock 整块删除（Item+MouseArea+Column+clampIntoView、review25 #15 onHeightChanged 钳位、parent resize Connections）+ enterWorld recentNames 重置 + onAchievementUnlocked 名单驱动分支（toast 路由保留）+ 两处头注交叉引用改写记因，全工程零悬垂 id 引用；② treeMinimap 拖手柄语义 = 边缘 10px mmDragGrip 环带为移动手柄（SizeAllCursor 四向箭头），中央跳转区原点击/拖动跳转语义与 PointingHandCursor 保留；首次 drag 写 x/y 断 x/y 锚定绑定 + onXChanged 检测断锚后摘除剩余 anchors.top/right/margins（drag.target 只破 x/y 两绑，锚定线是另一套约束不摘则写位无效——旧 dock 无此环因无锚定线），此后可整块拖出面板边界（treeViewport clip 只裁内容子树不裁本件，progressOverlay 全屏无裁剪），越界钳制 clampIntoOverlay 与 drag.min/max 同口径只越界才写（未拖动时锚定绑定不受扰）；位置会话态不入存档（纯呈现态同旧 dock 口径，重开面板回默认位）。visual/UI-only no probe（t781 先例）；矩阵 277 PASS/0 FAIL 不变 + clean rebuild 零警告 + exe 冒烟 14s 存活日志零字节。待用户目视：拖动手柄手感/可出面板边界/hover 光标。
 
 ### 🅶 火焰（t888-t891）
 **t888** 火伤节奏调快：生存碰火掉血太慢/存活太久——燃烧伤害间隔或持续致死性对齐 MC（核伤害间隔与熄灭概率参数）。
