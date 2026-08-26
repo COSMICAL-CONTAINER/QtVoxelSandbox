@@ -200,7 +200,9 @@ Item {
         if (si < 0 || !root.furnaceStore) return
         // t647：实例元数据透传 FurnaceStore（同 ChestStore 模式；dur 归一只存实例值 >0 或 -1 自动）。
         root.furnaceStore.setSlot(root.furnaceX, root.furnaceY, root.furnaceZ, si, id, count,
-                                  (Array.isArray(enchants) && enchants.length === 4) ? enchants : [],
+                                  // review26 #9：enchants 可为 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫兜 []
+                                  //   把带附魔放入静默清白板（t874 AnvilUI 同根，list4 归一终局防御）。
+                                  InventoryOps.list4(enchants),
                                   (typeof name === "string") ? name : "",
                                   (durability > 0) ? durability : -1)
     }
@@ -526,7 +528,8 @@ Item {
                             const _r = root.slotRev
                             if (_r < 0 || root.inId === 0) return false
                             const e = root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, 0)
-                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫光晕恒不亮。
+                            return !!e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                         }
                         color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                         radius: 3
@@ -610,7 +613,8 @@ Item {
                             const _r = root.slotRev
                             if (_r < 0 || root.fuelId === 0) return false
                             const e = root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, 1)
-                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫光晕恒不亮。
+                            return !!e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                         }
                         color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                         radius: 3
@@ -783,7 +787,8 @@ Item {
                             const _r = root.slotRev
                             if (_r < 0 || root.outId === 0) return false
                             const e = root.furnaceStore.slotEnchantsAt(root.furnaceX, root.furnaceY, root.furnaceZ, 2)
-                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                            // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫光晕恒不亮。
+                            return !!e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                         }
                         color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                         radius: 3
@@ -1114,7 +1119,7 @@ Item {
         if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
         else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
         else return ""
-        if (!Array.isArray(e)) return ""
+        if (!e) return ""   // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫攻击行恒缺（t874 同根）
         let sharp = 0
         for (let i = 0; i < 4; ++i) {
             if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // EnchantRegistry::Sharpness = 1

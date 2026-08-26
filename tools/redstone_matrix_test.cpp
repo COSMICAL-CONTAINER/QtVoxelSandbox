@@ -9662,6 +9662,12 @@ int main(int argc, char *argv[])
     //        链由 t811 探针 (d) 已覆盖，此处钉改判面）；
     //   (a2) 创造攻击乘骑车：瞬毁 + cartBroken 不发（创造无掉落）+ 乘员对账自动释放（rideCart==-1、
     //        存活、不掉血）；
+    //   (a3) 源码钉（t889 先例）：beginMining 乘员重路由 = **验 hitCartFromRay/hitBoatFromRay 返回值**
+    //        （review26 #4：旧无条件 return 在「瞄乘员露出车斗的上身/头部」几何〔射线中 mob 不交车盒〕
+    //        吞击——冷却+挥手已发但零效果）+ 射线长度 m_hitDist（非 kReach 全程，极端角度不可隔墙打车）
+    //        + 未命中车盒落回 attackMob（乘员本体照旧可打）；
+    //   (a4) 行为几何钉（review26 #4 复现形态）：Shambler 乘员（halfH 0.90，头顶高出车盒顶 ~1.04 格）
+    //        瞄上身高度的水平射线 → findMobHit 命中乘员 + findCartHit 恒 -1（= 驱动 a3 落回分支的几何事实）；
     //   (b)  仙人掌：轨端前方一格仙人掌 → 空车被推到末格中心（AABB 前沿探入仙人掌格）→ 下一
     //        tickPushedCarts 环境检查即毁 + cartBroken 发（生存掉落语义）；
     //   (c)  岩浆：静止车格被岩浆灌入（setBlock Lava）→ 下一 tick 即毁（同链；掉落物落岩浆由
@@ -9690,7 +9696,10 @@ int main(int argc, char *argv[])
             EntityManager ents;
             ents.setVehicleManagers(&carts, nullptr);
             carts.spawnCart(x0, kRigY, z0, &w);
-            const int mob = ents.spawnMobTyped(x0, kRigY, z0, 0, QStringLiteral("#ff5555"), 50);
+            // 乘员用 Shambler（halfH 0.90 高个）：头顶高出车盒顶 ~1.04 格 —— 正是 review26 #4 的
+            // 「瞄上身射线不交车盒」形态载体（短 mob 上身全在车盒内，旧吞击几何不可达）。
+            const int mob = ents.spawnMobTyped(x0, kRigY, z0, EntityManager::MobShambler,
+                                               QStringLiteral("#ff5555"), 50);
             for (int t = 0; t < 8 && ents.rideCartAt(mob) < 0; ++t) {
                 ents.tick(0.016f, &w, carts.posAt(0) + QVector3D(0, 3, 0), 0.3f, 1.8f, false);
                 ents.tickVehicleRiding();
@@ -9719,8 +9728,9 @@ int main(int argc, char *argv[])
                               && ents.aliveAt(mob) && ents.healthAt(mob) == mobHp0
                               && brokenCount == 0;
             // (a3) 源码钉（t889 先例）：beginMining mob 分支的重路由接线——乘骑判定（rideCartAt/rideBoatAt）
-            //      → 改判进 hitCartFromRay / hitBoatFromRay（含冷却门 + swingArm）→ attackMob 前被
-            //      return 截住（乘员本体不吃伤害）。滤注释体（注释里的字面量不参与）。
+            //      → 改判进 hitCartFromRay / hitBoatFromRay（review26 #4：**验返回值**〔`&&` 进冷却门条件 =
+            //      未命中不置冷却/不发挥手〕+ 射线长度 m_hitDist〔非 kReach 全程，不可隔墙打车〕）→ 未命中
+            //      车盒落回 attackMob（乘员本体照旧可打）。滤注释体（注释里的字面量不参与）。
             bool okA3 = false;
             {
                 const QString exeDir = QCoreApplication::applicationDirPath();
@@ -9737,16 +9747,41 @@ int main(int argc, char *argv[])
                         if (!line.trimmed().startsWith(QLatin1String("//"))) {
                             body += line; body += QLatin1Char('\n');
                         }
-                    // 重路由语句面：乘骑判定 + 双载具分支调用 + 乘员分支 return 先于 attackMob。
+                    // 重路由语句面（review26 #4 契约）：乘骑判定 + 「冷却门 && hit*FromRay(…, m_hitDist, …)」
+                    // 值门调用（`&&` 前缀钉返回值被消费——无条件弃值调用的旧形态不再匹配）+ 分支内落回
+                    // attackMob（首个出现位须在各自值门调用之后）。
                     const int iRideC = body.indexOf(QStringLiteral("m_entityManager->rideCartAt(mobIdx)"));
                     const int iRideB = body.indexOf(QStringLiteral("m_entityManager->rideBoatAt(mobIdx)"));
-                    const int iHitC  = body.indexOf(QStringLiteral("m_minecartManager->hitCartFromRay(eye, look, kReach, m_world,"));
-                    const int iHitB  = body.indexOf(QStringLiteral("m_boatManager->hitBoatFromRay(eye, look, kReach, m_world,"));
-                    const int iAtk   = body.indexOf(QStringLiteral("attackMob(mobIdx);"));
+                    const int iHitC  = body.indexOf(QStringLiteral("&& m_minecartManager->hitCartFromRay(eye, look, m_hitDist, m_world,"));
+                    const int iHitB  = body.indexOf(QStringLiteral("&& m_boatManager->hitBoatFromRay(eye, look, m_hitDist, m_world,"));
+                    const int iAtkC  = iHitC >= 0 ? body.indexOf(QStringLiteral("attackMob(mobIdx);"), iHitC) : -1;
+                    const int iAtkB  = iHitB >= 0 ? body.indexOf(QStringLiteral("attackMob(mobIdx);"), iHitB) : -1;
                     okA3 = iRideC >= 0 && iRideB > iRideC && iHitC > iRideC && iHitB > iRideB
-                           && iAtk > iHitC && iAtk > iHitB;
+                           && iAtkC > iHitC && iAtkB > iHitB;
                 }
             }
+            // (a4) 行为几何钉（review26 #4 复现形态）：重铺车 + 乘员再登（a2 释放后仍站在轨格旁，登乘扫描
+            //      ≤0.8 拾回）。瞄「乘员上身高度（座位中心 + 0.6*halfH，严格高于车盒顶 cp.y+0.45）」的纯
+            //      水平射线（dy=0 → 车盒 Y slab 恒排除）→ findMobHit 命中乘员 + findCartHit -1 +
+            //      hitCartFromRay 明确返 false（= beginMining 据以落回 attackMob 的那个返回值）。
+            carts.spawnCart(x0, kRigY, z0, &w);
+            for (int t = 0; t < 8 && ents.rideCartAt(mob) < 0; ++t) {
+                ents.tick(0.016f, &w, carts.posAt(0) + QVector3D(0, 3, 0), 0.3f, 1.8f, false);
+                ents.tickVehicleRiding();
+            }
+            const QVector3D cpA4 = carts.posAt(0);
+            const float halfA4 = ents.halfHeightAt(mob);
+            const float chestY = cpA4.y() - 0.3125f + halfA4 + 0.6f * halfA4; // 座位钉位中心（车心-0.3125+halfH）+ 0.6*halfH = 胸/头区间
+            const QVector3D eyeA4(cpA4.x() + 3.0f, chestY, cpA4.z());
+            const QVector3D aimA4(-1.0f, 0.0f, 0.0f);
+            const bool okA4 = ents.rideCartAt(mob) == 0
+                              && halfA4 > 0.8f && chestY > cpA4.y() + 0.45f
+                              && ents.findMobHit(eyeA4, aimA4, 4.0f, nullptr) == mob
+                              && carts.findCartHit(eyeA4, aimA4, 4.0f, nullptr) < 0
+                              && !carts.hitCartFromRay(eyeA4, aimA4, 4.0f, &w, /*instantBreak=*/false);
+            if (!okA4)
+                qInfo().noquote() << "  t866 a4 upper-body aim: ride" << ents.rideCartAt(mob)
+                                  << "halfH" << halfA4 << "chestY-cartTop" << (chestY - (cpA4.y() + 0.45f));
             // 清 (a) 场。
             w.setBlock(x0, kRigY, z0, BR::Air, 0);
             w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
@@ -9792,10 +9827,10 @@ int main(int argc, char *argv[])
             w.setBlock(x0, kRigY - 1, z0, BR::Lava, 0); // 基座格换岩浆 → 车 AABB 覆盖该格
             carts.tickPushedCarts(0.016, &w);
             const bool okC = !carts.aliveAt(0) && brokenCount == lavaBroken0 + 1;
-            const bool ok = okA0 && okA1 && okA2 && okA3 && okB && okC;
+            const bool ok = okA0 && okA1 && okA2 && okA3 && okA4 && okB && okC;
             if (!ok)
                 qInfo().noquote() << "  t866 a0" << okA0 << "a1" << okA1 << "hp" << carts.hpAt(0)
-                                  << "a2" << okA2 << "a3(src)" << okA3
+                                  << "a2" << okA2 << "a3(src)" << okA3 << "a4(geom)" << okA4
                                   << "rideC" << ents.rideCartAt(mob) << "b" << okB
                                   << "c" << okC << "broken" << brokenCount;
             if (!ok) ++totalFail;

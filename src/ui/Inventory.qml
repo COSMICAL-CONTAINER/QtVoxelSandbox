@@ -349,7 +349,9 @@ Item {
         root.craftSlots[index] = id
         root.craftCounts[index] = count
         root.craftDur[index] = (durability > 0) ? durability : 0
-        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants : [0, 0, 0, 0]
+        // review26 #9：enchants 可为 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫把带附魔放入静默清
+        //   白板 + e.slice() 对序列 undefined（t874 AnvilUI 同根，list4 归一终局防御）。
+        const e = InventoryOps.list4(enchants)
         const arr = root.craftEnch.slice()     // t699：新外层引用保 var NOTIFY（同引用重赋不发信号）
         arr[index] = e.slice()
         root.craftEnch = arr
@@ -493,7 +495,9 @@ Item {
         root.hotbar.heldBlock = id
         root.hotbar.heldCount = root.hotbar.maxStackSize(id)
         root.hotbar.heldDurability = (durability > 0) ? durability : 0
-        const e = (Array.isArray(enchants) && enchants.length === 4) ? enchants.slice() : [0, 0, 0, 0]
+        // review26 #9：enchants 形参实为 C++ 序列对象（armorEnchantsAt / mainEnchantsAt / enchantsAt 直传，
+        //   Array.isArray 恒 false）→ 旧守卫把中键复制的附魔静默清白板（t874 同根，list4 归一）。
+        const e = InventoryOps.list4(enchants)
         root.hotbar.setHeldEnchants(e)
         root.hotbar.heldCustomName = (typeof name === "string") ? name : ""
         root.itemTaken()
@@ -1069,7 +1073,8 @@ Item {
                                             const _r = root.hotbar.armorRevision
                                             if (_r < 0 || armId === 0) return false
                                             const e = root.hotbar.armorEnchantsAt(index)
-                                            return Array.isArray(e) && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
+                                            // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫光晕恒不亮。
+                                            return !!e && ((e[0] || 0) !== 0 || (e[1] || 0) !== 0 || (e[2] || 0) !== 0 || (e[3] || 0) !== 0)
                                         }
                                         color: Qt.rgba(0.55, 0.25, 0.9, 0.25)
                                         radius: 3
@@ -1477,7 +1482,7 @@ Item {
                                     // t696：紫晕只罩图标 rect（见 hotbar 行同注释）。
                                     Rectangle {
                                         anchors.fill: parent
-                                        visible: Array.isArray(mainEnch) && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0)
+                                        visible: !!mainEnch && ((mainEnch[0] || 0) !== 0 || (mainEnch[1] || 0) !== 0 || (mainEnch[2] || 0) !== 0 || (mainEnch[3] || 0) !== 0) // review26 #9：mainEnch 是 C++ 序列（Array.isArray 恒 false），真值守卫
                                         color: Qt.rgba(0.55, 0.25, 0.9, 0.30)
                                         radius: 3
                                     }
@@ -1915,7 +1920,7 @@ Item {
                 if (!Number.isNaN(idx)) {
                     if (parts[0] === "hotbar")      e = _sr >= 0 ? root.hotbar.enchantsAt(idx) : null
                     else if (parts[0] === "main")   e = _mr >= 0 ? root.hotbar.mainEnchantsAt(idx) : null
-                    if (Array.isArray(e)) {
+                    if (e) {   // review26 #9：e 是 C++ 序列对象（Array.isArray 恒 false）→ 旧守卫锐锋括号恒缺（t874 同根）
                         for (let i = 0; i < 4; ++i) {
                             if (((e[i] || 0) >> 8) === 1) { sharp = e[i] & 0xFF; break }   // Sharpness = 1
                         }

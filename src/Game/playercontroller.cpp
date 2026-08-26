@@ -1170,23 +1170,33 @@ void PlayerController::beginMining()
             //   矿车耐久 / 船击毁链（末击摧毁 → 车毁 → 对账链自动释放乘员恢复 AI = 「乘员自动下来」；玩家
             //   骑的被毁车自然下车）。乘员本体不掉血 —— 攻击意图是拆载具不是打乘客（机制等价 MC 打船 /
             //   打车载实体先伤载具）。冷却门内吞点击（不误伤乘员，同下方车 / 船分支口径）。
+            //   review26 #4：重路由必须验 hit*FromRay 返回值 —— 乘员 AABB 高出车盒一大截（Zombie 半高 0.95，
+            //   头顶高出车盒顶约 1.2 格），准星瞄乘员可见上身/头部时射线命中 mob 但不与车盒相交 → 返回 false。
+            //   未命中车盒 → 落回 attackMob 打乘员本体（恢复 t242 旧行为；冷却/挥手由 attackMob 自管，不再出现
+            //   「冷却已置位+挥手已发但零效果」的静默吞击）。冷却内短路不调 hit（吞点击口径不变），attackMob 自带
+            //   冷却门同样早退。重路由射线长度用 m_hitDist（命中方块距离；无命中 = kReach）而非 kReach 全程 ——
+            //   与 mob/船/矿车三分支「实体比方块近才优先」同口径，极端角度不可隔墙打车/船。
             const int rideCart = m_entityManager->rideCartAt(mobIdx);
             if (rideCart >= 0 && m_minecartManager) {
-                if (m_attackCooldown <= 0.0f) {
-                    m_minecartManager->hitCartFromRay(eye, look, kReach, m_world,
-                                                      /*instantBreak=*/m_mode == Creative);
+                if (m_attackCooldown <= 0.0f
+                    && m_minecartManager->hitCartFromRay(eye, look, m_hitDist, m_world,
+                                                         /*instantBreak=*/m_mode == Creative)) {
                     m_attackCooldown = kAttackCooldown; // 拆载具同攻击冷却（连击定耐久节奏）
                     emit swingArm();
+                    return;
                 }
+                attackMob(mobIdx); // 未中车盒（瞄乘员上身）→ 打乘员；冷却内 attackMob 自吞（同旧口径）
                 return;
             }
             const int rideBoat = m_entityManager->rideBoatAt(mobIdx);
             if (rideBoat >= 0 && m_boatManager) {
-                if (m_attackCooldown <= 0.0f) {
-                    m_boatManager->hitBoatFromRay(eye, look, kReach, m_world, m_mode == Creative);
+                if (m_attackCooldown <= 0.0f
+                    && m_boatManager->hitBoatFromRay(eye, look, m_hitDist, m_world, m_mode == Creative)) {
                     m_attackCooldown = kAttackCooldown;
                     emit swingArm();
+                    return;
                 }
+                attackMob(mobIdx); // 未中船体（瞄乘员上身）→ 打乘员（review26 #4 同矿车分支）
                 return;
             }
             attackMob(mobIdx);
