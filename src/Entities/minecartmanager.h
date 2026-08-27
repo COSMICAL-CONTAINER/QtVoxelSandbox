@@ -473,6 +473,16 @@ private:
     // ① 坡上失速反溜起步速度（blocks/s）：死区归零点上坡面 → 置 -kCartSlopeDownSpeed×5%（同下坡起步
     //   溜 0.05 系数；后续由坡道重力目标 -kCartSlopeDownSpeed 接管加速）。
     static constexpr float kCartStallKick = 0.5f;
+    // ── t909 V 形动力永动三修常量（机制等价 MC 1.0 矿车坡道重力）──
+    // ③ 坡道重力加速度（blocks/s²，空车路径 tickPushedCarts 专用）：g·sin45° = kCartFallGravity(28)·
+    //   0.7071 ≈ 19.8（1:1 坡的重力沿轨分量，与世界重力同源可推导）。上坡减速：v²=v0²−2ad → 12.8
+    //   boost 入坡 ~4.1 格失速（旧版仅摩擦 2/s 走 6.4 格 = 短 V 坡冲顶飞出 / 停驻不反溜的根因半边）；
+    //   下坡加速：v²=2ad → kCartSlopeKick 起步 ~2 格即到 kCartSlopeDownSpeed（旧版恒速不加速 = 「五六
+    //   格都到不了最大速度」）。被骑路径（tickRiddenCart）仍走 targetV lerp（玩家输入供能语义），不读它。
+    static constexpr float kCartSlopeGravity = 19.799f; // 28 × 0.70711
+    // ② 静置空车坡道自溜起步速度（blocks/s）：放在坡上的静止车朝下坡侧的初始速度（后续重力加速接管；
+    //   平地静止车不动）。> t863① 反溜 kick 0.5 —— 用户口径「下坡初速加大」。
+    static constexpr float kCartSlopeKick = 1.0f;
 };
 
 #endif // MINECARTMANAGER_H

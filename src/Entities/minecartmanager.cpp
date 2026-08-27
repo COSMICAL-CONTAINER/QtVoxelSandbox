@@ -755,9 +755,38 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
                 continue;
             }
         }
-        if (std::fabs(c.speed) < 1e-3f) continue; // 静置空车不自动起步
+        // t909② 静置空车坡道自溜（t708「静置空车不自动起步」保守闸门在**坡道**让位 —— 机制等价 MC 放在
+        //   坡上的矿车自然下滑；平地静止车仍不动 = 玩家放平轨上的车不自己跑掉）。行进侧（+dir）邻轨低
+        //   一格 → 顺行起步溜；行进侧平 / 上坡而**背向侧**低一格 → 翻 dir 使行进侧 = 下坡再起步（V 半
+        //   山腰任意朝向放置都往坡底走，用户报「初始放在 V 半山腰静止不动」）；两侧皆平 / 上坡 / 死端
+        //   （INT_MIN）→ 维持停驻。t863① 反溜链（死区采样起步）继续承担「行驶中失速」的转弯，本闸承担
+        //   「静止初始态」—— 两路互补，V 形永动机（t909①）的停驻面全部闭合。
+        if (std::fabs(c.speed) < 1e-3f) {
+            const int sx = int(std::floor(c.pos.x()));
+            const int sz = int(std::floor(c.pos.z()));
+            const auto slopeToward = [&](int sgn) {
+                const int sdx = int(c.dirX) * sgn, sdz = int(c.dirZ) * sgn;
+                return BlockRegistry::railProbeDelta(
+                    { world->blockAt(sx + sdx, ry, sz + sdz),
+                      world->blockAt(sx + sdx, ry + 1, sz + sdz),
+                      world->blockAt(sx + sdx, ry - 1, sz + sdz) });
+            };
+            const int fwdSlope = slopeToward(1);
+            const int bwdSlope = slopeToward(-1);
+            if (fwdSlope == -1) {
+                c.speed = kCartSlopeKick;                       // 行进侧已是下坡 → 顺行起步
+            } else if (bwdSlope == -1) {
+                c.dirX = -c.dirX;                               // 翻向：行进侧改下坡
+                c.dirZ = -c.dirZ;
+                cartYawFromDir(c.dirX, c.dirZ, c.yaw);
+                c.speed = kCartSlopeKick;
+            } else {
+                continue; // 平 / 上坡两侧 / 死端 → 静置（平地放置的车不自己跑掉）
+            }
+        }
         // 滑行物理：行进侧邻轨高度差判定（同 tickRiddenCart 坡道重力公式；空车无输入 → 只做滑行不抬速）。
-        //   下坡（δ=-1）→ 重力抵摩擦 → 本帧不衰减（顺坡滑）；平 / 上坡 / 无轨（INT_MIN）→ 磨擦渐停。
+        //   下坡（δ=-1）→ t909③ 重力加速（旧版仅「不衰减」恒速 = 用户报「五六格都到不了最大速度」根因）；
+        //   平 / 上坡 / 无轨（INT_MIN）→ t909③ 上坡重力减速 + 平面摩擦渐停。
         const float bx = c.pos.x(), bz = c.pos.z(); // 水平位移检测基准（ry 已在上方支撑复探段取得）
         const int gs = (c.speed >= 0.0f) ? 1 : -1;
         const int cx = int(std::floor(c.pos.x()));
@@ -778,16 +807,37 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             const float targetV = (c.speed >= 0.0f ? 1.0f : -1.0f) * kCartBoostSpeed;
             const float alpha = 1.0f - std::exp(-kCartAccel * float(dt));
             c.speed += (targetV - c.speed) * alpha;
-        } else if (slope == INT_MIN || slope >= 0) { // 平 / 上坡：摩擦衰减（帧率无关 exp 衰减）
-            const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
-            c.speed -= c.speed * alpha;
+        } else if (slope == INT_MIN || slope >= 0) { // 平 / 上坡 / 无轨
+            if (slope > 0) {
+                // t909③ 上坡重力减速（g·sin45° = kCartFallGravity·0.7071 ≈ 19.8 blocks/s²，与世界重力
+                //   同源；v² = v0² − 2ad → 12.8 boost 入坡 ~4.1 格失速）。旧版仅摩擦 2/s（走 6.4 格）——
+                //   短 V 坡上冲到顶尚有余速 ≥3 触发 t863③ 坡顶飞出 / 或死端停驻不反溜 = ①「加速上坡后
+                //   停驻 / 飞出，不反溜」的根因半边；失速点落坡中 → t863① 反溜 + t909② 自溜把车送回。
+                const float dec = kCartSlopeGravity * float(dt);
+                c.speed = (c.speed > 0.0f) ? std::max(0.0f, c.speed - dec)
+                                           : std::min(0.0f, c.speed + dec);
+            } else {
+                // 平面 / 无轨：摩擦衰减（帧率无关 exp 衰减）。
+                const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
+                c.speed -= c.speed * alpha;
+            }
             if (std::fabs(c.speed) < 0.02f) {
                 c.speed = 0.0f;
                 // t863① 坡上失速反溜：车头朝上坡面 → 反溜起步（沿 -dir 倒行滑回坡脚，不悬停半空；
-                //   机制等价 MC 1.0 矿车上坡失速滑回）。平面 / 采样失联 → 照旧停驻（t708 保守闸门保留）。
+                //   机制等价 MC 1.0 矿车上坡失速滑回）。平面 / 采样失联 → 照旧停驻（下帧 t909② 自溜
+                //   闸按邻轨梯度再判——两路互补）。
                 if (!tryStallSlideback(c, world, ry)) continue; // 磨擦停稳（死区）
             }
-        } // 下坡（slope<0）→ 不衰减（顺坡滑）；动力段已先行接管（boost 12.8 > 溜坡 10，语义不冲突）
+        } else {
+            // t909③ 下坡重力加速（g·sin45° 同上坡对称；向 ±kCartSlopeDownSpeed 收敛 —— v² = 2ad →
+            //   kCartSlopeKick(1.0) 起步 ~2 格即到 10；旧版恒速不加速）。动力段已先行接管（boost 12.8
+            //   > 溜坡 10，语义不冲突）。
+            if (std::fabs(c.speed) < kCartSlopeDownSpeed) {
+                c.speed += (c.speed >= 0.0f ? 1.0f : -1.0f) * kCartSlopeGravity * float(dt);
+                if (std::fabs(c.speed) > kCartSlopeDownSpeed)
+                    c.speed = (c.speed >= 0.0f) ? kCartSlopeDownSpeed : -kCartSlopeDownSpeed;
+            }
+        }
         stepCartAlongRail(c, world, float(dt));
         // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）；t769 返回值带出新轨层 → 俯仰随坡刷新。
         updateCartPitch(c, world, pinCartY(c, world));
