@@ -24,6 +24,7 @@
 #include <QFile>   // review-e 探针（派生缓存 _r<rev> 存在性 / 旧版清理断言）
 #include <QRegularExpression> // t813 探针（stamp / git 哈希格式正则）
 #include <QUrl>    // Review 2026-08-24 #5 探针（packFileUrl 查询串剥离断言：QUrl::toLocalFile）
+#include <QMetaObject> // t898 review27 #1 探针（sleepLying Q_PROPERTY 契约面：indexOfProperty/property 经 metaobject 读回）
 #include <cmath>
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
@@ -1416,6 +1417,60 @@ int main(int argc, char *argv[])
                              "fire/emberling/pearl-tp/feather/protection; unbreaking-III wear over 400 hits in "
                              "[260,340], no-enchant control exact 50 (t763)";
     }
+    // ── P-t887b 成就小地图拖拽源码钉（review27 #2；行为级 headless 不可达——MouseArea drag 需真窗口
+    //    输入，退路 = review Lessons 3 源码钉「首次交互断绑定」语句面）──
+    //    旧版病灶：treeMinimap 声明 anchors.top/right 却用 drag.target 写 x/y——锚布局每次 polish 把
+    //    写入同步回锚定位（Qt Quick 硬约束：锚与绝对定位不可混用），拖拽 100% 无效；守卫
+    //    `if (!anchors.top && !anchors.right)` 恒 false（anchors.top 读回恒真值 AnchorLine 对象，两套
+    //    qml.exe 实测清锚后仍真）→ clamp 也是死代码。断言（Main.qml treeMinimap 段，滤段界）：
+    //    (a) onPressed 显式清两锚（`anchors.top = undefined` + `anchors.right = undefined`）——首次
+    //        交互断绑定语句面存在；(b) userMoved 旗守卫存在（真值对象不可作守卫）；(c) 旧死守卫全形
+    //        `if (!anchors.top && !anchors.right)` 不存在（负向）；(d) drag 边界按父 treeViewport 口径
+    //        （父链 clip: true，取舍 = 约束在视口内；旧版 progressOverlay 全窗口径 = 跨坐标空间错位），
+    //        旧 `progressOverlay.width - 24` 边界不回归（负向）；(e) 视口缩放经 Connections 钳回。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+        const int i0 = t.indexOf(QStringLiteral("id: treeMinimap"));
+        const int iEnd = i0 >= 0 ? t.indexOf(QStringLiteral("// 返回按钮：关进度面板"), i0) : -1;
+        if (i0 < 0 || iEnd < 0) {
+            qInfo().noquote() << "  [t887b pin diag] treeMinimap block miss i0=" << i0 << "iEnd=" << iEnd;
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t887b minimap drag source pin: treeMinimap block not found";
+        } else {
+            const QString seg = t.mid(i0, iEnd - i0);
+            const bool okA = seg.contains(QStringLiteral("treeMinimap.anchors.top = undefined"))
+                          && seg.contains(QStringLiteral("treeMinimap.anchors.right = undefined"));
+            const bool okB = seg.contains(QStringLiteral("property bool userMoved: false"))
+                          && seg.contains(QStringLiteral("onXChanged: if (userMoved) clampIntoViewport()"));
+            const bool okC = !seg.contains(QStringLiteral("if (!anchors.top && !anchors.right)"));
+            const bool okD = seg.contains(QStringLiteral("drag.maximumX: treeViewport.width - 24"))
+                          && seg.contains(QStringLiteral("drag.maximumY: treeViewport.height - 24"))
+                          && seg.contains(QStringLiteral("function clampIntoViewport()"))
+                          && !seg.contains(QStringLiteral("progressOverlay.width - 24"));
+            const bool okE = seg.contains(QStringLiteral("function onWidthChanged() { if (treeMinimap.userMoved) treeMinimap.clampIntoViewport() }"));
+            const bool okT887b = okA && okB && okC && okD && okE;
+            if (!okT887b) ++totalFail;
+            if (!okT887b)
+                qInfo().noquote() << "  [t887b pin diag] clearAnchors" << okA << "userMovedGuard" << okB
+                                  << "oldDeadGuardGone" << okC << "viewportBounds" << okD
+                                  << "resizeReclamp" << okE;
+            qInfo().noquote() << (okT887b ? "PASS" : "FAIL")
+                              << "| t887b minimap drag source pin: first-interaction anchor break "
+                                 "(onPressed clears anchors.top/right to undefined - Qt Quick hard "
+                                 "constraint: anchors override imperative x/y writes, two qml.exe "
+                                 "rigs verified the clear makes writes stick), userMoved flag guard "
+                                 "(anchors.top reads back a truthy AnchorLine even after clearing, "
+                                 "the old !anchors.top guard form was structurally dead - pinned "
+                                 "absent), drag bounds in parent treeViewport space (clip:true "
+                                 "ancestor, decision pinned in comments - old progressOverlay "
+                                 "full-window bounds were a cross-space mismatch, pinned absent), "
+                                 "and viewport-resize re-clamp via Connections";
+        }
+    }
+
     // ── P-t890 燃烧方块侧壁接触点燃探针（AABB 接触扫描行为级 + 阴性轮）──
     //    t890：旧三格判定漏「贴燃烧方块侧壁走」——玩家 AABB 半宽 0.3 身在邻格、中心列不含燃烧格 → 永不
     //    点燃。修法 = 仙人掌判据族先例（满格 AABB + kTouchSkin 容差皮 + 正交 ±1 扩圈），Fire 格同口径并入。
@@ -1507,6 +1562,17 @@ int main(int argc, char *argv[])
         pc.loadSavedState(5.5f, float(fy + 2), 6.5f, -90.0f, 0.0f, 2);
         bool topLit = false;
         for (int t = 0; t < 24 && !topLit; ++t) { tickP(1, 0.05f); topLit = pc.burning(); }
+        // (f) review27 #3 腾空越顶不点燃（旧 bug 本体）：玩家悬停在燃板顶 +0.5 格（footY-1 恰为燃板、
+        //     XZ 足印盖住该列——旧站顶分支无 Y 校验，第一 tick 即误点燃并刷满 8s fireTimer）。修复后
+        //     Y 界定 pMinY <= float(footY)+kTouchSkin 挡住腾空窗（跳跃越过 / 下落掠过同窗口）。断言：
+        //     首 tick（下落 ~0.035 格仍悬空）不燃；继续 tick 落到板顶（snap 缝 +1e-4 入容差皮）→ 燃
+        //     （= (c) 站顶语义不回归，两向钉死边界）。
+        pc.clearStatusEffects();
+        pc.loadSavedState(5.5f, float(fy + 2.5f), 6.5f, -90.0f, 0.0f, 2);
+        tickP(1, 0.05f);
+        const bool hoverClean = !pc.burning();
+        bool landLit = false;
+        for (int t = 0; t < 24 && !landLit; ++t) { tickP(1, 0.05f); landLit = pc.burning(); }
         // (e) mob 侧壁：pig 出生即贴墙（x=7.5 格心 → AABB maxX=7.8，距墙 cMinX=8.0 缝 0.2 < halfW 0.45
         //     → 出生帧即重叠）+ knockback 推向墙（对消 wander 随机步的离墙漂移；短窗抢拍 < 首游荡窗）。
         buildLane(true);
@@ -1525,12 +1591,13 @@ int main(int argc, char *argv[])
             for (int z = 4; z <= 8; ++z)
                 for (int dy = 0; dy <= 3; ++dy) wS.setBlock(x, fy + dy, z, BR::Air, 0);
         pc.clearStatusEffects();
-        const bool okT890 = sideLit && diagClear && unlitClean && topLit && mobSideLit;
+        const bool okT890 = sideLit && diagClear && unlitClean && topLit && mobSideLit && hoverClean && landLit;
         if (!okT890) ++totalFail;
         if (!okT890)
             qInfo().noquote() << "  [t890 diag] sideLit" << sideLit << "diagClear" << diagClear
                               << "unlitClean" << unlitClean << "topLit" << topLit
-                              << "mobSideLit" << mobSideLit;
+                              << "mobSideLit" << mobSideLit
+                              << "hoverClean" << hoverClean << "landLit" << landLit;
         qInfo().noquote() << (okT890 ? "PASS" : "FAIL")
                           << "| t890 side-contact ignition review: walking flush against a burning "
                              "plank wall now ignites the player (full-cell AABB overlap scan over own "
@@ -1538,7 +1605,11 @@ int main(int argc, char *argv[])
                              "1e-4 collision snap gap - cactus contact-damage predicate family "
                              "precedent; old center-column 3-cell check structurally missed it since "
                              "the body rests in the adjacent cell), standing on a burning plank top "
-                             "still ignites (support-face branch), diagonal-only burning cell one cell "
+                             "still ignites (support-face branch now Y-bounded pMinY<=footY+skin per "
+                             "review27 #3 - airborne hover 0.5 above the burning top (jump-over/"
+                             "fall-past window, footY-1 = burning cell, footprint covering it) does "
+                             "NOT ignite on first tick, then falling onto the top re-ignites), "
+                             "diagonal-only burning cell one cell "
                              "out does NOT ignite (AABB filter rejects corner false positives), an "
                              "unlit identical walk stays clean (negative control), and the mob side "
                              "shares the same scan (pig hugging the wall catches fire); lava keeps "
@@ -15947,14 +16018,21 @@ Item {
 
         pc.trySleepAt(x0, y, z0);
         const QVector3D lie = pc.feetPosition();
-        const bool okA = pc.sleeping() && pc.sleepLying()
+        // (d) review27 #1 QML 契约面：sleepLying 必须在 metaobject 属性表内（QML 属性解析走 QMetaObject，
+        //     旧版缺 Q_PROPERTY 声明 → Main.qml player.sleepLying 解析 undefined（falsy）→ F5 躺姿 100%
+        //     失效；C++ 直调探针测不到该面——review26 #4 同族教训）。经 property() 读回（QML 同路径）。
+        const QMetaObject *mo = pc.metaObject();
+        const int propIdx = mo->indexOfProperty("sleepLying");
+        const bool metaLieA = propIdx >= 0 && mo->property(propIdx).read(&pc).toBool();
+        const bool okA = pc.sleeping() && pc.sleepLying() && metaLieA
                          && std::abs(lie.x() - (x0 + 0.9f)) < 1e-3f
                          && std::abs(lie.y() - (y + 1.0f)) < 1e-3f
                          && std::abs(lie.z() - (z0 + 0.5f)) < 1e-3f
                          && std::abs(pc.yaw() - (-90.0f)) < 1e-3f;
         pc.wakeUp();
         const QVector3D out = pc.feetPosition();
-        const bool okB = !pc.sleeping() && !pc.sleepLying()
+        const bool metaLieB = propIdx >= 0 && !mo->property(propIdx).read(&pc).toBool();
+        const bool okB = !pc.sleeping() && !pc.sleepLying() && metaLieB
                          && std::abs(out.x() - (x0 + 1.5f)) < 1e-3f
                          && std::abs(out.y() - float(y)) < 1e-3f
                          && std::abs(out.z() - (z0 + 0.5f)) < 1e-3f;
@@ -15966,14 +16044,20 @@ Item {
         if (!okT898)
             qInfo().noquote() << "  [t898 diag] lie=" << lie.x() << lie.y() << lie.z()
                               << "yaw=" << pc.yaw() << " out=" << out.x() << out.y() << out.z()
-                              << " sleeping=" << pc.sleeping() << " lying=" << pc.sleepLying();
+                              << " sleeping=" << pc.sleeping() << " lying=" << pc.sleepLying()
+                              << " propIdx=" << propIdx
+                              << " metaLieA=" << metaLieA << " metaLieB=" << metaLieB;
         if (!okT898) ++totalFail;
         qInfo().noquote() << (okT898 ? "PASS" : "FAIL")
                           << "| t898 bed-sleep teleport: right-click bed at night teleports the player "
                              "flat onto the bed (feet pinned to the foot-cell end offset 0.4 along the "
                              "head->foot axis so the 1.8-block body nests inside the 2-block bed, Y = bed "
                              "top, yaw rotated to the bed axis looking toward the foot, lying-pose gate "
-                             "on), interrupt-style wake teleports out to the first standable cell beside "
+                             "on - and review27 #1: the gate is a real Q_PROPERTY read via "
+                             "QMetaObject::indexOfProperty/property() on both lying and woken states, "
+                             "the exact resolution path QML uses; the old bare member function resolved "
+                             "to undefined in Main.qml bindings), interrupt-style wake teleports out to "
+                             "the first standable cell beside "
                              "the bed at floor level (MC get-out-of-bed semantics, pose gate off), and a "
                              "daytime refusal produces zero displacement side effects (teleport strictly "
                              "after the night/monster semantic gates)";

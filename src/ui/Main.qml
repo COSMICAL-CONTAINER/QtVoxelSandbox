@@ -12001,10 +12001,13 @@ Window {
                     //   四元组（contentX/Y/viewScale/视口尺寸）变化时重算，非逐帧动画（低频重绘）。
                     //   t887 可拖动（用户「成就小地图」真意——t840 据此误解新建的右下角常驻快捷悬浮栏
                     //   achQuickDock 已整体删除，可拖动语义落回本件）：**拖手柄语义** = minimap 边缘
-                    //   环带拖动改 x/y（中央跳转区原语义保留），首次拖动断默认锚定绑定（用户接管位置，
-                    //   会话态不入存档——与旧 dock 同口径：纯呈现态，重开面板回默认位）；可拖出面板
-                    //   边界（父 treeViewport clip 只裁内容层不裁本件；progressOverlay 全屏无裁剪），
-                    //   越界钳制只防整块丢出可视区。z=5 → 视觉与输入均在树内容之上（minimap 区域的
+                    //   环带拖动改 x/y（中央跳转区原语义保留），首次拖动 onPressed 显式清锚（review27 #2：
+                    //   锚在身则 drag 写 x/y 被锚布局同步吞回——旧版全仓无清锚代码，拖拽 100% 无效；两套
+                    //   qml.exe 实测：清锚后写 x=100 读回 100），会话态不入存档（与旧 dock 同口径：纯呈现态，
+                    //   重开面板回默认位）。取舍（review27 #2 钉死）：本件是 treeViewport 直接子项，父链
+                    //   clip: true —— **约束拖拽在视口内**（drag.min/max + 钳位均按 treeViewport 口径），
+                    //   不 reparent 到无 clip 层（默认右上锚定位跨父映射非可绑定依赖，得不偿失）；越界钳制
+                    //   只防整块丢出视口可视区。z=5 → 视觉与输入均在树内容之上（minimap 区域的
                     //   拖拽/点击不落入 treeDragArea，不误平移树）。hover 光标变化保留（手柄区四向箭头
                     //   / 中央区手型，用户认可项）。
                     Item {
@@ -12022,16 +12025,25 @@ Window {
                             color: Qt.rgba(0.059, 0.078, 0.102, 0.85)
                             border.color: "#3a444f"; border.width: 1
                         }
-                        // t887 首次拖动断剩余锚定绑定（drag.target 写 x/y 只断 x/y 自身绑定，anchors.top/
-                        //   right/margins 是另一套约束——不摘除则写 x/y 无效）。断锚后钳位与 drag.min/max
-                        //   同口径（只越界才写）：未拖动时锚定绑定不受扰，窗口/面板尺寸变化也钳回可视区。
-                        function clampIntoOverlay() {
-                            const minX = 24 - width, maxX = progressOverlay.width - 24
-                            const minY = 24 - height, maxY = progressOverlay.height - 24
+                        // t887 首次拖动接管位置态（review27 #2）：onPressed 清锚后 drag 写 x/y 生效；守卫
+                        //   不能读 anchors.top（实测两套 Qt：清锚后 !!anchors.top 仍 true——AnchorLine 恒真值
+                        //   对象，`!anchors.top` 形态恒 false = 死守卫）→ 用 userMoved 旗。钳位按 treeViewport
+                        //   口径（父链 clip: true，见头注取舍）：只在越界才写（未拖动时不扰默认锚定绑定）；
+                        //   视口尺寸变化经下方 Connections 钳回（旧版只在 onXChanged 钳，缩窗不触发 = 空洞）。
+                        property bool userMoved: false
+                        function clampIntoViewport() {
+                            const minX = 24 - width, maxX = treeViewport.width - 24
+                            const minY = 24 - height, maxY = treeViewport.height - 24
                             if (x > maxX || x < minX) x = Math.max(minX, Math.min(x, maxX))
                             if (y > maxY || y < minY) y = Math.max(minY, Math.min(y, maxY))
                         }
-                        onXChanged: if (!anchors.top && !anchors.right) clampIntoOverlay()
+                        onXChanged: if (userMoved) clampIntoViewport()
+                        onYChanged: if (userMoved) clampIntoViewport()
+                        Connections {
+                            target: treeViewport
+                            function onWidthChanged() { if (treeMinimap.userMoved) treeMinimap.clampIntoViewport() }
+                            function onHeightChanged() { if (treeMinimap.userMoved) treeMinimap.clampIntoViewport() }
+                        }
                         // ── 几何映射（t753 核心）：树画布坐标 c ↔ minimap 坐标 m ──
                         //   正映射 m = off + c × fitScale（整树 bounding box 等比缩放居中）；
                         //   反映射 c = (m − off) / fitScale（点击跳转用）。
@@ -12063,10 +12075,12 @@ Window {
                         }
                         // ── t887 拖手柄层（声明在内容层之前 = 绘制底层；输入由顶层交互区分派）：──
                         //   minimap 四周 10px 环带 = 移动手柄（中央仍是原点击/拖动跳转区）。MouseArea
-                        //   drag 改 x/y；首次 drag.target 写 x/y 即断 x/y 默认锚定绑定（用户接管会话态，
-                        //   不入存档——重开面板回默认位）。可整块拖出面板边界（本件不在任何 clip 祖先内
-                        //   —— treeViewport clip 只作用于其内容子树，见头注），drag.min/max 仅防丢出
-                        //   可视区。hover 光标变化保留：手柄区四向箭头 SizeAllCursor（移动语义）。
+                        //   drag 改 x/y；review27 #2 修复：onPressed **显式清 top/right 两锚**再拖——锚声明
+                        //   在身则锚布局每次 polish 把 drag 写入的 x/y 同步回锚定位（Qt Quick 硬约束：
+                        //   锚与绝对定位不可混用；旧版无清锚代码 → 拖拽 100% 无效，且守卫 `!anchors.top`
+                        //   读回恒真值 → 钳位也是死代码）。清锚后 userMoved 旗接管钳位门；drag.min/max 按
+                        //   父 treeViewport 口径（本件是其直接子项、父链 clip: true，约束拖拽在视口内，
+                        //   见头注取舍），仅防丢出可视区。hover 光标变化保留：手柄区四向箭头 SizeAllCursor。
                         readonly property int mmDragGrip: 10
                         MouseArea {
                             id: minimapMoveArea
@@ -12074,10 +12088,17 @@ Window {
                             hoverEnabled: true
                             cursorShape: Qt.SizeAllCursor
                             drag.target: treeMinimap
+                            onPressed: (mouse) => {
+                                // 首次交互断锚（Qt 官方 anchors Restrictions：置 undefined 清锚；两套 qml.exe
+                                //   实测清锚后写 x/y 生效——review27 Lessons 3「首次交互断绑定」的源码钉锚点）。
+                                treeMinimap.anchors.top = undefined
+                                treeMinimap.anchors.right = undefined
+                                treeMinimap.userMoved = true
+                            }
                             drag.minimumX: -treeMinimap.width + 24
                             drag.minimumY: -treeMinimap.height + 24
-                            drag.maximumX: progressOverlay.width - 24
-                            drag.maximumY: progressOverlay.height - 24
+                            drag.maximumX: treeViewport.width - 24
+                            drag.maximumY: treeViewport.height - 24
                         }
                         // 内容层（连线 + 节点 + 视口框；clip 钳制越界部分 —— 居中态视口框可超出树界）。
                         Item {

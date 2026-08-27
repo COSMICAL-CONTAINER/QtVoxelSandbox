@@ -252,6 +252,12 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(float sleepFade READ sleepFade NOTIFY sleepFadeChanged)
     Q_PROPERTY(float sleepLie READ sleepLie NOTIFY sleepLieChanged)
     Q_PROPERTY(bool sleepSettled READ sleepSettled NOTIFY sleepSettledChanged)
+    // t898 躺床姿态门（review27 #1 补声明）：sleepLying 此前只是普通成员函数——不在 metaobject 属性表，
+    //   Main.qml 属性语法 player.sleepLying 解析到 undefined（falsy）→ F5 第三人称躺床 +90° 平躺
+    //   100% 不生效（cpp 两处专为驱动该绑定的补发 emit sleepingChanged 全落空——绑定从未注册）。
+    //   C++ 直调探针测不到该契约面（review26 #4 TapHandler 同族教训的 Q_PROPERTY 版）——P-t898 探针
+    //   经 QMetaObject::indexOfProperty("sleepLying") 断言属性表项存在且读回值与直调一致。
+    Q_PROPERTY(bool sleepLying READ sleepLying NOTIFY sleepingChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
