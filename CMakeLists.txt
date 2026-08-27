@@ -182,6 +182,10 @@ qt_add_executable(voxelsandbox
     src/Game/toolregistry.h
     src/Game/itementitymanager.cpp
     src/Game/itementitymanager.h
+    # t858（R19.14）经验球 instancing 试点：QQuick3DInstancing C++ feeder（Game 层呈现适配器，
+    #   向下只读 Entities 层 XpOrbManager；Quick3D 公开 API，无自定义 shader——RHI 囚笼合规）。
+    src/Game/xporbinstancing.cpp
+    src/Game/xporbinstancing.h
     # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
     src/Entities/entitymanager.cpp
     src/Entities/entitymanager.h
@@ -870,6 +874,10 @@ add_executable(redstone_matrix_test
     #   —— 折叠 / 回退各留一枚探针红绿可辨）。依赖 partialblockgeometry（已列）+ world（已列）。
     src/World/chunkgeometry.cpp
     src/World/chunkgeometry.h
+    # t858 经验球 instancing 探针：Game 层 XpOrbInstancing feeder 直调（实例表内容断言：位置派生 /
+    #   活体过滤）。依赖 xporbmanager（已列）；Quick3D 公开 API。
+    src/Game/xporbinstancing.cpp
+    src/Game/xporbinstancing.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
