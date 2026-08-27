@@ -2580,14 +2580,27 @@ void PlayerController::useFishingRod()
         //   spawnItemThrown（t608 发射器 / t542 投掷器先例——免 QML 信号往返，掉落物重力 / 摩擦 / 免拾窗
         //   同一链）。抛物解：目标 = 玩家中心（磁吸拾取同心，m_height*0.5）；飞行时 T = clamp(0.45+0.055D,
         //   0.5, 1.4)（近快远慢的可见弧）；vy = Δy/T + ½·g·T（g = kFishCatchItemGravity 镜像 28）→ 精确
-        //   落点解。**弹出点抬升 kFishCatchRiseOffset 到水面上方空气格**——浮标浮定在顶水格内
-        //   （y=格顶−0.125），原位生成会落进掉落物浮水分支（vy 清零 + 恒速上浮贴水面）把弧线整个吞掉；
-        //   抬升后中心格 = 空气 → 弧线全程生效，落回水里自然转浮水。
+        //   落点解。**弹出点抬升改列扫（review26 #7）**——从浮标格向上扫到首个非 Water 格再
+        //   +kFishCatchPopOffset 0.225（与 ItemEntityManager 浮水分支自己的列扫同源）：旧固定 +0.35 只在
+        //   静水（state 0，液面 7/8）恰好把生成点送出水格；流动水 state≥2 液面 ≤0.75 → 生成点仍落水格内
+        //   → 掉落物浮水分支 vy 清零 + 恒速上浮把弧线整个吞掉（t886 症状在河流 / 溢流边缘复发）。首个非
+        //   水格若非空气（冰盖等）继续上扫到空气 → 获物弹到冰面上。静水新口径 = 格顶+0.225（与旧值差
+        //   1/8 格，视觉不变级），弧线全程生效，落回水里自然转浮水。列扫上限 128 同浮水分支（防异常长柱）。
         const auto &pool = LootTable::fishingPool();
         const quint32 seed = QRandomGenerator::global()->generate();
         const std::vector<LootTable::Stack> stacks = LootTable::roll(pool, 1, seed);
         if (!stacks.empty() && stacks[0].itemId != 0 && stacks[0].count > 0) {
-            const QVector3D spawnPos = bp + QVector3D(0.0f, kFishCatchRiseOffset, 0.0f);
+            int popCellY = qFloor(bp.y());
+            const int pcx = qFloor(bp.x()), pcz = qFloor(bp.z());
+            for (int i = 0; i < 128; ++i) { // 出水：浮标格起向上找首个非水格（blockAt 对 y>=height 返空气）
+                if (m_world->blockAt(pcx, popCellY, pcz) != BlockRegistry::Water) break;
+                ++popCellY;
+            }
+            for (int i = 0; i < 128; ++i) { // 冰盖 / 实体块：继续上扫到首个空气格（不在固体内生成）
+                if (m_world->blockAt(pcx, popCellY, pcz) == BlockRegistry::Air) break;
+                ++popCellY;
+            }
+            const QVector3D spawnPos(bp.x(), float(popCellY) + kFishCatchPopOffset, bp.z());
             const QVector3D target = m_pos + QVector3D(0.0f, m_height * 0.5f, 0.0f);
             const float ddx = target.x() - spawnPos.x();
             const float ddy = target.y() - spawnPos.y();

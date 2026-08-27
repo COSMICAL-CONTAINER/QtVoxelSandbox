@@ -3908,8 +3908,13 @@ bool EntityManager::nightwalkerSpotFree(World *world, float cx, float cy, float 
 }
 
 // t727 通用瞬移（怕水 / 弹射物 / 近战 dodge 逃逸共用；见头文件注释）。随机 [minDist,maxDist] 水平距离 + 随机
-//   方向，迭代找「落点格非水 + 下方 solid 支撑 + AABB 非实体占用」空位。找到 → 移动 + 置 cooldown + 清 enraged。
-bool EntityManager::teleportEntity(int idx, Entity &e, World *world, float minDist, float maxDist)
+//   方向，迭代找「落点格非水 + 下方 solid 支撑 + AABB 非实体占用」空位。找到 → 移动 + 置 cooldown；仇恨
+//   清理由 clearAggro 参数门控（review26 #8）：默认 true（近战 dodge / 水逃逸——近身交互 / 水伤打断激怒是
+//   既有设计）；弹射物闪避（箭链 t829① / 浮标 t883）传 false——机制等价 MC 1.0 末影人被投射物闪避**不
+//   解除仇恨**：浮标 0 伤害 / 永不钩定 / 回收零耐久，若闪避清 enraged+windupTimer 则成免费无限远程「净化」
+//   （激怒→甩竿→打断前摇→循环）；箭虽是消耗品 + 失败兜底有伤害，同样只位移不清仇恨（MC 口径一致）。
+bool EntityManager::teleportEntity(int idx, Entity &e, World *world, float minDist, float maxDist,
+                                   bool clearAggro)
 {
     if (!world) return false;
     auto *rng = QRandomGenerator::global();
@@ -3947,7 +3952,7 @@ bool EntityManager::teleportEntity(int idx, Entity &e, World *world, float minDi
         e.resting = true;
         e.vy = 0.0f; e.vx = 0.0f; e.vz = 0.0f;
         e.teleportCooldown = kNightwalkerTeleportCooldown;
-        e.enraged = false; e.rageTimer = 0.0f; e.windupTimer = 0.0f;
+        if (clearAggro) { e.enraged = false; e.rageTimer = 0.0f; e.windupTimer = 0.0f; } // review26 #8：仅位移的调用方不清
         return true;
     }
     return false; // 全试失败（被围困 / 地形不允许）→ 原地（不移动）
@@ -5051,7 +5056,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                             //   m_entities[mi].pos != m.pos 是同对象自比较恒 false（瞬移成功也记 forced hit）。
                             //   瞬移前快照旧位，日志改比快照（真实判据：位置变了 = 闪避成功）。
                             const QVector3D oldPos = nm.pos;
-                            if (!teleportEntity(mi, nm, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
+                            if (!teleportEntity(mi, nm, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax,
+                                                /*clearAggro=*/false)) { // review26 #8：投射物闪避只位移不清仇恨（MC 1.0 口径）
                                 // 瞬移失败兜底：普通命中（伤害 / 击退 / 音 / 移除，同下常规分支语义）。
                                 damageEntity(mi, e.arrowDamage);
                                 const float fhx = e.vx, fhz = e.vz;
@@ -5786,7 +5792,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         Entity &nm = m_entities[j];
                         const QVector3D oldPos = nm.pos; // 快照旧位（同箭分支 B-L1：teleportEntity 改同一对象）
                         const bool dodged = teleportEntity(int(j), nm, world,
-                                                           kNightwalkerTeleportMin, kNightwalkerTeleportMax);
+                                                           kNightwalkerTeleportMin, kNightwalkerTeleportMax,
+                                                           /*clearAggro=*/false); // review26 #8：0 伤害 0 消耗的浮标不得成免费远程「净化」——闪避只位移，enraged/rageTimer/windupTimer 保持（MC 1.0 末影人被投射物闪避不解除仇恨；箭链 t829① 同口径）
                         qCInfo(lcEnt) << "bobber deflected by nightwalker" << int(j)
                                       << (dodged ? "(teleport dodge)" : "(teleport failed; immune pass-through)")
                                       << "from" << oldPos;

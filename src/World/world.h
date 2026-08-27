@@ -1424,6 +1424,18 @@ private:
     //   稳态空集 → 每 tick 零开销（同 m_growthCells 位置索引模式；**非**全图每 tick 扫描——lessons
     //   perf-fluid-scan 反模式）。generate / beginLoad 清空（网格重置坐标作废）。键编码复用 packGrowthCell。
     std::unordered_set<quint64> m_powerDirty;
+    // review26 #6 火把 burnout 侧表（机制近似 MC 红石火把熔断；确定性计数——PLAN §2-K，非随机）：键 =
+    //   火把格（packGrowthCell），值 = 翻转计数窗。t869 形状语义恢复端点 / 拐角回灌后，「端点粉贴火把基座」
+    //   成为合法无稳态电路（5Hz 永续振荡）——MC 有 burnout 兜底（短窗内翻转过 N 次锁熄一段冷却），本表
+    //   补该兜底。窗 / 冷却均按红石 tick（10Hz）整数计数（确定性）；运行期瞬态不进存档（读档自然复位，
+    //   同 m_burningCells 取舍）。beginLoad / generate 清空（网格重置坐标作废）。振荡能力本身是**已知
+    //   tradeoff**（端点贴基座 = 有意时钟形态，review26 #6 记档）——burnout 只封「永续」，不封「可振荡」。
+    struct TorchBurnout {
+        quint8  flips = 0;        // 当前窗内已翻转次数（达 kTorchBurnoutFlipLimit 熔断）
+        quint16 windowTicks = 0;  // 计数窗剩余红石 tick（自窗内首翻起算的 deadline，不逐翻刷新）
+        quint16 cooldownTicks = 0;// 熔断冷却剩余红石 tick（>0 = 锁定熄灭，不评估不翻转）
+    };
+    std::unordered_map<quint64, TorchBurnout> m_torchBurnout;
     // perf：流体方格位置索引（Water / Lava 各一集）—— 流体 tick 遍历此集（O(流体格数)）替代全图扫描
     //   （O(W×D×H)=3.28M）。写入路径经 noteFluidWrite 增量维护；generate/beginLoad 清空、finishLoad
     //   全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无流体写入）
@@ -1541,6 +1553,10 @@ private:
     //   语义各不相同且均为持久态 → 不动。见 world.cpp 头注释。
     void normalizeLoadedMechanismState();
     // ── t656 红石电力私有实现（见 notePowerWrite / tickRedstone 公有头注释）──
+    // review26 #6 火把 burnout 计时（tickRedstone 头段调，独立于脏集——锁定火把脱离脏集后冷却仍要走）：
+    //   冷却 / 计数窗逐红石 tick 递减；冷却归零 → 摘表 + 火把格入脏集（下一定点重算里重评可重亮）；窗归零
+    //   → flips 清零摘表（慢电路永不累积熔断）。
+    void tickTorchBurnout();
     // 编辑格是否属红石族（粉 / 源 / 接收器 —— notePowerWrite 判定 + tickRedstone 邻接收器扫描共用）。
     static bool isPowerFamilyBlock(quint8 id);
     // (x,y,z) 处电源对邻格的强电值（红石块 / 亮火把 / 拉杆 on / 按钮按下 / 压力板压下 / 探测轨有车 → 15；

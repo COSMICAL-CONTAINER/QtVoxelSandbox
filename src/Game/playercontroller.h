@@ -1779,13 +1779,15 @@ private:
     static constexpr float kFishHookLiftGain     = 0.18f;
     static constexpr float kFishHookAngleMin     = 0.4f;
     // t886 鱼获反馈常量（掉落物从鱼钩处抛物线弹向玩家 + 1-6 XP 经验球）：
-    //   - kFishCatchRiseOffset：获物弹出点抬升（blocks；浮标浮定在顶水格内 y=格顶−0.125，原位生成会落进
-    //     ItemEntityManager 浮水分支（vy 清零 + 恒速上浮贴水面）把整个抛物弧吞掉——抬到水面上方空气格
-    //     （格顶+0.225）弧线全程生效，落回水里自然转浮水）。
+    //   - kFishCatchPopOffset：获物弹出点超出水面上方空气格底的高度（blocks；review26 #7 弹出点改**列扫**
+    //     口径——从浮标格向上扫到首个非 Water 格（非空气则续扫到空气，冰盖弹出冰面）再 + 本偏移。旧固定
+    //     kFishCatchRiseOffset 0.35 只在静水 state 0 恰好出水格：流动水 state≥2 液面 ≤0.75 → 生成点仍在
+    //     水格内 → ItemEntityManager 浮水分支（vy 清零 + 恒速上浮贴水面）把整个抛物弧吞掉。静水新口径 =
+    //     格顶+0.225（与旧值差 1/8 格），与浮水分支自己的列扫同源）。
     //   - kFishCatchItemGravity：掉落物重力镜像（28 = ItemEntityManager::kGravity；P18 双钉——改值须两处同步）。
     //     抛物解：目标 = 玩家中心；飞行时 T = clamp(0.45+0.055D, 0.5, 1.4)；vy = Δy/T + ½gT；v = (Δxz/T, vy)。
     //   （kFishCatchFlySpeed 4.5 随 t886 退役：弹速不再是常量——按落点抛物解算 |v|，远近自适应。）
-    static constexpr float kFishCatchRiseOffset  = 0.35f;
+    static constexpr float kFishCatchPopOffset    = 0.225f;
     static constexpr float kFishCatchItemGravity = 28.0f;
     static constexpr float kCamMax = 3.5f;     // 第三人称相机最大距离（格；t40，与 Main.qml 默认 d 对齐）
     static constexpr float kCamMargin = 0.1f;  // 相机贴命中面前的余量（防卡面 z-fight / 近裁面穿插；t40）
