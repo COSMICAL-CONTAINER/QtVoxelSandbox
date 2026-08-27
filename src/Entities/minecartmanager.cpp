@@ -805,21 +805,30 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
 //       （同 pushEmptyCart「无轨推不动」语义）。目标列有轨但当前 Y 扫描窗够不到（坡顶上格 + 车 Y 尚停
 //       坡脚低处）同样拒 —— 保证位移后位置下一帧 pinCartY 必能解析，位移永不制造「离轨悬空」态。
 //   (b) impulseDirOk —— 受冲量方向（A 沿 -n 顶退 / B 沿 +n 推离）须有合法轨连接（pickTrackStep），
-//       死端车（仅剩来路连接）/ 离轨车不吃冲量（正常追尾 / 对撞 / 坡道 / 交叉的正向连接不受影响）。
+//       死端车（仅剩来路连接）不吃冲量（正常追尾 / 对撞 / 坡道 / 交叉的正向连接不受影响）；derailed
+//       出轨车例外放行（review26 #14：无轨约束可验的自由体可被撞滑，见守卫内注释；t734 存量地面车
+//       —— 无轨且未挂 derailed 标 —— 仍不吃冲量）。
 //   任一车 speed/pos 被改 → notifyChanged。
 void MinecartManager::resolveCartCollisions(World *world)
 {
     if (m_carts.size() < 2) return; // <2 车 → 无对可撞（零开销）
     // 复审 #3 (b) 冲量方向守卫：车沿 pushDir 有合法轨连接（pickTrackStep：列内有轨 + 非反向连接）才
     //   允许改速；无世界（防御路径）恒 false（无轨约束可验即不动车）。
+    //   review26 #14：derailed 态（出轨自由物理）无轨约束可验 → 恒放行 —— 冲量沿其自身 dir 轴生效
+    //   （bDot 投影，行进车撞出轨车 = 出轨车被撞滑，tickDerailedCart 水平积分 + 摩擦自然承接）；旧版
+    //   出轨车在车-车碰撞中是不可推动的幽灵障碍（行进车每帧被顶回、出轨车纹丝不动，动力轨也推不过去）。
     const auto impulseDirOk = [&](const Cart &c, float wx, float wz) -> bool {
         if (!world) return false;
+        if (c.derailed) return true;
         int pdx = 0, pdz = 0;
         return pickTrackStep(world, c.pos, wx, wz, pdx, pdz);
     };
     // 复审 #3 (a) 位移边界守卫：去穿插位移 s（沿轨轴带符号标量）若使车越过当前格边界，先以 pinCartY
     //   同语义列扫描（宽容版：自车当前 Y 向下 + 低顶净空放行 / 隔板拒）探测目标列有轨；无轨 → 钳制在
     //   当前格边界内。返回允许执行的位移标量（0 = 不动；负 = 把已越线的半格拉回边界内）。
+    //   review26 #14：本列无轨且 derailed → 自由体墙检（同 tickDerailedCart 水平积分的车身腰位格
+    //   isCollidable）：目标格敞开 → 放行（被撞滑出去）；堵 → 钳当前格边界内（贴墙停不穿墙）。
+    //   非 derailed 的无轨车（t734 地面车存量）维持恒 0（「无轨推不动」旧语义，本修不扩面）。
     const auto clampShift = [&](const Cart &c, float s) -> float {
         if (!world) return 0.0f;
         if (std::fabs(s) < 1e-6f) return s;
@@ -838,7 +847,16 @@ void MinecartManager::resolveCartCollisions(World *world)
             return scanRailColumnRiding(world, colX, colZ, topY,
                                         wx - float(colX), wz - float(colZ), c.pos.y()) >= 0;
         };
-        if (!colHasRail(cx, cz, c.pos.x(), c.pos.z())) return 0.0f; // 本列无轨（离轨 / 地面车）→ 推不动
+        if (!colHasRail(cx, cz, c.pos.x(), c.pos.z())) {
+            if (!c.derailed) return 0.0f; // 本列无轨且非出轨自由体（t734 地面车）→ 推不动
+            const int stepF = (cellNxt > cellCur) ? 1 : -1;
+            const int byc = int(std::floor(c.pos.y() - 0.1f)); // 车身腰位格（同 tickDerailedCart 撞墙判据）
+            if (!world->isCollidable(axisX ? cx + stepF : cx, byc,
+                                     axisX ? cz : cz + stepF))
+                return s; // 自由体：目标格敞开 → 放行（撞滑）
+            const float boundF = (stepF > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
+            return (boundF - cur) / d; // 堵 → 钳当前格边界内（贴墙停）
+        }
         const int step = (cellNxt > cellCur) ? 1 : -1;
         const int tx = axisX ? cx + step : cx;
         const int tz = axisX ? cz : cz + step;
@@ -1001,6 +1019,8 @@ bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, f
             c.speed = kCartPushSpeed;
             c.derailed = true; // 出轨自由物理（本帧起平抛 / 贴地滑行；站轨 1/16 落差由落地扫描承接）
             c.fallVy = 0.0f;
+            c.pitch = 0.0f;    // review26 #12：推离即离轨面 —— 带走坡面俯仰会让平抛车保持倾斜（tickDerailedCart
+                               //   只在轨面重挂时刷 pitch，落地贴面永不刷）→ 与 deadEnd 飞出分支对称清 0（水平摆）
             cartYawFromDir(c.dirX, c.dirZ, c.yaw);
             pushed = true;
             continue;
