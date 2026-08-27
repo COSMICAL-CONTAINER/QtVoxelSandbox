@@ -5700,6 +5700,16 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
                            float(y) + 0.5f,
                            float(z) + 0.5f + dir.z() * 0.5f);
 
+    // t856/t912 排出口占用门共用（review25 #11 / review26 #24）：发射面邻格有碰撞盒 = 堵口 →
+    //   「放实体」分派（TNT 引燃实体 / 矿车实体）一律降级为普通掉落物弹出（MC 堵口不弹的近似取舍：
+    //   物品形态保库存语义完整，比静默吞更可观察可回收，也比隔墙生成更保守）。
+    const auto spoutCellClear = [this](int cx, int cy, int cz) {
+        // t859：out-param 栈上小缓冲（零堆分配；旧按值 .empty() 每查两次分配）。
+        BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+        return m_world && m_world->collisionAABBsAt(cx, cy, cz, boxes,
+                                                    BlockRegistry::kMaxAABBsPerCell) == 0;
+    };
+
     if (BlockRegistry::isDropper(blockId)) {
         // t609 投掷器分支：**全部物品**一律弹出掉落物实体（机制等价 MC 1.0 dropper——只投不射，箭 / 雪球 /
         //   剑等都不走弹丸 / 伤害分派，一律 spawnItemAt 从排出口沿朝向定向弹出，落地成可拾取掉落物）。
@@ -5753,16 +5763,31 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   掉落物弹出**（review26 #24 收口：旧版「沿朝向再探一格」不看中间格连通 → 堵口是 1 格厚墙时 TNT 隔墙
         //   生成在墙后格（穿墙 TNT）；堵口降级与 d2 路径统一——MC 堵口不弹的近似取舍，物品形态保库存语义完整，
         //   比静默吞 TNT 更可观察可回收，也比隔墙传送更保守）。
-        const auto primedCellClear = [this](int cx, int cy, int cz) {
-            // t859：out-param 栈上小缓冲（零堆分配；旧按值 .empty() 每查两次分配）。
-            BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
-            return m_world && m_world->collisionAABBsAt(cx, cy, cz, boxes,
-                                                        BlockRegistry::kMaxAABBsPerCell) == 0;
-        };
         const int tdx = int(dir.x()), tdz = int(dir.z());
         const float popVX = dir.x() * kDispenserTntPopSpeed, popVZ = dir.z() * kDispenserTntPopSpeed;
-        if (primedCellClear(x + tdx, y, z + tdz)) {
+        if (spoutCellClear(x + tdx, y, z + tdz)) {
             m_entityManager->spawnPrimedTnt(x + tdx, y, z + tdz, -1.0f, popVX, popVZ);
+        } else if (m_itemEntities) {
+            m_itemEntities->spawnItemThrown(origin, itemId, 1, dir.x(), 0.0f, dir.z(), kDispenserPopSpeed,
+                                            slotEnch, slotName, slotDur);
+        } else {
+            emit spawnItem(int(std::floor(origin.x())), int(std::floor(origin.y())),
+                           int(std::floor(origin.z())), itemId, 1, slotEnch, slotName);
+        }
+    } else if (itemId == RecipeRegistry::MinecartId) {
+        // t912 发射器发矿车（spec「发射矿车物品 → 在发射口前邻格放置矿车实体；邻格是铁轨则对齐轨向」）：
+        //   发射面邻格 spawnCart 放置矿车**实体**（同 t856 TNT 弹出的排出口语义 + review26 #24 堵口降级门）：
+        //   · 邻格是铁轨（isRail 家族——普通 / 动力 / 探测）→ 轨上模式，t708② 连接位定向 = 车 yaw 轴向取
+        //     轨向（对齐轨向的机制半边由 spawnCart 既有链承担，本分支零特判）；
+        //   · 非轨格（净空）→ t734 放宽地面静止模式（车底贴 cell 底，推不动待拾取）；
+        //   · 堵口（邻格有碰撞盒）→ 降级普通掉落物弹出（spoutCellClear 共用门——矿车物品形态保库存
+        //     语义完整；机制等价 MC 堵口不弹）。
+        //   投掷器不放行本分支（isDropper 前置分支已全量兜底 = 矿车走普通掉落物弹出——机制等价 MC 1.0
+        //   dropper「只投不射」不放实体）。m_minecartManager 未注入（防御路径）→ 同堵口降级。达 kCap 的
+        //   溢出由 spawnCart 内 qWarning 兜（探针 / 生产日志可观察）。
+        const int tdx = int(dir.x()), tdz = int(dir.z());
+        if (spoutCellClear(x + tdx, y, z + tdz) && m_minecartManager) {
+            m_minecartManager->spawnCart(x + tdx, y, z + tdz, m_world);
         } else if (m_itemEntities) {
             m_itemEntities->spawnItemThrown(origin, itemId, 1, dir.x(), 0.0f, dir.z(), kDispenserPopSpeed,
                                             slotEnch, slotName, slotDur);

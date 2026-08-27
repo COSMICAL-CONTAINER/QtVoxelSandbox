@@ -10809,6 +10809,108 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t912 发射器发矿车探针（Game 层 PlayerController + DispenserStore + MinecartManager +
+    //    ItemEntityManager 直编，t856/t868 模式；spec「发射矿车物品 → 在发射口前邻格放置矿车实体；
+    //    邻格是铁轨则对齐轨向」）──
+    //   断言三段（每段间 pc.scanDispenserTraps(2.5f) 耗冷却 + 拉杆降/升沿造新触发）：
+    //   (a) 轨上模式：发射面邻格是铁轨（双格线 → +X 连接定向）→ 邻格生成矿车实体（轨面高 kCartRideH
+    //       镜像 0.45）+ yaw 轴向取轨向（+X 行进 → yaw 270，t708② 连接位定向链）+ 库存 2→1；
+    //   (b) 地面模式：拆轨后邻格净空 → 矿车实体贴 cell 底（kCartGroundH 镜像 0.3875，t734 放宽放置）；
+    //   (c) 堵口降级：邻格实体方块堵住 → 不放实体（车数不增）+ 掉落物实体 +1（MinecartId 物品形态，
+    //       review26 #24 堵口门复用）+ 库存照扣。
+    {
+        PlayerController pc;
+        EntityManager ents;
+        DispenserStore store;
+        ItemEntityManager items;
+        MinecartManager carts;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setDispenserStore(&store);
+        pc.setItemEntities(&items);
+        pc.setMinecartManager(&carts);
+        QObject::connect(&w, &World::powerDispenserTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
+        const auto cartItemCount = [&items]() {
+            int n = 0;
+            for (int i = 0; i < items.count(); ++i)
+                if (items.aliveAt(i) && items.itemIdAt(i) == RecipeRegistry::MinecartId) ++n;
+            return n;
+        };
+        const auto [x0, z0] = nextSlot();
+        placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0); // state 0 → 朝 +X
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);          // 凿空发射面（新 rig 行地形可达 y41）
+        w.setBlock(x0 + 2, kRigY, z0, BR::Air, 0);
+        store.ensureDispenser(x0, kRigY, z0);
+        store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::MinecartId, 3);
+        tickN(w, 2);
+        const auto reEdge = [&]() { // 造一个真上升沿：先拆源（清 fireDispenserAtQml 沿基线）再置源
+            pc.scanDispenserTraps(2.5f); // 耗尽冷却（等价递减驱动，t856(b) 同款）
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+            tickN(w, 4);
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1);
+            tickN(w, 4);
+        };
+        // (a) 轨上模式：发射面邻格 (x0+1) 铺双格线（+X 连接 → spawn 定向 +X）。
+        w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Rail, 0);
+        reEdge();
+        bool okA = carts.liveCount() == 1
+            && std::fabs(carts.posAt(0).x() - (x0 + 1.5f)) < 1e-3f
+            && std::fabs(carts.posAt(0).y() - (kRigY + 0.45f)) < 1e-3f   // 轨面高（kCartRideH 镜像）
+            && std::fabs(carts.posAt(0).z() - (z0 + 0.5f)) < 1e-3f
+            && std::fabs(carts.yawAt(0) - 270.0f) < 1.0f                 // 轴向取轨向（+X → yaw 270）
+            && store.slotCountAt(x0, kRigY, z0, 0) == 2;                 // 库存 3→2
+        if (!okA)
+            qInfo().noquote() << "  t912(a) rail cart" << carts.liveCount() << carts.posAt(0)
+                              << "yaw" << carts.yawAt(0)
+                              << "stock" << store.slotCountAt(x0, kRigY, z0, 0);
+        // 清 (a)：毁车（创造瞬破免掉落）+ 拆轨。
+        carts.hitCartFromRay(carts.posAt(0) + QVector3D(0, 3.0f, 0), QVector3D(0, -1, 0), 4.0f, &w, true);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Air, 0);
+        tickN(w, 2);
+        // (b) 地面模式：邻格净空（非轨）→ 贴 cell 底静止车（t734 放宽放置）。
+        reEdge();
+        const bool okB = carts.liveCount() == 1
+            && std::fabs(carts.posAt(0).x() - (x0 + 1.5f)) < 1e-3f
+            && std::fabs(carts.posAt(0).y() - (kRigY + 0.3875f)) < 1e-3f // 地面高（kCartGroundH 镜像）
+            && store.slotCountAt(x0, kRigY, z0, 0) == 1;                 // 库存 2→1
+        if (!okB)
+            qInfo().noquote() << "  t912(b) ground cart" << carts.liveCount() << carts.posAt(0)
+                              << "stock" << store.slotCountAt(x0, kRigY, z0, 0);
+        // 清 (b)：毁车。
+        carts.hitCartFromRay(carts.posAt(0) + QVector3D(0, 3.0f, 0), QVector3D(0, -1, 0), 4.0f, &w, true);
+        tickN(w, 2);
+        // (c) 堵口降级：发射面邻格实体方块 → 不放实体 + 掉落物 +1（MinecartId 物品形态）+ 库存照扣。
+        placeRigBlock(w, x0 + 1, kRigY, z0, BR::Stone, 0);
+        const int itemsBefore = cartItemCount();
+        reEdge();
+        const bool okC = carts.liveCount() == 0
+            && cartItemCount() == itemsBefore + 1
+            && store.slotCountAt(x0, kRigY, z0, 0) == 0;                 // 库存 1→0（最后一发）
+        if (!okC)
+            qInfo().noquote() << "  t912(c) blocked carts" << carts.liveCount()
+                              << "items" << cartItemCount() << "was" << itemsBefore
+                              << "stock" << store.slotCountAt(x0, kRigY, z0, 0);
+        const bool ok = okA && okB && okC;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t912 dispenser minecart: dispensing a minecart places a cart entity in "
+                             "the spout-adjacent cell (rail cell -> on-rail mode with yaw aligned to the "
+                             "rail axis via the connection-direction chain, open ground -> ground-parked "
+                             "mode at kCartGroundH), a blocked spout degrades to a dropped minecart item "
+                             "(review26-24 gate reused) and stock decrements in all cases";
+        // 清场
+        carts.clearAll();
+        w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+        w.setBlock(x0, kRigY, z0, BR::Air, 0);
+        store.clearDispenser(x0, kRigY, z0);
+        items.clearAll();
+        tickN(w, 2);
+    }
+
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
     //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；
