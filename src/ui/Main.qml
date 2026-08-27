@@ -430,6 +430,10 @@ Window {
              //   drawn 真值在此行）。threads 0/0 = meshing 全 GUI 线程同步（survey §1.1 实况）。
              + "\ndraw-calls: " + drawCalls + "  verts drawn: " + drawVerts
              + "  passes: " + passCount + "  render " + renderMs.toFixed(1) + " ms  [RenderStats]"
+             // t906 核实钉死：0/0 = 全程 GUI 线程同步 meshing 是**现状事实**（src/ 无 QThreadPool/QThread/
+             // QtConcurrent 任何线程原语；ChunkManager 是纯容器，mesh 由每 chunk ChunkGeometry 的
+             // onWorldChanged 同步直连槽驱动）—— 非「线程池退化」。异步 meshing 登记为未来架构工作
+             // （chunkgeometry.h 不变量 B 注释已为线程化保 mesh 数据 move-only 形）。
              + "  threads: 0/0 (sync meshing)"
              + "\ntime: " + timeStr + "  day " + worldClock.dayCount + "  moon " + worldClock.moonPhase
              + "  phase " + dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
@@ -12685,7 +12689,12 @@ Window {
         //       - main_total >> render_cpu → 主线程 bound（QML binding / 物理 tick / scene-graph update）；
         //       - render_cpu >> main_total → 渲染线程 bound（GPU 提交 / draw-call 多 / 渲染队列长）。
         //     max 一侧标 *（视觉提示瓶颈侧）。
-        //   mob sub 行 = mob 桶拆分（ai/phys/hostile/spawn/loop）。
+        //   frame2 行（t904 perf）= residual 四段归因：evA（idleA−sim = QML 绑定 / 其它 Timer / 空闲）、
+        //     waitSync（GUI 阻塞等渲染线程同步屏障）、idleB（sync 后到 swap；basic 循环下 = 渲染本体在 GUI 跑）。
+        //     residual ≈ evA+waitSync+idleB —— 32.8ms 级黑盒读此行即归因到命名段（恒 0 段 = 该 hook 未发，本身即判据）。
+        //   mob sub 行 = mob 桶拆分（ai/phys/hostile/spawn/loop）+ t905 细分：[head/tail/ltail]（head=投射物/尸体/
+        //     骑乘头段、tail=活体每帧物理尾段、ltail=emit entitiesChanged 的 QML delegate 扇出循环尾）+
+        //     st[R/F/V/D] 状态直方图（resting/下落/骑乘/尸体 mob-帧数 —— stF 高 = resting↔下落振荡吃尾段）。
         //   诊断 <10 FPS 时读此叠层定位「每帧固定开销」花在哪（实体 tick / mesh 重建 / 物理 / QML binding / 渲染），
         //   不再猜。F3 关时不显；报告内容亦每秒落 logs/voxelsandbox.log（grep vo.prof）。
         Text {

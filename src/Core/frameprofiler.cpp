@@ -171,6 +171,25 @@ void FrameProfiler::flush()
         + "  qmlSync " + QString::number(syncMs, 'f', 1)
         + "  residual " + QString::number(residualMs, 'f', 1)
         + "  (frame≈max(main,render); main≈sim+qmlSync+residual; residual=未插桩/等渲染)";
+    // t904 perf residual 四段归因行：main.cpp 的渲染管线 hook（frameSwapped/afterAnimating/beforeSynchronizing/
+    //   afterSynchronizing）把 GUI 线程帧周期切成 idleA / waitSync / qmlSync / idleB 四段（构造上 main_total ≈
+    //   四段之和）→ residual ≈ evA + waitSync + idleB（evA = idleA − sim：idleA 内含 16ms 游戏 tick，sim 桶已计，
+    //   差值 = QML 绑定求值 / 其它 QML Timer / 事件派发 / 纯空闲）。诊断：
+    //     - evA 大 → 主线程有 sim 外未插桩重活（QML 绑定扇出 / delegate 高水位 / 其它 Timer）→ 去 QML 侧查；
+    //     - waitSync 大 → GUI 阻塞等渲染线程同步屏障（渲染 / present-vsync 拖慢帧节奏）→ 渲染侧 bound；
+    //     - idleB 大 → afterSync 后到 swap 的等待：threaded 循环 = 渲染线程渲染+present（正常 ≈ render_cpu+vsync），
+    //       basic 单线程循环 = 渲染本体在 GUI 线程跑（idleB ≈ render_cpu + present）；
+    //     - 某段恒 0 且其它段非 0 = 该 hook 未发（basic 循环不发 afterAnimating → evA/waitSync 恒 0 本身即判据）。
+    const double idleAMs = frameMs("fIdleA");
+    const double waitSyncMs = frameMs("fWaitSync");
+    const double idleBMs = frameMs("fIdleB");
+    const double evAMs = idleAMs - simMs; // idleA 内 sim 已单列 → 差值 = 非 sim 事件段（可为负 = 测量噪声标志）
+    QString frame2Line = QStringLiteral("frame2 ms/f: ")
+        + "evA " + QString::number(evAMs, 'f', 1)
+        + "  waitSync " + QString::number(waitSyncMs, 'f', 1)
+        + "  idleB " + QString::number(idleBMs, 'f', 1)
+        + "  (residual≈evA+waitSync+idleB; evA=idleA−sim=QML绑定/其它Timer/空闲; idleA "
+        + QString::number(idleAMs, 'f', 1) + ")";
 
     // t500 perf mob 子分解（逐帧 ms/f，÷ frames）：mob 桶（PlayerController tickImpl 整段）拆成 mobLoop
     //   （EntityManager::tick）/ mobHostile（tickHostileLife）/ mobSpawn（tickSpawners）三函数，mobLoop 再拆
@@ -180,15 +199,39 @@ void FrameProfiler::flush()
     auto mobSubMs = [this, f](const char *key) { return double(bucketLocked(key)) / 1e6 / f; };
     const double mobLoopMs = mobSubMs("mobLoop");
     const double mobAiMs = mobSubMs("mobAI");
+    // t905 perf mob 段细分：phys（= loop − ai）再拆 head / tail ——
+    //   - head = 非 Mob kind 分支（箭 / 雪球 / 铁砧落体 …）+ Mob 入块到 aiT0（dead 倒计时 / 骑乘冻结 / 免疫清零）；
+    //   - tail = ai 后每帧段（流推 / 红闪 / 环境音 / 走相 / 击退 / 滑流 / 窒息节流帧）+ resting 复探 / 重力 /
+    //     落地扫描尾段；
+    //   - ltail = 循环尾（releaseSlot / flushPendingShots / tickBreeding / emit entitiesChanged 的 QML delegate
+    //     扇出 —— 47 槽 × ~12 revision 绑定 + 行走 mob MobModel 几何重建，与逐实体物理不同成本中心）。
+    //   诊断：phys 大时看本行即知「投射物 / 尸体 / 骑乘头段」「活体每帧物理尾段」还是「emit 扇出循环尾」；
+    //   尾段大 + stF（下落态 mob-帧数）高 = resting↔下落振荡（每帧重力 + 落地扫描 + dirty bump）。
+    const double mobHeadMs = mobSubMs("mobHead");
+    const double mobTailMs = mobSubMs("mobTail");
+    const double mobLTailMs = mobSubMs("mobLoopTail");
+    // t905 perf mob 状态直方图（窗口内 mob-帧 数：每 tick 每活体按当前态 +1）—— stR=resting 静置 / stF=非
+    //   resting（重力+落地扫描每帧跑）/ stV=骑乘冻结 / stD=dead 尸体。判「14 活体为何 10ms」先看分布：
+    //   stF 高位 = 振荡 / 悬空 mob 主吃尾段；全 stR 而 tail 仍大 = 循环尾（emit/繁殖）或索引态泄漏。
+    auto mobCnt = [this](const char *key) {
+        auto it = m_counts.find(key); return it == m_counts.end() ? 0 : it->second;
+    };
     QString mobLine = QStringLiteral("mob sub ms/f: ")
         + "ai " + QString::number(mobAiMs, 'f', 2)
         + "  phys " + QString::number(mobLoopMs - mobAiMs, 'f', 2)
+        + "  [head " + QString::number(mobHeadMs, 'f', 2)
+        + " tail " + QString::number(mobTailMs, 'f', 2)
+        + " ltail " + QString::number(mobLTailMs, 'f', 2) + "]"
+        + "  st[R " + QString::number(mobCnt("mobStRest"))
+        + " F " + QString::number(mobCnt("mobStFall"))
+        + " V " + QString::number(mobCnt("mobStRide"))
+        + " D " + QString::number(mobCnt("mobStDead")) + "]"
         + "  hostile " + QString::number(mobSubMs("mobHostile"), 'f', 2)
         + "  spawn " + QString::number(mobSubMs("mobSpawn"), 'f', 2)
         + "  loop " + QString::number(mobLoopMs, 'f', 2);
 
-    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4\n  %5")
-                   .arg(frames).arg(tickLine, winLine, frameLine, mobLine);
+    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4\n  %5\n  %6")
+                   .arg(frames).arg(tickLine, winLine, frameLine, frame2Line, mobLine);
     m_lastFrames = frames;
 
     // 重置窗口。
