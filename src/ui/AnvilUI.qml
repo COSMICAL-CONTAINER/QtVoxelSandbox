@@ -767,9 +767,13 @@ Item {
     // ── t550 三功能执行（真逻辑；t477 占位交互替换）──
     //   修复：消耗 1 级/材料 + 消耗右槽材料（每材料修 1/3 满耐久）→ 产物 = 左槽修后耐久。合并附魔：消耗 2 级 +
     //   消耗右槽附魔书 1 本（多本只扣 1 本，rv11 修「合并销毁整摞书」）。改名：改名框非空时叠加在修复 / 合并之上
-    //   （+1 级）或单独生效 → 产物即时显新名。产物输出路由（rv11 → t626② 收敛）：**恒走光标**（空 → 带名上
-    //   光标；同 id → 合并；异物光标 → 无操作不消耗），不再入包。成功后清左输入槽 + 推进铁砧损坏。
-    function takeProduct() {
+    //   （+1 级）或单独生效 → 产物即时显新名。产物输出路由（rv11 → t626② → t918 双路由）：
+    //   - 普通左键 / 回车 → **光标**（空 → 带名上光标；同 id → 合并；异物光标 → 无操作不消耗）；
+    //   - t918 Shift+左键 → **直入背包**（hotbar 空槽优先 → main 兜底 = addToAny 空槽序；同 id 栈就地
+    //     优先——工作台批量合成 slotShiftLeftCraft 同款路由）；背包满 → 余量 fallback 光标（MC 取出
+    //     语义：shift 取产物优先入背包、满了才落光标）；光标持异物且背包也放不下 → 无操作（零消耗）。
+    //   成功后清左输入槽 + 推进铁砧损坏。
+    function takeProduct(toInventory) {
         if (root.activeOp === "") return
         if (!root.affordCost) return
         const op = root.activeOp
@@ -840,20 +844,42 @@ Item {
         // 改名叠加：改名框非空 → 产物名 = 新名（覆盖原 customName）。
         if (root.renaming) outName = root.renameName.trim()
 
-        // ── 产物路由（rv11 / t622 / t626② 重定）── 探路段改为**纯只读**（t626②/⑤ 根因修复）：
+        // ── 产物路由（rv11 / t622 / t626② / t918 双路由）── 探路段保持**纯只读**（t626②/⑤ 根因）：
         //   旧版探路段对「异物光标」当场 addToAny 把产物写进背包——两个后果：(a) 用户点一下产物却直接
         //   入包（相当于 shift 效果，用户「应到光标」）；(b) 写包发生在 spendLevels 拒付 / 后续无操作 return
         //   **之前** → 等级不足时产物已入包、输入槽未清 → 产物槽仍显 → 再点再入包 = **无限复制**（A 工具 +
         //   B 附魔书可无限刷）。t626②：异物光标 → **无操作**（机制等价 MC——光标被占时铁砧产物不可取），
         //   不写包、不消耗、产物槽保留预览；腾空光标再点即正常到光标。任何副作用（扣等级 / 清槽 / 写入）
-        //   只发生在探路全通过之后的落定段。
+        //   只发生在探路全通过之后的落定段。t918 增设 **shift 背包路由**（用户「附魔书敲进工具完成后
+        //   shift+左键对合成品应直接放到背包」）：预检 main+hotbar 容量 + 光标兜底位，装不下 → 无操作。
         const heldId = root.hotbar.heldBlock
         const heldCount = root.hotbar.heldCount
         const cap = root.hotbar.maxStackSize(outId)
-        // 光标被异物占用 → 无操作（t626②：不再退路入包——「左键取产物」恒指光标通道；入包是 shift 语义）。
-        if (heldId !== 0 && heldId !== outId) return
-        // 同 id 光标合并容量检查（held 同 id 且累加超上限 → 无操作）。
-        if (heldId === outId && heldCount + outCount > cap) return
+        // t918 光标兜底容量（shift 路由背包满时的余量落点；空 = 满容量 / 同 id = 余量 / 异物 = 0）。
+        const cursorSpace = (heldId === 0) ? cap
+                          : ((heldId === outId) ? Math.max(0, cap - heldCount) : 0)
+        if (toInventory) {
+            // Shift 预检（slotShiftLeftCraft 同口径）：main+hotbar 对 outId 的可用容量 = 空槽满容量 +
+            //   同 id 无名栈余量（addToAny rev2-C5 双向带名守卫 → 带名栈不并，不计其容量，保守）+ 光标
+            //   兜底位；合计 < outCount → 无操作（不消耗等级 / 材料 / 输入）。
+            let space = cursorSpace
+            for (let i = 0; i < root.hotbar.mainCount; ++i) {
+                const s = InventoryOps.readSlot(root, "main", i)
+                if (s.id === 0) space += cap
+                else if (s.id === outId && s.name.length === 0) space += Math.max(0, cap - s.count)
+            }
+            for (let i = 0; i < root.hotbar.slotCount; ++i) {
+                const s = InventoryOps.readSlot(root, "hotbar", i)
+                if (s.id === 0) space += cap
+                else if (s.id === outId && s.name.length === 0) space += Math.max(0, cap - s.count)
+            }
+            if (space < outCount) return
+        } else {
+            // 光标路由（t626② 语义保持）：异物占用 → 无操作（「左键取产物」恒指光标通道；入包是 shift 语义）。
+            if (heldId !== 0 && heldId !== outId) return
+            // 同 id 光标合并容量检查（held 同 id 且累加超上限 → 无操作）。
+            if (heldId === outId && heldCount + outCount > cap) return
+        }
 
         // ── 探路通过 → 真消耗（等级 + 材料 + 输入槽）──
         //   t606③ 创造模式免经验：跳过 spendLevels（机制等价 MC 创造铁砧免 XP；材料消耗照旧——保守只免
@@ -891,10 +917,27 @@ Item {
         root.anvilNames = [ "", bEmpty ? "" : (root.anvilNames[1] || ""), "" ]
         root.renameName = ""; nameInput.text = ""; root.lastAutoName = ""
 
-        // ── 产物落定（t626② 简化：探路段已把光标收敛为「空 或 同 id」两态，恒走光标通道）──
+        // ── 产物落定（t626② 光标通道 / t918 shift 背包通道 + 满则光标兜底）──
         //   t622：held 光标有 customName 通道（Q_PROPERTY）→ 改名产物同普通产物直接带名上光标
         //   （机制等价 MC 铁砧产物左键拿到光标）。
-        if (heldId === 0) {
+        if (toInventory) {
+            // t918 Shift：产物直入背包（addToAny：同 id 无名栈就地合并 main→hotbar → 空槽 hotbar 优先→
+            //   main；耐久 / 附魔 / 名随实例——cap=1 物品空槽开新写全套元数据）。余量（预检 space 已含
+            //   cursorSpace，光标必收得下）→ fallback 光标（MC 取出语义的兜底半边）。
+            const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch, outName)
+            if (remain > 0) {
+                if (heldId === 0) {
+                    root.hotbar.heldBlock = outId
+                    root.hotbar.heldCount = remain
+                    root.hotbar.heldDurability = outDur
+                    root.hotbar.setHeldEnchants(outEnch)
+                    root.hotbar.heldCustomName = outName
+                } else {
+                    // 光标持同 id → 余量并入（预检 cursorSpace 已保证不超上限；合并不搬实例元数据同 C 路径）。
+                    root.hotbar.heldCount = heldCount + remain
+                }
+            }
+        } else if (heldId === 0) {
             // 光标空 → 产物上光标（耐久 / 附魔 / 名随实例保真——t622 heldCustomName 通道）。
             root.hotbar.heldBlock = outId
             root.hotbar.heldCount = outCount
@@ -1483,8 +1526,10 @@ Item {
                 // t626③ 点槽即退出改名框输入态（焦点回键位层）——空手点空槽的无操作路径也退。
                 root.defocusNameBox()
                 // 产物预览槽：点击 = 取产物（执行当前修复/合并/改名并写选中槽 + 清输入）。
+                //   t918：Shift+左键 → takeProduct(toInventory=true) 产物直入背包（hotbar 空槽优先 /
+                //   main 兜底；满则光标兜底——MC 取出语义）；普通左键 → 光标（t626② 语义保持）。
                 if (aslot.preview) {
-                    if (aslot.slotId !== 0) root.takeProduct()
+                    if (aslot.slotId !== 0) root.takeProduct(window.shiftHeld)
                     return
                 }
                 if (window.shiftHeld) { root.slotShiftLeftAnvil(aslot.group, aslot.index); return }
