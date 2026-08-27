@@ -1974,6 +1974,10 @@ void PlayerController::attackMob(int entityIndex)
     }
     // t476 燃焰附魔：命中即点燃 mob（机制等价 MC fire-aspect ignite on hit）。fireTimer = level*4s；tick 火烧分支扣血 +
     //   致死掉熟肉。先 damageEntity 再 ignite：若本次击杀（health→0→dead），ignite 内 dead 守卫早退（尸体不燃）。
+    //   t919 账目钉死（用户「+7 的火焰附加剑两刀杀死 20 血僵尸」核账）：燃焰**不进 weaponAttackDamage**
+    //   （直伤与 tooltip 面板均 0 加成——显示 +7 = 钻石剑基础 7，正确）；其输出全在点燃 DoT：每拍
+    //   kFireDamageInterval(0.75s) 扣 1HP，两刀 14 直伤 + 第二刀刷新燃烧窗后的 ≥6 拍火伤 ≥ 20HP → 数秒内
+    //   补刀致死（非显示 bug）。暴击另路：滞空下落 ×1.5 → 7→11，两记跳劈 22 ≥ 20 可独立致死。
     const int fireLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::FireAspect) : 0;
     if (fireLvl > 0) m_entityManager->ignite(entityIndex, float(fireLvl) * 4.0f);
     // t480 主人攻击 → 驯服狼防御目标 = 本 mob（setWolfTarget 记共享目标：所有驯服且站立的狼追击它，机制等价

@@ -11836,6 +11836,91 @@ int main(int argc, char *argv[])
                              "out semantics)";
     }
 
+    // ── t919 钻石剑伤害核账探针（公式面 + 运行时 DoT 补刀复现；R19.16）──
+    //    用户疑问：「钻石剑只有火焰附加、显示 +7 伤害，两刀砍死 20 血僵尸——7×2=14 < 20 为何死？」。
+    //    核账结论（账目公式钉死，非 bug——「DoT 补刀 = 正常」口径）：
+    //    - 直伤 = EnchantRegistry::weaponAttackDamage = 基础 7（钻石剑 tier 4，ToolRegistry::attackDamage）
+    //      + 锐锋 ×0.5/级 —— **火焰附加不进直伤公式**（tooltip +7 与实战直伤 7 同源同值且正确；MC 1.0
+    //      fire-aspect 同样不加攻击面板，其输出全在点燃 DoT）；
+    //    - 火焰附加输出 = ignite(级×4s) 点燃 + 火伤每 kFireDamageInterval(0.75s) 扣 1HP（fireTimer>0 期间，
+    //      第二刀刷新燃烧窗）→ 两刀 14 直伤 + ≥6 拍火伤 ≥ 20 → 僵尸在两刀后数秒内死亡（用户观感「两刀死」）；
+    //    - 暴击（滞空下落 ×1.5）另辟一路：7→11，两记跳劈 22 ≥ 20 可独立致死（attackMob crit 分支）；
+    //    - 僵尸（Shambler）满血 = kHostileDefaultHealth = 20（MC 1.0 口径，头文件钉死）。
+    //    断言：① 公式面 —— attackDamage(钻石剑)=7；火焰附加 II 下 weaponAttackDamage=7.0（火不加直伤）；
+    //    displayAttackDamage=7（显示 = 直伤同源，火不在面板）。② 运行时 —— 两只满血 Shambler 各吃两刀
+    //    直伤 7：无火对照 6s 后存活（14 < 20，血 6）；带火（每刀后 ignite 4s）在窗内死亡且 mobDied 带
+    //    burned=true（DoT 补刀走火烧致死链）——同一 rig 上「无火不死 / 有火死」的对照即用户疑问的答案。
+    {
+        Hotbar hb;
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const int fa2 = EnchantRegistry::pack(int(EnchantRegistry::FireAspect), 2);
+        const int eFa[4] = {fa2, 0, 0, 0};
+        bool ok = ToolRegistry::attackDamage(diaSword) == 7
+               && std::abs(EnchantRegistry::weaponAttackDamage(diaSword, eFa) - 7.0f) < 1e-4f
+               && hb.displayAttackDamage(diaSword, QVariantList{fa2, 0, 0, 0}) == 7;
+        // 运行时 rig（t827 同款净空扫描 + 石平台；far listener 安抚 AI，despawn 在 tickHostileLife 不在 tick）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 125 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 15 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 15 && clear; ++dx)
+                    for (int dz = -3; dz <= 3 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t919 fire-aspect DoT finisher: no clear rig area found";
+        } else {
+            for (int dx = 0; dx <= 15; ++dx)
+                for (int dz = -3; dz <= 3; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+            EntityManager ents;
+            const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+            // 满血 20 = kHostileDefaultHealth（spawnHostileMob 同值；显式传参取回句柄索引）。
+            const int burned = ents.spawnMobTyped(x0 + 2, kRigY, z0, EntityManager::MobShambler,
+                                                  QStringLiteral("#4a6a3a"), 20);
+            const int control = ents.spawnMobTyped(x0 + 10, kRigY, z0, EntityManager::MobShambler,
+                                                   QStringLiteral("#4a6a3a"), 20);
+            ok = ok && burned >= 0 && control >= 0
+                    && ents.healthAt(burned) == 20 && ents.healthAt(control) == 20;
+            int diedBurnedFlag = -1;
+            QObject::connect(&ents, &EntityManager::mobDied, &ents,
+                             [&](int, int, int, int, bool wasBurned, bool) {
+                                 if (diedBurnedFlag < 0) diedBurnedFlag = wasBurned ? 1 : 0;
+                             });
+            // 第一刀（attackMob 直伤 7）+ 燃焰 II 点燃 8s（口径用 I 的 4s 亦同理；II 取上界证刷新语义）。
+            ents.damageEntity(burned, 7);
+            ents.ignite(burned, 4.0f);
+            ents.damageEntity(control, 7);
+            for (int t = 0; t < 94; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);   // ~1.5s
+            // 第二刀（同窗两刀 14 直伤；带火侧刷新燃烧）。
+            ents.damageEntity(burned, 7);
+            ents.ignite(burned, 4.0f);
+            ents.damageEntity(control, 7);
+            for (int t = 0; t < 470; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);  // ~7.5s 火烧尽 + 死亡动画
+            // 对照：14 直伤无火 → 存活 6 HP（第二刀后 7.5s 无任何额外伤害源）；带火：14 + ≥6 拍火伤 → 死。
+            const bool controlAlive = !ents.deadAt(control) && ents.healthAt(control) == 6;
+            const bool fireDied = ents.deadAt(burned) && diedBurnedFlag == 1;
+            ok = ok && controlAlive && fireDied;
+            if (!ok) qInfo().noquote() << "  t919 diag: control dead" << ents.deadAt(control)
+                                       << "hp" << ents.healthAt(control)
+                                       << "| fire dead" << ents.deadAt(burned)
+                                       << "burnedFlag" << diedBurnedFlag;
+            for (int dx = 0; dx <= 15; ++dx)
+                for (int dz = -3; dz <= 3; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air);
+            tickN(w, 2);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t919 diamond sword damage accounting: base 7 (tier 4), fire-aspect adds ZERO "
+                                 "direct damage (weaponAttackDamage 7.0 with FA II, display +7 == combat direct "
+                                 "damage - fire lives in the ignite DoT); two 7-hits leave a 20HP shambler alive "
+                                 "at 6HP without fire, with per-hit ignite(4s) the burn ticks finish it and "
+                                 "mobDied carries burned=true (DoT finisher = expected, not a display bug); crit "
+                                 "x1.5 path noted in attackMob (11/hit, two jump strikes 22 >= 20 standalone)";
+        }
+    }
+
     // ── t826 击退附魔实战强度探针（R19.13；公式面 + Entities 层真位移，t774 爆炸击退同款 rig）──
     //    用户报告：「附击退打生物无击退」。根因：旧强度 1+0.5*级 令 II 仅 ~2.3 格总位移（基线 ~1.1 格），
     //    与 AI 游荡抖动同量级 → 实战「无感」。t826 收口 EnchantRegistry::knockbackStrength 单一权威
