@@ -10729,6 +10729,86 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t911 铁轨贴仙人掌破坏探针（World 直编；spec「仙人掌旁放铁轨 → 仙人掌被破坏掉落（MC 语义：
+    //    铁轨非仙人掌合法邻面；自动下矿车系统前提）」）──
+    //   断言三段：
+    //   (a) 铁轨贴 2 高仙人掌**上层**格放置 → 整柱坍落（上下两格全 Air + 每格 blockDroppedAsItem(Cactus)
+    //       各一次）+ 铁轨留存（非法邻面反应只毁仙人掌不毁铁轨）；
+    //   (b) 铁轨贴 1 高仙人掌（基座层）→ 同样坍落（基线场景钉语义）；
+    //   (c) 阴性对照：铁轨距仙人掌 2 格 → 仙人掌无恙（非邻接不触发）。
+    {
+        // rig 选址：运行期扫描空区。dx -1..6、dz -1..1、dy -2..+3。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 6 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 6 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t911 rail-adjacent cactus break: no clear rig area found";
+        } else {
+            // 掉落计数（blockDroppedAsItem 局部连接——句柄断开，不误伤其它探针的连接；只数本 rig 柱格）。
+            int dropsAtCol = 0;
+            const QMetaObject::Connection dropConn = QObject::connect(
+                &w, &World::blockDroppedAsItem, &w,
+                [&dropsAtCol, x0, z0](int bx, int, int bz, int bid) {
+                    if (bid == int(BR::Cactus) && bz == z0 && bx >= x0 && bx <= x0 + 5)
+                        ++dropsAtCol;
+                });
+            // (a) 2 高仙人掌 @（x0, Y/Y+1）+ 铁轨贴上层格 (x0+1, Y+1)。
+            w.setBlock(x0, kRigY - 1, z0, BR::Sand, 0);        // 沙基座（仙人掌合法支撑）
+            w.setBlock(x0, kRigY, z0, BR::Cactus, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::Cactus, 0);
+            dropsAtCol = 0;
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Rail, 0);    // 铁轨贴仙人掌上层 → 整柱坍落
+            const bool okA = w.blockAt(x0, kRigY, z0) == BR::Air
+                          && w.blockAt(x0, kRigY + 1, z0) == BR::Air
+                          && w.blockAt(x0 + 1, kRigY + 1, z0) == BR::Rail
+                          && dropsAtCol == 2;                  // 整柱两格各一次掉落
+            // (b) 1 高仙人掌 @（x0+2, Y）+ 铁轨贴基座层 (x0+3, Y)。
+            w.setBlock(x0 + 2, kRigY - 1, z0, BR::Sand, 0);
+            w.setBlock(x0 + 2, kRigY, z0, BR::Cactus, 0);
+            dropsAtCol = 0;
+            w.setBlock(x0 + 3, kRigY, z0, BR::Rail, 0);
+            const bool okB = w.blockAt(x0 + 2, kRigY, z0) == BR::Air
+                          && w.blockAt(x0 + 3, kRigY, z0) == BR::Rail
+                          && dropsAtCol == 1;
+            // (c) 阴性对照：仙人掌 @（x0+5, Y），与 (b) 留下的铁轨 (x0+3) 相距 2 格（x0+4 空）→ 放置
+            //     不触发坍落、仙人掌留存（非邻接不触发；世界侧反应规则只对新放的**邻面**生效）。
+            w.setBlock(x0 + 5, kRigY - 1, z0, BR::Sand, 0);
+            w.setBlock(x0 + 5, kRigY, z0, BR::Cactus, 0);
+            dropsAtCol = 0;
+            const bool okC = w.blockAt(x0 + 5, kRigY, z0) == BR::Cactus
+                          && dropsAtCol == 0;
+            const bool ok = okA && okB && okC;
+            if (!ok)
+                qInfo().noquote() << "  t911 colBreak" << okA << "baseBreak" << okB
+                                  << "farControl" << okC
+                                  << "a-cell" << int(w.blockAt(x0, kRigY, z0))
+                                  << int(w.blockAt(x0, kRigY + 1, z0));
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t911 rail-adjacent cactus break: placing a rail against a cactus "
+                                 "(mid-column or base level) fells the WHOLE cactus column (both cells air, "
+                                 "one drop per cell) while the rail stays, and a rail two cells away leaves "
+                                 "the cactus untouched (rails are illegal cactus neighbors - MC semantics, "
+                                 "prerequisite for cactus-based cart-dropper systems)";
+            // 清场
+            QObject::disconnect(dropConn);
+            w.setBlock(x0 + 5, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 5, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 3, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
     //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；
