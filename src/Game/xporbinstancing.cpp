@@ -2,6 +2,8 @@
 
 #include "xporbmanager.h"
 
+#include <cmath> // review-r1914-final L1: std::cos/std::fmod/M_PI used below
+
 // t858（R19.14）经验球 instancing 试点（类头注释 = 设计权威）。实现要点：
 // - 动画解析式与旧 QML delegate 逐字对齐（Main.qml t402 段）：
 //     bob   = 0.06 * (1 - cos(pi * s1)),  s1 = fmod(t / 0.7, 2)   （0↔0.12 三角波，周期 1.4s）
