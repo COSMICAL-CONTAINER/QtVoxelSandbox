@@ -5525,7 +5525,8 @@ void PlayerController::updateButtonRecovery(float dt)
 
 // t627/t628 发射器 / 投掷器单次触发（scanDispenserTraps 踩板沿 + t628 拉杆/按钮右键激活共用）。
 //   (dx,dy,dz) = 机器格坐标、db = 机器方块 id（Dispenser / Dropper）。per-dispenser 冷却（m_dispenserCooldowns，
-//   按列坐标键 (x,z) 打包——发射器每柱唯一故 (x,z) 足以定位；Y 不进键防高位重叠）内 → 返 false 不动作；
+//   按格坐标三维打包 x/z 各 21 位 + y 10 位——review26 #16 前旧键 (x<<32|z) 不含 Y，同柱垂直两台共享
+//   冷却在 0.5s 语义下吞下台的合法沿）内 → 返 false 不动作；
 //   触发成功（含神殿陷阱 fallback 射箭）→ 写冷却 + 返 true。方向 = 机器 state 朝向外向（chestFrontFace 解码；
 //   state=0 旧存档 → +X 兜底）。库存路径（t579/t607/t609）与 fallback 语义同旧 scanDispenserTraps 逐字保留。
 //   t868②：冷却语义 = **短防抖闸**（0.5s，见 kDispenserCooldown 注释）——只拦同 tick 双路径双发，不吞
@@ -5537,7 +5538,13 @@ bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
     //   ≥0.5s 即全过闸，逐沿发射；MC 同名语义 = 触发间隔下限。review25 #8 阴性验证口径保持：本值改 0 →
     //   t814(e)/t856(b) 双 FAIL（勿动）；改回 ≥2.0s → t868 高频沿探针 FAIL（旧症状复现）。
     constexpr float kDispenserCooldown = 0.5f;
-    const quint64 key = (quint64(quint32(dx)) << 32) | quint64(quint32(dz));
+    // review26 #16：冷却键从 (x<<32|z) 改为全三维打包（21/21/10 位布局，同 m_redstoneLitCells /
+    //   m_plateJustPressed 既有键序）——旧键不含 Y → 同柱垂直叠放两台发射器共享冷却，0.5s 内上台
+    //   发射后下台合法沿被吞（t868「逐沿发射」语义被柱粒度冷却破坏）。x/z 各 21 位带 ±0x100000 偏移、
+    //   y 10 位（世界高 ≤128 恒够）→ quint64 无重叠。
+    const quint64 key = (quint64(quint32(dx + 0x100000) & 0x1FFFFFu))
+                      | (quint64(quint32(dz + 0x100000) & 0x1FFFFFu) << 21)
+                      | (quint64(quint32(dy) & 0x3FFu) << 42);
     // review25 #8：冷却门看**值**（contains && value > 0）而非纯 contains——若只查存在性，常量回归改 0（或
     //   任何 ≤0 写入）时表项永驻、该机器永久哑火且矩阵探针的「时长下界钉死」断言失效（0 冷却仍被 contains
     //   拦下复置沿 → 探针照 PASS）。零/负值冷却无合法语义（递减循环本就 erase 非正值），故 >0 才拦是真实
@@ -5610,7 +5617,9 @@ void PlayerController::fireDispenserAtQml(int x, int y, int z)
     if (!m_world) return;
     const quint8 b = m_world->blockAt(x, y, z);
     if (!BlockRegistry::isDispenser(b) && !BlockRegistry::isDropper(b)) return; // 已非机器 → no-op
-    const quint64 key = (quint64(quint32(x)) << 32) | quint64(quint32(z)); // 同 fireDispenserAt 冷却键编码（x<<32|z）
+    const quint64 key = (quint64(quint32(x + 0x100000) & 0x1FFFFFu)) // 同 fireDispenserAt 冷却键编码（review26 #16 起含 Y 的 21/21/10 布局）
+                      | (quint64(quint32(z + 0x100000) & 0x1FFFFFu) << 21)
+                      | (quint64(quint32(y) & 0x3FFu) << 42);
     const bool powered = m_world->isReceivingPower(x, y, z); // 现读电力态（信号不携态，消费端自查）
     if (!powered) { m_dispenserPoweredCells.remove(key); return; } // 降沿：只清基线，不 fire
     if (m_dispenserPoweredCells.contains(key)) return;             // 稳定通电（基线已有）→ 非沿，不 fire
@@ -5708,9 +5717,10 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   下 TNT 走上方全部物品分支 = 普通掉落物弹出**不点燃**（机制等价 MC dropper 弹 TNT 是物品非引燃实体）。
         //   review25 #11 **排出口占用门**：贴墙安装的发射器激活时目标邻格是实体方块——primed 水平积分刻意不查
         //   碰撞（见 primed tick 注释）→ TNT 会在墙格内就地引爆，炸穿墙并波及发射器自身。spawn 前查目标邻格
-        //   碰撞盒（collisionAABBsAt 空 = 可生成；水 / 无碰撞族照常）：空 → 原位 spawn；非空 → 沿朝向**再探一格**
-        //   （MC「弹出到可达空位」的近似）；仍非空 → **退化为普通掉落物弹出**（不点燃；MC 堵口不弹的近似取舍——
-        //   物品形态保库存语义完整，比静默吞 TNT 更可观察可回收）。
+        //   碰撞盒（collisionAABBsAt 空 = 可生成；水 / 无碰撞族照常）：空 → 原位 spawn；非空 → **一律退化为普通
+        //   掉落物弹出**（review26 #24 收口：旧版「沿朝向再探一格」不看中间格连通 → 堵口是 1 格厚墙时 TNT 隔墙
+        //   生成在墙后格（穿墙 TNT）；堵口降级与 d2 路径统一——MC 堵口不弹的近似取舍，物品形态保库存语义完整，
+        //   比静默吞 TNT 更可观察可回收，也比隔墙传送更保守）。
         const auto primedCellClear = [this](int cx, int cy, int cz) {
             return m_world && m_world->collisionAABBsAt(cx, cy, cz).empty();
         };
@@ -5718,8 +5728,6 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         const float popVX = dir.x() * kDispenserTntPopSpeed, popVZ = dir.z() * kDispenserTntPopSpeed;
         if (primedCellClear(x + tdx, y, z + tdz)) {
             m_entityManager->spawnPrimedTnt(x + tdx, y, z + tdz, -1.0f, popVX, popVZ);
-        } else if (primedCellClear(x + 2 * tdx, y, z + 2 * tdz)) {
-            m_entityManager->spawnPrimedTnt(x + 2 * tdx, y, z + 2 * tdz, -1.0f, popVX, popVZ);
         } else if (m_itemEntities) {
             m_itemEntities->spawnItemThrown(origin, itemId, 1, dir.x(), 0.0f, dir.z(), kDispenserPopSpeed,
                                             slotEnch, slotName, slotDur);

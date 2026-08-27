@@ -7718,8 +7718,8 @@ int main(int argc, char *argv[])
     //   (c) 投掷器 + TNT → 普通掉落物弹出**不点燃**（dropper 只投不射口径——两路径边界的另一侧：dropper
     //       弹 TNT 是物品非引燃实体）+ 库存照扣；
     //   (d) review25 #11 排出口占用门：发射面邻格被实体方块堵住 → 不在墙格内 spawn（primed 水平积分不查
-    //       碰撞 → 墙格 spawn = ~5s 后就地爆穿墙波及发射器自身）；沿朝向再探一格生成，仍堵 → 退化普通
-    //       掉落物弹出（不点燃；MC 堵口不弹的近似取舍——物品形态可回收，不静默吞 TNT）；
+    //       碰撞 → 墙格 spawn = ~5s 后就地爆穿墙波及发射器自身）；review26 #24 起堵口**一律**退化普通掉落物
+    //       弹出（不点燃）——旧版「再探一格」不看连通 → 1 格厚墙时 TNT 隔墙生成在墙后（穿墙 TNT），已收口；
     //   (e) 红石直接邻接 TNT 原地引爆（firePowerTnt 清方块 + 原格生成）不回归由 t814 (a) 既有探针复跑覆盖。
     {
         PlayerController pc;
@@ -7850,24 +7850,28 @@ int main(int argc, char *argv[])
             tickN(w, 2);
         }
 
-        // (d) review25 #11 排出口占用门：发射面邻格被实体方块堵住 → 不在墙格内 spawn TNT（primed 水平积分
-        //     不查碰撞 → 墙格内 spawn = ~5s 后就地爆穿墙并波及发射器自身）。两段：
-        //     d1 邻格墙、再探格空 → PrimedTnt 生成在再探格（x0+2）格心（沿朝向弹出到可达空位）+ 库存照扣；
-        //     d2 邻格 + 再探格都墙 → 零 PrimedTnt + 掉落物 +1（退化物品形态不点燃）+ 库存照扣。
+        // (d) review25 #11 排出口占用门（review26 #24 口径）：发射面邻格被实体方块堵住 → 不在墙格内 spawn
+        //     TNT（primed 水平积分不查碰撞 → 墙格内 spawn = ~5s 后就地爆穿墙并波及发射器自身）。两段：
+        //     d1 邻格墙、墙后格空（review26 #24 复现形态：旧版在此隔 1 格墙把 TNT 生成在墙后）→ 零
+        //        PrimedTnt（墙格 + 墙后格都无）+ 掉落物 +1（堵口一律退化物品形态）+ 库存照扣；
+        //     d2 邻格 + 墙后格都墙 → 同口径（零 PrimedTnt + 掉落物 +1 + 库存照扣）。
         bool okD1 = false, okD2 = false;
         {
-            // d1：堵一格 → 弹到 x0+2（再探格空）。
+            // d1：堵一格（墙后格净空）→ 堵口退化掉落物，墙后零 PrimedTnt（旧版穿墙生成位）。
             const auto [xa, za] = nextSlot();
             placeRigBlock(w, xa, kRigY, za, BR::Dispenser, 0); // state 0 → 朝 +X
-            w.setBlock(xa + 2, kRigY, za, BR::Air, 0); // 凿空再探格（z≥97 新行地形可达 y41；墙格由下方覆写）
+            w.setBlock(xa + 2, kRigY, za, BR::Air, 0); // 凿空墙后格（z≥97 新行地形可达 y41；墙格由下方覆写）
             store.ensureDispenser(xa, kRigY, za);
             store.setSlot(xa, kRigY, za, 0, BR::TntBlock, 3);
             placeRigBlock(w, xa + 1, kRigY, za, BR::Stone, 0); // 堵口墙（发射面邻格）
             tickN(w, 2);
-            placeRigBlock(w, xa - 1, kRigY, za, BR::Lever, 1); // 源贴背面
+            // 基线在拉杆激活**前**取（发射发生在下方 tickN(4) 内——事后取会把退化掉落物算进基线 = 假 +0）
+            const int itemsBeforeD1 = items.count();
+            const int primedBeforeD1 = primedCount();
+            placeRigBlock(w, xa - 1, kRigY, za, BR::Lever, 1); // 源贴背面（激活发射）
             tickN(w, 4);
             int idxD = -1;
-            for (int i = 0; i < ents.count(); ++i) // 找「再探格格心」的 PrimedTnt（ents 内有 (a)/(b) 冻结残留）
+            for (int i = 0; i < ents.count(); ++i) // 找「墙后格格心」的 PrimedTnt（旧版穿墙生成位；ents 内有 (a)/(b) 冻结残留）
                 if (ents.isPrimedAt(i)
                     && std::abs(ents.posAt(i).x() - (xa + 2.5f)) < 1e-3f
                     && std::abs(ents.posAt(i).y() - (kRigY + 0.5f)) < 1e-3f
@@ -7877,13 +7881,18 @@ int main(int argc, char *argv[])
                 if (ents.isPrimedAt(i) && std::abs(ents.posAt(i).x() - (xa + 1.5f)) < 1e-3f
                     && std::abs(ents.posAt(i).z() - (za + 0.5f)) < 1e-3f)
                     noneInWall = false;
-            okD1 = idxD >= 0 && noneInWall
-                   && store.slotIdAt(xa, kRigY, za, 0) == BR::TntBlock
-                   && store.slotCountAt(xa, kRigY, za, 0) == 2; // 库存 3→2
+            // review26 #24：堵口一律退化掉落物——旧版在墙后格（xa+2）生成 PrimedTnt（隔 1 格墙穿墙）。
+            //   新口径断言：零 PrimedTnt（含墙后格，idxD 必 -1）+ 掉落物 +1 + 库存照扣。
+            okD1 = idxD < 0 && noneInWall
+                  && primedCount() == primedBeforeD1
+                  && items.count() == itemsBeforeD1 + 1
+                  && store.slotIdAt(xa, kRigY, za, 0) == BR::TntBlock
+                  && store.slotCountAt(xa, kRigY, za, 0) == 2; // 库存 3→2
             if (!okD1)
-                qInfo().noquote() << "  [t856 d1 diag] pos=" << (idxD >= 0 ? ents.posAt(idxD) : QVector3D())
-                                  << " expect=(" << xa + 2.5f << "," << kRigY + 0.5f << "," << za + 0.5f << ")"
+                qInfo().noquote() << "  [t856 d1 diag] idxD=" << idxD
                                   << " noneInWall=" << noneInWall
+                                  << " items=" << items.count() << "/" << itemsBeforeD1
+                                  << " primed=" << primedCount() << "/" << primedBeforeD1
                                   << " slotCount=" << store.slotCountAt(xa, kRigY, za, 0)
                                   << " b1=" << int(w.blockAt(xa + 1, kRigY, za))
                                   << " cb1=" << w.collisionAABBsAt(xa + 1, kRigY, za).size()
@@ -7895,7 +7904,7 @@ int main(int argc, char *argv[])
             store.clearDispenser(xa, kRigY, za);
             tickN(w, 2);
 
-            // d2：堵两格（邻格 + 再探格）→ 退化普通掉落物弹出（不点燃）。
+            // d2：堵两格（邻格 + 墙后格）→ 退化普通掉落物弹出（不点燃，d1 同口径）。
             const auto [xb, zb] = nextSlot();
             const int itemsBefore = items.count();
             const int primedBefore = primedCount();
@@ -7937,10 +7946,11 @@ int main(int argc, char *argv[])
                              "powerDispenserTriggered still emits, cooldown driven past 0.5s then re-edge "
                              "MUST re-pop (+1 entity, stock 2->1); dropper w/ TNT pops a plain item drop "
                              "with zero primed entities (dropper = item-only, the other side of the "
-                             "two-path boundary); blocked firing face (review25 #11) pops TNT at the "
-                             "next cell along facing when only the adjacent cell is walled (never "
-                             "inside the wall cell), fully-walled exit degrades to a plain item drop "
-                             "with zero primed entities (MC-approximate: recoverable item over silent "
+                             "two-path boundary); blocked firing face (review25 #11 / review26 #24) "
+                             "always degrades to a plain item drop with zero primed entities -- "
+                             "whether only the adjacent cell is walled (the wall-behind cell stays "
+                             "primed-free: old code teleported TNT through a 1-thick wall) or the "
+                             "exit is fully walled (MC-approximate: recoverable item over silent "
                              "swallow), stock decremented on every path; "
                              "redstone-direct-adjacent in-place priming regression is "
                              "covered by the t814(a) probe above";
@@ -8025,6 +8035,62 @@ int main(int argc, char *argv[])
                              "cooldown swallowed every sub-2s edge = the reported fires-once symptom), stock "
                              "decremented exactly once per shot; a fresh re-edge inside the 0.5s debounce "
                              "window stays blocked (single-path double-fire guard intact)";
+    }
+
+    // ── review26 #16 同柱垂直叠放发射器独立冷却探针（Game 层真消费端，t856/t868 模式）──
+    //   用户症状（review26 低危）：冷却键 (x<<32|z) 不含 Y → 同柱垂直两台发射器共享冷却，0.5s 内上台
+    //   发射后下台的合法沿被吞（t868「逐沿发射」语义在柱粒度上破裂）。修：键入 Y（21/21/10 三维布局，
+    //   同 m_redstoneLitCells 既有键序）。断言：同 tick 两台各自被拉杆通电 → 两箭各发一支（箭 +2、
+    //   两台库存各扣 1）——旧键下第二台被共享冷却拦（恰 1 箭、一台库存不扣），回退即红。
+    {
+        PlayerController pc;
+        EntityManager ents;
+        DispenserStore store;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setDispenserStore(&store);
+        QObject::connect(&w, &World::powerDispenserTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
+        const auto arrowCount16 = [&ents]() {
+            int n = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++n;
+            return n;
+        };
+        const auto [x0, z0] = nextSlot();
+        const int arrowsBefore = arrowCount16();
+        // 同柱两台：下台 @kRigY、上台 @kRigY+1，各配独立背面拉杆（同 tick 双上升沿）、各装 2 支箭。
+        placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0);       // 下台（state 0 → 朝 +X）
+        placeRigBlock(w, x0, kRigY + 1, z0, BR::Dispenser, 0);   // 上台
+        store.ensureDispenser(x0, kRigY, z0);
+        store.ensureDispenser(x0, kRigY + 1, z0);
+        store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::ArrowId, 2);
+        store.setSlot(x0, kRigY + 1, z0, 0, RecipeRegistry::ArrowId, 2);
+        tickN(w, 2);
+        placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1);       // 下台拉杆（on）
+        placeRigBlock(w, x0 - 1, kRigY + 1, z0, BR::Lever, 1);   // 上台拉杆（on）
+        tickN(w, 4);
+        const bool ok16 = arrowCount16() == arrowsBefore + 2                // 两台各发一支（旧键恰 +1）
+            && store.slotCountAt(x0, kRigY, z0, 0) == 1                     // 下台库存 2→1
+            && store.slotCountAt(x0, kRigY + 1, z0, 0) == 1;                // 上台库存 2→1（旧键不扣 = 被吞沿）
+        if (!ok16)
+            qInfo().noquote() << "  [review26-16 diag] arrows +" << arrowCount16() - arrowsBefore
+                          << " lowerStock" << store.slotCountAt(x0, kRigY, z0, 0)
+                          << " upperStock" << store.slotCountAt(x0, kRigY + 1, z0, 0);
+        if (!ok16) ++totalFail;
+        qInfo().noquote() << (ok16 ? "PASS" : "FAIL")
+                          << "| review26-16 per-dispenser cooldown keyed in 3D: two vertically stacked "
+                             "dispensers powered the same tick each fire their own arrow (old (x<<32|z) key "
+                             "shared the cooldown across the column and swallowed the lower machine's legal "
+                             "edge within 0.5s), both stocks decremented";
+        // 清场
+        w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+        w.setBlock(x0 - 1, kRigY + 1, z0, BR::Air, 0);
+        w.setBlock(x0, kRigY, z0, BR::Air, 0);
+        w.setBlock(x0, kRigY + 1, z0, BR::Air, 0);
+        store.clearDispenser(x0, kRigY, z0);
+        store.clearDispenser(x0, kRigY + 1, z0);
+        tickN(w, 2);
     }
 
     // ── P-t869 红石无稳态电路（时钟）复刻探针（World 层，t740 回归定位）──

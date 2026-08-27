@@ -3561,6 +3561,12 @@ bool World::recomputePowerLocal()
         }
         // t702 上墙连接位（机制等价 MC 1.0 粉沿 1 格台阶爬墙）：水平 4 向的**上 / 下一格**有粉 → 该向也
         //   置连接位（渲染画向该向的爬坡斜线，同铁轨 t667 坡向语义）。
+        //   review26 #15（登记不修，知情近似）：爬墙连接与同层连接**共用同一组 4 个水平连接位**（state 高
+        //   半字节仅 4 位，无空闲位存「坡向」标记）→ 消费端若把连接位当「同层有臂」读，坡上形态与平地不一致。
+        //   已知影响面：redstoneDustPowersNeighbor 的「臂轴延长端」形状判定（火把基座环）会把爬坡斜角粉当
+        //   同层臂 —— 粉沿台阶爬坡且一端贴火把基座时，坡上拐角可能被误判贯穿直线（坡上 NOT 门行为与平地
+        //   不一致；布局罕见）。修法需另设坡向位（位不够）或判定时回读邻格 y±1 几何（每判定两格 world 读，
+        //   热路径代价）—— 权衡后登记近似；渲染（爬坡斜线画对）与电力 BFS（距离模型自带 y±1 hop）不受影响。
         static constexpr int kHDir[4][3] = {{1,0,0},{-1,0,0},{0,0,1},{0,0,-1}};
         static constexpr quint8 kHConnBit[4] = {
             BlockRegistry::RedstoneDustConnPx, BlockRegistry::RedstoneDustConnNx,
