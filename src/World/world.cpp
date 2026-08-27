@@ -74,6 +74,7 @@ void World::beginLoad(int seed)
     m_iceCells.clear();      // t495：网格重置 → 普通冰方格索引作废（finishLoad 写完 blob 后 rebuildIceCells 全图重建）
     m_fireCells.clear();     // t724：网格重置 → 火焰方格索引作废（finishLoad 写完 blob 后 rebuildFireCells 全图重建）
     m_burningCells.clear();  // t843：网格重置 → 燃烧侧表作废（燃烧态不进存档 → 读档自然熄灭，dev-spec 明示可接受）
+    m_torchBurnout.clear();  // review26 #6：网格重置 → burnout 计数侧表作废（运行期瞬态不进存档，读档自然复位）
     m_powerDirty.clear();    // t656：网格重置 → 红石电力脏集作废（finishLoad 末全量重建红石族脏集）
     // 审查修 B5（t724-t729 复盘）：清要塞传送门坐标 —— 旧版只在世界生成（placeStronghold）记录，读档后
     //   残留上一世界坐标会让暗渊之眼（t729）朝错误方向飞；finishLoad 末 rebindStrongholdPortalFromVoxels
@@ -3372,6 +3373,43 @@ void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
     }
 }
 
+// review26 #6 火把 burnout 参数（机制近似 MC 红石火把熔断；MC 原值：60s 窗内 8 次翻转 → 熄 160 game
+//   tick = 8s。本工程红石 tick 10Hz → 秒值按 tick 数折算，语义钉死）：确定性整数计数（PLAN §2-K）。
+static constexpr int kTorchBurnoutFlipLimit     = 8;   // 窗内翻转达 8 次 → 熔断（MC：8 toggles）
+static constexpr int kTorchBurnoutWindowTicks   = 600; // 计数窗 60s（deadline 自窗内首翻起算，不逐翻刷新）
+static constexpr int kTorchBurnoutCooldownTicks = 80;  // 熔断冷却 8s（MC 160 game tick @20Hz；10Hz 折 80）
+
+// review26 #6 火把 burnout 计时（tickRedstone 头段调）：冷却 / 计数窗逐红石 tick 递减。独立于 m_powerDirty
+//   早退 —— 熔断锁定后火把稳定熄灭、周围粉失电收敛，火把格**脱离脏集**，冷却只能在此处全局走（否则锁
+//   死永远不解）。冷却归零 → 摘表 + 火把格入脏集（同 tick 的 recompute 重评 → attach 失电即重亮，电路若
+//   仍在振荡则再累积 8 翻再熔断 = MC「冷却后可再振荡」）；窗归零 → flips 清零摘表（慢电路每翻间隔 > 窗
+//   永不累积到熔断）。摘表后条目生命周期 ≤ 窗+冷却（600+80 tick），不随火把数累积。
+void World::tickTorchBurnout()
+{
+    if (m_torchBurnout.empty()) return; // 稳态零开销（同 tickRedstone 早退口径）
+    for (auto it = m_torchBurnout.begin(); it != m_torchBurnout.end(); ) {
+        TorchBurnout &bo = it->second;
+        bool expire = false;
+        if (bo.cooldownTicks > 0) {
+            --bo.cooldownTicks;
+            if (bo.cooldownTicks == 0) { // 解锁：格入脏集重评（火把可能已被玩家拆走 → 重算 no-op 无害）
+                m_powerDirty.insert(it->first);
+                expire = true;
+            }
+        } else if (bo.windowTicks > 0) {
+            --bo.windowTicks;
+            if (bo.windowTicks == 0) { bo.flips = 0; expire = true; } // 窗到期 → 计数作废
+        } else {
+            expire = true; // 空条目（防御；正常路径摘表时已清）
+        }
+        if (expire) {
+            it = m_torchBurnout.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 // 电力局部重算核心（tickRedstone 消费 m_powerDirty）：两阶段——
 //   Phase A（粉传播）：从脏锚点 BFS 收集连通粉域（上界 kPowerFloodCap）。域内每粉电力 = 16 - 距最近
 //     **活跃源**的线距（t707 源连通距离 BFS：6 正交邻粉 + t702 爬墙斜角粉各算一跳，源直供邻格 15，
@@ -3845,30 +3883,55 @@ bool World::recomputePowerLocal()
             return false;
         }(); // 附着块被供电（含形状达的粉 / 源；不含本火把与其非所指粉）
         const bool off = (st & BlockRegistry::RedstoneTorchStateOffFlag) != 0;
+        // review26 #6 burnout 锁定门：熔断冷却期内不评估不翻转（保持熄灭态——重亮被抑制；冷却到期由
+        //   tickTorchBurnout 摘表 + 入脏集唤醒重评）。门在 attachPowered 翻转判定之前。
+        {
+            const auto boIt = m_torchBurnout.find(k);
+            if (boIt != m_torchBurnout.end() && boIt->second.cooldownTicks > 0) continue;
+        }
         if (attachPowered != off) {
-            // 供电 → 置熄灭位；失电 → 清熄灭位重亮。附着位（低 3 位）不动。
-            const quint8 ns = quint8(attachPowered ? (st | BlockRegistry::RedstoneTorchStateOffFlag)
-                                                   : (st & quint8(~BlockRegistry::RedstoneTorchStateOffFlag)));
-            m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneTorch, ns);
-            recomputeLightAround(x, y, z, BlockRegistry::RedstoneTorch, st, BlockRegistry::RedstoneTorch, ns);
-            // 火把供能变化（15↔0）→ 其 6 邻粉须重算 → 火把格重入脏集（下一 tick 传播；定点迭代）。
-            m_powerDirty.insert(k);
-            // 审查 #2（t740 降沿失达补口）：本翻转分支是静默直写（m_chunks.setBlock），不经 notePowerWrite
-            //   的火把斜下环入脏集；而 Phase A 锚点展开只播 6 正交种子，(±1,-1,0)/(0,-1,±1) 斜角粉从火把格
-            //   出发永不可达 → 熄灭 / 重亮两方向环粉都保留陈旧电力（NOT 门灯恒亮 / TNT 假信号，直到该粉
-            //   线被任意其它编辑触碰）。修法与 notePowerWrite 的 kDiag 环入脏集同表（kHDir2）同判定：翻转
-            //   时把 4 个斜下粉一并入脏集，下一 tick 锚点自身是粉即入域重算（升 / 降沿各收敛一次）。
-            //   复审 #6：与供电 seeding 同步只对**立式**火把（ay==-1）扩脏集 —— 墙挂火把与斜下粉无供电
-            //   关系（seeding 已拒），翻转时不再把无关斜角粉拉入重算（两处立式语义保持一致；notePowerWrite
-            //   的编辑路径扩集是可达性超集（拆火把时旧 attach state 不可得），重算幂等无害）。
-            if (ay == -1) {
-                for (const auto &h : kHDir2) {
-                    const int nx = x + h[0], ny = y - 1, nz = z + h[1];
-                    if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
-                        m_powerDirty.insert(packGrowthCell(nx, ny, nz));
-                }
+            // review26 #6 burnout 计数：每次翻转入窗（窗内首翻开窗，deadline 不逐翻刷新——慢电路每翻
+            //   间隔 > 窗则窗到期清零永不熔断；5Hz 振荡窗内累积 8 次 → 熔断锁熄 8s，冷却后可再振荡
+            //   = MC 火把熔断近似）。熔断时若本次是自然熄灭向（attachPowered）照写熄灭；若是重亮向
+            //   （失电重亮）则**抑制**（ns==st 不写）——两种方向都终止于「锁定熄灭」。
+            TorchBurnout &bo = m_torchBurnout[k]; // 引用稳（unordered_map 插入不失效引用）
+            if (bo.windowTicks == 0) {
+                bo.flips = 0; // 新窗首翻（上一窗已到期 / 首次）
+                bo.windowTicks = quint16(kTorchBurnoutWindowTicks);
             }
-            any = true;
+            ++bo.flips;
+            const bool burnout = bo.flips >= kTorchBurnoutFlipLimit;
+            if (burnout) {
+                bo.cooldownTicks = quint16(kTorchBurnoutCooldownTicks);
+                bo.flips = 0;
+                bo.windowTicks = 0;
+            }
+            // 供电 → 置熄灭位；失电 → 清熄灭位重亮（burnout 抑制重亮）。附着位（低 3 位）不动。
+            const quint8 ns = (burnout || attachPowered)
+                                  ? quint8(st | BlockRegistry::RedstoneTorchStateOffFlag)
+                                  : quint8(st & quint8(~BlockRegistry::RedstoneTorchStateOffFlag));
+            if (ns != st) { // 熔断抑制重亮时无写入（状态保持 + 不触发传播；burnout 表自身已在计时）
+                m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneTorch, ns);
+                recomputeLightAround(x, y, z, BlockRegistry::RedstoneTorch, st, BlockRegistry::RedstoneTorch, ns);
+                // 火把供能变化（15↔0）→ 其 6 邻粉须重算 → 火把格重入脏集（下一 tick 传播；定点迭代）。
+                m_powerDirty.insert(k);
+                // 审查 #2（t740 降沿失达补口）：本翻转分支是静默直写（m_chunks.setBlock），不经 notePowerWrite
+                //   的火把斜下环入脏集；而 Phase A 锚点展开只播 6 正交种子，(±1,-1,0)/(0,-1,±1) 斜角粉从火把格
+                //   出发永不可达 → 熄灭 / 重亮两方向环粉都保留陈旧电力（NOT 门灯恒亮 / TNT 假信号，直到该粉
+                //   线被任意其它编辑触碰）。修法与 notePowerWrite 的 kDiag 环入脏集同表（kHDir2）同判定：翻转
+                //   时把 4 个斜下粉一并入脏集，下一 tick 锚点自身是粉即入域重算（升 / 降沿各收敛一次）。
+                //   复审 #6：与供电 seeding 同步只对**立式**火把（ay==-1）扩脏集 —— 墙挂火把与斜下粉无供电
+                //   关系（seeding 已拒），翻转时不再把无关斜角粉拉入重算（两处立式语义保持一致；notePowerWrite
+                //   的编辑路径扩集是可达性超集（拆火把时旧 attach state 不可得），重算幂等无害）。
+                if (ay == -1) {
+                    for (const auto &h : kHDir2) {
+                        const int nx = x + h[0], ny = y - 1, nz = z + h[1];
+                        if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
+                            m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+                    }
+                }
+                any = true;
+            } // ns != st（burnout 抑制重亮分支到此）
         }
     }
     return any;
@@ -3880,6 +3943,7 @@ bool World::recomputePowerLocal()
 //   MC 红石的多 tick 传播延迟；一格 100ms —— 比真实的 1 redstone tick（0.1s）恰同量级）。
 void World::tickRedstone()
 {
+    tickTorchBurnout(); // review26 #6：burnout 计时独立于脏集早退（锁定火把脱离脏集后冷却仍要走到期）
     if (m_powerDirty.empty()) return; // 稳态零开销（lessons perf-fluid-scan：无红石场景不扫描）
     FrameProfiler::Scope prof("wRed"); // perf：红石重算计时进 w* 桶
     if (recomputePowerLocal()) {
@@ -4508,6 +4572,7 @@ void World::generate()
     m_iceCells.clear();      // t495：全新世界 → 清普通冰方格索引（worldgen freezeSurfaceWater 直写 chunk → 末尾 rebuildIceCells 全图重建）
     m_fireCells.clear();     // t724：全新世界 → 清火焰方格索引（worldgen 无火 → 稳态空集零开销；玩家点燃经 noteFireWrite 增量维护）
     m_burningCells.clear();  // review25 #1：全新世界 → 清燃烧侧表（regenerate/setSeed/setWidth/setDepth/setHeight 直调 generate 不经
+    m_torchBurnout.clear();  // review26 #6：全新世界 → burnout 计数侧表作废（同 burningCells 世界复位口径）
                              //   beginLoad/rebuildFireCells → 漏清则旧世界燃烧坐标污染新世界：isBurningAt 假阳性点燃无辜可燃块 +
                              //   tickFire 倒计时继续烧毁替换（无掉落不可逆）+ 该格打火石被守卫拦成 no-op）
     m_powerDirty.clear();    // t656：全新世界 → 清红石电力脏集（worldgen 无红石电路 → 稳态空集零开销）

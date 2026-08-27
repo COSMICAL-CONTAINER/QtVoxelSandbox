@@ -105,11 +105,12 @@ struct RecvDef {
 };
 
 // t886 获物弹速抛物解镜像（PlayerController useFishingRod 获物分支；P18 双钉——改值须两处同步）：
-//   弹出点 = 浮标位 +0.35 抬升（kFishCatchRiseOffset，出水面上空气格）；目标 = 玩家脚位 +0.9（m_height 1.8
-//   之半）；T = clamp(0.45+0.055D, 0.5, 1.4)；vy = Δy/T + 14T（½g，g=28 掉落物重力镜像）；返 |v|。
+//   弹出点 = 浮标格向上**列扫**首个非水格 +0.225（review26 #7 口径——kFishCatchPopOffset；直上空气 =
+//   floor(bobY)+1+0.225，静水/流动水同式）；目标 = 玩家脚位 +0.9（m_height 1.8 之半）；
+//   T = clamp(0.45+0.055D, 0.5, 1.4)；vy = Δy/T + 14T（½g，g=28 掉落物重力镜像）；返 |v|。
 float fishCatchSpeedMirror(const QVector3D &bobPos, const QVector3D &playerFeet)
 {
-    const float spY = bobPos.y() + 0.35f;
+    const float spY = std::floor(bobPos.y()) + 1.225f; // 列扫：直上空气格顶 +0.225（rig 水池皆无冰盖）
     const float dx = playerFeet.x() - bobPos.x();
     const float dz = playerFeet.z() - bobPos.z();
     const float dy = (playerFeet.y() + 0.9f) - spY;
@@ -8140,6 +8141,239 @@ int main(int argc, char *argv[])
                              "cleared of involvement";
     }
 
+    // ── P-review26-5 红石粉形状输出「臂轴延长端」语义探针（review26 #5：拐角/单臂垂直侧自相矛盾修口）──
+    //   旧判定等价「目标向无连接位且非贯穿直线侧即供电」：单臂粉向三个非连接方向全 true，贯穿直线垂直侧
+    //   false——同为垂直于粉臂的侧面，一格之差行为翻转（L 形拐角格垂直侧贴 TNT/灯/发射器/铁门意外通电）。
+    //   新语义：目标 ±X 输出 iff X 轴有连接（px||nx）、±Z iff（pz||nz）、dot 仍 false。
+    //   (a) 纯函数四形真值表（连接位直构）：端点垂直侧 false（修掉矛盾面）/ 端点延长端 true / 拐角开放侧
+    //       true / 贯穿直线侧向 false / dot 全 false / 垂直对角 false；
+    //   (b) World 行为级（专用局部世界 + 固定坐标，t829 免凿高台先例——**不占 nextSlot 主世界位**：本批
+    //       探针前移会推移 t812 等下游探针的 rig 位，矿车跑法对槽位地形敏感 = 假 FAIL）：端点粉臂**垂直于**
+    //       基座方向 → 火把恒亮（旧代码此形态供电 → 火把熄 = FAIL 面）；臂沿基座方向（延长端，拉杆驱动）→
+    //       火把锁存熄灭（正对照，t869(b) NOT 门形态不变）；拐角开放侧 → 供电熄灭（正对照，与旧行为一致）。
+    {
+        const auto dustSt = [](quint8 conn) { return quint8(conn << 4); };
+        const quint8 armNx  = dustSt(BR::RedstoneDustConnNx);
+        const quint8 armPx  = dustSt(BR::RedstoneDustConnPx);
+        const quint8 corner = dustSt(BR::RedstoneDustConnPx | BR::RedstoneDustConnPz);
+        const quint8 lineZ  = dustSt(BR::RedstoneDustConnPz | BR::RedstoneDustConnNz);
+        const bool okTable =
+            // 端点（单臂 -X）：延长端 ±X 输出；垂直侧 ±Z 不输出（review26 #5 修掉的矛盾面）
+            BR::redstoneDustPowersNeighbor(armNx, -1, 0) && BR::redstoneDustPowersNeighbor(armNx, 1, 0)
+            && !BR::redstoneDustPowersNeighbor(armNx, 0, 1) && !BR::redstoneDustPowersNeighbor(armNx, 0, -1)
+            // 端点（单臂 +X）镜像
+            && BR::redstoneDustPowersNeighbor(armPx, 1, 0) && BR::redstoneDustPowersNeighbor(armPx, -1, 0)
+            && !BR::redstoneDustPowersNeighbor(armPx, 0, 1) && !BR::redstoneDustPowersNeighbor(armPx, 0, -1)
+            // 拐角（px+pz）：两个几何可达开放侧（-X 延长端 / -Z 延长端）输出
+            && BR::redstoneDustPowersNeighbor(corner, -1, 0) && BR::redstoneDustPowersNeighbor(corner, 0, -1)
+            // 贯穿直线（Z 轴）：侧向 ±X 不输出（t740 反闪烁保持）；轴向 ±Z 输出
+            && !BR::redstoneDustPowersNeighbor(lineZ, 1, 0) && !BR::redstoneDustPowersNeighbor(lineZ, -1, 0)
+            && BR::redstoneDustPowersNeighbor(lineZ, 0, 1) && BR::redstoneDustPowersNeighbor(lineZ, 0, -1)
+            // dot（无连接）：全向不输出（P4/P14 语义）
+            && !BR::redstoneDustPowersNeighbor(dustSt(0), 1, 0) && !BR::redstoneDustPowersNeighbor(dustSt(0), 0, 1)
+            // 垂直 / 对角 / 零偏移：无形状语义
+            && !BR::redstoneDustPowersNeighbor(armNx, 0, 0) && !BR::redstoneDustPowersNeighbor(armNx, 1, 1);
+        // 专用世界（seed 77：实测地形 ≤81 → 84+ 全空带，t835 同款）：y84 石平台，器件层 y85，火把 y86。
+        World wR5;
+        wR5.setWidth(48); wR5.setDepth(48); wR5.setHeight(96); wR5.setSeed(77);
+        for (int x = 2; x <= 40; ++x)
+            for (int z = 2; z <= 40; ++z) wR5.setBlock(x, 84, z, BR::Stone, 0);
+        // (b1) 端点垂直侧（判别面）：基座 -X、粉臂 +Z（臂垂直于基座方向）→ 无 X 轴臂 → 不供电 → 火把恒亮。
+        //      旧代码：!nx && !straightZ 全 true + 火把斜下喂粉 → attachPowered → 熄灭（= 矛盾行为）。
+        placeRigBlock(wR5, 6, 85, 6, BR::Stone, 0);
+        wR5.setBlock(7, 85, 6, BR::RedstoneDust, 0);
+        wR5.setBlock(7, 85, 7, BR::RedstoneDust, 0); // 臂 +Z（垂直侧形态）
+        tickN(wR5, 2);
+        placeRigBlock(wR5, 6, 86, 6, BR::RedstoneTorch, 0);
+        bool anyOff1 = false;
+        for (int t = 0; t < 16; ++t) {
+            wR5.tickRedstone();
+            if (wR5.stateAt(6, 86, 6) & BR::RedstoneTorchStateOffFlag) anyOff1 = true;
+        }
+        const bool okPerp = !anyOff1;
+        if (!okPerp)
+            qInfo().noquote() << "  [review26-5 b1 diag] anyOff1" << anyOff1;
+        wR5.setBlock(6, 86, 6, BR::Air, 0);
+        wR5.setBlock(7, 85, 6, BR::Air, 0);
+        wR5.setBlock(7, 85, 7, BR::Air, 0);
+        wR5.setBlock(6, 85, 6, BR::Air, 0);
+        tickN(wR5, 2);
+        // (b2) 端点延长端正对照（拉杆驱动，锁存非振荡）：臂 +X 沿基座方向 → 供电 → 火把持续熄灭。
+        placeRigBlock(wR5, 12, 85, 6, BR::Stone, 0);
+        wR5.setBlock(13, 85, 6, BR::RedstoneDust, 0);
+        wR5.setBlock(14, 85, 6, BR::RedstoneDust, 0);
+        placeRigBlock(wR5, 15, 85, 6, BR::Lever, 1);
+        tickN(wR5, 2);
+        placeRigBlock(wR5, 12, 86, 6, BR::RedstoneTorch, 0);
+        bool off2 = false;
+        for (int t = 0; t < 12; ++t) {
+            wR5.tickRedstone();
+            if (t >= 6 && (wR5.stateAt(12, 86, 6) & BR::RedstoneTorchStateOffFlag)) off2 = true;
+        }
+        const bool okExt = off2;
+        if (!okExt)
+            qInfo().noquote() << "  [review26-5 b2 diag] off2" << off2;
+        wR5.setBlock(12, 86, 6, BR::Air, 0);
+        wR5.setBlock(15, 85, 6, BR::Air, 0);
+        wR5.setBlock(13, 85, 6, BR::Air, 0);
+        wR5.setBlock(14, 85, 6, BR::Air, 0);
+        wR5.setBlock(12, 85, 6, BR::Air, 0);
+        tickN(wR5, 2);
+        // (b3) 拐角开放端正对照：粉 A 连 +X（远端）与 +Z（拐臂）成拐角，基座在 -X 开放侧 → 供电 → 熄灭
+        //      （旧行为一致——拐角开放端 true 两版相同，钉住不回归）。
+        placeRigBlock(wR5, 18, 85, 6, BR::Stone, 0);
+        wR5.setBlock(19, 85, 6, BR::RedstoneDust, 0);
+        wR5.setBlock(20, 85, 6, BR::RedstoneDust, 0); // px 臂（远端）
+        wR5.setBlock(19, 85, 7, BR::RedstoneDust, 0); // pz 拐臂 → A 成拐角形
+        placeRigBlock(wR5, 21, 85, 6, BR::Lever, 1);
+        tickN(wR5, 2);
+        placeRigBlock(wR5, 18, 86, 6, BR::RedstoneTorch, 0);
+        bool off3 = false;
+        for (int t = 0; t < 12; ++t) {
+            wR5.tickRedstone();
+            if (t >= 6 && (wR5.stateAt(18, 86, 6) & BR::RedstoneTorchStateOffFlag)) off3 = true;
+        }
+        const bool okCorner = off3;
+        if (!okCorner)
+            qInfo().noquote() << "  [review26-5 b3 diag] off3" << off3;
+        wR5.setBlock(18, 86, 6, BR::Air, 0);
+        wR5.setBlock(21, 85, 6, BR::Air, 0);
+        wR5.setBlock(19, 85, 6, BR::Air, 0);
+        wR5.setBlock(20, 85, 6, BR::Air, 0);
+        wR5.setBlock(19, 85, 7, BR::Air, 0);
+        wR5.setBlock(18, 85, 6, BR::Air, 0);
+        tickN(wR5, 2);
+        const bool okR5 = okTable && okPerp && okExt && okCorner;
+        if (!okR5) ++totalFail;
+        qInfo().noquote() << (okR5 ? "PASS" : "FAIL")
+                          << "| review26-5 dust shape output unified to arm-axis extension semantics: "
+                             "target +-X powered iff the dust has an X-axis arm (px||nx), +-Z iff "
+                             "(pz||nz), dot stays dark - endpoint perpendicular sides no longer power "
+                             "(old rule powered all 3 non-connected sides of a single-arm dust while a "
+                             "through-line's perpendicular side stayed dark - same geometry, opposite "
+                             "verdict one cell apart), endpoint extension end / corner open sides / "
+                             "through-line axial ends still power (NOT-gate and clock wiring intact), "
+                             "t740 anti-flicker shapes (dot + through-line side) unchanged; four-shape "
+                             "function truth table + world rigs: perpendicular-arm endpoint keeps the "
+                             "torch lit (old code powered it), lever-driven extension end and corner "
+                             "open side keep it latched off (positive controls)";
+    }
+
+    // ── P-review26-6 火把 burnout 熔断探针（review26 #6：端点粉贴基座永续振荡无兜底）──
+    //   t869 形状语义恢复端点/拐角回灌后，「火把立方块上 + 基座旁 ≥2 格端点粉」= 5Hz 永续振荡（每 tick
+    //   recomputeLightAround 双调 + chunk mesh 10Hz 重建直到玩家干预）；MC 有 torch burnout 熔断。本探针钉
+    //   MC 近似参数（镜像常量 P18 模式）：**8 次翻转（60s 窗内）→ 锁定熄灭 80 红石 tick（8s）→ 冷却后可再
+    //   振荡**（确定性整数计数，PLAN §2-K）。
+    //   (a) 拉杆驱动精确翻转：NOT 门 rig 4 个 on/off 半周期 = 恰 8 翻 → 第 8 翻熔断——拉杆 OFF（attach 失电，
+    //       自然应重亮）而火把保持熄灭 = 锁定面；+70 tick 仍熄；75..100 tick 窗内重亮（冷却 80 ± 传播余量）；
+    //       重亮后再拨拉杆立即再熄（冷却后电路照常工作）。
+    //   (b) 自由时钟（t869(a) 同 rig）长跑 320 tick：早期 ≥4 翻（振荡未被熔断误杀）→ 出现 60..100 tick
+    //       连续熄灭段（锁定段长钉冷却量级）→ 段后 100 tick 内再翻转（冷却后恢复振荡 = 「可振荡」tradeoff
+    //       保持，burnout 只封「永续」）。
+    {
+        constexpr int kMirrorBurnoutFlips = 8;      // World::kTorchBurnoutFlipLimit 镜像（改值须两处同步）
+        constexpr int kMirrorBurnoutCooldown = 80;  // World::kTorchBurnoutCooldownTicks 镜像
+        Q_UNUSED(kMirrorBurnoutFlips);
+        // 专用世界（同 review26-5：seed 77 全空带 y84+ 平台——不占 nextSlot 主世界位，防下游槽位漂移）。
+        World wR6;
+        wR6.setWidth(48); wR6.setDepth(48); wR6.setHeight(96); wR6.setSeed(77);
+        for (int x = 2; x <= 40; ++x)
+            for (int z = 2; z <= 40; ++z) wR6.setBlock(x, 84, z, BR::Stone, 0);
+        // (a) 拉杆驱动（P14 几何：拉杆贴**支撑块**侧面——直供 attach，翻转链每拨恰一翻可精确计数；t869(b)
+        //     的「拉杆贴粉线远端」形态锚点 2-hop 展开够不到火把，lever 翻转永不复评 = rig 假死）。
+        placeRigBlock(wR6, 6, 85, 14, BR::Stone, 0);
+        placeRigBlock(wR6, 6, 85, 15, BR::Lever, 1); // ON（贴支撑侧面）
+        tickN(wR6, 2);
+        placeRigBlock(wR6, 6, 86, 14, BR::RedstoneTorch, 0);
+        tickN(wR6, 6);
+        const auto torchOffA = [&]() {
+            return (wR6.stateAt(6, 86, 14) & BR::RedstoneTorchStateOffFlag) != 0;
+        };
+        bool okA = torchOffA(); // 翻 1：lever ON → 锁存熄灭
+        for (int half = 0; half < 7 && okA; ++half) { // 翻 2..8：交替 off/on 半周期
+            wR6.setBlock(6, 85, 15, BR::Lever, quint8(half % 2 == 0 ? 0 : 1));
+            tickN(wR6, 6);
+            const bool off = torchOffA();
+            if (half < 6) {
+                okA = okA && (off == (half % 2 == 1)); // 前 6 半周期正常翻转（lever on 段熄 / off 段亮）
+            } else {
+                okA = okA && off; // 第 8 翻（lever OFF 后本应重亮）熔断 → 保持熄灭 = 锁定
+            }
+            if (!okA)
+                qInfo().noquote() << "  [review26-6 a half diag] half" << half << "off" << off;
+        }
+        int relightTick = -1;
+        for (int t = 1; t <= 110 && okA; ++t) {
+            wR6.tickRedstone();
+            if (t <= 70 && !torchOffA()) { okA = false; break; } // 冷却期内不得重亮
+            if (t > 70 && !torchOffA() && relightTick < 0) relightTick = t;
+        }
+        okA = okA && relightTick > 72 && relightTick <= 100; // 冷却 80 ± 锁定点/传播余量
+        if (okA) { // 冷却后电路照常：再拨 lever → 立即再熄（新计数窗开跑）
+            wR6.setBlock(6, 85, 15, BR::Lever, 1);
+            tickN(wR6, 6);
+            okA = torchOffA();
+        }
+        if (!okA)
+            qInfo().noquote() << "  [review26-6 a diag] relightTick" << relightTick
+                              << "endOff" << torchOffA();
+        wR6.setBlock(6, 86, 14, BR::Air, 0);
+        wR6.setBlock(6, 85, 15, BR::Air, 0);
+        wR6.setBlock(6, 85, 14, BR::Air, 0);
+        tickN(wR6, 2);
+        // (b) 自由时钟长跑（t869(a) 同 rig：火把立方块上 + 端点粉 stub 贴基座侧自持振荡）。
+        placeRigBlock(wR6, 12, 85, 14, BR::Stone, 0);
+        wR6.setBlock(13, 85, 14, BR::RedstoneDust, 0);
+        wR6.setBlock(14, 85, 14, BR::RedstoneDust, 0);
+        tickN(wR6, 2);
+        placeRigBlock(wR6, 12, 86, 14, BR::RedstoneTorch, 0);
+        std::vector<bool> offSeq;
+        offSeq.reserve(320);
+        for (int t = 0; t < 320; ++t) {
+            wR6.tickRedstone();
+            offSeq.push_back((wR6.stateAt(12, 86, 14) & BR::RedstoneTorchStateOffFlag) != 0);
+        }
+        int flipsEarly = 0;
+        for (size_t t = 1; t < offSeq.size(); ++t)
+            if (t <= 60 && offSeq[t] != offSeq[t - 1]) ++flipsEarly;
+        int best = 0, cur = 0, bestEnd = 0;
+        for (size_t t = 0; t < offSeq.size(); ++t) {
+            if (offSeq[t]) {
+                ++cur;
+                if (cur > best) { best = cur; bestEnd = int(t); }
+            } else {
+                cur = 0;
+            }
+        }
+        bool recovered = false; // 锁定段结束后 100 tick 内有翻转（冷却后恢复振荡）
+        for (int t = bestEnd + 1; t < std::min(int(offSeq.size()), bestEnd + 101); ++t)
+            if (offSeq[t] != offSeq[t - 1]) { recovered = true; break; }
+        const bool okB = flipsEarly >= 4 && best >= 60 && best <= 100 && recovered;
+        if (!okB)
+            qInfo().noquote() << "  [review26-6 b diag] flipsEarly" << flipsEarly
+                              << "bestStreak" << best << "recovered" << recovered;
+        wR6.setBlock(12, 86, 14, BR::Air, 0);
+        wR6.setBlock(13, 85, 14, BR::Air, 0);
+        wR6.setBlock(14, 85, 14, BR::Air, 0);
+        wR6.setBlock(12, 85, 14, BR::Air, 0);
+        tickN(wR6, 2);
+        const bool okR6 = okA && okB;
+        if (!okR6) ++totalFail;
+        qInfo().noquote() << (okR6 ? "PASS" : "FAIL")
+                          << "| review26-6 torch burnout fuse: a torch flipping "
+                             + QString::number(kMirrorBurnoutFlips) + " times inside the 60s window "
+                             "locks OFF for " + QString::number(kMirrorBurnoutCooldown) + " redstone "
+                             "ticks (8s, MC 160gt parity) then re-evaluates - lever-driven NOT rig: "
+                             "8th flip (would-be relight under an OFF lever) stays dark = locked, no "
+                             "relight within 70 ticks, relight lands in the 73..100 window, circuit "
+                             "toggles normally after cooldown; free-running endpoint-dust clock: >=4 "
+                             "flips before the fuse (oscillation not over-killed), a 60..100-tick "
+                             "continuous dark stretch (lock magnitude), and post-lock flips within "
+                             "100 ticks (cooldown expiry restores oscillation - astable circuits "
+                             "remain buildable, only PERPETUAL 5Hz hammering is fused; deterministic "
+                             "integer counters, PLAN 2-K)";
+    }
+
     // ── P-t870 红石粉中键复制给物品 id 探针（t815 返修：根因不在图标源在 id）──
     //   用户二报「复制红石粉仍非红石粉图标」。根因：pickBlock 把**方块形态** 130 写进 hotbar →
     //   ① 图标走方块段路径（图集瓦片重渲，连接形随电力态变）；② 与红石 tab / 材料段的粉条目（0x224）
@@ -14074,6 +14308,60 @@ Item {
                              "24 ticks + displacement >4 blocks (teleport band 8-16 vs wander <1/s)";
     }
 
+    // ── P-review26-8 弹射物闪避不清仇恨源码钉（review26 #8：浮标闪避复用 teleportEntity 免费净化）──
+    //   行为级不可密闭驱动的取舍声明：enraged 是 ≤1s 瞬态（rage 满 1s 即 teleportBehindPlayer 转蓄力段，
+    //   背后无落点也清 enraged 防卡态），且进入态依赖「夜行者面朝玩家」——游荡 yaw 随机翻转 → headless
+    //   掷骰驱动必 flaky（t882 mob flake 前车之鉴，不新增）——按 t889(a3)/t836(e) 源码钉手法锁语句面：
+    //   ① teleportEntity 落定清仇恨三连（enraged/rageTimer/windupTimer）被 clearAggro 参数门控；
+    //   ② 箭链 / 浮标两处弹射物闪避调用显式传 false（MC 1.0 末影人被投射物闪避不解除仇恨；浮标 0 伤害
+    //      0 消耗清仇恨 = 免费无限远程「净化」+ 打断攻击前摇，箭链同为投射物一并修）；
+    //   ③ 水逃逸 / 近战 dodge 保持默认 true（既有设计：水伤与近身交互打断激怒）+ 头文件默认参数存在。
+    //   闪避行为本身（位移 / 不钩定 / 箭消耗）由 t883 / t829(b) 行为级探针覆盖，不重摆。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile cf(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+        QFile hf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+        const QString ct = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
+        const QString ht = hf.open(QIODevice::ReadOnly) ? QString::fromUtf8(hf.readAll()) : QString();
+        const int b0 = ct.indexOf(QStringLiteral("bool EntityManager::teleportEntity"));
+        const int b1 = ct.indexOf(QStringLiteral("bool EntityManager::teleportBehindPlayer"));
+        bool okGuard = false, okCalls = false, okDefault = false, okDecl = false;
+        if (b0 < 0 || b1 <= b0 || ht.isEmpty()) {
+            qInfo().noquote() << "  [review26-8 diag] slice miss b0" << b0 << "b1" << b1;
+        } else {
+            QString body;
+            for (const QString &line : ct.mid(b0, b1 - b0).split(QLatin1Char('\n')))
+                if (!line.trimmed().startsWith(QLatin1String("//"))) { body += line; body += QLatin1Char('\n'); }
+            // ① 清仇恨三连被参数门控（签名带参 + if (clearAggro) 守卫）
+            okGuard = body.contains(QStringLiteral("bool clearAggro"))
+                      && body.contains(QStringLiteral("if (clearAggro)"));
+            // ② 箭链 + 浮标两处弹射物闪避显式 false
+            okCalls = ct.count(QStringLiteral("clearAggro=*/false")) == 2;
+            // ③ 水逃逸 + 近战 dodge 保持默认调用（Max 后紧跟右括号 = 未传参）
+            okDefault = ct.count(QStringLiteral("kNightwalkerTeleportMax)")) == 2;
+            // 头文件默认参数（true = 近战/水逃逸清仇恨语义保持）
+            okDecl = ht.contains(QStringLiteral("bool clearAggro = true"));
+        }
+        const bool okR8 = okGuard && okCalls && okDefault && okDecl;
+        if (!okR8) ++totalFail;
+        if (!okR8)
+            qInfo().noquote() << "  [review26-8 diag] okGuard" << okGuard << "okCalls" << okCalls
+                              << "okDefault" << okDefault << "okDecl" << okDecl;
+        qInfo().noquote() << (okR8 ? "PASS" : "FAIL")
+                          << "| review26-8 projectile dodge no longer wipes aggro: teleportEntity's "
+                             "landing hatred-clear trio (enraged/rageTimer/windupTimer) is gated "
+                             "behind a clearAggro param; the arrow-chain and bobber dodge call sites "
+                             "pass false explicitly (MC 1.0 enderman projectile-dodge keeps aggro - "
+                             "the 0-damage 0-cost bobber was a free repeatable ranged pacify that "
+                             "also cancelled attack windup), while water-escape and melee dodge "
+                             "keep the default true (documented design: water damage and close-"
+                             "range interaction interrupt rage); source pin because the enraged "
+                             "state is a sub-1s transient gated on random wander yaw - behavioral "
+                             "driving would be flaky (t889 a3 / t836 e precedent); dodge behavior "
+                             "itself stays covered by the t883/t829(b) rigs";
+    }
+
     // ── P-t884 咬钩可见性全套探针（行为级：①入水水花信号恰一次 + 坐标；Water 态查询三态分辨；Game 层
     //    bobberInWater 镜像翻转。②微飘动画 / ③水面轨迹粒子 / ④下沉加深与咬钩水花加强是 QML 视觉层——
     //    commit 钉 visual-only：驱动条件（bobberInWater && !hasBite）已被本探针行为级锁死）──
@@ -14173,7 +14461,8 @@ Item {
 
     // ── P-t886 鱼获反馈探针（行为级：获物抛物弹出落玩家旁可捡 + 经验球 1-6 XP）──
     //    pc 真 Consumer 端（ItemEntityManager + XpOrbManager 都注入）：甩竿 → settle → drive 到咬钩 → 收竿 →
-    //    ① 掉落物实体已生成于浮标位 +0.35 抬升点（水面上空气格——浮水分支不吞弧线）；
+    //    ① 掉落物实体已生成于浮标格向上**列扫**弹出点（review26 #7：首个非水格 +0.225 = 静水格顶+0.225——
+    //    水面上空气格，浮水分支不吞弧线；旧 +0.35 固定抬升口径退役）；
     //    ② 推掉落物物理 3s（60 tick × 0.05）→ 落定在玩家中心 2.2 格内（抛物解准确弹向玩家，可捡）；
     //    ③ 经验球恰一枚、量 ∈[1,6]（MC 1.0 钓鱼 1-6 XP）、落浮标格中心（+0.5）；
     //    ④ 弹速 = 抛物解 |v| 镜像（近距 ≈8.1，随距离自适应）+ 耐久 -1（口径不变）。
@@ -14226,11 +14515,12 @@ Item {
         const QVector3D bobPos = ents.posAt(bob);
         const int dur0 = hb.durabilityAt(0);
         pc.useFishingRod(); // 窗内收竿 → C++ 直调 spawnItemThrown + spawnOrb（t886 主路径）
-        // ① 掉落物已生成于抬升弹出点（浮标位 + 0.35 出水面上空气格）
+        // ① 掉落物已生成于列扫弹出点（review26 #7：浮标格向上首个非水格 +0.225——静水 = 格顶+0.225；
+        //    本 rig 浮标 settle 于 (5, fy+1, 6) → 弹出格 (5, fy+2, 6)）
         int item = -1;
         for (int i = 0; i < items.count(); ++i)
             if (items.aliveAt(i)) { item = i; break; }
-        const QVector3D spawnExp(bobPos.x(), bobPos.y() + 0.35f, bobPos.z());
+        const QVector3D spawnExp(bobPos.x(), std::floor(bobPos.y()) + 1.225f, bobPos.z());
         bool okItem = item >= 0 && caughtCount == 1
                       && qAbs(items.posAt(item).x() - spawnExp.x()) < 1e-2f
                       && qAbs(items.posAt(item).y() - spawnExp.y()) < 1e-2f
@@ -14277,9 +14567,10 @@ Item {
         qInfo().noquote() << (okT886 ? "PASS" : "FAIL")
                           << "| t886 catch feedback: the loot item is spawned C++-side (dispenser/dropper "
                              "direct-call precedent) as a solved ballistic throw from the bobber - spawn "
-                             "point lifted +0.35 into the air cell above the water surface (the bobber "
-                             "floats INSIDE the top water cell; spawning in place would hit the item "
-                             "float-water branch which zeroes vy and glues the drop to the surface, "
+                             "point column-scanned to the first non-water cell above the bobber +0.225 "
+                             "(review26 #7: static water = cell top +0.225; the old fixed +0.35 lift "
+                             "never left the water cell on flowing water where the surface frac is lower, "
+                             "and the item float-water branch zeroes vy and glues the drop to the surface, "
                              "killing the arc), target = player center, flight time clamp(0.45+0.055D, "
                              "0.5,1.4), vy = dy/T + g*T/2 (g=28 item gravity mirror) - after 3s of "
                              "item physics the drop rests within 2.2 blocks of the player center "
@@ -14290,6 +14581,101 @@ Item {
                              "informational - double-spawn guard); rod -1 unchanged. Matrix probe "
                              "drives a real PlayerController with ItemEntityManager + XpOrbManager "
                              "injected";
+    }
+
+    // ── P-review26-7 流动水获物弹出点列扫探针（review26 #7：+0.35 固定抬升在 state≥2 未离水格）──
+    //   旧口径 kFishCatchRiseOffset 0.35 只在静水（state 0，液面 7/8）恰好把生成点送出水格；流动水
+    //   state≥2 液面 ≤0.75 → 生成点仍落水格内 → 掉落物浮水分支（vy 清零 + 恒速上浮）把弧线整个吞掉，
+    //   获物粘回浮标处（t886 症状在河流 / 溢流边缘复发）。新口径：从浮标格向上**列扫**首个非 Water 格再
+    //   +0.225（与 ItemEntityManager 浮水分支自己的列扫同源）。rig：3×3 池 state=5（液面 3/8 → 浮标 settle
+    //   y = 格底+0.25，旧口径生成点 = +0.60 仍在水格 = FAIL 面）→ ① 生成点 y = 首非水格+0.225 = 池上空气格
+    //   fy+2+0.225 且中心格非 Water；② 弧线不被吞：spawn 后 2 tick 水平位移 >0（浮水分支只动 Y）。
+    //   t886 探针（静水 rig）已同步新口径断言，两水位全覆盖。
+    {
+        World wL;
+        wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(84);
+        EntityManager ents;
+        ItemEntityManager items;
+        XpOrbManager orbs;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickL = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wL, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        for (int x = 3; x <= 8; ++x)
+            for (int z = 4; z <= 8; ++z) wL.setBlock(x, fy, z, BR::Stone, 0);
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) wL.setBlock(x, fy + 1, z, BR::Water, 5); // 流动水 state 5（液面 3/8）
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wL);
+        pc.setEntityManager(&ents);
+        pc.setItemEntities(&items);
+        pc.setXpOrbManager(&orbs);
+        pc.setHotbar(&hb);
+        pc.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+        int caughtCount = 0;
+        QObject::connect(&pc, &PlayerController::fishCaught, &pc,
+                         [&](int, int, float, float, float, float, float, float) { ++caughtCount; });
+        pc.useFishingRod();
+        int bob = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
+        // state 5：settle y = (fy+1) + 3/8 − 0.125 = fy+1.25（浮定沿随液面折算，同 t892 口径）
+        const QVector3D settlePos(5.5f, float(fy + 1) + 0.25f, 6.5f);
+        bool okCast = bob >= 0;
+        for (int t = 0; t < 40 && okCast; ++t) {
+            tickL(1, 0.05f);
+            if (!ents.aliveAt(bob)) { okCast = false; break; }
+            if (ents.posAt(bob) == settlePos) break;
+        }
+        okCast = okCast && ents.posAt(bob) == settlePos;
+        for (int t = 0; t < 660 && okCast && !ents.bobberHasBiteAt(bob); ++t) tickL(1, 0.05f);
+        okCast = okCast && ents.bobberHasBiteAt(bob);
+        const QVector3D bobPos = ents.posAt(bob);
+        pc.useFishingRod(); // 窗内收竿 → 获物 spawnItemThrown（review26 #7 列扫弹出点）
+        int item = -1;
+        for (int i = 0; i < items.count(); ++i)
+            if (items.aliveAt(i)) { item = i; break; }
+        // ① 生成点在非水格：列扫 → 浮标格 (5, fy+1, 6) 上首个非水格 = (5, fy+2, 6) 空气格 → y = fy+2+0.225
+        const QVector3D spawnExp(bobPos.x(), float(fy + 2) + 0.225f, bobPos.z());
+        const bool okSpawn = item >= 0 && caughtCount == 1
+                             && qAbs(items.posAt(item).x() - spawnExp.x()) < 1e-2f
+                             && qAbs(items.posAt(item).y() - spawnExp.y()) < 1e-2f
+                             && qAbs(items.posAt(item).z() - spawnExp.z()) < 1e-2f
+                             && wL.blockAt(5, fy + 2, 6) != BR::Water;
+        // ② 弧线不被浮水分支吞：spawn 后 2 tick 水平位移 >0.05（浮水分支 vy 清零只动 Y，水平冻结）
+        bool okArc = false;
+        QVector3D pos2;
+        for (int t = 0; t < 2 && okSpawn; ++t) {
+            items.tick(0.05, &wL);
+            pos2 = items.posAt(item);
+        }
+        if (okSpawn && items.aliveAt(item)) {
+            const float dh = QVector3D(pos2.x() - spawnExp.x(), 0.0f, pos2.z() - spawnExp.z()).length();
+            okArc = dh > 0.05f;
+        }
+        const bool okR7 = okCast && okSpawn && okArc;
+        if (!okR7) ++totalFail;
+        if (!okR7)
+            qInfo().noquote() << "  [review26-7 diag] okCast" << okCast << "okSpawn" << okSpawn
+                              << "(itemPos" << (item >= 0 ? items.posAt(item) : QVector3D())
+                              << "exp" << spawnExp << ") okArc" << okArc << "(pos2" << pos2 << ")";
+        qInfo().noquote() << (okR7 ? "PASS" : "FAIL")
+                          << "| review26-7 catch spawn escapes FLOWING water: the loot pop point is "
+                             "column-scanned from the bobber cell up to the first non-water cell "
+                             "(+0.225, same column-scan the item float-water branch itself uses) "
+                             "instead of a fixed +0.35 lift - on state>=2 water the surface frac is "
+                             "<=0.75 so the old fixed lift left the spawn INSIDE the water cell and "
+                             "the float branch zeroed vy and swallowed the whole arc (the t886 "
+                             "'no visible catch flight' symptom recurring on rivers/overflow "
+                             "edges); rig: 3x3 pool at state 5 (surface 3/8, bobber settles at "
+                             "cell+0.25, old code spawned at +0.60 = still in water) - spawn lands "
+                             "at the air cell above (non-water center cell) and the drop moves "
+                             "horizontally within 2 ticks (arc alive); the t886 static-water probe "
+                             "asserts the same column-scan value (cell top +0.225)";
     }
 
     // ── P-t888 火伤节奏对齐 MC 探针（行为级 + 数值钉）──

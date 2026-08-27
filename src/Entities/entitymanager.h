@@ -1711,10 +1711,14 @@ private:
     // t727 通用瞬移（夜行者怕水 / 弹射物 / 近战 dodge 逃逸共用；机制等价 MC 末影人瞬移）：以 e 为中心随机选
     //   [minDist, maxDist] 水平距离 + 随机方向，迭代 kTeleportAttempts 次找「落点格非水 + 下方有 solid 支撑 + 该
     //   处 AABB 不与其他活体 mob 重叠」的空位（targetX/targetZ = 既存生成位用；绝大多数为简单地面随机瞬移）。
-    //   找到 → 设 e.pos（水平 + 支撑面贴地 resting）+ 解除休息 + teleportCooldown 设 kNightwalkerTeleportCooldown +
-    //   置 enraged=false（瞬移打断激怒时序）+ 返 true；找不到（全试失败，如被围困 / 地形不允许）→ 不移动返 false。
+    //   找到 → 设 e.pos（水平 + 支撑面贴地 resting）+ 解除休息 + teleportCooldown 设 kNightwalkerTeleportCooldown
+    //   + 返 true；找不到（全试失败，如被围困 / 地形不允许）→ 不移动返 false。
     //   目标：安全落点非水 / 非实体 —— 找到即返（不做有向收敛；MC 末影人瞬移本就无向随机）。
-    bool teleportEntity(int idx, Entity &e, World *world, float minDist, float maxDist);
+    //   clearAggro（review26 #8）：true（默认）= 落定清 enraged/rageTimer/windupTimer（近战 dodge / 水逃逸——
+    //   近身交互与水伤打断激怒的既有设计）；false = 只位移不清仇恨（箭链 / 浮标弹射物闪避——MC 1.0 末影人
+    //   被投射物闪避不解除仇恨；浮标 0 伤害 0 消耗，清了就是免费无限远程「净化」+ 打断攻击前摇）。
+    bool teleportEntity(int idx, Entity &e, World *world, float minDist, float maxDist,
+                        bool clearAggro = true);
     // t727 瞬移到玩家背后（激怒满 rageTimer 后调）：落点 = 玩家眼睛 − 玩家 lookDir × 1.6，XZ 取该水平 + 往下扫
     //   （qFloor 下方 solid 支撑的贴地格），Y = 支撑面 + halfH。若落点被占（非空位 / 水）→ teleportEntity(1,6)
     //   随机近距兜底。成功返 true（置 teleportCooldown + 清 enraged 进蓄力段）。仅夜行者用。
