@@ -3657,9 +3657,14 @@ bool World::recomputePowerLocal()
     // t704 动力轨链式激活预计算（机制等价 MC 1.0 powered rail 信号沿同向链传播，链最长 8 根）：被红石块 /
     //   火把 / 粉等直接供电的轨把信号传给**同轴向**（沿轨延伸方向）相邻的动力轨，链上每根依次接力——块直接
     //   激活 1 根 → 该根向同向链传播共 ≤8 根（用户实测「红石块只激活贴邻 1 根」→ 本链补全）。实现：种子 =
-    //   receivers 内 isReceivingPower 的动力轨（直供轨），沿轴向 4 邻（x±1 / z±1 同 y 动力轨）分层 BFS，
-    //   深度 < kGoldenRailChainMax；可达轨 chainPowered。期望位 = direct ∪ chain——下方 receivers 循环
-    //   统一按本表写位（升 / 降沿对称：去源 → direct 消失 → chain 收缩 → 远端轨熄灭）。
+    //   receivers 内 isReceivingPower 的动力轨（直供轨），沿轴向 4 邻分层 BFS，深度 < kGoldenRailChainMax；
+    //   可达轨 chainPowered。期望位 = direct ∪ chain——下方 receivers 循环统一按本表写位（升 / 降沿对称：
+    //   去源 → direct 消失 → chain 收缩 → 远端轨熄灭）。
+    //   **t910 沿坡传播**（spec「充能扩散沿轨走向含升降」）：轴向邻不再钉同 y —— 每向先 railProbeDelta
+    //   三高探针（same/up/down，与 railConnections / 矿车 pickTrackStep 同一权威）解出**该向轨几何层的
+    //   高度差**，邻轨取 c.y+delta。旧版「同 y 轴向邻（信号不爬坡）」→ 上坡的动力轨链（每根 +1）一根都
+    //   传不到（用户报「上坡的动力铁轨被红石激活只亮贴邻，平地却能传 8 根」）。平链 delta 恒 0 行为不变；
+    //   同层优先的探针序保「平/坡并存时走平面连接」（railConnections 同款）。
     //   同 pass 同步展开（不走跨 tick 级联）：金轨通电位是渲染 / boost 语义位（powerSourceLevel 不读它
     //   → 无自反馈 / 无双缓冲快照隔离需求），BFS 定深即结果确定。
     //   链轨不互供**电力**（只传通电位）——MC 语义：动力轨链是「信号延伸器」不是电源，链轨旁的 TNT / 灯
@@ -3683,7 +3688,16 @@ bool World::recomputePowerLocal()
             std::vector<GCell> nextG;
             for (const GCell &c : frontierG) {
                 for (const auto &a : kAxial) {
-                    const int nx = c.x + a[0], ny = c.y, nz = c.z + a[1]; // 同 y 轴向邻（信号不爬坡）
+                    const int px = c.x + a[0], pz = c.z + a[1]; // 该向邻列（Y 由三高探针解出）
+                    if (!inBounds(px, c.y + 1, pz) && !inBounds(px, c.y, pz) && !inBounds(px, c.y - 1, pz))
+                        continue;
+                    // t910：三高探针解该向轨层差（same 优先 / up / down；INT_MIN = 该向无轨不传）。
+                    const int dy = BlockRegistry::railProbeDelta(
+                        { m_chunks.blockAt(px, c.y,     pz),
+                          m_chunks.blockAt(px, c.y + 1, pz),
+                          m_chunks.blockAt(px, c.y - 1, pz) });
+                    if (dy == INT_MIN) continue;
+                    const int nx = px, ny = c.y + dy, nz = pz; // 沿轨走向含升降
                     if (!inBounds(nx, ny, nz)) continue;
                     if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::GoldenRail) continue;
                     goldenSeenAll.insert(packGrowthCell(nx, ny, nz)); // 链外轨也记（降沿复查）
@@ -3725,11 +3739,15 @@ bool World::recomputePowerLocal()
                 // t704 链波前推进：本轨位翻转 → 同轴向邻的动力轨通电位可能因此变（升：链外扩一步；
                 //   降：熄灭收缩一步）→ 轴向邻轨入脏集，下一 tick 复查（同粉变化格回插模式；m_chunks
                 //   .setBlock 静默写不经 notePowerWrite → 手动补）。稳定后不再翻转 → 不再入集 → 稳态停。
+                //   t910：邻轨含 ±1 层（坡链的波前在升降层 —— 只插同 y 会把坡链的翻转传播卡死在
+                //   首格，链永不满编）。
                 static constexpr int kAx2[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
                 for (const auto &a : kAx2) {
-                    const int nx = x + a[0], nz = z + a[1];
-                    if (inBounds(nx, y, nz) && m_chunks.blockAt(nx, y, nz) == BlockRegistry::GoldenRail)
-                        m_powerDirty.insert(packGrowthCell(nx, y, nz));
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        const int nx = x + a[0], ny = y + dy, nz = z + a[1];
+                        if (inBounds(nx, ny, nz) && m_chunks.blockAt(nx, ny, nz) == BlockRegistry::GoldenRail)
+                            m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+                    }
                 }
                 any = true;
             }
@@ -3838,11 +3856,14 @@ bool World::recomputePowerLocal()
                               quint8(wantOn ? (st | BlockRegistry::GoldenRailStateOnFlag)
                                             : (st & quint8(~BlockRegistry::GoldenRailStateOnFlag))));
             // t704 链波前推进（同上 receivers 循环分支——位翻转 → 轴向邻轨入脏集下 tick 复查）。
+            //   t910：邻轨含 ±1 层（坡链波前，同上）。
             static constexpr int kAx3[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
             for (const auto &a : kAx3) {
-                const int nx = x + a[0], nz = z + a[1];
-                if (inBounds(nx, y, nz) && m_chunks.blockAt(nx, y, nz) == BlockRegistry::GoldenRail)
-                    m_powerDirty.insert(packGrowthCell(nx, y, nz));
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const int nx = x + a[0], ny = y + dy, nz = z + a[1];
+                    if (inBounds(nx, ny, nz) && m_chunks.blockAt(nx, ny, nz) == BlockRegistry::GoldenRail)
+                        m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+                }
             }
             any = true;
         }

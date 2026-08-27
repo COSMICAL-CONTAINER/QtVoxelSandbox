@@ -10661,6 +10661,74 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t910 动力铁轨充能沿坡传播探针（World 直编；spec「上坡的动力铁轨被红石激活应传播到上下坡固定
+    //    距离的动力铁轨（现只有平地传远）—— 充能扩散沿轨走向含升降」）──
+    //   rig：坡链（种子直供 + 向东逐格 +1 共 6 根）+ 同长度平链对照（同种子位直供）。
+    //   断言：(a) 坡链 6 根全部置 GoldenRailStateOnFlag —— 传播距离与平地一致（钉「固定距离沿轨走向含
+    //            升降」；旧版链 BFS 钉同 y → 坡链除种子外一根不亮）；
+    //         (b) 平链 6 根全亮（t704 平链语义回归）；
+    //         (c) 拆源 → 两链全灭（降沿对称沿坡收缩 —— 波前 ±1 层入脏集，熄灭链不被卡在首格）。
+    {
+        // rig 选址：运行期扫描空区。dx -1..6、dz -1..3、dy -2..+6。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 92 && x0 < 0; zz += 4)
+            for (int xx = 4; xx + 5 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 6 && clear; ++dx)
+                    for (int dz = -1; dz <= 3 && clear; ++dz)
+                        for (int dy = -2; dy <= 6 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t910 golden-rail slope power chain: no clear rig area found";
+        } else {
+            // 坡链（z0）：种子 (x0,Y) 直供 + 向东逐格 +1 共 6 根。**源放种子侧邻**（非脚下）——
+            //   脚下源被拆时种子轨同步失撑掉落（t733 支撑规则），测的是「轨消失」非「降沿熄灭」。
+            w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+            for (int i = 0; i <= 5; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0);
+            // 平链（z0+2）：镜像同长、种子位同侧邻直供。
+            w.setBlock(x0 - 1, kRigY, z0 + 2, BR::RedstoneBlock, 0);
+            for (int i = 0; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0 + 2, BR::GoldenRail, 0);
+            tickN(w, 10); // 电力重算收敛（链波前逐 tick 外扩）
+            const auto onCount = [&](int z, bool slope) {
+                int n = 0;
+                for (int i = 0; i <= 5; ++i)
+                    if ((w.stateAt(x0 + i, kRigY + (slope ? i : 0), z) & BR::GoldenRailStateOnFlag) != 0) ++n;
+                return n;
+            };
+            const int onSlope = onCount(z0, true);
+            const int onFlat = onCount(z0 + 2, false);
+            // (c) 降沿：拆两源 → 全灭（源在侧邻，拆源只断供不掉轨）。
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 - 1, kRigY, z0 + 2, BR::Air, 0);
+            tickN(w, 10);
+            const int offSlope = onCount(z0, true);
+            const int offFlat = onCount(z0 + 2, false);
+            const bool ok = onSlope == 6 && onFlat == 6 && offSlope == 0 && offFlat == 0;
+            if (!ok)
+                qInfo().noquote() << "  t910 onSlope" << onSlope << "onFlat" << onFlat
+                                  << "offSlope" << offSlope << "offFlat" << offFlat;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t910 golden-rail power chain follows rail geometry up/down slopes: a "
+                                 "redstone-fed powered rail lights all 6 rails of a +1-per-cell climbing "
+                                 "chain exactly like the same-length flat chain (old BFS was same-Y only - "
+                                 "slope chains stayed dark past the seed), and removing the source "
+                                 "extinguishes both chains symmetrically (falling-edge wavefront also "
+                                 "walks the slope layers)";
+            // 清场
+            for (int i = 0; i <= 5; ++i) {
+                w.setBlock(x0 + i, kRigY + i, z0, BR::Air, 0);
+                w.setBlock(x0 + i, kRigY, z0 + 2, BR::Air, 0);
+            }
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 - 1, kRigY, z0 + 2, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
     //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；
