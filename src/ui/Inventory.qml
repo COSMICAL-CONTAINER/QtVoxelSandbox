@@ -727,8 +727,12 @@ Item {
                     // t900 垃圾桶语义终版（用户 8-25 定稿原话：「普通左键=清光标持有 + shift+左键=清空整个背包」）：
                     //   - 普通左键（无 Shift）：t839 语义保持——① 光标持有 → 整组销毁（heldBlock=0 同步清 count/
                     //     耐久/附魔/名）；② 光标空手 → 清当前选中槽单格（setStack(selectedSlot,0,0)，绝批量）。
-                    //   - Shift+左键：清空**整个背包**——hotbar 9 槽 + main 27 槽 + 光标持有全清（恢复批量清空档，
-                    //     创造/生存同语义）。
+                    //   - Shift+左键：清空**整个背包**——hotbar 9 槽 + main 27 槽 + 盔甲 4 槽（armorSetStack 独立
+                    //     存储，review27 #21① 补——旧版漏清致「整个背包」语义不完整）+ 2×2 合成格原料（craftSlots
+                    //     本地态；输出槽是 craftRev 派生绑定，清原料即清产物）+ 光标持有全清（创造/生存同语义）。
+                    //     **产品风险登记（review27 #21②，不加确认）**：垃圾桶槽与 hotbar 行相邻，全界面 shift+左键
+                    //     = 搬运的肌肉记忆下，搬物点击偏一格即触发不可逆全清且无 undo——语义为用户 8-25 定稿
+                    //     （上方注释钉死），确认弹窗留待用户实测后再议；误触后生存损失不可恢复，操作时留意。
                     // 事件源选型：TapHandler 不分辨修饰键（t700 教训）→ 改 MouseArea（mouse.modifiers 直读
                     //   ShiftModifier 分流）。仅收左键（acceptedButtons LeftButton）——右键仍全归 root 右键
                     //   TapHandler 独占（t79 拿半/均分手势，t138 无 DragHandler 抢右键 grab 语义保持：
@@ -739,11 +743,19 @@ Item {
                         onClicked: (mouse) => {
                             if (!root.hotbar) return
                             if ((mouse.modifiers & Qt.ShiftModifier) !== 0) {
-                                // Shift+左键：清空整个背包（hotbar 9 + main 27 + 光标持有）。
+                                // Shift+左键：清空整个背包（hotbar 9 + main 27 + 盔甲 4 + 合成格 4 + 光标持有）。
                                 for (let s = 0; s < 9; ++s)
                                     root.hotbar.setStack(s, 0, 0)
                                 for (let m = 0; m < root.hotbar.mainCount; ++m)
                                     root.hotbar.mainSetStack(m, 0, 0)
+                                for (let a = 0; a < 4; ++a)          // 盔甲四槽（armorSetStack 独立存储）
+                                    root.hotbar.armorSetStack(a, 0, 0)
+                                root.craftSlots = [0, 0, 0, 0]        // 2×2 合成格原料（平行数组全清）
+                                root.craftCounts = [0, 0, 0, 0]
+                                root.craftDur = [0, 0, 0, 0]
+                                root.craftEnch = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]]
+                                root.craftName = ["", "", "", ""]
+                                root.craftRev++                       // 输出槽随 craftRev 派生绑定重算为空
                                 if (root.hotbar.heldBlock !== 0)
                                     root.hotbar.heldBlock = 0
                             } else if (root.hotbar.heldBlock !== 0) {

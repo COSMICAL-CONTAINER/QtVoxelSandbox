@@ -172,7 +172,8 @@ Item {
             case 3: return 0.06   // 羊 [-0.44, 0.33]
             case 4: return 0.06   // 蹒跚者 [-0.90, 0.79]
             case 5: return 0.08   // 骸骨 [-0.90, 0.75]
-            case 6: return 0.05   // 潜行者 [-0.90, 0.81]（t616 拉高 ~1.7 格后近对称 → 微上提居中）
+            case 6: return 0.05   // 潜行者 [-0.77, 0.69]（t894 0.85 视觉缩放后跨度；缩放前 [-0.90, 0.81]——
+                                  //   中心偏移差 <0.05 格视觉不可辨，0.05 沿用 t616 值；review27 #24 注释勘误）
             case 7: return 0.08   // 蜘蛛 [-0.30, 0.13]
             case 8: return 0.01   // 鸡 [-0.40, 0.38]
             case 9: return 0.07   // 鱿鱼 [-0.46, 0.32]（t778 删尖顶后 pack 开关两态统一；全跨度中心 -0.07 → 上提居中）
@@ -249,14 +250,17 @@ Item {
     //   整模，零回归）。
     readonly property bool sheepSkinHeadActive:
         root.selectedMobFromSection === 3 && !root.sheepSheared
-    // t880 「有 3D 模型的物品」3D 预览判据（家族 = Main.qml isItem3DFamily 掉落物家族 ∪ 木楼梯 16——
-    //   查看器楼梯**上 3D**、掉落物按 MC 平贴语义保留 billboard，两处差集即 16）：活板门（20/136）/
-    //   火把（13）/ 台阶四族（15/87/58/109）/ 木楼梯（16）/ 雪层（44）/ 草丛（24）/ 附魔台（94，带书）→
-    //   ItemShapeGeometry 真实 3D 形状旋转预览（替代大图标平面图）。字面量 = BlockRegistry id（QML
-    //   不 import C++ 枚举；两侧家族表注释互指——加族员须同步两处）。
+    // t880 「有 3D 模型的物品」3D 预览判据（家族 = Main.qml isItem3DFamily 掉落物家族 ∪ **楼梯三族
+    //   16/59/110**——查看器楼梯**上 3D**、掉落物按 MC 平贴语义保留 billboard，两处差集即楼梯三族；
+    //   review27 #19①：旧版只并了木楼梯 16，圆石楼梯 59 / 石砖楼梯 110 仍 2D 大图标——同为 ShapeStairs
+    //   几何，一并补进（掉落物侧楼梯三族都不进 isItem3DFamily，两侧家族表差集 = {16,59,110}））：
+    //   活板门（20/136）/ 火把（13）/ 台阶四族（15/87/58/109）/ 楼梯三族（16/59/110）/ 雪层（44）/
+    //   草丛（24）/ 附魔台（94，带书）→ ItemShapeGeometry 真实 3D 形状旋转预览（替代大图标平面图）。
+    //   字面量 = BlockRegistry id（QML 不 import C++ 枚举；两侧家族表注释互指——加族员须同步两处）。
     readonly property bool selectedIsItem3D: root.selectedId === 13 || root.selectedId === 20
         || root.selectedId === 136 || root.selectedId === 15 || root.selectedId === 87
         || root.selectedId === 58 || root.selectedId === 109 || root.selectedId === 16
+        || root.selectedId === 59 || root.selectedId === 110
         || root.selectedId === 44 || root.selectedId === 24 || root.selectedId === 94
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
