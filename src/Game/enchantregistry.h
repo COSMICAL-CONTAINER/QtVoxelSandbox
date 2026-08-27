@@ -67,7 +67,8 @@ public:
         UndeadSlay      = 2,  // 亡灵杀手：对亡灵类 mob 伤害 +（机制等价 MC Smite；max 5）
         ArthropodSlay   = 3,  // 节肢克星：对节肢类 mob 伤害 +（机制等价 MC arthropod-slayer；max 5）
         Knockback       = 4,  // 击退：命中 mob 击退距离 +（机制等价 MC knockback；max 2）
-        FireAspect      = 5,  // 燃焰：命中 mob 点燃（机制等价 MC fire-aspect；max 2）
+        FireAspect      = 5,  // 燃焰：命中 mob 点燃（机制等价 MC fire-aspect；max 2）。t919 账目钉死：不进
+                               //   weaponAttackDamage（直伤/攻击面板 0 加成），输出全在 ignite(level×4s) 的 DoT。
         Efficiency      = 6,  // 效率：挖掘速度 +（机制等价 MC efficiency；max 5）
         SilkTouch       = 7,  // 精准采集：掉落方块自身（机制等价 MC silk-touch；max 1）
         Fortune         = 8,  // 时运：掉落倍率 +（机制等价 MC fortune；max 3）
