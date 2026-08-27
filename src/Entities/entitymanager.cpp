@@ -4754,6 +4754,9 @@ void EntityManager::tickVehicleRiding()
     }
 
     bool dirty = false;
+    // review26 #10：本 pass 内是否有乘客钉位值真变（= 载客矿车 / 船本帧移动，钉位公式算出新位）。
+    //   只统计「跟车钉位」——登乘 / 自释放等一次性状态变化仍走 20Hz 相位门（无逐帧刷新需求）。
+    bool pinMoved = false;
     for (int idx = 0; idx < int(m_entities.size()); ++idx) {
         Entity &e = m_entities[size_t(idx)];
         if (!e.alive || e.kind != Mob || e.dead) continue; // 空槽 / 非 mob / 尸体不参与钉位与登乘
@@ -4766,7 +4769,7 @@ void EntityManager::tickVehicleRiding()
                 && m_cartMgr->mobPassengerAt(ci) == idx) {
                 const QVector3D cp = m_cartMgr->posAt(ci);
                 const QVector3D pin(cp.x(), cp.y() - kEmCartSeatFloorDrop + e.halfH, cp.z());
-                if (e.pos != pin) { e.pos = pin; dirty = true; }
+                if (e.pos != pin) { e.pos = pin; dirty = true; pinMoved = true; }
             } else {
                 e.rideCart = -1;
                 e.resting = false; // 解除静止让重力复探支撑面：钉位 Y（车座位）常高于地面 → 不解除则复探
@@ -4788,7 +4791,7 @@ void EntityManager::tickVehicleRiding()
                 const QVector3D pin(bp.x() + std::cos(yawRad) * side,
                                     bp.y() + e.halfH,
                                     bp.z() - std::sin(yawRad) * side);
-                if (e.pos != pin) { e.pos = pin; dirty = true; }
+                if (e.pos != pin) { e.pos = pin; dirty = true; pinMoved = true; }
             } else {
                 e.rideBoat = -1;
                 e.resting = false; // 同矿车自释放：重力复探支撑面（船座位高于地面 / 水面落点由重力 + 浮力接手）。
@@ -4860,6 +4863,18 @@ void EntityManager::tickVehicleRiding()
     //   → pending 由**下一帧** tick 的相位门接住（≤kEmitEveryN 帧 ≈ 50ms 延迟，钉位呈现层无感）；
     //   m_pendingEmit 持续脏确保变更不丢。
     if (dirty) m_pendingEmit = true;
+    // review26 #10 乘客钉位帧同步发射：钉位值真变（载客车 / 船本帧移动）→ bump rideRevision + 发
+    //   ridersChanged。取舍（review 三选一，此处取「乘客单开小名单每帧 emit」的变体——专用 revision
+    //   而非复用 entitiesChanged）：①「bump 矿车侧 revision」按字面不解——mob delegate 不观察
+    //   carts.entitiesChanged，bump 车侧 revision 对乘客 delegate 零刷新；让 mob 绑定改触 carts.revision
+    //   则任何车（含玩家骑乘 / 空车）移动都激活全体 mob position 绑定，触发面比「载客载具移动」宽。
+    //   ② 本实现：发射条件恰 = 载客载具移动帧（静止 / 无乘客零发射），QML 侧仅 position 一条绑定触碰
+    //   rideRevision（t500 卡顿主因的 ~12 条 revision 绑定 + MobModel 几何重建面不被触碰；乘客
+    //   walkPhase 冻结、非乘客重采样到相同 / 静息值 = no-op）→ 乘客与车 delegate 同帧 60Hz 刷新，玩家
+    //   骑乘观感不受影响（车侧 notifyChanged 节奏未动）。调序注：本 pass 每帧两调（mob 桶内 #1 在 step
+    //   前、step 后 #2）——车在 step 内推进 → 只有 #2 观察到钉位变化 → 稳态恰每帧一次发射；船由
+    //   BoatManager::tick 常开推进 → #1 或 #2 恰一处观察到，同样 ≤1 次 / 帧。
+    if (pinMoved) { ++m_rideRevision; emit ridersChanged(); }
 }
 
 // 重力 + AI wander + 地面静止（机制同 ItemEntityManager::tick；向下只读 World::isSolid/blockAt）。

@@ -30,6 +30,11 @@ Node {
     property int tableY: 0
     property int tableZ: 0
     property bool active: false
+    // review26 #11（t889 补漏，同 EnchantGlyphFlow 同批）：硬暂停总闸——宿主注入 window.worldRunning。
+    //   ESC 硬档符文停发 + 在飞符文冻结（恢复自然续飞，MC Java 单机暂停粒子冻结）；软档 GUI 开照常。
+    //   旧 tickTimer 由 onCompleted 里的 start() 常开（菜单 / 暂停期空转扫池）→ 改声明式 running，
+    //   菜单 / 硬暂停零触发。
+    property bool worldRunning: false
     property int editRev: 0
 
     // ---- 池配置 ----
@@ -52,7 +57,6 @@ Node {
             root.pool.push({ obj: m, vel: null, swayPhase: 0.0, swayAmp: 0.0,
                              life: 0.0, maxLife: 1.0, active: false })
         }
-        tickTimer.start()
         console.info("[t649] EnchantRunes ready; pool=" + root.poolSize
                      + " (Model+Timer pool; no Particles3D dependency)")
     }
@@ -87,12 +91,13 @@ Node {
     // 常驻漂浮 Timer：t697 改「active && 有书架」即流（active = playing 常驻，宿主绑 window.appState）——
     //   只要有参与书架，符文从书架向台持续飘（用户「粒子应常驻循环，非仅放入物品时」）。面板开 / 关
     //   不再门控（关面板旁有书架也飘，机制等价 MC 附魔台常驻符文）；无书架（shelfCells 空）spawnTimer
-    //   停摆（running 绑 length > 0），在飞符文仍由 tickTimer 推进至寿终。
+    //   停摆（running 绑 length > 0），在飞符文仍由 tickTimer 推进至寿终。review26 #11：worldRunning
+    //   并入 —— ESC 硬档停发（t873 同构漏网，与 EnchantGlyphFlow 同批修）。
     Timer {
         id: spawnTimer
         interval: 500
         repeat: true
-        running: root.active && root.shelfCells.length > 0
+        running: root.active && root.shelfCells.length > 0 && root.worldRunning
         onTriggered: {
             const n = 1 + Math.floor(Math.random() * 2)
             for (let i = 0; i < n; ++i) root.spawnRune()
@@ -141,12 +146,14 @@ Node {
         // 池满：静默丢（同 BlockParticles）
     }
 
-    // 弹道推进 Timer（~50fps）：直线漂向台心 + 正弦横向摆动 + 渐隐；到期归位入池。
+    // 弹道推进 Timer（~50fps）：直线漂向台心 + 正弦横向摆动 + 渐隐；到期归位入池。review26 #11：改
+    //   声明式 running（原 running:false + onCompleted start() 常开）—— 世界运行期照常推进（在飞符文
+    //   至寿终 / 硬暂停冻结中途、恢复自然续飞）；菜单 / 硬暂停零触发（原空转扫池的小开销一并消除）。
     Timer {
         id: tickTimer
         interval: 20
         repeat: true
-        running: false
+        running: root.worldRunning
         onTriggered: {
             const dt = 0.020
             const arr = root.pool

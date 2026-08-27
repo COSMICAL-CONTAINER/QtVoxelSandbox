@@ -45,6 +45,11 @@ Node {
     // 绑 tableModel.count —— 增/删台（含读档重建的 clear+append、onWorldChanged 孤儿清理）触发重扫。
     property int tableCount: 0
     property bool active: false
+    // review26 #11（t889 补漏）：硬暂停总闸——宿主经 glyphFlowLoader.onLoaded 注入 window.worldRunning
+    //   （Qt.binding；同 active/world/camNode 注入先例，组件不直引跨上下文 id）。ESC 硬档（世界全停）时
+    //   spawn 停 + 在飞字形冻结（恢复时自然续飞，机制等价 MC Java 单机暂停粒子冻结）；软档 GUI 开
+    //   worldRunning 仍真 → 照常发射。旧版只绑 active（appState=="playing"）→ ESC 时白字持续飞（finding）。
+    property bool worldRunning: false
     property bool uiOpen: false
     property int openTableX: 0
     property int openTableY: 0
@@ -137,12 +142,13 @@ Node {
 
     // 发射轮（500ms）：① 距离门 —— 书架离相机 >16 格的对剔除（远处不发射）；② 期望值法 —— 每近处对
     //   ratePerShelf × 0.5s（所开台 ×uiBoost）累加出期望发射数，整数部分 + 按小数部分概率补 1（3-6s
-    //   一粒的**随机**低频，非整齐节拍）；③ 全局 maxPerTick 封顶。无对 → running=false 零开销。
+    //   一粒的**随机**低频，非整齐节拍）；③ 全局 maxPerTick 封顶。无对 / 硬暂停 → running=false 零开销
+    //   （review26 #11：worldRunning 并入——ESC 全停时不新增发射）。
     Timer {
         id: spawnTimer
         interval: 500
         repeat: true
-        running: root.active && root.pairs.length > 0
+        running: root.active && root.pairs.length > 0 && root.worldRunning
         onTriggered: {
             const camPos = root.camNode ? root.camNode.position : null   // JS 读 = 快照（不建绑定依赖）
             const near = []
@@ -227,12 +233,14 @@ Node {
 
     // 弹道推进 Timer（~50fps）：参数化飞行 + 正弦轻弧 + billboard 朝相机 + 前 12% 淡入 × (1-k) 全程
     //   线性渐隐（t797「途中缓慢变透明」）；t≥1 落书心已全透明即回收（到达即删）。running 绑
-    //   active || liveCount>0 —— active 翻假后在飞颗粒放完即全停（零常驻）。
+    //   (active || liveCount>0) && worldRunning —— active 翻假后在飞颗粒放完即全停（零常驻）；
+    //   review26 #11：硬暂停亦冻结（在飞字形停在中途，恢复时自然续飞——比「暂停期继续飞完」更贴
+    //   MC Java 单机 ESC 粒子冻结；暂停叠层遮住世界，冻结不可见无观感代价）。
     Timer {
         id: tickTimer
         interval: 20
         repeat: true
-        running: root.active || root.liveCount > 0
+        running: (root.active || root.liveCount > 0) && root.worldRunning
         onTriggered: {
             const dt = 0.020
             const camPos = root.camNode ? root.camNode.position : null   // JS 读 = 快照（不建绑定依赖）

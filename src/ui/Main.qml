@@ -1857,14 +1857,16 @@ Window {
         id: waterAnimTimer
         interval: 150
         repeat: true
-        running: true   // 不门控 appState：菜单态水/岩浆段不渲染（visible 绑 vertexCount>0），Timer 空跑零成本
+        // review26 #11（全仓纯视觉 Timer 清点批）：世界材质翻书帧 gate worldRunning——ESC 硬档水面冻结
+        //   （MC Java 单机暂停时贴图动画停）；菜单态本就不渲染水段（下方四 Timer 同注）。软档 GUI 开照翻。
+        running: window.worldRunning
         onTriggered: window.waterAnimFrame = (window.waterAnimFrame + 1) % resourcePack.waterStripFrames
     }
     Timer {
         id: lavaAnimTimer
         interval: 250
         repeat: true
-        running: true
+        running: window.worldRunning   // review26 #11：同 waterAnimTimer（硬暂停岩浆面冻结）
         onTriggered: window.lavaAnimFrame = (window.lavaAnimFrame + 1) % resourcePack.lavaStripFrames
     }
     // t724 火焰 flipbook：32 帧 × ~150ms ≈ 4.8s/圈（对齐水节拍；MC fire frametime=1 tick=50ms 偏快刺眼，
@@ -1873,7 +1875,7 @@ Window {
         id: fireAnimTimer
         interval: 150
         repeat: true
-        running: true
+        running: window.worldRunning   // review26 #11：同 waterAnimTimer（硬暂停火焰冻结）
         onTriggered: window.fireAnimFrame = (window.fireAnimFrame + 1) % resourcePack.fireStripFrames
     }
     // t725 余烬门 flipbook：32 帧 × ~150ms（同火节拍——门面紫焰漩涡与火同为翻书观感）。帧切换纯材质参数
@@ -1882,7 +1884,7 @@ Window {
         id: portalAnimTimer
         interval: 150
         repeat: true
-        running: true
+        running: window.worldRunning   // review26 #11：同 waterAnimTimer（硬暂停门漩涡冻结）
         onTriggered: window.portalAnimFrame = (window.portalAnimFrame + 1) % resourcePack.portalStripFrames
     }
     // perf-t520 进 playing 立即刷新（避免 hudPosText 首帧空白），F3 切换 on 时立即刷一次。
@@ -5436,6 +5438,8 @@ Window {
             onLoaded: {
                 // 关键：领养进场景锚点 Node（否则加载到的 Node parent=null → 孤儿 → 不渲染）。
                 particleLoader.item.parent = particlesHost
+                // review26 #11：硬暂停总闸注入（碎屑/烟雾在飞冻结，恢复续飞；菜单/硬暂停 tickTimer 零触发）。
+                particleLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })
                 console.info("[t16] BlockParticles adopted into scene graph (parent=Node)")
             }
             onStatusChanged: {
@@ -5466,6 +5470,8 @@ Window {
                 runeLoader.item.active = Qt.binding(function() {
                     return window.appState === "playing"
                 })
+                // review26 #11：硬暂停总闸注入（ESC 全停 → 符文停发 + 在飞冻结；软档 GUI 开照常）。
+                runeLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })
                 runeLoader.item.tableX = Qt.binding(function() { return window.enchantX })
                 runeLoader.item.tableY = Qt.binding(function() { return window.enchantY })
                 runeLoader.item.tableZ = Qt.binding(function() { return window.enchantZ })
@@ -5510,6 +5516,10 @@ Window {
                 glyphFlowLoader.item.active = Qt.binding(function() {
                     return window.appState === "playing"
                 })
+                // review26 #11（finding 本体）：硬暂停总闸注入——ESC 时字形停发 + 在飞冻结（恢复自然续飞，
+                //   机制等价 MC Java 单机暂停粒子冻结）；软档 GUI 开 worldRunning 仍真照常。旧版两 Timer
+                //   只绑 active（appState 派生）→ ESC 世界全停而白字持续飞。
+                glyphFlowLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })
                 glyphFlowLoader.item.uiOpen = Qt.binding(function() { return window.enchantingTableOpen })
                 glyphFlowLoader.item.openTableX = Qt.binding(function() { return window.enchantX })
                 glyphFlowLoader.item.openTableY = Qt.binding(function() { return window.enchantY })
@@ -6487,8 +6497,15 @@ Window {
                     property real entBabyScale: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.babyScaleAt(index)) : 0 }
                     position: {
                         const _r = entityManager.revision
+                        // review26 #10 载具乘客钉位同步采样：rideRevision 在「钉位值真变」（= 载客矿车/船
+                        //   本帧移动）时每帧 bump（有界发射）→ 乘客 position 与车 delegate 同帧 60Hz 刷新，
+                        //   消除 20Hz 相位门下快速矿车载乘的 ~0.4 格滞后跳变。非乘客单帧重采样读到相同 /
+                        //   静息值 = 廉价 no-op（t498/t556：NOTIFY 属性须以表达式形式参与值计算才建依赖）。
+                        const _rr = entityManager.rideRevision
                         const p = entityManager.posAt(index)
-                        return _r >= 0 ? Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z) : Qt.vector3d(0, 0, 0)
+                        return (_r >= 0 && _rr >= 0)
+                               ? Qt.vector3d(p.x, p.y - mobHalfH * (1.0 - entBabyScale), p.z)
+                               : Qt.vector3d(0, 0, 0)
                     }
                     scale: Qt.vector3d(entBabyScale, entBabyScale, entBabyScale)
                     property int entKind: { const _r = entityManager.revision; return _r >= 0 ? (entityManager.kindAt(index)) : 0 }
@@ -6801,7 +6818,7 @@ Window {
                         visible: { const _r = entityManager.revision; return _r >= 0 ? (entKind === EntityManager.Mob && entityManager.inLoveAt(index)) : false }
                         position: Qt.vector3d(0, mobHalfH + 0.45, 0) // 粒子云基线（头顶上方；升腾自此向上）
                         property real heartT: 0 // 0..1 循环时钟（1.2s/周期）
-                        NumberAnimation on heartT { from: 0; to: 1; duration: 1200; loops: Animation.Infinite; running: loveHearts.visible }
+                        NumberAnimation on heartT { from: 0; to: 1; duration: 1200; loops: Animation.Infinite; running: loveHearts.visible && window.worldRunning }   // review26 #11：硬暂停爱心冻结（t878 心流属世界锚定视觉；ESC 时 mob 冻结而爱心照飘 = 漏网）
                         Model { // 心 ①（相位 0）
                             geometry: BillboardQuad {}
                             position: Qt.vector3d(Math.sin(loveHearts.heartT * 12.566) * 0.06, (loveHearts.heartT) * 0.5, 0)
@@ -9201,7 +9218,9 @@ Window {
                 Timer {
                     id: pageFlipTimer
                     interval: 1600
-                    running: true
+                    // review26 #11：世界内附魔书随机翻页 gate worldRunning——ESC 硬档书页停翻（世界锚定
+                    //   视觉，MC 单机暂停冻结）；菜单态 delegate 不渲染（同翻书帧四 Timer 口径）。
+                    running: window.worldRunning
                     repeat: true
                     onTriggered: {
                         pageFlipAnim.restart()
