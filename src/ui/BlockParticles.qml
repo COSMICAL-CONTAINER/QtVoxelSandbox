@@ -28,6 +28,11 @@ Node {
     // 池表：[{obj, vel, life, maxLife, active}, ...]（启动时 Component.onCompleted 填满）。
     //   obj = Model 实例（由 particleComponent.createObject 创建）；vel/life 为弹道态；active 复用标志。
     property var pool: []
+    // review26 #11（t889 补漏，全仓纯视觉 Timer 清点批）：硬暂停总闸——宿主注入 window.worldRunning
+    //   （Qt.binding）。ESC 硬档在飞碎屑 / 烟雾冻结中途、恢复自然续飞（MC Java 单机暂停粒子冻结）；
+    //   软档 GUI 开 worldRunning 仍真 → 照常。burst 全由世界事件触发（世界停则无新迸发），冻结面只有
+    //   在飞段。旧版 onCompleted start() 常开（菜单 / 暂停期空转扫池）→ 一并改声明式。
+    property bool worldRunning: false
 
     // ---- 入口（保留旧 Particles3D 版本签名，Main.qml 不改） ----
     // 破块完成迸发（t61 +30%：原 6 → 8）：碎屑色 = 被破方块主色，主上抛 + 横向收束、强重力下落。
@@ -169,7 +174,8 @@ Node {
     }
 
     // 启动时预分配池（一次性 createObject，运行期不 new）。Loader.onLoaded 把本 root 领养进
-    //   particlesHost 后，本 onCompleted 触发 → 池填满 → tickTimer.start()。
+    //   particlesHost 后，本 onCompleted 触发 → 池填满（tickTimer 走声明式 running: root.worldRunning，
+    //   review26 #11 硬暂停总闸——原 onCompleted 里 start() 常开已退役）。
     Component.onCompleted: {
         root.pool = []
         for (let i = 0; i < root.poolSize; i++) {
@@ -177,7 +183,6 @@ Node {
             m.visible = false
             root.pool.push({ obj: m, vel: null, life: 0.0, maxLife: 1.0, active: false, gravity: 14.0 })
         }
-        tickTimer.start()
         console.info("[t465] BlockParticles ready; pool=" + root.poolSize
                      + " (Model+Timer pool; no Particles3D dependency)")
     }
@@ -193,7 +198,9 @@ Node {
         id: tickTimer
         interval: 20
         repeat: true
-        running: false
+        // review26 #11：声明式总闸（原 running:false + onCompleted start() 常开）——世界运行期推进在飞
+        //   粒子至寿终；菜单 / 硬暂停零触发（硬停在飞的冻结中途，恢复自然续飞）。
+        running: root.worldRunning
         onTriggered: {
             // t500 perf：测本轮 onTriggered 总耗时（含 Date.now 调用，本身 ~0）。
             const t0 = (typeof performance !== "undefined") ? performance.now() : Date.now()

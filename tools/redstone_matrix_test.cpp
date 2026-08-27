@@ -14678,6 +14678,176 @@ Item {
                              "asserts the same column-scan value (cell top +0.225)";
     }
 
+    // ── P-review26-10 载具乘客钉位帧 rideRevision 同步探针（review26 #10：mob 乘客 QML 刷新 20Hz vs 矿车
+    //   60Hz 不同步——快速车载乘视觉锯齿）──
+    //   review25 #3 把 tickVehicleRiding 的乘客直发收口到 ~20Hz 相位门（修每帧双发卡顿，方向正确），但车侧
+    //   位移仍每帧 notifyChanged（60Hz）→ C++ 乘客每帧钉车、QML 乘客 delegate 20Hz 采样 → 快速矿车
+    //   （~8 格/s）载 mob 乘客相对车滞后 ~0.4 格、每 50ms 跳变。修 = ②「乘客单开小名单每帧 emit」的专用
+    //   revision 变体：钉位值真变帧 bump rideRevision + 发 ridersChanged（有界：仅载客载具移动帧），QML 侧
+    //   仅 mob delegate 的 position 绑定触碰它（t500 卡顿主因的 ~12 条 revision 绑定 + MobModel 重建面不
+    //   触碰）。矩阵断言：(a) 行为级——载客矿车每个移动帧 rideRevision 恰 +1（同帧同步契约），停驻帧
+    //   零 bump（无空转发射），钉位精度 <0.01（rig 自证场景成立）；(b) 源码钉——Main.qml mob delegate 的
+    //   position 绑定触碰 entityManager.rideRevision + entitymanager.h 的 Q_PROPERTY 三件套存在
+    //   （t870/t889 源码钉先例）。
+    {
+        // 专用世界（review26-5/6 先例：seed 77 全空带 y84+ 平台——不占主世界 rig 位，防下游槽位漂移）：
+        //   平台 y84 + 北向直轨 10 格 y85（x6，z21..30）。
+        World wR10;
+        wR10.setWidth(48); wR10.setDepth(48); wR10.setHeight(96); wR10.setSeed(77);
+        for (int x = 4; x <= 8; ++x)
+            for (int z = 20; z <= 32; ++z) wR10.setBlock(x, 84, z, BR::Stone, 0);
+        const int rx = 6, rz0 = 30;
+        for (int dz = -10; dz <= 0; ++dz) wR10.setBlock(rx, 85, rz0 + dz, BR::Rail, 0);
+        MinecartManager carts;
+        EntityManager ents;
+        ents.setVehicleManagers(&carts, nullptr);
+        carts.spawnCart(rx, 85, rz0, &wR10);
+        const int mob = ents.spawnMobTyped(rx, 85, rz0, 0, QStringLiteral("#ff5555"), 10);
+        const float seatDropX = 0.3125f; // kCartSeatDrop 同值镜像（t811 探针同款）
+        QVector3D player = carts.posAt(0);
+        QVector3D lastCp = carts.posAt(0);
+        bool boarded = false, contractArmed = false, okMove = true, okIdle = true, pinOk = true;
+        int settleFrames = 0, moveFrames = 0;
+        float travel = 0.0f;
+        // 阶段 A（推动期）：登乘后 2 帧武装契约（首钉落座帧允许一次性 bump，非车载移动）。
+        for (int t = 0; t < 1200 && travel < 6.0f; ++t) {
+            const int rev0 = ents.rideRevision();
+            ents.tick(0.016, &wR10, player, 0.3f, 1.8f, false);
+            ents.tickVehicleRiding();                       // 钉位①（mob 桶内，游戏同序）
+            if (int(std::floor(player.z())) > rz0 - 10)
+                carts.pushEmptyCart(&wR10, player, 0.0f, -1.0f); // 长按 W 朝北推（t809/t811 玩家模型）
+            carts.tickPushedCarts(0.016, &wR10);
+            ents.tickVehicleRiding();                       // 钉位②（step 后同帧随车）
+            const int rev1 = ents.rideRevision();
+            const QVector3D cp = carts.posAt(0);
+            const bool moved = QVector3D(cp - lastCp).length() > 1e-4f;
+            if (moved) travel += QVector3D(cp - lastCp).length();
+            if (ents.rideCartAt(mob) >= 0) {
+                boarded = true;
+                const QVector3D mp = ents.posAt(mob);
+                if (std::fabs(mp.x() - cp.x()) > 0.01f
+                    || std::fabs(mp.y() - (cp.y() - seatDropX + 0.5f)) > 0.01f
+                    || std::fabs(mp.z() - cp.z()) > 0.01f) pinOk = false;
+                if (!contractArmed) {
+                    if (++settleFrames >= 2) contractArmed = true; // 落座 / 登乘帧不计契约
+                } else if (moved) {
+                    ++moveFrames;
+                    if (rev1 - rev0 != 1) okMove = false;   // 移动帧恰 +1（同帧同步契约）
+                } else {
+                    if (rev1 != rev0) okIdle = false;        // 静止帧零 bump（无空转发射）
+                }
+            }
+            lastCp = cp;
+            player = cp; // 贴身追随（t809 先例）
+        }
+        // 阶段 B（停驻期）：不再推 → 余速滑到死端停驻 → 100 tick 静止帧零 bump。
+        bool okPark = true;
+        int parked = 0;
+        for (int t = 0; t < 700 && parked < 100; ++t) {
+            const int rev0 = ents.rideRevision();
+            ents.tick(0.016, &wR10, player, 0.3f, 1.8f, false);
+            ents.tickVehicleRiding();
+            carts.tickPushedCarts(0.016, &wR10);
+            ents.tickVehicleRiding();
+            const int rev1 = ents.rideRevision();
+            const QVector3D cp = carts.posAt(0);
+            const bool moved = QVector3D(cp - lastCp).length() > 1e-4f;
+            if (moved) { parked = 0; travel += QVector3D(cp - lastCp).length(); }
+            else ++parked;
+            if (!moved && rev1 != rev0) okPark = false;      // 停驻帧零 bump
+            lastCp = cp;
+            player = cp;
+        }
+        // (b) 源码钉：QML position 绑定触碰 + 头文件属性三件套（t870/t889 先例）。
+        bool okPinQml = false, okPinHdr = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+            const QString mt = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            const int d0 = mt.indexOf(QStringLiteral("id: mobDelegate"));
+            const int d1 = mt.indexOf(QStringLiteral("property int entKind:"), d0 > 0 ? d0 : 0);
+            okPinQml = d0 >= 0 && d1 > d0
+                       && mt.mid(d0, d1 - d0).contains(QStringLiteral("entityManager.rideRevision"));
+            QFile hf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+            const QString ht = hf.open(QIODevice::ReadOnly) ? QString::fromUtf8(hf.readAll()) : QString();
+            okPinHdr = ht.contains(QStringLiteral(
+                "Q_PROPERTY(int rideRevision READ rideRevision NOTIFY ridersChanged)"));
+        }
+        const bool ok = boarded && pinOk && okMove && okIdle && okPark && moveFrames >= 30
+                        && travel >= 4.0f && okPinQml && okPinHdr;
+        if (!ok)
+            qInfo().noquote() << "  review26-10 diag: boarded" << boarded << "pinOk" << pinOk
+                              << "okMove" << okMove << "okIdle" << okIdle << "okPark" << okPark
+                              << "moveFrames" << moveFrames << "travel" << travel
+                              << "okPinQml" << okPinQml << "okPinHdr" << okPinHdr;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review26-10 vehicle passenger pin syncs to the cart cadence: every"
+                             " frame a passenger-carrying cart MOVES bumps rideRevision exactly once"
+                             " (dedicated ridersChanged emit, only the mob delegate position binding"
+                             " touches it - the t500 12-binding revision face stays at the 20Hz gate)"
+                             " and parked frames emit nothing; QML position binding touches"
+                             " rideRevision (source pin); travel" << travel;
+        // 专用世界随作用域丢弃，无需清场。
+    }
+
+    // ── P-review26-11 硬暂停冻结纯 QML 视觉 Timer 源码钉（review26 #11：ESC 时附魔字形仍持续发射/飞行）──
+    //   EnchantGlyphFlow 两 Timer 的 running 只绑 active（appState=="playing" 派生）→ ESC 硬档（世界全停）
+    //   白字持续飞（t884 自己 gate 了 worldRunning、t873 漏了）。修 = worldRunning 并入 running（经 Loader
+    //   注入 window.worldRunning，同 active/world/camNode 注入先例——组件不直引跨上下文 id）。全仓纯视觉
+    //   Timer 清点（本探针一并钉同批修的漏网）：EnchantGlyphFlow spawn+tick / EnchantRunes spawn+tick /
+    //   BlockParticles tick（碎屑烟雾）/ Main.qml 水·岩浆·火·余烬门四翻书帧 + 附魔书翻页 + t878 爱心
+    //   NumberAnimation。豁免面（UI chrome / 输入冻结期输出必静态，清点表落 Review 与 commit message）：
+    //   bobber 拍水 Timer（t884 已 gate）/ f3Refresh / faceTimer（书朝向，玩家冻结→值静态）/ 指南针钟表
+    //   图标 / 聊天淡出 / 上下船 toast / 信息 toast / anvil·enchant 面板闪光 / CharacterPreview3D 预览。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        const auto readSrc = [&root](const QString &rel) {
+            QFile f(root + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString gf = readSrc(QStringLiteral("/src/ui/EnchantGlyphFlow.qml"));
+        const QString rn = readSrc(QStringLiteral("/src/ui/EnchantRunes.qml"));
+        const QString bp = readSrc(QStringLiteral("/src/ui/BlockParticles.qml"));
+        const QString mn = readSrc(QStringLiteral("/src/ui/Main.qml"));
+        // (a) finding 本体：GlyphFlow 两 Timer running 含 worldRunning + 注入属性存在。
+        const bool okGf = gf.contains(QStringLiteral(
+                              "running: root.active && root.pairs.length > 0 && root.worldRunning"))
+                          && gf.contains(QStringLiteral(
+                              "running: (root.active || root.liveCount > 0) && root.worldRunning"))
+                          && gf.contains(QStringLiteral("property bool worldRunning: false"));
+        // (b) 同族漏网：EnchantRunes spawn+tick / BlockParticles tick（tick 改声明式——imperative start 退役）。
+        const bool okRn = rn.contains(QStringLiteral(
+                              "running: root.active && root.shelfCells.length > 0 && root.worldRunning"))
+                          && rn.contains(QStringLiteral("running: root.worldRunning"))
+                          && !rn.contains(QStringLiteral("tickTimer.start()"));
+        const bool okBp = bp.contains(QStringLiteral("running: root.worldRunning"))
+                          && !bp.contains(QStringLiteral("tickTimer.start()"));
+        // (c) Main.qml：四翻书帧 Timer + 附魔书翻页 Timer gate window.worldRunning（≥5 处）+ 爱心
+        //     NumberAnimation + 三处 Loader 注入（GlyphFlow/Runes/BlockParticles）。
+        int flipGates = 0;
+        for (int i = mn.indexOf(QStringLiteral("running: window.worldRunning")); i >= 0;
+             i = mn.indexOf(QStringLiteral("running: window.worldRunning"), i + 1)) ++flipGates;
+        const bool okMn = flipGates >= 5
+                          && mn.contains(QStringLiteral(
+                              "running: loveHearts.visible && window.worldRunning"))
+                          && mn.count(QStringLiteral(".item.worldRunning = Qt.binding(function() { return window.worldRunning })")) >= 3;
+        const bool ok = okGf && okRn && okBp && okMn;
+        if (!ok)
+            qInfo().noquote() << "  review26-11 diag: okGf" << okGf << "okRn" << okRn
+                              << "okBp" << okBp << "okMn" << okMn << "flipGates" << flipGates;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review26-11 hard pause freezes pure-visual QML Timers: enchant glyph"
+                                 " spawn+flight, ambient runes, block debris pool, water/lava/fire/"
+                                 "portal strip flipbooks, book page-flip and love hearts all gate"
+                                 " worldRunning (MC Java singleplayer pause freezes particles);"
+                                 " UI-chrome timers (toasts, chat fade, panel flashes, preview pane)"
+                                 " stay exempt (source pin)";
+    }
+
     // ── P-t888 火伤节奏对齐 MC 探针（行为级 + 数值钉）──
     //    t888：① 常量钉（kFireDamageInterval 0.75s / kFireExtinguishChance 0 / kFireDuration 8——改值须
     //      同步本探针；MC 基准出处见 entitymanager.h 常量注释）；② 玩家侧行为级：真 pc 站立地火 → 首拍

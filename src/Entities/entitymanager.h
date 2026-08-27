@@ -78,12 +78,21 @@ class EntityManager : public QObject
     // posAt/colorAt/yawAt/healthAt 是 Q_INVOKABLE 不被 NOTIFY 自动跟踪，需 { revision; posAt(i) } 显式建依赖，
     // push/下落/AI 移动/红闪/死亡后绑定才重算。
     Q_PROPERTY(int revision READ revision NOTIFY entitiesChanged)
+    // review26 #10 载具乘客钉位专用 revision：tickVehicleRiding 钉位值真变（= 载客矿车/船本帧移动）时每帧
+    //   自增 + 发 ridersChanged（有界发射：仅该场景触发；静止 / 无乘客帧零发射）。mob delegate 的 position
+    //   绑定触碰它 → 乘客以车同帧的 60Hz 刷新（车 delegate 走 MinecartManager 每帧 notifyChanged），消除
+    //   20Hz 相位门（kEmitEveryN，review25 #3 收口）下快速矿车（~8 格/s）载乘 ~0.4 格滞后、每 50ms 跳变。
+    //   为什么不复用 revision/entitiesChanged：那个 NOTIFY 激活全体 delegate ~12 条 revision 绑定 + 行走
+    //   MobModel 几何重建（t500 卡顿主因，才收口到 20Hz——不可为单乘客场景回退）；本信号只被 position 一条
+    //   绑定触碰，非乘客单帧重采样读到相同 / 静息值 = 廉价 no-op（乘客 walkPhase 已冻结 → 无几何重建）。
+    Q_PROPERTY(int rideRevision READ rideRevision NOTIFY ridersChanged)
 
 public:
     explicit EntityManager(QObject *parent = nullptr);
 
     int count() const { return int(m_entities.size()); }
     int revision() const { return m_revision; }
+    int rideRevision() const { return m_rideRevision; }
     // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate 已 visible=false
     //   不参与绘制，count 会高估）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
     Q_INVOKABLE int liveCount() const { return m_liveCount; }
@@ -880,6 +889,9 @@ public:
 
 signals:
     void entitiesChanged(); // spawn / 推动位移 / 重力下落 / AI 行走 / 受击红闪 / 死亡移除 触发；驱动 count/revision + QML 绑定刷新
+    // review26 #10 载具乘客钉位帧发射（rideRevision 的 NOTIFY；见上方 Q_PROPERTY 头注释——只给 mob
+    //   delegate 的 position 绑定建依赖，不触碰 ~12 条 revision 绑定面）。
+    void ridersChanged();
     // t250 mob 环境 idle 叫声（被动 牛叫/羊叫/猪叫 + 敌对 idle）：tick 内 ambientTimer 周期倒计时（随机
     //   8-16s）到 + 玩家听者范围内 → emit mobAmbient(mobType)。mobType = 子类 id（0=通用 / 1=猪 / 2=牛 /
     //   3=羊 / 4=Shambler / 5=Bones / 6=Stalker / 7=Spider，全 8 子类均周期偶发叫 —— 敌对亦走此路径，非仅
@@ -1426,6 +1438,8 @@ private:
     //   每 kEmitEveryN 帧（~20Hz）才 ++revision + emit 一次。位置 / 腿动画 / 外观 20Hz 刷新（缓慢生物视觉够），
     //   spawn/despawn ≤kEmitEveryN 帧延迟（可察觉但优先恢复 FPS）。m_pendingEmit 持续脏确保节流帧间累积变更不丢。
     bool m_pendingEmit = false;
+    // review26 #10 载具乘客钉位 revision（ridersChanged 的 READ 值；语义见 Q_PROPERTY 头注释）。
+    int m_rideRevision = 0;
 
     // t256 slot-reuse（修掉落沙 delegate 泄漏）：实体移除（着地 / 死亡 / 跌出）不再 erase-shift，而把槽位
     //   标 alive=false + 入 m_freeSlots；下次 spawn 优先复用空槽。于是 m_entities.size()（=count 属性 = QML
