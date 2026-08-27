@@ -166,7 +166,8 @@ public:
     //   消费端（t865/t867 前）：mob 落地扫描 mobSupportTopY + mob 水平碰撞 mobAabbHitsSolid + 越障跳
     //   isJumpObstacle + 掉落物落地 / resting 复探（ItemEntityManager tick）—— 旧族把 isSolid（非 air 实存）
     //   当支撑 → 轨 / 压力板等非整格被抬满格一格（用户报「生物走铁轨悬浮上方一格」「压力板掉落物悬空」
-    //   同根因）。性能：整立方快路径零 AABB 构建（地形绝大多数），仅异形格付 vector 构建。
+    //   同根因）。性能：整立方快路径零 AABB 构建（地形绝大多数）；异形格走 collisionTopY（review26 #20
+    //   免构建标量镜像，等价性由矩阵探针钉死）—— 仅异形格付一次标量计算，无 vector 堆分配。
     //   分层（PLAN §2）：World 低层只读查询（BlockRegistry + ChunkManager），Game / Entities / 测试直调。
     float supportTopYAt(int x, int y, int z) const;
 

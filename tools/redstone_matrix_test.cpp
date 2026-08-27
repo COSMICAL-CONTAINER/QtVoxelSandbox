@@ -4384,6 +4384,99 @@ int main(int argc, char *argv[])
                              "(cage mini-model visuals = QML, manual check)";
     }
 
+    // ── review26 #19 刷怪支撑收口 isCollidable 探针（EntityManager 直编，t786 tickTypedCage rig 族）──
+    //   用户症状（review26 低危）：宠物瞬移 / 自然刷怪 / 刷怪笼支撑判定仍 isSolid（非 air）→ 落花草下帧
+    //   坠落、落水瞬进水。修：四处收口 World::isCollidable（t865 单一权威）。刷怪笼候选扫描是**确定性
+    //   首匹配**（固定 kSpawnDx/Dz 枚举序）→ 可构造唯一候选位 rig 行为级钉死：候选下方是花草时零刷怪
+    //   （旧 isSolid 判花草可站 → 首周期即刷）；同 rig 下方换石头 → 首周期必刷在唯一候选格心。
+    //   （狼 / 豹猫瞬移与自然刷怪同谓词替换，源码一致性由本探针钉住谓词语义。）
+    {
+        bool okNeg = false, okPos = false;
+        // rig：独立小世界（t786 同款）。笼 @（24,8,24）；7 个非花候选位的 y=8/y=9 双层填死（here!=Air
+        //   恒拒）；唯一候选 (25,8,24) 净空两格，下方 (25,7) = 待测支撑块。
+        const auto runSupportCage = [&](quint8 supportBlock, int &spawnedCount, float &spawnX) {
+            World wS;
+            wS.setWidth(48); wS.setDepth(48); wS.setHeight(32); wS.setSeed(9);
+            const int sx = 24, sy = 8, sz = 24;
+            wS.setBlock(sx, sy, sz, BlockRegistry::Spawner, BlockRegistry::SpawnerStateShambler);
+            static const int kDx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+            static const int kDz[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+            for (int i = 0; i < 8; ++i) {
+                const int cx = sx + kDx[i], cz = sz + kDz[i];
+                if (i == 0) { // 唯一候选（枚举序首位）：净空两格 + 下方待测支撑
+                    wS.setBlock(cx, sy, cz, BlockRegistry::Air, 0);
+                    wS.setBlock(cx, sy + 1, cz, BlockRegistry::Air, 0);
+                    wS.setBlock(cx, sy - 1, cz, supportBlock, 0);
+                    continue;
+                }
+                wS.setBlock(cx, sy, cz, BlockRegistry::Stone, 0);     // 其它 7 位 y=8 填死
+                wS.setBlock(cx, sy + 1, cz, BlockRegistry::Stone, 0); // y=9 也填死（cyOff=1 不再可用）
+            }
+            EntityManager emS;
+            const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f); // 激活圈内
+            for (int t = 0; t < 80; ++t) emS.tickSpawners(0.1, &wS, playerPos); // 8s > 6s 首周期
+            spawnedCount = 0; spawnX = -1.0f;
+            for (int i = 0; i < emS.count(); ++i)
+                if (emS.aliveAt(i)) { ++spawnedCount; spawnX = emS.posAt(i).x(); }
+        };
+        {
+            int n = 0; float px = -1.0f;
+            runSupportCage(BR::FlowerRed, n, px); // 花草支撑（ShapeNone → isCollidable=false）
+            okNeg = n == 0; // 旧 isSolid：花草非 air → 可站 → 首周期即刷（回退即红）
+            if (!okNeg) qInfo().noquote() << "  [review26-19 diag] flower-floor spawned" << n << "@x" << px;
+        }
+        {
+            int n = 0; float px = -1.0f;
+            runSupportCage(BR::Stone, n, px); // 石头支撑（isCollidable=true 正对照）
+            okPos = n >= 1 && std::abs(px - 25.5f) < 1e-3f; // 必刷在唯一候选格心
+            if (!okPos) qInfo().noquote() << "  [review26-19 diag] stone-floor spawned" << n << "@x" << px;
+        }
+        const bool ok19 = okNeg && okPos;
+        if (!ok19) ++totalFail;
+        qInfo().noquote() << (ok19 ? "PASS" : "FAIL")
+                          << "| review26-19 spawn support requires a collidable block: a spawner whose "
+                             "only candidate cell sits above a flower spawns nothing (old isSolid read "
+                             "non-air as standable), the same rig over stone spawns at the unique "
+                             "candidate cell center; wolf/ocelot teleport and natural spawn share the "
+                             "same predicate swap";
+    }
+
+    // ── review26 #20 collisionTopY 免构建镜像等价探针（Core 层全表扫描）──
+    //   免构建顶面查询（BlockRegistry::collisionTopY）替代 supportTopYAt 慢路径的 collisionAABBs 最高盒
+    //   maxY 读取（resting 掉落物每帧两格窗复探在异形支撑上不再堆分配）。等价性 = 全 id（0..255）×
+    //   state（0..255）逐格断言 collisionTopY(id,st) == 盒空 ? -1 : max(box.maxY) —— 改形状只动一处
+    //   （shapeBoxes / collisionAABBs 特例表 vs collisionTopY 镜像表）→ 本探针红，防两表漂移。
+    {
+        quint32 checked = 0;
+        int firstBadId = -1, firstBadSt = -1;
+        float badWant = 0.0f, badGot = 0.0f;
+        for (int id = 0; id < 256 && firstBadId < 0; ++id) {
+            for (int st = 0; st < 256; ++st) {
+                float want = -1.0f;
+                for (const auto &b : BR::collisionAABBs(quint8(id), quint8(st)))
+                    if (b.maxY > want) want = b.maxY;
+                const float got = BR::collisionTopY(quint8(id), quint8(st));
+                ++checked;
+                if (std::abs(want - got) > 1e-6f) {
+                    firstBadId = id; firstBadSt = st; badWant = want; badGot = got;
+                    break;
+                }
+            }
+        }
+        const bool ok20 = firstBadId < 0 && checked > 0;
+        if (!ok20)
+            qInfo().noquote() << "  [review26-20 diag] id=" << firstBadId << "st=" << firstBadSt
+                          << "want=" << badWant << "got=" << badGot;
+        if (!ok20) ++totalFail;
+        qInfo().noquote() << (ok20 ? "PASS" : "FAIL")
+                          << "| review26-20 allocation-free collisionTopY mirrors collisionAABBs exactly: "
+                             "for every block id x state (65536 combos), collisionTopY equals the max "
+                             "box maxY (or -1 when boxless) -- supportTopYAt's slow path swaps the "
+                             "vector-building read for this scalar mirror with zero behavior change, "
+                             "and any future shape edit touching only one of the two tables turns this "
+                             "red (anti-drift pin)";
+    }
+
     // ── t787 生物蛋×刷怪笼交互（用户「拿上生物蛋对着刷怪笼右键，就可以弄成刷这个生物的刷怪笼」；机制等价
     //    MC 1.0 spawn egg 右键 spawner 改型）：①全 13 蛋改型 round-trip（蛋表 → 编码 → 解码互逆，白名单
     //    扩表锁死——加蛋漏接 = 此处 FAIL，t785 B9 缺口防线）②哨兵/越界 type 仍兜底 Shambler（扩表不含
@@ -14165,6 +14258,59 @@ Item {
                              "free of captured/panel gates)";
     }
 
+    // ── review26 #25 软档受击击退探针（Game 层 PlayerController 直编，t889(a) 软档 rig 族）──
+    //   用户症状（review26 低危）：GUI 开（软档，世界照跑）被 mob 攻击伤害照扣但击退被吞——
+    //   applyHitKnockback 旧门 `m_dead || !m_captured` 把软档击退一起拦掉（Java 语义：开背包照被打且被打飞）。
+    //   修：门只拦 m_dead（applyGolemLaunch 连坐同修）。断言（行为级，t889(a) 的 pumpFor+pc.tick 驱动）：
+    //   (a) 软档（默认 !captured）直调 applyHitKnockback(+X) → 玩家 X 位移 > 0.3（旧门恒 0 = 症状签名，回退即红）
+    //       + 垂直小跳真发（y 曾高于地面）；
+    //   (b) 对照：无击退时同窗口 X 精确不动（软档 XZ 冻结基线，位移只来自击退冲量）。
+    {
+        bool okA = false, okB = false, okHop = false;
+        const auto pumpFor25 = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        World w25;
+        w25.setWidth(48); w25.setDepth(48); w25.setHeight(96); w25.setSeed(77);
+        EntityManager ents25;
+        PlayerController pc25;
+        pc25.setWorld(&w25);
+        pc25.setEntityManager(&ents25);
+        const int fy25 = 83;
+        for (int x = 3; x <= 10; ++x)                       // 石板地板走廊（击退 +X 弹程接地）
+            for (int z = 4; z <= 8; ++z) w25.setBlock(x, fy25, z, BR::Stone, 0);
+        pc25.loadSavedState(4.5f, float(fy25 + 1), 6.5f, -90.0f, 0.0f, 2 /* Survival */);
+        const QVector3D base25 = pc25.position();
+        // (b) 对照窗：无击退 12 tick → X/Z 精确冻结（软档零输入基线）
+        for (int i = 0; i < 12; ++i) { pumpFor25(17); pc25.tick(); }
+        okB = pc25.position().x() == base25.x() && pc25.position().z() == base25.z();
+        // (a) 软档击退：直调（QML Connections 等价；默认 !captured = GUI 开软档）→ +X 位移 + (hop) 垂直上抬
+        const float groundY = pc25.position().y();
+        pc25.applyHitKnockback(1.0f, 0.0f);
+        float maxY = groundY;
+        for (int i = 0; i < 12; ++i) {
+            pumpFor25(17); pc25.tick();
+            maxY = std::max(maxY, float(pc25.position().y()));
+        }
+        okA = float(pc25.position().x() - base25.x()) > 0.3f;
+        okHop = maxY > groundY + 0.05f; // kHitKnockbackUp 小跳（m_vel.y max 写入）
+        const bool ok25 = okA && okB && okHop;
+        if (!ok25)
+            qInfo().noquote() << "  [review26-25 diag] dx=" << float(pc25.position().x() - base25.x())
+                          << "frozenOk=" << okB << "maxY-lift=" << float(maxY - groundY);
+        if (!ok25) ++totalFail;
+        qInfo().noquote() << (ok25 ? "PASS" : "FAIL")
+                          << "| review26-25 soft-tier hit knockback lands: with a GUI-open equivalent "
+                             "(!captured, world running), applyHitKnockback displaces the player >0.3 "
+                             "blocks along the hit direction with the vertical hop (Java parity: damage "
+                             "already ticked, knockback must follow; old gate swallowed it - the "
+                             "no-knockback window signature), while the no-hit control window keeps X/Z "
+                             "exactly frozen (displacement comes only from the impulse)";
+    }
+
     // ── P-t881 鱼线最大长度探针（32 格断线，行为级）──
     //    pc 真甩竿 → settle（近距 ~2 格）→ pc.tick 线仍持；applyEnderPearlTeleport 把玩家拉到 ~53 格
     //    （loadSavedState 会 cancelFishing 不可用——传送是唯一不撞钓鱼态的移位口）→ 传送本身不断线
@@ -14614,7 +14760,8 @@ Item {
     //    ① 掉落物实体已生成于浮标格向上**列扫**弹出点（review26 #7：首个非水格 +0.225 = 静水格顶+0.225——
     //    水面上空气格，浮水分支不吞弧线；旧 +0.35 固定抬升口径退役）；
     //    ② 推掉落物物理 3s（60 tick × 0.05）→ 落定在玩家中心 2.2 格内（抛物解准确弹向玩家，可捡）；
-    //    ③ 经验球恰一枚、量 ∈[1,6]（MC 1.0 钓鱼 1-6 XP）、落浮标格中心（+0.5）；
+    //    ③ review26 #21：XP 直接入账——恰一次 fishXpGained、量 ∈[1,6]、零经验球（MC 1.0 钓鱼 1-6 XP
+    //       无球实体；旧口径「球落浮标格中心」随 #21 退役）；
     //    ④ 弹速 = 抛物解 |v| 镜像（近距 ≈8.1，随距离自适应）+ 耐久 -1（口径不变）。
     {
         World wC;
@@ -14648,6 +14795,11 @@ Item {
                          [&](int, int, float, float, float, float, float, float speed) {
                              ++caughtCount; csp = speed;
                          });
+        // review26 #21：钓获 XP 直接入账信号（MC 1.0 钓鱼无经验球实体）——计数 + 量程；旧版断言球落
+        //   浮标格随 #21 退役（改断言**零球**：入账与球互斥，防双发）。
+        int xpGainCount = 0; int xpGainAmount = 0;
+        QObject::connect(&pc, &PlayerController::fishXpGained, &pc,
+                         [&](int amount) { ++xpGainCount; xpGainAmount += amount; });
         pc.useFishingRod();
         int bob = -1;
         for (int i = 0; i < ents.count(); ++i)
@@ -14692,17 +14844,14 @@ Item {
         const QVector3D playerCenter(3.5f, float(fy + 1) + 0.9f, 6.5f);
         okItem = okItem && touchedDown && items.aliveAt(item)
                  && (touchdown - playerCenter).length() < 2.2f;
-        // ③ 经验球恰一枚、量 [1,6]、落浮标格中心；④ 弹速 = 抛物解镜像 + 耐久 -1
-        int orb = -1;
+        // ③ review26 #21：XP 直接入账——恰一次 fishXpGained、量 ∈[1,6]、零经验球（入账与球互斥防双发）；
+        //    ④ 弹速 = 抛物解镜像 + 耐久 -1
+        int orbAlive = 0;
         for (int i = 0; i < orbs.count(); ++i)
-            if (orbs.aliveAt(i)) { orb = i; break; }
-        const QVector3D orbExp(std::floor(bobPos.x()) + 0.5f, std::floor(bobPos.y()) + 0.5f,
-                               std::floor(bobPos.z()) + 0.5f);
+            if (orbs.aliveAt(i)) ++orbAlive;
         const float vmagExp = fishCatchSpeedMirror(bobPos, QVector3D(3.5f, float(fy + 1), 6.5f));
-        const bool okOrb = orb >= 0 && orbs.amountAt(orb) >= 1 && orbs.amountAt(orb) <= 6
-                           && qAbs(orbs.posAt(orb).x() - orbExp.x()) < 1e-2f
-                           && qAbs(orbs.posAt(orb).y() - orbExp.y()) < 1e-2f
-                           && qAbs(orbs.posAt(orb).z() - orbExp.z()) < 1e-2f
+        const bool okOrb = xpGainCount == 1 && xpGainAmount >= 1 && xpGainAmount <= 6
+                           && orbAlive == 0
                            && qAbs(csp - vmagExp) < 1e-2f
                            && hb.durabilityAt(0) == dur0 - 1;
         const bool okT886 = okCast && okItem && okOrb;
@@ -14710,8 +14859,8 @@ Item {
         if (!okT886)
             qInfo().noquote() << "  [t886 diag] okCast" << okCast << "okItem" << okItem << "(itemPos"
                               << (item >= 0 ? items.posAt(item) : QVector3D()) << ") okOrb" << okOrb
-                              << "(orbAmt" << (orb >= 0 ? orbs.amountAt(orb) : -1) << "orbPos"
-                              << (orb >= 0 ? orbs.posAt(orb) : QVector3D()) << "orbExp" << orbExp
+                              << "(xpGain" << xpGainCount << "amt" << xpGainAmount
+                              << "orbAlive" << orbAlive
                               << "csp" << csp << "exp" << vmagExp
                               << "dur" << hb.durabilityAt(0) - dur0 << ")";
         qInfo().noquote() << (okT886 ? "PASS" : "FAIL")
@@ -14724,9 +14873,12 @@ Item {
                              "killing the arc), target = player center, flight time clamp(0.45+0.055D, "
                              "0.5,1.4), vy = dy/T + g*T/2 (g=28 item gravity mirror) - after 3s of "
                              "item physics the drop rests within 2.2 blocks of the player center "
-                             "(accurately catchable); one xp orb of 1-6 amount spawns at the bobber "
-                             "cell center (MC 1.0 fishing 1-6 XP; runtime RNG same license as the "
-                             "loot pool roll); fishCaught speed payload equals the solved |v| mirror "
+                             "(accurately catchable); review26 #21: XP credits directly via one "
+                             "fishXpGained of 1-6 amount routed to addXp (MC 1.0 fishing grants no "
+                             "xp-orb entity - the old orb sat up to 32 blocks away at the bobber, "
+                             "pure-magnet so it never chased the player) and zero orb entities "
+                             "spawn (credit-orb mutual exclusion guards double-grant); "
+                             "fishCaught speed payload equals the solved |v| mirror "
                              "and the QML onFishCaught forwarder is retired (signal is now "
                              "informational - double-spawn guard); rod -1 unchanged. Matrix probe "
                              "drives a real PlayerController with ItemEntityManager + XpOrbManager "

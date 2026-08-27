@@ -1129,7 +1129,9 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 //   air → 1 格高洞穴气袋 / 地表树冠压顶（surfH+2 是树叶）下照样刷 → mob 生成即嵌方块卡死
                 //   （用户「晚上僵尸生成卡在方块里」根因）。spawnCellFitsHostile 内含双格 + 界内校验。
                 if (!spawnCellFitsHostile(world, cx, cy, cz)) continue;
-                if (!world->isSolid(cx, cy - 1, cz)) continue; // 脚下须有支撑（防悬空刷怪）
+                // review26 #19：脚下支撑收口 isCollidable（t865 单一权威）——旧 isSolid（非 air）把花草 /
+                //   轨 / 火把 / 作物 / 火当「可站立」，刷在其上的 mob 下帧失支撑再坠落。
+                if (!world->isCollidable(cx, cy - 1, cz)) continue; // 脚下须有碰撞支撑（防悬空 / 花草刷怪）
                 const quint8 skyL = world->skyLightAt(cx, cy, cz);
                 const quint8 blkL = world->blockLightAt(cx, cy, cz);
                 const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
@@ -1268,12 +1270,12 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                         if (cy < 0 || cy >= worldH - 1) continue;        // 须留一格空间在上（mob 占 2 格高/水柱同）
                         const quint8 here = world->blockAt(cx, cy, cz);
                         const quint8 above = world->blockAt(cx, cy + 1, cz);
-                        const quint8 below = world->blockAt(cx, cy - 1, cz);
                         const bool okCell = wantWater
                             ? (here == BlockRegistry::Water && above == BlockRegistry::Water)
                             : (here == BlockRegistry::Air && above == BlockRegistry::Air
-                               && world->isSolid(cx, cy - 1, cz) && below != BlockRegistry::Water
-                               && below != BlockRegistry::Lava);
+                               // review26 #19：支撑收口 isCollidable（t865 单一权威）——水 / 岩浆本就
+                               //   ShapeNone 无碰撞（旧显式排除随之免费包含），花草 / 轨 / 火把不再当支撑。
+                               && world->isCollidable(cx, cy - 1, cz));
                         if (okCell) {
                             sx = cx; sy = cy; sz = cz;
                             break;
@@ -2571,7 +2573,9 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
             if (tx < 0 || tz < 0 || tx >= int(worldW) || tz >= int(worldD)) continue;
             // 自主人高度向上 1 格起向下扫 5 格，找「本格 air + 下方实体」（防瞬移进墙 / 悬空 / 天花板）。
             for (int y = qFloor(playerPos.y()) + 1; y >= std::max(0, qFloor(playerPos.y()) - 4); --y) {
-                if (world->blockAt(tx, y, tz) == BlockRegistry::Air && world->isSolid(tx, y - 1, tz)) {
+                // review26 #19：落点支撑收口 isCollidable（t865 单一权威）——旧 isSolid 把花草 / 水 / 轨当
+                //   「安全位」，宠物瞬移落花草下帧坠落、落水则瞬进水（t878 阈值 24→12 放大暴露频率）。
+                if (world->blockAt(tx, y, tz) == BlockRegistry::Air && world->isCollidable(tx, y - 1, tz)) {
                     e.pos = QVector3D(float(tx) + 0.5f, float(y) + e.halfH, float(tz) + 0.5f);
                     e.vy = 0.0f;
                     e.resting = true; // 落安全位 → 贴地（下帧 resting 复探支撑；pos 变化须返 true 驱动 dirty）
@@ -2661,7 +2665,9 @@ bool EntityManager::aiOcelot(int idx, Entity &e, float dt, World *world, const Q
             if (tx < 0 || tz < 0 || tx >= int(worldW) || tz >= int(worldD)) continue;
             // 自主人高度向上 1 格起向下扫 5 格，找「本格 air + 下方实体」（防瞬移进墙 / 悬空 / 天花板）。
             for (int y = qFloor(playerPos.y()) + 1; y >= std::max(0, qFloor(playerPos.y()) - 4); --y) {
-                if (world->blockAt(tx, y, tz) == BlockRegistry::Air && world->isSolid(tx, y - 1, tz)) {
+                // review26 #19：落点支撑收口 isCollidable（t865 单一权威）——旧 isSolid 把花草 / 水 / 轨当
+                //   「安全位」，宠物瞬移落花草下帧坠落、落水则瞬进水（t878 阈值 24→12 放大暴露频率）。
+                if (world->blockAt(tx, y, tz) == BlockRegistry::Air && world->isCollidable(tx, y - 1, tz)) {
                     e.pos = QVector3D(float(tx) + 0.5f, float(y) + e.halfH, float(tz) + 0.5f);
                     e.vy = 0.0f;
                     e.resting = true; // 落安全位 → 贴地（下帧 resting 复探支撑；pos 变化须返 true 驱动 dirty）

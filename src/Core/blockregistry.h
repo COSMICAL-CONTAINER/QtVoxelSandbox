@@ -1820,6 +1820,12 @@ public:
     //   air/torch → 空；常规整立方 → 单盒 {0,0,0,1,1,1}；异形 → 形状对应的多盒（stairs 2 盒 等）。
     //   越界 / air 行 → 空。机制等价 MC「方块 VoxelShape」（机制对齐，非名词照搬）。
     static std::vector<BlockAABB> collisionAABBs(quint8 blockId, quint8 state);
+    // review26 #20 碰撞盒**顶面高**免构建查询（cell-local maxY；无碰撞盒 → -1）：分支逐字镜像
+    //   collisionAABBs（特例表 + shapeBoxes 各 shape 的 maxY），但只算标量不建 vector —— 支撑复探热路径
+    //   （World::supportTopYAt 慢路径：resting 掉落物每帧两格窗、mob 支撑链）在异形支撑（半砖 / 压力板 /
+    //   活板门 / 床等）上不再每格堆分配。与 collisionAABBs 的等价性由矩阵探针钉死（全 id × state 扫描
+    //   断言 collisionTopY == max(box.maxY)），改形状只动一处 → 探针红，防两表漂移。
+    static float collisionTopY(quint8 blockId, quint8 state);
     // t849 铁砧三件套窄形盒（单一权威，见 .cpp 注释）：三阶段共用一套盒（机制等价 MC 1.0 anvil 异形
     //   碰撞/选中框）。供 collisionAABBs / selectionAABBs / raycastAABBs 三消费者同读（四消费者铁律：
     //   渲染已走 partialblockgeometry 铁砧 case 三盒，本函数补齐其余三个消费端；heightmap 排除在 chunk.cpp）。

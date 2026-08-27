@@ -1998,11 +1998,16 @@ void PlayerController::attackMob(int entityIndex)
 //   （XZ ~1s 衰减）未衰减完时积分块仍每 tick 跑、把已着地清零的 m_knockback.y 反复拉负 → 叠入 delta.y 把玩家向下拽 →
 //   其后的跳跃（m_vel.y=kJump）/ 水中上浮（m_vel.y=kSwimUp）有效向上速度被双重力吃掉、峰值腰斩 = 用户实测「被怪打后
 //   跳不起来 / 水里跳不上一格」，~1s 后水平击退衰减完才恢复。改走 m_vel.y 根治（见 step() 击退积分注释）。
-//   防御：归一输入（caller 已归一，此处再守）；非 Survival / 死亡 / 未捕获（菜单态）/ 零方向 → 静默早退。
+//   防御：归一输入（caller 已归一，此处再守）；非 Survival / 死亡 / 零方向 → 静默早退（review26 #25 起
+//   不再拦 !m_captured——软档 GUI 开 = 世界照跑，伤害照扣击退照弹，见函数内注释）。
 void PlayerController::applyHitKnockback(float dirX, float dirZ)
 {
     if (m_mode != Survival) return;      // 创造 / 观察者无敌（防御；mobAttackedPlayer 本就 Survival-only）
-    if (m_dead || !m_captured) return;   // 死亡 / 菜单态不弹（防 respawn 后陈旧信号或暂停中被推）
+    // review26 #25：门只拦 m_dead（掉血照走、击退要跟——Java 语义「开背包照被打且被打飞」）。旧版连
+    //   !m_captured 一起拦 → 软档（GUI 开，世界照跑）伤害照扣但击退恒吞 = 「被打却原地不动」的口径分裂。
+    //   硬暂停无需本门（worldRunning=false 时 EntityManager 不 tick → 无攻击信号）；死亡屏由 m_dead 覆盖；
+    //   respawn 后陈旧信号亦由 m_dead 语义覆盖（复活即 m_dead=false，新信号本就该生效）。
+    if (m_dead) return;                  // 死亡态不弹（尸体冻结，同伤害门）
     float len = std::sqrt(dirX * dirX + dirZ * dirZ);
     if (!(std::isfinite(len) && len > 1e-3f)) return; // 零 / 非有限方向 → 无击退（不弹）
     dirX /= len;
@@ -2019,11 +2024,12 @@ void PlayerController::applyHitKnockback(float dirX, float dirZ)
 //   EntityManager.golemLaunchedPlayer Connections 调（仅 Survival —— mobAttackedPlayer 同帧发的伤害已门控，
 //   上抛与伤害同源同门；Creative / Spectator 无敌不抛）。同 applyHitKnockback 的 m_vel.y 直写模式（无双重力），
 //   但垂直冲量用大值 kGolemLaunchVy（16 → 峰值 ~4.6 格，落地落差 >3 格必触发摔落伤害，用户口径「4 格以上摔伤」）。
-//   防御：归一输入；非 Survival / 死亡 / 未捕获 / 零方向 → 静默早退（同 applyHitKnockback）。
+//   防御：归一输入；非 Survival / 死亡 / 零方向 → 静默早退（同 applyHitKnockback；review26 #25 连坐——
+//   不再拦 !m_captured，软档 GUI 开照弹）。
 void PlayerController::applyGolemLaunch(float dirX, float dirZ)
 {
     if (m_mode != Survival) return;      // 创造 / 观察者无敌（防御；golemLaunchedPlayer 本就 Survival-only）
-    if (m_dead || !m_captured) return;   // 死亡 / 菜单态不弹（防 respawn 后陈旧信号或暂停中被推）
+    if (m_dead) return;                  // 死亡态不弹（review26 #25 连坐同 applyHitKnockback：软档 GUI 开照弹）
     float len = std::sqrt(dirX * dirX + dirZ * dirZ);
     if (!(std::isfinite(len) && len > 1e-3f)) return;
     dirX /= len;
@@ -2621,11 +2627,11 @@ void PlayerController::useFishingRod()
             if (dHoriz > 1e-3f) { hdx = ddx / dHoriz; hdz = ddz / dHoriz; } // 正上/下重合 → 无水平弹向（原地落下即可拾）
             emit fishCaught(stacks[0].itemId, stacks[0].count,
                             bp.x(), bp.y(), bp.z(), hdx, hdz, vmag); // 通知性（探针 / 未来 UI；QML 不再转发 spawn）
-            // t886 经验球 1-6 XP（机制等价 MC 1.0 钓鱼 1-6 XP；战利品非世界生成 → 运行期随机同 fishingPool
-            //   掷骰口径）。落浮标所在格中心（spawnOrb 内 +0.5），磁吸半径内玩家走近拾取。
-            if (m_xpOrbManager)
-                m_xpOrbManager->spawnOrb(qFloor(bp.x()), qFloor(bp.y()), qFloor(bp.z()),
-                                         1 + QRandomGenerator::global()->bounded(6));
+            // t886 经验 1-6 XP（机制等价 MC 1.0 钓鱼 1-6 XP；战利品非世界生成 → 运行期随机同 fishingPool
+            //   掷骰口径）。review26 #21：改**直接入账**（emit fishXpGained → 呈层路由 playerState.addXp）——
+            //   MC 1.0 钓鱼 XP 无经验球实体（区别于死亡 / 熔炉落球路径）；旧版球落浮标水格（最远 32 格外），
+            //   纯磁吸不追人 → 玩家须涉水去吃、离开即到寿命消散（「鱼到手 XP 留钓点」语义破碎）。
+            emit fishXpGained(1 + QRandomGenerator::global()->bounded(6));
             // 生存钓竿 -1 耐久（归零自动清槽，同弓 / 镐）；创造不消耗（无限源）。
             if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem();
         }
