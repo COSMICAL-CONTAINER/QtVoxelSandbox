@@ -104,16 +104,23 @@ Node {
                      + " (ambient white glyph flow: all tables x shelves, cam-range gated)")
     }
 
+    // review26 #23：t873 自检日志降为调试开关门（默认关）——rescanPairs 由 onEditRevChanged 驱动，旧版
+    //   每次挖/放方块必刷一行 console.info（生产路径噪声）。开关 = 启动参数 --verbose-glyphs（排障时
+    //   临时打开恢复 t873 全量自检：数据侧 0 台/0 对 vs 渲染侧不可见的折损点定位语义不变）。
+    readonly property bool debugSelfCheck: Qt.application.arguments.indexOf("--verbose-glyphs") >= 0
+
     // 重扫台×书架对：tableModel 逐台套 World::countBookshelvesAround 同规则（水平切比雪夫 ==2 环带 ×
     //   y/y+1 两层 + 半步格 Air）。规则单一权威在 World::countBookshelvesAround 的注释契约里，QML 呈现层
     //   内联同规则（EnchantRunes 同款复制 —— 改规则须多处同步，此处显式注记）。
     function rescanPairs() {
         root.pairs = []
         if (!root.world || !root.active || !root.tableModel) {
-            // t873 自检：前置门未齐（读档早期 / 菜单态）—— 折损点直接落日志，不再静默早退。
-            console.info("[t873] rescan aborted: world=" + (root.world !== null)
-                         + " active=" + root.active
-                         + " tableModel=" + (root.tableModel !== null))
+            // t873 自检：前置门未齐（读档早期 / 菜单态）—— 折损点直接落日志，不再静默早退（review26 #23
+            //   起同受 --verbose-glyphs 门：常态零日志）。
+            if (root.debugSelfCheck)
+                console.info("[t873] rescan aborted: world=" + (root.world !== null)
+                             + " active=" + root.active
+                             + " tableModel=" + (root.tableModel !== null))
             return
         }
         const n = root.tableModel.count
@@ -131,9 +138,10 @@ Node {
                 }
             }
         }
-        // t873 自检：每次重扫落一行「台数 × 对数」——0 台 / 0 对即链断在数据侧（表空或搭法不满足环带规则），
-        //   非 0 却看不见则链断在渲染/视觉侧（发射、材质、尺寸）。
-        console.info("[t873] rescanPairs: tables=" + n + " pairs=" + root.pairs.length)
+        // t873 自检（review26 #23 起 --verbose-glyphs 门控）：每次重扫落一行「台数 × 对数」——0 台 / 0 对
+        //   即链断在数据侧（表空或搭法不满足环带规则），非 0 却看不见则链断在渲染/视觉侧（发射、材质、尺寸）。
+        if (root.debugSelfCheck)
+            console.info("[t873] rescanPairs: tables=" + n + " pairs=" + root.pairs.length)
     }
 
     onActiveChanged:     rescanPairs()

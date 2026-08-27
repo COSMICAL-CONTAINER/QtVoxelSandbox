@@ -560,6 +560,11 @@ void PlayerController::setCaptured(bool c)
 //   时长补给三管理器的墙钟寿命（箭 60s / 浮标 180s / 掉落物 5min / 经验球 5min 暂停期不老化 —— 机制等价
 //   MC Java 单机 ESC 暂停一切计时冻结；t885：ESC 挂机后鱼线仍在）。dt 类计时（燃烧 / 挖掘 / 咬钩窗口 /
 //   实体物理）随 tick 停而天然冻结，无需顺延。翻转才 emit（QML 绑定纪律）。
+//   review26 #22（登记，知情语义）：**顺延只在硬档（worldRunning=false→true 翻转）发生**——软档（GUI /
+//   聊天 / 死亡屏，!captured 但 worldRunning=true）EntityManager/ItemEntityManager 照 tick、墙钟照走 =
+//   开背包挂机 >180s 浮标到期自动收、掉落物按 5min 寿命消散。这是「软档 = 世界照跑」的一致推论（Java
+//   语义），非缺陷；「GUI 开鱼线持久」（t885/t889）的承诺面**仅限硬暂停**。用户预期落差已在 t889 叙事
+//   注记（不是每条 GUI 开 = 安全挂机）。
 void PlayerController::setWorldRunning(bool running)
 {
     if (m_worldRunning == running) return;

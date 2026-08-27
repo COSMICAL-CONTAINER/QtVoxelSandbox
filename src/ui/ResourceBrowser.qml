@@ -958,7 +958,11 @@ Item {
                                                     //   不被消费（materials 多于 subset → 多余材质忽略）。
                                                     lighting: PrincipledMaterial.NoLighting
                                                     baseColor: "#ffffff" // 贴图在身 → 白透原色（t597）
-                                                    baseColorMap: root.selectedMobTexSource !== "" ? mobPrevTex : mobSheepHeadTex
+                                                    // review26 #18：判据改 selectedMobPackSrc（与下行 alphaMode 同源）——
+                                                    //   selectedMobTexSource 在 pack 关时也非空（= 回退 qrc 贴图）→ 旧三目
+                                                    //   恒走 mobPrevTex，注释声明的「pack 关 → mobSheepHeadTex」落空 = 程序
+                                                    //   羊头贴图死代码（图鉴侧从未激活）。
+                                                    baseColorMap: root.selectedMobPackSrc !== "" ? mobPrevTex : mobSheepHeadTex
                                                     alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== ""
                                                                ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
                                                     alphaCutoff: 0.5
