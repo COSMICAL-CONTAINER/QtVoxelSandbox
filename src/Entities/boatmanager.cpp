@@ -280,6 +280,22 @@ float BoatManager::boatFootprintIceTopAt(World *world, float px, float py, float
     return topY;
 }
 
+// review27 #15② 指定层冰存在查（见 .h 注释）：snap 目标层（贴稳态后船中心层）有冰 = 舱位被埋，
+//   拒 snap（两层冰墙振荡守卫）。外扩口径与 boatFootprintIceTopAt 一致（kShoreProbe 前瞻）。
+bool BoatManager::boatFootprintLayerIsIce(World *world, float px, float pz, int layer) const
+{
+    if (!world || layer < 0) return false;
+    const int x0 = int(std::floor(px - kBoatHalfW - kShoreProbe));
+    const int x1 = int(std::floor(px + kBoatHalfW + kShoreProbe));
+    const int z0 = int(std::floor(pz - kBoatHalfLen - kShoreProbe));
+    const int z1 = int(std::floor(pz + kBoatHalfLen + kShoreProbe));
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z)
+            if (BlockRegistry::isIce(world->blockAt(x, layer, z)))
+                return true;
+    return false;
+}
+
 float BoatManager::boatFootprintWaterFraction(World *world, float px, float pz, float probeY) const
 {
     if (!world) return 0.0f;
@@ -791,12 +807,19 @@ void BoatManager::tickRiddenBoat(qreal dt, World *world, float wishX, float wish
             //   无冰 / 高差 > snap → 常规钉水面。仅骑乘路径（空船漂移无驱动力，摩擦即停不涉及）。
             //   判据取 **≥**（非 >）：贴稳态后 iceRestY == pos.y，取 > 会在「snap 上去 / 回钉 surfY」间
             //   逐帧振荡（t805 冰道实测卡冰缘 13.50）—— ≥ 使稳态自持，直到覆盖跌破落下阈转陆档。
+            // review27 #15② 埋位守卫：snap 目标层（贴稳态后船中心层 floor(iceRestY)）有冰 = 两层冰墙
+            //   场景（首层冰顶上是第二层冰）——舱位被埋，是墙不是可行驶面；旧版照 snap → 下一帧 iceTop
+            //   见第二层（高差 1.0 > snap）回钉 surfY → 再 snap 首层 = 逐帧 ~0.325 振荡。守卫拒埋位
+            //   snap，船稳定浮在冰墙脚的水面（位移碰撞挡住不进墙），单层冰面 snap 路径不受影响。
             const float iceTop = world ? boatFootprintIceTopAt(world, b.pos.x(), b.pos.y(), b.pos.z()) : -1.0f;
             const float iceRestY = (iceTop >= 0.0f) ? iceTop + kBoatHullBottom : -1.0f;
-            if (iceRestY >= b.pos.y() && iceRestY - b.pos.y() <= kBoatBeachSnap)
+            const bool iceRestBuried = iceRestY >= 0.0f && world
+                                       && boatFootprintLayerIsIce(world, b.pos.x(), b.pos.z(),
+                                                                   int(std::floor(iceRestY)));
+            if (!iceRestBuried && iceRestY >= b.pos.y() && iceRestY - b.pos.y() <= kBoatBeachSnap)
                 b.pos.setY(iceRestY);
             else
-                b.pos.setY(surfY); // 常规浮水：Y 钉水面（爬升期 Y 已高于 surfY，不回钉）
+                b.pos.setY(surfY); // 常规浮水：Y 钉水面（爬升期 Y 已高于 surfY，不回钉；埋位守卫拒 = 同口径）
         }
     } else {
         // 无水重力落地（同 tick 段：footprint 支撑顶 → 贴稳态 / 冲量爬岸 / 下落钳不穿）。

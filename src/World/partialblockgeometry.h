@@ -65,6 +65,11 @@ struct PartialNeighborCtx {
     int dustClimbNx = 0;
     int dustClimbPz = 0;
     int dustClimbNz = 0;
+    // review27 #15① 睡莲叶高上下文：**下一格**（同列 y-1）的方块 id + state（仅 blockId == LilyPad 时由
+    //   chunkgeometry 填；睡莲置于顶水格 + 1，叶 quad 高度须读下方水格液面 waterSurfaceFrac——t892 静水
+    //   液面降 7/8 后，旧「cell 底 + 1/16 按满格水面校准」的叶面悬空 ~3/16）。非睡莲异形方块忽略。
+    quint8 belowId = 0;
+    quint8 belowState = 0;
 };
 
 // 不完整方块异形几何（t133 基础设施）：为 slab/stairs/fence/door/trapdoor/pressure plate 等「非

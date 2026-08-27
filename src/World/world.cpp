@@ -3376,6 +3376,13 @@ void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
     //   编辑锚点经 6 正交种子够不到斜角粉 → 环粉保留陈旧电力（拆火把后灯不灭——降沿失达，t706
     //   同类）。仅火把编辑需要（火把 ↔ 斜下粉是唯一的斜角供电关系）。
     if (oldId == BlockRegistry::RedstoneTorch || newId == BlockRegistry::RedstoneTorch) {
+        // review27 #23：火把**被拆**（oldId==Torch）→ 同格 burnout 侧表摘键——MC 拆火把重放即重置熔断。
+        //   旧版唯一摘表路径是到期（tickTorchBurnout），拆 / 重放残留两缺口：(a) 计数窗内拆后同格重放 →
+        //   新火把继承 flips（可能不到 8 翻就熔断）；(b) 冷却锁定期内拆后重放 → 锁定门 continue 跳过新火把
+        //   评估，基座已供电也错误亮到冷却到期（最长 8s）。失撑自拆（recheckAttachmentsAfterClear 走
+        //   notePowerWrite(Torch→Air)）同经本口摘键 = 语义一致；熔断翻转自身是静默直写不经本口，不受影响。
+        if (oldId == BlockRegistry::RedstoneTorch)
+            m_torchBurnout.erase(packGrowthCell(x, y, z));
         static constexpr int kDiag[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         for (const auto &h : kDiag) {
             const int nx = x + h[0], ny = y - 1, nz = z + h[1];

@@ -266,6 +266,12 @@ private:
     //   盲目 snap 会把船「吸上」沙唇，破坏 t661 上岸需冲量语义。空船 tick() 漂移无驱动力（摩擦即停）
     //   不涉及，仅骑乘路径调用。
     float boatFootprintIceTopAt(World *world, float px, float py, float pz) const;
+    // review27 #15② 指定层冰存在查：footprint（外扩 kShoreProbe，同 boatFootprintIceTopAt 口径）覆盖格
+    //   在 layer 层任一冰族格 → true。供冰面 snap-up 前的「目标层上方无冰」守卫：岸边两层冰墙（冰堆
+    //   2 格高）时首层冰顶 snap 上去后船中心层（= snap 后 restLayer）仍是冰（第二层）——舱位被埋 =
+    //   是墙不是可行驶面；下一帧 iceTop 升到第二层顶 → 高差 1.0 > kBoatBeachSnap 不 snap 回钉水面 →
+    //   再 snap 首层 = 逐帧 ~0.325 的 Y 振荡。守卫拒埋位 snap → 船稳定浮在水面（位移碰撞挡住不进冰墙）。
+    bool boatFootprintLayerIsIce(World *world, float px, float pz, int layer) const;
     // t630 船 footprint 水域覆盖率（0..1）：footprint 覆盖格中「该列有水柱」的格数占比（列从支撑层
     //   probeY 向上扫 kWaterProbeDepth 格内有 Water 即算水列 —— 覆盖浅水 / 深水，取覆盖即可）。采样同
     //   boatFootprintBlocked（floor(±半宽/半长) 格扫）。t630「2/3 支撑阈值」用：覆盖率 ≥ 2/3 才判「船浮

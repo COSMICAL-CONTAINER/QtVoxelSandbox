@@ -547,16 +547,24 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::LilyPad: {
-        // t396 睡莲「横向浮叶」模型：**一片水平双面 quad 贴 cell 底部**（y≈1/16，刚好浮于水面）—— 与竖直 cross
-        //   （草丛 / 蘑菇等两片对角 X）不同，睡莲是平铺水面的圆叶，故几何为水平 quad 非竖直 cross。机制等价
-        //   MC 1.0 lily pad（沼泽浅水水面浮叶）。worldgen 把本方块置于水格上方一格（y = 水面 + 1），其 cell 底部
-        //   quad（world y ≈ 水面 + 1/16）恰浮于水面之上 → 视觉如叶片贴水。
+        // t396 睡莲「横向浮叶」模型：**一片水平双面 quad** —— 与竖直 cross（草丛 / 蘑菇等两片对角 X）
+        //   不同，睡莲是平铺水面的圆叶，故几何为水平 quad 非竖直 cross。机制等价 MC 1.0 lily pad（沼泽
+        //   浅水水面浮叶）。worldgen 把本方块置于水格上方一格（y = 水面 + 1）→ 叶 quad 恰浮于水面之上
+        //   → 视觉如叶片贴水。
         //   复用 pushCrossQuad（它对任意 4 共面角点发正反双面三角形 → 水平 quad 同样双面可见，从水面上下均见叶）。
-        //   四角取 cell 全 footprint（xz [0,1]）+ y=1/16（略高于 cell 底防 z-fight 水面）；UV 满铺整张瓦片（圆叶由
-        //   贴图 alpha cutout 表达，几何仍为整张 quad）。不做邻居剔除（透明 + 浮叶，同 cross；LilyPad solid=false）。
+        //   四角取 cell 全 footprint（xz [0,1]）+ UV 满铺整张瓦片（圆叶由贴图 alpha cutout 表达，几何仍为
+        //   整张 quad）。不做邻居剔除（透明 + 浮叶，同 cross；LilyPad solid=false）。
         //   材质 alphaCutoff:0.5 丢弃透明底 → 仅圆叶像素显（V 形缺口由贴图 alpha 表达）。
         //   tile 由 BlockRegistry::tileIndex(LilyPad, PosX) = sideTile = 61 给出。
-        constexpr float yp = 1.0f / 16.0f; // 浮叶高度（cell 底以上 1/16，贴水面防 z-fight）
+        // review27 #15① 叶高改读下方水格液面：旧版固定「cell 底 + 1/16」按满格水面（1.0）校准——t892 静水
+        //   液面降 7/8（源）后，叶 cell（顶水格 + 1）底部已高出水面 1/8，叶面悬空 ~3/16（视觉「浮空叶」）。
+        //   现叶 quad 世界高 = 下方水格液面 + 1/16（防 z-fight 裕度不变）= 本 cell 局部 y =
+        //   waterSurfaceFrac(下方水 state) − 1 + 1/16（源 7/8 → **−1/16**：quad 沉入本 cell 底以下 1/16 =
+        //   恰贴水面；顶点跨 cell 边界无碍——chunk mesh 无按 cell 裁剪）。下方非水（冰冻成冰 / 干涸残留 /
+        //   越界）：fallback 满格液面 1.0 → 局部 1/16（旧值，冰顶 = 格顶，叶贴冰面）。
+        const float belowFrac = (nb.belowId == BlockRegistry::Water)
+                                    ? BlockRegistry::waterSurfaceFrac(nb.belowState) : 1.0f;
+        const float yp = belowFrac - 1.0f + 1.0f / 16.0f; // 浮叶高度（液面上 1/16，防 z-fight 水面）
         pushCrossQuad(verts, idx, lx, ly, lz,
                       0.f, yp, 0.f,  1.f, yp, 0.f,  1.f, yp, 1.f,  0.f, yp, 1.f, // 水平 quad：BL→BR→TR→TL（xz 全 footprint）
                       tile, light, tileW, hx, hy, v0, v1);

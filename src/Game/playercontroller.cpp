@@ -2923,6 +2923,11 @@ void PlayerController::leaveBedTeleport()
             if (m_world->isCollidable(x, m_sleepBy, z)) continue;         // 脚位格须可通过
             if (m_world->isCollidable(x, m_sleepBy + 1, z)) continue;     // 头位格须可通过（1.8 身高）
             if (!m_world->isCollidable(x, m_sleepBy - 1, z)) continue;    // 下方须有支撑（不瞬移进虚空）
+            // review27 #20①：可站格排液体——岩浆湖 / 水域旁贴床睡觉，醒来不得瞬移进液体（岩浆 = 醒即
+            //   自焚站火里，水 = 睡醒瞬移湿身；液体非 collidable 故上面三查拦不住）。脚位格是 Lava/Water
+            //   → 换下一候选（MC respawn 排液体同语义；全邻皆液体时仍走下方 fallback 站床顶）。
+            const quint8 standId = m_world->blockAt(x, m_sleepBy, z);
+            if (standId == BlockRegistry::Lava || standId == BlockRegistry::Water) continue;
             m_pos = QVector3D(float(x) + 0.5f, float(m_sleepBy), float(z) + 0.5f);
             m_vel = QVector3D(0, 0, 0);
             m_knockback = QVector3D(0, 0, 0);
@@ -3446,7 +3451,12 @@ void PlayerController::placeBlock()
         const QVector3D look = lookDirection();
         // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球模式）。
         const QVector3D origin = eye + look * 0.5f;
-        m_entityManager->spawnFireball(origin, look * kPlayerFireballSpeed, 100); // 撞击必生火（t891②）
+        // review27 #14②：spawnFireball 达实体上限（kCap）返 -1 = 弹未生成 → 不消耗 / 不挥手 / 不置冷却
+        //   （旧版无条件 takeStack：弹被吞仍扣 1 发——烈焰弹是生存合成资源（3 发/组），与免费雪球不同档，
+        //   雪球既有先例口径不动，后续统一收口）。
+        const int fireballSlot = m_entityManager->spawnFireball(origin, look * kPlayerFireballSpeed, 100); // 撞击必生火（t891②）
+        if (fireballSlot < 0)
+            return; // 生成被拒（kCap 满载告警已由 Entities 层发）→ 发射未发生，不再走消耗 / 挥手路径
         if (m_mode != Creative)
             m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 烈焰弹（创造不耗）
         m_lastPlaceMs = now;
@@ -6012,8 +6022,13 @@ bool PlayerController::eyeInWater() const
     const QVector3D eye = position();
     const int ex = int(std::floor(eye.x())), ey = int(std::floor(eye.y())), ez = int(std::floor(eye.z()));
     if (m_world->blockAt(ex, ey, ez) != BlockRegistry::Water) return false;
+    // review27 #15③ 液面比较加 epsilon 去抖：游泳物理无浮力平衡点，眼位贴 7/8 液面（±毫米级）逐帧穿越
+    //   → 蓝雾 / 耗氧口径逐帧翻转（m_underwaterChanged 抖 QML 绑定）。眼位高出液面 < kSurfaceDebounce
+    //   仍算水下（单侧吸收：向「水下」侧粘滞——贴面瞬间显蓝雾比逐帧闪烁观感好；1/32 ≈ 2 texel）。
+    constexpr float kSurfaceDebounce = 1.0f / 32.0f;
     if (m_world->blockAt(ex, ey + 1, ez) != BlockRegistry::Water
-        && eye.y() - float(ey) > BlockRegistry::waterSurfaceFrac(m_world->stateAt(ex, ey, ez)))
+        && eye.y() - float(ey) > BlockRegistry::waterSurfaceFrac(m_world->stateAt(ex, ey, ez))
+                                      + kSurfaceDebounce)
         return false; // 眼位在降位液面上方的空气段 → 不算水下
     return true;
 }
@@ -7386,14 +7401,23 @@ void PlayerController::step(qreal dt)
             m_fireDmgTimer += float(dt);
             if (m_fireDmgTimer >= EntityManager::kFireDamageInterval) {
                 m_fireDmgTimer -= EntityManager::kFireDamageInterval;
-                // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭，掷骰退化为永假分支保留结构——
-                //   雨灭 / 水灭走上方 review27 #11 独立路径；若未来接 Peaceful 难度再复用本口）。不熄才扣 1HP 火伤。
-                if (QRandomGenerator::global()->generateDouble() < double(EntityManager::kFireExtinguishChance)) {
-                    m_fireTimer = 0.0f;
-                    m_fireDmgTimer = 0.0f;
-                } else {
-                    emit fallDamageTaken(1, PlayerState::Fire); // t311 死因=燃烧（复用 takeDamage→damaged 链）
+                // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭；雨灭 / 水灭走上方 review27 #11 独立
+                //   路径）。review27 #17①：if constexpr 按常量门控——kFireExtinguishChance == 0 时掷骰与
+                //   分支整体编译期剔除（旧版每火伤脉冲白耗一次全局 RNG + 永假死分支）。**常量回改非零前
+                //   必读**：t888 全套节奏标定（kFireDuration 8s 必烧满 / kFireDamageInterval 1s）按「无随
+                //   机提前熄灭」校准，复活本分支 = 实际火伤期望低于现标定，须同步重标（若接 Peaceful
+                //   难度再复用本口——锚点保留）。
+                bool earlyExtinguished = false;
+                if constexpr (EntityManager::kFireExtinguishChance > 0.0f) {
+                    earlyExtinguished = QRandomGenerator::global()->generateDouble()
+                                        < double(EntityManager::kFireExtinguishChance);
+                    if (earlyExtinguished) {
+                        m_fireTimer = 0.0f;
+                        m_fireDmgTimer = 0.0f;
+                    }
                 }
+                if (!earlyExtinguished)
+                    emit fallDamageTaken(1, PlayerState::Fire); // t311 死因=燃烧（复用 takeDamage→damaged 链）
             }
             if (m_fireTimer <= 0.0f) { m_fireTimer = 0.0f; m_fireDmgTimer = 0.0f; } // 定时熄灭
         }

@@ -580,7 +580,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   m_cutoutOnly=true 分支保留为**降级杠杆**：QML 重新启用 crossChunkComp 即回 6 段
                     //   （若实测出现草丛边缘 / 树苗阴影观感回归，一行恢复）。
                     if (m_cutoutOnly) {
-                        if (!isCrossX && !isDoorX && !isCutoutTrapX) continue;  // cutout 段：仅 cross + 门 + 铁活板门（alpha cutout 透视）
+                        if (!isCrossX && !isDoorX && !isCutoutTrapX) continue;  // cutout 段：仅 cross + 门 + 活板门（铁 723 栅格孔 / 木 t879 四镂空板，alpha cutout 透视）
                     } else {
                         // t860 折叠后 terrain 段：partial 盒体 + cross + 门 + 活板门全收（唯 PASS 2 立方面
                         //   跳过清单不变——cross/door/trapdoor 本就只走 PASS 1，无双重发射）。
@@ -657,6 +657,13 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                         nctx.dustClimbNx = dclimb(-1, 0);
                         nctx.dustClimbPz = dclimb(0, 1);
                         nctx.dustClimbNz = dclimb(0, -1);
+                    }
+                    // review27 #15① 睡莲叶高上下文：填同列下一格 id/state（仅 LilyPad 用——叶 quad 高度读
+                    //   下方水格液面 waterSurfaceFrac，partialblockgeometry LilyPad case 消费；其余异形
+                    //   方块忽略，零成本）。
+                    if (b == BlockRegistry::LilyPad) {
+                        nctx.belowId = blockAtWorld(wx, ly - 1, wz);
+                        nctx.belowState = stateAtWorld(wx, ly - 1, wz);
                     }
                     PartialBlockGeometry::append(verts, idx, lx, ly, lz, b, st,
                                                  lctx, nctx, tileW, hx, hy, v0, v1);
