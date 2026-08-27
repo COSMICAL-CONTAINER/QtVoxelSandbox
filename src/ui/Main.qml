@@ -288,8 +288,8 @@ Window {
     property var terrainGeos: []
     property var chunkObjects: []
     property bool chunksBuilt: false
-    property int meshVertices: 0     // 全幅地形段顶点汇总（recomputeMeshStats 写；F3 只读）
-    property int meshTriangles: 0    // 全幅地形段三角面汇总（recomputeMeshStats 写；F3 只读）
+    property int meshVertices: 0     // 全幅**地形段**已建顶点汇总（recomputeMeshStats 写；F3 mesh 行读，段域标注见 t857）
+    property int meshTriangles: 0    // 全幅**地形段**已建三角面汇总（recomputeMeshStats 写；F3 mesh 行读）
     // perf-t520 F3 文本节流（PLAN §4 性能打磨：用户报 <10FPS 主因之一 = F3 文本绑定重算）。
     //   旧 F3 text 绑定读 player.position/feetPosition/yaw/pitch/speed/onGround/hasHit/hitBlock +
     //   theWorld.biomeIdAt(...) Q_INVOKABLE + liveCount() Q_INVOKABLE 等 —— 这些属性 NOTIFY 60Hz
@@ -316,10 +316,9 @@ Window {
     property int _playerCX: -1       // 玩家所在 chunk X（缓存；未初始化 -1，跨 chunk 边界才刷新）
     property int _playerCZ: -1       // 玩家所在 chunk Z（同上）
     property int visibleChunkCount: 0 // 当前 chunkInRange=true 的 chunk 数（F3 显示；可见 ≠ 全 meshed 100）
-    // t470 实际 visible=true 的段 Model 数（chunkInRange && geo.vertexCount>0；空段被剔）。draw-call 估算读它
-    //   （替代旧 ncx*ncz*2 / visibleChunkCount*6 上界——空段不出 draw，此为更诚实的估算）。
-    //   注意：值在 _refreshChunkVisibility 末刷新；meshRebuilt 改 vertexCount 时各段 visible 绑定自动重算，
-    //   但本属性不实时跟踪（仅在 chunk 跨界 / 渲染距离调整时刷新）—— F3 draw-call 行仅示性，无需逐帧精度。
+    // t470 实际 visible=true 的段 Model 数（chunkInRange && geo.vertexCount>0；空段被剔）。t857 起 F3 draw 行
+    //   换 RenderStats 真值后本属性不再被消费（旧估算公式退役）——保留为 _refreshChunkVisibility 的一次性
+    //   诊断计数（console 刷新时可观测段剔除效果），不再进 F3 文本。
     property int visibleSegmentCount: 0
     // t489 流体材质级动画帧（水/岩浆条带 flipbook）。由下方 waterAnimTimer / lavaAnimTimer 推进；
     //   绑水/岩浆段 Texture 的 positionV（= frame / stripFrames）→ 帧切换纯材质参数，零 mesh 重建
@@ -373,7 +372,14 @@ Window {
         const ncx = window.worldChunksPerSide, ncz = window.worldChunksPerSide
         const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
         const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
-        const drawEst = window.visibleSegmentCount + itemLive + mobLive + torchPositions.count + 6
+        // t857（R19.14）draw / 顶点 / pass 换 RenderStats 真值：View3D.renderStats 是 Quick3D 渲染后端
+        //   逐帧统计（drawCallCount / drawVertexCount / renderPassCount / renderTime），替代旧 ~drawEst
+        //   估算公式（visibleSegmentCount + itemLive + mobLive + torches + 6——那只是「应画 Model 数」的
+        //   上界假设，与后端实际提交的 draw 数会漂移：透明拆 pass / 视锥剔除 / instancing 合批都不反映）。
+        //   真值依赖 extendedDataCollectionEnabled（View3D 上绑 window.f3Visible——F3 关闭时零收集开销）。
+        const rs = view3d.renderStats
+        const drawCalls = rs.drawCallCount, drawVerts = rs.drawVertexCount
+        const passCount = rs.renderPassCount, renderMs = rs.renderTime
         const meshMode = window.greedyMeshing ? "greedy" : "culled"
         // MC x/y/z/f 行数据：眼位（MC F3 显眼位）；格 = floor；格内 16 取余（负坐标 JS & 补码同 MC 正余数）。
         const ex = player.position.x, ey = player.position.y, ez = player.position.z
@@ -415,12 +421,16 @@ Window {
              + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
              + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
              + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
-             + "\nmesh: " + meshMode + "  vertices: " + vx + "  triangles: " + tr
+             + "\nmesh: " + meshMode + "  terrain verts: " + vx + "  tris: " + tr + "  (built 地形段)"
              + "\nentities: mobs " + mobLive + "/" + entityManager.count + "  items " + itemLive + "/" + itemEntities.count
              + "  orbs " + orbLive + "/" + xpOrbs.count
-             + "\ndraw-calls: ~" + drawEst + "  (segs vis " + window.visibleSegmentCount
-             + " + items " + itemLive
-             + " + mobs " + mobLive + " + torches " + torchPositions.count + " +6 scene)  threads: 0/0 (sync meshing)"
+             // t857 真值行：draw-calls / verts(已画) / passes / render ms 全部来自 RenderStats（非估算）。
+             //   drawVertexCount 是「本帧实际画的顶点」（含视锥剔除 / 全部段与实体），区别上一行 mesh 的
+             //   「地形段已建顶点」（t178-correctness.md:87 登记项随真值落地闭案：built 求和显式标注段域，
+             //   drawn 真值在此行）。threads 0/0 = meshing 全 GUI 线程同步（survey §1.1 实况）。
+             + "\ndraw-calls: " + drawCalls + "  verts drawn: " + drawVerts
+             + "  passes: " + passCount + "  render " + renderMs.toFixed(1) + " ms  [RenderStats]"
+             + "  threads: 0/0 (sync meshing)"
              + "\ntime: " + timeStr + "  day " + worldClock.dayCount + "  moon " + worldClock.moonPhase
              + "  phase " + dayPhase.toFixed(2) + "  sky " + worldClock.skyLight.toFixed(2)
              + (worldClock.debugFast ? "  (fast)" : "")
@@ -2851,6 +2861,11 @@ Window {
         // t232 抓封面期间抬到最上层：盖住暂停叠层 / HUD，让 grabWindow 拍到纯 3D 场景（无「PAUSED」面板 /
         //   hotbar / HUD 文字）。平时 z=0（叠层在上层正常显）。opaque clearColor 背景 → 抬高后完全盖住 UI。
         z: window.coverHideUi ? 999 : 0
+        // t857（R19.14 性能起步批）F3 渲染统计真值：RenderStats 的 drawCallCount / drawVertexCount /
+        //   renderPassCount 是后端逐帧真值（drawVertexCount 经视锥剔除后的实画数；renderPassCount 含透明
+        //   拆 pass）。扩展统计默认关（有收集开销）→ 绑 f3Visible：F3 开才收、关则零成本（真值行在
+        //   buildF3Text 内读 renderStats 属性，10Hz Timer 快照式读取不建绑定依赖）。
+        renderStats.extendedDataCollectionEnabled: window.f3Visible
         environment: SceneEnvironment {
             // t09：clearColor 随天光乘子 lerp 昼(#9ec6e8)↔夜(#0b1026)；方向固定（PLAN §2-H 非
             // 旋转方向光）。绑定 skyLight → 每周期 tick 自动刷新（debugFast 下 ~30s 一圈）。

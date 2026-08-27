@@ -15682,7 +15682,9 @@ Item {
                         && m.lastIndexOf(QStringLiteral("Column {"), iProf) == iCol;          // 两 Text 同 Column
         bool okOldGone = !m.contains(QStringLiteral("y: 62 + 200"));
         const int iFn = m.indexOf(QStringLiteral("function buildF3Text()"));
-        const QString fn = iFn >= 0 ? m.mid(iFn, 4200) : QString();
+        // t857 起函数体加长（renderStats 真值段 + 注释）→ 切片窗 4200→5200（钉的是内容 token，窗口须覆盖
+        //   增长后的函数；窗口不足会把仍在函数内的钉 token 误判为消失 = 假红）。
+        const QString fn = iFn >= 0 ? m.mid(iFn, 5200) : QString();
         bool okMc = fn.contains(QStringLiteral("\"voxelsandbox (\" + BuildInfo.full"))
                     && fn.contains(QStringLiteral("\\nx: \""))
                     && fn.contains(QStringLiteral(" // \""))
@@ -16087,6 +16089,73 @@ Item {
                              "plant and drop its dropId, while the flower negative control stays put on "
                              "replaced-but-still-legal farmland (family replacement-caliber kept for flowers/"
                              "mushrooms, only tallgrass tightened)";
+    }
+
+    // ── P-t857 F3 渲染统计真值源码钉（R19.14 性能起步批；源序钉先例 = review #4/#5 的 rpm 源序探针）──
+    //   buildF3Text 的 draw 行自 t857 起读 view3d.renderStats 真值（drawCallCount / drawVertexCount /
+    //   renderPassCount），旧 ~drawEst 估算公式（visibleSegmentCount + itemLive + mobLive + torches + 6）
+    //   退役。钉三件事：① 函数体必经 renderStats 真值四读；② 估算公式 token（drawEst）在函数体内绝迹；
+    //   ③ View3D 上 extendedDataCollectionEnabled 绑 f3Visible（真值收集的开关契约——漏绑则真值恒 0，
+    //   F3 显示静默失真）。QML 无 static_assert 面 → 源码文本钉（滤 // 注释行后切片断言）。
+    {
+        QString qmlPath;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString candidates[2] = {
+                QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+                QDir(exeDir + QStringLiteral("/../..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+            };
+            for (const QString &c : candidates) {
+                if (QFile::exists(c)) { qmlPath = c; break; }
+            }
+        }
+        bool okT857 = true;
+        if (qmlPath.isEmpty()) {
+            qInfo().noquote() << "  [t857 note] Main.qml not found near exe - source-pin skipped";
+        } else {
+            QFile qmlF(qmlPath);
+            if (!qmlF.open(QIODevice::ReadOnly)) {
+                okT857 = false;
+                qInfo().noquote() << "  [t857 diag] failed to open" << qmlPath;
+            } else {
+                QString codeText;
+                const QString rawText = QString::fromUtf8(qmlF.readAll());
+                for (const QString &line : rawText.split(QLatin1Char('\n'))) {
+                    if (line.trimmed().startsWith(QLatin1String("//")))
+                        continue; // 滤 // 注释行（探测目标是语句文本，注释里的 token 会干扰）
+                    codeText += line;
+                    codeText += QLatin1Char('\n');
+                }
+                const int fnStart = codeText.indexOf(QStringLiteral("function buildF3Text()"));
+                const int fnEnd = fnStart >= 0 ? codeText.indexOf(QStringLiteral("\n    }"), fnStart) : -1;
+                if (fnStart < 0 || fnEnd < 0) {
+                    okT857 = false;
+                    qInfo().noquote() << "  [t857 diag] buildF3Text body not found fnStart" << fnStart
+                                      << "fnEnd" << fnEnd;
+                } else {
+                    const QString body = codeText.mid(fnStart, fnEnd - fnStart);
+                    const bool hasTruth = body.contains(QStringLiteral("view3d.renderStats"))
+                                          && body.contains(QStringLiteral("drawCallCount"))
+                                          && body.contains(QStringLiteral("drawVertexCount"))
+                                          && body.contains(QStringLiteral("renderPassCount"));
+                    const bool noEstimate = !body.contains(QStringLiteral("drawEst"));
+                    const bool hasEnable = codeText.contains(
+                            QStringLiteral("renderStats.extendedDataCollectionEnabled: window.f3Visible"));
+                    okT857 = hasTruth && noEstimate && hasEnable;
+                    if (!okT857)
+                        qInfo().noquote() << "  [t857 diag] truth" << hasTruth << "noEstimate" << noEstimate
+                                          << "enableGate" << hasEnable;
+                }
+            }
+        }
+        if (!okT857) ++totalFail;
+        qInfo().noquote() << (okT857 ? "PASS" : "FAIL")
+                          << "| t857 F3 render-stats truth: buildF3Text draw line reads view3d.renderStats "
+                             "real values (drawCallCount/drawVertexCount/renderPassCount via RenderStats, "
+                             "extended collection gated on f3Visible at the View3D) and the legacy ~drawEst "
+                             "sum formula (visibleSegmentCount+items+mobs+torches+6) is retired - estimate "
+                             "drift vs backend reality (transparency pass splits, frustum culling, "
+                             "instancing batches) no longer misleads perf work";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
