@@ -11808,6 +11808,34 @@ int main(int argc, char *argv[])
                              "display names";
     }
 
+    // ── t918 铁砧 shift+左键产物直入背包探针（源码钉；R19.16）──
+    //    用户：「附魔书敲进工具完成后 shift+左键对合成品应直接放到背包，现在没反应被鼠标拿取」。
+    //    takeProduct 增 toInventory 路由：预检 main+hotbar 容量 + 光标兜底位（slotShiftLeftCraft 同口径，
+    //    预检不过 → 零消耗无操作防 t626② 复制面回归）→ addToAny 直入背包（hotbar 空槽优先 / main 兜底，
+    //    同 id 无名栈就地优先）→ 余量 fallback 光标。断言（源码钉）：
+    //    ① takeProduct 带 toInventory 形参；② 产物槽 TapHandler 传 window.shiftHeld（shift 分流）；
+    //    ③ 落定段 shift 分支走 addToAny(outId, outCount, outDur, outEnch, outName)（取出链走 InventoryOps/
+    //       VM 既有 helper 非手搓循环写槽）；④ 预检含 cursorSpace 兜底位 + 满则 return（零消耗门）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString rootDir = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile af(rootDir + QStringLiteral("/src/ui/AnvilUI.qml"));
+        const QString t = af.open(QIODevice::ReadOnly) ? QString::fromUtf8(af.readAll()) : QString();
+        bool ok = t.contains(QStringLiteral("function takeProduct(toInventory)"))
+                  && t.contains(QStringLiteral("root.takeProduct(window.shiftHeld)"))
+                  && t.contains(QStringLiteral("const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch, outName)"))
+                  && t.contains(QStringLiteral("const cursorSpace = (heldId === 0) ? cap"))
+                  && t.contains(QStringLiteral("if (space < outCount) return"));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t918 anvil shift-click product to inventory: takeProduct(toInventory) dual route, "
+                             "preview slot passes window.shiftHeld, inventory route lands via hotbar.addToAny "
+                             "(hotbar-first empty slots, same-id unnamed merge in place), preflight counts "
+                             "main+hotbar capacity + cursor fallback and bails with zero consumption when neither "
+                             "fits (t626 duplicate-item guard preserved); leftover falls back to cursor (MC take-"
+                             "out semantics)";
+    }
+
     // ── t826 击退附魔实战强度探针（R19.13；公式面 + Entities 层真位移，t774 爆炸击退同款 rig）──
     //    用户报告：「附击退打生物无击退」。根因：旧强度 1+0.5*级 令 II 仅 ~2.3 格总位移（基线 ~1.1 格），
     //    与 AI 游荡抖动同量级 → 实战「无感」。t826 收口 EnchantRegistry::knockbackStrength 单一权威
@@ -14359,7 +14387,7 @@ Item {
                 const int use = std::min(3, need);
                 const int expectDur = std::min(pickMax, (pickMax - 21) + use * per);
                 resetTap(anvilRoot);
-                qmlCall(anvilRoot, "takeProduct", {}); // 产物槽点击（TapHandler onTapped → takeProduct 同一函数）
+                qmlCall(anvilRoot, "takeProduct", { QVariant(false) }); // t918 起带 toInventory 形参（shift 背包路由）；探针按普通左键语义传 false（光标路由） // 产物槽点击（TapHandler onTapped → takeProduct 同一函数）
                 bool step = vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0)
                         && vm.heldCustomName() == QStringLiteral("神镐")
                         && vm.heldDurability() == expectDur
@@ -14388,7 +14416,7 @@ Item {
                 resetTap(anvilRoot);
                 qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) });
                 resetTap(anvilRoot);
-                qmlCall(anvilRoot, "takeProduct", {});
+                qmlCall(anvilRoot, "takeProduct", { QVariant(false) }); // t918 起带 toInventory 形参（shift 背包路由）；探针按普通左键语义传 false（光标路由）
                 const QVariantList pe = vm.heldEnchants();
                 const bool hasEff = pe.contains(QVariant(eff3));
                 const bool hasUnb = pe.contains(QVariant(unb2));
@@ -14419,7 +14447,7 @@ Item {
                 resetTap(anvilRoot);
                 qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) });
                 resetTap(anvilRoot);
-                qmlCall(anvilRoot, "takeProduct", {});
+                qmlCall(anvilRoot, "takeProduct", { QVariant(false) }); // t918 起带 toInventory 形参（shift 背包路由）；探针按普通左键语义传 false（光标路由）
                 const QVariantList me = vm.heldEnchants();
                 bool step = vm.heldBlock() == sword && me.contains(QVariant(sharp5))
                         && localIdAt(anvilRoot, "anvilSlots", 1) == 0; // 书消耗
@@ -14437,7 +14465,7 @@ Item {
                 qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
                 anvilRoot->setProperty("renameName", QStringLiteral("新名字"));
                 resetTap(anvilRoot);
-                qmlCall(anvilRoot, "takeProduct", {});
+                qmlCall(anvilRoot, "takeProduct", { QVariant(false) }); // t918 起带 toInventory 形参（shift 背包路由）；探针按普通左键语义传 false（光标路由）
                 step = vm.heldBlock() == pick && listEq4(vm.heldEnchants(), eff3, unb2, 0, 0)
                         && vm.heldCustomName() == QStringLiteral("新名字")
                         && vm.heldDurability() == pickMax - 2;
