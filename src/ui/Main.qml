@@ -476,7 +476,8 @@ Window {
         // chunk Model 6 段共享同 chunkCX/chunkCZ；用「首段」统计 unique chunk 数（避免重复计 6 段）。
         // 简化：每 6 段为一组，组内首段命中即 chunk 计数 +1。
         const totalChunks = window.worldChunksPerSide * window.worldChunksPerSide
-        const segmentsPerChunk = 6 // terrain + water + lava + cross + glass + ice
+        const segmentsPerChunk = 5 // terrain + water + lava + glass + ice（t860：cutout 段折叠进 terrain，6→5；
+                                   //   chunkObjects 的创建序与组边界同步——恢复 cutout 段须两处同步改回 6）
         for (let i = 0; i < objs.length; ++i) {
             const o = objs[i]
             if (!o) continue
@@ -4162,7 +4163,13 @@ Window {
                         objs.push(t); geos.push(t.geometry)
                         objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
                         objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
-                        objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t326 cutout 段（草丛/作物/树苗）
+                        // t326 cutout 段（草丛/作物/树苗/门/活板门）—— **t860（R19.14）折叠退役**：t442 起
+                        //   terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（与 cutout 段材质逐字相同），
+                        //   cross/门/活板门顶点并入 terrain 段 mesh 渲染逐像素等价 → 停建本段 Model（每 chunk
+                        //   6 段 → 5 段，600 Model 满配 → 500，F3 drawCalls 真值可观测）。**降级杠杆**：若实测
+                        //   草丛边缘 / 树苗阴影 / 门窗格出现观感回归，恢复下一行 createObject 即回 6 段
+                        //   （crossChunkComp 模板与 ChunkGeometry.cutoutOnly 路由均保留未删）：
+                        //   objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
                         objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
                         objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
                     }
@@ -4359,6 +4366,12 @@ Window {
         // t326 cross cutout 段 chunk Model 模板：cross 广告牌方块（草丛 / 小麦作物 / 树苗）的独立 cutout 段。
         //   cross 贴图带 alpha 透明底（草叶 / 树苗本体 alpha=255、底 alpha=0），须 alpha-test cutout 才显透明
         //   间隙（否则显成两片实心板挡视线）。
+        // **t860（R19.14）折叠退役（降级杠杆保留）**：本模板不再被 chunkAnchor 实例化——terrain 段材质自
+        //   t442 起已带 alphaMode:Mask + alphaCutoff:0.5（与下方材质逐字相同），cross/门/活板门顶点并入
+        //   terrain 段 mesh 渲染逐像素等价（同材质 / 同光照管线 / 同 Mask 深度写 pass），独立段唯一的历史
+        //   必要性（terrain 段旧 Opaque 材质忽略 alpha）已消除。每 chunk 6 段 → 5 段。若实测草丛边缘 /
+        //   树苗阴影观感回归 → 在 chunkAnchor.onCompleted 恢复 crossChunkComp.createObject 一行 +
+        //   _refreshChunkVisibility 的 segmentsPerChunk 改回 6 即回退。
         // t439 透明 Z-fighting 修复（核心）：改用 **alphaMode: Mask**（Qt 6.8+ 原生 alpha-test）。Mask 模式让本段在
         //   **不透明 pass** 渲染（深度写 ON、alpha 硬丢弃：alpha<alphaCutoff 的像素直接 discard、保留像素按不透明写深度），
         //   而非透明 pass。旧实现靠 `opacity:0.99` 强制走透明通道（pre-6.8 alphaCutoff 仅在 opacity<1 下生效的 backend

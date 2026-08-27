@@ -570,17 +570,21 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   partial 盒体贴图不透明仍留 terrain 段零回归）。
                     const bool isCutoutTrapX = (b == BlockRegistry::IronTrapdoor
                                                 || b == BlockRegistry::WoodTrapdoor);
-                    // t326 cross cutout 分流：cross 方块（草丛/作物/树苗）贴图带 alpha 透明底 → 进独立 cutout 段
-                    //   （半透材质 opacity:0.99 + alphaCutoff:0.5 cutout 透明间隙）；partial 盒体（slab/stairs/...）
-                    //   贴图不透明 → 留地形段（不透明材质 opacity=1）。两段互斥：地形段若同时发 cross → opacity=1
-                    //   下 alpha 被忽略、透明底当不透明显成实心板（用户「草丛挡视线」根因）。cutout 段只发 cross。
+                    // t326 cross cutout 分流（**t860 R19.14 已折叠**）：历史上 cross（草丛/作物/树苗）+
+                    //   门（t638 窗格 alpha）+ 活板门（t723 栅格孔）拆独立 cutout 段 + Mask 材质，因彼时
+                    //   terrain 段材质还是 Opaque（opacity=1 无 alphaMode → alpha 被忽略 → 透明底显实心板）。
+                    //   t442 起 terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（leaves 透明间隙硬丢弃），
+                    //   与 cutout 段材质（t439 起 Mask）**逐字相同** → 独立段无存在必要。t860 折叠：terrain 段
+                    //   不再跳过 cross/door/trapdoor（并入本段 mesh，同材质同光照管线同 Mask 深度写 pass，
+                    //   逐像素等价），QML 停建 cutout 段 Model（每 chunk 6 段 → 5 段，600 Model 满配 → 500）。
+                    //   m_cutoutOnly=true 分支保留为**降级杠杆**：QML 重新启用 crossChunkComp 即回 6 段
+                    //   （若实测出现草丛边缘 / 树苗阴影观感回归，一行恢复）。
                     if (m_cutoutOnly) {
                         if (!isCrossX && !isDoorX && !isCutoutTrapX) continue;  // cutout 段：仅 cross + 门 + 铁活板门（alpha cutout 透视）
                     } else {
-                        if (isCrossX) continue;      // 地形段：cross 走 cutout 段、不在此画（否则显实心板）
-                        if (isDoorX) continue;       // t638 门走 cutout 段（窗格 alpha 透视；terrain 段不画门）
-                        if (isCutoutTrapX) continue; // t723 铁活板门走 cutout 段（栅格孔 alpha 透视）
-                        if (!isPartialX) continue;   // 地形段：仅 partial 盒体（立方面在 PASS 2）
+                        // t860 折叠后 terrain 段：partial 盒体 + cross + 门 + 活板门全收（唯 PASS 2 立方面
+                        //   跳过清单不变——cross/door/trapdoor 本就只走 PASS 1，无双重发射）。
+                        if (!isPartialX && !isCrossX && !isDoorX && !isCutoutTrapX) continue;
                     }
                     const quint8 cSky = m_world->skyLightAt(wx, ly, wz);
                     const quint8 cBlock = m_world->blockLightAt(wx, ly, wz);

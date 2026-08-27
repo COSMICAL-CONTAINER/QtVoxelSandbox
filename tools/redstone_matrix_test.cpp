@@ -41,6 +41,7 @@
 #include "playerstate.h"  // t755 死亡态硬锁探针（致死落库 0 / heal 死亡免疫 / respawn 复位链）
 #include "playerprogress.h" // review #22 农夫计数回放链式补前置探针（loadVariant → unlockWithAncestry）
 #include "world.h"
+#include "chunkgeometry.h" // t860 cutout 折叠探针：terrain 段 ChunkGeometry 直调（顶点数行为级断言）
 #include "worldstore.h"   // t822 存档 round-trip 探针（真 WorldStore SQLite：savePlayerData/loadPlayerData
                           //   玩家态 JSON 落盘读回；World 层直编，t622 序列化链首次自动化覆盖）
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
@@ -16235,6 +16236,89 @@ Item {
                              "sum formula (visibleSegmentCount+items+mobs+torches+6) is retired - estimate "
                              "drift vs backend reality (transparency pass splits, frustum culling, "
                              "instancing batches) no longer misleads perf work";
+    }
+
+    // ── P-t860 cutout 段折叠（R19.14 试验项，保留交付）：行为级 + 源码钉双探针 ──
+    //   背景：t442 起 terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（与 cutout 段材质逐字相同，
+    //   leaves cutout 实证生效）→ 独立 cutout 段失去存在必要。t860 把 cross（草丛/作物/树苗）+ 门（t638
+    //   窗格）+ 活板门（t723 栅格孔）顶点并入 terrain 段 mesh，QML 停建 cutout 段 Model（每 chunk 6 段 →
+    //   5 段，600 Model 满配 → 500）。行为级断言：terrain 段 ChunkGeometry 在放置 TallGrass 后顶点数**增加**
+    //   （折叠前该格被路由走、terrain 顶点不变；cross 是 ShapeNone 非实体 → 不影响邻居面剔除，顶点差 = 纯
+    //   cross 贡献）。源码钉：chunkAnchor 不再实例化 crossChunkComp（降级杠杆注释行保留不计）+
+    //   _refreshChunkVisibility 的 segmentsPerChunk = 5（组边界与创建序同步）。回退（恢复 6 段）→ 行为级
+    //   断言红（顶点不再增加）= 探针红绿可辨折叠态。
+    {
+        const auto [x860, z860] = nextSlot();
+        const int cx860 = x860 / 16, cz860 = z860 / 16;
+        ChunkGeometry geoT;
+        geoT.setWorld(&w);
+        geoT.setCx(cx860);
+        geoT.setCz(cz860);
+        // 扫真空位（t799/t814 教训：rig 槽位地形可及 y≥42，「某高度以上必空」不成立——Stone 放进已实体格
+        //   = 无变化早退不 emit，首建不触发）。找连续两格 Air：Stone 落下格（制造脏 + 同步 worldChanged
+        //   重建取基线 v0），TallGrass 落上格（cross 折叠顶点差分）。
+        int y860 = kRigY + 1;
+        while (y860 < 46
+               && (w.blockAt(x860, y860, z860) != BR::Air || w.blockAt(x860, y860 + 1, z860) != BR::Air))
+            ++y860;
+        w.setBlock(x860, y860, z860, BR::Stone, 0);
+        const int v0 = geoT.vertexCount();
+        w.setBlock(x860, y860 + 1, z860, BR::TallGrass, 0); // Air → TallGrass（ShapeNone 不动邻居剔面）
+        const int v1 = geoT.vertexCount(); // setBlock 同步 emit worldChanged → 脏 chunk 即时重建
+        const bool okFold = v0 > 0 && v1 > v0; // cross 顶点计入 terrain 段 mesh（折叠生效签名）
+        if (!okFold)
+            qInfo().noquote() << "  [t860 diag] y=" << y860 << "v0=" << v0 << "v1=" << v1
+                              << "(cross must add terrain-segment vertices when folded)";
+        w.setBlock(x860, y860 + 1, z860, BR::Air, 0); // 还原（rig 清洁）
+        w.setBlock(x860, y860, z860, BR::Air, 0);
+
+        // 源码钉：Main.qml 的 chunkAnchor 不再 createObject crossChunkComp（降级注释行除外）+ 段数 5。
+        bool okPin860 = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString candidates[2] = {
+                QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+                QDir(exeDir + QStringLiteral("/../..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+            };
+            QString qml;
+            for (const QString &c : candidates) {
+                QFile f(c);
+                if (f.open(QIODevice::ReadOnly)) { qml = QString::fromUtf8(f.readAll()); break; }
+            }
+            if (qml.isEmpty()) {
+                qInfo().noquote() << "  [t860 note] Main.qml not found near exe - source-pin skipped";
+                okPin860 = true; // 行为级断言仍有效（源码钉缺席不判红，同 r24 note 先例）
+            } else {
+                // 滤 // 注释行后判「objs.push(crossChunkComp...」语句不存在（降级杠杆注释行被滤掉）。
+                QString code;
+                for (const QString &line : qml.split(QLatin1Char('\n'))) {
+                    const QString t = line.trimmed();
+                    if (t.startsWith(QLatin1String("//")) || t.startsWith(QLatin1String("*"))
+                        || t.startsWith(QLatin1String("/*")))
+                        continue;
+                    code += line;
+                    code += QLatin1Char('\n');
+                }
+                const bool noCutoutModel = !code.contains(QStringLiteral("objs.push(crossChunkComp"));
+                const bool seg5 = code.contains(QStringLiteral("const segmentsPerChunk = 5"));
+                okPin860 = noCutoutModel && seg5;
+                if (!okPin860)
+                    qInfo().noquote() << "  [t860 diag] noCutoutModel" << noCutoutModel
+                                      << "seg5" << seg5;
+            }
+        }
+        const bool okT860 = okFold && okPin860;
+        if (!okT860) ++totalFail;
+        qInfo().noquote() << (okT860 ? "PASS" : "FAIL")
+                          << "| t860 cutout segment folded into terrain: terrain-segment ChunkGeometry "
+                             "absorbs cross-billboard vertices (TallGrass placement grows the terrain "
+                             "mesh, pre-fold routing diverted it to a separate cutout model), and the "
+                             "QML chunk factory no longer instantiates the cutout segment (6 models per "
+                             "chunk down to 5, 600 full-config models down to 500) - sound because both "
+                             "materials became literally identical after t439/t442 (alphaMode Mask + "
+                             "cutoff 0.5), same vertex pipeline, same depth-writing opaque pass; "
+                             "cutoutOnly routing kept as documented degrade lever if grass-edge or "
+                             "sapling-shadow visuals regress in playtest";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
