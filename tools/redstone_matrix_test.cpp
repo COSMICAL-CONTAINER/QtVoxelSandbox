@@ -53,7 +53,8 @@
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
 #include "playercontroller.h"     // t814 真消费端探针（Game 层 PlayerController 直编：firePowerTnt/fireDispenserAtQml）
 #include "worldclock.h"           // t889 暂停语义探针（WorldClock.running 停表行为级 + 源码钉）
-#include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）
+#include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）；t858 feeder 探针共用
+#include "xporbinstancing.h"      // t858 经验球 instancing 试点探针（feeder 实例表内容级断言）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
@@ -16319,6 +16320,44 @@ Item {
                              "cutoff 0.5), same vertex pipeline, same depth-writing opaque pass; "
                              "cutoutOnly routing kept as documented degrade lever if grass-edge or "
                              "sapling-shadow visuals regress in playtest";
+    }
+
+    // ── P-t858 经验球 instancing 试点探针（R19.14；Game 层 feeder 直调，实例表内容级）──
+    //   XpOrbInstancing（QQuick3DInstancing 子类，公开 API、无自定义 shader——RHI 囚笼合规）把整族
+    //   经验球压成 1 Model / 1 draw。钉实例表内容派生契约：① 无数据源 / 无活体 → 空表；② spawn 后
+    //   表条目位置 = 管理器 posAt ± bob 带（Y ∈ [pos.y, pos.y+0.12]，XZ 精确——bob 只加 Y，解析式
+    //   0.06*(1-cos) ∈ [0,0.12]）；③ clearAll（切世界清场）后表清空（slot-reuse 的 alive=false 槽
+    //   不进表）。掉落物各族保持逐 Model 的范围取舍在 xporbinstancing.h 头注释 + dev-plan 记录钉死。
+    {
+        XpOrbManager orbs858;
+        XpOrbInstancing feed858;
+        QVector3D p858;
+        const bool okEmpty = !feed858.probeFirstInstancePosition(&p858); // 无 manager → 空表
+        feed858.setManager(&orbs858);
+        const bool okNoLive = !feed858.probeFirstInstancePosition(&p858); // 有 manager 无活体 → 空表
+        orbs858.spawnOrb(10, 20, 30, 3);
+        const bool okOne = feed858.probeFirstInstancePosition(&p858)
+                           && std::abs(p858.x() - 10.5f) < 1e-4f
+                           && std::abs(p858.z() - 30.5f) < 1e-4f
+                           && p858.y() >= 20.5f - 1e-4f && p858.y() <= 20.5f + 0.12f + 1e-4f;
+        orbs858.spawnOrb(11, 20, 30, 7);
+        orbs858.clearAll();
+        const bool okCleared = !feed858.probeFirstInstancePosition(&p858);
+        const bool okT858 = okEmpty && okNoLive && okOne && okCleared;
+        if (!okT858)
+            qInfo().noquote() << "  [t858 diag] empty" << okEmpty << "noLive" << okNoLive
+                              << "one" << okOne << "pos" << p858.x() << p858.y() << p858.z()
+                              << "cleared" << okCleared;
+        if (!okT858) ++totalFail;
+        qInfo().noquote() << (okT858 ? "PASS" : "FAIL")
+                          << "| t858 xp-orb instancing pilot: XpOrbInstancing feeder derives the "
+                             "instance table from XpOrbManager slots (empty without manager or live "
+                             "orbs, entry position = slot pos + analytic bob band on Y only, "
+                             "clearAll empties the table since dead slots never enter it) - whole "
+                             "family renders as one Model/one draw replacing per-orb delegates, "
+                             "pickups/magnetism stay pure C++ in the manager; drop-item families "
+                             "stay per-Model by scope decision (per-item textures/geometries need "
+                             "per-itemId bucketed models, deferred with rationale)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

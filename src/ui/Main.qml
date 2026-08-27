@@ -6128,59 +6128,35 @@ Window {
             }
         }
 
-        // t402 经验球渲染（XpOrbManager 的发光小球实体）：Repeater 父节点 = 场景内 3D Node（xpOrbHost）
-        //   → delegate 被 reparent 进 3D 场景图（同 itemHost / mobHost 模式；lessons-learned「动态 3D 对象
-        //   必须挂到场景 Node，否则孤儿不渲染」）。slot-reuse：count 单调不降 → 空槽 delegate visible=false
-        //   隐藏不销毁（同 itemHost 族；lessons-learned t170/t256）。
-        // 触发：xpOrbs.count 随 spawnOrb 自增（NOTIFY entitiesChanged）→ Repeater 追加 delegate。位置随
-        //   磁吸 bump revision → {revision; posAt} 绑定重算（呈现层只读消费，绝不反向写；PLAN §2 分层）。
-        // 外观：纯色发光小球（PrincipledMaterial.NoLighting + 绿色 baseColor；§9a 自绘纯色，无 MC 资产）。
-        //   上下浮动 + 缩放呼吸由呈现层自发（不反向写数据）；amountAt 驱动颜色深浅（大球更显眼）。
+        // t402 经验球渲染（XpOrbManager 的发光小球实体）。**t858（R19.14）instancing 试点**：整族从
+        //   「Repeater × per-orb delegate（UnitCube Model + per-delegate QML 动画）」压成 **一个 Model +
+        //   一张实例表**（XpOrbInstancing C++ feeder，1 draw / 全族，F3 drawCalls 真值可观测）。
+        //   - 动画下沉 C++：bob（0↔0.12，700ms/leg InOutSine）/ pulse（0.85↔1.15，500ms/leg）在 feeder
+        //     里按解析式复算（公式逐字对齐旧 QML 数字，per-slot 0.37s 错峰 = 旧「相位 = delegate 创建时刻」
+        //     的等价视觉错开）；颜色二值（amount>=5 亮黄绿 / 小额深绿）走 per-instance color，材质 baseColor 白。
+        //   - 数据链不变：spawnOrb / 磁吸 / 拾取全在 XpOrbManager（C++，PLAN §2 分层零改动）；feeder 只读
+        //     pos/amount/alive。slot-reuse 语义自然成立（alive=false 槽不进表，count 单调无关紧要——本渲染
+        //     路径不再有 per-orb delegate，t170/t256 的 delegate 生命周期问题对经验球族整体消除）。
+        //   - xpOrbHost 保留（空壳）：world-exit 清理链（clearEntDelegates(xpOrbHost) 扫描 children）
+        //     引用它，保持不动（扫到空 = 无害）。
+        //   - 试点范围取舍（钉死，详见 xporbinstancing.h 头注释）：掉落物各族（billboard / 3D 形状 / 工具
+        //     几何）保持逐 Model——per-item 贴图 / 几何需按 itemId 分桶动态建 Model，复杂度与 delegate
+        //     生命周期风险留独立任务。
         Node {
             id: xpOrbHost
             Component.onCompleted: {
                 console.info("[t402] xpOrbHost UP parent=" + xpOrbHost.parent + " (须为 3D Node 非 null)")
             }
 
-            Repeater {
-                model: xpOrbs.count
-                delegate: Node {
-                    visible: { const _r = xpOrbs.revision; return _r >= 0 ? (xpOrbs.aliveAt(index)) : false }
-                    id: orbRoot
-                    position: { const _r = xpOrbs.revision; return _r >= 0 ? (xpOrbs.posAt(index)) : Qt.vector3d(0, 0, 0) }
-                    property int orbAmount: { const _r = xpOrbs.revision; return _r >= 0 ? (xpOrbs.amountAt(index)) : 0 }
-                    property real bobY: 0
-                    property real pulse: 1.0   // 缩放呼吸（0.85..1.15）
-
-                    Component.onCompleted: {
-                        if (parent === null) parent = xpOrbHost
-                    }
-
-                    // 经验球本体：纯色发光小球（NoLighting 必备 —— lit 材质在本 D3D11 后端不渲染，
-                    //   lessons-learned「所有可见 Model 必须用 NoLighting」）。绿色 baseColor；amount 大 →
-                    //   更亮（黄绿）凸显。scale ~0.18 + bob + pulse 呼吸（呈现层自发动画）。
-                    Model {
-                        geometry: UnitCube {}
-                        position: Qt.vector3d(0, orbRoot.bobY, 0)
-                        scale: Qt.vector3d(0.18 * orbRoot.pulse, 0.18 * orbRoot.pulse, 0.18 * orbRoot.pulse)
-                        materials: PrincipledMaterial {
-                            lighting: PrincipledMaterial.NoLighting
-                            // 大额球更亮黄（机制等价 MC 大经验球更显眼）；小额偏深绿。
-                            baseColor: orbRoot.orbAmount >= 5 ? "#b8e635" : "#7fd13b"
-                        }
-                    }
-                    // 上下浮动 0.12 格（~1.4s 周期；比掉落物快 = 经验球活泼感）。
-                    SequentialAnimation on bobY {
-                        loops: Animation.Infinite
-                        NumberAnimation { from: 0; to: 0.12; duration: 700; easing.type: Easing.InOutSine }
-                        NumberAnimation { from: 0.12; to: 0; duration: 700; easing.type: Easing.InOutSine }
-                    }
-                    // 缩放呼吸（0.85..1.15，~1s 周期）= 发光脉动感。
-                    SequentialAnimation on pulse {
-                        loops: Animation.Infinite
-                        NumberAnimation { from: 0.85; to: 1.15; duration: 500; easing.type: Easing.InOutSine }
-                        NumberAnimation { from: 1.15; to: 0.85; duration: 500; easing.type: Easing.InOutSine }
-                    }
+            // t858 单 Model 实例化经验球：NoLighting 红线保持（lit 在 D3D11 不出像素）；几何 UnitCube
+            //   同旧 delegate；无活体球时实例表为空 → instanceCount 0 → 不出 draw（等效旧 count=0）。
+            Model {
+                geometry: UnitCube {}
+                instancing: XpOrbInstancing { manager: xpOrbs }
+                materials: PrincipledMaterial {
+                    lighting: PrincipledMaterial.NoLighting
+                    // per-instance color 承载二值绿（大额亮黄绿 / 小额深绿）；材质基色白。
+                    baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
                 }
             }
         }
