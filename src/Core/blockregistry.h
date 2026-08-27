@@ -380,9 +380,9 @@ public:
         //   （review #8/t834：破玻璃掉玻璃**方块**（同 Wool/床自掉模式）——红石灯配方原料改接方块段 Glass 后，仍掉
         //   材料段 0x204 会让方块段在生存无获取入口 = 配方死链；自掉后生存链 = 烧沙得 0x204（放置中转）→ 破坏回收
         //   Glass 方块 → 入配方）、dropCount=1、maxStack=64。各面贴图=glass(68)（近白青底 + 暗边框 + 对角高光斜线，原创自绘 §9a；
-        //   透明感由 glassOnly 段材质 opacity≈0.45 实现，纹理本身不透明——同 water 模式：纹理不透 + 材质半透）。
+        //   透明感由 glassOnly 段材质 opacity≈0.30 实现，纹理本身不透明——同 water 模式：纹理不透 + 材质半透）。
         //   音色归 GroupStone（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）。**渲染**：mesher 路由进
-        //   ChunkGeometry 的 glassOnly 段（独立半透材质 opacity:0.45 + NoLighting + 顶点色光照，机制等价 waterOnly /
+        //   ChunkGeometry 的 glassOnly 段（独立半透材质 opacity:0.30 + NoLighting + 顶点色光照，机制等价 waterOnly /
         //   lavaOnly 的透明分流）；地形段跳过 Glass（避免与玻璃段重复绘制 + 被当不透明地形）。glassOnly 段面剔除：
         //   邻实体剔（避免与实体面共面 z-fight）、邻 Glass 剔（玻璃-玻璃共面不重复绘制）、邻空气画（半透面，透视关键）。
         //   lightOpacity=0（玻璃透光——机制等价 MC 玻璃 lightOpacity 0；solid=false 已致全透，玻璃与其它 solid=false

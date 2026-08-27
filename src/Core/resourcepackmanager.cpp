@@ -3036,7 +3036,7 @@ QString ResourcePackManager::blockAtlasIconSource(int blockId, bool requirePackC
     //   icon3_54_* 是旧立方投影，不换名则永久复用旧观感）。
     //   t815/t838 换 icon5：① 玻璃（54）需求反转回 dimetric 立方（t800 落盘的 icon4_54_* 是 flat 平贴）；
     //   ② 红石粉（130）新入 flat 图集渲染族（此前无该路径缓存，一并换代防未来混淆）。
-    //   t879 换 icon6：活板门族（20 木 / 103 铁）图标画法变更——① ShapeTrapdoor 泛化 case 薄侧边贴图改
+    //   t879 换 icon6：活板门族（20 木 / 136 铁）图标画法变更——① ShapeTrapdoor 泛化 case 薄侧边贴图改
     //   per-face 分流（铁=iron_block / 木=planks，修「铁活板门侧边贴图查看器里还没改对」）；② 木活板门大面
     //   贴图 planks(8) → 180 四镂空板（改观感）。已落盘 icon5_20_* / icon5_103_* 是旧画法，不换名则永久复用。
     //   t902 换 icon7：耕地（Farmland=23）图标面修正——显式 case 钉 side/front=dirt（旧 ShapeFull 泛化把
