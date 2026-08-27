@@ -133,10 +133,15 @@ int main(int argc, char *argv[])
     if (auto *win = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0))) {
         auto *frames = new int(0);
         // main_total：本帧 frameSwapped 与上帧 frameSwapped 的间隔（ns）。首帧 lastNs=0 跳过（无基准）。
+        // t904：swap 时先结清 idleB（afterSynchronizing→frameSwapped，见上方四段归因注释）。
         auto *lastSwapNs = new qint64(0);
-        QObject::connect(win, &QQuickWindow::frameSwapped, win, [frames, lastSwapNs]() {
+        auto *afterSyncNs = new qint64(0);
+        QObject::connect(win, &QQuickWindow::frameSwapped, win, [frames, lastSwapNs, afterSyncNs]() {
             ++(*frames);
             const qint64 now = FrameProfiler::nowNs();
+            if (*afterSyncNs > 0)
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("fIdleB"), double(now - *afterSyncNs) / 1e6);
+            *afterSyncNs = 0;
             if (*lastSwapNs > 0) {
                 const double ms = double(now - *lastSwapNs) / 1e6;
                 FrameProfiler::instance()->addSampleMs(QStringLiteral("main_total"), ms);
@@ -161,17 +166,47 @@ int main(int argc, char *argv[])
         //   到渲染侧：transform/geometry/material/draw-list 重算）。mob delegate 节点爆炸 / 绑定扇出等成本藏在这里
         //   —— F3 既有桶（sim/main_total/render_cpu）都不单独覆盖此段（main_total 含它但不拆）。1s 窗口 ÷ frames
         //   报 ms/frame，与 sim 相加逼近 main_total 即证实瓶颈归因（残差 = 事件循环空闲 / 其它）。
-        //   beforeSynchronizing/afterSynchronizing 在 GUI 线程发射（默认 AutoConnection = 直接调用），无需 DirectConnection。
+        //   beforeSynchronizing/afterSynchronizing 在 GUI 线程发射（默认 AutoConnection = 直接调用），无需
+        //   DirectConnection。**t904 起连接体并入下方四段归因三连**（beforeSynchronizing 顺带结清 waitSync、
+        //   afterSynchronizing 顺带开启 idleB 计时）—— 本块只保留 syncStartNs 声明，勿在此重复 connect
+        //   （双连接 = qmlSync 桶双计）。
+        // t904 perf residual 四段归因：residual（= main_total − sim − qmlSync，用户实测 32.8ms/帧 @18FPS）此前
+        //   是「未插桩黑盒」。GUI 线程一帧周期可按渲染管线 hook 点切成四段（全部 GUI 线程信号，与既有
+        //   frameSwapped/beforeSynchronizing 同一套）：
+        //     frameSwapped ──idleA──> afterAnimating ──waitSync──> beforeSynchronizing ──qmlSync(既有)──>
+        //     afterSynchronizing ──idleB──> 下一 frameSwapped
+        //   - idleA（frameSwapped→afterAnimating）：事件循环处理（16ms 游戏 tick = sim 计时所在 + QML 绑定求值 +
+        //     其它 QML Timer）+ 纯空闲。residual 里的「未插桩主线程重活」藏此段 → 报告里再减 sim 得「非 sim 事件段」。
+        //   - waitSync（afterAnimating→beforeSynchronizing）：threaded render loop 下 GUI 线程阻塞等渲染线程抵达
+        //     同步屏障（渲染线程还在跑上一帧的渲染 / present-vsync）→ 大值 = 渲染侧拖慢帧节奏（vsync/提交 bound）。
+        //   - idleB（afterSynchronizing→frameSwapped）：GUI 已放行、渲染线程渲染 + present；basic（单线程）渲染
+        //     循环下这段 = 渲染本体在 GUI 线程跑（idleB ≈ render_cpu + present）。两机制都可由本段量值分辨。
+        //   由构造 main_total ≈ idleA + waitSync + qmlSync + idleB → residual ≈ (idleA−sim) + waitSync + idleB，
+        //   黑盒完全归因到命名段。frameSwapped 连接（AutoConnection）在 threaded 循环下经队列回 GUI 线程派发 →
+        //   idleB 含少量派发延迟（与既有 main_total 同口径，一致性优先）。0 值守卫：漏 hook 的帧跳过该段样本
+        //   （某段恒 0 = 该 hook 未发 —— 如 basic 循环不发 afterAnimating，frame2 行 evA/waitSync 恒 0 本身即判据）。
+        //   afterSyncNs 与 frameSwapped 块共用同一指针（上方已声明），afterAnimNs / syncStartNs 在此声明。
+        auto *afterAnimNs = new qint64(0);
         auto *syncStartNs = new qint64(0);
-        QObject::connect(win, &QQuickWindow::beforeSynchronizing, win, [syncStartNs]() {
-            *syncStartNs = FrameProfiler::nowNs();
+        QObject::connect(win, &QQuickWindow::afterAnimating, win, [afterAnimNs, lastSwapNs]() {
+            const qint64 now = FrameProfiler::nowNs();
+            if (*afterAnimNs == 0 && *lastSwapNs > 0)
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("fIdleA"), double(now - *lastSwapNs) / 1e6);
+            *afterAnimNs = now;
         });
-        QObject::connect(win, &QQuickWindow::afterSynchronizing, win, [syncStartNs]() {
-            if (*syncStartNs > 0) {
-                const double ms = double(FrameProfiler::nowNs() - *syncStartNs) / 1e6;
-                FrameProfiler::instance()->addSampleMs(QStringLiteral("qmlSync"), ms);
-                *syncStartNs = 0;
-            }
+        QObject::connect(win, &QQuickWindow::beforeSynchronizing, win, [syncStartNs, afterAnimNs]() {
+            const qint64 now = FrameProfiler::nowNs();
+            if (*afterAnimNs > 0)
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("fWaitSync"), double(now - *afterAnimNs) / 1e6);
+            *afterAnimNs = 0; // 本帧 idleA/waitSync 已结清
+            *syncStartNs = now;
+        });
+        QObject::connect(win, &QQuickWindow::afterSynchronizing, win, [syncStartNs, afterSyncNs]() {
+            const qint64 now = FrameProfiler::nowNs();
+            if (*syncStartNs > 0)
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("qmlSync"), double(now - *syncStartNs) / 1e6);
+            *syncStartNs = 0;
+            *afterSyncNs = now;
         });
         auto *fpsTimer = new QTimer(win);
         fpsTimer->setInterval(1000);
