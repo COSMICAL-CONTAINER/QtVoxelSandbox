@@ -72,6 +72,11 @@ public:
     //   （地形段 + 水段 + cutout 段），各自绑 QML Model + 材质。cutout 段无邻居面剔除（cross 透明装饰，不挡
     //   邻居；PASS 1 只发 cross 顶点、PASS 2 立方面跳过）。dirty 时序不受影响（三段 onWorldChanged 皆同步槽，
     //   World emit worldChanged() 内全部重建完才 clearAllDirty，见 world.cpp setBlock）。
+    // **t860（R19.14）折叠**：t442 起 terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（leaves cutout
+    //   实证生效），与本段材质逐字相同 → cross/门/活板门顶点并入 terrain 段 mesh（buildMesh PASS 1 路由
+    //   不再跳过），QML 停建 cutout 段 Model（每 chunk 6 段 → 5 段）。本属性 + 路由分支保留为**降级杠杆**
+    //   （观感回归时 QML 恢复 crossChunkComp 实例化即回 6 段），折叠行为由矩阵 t860 探针钉死（terrain 段
+    //   mesh 计入 cross 顶点）。
     Q_PROPERTY(bool cutoutOnly READ cutoutOnly WRITE setCutoutOnly NOTIFY cutoutOnlyChanged)
     // t343 岩浆渲染分流（机制等价 waterOnly 的「独立段」，复用 culled/greedy 立方面路径而非水的变高水面）：
     //   lavaOnly=true → 本几何只网格化 Lava 方块（独立段，Main.qml 用 opacity≈0.95 + NoLighting 暖色 baseColor 材质
