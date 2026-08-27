@@ -748,7 +748,10 @@ public:
     //   （掉落 / 死亡正常走）—— 机制等价 MC 1.0 末影人被打中概率瞬移闪避（命中落空感）。概率 30% 由 caller
     //   （PlayerController attackMob）掷骰决定是否调用（本方法只负责「调用即躲」）。world = caller 的只读世界
     //   （瞬移找落点 / 支撑用；null → 不躲）。非 Nightwalker → false no-op。
-    bool nightwalkerDodge(int i, World *world);
+    //   review27 #5：clearAggro 形参（默认 true）——近战 30% 闪避路径保持 teleportEntity 默认清仇恨（被打闪开
+    //   = 打断激怒，t727 原语义）；雪球 / 鸡蛋两条 0 伤害投掷物闪避链显式传 false（review26 #8 箭 / 浮标同口径：
+    //   MC 1.0 投射物闪避只位移不解仇恨，否则雪球 4 雪块无限复购 = 免费远程净化 + 打断前摇 exploit）。
+    bool nightwalkerDodge(int i, World *world, bool clearAggro = true);
     // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。
     //   仅 Shambler/Bones spawn 时随机分配（~80% 无 / ~20% 一件或一套）；QML delegate 据 it 叠加 layer
     //   贴图护甲壳（t719 ArmorLayerBox，机制等价 MC 1.0 僵尸/骷髅随机护甲）。越界 → 0。

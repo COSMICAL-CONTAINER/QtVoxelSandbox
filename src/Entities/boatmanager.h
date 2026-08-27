@@ -288,8 +288,9 @@ private:
     //   t584：介质档判定（tickRiddenBoat）先看 waterSurfaceY 的扫柱结论（有水 → Water 档，浅水船读到水底
     //   沙 / 石不误判陆档），无水才读本返回值判 Ice / Land 档。
     quint8 blockBelowBoat(World *world, const QVector3D &boatPos) const;
-    // t630 撞碎荷叶：船速 > kBoatLilySmashSpeed 时扫 footprint 覆盖格（船中心层 + 下一层，匹配
-    //   boatFootprintBlocked 的两层采样），命中 LilyPad → setWaterSilent 清为 Air（静默写：非玩家破块，
+    // t630 撞碎荷叶：船速 > kBoatLilySmashSpeed 时扫 footprint 覆盖格（review27 #6：cy-1..cy+1 三层——
+    //   睡莲只在「顶水格+1」层，t892 降位后稳态船 floor=顶水格 → 叶在 cy+1，旧向下两层扫永不命中），
+    //   命中 LilyPad → setWaterSilent 清为 Air（静默写：非玩家破块，
     //   同 EntityManager 留雪路径）+ emit lilyPadSmashed（呈层掉睡莲物品）+ 返 true（caller 标 changed）。
     //   撞碎**先于**位移碰撞判定（tick / tickRiddenBoat 调用顺序）→ 高速船碾碎叶后本帧可继续前进（叶
     //   isCollidable=true 若不清会把船挡停在叶前 =「撞不动」）；低速（< 阈值）不碎 → 叶仍挡船（绕行，

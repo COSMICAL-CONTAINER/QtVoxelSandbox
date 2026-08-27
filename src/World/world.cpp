@@ -1693,6 +1693,13 @@ void World::tickFire()
                     setBlock(x, py, z, BlockRegistry::Air); // 同窗收尾（对偶已自行烧毁 → 已非门不命中；
                                                             //   对偶在燃 → 留它本窗自烧，不误发 broken）
             }
+            // review27 #7：烧尽终局补附着复检——本格已燃失（Fire/Air），贴墙火把 / 侧挂活板门 / 顶立门 /
+            //   铁轨 / 画作等附着物随支撑消失掉落，不再悬空残留（legacy 焚毁路径 recheckAttachmentsAfterClear
+            //   同款收口；t891 岩浆点燃改道 + t843 火蔓延两路烧尽终局共用此处，后者为既有缺口顺带收口）。
+            //   门自身不入本扫：烧尽门的配对半扇清理由上方带湿/雨守卫的专用分支负责——本扫的 door 支撑
+            //   复检无湿守卫，抢跑会把 review24 #1 / review25 #9 特意保住的湿/雨对偶半扇误清。
+            if (!BlockRegistry::isDoor(id))
+                recheckAttachmentsAfterClear(x, y, z, id);
             continue;
         }
         m_burningCells[it.key()] = quint8(remain);

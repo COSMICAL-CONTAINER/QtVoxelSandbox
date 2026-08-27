@@ -769,7 +769,7 @@ Item {
                                         // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel；选中床 → 只显
                                         //   BedModelGeometry 低 3D 床；t880 异形物品 → 只显 ItemShapeGeometry，
                                         //   多模型互斥不叠渲染）。
-                                        visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed
+                                        visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed && !root.selectedIsItem3D // review27 #4：附魔台 94 不在 isPartialBlock → selectedIsCube 对 94 仍 true，与下方 ItemShapeGeometry 预览叠渲 z-fight（同 Main.qml 掉落物侧修法）；家族互斥钉死
                                         // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
                                         geometry: BlockCube { blockId: root.selectedId }
                                         // 固定 -22° X 基倾（见顶面）+ userPitch 拖拽俯仰（t599）+ Y 自转

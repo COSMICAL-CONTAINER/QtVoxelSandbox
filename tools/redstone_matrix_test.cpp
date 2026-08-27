@@ -14791,10 +14791,13 @@ Item {
             // ① 清仇恨三连被参数门控（签名带参 + if (clearAggro) 守卫）
             okGuard = body.contains(QStringLiteral("bool clearAggro"))
                       && body.contains(QStringLiteral("if (clearAggro)"));
-            // ② 箭链 + 浮标两处弹射物闪避显式 false
-            okCalls = ct.count(QStringLiteral("clearAggro=*/false")) == 2;
-            // ③ 水逃逸 + 近战 dodge 保持默认调用（Max 后紧跟右括号 = 未传参）
-            okDefault = ct.count(QStringLiteral("kNightwalkerTeleportMax)")) == 2;
+            // ② 四条弹射物闪避链显式 false（review27 #5 扩：箭 / 浮标直调 + 雪球 / 蛋经
+            //    nightwalkerDodge 透传——旧口径只数箭/浮标 2 处，漏改正是 review27 #5 本身）
+            okCalls = ct.count(QStringLiteral("clearAggro=*/false")) == 4;
+            // ③ 水逃逸保持默认调用（Max 后紧跟右括号 = 未传参）。近战 dodge 改经
+            //    nightwalkerDodge(clearAggro) 透传（review27-5 探针钉 "Max, clearAggro)" +
+            //    头文件默认 true），默认清仇恨语义不变——故本钉从 2 降为 1。
+            okDefault = ct.count(QStringLiteral("kNightwalkerTeleportMax)")) == 1;
             // 头文件默认参数（true = 近战/水逃逸清仇恨语义保持）
             okDecl = ht.contains(QStringLiteral("bool clearAggro = true"));
         }
@@ -14806,10 +14809,11 @@ Item {
         qInfo().noquote() << (okR8 ? "PASS" : "FAIL")
                           << "| review26-8 projectile dodge no longer wipes aggro: teleportEntity's "
                              "landing hatred-clear trio (enraged/rageTimer/windupTimer) is gated "
-                             "behind a clearAggro param; the arrow-chain and bobber dodge call sites "
-                             "pass false explicitly (MC 1.0 enderman projectile-dodge keeps aggro - "
-                             "the 0-damage 0-cost bobber was a free repeatable ranged pacify that "
-                             "also cancelled attack windup), while water-escape and melee dodge "
+                             "behind a clearAggro param; all FOUR projectile dodge call sites "
+                             "pass false explicitly (arrow + bobber direct, snowball + egg via the "
+                             "nightwalkerDodge pass-through added by review27 #5 - the old "
+                             "count-of-2 pin was the incomplete enumeration that let the snowball/"
+                             "egg chains keep the free-purge exploit), while water-escape and melee dodge "
                              "keep the default true (documented design: water damage and close-"
                              "range interaction interrupt rage); source pin because the enraged "
                              "state is a sub-1s transient gated on random wander yaw - behavioral "
@@ -16443,6 +16447,252 @@ Item {
                              "pickups/magnetism stay pure C++ in the manager; drop-item families "
                              "stay per-Model by scope decision (per-item textures/geometries need "
                              "per-itemId bucketed models, deferred with rationale)";
+    }
+
+    // ── review27-4 附魔台（94）掉落物 / 资源浏览器双渲染互斥（源码钉）──
+    //   isItem3DFamily 家族成员里附魔台不在 isPartialBlock（mesher 靠 chunkgeometry 显式 case 并入）→
+    //   BlockCube 分支 visible 对 94 仍 true，与 ItemShapeGeometry 分支叠加 = 满格立方 + 矮台四面共面
+    //   z-fight。修法 = 两处 BlockCube 分支 visible 追加家族排除（不把 94 并入 isPartialBlock——放置 /
+    //   失撑 / 碰撞链回归面大）。QML 渲染分支 headless 不可行为级断言 → 源码钉两分支互斥（t880 (b) 先例）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        bool ok4 = true;
+        {
+            QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+            const QString t = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            const int i0 = t.indexOf(QStringLiteral("visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock"));
+            const int i1 = t.indexOf(QStringLiteral("geometry: BlockCube { blockId: entRoot.entId }"), i0);
+            if (i0 < 0 || i1 <= i0) {
+                ok4 = false;
+                qInfo().noquote() << "  [review27-4 diag] Main.qml BlockCube slice miss";
+            } else {
+                ok4 = ok4 && t.mid(i0, i1 - i0).contains(QStringLiteral("&& !isItem3DFamily(entRoot.entId)"));
+            }
+            // 互斥另一边：ItemShapeGeometry 分支存在且以同一家族谓词开门。
+            ok4 = ok4 && t.indexOf(QStringLiteral("visible: isItem3DFamily(entRoot.entId)")) > i0;
+        }
+        {
+            QFile rf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+            const QString t = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+            const int i0 = t.indexOf(QStringLiteral("visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed"));
+            const int i1 = t.indexOf(QStringLiteral("geometry: BlockCube { blockId: root.selectedId }"), i0);
+            if (i0 < 0 || i1 <= i0) {
+                ok4 = false;
+                qInfo().noquote() << "  [review27-4 diag] ResourceBrowser BlockCube slice miss";
+            } else {
+                ok4 = ok4 && t.mid(i0, i1 - i0).contains(QStringLiteral("&& !root.selectedIsItem3D"));
+            }
+        }
+        if (!ok4) ++totalFail;
+        qInfo().noquote() << (ok4 ? "PASS" : "FAIL")
+                          << "| review27-4 enchanting-table dual-render z-fight: both BlockCube branches "
+                             "(drop-item delegate in Main.qml + resource-browser preview) now exclude the "
+                             "isItem3DFamily / selectedIsItem3D family so the full cube and the real "
+                             "ItemShapeGeometry partial shape can never be visible at once (source pin - 94 "
+                             "sits outside isPartialBlock so the family-exclusion clause is the only mutual "
+                             "exclusion guard; merging 94 into isPartialBlock was rejected to keep the "
+                             "place/support/collision chain untouched)";
+    }
+
+    // ── review27-5 雪球 / 鸡蛋闪避链 clearAggro=false（源码钉 + 闪避入口全枚举）──
+    //   review26 #8 修复只给箭 / 浮标两链传了 clearAggro=false，雪球 / 蛋走 nightwalkerDodge 内
+    //   teleportEntity 默认清仇恨 → 0 伤害 4 雪块无限复购投掷物 = 免费远程净化 + 打断前摇 exploit 原封
+    //   保留。修法 = nightwalkerDodge 加 clearAggro 形参（默认 true 保近战 30% 闪避「打断激怒」原语义），
+    //   雪球 / 蛋两调用点显式 false。Lessons #5：声称封闭 exploit 的修复把同族入口全部枚举进探针——
+    //   本钉同时数 entitymanager.cpp 投射物命中分支 m.mobType == MobNightwalker == 4（箭 / 雪球 / 蛋 /
+    //   浮标），日后新增第五条闪避入口（如火球补免疫分支）会翻数 → 强制同步更新本探针（排查结论：
+    //   火球现无闪避分支——真伤害直击不清仇恨不位移；末影珍珠 / 末影眼不判 mob 命中——非闪避入口）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        bool ok5 = true;
+        QFile ef(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+        const QString t = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
+        const int cntFalse = t.count(QStringLiteral("nightwalkerDodge(mi, world, /*clearAggro=*/false)"));
+        const int cntAll = t.count(QStringLiteral("nightwalkerDodge(mi, world"));
+        const int cntBranch = t.count(QStringLiteral("m.mobType == MobNightwalker"));
+        ok5 = ok5 && cntFalse == 2 && cntAll == cntFalse && cntBranch == 4;
+        // nightwalkerDodge 本体把形参透传 teleportEntity（默认 true 走 teleportEntity 缺省——近战链不变）。
+        const int i0 = t.indexOf(QStringLiteral("bool EntityManager::nightwalkerDodge"));
+        const int i1 = t.indexOf(QStringLiteral("aiEmberling"), i0);
+        ok5 = ok5 && i0 >= 0 && i1 > i0
+              && t.mid(i0, i1 - i0).contains(QStringLiteral("kNightwalkerTeleportMax, clearAggro)"));
+        QFile eh(root + QStringLiteral("/src/Entities/entitymanager.h"));
+        const QString th = eh.open(QIODevice::ReadOnly) ? QString::fromUtf8(eh.readAll()) : QString();
+        ok5 = ok5 && th.contains(
+                  QStringLiteral("bool nightwalkerDodge(int i, World *world, bool clearAggro = true);"));
+        QFile pf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+        const QString tp = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+        ok5 = ok5 && tp.count(QStringLiteral("nightwalkerDodge(entityIndex, m_world)")) == 1; // 近战链保持默认清仇恨
+        if (!ok5)
+            qInfo().noquote() << "  [review27-5 diag] cntFalse" << cntFalse << "cntAll" << cntAll
+                              << "cntBranch" << cntBranch;
+        if (!ok5) ++totalFail;
+        qInfo().noquote() << (ok5 ? "PASS" : "FAIL")
+                          << "| review27-5 nightwalker projectile-dodge aggro preservation: snowball and "
+                             "egg dodge chains now pass clearAggro=false through nightwalkerDodge (matching "
+                             "the arrow/bobber caliber from review26 #8 - a zero-damage "
+                             "infinitely-rebuyable projectile must not double as a free remote purge wiping "
+                             "enraged/rageTimer/windupTimer and cancelling the attack windup), the melee "
+                             "30%-dodge path keeps the default clearAggro=true, and the projectile "
+                             "hit-branch count (m.mobType == MobNightwalker == 4: arrow/snowball/egg/"
+                             "bobber) pins the complete dodge-entry enumeration so a future fifth entry "
+                             "forces a conscious probe update (fireball hits with real damage and no dodge "
+                             "branch; pearl/ender-eye never test mob hits)";
+    }
+
+    // ── review27-6 船降位后撞睡莲扫层（行为级：快=碎 / 慢=挡 双半边）──
+    //   t892 静水降位（稳态船 Y = 顶水格 + 7/8 → floor = 顶水格 W）后，睡莲只存在于「顶水格+1」层
+    //   （W+1）而撞碎扫描只向下扫 cy/cy-1 两层 → 高速船穿叶不碎（t630/t711「快=碎」半边静默失效；
+    //   慢=挡半边由 boatFootprintBlocked 的 cy/cy+1 采样正常）。修法 = smashLilyPads 扫 cy-1..cy+1 三层。
+    //   断言：(a) W 层顶浮船满速撞 W+1 层叶 → 叶碎（Air）+ lilyPadSmashed 信号（t805 骑乘 rig：
+    //   tryMount + tickRiddenBoat 定步长驱动）；(b) 低速（wish 0.25 → 稳态 2.0 < 阈值 3.0）同景 →
+    //   叶完好且船被挡在叶列前（防过度修复破「慢=挡」契约）。
+    {
+        World wR6;
+        // 48×48×96 seed 77 = t836 已证净空带（t892 同款；地形 ≤81 → 82+ 全空）。
+        wR6.setWidth(48); wR6.setDepth(48); wR6.setHeight(96); wR6.setSeed(77);
+        const int ty = 83;   // 石底；静水 ty+1（state 0 → 液面 ty+1.875）；叶 ty+2（顶水格+1）
+        for (int x = 4; x <= 30; ++x)
+            for (int z = 6; z <= 8; ++z) {          // 快道条带（z 中格 7）
+                wR6.setBlock(x, ty, z, BR::Stone, 0);
+                wR6.setBlock(x, ty + 1, z, BR::Water, 0);
+            }
+        for (int x = 4; x <= 30; ++x)
+            for (int z = 15; z <= 17; ++z) {        // 慢道条带（z 中格 16）
+                wR6.setBlock(x, ty, z, BR::Stone, 0);
+                wR6.setBlock(x, ty + 1, z, BR::Water, 0);
+            }
+        wR6.setBlock(20, ty + 2, 7, BR::LilyPad, 0);   // 快道叶
+        wR6.setBlock(20, ty + 2, 16, BR::LilyPad, 0);  // 慢道叶
+        BoatManager boats6;
+        int smashSignals = 0;
+        QObject::connect(&boats6, &BoatManager::lilyPadSmashed, &boats6,
+                         [&](int, int, int) { ++smashSignals; });
+        QVector3D bp6;
+        bool crashed6 = false;
+        // (a) 快道：spawn + 骑乘 + 满油 +X（速度 >3 后 ~1.8s 到叶列，600 tick 上限裕量）。
+        bool fastSmashed = false;
+        if (boats6.spawnBoat(6, ty + 1, 7, BoatManager::Oak))
+            boats6.tryMount(QVector3D(6.5f, float(ty + 3), 7.5f), QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+        for (int t = 0; t < 600 && !fastSmashed; ++t) {
+            boats6.tickRiddenBoat(1.0 / 60.0, &wR6, 1.0f, 0.0f, bp6, crashed6);
+            if (wR6.blockAt(20, ty + 2, 7) == BR::Air) fastSmashed = true;
+        }
+        const bool okFast = fastSmashed && smashSignals >= 1;
+        // (b) 慢道：wish 0.25 → 稳态速 8×0.25=2.0 < kBoatLilySmashSpeed 3.0 → 叶不碎；船被叶挡停
+        //     （footprint 前缘 x+0.5 到 20 前被拒 → 停位 <19.5，容差上界 19.6）。
+        float slowMaxX = 0.0f;
+        if (boats6.spawnBoat(6, ty + 1, 16, BoatManager::Oak))
+            boats6.tryMount(QVector3D(6.5f, float(ty + 3), 16.5f), QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+        const int bIdx6 = boats6.ridingIndex();
+        for (int t = 0; t < 600; ++t) {
+            boats6.tickRiddenBoat(1.0 / 60.0, &wR6, 0.25f, 0.0f, bp6, crashed6);
+            if (bIdx6 >= 0) slowMaxX = qMax(slowMaxX, boats6.posAt(bIdx6).x());
+        }
+        const bool okSlow = wR6.blockAt(20, ty + 2, 16) == BR::LilyPad && slowMaxX < 19.6f;
+        const bool okR6 = okFast && okSlow;
+        if (!okR6)
+            qInfo().noquote() << "  [review27-6 diag] okFast" << okFast << "smashSignals" << smashSignals
+                              << "| okSlow" << okSlow << "padIntact"
+                              << (wR6.blockAt(20, ty + 2, 16) == BR::LilyPad)
+                              << "slowMaxX" << slowMaxX;
+        if (!okR6) ++totalFail;
+        qInfo().noquote() << (okR6 ? "PASS" : "FAIL")
+                          << "| review27-6 boat lily-pad smash layer realigned to the lowered waterline: "
+                             "with the t892 still-water surface (boat rest Y = top-water + 7/8, floor = the "
+                             "top water cell W) a full-throttle ridden boat smashes the lily pad one layer "
+                             "up at W+1 (smashLilyPads now scans cy-1..cy+1 - the pad-only layer is cy+1; "
+                             "behavioral via tryMount + tickRiddenBoat rig, lilyPadSmashed signal observed), "
+                             "while a slow boat (steady 2.0 b/s < 3.0 threshold) still gets blocked by the "
+                             "intact pad before its footprint enters the pad column (fast=smash / slow=stop "
+                             "both halves of the t630/t711 contract pinned)";
+    }
+
+    // ── review27-7 烧尽终局附着复检（行为级：火把 / 铁活板门 / 铁门随燃失掉落）──
+    //   t891 岩浆点燃改道「点燃 → 计时烧尽」后，烧尽终局走 4 参 setBlock（钩子清单无 trapdoor/door
+    //   复检、无 6 邻火把扫）→ 贴墙 / 顶立附着物悬空残留（legacy 焚毁路径有 recheckAttachmentsAfterClear）。
+    //   修法 = 烧毁分支 setBlock 后补调 recheckAttachmentsAfterClear（门格除外——烧尽门的配对半扇走
+    //   上方带湿/雨守卫的专用分支，通用复检无湿守卫抢跑会误清 review24#1/review25#9 保住的湿/雨半扇）。
+    //   rig：木板贴岩浆（t891 (a1) 同款点火）×3——板顶立火把（TorchFloor state 0：支撑=下方）/ 板顶立
+    //   铁门（下扇 bit3=0 / 上扇 bit3=1）/ 板 +X 侧贴铁活板门。铁门 / 铁活板门非 flammable → 无同态
+    //   蔓延干扰（木门 / 木活板门会被燃烧板的逐窗蔓延掷骰点燃烧成另一条链，断言面被污染）。
+    //   断言：三板均燃尽（非 Planks）后三附着格全 Air + 各格 blockDroppedAsItem 信号 ≥1（铁门两扇各 1）。
+    //   t843 火蔓延路径共用本终局 = 既有缺口顺带收口（同断言覆盖）。
+    {
+        World wR7;
+        wR7.setWidth(48); wR7.setDepth(48); wR7.setHeight(96); wR7.setSeed(77);
+        const int fy7 = 83;
+        // rig A：岩浆 (9) + 板 (10) + 板顶火把；rig B：岩浆 (15) + 板 (16) + 板顶铁门两扇；
+        // rig C：岩浆 (21) + 板 (22) + 板 +X 侧铁活板门 (23)。岩浆横向邻除板侧外砌石（防流岩浆
+        // 绕板改地形 / 顶掉附着格），标记格 = 各岩浆正上一格翻转 Air/Stone（t891 poke 手法）。
+        const int lavaX7[3] = {9, 15, 21};
+        for (int lx : lavaX7) {
+            wR7.setBlock(lx, fy7, 7, BR::Stone, 0);
+            wR7.setBlock(lx, fy7, 9, BR::Stone, 0);
+            wR7.setBlock(lx - 1, fy7, 8, BR::Stone, 0);
+            wR7.setBlock(lx, fy7, 8, BR::Lava, 0);
+        }
+        wR7.setBlock(10, fy7, 8, BR::Planks, 0);
+        wR7.setBlock(10, fy7 + 1, 8, BR::Torch, 0);      // TorchFloor=0：支撑 = 下方板
+        wR7.setBlock(16, fy7, 8, BR::Planks, 0);
+        wR7.setBlock(16, fy7 + 1, 8, BR::IronDoor, 0);   // 下扇（bit3=0）
+        wR7.setBlock(16, fy7 + 2, 8, BR::IronDoor, 8);   // 上扇（bit3=1）
+        wR7.setBlock(22, fy7, 8, BR::Planks, 0);
+        wR7.setBlock(23, fy7, 8, BR::IronTrapdoor, 0);   // 板 +X 侧（唯一侧撑 = 板）
+        int dropTorch = 0, dropDoor = 0, dropTrap = 0;
+        QObject::connect(&wR7, &World::blockDroppedAsItem, &wR7,
+                         [&](int x, int y, int z, int) {
+                             if (x == 10 && y == fy7 + 1 && z == 8) ++dropTorch;
+                             else if (x == 16 && y >= fy7 + 1 && y <= fy7 + 2 && z == 8) ++dropDoor;
+                             else if (x == 23 && y == fy7 && z == 8) ++dropTrap;
+                         });
+        // 点火（t891 (a1)：每窗 35 调 tickLavaFlow ≥ 节流 30 → 恰 1 真窗；8%/窗 → 480 窗 P(未中)≈1e-17）。
+        bool litA = false, litB = false, litC = false;
+        int wins7 = 0;
+        for (; wins7 < 480 && !(litA && litB && litC); ++wins7) {
+            for (int lx : lavaX7)
+                wR7.setBlock(lx, fy7 + 1, 8, (wins7 & 1) ? BR::Air : BR::Stone, 0); // 标记翻转 poke 脏
+            for (int t = 0; t < 35; ++t) wR7.tickLavaFlow();
+            litA = litA || wR7.isBurningAt(10, fy7, 8);
+            litB = litB || wR7.isBurningAt(16, fy7, 8);
+            litC = litC || wR7.isBurningAt(22, fy7, 8);
+        }
+        // 燃尽驱动（燃烧计时 ~10 窗 + 余烬衔接；400 调裕量，t891 同款）。
+        bool goneA = false, goneB = false, goneC = false;
+        for (int t = 0; t < 400 && !(goneA && goneB && goneC); ++t) {
+            wR7.tickFire();
+            goneA = goneA || wR7.blockAt(10, fy7, 8) != BR::Planks;
+            goneB = goneB || wR7.blockAt(16, fy7, 8) != BR::Planks;
+            goneC = goneC || wR7.blockAt(22, fy7, 8) != BR::Planks;
+        }
+        const bool okBurn7 = litA && litB && litC && goneA && goneB && goneC;
+        const bool torchGone = wR7.blockAt(10, fy7 + 1, 8) == BR::Air;
+        const bool doorGone = wR7.blockAt(16, fy7 + 1, 8) == BR::Air
+                              && wR7.blockAt(16, fy7 + 2, 8) == BR::Air;
+        const bool trapGone = wR7.blockAt(23, fy7, 8) == BR::Air;
+        const bool okR7 = okBurn7 && torchGone && doorGone && trapGone
+                          && dropTorch >= 1 && dropDoor >= 2 && dropTrap >= 1;
+        if (!okR7)
+            qInfo().noquote() << "  [review27-7 diag] okBurn" << okBurn7
+                              << "lit" << litA << litB << litC
+                              << "gone" << goneA << goneB << goneC
+                              << "| torchGone" << torchGone << dropTorch
+                              << "doorGone" << doorGone << dropDoor
+                              << "trapGone" << trapGone << dropTrap;
+        if (!okR7) ++totalFail;
+        qInfo().noquote() << (okR7 ? "PASS" : "FAIL")
+                          << "| review27-7 burnout endgame re-checks attachments: the burn-timer endgame "
+                             "(shared by the t891 lava-ignite path and the t843 fire-spread path - the "
+                             "latter's pre-existing gap closes here too) now runs "
+                             "recheckAttachmentsAfterClear after the burnout setBlock, so a torch standing "
+                             "on the plank, an iron door mounted on it and an iron trapdoor attached to its "
+                             "side all break and drop as items at those cells instead of floating "
+                             "(behavioral: three attachment cells go Air with blockDroppedAsItem signals; "
+                             "iron variants chosen as non-flammable carriers so same-type spread cannot "
+                             "divert the door/trapdoor into their own burn chains; door cells themselves "
+                             "skip the generic recheck and keep the wet/rain-guarded pair cleanup)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -311,8 +311,12 @@ float BoatManager::boatFootprintWaterFraction(World *world, float px, float pz, 
 
 // t630 撞碎荷叶（见 boatmanager.h smashLilyPads 注释）：高速船碾过 footprint 内 LilyPad → 清 Air +
 //   emit lilyPadSmashed（呈层掉睡莲物品）。静默写 setWaterSilent（非玩家破块，免粒子/音 spam —— 掉落物由
-//   呈层信号侧 spawnItem；同 EntityManager 留雪 / 羊吃草静默写模式）。两层采样（船中心层 + 下一层）与
-//   boatFootprintBlocked 一致：浮水船中心 Y = 水面顶 → 叶（浮于水面格底 1/16）常在中心层或下一层。
+//   呈层信号侧 spawnItem；同 EntityManager 留雪 / 羊吃草静默写模式）。
+//   review27 #6 扫层修正：睡莲只存在于「顶水格 + 1」层（worldgen / 玩家放置同口径）。t892 静水降位后稳态
+//   船中心 Y = 顶水格 + 7/8 → floor = 顶水格 W，叶恰在 cy + 1 层——旧「cy / cy-1 向下两层」永远错过叶层
+//   （旧口径船 Y = W+1 时 floor = W+1 恰命中，降位后快=碎契约静默失效）。改扫 cy-1..cy+1 三层：+1 盖稳态
+//   浮水（叶层）、cy 盖刚放置 / 冰面高位过渡（spawn 于水面格时叶同层）、-1 盖下坡 / 出水瞬间低半格过渡；
+//   越界层 blockAt 判界返 Air 天然 no-op，零成本。
 bool BoatManager::smashLilyPads(World *world, float px, float py, float pz)
 {
     if (!world) return false;
@@ -322,7 +326,7 @@ bool BoatManager::smashLilyPads(World *world, float px, float py, float pz)
     bool smashed = false;
     for (int x = x0; x <= x1; ++x)
         for (int z = z0; z <= z1; ++z)
-            for (int y = cy; y >= cy - 1; --y) {
+            for (int y = cy + 1; y >= cy - 1; --y) { // review27 #6：三层（叶在顶水格+1；见头注释）
                 if (world->blockAt(x, y, z) == BlockRegistry::LilyPad) {
                     world->setWaterSilent(x, y, z, BlockRegistry::Air, 0);
                     emit lilyPadSmashed(x, y, z);
