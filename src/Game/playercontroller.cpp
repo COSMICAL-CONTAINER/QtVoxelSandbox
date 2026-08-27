@@ -5558,18 +5558,21 @@ void PlayerController::updateButtonRecovery(float dt)
 // t627/t628 发射器 / 投掷器单次触发（scanDispenserTraps 踩板沿 + t628 拉杆/按钮右键激活共用）。
 //   (dx,dy,dz) = 机器格坐标、db = 机器方块 id（Dispenser / Dropper）。per-dispenser 冷却（m_dispenserCooldowns，
 //   按格坐标三维打包 x/z 各 21 位 + y 10 位——review26 #16 前旧键 (x<<32|z) 不含 Y，同柱垂直两台共享
-//   冷却在 0.5s 语义下吞下台的合法沿）内 → 返 false 不动作；
+//   冷却会吞下台的合法沿）内 → 返 false 不动作；
 //   触发成功（含神殿陷阱 fallback 射箭）→ 写冷却 + 返 true。方向 = 机器 state 朝向外向（chestFrontFace 解码；
 //   state=0 旧存档 → +X 兜底）。库存路径（t579/t607/t609）与 fallback 语义同旧 scanDispenserTraps 逐字保留。
-//   t868②：冷却语义 = **短防抖闸**（0.5s，见 kDispenserCooldown 注释）——只拦同 tick 双路径双发，不吞
-//   高频红石的新上升沿；沿语义本身在 fireDispenserAtQml（t689 基线集），快速拉杆 / 时钟每沿必过闸逐沿发射。
+//   t868② 语义：冷却 = **触发间隔下限闸**（拦同 tick 双路径双发 + 沿抖动），不吞间隔外的新上升沿；
+//   沿语义本身在 fireDispenserAtQml（t689 基线集），快速拉杆 / 时钟每沿必过闸逐沿发射。
 bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
 {
-    // t868② 冷却缩短 2.0 → **0.5s**（用户「冷却太长 + 高频红石只能激活一次」）：语义重钉为**短防抖闸**
-    //   （拦同 tick 双路径双发 / 沿抖动），非节流窗——快速拉杆 / 按钮循环 / 时钟电路的每个新上升沿间隔
-    //   ≥0.5s 即全过闸，逐沿发射；MC 同名语义 = 触发间隔下限。review25 #8 阴性验证口径保持：本值改 0 →
-    //   t814(e)/t856(b) 双 FAIL（勿动）；改回 ≥2.0s → t868 高频沿探针 FAIL（旧症状复现）。
-    constexpr float kDispenserCooldown = 0.5f;
+    // t913 冷却对齐 MC：**0.2s**（MC 1.0 发射器重触发间隔 = 4 game ticks @ 20Hz = 0.2s——Minecraft Wiki
+    //   Dispenser 行为节「dispensations 间隔 4 game ticks」；本值即 t868 语义的 MC 精确化：2.0 → 0.5（t868
+    //   经验值）→ 0.2（MC 出处值）。用户症状「无限红石电路持续闪烁但只射出几根箭」= 0.5s 仍吞 <0.5s 间隔
+    //   的时钟沿；0.2s 下 ≥4 game tick 周期的时钟（含中继器最短时钟）逐沿发射。同沿只触发一次（上升沿触发）
+    //   由 fireDispenserAtQml 的 m_dispenserPoweredCells 基线集承担（t689），与冷却闸正交。
+    //   review25 #8 阴性验证口径保持：本值改 0 → t814(e)/t856(b) 双 FAIL（勿动）；改回 ≥0.3s → t913 探针
+    //   FAIL（0.3s 沿必须再发）。
+    constexpr float kDispenserCooldown = 0.2f;
     // review26 #16：冷却键从 (x<<32|z) 改为全三维打包（21/21/10 位布局，同 m_redstoneLitCells /
     //   m_plateJustPressed 既有键序）——旧键不含 Y → 同柱垂直叠放两台发射器共享冷却，0.5s 内上台
     //   发射后下台合法沿被吞（t868「逐沿发射」语义被柱粒度冷却破坏）。x/z 各 21 位带 ±0x100000 偏移、
