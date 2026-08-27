@@ -7294,8 +7294,11 @@ void PlayerController::step(qreal dt)
         //   1e-4 缝（playercontroller kTouchSkin 先例注释：moveAxis 把身体 snap 在障碍面外 eps 缝上，
         //   含边界比较恒 false 的同款病灶）。岩浆保持中心列判定不动（MC 岩浆是流体接触 = 中心进液格语义，
         //   且泡岩浆已有独立伤害链，不掺入 AABB 面——防贴墙走被隔壁岩浆误点燃）。
+        // 容差皮 ≫1e-4 snap 缝、≪0.3 半宽（同仙人掌判据族取值）。review27 #3 提升到火段共享：下方 AABB
+        //   扫描的站顶分支与 t843 中心列快速路径的脚下一格行须**同款 Y 界定**——任一处漏补则跳跃越顶
+        //   误点燃经另一路复活（探针 hoverClean 实测抓出快速路径漏洞）。
+        constexpr float kTouchSkin = 0.002f;
         if (!touchingLava) {
-            constexpr float kTouchSkin = 0.002f; // 容差皮 ≫1e-4 snap 缝、≪0.3 半宽（同仙人掌判据族取值）
             const float pMinX = m_pos.x() - 0.3f, pMaxX = m_pos.x() + 0.3f;
             const float pMinZ = m_pos.z() - 0.3f, pMaxZ = m_pos.z() + 0.3f;
             const float pMinY = m_pos.y(),         pMaxY = m_pos.y() + m_height;
@@ -7330,18 +7333,27 @@ void PlayerController::step(qreal dt)
             }
             // 站顶分支（t716 仙人掌先例同构）：站在燃烧方块顶面——碰撞 snap 使脚底停在支撑面**上缘**
             //   eps 缝（pMinY == cMaxY + ~1e-4），主循环 Y 严格判定漏；脚下支撑格单独含边界复探
-            //   （该分支只查 footY-1 一层支撑面，无斜对角 / 上层误伤面，XZ 仍受满格 AABB 过滤）。
+            //   （该分支只查 footY-1 一层支撑面，无斜对角 / 上层误伤面，XZ 仍受足印枚举过滤）。
+            //   review27 #3 补先例的 Y 界定半边（t890 迁移时漏抄——仙人掌站顶分支有 `pMinY <= cMaxY +
+            //   kTouchSkin`，本分支此前无任何 Y 校验）：cMaxY = float(footY-1)+1 = float(footY)，
+            //   脚底须**贴住支撑面**（±容差皮）才算站顶接触。旧版只要脚位处于 [燃块顶, 燃块顶+1) 窗口
+            //   （footY-1 恰为燃块）+ XZ 足印盖到该列就点燃 → 跳跃越过燃块（kJump=8.4 顶点 ~1.25 格
+            //   必经该窗口）/ 下落掠过燃块顶 <1 格都被误点燃 + 每帧刷 fireTimer = 8s 余燃（≈10.6HP）。
+            //   腾空时 pMinY > float(footY) + kTouchSkin → 不点燃（AABB 未触火源，MC 同判）。
             if (!touchingLava) {
                 for (int cx = xLo; cx <= xHi && !touchingLava; ++cx)
                     for (int cz = zLo; cz <= zHi && !touchingLava; ++cz)
-                        if (fireCellAt(cx, footY - 1, cz))
+                        if (fireCellAt(cx, footY - 1, cz) && pMinY <= float(footY) + kTouchSkin)
                             touchingLava = true; // 支撑面即火源 = 接触（站燃块顶必点燃，t843 三格判定的超集）
             }
         }
         // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值）。三格判定已被上方 t888 AABB
         //   接触扫描覆盖（自身格 ⊂ 扫描域；脚下一格由站顶分支兜）→ 保留原三行作**中心列快速路径**冗余
-        //   （命中即短路省全扫；语义不变，双保险）。
-        if (footY - 1 >= 0 && m_world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
+        //   （命中即短路省全扫；语义不变，双保险）。review27 #3：脚下一格行补与站顶分支**同款 Y 界定**
+        //   （m_pos.y() <= float(footY)+kTouchSkin，脚底贴支撑面才算）——快速路径不补则跳跃越顶误点燃
+        //   经中心列复活；自身格 / 眼位格两行 Y 语义本就与主扫描一致（体内即接触），不动。
+        if (footY - 1 >= 0 && m_pos.y() <= float(footY) + kTouchSkin
+            && m_world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
         if (!touchingLava && footY >= 0 && m_world->isBurningAt(fx, footY, fz)) touchingLava = true;
         if (!touchingLava && eyeY >= 0 && m_world->isBurningAt(fx, eyeY, fz)) touchingLava = true;
         if (touchingLava) {
