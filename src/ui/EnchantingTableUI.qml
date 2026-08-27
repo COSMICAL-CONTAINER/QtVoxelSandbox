@@ -751,12 +751,31 @@ Item {
                     }
                 }
 
-                // 提示文字。
+                // t916 槽位说明行（用户原话落地：「左槽放工具/武器/书 · 右槽放足青金石即解锁高栏（创造
+                //   亦须摆满）· 书附魔成附魔书不需要显示」）。按状态分档——空态 / 未满态提示，满态静默：
+                //   - 槽 0 空 →「左槽放工具 / 武器 / 书」；
+                //   - 槽 0 有物但槽 1 未放青金石 →「右槽放足青金石即解锁高栏（创造亦须摆满）」（「创造
+                //     亦须摆满」= t795 收口语义：创造也不免青金石 / 书架门）；
+                //   - 槽 0 有物且槽 1 已放青金石（含 书+青金石 → 附魔书 路径）→ **整行不显示**（用户
+                //     「书附魔成附魔书不需要显示」；非书就绪态同理——选项已亮，说明行无信息量）。
+                //   - 槽 0 物品已附魔（附魔后未取走）→ 也不显示（绿色 flash 已反馈；下一步「取出」自明）。
+                //   书未放青金石仍显提示——t795 口径：附书同样消耗槽 1 青金石，缺料提示对书路径同样
+                //   成立（MC 1.0 本无青金石门槛，1.8 加入；本工程按用户定稿保留恒须口径，注释钉死）。
+                //   触碰 enchantRev（槽数组写入经版本号驱动刷新）。
                 Text {
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "左槽放工具 / 武器 / 书 · 右槽放足青金石后选项才亮（创造亦须） · 书架解锁高档（创造亦须摆满） · 书附魔成附魔书"
+                    text: {
+                        const _r = root.enchantRev
+                        if (_r < 0) return ""
+                        const id0 = root.enchantSlots[0] || 0
+                        if (id0 === 0) return "左槽放工具 / 武器 / 书"
+                        if (root.slot0HasEnch()) return ""
+                        if (root.lapisCount < 1) return "右槽放足青金石即解锁高栏（创造亦须摆满）"
+                        return ""
+                    }
                     color: "#aa9888"; font.pixelSize: 10
+                    visible: text.toString().length > 0
                 }
 
                 // 「已附魔」绿色 flash 叠层（点击成功后短暂显，~600ms 淡出）。
