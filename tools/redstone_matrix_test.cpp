@@ -8279,7 +8279,7 @@ int main(int argc, char *argv[])
                           << "| t868 high-frequency redstone re-fires per rising edge: rapid lever cycling "
                              "(edge -> 0.7s frame-driven cooldown decay -> re-edge) MUST re-fire (the old 2.0s "
                              "cooldown swallowed every sub-2s edge = the reported fires-once symptom), stock "
-                             "decremented exactly once per shot; a fresh re-edge inside the 0.5s debounce "
+                             "decremented exactly once per shot; a fresh re-edge inside the cooldown "
                              "window stays blocked (single-path double-fire guard intact)";
     }
 
@@ -10908,6 +10908,72 @@ int main(int argc, char *argv[])
         w.setBlock(x0, kRigY, z0, BR::Air, 0);
         store.clearDispenser(x0, kRigY, z0);
         items.clearAll();
+        tickN(w, 2);
+    }
+
+    // ── t913 发射器冷却对齐 MC 探针（Game 层真消费端，t868 模式；spec「调研 MC 1.0 发射器实际延迟
+    //    （MC 语义约 4 game ticks = 0.2s，且同一信号沿只触发一次=上升沿触发）；以调研值为准重钉常量
+    //    与探针（现 kDispenserCooldown 0.5f）」）──
+    //   MC 出处（Minecraft Wiki Dispenser 行为节，dev-plan R19.16 钉值；实网核验被反爬 403 拦截，
+    //   以 dev-plan 所钉 MC 语义为准）：发射器重触发间隔 = **4 game ticks @ 20Hz = 0.2s**；同一信号沿
+    //   只触发一次 = 上升沿触发（t689 m_dispenserPoweredCells 基线集，既有语义正交不动）。
+    //   断言三段（钉常量 ∈ (0.1, 0.3] 窗——改 0.5/2.0 → (c) FAIL 复现用户「持续闪烁只射几根箭」；
+    //   改 0/0.1 → (b) FAIL 防抖闸失效）：
+    //   (a) 首沿恰发一支（基线）；
+    //   (b) 0.112s（7 帧）后的新沿 → 冷却拦（0.1 < 0.2：箭数持平 + 库存不扣）；
+    //   (c) 续 0.128s（累计 0.24s > 0.2）后的新沿 → 必再发（箭 +1 / 库存再扣）。
+    {
+        PlayerController pc;
+        EntityManager ents;
+        DispenserStore store;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setDispenserStore(&store);
+        QObject::connect(&w, &World::powerDispenserTriggered, &pc,
+                         [&pc](int x, int y, int z) { pc.fireDispenserAtQml(x, y, z); });
+        const auto arrowCount913 = [&ents]() {
+            int n = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.kindAt(i) == EntityManager::Arrow) ++n;
+            return n;
+        };
+        const auto [x0, z0] = nextSlot();
+        placeRigBlock(w, x0, kRigY, z0, BR::Dispenser, 0);
+        store.ensureDispenser(x0, kRigY, z0);
+        store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::ArrowId, 4);
+        tickN(w, 2);
+        const auto edgeOn = [&]() { placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1); tickN(w, 4); };
+        const auto edgeOff = [&]() { w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0); tickN(w, 4); };
+        edgeOn();                                        // (a) 首沿 → 恰发一支
+        const int a1 = arrowCount913();
+        const bool okA = a1 == 1 && store.slotCountAt(x0, kRigY, z0, 0) == 3;
+        edgeOff();                                       // 清沿基线
+        for (int f = 0; f < 7; ++f) pc.scanDispenserTraps(0.016f); // 0.112s 帧驱动递减（< 0.2s）
+        edgeOn();                                        // (b) 冷却窗内新沿 → 拦
+        const int a2 = arrowCount913();
+        const bool okB = a2 == 1 && store.slotCountAt(x0, kRigY, z0, 0) == 3;
+        edgeOff();
+        for (int f = 0; f < 8; ++f) pc.scanDispenserTraps(0.016f); // 续 0.128s（累计 0.24s > 0.2s）
+        edgeOn();                                        // (c) 冷却已过 → 必再发
+        const int a3 = arrowCount913();
+        const bool okC = a3 == 2 && store.slotCountAt(x0, kRigY, z0, 0) == 2;
+        const bool ok = okA && okB && okC;
+        if (!ok)
+            qInfo().noquote() << "  t913 first" << a1 << "inWindow" << a2 << "afterWindow" << a3
+                              << "stock" << store.slotCountAt(x0, kRigY, z0, 0);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t913 dispenser cooldown pinned to MC 0.2s (4 game ticks @ 20Hz, wiki "
+                             "Dispenser behavior; rising-edge-once semantics stay in the t689 baseline "
+                             "set): first edge fires exactly one arrow, a fresh rising edge 0.112s in "
+                             "stays blocked (cooldown window), and an edge at 0.24s total MUST re-fire "
+                             "(the reported fast-clock starve was the 0.5s constant swallowing sub-0.5s "
+                             "edges; constant window pinned in (0.1, 0.3])";
+        // 清场
+        w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+        w.setBlock(x0, kRigY, z0, BR::Air, 0);
+        store.clearDispenser(x0, kRigY, z0);
+        ents.clearAll();
         tickN(w, 2);
     }
 
