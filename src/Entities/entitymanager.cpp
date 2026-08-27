@@ -4589,15 +4589,20 @@ float EntityManager::fuseProgressAt(int i) const
 //   开吃草动画；②吃不吃取决于朝向（正对草丛才吃）观感怪。改目标 = **自身列脚下方块**（AABB 底面
 //   下一格 = 支撑格，与 t300 重新长毛链 / 脚步声同列口径）== Grass —— 草丛（TallGrass）不再参与
 //   吃草语义（kEatReach 前向外推随之退役）。consume=true：草方块 → 泥土（静默写 setWaterSilent，
-//   非玩家破块 → 不发 broken/placed → 免粒子 / 音 / 掉落噪音，同水流蔓延 / t300 长毛链模式；长毛
-//   归 t300 链，本处不越权翻 sheared）。consume=false：仅检测（决定是否开吃草周期）。越界 / 非
+//   非玩家破块 → 不发 broken/placed——但 t903 给 setWaterSilent 挂了「同格植物连带清」钩子：羊吃的
+//   Grass 上方有 TallGrass 时会正常爆粒子 + 掉种子（t903 有意设计，顺带收割高草），「完全免粒子 /
+//   掉落」只对无附着裸草方块成立）。consume=false：仅检测（决定是否开吃草周期）。越界 / 非
 //   草方块 → 安全返 false（blockAt 越界返 Air ≠ Grass；pos 已被物理边界 clamp，自身列恒在界内）。
+//   review27 #18① 腾空不开吃：groundY = floor(pos.y − halfH) − 1 的垂直窗口在腾空时放宽 ~1 格（小跳 /
+//   下落 / 水面缓沉都落在窗内）——旧版腾空羊可开吃并在 0.5s 后空中消耗 Grass→Dirt。吃草是落地行为：
+//   resting（已落实体支撑面）才检测 / 消耗（检测与消耗同门，杜绝「落地开吃后离地仍消耗」半态）。
 bool EntityManager::sheepEatGrass(Entity &e, World *world, float worldW, float worldD,
                                   bool consume)
 {
     if (!world) return false;
     Q_UNUSED(worldW);
     Q_UNUSED(worldD); // 脚下自身列（pos 被边界 clamp 恒在界内）；保留签名兼容两处调用点
+    if (!e.resting) return false; // review27 #18①：腾空（未落实体支撑面）→ 不检测不消耗（见头注释）
     // 脚下方块（自身列）：bodyY = AABB 底面所在格；支撑格 = bodyY − 1（草方块）。
     const int cx = qFloor(e.pos.x());
     const int cz = qFloor(e.pos.z());
@@ -5452,12 +5457,58 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (!hitWater
                         && QRandomGenerator::global()->bounded(100) < e.fireballIgnitePct) {
                         if (!world->igniteFlammableAt(bx, by, bz)) {
-                            const int px = qFloor(e.pos.x()), py = qFloor(e.pos.y()), pz = qFloor(e.pos.z());
-                            if (py >= 0 && py < world->height()
+                            int px = qFloor(e.pos.x()), py = qFloor(e.pos.y()), pz = qFloor(e.pos.z());
+                            // review27 #14①：玩家朝脚下近距直射（直击豁免外）撞非可燃块时，来向格 ==
+                            //   玩家自身格 → 立地火把发射者自己点着（火系统按 AABB 接触点燃）。玩家侧火球
+                            //   （fireballShooter==-1）来向格与玩家 AABB 相交 → 偏移到首个「Air 且不与玩家
+                            //   AABB 相交」的邻格再落火（火球水平来向一格优先 = 火「溅」过撞击点，四向兜底）；
+                            //   无合格邻格 → 不落火（宁缺勿自燃）。燃烬者火球（shooter>=0）不偏移——落火
+                            //   贴玩家脚边是敌意投射物的合法后果（MC 语义），只收口「自己射自己」。
+                            bool dropFire = true;
+                            if (e.fireballShooter < 0) {
+                                const float plMinX = listener.x() - listenerHalfW, plMaxX = listener.x() + listenerHalfW;
+                                const float plMinY = listener.y(), plMaxY = listener.y() + listenerHeight;
+                                const float plMinZ = listener.z() - listenerHalfW, plMaxZ = listener.z() + listenerHalfW;
+                                const auto cellHitsPlayer = [&](int cx, int cy, int cz) {
+                                    return float(cx) < plMaxX && float(cx + 1) > plMinX
+                                        && float(cy) < plMaxY && float(cy + 1) > plMinY
+                                        && float(cz) < plMaxZ && float(cz + 1) > plMinZ;
+                                };
+                                if (cellHitsPlayer(px, py, pz)) {
+                                    int ox = 0, oz = 0; // 水平来向一格（垂直下射 hvx/hvz≈0 → 四向兜底）
+                                    if (e.vx * e.vx + e.vz * e.vz > 1e-4f) {
+                                        if (qAbs(e.vx) >= qAbs(e.vz)) { ox = e.vx > 0.0f ? 1 : -1; }
+                                        else { oz = e.vz > 0.0f ? 1 : -1; }
+                                    }
+                                    const int cand[5][2] = { {ox, oz}, {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+                                    dropFire = false;
+                                    for (const auto &c : cand) {
+                                        const int qx = px + c[0], qz = pz + c[1];
+                                        if ((qx == px && qz == pz) || qx < 0 || qz < 0
+                                            || qx >= world->width() || qz >= world->depth())
+                                            continue;
+                                        if (!cellHitsPlayer(qx, py, qz)
+                                            && world->blockAt(qx, py, qz) == BlockRegistry::Air) {
+                                            px = qx;
+                                            pz = qz;
+                                            dropFire = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (dropFire && py >= 0 && py < world->height()
                                 && world->blockAt(px, py, pz) == BlockRegistry::Air) {
                                 // 来向格是空气 → 落火（撞面外的空气侧；t724 火系统承接蔓延）。
-                                world->setBlock(px, py, pz, BlockRegistry::Fire, 0);
-                                qCInfo(lcEnt) << "fireball ignited at" << px << py << pz;
+                                // review27 #14③：先试下界门框（与打火石 playercontroller 路径同源口径——
+                                //   tryIgniteNetherPortal 成门 → 开口整面 NetherPortal 不落火；烈焰弹撞
+                                //   黑曜石门框内腔点火与打火石等效，替代此前只在打火石链生效的门检测）。
+                                if (world->tryIgniteNetherPortal(px, py, pz)) {
+                                    qCInfo(lcEnt) << "fireball lit nether portal at" << px << py << pz;
+                                } else {
+                                    world->setBlock(px, py, pz, BlockRegistry::Fire, 0);
+                                    qCInfo(lcEnt) << "fireball ignited at" << px << py << pz;
+                                }
                             }
                         } else {
                             qCInfo(lcEnt) << "fireball ignited flammable block at" << bx << by << bz;
@@ -5690,7 +5741,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //       EntityManager 实体天然排除；已钩 mob 被新浮标命中 = 换绑，旧浮标脱钩转 Flying 下落——spec「已钩
         //       新浮标重钩=换绑」；**t883 夜行者例外**：命中夜行者 → 强制瞬移闪避（同箭链 t829①）且永不钩定——
         //       钩不住夜行者族，浮标穿过继续飞）；② next 格是 Water → 浮定水面（浮力平衡半浸：XZ 收格心、Y = 液面 −
-        //       kBobberFloatDip；液面按水 state 折算，源=1.0 / 流=(8−s)/8，mesher renderTop 同口径）+ 掷确定性
+        //       kBobberFloatDip；液面按水 state 折算，源 7/8 / 流 (8−s)/8——waterSurfaceFrac 单一权威（t892 降位
+        //   后口径，见下方 t892 行；review27 #24 勘误：旧注「源=1.0」是降位前数据））+ 掷确定性
         //       等待（hashVoxel(seed ^ 盐 ^ 甩竿序号)，PLAN §2-K 禁随机源，t791 骨粉同模式）→ Water 态；
         //       ③ 实体方块接触（豁免族同 t835 珍珠：Air/水/岩浆/门面/火）→ 贴命中面静止（Ground，不推进 next
         //       ——浮标停在接触面前一位置，MC 浮标砸哪停哪的近似）；review25 #13 本接触门**前置到 ① 钩 mob
@@ -6373,13 +6425,22 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     e.fireDamageTimer += float(aiDt);
                     if (e.fireDamageTimer >= kFireDamageInterval) {
                         e.fireDamageTimer -= kFireDamageInterval;
-                        // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭；雨灭走上方独立路径，分支保留结构）。
-                        //   不熄才扣 1HP 火伤。
-                        if (QRandomGenerator::global()->generateDouble() < double(kFireExtinguishChance)) {
-                            e.fireTimer = 0.0f;
-                            e.fireDamageTimer = 0.0f;
-                            dirty = true; // 熄火 → bump（QML 收火焰）
-                        } else if (!e.dead) { // 防御：damageEntity 可能本帧已死
+                        // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭；雨灭走上方独立路径）。
+                        // review27 #17①：if constexpr 按常量门控——kFireExtinguishChance == 0 时掷骰与
+                        //   永假分支整体编译期剔除（旧版每 mob 每火伤脉冲白耗一次全局 RNG）。**常量回改
+                        //   非零前必读**：t888 节奏标定按「必烧满 kFireDuration」校准，复活掷骰 = 实际火伤
+                        //   期望低于标定，须同步重标（若接 Peaceful 难度再复用本口——锚点保留）。
+                        bool earlyExtinguished = false;
+                        if constexpr (kFireExtinguishChance > 0.0f) {
+                            earlyExtinguished = QRandomGenerator::global()->generateDouble()
+                                                < double(kFireExtinguishChance);
+                            if (earlyExtinguished) {
+                                e.fireTimer = 0.0f;
+                                e.fireDamageTimer = 0.0f;
+                                dirty = true; // 熄火 → bump（QML 收火焰）
+                            }
+                        }
+                        if (!earlyExtinguished && !e.dead) { // 防御：damageEntity 可能本帧已死
                             damageEntity(idx, 1); // 火伤 1HP（复用受击链；归零 mobDied 带 burned=true）
                             dirty = true;
                         }
