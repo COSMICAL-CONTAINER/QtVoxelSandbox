@@ -67,6 +67,7 @@ void World::beginLoad(int seed)
     m_seed = seed;
     m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
     buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
+    m_biomeCache.clear(); // t905 perf：seed 换新 → 群系 memo 作废（懒重建；见 world.h m_biomeCache 注释）
     m_decayingLeaves.clear(); // t325 网格重置 → 渐进衰减队列作废（坐标已不指向当前栅格；防误清新世界叶）
     m_growthCells.clear();   // t425 网格重置 → 生长方格索引作废（finishLoad 写完 blob 后 rebuildGrowthCells 全图重建）
     m_waterCells.clear();    // perf：网格重置 → 流体方格索引作废（finishLoad 写完 blob 后 rebuildFluidCells 全图重建）
@@ -4350,7 +4351,26 @@ int World::heightAt(int x, int z) const
 //     其余     → Plains （多数，~60-70%：平坦草原，spec「大草原」原意）
 //   纯函数于 seed → 同 seed 同群系图。biomeAt 是群系的唯一权威：isDesert / heightAt / placeTallGrass
 //   均经此读群系，保证三处判定一致（不会出现「同列 generate 判沙漠、placeTrees 判草原」的撕裂）。
+// t905 perf：biomeAt = 列级 memo 入口（头注释见 world.h m_biomeCache / biomeComputeAt）。在界列走缓存：
+//   未命中 → biomeComputeAt 算 fBm 并回填。越界列不走缓存（保持旧口径 —— 直接算 fBm，返回某确定群系，
+//   行为与加 memo 前逐字一致）。缓存尺寸自检兜底漏清（size 不匹配 = 尺寸已变 → 整表重建）。
 World::Biome World::biomeAt(int x, int z) const
+{
+    if (x >= 0 && z >= 0 && x < m_width && z < m_depth) {
+        const size_t want = size_t(m_width) * size_t(m_depth);
+        if (m_biomeCache.size() != want)
+            m_biomeCache.assign(want, 0xFF); // 懒建 / 尺寸换代自愈（generate/beginLoad 亦显式清）
+        quint8 &slot = m_biomeCache[size_t(x) + size_t(z) * size_t(m_width)];
+        if (slot != 0xFF) return Biome(slot);
+        const Biome b = biomeComputeAt(x, z);
+        slot = quint8(b); // Biome 编码 0..6（< 0xFF 哨兵），见 enum class Biome
+        return b;
+    }
+    return biomeComputeAt(x, z);
+}
+
+// t905 perf：biomeAt 的 fBm 计算本体（原 biomeAt 函数体原样迁移，零语义变化；仅由 biomeAt memo 未命中调）。
+World::Biome World::biomeComputeAt(int x, int z) const
 {
     const double b = fbm((x + m_seed + 3571) * 0.012, (z + m_seed + 3571) * 0.012); // [-1,1]
     if (b > 0.5)  return Biome::Hills;
@@ -4596,6 +4616,7 @@ void World::generate()
 {
     buildPermutation();
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
+    m_biomeCache.clear(); // t905 perf：seed / 尺寸换新 → 群系 memo 作废（懒重建；generate 首遍逐列填回）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
     m_growthCells.clear();   // t425 全新世界 → 清生长方格索引（worldgen placeSugarcane 经 setVoxelIfAir 增量重建）
     m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
