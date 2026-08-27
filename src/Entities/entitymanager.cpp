@@ -4000,14 +4000,16 @@ bool EntityManager::teleportBehindPlayer(int idx, Entity &e, World *world, const
 }
 
 // t727 夜行者近战命中瞬移躲避（PlayerController::attackMob 调；见头文件注释）。调用即躲（30% 概率由 caller 掷）。
-bool EntityManager::nightwalkerDodge(int i, World *world)
+//   review27 #5：clearAggro 透传 teleportEntity（默认 true = 近战闪避打断激怒原语义；雪球 / 蛋投掷物链传
+//   false——0 伤害投掷物不得成免费远程「净化」，箭 / 浮标 review26 #8 同口径）。
+bool EntityManager::nightwalkerDodge(int i, World *world, bool clearAggro)
 {
     if (!world) return false;
     if (i < 0 || i >= int(m_entities.size())) return false;
     Entity &e = m_entities[size_t(i)];
     if (!e.alive || e.kind != Mob || e.dead || e.mobType != MobNightwalker) return false;
     if (e.teleportCooldown > 0.0f) return false; // 冷却内不连躲（防 spam）
-    if (teleportEntity(i, e, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax)) {
+    if (teleportEntity(i, e, world, kNightwalkerTeleportMin, kNightwalkerTeleportMax, clearAggro)) {
         qCInfo(lcEnt) << "nightwalker" << i << "dodged melee via teleport";
         return true;
     }
@@ -5183,8 +5185,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kSnowballHitHalfW) {
                         // t727 夜行者弹射物免疫（spec「雪球…攻击不到会瞬移」）：命中夜行者 → 不击退 / 不减速 / 不落定
                         //   （雪球穿过），夜行者瞬移躲避。仅夜行者免疫（其余 mob 走下方既有击退 / 减速 / 伤害分流）。
+                        //   review27 #5：clearAggro=false——雪球 0 伤害 4 雪块可无限复购，清仇恨 = 免费远程「净化」
+                        //   + 打断攻击前摇 exploit；闪避只位移，enraged/rageTimer/windupTimer 保持（箭 / 浮标
+                        //   review26 #8 同口径，MC 1.0 投射物闪避不解仇恨）。
                         if (m.mobType == MobNightwalker) {
-                            nightwalkerDodge(mi, world);
+                            nightwalkerDodge(mi, world, /*clearAggro=*/false);
                             break; // 穿过（不落定），本帧不再判定其它 mob（夜行者已跳走）
                         }
                         // t505 按发射者分流伤害：golem(damage>0) → 扣血走 damageEntity（红闪 + 归零 mobDied 掉落）；
@@ -5270,8 +5275,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kEggHitHalfW) {
                         // t727 夜行者弹射物免疫（spec「鸡蛋…攻击不到会瞬移」）：命中夜行者 → 不击退 / 不落定（蛋穿
                         //   过），夜行者瞬移躲避。仅夜行者免疫（其余 mob 走下方既有击退）。
+                        //   review27 #5：clearAggro=false——鸡蛋同雪球是 0 伤害无限复购投掷物，清仇恨 = 免费远程
+                        //   「净化」exploit；闪避只位移（箭 / 浮标 / 雪球全族同口径）。
                         if (m.mobType == MobNightwalker) {
-                            nightwalkerDodge(mi, world);
+                            nightwalkerDodge(mi, world, /*clearAggro=*/false);
                             break; // 穿过（不落定），本帧不再判定其它 mob（夜行者已跳走）
                         }
                         // 击退：方向 = 鸡蛋水平速度归一化（鸡蛋 → mob），同雪球命中分支模式（慢速退化由

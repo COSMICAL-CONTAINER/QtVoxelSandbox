@@ -5734,7 +5734,7 @@ Window {
                     //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
                     //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
-                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isBed(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId)
+                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isBed(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId) && !isItem3DFamily(entRoot.entId) // review27 #4：附魔台 94 不在 isPartialBlock（mesher 靠 chunkgeometry 显式 case）→ 旧链对 94 仍 true，与下方 ItemShapeGeometry 分支叠渲共面 z-fight；家族整体互斥（其余族员已被前五谓词挡住，本条对它们冗余但钉死互斥不变量）
                         geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
