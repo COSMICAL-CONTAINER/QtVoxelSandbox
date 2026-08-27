@@ -1556,7 +1556,10 @@ inline void putAABB(BlockRegistry::BlockAABB *out, int cap, int &n, BlockRegistr
     } else {
         qWarning("collision sub-AABB buffer cap %d exceeded - raise BlockRegistry::kMaxAABBsPerCell", cap);
     }
-    ++n;
+    // review-r1914-final M1: callers loop on the returned count with a kMaxAABBsPerCell-sized
+    // stack buffer - an uncapped n would turn the loud-warning guard into the very
+    // out-of-bounds read it exists to prevent (future >4-box shapes)
+    n = qMin(n + 1, cap);
 }
 
 // t859（R19.14）shapeBoxes 的 out-param 单一权威：逐字保留原 switch 的盒表与注释，仅把 vector 存储

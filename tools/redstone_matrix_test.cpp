@@ -4505,7 +4505,8 @@ int main(int argc, char *argv[])
             }
         }
         // cap=0 保护（单点抽查，防逐组合跑刷爆日志——putAABB 守卫是共享代码路径，一次足以证不写穿）：
-        // 返回计数与 cap 充足时一致、不写任何字节。
+        // review-r1914-final M1 钳制语义：返回值钳到 cap（cap=0 → 返回 0 且不写任何字节；调用方全部
+        // 以 kMaxAABBsPerCell 定容数组循环返回值，未钳的 n>cap 正是终审指出的潜伏越界读引爆点）。
         bool cap0Ok = false;
         {
             const int nFull = BR::collisionAABBsInto(quint8(1) /*Stone=ShapeFull*/, quint8(0),
@@ -4516,7 +4517,7 @@ int main(int argc, char *argv[])
             bool untouched = true;
             for (const auto &c : canary)
                 if (c.minX != 1234.5f) untouched = false;
-            cap0Ok = nFull == 1 && n0 == 1 && untouched; // n0 查询会响一次 qWarning（守卫在响，符合预期）
+            cap0Ok = nFull == 0 && n0 == 0 && untouched; // 两次查询各响一次 qWarning（守卫在响，符合预期）
             if (!cap0Ok) diag859 = "cap0-guard";
         }
         bool okCore859 = badId859 < 0 && checked859 > 0 && cap0Ok;
