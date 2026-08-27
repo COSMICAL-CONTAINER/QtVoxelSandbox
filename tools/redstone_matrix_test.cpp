@@ -10094,15 +10094,21 @@ int main(int argc, char *argv[])
             w.setBlock(x0 + 5, kRigY, z0, BR::Air, 0); // 拆临时轨（B 列确认无轨 = 自由体分支前置）
             // A：西端轨上静止车被向东反复推（停驻即再推，单次滑 ≤2 格）→ 撞上 B。B 在 A 东侧 →
             //   被撞离向 = +X（冲量沿 n=B−A 推离；B.dir=-X × 负速 = +X 位移，与「顶退-推离」注释一致）。
+            //   **推手距离门**（阴性验证教训）：只在 A.x < bPark−1.35 时跟推 —— 推手贴 A 后 0.4 → 距 B
+            //   恒 ≥1.75 > kCartPushReach(0.8)，玩家永不直接推到 B（旧代码下 A 穿进 B 时跟推会把 B 直接
+            //   推走 = 假绿污染通道）；A 的最后一推从 ≤bPark−1.35 处滑 ≤2 格必触 B（触点差 <1.4 格）。
             carts.spawnCart(x0, kRigY, z0, &w); // A（槽 1）
             QVector3D pusherA(carts.posAt(1).x() - 0.4f, carts.posAt(1).y(), carts.posAt(1).z());
             float bMaxX = bPark;
             for (int t = 0; t < 1200; ++t) {
-                carts.pushEmptyCart(&w, pusherA, 1.0f, 0.0f); // 朝 +X 推（推动分支对静止车幂等）
+                const float axNow = carts.posAt(1).x();
+                if (bRigOk && axNow < bPark - 1.35f) {
+                    pusherA.setX(axNow - 0.4f);
+                    carts.pushEmptyCart(&w, pusherA, 1.0f, 0.0f); // 距离门内才跟推
+                }
                 carts.tickPushedCarts(0.016, &w);
                 carts.resolveCartCollisions(&w);
                 bMaxX = std::max(bMaxX, float(carts.posAt(0).x()));
-                pusherA.setX(carts.posAt(1).x() - 0.4f); // 追着推
             }
             for (int t = 0; t < 200; ++t) { // 收尾：撞滑余动量摩擦停驻
                 carts.tickPushedCarts(0.016, &w);
