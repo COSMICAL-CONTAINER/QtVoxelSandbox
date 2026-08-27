@@ -1983,7 +1983,9 @@ public:
     //     P4/P14 探针钉死的 t740 反闪烁语义；对齐现代 MC「dot 无输出侧」）。
     //   垂直 / 对角偏移 → false（MC 粉不向支撑块竖直供电、对角无形状关系）。唯一消费方：World 火把
     //   反相 attachPowered 读（t869 起基座环粉按形状计——恢复无稳态时钟同时保持装饰环稳定）；一般接收器
-    //   （灯 / TNT / 轨）读 isReceivingPower 仍为全向 6 邻（v1 简化，t869 范围只收口火把反馈路径）。
+    //   （灯 / TNT / 轨）读 isReceivingPower 仍为全向 6 邻（v1 简化，t869 范围只收口火把反馈路径；
+    //   review26 #17 复核声明仍如实——推广到接收器读取属后续任务，随 t740 回归面一并评估）。连接位由
+    //   同层邻粉与 t702 爬墙斜角粉共用（review26 #15 坡上形态近似，详见 .cpp 实现处注释）。
     static bool redstoneDustPowersNeighbor(quint8 st, int dx, int dz);
     // t656 动力铁轨通电位（bit4，值 16 —— 与探测轨 DetectorRailStateOnFlag 同位不同块互不干扰）：
     //   机制等价 MC 1.0 powered rail 受红石信号激活。World::tickRedstone 电力重算时置 / 清本位

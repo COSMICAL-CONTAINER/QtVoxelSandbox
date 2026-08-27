@@ -1282,6 +1282,9 @@ bool BlockRegistry::isRedstoneDust(quint8 blockId)
 //   · 端点延长端 true（单臂 ±X → 目标 ±X true——粉线终止处向延长端方块供电，火把时钟 / NOT 门输入）。
 //   连接位几何事实保证一致性：目标若是火把基座等非粉方块，其方向必无连接位（连接位 = 该向有粉），
 //   故「该轴有连接」在可达形态上恰为「臂的延长端 / 拐角开放侧」。
+//   review26 #15（登记不修，知情近似）：连接位由 World 写入时**同层邻粉与 t702 爬墙斜角粉（水平邻的
+//   y±1）共用同一组水平位**——本函数把连接位读作「同层有臂」，粉沿台阶爬坡且一端贴基座时坡上拐角可被
+//   误判贯穿直线（坡上 NOT 门与平地不一致；布局罕见，详见 world.cpp 连接位写入处的 #15 注释）。
 bool BlockRegistry::redstoneDustPowersNeighbor(quint8 st, int dx, int dz)
 {
     const quint8 conn = quint8((st >> 4) & 0x0F);
