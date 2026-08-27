@@ -10290,6 +10290,173 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t907 密闭单格 cart-cart 挤压飞穿探针（MinecartManager 直编；t864/review26-14 rig 族）──
+    //   用户报告（R19.16 玩法阻塞）：全封闭单格空间内矿车互挤，碰撞解析把车飞出牢笼（穿实体方块）。
+    //   硬不变量（spec 原文）：解析结果不得写车入实体格；任何弹射不得越实体墙。断言三段（驱动序镜像
+    //   PlayerController 非骑乘分支 tickPushedCarts → pushEmptyCart → resolveCartCollisions）：
+    //   (a) 密闭双格轨笼对挤：两轨车被玩家交替两侧持续挤 600 tick —— 全程两车车心永不入实体格、
+    //       永不出笼（x∈[x0,x0+2)），终态两车存活且分离 ≥0.85（去穿插仍工作 = 非冻结假绿）；
+    //   (b) 密闭单格地面笼：两地面车（t734 静止）互挤 + 推离弹射（t863④ push-off derailed）——
+    //       车心永不入实体格、不出笼；
+    //   (c) dt 尖峰弹射穿墙（「任何弹射不得越实体墙」的弹射半边）：地面车推离获 4 blocks/s 后
+    //       tickPushedCarts(0.3f)（tick 饿死窗口，t904 实测 16ms 定时器可被饿到 1/3 以下）—— 单步
+    //       1.2 格 > 1 格厚墙：旧版一步欧拉只验落点格（墙后开格）→ 整车穿墙；子步化（≤0.45 格逐格
+    //       墙检）后贴墙停驻。
+    {
+        // rig 选址：运行期扫描空区（t863 先例）。需 12×1×4 净空（(a)(b) 笼 + (c) 穿墙走廊 + 隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 11 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 11 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t907 sealed-cage squeeze: no clear rig area found";
+        } else {
+            // 车心「在实体格内」判定（硬不变量口径：中心腰位格实体 = 入墙；腰位 = floor(y-0.1)，
+            //   同 tickDerailedCart / clampShift 墙检口径）。
+            const auto centerInSolid = [&](const QVector3D &p) {
+                return w.isCollidable(int(std::floor(p.x())), int(std::floor(p.y() - 0.1f)),
+                                      int(std::floor(p.z())));
+            };
+            // ── (a) 密闭双格轨笼：内部 (x0,Y)/(x0+1,Y) 两格；地板 Y-1、墙 (x0-1,Y)/(x0+2,Y)、
+            //        侧墙 z0±1（Y..Y+1）、顶 Y+1。轨两根（互连 2 格孤段——墙列 ±1 高度皆无轨）。──
+            for (int i = 0; i <= 1; ++i) {
+                w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);          // 地板
+                w.setBlock(x0 + i, kRigY, z0, BR::Rail, 0);               // 轨
+                w.setBlock(x0 + i, kRigY + 1, z0, BR::Stone, 0);          // 顶
+                w.setBlock(x0 + i, kRigY, z0 - 1, BR::Stone, 0);          // 侧墙
+                w.setBlock(x0 + i, kRigY + 1, z0 - 1, BR::Stone, 0);
+                w.setBlock(x0 + i, kRigY, z0 + 1, BR::Stone, 0);
+                w.setBlock(x0 + i, kRigY + 1, z0 + 1, BR::Stone, 0);
+            }
+            w.setBlock(x0 - 1, kRigY, z0, BR::Stone, 0);                   // 端墙
+            w.setBlock(x0 + 2, kRigY, z0, BR::Stone, 0);
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);       // A（槽 0，西格）
+            carts.spawnCart(x0 + 1, kRigY, z0, &w);   // B（槽 1，东格）
+            bool okA = true;
+            float minSep = 99.0f;
+            for (int t = 0; t < 600; ++t) {
+                // 玩家交替两侧挤（每 100 tick 换向）：推手贴目标车后 0.4（kCartPushReach 0.8 内）。
+                const int side = (t / 100) % 2; // 0 = 东侧推西向（推 B），1 = 西侧推东向（推 A）
+                const int tgt = side == 0 ? 1 : 0;
+                const QVector3D tp = carts.posAt(tgt);
+                const QVector3D pusher(tp.x() + (side == 0 ? 0.4f : -0.4f), tp.y(), tp.z());
+                carts.pushEmptyCart(&w, pusher, side == 0 ? -1.0f : 1.0f, 0.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                carts.resolveCartCollisions(&w);
+                for (int ci = 0; ci <= 1; ++ci) {
+                    const QVector3D p = carts.posAt(ci);
+                    if (!carts.aliveAt(ci) || centerInSolid(p)
+                        || p.x() < float(x0) || p.x() >= float(x0 + 2))
+                        okA = false;
+                }
+                const QVector3D pa = carts.posAt(0), pb = carts.posAt(1);
+                minSep = std::min(minSep, float(pa.x() - pb.x()));
+            }
+            const QVector3D fa = carts.posAt(0), fb = carts.posAt(1);
+            okA = okA && carts.aliveAt(0) && carts.aliveAt(1)
+                && std::fabs(fa.x() - fb.x()) >= 0.85f;   // 终态分离（去穿插工作，非冻结）
+            if (!okA)
+                qInfo().noquote() << "  t907(a) cage final" << fa << fb
+                                  << "alive" << carts.aliveAt(0) << carts.aliveAt(1);
+            // 清 (a)：毁车 + 拆笼（地板 / 轨 / 顶 / 侧墙 / 端墙）。
+            carts.hitCartFromRay(QVector3D(fa.x(), fa.y() + 3.0f, fa.z()), QVector3D(0, -1, 0), 4.0f, &w, true);
+            carts.hitCartFromRay(QVector3D(fb.x(), fb.y() + 3.0f, fb.z()), QVector3D(0, -1, 0), 4.0f, &w, true);
+            for (int i = -1; i <= 2; ++i)
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dy = -1; dy <= 1; ++dy)
+                        if (w.blockAt(x0 + i, kRigY + dy, z0 + dz) != BR::Air)
+                            w.setBlock(x0 + i, kRigY + dy, z0 + dz, BR::Air, 0);
+
+            // ── (b) 密闭单格地面笼：内部单格 (x0,Y)；地板 / 四墙 / 顶全石。两地面车互挤 + 反复推离。──
+            w.setBlock(x0, kRigY - 1, z0, BR::Stone, 0);
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dx = -1; dx <= 1; ++dx)
+                    if (dx != 0 || dz != 0) w.setBlock(x0 + dx, kRigY, z0 + dz, BR::Stone, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::Stone, 0);
+            bool okB = true;
+            {
+                MinecartManager gc;                       // 独立管理器（槽位语义干净：0/1）
+                gc.spawnCart(x0, kRigY, z0, &w);          // 地面静止模式（槽 0）
+                gc.spawnCart(x0, kRigY, z0, &w);          // 同格第二车（槽 1；同格互挤形态）
+                for (int t = 0; t < 400; ++t) {
+                    const QVector3D tp = gc.posAt(1);
+                    const QVector3D pusher(tp.x() + ((t / 80) % 2 ? 0.4f : -0.4f), tp.y(), tp.z());
+                    gc.pushEmptyCart(&w, pusher, (t / 80) % 2 ? -1.0f : 1.0f, 0.0f);
+                    gc.tickPushedCarts(0.016f, &w);
+                    gc.resolveCartCollisions(&w);
+                    for (int ci = 0; ci < gc.count(); ++ci) {
+                        if (!gc.aliveAt(ci)) continue;
+                        const QVector3D p = gc.posAt(ci);
+                        if (centerInSolid(p) || std::floor(p.x()) != x0 || std::floor(p.z()) != z0)
+                            okB = false;
+                    }
+                }
+                okB = okB && gc.aliveAt(0) && gc.aliveAt(1);
+                if (!okB) qInfo().noquote() << "  t907(b) ground-cage pos" << gc.posAt(0) << gc.posAt(1);
+                gc.clearAll();
+            }
+            // 清 (b)：拆笼。
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dy = -1; dy <= 1; ++dy)
+                        if (w.blockAt(x0 + dx, kRigY + dy, z0 + dz) != BR::Air)
+                            w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+
+            // ── (c) dt 尖峰弹射穿墙：走廊地板 (x0+2..x0+5,Y-1) + 1 格厚墙 (x0+6,Y) + 墙后开格。
+            //        地面车推离（push-off 4 blocks/s derailed）滑向墙磨停 → 再推一次（speed 重置 4.0）
+            //        → 立即 tickPushedCarts(0.5f)（tick 饿死病理帧：拖窗 / 断点 / 饿死，t904 实测定时器
+            //        可被饿）—— 单步 2.0 格挑战 1 格厚墙：旧版一步欧拉只验**落点格**（墙后开格 → 放行）
+            //        整车穿墙；子步化（≤0.45 格逐格墙检）贴墙停驻。──
+            for (int i = 2; i <= 5; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0); // 地板
+            w.setBlock(x0 + 6, kRigY, z0, BR::Stone, 0);                                  // 1 格厚墙
+            bool okC = true;
+            QVector3D fc;
+            {
+                MinecartManager sc;                        // 独立管理器（槽 0）
+                sc.spawnCart(x0 + 3, kRigY, z0, &w);       // 地面静止车（走廊地板上）
+                {
+                    const QVector3D tp = sc.posAt(0);
+                    sc.pushEmptyCart(&w, QVector3D(tp.x() - 0.4f, tp.y(), tp.z()), 1.0f, 0.0f); // 推离
+                    for (int t = 0; t < 400; ++t) sc.tickPushedCarts(0.016f, &w);               // 滑向墙磨停
+                }
+                {
+                    const QVector3D tp = sc.posAt(0);
+                    sc.pushEmptyCart(&w, QVector3D(tp.x() - 0.4f, tp.y(), tp.z()), 1.0f, 0.0f); // 再推（speed 4.0）
+                    sc.tickPushedCarts(0.5f, &w);          // dt 尖峰：单步 2.0 格挑战 1 格厚墙
+                }
+                for (int t = 0; t < 20; ++t) sc.tickPushedCarts(0.016f, &w); // 尖峰后余速收尾
+                fc = sc.posAt(0);
+                // 车心留在墙格前（贴墙停驻位 ~墙边界−0.05 内属正常；穿墙 = 落墙格 / 墙后开格）
+                okC = sc.aliveAt(0) && fc.x() < float(x0 + 6) - 0.02f;
+                okC = okC && !centerInSolid(fc);
+                if (!okC) qInfo().noquote() << "  t907(c) dt-spike final" << fc << "alive" << sc.aliveAt(0);
+                sc.clearAll();
+            }
+            const bool ok = okA && okB && okC;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t907 sealed-cage cart squeeze: collision resolution keeps both cart "
+                                 "centers out of solid cells and inside a fully sealed 2-cell rail cage "
+                                 "(separation still resolves >=0.85, not frozen), ground carts squeezed in "
+                                 "a 1-cell stone box stay boxed, and a derailed ejection at 4 blocks/s "
+                                 "through a 0.5s starved tick cannot tunnel the 1-thick wall (substepped "
+                                 "wall checks; old single-step Euler landed past the wall in the open cell)";
+            // 清场
+            carts.clearAll();
+            for (int i = 2; i <= 6; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 6, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
     //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；

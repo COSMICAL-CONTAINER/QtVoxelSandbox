@@ -514,15 +514,25 @@ void MinecartManager::tickDerailedCart(int idx, Cart &c, World *world, float dt)
         if (c.pos.y() < 0.0f) { destroyCartTail(idx, world, /*survivalDrop=*/false); return; }
     }
     // ── 水平：dir×speed 积分 + 撞可碰撞格清零（车身格 = 中心下一格；撞墙清速度顺墙停）──
+    //   t907 子步化（spec「任何弹射不得越实体墙」）：旧版一步欧拉（nx = pos + dir·speed·dt）只验
+    //   **落点格** —— dt 尖峰（16ms 定时器饿死 / 调试断点 / 帧尖，t904 实测 tick 可被饿到 1/3）下
+    //   挤压弹射车（boost 上界 12.8 blocks/s）单步可跨 >1 格，1 格厚墙恰被「跳过」（落点在墙后开格
+    //   → isCollidable(false) → 整步放行 = 飞出牢笼）。改 ≤0.45 格子步循环（<半格，恒逐格墙检；
+    //   子步数上界 = 步长 / 0.45 向上取整，常态 1 子步零开销），撞墙清速立即终止。
     if (std::fabs(c.speed) > 1e-4f) {
-        const float nx = c.pos.x() + c.dirX * c.speed * float(dt);
-        const float nz = c.pos.z() + c.dirZ * c.speed * float(dt);
+        constexpr float kDerailStepMax = 0.45f; // 子步上限（<半格：单子步不可能跨过 1 格厚墙）
+        float remainH = std::fabs(c.speed) * float(dt);
+        const float sgnH = (c.speed >= 0.0f) ? 1.0f : -1.0f;
         const int byc = int(std::floor(c.pos.y() - 0.1f)); // 车身腰位格（撞半格高台阶也挡）
-        if (world->isCollidable(int(std::floor(nx)), byc, cz)) c.speed = 0.0f;
-        else c.pos.setX(nx);
-        if (std::fabs(c.speed) > 1e-4f) {
-            if (world->isCollidable(int(std::floor(c.pos.x())), byc, int(std::floor(nz)))) c.speed = 0.0f;
-            else c.pos.setZ(nz);
+        while (remainH > 1e-5f) {
+            const float stepH = std::min(remainH, kDerailStepMax);
+            remainH -= stepH;
+            const float nx = c.pos.x() + c.dirX * sgnH * stepH;
+            const float nz = c.pos.z() + c.dirZ * sgnH * stepH;
+            if (world->isCollidable(int(std::floor(nx)), byc, cz)) { c.speed = 0.0f; break; }
+            c.pos.setX(nx);
+            if (world->isCollidable(int(std::floor(c.pos.x())), byc, int(std::floor(nz)))) { c.speed = 0.0f; break; }
+            c.pos.setZ(nz);
         }
     }
     // 落地 / 接地摩擦（每 tick 落定 snap 重置 fallVy → 接地恒走 landed 路径）：exp 衰减 + 死区停驻。
@@ -829,6 +839,18 @@ void MinecartManager::resolveCartCollisions(World *world)
     //   review26 #14：本列无轨且 derailed → 自由体墙检（同 tickDerailedCart 水平积分的车身腰位格
     //   isCollidable）：目标格敞开 → 放行（被撞滑出去）；堵 → 钳当前格边界内（贴墙停不穿墙）。
     //   非 derailed 的无轨车（t734 地面车存量）维持恒 0（「无轨推不动」旧语义，本修不扩面）。
+    //   **t907 实体墙硬约束**（spec「解析结果不得写车入实体格；任何弹射不得越实体墙」）：轨列探测
+    //   之外再叠两道闸——
+    //   · 同层闸：目标列解析到的轨层必须与自车当前轨层**同层**（colRailY 相等）。宽容扫描（复审 #2）
+    //     的容差窗在「邻列下隧轨坡面 rise 抬到接近本层」场景可解析到隔层轨（|ΔY|=1 经 rise 一致性
+    //     放行）—— 旧版只验「目标列有轨」就全额放行位移，把车写进墙列、下一帧 pinCartY 同一容差
+    //     把它钉到墙内 / 墙后轨上（密闭单格互挤「飞出牢笼」的写位半边）。同层闸只拦「一次去穿插
+    //     位移换层」—— 真实的坡道跨格行驶（层变化）走 stepCartAlongRail 的逐格心重选（轨连接验证），
+    //     不受本闸影响；碰撞微推（≤半穿透量 0.49）本就不该换层。
+    //   · 腰位闸：同层放行后仍验**落点中心格**（腰位 Y = floor(pos.y-0.1)，同自由体墙检口径）非实体
+    //     —— 同层 + 宽容窗（top 格实心、top-1 是轨）放行的低顶坡段，落点腰位格恰是贴轨天花板实心格，
+    //     去穿插把车心写进实体格（旧版无条件放行）。钳边界内保「解析永不把车心移入实体格」硬不变量。
+    //   两闸都不过 → 钳当前格边界内（同旧钳制公式）。
     const auto clampShift = [&](const Cart &c, float s) -> float {
         if (!world) return 0.0f;
         if (std::fabs(s) < 1e-6f) return s;
@@ -842,12 +864,14 @@ void MinecartManager::resolveCartCollisions(World *world)
         const int cz = int(std::floor(c.pos.z()));
         const int topY = int(std::floor(c.pos.y()));
         // 复审 #2：宽容版（与 pinCartY 严格同语义 —— 低顶净空坡上的去穿插不被隔板断扫误拒；
-        //   refY/格内坐标按位移落点取：下一帧 pinCartY 将以该落点解析）。
-        const auto colHasRail = [&](int colX, int colZ, float wx, float wz) {
+        //   refY/格内坐标按位移落点取：下一帧 pinCartY 将以该落点解析）。t907：返回值从「有轨」
+        //   布尔改为**轨层 Y**（-1 无轨）—— 同层闸消费。
+        const auto colRailY = [&](int colX, int colZ, float wx, float wz) {
             return scanRailColumnRiding(world, colX, colZ, topY,
-                                        wx - float(colX), wz - float(colZ), c.pos.y()) >= 0;
+                                        wx - float(colX), wz - float(colZ), c.pos.y());
         };
-        if (!colHasRail(cx, cz, c.pos.x(), c.pos.z())) {
+        const int rySelf = colRailY(cx, cz, c.pos.x(), c.pos.z());
+        if (rySelf < 0) {
             if (!c.derailed) return 0.0f; // 本列无轨且非出轨自由体（t734 地面车）→ 推不动
             const int stepF = (cellNxt > cellCur) ? 1 : -1;
             const int byc = int(std::floor(c.pos.y() - 0.1f)); // 车身腰位格（同 tickDerailedCart 撞墙判据）
@@ -860,8 +884,15 @@ void MinecartManager::resolveCartCollisions(World *world)
         const int step = (cellNxt > cellCur) ? 1 : -1;
         const int tx = axisX ? cx + step : cx;
         const int tz = axisX ? cz : cz + step;
-        if (colHasRail(tx, tz, c.pos.x() + (axisX ? d * s : 0.0f),
-                       c.pos.z() + (axisX ? 0.0f : d * s))) return s; // 目标列有轨（当前 Y 可达）→ 放行
+        const float landX = c.pos.x() + (axisX ? d * s : 0.0f);
+        const float landZ = c.pos.z() + (axisX ? 0.0f : d * s);
+        // t907 同层闸 + 腰位闸（见函数头 t907 注释）。同层 + 腰位非实体 → 放行（平轨跨格微推 /
+        //   同层轨列推进的常规路径）；其余一律钳边界内。
+        if (colRailY(tx, tz, landX, landZ) == rySelf) {
+            const int byc = int(std::floor(c.pos.y() - 0.1f));
+            if (!world->isCollidable(int(std::floor(landX)), byc, int(std::floor(landZ))))
+                return s; // 目标列同层有轨（当前 Y 可达）且落点腰位非实体 → 放行
+        }
         const float bound = (step > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
         return (bound - cur) / d; // 钳到边界内（d=±1 → 同号同模换算）
     };
@@ -902,9 +933,19 @@ void MinecartManager::resolveCartCollisions(World *world)
             if (closing > 0.05f) {
                 // 复审 #3 (b)：A 的受冲向 = -n（顶退）、B 的 = +n（推离），各自须有合法轨连接才吃冲量
                 //   （死端车不被撞进无轨列；守卫未过者速度原样保留 —— 另一侧的减速分量照常生效）。
+                //   t907 冲量钳制：碰撞获速上限 = kCartBoostSpeed（全引擎矿车速度上界 —— boost 档）。
+                //   旧版冲量与既有速度线性叠加（后车 8 + 前车吃 0.85×closing 可冲破上界），高速弹射
+                //   放大帧率尖峰下 derailed 水平积分的单步步长（穿墙风险面，见 tickDerailedCart 子步
+                //   化注释）；钳到上界把「任何弹射」的能量面收敛回既有常量域。
                 const float impulse = closing * kCartMomentumTransfer;
-                if (impulseDirOk(b, nx, nz)) b.speed += impulse * bDot;
-                if (impulseDirOk(a, -nx, -nz)) a.speed -= impulse * aDot;
+                if (impulseDirOk(b, nx, nz)) {
+                    b.speed += impulse * bDot;
+                    b.speed = std::max(-kCartBoostSpeed, std::min(kCartBoostSpeed, b.speed));
+                }
+                if (impulseDirOk(a, -nx, -nz)) {
+                    a.speed -= impulse * aDot;
+                    a.speed = std::max(-kCartBoostSpeed, std::min(kCartBoostSpeed, a.speed));
+                }
                 changed = true;
             }
             // (a) 位置去穿插（穿透 >5cm 才推，防贴轨停驻两车的 FP 微抖抖动）：各沿自身轨轴推开半穿透量
