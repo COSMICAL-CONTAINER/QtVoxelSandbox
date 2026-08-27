@@ -244,7 +244,10 @@ class PlayerController : public QQuickItem
     //   非瞬黑瞬醒）。三阶段状态机（m_sleepPhase）驱动三个派生属性供 QML 呈现层只读消费：
     //   - sleeping：整个睡觉序列进行中（从右键床到 fade 回显完毕）。
     //   - sleepFade：0..1 全屏黑叠层透明度（Lying 阶段 0→1 渐黑；Settled 阶段恒 1 全黑；Waking 阶段 1→0 渐显）。
-    //   - sleepLie：0..1 躺下量（驱动 QML 第一人称相机降低 + 上仰转躺；与 sleepFade 同步 ramp）。
+    //   - sleepLie：0..1 躺下量（驱动 QML 第一人称相机降低 + 上仰转躺）。review27 #8：只在入睡方向
+    //     使用——Lying 阶段 0→1 与 sleepFade 同步 ramp；出床瞬移（leaveBedTeleport，即 Waking 入口 /
+    //     中断醒）即清 0 且 Waking 阶段恒 0（相机躺偏移按床顶躺位标定，出床后 m_pos 已在床边地面，
+    //     残留 lie 会把渐显期眼位沉进床 / 邻墙）。
     //   - sleepSettled：true 时处于全黑「入睡」阶段，QML 显「起床」按钮（玩家可点按钮立即醒，否则自动跳清晨）。
     //   受击即醒（wakeUp 受惊醒，瞬切；spec「受惊醒」）。分层（PLAN §2）：睡觉态属 Game/Physics 层（持 worldClock
     //   + entityManager + 自身 spawn 点），呈现层只读消费（同 miningStateChanged / eatingStateChanged 模式）。

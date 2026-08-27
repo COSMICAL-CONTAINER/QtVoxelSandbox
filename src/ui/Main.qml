@@ -2889,12 +2889,14 @@ Window {
             position: {
                 let eye = player.position
                 // t898 睡觉瞬移躺床（用户 8-25 澄清：睡下人物直接瞬移躺床、视角/相机移到床位置）：m_pos 已被
-                //   trySleepAt 瞬移到床脚端躺位 → position() 随行到床顶。sleepLie 0→1（Lying 阶段与渐黑同步 ramp）
-                //   再把第一人称锚点平移到**床头**：水平沿 -look 移 1.4 格（look 睡时已转床轴朝床尾 → -look 指
-                //   向床头；床脚端躺位 + 1.4 = 床头格心），竖直降 1.35 → 眼位 = 床顶 + 0.27（床垫上枕头高，平视
-                //   床尾不穿地不黑屏——t496「镜头落到底」教训保持，降量以瞬移后 m_pos.y=床顶为基准重标）。
-                //   机制等价 MC 躺床视点落床头。三模式都加（第三人称相机目标同随 position 到床）。look 取水平
-                //   分量归一（躺床视线沿床轴水平；pitch 睡时已清 0，归一防陈旧非零分量放大偏移）。
+                //   trySleepAt 瞬移到床脚端躺位 → position() 随行到床顶。sleepLie 0→1（**仅 Lying 阶段**与渐黑
+                //   同步 ramp；review27 #8：出床瞬移即清 0、Waking 期恒 0——躺偏移按床顶躺位标定，出床后
+                //   m_pos 已在床边地面，渐显期残留 lie 会把眼位沉进床 / 邻墙）再把第一人称锚点平移到**床头**：
+                //   水平沿 -look 移 1.4 格（look 睡时已转床轴朝床尾 → -look 指向床头；床脚端躺位 + 1.4 = 床头格
+                //   心），竖直降 1.35 → 眼位 = 床顶 + 0.27（床垫上枕头高，平视床尾不穿地不黑屏——t496「镜头落
+                //   到底」教训保持，降量以瞬移后 m_pos.y=床顶为基准重标）。机制等价 MC 躺床视点落床头。三模式
+                //   都加（第三人称相机目标同随 position 到床）。look 取水平分量归一（躺床视线沿床轴水平；
+                //   pitch 睡时已清 0，归一防陈旧非零分量放大偏移）。
                 if (player.sleepLie > 0.0) {
                     const lv = player.lookVector
                     const hl = Math.hypot(lv.x, lv.z)
@@ -5594,6 +5596,8 @@ Window {
                 smokeLoader.item.parent = particlesHost
                 // 注入火把位置 ListModel（引用稳定；TorchSmoke 内 Repeater 据其 count/角色反应式更新）。
                 smokeLoader.item.torchModel = torchPositions
+                // review27 #13：硬暂停总闸注入（ParticleSystem3D.running 门——ESC 硬档火把烟停发冻结）。
+                smokeLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })
                 console.info("[t157] TorchSmoke adopted into scene graph; torches=" + torchPositions.count)
             }
             onStatusChanged: {
@@ -5621,6 +5625,8 @@ Window {
                 // 注入 World + PlayerController（WeatherParticles 据此查天气态 + 跟随眼位）。
                 weatherLoader.item.world = theWorld
                 weatherLoader.item.player = player
+                // review27 #13：硬暂停总闸注入（同 smokeLoader；ESC 硬档雨雪停发冻结）。
+                weatherLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })
                 console.info("[t385] WeatherParticles adopted into scene graph")
             }
             onStatusChanged: {
@@ -5649,6 +5655,8 @@ Window {
                 ambientLoader.item.world = theWorld
                 ambientLoader.item.player = player
                 ambientLoader.item.torchModel = torchPositions
+                // review27 #13：硬暂停总闸注入（同 smokeLoader；ESC 硬档雨溅/叶飘/火星停发冻结）。
+                ambientLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })
                 console.info("[t390] AmbientParticles adopted into scene graph; torches=" + torchPositions.count)
             }
             onStatusChanged: {
@@ -5770,17 +5778,21 @@ Window {
                         //   宽 ≤64 pack 按 miss 处理走 qrc 布局 0——bookDelegate bookPackHit 同判据）。
                         //   材质经显式 id 引用判据（t610 教训：材质 parent 解析到 Model，parent.parent
                         //   在构造期求值为 null → TypeError）。
+                        //   review27 #9：局部坐标与 ResourceBrowser 预览 / 放置态 bookDelegate **同款**
+                        //   （书心 y=+0.46 > 台顶 +0.375、页 ±0.176、页 scale 0.38×0.03×0.46）——父级
+                        //   Model 的 0.3 统一缩小，**不做预缩放**。旧版 y=0.14（0.46×0.3 误做预缩放）被
+                        //   父级再乘 0.3 → 实际 0.042 < 台顶 0.1125，书整个埋进台体内部不可见。
                         Node {
                             id: dropBookNode
                             visible: entRoot.entId === 94
-                            position: Qt.vector3d(0, 0.14, 0)
+                            position: Qt.vector3d(0, 0.46, 0)
                             property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
                                                         && resourcePack.entityTextureWidth("enchant_book") > 64
                             Model { // 左页（纸页镜像 piece 4；外缘下倾 -22°）
                                 geometry: EnchantBookBox { piece: 4; layout: dropBookNode.bookPackHit ? 1 : 0 }
-                                position: Qt.vector3d(-0.088, 0.035, 0)
+                                position: Qt.vector3d(-0.176, 0.045, 0)
                                 eulerRotation: Qt.vector3d(0, 0, -22)
-                                scale: Qt.vector3d(0.19, 0.03, 0.23)
+                                scale: Qt.vector3d(0.38, 0.03, 0.46)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     baseColor: terrainLight(worldClock.skyLight)
@@ -5789,9 +5801,9 @@ Window {
                             }
                             Model { // 右页（纸页 piece 1；+22° 镜像成 V）
                                 geometry: EnchantBookBox { piece: 1; layout: dropBookNode.bookPackHit ? 1 : 0 }
-                                position: Qt.vector3d(0.088, 0.035, 0)
+                                position: Qt.vector3d(0.176, 0.045, 0)
                                 eulerRotation: Qt.vector3d(0, 0, 22)
-                                scale: Qt.vector3d(0.19, 0.03, 0.23)
+                                scale: Qt.vector3d(0.38, 0.03, 0.46)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     baseColor: terrainLight(worldClock.skyLight)
@@ -9125,7 +9137,9 @@ Window {
                 Timer {
                     id: faceTimer
                     interval: 100   // 10Hz 节流（机制等价 MC 附魔台书随玩家转向；不需每帧）
-                    running: true; repeat: true
+                    // review27 #13：同 pageFlipTimer 口径 gate（世界锚定书视觉；review26 #11 Timer 清点
+                    //   漏网——暂停期玩家 feetPosition 不变，本 Timer 空转，照 gate 清零）。
+                    running: window.worldRunning; repeat: true
                     onTriggered: {
                         const dx = player.feetPosition.x - (bookRoot.cellX + 0.5)
                         const dz = player.feetPosition.z - (bookRoot.cellZ + 0.5)
@@ -9151,8 +9165,10 @@ Window {
                         property real bob: 0.0
                         position: Qt.vector3d(0, -0.035 + 0.07 * bob, 0)
                         // 单段线性 0→1 经 yoyo 自动往返 → 正弦式浮沉（柔和悬浮感）。
+                        //   review27 #13：世界锚定书浮沉 gate worldRunning（同 pageFlipTimer 口径——
+                        //   ESC 硬档冻结；恢复从 0 相位重启，幅度 0.07 格跳变不可辨）。
                         SequentialAnimation on bob {
-                            running: true; loops: Animation.Infinite
+                            running: window.worldRunning; loops: Animation.Infinite
                             NumberAnimation { from: 0.0; to: 1.0; duration: 3200 }
                             NumberAnimation { from: 1.0; to: 0.0; duration: 3200 }
                         }
@@ -9225,8 +9241,9 @@ Window {
                 // t697 翻页循环（风翻页感，用户「翻页应循环」）：页片翻到左页 → 停 700ms → 翻回 → 停
                 //   900ms → 下一轮。每轮间隔 1.4-3.2s 随机（风不定时吹动；旧 2.5-6s 间隔稀疏，读作
                 //   「偶尔动一下」非循环风感）。Timer 驱动（repeat 恒真，interval 每轮随机重设）。
-                //   t796 ③：本大摆与 pageFlutterAnim（静息小幅翻页）互斥——onStarted 停 flutter 并清零
-                //   （14° 叠加会令落角 152+14=166° > 左页平面 158°，页片穿到左页背面），onCompleted 重启。
+                //   t796 ③：本大摆与 pageFlutterAnim（静息小幅翻页）互斥（review27 #13 起声明式——
+                //   pageFlutterAnim.running 含 !pageFlipAnim.running；大摆期 flutter 冻结且起摆清零，
+                //   14° 叠加会令落角 152+14=166° > 左页平面 158°，页片穿到左页背面），摆完自动续。
                 Timer {
                     id: pageFlipTimer
                     interval: 1600
@@ -9244,9 +9261,14 @@ Window {
                 //   页片绕书脊 0→14°→0 无限往复（起 ~0.8s / 落 ~0.9s 不对称 = 柔起缓落，非机械节拍），
                 //   与 bob 上下浮动复合成「悬浮 + 持续翻页」双动效；14° 小幅不会与右页/左页共面
                 //   （总角 22..36°，两页平面在 22°/158°）。
+                //   review27 #13：世界锚定静息翻页 gate worldRunning（同 pageFlipTimer / bob 口径——
+                //   ESC 硬档冻结）；与 pageFlipAnim 大摆的互斥改**声明式**（!pageFlipAnim.running）——
+                //   旧 onStarted stop() / onFinished restart() 命令式调用会夺走 running 绑定（暂停门
+                //   失效），大摆起摆仍显式清零 flutter（防 14° 叠加过冲穿左页，t796 ③ 语义保持），
+                //   摆完 running 条件翻转自动续摆（等效旧 restart）。
                 SequentialAnimation {
                     id: pageFlutterAnim
-                    running: true; loops: Animation.Infinite
+                    running: window.worldRunning && !pageFlipAnim.running; loops: Animation.Infinite
                     NumberAnimation { target: flipPivot; property: "flutter"; from: 0.0; to: 14.0; duration: 800; easing.type: Easing.InOutQuad }
                     NumberAnimation { target: flipPivot; property: "flutter"; from: 14.0; to: 0.0; duration: 900; easing.type: Easing.InOutQuad }
                 }
@@ -9256,10 +9278,12 @@ Window {
                 SequentialAnimation {
                     id: pageFlipAnim
                     running: false
-                    onStarted: { pageFlutterAnim.stop(); flipPivot.flutter = 0.0 }
+                    // review27 #13：只保留清零——停摆 / 续摆互斥已声明式（pageFlutterAnim.running 含
+                    //   !pageFlipAnim.running，命令式 stop/restart 会夺其 running 绑定）。
+                    onStarted: flipPivot.flutter = 0.0
                     // onFinished（Animation::finished，自然播完发射）——不能用 onCompleted：那是
                     // Component 的信号，Animation 没有 → QML 装载失败（t796 冒烟抓到：Main.qml 整体拒载）。
-                    onFinished: pageFlutterAnim.restart()
+                    //   review27 #13 后本处无命令（续摆由 pageFlutterAnim.running 条件自动接管）。
                     NumberAnimation { target: flipPivot; property: "flipAngle"; from: 0.0; to: 130.0; duration: 550; easing.type: Easing.InOutQuad }
                     PauseAnimation { duration: 700 }
                     NumberAnimation { target: flipPivot; property: "flipAngle"; from: 130.0; to: 0.0; duration: 500; easing.type: Easing.InOutQuad }
@@ -9810,8 +9834,10 @@ Window {
                     property real spinY: 0.0
                     eulerRotation: Qt.vector3d(0, spinY, 0)
                     // 单段线性 0→360 无缝循环（360≡0 无视觉跳变）。
+                    //   review27 #13：世界锚定笼心剪影自旋 gate worldRunning（同 t878 爱心口径——
+                    //   ESC 硬档笼内冻结；恢复从 0 相位重启，慢速 4s/圈不可辨）。
                     SequentialAnimation on spinY {
-                        running: true; loops: Animation.Infinite
+                        running: window.worldRunning; loops: Animation.Infinite
                         NumberAnimation { from: 0.0; to: 360.0; duration: 4000 }
                     }
 
@@ -9820,8 +9846,9 @@ Window {
                         property real bob: 0.0
                         position: Qt.vector3d(0, -0.015 + 0.03 * bob, 0)
                         // 单段线性 0→1 yoyo 往返 → 正弦式浮沉（bookHost bob 同款）。
+                        //   review27 #13：同 miniMobSpin gate（幅度 0.03 格重启跳变不可辨）。
                         SequentialAnimation on bob {
-                            running: true; loops: Animation.Infinite
+                            running: window.worldRunning; loops: Animation.Infinite
                             NumberAnimation { from: 0.0; to: 1.0; duration: 2600 }
                             NumberAnimation { from: 1.0; to: 0.0; duration: 2600 }
                         }

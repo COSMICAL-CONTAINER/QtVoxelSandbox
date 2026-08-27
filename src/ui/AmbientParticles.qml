@@ -25,6 +25,11 @@ Node {
     property var player: null
     property var torchModel: null
 
+    // review27 #13（review26 #11 清点批漏网的 ParticleSystem3D 族）：硬暂停总闸——宿主注入
+    //   window.worldRunning（Qt.binding）。ESC 硬档雨溅 / 叶飘 / 火星停发冻结（同 BlockParticles /
+    //   TorchSmoke / WeatherParticles 口径）；软档 GUI 开照常。
+    property bool worldRunning: false
+
     // 局部降水类型（0=Clear / 1=Rain / 2=Snow / 3=Thunder；推导同 WeatherParticles.precipType）。
     //   触碰 world.weatherState（NOTIFY weatherChanged）+ player.position → 天气翻转 / 玩家跨群系时重算。
     readonly property int precipType: {
@@ -45,7 +50,7 @@ Node {
 
     ParticleSystem3D {
         id: ambientSys
-        running: true
+        running: root.worldRunning
 
         // === (1) 雨溅：玩家脚边扁平盘小水花，降水态发射（联动 t385）===
         ModelParticle3D {

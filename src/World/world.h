@@ -210,6 +210,12 @@ public:
     Q_INVOKABLE int weatherStateAt(int x, int z) const;
     // 该位置是否正降水（= weatherStateAt != Clear）。mob 灭火 / 作物浇水 / 日光燃烧门控用。OOB 安全。
     Q_INVOKABLE bool isPrecipitatingAt(int x, int z) const;
+    // review27 #11 着火实体雨灭判据（**单一权威**，玩家 / mob 两侧共用——旧版判据只写在 mob 侧，
+    //   玩家侧无雨灭路径即 #11 本体）：所在格见天（skyLightAt>=15 = 头顶无遮挡；y>=世界顶按开阔
+    //   天空 15 处理）且所在列正降水（isPrecipitatingAt 群系解析）→ 雨水浇灭着火实体（机制等价
+    //   MC 1.0 雨中实体熄灭）。仅露天生效（树下 / 屋内不淋雨不灭）。OOB 安全（x/z 出界 skyLightAt
+    //   返 0 → 判假；weatherStateAt 出界按 Clear 处理）。
+    Q_INVOKABLE bool rainExtinguishesAt(int x, int y, int z) const;
 
     // t151 真光场查询（PLAN §2-H / §M）：世界坐标 per-voxel 天光 / 方块光（各 0..15）。mesher 据此写顶点色。
     //   光场由 BFS flood-fill 算出：worldgen 末走全量 recomputeLightField()；玩家编辑（setBlock / 实体写入）

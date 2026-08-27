@@ -22,11 +22,16 @@ Node {
     // 由 Main.qml 经 smokeLoader.onLoaded 注入（ListModel 引用稳定，Repeater 反应式跟随增删）。
     property var torchModel: null
 
+    // review27 #13（review26 #11 全仓纯视觉 Timer 清点批的漏网族）：硬暂停总闸——宿主注入
+    //   window.worldRunning（Qt.binding）。ESC 硬档火把烟停止发射 / 在飞烟冻结中途（MC Java 单机
+    //   暂停粒子冻结，同 BlockParticles tickTimer 口径）；软档 GUI 开 worldRunning 仍真照常。
+    property bool worldRunning: false
+
     Component.onCompleted: console.info("[t157] TorchSmoke ready; torches=", root.torchModel ? root.torchModel.count : 0)
 
     ParticleSystem3D {
         id: smokeSystem
-        running: true
+        running: root.worldRunning
 
         // 烟雾粒子（共享池）：小灰半透立方，淡入淡出（非 FadeScale — 烟不需要缩放出现）。
         ModelParticle3D {

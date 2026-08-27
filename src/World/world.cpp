@@ -4422,6 +4422,12 @@ bool World::isPrecipitatingAt(int x, int z) const
     return weatherStateAt(x, z) != int(Weather::Clear);
 }
 
+// review27 #11 着火实体雨灭判据（见 world.h 头注释；玩家 / mob 两侧共用单一权威）。
+bool World::rainExtinguishesAt(int x, int y, int z) const
+{
+    return skyLightAt(x, y, z) >= 15 && isPrecipitatingAt(x, z);
+}
+
 // t385 重置天气态（见 world.h 头注释）：Clear + 随机首场晴时长（偏短便于进世界即见天气）。态真翻才 emit。
 //   t386：同时重置闪电计时（雷态进入时第一击的随机间隔；非雷态不递减，无副作用）。
 void World::resetWeather()
