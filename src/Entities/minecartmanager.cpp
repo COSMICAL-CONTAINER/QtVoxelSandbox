@@ -1036,19 +1036,60 @@ bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, f
         if (al > 1e-4f) { ax /= al; az /= al; } else { ax = 0.0f; az = 0.0f; }
         const float selX = ax + 0.5f * nwx + 0.25f * c.dirX;
         const float selZ = az + 0.5f * nwz + 0.25f * c.dirZ;
+        // t908 向量分解（spec「轨上矿车被玩家身体/推动时只接受沿轨前后分量，横向推无效（不脱轨）」；
+        //   身体挤推（away）与走步推动（wish）两路都在本合成向量里 → 一处分解两路同口径）：本格轨
+        //   **有定向**（连接位非 0 或孤轨轴偏好位）时，推挤先投影到轨向 ——
+        //   ① 全部连接臂上 |sel·d| 的最大值 < kCartPushProjMin（横推：与轨轴两向都近垂直）→ 本车 no-op
+        //      （不沿轨推、也不脱轨 —— 横推分量整体丢弃，机制等价 MC 轨上车只能沿轨前后受力）。取
+        //      **绝对值**：沿轨「后退」分量与「前进」同属轨向（t809 拐角推穿 = 玩家沿入轨轴推、pickTrackStep
+        //      选中垂直出臂 dot=0 —— 绝对值口径下照常放行，拐角转弯保留）；
+        //   ② pickTrackStep 失败（死端）→ 轴向投影 < 阈 同样 no-op，且推离方向改**轨轴符号向**（旧版
+        //      取合成向量主轴 —— 斜推时主轴落在垂直向 → 朝侧向弹出 = 用户报「横向推一下就脱轨」）。
+        //   无定向轨（state=0 孤轨：0 连接且无轴位——worldgen / 探针直铺形态）与非轨地面车**不分解**
+        //   （任意向可推：review26 #14 出轨车撞滑、t863④ 孤轨推离既有语义保留）。
+        const int pcx = int(std::floor(c.pos.x())), pcz = int(std::floor(c.pos.z()));
+        const int pry = scanRailColumnRiding(world, pcx, pcz, int(std::floor(c.pos.y())),
+                                             c.pos.x() - float(pcx), c.pos.z() - float(pcz),
+                                             c.pos.y());
+        float railAxisX = 0.0f, railAxisZ = 0.0f;
+        bool railAxisKnown = false;
+        float bestArmAbsDot = -1.0f;
+        if (pry >= 0) {
+            const quint8 pst = world->stateAt(pcx, pry, pcz);
+            const quint8 pcon = quint8(pst & 0x0F);
+            const bool hpx = (pcon & BlockRegistry::RailConnPx) != 0;
+            const bool hnx = (pcon & BlockRegistry::RailConnNx) != 0;
+            const bool hpz = (pcon & BlockRegistry::RailConnPz) != 0;
+            const bool hnz = (pcon & BlockRegistry::RailConnNz) != 0;
+            if (hpx || hnx) bestArmAbsDot = std::max(bestArmAbsDot, std::fabs(selX));
+            if (hpz || hnz) bestArmAbsDot = std::max(bestArmAbsDot, std::fabs(selZ));
+            if (hpx || hnx) { railAxisX = 1.0f; railAxisZ = 0.0f; railAxisKnown = true; }
+            else if (hpz || hnz) { railAxisX = 0.0f; railAxisZ = 1.0f; railAxisKnown = true; }
+            else if ((pst & BlockRegistry::RailAxisEWFlag) != 0)
+                { railAxisX = 1.0f; railAxisZ = 0.0f; railAxisKnown = true; } // 孤轨轴偏好（t666 放置写入）
+        }
         int ndx = 0, ndz = 0;
-        if (!pickTrackStep(world, c.pos, selX, selZ, ndx, ndz)) {
+        const bool stepped = pickTrackStep(world, c.pos, selX, selZ, ndx, ndz);
+        if (stepped && railAxisKnown && bestArmAbsDot < kCartPushProjMin)
+            continue; // t908 ①：横推（全部连接臂上的投影不足）→ 无沿轨分量 → no-op（不脱轨）
+        if (!stepped) {
             // t863④ 轨末端推离（spec「轨末端静止车可被玩家推离轨道进入自由物理」）：合成推向前方主轴
             //   无轨（真轨端）或本就出轨 / 地面车 → 自由物理推（derailed 水平推出，下方有地面则贴地滑
             //   行渐停、无地面坠落）。轨上但前方主轴**有轨**（三高探针）→ 是反向推（dot<0 滤）或拐角
-            //   选向问题 → 不推离（旧语义防振荡）。主轴 = 合成向量绝对值更大的一轴（轨向四向对齐）。
-            const int pcx = int(std::floor(c.pos.x())), pcz = int(std::floor(c.pos.z()));
-            const int pry = scanRailColumnRiding(world, pcx, pcz, int(std::floor(c.pos.y())),
-                                                 c.pos.x() - float(pcx), c.pos.z() - float(pcz),
-                                                 c.pos.y());
+            //   选向问题 → 不推离（旧语义防振荡）。主轴 = 合成向量绝对值更大的一轴（轨向四向对齐）；
+            //   t908 ②：有定向轨时主轴改**轨轴**（合成向量沿轨投影的符号向）且投影不足 → 不推离。
             int ax = 0, az = 0;
-            if (std::fabs(selX) >= std::fabs(selZ)) ax = (selX >= 0.0f) ? 1 : -1;
-            else                                     az = (selZ >= 0.0f) ? 1 : -1;
+            if (railAxisKnown) {
+                const float proj = selX * railAxisX + selZ * railAxisZ;
+                if (std::fabs(proj) < kCartPushProjMin)
+                    continue; // t908 ②：横推死端车 → 不脱轨（no-op）
+                ax = (proj >= 0.0f) ? int(railAxisX) : -int(railAxisX);
+                az = (proj >= 0.0f) ? int(railAxisZ) : -int(railAxisZ);
+            } else if (std::fabs(selX) >= std::fabs(selZ)) {
+                ax = (selX >= 0.0f) ? 1 : -1;
+            } else {
+                az = (selZ >= 0.0f) ? 1 : -1;
+            }
             if (pry >= 0) {
                 const auto railAhead = BlockRegistry::isRail(world->blockAt(pcx + ax, pry, pcz + az))
                     || BlockRegistry::isRail(world->blockAt(pcx + ax, pry + 1, pcz + az))

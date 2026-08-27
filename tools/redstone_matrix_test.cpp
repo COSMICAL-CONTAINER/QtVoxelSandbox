@@ -10457,6 +10457,99 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── t908 玩家推车向量分解探针（MinecartManager 直编；spec「轨上矿车被玩家身体/推动时只接受沿轨
+    //   前后分量，横向推无效（不脱轨）；pushEmptyCart 与玩家碰撞挤推两路都按轨向投影」）──
+    //   EW 三格直线轨 + 全线地板；车在中格 / 西端死端格。断言四段：
+    //   (a) 中格横推（wish + away 皆 ⊥ 轨轴）：零位移（旧版 dot=0.25 兜底臂仍被选中 → 车被推走）；
+    //   (b) 中格纵推（沿轨 -X）：沿轨位移 ≥0.8 格且恒贴轨面（轨约束行驶）；
+    //   (c) 西端死端格横推：零位移 + 不脱轨（旧版选中内陆臂 dot=0.25 推走；再旧路径 = 合成主轴落
+    //       垂直向时朝侧向弹出脱轨）；
+    //   (d) 西端死端格**沿轴外向**推：t863④ 推离保留（出轨滑离轨端 —— 分解不吞死端合法推离）。
+    {
+        // rig 选址：运行期扫描空区。需 10×1×4 净空（地板 x0-3..x0+2 + 轨 3 格 + 隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 9 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 9 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t908 push vector decomposition: no clear rig area found";
+        } else {
+            const float rideH = 0.45f; // kCartRideH 镜像
+            for (int i = -3; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0); // 地板
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Rail, 0);       // EW 三格轨
+            MinecartManager carts;
+            // (a)+(b) 中格车。
+            carts.spawnCart(x0 + 1, kRigY, z0, &w);
+            const QVector3D p0 = carts.posAt(0);
+            for (int t = 0; t < 60; ++t) { // (a) 横推：玩家在车南侧贴住、wish 朝北（皆 ⊥ EW 轨轴）
+                carts.pushEmptyCart(&w, QVector3D(p0.x(), p0.y(), p0.z() + 0.4f), 0.0f, -1.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                carts.resolveCartCollisions(&w);
+            }
+            const QVector3D pa = carts.posAt(0);
+            const bool okA = (pa - p0).length() < 1e-3f; // 零位移（横推无效）
+            for (int t = 0; t < 300; ++t) { // (b) 纵推：玩家在车东侧贴住、wish 朝 -X（沿轨）。
+                const QVector3D tp = carts.posAt(0);
+                if (tp.x() > float(x0) + 1.0f)                    // t863④ 适配：车进西死端格后停推
+                    carts.pushEmptyCart(&w, QVector3D(tp.x() + 0.4f, tp.y(), tp.z()), -1.0f, 0.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                carts.resolveCartCollisions(&w);
+            }
+            const QVector3D pb = carts.posAt(0);
+            const bool okB = pb.x() < p0.x() - 0.8f                             // 沿轨西移 ≥0.8
+                && std::fabs(pb.y() - (float(kRigY) + rideH)) < 0.02f          // 恒贴轨面（未脱轨）
+                && std::fabs(pb.z() - p0.z()) < 0.05f;                          // 不侧漂
+            carts.hitCartFromRay(QVector3D(pb.x(), pb.y() + 3.0f, pb.z()),
+                                 QVector3D(0, -1, 0), 4.0f, &w, true);          // 清 (a)(b) 车
+            // (c)+(d) 西端死端格车（x0：仅 +X 内陆连接）。
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const QVector3D q0 = carts.posAt(0);
+            for (int t = 0; t < 60; ++t) { // (c) 死端横推：零位移 + 不脱轨
+                carts.pushEmptyCart(&w, QVector3D(q0.x(), q0.y(), q0.z() + 0.4f), 0.0f, -1.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                carts.resolveCartCollisions(&w);
+            }
+            const QVector3D pc = carts.posAt(0);
+            const bool okC = (pc - q0).length() < 1e-3f;
+            for (int t = 0; t < 300; ++t) { // (d) 死端沿轴外向推：t863④ 推离保留（出轨滑离轨端西行）
+                const QVector3D tp = carts.posAt(0);
+                if (tp.x() < float(x0) - 0.6f) break; // 已滑离轨端（免追推干扰）
+                carts.pushEmptyCart(&w, QVector3D(tp.x() + 0.4f, tp.y(), tp.z()), -1.0f, 0.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                carts.resolveCartCollisions(&w);
+            }
+            for (int t = 0; t < 200; ++t) carts.tickPushedCarts(0.016f, &w); // 滑行渐停
+            const QVector3D pd = carts.posAt(0);
+            const bool okD = pd.x() < float(x0) - 0.3f                          // 推离出轨（西行离轨格）
+                && std::fabs(pd.z() - q0.z()) < 0.05f                           // 不侧漂（轨轴符号向）
+                && carts.aliveAt(0);
+            const bool ok = okA && okB && okC && okD;
+            if (!ok)
+                qInfo().noquote() << "  t908 lateralA" << pa << "longB" << pb
+                                  << "deadLatC" << pc << "deadAxD" << pd;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t908 push decomposition: lateral player push on a railed cart is a "
+                                 "no-op (zero displacement, no derail - body-squeeze away and walking wish "
+                                 "both project onto the rail axis), longitudinal push still rolls the cart "
+                                 "along the rail glued to the surface, dead-end lateral push stays put, and "
+                                 "the along-axis outward push at the dead end still knocks the cart off the "
+                                 "rail end (t863 push-off preserved, direction = rail-axis sign)";
+            // 清场
+            carts.clearAll();
+            for (int i = -3; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
     //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；
