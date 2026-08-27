@@ -925,7 +925,13 @@ private:
     //   其余 plains 候选带。t306 在 plains 候选带内用**第二条独立低频 fBm**（频率 0.020 + seed 偏移 +977，与主图
     //   解耦）把 forest 从草原里 carve 出来 → 森林成片分布、与草原无缝衔接（二者同振幅 amp 2 → 边界零高差无缝）。
     //   纯函数于 seed → 同 seed 同群系分布（含 forest/plains 划分）。
+    // t905 perf：本入口加列级 memo（m_biomeCache，见其声明注释）—— 群系图运行期不变，重复调用变 O(1)
+    //   数组读；fBm 判定本体移 biomeComputeAt（正名「计算路径」，纯函数于 seed 不变，§2-K 确定性无损）。
     Biome biomeAt(int x, int z) const;
+    // t905 perf：biomeAt 的 fBm 计算本体（原 biomeAt 函数体原样迁移，零语义变化）。最多 5 条 4 阶 fBm
+    //   （主群系图 + 丛林 + 森林 + 雪原 + 沼泽，每条 4 次 noise2）→ 单次 ~20 次 Perlin 采样。仅由
+    //   biomeAt 在 memo 未命中时调（worldgen generate 首遍全列填缓存后，运行期 tick 全命中）。
+    Biome biomeComputeAt(int x, int z) const;
     // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威；旧独立 fBm 实现已由 t274 biomeAt 统一）。
     //   供 generate（沙表层）/ placeTrees / placeTallGrass 跳过沙漠列。纯函数于 seed（经 biomeAt）。
     bool isDesert(int x, int z) const;
@@ -1217,6 +1223,14 @@ private:
 
     std::vector<int> m_perm;  // 512 置换表（Perlin）
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;
+    // t905 perf：群系列级 memo（W×D 扁平字节缓存，值 = Biome 枚举编码，0xFF = 未填）。根因：biomeAt 单次
+    //   调用最多 5 条 4 阶 fBm（~20 次 Perlin noise2），而 tickIceFreeze 每 5s 节流窗遍历全水格索引逐格调它
+    //   （biomeAt 还是首个判定 → 非雪原水格也全价支付 fBm 后才 continue）→ 用户 F3 实测 ice 桶 2.5ms/s 均摊
+    //   = 每 5s 一次 ~12ms 主线程尖峰的主源（水格越多越贵；增量索引 c282bc0 只砍了「全图扫描」，没砍
+    //   「每格的群系判定成本」）。群系运行期不变（纯函数于 seed，§2-K）→ 列级缓存语义等价：首次调用填值，
+    //   后续 O(1) 数组读。失效：generate()/beginLoad() 显式清（seed / 尺寸换新，与 m_iceCells 等索引同批）；
+    //   懒填充时尺寸自检（size 不匹配即整表重建）兜底任何漏清路径。mutable：biomeAt 是 const，缓存非语义。
+    mutable std::vector<quint8> m_biomeCache;
     // t729 最近要塞末地传送门中心格坐标（worldgen placeStronghold 放置处记录；全图至多一座要塞 / 一个传送门，
     //   t564「全图至多一个末地传送门」）。m_hasStronghold=false → 无要塞（世界未生成 / 空）→ 暗渊之眼掷出兜底
     //   不寻路。坐标语义 = 传送门房 12 框架环中心格：x=placeAt 的 cx（环 x 中心）、y=cy+4（地板 cy 之上门面 dy=4）、

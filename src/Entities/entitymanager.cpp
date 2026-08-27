@@ -4933,6 +4933,27 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     //   mobLoop − mobAI（见函数末尾 mobAI 桶注释）。手动 nowNs 比 RAII Scope 更轻（每实体 2× nowNs vs 2×
     //   Scope 构造析构含 map add）且能跨 continue。
     qint64 aiNs = 0;
+    // t905 perf mob 桶细分（phys = loop − ai 的 10.26ms/帧黑盒解剖）：mobHead / mobTail 两手动桶，靠
+    //   「下一实体迭代起点结清上一实体尾段」的跨迭代记账（循环内 continue 太多，逐段 RAII 包裹不可行）：
+    //   - segId=0（head）：迭代起点 → aiT0。覆盖非 Mob kind 分支（箭 / 雪球 / 落体 …）+ Mob 入块前置
+    //     （dead 倒计时 / 骑乘冻结 / 免疫清零）+ 空槽跳过。
+    //   - ai 段：aiT0 → aiNs 结算行（既有 aiNs 计时，不动）。
+    //   - segId=2（tail）：ai 结算行 → 下一迭代起点 / 循环尾。覆盖流推 / 红闪 / 环境音 / 走相 / 击退 /
+    //     滑流 / 窒息（节流帧）+ resting 复探 / 重力 / 落地扫描 + 循环尾（releaseSlot / flushPendingShots /
+    //     tickBreeding / emit）。
+    //   每活体迭代 2-3 次 nowNs（~25ns/次），空槽 1 次 —— 开销 << 观测对象（μs 级）。
+    qint64 headNs = 0, tailNs = 0;
+    qint64 segT0 = 0;  // 当前段起点（0 = 无未结清段）
+    int segId = -1;    // 0=head 1=ai（块内 continue 由结清点入 aiNs）2=tail
+    // t905 结清当前未结段（下一迭代起点 / 循环尾两处调）。
+    auto settleSeg = [&]() {
+        const qint64 now = FrameProfiler::nowNs();
+        if (segId == 0) headNs += now - segT0;
+        else if (segId == 1) aiNs += now - segT0;
+        else if (segId == 2) tailNs += now - segT0;
+        segT0 = 0;
+        segId = -1;
+    };
 
     // t321 玩家受击全局节流倒计时（每帧扣一次，非每实体；防多 mob 围攻秒杀，详见 kPlayerHitThrottle 注释）。
     if (m_playerHitCooldown > 0.0f) {
@@ -4941,6 +4962,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     }
 
     for (int idx = 0; idx < int(m_entities.size()); ++idx) {
+        // t905 mob 细分：先结清上一实体的未结段（head / ai / tail），本实体开 head 段。空槽 continue 亦计入
+        //   head（它们本就是 head 成本：47 槽里 33 空槽的逐槽跳过）。
+        settleSeg();
+        {
+            const qint64 now = FrameProfiler::nowNs();
+            segT0 = now;
+            segId = 0;
+        }
         Entity &e = m_entities[size_t(idx)];
         if (!e.alive) continue; // t256：跳过已释放的空槽（slot-reuse 残留位；不参与物理 / AI）
 
@@ -6218,6 +6247,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         // --- Mob（t239）---
         if (e.kind == Mob) {
             if (e.dead) {
+                // t905 状态直方图：dead 尸体（deathTimer 倒计时帧）。
+                FrameProfiler::instance()->count("mobStDead");
                 // 死亡态：冻结 AI / 重力 / 敌对攻击，仅 deathTimer 倒计时（给 QML 播侧倒动画 + 白烟窗口）+
                 //   hurtFlash 衰减（让 killing blow 的红闪自然褪去）。deathTimer≤0 → emit mobDied（掉落物，
                 //   t449 延迟到此刻）+ 标记移除（releaseSlot）。
@@ -6253,12 +6284,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   自然褪去）。dead 优先于本守卫（上文先判）。守卫只看 rideX 字段：对账释放（车被挖）发生在
             //   tickVehicleRiding → 下一 tick 本守卫自然放行（mob 恢复 AI），至多冻结一帧可忽略。
             if ((e.rideCart >= 0 && m_cartMgr) || (e.rideBoat >= 0 && m_boatMgr)) {
+                // t905 状态直方图：骑乘冻结（早退帧，AI/物理全停）。
+                FrameProfiler::instance()->count("mobStRide");
                 if (e.hurtFlash > 0.0f) {
                     e.hurtFlash -= float(dt);
                     if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; }
                 }
                 continue; // 骑乘态：AI / 重力 / resting / 击退 / jumpG / 流推 / 火 / 仙人掌 / 窒息全跳（防漂移）
             }
+            // t905 状态直方图：活体自由态（AI + 每帧物理照跑）。resting=静置（非 aiTick 帧 continue 早退），
+            //   非 resting=下落/水中（重力 + 落地扫描每帧跑）—— stF 高 = 振荡 / 悬空 mob 主吃尾段的判据。
+            FrameProfiler::instance()->count(e.resting ? "mobStRest" : "mobStFall");
 
             // t500 perf：mob AI / 环境扫描错峰节流 —— 每 kAiTickInterval 帧（按 idx 错峰）跑一次「火烧 / 仙人掌 /
             //   AI 决策 + 移动 / 窒息」重活，传 aiDt = 自上帧起的累积 dt → AI 速度 / 火伤 / 仙人掌扎伤 / 窒息 /
@@ -6289,7 +6325,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
 
             // t500 perf mob 子桶：mobAI 计时 —— 包裹整个 aiTick 块（火烧 / 仙人掌 / AI 决策移动 / 吃草）。
             //   非 aiTick 帧此块全跳过 → aiNs 不累（mobAI≈0）；aiTick 帧 aiNs 累入 mobAI 桶。
+            // t905 细分：aiT0 同时是 head 段的结清点（迭代起点→此处的 headNs 入账），ai 段开启。
             const qint64 aiT0 = FrameProfiler::nowNs();
+            if (segId == 0 && segT0 > 0) headNs += aiT0 - segT0;
+            segT0 = aiT0;
+            segId = 1; // ai 段进行中：块内 continue（如火伤致死早退）由下一迭代起点 / 循环尾结清入 aiNs
             if (aiTick) {
                 speedScale = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
                              ? kWaterSpeedMul : 1.0f;
@@ -6705,7 +6745,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 } // 非 squid 的 passive（sheep 吃草 / 通用 wander）；squid 走上面 aiSquid 分支
             }
             } // /aiTick（t500 perf：火烧 / 仙人掌 / AI / 吃草 节流到此；下方物理 + 音频每帧跑）
-            aiNs += FrameProfiler::nowNs() - aiT0; // t500 mob 子桶：mobAI 累入（含 aiTick 跳过的近零开销）
+            // t905 细分：ai 段在此结算（既有 aiNs 累计不动），同时开启 tail 段（ai 后每帧物理 → 下一迭代
+            //   起点 / 循环尾）。fire 烧死 continue（下方 e.dead 早退）等本块后的 continue 路径都落在 tail。
+            {
+                const qint64 aiEnd = FrameProfiler::nowNs();
+                aiNs += aiEnd - aiT0; // t500 mob 子桶：mobAI 累入（含 aiTick 跳过的近零开销）
+                segT0 = aiEnd;
+                segId = 2;
+            }
 
             // t298 流水推动 mob（机制等价玩家 t211：脚位在流水格 state>0 → 沿「离源方向」叠入水平位移）。
             //   流向据脚位 4 向邻居 state 梯度推算：state 低于脚位的邻居 = 近源方向 → 推力朝远离它（离源）。
@@ -7141,6 +7188,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         // t239 void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推/走离边界外无支撑）→ 标记移除（防永久下落）。
         if (e.kind == Mob && e.pos.y() < 0.0f) { toRemove.push_back(idx); dirty = true; }
     }
+    // t905 mob 细分：实体循环结束即结清最后一段（releaseSlot 起为独立 loopTail 段 —— emit entitiesChanged
+    //   的 QML delegate 扇出（47 槽 × ~12 revision 绑定 + 行走 mob 的 MobModel 几何重建）与逐实体物理是
+    //   两个不同成本中心，混在一个 tail 桶会互相掩盖）。
+    settleSeg();
+    const qint64 loopTailT0 = FrameProfiler::nowNs();
 
     // t256：移除的实体（着地 / 跌出的 FallingBlock + deathTimer 到 / void-loss 的 Mob）改 releaseSlot（标
     //   alive=false + 入 free list）替代 erase-shift —— 保 m_entities.size()（=count 属性 = QML Repeater
@@ -7171,7 +7223,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         ++m_revision;
         emit entitiesChanged();
     }
-
+    // t905 mob 细分：三桶 + loopTail（releaseSlot / flushPendingShots / tickBreeding / emit 扇出）入账
+    //   （mobHead / mobAI / mobTail / mobLoopTail 在 FrameProfiler report 的 mob 行细分展示）。
+    FrameProfiler::instance()->add("mobHead", headNs);
+    FrameProfiler::instance()->add("mobTail", tailNs);
+    FrameProfiler::instance()->add("mobLoopTail", FrameProfiler::nowNs() - loopTailT0);
     // t500 perf mob 子桶：mobAI 累入（mobPhys = mobLoop − mobAI 在 report 派生）。
     FrameProfiler::instance()->add("mobAI", aiNs);
 }

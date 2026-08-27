@@ -17425,6 +17425,69 @@ Item {
                              "resets its burnout state; lever NOT-gate rig, deterministic integer counters)";
     }
 
+    // ── t905 perf：群系 memo（World::biomeAt 列级缓存）契约探针 ──
+    // 背景：tickIceFreeze 每 5s 节流窗遍历全水格索引逐格调 biomeAt（单次最多 5 条 4 阶 fBm ~20 次
+    //   Perlin 采样）→ ice 桶 2.5ms/s 均摊尖峰的主源。修法 = 列级 memo（纯函数于 seed，运行期群系不变）。
+    // 本探针钉三契约：① 同世界两遍全图读一致（缓存暖后回读同值，不抖动）；② 换 seed 缓存失效
+    //   （regenerate 清缓存 → 新图生效，非旧缓存假阳性）；③ 同 seed 跨实例一致（memo 路径 == 纯计算
+    //   路径的确定性，§2-K 无损）。时序收益另行实测（perf 报告），此处只钉语义零回归。
+    {
+        qInfo().noquote() << "=== t905 perf probes (biome memo contract) ===";
+        World wA;
+        wA.setWidth(64);
+        wA.setDepth(64);
+        wA.setHeight(32);
+        wA.setSeed(4242); // 1337 → 4242：触发 regenerate（缓存清 + 新图）
+        QVector<int> pass1, pass2;
+        for (int z = 0; z < 64; ++z)
+            for (int x = 0; x < 64; ++x) pass1.push_back(wA.biomeIdAt(x, z)); // 首遍：冷缓存逐列回填
+        for (int z = 0; z < 64; ++z)
+            for (int x = 0; x < 64; ++x) pass2.push_back(wA.biomeIdAt(x, z)); // 二遍：全命中
+        const bool stable = pass1 == pass2;
+        wA.setSeed(999); // 4242 → 999：缓存失效点（generate 清）
+        QVector<int> pass3;
+        for (int z = 0; z < 64; ++z)
+            for (int x = 0; x < 64; ++x) pass3.push_back(wA.biomeIdAt(x, z));
+        const bool invalidated = pass3 != pass1; // 新 seed 必产新图（低频 fBm 全图重排，64×64 全同概率 ~0）
+        World wB; // 跨实例同 seed：memo 路径的确定性 == 独立世界纯计算路径
+        wB.setWidth(64);
+        wB.setDepth(64);
+        wB.setHeight(32);
+        wB.setSeed(999);
+        QVector<int> passB;
+        for (int z = 0; z < 64; ++z)
+            for (int x = 0; x < 64; ++x) passB.push_back(wB.biomeIdAt(x, z));
+        const bool crossInstance = pass3 == passB;
+        const bool okT905 = stable && invalidated && crossInstance;
+        if (!okT905)
+            qInfo().noquote() << "  [t905 diag] stable" << stable << "invalidated" << invalidated
+                              << "crossInstance" << crossInstance;
+        // 诊断（非断言，防机器快慢抖动）：64×64=4096 列全图冷（fBm 计算 + 回填）vs 暖（纯缓存读）耗时。
+        //   注意 generate 的逐列 worldgen 本身就会调 biomeAt 预热缓存（生产路径 tickIceFreeze 首窗即暖）——
+        //   要测真冷路径须 beginLoad（清缓存且不 worldgen）后首遍。
+        wB.beginLoad(999); // 网格零填 + 群系缓存清（seed 同值无妨：beginLoad 无条件清）
+        QElapsedTimer tCold2; tCold2.start();
+        for (int z = 0; z < 64; ++z)
+            for (int x = 0; x < 64; ++x) wB.biomeIdAt(x, z);
+        const qint64 nsCold = tCold2.nsecsElapsed();
+        QElapsedTimer tWarm2; tWarm2.start();
+        for (int z = 0; z < 64; ++z)
+            for (int x = 0; x < 64; ++x) wB.biomeIdAt(x, z);
+        const qint64 nsWarm = tWarm2.nsecsElapsed();
+        // 比值即 tickIceFreeze / 天气 / F3 等逐格调 biomeAt 路径的每格节省倍数（冷 = 修复前每窗每格成本）。
+        qInfo().noquote() << "  [t905 perf diag] biomeAt 4096 cols cold" << nsCold / 1000 << "us warm"
+                          << nsWarm / 1000 << "us ratio"
+                          << (nsWarm > 0 ? double(nsCold) / double(nsWarm) : -1.0);
+        if (!okT905) ++totalFail;
+        qInfo().noquote() << (okT905 ? "PASS" : "FAIL")
+                          << "| t905 biome memo: per-column cache in biomeAt returns identical values on "
+                             "cold and warm passes, is cleared on seed change (no stale-map false positives), "
+                             "and a seeded rebuild matches an independent same-seed world (memo path == pure "
+                             "fBm path determinism, PLAN 2-K intact; motivation: tickIceFreeze scans the "
+                             "water-cell index calling biomeAt per cell - 5 fbm chains x 4 noise octaves each "
+                             "was the dominant cost of the ice bucket hitch)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
