@@ -3,9 +3,10 @@ import QtQuick3D
 // t765/t797 书架→附魔台「文字」粒子流（呈现层；PLAN §2 分层 —— 只读 World 书架位，不反向写栅格）。
 //
 // 机制等价 MC 1.0 附魔台 glyph 粒子流的**常驻版**（t797 用户定稿）：只要游玩中，附魔台旁的有效书架就
-//   持续向台漂出**白色小字形**（透明底字形图集 × 纯白染色）：缓慢漂移（一程 ~2-4s）+ 途中线性渐隐 +
-//   到达书心即透明回收（到达即删）—— **不依赖附魔台 UI 开关**（旧 t765 仅开 UI 才播且面片过大「像
-//   爆炸」，两项均按用户报告重做）。附魔台 UI 打开时**所开台**的书架发射率加密（×uiBoost，交互反馈）。
+//   持续向台漂出**白色小字形**（透明底字形图集 × 纯白染色）：丝滑漂移（一程 ~1s，t915 提速）+ 飞行
+//   主体全显、末段渐隐 + 到达书心即透明回收（到达即删）—— **不依赖附魔台 UI 开关**（旧 t765 仅开
+//   UI 才播且面片过大「像爆炸」，两项均按用户报告重做）。附魔台 UI 打开时**所开台**的书架发射率加密
+//   （×uiBoost，交互反馈）。t915 返修要点见下方可调常量段注（常驻/提速/字形态三面）。
 //
 // 与既有「符文」视觉的区别（防后人误删/误并）：
 // - t649 EnchantRunes.qml：常驻彩色**小立方**氛围漂流（t697 起常驻）—— 纯色立方、无字形贴图、只跟
@@ -18,9 +19,9 @@ import QtQuick3D
 // - 粒子 = "#Rectangle" 内建面片 + glyphs.png 4×4 字形图集（tools/build_glyph_sprites.py 程序原创字形，
 //   零 MC 资产）按格采样（Texture.scaleU/V=0.25 + positionU/V 选格，t489 flipbook 同 API）；每池元素独立
 //   材质/贴图 → 每颗随机字形；t797 起染色板改纯白系（用户「白色的文字就行」，透明底走 Blend）。
-// - 弹道 = 参数化飞行（start→书心 lerp + sinπt 轻弧 + 末端收敛横摆）：漂速 ~0.9 格/s → 一程 2-4s
-//   「缓慢漂向」；alpha = 前 12% 淡入 × (1-k) 线性渐隐 → t=1 恰落书心且已透明（到达即删，不与书页
-//   z-fight）；tick 内每颗面向相机 billboard（正对可读的文字面）。
+// - 弹道 = 参数化飞行（start→书心 lerp + sinπt 轻弧 + 末端收敛横摆）：t915 漂速 ~2.6 格/s → 一程
+//   ~1s「丝滑漂向」；alpha = 前 15% 淡入 × (k<0.7 全显 → 末 30% 线性归零) → t=1 恰落书心且已透明
+//   （到达即删，不与书页 z-fight）。tick 内每颗面向相机 billboard（正对可读的文字面）。
 // - 台×书架对枚举：tableModel（Main.qml 注入 enchantTablePositions 全图附魔台表 —— 事件驱动 + 读档
 //   重建 + 孤儿清理三重维护）逐台套 World::countBookshelvesAround 同规则（水平切比雪夫 ==2 环带 ×
 //   y/y+1 两层 + 半步格 Air；blockAt 只读，不加 World API —— t649 先例）。editRev / 台表 count /
@@ -29,7 +30,7 @@ import QtQuick3D
 // 性能红线（t724 粒子风暴前例）：① 无对（pairs 空）→ spawnTimer 停；在飞粒子由 tickTimer 推进至寿终
 //   （running 绑 active || liveCount>0 → 清空即全停，零常驻开销）；② 全局发射率上限 maxPerTick + 池硬
 //   上限 poolSize（满则静默丢，同 BlockParticles 模式）；③ 发射距离门 camEmitRangeSq：书架离相机
-//   >16 格的对不发射（远处看不见纯浪费）；④ 每书架低频 ~0.22/s（= 3-6s 一粒的随机常驻密度）。
+//   >16 格的对不发射（远处看不见纯浪费）；④ 每书架 ~0.55/s（15 书架满配 ~8 字/s 持续流，t915 提速）。
 //
 // 坐标空间：经 Main.qml glyphFlowLoader.onLoaded 领养进 particlesHost 锚点（t16：否则 Loader 加载的
 //   3D Node parent=null → 孤儿不渲染）。粒子坐标即世界坐标（书架格 / 台格中心）。
@@ -57,23 +58,31 @@ Node {
     property int editRev: 0
 
     // ---- 可调常量（性能红线：发射率/池上限/距离门防粒子风暴；集中在此便于调参） ----
-    readonly property int poolSize: 36          // 池硬上限：全局 ≤8/s × 最长寿命 4s ≈ 32 稳态 + 余量
-    readonly property real ratePerShelf: 0.22   // 每书架每秒字数（用户「3-6s 一粒」→ 低频常驻密度）
-    readonly property real uiBoost: 4.0         // 附魔台 UI 开时所开台书架的发射率倍率（加密反馈）
-    readonly property int maxPerTick: 4         // 单轮（500ms）发射上限 → 全局 ≤8/s 封顶
+    // t915 三面返修（用户：「平时看附魔台就要有文字飘入 · 很慢一点都不丝滑 · 看到的是小透明方块不是
+    //   文字」）：① 常驻链路 t797 起已在（active=playing 不依赖 UI 开——用户看到的「附魔完成时小透明
+    //   方块」是 EnchantRunes 彩色小立方（另一路效果，两套并存）；② 丝滑提速 = 漂速 0.9→2.6 格/s、
+    //   寿命 1.8-4.0→0.7-1.5s、每书架 0.22→0.55 字/s（满 15 书架 ~8 字/s 持续流）；③ 字形态 =
+    //   面片 0.18-0.28→0.26-0.40 格 + 图集笔画 1px→2px（tools/build_glyph_sprites.py t915 加粗）+
+    //   渐隐律改「前 70% 全显 → 末 30% 线性归零」（旧 min(1,k/0.12)×(1-k) 全程衰减，中段 alpha 仅
+    //   ~0.5 × 1px 细笔画 = 过滤后亚像素淡影 = 「小透明方块」观感的渲染侧根因）。
+    readonly property int poolSize: 48          // 池硬上限：~8/s × 最长寿命 1.5s ≈ 12 稳态 + 迸发余量
+    readonly property real ratePerShelf: 0.55   // 每书架每秒字数（15 书架 ~8/s 持续文字流）
+    readonly property real uiBoost: 4.0         // 附魔台 UI 开时所开台书架的发射率倍率（加密反馈；受 maxPerTick 封顶）
+    readonly property int maxPerTick: 5         // 单轮（500ms）发射上限 → 全局 ≤10/s 封顶
     readonly property real camEmitRangeSq: 256  // 发射距离门 16²（格²）：书架离相机超此距不发射
-    readonly property real driftSpeed: 0.9      // 漂移速度（格/s）：2-3 格书架 → 一程 ~2-4s 缓慢漂向
-    readonly property real flightLifeMin: 1.8   // 寿命钳制（近书架防闪瞬、远书架防拖尾过久）
-    readonly property real flightLifeMax: 4.0
-    readonly property real arcHeight: 0.20      // 弧线峰值（慢漂下的轻拱，不夺目）
-    // 字形面片边长（格）：t873 标定。#Rectangle 内建面片基尺寸是 **100×100 单位**（实测 scale 0.07 →
-    //   7.005 格宽 = 0.07×100，非 1×1）—— 下方池模板 scale 已 ÷100，本组数值即真实「格」数。历史：
-    //   t765 旧值 0.10-0.16 直乘 100 基 = 10-16 格宽「像爆炸」；t797 缩到 0.055-0.085 仍直乘 = 5.5-8.5
-    //   格白幕（两轮都治不好的真因）。÷100 后 0.055-0.085 实测在 5-8 格视距下笔画 ~0.5px **亚像素不
-    //   可见**（探针像素级实证），故按可读性重标定为 0.18-0.28（18-28px @ 7 格视距、笔画 1.5-2px，
-    //   机制对标 MC 字形粒子 ~1/4 格的白字）。
-    readonly property real glyphScaleMin: 0.18
-    readonly property real glyphScaleMax: 0.28
+    readonly property real driftSpeed: 2.6      // 漂移速度（格/s）：2-3 格书架 → 一程 ~1s 丝滑漂入
+    readonly property real flightLifeMin: 0.7   // 寿命钳制（近书架防闪瞬、远书架防拖尾过久）
+    readonly property real flightLifeMax: 1.5
+    readonly property real arcHeight: 0.12      // 弧线峰值（快漂下轻拱不夺目）
+    // 字形面片边长（格）：t873 标定 + t915 放大。#Rectangle 内建面片基尺寸是 **100×100 单位**（实测
+    //   scale 0.07 → 7.005 格宽 = 0.07×100，非 1×1）—— 下方池模板 scale 已 ÷100，本组数值即真实
+    //   「格」数。历史：t765 旧值 0.10-0.16 直乘 100 基 = 10-16 格宽「像爆炸」；t797 缩到 0.055-0.085
+    //   仍直乘 = 5.5-8.5 格白幕（两轮都治不好的真因）。÷100 后 t873 标定 0.18-0.28——探针像素级实证
+    //   笔画亚像素不可见（1px 笔画 @ 5-8 格视距过滤后只剩淡影，读作「小透明方块」）；t915 连图集加粗
+    //   （笔画 2px）一起放大到 0.26-0.40（机制对标 MC 字形粒子 ~1/4-2/5 格的白字，5 格视距笔画 2-3px
+    //   可辨「是字」）。
+    readonly property real glyphScaleMin: 0.26
+    readonly property real glyphScaleMax: 0.40
 
     // 字形染色板：t797 用户定稿「白色的文字」—— 纯白为主 + 极轻冷调抖动（近白字形相乘仍读作白）。
     readonly property var tintColors: ["#ffffff", "#f4f6ff", "#e9eeff"]
@@ -182,9 +191,10 @@ Node {
             n = Math.min(n, root.maxPerTick)
             for (let i = 0; i < n; i++) root.spawnGlyph(near)
             // t873 自检：发射节拍采样（每 ~8s 一行，不逐轮刷屏）：近处对数 / 期望值 / 实发 / 累计 ——
-            //   want>0 而 spawn=0 = 池满；want=0 = 距离门全剔或速率归零。
+            //   want>0 而 spawn=0 = 池满；want=0 = 距离门全剔或速率归零。review26 #23 同口径：常态零日志
+            //   （--verbose-glyphs 才落；生产路径噪声清零）。
             root.tickSample++
-            if (root.tickSample % 16 === 1)
+            if (root.debugSelfCheck && root.tickSample % 16 === 1)
                 console.info("[t873] spawn tick: nearPairs=" + near.length + " want=" + want.toFixed(2)
                              + " spawned=" + n + " totalEmitted=" + root.emittedTotal
                              + " poolFree=" + (root.poolSize - liveCount))
@@ -193,7 +203,7 @@ Node {
 
     // 从随机近处对 spawn 一颗白色小字形：起点 = 书架格中心朝台侧偏移（从书架「怀里」冒出），终点 =
     //   所属台上悬浮书心（t796 ① 书心 0.82→0.95 抬升同步：台格中心 +0.95，对齐 bookDelegate 书心
-    //   y+0.95±bob0.035）；寿命 = 距离/漂速钳制 → 一程 ~2-4s，t=1 恰落书心且 alpha 已线性归零。
+    //   y+0.95±bob0.035）；寿命 = 距离/漂速钳制 → 一程 ~1s（t915 提速），t=1 恰落书心且 alpha 已归零。
     function spawnGlyph(list) {
         if (list.length === 0) return
         const c = list[Math.floor(Math.random() * list.length)]
@@ -239,11 +249,12 @@ Node {
         // 池满：静默丢（同 BlockParticles / EnchantRunes 模式，不 new 不阻塞）。
     }
 
-    // 弹道推进 Timer（~50fps）：参数化飞行 + 正弦轻弧 + billboard 朝相机 + 前 12% 淡入 × (1-k) 全程
-    //   线性渐隐（t797「途中缓慢变透明」）；t≥1 落书心已全透明即回收（到达即删）。running 绑
-    //   (active || liveCount>0) && worldRunning —— active 翻假后在飞颗粒放完即全停（零常驻）；
-    //   review26 #11：硬暂停亦冻结（在飞字形停在中途，恢复时自然续飞——比「暂停期继续飞完」更贴
-    //   MC Java 单机 ESC 粒子冻结；暂停叠层遮住世界，冻结不可见无观感代价）。
+    // 弹道推进 Timer（~50fps）：参数化飞行 + 正弦轻弧 + billboard 朝相机 + 前 15% 淡入 ×（前 70% 全显
+    //   → 末 30% 线性归零）渐隐律（t915：旧 min(1,k/0.12)×(1-k) 全程衰减令中段 alpha ~0.5，细笔画过滤后
+    //   读作半透明小方块；全显段保证飞行主体可辨「是字」，末段渐隐仍不与书页 z-fight）；t≥1 落书心已全
+    //   透明即回收（到达即删）。running 绑 (active || liveCount>0) && worldRunning —— active 翻假后在飞
+    //   颗粒放完即全停（零常驻）；review26 #11：硬暂停亦冻结（在飞字形停在中途，恢复时自然续飞——比
+    //   「暂停期继续飞完」更贴 MC Java 单机 ESC 粒子冻结；暂停叠层遮住世界，冻结不可见无观感代价）。
     Timer {
         id: tickTimer
         interval: 20
@@ -270,9 +281,10 @@ Node {
                 m.px = p.sx + (p.ex - p.sx) * k + swayA
                 m.py = p.sy + (p.ey - p.sy) * k + Math.sin(Math.PI * k) * p.arc
                 m.pz = p.sz + (p.ez - p.sz) * k + Math.cos(p.swayPhase + k * 6.0) * 0.04 * (1.0 - k)
-                // t797 渐隐律：前 12% 淡入 × (1-k) 线性渐隐 —— 全程缓慢变透明，t=1 在书心处恰归零
-                //   （到达即删，不与书页面 z-fight）。
-                m.glyphOpacity = Math.min(1.0, k / 0.12) * (1.0 - k)
+                // t915 渐隐律：前 15% 淡入 ×（k<0.7 全显 1.0 → 末 30% 线性归零）—— 飞行主体全显可辨
+                //   （旧全程 (1-k) 衰减 = 中段半透明 × 细笔画 = 「小透明方块」根因的渲染侧半边），
+                //   t=1 在书心处恰归零（到达即删，不与书页面 z-fight）。
+                m.glyphOpacity = Math.min(1.0, k / 0.15) * (k < 0.7 ? 1.0 : (1.0 - k) / 0.3)
                 // billboard：面片 +Z 朝相机（yaw=atan2(dx,dz)；pitch=-atan2(dy,水平距)，+Z 上仰为负角）。
                 //   camNode 未注入时保持 spawn 位姿（兜底：朝台飞行方向附近仍大致可读）。
                 if (camPos) {
