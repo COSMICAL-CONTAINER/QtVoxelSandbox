@@ -17796,9 +17796,11 @@ Item {
                && m13.count(QStringLiteral("weatherLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })")) == 1
                && m13.count(QStringLiteral("ambientLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })")) == 1;
         // 书 bob / 刷怪笼自旋 + 浮沉三处无限循环动画 gate；flutter 声明式互斥（含暂停门）。
+        //   t914 契约更新：flutter 的 running 在暂停门上**追加** bookOpen 门（书本开合返修——合拢态
+        //   不翻页；worldRunning 暂停门保持在前，语义不变）。
         ok13 = ok13
                && m13.count(QStringLiteral("running: window.worldRunning; loops: Animation.Infinite")) == 3
-               && m13.contains(QStringLiteral("running: window.worldRunning && !pageFlipAnim.running; loops: Animation.Infinite"));
+               && m13.contains(QStringLiteral("running: window.worldRunning && bookRoot.bookOpen && !pageFlipAnim.running; loops: Animation.Infinite"));
         // faceTimer（书朝向 10Hz）同口径 gate（pageFlipTimer 旁的漏网 Timer）。
         ok13 = ok13 && m13.count(QStringLiteral("running: window.worldRunning; repeat: true")) == 1;
         if (!ok13) ++totalFail;

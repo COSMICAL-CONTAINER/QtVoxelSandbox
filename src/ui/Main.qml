@@ -9138,6 +9138,20 @@ Window {
                 //   物，10Hz 转向肉眼已连续，且多附魔台同屏时省每帧 JS（同 t585 指南针 4Hz 节流先例）。
                 property real bookYaw: 0
                 eulerRotation: Qt.vector3d(0, bookYaw, 0)
+                // t914 书本开合（用户 t872「书本一直是打开的状态，并未合上」返修）：玩家靠近 4 格内
+                //   敞开（两页 V 形阅读态）/ 远离合拢（左页绕书脊翻扣到右页上方，封面朝上）——机制等价
+                //   MC 附魔台书随玩家接近翻开、走远合上。驱动并进 faceTimer（10Hz 已有玩家位读取，不加
+                //   Timer）；迟滞带 4.0/4.4 格防玩家在阈值附近来回触发开合抖动（角度动画 240ms 内反复
+                //   反转会读作「抽搐」）。合拢态细节：
+                //   - 左页 -22°→-178°（翻扣过书脊落右页上方，2° 残角防两薄盒共面 z-fight；近书脊交叠
+                //     区被书脊条遮住）；右页 +22°→+1°。
+                //   - 左页 piece 4（纸页镜像）→ piece 0（封面）：合拢过程与合拢态上面读作「封面」——
+                //   翻扣中的页片 ±Y 都是封面区（qrc 布局 0 两面同封面矩形 / pack 布局 1 上=左封下=右封），
+                //   与真实书「前封随翻动翻上来」一致；敞开恢复 piece 4 纸页（t796 ② 用户定稿）。
+                //   - 翻页片（flipPivot）与 flutter/大摆动画合拢期整体隐藏（合着的书不翻页）。
+                readonly property real bookOpenDist: 4.0   // 靠近敞开半径（dev-plan t914 口径：4 格内敞开）
+                readonly property real bookCloseDist: 4.4  // 远离合拢半径（迟滞上沿 > 敞开半径防抖）
+                property bool bookOpen: false
                 Timer {
                     id: faceTimer
                     interval: 100   // 10Hz 节流（机制等价 MC 附魔台书随玩家转向；不需每帧）
@@ -9150,6 +9164,13 @@ Window {
                         // 玩家恰在书心正上 → 保持原朝向（atan2(0,0)=0 会每拍跳回北，观感抖动）
                         if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01)
                             bookRoot.bookYaw = Math.atan2(dx, dz) * 180 / Math.PI
+                        // t914 开合判定：3D 距离（书悬浮位 y+0.95）+ 迟滞带（带内保持原态）。
+                        const dy = player.feetPosition.y - (bookRoot.cellY + 0.95)
+                        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+                        if (!bookRoot.bookOpen && dist <= bookRoot.bookOpenDist)
+                            bookRoot.bookOpen = true
+                        else if (bookRoot.bookOpen && dist > bookRoot.bookCloseDist)
+                            bookRoot.bookOpen = false
                     }
                 }
 
@@ -9180,20 +9201,35 @@ Window {
                         // 左页：绕书脊（Z 轴）外倾 -22°，页盒心 (-0.19, 0, 0)（内缘贴书脊）。
                         //   t796 ② EnchantBookBox piece 4（纸页镜像）：上面采纸页区镜像采样（u 翻转）——
                         //   旧 piece 0 采封面区令「一面书页一面书皮像翻完的书」（用户报告），现两页都是
-                        //   纸页且互为镜像（真开书左右页对称）；封面区不再出现在放置态书上，只留 item
-                        //   图标叠层（drawEnchantBookOverlay）用。页面符文 / 符章由贴图自带。
+                        //   纸页且互为镜像（真开书左右页对称）；封面区在**合拢态**回归（t914：bookOpen
+                        //   假 → piece 0 封面随翻扣翻上来，见 bookRoot.bookOpen 注释）。页面符文 / 符章
+                        //   由贴图自带。
+                        //   t914 开合动画：pageAngle 绑 bookOpen（敞开 -22° / 合拢 -178° 翻扣），Behavior
+                        //   240ms InOutQuad 平滑过渡（探针-实机第 N 例教训：状态门不接动画面 = 恒开恒合
+                        //   的「完全没有」观感；两态都真接进几何/材质才可目视）。
                         Node {
-                            rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: -22 }
+                            id: leftPageNode
+                            property real pageAngle: bookRoot.bookOpen ? -22 : -178
+                            Behavior on pageAngle {
+                                NumberAnimation { duration: 240; easing.type: Easing.InOutQuad }
+                            }
+                            rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: leftPageNode.pageAngle }
                             Model {
-                                geometry: EnchantBookBox { piece: 4; layout: bookPackHit ? 1 : 0 }
+                                geometry: EnchantBookBox { piece: bookRoot.bookOpen ? 4 : 0; layout: bookPackHit ? 1 : 0 }
                                 position: Qt.vector3d(-0.19, 0.0, 0.0)
                                 scale: Qt.vector3d(0.38, 0.022, 0.46)
                                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                             }
                         }
                         // 右页：镜像（+22°）。t732 piece 1（纸页）：上面采纸页区（qrc 右半符文行 / 包纸页叠）。
+                        //   t914 合拢 +1°（近平放；残角防与翻扣上的左页共面 z-fight）。
                         Node {
-                            rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: 22 }
+                            id: rightPageNode
+                            property real pageAngle: bookRoot.bookOpen ? 22 : 1
+                            Behavior on pageAngle {
+                                NumberAnimation { duration: 240; easing.type: Easing.InOutQuad }
+                            }
+                            rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: rightPageNode.pageAngle }
                             Model {
                                 geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
                                 position: Qt.vector3d(0.19, 0.0, 0.0)
@@ -9223,8 +9259,11 @@ Window {
                         //   静止观感不再是「只有 bob 上下浮动」，页片外缘反复翘离纸面再贴回（总角 22→36°，
                         //   页尖抬升 0.37·(sin36°−sin22°) ≈ 0.07 明显可辨），完整翻页（130° 大摆）仍由
                         //   pageFlipTimer 随机触发，两动画互斥（大摆期间 flutter 清零防过冲穿左页）。
+                        //   t914：bookOpen 假（合拢态）整片隐藏——合着的书不翻页（flutter/大摆两动画
+                        //   的 running 亦并 bookOpen 门，防隐藏期空转变量漂移）。
                         Node {
                             id: flipPivot
+                            visible: bookRoot.bookOpen
                             property real baseAngle: 22
                             property real flipAngle: 0.0
                             property real flutter: 0.0
@@ -9253,7 +9292,8 @@ Window {
                     interval: 1600
                     // review26 #11：世界内附魔书随机翻页 gate worldRunning——ESC 硬档书页停翻（世界锚定
                     //   视觉，MC 单机暂停冻结）；菜单态 delegate 不渲染（同翻书帧四 Timer 口径）。
-                    running: window.worldRunning
+                    //   t914：并 bookOpen 门（合拢态不翻页）。
+                    running: window.worldRunning && bookRoot.bookOpen
                     repeat: true
                     onTriggered: {
                         pageFlipAnim.restart()
@@ -9272,7 +9312,8 @@ Window {
                 //   摆完 running 条件翻转自动续摆（等效旧 restart）。
                 SequentialAnimation {
                     id: pageFlutterAnim
-                    running: window.worldRunning && !pageFlipAnim.running; loops: Animation.Infinite
+                    // t914：并 bookOpen 门（合拢态静息翻页同停；世界运行 + 敞开 + 非大摆三条件）。
+                    running: window.worldRunning && bookRoot.bookOpen && !pageFlipAnim.running; loops: Animation.Infinite
                     NumberAnimation { target: flipPivot; property: "flutter"; from: 0.0; to: 14.0; duration: 800; easing.type: Easing.InOutQuad }
                     NumberAnimation { target: flipPivot; property: "flutter"; from: 14.0; to: 0.0; duration: 900; easing.type: Easing.InOutQuad }
                 }
