@@ -10183,7 +10183,13 @@ int main(int argc, char *argv[])
             const QVector3D fa = carts.posAt(1);
             const bool okB = fa.x() < float(x0) + 1.0f                           // 滑回低平段（坡脚）
                 && std::fabs(fa.y() - (float(kRigY) + rideH)) < 0.02f            // 贴低平轨面停驻
-                && carts.posAt(0).x() > float(x0) + 1.9f;                        // B 仍在坡顶格（未被顶下山）
+                // t909② 语义适配：B（坡顶死端格停驻的挡路车）在新坡道物理下会**自然滚回坡下**
+                //（静置空车坡道自溜 —— 机制等价 MC 坡上的车不停驻；旧「B 仍在坡顶格」钉的是 t708
+                // 保守闸门时代的行为）。改钉：两车都活着、仍在 rig 轨段内、且分离 ≥0.85（A 的滑回
+                // 不是把 B 顶穿 / 顶飞下山——B 的位移是自重滚落，非 A 推挤穿透）。
+                && carts.aliveAt(0)
+                && carts.posAt(0).x() > float(x0) - 0.5f && carts.posAt(0).x() < float(x0) + 2.6f
+                && std::fabs(carts.posAt(0).x() - fa.x()) >= 0.85f;
             ok = ok && okA && okB;
             if (!ok)
                 qInfo().noquote() << "  t864 maxLift" << maxLift << "neverPassed" << neverPassed
@@ -10546,6 +10552,111 @@ int main(int argc, char *argv[])
             carts.clearAll();
             for (int i = -3; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
             for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
+    // ── t909 V 形动力永动探针（MinecartManager 直编；spec「V 底两格激活动力轨应无限往复 / 半山腰放置
+    //   应下坡运动 / 下坡初速与加速度加大」）──
+    //   rig：V 形 —— 底部两格激活动力轨（GoldenRail ×2 + 下方 RedstoneBlock 直供，t704 链传第二格）+
+    //   两侧各 4 格普通轨爬升（端格平顶死端）。断言四段：
+    //   (a) ② 半山腰放置（东坡中段）→ 初始即往**坡底**方向运动（旧版静止不动）；
+    //   (b) ③ 下坡 5 格内达最大速度：首段下滑的视速度（5 tick 窗平滑）≥9.0 且达速点累计水平位移 ≤4.5
+    //       格（v²=2ad → kCartSlopeKick 1.0 起步 ~2.5 格到 10；旧版恒速不加速恒到不了）；
+    //   (c) ① 底部往复不停驻：1500 tick（24s）内方向反转 ≥6 次（≥3 完整周期；停驻 / 飞出顶 = 反转不足）；
+    //   (d) 全程含留在 rig 内（x∈[x0-4.6, x0+5.6]，未飞出顶）+ Y 平滑（|Δy|/tick < 0.35，未坠落）。
+    {
+        // rig 选址：运行期扫描空区。需 12×1×4 净空（V 底 2 + 两坡 4+4 + 隔离边；高度 +5）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 6; xx + 5 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -5; dx <= 6 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 6 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t909 V perpetual rig: no clear rig area found";
+        } else {
+            // V 形：底 (x0,Y) (x0+1,Y) GoldenRail；东坡 (x0+2..x0+5) 逐格 +1（顶格平顶）；西坡镜像。
+            w.setBlock(x0, kRigY - 1, z0, BR::RedstoneBlock, 0); // 直供源（兼支撑）
+            w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::GoldenRail, 0);
+            for (int i = 1; i <= 4; ++i) {
+                w.setBlock(x0 + 1 + i, kRigY + i, z0, BR::Rail, 0); // 东坡（顶格 x0+5@Y+4 平顶）
+                w.setBlock(x0 - i, kRigY + i, z0, BR::Rail, 0);     // 西坡镜像
+            }
+            tickN(w, 8); // 电力重算：直供第一格 + t704 链传第二格
+            const bool poweredOk = (w.stateAt(x0, kRigY, z0) & BR::GoldenRailStateOnFlag) != 0
+                                && (w.stateAt(x0 + 1, kRigY, z0) & BR::GoldenRailStateOnFlag) != 0;
+            MinecartManager carts;
+            carts.spawnCart(x0 + 3, kRigY + 2, z0, &w); // ② 半山腰（东坡中段）
+            // 驱动 + 采样：5 tick 窗视速度 / 反向计数 / 含留 / Y 平滑。
+            bool downOk = false, inRig = true, ySmooth = true;
+            float vFirstFast = -1.0f, distAtFirstFast = -1.0f, vPeak = 0.0f;
+            float dist = 0.0f;
+            int reversals = 0, state = 0;
+            float accum = 0.0f, prevX = carts.posAt(0).x(), prevY = carts.posAt(0).y();
+            float xHist[6] = { prevX, prevX, prevX, prevX, prevX, prevX };
+            for (int t = 0; t < 1500; ++t) {
+                carts.tickPushedCarts(0.016f, &w);
+                const QVector3D p = carts.posAt(0);
+                const float dX = p.x() - prevX;
+                dist += std::fabs(dX);
+                // (a) ② 首段下行：起步 60 tick 内朝坡底（-X）累计 ≥0.3 格。
+                if (t < 60 && p.x() < float(x0 + 3) + 0.5f - 0.3f) downOk = true;
+                // (b) ③ 视速度（5 tick 窗）：**首次**达 9.0 的累计水平位移（全局峰在后续往复的
+                //     boost 入坡段出现，不钉首段）。
+                xHist[t % 6] = p.x();
+                if (t >= 6) {
+                    const float vApp = std::fabs(p.x() - xHist[(t + 1) % 6]) / 0.08f;
+                    if (vApp > vPeak) vPeak = vApp;
+                    if (vFirstFast < 0.0f && vApp >= 9.0f) {
+                        vFirstFast = vApp;
+                        distAtFirstFast = dist;
+                    }
+                }
+                // (c) ① 反向计数（0.3 格阈值去微抖）。
+                accum += dX;
+                if (state == 0) {
+                    if (accum > 0.3f) { state = 1; accum = 0.0f; }
+                    else if (accum < -0.3f) { state = -1; accum = 0.0f; }
+                } else if (state > 0 && accum < -0.3f) { ++reversals; state = -1; accum = 0.0f; }
+                else if (state < 0 && accum > 0.3f) { ++reversals; state = 1; accum = 0.0f; }
+                // (d) 含留 + Y 平滑。
+                if (p.x() < float(x0) - 4.6f || p.x() > float(x0) + 5.6f) inRig = false;
+                if (std::fabs(p.y() - prevY) > 0.35f) ySmooth = false;
+                prevX = p.x(); prevY = p.y();
+            }
+            const bool okA = downOk;                                   // ② 半山腰下坡起步
+            const bool okB = vFirstFast >= 9.0f && distAtFirstFast <= 4.5f; // ③ 5 格内达最大速度
+            const bool okC = reversals >= 6;                           // ① ≥3 完整往复周期
+            const bool ok = poweredOk && okA && okB && okC && inRig && ySmooth && carts.aliveAt(0);
+            if (!ok)
+                qInfo().noquote() << "  t909 powered" << poweredOk << "downhill" << okA
+                                  << "vFirstFast" << vFirstFast << "distAtFirstFast" << distAtFirstFast
+                                  << "vPeak" << vPeak << "reversals" << reversals << "inRig" << inRig
+                                  << "ySmooth" << ySmooth << "final" << carts.posAt(0);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t909 V perpetual rig: cart placed mid-slope rolls downhill immediately "
+                                 "(static-start gate yields on gradients), first descent reaches ~max slope "
+                                 "speed (9.0+) within 4.5 blocks (slope gravity accel g*sin45, old code "
+                                 "coasted at constant speed), and the two powered rails at the V bottom "
+                                 "sustain endless oscillation (>=6 direction reversals in 24s, no mid-slope "
+                                 "park, no crest launch, stays inside the rig)";
+            // 清场
+            carts.clearAll();
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            for (int i = 1; i <= 4; ++i) {
+                w.setBlock(x0 + 1 + i, kRigY + i, z0, BR::Air, 0);
+                w.setBlock(x0 - i, kRigY + i, z0, BR::Air, 0);
+            }
             tickN(w, 2);
         }
     }
