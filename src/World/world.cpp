@@ -2390,14 +2390,23 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     }
     // ④ 邻接方块：本格新放非 Air 方块 → 水平 4 邻任一为 Cactus 即「邻接方块」→ 该 Cactus 整柱掉落
     //   （机制等价 MC 1.0 仙人掌邻接任何方块即被扎破；覆盖玩家放沙旁 / 落沙落旁等非玩家放置路径）。
+    //   **t911 铁轨显式钉入非法邻面集**（spec「仙人掌旁放铁轨 → 仙人掌被破坏掉落；MC 语义：铁轨非仙人掌
+    //   合法邻面」）：铁轨 id 非 Air → 本分支天然覆盖（无需白名单 —— 非空即非法邻面），探针显式钉该
+    //   场景防回归；自动下矿车系统（仙人掌撞毁矿车 t866② ↔ 铁轨贴仙人掌破坏）由此闭合。
+    //   **t911 整柱口径修**：命中可能在柱**中段**（铁轨贴 2+ 高仙人掌的上层格）—— 旧版 dropCactusColumn
+    //   从命中层起只清上半（下半残留悬空柱 / 掉落不完整）。先下探柱基再整柱坍落。
     if (id != BlockRegistry::Air) {
         constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         for (const auto &d : kNb) {
             const int nx = x + d[0], nz = z + d[1];
             if (nx >= 0 && nz >= 0 && nx < m_width && nz < m_depth
                 && y >= 0 && y < m_height
-                && m_chunks.blockAt(nx, y, nz) == BlockRegistry::Cactus)
-                dropCactusColumn(nx, y, nz);
+                && m_chunks.blockAt(nx, y, nz) == BlockRegistry::Cactus) {
+                int baseY = y; // 下探柱基（柱中段命中 → 整柱从基座坍落）
+                while (baseY > 0 && m_chunks.blockAt(nx, baseY - 1, nz) == BlockRegistry::Cactus)
+                    --baseY;
+                dropCactusColumn(nx, baseY, nz);
+            }
         }
     }
 }
