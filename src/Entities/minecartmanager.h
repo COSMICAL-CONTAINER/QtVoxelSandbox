@@ -200,6 +200,11 @@ public:
     //   最大者；t809 前纯 wish 选向在 wish⊥轨轴时按枚举序破平局 → 拐角推车往返振荡「推不动」）；车无
     //   碰撞盒，推走即让出，不阻断玩家行走。无世界 / 无输入 / 无重叠 / 已滑行的车 → no-op。返 false = 未推动。
     //   由 PlayerController.step 走路分支调（wish = 玩家世界向移动意图）。
+    //   **t908 向量分解**（「轨上矿车被玩家身体/推动时只接受沿轨前后分量，横向推无效（不脱轨）」；身体
+    //   挤推 away 与走步 wish 两路同在本函数 → 一处分解两路同口径）：有定向轨（连接位非 0 / 孤轨轴偏好）
+    //   上的车，合成推向量先投影轨向 —— 选中连接向投影 < kCartPushProjMin（横推）→ no-op；死端推离方向
+    //   改轨轴符号向（旧合成主轴在斜推时落垂直向 = 侧向脱轨面）。无定向轨（state=0 孤轨）与地面车不
+    //   分解（任意向可推，review26 #14 / t863④ 既有语义）。
     bool pushEmptyCart(World *world, const QVector3D &playerFeet, float wishX, float wishZ);
 
     // t658 探测轨占用边沿收尾（t736 起由 updateDetectorRailOccupancy 末尾调）：prev（上一帧占用快照）− 本帧
@@ -389,6 +394,11 @@ private:
     // t708 ④ 推车判定重叠半径：玩家脚底中心与静止空矿车中心的水平距离 ≤ 0.8 视为「贴住可推」
     //   （≈ 玩家碰撞盒半宽 0.3 + 矿车 footprint 半宽 0.45 + 0.05 容差；同量级玩家站立占格半径 0.5）。
     static constexpr float kCartPushReach = 0.8f;
+    // t908 推车向量分解阈值：合成推向量在轨向（选中连接向 / 死端轨轴）上的投影 < 该值 → 视为横向推
+    //   （无沿轨前后分量）→ no-op（不推、不脱轨）。取值依据：三级合成的 dir 兜底项权重 0.25 —— 纯横推
+    //   （away+wish 皆垂直轨轴）的轴向投影恰 0.25 < 0.3 必被拦；away 只要 ~0.05 以上沿轨分量即放行
+    //   （真实斜挤不受影响）。拐角格两臂都属连接向集 → 沿垂直臂推照常选中（拐角推转弯保留）。
+    static constexpr float kCartPushProjMin = 0.3f;
     // t735 ② 生存矿车耐久击数（可承受的攻击次数；第 kCartHitPoints 击摧毁+掉落）。机制注：MC 1.0 矿车
     //   本是一击即毁，此为用户明确要求的多击耐久语义（可调：改小=更快毁）。创造模式不看它（单击即毁）。
     static constexpr int kCartHitPoints = 3;
