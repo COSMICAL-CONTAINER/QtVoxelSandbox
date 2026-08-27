@@ -16,6 +16,11 @@ Node {
     property var world: null
     property var player: null
 
+    // review27 #13（review26 #11 清点批漏网的 ParticleSystem3D 族）：硬暂停总闸——宿主注入
+    //   window.worldRunning（Qt.binding）。ESC 硬档雨雪停止发射 / 在飞粒子冻结（同 BlockParticles /
+    //   TorchSmoke / AmbientParticles 口径）；软档 GUI 开照常。
+    property bool worldRunning: false
+
     // 粒子云跟随玩家眼位（player.position = 眼位）。降水是「头顶落下的覆盖层」，跟随玩家移动始终笼罩。
     position: player ? player.position : Qt.vector3d(0, 0, 0)
 
@@ -34,7 +39,7 @@ Node {
 
     ParticleSystem3D {
         id: weatherSys
-        running: true
+        running: root.worldRunning
 
         // --- 雨（含雷态）：蓝灰小颗粒快速直落 ---
         ModelParticle3D {

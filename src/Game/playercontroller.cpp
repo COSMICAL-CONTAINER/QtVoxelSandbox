@@ -2739,7 +2739,8 @@ void PlayerController::sleepAdvanceToDawn()
     //   sleepLying 同步翻 false —— 补发 sleepingChanged 驱动 QML 重算（sleeping 本值未变，通知合法））。
     leaveBedTeleport();
     emit sleepingChanged();
-    // 离开 Settled（隐藏起床按钮）；fade/lie 保持满值（Waking 内从 1 渐降到 0）。
+    // 离开 Settled（隐藏起床按钮）；fade 保持满值（Waking 内从 1 渐降到 0）；lie 已在 leaveBedTeleport
+    //   清 0（review27 #8：站位眼位渐显，Waking 分支恒保持 0）。
     if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
 }
 
@@ -2835,9 +2836,11 @@ void PlayerController::updateSleep(float dt)
             fade = 1.0f; lie = 1.0f; settled = false; // sleepAdvanceToDawn 已发 sleepSettledChanged
         }
     } else if (m_sleepPhase == kSleepPhaseWaking) {
-        // Waking：fade/lie 1→0（平滑回显清晨 / 当前场景，spec「非瞬醒」）。
+        // Waking：fade 1→0（平滑回显清晨 / 当前场景，spec「非瞬醒」）。lie 恒 0（review27 #8）：出床
+        //   瞬移（leaveBedTeleport，Waking 入口）已清躺姿量——站位眼位渐显，不再按床顶基准沉降
+        //   （躺渐变只在入睡方向 Lying 0→1 使用）。
         const float t = clamp01(m_sleepPhaseTimer / kSleepWakeDur);
-        fade = 1.0f - t; lie = 1.0f - t; settled = false;
+        fade = 1.0f - t; lie = 0.0f; settled = false;
         if (m_sleepPhaseTimer >= kSleepWakeDur) {
             // fade 回显完毕 → 结束整个睡觉序列。
             cancelSleep(); // 瞬切 None + sleeping=false（fade 已 0，黑叠层随 sleeping=false 隐藏无跳变）
@@ -2890,7 +2893,8 @@ void PlayerController::wakeUpFromBed()
     leaveBedTeleport();
     emit sleepingChanged();
     if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
-    // fade/lie 保持满值（Waking 内从 1 渐降到 0）；不调 skipToDawn / 不设 spawn（区别于 sleepAdvanceToDawn）。
+    // fade 保持满值（Waking 内从 1 渐降到 0）；lie 已在 leaveBedTeleport 清 0（review27 #8，恒 0）；
+    // 不调 skipToDawn / 不设 spawn（区别于 sleepAdvanceToDawn）。
 }
 
 // t898 出床瞬移（MC 下床语义）：床头 / 床脚两格的水平 4 邻里按固定序（点击格先行、+X/-X/+Z/-Z）扫**首个
@@ -2901,6 +2905,11 @@ void PlayerController::leaveBedTeleport()
 {
     if (!m_world || m_sleepOutDone) return;
     m_sleepOutDone = true;
+    // review27 #8：出床即清躺姿量。相机躺偏移（-look×1.4 / Y−1.35）按「躺位在床顶」标定，而出床瞬移
+    //   已把 m_pos 换到床边地面（Y=by）——lie 若沿 Waking 1→0 渐降，渐显期眼位 = by+1.62−1.35·lie，
+    //   lie>0.44 即低于床顶（嵌床 / 嵌邻墙观感，t496 教训在新基准下的变体）。躺渐变只在入睡方向
+    //   （Lying 0→1）使用；Waking / 中断醒从站位眼位直接渐显（updateSleep Waking 分支同口径恒 0）。
+    if (m_sleepLie != 0.0f) { m_sleepLie = 0.0f; emit sleepLieChanged(); }
     static constexpr int kSideX[4] = { 1, -1, 0, 0 };
     static constexpr int kSideZ[4] = { 0, 0, 1, -1 };
     const quint8 bedState = m_world->stateAt(m_sleepBx, m_sleepBy, m_sleepBz);
@@ -7359,13 +7368,26 @@ void PlayerController::step(qreal dt)
         if (touchingLava) {
             m_fireTimer = EntityManager::kFireDuration; // 持续重燃（离开前 fireTimer 不衰减）；不动 m_fireDmgTimer（t351）
         }
+        // review27 #11 玩家侧水灭 / 雨灭（MC 1.0 语义：着火实体浸水 / 淋雨立即熄灭——t888 拿掉随机
+        //   熄灭后玩家侧无任何提前止损路径，着火必烧满 8s ~10.6HP）：水灭 = 脚位 / 眼位任一在水
+        //   （feetInWater / eyeInWater 既有谓词，涉水即灭）；雨灭 = World::rainExtinguishesAt（见天 +
+        //   列降水，与 mob 侧**同一判据单一权威**，眼位取头格）。灭后 burning 翻转走下方既有 emit 链。
+        // review27 #11 玩家侧水灭 / 雨灭（MC 1.0 语义：着火实体浸水 / 淋雨立即熄灭——t888 拿掉随机
+        //   熄灭后玩家侧无任何提前止损路径，着火必烧满 8s ~10.6HP）：水灭 = 脚位 / 眼位任一在水
+        //   （feetInWater / eyeInWater 既有谓词，涉水即灭）；雨灭 = World::rainExtinguishesAt（见天 +
+        //   列降水，与 mob 侧**同一判据单一权威**，眼位取头格）。灭后 burning 翻转走下方既有 emit 链。
+        if (m_fireTimer > 0.0f
+            && (feetInWater() || eyeInWater() || m_world->rainExtinguishesAt(fx, eyeY, fz))) {
+            m_fireTimer = 0.0f;
+            m_fireDmgTimer = 0.0f;
+        }
         if (m_fireTimer > 0.0f) {
             if (!touchingLava) m_fireTimer -= float(dt);
             m_fireDmgTimer += float(dt);
             if (m_fireDmgTimer >= EntityManager::kFireDamageInterval) {
                 m_fireDmgTimer -= EntityManager::kFireDamageInterval;
                 // 先掷随机提前熄灭（t888 起恒 0 = MC 常态火不自灭，掷骰退化为永假分支保留结构——
-                //   雨灭走 mob/世界侧独立路径；若未来接 Peaceful 难度再复用本口）。不熄才扣 1HP 火伤。
+                //   雨灭 / 水灭走上方 review27 #11 独立路径；若未来接 Peaceful 难度再复用本口）。不熄才扣 1HP 火伤。
                 if (QRandomGenerator::global()->generateDouble() < double(EntityManager::kFireExtinguishChance)) {
                     m_fireTimer = 0.0f;
                     m_fireDmgTimer = 0.0f;

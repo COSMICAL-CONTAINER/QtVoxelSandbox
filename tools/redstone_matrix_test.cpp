@@ -16695,6 +16695,423 @@ Item {
                              "skip the generic recheck and keep the wet/rain-guarded pair cleanup)";
     }
 
+    // ── review27-8 Waking 渐显期相机基准（行为级）──
+    //   相机躺偏移（-look×1.4 / Y−1.35）按床顶躺位标定，但 Waking 入口 leaveBedTeleport 已把 m_pos 瞬移
+    //   到床边地面（Y=by）——lie 若沿 Waking 1→0 渐降，渐显期眼位 = by+1.62−1.35·lie，lie>0.44 即低于
+    //   床顶（嵌床 / 嵌邻墙观感）。修法 = 出床瞬移单点清 lie + Waking 分支恒 0（躺渐变只在入睡方向
+    //   Lying 0→1 使用）。断言：(a) Lying 期 lie 如常 0→1 ramp（入睡方向保留）；(b) Settled 满 lie 后
+    //   wakeUpFromBed 进 Waking 瞬间 lie==0 而 fade 仍 1（旧版此刻 lie=1 渐降——正是沉床窗口）；
+    //   (c) Waking 中段 fade<0.5 时 lie 仍 0；(d) Lying 中断醒（wakeUp）后 lie==0。
+    //   captured 前置：updateSleep 只在 m_captured 路径跑（!captured 早 return 之前不到睡眠段）——
+    //   t891 的「挂窗 + grab」载体同款（headless 无指针锁）。
+    {
+        World wR8;
+        wR8.setWidth(48); wR8.setDepth(48); wR8.setHeight(96); wR8.setSeed(77);
+        WorldClock clockR8;
+        EntityManager entsR8; // 空管理器：hostileNearby 恒 false（怪物拒绝门不触发）
+        Hotbar hbR8;
+        PlayerController pcR8;
+        pcR8.setWorld(&wR8);
+        pcR8.setWorldClock(&clockR8);
+        pcR8.setEntityManager(&entsR8);
+        pcR8.setHotbar(&hbR8);
+        QQuickWindow probeWinR8;
+        pcR8.setParentItem(probeWinR8.contentItem());
+        pcR8.grab(); // m_window 就绪 → setCaptured(true) 走通（t891 同款；进程退出析构配对）
+        clockR8.setPhase(0.5f); // 子夜（skyLight<0.5 → isNight）
+        const auto pumpR8 = [&pcR8](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            pcR8.tick();
+        };
+        const int bx8 = 8, by8 = 84, bz8 = 8; // 工作体积净空 + 石地板 + 床（P-t898 同构：foot D=+X）
+        for (int dx = -2; dx <= 3; ++dx)
+            for (int dz = -1; dz <= 1; ++dz) {
+                for (int dy = 0; dy <= 3; ++dy) wR8.setBlock(bx8 + dx, by8 + dy, bz8 + dz, BR::Air, 0);
+                wR8.setBlock(bx8 + dx, by8 - 1, bz8 + dz, BR::Stone, 0);
+            }
+        wR8.setBlock(bx8, by8, bz8, BR::BedWhite, quint8(0));
+        wR8.setBlock(bx8 - 1, by8, bz8, BR::BedWhite, quint8(8));
+        // (a) Lying ramp：trySleepAt → 泵至 lie>0.5（kSleepLieDur=1s → ~35 拍 17ms 泵）。
+        pcR8.trySleepAt(bx8, by8, bz8);
+        for (int t = 0; t < 200 && pcR8.sleepLie() <= 0.5f; ++t) pumpR8(17);
+        const bool okA = pcR8.sleeping() && pcR8.sleepLying() && pcR8.sleepLie() > 0.5f;
+        // 进 Settled（满 lie=1 + 按钮窗口）再按钮醒 → Waking 入口。
+        for (int t = 0; t < 200 && !pcR8.sleepSettled(); ++t) pumpR8(17);
+        pcR8.wakeUpFromBed();
+        // (b) Waking 入口：lie 已清 0、fade 仍满值 1、sleeping 真、躺姿门假（站位眼位渐显）。
+        const bool okB = pcR8.sleeping() && !pcR8.sleepLying()
+                         && pcR8.sleepLie() == 0.0f && pcR8.sleepFade() == 1.0f;
+        // (c) Waking 中段：fade<0.5（kSleepWakeDur=0.8s 半程）时 lie 仍恒 0（旧版此处 lie≈0.5 沉床）。
+        for (int t = 0; t < 200 && pcR8.sleepFade() >= 0.5f; ++t) pumpR8(17);
+        const bool okC = pcR8.sleepFade() < 0.5f && pcR8.sleeping()
+                         && pcR8.sleepLie() == 0.0f;
+        // (d) 中断醒：再睡 → Lying ramp 到 lie>0.5 → wakeUp（cancelSleep 路径）→ lie==0。
+        for (int t = 0; t < 200 && pcR8.sleeping(); ++t) pumpR8(17); // Waking 走完自然收尾
+        clockR8.setPhase(0.5f);
+        pcR8.trySleepAt(bx8, by8, bz8);
+        for (int t = 0; t < 200 && pcR8.sleepLie() <= 0.5f; ++t) pumpR8(17);
+        pcR8.wakeUp();
+        const bool okD = !pcR8.sleeping() && !pcR8.sleepLying() && pcR8.sleepLie() == 0.0f;
+        const bool okR8 = okA && okB && okC && okD;
+        if (!okR8)
+            qInfo().noquote() << "  [review27-8 diag] okA" << okA << "okB" << okB
+                              << "okC" << okC << "okD" << okD
+                              << "lie" << pcR8.sleepLie() << "fade" << pcR8.sleepFade()
+                              << "sleeping" << pcR8.sleeping();
+        pcR8.release();
+        probeWinR8.deleteLater();
+        if (!okR8) ++totalFail;
+        qInfo().noquote() << (okR8 ? "PASS" : "FAIL")
+                          << "| review27-8 waking camera anchor: the lie camera offset is calibrated "
+                             "for the on-bed lying spot, but leaveBedTeleport has already moved m_pos "
+                             "to the bedside floor when Waking starts - so the lie amount is zeroed at "
+                             "the teleport (single point) and pinned to 0 through the whole Waking "
+                             "phase (fade still ramps 1->0); the lying ramp now only runs in the "
+                             "fall-asleep direction (Lying 0->1), so the fade-in eye never sinks into "
+                             "the bed or the wall behind it (lie>0.44 was below bed-top under the old "
+                             "1->0 wake ramp); interrupt-wake mid-Lying also reads lie==0";
+    }
+
+    // ── review27-9 掉落物附魔台「悬浮书」局部坐标（源码钉；纯视觉 headless 不可行为级）──
+    //   旧版 dropBookNode y=0.14（疑似 0.46×0.3 误做预缩放）被父级 Model scale 0.3 再乘 → 实际 0.042
+    //   < 台顶 0.1125，书整个埋进台体内部不可见。修法 = 与资源浏览器预览 / 放置态 bookDelegate 相同
+    //   局部坐标（书心 y=0.46、页 ±0.176、页 scale 0.38×0.03×0.46），父级 0.3 统一缩小、不做预缩放。
+    //   钉：Main.qml dropBookNode 切片含新坐标 + 不含旧坐标；ResourceBrowser etBookNode 同 y（两消费端
+    //   单一口径互钉）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        bool ok9 = true;
+        QString tMain;
+        {
+            QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+            tMain = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            const int i0 = tMain.indexOf(QStringLiteral("id: dropBookNode"));
+            const int i1 = tMain.indexOf(QStringLiteral("// t219"), i0);
+            if (i0 < 0 || i1 <= i0) {
+                ok9 = false;
+                qInfo().noquote() << "  [review27-9 diag] dropBookNode slice miss";
+            } else {
+                const QString slice = tMain.mid(i0, i1 - i0);
+                ok9 = ok9 && slice.contains(QStringLiteral("position: Qt.vector3d(0, 0.46, 0)"))
+                      && slice.count(QStringLiteral("position: Qt.vector3d(-0.176, 0.045, 0)")) == 1
+                      && slice.count(QStringLiteral("position: Qt.vector3d(0.176, 0.045, 0)")) == 1
+                      && slice.count(QStringLiteral("scale: Qt.vector3d(0.38, 0.03, 0.46)")) == 2;
+                // 负向钉：旧预缩放坐标不得残留（y=0.14 / 页 ±0.088 / 页 scale 0.19×0.03×0.23）。
+                ok9 = ok9 && !slice.contains(QStringLiteral("Qt.vector3d(0, 0.14, 0)"))
+                      && !slice.contains(QStringLiteral("0.088"))
+                      && !slice.contains(QStringLiteral("Qt.vector3d(0.19, 0.03, 0.23)"));
+            }
+        }
+        {
+            QFile rf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+            const QString t = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+            ok9 = ok9 && t.contains(QStringLiteral("id: etBookNode"))
+                      && t.contains(QStringLiteral("position: Qt.vector3d(0, 0.46, 0)"));
+        }
+        if (!ok9) ++totalFail;
+        qInfo().noquote() << (ok9 ? "PASS" : "FAIL")
+                          << "| review27-9 drop-item enchanting-table book visible: dropBookNode now "
+                             "uses the same local coordinates as the resource-browser preview and the "
+                             "placed-state delegate (book center y=0.46 above the 0.375 table top, "
+                             "pages at +/-0.176 scaled 0.38x0.03x0.46) - the parent Model's 0.3 scale "
+                             "shrinks everything uniformly, no manual pre-scale; the old y=0.14 "
+                             "(0.46x0.3 pre-scaled by mistake) got re-scaled to 0.042 world units, "
+                             "burying the book inside the opaque table body";
+    }
+
+    // ── review27-10 mob 侧站燃块顶（行为级：悬停不燃 / 落顶复燃——与玩家侧对称）──
+    //   mob 侧主扫描 yy 从 footY 起（Y 严格）恒不覆盖 footY-1 支撑格：站燃块顶唯一覆盖是 t843 中心列
+    //   行，且无 Y 界定 → 跳越 / 下落掠过燃块顶 <1 格误燃 8s。修法 = 站顶分支（XZ 足印覆盖列 + Y 界定
+    //   脚底贴支撑面 ±0.002）+ 中心列快速路径同款 Y 界定（玩家侧 review27 #3 口径）。rig：燃板正上 1×1
+    //   石井（禁 XZ 漂移，落点确定）；(a) 猪出生悬空 feet=板顶+1.0，慢 tick（dt 0.005×20）下落 <0.16 格
+    //   期间（覆盖 ≥5 个 aiTick）不燃——旧中心列行在此窗必燃（阴性回归钉）；(b) 常速 tick 落定板顶后复燃。
+    {
+        World wR10;
+        wR10.setWidth(48); wR10.setDepth(48); wR10.setHeight(96); wR10.setSeed(77);
+        EntityManager ents10;
+        const QVector3D farL10(-1000.0f, 10.0f, -1000.0f);
+        const int cx10 = 10, cy10 = 83, cz10 = 10; // 燃板格；seed 77 地形 ≤81 → 82+ 全空（review27-6 同款）
+        wR10.setBlock(cx10, cy10, cz10, BR::Planks, 0);
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz) {
+                if (dx == 0 && dz == 0) continue;
+                for (int dy = 1; dy <= 4; ++dy) wR10.setBlock(cx10 + dx, cy10 + dy, cz10 + dz, BR::Stone, 0); // 井壁
+            }
+        const bool lit10 = wR10.igniteFlammableAt(cx10, cy10, cz10)
+                           && wR10.isBurningAt(cx10, cy10, cz10);
+        const int pig10 = ents10.spawnMobTyped(cx10, cy10 + 2, cz10, EntityManager::MobPig,
+                                               QStringLiteral("#ee9999"), 20); // feet = 板顶 +1.0（悬空 1 格）
+        bool ok10 = lit10 && pig10 >= 0;
+        // (a) 悬停窗：慢 tick ×20（0.1s，落 <0.16 格；feet ∈ (板顶, 板顶+1) → footY-1 = 燃板但脚底未贴面）
+        //   → 不燃（Y 界定生效；旧版中心列行 footY-1 无 Y 校验在此窗点燃）。
+        if (pig10 >= 0) {
+            for (int t = 0; t < 20; ++t)
+                ents10.tick(0.005, &wR10, farL10, 0.3f, 1.8f, false);
+            ok10 = ok10 && !ents10.isBurningAt(pig10);
+            // (b) 落定复燃：常速 tick 至 resting（feet 贴板顶 ±snap 缝 ≤0.002）→ 站顶接触点燃。
+            bool ignited10 = false;
+            for (int t = 0; t < 80 && !ignited10; ++t) {
+                ents10.tick(0.05, &wR10, farL10, 0.3f, 1.8f, false);
+                ignited10 = ents10.isBurningAt(pig10);
+            }
+            ok10 = ok10 && ignited10;
+            if (!(ok10 && lit10))
+                qInfo().noquote() << "  [review27-10 diag] lit" << lit10
+                                  << "hoverBurn" << ents10.isBurningAt(pig10)
+                                  << "ignited" << ignited10
+                                  << "pos" << ents10.posAt(pig10).y();
+        }
+        if (!ok10) ++totalFail;
+        qInfo().noquote() << (ok10 ? "PASS" : "FAIL")
+                          << "| review27-10 mob stand-on-burning-top parity: the mob-side scan now "
+                             "carries the player-side stand-on branch (footprint columns of the "
+                             "support layer with the Y touch bound - feet within kTouchSkin of the "
+                             "support face) plus the same Y bound on the t843 center-column fast "
+                             "path, so a pig hovering inside the 1-block window above a burning "
+                             "plank top (jump-over/fall-through) stays unlit while landing back on "
+                             "the top ignites it (behavior mirrors the player side; the misleading "
+                             "'already redundant' comment is gone - the strict-Y main scan never "
+                             "covered the support layer)";
+    }
+
+    // ── review27-11 玩家水灭 / 雨灭（行为级；MC 1.0 着火实体浸水 / 淋雨立即熄灭）──
+    //   t888 拿掉随机熄灭后玩家侧无任何提前止损（注释谎称「雨灭走 mob/世界侧」）。修法 = 火段补水灭
+    //   （feetInWater/eyeInWater）+ 雨灭（World::rainExtinguishesAt 单一权威，与 mob 侧同判据）。
+    //   rig（seed 86 石地板，biome 扫 Plains 列——沙漠列恒 Clear 会假阴性）：(a) 站火点燃 → 撤火干燥
+    //   对照仍燃（防「任意 tick 熄灭」假阳性）→ 脚位格换水 → 熄；(b) 两 pc 同景（露天 / 头顶石檐），
+    //   撤火后强降雨 → 露天熄、檐下仍燃（雨灭谓词的见天半边隔离）。
+    {
+        World wR11;
+        wR11.setWidth(48); wR11.setDepth(48); wR11.setHeight(96); wR11.setSeed(86);
+        EntityManager ents11;
+        Hotbar hb11a, hb11b;
+        PlayerController pcA, pcB;
+        const QVector3D farL11(-1000.0f, 10.0f, -1000.0f);
+        const auto pump11 = [&](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        pcA.setWorld(&wR11); pcA.setEntityManager(&ents11); pcA.setHotbar(&hb11a);
+        pcB.setWorld(&wR11); pcB.setEntityManager(&ents11); pcB.setHotbar(&hb11b);
+        const int fy11 = 83;
+        // 选题：随全局天气的群系列（Plains 0 / Forest 3——跳过 Desert 恒晴 / Snowy 恒雪：后者降水恒真
+        //   会破「干燥对照仍燃」半边）。两列同 z=6、间隔 ≥4（同群系带，互不掺火/水）。
+        int xOpen = -1, xRoof = -1;
+        QString biomes11;
+        for (int x = 2; x <= 45; ++x) {
+            const int b = wR11.biomeIdAt(x, 6);
+            if (x < 10) biomes11 += QString::number(b);
+            if (b != 0 && b != 3) continue;
+            if (xOpen < 0) xOpen = x;
+            else if (xRoof < 0 && x >= xOpen + 4) { xRoof = x; break; }
+        }
+        bool ok11 = xOpen >= 2 && xRoof >= 2;
+        if (!ok11)
+            qInfo().noquote() << "  [review27-11 diag] biome scan miss xOpen" << xOpen
+                              << "xRoof" << xRoof << "row@z6 head" << biomes11;
+        if (ok11) {
+            for (int x : { xOpen, xRoof }) {
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        wR11.setBlock(x + dx, fy11, 6 + dz, BR::Stone, 0);      // 地板
+                        for (int dy = 1; dy <= 12; ++dy) wR11.setBlock(x + dx, fy11 + dy, 6 + dz, BR::Air, 0); // 净空到顶
+                    }
+            }
+            for (int dx = -1; dx <= 1; ++dx)                   // 檐：pcB 头顶 y=88 石盖（隔天空）
+                for (int dz = -1; dz <= 1; ++dz) wR11.setBlock(xRoof + dx, fy11 + 5, 6 + dz, BR::Stone, 0);
+            ok11 = ok11 && wR11.skyLightAt(xOpen, fy11 + 2, 6) >= 15
+                        && wR11.skyLightAt(xRoof, fy11 + 2, 6) < 15; // 见天半边 rig 自检
+            wR11.setBlock(xOpen, fy11 + 1, 6, BR::Fire, 0);
+            wR11.setBlock(xRoof, fy11 + 1, 6, BR::Fire, 0);
+            pcA.loadSavedState(xOpen + 0.5f, float(fy11 + 2), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+            pcB.loadSavedState(xRoof + 0.5f, float(fy11 + 2), 6.5f, -90.0f, -20.0f, 2);
+            bool litA11 = false, litB11 = false;
+            for (int t = 0; t < 40 && !(litA11 && litB11); ++t) {
+                pump11(17); ents11.tick(0.05, &wR11, farL11, 0.3f, 1.8f, false);
+                pcA.tick(); pcB.tick();
+                litA11 = pcA.burning(); litB11 = pcB.burning();
+            }
+            ok11 = ok11 && litA11 && litB11;
+            // 撤火 + 干燥对照：无火无水无雨 → 仍燃（防假阳性；余焰 8s 语义 t888 已钉）。
+            wR11.setBlock(xOpen, fy11 + 1, 6, BR::Air, 0);
+            wR11.setBlock(xRoof, fy11 + 1, 6, BR::Air, 0);
+            for (int t = 0; t < 6; ++t) {
+                pump11(17); ents11.tick(0.05, &wR11, farL11, 0.3f, 1.8f, false);
+                pcA.tick(); pcB.tick();
+            }
+            ok11 = ok11 && pcA.burning() && pcB.burning();
+            // (a) 水灭：pcA 脚位格置水（feetInWater）→ 数拍内熄。
+            wR11.setBlock(xOpen, fy11 + 1, 6, BR::Water, 0);
+            for (int t = 0; t < 6 && pcA.burning(); ++t) {
+                pump11(17); ents11.tick(0.05, &wR11, farL11, 0.3f, 1.8f, false);
+                pcA.tick();
+            }
+            ok11 = ok11 && !pcA.burning();
+            // (b) 雨灭：强降雨（Clear→雨/雪必翻，Thunder 回避雷击；review-g #5 (d) 同款）→ pcB 檐下仍燃、
+            //     pcA 已灭保持；再验露天新着火被雨即灭——pcB 移檐外不可（loadSavedState 清火）→ 用 pcA 复燃：
+            //     pcA 已在水中（会水灭）→ 改验「檐下 pcB 仍燃」即雨灭谓词的对照组（见天半边）。
+            bool precip11 = false;
+            for (int i = 0; i < 60 && !precip11; ++i) {
+                wR11.tickWeather(1.0e6);
+                const int st = wR11.weatherState();
+                precip11 = (st == 1 || st == 2);
+            }
+            for (int t = 0; t < 6; ++t) {
+                pump11(17); ents11.tick(0.05, &wR11, farL11, 0.3f, 1.8f, false);
+                pcB.tick();
+            }
+            ok11 = ok11 && precip11 && !pcA.burning() && pcB.burning(); // 檐下对照：雨不灭（不见天）
+            if (!ok11)
+                qInfo().noquote() << "  [review27-11 diag] xOpen" << xOpen << "xRoof" << xRoof
+                                  << "precip" << precip11 << "A(water)" << !pcA.burning()
+                                  << "B(roofed, still burning)" << pcB.burning();
+        }
+        pcA.clearStatusEffects();
+        pcB.clearStatusEffects();
+        if (!ok11) ++totalFail;
+        qInfo().noquote() << (ok11 ? "PASS" : "FAIL")
+                          << "| review27-11 player fire extinguish paths: the player fire segment now "
+                             "douses immediately when feet or eyes are in water and when the shared "
+                             "World::rainExtinguishesAt predicate hits (sky-exposed + precipitating "
+                             "column - the same single authority the mob side uses, replacing the "
+                             "misleading 'rain handled elsewhere' comment); dry control stays burning "
+                             "after the fire source is removed, the roofed control stays burning "
+                             "through the rain (sky half of the predicate isolated), and the t888 "
+                             "full-8s no-early-stop gap is closed for the player";
+    }
+
+    // ── review27-12 walkPhase 骑乘 / 死亡态归零（行为级 + 源码钉）──
+    //   骑乘态 / 死亡态在主循环 continue 早退，恒不达 t897 ② 归零块——行走中被放上矿车 / 被击杀的 mob
+    //   腿冻结半步相位（注释 / 提交信息却声称覆盖）。修法 = 登乘写链（矿车 / 船，清 moveSpeed 同位置）
+    //   与死亡翻转处顺带 walkPhase=stepAccum=0。断言：(a) 行走中（walkPhase≠0 瞬间）damageEntity 致死
+    //   → walkPhase==0；(b) 行走中 spawnCart 贴身 + tickVehicleRiding → 登乘（rideCartAt≥0）且
+    //   walkPhase==0；(c) 源码钉三写点。
+    {
+        World wR12;
+        wR12.setWidth(48); wR12.setDepth(48); wR12.setHeight(96); wR12.setSeed(77);
+        EntityManager ents12;
+        MinecartManager carts12;
+        ents12.setVehicleManagers(&carts12, nullptr);
+        const QVector3D farL12(-1000.0f, 10.0f, -1000.0f);
+        const int fy12 = 83;
+        for (int dx = -1; dx <= 6; ++dx)
+            for (int dz = -1; dz <= 1; ++dz) {
+                wR12.setBlock(10 + dx, fy12, 6 + dz, BR::Stone, 0);
+                for (int dy = 1; dy <= 4; ++dy) wR12.setBlock(10 + dx, fy12 + dy, 6 + dz, BR::Air, 0);
+            }
+        const auto pumpWalk12 = [&](int slot, int maxTicks) {
+            QElapsedTimer t; t.start();
+            for (int i = 0; i < maxTicks; ++i) {
+                while (t.elapsed() < 17 * (i + 1))
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                ents12.tick(0.05, &wR12, farL12, 0.3f, 1.8f, false);
+                if (ents12.walkPhaseAt(slot) != 0.0f) return true; // 行走相位推进中
+            }
+            return false;
+        };
+        // (a) 死亡翻转：行走中一击致死 → 相位即刻归零（尸体腿中立位）。
+        const int pigDead = ents12.spawnMobTyped(10, fy12 + 1, 6, EntityManager::MobPig,
+                                                 QStringLiteral("#ee9999"), 20);
+        bool okA12 = pigDead >= 0 && pumpWalk12(pigDead, 600);
+        if (okA12) {
+            ents12.damageEntity(pigDead, 9999);
+            okA12 = ents12.deadAt(pigDead) && ents12.walkPhaseAt(pigDead) == 0.0f;
+        }
+        // (b) 矿车登乘：行走中贴身生成矿车 + tickVehicleRiding（Pass C 登乘扫描）→ 归零。
+        const int pigRide = ents12.spawnMobTyped(14, fy12 + 1, 6, EntityManager::MobPig,
+                                                 QStringLiteral("#ee9999"), 20);
+        bool okB12 = pigRide >= 0 && pumpWalk12(pigRide, 600);
+        if (okB12) {
+            const QVector3D p12 = ents12.posAt(pigRide);
+            carts12.spawnCart(int(std::floor(p12.x())), int(std::floor(p12.y())), int(std::floor(p12.z())));
+            for (int t = 0; t < 3 && ents12.rideCartAt(pigRide) < 0; ++t)
+                ents12.tickVehicleRiding();
+            okB12 = ents12.rideCartAt(pigRide) >= 0 && ents12.walkPhaseAt(pigRide) == 0.0f;
+        }
+        // (c) 源码钉：三写点（死亡翻转 / 矿车登乘 / 船登乘）各自切片含 walkPhase=stepAccum=0。
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile ef12(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+        const QString t12 = ef12.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef12.readAll()) : QString();
+        auto sliceHas12 = [&t12](const QString &from, const QString &to) {
+            const int i0 = t12.indexOf(from);
+            const int i1 = t12.indexOf(to, i0);
+            return i0 >= 0 && i1 > i0
+                   && t12.mid(i0, i1 - i0).contains(QStringLiteral("e.walkPhase = 0.0f;"))
+                   && t12.mid(i0, i1 - i0).contains(QStringLiteral("e.stepAccum = 0.0f;"));
+        };
+        const bool okC12 = sliceHas12(QStringLiteral("e.dead = true;"), QStringLiteral("e.deathBurned"))
+                           && sliceHas12(QStringLiteral("m_cartMgr->seatMob(best, idx);"), QStringLiteral("continue;"))
+                           && sliceHas12(QStringLiteral("m_boatMgr->seatMob(best, bestSeat, idx);"), QStringLiteral("continue;"));
+        const bool okR12 = okA12 && okB12 && okC12;
+        if (!okR12)
+            qInfo().noquote() << "  [review27-12 diag] death" << okA12 << "ride" << okB12
+                              << "srcpin" << okC12;
+        if (!okR12) ++totalFail;
+        qInfo().noquote() << (okR12 ? "PASS" : "FAIL")
+                          << "| review27-12 walkPhase zeroing covers riding and death: both early-exit "
+                             "states never reach the t897 idle-reset block, so the mount write-sites "
+                             "(cart and boat boarding, next to the moveSpeed clear) and the death flip "
+                             "now zero walkPhase and stepAccum in place - a walking mob put into a "
+                             "minecart or killed mid-stride snaps its legs to neutral instead of "
+                             "freezing mid-step (the exact visual bug t897-2 claimed to have fixed); "
+                             "comments no longer claim the idle block covers them";
+    }
+
+    // ── review27-13 ParticleSystem3D 族 + 世界锚定动画暂停门（源码钉）──
+    //   review26 #11「全仓纯视觉 Timer 清点」漏网同族：TorchSmoke/AmbientParticles/WeatherParticles
+    //   三处 ParticleSystem3D.running 常开（ESC 硬档照发照飞）；同组件自相矛盾——附魔书 pageFlipTimer
+    //   被 gate 但书 bob / 静息 flutter 照跑；刷怪笼 mini-mob 自旋+浮沉未 gate。修法 = 三组件加
+    //   worldRunning 注入门（Loader.onLoaded 绑 window.worldRunning，BlockParticles 模式）+ 书 /
+    //   刷怪笼动画补 && window.worldRunning（flutter 与大摆互斥改声明式——命令式 stop/restart 会夺
+    //   running 绑定）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        bool ok13 = true;
+        // 三粒子组件：worldRunning 属性 + running 门 + 无残留 running: true。
+        for (const char *f : { "/src/ui/TorchSmoke.qml", "/src/ui/AmbientParticles.qml",
+                               "/src/ui/WeatherParticles.qml" }) {
+            QFile pf(root + QString::fromLatin1(f));
+            const QString t = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const bool thisOk = t.contains(QStringLiteral("property bool worldRunning: false"))
+                                && t.contains(QStringLiteral("running: root.worldRunning"))
+                                && !t.contains(QStringLiteral("running: true"));
+            if (!thisOk)
+                qInfo().noquote() << "  [review27-13 diag] particle file gate miss:" << f;
+            ok13 = ok13 && thisOk;
+        }
+        QFile mf13(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString m13 = mf13.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf13.readAll()) : QString();
+        // 三个 Loader 注入（Qt.binding → window.worldRunning）。
+        ok13 = ok13
+               && m13.count(QStringLiteral("smokeLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })")) == 1
+               && m13.count(QStringLiteral("weatherLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })")) == 1
+               && m13.count(QStringLiteral("ambientLoader.item.worldRunning = Qt.binding(function() { return window.worldRunning })")) == 1;
+        // 书 bob / 刷怪笼自旋 + 浮沉三处无限循环动画 gate；flutter 声明式互斥（含暂停门）。
+        ok13 = ok13
+               && m13.count(QStringLiteral("running: window.worldRunning; loops: Animation.Infinite")) == 3
+               && m13.contains(QStringLiteral("running: window.worldRunning && !pageFlipAnim.running; loops: Animation.Infinite"));
+        // faceTimer（书朝向 10Hz）同口径 gate（pageFlipTimer 旁的漏网 Timer）。
+        ok13 = ok13 && m13.count(QStringLiteral("running: window.worldRunning; repeat: true")) == 1;
+        if (!ok13) ++totalFail;
+        qInfo().noquote() << (ok13 ? "PASS" : "FAIL")
+                          << "| review27-13 particle systems and world-anchored animations under the "
+                             "pause gate: the three Particles3D-isolated components (torch smoke, "
+                             "ambient, weather) expose a worldRunning property bound through their "
+                             "Loaders to window.worldRunning (BlockParticles pattern) so ESC hard "
+                             "pause stops emission and freezes in-flight particles; the enchanting "
+                             "book bob/flutter, its facing timer and the spawner mini-mob spin/bob "
+                             "animations are gated the same way, with the flutter-vs-big-flip mutex "
+                             "made declarative (!pageFlipAnim.running) because imperative "
+                             "stop()/restart() calls would steal the running binding and re-open the "
+                             "pause gate";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -2210,6 +2210,11 @@ void EntityManager::damageEntity(int i, int amount)
         e.deathTimer = kDeathTime;
         e.wanderSpeed = 0.0f;
         e.moveSpeed = 0.0f;
+        // review27 #12：死亡翻转即归零行走相位（死亡态在 tick 主循环 continue 早退，恒不达下方 t897 ②
+        //   归零块——不在此清则行走中被击杀的 mob 尸体腿冻结半步相位）。stepAccum 同清（防残留半步
+        //   累加在（不可能的）复活瞬发鬼脚步；登乘写链同款）。
+        e.walkPhase = 0.0f;
+        e.stepAccum = 0.0f;
         // t344 burned = 致死时刻是否处于火烧态（fireTimer>0）：着火死亡掉熟肉（被动动物）。仅 fireTimer
         //   触发（日光 burning 仅敌对、不掉肉故不参与 cooked 判定）。t449 快照进 deathBurned 供延迟 emit 携带
         //   （dead 态 fireTimer 冻结，故与 expiry 复算等价；快照更稳）。
@@ -4827,9 +4832,13 @@ void EntityManager::tickVehicleRiding()
                 m_cartMgr->seatMob(best, idx);
                 e.rideCart = best;
                 e.rideBoat = -1;
-                // 姿态锁定：清行走驱动（walkPhase 冻结）+ 残余动量（击退 / 越障滑流 / 垂直速度），骑乘态
-                //   从静止位开始钉。resting 不动（钉位跳过 tick 物理段，不读它）。
+                // 姿态锁定：清行走驱动 + 残余动量（击退 / 越障滑流 / 垂直速度），骑乘态从静止位开始钉。
+                //   review27 #12：walkPhase/stepAccum 同处归零——骑乘态在 tick 主循环 continue 早退，恒
+                //   不达下方 t897 ② 归零块；不在此清则行走中被放上车的 mob 腿冻结半步相位（t897 ② 自称
+                //   修掉的观感 bug 在骑乘态残留）。resting 不动（钉位跳过 tick 物理段，不读它）。
                 e.moveSpeed = 0.0f;
+                e.walkPhase = 0.0f;
+                e.stepAccum = 0.0f;
                 e.vx = 0.0f; e.vz = 0.0f; e.vy = 0.0f;
                 e.jumpGX = 0.0f; e.jumpGZ = 0.0f;
                 dirty = true;
@@ -4855,7 +4864,10 @@ void EntityManager::tickVehicleRiding()
                 e.rideBoat = best;
                 e.rideBoatSeat = bestSeat;
                 e.rideCart = -1;
+                // review27 #12：同矿车登乘——walkPhase/stepAccum 归零（骑乘态早退不达 t897 ② 归零块）。
                 e.moveSpeed = 0.0f;
+                e.walkPhase = 0.0f;
+                e.stepAccum = 0.0f;
                 e.vx = 0.0f; e.vz = 0.0f; e.vy = 0.0f;
                 e.jumpGX = 0.0f; e.jumpGZ = 0.0f;
                 dirty = true;
@@ -6181,7 +6193,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
 
             // t811 载具骑乘态冻结：mob 坐上矿车/船后 AI / 物理 / 环境判定**全停**（不动不漂、姿态锁定 ——
-            //   登乘时已清 moveSpeed，walkPhase 冻结在中位）。位置钉载具座位由 tickVehicleRiding 负责
+            //   登乘时已清 moveSpeed + walkPhase/stepAccum 归零（review27 #12：腿回中立位，非冻结半步
+            //   相位）。位置钉载具座位由 tickVehicleRiding 负责
             //   （PlayerController 在载具物理之后调 → 同帧随车不滞后）。掉血 / 死亡照常：damageEntity 是
             //   外部路径（玩家攻击 / 箭 / 火）不经本循环，dead 翻 true 后走上文死亡分支 → 尸体 / 掉落留在
             //   载具处（spec「骑乘中被箭射死 → 尸体/掉落在载具处释放」）。仅保 hurtFlash 衰减（受击红闪
@@ -6261,6 +6274,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 const int fz = qFloor(e.pos.z());
                 const int footY = qFloor(e.pos.y() - e.halfH); // 脚位（AABB 底面）格
                 const int bodyY = qFloor(e.pos.y());           // 身体中心格
+                // 容差皮 ≫1e-4 snap 缝、≪半宽（玩家侧判据族同值；review27 #10 提升到火段共享——下方
+                //   AABB 扫描 / 站顶分支 / t843 中心列快速路径三处同值同口径）。
+                constexpr float kTouchSkin = 0.002f;
                 bool touchingLava = false;
                 // t724：火焰格（Fire）并入点燃判定 —— mob 脚位 / 身体格 == Fire 同样持续点燃（机制等价
                 //   MC 1.0 实体站火 / 穿火着火；与岩浆共用 t344 火烧推进链：余焰扣血 / 随机熄灭 / 熟肉掉落）。
@@ -6276,7 +6292,6 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   即接触；扫自身 XZ 覆盖格 + 正交 4 邻（侧壁贴走时燃烧格在邻格）。岩浆保持中心列判定不动
                 //   （流体接触语义 + 泡岩浆独立伤害链，防隔墙误燃）。
                 if (!touchingLava) {
-                    constexpr float kTouchSkin = 0.002f; // ≫1e-4 snap 缝、≪半宽（玩家侧判据族同值）
                     const float mMinX = e.pos.x() - e.halfW, mMaxX = e.pos.x() + e.halfW;
                     const float mMinZ = e.pos.z() - e.halfW, mMaxZ = e.pos.z() + e.halfW;
                     const float mMinY = e.pos.y() - e.halfH, mMaxY = e.pos.y() + e.halfH;
@@ -6308,10 +6323,32 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                             }
                         }
                     }
+                    // 站顶分支（review27 #10，玩家侧 review27 #3 同构——口径统一 / 行为对称）：mob 站燃烧
+                    //   方块顶面——主扫描 yy 从 footY 起恒不覆盖 footY-1 支撑格（Y 严格界定的固有边界），
+                    //   脚下支撑层按 XZ 足印覆盖列 + **Y 界定**（脚底贴支撑面 ±容差皮才算；腾空跳越 /
+                    //   下落掠过不误燃，与玩家侧跳越不点燃对称）复探。部分悬站（足印盖到燃块列而中心列
+                    //   不在其上）从此同玩家口径点燃——旧版只有 t843 中心列行覆盖站顶，行为不对称。
+                    if (!touchingLava && footY - 1 >= 0 && footY - 1 < world->height()) {
+                        const int supY = footY - 1;
+                        for (int cx = xLo; cx <= xHi && !touchingLava; ++cx) {
+                            if (cx < 0 || cx >= int(worldW)) continue;
+                            for (int cz = zLo; cz <= zHi && !touchingLava; ++cz) {
+                                if (cz < 0 || cz >= int(worldD)) continue;
+                                const quint8 nid = world->blockAt(cx, supY, cz);
+                                if ((nid == BlockRegistry::Fire || world->isBurningAt(cx, supY, cz))
+                                    && mMinY <= float(footY) + kTouchSkin) {
+                                    touchingLava = true; // 支撑面即火源 = 接触（站燃块顶必点燃）
+                                }
+                            }
+                        }
+                    }
                 }
-                // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值，玩家侧 step 同款三格
-                //   判定）。t888 后为**中心列快速路径**冗余（AABB 扫描已覆盖其语义；命中短路省全扫）。
-                if (footY - 1 >= 0 && world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
+                // t843：燃烧中的可燃方块并入接触点燃（World::isBurningAt 侧表真值）。三格判定现为**中心列
+                //   快速路径**（主扫描含 foot/body 自身格；站顶分支含脚下一格的足印覆盖列 ⊃ 中心列）——
+                //   命中即短路省全扫（语义等价，双保险）。review27 #10：脚下一格行补与站顶分支同款 Y 界定
+                //   （玩家侧 review27 #3 口径：脚底贴支撑面才算）——不补则 mob 跳越燃块顶经中心列复活误燃。
+                if (footY - 1 >= 0 && e.pos.y() - e.halfH <= float(footY) + kTouchSkin
+                    && world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
                 if (!touchingLava && footY >= 0 && world->isBurningAt(fx, footY, fz)) touchingLava = true;
                 if (!touchingLava && bodyY >= 0 && world->isBurningAt(fx, bodyY, fz)) touchingLava = true;
                 if (touchingLava) {
@@ -6324,15 +6361,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 // t385 雨灭 mob 火（spec「雨灭 mob 火」）：mob 直接见天（skyLightAt>=15 = 头顶无遮挡）且所在列
                 //   正降水（雨/雪/雷，群系解析；沙漠不降水）→ 立即灭火。机制等价 MC 雨水浇灭着火实体。
                 //   仅露天生效（树下/屋内不淋雨，火不灭）。与日光 burning 独立（fireTimer 适用于所有 Mob）。
-                if (e.fireTimer > 0.0f) {
-                    const bool mobSkyExposed = (fx >= 0 && fz >= 0 && fx < int(worldW) && fz < int(worldD)
-                                                && bodyY >= 0 && bodyY < world->height()
-                                                && world->skyLightAt(fx, bodyY, fz) >= 15);
-                    if (mobSkyExposed && world->isPrecipitatingAt(fx, fz)) {
-                        e.fireTimer = 0.0f;
-                        e.fireDamageTimer = 0.0f;
-                        dirty = true; // 熄火 → bump（QML 收火焰）
-                    }
+                //   review27 #11：判据抽到 World::rainExtinguishesAt（玩家 / mob 单一权威，玩家侧同批补
+                //   雨灭 / 水灭路径——此前玩家着火必烧满 8s 无提前止损）。
+                if (e.fireTimer > 0.0f && world->rainExtinguishesAt(fx, bodyY, fz)) {
+                    e.fireTimer = 0.0f;
+                    e.fireDamageTimer = 0.0f;
+                    dirty = true; // 熄火 → bump（QML 收火焰）
                 }
                 if (e.fireTimer > 0.0f) {
                     if (!touchingLava) e.fireTimer -= float(aiDt);
@@ -6704,9 +6738,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             }
 
             // t241 行走动画相位推进：moveSpeed>0（行走 / 被推）→ walkPhase 前进（fmod 2π，QML 据它驱动腿摆）；
-            //   **t897 ②：静止（idle / 吃草 / 撞墙 / 骑乘）→ walkPhase 归零**（腿回中立位）—— 旧「冻结于
+            //   **t897 ②：静止（idle / 吃草 / 撞墙）→ walkPhase 归零**（腿回中立位）—— 旧「冻结于
             //   上次相位」让停步的 mob 腿卡在半步中间（用户「静止卡住」）；归零 = QML walkPhase 0 的腿摆角 0
             //   （四腿站直，机制等价 MC 停步回正）。非零才清（已 0 的稳态 mob 零额外 dirty）。
+            //   review27 #12：**骑乘 / 死亡态恒不达本块**（主循环 continue 早退）——两者在登乘写链 /
+            //   死亡翻转处各自归零（walkPhase=stepAccum=0），本块只覆盖活体自由态静止。
             //   t250 mob 走路声：相位推进量同步累加进 stepAccum，每半步（π=一次脚落）听者范围内 emit mobStep
             //   （mobType + 脚下方块 id 供 AudioManager 按材质组选 step clip）。半步语义同 player QML 端
             //   「Δphase≥π 播一次脚步音」，搬进 C++ 避逐 mob 追踪 walkPhase（多 mob 在 QML 追踪不现实）。

@@ -41,8 +41,9 @@
 //     使模型 -Z 前）正对行走方向），逐轴（X 后 Z）做世界边界 clamp + 方块碰撞撤回（复用 mobAabbHitsSolid）。
 //     撞墙（两轴都未动）→ 缩短 timer 下帧大概率换向离开墙角。机制等价 MC passive mob 的「游荡 + 停驻」
 //     循环（随机选向 + 时间片），非确定性（生物 AI 非世界生成，不涉 §2-K）。
-//   - **t241 行走动画相位 walkPhase**：tick 内 moveSpeed>0（行走）时推进 walkPhase（fmod 2π）；idle / 吃草 /
-//     死亡 → **归零**（t897 ②：腿回中立位；旧「冻结于上次相位」让停步 mob 腿卡半步中间）。walkPhaseAt(i)
+//   - **t241 行走动画相位 walkPhase**：tick 内 moveSpeed>0（行走）时推进 walkPhase（fmod 2π）；idle / 吃草
+//     → **归零**（t897 ②：腿回中立位；旧「冻结于上次相位」让停步 mob 腿卡半步中间）；死亡 / 骑乘态在主循环
+//     早退前已各自归零（review27 #12：死亡翻转处 + 登乘写链处 walkPhase=stepAccum=0）。walkPhaseAt(i)
 //     供 QML 驱动 MobModel 腿摆（每 active 帧 bump revision 让绑定刷新；相位不变时 EntityManager 返回同一
 //     float → MobModel.setWalkPhase 早退不重建）。
 //   - **t241/t897 羊吃草 AI**（仅 mobType==MobSheep）：idle 且扫描冷却到 → 检测**脚下草方块**（自身列支撑格
