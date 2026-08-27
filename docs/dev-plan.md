@@ -3155,8 +3155,26 @@ t861-t903（43 项）。**建议顺序：t874/t875 铁砧+附魔台顽疾最高�
 
 ### 🅰 性能调研（t904-t906）⚠️ 用户点名先跑
 **t904** 帧耗时 residual 32.8ms 归因：frame 与 main/render 桶之间 32.8ms 未插桩——补插桩（Present/vsync 等待、QQuickWindow sync 未计入 qmlSync 的部分、事件循环、帧首尾空闲）逐项归因；产出根因报告（docs/test-reports/）+ 修复或登记。kill @e 后仍卡说明大头不在实体数。
+  > **调研完成，根因判定待复测**（9550a0d，报告 docs/test-reports/perf-investigation-2026-08-28.md）：插桩落地——
+  > main.cpp 四段 hook + F3 新 `frame2` 行（evA=QML 绑定/其它 Timer/空闲、waitSync=GUI 等渲染同步屏障、
+  > idleB=sync 后到 swap），构造上 residual≈evA+waitSync+idleB 全归因；菜单态验证 16.0=14.9+0.5+0.6 闭合。
+  > 旧快照可推硬事实：所有 ms/f 桶分母=tick 数，main\*46.6 ⇒ **tick 只 ~21 次/s（16ms 定时器被饿到 1/3）**、
+  > sim 聚合仅 ~235ms/s ⇒ 帧率非 sim 聚合 bound，~720ms/s 花在 tick/sync 之外。根因判定按报告判读树待用户复测 frame2。
 **t905** mob phys 10.26ms/帧解剖：14 活体 ~0.73ms/只异常——逐 mob 计时插桩定位到函数级；重点疑面（均为 R19.14/R19.15 新面）：supportTopYAt/collisionAABBsInto 脚位格豁免循环（review26 #1）每帧全盒表重扫、t863 derailed 每帧支撑复探、t866 checkCartEnvironment 帧级全车扫、t891 岩浆 ignite pass、t897 静止 walkPhase 归零链；冰 ice 2.5ms/帧同查（增量索引 c282bc0 之后 ice 扫描为何还贵）。
+  > **ice 部分 ✅✅ 修复**（b070a28）：根因=tickIceFreeze 每 5s 窗遍历全水格索引逐格调 biomeAt（5 条 4 阶 fBm
+  > ~20 次 Perlin ≈206ns/格，c282bc0 只消了全图扫描没消每格判定）→ biomeAt 列级 memo（矩阵实测 4096 列
+  > 冷 843µs/暖 6µs=**128×**；按快照反推 6 万水格 → ice 窗 12.5ms→预期 <1ms，F3 修后数字待复测）；
+  > 契约探针入矩阵（冷/暖一致 + 换 seed 失效 + 跨实例一致）325→326 PASS。
+  > **mob 部分调研完成（插桩落地），热点定位待复测**：ai 0.00 已排除 aiTick 族疑面（t890 火扫/仙人掌/
+  > wander 全在节流块）；新 [head/tail/ltail] 拆分 + st[R/F/V/D] 状态直方图——头号假设=ltail（emit
+  > entitiesChanged 的 47 槽 delegate 扇出，10.26×21tick≈215ms/s 与 3tick 一次 ~30ms 扇出均摊自洽），
+  > 次假设=st F 高的 resting↔下落振荡；复测定音（判读树见报告）。
 **t906** 同步 meshing 疑点：`threads: 0/0 (sync meshing)`——异步 mesh 线程池是否退化/未启用（chunkmanager 线程池状态、构建路径分支）；1.43M 顶点若同步重建直接吃主线程。核实 + 修或登记。
+  > **调研完成（核实非退化，无需修复）**：src/ 全树零线程原语（QThreadPool/QThread/QtConcurrent 均无）——
+  > 不存在可退化的池；ChunkManager 是纯容器，mesh 由 ChunkGeometry::onWorldChanged 同步直连槽驱动
+  > （F3 该串是 Main.qml 硬编码事实标签，已补注释钉死）。影响：稳态 0reb（快照 mesh 0.00）非持续掉帧因素；
+  > 重建以突发落 GUI（编辑 dirty / sun 量化步进 ~3.3s，t472 视距门控 + t383 精确标脏已限幅）。
+  > 异步 meshing 登记为架构级未来工作（chunkgeometry.h 不变量 B 形已为线程化保 move-only）。
 
 ### 🅱 矿车与铁轨（t907-t913）⚠️ 玩法阻塞
 **t907** 密闭单格 cart-cart 挤压飞穿：全封闭单格空间内矿车互挤，碰撞解析把车**飞出牢笼**（穿实体方块）——实体碰撞改硬约束（解析结果不得写车入实体格；冲量/位移钳制），任何弹射不得越实体墙。
