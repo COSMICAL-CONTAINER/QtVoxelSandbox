@@ -2707,10 +2707,18 @@ Window {
         // t622：第 7 参携实例名（铁砧改名物品丢弃；其余掉落不传 → 转发缺省空）。
         // t686：第 8 参携实例耐久（死亡掉落磨损工具；其余掉落不传 → undefined → 转发缺省 -1 → 拾取归满耐久）。
         function onSpawnItem(x, y, z, id, count, enchants, name, durability) { itemEntities.spawnItem(x, y, z, id, count, enchants, name, durability) }
+        // review26 #21 钓获 XP 直接入账（MC 1.0 钓鱼无经验球实体）：Game 层发 fishXpGained（t886 起随
+        //   spawnItemThrown 同帧）→ 路由 playerState.addXp（同 xpPickedUp 模式）+ 拾取音反馈。旧版球落
+        //   32 格外钓点纯磁吸不追人 = 「鱼到手 XP 留钓点」语义破碎，随 #21 退役。
+        function onFishXpGained(amount) {
+            playerState.addXp(amount)
+            audio.playPickup()
+        }
         // t401/t836/t886 钓获物：**t886 起掉落物实体在 Game 层 C++ 直调 spawnItemThrown 生成**（抛物解弹向
-        //   玩家中心 + 弹出点抬升出水面上空气格——浮水分支不吞弧线；发射器 / 投掷器 C++ 直调先例），经验球
-        //   同帧经 m_xpOrbManager 直调 spawnOrb（1-6 XP）。fishCaught 信号为**通知性**（矩阵探针 / 未来 UI），
-        //   本层不再转发 spawn——双重生成防线（旧 onFishCaught → spawnItemAt 转发随 t886 退役）。
+        //   玩家中心 + 弹出点抬升出水面上空气格——浮水分支不吞弧线；发射器 / 投掷器 C++ 直调先例）；XP 走
+        //   onFishXpGained 直接入账（review26 #21：MC 1.0 钓鱼无球——见上方路由）。fishCaught 信号为**通知性**
+        //   （矩阵探针 / 未来 UI），本层不再转发 spawn——双重生成防线（旧 onFishCaught → spawnItemAt 转发随
+        //   t886 退役）。
         // t61：挖掘过程粒子 —— 生存累积挖掘时每跨一阶，player 发 miningParticle（被挖方块坐标+id），
         // 转发到 BlockParticles.burstMine（复用破块碎屑 emitter / 色逻辑 / 重力，少量迸发，进度反馈）。
         // 破块完成时的 +30% 大迸发仍由 onBlockBroken → burstBreak 驱动（burstBreak 已在此任务内 +30%）。

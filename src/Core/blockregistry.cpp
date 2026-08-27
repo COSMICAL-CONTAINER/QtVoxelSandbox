@@ -1709,6 +1709,40 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
     //   y[0,0.1875] → 顶面行走（不变）。
     return shapeBoxes(def(blockId).shape, state);
 }
+
+// review26 #20 collisionAABBs 的免构建顶面镜像（声明见 .h）：分支序 / 特例表逐字对齐 collisionAABBs，
+//   只返回 cell-local maxY（无碰撞盒 → -1.0f）。各 shape 的 maxY：Slab 上/下半 1.0/0.5、Stairs 整步+背墙
+//   必有一段到 1.0、Fence 1.5（t801 视觉 1.0 但碰撞 1.5 不变）、Plate 1/16、Door 满高 1.0、Trapdoor 合
+//   0.1875 / 开 1.0、Bed kBedMattressTop、SnowLayer snowLayerHeight（state 驱动）、特例 LilyPad
+//   kLilyPadTop / Farmland 0.9375 / EnchantingTable 0.75 / 铁砧顶台满高 1.0 / Cactus 1.0。等价性由矩阵
+//   探针全 id × state 钉死（改形状只动一处 → 探针红）。
+float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
+{
+    if (blockId == LilyPad)
+        return kLilyPadTop;
+    if (!isCollidable(blockId, state)) return -1.0f;
+    if (blockId == Farmland)
+        return 0.9375f;
+    if (blockId == EnchantingTable)
+        return 0.75f;
+    if (isAnvil(blockId))
+        return 1.0f; // anvilShapeBoxes 顶砧台 y[10/16,1.0] 满高到格顶
+    if (blockId == Cactus)
+        return 1.0f;
+    switch (def(blockId).shape) {
+    case ShapeFull:     return 1.0f;
+    case ShapeNone:     return -1.0f;
+    case ShapeSlab:     return ((state & 1) != 0) ? 1.0f : 0.5f;
+    case ShapeStairs:   return 1.0f; // 整步 [0,0.5]+背墙 [0.5,1]（倒置镜像）恒有一段到 1.0
+    case ShapeFence:    return 1.5f;
+    case ShapePlate:    return 0.0625f;
+    case ShapeDoor:     return 1.0f;
+    case ShapeTrapdoor: return ((state & 1) != 0) ? 1.0f : 0.1875f;
+    case ShapeBed:      return kBedMattressTop;
+    case ShapeSnowLayer: return snowLayerHeight(state);
+    }
+    return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
+}
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 blockId, quint8 state)
 {
     // t639⑦ 耕地选中框贴合 0.9375（spec「耕地选中框应贴 0.9375 高度」）：与碰撞矮盒同源同盒

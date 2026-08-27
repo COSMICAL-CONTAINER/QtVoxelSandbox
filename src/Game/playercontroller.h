@@ -483,7 +483,8 @@ public:
     // t296 玩家受击击退（机制等价 MC 1.0 玩家被僵尸 / 箭 / 苦力怕爆炸击退 —— 命中后向被攻击方向小弹 + 水平推）。
     //   EntityManager.mobAttackedPlayer(amount, mobType, kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml
     //   Connections 据它调本方法。仅 Survival 生效（Creative/Spectator 无敌不弹；mobAttackedPlayer 经 t290 门控
-    //   本就只在 Survival 发，此处再守防御）+ 非死亡 + 已捕获（菜单态不弹）。kbX/kbZ 由 caller 归一（EntityManager
+    //   本就只在 Survival 发，此处再守防御）+ 非死亡（review26 #25：不再拦未捕获——软档 GUI 开 = 世界照跑，
+    //   伤害照扣击退照弹，Java 语义；硬暂停无攻击信号）。kbX/kbZ 由 caller 归一（EntityManager
     //   内已归一并兜底零向量）；本方法再防御性归一一次。水平击退写入独立冲量累加器 m_knockback 的 XZ（玩家 m_vel.x/z 每
     //   tick 被 wish 输入覆盖，无法存击退），step() 走路路径每帧指数衰减 + 叠入位移；垂直小跳 kHitKnockbackUp 直接写入
     //   m_vel.y（m_vel.y 不被 wish 覆盖、由重力 / 着地分支统一管，无需独立冲量 —— 旧版垂直亦入 m_knockback.y 致双重力吃掉
@@ -492,7 +493,8 @@ public:
     Q_INVOKABLE void applyHitKnockback(float dirX, float dirZ);
     // t635 铁傀儡重拳上抛（机制等价 MC 1.0 铁傀儡把玩家抛上天 —— 大垂直冲量 + 水平击退，落地摔伤）。
     //   EntityManager.golemLaunchedPlayer(kbX, kbZ) 携「欲推开玩家的水平单位方向」，Main.qml Connections
-    //   据它调本方法（与 onMobAttackedPlayer 的 applyHitKnockback 平行）。仅 Survival + 非死亡 + 已捕获生效。
+    //   据它调本方法（与 onMobAttackedPlayer 的 applyHitKnockback 平行）。仅 Survival + 非死亡生效
+    //   （review26 #25 连坐：不拦未捕获，同 applyHitKnockback）。
     //   垂直走 kGolemLaunchVy=16（峰值 16²/(2·28)≈4.6 格 > 3 格摔伤线 → 落回原位即 1..2 HP 摔落伤害，
     //   用户口径「打飞 4 格以上摔伤」）；同 applyHitKnockback 的 m_vel.y 直写模式（无双重力）。
     Q_INVOKABLE void applyGolemLaunch(float dirX, float dirZ);
@@ -700,8 +702,13 @@ signals:
     //   id + 数量 + 浮标 float 世界坐标 + 水平弹向（dirX/dirZ 归一，指向玩家）+ 弹速（= 抛物解 |v|，随距离
     //   自适应——近快远慢的可见弧）。**t886 起掉落物实体在 Game 层 C++ 直调 spawnItemThrown 生成**（t608 发射器
     //   / t542 投掷器先例——免 QML 信号往返、掉落物物理同一链）；本信号改为**通知性**（矩阵探针 / 未来 UI
-    //   消费，QML 不再转发 spawn——双重生成防线）。经验球同帧经 m_xpOrbManager 直调 spawnOrb（1-6 XP）。
+    //   消费，QML 不再转发 spawn——双重生成防线）。XP 走 fishXpGained 直接入账（review26 #21，见下方信号）。
     void fishCaught(int itemId, int count, float px, float py, float pz, float dirX, float dirZ, float speed);
+    // t886/review26 #21 钓获 XP 直接入账语义信号（1-6 XP）：MC 1.0 钓鱼经验**直接给玩家无经验球实体**
+    //   （区别于死亡 / 熔炉等落球路径）——获物飞到玩家手上、XP 却留在最远 32 格外钓点需涉水去吃（XpOrbManager
+    //   纯磁吸，玩家离开即到寿命消散）语义破碎。呈层 Connections 路由 playerState.addXp（同 xpPickedUp 模式：
+    //   Entities/Game 发语义事件、呈现层只消费）。**只在真正入账时发**（探针断言次数与量程）。
+    void fishXpGained(int amount);
     // t267 进食屑粒（持面包按住右键累积进食时每跨一节拍发一次）：携嘴部世界坐标（= 玩家眼位 position()，
     //   float 坐标非方块格 —— 进食屑粒从玩家嘴部迸发而非方块中心）。呈现层 Connections 转发到
     //   BlockParticles.burstEat 迸发少量屑粒（机制等价 MC 进食屑粒）。分层同 miningParticle。

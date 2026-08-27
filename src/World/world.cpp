@@ -550,7 +550,9 @@ std::vector<BlockRegistry::BlockAABB> World::collisionAABBsAt(int x, int y, int 
 // t865/t867 统一支撑顶面查询（头注释见 world.h）：碰撞 sub-AABB 真顶为单一权威 —— 整立方快路径
 //   （isFullCube 且非 Farmland/附魔台矮盒特例）零 AABB 构建；SnowLayer 按 state 真顶（与盒同源的快路径
 //   特例，免为薄层建盒）；其余（slab/stairs/fence/plate/door/trapdoor/bed/lily-pad/矮盒特例）走
-//   collisionAABBs 取最高盒 maxY；无碰撞格（轨/火把/花草/作物/火/水/岩浆）盒空 → -1 不承载。
+//   BlockRegistry::collisionTopY（review26 #20 起免构建镜像 —— 只取 maxY 标量不建 vector，resting 掉落物
+//   每帧两格窗复探在异形支撑上不再堆分配；等价性由矩阵探针钉死）；无碰撞格（轨/火把/花草/作物/火/水/岩浆）
+//   盒空 → -1 不承载。
 float World::supportTopYAt(int x, int y, int z) const
 {
     const quint8 id = m_chunks.blockAt(x, y, z);
@@ -560,9 +562,7 @@ float World::supportTopYAt(int x, int y, int z) const
     if (BlockRegistry::isFullCube(id) && id != BlockRegistry::Farmland
         && id != BlockRegistry::EnchantingTable)
         return float(y) + 1.0f;
-    float top = -1.0f;
-    for (const BlockRegistry::BlockAABB &b : BlockRegistry::collisionAABBs(id, m_chunks.stateAt(x, y, z)))
-        if (b.maxY > top) top = b.maxY;
+    const float top = BlockRegistry::collisionTopY(id, m_chunks.stateAt(x, y, z));
     return (top < 0.0f) ? -1.0f : float(y) + top;
 }
 
