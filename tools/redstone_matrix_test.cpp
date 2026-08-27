@@ -15609,7 +15609,8 @@ Item {
             if (fbD >= 0 && !ents.aliveAt(fbD)) downSettled = true;
         }
         const bool exemptOk = playerHits == 0 && downSettled
-                              && wL.blockAt(3, fy + 1, 6) == BR::Fire; // 坠地生火（地板上方来向格）
+                              && wL.blockAt(3, fy + 1, 6) == BR::Air   // review27 #14①：玩家自身格不再落火（朝脚下直射偏移出 AABB）
+                              && wL.blockAt(4, fy + 1, 6) == BR::Fire; // 落火偏移到不与玩家 AABB 相交的邻格（+X 候选首中）
         // 清场
         for (int x = 1; x <= 14; ++x)
             for (int z = 4; z <= 8; ++z)
@@ -16080,23 +16081,33 @@ Item {
         Hotbar hb;
         for (int s = 0; s < 9; ++s) hb.setStack(s, int(BR::Cobble), 32);
         for (int m = 0; m < hb.mainCount(); ++m) hb.mainSetStack(m, int(BR::Planks), 16);
+        // review27 #21①：盔甲 4 槽并入清空序列（armorSetStack 独立存储，旧版 shift 清空漏扫 = 残留）。
+        //   填充用真护甲 id 且部位对槽（armorSetStack 拒非护甲 / 部位不符——Glass 会被静默拒掉成假绿）。
+        for (int a = 0; a < 4; ++a)
+            hb.armorSetStack(a, RecipeRegistry::ArmorIdBase + a, 1);
         hb.setHeldBlock(int(BR::Glass));
         hb.setHeldCount(8);
-        // QML shift 分支同序清空序列（Inventory.qml 销毁槽 MouseArea onClicked ShiftModifier 支）。
+        // QML shift 分支同序清空序列（Inventory.qml 销毁槽 MouseArea onClicked ShiftModifier 支；
+        //   review27 #21① 后含盔甲四槽——合成格是 QML 本地态，由 review27-21 源码钉看守）。
         for (int s = 0; s < 9; ++s) hb.setStack(s, 0, 0);
         for (int m = 0; m < hb.mainCount(); ++m) hb.mainSetStack(m, 0, 0);
+        for (int a = 0; a < 4; ++a) hb.armorSetStack(a, 0, 0);
         hb.setHeldBlock(0);
         bool okA = hb.heldBlock() == 0 && hb.heldCount() == 0;
         for (int s = 0; s < 9 && okA; ++s)
             if (hb.blockIdAt(s) != 0 || hb.countAt(s) != 0) okA = false;
         for (int m = 0; m < hb.mainCount() && okA; ++m)
             if (hb.mainBlockIdAt(m) != 0 || hb.mainCountAt(m) != 0) okA = false;
+        for (int a = 0; a < 4 && okA; ++a)
+            if (hb.armorBlockIdAt(a) != 0 || hb.armorCountAt(a) != 0) okA = false;
         if (!okA)
             qInfo().noquote() << "  [t900 diag] held=" << hb.heldBlock()
-                              << " h0=" << hb.blockIdAt(0) << " m0=" << hb.mainBlockIdAt(0);
+                              << " h0=" << hb.blockIdAt(0) << " m0=" << hb.mainBlockIdAt(0)
+                              << " a0=" << hb.armorBlockIdAt(0);
 
         // (b) 源码钉（t879/t893 先例：断言销毁槽块的路由文本；锚定 destroyWrap 块而非全文件首
-        //     MouseArea——面板根遮罩自身也是 MouseArea）。
+        //     MouseArea——面板根遮罩自身也是 MouseArea）。review27 #21① 扩段后块跨度增长 → 窗口改
+        //     「tier② 行 + 60」动态收尾（普通左键档②是块内 onClicked 的末行，其后即 MouseArea 收口）。
         bool okPin = false;
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
@@ -16104,17 +16115,20 @@ Item {
             QFile qf(root + QStringLiteral("/src/ui/Inventory.qml"));
             const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
             const int i0 = t.indexOf(QStringLiteral("id: destroyWrap"));
-            if (i0 < 0) {
-                qInfo().noquote() << "  [t900 pin diag] destroyWrap block miss";
+            const int iTier2 = t.indexOf(
+                QStringLiteral("root.hotbar.setStack(root.hotbar.selectedSlot, 0, 0)"), i0);
+            if (i0 < 0 || iTier2 < 0) {
+                qInfo().noquote() << "  [t900 pin diag] destroyWrap block miss"
+                              << (i0 >= 0) << "tier2" << (iTier2 >= 0);
             } else {
-                const QString seg = t.mid(i0, 4000); // 销毁槽块（图标 Canvas + 注释 + 点击处理器全在内，实测
-                                                      //   跨度 ~3.7k 字符；注释未滤 → 负向断言用元素声明形
-                                                      //   「TapHandler {」防注释文本误中）
+                const QString seg = t.mid(i0, iTier2 - i0 + 60); // 销毁槽块（图标 Canvas + 注释 + 点击处理器；
+                                                                 //   负向断言用元素声明形「TapHandler {」防注释文本误中）
                 okPin = seg.contains(QStringLiteral("MouseArea"))                       // TapHandler 不分辨修饰键（t700）→ MouseArea
                         && seg.contains(QStringLiteral("mouse.modifiers & Qt.ShiftModifier")) // shift 分流分支
                         && seg.contains(QStringLiteral("root.hotbar.mainSetStack(m, 0, 0)"))   // main 27 槽清空
                         && seg.indexOf(QStringLiteral("setStack(s, 0, 0)"))
                                < seg.indexOf(QStringLiteral("mainSetStack(m, 0, 0)"))  // hotbar 9 槽先行
+                        && seg.contains(QStringLiteral("root.hotbar.armorSetStack(a, 0, 0)")) // review27 #21① 盔甲 4 槽
                         && seg.contains(QStringLiteral("root.hotbar.heldBlock = 0"))   // 光标清空 + 普通左键档①
                         && seg.contains(QStringLiteral("root.hotbar.setStack(root.hotbar.selectedSlot, 0, 0)")) // 档②
                         && !seg.contains(QStringLiteral("TapHandler {"));              // 旧事件源元素形态退役（块内）
@@ -16129,9 +16143,11 @@ Item {
                           << "| t900 trash-slot final semantics (user 8-25): plain left click keeps t839 tiers "
                              "(cursor-held stack destroyed / selected single slot cleared when empty-handed), "
                              "shift+left-click clears the ENTIRE inventory (behavioral leg proves the exact QML "
-                             "call sequence - 9 setStack + 27 mainSetStack + heldBlock reset - leaves zero "
-                             "residue in every slot read; source pin proves the MouseArea modifier split and "
-                             "retires the old TapHandler form - TapHandler cannot see modifiers, t700 lesson)";
+                             "call sequence - 9 setStack + 27 mainSetStack + 4 armorSetStack (review27 #21) + "
+                             "heldBlock reset - leaves zero residue in every slot read, armor included; the "
+                             "crafting-grid half is QML-local state pinned by review27-21; source pin proves "
+                             "the MouseArea modifier split and retires the old TapHandler form - TapHandler "
+                             "cannot see modifiers, t700 lesson)";
     }
 
     // ── P-t901 画作背面木板源码钉（t837 未愈返修；纯视觉项轻量源码钉，t781/t893 先例）──
@@ -17110,6 +17126,303 @@ Item {
                              "made declarative (!pageFlipAnim.running) because imperative "
                              "stop()/restart() calls would steal the running binding and re-open the "
                              "pause gate";
+    }
+
+    // ── review27-14 烈焰弹边缘对（①朝脚下直射不自燃 ②kCap 拒生成不消耗；行为级）──
+    //   ① 玩家侧火球（fireballShooter==-1）直下发射撞非可燃地板：来向格 == 玩家自身格（旧版立地火把
+    //     发射者自己点着——火系统按 AABB 接触点燃）。修后落火偏移到不与玩家 AABB 相交的邻格（火球水平
+    //     来向一格优先、四向兜底；燃烬者火球 shooter>=0 不偏移保持敌意落火语义）。
+    //   ② EntityManager 实体达 kCap：spawnFireball 返 -1（弹未生成）→ 烈焰弹不消耗 / 不挥手（旧版
+    //     无条件 takeStack = 弹被吞仍扣 1 发；烈焰弹是生存合成资源 3 发/组）。
+    {
+        World wR14;
+        wR14.setWidth(48); wR14.setDepth(48); wR14.setHeight(96); wR14.setSeed(77);
+        const int fy14 = 84;
+        for (int x = 1; x <= 14; ++x)
+            for (int z = 4; z <= 8; ++z) {
+                wR14.setBlock(x, fy14, z, BR::Stone, 0);
+                for (int dy = 1; dy <= 3; ++dy) wR14.setBlock(x, fy14 + dy, z, BR::Air, 0);
+            }
+        // (a) 朝脚下直射：listener 站 (3.5, 85, 6.5)（halfW 0.3 → AABB x[3.2,3.8]），火球从眼位下方
+        //     0.5 直落撞脚下石板 → 来向格 = 玩家格 (3,85,6)。断言：玩家格 Air + 邻格 (4,85,6) Fire
+        //     （+X 候选首个不交 AABB 的 Air 格）。
+        EntityManager entsA;
+        const int fbA = entsA.spawnFireball(QVector3D(3.5f, float(fy14 + 1) + 1.62f - 0.5f, 6.5f),
+                                            QVector3D(0.0f, -12.0f, 0.0f), 100);
+        bool settleA = false;
+        for (int t = 0; t < 40 && !settleA; ++t) {
+            entsA.tick(0.05f, &wR14, QVector3D(3.5f, float(fy14 + 1), 6.5f), 0.3f, 1.8f, true);
+            if (fbA >= 0 && !entsA.aliveAt(fbA)) settleA = true; // 消失 = 撞击结算完成
+        }
+        const bool okA14 = settleA
+                           && wR14.blockAt(3, fy14 + 1, 6) == BR::Air   // 玩家自身格不落火（不自燃）
+                           && wR14.blockAt(4, fy14 + 1, 6) == BR::Fire; // 落火偏移到 AABB 外邻格
+        // (b) kCap 拒生成：填满实体槽（镜像常量 64 = EntityManager::kCap，private 不跨层读，P18 模式）→
+        //     右键发射被拒 → 生存不消耗（count 3 不变）+ 不挥手（发射未发生）。
+        constexpr int kMirrorEntityCap = 64;
+        EntityManager entsB;
+        int spawnedB = 0;
+        for (int i = 0; i < kMirrorEntityCap + 2; ++i)
+            if (entsB.spawnMobTyped(6 + (i % 8), fy14 + 1 + (i / 8) * 2, 6, EntityManager::MobPig,
+                                    QStringLiteral("#ee9999"), 10) >= 0)
+                ++spawnedB;
+        Hotbar hbB;
+        hbB.setStack(0, RecipeRegistry::FireChargeId, 3, 0);
+        hbB.setSelectedSlot(0);
+        PlayerController pcB;
+        pcB.setWorld(&wR14);
+        pcB.setEntityManager(&entsB);
+        pcB.setHotbar(&hbB);
+        QQuickWindow probeWin14;
+        pcB.setParentItem(probeWin14.contentItem());
+        pcB.grab(); // captured 入口门（P-t891 探针同款挂窗载体，无 show）
+        pcB.loadSavedState(3.5f, float(fy14 + 1), 6.5f, 0.0f, -30.0f, 2 /* Survival */);
+        int swingB = 0;
+        QObject::connect(&pcB, &PlayerController::swingArm, &pcB, [&]() { ++swingB; });
+        pcB.placeBlock(); // 右键发射（kCap 满 → spawnFireball 返 -1）
+        const bool okB14 = spawnedB == kMirrorEntityCap
+                           && hbB.blockIdAt(0) == RecipeRegistry::FireChargeId
+                           && hbB.countAt(0) == 3   // 不消耗（旧版 3→2 = 弹被吞仍扣）
+                           && swingB == 0;          // 不挥手（发射未发生）
+        pcB.release();
+        const bool okR14 = okA14 && okB14;
+        if (!okR14)
+            qInfo().noquote() << "  [review27-14 diag] selfCellAir"
+                              << (wR14.blockAt(3, fy14 + 1, 6) == BR::Air)
+                              << "offsetFire" << (wR14.blockAt(4, fy14 + 1, 6) == BR::Fire)
+                              << "settleA" << settleA << "| spawnedB" << spawnedB
+                              << "cnt0" << hbB.countAt(0) << "swingB" << swingB;
+        if (!okR14) ++totalFail;
+        qInfo().noquote() << (okR14 ? "PASS" : "FAIL")
+                          << "| review27-14 fire-charge edge pair: a straight-down player fireball hitting "
+                             "the floor under the shooter no longer drops standing fire into the shooter's "
+                             "own cell (the approach cell overlaps the player AABB so the fire offsets to "
+                             "the first neighbor outside it - horizontal travel direction first, compass "
+                             "fallback, owner-side only since emberling splash near the player is intended), "
+                             "and a launch rejected at the entity cap (spawnFireball -1) consumes no charge "
+                             "and plays no swing (crafted survival ammo must not vanish into a full entity "
+                             "table; the old path took the stack unconditionally)";
+    }
+
+    // ── review27-15 水面降位外溢对（①睡莲叶高读液面·源码钉 ②两层冰墙骑船 Y 振荡·行为级）──
+    //   ① t892 静水液面降 7/8 后，睡莲 quad 旧「cell 底 + 1/16 按满格水面校准」悬空 ~3/16——叶高改读
+    //     下方水格 waterSurfaceFrac（partialblockgeometry LilyPad case 消费 nb.belowId/belowState，
+    //     chunkgeometry 仅对 LilyPad 填）。mesher 内部不可行为直驱（t893 源码钉先例）。
+    //   ② 岸边两层冰墙：首层冰顶 snap 上去后船中心层（restLayer）仍是冰（第二层）→ 下一帧 iceTop 升到
+    //     第二层顶（高差 1.0 > snap）回钉水面 → 再 snap = 逐帧 ~0.325 振荡。修 = snap 前查目标层无冰
+    //     （埋位守卫）；单层冰面 snap（t892/t805 契约）必须不受影响（对照半边）。
+    {
+        const QString exeDir15 = QCoreApplication::applicationDirPath();
+        const QString root15 = QDir(exeDir15 + QStringLiteral("/..")).absolutePath();
+        // (a) 源码钉：三方契约（消费 nb.belowState×waterSurfaceFrac / ctx 字段存在 / chunkgeometry 填）
+        //     + 负向钉（旧固定高度行不残留）。
+        QFile pg15(root15 + QStringLiteral("/src/World/partialblockgeometry.cpp"));
+        const QString t15 = pg15.open(QIODevice::ReadOnly) ? QString::fromUtf8(pg15.readAll()) : QString();
+        QFile ph15(root15 + QStringLiteral("/src/World/partialblockgeometry.h"));
+        const QString h15 = ph15.open(QIODevice::ReadOnly) ? QString::fromUtf8(ph15.readAll()) : QString();
+        QFile cg15(root15 + QStringLiteral("/src/World/chunkgeometry.cpp"));
+        const QString c15 = cg15.open(QIODevice::ReadOnly) ? QString::fromUtf8(cg15.readAll()) : QString();
+        const bool okA15 = t15.contains(QStringLiteral("waterSurfaceFrac(nb.belowState)"))
+                           && t15.contains(QStringLiteral("nb.belowId == BlockRegistry::Water"))
+                           && !t15.contains(QStringLiteral("constexpr float yp = 1.0f / 16.0f;"))
+                           && h15.contains(QStringLiteral("quint8 belowId = 0;"))
+                           && c15.contains(QStringLiteral("nctx.belowId = blockAtWorld(wx, ly - 1, wz)"))
+                           && c15.contains(QStringLiteral("nctx.belowState = stateAtWorld(wx, ly - 1, wz)"));
+        // (b) 行为级：两层冰墙（lane A z 6..8 x=20 两层）骑船逼近 → 埋位守卫拒 snap，Y 稳定钉水面
+        //     84.875（surf = 84 + 7/8）不超 85.0（旧版振荡上界 85.2 = 84+1+0.2）；单层冰面（lane B
+        //     z 15..17 x 20..30 一层）snap 照常 → Y 到 85.2 稳定（守卫不过度）。
+        World wR15;
+        wR15.setWidth(48); wR15.setDepth(48); wR15.setHeight(96); wR15.setSeed(77);
+        const int ty15 = 83;
+        for (int x = 4; x <= 30; ++x)
+            for (int z = 6; z <= 8; ++z) wR15.setBlock(x, ty15, z, BR::Stone, 0);      // lane A 石底
+        for (int x = 4; x <= 30; ++x)
+            for (int z = 15; z <= 17; ++z) wR15.setBlock(x, ty15, z, BR::Stone, 0);    // lane B 石底
+        for (int x = 4; x <= 30; ++x)
+            for (int z = 6; z <= 8; ++z)
+                if (x != 20) wR15.setBlock(x, ty15 + 1, z, BR::Water, 0);              // lane A 水（x=20 留给冰）
+        for (int x = 4; x < 20; ++x)
+            for (int z = 15; z <= 17; ++z) wR15.setBlock(x, ty15 + 1, z, BR::Water, 0); // lane B 水（冰前）
+        for (int z = 6; z <= 8; ++z) {           // lane A 两层冰墙（x=20，y 84/85）
+            wR15.setBlock(20, ty15 + 1, z, BR::Ice, 0);
+            wR15.setBlock(20, ty15 + 2, z, BR::Ice, 0);
+        }
+        for (int x = 20; x <= 46; ++x)
+            for (int z = 15; z <= 17; ++z) wR15.setBlock(x, ty15 + 1, z, BR::Ice, 0);  // lane B 单层冰面（铺到车道尽头防驶出跌落）
+        BoatManager boats15;
+        QVector3D bp15;
+        bool crashed15 = false;
+        // lane A：两层冰墙逼近（低速 0.4 档稳态 ~3.2 b/s < crash 14；速不参与判据，Y 段逐帧求值）。
+        float maxY_A = 0.0f, lastY_A = 0.0f;
+        if (boats15.spawnBoat(6, ty15 + 1, 7, BoatManager::Oak)) {
+            boats15.tryMount(QVector3D(6.5f, float(ty15 + 3), 7.5f), QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+            const int bA = boats15.ridingIndex();
+            for (int t = 0; t < 900; ++t) {
+                boats15.tickRiddenBoat(1.0 / 60.0, &wR15, 0.4f, 0.0f, bp15, crashed15);
+                if (bA >= 0) {
+                    lastY_A = boats15.posAt(bA).y();
+                    maxY_A = qMax(maxY_A, lastY_A);
+                }
+            }
+        }
+        const float surf15 = float(ty15) + 1.0f + 7.0f / 8.0f; // 84.875（降位静水液面镜像）
+        const bool okB15 = maxY_A < float(ty15) + 2.0f         // 从未 snap 到首层冰顶 + 船底（85.2）
+                           && qAbs(lastY_A - surf15) < 0.05f;  // 终态稳定钉水面（无振荡）
+        // lane B：单层冰面 snap 照常（守卫不过度）——Y 到 85.2（冰顶 + 船底 0.2）并稳定。
+        float maxY_B = 0.0f, lastY_B = 0.0f;
+        if (boats15.spawnBoat(6, ty15 + 1, 16, BoatManager::Oak)) {
+            boats15.tryMount(QVector3D(6.5f, float(ty15 + 3), 16.5f), QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+            const int bB = boats15.ridingIndex();
+            for (int t = 0; t < 900; ++t) {
+                boats15.tickRiddenBoat(1.0 / 60.0, &wR15, 0.4f, 0.0f, bp15, crashed15);
+                if (bB >= 0) {
+                    lastY_B = boats15.posAt(bB).y();
+                    maxY_B = qMax(maxY_B, lastY_B);
+                }
+            }
+        }
+        const float iceRest15 = float(ty15) + 2.0f + 0.2f;     // 85.2（单层冰顶 85 + kBoatHullBottom 0.2）
+        const bool okC15 = maxY_B >= iceRest15 - 0.05f         // 真的 snap 上去了（t892 契约保持）
+                           && qAbs(lastY_B - iceRest15) < 0.05f; // 终态稳定贴冰面（无回落振荡）
+        const bool okR15 = okA15 && okB15 && okC15;
+        if (!okR15)
+            qInfo().noquote() << "  [review27-15 diag] pin" << okA15 << "| laneA maxY" << maxY_A
+                              << "lastY" << lastY_A << "| laneB maxY" << maxY_B << "lastY" << lastY_B;
+        if (!okR15) ++totalFail;
+        qInfo().noquote() << (okR15 ? "PASS" : "FAIL")
+                          << "| review27-15 lowered-waterline spillover pair: the lily-pad quad height now "
+                             "reads the water cell below through the mesher context (waterSurfaceFrac, "
+                             "source-pinned across producer and consumer - the old cell-bottom+1/16 "
+                             "calibration floated the leaf ~3/16 above the 7/8 surface), and a ridden boat "
+                             "approaching a TWO-layer ice wall no longer y-oscillates ~0.325/frame (the "
+                             "snap-up target layer contains the second ice layer = buried hull = wall not "
+                             "surface, guard rejects the snap and the boat stays pinned to the waterline "
+                             "84.875), while the single-layer ice sheet still snaps up and rests stably at "
+                             "85.2 (the t892/t805 ice-road contract the guard must not over-reach)";
+    }
+
+    // ── review27-18 腾空羊不开吃（源码钉；行为回归由 P-t897 草栏探针看守）──
+    //   groundY = floor(pos.y − halfH) − 1 的垂直窗口腾空时放宽 ~1 格（小跳 / 下落 / 水面缓沉都在窗内）
+    //   → 旧版腾空羊可开吃并在 0.5s 后空中消耗 Grass→Dirt。修 = sheepEatGrass 入口 resting 门（检测与
+    //   消耗同门）。行为级「落地照常吃」由 P-t897（草栏 grassDirt≥1）覆盖——本探针钉源码契约面。
+    {
+        const QString exeDir18 = QCoreApplication::applicationDirPath();
+        const QString root18 = QDir(exeDir18 + QStringLiteral("/..")).absolutePath();
+        QFile ef18(root18 + QStringLiteral("/src/Entities/entitymanager.cpp"));
+        const QString t18 = ef18.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef18.readAll()) : QString();
+        const int i0 = t18.indexOf(QStringLiteral("bool EntityManager::sheepEatGrass"));
+        const int i1 = t18.indexOf(QStringLiteral("const int cx = qFloor(e.pos.x());"), i0);
+        const bool okR18 = i0 >= 0 && i1 > i0
+                           && t18.mid(i0, i1 - i0).contains(QStringLiteral("if (!e.resting) return false;"));
+        if (!okR18) ++totalFail;
+        qInfo().noquote() << (okR18 ? "PASS" : "FAIL")
+                          << "| review27-18 airborne sheep cannot open a graze cycle: sheepEatGrass gates "
+                             "on e.resting (detection and consumption share the same gate - the "
+                             "groundY=floor(pos.y-halfH)-1 window is ~1 block too generous while airborne, "
+                             "so a hopping/sinking sheep used to open the cycle and consume Grass->Dirt "
+                             "mid-air 0.5s later); grounded eating stays covered behaviorally by the "
+                             "P-t897 grass-pen probe (grassDirt >= 1)";
+    }
+
+    // ── review27-21 清空整个背包语义收口（源码钉：盔甲 4 槽 + 2×2 合成格一并清）──
+    //   旧 shift+左键只清 hotbar 9 + main 27 + 光标——盔甲（armorSetStack 独立存储）与合成格原料残留、
+    //   输出槽仍显产物 =「整个背包」语义不完整。QML 不可行为直驱（review27-13 源码钉先例）。
+    {
+        const QString exeDir21 = QCoreApplication::applicationDirPath();
+        const QString root21 = QDir(exeDir21 + QStringLiteral("/..")).absolutePath();
+        QFile iv21(root21 + QStringLiteral("/src/ui/Inventory.qml"));
+        const QString q21 = iv21.open(QIODevice::ReadOnly) ? QString::fromUtf8(iv21.readAll()) : QString();
+        // 清空段切片：从 shift 分支标记到 heldBlock 归零（段内须含盔甲循环 + 合成格数组全清 + craftRev++）。
+        const int i0 = q21.indexOf(QStringLiteral("if ((mouse.modifiers & Qt.ShiftModifier) !== 0) {"));
+        const int i1 = q21.indexOf(QStringLiteral("root.hotbar.heldBlock = 0"), i0);
+        const QString seg = (i0 >= 0 && i1 > i0) ? q21.mid(i0, i1 - i0) : QString();
+        const bool okR21 = seg.contains(QStringLiteral("root.hotbar.armorSetStack(a, 0, 0)"))
+                           && seg.contains(QStringLiteral("root.craftSlots = [0, 0, 0, 0]"))
+                           && seg.contains(QStringLiteral("root.craftCounts = [0, 0, 0, 0]"))
+                           && seg.contains(QStringLiteral("root.craftRev++"));
+        if (!okR21) ++totalFail;
+        qInfo().noquote() << (okR21 ? "PASS" : "FAIL")
+                          << "| review27-21 clear-whole-inventory semantics completed: the shift+click "
+                             "trash action now also clears the four armor slots (armorSetStack, separately "
+                             "stored) and the 2x2 crafting grid ingredients (output slot is a craftRev "
+                             "derived binding and recomputes to empty), so 'entire inventory' no longer "
+                             "leaves armor and ingredients behind while the UI implies a full wipe; "
+                             "no-confirmation risk registered as a product note (user-pinned 8-25 "
+                             "semantics, adjacency misclick warning in the comment)";
+    }
+
+    // ── review27-23 火把拆/重放重置 burnout（行为级：计数窗继承 + 冷却锁定两半）──
+    //   m_torchBurnout 唯一摘表路径原只有到期 → (a) 计数窗内拆后同格重放，新火把继承 flips（不到 8 翻
+    //   即熔断）；(b) 冷却锁定期内拆后重放，锁定门 continue 跳过评估——基座已供电也错误亮到到期。
+    //   修 = notePowerWrite 中 oldId==RedstoneTorch 时 erase 该格键（MC 拆火把重放即重置熔断）。
+    //   rig = review26-6(a) 拉杆 NOT 门（每拨恰一翻可精确计数）。
+    {
+        World wR23;
+        wR23.setWidth(48); wR23.setDepth(48); wR23.setHeight(96); wR23.setSeed(77);
+        for (int x = 2; x <= 40; ++x)
+            for (int z = 2; z <= 40; ++z) wR23.setBlock(x, 84, z, BR::Stone, 0);
+        const auto torchOff23 = [&]() {
+            return (wR23.stateAt(6, 86, 14) & BR::RedstoneTorchStateOffFlag) != 0;
+        };
+        const auto setLever23 = [&](quint8 st) {
+            wR23.setBlock(6, 85, 15, BR::Lever, st);
+            tickN(wR23, 6);
+        };
+        placeRigBlock(wR23, 6, 85, 14, BR::Stone, 0);
+        placeRigBlock(wR23, 6, 85, 15, BR::Lever, 1); // ON
+        tickN(wR23, 2);
+        placeRigBlock(wR23, 6, 86, 14, BR::RedstoneTorch, 0);
+        tickN(wR23, 6);
+        // 翻 1..4（lever ON→off / OFF→on ×2）：到窗内 4 翻。
+        bool seqOk = torchOff23();
+        for (int half = 0; half < 3 && seqOk; ++half) {
+            setLever23(quint8(half % 2 == 0 ? 0 : 1));
+            seqOk = seqOk && (torchOff23() == (half % 2 == 1)); // lever on 段熄 / off 段亮（review26-6 同相序）
+        }
+        // (a) 计数窗中段拆 + 重放（lever OFF → 新火把亮）：窗内 flips 已 4。
+        wR23.setBlock(6, 86, 14, BR::Air, 0);
+        tickN(wR23, 2);
+        placeRigBlock(wR23, 6, 86, 14, BR::RedstoneTorch, 0);
+        tickN(wR23, 6);
+        const bool relitAfterReplace = !torchOff23(); // 新火把立即评估（lever OFF → 亮）
+        // 再拨 4 翻（ON,OFF,ON,OFF）：修复后 = 新窗第 1..4 翻全正常（末态亮）；未修 = 累计第 5..8 翻，
+        //   第 8 翻（本应重亮）熔断 → 末态灭。
+        for (int k = 0; k < 4; ++k) setLever23(quint8(k % 2 == 0 ? 1 : 0));
+        const bool okCountReset = seqOk && relitAfterReplace && !torchOff23();
+        // (b) 冷却锁定中段拆 + 重放：继续拨到新窗第 8 翻（OFF→本应重亮）→ 锁定灭；确认 30 tick 仍灭；
+        //     然后 lever ON（基座供电）+ 拆 + 重放 → 修复后新火把立即评估为灭（offFlag 置位）；未修 =
+        //     锁定门 continue 跳过评估 → 错误保持亮到冷却到期。
+        for (int k = 0; k < 4; ++k) setLever23(quint8(k % 2 == 0 ? 1 : 0));
+        const bool lockedDark = torchOff23();
+        for (int t = 0; t < 30; ++t) wR23.tickRedstone();
+        const bool stillDark = torchOff23();
+        setLever23(1); // ON：锁定中不重评（保持灭）
+        const bool darkUnderPower = torchOff23();
+        wR23.setBlock(6, 86, 14, BR::Air, 0);
+        tickN(wR23, 2);
+        placeRigBlock(wR23, 6, 86, 14, BR::RedstoneTorch, 0);
+        tickN(wR23, 6);
+        const bool okCooldownReset = lockedDark && stillDark && darkUnderPower && torchOff23();
+        // 清场（rig 槽位还原）。
+        wR23.setBlock(6, 86, 14, BR::Air, 0);
+        wR23.setBlock(6, 85, 15, BR::Air, 0);
+        wR23.setBlock(6, 85, 14, BR::Air, 0);
+        tickN(wR23, 2);
+        const bool okR23 = okCountReset && okCooldownReset;
+        if (!okR23)
+            qInfo().noquote() << "  [review27-23 diag] countReset" << okCountReset << "seqOk" << seqOk
+                              << "relit" << relitAfterReplace << "endLit" << !torchOff23()
+                              << "| cooldown" << okCooldownReset << "locked" << lockedDark
+                              << "still" << stillDark << "underPower" << darkUnderPower;
+        if (!okR23) ++totalFail;
+        qInfo().noquote() << (okR23 ? "PASS" : "FAIL")
+                          << "| review27-23 torch burnout resets on break+replace: notePowerWrite erases "
+                             "the cell's burnout entry when the torch is removed, so a torch replaced "
+                             "mid-count-window starts from zero flips (the old inherited count fused it "
+                             "before 8 fresh toggles) and a torch replaced during the cooldown lock gets "
+                             "evaluated immediately - with a powered base it turns OFF at once instead of "
+                             "illegally staying lit until cooldown expiry (MC semantics: replacing a torch "
+                             "resets its burnout state; lever NOT-gate rig, deterministic integer counters)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
