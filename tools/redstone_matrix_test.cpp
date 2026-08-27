@@ -4477,6 +4477,83 @@ int main(int argc, char *argv[])
                              "red (anti-drift pin)";
     }
 
+    // ── P-t859 collisionAABBsInto out-param 等价探针（R19.14 堆分配消除；Core 层全表扫描 + World 层抽查）──
+    //   玩家/mob 碰撞热路径改读 BlockRegistry::collisionAABBsInto（栈上定容直写）与
+    //   World::collisionAABBsAt(out,cap)（世界坐标偏移版）。等价性 = 全 id × state 断言 Into 输出与
+    //   by-value 薄壳 collisionAABBs 逐盒逐字段完全一致（count / 6 坐标分量）+ 缓冲越界保护（cap=0 时
+    //   只报计数不写穿）+ World 版抽查（放置方块后 out-param 盒 = cell-local 盒 + 格偏移）。改形状
+    //   漏同步两路 → 本探针红（防单一权威漂移，同 review26-20 钉法）。
+    {
+        quint32 checked859 = 0;
+        int badId859 = -1, badSt859 = -1;
+        QString diag859;
+        for (int id = 0; id < 256 && badId859 < 0; ++id) {
+            for (int st = 0; st < 256; ++st) {
+                const auto vec = BR::collisionAABBs(quint8(id), quint8(st));
+                BlockRegistry::BlockAABB buf[BR::kMaxAABBsPerCell];
+                const int n = BR::collisionAABBsInto(quint8(id), quint8(st), buf, BR::kMaxAABBsPerCell);
+                ++checked859;
+                bool same = n == int(vec.size()) && n <= BR::kMaxAABBsPerCell;
+                for (int i = 0; same && i < n; ++i) {
+                    const auto &a = vec[size_t(i)], &b = buf[i];
+                    same = a.minX == b.minX && a.minY == b.minY && a.minZ == b.minZ
+                           && a.maxX == b.maxX && a.maxY == b.maxY && a.maxZ == b.maxZ;
+                }
+                if (!same) { badId859 = id; badSt859 = st; break; }
+            }
+        }
+        // cap=0 保护（单点抽查，防逐组合跑刷爆日志——putAABB 守卫是共享代码路径，一次足以证不写穿）：
+        // 返回计数与 cap 充足时一致、不写任何字节。
+        bool cap0Ok = false;
+        {
+            const int nFull = BR::collisionAABBsInto(quint8(1) /*Stone=ShapeFull*/, quint8(0),
+                                                     nullptr, 0);
+            BlockRegistry::BlockAABB canary[BR::kMaxAABBsPerCell];
+            for (auto &c : canary) c = {1234.5f, 1234.5f, 1234.5f, 1234.5f, 1234.5f, 1234.5f};
+            const int n0 = BR::collisionAABBsInto(quint8(1), quint8(0), canary, 0);
+            bool untouched = true;
+            for (const auto &c : canary)
+                if (c.minX != 1234.5f) untouched = false;
+            cap0Ok = nFull == 1 && n0 == 1 && untouched; // n0 查询会响一次 qWarning（守卫在响，符合预期）
+            if (!cap0Ok) diag859 = "cap0-guard";
+        }
+        bool okCore859 = badId859 < 0 && checked859 > 0 && cap0Ok;
+        if (!okCore859)
+            qInfo().noquote() << "  [t859 diag] id=" << badId859 << "st=" << badSt859 << diag859;
+        // World 层抽查：放一块下半砖（state bit0=0 → 盒顶 0.5），out-param 版须回 (bx,bz) 偏移的矮盒。
+        bool okWorld859 = false;
+        {
+            const auto [wx, wz] = nextSlot();
+            placeRigBlock(w, wx, kRigY, wz, BR::CobbleSlab, 0);
+            BlockRegistry::BlockAABB wb[BR::kMaxAABBsPerCell];
+            const int wn = w.collisionAABBsAt(wx, kRigY, wz, wb, BR::kMaxAABBsPerCell);
+            okWorld859 = wn == 1
+                         && std::abs(wb[0].minX - float(wx)) < 1e-6f
+                         && std::abs(wb[0].minY - float(kRigY)) < 1e-6f
+                         && std::abs(wb[0].minZ - float(wz)) < 1e-6f
+                         && std::abs(wb[0].maxX - float(wx + 1)) < 1e-6f
+                         && std::abs(wb[0].maxY - (float(kRigY) + 0.5f)) < 1e-6f
+                         && std::abs(wb[0].maxZ - float(wz + 1)) < 1e-6f;
+            if (!okWorld859)
+                qInfo().noquote() << "  [t859 diag] world slab n=" << wn << "box="
+                                  << (wn > 0 ? wb[0].minX : -1.f) << (wn > 0 ? wb[0].minY : -1.f)
+                                  << (wn > 0 ? wb[0].minZ : -1.f) << (wn > 0 ? wb[0].maxX : -1.f)
+                                  << (wn > 0 ? wb[0].maxY : -1.f) << (wn > 0 ? wb[0].maxZ : -1.f);
+            w.setBlock(wx, kRigY, wz, BR::Air, 0);
+        }
+        const bool okT859 = okCore859 && okWorld859;
+        if (!okT859) ++totalFail;
+        qInfo().noquote() << (okT859 ? "PASS" : "FAIL")
+                          << "| t859 collisionAABBsInto out-param path: stack-buffer collision query "
+                             "(BlockRegistry::collisionAABBsInto + World::collisionAABBsAt(out,cap)) is "
+                             "field-exact with the by-value shell for all 65536 id x state combos, cap=0 "
+                             "returns the count without writing a byte (overflow guard), and the World "
+                             "wrapper offsets cell-local boxes into world space (lower slab spot check) - "
+                             "player/mob collision hot paths (3 axes x ~12 cells/tick + 60 mob "
+                             "predicates) drop 2 vector heap allocations per query with zero behavior "
+                             "change";
+    }
+
     // ── t787 生物蛋×刷怪笼交互（用户「拿上生物蛋对着刷怪笼右键，就可以弄成刷这个生物的刷怪笼」；机制等价
     //    MC 1.0 spawn egg 右键 spawner 改型）：①全 13 蛋改型 round-trip（蛋表 → 编码 → 解码互逆，白名单
     //    扩表锁死——加蛋漏接 = 此处 FAIL，t785 B9 缺口防线）②哨兵/越界 type 仍兜底 Shambler（扩表不含
@@ -7988,9 +8065,11 @@ int main(int argc, char *argv[])
                                   << " primed=" << primedCount() << "/" << primedBeforeD1
                                   << " slotCount=" << store.slotCountAt(xa, kRigY, za, 0)
                                   << " b1=" << int(w.blockAt(xa + 1, kRigY, za))
-                                  << " cb1=" << w.collisionAABBsAt(xa + 1, kRigY, za).size()
+                                  << " cb1=" << (BR::collisionAABBs(w.blockAt(xa + 1, kRigY, za),
+                                                                    w.stateAt(xa + 1, kRigY, za))).size()
                                   << " b2=" << int(w.blockAt(xa + 2, kRigY, za))
-                                  << " cb2=" << w.collisionAABBsAt(xa + 2, kRigY, za).size();
+                                  << " cb2=" << (BR::collisionAABBs(w.blockAt(xa + 2, kRigY, za),
+                                                                    w.stateAt(xa + 2, kRigY, za))).size();
             w.setBlock(xa - 1, kRigY, za, BR::Air, 0);
             w.setBlock(xa, kRigY, za, BR::Air, 0);
             w.setBlock(xa + 1, kRigY, za, BR::Air, 0);

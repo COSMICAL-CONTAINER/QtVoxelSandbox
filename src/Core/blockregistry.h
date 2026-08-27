@@ -1820,6 +1820,13 @@ public:
     //   air/torch → 空；常规整立方 → 单盒 {0,0,0,1,1,1}；异形 → 形状对应的多盒（stairs 2 盒 等）。
     //   越界 / air 行 → 空。机制等价 MC「方块 VoxelShape」（机制对齐，非名词照搬）。
     static std::vector<BlockAABB> collisionAABBs(quint8 blockId, quint8 state);
+    // t859（R19.14）out-param 版碰撞盒查询（堆分配消除的单一权威）：与 collisionAABBs 同表同特例，
+    //   cell-local 盒直写调用方提供的栈上小缓冲（cap ≥ kMaxAABBsPerCell），返回实际写入数 —— 玩家 3 轴
+    //   × ~12 格/tick + mob 四谓词每帧数百次查询不再各付一次 vector 堆分配（by-value 版变薄壳供矩阵
+    //   测试 / 冷路径继续用）。超出 cap（当前形状族封顶铁砧 3 盒）→ 钳制写入 + qWarning 响亮失败（新增
+    //   多盒形状时这里第一时间红，不静默截断）。
+    static constexpr int kMaxAABBsPerCell = 4; // 单格碰撞 sub-AABB 数上限（铁砧 3 盒为当前最大）
+    static int collisionAABBsInto(quint8 blockId, quint8 state, BlockAABB *out, int cap);
     // review26 #20 碰撞盒**顶面高**免构建查询（cell-local maxY；无碰撞盒 → -1）：分支逐字镜像
     //   collisionAABBs（特例表 + shapeBoxes 各 shape 的 maxY），但只算标量不建 vector —— 支撑复探热路径
     //   （World::supportTopYAt 慢路径：resting 掉落物每帧两格窗、mob 支撑链）在异形支撑（半砖 / 压力板 /

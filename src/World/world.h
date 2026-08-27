@@ -146,7 +146,12 @@ public:
     //   做 3 轴严格重叠测试（aabbHitsSolid / moveAxis 贴面 / overlapsPlayerAABB 放置校验）。
     //   分层（PLAN §2）：本方法属 World 层，只读 ChunkManager（blockAt + stateAt）+ BlockRegistry，
     //   不依赖 Renderer/Physics；PlayerController（Game/Physics）只读消费。
-    std::vector<BlockRegistry::BlockAABB> collisionAABBsAt(int x, int y, int z) const;
+    // t859（R19.14）按值返回 std::vector 退役 → **out-param 版**（堆分配消除）：玩家 3 轴 × ~12 格/tick
+    //   + 60 mob 各自四谓词 = 每帧数百次查询，旧按值版每次各付一次 vector 堆分配（外加
+    //   BlockRegistry::collisionAABBs 内部再建一次 local vector = 每查询两次分配）。本版直写调用方
+    //   栈上定容数组（cap ≥ BlockRegistry::kMaxAABBsPerCell），返回实际写入数 —— 纯分配路径改写，
+    //   行为零变（盒表单一权威 = BlockRegistry::collisionAABBsInto，等价性由矩阵探针钉死）。
+    int collisionAABBsAt(int x, int y, int z, BlockRegistry::BlockAABB *out, int cap) const;
     // t775 点级碰撞占据查询：世界坐标点所在格的任一碰撞 sub-AABB **严格包含**该点 → true（点嵌进实体
     //   方块的碰撞体）。窒息判定的原子查询：t160 玩家眼位与 t775 矿车骑乘眼位（PlayerController
     //   tickSuffocation 单链）自 t775 起收敛为本 World 单一权威（矩阵测试矿车骑乘窒息探针同源共用）。

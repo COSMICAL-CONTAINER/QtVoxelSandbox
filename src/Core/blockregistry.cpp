@@ -1,4 +1,5 @@
 #include "blockregistry.h"
+#include <QDebug> // t859：collisionAABBsInto 缓冲越界响亮告警（冷路径，当前形状族不可能触发）
 
 // 单一数据表：每方块一行 —— 外观 / 实体 / 挖掘 / 掉落 / 堆叠 / 名 全部集中（t42）。
 // 行索引 == 方块 id（BlockRegistry::Id）。改方块任何属性只改这里，全工程生效（挖掘 / 掉落 /
@@ -1546,20 +1547,37 @@ Half facingWallZ(int facing) {
     default: return {0.0f, 1.0f}; // codereview H1: +X/-X 向（Z 轴全 footprint）——原 {0,0} 零体积致楼梯墙无碰撞
     }
 }
-std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8 state)
+// t859（R19.14）受界定容写入（两处 Into 共用）：n<cap 才写；越界钳制 + 响亮告警（新增多盒形状超
+//   kMaxAABBsPerCell 时第一时间红，不静默截断 / 不写穿调用方缓冲）。braced-init-list 可直接作实参。
+inline void putAABB(BlockRegistry::BlockAABB *out, int cap, int &n, BlockRegistry::BlockAABB a)
 {
-    std::vector<BlockRegistry::BlockAABB> out;
+    if (n < cap) {
+        out[n] = a;
+    } else {
+        qWarning("collision sub-AABB buffer cap %d exceeded - raise BlockRegistry::kMaxAABBsPerCell", cap);
+    }
+    ++n;
+}
+
+// t859（R19.14）shapeBoxes 的 out-param 单一权威：逐字保留原 switch 的盒表与注释，仅把 vector 存储
+//   换成「调用方栈上定容数组 + 计数」（零堆分配——玩家/mob 碰撞热路径每帧数百次查询不再各付一次
+//   vector 分配）。by-value 版 shapeBoxes 变薄壳（selectionAABBs / raycastAABBs 等冷路径继续用）。
+//   返回写入数 n（cap 充足时 ≤ 2；cap=0 时只报计数不写字节——探针钉死该保护）。
+int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAABB *out, int cap)
+{
+    using AABB = BlockRegistry::BlockAABB; // 类型别名（成员 using-declaration 非法于函数作用域）
+    int n = 0;
     switch (sh) {
     case BlockRegistry::ShapeFull:
-        out.push_back({0, 0, 0, 1, 1, 1});
-        return out;
+        putAABB(out, cap, n, {0, 0, 0, 1, 1, 1});
+        return n;
     case BlockRegistry::ShapeNone:
-        return out; // air / torch：无碰撞 sub-AABB
+        return 0; // air / torch：无碰撞 sub-AABB
     case BlockRegistry::ShapeSlab: {
         const bool upper = (state & 1) != 0;
-        out.push_back(upper ? BlockRegistry::BlockAABB{0, 0.5f, 0, 1, 1, 1}
-                            : BlockRegistry::BlockAABB{0, 0, 0, 1, 0.5f, 1});
-        return out;
+        putAABB(out, cap, n, upper ? AABB{0, 0.5f, 0, 1, 1, 1}
+                                   : AABB{0, 0, 0, 1, 0.5f, 1});
+        return n;
     }
     case BlockRegistry::ShapeStairs: {
         // 整步（全 footprint 半高）+ 背墙（朝向对侧半 footprint 的另半高）。
@@ -1567,11 +1585,11 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         const bool inverted = (state & 4) != 0;
         const float stepY0 = inverted ? 0.5f : 0.0f, stepY1 = inverted ? 1.0f : 0.5f;
         const float wallY0 = inverted ? 0.0f : 0.5f, wallY1 = inverted ? 0.5f : 1.0f;
-        out.push_back({0, stepY0, 0, 1, stepY1, 1});
+        putAABB(out, cap, n, {0, stepY0, 0, 1, stepY1, 1});
         const Half hx = facingWall(int(state));
         const Half hz = facingWallZ(int(state));
-        out.push_back({hx.a0, wallY0, hz.a0, hx.a1, wallY1, hz.a1});
-        return out;
+        putAABB(out, cap, n, {hx.a0, wallY0, hz.a0, hx.a1, wallY1, hz.a1});
+        return n;
     }
     case BlockRegistry::ShapeFence:
         // t209 立柱碰撞 1.5 高。maxY=1.5 探入上格 0.5 → 玩家跳跃顶点 ~1.25 < 1.5 跳不过（机制等价 MC 栅栏
@@ -1581,11 +1599,11 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
         //   t801 视觉/碰撞分离（MC 栅栏语义）：渲染立柱/横档已裁到 1.0 高（partialblockgeometry），本盒 1.5
         //   **仅喂 collisionAABBs**（mob 支撑/越障 + 玩家碰撞链零改动）；selectionAABBs / raycastAABBs 对
         //   isFence 特例 1.0 盒贴视觉（准星瞄立柱上方空带穿过，不再被 1.5 空带挡住优先选中）。
-        out.push_back({0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（碰撞语义；视觉 1.0 见 t801）
-        return out;
+        putAABB(out, cap, n, {0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（碰撞语义；视觉 1.0 见 t801）
+        return n;
     case BlockRegistry::ShapePlate:
-        out.push_back({0.0625f, 0, 0.0625f, 0.9375f, 0.0625f, 0.9375f}); // 贴地薄板 1/16 厚
-        return out;
+        putAABB(out, cap, n, {0.0625f, 0, 0.0625f, 0.9375f, 0.0625f, 0.9375f}); // 贴地薄板 1/16 厚
+        return n;
     case BlockRegistry::ShapeDoor: {
         // 合：薄板贴朝向边（厚 3/16）；开：板旋 90° 贴邻边。满高（y 0..1）。
         const int facing = state & 3;
@@ -1607,13 +1625,13 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
             case 3: bx0 = s0; bx1 = s1; break; // 原 -Z → 旋到 -X 边
             }
         }
-        out.push_back({bx0, 0, bz0, bx1, 1, bz1});
-        return out;
+        putAABB(out, cap, n, {bx0, 0, bz0, bx1, 1, bz1});
+        return n;
     }
     case BlockRegistry::ShapeTrapdoor: {
         const bool open = (state & 1) != 0;
         if (!open) {
-            out.push_back({0, 0, 0, 1, 0.1875f, 1}); // 合：水平薄板贴地
+            putAABB(out, cap, n, {0, 0, 0, 1, 0.1875f, 1}); // 合：水平薄板贴地
         } else {
             const int facing = (state >> 1) & 3;
             const float t0 = 0.8125f, t1 = 1.0f, s0 = 0.0f, s1 = 0.1875f;
@@ -1624,28 +1642,39 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
             case 2: bz0 = t0; bz1 = t1; break; // +Z 边
             case 3: bz0 = s0; bz1 = s1; break; // -Z 边
             }
-            out.push_back({bx0, 0, bz0, bx1, 1, bz1}); // 开：竖直薄板贴边
+            putAABB(out, cap, n, {bx0, 0, bz0, bx1, 1, bz1}); // 开：竖直薄板贴边
         }
-        return out;
+        return n;
     }
     case BlockRegistry::ShapeBed:
         // t457/t496 床低盒（与 partialblockgeometry 床床垫顶同高）：cell 底低盒 y[0, kBedMattressTop ~0.31]（床垫顶）。
         //   玩家立于床垫顶（机制等价 MC 床矮半高 hitbox；非整格满高碰撞）。foot / head 半同盒（碰撞不区分头脚）。
         //   t496：床头板 / 床尾板 / 枕头视觉凸出碰撞盒顶（partialblockgeometry 渲染到 9/16 / 7/16），但碰撞仍走
         //   本低盒（机制等价 MC 床低 hitbox + 视觉床头板凸出 —— 玩家可站床垫顶、床头板不挡碰撞）。
-        out.push_back({0, 0, 0, 1, BlockRegistry::kBedMattressTop, 1});
-        return out;
+        putAABB(out, cap, n, {0, 0, 0, 1, BlockRegistry::kBedMattressTop, 1});
+        return n;
     case BlockRegistry::ShapeSnowLayer: {
         // t505 积雪层薄板（机制等价 MC 1.0 snow layer 8 层）：cell 底薄板 y[0, snowLayerHeight(state)]。
         //   高度由 state 驱动（state 0..7 → 1/8..1.0；snowLayerHeight 单一权威）。玩家立于薄层顶 = cell+height；
         //   高度 ≤0.5 时玩家 t163 auto-step 抬升 0.55 即可跨过（机制等价 MC 薄雪层可踩 + 半格平滑上行）。
         //   与 partialblockgeometry SnowLayer case 渲染同源（同一 height，碰撞与渲染贴合）。
         const float h = BlockRegistry::snowLayerHeight(state);
-        out.push_back({0, 0, 0, 1, h, 1});
-        return out;
+        putAABB(out, cap, n, {0, 0, 0, 1, h, 1});
+        return n;
     }
     }
-    return out; // 未知 shape → 空（兜底）
+    return 0; // 未知 shape → 空（兜底，同旧 shapeBoxes 兜底空 vector）
+}
+
+// by-value 薄壳（t859）：selectionAABBs / raycastAABBs 等冷路径继续按值消费；热路径走 shapeBoxesInto。
+std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8 state)
+{
+    std::vector<BlockRegistry::BlockAABB> out;
+    BlockRegistry::BlockAABB buf[BlockRegistry::kMaxAABBsPerCell];
+    const int n = shapeBoxesInto(sh, state, buf, BlockRegistry::kMaxAABBsPerCell);
+    out.reserve(size_t(n));
+    for (int i = 0; i < n; ++i) out.push_back(buf[i]);
+    return out;
 }
 } // namespace
 
@@ -1663,34 +1692,51 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
 //   故薄板碰撞成立：门仅在其面板法线轴上合时挡（沿门板法线穿越被阻），开门则门板旋到铰链侧邻边仍挡那一面
 //   （t261）；门板切线轴（与面板平行的两侧）恒通——玩家可贴门板侧面走过。selectionAABBs 同源 → 选中框
 //   + F3+B 碰撞箱均显薄板。
-std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
+// t859（R19.14）collisionAABBs 的 out-param 单一权威（头注释见 .h）：分支序 / 特例表逐字对齐旧按值版，
+//   仅把「建 vector」换成「直写调用方栈上定容数组 + 返回计数」。铁砧三盒在此直写（anvilShapeBoxes()
+//   按值版保留给 selectionAABBs / raycastAABBs 冷路径，盒表数值互为镜像——改形状两处同步，等价性由
+//   矩阵 review26 #20 / t859 探针钉死）。cap 不足（新增多盒形状超 kMaxAABBsPerCell）→ 钳制 + qWarning。
+int BlockRegistry::collisionAABBsInto(quint8 blockId, quint8 state, BlockAABB *out, int cap)
 {
+    int n = 0;
+    const auto put = [&](BlockAABB a) { putAABB(out, cap, n, a); }; // 共享受界定容写入（越界钳制 + 响亮告警）
     // t444 睡莲水上行走（spec「站在睡莲上不掉进水 / 水上行走辅助」）：睡莲 shape=ShapeNone（selection 空、
     //   raycast 整格命中、不挡邻居面剔除、不进 heightmap、不遮光），但须当可踩实体 → 在此特例返 cell 底薄板
     //   （顶面 = 睡莲 quad 高度 1/16，与 partialblockgeometry.cpp LilyPad case 的 yp 同源）。玩家脚位停在睡莲顶面
     //   （= 水面 + 1/16）→ 站在睡莲上不掉进水（机制等价 MC 1.0 lily pad 薄叶可站立）。仅碰撞特例；selection /
     //   raycast / solid / 光照仍走 ShapeNone（四者解耦，同 Farmland 矮盒碰撞特例模式）。薄板厚 1/16 < kEmbedTol(0.1)
     //   且玩家立于板顶（非嵌入）→ isLockedBuried / extrudeEmbedded 不误触（边界 FP 不计嵌入，见 playercontroller）。
-    if (blockId == LilyPad)
-        return {BlockAABB{0, 0, 0, 1, kLilyPadTop, 1}};
-    if (!isCollidable(blockId, state)) return {}; // air / torch / water → 无碰撞 sub-AABB（玩家穿过）
+    if (blockId == LilyPad) {
+        put(BlockAABB{0, 0, 0, 1, kLilyPadTop, 1});
+        return n;
+    }
+    if (!isCollidable(blockId, state)) return 0; // air / torch / water → 无碰撞 sub-AABB（玩家穿过）
     // t234 耕地碰撞略矮（15/16=0.9375）：机制等价 MC 耕地碰撞箱比整立方矮 1 像素。Farmland 走 ShapeFull
     //   （mesher 邻居面剔除 + raycast isFullCube=true 整格命中 + selectionAABBs 整格选中框，三者不动），
     //   仅碰撞在此特例返矮盒 → 玩家脚位停在 cell+0.9375（渲染顶面 cell+1.0 略高于脚位 → 视觉如站在浅翻耕沟，
     //   同 MC 耕地观感）。与 selectionAABBs 解耦：选中框仍整格（玩家瞄准/破块按整格，无 1/16 误差烦恼）。
-    if (blockId == Farmland)
-        return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
+    if (blockId == Farmland) {
+        put(BlockAABB{0, 0, 0, 1, 0.9375f, 1});
+        return n;
+    }
     // t620 附魔台矮盒 0.75（12/16，机制等价 MC 1.0 附魔台矮 hitbox；渲染走 PartialBlockGeometry
     //   [0,0.75] 矮盒）。与 Farmland 同模式：碰撞矮、selection 仍整格（ShapeFull 走 shapeBoxes 满格
     //   选中框，瞄准/破块按整格无 0.25 误差烦恼）、raycast 整格命中（isFullCube=true）—— 三者解耦。
-    if (blockId == EnchantingTable)
-        return {BlockAABB{0, 0, 0, 1, 0.75f, 1}};
+    if (blockId == EnchantingTable) {
+        put(BlockAABB{0, 0, 0, 1, 0.75f, 1});
+        return n;
+    }
     // t849 铁砧碰撞收窄为三盒窄形（anvilShapeBoxes 单一权威：底座/腰柱/顶台三段，XZ 12/16 足印）——
     //   玩家可走进边缘缝隙（spec「整格挡人 → 0.75 宽」）。机制等价 MC 1.0 anvil 异形 VoxelShape。
     //   铁砧 def.shape=ShapeFull（solid=false 异形渲染先例：mesher 邻居剔除 / 重力族 / 满遮等共享语义
     //   依赖它，lessons-learned t639「别翻转共享谓词修单消费者」）→ 在此 id 特例分流，不动共享谓词。
-    if (isAnvil(blockId))
-        return anvilShapeBoxes();
+    if (isAnvil(blockId)) {
+        constexpr float s = 1.0f / 16.0f; // 与 anvilShapeBoxes() 同表镜像（改铁砧造型两处同步）
+        put(BlockAABB{ 2*s, 0.0f, 2*s, 14*s, 4*s, 14*s }); // ① 宽基座
+        put(BlockAABB{ 6*s, 4*s, 6*s, 10*s, 10*s, 10*s }); // ② 窄腰柱
+        put(BlockAABB{ 2*s, 10*s, 3*s, 14*s, 1.0f, 13*s }); // ③ 宽顶砧台（满高到格顶 1.0）
+        return n;
+    }
     // t849 仙人掌碰撞贴实际形状：渲染是 0.8 居中细柱（partialblockgeometry kCactusInset=0.1 内缩——
     //   (1−0.8)/2，非 1/16）→ 碰撞盒同 0.8 居中（此前 ShapeFull 整格——玩家贴仙人掌半身即被挡，与视觉
     //   不符；本盒只管**实体阻挡**——玩家停在柱面外）。**接触伤害不走本收窄盒**（review25 #17 注释更正，
@@ -1698,8 +1744,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
     //   kTouchSkin 容差皮**重叠判定（刻意外扩——被柱面碰撞挡住即算接触，权威注释见 playercontroller.cpp
     //   仙人掌伤害段，多轮回归史：按内缩盒对齐会把侧撞挡在 0.1 缝外的接触漏判 =「侧撞不扣血」回归）；
     //   mob 侧为 EntityManager 格邻接判定。**勿按本盒「对齐」伤害口径**。放置预检 / 失撑链不读本函数，零回归。
-    if (blockId == Cactus)
-        return {BlockAABB{0.1f, 0.0f, 0.1f, 0.9f, 1.0f, 0.9f}};
+    if (blockId == Cactus) {
+        put(BlockAABB{0.1f, 0.0f, 0.1f, 0.9f, 1.0f, 0.9f});
+        return n;
+    }
     // t359 活版门开态碰撞 = 整高竖直板（同 shapeBoxes，无特例覆盖）。机制等价「半门 / 1 格高 ledge」：
     //   开活板门铰链侧整高 [0,1] 竖直板可站立于顶（y=1.0）+ 蹲行走 → 不再穿透。
     //   t335 曾对此返「铰链侧 3/16 宽 × 3/16 高的唇边」(板身穿过)，但唇边太薄（0.1875 < 玩家 footprint
@@ -1707,7 +1755,18 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
     //   t359 复发根因）。现直接走 shapeBoxes（开=整高板 y[0,1]），与渲染 / selectionAABBs 三者同源；脚下支撑复探
     //   （playercontroller step() 脚底 -0.05 探地）取该板顶面 → 站稳。合态（state bit0=0）shapeBoxes 返水平薄板
     //   y[0,0.1875] → 顶面行走（不变）。
-    return shapeBoxes(def(blockId).shape, state);
+    return shapeBoxesInto(def(blockId).shape, state, out, cap);
+}
+
+// by-value 薄壳（t859）：矩阵测试 / 冷路径继续按值消费；玩家 / mob 碰撞热路径走 collisionAABBsInto。
+std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 blockId, quint8 state)
+{
+    std::vector<BlockAABB> out;
+    BlockAABB buf[kMaxAABBsPerCell];
+    const int n = collisionAABBsInto(blockId, state, buf, kMaxAABBsPerCell);
+    out.reserve(size_t(n));
+    for (int i = 0; i < n; ++i) out.push_back(buf[i]);
+    return out;
 }
 
 // review26 #20 collisionAABBs 的免构建顶面镜像（声明见 .h）：分支序 / 特例表逐字对齐 collisionAABBs，
