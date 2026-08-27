@@ -4970,7 +4970,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
                 bool hitBlock = false;
                 if (by >= 0) {
-                    for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(bx, by, bz)) {
+                    // t859：out-param 栈上小缓冲（零堆分配；旧按值版每查两次 vector 分配）。
+                    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+                    const int n = world->collisionAABBsAt(bx, by, bz, boxes, BlockRegistry::kMaxAABBsPerCell);
+                    for (int i = 0; i < n; ++i) {
+                        const BlockRegistry::BlockAABB &b = boxes[i];
                         if (next.x() > b.minX && next.x() < b.maxX
                             && next.y() > b.minY && next.y() < b.maxY
                             && next.z() > b.minZ && next.z() < b.maxZ) { hitBlock = true; break; }
@@ -5948,10 +5952,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   1.0 / 下半砖 0.5 / 压力板 ~0.0625 / 上半砖 1.0 / stairs 多盒取最高）→ restY = supportCellY +
                 //   topOffset + 0.5（TNT 底面贴支撑顶面）。halfH=0 可穿透 + 不放置方块（引燃态）。
                 float topOffset = 0.0f;
-                const auto aabbs = BlockRegistry::collisionAABBs(supportId, world->stateAt(cx, supportCellY, cz));
-                for (const BlockRegistry::BlockAABB &bb : aabbs)
-                    if (bb.maxY > topOffset) topOffset = bb.maxY; // 取最大顶面（stairs 多盒取最高）
-                if (aabbs.empty()) topOffset = 1.0f; // 兜底（不应发生）
+                // t859：out-param 栈上小缓冲（零堆分配；旧按值版每查两次 vector 分配）。
+                BlockRegistry::BlockAABB supBoxes[BlockRegistry::kMaxAABBsPerCell];
+                const int nSup = BlockRegistry::collisionAABBsInto(
+                        supportId, world->stateAt(cx, supportCellY, cz),
+                        supBoxes, BlockRegistry::kMaxAABBsPerCell);
+                for (int i = 0; i < nSup; ++i)
+                    if (supBoxes[i].maxY > topOffset) topOffset = supBoxes[i].maxY; // 取最大顶面（stairs 多盒取最高）
+                if (nSup == 0) topOffset = 1.0f; // 兜底（不应发生）
                 const float restY = float(supportCellY) + topOffset + 0.5f; // 支撑顶面 + TNT 半高
                 if (e.pos.y() != restY) { e.pos.setY(restY); e.vy = 0.0f; dirty = true; }
             } else if (newY <= 0.0f) {
@@ -6788,7 +6796,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 const int sy = qFloor(hy);
                 bool embedded = false;
                 if (sy >= 0 && world->isCollidable(sx, sy, sz)) {
-                    for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(sx, sy, sz)) {
+                    // t859：out-param 栈上小缓冲（零堆分配；mob 窒息判定 aiTick 节流帧集中跑）。
+                    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+                    const int n = world->collisionAABBsAt(sx, sy, sz, boxes, BlockRegistry::kMaxAABBsPerCell);
+                    for (int i = 0; i < n; ++i) {
+                        const BlockRegistry::BlockAABB &b = boxes[i];
                         if (hx > b.minX && hx < b.maxX && hy > b.minY && hy < b.maxY
                             && hz > b.minZ && hz < b.maxZ) { embedded = true; break; }
                     }
@@ -6969,10 +6981,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const int headCellFrom = qFloor(e.pos.y() + e.halfH);
             const int headCellTo = qFloor(headTopNew);
             float ceilBottom = -1.0f;
+            // t859：out-param 栈上小缓冲（零堆分配；mob 上浮天花板钳制每 mob 每帧查）。
+            BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
             for (int cy = headCellFrom; cy <= headCellTo && ceilBottom < 0.0f; ++cy) {
                 if (cy < 0) continue;
-                for (const BlockRegistry::BlockAABB &b : world->collisionAABBsAt(cx, cy, cz)) {
-                    if (ceilBottom < 0.0f || b.minY < ceilBottom) ceilBottom = b.minY;
+                const int n = world->collisionAABBsAt(cx, cy, cz, boxes, BlockRegistry::kMaxAABBsPerCell);
+                for (int i = 0; i < n; ++i) {
+                    if (ceilBottom < 0.0f || boxes[i].minY < ceilBottom) ceilBottom = boxes[i].minY;
                 }
             }
             if (ceilBottom >= 0.0f && headTopNew > ceilBottom) {

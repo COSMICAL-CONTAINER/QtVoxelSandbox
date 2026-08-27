@@ -530,21 +530,22 @@ float World::columnTopSurfaceY(int x, int z) const
     return m_chunks.columnTopSurfaceY(x, z);
 }
 
-// t146 给定格的碰撞 sub-AABB（世界坐标）。读 blockAt + stateAt → BlockRegistry::collisionAABBs 取 cell-local
-//   子盒 → 偏移到世界坐标。越界 blockAt=0(air) → collisionAABBs 空 → 返回空。玩家碰撞（PlayerController）
-//   逐格逐 sub-AABB 测试。同源 partialblockgeometry 的 state 解码（碰撞形状 == 渲染形状）。
-std::vector<BlockRegistry::BlockAABB> World::collisionAABBsAt(int x, int y, int z) const
+// t146 给定格的碰撞 sub-AABB（世界坐标）。读 blockAt + stateAt → BlockRegistry::collisionAABBsInto 取
+//   cell-local 子盒直写调用方缓冲 → 原地偏移到世界坐标（t859 起零堆分配，见 world.h 头注释；旧行为
+//   「按值返回 vector + 内部再建 local vector」两次分配/查询退役）。越界 blockAt=0(air) → 0 盒。
+//   玩家碰撞（PlayerController）逐格逐 sub-AABB 测试。同源 partialblockgeometry 的 state 解码
+//   （碰撞形状 == 渲染形状）。
+int World::collisionAABBsAt(int x, int y, int z, BlockRegistry::BlockAABB *out, int cap) const
 {
     const quint8 id = m_chunks.blockAt(x, y, z);
     const quint8 st = m_chunks.stateAt(x, y, z);
-    const std::vector<BlockRegistry::BlockAABB> local = BlockRegistry::collisionAABBs(id, st);
-    std::vector<BlockRegistry::BlockAABB> out;
-    out.reserve(local.size());
+    const int n = BlockRegistry::collisionAABBsInto(id, st, out, cap);
     const float fx = float(x), fy = float(y), fz = float(z);
-    for (const BlockRegistry::BlockAABB &a : local)
-        out.push_back({a.minX + fx, a.minY + fy, a.minZ + fz,
-                       a.maxX + fx, a.maxY + fy, a.maxZ + fz});
-    return out;
+    for (int i = 0; i < n; ++i) {
+        out[i].minX += fx; out[i].minY += fy; out[i].minZ += fz;
+        out[i].maxX += fx; out[i].maxY += fy; out[i].maxZ += fz;
+    }
+    return n;
 }
 
 // t865/t867 统一支撑顶面查询（头注释见 world.h）：碰撞 sub-AABB 真顶为单一权威 —— 整立方快路径
@@ -572,8 +573,12 @@ float World::supportTopYAt(int x, int y, int z) const
 //   见 world.h 头注释）。
 bool World::pointBlockedByCollision(float x, float y, float z) const
 {
-    for (const BlockRegistry::BlockAABB &b
-         : collisionAABBsAt(int(std::floor(x)), int(std::floor(y)), int(std::floor(z)))) {
+    // t859：out-param 版（栈上小缓冲，零堆分配；旧行为按值 range-for vector）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+    const int n = collisionAABBsAt(int(std::floor(x)), int(std::floor(y)), int(std::floor(z)),
+                                   boxes, BlockRegistry::kMaxAABBsPerCell);
+    for (int i = 0; i < n; ++i) {
+        const BlockRegistry::BlockAABB &b = boxes[i];
         if (x > b.minX && x < b.maxX && y > b.minY && y < b.maxY && z > b.minZ && z < b.maxZ)
             return true;
     }

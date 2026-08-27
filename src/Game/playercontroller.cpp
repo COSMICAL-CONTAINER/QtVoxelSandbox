@@ -2074,9 +2074,11 @@ void PlayerController::applyEnderPearlTeleport(int x, int y, int z)
     const int lx = qBound(0, x, int(m_world->width()) - 1);
     const int lz = qBound(0, z, int(m_world->depth()) - 1);
     // t835① 单一判据：本格有碰撞盒 = 支撑/阻挡（支撑扫描与脚/头复查共用；与玩家 step 物理同源的碰撞口径，
-    //   替换旧 isSolid「非 air 实存」—— 见方法头注释 (3)）。collisionAABBsAt 越界返空盒表 → 空气语义安全。
+    //   替换旧 isSolid「非 air 实存」—— 见方法头注释 (3)）。collisionAABBsAt 越界 0 盒 → 空气语义安全。
+    //   t859：out-param 栈上小缓冲（零堆分配；旧按值 .empty() 每查两次分配）。
     const auto cellBlocked = [this](int cx, int cy, int cz) {
-        return !m_world->collisionAABBsAt(cx, cy, cz).empty();
+        BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+        return m_world->collisionAABBsAt(cx, cy, cz, boxes, BlockRegistry::kMaxAABBsPerCell) > 0;
     };
     int yy = y; // 自命中格向下扫（y 越上界无害：越界无碰撞盒 → 视作开放，同 endereye 落物扫描）
     int footY = -1;
@@ -5733,7 +5735,10 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
         //   生成在墙后格（穿墙 TNT）；堵口降级与 d2 路径统一——MC 堵口不弹的近似取舍，物品形态保库存语义完整，
         //   比静默吞 TNT 更可观察可回收，也比隔墙传送更保守）。
         const auto primedCellClear = [this](int cx, int cy, int cz) {
-            return m_world && m_world->collisionAABBsAt(cx, cy, cz).empty();
+            // t859：out-param 栈上小缓冲（零堆分配；旧按值 .empty() 每查两次分配）。
+            BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+            return m_world && m_world->collisionAABBsAt(cx, cy, cz, boxes,
+                                                        BlockRegistry::kMaxAABBsPerCell) == 0;
         };
         const int tdx = int(dir.x()), tdz = int(dir.z());
         const float popVX = dir.x() * kDispenserTntPopSpeed, popVZ = dir.z() * kDispenserTntPopSpeed;
@@ -5864,7 +5869,11 @@ bool PlayerController::overlapsPlayerAABB(int bx, int by, int bz, quint8 id, qui
     const float miny = m_pos.y(),           maxy = m_pos.y() + m_height;
     const float minz = m_pos.z() - kHalfW, maxz = m_pos.z() + kHalfW;
     const float fx = float(bx), fy = float(by), fz = float(bz);
-    for (const BlockRegistry::BlockAABB &a : BlockRegistry::collisionAABBs(id, state)) {
+    // t859：out-param 栈上小缓冲（零堆分配；放置校验每格一查，旧按值版两次分配/查）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+    const int n = BlockRegistry::collisionAABBsInto(id, state, boxes, BlockRegistry::kMaxAABBsPerCell);
+    for (int i = 0; i < n; ++i) {
+        const BlockRegistry::BlockAABB &a = boxes[i];
         if (minx < a.maxX + fx && maxx > a.minX + fx &&
             miny < a.maxY + fy && maxy > a.minY + fy &&
             minz < a.maxZ + fz && maxz > a.minZ + fz) return true;
@@ -5907,10 +5916,15 @@ bool PlayerController::overlapSubAABBs(int axis, float *outMinSurf, float *outMa
     const int z0 = int(std::floor(fminz)), z1 = int(std::ceil(fmaxz)) - 1;
     bool hit = false, haveMin = false, haveMax = false;
     float minSurf = 0.f, maxSurf = 0.f;
+    // t859：out-param 栈上小缓冲（零堆分配）——这是玩家碰撞最热路径（3 轴 × ~12 格/tick，旧按值版
+    //   每格两次 vector 分配）。缓冲声明在循环外，逐格复用同一栈槽。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x) {
-                for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z)) {
+                const int n = m_world->collisionAABBsAt(x, y, z, boxes, BlockRegistry::kMaxAABBsPerCell);
+                for (int i = 0; i < n; ++i) {
+                    const BlockRegistry::BlockAABB &b = boxes[i];
                     if (!(minx < b.maxX && maxx > b.minX &&
                           miny < b.maxY && maxy > b.minY &&
                           minz < b.maxZ && maxz > b.minZ)) continue; // 3 轴任一仅贴面 / 不重叠 → 跳过
@@ -6295,14 +6309,20 @@ bool PlayerController::canStandUp() const
     const int x0 = int(std::floor(fminx)), x1 = int(std::ceil(fmaxx)) - 1;
     const int y0 = int(std::floor(fminy)), y1 = int(std::ceil(fmaxy)) - 1;
     const int z0 = int(std::floor(fminz)), z1 = int(std::ceil(fmaxz)) - 1;
+    // t859：out-param 栈上小缓冲（零堆分配，逐格复用同一栈槽）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
-            for (int x = x0; x <= x1; ++x)
-                for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z))
+            for (int x = x0; x <= x1; ++x) {
+                const int n = m_world->collisionAABBsAt(x, y, z, boxes, BlockRegistry::kMaxAABBsPerCell);
+                for (int i = 0; i < n; ++i) {
+                    const BlockRegistry::BlockAABB &b = boxes[i];
                     if (minx < b.maxX && maxx > b.minX &&
                         miny < b.maxY && maxy > b.minY &&
                         minz < b.maxZ && maxz > b.minZ)
                         return false; // 3 轴严格重叠（同 overlapSubAABBs 判据）→ 站不下
+                }
+            }
     return true;
 }
 
@@ -6333,10 +6353,14 @@ float PlayerController::autoStepLift() const
     const int y0 = int(std::floor(baseY)), y1 = int(std::floor(maxY));
     float bestTop = 0.0f;
     bool found = false;
+    // t859：out-param 栈上小缓冲（零堆分配，逐格复用同一栈槽）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
     for (int y = y0; y <= y1; ++y)
         for (int z = z0; z <= z1; ++z)
-            for (int x = x0; x <= x1; ++x)
-                for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(x, y, z)) {
+            for (int x = x0; x <= x1; ++x) {
+                const int n = m_world->collisionAABBsAt(x, y, z, boxes, BlockRegistry::kMaxAABBsPerCell);
+                for (int i = 0; i < n; ++i) {
+                    const BlockRegistry::BlockAABB &b = boxes[i];
                     const float top = b.maxY;
                     if (top <= baseY + 1e-3f || top > maxY) continue; // 只取「脚底之上、maxStep 内」的顶面
                     if (!(minx - kStepProbe < b.maxX && maxx + kStepProbe > b.minX &&
@@ -6344,6 +6368,7 @@ float PlayerController::autoStepLift() const
                         continue; // footprint 外扩容差重叠（t581：含「正贴面被挡」的障碍；排除仅邻格远障碍）
                     if (!found || top > bestTop) { bestTop = top; found = true; }
                 }
+            }
     return found ? (bestTop - baseY) : 0.0f;
 }
 
@@ -6437,8 +6462,12 @@ bool PlayerController::isLockedBuried() const
     //   → 仅「显著嵌入」（深度 >0.1）才算，排除边界 FP。真被埋（沙落身 / 卡进墙）仍显著嵌入 → 仍锁。
     constexpr float kEmbedTol = 0.1f;
     bool embedded = false;
+    // t859：out-param 栈上小缓冲（零堆分配）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
     for (int y = y0; y <= y1 && !embedded; ++y) {
-        for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
+        const int n = m_world->collisionAABBsAt(bx, y, bz, boxes, BlockRegistry::kMaxAABBsPerCell);
+        for (int i = 0; i < n; ++i) {
+            const BlockRegistry::BlockAABB &b = boxes[i];
             if (minx + kEmbedTol < b.maxX && maxx - kEmbedTol > b.minX &&
                 miny + kEmbedTol < b.maxY && maxy - kEmbedTol > b.minY &&
                 minz + kEmbedTol < b.maxZ && maxz - kEmbedTol > b.minZ) { embedded = true; break; }
@@ -6486,8 +6515,12 @@ void PlayerController::extrudeEmbedded()
     constexpr float kEmbedTol = 0.1f; // 须与 isLockedBuried 同值（边界 FP 阈一致；改须两处同步）
     // 1) 找嵌入块（中心列上某 Y 格**显著**重叠，内缩 kEmbedTol 排除边界 FP）。
     int embY = -1;
+    // t859：out-param 栈上小缓冲（零堆分配）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
     for (int y = y0; y <= y1 && embY < 0; ++y) {
-        for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
+        const int n = m_world->collisionAABBsAt(bx, y, bz, boxes, BlockRegistry::kMaxAABBsPerCell);
+        for (int i = 0; i < n; ++i) {
+            const BlockRegistry::BlockAABB &b = boxes[i];
             if (minx + kEmbedTol < b.maxX && maxx - kEmbedTol > b.minX &&
                 miny + kEmbedTol < b.maxY && maxy - kEmbedTol > b.minY &&
                 minz + kEmbedTol < b.maxZ && maxz - kEmbedTol > b.minZ) { embY = y; break; }
@@ -6540,8 +6573,12 @@ void PlayerController::launchUnburyUpward()
     constexpr float kEmbedTol = 0.1f; // 与 extrudeEmbedded / isLockedBuried 同值（边界 FP 阈一致，改须三处同步）
     // 找中心列嵌入块（同 extrudeEmbedded 步骤 1）。
     int embY = -1;
+    // t859：out-param 栈上小缓冲（零堆分配；下方 topY 复探同缓冲复用）。
+    BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
     for (int y = y0; y <= y1 && embY < 0; ++y) {
-        for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, y, bz)) {
+        const int n = m_world->collisionAABBsAt(bx, y, bz, boxes, BlockRegistry::kMaxAABBsPerCell);
+        for (int i = 0; i < n; ++i) {
+            const BlockRegistry::BlockAABB &b = boxes[i];
             if (minx + kEmbedTol < b.maxX && maxx - kEmbedTol > b.minX &&
                 miny + kEmbedTol < b.maxY && maxy - kEmbedTol > b.minY &&
                 minz + kEmbedTol < b.maxZ && maxz - kEmbedTol > b.minZ) { embY = y; break; }
@@ -6550,8 +6587,9 @@ void PlayerController::launchUnburyUpward()
     if (embY < 0) return; // 无显著嵌入 → 不干预
     // 嵌入块顶面（完整格顶 = embY+1；partial 块取其 sub-AABB 最高 maxY，落沙 / 沙块为整格）。
     float topY = float(embY) + 1.0f;
-    for (const BlockRegistry::BlockAABB &b : m_world->collisionAABBsAt(bx, embY, bz))
-        if (b.maxY > topY) topY = b.maxY;
+    const int nTop = m_world->collisionAABBsAt(bx, embY, bz, boxes, BlockRegistry::kMaxAABBsPerCell);
+    for (int i = 0; i < nTop; ++i)
+        if (boxes[i].maxY > topY) topY = boxes[i].maxY;
     // 顶面上方须容得下玩家全高（抬过去不顶头 / 不再嵌）才抬。
     const float savedY = m_pos.y();
     m_pos.setY(topY + 1e-3f);
