@@ -939,6 +939,11 @@ void PlayerController::tickImpl()
     //   （玩家本就立于地面）。updateSleep 跑完即 return，避免下方 pollMouse/updateMining 等干扰睡眠过渡。
     if (m_sleeping) {
         { FrameProfiler::Scope profInput("input"); updateSleep(float(dt)); }
+        // review26 #13：睡觉窗口与骑船分支同病 —— 整段冻结跳过 step() → 矿车环境检查（t866② 仙人掌 /
+        //   岩浆 / 虚空销毁）与探测轨占用在本窗口停摆。补调 checkCartEnvironment（轻量 O(车数×AABB 格扫)，
+        //   骑船分支同款）；derailed 自由物理与滑行摩擦维持停摆（睡觉通常 1-3s、醒来自愈，登记窗口语义）。
+        //   硬暂停（worldRunning=false）不进本分支（上层早退），软档睡觉时世界照跑语义一致。
+        if (m_minecartManager) m_minecartManager->checkCartEnvironment(m_world);
         return;
     }
     { FrameProfiler::Scope profPhys("phys");
@@ -6623,8 +6628,15 @@ void PlayerController::step(qreal dt)
         //   直到下船。return 前补调占用重扫（全车种重扫 + 离开沿清位；O(车数×列扫)，帧级开销可承受；
         //   不推进空车物理 —— 骑船期车停驻语义不变）。dismount / 撞毁两 return 不用补：下一帧已脱离
         //   骑船态走正常路径收口。
-        if (m_minecartManager)
+        // review26 #13：同窗口再补一档环境摧毁检查（checkCartEnvironment，L5 同款轻量帧级收口）——
+        //   骑船期触仙人掌 / 岩浆的车不销毁、虚空车永挂的停摆窗口关闭（t866② 环境检查承诺「帧级」，
+        //   本分支是唯一不经 tickPushedCarts 的常驻窗口）。**derailed 自由物理（半空坠落 / 贴地滑行）
+        //   本窗口仍停摆**：补推进需复刻 tickPushedCarts 的骑乘排除与驱动序，代价大于收益（骑船通常
+        //   数秒、下车即自愈、悬停车无观察面），登记为窗口语义而非缺陷。
+        if (m_minecartManager) {
             m_minecartManager->updateDetectorRailOccupancy(m_world);
+            m_minecartManager->checkCartEnvironment(m_world);
+        }
         reportHorizSpeed(posBefore, dt);
         emit positionChanged();
         return;

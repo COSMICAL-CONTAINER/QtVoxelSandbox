@@ -9888,6 +9888,90 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ── review26 #14 derailed 矿车可被撞滑探针（MinecartManager 直编，t863(d)/t864 推离 rig 族）──
+    //   用户症状（review26 低危）：出轨落地的矿车在车-车碰撞中是不可推动的幽灵障碍 —— 行进车撞上
+    //   出轨车被每帧顶回、出轨车纹丝不动，动力轨也推不过去（clampShift 无轨列恒 0 + impulseDirOk
+    //   需轨连接）。修：derailed 态加碰撞分支（冲量放行 + 自由体墙检去穿插）。断言：
+    //   (a) 停驻出轨车被行进车撞后位移 ≥0.5 格（旧代码恒 0 = 幽灵障碍签名，回退即红）；
+    //   (b) 终态两车分离 ≥0.85（kCartCollideSep−ε：无穿透互锁 / 无永久贴脸抖动）；
+    //   (c) 行进车推进 ≥1 格（撞滑不吞行进侧动量到「原地锁死」）。
+    {
+        // rig 选址：运行期扫描空区（t863 同款）。需 11×1×4 净空（地板走廊 x0..x0+8 + 隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 10 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 10 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | review26-14 derailed cart knockable: no clear rig area found";
+        } else {
+            const float groundH = 0.3875f; // kCartGroundH 镜像（出轨贴地落定中心偏移）
+            // 走廊地板 x0+1..x0+8 @kRigY-1（顶 = kRigY）；A 起动轨 x0、B 出轨用临时轨 x0+5（轨下地板承接）。
+            for (int i = 1; i <= 8; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0 + 5, kRigY, z0, BR::Rail, 0);
+            MinecartManager carts;
+            // B：临时轨上静止车被向西推离 → derailed + 沿 -X 贴地滑行 ≤2 格（4.0/摩擦 2）→ 停驻走廊中段。
+            carts.spawnCart(x0 + 5, kRigY, z0, &w); // B（槽 0）
+            QVector3D pusherB(carts.posAt(0).x() + 0.4f, carts.posAt(0).y(), carts.posAt(0).z());
+            for (int t = 0; t < 400; ++t) {
+                carts.pushEmptyCart(&w, pusherB, -1.0f, 0.0f); // 朝 -X（走廊内侧）推
+                carts.tickPushedCarts(0.016, &w);
+                if (carts.posAt(0).x() < float(x0 + 5) - 0.4f) break; // 已离临时轨格 → 出轨成立
+                pusherB.setX(carts.posAt(0).x() + 0.4f);              // 追着推
+            }
+            for (int t = 0; t < 300; ++t) carts.tickPushedCarts(0.016, &w); // 滑行摩擦停驻
+            const float bPark = carts.posAt(0).x();
+            const float bParkY = carts.posAt(0).y();
+            const bool bRigOk = bPark < float(x0 + 5) - 0.3f            // 确已推离临时轨
+                && bPark > float(x0 + 2) + 0.2f                          // 停驻走廊中段（A 进攻走廊可达）
+                && std::fabs(bParkY - (float(kRigY) + groundH)) < 0.02f; // 贴地落定（derailed 落地形态）
+            w.setBlock(x0 + 5, kRigY, z0, BR::Air, 0); // 拆临时轨（B 列确认无轨 = 自由体分支前置）
+            // A：西端轨上静止车被向东反复推（停驻即再推，单次滑 ≤2 格）→ 撞上 B。B 在 A 东侧 →
+            //   被撞离向 = +X（冲量沿 n=B−A 推离；B.dir=-X × 负速 = +X 位移，与「顶退-推离」注释一致）。
+            carts.spawnCart(x0, kRigY, z0, &w); // A（槽 1）
+            QVector3D pusherA(carts.posAt(1).x() - 0.4f, carts.posAt(1).y(), carts.posAt(1).z());
+            float bMaxX = bPark;
+            for (int t = 0; t < 1200; ++t) {
+                carts.pushEmptyCart(&w, pusherA, 1.0f, 0.0f); // 朝 +X 推（推动分支对静止车幂等）
+                carts.tickPushedCarts(0.016, &w);
+                carts.resolveCartCollisions(&w);
+                bMaxX = std::max(bMaxX, float(carts.posAt(0).x()));
+                pusherA.setX(carts.posAt(1).x() - 0.4f); // 追着推
+            }
+            for (int t = 0; t < 200; ++t) { // 收尾：撞滑余动量摩擦停驻
+                carts.tickPushedCarts(0.016, &w);
+                carts.resolveCartCollisions(&w);
+            }
+            const float fa = carts.posAt(1).x(), fb = carts.posAt(0).x();
+            const bool okMove = bRigOk && (bMaxX - bPark) >= 0.5f;              // (a) 出轨车被撞滑 ≥0.5 格（撞离向）
+            const bool okSep = carts.aliveAt(0) && carts.aliveAt(1)
+                && std::fabs(fa - fb) >= 0.85f;                                 // (b) 终态无穿透互锁
+            const bool okProg = fa >= float(x0) + 1.0f;                         // (c) 行进车推进 ≥1 格
+            const bool ok14 = okMove && okSep && okProg;
+            if (!ok14)
+                qInfo().noquote() << "  review26-14 bPark" << bPark << "bMaxX" << bMaxX
+                              << "finalA" << fa << "finalB" << fb << "bRigOk" << bRigOk;
+            if (!ok14) ++totalFail;
+            qInfo().noquote() << (ok14 ? "PASS" : "FAIL")
+                              << "| review26-14 derailed cart is knockable: a sliding cart striking a"
+                                 " derailed-parked cart displaces it >=0.5 cells (old code: immovable"
+                                 " ghost obstacle), both settle apart >=0.85 with no interpenetration"
+                                 " lock, and the striker keeps >=1 cell of progress";
+            // 清场
+            carts.clearAll();
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            for (int i = 1; i <= 8; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+    }
+
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
     //   AABB 与车体重叠 → 攻击射线恒先中乘员，矿车耐久链永不可达 → 下车唯一路径〔车毁〕永不成）；
