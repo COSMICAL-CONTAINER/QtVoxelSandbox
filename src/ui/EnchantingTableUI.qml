@@ -449,6 +449,42 @@ Item {
     readonly property bool creativeMode: root.player && root.player.mode === PlayerController.Creative
     // 「已附魔」flash 状态（点击成功附魔后短暂显绿，~600ms 淡出）。
     property bool justEnchanted: false
+
+    // ── t917 附魔选项种子单一权威（hover 预告与 doEnchant 施放读同一确定性种子）──
+    // PLAN §2-K 确定性：三档选项的附魔结果由「台位 × 物品 × 档位 × 重投计数」位异或派生（hashVoxel 族），
+    //   不掺 Date.now()/Math.random()——旧 doEnchant 种子掺 Date.now() 令每次点击结果都变，hover 预告
+    //   根本无法诚实（预告与施放两路必漂移）。现同槽同物品同重投 = 同结果：hover 读 tierPreviewName
+    //   显示的「必出附魔」与点击 doEnchant 写入的附魔**严格同源**（同一 selectEnchantsPreviewForItem
+    //   纯函数 + 同一 seed），绝非另算的一份随机。
+    //   optionReroll：槽 0 换入新物品实例时 +1（一轮新选项重投，机制等价 MC 换物品重掷附魔种子）；
+    //   同物品逗留期不变 → hover 预告稳定不闪烁（doEnchant 产物写回槽 0 只改 enchants 数组、id/count
+    //   不变 → 附魔后预告保持当轮结果，直到取走换下一件）。
+    property int optionReroll: 0
+    property int _lastSlot0Key: -1   // 槽 0 (id,count) 快照（换件检测；-1 = 初值必触发首次重投）
+    onEnchantRevChanged: {
+        const id0 = root.enchantSlots[0] || 0
+        const key = id0 * 4096 + (root.enchantCounts[0] || 0)
+        if (id0 !== 0 && key !== root._lastSlot0Key) root.optionReroll++
+        root._lastSlot0Key = key
+    }
+    // 档位种子（t917 单一权威；返回非负 int——doEnchant 与 tierPreviewName 同式消费，勿在调用点再变换）。
+    function tierSeed(slotIdx) {
+        const raw = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791)
+                  ^ (root.enchantItemId * 40503) ^ (slotIdx * 7919) ^ (root.optionReroll * 2654435761)
+        return Math.abs(raw) | 0
+    }
+    // t917 档位预告（hover 悬浮窗文案）：selectEnchantsPreviewForItem 同 seed 复算取**首条**附魔名。
+    //   MC 1.0 语义：附魔台悬停选项预告**一条必定出现**的附魔、等级模糊（预告只显名 + ?，不显等级）。
+    //   只显示一种（首条）、必定出现（首条就在施放产物 picks 里）、等级未知（?）——书路径（cat=8 全池）
+    //   同样适用。itemReady 假 / 空产物 → 空串不显。
+    function tierPreviewName(slotIdx) {
+        if (!root.hotbar || !root.itemReady) return ""
+        const picks = root.hotbar.selectEnchantsPreviewForItem(root.enchantItemId,
+                                                                root.offeredFor(slotIdx),
+                                                                root.tierSeed(slotIdx))
+        if (!picks || picks.length === 0) return ""
+        return root.hotbar.enchantDisplayName(picks[0].id)
+    }
     // PERF 护栏：三档 enabled / 消耗 / 附魔结果全部走绑定（itemReady 绑 enchantRev、playerLevel 绑
     //   levelChanged、bookshelfPower 绑 worldEditRev、档位消耗绑 bookshelfPower），低频 NOTIFY 自动重算、
     //   永不 per-frame。无逐帧刷新路径（占位名重投已移除，t590）。
@@ -503,8 +539,10 @@ Item {
         // t649 offeredLevel：offeredFor(slotIdx) 单一权威（floor(bs*20*(i+1)/33)+(i+1)，钳 [1,30]——见属性段
         //   校准注释）。旧版 [8,15,22]+floor(power/2) 固定基底令 4 书架第三档即 24（用户实测偏差）。
         const offered = root.offeredFor(slotIdx)
-        const seed = (enchantX * 73856093) ^ (enchantY * 19349663) ^ (enchantZ * 83492791)
-                    ^ (root.enchantItemId * 40503) ^ (slotIdx * 7919) ^ (Date.now() & 0xffff)
+        // t917 种子改 tierSeed 单一权威（台位 ^ 物品 ^ 档位 ^ optionReroll 确定性派生）：hover 预告
+        //   （tierPreviewName）与本次施放读同一 seed → 预告的「必出附魔」与产物严格同源。旧种子掺
+        //   Date.now() —— 每次点击结果都变，任何 hover 预告都必假（预告-施放双路漂移的根因）。
+        const seed = root.tierSeed(slotIdx)
         // 1) 扣 XP（t694：创造免等级跳过；生存等级不足已被前置守卫拦，spendLevels 拒付 → 全回滚零副作用）。
         if (!freeXp && !root.playerState.spendLevels(lvlCost)) return
         // 2) 扣槽 1 青金石（余数写回；不足已被上方 lapisCount 门控拦，此处防御）。
@@ -744,6 +782,38 @@ Item {
                                         //   → doEnchant（消耗 XP + 槽 1 青金石 → selectEnchants 写入槽 0 物品）。
                                         if (!optSlot.enabled1) return
                                         root.doEnchant(optSlot.idx)
+                                    }
+                                }
+
+                                // t917 hover 预告（用户「锋利? 耐久?」式）：悬停档位显示**一条必定出现**的
+                                //   附魔预告（名 + ? 等级模糊）。tierPreviewName 与 doEnchant 读同一 tierSeed
+                                //   单一权威（预告 = 施放产物首条，绝不另算随机）；itemReady + 已解锁即显
+                                //   （青金石未放足也可先看预告——攒料期间的可读信息）。触碰 enchantRev →
+                                //   换物品 / 附魔后预告即时刷新；hover 进出驱动绑定重算（低频）。
+                                HoverHandler { id: optHover }
+                                property string previewName: {
+                                    const _r = root.enchantRev
+                                    return (_r >= 0 && optHover.hovered && optSlot.unlocked)
+                                           ? root.tierPreviewName(optSlot.idx) : ""
+                                }
+                                Rectangle {
+                                    visible: optSlot.previewName.length > 0
+                                    anchors.bottom: parent.top
+                                    anchors.bottomMargin: 4
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    width: previewText.implicitWidth + 14
+                                    height: 18
+                                    radius: 3
+                                    color: "#101216"; opacity: 0.95
+                                    border.color: "#6a4a9a"; border.width: 1
+                                    z: 20
+                                    Text {
+                                        id: previewText
+                                        anchors.centerIn: parent
+                                        // 「必得 锐锋 ?」：必得 = 必定出现（产物首条）；? = 等级未知
+                                        //   （MC 1.0 附魔台悬停预告口径——只显一种、必定出现、等级模糊）。
+                                        text: "必得 " + optSlot.previewName + " ?"
+                                        color: "#c58af0"; font.pixelSize: 10; font.bold: true
                                     }
                                 }
                             }

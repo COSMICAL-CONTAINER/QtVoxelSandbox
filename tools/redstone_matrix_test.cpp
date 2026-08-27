@@ -11769,6 +11769,45 @@ int main(int argc, char *argv[])
                              "enchant arrays degrade to base";
     }
 
+    // ── t917 附魔选项 hover 预告同源探针（源码钉 + 行为面；R19.16）──
+    //    用户口径：「锋利? 耐久?」式预告——只显示一种附魔、必定出现该附魔、等级未知。诚实预告的前提 =
+    //    预告与施放读同一确定性种子（PLAN §2-K）；旧 doEnchant 种子掺 Date.now()&0xffff → 每次点击结果
+    //    都变，任何静态预告必假（预告-施放双路漂移）。t917 收口 tierSeed 单一权威（台位 ^ 物品 ^ 档位 ^
+    //    optionReroll，无时钟无随机）。断言：① 源码钉 —— EnchantingTableUI.qml 定义 tierSeed、doEnchant
+    //    消费 root.tierSeed(slotIdx)、tierPreviewName 消费同一 root.tierSeed、旧时钟混种式已绝迹（Date.now
+    //    本身不 ban——双击计时的 Date.now() 是合法用途，只 ban 种子混法）；② 行为面 —— 剑 / 书各档 offered
+    //    的 picks 非空且首条 displayName 可解析（预告 = 产物首条，纯函数复算即同产物，「必出」不另掷）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString rootDir = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile ef(rootDir + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
+        const QString t = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
+        bool ok = t.contains(QStringLiteral("function tierSeed(slotIdx)"))
+                  && t.contains(QStringLiteral("const seed = root.tierSeed(slotIdx)"))
+                  && t.contains(QStringLiteral("root.tierSeed(slotIdx))"))
+                  && !t.contains(QStringLiteral("Date.now() & 0xffff"));
+        Hotbar hb;
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const int bookId = RecipeRegistry::BookId;
+        for (int s = 0; ok && s < 40; ++s) {
+            const QVariantList picks = hb.selectEnchantsPreviewForItem(diaSword, 1 + (s % 30), s * 977 + 13);
+            if (picks.isEmpty()) { ok = false; break; }
+            ok = !hb.enchantDisplayName(picks.at(0).toMap().value(QStringLiteral("id")).toInt()).isEmpty();
+        }
+        for (int s = 0; ok && s < 20; ++s) {
+            const QVariantList picks = hb.selectEnchantsPreviewForItem(bookId, 10, s * 331 + 7);
+            ok = !picks.isEmpty()
+                 && !hb.enchantDisplayName(picks.at(0).toMap().value(QStringLiteral("id")).toInt()).isEmpty();
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t917 enchant option hover preview single-source: tierSeed authority (pos^item^"
+                             "tier^reroll; clock mixing Date.now()&0xffff extinct), doEnchant and tierPreviewName "
+                             "both consume root.tierSeed -> preview == first pick of the actual result (guaranteed "
+                             "enchant, level masked); sword offered 1..30 / book samples non-empty with resolvable "
+                             "display names";
+    }
+
     // ── t826 击退附魔实战强度探针（R19.13；公式面 + Entities 层真位移，t774 爆炸击退同款 rig）──
     //    用户报告：「附击退打生物无击退」。根因：旧强度 1+0.5*级 令 II 仅 ~2.3 格总位移（基线 ~1.1 格），
     //    与 AI 游荡抖动同量级 → 实战「无感」。t826 收口 EnchantRegistry::knockbackStrength 单一权威
