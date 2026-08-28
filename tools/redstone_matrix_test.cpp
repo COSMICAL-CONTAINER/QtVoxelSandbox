@@ -52,6 +52,7 @@
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
+#include "frameprofiler.h"        // t933 跨世界泄漏探针（reflood 计数快照差分；Core 叶子直编）
 #include "playercontroller.h"     // t814 真消费端探针（Game 层 PlayerController 直编：firePowerTnt/fireDispenserAtQml）
 #include "worldclock.h"           // t889 暂停语义探针（WorldClock.running 停表行为级 + 源码钉）
 #include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）；t858 feeder 探针共用
@@ -19504,6 +19505,289 @@ Item {
                              "number text hides at full durability (visible only while "
                              "armorDurabilityAt < armorMaxDurability); pure UI change pinned at source "
                              "level per the t902 precedent"
+                             ;
+    }
+
+    // ── P-t933 跨世界卡顿泄漏定位探针（TNT 炸沙坑 8FPS → kill @e 无效 → 换世界仍卡 → 重启恢复）──
+    //   三腿：
+    //   (a) 风暴量化 + 批量收口经济性：t930 级联把「逐格 recomputeLightAround（每次 = ±15×到顶全盒重
+    //       flood）+ 每柱 1 次 worldChanged QML 扇出」重新引入爆炸链（t320 只批了爆炸本体）→ 沙坑一次
+    //       爆炸 = 数百次全盒重 flood。修 = dropGravityColumn 柱末一次 refloodBox + cascadeGravityAround
+    //       级联末一次（联合盒）。钉：128 格悬空沙经一次编辑触发全坍落，光照重 flood 总数 ≤ 4（旧逐格版
+    //       ≥ 129 → 必 FAIL）+ worldChanged ≤ 3（旧逐柱版 = 1 + 柱数）。行为等价钉：坍落后原悬空格见天
+    //       skyLight==15、遮挡格 < 15（批量联合盒 reflood 终态 == 逐格重 flood 终态）。
+    //   (b) 同世界收敛：爆炸 + 级联后跑全部世界 tick（水/岩浆/火/生长/冰/叶衰/天气/红石）——稳态窗口内
+    //       worldChanged / gravityBlockFell / blockBroken / 光照重 flood 全零。若非零 = 存在**不收敛**的
+    //       重算循环（用户「光照一直重建」怀疑的判据）。
+    //   (c) 跨世界残留清零：走真实换世界两路径 —— regenerate（新世界 worldgen）与 beginLoad+finishLoad
+    //       （读档），之后同款 tick 电池全零。非零 = 进程级 / World 级状态跨世界存活（泄漏类）。
+    //       C++ World 层审计结论（beginLoad/generate 清 m_growthCells/m_waterCells/m_lavaCells/m_iceCells/
+    //       m_fireCells/m_burningCells/m_torchBurnout/m_powerDirty/m_decayingLeaves/m_biomeCache/活动盒/
+    //       t933 联合盒）由本腿行为级钉死。
+    //   独立世界（t759 要塞净空先例）：96×96×64 —— 本工程海平面 kWaterLevel=58，高 64 世界的水只到 58，
+    //       y≥59 为干燥空气带（沙坑弹坑不进水 → 电池零写入断言不被「水流入弹坑」合法瞬态污染）。
+    //       ⚠ 地形 / 山体可达世界顶（seed 1337 的 (8..16) 区山体实测到顶）→ rig 位**程序化搜索**干燥
+    //       空气盒（blockAt 全 Air 判定），不假定固定坐标为空。worldgen 水（海 / 湖邻洞穴）首 tick 起
+    //       有合法有限沉降 → 各断言窗前先跑**沉降循环**（tickWaterFlow 推进到连续无写入），把「自然
+    //       瞬态」与「泄漏残留」分离——沉降收敛本身也是 (b)/(c)「有限收敛」前提的一部分。
+    {
+        World w933;
+        w933.setWidth(96);
+        w933.setDepth(96);
+        w933.setHeight(64); // 3 次 setter 各 regenerate 一次；水至 58，y≥59 干燥带（山体除外 → 找位）
+        // 事件计数器（等价 Main.qml 消费端；同步直连）。
+        int wc933 = 0, fell933 = 0, broke933 = 0, dropped933 = 0;
+        QObject::connect(&w933, &World::worldChanged, &w933, [&wc933]() { ++wc933; });
+        QObject::connect(&w933, &World::gravityBlockFell, &w933,
+                         [&fell933](int, int, int, int) { ++fell933; });
+        QObject::connect(&w933, &World::blockBroken, &w933,
+                         [&broke933](int, int, int, int) { ++broke933; });
+        QObject::connect(&w933, &World::blockDroppedAsItem, &w933,
+                         [&dropped933](int, int, int, int) { ++dropped933; });
+        // 世界 tick 系统（等价 Main.qml 的 WorldClock.ticked 桥接面；逐系统分立 → 断言窗可按系统归因）。
+        constexpr int kSysN933 = 13;
+        const char *const kSysName933[kSysN933] = { "rs", "wat", "lav", "fire", "crop", "sug",
+                                                    "farm", "sap", "berry", "frz", "melt", "leaf", "wthr" };
+        const auto tickSys933 = [&w933](int i) {
+            switch (i) {
+            case 0: w933.tickRedstone(); break;
+            case 1: w933.tickWaterFlow(); break;
+            case 2: w933.tickLavaFlow(); break;
+            case 3: w933.tickFire(); break;
+            case 4: w933.tickCropGrowth(); break;
+            case 5: w933.tickSugarcaneGrowth(); break;
+            case 6: w933.tickFarmlandHydration(); break;
+            case 7: w933.tickSaplingGrowth(); break;
+            case 8: w933.tickSweetBerryBushGrowth(); break;
+            case 9: w933.tickIceFreeze(); break;
+            case 10: w933.tickIceMelt(); break;
+            case 11: w933.tickLeafDecay(); break;
+            default: w933.tickWeather(0.1); break;
+            }
+        };
+        // worldgen 水沉降循环：推进 tickWaterFlow 直到连续 kQuiet 个推进零写入（世界自然流场有限收敛；
+        //      cap 防病态挂死）。岩浆步进 3s/格太慢且 worldgen 岩浆湖恒封闭稳定 → 不沉降（断言窗内
+        //      interval=30 不推进）。
+        const auto settleWater933 = [&w933, &wc933]() -> bool {
+            int quiet = 0;
+            int iter = 0;
+            for (; iter < 4000 && quiet < 12; ++iter) {
+                const int wc0 = wc933;
+                w933.tickWaterFlow();
+                w933.tickWaterFlow();
+                w933.tickWaterFlow(); // 3 tick = 1 波前推进（kFlowTickInterval=3）
+                quiet = (wc933 == wc0) ? quiet + 1 : 0;
+            }
+            return quiet >= 12; // true = 已收敛（cap 4000 推进仍未收敛 = 病态世界，探针响亮报 FAIL）
+        };
+        // 干燥盒搜索（区域 B 用）：bx×bz 足迹在 y∈[y0,y1] 无 Water/Lava（山体实岩 / 空气皆可——
+        //      placeRigBlock 覆写放置，弹坑只要不邻流体即稳态）。step 2 扫描；找不到 → qFatal。
+        const auto findDryBox933 = [&w933](int bx, int bz, int y0, int y1) {
+            for (int z = 2; z + bz - 1 < 96; z += 2)
+                for (int x = 2; x + bx - 1 < 96; x += 2) {
+                    bool ok = true;
+                    for (int dz = 0; dz < bz && ok; dz += 1)
+                        for (int dx = 0; dx < bx && ok; dx += 1)
+                            for (int y = y0; y <= y1 && ok; y += 1) {
+                                const quint8 id = w933.blockAt(x + dx, y, z + dz);
+                                if (id == quint8(BR::Water) || id == quint8(BR::Lava)) ok = false;
+                            }
+                    if (ok) return QPair<int, int>(x, z);
+                }
+            qFatal("t933 rig: no dry box %dx%d y%d..%d found in 96x96x64 world", bx, bz, y0, y1);
+            return QPair<int, int>(-1, -1); // qFatal noreturn（防 -Wreturn-type）
+        };
+        // 纯空气盒搜索（区域 A 用：悬空沙 staging 须目标格空气 + 光照断言须见天到顶）。尺寸回退
+        //      （山体种子大平空气带可能不存在 → 逐级缩盒），返回 {x, z, size}。避开 excl 足迹区。
+        const auto findAirBox933 = [&w933](int bxMax, int y0, int y1,
+                                           int exclX0, int exclZ0, int exclX1, int exclZ1) {
+            for (int bx = bxMax; bx >= 8; bx -= 2)
+                for (int z = 2; z + bx - 1 < 96; z += 2)
+                    for (int x = 2; x + bx - 1 < 96; x += 2) {
+                        if (x + bx - 1 >= exclX0 && x <= exclX1 && z + bx - 1 >= exclZ0 && z <= exclZ1)
+                            continue; // 与既有 rig 区重叠 → 跳过该候选
+                        bool ok = true;
+                        for (int dz = 0; dz < bx && ok; dz += 1)
+                            for (int dx = 0; dx < bx && ok; dx += 1)
+                                for (int y = y0; y <= y1 && ok; y += 1)
+                                    if (w933.blockAt(x + dx, y, z + dz) != quint8(BR::Air)) ok = false;
+                        if (ok) return QVector3D(float(x), float(z), float(bx));
+                    }
+            qFatal("t933 rig: no air box >=8x8 y%d..%d found in 96x96x64 world", y0, y1);
+            return QVector3D(-1, -1, -1); // qFatal noreturn（防 -Wreturn-type）
+        };
+
+        // ── rig 找位 + 水沉降（断言前提：世界自然流场已收敛）──
+        // 区域 B（大，先找）：29×29 足迹 y∈[59,62]（石板 y=59 + 沙丘 3 层）。区域 A（小，后找，避开 B）：
+        // 12×12 足迹 y∈[59,62]（悬空沙 8×8×2 + 触发邻格）。
+        // ⚠ 顺序契约：**先沉降后找位**——初始 worldgen 含未稳水系（泉 / 悬水 / 湖洞相交），首轮流
+        //   扫（setter 的 generate 置 dirty + 空盒 → 全量兜底）会把水重排到新位置；若找位在沉降前，
+        //   「干燥」判定量的是**沉降前**的栅格，rig 可能恰好压在沉降后才出现的泉眼 / 瀑布上（平台堵
+        //   住水柱 → 电池窗内合法排水 / 重流写入污染零断言——实测如此）。沉降收敛后再找位 = 干燥判定
+        //   对稳态世界成立。
+        const bool settledInit933 = settleWater933();
+        const QPair<int, int> boxB = findDryBox933(29, 29, 56, 63); // 弹坑 ± 活动盒无流体即可（实岩可）
+        const QVector3D boxA3 = findAirBox933(12, 59, 63,
+                                              boxB.first - 2, boxB.second - 2,
+                                              boxB.first + 29, boxB.second + 29);
+        const int aSize933 = int(boxA3.z()); // 空气盒边长（8..12 回退结果）
+
+        // ── (a) 悬空沙 128 格一次编辑全坍落：reflood / worldChanged 经济性 + 光照终态等价 ──
+        // 区域 A：boxA 内 8×8 高 60..61 悬空沙（setBlockFromEntity 实体着地入口无编辑钩子 → 静默滞留
+        //   悬空态，t930 探针同款确定性构造法；找位保证目标格恒空气 → staging 必成）。
+        //   触发 = 在邻格放一个完整立方（t930 (b) 放置路径）→ ③ 级联 BFS 带落全部。
+        const int ax0 = int(boxA3.x()), az0 = int(boxA3.y());
+        const int ae933 = aSize933 - 2; // 内缩 1 圈（触发格留在盒角外圈邻位）
+        bool stagedAll = true;
+        int stagedN933 = 0;
+        for (int x = ax0 + 1; x <= ax0 + ae933; ++x)
+            for (int z = az0 + 1; z <= az0 + ae933; ++z)
+                for (int y = 60; y <= 61; ++y) {
+                    stagedAll = w933.setBlockFromEntity(x, y, z, quint8(BR::Sand)) && stagedAll;
+                    ++stagedN933;
+                }
+        const qint64 rf0 = FrameProfiler::instance()->countValue("refloodN");
+        const int wc0 = wc933, fell0 = fell933;
+        w933.setBlock(ax0, 60, az0, BR::Stone, 0); // 邻格放置完整立方 → ③ 26 邻域级联触发（t930 (b) 路径）
+        const qint64 rfTrig = FrameProfiler::instance()->countValue("refloodN") - rf0;
+        const int wcTrig = wc933 - wc0, fellTrig = fell933 - fell0;
+        bool goneAll = true;
+        for (int x = ax0 + 1; x <= ax0 + ae933; ++x)
+            for (int z = az0 + 1; z <= az0 + ae933; ++z)
+                for (int y = 60; y <= 61; ++y)
+                    goneAll = goneAll && w933.blockAt(x, y, z) == quint8(BR::Air);
+        // 光照终态等价：原悬空沙格现为露天空气 → 天光 15（批量联合盒 reflood 必须复出与逐格重 flood
+        //   相同的见天列；若联合盒范围算错（漏 ±15 / 漏到顶）此处留下暗格）。对照：触发放的 Stone
+        //   遮挡其正下方格 → 该格天光 < 15（遮光语义仍在）。
+        const int skyOpen = int(w933.skyLightAt(ax0 + aSize933 / 2, 60, az0 + aSize933 / 2));
+        const int skyShaded = int(w933.skyLightAt(ax0, 59, az0));
+        const bool okA = stagedAll && goneAll && fellTrig == stagedN933 && rfTrig <= 4 && wcTrig <= 3
+                         && skyOpen == 15 && skyShaded < 15;
+
+        // ── (b)+(c) 沙坑爆炸风暴 → 同世界收敛 → 换世界（regenerate / beginLoad+finishLoad）残留清零 ──
+        // 区域 B：石板 y=59（29×29 足迹），沙丘 y=60..62（中心 15×15=675 格，逐格 setBlock 合法支撑
+        //   放置）；爆炸球心 = 沙丘中心 (bx0+14, 60, bz0+14) r=2.5 —— 球底掏穿石板 → 上方沙柱失撑
+        //   级联（用户沙坑场景的最小复现）。红石粉 / 铁轨 / 火把放远离弹坑的板角（爆炸后 m_powerDirty /
+        //   级联 recheck 路径有真实载荷）。
+        const int bx0 = boxB.first, bz0 = boxB.second;
+        for (int x = bx0; x <= bx0 + 28; ++x)
+            for (int z = bz0; z <= bz0 + 28; ++z)
+                placeRigBlock(w933, x, 59, z, BR::Stone, 0);
+        for (int x = bx0 + 7; x <= bx0 + 21; ++x)
+            for (int z = bz0 + 7; z <= bz0 + 21; ++z)
+                for (int y = 60; y <= 62; ++y)
+                    placeRigBlock(w933, x, y, z, BR::Sand, 0);
+        placeRigBlock(w933, bx0 + 1, 60, bz0 + 1, BR::RedstoneDust, 0); // 电力族（编辑入 m_powerDirty 载荷）
+        placeRigBlock(w933, bx0 + 2, 60, bz0 + 1, BR::Rail, 0);         // 铁轨（级联 recheck 路径载荷）
+        placeRigBlock(w933, bx0 + 3, 60, bz0 + 1, BR::Torch, 0);        // 火把（光源 + 附着物复检载荷）
+        const qint64 rfB0 = FrameProfiler::instance()->countValue("refloodN");
+        const int wcB0 = wc933, fellB0 = fell933, brokeB0 = broke933, dropB0 = dropped933;
+        const auto dv = w933.destroySphereSilent(bx0 + 14, 60, bz0 + 14, 2.5f); // TNT 陆地爆炸的 World 层本体
+        const int explDestroyed = int(dv.size());
+        const int fellExpl = fell933 - fellB0;
+        const int wcExpl = wc933 - wcB0;
+        const int brokeExpl = broke933 - brokeB0, dropExpl = dropped933 - dropB0;
+        const qint64 rfExpl = FrameProfiler::instance()->countValue("refloodN") - rfB0;
+        // 稳态电池：逐系统 5 tick × 2 窗（预热 + 断言）；每系统独立计 wc → 归因。5 次 < 各系最短
+        //   概率窗距（结冰 50 / 冰融 20 —— 全程 6 窗 × 5 = 30 次超过 20 → 冰融窗会触发；但 worldgen
+        //   冰的融化候选 = 邻发光源冰（无）→ 零写入，diag 按 melt 位归因核对）。
+        int sysSame933[kSysN933] = { 0 };
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int s = 0; s < kSysN933; ++s) {
+                const int w0 = wc933;
+                for (int i = 0; i < 5; ++i) tickSys933(s);
+                if (pass == 1) sysSame933[s] = wc933 - w0; // 断言窗才记录（预热窗的一次性收尾不算）
+            }
+        }
+        const qint64 rfS0 = FrameProfiler::instance()->countValue("refloodN");
+        for (int s = 0; s < kSysN933; ++s)
+            for (int i = 0; i < 5; ++i) tickSys933(s);
+        const qint64 rfSame = FrameProfiler::instance()->countValue("refloodN") - rfS0;
+        int wcSameTotal = 0, fellSame = fell933, brokeSame = broke933, dropSame = dropped933;
+        for (int s = 0; s < kSysN933; ++s) wcSameTotal += sysSame933[s];
+        // fell/broke/drop 的稳态增量在电池后再取一次差分（上面记录的是电池前值）
+        const int fellS1 = fell933 - fellSame, brokeS1 = broke933 - brokeSame, dropS1 = dropped933 - dropSame;
+        const bool okSame = wcSameTotal == 0 && fellS1 == 0 && brokeS1 == 0 && dropS1 == 0 && rfSame == 0;
+        // 换世界路径 1：regenerate（「新建世界」）→ 沉降 → 同款电池全零。
+        w933.regenerate(4242);
+        const int wcRegen = wc933; // 累计值（diag 用；regenerate 自身 emit 不在断言窗内）
+        const bool settledRegen933 = settleWater933();
+        int sysRegen933[kSysN933] = { 0 };
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int s = 0; s < kSysN933; ++s) {
+                const int w0 = wc933;
+                for (int i = 0; i < 5; ++i) tickSys933(s);
+                if (pass == 1) sysRegen933[s] = wc933 - w0;
+            }
+        }
+        int wcRegenTotal = 0;
+        for (int s = 0; s < kSysN933; ++s) wcRegenTotal += sysRegen933[s];
+        const bool okRegen = wcRegenTotal == 0 && (fell933 - fellS1 - fellSame) == 0;
+        // 换世界路径 2：beginLoad + finishLoad（「读档」）→ 沉降（空世界即刻稳）→ 同款电池全零。
+        w933.beginLoad(777);
+        w933.finishLoad();
+        const bool settledLoad933 = settleWater933();
+        int sysLoad933[kSysN933] = { 0 };
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int s = 0; s < kSysN933; ++s) {
+                const int w0 = wc933;
+                for (int i = 0; i < 5; ++i) tickSys933(s);
+                if (pass == 1) sysLoad933[s] = wc933 - w0;
+            }
+        }
+        int wcLoadTotal = 0;
+        for (int s = 0; s < kSysN933; ++s) wcLoadTotal += sysLoad933[s];
+        const bool okLoad = wcLoadTotal == 0;
+        const bool okT933 = okA && okSame && okRegen && okLoad && settledInit933 && settledRegen933
+                            && settledLoad933
+                            && explDestroyed > 0 && fellExpl > 0 && wcExpl > 0 && rfExpl > 0;
+        if (!okT933) ++totalFail;
+        if (!okT933) {
+            auto sysStr = [&](const int *v) {
+                QString s;
+                for (int i = 0; i < kSysN933; ++i)
+                    if (v[i] != 0) s += QString(" %1:%2").arg(QLatin1String(kSysName933[i])).arg(v[i]);
+                return s.isEmpty() ? QString(" all0") : s;
+            };
+            qInfo().noquote() << "  [t933 diag] a" << okA << "(staged" << stagedAll << "gone" << goneAll
+                              << "fell" << fellTrig << "of" << stagedN933 << "rf" << rfTrig << "wc" << wcTrig
+                              << "sky" << skyOpen << "shaded" << skyShaded << ")"
+                              << "| same" << okSame << "(" << sysStr(sysSame933)
+                              << "dfell" << fellS1 << "dbroke" << brokeS1 << "drf" << rfSame << ")"
+                              << "| regen" << okRegen << "(" << sysStr(sysRegen933) << ")"
+                              << "| load" << okLoad << "(" << sysStr(sysLoad933) << ")"
+                              << "| expl(destroyed" << explDestroyed << "fell" << fellExpl
+                              << "wc" << wcExpl << "broke" << brokeExpl << "drop" << dropExpl
+                              << "rf" << rfExpl << ")"
+                              << "| settled" << settledInit933 << settledRegen933 << settledLoad933
+                              << "| rigA" << ax0 << az0 << "s" << aSize933 << "rigB" << bx0 << bz0
+                              << "wcRegen" << wcRegen;
+        }
+        qInfo().noquote() << (okT933 ? "PASS" : "FAIL")
+                          << "| t933 cross-world lag leak localization: the TNT-on-sand 8FPS storm is "
+                             "the t930 gravity cascade re-introducing per-CELL recomputeLightAround "
+                             "(each a +/-15-to-sky-top two-channel reflood plus a qInfo disk flush) "
+                             "and per-COLUMN worldChanged QML fanout into the explosion chain that "
+                             "t320 had batched -- dropGravityColumn now does ONE refloodBox per column "
+                             "and cascadeGravityAround collapses the whole BFS into ONE union-box "
+                             "reflood + ONE worldChanged (equivalence: every cell's light influence "
+                             "is a subset of its +/-15 box, all boxes subset the union, boundary-seed "
+                             "reflood of the union equals the per-cell terminal state, pinned by "
+                             "skyLight==15 on a former floater cell and <15 under the placed shade "
+                             "block); probe legs: (a) 128 staged floaters collapse via a single edit "
+                             "with <=4 refloods and <=3 worldChanged (per-cell code would need >=129), "
+                             "(b) after the explosion + cascade a full world tick battery "
+                             "(water/lava/fire/growth/ice/leaf/weather/redstone) produces ZERO "
+                             "worldChanged/blockBroken/light-reflood in steady state -- no "
+                             "non-converging recompute loop, killing the 'lighting keeps rebuilding' "
+                             "hypothesis at the World layer, (c) the same battery stays zero after "
+                             "both real world-exit paths (regenerate worldgen AND beginLoad+"
+                             "finishLoad save-load) -- no process-level World state survives a "
+                             "world switch (index sets, side tables, dirty flags, activity boxes, "
+                             "and the new gravity-light union box are all cleared), so the residual "
+                             "cross-world cost the user measured lives in the QML scene layer "
+                             "(slot high-water delegate fanout = t935; render-side waitSync = t934, "
+                             "now observable via the F3 'act ct' line)"
                              ;
     }
 

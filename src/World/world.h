@@ -1314,6 +1314,25 @@ private:
     void fluidActExpand(int x, int y, int z);
     // 清空活动盒（每次流体 tick 扫描后 + 世界重置时）。扫描后清 → 盒只累积「自上次扫描以来」的活动。
     void fluidActReset();
+    // t933 perf：重力级联批量收口的**光照重算联合盒**（m_fluidAct* 同模式）。根因：dropGravityColumn 旧版对
+    //   柱内**每格**调 recomputeLightAround —— 每次都是「±15 × 到世界顶」的两通道重 flood（t320 注释 ~50k+
+    //   体素）+ 一次 qInfo 落盘；t930 起爆炸（destroySphereSilent 逐破坏格 → checkGravityBlockOnEdit ③）会级联
+    //   坍落弹坑周边全部失撑沙柱（沙坑场景数十柱 × 每柱 ~10 格）→ 一次爆炸 = 数百次全盒重 flood + 数百次
+    //   日志刷盘 + 每柱 1 次 worldChanged QML 扇出 = 帧时间数百 ms（用户实测 TNT 炸沙坑 8FPS 的 C++ 侧主源；
+    //   对照 t320 爆炸本体早已批量化，t930 级联把逐格风暴重新引入）。修法（destroySphereSilent 批量收口同
+    //   先例）：cascadeGravityAround 全程置 m_batchGravity —— dropGravityColumn 批内**不再**逐格重光照、也不
+    //   自发 worldChanged，只把各柱格并入本联合盒；级联末对「全部坍落格的外接盒 ±15」做**一次** refloodBox
+    //   + **一次** worldChanged + clearAllDirty。等价性：每格编辑的光照影响 ⊆ 其 ±15 盒 ⊆ 联合盒（遮光翻转 →
+    //   盒须到世界顶，与 recomputeLightAround 的 opacity 分支同式），盒外格不受任何坍落影响 → 联合盒边界
+    //   种子法终态与逐格重 flood 一致（同 flushPendingLightEdits 的正确性论证，t380r）。
+    bool m_batchGravity = false; // 级联批进行中（cascadeGravityAround 独占置位；dropGravityColumn 读）
+    int m_gravLightX0 = 0, m_gravLightY0 = 0, m_gravLightZ0 = 0;
+    int m_gravLightX1 = 0, m_gravLightY1 = 0, m_gravLightZ1 = 0;
+    bool m_gravLightAny = false; // 联合盒非空（本批已有坍落格）
+    // 联合盒扩到 (x,y,z)（O(1)；dropGravityColumn 批内每坍落格调）。
+    void gravLightExpand(int x, int y, int z);
+    // 清空联合盒（级联收尾用完 + 世界重置时）。O(1)。
+    void gravLightReset();
     static constexpr int kFlowTickInterval = 3;   // tickWaterFlow 节流间隔（WorldClock tick 单位 = 100ms → 0.3s/格）
     static constexpr int kMaxFlowLevel = 7;       // 水流最大蔓延等级（state 1..7；机制等价 MC 1.0 流水 7 格扩散）
     // t343 岩浆流 tick 节流计数 + 常量：tickLavaFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到

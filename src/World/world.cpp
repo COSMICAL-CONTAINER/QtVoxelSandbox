@@ -84,6 +84,7 @@ void World::beginLoad(int seed)
     m_spawnColX = -1; // t756：出生列同步清（防旧世界残留坐标误导出生定位）；finishLoad 末从存档体素重新解析
     m_spawnColZ = -1;
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
+    gravLightReset();        // t933：网格重置 → 重力级联光照联合盒 / 批标志防御清（正常路径级联收尾已清；防任何中途路径残留批态）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
     emit seedChanged();
 }
@@ -990,6 +991,34 @@ void World::fluidActReset()
     m_fluidActValid = false;
     m_fluidActX0 = m_fluidActY0 = m_fluidActZ0 = 0;
     m_fluidActX1 = m_fluidActY1 = m_fluidActZ1 = 0;
+}
+
+// t933：重力级联光照联合盒扩到 (x,y,z)（见 world.h m_gravLight* 头注释）。O(1)；盒存坍落格本体
+//   （±15 余量在级联收尾 refloodBox 调用点统一外扩，与 recomputeLightAround 的盒公式同式）。
+void World::gravLightExpand(int x, int y, int z)
+{
+    if (!m_gravLightAny) {
+        m_gravLightX0 = m_gravLightX1 = x;
+        m_gravLightY0 = m_gravLightY1 = y;
+        m_gravLightZ0 = m_gravLightZ1 = z;
+        m_gravLightAny = true;
+    } else {
+        if (x < m_gravLightX0) m_gravLightX0 = x;
+        if (x > m_gravLightX1) m_gravLightX1 = x;
+        if (y < m_gravLightY0) m_gravLightY0 = y;
+        if (y > m_gravLightY1) m_gravLightY1 = y;
+        if (z < m_gravLightZ0) m_gravLightZ0 = z;
+        if (z > m_gravLightZ1) m_gravLightZ1 = z;
+    }
+}
+
+// t933：清空重力级联光照联合盒（级联收尾消费后 + 世界重置时防御清）。O(1)。
+void World::gravLightReset()
+{
+    m_batchGravity = false;
+    m_gravLightAny = false;
+    m_gravLightX0 = m_gravLightY0 = m_gravLightZ0 = 0;
+    m_gravLightX1 = m_gravLightY1 = m_gravLightZ1 = 0;
 }
 
 void World::tickWaterFlow()
@@ -2725,6 +2754,7 @@ void World::dropGravityColumn(int x, int y, int z)
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     if (y < 0 || y >= m_height) return;
     int cy = y;
+    int firstY = y; // t933：本柱首坍落格 y（列末单次重光照的联合盒底）
     bool any = false;
     while (cy < m_height && BlockRegistry::isGravityBlock(m_chunks.blockAt(x, cy, z))) {
         const quint8 b = m_chunks.blockAt(x, cy, z);
@@ -2734,7 +2764,9 @@ void World::dropGravityColumn(int x, int y, int z)
         noteIceWrite(x, cy, z, b, BlockRegistry::Air);    // 沙非冰 → no-op（同上）
         noteFireWrite(x, cy, z, b, BlockRegistry::Air);   // 沙非火 → no-op（同上）
         emit blockBroken(x, cy, z, int(b));               // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
-        recomputeLightAround(x, cy, z, b, BlockRegistry::Air); // 沙柱遮光消失重 flood
+        // t933 perf：逐格 recomputeLightAround 退役 —— 单次 = 「±15 × 到世界顶」两通道重 flood（~数十 k 体素）
+        //   + 一次 qInfo 落盘；沙坑爆炸级联数十柱 × 每柱 ~10 格 = 数百次全盒重 flood 是 8FPS 的 C++ 侧主源
+        //   （见 world.h m_gravLight* 头注释）→ 收口到柱末一次；级联批进行中再并入级联联合盒（见函数尾）。
         emit gravityBlockFell(x, cy, z, int(b));          // 呈现层转 spawnFallingBlock（每格一实体，保留真实 id）
         // 审查修 #4：本格已清 Air → 补邻域附着物复检（正上方族 + 6 邻火把 / 红石火把）。柱中段清格时上方
         //   仍是下一格沙 → 各 check 早退 no-op；只有清到**柱顶格**时柱顶 / 柱侧附着物才被本扫带走（含级联：
@@ -2742,10 +2774,32 @@ void World::dropGravityColumn(int x, int y, int z)
         //   见 recheckAttachmentsAfterClear 头注释）。caller 末尾 1 次 worldChanged 覆盖本扫的静默写。
         recheckAttachmentsAfterClear(x, cy, z, b);
         breakNetherPortalsAround(x, cy, z); // review #27：坍落清格邻接门面 → 熄门（同钩子族口径；b 非空构造）
+        if (!any) firstY = cy;
         any = true;
         ++cy;
+        FrameProfiler::instance()->count("gravCellN"); // t933 可观测：本窗坍落重力格数（F3 cnt 行）
     }
     if (!any) return;
+    // t933 perf：坍落可观测（F3 cnt 行 / 1s 窗聚合，FrameProfiler 单例）。
+    FrameProfiler::instance()->count("gravColN");
+    if (m_batchGravity) {
+        // t933 级联批进行中（cascadeGravityAround 独占置位）：并入联合盒即返 —— 光照重算 + worldChanged +
+        //   clearAllDirty 收口到级联末尾**一次**（等价性论证见 world.h m_gravLight* 头注释）。
+        gravLightExpand(x, firstY, z);
+        gravLightExpand(x, cy - 1, z);
+        return;
+    }
+    // t933 非批路径（① 放置自检 / ② 直接上方支线的单柱坍落）：柱末**一次** refloodBox 覆盖全柱各格盒之并
+    //   （x/z ±15；y 自首格 -15 到世界顶 —— 与逐格 recomputeLightAround 的 opacity 分支盒公式一致；重力
+    //   方块均遮光 → doSky=true）。终态与逐格重 flood 等价：每格影响 ⊆ 其 ±15 盒 ⊆ 并盒，盒外格不受影响。
+    {
+        constexpr int R = 15;
+        const int lx0 = std::max(0, x - R), lx1 = std::min(m_width - 1, x + R);
+        const int lz0 = std::max(0, z - R), lz1 = std::min(m_depth - 1, z + R);
+        const int ly0 = std::max(0, firstY - R), ly1 = m_height - 1;
+        if (ly0 <= ly1)
+            refloodBox(lx0, ly0, lz0, lx1, ly1, lz1, /*doSky=*/true);
+    }
     emit worldChanged();      // 驱动 mesh 重建（沙柱消失）
     m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
 }
@@ -2852,6 +2906,15 @@ void World::cascadeGravityAround(int x, int y, int z)
 {
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     if (y < 0 || y >= m_height) return;
+    // t933 perf：级联批收口（见 world.h m_gravLight* 头注释）—— 全程置 m_batchGravity，dropGravityColumn
+    //   批内并入联合盒（不逐格重光照、不逐柱 emit worldChanged）；级联末对联合盒 ±15 一次 refloodBox +
+    //   一次 worldChanged + clearAllDirty。沙坑爆炸场景从「数十柱 × 每柱 ~10 格 × 全盒重 flood + 每柱 1 次
+    //   QML 扇出」降到「一次联合盒重 flood + 一次扇出」（destroySphereSilent t320 批量收口同先例）。
+    //   无重入（dropGravityColumn / recheckAttachmentsAfterClear 均不含 checkGravityBlockOnEdit，见各头
+    //   注释）→ 标志不会被嵌套级联破坏；真有坍落才收尾 emit（无坍落零 emit，与逐柱口径一致）。
+    FrameProfiler::instance()->count("cascN"); // t933 可观测：本窗级联扫描次数（F3 cnt 行）
+    gravLightReset();
+    m_batchGravity = true;
     std::vector<std::array<int, 3>> queue;
     queue.push_back({x, y, z});
     for (size_t qi = 0; qi < queue.size(); ++qi) {
@@ -2876,6 +2939,24 @@ void World::cascadeGravityAround(int x, int y, int z)
                     dropGravityColumn(nx, ny, nz);
                 }
     }
+    // t933 级联收尾：一次联合盒重光照（±15 余量 + 遮光翻转到世界顶，与 recomputeLightAround 的 opacity
+    //   分支盒公式一致）+ 一次 worldChanged + clearAllDirty。无坍落 → 零 emit 零重算（干净早退）。
+    const bool dropped = m_gravLightAny;
+    int bx0 = 0, by0 = 0, bz0 = 0, bx1 = 0, by1 = 0, bz1 = 0;
+    if (dropped) {
+        constexpr int R = 15;
+        bx0 = std::max(0, m_gravLightX0 - R);
+        by0 = std::max(0, m_gravLightY0 - R);
+        bz0 = std::max(0, m_gravLightZ0 - R);
+        bx1 = std::min(m_width - 1, m_gravLightX1 + R);
+        by1 = m_height - 1; // 遮光翻转 → 天光列 first-opaque 须重 seed 到顶（同 recomputeLightAround）
+        bz1 = std::min(m_depth - 1, m_gravLightZ1 + R);
+    }
+    gravLightReset();
+    if (!dropped) return;
+    refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    emit worldChanged();      // 驱动 mesh 重建（本批全部坍落柱）
+    m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 destroySphereSilent 批量收口）
 }
 
 // t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 的 4 向 × 3 高（同层 / 上 / 下 —— 坡度邻轨存在性，
@@ -4696,6 +4777,7 @@ void World::generate()
                              //   tickFire 倒计时继续烧毁替换（无掉落不可逆）+ 该格打火石被守卫拦成 no-op）
     m_powerDirty.clear();    // t656：全新世界 → 清红石电力脏集（worldgen 无红石电路 → 稳态空集零开销）
     fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
+    gravLightReset();        // t933：全新世界 → 重力级联光照联合盒 / 批标志防御清（同 beginLoad 口径）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
     // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。
@@ -7877,8 +7959,14 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
     //   消除持续破/放的 dirty-storm（典型编辑只 1~2 chunk 光变，旧版每次标 9~16 chunk → 18~32 段/编辑重建）。
     //   编辑 chunk + 边界邻接（setBlock 已标）+ 此处光变 chunk → emit worldChanged 后仅这些重建。
     const int dirty = refloodBox(x0, y0, z0, x1, y1, z1, /*doSky=*/opacityChanged);
-    qInfo("vo.light: recomputeLightAround %lldus box=%dx%dx%d dirtyChunks=%d", t.elapsed(),
-          x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1, dirty); // t383：dirtyChunks = 实际光变重建的 chunk 数
+    // t933 perf：per-call qInfo 落盘退役（每次 recomputeLightAround 一条日志 = logHandler 锁 + QTextStream
+    //   + flush 磁盘同步；级联 / 流体活跃期每秒数十次 = 主线程隐性 I/O 风暴）。聚合计数进 FrameProfiler
+    //   （"refloodN"，F3 cnt 行 1s 窗报告）；仅**异常慢**（>3ms，单次编辑重 flood 不应至此）才落一条日志
+    //   保住 t155c「找卡顿根因」的可观测性。
+    FrameProfiler::instance()->count("lightEditN");
+    if (t.elapsed() > 3)
+        qInfo("vo.light: recomputeLightAround %lldus box=%dx%dx%d dirtyChunks=%d", t.elapsed(),
+              x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1, dirty); // t383：dirtyChunks = 实际光变重建的 chunk 数
 }
 
 // t154 有界盒清场 + 重 seed + 重 flood（recomputeLightAround 的实现核心）。盒外格作固定边界种子（衰减 1 流入），
@@ -7891,6 +7979,10 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
 //   （开阔天空，与 skyLightAt OOB 同语义）；其余世界外（y<0 / x/z 越界）→ 0；盒内世界 → 其当前（未清）光值。
 int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky)
 {
+    // t933 可观测：所有光照重 flood 的单一漏斗计数（编辑增量 recomputeLightAround / 爆炸与级联批量收口 /
+    //   流体延迟 flushPendingLightEdits / 叶衰批量均经此）→ F3 cnt 行 1s 窗聚合。稳态（无编辑无坍落）应
+    //   恒 0；换世界后仍非 0 = 有跨世界存活的写入源（t933 跨世界泄漏排查的直接判据）。
+    FrameProfiler::instance()->count("refloodN");
     const int W = m_width, D = m_depth, H = m_height;
     struct Cell { int x, y, z; };
     std::queue<Cell> skyQ, blockQ;
