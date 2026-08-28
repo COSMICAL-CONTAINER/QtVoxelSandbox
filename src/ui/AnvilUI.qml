@@ -859,19 +859,22 @@ Item {
         const cursorSpace = (heldId === 0) ? cap
                           : ((heldId === outId) ? Math.max(0, cap - heldCount) : 0)
         if (toInventory) {
-            // Shift 预检（slotShiftLeftCraft 同口径）：main+hotbar 对 outId 的可用容量 = 空槽满容量 +
-            //   同 id 无名栈余量（addToAny rev2-C5 双向带名守卫 → 带名栈不并，不计其容量，保守）+ 光标
-            //   兜底位；合计 < outCount → 无操作（不消耗等级 / 材料 / 输入）。
+            // Shift 预检（review28 #1 修：与 addToAny rev2-C5 双向带名守卫**同口径**）：main+hotbar 对 outId
+            //   的可用容量 = 空槽满容量（带名产物空槽开新照收 → 恒计）+ 光标兜底位 + 同 id 无名栈余量——
+            //   后者**仅当产物自身无名**（outName 判空）才计：addToAny 对带名产物不并入任何既有同 id 栈
+            //   （即使槽无名，双向守卫的「产物侧」半边），漏看产物名会把这份实际不可用的容量虚增进预检 →
+            //   背包无空槽时 addToAny 返回整份 remain，落定段把改名产物凭空并进异物光标计数（复制/转化面，
+            //   t626 系列严防的面被 t918 新路由旁路）。合计 < outCount → 无操作（不消耗等级 / 材料 / 输入）。
             let space = cursorSpace
             for (let i = 0; i < root.hotbar.mainCount; ++i) {
                 const s = InventoryOps.readSlot(root, "main", i)
                 if (s.id === 0) space += cap
-                else if (s.id === outId && s.name.length === 0) space += Math.max(0, cap - s.count)
+                else if (outName.length === 0 && s.id === outId && s.name.length === 0) space += Math.max(0, cap - s.count)
             }
             for (let i = 0; i < root.hotbar.slotCount; ++i) {
                 const s = InventoryOps.readSlot(root, "hotbar", i)
                 if (s.id === 0) space += cap
-                else if (s.id === outId && s.name.length === 0) space += Math.max(0, cap - s.count)
+                else if (outName.length === 0 && s.id === outId && s.name.length === 0) space += Math.max(0, cap - s.count)
             }
             if (space < outCount) return
         } else {
@@ -932,9 +935,17 @@ Item {
                     root.hotbar.heldDurability = outDur
                     root.hotbar.setHeldEnchants(outEnch)
                     root.hotbar.heldCustomName = outName
-                } else {
+                } else if (heldId === outId) {
                     // 光标持同 id → 余量并入（预检 cursorSpace 已保证不超上限；合并不搬实例元数据同 C 路径）。
-                    root.hotbar.heldCount = heldCount + remain
+                    //   review28 #1：Math.min 封顶（cap = maxStackSize 单一权威）——预检↔落定口径若被未来
+                    //   改动打破也不产生超上限光标栈（超上限的溢出量在预检同口径下不可达，此处纯防御纵深）。
+                    root.hotbar.heldCount = Math.min(cap, heldCount + remain)
+                } else {
+                    // review28 #1 防御纵深：异物光标 + remain>0 在预检同口径下不可达（异物 cursorSpace=0 →
+                    //   预检须背包独立装下全部产物才会通过）；此时输入 / 等级已消耗，零副作用 bail 会让 remain
+                    //   凭空蒸发 → 按 §2-E 不静默吞：丢实体到玩家前方（同本文件归还满包丢弃 dropItemAtFront
+                    //   模式；参数序 = id, count, enchants, name, durability）。
+                    if (root.player) root.player.dropItemAtFront(outId, remain, outEnch, outName, outDur)
                 }
             }
         } else if (heldId === 0) {
