@@ -288,6 +288,14 @@ Window {
     property var terrainGeos: []
     property var chunkObjects: []
     property bool chunksBuilt: false
+    // review28 #4：t860 cutout 折叠降级**总开关**（false = 默认折叠态 5 段）。恢复独立 cutout 段 = 本开关
+    //   置 true（一处翻转，三面经绑定自动联动，**不可能只恢复一半**——旧注释「恢复 createObject 一行即回
+    //   6 段」漏了 terrain 路由半边 → 两段同发同几何 = z-fighting，review28 #4 即此缺陷）：① 各 terrain 段
+    //   ChunkGeometry.cutoutFolded 翻 false（PASS 1 恢复 cross/门/活板门跳过清单）；② chunkAnchor 条件
+    //   实例化 crossChunkComp；③ _refreshChunkVisibility 的 segmentsPerChunk 回 6。开关在 **chunk 构建期**
+    //   读取（chunksBuilt 守卫一次成型）→ 恢复须在启动前置位；运行期翻转只重路由已建段、不补建 cutout
+    //   Model（草丛消失可反向翻回，无 z-fighting 中间态）。矩阵 t860 源码钉断言三处联动字面一致。
+    property bool cutoutSegmentRestored: false
     property int meshVertices: 0     // 全幅**地形段**已建顶点汇总（recomputeMeshStats 写；F3 mesh 行读，段域标注见 t857）
     property int meshTriangles: 0    // 全幅**地形段**已建三角面汇总（recomputeMeshStats 写；F3 mesh 行读）
     // perf-t520 F3 文本节流（PLAN §4 性能打磨：用户报 <10FPS 主因之一 = F3 文本绑定重算）。
@@ -480,8 +488,9 @@ Window {
         // chunk Model 6 段共享同 chunkCX/chunkCZ；用「首段」统计 unique chunk 数（避免重复计 6 段）。
         // 简化：每 6 段为一组，组内首段命中即 chunk 计数 +1。
         const totalChunks = window.worldChunksPerSide * window.worldChunksPerSide
-        const segmentsPerChunk = 5 // terrain + water + lava + glass + ice（t860：cutout 段折叠进 terrain，6→5；
-                                   //   chunkObjects 的创建序与组边界同步——恢复 cutout 段须两处同步改回 6）
+        // t860 折叠 5 段 / review28 #4 开关恢复 6 段（cutoutSegmentRestored 单开关联动——与 chunkAnchor
+        //   创建序、terrainGeo.cutoutFolded 绑定同源，恢复时无需手改本行）。
+        const segmentsPerChunk = window.cutoutSegmentRestored ? 6 : 5
         for (let i = 0; i < objs.length; ++i) {
             const o = objs[i]
             if (!o) continue
@@ -4195,10 +4204,14 @@ Window {
                         // t326 cutout 段（草丛/作物/树苗/门/活板门）—— **t860（R19.14）折叠退役**：t442 起
                         //   terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（与 cutout 段材质逐字相同），
                         //   cross/门/活板门顶点并入 terrain 段 mesh 渲染逐像素等价 → 停建本段 Model（每 chunk
-                        //   6 段 → 5 段，600 Model 满配 → 500，F3 drawCalls 真值可观测）。**降级杠杆**：若实测
-                        //   草丛边缘 / 树苗阴影 / 门窗格出现观感回归，恢复下一行 createObject 即回 6 段
-                        //   （crossChunkComp 模板与 ChunkGeometry.cutoutOnly 路由均保留未删）：
-                        //   objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+                        //   6 段 → 5 段，600 Model 满配 → 500，F3 drawCalls 真值可观测）。**降级杠杆
+                        //   （review28 #4 显式开关化）**：若实测草丛边缘 / 树苗阴影 / 门窗格出现观感回归 →
+                        //   window.cutoutSegmentRestored 置 true（一处翻转）——本行条件实例化 cutout 段、
+                        //   terrainChunkComp 的 cutoutFolded 翻 false（路由退回跳过清单）、segmentsPerChunk
+                        //   回 6，三面联动（旧「只解注释一行」路径会两段同发 z-fighting，已废）。开关在
+                        //   chunk 构建期读取 → 启动前置位生效。
+                        if (window.cutoutSegmentRestored)
+                            objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
                         objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
                         objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
                     }
@@ -4248,6 +4261,9 @@ Window {
                     greedyMeshing: window.greedyMeshing
                     dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     chunkInRange: terrainModel.chunkInRange // t472：视距门控传给 mesher（远端跳过 sun/water/编辑重建）
+                    // review28 #4：t860 折叠开关绑 window.cutoutSegmentRestored 总开关（false=折叠全收；
+                    // true=恢复 cutout 段时本段退回 cross/门/活板门跳过清单，防两段同发 z-fighting）。
+                    cutoutFolded: !window.cutoutSegmentRestored
                 }
                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; alphaMode: PrincipledMaterial.Mask; alphaCutoff: 0.5; baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0) }
             }
@@ -4395,12 +4411,13 @@ Window {
         // t326 cross cutout 段 chunk Model 模板：cross 广告牌方块（草丛 / 小麦作物 / 树苗）的独立 cutout 段。
         //   cross 贴图带 alpha 透明底（草叶 / 树苗本体 alpha=255、底 alpha=0），须 alpha-test cutout 才显透明
         //   间隙（否则显成两片实心板挡视线）。
-        // **t860（R19.14）折叠退役（降级杠杆保留）**：本模板不再被 chunkAnchor 实例化——terrain 段材质自
+        // **t860（R19.14）折叠退役（降级杠杆保留）**：本模板不再被 chunkAnchor 无条件实例化——terrain 段材质自
         //   t442 起已带 alphaMode:Mask + alphaCutoff:0.5（与下方材质逐字相同），cross/门/活板门顶点并入
         //   terrain 段 mesh 渲染逐像素等价（同材质 / 同光照管线 / 同 Mask 深度写 pass），独立段唯一的历史
         //   必要性（terrain 段旧 Opaque 材质忽略 alpha）已消除。每 chunk 6 段 → 5 段。若实测草丛边缘 /
-        //   树苗阴影观感回归 → 在 chunkAnchor.onCompleted 恢复 crossChunkComp.createObject 一行 +
-        //   _refreshChunkVisibility 的 segmentsPerChunk 改回 6 即回退。
+        //   树苗阴影观感回归 → **window.cutoutSegmentRestored 置 true**（review28 #4 单开关：本段恢复条件
+        //   实例化 + terrainGeo.cutoutFolded 翻 false（跳过清单回归，互斥无双发）+ segmentsPerChunk 回 6，
+        //   三面绑定联动；启动前置位生效）。
         // t439 透明 Z-fighting 修复（核心）：改用 **alphaMode: Mask**（Qt 6.8+ 原生 alpha-test）。Mask 模式让本段在
         //   **不透明 pass** 渲染（深度写 ON、alpha 硬丢弃：alpha<alphaCutoff 的像素直接 discard、保留像素按不透明写深度），
         //   而非透明 pass。旧实现靠 `opacity:0.99` 强制走透明通道（pre-6.8 alphaCutoff 仅在 opacity<1 下生效的 backend

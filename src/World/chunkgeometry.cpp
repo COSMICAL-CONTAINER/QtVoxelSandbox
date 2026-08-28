@@ -204,6 +204,17 @@ void ChunkGeometry::setCutoutOnly(bool on)
     buildMesh(RebuildReason::Dirty);
 }
 
+// review28 #4：cutout 折叠开关变 → 重建。两态 PASS 1 选块不同——false 恢复 cross/门/活板门跳过清单
+//   （让位并行存在的独立 cutout 段，互斥闭合防双重发射），true 重新全收。值未变则早退。Dirty reason
+//   同 setCutoutOnly（绕过 sun-step 节流，跨 chunk 边界 cross 随开关翻转即时刷新）。
+void ChunkGeometry::setCutoutFolded(bool on)
+{
+    if (m_cutoutFolded == on) return;
+    m_cutoutFolded = on;
+    emit cutoutFoldedChanged();
+    buildMesh(RebuildReason::Dirty);
+}
+
 // t343：岩浆段开关变 → 重建（岩浆段只画 Lava、地形段跳 Lava → 两段选块不同，需重网格化）。值未变则早退。
 //   用 Dirty reason（同编辑即时重建路径，绕过 sun-step 节流）。岩浆段复用 culled/greedy 立方面路径（满格立方 +
 //   自剔 nb==Lava + 邻实体剔），不效仿水的变高水面（岩浆浓稠近不透、满格即可；流岩浆 state 仅驱动蔓延逻辑）。
@@ -577,12 +588,22 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                     //   与 cutout 段材质（t439 起 Mask）**逐字相同** → 独立段无存在必要。t860 折叠：terrain 段
                     //   不再跳过 cross/door/trapdoor（并入本段 mesh，同材质同光照管线同 Mask 深度写 pass，
                     //   逐像素等价），QML 停建 cutout 段 Model（每 chunk 6 段 → 5 段，600 Model 满配 → 500）。
-                    //   m_cutoutOnly=true 分支保留为**降级杠杆**：QML 重新启用 crossChunkComp 即回 6 段
-                    //   （若实测出现草丛边缘 / 树苗阴影观感回归，一行恢复）。
+                    //   **降级杠杆 = cutoutFolded 显式开关（review28 #4）**：false 时本段退回 t860 前跳过
+                    //   清单（cross/门/活板门让位 QML 恢复的独立 cutout 段；两段同发 = 同几何同材质逐顶点
+                    //   重合 z-fighting——旧注释「QML 只恢复 createObject 一行即回 6 段」正是漏了本半边）。
+                    //   Main.qml window.cutoutSegmentRestored 单开关联动本属性 / cutout 段实例化 /
+                    //   segmentsPerChunk，恢复 = 翻一个属性（chunk 构建期置位），不可能只恢复一半。
                     if (m_cutoutOnly) {
                         if (!isCrossX && !isDoorX && !isCutoutTrapX) continue;  // cutout 段：仅 cross + 门 + 活板门（铁 723 栅格孔 / 木 t879 四镂空板，alpha cutout 透视）
+                    } else if (!m_cutoutFolded) {
+                        // 恢复态（cutoutFolded=false）：t860 前跳过清单逐字回归——cross/门/活板门走独立
+                        //   cutout 段，本段仅 partial 盒体（立方面照走 PASS 2）。
+                        if (isCrossX) continue;
+                        if (isDoorX) continue;
+                        if (isCutoutTrapX) continue;
+                        if (!isPartialX) continue;
                     } else {
-                        // t860 折叠后 terrain 段：partial 盒体 + cross + 门 + 活板门全收（唯 PASS 2 立方面
+                        // t860 折叠态（默认）：partial 盒体 + cross + 门 + 活板门全收（唯 PASS 2 立方面
                         //   跳过清单不变——cross/door/trapdoor 本就只走 PASS 1，无双重发射）。
                         if (!isPartialX && !isCrossX && !isDoorX && !isCutoutTrapX) continue;
                     }

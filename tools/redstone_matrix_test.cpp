@@ -17717,9 +17717,11 @@ Item {
     //   窗格）+ 活板门（t723 栅格孔）顶点并入 terrain 段 mesh，QML 停建 cutout 段 Model（每 chunk 6 段 →
     //   5 段，600 Model 满配 → 500）。行为级断言：terrain 段 ChunkGeometry 在放置 TallGrass 后顶点数**增加**
     //   （折叠前该格被路由走、terrain 顶点不变；cross 是 ShapeNone 非实体 → 不影响邻居面剔除，顶点差 = 纯
-    //   cross 贡献）。源码钉：chunkAnchor 不再实例化 crossChunkComp（降级杠杆注释行保留不计）+
-    //   _refreshChunkVisibility 的 segmentsPerChunk = 5（组边界与创建序同步）。回退（恢复 6 段）→ 行为级
-    //   断言红（顶点不再增加）= 探针红绿可辨折叠态。
+    //   cross 贡献）。review28 #4：降级杠杆显式开关化（ChunkGeometry.cutoutFolded + Main.qml
+    //   cutoutSegmentRestored 单开关三面联动）——行为级加两态互斥腿（false = cross 退出 terrain 段回基线 /
+    //   true = 复原），源码钉改钉联动四件（开关声明 / 守卫实例化 / cutoutFolded 绑定 / segmentsPerChunk
+    //   派生），任何半恢复（只改一处）即红；旧「无 createObject + 段数 5」静态钉退役（照旧注释恢复
+    //   createObject 会两段同发 z-fighting——正是 review28 #4 的缺陷）。
     {
         const auto [x860, z860] = nextSlot();
         const int cx860 = x860 / 16, cz860 = z860 / 16;
@@ -17742,10 +17744,34 @@ Item {
         if (!okFold)
             qInfo().noquote() << "  [t860 diag] y=" << y860 << "v0=" << v0 << "v1=" << v1
                               << "(cross must add terrain-segment vertices when folded)";
+        // review28 #4 行为级（**同态基线**——两态的 chunk 内容集不同，跨态比顶点必混入世界生成 cross
+        //   的路由差，v0 不能复用）：显式开关两态互斥——恢复态（false）基线下放 TallGrass 顶点**不变**
+        //   （跳过清单回归，cross 让位 cutout 段）；翻回 true 顶点增长（折叠全收）；再翻 false 回基线
+        //   （round-trip 无残留）。回退本开关（else 恒全收）→ 恢复态放置即增长 → 第一断言红。
+        geoT.setCutoutFolded(false);
+        w.setBlock(x860, y860 + 1, z860, BR::Air, 0); // 清 cross 位重立恢复态基线
+        const int u0 = geoT.vertexCount();
+        w.setBlock(x860, y860 + 1, z860, BR::TallGrass, 0);
+        const int u1 = geoT.vertexCount();
+        const bool okUnfolded = u0 > 0 && u1 == u0;
+        geoT.setCutoutFolded(true);
+        const int f1 = geoT.vertexCount(); // setter 触发 Dirty 即时重建
+        const bool okRefold = f1 > u1;
+        geoT.setCutoutFolded(false);
+        const int u2 = geoT.vertexCount();
+        const bool okRoundTrip = u2 == u0;
+        if (!okUnfolded || !okRefold || !okRoundTrip)
+            qInfo().noquote() << "  [t860 diag] switch u0=" << u0 << "u1=" << u1
+                              << "f1=" << f1 << "u2=" << u2
+                              << "(unfolded must ignore the cross placement; refold must absorb it)";
+        geoT.setCutoutFolded(true); // 复位默认折叠态
         w.setBlock(x860, y860 + 1, z860, BR::Air, 0); // 还原（rig 清洁）
         w.setBlock(x860, y860, z860, BR::Air, 0);
 
-        // 源码钉：Main.qml 的 chunkAnchor 不再 createObject crossChunkComp（降级注释行除外）+ 段数 5。
+        // 源码钉（review28 #4 联动钉）：恢复路径三面同源——① 总开关声明默认 false（折叠态出厂）；
+        //   ② crossChunkComp 实例化受该开关守卫（守卫行缺失 = 有人恢复了无条件 createObject → 双发）；
+        //   ③ terrainGeo 的 cutoutFolded 绑定到同一开关（绑定缺失 = 恢复后 terrain 仍全收 → 双发）；
+        //   ④ segmentsPerChunk 由同一开关派生（5/6）。四断言互锁：任何半恢复（只改一处）即红。
         bool okPin860 = false;
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
@@ -17762,7 +17788,7 @@ Item {
                 qInfo().noquote() << "  [t860 note] Main.qml not found near exe - source-pin skipped";
                 okPin860 = true; // 行为级断言仍有效（源码钉缺席不判红，同 r24 note 先例）
             } else {
-                // 滤 // 注释行后判「objs.push(crossChunkComp...」语句不存在（降级杠杆注释行被滤掉）。
+                // 滤 // 注释行后判定（降级杠杆注释行被滤掉，只钉真代码）。
                 QString code;
                 for (const QString &line : qml.split(QLatin1Char('\n'))) {
                     const QString t = line.trimmed();
@@ -17772,26 +17798,35 @@ Item {
                     code += line;
                     code += QLatin1Char('\n');
                 }
-                const bool noCutoutModel = !code.contains(QStringLiteral("objs.push(crossChunkComp"));
-                const bool seg5 = code.contains(QStringLiteral("const segmentsPerChunk = 5"));
-                okPin860 = noCutoutModel && seg5;
+                const bool switchDeclared = code.contains(QStringLiteral("property bool cutoutSegmentRestored: false"));
+                const bool createGuarded = code.contains(QStringLiteral("if (window.cutoutSegmentRestored)"))
+                                           && code.contains(QStringLiteral("objs.push(crossChunkComp.createObject"));
+                const bool foldedBound = code.contains(QStringLiteral("cutoutFolded: !window.cutoutSegmentRestored"));
+                const bool segDerived = code.contains(QStringLiteral("const segmentsPerChunk = window.cutoutSegmentRestored ? 6 : 5"));
+                okPin860 = switchDeclared && createGuarded && foldedBound && segDerived;
                 if (!okPin860)
-                    qInfo().noquote() << "  [t860 diag] noCutoutModel" << noCutoutModel
-                                      << "seg5" << seg5;
+                    qInfo().noquote() << "  [t860 diag] switchDeclared" << switchDeclared
+                                      << "createGuarded" << createGuarded
+                                      << "foldedBound" << foldedBound
+                                      << "segDerived" << segDerived;
             }
         }
-        const bool okT860 = okFold && okPin860;
+        const bool okT860 = okFold && okUnfolded && okRefold && okRoundTrip && okPin860;
         if (!okT860) ++totalFail;
         qInfo().noquote() << (okT860 ? "PASS" : "FAIL")
                           << "| t860 cutout segment folded into terrain: terrain-segment ChunkGeometry "
                              "absorbs cross-billboard vertices (TallGrass placement grows the terrain "
-                             "mesh, pre-fold routing diverted it to a separate cutout model), and the "
-                             "QML chunk factory no longer instantiates the cutout segment (6 models per "
-                             "chunk down to 5, 600 full-config models down to 500) - sound because both "
-                             "materials became literally identical after t439/t442 (alphaMode Mask + "
-                             "cutoff 0.5), same vertex pipeline, same depth-writing opaque pass; "
-                             "cutoutOnly routing kept as documented degrade lever if grass-edge or "
-                             "sapling-shadow visuals regress in playtest";
+                             "mesh, pre-fold routing diverted it to a separate cutout model) - sound "
+                             "because both materials became literally identical after t439/t442 "
+                             "(alphaMode Mask + cutoff 0.5), same vertex pipeline, same depth-writing "
+                             "opaque pass; review28 #4: the documented degrade lever is now an explicit "
+                             "switch - ChunkGeometry.cutoutFolded=false behaviorally sheds cross "
+                             "vertices back to baseline (pre-t860 skip list restored, mutually "
+                             "exclusive with a restored cutout segment, no double-emission z-fighting) "
+                             "and refolding restores them, while the Main.qml source pin locks the "
+                             "single-switch coupling (cutoutSegmentRestored declared false + guarded "
+                             "crossChunkComp instantiation + cutoutFolded binding + segmentsPerChunk "
+                             "derivation all keyed to one property - any half-restored path goes red)";
     }
 
     // ── P-t858 经验球 instancing 试点探针（R19.14；Game 层 feeder 直调，实例表内容级）──
