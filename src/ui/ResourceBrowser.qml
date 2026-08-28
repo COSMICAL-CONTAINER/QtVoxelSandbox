@@ -769,7 +769,15 @@ Item {
                                         root.spinAngle = (root.spinAngle + dx * 0.6 + 360) % 360
                                         // t877 用户定稿符号（t599 原方向）：上拖看顶 / 下拖看底。
                                         //   【用户确认方向，勿再改】——t820 的 +dy 取反已按用户实测回退。
-                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))
+                                        // t921 背面相位补偿（与 t877 契约的关系，钉死防误改回）：t877 定稿的是
+                                        //   **正面相位**（显示 yaw 未过 ±90°）的符号——本行不改该符号，只在
+                                        //   自转把背面转向相机时（显示 yaw = spinAngle-35 的 cos < 0，pitch 铰链
+                                        //   轴在屏幕上的投影反号）把**增量**乘 -1，使「上拖看顶」的屏幕感知在
+                                        //   背面相位与正面一致（用户定位的规律：转到底面朝人时上下拖拽反了）。
+                                        //   两态同向 = t877 契约保持并扩到全程，非翻转既有方向。
+                                        const yawRad = (root.spinAngle - 35) * Math.PI / 180
+                                        const faceSign = Math.cos(yawRad) >= 0 ? 1 : -1
+                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6 * faceSign))
                                     }
                                 }
                                 // 整立方方块 → 内嵌 View3D 旋转 BlockCube。
