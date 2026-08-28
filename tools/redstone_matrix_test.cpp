@@ -8864,6 +8864,93 @@ int main(int argc, char *argv[])
                              "renders the dust-dot pile tile 167 instead of the wire line 166 (source pin)";
     }
 
+    // ── P-t925 3D 模型扩面第二批（t880 口径：每新形状 顶点数 + 包络 断言；栅栏 / 门 / 机关 / cross 扩面）──
+    //    几何契约（ItemShapeGeometry 直调）：栅栏族 = 柱 + 四向双档 9 盒（216 顶点）；门族 = 合态 +X 边
+    //    3/16 薄板（24 顶点，xMin ≥ 0.31 = 薄板非对称防退化满格）；cross 族扩面（枯灌木 / 小麦 / 红白蘑菇 /
+    //    蛛网 / 红石火把）= 2 对角片 × 双面 16 顶点；拉杆 = mechBoxes 底座 + 两段摆棍 3 盒（72）且形心系
+    //    yMax ≈ 0（棍顶 8/16）；按钮 = 单盒 24 且 yMax = -0.375（盒 y[0,2/16] 贴地小凸块，负 yMax 防退化
+    //    满格）。另有两侧家族表同步源码钉（ResourceBrowser selectedIsItem3D ∪ Main.qml isItem3DFamily
+    //    都含 t925 全部 15 个族员——加族员须同步两处的契约钉死）。
+    {
+        bool ok = true;
+        {
+            ItemShapeGeometry g;
+            struct Expect { int blockId; int vCount; float yMax; float xMax; float xMin; };
+            const Expect exp[] = {
+                // 栅栏族（木 17 / 云杉 88）：柱 + 四向双档 = 9 盒 × 24。
+                { int(BR::WoodFence),   216, 0.501f, 0.501f, -0.501f },
+                { int(BR::SpruceFence), 216, 0.501f, 0.501f, -0.501f },
+                // 门族（木 19 / 云杉 89 / 铁 71）：单薄板；x ∈ [0.3125, 0.5]（+X 边厚 3/16 居中后非对称）。
+                { int(BR::WoodDoor),   24, 0.501f, 0.501f, 0.31f },
+                { int(BR::SpruceDoor), 24, 0.501f, 0.501f, 0.31f },
+                { int(BR::IronDoor),   24, 0.501f, 0.501f, 0.31f },
+                // cross 族扩面：16 顶点（2 片 × 双面）。
+                { int(BR::WheatCrop),     16, 0.501f, 0.501f, -0.501f },
+                { int(BR::DeadBush),      16, 0.501f, 0.501f, -0.501f },
+                { int(BR::Mushroom),      16, 0.501f, 0.501f, -0.501f },
+                { int(BR::BrownMushroom), 16, 0.501f, 0.501f, -0.501f },
+                { int(BR::Cobweb),        16, 0.501f, 0.501f, -0.501f },
+                { int(BR::RedstoneTorch), 16, 0.501f, 0.501f, -0.501f },
+                // 拉杆（112）：底座 + 两段摆棍 = 3 盒；棍顶 8/16 → 形心系 yMax ≈ 0.0（上界 0.001 + 容差）。
+                { int(BR::Lever),       72, 0.002f, 0.501f, -0.501f },
+                // 按钮（113/114）：单盒 y[0,2/16] → 形心系 yMax = -0.375（负值 = 贴地小凸块）。
+                { int(BR::WoodButton),  24, -0.374f, 0.501f, -0.501f },
+                { int(BR::StoneButton), 24, -0.374f, 0.501f, -0.501f },
+            };
+            for (const Expect &e : exp) {
+                g.setBlockId(e.blockId);
+                const QByteArray vd = g.vertexData();
+                const int vCount = int(vd.size()) / 20; // stride 5 float = 20B（t880 同契约）
+                const QVector3D bMax = g.boundsMax();
+                const QVector3D bMin = g.boundsMin();
+                if (vCount != e.vCount || bMax.y() > e.yMax || bMax.x() > e.xMax || bMin.x() < e.xMin) {
+                    ok = false;
+                    qInfo().noquote() << "  t925 diag: id" << e.blockId << "v" << vCount
+                                      << "expect" << e.vCount << "yMax" << bMax.y()
+                                      << "xMax" << bMax.x() << "xMin" << bMin.x();
+                }
+            }
+        }
+        // 家族表同步源码钉：两侧 QML 谓词都含 t925 全部 14 个族员（字面量逐一）。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile bf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+            QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+            const QString browser = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+            const QString mainQml = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            const int iSel = browser.indexOf(QStringLiteral("selectedIsItem3D:"));
+            const int iFn = mainQml.indexOf(QStringLiteral("function isItem3DFamily"));
+            const int iFnEnd = mainQml.indexOf(QLatin1Char('}'), iFn);
+            if (iSel < 0 || iFn < 0 || iFnEnd <= iFn || browser.isEmpty()) {
+                ok = false;
+                qInfo().noquote() << "  t925 pin slice miss";
+            } else {
+                const QString selBlock = browser.mid(iSel, 1600);  // 谓词绑定块窗口（现长 ~750，余量防漂移误红）
+                const QString fnBlock = mainQml.mid(iFn, iFnEnd - iFn);
+                const QList<int> ids = { 43, 25, 17, 60, 88, 19, 71, 89, 115, 48, 102, 129, 112, 113, 114 };
+                for (int id : ids) {
+                    const QString lit = QStringLiteral("=== ") + QString::number(id);
+                    if (!selBlock.contains(lit) || !fnBlock.contains(lit)) {
+                        ok = false;
+                        qInfo().noquote() << "  t925 pin miss id" << id
+                                          << "browser" << selBlock.contains(lit)
+                                          << "drop" << fnBlock.contains(lit);
+                    }
+                }
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t925 item 3D family batch 2: fences (post + four double arms, 9 boxes), "
+                             "doors (3/16 plate at +X edge with family-planks thin sides), lever (mechBoxes "
+                             "base + stick, same source as world mesher) and buttons (single 2/16 nub) build "
+                             "real multi-box shapes, the cross batch (dead bush / mature wheat / red+white "
+                             "mushroom / cobweb / redstone torch) builds double-sided X-quads, all with "
+                             "per-shape vertex+bounds contracts, and both family tables (viewer + drop) are "
+                             "source-pinned to contain all 15 new ids";
+    }
+
     // ── P-t924 附魔台查看器 = 世界放置形态 对齐契约（R19.16 t924；源码钉——QML 渲染分支 headless 不可
     //    行为级断言，t880 (b) 先例）──
     //    用户报「查看器重建整格黑曜石且抖动」根因 = review27 #4：附魔台 94 不在 isPartialBlock →
