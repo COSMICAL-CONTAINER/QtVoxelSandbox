@@ -18867,6 +18867,122 @@ Item {
                              "detection dead code removed with the feature";
     }
 
+    // ── P-t930 沙子悬浮链 26 邻域探针（World 层行为级；t799 既有「直接上方」支线保钉 + 新 ③ 级联四腿）──
+    //   用户口径：「破坏其中一个沙子应自动检测周围沙子状态，悬空就掉落；放置一个方块在它一格之内（26
+    //   体素检测概念）也更新沙子悬浮状态开始掉落」。旧 checkGravityBlockOnEdit 只查直接上方 + 放置完整
+    //   立方早退（编辑格邻域的既有悬空沙永不复检）。修 = ③ cascadeGravityAround：任何编辑（破坏 / 放置）
+    //   → BFS 扫 26 邻域失撑重力方块整柱坍落 + 坍落格续扫连锁。悬空沙以 setBlockFromEntity 直写构造
+    //   （实体着地入口无 check 钩子——真实「落地后下方被挖」等滞留悬空态的等价孤本，探针可确定性摆出）。
+    //   五腿：(a) 破坏对角邻格触发邻域悬空沙坍落；(b) 放置完整立方（斜对角）触发（旧早退路径）；(c) 连锁
+    //   传播——初扫不可达（距编辑格 dx=2）的第二悬空沙经第一坍落格续扫带落；(d) 阴性——有支撑沙在邻域
+    //   编辑后不掉、放置支撑面救活悬空沙；(e) 破坏沙柱底格全柱坍落（既有②行为回归钉）。
+    {
+        int fellCount = 0;
+        const QMetaObject::Connection fellConn =
+            QObject::connect(&w, &World::gravityBlockFell, &w, [&fellCount](int, int, int, int) {
+                ++fellCount;
+            });
+
+        // (a) 破坏对角邻格 → 邻域悬空沙坍落（旧代码：编辑格非下方支撑 → 不查 → 悬空残留）。
+        //     先 setBlock 清空气袋（晚位 slot 列 y=kRigY 可能仍在山体内——setBlock 覆写无守卫、
+        //     setBlockFromEntity 只肯写 air/水 → 不清袋则悬空沙构造被静默拒绝）。
+        const auto clearPocket = [](World &world, int x0, int y0, int z0, int x1, int y1, int z1) {
+            for (int x = x0; x <= x1; ++x)
+                for (int y = y0; y <= y1; ++y)
+                    for (int z = z0; z <= z1; ++z)
+                        world.setBlock(x, y, z, BR::Air, 0);
+        };
+        const auto [xa, za] = nextSlot();
+        clearPocket(w, xa - 1, kRigY - 1, za - 1, xa + 2, kRigY + 2, za + 2);
+        placeRigBlock(w, xa, kRigY, za, BR::Stone, 0);          // 待破对角邻格
+        const bool flA = w.setBlockFromEntity(xa + 1, kRigY + 1, za + 1, quint8(BR::Sand)); // 悬空沙
+        int fell0 = fellCount;
+        w.setBlock(xa, kRigY, za, BR::Air, 0);                   // 破坏 → ③ 26 邻域扫中 (dx=1,dy=1,dz=1)
+        const bool okA = flA
+                     && w.blockAt(xa + 1, kRigY + 1, za + 1) == quint8(BR::Air)
+                     && fellCount == fell0 + 1;
+
+        // (b) 放置完整立方（斜对角）触发（旧代码 isFullCube(id) 早退 → 放置路径零复检）。
+        const auto [xb, zb] = nextSlot();
+        clearPocket(w, xb - 1, kRigY, zb - 1, xb + 2, kRigY + 3, zb + 2);
+        const bool flB = w.setBlockFromEntity(xb, kRigY + 2, zb, quint8(BR::Sand)); // 悬空沙
+        fell0 = fellCount;
+        w.setBlock(xb + 1, kRigY + 1, zb + 1, BR::Stone, 0);      // 放置完整立方（对角邻）
+        const bool okB = flB
+                     && w.blockAt(xb, kRigY + 2, zb) == quint8(BR::Air)
+                     && fellCount == fell0 + 1;
+
+        // (c) 连锁传播：F1 距编辑格 dx=1（初扫可达），F2 距编辑格 dx=2（初扫不可达，只能经 F1 坍落格续扫）。
+        const auto [xc, zc] = nextSlot();
+        clearPocket(w, xc - 2, kRigY - 1, zc - 1, xc + 2, kRigY + 2, zc + 2);
+        placeRigBlock(w, xc - 1, kRigY, zc, BR::Stone, 0);        // 待破格
+        const bool flC1 = w.setBlockFromEntity(xc, kRigY + 1, zc, quint8(BR::Sand));         // F1
+        const bool flC2 = w.setBlockFromEntity(xc + 1, kRigY + 1, zc + 1, quint8(BR::Sand)); // F2
+        fell0 = fellCount;
+        w.setBlock(xc - 1, kRigY, zc, BR::Air, 0);
+        const bool okC = flC1 && flC2
+                     && w.blockAt(xc, kRigY + 1, zc) == quint8(BR::Air)
+                     && w.blockAt(xc + 1, kRigY + 1, zc + 1) == quint8(BR::Air)
+                     && fellCount == fell0 + 2;
+
+        // (d) 阴性：有支撑沙在邻域编辑后不掉；放置支撑面「救活」悬空沙（放置不误伤不迟钝）。
+        const auto [xd, zd] = nextSlot();
+        clearPocket(w, xd - 1, kRigY - 1, zd - 1, xd + 3, kRigY + 4, zd + 2);
+        placeRigBlock(w, xd, kRigY, zd, BR::Stone, 0);
+        w.setBlock(xd, kRigY + 1, zd, BR::Sand, 0);               // 合法支撑沙（②/③ 均不掉）
+        const bool flD = w.setBlockFromEntity(xd + 2, kRigY + 3, zd, quint8(BR::Sand)); // 悬空沙（dy=+2 出 D1 编辑 26 邻域）
+        fell0 = fellCount;
+        w.setBlock(xd + 1, kRigY + 1, zd + 1, BR::Stone, 0);      // 邻域放置：支撑沙不掉（有支撑）
+        const bool okD1 = flD
+                     && w.blockAt(xd, kRigY + 1, zd) == quint8(BR::Sand)
+                     && w.blockAt(xd + 2, kRigY + 3, zd) == quint8(BR::Sand)
+                     && fellCount == fell0;
+        w.setBlock(xd + 2, kRigY + 2, zd, BR::Stone, 0);          // 悬空沙正下方补支撑 → 不掉（被救活）
+        const bool okD2 = w.blockAt(xd + 2, kRigY + 3, zd) == quint8(BR::Sand) && fellCount == fell0;
+
+        // (e) 破坏沙柱底格 → 全柱坍落（既有 ② 直接上方支线回归钉）。
+        const auto [xe, ze] = nextSlot();
+        clearPocket(w, xe - 1, kRigY - 1, ze - 1, xe + 1, kRigY + 4, ze + 1);
+        placeRigBlock(w, xe, kRigY, ze, BR::Stone, 0);
+        w.setBlock(xe, kRigY + 1, ze, BR::Sand, 0);
+        w.setBlock(xe, kRigY + 2, ze, BR::Sand, 0);
+        w.setBlock(xe, kRigY + 3, ze, BR::Sand, 0);
+        fell0 = fellCount;
+        w.setBlock(xe, kRigY + 1, ze, BR::Air, 0);                // 破底格 → 上方 3 格整柱坍落
+        const bool okE = w.blockAt(xe, kRigY + 2, ze) == quint8(BR::Air)
+                     && w.blockAt(xe, kRigY + 3, ze) == quint8(BR::Air)
+                     && fellCount == fell0 + 2;
+
+        QObject::disconnect(fellConn);
+        const bool okT930 = okA && okB && okC && okD1 && okD2 && okE;
+        if (!okT930) ++totalFail;
+        if (!okT930)
+            qInfo().noquote() << "  [t930 diag] a" << okA << "b" << okB << "c" << okC
+                              << "d1" << okD1 << "d2" << okD2 << "e" << okE
+                              << "| flA" << flA << "flB" << flB << "flC" << flC1 << flC2
+                              << "flD" << flD
+                              << "| a.cell" << int(w.blockAt(xa + 1, kRigY + 1, za + 1))
+                              << "b.cell" << int(w.blockAt(xb, kRigY + 2, zb))
+                              << "c.f1" << int(w.blockAt(xc, kRigY + 1, zc))
+                              << "c.f2" << int(w.blockAt(xc + 1, kRigY + 1, zc + 1))
+                              << "d.f" << int(w.blockAt(xd + 2, kRigY + 3, zd));
+        qInfo().noquote() << (okT930 ? "PASS" : "FAIL")
+                          << "| t930 sand 26-neighborhood gravity cascade: any edit (break OR place, "
+                             "including placing a full cube which used to early-return untouched) now "
+                             "BFS-scans the 26-voxel neighborhood for unsupported gravity blocks "
+                             "(same predicate as placement self-check: below not a full cube) and drops "
+                             "them as whole columns, with cleared cells re-queued so the collapse "
+                             "propagates outward (a floater two cells from the edit falls via the first "
+                             "dropped column's rescan); supported sand near an edit stays put and "
+                             "placing a support under a floater rescues it (no false drops, no missed "
+                             "drops); breaking the bottom of a sand column still cascades the whole "
+                             "column (t799 direct-above branch kept); floaters staged via "
+                             "setBlockFromEntity (the entity-landing write path that carries no edit "
+                             "hooks -- equivalent of landed-then-undermined stale sand, "
+                             "deterministically constructible in the rig)"
+                             ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

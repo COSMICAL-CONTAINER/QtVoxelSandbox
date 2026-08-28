@@ -2823,22 +2823,59 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
 //   本检查下沉 World 层（同甘蔗 / 雪层支撑校验族先例）后：写入口全收口，两路径同一谓词。
 void World::checkGravityBlockOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
-    Q_UNUSED(oldId); // 两分支都只看编辑后状态（id + 邻格现值）；参数保留供 checkXxxOnEdit 族签名一致
+    Q_UNUSED(oldId); // 各分支都只看编辑后状态（id + 邻格现值）；参数保留供 checkXxxOnEdit 族签名一致
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     if (y < 0 || y >= m_height) return;
     // ① 放置自检：本格刚写入重力方块且下方非完整立方支撑（火把 / 睡莲 / 草丛 / 半砖 / 空气 / 水…）→ 坍落。
     //   y==0（世界底）无下格 → 视为失撑（实体落出世界由 EntityManager tick 移除，同旧 QML 版 y>0 守卫语义）。
+    //   t930：不再提前 return —— 放置重力方块同属「一格内的编辑」，其 26 邻域既有悬空重力方块亦须复检
+    //   （用户口径「放置一个方块在它一格之内也更新沙子悬浮状态」）；本格柱坍落后已为 Air → ③ 扫描天然跳过。
     if (BlockRegistry::isGravityBlock(id)) {
         const bool supported = (y > 0) && BlockRegistry::isFullCube(m_chunks.blockAt(x, y - 1, z));
         if (!supported) dropGravityColumn(x, y, z);
-        return; // 本格即重力方块 → ② 的「正上方」必是重力柱上层，坍落时已整柱带走，无需重复查
+    } else if (!BlockRegistry::isFullCube(id)) {
+        // ② 支撑变化复检（直接上方支线）：本格编辑后非完整立方（被破为 Air / 换成不完整方块）且正上方是
+        //   重力方块 → 上方坍落。覆盖：挖支撑（→Air）、支撑被替换为火把 / 半砖等（放上去那刻上方沙即落）、
+        //   水蒸发 / 焚毁 / 爆炸。编辑后仍完整立方 → 直接上方不失撑（但 ③ 邻域扫描仍跑——放置完整立方
+        //   同属编辑，须更新邻域沙悬浮态）。
+        if (y + 1 < m_height && BlockRegistry::isGravityBlock(m_chunks.blockAt(x, y + 1, z)))
+            dropGravityColumn(x, y + 1, z);
     }
-    // ② 支撑变化复检：本格编辑后非完整立方（被破为 Air / 换成不完整方块）且正上方是重力方块 → 上方坍落。
-    //   覆盖：挖支撑（→Air）、支撑被替换为火把 / 半砖等（放上去那刻上方沙即落）、水蒸发 / 焚毁 / 爆炸。
-    if (BlockRegistry::isFullCube(id)) return; // 仍是完整立方支撑（含 state 变化）→ 上方不失撑
-    if (y + 1 >= m_height) return;
-    if (BlockRegistry::isGravityBlock(m_chunks.blockAt(x, y + 1, z)))
-        dropGravityColumn(x, y + 1, z);
+    // ③ t930 26 邻域级联复检：任何编辑（破坏 / 放置）→ 扫本格 26 邻域重力方块失撑态并连锁坍落。
+    cascadeGravityAround(x, y, z);
+}
+
+// t930 26 邻域重力级联复检（头注释见 world.h）。BFS 队列元素 = 「须扫其 26 邻」的格；种子 = 编辑格，
+//   之后每个坍落清掉的柱格 + 柱顶上方格入队（周边连锁 + 柱顶附着物脱落后其上方支线）。全程只读
+//   blockAt（失撑判定）+ dropGravityColumn（静默清 + 信号），无 check*OnEdit 重入。
+void World::cascadeGravityAround(int x, int y, int z)
+{
+    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    if (y < 0 || y >= m_height) return;
+    std::vector<std::array<int, 3>> queue;
+    queue.push_back({x, y, z});
+    for (size_t qi = 0; qi < queue.size(); ++qi) {
+        const int qx = queue[qi][0], qy = queue[qi][1], qz = queue[qi][2];
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    const int nx = qx + dx, ny = qy + dy, nz = qz + dz;
+                    if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+                    if (ny < 0 || ny >= m_height) continue;
+                    if (!BlockRegistry::isGravityBlock(m_chunks.blockAt(nx, ny, nz))) continue; // 邻格非沙族 → 零成本早退
+                    // 失撑判定（同 ① 口径）：世界底无下格视为失撑；下方完整立方 → 有支撑。
+                    if (ny > 0 && BlockRegistry::isFullCube(m_chunks.blockAt(nx, ny - 1, nz))) continue;
+                    // 失撑 → 整柱坍落。先记录柱范围（坍后为 Air 读不出）→ 柱格 + 柱顶上方格入队（连锁）。
+                    int top = ny;
+                    while (top + 1 < m_height
+                           && BlockRegistry::isGravityBlock(m_chunks.blockAt(nx, top + 1, nz)))
+                        ++top;
+                    for (int cy = ny; cy <= top; ++cy) queue.push_back({nx, cy, nz});
+                    if (top + 1 < m_height) queue.push_back({nx, top + 1, nz});
+                    dropGravityColumn(nx, ny, nz);
+                }
+    }
 }
 
 // t565 铁轨连接重算（见 world.h 头注释）：读 (x,y,z) 的 4 向 × 3 高（同层 / 上 / 下 —— 坡度邻轨存在性，
