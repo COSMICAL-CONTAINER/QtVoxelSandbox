@@ -1786,18 +1786,32 @@ private:
     //   「玩家—浮标」关系，收口在收竿语义所在的 Game 层（Entities 层 tick 的 playerPos 是远置哑元探针位，
     //   不承载玩家真实位；分层：Entities 承载浮标物理，Game 收口语义）。
     static constexpr float kFishLineMaxLen        = 32.0f;
-    // t882 拉拽反馈增强常量（收杆拉力随距离增强 + 收杆角度调制 + 上抛弧随距离加大——用户「没看到生物被
-    //   拉起来飞」）：冲量全数收口 Game 层（Entities 层 pullMobToward 只收调制结果，同 kFishCastSpeed 分层）。
+    // t882 拉拽反馈增强常量（收杆拉力随距离增强 + 收杆角度调制；上抛弧见 t927 解算组——**t927 起距离增益
+    //   上抛退役**，旧冲量式在大高差下峰值 vy²/56 远够不着玩家高度 =「空中收杆看不到生物飞起」根因）：
+    //   冲量全数收口 Game 层（Entities 层 pullMobToward 只收调制结果，同 kFishCastSpeed 分层）。
     //   - kFishHookPullGain：拉拽水平速度随距离的增益（blocks/s per block；距离按 kFishLineMaxLen=32 封顶
     //     → 32 格远拉 = 6 + 0.35×32 ≈ 17.2 b/s，近 2 格 ≈ 6.7 b/s——「越远越猛」）。
-    //   - kFishHookLiftBase / kFishHookLiftGain：上抛分量基值（2.8 = 旧 Entities 层 kBobberHookPullUp 观感
-    //     原值）/ 距离增益（32 格 → 2.8+5.76 ≈ 8.6 b/s → 峰值 ~1.3 格——「空中钩起直接拽飞」的弧高来源）。
     //   - kFishHookAngleMin：收杆角度系数下限（正对目标拉 = 满力 1.0；侧向 / 背向衰减到 0.4——玩家拉杆
     //     朝向与线方向夹角越大越卸力，机制等价 MC「收杆方向影响拉拽」的可感近似）。
     static constexpr float kFishHookPullGain     = 0.35f;
-    static constexpr float kFishHookLiftBase     = 2.8f;
-    static constexpr float kFishHookLiftGain     = 0.18f;
     static constexpr float kFishHookAngleMin     = 0.4f;
+    // （kFishHookLiftBase 2.8 / kFishHookLiftGain 0.18 随 t927 退役：冲量式上抛改为**落差解算式抛物**——
+    //   旧式 32 格远也只 vy≈8.6 → 峰值 ~1.3 格，玩家高 6 格收杆时生物离玩家眼位还差 5+ 格；解算组见下。）
+    // t927 拉拽飞天解算常量（落差解算式抛物：目标峰 = 玩家眼位 + 轻型过头余量，vy = √(2·g·Δh) 精确落到
+    //   玩家高度一带；按 mobType halfH 质量口径折扣——重型少抬、轻型拽过头顶）：
+    //   - kFishHookLiftGravity：mob 重力镜像（28 = EntityManager::kGravity；P18 双钉——改值须两处同步，
+    //     同 kFishCatchItemGravity 先例）。
+    //   - kFishHookLiftOverhead：轻型过头余量（blocks；目标峰 = 眼位 + 0.6 → 「拽过头顶」的可感口径）。
+    //   - kFishHookLiftFloorDh：最小弧落差下限（blocks；同高 / 玩家更低时保底明显拽起——≈旧式 32 格
+    //     远距峰值 1.3 的观感量级，平地收杆仍可见飞起）。
+    //   - kFishHookHeavyHalfH：重型族 halfH 阈值（质量代理口径；≥1.0 判重——铁傀儡 1.20 / 夜行者 1.40
+    //     折扣，猪 0.45 / 狼 0.45 / 骨族 0.90 不折）。
+    //   - kFishHookHeavyLift：重型折扣系数（Δh × 0.55 → 重型峰值约砍一半）。
+    static constexpr float kFishHookLiftGravity  = 28.0f;
+    static constexpr float kFishHookLiftOverhead = 0.6f;
+    static constexpr float kFishHookLiftFloorDh  = 1.3f;
+    static constexpr float kFishHookHeavyHalfH   = 1.0f;
+    static constexpr float kFishHookHeavyLift    = 0.55f;
     // t886 鱼获反馈常量（掉落物从鱼钩处抛物线弹向玩家 + 1-6 XP 经验球）：
     //   - kFishCatchPopOffset：获物弹出点超出水面上方空气格底的高度（blocks；review26 #7 弹出点改**列扫**
     //     口径——从浮标格向上扫到首个非 Water 格（非空气则续扫到空气，冰盖弹出冰面）再 + 本偏移。旧固定

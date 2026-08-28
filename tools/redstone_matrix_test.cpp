@@ -15653,9 +15653,11 @@ Item {
     //    (a) 近距钩猪（~3 格直瞄，t836(d) 轨迹）→ 收竿一帧物理位移 movedN + 耐久 -5；
     //    (b) 远距钩猪（~12.5 格：直瞄会中途落地够不着 → 仰角 12..34° 扫描，每次失败换新猪重摆——首游荡窗
     //        30 tick 内完成甩钩的确定性口径）→ 收竿 movedF > movedN×1.25（6+0.35d 距离缩放）+ 猪升起
-    //        riseF > 0.06（2.8+0.18d 上抛弧——旧基值 2.8 只升 ~0.045，用户「没看到生物被拉起来飞」）；
-    //    (c) 源码钉：useFishingRod 体内距离增益（kFishHookPullGain/kFishHookLiftGain）+ 角度调制
-    //        （angleFactor 乘 speed 与 lift 两支）语句面。
+    //        riseF > 0.06（t927 落差解算上抛 √(2·g·Δh)：平地远猪 vy≈10 → 首 tick 升 ~0.15——t882 旧冲量
+    //        2.8+0.18d 只升 ~0.08 / 更旧基值 2.8 只升 ~0.045，用户「没看到生物被拉起来飞」）；
+    //    (c) 源码钉：useFishingRod 体内距离增益（kFishHookPullGain）+ t927 落差解算上抛（√(2·g·Δh) 语句 +
+    //        眼位目标 kFishHookLiftOverhead + 重型折扣 kFishHookHeavyLift）+ 角度调制（angleFactor 乘
+    //        speed 与 lift 两支）语句面。
     {
         World wP;
         wP.setWidth(48); wP.setDepth(48); wP.setHeight(96); wP.setSeed(79);
@@ -15738,7 +15740,7 @@ Item {
                 const float pigFX0 = ents.posAt(pigF).x();
                 const float pigFY0 = ents.posAt(pigF).y();
                 const int durF0 = hb.durabilityAt(0);
-                pc.useFishingRod(); // 收竿拉拽（远距：≈6+0.35×12.5 ≈ 10.4 b/s + 上抛 ≈2.8+2.25）
+                pc.useFishingRod(); // 收竿拉拽（远距：≈6+0.35×12.5 ≈ 10.4 b/s + t927 解算上抛 √(2·28·Δh)）
                 tickP(1, 0.016f);
                 movedF = std::fabs(ents.posAt(pigF).x() - pigFX0);
                 riseF = ents.posAt(pigF).y() - pigFY0;
@@ -15774,7 +15776,10 @@ Item {
                         body += line; body += QLatin1Char('\n');
                     }
                     okPin = body.contains(QStringLiteral("kFishHookPullGain * dc"))
-                            && body.contains(QStringLiteral("kFishHookLiftGain * dc"))
+                            && body.contains(QStringLiteral(
+                                   "std::sqrt(2.0f * kFishHookLiftGravity * dhLift)"))
+                            && body.contains(QStringLiteral("kFishHookLiftOverhead"))
+                            && body.contains(QStringLiteral("kFishHookHeavyLift"))
                             && body.contains(QStringLiteral("pullSpeed *= angleFactor;"))
                             && body.contains(QStringLiteral("liftSpeed *= angleFactor;"))
                             && body.contains(QStringLiteral(
@@ -15791,8 +15796,9 @@ Item {
         qInfo().noquote() << (okT882 ? "PASS" : "FAIL")
                           << "| t882 hook-reel feedback: pull strength scales with line length (speed "
                              "+= 0.35 x dist-capped-32 -> far pig displaces >1.25x near pig in the "
-                             "first physics tick after the reel) and the launch arc grows with it "
-                             "(lift base 2.8 + 0.18 x dist -> far-pig rise > 0.06/tick vs old flat "
+                             "first physics tick after the reel) and the launch arc is solved from "
+                             "fall height (t927 drop-solved lift vy=sqrt(2 x 28 x dh) targeting the "
+                             "player eye + overhead margin -> far-pig rise > 0.06/tick vs old flat "
                              "0.045 -- 'yanked visibly into the air'), both modulated by reel angle "
                              "(look-vs-line |cos| factor, facing the target = full power, sideways/"
                              "over-shoulder decays to 0.4x; pitch excluded via horizontal renorm -- "
@@ -18690,6 +18696,109 @@ Item {
                              "distance (1.2+0.8xrad -> any spawn reaches the hook in <=1.1s, "
                              "arriving-and-dying at the bobber); QML halves pinned at source "
                              "level per the t887b/t924 precedent";
+    }
+
+    // ── P-t927 拉拽飞天返修探针（行为级：高台收杆峰值 ≥ 玩家高度 − 1 + 重型折扣；t882 参数返修）──
+    //    用户「空中右键收杆看不到生物飞起」：旧 t882 冲量式上抛 2.8+0.18d 的峰值 = vy²/56（32 格远也只
+    //    ~1.3 格）在玩家居高时够不着玩家高度。修 = 落差解算 vy = √(2·28·Δh)，目标峰 = 玩家眼位 + 0.6。
+    //    rig：玩家 Y+6 石柱高台（脚位 fy+7=90），地面猪平台 fy；仰角扫描甩中（t882(b) 手法——直瞄在轻重力
+    //    12 下过冲，需扫描 + 每次失败换新猪重摆压进首游荡窗 30 tick）；收杆后逐 tick 跟踪峰值 Y：
+    //    (a) 猪（轻型）峰值 ≥ 玩家脚位 − 1（89.0；解算目标眼位 91.62 + 0.6 → 理想 ~92.7）；
+    //    (b) 铁傀儡（重型 halfH 1.20）峰值 > 起点 + 2（仍明显拽起）且 < 猪峰值 − 1（重型折扣可观察）；
+    //    (c) 两者耐久均 -5（钩住收杆口径不变）。
+    //    flake 声明：与 t882(b) 同口径（mob 首游荡窗内完成甩钩的确定性），偶发 RNG 漂移复跑清。
+    {
+        World wG;
+        wG.setWidth(48); wG.setDepth(48); wG.setHeight(96); wG.setSeed(83);
+        EntityManager ents;
+        const QVector3D farG(-1000.0f, 10.0f, -1000.0f);
+        const auto tickG = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wG, farG, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        PlayerController pc;
+        Hotbar hb;
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wG);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        // 玩家高台：柱 (13, fy+1..fy+6, 6) → 脚位 fy+7 = 90（眼 91.62）；目标平台 (19..21, fy, 5..7)。
+        for (int y = fy + 1; y <= fy + 6; ++y) wG.setBlock(13, y, 6, BR::Stone, 0);
+        for (int x = 19; x <= 21; ++x)
+            for (int z = 5; z <= 7; ++z) wG.setBlock(x, fy, z, BR::Stone, 0);
+        const float playerFeet = float(fy + 7);
+        // 高台甩中 + 收杆 + 峰值跟踪：pitch 扫描 −18..−58（步 2），每次失败换新 mob 重摆（t882(b) 手法）。
+        //   返 (峰值 − 起始 Y)，未钩中返 -1。
+        const auto hookAndPeak = [&](EntityManager::MobType type, const QString &color, int hp,
+                                     float *startYOut) -> float {
+            for (int pi = 0; pi <= 20; ++pi) {
+                const float pitch = -18.0f - 2.0f * float(pi);
+                const int mob = ents.spawnMobTyped(20, fy + 1, 6, type, color, hp);
+                tickG(5, 0.05f); // settle（首游荡窗内）
+                pc.loadSavedState(13.5f, playerFeet, 6.5f, -90.0f, pitch, 2);
+                pc.useFishingRod();
+                int bob = -1;
+                for (int i = 0; i < ents.count(); ++i)
+                    if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::Bobber)) { bob = i; break; }
+                bool hooked = false;
+                if (bob >= 0) {
+                    for (int t = 0; t < 40; ++t) {
+                        if (ents.bobberHookedMobAt(bob) == mob) { hooked = true; break; }
+                        tickG(1, 0.05f);
+                        if (!ents.aliveAt(bob)) break;
+                    }
+                }
+                if (!hooked) {
+                    pc.useFishingRod(); // 空收浮标（重试下一仰角）
+                    ents.removeEntityAt(mob);
+                    continue;
+                }
+                const float y0 = ents.posAt(mob).y();
+                const int dur0 = hb.durabilityAt(0);
+                pc.useFishingRod(); // 高台收杆 → 解算式拉拽
+                const bool durOk = hb.durabilityAt(0) == dur0 - 5;
+                float peak = y0;
+                bool landed = false;
+                for (int t = 0; t < 160 && ents.aliveAt(mob); ++t) {
+                    tickG(1, 0.05f);
+                    if (!ents.aliveAt(mob)) break;
+                    const float y = ents.posAt(mob).y();
+                    if (y > peak) peak = y;
+                    if (t > 20 && y < y0 + 0.05f) { landed = true; break; } // 升过又落回 = 飞完
+                }
+                ents.removeEntityAt(mob);
+                if (startYOut) *startYOut = y0;
+                return (durOk && (landed || peak > y0 + 0.5f)) ? peak : -1000.0f; // durOk / 峰值有效性门
+            }
+            return -1.0f; // 全仰角未钩中
+        };
+        float pigStart = 0.0f, golemStart = 0.0f;
+        const float pigPeak = hookAndPeak(EntityManager::MobPig, QStringLiteral("#e8a0a0"), 10, &pigStart);
+        const float golemPeak = hookAndPeak(EntityManager::MobIronGolem, QStringLiteral("#c8c8c8"), 40,
+                                            &golemStart);
+        const bool okA = pigPeak >= playerFeet - 1.0f; // 轻型至少拽到玩家高度 − 1（用户口径）
+        const bool okB = golemPeak > golemStart + 2.0f && golemPeak < pigPeak - 1.0f; // 重型拽起但打折
+        const bool okT927 = okA && okB;
+        if (!okT927) ++totalFail;
+        if (!okT927)
+            qInfo().noquote() << "  [t927 diag] okA" << okA << "pigPeak" << pigPeak << "from" << pigStart
+                              << "okB" << okB << "golemPeak" << golemPeak << "from" << golemStart
+                              << "playerFeet" << playerFeet;
+        qInfo().noquote() << (okT927 ? "PASS" : "FAIL")
+                          << "| t927 hook-reel to player height: drop-solved launch replaces the t882 "
+                             "impulse lift -- vy = sqrt(2 x 28 x dh) with dh targeting the player eye "
+                             "+ 0.6 overhead margin (old 2.8+0.18xd peaked at vy^2/56 ~1.3 blocks, "
+                             "nowhere near an elevated player, the 'reel from a height and the mob "
+                             "never visibly flies' root); behavioral rig: player on a Y+6 pillar "
+                             "reels a ground pig -> pig peak Y >= player feet - 1 (solved target "
+                             "~eye+0.6 vs required feet-1, 3-block margin), weight-class discount "
+                             "via the mobType halfH mass proxy (halfHeightAt >= 1.0 = heavy family) "
+                             "-- iron golem (halfH 1.20) still yanked >2 blocks but peaks >=1 below "
+                             "the pig (x0.55 dh discount, 'heavy barely lifts, light sails over the "
+                             "head'); floor dh 1.3 keeps same-level reels visibly airborne; -5 "
+                             "durability unchanged; elevation-sweep rig with a fresh mob per "
+                             "attempt per the t882(b) wander-window discipline";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
