@@ -642,8 +642,12 @@ public:
     //   的呈现层链路，脆弱且放置路径实测不触发「沙放火把上稳定站住」）。两分支：
     //   ① 放置自检：本格刚写入重力方块（id ∈ 重力族）且下方 (x,y-1,z) 非完整立方（火把 / 睡莲 / 草丛 /
     //     半砖 / 空气 / 水…）→ 本格失撑坍落；y==0（世界底无下格）亦视为失撑（落出世界由实体 tick 移除）。
-    //   ② 支撑变化复检：本格编辑后非完整立方（被破为 Air / 被替换为不完整方块）且正上方 (x,y+1,z) 是
-    //     重力方块 → 上方方块失撑坍落。
+    //   ② 支撑变化复检（直接上方支线）：本格编辑后非完整立方（被破为 Air / 被替换为不完整方块）且正上方
+    //     (x,y+1,z) 是重力方块 → 上方方块失撑坍落。
+    //   ③ t930 26 邻域级联复检（cascadeGravityAround）：本格**任何**编辑（破坏 / 放置，含放置完整立方）
+    //     → 扫 26 邻域（3×3×3 减自身，含斜对角）内重力方块的失撑态（谓词同 ①：下方非完整立方即失撑），
+    //     失撑者整柱坍落并沿坍落格继续连锁（用户口径「破坏 / 在一格内放置方块都更新周围沙子悬浮状态，
+    //     26 体素检测 + 连锁掉落」；机制等价 MC 邻格 block update 传播至斜对角的宽松口径）。
     //   坍落 = dropGravityColumn：自失撑格起向上逐格清连续重力方块（混合沙/沙砾柱各自保留 id），每格
     //   静默写 Air（m_chunks.setBlock 直写 + 标脏，**不**经 World::setBlock → 不递归触发本检查）+ emit
     //   blockBroken（破块粒子 / 音）+ recomputeLightAround + emit gravityBlockFell（每格一信号一实体，
@@ -657,6 +661,15 @@ public:
     // t799 重力方块整柱坍落 helper（checkGravityBlockOnEdit 调）：自 (x,y,z)（须为重力方块）起向上清
     //   连续重力方块列 + 每格 emit gravityBlockFell。空首格 → no-op。见上方头注释。
     void dropGravityColumn(int x, int y, int z);
+    // t930 26 邻域重力级联（checkGravityBlockOnEdit ③ 调）：自 (x,y,z) 的 26 邻域起 BFS 扫悬空重力
+    //   方块（谓词同 ①：下方非完整立方 / 世界底），失撑者 dropGravityColumn 整柱坍落；每个被清柱格 +
+    //   柱顶上方格再入队扫其 26 邻（连锁传播——斜对角浮沙结构逐柱塌净；柱顶上格覆盖「柱顶附着物（火把）
+    //   被连带脱落后其上方重力方块」的间隙链）。终止性：dropGravityColumn 必清 ≥1 重力格且栅格只减不
+    //   增 → 队列必收敛（无 visited 集：已清格 blockAt=Air 非 gravity 天然跳过）。邻格非重力 → 单次
+    //   blockAt 早退（26 读/格，编辑热路径可承受）。**不经 checkGravityBlockOnEdit 重入**（dropGravityColumn
+    //   → recheckAttachmentsAfterClear 的反重入约定保持，见其头注释）；recheck 脱落的附着物均非完整
+    //   立方，其上方不可能有经合法路径放置的重力方块（① 会即刻坍落），无需从脱落点续扫。非 Q_INVOKABLE。
+    void cascadeGravityAround(int x, int y, int z);
 
     // 审查修 #4（Review 2026-08-23 中危）：静默清格后的邻域附着物复检（公共收口）。dropGravityColumn /
     //   clearBlockSilent 这类「绕过 World::setBlock 直写 Air」的静默路径只维护了索引 / 光照，不触发
