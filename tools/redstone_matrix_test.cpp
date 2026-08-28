@@ -8864,6 +8864,60 @@ int main(int argc, char *argv[])
                              "renders the dust-dot pile tile 167 instead of the wire line 166 (source pin)";
     }
 
+    // ── P-t924 附魔台查看器 = 世界放置形态 对齐契约（R19.16 t924；源码钉——QML 渲染分支 headless 不可
+    //    行为级断言，t880 (b) 先例）──
+    //    用户报「查看器重建整格黑曜石且抖动」根因 = review27 #4：附魔台 94 不在 isPartialBlock →
+    //    selectedIsCube 对 94 仍 true，满格 BlockCube（六面黑曜石深色瓦片 = 「整格黑曜石」）与
+    //    ItemShapeGeometry 0.75 矮盒叠渲 z-fight（= 「抖动」）——修法为家族互斥钉死。本探针锁五面契约：
+    //    (a) 查看器 selectedIsItem3D 家族覆盖 94（94 走 ItemShapeGeometry 分支）；
+    //    (b) 立方分支 visible 排除 item3D 家族（互斥防叠渲回归 = 症状本体防复发）；
+    //    (c) ItemShapeGeometry 附魔台 case 真用 0.75 矮盒（partialblockgeometry 同高；防「修回整格」）；
+    //    (d) 悬浮书坐标三处同源：查看器 etBookNode 与掉落物 dropBookNode 同为 y=0.46、页 scale
+    //        0.38×0.03×0.46 ×2（review27 #9 钉的「同款局部坐标」契约）。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile bf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        QFile gf(root + QStringLiteral("/src/Renderer/itemshapegeometry.cpp"));
+        const QString browser = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+        const QString mainQml = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const QString geo = gf.open(QIODevice::ReadOnly) ? QString::fromUtf8(gf.readAll()) : QString();
+        if (browser.isEmpty() || mainQml.isEmpty() || geo.isEmpty()) {
+            ok = false;
+            qInfo().noquote() << "  t924 diag: source slice miss";
+        } else {
+            // (a) 查看器家族含 94（selectedIsItem3D 绑定块内字面量；600 字符窗口防在文件它处命中漂移）。
+            const int iSel = browser.indexOf(QStringLiteral("selectedIsItem3D:"));
+            ok = ok && iSel >= 0
+                 && browser.indexOf(QStringLiteral("=== 94"),
+                                    iSel) > iSel
+                 && browser.indexOf(QStringLiteral("=== 94"), iSel) < iSel + 600;
+            // (b) 立方分支 + 大图标分支均排除 item3D（互斥 ≥2 处）。
+            ok = ok && browser.count(QStringLiteral("!root.selectedIsItem3D")) >= 2;
+            // (c) 附魔台 case 0.75 矮盒（case 切片内含 0.75f 且不含「1.0f, 1.0f, 1.0f,」满格兜底主路径）。
+            const int iCase = geo.indexOf(QStringLiteral("EnchantingTable"));
+            const int iCaseEnd = geo.indexOf(QStringLiteral("} else {"), iCase);
+            ok = ok && iCase >= 0 && iCaseEnd > iCase
+                 && geo.mid(iCase, iCaseEnd - iCase).contains(QStringLiteral("0.75f"));
+            // (d) 书坐标两文件同款（review27 #9 契约：y=0.46 + 页 scale 0.38×0.03×0.46 各 ×2）。
+            ok = ok && browser.contains(QStringLiteral("Qt.vector3d(0, 0.46, 0)"))
+                 && mainQml.contains(QStringLiteral("Qt.vector3d(0, 0.46, 0)"))
+                 && browser.count(QStringLiteral("Qt.vector3d(0.38, 0.03, 0.46)")) >= 2
+                 && mainQml.count(QStringLiteral("Qt.vector3d(0.38, 0.03, 0.46)")) >= 2;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t924 enchant-table viewer/world parity: browser routes 94 to the "
+                             "item3D family, cube branch excludes the family (z-fight/full-cube "
+                             "regression pin - the reported 'full obsidian cube + jitter' was the "
+                             "review27 #4 double render), ItemShapeGeometry keeps the 0.75 "
+                             "half-height box (same as partialblockgeometry), and the hovering "
+                             "book coords (y=0.46, pages 0.38x0.03x0.46) stay identical between "
+                             "viewer and drop (review27 #9 contract)";
+    }
+
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
     //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
     //   AnvilUI.qml + InventoryOps.js，11 放入路径）47/47 全过，但其 Hotbar 是 **QML 桩**
