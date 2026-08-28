@@ -1065,8 +1065,8 @@ Item {
                                         visible: armId !== 0
                                         materialId: armId
                                     }
-                                    // t640② 装备槽护甲耐久条（DurabilityBar；同 SurvivalInventory armorDurBar 语义：
-                                    //   满耐久也显满绿条，背包常显）。触碰 armorRevision → 受击损耗 / 换装后重算。
+                                    // t640② 装备槽护甲耐久条（DurabilityBar；满耐久不显——t931 对齐 hotbar 口径，
+                                    //   组件内统一判）。触碰 armorRevision → 受击损耗 / 换装后重算。
                                     DurabilityBar {
                                         anchors.left: parent.left; anchors.right: parent.right
                                         anchors.bottom: parent.bottom

@@ -703,9 +703,12 @@ Item {
                             }
                             // t498 二轮复盘：装备槽内显「cur/max」耐久数字（小字，耐久条上方）。
                             //   用户报「进背包无耐久显示、只在 hover tooltip 显」→ 槽内常显数字（进背包即见），
-                            //   不依赖 hover。满耐久也显（与耐久条常显一致）。触碰 armorRevision 损耗后重算。
+                            //   不依赖 hover。t931 对齐 hotbar 口径：满耐久不显（新护甲无数字），受损后才见且持续。
+                            //   触碰 armorRevision 损耗后重算。
                             Text {
                                 visible: armId !== 0
+                                         && root.hotbar.armorRevision >= 0
+                                         && root.hotbar.armorDurabilityAt(index) < root.hotbar.armorMaxDurability(armId)
                                 text: { const _r = root.hotbar.armorRevision
                                     return _r >= 0 ? (root.hotbar.armorDurabilityAt(index) + "/" + root.hotbar.armorMaxDurability(armId)) : "" }
                                 anchors.horizontalCenter: parent.horizontalCenter
@@ -720,7 +723,10 @@ Item {
                             //     即显，满耐久也显绿条），与 MC 1.0 装备槽耐久条一致（MC 装备槽耐久条满耐久也显）。
                             //     ② 原 curDur/maxDur 用语句块形式绑 armDur（同 armId stale 根因）→ 受击损耗后条不刷新；
                             //     改表达式形式直接读 armorDurabilityAt（Q_INVOKABLE，恒最新）。
-                            //   色 绿(>50%)/黄(20–50%)/红(<20%)；满耐久显满绿条。触碰 armorRevision → 损耗后重算。
+                            //   t931 用户口径翻案 t498①：满耐久（curDur==maxDur）**不显条**——新护甲槽内无条，受损后
+                            //     才见且持续显示，与 HUD hotbar t315/t349 及 DurabilityBar 组件（同日改）完全同口径
+                            //     （「1~9 物品栏的显示是正确的，背包对齐它」）。t498② 的表达式形式绑定保留。
+                            //   色 绿(>50%)/黄(20–50%)/红(<20%)。触碰 armorRevision → 损耗后重算。
                             Item {
                                 id: armorDurBar
                                 property int curDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorDurabilityAt(index) : 0
@@ -730,7 +736,7 @@ Item {
                                 anchors.bottom: parent.bottom
                                 anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
                                 height: 3
-                                visible: armId !== 0 && maxDur > 0 && curDur > 0
+                                visible: armId !== 0 && maxDur > 0 && curDur > 0 && curDur < maxDur
                                 Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.55 }
                                 Rectangle {
                                     anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
@@ -892,8 +898,8 @@ Item {
                             font.pixelSize: 13; font.bold: true
                         }
                         // t640② 主栏工具耐久条（t183 HUD hotbar 耐久条模式推广到背包主栏）：槽底薄条
-                        //   （DurabilityBar 复用组件），宽 ∝ remaining/max、绿/黄/红。满耐久仍显满绿条（背包常显
-                        //   语义同护甲槽 t498；与 HUD hotbar 满耐久隐不同）。触碰 mainRevision → 磨损 / 换槽后重算。
+                        //   （DurabilityBar 复用组件），宽 ∝ remaining/max、绿/黄/红。满耐久不显（t931 对齐
+                        //   HUD hotbar 口径，组件内统一判）。触碰 mainRevision → 磨损 / 换槽后重算。
                         //   非工具 / 空槽 → DurabilityBar 内部 maxDur<=0 / curDur<=0 自隐。
                         DurabilityBar {
                             anchors.left: parent.left; anchors.right: parent.right
