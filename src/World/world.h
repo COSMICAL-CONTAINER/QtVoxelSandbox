@@ -808,7 +808,10 @@ public:
     //   （6 正交种子够不到斜角 → 降沿失达，t706 同类可达性）。
     //
     // 重算触发（notePowerWrite，挂 setBlock / setWaterSilent / clearBlockSilent 编辑路径，同 checkRailOnEdit
-    //   收口模式）：编辑格属红石族（粉 / 源 / 接收器）或其 6 邻含红石族 → 编辑格 + 受影响的粉连通域入
+    //   收口模式）：编辑格属红石族（粉 / 源 / 接收器）或其 6 邻含**粉 / 电源**（t937 ② 收窄——旧版「任意
+    //   红石族邻格」把接收器也算上，普通方块与空气在电力读数（powerSourceLevel / isRedstoneDust）里同为
+    //   0，接收器旁的普通编辑（放 / 挖石头、沙级联着地）不改变任何读数却触发了全链重算 + 域内无种子的
+    //   误熄两拍闪烁）→ 编辑格 + 受影响的粉连通域入
     //   m_powerDirty 脏集；tickRedstone（WorldClock 10Hz 桥接）处理脏集 —— 从各脏锚点 BFS 收集连通粉域
     //   （上界 kPowerFloodCap 格防失控），域内每粉电力 = 16 - 距最近活跃源的线距（t707 源连通距离 BFS；
     //   源直供邻格 15、每经一粉 -1、爬墙斜角算一跳，距 >15 不达 → 0），写粉 state（连接位 + 电力级）+
@@ -829,9 +832,25 @@ public:
     //   层差，邻轨须为动力轨（普通 / 探测轨不传链）。命中返 true 并写出 (nx,ny,nz)。recomputePowerLocal
     //   链 BFS（t704/t910）与 notePowerWrite 放置沿重算（t936）共用本步 —— 链几何判定禁第二套（lessons：
     //   校验 / 派生扫描的探测域必须与写入侧权威一致）。只读 m_chunks。
+    //   **t937 ① 连接位门槛**：步源格是动力轨时，还须持有该轴向的连接位（RailConnPx/Nx/Pz/Nz ——
+    //   railConnections 写入、mesher 形态与矿车 pickTrackStep 消费的同一物理连接权威）。旧版只看「该向
+    //   三高有动力轨」的**空间存在性** → 平行铺设的两条互不连接的轨（A 走 X、B 贴其侧向平行走 X；
+    //   轨道族连接规则对贯穿轴轨不设跨向位）也被当作链 → 信号横穿到无连接的邻轨 = 用户实测「一个
+    //   红石点亮两条独立平行轨道」。步源格非动力轨（t936 破坏沿的编辑格探针——破后是 Air 无 state
+    //   可读）不设门槛：那是入脏集的拓扑发现，点亮与否由重算侧（本门槛）把关。
     bool goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, int &ny, int &nz) const;
+    // t937 ② 动力轨「链内直供种子」反向有界走查：从 (x,y,z)（动力轨）沿 goldenRailChainStep（同一权威）
+    //   走 ≤ kGoldenRailChainMax-1 步，任一沿途动力轨 isReceivingPower → true（= 本轨链距 ≤7 内有直供
+    //   种子 → 应亮）。这是激活集纯函数（t936）的完备判据：正向 BFS 只能从**本 pass 扫描域内**的种子
+    //   外扩，种子在域外（触发点落在链中段旁）时够不到 → 旧版误判灭、先写暗、随后 tick 波前摸到真种子
+    //   再重亮 = 用户实测「动力轨灭一下又亮」的两拍闪烁。与正向 BFS 同深（连接位对称 → 链距对称）→
+    //   两向判据等价，终态不变（顺序无关不变量保持）。只读 m_chunks；仅接收器降沿评估路径调用。
+    bool goldenRailChainHasFedSeed(int x, int y, int z) const;
     // t656 电力脏集消费（WorldClock 10Hz 桥接；见上方系统头注释）。Q_INVOKABLE 同 tickWaterFlow 模式。
     Q_INVOKABLE void tickRedstone();
+    // t937 ② 探针 / 调试：电力局部重算 pass 计数（recomputePowerLocal 实际执行的次数——脏集空 tick 不计）。
+    //   矩阵 P-t937 用它断言「普通方块编辑零红石重算」（收窄面的行为级判据）；只读。
+    int powerRecomputePasses() const { return m_powerRecomputePasses; }
     // t656/t658 查询：(x,y,z) 处接收器是否被邻格供电（邻源激活或邻粉电力 >0）。供 MinecartManager
     //   boost 判定 / 调试。只读，不改栅格。
     bool isReceivingPower(int x, int y, int z) const;
@@ -1488,6 +1507,9 @@ private:
     //   稳态空集 → 每 tick 零开销（同 m_growthCells 位置索引模式；**非**全图每 tick 扫描——lessons
     //   perf-fluid-scan 反模式）。generate / beginLoad 清空（网格重置坐标作废）。键编码复用 packGrowthCell。
     std::unordered_set<quint64> m_powerDirty;
+    // t937 ② 电力局部重算 pass 计数（recomputePowerLocal 实跑次数，脏集空 tick 不计）：矩阵探针
+    //   「普通方块编辑零红石重算」的行为级判据 + 调试直读。运行期瞬态不进存档（同 m_powerDirty 取舍）。
+    int m_powerRecomputePasses = 0;
     // review26 #6 火把 burnout 侧表（机制近似 MC 红石火把熔断；确定性计数——PLAN §2-K，非随机）：键 =
     //   火把格（packGrowthCell），值 = 翻转计数窗。t869 形状语义恢复端点 / 拐角回灌后，「端点粉贴火把基座」
     //   成为合法无稳态电路（5Hz 永续振荡）——MC 有 burnout 兜底（短窗内翻转过 N 次锁熄一段冷却），本表

@@ -3436,6 +3436,19 @@ bool World::isPowerFamilyBlock(quint8 id)
         || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
 }
 
+// t937 ② 电源族布局谓词（粉以外）：红石块 / 红石火把 / 拉杆 / 木石按钮 / 压力板 / 探测轨。与
+//   powerSourceLevel 的源集合同员（按下 / 亮灭只影响重算**结果**，不影响「是否须重算」——纯 id 判定）。
+//   notePowerWrite 快路径的邻格收窄面用：普通编辑只有挨着「电力读数的输入端」（粉 ∪ 本族）才可能改读数。
+static bool isPowerEmitterBlock(quint8 id)
+{
+    using BR = BlockRegistry;
+    return id == BR::RedstoneBlock
+        || id == BR::RedstoneTorch
+        || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id)
+        || BR::isPressurePlate(id)
+        || id == BR::DetectorRail;
+}
+
 // 电源对邻格的强电值（机制等价 MC 1.0 各电源直供 15）：红石块恒 15；红石火把亮态 15（熄灭态 0）；
 // 拉杆 / 按钮按下态（state bit0）15；压力板压下态（state bit0）15；探测轨「有车」标记（state bit4）15。
 // 其余 → 0。只读 m_chunks + state。
@@ -3484,8 +3497,20 @@ static constexpr int kGoldenRailChainMax = 8;
 // t936 动力轨链邻步（单一权威，见 world.h 头注释）：视 (x,y,z) 为动力轨，解水平轴向 (ax,az) 的邻接
 //   动力轨格。邻列 x/z 出界 → false；y±1 越界 blockAt 安全返 Air（ChunkManager 契约）→ 探针视无轨。
 //   探针层命中非动力轨（普通 / 探测轨）→ false —— 链只在动力轨间传导（t704 语义，同层优先序不破）。
+//   **t937 ① 连接位门槛**：步源格是动力轨时还须持有该轴向连接位（railConnections 写入 / mesher 形态 /
+//   矿车 pickTrackStep 消费的同一物理连接权威）。旧版只看空间存在性 → 平行独立轨互不连接也被横穿
+//   （用户实测「一个红石点亮两条平行轨道」）。步源非动力轨（t936 破坏沿的编辑格——破后 Air 无
+//   state）不设门槛：那是入脏集的拓扑发现，点亮由重算侧本门槛把关。
 bool World::goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, int &ny, int &nz) const
 {
+    if (m_chunks.blockAt(x, y, z) == BlockRegistry::GoldenRail) {
+        const quint8 con = quint8(m_chunks.stateAt(x, y, z) & 0x0F); // 低 4 位连接位（bit4 通电位不参与）
+        const quint8 need = (ax > 0) ? BlockRegistry::RailConnPx
+                        : (ax < 0) ? BlockRegistry::RailConnNx
+                        : (az > 0) ? BlockRegistry::RailConnPz
+                                   : BlockRegistry::RailConnNz;
+        if ((con & need) == 0) return false; // 本轨不朝该向连接 → 链不由此走（平行邻轨在此被挡下）
+    }
     const int px = x + ax, pz = z + az;
     if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth) return false;
     const int dy = BlockRegistry::railProbeDelta(
@@ -3499,20 +3524,57 @@ bool World::goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, in
     return m_chunks.blockAt(nx, ny, nz) == BlockRegistry::GoldenRail;
 }
 
+// t937 ② 动力轨「链内直供种子」反向有界走查（见 world.h 头注释）：激活集纯函数的完备判据——正向 BFS
+//   只能从本 pass 扫描域内的种子外扩；种子在域外（触发点落在链中段旁，如拉杆 / 灯放到亮链轨旁）时
+//   旧版把「域内无种子」误判成「灭」先写暗、随后 tick 波前摸到真种子再重亮 = 用户实测「灭一下又亮」。
+//   本走查从待判轨沿链（goldenRailChainStep 同一权威，含连接位门槛）走 ≤ kGoldenRailChainMax-1 步找
+//   直供轨：找到 → 本轨应亮（链距 ≤7 恰是 BFS 从种子可覆盖的范围，两向同深等价）；找不到 → 灭是
+//   终态（真无种子）。防环：seen 去重（环轨不死循环）。只读 m_chunks。
+bool World::goldenRailChainHasFedSeed(int x, int y, int z) const
+{
+    if (isReceivingPower(x, y, z)) return true; // 本轨直供（调用侧多已判，防御直调）
+    static constexpr int kAxFed[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    struct FCell { int x, y, z; };
+    std::vector<FCell> frontier{{x, y, z}};
+    std::unordered_set<quint64> seen{packGrowthCell(x, y, z)};
+    for (int depth = 1; depth < kGoldenRailChainMax && !frontier.empty(); ++depth) {
+        std::vector<FCell> next;
+        for (const FCell &c : frontier) {
+            for (const auto &a : kAxFed) {
+                int nx, ny, nz;
+                if (!goldenRailChainStep(c.x, c.y, c.z, a[0], a[1], nx, ny, nz)) continue;
+                if (!seen.insert(packGrowthCell(nx, ny, nz)).second) continue;
+                if (isReceivingPower(nx, ny, nz)) return true; // 链内 ≤7 步有直供种子 → 本轨应亮
+                next.push_back({nx, ny, nz});
+            }
+        }
+        frontier = std::move(next);
+    }
+    return false; // 链距 ≤7 内无直供轨 → 灭即终态
+}
+
 // 编辑路径电力脏标记（挂 4/5 参数 setBlock / setWaterSilent / clearBlockSilent 末尾，同 checkRailOnEdit
-// 收口模式）：本格属红石族（粉 / 源 / 接收器）→ 本格入脏集；否则查 6 邻**任意红石族格**（t706：旧版只查
-// 邻粉——破掉「源 | 石 | TNT」中间的石块这类无粉场景不入脏集 → 邻源 / 邻接收器电力永不复算 = 用户实测
-// 「红石块 / 火把点不着 TNT」的可达性缺口之一；扩到全红石族后惰性块编辑也能唤醒两侧电路），命中才继续
-// （全无 → 本次编辑与电力无关，no-op）。
+// 收口模式）：本格属红石族（粉 / 源 / 接收器）→ 本格入脏集；否则查 6 邻**粉 / 电源格**才继续（全无 →
+// 本次编辑与电力无关，no-op；t937 ② 收窄，见快路径注释）。t706：旧版只查邻粉——破掉「源 | 石 | TNT」
+// 中间的石块这类无粉场景不入脏集 → 邻源电力永不复算 = 用户实测「红石块 / 火把点不着 TNT」的可达性
+// 缺口之一；扩到粉 + 电源后惰性块编辑仍能唤醒两侧电路。
 void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
 {
     if (!isPowerFamilyBlock(oldId) && !isPowerFamilyBlock(newId)) {
-        // 快路径：本格前后都非红石族 → 只有邻格红石连通性可能受影响（如破掉源与接收器之间的石块）。查
-        //   6 邻任意红石族格（粉 / 源 / 接收器）才继续（全无 → no-op）。
+        // 快路径（t937 ② 收窄）：本格前后都非红石族 → 只有当邻格是**电力读数的输入端**（粉 / 电源）才
+        //   可能受影响。接收器（动力轨 / 灯 / TNT / 铁门……）读的是邻源 / 邻粉——普通方块与空气在
+        //   powerSourceLevel / isRedstoneDust 读数里同为 0 → 纯接收器旁的普通编辑（轨旁放 / 挖土石、
+        //   t930 级联沙逐格着地）不改变任何电力读数，须 no-op 早退。旧版「任意红石族邻格」把接收器也
+        //   算上 → 触发面扩大到一切邻轨 / 邻灯编辑 = 用户实测重算风暴 + 扫描域无种子的先误熄再波前
+        //   重亮两拍闪烁；收窄后这些编辑零红石重算。粉 / 电源邻保留触发：t706 可达性、粉失撑掉落的
+        //   邻粉入脏集等路径语义不变（接收器 / 源本体的失撑掉落走各自编辑写——oldId 属红石族，天然
+        //   慢路径触发）。
         static constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
         bool anyPower = false;
-        for (const auto &d : kNb)
-            if (isPowerFamilyBlock(m_chunks.blockAt(x + d[0], y + d[1], z + d[2]))) { anyPower = true; break; }
+        for (const auto &d : kNb) {
+            const quint8 nb = m_chunks.blockAt(x + d[0], y + d[1], z + d[2]);
+            if (BlockRegistry::isRedstoneDust(nb) || isPowerEmitterBlock(nb)) { anyPower = true; break; }
+        }
         if (!anyPower) return;
     }
     m_powerDirty.insert(packGrowthCell(x, y, z)); // 编辑格入脏集（tickRedstone 从此锚点展开）
@@ -3633,6 +3695,7 @@ void World::tickTorchBurnout()
 bool World::recomputePowerLocal()
 {
     if (m_powerDirty.empty()) return false;
+    ++m_powerRecomputePasses; // t937 ②：探针判据（普通编辑零重算 = 计数不动；见 powerRecomputePasses 头注释）
     // 快照脏锚点（BFS 展开中可能再入集 —— 火把重亮 / 粉电力变化级联；快照后清集，新入集留下一 tick）。
     std::vector<quint64> anchors(m_powerDirty.begin(), m_powerDirty.end());
     m_powerDirty.clear();
@@ -3887,6 +3950,11 @@ bool World::recomputePowerLocal()
             frontierG = std::move(nextG);
         }
     }
+    // t937 ② 链传集并入接收器写集：种子 → BFS → 写闭环同 pass 完成（亮沿一次 pass 点亮整链）。旧版只有
+    //   扫描域内（锚点 + 6 邻）的轨被写，链其余轨等 t704 波前逐 tick 点亮 = 每 tick 一整趟重算 machinery
+    //   （粉域 BFS + 接收器扫描）空转——「全轨激活重算」风暴的放大器。goldenPowered 内恒为动力轨
+    //   （goldenRailChainStep 过滤）→ 并入只影响动力轨分支，其余接收器类型不受扰。
+    for (const quint64 k : goldenPowered) receivers.insert(k);
     for (const quint64 k : receivers) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
@@ -3910,23 +3978,27 @@ bool World::recomputePowerLocal()
             //   + MinecartManager boost 读此位（通电才加速）。连接位（低 4 位）保留不动。
             //   t704：通电位 = 直供（isReceivingPower）∪ 链传（goldenPowered 预计算——同轴向邻接的已通电
             //   动力轨接力传导，链 ≤8 根）。降沿对称：goldenPowered 不含本轨且非直供 → 熄灭。
-            const bool wantOn = powered || goldenPowered.count(k) > 0;
+            //   t937 ②「先算后清」：欲写灭前先 goldenRailChainHasFedSeed 反向走查——链距 ≤7 内若有直供
+            //   种子则本轨应亮（扫描域外的种子正向 BFS 够不到，旧版即误熄后靠波前数 tick 重亮 = 用户
+            //   实测「灭一下又亮」两拍闪烁）。走查与 BFS 同深同权威 → 终态仍是布局纯函数（t936 不变量
+            //   保持），只是消灭了错误中间态。仅在「廉价判据全灭且当前亮」时走查（编辑路径非热路径）。
+            bool wantOn = powered || goldenPowered.count(k) > 0;
             const bool on = (st & BlockRegistry::GoldenRailStateOnFlag) != 0;
+            if (!wantOn && on)
+                wantOn = goldenRailChainHasFedSeed(x, y, z);
             if (on != wantOn) {
                 m_chunks.setBlock(x, y, z, b, quint8(wantOn ? (st | BlockRegistry::GoldenRailStateOnFlag)
                                                              : (st & quint8(~BlockRegistry::GoldenRailStateOnFlag))));
-                // t704 链波前推进：本轨位翻转 → 同轴向邻的动力轨通电位可能因此变（升：链外扩一步；
-                //   降：熄灭收缩一步）→ 轴向邻轨入脏集，下一 tick 复查（同粉变化格回插模式；m_chunks
-                //   .setBlock 静默写不经 notePowerWrite → 手动补）。稳定后不再翻转 → 不再入集 → 稳态停。
-                //   t910：邻轨含 ±1 层（坡链的波前在升降层 —— 只插同 y 会把坡链的翻转传播卡死在
-                //   首格，链永不满编）。
+                // t704 链波前推进：本轨位翻转 → 链邻动力轨通电位可能因此变（升：链外扩一步；降：熄灭
+                //   收缩一步）→ 链邻轨入脏集，下一 tick 复查（同粉变化格回插模式；m_chunks.setBlock 静默
+                //   写不经 notePowerWrite → 手动补）。稳定后不再翻转 → 不再入集 → 稳态停。
+                //   t937：邻位经 goldenRailChainStep 解（三高探针 + **连接位门槛**，同一权威）——旧版
+                //   空间 ±1 层直插把平行独立轨也拉进重算（横穿脏标记面）；链翻转的传播本就只沿连接走。
                 static constexpr int kAx2[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
                 for (const auto &a : kAx2) {
-                    for (int dy = -1; dy <= 1; ++dy) {
-                        const int nx = x + a[0], ny = y + dy, nz = z + a[1];
-                        if (inBounds(nx, ny, nz) && m_chunks.blockAt(nx, ny, nz) == BlockRegistry::GoldenRail)
-                            m_powerDirty.insert(packGrowthCell(nx, ny, nz));
-                    }
+                    int nx, ny, nz;
+                    if (!goldenRailChainStep(x, y, z, a[0], a[1], nx, ny, nz)) continue;
+                    m_powerDirty.insert(packGrowthCell(nx, ny, nz));
                 }
                 any = true;
             }

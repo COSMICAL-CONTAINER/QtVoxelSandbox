@@ -20219,6 +20219,160 @@ Item {
                           ;
     }
 
+    // ── P-t937 平行轨道独立激活 + 重算风暴收窄探针（World 直编；spec t937 ①②）──
+    //   ① 平行独立：两条互不连接的平行动力轨线（A 沿 X 走、B 贴其 +Z 侧同沿 X 走），源只贴 A 头 →
+    //      A 全亮、B 恒灭。旧版链步只看「该向三高有动力轨」的**空间存在性** → A 的 +Z 探针命中 B，
+    //      信号横穿无连接的平行轨 = 用户实测「一个红石点亮两条独立平行轨道」；连接位门槛（步源轨须持
+    //      该轴向 RailConn 位——贯穿轴轨不设跨向位）后 A→B 无位即断。
+    //   ② 零重算：普通方块（Stone）放到亮链中段轨旁再挖掉 → powerRecomputePasses 计数不动（普通方块
+    //      与空气在电力读数里同为 0——收窄面判据）且链全程保持亮（无「灭一下又亮」中间态）。
+    //   ③ 真触发照常 + 先算后清：拉杆（未扳）放到亮链中段旁 → 计数增长（触发面不回缩）且链不闪
+    //      （goldenRailChainHasFedSeed 域外种子兜底——旧版扫描域无种子即误熄、波前数 tick 后重亮 =
+    //      两拍闪烁）；拆源 → 链全灭（降沿终态 = 布局纯函数不变，t936 不变量保持）。
+    //   (d) 源码钉：链步连接位门槛 / 快路径收窄谓词 / 反向走查消费 / 链传集并入写集 / 计数器声明。
+    {
+        // rig 选址：运行期扫描空区（lessons t769）。双线 rig（A/B 沿 X 平行、dz -1..2 隔离）。
+        const auto scanRig937 = [&](int dxLo, int dxHi) {
+            int rx = -1, rz = -1;
+            for (int zz = 3; zz < 94 && rx < 0; zz += 2)
+                for (int xx = 4; xx + dxHi < 96 && rx < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = dxLo; dx <= dxHi && clear; ++dx)
+                        for (int dz = -1; dz <= 2 && clear; ++dz)
+                            for (int dy = -1; dy <= 1 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { rx = xx; rz = zz; }
+                }
+            return QPair<int, int>(rx, rz);
+        };
+        const auto railOn937 = [&](int x, int y, int z) {
+            return (w.stateAt(x, y, z) & BR::GoldenRailStateOnFlag) != 0;
+        };
+        const auto litA = [&](int x0, int z0) {
+            int n = 0;
+            for (int i = 0; i < 6; ++i) n += railOn937(x0 + i, kRigY, z0);
+            return n;
+        };
+        const auto litB = [&](int x0, int z0) {
+            int n = 0;
+            for (int i = 0; i < 6; ++i) n += railOn937(x0 + i, kRigY, z0 + 1);
+            return n;
+        };
+        const auto clear937 = [&](int x0, int z0) {
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+            for (int i = 0; i < 6; ++i) {
+                w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+                w.setBlock(x0 + i, kRigY, z0 + 1, BR::Air, 0);
+            }
+            tickN(w, 2);
+        };
+        // (a) ① 平行独立主腿：A 全亮 / B 恒灭（阴性即用户症状——旧空间域下 B 误亮）。
+        bool okA = false, okB = false, okC = false;
+        {
+            const auto [x0, z0] = scanRig937(-1, 6);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t937 diag] no clear rig area found";
+            } else {
+                for (int i = 0; i < 6; ++i) w.setBlock(x0 + i, kRigY, z0, BR::GoldenRail, 0);     // 线 A（z0）
+                for (int i = 0; i < 6; ++i) w.setBlock(x0 + i, kRigY, z0 + 1, BR::GoldenRail, 0); // 线 B（z0+1，平行贴邻）
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0); // 源只贴 A 头（B 各格 6 邻均不含源）
+                tickN(w, 8);
+                const int a = litA(x0, z0), b = litB(x0, z0);
+                okA = a == 6 && b == 0;
+                if (!okA) qInfo().noquote() << "  [t937 diag] a litA" << a << "litB" << b;
+                // (b) ② 普通方块编辑零重算 + 无闪烁：settled 后快照计数 → 放石头 / 挖石头（贴 A 中段轨旁）
+                //     → 计数不动 + A 恒 6/6。旧版：任意红石族邻格触发 → 计数增 + 域内无种子先误熄再重亮。
+                tickN(w, 2); // 沉降（前腿写入的波前脏集清空）
+                const int c0 = w.powerRecomputePasses();
+                w.setBlock(x0 + 3, kRigY, z0 - 1, BR::Stone, 0); // 贴 A3 的普通方块
+                tickN(w, 3);
+                const int aPlace = litA(x0, z0);
+                w.setBlock(x0 + 3, kRigY, z0 - 1, BR::Air, 0);   // 挖掉
+                tickN(w, 3);
+                const int c1 = w.powerRecomputePasses();
+                const int aBreak = litA(x0, z0);
+                okB = c1 == c0 && aPlace == 6 && aBreak == 6;
+                if (!okB)
+                    qInfo().noquote() << "  [t937 diag] b passes" << c0 << "->" << c1
+                                      << "litA(place)" << aPlace << "litA(break)" << aBreak;
+                // (c) ③ 真触发照常 + 先算后清：未扳拉杆放亮链中段旁 → 计数增长且不闪（域外种子兜底）；
+                //     拆源 → 全灭（降沿终态）。
+                const int c2 = w.powerRecomputePasses();
+                w.setBlock(x0 + 2, kRigY, z0 - 1, BR::Lever, 0); // 慢路径（拉杆属红石族）——真触发面
+                tickN(w, 1);
+                const int cLeverTick = w.powerRecomputePasses();
+                const int aLever = litA(x0, z0);
+                tickN(w, 3); // 旧版误熄后波前重亮窗——全程 6/6 才算无两拍闪烁
+                const int aLeverSettled = litA(x0, z0);
+                w.setBlock(x0 + 2, kRigY, z0 - 1, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0); // 拆源 → 降沿
+                tickN(w, 10);
+                const int aDark = litA(x0, z0);
+                okC = cLeverTick > c2 && aLever == 6 && aLeverSettled == 6 && aDark == 0;
+                if (!okC)
+                    qInfo().noquote() << "  [t937 diag] c passes" << c2 << "->" << cLeverTick
+                                      << "aLever" << aLever << "aLeverSettled" << aLeverSettled
+                                      << "aDark" << aDark;
+                clear937(x0, z0);
+            }
+        }
+        // (d) 源码钉（t935/t936 模式：源文件直读字符串钉——门槛 / 收窄谓词 / 走查 / 并入 / 计数器消失即红）。
+        const QString exeDir937 = QCoreApplication::applicationDirPath();
+        const QString root937 = QDir(exeDir937 + QStringLiteral("/..")).absolutePath();
+        auto readSrc937 = [&root937](const QString &rel) -> QString {
+            QFile f(root937 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString wh937 = readSrc937(QStringLiteral("src/World/world.h"));
+        const QString wc937 = readSrc937(QStringLiteral("src/World/world.cpp"));
+        const bool okD1 = wc937.contains(QStringLiteral("if ((con & need) == 0) return false;"))
+                       && wc937.contains(QStringLiteral("const quint8 need = (ax > 0) ? BlockRegistry::RailConnPx"));
+        const bool okD2 = wc937.contains(QStringLiteral("static bool isPowerEmitterBlock(quint8 id)"))
+                       && wc937.contains(QStringLiteral("isPowerEmitterBlock(nb)"));
+        const bool okD3 = wc937.contains(QStringLiteral("bool World::goldenRailChainHasFedSeed(int x, int y, int z) const"))
+                       && wc937.contains(QStringLiteral("wantOn = goldenRailChainHasFedSeed(x, y, z);"));
+        const bool okD4 = wc937.contains(QStringLiteral("for (const quint64 k : goldenPowered) receivers.insert(k);"));
+        const bool okD5 = wh937.contains(QStringLiteral("int powerRecomputePasses() const"))
+                       && wh937.contains(QStringLiteral("bool goldenRailChainHasFedSeed(int x, int y, int z) const;"));
+        const bool okT937 = okA && okB && okC && okD1 && okD2 && okD3 && okD4 && okD5;
+        if (!okT937) ++totalFail;
+        if (!okT937)
+            qInfo().noquote() << "  [t937 diag] a" << okA << "b" << okB << "c" << okC
+                              << "| d" << okD1 << okD2 << okD3 << okD4 << okD5
+                              << "| srcLen h" << wh937.size() << "c" << wc937.size();
+        qInfo().noquote() << (okT937 ? "PASS" : "FAIL")
+                          << "| t937 parallel tracks activate independently and the power-recompute "
+                             "trigger surface is narrowed to connectivity-relevant edits: (1) chain "
+                             "propagation now requires the stepping rail's own connection bit toward "
+                             "the step direction (the same physical-connection authority the mesher "
+                             "and minecart pickTrackStep consume), so a redstone source feeding one "
+                             "track no longer leaks across to an unconnected parallel track placed "
+                             "beside it (old chain step only probed spatial existence - any golden "
+                             "rail in the 3-height window was chain, so power jumped the gap between "
+                             "side-by-side tracks; user report: one redstone lit two independent "
+                             "parallel tracks); (2) notePowerWrite's fast path only continues when a "
+                             "neighbor is dust or a power SOURCE - plain blocks read as 0 in every "
+                             "power reading just like air, so placing/breaking ordinary blocks beside "
+                             "rails (and t930 cascade sand landings) trigger zero redstone recomputes "
+                             "(old path accepted ANY power-family neighbor including receivers, "
+                             "pumping a full-chain recompute whose scan domain missed the chain seed "
+                             "and visibly flickered the rails dark-then-lit); (3) before writing a "
+                             "golden rail dark, a bounded reverse seed-walk (same chain-step "
+                             "authority, same depth) confirms no directly-fed rail within chain "
+                             "distance 7 - legit triggers (lever/lamp placement, source edits) no "
+                             "longer emit wrong dark intermediates, and the chain-lit set is merged "
+                             "into the receiver write set so brightening completes in one pass; "
+                             "final activation states are unchanged (order-independent pure function "
+                             "of layout, t936 invariant kept, P-t936 legs stay green); probe legs: "
+                             "(a) parallel rig A-lit-6/B-dark-0, (b) stone place+break beside the lit "
+                             "chain - powerRecomputePasses counter flat and chain stays lit, (c) lever "
+                             "beside mid-chain recompute counter rises with no flicker + source "
+                             "removal darkens the chain, (d) source pins for the connection gate, "
+                             "narrowed predicate, reverse-walk consumption, write-set merge, and the "
+                             "counter accessor"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
