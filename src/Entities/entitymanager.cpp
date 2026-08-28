@@ -9,6 +9,7 @@
 #include <QtMath>    // qFloor, qRadiansToDegrees
 #include <algorithm> // std::clamp, std::min, std::move
 #include <cmath>     // std::sqrt, std::sin, std::cos
+#include <cstring>   // std::memcpy（slotFingerprint 浮点位混合）
 
 namespace {
 Q_LOGGING_CATEGORY(lcEnt, "vo.entity") // 模块化日志（PLAN §2-F）；未在 main.cpp 过滤，落 log 可见
@@ -242,6 +243,108 @@ EntityManager::EntityManager(QObject *parent) : QObject(parent)
     m_clock.start(); // 任务（弓箭 60s despawn）：墙钟计时器（arrowSpawnMs / tick 硬上限用）
 }
 
+// t935 perf 槽位可见态指纹（= Main.qml mobHost delegate 绑定读到的 At() 访问器底层字段集的散列）。
+//   差分语义：指纹不变 ⇔ 该槽全部可见字段值不变 ⇔ delegate 绑定重求值只会读回相同值 → 跳过（零 QML
+//   绑定求值成本）。**字段清单契约**：Main.qml delegate 每读一个新的 entityManager.xxxAt(index) 访问器，
+//   其底层字段必须加入本清单，否则该字段变化不 bump → delegate 停更（视觉冻结直到下次别的字段变化）。
+//   逐字段 ↔ 访问器对照（2026-08 盘点，新增访问器同步改两侧）：
+//     alive→aliveAt；pos→posAt；halfW/halfH→radiusAt/halfHeightAt；pushable→pushableAt；kind→kindAt；
+//     blockId/blockState→blockIdAt/blockStateAt；primed/fuse→isPrimedAt/fuseProgressAt；color→colorAt；
+//     vx/vy/vz→arrowYawAt/arrowPitchAt（箭朝向；mob 击退衰减期顺带 bump 无害）；
+//     mobType/maxHealth/health/dead/hurtFlash→mobTypeAt/maxHealthAt/healthAt/deadAt/hurtFlashAt；
+//     burning/fireTimer→isBurningAt；slowTimer→isSlowedAt；yawRad→yawAt；walkPhase→walkPhaseAt；
+//     eatTimer→headPitchAt（羊吃草低头包络）；sheared/sheepWool→shearedAt/sheepWoolTintAt；
+//     snowGolemSheared→snowGolemShearedAt；loveTimer/tameHeartTimer→inLoveAt；baby→babyScaleAt；
+//     wolfTamed/wolfSitting→wolfTamedAt/wolfSittingAt；ocelotTamed/ocelotSitting/ocelotVariant→…At；
+//     fuseTimer→inflateAt（潜行者蓄力膨胀）；aimTimer→drawAmountAt（骸骨拉弓）；
+//     enraged/rageTimer→enragedAt/nightwalkerRageProgressAt；golemWindup→golemAttackPoseAt；
+//     enderEyeShatter→shatteringAt；armorHelmet/Chest/Legs/Boots→mobArmorAt。
+//   **刻意排除**的字段（每 tick 恒变但零视觉 → 入指纹会让静置 mob 每 emit 空转 bump，正是本修复要消灭的
+//   浪费）：AI/节流计时器（wanderTimer/ambientTimer/aiAccum/hostileAccum/stepAccum/losCacheTimer/
+//   shadeRescanTimer/teleportCooldown…）、经济计时器（eggTimer/swimTimer/growTimer/regrowCooldown/
+//   breedCooldown）、内部快照（spawnSerial/deathBurned/deathBaby/deathSheared/deathTimer）、
+//   arrowLife/enderEyeDistLeft/bobber 族（寿命/驱动计时，呈现走 player.fishing 镜像非本 delegate）。
+//   其中「值翻转才可见」的计时器（growTimer→baby、regrowCooldown→sheared…）以对应布尔/值字段入指纹，
+//   翻转帧必 bump，语义无损。
+//   碰撞概率口径：64 位 FNV-1a + boost 式混合，47 槽 × ~20 emit/s 连玩一年 ≈ 3e9 次比对，生日碰撞
+//   ~2e-10；即便命中，失败模式 = 单槽错过一帧中间态（下次真变化即恢复），非崩溃/永久冻结，可接受。
+quint64 EntityManager::slotFingerprint(size_t i) const
+{
+    const Entity &e = m_entities[i];
+    auto mix = [](quint64 &h, quint64 v) {
+        h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    };
+    auto mixB = [&mix](quint64 &h, bool b) { mix(h, b ? 1 : 0); };
+    auto mixI = [&mix](quint64 &h, int v) { mix(h, quint64(quint32(v))); };
+    // 浮点按位混合（位级稳定 ≠ 数值相等；呈现层只消费数值，位同 ⇒ 值同，方向安全）。
+    auto mixF = [&mix](quint64 &h, float f) { quint32 b = 0; std::memcpy(&b, &f, sizeof(b)); mix(h, b); };
+    quint64 h = 1469598103934665603ULL; // FNV offset basis
+    mixB(h, e.alive);
+    mixF(h, e.pos.x()); mixF(h, e.pos.y()); mixF(h, e.pos.z());
+    mixF(h, e.halfW); mixF(h, e.halfH); mixB(h, e.pushable);
+    mixI(h, e.kind); mixI(h, e.blockId); mixI(h, e.blockState);
+    mixB(h, e.primed); mixF(h, e.fuse);
+    mix(h, quint64(qHash(e.color))); // QString → 64 位域
+    mixF(h, e.vx); mixF(h, e.vy); mixF(h, e.vz);
+    mixI(h, e.mobType); mixI(h, e.maxHealth); mixI(h, e.health);
+    mixB(h, e.dead); mixF(h, e.hurtFlash);
+    mixB(h, e.burning); mixF(h, e.fireTimer); mixF(h, e.slowTimer);
+    mixF(h, e.yawRad); mixF(h, e.walkPhase); mixF(h, e.eatTimer);
+    mixB(h, e.sheared); mixI(h, e.sheepWool); mixB(h, e.snowGolemSheared);
+    mixF(h, e.loveTimer); mixF(h, e.tameHeartTimer); mixB(h, e.baby);
+    mixB(h, e.wolfTamed); mixB(h, e.wolfSitting);
+    mixB(h, e.ocelotTamed); mixB(h, e.ocelotSitting); mixI(h, e.ocelotVariant);
+    mixF(h, e.fuseTimer); mixF(h, e.aimTimer);
+    mixB(h, e.enraged); mixF(h, e.rageTimer); mixF(h, e.golemWindup); mixF(h, e.enderEyeShatter);
+    mixI(h, e.armorHelmet); mixI(h, e.armorChest); mixI(h, e.armorLegs); mixI(h, e.armorBoots);
+    return h;
+}
+
+// t935 槽位监视器惰性入口（QML delegate 建立时取一次）。新槽首次询问即建；已建的恒返回同一实例
+//   （槽复用换任不换 monitor —— delegate 的绑定依赖挂在该实例 revision 上，换实例 = 依赖重挂丢一拍）。
+QObject *EntityManager::slotMonitorAt(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return nullptr;
+    if (int(m_slotMonitors.size()) < int(m_entities.size()))
+        m_slotMonitors.resize(m_entities.size(), nullptr); // 只增不减（同 count 单调；delegate 引用稳定）
+    if (!m_slotMonitors[size_t(i)])
+        m_slotMonitors[size_t(i)] = new EntitySlotMonitor(this); // 父对象托管；GUI 线程专用
+    return m_slotMonitors[size_t(i)];
+}
+
+// t935 统一 notify 漏斗（头文件声明处注释）。全部原「++m_revision; emit entitiesChanged();」对收口到此。
+void EntityManager::notifyEntitiesChanged()
+{
+    ++m_revision;
+    refreshSlotMonitors();
+    emit entitiesChanged();
+}
+
+// t935 指纹差分 → 按槽 bump。每次 notify 全槽扫一遍（47 槽 × ~45 字段混合 ≈ 微秒级，对照被消掉的
+//   N×50 QML 绑定重求值可忽略）。计数三键（F3 mob 行量化面）：mobEmitN = emit 次数；mobBumpN = 实际
+//   bump 槽数（= 真被刷新的 delegate 数）；mobFanN = 旧口径全扇出槽数和（count × emit，修复前实付成本
+//   的口径）—— bump << fan 即收口生效（静置 / 空槽 / 跨世界高水位槽全部落在差里）。
+void EntityManager::refreshSlotMonitors()
+{
+    const int n = int(m_entities.size());
+    if (int(m_slotFp.size()) < n) {
+        m_slotFp.resize(n, ~quint64(0)); // 哨兵必 ≠ 首算指纹 → 新槽首 notify 必 bump（delegate 首刷不丢）
+        m_slotMonitors.resize(n, nullptr);
+    }
+    int bumped = 0;
+    for (int i = 0; i < n; ++i) {
+        const quint64 fp = slotFingerprint(size_t(i));
+        if (fp == m_slotFp[size_t(i)]) continue; // 可见态未变 → 不 bump → 本槽 delegate 绑定零重求值
+        m_slotFp[size_t(i)] = fp;
+        ++bumped;
+        if (EntitySlotMonitor *m = m_slotMonitors[size_t(i)])
+            m->bump(); // nullptr = 该槽尚无 delegate（monitor 未被索取）→ 无观众无需 bump
+    }
+    FrameProfiler::instance()->count("mobEmitN");
+    FrameProfiler::instance()->addCount("mobBumpN", bumped);
+    FrameProfiler::instance()->addCount("mobFanN", n);
+}
+
 // 生成默认测试生物：委托 spawnMobTyped（mobType=0、#ff5555、满血）。t239 调试入口（M 键）。
 void EntityManager::spawnMob(int x, int y, int z)
 {
@@ -255,8 +358,7 @@ int EntityManager::spawnMobTyped(int x, int y, int z, int mobType, const QString
 {
     const int slot = spawnMobCore(x, y, z, mobType, color, maxHealth);
     if (slot < 0) return -1; // 达 kCap（spawnMobCore 内已告警）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
     return slot;
@@ -268,8 +370,7 @@ int EntityManager::spawnMobTypedYaw(int x, int y, int z, int mobType, const QStr
     const int slot = spawnMobCore(x, y, z, mobType, color, maxHealth);
     if (slot < 0) return -1; // 达 kCap（spawnMobCore 内已告警）
     m_entities[size_t(slot)].yawRad = yawRad; // 生成时固定朝向（emit 前设，QML 首帧即读到正确 yaw）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "spawned mob type" << mobType << "at" << x << y << z
                   << "yaw" << yawRad << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
     return slot;
@@ -421,8 +522,7 @@ void EntityManager::spawnFallingBlock(int x, int y, int z, int blockId)
     e.blockId = blockId;
     e.fallStartY = e.pos.y(); // t794 铁砧砸伤落差基准（spawn 时刻中心 Y；沙/砾等族不读，无害写入）
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "spawned falling block id=" << blockId << "at" << x << y << z
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
@@ -446,8 +546,7 @@ void EntityManager::spawnFallingBlockState(int x, int y, int z, int blockId, int
     e.blockState = state; // t527：携带 state（积雪层层数 metadata；仅 SnowLayer 用）
     e.fallStartY = e.pos.y(); // t794 铁砧砸伤落差基准（同 spawnFallingBlock；SnowLayer 不读无害）
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "spawned falling block id=" << blockId << "state=" << state << "at" << x << y << z
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
@@ -474,8 +573,7 @@ int EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
     e.arrowLife = kArrowLifetime;
     e.arrowSpawnMs = m_clock.elapsed(); // 任务（60s despawn）：spawn 墙钟（tick 硬上限用）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 
@@ -501,8 +599,7 @@ void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &v
     e.arrowFromPlayer = true;                  // 命中 mob（非玩家）
     e.arrowDamage = damage > 0 ? damage : 1;   // 蓄力伤害（防御 ≥1）
     acquireSlot(std::move(e));
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
 }
 
 // t482/t505 生成雪球投射物（雪傀儡 aiSnowGolem 远程攻击 / t505 玩家右键抛掷）：存 origin + 3D 速度 vel（含 vy 抛物）
@@ -532,8 +629,7 @@ int EntityManager::spawnSnowball(const QVector3D &origin, const QVector3D &vel, 
     if (thrower >= 0 && thrower < int(m_entities.size()))
         e.snowballThrowerSerial = m_entities[size_t(thrower)].spawnSerial;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 // t583 生成鸡蛋投射物（玩家右键投掷 / 发射器弹射；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
@@ -557,8 +653,7 @@ int EntityManager::spawnEgg(const QVector3D &origin, const QVector3D &vel)
     e.vz = vel.z();
     e.arrowLife = kEggLifetime;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 
@@ -586,8 +681,7 @@ int EntityManager::spawnFireball(const QVector3D &origin, const QVector3D &vel, 
     e.arrowLife = kFireballLifetime;
     e.fireballIgnitePct = igniteChancePct; // t891② per-entity 撞击点燃概率（默认 20；玩家烈焰弹 100）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 
@@ -652,8 +746,7 @@ int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
     //   头文件默认 0.0f）→ tick 远段 gap 恒负、爬升分量恒 0，升空巡航整体死码。矩阵测试有断言防线。
     e.enderEyeCruiseY = origin.y() + kEnderEyeClimbHeight;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 // t758 生成暗渊珠投射物（玩家右键 EnderPearlId 掷出；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
@@ -677,8 +770,7 @@ int EntityManager::spawnEnderPearl(const QVector3D &origin, const QVector3D &vel
     e.vz = vel.z();
     e.arrowLife = kEnderPearlLifetime; // 寿命兜底「命中」（悬空到期视作落点结算传送）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 
@@ -709,8 +801,7 @@ int EntityManager::spawnBobber(const QVector3D &origin, const QVector3D &vel, qu
     e.bobberState = kBobberStFlying;
     e.bobberSerial = castSerial;   // 掷骰序号（等待值在落水 settle 时算）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return slot;
 }
 
@@ -747,8 +838,7 @@ bool EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float 
     e.vz = dz * speed;
     e.vy = upSpeed;           // t882 上抛分量（距离 / 角度调制后的传入值；拉离地面 + 空中拽飞弧高来源）
     e.resting = false;        // 解除静止 → tick 重力分支处理上抛→减速→下落→着地
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "mob" << mobIdx << "hook-pulled toward player speed=" << speed << "up=" << upSpeed;
     return true;
 }
@@ -1156,8 +1246,7 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
     }
 
     if (dirty) {
-        ++m_revision;
-        emit entitiesChanged();
+        notifyEntitiesChanged();
     }
 }
 
@@ -1302,8 +1391,7 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
     }
 
     if (dirty) {
-        ++m_revision;
-        emit entitiesChanged();
+        notifyEntitiesChanged();
     }
 }
 
@@ -1469,8 +1557,7 @@ void EntityManager::removeEntityAt(int i)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
     releaseSlot(i);
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
 }
 
 // t284 Stalker 蓄力膨胀进度（0..1）：仅 mobType==MobStalker 且 fuseTimer>0（正在蓄力）时返
@@ -1635,8 +1722,7 @@ bool EntityManager::setMobArmorSet(int i, int tier)
         e.armorLegs   = base + 2;
         e.armorBoots  = base + 3;
     }
-    ++m_revision;
-    emit entitiesChanged(); // QML 护甲壳 armId 绑定刷新
+    notifyEntitiesChanged(); // QML 护甲壳 armId 绑定刷新
     return true;
 }
 
@@ -1670,8 +1756,7 @@ void EntityManager::shearSheep(int i)
     qCInfo(lcEnt) << "sheep sheared at slot" << i << "pos" << e.pos << "woolIndex" << e.sheepWool
                   << "-> dropped wool at" << dx << dy << dz;
     emit sheepSheared(dx, dy, dz, e.sheepWool); // t789：携毛色下标（呈现层据此选对应色羊毛掉落 id）
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
+    notifyEntitiesChanged(); // bump → QML delegate 据 shearedAt 翻羊为裸外观
 }
 
 // t832 染料染羊（spec「手持染料对羊右键 → 羊染成对应色」；机制等价 MC 1.0 染羊 + 一次性语义）。染即长毛
@@ -1690,8 +1775,7 @@ bool EntityManager::dyeSheep(int i, int woolIndex)
     e.sheared = false;      // 染即长毛（染料涂在毛上，观感立即显染色毛层）
     e.regrowCooldown = 0.0f; // 新长的毛不吃草重掷（剪后才会走长回重掷链）
     qCInfo(lcEnt) << "sheep dyed at slot" << i << "woolIndex" << woolIndex;
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 毛层 tint / 毛茸外观刷新
+    notifyEntitiesChanged(); // bump → QML 毛层 tint / 毛茸外观刷新
     return true;            // caller 据返值消耗 1 染料（生存）
 }
 
@@ -1710,8 +1794,7 @@ bool EntityManager::healTamedPet(int i, int amount)
     if (e.health >= e.maxHealth) return false; // 满血 → 不回（caller 走繁殖分支）
     e.health = std::min(e.maxHealth, e.health + amount);
     qCInfo(lcEnt) << "tamed pet healed at slot" << i << "->" << e.health << "/" << e.maxHealth;
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 心条刷新（尾巴角度据 healthAt 同步翘起）
+    notifyEntitiesChanged(); // bump → QML 心条刷新（尾巴角度据 healthAt 同步翘起）
     return true;            // caller 据返值消耗 1 食物（生存）
 }
 
@@ -1765,8 +1848,7 @@ void EntityManager::shearSnowGolem(int i)
     const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
     qCInfo(lcEnt) << "snow golem sheared at slot" << i << "pos" << e.pos << "-> dropped pumpkin at" << dx << dy << dz;
     emit snowGolemSheared(dx, dy, dz);
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML delegate 据 snowGolemShearedAt 翻为无头 derpy 外观
+    notifyEntitiesChanged(); // bump → QML delegate 据 snowGolemShearedAt 翻为无头 derpy 外观
 }
 
 // t400 mobType 是否可繁殖被动生物（pig/cow/sheep/chicken 之一；t480 加 MobWolf；t481 加 MobOcelot）。hostile /
@@ -1798,8 +1880,7 @@ bool EntityManager::enterLoveMode(int i)
     if (e.loveTimer > 0.0f) return false;                     // 已求偶 → 不重复触发（防一次喂多个叠加）
     e.loveTimer = kLoveDuration; // 进求偶期（tick 内衰减 + 寻偶 AI 把它拉向同类求偶者）
     qCInfo(lcEnt) << "mob slot" << i << "type" << e.mobType << "-> love mode" << kLoveDuration << "s";
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 据 inLoveAt 显心
+    notifyEntitiesChanged(); // bump → QML 据 inLoveAt 显心
     return true; // caller 据返值消耗 1 食物（生存）
 }
 
@@ -1822,8 +1903,7 @@ bool EntityManager::feedBaby(int i)
     if (e.growTimer < 0.0f) e.growTimer = 0.0f;               // clamp 0（防负成长；到 0 即下 tick 长大）
     qCInfo(lcEnt) << "baby fed at slot" << i << "type" << e.mobType
                   << "-> growTimer reduced to" << e.growTimer << "s left";
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     return true; // caller 据返值消耗 1 食物（生存）
 }
 
@@ -1866,8 +1946,7 @@ bool EntityManager::tameWolf(int i)
     e.attackCooldown = 0.0f; // 清咬击冷却（驯服后无攻击语义残留）
     e.tameHeartTimer = kTameHeartDuration; // t831 驯服成功爱心（QML 心形经 inLoveAt 显；tickBreeding 衰减）
     qCInfo(lcEnt) << "wolf tamed at slot" << i << "pos" << e.pos;
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 据 wolfTamedAt 切狼行为态
+    notifyEntitiesChanged(); // bump → QML 据 wolfTamedAt 切狼行为态
     return true; // caller 据返值消耗 1 骨头（生存）
 }
 
@@ -1883,8 +1962,7 @@ void EntityManager::toggleWolfSit(int i)
     if (!e.wolfTamed) return;                          // 未驯服 → 右键无反应（机制等价 MC 野狼不可命令）
     e.wolfSitting = !e.wolfSitting;
     qCInfo(lcEnt) << "wolf slot" << i << (e.wolfSitting ? "sitting (stay)" : "standing (follow)");
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 据 wolfSittingAt 切坐姿/站姿
+    notifyEntitiesChanged(); // bump → QML 据 wolfSittingAt 切坐姿/站姿
 }
 
 // t923 仇恨传递：敌对攻击驯服狼 → 狼群反击攻击者（m_wolfTarget 共享防御目标；调自 骷髅箭命中狼 /
@@ -1952,8 +2030,7 @@ bool EntityManager::tameOcelot(int i)
     e.chaseTimer = 0.0f;
     e.tameHeartTimer = kTameHeartDuration; // t831 驯服成功爱心（QML 心形经 inLoveAt 显；tickBreeding 衰减）
     qCInfo(lcEnt) << "ocelot tamed at slot" << i << "pos" << e.pos << "variant" << e.ocelotVariant;
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 据 ocelotTamedAt 切猫外观 / 跟随态
+    notifyEntitiesChanged(); // bump → QML 据 ocelotTamedAt 切猫外观 / 跟随态
     return true; // caller 据返值消耗 1 生鱼（生存）
 }
 
@@ -1969,8 +2046,7 @@ void EntityManager::toggleOcelotSit(int i)
     if (!e.ocelotTamed) return;                          // 未驯服 → 右键无反应（机制等价 MC 野豹猫不可命令）
     e.ocelotSitting = !e.ocelotSitting;
     qCInfo(lcEnt) << "ocelot slot" << i << (e.ocelotSitting ? "sitting (stay)" : "standing (follow)");
-    ++m_revision;
-    emit entitiesChanged(); // bump → QML 据 ocelotSittingAt 切坐姿/站姿
+    notifyEntitiesChanged(); // bump → QML 据 ocelotSittingAt 切坐姿/站姿
 }
 
 // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈）。
@@ -2249,8 +2325,7 @@ void EntityManager::damageEntity(int i, int amount)
         qCInfo(lcEnt) << "mob" << i << "took" << amount << "dmg, health=" << e.health << "/" << e.maxHealth;
     }
 
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
 }
 
 // t242 攻击射线 vs mob AABB 命中测试（spec「玩家左键攻击生物」前置：选体）。slab-based ray-AABB
@@ -2334,8 +2409,7 @@ void EntityManager::knockback(int i, float dirX, float dirZ, float strength)
     e.vz = dirZ * horiz;
     e.vy = kKnockbackUp;   // 小跳垂直速度（向上为正；tick 重力分支接手）
     e.resting = false;     // 解除静止 → tick 处理上跳 + 下落 + 着地（否则 resting continue 跳过）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "mob" << i << "knockback dir=(" << dirX << dirZ << ") horiz=" << horiz;
 }
 
@@ -2349,8 +2423,7 @@ void EntityManager::ignite(int i, float duration)
     if (!e.alive || e.kind != Mob || e.dead || duration <= 0.0f) return;
     if (e.fireTimer < duration) {
         e.fireTimer = duration;
-        ++m_revision;
-        emit entitiesChanged();
+        notifyEntitiesChanged();
         qCInfo(lcEnt) << "mob" << i << "ignited duration=" << duration;
     }
 }
@@ -4589,8 +4662,7 @@ void EntityManager::spawnPrimedTnt(int x, int y, int z, float fuseSec, float vel
         e.vz = velZ;
     }
     acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
-    ++m_revision;
-    emit entitiesChanged();
+    notifyEntitiesChanged();
     qCInfo(lcEnt) << "spawned primed TNT at" << x << y << z << "fuse" << e.fuse << "s"
                   << "(live" << m_liveCount << "slots" << m_entities.size() << ")";
 }
@@ -4605,8 +4677,7 @@ void EntityManager::detonatePrimedTnt(int idx, World *world, const QVector3D &pl
     const int cx = qFloor(e.pos.x()), cy = qFloor(e.pos.y()), cz = qFloor(e.pos.z());
     releaseSlot(idx); // 先释放槽（爆炸即除，不再模拟；releaseSlot 不 erase 保 count 单调，同 t256）
     detonateTntSphere(cx, cy, cz, world, playerPos); // 球形爆炸 + 链式引燃 + 伤玩家 + 音视
-    ++m_revision; // releaseSlot 改了槽位 → bump revision 让 QML delegate 隐藏空槽（aliveAt 翻 false）
-    emit entitiesChanged();
+    notifyEntitiesChanged(); // releaseSlot 改了槽位 → bump revision 让 QML delegate 隐藏空槽（aliveAt 翻 false）
 }
 
 // t490 第 i 个实体是否 PrimedTnt（kind==FallingBlock && primed && alive）。QML delegate 据它对 FallingBlock 叠白闪脉冲。
@@ -4757,7 +4828,7 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
             dirty = true;
         }
     }
-    if (dirty) { ++m_revision; emit entitiesChanged(); }
+    if (dirty) notifyEntitiesChanged();
 }
 
 namespace {
@@ -5302,8 +5373,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                             // 玩家雪球打敌对：0 伤害但触发红闪（damageEntity 守 amount<=0 不闪，手动设 hurtFlash）。
                             Entity &tm = m_entities[size_t(mi)];
                             if (tm.alive && tm.kind == Mob && !tm.dead) {
-                                tm.hurtFlash = kHurtFlashTime; // 红闪（QML hurtFlashAt>0 → baseColor 红）
-                                ++m_revision; // bump → QML 红闪绑定刷新
+                                tm.hurtFlash = kHurtFlashTime; // 红闪（QML hurtFlashAt>0 → baseColor 红；t935 起由
+                                // 下方 dirty → tick 末 notify 的槽位指纹差分捕获 hurtFlash 变化 → bump 本槽监视器）
                             }
                         }
                         // 击退（t553 加大到 kSnowballKnockbackStrength=2.0：追尾敌对 mob 也被明显推开；t505 玩家雪球
@@ -7294,14 +7365,18 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     // perf：节流 entitiesChanged emit。mob 每帧 wander/gravity 致 dirty 几乎每帧 → 旧版每帧 ++revision+emit 触发
     //   全体 delegate（count × ~12 revision 绑定）NOTIFY 激活 + 行走 mob 的 MobModel 全几何 rebuild+GPU 重上传
     //   = mob 卡顿主因（用户实测 mob 22ms 恒定 + ~65ms QML，与视距无关；前几轮 AI/blockAt 节流无效因瓶颈在此）。
-    //   改：dirty/toRemove 只置 m_pendingEmit；每 kEmitEveryN 帧（~20Hz）才 ++revision+emit 一次 → NOTIFY 激活 +
+    //   改：dirty/toRemove 只置 m_pendingEmit；每 kEmitEveryN 帧（~20Hz）才 notify 一次 → NOTIFY 激活 +
     //   MobModel 重建频率降 3×。mob 位置/腿/外观 20Hz 刷新（缓慢生物视觉够），spawn/despawn ≤3 帧延迟。配合
     //   MobModel::setWalkPhase 量化（腿姿 12 步/cycle），双重削减每帧 mob 渲染开销。m_pendingEmit 持续脏确保不丢更新。
+    //   t935 二段收口：节流把 emit 从 60Hz 降到 ~20Hz，但**单次 emit 仍激活全部 N 槽 delegate**（用户实测 ltail
+    //   10.59ms：TNT 炸沙坑后槽高水位 47，空槽 / 静置 mob 的绑定重求值全是白算）。notify → refreshSlotMonitors
+    //   槽位指纹差分只 bump 可见态真变的槽 → 扇出 =「bump 槽 × ~50 绑定」而非「count 槽 × ~50」（量化读数 =
+    //   F3 mob 行 emit/bump/fan 三计数）。dirty 含非可见字段翻转（resting 等）时 notify 照发但零 bump（指纹
+    //   差分吸收），成本退化为全槽指纹扫描（微秒级）。
     if (dirty || !toRemove.empty()) m_pendingEmit = true;
     if (m_pendingEmit && (m_tickPhase % quint32(kEmitEveryN) == 0)) {
         m_pendingEmit = false;
-        ++m_revision;
-        emit entitiesChanged();
+        notifyEntitiesChanged();
     }
     // t905 mob 细分：三桶 + loopTail（releaseSlot / flushPendingShots / tickBreeding / emit 扇出）入账
     //   （mobHead / mobAI / mobTail / mobLoopTail 在 FrameProfiler report 的 mob 行细分展示）。

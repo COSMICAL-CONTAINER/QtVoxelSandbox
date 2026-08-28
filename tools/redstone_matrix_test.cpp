@@ -19898,6 +19898,134 @@ Item {
                           ;
     }
 
+    // ── P-t935 mob ltail 10.59ms 粒度化 revision 探针（R19.17 性能批二收官；t933 判决的 QML 侧残留面）──
+    //   用户实测（TNT 炸沙坑后）mob 行 ltail 10.59ms —— t905 头号假设实锤：20Hz 节流后单次 emit 仍激活
+    //   **全部** N 槽 delegate 的 ~50 个 revision 绑定（槽高水位 47，空槽 / 静置 mob 的重求值全是白算）。
+    //   修法 = 槽位脏名单（可见态指纹差分）+ 每槽 EntitySlotMonitor（delegate 绑 mon.revision，仅本槽
+    //   可见态变化时重求值）。矩阵断言（任一 FAIL = 扇出回归 / 粒度化失效）：
+    //   (a) 定向 bump：3 猪 spawn + 3 监视器建立后 damage 槽 1 → 恰槽 1 revision +1、槽 0/2 不变、全局
+    //       revision +1；FrameProfiler 差分 emit=1 / bump=1 / fan=3（fan = 旧口径 count×emit 全扇出）；
+    //   (b) 高水位 / 跨世界残留归零：clearAll → 三槽全 bump（alive/kind 翻转可见，delegate 隐藏）；此后
+    //       逐只重 spawn（复用空槽）→ 每次恰复用槽 +1，**死槽不再 bump**（这正是 t933 判决的 QML 侧
+    //       残留嫌疑面 —— 槽池高水位存活但刷新成本归零）；
+    //   (c) O(变化槽) 非 O(count)：第 4 只 spawn 使 count 3→4 → fan=4 而 bump=1（新槽哨兵必 bump，
+    //       既有 3 槽零成本）；新槽监视器建立后 damage 它 → 恰新槽 +1；
+    //   (d) 源码钉：EntitySlotMonitor 类 / slotMonitorAt / notifyEntitiesChanged 漏斗 / 指纹差分本体；
+    //       Main.qml 迁移面 —— mon.revision 绑定 ≥ 100 处且 entityManager.revision 全文件残留 0（残留
+    //       = 未迁绑定仍吃全局扇出 = 粒度化破洞，t934 教训：源码钉须配行为腿防注释嵌字假绿）。
+    {
+        EntityManager ents;
+        auto monRev = [&ents](int i) -> int {
+            QObject *m = ents.slotMonitorAt(i);
+            return m ? m->property("revision").toInt() : -1;
+        };
+        const int p0 = ents.spawnMobTyped(10, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const int p1 = ents.spawnMobTyped(12, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const int p2 = ents.spawnMobTyped(14, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        bool okPre = p0 == 0 && p1 == 1 && p2 == 2; // 追加槽 0/1/2（首次占用无空槽）
+        // 模拟 QML delegate 建立（mobHost Repeater 每槽 delegate 各取一次监视器）。
+        QObject *m0 = ents.slotMonitorAt(0), *m1 = ents.slotMonitorAt(1), *m2 = ents.slotMonitorAt(2);
+        okPre = okPre && m0 && m1 && m2 && m0 != m1 && m1 != m2
+               && monRev(0) == 0 && monRev(1) == 0 && monRev(2) == 0; // 建立时 0（spawn 时监视器尚不存在，无需 bump）
+        const int revBefore = ents.revision();
+        const qint64 e0 = FrameProfiler::instance()->countValue("mobEmitN");
+        const qint64 b0 = FrameProfiler::instance()->countValue("mobBumpN");
+        const qint64 f0 = FrameProfiler::instance()->countValue("mobFanN");
+        const int r0a = monRev(0), r1a = monRev(1), r2a = monRev(2);
+        // (a) 定向 damage：只槽 1 可见态变（health/hurtFlash）。
+        ents.damageEntity(1, 1);
+        const bool okA = monRev(0) == r0a && monRev(1) == r1a + 1 && monRev(2) == r2a
+                        && ents.revision() == revBefore + 1
+                        && FrameProfiler::instance()->countValue("mobEmitN") - e0 == 1
+                        && FrameProfiler::instance()->countValue("mobBumpN") - b0 == 1
+                        && FrameProfiler::instance()->countValue("mobFanN") - f0 == 3;
+        // (b) 高水位归零：clearAll 全 bump（隐藏），重 spawn 只 bump 复用槽（free list LIFO：2 → 1 → 0）。
+        const int r0b = monRev(0), r1b = monRev(1), r2b = monRev(2);
+        ents.clearAll();
+        const bool okB1 = monRev(0) == r0b + 1 && monRev(1) == r1b + 1 && monRev(2) == r2b + 1
+                        && !ents.aliveAt(0) && !ents.aliveAt(1) && !ents.aliveAt(2);
+        const int p3 = ents.spawnMobTyped(16, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const int p4 = ents.spawnMobTyped(18, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const int p5 = ents.spawnMobTyped(20, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        // 复用期间死槽数：p3 占槽 2、p4 占槽 1、p5 占槽 0（LIFO）；每 spawn 恰该槽 +1，其余不变。
+        const bool okB2 = p3 == 2 && p4 == 1 && p5 == 0
+                        && monRev(2) == r2b + 2 && monRev(1) == r1b + 2 && monRev(0) == r0b + 2
+                        && ents.aliveAt(0) && ents.aliveAt(1) && ents.aliveAt(2);
+        // (c) 第 4 只：free 空尽 → count 3→4；fan=4 而 bump=1（成本随变化槽，不随 count）。
+        const qint64 b1 = FrameProfiler::instance()->countValue("mobBumpN");
+        const qint64 f1 = FrameProfiler::instance()->countValue("mobFanN");
+        const int r0c = monRev(0), r1c = monRev(1), r2c = monRev(2);
+        const int p6 = ents.spawnMobTyped(22, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        QObject *m3 = ents.slotMonitorAt(3); // 新 delegate 建立（count 增后可取）
+        const bool okC1 = p6 == 3 && m3
+                        && monRev(0) == r0c && monRev(1) == r1c && monRev(2) == r2c
+                        && FrameProfiler::instance()->countValue("mobFanN") - f1 == 4
+                        && FrameProfiler::instance()->countValue("mobBumpN") - b1 == 1;
+        const int r3c = monRev(3);
+        ents.damageEntity(3, 1);
+        const bool okC2 = monRev(3) == r3c + 1 && monRev(0) == r0c && monRev(1) == r1c && monRev(2) == r2c;
+        // (d) 源码钉：C++ 漏斗 / 指纹差分本体 + QML 迁移面（mon.revision 大规模替换 + 全局 revision 残留 0）。
+        const QString exeDir935 = QCoreApplication::applicationDirPath();
+        const QString root935 = QDir(exeDir935 + QStringLiteral("/..")).absolutePath();
+        auto readSrc935 = [&root935](const QString &rel) -> QString {
+            QFile f(root935 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString emh935 = readSrc935(QStringLiteral("src/Entities/entitymanager.h"));
+        const QString emc935 = readSrc935(QStringLiteral("src/Entities/entitymanager.cpp"));
+        const QString qml935 = readSrc935(QStringLiteral("src/ui/Main.qml"));
+        const QString fpc935 = readSrc935(QStringLiteral("src/Core/frameprofiler.cpp"));
+        const bool okD1 = emh935.contains(QStringLiteral("class EntitySlotMonitor : public QObject"))
+                        && emh935.contains(QStringLiteral("Q_INVOKABLE QObject *slotMonitorAt(int i);"))
+                        && emh935.contains(QStringLiteral("void notifyEntitiesChanged();"))
+                        && emh935.contains(QStringLiteral("quint64 slotFingerprint(size_t i) const;"));
+        const bool okD2 = emc935.contains(QStringLiteral("void EntityManager::refreshSlotMonitors()"))
+                        && emc935.contains(QStringLiteral("quint64 EntityManager::slotFingerprint(size_t i) const"))
+                        && emc935.contains(QStringLiteral("++m_revision;\n    refreshSlotMonitors();\n    emit entitiesChanged();"))
+                        && emc935.contains(QStringLiteral("FrameProfiler::instance()->addCount(\"mobBumpN\", bumped);"));
+        int monCount935 = 0;
+        for (int pos935 = qml935.indexOf(QStringLiteral("mon.revision"));
+             pos935 >= 0; pos935 = qml935.indexOf(QStringLiteral("mon.revision"), pos935 + 1))
+            ++monCount935;
+        const bool okD3 = monCount935 >= 100
+                        && !qml935.contains(QStringLiteral("entityManager.revision"))
+                        && qml935.contains(QStringLiteral("property var mon: entityManager.slotMonitorAt(index)"));
+        const bool okD4 = fpc935.contains(QStringLiteral("mobEmitN"))
+                        && fpc935.contains(QStringLiteral("mobBumpN"))
+                        && fpc935.contains(QStringLiteral("mobFanN"));
+        const bool okT935 = okPre && okA && okB1 && okB2 && okC1 && okC2 && okD1 && okD2 && okD3 && okD4;
+        if (!okT935) ++totalFail;
+        if (!okT935)
+            qInfo().noquote() << "  [t935 diag] pre" << okPre << "a" << okA << "b1" << okB1 << "b2" << okB2
+                              << "c1" << okC1 << "c2" << okC2 << "| d" << okD1 << okD2 << okD3 << okD4
+                              << "(monCount" << monCount935 << ")"
+                              << "| srcLen h" << emh935.size() << "c" << emc935.size()
+                              << "qml" << qml935.size();
+        qInfo().noquote() << (okT935 ? "PASS" : "FAIL")
+                          << "| t935 per-slot entity revision fanout: one throttled entitiesChanged "
+                             "emit used to reactivate ALL N delegates' ~50 revision bindings each "
+                             "(user-measured mob ltail 10.59ms after a TNT sand-pit explosion, 47-slot "
+                             "high-water; empty slots and resting mobs re-evaluating bindings that read "
+                             "back identical values = pure waste, and the cross-world residue t933 "
+                             "verdict placed in the QML scene layer); fix = slot-granular dirty list: "
+                             "every notify funnels through notifyEntitiesChanged which diffs a "
+                             "per-slot fingerprint of the QML-visible fields (slotFingerprint, the "
+                             "At()-accessor field contract) and bumps ONLY changed slots' "
+                             "EntitySlotMonitor -> delegate bindings moved from entityManager.revision "
+                             "to mon.revision re-evaluate per changed slot only; walking mobs still "
+                             "refresh (MobModel walkPhase quantization unchanged), dead/high-water "
+                             "slots cost zero; quantified via the F3 mob line emit/bump/fan counters "
+                             "(bump = slots actually refreshed, fan = legacy count*emit fanout); "
+                             "probe legs: (a) damage slot 1 of 3 bumps exactly slot 1 + emit=1/"
+                             "bump=1/fan=3, (b) clearAll bumps all (visible hide) then each re-spawn "
+                             "reusing a freed slot bumps only that slot -- dead-slot fanout stays zero "
+                             "across the high-water pool, (c) 4th spawn grows count 3->4 with fan=4 "
+                             "bump=1 and the new slot's monitor bumps on its first damage, (d) source "
+                             "pins for the funnel/fingerprint/monitor + the Main.qml migration (>=100 "
+                             "mon.revision bindings, zero entityManager.revision survivors)"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

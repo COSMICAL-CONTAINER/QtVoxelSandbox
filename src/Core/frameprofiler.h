@@ -95,6 +95,8 @@ public:
     void add(const char *name, qint64 ns);
     // 累加 name 事件计数（用于统计 mesh rebuild 次数等）。name 静态字面量。
     void count(const char *name);
+    // t935：累加 name 计数 +n（count 的批量版；一次 notify 刷新 N 槽只该记 1 次 map 查找）。name 静态字面量。
+    void addCount(const char *name, qint64 n);
     // t933：读当前窗口 name 计数（不清窗、不加 flush 时序依赖；矩阵探针 / 诊断用）。不存在 → 0。
     //   与 count() 共用 m_counts（锁保护读；调用频率低——探针快照两次取差分）。
     qint64 countValue(const char *name) const;
