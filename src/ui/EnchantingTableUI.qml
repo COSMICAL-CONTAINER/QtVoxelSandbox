@@ -520,6 +520,14 @@ Item {
         const freeXp = root.creativeMode
         if (!freeXp && root.playerLevel < lvlCost) return
         if (root.lapisCount < lapCost) return
+        // review28 #3：种子（连同 offered）**先行快照**——必须取在下方 H1 归一化写槽**之前**。
+        //   书堆（count>1）路径 writeSlot 会写回槽 0 count → enchantRev++ **同步**触发 onEnchantRevChanged
+        //   （QML 属性信号同线程直连）→ 换件快照键含 count（id0*4096+count）必变 → optionReroll++；
+        //   种子若在其后取（旧版 :545）= 施放用 reroll+1 的种子而 hover 预告用点击前的 → 「必得」预告
+        //   与产物漂移（推翻 t917「预告与施放严格同源」承诺）。种子/快照类值应在第一次有副作用的写之前取
+        //   （review 模式小结 #3：先写后读派生态必被同步信号处理器插队）。
+        const offered = root.offeredFor(slotIdx)
+        const seed = root.tierSeed(slotIdx)
         // review H1 修：普通左键可把整栈书（如 64 本）放进槽 0（resolveClick B 整栈放置；只有 Shift+左键才有
         //   「只取 1 本」语义），而 doEnchant 产物恒 1 本 → 其余 N-1 本曾被静默销毁。附魔只消耗 1 本：先把余下
         //   (count-1) 本归还背包（addToAny，同 slotShiftLeftEnchant 归还路径；书无耐久 / 无附魔，dur 传 0）。
@@ -538,11 +546,7 @@ Item {
         }
         // t649 offeredLevel：offeredFor(slotIdx) 单一权威（floor(bs*20*(i+1)/33)+(i+1)，钳 [1,30]——见属性段
         //   校准注释）。旧版 [8,15,22]+floor(power/2) 固定基底令 4 书架第三档即 24（用户实测偏差）。
-        const offered = root.offeredFor(slotIdx)
-        // t917 种子改 tierSeed 单一权威（台位 ^ 物品 ^ 档位 ^ optionReroll 确定性派生）：hover 预告
-        //   （tierPreviewName）与本次施放读同一 seed → 预告的「必出附魔」与产物严格同源。旧种子掺
-        //   Date.now() —— 每次点击结果都变，任何 hover 预告都必假（预告-施放双路漂移的根因）。
-        const seed = root.tierSeed(slotIdx)
+        //   review28 #3：offered / seed 快照已上移到函数开头（归一化写槽之前）——此处只消费，勿再取。
         // 1) 扣 XP（t694：创造免等级跳过；生存等级不足已被前置守卫拦，spendLevels 拒付 → 全回滚零副作用）。
         if (!freeXp && !root.playerState.spendLevels(lvlCost)) return
         // 2) 扣槽 1 青金石（余数写回；不足已被上方 lapisCount 门控拦，此处防御）。
