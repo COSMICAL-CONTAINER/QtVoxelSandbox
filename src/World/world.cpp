@@ -3476,6 +3476,29 @@ bool World::isReceivingPower(int x, int y, int z) const
     return false;
 }
 
+// t704 动力轨链深度上限（机制等价 MC 1.0 powered rail 链最长 8 根：直供种子 1 根 + 向外扩 7 根）。
+//   t936 提为文件级单一来源：recomputePowerLocal 链 BFS（定深）与 notePowerWrite 放置沿重算（脏集
+//   扩散半径）共用 —— 两处深度禁各写一份（review26 #1 口径漂移防线；链上限改值须两处同步生效）。
+static constexpr int kGoldenRailChainMax = 8;
+
+// t936 动力轨链邻步（单一权威，见 world.h 头注释）：视 (x,y,z) 为动力轨，解水平轴向 (ax,az) 的邻接
+//   动力轨格。邻列 x/z 出界 → false；y±1 越界 blockAt 安全返 Air（ChunkManager 契约）→ 探针视无轨。
+//   探针层命中非动力轨（普通 / 探测轨）→ false —— 链只在动力轨间传导（t704 语义，同层优先序不破）。
+bool World::goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, int &ny, int &nz) const
+{
+    const int px = x + ax, pz = z + az;
+    if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth) return false;
+    const int dy = BlockRegistry::railProbeDelta(
+        { m_chunks.blockAt(px, y,     pz),
+          m_chunks.blockAt(px, y + 1, pz),
+          m_chunks.blockAt(px, y - 1, pz) });
+    if (dy == INT_MIN) return false; // 该向三高皆无轨
+    ny = y + dy;
+    if (ny < 0 || ny >= m_height) return false;
+    nx = px; nz = pz;
+    return m_chunks.blockAt(nx, ny, nz) == BlockRegistry::GoldenRail;
+}
+
 // 编辑路径电力脏标记（挂 4/5 参数 setBlock / setWaterSilent / clearBlockSilent 末尾，同 checkRailOnEdit
 // 收口模式）：本格属红石族（粉 / 源 / 接收器）→ 本格入脏集；否则查 6 邻**任意红石族格**（t706：旧版只查
 // 邻粉——破掉「源 | 石 | TNT」中间的石块这类无粉场景不入脏集 → 邻源 / 邻接收器电力永不复算 = 用户实测
@@ -3516,6 +3539,43 @@ void World::notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId)
             const int nx = x + h[0], ny = y - 1, nz = z + h[1];
             if (ny >= 0 && BlockRegistry::isRedstoneDust(m_chunks.blockAt(nx, ny, nz)))
                 m_powerDirty.insert(packGrowthCell(nx, ny, nz));
+        }
+    }
+    // t936 动力轨放置 / 破坏沿重算（顺序无关不变量：激活集 = 世界布局的纯函数，与摆放先后无关）。
+    //   根因：recomputePowerLocal 的接收器扫描域 = 锚点 + 其 **6 正交邻**，而坡链相邻轨是斜角（轴向 ±1
+    //   层，t910 几何）→ 后放的动力轨虽贴着已通电链，pass 内 receivers 够不到链上 ≤8 格外的直供种子 →
+    //   通电位恒判灭 = 用户实测「先放上坡动力轨再激活一段，后放的不被激活（要全部摆好再激活才行）」。
+    //   对称缺口同根：破坡链中段轨 → 远翼轨不在任何 6 正交扫描域 → 残留通电位永不熄。
+    //   修法（lessons「探测域必须与写入侧权威一致」）：编辑动力轨（放 / 破 / 置换）→ 从编辑格沿链
+    //   goldenRailChainStep（三高探针单一权威，与链 BFS 同步）走 kGoldenRailChainMax 步，沿途动力轨全部
+    //   入脏集 → 下 tick 它们成为锚点，链上直供轨（若有）进 receivers 成种子，t704/t910 BFS 从**真种子**
+    //   定深重亮 / 收缩。影响半径：轨 R 因编辑 E 翻转必链距 ≤ 上限（翻亮 = 存在种子 P 使 d(R,P) ≤ 上限-1
+    //   且路径经 E → d(R,E) ≤ 上限-1；断链翻暗同理）→ 定深走查全覆盖。代价：每次动力轨编辑一次性
+    //   ≤4 向 ×8 深有限走（seen 去重，环轨不死循环），编辑路径非热路径。
+    if (oldId == BlockRegistry::GoldenRail || newId == BlockRegistry::GoldenRail) {
+        struct RCell { int x, y, z; };
+        std::vector<RCell> frontier, next;
+        std::unordered_set<quint64> chainSeen;
+        const auto tryStep = [&](int cx, int cy, int cz, const int (&dir)[2], std::vector<RCell> &out) {
+            int sx, sy, sz;
+            if (!goldenRailChainStep(cx, cy, cz, dir[0], dir[1], sx, sy, sz)) return;
+            if (chainSeen.insert(packGrowthCell(sx, sy, sz)).second) out.push_back({sx, sy, sz});
+        };
+        // 起始环：放置 → 新轨自身入环（破坏时编辑格已非轨，跳过）；两翼 → 把编辑格当轨位探 4 轴向
+        //   （破坏前的邻轨恰在这些探针层上——放置时同一步兼收既有邻轨）。
+        static constexpr int kAxC[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        if (m_chunks.blockAt(x, y, z) == BlockRegistry::GoldenRail
+            && chainSeen.insert(packGrowthCell(x, y, z)).second) {
+            frontier.push_back({x, y, z});
+        }
+        for (const auto &a : kAxC) tryStep(x, y, z, a, frontier);
+        for (int depth = 0; depth < kGoldenRailChainMax && !frontier.empty(); ++depth) {
+            next.clear();
+            for (const RCell &c : frontier) {
+                m_powerDirty.insert(packGrowthCell(c.x, c.y, c.z)); // 链轨入脏集 → 下 tick 锚点化
+                for (const auto &a : kAxC) tryStep(c.x, c.y, c.z, a, next);
+            }
+            frontier.swap(next);
         }
     }
 }
@@ -3809,24 +3869,16 @@ bool World::recomputePowerLocal()
             if (!isReceivingPower(x, y, z)) continue; // 非直供轨：等链扩散到达
             if (goldenPowered.insert(k).second) frontierG.push_back({x, y, z});
         }
-        constexpr int kGoldenRailChainMax = 8; // 链最长 8 根（MC 1.0 块供电轨链上限；种子自身 1 根 + 向外扩 7 根）
+        // kGoldenRailChainMax 已提文件级（t936：与 notePowerWrite 放置沿重算共用同一深度源）。
         static constexpr int kAxial[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         for (int depth = 1; depth < kGoldenRailChainMax && !frontierG.empty(); ++depth) {
             std::vector<GCell> nextG;
             for (const GCell &c : frontierG) {
                 for (const auto &a : kAxial) {
-                    const int px = c.x + a[0], pz = c.z + a[1]; // 该向邻列（Y 由三高探针解出）
-                    if (!inBounds(px, c.y + 1, pz) && !inBounds(px, c.y, pz) && !inBounds(px, c.y - 1, pz))
-                        continue;
-                    // t910：三高探针解该向轨层差（same 优先 / up / down；INT_MIN = 该向无轨不传）。
-                    const int dy = BlockRegistry::railProbeDelta(
-                        { m_chunks.blockAt(px, c.y,     pz),
-                          m_chunks.blockAt(px, c.y + 1, pz),
-                          m_chunks.blockAt(px, c.y - 1, pz) });
-                    if (dy == INT_MIN) continue;
-                    const int nx = px, ny = c.y + dy, nz = pz; // 沿轨走向含升降
-                    if (!inBounds(nx, ny, nz)) continue;
-                    if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::GoldenRail) continue;
+                    // t910：三高探针解该向轨层差（same 优先 / up / down；无轨不传）+ 邻轨须动力轨 ——
+                    //   t936 收口进 goldenRailChainStep 单一权威（放置沿重算同一步，禁第二套判定）。
+                    int nx, ny, nz;
+                    if (!goldenRailChainStep(c.x, c.y, c.z, a[0], a[1], nx, ny, nz)) continue;
                     goldenSeenAll.insert(packGrowthCell(nx, ny, nz)); // 链外轨也记（降沿复查）
                     const quint64 nk = packGrowthCell(nx, ny, nz);
                     if (goldenPowered.insert(nk).second) nextG.push_back({nx, ny, nz});

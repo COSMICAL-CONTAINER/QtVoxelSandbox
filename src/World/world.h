@@ -824,6 +824,12 @@ public:
     //   通电态）→ 火把熄灭（state 置 RedstoneTorchStateOffFlag + lightEmission 0 → 光照重 flood + off 贴图）。
     // 分层（PLAN §2）：本组只读 / 写 m_chunks + BlockRegistry 谓词 + 发信号；不依赖 Game / Entities。
     void notePowerWrite(int x, int y, int z, quint8 oldId, quint8 newId);
+    // t936 动力轨链邻步（单一权威）：视 (x,y,z) 为动力轨，解水平轴向 (ax,az) 的邻接动力轨格 —— 4 轴向
+    //   邻列经 railProbeDelta 三高探针（same/up/down，与 railConnections / 矿车 pickTrackStep 同源）解
+    //   层差，邻轨须为动力轨（普通 / 探测轨不传链）。命中返 true 并写出 (nx,ny,nz)。recomputePowerLocal
+    //   链 BFS（t704/t910）与 notePowerWrite 放置沿重算（t936）共用本步 —— 链几何判定禁第二套（lessons：
+    //   校验 / 派生扫描的探测域必须与写入侧权威一致）。只读 m_chunks。
+    bool goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, int &ny, int &nz) const;
     // t656 电力脏集消费（WorldClock 10Hz 桥接；见上方系统头注释）。Q_INVOKABLE 同 tickWaterFlow 模式。
     Q_INVOKABLE void tickRedstone();
     // t656/t658 查询：(x,y,z) 处接收器是否被邻格供电（邻源激活或邻粉电力 >0）。供 MinecartManager
