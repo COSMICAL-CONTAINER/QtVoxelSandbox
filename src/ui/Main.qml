@@ -3013,6 +3013,14 @@ Window {
                         //   Opaque 路径整列显成「一半 Steve 一半 Alex」的鬼影列；正常不透明纹素零影响。
                         alphaCutoff: 0.5
                         opacity: 0.99
+                        // t932 手不没入静水（用户「手贴图和静止的水重合、显示手在水里面」）：手臂与水段同在
+                        //   透明通道，材质默认 OpaqueOnly **不写深度** → 透明队列把某水段 chunk 排在手之后
+                        //   画时，水片元做深度测试只对手前不透明地形（手没留深度）→ 水直接盖过手 = 「手在水
+                        //   里面」。Always = 手臂照常 blend 但**写深度**：后画的水（更远）按像素深度测试输给
+                        //   手臂；真正更近的水（贴脸视角 / 涉水手入水面以下）深度更小仍正确盖手（几何上真在
+                        //   水里的部分照常显在水下，机制对齐 MC 第一人称手深度语义）。不透明 UnitCube 手持
+                        //   工具（opacity 1）本就写深度无此症，无需同修。
+                        depthDrawMode: Material.AlwaysDepthDraw
                     }
                 }
                 // 手持方块（t73 可见性修复；t156 位置重定）：持有方块（selectedBlock≠0）时，手前显该方块。
@@ -3043,6 +3051,9 @@ Window {
                         alphaMode: window.heldCubeIsGlass(player.selectedBlock) ? PrincipledMaterial.Blend : PrincipledMaterial.Mask
                         alphaCutoff: 0.5
                         opacity: window.heldCubeIsGlass(player.selectedBlock) ? 0.45 : 1.0 // 玻璃半透度对齐世界段；其余 1.0 同缺省
+                        // t932 同手臂：玻璃 Blend 路径与水段同通道不写深度 → 后画的水可盖过手持玻璃立方；
+                        //   Always 写深度钉「手前物赢过更远的静水」（Mask+1.0 走不透明通道本就写深度，Always 幂等）。
+                        depthDrawMode: Material.AlwaysDepthDraw
                     }
                 }
                 // t219 手持木板衍生方块（第一人称）：异形段（台阶/楼梯/栅栏/压力板/门/活板门）在世界内非整立方
@@ -3068,6 +3079,7 @@ Window {
                         alphaCutoff: 0.5
                         opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                         baseColorMap: partialIconTex   // t440：cross 段（花/蘑菇/睡莲/树苗/枯木/草丛…）透明底 flat 图标同 partialIconTex（iconSourceForBlock 返回 icon_*.png）；t496 床段亦同
+                        depthDrawMode: Material.AlwaysDepthDraw // t932 同手臂：透明通道写深度，防后画的静水盖过手持异形/床图标
                     }
                 }
                 // t218/t260 手持火把（第一人称）：火把非立方（世界内异形），手持走 billboard 平图标（细立柱），
@@ -3096,6 +3108,7 @@ Window {
                             alphaCutoff: 0.5
                             opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                             baseColorMap: torchIconTex
+                            depthDrawMode: Material.AlwaysDepthDraw // t932 同手臂：透明通道写深度，防后画的静水盖过手持火把
                         }
                     }
 
