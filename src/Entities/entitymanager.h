@@ -585,6 +585,13 @@ public:
     //   向下依赖）。**共享目标**：所有驯服且站立的狼都追击它（机制等价 MC 1.0 驯服狼群攻主人攻击的目标）。
     //   索引经 slot-reuse 稳定（release 不 shift）；目标死亡 / 移除由 aiWolf 每 AI tick 校验清除。越界 → 忽略。
     void setWolfTarget(int idx) { if (idx >= 0 && idx < int(m_entities.size())) m_wolfTarget = idx; }
+    // t923 仇恨传递（敌对攻击狼 → 狼反击）：mob 伤害 mob 的路径（骷髅箭 / 燃烬者火球）命中**驯服狼**时由
+    //   伤害点调本入口 —— 受害者是活体驯服狼且攻击者是活体 Mob → m_wolfTarget = 攻击者（共享防御目标语义，
+    //   同 setWolfTarget：全体驯服站立狼追击咬击它）。与「主人受击注册」（aiHostile 近战 / 箭 / 爆炸三处 t480
+    //   既有）互补 = MC 1.0 驯服狼双向护主（护主人 + 被打反击）。豹猫**不进**本入口（机制等价 MC 1.0 猫不
+    //   攻击怪物，aiOcelot 无防御分支）。爆炸伤狼不注册（Stalker 当帧自毁无活体可反击）。越界 / 非驯服狼 /
+    //   攻击者非活体 → 静默 no-op。
+    void wolfRetaliateAgainst(int victimIdx, int attackerIdx);
     // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
     //   healthAt / maxHealthAt = 当前 / 上限血量（供心条 / 攻击反馈）；deadAt = 死亡态（QML 播死亡动画）；
     //   hurtFlashAt = 受击红闪剩余比 0..1（>0 → QML baseColor 红，机制等价 MC mob 受击 10 tick 红闪）。
@@ -1960,6 +1967,16 @@ private:
     //   - kSquidRiseMax：上浮速度上限（blocks/s）。钳制防喷水脉冲 + 浮力叠加把鱿鱼顶出水面过高（跳面搁浅）。
     static constexpr float kSquidBuoyancy = 3.0f;  // 鱿鱼水中净浮力加速度（blocks/s²；正=上浮）
     static constexpr float kSquidRiseMax  = 1.6f;  // 鱿鱼上浮速度上限（blocks/s；钳制防跃出水面）
+    // t923 陆栖 mob 主动浮面常量（spec「mob 困水里应主动浮面不淹死」；机制等价 MC 1.0 全生物水中游到水面）：
+    //   触发门 = **头部格浸水**（与 t828 溺水头部判定同式 floor(pos.y+halfH·0.8)——「会淹才游」，头出水即停游
+    //   回缓沉 → 水面小幅 bobbing 悬停；浅水跋涉（头未没）维持 t298 缓沉贴底站立，无振荡）。tamed 狼困深水
+    //   淹死的根因修复：旧实现陆栖 mob 恒缓沉贴底 → 头长浸水 15s 呼吸耗尽 1HP/s 溺亡 + 贴底追击被岸壁挡死。
+    //   - kMobSwimBuoyancy：净浮力加速度（blocks/s²，正=上浮）。取 3.0（同 kSquidBuoyancy：温和上涌，
+    //     配 rise 钳制成稳定悬浮层；无喷水脉冲故不需鱿鱼那么高的上限）。
+    //   - kMobSwimRiseMax：上浮速度上限（blocks/s）。取 1.2（略低于鱿鱼 1.6——陆栖泳姿笨拙，出水面跃幅
+    //     ≤ 1.2²/(2·kGravity) ≈ 0.026 格 = 水面贴平 bob）。
+    static constexpr float kMobSwimBuoyancy = 3.0f; // 陆栖 mob 头浸水净浮力加速度（blocks/s²；正=上浮）
+    static constexpr float kMobSwimRiseMax  = 1.2f; // 陆栖 mob 上浮速度上限（blocks/s；钳制防跃出水面）
     // t400 繁殖常量（spec t400「同种 2 只喂对应食物 → 生幼崽；种群上限防泛滥」；机制对齐 MC 1.0 breeding：
     //   喂食触发 love mode → 同种配对产幼崽 + 5 分钟冷却 + 幼崽 20 分钟长大；数值为本工程小世界量身调，
     //   非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
@@ -2411,8 +2428,9 @@ private:
     //   手感一致；非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。分层（PLAN §2）：Entities 层只读
     //   World::blockAt/stateAt（脚位格是否水 / 流水 state），写自身实体态；无向上依赖。
     //   - kWaterSpeedMul：水中水平速度倍数（脚位在水格 → AI 行走 / 追踪位移 ×此值）。0.4 = 陆地的 40%。
-    //   - kWaterGravity：水中等效重力（缓沉；远小于 kGravity=28 → mob 在水中缓慢下沉而非自由落体）。
-    //   - kWaterSinkMax：水中最大下沉速度（钳制，防加速穿水底；远小于 kMaxFall=78.4）。
+    //   - kWaterGravity：水中等效重力（缓沉；远小于 kGravity=28）。t923 起仅作用于**头未没水的浅水跋涉**
+    //     （贴底站立继续走）；头浸水的深水走 kMobSwimBuoyancy 主动浮面（见其注释）。
+    //   - kWaterSinkMax：浅水缓沉最大下沉速度（钳制，防加速穿水底；远小于 kMaxFall=78.4）。
     //   - kWaterFlowPush：流水水平推力速度（脚位在流水格 state>0 时沿离源方向叠入水平位移，同玩家 t211）。
     static constexpr float kWaterSpeedMul = 0.4f;  // 水中水平速度倍数（同玩家 kUnderwaterSpeedMul）
     static constexpr float kWaterGravity  = 6.0f;  // 水中重力（缓沉；同玩家 kWaterGravity ≈ kGravity×0.21）
