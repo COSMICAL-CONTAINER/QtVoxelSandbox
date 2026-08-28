@@ -1234,18 +1234,25 @@ private:
     QElapsedTimer m_evtClock; // 事件时间戳（双击检测；不被 tick restart）
     // t486 发射器陷阱 per-dispenser 冷却：打包坐标键（dispenserCell）→ 剩余冷却秒。玩家踩压力板触发发射器
     //   射箭后写 kDispenserCooldown 秒；每 tick 递减 dt，**≤0 即 erase**（review25 #8：门是 contains &&
-    //   value > 0 双条件，零/负值冷却不拦——否则「常量回归改 0」时表项永驻、contains 恒拦，冷却时长下界
-    //   对探针不可见）。冷却内同发射器不再射（防每帧刷屏满天箭，
+    //   value > 容差 双条件，零/负值冷却不拦——否则「常量回归改 0」时表项永驻、contains 恒拦，冷却时长下界
+    //   对探针不可见。容差见 review28 #2 条）。冷却内同发射器不再射（防每帧刷屏满天箭，
     //   机制等价 MC 发射器触发间隔）。换世界时 clearAllTrapsState() 清空（防跨世界串扰）。无发射器陷阱场景
     //   恒空（零开销）。
     //   t868② 冷却语义重钉：**触发间隔下限闸**而非节流窗——kDispenserCooldown 只拦「同沿抖动 / 同 tick
     //   双路径双发」（板沿 + 电力沿同帧触达同一台机器），**不吞间隔外的高频红石上升沿**：快速拉杆循环 /
     //   时钟电路的每个间隔 ≥冷却的新上升沿都过闸正常发射；MC 同名语义即「触发间隔下限」，非「沿间隔
     //   上限」。旧 2.0s 会把 2s 内的第二个上升沿整只吞掉 = 用户实测「只能激活一次」。
-    //   t913 常量对齐 MC：2.0 → 0.5（t868 经验值）→ **0.2s**（MC 1.0 发射器重触发间隔 = 4 game ticks
-    //   @ 20Hz = 0.2s，Minecraft Wiki Dispenser 行为节；用户「持续闪烁的无限时钟只射几根箭」= 0.5s 仍吞
+    //   t913 常量对齐 MC：2.0 → 0.5（t868 经验值）→ **0.2s**（MC 1.0 发射器重触发间隔 4 game ticks 按本作
+    //   红石 10Hz 时基折算 = 2 redstone ticks = 0.2s；用户「持续闪烁的无限时钟只射几根箭」= 0.5s 仍吞
     //   <0.5s 周期的沿）。同沿只触发一次（上升沿触发）由 m_dispenserPoweredCells 基线集承担（正交）。
+    //   review28 #2：帧递减模型对「周期恰等于冷却值」的等周期时钟有量化吞沿面（0.2s 冷却 60fps 下 12 帧
+    //   归零，第 12 帧恰遇新沿时余量 >0 被拦）→ 拦截闸带一帧 dt 容差（见 fireDispenserAt 注释），等周期
+    //   时钟逐沿发射。m_dispenserFrameDt 由 scanDispenserTraps 每帧先写（缺帧驱动时 0 = 退化为纯值闸）。
     QHash<quint64, float> m_dispenserCooldowns;
+    // review28 #2：本帧 dt 快照（scanDispenserTraps 开头写入；fireDispenserAt 拦截闸的一帧容差取它）。
+    //   0 = 本帧无递减驱动（矩阵探针只写冷却不驱动递减的路径）→ 容差退化为 0 = 纯值闸（review25 #8
+    //   「contains && value > 0」原语义，探针下界钉死口径不变）。float 同表值型。
+    float m_dispenserFrameDt = 0.0f;
     // t689 发射器 / 投掷器电力基线集：上一 tick 已通电的机器（打包坐标键，同 m_dispenserCooldowns 的
     //   x<<32|z 编码）。fireDispenserAtQml 收到 World 的「电力复算触达」信号时读 isReceivingPower 与本集
     //   比较——仅 unpowered→powered 真上升沿才 fire（稳定通电不连发；断电触达清基线）。换世界清空（防跨

@@ -5508,6 +5508,9 @@ void PlayerController::scanDispenserTraps(float dt)
     if (m_dead) return; // 死亡态不触发（同 scanTntTraps 门控）
 
     // 递减 per-dispenser 冷却（每 tick）；到期移除。无发射器陷阱场景 m_dispenserCooldowns 恒空（零开销）。
+    //   review28 #2：本帧 dt 先记入 m_dispenserFrameDt——fireDispenserAt 的拦截闸带「一帧 dt 容差」
+    //   （帧驱动递减的量化误差界），两条触发路径（踩板沿 / 电力沿）同帧共享同一容差量级。
+    m_dispenserFrameDt = dt;
     if (!m_dispenserCooldowns.isEmpty()) {
         for (auto it = m_dispenserCooldowns.begin(); it != m_dispenserCooldowns.end(); ) {
             it.value() -= dt;
@@ -5581,11 +5584,13 @@ void PlayerController::updateButtonRecovery(float dt)
 //   沿语义本身在 fireDispenserAtQml（t689 基线集），快速拉杆 / 时钟每沿必过闸逐沿发射。
 bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
 {
-    // t913 冷却对齐 MC：**0.2s**（MC 1.0 发射器重触发间隔 = 4 game ticks @ 20Hz = 0.2s——Minecraft Wiki
-    //   Dispenser 行为节「dispensations 间隔 4 game ticks」；本值即 t868 语义的 MC 精确化：2.0 → 0.5（t868
-    //   经验值）→ 0.2（MC 出处值）。用户症状「无限红石电路持续闪烁但只射出几根箭」= 0.5s 仍吞 <0.5s 间隔
-    //   的时钟沿；0.2s 下 ≥4 game tick 周期的时钟（含中继器最短时钟）逐沿发射。同沿只触发一次（上升沿触发）
-    //   由 fireDispenserAtQml 的 m_dispenserPoweredCells 基线集承担（t689），与冷却闸正交。
+    // t913 冷却对齐 MC：**0.2s**（MC 1.0 发射器重触发间隔 = 2 redstone ticks @ 10Hz = 0.2s——本作红石
+    //   世界时钟 10Hz，最短中继器时钟 = 2 tick = 0.2s；机制等价 MC 1.0 发射器 4 game ticks 重触发间隔，
+    //   时基按本作红石 10Hz 折算。review28 #2 更正旧注「4 game ticks @ 20Hz」的时基表述——0.2s 数值本身
+    //   一直正确）。本值即 t868 语义的 MC 精确化：2.0 → 0.5（t868 经验值）→ 0.2（MC 出处值）。用户症状
+    //   「无限红石电路持续闪烁但只射出几根箭」= 0.5s 仍吞 <0.5s 间隔的时钟沿；0.2s 下等周期时钟逐沿发射
+    //   （配 review28 #2 的一帧容差——见下）。同沿只触发一次（上升沿触发）由 fireDispenserAtQml 的
+    //   m_dispenserPoweredCells 基线集承担（t689），与冷却闸正交。
     //   review25 #8 阴性验证口径保持：本值改 0 → t814(e)/t856(b) 双 FAIL（勿动）；改回 ≥0.3s → t913 探针
     //   FAIL（0.3s 沿必须再发）。
     constexpr float kDispenserCooldown = 0.2f;
@@ -5596,11 +5601,21 @@ bool PlayerController::fireDispenserAt(int dx, int dy, int dz, quint8 db)
     const quint64 key = (quint64(quint32(dx + 0x100000) & 0x1FFFFFu))
                       | (quint64(quint32(dz + 0x100000) & 0x1FFFFFu) << 21)
                       | (quint64(quint32(dy) & 0x3FFu) << 42);
-    // review25 #8：冷却门看**值**（contains && value > 0）而非纯 contains——若只查存在性，常量回归改 0（或
+    // review25 #8：冷却门看**值**（contains && value > 容差）而非纯 contains——若只查存在性，常量回归改 0（或
     //   任何 ≤0 写入）时表项永驻、该机器永久哑火且矩阵探针的「时长下界钉死」断言失效（0 冷却仍被 contains
-    //   拦下复置沿 → 探针照 PASS）。零/负值冷却无合法语义（递减循环本就 erase 非正值），故 >0 才拦是真实
+    //   拦下复置沿 → 探针照 PASS）。零/负值冷却无合法语义（递减循环本就 erase 非正值），故 >容差 才拦是真实
     //   门控语义，非仅为探针服务。
-    if (m_dispenserCooldowns.contains(key) && m_dispenserCooldowns.value(key) > 0.0f) return false; // 该机器冷却中 → 不动作
+    //   review28 #2：拦截阈值带**一帧 dt 容差**（value > m_dispenserFrameDt 才拦，帧 dt 缺席时退化为
+    //   > 0 纯值闸）——帧驱动递减模型下 0.2s 冷却按 60fps 量化 = 12 帧归零，0.2s 等周期时钟（红石 10Hz
+    //   最短中继器时钟）的下一沿若恰落在第 12 帧处理，余量 ≈0.008s > 0 会被纯 >0 闸确定性吞掉（该沿永久
+    //   丢 → 半速率发射）；容差 = 本帧递减步长，令「余量 < 一帧量化误差」的沿必过闸，等周期时钟逐沿发射。
+    //   对真防抖语义无损：同 tick 双路径双发 / 冷却窗内抖动沿的余量 ≈ 冷却全值 0.2s，仍被拦。绝对到期时刻
+    //   方案被否的原因：沿经 QML 信号在帧内任意相位到达而扫描只在帧头推进，「到期 − ε」的 ε 恰好也要取
+    //   一帧 dt——递减模型 + 同量级容差等价且不动 t814/t856/t868 探针族的「scanDispenserTraps(x) 等价
+    //   递减驱动」契约。
+    if (m_dispenserCooldowns.contains(key)
+        && m_dispenserCooldowns.value(key) > ((m_dispenserFrameDt > 0.0f) ? m_dispenserFrameDt : 0.0f))
+        return false; // 该机器冷却中（余量超一帧量化容差）→ 不动作
     // t608 发射方向 = 发射器 state 朝向外向（chestFrontFace 解码 → 轴向单位向量；单一方向源）。
     const quint8 dispState = m_world->stateAt(dx, dy, dz);
     float fdx = 0.0f, fdz = 0.0f;

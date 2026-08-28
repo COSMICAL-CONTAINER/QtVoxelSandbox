@@ -11061,14 +11061,21 @@ int main(int argc, char *argv[])
     // ── t913 发射器冷却对齐 MC 探针（Game 层真消费端，t868 模式；spec「调研 MC 1.0 发射器实际延迟
     //    （MC 语义约 4 game ticks = 0.2s，且同一信号沿只触发一次=上升沿触发）；以调研值为准重钉常量
     //    与探针（现 kDispenserCooldown 0.5f）」）──
-    //   MC 出处（Minecraft Wiki Dispenser 行为节，dev-plan R19.16 钉值；实网核验被反爬 403 拦截，
-    //   以 dev-plan 所钉 MC 语义为准）：发射器重触发间隔 = **4 game ticks @ 20Hz = 0.2s**；同一信号沿
-    //   只触发一次 = 上升沿触发（t689 m_dispenserPoweredCells 基线集，既有语义正交不动）。
+    //   MC 出处（dev-plan R19.16 钉值；实网核验被反爬 403 拦截，以 dev-plan 所钉 MC 语义为准）：发射器
+    //   重触发间隔 = 4 game ticks 按本作红石 10Hz 时基折算 = **2 redstone ticks = 0.2s**（review28 #2
+    //   更正旧注 20Hz 表述）；同一信号沿只触发一次 = 上升沿触发（t689 m_dispenserPoweredCells 基线集，
+    //   既有语义正交不动）。
     //   断言三段（钉常量 ∈ (0.1, 0.3] 窗——改 0.5/2.0 → (c) FAIL 复现用户「持续闪烁只射几根箭」；
     //   改 0/0.1 → (b) FAIL 防抖闸失效）：
     //   (a) 首沿恰发一支（基线）；
     //   (b) 0.112s（7 帧）后的新沿 → 冷却拦（0.1 < 0.2：箭数持平 + 库存不扣）；
     //   (c) 续 0.128s（累计 0.24s > 0.2）后的新沿 → 必再发（箭 +1 / 库存再扣）。
+    //   (d) review28 #2 新增：**0.2s 等周期时钟逐沿发射**（常量窗 (a)(b)(c) 测不到帧相位量化）——
+    //       红石沿由 10Hz 世界时钟产生、帧内经信号到达，60fps 帧递减把 0.2s 冷却量化成 12 帧归零；
+    //       周期恰等于冷却值时旧纯 >0 闸在第 12 帧遇沿（余量 ≈0.008s > 0）确定性吞沿 → 半速率发射。
+    //       rig 模拟生产时序：每格世界 tick 之间**交替注入 scanDispenserTraps(1/60s) 帧驱动 + 沿写入**
+    //       （沿注入 = 置拉杆再 tickRedstone 触达，等价 QML 信号帧内到达），连发 N=6 沿断言 N 次发射
+    //       （回退一帧容差 → 恰 3 次 = FAIL）。
     {
         PlayerController pc;
         EntityManager ents;
@@ -11104,18 +11111,44 @@ int main(int argc, char *argv[])
         edgeOn();                                        // (c) 冷却已过 → 必再发
         const int a3 = arrowCount913();
         const bool okC = a3 == 2 && store.slotCountAt(x0, kRigY, z0, 0) == 2;
-        const bool ok = okA && okB && okC;
+        // (d) 0.2s 等周期时钟连发 6 沿 → 6 次发射（review28 #2 帧相位量化回归面）。
+        //    生产时序 = 10Hz 沿网格 × 60fps 帧递减并存：每格世界 tick 之间先 scanDispenserTraps(1/60s)
+        //    推帧（冷却递减 + 记本帧容差），再写沿（拉杆置位 → tickRedstone 复算 → 电力沿信号到达 →
+        //    fireDispenserAtQml）。每周期 12 格 = 0.2s；库存预填 8 箭足额。第 12 格的沿在旧纯 >0 闸下
+        //    余量 ≈0.008s > 0 被拦（此后沿逐周期丢 → 恰 3 次）；新容差闸逐沿放行 = 恰 6 次。
+        edgeOff();                                       // 清 (c) 沿基线
+        store.setSlot(x0, kRigY, z0, 0, RecipeRegistry::ArrowId, 8);
+        const int d0 = arrowCount913();
+        for (int cyc = 0; cyc < 6; ++cyc) {
+            for (int g = 0; g < 12; ++g) {
+                pc.scanDispenserTraps(1.0f / 60.0f);     // 帧驱动递减（本帧容差同步写入）
+                if (g == 11) {
+                    placeRigBlock(w, x0 - 1, kRigY, z0, BR::Lever, 1); // 沿注入（等周期第 12 格）
+                    tickN(w, 1);                         // 复算 → 电力沿信号帧内到达
+                    w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0); // 立即清（下周期同一格再注入沿）
+                    tickN(w, 1);
+                } else {
+                    tickN(w, 1);
+                }
+            }
+        }
+        const int dN = arrowCount913() - d0;
+        const bool okD = dN == 6 && store.slotCountAt(x0, kRigY, z0, 0) == 8 - 6;
+        const bool ok = okA && okB && okC && okD;
         if (!ok)
             qInfo().noquote() << "  t913 first" << a1 << "inWindow" << a2 << "afterWindow" << a3
+                              << "equalPeriodFired" << dN
                               << "stock" << store.slotCountAt(x0, kRigY, z0, 0);
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t913 dispenser cooldown pinned to MC 0.2s (4 game ticks @ 20Hz, wiki "
-                             "Dispenser behavior; rising-edge-once semantics stay in the t689 baseline "
+                          << "| t913 dispenser cooldown pinned to MC 0.2s (2 redstone ticks @ 10Hz; "
+                             "rising-edge-once semantics stay in the t689 baseline "
                              "set): first edge fires exactly one arrow, a fresh rising edge 0.112s in "
-                             "stays blocked (cooldown window), and an edge at 0.24s total MUST re-fire "
-                             "(the reported fast-clock starve was the 0.5s constant swallowing sub-0.5s "
-                             "edges; constant window pinned in (0.1, 0.3])";
+                             "stays blocked (cooldown window), an edge at 0.24s total MUST re-fire, "
+                             "and a 0.2s equal-period clock interleaved with 60fps frame-driven decay "
+                             "fires all 6 edges (review28 #2: the frame-quantized remainder ~0.008s at "
+                             "the 12th frame must not swallow the on-period edge; constant window "
+                             "pinned in (0.1, 0.3])";
         // 清场
         w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
         w.setBlock(x0, kRigY, z0, BR::Air, 0);
