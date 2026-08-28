@@ -722,15 +722,18 @@ function slotShiftLeftCraft(root) {
     if (heldId === r.outputId) space += (cap - heldCount)
     else if (heldId === 0) space += cap
     // t268：heldId 为非产物异物时两分支均不命中 → 光标贡献 0 产物容量（产物只入 main/hotbar，不动光标原物）。
+    //   review28 #1 顺手清点（同铁砧 shift 预检同病同修）：addToAny 双向带名守卫下无名产物也不并入**带名**
+    //   同 id 栈（守卫的「槽侧」半边）→ 带名栈余量不计入，否则预检虚增容量：背包无空槽 + 异物光标时
+    //   addToAny 返回的 remain 落不进任何落点（下方光标分支条件不命中）= 材料已消耗、产物静默蒸发。
     for (let i = 0; i < root.hotbar.mainCount; ++i) {
         const s = readSlot(root, "main", i)
         if (s.id === 0) space += cap
-        else if (s.id === r.outputId) space += (cap - s.count)
+        else if (s.id === r.outputId && s.name.length === 0) space += (cap - s.count)
     }
     for (let i = 0; i < root.hotbar.slotCount; ++i) {
         const s = readSlot(root, "hotbar", i)
         if (s.id === 0) space += cap
-        else if (s.id === r.outputId) space += (cap - s.count)
+        else if (s.id === r.outputId && s.name.length === 0) space += (cap - s.count)
     }
     const maxCraftsBySpace = Math.floor(space / r.outputCount)
     if (maxCrafts > maxCraftsBySpace) maxCrafts = maxCraftsBySpace
@@ -751,7 +754,9 @@ function slotShiftLeftCraft(root) {
     if (remain > 0 && (heldId === 0 || heldId === r.outputId)) {
         const prevHeldCount = (heldId === r.outputId) ? heldCount : 0
         root.hotbar.heldBlock = r.outputId
-        root.hotbar.heldCount = prevHeldCount + remain
+        // review28 #1：Math.min 封顶（cap 单一权威，同铁砧落定段修法）——预检同口径下 remain ≤ 光标余量，
+        //   此处纯防御纵深，防未来预检口径漂移再开「超上限光标栈」面。
+        root.hotbar.heldCount = Math.min(cap, prevHeldCount + remain)
     }
     root.craftRev++
     // progress 统计：批量合成 maxCrafts 次（craftsCount 加 maxCrafts + 成就按产物判一次）。root.progress 由

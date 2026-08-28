@@ -11963,6 +11963,16 @@ int main(int argc, char *argv[])
     //    ① takeProduct 带 toInventory 形参；② 产物槽 TapHandler 传 window.shiftHeld（shift 分流）；
     //    ③ 落定段 shift 分支走 addToAny(outId, outCount, outDur, outEnch, outName)（取出链走 InventoryOps/
     //       VM 既有 helper 非手搓循环写槽）；④ 预检含 cursorSpace 兜底位 + 满则 return（零消耗门）。
+    //    review28 #1 加固（行为腿在本文件 t874 harness 段 (13)，此处钉**口径逐字**——QML 路由 C++ 矩阵
+    //    全盲，预检条件漂移只能靠源码钉拦）：
+    //    ⑤ 预检与 addToAny rev2-C5 双向带名守卫同口径：同 id 无名栈余量仅在产物自身无名（outName 判空，
+    //       条件逐字含 outName.length === 0）时计入——旧码只查槽名 → 改名产物场景预检虚增容量，背包无
+    //       空槽时 addToAny 返整份 remain，落定段把改名产物凭空并进异物光标计数（复制/转化面）；
+    //    ⑥ 落定 else 分支三件套：heldId === outId 守卫（异物光标不并栈——不可达防御分支走
+    //       dropItemAtFront 丢实体，§2-E 不静默吞）+ Math.min(cap, heldCount + remain) 封顶（防超上限栈）；
+    //    ⑦ 工作台批量合成 slotShiftLeftCraft 同病同钉（review 模式小结 #1 清点结论：附魔台无「预检算
+    //       容量」组合，仅铁砧/工作台两处）：无名产物不并入带名同 id 栈（守卫槽侧半边）→ 槽名判空 + 落定
+    //       Math.min 封顶。
     {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString rootDir = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -11972,7 +11982,14 @@ int main(int argc, char *argv[])
                   && t.contains(QStringLiteral("root.takeProduct(window.shiftHeld)"))
                   && t.contains(QStringLiteral("const remain = root.hotbar.addToAny(outId, outCount, outDur, outEnch, outName)"))
                   && t.contains(QStringLiteral("const cursorSpace = (heldId === 0) ? cap"))
-                  && t.contains(QStringLiteral("if (space < outCount) return"));
+                  && t.contains(QStringLiteral("if (space < outCount) return"))
+                  && t.contains(QStringLiteral("outName.length === 0 && s.id === outId && s.name.length === 0"))
+                  && t.contains(QStringLiteral("} else if (heldId === outId) {"))
+                  && t.contains(QStringLiteral("Math.min(cap, heldCount + remain)"));
+        QFile iof(rootDir + QStringLiteral("/src/ui/InventoryOps.js"));
+        const QString js = iof.open(QIODevice::ReadOnly) ? QString::fromUtf8(iof.readAll()) : QString();
+        ok = ok && js.contains(QStringLiteral("s.id === r.outputId && s.name.length === 0"))
+              && js.contains(QStringLiteral("Math.min(cap, prevHeldCount + remain)"));
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t918 anvil shift-click product to inventory: takeProduct(toInventory) dual route, "
@@ -11980,7 +11997,12 @@ int main(int argc, char *argv[])
                              "(hotbar-first empty slots, same-id unnamed merge in place), preflight counts "
                              "main+hotbar capacity + cursor fallback and bails with zero consumption when neither "
                              "fits (t626 duplicate-item guard preserved); leftover falls back to cursor (MC take-"
-                             "out semantics)";
+                             "out semantics); review28 #1 hardening: preflight same-caliber as addToAny bidirectional "
+                             "named guard (same-id stack headroom counted only when product itself unnamed - "
+                             "outName.length===0 pinned verbatim), landing else branch holds heldId===outId guard "
+                             "(unreachable foreign-cursor fallback drops remain as entity, no silent swallow) + "
+                             "Math.min(cap,...) clamp; crafting-table slotShiftLeftCraft swept and pinned in "
+                             "InventoryOps.js (named-slot headroom excluded + cursor clamp)";
     }
 
     // ── t919 钻石剑伤害核账探针（公式面 + 运行时 DoT 补刀复现；R19.16）──
@@ -15104,6 +15126,99 @@ Item {
                 qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(5) }); // 光标归位
             }
 
+            // ═══ (13) review28 #1 t918 shift 路由行为腿（真 QML × 真 VM：预检同口径 + 落定守卫）═══
+            //    事故链两场景复现（同根因）+ 一条正链（防 #1 修复误伤 t918 本体）：
+            //    S1 异物光标 5 泥土 + 背包无空槽仅 main0 34/64 无名石头栈 + 30 石头改名「X」→ 旧码预检把
+            //       无名栈余量 30 虚增进容量（漏看产物带名）→ addToAny 带名不并无空槽 remain=30 → 落定 else
+            //       直接 heldCount=5+30=35（30 个改名石头凭空转化进泥土计数）；新码预检拒 → 零消耗无操作。
+            //    S2 同 id 光标 40/64 石头 + main0 10/64 无名石头栈 + 40 石头改名「Y」→ 旧码 cursorSpace 24 +
+            //       栈余量 54 = 78 ≥ 40 通过 → remain=40 → heldCount=40+40=80 > cap 64；新码预检拒 → 保持 40。
+            //    S3 带名产物 + 空背包正链：addToAny 空槽开新带名栈（hotbar 0 号优先），光标不受扰。
+            {
+                const int stone = BR::Stone, dirt = BR::Dirt;
+                auto fillAll = [&]() {   // 36 槽全满异物（泥土 64）——封死空槽容量贡献
+                    for (int i = 0; i < vm.slotCount(); ++i)
+                        vm.setStack(i, dirt, 64);
+                    for (int i = 0; i < vm.mainCount(); ++i)
+                        vm.mainSetStack(i, dirt, 64);
+                };
+                // —— S1 异物光标 + 带名产物：预检必须拒（零消耗、异物计数不变）——
+                wrapper->setProperty("shiftHeld", false);
+                resetAnvil();
+                vm.setStack(3, stone, 30);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                fillAll();                        // hotbar3 取走后已空 → 补满；全背包无空槽
+                vm.mainSetStack(0, stone, 34);    // 唯一「同 id 无名栈余量 30」诱饵
+                vm.setHeldBlock(dirt);            // 异物光标 5 泥土（cursorSpace=0）
+                vm.setProperty("heldCount", 5);
+                anvilRoot->setProperty("renameName", QStringLiteral("X"));
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", { QVariant(true) });
+                bool step = vm.heldBlock() == dirt && vm.heldCount() == 5
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == stone
+                        && localIdAt(anvilRoot, "anvilCounts", 0) == 30
+                        && vm.mainBlockIdAt(0) == stone && vm.mainCountAt(0) == 34;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [review28-1 diag] S1 foreign-cursor transmutation: held="
+                                      << vm.heldBlock() << "x" << vm.heldCount()
+                                      << " A=" << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << "x" << localIdAt(anvilRoot, "anvilCounts", 0);
+                }
+                anvilRoot->setProperty("renameName", QString());
+                // —— S2 同 id 光标 + 带名产物超上限：预检必须拒（heldCount 保持 40 不变 80）——
+                resetAnvil();
+                vm.setStack(3, stone, 40);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                fillAll();
+                vm.mainSetStack(0, stone, 10);    // 无名石头 10/64（旧码会把余量 54 虚增进预检）
+                vm.setHeldBlock(stone);           // 同 id 光标 40/64（cursorSpace=24 < 40）
+                vm.setProperty("heldCount", 40);
+                anvilRoot->setProperty("renameName", QStringLiteral("Y"));
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", { QVariant(true) });
+                step = vm.heldBlock() == stone && vm.heldCount() == 40
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == stone
+                        && localIdAt(anvilRoot, "anvilCounts", 0) == 40
+                        && vm.mainBlockIdAt(0) == stone && vm.mainCountAt(0) == 10;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [review28-1 diag] S2 over-cap cursor stack: held="
+                                      << vm.heldBlock() << "x" << vm.heldCount()
+                                      << " A=" << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << "x" << localIdAt(anvilRoot, "anvilCounts", 0);
+                }
+                anvilRoot->setProperty("renameName", QString());
+                // —— S3 带名产物 + 空背包正链：shift 路由本体不受 #1 修复误伤 ——
+                resetAnvil();
+                vm.setStack(3, stone, 30);
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                anvilRoot->setProperty("renameName", QStringLiteral("Z"));
+                resetTap(anvilRoot);
+                qmlCall(anvilRoot, "takeProduct", { QVariant(true) });
+                step = vm.blockIdAt(0) == stone && vm.countAt(0) == 30
+                        && vm.customNameAt(0) == QStringLiteral("Z")
+                        && localIdAt(anvilRoot, "anvilSlots", 0) == 0
+                        && vm.heldBlock() == 0;
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [review28-1 diag] S3 positive route: hb0="
+                                      << vm.blockIdAt(0) << "x" << vm.countAt(0)
+                                      << " name=" << vm.customNameAt(0)
+                                      << " A=" << localIdAt(anvilRoot, "anvilSlots", 0)
+                                      << " held=" << vm.heldBlock();
+                }
+            }
+
             clearVm();
         }
 
@@ -15118,7 +15233,10 @@ Item {
                              "TapHandlers (the exact user path). Entries: mouse left/right on A slot, "
                              "shift-move, drag single-slot release, double-click pickup, number-key swap, "
                              "takeProduct repair/combine/merge/rename, close-panel return, save round-trip "
-                             "with VM rebind; categories: tool/weapon(4-ench)/armor/enchanted-book, all "
+                             "with VM rebind; review28 #1 t918 shift-route legs: foreign-cursor + named-product "
+                             "preflight rejects with zero consumption (no transmutation into cursor count), "
+                             "same-id cursor stays at cap (no over-cap stack), named product still lands via "
+                             "addToAny into empty slots; categories: tool/weapon(4-ench)/armor/enchanted-book, all "
                              "with custom names + instance durability asserted at every hop";
         if (!ok875)
             ++totalFail;
