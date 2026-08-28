@@ -109,6 +109,17 @@ Item {
         { name: "绿色", tint: "#468237" }, { name: "红色", tint: "#962828" },
         { name: "黑色", tint: "#1e1e26" }
     ]
+    // t920 狼（10）/豹猫（11）驯服态预览（变体面板两段切换）：第一段 驯服/未驯服（镜像游戏内 wolfTamed /
+    //   ocelotTamed）；第二段仅驯服后可切 站立/坐下（镜像 wolfSitting / ocelotSitting——野狼/野豹猫不可命令坐，
+    //   机制等价 MC 1.0；坐姿几何走 MobModel sitPose（t878② 已就绪），狼驯服态视觉 = 红项圈 overlay（t831），
+    //   豹猫驯服态 = 家猫贴图（mob_cat_*，游戏内 3 变体随机，图鉴取变体 0 黑猫代表）。蛋路径不设变体（同羊）。
+    property bool mobTamedPreview: false
+    property bool mobSitPreview: false
+    // 生物段选中是否狼/豹猫（t920 驯服态面板门控；蛋路径 selectedMobFromSection<0 恒 false）。
+    readonly property bool selectedMobTameable: root.selectedMobFromSection === 10
+        || root.selectedMobFromSection === 11
+    // 预览当前驯服激活态（面板第一段「已驯服」且选中狼/豹猫）。
+    readonly property bool mobTamedActive: root.selectedMobTameable && root.mobTamedPreview
     // 生物蛋材料 id → mobType（t785 起与 RecipeRegistry::mobTypeForSpawnEgg 单一权威表同源镜像——Core 层
     //   QML 不能引 Game 头，字面量 + 注释互指；矩阵测试 t785 探针对 C++ 权威表全蛋断言防漂移）。
     //   pig=1/cow=2/sheep=3/shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9/wolf=10/ocelot=11/
@@ -197,8 +208,12 @@ Item {
     readonly property string selectedMobPackSrc: root.selectedMobType >= 0 && root.resourcePack && root.resourcePack.active
         ? root.resourcePack.mobTextureSource(root.selectedMobType) : ""
     // 最终贴图源：pack 命中 → pack；否则程序生成 mob_*.png（无 → 空串走纯色）。
-    readonly property string selectedMobTexSource: root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
-        : root.mobFallbackTexture(root.selectedMobType)
+    //   t920 例外：已驯服豹猫 → 恒程序家猫贴图 mob_cat_black（变体 0 代表；demo 包无驯服猫 PNG，Main.qml
+    //   游戏内同款「驯服猫恒程序贴图」口径——pack 豹猫贴图只覆盖野生形态）。触碰驯服态属性即时刷新。
+    readonly property string selectedMobTexSource: root.selectedMobFromSection === 11 && root.mobTamedPreview
+        ? "qrc:/textures/mob_cat_black.png"
+        : (root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
+                                          : root.mobFallbackTexture(root.selectedMobType))
     // 选中 mob 显示名：生物段选中 → selectedMobName + 变体后缀（t751：剪毛/剪头/毛色态随预览区悬浮
     //   变体面板切换刷新）；否则按 mobType 反查 mobModel 表（生物蛋路径，t751 合并后每型单条恒得常规形态名）。
     readonly property string selectedMobDisplay: (root.selectedMobFromSection >= 0 && root.selectedMobName !== ""
@@ -225,6 +240,9 @@ Item {
             return root.sheepWoolIndex > 0 ? " · " + root.woolPalette[root.sheepWoolIndex].name + "羊毛" : ""
         }
         if (root.selectedMobFromSection === 12) return root.snowGolemSheared ? "（剪头后）" : ""
+        // t920 狼/豹猫驯服态后缀（未驯服无后缀 = 常规形态名）。
+        if (root.selectedMobTameable)
+            return root.mobTamedPreview ? (root.mobSitPreview ? "（已驯服 · 坐下）" : "（已驯服）") : ""
         return ""
     }
     // t749 剪毛羊 pack 本体层源（pack 启用且包内有 sheep/sheep.png → file:///；否则空串走程序贴图）。
@@ -893,6 +911,11 @@ Item {
                                                 // t876 羊头分离 subset：毛茸态羊 → 头盒独立 subset（materials[1]
                                                 //   换绑本体层头区、不吃毛色 tint）；剪毛态 / 非羊 → false 单段绘制。
                                                 sheepSkinHead: root.sheepSkinHeadActive
+                                                // t920 坐姿几何：狼/豹猫驯服态 + 面板「坐下」段 → MobModel
+                                                //   sitPose 分支（t878②；与 Main.qml 游戏内 delegate 同一几何
+                                                //   源，非浏览器侧复刻）。未驯服不可坐（机制等价 MC 野狼/野豹猫
+                                                //   不可命令）；切换即时重建。
+                                                sitPose: root.mobTamedActive && root.mobSitPreview
                                                 // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
                                                 //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
                                                 packTextured: root.selectedMobPackSrc !== ""
@@ -1084,10 +1107,13 @@ Item {
                                         // t750 ② 狼尾（修复「像兔子」——缺尾缺眼的灰身立耳四足读作兔；镜像
                                         //   Main.qml wolfTailPivot：尾根 (0,0.16,0.38) + 竖细盒毛色 0.55 灰；图鉴
                                         //   静态取满血竖起 35°（游戏内随血量 35°..140°）。
+                                        //   t920 坐姿随移（Main.qml t878② 成对契约）：尾根 (0,-0.17,0.50) +
+                                        //   垂尾搭地 35°+75°=110°（机制等价 MC 坐狼垂尾）。
                                         Node {
                                             visible: root.selectedMobType === 10
-                                            position: Qt.vector3d(0, 0.16, 0.38)
-                                            eulerRotation.x: 35
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(0, -0.17, 0.50) : Qt.vector3d(0, 0.16, 0.38)
+                                            eulerRotation.x: root.mobTamedActive && root.mobSitPreview ? 110 : 35
                                             Model {
                                                 geometry: UnitCube {}
                                                 position: Qt.vector3d(0, 0.10, 0)
@@ -1095,21 +1121,39 @@ Item {
                                                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8c8c8c" }
                                             }
                                         }
+                                        // t920 驯服狼红项圈（t831 驯服态视觉；镜像 Main.qml 游戏内 collar
+                                        //   Model：站姿颈根 (0,0.16,-0.30) / 坐姿头-胸嵌接高位 (0,0.28,-0.03)
+                                        //   成对契约，横扁环带 x 微出躯干侧缘读作环颈）。未驯服不显；图鉴不做
+                                        //   昼夜灰阶 / 受击红闪（纯色预览，同其他 overlay 眼/腿约定）。
+                                        Model {
+                                            visible: root.selectedMobType === 10 && root.mobTamedPreview
+                                            geometry: UnitCube {}
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(0, 0.28, -0.03) : Qt.vector3d(0, 0.16, -0.30)
+                                            scale: Qt.vector3d(0.42, 0.06, 0.07)
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                baseColor: "#c22828" // 驯服项圈红（Main.qml rgba(0.76,0.16,0.16) 同值）
+                                            }
+                                        }
                                         // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
                                         //   (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前脸 z=-0.60 → 眼贴头前
                                         //   (±0.08,0.16,-0.61)（t819 头后移贴胸，眼随移）。
                                         //   t780：pack 命中 → box-UV 贴图头前脸自带双瞳 → overlay 隐（t777 双眼教训）。
+                                        //   t920 坐姿眼随移（Main.qml t878② 成对契约）：(±0.08, 0.34, -0.325)。
                                         Model {
                                             visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.08, 0.16, -0.61)
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(-0.08, 0.34, -0.325) : Qt.vector3d(-0.08, 0.16, -0.61)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
                                             visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.08, 0.16, -0.61)
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(0.08, 0.34, -0.325) : Qt.vector3d(0.08, 0.16, -0.61)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
@@ -1117,17 +1161,25 @@ Item {
                                         //   (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前脸 z=-0.52 → 眼贴头前
                                         //   (±0.07,0.15,-0.53)（t819 头后移贴胸，眼随移）。
                                         //   t780：pack 命中 → 贴图头前脸自带眼点 → overlay 隐（同上）。
+                                        //   t920：已驯服豹猫贴图恒程序家猫（无脸纹）→ 眼恒显（镜像 Main.qml
+                                        //   「驯服猫不走 pack 判据」）；坐姿眼随移 (±0.07, 0.32, -0.28)。
                                         Model {
-                                            visible: root.selectedMobType === 11 && root.selectedMobPackSrc === ""
+                                            visible: root.selectedMobType === 11
+                                                     && (root.selectedMobPackSrc === ""
+                                                         || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.07, 0.15, -0.53)
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(-0.07, 0.32, -0.28) : Qt.vector3d(-0.07, 0.15, -0.53)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
                                         Model {
-                                            visible: root.selectedMobType === 11 && root.selectedMobPackSrc === ""
+                                            visible: root.selectedMobType === 11
+                                                     && (root.selectedMobPackSrc === ""
+                                                         || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
                                             geometry: UnitCube {}
-                                            position: Qt.vector3d(0.07, 0.15, -0.53)
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(0.07, 0.32, -0.28) : Qt.vector3d(0.07, 0.15, -0.53)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
@@ -1328,6 +1380,7 @@ Item {
                                 Rectangle {
                                     id: variantPanel
                                     visible: root.selectedMobFromSection === 3 || root.selectedMobFromSection === 12
+                                             || root.selectedMobTameable // t920 狼/豹猫驯服态面板
                                     z: 10
                                     width: parent.width - 12
                                     height: variantCol.implicitHeight + 10
@@ -1352,6 +1405,7 @@ Item {
                                         }
                                         // 两段 toggle（激活段金边金字 = 选中格高亮同款 #ffd76a；非激活 = 返回按钮蓝字风）。
                                         Row {
+                                            visible: root.selectedMobFromSection === 3 || root.selectedMobFromSection === 12
                                             spacing: 8
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             Repeater {
@@ -1383,6 +1437,70 @@ Item {
                                                     }
                                                 }
                                             }
+                                        }
+                                        // t920 狼/豹猫驯服态两段（同款金边 toggle 语言）：第一段 驯服/未驯服
+                                        //   （镜像 wolfTamed/ocelotTamed）；第二段仅驯服后显示 站立/坐下
+                                        //   （镜像 wolfSitting/ocelotSitting——野生态不可命令坐，机制等价 MC 1.0；
+                                        //   切「未驯服」时坐段随隐 = 回野生站姿）。
+                                        Row {
+                                            visible: root.selectedMobTameable
+                                            spacing: 8
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            Repeater {
+                                                model: [ "未驯服", "已驯服" ]
+                                                delegate: Rectangle {
+                                                    width: 104; height: 26; radius: 6
+                                                    color: tameSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
+                                                    border.color: (index === 1) === root.mobTamedPreview ? "#ffd76a" : "#3a5a7a"
+                                                    border.width: (index === 1) === root.mobTamedPreview ? 2 : 1
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData
+                                                        color: (index === 1) === root.mobTamedPreview ? "#ffd76a" : "#7fb0e5"
+                                                        font.pixelSize: 12
+                                                    }
+                                                    MouseArea {
+                                                        id: tameSegHover
+                                                        anchors.fill: parent; hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.mobTamedPreview = (index === 1)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Row {
+                                            visible: root.selectedMobTameable && root.mobTamedPreview
+                                            spacing: 8
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            Repeater {
+                                                model: [ "站立", "坐下" ]
+                                                delegate: Rectangle {
+                                                    width: 104; height: 26; radius: 6
+                                                    color: sitSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
+                                                    border.color: (index === 1) === root.mobSitPreview ? "#ffd76a" : "#3a5a7a"
+                                                    border.width: (index === 1) === root.mobSitPreview ? 2 : 1
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData
+                                                        color: (index === 1) === root.mobSitPreview ? "#ffd76a" : "#7fb0e5"
+                                                        font.pixelSize: 12
+                                                    }
+                                                    MouseArea {
+                                                        id: sitSegHover
+                                                        anchors.fill: parent; hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.mobSitPreview = (index === 1)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // t920 驯服猫形态注（仅豹猫驯服态）：游戏内三变体随机，图鉴取黑猫代表。
+                                        Text {
+                                            visible: root.selectedMobFromSection === 11 && root.mobTamedPreview
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: "驯服后为家猫形态（黑猫变体代表 · 游戏内三变体随机）"
+                                            color: "#7fae7f"; font.pixelSize: 9
                                         }
                                         // 毛色 swatch 行（仅羊）：16 色与游戏内羊毛方块调色板同源（build_wool.py
                                         //   WOOL_COLORS + 白）；选中格金框（同选中高亮语言）。
