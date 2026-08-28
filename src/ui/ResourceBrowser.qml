@@ -274,12 +274,23 @@ Item {
     //   几何，一并补进（掉落物侧楼梯三族都不进 isItem3DFamily，两侧家族表差集 = {16,59,110}））：
     //   活板门（20/136）/ 火把（13）/ 台阶四族（15/87/58/109）/ 楼梯三族（16/59/110）/ 雪层（44）/
     //   草丛（24）/ 附魔台（94，带书）→ ItemShapeGeometry 真实 3D 形状旋转预览（替代大图标平面图）。
-    //   字面量 = BlockRegistry id（QML 不 import C++ 枚举；两侧家族表注释互指——加族员须同步两处）。
+    //   t925 二批扩面（凡右键可放置的方块都应有 3D 模型）：枯灌木（43）/ 小麦作物（25，成熟态瓦片）/
+    //   栅栏族（木 17 / 圆石墙 60 / 云杉 88，柱 + 双档满连形态）/ 门族（木 19 / 铁 71 / 云杉 89，薄板 +
+    //   同族基材薄边）/ 白蘑菇（115）/ 红蘑菇（48）/ 蜘蛛网（102）/ 红石火把（129）——cross 族走
+    //   ItemShapeGeometry 交叉双面片；拉杆（112）/ 木·石按钮（113/114）——mechBoxes 单一几何源。
+    //   字面量 = BlockRegistry id（QML 不 import C++ 枚举；两侧家族表注释互指——加族员须同步两处；
+    //   掉落物排除清单沿用 t880：铁轨平贴族 / 楼梯三族 billboard）。
     readonly property bool selectedIsItem3D: root.selectedId === 13 || root.selectedId === 20
         || root.selectedId === 136 || root.selectedId === 15 || root.selectedId === 87
         || root.selectedId === 58 || root.selectedId === 109 || root.selectedId === 16
         || root.selectedId === 59 || root.selectedId === 110
         || root.selectedId === 44 || root.selectedId === 24 || root.selectedId === 94
+        || root.selectedId === 43 || root.selectedId === 25 // t925：枯灌木 / 小麦
+        || root.selectedId === 17 || root.selectedId === 60 || root.selectedId === 88 // 栅栏族
+        || root.selectedId === 19 || root.selectedId === 71 || root.selectedId === 89 // 门族
+        || root.selectedId === 115 || root.selectedId === 48 // 白 / 红蘑菇
+        || root.selectedId === 102 || root.selectedId === 129 // 蛛网 / 红石火把
+        || root.selectedId === 112 || root.selectedId === 113 || root.selectedId === 114 // 拉杆 / 按钮
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -878,8 +889,20 @@ Item {
                                     //   （参数视觉钉死，待用户目视确认）。
                                     Node {
                                         visible: root.selectedIsItem3D
-                                        property bool item3DTorch: root.selectedId === 13
-                                        scale: item3DTorch ? Qt.vector3d(1.6, 1.6, 1.6) : Qt.vector3d(1.0, 1.0, 1.0)
+                                        // t880 火把细柱 1.6 放大先例 → t925 小体型族同款放大（近立方视觉
+                                        //   量级可辨）：机关小体（拉杆/按钮 6/16 见方）×1.8、蘑菇剪影 / 红石
+                                        //   火把 ×1.5、栅栏横档细臂 ×1.2；其余 1.0（参数视觉钉死，待目视）。
+                                        property real item3DScale: {
+                                            if (root.selectedId === 13) return 1.6
+                                            if (root.selectedId === 112 || root.selectedId === 113
+                                                || root.selectedId === 114) return 1.8
+                                            if (root.selectedId === 48 || root.selectedId === 115
+                                                || root.selectedId === 129) return 1.5
+                                            if (root.selectedId === 17 || root.selectedId === 60
+                                                || root.selectedId === 88) return 1.2
+                                            return 1.0
+                                        }
+                                        scale: Qt.vector3d(item3DScale, item3DScale, item3DScale)
                                         eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
                                         Model {
                                             geometry: ItemShapeGeometry { blockId: root.selectedId }

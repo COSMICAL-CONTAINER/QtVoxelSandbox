@@ -8,12 +8,13 @@
 
 // 方块**异形 / cross**的物品 3D 模型几何（t880；Renderer 层）。
 //
-// 用途（t880 资源查看器 + 掉落物 3D 化）：把「有 3D 模型的物品」从 BillboardQuad 平面图标升级为真实
-// 3D 形状 —— 木/铁活板门（合态薄板）、火把（细立柱）、台阶族（半高盒）、木板楼梯（整步 + 背墙）、
-// 雪层（1/8 薄板）、草丛（对角交叉双面片）、附魔台（0.75 矮盒）。块几何与 World 层
-// partialblockgeometry 的形状语义同源（盒区一致；本类是**物品摆位**变体：各形状绕自身高度中点居中
-// —— 同 build_cube_icons._partial_y_mid 的图标居中口径），贴图按 BlockDef per-face 图集瓦片 +
-// 半纹素内缩（同 BlockCube）。
+// 用途（t880 资源查看器 + 掉落物 3D 化；t925 扩面第二批）：把「有 3D 模型的物品」从 BillboardQuad 平面图标
+//   升级为真实 3D 形状 —— 木/铁活板门（合态薄板）、火把（细立柱）、台阶族（半高盒）、木楼梯（整步 + 背墙）、
+//   雪层（1/8 薄板）、草丛（对角交叉双面片）、附魔台（0.75 矮盒）；t925 二批：栅栏族（柱 + 四向双档满连
+//   形态）、门族（3/16 薄板 + t674 同族基材薄边）、拉杆/按钮（mechBoxes 单一几何源）、cross 族扩面（枯灌木/
+//   小麦（成熟态瓦片）/红白蘑菇/蛛网/红石火把）。块几何与 World 层 partialblockgeometry 的形状语义同源
+//   （盒区一致；本类是**物品摆位**变体：各形状绕自身高度中点居中 —— 同 build_cube_icons._partial_y_mid 的
+//   图标居中口径），贴图按 BlockDef per-face 图集瓦片 + 半纹素内缩（同 BlockCube）。
 //
 // 与 BlockCube 的分工：BlockCube 是满 1×1×1 立方（ShapeFull 方块段）；本类管非满格形状（slab/
 // stairs/trapdoor/snow layer/enchant table/torch/cross）。掉落物 delegate 与 ResourceBrowser 预览按
