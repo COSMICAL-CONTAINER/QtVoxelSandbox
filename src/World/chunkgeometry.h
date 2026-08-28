@@ -74,10 +74,18 @@ public:
     //   World emit worldChanged() 内全部重建完才 clearAllDirty，见 world.cpp setBlock）。
     // **t860（R19.14）折叠**：t442 起 terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（leaves cutout
     //   实证生效），与本段材质逐字相同 → cross/门/活板门顶点并入 terrain 段 mesh（buildMesh PASS 1 路由
-    //   不再跳过），QML 停建 cutout 段 Model（每 chunk 6 段 → 5 段）。本属性 + 路由分支保留为**降级杠杆**
-    //   （观感回归时 QML 恢复 crossChunkComp 实例化即回 6 段），折叠行为由矩阵 t860 探针钉死（terrain 段
-    //   mesh 计入 cross 顶点）。
+    //   不再跳过），QML 停建 cutout 段 Model（每 chunk 6 段 → 5 段）。降级杠杆 = **cutoutFolded 显式开关**
+    //   （review28 #4；Main.qml window.cutoutSegmentRestored 单开关联动 terrain 路由 / cutout 段实例化 /
+    //   segmentsPerChunk 三处——旧「只恢复 createObject 一行即回 6 段」的注释路径会两段同发 z-fighting，
+    //   已废），折叠行为由矩阵 t860 探针钉死（terrain 段 mesh 计入 cross 顶点 + 开关行为级两态断言）。
     Q_PROPERTY(bool cutoutOnly READ cutoutOnly WRITE setCutoutOnly NOTIFY cutoutOnlyChanged)
+    // review28 #4（t860 降级杠杆显式开关化）：cutoutFolded=true（默认）→ terrain 段 PASS 1 路由**全收**
+    //   cross/门/活板门（t860 折叠态，QML 停建 cutout 段）。false → terrain 段恢复 t860 **前**的跳过清单
+    //   （cross/门/活板门让位并行存在的独立 cutout 段——两段同发同几何同材质 = 逐顶点重合 z-fighting，
+    //   即 review28 #4 指出的「照旧注释只恢复 createObject 一行」事故路径）。Main.qml 以
+    //   window.cutoutSegmentRestored **单开关**联动三处（本属性绑定 + crossChunkComp 条件实例化 +
+    //   segmentsPerChunk），恢复 = 翻一个属性（构建期置位），结构上不可能只恢复一半。
+    Q_PROPERTY(bool cutoutFolded READ cutoutFolded WRITE setCutoutFolded NOTIFY cutoutFoldedChanged)
     // t343 岩浆渲染分流（机制等价 waterOnly 的「独立段」，复用 culled/greedy 立方面路径而非水的变高水面）：
     //   lavaOnly=true → 本几何只网格化 Lava 方块（独立段，Main.qml 用 opacity≈0.95 + NoLighting 暖色 baseColor 材质
     //   显近不透岩浆 + 自发光感）；lavaOnly=false（默认）→ 地形段跳过 Lava（避免与岩浆段重复绘制）。岩浆段满格立方
@@ -170,6 +178,10 @@ public:
     // t326 cross cutout 分流（见 Q_PROPERTY 注释）：true=只网格化 cross 广告牌方块（草丛 / 作物 / 树苗）。
     bool cutoutOnly() const { return m_cutoutOnly; }
     void setCutoutOnly(bool on);
+    // review28 #4 cutout 折叠开关（见 Q_PROPERTY 注释）：true=terrain 段全收 cutout 族（t860 折叠态）；
+    // false=恢复独立 cutout 段时代的跳过清单。值变 → 重网格化（两态 PASS 1 选块不同）。
+    bool cutoutFolded() const { return m_cutoutFolded; }
+    void setCutoutFolded(bool on);
     // t343 岩浆分流（见 Q_PROPERTY 注释）：true=只网格化 Lava 段（满格立方，独立近不透暖色材质）。
     bool lavaOnly() const { return m_lavaOnly; }
     void setLavaOnly(bool on);
@@ -204,6 +216,7 @@ signals:
     void dayMulChanged();   // PLAN §2-H：昼夜天光乘子变（仅乘天光分量，方块光时间不变）
     void waterOnlyChanged(); // t148：水段开关变（QML 改 waterOnly → 重建，水段 / 地形段重网格化）
     void cutoutOnlyChanged(); // t326：cutout 段开关变（QML 改 cutoutOnly → 重建，cross 段 / 地形段重网格化）
+    void cutoutFoldedChanged(); // review28 #4：折叠杠杆开关变（QML 恢复 cutout 段 → terrain 段退回跳过清单并重建）
     void lavaOnlyChanged(); // t343：岩浆段开关变（QML 改 lavaOnly → 重建，岩浆段 / 地形段重网格化）
     void glassOnlyChanged(); // t405：玻璃段开关变（QML 改 glassOnly → 重建，玻璃段 / 地形段重网格化）
     void iceOnlyChanged(); // t468：冰段开关变（QML 改 iceOnly → 重建，冰段 / 地形段重网格化）
@@ -248,6 +261,7 @@ private:
     float m_dayMul = 1.0f; // PLAN §2-H：昼夜天光乘子（仅乘天光分量；默认 1.0=正午全日照，QML 绑 terrainLight(skyLight)）
     bool m_waterOnly = false; // t148：true=只网格化 Water 段（透明水）；false=只网格化非水地形段
     bool m_cutoutOnly = false; // t326：true=只网格化 cross 段（草丛/作物/树苗 cutout）；false=不网格化 cross
+    bool m_cutoutFolded = true; // review28 #4：true=t860 折叠态（terrain 段全收 cutout 族，默认）；false=恢复跳过清单（cutout 段并行时的互斥路由）
     bool m_lavaOnly = false; // t343：true=只网格化 Lava 段（满格立方近不透暖色）；false=地形段跳 Lava
     bool m_glassOnly = false; // t405：true=只网格化 Glass 段（透明整立方半透）；false=地形段跳 Glass
     bool m_iceOnly = false; // t468：true=只网格化冰族段（Ice/PackIce/BlueIce 透明整立方半透）；false=地形段跳冰族
