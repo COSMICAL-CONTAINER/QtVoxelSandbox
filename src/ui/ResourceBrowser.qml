@@ -328,6 +328,10 @@ Item {
     //   spinAngle，自转从松手角度继续）。
     property bool previewDragging: false
     property real userPitch: 0
+    // t922 预览滚轮缩放（3D 预览态）：>1 放大 / <1 缩小，钳 [0.5, 3.0]（防贴脸穿 clipNear / 缩成芝麻）；
+    //   由 cubeView 相机距离承载（z = 3.2 / zoom，全 3D 分支共享——方块/床/异形/生物同缩放）。大图标态不缩放
+    //   （非 3D 预览无镜头概念）。重置按钮（预览区右下角）回 1.0。
+    property real previewZoom: 1.0
 
     // t599 松手回自转说明：yaw 由 NumberAnimation on spinAngle 重启从当前值续跑（无跳变）；pitch 归零走
     //   resumePitchAnim（见预览区 DragHandler 处）。
@@ -780,6 +784,40 @@ Item {
                                         root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6 * faceSign))
                                     }
                                 }
+                                // t922 滚轮缩放（3D 预览态）：滚上放大 / 滚下缩小（每档 ×1.1，钳 [0.5, 3.0]）。
+                                //   enabled 限定 cubeView 可见（大图标态不抢滚轮——左侧网格 Flickable 不受影响，
+                                //   WheelHandler 在 previewArea 内独占消费）。target:null 只读滚轮增量不拖对象。
+                                //   缩放由相机距离承载（PerspectiveCamera z = 3.2/zoom）——各 3D 分支零改动共享。
+                                WheelHandler {
+                                    acceptedDevices: PointerDevice.Mouse
+                                    enabled: cubeView.visible
+                                    onWheel: (wheel) => {
+                                        const factor = wheel.angleDelta.y > 0 ? 1.1 : 1.0 / 1.1
+                                        let z = root.previewZoom * factor
+                                        if (z < 0.5) z = 0.5
+                                        if (z > 3.0) z = 3.0
+                                        root.previewZoom = z
+                                    }
+                                }
+                                // t922 重置缩放按钮（预览区右下角）：回默认大小 1.0。仅 3D 预览且已缩放时显示
+                                //   （默认态自隐，不占预览面）；变体面板已收窄让位（width -12 → -58）防叠。
+                                Rectangle {
+                                    visible: cubeView.visible && Math.abs(root.previewZoom - 1.0) > 0.001
+                                    width: 52; height: 24; radius: 6
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 6
+                                    anchors.bottomMargin: 6
+                                    color: zoomResetArea.containsMouse ? "#2a3a4a" : "#1a2a3a"
+                                    border.color: "#3a5a7a"; border.width: 1
+                                    Text { anchors.centerIn: parent; text: "重置"; color: "#7fb0e5"; font.pixelSize: 11 }
+                                    MouseArea {
+                                        id: zoomResetArea
+                                        anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.previewZoom = 1.0
+                                    }
+                                }
                                 // 整立方方块 → 内嵌 View3D 旋转 BlockCube。
                                 // 渲染可见性铁律（lessons-learned）：clipNear≈0.05（默认 10 会剪掉单位立方）+
                                 //   PrincipledMaterial.NoLighting（默认 lit 在本工程不渲染）+ alphaMode Mask（leaves 等带
@@ -790,7 +828,7 @@ Item {
                                     visible: root.selectedIsCube || root.selectedIsMob || root.selectedIsItem3D
                                     // View3D 默认 Offscreen 渲染（FBO 合成），嵌面板预览正确。
                                     PerspectiveCamera {
-                                        position: Qt.vector3d(0, 0, 3.2)
+                                        position: Qt.vector3d(0, 0, 3.2 / root.previewZoom) // t922 滚轮缩放（距离承载；1.0 = 默认 3.2）
                                         clipNear: 0.05
                                         clipFar: 100
                                         fieldOfView: 45
@@ -1390,7 +1428,7 @@ Item {
                                     visible: root.selectedMobFromSection === 3 || root.selectedMobFromSection === 12
                                              || root.selectedMobTameable // t920 狼/豹猫驯服态面板
                                     z: 10
-                                    width: parent.width - 12
+                                    width: parent.width - 58 // t922 收窄 58：右下角让位重置缩放按钮（防叠；两段 104px + 8 间距仍容纳）
                                     height: variantCol.implicitHeight + 10
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     anchors.bottom: parent.bottom
