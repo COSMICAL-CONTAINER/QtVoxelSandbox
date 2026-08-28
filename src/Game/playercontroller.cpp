@@ -2566,16 +2566,28 @@ void PlayerController::useFishingRod()
             //   tick 尚未跑脱钩验证）时拉拽 no-op，按空收处理（无获物不消耗），不再白损 5 耐久。
             // t882 拉拽反馈增强（用户「没看到生物被拉起来飞」）：
             //   a) 拉力随距离增强——speed = kFishHookPullSpeed + kFishHookPullGain × min(dist, 32)（越远越猛）；
-            //   b) 上抛弧随距离加大——upSpeed = kFishHookLiftBase + kFishHookLiftGain × min(dist, 32)（远距
-            //      拉拽峰值 ~1.3 格 + 空中无摩擦 → 被钩生物明显飞起 / 空中钩起直接拽飞）；
             //   c) 收杆角度调制——玩家视线与线方向（浮标→玩家）的水平 |cos| 越小越卸力（正对目标拉 = 满力，
             //      侧 / 背向衰减到 kFishHookAngleMin）。距离取玩家—浮标水平距（拉拽语义 = 沿线收线长度）。
+            // t927 空中收杆「至少拽到玩家高度」（t882 参数返修；用户「空中右键收杆看不到生物飞起」）：
+            //   b) 上抛弧改**落差解算式抛物**取代旧 2.8+0.18×d 冲量——冲量式峰值 = vy²/(2g)，32 格远也只
+            //      ~1.3 格，玩家居高收杆时生物根本够不到玩家眼位（解算需求：6 格高差需 vy≈19）。新解 =
+            //      目标峰 = 玩家眼位（m_pos.y + m_eyeHeight）+ kFishHookLiftOverhead 轻型过头余量，
+            //      vy = √(2·kFishHookLiftGravity·Δh)（g 镜像 Entities 层 kGravity 28，P18 双钉）；同高 /
+            //      玩家更低时 kFishHookLiftFloorDh 保底小弧（平地收杆仍明显拽起）。重量口径 = mobType halfH
+            //      质量代理（halfHeightAt）：≥ kFishHookHeavyHalfH 判重型族（铁傀儡 1.20 / 夜行者 1.40）→
+            //      Δh × kFishHookHeavyLift 折扣（重型少抬约半、轻型拽过头顶——用户口径）。mob 位 / 体型在
+            //      removeEntityAt(浮标) 之后仍可查（收走的是浮标槽非 mob 槽，槽位不重排——t882 先例）。
             float dxp = m_pos.x() - bp.x();
             float dzp = m_pos.z() - bp.z();
             const float dist = std::sqrt(dxp * dxp + dzp * dzp);
             const float dc = std::min(dist, kFishLineMaxLen);
             float pullSpeed = kFishHookPullSpeed + kFishHookPullGain * dc;
-            float liftSpeed = kFishHookLiftBase + kFishHookLiftGain * dc;
+            float dhLift = (m_pos.y() + m_eyeHeight) - m_entityManager->posAt(hooked).y()
+                           + kFishHookLiftOverhead; // 目标峰落差（眼位 + 过头余量 − mob 现高）
+            dhLift = std::max(dhLift, kFishHookLiftFloorDh);
+            if (m_entityManager->halfHeightAt(hooked) >= kFishHookHeavyHalfH)
+                dhLift *= kFishHookHeavyLift; // 重型族折扣（halfH 质量口径）
+            float liftSpeed = std::sqrt(2.0f * kFishHookLiftGravity * dhLift);
             {
                 const QVector3D look = lookDirection();
                 const float llen = std::sqrt(look.x() * look.x() + look.z() * look.z());
