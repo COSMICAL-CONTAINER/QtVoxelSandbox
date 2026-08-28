@@ -10593,15 +10593,77 @@ int main(int argc, char *argv[])
                 if (!okC) qInfo().noquote() << "  t907(c) dt-spike final" << fc << "alive" << sc.aliveAt(0);
                 sc.clearAll();
             }
-            const bool ok = okA && okB && okC;
+            // ── (d) review28 #7：坡段双车挤压分离 ≥0.85（近层闸 |Δ层|≤1 后的坡段不变量行为级钉死）。
+            //        rig：平段 (x0,Y)(x0+1,Y) + 1:1 上坡 (x0+2,Y+1) + 平顶 (x0+3..x0+4,Y+1)；两端
+            //        接轨墙 + 分层地板（下坡加速的轨端弹射（t863③ ≥3.0）被墙接住、落在 rig 地板上，
+            //        不坠出 rig）。两车交替对挤 600 tick（镜像 (a) 驱动序）——断言全程两车不入实体格、
+            //        不出 rig、不坠层，终态水平分离 ≥0.85（坡格轨层差 ±1 区的跨格去穿插在近层闸下
+            //        照常收口）。闸形本身由 P-review28c 源码钉单独钉（本腿钉行为不变量）。──
+            bool okD = true;
+            {
+                for (int i = -1; i <= 1; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);   // 低段地板
+                for (int i = 2; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Stone, 0);        // 高段地板
+                w.setBlock(x0 - 1, kRigY, z0, BR::Stone, 0);                                     // 西接轨墙
+                w.setBlock(x0 - 1, kRigY + 1, z0, BR::Stone, 0);
+                w.setBlock(x0 + 5, kRigY + 1, z0, BR::Stone, 0);                                 // 东接轨墙
+                w.setBlock(x0 + 5, kRigY + 2, z0, BR::Stone, 0);
+                w.setBlock(x0, kRigY, z0, BR::Rail, 0);
+                w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);
+                for (int i = 2; i <= 4; ++i) w.setBlock(x0 + i, kRigY + 1, z0, BR::Rail, 0);
+                MinecartManager dc;
+                dc.spawnCart(x0 + 1, kRigY, z0, &w);       // A（低段坡脚格）
+                dc.spawnCart(x0 + 3, kRigY + 1, z0, &w);   // B（坡上平顶）
+                for (int t = 0; t < 600; ++t) {
+                    // 交替对挤（每 100 tick 换向，镜像 (a)）：0 = 东端推西向（压 B 下坡冲 A）、
+                    //   1 = 西端推东向（压 A 上坡冲 B）——挤压发生在坡格边界两侧（轨层差 ±1 区）。
+                    const int side = (t / 100) % 2;
+                    const int tgt = side == 0 ? 1 : 0;
+                    const QVector3D tp = dc.posAt(tgt);
+                    dc.pushEmptyCart(&w, QVector3D(tp.x() + (side == 0 ? 0.4f : -0.4f), tp.y(), tp.z()),
+                                     side == 0 ? -1.0f : 1.0f, 0.0f);
+                    dc.tickPushedCarts(0.016f, &w);
+                    dc.resolveCartCollisions(&w);
+                    for (int ci = 0; ci < 2; ++ci) {
+                        const QVector3D p = dc.posAt(ci);
+                        if (!dc.aliveAt(ci) || centerInSolid(p)
+                            || p.x() <= float(x0 - 1) || p.x() >= float(x0 + 6)
+                            || p.y() < float(kRigY) - 0.6f || p.y() > float(kRigY) + 2.6f)
+                            okD = false;
+                    }
+                }
+                const QVector3D da = dc.posAt(0), db = dc.posAt(1);
+                okD = okD && dc.aliveAt(0) && dc.aliveAt(1)
+                    && std::fabs(da.x() - db.x()) >= 0.85f; // 终态分离（坡段挤压不冻结、不永久重叠）
+                if (!okD)
+                    qInfo().noquote() << "  t907(d) slope final" << da << db
+                                      << "alive" << dc.aliveAt(0) << dc.aliveAt(1);
+                // 清 (d)：毁车 + 拆 rig。
+                dc.hitCartFromRay(QVector3D(da.x(), da.y() + 3.0f, da.z()), QVector3D(0, -1, 0), 4.0f, &w, true);
+                dc.hitCartFromRay(QVector3D(db.x(), db.y() + 3.0f, db.z()), QVector3D(0, -1, 0), 4.0f, &w, true);
+                dc.clearAll();
+                for (int i = -1; i <= 1; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+                for (int i = 2; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY + 1, z0, BR::Air, 0);
+                w.setBlock(x0 + 5, kRigY + 1, z0, BR::Air, 0);
+                w.setBlock(x0 + 5, kRigY + 2, z0, BR::Air, 0);
+                w.setBlock(x0, kRigY, z0, BR::Air, 0);
+                w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+                for (int i = 2; i <= 4; ++i) w.setBlock(x0 + i, kRigY + 1, z0, BR::Air, 0);
+            }
+            const bool ok = okA && okB && okC && okD;
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
                               << "| t907 sealed-cage cart squeeze: collision resolution keeps both cart "
                                  "centers out of solid cells and inside a fully sealed 2-cell rail cage "
                                  "(separation still resolves >=0.85, not frozen), ground carts squeezed in "
-                                 "a 1-cell stone box stay boxed, and a derailed ejection at 4 blocks/s "
+                                 "a 1-cell stone box stay boxed, a derailed ejection at 4 blocks/s "
                                  "through a 0.5s starved tick cannot tunnel the 1-thick wall (substepped "
-                                 "wall checks; old single-step Euler landed past the wall in the open cell)";
+                                 "wall checks; old single-step Euler landed past the wall in the open cell), "
+                                 "and two carts alternately squeezed across a 1:1 slope step (rail layers "
+                                 "differ by 1, dead-end launches caught by end walls) still end >=0.85 "
+                                 "apart - review28 #7 lets the depenetration gate admit |rail layer "
+                                 "delta| <= 1 slope continuations, pinned by P-review28c";
             // 清场
             carts.clearAll();
             for (int i = 2; i <= 6; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
@@ -10683,10 +10745,65 @@ int main(int argc, char *argv[])
             const bool okD = pd.x() < float(x0) - 0.3f                          // 推离出轨（西行离轨格）
                 && std::fabs(pd.z() - q0.z()) < 0.05f                           // 不侧漂（轨轴符号向）
                 && carts.aliveAt(0);
-            const bool ok = okA && okB && okC && okD;
+            // 清场（先于 (e)/(f)：孤轨须与主线轨 / 旧车完全隔离 —— 轴位孤轨的连接重算会读到邻轨）。
+            carts.clearAll();
+            for (int i = -3; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+            // (e)/(f) review28 #6：孤轨推动语义对称（EW 轴偏好位孤轨 vs NS state=0 孤轨）。孤轨 = 0 连接
+            //   （轴偏好位不构成定向）→ 全向可推；旧版对轴位孤轨的向量分解吞掉 ⊥ 轴偏好向的侧推（投影
+            //   < kCartPushProjMin → no-op）而 state=0 孤轨任意可推 —— 同一布局仅放置朝向不同、推动行为
+            //   恰好相反。两腿同构：孤轨上车、北向推（EW 轴偏好向的侧向）→ 必须推离出轨（位移 ≥0.3 即
+            //   语义达成，不追满滑程 —— 车恒在地板带内）。
+            bool okE = true, okF = true;
+            QVector3D e0, e1, f0, f1;
+            {
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0); // 地板（出轨贴地滑支撑）
+                // (e) EW 孤轨（state = RailAxisEWFlag，t666 放置同款位）：北推 = ⊥ 轴偏好向。
+                w.setBlock(x0, kRigY, z0, BR::Rail, BR::RailAxisEWFlag);
+                MinecartManager ec;
+                ec.spawnCart(x0, kRigY, z0, &w);
+                e0 = ec.posAt(0);
+                e1 = e0;
+                for (int t = 0; t < 200; ++t) {
+                    const QVector3D tp = ec.posAt(0);
+                    ec.pushEmptyCart(&w, QVector3D(tp.x(), tp.y(), tp.z() + 0.4f), 0.0f, -1.0f);
+                    ec.tickPushedCarts(0.016f, &w);
+                    e1 = ec.posAt(0);
+                    if (e1.z() < e0.z() - 0.3f) break; // 已推离 0.3（语义达成即停）
+                }
+                okE = e1.z() < e0.z() - 0.3f && std::fabs(e1.x() - e0.x()) < 0.05f && ec.aliveAt(0);
+                ec.clearAll();
+                w.setBlock(x0, kRigY, z0, BR::Air, 0);
+                // (f) NS 孤轨（state = 0，无轴位）：同构北推（对称对照组 —— 两朝向语义一致）。
+                w.setBlock(x0, kRigY, z0, BR::Rail, 0);
+                MinecartManager fc;
+                fc.spawnCart(x0, kRigY, z0, &w);
+                f0 = fc.posAt(0);
+                f1 = f0;
+                for (int t = 0; t < 200; ++t) {
+                    const QVector3D tp = fc.posAt(0);
+                    fc.pushEmptyCart(&w, QVector3D(tp.x(), tp.y(), tp.z() + 0.4f), 0.0f, -1.0f);
+                    fc.tickPushedCarts(0.016f, &w);
+                    f1 = fc.posAt(0);
+                    if (f1.z() < f0.z() - 0.3f) break;
+                }
+                okF = f1.z() < f0.z() - 0.3f && std::fabs(f1.x() - f0.x()) < 0.05f && fc.aliveAt(0);
+                fc.clearAll();
+                w.setBlock(x0, kRigY, z0, BR::Air, 0);
+                // 清地板。
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air, 0);
+                tickN(w, 2);
+            }
+            const bool ok = okA && okB && okC && okD && okE && okF;
             if (!ok)
                 qInfo().noquote() << "  t908 lateralA" << pa << "longB" << pb
-                                  << "deadLatC" << pc << "deadAxD" << pd;
+                                  << "deadLatC" << pc << "deadAxD" << pd
+                                  << "orphanEwE" << (e1 - e0) << "orphanNsF" << (f1 - f0);
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
                               << "| t908 push decomposition: lateral player push on a railed cart is a "
@@ -10694,13 +10811,92 @@ int main(int argc, char *argv[])
                                  "both project onto the rail axis), longitudinal push still rolls the cart "
                                  "along the rail glued to the surface, dead-end lateral push stays put, and "
                                  "the along-axis outward push at the dead end still knocks the cart off the "
-                                 "rail end (t863 push-off preserved, direction = rail-axis sign)";
-            // 清场
-            carts.clearAll();
-            for (int i = -3; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
-            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
-            tickN(w, 2);
+                                 "rail end (t863 push-off preserved, direction = rail-axis sign); "
+                                 "review28 #6 adds orphan-rail symmetry - a 0-connection rail carrying only "
+                                 "the EW axis-preference bit is pushed off by a lateral push exactly like a "
+                                 "state-0 NS orphan (the axis bit is texture/rise metadata, not a push "
+                                 "decomposition axis - old code swallowed lateral pushes on EW orphans "
+                                 "only, an orientation-dependent asymmetry)";
         }
+    }
+
+    // ── P-review28a 睡眠分支探测轨占用重扫源码钉（review28 #5；行为级 headless 不可达——PlayerController
+    //    睡眠窗口分支需 Game 层 tick 驱动，退路 = 源码钉两调齐全 + 次序，P-t887b 先例）──
+    //    review26 #13 给睡眠分支补 checkCartEnvironment 却漏了 updateDetectorRailOccupancy——环境检查
+    //    销毁压探测轨的车后，该轨带电滞留整个睡眠窗口（骑船分支两调齐全）。断言：review28 #5 标记之后
+    //    的窗口内先 checkCartEnvironment 后 updateDetectorRailOccupancy（tickPushedCarts 同序：环境
+    //    检查在前、占用收口在后——毁车当帧收离开沿断电）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile sf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+        const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
+        const int i0 = t.indexOf(QStringLiteral("review28 #5"));
+        const QString seg = i0 >= 0 ? t.mid(i0, 800) : QString();
+        const int iEnv = seg.indexOf(QStringLiteral("checkCartEnvironment(m_world)"));
+        const int iOcc = seg.indexOf(QStringLiteral("updateDetectorRailOccupancy(m_world)"));
+        const bool ok = i0 >= 0 && iEnv >= 0 && iOcc >= 0 && iEnv < iOcc;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review28a sleep-branch detector-rail rescan pin: the sleeping-window "
+                             "cart environment check is followed by updateDetectorRailOccupancy within "
+                             "the same block (tickPushedCarts order - env check first, occupancy close "
+                             "after: a cart destroyed on a detector rail during sleep drops the power "
+                             "edge the same frame instead of staying powered until wake; review26 #13 "
+                             "added the env check without the rescan)";
+    }
+
+    // ── P-review28b 翻书大摆 worldRunning 硬档门源码钉（review28 #9；行为级 headless 不可达——ESC 硬暂停
+    //    + 2.65s 大摆动画时序需真窗口，退路 = 源码钉变更 handler 语句面）──
+    //    pageFlipAnim 本体 running:false 字面 + restart() 命令式驱动（声明式 worldRunning 门会与 restart
+    //    抢 running 绑定）→ 硬档门补在 window 级 onWorldRunningChanged：硬档时 stop() + 复位 flipAngle
+    //    （恢复侧由 pageFlutterAnim 的声明式 running 条件自动接管续摆）。断言三语句面存在。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+        const bool ok = t.contains(QStringLiteral("onWorldRunningChanged: {"))
+                     && t.contains(QStringLiteral("pageFlipAnim.stop()"))
+                     && t.contains(QStringLiteral("flipPivot.flipAngle = 0.0"));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review28b page-flip hard-pause gate pin: the big page-flip animation "
+                             "(imperatively driven - running:false literal + restart(), a declarative "
+                             "worldRunning gate would fight restart over the running binding) gets its "
+                             "hard-pause gate at the window-level onWorldRunningChanged handler: ESC "
+                             "during the 2.65s swing stops the animation and resets flipAngle to the "
+                             "rest pose (resume is automatic - the idle flutter animation's declarative "
+                             "running condition takes back over)";
+    }
+
+    // ── P-review28c 去穿插近层闸源码钉（review28 #7；多车坡谷挤压的行为级构造需受控中间态（三车
+    //    非重合定位无 headless 手段），闸形以源码钉钉死；坡段双车分离 ≥0.85 不变量由 t907(d) 行为级
+    //    覆盖）──
+    //    t907 原同层闸严格相等（== rySelf）把坡上跨格去穿插全钳回当前格——格宽 1.0 只容一车分离
+    //    （kCartCollideSep 0.98），坡谷格 / 坡段格 ±1 邻接时多车或死端夹逼的对永久 <0.85 重叠。
+    //    review28 #7 放行 |Δ轨层| ≤ 1（坡面延续）。断言（闸标记后窗口内）：ryTgt 提取 +
+    //    fabs(ryTgt − rySelf) ≤ 1.0f + 腰位闸 isCollidable 配套（拆任一 → FAIL）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile sf(root + QStringLiteral("/src/Entities/minecartmanager.cpp"));
+        const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
+        const int i0 = t.indexOf(QStringLiteral("review28 #7 近层闸"));
+        const QString seg = i0 >= 0 ? t.mid(i0, 1500) : QString();
+        const bool ok = i0 >= 0
+                     && seg.contains(QStringLiteral("const int ryTgt = colRailY(tx, tz, landX, landZ);"))
+                     && seg.contains(QStringLiteral("std::fabs(float(ryTgt - rySelf)) <= 1.0f"))
+                     && seg.contains(QStringLiteral("isCollidable"));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review28c depenetration near-layer gate pin: clampShift admits "
+                             "cross-cell depenetration shifts only when the target column's rail layer "
+                             "is within 1 of the cart's own (slope continuation) AND the landing waist "
+                             "cell is non-solid - the old strict-equality gate clamped every "
+                             "slope-boundary shift back into the current cell, and a 1-wide cell "
+                             "cannot fit two 0.98 separations, so carts wedged between +1/-1 slope "
+                             "neighbors stayed permanently overlapped";
     }
 
     // ── t909 V 形动力永动探针（MinecartManager 直编；spec「V 底两格激活动力轨应无限往复 / 半山腰放置
