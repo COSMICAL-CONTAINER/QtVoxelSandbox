@@ -134,14 +134,20 @@ int main(int argc, char *argv[])
         auto *frames = new int(0);
         // main_total：本帧 frameSwapped 与上帧 frameSwapped 的间隔（ns）。首帧 lastNs=0 跳过（无基准）。
         // t904：swap 时先结清 idleB（afterSynchronizing→frameSwapped，见上方四段归因注释）。
+        // t934：swap 时顺带结清 fPresent（afterRendering[渲染线程]→frameSwapped[GUI 收到]；见下方 t934 注释）。
         auto *lastSwapNs = new qint64(0);
         auto *afterSyncNs = new qint64(0);
-        QObject::connect(win, &QQuickWindow::frameSwapped, win, [frames, lastSwapNs, afterSyncNs]() {
+        auto *afterRenderDoneNs = new qint64(0); // t934：渲染线程 afterRendering 时刻（0 = 未发 / 已结清）
+        QObject::connect(win, &QQuickWindow::frameSwapped, win, [frames, lastSwapNs, afterSyncNs, afterRenderDoneNs]() {
             ++(*frames);
             const qint64 now = FrameProfiler::nowNs();
             if (*afterSyncNs > 0)
                 FrameProfiler::instance()->addSampleMs(QStringLiteral("fIdleB"), double(now - *afterSyncNs) / 1e6);
             *afterSyncNs = 0;
+            if (*afterRenderDoneNs > 0) // t934 present 段：渲染线程编完 → GUI 收到 swap 的全部时间
+                FrameProfiler::instance()->addSampleMs(QStringLiteral("fPresent"),
+                                                       double(now - *afterRenderDoneNs) / 1e6);
+            *afterRenderDoneNs = 0;
             if (*lastSwapNs > 0) {
                 const double ms = double(now - *lastSwapNs) / 1e6;
                 FrameProfiler::instance()->addSampleMs(QStringLiteral("main_total"), ms);
@@ -155,12 +161,17 @@ int main(int argc, char *argv[])
         QObject::connect(win, &QQuickWindow::beforeRendering, win, [renderStartNs]() {
             *renderStartNs = FrameProfiler::nowNs();
         }, Qt::DirectConnection);
-        QObject::connect(win, &QQuickWindow::afterRendering, win, [renderStartNs]() {
+        QObject::connect(win, &QQuickWindow::afterRendering, win, [renderStartNs, afterRenderDoneNs]() {
             if (*renderStartNs > 0) {
                 const double ms = double(FrameProfiler::nowNs() - *renderStartNs) / 1e6;
                 FrameProfiler::instance()->addSampleMs(QStringLiteral("render_cpu"), ms);
                 *renderStartNs = 0; // 守卫：防 beforeRendering 漏一帧导致 stale 算
             }
+            // t934：标记「渲染线程本帧编码完成」时刻 —— frameSwapped（GUI 收到）与此差的 fPresent 段
+            //   = present/vsync 阻塞 + queued 派发延迟（threaded 循环下渲染线程 swap 完才 emit，swap 若
+            //   被 GPU 排队卡住，本段吸收该阻塞）。render_cpu 小而 waitSync 大时，本段大 → GPU/present
+            //   bound（配合 F3 render-side 行 gpu 真值判读）；本段也小 → 渲染线程忙在别处（prep/清理）。
+            *afterRenderDoneNs = FrameProfiler::nowNs();
         }, Qt::DirectConnection);
         // qmlSync：GUI 线程 beforeSynchronizing → afterSynchronizing = QML scene-graph 同步期（Node 树 commit
         //   到渲染侧：transform/geometry/material/draw-list 重算）。mob delegate 节点爆炸 / 绑定扇出等成本藏在这里
@@ -186,6 +197,20 @@ int main(int argc, char *argv[])
         //   idleB 含少量派发延迟（与既有 main_total 同口径，一致性优先）。0 值守卫：漏 hook 的帧跳过该段样本
         //   （某段恒 0 = 该 hook 未发 —— 如 basic 循环不发 afterAnimating，frame2 行 evA/waitSync 恒 0 本身即判据）。
         //   afterSyncNs 与 frameSwapped 块共用同一指针（上方已声明），afterAnimNs / syncStartNs 在此声明。
+        // t934 waitSync 归因（dev-plan R19.17 性能批二：用户实测 waitSync 76ms 一家独大、render_cpu ~7ms /
+        //   RenderStats render ~1ms——渲染 pass 本身不慢，GUI 却在同步屏障阻塞 76ms）。机械链：waitSync 段内
+        //   GUI 等渲染线程抵达屏障，而渲染线程必须先跑完**上一帧**的 [渲染 pass（render_cpu 桶）+ present/
+        //   vsync（GPU 落后时 swap 阻塞，D3D11 FIFO 2 缓冲可等数个帧周期）+ 帧尾清理]。render_cpu 小而
+        //   waitSync 大 → 时间去向只剩三汇，判读口（F3）：
+        //     ① GPU/present bound：F3 render-side 行 gpu（RenderStats.lastCompletedGpuTime，**真 GPU ms**）
+        //       同量级大 + frame2 行 present（fPresent，本任务新增：afterRendering[渲染线程]→frameSwapped
+        //       [GUI 收到]）大 → 治理面 = 降 GPU 负载（renderDistance 已有 / 段折叠已有 / 透明 overdraw）。
+        //     ② 渲染线程 prep/上传风暴（chunk mesh 重建 → 顶点缓冲重传 + 渲染列表重建，t930/t933 风暴的
+        //       渲染侧回声）：F3 render-side 行 prep（RenderStats.renderPrepareTime）大 + win 行 mesh reb
+        //       计数非 0 → 治理面 = 节流/合批（t933 已把触发面 101→2，残余是否为 0 由 act ct / reb 读出）。
+        //     ③ 渲染合帧/hook 多发：frame2 行各段 (N) 样本数 > main 的 N → 四段恒等式不可加（拥塞下
+        //       animation tick 每事件循环回合一拍、渲染按 vsync 合帧），是测量口径而非独立开销。
+        //   fPresent 桶与 (N) 计数即本任务的插桩交付；①② 的数值面由 F3 render-side 行（Main.qml）提供。
         auto *afterAnimNs = new qint64(0);
         auto *syncStartNs = new qint64(0);
         QObject::connect(win, &QQuickWindow::afterAnimating, win, [afterAnimNs, lastSwapNs]() {

@@ -401,6 +401,18 @@ Window {
         const rs = view3d.renderStats
         const drawCalls = rs.drawCallCount, drawVerts = rs.drawVertexCount
         const passCount = rs.renderPassCount, renderMs = rs.renderTime
+        // t934（R19.17 性能批二）waitSync 归因真值：RenderStats 的渲染侧分解（Qt 6.11 起 Q_PROPERTY，与
+        //   drawCallCount 同一对象）。frameTime/syncTime/renderPrepareTime/renderTime = 渲染线程各段 ms；
+        //   gpuTime = lastCompletedGpuTime（RHI timestamp 查询的**真 GPU ms**——perf-t520 时代「无 GPU 计时」
+        //   的诚实标注由本属性补上，0 = 后端不支持/尚未完成一帧）；vmem = GPU 显存字节；pipes = 管线数。
+        //   判读（waitSync 大时，见 main.cpp t934 注释三汇）：gpu 同量级大 → ①GPU/present bound（配合
+        //   frame2 行 present）；prep 大 + win 行 mesh reb 非 0 → ②渲染线程上传/重建风暴；都小 → ③合帧
+        //   （看 (N) 样本数）。extendedDataCollection 关（F3 关）时 gpu/vmem 可能不采——读数以 F3 开为准。
+        const gpuMs = rs.lastCompletedGpuTime
+        const prepMs = rs.renderPrepareTime
+        const rsFrameMs = rs.frameTime, rsSyncMs = rs.syncTime, rsMaxMs = rs.maxFrameTime
+        const vmemMB = rs.vmemUsedBytes / (1024.0 * 1024.0)
+        const pipeN = rs.pipelineCount
         const meshMode = window.greedyMeshing ? "greedy" : "culled"
         // MC x/y/z/f 行数据：眼位（MC F3 显眼位）；格 = floor；格内 16 取余（负坐标 JS & 补码同 MC 正余数）。
         const ex = player.position.x, ey = player.position.y, ez = player.position.z
@@ -451,6 +463,15 @@ Window {
              //   drawn 真值在此行）。threads 0/0 = meshing 全 GUI 线程同步（survey §1.1 实况）。
              + "\ndraw-calls: " + drawCalls + "  verts drawn: " + drawVerts
              + "  passes: " + passCount + "  render " + renderMs.toFixed(1) + " ms  [RenderStats]"
+             // t934 render-side 真值行：渲染线程侧分解 + 真 GPU 时间 + 显存。waitSync（frame2 行）大时，
+             //   本行 gpu 大 = GPU/present bound；prep 大 = 上传/渲染列表重建（mesh 风暴渲染侧回声）；
+             //   frame = RenderStats 自己的帧周期（与 main_total 交叉核对）；max = 尖峰（风暴一帧几百 ms
+             //   的签名）。vmem 单调涨跨世界不回落 = 进程级 GPU 资源泄漏判据（重启才恢复类）。
+             + "\nrender-side: frame " + rsFrameMs.toFixed(1) + " (max " + rsMaxMs.toFixed(1) + ")"
+             + "  sync " + rsSyncMs.toFixed(1)
+             + "  prep " + prepMs.toFixed(1)
+             + "  gpu " + gpuMs.toFixed(1) + " ms  [RenderStats]"
+             + "  vmem " + vmemMB.toFixed(0) + " MB  pipes " + pipeN
              // t906 核实钉死：0/0 = 全程 GUI 线程同步 meshing 是**现状事实**（src/ 无 QThreadPool/QThread/
              // QtConcurrent 任何线程原语；ChunkManager 是纯容器，mesh 由每 chunk ChunkGeometry 的
              // onWorldChanged 同步直连槽驱动）—— 非「线程池退化」。异步 meshing 登记为未来架构工作
