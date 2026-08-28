@@ -1887,6 +1887,22 @@ void EntityManager::toggleWolfSit(int i)
     emit entitiesChanged(); // bump → QML 据 wolfSittingAt 切坐姿/站姿
 }
 
+// t923 仇恨传递：敌对攻击驯服狼 → 狼群反击攻击者（m_wolfTarget 共享防御目标；调自 骷髅箭命中狼 /
+//   燃烬者火球命中狼 两处 mob→mob 伤害点）。见头文件注释（豹猫不护主 = MC 1.0 猫不攻击怪物，钉死）。
+void EntityManager::wolfRetaliateAgainst(int victimIdx, int attackerIdx)
+{
+    if (victimIdx < 0 || attackerIdx < 0 || victimIdx == attackerIdx) return;
+    if (victimIdx >= int(m_entities.size()) || attackerIdx >= int(m_entities.size())) return;
+    const Entity &v = m_entities[size_t(victimIdx)];
+    if (v.kind != Mob || v.mobType != MobWolf || !v.wolfTamed || !v.alive || v.dead) return; // 仅活体驯服狼
+    const Entity &a = m_entities[size_t(attackerIdx)];
+    if (!a.alive || a.kind != Mob || a.dead) return; // 攻击者须活体 mob（爆炸者已自毁 → caller 不调）
+    if (m_wolfTarget == attackerIdx) return; // 已在反击它（防重复日志刷屏）
+    m_wolfTarget = attackerIdx;
+    qCInfo(lcEnt) << "tamed wolf" << victimIdx << "harmed by mob" << attackerIdx
+                  << "- pack retaliates (MC 1.0 wolf defend-self)";
+}
+
 // t481 第 i 只 mob 是否已驯服猫（ocelotTamed=true）。仅 MobOcelot 用；其余 mob 恒 false。越界 → false。
 bool EntityManager::ocelotTamedAt(int i) const
 {
@@ -2487,6 +2503,36 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
         if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
         e.moveSpeed = moved ? spd : 0.0f; // 撞墙 → 腿停（t241 腿摆频率随它）
+        // t923 ① 跟随返修——越障跳 + 泳跃（旧版 chase 撞墙只撤回不动 = 驯服狼被 1 格岸壁/台阶挡死「不跟随」
+        //   的根因之一；t878 修的是驯服后骨头 no-op，移动卡死仍在）：
+        //   - 陆上（resting）：复刻 aiHostile 越障跳（前方脚位 1 格墙 + 墙顶两格空气 → kJumpSpeed +
+        //     t670 水平滑流 jumpGX/GZ；isJumpObstacle 排作物）。追玩家/咬目标/跟随/寻偶四处共用本 lambda
+        //     → 一次修复全覆盖（野狼追击同受益，机制等价 MC 1.0 狼越 1 格障）。
+        //   - 水中（脚位格 Water 且未 resting）：泳跃 vy=kJumpSpeed 跃出水面贴 1 格岸（t923 ② 浮面把狼顶到
+        //     水面后，最后一步上岸靠本跃；MC 泳跃语义）。重复触发无害（出水后脚位离水即停，弧线落岸/回落再试）。
+        if (!moved && distXZ > 0.6f && world) {
+            if (e.resting) {
+                const float fdx = -std::sin(e.yawRad);
+                const float fdz = -std::cos(e.yawRad);
+                const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
+                const int fx = qFloor(e.pos.x() + fdx * 0.6f);
+                const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+                if (fy >= 0
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // 作物可穿越不跳（t642 同款）
+                    && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落
+                    && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高）
+                    e.vy = kJumpSpeed;
+                    e.resting = false;
+                    e.jumpGX = ((tx - e.pos.x()) / distXZ) * spd; // t670 越障跳水平滑流（朝目标）
+                    e.jumpGZ = ((tz - e.pos.z()) / distXZ) * spd;
+                }
+            } else {
+                const int fy = qFloor(e.pos.y() - e.halfH);
+                if (fy >= 0
+                    && world->blockAt(qFloor(e.pos.x()), fy, qFloor(e.pos.z())) == BlockRegistry::Water)
+                    e.vy = kJumpSpeed; // 泳跃（出水弧线 ≥1 格 → 贴岸跃上）
+            }
+        }
         return moved;
     };
 
@@ -5161,10 +5207,13 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   golem 分支射出的目标）→ damageEntity(kArrowDamage) + 击退 + 移除箭。仅铁傀儡（骷髅不会朝其它
             //   mob 射箭 —— aiArcher golem 分支只在 nearestIronGolem 命中时开火；范围限定防骷髅误伤羊群 /
             //   队友改变既有生态）。AABB 外扩同玩家箭（kArrowHitHalfW）；伤害固定 kArrowDamage（同命中玩家）。
+            //   t923 扩到**狼**：箭道上的狼身体挡箭（机制等价 MC 1.0 箭不穿透生物体——宠物挡箭实战场景）；
+            //   命中驯服狼 → 仇恨传递反击射手（wolfRetaliateAgainst）。其余 mob 仍穿透（生态稳定不扩）。
             if (!remove && !e.arrowFromPlayer) {
                 for (int mi = 0; mi < int(m_entities.size()); ++mi) {
                     const Entity &m = m_entities[size_t(mi)];
-                    if (!m.alive || m.kind != Mob || m.dead || m.mobType != MobIronGolem) continue; // 仅活体铁傀儡
+                    if (!m.alive || m.kind != Mob || m.dead
+                        || (m.mobType != MobIronGolem && m.mobType != MobWolf)) continue; // 仅活体铁傀儡 / 狼
                     const float ex2 = m.pos.x() - m.halfW - kArrowHitHalfW;
                     const float ey2 = m.pos.y() - m.halfH - kArrowHitHalfW;
                     const float ez2 = m.pos.z() - m.halfW - kArrowHitHalfW;
@@ -5175,7 +5224,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         const float ahx = e.vx, ahz = e.vz;
                         float alen = std::sqrt(ahx * ahx + ahz * ahz);
                         if (alen > 1e-3f) knockback(mi, ahx / alen, ahz / alen, kArrowKnockbackStrength);
-                        qCInfo(lcEnt) << "skeleton arrow hit iron golem" << mi << "for" << kArrowDamage << "HP";
+                        // t923 仇恨传递：骷髅箭命中驯服狼（挡箭的宠物）→ 狼群反击射手（arrowShooter = 发射
+                        //   骸骨槽，同命中玩家注册 m_wolfTarget 的 t480 先例；受害者/攻击者校验在入口内）。
+                        if (m.mobType == MobWolf && m.wolfTamed
+                            && e.arrowShooter >= 0 && e.arrowShooter < int(m_entities.size()))
+                            wolfRetaliateAgainst(mi, e.arrowShooter);
+                        qCInfo(lcEnt) << "skeleton arrow hit mob" << mi << "for" << kArrowDamage << "HP";
                         remove = true;
                         break;
                     }
@@ -5448,6 +5502,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         && next.y() >= ey2 && next.y() <= m.pos.y() + m.halfH + kFireballHitHalfW
                         && next.z() >= ez2 && next.z() <= m.pos.z() + m.halfW + kFireballHitHalfW) {
                         damageEntity(mi, kEmberlingFireballDamage); // 扣血 + 红闪 + 归零 mobDied（复用受击链）
+                        // t923 仇恨传递：火球命中驯服狼 → 狼群反击发射者（slot+serial 双查防槽复用误绑，
+                        //   同上方发射者排除的成对契约；受害者/攻击者活体校验在 wolfRetaliateAgainst 内）。
+                        if (m.mobType == MobWolf && e.fireballShooter >= 0
+                            && e.fireballShooter < int(m_entities.size())
+                            && m_entities[size_t(e.fireballShooter)].spawnSerial == e.fireballShooterSerial)
+                            wolfRetaliateAgainst(mi, e.fireballShooter);
                         // t453 点燃目标（火伤）：fireTimer 刷新到 kFireDuration（t724 点燃判据先例；若目标自身火
                         //   免疫如另一燃烬者无实际火伤，但仍设 fireTimer —— 免疫由火烧分支跳过不伤）。
                         Entity &tm = m_entities[size_t(mi)];
@@ -7026,9 +7086,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // t828 鱿鱼浮力打破 resting：水中的鱿鱼有持续净上涌（下方重力分流 +kSquidBuoyancy），不应贴底
             //   静置——但支撑复探对「水底固体」恒真 → 无此打破则下方浮力分支永不可达（resting continue 先于
             //   重力），鱿鱼仍贴底。脚位格在水 → 翻 resting=false 走浮力上升（头出水面落回普通重力 bobbing）。
-            if (e.kind == Mob && e.mobType == MobSquid) {
-                const int sqFeetY = qFloor(e.pos.y() - e.halfH);
-                if (sqFeetY >= 0 && world->blockAt(cx, sqFeetY, cz) == BlockRegistry::Water) {
+            // t923 泛化到全部陆栖 mob（浮面）：**头部格浸水**（与 t828 溺水头部判定同式）→ 打破 resting 走
+            //   下方泳浮分支升到水面（旧版仅鱿鱼有浮力，其余 mob 缓沉贴底 → 头长浸水 15s 溺亡 = 驯服狼困水
+            //   淹死根因）。浅水跋涉（头未没水）**不打破**——贴底站立继续走（无 resting 翻转振荡 / dirty 抖动）。
+            //   鱿鱼保持 t828 原脚位判据（水生恒浮，包括浅水格）。
+            if (e.kind == Mob) {
+                const bool deepWater = (e.mobType == MobSquid)
+                    ? (qFloor(e.pos.y() - e.halfH) >= 0
+                       && world->blockAt(cx, qFloor(e.pos.y() - e.halfH), cz) == BlockRegistry::Water)
+                    : (qFloor(e.pos.y() + e.halfH * 0.8f) >= 0
+                       && world->blockAt(cx, qFloor(e.pos.y() + e.halfH * 0.8f), cz) == BlockRegistry::Water);
+                if (deepWater) {
                     e.resting = false;
                     dirty = true;
                 }
@@ -7106,7 +7174,19 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   钳制后仍保持「上涌快、回沉慢」的节律游动感。
                 e.vy += kSquidBuoyancy * float(dt);
                 if (e.vy > kSquidRiseMax) e.vy = kSquidRiseMax;
+            } else if (qFloor(e.pos.y() + e.halfH * 0.8f) >= 0
+                       && world->blockAt(cx, qFloor(e.pos.y() + e.halfH * 0.8f), cz)
+                              == BlockRegistry::Water) {
+                // t923 ② 陆栖 mob 主动浮面（头部格浸水 = 与溺水判定同式——「会淹才游」；机制等价 MC 1.0
+                //   生物水中游到水面，替代 t298 旧「恒缓沉贴底」简化）：净浮力上涌 + rise 钳制 → 头出水面后
+                //   本分支不触发、落回下方缓沉 → 水面贴平 bobbing 悬停（呼吸恢复不溺亡 + 追击水平照常）。
+                //   驯服狼困水淹死链（缓沉贴底 → 头浸 15s → 1HP/s → 死）由此断开；上岸最后一步由 aiWolf
+                //   chase 泳跃（vy=kJumpSpeed 直设）承接——钳制只作用于**浮力累积**（vy < riseMax 才加），
+                //   泳跃的高速 vy 原样穿过（否则跃出速度被夹回 1.2 = 跃不出水面）。
+                if (e.vy < kMobSwimRiseMax)
+                    e.vy = std::min(e.vy + kMobSwimBuoyancy * float(dt), kMobSwimRiseMax);
             } else {
+                // t298 浅水跋涉缓沉（头未没水：仅脚位浸水）：贴底站立继续走（原行为，无浮面振荡）。
                 e.vy -= kWaterGravity * float(dt);
                 if (e.vy < -kWaterSinkMax) e.vy = -kWaterSinkMax;
             }

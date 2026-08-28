@@ -12077,9 +12077,11 @@ int main(int argc, char *argv[])
     //        且水生豁免溺水（20s 后仍满血）。
     //    rig 高度：局部 World setter 触发 worldgen（地形 ~57-71 + 树冠 ≤81）→ rig 平面取 y84+（地形之上
     //    确定性净空，P31「自凿净空」精神的免凿版——直接摆更高）。pit 结构：y84 石基底（30×30）+ 两口
-    //    12×12 pit 开口（水 pit x10..21/z10..21 填水 y85..87；干 pit x24..35/z24..35 全空）+ 口外 y85..88
-    //    全石壁（壁顶 89 > 鱿鱼水面 bob 峰脚位 ~88.05 → 三种 mob 都爬不出，水平出界被 mobAabbHitsSolid
-    //    撤回）；水位恒定（探针不 tick world，流体静置）。
+    //    12×12 pit 开口（水 pit x10..21/z10..21 填水 y85..87 + **y88 石盖**；干 pit x24..35/z24..35 全空）+
+    //    口外 y85..88 全石壁（壁顶 89）。t923 起**水 pit 加盖**：陆栖 mob 主动浮面（头浸水 → kMobSwimBuoyancy
+    //    升到水面呼吸）后敞顶猪不再溺亡（MC 语义：溺水须被按在水下）——加盖把猪钉在盖下（review25 #4 上浮
+    //    天花板钳制）保溺水断言仍可达；鱿鱼浮面被盖截在 ~87.6 ≥ 86.2 下界，(b) 断言不变。水位恒定（探针
+    //    不 tick world，流体静置）。
     {
         World wA;
         wA.setWidth(44); wA.setDepth(44); wA.setHeight(96); wA.setSeed(21);
@@ -12091,7 +12093,7 @@ int main(int argc, char *argv[])
                     const bool inWaterPit = (x >= 10 && x < 22 && z >= 10 && z < 22);
                     const bool inDryPit = (x >= 24 && x < 36 && z >= 24 && z < 36);
                     const quint8 b = inWaterPit
-                        ? ((y <= 87) ? BR::Water : BR::Air)
+                        ? ((y <= 87) ? BR::Water : BR::Stone) // t923：y88 石盖（猪被浮力钉在盖下 → 头恒浸水）
                         : (inDryPit ? BR::Air : BR::Stone);
                     wA.setBlock(x, y, z, b, 0);
                 }
@@ -12128,6 +12130,132 @@ int main(int argc, char *argv[])
                           << "| t828 drowning + squid buoyancy: submerged pig loses HP after 15s "
                              "breath (1HP/s, dry control stays full), squid buoyed off pool floor "
                              "(no bottom-resting) and exempt from drowning";
+    }
+
+    // ── P-t923 驯服狼生态三面（R19.16 t923：跟随返修 / 浮面 / 仇恨传递 + 阴性轮）──
+    //    (a) 全链复现用户实测「走了他还在水里最后淹死」并断言修复：驯服站立狼沉 2 深水坑（壁顶与水面等高
+    //        = 常规掘塘口径）→ 主动浮面（头浸水净浮力，中心升到水面带 ≥86.3——旧缓沉恒贴底 85.45）→ 不溺亡
+    //        （12s 满血）→ 追玩家贴壁 → 泳跃（vy=kJumpSpeed 直设，穿 rise 钳制）跃上壁顶 → 出水登岸
+    //        （中心 ≥87.0）+ 向玩家逼近（XZ 距 <6，初始 ~9）。玩家距 <12 不瞬移（瞬移分支会短路本链）。
+    //    (b) 阴性·坐态：驯服坐狼同坑 → XZ 静止（留守不跟随）但**仍浮面**（浮力是物理层非 AI 层——坐宠落水
+    //        也浮，机制等价 MC）+ 满血。
+    //    (c) 仇恨传递：wolfRetaliateAgainst(驯服狼, 攻击者 Shambler) 直调（骷髅箭 / 燃烬者火球两接线点由 (d)
+    //        源码钉）→ 狼越过跟随优先追击攻击者（m_wolfTarget 分支先于跟随）+ 攻击者被咬扣血（< 20HP）。
+    //    (c2) 阴性·豹猫：同调 wolfRetaliateAgainst(驯服豹猫, 攻击者) → no-op（受害者非狼；MC 1.0 猫不攻击
+    //        怪物，机制钉死）→ 攻击者满血 + 豹猫原地贴玩家。窗口 playerTargetable=false（防敌对近战命中玩家
+    //        顺带注册 m_wolfTarget 把 (c) 残狼引来搅局——t480 melee 注册链）。
+    //    (d) 源码钉：火球 / 骷髅箭命中狼两伤害点调 wolfRetaliateAgainst + 箭碰撞滤网并入狼（QML 外 C++ 行为
+    //        可行为级断言的是 hook 本体；两处伤害点内部走逐帧弹道，headless 复现弹道不稳 → t880 (b) 源码钉先例）。
+    {
+        World wW;
+        wW.setWidth(44); wW.setDepth(44); wW.setHeight(96); wW.setSeed(26); // rig y84+ 地形之上（t828 同款）
+        for (int x = 4; x < 40; ++x)
+            for (int z = 4; z < 40; ++z) wW.setBlock(x, 84, z, BR::Stone, 0);
+        for (int x = 4; x < 40; ++x)
+            for (int z = 4; z < 40; ++z)
+                for (int y = 85; y <= 86; ++y) {
+                    const bool inPit = (x >= 12 && x < 20 && z >= 12 && z < 20);
+                    wW.setBlock(x, y, z, inPit ? BR::Water : BR::Stone, 0); // 坑内水 y85..86（顶 87）；坑外岸顶 87
+                }
+        EntityManager emW;
+        const QVector3D bank(24.5f, 87.0f, 15.5f); // 岸上玩家位（坑心距 ~9 < 12 不瞬移；x≥20 在岸上）
+        bool ok = true;
+        const int wolf = emW.spawnMobTyped(15, 86, 15, EntityManager::MobWolf,
+                                           QStringLiteral("#c8ccd4"), 10);
+        if (wolf < 0) {
+            ok = false;
+        } else {
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && !tamed; ++attempt)
+                tamed = emW.tameWolf(wolf);
+            ok = ok && tamed && emW.wolfTamedAt(wolf);
+            // (b) 坐态：浮面 + XZ 静止 + 满血（先坐后站——(a) 要站态）。
+            emW.toggleWolfSit(wolf);
+            ok = ok && emW.wolfSittingAt(wolf);
+            const QVector3D sitP0 = emW.posAt(wolf);
+            for (int t = 0; t < 250; ++t) // 4s：浮面（自沉落位升到水面带；旧缓沉恒 85.45 贴底）
+                emW.tick(0.016f, &wW, bank, 0.3f, 1.8f, true);
+            const QVector3D sitP1 = emW.posAt(wolf);
+            const float sitDXZ = QVector3D(sitP1.x() - sitP0.x(), 0.0f, sitP1.z() - sitP0.z()).length();
+            ok = ok && sitDXZ < 0.3f          // 坐 → 留守（XZ 不跟）
+                 && sitP1.y() >= 86.3f        // 浮面（水面带中心 ~86.6-87；贴底 85.45 = 旧缓沉判据）
+                 && emW.healthAt(wolf) == 10; // 不溺亡（bobbing 全程头出水呼吸恢复）
+            // (a) 站态：跟随出水上岸（浮面 → 贴壁 → 泳跃 → 登岸 → 逼近玩家）。
+            emW.toggleWolfSit(wolf);
+            ok = ok && !emW.wolfSittingAt(wolf);
+            for (int t = 0; t < 500; ++t) // 8s
+                emW.tick(0.016f, &wW, bank, 0.3f, 1.8f, true);
+            const QVector3D outP = emW.posAt(wolf);
+            const float outDXZ = QVector3D(outP.x() - bank.x(), 0.0f, outP.z() - bank.z()).length();
+            ok = ok && outP.y() >= 87.0f   // 出水登岸（岸顶 87 + halfH 0.45 ≈ 87.45；留半格余量）
+                 && outDXZ < 6.0f          // 已逼近玩家（初始 ~9；困坑内 ≈9-10 → 阈值 6 区分）
+                 && emW.healthAt(wolf) == 10;
+            if (!ok)
+                qInfo().noquote() << "  t923ab diag: tamed" << emW.wolfTamedAt(wolf)
+                                  << "sitDXZ" << sitDXZ << "sitY" << sitP1.y()
+                                  << "| outY" << outP.y() << "outDXZ" << outDXZ
+                                  << "hp" << emW.healthAt(wolf);
+        }
+        // (c) 仇恨传递：驯服狼反击攻击者（直调 hook —— 火球/箭接线见 (d)）。
+        const int attacker = emW.spawnMobTyped(22, 87, 20, EntityManager::MobShambler,
+                                               QStringLiteral("#3a7a3a"), 20);
+        if (attacker < 0 || wolf < 0) {
+            ok = false;
+        } else {
+            emW.wolfRetaliateAgainst(wolf, attacker);
+            const QVector3D farAway(-1000.0f, 90.0f, -1000.0f); // 玩家远 → 跟随/瞬移不抢戏（目标分支优先）
+            for (int t = 0; t < 312; ++t) // 5s：追上（~5 格 @3.5/s）+ 冷却 1s 咬 ≥2 口
+                emW.tick(0.016f, &wW, farAway, 0.3f, 1.8f, true);
+            ok = ok && emW.healthAt(attacker) < 20; // 被驯服狼咬伤（kWolfAttackDamage 4/口）
+            if (!ok)
+                qInfo().noquote() << "  t923c diag: attacker hp" << emW.healthAt(attacker);
+        }
+        // (c2) 阴性·豹猫：同 hook 对驯服猫 no-op（猫无防御分支，MC 1.0 机制钉死）。
+        const int cat = emW.spawnMobTyped(30, 87, 30, EntityManager::MobOcelot,
+                                          QStringLiteral("#e8c890"), 10);
+        const int attacker2 = emW.spawnMobTyped(26, 87, 30, EntityManager::MobShambler,
+                                                QStringLiteral("#3a7a3a"), 20);
+        if (cat < 0 || attacker2 < 0) {
+            ok = false;
+        } else {
+            bool catTamed = false;
+            for (int attempt = 0; attempt < 200 && !catTamed; ++attempt)
+                catTamed = emW.tameOcelot(cat);
+            ok = ok && catTamed && emW.ocelotTamedAt(cat);
+            const QVector3D nearCat(31.0f, 87.0f, 30.5f); // 玩家贴猫（<2.5 到位停步 → XZ 稳定基线）
+            emW.wolfRetaliateAgainst(cat, attacker2);     // 非狼受害者 → 静默 no-op
+            const QVector3D catP0 = emW.posAt(cat);
+            for (int t = 0; t < 188; ++t) // 3s；targetable=false：敌对不近战玩家 → 不触发 t480 melee 注册链
+                emW.tick(0.016f, &wW, nearCat, 0.3f, 1.8f, false);
+            const QVector3D catP1 = emW.posAt(cat);
+            const float catDXZ = QVector3D(catP1.x() - catP0.x(), 0.0f, catP1.z() - catP0.z()).length();
+            ok = ok && emW.healthAt(attacker2) == 20  // 猫不反击（MC 1.0 猫不攻击怪物）
+                 && catDXZ < 0.8f;                    // 猫原地贴玩家（无防御追击）
+            if (!ok)
+                qInfo().noquote() << "  t923c2 diag: attacker2 hp" << emW.healthAt(attacker2)
+                                  << "catDXZ" << catDXZ << "tamed" << emW.ocelotTamedAt(cat);
+        }
+        // (d) 源码钉：两伤害点接 wolfRetaliateAgainst + 骷髅箭碰撞滤网并入狼。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile ef(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+            const QString t = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
+            ok = ok && t.contains(QStringLiteral("wolfRetaliateAgainst(mi, e.fireballShooter)"))
+                 && t.contains(QStringLiteral("wolfRetaliateAgainst(mi, e.arrowShooter)"))
+                 && t.contains(QStringLiteral("m.mobType != MobIronGolem && m.mobType != MobWolf"));
+            if (t.isEmpty())
+                qInfo().noquote() << "  t923d diag: entitymanager.cpp slice miss";
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t923 tamed-wolf ecology: float-to-surface (head-submerged buoyancy) "
+                             "breaks the drown chain, sitting pet still floats but stays put (negative), "
+                             "standing pet swims-hops the pond lip and reaches the owner (follow rework "
+                             "root = water trap), wolfRetaliateAgainst drives pack biting of a mob "
+                             "attacker while the same hook is a no-op for tamed cats (MC 1.0: cats do "
+                             "not fight) and both damage sites (skeleton arrow + emberling fireball) "
+                             "are source-pinned to the hook";
     }
 
     // ── P-t829 末影人三修（专用局部世界 wB 平石台；rig y84+ 地形之上，t828 同款免凿高台）──
