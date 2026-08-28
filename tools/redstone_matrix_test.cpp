@@ -18983,6 +18983,54 @@ Item {
                              ;
     }
 
+    // ── P-t931 满耐久不显耐久条源码钉（纯 UI 修；t902/t857 源码文本钉先例——QML 无 static_assert 面）──
+    //   用户：「刚做好的工具耐久度是满的，在背包界面就不要显示耐久条了；1~9 物品栏的显示是正确的，只有
+    //   破坏了之后才会看到耐久度并且一直显示」。根因 = DurabilityBar 组件 visible 只判 `maxDur>0 && curDur>0`
+    //   （t498 曾定「背包常显」口径）→ 满耐久显满绿条，与 HUD hotbar（t315/t349 `curDur < maxDur` 满耐久隐）
+    //   两套口径。t931 用户口径翻案 t498：背包 / 装备槽全部对齐 hotbar——满耐久无条、受损后显且持续。
+    //   钉三面：① DurabilityBar.qml visible 含 `curDur < maxDur`（组件统一判——Inventory 生存 tab 主栏 /
+    //   hotbar / 装备槽 + SurvivalInventory 主栏 / hotbar 全走本组件）；② SurvivalInventory 内联 armorDurBar
+    //   （唯二不迁移组件的槽）同判 + 护甲耐久数字 Text 同口径（满耐久无数字）；③ Main.qml HUD hotbar
+    //   参照实现保持不变（`durabilityBar.curDur < durabilityBar.maxDur` 正锚）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        auto readSrc = [&root](const QString &rel) -> QString {
+            QFile f(root + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString db = readSrc(QStringLiteral("src/ui/DurabilityBar.qml"));
+        const QString sv = readSrc(QStringLiteral("src/ui/SurvivalInventory.qml"));
+        const QString mn = readSrc(QStringLiteral("src/ui/Main.qml"));
+        const bool okBar = db.contains(QStringLiteral(
+            "visible: maxDur > 0 && curDur > 0 && curDur < maxDur"));
+        const bool okArmor = sv.contains(QStringLiteral(
+            "visible: armId !== 0 && maxDur > 0 && curDur > 0 && curDur < maxDur"));
+        const bool okArmorNum = sv.contains(QStringLiteral(
+            "root.hotbar.armorDurabilityAt(index) < root.hotbar.armorMaxDurability(armId)"));
+        const bool okHotbar = mn.contains(QStringLiteral(
+            "durabilityBar.curDur < durabilityBar.maxDur")); // 参照实现不变（正锚）
+        const bool okT931 = okBar && okArmor && okArmorNum && okHotbar;
+        if (!okT931) ++totalFail;
+        if (!okT931)
+            qInfo().noquote() << "  [t931 diag] bar" << okBar << "armor" << okArmor
+                              << "armorNum" << okArmorNum << "hotbar" << okHotbar;
+        qInfo().noquote() << (okT931 ? "PASS" : "FAIL")
+                          << "| t931 full-durability hides the bar in inventory panels: DurabilityBar's "
+                             "visible gains curDur < maxDur (the t498 'always show in inventory' caliber "
+                             "is overruled by the user -- a freshly crafted tool or new armor shows NO "
+                             "bar/number in inventory/chest-adjacent panels until first damage, then it "
+                             "stays visible), which unifies every panel (Inventory survival-tab main/"
+                             "hotbar/armor slots + SurvivalInventory main/hotbar all route through the "
+                             "component) with the HUD hotbar reference (t315/t349, pinned unchanged as "
+                             "the positive anchor); the two non-migrated spots are pinned too -- the "
+                             "inline armorDurBar gets the same comparison and the armor durability "
+                             "number text hides at full durability (visible only while "
+                             "armorDurabilityAt < armorMaxDurability); pure UI change pinned at source "
+                             "level per the t902 precedent"
+                             ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
