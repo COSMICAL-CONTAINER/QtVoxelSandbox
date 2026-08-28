@@ -894,9 +894,10 @@ void MinecartManager::resolveCartCollisions(World *world)
     //   · 同层闸：目标列解析到的轨层必须与自车当前轨层**同层**（colRailY 相等）。宽容扫描（复审 #2）
     //     的容差窗在「邻列下隧轨坡面 rise 抬到接近本层」场景可解析到隔层轨（|ΔY|=1 经 rise 一致性
     //     放行）—— 旧版只验「目标列有轨」就全额放行位移，把车写进墙列、下一帧 pinCartY 同一容差
-    //     把它钉到墙内 / 墙后轨上（密闭单格互挤「飞出牢笼」的写位半边）。同层闸只拦「一次去穿插
-    //     位移换层」—— 真实的坡道跨格行驶（层变化）走 stepCartAlongRail 的逐格心重选（轨连接验证），
-    //     不受本闸影响；碰撞微推（≤半穿透量 0.49）本就不该换层。
+    //     把它钉到墙内 / 墙后轨上（密闭单格互挤「飞出牢笼」的写位半边）。层闸只拦「一次去穿插位移
+    //     大幅换层」—— review28 #7 起精确为 |Δ轨层| ≤ 1 放行（坡面延续跨格微推；≥2 与无轨照钳）；
+    //     真实的坡道跨格行驶（层变化）走 stepCartAlongRail 的逐格心重选（轨连接验证），不受本闸
+    //     影响；写墙 / 隔板弹射面由腰位闸 + 列扫一致性校验兜住（见闸内注释）。
     //   · 腰位闸：同层放行后仍验**落点中心格**（腰位 Y = floor(pos.y-0.1)，同自由体墙检口径）非实体
     //     —— 同层 + 宽容窗（top 格实心、top-1 是轨）放行的低顶坡段，落点腰位格恰是贴轨天花板实心格，
     //     去穿插把车心写进实体格（旧版无条件放行）。钳边界内保「解析永不把车心移入实体格」硬不变量。
@@ -936,12 +937,18 @@ void MinecartManager::resolveCartCollisions(World *world)
         const int tz = axisX ? cz : cz + step;
         const float landX = c.pos.x() + (axisX ? d * s : 0.0f);
         const float landZ = c.pos.z() + (axisX ? 0.0f : d * s);
-        // t907 同层闸 + 腰位闸（见函数头 t907 注释）。同层 + 腰位非实体 → 放行（平轨跨格微推 /
-        //   同层轨列推进的常规路径）；其余一律钳边界内。
-        if (colRailY(tx, tz, landX, landZ) == rySelf) {
+        // t907 同层闸 + 腰位闸 → review28 #7 近层闸（|Δ层| ≤ 1）：坡格轨层差恒 ±1，原严格同层把坡上
+        //   车对的跨格去穿插全钳回当前格——格宽 1.0 只容一车分离（kCartCollideSep 0.98），坡谷格 /
+        //   坡段格 ±1 邻接时多车或死端夹逼的对**永久** <0.85 重叠（t907(d) 坡谷三车探针钉死）。
+        //   放行 |Δ轨层| ≤ 1（坡面延续跨格）；≥2 的层差仍是「一次微推换层弹射」面照钳。写墙风险由
+        //   腰位闸兜住：宽容列扫的 ±1 解析必经「实心格 + 骑乘高一致」双关（平地车隔地板钉下方轨的
+        //   高差 0.9375 >> kRideScanTol 恒拒；rise>0.94 的地板下坡段例外在落点腰位 isCollidable 处再拒
+        //   —— 恰是扫描判可达的那个实心格）。
+        const int ryTgt = colRailY(tx, tz, landX, landZ);
+        if (ryTgt >= 0 && std::fabs(float(ryTgt - rySelf)) <= 1.0f) {
             const int byc = int(std::floor(c.pos.y() - 0.1f));
             if (!world->isCollidable(int(std::floor(landX)), byc, int(std::floor(landZ))))
-                return s; // 目标列同层有轨（当前 Y 可达）且落点腰位非实体 → 放行
+                return s; // 目标列近层（|Δ|≤1，坡面延续）有轨且落点腰位非实体 → 放行
         }
         const float bound = (step > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
         return (bound - cur) / d; // 钳到边界内（d=±1 → 同号同模换算）
@@ -1095,8 +1102,8 @@ bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, f
         //      选中垂直出臂 dot=0 —— 绝对值口径下照常放行，拐角转弯保留）；
         //   ② pickTrackStep 失败（死端）→ 轴向投影 < 阈 同样 no-op，且推离方向改**轨轴符号向**（旧版
         //      取合成向量主轴 —— 斜推时主轴落在垂直向 → 朝侧向弹出 = 用户报「横向推一下就脱轨」）。
-        //   无定向轨（state=0 孤轨：0 连接且无轴位——worldgen / 探针直铺形态）与非轨地面车**不分解**
-        //   （任意向可推：review26 #14 出轨车撞滑、t863④ 孤轨推离既有语义保留）。
+        //   无定向轨（0 连接孤轨——state=0 与仅带轴偏好位两形态，review28 #6 统一同口径）与非轨地面车
+        //   **不分解**（任意向可推：review26 #14 出轨车撞滑、t863④ 孤轨推离既有语义保留）。
         const int pcx = int(std::floor(c.pos.x())), pcz = int(std::floor(c.pos.z()));
         const int pry = scanRailColumnRiding(world, pcx, pcz, int(std::floor(c.pos.y())),
                                              c.pos.x() - float(pcx), c.pos.z() - float(pcz),
@@ -1115,8 +1122,14 @@ bool MinecartManager::pushEmptyCart(World *world, const QVector3D &playerFeet, f
             if (hpz || hnz) bestArmAbsDot = std::max(bestArmAbsDot, std::fabs(selZ));
             if (hpx || hnx) { railAxisX = 1.0f; railAxisZ = 0.0f; railAxisKnown = true; }
             else if (hpz || hnz) { railAxisX = 0.0f; railAxisZ = 1.0f; railAxisKnown = true; }
-            else if ((pst & BlockRegistry::RailAxisEWFlag) != 0)
-                { railAxisX = 1.0f; railAxisZ = 0.0f; railAxisKnown = true; } // 孤轨轴偏好（t666 放置写入）
+            // review28 #6：0 连接孤轨（含仅带 RailAxisEWFlag 轴偏好位——t666 放置写入）**不**置
+            //   railAxisKnown：孤轨无连接臂，与 state=0 孤轨同口径归「无定向轨」不分解（全向可推，
+            //   t863④ 孤轨推离语义）。旧版轴偏好位孤轨走分解 → 侧推（⊥ 轴偏好向）投影恒
+            //   < kCartPushProjMin 被吞 → EW 孤轨锁死而 NS 孤轨（state=0 无轴位）任意可推 —— 同一
+            //   物理布局仅放置朝向不同、推动行为相反（t908 探针 (e)/(f) 钉两朝向对称）。轴偏好位的
+            //   真正消费面在 mesher 贴图朝向 / railRiseAt（rise 无邻轨恒 0，不受本分支影响）。
+            //   ⚠ 连接位与轴偏好位可并存（recomputeRailConnections 有连接时镜像轴写回）—— 那类轨
+            //   由上方连接位分支接管，本注释只覆盖 0 连接纯孤轨形态。
         }
         int ndx = 0, ndz = 0;
         const bool stepped = pickTrackStep(world, c.pos, selX, selZ, ndx, ndz);

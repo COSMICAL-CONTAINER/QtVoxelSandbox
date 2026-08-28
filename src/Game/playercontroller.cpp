@@ -948,7 +948,12 @@ void PlayerController::tickImpl()
         //   岩浆 / 虚空销毁）与探测轨占用在本窗口停摆。补调 checkCartEnvironment（轻量 O(车数×AABB 格扫)，
         //   骑船分支同款）；derailed 自由物理与滑行摩擦维持停摆（睡觉通常 1-3s、醒来自愈，登记窗口语义）。
         //   硬暂停（worldRunning=false）不进本分支（上层早退），软档睡觉时世界照跑语义一致。
-        if (m_minecartManager) m_minecartManager->checkCartEnvironment(m_world);
+        // review28 #5：环境检查会销毁压探测轨的车（destroyCartTail）→ 补占用重扫收离开沿（tickPushedCarts
+        //   同序：环境检查在前、占用收口在后 —— 毁车当帧断电，不滞留整个睡眠窗口；骑船分支两调齐全同款）。
+        if (m_minecartManager) {
+            m_minecartManager->checkCartEnvironment(m_world);
+            m_minecartManager->updateDetectorRailOccupancy(m_world);
+        }
         return;
     }
     { FrameProfiler::Scope profPhys("phys");
@@ -7446,10 +7451,7 @@ void PlayerController::step(qreal dt)
         //   熄灭后玩家侧无任何提前止损路径，着火必烧满 8s ~10.6HP）：水灭 = 脚位 / 眼位任一在水
         //   （feetInWater / eyeInWater 既有谓词，涉水即灭）；雨灭 = World::rainExtinguishesAt（见天 +
         //   列降水，与 mob 侧**同一判据单一权威**，眼位取头格）。灭后 burning 翻转走下方既有 emit 链。
-        // review27 #11 玩家侧水灭 / 雨灭（MC 1.0 语义：着火实体浸水 / 淋雨立即熄灭——t888 拿掉随机
-        //   熄灭后玩家侧无任何提前止损路径，着火必烧满 8s ~10.6HP）：水灭 = 脚位 / 眼位任一在水
-        //   （feetInWater / eyeInWater 既有谓词，涉水即灭）；雨灭 = World::rainExtinguishesAt（见天 +
-        //   列降水，与 mob 侧**同一判据单一权威**，眼位取头格）。灭后 burning 翻转走下方既有 emit 链。
+        //   （review28 #8：本注释块曾被逐字粘贴两遍，删重复份——单一权威表述只留一份。）
         if (m_fireTimer > 0.0f
             && (feetInWater() || eyeInWater() || m_world->rainExtinguishesAt(fx, eyeY, fz))) {
             m_fireTimer = 0.0f;
