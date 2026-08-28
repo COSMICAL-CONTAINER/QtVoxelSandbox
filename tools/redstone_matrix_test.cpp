@@ -1451,12 +1451,15 @@ int main(int argc, char *argv[])
                           && seg.contains(QStringLiteral("function clampIntoViewport()"))
                           && !seg.contains(QStringLiteral("progressOverlay.width - 24"));
             const bool okE = seg.contains(QStringLiteral("function onWidthChanged() { if (treeMinimap.userMoved) treeMinimap.clampIntoViewport() }"));
-            const bool okT887b = okA && okB && okC && okD && okE;
+            // t928 补钉：拖拽接线本体（drag.target = treeMinimap——无此行清锚/守卫全在也拖不动，
+            //   review27 #2 修复链的最后一环；fd0b3f4 后多轮 Main.qml 改动的在位核验）。
+            const bool okF = seg.contains(QStringLiteral("drag.target: treeMinimap"));
+            const bool okT887b = okA && okB && okC && okD && okE && okF;
             if (!okT887b) ++totalFail;
             if (!okT887b)
                 qInfo().noquote() << "  [t887b pin diag] clearAnchors" << okA << "userMovedGuard" << okB
                                   << "oldDeadGuardGone" << okC << "viewportBounds" << okD
-                                  << "resizeReclamp" << okE;
+                                  << "resizeReclamp" << okE << "dragTargetWired" << okF;
             qInfo().noquote() << (okT887b ? "PASS" : "FAIL")
                               << "| t887b minimap drag source pin: first-interaction anchor break "
                                  "(onPressed clears anchors.top/right to undefined - Qt Quick hard "
@@ -1467,7 +1470,10 @@ int main(int argc, char *argv[])
                                  "absent), drag bounds in parent treeViewport space (clip:true "
                                  "ancestor, decision pinned in comments - old progressOverlay "
                                  "full-window bounds were a cross-space mismatch, pinned absent), "
-                                 "and viewport-resize re-clamp via Connections";
+                                 "and viewport-resize re-clamp via Connections; t928 adds the "
+                                 "final chain link -- drag.target: treeMinimap itself is pinned "
+                                 "(without the wiring line the cleared anchors and guards would "
+                                 "still drag nothing)";
         }
     }
 
