@@ -4520,14 +4520,17 @@ Window {
 
         // t401/t836 钓鱼浮标 + 鱼线（仅 player.fishing 时显）：浮标 = 红顶立方 + 白杆小段（ bobberPosition 是
         //   EntityManager 浮标实体的 Game 层每 tick 镜像——飞行段随抛物移动 / 水中浮定 / 钉 mob 跟随）。咬钩时
-        //   整体下沉（hasBite →「鱼扯浮标」；t884④ 0.15→0.35 明显下沉 + bobberBit 水花加强——可读的「现在
-        //   右键」信号）。鱼线 = 竿尖 → 浮标的细长盒（UnitCube 沿 Y 拉长 + 手写 axis-angle 四元数把本地 +Y
+        //   整体下沉（hasBite →「鱼扯浮标」；t884④ 0.15→0.35 → **t926 0.35→0.7 大幅下沉**（用户「碰到鱼钩
+        //   的时候鱼钩会被拉下去很多」）+ bobberBit 水花加强——配 1s 判定窗（t926）的可读「现在右键」信号）。
+        //   鱼线 = 竿尖 → 浮标的细长盒（UnitCube 沿 Y 拉长 + 手写 axis-angle 四元数把本地 +Y
         //   旋到连线方向；position=中点、scale=(细,长,细)）。NoLighting（同地形 / 线框已验证可见路径）。
         //   分层（PLAN §2）：呈现层只读 player.fishing / bobberPosition / hasBite / bobberInWater
         //   （Game 层镜像实体态），不反向写。
-        //   t884② 待机水面微飘：仅水中待咬段（bobberInWater && !hasBite）给 ±0.035 极小幅 sin 起伏
+        //   t884② 待机水面微飘：仅水中待咬段（bobberInWater && !hasBite）给小幅 sin 起伏
         //   （NumberAnimation 循环驱动相位；视觉层偏移——物理位不动，不污染 Entities 层 Water 态 blockAt
-        //   复查）。陆上 / 飞行 / 咬钩段不飘（咬钩下沉分支接管视觉）。
+        //   复查）。陆上 / 飞行 / 咬钩段不飘（咬钩下沉分支接管视觉）。**t926 缩幅 0.035→0.018**（用户
+        //   「悬浮的鱼钩幅度也比较大可能需要缩小一点」——待机飘幅别喧宾夺主，咬钩 0.7 下沉与待机 0.018
+        //   微飘的对比度即「难判断是否有鱼上钩」的修面）。
         Node {
             id: fishingBobber
             visible: player.fishing
@@ -4541,9 +4544,9 @@ Window {
             }
             position: Qt.vector3d(player.bobberPosition.x,
                                   player.bobberPosition.y
-                                      - (player.hasBite ? 0.35
+                                      - (player.hasBite ? 0.7
                                           : (player.bobberInWater
-                                             ? Math.sin(fishingBobber.bobPhase) * 0.035
+                                             ? Math.sin(fishingBobber.bobPhase) * 0.018
                                              : 0.0)),
                                   player.bobberPosition.z)
             // 红顶浮头（水上可见段）
@@ -4571,7 +4574,10 @@ Window {
         //   确定性螺旋角出生水色微粒、沿径向游向浮标、抵达即消（「前端生成、尾端消除——像有东西游向鱼钩」；
         //   节律相位驱动非随机源，PLAN §2-K 呈现层纪律）。仅水中待咬段运行（bobberInWater && !hasBite——
         //   咬钩 / 鱼跑后停拍，窗口期保持「水面突然安静」的对比）。坐标取实时镜像 bobberPosition（浮定后
-        //   静止 ≈ 浮标位）。
+        //   静止 ≈ 浮标位）。**t926 演进**：出生域从 t884 近距涟漪（0.9..1.32 格）扩为**随机方位 + 随机距离
+        //   ≤4 格**的鱼群逼近域（用户原话「水粒子在鱼钩随机方位随机距离不超过 4 格出现然后往鱼钩运动」，
+        //   距离域 / 游速解算见 BlockParticles.burstWaterApproach——t884 的收缩粒子链模式保留，只换出生
+        //   域与游速；t884 近距涟漪方案由本方案**取代**，登记于此）。
         Timer {
             interval: 380; repeat: true
             // 硬暂停（ESC）停拍（t889 全停语义）；软档 GUI 开照常（世界照跑）。

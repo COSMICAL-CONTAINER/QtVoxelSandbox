@@ -13398,7 +13398,8 @@ int main(int argc, char *argv[])
         // 镜像常量（P18 模式，改值须两处同步；Entities 层 kBobberWaitHashSalt / kBobberBiteWindowSec 与
         //   Game 层获物抛物解均探针不可达私有）：
         constexpr quint32 kMirrorBobberSalt = 0xF15Cu;   // EntityManager::kBobberWaitHashSalt（等待掷骰盐）
-        constexpr float kMirrorBiteWindow = 0.5f;        // EntityManager::kBobberBiteWindowSec（咬钩窗口秒）
+        constexpr float kMirrorBiteWindow = 1.0f;        // EntityManager::kBobberBiteWindowSec（咬钩窗口秒；
+                                                          //   t926 用户口径 1.0s——0.5→1.0 随源同步，P18 双钉）
         // t886 获物弹速 = 抛物解镜像 fishCatchSpeedMirror（文件级 helper，t886 探针共用）。
         World wF;
         wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(77);
@@ -13573,7 +13574,7 @@ int main(int argc, char *argv[])
                    && qAbs(cpz - bobPos.z()) < 1e-3f
                    && qAbs(csp - fishCatchSpeedMirror(bobPos, QVector3D(3.5f, float(fy + 1), 6.5f))) < 1e-2f
                    && (toPLen < 1e-3f || (cdx * toPX + cdz * toPZ) / toPLen > 0.9f);
-            // c2 窗过 = 鱼跑重等 + 空收无消耗：再甩（serial 2）→ 咬 → drive 过窗（0.5s + 余量）→ escaped 信号 +
+            // c2 窗过 = 鱼跑重等 + 空收无消耗：再甩（serial 2）→ 咬 → drive 过窗（1.0s + 余量）→ escaped 信号 +
             //   hasBite 翻 false → 继续 drive 到第二次咬（重等可达，cap 31s）→ 再过窗 → 此刻收 = 真空收
             //   （无咬无获物 + 耐久不变）。
             const int escBefore = escCount, bitBefore = bitCount;
@@ -13590,14 +13591,14 @@ int main(int argc, char *argv[])
             okc2 = okc2 && ents.posAt(b2) == settlePos;
             for (int t = 0; t < 660 && okc2 && !ents.bobberHasBiteAt(b2); ++t) tickB(1, 0.05f);
             okc2 = okc2 && ents.bobberHasBiteAt(b2);
-            tickB(int(kMirrorBiteWindow / 0.05f) + 2, 0.05f); // 0.6s > 0.5s 窗 → 鱼跑
+            tickB(int(kMirrorBiteWindow / 0.05f) + 2, 0.05f); // 1.1s > 1.0s 窗（t926）→ 鱼跑
             const bool okEsc = escCount == escBefore + 1 && !ents.bobberHasBiteAt(b2) && bitCount == bitBefore + 1;
             bool okRewait = false;
             for (int t = 0; t < 620 && ents.aliveAt(b2); ++t) {
                 if (ents.bobberHasBiteAt(b2)) { okRewait = true; break; }
                 tickB(1, 0.05f);
             }
-            tickB(int(kMirrorBiteWindow / 0.05f) + 2, 0.05f); // 第二次咬钩窗口亦过期 → 收 = 空收
+            tickB(int(kMirrorBiteWindow / 0.05f) + 2, 0.05f); // 第二次咬钩窗口亦过期（1.1s > 1.0s）→ 收 = 空收
             const int durBeforeEmpty = hb.durabilityAt(0);
             pc.useFishingRod(); // 无咬空收
             okc2 = okc2 && okEsc && okRewait && caughtCount == 1 && hb.durabilityAt(0) == durBeforeEmpty
@@ -13930,7 +13931,8 @@ int main(int argc, char *argv[])
                              "Game layer cast-anywhere/reel (EntityManager-carries-entity + "
                              "PlayerController-settles-semantics split, pearl/drop precedent); deterministic "
                              "5-30s wait via hashVoxel(seed^salt^castSerial) with exact reachable endpoints and "
-                             "+-1tick behavioral match, 0.5s bite window (in-window reel = fishingPool loot "
+                             "+-1tick behavioral match, bite window 1.0s (t926 user override of the MC "
+                             "1.0 ~0.5s value; in-window reel = fishingPool loot "
                              "thrown to the player as a ballistic spawnItemThrown (t886: solved arc, "
                              "distance-adaptive speed) + rod -1, expired = escaped signal + re-roll + empty "
                              "reel costs nothing), hooked-mob reel pulls at ~6 b/s with -5 durability and zero "
@@ -18596,6 +18598,98 @@ Item {
                              "fBm path determinism, PLAN 2-K intact; motivation: tickIceFreeze scans the "
                              "water-cell index calling biomeAt per cell - 5 fbm chains x 4 noise octaves each "
                              "was the dominant cost of the ice bucket hitch)";
+    }
+
+    // ── P-t926 咬钩信号重做探针（行为级：判定窗 ~1s；源码钉：下沉幅度 / 待机缩幅 / 鱼粒子距离-方位域）──
+    //    用户原话四要素：待机微飘缩幅别喧宾夺主 / 鱼粒子在浮标随机方位随机距离 ≤4 格出现游向鱼钩 /
+    //    触钩大幅下沉+水花 / ~1s 判定窗右键收杆。窗口在 Entities 层（kBobberBiteWindowSec）——行为级可
+    //    钉：水槽 settle → 等待期（确定性掷骰 ≤30s）→ bobberBit 沿数窗内 tick 到 bobberEscaped，断言
+    //    窗长 ∈[0.9,1.1]s 且窗口内 bobberHasBiteAt 恒 true / 逃走后翻 false。视觉三面（QML）按 t887b/
+    //    t924 源码钉手法锁语句面：Main.qml 下沉 0.35→0.7 / 微飘 0.035→0.018（fishingBobber 段界滤）；
+    //    BlockParticles 距离域 0.7..4.0（≤4 上限）+ 距离解算游速（t884 近距涟漪域 0.9..1.32 退役）。
+    {
+        World wL;
+        wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(82);
+        EntityManager ents;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickL = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wL, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wL.setBlock(x, fy, z, BR::Stone, 0);
+                wL.setBlock(x, fy + 1, z, BR::Water, 0); // 3×3 水池（t884(a) 同款）
+            }
+        // (a) 窗长行为级：bobberBit → bobberEscaped 的模拟时长 ≈ 1.0s（dt 0.05 → 恰 20 tick）。
+        int bitAt = -1, escAt = -1, t926tick = 0;
+        bool biteSeen = false;
+        QObject::connect(&ents, &EntityManager::bobberBit, &ents, [&](float, float, float) {
+            if (!biteSeen) { biteSeen = true; bitAt = t926tick; }
+        });
+        QObject::connect(&ents, &EntityManager::bobberEscaped, &ents, [&](float, float, float) {
+            if (bitAt >= 0 && escAt < 0) escAt = t926tick;
+        });
+        const int bobL = ents.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0), 961);
+        bool inWindow = false;
+        for (int t = 0; t < 700 && bobL >= 0 && escAt < 0; ++t) { // 等待 ≤30s（600 tick）+ 裕量
+            tickL(1, 0.05f);
+            t926tick = t + 1;
+            if (biteSeen && !inWindow) inWindow = ents.bobberHasBiteAt(bobL); // 窗口内查询恒 true
+        }
+        const float winSec = (bitAt >= 0 && escAt >= 0) ? float(escAt - bitAt) * 0.05f : -1.0f;
+        const bool okA = bobL >= 0 && bitAt >= 0 && escAt >= 0 && inWindow
+                         && winSec >= 0.9f && winSec <= 1.1f
+                         && !ents.bobberHasBiteAt(bobL); // 逃走后翻 false（鱼跑了）
+        ents.removeEntityAt(bobL);
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wL.setBlock(x, fy + 1, z, BR::Air, 0);
+                wL.setBlock(x, fy, z, BR::Air, 0);
+            }
+
+        // (b) 源码钉：下沉 0.7 / 微飘 0.018（fishingBobber 段界滤——段外同名数字不误伤）+ 鱼粒子
+        //     距离域 0.7..4.0 / 距离解算游速（BlockParticles 全文——函数名唯一）。
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        QFile bf(root + QStringLiteral("/src/ui/BlockParticles.qml"));
+        const QString mt = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const QString bt = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+        const int f0 = mt.indexOf(QStringLiteral("id: fishingBobber"));
+        const int f1 = f0 >= 0 ? mt.indexOf(QStringLiteral("function fishingRodTipWorld"), f0) : -1;
+        bool okB = false;
+        if (f0 >= 0 && f1 > f0) {
+            const QString seg = mt.mid(f0, f1 - f0);
+            okB = seg.contains(QStringLiteral("player.hasBite ? 0.7"))
+                  && seg.contains(QStringLiteral("Math.sin(fishingBobber.bobPhase) * 0.018"))
+                  && !seg.contains(QStringLiteral("* 0.035"))   // 旧待机幅度退役（段内负向）
+                  && !seg.contains(QStringLiteral("? 0.35"));   // 旧下沉深度退役（段内负向）
+        }
+        const bool okC = bt.contains(QStringLiteral("0.7 + 3.3 * ((ph * 7) % 16) / 15"))
+                         && bt.contains(QStringLiteral("const sp = 1.2 + 0.8 * rad"))
+                         && !bt.contains(QStringLiteral("0.9 + 0.14 * ((ph * 7) % 4)")); // t884 近距涟漪域退役
+        const bool okT926 = okA && okB && okC;
+        if (!okT926) ++totalFail;
+        if (!okT926)
+            qInfo().noquote() << "  [t926 diag] okA" << okA << "winSec" << winSec
+                              << "biteSeen" << biteSeen << "okB" << okB << "okC" << okC;
+        qInfo().noquote() << (okT926 ? "PASS" : "FAIL")
+                          << "| t926 bite-signal rework: judgment window widened 0.5->1.0s "
+                             "(kBobberBiteWindowSec user override pinned over the MC 1.0 ~0.5s "
+                             "value -- 'about one second to right-click reel', behavioral: "
+                             "bobberBit->bobberEscaped measures 1.00s +-0.1 in the water rig, "
+                             "bobberHasBiteAt true throughout the window and false after the "
+                             "escape), bite sink deepened 0.35->0.7 blocks with a stronger "
+                             "splash (16 particles, vY 4.4) as the 'pull it under hard' moment, "
+                             "idle micro-bob shrunk 0.035->0.018 so the wait phase no longer "
+                             "drowns the bite contrast, and the approach-fish particle domain "
+                             "replaces t884's close ripple ring (0.9..1.32) with random-bearing "
+                             "random-distance <=4-block spawns (0.7..4.0 deterministic golden-"
+                             "angle + phase-derived distance) whose swim speed is solved from "
+                             "distance (1.2+0.8xrad -> any spawn reaches the hook in <=1.1s, "
+                             "arriving-and-dying at the bobber); QML halves pinned at source "
+                             "level per the t887b/t924 precedent";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

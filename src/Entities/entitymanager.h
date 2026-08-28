@@ -367,7 +367,8 @@ public:
     //       命中门先行——next 已进入非豁免实体格即贴面 Ground 不钩，防隔墙钩）→ 落水（Water 格）
     //       浮定水面（浮力平衡半浸：液面 - kBobberFloatDip，XZ 收格心）+ 掷确定性等待 → 落实体方块贴面静止
     //       （Ground，可再甩收回）；出界 / 虚空消散。
-    //     · Water：等待（bobberWaitSeconds ∈ [5,30]s，MC 1.0 口径）→ 咬钩窗口 kBobberBiteWindowSec（0.5s，浮标
+    //     · Water：等待（bobberWaitSeconds ∈ [5,30]s，MC 1.0 口径）→ 咬钩窗口 kBobberBiteWindowSec（t926 起
+    //       1.0s——用户口径「~1s 判定窗右键收杆」> MC 0.5s；浮标
     //       下沉重置视觉）emit bobberBit（呈现层水花粒子）→ 窗口过 emit bobberEscaped（鱼跑提示）+ 重掷新等待。
     //     · Ground：静止（不再钩 mob——只在飞行段钩，MC 语义近似取舍；review25 #12 节流复查贴靠格，支撑被挖
     //       → 转 Flying 零速下落，不再悬空滞留至寿命兜底）。
@@ -2173,7 +2174,8 @@ private:
     //   - kBobberWaitMinSec / kBobberWaitMaxSec：入水到咬钩的确定性等待区间（秒；MC 1.0 wiki 口径 5-30s。
     //     掷骰 = bobberWaitSeconds(hashVoxel(seed ^ kBobberWaitHashSalt ^ 甩竿序号))，PLAN §2-K 禁运行期随机源，
     //     t791 骨粉同模式）。
-    //   - kBobberBiteWindowSec：咬钩后可收竿获物的窗口（秒；MC 1.0 浮标短暂下沉 ~0.5s，错过鱼跑重等）。
+    //   - kBobberBiteWindowSec：咬钩后可收竿获物的窗口（秒；t926 用户口径 1.0s——「~1s 判定时间右键收杆」，
+    //     MC 1.0 浮标短暂下沉 ~0.5s 被用户明确覆写；错过鱼跑重等）。
     //   - kBobberFloatDip：浮标浮定水面的浸没深度（blocks；浮力平衡半浸观感 = 液面下压 1/8）。
     //   - kBobberWaitHashSalt：等待掷骰的哈希盐（与火 / 作物 / 骨粉等既有 hashVoxel 消费者解耦）。
     //   - kBobberHookHitPad：飞行段钩 mob 的 AABB 外扩（blocks；浮标是点，外扩后命中盒覆盖 mob 体型边缘）。
@@ -2193,7 +2195,11 @@ private:
                                                           //   降频版，Ground 是静置态不值得每 tick 查）
     static constexpr float kBobberWaitMinSec   = 5.0f;   // 入水到咬钩等待下界（秒；MC 1.0 口径）
     static constexpr float kBobberWaitMaxSec   = 30.0f;  // 入水到咬钩等待上界（秒；MC 1.0 口径）
-    static constexpr float kBobberBiteWindowSec= 0.5f;   // 咬钩窗口（秒；窗口内收竿获物，错过鱼跑）
+    // t926 咬钩窗口 0.5→1.0s（用户口径钉死：MC 1.0 实际 ~0.5s，但用户明确要「~1s 判定时间来右键收杆」
+    //   ——可读的「现在收」信号优先于机制数值还原；变更登记见 t884→t926 演进：窗口加倍的收益面 =
+    //   下沉 0.7 + 鱼粒子 4 格逼近域 + 水花加强的组合信号，玩家有整秒反应窗）。
+    static constexpr float kBobberBiteWindowSec= 1.0f;   // 咬钩窗口（秒；窗口内收竿获物，错过鱼跑；
+                                                          //   t926 用户口径 1s > MC 0.5s，见上注）
     static constexpr float kBobberFloatDip     = 0.125f; // 浮定水面浸没深度（blocks；半浸观感）
     static constexpr quint32 kBobberWaitHashSalt = 0xF15Cu; // 等待掷骰哈希盐（与其它 hashVoxel 消费者解耦）
     static constexpr float kBobberHookHitPad   = 0.15f;  // 钩 mob 命中盒外扩（blocks）
