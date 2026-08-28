@@ -18807,6 +18807,66 @@ Item {
                              "attempt per the t882(b) wander-window discipline";
     }
 
+    // ── P-t929 大峡谷孤立水格探针（worldgen 行为级：多 seed 生成 → 全图孤立水格 == 0）──
+    //   用户「大峡谷中间还是会生成单独的水方块然后直接掉落，旁边没有别的支撑方块」——根因 = t376/t601
+    //   高源瀑布源：峡心柱悬空一格 Water（下方恒 canyon air、水平四邻恒无水；水源永不蒸发但起 tick 即
+    //   泄成孤立下落水柱 = 用户所见）。t929 退役整个置源 pass（连同 t376 (1a) 壁环含水检测死码），峡谷
+    //   定版干涸地貌（carve 盘内排干 + 排水带 + 不补新源）。孤立水格判据 = 本格 Water 且下方 Air 且 4
+    //   水平邻皆非水（无侧向水体喂养 → 起 tick 必为孤立下落柱）；worldgen 纯函数于 seed（PLAN §2-K）→
+    //   同 seed 计数确定，可精确断言 0。多 seed 扫：瀑布门控按概率命中含水壁环，单 seed 可能不触发
+    //   （阴性轮依赖其中至少一 seed 在退役前命中）。fresh world 无任何 rig 编辑 → 不与游玩期倒水混淆。
+    {
+        const int kT929Seeds[] = {1337, 42, 7, 2024, 8888, 555};
+        int isoTotal = 0;
+        QString perSeedDiag;
+        for (int sd : kT929Seeds) {
+            World wc;
+            wc.setWidth(96);
+            wc.setDepth(96);
+            wc.setHeight(48);
+            wc.setSeed(sd); // 最后设 seed → 一次全尺寸 regenerate（尺寸 setter 各自小尺寸 regen，省时）
+            int iso = 0;
+            int firstX = -1, firstY = -1, firstZ = -1;
+            for (int x = 0; x < wc.width(); ++x) {
+                for (int z = 0; z < wc.depth(); ++z) {
+                    for (int y = 1; y < wc.height(); ++y) { // y=0 下无格（基岩域）
+                        if (wc.blockAt(x, y, z) != quint8(BR::Water)) continue;
+                        if (wc.blockAt(x, y - 1, z) != quint8(BR::Air)) continue; // 下方实体/水 → 有支撑
+                        bool horiz = false;
+                        if ((x > 0 && wc.blockAt(x - 1, y, z) == quint8(BR::Water))
+                            || (x + 1 < wc.width() && wc.blockAt(x + 1, y, z) == quint8(BR::Water))
+                            || (z > 0 && wc.blockAt(x, y, z - 1) == quint8(BR::Water))
+                            || (z + 1 < wc.depth() && wc.blockAt(x, y, z + 1) == quint8(BR::Water))) {
+                            horiz = true;
+                        }
+                        if (horiz) continue;
+                        if (iso == 0) { firstX = x; firstY = y; firstZ = z; }
+                        ++iso;
+                    }
+                }
+            }
+            isoTotal += iso;
+            if (iso > 0)
+                perSeedDiag += QStringLiteral(" seed%1=%2@(%3,%4,%5)").arg(sd).arg(iso).arg(firstX).arg(firstY).arg(firstZ);
+        }
+        const bool okT929 = isoTotal == 0;
+        if (!okT929) ++totalFail;
+        if (!okT929)
+            qInfo().noquote() << "  [t929 diag] isolated water cells:" << perSeedDiag;
+        qInfo().noquote() << (okT929 ? "PASS" : "FAIL")
+                          << "| t929 canyon lone-water removal: the t376/t601 high-source waterfall pass is "
+                             "retired wholesale -- it planted a single Water source hanging in the canyon "
+                             "center column (solid air below, zero horizontal water neighbors), which on "
+                             "the first fluid tick bleeds into a lone falling column exactly matching the "
+                             "user report 'a single water block appears mid-canyon and drops with nothing "
+                             "supporting it'; canyons are now canonically dry landforms (carve-disc "
+                             "drain + kDrainRadius drain band, no new sources placed), and a full-grid "
+                             "sweep over six deterministic seeds asserts worldgen emits zero unsupported "
+                             "isolated water cells anywhere (water with air below and no horizontal water "
+                             "neighbor), so in-world waterfalls are player-made only; wall-ring water "
+                             "detection dead code removed with the feature";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
