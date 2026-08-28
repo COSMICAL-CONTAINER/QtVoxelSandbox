@@ -20026,6 +20026,199 @@ Item {
                           ;
     }
 
+    // ── P-t936 动力轨传播顺序无关探针（World 直编；spec「不管先放什么，激活都沿动力铁轨链传到红石最远
+    //    可达范围」—— 用户实测：先放上坡动力轨再激活一段，后放的其他上坡动力轨不被激活〔要全部摆好再激
+    //    活才行〕）──
+    //   不变量：激活集 = 世界布局的**纯函数**（任意放置 / 破坏序收敛到同一激活集）。五腿：
+    //   (a) 用户序主腿：坡链 A..C 先摆 + 源激活段（A..C 亮）→ **后放** D..F 接链 → D..F 立即亮（主断言；
+    //       旧版接收器扫描域 = 6 正交邻，坡链相邻轨是斜角 → 后放轨的 pass 内够不到链尾 ≤8 格外的直供种子
+    //       → 恒判灭 = 顺序依赖）；
+    //   (b) 阴性·无源：无源坡链的延伸轨保持灭（不接链 / 源未激活 → 不激活）；随后**最后**放源 → 整链 7 根
+    //       全亮（第三种摆放序也收敛到同一激活集）；
+    //   (c) 深度上限腿：种子 + 下坡 9 根（逐格 -1）→ 前 8 根亮、第 9 根灭（kGoldenRailChainMax 钉住——
+    //       「放置即亮」不得越链上限过度点亮；下坡方向兼钉 -1 层传播）；
+    //   (d) 破坏对称腿：亮坡链破中段轨 → 源侧 2 根保持亮、远翼 2 根熄灭（放置 / 破坏对称完整——旧版远翼
+    //       不在任何 6 正交扫描域 = 残留通电位）；
+    //   (e) 源码钉：goldenRailChainStep 单一权威（声明 + 定义）+ notePowerWrite 放置沿重算块 + 链 BFS 消费
+    //       同 helper + 深度常量恰一处声明（防第二套判定 / 双深度源漂移回归）。
+    {
+        // rig 选址：运行期扫描空区（lessons t769：不信任「某高度以上必空」经验值）。单列 rig（链沿 X 走
+        //   向，dz -1..1 隔离）；各腿独立选址、用毕清场。
+        const auto scanRigArea = [&](int dxLo, int dxHi, int dyLo, int dyHi) {
+            int rx = -1, rz = -1;
+            for (int zz = 3; zz < 94 && rx < 0; zz += 2)
+                for (int xx = 4; xx + dxHi < 96 && rx < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = dxLo; dx <= dxHi && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = dyLo; dy <= dyHi && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { rx = xx; rz = zz; }
+                }
+            return QPair<int, int>(rx, rz);
+        };
+        const auto railOn = [&](int x, int y, int z) {
+            return (w.stateAt(x, y, z) & BR::GoldenRailStateOnFlag) != 0;
+        };
+        // (a) 用户序主腿：先摆 A..C → 激活 → 后放 D..F。
+        bool okA = false;
+        {
+            const auto [x0, z0] = scanRigArea(-1, 6, -2, 6);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t936 diag] leg A: no clear rig area found";
+            } else {
+                for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0); // 源放种子侧邻（t910 口径：非脚下）
+                tickN(w, 6);
+                int litSeg = 0;
+                for (int i = 0; i <= 2; ++i) litSeg += railOn(x0 + i, kRigY + i, z0);
+                for (int i = 3; i <= 5; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0); // 后放
+                tickN(w, 6);
+                int litAll = 0;
+                for (int i = 0; i <= 5; ++i) litAll += railOn(x0 + i, kRigY + i, z0);
+                okA = litSeg == 3 && litAll == 6;
+                if (!okA)
+                    qInfo().noquote() << "  [t936 diag] leg A litSeg" << litSeg << "litAll" << litAll;
+                for (int i = 0; i <= 5; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (b) 阴性·无源 + 源最后放。
+        bool okB = false;
+        {
+            const auto [x0, z0] = scanRigArea(-1, 7, -2, 6);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t936 diag] leg B: no clear rig area found";
+            } else {
+                for (int i = 0; i <= 4; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0);
+                tickN(w, 4);
+                int dark5 = 0;
+                for (int i = 0; i <= 4; ++i) dark5 += railOn(x0 + i, kRigY + i, z0);
+                for (int i = 5; i <= 6; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0); // 延伸无源链
+                tickN(w, 4);
+                int dark7 = 0;
+                for (int i = 0; i <= 6; ++i) dark7 += railOn(x0 + i, kRigY + i, z0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0); // 源**最后**放
+                tickN(w, 6);
+                int lit7 = 0;
+                for (int i = 0; i <= 6; ++i) lit7 += railOn(x0 + i, kRigY + i, z0);
+                okB = dark5 == 0 && dark7 == 0 && lit7 == 7;
+                if (!okB)
+                    qInfo().noquote() << "  [t936 diag] leg B dark5" << dark5 << "dark7" << dark7
+                                      << "lit7" << lit7;
+                for (int i = 0; i <= 6; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (c) 深度上限腿（下坡逐格 -1 共 9 根：种子 + 7 亮，第 9 根灭）。
+        bool okC = false;
+        {
+            const auto [x0, z0] = scanRigArea(-1, 9, -10, 2);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t936 diag] leg C: no clear rig area found";
+            } else {
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+                for (int i = 0; i <= 8; ++i) w.setBlock(x0 + i, kRigY - i, z0, BR::GoldenRail, 0);
+                tickN(w, 8);
+                int lit08 = 0;
+                for (int i = 0; i <= 7; ++i) lit08 += railOn(x0 + i, kRigY - i, z0);
+                const bool ninthDark = !railOn(x0 + 8, kRigY - 8, z0);
+                okC = lit08 == 8 && ninthDark;
+                if (!okC)
+                    qInfo().noquote() << "  [t936 diag] leg C lit08" << lit08 << "ninthDark" << ninthDark;
+                for (int i = 0; i <= 8; ++i) w.setBlock(x0 + i, kRigY - i, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (d) 破坏对称腿（亮坡链破中段 → 源侧亮 / 远翼灭）。
+        bool okD = false;
+        {
+            const auto [x0, z0] = scanRigArea(-1, 5, -2, 5);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t936 diag] leg D: no clear rig area found";
+            } else {
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+                for (int i = 0; i <= 4; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0);
+                tickN(w, 6);
+                int lit5 = 0;
+                for (int i = 0; i <= 4; ++i) lit5 += railOn(x0 + i, kRigY + i, z0);
+                w.setBlock(x0 + 2, kRigY + 2, z0, BR::Air, 0); // 破中段
+                tickN(w, 6);
+                const bool nearLit = railOn(x0, kRigY, z0) && railOn(x0 + 1, kRigY + 1, z0);
+                const bool farDark = !railOn(x0 + 3, kRigY + 3, z0) && !railOn(x0 + 4, kRigY + 4, z0);
+                okD = lit5 == 5 && nearLit && farDark;
+                if (!okD)
+                    qInfo().noquote() << "  [t936 diag] leg D lit5" << lit5 << "nearLit" << nearLit
+                                      << "farDark" << farDark;
+                for (int i = 0; i <= 4; ++i)
+                    if (i != 2) w.setBlock(x0 + i, kRigY + i, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (e) 源码钉（t935 模式：源文件直读字符串钉——helper 消失 / 双深度源 / BFS 自写第二套判定即红）。
+        const QString exeDir936 = QCoreApplication::applicationDirPath();
+        const QString root936 = QDir(exeDir936 + QStringLiteral("/..")).absolutePath();
+        auto readSrc936 = [&root936](const QString &rel) -> QString {
+            QFile f(root936 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString wh936 = readSrc936(QStringLiteral("src/World/world.h"));
+        const QString wc936 = readSrc936(QStringLiteral("src/World/world.cpp"));
+        const bool okE1 = wh936.contains(QStringLiteral(
+                              "bool goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, int &ny, int &nz) const;"))
+                       && wc936.contains(QStringLiteral(
+                              "bool World::goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, int &ny, int &nz) const"));
+        const bool okE2 = wc936.contains(QStringLiteral("t936 动力轨放置 / 破坏沿重算"))
+                       && wc936.contains(QStringLiteral(
+                              "goldenRailChainStep(cx, cy, cz, dir[0], dir[1], sx, sy, sz)"))
+                       && wc936.contains(QStringLiteral("kGoldenRailChainMax && !frontier.empty()"));
+        const bool okE3 = wc936.contains(QStringLiteral(
+                              "if (!goldenRailChainStep(c.x, c.y, c.z, a[0], a[1], nx, ny, nz)) continue;"));
+        int depthDecl936 = 0;
+        for (int pos936 = wc936.indexOf(QStringLiteral("kGoldenRailChainMax = 8"));
+             pos936 >= 0;
+             pos936 = wc936.indexOf(QStringLiteral("kGoldenRailChainMax = 8"), pos936 + 1))
+            ++depthDecl936;
+        const bool okE4 = depthDecl936 == 1;
+        const bool okT936 = okA && okB && okC && okD && okE1 && okE2 && okE3 && okE4;
+        if (!okT936) ++totalFail;
+        if (!okT936)
+            qInfo().noquote() << "  [t936 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "| e" << okE1 << okE2 << okE3 << okE4
+                              << "(depthDecl" << depthDecl936 << ")"
+                              << "| srcLen h" << wh936.size() << "c" << wc936.size();
+        qInfo().noquote() << (okT936 ? "PASS" : "FAIL")
+                          << "| t936 powered-rail propagation is order-independent: activation is "
+                             "a pure function of the world layout - placing a powered rail that "
+                             "extends an already-energized climbing chain lights it immediately "
+                             "(user report: rails placed AFTER activating a segment stayed dark "
+                             "unless everything was laid out before powering; the receiver scan "
+                             "only covered 6-orthogonal neighbors so a newly placed slope rail "
+                             "never saw the directly-fed seed up to 8 chain cells away along the "
+                             "diagonal rail geometry); fix = golden-rail edits walk the chain via "
+                             "goldenRailChainStep (the same three-height-probe single authority "
+                             "the chain BFS uses) for kGoldenRailChainMax steps and dirty every "
+                             "rail on it, so the next tick re-seeds from the true directly-fed "
+                             "rail and the t704/t910 BFS relights/extinguishes to the fixed-point "
+                             "regardless of placement order; symmetric destruction face covered "
+                             "(breaking a mid-chain slope rail now extinguishes the sourceless "
+                             "far wing instead of leaving stale charge outside the 6-orthogonal "
+                             "scan domain); probe legs: (a) user-order main leg (A..C placed, "
+                             "powered, then D..F placed after -> all 6 lit), (b) negative "
+                             "unpowered-chain extension stays dark + source placed LAST lights "
+                             "all 7, (c) downhill 9-rail chain lights seed+7 only (chain depth "
+                             "cap pinned - no over-lighting past kGoldenRailChainMax), (d) "
+                             "mid-chain break keeps the fed side lit and drops the far wing, "
+                             "(e) source pins: helper declaration+definition, the notePowerWrite "
+                             "placement-walk block, the BFS consuming the same helper, and "
+                             "exactly one kGoldenRailChainMax declaration"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
