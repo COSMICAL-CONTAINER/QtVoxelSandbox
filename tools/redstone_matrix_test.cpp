@@ -11957,6 +11957,11 @@ int main(int argc, char *argv[])
     //    消费 root.tierSeed(slotIdx)、tierPreviewName 消费同一 root.tierSeed、旧时钟混种式已绝迹（Date.now
     //    本身不 ban——双击计时的 Date.now() 是合法用途，只 ban 种子混法）；② 行为面 —— 剑 / 书各档 offered
     //    的 picks 非空且首条 displayName 可解析（预告 = 产物首条，纯函数复算即同产物，「必出」不另掷）。
+    //    review28 #3 加钉：③ 种子快照**必须先于** H1 书堆归一化写槽 —— 源码钉断言 doEnchant 函数体内
+    //    `const seed = root.tierSeed(slotIdx)` 的行号先于 `InventoryOps.writeSlot(root, "enchant", 0,`
+    //    （归一化写）与 `if (srcCount0 > 1)`（归一化门）——旧序（种子在归一化写后取）下书堆路径
+    //    writeSlot 触发的同步 optionReroll++ 令施放种子 ≠ hover 预告种子，「必得」预告漂移。种子取在
+    //    `const srcCount0` 行之前 = 归一化写（会 bump reroll 的唯一写）之前，两函数严格同源。
     {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString rootDir = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -11966,6 +11971,19 @@ int main(int argc, char *argv[])
                   && t.contains(QStringLiteral("const seed = root.tierSeed(slotIdx)"))
                   && t.contains(QStringLiteral("root.tierSeed(slotIdx))"))
                   && !t.contains(QStringLiteral("Date.now() & 0xffff"));
+        int seedLine = -1, normGateLine = -1, normWriteLine = -1;
+        if (ok) {
+            const QStringList lines = t.split(QLatin1Char('\n'));
+            for (int i = 0; i < lines.size(); ++i) {
+                const QString &ln = lines.at(i);
+                if (seedLine < 0 && ln.contains(QStringLiteral("const seed = root.tierSeed(slotIdx)"))) seedLine = i;
+                if (normGateLine < 0 && ln.contains(QStringLiteral("const srcCount0 = root.enchantCounts[0]"))) normGateLine = i;
+                // 归一化写特异串（srcId0 + 1 + remain 只在 doEnchant H1 段出现；泛化的 slot-0 write 会
+                //   误中文件前部的 returnEnchantToHotbar / slotShiftLeftEnchant 清槽写）。
+                if (normWriteLine < 0 && ln.contains(QStringLiteral("srcId0, 1 + remain"))) normWriteLine = i;
+            }
+            ok = seedLine >= 0 && normGateLine > seedLine && normWriteLine > seedLine;
+        }
         Hotbar hb;
         const int diaSword = int(ToolRegistry::DiamondSword);
         const int bookId = RecipeRegistry::BookId;
@@ -11979,13 +11997,20 @@ int main(int argc, char *argv[])
             ok = !picks.isEmpty()
                  && !hb.enchantDisplayName(picks.at(0).toMap().value(QStringLiteral("id")).toInt()).isEmpty();
         }
-        if (!ok) ++totalFail;
+        if (!ok) {
+            qInfo().noquote() << "  t917 diag seedLine" << seedLine << "normGate" << normGateLine
+                              << "normWrite" << normWriteLine;
+            ++totalFail;
+        }
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t917 enchant option hover preview single-source: tierSeed authority (pos^item^"
                              "tier^reroll; clock mixing Date.now()&0xffff extinct), doEnchant and tierPreviewName "
                              "both consume root.tierSeed -> preview == first pick of the actual result (guaranteed "
                              "enchant, level masked); sword offered 1..30 / book samples non-empty with resolvable "
-                             "display names";
+                             "display names; review28 #3: the doEnchant seed snapshot is taken BEFORE the H1 "
+                             "book-stack normalization gate/write (seed line < srcCount0 gate line < slot-0 "
+                             "write line) so the synchronous optionReroll++ fired by the normalization "
+                             "enchantRev bump can no longer split the preview seed from the cast seed";
     }
 
     // ── t918 铁砧 shift+左键产物直入背包探针（源码钉；R19.16）──
@@ -15249,6 +15274,75 @@ Item {
                                       << " name=" << vm.customNameAt(0)
                                       << " A=" << localIdAt(anvilRoot, "anvilSlots", 0)
                                       << " held=" << vm.heldBlock();
+                }
+            }
+
+            // ═══ (14) review28 #3 t917 书堆首击种子同源行为腿（真 QML × 真 VM）═══
+            //    事故链：书堆 count>1 → doEnchant H1 归一化 writeSlot 写回槽 0 → enchantRev++ **同步**触发
+            //    onEnchantRevChanged → 换件键（id0*4096+count）变 → optionReroll++；旧码种子在其后才取 →
+            //    施放用 reroll+1 种子而 hover 预告（tierPreviewName 读点击前状态）用旧种子 → 「必得」预告
+            //    漂移。断言：书堆入槽 → 记 hover 预告名（点击前种子）→ doEnchant(0) 首击 → 产物首条附魔
+            //    displayName == 预告名（种子不漂 → 严格同源）。回退（种子取在归一化写之后）→ 施放用
+            //    reroll+1 种子而预告是旧种子 → selectEnchantsForItem 对 seed 位敏感 → 首条大概率漂 → FAIL。
+            {
+                resetEnchant();
+                const int plainBook = RecipeRegistry::BookId;
+                vm.setStack(3, plainBook, 8);      // 整摞书（count 8 > 1 → 必走归一化路径）
+                vm.setStack(4, RecipeRegistry::LapisId, 5);
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) }); // 书堆入槽 0
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(4) });
+                resetTap(enchantRoot);
+                qmlCall(enchantRoot, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(1) }); // 青金石入槽 1
+                const bool stackIn = localIdAt(enchantRoot, "enchantSlots", 0) == plainBook
+                        && localIdAt(enchantRoot, "enchantCounts", 0) == 8;
+                // 黑盒校准：本态必须对 reroll 轴敏感（name(R) != name(R+1)）——否则两种子首条巧合相同，
+                //   回退也假 PASS（首轮阴性恰命中：书全池单条 pick 下两 seed 同首条概率 ~1/10）。用真
+                //   tierPreviewName 直接探测：暂写 optionReroll 前移一格读 name(R+1)（= 旧码归一化写后
+                //   取种子的产物首条名），与 name(R) 比；不敏感则停在 R+1 再试下一对（≤8 格内书池必出
+                //   判别态）。校准只动 reroll 快照，点击链本身零干预。
+                const int reroll0 = enchantRoot->property("optionReroll").toInt();
+                auto previewNow = [&]() -> QString {
+                    QVariant pv;
+                    QMetaObject::invokeMethod(enchantRoot, "tierPreviewName",
+                                              Q_RETURN_ARG(QVariant, pv), Q_ARG(QVariant, QVariant(0)));
+                    return pv.toString();
+                };
+                QString preview;
+                bool discriminating = false;
+                for (int bump = 0; bump < 8 && !discriminating; ++bump) {
+                    const int r = reroll0 + bump;
+                    enchantRoot->setProperty("optionReroll", r);
+                    preview = previewNow();                     // name(r)：用户 hover 所见（点击前状态）
+                    enchantRoot->setProperty("optionReroll", r + 1);
+                    const QString previewRerolled = previewNow(); // name(r+1)：旧码施放将读的种子
+                    if (previewRerolled != preview) {
+                        discriminating = true;
+                        enchantRoot->setProperty("optionReroll", r); // 回到 r —— 施放从点击前状态出发
+                    } // 不敏感 → 留在 r+1，下一轮探测 (r+1, r+2)
+                }
+                QMetaObject::invokeMethod(enchantRoot, "doEnchant", Q_ARG(QVariant, QVariant(0))); // 首击
+                const QVariantList prod = localEnchAt(enchantRoot, "enchantEnch", 0);
+                QString prodFirstName;
+                if (prod.at(0).toInt() != 0) {
+                    Hotbar hb917;
+                    prodFirstName = hb917.enchantDisplayName(prod.at(0).toInt() >> 8);
+                }
+                bool step = stackIn
+                        && discriminating                        // 校准达判别态（否则本腿无法分 red/green）
+                        && preview.length() > 0                  // 预告真出了名（「必得」预告本体活着）
+                        && prodFirstName == preview;             // 产物首条 == 预告（同源断言）
+                if (!step) {
+                    ok874 = false;
+                    qInfo().noquote() << "  [review28-3 diag] book-stack first-click seed drift: stackIn="
+                                      << stackIn << "discriminating=" << discriminating
+                                      << "preview=" << preview
+                                      << "prodFirst=" << prodFirstName
+                                      << "slot0=" << localIdAt(enchantRoot, "enchantSlots", 0)
+                                      << "x" << localIdAt(enchantRoot, "enchantCounts", 0);
                 }
             }
 
