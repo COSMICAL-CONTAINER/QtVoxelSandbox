@@ -1767,7 +1767,8 @@ private:
     // t401/t836 钓鱼机制常量（机制对齐 MC 1.0 钓鱼；浮标物理 / 咬钩时序常量在 EntityManager——kBobber* 单一权威）。
     //   kFishCastOriginOffset：甩竿生成位 = 眼位 + 视线 × 0.4（略出身体表面，防贴脸生成即碰墙 / 即钩近身 mob）。
     //   kFishCastSpeed：甩竿初速（blocks/s，沿视线含俯仰分量）× 投射物轻重力 12 → 45° 满甩 ~19 格 / 平视 ~11 格
-    //     （MC 1.0 钓竿甩距量级）。等待 5-30s / 咬钩窗口 0.5s 见 EntityManager kBobberWait*/kBobberBiteWindowSec。
+    //     （MC 1.0 钓竿甩距量级）。等待 5-30s / 咬钩窗口 t926 起 1.0s（用户口径 > MC 0.5s）见 EntityManager
+    //     kBobberWait*/kBobberBiteWindowSec。
     //   kFishHookPullSpeed：钩住生物收竿的拉拽水平冲量基值（t882 起按距离 / 收杆角度调制——见 kFishHook*
     //     常量组；MC 1.0 口径）。
     //   kFishHookDurabilityCost：钩住生物收竿的钓竿耐久消耗（-5；钓获 -1 走 damageSelectedItem() 缺省；MC 1.0 口径
