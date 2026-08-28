@@ -53,6 +53,16 @@ void FrameProfiler::count(const char *name)
     m_counts[name] += 1;
 }
 
+// t933：读当前窗口计数（不清窗）。锁内查表；不存在 → 0。探针在事件前后各取一次快照做差分，
+//   不受 flush 清窗影响的前提是探针运行期间无 60-tick flush（矩阵探针无 PlayerController tick →
+//   flush 不触发；GUI 下探针短窗口内 flush 至多把差分切到新窗，行为退化而非错报，可接受）。
+qint64 FrameProfiler::countValue(const char *name) const
+{
+    QMutexLocker lock(&m_mutex);
+    auto it = m_counts.find(name);
+    return it == m_counts.end() ? 0 : it->second;
+}
+
 // t500 QML 侧样本入口 / perf-t520 C++ 侧 frameSwapped + beforeRendering/afterRendering 推样本入口：
 //   name → ns 累加进 m_ns（同 add 路径，但 name 非 const char* 字面量而是 QString → 转 std::string 做
 //   unordered_map 键；QML 50Hz / frameSwapped 60Hz / before-afterRendering 60Hz 调用，开销可忽略）。
@@ -147,6 +157,24 @@ void FrameProfiler::flush()
         + " wthr " + QString::number(wMs[8], 'f', 1)
         + " imelt " + QString::number(wMs[9], 'f', 1) + "]";
 
+    // t933 perf 世界写入 / 重算活动计数行（1s 窗聚合；dev-plan t933「量化每帧 recompute/mesh 重建数」）：
+    //   - reflood：光照重 flood 次数（refloodBox 单一漏斗 = 编辑增量 + 爆炸 / 级联批量 + 流体延迟 + 叶衰）。
+    //     稳态应恒 0；**换世界后仍非 0 = 有跨世界存活的写入源**（t933 跨世界泄漏的直接判据）。
+    //   - ledit：recomputeLightAround 编辑路径调用数（reflood 的编辑分量）。
+    //   - casc / gcol / gcell：重力 26 邻域级联扫描数 / 坍落柱数 / 坍落格数（t930 级联风暴强度）。
+    //   诊断口径：爆炸帧窗口 casc/gcol/gcell 应一次性尖峰后归零；此后每窗恒 0 = 收敛。若持续非 0 =
+    //   非收敛重算循环（用户怀疑「光照一直重建」的定量答案）。
+    auto cntN = [this](const char *key) {
+        auto it = m_counts.find(key); return it == m_counts.end() ? 0 : it->second;
+    };
+    QString cntLine = QStringLiteral("act ct: ")
+        + "reflood " + QString::number(cntN("refloodN"))
+        + "  ledit " + QString::number(cntN("lightEditN"))
+        + "  casc " + QString::number(cntN("cascN"))
+        + "  gcol " + QString::number(cntN("gravColN"))
+        + "  gcell " + QString::number(cntN("gravCellN"))
+        + "  (steady=0; nonzero after world switch = cross-world writer)";
+
     // perf-t520 帧时间分解桶：main_total（frameSwapped 间隔）+ render_cpu（beforeRendering→afterRendering）。
     //   按 ms/frame 报告（÷ frames），与 tick 各阶段同口径。诊断公式：threaded render loop 下
     //   frame ≈ max(main_total, render_cpu)。两者并标注「render_cpu 含 GPU stall 但非真 GPU 时间」。
@@ -230,8 +258,8 @@ void FrameProfiler::flush()
         + "  spawn " + QString::number(mobSubMs("mobSpawn"), 'f', 2)
         + "  loop " + QString::number(mobLoopMs, 'f', 2);
 
-    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4\n  %5\n  %6")
-                   .arg(frames).arg(tickLine, winLine, frameLine, frame2Line, mobLine);
+    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4\n  %5\n  %6\n  %7")
+                   .arg(frames).arg(tickLine, winLine, cntLine, frameLine, frame2Line, mobLine);
     m_lastFrames = frames;
 
     // 重置窗口。

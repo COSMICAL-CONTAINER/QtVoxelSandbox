@@ -95,6 +95,9 @@ public:
     void add(const char *name, qint64 ns);
     // 累加 name 事件计数（用于统计 mesh rebuild 次数等）。name 静态字面量。
     void count(const char *name);
+    // t933：读当前窗口 name 计数（不清窗、不加 flush 时序依赖；矩阵探针 / 诊断用）。不存在 → 0。
+    //   与 count() 共用 m_counts（锁保护读；调用频率低——探针快照两次取差分）。
+    qint64 countValue(const char *name) const;
     // 调用方每 60Hz tick 调一次 → 累帧计数（逐帧桶 report 时除以它）。
     void tickFrame() { ++m_frameCount; }
     // 每 ~1s 调一次（PlayerController 既有 perf 窗口）：把当前窗口各桶 → 报告，重置窗口，emit + qInfo。
