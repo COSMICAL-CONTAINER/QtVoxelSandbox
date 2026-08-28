@@ -179,6 +179,19 @@ Window {
                 || window.dispenserOpen || window.chatOpen || playerState.dead
     }
 
+    // review28 #9：翻书「大摆」pageFlipAnim 是 running:false 字面 + restart() 命令式驱动（声明式
+    //   worldRunning 门会与 restart 抢 running 绑定，见 pageFlipAnim 处注释），硬档门在此变更 handler
+    //   补齐——ESC 落在 2.65s 大摆进行中 → 停摆并复位 flipAngle 到静息位（中断摆作废：不复位则恢复后
+    //   flutter（0↔14°）叠在半空残留角上读作卡页）。恢复侧无需命令：pageFlutterAnim 的 running 条件
+    //   （worldRunning && bookOpen && !pageFlipAnim.running）自动翻转接管续摆，下次大摆由 pageFlipTimer
+    //   （running 已含 worldRunning 门）重新触发。
+    onWorldRunningChanged: {
+        if (!worldRunning && pageFlipAnim.running) {
+            pageFlipAnim.stop()
+            flipPivot.flipAngle = 0.0
+        }
+    }
+
     // t110 Shift/数字键守卫所需 window 级态：
     //   - shiftHeld：Shift 按下态（keyInput Keys.onPressed/Released 始终追踪，**不论背包是否开**）。
     //     各背包面板的槽 TapHandler 读此属性 → 区分普通左键 vs Shift+左键搬运。不放进各面板是因为 Shift
@@ -6199,8 +6212,10 @@ Window {
         //   - 数据链不变：spawnOrb / 磁吸 / 拾取全在 XpOrbManager（C++，PLAN §2 分层零改动）；feeder 只读
         //     pos/amount/alive。slot-reuse 语义自然成立（alive=false 槽不进表，count 单调无关紧要——本渲染
         //     路径不再有 per-orb delegate，t170/t256 的 delegate 生命周期问题对经验球族整体消除）。
-        //   - xpOrbHost 保留（空壳）：world-exit 清理链（clearEntDelegates(xpOrbHost) 扫描 children）
-        //     引用它，保持不动（扫到空 = 无害）。
+        //   - xpOrbHost 保留：instanced Model 的场景内挂载点（lessons-learned：动态 3D 对象必须挂到
+        //     场景 Node 否则孤儿不渲染——本 Node 承挂下方 instanced 经验球 Model，非空壳。review28 #10
+        //     更正：旧注释所称 clearEntDelegates(xpOrbHost) 清理链已被 1ae1364 整体 revert，写注释时
+        //     该函数即不存在，保留理由以场景挂载为准）。
         //   - 试点范围取舍（钉死，详见 xporbinstancing.h 头注释）：掉落物各族（billboard / 3D 形状 / 工具
         //     几何）保持逐 Model——per-item 贴图 / 几何需按 itemId 分桶动态建 Model，复杂度与 delegate
         //     生命周期风险留独立任务。
@@ -9369,8 +9384,11 @@ Window {
                 SequentialAnimation {
                     id: pageFlipAnim
                     running: false
-                    // review27 #13：只保留清零——停摆 / 续摆互斥已声明式（pageFlutterAnim.running 含
-                    //   !pageFlipAnim.running，命令式 stop/restart 会夺其 running 绑定）。
+                    // review27 #13：本体只保留起摆清零——停摆 / 续摆互斥已声明式（pageFlutterAnim.running
+                    //   含 !pageFlipAnim.running，命令式 stop/restart 会夺其 running 绑定）。review28 #9：
+                    //   ESC 硬档门不在本动画上加（会与 restart 抢 running），改由 window 的
+                    //   onWorldRunningChanged 变更 handler 统一 stop() + 复位 flipAngle（见 worldRunning
+                    //   声明处的 review28 #9 注释）。
                     onStarted: flipPivot.flutter = 0.0
                     // onFinished（Animation::finished，自然播完发射）——不能用 onCompleted：那是
                     // Component 的信号，Animation 没有 → QML 装载失败（t796 冒烟抓到：Main.qml 整体拒载）。
