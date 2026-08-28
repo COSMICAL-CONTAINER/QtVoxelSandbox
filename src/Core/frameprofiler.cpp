@@ -53,6 +53,14 @@ void FrameProfiler::count(const char *name)
     m_counts[name] += 1;
 }
 
+// t935：count 的批量版（+n）。与 count() 共用 m_counts / m_mutex（跨线程安全口径一致）。
+void FrameProfiler::addCount(const char *name, qint64 n)
+{
+    if (n <= 0) return; // 零增量不加键（保持「无事件 = 表无键」的读侧口径）
+    QMutexLocker lock(&m_mutex);
+    m_counts[name] += n;
+}
+
 // t933：读当前窗口计数（不清窗）。锁内查表；不存在 → 0。探针在事件前后各取一次快照做差分，
 //   不受 flush 清窗影响的前提是探针运行期间无 60-tick flush（矩阵探针无 PlayerController tick →
 //   flush 不触发；GUI 下探针短窗口内 flush 至多把差分切到新窗，行为退化而非错报，可接受）。
@@ -253,7 +261,9 @@ void FrameProfiler::flush()
     //   - tail = ai 后每帧段（流推 / 红闪 / 环境音 / 走相 / 击退 / 滑流 / 窒息节流帧）+ resting 复探 / 重力 /
     //     落地扫描尾段；
     //   - ltail = 循环尾（releaseSlot / flushPendingShots / tickBreeding / emit entitiesChanged 的 QML delegate
-    //     扇出 —— 47 槽 × ~12 revision 绑定 + 行走 mob MobModel 几何重建，与逐实体物理不同成本中心）。
+    //     扇出 —— t935 起粒度化：指纹差分只 bump 可见态真变的槽（emit/bump/fan 三计数见 mob 行尾），扇出
+    //     从「47 槽 × ~50 revision 绑定」收口到「bump 槽 × ~50」；行走 mob MobModel 几何重建仅发生在
+    //     bump 槽（setWalkPhase 量化 12 腿姿/cycle 不变），与逐实体物理不同成本中心）。
     //   诊断：phys 大时看本行即知「投射物 / 尸体 / 骑乘头段」「活体每帧物理尾段」还是「emit 扇出循环尾」；
     //   尾段大 + stF（下落态 mob-帧数）高 = resting↔下落振荡（每帧重力 + 落地扫描 + dirty bump）。
     const double mobHeadMs = mobSubMs("mobHead");
@@ -275,6 +285,14 @@ void FrameProfiler::flush()
         + " F " + QString::number(mobCnt("mobStFall"))
         + " V " + QString::number(mobCnt("mobStRide"))
         + " D " + QString::number(mobCnt("mobStDead")) + "]"
+        // t935 粒度化 revision 量化读数（1s 窗）：emit = entitiesChanged 漏斗次数；bump = 指纹差分实际
+        //   bump 的槽数（= 真被刷新的 delegate 数 —— 每槽 ~50 个 revision 绑定的重求值只发生在这些槽上）；
+        //   fan = 旧口径「count 槽 × 每 emit 全扇出」（修复前的实付成本口径）。bump << fan = 收口生效，
+        //   差值全部来自静置 mob / 空槽 / 跨世界高水位槽（t933 判决的 QML 侧残留嫌疑人，至此归零）。
+        //   bump ≈ fan = 本窗大量槽真在变（正常：全场 mob 行走中）——对照 stR 静置数判读是否异常。
+        + "  emit " + QString::number(mobCnt("mobEmitN"))
+        + " bump " + QString::number(mobCnt("mobBumpN"))
+        + " fan " + QString::number(mobCnt("mobFanN"))
         + "  hostile " + QString::number(mobSubMs("mobHostile"), 'f', 2)
         + "  spawn " + QString::number(mobSubMs("mobSpawn"), 'f', 2)
         + "  loop " + QString::number(mobLoopMs, 'f', 2);

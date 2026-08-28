@@ -13,6 +13,37 @@
 #include "world.h" // t738 爆炸失撑火把掉落 helper 入参用 World::DestroyedVoxel 嵌套类型（World 层在
                    //   Entities 之下，向下 include 合 PLAN §2 分层；World 不反向 include 本头，无环）
 
+// t935 perf 实体槽位 revision 监视器（粒度化 QML delegate 刷新的呈现层锚点）。
+//
+// 背景（用户实测 mob 行 ltail 10.59ms，t905 头号假设实锤）：单一全局 revision 计数器时代，一次
+//   entitiesChanged emit 激活**全部** N 槽 delegate 的全部 revision 绑定（mobHost delegate 每槽
+//   ~50 个 `{ revision; xxxAt(index) }` 绑定 + 行走 mob 的 MobModel 几何重建）。TNT 炸沙坑后槽高水位
+//   47（slot-reuse 单调不降），其中多数是已释放的空槽 / 未变化的静置 mob —— 每次	emit 照样全扇出，
+//   纯浪费（空槽绑定重读 aliveAt=false 返回默认值）。
+//
+// 修法（脏名单 / 按需槽刷新）：EntityManager 在每次统一 notify 前 做**槽位指纹差分**
+//   （slotFingerprint = 该槽全部 QML 可见字段的散列），只对「指纹真变了」的槽 bump 它的监视器
+//   revision → 仅该槽 delegate 的绑定重求值；未变槽零成本。delegate 侧绑定从 entityManager.revision
+//   迁到 mon.revision（mon = entityManager.slotMonitorAt(index)，delegate 创建时取一次、槽位稳定）。
+//
+// 生命周期：惰性创建（首个 delegate 询问该槽时），父对象 = EntityManager，**永不销毁**（QML delegate
+//   的 var 属性长期持引用；slot-reuse 模型下 index 稳定，同一槽恒同一 monitor 实例）。GUI 线程专用
+//   （EntityManager 全部写路径都在 GUI 线程 tick / 事件内，无锁必要，同 FrameProfiler 口径）。
+class EntitySlotMonitor : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
+public:
+    explicit EntitySlotMonitor(QObject *parent = nullptr) : QObject(parent) {}
+    int revision() const { return m_revision; }
+    // 槽位可见态变化时由 EntityManager::refreshSlotMonitors 调（NOTIFY → 仅本槽 delegate 绑定重求值）。
+    void bump() { ++m_revision; emit revisionChanged(); }
+signals:
+    void revisionChanged();
+private:
+    int m_revision = 0;
+};
+
 // 统一实体管理器（t95；Entities 层）。t239 扩展为「生物基类（AI/物理/血量/受击/死亡）」。
 //
 // 每个 Mob 实体 = {世界坐标 pos, 半径 radius, 可推动标志 pushable, 渲染外观（kind/color/mobType/blockId）,
@@ -78,6 +109,9 @@ class EntityManager : public QObject
     // 「触碰」绑定作 NOTIFY 触发器（同 Hotbar.slotRevision / ItemEntityManager.revision 模式）——
     // posAt/colorAt/yawAt/healthAt 是 Q_INVOKABLE 不被 NOTIFY 自动跟踪，需 { revision; posAt(i) } 显式建依赖，
     // push/下落/AI 移动/红闪/死亡后绑定才重算。
+    // t935：mobHost delegate 的绑定已迁到 EntitySlotMonitor.revision（每槽独立 NOTIFY，见 slotMonitorAt）——
+    //   本属性仍在每次 notify 自增（F3 / 遗留消费面兼容），但**不再被 delegate 绑定触碰** → 单次 emit 的
+    //   QML 绑定扇出从 count×~50 收口到「指纹变化的槽」×~50（ltail 10.59ms 的主体）。
     Q_PROPERTY(int revision READ revision NOTIFY entitiesChanged)
     // review26 #10 载具乘客钉位专用 revision：tickVehicleRiding 钉位值真变（= 载客矿车/船本帧移动）时每帧
     //   自增 + 发 ridersChanged（有界发射：仅该场景触发；静止 / 无乘客帧零发射）。mob delegate 的 position
@@ -100,6 +134,11 @@ public:
     // t256：第 i 个槽位是否活体（= 已分配未释放）。呈现层 delegate 据它 visible：空槽 → 隐藏整棵 delegate
     //   （slot 复用保 Repeater count 单调不降、delegate 永不销毁，空槽仅隐藏不重建）。越界 → false。
     Q_INVOKABLE bool aliveAt(int i) const;
+    // t935：第 i 槽的 revision 监视器（粒度化 delegate 刷新锚点，见 EntitySlotMonitor 头注释）。QML delegate
+    //   建立时取一次（`property var mon: entityManager.slotMonitorAt(index)`，index 稳定 → 引用终身有效），
+    //   绑定触碰 mon.revision → 仅本槽可见态变化（指纹差分，refreshSlotMonitors）时重求值。越界 → nullptr
+    //   （delegate 只对 < count 的 index 建立，正常路径不达）。返回 QObject* 免为新类型注册 QML 元类型。
+    Q_INVOKABLE QObject *slotMonitorAt(int i);
 
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
@@ -423,7 +462,7 @@ public:
     Q_INVOKABLE void clearAll() {
         for (size_t i = 0; i < m_entities.size(); ++i)
             if (m_entities[i].alive) releaseSlot(int(i));
-        emit entitiesChanged();
+        notifyEntitiesChanged(); // t935 统一漏斗（含槽位指纹差分 → 释放槽 bump 隐藏；裸 emit 不刷指纹）
     }
 
     // 第 i 个实体的渲染数据（呈现层 Repeater delegate 绑它摆位 + 配色）。越界返回安全默认。
@@ -1463,6 +1502,14 @@ private:
     //   钳制（≤64 槽），与既有「峰值并发实体数」同量级，无额外常驻开销。
     std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
+    // t935 perf 粒度化 revision 的槽位状态（见 EntitySlotMonitor 头注释）：
+    //   m_slotMonitors[i] = 槽 i 的监视器（QML delegate 首次询问时惰性创建；父对象 = this，永不销毁——
+    //     delegate 的 var 引用终身有效；nullptr = 该槽尚无 delegate，无需 bump）。
+    //   m_slotFp[i] = 上次 notify 时槽 i 的可见态指纹（slotFingerprint）。与 m_entities 同步增长（resize
+    //     只增不减，新槽初值 ~0 = 必不等于首算指纹 → 首 notify 必 bump，保证 delegate 建立后首刷不丢）。
+    //   两向量在 refreshSlotMonitors 内维护，全部 GUI 线程访问（同 m_entities 写路径），无锁。
+    std::vector<EntitySlotMonitor *> m_slotMonitors;
+    std::vector<quint64> m_slotFp;
     // t280 黑暗刷怪 spawn 节流累积器（秒）：tickHostileLife 每 tick 累加 dt，达 kSpawnInterval 才尝试一次 spawn
     //   周期（kSpawnAttempts 次选点）。独立于物理 / AI 的 tick（tick 每 16ms 跑、spawn 每 kSpawnInterval 秒跑一次，
     //   节流避免每帧扫几千次 blockAt）。PlayerController 唯一调 tickHostileLife → 累加器随其 60Hz tick 推进。
@@ -1500,6 +1547,18 @@ private:
     std::vector<PendingFireball> m_pendingFireballs;
     std::vector<PendingArrow> m_pendingArrows;
     void flushPendingShots(); // tick 主循环外统一生成 pending 火球 / 箭（见实现注释）
+
+    // t935 perf 统一 notify 漏斗：++m_revision + 槽位指纹差分（refreshSlotMonitors，只 bump 可见态真变的槽
+    //   的 EntitySlotMonitor）+ emit entitiesChanged。全部「实体集有变」的发射点（spawn / damage / 剪毛 /
+    //   tick 节流尾 …原 35 处 ++m_revision+emit 对）收口到本函数 —— 单点保证「每次 emit 前指纹已对齐」，
+    //   漏走漏斗的裸 emit 会造成指纹滞后（下次 notify 补刷，一帧内自愈）而非丢更新。
+    void notifyEntitiesChanged();
+    // 槽位可见态指纹差分 → 按槽 bump 监视器 + FrameProfiler 计数（mobEmitN/mobBumpN/mobFanN，F3 mob 行
+    //   读出「实际刷新槽数 bump vs 旧口径全扇出 fan」= t935 收口效益的量化面）。
+    void refreshSlotMonitors();
+    // 槽 i 的 QML 可见字段散列（mobHost delegate 绑定读到的 At() 访问器底层字段集，逐字段清单见实现注释；
+    //   **新增 At() 访问器必须同步本清单**，否则新字段变化不 bump → delegate 停更——两侧注释互指钉死）。
+    quint64 slotFingerprint(size_t i) const;
 
     // 把构造好的实体放入槽位（优先复用空槽，否则追加）。move 入槽后 alive=true（Entity 默认）。++m_liveCount。
     int acquireSlot(Entity &&e)
