@@ -17404,9 +17404,10 @@ Item {
                         && m.lastIndexOf(QStringLiteral("Column {"), iProf) == iCol;          // 两 Text 同 Column
         bool okOldGone = !m.contains(QStringLiteral("y: 62 + 200"));
         const int iFn = m.indexOf(QStringLiteral("function buildF3Text()"));
-        // t857 起函数体加长（renderStats 真值段 + 注释）→ 切片窗 4200→5200（钉的是内容 token，窗口须覆盖
-        //   增长后的函数；窗口不足会把仍在函数内的钉 token 误判为消失 = 假红）。
-        const QString fn = iFn >= 0 ? m.mid(iFn, 5200) : QString();
+        // t857 起函数体加长（renderStats 真值段 + 注释）→ 切片窗 4200→5200；t934 再加 render-side 真值行
+        //   （+~3.5k：gpu/prep/vmem 常量 + 行拼接 + 判读注释）→ 8736 → 窗 9600（钉的是内容 token，窗口须
+        //   覆盖增长后的函数；窗口不足会把仍在函数内的钉 token 误判为消失 = 假红）。
+        const QString fn = iFn >= 0 ? m.mid(iFn, 9600) : QString();
         bool okMc = fn.contains(QStringLiteral("\"voxelsandbox (\" + BuildInfo.full"))
                     && fn.contains(QStringLiteral("\\nx: \""))
                     && fn.contains(QStringLiteral(" // \""))
@@ -19789,6 +19790,112 @@ Item {
                              "(slot high-water delegate fanout = t935; render-side waitSync = t934, "
                              "now observable via the F3 'act ct' line)"
                              ;
+    }
+
+    // ── P-t934 waitSync 渲染侧归因插桩探针（dev-plan R19.17 性能批二；t933 act-ct 先例的渲染线程侧续篇）──
+    //   背景：用户实测 frame2 行 waitSync 76ms 一家独大而 render_cpu ~7ms / RenderStats render ~1ms——
+    //   GUI 在同步屏障阻塞 76ms，渲染 pass 本身不慢。机械链（main.cpp t934 注释）：渲染线程要跑完上一帧的
+    //   [渲染 pass + present/vsync 阻塞 + 帧尾清理] 才到屏障 → 时间去向只剩三汇：①GPU/present bound
+    //   （真 GPU 时间此前无测量面）②渲染线程 prep/上传风暴（mesh 重建的渲染侧回声）③渲染合帧/hook 多发
+    //   （测量口径，非独立开销）。矩阵 rig 无 GUI、渲染线程路径不可直达 → 交付 = 插桩 + 判读面，钉三级：
+    //   (a) 行为级（Core 直达）：FrameProfiler 样本计数 roundtrip——addSampleMs 每有效样本给 "cnt:<name>"
+    //       +1（ms<=0 被忽略的样本不计数）+ flush 报告把帧段拼 "ms(N)" 且含新 fPresent 段。(N) 判据的数据面：
+    //   拥塞下 animation tick 每事件循环回合一拍而渲染按 vsync 合帧 → 某段 N > main 的 N = 恒等式不可加
+    //   （用户实测 main 88.4 vs 四段和 150.4 的机械解释）。
+    //   (b) 源码钉 main.cpp + frameprofiler.cpp：fPresent 段接线——afterRendering（渲染线程 DirectConnection）
+    //       记 afterRenderDoneNs、frameSwapped（GUI 收到）结清 fPresent = present 阻塞 + queued 派发延迟；
+    //       计数 bump 语句本体。
+    //   (c) 源码钉 Main.qml：F3 render-side 行读 RenderStats 的 lastCompletedGpuTime（真 GPU ms，perf-t520
+    //       「无 GPU 计时」诚实标注的补面）/ renderPrepareTime / frameTime / syncTime / vmemUsedBytes——①②
+    //   的实机判读面（waitSync 大时 gpu 大 → ①；prep 大 + mesh reb 非 0 → ②；都小 → ③看 (N)）。
+    {
+        // (a) 行为级：计数 roundtrip + 报告格式（先 flush 清窗防此前 World 计数残留；tickFrame 保除数 ≥1）。
+        FrameProfiler *fp934 = FrameProfiler::instance();
+        fp934->tickFrame();
+        fp934->flush(); // 清窗 + 基线（frames=1 全零）
+        fp934->addSampleMs(QStringLiteral("t934probe"), 1.5);
+        fp934->addSampleMs(QStringLiteral("t934probe"), 2.5);
+        fp934->addSampleMs(QStringLiteral("t934probe"), 0.0);  // ms<=0：被忽略 → 不得计数
+        fp934->addSampleMs(QStringLiteral("t934probe"), -1.0); // 同上
+        const qint64 n934 = fp934->countValue("cnt:t934probe"); // == 2（只数有效样本）
+        for (int i = 0; i < 2; ++i) fp934->tickFrame();         // 本窗 frames=2
+        fp934->addSampleMs(QStringLiteral("fWaitSync"), 10.0);
+        fp934->addSampleMs(QStringLiteral("fWaitSync"), 20.0);
+        fp934->addSampleMs(QStringLiteral("fPresent"), 5.0);
+        fp934->flush();
+        const QString rep934 = fp934->report();
+        const bool okA1 = n934 == 2;
+        const bool okA2 = rep934.contains(QStringLiteral("waitSync 15.0(2)")); // (10+20)ms / 2 帧
+        const bool okA3 = rep934.contains(QStringLiteral("present 2.5(1)"));  // 5ms / 2 帧
+        const bool okA4 = rep934.contains(QStringLiteral("(N)=samples/win")); // 判据图例在报告内
+        const bool okA = okA1 && okA2 && okA3 && okA4;
+        // (b) 源码钉：fPresent 接线（代码形态字面量——注释不含这些精确串）。
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        auto readSrc934 = [&root](const QString &rel) -> QString {
+            QFile f(root + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mcs934 = readSrc934(QStringLiteral("main.cpp"));
+        const bool okB1 = mcs934.contains(
+            QStringLiteral("addSampleMs(QStringLiteral(\"fPresent\")"));
+        const bool okB2 = mcs934.contains(
+            QStringLiteral("*afterRenderDoneNs = FrameProfiler::nowNs();"));
+        const bool okB3 = mcs934.contains(
+            QStringLiteral("double(now - *afterRenderDoneNs) / 1e6"));
+        const QString fpc934 = readSrc934(QStringLiteral("src/Core/frameprofiler.cpp"));
+        const bool okB4 = fpc934.contains(
+            QStringLiteral("m_counts[\"cnt:\" + name.toStdString()] += 1;"));
+        const bool okB = okB1 && okB2 && okB3 && okB4;
+        // (c) 源码钉：F3 render-side 真值行（RenderStats 6.11 Q_PROPERTY 名逐一钉——名字写错 = 运行期
+        //     TypeError 静默断行，F3 行消失；本钉让改名 / 删行在矩阵红）。
+        const QString qml934 = readSrc934(QStringLiteral("src/ui/Main.qml"));
+        const bool okC1 = qml934.contains(QStringLiteral("rs.lastCompletedGpuTime"))
+                       && qml934.contains(QStringLiteral("rs.renderPrepareTime"))
+                       && qml934.contains(QStringLiteral("rs.frameTime"))
+                       && qml934.contains(QStringLiteral("rs.syncTime"))
+                       && qml934.contains(QStringLiteral("rs.vmemUsedBytes"));
+        const bool okC2 = qml934.contains(QStringLiteral("\\nrender-side: frame "));
+        const bool okC = okC1 && okC2;
+        const bool okT934 = okA && okB && okC;
+        if (!okT934) ++totalFail;
+        if (!okT934)
+            qInfo().noquote() << "  [t934 diag] a" << okA << "(cnt" << okA1 << n934
+                              << "ws" << okA2 << "pr" << okA3 << "legend" << okA4 << ")"
+                              << "| b" << okB << "(wire" << okB1 << okB2 << okB3 << "bump" << okB4 << ")"
+                              << "| c" << okC << "(props" << okC1 << "line" << okC2 << ")"
+                              << "| srcLen main" << mcs934.size() << "fp" << fpc934.size()
+                              << "qml" << qml934.size();
+        qInfo().noquote() << (okT934 ? "PASS" : "FAIL")
+                          << "| t934 waitSync render-side attribution instrumentation: the 76ms "
+                             "GUI block at the sync barrier is mechanically [render pass + "
+                             "present/vsync + post-frame cleanup] of the PREVIOUS frame on the "
+                             "render thread (render_cpu small => time went to one of three "
+                             "sinks); this task delivers the discriminating instrumentation: "
+                             "(1) fPresent bucket (afterRendering on the render thread -> "
+                             "frameSwapped receipt on GUI = present blocking + queued dispatch, "
+                             "wired in main.cpp), (2) per-bucket sample counts (N) on the frame/"
+                             "frame2 report lines (denominator mismatch = hook coalescing under "
+                             "congestion -- the mechanical explanation for the user's "
+                             "four-segment sum 150.4 vs main_total 88.4; a segment's N exceeding "
+                             "main's N means the identity is not additive, not extra cost), "
+                             "(3) the F3 render-side truth line from View3D.renderStats: "
+                             "frameTime/syncTime/renderPrepareTime plus lastCompletedGpuTime "
+                             "(TRUE GPU ms via RHI timestamp queries, closing the perf-t520 "
+                             "'no GPU timing' honesty gap) and vmemUsedBytes (monotonic vmem "
+                             "growth across world switches that only a process restart clears = "
+                             "the process-level GPU leak signature); read-out guide: waitSync "
+                             "big + gpu big => GPU/present bound (treat via renderDistance/"
+                             "segment folding/overdraw), waitSync big + prep big + win-line "
+                             "mesh reb nonzero => render-thread upload/rebuild storm (the "
+                             "t930/t933 storm's render-side echo), both small + N mismatch => "
+                             "frame coalescing (measurement caliber); probe legs: (a) behavioral "
+                             "count roundtrip on FrameProfiler (ignored ms<=0 samples must not "
+                             "count, report formats 'ms(N)' including the new present field), "
+                             "(b) source-pin the fPresent wiring + count bump, (c) source-pin "
+                             "the F3 render-side property reads (a typo'd property name would "
+                             "silently kill the line at runtime -- TypeError, headless-invisible)"
+                          ;
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

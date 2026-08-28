@@ -107,8 +107,14 @@ public:
     //   动态 QString（addSampleMs 内部转 std::string 做 unordered_map 键）。QML 侧（BlockParticles.qml
     //   的 50Hz Timer）与 C++ 侧（main.cpp 的 frameSwapped / beforeRendering / afterRendering）共用本入口。
     //   跨线程安全：内部加 QMutex（render_cpu 由渲染线程发射、main_total 由 GUI 线程发射 → 必须锁）。
-    //   ms<=0 忽略（防 0 / 负值噪声）。分层（PLAN §2）：Core 叶子，仅依赖 Qt Core/Qml；QML 经
-    //   QML_NAMED_ELEMENT 单例访问，C++ 经 instance() 访问。
+    //   ms<=0 忽略（防 0 / 负值噪声）——被忽略的样本**不**计数（见下）。分层（PLAN §2）：Core 叶子，仅依赖
+    //   Qt Core/Qml；QML 经 QML_NAMED_ELEMENT 单例访问，C++ 经 instance() 访问。
+    // t934 样本计数：每次有效样本（ms>0）同时给 "cnt:<name>" 计数桶 +1（与 count() 共用 m_counts）。
+    //   动机：t904 四段恒等式（main_total ≈ idleA+waitSync+qmlSync+idleB）在拥塞帧下失准（用户实测
+    //   88.4 vs 四段和 150.4）——各段按「事件发生」计样本、main_total 按「frameSwapped 到达 GUI」计，
+    //   渲染合帧 / hook 多发时分母不一致，恒等式不可加。报告把每段样本数 (N) 显式拼出（flush 的
+    //   frame / frame2 行），N 不齐本身就是判据（animation tick 每事件循环回合一拍、渲染按 vsync
+    //   合帧 → waitSync 每渲染帧可能多样本）。探针可经 countValue("cnt:<name>") 读。
     Q_INVOKABLE void addSampleMs(const QString &name, double ms);
 
 signals:

@@ -70,9 +70,10 @@ qint64 FrameProfiler::countValue(const char *name) const
 //   GUI 线程发射 → 两个线程并行写 m_ns 不加锁会 hash race 崩 / 数字乱跳。
 void FrameProfiler::addSampleMs(const QString &name, double ms)
 {
-    if (ms <= 0.0) return; // 防 0 / 负值（Date.now 精度噪声 / 首帧边界）
+    if (ms <= 0.0) return; // 防 0 / 负值（Date.now 精度噪声 / 首帧边界）；被忽略样本不计数（见 .h t934 注释）
     QMutexLocker lock(&m_mutex);
     m_ns[name.toStdString()] += qint64(ms * 1e6);
+    m_counts["cnt:" + name.toStdString()] += 1; // t934 样本计数（每窗各桶被推样本次数；报告拼 (N)）
 }
 
 qint64 FrameProfiler::bucketLocked(const char *name) const
@@ -185,6 +186,16 @@ void FrameProfiler::flush()
     // 瓶颈标注：max 一侧标 *（视觉提示「这一侧是瓶颈」），近相等标 ≈。
     const QLatin1String mainTag = (mainMs >= renderMs && mainMs > 0.0) ? QLatin1String("*") : QLatin1String(" ");
     const QLatin1String renderTag = (renderMs > mainMs && renderMs > 0.0) ? QLatin1String("*") : QLatin1String(" ");
+    // t934 段格式化："ms(N)" —— N = 本窗该桶被推样本次数（cnt:<name> 计数桶）。动机：四段恒等式
+    //   （main ≈ idleA+waitSync+qmlSync+idleB）只在「各段样本数 == main_total 样本数」时可加；拥塞下
+    //   animation tick 每事件循环回合一拍而渲染按 vsync 合帧 → waitSync / idleB 可能每渲染帧多样本，
+    //   ÷ 同一 frames 的均值不可加（用户实测 main 88.4 vs 四段和 150.4 的机械解释）。N 不齐本身即判据。
+    const auto segN = [this, f](const char *key) {
+        const double ms = double(bucketLocked(key)) / 1e6 / f;
+        auto it = m_counts.find(std::string("cnt:") + key);
+        const qint64 n = it == m_counts.end() ? 0 : it->second;
+        return QString::number(ms, 'f', 1) + QLatin1Char('(') + QString::number(n) + QLatin1Char(')');
+    };
     // t488 perf residual 残留桶：main_total 与「已知桶（sim 逐帧和 + qmlSync）」之差，显式量化主线程帧周期内
     //   没被 sim/qmlSync 覆盖的部分（事件循环 / QML binding 同步外开销 / mesh 重建 / 等渲染线程）。诊断公式：
     //   main ≈ sim + qmlSync + residual。residual 大时对照 render_cpu：
@@ -194,11 +205,11 @@ void FrameProfiler::flush()
     //       高水位）→ 去那侧查。residual 可为负（main_total 样本与 tick 帧数不对齐的测量噪声，负值即噪声标志）。
     const double residualMs = mainMs - simMs - syncMs;
     QString frameLine = QStringLiteral("frame ms/f: ")
-        + "main" + mainTag + QString::number(mainMs, 'f', 1)
-        + "  render" + renderTag + QString::number(renderMs, 'f', 1)
-        + "  qmlSync " + QString::number(syncMs, 'f', 1)
+        + "main" + mainTag + segN("main_total")
+        + "  render" + renderTag + segN("render_cpu")
+        + "  qmlSync " + segN("qmlSync")
         + "  residual " + QString::number(residualMs, 'f', 1)
-        + "  (frame≈max(main,render); main≈sim+qmlSync+residual; residual=未插桩/等渲染)";
+        + "  (frame≈max(main,render); main≈sim+qmlSync+residual; residual=未插桩/等渲染; (N)=samples/win)";
     // t904 perf residual 四段归因行：main.cpp 的渲染管线 hook（frameSwapped/afterAnimating/beforeSynchronizing/
     //   afterSynchronizing）把 GUI 线程帧周期切成 idleA / waitSync / qmlSync / idleB 四段（构造上 main_total ≈
     //   四段之和）→ residual ≈ evA + waitSync + idleB（evA = idleA − sim：idleA 内含 16ms 游戏 tick，sim 桶已计，
@@ -209,15 +220,25 @@ void FrameProfiler::flush()
     //       basic 单线程循环 = 渲染本体在 GUI 线程跑（idleB ≈ render_cpu + present）；
     //     - 某段恒 0 且其它段非 0 = 该 hook 未发（basic 循环不发 afterAnimating → evA/waitSync 恒 0 本身即判据）。
     const double idleAMs = frameMs("fIdleA");
-    const double waitSyncMs = frameMs("fWaitSync");
-    const double idleBMs = frameMs("fIdleB");
     const double evAMs = idleAMs - simMs; // idleA 内 sim 已单列 → 差值 = 非 sim 事件段（可为负 = 测量噪声标志）
+    // t934 waitSync 归因行（dev-plan：渲染线程同步等待 76ms 一家独大的解剖）。waitSync = GUI 阻塞等渲染
+    //   线程抵达同步屏障；渲染线程要跑完上一帧的 [渲染 pass（render_cpu / RenderStats renderTime）+
+    //   present/vsync 阻塞（fPresent 桶）+ 帧尾清理] 才到屏障。render_cpu 小而 waitSync 大时的三个候选汇
+    //   （实机判读 = F3 render-side 行 + 本行）：
+    //     ① GPU 过载 / present 排队 → F3 render-side 行 gpu（RenderStats.lastCompletedGpuTime，真 GPU ms）
+    //       同量级大 + 本行 present 大（fPresent = afterRendering[渲染线程]→frameSwapped[GUI 收到] =
+    //       present 阻塞 + 队列派发延迟，main.cpp t934 新增）；
+    //     ② 渲染线程 prep / 上传风暴（mesh 重建 → 顶点缓冲重传 / 渲染列表重建，t933 风暴的渲染侧回声）
+    //       → F3 render-side 行 prep（RenderStats.renderPrepareTime）大 + win 行 mesh reb 计数非 0；
+    //     ③ 渲染合帧 / hook 多发 → 某段 N > main 的 N（恒等式不可加，非独立开销）。
     QString frame2Line = QStringLiteral("frame2 ms/f: ")
         + "evA " + QString::number(evAMs, 'f', 1)
-        + "  waitSync " + QString::number(waitSyncMs, 'f', 1)
-        + "  idleB " + QString::number(idleBMs, 'f', 1)
+        + "  waitSync " + segN("fWaitSync")
+        + "  idleB " + segN("fIdleB")
+        + "  present " + segN("fPresent")
         + "  (residual≈evA+waitSync+idleB; evA=idleA−sim=QML绑定/其它Timer/空闲; idleA "
-        + QString::number(idleAMs, 'f', 1) + ")";
+        + QString::number(idleAMs, 'f', 1)
+        + "; N不齐=段不可加(合帧/hook多发); waitSync大→看F3 render-side行 gpu/prep + present)";
 
     // t500 perf mob 子分解（逐帧 ms/f，÷ frames）：mob 桶（PlayerController tickImpl 整段）拆成 mobLoop
     //   （EntityManager::tick）/ mobHostile（tickHostileLife）/ mobSpawn（tickSpawners）三函数，mobLoop 再拆
