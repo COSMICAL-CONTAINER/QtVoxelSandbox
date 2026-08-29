@@ -23878,6 +23878,220 @@ Item {
                              "anchor)";
     }
 
+    // ── t956 附魔台 / 铁砧创造中键复制补口（源码钉 ×2 + 真 QML×真 C++ Hotbar 行为腿；R19.17）──
+    //    用户第五轮实测：「附魔台/铁砧 UI 创造中键复制返修（t896 链在这两个 UI 不管用了）」。根因：
+    //    t653①/t896 的中键复制只落在 Inventory 面板（调色板 / 护甲 / craft / main / hotbar 五面），
+    //    EnchantingTableUI / AnvilUI 的槽交互面只有左/右两个 TapHandler —— acceptedButtons 漏中键，
+    //    中键分支整个缺席（不是坏了，是从来没接过）。钉四面：
+    //    ① 两面板各持面板级 copyStackToCursor（口径逐字对齐 Inventory.qml 单一权威：maxStackSize(id)
+    //       整组数量 + list4 序列归一（t874）+ 实例元数据保真；旧 min(count,…) 翻倍形态必须绝迹）；
+    //    ② 两面板各恰 3 个中键 TapHandler（附魔台 = EnchantInputSlot 组件（覆盖 0/1 两实例）+ main 行 +
+    //       hotbar 行；铁砧 = AnvilSlot 组件（覆盖左/右输入两实例）+ main 行 + hotbar 行），且每分支
+    //       400 字符内同现 enabled: root.creativeMode 创造门（t288 中键 pick 仅创造）与复制调用；
+    //    ③ 铁砧产物预览槽排除钉逐字（enabled: root.creativeMode && !aslot.preview）—— 预览 slotId 是
+    //       投射产物非实有物品，中键复制 = 绕过 takeProduct 消耗凭空量产（同 Inventory.qml 合成
+    //       结果槽无中键的先例）；
+    //    ④ 行为腿（t874 真链 harness 先例；真中键事件投递在该 harness 已证不可达 —— 合成 QMouseEvent
+    //       走 TapHandler 有不可消除的拖动伪影，故按其「函数链直调」定案）：源树 AnvilUI.qml 经临时
+    //       目录直载 + 真 Hotbar VM，直调 copyStackToCursor —— 断言满栈复制（源槽 5 件方块 → 光标 64
+    //       整组，非 min(5,64)=5）、工具整组=1、实例元数据（耐久 / 附魔 / 名）保真、旧光标手持被覆盖、
+    //       空槽 no-op。（中键事件路由面与 enabled 门由 ①②③ 源码钉承载 —— QML 事件路由 C++ 矩阵全盲，
+    //       同 t918 口径。）
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile ef956(root + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
+        const QString e956 = ef956.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef956.readAll()) : QString();
+        QFile af956(root + QStringLiteral("/src/ui/AnvilUI.qml"));
+        const QString a956 = af956.open(QIODevice::ReadOnly) ? QString::fromUtf8(af956.readAll()) : QString();
+        // ① 面板级复制函数：数量权威 + 序列归一 + 元数据保真三要素在函数体内；旧 min(count,…) 绝迹。
+        auto copyBodyOk = [](const QString &s) {
+            const int iFn = s.indexOf(QStringLiteral("function copyStackToCursor"));
+            if (iFn < 0) return false;
+            const QString fn = s.mid(iFn, 700);
+            return fn.contains(QStringLiteral("heldCount = root.hotbar.maxStackSize(id)"))
+                    && fn.contains(QStringLiteral("InventoryOps.list4(enchants)"))
+                    && fn.contains(QStringLiteral("heldDurability = (durability > 0) ? durability : 0"))
+                    && !s.contains(QStringLiteral("Math.min(count"));
+        };
+        // ② 逐分支钉：每个中键 TapHandler 的邻近段同现创造门与复制调用（缺门 / 缺调用的散写分支即红）。
+        auto midHandlersOk = [](const QString &s) {
+            int pos = -1, n = 0;
+            while ((pos = s.indexOf(QStringLiteral("acceptedButtons: Qt.MiddleButton"), pos + 1)) >= 0) {
+                ++n;
+                const QString seg = s.mid(pos, 400);
+                if (!seg.contains(QStringLiteral("enabled: root.creativeMode"))
+                        || !seg.contains(QStringLiteral("root.copyStackToCursor(")))
+                    return false;
+            }
+            return n == 3;
+        };
+        const bool okDefE = copyBodyOk(e956);
+        const bool okDefA = copyBodyOk(a956);
+        const bool okMidE = midHandlersOk(e956);
+        const bool okMidA = midHandlersOk(a956);
+        // ③ 铁砧预览排除（逐字；QML 事件面无 static_assert 可用，源码即契约）。
+        const bool okPreviewA = a956.contains(QStringLiteral("enabled: root.creativeMode && !aslot.preview"));
+
+        // ④ 行为腿：最小真链 harness（同 t874 装配法：临时目录逃离 qrc 重映射 + 私有 URI + wrapper 作用域）。
+        static bool sT956TypesRegistered = false;
+        if (!sT956TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT956", 1, 0, "Hotbar");
+            qmlRegisterType<PlayerState>("VoxelSandboxProbeT956", 1, 0, "PlayerState");
+            qmlRegisterType<PlayerController>("VoxelSandboxProbeT956", 1, 0, "PlayerController");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT956", 1, 0, "ResourcePackManager");
+            sT956TypesRegistered = true;
+        }
+        bool behavOk = false;
+        QString behavDiag;
+        const QString uiDir956 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUiDir = QDir::temp().absoluteFilePath(
+                QStringLiteral("t956_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUiDir);
+        for (const QString f : { QStringLiteral("AnvilUI.qml"), QStringLiteral("InventoryOps.js"),
+                                 QStringLiteral("InvSlot.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("MaterialIcon.qml") }) {
+            QFile::remove(probeUiDir + QLatin1Char('/') + f);
+            QFile(uiDir956 + QLatin1Char('/') + f).copy(probeUiDir + QLatin1Char('/') + f);
+        }
+        {
+            const QUrl jsUrl = QUrl::fromLocalFile(probeUiDir + QLatin1Char('/') + QStringLiteral("InventoryOps.js"));
+            const QStringList qmlFiles = QDir(probeUiDir).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles) {
+                QFile p(probeUiDir + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import \"InventoryOps.js\" as InventoryOps"),
+                          QStringLiteral("import \"") + jsUrl.toString() + QStringLiteral("\" as InventoryOps"));
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT956\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine956;
+        Hotbar vm956;
+        PlayerState ps956;
+        engine956.rootContext()->setContextProperty(QStringLiteral("t956Hotbar"), &vm956);
+        QQmlComponent wrapComp956(&engine956);
+        wrapComp956.setData(R"QML(import QtQuick
+Item {
+    id: window
+    width: 800; height: 600
+    property bool shiftHeld: false
+    function refocusKeyInput() { }
+    function closeAnvil() { }
+}
+)QML", QUrl());
+        QQuickItem host956;   // 独立场景根（无窗口，同 t874）
+        QObject *anvil956 = nullptr;
+        QFile anvilSrc956(probeUiDir + QLatin1Char('/') + QStringLiteral("AnvilUI.qml"));
+        if (wrapComp956.isError()) {
+            behavDiag = QStringLiteral("wrapper: ") + wrapComp956.errorString();
+        } else if (!anvilSrc956.open(QIODevice::ReadOnly)) {
+            behavDiag = QStringLiteral("AnvilUI read failed");
+        } else {
+            QQuickItem *wrapItem = qobject_cast<QQuickItem *>(wrapComp956.create());
+            if (!wrapItem) {
+                behavDiag = QStringLiteral("wrapper create failed");
+            } else {
+                wrapItem->setParent(&engine956);
+                wrapItem->setParentItem(&host956);
+                QQmlComponent anvilComp956(&engine956);
+                anvilComp956.setData(anvilSrc956.readAll(), QUrl::fromLocalFile(anvilSrc956.fileName()));
+                if (anvilComp956.isError()) {
+                    behavDiag = QStringLiteral("AnvilUI load: ") + anvilComp956.errorString();
+                } else {
+                    anvil956 = anvilComp956.create(qmlContext(wrapItem));
+                    QQuickItem *ai = qobject_cast<QQuickItem *>(anvil956);
+                    if (!ai) {
+                        behavDiag = QStringLiteral("AnvilUI create: ") + anvilComp956.errorString();
+                    } else {
+                        anvil956->setProperty("hotbar", QVariant::fromValue(&vm956));
+                        anvil956->setProperty("playerState", QVariant::fromValue(&ps956));
+                        anvil956->setProperty("player", QVariant());
+                        anvil956->setProperty("progress", QVariant());
+                        ai->setWidth(800);
+                        ai->setHeight(600);
+                        anvil956->setParent(wrapItem);
+                        ai->setParentItem(wrapItem);
+                    }
+                }
+            }
+        }
+        if (!anvil956) {
+            behavOk = false;
+        } else {
+            QCoreApplication::processEvents();
+            const int stoneT = int(BR::Stone);
+            const int swordT = int(ToolRegistry::DiamondSword);
+            const int sharp3T = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+            auto invokeCopy = [anvil956](int id, int count, int dur, const QVariantList &ench, const QString &name) {
+                return QMetaObject::invokeMethod(anvil956, "copyStackToCursor",
+                                                 Q_ARG(QVariant, QVariant(id)), Q_ARG(QVariant, QVariant(count)),
+                                                 Q_ARG(QVariant, QVariant(dur)), Q_ARG(QVariant, QVariant(ench)),
+                                                 Q_ARG(QVariant, QVariant(name)));
+            };
+            // 断言面（do/while(0) 顺序步进，首个失败步留 diag 短路余下步）：
+            do {
+                // (1) 满栈复制：源槽 5 件方块 → 光标 64 整组（t896 数量权威，非 min(5,64)=5）+ 旧光标被覆盖。
+                vm956.setHeldBlock(int(RecipeRegistry::BucketEmptyId));   // 预置旧光标手持 → 应被覆盖（创造归还虚空同效）
+                if (!invokeCopy(stoneT, 5, 0, { 0, 0, 0, 0 }, QString())) { behavDiag = QStringLiteral("invoke stone failed"); break; }
+                if (vm956.heldBlock() != stoneT || vm956.heldCount() != vm956.maxStackSize(stoneT)) {
+                    behavDiag = QStringLiteral("stone full-stack: held ") + QString::number(vm956.heldBlock())
+                                 + QStringLiteral(" x") + QString::number(vm956.heldCount());
+                    break;
+                }
+                if (vm956.heldDurability() != 0 || !vm956.heldCustomName().isEmpty()) { behavDiag = QStringLiteral("stone metadata leak"); break; }
+                // (2) 工具实例保真：整组=1 + 耐久 / 附魔 / 名随实例复制（非「创造取新」的清零路径）。
+                if (!invokeCopy(swordT, 1, 37, { sharp3T, 0, 0, 0 }, QStringLiteral("改名剑"))) { behavDiag = QStringLiteral("invoke sword failed"); break; }
+                if (vm956.heldBlock() != swordT || vm956.heldCount() != 1) {
+                    behavDiag = QStringLiteral("sword stack: ") + QString::number(vm956.heldCount());
+                    break;
+                }
+                if (vm956.heldDurability() != 37) {
+                    behavDiag = QStringLiteral("sword durability lost: ") + QString::number(vm956.heldDurability());
+                    break;
+                }
+                const QVariantList he = vm956.heldEnchants();
+                if (he.size() != 4 || he.at(0).toInt() != sharp3T) { behavDiag = QStringLiteral("sword ench lost (list4 chain)"); break; }
+                if (vm956.heldCustomName() != QStringLiteral("改名剑")) {
+                    behavDiag = QStringLiteral("sword name lost: ") + vm956.heldCustomName();
+                    break;
+                }
+                // (3) 空槽 no-op：光标仍持改名剑（复制面只认实有物品格）。
+                if (!invokeCopy(0, 0, 0, { 0, 0, 0, 0 }, QString())) { behavDiag = QStringLiteral("invoke empty failed"); break; }
+                if (vm956.heldBlock() != swordT || vm956.heldCustomName() != QStringLiteral("改名剑")) { behavDiag = QStringLiteral("empty-slot copy clobbered cursor"); break; }
+                behavOk = true;
+            } while (false);
+        }
+        QDir(probeUiDir).removeRecursively();
+
+        const bool ok956 = okDefE && okDefA && okMidE && okMidA && okPreviewA && behavOk;
+        if (!ok956)
+            qInfo().noquote() << "  [t956 diag] defE" << okDefE << "defA" << okDefA << "midE" << okMidE
+                              << "midA" << okMidA << "preview" << okPreviewA << "behav" << behavOk
+                              << behavDiag;
+        if (!ok956) ++totalFail;
+        qInfo().noquote() << (ok956 ? "PASS" : "FAIL")
+                          << "| t956 enchanting/anvil creative middle-click copy: the t896 chain now reaches "
+                             "both block-adjacent workstations - each panel carries a panel-level "
+                             "copyStackToCursor (verbatim Inventory.qml caliber: maxStackSize full-stack "
+                             "quantity, list4 sequence normalization, durability/enchant/name instance "
+                             "fidelity) and exactly three middle-button TapHandlers (input-slot component "
+                             "+ main row + hotbar row) each creative-gated; the anvil product-preview slot "
+                             "is excluded verbatim (copying a projected output would bypass takeProduct "
+                             "consumption, same precedent as the crafting result slot); behavioral leg "
+                             "drives the real AnvilUI.qml against the real Hotbar VM: 5-item stone source "
+                             "copies as a 64 stack (not min(5,64)), tool copies as 1 with durability 37 / "
+                             "sharpness-3 / custom name intact, stale cursor overwritten, empty slot no-op";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
