@@ -1,6 +1,7 @@
 #include "playercontroller.h"
 #include "playerstate.h" // t311 DeathCause 枚举（致死来源区分：Fall/Suffocation/Drowning/Starvation）
 #include "loottable.h"   // t401 钓鱼获物池（fishingPool / roll）；同层 Game，向下依赖 Core
+#include "armor.h"       // t950 mob 装备拾取：护甲段判定 / 部位 / 护甲点数（同层 Game 纯表，向下依赖 Core）
 #include "world.h"
 
 #include "frameprofiler.h" // perf：帧时间分解探针（tickImpl 各阶段 Scope + 1s 窗口 flush）
@@ -914,6 +915,11 @@ void PlayerController::tickImpl()
     // t323 嵌入箭近距拾取（与掉落物拾取同级常开：背包开 / 失焦时玩家仍可走近拾嵌入箭）。内自检
     //   m_entityManager/m_hotbar 非空 + 死亡 / 观察者门控，常开安全（同 pickupScan）。
     arrowPickupScan();
+    // t950 mob 装备拾取穿着扫描（僵尸/骷髅经过装备掉落物概率拾取 + 更好才换）：与拾取扫描同级常开
+    //   （背包开 / 失焦时 mob 仍路过拾装备——世界模拟连续，同 pickupScan 族）。内自检管理器空 +
+    //   kEquipPickupScanInterval dt 节流窗；硬暂停不达此行（上方 worldRunning 总闸已 return）= 暂停期
+    //   mob 冻结不拾（机制等价 MC 暂停一切）。探针 P-t950 直调本方法定步长驱动（本接线行由源码钉覆盖）。
+    tickMobEquipmentPickup(dt);
     // t627 压力板触发态更新（边沿触发单一权威）：先算本 tick 踩下沿集（玩家/mob/掉落物按权重压板 +
     //   踩下视觉 state bit），再供下方 scanTntTraps / scanDispenserTraps 消费（两者只对沿触发——踩一次
     //   fire 一次，持续踩着不重复；走开回位再踩再触发）。与拾取同级常开（掉落物落板即触发，独立于
@@ -5425,6 +5431,110 @@ void PlayerController::scanTntTraps()
             }
         }
     }
+}
+
+// ── t950 mob 装备拾取穿着系统（R19.17 🅲；用户第五轮口径原文：僵尸/骷髅经过装备掉落物时有概率拾取
+//    并穿上，不主动寻路；玩家死亡掉落被路过捡起穿上——按槽位规则：更好护甲/武器才换）──
+//
+//    归属（PLAN §2 分层定盘）：扫描**不放 EntityManager**（Entities 层不得向上依赖 Game 的注册表知识
+//    ——ItemEntityManager 同理，见 updatePressurePlates 先例「Game 层桥接扫描双管理器」）。本函数是
+//    PlayerController（Game 层）里「EntityManager × ItemEntityManager」的接触扫描：mob 位置/装备读
+//    EntityManager，掉落物读 ItemEntityManager，装备分类/比较读同层注册表（ArmorRegistry 护甲点数 /
+//    ToolRegistry::attackDamage），写入经 EntityManager 新开口（equipMobArmorPiece / equipMobHeldItem，
+//    向下依赖）+ ItemEntityManager::removeAt（玩家拾取同款移除路径）。掉落物消失后 QML delegate 随
+//    entitiesChanged 隐藏；穿上护甲后 t377/t719 护甲壳视觉链（{revision; mobArmorAt} 绑定）自动跟随，
+//    零渲染层改动。
+//
+//    口径登记（用户未明说的面，取稳从简）：
+//    ① 概率 = 每 0.5s 扫描窗每件接触装备独立掷骰 kEquipPickupChance(0.3)；MC 1.0 无此概率面
+//      （canPickUpLoot 必拾），本作取「路过偶拾、连续经过必拾（1−0.7ⁿ→1）」手感。0/1 两端为行为钉
+//      （setEquipmentPickupChance 缝）。
+//    ② 「更好才换」是**严格更大**：护甲同部位比 armorPoints、武器比 attackDamage（剑+斧 > 徒手即武器；
+//      弓/钓竿 attackDamage=徒手 → 非武器不拾）。相等/更差不拾、掉落物留存。严格序天然单调有上界
+//      （钻石套/钻石剑封顶）→ 无换装循环，不需额外次数帽（「每槽换一次」口径被严格序覆盖，不采用）。
+//    ③ 换下旧装备掉回 mob 脚格（spawnItem 自带确定性弹出 + 0.5s 新生免拾窗 → 不被同窗回吸；被另一只
+//      路过 mob 拾走属正确语义）。mob 装备槽 id-only（t377 遗产）→ 被拾/换下装备的附魔/耐久/改名实例
+//      元数据不保真；mob 死亡不掉装备（既有登记缺口，本任务不扩）。
+//    ④ 武器拾取是**数据登记面**：heldItemId 入槽、更好才换、旧武器掉回，但 mob 攻击力维持 AI 常量
+//      （kAttackDamage）不加成（用户口径未要伤害面）；骷髅的弓是 AI 固有不入槽；QML 无 mob 手持物
+//      渲染端（视觉留未来项）。食物/材料/方块不拾（MC 僵尸会捡食物——登记未来食物面）。
+//    ⑤ 门：mobType ∈ {Shambler, Bones}（用户口径仅僵尸/骷髅；Stalker/Nightwalker/Emberling/被动全不
+//      拾）、活体（healthAt>0，死亡动画窗不拾）、isPickupReady（0.5s 新生免拾窗同玩家拾取）、水平
+//      kEquipPickupRadiusXZ(1.0) + 竖直脚平面 −0.5..+1.5 窗（同层地面/上一格台阶可达、坑内不吸）。
+//    每 mob 每窗至多拾一件（MC 同拍单件语义；窗间自动续拾）。
+void PlayerController::tickMobEquipmentPickup(qreal dt)
+{
+    if (!m_entityManager || !m_itemEntities) return;
+    if (m_equipPickupChance <= 0.0) { m_equipPickupAccum = 0.0; return; } // 概率下端钉：永不拾
+    m_equipPickupAccum += dt;
+    if (m_equipPickupAccum < kEquipPickupScanInterval) return;
+    m_equipPickupAccum = 0.0; // 到窗清零跑本窗（探针直喂 dt=窗长 = tick 驱动的等价递推）
+    const int mobN = m_entityManager->count();
+    const int itemN = m_itemEntities->count();
+    if (mobN == 0 || itemN == 0) return;
+    for (int mi = 0; mi < mobN; ++mi) {
+        if (!m_entityManager->aliveAt(mi)) continue;                        // 空槽（slot-reuse）
+        if (m_entityManager->kindAt(mi) != int(EntityManager::Mob)) continue;
+        const int mt = m_entityManager->mobTypeAt(mi);
+        if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones) continue; // ⑤ 仅僵尸/骷髅
+        if (m_entityManager->healthAt(mi) <= 0) continue;                   // ⑤ 尸体（死亡动画窗）不拾
+        const QVector3D mp = m_entityManager->posAt(mi);
+        const float feetY = mp.y() - m_entityManager->halfHeightAt(mi);
+        for (int ii = 0; ii < itemN; ++ii) {
+            if (!m_itemEntities->aliveAt(ii)) continue;                     // 空槽（slot-reuse）
+            if (!m_itemEntities->isPickupReady(ii)) continue;               // ⑤ 新生免拾窗（同玩家）
+            const int id = m_itemEntities->itemIdAt(ii);
+            // ④ 装备分类（Game 注册表知识，本扫描侧唯一分类点）：护甲段 / 武器（attackDamage > 徒手 =
+            //    剑 + 斧；弓/钓竿/镐铲锄 = 徒手级不拾）。其余（食物/材料/方块）不拾。
+            const bool isArmor = ArmorRegistry::isArmor(id);
+            const bool isWeapon = !isArmor && ToolRegistry::attackDamage(id) > ToolRegistry::kFistDamage;
+            if (!isArmor && !isWeapon) continue;
+            const QVector3D ip = m_itemEntities->posAt(ii);
+            const float dx = ip.x() - mp.x(), dz = ip.z() - mp.z();
+            if (dx * dx + dz * dz > kEquipPickupRadiusXZ * kEquipPickupRadiusXZ) continue; // ⑤ 水平带
+            if (ip.y() < feetY - 0.5f || ip.y() > feetY + 1.5f) continue;   // ⑤ 竖直窗（坑内不吸）
+            // ① 概率门：每窗每件独立掷骰；>=1 跳掷恒拾（概率上端钉）。
+            if (m_equipPickupChance < 1.0
+                && QRandomGenerator::global()->generateDouble() >= m_equipPickupChance) continue;
+            if (isArmor) {
+                const int piece = ArmorRegistry::piece(id);
+                if (piece < 0 || piece > 3) continue;
+                // ② 槽位规则「更好才换」（用户定稿）：同部位护甲点数严格更大；相等/更差不拾（留存）。
+                const int cur = m_entityManager->mobArmorAt(mi, piece);
+                if (ArmorRegistry::armorPoints(id) <= ArmorRegistry::armorPoints(cur)) continue;
+                const int old = m_entityManager->equipMobArmorPiece(mi, piece, id);
+                if (old < 0) continue; // mob 侧拒绝（死亡/槽复用竞态）→ 本件放弃
+                if (old > 0) dropMobEquipmentAt(mp, m_entityManager->halfHeightAt(mi), old); // ③ 换下掉回
+            } else {
+                // ② 武器同规则：攻击力严格更大才换（空手 = kFistDamage(1) 基线）。
+                const int cur = m_entityManager->mobHeldItemAt(mi);
+                if (ToolRegistry::attackDamage(id) <= ToolRegistry::attackDamage(cur)) continue;
+                const int old = m_entityManager->equipMobHeldItem(mi, id);
+                if (old < 0) continue;
+                if (old > 0) dropMobEquipmentAt(mp, m_entityManager->halfHeightAt(mi), old);
+            }
+            m_itemEntities->removeAt(ii); // ③ 被拾装备从地面消失（同玩家拾取移除路径）
+            break; // 每 mob 每窗至多一件（MC 同拍单件；下窗续拾）
+        }
+    }
+}
+
+// t950 换下旧装备掉回地面（MC equip-swap 语义「换下的掉落」）：mob 脚格中心 spawnItem（自带确定性
+//   弹出方向 + 0.5s 新生免拾窗 → 不被同一扫描窗回吸）。mob 装备槽 id-only（③ 口径）→ 裸 id 掉出，
+//   实例元数据不保真。itemId<=0 no-op（原空槽无掉落）。分层同主扫描：Game 层直调 ItemEntityManager。
+void PlayerController::dropMobEquipmentAt(const QVector3D &mobCenter, float halfH, int itemId)
+{
+    if (!m_itemEntities || itemId <= 0) return;
+    const int fx = int(std::floor(mobCenter.x()));
+    const int fz = int(std::floor(mobCenter.z()));
+    const int fy = int(std::floor(mobCenter.y() - halfH + 0.01f)); // 脚格（同 updatePressurePlates feet 口径）
+    m_itemEntities->spawnItem(fx, fy, fz, itemId, 1);
+}
+
+// t950 装备拾取概率缝（见头文件注释）：钳 [0,1]。0 = 永不拾（下端钉）、>=1 = 接触即拾（上端钉）。
+void PlayerController::setEquipmentPickupChance(qreal chance)
+{
+    m_equipPickupChance = std::clamp(chance, 0.0, 1.0);
 }
 
 // t627 压力板触发态更新（边沿触发单一权威；见 playercontroller.h 头注释）。每 tick 先跑，产出：

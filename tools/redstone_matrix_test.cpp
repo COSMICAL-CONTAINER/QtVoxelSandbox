@@ -34,6 +34,7 @@
 #include <QQuickItem>   // t874/t875 真链探针：面板 root / 宿主容器 Item
 #include <QQuickWindow> // t891 探针：pc 挂窗置 captured（placeBlock 入口门；grab 载体，无 show）
 #include <QMouseEvent>  // t949 探针：合成右键 press 直调 eventFilter（真实输入翻译链第一站）
+#include <QThread>      // t950 探针：msleep 越过掉落物新生免拾窗（isPickupReady 墙钟，无注入缝）
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -22753,6 +22754,244 @@ Item {
                              " and the viewer packTextured gate now carries the same tamed-cat"
                              " exception as the t920 texture switch (no more box-UV sampling of the"
                              " program cat art = the wolf-gray mottle the user reported)"
+                             ;
+    }
+
+    // ── P-t950 mob 装备拾取穿着（R19.17 🅲：僵尸/骷髅**经过**装备掉落物时有概率拾取并穿上——不主动
+    //    寻路纯接触判定；按槽位规则更好护甲/武器才换；换下旧装备掉回地面）──
+    //    驱动方式：PlayerController 直造（t814 先例，不启 16ms tick）+ EntityManager/ItemEntityManager
+    //    注入；实体物理不 tick（mob 定格在掉落物所在格 = 「经过」的接触稳态，游走 RNG 不进断言），扫描
+    //    窗由探针直调 tickMobEquipmentPickup(0.5) 定步长递推（窗内 = tickImpl 每帧喂真 dt 的等价累积，
+    //    逐窗行为一致；tickImpl 接线行由 (f) 源码钉覆盖——t948(d) 接线文本钉先例）。掉落物新生免拾窗
+    //    （kPickupDelayMs=500 墙钟，ItemEntityManager 时钟构造即走无注入缝）用 msleep 越过。
+    //    (a) 拾取穿上（概率上端钉 chance=1）：裸装 Shambler 站铁胸甲所在格 → 1 窗内胸甲位变铁胸甲 id +
+    //        掉落物从地面消失 + 无旧装备回掉（原空槽）。
+    //    (b) 更好规则腿（用户定稿「更好才换」）：铁套 Shambler 路过皮革胸甲（差）→ 6 窗不拾（身上不变 +
+    //        掉落物留存）；路过钻石胸甲（好）→ 1 窗内换上 + 被换下铁胸甲**回掉在地面**（新活体同 id）；
+    //        回掉铁甲陈化后续窗仍不被回吸（比身上钻石差——严格序天然防循环，亦证非免拾窗假绿）。
+    //    (c) 武器腿（数据登记面）：裸手 Shambler 拾木剑（4 > 徒手 1 基线）→ heldItemId=木剑 + 地面消失；
+    //        路过铁剑（6 > 4）→ 换持铁剑 + 木剑回掉；回掉木剑陈化后续窗不回吸（4 < 6）；骸骨同规则拾木剑。
+    //        手持武器不加成攻击力（AI 常量口径——登记取舍，无行为面可断言）。
+    //    (d) 概率下端钉（chance=0）：铁胸甲在场 8 窗恒不拾（护甲/地面全不动）。
+    //    (e) 非装备不掉腿：生猪排（食物材料段）+ 弓（attackDamage=徒手 → 非武器口径）在场 → 6 窗恒不拾。
+    //    (f) 源码钉：tickImpl 接线行 / 类型门行 / 护甲与武器的严格更大比较行 / removeAt 移除行 / 旧装备
+    //        掉地行 / Entity heldItemId 字段行。
+    {
+        bool ok = true;
+        QString diag;
+        auto flatRig950 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        // 装备 id（t763/t949 同式字面组装：ArmorIdBase + tier*4 + piece；工具段用 ToolRegistry 枚举）。
+        const int leatherChest = int(RecipeRegistry::ArmorIdBase) + 0 * 4 + 1; // 0x301 皮革胸甲（护甲点 3）
+        const int ironChest    = int(RecipeRegistry::ArmorIdBase) + 1 * 4 + 1; // 0x305 铁胸甲（护甲点 6）
+        const int diaChest     = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 1; // 0x311 钻石胸甲（护甲点 8）
+        const int woodSword    = int(ToolRegistry::SwordWood); // 0x10C 木剑（攻 4）
+        const int ironSword    = int(ToolRegistry::SwordIron); // 0x10E 铁剑（攻 6）
+        // 越过掉落物新生免拾窗（isPickupReady 读墙钟 500ms；无注入缝 → 真睡）。
+        const auto ageDrop950 = []() { QThread::msleep(560); };
+        // 地面上是否有 itemId 活体掉落物（有 → 槽索引，无 → -1）。
+        auto findAliveItem950 = [](ItemEntityManager &iem, int itemId) -> int {
+            for (int i = 0; i < iem.count(); ++i)
+                if (iem.aliveAt(i) && iem.itemIdAt(i) == itemId) return i;
+            return -1;
+        };
+        // 裸装 Shambler 站 (20,85,20)（脱 spawn 随机甲 → 断言面纯净；~20% 生成自带甲会被污染）。
+        auto nakedZombie950 = [](EntityManager &em) -> int {
+            const int zom = em.spawnMobTyped(20, 85, 20, EntityManager::MobShambler,
+                                             QStringLiteral("#4a6a3a"), 20);
+            if (zom >= 0) em.setMobArmorSet(zom, -1); // tier<0 = 清空四部位（setMobArmorSet 脱甲语义）
+            return zom;
+        };
+        // (a) 拾取穿上（chance=1 上端钉）。
+        {
+            World wa; flatRig950(wa);
+            EntityManager ema;
+            ItemEntityManager iema;
+            PlayerController pca;
+            pca.setEntityManager(&ema);
+            pca.setItemEntities(&iema);
+            const int zom = nakedZombie950(ema);
+            iema.spawnItem(20, 85, 20, ironChest); // 与 mob 同格（item 中心格心，mob 脚 85.0——竖直窗内）
+            ageDrop950();
+            pca.setEquipmentPickupChance(1.0);
+            pca.tickMobEquipmentPickup(0.5); // 1 窗即拾（chance=1 跳掷骰恒拾）
+            const bool worn = ema.mobArmorAt(zom, 1) == ironChest;
+            const bool gone = findAliveItem950(iema, ironChest) == -1;
+            const bool noDrop = iema.liveCount() == 0; // 原空槽 → 无旧装备回掉
+            ok = ok && zom >= 0 && worn && gone && noDrop;
+            if (!(zom >= 0 && worn && gone && noDrop))
+                diag += QStringLiteral("a zom=%1 worn=%2 gone=%3 noDrop=%4 ")
+                            .arg(zom).arg(int(worn)).arg(int(gone)).arg(int(noDrop));
+        }
+        // (b) 更好规则腿：皮革（差）不拾留存 → 钻石（好）换上 + 铁甲回掉 → 回掉件陈化后不回吸。
+        {
+            World wb; flatRig950(wb);
+            EntityManager emb;
+            ItemEntityManager iemb;
+            PlayerController pcb;
+            pcb.setEntityManager(&emb);
+            pcb.setItemEntities(&iemb);
+            const int zom = emb.spawnMobTyped(20, 85, 20, EntityManager::MobShambler,
+                                              QStringLiteral("#4a6a3a"), 20);
+            emb.setMobArmorSet(zom, 1); // 整套铁（胸甲位 = ironChest）
+            iemb.spawnItem(20, 85, 20, leatherChest);
+            ageDrop950();
+            pcb.setEquipmentPickupChance(1.0);
+            for (int wi = 0; wi < 6; ++wi) pcb.tickMobEquipmentPickup(0.5);
+            const bool worseKept = emb.mobArmorAt(zom, 1) == ironChest
+                                   && findAliveItem950(iemb, leatherChest) >= 0;
+            iemb.spawnItem(20, 85, 20, diaChest);
+            ageDrop950();
+            pcb.tickMobEquipmentPickup(0.5); // 1 窗换钻石
+            const bool upgraded = emb.mobArmorAt(zom, 1) == diaChest
+                                  && findAliveItem950(iemb, diaChest) == -1;
+            const bool ironDropped = findAliveItem950(iemb, ironChest) >= 0; // 换下的铁甲回掉在地面
+            ageDrop950(); // 回掉件陈化 → 续窗判定走「更好才换」而非免拾窗（防弱断言假绿）
+            for (int wi = 0; wi < 2; ++wi) pcb.tickMobEquipmentPickup(0.5);
+            const bool noResuck = findAliveItem950(iemb, ironChest) >= 0
+                                  && findAliveItem950(iemb, leatherChest) >= 0
+                                  && emb.mobArmorAt(zom, 1) == diaChest;
+            ok = ok && zom >= 0 && worseKept && upgraded && ironDropped && noResuck;
+            if (!(zom >= 0 && worseKept && upgraded && ironDropped && noResuck))
+                diag += QStringLiteral("b zom=%1 worse=%2 up=%3 drop=%4 resuck=%5 chest=%6 ")
+                            .arg(zom).arg(int(worseKept)).arg(int(upgraded)).arg(int(ironDropped))
+                            .arg(int(noResuck)).arg(emb.mobArmorAt(zom, 1));
+        }
+        // (c) 武器腿：木剑入槽 → 铁剑换下木剑回掉 → 木剑陈化后不回吸；骸骨同规则。
+        {
+            World wc; flatRig950(wc);
+            EntityManager emc;
+            ItemEntityManager iemc;
+            PlayerController pcc;
+            pcc.setEntityManager(&emc);
+            pcc.setItemEntities(&iemc);
+            const int zom = nakedZombie950(emc);
+            iemc.spawnItem(20, 85, 20, woodSword);
+            ageDrop950();
+            pcc.setEquipmentPickupChance(1.0);
+            pcc.tickMobEquipmentPickup(0.5);
+            const bool woodHeld = emc.mobHeldItemAt(zom) == woodSword
+                                  && findAliveItem950(iemc, woodSword) == -1;
+            iemc.spawnItem(20, 85, 20, ironSword);
+            ageDrop950();
+            pcc.tickMobEquipmentPickup(0.5);
+            const bool ironSwap = emc.mobHeldItemAt(zom) == ironSword
+                                  && findAliveItem950(iemc, ironSword) == -1
+                                  && findAliveItem950(iemc, woodSword) >= 0; // 换下木剑回掉
+            ageDrop950(); // 回掉木剑陈化 → 续窗不回吸（4 < 6 严格序，非免拾窗假绿）
+            for (int wi = 0; wi < 2; ++wi) pcc.tickMobEquipmentPickup(0.5);
+            const bool noResuck = emc.mobHeldItemAt(zom) == ironSword
+                                  && findAliveItem950(iemc, woodSword) >= 0;
+            const int bones = emc.spawnMobTyped(30, 85, 30, EntityManager::MobBones,
+                                                QStringLiteral("#d8d8e0"), 20);
+            iemc.spawnItem(30, 85, 30, woodSword); // 骸骨侧独立格同规则（距 (20,20) 11 格零串扰）
+            ageDrop950();
+            pcc.tickMobEquipmentPickup(0.5);
+            const bool bonesHeld = emc.mobHeldItemAt(bones) == woodSword
+                                   && findAliveItem950(iemc, ironSword) == -1;
+            ok = ok && zom >= 0 && woodHeld && ironSwap && noResuck && bones >= 0 && bonesHeld;
+            if (!(zom >= 0 && woodHeld && ironSwap && noResuck && bones >= 0 && bonesHeld))
+                diag += QStringLiteral("c zom=%1 wood=%2 swap=%3 resuck=%4 bones=%5 bHeld=%6 ")
+                            .arg(zom).arg(int(woodHeld)).arg(int(ironSwap)).arg(int(noResuck))
+                            .arg(bones).arg(int(bonesHeld));
+        }
+        // (d) 概率下端钉（chance=0 → 入口早退，窗都不跑）。
+        {
+            World wd; flatRig950(wd);
+            EntityManager emd;
+            ItemEntityManager iemd;
+            PlayerController pcd;
+            pcd.setEntityManager(&emd);
+            pcd.setItemEntities(&iemd);
+            const int zom = nakedZombie950(emd);
+            iemd.spawnItem(20, 85, 20, ironChest);
+            ageDrop950();
+            pcd.setEquipmentPickupChance(0.0);
+            for (int wi = 0; wi < 8; ++wi) pcd.tickMobEquipmentPickup(0.5);
+            const bool untouched = emd.mobArmorAt(zom, 1) == 0
+                                   && findAliveItem950(iemd, ironChest) >= 0;
+            ok = ok && zom >= 0 && untouched;
+            if (!(zom >= 0 && untouched))
+                diag += QStringLiteral("d zom=%1 untouched=%2 chest=%3 ")
+                            .arg(zom).arg(int(untouched)).arg(emd.mobArmorAt(zom, 1));
+        }
+        // (e) 非装备不掉腿：生猪排（食物）+ 弓（attackDamage=徒手非武器口径）恒不拾。
+        {
+            World we; flatRig950(we);
+            EntityManager eme;
+            ItemEntityManager ieme;
+            PlayerController pce;
+            pce.setEntityManager(&eme);
+            pce.setItemEntities(&ieme);
+            const int zom = nakedZombie950(eme);
+            ieme.spawnItem(20, 85, 20, RecipeRegistry::RawPorkchopId);
+            ieme.spawnItem(21, 85, 20, int(ToolRegistry::Bow)); // 邻格（同在水平 1 格带内）
+            ageDrop950();
+            pce.setEquipmentPickupChance(1.0);
+            for (int wi = 0; wi < 6; ++wi) pce.tickMobEquipmentPickup(0.5);
+            const bool kept = findAliveItem950(ieme, RecipeRegistry::RawPorkchopId) >= 0
+                              && findAliveItem950(ieme, int(ToolRegistry::Bow)) >= 0
+                              && eme.mobArmorAt(zom, 1) == 0 && eme.mobHeldItemAt(zom) == 0;
+            ok = ok && zom >= 0 && kept;
+            if (!(zom >= 0 && kept))
+                diag += QStringLiteral("e zom=%1 kept=%2 ").arg(zom).arg(int(kept));
+        }
+        // (f) 源码钉：tickImpl 接线 / 类型门 / 严格更大比较（护甲 + 武器）/ removeAt / 旧装备掉地 / 字段。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile pf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            const QString psrc = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const bool pinWire = psrc.contains(QStringLiteral("tickMobEquipmentPickup(dt);"));
+            const bool pinGate = psrc.contains(QStringLiteral(
+                "if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones) continue;"));
+            const bool pinBetter = psrc.contains(QStringLiteral(
+                "if (ArmorRegistry::armorPoints(id) <= ArmorRegistry::armorPoints(cur)) continue;"));
+            const bool pinWpn = psrc.contains(QStringLiteral(
+                "if (ToolRegistry::attackDamage(id) <= ToolRegistry::attackDamage(cur)) continue;"));
+            const bool pinRemove = psrc.contains(QStringLiteral("m_itemEntities->removeAt(ii);"));
+            const bool pinDrop = psrc.contains(QStringLiteral(
+                "m_itemEntities->spawnItem(fx, fy, fz, itemId, 1);"));
+            QFile ef(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+            const QString esrc = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
+            const bool pinGateEnt = esrc.contains(QStringLiteral(
+                "if (e.mobType != MobShambler && e.mobType != MobBones) return -1;"));
+            QFile ehf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+            const QString ehsrc = ehf.open(QIODevice::ReadOnly) ? QString::fromUtf8(ehf.readAll()) : QString();
+            const bool pinField = ehsrc.contains(QStringLiteral("int heldItemId = 0;"));
+            ok = ok && pinWire && pinGate && pinBetter && pinWpn && pinRemove && pinDrop
+                      && pinField && pinGateEnt;
+            if (!(pinWire && pinGate && pinBetter && pinWpn && pinRemove && pinDrop
+                  && pinField && pinGateEnt))
+                diag += QStringLiteral("f wire=%1 gate=%2 better=%3 wpn=%4 rm=%5 drop=%6 fld=%7 gEnt=%8 ")
+                            .arg(int(pinWire)).arg(int(pinGate)).arg(int(pinBetter)).arg(int(pinWpn))
+                            .arg(int(pinRemove)).arg(int(pinDrop)).arg(int(pinField))
+                            .arg(int(pinGateEnt));
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t950 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t950 mob equipment pickup-and-wear: a shambler passing over an iron"
+                             " chestplate dons it (armor slot changes, drop vanishes from the ground,"
+                             " nothing re-dropped from the empty slot) under chance=1, a worse drop"
+                             " (leather on an iron-set mob) stays put across six windows while a"
+                             " better one (diamond) swaps in and the displaced iron chestplate falls"
+                             " back to the ground and is never re-sucked once aged (strictly-better"
+                             " rule, not the pickup-delay window), weapons follow the same rule as a"
+                             " data-registered held slot (wood sword picked from bare hands, iron"
+                             " sword swaps it out and the wood sword drops back, bones archers obey"
+                             " the same rule; attack power stays the AI constant per the registered"
+                             " trade-off), chance=0 never picks across eight windows, food and the"
+                             " bow (fist-class attackDamage) are never picked, and the tickImpl"
+                             " wiring / type gate / strictly-better comparisons / removal / drop-"
+                             " back sites are source-pinned"
                              ;
     }
 

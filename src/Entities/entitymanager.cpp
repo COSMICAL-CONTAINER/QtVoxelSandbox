@@ -1726,6 +1726,52 @@ bool EntityManager::setMobArmorSet(int i, int tier)
     return true;
 }
 
+// t950 mob 装备拾取穿着链 · 部位护甲写入口（见头文件注释）：Game 层扫描比较「更好才换」后调——
+//   写入前旧 id 快照返回（0=原空），caller 据它把换下装备掉回地面（MC equip-swap 语义）。零注册表
+//   依赖（Entities 不向上 include Game）；视觉 = t377/t719 既有链随 revision 刷新。
+int EntityManager::equipMobArmorPiece(int i, int piece, int armorId)
+{
+    if (i < 0 || i >= int(m_entities.size())) return -1;
+    if (piece < 0 || piece > 3) return -1;
+    if (armorId < 0) return -1;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.dead) return -1;
+    if (e.mobType != MobShambler && e.mobType != MobBones) return -1; // 仅人形两种（同 setMobArmorSet 门）
+    int old;
+    switch (piece) {
+    case 0:  old = e.armorHelmet; e.armorHelmet = armorId; break;
+    case 1:  old = e.armorChest;  e.armorChest  = armorId; break;
+    case 2:  old = e.armorLegs;   e.armorLegs   = armorId; break;
+    default: old = e.armorBoots;  e.armorBoots  = armorId; break;
+    }
+    notifyEntitiesChanged(); // QML 护甲壳 armId 绑定刷新（同 setMobArmorSet）
+    return old;
+}
+
+// t950 mob 手持武器槽读取（0=空手；数据登记面，暂无 QML 消费端）。越界 / 非 Mob → 0（同 mobArmorAt 语义）。
+int EntityManager::mobHeldItemAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    const Entity &e = m_entities[size_t(i)];
+    return e.kind == Mob ? e.heldItemId : 0;
+}
+
+// t950 mob 手持武器槽写入（Game 层比较「更好武器」后调）：快照返回旧 id（0=原空手）/ -1 拒绝。
+//   手持武器**不加成** mob 攻击力（AI 常量口径，用户未要伤害面——登记取舍）；bump revision 备未来
+//   手持物渲染消费端接入。
+int EntityManager::equipMobHeldItem(int i, int itemId)
+{
+    if (i < 0 || i >= int(m_entities.size())) return -1;
+    if (itemId < 0) return -1;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.dead) return -1;
+    if (e.mobType != MobShambler && e.mobType != MobBones) return -1;
+    const int old = e.heldItemId;
+    e.heldItemId = itemId;
+    notifyEntitiesChanged();
+    return old;
+}
+
 // t300 第 i 只 mob 是否已被剪羊毛（仅 MobSheep 用；其余 mob 永远 false）。越界 → false。
 bool EntityManager::shearedAt(int i) const
 {

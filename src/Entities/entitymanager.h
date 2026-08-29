@@ -819,6 +819,21 @@ public:
     //   include Game/recipe.h，同 spawn 随机护甲先例）。tier 越界（<0 或 >4）→ 清空四部位（脱甲）。
     //   非 Mob / 非人形 / dead / 越界 → 静默早退（返 false）。bump revision → QML 护甲壳绑定刷新。
     Q_INVOKABLE bool setMobArmorSet(int i, int tier);
+    // t950 mob 装备拾取穿着链 · Entities 侧数据写入口（扫描 / 注册表比较在 Game 层 PlayerController——
+    //   ArmorRegistry/ToolRegistry 知识在 Game，本层只存 id + 刷新视觉，同 setMobArmorSet「本地字面量
+    //   避免跨层 include」先例）：
+    //   equipMobArmorPiece：把第 i 个 mob（须 Shambler/Bones 人形活体）piece(0..3) 部位护甲设为 armorId
+    //     （>=0；id 是否合法护甲由 caller 校验），返回**被换下的旧 id**（0 = 该部位原空）供 caller 掉地。
+    //     拒绝（越界 / 非 Mob / dead / 非人形 / piece 越界 / armorId<0）→ 返 -1 且零写。
+    //   mobHeldItemAt / equipMobHeldItem：手持武器槽（heldItemId，0=空手）读 / 写，返回值约定同上。
+    //     武器槽是数据登记面：mob 攻击力不加成（见 heldItemId 注释）；骷髅弓为 AI 固有不入本槽；
+    //     暂无 QML 消费端，bump revision 备未来手持物渲染接入。
+    //   两写入口均 notifyEntitiesChanged → QML 护甲壳 armId 绑定（{revision; mobArmorAt}）自动重算 =
+    //   t377/t719 视觉链跟随（穿上即可见，零渲染层改动）。C++ 直调（Game→Entities 向下依赖，同
+    //   knockback / setGolemRetaliate 模式，不挂 Q_INVOKABLE）。
+    int equipMobArmorPiece(int i, int piece, int armorId);
+    int mobHeldItemAt(int i) const;
+    int equipMobHeldItem(int i, int itemId);
     // t249 受击击退（spec「受击往攻击方向小跳击退」；C++ 直调，PlayerController::attackMob 命中后调）：
     //   给第 i 个 mob 一个水平方向 (dirX,dirZ) 的击退冲量（vx/vz=kKnockbackHoriz 沿方向）+ 小跳垂直速度
     //   （vy=kKnockbackUp 向上）；解除 resting 让 tick 重力分支处理上跳→减速→下落→着地（小弹起观感）。
@@ -1498,6 +1513,12 @@ private:
         //   末尾区保既有聚合初始化不错位（t256 元教训）；DMI 兜底默认 -1/0。
         int     aggroIdx = -1;    // 仇恨目标 mob 槽索引（-1 = 无仇恨；slot-reuse 索引稳定 + serial 防换任）
         quint32 aggroSerial = 0;  // 仇恨目标代际快照（与槽内 spawnSerial 比对防槽复用误仇恨；0 恒无效）
+        // t950 mob 手持武器槽（0=空手；仅 Shambler/Bones 拾取面读写——装备拾取穿着系统的武器位）。
+        //   **数据登记面**：不参与 mob 攻击力（攻击恒 AI 常量，用户口径未要伤害加成——登记取舍）、无 QML
+        //   渲染消费端（mob 手持物视觉留未来项）；骷髅的弓是 AI 固有（拉弓射击链）不入本槽。spawn 恒 0
+        //   （僵尸/骷髅生成不持武器，机制等价 MC 1.0 空手生成、装备全靠地面拾取）。放 struct 末尾区保
+        //   聚合初始化不错位（t256 元教训）；DMI 兜底 + spawnMobCore 整体 move 入槽 → 槽复用自动清回 0。
+        int heldItemId = 0;
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
