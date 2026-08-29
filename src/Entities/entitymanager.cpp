@@ -416,6 +416,9 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         case MobSilverfish: e.halfW = 0.22f; e.halfH = 0.15f; e.hostile = true; break; // 0.44×0.30 小型虫（机制等价 MC 1.0 银鱼 0.43×0.18 宽矮；要塞刷怪笼刷出，t487）
         case MobNightwalker: e.halfW = 0.35f; e.halfH = 1.40f; e.hostile = true; break; // 0.7×2.9 三格高细长人形（机制等价 MC 1.0 末影人 3 格高；怕水/瞪视激怒/弹射免疫/近战传送，t727）
         case MobEmberling: e.halfW = 0.50f; e.halfH = 0.60f; e.hostile = true; break; // 1.0×1.2 悬浮单头（机制等价 MC 1.0 烈焰人；浮空漂移 + 远程火球 + 火免疫，t728）
+        // t952 小蹒跚者（MobBabyShambler）：0.5×0.9 幼体盒（<1 格高口径 halfH=0.45<0.5；机制等价 MC 幼体
+        //   僵尸 0.3×0.95 的量级收紧——本工程盒沿用 0.5 宽步进；移速 / 伤害倍率在 aiHostile 分支读常量）。
+        case MobBabyShambler: e.halfW = 0.25f; e.halfH = 0.45f; e.hostile = true; break;
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -478,7 +481,7 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     //   Game/recipe.h —— Entities 层不向上 include）。tier 0..4（皮革/铁/铜/金/钻石）；piece 0..3（头/胸/腿/靴）。
     //   仅视觉 + spawn 随机（QML delegate 叠 tier 色护甲 Model）；不参与 mob 减伤（spec 仅要求偶遇）。
     e.armorHelmet = e.armorChest = e.armorLegs = e.armorBoots = 0;
-    if (mobType == MobShambler || mobType == MobBones) {
+    if (mobType == MobShambler || mobType == MobBones || mobType == MobBabyShambler) { // t952 小蹒跚者入随机甲白名单（机制等价 MC 幼体僵尸可带甲生成；delegate 有对应甲壳渲染）
         auto *rng = QRandomGenerator::global();
         if (rng->bounded(100) < 20) {                       // ~20% 有护甲
             constexpr int kArmorBase = 0x300;                // ArmorRegistry::ArmorIdBase（同源常量）
@@ -501,7 +504,46 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     // t400 繁殖态初值：Entity 默认成员初始化已把 loveTimer/breedCooldown/growTimer=0、baby=false，move 入槽时
     //   覆盖槽位旧值（slot 复用防残留 —— 上一任槽位若曾求偶 / 繁殖 / 是幼崽，复用时清回成体默认）。故新生 mob
     //   恒为成体、未求偶、可繁殖；幼崽态由 tickBreeding 产时单独设 baby=true + growTimer。无需在此显式赋。
-    return acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）；返槽索引
+    // t952 小鸡骑士：mobType==MobBabyShambler 的生成在 acquireSlot 后掷组合骰（全生成路径单一权威入口，
+    //   黑暗刷怪 / 生物蛋 / 刷怪笼均经此）。同样**不 bump / 不 emit**（caller 统一发，组合出的小鸡同帧可见）。
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）；返槽索引
+    if (slot >= 0 && mobType == MobBabyShambler) tryFormChickenJockey(slot);
+    return slot;
+}
+
+// t952 小鸡骑士组合（见 .h 注释）：生成时概率把小蹒跚者与小鸡合并为「小鸡骑士」（小鸡驮小僵尸）。
+//   机制等价 MC 幼体僵尸骑小鸡（chicken jockey）生成语义；概率口径 kChickenJockeyChance=5%（运行时可缝写
+//   供探针端钉）。组合 = 同格再 spawn 一只 MobChicken（spawnMobCore 直入；槽满静默跳过 → 小僵尸独立生成）
+//   + 挂双向链 + 骑手即时钉载具顶。只生成时组合，分离后不再合并（dev-plan 登记取舍）。
+void EntityManager::tryFormChickenJockey(int babySlot)
+{
+    if (babySlot < 0 || babySlot >= int(m_entities.size())) return;
+    // 掷骰：>=1 恒组合（探针上端钉，跳掷骰语义同 t950 setEquipmentPickupChance 口径）。
+    if (m_chickenJockeyChance < 1.0
+        && float(QRandomGenerator::global()->bounded(1000)) / 1000.0f >= float(m_chickenJockeyChance)) {
+        return;
+    }
+    // 读骑手位（值拷贝，不持 Entity& 跨 spawnMobCore —— 其内 acquireSlot 可能 push_back 致引用悬空，
+    //   lessons-learned t690/t400 同因先例）。
+    const QVector3D babyPos = m_entities[size_t(babySlot)].pos;
+    const float babyHalfH = m_entities[size_t(babySlot)].halfH;
+    const int cx = qFloor(babyPos.x());
+    const int cy = qFloor(babyPos.y() - babyHalfH); // 脚位格（spawnMobCore pos = 格底 + halfH → 反推格 y）
+    const int cz = qFloor(babyPos.z());
+    // 同格载具小鸡（占位配色同被动鸡路径——鸡走 MobModel + 贴图不读 color）。达 kCap → -1 静默跳过。
+    const int chickenSlot = spawnMobCore(cx, cy, cz, MobChicken, QStringLiteral("#f5f0e4"), kDefaultMaxHealth);
+    if (chickenSlot < 0 || chickenSlot == babySlot) return; // 槽满 / 自指（防御）：放弃组合，小僵尸独立
+    m_entities[size_t(babySlot)].rideMob = chickenSlot;
+    m_entities[size_t(chickenSlot)].mobRider = babySlot;
+    // 骑手即时钉载具顶（spawnMobTyped 的 emit 在本调用之后 → QML 首帧即见骑士姿态，无穿模首帧）。
+    const float mountTop = m_entities[size_t(chickenSlot)].pos.y() + m_entities[size_t(chickenSlot)].halfH;
+    m_entities[size_t(babySlot)].pos = QVector3D(m_entities[size_t(chickenSlot)].pos.x(),
+                                                 mountTop + m_entities[size_t(babySlot)].halfH,
+                                                 m_entities[size_t(chickenSlot)].pos.z());
+    m_entities[size_t(babySlot)].resting = true;
+    m_entities[size_t(babySlot)].vy = 0.0f;
+    qCInfo(lcEnt) << "chicken jockey formed: baby shambler slot" << babySlot
+                  << "riding chicken slot" << chickenSlot << "at" << cx << cy << cz;
 }
 
 // t117 生成下落方块实体：存格中心 + blockId + pushable=false + kind=FallingBlock。bump revision →
@@ -902,6 +944,8 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#2a1f2a"); // Nightwalker：暗紫黑体色（机制等价 MC 末影人暗黑体型；原创配色，t727）
     } else if (mobType == MobEmberling) {
         color = QStringLiteral("#e8b030"); // Emberling：橙黄焰色（机制等价 MC 烈焰人黄色焰体；原创配色，t728）
+    } else if (mobType == MobBabyShambler) {
+        color = QStringLiteral("#5a7a42"); // t952 小蹒跚者：亮一档的黄绿幼体色（区别成体暗绿 #4a6a3a；走专属贴图不读 color，占位串同族文档锚）
     } else {
         color = QStringLiteral("#4a6a3a"); // Shambler：暗绿腐肉色（机制等价 MC 僵尸；原创配色）
         if (mobType != MobShambler) mobType = MobShambler; // 防御：非七敌对型一律按 Shambler
@@ -982,6 +1026,7 @@ int EntityManager::spawnerMobTypeForState(int state) const
         case MobOcelot:
         case MobNightwalker:
         case MobEmberling:
+        case MobBabyShambler: // t952 小蹒跚者蛋（0x25D）右键刷怪笼改型（组合骰在 spawnMobCore 末段照掷）
             return typeBits;
         default:
             return MobShambler;
@@ -1111,9 +1156,11 @@ bool EntityManager::sunBurnExposureAt(World *world, float px, float py, float pz
 }
 
 // t951 亡灵日光白名单单一权威（契约见头文件声明；审查修 B6 的名单提炼——新敌对默认不晒燃，显式加白才燃）。
+//   t952 小蹒跚者同入白名单（亡灵幼体同族晒燃 + t951 白天阴影 AI 避光行为随之生效——骑乘中由骑手 AI
+//   驱动载具避光，机制等价 MC 幼体僵尸日间燃烧）。
 bool EntityManager::undeadBurnsInDaylight(int mobType)
 {
-    return mobType == MobShambler || mobType == MobBones;
+    return mobType == MobShambler || mobType == MobBones || mobType == MobBabyShambler;
 }
 
 // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。
@@ -1242,8 +1289,15 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 const int spawnType = (pickMob == 0 || pickMob == 1) ? MobShambler
                                     : (pickMob == 2) ? MobBones
                                     : (pickMob == 3) ? MobStalker : MobNightwalker;
-                spawnHostileMob(cx, cy, cz, spawnType);
-                qCInfo(lcEnt) << "hostile spawned type" << spawnType
+                // t952 幼体翻变：选中蹒跚者 → kBabyShamblerSpawnChance（5%）翻成小蹒跚者（机制等价 MC
+                //   小僵尸稀有自然生成；再经 spawnMobCore 的 kChickenJockeyChance 掷小鸡骑士组合骰）。
+                int finalSpawnType = spawnType;
+                if (spawnType == MobShambler
+                    && float(rng->bounded(1000)) / 1000.0f < kBabyShamblerSpawnChance) {
+                    finalSpawnType = MobBabyShambler;
+                }
+                spawnHostileMob(cx, cy, cz, finalSpawnType);
+                qCInfo(lcEnt) << "hostile spawned type" << finalSpawnType
                              << "at" << cx << cy << cz << "effLight=" << effLight
                              << "(hostile" << hostileCount() << "/" << kHostileMobCap << ")";
                 break; // 本周期成功 spawn 1 个即收手（慢速堆叠；下个 kSpawnInterval 周期再尝试）
@@ -1692,6 +1746,28 @@ int EntityManager::rideBoatAt(int i) const
     return m_entities[size_t(i)].rideBoat;
 }
 
+// t952 mob-on-mob 骑乘双向链读口（-1 = 无链；矩阵探针钉骑士组合 / 分离腿用）。越界 / 非 Mob → -1。
+int EntityManager::rideMobAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size()) || m_entities[size_t(i)].kind != Mob) return -1;
+    return m_entities[size_t(i)].rideMob;
+}
+
+int EntityManager::mobRiderAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size()) || m_entities[size_t(i)].kind != Mob) return -1;
+    return m_entities[size_t(i)].mobRider;
+}
+
+// t952 小鸡骑士组合概率缝写（见 .h 声明注释）：钳 [0,1]（负值/越界钳边界，防调用方误传生成恒独立 / 恒组合）。
+void EntityManager::setChickenJockeyChance(qreal chance)
+{
+    chance = std::clamp(chance, 0.0, 1.0);
+    if (chance == m_chickenJockeyChance) return;
+    m_chickenJockeyChance = chance;
+    qCInfo(lcEnt) << "chicken jockey chance set to" << m_chickenJockeyChance;
+}
+
 // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。越界 → 0。
 //   仅 Shambler/Bones spawn 时随机分配；QML delegate 据 it 叠 layer 贴图护甲壳（t719 ArmorLayerBox）。
 int EntityManager::mobArmorAt(int i, int piece) const
@@ -1716,7 +1792,8 @@ bool EntityManager::setMobArmorSet(int i, int tier)
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || e.dead) return false;
     // 仅人形 mob（Shambler/Bones——delegate 有 ArmorLayerBox 护甲壳的两种）；其余静默早退。
-    if (e.mobType != MobShambler && e.mobType != MobBones) return false;
+    //   t952 小蹒跚者同门（幼体人形，delegate 有 baby 尺码甲壳）。
+    if (e.mobType != MobShambler && e.mobType != MobBones && e.mobType != MobBabyShambler) return false;
     if (tier < 0 || tier > 4) {
         // 越界 → 清空四部位（脱甲）。
         e.armorHelmet = e.armorChest = e.armorLegs = e.armorBoots = 0;
@@ -1742,7 +1819,7 @@ int EntityManager::equipMobArmorPiece(int i, int piece, int armorId)
     if (armorId < 0) return -1;
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || e.dead) return -1;
-    if (e.mobType != MobShambler && e.mobType != MobBones) return -1; // 仅人形两种（同 setMobArmorSet 门）
+    if (e.mobType != MobShambler && e.mobType != MobBones && e.mobType != MobBabyShambler) return -1; // 仅人形三种（同 setMobArmorSet 门；t952 加小蹒跚者）
     int old;
     switch (piece) {
     case 0:  old = e.armorHelmet; e.armorHelmet = armorId; break;
@@ -1771,7 +1848,7 @@ int EntityManager::equipMobHeldItem(int i, int itemId)
     if (itemId < 0) return -1;
     Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || e.dead) return -1;
-    if (e.mobType != MobShambler && e.mobType != MobBones) return -1;
+    if (e.mobType != MobShambler && e.mobType != MobBones && e.mobType != MobBabyShambler) return -1; // 仅人形三种（t950 武器槽门；t952 加小蹒跚者）
     const int old = e.heldItemId;
     e.heldItemId = itemId;
     notifyEntitiesChanged();
@@ -3327,6 +3404,14 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
     }
 
+    // t952 小蹒跚者参数分支（快速低伤口径，常量注释即契约）：追击基准速 ×kBabyShamblerChaseSpeedMul
+    //   （本函数内全部 kChaseSpeed 消费点统一经 chaseBase 缩放——仇恨狼 / 铁傀儡 / 玩家三条追击路径同参数，
+    //   防单点漏改漂移），近战伤害 kBabyShamblerAttackDamage（成体一半档；三条伤害出口同换）。
+    //   成体 Shambler/Spider/Silverfish 走原值零变化（mul=1、dmg=kAttackDamage）。
+    const bool isBabyShambler = (e.mobType == MobBabyShambler);
+    const float chaseBase = kChaseSpeed * (isBabyShambler ? kBabyShamblerChaseSpeedMul : 1.0f);
+    const int meleeDamage = isBabyShambler ? kBabyShamblerAttackDamage : kAttackDamage;
+
     // t948 仇恨转移（狼咬敌对 → 被咬者转火攻击咬它的驯服狼；机制等价 MC 1.0 revenge target——被咬敌对
     //   改追攻击狼而非玩家）：注册单一入口 mobAggroAgainst（狼咬击命中处调），本分支消费。目标优先级：
     //   仇恨目标（个人即时仇恨）> golem 视线目标（下方 t712 分支）> 玩家。目标死亡 / 槽复用 →
@@ -3357,7 +3442,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                             float kx = 1.0f, kz = 0.0f;
                             if (aDist > 1e-3f) { kx = adx / aDist; kz = adz / aDist; }
                             else { kx = -std::sin(e.yawRad); kz = -std::cos(e.yawRad); }
-                            damageEntity(aggroIdx, kAttackDamage);
+                            damageEntity(aggroIdx, meleeDamage);
                             knockback(aggroIdx, kx, kz, 1.0f);
                             // t923 面完整：敌对近战命中驯服狼也注册狼群反击（同骷髅箭接线先例；互咬循环
                             //   下 m_wolfTarget 已是该 mob → 入口去重 no-op，多狼包亦正确）。
@@ -3372,8 +3457,8 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                 }
                 if (aDist > kAttackRange) {
                     // 追击仇恨目标：越障跳 + 水平移动（复用 golem 分支逐轴 AABB 撤回 + 边界 clamp 模式）。
-                    e.wanderSpeed = kChaseSpeed;
-                    const float chaseSpd = kChaseSpeed * speedScale;
+                    e.wanderSpeed = chaseBase;
+                    const float chaseSpd = chaseBase * speedScale;
                     if (e.resting && world && aDist > 1e-4f) {
                         const float fdx = -std::sin(e.yawRad);
                         const float fdz = -std::cos(e.yawRad);
@@ -3441,7 +3526,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                     float kx = 1.0f, kz = 0.0f;
                     if (gDist > 1e-3f) { kx = gdx / gDist; kz = gdz / gDist; }
                     else { kx = -std::sin(e.yawRad); kz = -std::cos(e.yawRad); }
-                    damageEntity(golemIdx, kAttackDamage);
+                    damageEntity(golemIdx, meleeDamage);
                     knockback(golemIdx, kx, kz, 1.0f);
                     qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked iron golem" << golemIdx;
                 }
@@ -3449,8 +3534,8 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         }
         if (gDist > kAttackRange) {
             // 追击 golem：越障跳 + 水平移动（复用 aiHostile 追玩家同款逐轴 AABB 撤回 + 边界 clamp）。
-            e.wanderSpeed = kChaseSpeed;
-            const float chaseSpd = kChaseSpeed * speedScale;
+            e.wanderSpeed = chaseBase;
+            const float chaseSpd = chaseBase * speedScale;
             if (e.resting && world && gDist > 1e-4f) {
                 const float fdx = -std::sin(e.yawRad);
                 const float fdz = -std::cos(e.yawRad);
@@ -3579,9 +3664,9 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     if (mdist > 1e-4f) {
         e.yawRad = std::atan2(-mx, -mz);
     }
-    e.wanderSpeed = kChaseSpeed; // 供 walkPhase 动画频率 + 语义（行走态；raw 值，水中减速不写入此字段避免下游二次缩放）
-    // t298 水中减速：chaseSpd = kChaseSpeed × speedScale（位移 + moveSpeed 用 it；wanderSpeed 保 raw）。
-    const float chaseSpd = kChaseSpeed * speedScale;
+    e.wanderSpeed = chaseBase; // 供 walkPhase 动画频率 + 语义（行走态；raw 值，水中减速不写入此字段避免下游二次缩放）
+    // t298 水中减速：chaseSpd = chaseBase × speedScale（位移 + moveSpeed 用 it；wanderSpeed 保 raw；t952 小蹒跚者 chaseBase 含 ×1.4 快速倍率）。
+    const float chaseSpd = chaseBase * speedScale;
 
     // 越障跳：resting（贴地）+ 前方脚位格是 1 格墙（实体）+ 墙顶两格空气（可落 + 头可容，mob ~1.8 高）→ 跳。
     //   不跳的情况：前方无墙（平地直走）/ 墙 ≥2 格（跳不过，正确不跳避免原地蹦）/ 已在空中（resting=false 跳过）。
@@ -3646,8 +3731,8 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝 mob 面朝方向（= 推开）
         // t480 主人受击 → 驯服狼攻击本敌对（防御目标 = 咬伤主人的 mob；机制等价 MC 驯服狼报复攻击者）。
         m_wolfTarget = idx;
-        emit mobAttackedPlayer(kAttackDamage, e.mobType, kbX, kbZ);
-        qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked player for" << kAttackDamage << "HP";
+        emit mobAttackedPlayer(meleeDamage, e.mobType, kbX, kbZ);
+        qCInfo(lcEnt) << "hostile mob" << e.mobType << "attacked player for" << meleeDamage << "HP";
     }
 
     return moved;
@@ -5141,7 +5226,10 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
         if (!e.alive || !e.pushable || e.dead) continue; // t256 空槽 + 掉落物等非推动 + t239 dead mob 跳过
         // t811 载具骑乘态跳过：mob 位置钉载具座位（tickVehicleRiding 权威），玩家推挤会把钉位实体推出
         //   车斗 → 视觉脱离 + 下帧钉回的反复拉扯；骑乘期玩家从旁走过不应扰动乘员（同 dead 不推语义）。
-        if ((e.rideCart >= 0 && m_cartMgr) || (e.rideBoat >= 0 && m_boatMgr)) continue;
+        //   t952 mob-on-mob 挂载组合同口径：骑士被驮 / 载具驮人，位置由 tickMobMounts 钉位权威接管，推挤
+        //   任一侧都会被对侧钉位拉回（反复拉扯），故成对豁免。
+        if ((e.rideCart >= 0 && m_cartMgr) || (e.rideBoat >= 0 && m_boatMgr)
+            || e.rideMob >= 0 || e.mobRider >= 0) continue;
 
         const float ehw = e.halfW; // 实体 XZ 半宽（圆碰撞半径）
         const float ehh = e.halfH; // 实体 Y 半高（垂直区间）
@@ -5317,6 +5405,9 @@ void EntityManager::tickVehicleRiding()
 
         // Pass C 登乘扫描（非骑乘 mob）：最近可乘载具。矿车 1 座（生物占 / 玩家骑均满）；船总乘员限 2
         //   （玩家占 1 座时只剩 1 生物座）。两类都在近旁优先矿车（先扫）—— 机制口径简单可预期。
+        //   t952：mob-on-mob 挂载组合（骑士 / 载具任一）不参与载具登乘——骑士组合是独立骑乘体系（双向链
+        //   挂 Entity 槽），混乘载具会让两套钉位权威打架（矿车钉位 vs 挂载钉位同帧互拉）。
+        if (e.rideMob >= 0 || e.mobRider >= 0) continue;
         if (m_cartMgr) {
             const int n = m_cartMgr->count();
             int best = -1;
@@ -5397,6 +5488,90 @@ void EntityManager::tickVehicleRiding()
     //   前、step 后 #2）——车在 step 内推进 → 只有 #2 观察到钉位变化 → 稳态恰每帧一次发射；船由
     //   BoatManager::tick 常开推进 → #1 或 #2 恰一处观察到，同样 ≤1 次 / 帧。
     if (pinMoved) { ++m_rideRevision; emit ridersChanged(); }
+}
+
+// t952 mob-on-mob 挂载 pass 实现（契约见 .h 声明注释；tick 末尾调）。三段：① 双向对账（死亡 / 槽复用 /
+//   链断 → 解除挂载，被骑乘者落地恢复独立、载具恢复自主漫步）② 骑手 AI（kAiTickInterval 节拍消费冻结
+//   分支累积的 aiAccum；玩家可锁定 → aiHostile，观察者 → aiWander）③ 钉位（载具 XZ ← 骑手 XZ、骑手 Y ←
+//   载具顶 + 清骑手垂直态；载具 moveSpeed ← 骑手速度驱动小鸡腿摆、骑手 moveSpeed 清零——被驮不迈腿）。
+//   钉位值真变帧 bump m_rideRevision + emit ridersChanged（review26 #10 专用通道：mob delegate position
+//   绑定独占触碰，骑士组合 60Hz 同帧刷新；非乘客单帧重采样读到相同值 = 廉价 no-op）。
+bool EntityManager::tickMobMounts(World *world, const QVector3D &playerPos, float worldW,
+                                  float worldD, bool playerTargetable, float skyBrightness)
+{
+    if (m_entities.empty()) return false;
+    bool dirty = false;
+    bool pinMoved = false;
+    for (int idx = 0; idx < int(m_entities.size()); ++idx) {
+        Entity &e = m_entities[size_t(idx)];
+        if (!e.alive || e.kind != Mob || e.dead) continue; // 空槽 / 非 mob / 尸体不参与（尸僵期对账已解除挂载）
+
+        // ② 骑手 AI（被骑乘者；主循环已冻结其 AI/物理，节拍在此消费）。放对账**之后**：链断帧 AI 不跑
+        //   （对账已在上方/下方解除），防骑死载具的骑手同帧再以挂载参数出手。
+        if (e.rideMob >= 0) {
+            // ① 骑手侧对账：载具失效（死 / 释放 / 槽复用换任 / 反向链断）→ 自解除落地（resting=false 让
+            //   重力复探支撑面，从载具顶自然坠地——同 rideCart 自释放解除 resting 先例）。
+            const int mi = e.rideMob;
+            const bool mountOk = mi < int(m_entities.size()) && m_entities[size_t(mi)].alive
+                                 && m_entities[size_t(mi)].kind == Mob && !m_entities[size_t(mi)].dead
+                                 && m_entities[size_t(mi)].mobRider == idx;
+            if (!mountOk) {
+                e.rideMob = -1;
+                e.resting = false; // 解除静止 → 重力接管：从载具顶落回地面（「小鸡被杀 → 小僵尸落地独立」）
+                e.moveSpeed = 0.0f;
+                e.walkPhase = 0.0f;
+                e.stepAccum = 0.0f;
+                dirty = true;
+                qCInfo(lcEnt) << "jockey rider" << idx << "dismounted (mount slot" << mi << "invalid)";
+                continue; // 本帧 AI / 钉位都不跑（下 tick 起主循环正常自由体）
+            }
+            // AI 节拍：同主循环 kAiTickInterval 错峰公式（m_tickPhase 本帧 tick 头部已 ++）。
+            const bool aiTick = ((m_tickPhase + quint32(idx)) % quint32(kAiTickInterval)) == 0;
+            const float aiDt = aiTick ? e.aiAccum : 0.0f;
+            if (aiTick) e.aiAccum = 0.0f;
+            if (aiDt > 0.0f) {
+                // t290 门控同口径：玩家可锁定 → aiHostile（小蹒跚者快速低伤追击）；观察者 → aiWander
+                //   （敌对回退游荡，位移经钉位仍驱动载具）。aiHostile 返 moved 已写入 moveSpeed，不消费。
+                if (playerTargetable) {
+                    aiHostile(idx, e, aiDt, world, playerPos, worldW, worldD, 1.0f, skyBrightness);
+                } else if (world) {
+                    aiWander(e, aiDt, world, worldW, worldD, 1.0f);
+                }
+                dirty = true;
+            }
+            // ③ 钉位：载具 XZ ← 骑手 XZ（骑手 AI 权威），骑手 Y ← 载具顶（垂直权威归本 pass）。
+            Entity &mount = m_entities[size_t(mi)];
+            const float riderSpeed = e.moveSpeed;
+            if (mount.pos.x() != e.pos.x() || mount.pos.z() != e.pos.z()) {
+                mount.pos.setX(e.pos.x());
+                mount.pos.setZ(e.pos.z());
+                pinMoved = true;
+                dirty = true;
+            }
+            const QVector3D pin(e.pos.x(), mount.pos.y() + mount.halfH + e.halfH, e.pos.z());
+            if (e.pos != pin) { e.pos = pin; pinMoved = true; dirty = true; }
+            if (e.vy != 0.0f) e.vy = 0.0f;             // 挂载期垂直速度清零（主循环冻结不积分，防解除残留）
+            if (!e.resting) e.resting = true;          // 钉位态视作「支撑」（无物理语义，仅状态一致）
+            mount.moveSpeed = riderSpeed;              // 小鸡腿随骑士移动摆动（走相块下帧消费）
+            e.moveSpeed = 0.0f;                        // 被驮不迈腿（同矿车乘客 walkPhase 冻结口径）
+            continue;
+        }
+
+        // ① 载具侧对账（无主动位移）：骑手失效 → 清反向链（小鸡下 tick 恢复自主 wander，本分支零动作）。
+        if (e.mobRider >= 0) {
+            const int ri = e.mobRider;
+            const bool riderOk = ri < int(m_entities.size()) && m_entities[size_t(ri)].alive
+                                 && m_entities[size_t(ri)].kind == Mob && !m_entities[size_t(ri)].dead
+                                 && m_entities[size_t(ri)].rideMob == idx;
+            if (!riderOk) {
+                e.mobRider = -1;
+                dirty = true;
+                qCInfo(lcEnt) << "chicken" << idx << "rider released (rider slot" << ri << "invalid)";
+            }
+        }
+    }
+    if (pinMoved) { ++m_rideRevision; emit ridersChanged(); }
+    return dirty;
 }
 
 // 重力 + AI wander + 地面静止（机制同 ItemEntityManager::tick；向下只读 World::isSolid/blockAt）。
@@ -6804,6 +6979,23 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
                 continue; // 骑乘态：AI / 重力 / resting / 击退 / jumpG / 流推 / 火 / 仙人掌 / 窒息全跳（防漂移）
             }
+            // t952 mob-on-mob 被骑乘态（小鸡骑士的骑手；同 t811 冻结口径的挂载变体）：主循环 AI / 物理 /
+            //   环境判定全停（**垂直物理必停**——重力 + 落地扫描的 `vy<0 → snap 支撑顶` 会把骑手从载具背上
+            //   拽到地面穿模，位置 Y 权威归 tickMobMounts 钉载具顶），但 aiAccum 照累积——骑手 AI 不死，在
+            //   tickMobMounts 挂载 pass 内以同一 kAiTickInterval 节奏消费（AI 位移驱动载具，「小僵尸的追击
+            //   移动驱动小鸡」）。掉血 / 死亡照常（外部 damageEntity 路径）；击退速度在挂载态不应用（vx/vz
+            //   留存不施位移，解除挂载后自然衰减——与矿车乘客击退不生效同口径，登记取舍）。对账解除（载具
+            //   死 / 槽复用）发生在 tickMobMounts → 下一 tick 本守卫自然放行（落地恢复独立 AI）。
+            if (e.rideMob >= 0) {
+                // t905 状态直方图：同骑乘冻结桶（挂载乘客物理全停）。
+                FrameProfiler::instance()->count("mobStRide");
+                e.aiAccum += float(dt); // 骑手 AI 节拍累积（tickMobMounts 按 aiTick 帧消费）
+                if (e.hurtFlash > 0.0f) {
+                    e.hurtFlash -= float(dt);
+                    if (e.hurtFlash <= 0.0f) { e.hurtFlash = 0.0f; dirty = true; }
+                }
+                continue; // 挂载态：重力 / resting / 击退应用 / 流推 / 溺水 / 走路声全跳（AI 走挂载 pass）
+            }
             // t905 状态直方图：活体自由态（AI + 每帧物理照跑）。resting=静置（非 aiTick 帧 continue 早退），
             //   非 resting=下落/水中（重力 + 落地扫描每帧跑）—— stF 高 = 振荡 / 悬空 mob 主吃尾段的判据。
             FrameProfiler::instance()->count(e.resting ? "mobStRest" : "mobStFall");
@@ -7185,6 +7377,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         dirty = true;
                 } else if (e.mobType == MobOcelot) {
                     if (aiOcelot(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                } else if (e.mobRider >= 0) {
+                    // t952 骑士载具 AI 挂起（小鸡被小僵尸驮乘期）：自身 wander / 求偶 / 坐站全停——移动由
+                    //   tickMobMounts 钉位跟随骑手（「小僵尸的追击移动驱动小鸡」，dev-plan 最稳刀口径，分离后
+                    //   恢复本分支之外的自主 AI）。物理（重力 / 支撑）与下蛋周期在共享尾段照跑（钉位只接管
+                    //   XZ，Y 由小鸡自身落地扫描贴地 → 骑手随之起伏；骑乘中的鸡照常周期下蛋，机制等价 MC）。
+                    //   moveSpeed 不在此清零：钉位 pass 每帧写入骑手速度驱动 walkPhase（小鸡腿随移动摆动）。
                 } else {
                 // t400 求偶寻偶（spec「喂食 → 求偶 → 同种配对」；机制等价 MC 1.0 love mode 寻偶）：成体可繁殖 mob
                 //   在求偶期（loveTimer>0）→ 覆盖 wander 的随机选向，把 yaw 钉向最近同种求偶配偶 + 强制行走 +
@@ -7745,6 +7943,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     //   致其失效）：衰减求偶 / 冷却 / 幼崽长大计时 + 求偶配对产幼崽（受 kPassiveMobCap 钳制）。dirty 合入本 tick
     //   末尾统一一次 bump + emit（批量收口，避免 N 幼崽 N 次 notify 风暴，同 t320/t354 纪律）。
     if (tickBreeding(dt)) dirty = true;
+
+    // t952 mob-on-mob 挂载 pass（小鸡骑士）：骑手 AI 消费 + 双向对账 + 骑手钉载具顶。主循环之外（骑手
+    //   AI 经由冻结分支累积的 aiAccum 在此消费；对账可能读多槽一致状态）。变更合入本 tick 末尾统一 emit。
+    if (tickMobMounts(world, listener, worldW, worldD, playerTargetable, skyBrightness)) dirty = true;
 
     // perf：节流 entitiesChanged emit。mob 每帧 wander/gravity 致 dirty 几乎每帧 → 旧版每帧 ++revision+emit 触发
     //   全体 delegate（count × ~12 revision 绑定）NOTIFY 激活 + 行走 mob 的 MobModel 全几何 rebuild+GPU 重上传

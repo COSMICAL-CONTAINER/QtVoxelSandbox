@@ -1443,6 +1443,7 @@ int RecipeRegistry::mobTypeForSpawnEgg(int itemId)
     case SpawnEggEmberlingId:   return EntityManager::MobEmberling;   // t728 燃烬者（烈焰人同源）
     case SpawnEggWolfId:        return EntityManager::MobWolf;        // t785 狼（野生）
     case SpawnEggOcelotId:      return EntityManager::MobOcelot;      // t785 豹猫（野生）
+    case SpawnEggBabyShamblerId: return EntityManager::MobBabyShambler; // t952 小蹒跚者（幼体僵尸；生成时掷小鸡骑士组合骰）
     default: return -1;
     }
 }

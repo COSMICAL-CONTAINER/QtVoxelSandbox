@@ -67,11 +67,11 @@
 #include "itemshapegeometry.h"    // t880 异形物品 3D 模型族探针（ItemShapeGeometry 几何契约直调：顶点数/bounds）
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
-//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（0..MobAnvil=18，
-//   实值经核：MobTest=0 .. MobAnvil=18 共 19 值）。枚举中部插值 / 尾部新增忘补表行时本断言编译期拦截
-//   （t782「整表错位静默钳猪」根因的复刻防线）。
-static_assert(MobModel::kValidMobTypeCount == EntityManager::MobAnvil + 1,
-              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobAnvil）——"
+//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t952 起
+//   上界 = MobBabyShambler=19，实值经核：MobTest=0 .. MobBabyShambler=19 共 20 值）。枚举中部插值 /
+//   尾部新增忘补表行时本断言编译期拦截（t782「整表错位静默钳猪」根因的复刻防线）。
+static_assert(MobModel::kValidMobTypeCount == EntityManager::MobBabyShambler + 1,
+              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobBabyShambler）——"
               "新增 mobType 须同步 kValidMobModelType 表 + mobmodel.h kValidMobTypeCount");
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
@@ -4245,6 +4245,7 @@ int main(int argc, char *argv[])
             RecipeRegistry::SpawnEggSpiderId, RecipeRegistry::SpawnEggChickenId, RecipeRegistry::SpawnEggSquidId,
             RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
             RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
+            RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；蛋区尾追加保连续同列）
         };
         const int expectMob[] = {
             EntityManager::MobPig, EntityManager::MobCow, EntityManager::MobSheep,
@@ -4252,6 +4253,7 @@ int main(int argc, char *argv[])
             EntityManager::MobSpider, EntityManager::MobChicken, EntityManager::MobSquid,
             EntityManager::MobNightwalker, EntityManager::MobEmberling,
             EntityManager::MobWolf, EntityManager::MobOcelot,
+            EntityManager::MobBabyShambler,
         };
         const int eggCount = int(sizeof(allEggs) / sizeof(allEggs[0]));
         for (int i = 0; i < eggCount; ++i) {
@@ -4302,8 +4304,9 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t785 spawn-egg completion: 13 eggs (nightwalker/emberling moved into the "
-                             "contiguous egg block + wolf 0x249 / ocelot 0x24A new) all map to correct "
+                          << "| t785 spawn-egg completion: 14 eggs (nightwalker/emberling moved into the "
+                             "contiguous egg block + wolf 0x249 / ocelot 0x24A new + t952 baby-shambler "
+                             "0x25D appended) all map to correct "
                              "EntityManager mob types via single-authority table, all present & contiguous "
                              "in creative palette with names, all have generative tint entries (egg icon "
                              "look & palette layout = QML, manual check)";
@@ -4337,10 +4340,11 @@ int main(int argc, char *argv[])
         }
         // ①b 旧存档兼容：state=0（旧地牢笼）→ Shambler；state=1（t487 旧要塞银鱼笼）→ Silverfish；
         //   非法 type 位 → 兜底 Shambler 不崩不误刷。t787 注：旧样本 0x21（type16）扩表后是合法
-        //   Nightwalker（蛋改型）→ 非法样本换 0x27（type19 > MobAnvil=18 越界）；0x3E（type31）仍非法。
+        //   Nightwalker（蛋改型）→ 非法样本换 0x29（type20 > MobBabyShambler=19 越界，t952 扩表后
+        //   0x27/type19 已是合法 BabyShambler）；0x3E（type31）仍非法。
         if (em786.spawnerMobTypeForState(0) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(1) != EntityManager::MobSilverfish
-            || em786.spawnerMobTypeForState(0x26 | 0x01) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(0x28 | 0x01) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(0x3E) != EntityManager::MobShambler) {
             qInfo() << "  [t786 diag] legacy/invalid-state decode wrong";
             ok = false;
@@ -4655,6 +4659,7 @@ int main(int argc, char *argv[])
             RecipeRegistry::SpawnEggSpiderId, RecipeRegistry::SpawnEggChickenId, RecipeRegistry::SpawnEggSquidId,
             RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
             RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
+            RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；round-trip 覆盖随全表扩展）
         };
         for (int eggId : eggs787) {
             const int mt = RecipeRegistry::mobTypeForSpawnEgg(eggId);
@@ -4667,8 +4672,9 @@ int main(int argc, char *argv[])
             }
         }
         // ② 哨兵 / 越界 type 编码后解码仍兜底 Shambler（0=MobTest / 12 SnowGolem / 13 IronGolem / 15 Tnt /
-        //    18 Anvil / 19 越界 —— 均无蛋不可经笼改型写入，白名单拒绝）。
-        const int sentinels787[] = { 0, 12, 13, 15, 18, 19 };
+        //    18 Anvil / 20 越界 —— 均无蛋不可经笼改型写入，白名单拒绝。t952 注：type19 已扩为合法
+        //    BabyShambler（蛋 0x25D 可改型写入）→ 越界样本上移到 20）。
+        const int sentinels787[] = { 0, 12, 13, 15, 18, 20 };
         for (int st_ : sentinels787) {
             if (em787.spawnerMobTypeForState(int(BlockRegistry::spawnerStateForMob(st_))) != EntityManager::MobShambler) {
                 qInfo().noquote() << "  [t787 diag] sentinel type" << st_ << "not rejected by decode whitelist";
@@ -4744,7 +4750,7 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t787 spawn-egg x spawner retype: all 13 eggs round-trip through "
+                          << "| t787 spawn-egg x spawner retype: all 14 eggs (t952 baby-shambler appended) round-trip through "
                              "spawnerStateForMob/spawnerMobTypeForState (whitelist extended, sentinels/overflow "
                              "still fall back to shambler), retype write via same-id setBlock then tickSpawners "
                              "spawns the egg's type (pig passive+non-hostile / spider hostile polarity), passive "
@@ -22949,8 +22955,10 @@ Item {
             QFile pf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
             const QString psrc = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
             const bool pinWire = psrc.contains(QStringLiteral("tickMobEquipmentPickup(dt);"));
+            // t952 扩表：拾取类型门加小蹒跚者（白名单两段钉——成人两型头段 + 幼体扩段，任一缺失即红）。
             const bool pinGate = psrc.contains(QStringLiteral(
-                "if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones) continue;"));
+                "if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones"))
+                && psrc.contains(QStringLiteral("&& mt != EntityManager::MobBabyShambler) continue;"));
             const bool pinBetter = psrc.contains(QStringLiteral(
                 "if (ArmorRegistry::armorPoints(id) <= ArmorRegistry::armorPoints(cur)) continue;"));
             const bool pinWpn = psrc.contains(QStringLiteral(
@@ -22961,7 +22969,7 @@ Item {
             QFile ef(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
             const QString esrc = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
             const bool pinGateEnt = esrc.contains(QStringLiteral(
-                "if (e.mobType != MobShambler && e.mobType != MobBones) return -1;"));
+                "if (e.mobType != MobShambler && e.mobType != MobBones && e.mobType != MobBabyShambler) return false;"));
             QFile ehf(root + QStringLiteral("/src/Entities/entitymanager.h"));
             const QString ehsrc = ehf.open(QIODevice::ReadOnly) ? QString::fromUtf8(ehf.readAll()) : QString();
             const bool pinField = ehsrc.contains(QStringLiteral("int heldItemId = 0;"));
@@ -23165,7 +23173,10 @@ Item {
             const bool pinHold = countSub951(esrc, QStringLiteral("e.shadeHoldTimer = kShadeHoldSeconds;")) >= 2;
             const bool pinPredDef = esrc.contains(QStringLiteral("bool EntityManager::sunBurnExposureAt(World *world"));
             const bool pinSingle = countSub951(esrc, QStringLiteral("sunBurnExposureAt(")) >= 6;
-            const bool pinWhite = esrc.contains(QStringLiteral("return mobType == MobShambler || mobType == MobBones;"))
+            // t952 扩表：亡灵白名单加小蹒跚者（单一权威名单的合法演化，钉演化后的整行——名单本体
+            //   消失 / 消费点缺失仍红，防 B6 名单漂移的契约不变）。
+            const bool pinWhite = esrc.contains(QStringLiteral(
+                "return mobType == MobShambler || mobType == MobBones || mobType == MobBabyShambler;"))
                                   && countSub951(esrc, QStringLiteral("undeadBurnsInDaylight(e.mobType)")) >= 3;
             const bool pinSuppress = esrc.contains(QStringLiteral("&& !attackSuppressed"));
             const bool pinGate = esrc.contains(QStringLiteral("wantMove = false; // t951 候选落点暴晒 → 弃选"));
@@ -23202,6 +23213,334 @@ Item {
                              " the attack-suppression gate, the archer candidate gate, the header"
                              " declaration/constants/field and the production skyBrightness wiring"
                              " are source-pinned"
+                             ;
+    }
+
+    // ── P-t952 小蹒跚者 + 小鸡骑士（R19.17 🅲：<1 格高、移速快、可穿盔甲的幼体僵尸；生成时概率与
+    //    小鸡组合成「小鸡骑士」——小鸡驮小僵尸，骑手 AI 驱动载具位移）──
+    //    驱动方式：EntityManager / PlayerController 直造直调（t950/t951 先例，不启 16ms tick）；
+    //    骑士组合概率经 setChickenJockeyChance 缝写端钉（同 t950 setEquipmentPickupChance 先例）——
+    //    所有非组合腿先钉 0.0 防缺省 5% 概率的随机鸡污染断言。
+    //    (a) 生成表项腿：spawnMobTyped 小蹒跚者 → halfH=0.45 < 0.5（<1 格高口径）且 < 成体 0.90、
+    //        hostile=true、radius < 成体。
+    //    (b) 移速快腿：同距（5 格）追击同一玩家位 30 tick 位移对比——小蹒跚者 > 成体 ×1.15
+    //        （kBabyShamblerChaseSpeedMul=1.4 实测投影；双方恒 chase 无 RNG 路径）。
+    //    (c) 可穿盔甲腿（t950 拾取面白名单扩小蹒跚者）：裸装小蹒跚者站铁胸甲格 → 1 窗拾取穿上
+    //        （chance=1 端钉；胸甲位 id 变 + 掉落物消失）。
+    //    (d) 骑士组合上端钉（chance=1）：生成小蹒跚者 → 必组合：同格出现小鸡、双向链互指
+    //        （rideMob/mobRider）、骑手钉载具顶（rider.y == mount.y + mount.halfH + rider.halfH）；
+    //        推进 10 tick 后钉位关系保持（XZ 重合 + Y 恒载具顶）。
+    //    (e) 骑士组合下端钉（chance=0）：生成小蹒跚者 → 恒独立（rideMob=-1、全场无小鸡、liveCount=1）。
+    //    (f) 分离腿 ①：小鸡被杀 → 小僵尸落地独立（rideMob 清 -1、存活、Y 从载具顶落回地面 <86.0）。
+    //    (g) 分离腿 ②：小僵尸被杀 → 小鸡独立存活（mobRider 清 -1、小鸡活体）。
+    //    (h) 蛋表 / 刷怪笼行为腿：mobTypeForSpawnEgg(0x25D)==MobBabyShambler（单一权威表）+ spawner
+    //        state 编码→解码 round-trip；成体蹒跚者蛋映射不被扩表污染。
+    //    (i) 源码钉：枚举/字段/常量（Entities .h）、组合钩子与概率、黑暗刷怪幼体翻变、主循环被骑乘
+    //        冻结 + aiAccum 累积、载具 AI 挂起分支、挂载 pass 接线、晒燃白名单、玩家推挤成对豁免、
+    //        aiHostile 快速低伤参数分支、Renderer 分支与白名单表行、拾取门扩段、蛋表 case、创造
+    //        调色板、图鉴条目 / 蛋映射 / Loader 贴图行、蛋图标 case。
+    {
+        bool ok = true;
+        QString diag;
+        auto flatRig952 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        // 骑士链一致性：rideMob/mobRider 双向互指且都有效（防单向断链假组合）。
+        auto jockeyLinked952 = [](EntityManager &em, int baby, int chicken) {
+            return em.rideMobAt(baby) == chicken && em.mobRiderAt(chicken) == baby;
+        };
+        // (a) 生成表项：<1 格高幼体盒 + 敌对语义。
+        {
+            World wa; flatRig952(wa);
+            EntityManager ema;
+            ema.setChickenJockeyChance(0.0); // 防缺省 5% 随机组合污染尺寸/速度腿
+            const int baby = ema.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            const int adult = ema.spawnMobTyped(30, 85, 30, EntityManager::MobShambler,
+                                                QStringLiteral("#4a6a3a"), 0);
+            const bool small = ema.aliveAt(baby) && ema.halfHeightAt(baby) < 0.5f;
+            const bool smallerThanAdult = ema.halfHeightAt(baby) < ema.halfHeightAt(adult);
+            const bool slim = ema.radiusAt(baby) < ema.radiusAt(adult);
+            const bool hostileBaby = ema.isHostileAt(baby) && ema.mobTypeAt(baby) == EntityManager::MobBabyShambler;
+            ok = ok && baby >= 0 && adult >= 0 && small && smallerThanAdult && slim && hostileBaby;
+            if (!(baby >= 0 && adult >= 0 && small && smallerThanAdult && slim && hostileBaby))
+                diag += QStringLiteral("a baby=%1 adult=%2 small=%3 smaller=%4 slim=%5 hostile=%6 ")
+                            .arg(baby).arg(adult).arg(int(small)).arg(int(smallerThanAdult))
+                            .arg(int(slim)).arg(int(hostileBaby));
+        }
+        // (b) 移速快：同距追击 30 tick 位移 baby > adult ×1.15。
+        {
+            World wb; flatRig952(wb);
+            EntityManager emb;
+            emb.setChickenJockeyChance(0.0);
+            const QVector3D player(25.0f, 85.0f, 25.0f);
+            const int baby = emb.spawnMobTyped(21, 85, 25, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            const int adult = emb.spawnMobTyped(29, 85, 25, EntityManager::MobShambler,
+                                                QStringLiteral("#4a6a3a"), 0);
+            const QVector3D b0 = emb.posAt(baby), a0 = emb.posAt(adult);
+            for (int t = 0; t < 30; ++t)
+                emb.tick(0.016f, &wb, player, 0.3f, 1.8f, true, false, 0.0f); // 夜间语义（t951 旁路 → 纯追击）
+            const auto xzDist = [](const QVector3D &from, const QVector3D &to) {
+                const float dx = to.x() - from.x(), dz = to.z() - from.z();
+                return std::sqrt(dx * dx + dz * dz);
+            };
+            const float babyDisp = xzDist(b0, emb.posAt(baby));
+            const float adultDisp = xzDist(a0, emb.posAt(adult));
+            const bool bothMoved = adultDisp > 0.3f;
+            const bool babyFaster = babyDisp > adultDisp * 1.15f;
+            ok = ok && baby >= 0 && adult >= 0 && bothMoved && babyFaster;
+            if (!(baby >= 0 && adult >= 0 && bothMoved && babyFaster))
+                diag += QStringLiteral("b baby=%1 adult=%2 bDisp=%3 aDisp=%4 ")
+                            .arg(baby).arg(adult).arg(babyDisp).arg(adultDisp);
+        }
+        // (c) 可穿盔甲：t950 拾取链对小蹒跚者生效（门扩段行为面）。
+        {
+            World wc; flatRig952(wc);
+            EntityManager emc;
+            ItemEntityManager iemc;
+            PlayerController pcc;
+            pcc.setEntityManager(&emc);
+            pcc.setItemEntities(&iemc);
+            emc.setChickenJockeyChance(0.0);
+            const int baby = emc.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            emc.setMobArmorSet(baby, -1); // 脱 spawn 随机甲（~20% 概率自带）→ 断言面纯净（t950 同式）
+            const int ironChest = int(RecipeRegistry::ArmorIdBase) + 1 * 4 + 1; // 0x305 铁胸甲（t950 同式组装）
+            iemc.spawnItem(20, 85, 20, ironChest);
+            QThread::msleep(560); // 越过掉落物新生免拾窗（kPickupDelayMs，t950 同式）
+            pcc.setEquipmentPickupChance(1.0);
+            pcc.tickMobEquipmentPickup(0.5);
+            const bool worn = emc.mobArmorAt(baby, 1) == ironChest;
+            const bool gone = [&]() {
+                for (int i = 0; i < iemc.count(); ++i)
+                    if (iemc.aliveAt(i) && iemc.itemIdAt(i) == ironChest) return false;
+                return true;
+            }();
+            ok = ok && baby >= 0 && worn && gone;
+            if (!(baby >= 0 && worn && gone))
+                diag += QStringLiteral("c baby=%1 worn=%2 gone=%3 chest=%4 ")
+                            .arg(baby).arg(int(worn)).arg(int(gone)).arg(emc.mobArmorAt(baby, 1));
+        }
+        // (d) 骑士组合上端钉（chance=1 全组合）+ 钉位关系推进保持。
+        {
+            World wd; flatRig952(wd);
+            EntityManager emd;
+            emd.setChickenJockeyChance(1.0);
+            const int baby = emd.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            int chicken = -1;
+            for (int i = 0; i < emd.count(); ++i)
+                if (emd.aliveAt(i) && emd.mobTypeAt(i) == EntityManager::MobChicken) { chicken = i; break; }
+            const bool linked = baby >= 0 && chicken >= 0 && jockeyLinked952(emd, baby, chicken);
+            const float mountTopY = emd.posAt(chicken).y() + emd.halfHeightAt(chicken);
+            const bool pinned = baby >= 0 && chicken >= 0
+                                && std::abs(emd.posAt(baby).y() - (mountTopY + emd.halfHeightAt(baby))) < 1e-3f;
+            const QVector3D player(25.0f, 85.0f, 25.0f);
+            bool heldAfterTicks = true;
+            for (int t = 0; t < 10; ++t) {
+                emd.tick(0.016f, &wd, player, 0.3f, 1.8f, true, false, 0.0f);
+                const QVector3D rp = emd.posAt(baby), mp = emd.posAt(chicken);
+                if (emd.rideMobAt(baby) != chicken
+                    || std::abs(rp.x() - mp.x()) > 1e-4f || std::abs(rp.z() - mp.z()) > 1e-4f
+                    || std::abs(rp.y() - (mp.y() + emd.halfHeightAt(chicken) + emd.halfHeightAt(baby))) > 1e-3f) {
+                    heldAfterTicks = false;
+                    break;
+                }
+            }
+            ok = ok && baby >= 0 && chicken >= 0 && linked && pinned && heldAfterTicks;
+            if (!(baby >= 0 && chicken >= 0 && linked && pinned && heldAfterTicks))
+                diag += QStringLiteral("d baby=%1 chicken=%2 linked=%3 pinned=%4 held=%5 ")
+                            .arg(baby).arg(chicken).arg(int(linked)).arg(int(pinned)).arg(int(heldAfterTicks));
+        }
+        // (e) 下端钉（chance=0 全独立）。
+        {
+            World we; flatRig952(we);
+            EntityManager eme;
+            eme.setChickenJockeyChance(0.0);
+            const int baby = eme.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            bool anyChicken = false;
+            for (int i = 0; i < eme.count(); ++i)
+                if (eme.aliveAt(i) && eme.mobTypeAt(i) == EntityManager::MobChicken) anyChicken = true;
+            const bool independent = baby >= 0 && eme.rideMobAt(baby) == -1 && !anyChicken && eme.liveCount() == 1;
+            ok = ok && independent;
+            if (!independent)
+                diag += QStringLiteral("e baby=%1 rideMob=%2 chicken=%3 live=%4 ")
+                            .arg(baby).arg(baby >= 0 ? eme.rideMobAt(baby) : -2)
+                            .arg(int(anyChicken)).arg(eme.liveCount());
+        }
+        // (f) 分离腿 ①：小鸡死 → 小僵尸落地独立（存活 + 链清 + Y 落回地面）。
+        {
+            World wf; flatRig952(wf);
+            EntityManager emf;
+            emf.setChickenJockeyChance(1.0);
+            const int baby = emf.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            const int chicken = emf.rideMobAt(baby);
+            const QVector3D player(25.0f, 85.0f, 25.0f);
+            for (int t = 0; t < 3; ++t) emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+            const float mountedY = emf.posAt(baby).y();
+            emf.damageEntity(chicken, 999); // 小鸡被杀（dead 即时翻 → 挂载 pass 对账解除）
+            for (int t = 0; t < 20; ++t) emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+            const bool riderAlive = emf.aliveAt(baby) && !emf.deadAt(baby);
+            const bool unlinked = emf.rideMobAt(baby) == -1;
+            const bool landed = emf.posAt(baby).y() < mountedY - 0.2f && emf.posAt(baby).y() < 86.0f;
+            const bool mountDead = emf.deadAt(chicken);
+            ok = ok && baby >= 0 && chicken >= 0 && riderAlive && unlinked && landed && mountDead;
+            if (!(baby >= 0 && chicken >= 0 && riderAlive && unlinked && landed && mountDead))
+                diag += QStringLiteral("f baby=%1 chicken=%2 alive=%3 unlink=%4 y=%5 mY=%6 mDead=%7 ")
+                            .arg(baby).arg(chicken).arg(int(riderAlive)).arg(int(unlinked))
+                            .arg(emf.posAt(baby).y()).arg(mountedY).arg(int(mountDead));
+        }
+        // (g) 分离腿 ②：小僵尸死 → 小鸡独立存活（链清 + 小鸡活体）。
+        {
+            World wg; flatRig952(wg);
+            EntityManager emg;
+            emg.setChickenJockeyChance(1.0);
+            const int baby = emg.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 0);
+            const int chicken = emg.rideMobAt(baby);
+            const QVector3D player(25.0f, 85.0f, 25.0f);
+            for (int t = 0; t < 3; ++t) emg.tick(0.016f, &wg, player, 0.3f, 1.8f, true, false, 0.0f);
+            emg.damageEntity(baby, 999); // 小僵尸被杀
+            for (int t = 0; t < 8; ++t) emg.tick(0.016f, &wg, player, 0.3f, 1.8f, true, false, 0.0f);
+            const bool chickenAlive = emg.aliveAt(chicken) && !emg.deadAt(chicken);
+            const bool freed = emg.mobRiderAt(chicken) == -1;
+            ok = ok && baby >= 0 && chicken >= 0 && emg.deadAt(baby) && chickenAlive && freed;
+            if (!(baby >= 0 && chicken >= 0 && emg.deadAt(baby) && chickenAlive && freed))
+                diag += QStringLiteral("g baby=%1 chicken=%2 bDead=%3 cAlive=%4 freed=%5 ")
+                            .arg(baby).arg(chicken).arg(int(emg.deadAt(baby)))
+                            .arg(int(chickenAlive)).arg(int(freed));
+        }
+        // (h) 蛋表 / 刷怪笼 round-trip 行为腿。
+        {
+            EntityManager emh;
+            const int eggId = RecipeRegistry::SpawnEggBabyShamblerId;
+            const bool eggMap = RecipeRegistry::mobTypeForSpawnEgg(eggId) == EntityManager::MobBabyShambler;
+            const bool adultUnpolluted = RecipeRegistry::mobTypeForSpawnEgg(RecipeRegistry::SpawnEggShamblerId)
+                                         == EntityManager::MobShambler;
+            const quint8 cageState = BlockRegistry::spawnerStateForMob(EntityManager::MobBabyShambler);
+            const bool cageRoundTrip = emh.spawnerMobTypeForState(int(cageState)) == EntityManager::MobBabyShambler;
+            ok = ok && eggMap && adultUnpolluted && cageRoundTrip;
+            if (!(eggMap && adultUnpolluted && cageRoundTrip))
+                diag += QStringLiteral("h egg=%1 adult=%2 cage=%3 ")
+                            .arg(int(eggMap)).arg(int(adultUnpolluted)).arg(int(cageRoundTrip));
+        }
+        // (i) 源码钉（相对 exe ../ = 工程根；t950 同式）。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            const auto readSrc = [&root](const QString &rel) {
+                QFile pf(root + QLatin1Char('/') + rel);
+                return pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            };
+            const QString entCpp = readSrc(QStringLiteral("src/Entities/entitymanager.cpp"));
+            const QString entH = readSrc(QStringLiteral("src/Entities/entitymanager.h"));
+            const QString modelCpp = readSrc(QStringLiteral("src/Renderer/mobmodel.cpp"));
+            const QString pcCpp = readSrc(QStringLiteral("src/Game/playercontroller.cpp"));
+            const QString recipeCpp = readSrc(QStringLiteral("src/Game/recipe.cpp"));
+            const QString hotbarCpp = readSrc(QStringLiteral("src/Game/hotbar.cpp"));
+            const QString mainQml = readSrc(QStringLiteral("src/ui/Main.qml"));
+            const QString browserQml = readSrc(QStringLiteral("src/ui/ResourceBrowser.qml"));
+            const QString iconQml = readSrc(QStringLiteral("src/ui/MaterialIcon.qml"));
+            // Entities：枚举 + Entity 双向链字段 + 概率常量（.h）。
+            const bool pinEnum = entH.contains(QStringLiteral("MobBabyShambler = 19"));
+            const bool pinFieldRide = entH.contains(QStringLiteral("int rideMob = -1;"));
+            const bool pinFieldRider = entH.contains(QStringLiteral("int mobRider = -1;"));
+            const bool pinChance = entH.contains(QStringLiteral("kChickenJockeyChance"));
+            const bool pinSetter = entH.contains(QStringLiteral("setChickenJockeyChance(qreal chance);"));
+            // Entities：生成组合钩子 / 概率掷骰 / 黑暗刷怪幼体翻变（.cpp）。
+            const bool pinCombineHook = entCpp.contains(QStringLiteral(
+                "if (slot >= 0 && mobType == MobBabyShambler) tryFormChickenJockey(slot);"));
+            const bool pinRoll = entCpp.contains(QStringLiteral("m_chickenJockeyChance < 1.0"));
+            const bool pinNatural = entCpp.contains(QStringLiteral("finalSpawnType = MobBabyShambler;"))
+                                    && entCpp.contains(QStringLiteral("kBabyShamblerSpawnChance"));
+            // Entities：被骑乘冻结 + 节拍累积 / 载具 AI 挂起 / 挂载 pass 接线 / 推挤成对豁免。
+            const bool pinFreeze = entCpp.contains(QStringLiteral("if (e.rideMob >= 0) {"))
+                                   && entCpp.contains(QStringLiteral(
+                                       "e.aiAccum += float(dt); // 骑手 AI 节拍累积"));
+            const bool pinMountSuspend = entCpp.contains(QStringLiteral("} else if (e.mobRider >= 0) {"));
+            const bool pinPassWire = entCpp.contains(QStringLiteral(
+                "if (tickMobMounts(world, listener, worldW, worldD, playerTargetable, skyBrightness)) dirty = true;"));
+            const bool pinPushSkip = entCpp.contains(QStringLiteral(
+                "|| e.rideMob >= 0 || e.mobRider >= 0) continue;"));
+            // Entities：晒燃白名单扩段（t951 单一权威名单）。
+            const bool pinBurnWhite = entCpp.contains(QStringLiteral(
+                "return mobType == MobShambler || mobType == MobBones || mobType == MobBabyShambler;"));
+            // Entities：aiHostile 快速低伤参数分支。
+            const bool pinBabyParams = entCpp.contains(QStringLiteral(
+                "const bool isBabyShambler = (e.mobType == MobBabyShambler);"))
+                && entCpp.contains(QStringLiteral("kBabyShamblerChaseSpeedMul"))
+                && entCpp.contains(QStringLiteral("kBabyShamblerAttackDamage"));
+            // Renderer：几何分支 + 白名单表行。
+            const bool pinModelBranch = modelCpp.contains(QStringLiteral("else if (m_mobType == 19) {"));
+            const bool pinModelTable = modelCpp.contains(QStringLiteral("/* 19 BabyShambler */ true"));
+            // Game：拾取门扩段 / 蛋表 case / 创造调色板。
+            const bool pinPickupGate = pcCpp.contains(QStringLiteral(
+                "&& mt != EntityManager::MobBabyShambler) continue;"));
+            const bool pinEggCase = recipeCpp.contains(QStringLiteral(
+                "case SpawnEggBabyShamblerId: return EntityManager::MobBabyShambler;"));
+            const bool pinPalette = hotbarCpp.contains(QStringLiteral(
+                "int(RecipeRegistry::SpawnEggBabyShamblerId),"));
+            // QML：图鉴条目 / 蛋映射 / delegate Loader + 程序贴图 / 蛋图标 case。
+            const bool pinBrowserEntry = browserQml.contains(QStringLiteral(
+                "{ mobType: 19, name: \"小蹒跚者\" }"));
+            const bool pinBrowserEgg = browserQml.contains(QStringLiteral("case 0x25D: return 19;"));
+            const bool pinLoader = mainQml.contains(QStringLiteral(
+                "active: entKind === EntityManager.Mob && entMobType === EntityManager.MobBabyShambler"));
+            const bool pinTex = mainQml.contains(QStringLiteral("mob_baby_shambler.png"));
+            const bool pinIcon = iconQml.contains(QStringLiteral("drawSpawnEgg(\"babyshambler\")"));
+            const bool pinsOk = pinEnum && pinFieldRide && pinFieldRider && pinChance && pinSetter
+                && pinCombineHook && pinRoll && pinNatural && pinFreeze && pinMountSuspend
+                && pinPassWire && pinPushSkip && pinBurnWhite && pinBabyParams
+                && pinModelBranch && pinModelTable && pinPickupGate && pinEggCase && pinPalette
+                && pinBrowserEntry && pinBrowserEgg && pinLoader && pinTex && pinIcon;
+            ok = ok && pinsOk;
+            if (!pinsOk)
+                diag += QStringLiteral("i enum=%1 ride=%2 rider=%3 chance=%4 setter=%5 hook=%6 roll=%7 "
+                                       "nat=%8 frz=%9 susp=%10 wire=%11 push=%12 burn=%13 prm=%14 "
+                                       "mbr=%15 mtb=%16 gate=%17 egg=%18 pal=%19 brE=%20 brg=%21 "
+                                       "ldr=%22 tex=%23 ico=%24 ")
+                            .arg(int(pinEnum)).arg(int(pinFieldRide)).arg(int(pinFieldRider))
+                            .arg(int(pinChance)).arg(int(pinSetter)).arg(int(pinCombineHook))
+                            .arg(int(pinRoll)).arg(int(pinNatural)).arg(int(pinFreeze))
+                            .arg(int(pinMountSuspend)).arg(int(pinPassWire)).arg(int(pinPushSkip))
+                            .arg(int(pinBurnWhite)).arg(int(pinBabyParams)).arg(int(pinModelBranch))
+                            .arg(int(pinModelTable)).arg(int(pinPickupGate)).arg(int(pinEggCase))
+                            .arg(int(pinPalette)).arg(int(pinBrowserEntry)).arg(int(pinBrowserEgg))
+                            .arg(int(pinLoader)).arg(int(pinTex)).arg(int(pinIcon));
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t952 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t952 baby shambler + chicken jockey: the spawned baby stands under"
+                             " half a block tall (halfH 0.45, below the adult's 0.90) with a slimmer"
+                             " hostile box; chasing a player from the same 5-block distance it covers"
+                             " over 1.15x the adult's ground in 30 ticks (fast caliber); it picks up"
+                             " and wears an iron chestplate it stands on through the equipment-"
+                             " pickup whitelist (t950 face extended); with the jockey chance pinned"
+                             " to 1 every baby spawn combines with a chicken at the same cell - the"
+                             " two-slot pair is cross-linked and the rider stays pinned on the"
+                             " mount's top across ticks while the mount's XZ follows the rider -"
+                             " and pinned to 0 every baby spawns independent with no chicken in the"
+                             " world; killing the chicken drops the baby back to the ground alive"
+                             " and unlinked, killing the baby frees the chicken alive and unlinked;"
+                             " the egg-table and spawner round-trips map the new egg to the baby"
+                             " type without polluting the adult shambler egg; and the enum/fields/"
+                             " chance, the combine hook and roll, the natural-spawn baby flip, the"
+                             " ridden freeze + beat accumulation, the mount AI suspension, the pass"
+                             " wiring, the pair push-skip, the daylight-burn whitelist, the fast-"
+                             " low-damage AI parameters, the renderer branch and table row, the"
+                             " pickup-gate extension, the egg-table case, the creative palette, the"
+                             " encyclopedia entry/egg map, the delegate loader/texture and the egg"
+                             " icon are source-pinned"
                              ;
     }
 

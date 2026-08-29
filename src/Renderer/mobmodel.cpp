@@ -348,7 +348,7 @@ namespace {
 //   「猪模型套皮」根因同款）。表驱动后：新分支只需在此表补一行 true，漏补时下方 qWarning 即时暴露。
 //   表项与 rebuild 分支号一一对应（1 猪[else 兜底分支] / 2 牛 / 3 羊 / 4 Shambler / 5 Bones / 6 Stalker /
 //   7 Spider / 8 Chicken / 9 Squid / 10 Wolf / 11 Ocelot / 12 SnowGolem / 13 IronGolem / 14 Silverfish /
-//   16 Nightwalker / 17 Emberling）。
+//   16 Nightwalker / 17 Emberling / 19 BabyShambler）。
 //   刻意 false 的号位：0 MobTest（QML 走 UnitCube 不进本类）、15 MobTnt / 18 MobAnvil（死因哨兵 mobType，
 //   非真实 mob——仅 mobAttackedPlayer 载荷用，传入本类必是接线 bug）。
 constexpr bool kValidMobModelType[] = {
@@ -371,11 +371,12 @@ constexpr bool kValidMobModelType[] = {
     /* 16 Nightwalker */ true,
     /* 17 Emberling */   true,
     /* 18 Anvil 哨兵 */  false,
+    /* 19 BabyShambler */ true, // t952 小蹒跚者（幼体僵尸：头大身小比例人形盒）
 };
 // review24 低危收尾（#35）：表长钉死到头常量（t782 根因复刻防线——MobType 枚举中部插值 / 尾部新增忘补
-//   表行时，本断言 + 矩阵探针「kValidMobTypeCount == EntityManager::MobAnvil+1」两级编译期拦截；Renderer
-//   在 Entities 之下不得 include entitymanager.h（PLAN §2），枚举侧互钉落在上层测试 TU）。MobType 实值经
-//   核：MobTest=0 .. MobAnvil=18 共 19 值（entitymanager.h）。
+//   表行时，本断言 + 矩阵探针「kValidMobTypeCount == EntityManager::MobBabyShambler+1」两级编译期拦截；
+//   Renderer 在 Entities 之下不得 include entitymanager.h（PLAN §2），枚举侧互钉落在上层测试 TU）。MobType
+//   实值经核：MobTest=0 .. MobBabyShambler=19 共 20 值（entitymanager.h；t952 起上界 = 小蹒跚者）。
 static_assert(int(sizeof(kValidMobModelType) / sizeof(kValidMobModelType[0])) == MobModel::kValidMobTypeCount,
               "kValidMobModelType 表长必须 == MobModel::kValidMobTypeCount——新增 mobType 须补表行 + 同步头常量");
 } // namespace
@@ -545,6 +546,29 @@ void MobModel::rebuild()
         addBoxRot(-0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, +sw, verts, idx, bMin, bMax); // 左腿
         setMobTex(0, 16, 4, 12, 4);
         addBoxRot( 0.11f, -0.575f, 0.00f, 0.11f, 0.325f, 0.12f, hipY, 0.00f, -sw, verts, idx, bMin, bMax); // 右腿
+    } else if (m_mobType == 19) {
+        // t952 小蹒跚者（BabyShambler；机制等价 MC 幼体僵尸，§9 区隔命名 + 原创模型/贴图）：Shambler 人形
+        //   的「幼体比例」变体——躯干 / 四肢 ×0.5 缩、头几乎原大（头 0.17³ vs 成体 0.22³、躯干半宽 0.11 vs
+        //   0.22）→「头大身小」幼体视觉语言（dev-plan 口径「盒子模型缩放时头少缩身多缩」）。碰撞盒
+        //   halfH=0.45（0.9 高 <1 格）→ 腿底本地 y=−0.45 贴 collision 底面（mobModelYOff = 0.45−0.45 = 0）。
+        //   双臂前伸姿态 / 双腿 biped 反相摆动与成体同构（小僵尸 = 成体的快速低伤缩小版，AI 同 aiHostile）。
+        //   UV 采同一张 64×64 humanoid 区（head(0,0) / body(16,16) / arm(40,16) / leg(0,16)）铺 mob_baby_
+        //   shambler 程序贴图（亮一档黄绿幼体配色，build_mob.py 同族生成）。
+        g_texW = 64.0f; g_texH = 64.0f;
+        setMobTex(16, 16, 8, 12, 4);
+        addBox( 0.00f,  0.025f,  0.00f, 0.11f, 0.15f, 0.06f, verts, idx, bMin, bMax); // 躯干（×0.5；心略上移让腿更长）
+        setMobTex(0, 0, 8, 8, 8);
+        addBox( 0.00f,  0.345f,  0.00f, 0.17f, 0.17f, 0.17f, verts, idx, bMin, bMax); // 头（原大级别——幼体大头）
+        setMobTex(40, 16, 4, 12, 4);
+        addBox(-0.165f,  0.115f, -0.185f, 0.05f, 0.05f, 0.125f, verts, idx, bMin, bMax); // 左臂前伸（-X、-Z 前）
+        setMobTex(40, 16, 4, 12, 4);
+        addBox( 0.165f,  0.115f, -0.185f, 0.05f, 0.05f, 0.125f, verts, idx, bMin, bMax); // 右臂前伸（+X、-Z 前）
+        const float swB = kLegSwingAmp * std::sin(m_walkPhase);
+        const float hipYB = -0.125f; // 髋枢 = 腿顶（= 躯干底面 y）
+        setMobTex(0, 16, 4, 12, 4);
+        addBoxRot(-0.055f, -0.2875f, 0.00f, 0.055f, 0.1625f, 0.06f, hipYB, 0.00f, +swB, verts, idx, bMin, bMax); // 左腿
+        setMobTex(0, 16, 4, 12, 4);
+        addBoxRot( 0.055f, -0.2875f, 0.00f, 0.055f, 0.1625f, 0.06f, hipYB, 0.00f, -swB, verts, idx, bMin, bMax); // 右腿
     } else if (m_mobType == 5) {
         // t287/t301 Bones（骸骨；机制等价 MC 1.0 骷髅，§9 区隔改名）—— 瘦骨嶙峋人形（窄躯干 + 小头骨 + 细骨杆四肢）
         //   + 右手持弓（t301：原创弧形弓几何）。修：原 mobType 5 误标为 Stalker，且 Main.qml 把 Bones(5) 路由到

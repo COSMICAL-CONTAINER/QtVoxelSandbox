@@ -75,7 +75,8 @@ Item {
         { mobType: 10, name: "狼" }, { mobType: 11, name: "豹猫" },
         { mobType: 12, name: "雪傀儡" }, { mobType: 13, name: "铁傀儡" }, { mobType: 14, name: "蠹虫" },
         { mobType: 16, name: "夜行者" }, // t727 末影人→夜行者（§9 改名；生物图鉴条目 + 生物蛋 0x246 映射）
-        { mobType: 17, name: "燃烬者" } // t728 烈焰人→燃烬者（§9 改名；生物图鉴条目 + 生物蛋 0x247 映射）
+        { mobType: 17, name: "燃烬者" }, // t728 烈焰人→燃烬者（§9 改名；生物图鉴条目 + 生物蛋 0x247 映射）
+        { mobType: 19, name: "小蹒跚者" } // t952 幼体僵尸（§9 区隔命名；生物图鉴条目 + 生物蛋 0x25D 映射；生成时概率组成小鸡骑士）
         // t751 条目合并：t663 ⑥ 曾把剪毛变体拆成独立条目（羊（剪毛后）/雪傀儡（剪头后）——同 mobType 双条
         //   仅靠名字区分）。现改为**每生物单条**+预览区下沿悬浮变体面板（见 previewArea 内 variantPanel，
         //   t783 ② 迁入）：羊 = 剪毛/未剪 toggle + 毛色 swatch（仅羊有颜色变体）、雪傀儡 = 戴头/剪头 toggle。
@@ -133,6 +134,7 @@ Item {
             case 0x247: return 17; // t728 燃烬者生物蛋（SpawnEggEmberlingId；与 PlayerController placeBlock 同源）
             case 0x249: return 10; // t785 狼生物蛋（SpawnEggWolfId；右键 → 生成野生狼）
             case 0x24A: return 11; // t785 豹猫生物蛋（SpawnEggOcelotId；右键 → 生成野生豹猫）
+            case 0x25D: return 19; // t952 小蹒跚者生物蛋（SpawnEggBabyShamblerId；右键 → 生成幼体僵尸，生成时掷小鸡骑士组合骰）
         }
         return -1
     }
@@ -144,6 +146,7 @@ Item {
             case 2: return "qrc:/textures/mob_cow.png"
             case 3: return "qrc:/textures/mob_sheep.png"
             case 4: return "qrc:/textures/mob_shambler.png"
+            case 19: return "qrc:/textures/mob_baby_shambler.png" // t952 小蹒跚者程序生成亮黄绿幼体贴图（§9 原创；无 pack 分流同源）
             case 8: return "qrc:/textures/mob_chicken.png"
             case 9: return "qrc:/textures/mob_squid.png"
             case 10: return "qrc:/textures/mob_wolf.png"
@@ -172,6 +175,7 @@ Item {
         if (t === 14) return 1.6
         if (t === 16) return 0.55 // t781 夜行者细肢人形高 2.70（[-1.40,1.30]）→ 缩到镜头内全身可见
         if (t === 17) return 1.1 // t782/t818 燃烬者头+4棒全模型 1.10 高 ×1.14 宽（[-0.58,0.52]/半径 0.57；t818 头 0.88³→0.7³ + 轨道 0.62→0.52）→ 1.1 撑满可辨
+        if (t === 19) return 1.5 // t952 小蹒跚者全模型 ~0.97 高（[-0.45,0.515]）幼体小 → 放大可辨（同蠹虫放大口径）
         if (t === 6) return 0.85 // t894 潜行者游戏内视觉体格 0.85 同源（图鉴所见即游戏内比例）
         return 1.0
     }
@@ -182,6 +186,7 @@ Item {
             case 2: return 0.10   // 牛 [-0.55, 0.37]
             case 3: return 0.06   // 羊 [-0.44, 0.33]
             case 4: return 0.06   // 蹒跚者 [-0.90, 0.79]
+            case 19: return -0.03 // t952 小蹒跚者 [-0.45, 0.515]（体心 -0.03 → 下压居中主体）
             case 5: return 0.08   // 骸骨 [-0.90, 0.75]
             case 6: return 0.05   // 潜行者 [-0.77, 0.69]（t894 0.85 视觉缩放后跨度；缩放前 [-0.90, 0.81]——
                                   //   中心偏移差 <0.05 格视觉不可辨，0.05 沿用 t616 值；review27 #24 注释勘误）
