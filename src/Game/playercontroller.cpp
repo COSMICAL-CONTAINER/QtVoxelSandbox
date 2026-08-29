@@ -671,6 +671,32 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                         placeBlock(); // → kCropSeeds 种植分支（胡萝卜 / 马铃薯）
                         return true;
                     }
+                    // t949 喂食分流优先（spec「生鱼驯豹猫 / 生熟肉喂驯服狼」；机制等价 MC 1.0「对实体使用」优先于
+                    //   「使用物品」）：生鱼 / 狼肉**既是食物又是 mob 交互材料** —— 下方食物分支（foodHungerAmount>0
+                    //   → beginEating + return）先行拦截 → placeBlock 内生鱼驯服/回血/求偶分支与狼肉分支**永不可达**
+                    //   （用户第五轮「喂鱼驯不了豹猫」根因：id 判定本就认 RawFishId（t481 单一权威表无缺口），是
+                    //   live 右键输入根本到不了那条分支——矩阵探针直调 tameOcelot/EntityManager 直链测不到本缝）。
+                    //   同构先例：t514 甜浆果 / t639① 胡萝卜马铃薯「使用方块优先于进食」分流。判据复用 placeBlock
+                    //   各喂食分支同一条 mob 命中射线（findMobHit + kReach 同射程，瞄 mob 不要求方块命中）：生鱼 +
+                    //   命中豹猫（驯服/回血/求偶由 placeBlock 分支自分流，野/驯都算「对实体使用」）；狼肉 + 命中
+                    //   **已驯服**狼（野狼不吃肉，MC 1.0；未命中驯服狼 → 回退进食）。分流进 placeBlock（消耗/挥手/
+                    //   驯服判定都在该分支内）；未命中（瞄空气 / 非 ocelot / 野狼）→ fall-through 进食（鱼/肉仍是食物）。
+                    if (m_hotbar && m_world && m_entityManager
+                        && (heldForEat == RecipeRegistry::RawFishId || isWolfMeatItem(heldForEat))) {
+                        float mobDist = 0.0f;
+                        const int mobIdx = m_entityManager->findMobHit(position(), lookDirection(), kReach, &mobDist);
+                        if (mobIdx >= 0) {
+                            const int mt = m_entityManager->mobTypeAt(mobIdx);
+                            const bool ocelotFeed = (heldForEat == RecipeRegistry::RawFishId
+                                                     && mt == EntityManager::MobOcelot);
+                            const bool wolfFeed = (isWolfMeatItem(heldForEat) && mt == EntityManager::MobWolf
+                                                   && m_entityManager->wolfTamedAt(mobIdx));
+                            if (ocelotFeed || wolfFeed) {
+                                placeBlock(); // → 生鱼分支（驯服/回血/求偶）/ 肉分支（回血/求偶）
+                                return true;
+                            }
+                        }
+                    }
                     // t267：手持食物（面包 / 甜浆果）→ 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
                     //   t467：经 foodHungerAmount 单一权威判「是否食物」，新增食物只改本判定一处（避免各处硬编码 BreadId）。
                     if (foodHungerAmount(heldForEat) > 0) { beginEating(); return true; }

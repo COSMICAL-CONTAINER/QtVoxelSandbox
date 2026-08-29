@@ -987,7 +987,15 @@ Item {
                                                 sitPose: root.mobTamedActive && root.mobSitPreview
                                                 // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
                                                 //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
-                                                packTextured: root.selectedMobPackSrc !== ""
+                                                // t949 贴图源 × UV 模式同源钉：驯服豹猫例外（t920 驯服猫 → 程序
+                                                //   mob_cat_* **全脸**贴图）必须同时关 box-UV——「贴图源」与「UV
+                                                //   模式」是两个独立开关，须同一条件门。旧版 packTextured 只看
+                                                //   pack 命中（mobType 11 开包恒命中）→ 驯服态预览几何以 box-UV
+                                                //   窗采程序猫贴图任意像素 = 混入狼样灰斑（用户第五轮「3D 贴图
+                                                //   混入狼的灰色贴图」根因；游戏内 delegate 的 ocelotPackHit 自带
+                                                //   !ocatTamed 故游戏内无此病——两消费端门条件现逐字同源）。
+                                                packTextured: (root.selectedMobPackSrc !== ""
+                                                               && !(root.selectedMobFromSection === 11 && root.mobTamedPreview))
                                                     || (root.selectedMobSheared && root.selectedMobType === 3
                                                         && root.sheepBodyPackSrc !== "")
                                                 // t782 燃烬者棒组公转（度；头+4棒共享几何）：仅选燃烬者时给动画角

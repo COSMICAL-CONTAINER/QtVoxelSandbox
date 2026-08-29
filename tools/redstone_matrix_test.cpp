@@ -33,6 +33,7 @@
 #include <QQmlComponent> // t874/t875 真链探针：setData+base URL 直载源树 AnvilUI.qml / EnchantingTableUI.qml
 #include <QQuickItem>   // t874/t875 真链探针：面板 root / 宿主容器 Item
 #include <QQuickWindow> // t891 探针：pc 挂窗置 captured（placeBlock 入口门；grab 载体，无 show）
+#include <QMouseEvent>  // t949 探针：合成右键 press 直调 eventFilter（真实输入翻译链第一站）
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -22559,6 +22560,199 @@ Item {
                              " (passive, no aggro system) never fights back (wolf stays full HP),"
                              " and both wiring sites are source-pinned (bite -> mobAggroAgainst,"
                              " melee consumer -> wolfRetaliateAgainst)"
+                             ;
+    }
+
+    // ── P-t949 豹猫两修（R19.17 🅲：① 生鱼驯服 live 右键可达 / ② 图鉴驯服猫预览贴图源 × UV 模式同源）──
+    //    根因①：eventFilter 右键链的食物分支（foodHungerAmount>0 → beginEating + return）先行拦截——生鱼 /
+    //    狼肉既是食物又是 mob 交互材料，placeBlock 内生鱼驯服分支（t481）与狼肉分支（t480）在 live 输入下
+    //    **永不可达**（矩阵旧探针直调 tameOcelot/EntityManager 测不到输入翻译缝）。修 = t514/t639①「使用优先
+    //    于进食」同构分流：findMobHit 命中豹猫（生鱼）/ 已驯服狼（狼肉）→ placeBlock；未命中 → fall-through 进食。
+    //    根因②：图鉴预览 packTextured（t780「pack 命中 → box-UV」）与 t920「驯服猫 → 程序全脸 mob_cat_*」
+    //    两开关条件不同源 → 驯服态预览几何以 box-UV 窗采程序猫贴图任意像素 = 混入狼样灰斑（游戏内 delegate
+    //    的 ocelotPackHit 自带 !ocatTamed 无此病）。修 = packTextured 门加驯服猫例外（与贴图切换同条件）。
+    //    (a) 行为腿·生鱼驯服（真实输入翻译链）：PlayerController 直编挂 QQuickWindow（grab 载体，t891 先例）
+    //        + 生存 64 生鱼 + 野豹猫 2.7 格前 → 合成 QMouseEvent 右键 press **直调 eventFilter**（输入第一站）
+    //        → 循环至驯中（~1/3 概率 40 次帽；每次 press 泵 >200ms placeBlock CD）→ 断言驯服态位 + 变体
+    //        0..2 + 生鱼消耗。阴性轮（回退 gate）本腿必红：食物分支拦截 → 永不进 placeBlock → 恒野。
+    //    (b) 阴性·熟鱼不驯（t836 口径豹猫只吃生鱼）：持熟鱼瞄豹猫 press → gate 不接熟鱼 → 食物分支进食
+    //        → 不驯 + 鱼不耗（无 tick 不完成进食）。
+    //    (c) 行为腿·狼肉喂养回血（同缝同修面，任务行③「喂养回血面顺带核一致」）：驯服狼 damageEntity 到
+    //        6HP → 持生牛肉瞄狼 press → gate（isWolfMeatItem + wolfTamed）→ placeBlock 肉分支 healTamedPet
+    //        +4 → HP==10 + 肉耗 1。
+    //    (d) ②映射单源 + 两消费端源码钉：mobEntityMap() 直调 11→cat/ocelot.png 且 10→wolf/wolf.png（两源
+    //        互异 =「豹猫贴图非狼贴图」映射级断言）；Main.qml 钉游戏内 ocelotPackHit 判据含 !ocatTamed +
+    //        baseColorMap 收口永不落狼贴图；ResourceBrowser.qml 钉 packTextured 门含驯服猫例外且与 t920
+    //        贴图切换同条件（t923(d) 文件读源码钉先例——QML 消费端 headless 不可达）。
+    {
+        bool ok = true;
+        QString diag;
+        auto flatRig949 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        // 泵事件循环推墙钟（placeBlock 200ms CD 走 m_evtClock 墙钟——t891 链 B pumpFor 先例）。
+        auto pump949 = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // 合成右键 press 经 sendEvent 投递进 probeWin（pc 在 onWindowChanged 里 installEventFilter 于窗
+        //   = 用户真实投递链，filter 命中 o==m_window；eventFilter 是 protected 虚不可直调。t874 合成事件
+        //   走 QML TapHandler 有 harness 伪影已弃，此处直达 C++ 事件过滤链，无 QML 队列伪影面）。
+        auto rightPress949 = [](PlayerController &, QQuickWindow &win) {
+            QMouseEvent press(QEvent::MouseButtonPress, QPointF(64.0, 64.0), QPointF(64.0, 64.0),
+                              Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            return QCoreApplication::sendEvent(&win, &press);
+        };
+        // 瞄准布置：pc 挂窗 grab 捕获 + 玩家脚位 (mx+0.5, 85, mz+3) 眼 86.62 → 瞄 mob 中心 (mx+0.5, 85.5, mz+0.5)
+        //   （dir (0,-1.12,-2.5)，距 2.74 < kReach 5；yaw 0 / pitch -24.12°，loadSavedState 取弧度→角度换算）。
+        auto aimRig949 = [](PlayerController &pc, World &w, EntityManager &em, Hotbar &hb,
+                            int mx, int mz, int mobType, int itemId) -> int {
+            pc.setWorld(&w);
+            pc.setEntityManager(&em);
+            pc.setHotbar(&hb);
+            const int mob = em.spawnMobTyped(mx, 85, mz, mobType, QStringLiteral("#e8c890"), 10);
+            hb.setStack(0, itemId, 64, 0);
+            hb.setSelectedSlot(0);
+            const QVector3D eye(float(mx) + 0.5f, 86.62f, float(mz) + 3.0f);
+            const QVector3D dir = (QVector3D(float(mx) + 0.5f, 85.5f, float(mz) + 0.5f) - eye).normalized();
+            pc.loadSavedState(eye.x(), 85.0f, eye.z(),
+                              qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                              qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+            return mob;
+        };
+        QQuickWindow probeWin949;
+        // (a) 生鱼驯服（真实输入链，40 次帽覆盖 ~1/3 驯服 RNG：0.67^40 ≈ 1e-7 漏判率）。
+        int consumedA = -1;
+        {
+            World wa; flatRig949(wa);
+            EntityManager ema;
+            Hotbar hba;
+            PlayerController pca;
+            pca.setParentItem(probeWin949.contentItem());
+            pca.grab(); // m_window 就绪 → setCaptured(true)（placeBlock/eating 共同入口门）
+            const int cat = aimRig949(pca, wa, ema, hba, 20, 12,
+                                      EntityManager::MobOcelot, RecipeRegistry::RawFishId);
+            bool tamed = false;
+            if (cat >= 0) {
+                for (int attempt = 0; attempt < 40 && !tamed; ++attempt) {
+                    if (attempt > 0) pump949(210); // >200ms placeBlock CD（墙钟）
+                    rightPress949(pca, probeWin949);
+                    tamed = ema.ocelotTamedAt(cat);
+                }
+            }
+            consumedA = 64 - hba.countAt(0);
+            const int variant = tamed ? ema.ocelotVariantAt(cat) : -1;
+            const bool varOk = tamed && variant >= 0 && variant <= 2;
+            ok = ok && cat >= 0 && tamed && varOk && consumedA >= 1 && consumedA <= 40;
+            if (!(cat >= 0 && tamed && varOk && consumedA >= 1 && consumedA <= 40))
+                diag += QStringLiteral("a cat=%1 tamed=%2 var=%3 consumed=%4 ")
+                            .arg(cat).arg(int(tamed)).arg(variant).arg(consumedA);
+        }
+        // (b) 阴性·熟鱼不驯（gate 不接熟鱼 → 食物分支进食 → placeBlock 不可达）。
+        {
+            World wb; flatRig949(wb);
+            EntityManager emb;
+            Hotbar hbb;
+            PlayerController pcb;
+            pcb.setParentItem(probeWin949.contentItem());
+            pcb.grab();
+            const int cat = aimRig949(pcb, wb, emb, hbb, 20, 12,
+                                      EntityManager::MobOcelot, RecipeRegistry::CookedFishId);
+            bool tamed = false;
+            if (cat >= 0) {
+                for (int attempt = 0; attempt < 5 && !tamed; ++attempt) {
+                    if (attempt > 0) pump949(210);
+                    rightPress949(pcb, probeWin949);
+                    tamed = emb.ocelotTamedAt(cat);
+                }
+            }
+            const bool untouched = hbb.countAt(0) == 64; // 进食路径不完成（无 tick）→ 鱼不耗
+            ok = ok && cat >= 0 && !tamed && untouched;
+            if (!(cat >= 0 && !tamed && untouched))
+                diag += QStringLiteral("b cat=%1 tamed=%2 count=%3 ")
+                            .arg(cat).arg(int(tamed)).arg(hbb.countAt(0));
+        }
+        // (c) 狼肉喂养回血（同缝同修面：isWolfMeatItem + 已驯服狼 → placeBlock 肉分支 healTamedPet）。
+        {
+            World wc; flatRig949(wc);
+            EntityManager emc;
+            Hotbar hbc;
+            PlayerController pcc;
+            pcc.setParentItem(probeWin949.contentItem());
+            pcc.grab();
+            const int wolf = aimRig949(pcc, wc, emc, hbc, 20, 12,
+                                       EntityManager::MobWolf, RecipeRegistry::RawBeefId);
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && wolf >= 0 && !tamed; ++attempt)
+                tamed = emc.tameWolf(wolf); // 直调驯服（t948 helper 先例；RNG 循环帽）
+            emc.damageEntity(wolf, 4); // 10 → 6HP（喂肉回血面：healTamedPet +4 钳上限）
+            if (wolf >= 0 && tamed) {
+                pump949(210);
+                rightPress949(pcc, probeWin949);
+            }
+            const bool healed = emc.healthAt(wolf) == 10;
+            const bool consumed = hbc.countAt(0) == 63; // 喂成功耗 1 生牛肉
+            ok = ok && wolf >= 0 && tamed && healed && consumed;
+            if (!(wolf >= 0 && tamed && healed && consumed))
+                diag += QStringLiteral("c wolf=%1 tamed=%2 hp=%3 count=%4 ")
+                            .arg(wolf).arg(int(tamed)).arg(emc.healthAt(wolf)).arg(hbc.countAt(0));
+        }
+        // (d) ②映射单源直调 + 两消费端源码钉。
+        {
+            bool mapOcelot = false, mapWolf = false;
+            for (const auto &m : mobEntityMap()) {
+                if (m.first == 11) mapOcelot = (m.second == QStringLiteral("cat/ocelot.png"));
+                if (m.first == 10) mapWolf = (m.second == QStringLiteral("wolf/wolf.png"));
+            }
+            const bool distinct = mapOcelot && mapWolf; // 豹猫/狼贴图源互异（「非狼贴图」映射级断言）
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile pf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            const QString psrc = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const bool pinGate = psrc.contains(QStringLiteral("if (ocelotFeed || wolfFeed) {"))
+                                 && psrc.contains(QStringLiteral("t949 喂食分流优先"));
+            QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+            const QString msrc = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            // 游戏内消费端：pack 命中判据排除驯服态（驯服猫恒程序贴图全脸 UV）+ 贴图收口永不落狼。
+            const bool pinMain = msrc.contains(QStringLiteral(
+                                    "!ocatTamed && mobOcelotPackTex.source.toString().length > 0"))
+                                 && msrc.contains(QStringLiteral(
+                                    "return ocelotPackHit ? mobOcelotPackTex : mobOcelotTex"));
+            QFile rf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+            const QString rsrc = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+            // 查看器消费端：packTextured 门含驯服猫例外（t949 新门）且与 t920 贴图切换同条件并存。
+            const bool pinBrowser = rsrc.contains(QStringLiteral(
+                                      "!(root.selectedMobFromSection === 11 && root.mobTamedPreview))"))
+                                    && rsrc.contains(QStringLiteral(
+                                      "? \"qrc:/textures/mob_cat_black.png\""));
+            ok = ok && distinct && pinGate && pinMain && pinBrowser;
+            if (!(distinct && pinGate && pinMain && pinBrowser))
+                diag += QStringLiteral("d mapO=%1 mapW=%2 pinGate=%3 pinMain=%4 pinBrowser=%5 ")
+                            .arg(int(mapOcelot)).arg(int(mapWolf)).arg(int(pinGate))
+                            .arg(int(pinMain)).arg(int(pinBrowser));
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t949 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t949 ocelot pair-fix: raw-fish right-click on a wild ocelot tames it"
+                             " through the REAL input chain (synthesized right-press driven straight"
+                             " into eventFilter -- the eat branch no longer swallows the feed; tame"
+                             " flag + variant 0..2 + fish consumed), a cooked fish press never tames"
+                             " (t836 raw-only caliber: eat path, fish untouched), raw beef on a"
+                             " damaged tamed wolf heals it 6->10 through the same gate (t480 meat"
+                             " face now reachable live), and the texture source stays single-"
+                             " authority: mobEntityMap 11->cat/ocelot.png distinct from 10->wolf/"
+                             "wolf.png, the in-game delegate pack-hit excludes the tamed state,"
+                             " and the viewer packTextured gate now carries the same tamed-cat"
+                             " exception as the t920 texture switch (no more box-UV sampling of the"
+                             " program cat art = the wolf-gray mottle the user reported)"
                              ;
     }
 
