@@ -437,6 +437,26 @@ bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY,
     return true;
 }
 
+// t939 本格面坡向采样（静置闸 / 滑行坡向补全共用；头注释见 .h）：沿 (wx,wz) ±kCartPitchProbe 两点采样
+//   轨面高（railSurfaceYAt —— Y 钉定 / 俯仰 / t863① 反溜同一张面；采样点越出本格时列扫自然读到邻格面
+//   → 梯度即真实连续坡面，非本格公式外推）。outGrad = (前−后)/(2·probe)：正 = 面沿 (wx,wz) 上坡
+//   （1:1 坡 ≈ 1.0、V 谷翼同量级）、负 = 下坡、0 = 平。任一端采样失联（死端前探 / 拐角垂直臂 / 离轨
+//   防御 / railY<0 地面车）→ 返 false（caller 退回邻轨层差判定，原语义不变）。只读 World。
+bool MinecartManager::cartRailGradient(World *world, const QVector3D &pos, int railY,
+                                       float wx, float wz, float &outGrad) const
+{
+    if (!world || railY < 0) return false;
+    float hF = 0.0f, hB = 0.0f;
+    if (!railSurfaceYAt(world, pos.x() + wx * kCartPitchProbe,
+                        pos.z() + wz * kCartPitchProbe, railY + 1, pos.y(), hF))
+        return false;
+    if (!railSurfaceYAt(world, pos.x() - wx * kCartPitchProbe,
+                        pos.z() - wz * kCartPitchProbe, railY + 1, pos.y(), hB))
+        return false;
+    outGrad = (hF - hB) / (2.0f * kCartPitchProbe);
+    return true;
+}
+
 // t863① 坡上失速反溜起步（头注释见 .h）：车头向 ±kCartPitchProbe 两点轨面采样高差判「车头朝上坡面」。
 // 采样列扫描窗 [railY+1, railY-1]（采样点距车心 ≤0.25 → 至多邻列，坡步进 ±1 恒覆盖）；任一端失联
 //（死端前探 / 拐角）→ 不起步（保守停驻，机制等价 MC 坡顶平段停）。
@@ -761,9 +781,28 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
         //   山腰任意朝向放置都往坡底走，用户报「初始放在 V 半山腰静止不动」）；两侧皆平 / 上坡 / 死端
         //   （INT_MIN）→ 维持停驻。t863① 反溜链（死区采样起步）继续承担「行驶中失速」的转弯，本闸承担
         //   「静止初始态」—— 两路互补，V 形永动机（t909①）的停驻面全部闭合。
+        //   t939 单格坡 + 轨型分口径补全（用户定稿：未激活动力轨=减速可平衡坡上；普通轨=下滑；激活动力
+        //   轨+探测轨=往下坡运动）：
+        //   ① 根因：邻轨层差规则只看见「下一格轨低一格」（连续坡每格 ±1）；单格坡（平轨里嵌一格凸/凹）
+        //   的坡度全部落在**本格面**上（railRiseAt 的 fx 线性坡），本格邻轨探针读 {上坡侧 +1, 平侧 0}——
+        //   两头都无 -1 → 被当平地停驻 = 用户实测「单格上/下坡静置矿车仍静止」。
+        //   ② 补全：邻轨层差之外读**本格面梯度**（cartRailGradient，与 Y 钉定 / 俯仰同一张面）——车头侧
+        //   采样面更高（grad>0）→ 下坡在背向 → 翻向起步；更低 → 顺行起步。采样失联（死端 / 拐角）→ 维持
+        //   停驻（保守，机制等价 t863① 平段停）。
+        //   ③ 轨型闸（先于一切坡向判定）：未激活动力轨 = 减速闸（机制等价 MC 1.0 断电 powered rail 刹
+        //   住坡上车）——静置车在坡上被刹住不下滑（用户定稿「车停得住」）；激活态读 t937 goldenPowered
+        //   收口写入的同一 state 位（GoldenRailStateOnFlag），不写第二套激活判定。普通轨 / 探测轨 / 通电
+        //   动力轨 → 有下坡分量（邻轨层差 ∪ 本格面梯度）即起步溜；通电动力轨起步后由 t735④ boost lerp
+        //   接管供能。平地无下坡分量 → 三轨型一律静止（t735④「平地静置空车不被动力轨弹射」不破 —— 弹
+        //   射豁免看的是坡向不是轨型）。
         if (std::fabs(c.speed) < 1e-3f) {
             const int sx = int(std::floor(c.pos.x()));
             const int sz = int(std::floor(c.pos.z()));
+            // t939 ③ 未激活动力轨减速闸（brake）：断电动力轨在坡上也刹得住。ry<0（地面车 / 离轨防御）
+            //   blockAt 越界读 Air → 恒不命中，地面停驻语义不受本闸影响。
+            if (world->blockAt(sx, ry, sz) == BlockRegistry::GoldenRail
+                && (world->stateAt(sx, ry, sz) & BlockRegistry::GoldenRailStateOnFlag) == 0)
+                continue;
             const auto slopeToward = [&](int sgn) {
                 const int sdx = int(c.dirX) * sgn, sdz = int(c.dirZ) * sgn;
                 return BlockRegistry::railProbeDelta(
@@ -773,16 +812,29 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             };
             const int fwdSlope = slopeToward(1);
             const int bwdSlope = slopeToward(-1);
+            bool downhill = false, flip = false;
             if (fwdSlope == -1) {
-                c.speed = kCartSlopeKick;                       // 行进侧已是下坡 → 顺行起步
+                downhill = true;                                // 行进侧已是下坡 → 顺行起步
             } else if (bwdSlope == -1) {
-                c.dirX = -c.dirX;                               // 翻向：行进侧改下坡
+                flip = true;                                    // 翻向：行进侧改下坡
+                downhill = true;
+            } else {
+                // t939 ② 单格坡本格面梯度（连续坡邻轨层差已覆盖，本分支只在「本格面倾斜而两侧邻轨都
+                //   不低一格」时命中 —— 单格凸/凹正是这种几何）。V 谷翼偏离谷心的静置车同由本分支
+                //   送回谷底（rise=2|轴-0.5| 的翼面梯度）。
+                float grad = 0.0f;
+                if (cartRailGradient(world, c.pos, ry, c.dirX, c.dirZ, grad)) {
+                    if (grad > kCartSlopeGradMin) { flip = true; downhill = true; }
+                    else if (grad < -kCartSlopeGradMin) { downhill = true; }
+                }
+            }
+            if (!downhill) continue; // 平 / 上坡两侧 / 死端 → 静置（平地放置的车不自己跑掉）
+            if (flip) {
+                c.dirX = -c.dirX;
                 c.dirZ = -c.dirZ;
                 cartYawFromDir(c.dirX, c.dirZ, c.yaw);
-                c.speed = kCartSlopeKick;
-            } else {
-                continue; // 平 / 上坡两侧 / 死端 → 静置（平地放置的车不自己跑掉）
             }
+            c.speed = kCartSlopeKick;
         }
         // 滑行物理：行进侧邻轨高度差判定（同 tickRiddenCart 坡道重力公式；空车无输入 → 只做滑行不抬速）。
         //   下坡（δ=-1）→ t909③ 重力加速（旧版仅「不衰减」恒速 = 用户报「五六格都到不了最大速度」根因）；
@@ -792,10 +844,25 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
         const int cx = int(std::floor(c.pos.x()));
         const int cz = int(std::floor(c.pos.z()));
         const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
-        const int slope = BlockRegistry::railProbeDelta(
+        int slope = BlockRegistry::railProbeDelta(
             { world->blockAt(cx + ndx, ry, cz + ndz),
               world->blockAt(cx + ndx, ry + 1, cz + ndz),
               world->blockAt(cx + ndx, ry - 1, cz + ndz) });
+        // t939 本格面坡向覆盖（滑行半边，与上方静置闸 ② 同源）：邻轨层差只描述「下一格」——车在单格坡
+        //   的倾斜面**上**时（本格 rise 0→1 的 fx 线性段），行进前方邻轨层差可能是 0（平）甚至 +1（对
+        //   侧更高）→ 重力从不接管 = 起步溜只剩 kCartSlopeKick 的摩擦滑行（约半格一停的蠕动，非自然
+        //   滚落）。改：沿**行进向**（负速倒行时梯度跟行进不跟车头）采样的本格面梯度显著
+        //   （|grad| > kCartSlopeGradMin）时以其分类覆盖邻轨层差（上坡减速 / 下坡加速同
+        //   kCartSlopeGravity，与 t909 连续坡同参数）。连续 1:1 坡两口径逐格同判（梯度 ±1 = 层差 ±1）
+        //   → t909/t864 既有语义零变化；单格坡 / V 谷翼才由本覆盖解锁。采样失联（死端前探 / 拐角）→
+        //   保留邻轨层差判定（原语义）。
+        {
+            float grad = 0.0f;
+            if (cartRailGradient(world, c.pos, ry, c.dirX * float(gs), c.dirZ * float(gs), grad)) {
+                if (grad > kCartSlopeGradMin) slope = 1;
+                else if (grad < -kCartSlopeGradMin) slope = -1;
+            }
+        }
         // t735 ④ 动力段保持（**语义变更**：t708 旧注释「空车不吃动力轨 boost」被本任务推翻 —— 碰撞 / 玩家
         //   推动获速的空车驶上通电动力轨（GoldenRail + GoldenRailStateOnFlag，同被骑路径 t658 通电判定）
         //   应保持前进直到离开动力段）：摩擦不衰减，反被 lerp 加速到 boost 档（沿当前 speed 符号 —— 动力

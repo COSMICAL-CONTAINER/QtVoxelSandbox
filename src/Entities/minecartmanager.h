@@ -326,6 +326,13 @@ private:
     //   caller 传的 topY 应为车所在轨层 +1（采样列与车列至多相邻 → 轨层差 ∈ [-1,+1]，扫描窗恰覆盖）。
     bool railSurfaceYAt(World *world, float sx, float sz, int topY, float refY, float &outY) const;
 
+    // t939 本格面坡向采样（静置闸 / 滑行坡向补全共用；实现见 .cpp 头注释）：沿 (wx,wz)（静置闸 = 车头向 /
+    //   滑行 = 行进向，负速倒行梯度跟行进不跟车头）±kCartPitchProbe 采样轨面高差 → 梯度 outGrad（正 =
+    //   面沿该向上坡、负 = 下坡、0 = 平；1:1 坡 ≈ ±1.0）。任一端采样失联（死端前探 / 拐角垂直臂 / 离轨
+    //   防御）→ 返 false（caller 退回邻轨层差判定，原语义不变）。只读 World。
+    bool cartRailGradient(World *world, const QVector3D &pos, int railY,
+                          float wx, float wz, float &outGrad) const;
+
     // t769 车身俯仰刷新（纯呈现）：以车心为基准、沿车头向 ±kCartPitchProbe 两点采样轨面高（railSurfaceYAt）
     //   → pitch = atan2(前-后, 2·probe)。railY = 车所在列轨层（pinCartY 返回值 / 被骑停驻帧的前置钉定 railY）。
     //   详见 .cpp 实现处头注释（采样窗语义 / 跨段过渡 / 符号约定）。
@@ -483,6 +490,10 @@ private:
     // ② 静置空车坡道自溜起步速度（blocks/s）：放在坡上的静止车朝下坡侧的初始速度（后续重力加速接管；
     //   平地静止车不动）。> t863① 反溜 kick 0.5 —— 用户口径「下坡初速加大」。
     static constexpr float kCartSlopeKick = 1.0f;
+    // t939 本格面坡向判定阈（梯度）：|grad| 超过它才认「本格面有坡向」（1:1 坡 / V 谷翼 ≈ 1.0、平面 /
+    //   平拐角 0）——与 t863① tryStallSlideback 的 0.05 高差阈同口径（0.05 高差 ÷ 0.5 采样窗 = 0.1 梯度）。
+    //   低于它的微起伏（拐角双线性残段 / 采样跨段过渡带）按平面处理（退回邻轨层差判定）。
+    static constexpr float kCartSlopeGradMin = 0.1f;
 };
 
 #endif // MINECARTMANAGER_H
