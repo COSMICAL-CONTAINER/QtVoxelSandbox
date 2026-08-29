@@ -185,8 +185,14 @@ Window {
     //   flutter（0↔14°）叠在半空残留角上读作卡页）。恢复侧无需命令：pageFlutterAnim 的 running 条件
     //   （worldRunning && bookOpen && !pageFlipAnim.running）自动翻转接管续摆，下次大摆由 pageFlipTimer
     //   （running 已含 worldRunning 门）重新触发。
+    //   t954 修订：pageFlipAnim / flipPivot 是 bookDelegate（inline Component）的**子组件作用域 id**，
+    //   window 的作用域链不含 inline Component 内部 id → 本 handler 的裸引用运行期 ReferenceError 被
+    //   引擎吞掉、硬档静默失效（P-review28b 源码钉钉的是语句面——「源码钉 PASS 但运行期断」的探针
+    //   盲区）。运行期真实硬档移到 bookDelegate 实例内 Connections（每台附魔书各一份，作用域内 id 全
+    //   可解析，见 bookDelegate 尾部）；本 handler 保留语句面 + typeof 守卫（子组件 id 未解析时静默
+    //   跳过不抛错）——两路同语义幂等，id 可解析与否行为一致。
     onWorldRunningChanged: {
-        if (!worldRunning && pageFlipAnim.running) {
+        if (!worldRunning && typeof pageFlipAnim !== "undefined" && pageFlipAnim.running) {
             pageFlipAnim.stop()
             flipPivot.flipAngle = 0.0
         }
@@ -9413,16 +9419,26 @@ Window {
                 //   物，10Hz 转向肉眼已连续，且多附魔台同屏时省每帧 JS（同 t585 指南针 4Hz 节流先例）。
                 property real bookYaw: 0
                 eulerRotation: Qt.vector3d(0, bookYaw, 0)
-                // t914 书本开合（用户 t872「书本一直是打开的状态，并未合上」返修）：玩家靠近 4 格内
-                //   敞开（两页 V 形阅读态）/ 远离合拢（左页绕书脊翻扣到右页上方，封面朝上）——机制等价
-                //   MC 附魔台书随玩家接近翻开、走远合上。驱动并进 faceTimer（10Hz 已有玩家位读取，不加
-                //   Timer）；迟滞带 4.0/4.4 格防玩家在阈值附近来回触发开合抖动（角度动画 240ms 内反复
-                //   反转会读作「抽搐」）。合拢态细节：
-                //   - 左页 -22°→-178°（翻扣过书脊落右页上方，2° 残角防两薄盒共面 z-fight；近书脊交叠
-                //     区被书脊条遮住）；右页 +22°→+1°。
-                //   - 左页 piece 4（纸页镜像）→ piece 0（封面）：合拢过程与合拢态上面读作「封面」——
-                //   翻扣中的页片 ±Y 都是封面区（qrc 布局 0 两面同封面矩形 / pack 布局 1 上=左封下=右封），
-                //   与真实书「前封随翻动翻上来」一致；敞开恢复 piece 4 纸页（t796 ② 用户定稿）。
+                // t914 书本开合（用户 t872「书本一直是打开的状态，并未合上」返修）+ t954 合拢动画重做
+                //   （用户第五轮「一瞬间+只有左边合并」）：玩家靠近 4 格内敞开（两页 V 形阅读态）/ 远离
+                //   合拢——机制等价 MC 附魔台书随玩家接近翻开、走远合上。驱动并进 faceTimer（10Hz 已有
+                //   玩家位读取，不加 Timer）；迟滞带 4.0/4.4 格防玩家在阈值附近来回触发开合抖动。
+                //   t954 合拢语义（dev-plan「左页向右、右页向左对向合拢成有厚度的关闭书籍」）：合拢不再是
+                //   240ms Behavior（读作瞬间）+ 仅左页翻扣（右页 21° 微动读作不动）——改**命令式双页对向
+                //   过渡**（bookOpenAnim / bookCloseAnim，ParallelAnimation running:false + restart()，
+                //   照 review28 #9 pageFlipAnim 同款先例：声明式门会与 restart 抢 running 绑定，且 ESC
+                //   硬档须能 stop+落定，见本 delegate 尾部 Connections）：
+                //   - 对向合拢：左页 -22°→-178°（外缘向右扫过书脊落右半上方，「左页向右」）；右页
+                //     +22°→+1° 压平并向书脊内移 gather（页盒 position.x 0.19→0.165，「右页向左」）——
+                //     两页同拍 850ms 缓出运动（时长档位对标大摆单摆 550/500ms 的 1s 内一档）。
+                //   - 合拢后厚度层（dev-plan「封面盒+页叠层…厚度=内页层」）：左页随合拢抬升 stackLift
+                //     0→0.026（封面拱在页叠上方、外缘 0.015 出檐）、右页下沉 -0.006、右页叠层
+                //     rightPageBlock（piece 1 纸页内缩薄片；敞开态即在 = 右侧页叠，无弹入弹出）——合拢态
+                //     总厚 ~0.06 ≈ 单页 2.7×，各层面互不共面（错位叠合免 z-fight）；书脊条随 closeAmt
+                //     增高（scale.y 0.03→0.075）读作装订边厚度（「封面+书脊厚度感」）。
+                //   - 左页 piece 4（纸页镜像）→ piece 0（封面）：bookOpen 状态翻转即换（动画起摆时页片
+                //     ±Y 都是封面区——qrc 布局 0 两面同封面矩形 / pack 布局 1 上=左封下=右封，「前封随
+                //     翻动翻上来」同真实书；敞开恢复 piece 4 纸页，t796 ② 用户定稿）。
                 //   - 翻页片（flipPivot）与 flutter/大摆动画合拢期整体隐藏（合着的书不翻页）。
                 readonly property real bookOpenDist: 4.0   // 靠近敞开半径（dev-plan t914 口径：4 格内敞开）
                 readonly property real bookCloseDist: 4.4  // 远离合拢半径（迟滞上沿 > 敞开半径防抖）
@@ -9479,15 +9495,17 @@ Window {
                         //   纸页且互为镜像（真开书左右页对称）；封面区在**合拢态**回归（t914：bookOpen
                         //   假 → piece 0 封面随翻扣翻上来，见 bookRoot.bookOpen 注释）。页面符文 / 符章
                         //   由贴图自带。
-                        //   t914 开合动画：pageAngle 绑 bookOpen（敞开 -22° / 合拢 -178° 翻扣），Behavior
-                        //   240ms InOutQuad 平滑过渡（探针-实机第 N 例教训：状态门不接动画面 = 恒开恒合
-                        //   的「完全没有」观感；两态都真接进几何/材质才可目视）。
+                        //   t914 开合动画（探针-实机第 N 例教训：状态门不接动画面 = 恒开恒合的「完全
+                        //   没有」观感）→ t954 重做：pageAngle 不再绑 bookOpen + Behavior（240ms 读作
+                        //   「一瞬间」），改命令式 bookOpenAnim/bookCloseAnim 驱动（见本 delegate 尾部
+                        //   ——动画写属性会拆绑定，绑定与动画两套驱动不可混用）；初值 = 合拢静息位
+                        //   （delegate 创建时 bookOpen 恒 false）。stackLift = 合拢抬升系数（1 = 封面
+                        //   拱于页叠上方 0.026 出厚度层，0 = 敞开贴平）。
                         Node {
                             id: leftPageNode
-                            property real pageAngle: bookRoot.bookOpen ? -22 : -178
-                            Behavior on pageAngle {
-                                NumberAnimation { duration: 240; easing.type: Easing.InOutQuad }
-                            }
+                            property real pageAngle: -178
+                            property real stackLift: 1.0
+                            position: Qt.vector3d(0, 0.026 * stackLift, 0)
                             rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: leftPageNode.pageAngle }
                             Model {
                                 geometry: EnchantBookBox { piece: bookRoot.bookOpen ? 4 : 0; layout: bookPackHit ? 1 : 0 }
@@ -9497,13 +9515,15 @@ Window {
                             }
                         }
                         // 右页：镜像（+22°）。t732 piece 1（纸页）：上面采纸页区（qrc 右半符文行 / 包纸页叠）。
-                        //   t914 合拢 +1°（近平放；残角防与翻扣上的左页共面 z-fight）。
+                        //   t954 合拢参与（「右页向左」）：+22°→+1° 压平之外再向书脊内移 gather（页盒心
+                        //   position.x 0.19→0.165、下沉 -0.006——对向合拢的右半拍 + 厚度基座）。
                         Node {
                             id: rightPageNode
-                            property real pageAngle: bookRoot.bookOpen ? 22 : 1
-                            Behavior on pageAngle {
-                                NumberAnimation { duration: 240; easing.type: Easing.InOutQuad }
-                            }
+                            // t954：同左页——角度/内移系数改命令式动画驱动，初值 = 合拢静息位。
+                            //   gather 1 = 合拢（向书脊收 0.025 + 下沉 0.006 出基座层），0 = 敞开。
+                            property real pageAngle: 1
+                            property real gather: 1.0
+                            position: Qt.vector3d(0.19 - 0.025 * gather, -0.006 * gather, 0.0)
                             rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: rightPageNode.pageAngle }
                             Model {
                                 geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
@@ -9511,12 +9531,29 @@ Window {
                                 scale: Qt.vector3d(0.38, 0.022, 0.46)
                                 materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                             }
+                            // t954 页叠层（dev-plan「封面盒+页叠层…厚度=内页层」）：纸页内缩薄片骑在右页
+                            //   上方（本地 +0.013，随右页同旋）——敞开态即在场 = 右侧页叠（真实书右半的
+                            //   内页层，非弹入弹出）；合拢态与下沉的右页错位叠合出基座厚度、与抬升的封面
+                            //   间留 0.008 阴影缝。暖 tint 同翻页片（t764 ④ 口径：与静态纸页拉开明度读
+                            //   出「层」）。
+                            Model {
+                                id: rightPageBlock
+                                geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
+                                position: Qt.vector3d(0.19, 0.013, 0.0)
+                                scale: Qt.vector3d(0.365, 0.014, 0.44)
+                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f2e8d5"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
+                            }
                         }
                         // 书脊：两页交汇处细横条。t732 piece 2：可见窄面 = 金边竖条（qrc）/ 书脊条含白宝石（包）。
+                        //   t954 合拢增厚：closeAmt 1 = 条带随厚度层增高（scale.y 0.03→0.075、随层抬到
+                        //   +0.0025 盖住整叠高）读作装订边（「封面+书脊厚度感」）；0 = 敞开态原细条
+                        //   （t732/t796 定稿零回归）。
                         Model {
+                            id: spineBar
+                            property real closeAmt: 1.0
                             geometry: EnchantBookBox { piece: 2; layout: bookPackHit ? 1 : 0 }
-                            position: Qt.vector3d(0.0, -0.02, 0.0)
-                            scale: Qt.vector3d(0.032, 0.03, 0.46)
+                            position: Qt.vector3d(0.0, -0.02 + 0.0225 * closeAmt, 0.0)
+                            scale: Qt.vector3d(0.032, 0.03 + 0.045 * closeAmt, 0.46)
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: bookPackHit ? enchantBookPackTex : enchantBookTex }
                         }
                         // 翻页片：绕书脊枢轴摆动的薄页。t764 ④几何三修（旧版「只见 bob 不见翻页」）：
@@ -9527,6 +9564,9 @@ Window {
                         //   b) 静息位藏进右页体内（position.y 0.006→0.004 + 厚 0.014→0.010 + 宽 0.38→0.36：
                         //      顶面 y+0.009 < 页顶 +0.011，侧面也内收）——旧版与右页近共面（穿叠 0.001）
                         //      z-fighting 闪烁；翻起时从书页「剥离」而出，读作揭页。
+                        //      t954 契约保持：右页上方新增页叠层（rightPageBlock ⊥区 [0.006,0.020]）后，
+                        //      静息位 ⊥区 [-0.001,0.009] = 下半嵌页体、上半嵌页叠，仍全嵌入无外露（载体
+                        //      从单页变「页+页叠」，position.y 0.004 无需再调）。
                         //   c) 材质暖 tint #f2e8d5：白纸页贴白纸页肉眼不可辨（t732 后 piece 3 采图已带符文，
                         //      再叠暖调与静态页拉开明度）。
                         //   轴对齐盒无曲率 → 像素风下读作「页片摆动」（机制等价 MC 书页翻动，§9 原创简化）。
@@ -9600,9 +9640,10 @@ Window {
                     running: false
                     // review27 #13：本体只保留起摆清零——停摆 / 续摆互斥已声明式（pageFlutterAnim.running
                     //   含 !pageFlipAnim.running，命令式 stop/restart 会夺其 running 绑定）。review28 #9：
-                    //   ESC 硬档门不在本动画上加（会与 restart 抢 running），改由 window 的
-                    //   onWorldRunningChanged 变更 handler 统一 stop() + 复位 flipAngle（见 worldRunning
-                    //   声明处的 review28 #9 注释）。
+                    //   ESC 硬档门不在本动画上加（会与 restart 抢 running），由 worldRunning 变更统一
+                    //   stop() + 复位 flipAngle——t954 勘误：运行期生效点在本 delegate 的 Connections
+                    //   （window 作用域够不到 inline Component 内 id，见本文件 worldRunning 声明处与
+                    //   下方 Connections 注释）。
                     onStarted: flipPivot.flutter = 0.0
                     // onFinished（Animation::finished，自然播完发射）——不能用 onCompleted：那是
                     // Component 的信号，Animation 没有 → QML 装载失败（t796 冒烟抓到：Main.qml 整体拒载）。
@@ -9611,6 +9652,70 @@ Window {
                     PauseAnimation { duration: 700 }
                     NumberAnimation { target: flipPivot; property: "flipAngle"; from: 130.0; to: 0.0; duration: 500; easing.type: Easing.InOutQuad }
                     PauseAnimation { duration: 900 }
+                }
+
+                // t954 开合过渡动画（命令式 restart 驱动——review28 #9 pageFlipAnim 同款先例：声明式
+                //   running 门会与 restart 抢绑定；from 省略 = 从属性当前值起摆，迟滞带边缘快速反向时
+                //   从半途平滑改向不跳变）。两动画同拍五驱动：左右页对向角度 + 厚度三系数（stackLift /
+                //   gather / closeAmt），850ms 缓出（对标大摆单摆 550/500ms 的 1s 内一档）。起摆入口 =
+                //   onBookOpenChanged；ESC 硬档落定 = 下方 Connections。
+                ParallelAnimation {
+                    id: bookOpenAnim
+                    running: false
+                    NumberAnimation { target: leftPageNode; property: "pageAngle"; to: -22; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: rightPageNode; property: "pageAngle"; to: 22; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: leftPageNode; property: "stackLift"; to: 0.0; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: rightPageNode; property: "gather"; to: 0.0; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: spineBar; property: "closeAmt"; to: 0.0; duration: 850; easing.type: Easing.InOutQuad }
+                }
+                ParallelAnimation {
+                    id: bookCloseAnim
+                    running: false
+                    // 对向合拢主摆：「左页向右」（外缘扫过书脊落右半上方）+「右页向左」（压平并向
+                    //   书脊内移，OutQuad 先落成基座、让封面后程扫叠其上）。
+                    NumberAnimation { target: leftPageNode; property: "pageAngle"; to: -178; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: rightPageNode; property: "pageAngle"; to: 1; duration: 850; easing.type: Easing.OutQuad }
+                    // 厚度落位：封面抬升拱于页叠上方 / 基页下沉内移 / 书脊增高读装订边。
+                    NumberAnimation { target: leftPageNode; property: "stackLift"; to: 1.0; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: rightPageNode; property: "gather"; to: 1.0; duration: 850; easing.type: Easing.InOutQuad }
+                    NumberAnimation { target: spineBar; property: "closeAmt"; to: 1.0; duration: 850; easing.type: Easing.InOutQuad }
+                }
+                // t954 起摆入口：bookOpen 状态翻转即起摆对应方向（piece 封面/纸页切换保持即时绑
+                //   bookOpen——t914 契约，动画起摆时页片已是目标贴图）。
+                onBookOpenChanged: {
+                    if (bookOpen) bookOpenAnim.restart()
+                    else bookCloseAnim.restart()
+                }
+                // t954 硬档落定：过渡全部驱动属性直接写到 bookOpen 对应静息位（ESC 落在过渡中途 →
+                //   过渡作废、形态落定目标态；恢复侧无需命令——faceTimer 复跑后迟滞带内状态不变、
+                //   无需重摆，同 review28 #9 恢复侧语义）。
+                function snapBookPose() {
+                    leftPageNode.pageAngle = bookOpen ? -22 : -178
+                    leftPageNode.stackLift = bookOpen ? 0.0 : 1.0
+                    rightPageNode.pageAngle = bookOpen ? 22 : 1
+                    rightPageNode.gather = bookOpen ? 0.0 : 1.0
+                    spineBar.closeAmt = bookOpen ? 0.0 : 1.0
+                }
+                // t954（兼 review28 #9 运行期收口）：ESC 硬档的**实际生效点**——window 级
+                //   onWorldRunningChanged 的作用域链不含本 inline Component 内部 id（pageFlipAnim /
+                //   flipPivot / bookCloseAnim…），裸引用在 window 作用域 ReferenceError 被引擎吞掉 =
+                //   硬档静默失效（源码钉探针盲区：语句面在、运行期断）。本 Connections 挂在 delegate
+                //   实例上（每台附魔书一份，id 全可解析）：大摆停摆复位（review28 #9 语义原样）+
+                //   开合过渡落定（t954）。
+                Connections {
+                    target: window
+                    function onWorldRunningChanged() {
+                        if (window.worldRunning) return
+                        if (pageFlipAnim.running) {
+                            pageFlipAnim.stop()
+                            flipPivot.flipAngle = 0.0
+                        }
+                        if (bookOpenAnim.running || bookCloseAnim.running) {
+                            bookOpenAnim.stop()
+                            bookCloseAnim.stop()
+                            bookRoot.snapBookPose()
+                        }
+                    }
                 }
             }
         }

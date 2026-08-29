@@ -23759,6 +23759,82 @@ Item {
                              ;
     }
 
+    // ── t954 书本合拢动画重做源码钉（用户第五轮口径「一瞬间+只有左边合并——应左页向右、右页向左
+    //    对向合拢成有厚度的关闭书籍」；纯视觉项，动画时序/观感 headless 不可达——3D 呈现层需真窗口，
+    //    t931/t941/t953 源码钉先例）──
+    //    旧病灶：左右页 pageAngle 绑 bookOpen + Behavior 240ms（读作「一瞬间」）且合拢面只有左页
+    //    -22°→-178° 大摆（右页仅 21° 微动读作不动）→ 合拢后两薄盒叠平零厚度。修 = 命令式双页对向
+    //    ParallelAnimation（850ms，review28 #9 pageFlipAnim 同款 running:false + restart() 先例）+
+    //    合拢厚度层（封面抬升 stackLift / 基页下沉内移 gather / 右页叠层 rightPageBlock / 书脊增高
+    //    closeAmt）+ ESC 硬档落定（delegate 实例内 Connections——window 作用域不含 inline Component
+    //    内 id，兼修 review28 #9 的运行期断链；window 级旧语句面加 typeof 守卫保持 P-review28b 契约）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile qf954(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString m954 = qf954.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf954.readAll()) : QString();
+        // (a) 对向双页动画存在 + 时长门：两动画各恰 5 条 850ms 驱动；合拢动画含左页 -178 与右页 +1
+        //     两腿（对向 = 双页都有角度驱动，回退单页即红）；翻开动画含 -22/+22 回程；起摆入口在
+        //     onBookOpenChanged（命令式 restart）。
+        const int iOpen954 = m954.indexOf(QStringLiteral("id: bookOpenAnim"));
+        const int iClose954 = m954.indexOf(QStringLiteral("id: bookCloseAnim"));
+        const int iTrigger954 = m954.indexOf(QStringLiteral("onBookOpenChanged:"));
+        const QString openSlice954 = (iOpen954 >= 0 && iClose954 > iOpen954)
+                                         ? m954.mid(iOpen954, iClose954 - iOpen954) : QString();
+        const QString closeSlice954 = (iClose954 >= 0 && iTrigger954 > iClose954)
+                                          ? m954.mid(iClose954, iTrigger954 - iClose954) : QString();
+        const bool okA954 = iOpen954 >= 0 && iClose954 > iOpen954 && iTrigger954 > iClose954
+                         && openSlice954.count(QStringLiteral("duration: 850")) == 5
+                         && closeSlice954.count(QStringLiteral("duration: 850")) == 5
+                         && closeSlice954.contains(QStringLiteral("target: leftPageNode; property: \"pageAngle\"; to: -178"))
+                         && closeSlice954.contains(QStringLiteral("target: rightPageNode; property: \"pageAngle\"; to: 1"))
+                         && openSlice954.contains(QStringLiteral("target: leftPageNode; property: \"pageAngle\"; to: -22"))
+                         && openSlice954.contains(QStringLiteral("target: rightPageNode; property: \"pageAngle\"; to: 22"))
+                         && m954.contains(QStringLiteral("if (bookOpen) bookOpenAnim.restart()"))
+                         && m954.contains(QStringLiteral("else bookCloseAnim.restart()"));
+        // (b) 合拢厚度层存在：右页叠层薄片（id + 内缩尺寸）+ 封面抬升 / 基页下沉内移 / 书脊增高
+        //     三系数绑定（合拢态总厚 ~0.06 ≈ 单页 2.7×，「封面+书脊厚度感」的几何面）。
+        const bool okB954 = m954.contains(QStringLiteral("id: rightPageBlock"))
+                         && m954.contains(QStringLiteral("scale: Qt.vector3d(0.365, 0.014, 0.44)"))
+                         && m954.contains(QStringLiteral("property real stackLift: 1.0"))
+                         && m954.contains(QStringLiteral("position: Qt.vector3d(0, 0.026 * stackLift, 0)"))
+                         && m954.contains(QStringLiteral("property real gather: 1.0"))
+                         && m954.contains(QStringLiteral("position: Qt.vector3d(0.19 - 0.025 * gather, -0.006 * gather, 0.0)"))
+                         && m954.contains(QStringLiteral("property real closeAmt: 1.0"))
+                         && m954.contains(QStringLiteral("scale: Qt.vector3d(0.032, 0.03 + 0.045 * closeAmt, 0.46)"))
+                         && m954.contains(QStringLiteral("position: Qt.vector3d(0.0, -0.02 + 0.0225 * closeAmt, 0.0)"));
+        // (c) ESC 硬档落定面：snapBookPose 全驱动落定函数 + delegate 实例内 Connections 停摆 + 复位；
+        //     window 级旧语句面 typeof 守卫（review28b 语句面契约 + t954 运行期勘误双钉）。
+        const bool okC954 = m954.contains(QStringLiteral("function snapBookPose()"))
+                         && m954.contains(QStringLiteral("leftPageNode.pageAngle = bookOpen ? -22 : -178"))
+                         && m954.contains(QStringLiteral("spineBar.closeAmt = bookOpen ? 0.0 : 1.0"))
+                         && m954.contains(QStringLiteral("bookOpenAnim.stop()"))
+                         && m954.contains(QStringLiteral("bookCloseAnim.stop()"))
+                         && m954.contains(QStringLiteral("bookRoot.snapBookPose()"))
+                         && m954.contains(QStringLiteral("typeof pageFlipAnim !== \"undefined\""));
+        const bool ok954 = okA954 && okB954 && okC954;
+        if (!ok954)
+            qInfo().noquote() << "  t954 diag: dualAnim" << okA954 << "thickness" << okB954
+                              << "escReset" << okC954;
+        if (!ok954) ++totalFail;
+        qInfo().noquote() << (ok954 ? "PASS" : "FAIL")
+                          << "| t954 book closing rework source pin: the close transition is now a "
+                             "command-driven parallel animation with BOTH pages converging toward "
+                             "the spine in one 850ms ease-out beat (the left page's outer edge "
+                             "sweeps right over the hinge to -178 while the right page flattens to "
+                             "+1 and gathers 0.025 toward the spine - the old bound-property 240ms "
+                             "Behavior read as instant and visibly moved only the left half), the "
+                             "closed form gains thickness (cover lifted 0.026 arching over the page "
+                             "stack, base page dropped and gathered inward, an inset paper block "
+                             "layer riding the right page, spine bar growing 0.03->0.075 as the "
+                             "bound edge), and the ESC hard-pause settle covers the transitions "
+                             "through the delegate-instance Connections (snapBookPose writes every "
+                             "driven property to the bookOpen-consistent rest pose) with the "
+                             "window-level handler keeping the review28b statement surface behind "
+                             "a typeof guard because inline-Component ids never resolve at window "
+                             "scope";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
