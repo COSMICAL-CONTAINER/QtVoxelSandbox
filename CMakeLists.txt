@@ -878,6 +878,11 @@ add_executable(redstone_matrix_test
     #   活体过滤）。依赖 xporbmanager（已列）；Quick3D 公开 API。
     src/Game/xporbinstancing.cpp
     src/Game/xporbinstancing.h
+    # t946 坐姿变换链连续域探针附加：Renderer 层 MobModel 直编（真几何顶点射线剪影断言——t880
+    #   ItemShapeGeometry 行为级先例；review24 时「只用头内 constexpr、不链 mobmodel.cpp」的旧注释口径
+    #   自本探针起放开为「头 constexpr 静态断言 + 行为级直编并存」）。
+    src/Renderer/mobmodel.cpp
+    src/Renderer/mobmodel.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core
@@ -886,7 +891,7 @@ target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Entities
     # review24 低危收尾（#35）：Renderer 头（mobmodel.h）——探针持「白名单长度 ↔ MobType 上界」跨层
     #   static_assert（测试 TU 合法 include 全栈；Renderer 自身在 Entities 之下不得反向 include）。
-    #   只用头内 constexpr，不链 mobmodel.cpp、不引 Quick3D 符号。
+    #   t946 起另链 mobmodel.cpp 做坐姿真几何行为级探针（Quick3D 链接已具备）。
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer
     # t813 生成的 build_stamps.h 搜索路径（buildinfo.cpp 消费；探针断言两宏格式）。
     ${VOXEL_GENERATED_DIR}
@@ -899,7 +904,7 @@ target_link_libraries(redstone_matrix_test PRIVATE
     # t814 真消费端探针：PlayerController 是 QQuickItem 派生（Qt Quick）→ 链 Quick。
     Qt6::Quick
     # review24 低危收尾（#35）：mobmodel.h（QQuick3DGeometry 派生）的 include 路径经 Quick3D target
-    #   传播——探针只用头内 constexpr 做跨层 static_assert，不调任何 Quick3D 符号。
+    #   传播——跨层 static_assert 用头内 constexpr；t946 起行为级坐姿探针直编 mobmodel.cpp（公开 API）。
     Qt6::Quick3D
     # t822 存档 round-trip 探针：WorldStore 的 SQLite 落盘读回。
     Qt6::Sql

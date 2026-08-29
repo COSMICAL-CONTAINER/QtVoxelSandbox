@@ -21988,6 +21988,253 @@ Item {
         }
     }
 
+    // ── P-t946 坐姿变换链连续域探针（狼/豹猫 t946 返修；t878② 断链形态回归拦截）──
+    //   用户实测（第五轮）：「身体翘太高、身体与躯体分离中间透明」。根因 = t878② 坐姿把躯干绕枢 +40°
+    //   上仰而头/耳/腿保持各段独立绝对坐标——变换链断开：抬起后的躯干底与臀下折叠腿顶之间悬空
+    //   ~0.10-0.23（「中间透明」），胸顶 0.48 反压头心 0.30（「翘太高」）。修复 = 臀部着地点单根锚派生
+    //   （mobmodel.cpp kSitRootY/kSitRootZ/kSitPitch + sitRot 链 lambda；躯干随动段全走链）。
+    //   本探针在**真几何顶点**上做连续域断言（MobModel 直编读 vertexData，同 t880 ItemShapeGeometry
+    //   行为级先例；沿 +Y 射线三角奇偶内外判定，凸盒并集上与盒区间并集等价）：
+    //   (a) 着地：坐姿整体 minY = 碰撞底面（狼 -0.42 / 豹猫 -0.40 ±0.05）——断链形态臀部悬空必红；
+    //   (b) 不翘太高：maxY 上界（狼 0.62 / 豹猫 0.58；修复态耳顶 0.568/0.50）——防未来再抬高的回归界；
+    //   (c) 臀链连续：髋带 z∈[0.16,0.36]（豹猫 [0.10,0.30]）× x=±0.10 逐列采样——列内自着地至剪影顶
+    //       的内部空隙 ≤ 0.075（断链形态实测 0.110-0.234 缝必红）+ 列底触地；
+    //   (d) 胸链连续：前腿带 z∈[-0.30,-0.20]（豹猫 [-0.26,-0.18]）同判（断链形态前带离地必红）；
+    //   (e) 站姿零回归：sitPose=false 站姿剪影界不变（狼 y[-0.42,0.37] / 豹猫 y[-0.40,0.32] ±0.05）；
+    //   (f) 源码钉：单根锚派生形态（kSitRootY/kSitRootZ 值 + 躯干 addBoxRot 枢轴引用 + 颈附 sitRot 链 +
+    //       大腿块/尾根锚绑定）+ Main.qml / ResourceBrowser.qml 眼/项圈/尾 overlay 成对契约新位
+    //       （t880/t902/t931 源码钉先例——QML 侧无行为级断言面）。
+    {
+        bool ok = true;
+        QString diag;
+        // 三角汤（顶点 stride 5 float = pos3+uv2，MobVtx 契约；索引 U32）。
+        struct SitTri { float ax, ay, az, bx, by, bz, cx, cy, cz; };
+        auto buildSitTris = [](const MobModel &g, std::vector<SitTri> &tris) {
+            tris.clear();
+            const QByteArray vd = g.vertexData();
+            const QByteArray id = g.indexData();
+            const float *vp = reinterpret_cast<const float *>(vd.constData());
+            const int vCount = int(vd.size()) / 20;
+            const quint32 *ip = reinterpret_cast<const quint32 *>(id.constData());
+            const int iCount = int(id.size()) / int(sizeof(quint32));
+            for (int i = 0; i + 2 < iCount; i += 3) {
+                const quint32 ia = ip[i], ib = ip[i + 1], ic = ip[i + 2];
+                if (ia >= quint32(vCount) || ib >= quint32(vCount) || ic >= quint32(vCount)) continue;
+                const float *a = vp + std::size_t(ia) * 5;
+                const float *b = vp + std::size_t(ib) * 5;
+                const float *c = vp + std::size_t(ic) * 5;
+                tris.push_back({a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]});
+            }
+        };
+        // 列覆盖区间并集（法线定向深度计数）：竖直射线在 (x0,z0) 列上的全部三角交点按 y 排序，
+        //   依面法线 Y 符号累计实体深度（nY<0 = 面朝下 → 上行进入 +1；nY>0 → 穿出 −1），depth ≥ 1 的
+        //   运行段 = 实体并集覆盖区间。**不能用奇偶法**——本几何大腿块/前爪/前腿/躯干互相嵌接（重叠实体），
+        //   奇偶在重叠段误判为外部（两实体叠 = depth 2 ≡ 偶）。nY≈0 = 竖直面（x=const 平面含射线方向）不横穿。
+        auto columnRuns = [](const std::vector<SitTri> &tris, float x0, float z0,
+                             std::vector<std::pair<float, float>> &runs) {
+            runs.clear();
+            std::vector<std::pair<float, int>> cr;
+            cr.reserve(tris.size());
+            for (const SitTri &t : tris) {
+                const float d = (t.bz - t.cz) * (t.ax - t.cx) + (t.cx - t.bx) * (t.az - t.cz);
+                if (std::abs(d) < 1e-12f) continue;
+                const float w1 = ((t.bz - t.cz) * (x0 - t.cx) + (t.cx - t.bx) * (z0 - t.cz)) / d;
+                const float w2 = ((t.cz - t.az) * (x0 - t.cx) + (t.ax - t.cx) * (z0 - t.cz)) / d;
+                const float w0 = 1.0f - w1 - w2;
+                if (w0 < -1e-6f || w1 < -1e-6f || w2 < -1e-6f) continue;
+                const float e1x = t.bx - t.ax, e1z = t.bz - t.az;
+                const float e2x = t.cx - t.ax, e2z = t.cz - t.az;
+                const float nY = e1z * e2x - e1x * e2z; // (e1×e2).y（kFace 绕序 = 外法线一致）
+                if (std::abs(nY) < 1e-9f) continue;
+                // 权重配对：m = P−C = w1·(A−C) + w2·(B−C) → w1↔A、w2↔B、w0=1−w1−w2↔C。
+                cr.push_back({ w1 * t.ay + w2 * t.by + w0 * t.cy, nY < 0.0f ? +1 : -1 });
+            }
+            std::sort(cr.begin(), cr.end());
+            int depth = 0;
+            float runStart = 0.0f;
+            for (const auto &c : cr) {
+                if (depth == 0) runStart = c.first;
+                depth += c.second;
+                if (depth == 0) runs.push_back({ runStart, c.first });
+            }
+            // 网格病态兜底（闭合网格不应触达；钳在末交点防越界虚高）。
+            if (depth > 0 && !cr.empty()) runs.push_back({ runStart, cr.back().first });
+        };
+        auto probeSitSilhouette = [&](const std::vector<SitTri> &tris, float ground, float maxYBound,
+                                      float hipLo, float hipHi, float frLo, float frHi, const char *tag) {
+            constexpr float kStep = 0.025f, kTol = 0.03f, kMaxGap = 0.075f;
+            const float xs[2] = { 0.10f, -0.10f }; // 落在 腿[0.08,0.24]/躯干/头/耳 投影内的采样平面（避开盒面坐标）
+            std::vector<std::pair<float, float>> runs;
+            float allMin = 9e9f, allMax = -9e9f;
+            // z 网格半步偏移：落在盒面坐标的列会让射线精确命中两三角共享对角边（交点双重计入 → 深度失衡）。
+            for (int xi = 0; xi < 2; ++xi)
+                for (float z = -0.60f + kStep / 2; z <= 0.70f; z += kStep) {
+                    columnRuns(tris, xs[xi], z, runs);
+                    for (const auto &r : runs) {
+                        allMin = std::min(allMin, r.first);
+                        allMax = std::max(allMax, r.second);
+                    }
+                }
+            if (std::abs(allMin - ground) > kTol) {
+                ok = false;
+                diag += QStringLiteral(" %1 minY %2!=%3").arg(tag).arg(allMin).arg(ground);
+            }
+            if (allMax > maxYBound) {
+                ok = false;
+                diag += QStringLiteral(" %1 maxY %2>%3").arg(tag).arg(allMax).arg(maxYBound);
+            }
+            const float bands[2][2] = { { hipLo, hipHi }, { frLo, frHi } };
+            for (int bi = 0; bi < 2; ++bi)
+                for (float z = bands[bi][0] + kStep / 2; z <= bands[bi][1]; z += kStep)
+                    for (int xi = 0; xi < 2; ++xi) {
+                        columnRuns(tris, xs[xi], z, runs);
+                        if (runs.empty()) {
+                            ok = false;
+                            diag += QStringLiteral(" %1 band%2 z=%3 x=%4 empty")
+                                        .arg(tag).arg(bi).arg(z, 0, 'f', 3).arg(xs[xi]);
+                            continue;
+                        }
+                        if (std::abs(runs.front().first - ground) > kTol) {
+                            ok = false;
+                            diag += QStringLiteral(" %1 band%2 z=%3 x=%4 off-ground %5")
+                                        .arg(tag).arg(bi).arg(z, 0, 'f', 3)
+                                        .arg(xs[xi]).arg(runs.front().first, 0, 'f', 3);
+                        }
+                        for (std::size_t ri = 1; ri < runs.size(); ++ri) {
+                            const float gap = runs[ri].first - runs[ri - 1].second;
+                            if (gap > kMaxGap) {
+                                ok = false;
+                                diag += QStringLiteral(" %1 band%2 z=%3 x=%4 gap %5")
+                                            .arg(tag).arg(bi).arg(z, 0, 'f', 3)
+                                            .arg(xs[xi]).arg(gap, 0, 'f', 3);
+                            }
+                        }
+                    }
+        };
+        std::vector<SitTri> sitTris;
+        {
+            MobModel g;
+            g.setMobType(10);
+            g.setSitPose(true);
+            buildSitTris(g, sitTris);
+            probeSitSilhouette(sitTris, -0.42f, 0.62f, 0.16f, 0.36f, -0.30f, -0.20f, "wolfSit");
+        }
+        {
+            MobModel g;
+            g.setMobType(11);
+            g.setSitPose(true);
+            buildSitTris(g, sitTris);
+            probeSitSilhouette(sitTris, -0.40f, 0.58f, 0.10f, 0.30f, -0.26f, -0.18f, "ocelotSit");
+        }
+        {   // (e) 站姿零回归（x=0.10 剪影列；站姿分支本任务未动，界钉死防漂移）。
+            std::vector<std::pair<float, float>> runs;
+            float mn = 9e9f, mx = -9e9f;
+            {
+                MobModel g;
+                g.setMobType(10);
+                buildSitTris(g, sitTris);
+                for (float z = -0.70f + 0.0125f; z <= 0.50f; z += 0.025f) {
+                    columnRuns(sitTris, 0.10f, z, runs);
+                    for (const auto &r : runs) {
+                        mn = std::min(mn, r.first);
+                        mx = std::max(mx, r.second);
+                    }
+                }
+                if (std::abs(mn - (-0.42f)) > 0.03f || std::abs(mx - 0.37f) > 0.03f) {
+                    ok = false;
+                    diag += QStringLiteral(" wolfStand [%1,%2]").arg(mn).arg(mx);
+                }
+            }
+            {
+                MobModel g;
+                g.setMobType(11);
+                buildSitTris(g, sitTris);
+                mn = 9e9f; mx = -9e9f;
+                for (float z = -0.60f + 0.0125f; z <= 0.60f; z += 0.025f) {
+                    columnRuns(sitTris, 0.10f, z, runs);
+                    for (const auto &r : runs) {
+                        mn = std::min(mn, r.first);
+                        mx = std::max(mx, r.second);
+                    }
+                }
+                // 豹猫站姿耳 x∈[0.03,0.09] 不含采样列 x=0.10 → 列顶 = 头顶 0.24（狼耳 [0.045,0.115] 含 0.10）。
+                if (std::abs(mn - (-0.40f)) > 0.03f || std::abs(mx - 0.24f) > 0.03f) {
+                    ok = false;
+                    diag += QStringLiteral(" ocelotStand [%1,%2]").arg(mn).arg(mx);
+                }
+            }
+        }
+        {   // (f) 源码钉：单根锚派生形态 + QML overlay 成对契约新位。
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            auto readSrc = [&root](const QString &rel) -> QString {
+                QFile f(root + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString mm = readSrc(QStringLiteral("src/Renderer/mobmodel.cpp"));
+            const int wSit = mm.indexOf(QStringLiteral("t946 狼坐姿返修"));
+            const int oSit = mm.indexOf(QStringLiteral("t946 豹猫/猫坐姿返修"));
+            const int oEnd = mm.indexOf(QStringLiteral("} else if (m_mobType == 12)"));
+            bool okPin = wSit >= 0 && oSit > wSit && oEnd > oSit;
+            if (okPin) {
+                const QString wolf = mm.mid(wSit, oSit - wSit);
+                okPin = wolf.contains(QStringLiteral("constexpr float kSitRootY   = -0.14f"))
+                     && wolf.contains(QStringLiteral("kSitRootY, kSitRootZ, kSitPitch"))
+                     && wolf.contains(QStringLiteral("sitRotY(0.12f, -0.24f)"))
+                     && wolf.contains(QStringLiteral("kSitRootZ - 0.12f"));
+            }
+            if (okPin) {
+                const QString oce = mm.mid(oSit, oEnd - oSit);
+                okPin = oce.contains(QStringLiteral("constexpr float kSitRootY   = -0.12f"))
+                     && oce.contains(QStringLiteral("kSitRootY, kSitRootZ, kSitPitch"))
+                     && oce.contains(QStringLiteral("sitRotY(0.12f, -0.24f)"))
+                     && oce.contains(QStringLiteral("sitRotZ(0.18f, 0.36f)"))
+                     && oce.contains(QStringLiteral("kSitRootZ - 0.12f"));
+            }
+            const QString mn = readSrc(QStringLiteral("src/ui/Main.qml"));
+            const QString rb = readSrc(QStringLiteral("src/ui/ResourceBrowser.qml"));
+            const bool okMn = mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0, 0.14, 0.47)"))
+                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0, 0.35, -0.175)"))
+                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(-0.08, 0.40, -0.49)"))
+                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0.08, 0.40, -0.49)"))
+                && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(-0.07, 0.36, -0.42)"))
+                && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0.07, 0.36, -0.42)"));
+            const bool okRb = rb.contains(QStringLiteral("? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(-0.08, 0.40, -0.49)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(0.08, 0.40, -0.49)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(-0.07, 0.36, -0.42)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(0.07, 0.36, -0.42)"));
+            if (!okPin || !okMn || !okRb) {
+                ok = false;
+                diag += QStringLiteral(" pins mm=%1 mn=%2 rb=%3").arg(okPin).arg(okMn).arg(okRb);
+            }
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t946 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t946 wolf/ocelot sit pose rebuilt on a single hip-root transform chain: the"
+                             " t878 pose rotated the torso +40 deg about a hip pivot while head/ears/legs"
+                             " stayed at independent absolute coordinates (broken chain -> the user-visible"
+                             " 'chest reared too high with a transparent gap between body halves'). The fix"
+                             " derives every torso-following segment (head via the rotated neck attach, ears"
+                             " via the head offset) from ONE root anchor + 18-deg pitch (mobmodel.cpp"
+                             " kSitRootY/kSitRootZ/kSitPitch + sitRot lambdas), with hind legs folded into a"
+                             " thigh block fully embedded into the torso underside and vertical front legs"
+                             " reaching the raised chest. Verified on REAL mesh vertices (MobModel direct"
+                             " build; per-column coverage = normal-oriented crossing-depth union -- parity is"
+                             " wrong here because the joints intentionally OVERLAP as separate closed boxes):"
+                             " (a) sit minY == collision bottom (wolf -0.42 /"
+                             " ocelot -0.40), (b) maxY <= 0.62/0.58 (no rearing high), (c) hip band"
+                             " z[0.16,0.36]/[0.10,0.30] columns ground-connected with interior gaps <= 0.075"
+                             " (the broken form gaps 0.11-0.23), (d) front-leg band columns continuous,"
+                             " (e) standing-pose silhouette bounds unchanged (zero regression), (f) source"
+                             " pins for the shared-root derivation form and the Main.qml/ResourceBrowser.qml"
+                             " eye/collar/tail overlay pair-contract positions"
+                             ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

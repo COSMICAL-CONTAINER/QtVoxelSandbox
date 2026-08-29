@@ -8665,11 +8665,12 @@ Window {
                                 // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
                                 //   0.02 半 0.15×0.40 → 后上角）。eulerRotation.x 正 → +Y 端朝 +Z（尾向后竖）；满血 → 140−105×1=35°
                                 //   （竖起）、残血 → 140−105×0=140°（下垂）。随 bodyYaw + 父 visible 继承。
-                                //   t878② 坐姿：坐姿几何臀位后上 ≈ (0,-0.17,+0.50)（mobmodel.cpp 躯干 +40° 绕后髋解析值，
-                                //   成对契约）→ 尾根随移；坐狼尾下垂搭地（tailAngle +75° 折到 ~110..215° 区，机制等价 MC 坐狼垂尾）。
+                                //   t946 坐姿：尾根随坐姿链派生——站姿尾根 (0,0.16,0.38) 绕坐姿根锚 (-0.14,0.36) 旋 18°
+                                //   = (0,0.139,0.472)（mobmodel.cpp kSitRootY/kSitRootZ/kSitPitch 成对契约）→ 尾根随移；
+                                //   坐狼尾下垂搭地（tailAngle +75° 折到 ~110..215° 区，机制等价 MC 坐狼垂尾）。
                                 Node {
                                     id: wolfTailPivot
-                                    position: wolfSit === 1 ? Qt.vector3d(0, -0.17, 0.50) : Qt.vector3d(0, 0.16, 0.38)
+                                    position: wolfSit === 1 ? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)
                                     property real tailAngle: {
                                         const _r = mon.revision
                                         const h = entityManager.healthAt(index)
@@ -8703,9 +8704,9 @@ Window {
                                 Model {
                                     visible: { const _r = mon.revision; return _r >= 0 && entityManager.wolfTamedAt(index) }
                                     geometry: UnitCube {}
-                                    // t878② 项圈随坐姿：站姿颈根 (0,0.16,-0.30) ↔ 坐姿头-胸嵌接高位 (0,0.28,-0.03)
-                                    //   （mobmodel.cpp 坐姿头心 (0,0.30,-0.12) 成对契约；revision 触碰即时随切）。
-                                    position: wolfSit === 1 ? Qt.vector3d(0, 0.28, -0.03) : Qt.vector3d(0, 0.16, -0.30)
+                                    // t946 项圈随坐姿：站姿颈根 (0,0.16,-0.30) 绕坐姿根锚 (-0.14,0.36) 旋 18°
+                                    //   = (0,0.349,-0.175)（mobmodel.cpp 坐姿链派生成对契约；revision 触碰即时随切）。
+                                    position: wolfSit === 1 ? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)
                                     scale: Qt.vector3d(0.42, 0.06, 0.07) // 横扁环带（x 微出躯干侧缘读作环颈）
                                     materials: PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
@@ -8721,19 +8722,19 @@ Window {
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.61，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
                                 //   t780：pack 命中时贴图头前脸自带双瞳（demo 包 row6 实测）→ overlay 隐（t777 双眼教训）。
-                                //   t878② 坐姿：头心抬到 (0,0.30,-0.12) + 净 +20° 微仰 → 眼随移 (±0.08, 0.34, -0.325)
-                                //   （mobmodel.cpp 坐姿头位成对契约）。
+                                //   t946 坐姿：坐姿头心 (0,0.324,-0.308)（t946 单根锚链派生位）+ 眼偏移 (±0.08,+0.04,-0.19)
+                                //   净 10° 随头旋 + 贴面外推 → 眼随移 (±0.08, 0.40, -0.49)（mobmodel.cpp 坐姿头位成对契约）。
                                 Model {
                                     visible: !wolfPackHit
                                     geometry: UnitCube {}
-                                    position: wolfSit === 1 ? Qt.vector3d(-0.08, 0.34, -0.325) : Qt.vector3d(-0.08, 0.16, -0.61)
+                                    position: wolfSit === 1 ? Qt.vector3d(-0.08, 0.40, -0.49) : Qt.vector3d(-0.08, 0.16, -0.61)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: !wolfPackHit
                                     geometry: UnitCube {}
-                                    position: wolfSit === 1 ? Qt.vector3d(0.08, 0.34, -0.325) : Qt.vector3d(0.08, 0.16, -0.61)
+                                    position: wolfSit === 1 ? Qt.vector3d(0.08, 0.40, -0.49) : Qt.vector3d(0.08, 0.16, -0.61)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
@@ -8792,19 +8793,20 @@ Window {
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.53，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
                                 //   t780：pack 命中（野生豹猫）时贴图头前脸自带眼点 → overlay 隐（t777 双眼教训）。
-                                //   t878② 坐姿：头心抬到 (0,0.28,-0.12) + 净 +23° 微仰 → 眼随移 (±0.07, 0.32, -0.28)
+                                //   t946 坐姿：坐姿头心 (0,0.306,-0.276)（t946 单根锚链派生位，与狼同修）+ 眼偏移
+                                //   (±0.07,+0.03,-0.15) 净 10° 随头旋 + 贴面外推 → 眼随移 (±0.07, 0.36, -0.42)
                                 //   （mobmodel.cpp 坐姿头位成对契约）。
                                 Model {
                                     visible: !ocelotPackHit
                                     geometry: UnitCube {}
-                                    position: ocatSit === 1 ? Qt.vector3d(-0.07, 0.32, -0.28) : Qt.vector3d(-0.07, 0.15, -0.53)
+                                    position: ocatSit === 1 ? Qt.vector3d(-0.07, 0.36, -0.42) : Qt.vector3d(-0.07, 0.15, -0.53)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: !ocelotPackHit
                                     geometry: UnitCube {}
-                                    position: ocatSit === 1 ? Qt.vector3d(0.07, 0.32, -0.28) : Qt.vector3d(0.07, 0.15, -0.53)
+                                    position: ocatSit === 1 ? Qt.vector3d(0.07, 0.36, -0.42) : Qt.vector3d(0.07, 0.15, -0.53)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
