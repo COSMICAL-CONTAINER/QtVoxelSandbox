@@ -4681,6 +4681,14 @@ void PlayerController::placeBlock()
     //     · 悬空 / 侧壁放轨（下方 Air / 非完整）→ 拒（不挥）；
     //     · 耕地（0.9375 ≠ 满立方）→ 拒；薄雪层 / 半砖 / 楼梯等非完整立方顶面 → 拒。
     //     （简化：「完整立方顶面 only」；MC 允许 rails 放 top-half slab 顶 —— 本工程统一不收，文档化。）
+    //   t945 口径核验（用户第五轮「仙人掌旁放铁轨放不了」复盘）：本预检**不**含任何「邻仙人掌 → 拒」条件，
+    //     邻仙人掌的合法支撑位（柱基旁地面顶面 / 沙丘侧贴柱上层）照常放置，World::checkCactusOnEdit ④
+    //     在 setBlock 成功后整柱坍落掉落（P-t945 玩家全链行为级钉死：地面顶面瞄准 / 细柱侧面瞄准 /
+    //     Survival hotbar 栈 + 消耗，全绿）。唯一可达的拒绝路径 = 本行 ②——瞄 2+ 高柱**上层**侧面时目标格
+    //     悬空无支撑（野生柱：worldgen 4 邻守卫保证柱旁地形不高于柱基 → 上层邻格下方恒 Air；玩家种植柱旁
+    //     垫高有支撑则照常可放），照旧拒绝；这正是用户
+    //     定稿口径「对轨本就非法的位置照旧拒绝，仙人掌坍落不是非法放置的免死金牌」（MC 同：rail 须支撑，
+    //     瞄柱上层放不了）。P-t945 (c) 钉「拒放且仙人掌无恙」，防未来把坍落错挂到被拒放置上。
     if (BlockRegistry::isRail(quint8(m_selectedBlock))) {
         if (BlockRegistry::isRail(m_world->blockAt(tx, ty, tz))) return; // ① 同格已有轨 → 拒
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
