@@ -6516,8 +6516,8 @@ Window {
                     }
                     // 左车帮（-X 纵长壁）：厚 0.08 × 高 0.75 × 长 0.875，贴 -X 边。t768 全高帮：本地 Y ±0.375
                     //   （下沿贴轨板上沿 → 帮顶 +0.375，车斗凹槽深 ~0.66 明显）。斗形「帮」：四面整圈上凸中间凹。
-                    //   t732 MinecartBox piece 1：外面采亮壁窗（含亮卷边顶行），内面采暗窗（t862② 内外语义），
-                    //   顶面 = 卷边条。
+                    //   t732/t941 MinecartBox piece 1：外内大面 = 端面窗（= 前后贴图；t941 四向统一 ——
+                    //   旧壁窗外亮/内暗分采被用户翻案：壁带平灰噪点读作「石头贴图」），条带 = 端帮同款。
                     //   t862① 消共面：Z 跨 0.9→0.875（±Z 端面没入端帮体内 —— 旧与端帮大面共面 = 四根竖直棱
                     //   闪烁的纵帮半边）；X 外表面 ±0.40 极值保留（外轮廓不变）。
                     Model {
@@ -6526,7 +6526,8 @@ Window {
                         scale: Qt.vector3d(0.08, 0.75, 0.875)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
-                    // 右车帮（+X 纵长壁；与左对称，t862① 同款 Z 内缩）。t732 piece 2：外面采亮壁窗。
+                    // 右车帮（+X 纵长壁；与左对称，t862① 同款 Z 内缩）。t732/t941 piece 2：与 piece 1
+                    //   同套（t941 四向统一贴图 —— 大面 = 端面窗 = 前后贴图）。
                     Model {
                         geometry: MinecartBox { piece: 2; layout: cartPackHit ? 1 : 0 }
                         position: Qt.vector3d(0.36, 0, 0)
@@ -6534,7 +6535,7 @@ Window {
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
                     }
                     // 车头帮（-Z 端横壁，X 跨 0.775 × 高 0.725 × 厚 0.08）。t768 全高帮 ±0.375；t732 piece 3：
-                    //   端面大区（qrc 壁窗 / 包框栏端面）。
+                    //   端面大区（qrc 壁窗 / 包框栏端面；t941 四向统一参照源 —— 纵帮同采本窗）。
                     //   t862① 消共面（四根竖直棱 z-fighting 主修）：旧「跨满宽 0.8 盖住四角」的端帮 ±X 面与
                     //   纵帮外表面恰共面（重叠竖条 = 移动视角闪烁的棱边）、端帮顶面与纵帮顶面共面（顶角片）。
                     //   改三层内缩 ε=0.0125：X 跨 0.8→0.775（±X 面没入纵帮体内）、Y 高 0.75→0.725（顶面

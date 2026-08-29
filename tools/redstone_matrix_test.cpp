@@ -20958,6 +20958,62 @@ Item {
                           ;
     }
 
+    // ── P-t941 矿车 3D 侧贴图四向统一源码钉（纯视觉修；t931 源码文本钉先例）──
+    //   用户第五轮实测：「侧边是石头贴图（错）——前后左右统一贴图（用前后贴图即可）」。根因 =
+    //   MinecartBox kPackParts（demo 包布局 1）纵帮 piece 1/2 大面分采壁带亮/暗窗（t862② 外亮/内暗），
+    //   PIL 实测壁带内区平灰噪点（lum≈74 sd≈6 无结构）= 石头纹理观感；端帮 piece 3 大面 = 框栏端面窗。
+    //   修 = piece 1/2 六面与 piece 3 同套采样（大面 ±X = 端面窗 (0,2)-(20,10) = 前后贴图，条带 = 端帮
+    //   同款内壁行）→ 前后左右四面墙同一贴图，壁带整条不再被引用（t862② 内外明暗随统一口径废止，
+    //   t931 同款用户最新口径翻案先例）。qrc 程序布局 0 不动（壁窗族有铆钉列结构、前后本就同族 =
+    //   正锚）。钉：(a) 统一纵帮行 ×2 + (b) 端帮参照行 ×1 + (c) 旧壁窗坐标串清零 + (d) 布局 0 两行
+    //   不变 + (e) Main.qml 五个车斗 Model 同一 baseColorMap 绑定 ×5。
+    {
+        const QString exeDir941 = QCoreApplication::applicationDirPath();
+        const QString root941 = QDir(exeDir941 + QStringLiteral("/..")).absolutePath();
+        auto readSrc941 = [&root941](const QString &rel) -> QString {
+            QFile f(root941 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mb = readSrc941(QStringLiteral("src/Renderer/minecartbox.cpp"));
+        const QString mq = readSrc941(QStringLiteral("src/ui/Main.qml"));
+        const QString kSide941 = QStringLiteral(
+            "    PartRects{{ { 0, 2,20,10}, { 0, 2,20,10}, {20,2,36, 4}, {20,8,36,10}, {20,2,24,10}, {20,2,24,10} }},");
+        const bool okA = mb.count(kSide941) == 2; // piece 1/2 同行 ×2（四向统一）
+        const bool okB = mb.contains(QStringLiteral(
+            "    PartRects{{ {20, 2,24,10}, {20, 2,24,10}, {20, 2,36, 4}, {20, 8,36,10}, { 0, 2,20,10}, { 0, 2,20,10} }},")); // piece 3 参照不变
+        const bool okC = !mb.contains(QStringLiteral("2,10,22,28"))
+                      && !mb.contains(QStringLiteral("24,10,44,28")); // 旧壁带亮/暗窗坐标清零
+        const bool okD = mb.contains(QStringLiteral(
+            "    PartRects{{ {0, 4,20,20}, {0, 4,20,20}, {0, 4,20, 6}, {0,18,20,20}, {0, 6, 4,20}, {0, 6, 4,20} }},"))
+                      && mb.contains(QStringLiteral(
+            "    PartRects{{ {24, 4,44,20}, {24, 4,44,20}, {24, 4,44, 6}, {24,18,44,20}, {20, 6,24,20}, {20, 6,24,20} }},")); // 布局 0 正锚不变
+        const bool okE = mq.count(QStringLiteral(
+            "baseColorMap: cartPackHit ? cartPackTex : cartTex")) == 5; // 五车斗 Model 同一贴图绑定
+        const bool okT941 = okA && okB && okC && okD && okE;
+        if (!okT941) ++totalFail;
+        if (!okT941)
+            qInfo().noquote() << "  [t941 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "e" << okE << "| srcLen box" << mb.size() << "qml" << mq.size();
+        qInfo().noquote() << (okT941 ? "PASS" : "FAIL")
+                          << "| t941 minecart 3D side walls unified to the front/back texture: the demo-pack"
+                             " layout side pieces (MinecartBox kPackParts 1/2) sampled the wall-band"
+                             " bright/dark windows for their large faces (t862② outer-bright/inner-dark split)"
+                             " - PIL re-measure shows that band is flat gray noise (lum~74, sd~6, no"
+                             " structure) reading as the stone texture per the user's round-5 report; fix"
+                             " makes pieces 1/2 sample the exact same rect set as the end piece 3 (large"
+                             " faces = the framed end-face window (0,2)-(20,10) = the front/back texture,"
+                             " rim strips = the end piece's light inner-wall rows), so all four walls"
+                             "(front/back/left/right) share one texture and the wall band is no longer"
+                             " referenced by any piece (the t862② shading distinction is overruled by the"
+                             " user's unify caliber, t931-style latest-word precedent); qrc program layout 0"
+                             " untouched (its wall windows carry rivet-column structure and are already the"
+                             " same family front/back - pinned unchanged as the positive anchor). Source"
+                             " pins: unified side rect line x2, end-piece reference line, old wall-band"
+                             " window coords absent, layout-0 lines intact, and all five cart Model"
+                             " materials bound to the same baseColorMap in Main.qml"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
