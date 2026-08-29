@@ -22235,6 +22235,193 @@ Item {
                              ;
     }
 
+    // ── P-t947 狼三修（R19.17 ①观察者不跟随 / ②咬击 4HP 口径 / ③chase 越障跳）──
+    //    通用 rig：44×44×96 局部世界（seed 26）整面凿平 —— y[85,95] 清 Air + y84 全铺 Stone（lessons
+    //    「地形高度是种子实测值非生成器不变量」：显式凿空不依赖任何「某高度以上必空」叙事；自带独立
+    //    小世界不碰共享 nextSlot 分配器，t923 同款）。三修各用独立 World/EntityManager 免态串扰。
+    //    (a1) 观察者不跟随：驯服站狼距主人 6.0 → tick(…, targetable=true, spectator=true) 1.5s → 主狼距
+    //         ≥4.0（跟随会在 ~1.0s 收进 kFollowMinDist=2.5 停步带；观察者回退 aiWander 漂移上限
+    //         1.5s×kWalkSpeed 1.0 = 1.5 → 距离下界 4.5，两行为带 [4.0,∞) vs ≤3.0 不相交，游向 RNG 无关判定）。
+    //    (a2) 观察者瞬移停：主人距 15（> kWolfTeleportDist=12）→ spectator 2s → 距离仍 ≥10（跟随段的
+    //         瞬移补位会把狼落进主人 2-5 格环 + 游荡 ≤2 → ≤7；不瞬移 ≥13 —— 阈值 10 两态硬分界）。
+    //    (a3) 跟随对照（创造/生存 = spectator=false）：同 (a1) 几何 → 1.5s 内收进 ≤3.0（2.5 停步带）。
+    //    (b) 咬击口径：满血 20HP Shambler setMobArmorSet(4) 穿甲 + 驯服狼 wolfRetaliateAgainst → 事件驱动
+    //        逐帧 tick 至恰两口（hp 每新落一档记一口，记满即停 —— 咬击节律时序无关判定）：逐口 ==4、
+    //        两口后血量 ==12（总伤 8 < 20 存活 = 「两口打死穿甲僵尸」不再成立）。==4 双向钉：kWolfAttackDamage
+    //        常量（下方 static_assert 源级同钉）+ 「护甲不减伤」（t377 mob 护甲仅视觉，damageEntity 原值
+    //        扣血 —— 穿甲与无甲同伤是既有口径非 bug，核对结论随本腿落档）。
+    //    (c) 越障跳：x∈{22,23} 两列厚 1 格高**全深**石墙隔开狼（x17）/ 穿甲僵尸（x27）—— 全深堵死绕行，
+    //        2 格厚 > kAttackRange 1.6 → 隔墙咬几何不可能（咬到必已越墙）；狼防御追击 → 越墙（中心 x >
+    //        24.2 = 远侧墙沿 24.0 + 落位余量）+ 越墙后咬击掉血（「起跳越过后继续接近」）。t923 版 chase 把
+    //        跳门在 `!moved`（斜向滑墙单轴恒可动 → 永不等到撞停）—— 阴性轮回退该形态本腿恒红（贴墙溜到超时）。
+    {
+        bool ok = true;
+        QString diag;
+        // ② 常量源级钉（kWolfAttackDamage 是类私有 constexpr，测试 TU 不可直读 → t923 (d) 源码钉先例）：
+        //   钉「= 4」用户口径（调参越界即红）；行为级逐口 ==4 断言在 (b) 双向兜底。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile hf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+            const QString h = hf.open(QIODevice::ReadOnly) ? QString::fromUtf8(hf.readAll()) : QString();
+            // 钉声明形态（含名→值原始间距）：文档注释里同名词不见「= 4」——首现即声明的匹配才算数。
+            const bool pin4 = h.contains(QStringLiteral("kWolfAttackDamage   = 4"));
+            ok = ok && pin4;
+            if (!pin4) diag += QStringLiteral("const-pin miss ");
+        }
+        auto flatRig = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        // 驯服站狼（~33%/骨 → 循环掷到成功；spawnMobTyped 默认站态非坐）。
+        auto tamedWolfAt = [](EntityManager &em, int x, int z) -> int {
+            const int wolf = em.spawnMobTyped(x, 85, z, EntityManager::MobWolf,
+                                              QStringLiteral("#c8ccd4"), 10);
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && wolf >= 0 && !tamed; ++attempt)
+                tamed = em.tameWolf(wolf);
+            return tamed ? wolf : -1;
+        };
+        auto distXZTo = [](const QVector3D &p, const QVector3D &q) {
+            return QVector3D(p.x() - q.x(), 0.0f, p.z() - q.z()).length();
+        };
+        // (a1) 观察者不跟随。
+        {
+            World w1; flatRig(w1);
+            EntityManager em1;
+            const int wolf = tamedWolfAt(em1, 16, 22);
+            const QVector3D owner(22.5f, 85.0f, 22.5f); // 距狼落点 (16.5,22.5) 恰 6.0
+            ok = ok && wolf >= 0;
+            if (wolf >= 0) {
+                for (int t = 0; t < 94; ++t) // 1.504s
+                    em1.tick(0.016f, &w1, owner, 0.3f, 1.8f, true, true); // targetable=true, spectator=true
+                const float d = distXZTo(em1.posAt(wolf), owner);
+                ok = ok && d >= 4.0f;
+                if (d < 4.0f) diag += QStringLiteral("a1 spectator followed: dist=%1 ").arg(d);
+            } else diag += QStringLiteral("a1 tame failed ");
+        }
+        // (a2) 观察者瞬移停。
+        {
+            World w2; flatRig(w2);
+            EntityManager em2;
+            const int wolf = tamedWolfAt(em2, 16, 22);
+            const QVector3D owner(31.5f, 85.0f, 22.5f); // 距 15.0 > kWolfTeleportDist 12
+            ok = ok && wolf >= 0;
+            if (wolf >= 0) {
+                for (int t = 0; t < 125; ++t) // 2.0s
+                    em2.tick(0.016f, &w2, owner, 0.3f, 1.8f, true, true);
+                const float d = distXZTo(em2.posAt(wolf), owner);
+                ok = ok && d >= 10.0f;
+                if (d < 10.0f) diag += QStringLiteral("a2 spectator teleported: dist=%1 ").arg(d);
+            } else diag += QStringLiteral("a2 tame failed ");
+        }
+        // (a3) 跟随对照（创造/生存）。
+        {
+            World w3; flatRig(w3);
+            EntityManager em3;
+            const int wolf = tamedWolfAt(em3, 16, 22);
+            const QVector3D owner(22.5f, 85.0f, 22.5f);
+            ok = ok && wolf >= 0;
+            if (wolf >= 0) {
+                for (int t = 0; t < 94; ++t) // 1.504s
+                    em3.tick(0.016f, &w3, owner, 0.3f, 1.8f, true, false); // spectator=false → 照常跟随
+                const float d = distXZTo(em3.posAt(wolf), owner);
+                ok = ok && d <= 3.0f;
+                if (d > 3.0f) diag += QStringLiteral("a3 follow missing: dist=%1 ").arg(d);
+            } else diag += QStringLiteral("a3 tame failed ");
+        }
+        // (b) 咬击口径（穿甲僵尸两口存活 + 逐口 ==4）。
+        int bite1 = -1, bite2 = -1, bHp = 20;
+        {
+            World wb; flatRig(wb);
+            EntityManager emb;
+            const int wolf = tamedWolfAt(emb, 16, 22);
+            const int zombie = emb.spawnMobTyped(28, 85, 22, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20); // 满血 20HP
+            bool dressed = zombie >= 0 && emb.setMobArmorSet(zombie, 4);         // 穿甲（tier4 全套）
+            for (int pc = 0; pc < 4 && zombie >= 0; ++pc)
+                dressed = dressed && emb.mobArmorAt(zombie, pc) != 0;            // 四部位皆着装（前置钉）
+            ok = ok && wolf >= 0 && dressed;
+            if (wolf >= 0 && dressed) {
+                emb.wolfRetaliateAgainst(wolf, zombie);
+                const QVector3D farOwner(-1000.0f, 90.0f, -1000.0f); // 玩家远 → 跟随/瞬移不抢戏（防御分支优先）
+                int bites = 0;
+                for (int t = 0; t < 2500 && bites < 2; ++t) { // 40s 事件驱动帽
+                    emb.tick(0.016f, &wb, farOwner, 0.3f, 1.8f, false, false);
+                    const int now = emb.healthAt(zombie);
+                    if (now < bHp) { // 新一口落地（冷却 1s → 单帧至多一口）
+                        if (bites == 0) bite1 = bHp - now; else bite2 = bHp - now;
+                        ++bites;
+                        bHp = now;
+                    }
+                }
+                ok = ok && bites == 2 && bite1 == 4 && bite2 == 4 && bHp == 12; // 两口总伤 8 < 20 → 存活
+                if (!(bites == 2 && bite1 == 4 && bite2 == 4 && bHp == 12))
+                    diag += QStringLiteral("b bites=%1 d1=%2 d2=%3 hp=%4 ")
+                                .arg(bites).arg(bite1).arg(bite2).arg(bHp);
+            } else diag += QStringLiteral("b spawn/tame/dress failed ");
+        }
+        // (c) 越障跳（追击穿墙不可能的两格厚全深墙 → 越墙 + 续咬）。
+        {
+            World wc;
+            wc.setWidth(44); wc.setDepth(44); wc.setHeight(96); wc.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) wc.setBlock(x, y, z, BR::Air, 0);
+                    wc.setBlock(x, 84, z, BR::Stone, 0);
+                }
+            for (int z = 0; z < 44; ++z)
+                for (int x = 22; x <= 23; ++x)
+                    wc.setBlock(x, 85, z, BR::Stone, 0);
+            EntityManager emc;
+            const int wolf = tamedWolfAt(emc, 17, 22);
+            const int zombie = emc.spawnMobTyped(27, 85, 22, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20);
+            const bool dressed = zombie >= 0 && emc.setMobArmorSet(zombie, 4);
+            ok = ok && wolf >= 0 && dressed;
+            if (wolf >= 0 && dressed) {
+                emc.wolfRetaliateAgainst(wolf, zombie);
+                const QVector3D farOwner(-1000.0f, 90.0f, -1000.0f);
+                bool crossed = false;
+                for (int t = 0; t < 3000 && !crossed; ++t) { // 48s 帽：越墙即停
+                    emc.tick(0.016f, &wc, farOwner, 0.3f, 1.8f, false, false);
+                    if (emc.posAt(wolf).x() > 24.2f) crossed = true; // 越过远侧墙沿 24.0 + 落位余量
+                }
+                int bites = 0;
+                int cHp = 20;
+                for (int t = 0; t < 1250 && bites < 1; ++t) { // 越墙后 20s 内咬到（继续接近的证据）
+                    emc.tick(0.016f, &wc, farOwner, 0.3f, 1.8f, false, false);
+                    const int now = emc.healthAt(zombie);
+                    if (now < cHp) { ++bites; cHp = now; }
+                }
+                ok = ok && crossed && bites == 1;
+                if (!(crossed && bites == 1))
+                    diag += QStringLiteral("c crossed=%1 bites=%2 wx=%3 hp=%4 ")
+                                .arg(int(crossed)).arg(bites)
+                                .arg(emc.posAt(wolf).x()).arg(cHp);
+            } else diag += QStringLiteral("c spawn/tame/dress failed ");
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t947 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t947 wolf triple-fix: (1) spectator-owner follow gate -- tamed standing"
+                             " wolf holds off (>=4.0) and skips the far-teleport (>=10) while the owner"
+                             " spectates, creative/survival control still closes to the 2.5 stop band"
+                             " (<=3.0); (2) bite caliber pinned at 4 HP/bite (static_assert + per-bite"
+                             "==4): an armored 20HP shambler survives two bites at exactly 12 HP -- total"
+                             " 8 < 20, no two-bite kill (t377 mob armor is visual-only by spec, so the"
+                             " constant is the real per-bite damage); (3) chase obstacle jump now probes"
+                             " proactively every AI tick (aiHostile precedent) instead of only after a"
+                             " full stop behind a >0.6 gate -- the wolf crosses a 2-thick full-depth"
+                             " 1-high wall it cannot bite through and lands a bite beyond it"
+                             ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

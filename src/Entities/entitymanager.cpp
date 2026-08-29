@@ -2539,10 +2539,13 @@ bool EntityManager::aiSquid(Entity &e, float dt, World *world, float worldW, flo
 //   (1) 未驯服 → 敌对玩家（侦测 → 追击 → 近距咬击；非追踪回退 wander）。
 //   (2) 驯服 + 坐 → 留守（不移动不攻击）。
 //   (3) 驯服 + 站 → 跟随主人 + 防御（追击咬击 m_wolfTarget 目标 mob）；求偶期优先寻偶。
+//       t947 ① 跟随门：观察者（playerSpectator）不跟随（走近/瞬移全停 → 回退 wander）；③ chase 越障跳
+//       改 aiHostile 同款主动判定（不等撞停、无距离短路边 —— 详见 chase lambda 内注释）。
 //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。分层（PLAN §2）：只读 World::isSolid + 自身数据；
 //   咬玩家走 mobAttackedPlayer 语义信号（呈现层路由 PlayerState）、咬 mob 走 damageEntity（同层受击链）。
 bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
-                           float worldW, float worldD, float speedScale, bool playerTargetable)
+                           float worldW, float worldD, float speedScale, bool playerTargetable,
+                           bool playerSpectator)
 {
     // 坐：留守 —— 不移动不攻击（跟随主人回来时仍坐原地；机制等价 MC 坐狼）。moveSpeed 清零 → walkPhase 冻结。
     if (e.wolfSitting) {
@@ -2576,35 +2579,38 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
         if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
         e.moveSpeed = moved ? spd : 0.0f; // 撞墙 → 腿停（t241 腿摆频率随它）
-        // t923 ① 跟随返修——越障跳 + 泳跃（旧版 chase 撞墙只撤回不动 = 驯服狼被 1 格岸壁/台阶挡死「不跟随」
-        //   的根因之一；t878 修的是驯服后骨头 no-op，移动卡死仍在）：
-        //   - 陆上（resting）：复刻 aiHostile 越障跳（前方脚位 1 格墙 + 墙顶两格空气 → kJumpSpeed +
-        //     t670 水平滑流 jumpGX/GZ；isJumpObstacle 排作物）。追玩家/咬目标/跟随/寻偶四处共用本 lambda
-        //     → 一次修复全覆盖（野狼追击同受益，机制等价 MC 1.0 狼越 1 格障）。
-        //   - 水中（脚位格 Water 且未 resting）：泳跃 vy=kJumpSpeed 跃出水面贴 1 格岸（t923 ② 浮面把狼顶到
-        //     水面后，最后一步上岸靠本跃；MC 泳跃语义）。重复触发无害（出水后脚位离水即停，弧线落岸/回落再试）。
-        if (!moved && distXZ > 0.6f && world) {
-            if (e.resting) {
-                const float fdx = -std::sin(e.yawRad);
-                const float fdz = -std::cos(e.yawRad);
-                const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
-                const int fx = qFloor(e.pos.x() + fdx * 0.6f);
-                const int fz = qFloor(e.pos.z() + fdz * 0.6f);
-                if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // 作物可穿越不跳（t642 同款）
-                    && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落
-                    && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高）
-                    e.vy = kJumpSpeed;
-                    e.resting = false;
-                    e.jumpGX = ((tx - e.pos.x()) / distXZ) * spd; // t670 越障跳水平滑流（朝目标）
-                    e.jumpGZ = ((tz - e.pos.z()) / distXZ) * spd;
-                }
-            } else {
-                const int fy = qFloor(e.pos.y() - e.halfH);
-                if (fy >= 0
-                    && world->blockAt(qFloor(e.pos.x()), fy, qFloor(e.pos.z())) == BlockRegistry::Water)
-                    e.vy = kJumpSpeed; // 泳跃（出水弧线 ≥1 格 → 贴岸跃上）
+        // t947 ③ 越障跳重构（用户第五轮「攻击被方块挡住不会跳」）——t923 版把整段门在 `!moved && distXZ > 0.6f`
+        //   上，两个门各漏一类攻击场景：①斜向滑墙时单轴仍可滑 → moved 恒 true，永不探跳（狼贴着墙往目标
+        //   z 向溜，纵向抖动步长恒非零 → 等不到「撞全停」那一拍）；②隔墙贴脸目标（如矮台阶上的目标）XZ 距
+        //   可 ≤0.6 被距离门短路。两型表现都是「顶墙干瞪眼」。改回 aiHostile 同款**主动判定**（3351-3373
+        //   先例）：每个 AI tick、resting 且朝目标移动就探前方脚位格（isJumpObstacle 单一权威 —— 作物/矮
+        //   支撑豁免沿用），是 1 格墙 + 墙顶两格净空 → kJumpSpeed + t670 朝目标水平滑流。判定独立于 moved
+        //   （不等撞停）也独立于 distXZ（贴脸障碍照跳；无墙时 isJumpObstacle 恒 false 不会原地蹦）。
+        if (e.resting && world && distXZ > 1e-4f) {
+            const float fdx = -std::sin(e.yawRad);
+            const float fdz = -std::cos(e.yawRad);
+            const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
+            const int fx = qFloor(e.pos.x() + fdx * 0.6f);
+            const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+            if (fy >= 0
+                && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // 作物可穿越不跳（t642 同款）
+                && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落
+                && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（跳峰 1.25 + 身高 0.9 → 两格口径，同 aiHostile）
+                e.vy = kJumpSpeed;
+                e.resting = false;
+                e.jumpGX = ((tx - e.pos.x()) / distXZ) * spd; // t670 越障跳水平滑流（朝目标）
+                e.jumpGZ = ((tz - e.pos.z()) / distXZ) * spd;
             }
+        }
+        // t923 ② 泳跃（保留「被挡才跃」触发语义，与上面的主动探跳分工）：水中（脚位格 Water 且未 resting）
+        //   且位移被挡 → vy=kJumpSpeed 跃出水面贴 1 格岸（出水弧线 ≥1 格 → 贴岸跃上）。距离门随 t947 ③ 一并
+        //   摘除（主人贴岸俯视时 XZ 可 ≤0.6，距离门会把最后一步上岸也拦死）；重复触发无害（出水后脚位离水
+        //   即停，弧线落岸/回落再试）。
+        if (!moved && world && !e.resting && distXZ > 1e-4f) {
+            const int fy = qFloor(e.pos.y() - e.halfH);
+            if (fy >= 0
+                && world->blockAt(qFloor(e.pos.x()), fy, qFloor(e.pos.z())) == BlockRegistry::Water)
+                e.vy = kJumpSpeed; // 泳跃（出水弧线 ≥1 格 → 贴岸跃上）
         }
         return moved;
     };
@@ -2681,6 +2687,14 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         }
         return moved;
     }
+
+    // t947 ① 跟随门（用户口径：创造/生存跟随、观察者模式不跟随）：观察者 → 跳过整个跟随段（走近 + 过远
+    //   瞬移补位一并停 —— 瞬移是跟随段的防掉队机制，跟随停则瞬移同停），回退 aiWander（同 t290 不可锁定
+    //   回退游荡先例：无跟随语义时的默认行为态）。门放在防御/寻偶分支之后 —— 防御追击（m_wolfTarget）与
+    //   求偶寻偶是 mob-mob 语义，不随主人模式翻转（观察者下狼被打仍反击）。创造/生存（false）不进此分支，
+    //   跟随行为零变化。
+    if (playerSpectator)
+        return aiWander(e, dt, world, worldW, worldD, speedScale);
 
     // 无防御目标 → 跟随主人：distXZ > kFollowMinDist 走近（kFollowMinDist 内停步贴近）；过远 kWolfTeleportDist
     //   瞬移到主人附近安全位（防跟随永久掉队 —— 狼速 3.5 < 玩家 4.3；机制等价 MC 狼距主人过远传送）。
@@ -5035,7 +5049,8 @@ void EntityManager::tickVehicleRiding()
 //
 // 移除用索引收集 + 循环后逆序 erase（保索引有效）。
 void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
-                        float listenerHalfW, float listenerHeight, bool playerTargetable)
+                        float listenerHalfW, float listenerHeight, bool playerTargetable,
+                        bool playerSpectator)
 {
     if (!world || m_entities.empty()) return;
     FrameProfiler::Scope profLoop("mobLoop"); // t500 perf：mob 桶子分解（EntityManager::tick 整段）
@@ -6797,7 +6812,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 } else if (e.mobType == MobSquid) {
                     if (aiSquid(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobWolf) {
-                    if (aiWolf(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, playerTargetable))
+                    // t947 ① 跟随门通道：playerSpectator 透传 aiWolf（观察者不跟随；PlayerController 按
+                    //   mode==Spectator 派生，同 playerTargetable 向下派生 bool 通道）。
+                    if (aiWolf(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale,
+                               playerTargetable, playerSpectator))
                         dirty = true;
                 } else if (e.mobType == MobOcelot) {
                     if (aiOcelot(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
