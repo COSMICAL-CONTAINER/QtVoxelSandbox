@@ -886,8 +886,12 @@ public:
     //   机制，跟随停则瞬移同停），回退 aiWander；创造/生存（false）照常跟随。用户口径：创造/生存跟随、
     //   观察者模式不跟随（观察者无跟随语义，机制等价 MC 观察者不可与宠物交互）。仅罩跟随段：防御追击
     //   （m_wolfTarget）与求偶寻偶是 mob-mob 语义，不随主人模式翻转。缺省 false —— 既有探针/调用方零扰动。
+    //   t951 昼夜通道：skyBrightness = 当前天光乘子（[0,1]，PlayerController::tickImpl 传 m_worldClock->
+    //   skyLight()，与 tickHostileLife 的燃烧门同源同帧值）。喂给 aiHostile / aiArcher 的白天阴影 AI
+    //   （暴晒寻影 / 持影等玩家 / 迟滞防抖）。缺省 0.0f = **夜间语义**（无昼夜注入的调用面——矩阵探针
+    //   旧 7 参调用零扰动，t951 日间分支整体不激活、行为与 t951 前逐位一致）；生产路径必传真值。
     void tick(qreal dt, World *world, const QVector3D &listener, float listenerHalfW, float listenerHeight,
-              bool playerTargetable, bool playerSpectator = false);
+              bool playerTargetable, bool playerSpectator = false, float skyBrightness = 0.0f);
     // t280 黑暗刷怪调度 + 敌对生物日光燃烧（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tick 同级）。
     //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续）。机制等价 MC 1.0
     //   「黑暗刷怪 + 白天燃烧」：周期 spawn（light<7 + 距玩家>24 + 总数上限）+ 敌对暴露日光 → 扣血 → 死亡消失。
@@ -1519,6 +1523,12 @@ private:
         //   （僵尸/骷髅生成不持武器，机制等价 MC 1.0 空手生成、装备全靠地面拾取）。放 struct 末尾区保
         //   聚合初始化不错位（t256 元教训）；DMI 兜底 + spawnMobCore 整体 move 入槽 → 槽复用自动清回 0。
         int heldItemId = 0;
+        // t951 遮荫迟滞保持窗（秒；仅白天阴影 AI 的 Shambler/Bones 推进——aiHostile / aiArcher 玩家路径）：
+        //   自身不暴露灼烧日光（sunBurnExposureAt 取反）即刷新到 kShadeHoldSeconds；暴晒中衰减。>0 期间
+        //   「视作遮蔽」——光影边界一步踏出 / 天光传播瞬态读数不触发立即 180° 折返寻影（窗口内维持当前
+        //   追击/持影决策）=「来回转向走出/退回阴影」抽搐的解药本体；窗尽仍暴晒 → 恢复寻影优先。
+        //   放 struct 末尾区保聚合初始化不错位（t256 元教训）；DMI 兜底默认 0（无窗 = 首 tick 暴晒即寻影）。
+        float shadeHoldTimer = 0.0f;
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1754,10 +1764,26 @@ private:
     //   playerPos = 玩家脚位（tick 的 listener = PlayerController::m_pos）。分层（PLAN §2）：只读 World::isSolid +
     //   自身数据；attack 走语义信号（mobAttackedPlayer）让呈现层路由到 PlayerState（同 fallDamageTaken 模式）。
     // speedScale 见 aiWander（t298 水中减速；追踪速度 / 内部回退 wander 一并缩放）。
-    //   t480 idx = 本 mob 槽索引：近战攻击命中玩家时注册驯服狼防御目标（m_wolfTarget = idx，机制等价 MC 驯服狼
+    // t480 idx = 本 mob 槽索引：近战攻击命中玩家时注册驯服狼防御目标（m_wolfTarget = idx，机制等价 MC 驯服狼
     //   攻击咬伤主人的怪物）。
+    //   t951 白天阴影 AI（用户口径「白天优先找阴凉保命；等玩家进阴影才发起攻击」；扩 t670「燃烧才寻影」
+    //   为「暴晒即寻影 + 持影等玩家」双状态 + kShadeHoldSeconds 迟滞——解「来回转向走出/退回阴影」抽搐）：
+    //   只罩**玩家目标路径**（仇恨狼 / 铁傀儡转火是 mob-mob 战斗语义，不随日光翻转——t947/t948 探针依赖
+    //   + MC 亡灵被打仍还手）；夜间（skyBrightness<=kBurnSkyBrightness）整段旁路，行为与 t951 前逐位一致。
+    //   skyBrightness = 天光乘子（tick 透传，见 tick 注释；缺省 0 = 夜间语义）。
     bool aiHostile(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
-                   float speedScale = 1.0f);
+                   float speedScale = 1.0f, float skyBrightness = 0.0f);
+    // t951 灼烧级日光暴露采样**单一权威**（定义在 .cpp；燃烧扣血 tickHostileLife 与 t951 白天阴影 AI 共用
+    //   同一采样，禁第二套光照判定）：(px,py,pz)（**身体中心**，feet = y−halfH）是否处于会点燃亡灵的直射
+    //   日光下——界内 + 身体格见天（skyLightAt>=15，t280 燃烧同列采样）+ 白天（skyBrightness>kBurnSky-
+    //   Brightness）+ 无降水遮日（t385）+ 不在水里（t561① 脚位/身体格水）。豁免态（夜间/晨昏/雨雪/水中/
+    //   树荫/屋檐/洞口）一律 false = 视同安全（寻影 AI 的「安全」即本谓词取反）。亡灵白名单 / 头盔免烧是
+    //   mob 侧语义不进本谓词（caller 叠加）；玩家侧同用（玩家不燃烧，但「玩家暴晒」是持影僵尸等待的对象）。
+    static bool sunBurnExposureAt(World *world, float px, float py, float pz, float halfH, float skyBrightness);
+    // t951 亡灵日光白名单（审查修 B6 名单的单一权威提炼）：仅 Shambler（蹒跚者）/ Bones（骸骨）晒燃——
+    //   新敌对默认不晒燃，显式加白才燃。白天阴影 AI 同门：只有会晒燃的亡灵才做避光行为（Spider /
+    //   Silverfish / Stalker / Nightwalker / Emberling / 被动型零波及）。
+    static bool undeadBurnsInDaylight(int mobType);
     // t283 骷髅弓箭手 AI（detect→keep-distance→shoot 三段；tick 内 hostile mob 且 mobType==MobBones 分支调，
     //   替代 aiHostile 的近战 attack）。spec t283「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」。
     //   机制对齐 MC 1.0 骷髅射手：检测玩家 → 在 [kArcherKeepMin, kArcherKeepMax] 距离带维持（近则退 / 远则进）→
@@ -1775,8 +1801,13 @@ private:
     //   分层（PLAN §2）：只读 World::isSolid + 自身数据；shoot 走 spawnArrow（箭实体）+ 命中由 Arrow 分支发
     //   mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile 的 attack 模式）。
     //   t480 idx = 本 mob 槽索引：传给 fireArrow 设箭 arrowShooter（箭命中玩家 → 驯服狼反击发射者）。
+    //   t951 白天阴影 AI（骸骨弓手版，同 aiHostile 的迟滞状态机；用户口径「骷髅可在阴影内射箭（走位不出
+    //   阴影）」）：暴晒 → 寻影优先（覆盖保持距离带——保命高于走位）；真遮蔽 → **移动候选落点暴晒则弃选**
+    //   （保持带照常运作但任何一步踏进灼烧日光即放弃该 tick 位移 = 走位不出阴影）；射击不因玩家暴晒压门
+    //   （远程无需接近 = 无需玩家入影，「在阴影内可射箭」；射界判定 lineOfSightClear 照旧）。仇恨狼 /
+    //   铁傀儡转火分支不罩（mob-mob 语义，同 aiHostile t951 注）。skyBrightness 缺省 0 = 夜间语义。
     bool aiArcher(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
-                  float speedScale = 1.0f);
+                  float speedScale = 1.0f, float skyBrightness = 0.0f);
     // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；tick 内 hostile mob 且
     //   mobType==MobStalker 分支调，替代 aiHostile/aiArcher）。spec t284「近距蓄力膨胀动画 → 爆炸」。
     //   机制对齐 MC 1.0 苦力怕：检测玩家 → 缓慢逼近 → 进 kFuseRange 开始蓄力（站立不动 + 膨胀，机制等价 MC
@@ -2024,6 +2055,12 @@ private:
     static constexpr int kShadeSkyLight        = 14;    // 遮荫门槛（skyLight < 此值 = 遮荫）
     static constexpr int kShadeScanRadius      = 6;     // 寻阴凉扫描半径（XZ 格）
     static constexpr float kShadeRescanInterval = 3.0f; // 目标失效后重扫间隔（秒）
+    // t951 持影迟滞窗（秒）：t670 旧版由 e.burning 驱动寻影，进影即停燃 → burning 翻 false → 立即回追
+    //   玩家 → 一步出影复燃 → 又寻影——追击/避光向量逐 AI tick 交替占优 = 用户「来回转向走出/退回阴影」
+    //   抽搐根因。t951 改双状态机 + 本迟滞窗：入影（不暴露）即刷新；暴晒衰减；>0 期间维持当前决策
+    //   （交战中踏出光影边界不立即 180° 折返，机制等价 MC 僵尸日间交战不秒退）。取 1.0s ≈ 至多多吃
+    //   1HP（kBurnDamageInterval 同量级），远小于折返抖动的观感/路程成本。
+    static constexpr float kShadeHoldSeconds   = 1.0f;  // 持影迟滞窗（秒）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
     // t392 刷怪笼周期刷怪常量（spec「periodically spawns ONE hostile mob while a player is within range;
