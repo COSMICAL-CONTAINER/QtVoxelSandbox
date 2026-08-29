@@ -857,8 +857,13 @@ public:
     //   消失）不读本参数 —— 那是世界模拟，独立于玩家模式（夜间照样刷怪、白天照样燃烧）。分层（PLAN §2）：
     //   玩家模式标志由 Game/Physics 层（PlayerController）持有并据此派生 bool 向下传（Game→Entities 向下依赖，
     //   同 listener/playerPos 先例），Entities 层不反查玩家模式（不反向依赖 Game）。
+    //   t947 ① 跟随门：playerSpectator = 玩家是否处于观察者模式（PlayerController 传 mode==Spectator，同上
+    //   向下派生 bool 通道）。true 时驯服狼跳过跟随段（走近 + 过远瞬移补位一并停 —— 瞬移是跟随段的防掉队
+    //   机制，跟随停则瞬移同停），回退 aiWander；创造/生存（false）照常跟随。用户口径：创造/生存跟随、
+    //   观察者模式不跟随（观察者无跟随语义，机制等价 MC 观察者不可与宠物交互）。仅罩跟随段：防御追击
+    //   （m_wolfTarget）与求偶寻偶是 mob-mob 语义，不随主人模式翻转。缺省 false —— 既有探针/调用方零扰动。
     void tick(qreal dt, World *world, const QVector3D &listener, float listenerHalfW, float listenerHeight,
-              bool playerTargetable);
+              bool playerTargetable, bool playerSpectator = false);
     // t280 黑暗刷怪调度 + 敌对生物日光燃烧（C++ 直调；PlayerController::tickImpl 每 tick 调，与 tick 同级）。
     //   独立于玩家捕获态（菜单 / 暂停时仍推进 —— 夜晚照样刷怪、白天照样燃烧，世界模拟连续）。机制等价 MC 1.0
     //   「黑暗刷怪 + 白天燃烧」：周期 spawn（light<7 + 距玩家>24 + 总数上限）+ 敌对暴露日光 → 扣血 → 死亡消失。
@@ -1631,11 +1636,14 @@ private:
     //       咬击该 mob（damageEntity(targetIdx, kWolfAttackDamage)）；无目标 → 跟随主人（distXZ > kFollowMinDist
     //       走近 / <= 停步；过远 kWolfTeleportDist 瞬移到主人附近防掉队）。求偶期（loveTimer>0）优先寻偶
     //       （findNearestMate + 走近配偶，复用 t400 求偶寻偶逻辑）。
+    //       t947 ① 跟随门：playerSpectator=true（观察者）→ 跳过跟随段（走近 + 过远瞬移一并停），回退
+    //       aiWander；创造/生存照常跟随。门只罩跟随段（放防御/寻偶分支之后）—— 防御追击与求偶是 mob-mob
+    //       语义，不随主人模式翻转（观察者下狼被打仍反击，机制等价 MC 宠物自卫）。
     //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。idx = 本 mob 槽索引（求偶寻偶 findNearestMate
     //   排除自身 + 防御目标自我排除）。分层（PLAN §2）：只读 World::isSolid + 自身数据；咬玩家 / 咬 mob 走既有
     //   受击链（mobAttackedPlayer 语义信号 / damageEntity），无向上依赖。
     bool aiWolf(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
-                float speedScale, bool playerTargetable);
+                float speedScale, bool playerTargetable, bool playerSpectator);
     // t481 豹猫/猫 AI（tick Mob 分支 mobType==MobOcelot 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
     //   MC 1.0 豹猫/猫三态：
     //   (1) 未驯服（ocelotTamed=false）：**被动游荡**（丛林野豹猫，不攻击玩家不敌对；aiWander）。
@@ -2063,8 +2071,10 @@ private:
     //     夜间刷怪敌对，属「地盘性攻击」，侦测近些；玩家走近才受袭）。
     //   - kWolfChaseSpeed：追击 / 跟随速度（blocks/s）。3.5 介于玩家走速 4.3 与 wander 1.0 之间 —— 跟随不掉队
     //     但玩家正常走略快（疾跑可拉开；机制等价 MC 狼跟随速度略低于玩家）。
-    //   - kWolfAttackDamage：狼咬击伤害（HP）。机制等价 MC 1.0 驯服狼咬击 ~3 心 = 6HP；本工程取 4（2 心，
-    //     介于玩家剑伤 4-6 之间 —— 战斗伙伴咬击威胁与剑相当，打敌对 20HP 需 5 咬）。
+    //   - kWolfAttackDamage：狼咬击伤害（HP）。用户口径（R19.17 第五轮实测 t947）：狼 4 HP/口一带 —— 满血
+    //     20HP 穿甲僵尸两口（8 伤）必须存活（咬 5 口才倒，不得两口死）；咬击走 damageEntity 原值扣血，mob
+    //     护甲自 t377 起即仅视觉、无 mob 侧减伤链（见 setMobArmorSet 注释），故本常量就是穿甲僵尸的每口实伤。
+    //     矩阵 P-t947 (b) 以「逐口 ==4 + 两口后血量 ==12」双向钉死本口径（调参越界即红）。
     //   - kWolfAttackCooldown：咬击间隔（秒）。机制等价 MC 狼 ~0.75s/击；取 1.0 对齐敌对 kAttackCooldown 节奏。
     //   - kFollowMinDist：驯服狼跟随到位的最小 XZ 距离（blocks；<= 停步、> 走近主人）。取 2.5（贴近不挤压）。
     //   - kWolfTeleportDist：驯服狼距主人过远 → 瞬移到主人附近（blocks；XZ）。机制等价 MC 1.0 狼距主人 >32 格

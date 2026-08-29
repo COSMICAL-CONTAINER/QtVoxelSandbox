@@ -850,6 +850,8 @@ void PlayerController::tickImpl()
     //   据它判箭命中玩家 AABB（蹲下命中盒正确收缩）。
     //   t290 观察者交互门控：传 playerTargetable = (m_mode == Survival) → 敌对 Mob 仅仇生存玩家（创造/观察者
     //   不被 detect/chase/attack/shoot；箭亦不命中）。Game 层持玩家模式并据此派生 bool 向下传（PLAN §2 向下依赖）。
+    //   t947 ① 跟随门：传 playerSpectator = (m_mode == Spectator) → 驯服狼观察者不跟随（走近/瞬移全停），
+    //   创造/生存照常跟随；同 playerTargetable 向下派生 bool 通道（Entities 层不反查玩家模式）。
     // t727 喂夜行者「玩家视线」：瞪视激怒（stare enrage）判据读目光射向头顶（dot>0.99 持续 2s）。玩家目光由
     //   Game 层玩家权威持有，向下注入 Entities 层（Game→Entities 向下依赖，setWolfTarget/distal 同模式）；
     //   position()=眼位、lookDirection()=目光单位向（findMobHit 同源，视线一致）。m_playerSightValid 由各
@@ -861,7 +863,7 @@ void PlayerController::tickImpl()
         // t811 载具管理器注入（mob 自动乘坐矿车/船）：tickVehicleRiding 登乘/钉位/对账读它（Game→Entities
         //   向下，同 setPlayerSight 先例；幂等指针写）。无载具场景传 null 同样安全（tickVehicleRiding 早退）。
         m_entityManager->setVehicleManagers(m_minecartManager, m_boatManager);
-        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival);
+        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival, m_mode == Spectator);
     }
     // t811 骑乘收口第 1 处（mob 桶内、tick 后、常开）：暂停 / 菜单期 step() 不跑（车不推进），但
     //   BoatManager::tick 常开（船浮水 / 动量滑行）→ 乘船 mob 须在此钉位才不与漂移船视觉脱离（世界模拟
