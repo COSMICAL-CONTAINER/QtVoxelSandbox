@@ -15796,6 +15796,221 @@ Item {
                              "(data chain proven live; pixel-side remains qml.exe/manual)";
     }
 
+    // ── t953 字形流两调 + 书架变更 rescan 加固（worldChanged 事件钩 + 风暴合并 + 1s 自愈轮询）──
+    //    用户第五轮实测（8-28）：① 字还有点大、速度偏快——再调小调慢；② 多放 / 挖一个书架文字流停
+    //    且不恢复（需保存退出才恢复）。病灶：字形流台×书架集合（pairs）的重扫唯一事件驱动是 editRev
+    //    （= window.worldEditRev，Main.qml 仅在玩家 blockPlaced/blockBroken 处自增）；一切系统改写栅格
+    //    路径（爆炸 destroySphereSilent / 落块着地 setBlockFromEntity 等）按约定只发 worldChanged →
+    //    书架被系统路径增删后集合永不重算，冻结在世界级缓存上（enchantTablePositions 读档重建才刷新
+    //    = 用户「保存退出才恢复」的观测面）；且玩家 editRev 链自身无任何自愈兜底。修 = 用户菜单双通
+    //    道：worldChanged 事件钩（脏标记 200ms 合并风暴，组件内 Connections 直连注入的 world）+ 1s
+    //    自愈轮询（重扫复用 rescanPairs 单一实现，不写第二套扫描）。
+    //    本探针（t873 真 QQmlEngine×真组件 rig 复用）：
+    //    (a) 行为级：满环带 16 书架基线（editRev 同步通道，t873 契约不回归）→
+    //        ① 爆炸腿：destroySphereSilent(r=0.6 恰拆一格) 拆一角书架（真 t942 路径，只发 worldChanged）
+    //          → **不触碰 editRev**，200ms 合并窗后 pairs 15（旧链在此恒 16 陈旧 = 阴性回退判据）；
+    //        ② 系统放回腿：setBlockFromEntity（落块着地语义，occ 守卫过、只发 worldChanged）→ pairs 16；
+    //        ③ 玩家挖 / 放腿（用户主诉）：World::setBlock 挖 / 放同样不触碰 editRev —— 单钉 worldChanged
+    //          通道：即便宿主 worldEditRev 链回归断线也须自愈 → pairs 15 / 16；
+    //        ④ 风暴合并腿：200ms 窗内 3 次系统写 → rescanCount 恰 +1（脏标记合并，非逐写重扫）；
+    //        ⑤ 自愈腿：worldRunning 置真 + 2.3s 无编辑窗 → 1s watchdog ≥1 次重扫（轮询通道活着）。
+    //    (b) 参数钉（用户 8-28 口径「再小再慢」源码钉）：glyphScale 0.21-0.32（t915 0.26-0.40 ×0.8）、
+    //        driftSpeed 1.8（2.6 ×0.7）、ratePerShelf 0.40（0.55 放缓）、maxPerTick 4（封顶 8/s）、寿命钳
+    //        0.9-2.2（随降速等比放宽——钳不放宽会截断慢飞令 t=1 提前到达 = 尾段重新加速，与调慢背反）。
+    //    (c) 通道源码钉：Connections onWorldChanged→requestRescan + rescanPending 脏标记 + 200ms 合并窗
+    //        + 1s watchdog（running 门 active && worldRunning —— review26-11 菜单/硬暂停零常驻约定）。
+    {
+        bool ok953a = true;
+        QString diag953;
+        // 泵事件循环等待墙钟（QTimer 需事件循环投递；每片 ≤10ms 防饿死，t889 pumpFor 同款）。
+        const auto pumpFor953 = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        World wT;
+        wT.setWidth(40); wT.setDepth(40); wT.setHeight(48); wT.setSeed(23);
+        const int t953Y = 44;
+        int tx0 = -1, tz0 = -1;
+        const auto areaClearT = [&](int x, int z) {
+            for (int dy = 0; dy <= 1; ++dy)
+                for (int dx = -2; dx <= 2; ++dx)
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                        if (wT.blockAt(x + dx, t953Y + dy, z + dz) != BR::Air) return false;
+                        if (wT.blockAt(x + dx / 2, t953Y + dy, z + dz / 2) != BR::Air) return false;
+                    }
+            return true;
+        };
+        for (int zz = 4; zz + 2 < 36 && tx0 < 0; zz += 2)
+            for (int xx = 4; xx + 2 < 36 && tx0 < 0; xx += 2)
+                if (areaClearT(xx, zz)) { tx0 = xx; tz0 = zz; }
+        if (tx0 < 0) {
+            ok953a = false;
+            diag953 = QStringLiteral("no clear 5x5 rig at y=44/45");
+        } else {
+            QQmlEngine e953;
+            QQmlComponent stubComp(&e953);
+            stubComp.setData(QByteArrayLiteral(
+                                 "import QtQuick\n"
+                                 "Item {\n"
+                                 "    property alias tableModel: lm\n"
+                                 "    ListModel { id: lm }\n"
+                                 "    function addEntry(x, y, z) { lm.append({x: x, y: y, z: z}) }\n"
+                                 "}\n"), QUrl());
+            const QString glyphPath = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                          .filePath(QStringLiteral("../src/ui/EnchantGlyphFlow.qml"));
+            QQmlComponent glyphComp(&e953, QUrl::fromLocalFile(glyphPath));
+            QObject *stub953 = nullptr;
+            QObject *g953 = nullptr;
+            if (stubComp.isError() || glyphComp.isError()) {
+                ok953a = false;
+                diag953 = QStringLiteral("qml load: ")
+                              + (stubComp.isError() ? stubComp.errorString() : glyphComp.errorString());
+            } else {
+                stub953 = stubComp.create();
+                g953 = glyphComp.create();
+                if (!stub953 || !g953) {
+                    ok953a = false;
+                    diag953 = QStringLiteral("create failed (stub=%1 glyph=%2)")
+                                  .arg(stub953 != nullptr).arg(g953 != nullptr);
+                } else {
+                    stub953->setParent(&e953);
+                    g953->setParent(&e953);
+                    // Main.qml glyphFlowLoader.onLoaded 同款注入（camNode 留 null = 距离门全通，t873 同口径）。
+                    g953->setProperty("world", QVariant::fromValue(&wT));
+                    g953->setProperty("tableModel",
+                                      QVariant::fromValue(stub953->property("tableModel").value<QObject *>()));
+                    g953->setProperty("active", true);
+                    auto pairsOf953 = [&]() -> int {
+                        return g953->property("pairs").toList().size();
+                    };
+                    auto rescans953 = [&]() -> int {
+                        return g953->property("rescanCount").toInt();
+                    };
+                    QMetaObject::invokeMethod(stub953, "addEntry", Q_ARG(QVariant, tx0),
+                                              Q_ARG(QVariant, t953Y), Q_ARG(QVariant, tz0));
+                    // 基线：满环带 16 书架 + editRev 同步触碰（通道一契约，t873 同款）。
+                    for (int dx = -2; dx <= 2; ++dx)
+                        for (int dz = -2; dz <= 2; ++dz)
+                            if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                                wT.setBlock(tx0 + dx, t953Y, tz0 + dz, BR::Bookshelf, 0);
+                    g953->setProperty("editRev", g953->property("editRev").toInt() + 1);
+                    const int basePairs = pairsOf953();
+
+                    // ① 爆炸腿：真 t942 路径只发 worldChanged；r=0.6 球心距判定恰拆一格（邻格 1.0 > 0.6）。
+                    wT.destroySphereSilent(tx0 + 2, t953Y, tz0, 0.6f);
+                    pumpFor953(450);   // 200ms 合并窗 + 泵余量
+                    const int pairsAfterBlast = pairsOf953();
+
+                    // ② 系统放回腿：落块着地语义（occ 守卫过：格已 Air；只发 worldChanged）。
+                    const bool placedBack = wT.setBlockFromEntity(tx0 + 2, t953Y, tz0, BR::Bookshelf);
+                    pumpFor953(450);
+                    const int pairsAfterBack = pairsOf953();
+
+                    // ③ 玩家挖 / 放腿：World::setBlock（发 broken/placed + worldChanged）——**不触碰
+                    //    editRev**，单钉 worldChanged 通道（宿主 worldEditRev 链断线也须自愈）。
+                    wT.setBlock(tx0 + 2, t953Y, tz0, BR::Air, 0);
+                    pumpFor953(450);
+                    const int pairsAfterMine = pairsOf953();
+                    wT.setBlock(tx0 + 2, t953Y, tz0, BR::Bookshelf, 0);
+                    pumpFor953(450);
+                    const int pairsAfterPlace = pairsOf953();
+
+                    // ④ 风暴合并腿：200ms 窗内 3 次系统写（挖→放→挖）→ 恰 1 次重扫（worldRunning 仍假
+                    //    → watchdog 未跑、spawn/tick Timer 未跑 → 窗内 rescanCount 增量只可能来自合并窗）。
+                    const int cStorm = rescans953();
+                    wT.setBlock(tx0 + 2, t953Y, tz0, BR::Air, 0);
+                    wT.setBlock(tx0 + 2, t953Y, tz0, BR::Bookshelf, 0);
+                    wT.setBlock(tx0 + 2, t953Y, tz0, BR::Air, 0);
+                    pumpFor953(450);
+                    const int stormRescans = rescans953() - cStorm;
+                    const int pairsAfterStorm = pairsOf953();
+
+                    // ⑤ 自愈腿：worldRunning 真门 + 2.3s 无编辑窗 → 1s watchdog 恰 2-3 次重扫（钳 1..3
+                    //    防墙钟抖动误报）；无写入 → 合并窗静默，增量全来自轮询。
+                    g953->setProperty("worldRunning", true);
+                    const int cWd = rescans953();
+                    pumpFor953(2300);
+                    const int wdRescans = rescans953() - cWd;
+                    g953->setProperty("worldRunning", false);
+
+                    ok953a = basePairs == 16 && placedBack
+                             && pairsAfterBlast == 15 && pairsAfterBack == 16
+                             && pairsAfterMine == 15 && pairsAfterPlace == 16
+                             && stormRescans == 1 && pairsAfterStorm == 15
+                             && wdRescans >= 1 && wdRescans <= 3;
+                    if (!ok953a)
+                        diag953 += QStringLiteral("(a) base=%1 back=%2 blast=%3 backPairs=%4 mine=%5 "
+                                                  "place=%6 storm=%7/%8 wd=%9;")
+                                       .arg(basePairs).arg(placedBack).arg(pairsAfterBlast)
+                                       .arg(pairsAfterBack).arg(pairsAfterMine).arg(pairsAfterPlace)
+                                       .arg(stormRescans).arg(pairsAfterStorm).arg(wdRescans);
+                }
+            }
+            // 好公民：复原环带（独立小世界随作用域析构，此步为 t873 同款对称纪律）。
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                        wT.setBlock(tx0 + dx, t953Y, tz0 + dz, BR::Air, 0);
+        }
+        if (!ok953a)
+            ++totalFail;
+        if (!diag953.isEmpty())
+            qInfo().noquote() << "  [t953 diag]" << diag953;
+        qInfo().noquote() << (ok953a ? "PASS" : "FAIL")
+                          << "| t953 glyph-flow rescan hardening real-chain probe (real QQmlEngine x real "
+                             "World rig): full-ring baseline via editRev sync channel, then WITHOUT ever "
+                             "touching editRev - explosion path (destroySphereSilent, worldChanged-only) "
+                             "drops pairs 16->15, entity-landing place-back restores 16, player mine/place "
+                             "via World::setBlock self-heals 15/16 even with the host worldEditRev chain "
+                             " severed, 3-write storm inside the 200ms window merges into exactly one "
+                             "rescan, 1s watchdog rescans >=1x in a 2.3s idle window under worldRunning "
+                             "(stale world-lifetime cache disease closed on all paths)";
+    }
+
+    // ── t953 参数/通道源码钉（用户 8-28 第五轮口径「字还有点大、速度偏快——再调小调慢」+ rescan 双通道）──
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        const auto readSrc = [&root](const QString &rel) {
+            QFile f(root + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString gf = readSrc(QStringLiteral("/src/ui/EnchantGlyphFlow.qml"));
+        // (b) 参数钉：调小（×0.8）+ 调慢（漂速 ×0.7 / 发射率放缓 / 封顶收口 / 寿命钳随降速放宽）。
+        const bool ok953b = gf.contains(QStringLiteral("glyphScaleMin: 0.21"))
+                            && gf.contains(QStringLiteral("glyphScaleMax: 0.32"))
+                            && gf.contains(QStringLiteral("driftSpeed: 1.8"))
+                            && gf.contains(QStringLiteral("ratePerShelf: 0.40"))
+                            && gf.contains(QStringLiteral("maxPerTick: 4"))
+                            && gf.contains(QStringLiteral("flightLifeMin: 0.9"))
+                            && gf.contains(QStringLiteral("flightLifeMax: 2.2"));
+        // (c) 通道钉：worldChanged 事件钩 + 脏标记合并窗 + 1s 自愈轮询（running 门 = review26-11 约定）。
+        const bool ok953c = gf.contains(QStringLiteral("function requestRescan()"))
+                            && gf.contains(QStringLiteral("property bool rescanPending: false"))
+                            && gf.contains(QStringLiteral("target: root.world"))
+                            && gf.contains(QStringLiteral("function onWorldChanged() { root.requestRescan() }"))
+                            && gf.contains(QStringLiteral("id: rescanDebounce"))
+                            && gf.contains(QStringLiteral("interval: 200"))
+                            && gf.contains(QStringLiteral("id: rescanWatchdog"))
+                            && gf.contains(QStringLiteral("interval: 1000"))
+                            && gf.contains(QStringLiteral("running: root.active && root.worldRunning"));
+        if (!ok953b || !ok953c)
+            qInfo().noquote() << "  t953 diag: okParams" << ok953b << "okChannels" << ok953c;
+        if (!ok953b || !ok953c)
+            ++totalFail;
+        qInfo().noquote() << ((ok953b && ok953c) ? "PASS" : "FAIL")
+                          << "| t953 glyph params + rescan channels source pin: glyph quads 0.21-0.32 "
+                             "(t915 0.26-0.40 x0.8, user 'still a bit big'), drift 1.8 (x0.7, user 'a bit "
+                             "fast'), rate 0.40/shelf + cap 4/tick (<=8/s), life clamp 0.9-2.2 scaled with "
+                             "the slower drift (clamping would truncate slow flights and re-accelerate the "
+                             "tail); worldChanged event hook -> requestRescan dirty flag with 200ms "
+                             "storm-merge window + 1s self-heal watchdog gated active&&worldRunning "
+                             "(review26-11 pause convention)";
+    }
+
     // ---- t889 暂停语义统一（两档：GUI 开=世界照跑玩家照坠但不动；ESC=全停；t885 鱼线持久前置）----
     //      门控矩阵钉子（行为级 + 源码钉双层）：
     //        (a) 软档（!captured + worldRunning=true，GUI 面板开等价）：pc.tick() step 照跑（玩家坠、XZ 冻结）、

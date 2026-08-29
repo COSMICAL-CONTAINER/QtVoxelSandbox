@@ -3,10 +3,27 @@ import QtQuick3D
 // t765/t797 书架→附魔台「文字」粒子流（呈现层；PLAN §2 分层 —— 只读 World 书架位，不反向写栅格）。
 //
 // 机制等价 MC 1.0 附魔台 glyph 粒子流的**常驻版**（t797 用户定稿）：只要游玩中，附魔台旁的有效书架就
-//   持续向台漂出**白色小字形**（透明底字形图集 × 纯白染色）：丝滑漂移（一程 ~1s，t915 提速）+ 飞行
+//   持续向台漂出**白色小字形**（透明底字形图集 × 纯白染色）：丝滑漂移（一程 ~1.5s，t953 降速）+ 飞行
 //   主体全显、末段渐隐 + 到达书心即透明回收（到达即删）—— **不依赖附魔台 UI 开关**（旧 t765 仅开
 //   UI 才播且面片过大「像爆炸」，两项均按用户报告重做）。附魔台 UI 打开时**所开台**的书架发射率加密
-//   （×uiBoost，交互反馈）。t915 返修要点见下方可调常量段注（常驻/提速/字形态三面）。
+//   （×uiBoost，交互反馈）。t915 返修要点见下方可调常量段注（常驻/提速/字形态三面）；t953 返修 =
+//   字再小一档 + 速度再慢一档（用户 8-28 第五轮实测口径）+ 书架变更后流停不恢复的 rescan 加固（下方
+//   「重扫通道」段）。
+//
+// t953 书架集合「变更后停止且不恢复」的病灶与修法（先读再动重扫逻辑）：
+// - 病灶：台×书架对集合（pairs）的重扫**唯一**事件驱动是 editRev（= window.worldEditRev，Main.qml 仅在
+//   blockPlaced / blockBroken 两个信号处理器里自增 = **玩家**放 / 破路径）。一切**系统**改写栅格的路径
+//   （爆炸 t942 链 destroySphereSilent / 落块着地 setBlockFromEntity / 焚毁 t843 / 流体 setWaterSilent 等）
+//   按约定不发这两个信号、只发 worldChanged → 书架被系统路径增删后集合永不重算，沿用陈旧源列表直到
+//   读档重建（enchantTablePositions 生命周期挂世界级）—— 用户实测「多放 / 挖一个书架文字流停，需保存
+//   退出才恢复」的观测面（另一面：即使玩家路径的 editRev 链本身在真实宿主里断线，也无任何自愈兜底，
+//   集合同样冻结在世界级缓存上）。
+// - 修法 = 用户菜单双通道（重扫复用 rescanPairs 单一实现，不写第二套扫描）：① **worldChanged 事件钩**
+//   （主通道，精确即时）——组件内 Connections 直连 root.world（呈现层只读信号，不反向写栅格，PLAN §2），
+//   脏标记 + 200ms 一次性合并窗（编辑风暴 N 次写只扫一次）；② **1s 低频自愈轮询**（兜底通道，用户菜单
+//   另一选项）——任一通道断线时集合仍周期性对齐栅格真值；扫法便宜（台数 × 50 格 blockAt 只读），且被
+//   active && worldRunning 门住（菜单 / ESC 硬档零开销，review26-11 纯视觉 Timer 同约定）。两通道都到
+//   不达每帧直发红线：事件级信号 + 秒级轮询，无逐帧 QML 信号回归。
 //
 // 与既有「符文」视觉的区别（防后人误删/误并）：
 // - t649 EnchantRunes.qml：常驻彩色**小立方**氛围漂流（t697 起常驻）—— 纯色立方、无字形贴图、只跟
@@ -30,7 +47,7 @@ import QtQuick3D
 // 性能红线（t724 粒子风暴前例）：① 无对（pairs 空）→ spawnTimer 停；在飞粒子由 tickTimer 推进至寿终
 //   （running 绑 active || liveCount>0 → 清空即全停，零常驻开销）；② 全局发射率上限 maxPerTick + 池硬
 //   上限 poolSize（满则静默丢，同 BlockParticles 模式）；③ 发射距离门 camEmitRangeSq：书架离相机
-//   >16 格的对不发射（远处看不见纯浪费）；④ 每书架 ~0.55/s（15 书架满配 ~8 字/s 持续流，t915 提速）。
+//   >16 格的对不发射（远处看不见纯浪费）；④ 每书架 ~0.40/s（15 书架满配 ~6 字/s 持续流，t953 放缓）。
 //
 // 坐标空间：经 Main.qml glyphFlowLoader.onLoaded 领养进 particlesHost 锚点（t16：否则 Loader 加载的
 //   3D Node parent=null → 孤儿不渲染）。粒子坐标即世界坐标（书架格 / 台格中心）。
@@ -65,24 +82,32 @@ Node {
     //   面片 0.18-0.28→0.26-0.40 格 + 图集笔画 1px→2px（tools/build_glyph_sprites.py t915 加粗）+
     //   渐隐律改「前 70% 全显 → 末 30% 线性归零」（旧 min(1,k/0.12)×(1-k) 全程衰减，中段 alpha 仅
     //   ~0.5 × 1px 细笔画 = 过滤后亚像素淡影 = 「小透明方块」观感的渲染侧根因）。
-    readonly property int poolSize: 48          // 池硬上限：~8/s × 最长寿命 1.5s ≈ 12 稳态 + 迸发余量
-    readonly property real ratePerShelf: 0.55   // 每书架每秒字数（15 书架 ~8/s 持续文字流）
+    // t953 两调（用户 8-28 第五轮实测口径：「字还有点大、速度偏快——再调小调慢」）：
+    //   ① 字再小一档：面片 0.26-0.40 → ×0.8 = 0.21-0.32 格（t915 放大后偏大；仍 ≥ t873 可读下限的
+    //     亚像素红线之上——2px 笔画 @ 0.21 格 / 5 格视距 ≈ 1.5-2px，可辨「是字」不糊成方块）。
+    //   ② 速度再慢一档：漂速 2.6 → ×0.7 = 1.8 格/s（一程 ~1.5s）；发射率 0.55 → ×0.73 = 0.40 字/s
+    //     （15 书架 ~6 字/s 持续流，节奏放缓）；单轮上限 5 → 4（全局封顶 10/s → 8/s）。寿命钳随降速
+    //     等比放宽（寿命 = 距离/漂速：漂速降后远书架一程自然变长，钳 0.7-1.5 会**截断慢飞**令 t=1
+    //     提前到达 = 尾段重新加速，与「调慢」背反——改 0.9-2.2 保持全程自然节奏）。
+    readonly property int poolSize: 48          // 池硬上限：~6/s × 最长寿命 2.2s ≈ 14 稳态 + 迸发余量
+    readonly property real ratePerShelf: 0.40   // 每书架每秒字数（15 书架 ~6/s 持续文字流；t953 0.55 放缓）
     readonly property real uiBoost: 4.0         // 附魔台 UI 开时所开台书架的发射率倍率（加密反馈；受 maxPerTick 封顶）
-    readonly property int maxPerTick: 5         // 单轮（500ms）发射上限 → 全局 ≤10/s 封顶
+    readonly property int maxPerTick: 4         // 单轮（500ms）发射上限 → 全局 ≤8/s 封顶（t953 5→4）
     readonly property real camEmitRangeSq: 256  // 发射距离门 16²（格²）：书架离相机超此距不发射
-    readonly property real driftSpeed: 2.6      // 漂移速度（格/s）：2-3 格书架 → 一程 ~1s 丝滑漂入
-    readonly property real flightLifeMin: 0.7   // 寿命钳制（近书架防闪瞬、远书架防拖尾过久）
-    readonly property real flightLifeMax: 1.5
+    readonly property real driftSpeed: 1.8      // 漂移速度（格/s）：2-3 格书架 → 一程 ~1.5s 慢漂（t953 2.6 降速）
+    readonly property real flightLifeMin: 0.9   // 寿命钳制随降速放宽（近书架防闪瞬、远书架防截断慢飞，见 t953 注）
+    readonly property real flightLifeMax: 2.2
     readonly property real arcHeight: 0.12      // 弧线峰值（快漂下轻拱不夺目）
-    // 字形面片边长（格）：t873 标定 + t915 放大。#Rectangle 内建面片基尺寸是 **100×100 单位**（实测
+    // 字形面片边长（格）：t873 标定 + t915 放大 + t953 再缩一档（用户「字还有点大」×0.8）。#Rectangle
+    //   内建面片基尺寸是 **100×100 单位**（实测
     //   scale 0.07 → 7.005 格宽 = 0.07×100，非 1×1）—— 下方池模板 scale 已 ÷100，本组数值即真实
     //   「格」数。历史：t765 旧值 0.10-0.16 直乘 100 基 = 10-16 格宽「像爆炸」；t797 缩到 0.055-0.085
     //   仍直乘 = 5.5-8.5 格白幕（两轮都治不好的真因）。÷100 后 t873 标定 0.18-0.28——探针像素级实证
     //   笔画亚像素不可见（1px 笔画 @ 5-8 格视距过滤后只剩淡影，读作「小透明方块」）；t915 连图集加粗
     //   （笔画 2px）一起放大到 0.26-0.40（机制对标 MC 字形粒子 ~1/4-2/5 格的白字，5 格视距笔画 2-3px
-    //   可辨「是字」）。
-    readonly property real glyphScaleMin: 0.26
-    readonly property real glyphScaleMax: 0.40
+    //   可辨「是字」）；t953 用户实测仍偏大 → 0.21-0.32（2px 笔画保住可读下限，见常量段 t953 注）。
+    readonly property real glyphScaleMin: 0.21
+    readonly property real glyphScaleMax: 0.32
 
     // 字形染色板：t797 用户定稿「白色的文字」—— 纯白为主 + 极轻冷调抖动（近白字形相乘仍读作白）。
     readonly property var tintColors: ["#ffffff", "#f4f6ff", "#e9eeff"]
@@ -90,9 +115,13 @@ Node {
     property var pool: []
     property int liveCount: 0   // 在飞数（active 翻假后 tickTimer 据它判「清空即全停」）
 
-    // 台×书架对缓存（[{x,y,z, tx,ty,tz},...]：书架格 + 所属台格）。editRev / 台表 count / active 变化时
-    //   重扫（显式触碰是唯一刷新源，同 EnchantRunes 模式 —— 放/破书架或台即刻重算，t549 先例）。
+    // 台×书架对缓存（[{x,y,z, tx,ty,tz},...]：书架格 + 所属台格）。重扫触发面见下方「重扫通道」段
+    //   （t953 起 = editRev / 台表 count / active 同步沿 + worldChanged 脏合并 + 1s 自愈轮询三面）。
     property var pairs: []
+
+    // t953 诊断计数：rescanPairs 实际执行次数（探针钉「编辑风暴合并为恰 1 次重扫」与 watchdog 自愈
+    //   节奏用；生产路径无消费，常态零日志零开销）。
+    property int rescanCount: 0
 
     // t873 自检计数器：累计发射颗数（诊断「发射器在跑但肉眼看不见」vs「根本没在跑」——前者查渲染侧，
     //   后者查数据链；配合下方各 [t873] 日志一次运行即可读出链断在哪一跳）。
@@ -122,6 +151,7 @@ Node {
     //   y/y+1 两层 + 半步格 Air）。规则单一权威在 World::countBookshelvesAround 的注释契约里，QML 呈现层
     //   内联同规则（EnchantRunes 同款复制 —— 改规则须多处同步，此处显式注记）。
     function rescanPairs() {
+        root.rescanCount++
         root.pairs = []
         if (!root.world || !root.active || !root.tableModel) {
             // t873 自检：前置门未齐（读档早期 / 菜单态）—— 折损点直接落日志，不再静默早退（review26 #23
@@ -153,14 +183,59 @@ Node {
             console.info("[t873] rescanPairs: tables=" + n + " pairs=" + root.pairs.length)
     }
 
+    // ---- 重扫通道（t953 加固；病灶与修法总述见文件头「t953」段）----
+    // 通道一（同步沿，t797 既有契约，t873 探针依赖其同步语义）：editRev（玩家放 / 破，Main.qml
+    //   worldEditRev++） / 台表 count（增删台含读档重建） / active（进世界）——变化即**当场**重扫。
     onActiveChanged:     rescanPairs()
     onEditRevChanged:    rescanPairs()
     onTableCountChanged: rescanPairs()
 
+    // 通道二（t953 主修，事件钩）：World.worldChanged —— 一切 setBlock 写入的语义信号（玩家路径 +
+    //   爆炸 t942 链 destroySphereSilent / 落块着地 setBlockFromEntity / 焚毁 t843 / 流体静默写等系统
+    //   路径全走它，N 写 1 emit 的批量收口也含）→ 脏标记，200ms 一次性合并窗后统一重扫。连接在组件内
+    //   直连注入的 root.world（宿主 Main.qml 零改动；world 在 Loader onLoaded 注入前为 null = 无连接，
+    //   注入后 property 绑定重连——Connections.target 动态重挂，QtQuick 既有语义）。
+    //   防抖语义（用户口径「编辑风暴合并」）：爆炸一帧毁 N 书架 → N 次 worldChanged 只置一次脏 →
+    //   单次重扫；requestRescan 重入直接早退（窗内合并），restart 语义 = 风暴未停则窗顺延，风暴结束后
+    //   ≤200ms 收口（放书架 ≤0.5s 起流的既有承诺不破）。此 Timer 为数据维护非纯视觉表现件，不门
+    //   worldRunning：脏标记只在有真实写入时置位，硬暂停期世界停写 → 无脏 → 零触发（review26-11 门
+    //   约定的豁免面同 faceTimer 口径——暂停期天然无事件源）。
+    property bool rescanPending: false
+    function requestRescan() {
+        if (root.rescanPending) return   // 窗内重入合并（风暴只扫一次）
+        root.rescanPending = true
+        rescanDebounce.restart()
+    }
+    Timer {
+        id: rescanDebounce
+        interval: 200
+        running: false
+        onTriggered: {
+            root.rescanPending = false
+            root.rescanPairs()
+        }
+    }
+    Connections {
+        target: root.world
+        function onWorldChanged() { root.requestRescan() }
+    }
+
+    // 通道三（t953 兜底，用户菜单的「定秒级轮询」选项）：1s 自愈轮询 —— 任一事件通道断线（未来宿主
+    //   注入回归 / 信号改名 / 合并窗丢失）时集合仍周期性对齐栅格真值，杜绝「变更后停止且不恢复」这一
+    //   病态再结晶。扫法便宜（台数 × 50 格 blockAt 只读），门 active && worldRunning：菜单 / ESC 硬档
+    //   零常驻开销（review26-11 纯视觉 Timer 同门约定）；直调 rescanPairs 不走合并窗（1Hz 本就无风暴）。
+    Timer {
+        id: rescanWatchdog
+        interval: 1000
+        repeat: true
+        running: root.active && root.worldRunning
+        onTriggered: root.rescanPairs()
+    }
+
     // 发射轮（500ms）：① 距离门 —— 书架离相机 >16 格的对剔除（远处不发射）；② 期望值法 —— 每近处对
-    //   ratePerShelf × 0.5s（所开台 ×uiBoost）累加出期望发射数，整数部分 + 按小数部分概率补 1（3-6s
-    //   一粒的**随机**低频，非整齐节拍）；③ 全局 maxPerTick 封顶。无对 / 硬暂停 → running=false 零开销
-    //   （review26 #11：worldRunning 并入——ESC 全停时不新增发射）。
+    //   ratePerShelf × 0.5s（所开台 ×uiBoost）累加出期望发射数，整数部分 + 按小数部分概率补 1（0.40 字/s
+    //   ≈ 2.5s 一粒期望节拍的**随机**低频，非整齐节拍）；③ 全局 maxPerTick 封顶。无对 / 硬暂停 →
+    //   running=false 零开销（review26 #11：worldRunning 并入——ESC 全停时不新增发射）。
     Timer {
         id: spawnTimer
         interval: 500
@@ -203,7 +278,7 @@ Node {
 
     // 从随机近处对 spawn 一颗白色小字形：起点 = 书架格中心朝台侧偏移（从书架「怀里」冒出），终点 =
     //   所属台上悬浮书心（t796 ① 书心 0.82→0.95 抬升同步：台格中心 +0.95，对齐 bookDelegate 书心
-    //   y+0.95±bob0.035）；寿命 = 距离/漂速钳制 → 一程 ~1s（t915 提速），t=1 恰落书心且 alpha 已归零。
+    //   y+0.95±bob0.035）；寿命 = 距离/漂速钳制 → 一程 ~1.5s（t953 降速档），t=1 恰落书心且 alpha 已归零。
     function spawnGlyph(list) {
         if (list.length === 0) return
         const c = list[Math.floor(Math.random() * list.length)]
