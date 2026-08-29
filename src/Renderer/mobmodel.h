@@ -34,11 +34,12 @@
 //     walkPhase 驱动（squid 水中持续漂移 → moveSpeed 恒 >0 → 触腕常驻摆动）。
 //   10 = Wolf（狼；t480）：中型犬科——细长躯干 + 前伸尖头 + 双立耳 + **4 腿**（四足 walk cycle，机制等价
 //     MC 1.0 狼）。尾巴**不在本几何** —— 呈现层 QML 据血量旋转独立尾巴 Model（spec「尾巴角度示血量」；独立子
-//     Model 才能绕尾根枢独立旋转）。坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动。眼由 Main.qml delegate 补。
+//     Model 才能绕尾根枢独立旋转）。坐姿走本类 sitPose（t878② 起；t946 单根锚链派生返修）。眼由 Main.qml delegate 补。
 //   11 = Ocelot/Cat（豹猫/猫；t481）：中型猫科——细长躯干 + 前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体
 //     贴图同纹）+ **4 腿**（四足 walk cycle，机制等价 MC 1.0 豹猫）。未驯服 = 丛林豹猫（斑点橙棕贴图）、
 //     驯服 = 家猫（3 色变体贴图），几何共用（机制等价 MC 1.0 豹猫/猫同模型异贴图；毛色变体由 Main.qml 据
-//     ocelotVariantAt 切贴图，几何不变）。坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动。眼由 Main.qml delegate 补。
+//     ocelotVariantAt 切贴图，几何不变）。坐姿走本类 sitPose（t878② 起；t946 单根锚链派生返修，与狼同修）。
+//     眼由 Main.qml delegate 补。
 //   14 = Silverfish（银鱼；t487）：小型虫类敌对生物——分节躯干 + 前伸小头 + **3 对短腿**（机制等价 MC 1.0 银鱼
 //     多足 + 多节体）。腿底本地 y=−0.15 贴 collision 底面（halfH=0.15 → offset=0）。walkPhase 驱动短腿摆动
 //     （缩 0.6 幅度，虫类快步频）。hostile → EntityManager AI 默认 aiHostile 近战追击玩家。要塞银鱼刷怪笼
@@ -136,11 +137,12 @@ class MobModel : public QQuick3DGeometry
     //   （旧单材质路径；剪毛态 / 刷怪笼迷你 / 其余 mobType 零回归）。materials 数少于 subset 时按
     //   QtQuick3D 文档「末材质兜余下 subset」退化（单材质仍整模可渲染）。
     Q_PROPERTY(bool sheepSkinHead READ sheepSkinHead WRITE setSheepSkinHead NOTIFY sheepSkinHeadChanged)
-    // t878② 犬科/猫科坐姿（仅 mobType 10 狼 / 11 豹猫读）：true → 几何摆**坐姿**——躯干绕后髋枢上仰
-    //   （臀落地、胸抬起）、头/耳随胸抬起并微仰（「头抬起看玩家」）、后腿前折平收臀下（「后腿折叠」）、
-    //   前腿垂直伸长撑地（坐姿胸前掌落地）。false（默认）→ 站姿（原四足布局零回归）。替代 Main.qml
-    //   旧「整模压缩 + 前倾」变换（用户判「身体前倾趴下」非坐）。QML 呈现层叠加件（眼/项圈/尾）另按
-    //   坐姿头位偏移（数值与几何坐姿头位成对契约，见 Main.qml 注释互指）。
+    // t878②/t946 犬科/猫科坐姿（仅 mobType 10 狼 / 11 豹猫读）：true → 几何摆**坐姿**——以臀部着地点为
+    //   唯一根锚（mobmodel.cpp kSitRootY/kSitRootZ）+ 躯干后仰 18°：躯干绕根锚旋转、头/耳由同一根锚链派生
+    //   （sitRot lambda，禁止独立世界坐标——t878② 各段独立绝对坐标的断链形态 = 「身体翘太高 + 分离中间
+    //   透明」根因）、后腿折叠为臀下大腿块 + 前腿垂直伸长撑地（坐姿胸前掌落地）。false（默认）→ 站姿
+    //   （原四足布局零回归）。QML 呈现层叠加件（眼/项圈/尾）按同一根锚派生的坐姿位偏移（成对契约，
+    //   见 Main.qml / ResourceBrowser.qml t946 注释互指）。
     Q_PROPERTY(bool sitPose READ sitPose WRITE setSitPose NOTIFY sitPoseChanged)
     // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
     //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.62, -0.03, sin·0.62)，棒身恒竖直只轨道心公转）。

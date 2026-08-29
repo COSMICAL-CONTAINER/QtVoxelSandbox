@@ -742,25 +742,46 @@ void MobModel::rebuild()
         //   收进身体轮廓（旧版腿心恰在身侧缘 ±0.18 → 半条腿悬在身侧外读作「位置不对」）。
         g_texW = 64.0f; g_texH = 32.0f;
         if (m_sitPose) {
-            // t878② 狼坐姿（机制等价 MC 坐狼：臀落地 + 胸抬起 + 头微仰看玩家 + 后腿前折 + 前腿垂直撑地）。
-            //   躯干绕后髋枢（髋顶 (0,-0.08,+0.24)）+40° 上仰；下沉 0.18 用「枢轴下移 0.18」实现（绕
-            //   平移后的枢轴旋转 = 原旋转后整体下移，旋转/平移可复合）。各件坐标由站姿值绕枢轴解析
-            //   推得（视觉参数钉死，待用户目视确认；Main.qml 眼/项圈/尾 overlay 坐标与本头位成对契约）。
+            // t946 狼坐姿返修（t878② 旧坐姿**变换链断裂**：躯干绕枢 +40° 上仰把胸顶推到 y≈0.48，而头/耳/腿
+            //   仍是各段独立绝对坐标——抬起后的躯干底与臀下折叠腿顶之间悬空 ~0.10-0.23 透明缝（用户
+            //   「身体与躯体分离中间透明」），头心 0.30 反被压在胸顶 0.48 之下（用户「身体翘太高」）。
+            //   修复 = 以臀部着地点为**唯一根锚**重推坐姿：躯干随动段（头/耳）一律由根锚旋转派生（下
+            //   sitRot lambda），禁止独立世界坐标；后仰 18°（10-20° 带，用户「不翘太高」口径）→ 胸顶 0.39、
+            //   头顶 0.47、耳顶 0.57（总高 ~0.99 ≈ 1 格自然坐狼）。解析值（rig 全量核过，矩阵 P-t946 连续域
+            //   钉）：躯干底线 y(z) = -0.143-0.325(z-0.401)；后大腿块顶 0.00 沿 z[0.10,0.38] 全线嵌入躯干底；
+            //   前腿顶 0.12 嵌入胸底（z=-0.18 处胸底 0.046）。Main.qml 眼/项圈/尾 overlay 坐标 = 同一根锚
+            //   派生的成对契约（见 Main.qml t946 注释）。
+            constexpr float kSitRootY   = -0.14f;      // 根锚 y（臀底 = 折叠大腿块顶面着地高度）
+            constexpr float kSitRootZ   =  0.36f;      // 根锚 z（臀部略前收）
+            constexpr float kSitPitch   =  0.3141593f; // 躯干后仰 18°（绕根锚 nose-up）
+            constexpr float kSitHeadNet =  0.1745329f; // 头净俯仰 10°（随躯干链再微抬「看玩家」）
+            const float sitCa = std::cos(kSitPitch), sitSa = std::sin(kSitPitch);
+            const float headCa = std::cos(kSitHeadNet), headSa = std::sin(kSitHeadNet);
+            // 链派生（躯干随动段唯一合法定位方式）：站姿 (y,z) 绕根锚旋 → 坐姿坐标。站姿参考值：
+            //   颈附着点 = 头盒后侧面心 (0.12,-0.24)；耳 = 颈附 + (±0.08, +0.18, -0.16)。
+            auto sitRotY = [&](float y, float z) { return kSitRootY + (y - kSitRootY) * sitCa - (z - kSitRootZ) * sitSa; };
+            auto sitRotZ = [&](float y, float z) { return kSitRootZ + (y - kSitRootY) * sitSa + (z - kSitRootZ) * sitCa; };
             setMobTex(21, 0, 6, 6, 7);
             addBoxRot( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f,
-                      -0.26f, 0.24f, 0.6981317f, verts, idx, bMin, bMax); // 躯干（+40° 上仰 + 下沉 0.18：臀落地胸抬）
+                      kSitRootY, kSitRootZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕根锚 +18°：臀落地胸抬起）
+            const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.293, -0.130)
+            const float neckZ = sitRotZ(0.12f, -0.24f);
             setMobTex(0, 0, 6, 6, 4);
-            addHeadRot( 0.00f,  0.30f, -0.12f, 0.14f, 0.15f, 0.18f,
-                        m_headPitch + 0.3490659f, verts, idx, bMin, bMax); // 头（随胸抬起高位 + 净 +20° 微仰「看玩家」）
+            addHeadRot( 0.00f, neckY + 0.18f * headSa, neckZ - 0.18f * headCa, 0.14f, 0.15f, 0.18f,
+                        m_headPitch + kSitHeadNet, verts, idx, bMin, bMax); // 头（颈附链位 + 净 +10° 微仰「看玩家」）
             setMobTex(21, 0, 6, 6, 7);
-            addBox(-0.08f,  0.46f, -0.16f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（随头高位）
-            addBox( 0.08f,  0.46f, -0.16f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
+            addBox(-0.08f, neckY + 0.18f * headCa + 0.16f * headSa,
+                   neckZ + 0.18f * headSa - 0.16f * headCa, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（头随动链位）
+            addBox( 0.08f, neckY + 0.18f * headCa + 0.16f * headSa,
+                   neckZ + 0.18f * headSa - 0.16f * headCa, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
             setMobTex(0, 18, 2, 8, 2);
-            addBox(-0.16f, -0.28f,  0.10f, 0.08f, 0.14f, 0.08f, verts, idx, bMin, bMax); // 后腿前折平收臀下（y[-0.42,-0.14] 贴地）
-            addBox( 0.16f, -0.28f,  0.10f, 0.08f, 0.14f, 0.08f, verts, idx, bMin, bMax);
+            addBox(-0.16f, -0.21f, kSitRootZ - 0.12f, 0.08f, 0.21f, 0.14f, verts, idx, bMin, bMax); // 后大腿块（臀下折叠，z 绑根锚；顶 0.00 全线嵌入躯干底）
+            addBox( 0.16f, -0.21f, kSitRootZ - 0.12f, 0.08f, 0.21f, 0.14f, verts, idx, bMin, bMax);
+            addBox(-0.16f, -0.38f,  0.02f, 0.08f, 0.04f, 0.12f, verts, idx, bMin, bMax); // 折叠前爪（贴地前伸，衔接大腿块）
+            addBox( 0.16f, -0.38f,  0.02f, 0.08f, 0.04f, 0.12f, verts, idx, bMin, bMax);
             setMobTex(0, 18, 2, 8, 2);
-            addBox(-0.16f, -0.185f, -0.128f, 0.08f, 0.235f, 0.08f, verts, idx, bMin, bMax); // 前腿垂直撑地（伸长 0.34→0.47：髋随胸抬 +0.25）
-            addBox( 0.16f, -0.185f, -0.128f, 0.08f, 0.235f, 0.08f, verts, idx, bMin, bMax);
+            addBox(-0.16f, -0.15f, -0.26f, 0.08f, 0.27f, 0.08f, verts, idx, bMin, bMax); // 前腿垂直撑地（胸抬起 → 加长 0.54，顶 0.12 嵌胸底）
+            addBox( 0.16f, -0.15f, -0.26f, 0.08f, 0.27f, 0.08f, verts, idx, bMin, bMax);
         } else {
         setMobTex(21, 0, 6, 6, 7);
         addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；采 mane 毛区）
@@ -790,25 +811,41 @@ void MobModel::rebuild()
         //   -0.08 深入躯干底 -0.11；腿底仍 -0.40 贴 collision 底面）+ legOffX 0.16→0.14 收进轮廓（身半宽 0.15）。
         g_texW = 64.0f; g_texH = 32.0f;
         if (m_sitPose) {
-            // t878② 豹猫/猫坐姿（同狼模式：躯干 +40° 绕后髋枢 (0,-0.06,+0.20) 上仰 + 下沉 0.16（枢轴下移
-            //   实现）+ 头高位微仰 + 后腿前折 + 前腿垂直撑地 + 竖尾（坐猫尾巴竖起贴臀）。坐标由站姿值绕
-            //   枢轴解析推得（视觉参数钉死，待用户目视确认）。
+            // t946 豹猫/猫坐姿返修（与狼同病同修——t878② 变换链断裂形态：躯干 +40° 绕枢上仰、头/耳/尾/腿
+            //   独立世界坐标 → 胸顶 0.42 压过头心 0.28 + 臀下折叠腿与躯干底间 ~0.10-0.12 透明缝，t963 登记
+            //   随本任务连修）。以臀部着地点为**唯一根锚**重推（链派生模式同狼分支）：后仰 18° + 头净 +10°
+            //   → 胸顶 0.35、头顶 0.43、耳顶 0.50（总高 0.90 自然坐猫）；竖尾锚在链派生尾根位（贴臀）。
+            constexpr float kSitRootY   = -0.12f;      // 根锚 y（臀底 = 折叠大腿块顶面着地高度）
+            constexpr float kSitRootZ   =  0.32f;      // 根锚 z
+            constexpr float kSitPitch   =  0.3141593f; // 躯干后仰 18°（绕根锚 nose-up）
+            constexpr float kSitHeadNet =  0.1745329f; // 头净俯仰 10°（随躯干链再微抬「看玩家」）
+            const float sitCa = std::cos(kSitPitch), sitSa = std::sin(kSitPitch);
+            const float headCa = std::cos(kSitHeadNet), headSa = std::sin(kSitHeadNet);
+            // 链派生（躯干随动段唯一合法定位方式）：站姿参考值 颈附 (0.12,-0.24)、耳 = 颈附 + (±0.06,+0.14,-0.12)。
+            auto sitRotY = [&](float y, float z) { return kSitRootY + (y - kSitRootY) * sitCa - (z - kSitRootZ) * sitSa; };
+            auto sitRotZ = [&](float y, float z) { return kSitRootZ + (y - kSitRootY) * sitSa + (z - kSitRootZ) * sitCa; };
             setMobTex(20, 6, 4, 5, 6);
             addBoxRot( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f,
-                      -0.22f, 0.20f, 0.6981317f, verts, idx, bMin, bMax); // 躯干（+40° 上仰 + 下沉 0.16）
+                      kSitRootY, kSitRootZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕根锚 +18°：臀落地胸抬起）
+            const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.281, -0.138)
+            const float neckZ = sitRotZ(0.12f, -0.24f);
             setMobTex(1, 1, 5, 4, 4);
-            addHeadRot( 0.00f,  0.28f, -0.12f, 0.11f, 0.12f, 0.14f,
-                        m_headPitch + 0.2967060f, verts, idx, bMin, bMax); // 头（高位 + 净 +23° 微仰「看玩家」）
+            addHeadRot( 0.00f, neckY + 0.14f * headSa, neckZ - 0.14f * headCa, 0.11f, 0.12f, 0.14f,
+                        m_headPitch + kSitHeadNet, verts, idx, bMin, bMax); // 头（颈附链位 + 净 +10° 微仰「看玩家」）
             setMobTex(20, 6, 4, 5, 6);
-            addBox(-0.06f,  0.42f, -0.17f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（随头高位）
-            addBox( 0.06f,  0.42f, -0.17f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
-            addBox( 0.00f, -0.02f,  0.44f, 0.04f, 0.12f, 0.04f, verts, idx, bMin, bMax); // 竖尾（坐猫尾竖起贴臀）
+            addBox(-0.06f, neckY + 0.14f * headCa + 0.12f * headSa,
+                   neckZ + 0.14f * headSa - 0.12f * headCa, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（头随动链位）
+            addBox( 0.06f, neckY + 0.14f * headCa + 0.12f * headSa,
+                   neckZ + 0.14f * headSa - 0.12f * headCa, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
+            addBox( 0.00f,  0.10f, sitRotZ(0.18f, 0.36f) + 0.02f, 0.04f, 0.15f, 0.04f, verts, idx, bMin, bMax); // 竖尾（链派生尾根位 0.451 +0.02 → 0.471 贴臀）
             setMobTex(0, 18, 2, 4, 2);
-            addBox(-0.14f, -0.26f,  0.08f, 0.06f, 0.14f, 0.06f, verts, idx, bMin, bMax); // 后腿前折平收臀下（y[-0.40,-0.12] 贴地）
-            addBox( 0.14f, -0.26f,  0.08f, 0.06f, 0.14f, 0.06f, verts, idx, bMin, bMax);
+            addBox(-0.14f, -0.19f, kSitRootZ - 0.12f, 0.06f, 0.21f, 0.13f, verts, idx, bMin, bMax); // 后大腿块（臀下折叠，z 绑根锚；顶 0.02 全线嵌入躯干底）
+            addBox( 0.14f, -0.19f, kSitRootZ - 0.12f, 0.06f, 0.21f, 0.13f, verts, idx, bMin, bMax);
+            addBox(-0.14f, -0.365f, -0.02f, 0.06f, 0.035f, 0.11f, verts, idx, bMin, bMax); // 折叠前爪（贴地前伸，衔接大腿块）
+            addBox( 0.14f, -0.365f, -0.02f, 0.06f, 0.035f, 0.11f, verts, idx, bMin, bMax);
             setMobTex(0, 18, 2, 4, 2);
-            addBox(-0.14f, -0.182f, -0.106f, 0.06f, 0.218f, 0.06f, verts, idx, bMin, bMax); // 前腿垂直撑地（伸长 0.34→0.436）
-            addBox( 0.14f, -0.182f, -0.106f, 0.06f, 0.218f, 0.06f, verts, idx, bMin, bMax);
+            addBox(-0.14f, -0.155f, -0.22f, 0.06f, 0.245f, 0.06f, verts, idx, bMin, bMax); // 前腿垂直撑地（胸抬起 → 加长 0.49，顶 0.09 嵌胸底）
+            addBox( 0.14f, -0.155f, -0.22f, 0.06f, 0.245f, 0.06f, verts, idx, bMin, bMax);
         } else {
         setMobTex(20, 6, 4, 5, 6);
         addBox( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f, verts, idx, bMin, bMax); // 细长躯干（比狼更窄长；猫科体型）

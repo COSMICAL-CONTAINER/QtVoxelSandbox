@@ -1176,12 +1176,13 @@ Item {
                                         // t750 ② 狼尾（修复「像兔子」——缺尾缺眼的灰身立耳四足读作兔；镜像
                                         //   Main.qml wolfTailPivot：尾根 (0,0.16,0.38) + 竖细盒毛色 0.55 灰；图鉴
                                         //   静态取满血竖起 35°（游戏内随血量 35°..140°）。
-                                        //   t920 坐姿随移（Main.qml t878② 成对契约）：尾根 (0,-0.17,0.50) +
-                                        //   垂尾搭地 35°+75°=110°（机制等价 MC 坐狼垂尾）。
+                                        //   t946 坐姿随移（Main.qml t878②→t946 成对契约）：尾根 = 站姿位绕坐姿根锚
+                                        //   (-0.14,0.36) 旋 18° = (0,0.139,0.472) + 垂尾搭地 35°+75°=110°
+                                        //   （机制等价 MC 坐狼垂尾）。
                                         Node {
                                             visible: root.selectedMobType === 10
                                             position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0, -0.17, 0.50) : Qt.vector3d(0, 0.16, 0.38)
+                                                      ? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)
                                             eulerRotation.x: root.mobTamedActive && root.mobSitPreview ? 110 : 35
                                             Model {
                                                 geometry: UnitCube {}
@@ -1191,14 +1192,14 @@ Item {
                                             }
                                         }
                                         // t920 驯服狼红项圈（t831 驯服态视觉；镜像 Main.qml 游戏内 collar
-                                        //   Model：站姿颈根 (0,0.16,-0.30) / 坐姿头-胸嵌接高位 (0,0.28,-0.03)
-                                        //   成对契约，横扁环带 x 微出躯干侧缘读作环颈）。未驯服不显；图鉴不做
+                                        //   Model：站姿颈根 (0,0.16,-0.30) / 坐姿位 = 站姿绕坐姿根锚旋 18° (0,0.349,-0.175)
+                                        //   （t946 链派生成对契约），横扁环带 x 微出躯干侧缘读作环颈）。未驯服不显；图鉴不做
                                         //   昼夜灰阶 / 受击红闪（纯色预览，同其他 overlay 眼/腿约定）。
                                         Model {
                                             visible: root.selectedMobType === 10 && root.mobTamedPreview
                                             geometry: UnitCube {}
                                             position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0, 0.28, -0.03) : Qt.vector3d(0, 0.16, -0.30)
+                                                      ? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)
                                             scale: Qt.vector3d(0.42, 0.06, 0.07)
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
@@ -1209,12 +1210,13 @@ Item {
                                         //   (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前脸 z=-0.60 → 眼贴头前
                                         //   (±0.08,0.16,-0.61)（t819 头后移贴胸，眼随移）。
                                         //   t780：pack 命中 → box-UV 贴图头前脸自带双瞳 → overlay 隐（t777 双眼教训）。
-                                        //   t920 坐姿眼随移（Main.qml t878② 成对契约）：(±0.08, 0.34, -0.325)。
+                                        //   t946 坐姿眼随移（Main.qml t878②→t946 成对契约）：坐姿头心 (0,0.324,-0.308)
+                                        //   + 眼偏移净 10° 随头旋 → (±0.08, 0.40, -0.49)。
                                         Model {
                                             visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(-0.08, 0.34, -0.325) : Qt.vector3d(-0.08, 0.16, -0.61)
+                                                      ? Qt.vector3d(-0.08, 0.40, -0.49) : Qt.vector3d(-0.08, 0.16, -0.61)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
@@ -1222,7 +1224,7 @@ Item {
                                             visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
                                             geometry: UnitCube {}
                                             position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0.08, 0.34, -0.325) : Qt.vector3d(0.08, 0.16, -0.61)
+                                                      ? Qt.vector3d(0.08, 0.40, -0.49) : Qt.vector3d(0.08, 0.16, -0.61)
                                             scale: Qt.vector3d(0.04, 0.05, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
@@ -1231,14 +1233,15 @@ Item {
                                         //   (±0.07,0.15,-0.53)（t819 头后移贴胸，眼随移）。
                                         //   t780：pack 命中 → 贴图头前脸自带眼点 → overlay 隐（同上）。
                                         //   t920：已驯服豹猫贴图恒程序家猫（无脸纹）→ 眼恒显（镜像 Main.qml
-                                        //   「驯服猫不走 pack 判据」）；坐姿眼随移 (±0.07, 0.32, -0.28)。
+                                        //   「驯服猫不走 pack 判据」）；t946 坐姿眼随移（与狼同修）：坐姿头心
+                                        //   (0,0.306,-0.276) + 眼偏移净 10° 随头旋 → (±0.07, 0.36, -0.42)。
                                         Model {
                                             visible: root.selectedMobType === 11
                                                      && (root.selectedMobPackSrc === ""
                                                          || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
                                             geometry: UnitCube {}
                                             position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(-0.07, 0.32, -0.28) : Qt.vector3d(-0.07, 0.15, -0.53)
+                                                      ? Qt.vector3d(-0.07, 0.36, -0.42) : Qt.vector3d(-0.07, 0.15, -0.53)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
@@ -1248,7 +1251,7 @@ Item {
                                                          || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
                                             geometry: UnitCube {}
                                             position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0.07, 0.32, -0.28) : Qt.vector3d(0.07, 0.15, -0.53)
+                                                      ? Qt.vector3d(0.07, 0.36, -0.42) : Qt.vector3d(0.07, 0.15, -0.53)
                                             scale: Qt.vector3d(0.035, 0.04, 0.02)
                                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                         }
