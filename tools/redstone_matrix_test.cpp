@@ -22422,6 +22422,146 @@ Item {
                              ;
     }
 
+    // ── P-t948 狼攻击仇恨转移（R19.17 🅲：狼主动咬敌对 → 被咬者转火攻击狼；t923 反击注册面核）──
+    //    通用 rig：44×44×96 局部世界（seed 26）整面凿平 —— y[85,95] 清 Air + y84 全铺 Stone（t947
+    //    同款；自带独立小世界不碰共享 nextSlot 分配器）。三腿各用独立 World/EntityManager 免态串扰。
+    //    (a) 行为腿·近战（Shambler）：驯服站狼 + 满血 20HP Shambler + 玩家位在僵尸侦测圈（kDetectRange
+    //        16）内（修复前被咬后仍追玩家的可复现口径）——setWolfTarget(僵尸) → 狼群追咬，首口落地
+    //        （hp<20，注册面前置）→ 仇恨转移行为证 = 狼掉血（僵尸近战 kAttackDamage=3 是本世界狼的
+    //        唯一伤害源；僵尸只有经仇恨分支才近战 mob）+ 双方贴身（dzw≤3.0 打斗带）。事件驱动双证齐
+    //        即停（防长窗互殴打死任何一方扰动断言）。
+    //    (b) 行为腿·远程（Bones）：驯服狼 + 满血骷髅弓手 —— 狼咬骷髅 → 骷髅转火**保持距离射击**狼：
+    //        箭命中狼掉血（kArrowDamage=2，狼 hp<10）。t712 滤网语义腿照绿：狼本就在骷髅箭 mob 结算
+    //        名单内（t923 扩），命中即 damageEntity + wolfRetaliateAgainst（源码钉在 t923(d) 既有）。
+    //        玩家远置（-1000）：骷髅箭不进玩家命中判定，侦测不到玩家 → 目标判别纯净。
+    //    (c) 阴性·被动无仇恨：setWolfTarget(猪) → 狼咬猪（猪掉血）但猪无仇恨系统不还手（狼满血恒 10
+    //        ——被动型入口门 no-op，逃跑链不受影响）。
+    //    (d) 源码钉：狼咬击点接单一注册入口 mobAggroAgainst(m_wolfTarget, idx) + 敌对近战消费点接
+    //        wolfRetaliateAgainst(aggroIdx, idx)（t923 反击面在转火近战路径的接线完整；t923(d) 源码钉
+    //        先例——逐帧弹道 / 打斗时序 headless 不稳的面锁接线文本）。
+    {
+        bool ok = true;
+        QString diag;
+        auto flatRig948 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        auto tamedWolfAt948 = [](EntityManager &em, int x, int z) -> int {
+            const int wolf = em.spawnMobTyped(x, 85, z, EntityManager::MobWolf,
+                                              QStringLiteral("#c8ccd4"), 10);
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && wolf >= 0 && !tamed; ++attempt)
+                tamed = em.tameWolf(wolf);
+            return tamed ? wolf : -1;
+        };
+        auto distXZTo948 = [](const QVector3D &p, const QVector3D &q) {
+            return QVector3D(p.x() - q.x(), 0.0f, p.z() - q.z()).length();
+        };
+        // (a) 近战转火（Shambler 咬回驯服狼 = 仇恨转移行为证）。
+        {
+            World wa; flatRig948(wa);
+            EntityManager ema;
+            const int wolf = tamedWolfAt948(ema, 16, 22);
+            const int zombie = ema.spawnMobTyped(12, 85, 12, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20);
+            // 玩家放僵尸侦测圈内（(12,12)→(22.5,22.5) 距 14.9 < 16）：修复前僵尸被咬后仍追玩家；
+            //   修复后转火追狼。玩家位仅作「另一可选目标」存在，断言读狼掉血（判别充分且 RNG 无关）。
+            const QVector3D player(22.5f, 85.0f, 22.5f);
+            ok = ok && wolf >= 0 && zombie >= 0;
+            if (wolf >= 0 && zombie >= 0) {
+                ema.setWolfTarget(zombie); // 主人标记 → 狼群追咬（t480 setWolfTarget 单一入口）
+                bool bitten = false, fought = false;
+                for (int t = 0; t < 1500 && !(bitten && fought); ++t) { // 24s 帽，事件驱动
+                    ema.tick(0.016f, &wa, player, 0.3f, 1.8f, true, false);
+                    if (ema.healthAt(zombie) < 20) bitten = true; // 狼首口落地（注册面前置证据）
+                    if (ema.healthAt(wolf) < 10) fought = true;   // 僵尸还手（仇恨转移 = 本任务断言）
+                }
+                const float dzw = distXZTo948(ema.posAt(zombie), ema.posAt(wolf));
+                ok = ok && bitten && fought && dzw <= 3.0f;
+                if (!(bitten && fought && dzw <= 3.0f))
+                    diag += QStringLiteral("a bitten=%1 fought=%2 dzw=%3 whp=%4 zhp=%5 ")
+                                .arg(int(bitten)).arg(int(fought)).arg(dzw)
+                                .arg(ema.healthAt(wolf)).arg(ema.healthAt(zombie));
+            } else diag += QStringLiteral("a spawn/tame failed ");
+        }
+        // (b) 远程转火（Bones 被咬 → 保持距离射击狼；t712 滤网语义腿照绿）。
+        {
+            World wb; flatRig948(wb);
+            EntityManager emb;
+            const int wolf = tamedWolfAt948(emb, 30, 12);
+            const int bones = emb.spawnMobTyped(24, 85, 12, EntityManager::MobBones,
+                                                QStringLiteral("#d8d8e0"), 20);
+            const QVector3D far(-1000.0f, 90.0f, -1000.0f); // 玩家远 → 侦测不到，箭不进玩家判定
+            ok = ok && wolf >= 0 && bones >= 0;
+            if (wolf >= 0 && bones >= 0) {
+                emb.setWolfTarget(bones); // 狼群追咬骷髅 → 首口落地注册仇恨
+                bool bitten = false, shot = false;
+                for (int t = 0; t < 2000 && !(bitten && shot); ++t) { // 32s 帽：拉弓 0.5s + 冷却 2.5s
+                    emb.tick(0.016f, &wb, far, 0.3f, 1.8f, true, false);
+                    if (emb.healthAt(bones) < 20) bitten = true;
+                    if (emb.healthAt(wolf) < 10) shot = true; // 箭命中狼（kArrowDamage=2）= 转火射击证
+                }
+                ok = ok && bitten && shot;
+                if (!(bitten && shot))
+                    diag += QStringLiteral("b bitten=%1 shot=%2 whp=%3 bhp=%4 ")
+                                .arg(int(bitten)).arg(int(shot))
+                                .arg(emb.healthAt(wolf)).arg(emb.healthAt(bones));
+            } else diag += QStringLiteral("b spawn/tame failed ");
+        }
+        // (c) 阴性·被动无仇恨（猪被咬不还手，狼满血恒 10）。
+        {
+            World wc; flatRig948(wc);
+            EntityManager emc;
+            const int wolf = tamedWolfAt948(emc, 16, 30);
+            const int pig = emc.spawnMobTyped(20, 85, 30, EntityManager::MobPig,
+                                              QStringLiteral("#e8a0a0"), 10);
+            const QVector3D far(-1000.0f, 90.0f, -1000.0f);
+            ok = ok && wolf >= 0 && pig >= 0;
+            if (wolf >= 0 && pig >= 0) {
+                emc.setWolfTarget(pig);
+                bool bitten = false;
+                for (int t = 0; t < 1000 && !bitten; ++t) { // 16s 帽：狼咬到猪即止
+                    emc.tick(0.016f, &wc, far, 0.3f, 1.8f, true, false);
+                    if (emc.healthAt(pig) < 10) bitten = true;
+                }
+                ok = ok && bitten && emc.healthAt(wolf) == 10; // 猪从不还手（无仇恨系统）
+                if (!(bitten && emc.healthAt(wolf) == 10))
+                    diag += QStringLiteral("c bitten=%1 whp=%2 ")
+                                .arg(int(bitten)).arg(emc.healthAt(wolf));
+            } else diag += QStringLiteral("c spawn/tame failed ");
+        }
+        // (d) 源码钉：咬击点单一注册入口 + 敌对近战消费点反击接线。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile ef(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+            const QString t = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
+            const bool pinReg = t.contains(QStringLiteral("mobAggroAgainst(m_wolfTarget, idx)"));
+            const bool pinRet = t.contains(QStringLiteral("wolfRetaliateAgainst(aggroIdx, idx)"));
+            ok = ok && pinReg && pinRet;
+            if (!pinReg || !pinRet)
+                diag += QStringLiteral("d pinReg=%1 pinRet=%2 ").arg(int(pinReg)).arg(int(pinRet));
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t948 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t948 wolf-bite aggro transfer: the bitten hostile turns on the biting"
+                             " wolf -- a shambler (with the player inside its detect band) counter-"
+                             "melees the wolf that bit it (wolf hp drop = zombie melee is the only"
+                             " damage source and only the revenge branch melee-hits mobs), a bones"
+                             " archer keeps distance and shoots the wolf (arrows settle on the wolf"
+                             " via the existing t712/t923 filter, semantics intact), a bitten pig"
+                             " (passive, no aggro system) never fights back (wolf stays full HP),"
+                             " and both wiring sites are source-pinned (bite -> mobAggroAgainst,"
+                             " melee consumer -> wolfRetaliateAgainst)"
+                             ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
