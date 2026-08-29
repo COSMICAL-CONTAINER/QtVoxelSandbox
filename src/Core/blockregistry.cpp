@@ -1832,6 +1832,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     //   机制等价 MC 画选中框贴画面）。ShapeNone → shapeBoxes 空，此处特例给形状。
     if (blockId == Painting)
         return raycastAABBs(blockId, state);
+    // t938 铁轨族选中框贴薄板（同 Painting 先例——ShapeNone → shapeBoxes 空，轨原先选中框 / 裂纹叠层恒无
+    //   形状）：选体已整格化（raycast.cpp HitRail 特判，轨格全高可选），选中框 / 挖掘裂纹贴**实际轨形**
+    //   2/16 贴地薄板（与 raycastAABBs 同盒同源）——准星落在轨格即给出「瞄的是这条轨」的反馈，框体贴
+    //   轨视觉非满格黑边（同栅栏 t801 / 铁砧 t849「选中框贴实际形状」口径）。
+    if (isRail(blockId))
+        return raycastAABBs(blockId, state);
     return shapeBoxes(def(blockId).shape, state);
 }
 
@@ -2029,10 +2035,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
         if (isRail(blockId)) {
             // t638 铁轨族薄板命中盒（spec「选下一格很难选到——铁轨薄板被选中优先级太高，应像木梯 t501
             //   透视不优先选中」）：mesher 画水平 quad 贴 cell 底（y=1/16，见 PartialBlockGeometry Rail
-            //   case 的 yr），射线须命中该薄板才算选中铁轨——瞄轨格上方空气（y>1/16）的射线穿过命中后方
-            //   方块（可选中铺轨地面 / 轨后目标；机制对标木梯贴墙薄板模式）。全格 footprint（xz [0,1]）——
-            //   轨横铺整格，只做垂直薄板化（上方穿、贴轨面命中）。防呆带 +1/16 容差（视觉 quad 厚 0，加
-            //   容差使准星贴地平扫微偏亦命中，可拆轨）。
+            //   case 的 yr）。**t938 口径翻转（消费者分工）**：本盒不再服务选体——选体射线（HitRail，
+            //   raycast.cpp fullCell 特判）对轨格整格命中（轨格全高可选，修「挖轨变挖后面 / 放矿车不便」；
+            //   用户第五轮实测 overrule t638③ 的轨格内透视，轨**上方**空域仍透视）。本盒继续服务：
+            //   (a) 相机距离（HitPartial）—— 轨无碰撞，相机只被 2/16 薄板实体段钳制（t605 语义零改动）；
+            //   (b) 起点嵌轨格的 sub-AABB 分流（玩家眼位 1.62 实际不可达，兜底路径）。全格 footprint
+            //   （xz [0,1]）—— 轨横铺整格，只做垂直薄板化。防呆带 +1/16 容差（视觉 quad 厚 0）。
             constexpr float kRailTop = 2.0f / 16.0f; // 薄板顶（视觉 1/16 + 1/16 容差）
             return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kRailTop, 1.0f}};
         }

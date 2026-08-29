@@ -47,6 +47,14 @@ struct RayHit
 //   - 默认（filter=0，RayFilter::Default）：Torch / Water / Ladder 均穿过 —— 基础语义（t40 相机旧用；t605 起
 //     相机改传 HitPartial 以获得 sub-AABB 精度，Default 保留作 filter 缺省值 / 最简阻挡谓词）：
 //     Torch / Water / Ladder 皆 non-solid（玩家可走过 / 游过 / 穿入梯格）。
+//   - HitRail（t938）：铁轨族（Rail / GoldenRail / DetectorRail，isRail 单一权威）**整格命中** —— 选体模式下
+//     轨格全高可选（进格即中，法线 = 进格面）。修用户第五轮实测「raycast 穿过铁轨选中后面方块——挖铁轨变挖
+//     后面、放矿车不便」：t638③ 的贴地薄板命中盒（raycastAABBs 2/16）只覆盖轨格底部细条，瞄准轨格中上部
+//     （轨格 15/16 高的空气段）的射线全部穿到后格——轨的屏幕可点击区域只剩贴地一线，实际不可选。整格化后：
+//     穿**轨格** → 命中轨（挖轨 / 手持矿车右键上轨直达）；穿轨**上方空域**（轨格上一格）→ 照旧命中后方
+//     （t638③「透视不优先」经上方空域路径保留——要选轨后目标须从轨格上方越过）。**仅选体模式**：相机距离
+//     （HitPartial）不设本位，铁轨族维持薄板 sub-AABB（轨无碰撞，相机不应被拉近视距，t605 语义零改动）；
+//     桶 / 钓竿（HitWater/HitLava 非精确模式）对轨本就整格阻挡（preciseMode=false），行为不变。
 namespace RayFilter {
     constexpr unsigned Default  = 0u;                  // Torch / Water / Ladder 均穿过（基础语义；filter 缺省值）
     constexpr unsigned HitTorch = 1u << 0;             // Torch 挡射线（选体 t184：火把可选中 / 直挖）
@@ -54,12 +62,14 @@ namespace RayFilter {
     constexpr unsigned HitLava  = 1u << 2;             // Lava 挡射线（铁桶舀岩浆 t343）
     constexpr unsigned HitLadder = 1u << 3;            // Ladder 挡射线（选体 t501：木梯可选中 / 直拆；同 HitTorch 模式）
     constexpr unsigned HitPartial = 1u << 4;           // 不完整方块 sub-AABB 精确命中（相机距离 t605；同选体几何）
+    constexpr unsigned HitRail  = 1u << 5;             // 铁轨族整格命中（选体 t938：轨格全高可选中；相机不设本位仍薄板）
 } // namespace RayFilter
 
 // 从 origin 沿 dir（无需归一化，内部归一）步进，maxDist 内返回首个「该 filter 视为阻挡」的方块命中。
-//   选体（updateRaycast）传 RayFilter::HitTorch|HitLadder（火把 / 木梯命中、水穿过）；相机距离（updateCameraDistance）
-//   传 RayFilter::HitPartial（t605：不完整方块 sub-AABB 精确命中、火把 / 水 / 木梯均穿过）；铁桶舀水传
-//   RayFilter::HitWater（命中首个水格）。详见 .cpp blocksRay / 起点退化注释。
+//   选体（updateRaycast）传 RayFilter::HitTorch|HitLadder|HitRail（火把 / 木梯命中、水穿过、铁轨族整格 t938）；
+//   相机距离（updateCameraDistance）传 RayFilter::HitPartial（t605：不完整方块 sub-AABB 精确命中、火把 / 水 /
+//   木梯均穿过、铁轨族保持 t638③ 贴地薄板——相机不被无碰撞的轨拉近视距）；铁桶舀水传 RayFilter::HitWater
+//   （命中首个水格）。详见 .cpp blocksRay / 起点退化注释。
 RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float maxDist, unsigned filter = RayFilter::Default);
 
 #endif // RAYCAST_H

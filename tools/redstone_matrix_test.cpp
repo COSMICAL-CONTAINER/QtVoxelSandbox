@@ -54,6 +54,7 @@
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
 #include "frameprofiler.h"        // t933 跨世界泄漏探针（reflood 计数快照差分；Core 叶子直编）
 #include "playercontroller.h"     // t814 真消费端探针（Game 层 PlayerController 直编：firePowerTnt/fireDispenserAtQml）
+#include "raycast.h"              // t938 铁轨可选中探针（选体射线直调：HitRail 整格命中 / HitPartial 相机零回归）
 #include "worldclock.h"           // t889 暂停语义探针（WorldClock.running 停表行为级 + 源码钉）
 #include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）；t858 feeder 探针共用
 #include "xporbinstancing.h"      // t858 经验球 instancing 试点探针（feeder 实例表内容级断言）
@@ -20370,6 +20371,194 @@ Item {
                              "removal darkens the chain, (d) source pins for the connection gate, "
                              "narrowed predicate, reverse-walk consumption, write-set merge, and the "
                              "counter accessor"
+                          ;
+    }
+
+    // ── P-t938 铁轨可选中探针（选体射线直调；spec「鼠标 raycast 穿过铁轨选中后面方块——挖铁轨变挖后面、
+    //   放矿车不便」）──
+    //   根因：t638③ 给铁轨族的选体命中盒是 2/16 贴地薄板（raycastAABBs）→ 瞄轨格中上部（薄板上方 14/16
+    //   空气段）的射线全部穿到后格，轨的屏幕可点击区域只剩贴地一线 = 实际不可选。修法：选体模式新增
+    //   RayFilter::HitRail（updateRaycast 传 HitTorch|HitLadder|HitRail）→ raycast.cpp fullCell 特判对
+    //   isRail 族整格命中（轨格全高可选；四消费者铁律——只动射线命中，isFullCube/collision/selection 不动）。
+    //   透视语义分工：穿**轨格** → 命中轨；穿轨**上方空域**（轨格上一格）→ 照旧命中后方（t638③ 经上方路径
+    //   保留）；相机（HitPartial）不设 HitRail → 轨仍是薄板 sub-AABB（轨无碰撞不拉近视距，t605 零回归）。
+    //   腿：(a) 浅俯角穿轨格→后墙场景命中=轨格+法线=进格面+命中点在轨格内（阴性即用户症状：旧行为命中墙）；
+    //       (b) 陡俯角直瞄轨心（修前薄板已可中的路径，回归钉）；(c) 穿轨上方空域 → 命中后墙非轨（透视保留）；
+    //       (d) isRail 家族三 id 同为整格；(e) 相机模式同射线仍穿轨命中墙（相机零回归钉）；
+    //       (f) 放置回归：选轨时命中面邻格放置（placeBlock 通用推导 tx=hit+normal）目标格≠轨格且为 Air、
+    //           放置后轨格 id 不变 + 轨格自身不满足任何放置预检（Air/水/岩浆，轨不可替换）；
+    //       (g) 源码钉：HitRail 位 + fullCell 特判 + updateRaycast 过滤器 + selectionAABBs 轨薄板分支 +
+    //           矿车放置分支（isRail 命中即轨上放车，非 setBlock 写格）+ 放置预检行。
+    {
+        // rig 选址：运行期扫描空区（lessons t769）。footprint x0-1..x0+5 × z0-1..z0+1 × y kRigY-1..kRigY+3。
+        const auto scanRig938 = [&]() {
+            int rx = -1, rz = -1;
+            for (int zz = 3; zz < 94 && rx < 0; zz += 2)
+                for (int xx = 4; xx + 5 < 96 && rx < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -1; dx <= 5 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -1; dy <= 3 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { rx = xx; rz = zz; }
+                }
+            return QPair<int, int>(rx, rz);
+        };
+        // 选体过滤器（镜像 updateRaycast t938 后的实参）与相机过滤器。
+        const unsigned kSel938 = RayFilter::HitTorch | RayFilter::HitLadder | RayFilter::HitRail;
+        const int kSelReach = 8; // 探针射程（与 kReach 解耦——测的是几何语义非触达）
+        bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
+        const auto [x0, z0] = scanRig938();
+        if (x0 < 0) {
+            qInfo().noquote() << "  [t938 diag] no clear rig area found";
+        } else {
+            const float zc = float(z0) + 0.5f; // rig 中轴（列中心）
+            // 场景：轨格 (x0+2,kRigY,z0) + 后墙石柱 (x0+4, kRigY..kRigY+2)（轨后 2 格的「后格」实体）。
+            for (int dy = 0; dy <= 2; ++dy) placeRigBlock(w, x0 + 4, kRigY + dy, z0, BR::Stone, 0);
+            placeRigBlock(w, x0 + 2, kRigY, z0, BR::Rail, 0);
+            // (a) 浅俯角穿轨格 → 后墙（用户症状场景）：眼位 (x0-0.5, kRigY+1.62)（玩家站高），视线过轨格中心
+            //     高度 y_frac 0.60 —— 轨格内段 y_frac 0.77→0.43（全程在 2/16 薄板上方 = 旧版必穿），
+            //     延长线入墙格 (x0+4,kRigY) y_frac 0.09。修后：命中轨格、法线 -X（-X 面进格）、命中点在轨格内。
+            const QVector3D oA(x0 - 0.5f, kRigY + 1.62f, zc);
+            const QVector3D dA(3.0f, -1.02f, 0.0f);
+            const RayHit hA = raycastVoxel(w, oA, dA, kSelReach, kSel938);
+            const float hitY_A = hA.valid ? oA.y() + dA.normalized().y() * hA.dist : -999.0f;
+            okA = hA.valid && hA.bx == x0 + 2 && hA.by == kRigY && hA.bz == z0
+                  && hA.nx == -1.0f && hA.ny == 0.0f && hA.nz == 0.0f
+                  && hitY_A > float(kRigY) && hitY_A < float(kRigY) + 1.0f;
+            if (!okA)
+                qInfo().noquote() << "  [t938 diag] a" << hA.valid << hA.bx << hA.by << hA.bz
+                                  << "n" << hA.nx << hA.ny << hA.nz << "hitY" << hitY_A;
+            // (b) 陡俯角直瞄轨心（修前薄板已可中的路径——回归钉）：垂直下视线入轨格顶面 → 命中轨、法线 +Y。
+            const RayHit hB = raycastVoxel(w, QVector3D(x0 + 2.5f, kRigY + 3.0f, zc),
+                                           QVector3D(0.0f, -1.0f, 0.0f), kSelReach, kSel938);
+            okB = hB.valid && hB.bx == x0 + 2 && hB.by == kRigY && hB.bz == z0
+                  && hB.nx == 0.0f && hB.ny == 1.0f && hB.nz == 0.0f;
+            if (!okB)
+                qInfo().noquote() << "  [t938 diag] b" << hB.valid << hB.bx << hB.by << hB.bz
+                                  << "n" << hB.nx << hB.ny << hB.nz;
+            // (c) 穿轨上方空域（轨格上一格，y_frac ~0.3..0.9 段）→ 命中后墙高位格而非轨（t638③ 透视经上方
+            //     路径保留）：视线全程 y>kRigY+1 直到入墙格 (x0+4,kRigY+1)。
+            const QVector3D oC(x0 - 0.5f, kRigY + 2.62f, zc);
+            const QVector3D dC(3.0f, -0.90f, 0.0f);
+            const RayHit hC = raycastVoxel(w, oC, dC, kSelReach, kSel938);
+            okC = hC.valid && hC.bx == x0 + 4 && hC.by == kRigY + 1 && hC.bz == z0;
+            if (!okC)
+                qInfo().noquote() << "  [t938 diag] c" << hC.valid << hC.bx << hC.by << hC.bz;
+            // (d) isRail 家族：动力轨 / 探测轨替换同格，同一 (a) 射线 → 同样整格命中（三 id 单一谓词覆盖）。
+            bool famGolden = false, famDetector = false;
+            placeRigBlock(w, x0 + 2, kRigY, z0, BR::GoldenRail, 0);
+            const RayHit hD1 = raycastVoxel(w, oA, dA, kSelReach, kSel938);
+            famGolden = hD1.valid && hD1.bx == x0 + 2 && hD1.by == kRigY && hD1.bz == z0;
+            placeRigBlock(w, x0 + 2, kRigY, z0, BR::DetectorRail, 0);
+            const RayHit hD2 = raycastVoxel(w, oA, dA, kSelReach, kSel938);
+            famDetector = hD2.valid && hD2.bx == x0 + 2 && hD2.by == kRigY && hD2.bz == z0;
+            placeRigBlock(w, x0 + 2, kRigY, z0, BR::Rail, 0); // 还原普通轨（后续腿用）
+            okD = famGolden && famDetector;
+            if (!okD)
+                qInfo().noquote() << "  [t938 diag] d golden" << famGolden << "detector" << famDetector;
+            // (e) 相机模式零回归：同一 (a) 射线改走 HitPartial（updateCameraDistance 过滤器）→ 轨回薄板
+            //     sub-AABB（y_frac 0.77→0.43 段无实体）→ 穿轨命中后墙（= 修前选体行为，相机语义不变）。
+            const RayHit hE = raycastVoxel(w, oA, dA, kSelReach, RayFilter::HitPartial);
+            okE = hE.valid && hE.bx == x0 + 4 && hE.by == kRigY && hE.bz == z0;
+            if (!okE)
+                qInfo().noquote() << "  [t938 diag] e" << hE.valid << hE.bx << hE.by << hE.bz;
+            // (f) 放置回归（placeBlock 通用推导 tx=hit+normal 的行为级镜像 + 预检复现）：
+            //     f1 选轨（a 命中，法线 -X）→ 邻格 (x0+1,kRigY) ≠ 轨格且为 Air → 预检过 → 放石 → 轨格仍是 Rail；
+            //     f2 选轨（b 命中，法线 +Y）→ 邻格 = 轨格正上（Air 可放，块放轨上方不毁轨）；
+            //     f3 轨格自身：id 非 Air/Water/Lava → 任何「目标须空气/流体」放置预检都拒绝写入轨格（轨不可替换）。
+            const int tX = hA.bx + int(hA.nx), tY = hA.by + int(hA.ny), tZ = hA.bz + int(hA.nz);
+            const bool f1Cell = (tX == x0 + 1 && tY == kRigY && tZ == z0);
+            const quint8 tgt1 = w.blockAt(tX, tY, tZ);
+            const bool f1Pre = (tgt1 == BR::Air); // 玻璃/方块放置预检：目标须空气（或流体）
+            if (f1Cell && f1Pre) { w.setBlock(tX, tY, tZ, BR::Stone, 0); }
+            const bool f1RailIntact = w.blockAt(x0 + 2, kRigY, z0) == BR::Rail;
+            if (f1Cell && f1Pre) { w.setBlock(tX, tY, tZ, BR::Air, 0); } // 清理
+            const int uX = hB.bx + int(hB.nx), uY = hB.by + int(hB.ny), uZ = hB.bz + int(hB.nz);
+            const bool f2Cell = (uX == x0 + 2 && uY == kRigY + 1 && uZ == z0)
+                                && w.blockAt(uX, uY, uZ) == BR::Air;
+            const quint8 railId938 = w.blockAt(x0 + 2, kRigY, z0);
+            const bool f3NotReplaceable = (railId938 != BR::Air && railId938 != BR::Water
+                                           && railId938 != BR::Lava);
+            okF = f1Cell && f1Pre && f1RailIntact && f2Cell && f3NotReplaceable;
+            if (!okF)
+                qInfo().noquote() << "  [t938 diag] f" << f1Cell << f1Pre << f1RailIntact
+                                  << f2Cell << f3NotReplaceable;
+            // 清理（还原空区 + 沉降红石脏标记——动力/探测轨替换走慢路径重算）。
+            for (int dy = 0; dy <= 2; ++dy) w.setBlock(x0 + 4, kRigY + dy, z0, BR::Air, 0);
+            w.setBlock(x0 + 2, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (g) 源码钉（t935/t936 模式：字符串钉——位定义 / fullCell 特判 / updateRaycast 过滤器 / 选中框
+        //     薄板分支 / 矿车放置分支 / 放置预检行，任一消失即红）。
+        const QString exeDir938 = QCoreApplication::applicationDirPath();
+        const QString root938 = QDir(exeDir938 + QStringLiteral("/..")).absolutePath();
+        auto readSrc938 = [&root938](const QString &rel) -> QString {
+            QFile f(root938 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString rh938 = readSrc938(QStringLiteral("src/Game/raycast.h"));
+        const QString rc938 = readSrc938(QStringLiteral("src/Game/raycast.cpp"));
+        const QString pc938 = readSrc938(QStringLiteral("src/Game/playercontroller.cpp"));
+        const QString br938 = readSrc938(QStringLiteral("src/Core/blockregistry.cpp"));
+        const bool okG1 = rh938.contains(QStringLiteral("constexpr unsigned HitRail  = 1u << 5;"));
+        const bool okG2 = rc938.contains(
+            QStringLiteral("|| ((filter & RayFilter::HitRail) && BlockRegistry::isRail(b));"));
+        const bool okG3 = pc938.contains(
+            QStringLiteral("RayFilter::HitTorch | RayFilter::HitLadder | RayFilter::HitRail);"));
+        const bool okG4 = br938.contains(QStringLiteral("    if (isRail(blockId))\n        return raycastAABBs(blockId, state);"));
+        const bool okG5 = pc938.contains(QStringLiteral("bool ok = BlockRegistry::isRail(m_world->blockAt(cx, cy, cz));"))
+                       && pc938.contains(QStringLiteral("m_minecartManager->spawnCart(cx, cy, cz, m_world);"));
+        const bool okG6 = pc938.contains(QStringLiteral("if (tgt == BlockRegistry::Air || tgt == BlockRegistry::Water || tgt == BlockRegistry::Lava) {"));
+        const bool okT938 = okA && okB && okC && okD && okE && okF
+                            && okG1 && okG2 && okG3 && okG4 && okG5 && okG6;
+        if (!okT938) ++totalFail;
+        if (!okT938)
+            qInfo().noquote() << "  [t938 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "e" << okE << "f" << okF
+                              << "| g" << okG1 << okG2 << okG3 << okG4 << okG5 << okG6
+                              << "| srcLen h" << rh938.size() << "c" << rc938.size()
+                              << "p" << pc938.size() << "b" << br938.size();
+        qInfo().noquote() << (okT938 ? "PASS" : "FAIL")
+                          << "| t938 rails are selectable by the pick ray: rails used to be "
+                             "practically unclickable - their t638 pick box is a 2/16 ground-hugging "
+                             "plate, so any ray through the upper 14/16 air band of the rail cell "
+                             "passed straight through and selected the block behind (user report: "
+                             "digging at a rail dug the block behind it, and holding a minecart "
+                             "could not target the rail to place a cart on it - the on-rail "
+                             "placement branch keys off the picked cell being isRail). Fix adds a "
+                             "selection-only RayFilter::HitRail bit (updateRaycast now passes "
+                             "HitTorch|HitLadder|HitRail) and a raycast.cpp fullCell special case "
+                             "for the isRail family: in pick mode the rail CELL is hit at entry "
+                             "(full height clickable, normal = entry face), while every other "
+                             "consumer keeps its own semantics per the four-consumer iron law - "
+                             "camera distance (HitPartial, no HitRail bit) still tests the 2/16 "
+                             "thin plate so the collision-less rail never pulls the third-person "
+                             "camera close (t605 unchanged), buckets/fishing (non-precise modes) "
+                             "were already full-cell and are unchanged, isFullCube/collision/"
+                             "selectionAABBs untouched; see-through is preserved one cell higher: "
+                             "rays through the air cell ABOVE the rail still reach the block behind "
+                             "(t638 see-through survives via the above-cell path - the round-3 "
+                             "'could not pick the cell behind' complaint stays fixed by aiming over "
+                             "the rails); the selection wireframe and mining crack overlay now get "
+                             "a thin-plate shape via a selectionAABBs rail branch (was empty = no "
+                             "outline at all), hugging the visual rail instead of a full-cell box. "
+                             "Probe legs: (a) shallow ray through the rail cell toward a wall 2 "
+                             "behind hits the RAIL cell with -X entry normal and hit point inside "
+                             "the cell (old behavior reproduced the bug by hitting the wall), (b) "
+                             "steep ray at the rail center still hits the rail (pre-fix plate path, "
+                             "regression guard), (c) ray through the air cell above the rail hits "
+                             "the wall behind, not the rail (see-through preserved), (d) golden and "
+                             "detector rails behave identically (isRail family), (e) the SAME ray "
+                             "as (a) under the camera filter HitPartial still passes the rail and "
+                             "hits the wall (camera zero-regression pin), (f) placement regression: "
+                             "the universal hit+normal target cell is never the rail cell, is air, "
+                             "writing a stone there leaves the rail id intact, and the rail cell "
+                             "itself fails every air/fluid-only placement precheck (rails are not "
+                             "replaceable), (g) source pins for the HitRail bit, the fullCell "
+                             "special case, the updateRaycast filter, the selectionAABBs thin-plate "
+                             "branch, the minecart on-rail placement branch, and the placement "
+                             "precheck line"
                           ;
     }
 
