@@ -297,6 +297,27 @@ Item {
         root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
     }
 
+    // t956 创造中键复制一整组到光标（t896 链补口 —— 用户实测「创造中键复制在附魔台 / 铁砧不管用了」：
+    //   t653①/t896 只落在 Inventory 面板，本两面板槽交互面只有左/右两个 TapHandler，中键分支整个缺席）。
+    //   口径逐字对齐 Inventory.qml copyStackToCursor（单一权威，勿另发明）：
+    //   - 空槽（id===0）/ count<=0 → no-op（复制「槽内实有物品」；预览类非实有格不进本函数）；
+    //   - 复制数量 = maxStackSize(id) **整组**（t896 数量权威：方块/材料 64、工具/桶/护甲/书 1），非源槽
+    //     当前数量（旧 min(count,max) 的「2变4 翻倍」回归红线）；
+    //   - 实例元数据（耐久 / 附魔 / 名）随实例复制保真；enchants 经 list4 归一（t874：C++ 序列对象
+    //     Array.isArray 恒 false，旧守卫会把中键复制的附魔静默清白板）；
+    //   - 旧光标手持直接覆盖 = 创造「归还虚空」同效（Inventory 面板经 returnHeldToVoidRequested 信号链
+    //     归零后再赋新值，净效果与本处直赋一致；本面板无该信号线，语义不缺）。
+    //   创造门（t288 中键 pick 仅创造语义）：各中键 TapHandler enabled: root.creativeMode —— 非创造不响应。
+    function copyStackToCursor(id, count, durability, enchants, name) {
+        if (!root.hotbar || id === 0 || count <= 0) return
+        root.hotbar.heldBlock = id
+        root.hotbar.heldCount = root.hotbar.maxStackSize(id)
+        root.hotbar.heldDurability = (durability > 0) ? durability : 0
+        const e = InventoryOps.list4(enchants)
+        root.hotbar.setHeldEnchants(e)
+        root.hotbar.heldCustomName = (typeof name === "string") ? name : ""
+    }
+
     // t549 附魔台 Shift+左键双向语义（spec「拿镐子按 shift+左键应把工具直接放进附魔台输入槽」）：
     //   仿 slotShiftLeftChest / slotShiftLeftFurnace 模式（面板专属 dispatch，全组覆盖不回退）：
     //   - main/hotbar 可附魔物（itemEnchantCategory != None 且尚未附魔）→ 整件入槽 0（耐久随实例保真；
@@ -936,6 +957,15 @@ Item {
                         }
                         TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("main", index) }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("main", index) }
+                        // t956 中键 = 复制该槽一整组到光标（t896 链补口；创造门内，源槽不动）。VM 直读
+                        //   （Q_INVOKABLE 恒最新，同 Inventory.qml t498 模式），不依赖 delegate 绑定快照。
+                        TapHandler {
+                            acceptedButtons: Qt.MiddleButton
+                            enabled: root.creativeMode
+                            onTapped: root.copyStackToCursor(root.hotbar.mainBlockIdAt(index), root.hotbar.mainCountAt(index),
+                                                              root.hotbar.mainDurabilityAt(index), root.hotbar.mainEnchantsAt(index),
+                                                              root.hotbar.mainCustomNameAt(index))
+                        }
                         HoverHandler {
                             // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
                             // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
@@ -1044,6 +1074,15 @@ Item {
                             }
                             TapHandler { acceptedButtons: Qt.LeftButton;  onTapped: root.slotLeft("hotbar", index) }
                             TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.slotRight("hotbar", index) }
+                            // t956 中键 = 复制该槽一整组到光标（t896 链补口；创造门内）。VM 直读，与
+                            //   Inventory.qml hotbar 行 t653① 落点同款（五读数 Q_INVOKABLE 恒最新）。
+                            TapHandler {
+                                acceptedButtons: Qt.MiddleButton
+                                enabled: root.creativeMode
+                                onTapped: root.copyStackToCursor(root.hotbar.blockIdAt(index), root.hotbar.countAt(index),
+                                                                  root.hotbar.durabilityAt(index), root.hotbar.enchantsAt(index),
+                                                                  root.hotbar.customNameAt(index))
+                            }
                             HoverHandler {
                                 // t99：跟踪槽显示 id。槽被丢弃/拾取/互换后变空时 hover 仍 true → onHoveredChanged
                                 // 不重发 → tooltip 残留旧名。变空时主动清 hoveredItemId（spec 修法 a）。
@@ -1249,6 +1288,17 @@ Item {
                 root.hotbar.heldDurability = r.heldDur
                 root.hotbar.setHeldEnchants(r.heldEnch)
                 root.hotbar.heldCustomName = r.heldName   // t622 实例名随光标保真
+            }
+        }
+        // t956 中键 = 复制该槽一整组到光标（t896 链补口；创造门内，源槽不动、元数据保真）。
+        //   集中落点：本组件一处改，武器/工具槽（index 0）与青金石槽（index 1）两实例同时生效。
+        //   t699 同款：readSlot 直读本地数组（绑定属性快照在同信号级联内可能 stale）。
+        TapHandler {
+            acceptedButtons: Qt.MiddleButton
+            enabled: root.creativeMode
+            onTapped: {
+                const cur = InventoryOps.readSlot(root, eslot.group, eslot.index)
+                root.copyStackToCursor(cur.id, cur.count, cur.durability, cur.enchants, cur.name)
             }
         }
         HoverHandler {
