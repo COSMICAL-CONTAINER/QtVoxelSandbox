@@ -632,6 +632,15 @@ public:
     //   攻击怪物，aiOcelot 无防御分支）。爆炸伤狼不注册（Stalker 当帧自毁无活体可反击）。越界 / 非驯服狼 /
     //   攻击者非活体 → 静默 no-op。
     void wolfRetaliateAgainst(int victimIdx, int attackerIdx);
+    // t948 敌对 mob 仇恨注册**单一入口**（狼主动咬击命中处调；wolfRetaliateAgainst 的反向互补面 —— t923
+    //   反击注册面核：狼**主动攻击**也要注册被咬者对狼的仇恨，不只狼被打了才反击）。机制等价 MC 1.0
+    //   revenge target：生物被活体 mob 打伤 → 仇恨目标记为攻击者。受害者门：仅带仇恨 AI 的敌对型
+    //   {Shambler / Spider / Silverfish（同落 aiHostile else 分发）/ Bones}——Stalker（spec 只锁玩家不对
+    //   生物自爆，t712 同界）/ Nightwalker、Emberling（独立 AI）/ 被动七型（无仇恨系统，逃跑链不受影响）
+    //   → 静默 no-op；攻击者门：活体 mob。slot+serial 双快照写入受害者 aggroIdx/aggroSerial（消费侧
+    //   resolveAggroTarget 校验），aiHostile / aiArcher 下个 AI tick 起转火追咬 / 转火射击本狼。重复注册
+    //   覆盖旧仇恨（最新攻击者优先，MC revenge target 同语义）。越界 / 死者 → 静默 no-op。
+    void mobAggroAgainst(int victimIdx, int attackerIdx);
     // t239 mob 血量 / 受击 / 死亡态（呈现层心条 / 红闪 / 死亡动画；t242 攻击 HUD 读）：
     //   healthAt / maxHealthAt = 当前 / 上限血量（供心条 / 攻击反馈）；deadAt = 死亡态（QML 播死亡动画）；
     //   hurtFlashAt = 受击红闪剩余比 0..1（>0 → QML baseColor 红，机制等价 MC mob 受击 10 tick 红闪）。
@@ -1480,6 +1489,15 @@ private:
         int rideCart = -1;     // 乘坐的矿车槽索引（-1 = 未乘；仅 Mob 用）
         int rideBoat = -1;     // 乘坐的船槽索引（-1 = 未乘；仅 Mob 用）
         int rideBoatSeat = 0;  // 船座位号 0/1（仅 rideBoat>=0 时读；登乘时分配）
+        // t948 敌对 mob 仇恨目标（slot+serial 双快照；同 bobberHookedIdx/Serial 槽复用防线先例）：
+        //   mobAggroAgainst（狼主动咬击命中处调，t923 wolfRetaliateAgainst 的反向互补面）注册「被咬者 →
+        //   咬它的驯服狼」——aiHostile / aiArcher 每 AI tick 经 resolveAggroTarget 校验消费：死亡 / 槽复用
+        //   （spawnSerial ≠ 快照）→ 清 -1/0 落回常规玩家路径（同 m_wolfTarget 攻击者死亡回落先例）；
+        //   仇恨不设时限不设距离（MC revenge target 持续到目标死亡，出侦测范围由 AI 分支门控落回）。
+        //   Stalker / Nightwalker / Emberling / 被动型不注册（入口门，见 mobAggroAgainst 注释）。放 struct
+        //   末尾区保既有聚合初始化不错位（t256 元教训）；DMI 兜底默认 -1/0。
+        int     aggroIdx = -1;    // 仇恨目标 mob 槽索引（-1 = 无仇恨；slot-reuse 索引稳定 + serial 防换任）
+        quint32 aggroSerial = 0;  // 仇恨目标代际快照（与槽内 spawnSerial 比对防槽复用误仇恨；0 恒无效）
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1696,6 +1714,12 @@ private:
     //   机制等价 MC 1.0 僵尸 / 骷髅见铁傀儡即转火攻击（防御造物天然吸怪）；Stalker（潜行者）不调用本查
     //   （MC 苦力怕只锁定玩家，不对造物自爆）。O(n) 同 nearestHostile。const 只读。
     int nearestIronGolem(const QVector3D &pos, float range) const;
+    // t948 敌对 mob 仇恨目标消费侧校验（aiHostile / aiArcher 入口顶部调；单一消费点）：校验 aggroIdx 槽内
+    //   仍是注册那一任实体（死亡 / 非 mob / 槽复用 spawnSerial ≠ 快照 → 清 -1/0 返 -1 → caller 落回常规
+    //   golem / 玩家目标路径，同 m_wolfTarget 死亡回落先例）。仇恨不设时限不设距离（MC revenge target
+    //   持续到目标死亡）；出侦测范围由 caller 分支门控（本函数仍返索引 —— 驯服狼瞬移回主人身边时仇恨
+    //   保留不丢，狼回侦测范围即恢复追狼）。无仇恨（aggroIdx<0）→ -1。
+    int resolveAggroTarget(Entity &e);
     // t281 敌对生物 AI（detect→pathfind→attack 三段；tick 内 hostile Mob 分支调，替代 aiWander）。
     //   spec t281「敌对生物基类（AI/寻路）：detect player（4-5 格 or MC 规则）+ 寻路（向玩家走 + 跳/绕障，简化 A*）
     //   + attack」。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI；标识符 / 美术全原创（§9 区隔）。

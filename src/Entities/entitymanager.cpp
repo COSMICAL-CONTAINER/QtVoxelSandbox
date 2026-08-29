@@ -1981,6 +1981,53 @@ void EntityManager::wolfRetaliateAgainst(int victimIdx, int attackerIdx)
                   << "- pack retaliates (MC 1.0 wolf defend-self)";
 }
 
+// t948 敌对 mob 仇恨注册**单一入口**（狼主动咬击命中处调；机制等价 MC 1.0 revenge target——生物被活体
+//   mob 打伤 → 仇恨目标记为攻击者）。与 t923 wolfRetaliateAgainst（狼被打 → 狼群反击）互补：狼**主动
+//   攻击**面也要注册被咬者对狼的仇恨（t923 反击注册面核），敌对被咬后下个 AI tick 起转火追咬 / 转火
+//   射击本狼（消费侧 resolveAggroTarget，aiHostile / aiArcher 入口顶部）。受害者门：仅带仇恨 AI 的敌对型
+//   {Shambler / Spider / Silverfish（同落 aiHostile else 分发面）/ Bones}——Stalker（spec 只锁玩家不对
+//   生物自爆，t712 同界）/ Nightwalker、Emberling（独立 AI）/ 被动七型（无仇恨系统，逃跑链不受影响）
+//   → 静默 no-op；攻击者门：活体 mob。slot+serial 双快照（同骷髅箭 arrowShooter+serial 槽复用防线）：
+//   攻击者槽复用换任后 serial 不匹配 → 消费侧判空落回玩家路径。重复注册覆盖旧仇恨（最新攻击者优先）。
+void EntityManager::mobAggroAgainst(int victimIdx, int attackerIdx)
+{
+    if (victimIdx < 0 || attackerIdx < 0 || victimIdx == attackerIdx) return;
+    if (victimIdx >= int(m_entities.size()) || attackerIdx >= int(m_entities.size())) return;
+    Entity &v = m_entities[size_t(victimIdx)];
+    if (!v.alive || v.kind != Mob || v.dead) return; // 尸体 / 空槽不注册（咬击致死同帧已是 dead → no-op）
+    switch (v.mobType) {
+    case MobShambler: case MobSpider: case MobSilverfish: case MobBones: break; // 仇恨 AI 消费面
+    default: return; // Stalker / Nightwalker / Emberling / 被动型无此系统（入口门，见上）
+    }
+    const Entity &a = m_entities[size_t(attackerIdx)];
+    if (!a.alive || a.kind != Mob || a.dead) return; // 攻击者须活体 mob（同 wolfRetaliateAgainst 门）
+    v.aggroIdx = attackerIdx;
+    v.aggroSerial = a.spawnSerial;
+    qCInfo(lcEnt) << "hostile mob" << victimIdx << "aggroed on mob" << attackerIdx
+                  << "- revenge target set (MC 1.0 attacked-by-wolf)";
+}
+
+// t948 敌对 mob 仇恨目标消费侧校验（aiHostile / aiArcher 入口顶部调；单一消费点）。见头文件注释：
+//   死亡 / 非 mob / 槽复用（spawnSerial ≠ 快照）→ 清 -1/0 返 -1（caller 落回常规目标路径）；仇恨不设
+//   时限不设距离（MC revenge target 持续到目标死亡），出侦测范围由 caller 分支门控（驯服狼瞬移回主人
+//   身边 → 本 tick 落回玩家路径，仇恨保留；狼回侦测范围即恢复追狼）。无仇恨 → -1。
+int EntityManager::resolveAggroTarget(Entity &e)
+{
+    if (e.aggroIdx < 0) return -1;
+    if (e.aggroIdx >= int(m_entities.size())) {
+        e.aggroIdx = -1;
+        e.aggroSerial = 0;
+        return -1;
+    }
+    const Entity &t = m_entities[size_t(e.aggroIdx)];
+    if (!t.alive || t.kind != Mob || t.dead || t.spawnSerial != e.aggroSerial) {
+        e.aggroIdx = -1;
+        e.aggroSerial = 0; // 攻击者死亡 / 槽复用换任 → 回落（同 m_wolfTarget 死亡回落先例，t480）
+        return -1;
+    }
+    return e.aggroIdx;
+}
+
 // t481 第 i 只 mob 是否已驯服猫（ocelotTamed=true）。仅 MobOcelot 用；其余 mob 恒 false。越界 → false。
 bool EntityManager::ocelotTamedAt(int i) const
 {
@@ -2682,6 +2729,12 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange && e.wolfAttackCooldown <= 0.0f) {
             e.wolfAttackCooldown = kWolfAttackCooldown;
             damageEntity(m_wolfTarget, kWolfAttackDamage);
+            // t948 仇恨转移注册（单一入口 mobAggroAgainst）：狼**主动咬击**命中也要注册被咬者对狼的仇恨
+            //   （t923 反击注册面核——不只狼被打了才反击；与上方 aiHostile 命中玩家处的 m_wolfTarget 注册
+            //   互补成双向面）。受害者门在入口内：敌对仇恨型 {Shambler/Spider/Silverfish/Bones} 记 slot+
+            //   serial 快照（下个 AI tick 起 aiHostile/aiArcher 转火追咬/射击本狼）；被动受害者（主人误标
+            //   羊/猪等）静默 no-op（无仇恨系统，逃跑链不变）。若咬击致死同帧受害者已 dead → 入口 no-op。
+            mobAggroAgainst(m_wolfTarget, idx);
             qCInfo(lcEnt) << "tamed wolf" << idx << "bit mob" << m_wolfTarget
                           << "for" << kWolfAttackDamage << "HP";
         }
@@ -3222,6 +3275,94 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
     }
 
+    // t948 仇恨转移（狼咬敌对 → 被咬者转火攻击咬它的驯服狼；机制等价 MC 1.0 revenge target——被咬敌对
+    //   改追攻击狼而非玩家）：注册单一入口 mobAggroAgainst（狼咬击命中处调），本分支消费。目标优先级：
+    //   仇恨目标（个人即时仇恨）> golem 视线目标（下方 t712 分支）> 玩家。目标死亡 / 槽复用 →
+    //   resolveAggroTarget 清仇恨落回常规路径（同 m_wolfTarget 死亡回落先例）；目标出侦测范围（驯服狼
+    //   瞬移回主人身边）→ 本 tick 不转火、落回下方玩家路径，仇恨保留（狼回侦测范围即恢复追狼）。
+    //   近距命中调 wolfRetaliateAgainst：敌对近战打驯服狼也注册狼群反击（t923 反击面接线，同骷髅箭先例；
+    //   咬击互咬循环下 m_wolfTarget 已是该 mob → 入口去重 no-op，多狼包场景亦正确）。Stalker /
+    //   Nightwalker / Emberling 走独立 AI 不进本函数（t712 同界）；t290 门控照旧（玩家不可锁定 → 敌对
+    //   AI 整体回退游荡）。追击 / 攻击体例全部照抄下方 golem 分支（逐轴 AABB 撤回 + 越障跳 + 垂直同层）。
+    {
+        const int aggroIdx = resolveAggroTarget(e);
+        if (aggroIdx >= 0) {
+            const Entity &t = m_entities[size_t(aggroIdx)];
+            const float adx = t.pos.x() - e.pos.x();
+            const float adz = t.pos.z() - e.pos.z();
+            const float ady = t.pos.y() - e.pos.y();
+            const float aDist = std::sqrt(adx * adx + adz * adz);
+            if (aDist <= kDetectRange) {
+                // 朝仇恨目标（同 golem 分支 yaw 约定 dir=(-sin,-cos)）。
+                if (aDist > 1e-4f) e.yawRad = std::atan2(-adx, -adz);
+                // 近距攻击（垂直同层门控同玩家路径；冷却到）：damageEntity + knockback（复用受击链）。
+                if (aDist <= kAttackRange && std::abs(ady) <= kAttackVertRange && e.attackCooldown <= 0.0f) {
+                    // 蓄力期目标可能死亡 / 被移除 → 重读槽位校验（同 golem 分支模式）。
+                    if (aggroIdx < int(m_entities.size())) {
+                        const Entity &t2 = m_entities[size_t(aggroIdx)];
+                        if (t2.alive && t2.kind == Mob && !t2.dead) {
+                            e.attackCooldown = kAttackCooldown;
+                            float kx = 1.0f, kz = 0.0f;
+                            if (aDist > 1e-3f) { kx = adx / aDist; kz = adz / aDist; }
+                            else { kx = -std::sin(e.yawRad); kz = -std::cos(e.yawRad); }
+                            damageEntity(aggroIdx, kAttackDamage);
+                            knockback(aggroIdx, kx, kz, 1.0f);
+                            // t923 面完整：敌对近战命中驯服狼也注册狼群反击（同骷髅箭接线先例；互咬循环
+                            //   下 m_wolfTarget 已是该 mob → 入口去重 no-op，多狼包亦正确）。
+                            wolfRetaliateAgainst(aggroIdx, idx);
+                            qCInfo(lcEnt) << "hostile mob" << e.mobType
+                                          << "attacked aggro target" << aggroIdx;
+                        }
+                    }
+                    e.wanderSpeed = 0.0f;
+                    e.moveSpeed = 0.0f;
+                    return false; // 贴身攻击 / 攻击瞬间：腿停（同 golem 分支贴身语义）
+                }
+                if (aDist > kAttackRange) {
+                    // 追击仇恨目标：越障跳 + 水平移动（复用 golem 分支逐轴 AABB 撤回 + 边界 clamp 模式）。
+                    e.wanderSpeed = kChaseSpeed;
+                    const float chaseSpd = kChaseSpeed * speedScale;
+                    if (e.resting && world && aDist > 1e-4f) {
+                        const float fdx = -std::sin(e.yawRad);
+                        const float fdz = -std::cos(e.yawRad);
+                        const int fy = qFloor(e.pos.y() - e.halfH);
+                        const int fx = qFloor(e.pos.x() + fdx * 0.6f);
+                        const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+                        if (fy >= 0
+                            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                            && !world->isSolid(fx, fy + 1, fz)
+                            && !world->isSolid(fx, fy + 2, fz)) {
+                            e.vy = kJumpSpeed;
+                            e.resting = false;
+                            e.jumpGX = (adx / aDist) * chaseSpd; // t670 越障跳水平滑流（朝仇恨目标）
+                            e.jumpGZ = (adz / aDist) * chaseSpd;
+                        }
+                    }
+                    const float ehw = e.halfW, ehh = e.halfH;
+                    const float nx = adx / aDist, nz = adz / aDist;
+                    float newX = e.pos.x() + nx * chaseSpd * dt;
+                    if (newX < ehw) newX = ehw;
+                    if (newX > worldW - ehw) newX = worldW - ehw;
+                    if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+                    float newZ = e.pos.z() + nz * chaseSpd * dt;
+                    if (newZ < ehw) newZ = ehw;
+                    if (newZ > worldD - ehw) newZ = worldD - ehw;
+                    if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+                    bool moved = false;
+                    if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+                    if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+                    e.moveSpeed = moved ? chaseSpd : 0.0f;
+                    return moved;
+                }
+                // 已贴身（攻击冷却中）：站立（腿停）。
+                e.wanderSpeed = 0.0f;
+                e.moveSpeed = 0.0f;
+                return false;
+            }
+            // 出侦测范围：落回下方常规目标路径（仇恨保留 —— resolveAggroTarget 未清）。
+        }
+    }
+
     // t712 批「敌对 mob 主动攻击铁傀儡」（机制等价 MC 1.0 僵尸 / 蜘蛛见铁傀儡即转火攻击防御造物）：
     //   侦测范围内有活体铁傀儡 → **优先锁定它**（高于玩家目标；MC 敌对近战对造物天然敌意）。走同款
     //   detect→chase→attack 流程但目标换 mob：朝 golem 走（kChaseSpeed）+ 近距（kAttackRange）冷却到 →
@@ -3441,6 +3582,96 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
     if (e.attackCooldown > 0.0f) {
         e.attackCooldown -= dt;
         if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
+    }
+
+    // t948 仇恨转移（骷髅弓手分支；机制等价 MC 1.0 骷髅被狼咬 → 反击目标=狼 → 保持距离射击它）：
+    //   注册单一入口 mobAggroAgainst（狼咬击命中处调），本分支消费（目标优先级同 aiHostile：仇恨 >
+    //   golem 视线 > 玩家）。侦测范围内有仇恨狼 → 保持距离带（kArcherKeepMin/Max）+ 拉弓瞄准 →
+    //   fireArrow 射狼上身；箭命中狼由 tick Arrow 分支的 t923 扩展结算名单（狼在滤网内）结算伤害 +
+    //   wolfRetaliateAgainst（狼群反击射手；咬击互咬循环下 m_wolfTarget 已是该骷髅 → 去重 no-op）。
+    //   狼出侦测范围（瞬移回主人身边）→ 落回下方 golem/玩家路径，仇恨保留。保持距离 / 越障跳 / 视线
+    //   清查 / 拉弓节律全部照抄下方 golem 分支同款；死亡 / 槽复用回落由 resolveAggroTarget 统一处理。
+    {
+        const int aggroIdx = resolveAggroTarget(e);
+        if (aggroIdx >= 0 && aggroIdx < int(m_entities.size())) {
+            const Entity &t = m_entities[size_t(aggroIdx)];
+            const float tdx = t.pos.x() - e.pos.x();
+            const float tdz = t.pos.z() - e.pos.z();
+            const float tdy = t.pos.y() - e.pos.y();
+            const float tDist = std::sqrt(tdx * tdx + tdz * tdz);
+            if (tDist <= kDetectRange) {
+                if (tDist > 1e-4f) e.yawRad = std::atan2(-tdx, -tdz); // 朝仇恨狼
+                e.wanderSpeed = kChaseSpeed;
+                float draw = e.aimTimer > 0.0f ? e.aimTimer / kAimWindup : 0.0f;
+                if (draw > 1.0f) draw = 1.0f;
+                const float chaseSpd = kChaseSpeed * speedScale * (1.0f - draw);
+                // 保持距离（同玩家 / golem 路径：近退远进）。
+                float moveDirX = 0.0f, moveDirZ = 0.0f;
+                bool wantMove = false;
+                if (tDist > 1e-4f) {
+                    if (tDist < kArcherKeepMin) { moveDirX = -tdx / tDist; moveDirZ = -tdz / tDist; wantMove = true; }
+                    else if (tDist > kArcherKeepMax) { moveDirX = tdx / tDist; moveDirZ = tdz / tDist; wantMove = true; }
+                }
+                // 越障跳（同玩家路径模式，朝移动方向）。
+                if (wantMove && e.resting && world) {
+                    const int fy = qFloor(e.pos.y() - e.halfH);
+                    const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
+                    const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
+                    if (fy >= 0
+                        && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                        && !world->isSolid(fx, fy + 1, fz)
+                        && !world->isSolid(fx, fy + 2, fz)) {
+                        e.vy = kJumpSpeed;
+                        e.resting = false;
+                        e.jumpGX = moveDirX * chaseSpd;
+                        e.jumpGZ = moveDirZ * chaseSpd;
+                    }
+                }
+                bool moved = false;
+                if (wantMove) {
+                    const float ehw = e.halfW, ehh = e.halfH;
+                    float newX = e.pos.x() + moveDirX * chaseSpd * dt;
+                    if (newX < ehw) newX = ehw;
+                    if (newX > worldW - ehw) newX = worldW - ehw;
+                    if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+                    float newZ = e.pos.z() + moveDirZ * chaseSpd * dt;
+                    if (newZ < ehw) newZ = ehw;
+                    if (newZ > worldD - ehw) newZ = worldD - ehw;
+                    if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+                    if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+                    if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+                }
+                e.moveSpeed = moved ? chaseSpd : 0.0f;
+                // 射箭（同 golem 路径：射程 + 垂直同层 + 冷却到 + 视线清 → 拉弓 kAimWindup 满 → fireArrow）。
+                if (tDist <= kArcherShootRange && std::abs(tdy) <= kShootVertRange && e.attackCooldown <= 0.0f) {
+                    const QVector3D origin(e.pos.x(), e.pos.y() + e.halfH * 0.5f, e.pos.z());
+                    const QVector3D target(t.pos.x(), t.pos.y() + t.halfH * 0.6f, t.pos.z()); // 狼上身
+                    e.losCacheTimer -= float(dt);
+                    if (e.losCacheTimer <= 0.0f) {
+                        e.losClear = lineOfSightClear(world, origin, target);
+                        e.losCacheTimer = kLosCacheInterval;
+                    }
+                    if (e.losClear) {
+                        e.aimTimer += float(dt);
+                        if (e.aimTimer >= kAimWindup) {
+                            // 审查修 B8（t724-t729 复盘）：主循环持 Entity& 期间不直接 fireArrow（pending
+                            //   模式同 golem 分支）→ tick 主循环外 flushPendingShots 统一射出。
+                            m_pendingArrows.push_back({ target, idx, e.spawnSerial });
+                            e.attackCooldown = kShootCooldown;
+                            e.aimTimer = 0.0f;
+                            qCInfo(lcEnt) << "archer (Bones) fired arrow at aggro wolf" << aggroIdx
+                                          << "dist=" << tDist;
+                        }
+                    } else {
+                        e.aimTimer = 0.0f;
+                    }
+                } else {
+                    e.aimTimer = 0.0f;
+                }
+                return moved;
+            }
+            // 出侦测范围：落回下方 golem/玩家路径（仇恨保留 —— resolveAggroTarget 未清）。
+        }
     }
 
     // t712 批「敌对 mob 主动攻击铁傀儡」（骷髅弓箭手分支；机制等价 MC 1.0 骷髅见铁傀儡转火射它）：
