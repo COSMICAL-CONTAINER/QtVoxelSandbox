@@ -1101,6 +1101,9 @@ private:
     //   销毁嵌入箭 + emit itemPickedUp（拾取音 / 手弹跳，同掉落物）；背包满 → 嵌入箭留。骷髅箭（arrowFromPlayer=
     //   false）不拾（防刷箭）；飞行中箭（未嵌入）不拾（免误拾）。门控同 pickupScan（死亡 / 观察者不拾）。
     void arrowPickupScan();
+    // t950 换下旧装备掉回地面（tickMobEquipmentPickup 调；见 .cpp）：mob 脚格中心 spawnItem。
+    //   旧 id<=0 no-op（原空槽无掉落）。
+    void dropMobEquipmentAt(const QVector3D &mobCenter, float halfH, int itemId);
     // t485 TNT 陷阱触发（spec「踩压力板引爆」）：扫玩家 footprint 格——任一格为压力板（Wood/Cobble）且其下方
     //   格 == TntBlock → 调 EntityManager::detonateTntBlock（destroySphereSilent 球形破坏 + 衰减伤玩家 + explosion
     //   音/视，机制等价 MC 1.0 沙漠神殿踩板引爆 TNT）。每 tick 至多触发 1 次（一次爆炸即摧毁陷阱，防同帧多次）。
@@ -1158,6 +1161,17 @@ public:
     // fireDispenserAtQml：该格仍是发射器 / 投掷器 → fireDispenserAt（per-dispenser 冷却 / state 朝向 /
     //   库存分派全复用）。非机器格 → no-op。（t814 public 同上。）
     Q_INVOKABLE void fireDispenserAtQml(int x, int y, int z);
+    // t950 装备拾取概率缝（调试 / 探针端；缺省 kEquipPickupChance）：钳 [0,1]。0 = 永不拾（概率下端
+    //   行为钉：入口早退，窗都不跑）；>=1 = 接触即拾（概率上端行为钉：跳过掷骰恒拾）；中间值 = 每
+    //   0.5s 扫描窗每件装备独立掷骰。QML 调试命令可直调（同 /mobarmor 的 setMobArmorSet 入口风格）；
+    //   矩阵探针 C++ 直调钉概率两端。
+    Q_INVOKABLE void setEquipmentPickupChance(qreal chance);
+    // t950 mob 装备拾取穿着扫描（僵尸/骷髅**经过**装备掉落物 → 概率拾取 + 同部位更好护甲/更高攻击武器
+    //   才换，换下旧装备掉回地面；不主动寻路——纯接触判定）。累积 dt 到 kEquipPickupScanInterval 窗跑
+    //   一次；tickImpl pickup 桶每帧喂真 dt。public 同 scanDispenserTraps 的 review24 #9 先例——矩阵
+    //   探针 C++ 直造不启 16ms 定时器，直喂 dt=窗长 = tick 驱动的等价递推；tickImpl 接线行由探针源码钉
+    //   覆盖（弹道/走位类实时时序 headless 不稳的面锁接线文本先例）。契约详见 .cpp 实现头注释。
+    void tickMobEquipmentPickup(qreal dt);
 private:
     // t628 按钮自动复位（见 m_buttonRecoverCells 头注释）：每 tick 递减按下倒计时，到期该格仍是按钮
     //   （WoodButton/StoneButton）且 state bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变 → 仅
@@ -1227,6 +1241,15 @@ private:
     BoatManager *m_boatManager = nullptr;        // t469 船：浮水 tick + 骑乘操控 / 放船 / 下船（Q_PROPERTY 绑定）
     MinecartManager *m_minecartManager = nullptr; // t565 矿车：轨上骑乘操控 / 放车 / 下车（Q_PROPERTY 绑定）
     DispenserStore *m_dispenserStore = nullptr;   // t579 发射器 per-block 9 槽内容（压力板触发取物发射，Q_PROPERTY 绑定）
+    // t950 mob 装备拾取（tickMobEquipmentPickup）状态：扫描窗 dt 累积器 + 拾取概率（setEquipmentPickupChance
+    //   缝写；初值 = 缺省常量）。非世界态（跨世界 reset 族）无需清——纯节流/标量，无跨世界语义。
+    qreal m_equipPickupAccum = 0.0;               // 距下次扫描窗的 dt 累积（秒；到窗长即清零跑扫描）
+    qreal m_equipPickupChance = 0.3;              // 每窗每件装备拾取概率（用户第五轮口径「有概率拾取」）
+    // t950 扫描参数常量（与 m_equipPickupChance 初值同源单一事实；探针经缝改写成员、常量供注释锚）。
+    static constexpr qreal kEquipPickupChance = 0.3;       // 缺省拾取概率（MC 1.0 无此概率面——canPickUpLoot
+                                                           //   必拾；本作取 0.3/窗让路过偶拾，连续经过必拾）
+    static constexpr qreal kEquipPickupScanInterval = 0.5; // 扫描窗长（秒；任务口径「每 0.5s 一带」低频）
+    static constexpr float kEquipPickupRadiusXZ = 1.0f;    // 水平拾取半径（格；「经过」= 同格 + 贴身邻格沿）
     bool m_shiftPrev = false;                    // t469 下船边沿触发（骑乘期 Shift 按下沿 → dismount；长按只下一次）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
