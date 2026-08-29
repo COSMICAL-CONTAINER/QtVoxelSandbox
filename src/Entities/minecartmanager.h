@@ -144,6 +144,10 @@ public:
     //   水平单位意图向量。沿「当前行进方向」的投影算目标速度（前进 / 后退），速度 lerp 接近 → 沿轨连接位
     //   逐格推进（advCell 向邻轨格插值移动；跨格时按行进方向选下一连接向 —— 拐角自动转弯；轨尽头停）。
     //   outCartPos 写新矿车中心位（PlayerController 据它把玩家 m_pos 同步到车座位）。
+    //   **t943 ① 无输入滑行与空车同物理**：|wish 投影|≈0 且非通电动力段时不再走 targetV lerp（旧版
+    //   上坡只剩 kCartFriction 指数衰减 —— 顶点前 0.x blocks/s 长时间爬行 = 用户「最高点速度正转负时
+    //   特别慢」），改走与 tickPushedCarts t909③ 同一套坡道积分（kCartSlopeGravity 沿轨分量直接积分
+    //   + t939 本格面梯度覆盖 + t863① 反溜收尾）；有输入 / 动力段（t810 四分支）语义不动。
     //   无骑乘（m_riderCart<0）→ no-op。
     void tickRiddenCart(qreal dt, World *world, float wishX, float wishZ, QVector3D &outCartPos);
 
@@ -183,6 +187,12 @@ public:
     //   当前格边界内。(b) 冲量后速度钳 ±kCartBoostSpeed（碰撞获速不破全引擎速度上界）。derailed 水平
     //   积分子步化（≤0.45 格/子步逐格墙检，见 tickDerailedCart 注释）—— dt 尖峰下弹射车不再跳过
     //   1 格厚墙。三修合计 =「解析结果不得写车入实体格；任何弹射不得越实体墙」硬不变量。
+    //   **t943 ② 多车挤压三收口**：① clampShift 近层闸补**链可达闸** —— 目标列 ±1 层轨须持本格该向
+    //   连接位且三高探针层差 == ryTgt−rySelf（落点 = 本链坡面延续），同列并行 / 上下交叉线的轨不再
+    //   被当成延续（跨链跳线「卡出 V 字到隔壁」根因）；② 去穿插被钳未分离的持续挤压对做**速度一致
+    //   性**（沿 n 追得更快的一侧速度钳到被追侧，限幅 ±boost）—— 消「冲量对撞反向弹开 + 坡面 kick
+    //   回灌」的弹开-回灌极限环（「挤压颤抖卡死」根因）；③ 解析收尾对全部轨上态车重钉
+    //   cartYawFromDir(dir)（姿态恒沿轨轴，「横着卡在坡上」呈现面收口；幂等）。
     //   任一车 speed/pos 被改 → notifyChanged（revision 触碰驱动 QML 位置刷新）。
     void resolveCartCollisions(World *world);
 

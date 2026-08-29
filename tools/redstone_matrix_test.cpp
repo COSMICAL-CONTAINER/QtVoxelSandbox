@@ -21228,6 +21228,230 @@ Item {
                           ;
     }
 
+    // ── P-t943 V 字载人变慢 + 多车卡出探针（MinecartManager 直编；spec「① 载人后速度变慢、最高点速度
+    //    正转负时特别慢（往返换向阻尼过大？）；② 多矿车丝滑运动有概率卡出 V 字到隔壁 / 横着卡在坡上
+    //    （非 45° 状态）/ 挤压颤抖卡死——t907/t909 去穿插与坡向参数返修」）──
+    //   ① 根因分账：被骑路径旧版无输入走 targetV lerp —— 上坡只剩 kCartFriction(2/s) 指数衰减（渐近
+    //      零、顶点前长时间 0.x b/s 爬行 = 「最高点速度正转负时特别慢」），下坡靠 slopeDownAuto 抬
+    //      targetV 再 kCartAccel(3/s) 缓起；空车路径（t909③）是 kCartSlopeGravity(19.8/s²) 沿轨重力
+    //      直接积分 —— 同一 V 空车丝滑、载人爬行 = 物理口径劈叉。修 = 无输入且非动力段改走空车同一套
+    //      坡道积分（tickRiddenCart coasting 分支），载人曲线与空车同物理。
+    //   ② 根因三面收口：clampShift 近层闸（review28 #7 |Δ层|≤1）只验「目标列有轨」不验「本链延续」→
+    //      跨链立体同列的下线 / 桥下线轨被当坡面延续 = 跨链跳线（「卡出 V 字到隔壁」）→ 补链可达闸
+    //      （连接位 + railProbeDelta 层差同一权威）；冲量对撞反向弹开 + 坡面 t909②/t863① kick 回灌 =
+    //      弹开-回灌极限环（「挤压颤抖卡死」）→ 持续挤压对速度一致性 + 钳向清速（钳边车不得持指向
+    //      钳制边界的速度 —— 段内位移无跨格校验，破之则推过格界坠轨，t907(a) 回归实证）；解析收尾
+    //      cartYawFromDir 重钉（姿态恒沿轨轴，「横着卡在坡上」呈现面收口）。
+    //   rig：V 形 **5 格臂**（重力捕获阈 sqrt(2·19.8·5)=14.1 > 冲量钳 12.8 → 闭合系统，任何碰撞获速车
+    //      必被臂重力捕获，无山顶逃逸面）+ V 底两格通电动力轨（t909 同款）。腿：
+    //      (a) 空车参照：东臂半山 spawn，1500 tick 往返 —— 反转 ≥6、臂上爬行 tick（|vApp|<0.5）≤90、
+    //          含留、Y 平滑、存活（= 修后载人须对齐的「同物理」基准，兼空车零回归守卫）；
+    //      (b) 载人对照：同位 spawn + tryMount，无输入同驱 1500 tick —— 同一组阈值全绿（旧代码：无
+    //          坡向起步 → 半山腰朝上坡向停死；或有速度时摩擦爬顶飞出死端 —— 反转不足 / 出 rig 必居其一）；
+    //      (c) 多车长跑：4 空车（谷底 ×2 + 两臂半山）+ resolveCartCollisions 同帧 1500 tick —— 全程
+    //          存活 / 恒贴轨线（|z−心|<0.02，横向逃逸零容忍）/ yaw 恒轴向（fmod 90° ±0.5，「横着」零
+    //          容忍）/ 含留（x 与 y 双界）/ 末 400 tick 每车路程 ≥1.0（无冻结无颤抖死锁）；
+    //      (d) 源码钉：coasting 闸 / 链可达闸两行 / 速度一致性 match / 钳向清速两行 / yaw 重钉。
+    {
+        // rig 选址：运行期扫描空区（t909 模式）。footprint x0-5..x0+6 × z0-1..z0+1 × kRigY-2..kRigY+6。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 8; xx + 6 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -5; dx <= 6 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 6 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        bool okA = false, okB = false, okC = false, okD = false;
+        if (x0 < 0) {
+            qInfo().noquote() << "  [t943 diag] no clear rig area found";
+        } else {
+            w.setBlock(x0, kRigY - 1, z0, BR::RedstoneBlock, 0);      // 直供源（兼支撑）
+            w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::GoldenRail, 0);
+            for (int i = 1; i <= 5; ++i) {
+                w.setBlock(x0 + 1 + i, kRigY + i, z0, BR::Rail, 0);   // 东臂（顶 x0+6@Y+5）
+                w.setBlock(x0 - i, kRigY + i, z0, BR::Rail, 0);       // 西臂（顶 x0-5@Y+5）
+            }
+            tickN(w, 8); // 电力重算：直供 + 链传第二格
+            const bool poweredOk = (w.stateAt(x0, kRigY, z0) & BR::GoldenRailStateOnFlag) != 0
+                                && (w.stateAt(x0 + 1, kRigY, z0) & BR::GoldenRailStateOnFlag) != 0;
+            // (a)/(b) 共用驱动：单空车 / 单被骑车在 V 里自由往返 1500 tick，采反转数 / 臂上爬行 tick /
+            //   含留 / Y 平滑 / 存活。臂上判定 = 离谷心 >1.3 格；爬行 = 视速 <0.5（旧载人摩擦衰减在顶点
+            //   前长时间 0.x b/s = 用户「特别慢」签名；重力物理 0.5→0 仅 ~2 tick）。
+            const auto runOsc = [&](bool ridden, int &rev, int &crawl, bool &inRig,
+                                    bool &ySmooth, bool &alive) {
+                MinecartManager carts;
+                carts.spawnCart(x0 + 3, kRigY + 2, z0, &w);           // 东臂半山（t909 同位）
+                const QVector3D mountOrigin(float(x0 + 3) + 0.5f, float(kRigY + 2) + 2.0f,
+                                            float(z0) + 0.5f);
+                const bool mounted = !ridden || carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+                QVector3D cp;
+                int state = 0;
+                float accum = 0.0f;
+                float prevX = carts.posAt(0).x(), prevY = carts.posAt(0).y();
+                rev = 0; crawl = 0; inRig = true; ySmooth = true;
+                for (int t = 0; t < 1500; ++t) {
+                    if (ridden) {
+                        carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp); // 骑乘分支（镜像 PlayerController 序）
+                        carts.tickPushedCarts(0.016, &w);                // 被骑车在其中被跳过
+                    } else {
+                        carts.tickPushedCarts(0.016, &w);
+                    }
+                    const int ri = ridden ? carts.ridingIndex() : 0;
+                    const QVector3D p = carts.posAt(ri);
+                    const float dX = p.x() - prevX;
+                    accum += dX;
+                    if (state == 0) {
+                        if (accum > 0.3f) { state = 1; accum = 0.0f; }
+                        else if (accum < -0.3f) { state = -1; accum = 0.0f; }
+                    } else if (state > 0 && accum < -0.3f) { ++rev; state = -1; accum = 0.0f; }
+                    else if (state < 0 && accum > 0.3f) { ++rev; state = 1; accum = 0.0f; }
+                    if (std::fabs(p.x() - (float(x0 + 1) + 0.5f)) > 1.3f
+                        && std::fabs(dX) / 0.016f < 0.5f) ++crawl;
+                    if (p.x() < float(x0) - 5.4f || p.x() > float(x0) + 6.4f) inRig = false;
+                    if (std::fabs(p.y() - prevY) > 0.35f) ySmooth = false;
+                    prevX = p.x(); prevY = p.y();
+                    alive = carts.aliveAt(ri);
+                }
+                return mounted && alive;
+            };
+            int revA = 0, crawlA = 0, revB = 0, crawlB = 0;
+            bool inRigA = false, ySA = false, aliveA = false, inRigB = false, ySB = false, aliveB = false;
+            const bool droveA = runOsc(false, revA, crawlA, inRigA, ySA, aliveA);
+            const bool droveB = runOsc(true, revB, crawlB, inRigB, ySB, aliveB);
+            okA = poweredOk && droveA && revA >= 6 && crawlA <= 90 && inRigA && ySA && aliveA;
+            okB = poweredOk && droveB && revB >= 6 && crawlB <= 90 && inRigB && ySB && aliveB;
+            if (!okA || !okB)
+                qInfo().noquote() << "  [t943 diag] osc empty pow" << poweredOk << "drove" << droveA
+                                  << "rev" << revA << "crawl" << crawlA << "inRig" << inRigA
+                                  << "yS" << ySA << "alive" << aliveA
+                                  << "| ridden drove" << droveB << "rev" << revB << "crawl" << crawlB
+                                  << "inRig" << inRigB << "yS" << ySB << "alive" << aliveB;
+            // ── (c) 多车长跑：4 空车（谷底 ×2 + 两臂半山）+ 碰撞解析同帧 1500 tick。──
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0, kRigY, z0, &w);          // 谷底西格
+                carts.spawnCart(x0 + 1, kRigY, z0, &w);      // 谷底东格
+                carts.spawnCart(x0 + 3, kRigY + 2, z0, &w);  // 东臂半山（cell x0+3 轨在 Y+2）
+                carts.spawnCart(x0 - 2, kRigY + 2, z0, &w);  // 西臂半山（cell x0-2 轨在 Y+2 —— 西臂
+                                                             //   镜像层差 x0-i@Y+i，勿按 +3 错层落地）
+                bool railLine = true, axisYaw = true, inRig = true, allAlive = true;
+                float pathLen[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                float prevXs[4];
+                for (int ci = 0; ci < 4; ++ci) prevXs[ci] = carts.posAt(ci).x();
+                int violT = -1, violCi = -1;
+                QVector3D violP;
+                for (int t = 0; t < 1500; ++t) {
+                    carts.tickPushedCarts(0.016f, &w);       // 镜像 PlayerController 非骑乘帧序
+                    carts.resolveCartCollisions(&w);
+                    for (int ci = 0; ci < 4; ++ci) {
+                        if (!carts.aliveAt(ci)) { allAlive = false; continue; }
+                        const QVector3D p = carts.posAt(ci);
+                        const bool bad = std::fabs(p.z() - (float(z0) + 0.5f)) > 0.02f
+                            || p.x() < float(x0) - 5.4f || p.x() > float(x0) + 6.4f
+                            || p.y() < float(kRigY) - 0.05f || p.y() > float(kRigY) + 5.6f;
+                        if (bad && violT < 0) { violT = t; violCi = ci; violP = p; }
+                        if (bad) inRig = false;                                          // 逃逸 / 坠落
+                        if (std::fabs(p.z() - (float(z0) + 0.5f)) > 0.02f) railLine = false; // 出轨线
+                        const float yawMod = std::fmod(carts.yawAt(ci), 90.0f);
+                        if (!(yawMod < 0.5f || yawMod > 89.5f)) axisYaw = false;             // 横着（非轴向）
+                        if (t >= 1100) pathLen[ci] += std::fabs(p.x() - prevXs[ci]);
+                        prevXs[ci] = p.x();
+                    }
+                }
+                float minPath = 99.0f;
+                for (int ci = 0; ci < 4; ++ci) minPath = std::min(minPath, pathLen[ci]);
+                okC = allAlive && railLine && axisYaw && inRig && minPath >= 1.0f;
+                if (!okC)
+                    qInfo().noquote() << "  [t943 diag] mc alive" << allAlive << "line" << railLine
+                                      << "yaw" << axisYaw << "inRig" << inRig << "minPath" << minPath
+                                      << "firstViol t" << violT << "cart" << violCi << "at" << violP
+                                      << "finals" << carts.posAt(0) << carts.posAt(1)
+                                      << carts.posAt(2) << carts.posAt(3);
+                carts.clearAll();
+            }
+            // 清场。
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);
+            for (int i = 1; i <= 5; ++i) {
+                w.setBlock(x0 + 1 + i, kRigY + i, z0, BR::Air, 0);
+                w.setBlock(x0 - i, kRigY + i, z0, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
+        // (d) 源码钉（t939/t940 模式：字符串钉，任一消失即红）。
+        const QString exeDir943 = QCoreApplication::applicationDirPath();
+        const QString root943 = QDir(exeDir943 + QStringLiteral("/..")).absolutePath();
+        auto readSrc943 = [&root943](const QString &rel) -> QString {
+            QFile f(root943 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mc943 = readSrc943(QStringLiteral("src/Entities/minecartmanager.cpp"));
+        const bool okD1 = mc943.contains(QStringLiteral(
+            "const bool coasting = !railPowered && std::fabs(proj) <= 1e-3f;"));
+        const bool okD2 = mc943.contains(QStringLiteral(
+            "if ((selfCon & connBit) != 0 && chainDelta != INT_MIN"));
+        const bool okD3 = mc943.contains(QStringLiteral(
+            "&& chainDelta == ryTgt - rySelf)"));
+        const bool okD4 = mc943.contains(QStringLiteral(
+            "if (va > vb + 1e-4f)"));
+        const bool okD5 = mc943.contains(QStringLiteral(
+            "if (aClamped && a.speed * wantA > 0.0f) a.speed = 0.0f;"));
+        const bool okD6 = mc943.contains(QStringLiteral(
+            "if (bClamped && b.speed * wantB > 0.0f) b.speed = 0.0f;"));
+        const bool okD7 = mc943.contains(QStringLiteral(
+            "if (!c.alive || c.derailed) continue;\n"
+            "            cartYawFromDir(c.dirX, c.dirZ, c.yaw);"));
+        okD = okD1 && okD2 && okD3 && okD4 && okD5 && okD6 && okD7;
+        const bool okT943 = okA && okB && okC && okD;
+        if (!okT943) ++totalFail;
+        if (!okT943)
+            qInfo().noquote() << "  [t943 diag] a" << okA << "b" << okB << "c" << okC
+                              << "| d" << okD1 << okD2 << okD3 << okD4 << okD5 << okD6 << okD7
+                              << "| srcLen cpp" << mc943.size();
+        qInfo().noquote() << (okT943 ? "PASS" : "FAIL")
+                          << "| t943 V-valley ridden slowdown + multi-cart escapes: the ridden path's"
+                             " no-input coasting went through the targetV lerp where an uphill leg has"
+                             " no slope gravity at all - only kCartFriction exponential decay (12.8"
+                             " needs ~6.4 blocks to bleed off, crawling at 0.x b/s for seconds before"
+                             " the reversal = the user's 'especially slow at the top'), while the"
+                             " empty-cart path integrates kCartSlopeGravity along the track - same V,"
+                             " different physics. Fix routes input-free unpowered riding through the"
+                             " same slope integration as the empty path (uphill 19.8 b/s^2 bleed,"
+                             " downhill converge to +-10, flat friction, t863(1) stall slide-back),"
+                             " leaving input-driven and powered-rail semantics untouched. Multi-cart"
+                             " escapes get three closures: the depenetration near-layer gate now also"
+                             " requires chain continuity (the target column's rail must be this"
+                             " chain's own slope continuation - connection bit plus railProbeDelta"
+                             " layer match - so stacked crossing lines can no longer hijack a pressed"
+                             " cart onto a neighboring chain), a persistently squeezed pair (both"
+                             " sides clamped, still overlapped) gets velocity consistency (the faster"
+                             " chaser along n adopts the chased velocity, clamped to +-boost, killing"
+                             " the bounce-vs-slope-kick limit cycle) with clamp-direction zeroing (a"
+                             " boundary-clamped cart may not keep velocity pointing into the clamp -"
+                             " segment moves have no mid-cell boundary validation, so breaking this"
+                             " slides carts through walls into rail-less columns where pinCartY drops"
+                             " them, the t907(a) cage regression this probe family guards), and a"
+                             " post-resolution cartYawFromDir re-pin keeps every rail-locked cart's"
+                             " heading exactly on its rail axis. Probe legs: (a) empty reference cart"
+                             " oscillates in the 5-arm V (capture threshold 14.1 > 12.8 impulse clamp"
+                             " = closed system) with >=6 reversals and <=90 arm-crawl ticks in 24s;"
+                             " (b) a mounted cart driven with no input meets the same thresholds -"
+                             " same physics as empty, no parked start, no friction crawl at the"
+                             " reversal; (c) four carts (two in the valley, one per arm) run 1500"
+                             " ticks with collision resolution: all alive, never off the rail line,"
+                             " yaw always an exact axis heading, never out of the rig, and every cart"
+                             " still covers >=1.0 blocks over the last 400 ticks (no freeze, no"
+                             " trembling deadlock); (d) source pins for the coasting gate, the chain"
+                             " continuity lines, the velocity-consistency match, the clamp-direction"
+                             " zeroing pair, and the yaw re-pin"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
