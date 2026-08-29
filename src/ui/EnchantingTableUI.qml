@@ -404,6 +404,11 @@ Item {
     readonly property var lapisCosts: [1, 2, 3]
     // t549 书架加成（0..15）：触碰 worldEditRev（放 / 破方块自增）—— countBookshelvesAround 是
     //   Q_INVOKABLE 无 NOTIFY，不触碰则 UI 开着放书架永不重算（用户报「显示还是 0」根因）。
+    //   t953 登记（同根因顺手核，未修）：worldEditRev 只在玩家放 / 破路径自增（Main.qml blockPlaced /
+    //   broken 处）——系统路径（爆炸 / 焚毁）毁书架只发 worldChanged → 面板开着时本计数可能短暂陈旧，
+    //   下一次玩家编辑或重开面板即自愈（重开时 onVisibleChanged 后绑定按当次 worldEditRev 重算仍读
+    //   不到系统编辑 → 需待任一玩家编辑；用户未报数字错，暂不扩 worldEditRev 语义，EnchantGlyphFlow
+    //   t953 的 worldChanged 事件钩为呈现层同病灶的已修参照）。
     readonly property int bookshelfPower: {
         if (!theWorld) return 0
         const _e = worldEditRev
