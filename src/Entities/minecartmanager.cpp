@@ -561,6 +561,49 @@ void MinecartManager::tickDerailedCart(int idx, Cart &c, World *world, float dt)
         c.speed -= c.speed * alpha;
         if (std::fabs(c.speed) < 0.02f) c.speed = 0.0f;
     }
+    // t940 近轨吸附（自由物理收尾；被骑 / 空车两路共享 tickDerailedCart → 单点收口）：玩家身体把脱轨 /
+    //   地面车推到旁边铁轨上（车心格 = 轨格层）→ 钉回轨上移动形态。同层闸 + 死端外向不吸 + 孤轨不吸
+    //   的防误吸域与吸附动作见 trySnapDerailedToRail 头注释（探针 P-t940）。
+    trySnapDerailedToRail(c, world);
+}
+
+// t940 脱轨车近轨吸附（实现；域 / 防误吸 / 钉定复用的取舍见 minecartmanager.h 头注释）。
+bool MinecartManager::trySnapDerailedToRail(Cart &c, World *world)
+{
+    if (!world) return false;
+    const int cx = int(std::floor(c.pos.x()));
+    const int cz = int(std::floor(c.pos.z()));
+    const int topY = int(std::floor(c.pos.y()));
+    // 同层闸（严格列扫：实体遮挡即断——自由体不穿墙 / 不隔板吸附）。车心在轨格上方层（坠落途中）由
+    //   tickDerailedCart 落地扫描 (a) 的下穿重挂承接，不在本函数抢答。
+    if (scanRailColumn(world, cx, topY, cz) != topY) return false;
+    // 选臂：want = 当前速度向（水平自由速度 = dir×speed，轨向四向 → 恒轴对齐）；静止取零向量（全臂
+    //   dot=0 平局按 kDirs 枚举序取臂 = spawnCart 初始朝向同口径）。死端外向速度（唯一连接臂 dot<0 被
+    //   滤）/ 孤轨（0 连接无臂）→ false 不吸（t863④ / t908 推离语义保留）。
+    const float vx = c.dirX * c.speed, vz = c.dirZ * c.speed;
+    const float vlen = std::sqrt(vx * vx + vz * vz);
+    const float wx = (vlen > 1e-3f) ? vx / vlen : 0.0f;
+    const float wz = (vlen > 1e-3f) ? vz / vlen : 0.0f;
+    int ndx = 0, ndz = 0;
+    if (!pickTrackStep(world, c.pos, wx, wz, ndx, ndz)) return false;
+    // 吸附（rail-locked 移动形态即正确终态 → 无条件，不等减速）：速度投影轨轴——选臂与速度向 dot ≥ 0
+    //   → 沿轨分量非负保留；横向分量直接截断（t908 推车向量分解同口径：轨上车只受沿轨力）。
+    c.speed = vx * float(ndx) + vz * float(ndz);
+    c.dirX = float(ndx);
+    c.dirZ = float(ndz);
+    // 位置钉定（复用放置 / 行进同一套）：垂直轴钉轨心线（吸附的一次性「吸」位移 ≤0.5 格；沿轴坐标保留
+    //   ——不整格传送）；Y 钉轨面（pinCartY 内 railRiseAt = 渲染坡面 / 放置 / 俯仰同一张面 → 坡轨钉到
+    //   坡面，不平地高度）；俯仰同放置即贴坡（updateCartPitch）；车头沿选中臂向（= 速度符号侧）。
+    if (std::fabs(c.dirX) > 0.5f) c.pos.setZ(std::floor(c.pos.z()) + 0.5f);
+    else                          c.pos.setX(std::floor(c.pos.x()) + 0.5f);
+    const int pinnedY = pinCartY(c, world);
+    if (pinnedY < 0) return false; // 防御（同层闸已验轨在列，此处失败 = 吸附瞬间轨被拆 / 列扫失效）：
+                                   //   保持 derailed 自由物理；上方已写的速度投影 / 垂直轴钉定对自由体无害。
+    updateCartPitch(c, world, pinnedY);
+    c.derailed = false;
+    c.fallVy = 0.0f;
+    cartYawFromDir(c.dirX, c.dirZ, c.yaw);
+    return true;
 }
 
 // t769 车身俯仰刷新（坡道平行轨面，纯呈现 —— 不反馈物理；头注释见 minecartmanager.h）：以车心为基准、

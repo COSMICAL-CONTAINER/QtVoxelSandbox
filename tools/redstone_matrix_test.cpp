@@ -20756,6 +20756,208 @@ Item {
                           ;
     }
 
+    // ── P-t940 脱轨车近轨吸附探针（MinecartManager 直编；spec「玩家身体碰撞把矿车推到旁边铁轨上时，
+    //    矿车自动吸附回轨恢复正常移动形态（近轨 snap）」）──
+    //   根因：脱轨 / 地面车被推进轨格列后仍走 tickDerailedCart 自由物理（贴地高度穿轨板滑行、沿轨推
+    //   也走 derailed 分支）——轨只「接住」了位置，没接回移动形态。修 = tickDerailedCart 收尾近轨吸附
+    //   trySnapDerailedToRail（同层闸 Δ=0 + pickTrackStep 死端外向不吸 + 复用 pinCartY / updateCartPitch
+    //   同一套钉定）。断言五段：
+    //   (a) 横推上轨（用户场景）：轨南侧地面车被北推 → 吸回 EW 轨（轨心对齐 |x/z−0.5| + 骑乘高 rideH
+    //       —— groundH 0.3875 差 0.0625 为形态签名）+ 停驻轨上不北漂；吸回后推手继续贴推（横推 =
+    //       t908 no-op，不二次脱轨）；
+    //   (b) 沿轨推上轨（西引道东推入轨端）：吸附保留沿轨速度（沿轨前进 ≥1.2 格贴 rideH 滑行至磨停，
+    //       终态轨上形态——旧代码 groundH 穿轨滑行出线）；
+    //   (c) 阴性·t908/t863④ 推离不吸回：西死端车沿轴外推 → 出轨西滑，落定轨外地面 groundH（不被吸回
+    //       轨上 rideH）；续跑 100 tick 位不动（平地脱轨车远离轨不吸附）；
+    //   (d) 坡轨吸附：脱轨车西推入 NS 坡格（北邻 +1）→ 吸附 Y 钉**坡面**（railY + rise(0.5) + rideH
+    //       = +0.95，非平地高度 +0.45）+ X 钉轨心线 + 俯仰 45°（放置即贴坡同函数）；
+    //   (e) 源码钉：snap 调用点 / helper 定义与声明（防静默移除）。
+    {
+        // rig 选址：运行期扫描空区（t908 模式）。footprint x0-6..x0+3 × z0-1..z0+4 × kRigY-2..kRigY+2
+        //   （(c) 西滑走廊地板铺到 x0-5 —— 推离 4 blocks/s / 摩擦 ≤2/s 最远 ~4 格）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 8; xx + 3 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -6; dx <= 3 && clear; ++dx)
+                    for (int dz = -1; dz <= 4 && clear; ++dz)
+                        for (int dy = -2; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        bool okA = false, okB = false, okC = false, okD = false;
+        if (x0 < 0) {
+            qInfo().noquote() << "  [t940 diag] no clear rig area found";
+        } else {
+            const float rideH = 0.45f;     // kCartRideH 镜像（轨上形态签名；groundH 0.3875 与之差 0.0625）
+            const float groundH = 0.3875f; // kCartGroundH 镜像（自由体贴地落定中心偏移）
+            // rig：z=z0 主线 EW 三格轨（x0..x0+2）+ 主线 / 西引道地板（x0-5..x0+2）；(a) 南腿地板
+            //     (x0+1,z0+1)；z=z0+3 坡腿：坡格 (x0,Y) + 北上邻轨 (x0,Y+1,z0+2)（支撑 Stone @Y）+ 地板。
+            for (int i = -5; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+            w.setBlock(x0 + 1, kRigY - 1, z0 + 1, BR::Stone, 0);
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0 + 3, BR::Stone, 0);
+            w.setBlock(x0, kRigY, z0 + 2, BR::Stone, 0); // 上邻轨支撑
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Rail, 0); // EW 主线
+            w.setBlock(x0, kRigY + 1, z0 + 2, BR::Rail, 0); // 坡上邻（北 = -Z）
+            w.setBlock(x0, kRigY, z0 + 3, BR::Rail, 0);     // 坡格（北邻 +1 → rise=1-fz）
+            // ── (a) 横推上轨（用户场景）：南侧地面车北推 → 吸回轨。──
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 + 1, kRigY, z0 + 1, &w); // 非轨格 → 地面静止模式
+                bool snapped = false;
+                int snapTick = -1;
+                for (int t = 0; t < 200 && !snapped; ++t) {
+                    const QVector3D tp = carts.posAt(0);
+                    carts.pushEmptyCart(&w, QVector3D(tp.x(), tp.y(), tp.z() + 0.4f), 0.0f, -1.0f); // 北推
+                    carts.tickPushedCarts(0.016f, &w);
+                    const QVector3D p = carts.posAt(0);
+                    if (std::fabs(p.y() - (float(kRigY) + rideH)) < 0.02f
+                        && std::fabs(p.z() - (float(z0) + 0.5f)) < 0.01f) { snapped = true; snapTick = t; }
+                }
+                // 吸回后推手继续贴推 30 tick：EW 轨上北向推 = 横推（t908 no-op）—— 不二次脱轨 / 不北漂。
+                for (int t = 0; t < 30; ++t) {
+                    const QVector3D tp = carts.posAt(0);
+                    carts.pushEmptyCart(&w, QVector3D(tp.x(), tp.y(), tp.z() + 0.4f), 0.0f, -1.0f);
+                    carts.tickPushedCarts(0.016f, &w);
+                }
+                const QVector3D fa = carts.posAt(0);
+                okA = snapped && carts.aliveAt(0)
+                    && std::fabs(fa.x() - (float(x0 + 1) + 0.5f)) < 0.02f // 沿轴坐标保留（spawn 位不动）
+                    && std::fabs(fa.z() - (float(z0) + 0.5f)) < 0.01f     // 垂直轴钉轨心线（轨心对齐）
+                    && std::fabs(fa.y() - (float(kRigY) + rideH)) < 0.02f // 轨上形态（rideH vs groundH）
+                    && fa.z() > float(z0);                                // 停驻轨上（未被推穿北侧）
+                if (!okA)
+                    qInfo().noquote() << "  [t940 diag] a snapped" << snapped
+                                      << "snapTick" << snapTick << "final" << fa;
+                carts.clearAll();
+            }
+            // ── (b) 沿轨推上轨（西引道东推入轨端）：吸附保留沿轨速度 → 贴 rideH 沿轨滑行磨停。──
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 - 1, kRigY, z0, &w); // 主线西侧一格地面车
+                const QVector3D p0 = carts.posAt(0);
+                carts.pushEmptyCart(&w, QVector3D(p0.x() - 0.4f, p0.y(), p0.z()), 1.0f, 0.0f); // 东推（一次性）
+                bool snapped = false;
+                float maxXRailed = -99.0f;
+                for (int t = 0; t < 400; ++t) {
+                    carts.tickPushedCarts(0.016f, &w);
+                    const QVector3D p = carts.posAt(0);
+                    if (p.x() > float(x0) && std::fabs(p.y() - (float(kRigY) + rideH)) < 0.02f) {
+                        snapped = true;                                 // 轨上形态（吸附成立）
+                        maxXRailed = std::max(maxXRailed, float(p.x()));
+                    }
+                }
+                const QVector3D fb = carts.posAt(0);
+                okB = snapped && carts.aliveAt(0)
+                    && maxXRailed >= float(x0) + 1.2f                     // 沿轨速度保留：吸后沿轨前进 ≥1.2 格
+                    && fb.x() > float(x0) && fb.x() < float(x0 + 3)       // 终位留在轨线（摩擦磨停，未飞出）
+                    && std::fabs(fb.y() - (float(kRigY) + rideH)) < 0.02f // 终态轨上形态（旧代码 groundH 穿轨）
+                    && std::fabs(fb.z() - (float(z0) + 0.5f)) < 0.02f;    // 轨心线（不侧漂）
+                if (!okB)
+                    qInfo().noquote() << "  [t940 diag] b snapped" << snapped
+                                      << "maxXRailed" << maxXRailed << "final" << fb;
+                carts.clearAll();
+            }
+            // ── (c) 阴性·t908/t863④ 推离不吸回：西死端车沿轴外推 → 出轨西滑落定轨外地面。──
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0, kRigY, z0, &w); // 西死端格轨上静止车（轨模式）
+                for (int t = 0; t < 300; ++t) {
+                    const QVector3D tp = carts.posAt(0);
+                    if (tp.x() < float(x0) - 0.6f) break; // 已滑离轨格（免追推干扰）
+                    carts.pushEmptyCart(&w, QVector3D(tp.x() + 0.4f, tp.y(), tp.z()), -1.0f, 0.0f);
+                    carts.tickPushedCarts(0.016f, &w);
+                }
+                for (int t = 0; t < 200; ++t) carts.tickPushedCarts(0.016f, &w); // 滑行渐停
+                const QVector3D fc0 = carts.posAt(0);
+                for (int t = 0; t < 100; ++t) carts.tickPushedCarts(0.016f, &w); // 远离轨续跑
+                const QVector3D fc = carts.posAt(0);
+                okC = fc0.x() < float(x0) - 0.3f                             // 确已推离轨格（不被吸回）
+                    && std::fabs(fc0.y() - (float(kRigY) + groundH)) < 0.02f // 落定轨外地面（自由体形态）
+                    && carts.aliveAt(0)
+                    && std::fabs(fc.x() - fc0.x()) < 0.01f                   // 续跑不动（无吸附 / 无漂移）
+                    && std::fabs(fc.y() - fc0.y()) < 0.01f;
+                if (!okC) qInfo().noquote() << "  [t940 diag] c settle" << fc0 << "after" << fc;
+                carts.clearAll();
+            }
+            // ── (d) 坡轨吸附：东引道西推入 NS 坡格 → Y 钉坡面（rise 0.5）+ X 钉轨心线 + 45° 贴坡。──
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 + 1, kRigY, z0 + 3, &w); // 坡格东侧一格地面车
+                bool snapped = false;
+                for (int t = 0; t < 200 && !snapped; ++t) {
+                    const QVector3D tp = carts.posAt(0);
+                    carts.pushEmptyCart(&w, QVector3D(tp.x() + 0.4f, tp.y(), tp.z()), -1.0f, 0.0f); // 西推
+                    carts.tickPushedCarts(0.016f, &w);
+                    const QVector3D p = carts.posAt(0);
+                    if (std::fabs(p.x() - (float(x0) + 0.5f)) < 0.01f
+                        && std::fabs(p.y() - (float(kRigY) + 0.95f)) < 0.02f) snapped = true;
+                }
+                const QVector3D fd = carts.posAt(0);
+                okD = snapped && carts.aliveAt(0)
+                    && std::fabs(fd.x() - (float(x0) + 0.5f)) < 0.01f     // X 钉轨心线（吸附「吸」位移）
+                    && std::fabs(fd.z() - (float(z0 + 3) + 0.5f)) < 0.01f // 沿轴坐标保留（z 不动）
+                    && std::fabs(fd.y() - (float(kRigY) + 0.95f)) < 0.02f // Y 钉坡面（rise 0.5；平地高 +0.45）
+                    && std::fabs(carts.pitchAt(0) - 45.0f) < 1.0f;        // 贴坡俯仰（updateCartPitch 同函数）
+                if (!okD)
+                    qInfo().noquote() << "  [t940 diag] d snapped" << snapped
+                                      << "final" << fd << "pitch" << carts.pitchAt(0);
+                carts.clearAll();
+            }
+            // 清场。
+            for (int i = -5; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, kRigY - 1, z0 + 1, BR::Air, 0);
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY - 1, z0 + 3, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0 + 2, BR::Air, 0);
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+            w.setBlock(x0, kRigY + 1, z0 + 2, BR::Air, 0);
+            w.setBlock(x0, kRigY, z0 + 3, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (e) 源码钉（t939 模式：字符串钉——snap 调用点 / helper 定义 / 头文件声明，任一消失即红）。
+        const QString exeDir940 = QCoreApplication::applicationDirPath();
+        const QString root940 = QDir(exeDir940 + QStringLiteral("/..")).absolutePath();
+        auto readSrc940 = [&root940](const QString &rel) -> QString {
+            QFile f(root940 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mc940 = readSrc940(QStringLiteral("src/Entities/minecartmanager.cpp"));
+        const QString mh940 = readSrc940(QStringLiteral("src/Entities/minecartmanager.h"));
+        const bool okE1 = mc940.contains(QStringLiteral("    trySnapDerailedToRail(c, world);"));
+        const bool okE2 = mc940.contains(
+            QStringLiteral("bool MinecartManager::trySnapDerailedToRail(Cart &c, World *world)"));
+        const bool okE3 = mh940.contains(QStringLiteral("bool trySnapDerailedToRail(Cart &c, World *world);"));
+        const bool okT940 = okA && okB && okC && okD && okE1 && okE2 && okE3;
+        if (!okT940) ++totalFail;
+        if (!okT940)
+            qInfo().noquote() << "  [t940 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "| e" << okE1 << okE2 << okE3
+                              << "| srcLen cpp" << mc940.size() << "h" << mh940.size();
+        qInfo().noquote() << (okT940 ? "PASS" : "FAIL")
+                          << "| t940 body-pushed derailed cart snaps back onto a nearby rail: a cart shoved"
+                             " sideways or along the ground into a rail cell was caught positionally but kept"
+                             " free-body physics (gliding at ground height through the rail boards, pushes"
+                             " routed through the derailed branch - never regaining rail movement form). Fix"
+                             " adds an end-of-free-physics near-rail snap (trySnapDerailedToRail) with a"
+                             " same-layer gate (rail layer must equal the cart-center cell, strict column"
+                             " scan so solid floors block), a dead-end-outward exemption (pickTrackStep with"
+                             " the current velocity - the only arm anti-parallel to an exiting push filters"
+                             " out, preserving t863(4)/t908 push-off semantics; orphan 0-connection rails"
+                             " never snap), and reuses the placement/riding pinning set (perpendicular axis"
+                             " onto the rail center line, Y=pinCartY on the same rise surface - slope rails"
+                             " pin to the sloped face not flat height, pitch via updateCartPitch, head along"
+                             " the selected arm) with velocity projected onto the rail axis (lateral"
+                             " component dropped per the t908 decomposition). Probe legs: (a) lateral"
+                             " ground shove onto an EW line snaps within ticks - center-line aligned, riding"
+                             " height, parked on the rail, continued lateral pushing stays a no-op; (b)"
+                             " along-rail entry preserves along-rail speed and glides >=1.2 cells glued to"
+                             " the surface; (c) dead-end along-axis push-off still exits west and settles on"
+                             " the ground off-track (not re-snapped) and stays put; (d) slope-cell snap pins"
+                             " Y to the slope face (+0.95 = rise 0.5 + rideH, not flat +0.45) with a 45deg"
+                             " pitch; (e) source pins for the call site, helper definition and declaration"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
