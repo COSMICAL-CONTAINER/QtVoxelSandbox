@@ -2152,6 +2152,11 @@ const EggTint *spawnEggTint(int itemId)
         static const EggTint kOcelot = { { 0xe8, 0xc8, 0x90 }, { 0x7a, 0x4a, 0x20 } };
         return &kOcelot;
     }
+    // t952 小蹒跚者：亮黄绿幼体壳 + 棕褐斑（baby shambler shell #5a7a42 / rot #6a4a2a——成体蛋亮一档同族色）。
+    if (itemId == 0x25D) {
+        static const EggTint kBabyShambler = { { 0x5a, 0x7a, 0x42 }, { 0x6a, 0x4a, 0x2a } };
+        return &kBabyShambler;
+    }
     return nullptr;
 }
 

@@ -1593,13 +1593,14 @@ Window {
             if (!entityManager.aliveAt(i)) continue
             if (entityManager.kindAt(i) !== EntityManager.Mob) continue
             const mt = entityManager.mobTypeAt(i)
-            if (mt !== EntityManager.MobShambler && mt !== EntityManager.MobBones) continue
+            if (mt !== EntityManager.MobShambler && mt !== EntityManager.MobBones
+                && mt !== EntityManager.MobBabyShambler) continue // t952 小蹒跚者同门（幼体人形可穿甲）
             const p = entityManager.posAt(i)
             const dx = p.x - pp.x, dz = p.z - pp.z
             const d2 = dx * dx + dz * dz
             if (d2 < bestD2) { bestD2 = d2; best = i }
         }
-        if (best < 0) return "附近没有蹒跚者/骸骨（人形 mob）"
+        if (best < 0) return "附近没有蹒跚者/骸骨/小蹒跚者（人形 mob）"
         const names = ["皮革", "铁", "铜", "金", "钻石"]
         if (entityManager.setMobArmorSet(best, tier)) {
             return (tier >= 0 && tier <= 4)
@@ -1666,6 +1667,7 @@ Window {
             "cow": EntityManager.MobCow,
             "sheep": EntityManager.MobSheep,
             "shambler": EntityManager.MobShambler,
+            "babyshambler": EntityManager.MobBabyShambler, // t952 小蹒跚者（/kill @e[type=babyshambler]）
             "bones": EntityManager.MobBones,
             "stalker": EntityManager.MobStalker,
             "spider": EntityManager.MobSpider,
@@ -2408,6 +2410,7 @@ Window {
             //   小世界量身调（非 MC 精确复刻，PLAN §4 机制对标非数值 1:1）。
             const xpForMob = {}
             xpForMob[EntityManager.MobShambler] = 5   // 蹒跚者（僵尸）：5 XP
+            xpForMob[EntityManager.MobBabyShambler] = 3 // t952 小蹒跚者（幼体僵尸）：3 XP（幼体低收益口径，成体 5 的低档）
             xpForMob[EntityManager.MobBones]    = 5   // 骸骨（骷髅）：5 XP
             xpForMob[EntityManager.MobStalker]  = 5   // 潜行者（苦力怕）：5 XP（自爆型，同敌对量级）
             xpForMob[EntityManager.MobSpider]   = 5   // 蜘蛛：5 XP
@@ -2477,6 +2480,9 @@ Window {
                 //   0x22F = RecipeRegistry::CarrotId / 0x230 = RecipeRegistry::PotatoId（⚠️ QML 用字面量同上注释约定）。
                 if (Math.random() < 0.025) itemEntities.spawnItem(x, y, z, 0x22F, 1)  // 胡萝卜 ~2.5%
                 if (Math.random() < 0.025) itemEntities.spawnItem(x, y, z, 0x230, 1)  // 马铃薯 ~2.5%
+            } else if (mobType === EntityManager.MobBabyShambler) {
+                // t952 小蹒跚者掉落：腐肉 ×1（幼体低收益口径——成体 1-2 + 稀有作物的低档，无稀有掉落）。
+                itemEntities.spawnItem(x, y, z, 0x218, 1)   // 腐肉 ×1（0x218 = RecipeRegistry::RottenFleshId）
             } else if (mobType === EntityManager.MobSpider) {
                 // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
                 itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2
@@ -2610,6 +2616,7 @@ Window {
                 //   EntityManager 解耦（不引入 C++ 反向依赖）。未知 mobType → Generic。
                 var cause = PlayerState.Generic
                 if (mobType === EntityManager.MobShambler) cause = PlayerState.Shambler
+                else if (mobType === EntityManager.MobBabyShambler) cause = PlayerState.Shambler // t952 小蹒跚者死因同族「被蹒跚者杀死」（幼体近战同一死因语义）
                 else if (mobType === EntityManager.MobBones) cause = PlayerState.Bones
                 else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
@@ -4053,6 +4060,10 @@ Window {
         //   破布残片 + 缝合痕（build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC 皮肤）。MobModel 人形几何
         //   （躯干/头/双臂前伸/双腿）每面铺整张贴图 [0,1]×[0,1]（同猪牛羊全脸 UV）；实心无 alpha → 不透明材质。
         Texture { id: mobShamblerTex; source: "qrc:/textures/mob_shambler.png"; generateMipmaps: false }
+        // t952 小蹒跚者（BabyShambler；机制等价 MC 幼体僵尸，§9 区隔命名 + 原创贴图）：亮一档的黄绿幼体
+        //   腐肉底（同族霉斑 / 腐痕纹样，build_mob.py 程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel
+        //   mobType 19 幼体比例人形几何每面铺整张贴图（pack 无幼体独立皮 → 恒程序贴图，无 pack 分流）。
+        Texture { id: mobBabyShamblerTex; source: "qrc:/textures/mob_baby_shambler.png"; generateMipmaps: false }
         // t398 鸡（Chicken；机制等价 MC 1.0 鸡，§9 原创）：白羽底 + 棕褐翅尖 / 尾羽斑 + 浅暖黄腹部（build_mob.py
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 小型鸟几何（躯干/头/尾/2 腿）每面铺整张贴图。
         Texture { id: mobChickenTex; source: "qrc:/textures/mob_chicken.png"; generateMipmaps: false }
@@ -6904,6 +6915,8 @@ Window {
                         if (entMobType === 3) return 0.44 - mobHalfH   // sheep
                         // t282 Shambler（人形）：MobModel 腿底本地 |y|=0.90（halfH=0.90 → offset=0，腿底贴 collision 底面）。
                         if (entMobType === EntityManager.MobShambler) return 0.90 - mobHalfH
+                        // t952 小蹒跚者（幼体人形）：MobModel 腿底本地 |y|=0.45（halfH=0.45 → offset=0，腿底贴 collision 底面）。
+                        if (entMobType === EntityManager.MobBabyShambler) return 0.45 - mobHalfH
                         // t284 Stalker（潜行者/苦力怕）：MobModel 腿底本地 |y|=0.90（halfH=0.90）。
                         //   t894 视觉缩到 0.85（用户「现偏大」）：腿底缩后 0.90×0.85=0.765 → offset 以**缩后**
                         //   腿底贴 collision 底面（否则脚下悬空 0.135）。**只缩视觉不缩碰撞盒**（halfW/halfH
@@ -7861,6 +7874,173 @@ Window {
                                         visible: parent.bootArmId !== 0
                                         geometry: ArmorLayerBox { piece: 4 }
                                         position: Qt.vector3d(0, -0.50, -0.03); scale: Qt.vector3d(0.26, 0.34, 0.30)   // t854 靴=脚+踝段（比腿件短、包住脚部）：y∈[-0.67,-0.33] 盖腿底 0.65-0.33 踝段；z 前探 0.03 成靴头（同玩家靴先例）；旧 (0,-0.57)@(0.20,0.16,0.26) 只盖脚底 0.16 一小截
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                            baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobBabyShambler
+                        sourceComponent: Component {
+                            Model {
+                                // t952 小蹒跚者（BabyShambler，mobType 19；机制等价 MC 幼体僵尸，§9 改名 + 原创
+                                //   模型/贴图）：MobModel 幼体比例人形几何（头大身小——躯干四肢 ×0.5、头近原大）
+                                //   + mob_baby_shambler 程序贴图（亮黄绿幼体配色；pack 无幼体独立皮 → 恒程序贴图，
+                                //   无 pack 分流）。近战 AI 走 aiHostile 同链（t952 快速低伤参数）；生成时概率组成
+                                //   「小鸡骑士」（骑手 AI 驱动载具位移，本 delegate 只管呈现）。
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobBabyShambler
+                                geometry: MobModel {
+                                    mobType: 19
+                                    walkPhase: { const _r = mon.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0) // halfH=0.45 → offset 0（腿底贴 collision 底面）
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    // 受击红闪：hurtFlashAt>0 → baseColor=#ff0000 调制贴图全红（同 Shambler 红闪语义）。
+                                    baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                    baseColorMap: mobBabyShamblerTex
+                                }
+                                // 亡灵赤红眼（MobModel mobType 19 头心 (0,0.345,0) 半 0.17 → 前面 z=-0.17；眼
+                                //   y≈0.39、x=±0.07、z=-0.18 略凸防 z-fight；尺寸 ~0.6× 成体眼层）。恒显（无 pack 分流）。
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, 0.39, -0.18)
+                                    scale: Qt.vector3d(0.05, 0.055, 0.015)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                                }
+                                Model {
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, 0.39, -0.18)
+                                    scale: Qt.vector3d(0.05, 0.055, 0.015)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#b01818" }
+                                }
+                                // t952 小蹒跚者护甲（4 部位；t377 随机甲 + t950 拾取穿着链可穿——幼体可穿盔甲口径）。
+                                //   结构同 Shambler 段（ArmorLayerBox + layer 贴图 + 髋枢腿摆），id 加 baby* 前缀保全局
+                                //   唯一；盒位/尺寸按幼体几何缩（头甲近原大 → 「幼体戴成体盔」观感；躯干/四肢 ×0.5）。
+                                Model { // 头盔（piece 0）
+                                    id: babyArmorHead
+                                    property int armId: { const _r = mon.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 0)) : 0 }
+                                    visible: armId !== 0
+                                    geometry: ArmorLayerBox { piece: 0 }
+                                    position: Qt.vector3d(0, 0.415, 0); scale: Qt.vector3d(0.38, 0.24, 0.38)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                        baseColorMap: window.armorLayerTex(babyArmorHead.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                Model { // 胸甲（piece 1；幼体躯干心 0.025 半 (0.11,0.15,0.06) → 全高壳）
+                                    id: babyArmorChest
+                                    property int armId: { const _r = mon.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 1)) : 0 }
+                                    visible: armId !== 0
+                                    geometry: ArmorLayerBox { piece: 1 }
+                                    position: Qt.vector3d(0, 0.025, 0); scale: Qt.vector3d(0.28, 0.38, 0.20)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                        baseColorMap: window.armorLayerTex(babyArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                Model { // 左胸甲袖（随左前伸臂；幼体臂 (±0.165,0.115,-0.185) 半 (0.05,0.05,0.125)）
+                                    visible: babyArmorChest.armId !== 0
+                                    geometry: ArmorLayerBox { piece: 2 }
+                                    position: Qt.vector3d(-0.165, 0.115, -0.185)
+                                    eulerRotation: Qt.vector3d(90, 0, 0)
+                                    scale: Qt.vector3d(0.15, 0.30, 0.15)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                        baseColorMap: window.armorLayerTex(babyArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                Model { // 右胸甲袖（镜像）
+                                    visible: babyArmorChest.armId !== 0
+                                    geometry: ArmorLayerBox { piece: 2 }
+                                    position: Qt.vector3d(0.165, 0.115, -0.185)
+                                    eulerRotation: Qt.vector3d(90, 0, 0)
+                                    scale: Qt.vector3d(0.15, 0.30, 0.15)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                        baseColorMap: window.armorLayerTex(babyArmorChest.armId, 1)
+                                        alphaCutoff: 0.5
+                                        opacity: 0.99
+                                    }
+                                }
+                                // 护腿/靴（piece 2/3）随腿 walkPhase 摆动：同 Shambler 段髋枢结构（枢 y=−0.125 与
+                                //   mobmodel.cpp mobType 19 腿枢 hipYB 一致；mobArmorLegSwingDeg 同幅同相）。
+                                Node { // 左腿盔甲枢轴（髋 y=−0.125；腿心 x=−0.055）
+                                    id: babyArmorLegPivotL
+                                    property int legArmId: { const _r = mon.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
+                                    property int bootArmId: { const _r = mon.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
+                                    property real legSwing: { const _r = mon.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), 1)) : 0 }
+                                    visible: legArmId !== 0 || bootArmId !== 0
+                                    position: Qt.vector3d(-0.055, -0.125, 0)
+                                    eulerRotation.x: legSwing
+                                    Model { // 左护腿（幼体全腿高：髋枢到腿底 0.325 → 壳 0.36+探 0.04）
+                                        visible: parent.legArmId !== 0
+                                        geometry: ArmorLayerBox { piece: 3 }
+                                        position: Qt.vector3d(0, -0.1625, 0); scale: Qt.vector3d(0.16, 0.40, 0.17)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                            baseColorMap: window.armorLayerTex(parent.legArmId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
+                                    }
+                                    Model { // 左靴（脚+踝段；z 前探成靴头）
+                                        visible: parent.bootArmId !== 0
+                                        geometry: ArmorLayerBox { piece: 5 }
+                                        position: Qt.vector3d(0, -0.26, -0.015); scale: Qt.vector3d(0.16, 0.20, 0.19)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                            baseColorMap: window.armorLayerTex(parent.bootArmId, 2)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
+                                    }
+                                }
+                                Node { // 右腿盔甲枢轴（镜像；右腿摆角反相）
+                                    id: babyArmorLegPivotR
+                                    property int legArmId: { const _r = mon.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 2)) : 0 }
+                                    property int bootArmId: { const _r = mon.revision; return _r >= 0 ? (entityManager.mobArmorAt(index, 3)) : 0 }
+                                    property real legSwing: { const _r = mon.revision; return _r >= 0 ? (mobArmorLegSwingDeg(entityManager.walkPhaseAt(index), -1)) : 0 }
+                                    visible: legArmId !== 0 || bootArmId !== 0
+                                    position: Qt.vector3d(0.055, -0.125, 0)
+                                    eulerRotation.x: legSwing
+                                    Model { // 右护腿
+                                        visible: parent.legArmId !== 0
+                                        geometry: ArmorLayerBox { piece: 3 }
+                                        position: Qt.vector3d(0, -0.1625, 0); scale: Qt.vector3d(0.16, 0.40, 0.17)
+                                        materials: PrincipledMaterial {
+                                            lighting: PrincipledMaterial.NoLighting
+                                            baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
+                                            baseColorMap: window.armorLayerTex(parent.legArmId, 1)
+                                            alphaCutoff: 0.5
+                                            opacity: 0.99
+                                        }
+                                    }
+                                    Model { // 右靴（piece 4 右靴区）
+                                        visible: parent.bootArmId !== 0
+                                        geometry: ArmorLayerBox { piece: 4 }
+                                        position: Qt.vector3d(0, -0.26, -0.015); scale: Qt.vector3d(0.16, 0.20, 0.19)
                                         materials: PrincipledMaterial {
                                             lighting: PrincipledMaterial.NoLighting
                                             baseColor: { const _r = mon.revision; return _r >= 0 ? mobArmorTintT(index) : "#ffffff" }
@@ -9903,10 +10083,12 @@ Window {
                     if (t === EntityManager.MobCow) return 0.47         // 体高 0.90（含角尖）
                     if (t === EntityManager.MobSheep) return 0.55       // 体高 0.77
                     if (t === EntityManager.MobEmberling) return 0.38   // t782 头+4棒全跨 1.12（[-0.58,0.54]；棒随共享几何在笼内可见）
+                    if (t === EntityManager.MobBabyShambler) return 0.44 // t952 幼体全跨 ~0.97（[-0.45,0.515]；0.42/0.97≈0.43）
                     return 0.25                                          // Shambler/Bones 人形体高 ~1.65-1.69
                 }
                 function miniMobYOff(t) {
                     if (t === EntityManager.MobShambler) return -0.014
+                    if (t === EntityManager.MobBabyShambler) return 0.005 // t952 跨 [-0.45,0.515] 体心 -0.03 → 微调居中
                     if (t === EntityManager.MobBones) return -0.019
                     if (t === EntityManager.MobStalker) return 0.011    // Stalker 体心在原点上方 → 下移补偿
                     if (t === EntityManager.MobSpider) return 0.043
@@ -9933,6 +10115,8 @@ Window {
                     }
                     if (t === EntityManager.MobShambler)
                         return [E(-0.09, 0.62, -0.23, 0.07, 0.08, "#b01818"), E(0.09, 0.62, -0.23, 0.07, 0.08, "#b01818")]
+                    if (t === EntityManager.MobBabyShambler) // t952 幼体赤红眼（头心 0.345 半 0.17 → 眼 y 0.39、x ±0.07、z -0.18）
+                        return [E(-0.07, 0.39, -0.18, 0.05, 0.055, "#b01818"), E(0.07, 0.39, -0.18, 0.05, 0.055, "#b01818")]
                     if (t === EntityManager.MobBones)
                         return [E(-0.06, 0.62, -0.17, 0.06, 0.07, "#1a1a1a"), E(0.06, 0.62, -0.17, 0.06, 0.07, "#1a1a1a")]
                     if (t === EntityManager.MobStalker)
@@ -10007,6 +10191,7 @@ Window {
                         property QtObject miniProgTex: {
                             const t = spawnerRoot.cageMobType
                             if (t === EntityManager.MobShambler) return mobShamblerTex
+                            if (t === EntityManager.MobBabyShambler) return mobBabyShamblerTex // t952 幼体程序贴图（无 pack 分流）
                             if (t === EntityManager.MobSilverfish) return mobSilverfishTex
                             if (t === EntityManager.MobPig) return mobPigTex
                             if (t === EntityManager.MobCow) return mobCowTex

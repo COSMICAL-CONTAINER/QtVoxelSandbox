@@ -494,6 +494,8 @@ void AudioManager::playUIClick()
 void AudioManager::playMobAmbient(int mobType)
 {
     int idx = mobType;
+    // t952 小蹒跚者（mobType 19）同族采蹒跚者哀嚎（幼体 = 成体同音色，无独立合成 clip；区别于 generic 兜底）。
+    if (idx == 19) idx = 4;
     if (idx < 0 || idx >= 8) idx = 0; // 越界 → generic 兜底（永不静默：spec 缺组用最常见音色）
     d->replay(d->mobIdleClips[size_t(idx)], m_volume * 0.85f);
 }

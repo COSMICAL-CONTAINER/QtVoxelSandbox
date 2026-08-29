@@ -230,7 +230,7 @@ public:
     //   分支（同 Arrow）。死亡掉 0-1 燃烬棒（BlazeRodId 0x245，t726）+ 3 XP（呈现层 onMobDied 分流）。死因
     //   DeathCause::Emberling「被燃烬者的火球焚杀」（t727 Nightwalker 先例）。§9 原创：名称 / 模型（MobModel
     //   中心头盒 + QML 环绕旋转竖棒）/ 贴图（t717 已建 entity_emberling 程序贴图 + pack blaze.png）全原创。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18, MobBabyShambler = 19 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）；t952 MobBabyShambler=19 小蹒跚者（幼体僵尸：<1 格高 halfH=0.45、移速快 kBabyShamblerChaseSpeedMul、低伤 kBabyShamblerAttackDamage、可穿盔甲——t950 拾取门 / t377 随机甲门 / setMobArmorSet 族门均入白名单；概率与小鸡组成「小鸡骑士」——kChickenJockeyChance，见 rideMob/mobRider 双向链）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -251,6 +251,10 @@ public:
     //   后再翻 Entity.hostile（spawnMobTyped 是通用入口，不知哪些 mobType 是敌对；本入口收口敌对语义）。
     //   达 kCap → 委托内静默跳过。mobType 仅 MobShambler/MobBones 合法（其余当敌对调是非语义，但仍生成不崩）。
     Q_INVOKABLE void spawnHostileMob(int x, int y, int z, int mobType);
+    // t952 小鸡骑士组合概率缝写（缺省 kChickenJockeyChance=0.05；0=生成恒独立 / ≥1=生成必组合——矩阵探针
+    //   C++ 直调端钉概率两端，同 PlayerController::setEquipmentPickupChance 先例）。纯标量状态（非世界态，
+    //   跨世界 reset 族无需清）。QML 调试命令可直调。
+    Q_INVOKABLE void setChickenJockeyChance(qreal chance);
     // t374 被动生物群系化生成类型选取：据群系 id（World::biomeIdAt 编码：0=Plains, 1=Hills, 2=Desert,
     //   3=Forest）按 kPassiveSpawnWeights 加权随机返 MobPig/MobCow/MobSheep/MobChicken 之一。机制等价 MC 1.0
     //   群系化被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
@@ -501,6 +505,9 @@ public:
     //   （tickVehicleRiding）；越界 / 非 Mob → -1。矩阵探针 + QML 坐姿切换预留读口（同 moveSpeedAt 模式）。
     Q_INVOKABLE int rideCartAt(int i) const;
     Q_INVOKABLE int rideBoatAt(int i) const;
+    // t952 mob-on-mob 骑乘双向链读口（-1 = 无链；矩阵探针钉骑士组合 / 分离腿 + QML 预留）。越界 → -1。
+    Q_INVOKABLE int rideMobAt(int i) const;
+    Q_INVOKABLE int mobRiderAt(int i) const;
     // t300 第 i 只 mob 是否**已被剪羊毛**（仅 mobType==MobSheep 用；其余 mob 永远 false）。QML delegate 据它切换
     //   羊的「毛茸」外观 vs 「裸」外观（sheared=true → 裸粉色身；false → mob_sheep 贴图毛茸身）。越界 / 非 sheep → false。
     //   revision 在剪羊毛 / 重新长毛时 bump 让 QML 绑定刷新（同 hurtFlash / chasing 模式）。
@@ -1508,6 +1515,17 @@ private:
         int rideCart = -1;     // 乘坐的矿车槽索引（-1 = 未乘；仅 Mob 用）
         int rideBoat = -1;     // 乘坐的船槽索引（-1 = 未乘；仅 Mob 用）
         int rideBoatSeat = 0;  // 船座位号 0/1（仅 rideBoat>=0 时读；登乘时分配）
+        // t952 mob-on-mob 骑乘（小鸡骑士；与 rideCart/rideBoat 载具系互斥正交 —— 双向链挂在 Entity 槽上，
+        //   非管理器槽索引）：rideMob >= 0 = 本 mob 正骑在 mobRider 槽指向的**载具 mob**（小蹒跚者 → 小鸡）；
+        //   mobRider >= 0 = 本 mob 背上驮着 rideMob 槽指向的**骑手 mob**（小鸡 → 小蹒跚者）。骑乘期被骑乘者
+        //   （rideMob>=0）主循环冻结（同 rideCart 口径：AI / 物理 / 环境判定停），但其 AI 在 tickMobMounts
+        //   挂载 pass 内以节流节奏照跑并**驱动载具位移**（骑手追击 → 小鸡跟着走；小鸡自身 AI 挂起）；位置
+        //   由 pass 钉载具顶（rider.pos = mount.pos + mount.halfH + rider.halfH）。任一侧死亡 / 槽复用 →
+        //   pass 双向对账解除（小鸡死 → 小僵尸落地独立恢复 AI；小僵尸死 → 小鸡恢复自主漫步）。放 struct
+        //   末尾区保既有聚合初始化不错位（t256 元教训）；DMI 兜底默认 -1，spawnMobCore 整体 move 入槽 →
+        //   槽复用自动清回 -1。
+        int rideMob = -1;      // 正骑乘的载具 mob 槽索引（-1 = 未骑乘；t952 仅 MobBabyShambler→MobChicken 用）
+        int mobRider = -1;     // 背上骑手的 mob 槽索引（-1 = 无骑手；t952 仅 MobChicken 被 MobBabyShambler 骑用）
         // t948 敌对 mob 仇恨目标（slot+serial 双快照；同 bobberHookedIdx/Serial 槽复用防线先例）：
         //   mobAggroAgainst（狼主动咬击命中处调，t923 wolfRetaliateAgainst 的反向互补面）注册「被咬者 →
         //   咬它的驯服狼」——aiHostile / aiArcher 每 AI tick 经 resolveAggroTarget 校验消费：死亡 / 槽复用
@@ -1654,6 +1672,15 @@ private:
     //   tickBreeding 批量产幼崽后统一一次 emit，避免高频扇出 notify 风暴，同 t320/t354 批量收口纪律）。
     //   t400 caller 据返回 slot 设 baby=true / growTimer（幼崽态）后再由 caller 统一 emit。
     int spawnMobCore(int x, int y, int z, int mobType, const QString &color, int maxHealth);
+    // t952 小鸡骑士组合（spawnMobCore 末段对小蹒跚者调）：掷 m_chickenJockeyChance → 命中且槽位有余 →
+    //   同格 spawn 一只 MobChicken（经 spawnMobCore，小鸡不递归组合）并挂双向链（baby.rideMob = chickenSlot
+    //   / chicken.mobRider = babySlot），骑手即时钉到载具顶（emit 前，QML 首帧即见骑士姿态）；槽满 →
+    //   静默跳过（小蹒跚者独立生成，不崩）。**只生成时组合**（分离后不再合并，dev-plan 登记取舍）。
+    //   生成时机收口在 spawnMobCore（全生成路径单一权威：黑暗刷怪 / 生物蛋 / 刷怪笼均经此）。
+    void tryFormChickenJockey(int babySlot);
+    // t952 小鸡骑士组合概率（kChickenJockeyChance 缺省；setChickenJockeyChance 运行时缝写——矩阵探针
+    //   端钉概率两端，同 t950 setEquipmentPickupChance 先例。纯标量状态，非世界态跨世界 reset 族无需清）。
+    qreal m_chickenJockeyChance = kChickenJockeyChance;
 
     // t239 AI wander 自主移动（tick 内 Mob 分支调）：时间片倒计时到 → 随机选向 + idle/行走；行走按 yaw 逐轴
     //   （X 后 Z）世界边界 clamp + 方块碰撞撤回。返回是否真位移（驱动 dirty + moveSpeed）。worldW/worldD =
@@ -1916,6 +1943,25 @@ private:
     //   返是否变更（驱动 dirty + bump revision + emit）。配对扫描 O(n²) 但 n ≤ kCap=64 可忽略。
     //   分层（PLAN §2）：只读自身实体数据 + 调 spawnMobCore（同层）；无向下 / 向上依赖。
     bool tickBreeding(qreal dt);
+    // t952 mob-on-mob 挂载 pass（tick 末尾调，主实体循环之外 —— 骑手 AI 走主循环冻结分支的累积通道，
+    //   钉位与对账集中在循环外，同 tickBreeding/tickVehicleRiding 放置理由）：
+    //   (1) 双向对账：骑手 rideMob / 载具 mobRider 任一侧失效（死亡 / 槽复用 / 链断）→ 解除骑乘（小鸡死
+    //       → 小僵尸落地恢复独立 AI；小僵尸死 → 小鸡恢复自主漫步；机制等价 MC 骑乘组合死亡分离）。
+    //   (2) 骑手 AI：以 kAiTickInterval 错峰节奏照跑（主循环冻结分支累积 aiAccum，此处消费）——玩家可
+    //       锁定 → aiHostile（小蹒跚者走 t952 快速低伤参数追击攻击），观察者 → aiWander（t290 回退语义）。
+    //       AI 位移的是**骑手自身** pos（骑手碰撞盒底没入载具顶所在的 1 格墙行 → 追击照常被墙阻挡），
+    //       载具随钉位跟随（「小僵尸的追击移动驱动小鸡」——小鸡自身 AI 挂起，dev-plan 最稳刀口径）。
+    //   (3) 钉位：载具 XZ ← 骑手 XZ；骑手 Y ← 载具顶（pos.y = mount.pos.y + mount.halfH + rider.halfH）
+    //       + 清 vy（垂直物理权威归本 pass，骑手冻结分支不跑重力——否则落地扫描会把骑手 snap 到地面
+    //       穿过载具）；载具 moveSpeed ← 骑手 moveSpeed（小鸡腿随骑士移动摆动），骑手 moveSpeed 清零
+    //       （被驮不迈腿，同矿车乘客 walkPhase 冻结口径）。钉位值真变帧 bump m_rideRevision + emit
+    //       ridersChanged（同 tickVehicleRiding review26 #10 专用低频通道——mob delegate position 绑定
+    //       独占触碰，60Hz 同步乘客呈现）。
+    //   返是否变更（合入 tick 尾 dirty → m_pendingEmit）。分层（PLAN §2）：只读自身实体数据，World 查询
+    //   经 aiHostile / aiWander（Entities→World 向下合法）。（不取 dt：骑手 AI 节拍由主循环冻结分支的
+    //   aiAccum 累积供给，本 pass 只消费。）
+    bool tickMobMounts(World *world, const QVector3D &playerPos, float worldW, float worldD,
+                       bool playerTargetable, float skyBrightness);
     // t400 最近求偶配偶查找（tick Mob 分支 love-mode 寻偶调）：返最近一只 alive 且 !dead 且 !baby 且
     //   loveTimer>0 且 mobType==e.mobType 的 mob 索引（排除 self）；无 → -1。供求偶者设 yaw 朝配偶 → aiWander
     //   行走相遇。O(n) 每 mob 每帧，n≤64 可忽略。const 只读。
@@ -2063,6 +2109,18 @@ private:
     static constexpr float kShadeHoldSeconds   = 1.0f;  // 持影迟滞窗（秒）
     static constexpr float kFarDespawn           = 56.0f; // 敌对远距消失半径（blocks）
     static constexpr int   kHostileDefaultHealth = 20;    // Shambler/Bones 满血（机制等价 MC 1.0 僵尸 / 骷髅 20HP）
+    // t952 小蹒跚者（MobBabyShambler）常量组（用户第五轮口径「<1 格高、移速快、概率与小鸡组合成小鸡僵尸骑士」；
+    //   机制等价 MC 幼体僵尸 / 小鸡骑士——数值为本工程口径非 MC 1:1，PLAN §4 机制对标）：
+    //   - kBabyShamblerChaseSpeedMul：追击移速倍率（×1.4 落在「×1.3~1.5 快」口径带内；adult kChaseSpeed 基准）。
+    //   - kBabyShamblerAttackDamage：近战伤害（HP；「伤害表小僵尸低一档——一半左右」口径，adult kAttackDamage=3 → 2）。
+    //   - kBabyShamblerSpawnChance：黑暗刷怪选中蹒跚者后翻成幼体的概率（5%，机制等价 MC 小僵尸稀有自然生成）。
+    //   - kChickenJockeyChance：小蹒跚者**生成时**与小鸡合并为「小鸡骑士」的概率（5%；常量注释口径。
+    //     运行时经 setChickenJockeyChance 缝写——矩阵探针端钉 =1 全组合 / =0 全独立，同 t950
+    //     setEquipmentPickupChance 先例）。只生成时组合，分离后不再组合（dev-plan 登记取舍）。
+    static constexpr float kBabyShamblerChaseSpeedMul = 1.4f; // 小蹒跚者追击移速倍率（相对 kChaseSpeed；快速口径）
+    static constexpr int   kBabyShamblerAttackDamage  = 2;    // 小蹒跚者近战伤害（HP；低伤口径 ≈ 成体一半）
+    static constexpr float kBabyShamblerSpawnChance   = 0.05f; // 黑暗刷怪蹒跚者翻幼体概率（5%）
+    static constexpr float kChickenJockeyChance       = 0.05f; // 小蹒跚者生成时组合小鸡骑士概率（5%）
     // t392 刷怪笼周期刷怪常量（spec「periodically spawns ONE hostile mob while a player is within range;
     //   spawn capped」；机制等价 MC 1.0 刷怪笼：玩家在 16 格内 + 笼周 6 只上限 + 每 ~5-10s 刷一只）。数值为本工程
     //   小世界量身调，非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。独立于 tickHostileLife 的「黑暗刷怪」

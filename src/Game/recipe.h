@@ -415,6 +415,13 @@ public:
     //   0x25C → fire_charge.png（现代包有；缺则安全跳过回退自绘）。mcMaterialId 越表界（>0x22E）→ -1 →
     //   资源包回退自绘（同 SnowballId 越界模式）。
     static constexpr int FireChargeId = 0x25C; // 烈焰弹：燃烬粉+煤炭/木炭+火药合成 3 发；右键发射火球撞击生火（t891）
+    // t952 生物蛋（小蹒跚者）（材料段 0x25D，烈焰弹之上首个空闲号）。机制等价 MC 幼体僵尸 spawn egg——
+    //   创造模式物品，右键地面 → mobTypeForSpawnEgg 单一权威表 → MobBabyShambler（<1 格高幼体僵尸；
+    //   生成时经 spawnMobCore 末段 kChickenJockeyChance 掷小鸡骑士组合骰）。可堆叠 64（材料段默认）；
+    //   非方块 → 右键在 selectedBlock Air 守卫之前分流走蛋分支（同全蛋族）。MaterialIcon 自绘小号蛋形
+    //   图标（亮绿幼体配色，drawSpawnEgg("babyshambler")，§9 原创）；无 pack 映射（资源包回退自绘，
+    //   同近期材料段物品模式）。创造调色板补全（hotbar creativeMaterials 蛋区尾）。
+    static constexpr int SpawnEggBabyShamblerId = 0x25D; // 生物蛋（小蹒跚者）：右键 → 生成小蹒跚者（幼体僵尸；t952）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

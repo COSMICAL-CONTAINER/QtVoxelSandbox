@@ -710,6 +710,22 @@ Item {
                     // 两颗红眼（居中偏上，僵尸的红色双眼 = 强身份特征）
                     R(10, 8, 1, 1, eye)
                     R(13, 8, 1, 1, eye)
+                } else if (kind === "babyshambler") {
+                    // t952 小蹒跚者（机制等价幼体僵尸）：亮黄绿幼体壳 + 棕褐腐斑 + 两颗红眼（同族僵尸眼缩小
+                    //   位）→ 亮绿 + 红眼一眼辨「幼体僵尸类」，亮一档色区别成体蹒跚者蛋。纯原创抽象纹样（§9）。
+                    const shell = "#5a7a42", lite = "#7a9a5a", dark = "#3a5a22"
+                    const rot = "#6a4a2a", eye = "#c83030"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边（圆柱明暗）
+                    // 棕褐腐斑（散布小点，比成体稀疏 = 幼体感）
+                    R(9, 10, 1, 1, rot)
+                    R(13, 12, 1, 1, rot)
+                    R(11, 15, 2, 1, rot)
+                    // 两颗红眼（偏大居中 = 幼体大头比例的强身份特征）
+                    R(10, 8, 1, 1, eye)
+                    R(13, 8, 1, 1, eye)
                 } else if (kind === "bones") {
                     // 骸骨（机制等价骷髅）：灰白骨壳 + 黑色眼窝 + 纵向肋骨纹
                     //   → 灰白 + 黑眼窝一眼辨「骷髅类」。纯原创抽象纹样（§9 区隔，非 MC 骷髅贴图）。
@@ -1971,6 +1987,7 @@ Item {
             case 0x25C: drawFireCharge();        break // t891② 烈焰弹（燃烬粉+煤/炭+火药合成；右键发射火球撞击生火）
             case 0x249: drawSpawnEgg("wolf");    break // t785 生物蛋（狼；右键 → 生成野生狼）
             case 0x24A: drawSpawnEgg("ocelot");  break // t785 生物蛋（豹猫；右键 → 生成野生豹猫）
+            case 0x25D: drawSpawnEgg("babyshambler"); break // t952 生物蛋（小蹒跚者；右键 → 生成幼体僵尸）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

@@ -4165,6 +4165,7 @@ void PlayerController::placeBlock()
                 case EntityManager::MobEmberling:   color = QStringLiteral("#e8b030"); break; // t728 橙黄焰色（机制等价烈焰人；远程火球悬浮）
                 case EntityManager::MobWolf:        color = QStringLiteral("#c8ccd4"); break; // t785 浅灰蓝（机制等价狼；蛋刷野生）
                 case EntityManager::MobOcelot:      color = QStringLiteral("#e8c890"); break; // t785 奶油底褐纹（机制等价豹猫；蛋刷野生）
+                case EntityManager::MobBabyShambler: color = QStringLiteral("#5a7a42"); break; // t952 亮黄绿幼体色（占位串：小蹒跚者走 MobModel + 贴图不读 color，文档锚同族）
                 default: break; // 防御（入口条件已排除 -1；表值恒非空 mobType）
                 }
                 // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
@@ -5314,6 +5315,7 @@ int PlayerController::mobTypeEggId(int mobType)
     case EntityManager::MobEmberling:   return RecipeRegistry::SpawnEggEmberlingId;   // t878④
     case EntityManager::MobWolf:     return RecipeRegistry::SpawnEggWolfId;           // t878④（中键复制狼蛋）
     case EntityManager::MobOcelot:   return RecipeRegistry::SpawnEggOcelotId;         // t878④（中键复制豹猫蛋）
+    case EntityManager::MobBabyShambler: return RecipeRegistry::SpawnEggBabyShamblerId; // t952（中键复制小蹒跚者蛋）
     default: return 0; // 无蛋物品的 mob（Test/Golem/Silverfish/Tnt 哨兵）
     }
 }
@@ -5480,7 +5482,8 @@ void PlayerController::tickMobEquipmentPickup(qreal dt)
         if (!m_entityManager->aliveAt(mi)) continue;                        // 空槽（slot-reuse）
         if (m_entityManager->kindAt(mi) != int(EntityManager::Mob)) continue;
         const int mt = m_entityManager->mobTypeAt(mi);
-        if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones) continue; // ⑤ 仅僵尸/骷髅
+        if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones
+            && mt != EntityManager::MobBabyShambler) continue; // ⑤ 仅僵尸/骷髅/小僵尸（t952 幼体入拾取白名单，可穿盔甲口径）
         if (m_entityManager->healthAt(mi) <= 0) continue;                   // ⑤ 尸体（死亡动画窗）不拾
         const QVector3D mp = m_entityManager->posAt(mi);
         const float feetY = mp.y() - m_entityManager->halfHeightAt(mi);
