@@ -890,7 +890,11 @@ void PlayerController::tickImpl()
         // t811 载具管理器注入（mob 自动乘坐矿车/船）：tickVehicleRiding 登乘/钉位/对账读它（Game→Entities
         //   向下，同 setPlayerSight 先例；幂等指针写）。无载具场景传 null 同样安全（tickVehicleRiding 早退）。
         m_entityManager->setVehicleManagers(m_minecartManager, m_boatManager);
-        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival, m_mode == Spectator);
+        // t951 白天阴影 AI 昼夜通道：skyBrightness 与下方 tickHostileLife 同源同帧（m_worldClock->skyLight()）
+        //   ——tick 先于 tickHostileLife 跑，AI 的暴晒判定与燃烧判定读同一乘子。m_worldClock=null 时不传
+        //   （缺省 0 = 夜间语义 → 日间寻影分支不激活，与「无昼夜 → 无燃烧」同口径）。
+        m_entityManager->tick(dt, m_world, m_pos, kHalfW, m_height, m_mode == Survival, m_mode == Spectator,
+                              m_worldClock ? float(m_worldClock->skyLight()) : 0.0f);
     }
     // t811 骑乘收口第 1 处（mob 桶内、tick 后、常开）：暂停 / 菜单期 step() 不跑（车不推进），但
     //   BoatManager::tick 常开（船浮水 / 动量滑行）→ 乘船 mob 须在此钉位才不与漂移船视觉脱离（世界模拟

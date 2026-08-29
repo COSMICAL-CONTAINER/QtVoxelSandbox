@@ -22995,6 +22995,216 @@ Item {
                              ;
     }
 
+    // ── P-t951 白天阴影 AI（R19.17 🅲：僵尸/骷髅白天优先找阴凉保命；等玩家进阴影才发起攻击；
+    //    骷髅可在阴影内射箭（走位不出阴影）；夜间全部现行行为零回归）──
+    //    抽搐根因（t670 版）：寻影由 e.burning 驱动——进影即停燃 → burning 翻 false → 立即清阴凉目标回
+    //    追玩家 → 一步出影复燃 → 又寻影，追击/避光向量逐 AI tick 交替占优 = 用户「来回转向走出/退回阴影」。
+    //    t951 修：白天双状态机（暴晒→寻影优先 / 真遮蔽→持影等玩家入影）+ kShadeHoldSeconds 迟滞窗 +
+    //    灼烧采样单源提炼（sunBurnExposureAt：燃烧扣血与避光 AI 同一谓词，禁第二套光照判定）。
+    //    驱动方式：EntityManager 直造 + 直调 tick 逐 tick 推进（t948 先例）；skyBrightness 经 tick 新尾参
+    //    注入（白天腿 1.0f；夜间腿缺省 0 = 夜间语义 = t951 分支整体旁路，恰为旧 7 参调用形态 = 零回归钉）。
+    //    阴凉 rig = 石台整面 + 石檐（setBlock 走 recomputeLightAround → 檐下水平 flood skyLight<15 = 真遮
+    //    荫，与燃烧判定同一真值源；腿内先钉 rig 光照真值防伪绿）。
+    //    (a) 白天寻影腿：暴晒僵尸（玩家置侦测圈内制造追击压力）→ 走入石檐停驻（檐下格 skyLight<15）且
+    //        ≥200 tick 稳定滞留（迟滞窗内不折返、不因追击压力出檐）。
+    //    (b) 持影不攻 + 入影开攻腿：檐下僵尸 vs 阳光下 2.4 格玩家（近战射程外一步、追击压力满格）→
+    //        ≥300 tick 零攻击且不出檐格；玩家入檐 → 数 tick 内攻击发起（mobAttackedPlayer 信号计数）。
+    //    (c) 骷髅影内射击腿：檐下骸骨 vs 阳光下 3 格玩家（< kArcherKeepMin 退避压力恰朝檐外）→ 拉弓射箭
+    //        命中玩家（信号计数）且骷髅全程 floor(XZ) 未出檐格（候选落点暴晒弃选闸）+ 终态檐下遮荫。
+    //    (d) 夜间零回归腿：缺省 skyBrightness → 暴晒僵尸照旧直线追击并攻击（t951 分支旁路 = 旧行为）。
+    //    (e) 源码钉：迟滞刷新行（两 AI ≥2）/ 灼烧谓词定义 + ≥7 处消费（单源禁令行为面）/ 白名单行 +
+    //        ≥3 消费 / 攻击压门行 / 弓手候选闸行 / 头文件声明 + 常量 + Entity 字段 / tickImpl 生产接线。
+    {
+        bool ok = true;
+        QString diag;
+        auto flatRig951 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        auto roof951 = [](World &w, int x0, int z0, int n) {
+            for (int dx = 0; dx < n; ++dx)
+                for (int dz = 0; dz < n; ++dz) w.setBlock(x0 + dx, 88, z0 + dz, BR::Stone, 0);
+        };
+        auto cellIn951 = [](const QVector3D &p, int x0, int z0, int n) {
+            const int cx = int(std::floor(p.x())), cz = int(std::floor(p.z()));
+            return cx >= x0 && cx < x0 + n && cz >= z0 && cz < z0 + n;
+        };
+        // (a) 白天寻影：暴晒僵尸走入石檐停驻 + 稳定滞留。
+        {
+            World wa; flatRig951(wa);
+            roof951(wa, 20, 20, 7); // 石檐 (20..26)² @y88 → 檐下 y85 格 skyLight≤14（边缘 14 / 内里 13）
+            EntityManager ema;
+            int hits = 0;
+            QObject::connect(&ema, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
+            const int zom = ema.spawnMobTyped(15, 85, 20, EntityManager::MobShambler,
+                                              QStringLiteral("#4a6a3a"), 20);
+            // rig 光照真值钉（遮荫/露天两读数——与燃烧判定同一采样源，防檐没造出 shade 的伪绿）。
+            const bool shadeTruth = wa.skyLightAt(23, 85, 23) < 15 && wa.skyLightAt(21, 85, 21) < 15;
+            const bool sunTruth = wa.skyLightAt(15, 85, 20) == 15 && wa.skyLightAt(10, 85, 10) == 15;
+            // 玩家在侦测圈内（dist≈10 < kDetectRange 16）制造持续追击压力 → 旧行为会朝玩家走。
+            const QVector3D player(15.5f, 85.0f, 30.5f);
+            bool inShade = false;
+            for (int t = 0; t < 900 && !inShade; ++t) { // 14.4s 帽：6 格寻影路程 ≈ 2.5s
+                ema.tick(0.016f, &wa, player, 0.3f, 1.8f, true, false, 1.0f);
+                inShade = cellIn951(ema.posAt(zom), 20, 20, 7)
+                          && wa.skyLightAt(int(std::floor(ema.posAt(zom).x())), 85,
+                                           int(std::floor(ema.posAt(zom).z()))) < 15;
+            }
+            bool stable = inShade;
+            for (int t = 0; t < 200 && stable; ++t) { // 3.2s 稳定窗：入影后不折返（迟滞 + 持影等待）
+                ema.tick(0.016f, &wa, player, 0.3f, 1.8f, true, false, 1.0f);
+                stable = cellIn951(ema.posAt(zom), 20, 20, 7);
+            }
+            ok = ok && zom >= 0 && shadeTruth && sunTruth && inShade && stable && hits == 0;
+            if (!(zom >= 0 && shadeTruth && sunTruth && inShade && stable && hits == 0))
+                diag += QStringLiteral("a zom=%1 shadeT=%2 sunT=%3 in=%4 stab=%5 hits=%6 ")
+                            .arg(zom).arg(int(shadeTruth)).arg(int(sunTruth)).arg(int(inShade))
+                            .arg(int(stable)).arg(hits);
+        }
+        // (b) 持影不攻（玩家暴晒）→ 玩家入影开攻。
+        {
+            World wb; flatRig951(wb);
+            roof951(wb, 22, 22, 3); // 石檐 (22..24)² @y88；檐下 (23,23) 遮荫、(25,23) 露天
+            EntityManager emb;
+            int hits = 0;
+            QObject::connect(&emb, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
+            const int zom = emb.spawnMobTyped(23, 85, 23, EntityManager::MobShambler,
+                                              QStringLiteral("#4a6a3a"), 20);
+            const bool shadeTruth = wb.skyLightAt(23, 85, 23) < 15 && wb.skyLightAt(25, 85, 23) == 15;
+            // 玩家阳光下 2.4 格（> kAttackRange 1.6 一步、< kDetectRange 16 追击压力满格）。
+            const QVector3D playerSun(25.9f, 85.0f, 23.5f);
+            for (int t = 0; t < 300; ++t) // 4.8s：持影等待——零攻击 + 不出檐格（旧码此窗必追出+咬）
+                emb.tick(0.016f, &wb, playerSun, 0.3f, 1.8f, true, false, 1.0f);
+            const QVector3D zp = emb.posAt(zom);
+            const bool heldInShade = hits == 0 && cellIn951(zp, 22, 22, 3);
+            // 玩家入檐（cell 23,23 遮荫 → 暴晒判定翻转）→ 攻击发起。
+            const QVector3D playerShade(23.9f, 85.0f, 23.9f);
+            bool attacked = false;
+            for (int t = 0; t < 600 && !attacked; ++t) {
+                emb.tick(0.016f, &wb, playerShade, 0.3f, 1.8f, true, false, 1.0f);
+                attacked = hits > 0;
+            }
+            ok = ok && zom >= 0 && shadeTruth && heldInShade && attacked;
+            if (!(zom >= 0 && shadeTruth && heldInShade && attacked))
+                diag += QStringLiteral("b zom=%1 shadeT=%2 held=%3 atk=%4 hits=%5 ")
+                            .arg(zom).arg(int(shadeTruth)).arg(int(heldInShade))
+                            .arg(int(attacked)).arg(hits);
+        }
+        // (c) 骷髅影内射箭（走位不出阴影）。
+        {
+            World wc; flatRig951(wc);
+            roof951(wc, 20, 20, 3); // 石檐 (20..22)² @y88；骷髅贴北缘（z=20），退避压力恰朝檐外
+            EntityManager emc;
+            int hits = 0;
+            QObject::connect(&emc, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
+            const int bones = emc.spawnMobTyped(21, 85, 21, EntityManager::MobBones,
+                                                QStringLiteral("#d8d8e0"), 20);
+            const bool shadeTruth = wc.skyLightAt(21, 85, 21) < 15 && wc.skyLightAt(21, 85, 23) == 15;
+            // 玩家阳光下 dist≈2.6（< kArcherKeepMin 5 → 保持带退避方向 = -z = 檐外；
+            // ≤ kArcherShootRange 12 + 视线越檐清 → 射门常开）。
+            // **定窗驱动**（不因命中提前停）：退避压力全程在场 ≥19s 覆盖多轮拉弓/冷却——冷却期 draw=0
+            // 全速退避，无候选闸必跨过檐缘（阴性 B 签名）；有闸则每 tick 目的地暴晒即弃选，永久滞留檐内。
+            const QVector3D player(21.5f, 85.0f, 23.5f);
+            bool stayedIn = true;
+            for (int t = 0; t < 1200; ++t) { // 19.2s：拉弓 0.5s + 冷却 2.5s 多轮（t948 b 同式帽量级）
+                emc.tick(0.016f, &wc, player, 0.3f, 1.8f, true, false, 1.0f);
+                if (!cellIn951(emc.posAt(bones), 20, 20, 3)) stayedIn = false; // 候选闸失效即出檐
+            }
+            const bool arrowHit = hits > 0; // 箭命中玩家（抛物解算确定性 + kArrowSpread 抖动多发射窗覆盖）
+            const QVector3D bp = emc.posAt(bones);
+            const bool endShaded = cellIn951(bp, 20, 20, 3)
+                                   && wc.skyLightAt(int(std::floor(bp.x())), 85,
+                                                    int(std::floor(bp.z()))) < 15;
+            ok = ok && bones >= 0 && shadeTruth && stayedIn && arrowHit && endShaded;
+            if (!(bones >= 0 && shadeTruth && stayedIn && arrowHit && endShaded))
+                diag += QStringLiteral("c bones=%1 shadeT=%2 stay=%3 shot=%4 end=%5 hits=%6 ")
+                            .arg(bones).arg(int(shadeTruth)).arg(int(stayedIn))
+                            .arg(int(arrowHit)).arg(int(endShaded)).arg(hits);
+        }
+        // (d) 夜间零回归：缺省 skyBrightness（=旧 7 参调用形态）→ 暴晒僵尸照旧追击并攻击。
+        {
+            World wd; flatRig951(wd);
+            EntityManager emd;
+            int hits = 0;
+            QObject::connect(&emd, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
+            const int zom = emd.spawnMobTyped(12, 85, 12, EntityManager::MobShambler,
+                                              QStringLiteral("#4a6a3a"), 20);
+            const QVector3D player(20.5f, 85.0f, 20.5f); // dist≈12 ≤ kDetectRange 16
+            bool attacked = false;
+            for (int t = 0; t < 1500 && !attacked; ++t) { // 24s 帽：12 格追击 ≈ 4.3s（t948 a 同式）
+                emd.tick(0.016f, &wd, player, 0.3f, 1.8f, true, false); // 缺省尾参 = 夜间语义零回归钉
+                attacked = hits > 0;
+            }
+            const QVector3D zp = emd.posAt(zom);
+            const bool closedUp = QVector3D(zp.x() - 20.5f, 0.0f, zp.z() - 20.5f).length() <= 2.0f;
+            ok = ok && zom >= 0 && attacked && closedUp;
+            if (!(zom >= 0 && attacked && closedUp))
+                diag += QStringLiteral("d zom=%1 atk=%2 close=%3 hits=%4 ")
+                            .arg(zom).arg(int(attacked)).arg(int(closedUp)).arg(hits);
+        }
+        // (e) 源码钉：迟滞 / 单源谓词 / 白名单 / 攻击压门 / 候选闸 / 声明常量字段 / 生产接线。
+        {
+            auto countSub951 = [](const QString &hay, const QString &needle) {
+                int n = 0;
+                for (int pos = hay.indexOf(needle); pos >= 0; pos = hay.indexOf(needle, pos + needle.size()))
+                    ++n;
+                return n;
+            };
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile ef(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+            const QString esrc = ef.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef.readAll()) : QString();
+            QFile ehf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+            const QString ehsrc = ehf.open(QIODevice::ReadOnly) ? QString::fromUtf8(ehf.readAll()) : QString();
+            QFile pf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            const QString psrc = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const bool pinHold = countSub951(esrc, QStringLiteral("e.shadeHoldTimer = kShadeHoldSeconds;")) >= 2;
+            const bool pinPredDef = esrc.contains(QStringLiteral("bool EntityManager::sunBurnExposureAt(World *world"));
+            const bool pinSingle = countSub951(esrc, QStringLiteral("sunBurnExposureAt(")) >= 6;
+            const bool pinWhite = esrc.contains(QStringLiteral("return mobType == MobShambler || mobType == MobBones;"))
+                                  && countSub951(esrc, QStringLiteral("undeadBurnsInDaylight(e.mobType)")) >= 3;
+            const bool pinSuppress = esrc.contains(QStringLiteral("&& !attackSuppressed"));
+            const bool pinGate = esrc.contains(QStringLiteral("wantMove = false; // t951 候选落点暴晒 → 弃选"));
+            const bool pinDecl = ehsrc.contains(QStringLiteral("static bool sunBurnExposureAt(World *world"));
+            const bool pinConst = ehsrc.contains(QStringLiteral("static constexpr float kShadeHoldSeconds   = 1.0f;"));
+            const bool pinField = ehsrc.contains(QStringLiteral("float shadeHoldTimer = 0.0f;"));
+            const bool pinWire = psrc.contains(QStringLiteral("m_worldClock ? float(m_worldClock->skyLight()) : 0.0f);"));
+            ok = ok && pinHold && pinPredDef && pinSingle && pinWhite && pinSuppress
+                      && pinGate && pinDecl && pinConst && pinField && pinWire;
+            if (!(pinHold && pinPredDef && pinSingle && pinWhite && pinSuppress
+                  && pinGate && pinDecl && pinConst && pinField && pinWire))
+                diag += QStringLiteral("e hold=%1 def=%2 single=%3 white=%4 sup=%5 gate=%6 decl=%7 const=%8 fld=%9 wire=%10 ")
+                            .arg(int(pinHold)).arg(int(pinPredDef)).arg(int(pinSingle)).arg(int(pinWhite))
+                            .arg(int(pinSuppress)).arg(int(pinGate)).arg(int(pinDecl)).arg(int(pinConst))
+                            .arg(int(pinField)).arg(int(pinWire));
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t951 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t951 daytime shade AI: a sun-exposed shambler (player pressing inside"
+                             " its detect band) walks into a stone overhang and settles in truly"
+                             " shaded cells, holding there across a stability window; a sheltered"
+                             " zombie facing a sun-lit player 2.4 blocks away neither attacks nor"
+                             " leaves the overhang for 300 ticks and opens the attack the moment the"
+                             " player steps into the shade; a sheltered bones archer under retreat"
+                             " pressure (player 2.6 blocks, inside the keep-min band) still shoots and"
+                             " lands an arrow on the exposed player while floor(XZ) never leaves the"
+                             " overhang cells (movement candidates that would land in burning sunlight"
+                             " are dropped); with the sky channel at its night default the legacy"
+                             " behavior is bit-identical (shambler charges and attacks in the open);"
+                             " and the shade-hold hysteresis lines, the single sun-exposure sampling"
+                             " authority (burn + both AIs + player verdict), the undead whitelist,"
+                             " the attack-suppression gate, the archer candidate gate, the header"
+                             " declaration/constants/field and the production skyBrightness wiring"
+                             " are source-pinned"
+                             ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

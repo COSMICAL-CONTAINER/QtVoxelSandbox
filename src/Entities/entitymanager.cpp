@@ -1092,6 +1092,30 @@ float EntityManager::enderEyeCruiseYAt(int i) const
     return (e.alive && e.kind == EnderEye) ? e.enderEyeCruiseY : 0.0f;
 }
 
+// t951 灼烧级日光暴露采样单一权威（契约见头文件声明）。从 tickHostileLife 内联判定提炼——燃烧扣血与
+//   白天阴影 AI（寻影 / 持影 / 玩家暴晒判定）共用同一采样，禁第二套光照判定（复用即正确）。门序按开销
+//   递增：界内（防御）→ 见天 skyLightAt（数组读）→ 白天 → 降水 isPrecipitatingAt（内含 biome 4×fbm 噪声，
+//   t500 节流先例的贵门殿后）→ 水豁免。豁免态一律 false = 视同安全。
+bool EntityManager::sunBurnExposureAt(World *world, float px, float py, float pz, float halfH, float skyBrightness)
+{
+    if (!world) return false;
+    const int sx = qFloor(px), sy = qFloor(py), sz = qFloor(pz);
+    if (sx < 0 || sz < 0 || sx >= world->width() || sz >= world->depth()
+        || sy < 0 || sy >= world->height()) return false;
+    if (world->skyLightAt(sx, sy, sz) < 15) return false;                  // 有遮挡（树荫 / 屋檐 / 洞口，t280 同列采样）
+    if (skyBrightness <= kBurnSkyBrightness) return false;                 // 夜间 / 晨昏（spec「白天燃烧」门）
+    if (world->isPrecipitatingAt(sx, sz)) return false;                    // 降水遮日（t385：雨/雪/雷皆豁免）
+    if (mobFeetInWater(world, px, py, pz, halfH)) return false;            // 入水不燃（t561①：脚位水格）
+    if (world->blockAt(sx, sy, sz) == BlockRegistry::Water) return false;  // t561①：身体中心格水（深水悬浮）
+    return true;
+}
+
+// t951 亡灵日光白名单单一权威（契约见头文件声明；审查修 B6 的名单提炼——新敌对默认不晒燃，显式加白才燃）。
+bool EntityManager::undeadBurnsInDaylight(int mobType)
+{
+    return mobType == MobShambler || mobType == MobBones;
+}
+
 // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。
 //   分层（PLAN §2）：Entities 层，只读 World（blockAt/isSolid/skyLightAt/blockLightAt/heightAt/width/depth/height）
 //   + 自身实体数据；写 EntityManager（spawn / releaseSlot / damageEntity）。world==null → 早 return。
@@ -1122,34 +1146,16 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
         e.hostileAccum = 0.0f;
 
         // (a) 日光燃烧判定：mob 所在格直接见天（skyLightAt>=15 = 无遮挡）且白天（skyBrightness>门槛）→ 燃烧。
-        //   mob 中心格 (sx, sy, sz)：用 body 中心 Y（pos.y）所处方块格（同 tick 的窒息判定取身体高度处格）。
+        //   mob 中心格：用 body 中心 Y（pos.y）所处方块格（同 tick 的窒息判定取身体高度处格）。
         //   shade（skyLightAt<15，如树叶下 / 屋檐 / 洞口）→ 不燃烧（机制等价 MC 树荫保护敌对）。
         //   夜间（skyBrightness<=门槛）→ 不燃烧（spec「白天燃烧消失」，仅白天）。
-        const int sx = qFloor(e.pos.x());
-        const int sy = qFloor(e.pos.y());
-        const int sz = qFloor(e.pos.z());
-        const bool exposedToSun = (sx >= 0 && sz >= 0 && sx < worldW && sz < worldD && sy >= 0 && sy < worldH)
-                                  && world->skyLightAt(sx, sy, sz) >= 15;
-        // t284：Stalker（苦力怕）非亡灵 → 白天**不**燃烧（机制等价 MC 苦力怕不像僵尸/骷髅那样日光起火；
-        //   仅 Shambler/Bones 亡灵类燃烧）。Stalker 仍受远距消失 / spawn 调度约束（hostile=true）。
-        // t385：降水（雨/雪/雷）时露天 mob 不燃烧（机制等价 MC 雨天遮日 → 亡灵不燃）—— 见天 + 所在列降水
-        //   即视为「无直射日光」。与 fire-timer 灭火（主 tick）互补：日光 burning 由 rain 门控前置、岩浆 / 火点燃
-        //   的 fireTimer 由主 tick 雨浇灭。
-        // t561 ① 水覆盖不烧：mob 脚位或身体中心格是水（水边浅水 / 水里）→ 无直射日光（机制等价 MC 亡灵入水
-        //   不燃）。本引擎 Water lightOpacity=0（透光）→ skyLightAt 仍 15 → 旧逻辑水中照样烧；此处显式查水。
-        //   mobFeetInWater（脚位 = floor(pos.y−halfH)）覆盖「水边浅水 / 水中」；body 中心格覆盖深水悬浮。
-        //   ③ 头盔免疫：mob 随机护甲含头盔（armorHelmet>0）→ 白天不燃烧（机制等价 MC 1.0 任何头盔防日光）。
-        const bool rainingHere = exposedToSun && world->isPrecipitatingAt(sx, sz);
-        const bool inWater = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)
-                             || (sy >= 0 && sy < worldH && world->blockAt(sx, sy, sz) == BlockRegistry::Water);
-        // 审查修 B6（t724-t729 复盘）：日光燃烧改「亡灵白名单」（仅 Shambler/Bones）—— 旧黑名单只排 Stalker，
-        //   t727 夜行者（末影人语义白天不燃只瞬移）/ t728 燃烬者（火力免疫设定却仍被日光烧死，burnTimer 走
-        //   tickHostileLife 独立扣血路径不经被跳过的火烧分支）/ t487 银鱼同漏排。白名单贴合 t284 注释的设计
-        //   意图（「仅 Shambler/Bones 亡灵类燃烧」）且防未来新增敌对再漏（新敌对默认不晒燃，显式加白才燃）。
-        const bool undeadBurnsInDay = (e.mobType == MobShambler || e.mobType == MobBones);
-        const bool inDaylight = exposedToSun && (skyBrightness > kBurnSkyBrightness)
-                                 && undeadBurnsInDay && !rainingHere
-                                 && !inWater && e.armorHelmet == 0;
+        //   t284：Stalker（苦力怕）非亡灵不燃烧（亡灵白名单）；t385：降水露天不燃烧；t561①：水覆盖不烧；
+        //   t561③：头盔免疫（mob 侧语义留在调用点）；审查修 B6：白名单单一权威防新敌对漏排。
+        //   t951：判定本体提炼为静态成员 sunBurnExposureAt（灼烧级日光采样单一权威——t951 白天阴影 AI 与
+        //   本处共用同一采样，禁第二套光照判定），亡灵白名单提炼为 undeadBurnsInDaylight（白天阴影 AI 同门
+        //   ——只有会晒燃的亡灵才做避光行为）。各豁免门语义逐字保留在谓词内（见其定义注释）。
+        const bool inDaylight = sunBurnExposureAt(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH, skyBrightness)
+                                && undeadBurnsInDaylight(e.mobType) && e.armorHelmet == 0;
         if (inDaylight) {
             if (!e.burning) { e.burning = true; dirty = true; } // 翻入燃烧 → bump（QML 显火焰）
             e.burnTimer += aiDt;
@@ -3313,7 +3319,7 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
 //   t480 idx = 本 mob 槽索引：近战攻击命中玩家时注册驯服狼防御目标（m_wolfTarget = idx，机制等价 MC 驯服狼
 //   攻击咬伤主人的怪物）。
 bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
-                              float worldW, float worldD, float speedScale)
+                              float worldW, float worldD, float speedScale, float skyBrightness)
 {
     // 攻击冷却递减（不论追踪与否；自然走完，复击不卡陈旧值）。钳到 0。
     if (e.attackCooldown > 0.0f) {
@@ -3503,41 +3509,69 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
 
-    // (2b) t670 白天燃烧寻阴凉（机制等价 MC 亡灵日间主动找树荫躲避；tickHostileLife 同节拍算 e.burning）：
-    //   燃烧中 → 移动目标从玩家改「最近的遮荫格」—— 走到遮荫（自身中心格 skyLight<kShadeSkyLight）即停驻
-    //   等不烧（出阴凉重新追玩家）；寻阴凉途中玩家贴身仍攻击（近战本能）。找不到遮荫格 → 维持追玩家，
-    //   白昼无遮荫烧死即 MC 语义。目标缓存 + kShadeRescanInterval 节流重扫（重扫也兜底目标失效 / 已到阴凉）。
+    // (2b) t951 白天阴影优先状态机（机制等价 MC 亡灵日间避光；用户口径「白天优先找阴凉保命；等玩家进
+    //   阴影才发起攻击」）。抽搐根因（t670 版）：寻影由 e.burning 驱动——进影即停燃 → burning 翻 false →
+    //   下方 else 立即清阴凉目标回追玩家 → 一步出影复燃 → 又寻影……追击与避光向量逐 AI tick 交替占优 =
+    //   「来回转向走出/退回阴影」。t951 双状态 + 迟滞：
+    //     • 暴晒（sunBurnExposureAt 真值——先于燃烧发生，保命不等点燃）→ 移动目标 = 就近遮荫格（t670
+    //       findShadeTarget 机制沿用：目标缓存 + kShadeRescanInterval 节流重扫；找不到 → 兜底维持追玩家——
+    //       沙漠 / 雪原等无遮蔽 biome 照旧，白昼照烧胜过原地等死，登记取舍）。
+    //     • 遮蔽（自身不暴露）且玩家仍暴晒 → 持影停驻 + 压攻击（等玩家进阴影才发起攻击；不追出影）。
+    //     • 遮蔽且玩家亦安全（入影 / 入水 / 降水 / 夜间豁免——同一谓词豁免=视同安全）→ 照常追击攻击
+    //       （双方都在安全态，追击不会把自己送进日光；玩家逃出遮蔽即回到持影等待）。
+    //     • 迟滞（kShadeHoldSeconds，Entity.shadeHoldTimer）：遮蔽即刷新；暴晒衰减；>0 期间「视作遮蔽」
+    //       维持当前决策——交战中踏出光影边界 / 天光传播瞬态读数不触发立即 180° 折返（MC 僵尸日间交战
+    //       也不秒退）。「追击→寻影」翻向最少隔一个迟滞窗 = 抽搐的结构性解药。
+    //   白名单 undeadBurnsInDaylight：只有会晒燃的亡灵做避光（Spider/Silverfish 走本函数但零波及）。
+    //   夜间（skyBrightness<=kBurnSkyBrightness）整段旁路 → 夜间行为与 t951 前逐位一致。
+    //   只罩玩家目标路径：上方仇恨狼 / 铁傀儡转火分支不入场（mob-mob 战斗语义不随日光翻转，t947/t948）。
     float mx = dx, mz = dz; // 移动目标向量（默认朝玩家）
     float mdist = distPlayer;
-    if (e.burning) {
-        e.shadeRescanTimer -= dt;
-        if (!e.seekingShade || e.shadeRescanTimer <= 0.0f) {
-            int tx = -1, tz = -1;
-            if (findShadeTarget(world, qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()),
-                                kShadeScanRadius, kShadeSkyLight, &tx, &tz)) {
-                e.seekingShade = true;
-                e.shadeTx = tx; e.shadeTz = tz;
-            } else {
-                e.seekingShade = false; // 没搜到遮荫 → 维持追玩家（白昼照烧，MC 语义）
+    bool attackSuppressed = false; // t951：持影等待期压攻击（玩家暴晒未入影 → 不发起攻击）
+    const bool dayShadeAi = skyBrightness > kBurnSkyBrightness && undeadBurnsInDaylight(e.mobType);
+    if (dayShadeAi) {
+        const bool selfExposed = sunBurnExposureAt(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH, skyBrightness);
+        if (!selfExposed) {
+            e.shadeHoldTimer = kShadeHoldSeconds; // 遮蔽 → 迟滞窗常满（真遮蔽，非残窗）
+            e.seekingShade = false;               // 已安全 → 清旧寻影目标（下次暴晒重新就近搜索）
+        } else if (e.shadeHoldTimer > 0.0f) {
+            e.shadeHoldTimer -= dt;               // 暴晒 → 旧窗衰减（窗内维持当前追击决策，不立即折返）
+        }
+        const bool sheltered = !selfExposed || e.shadeHoldTimer > 0.0f; // 迟滞后的「视作遮蔽」判定
+        if (!sheltered) {
+            // 暴晒且迟滞窗尽 → 寻影优先（t670 机制：目标缓存 + 节流重扫；找不到 → 兜底追玩家照旧）。
+            e.shadeRescanTimer -= dt;
+            if (!e.seekingShade || e.shadeRescanTimer <= 0.0f) {
+                int tx = -1, tz = -1;
+                if (findShadeTarget(world, qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()),
+                                    kShadeScanRadius, kShadeSkyLight, &tx, &tz)) {
+                    e.seekingShade = true;
+                    e.shadeTx = tx; e.shadeTz = tz;
+                } else {
+                    e.seekingShade = false; // 没搜到遮荫 → 维持追玩家（白昼照烧胜过原地等死；无遮蔽 biome 兜底口径）
+                }
+                e.shadeRescanTimer = kShadeRescanInterval;
             }
-            e.shadeRescanTimer = kShadeRescanInterval;
-        }
-        if (e.seekingShade) {
-            const float sx = (float(e.shadeTx) + 0.5f) - e.pos.x();
-            const float sz = (float(e.shadeTz) + 0.5f) - e.pos.z();
-            // t690：停驻前验证**自身中心格**确已遮荫（skyLight < kShadeSkyLight）。旧版只查「距目标格 <0.9」
-            //   —— 卡在 0.81~0.9 距离（碰撞 / 拥挤挡住最后一步）时距离条件已满足但自身仍在日光里 → 停驻
-            //   原地烧死（注释自称「own cell shaded」但从未验证）；3s 重扫又选同一目标 → 永卡。修：未遮荫则
-            //   继续朝目标格**中心**走（0.81 内小步逼近格心，XZ 位移由 3) 段正常走速承担），进了阴影才停。
-            const int myX = qFloor(e.pos.x()), myY = qFloor(e.pos.y()), myZ = qFloor(e.pos.z());
-            const bool ownShaded = world && world->skyLightAt(myX, myY, myZ) < kShadeSkyLight;
-            if (sx * sx + sz * sz < 0.81f && ownShaded) {
-                // 已到阴凉目标格且自身中心格遮荫 → 原地停驻（等不烧 / 玩家靠近再追；mx=mz=0 停止移动）
+            if (e.seekingShade) {
+                const float sx = (float(e.shadeTx) + 0.5f) - e.pos.x();
+                const float sz = (float(e.shadeTz) + 0.5f) - e.pos.z();
+                mx = sx; mz = sz; mdist = std::sqrt(sx * sx + sz * sz);
+                // 入影停驻不在本分支判：!sheltered 蕴含 selfExposed（本格仍暴晒）——自身格翻为不暴露的
+                //   下一 AI tick 即走上方 !selfExposed 路径停驻（同谓词单源 = t690「停驻前验证自身格」
+                //   升级版；入水/降水=安全同燃烧豁免口径）。迟滞一拍（≤0.07s）的入影过冲可忽略。
+            }
+        } else if (!selfExposed) {
+            // 真遮蔽（非迟滞残窗）→ 持影决策：玩家暴晒 → 停驻 + 压攻击（等玩家进阴影）；玩家安全 →
+            //   mx/mz 保持朝玩家（照常追击攻击）。玩家暴露判定同谓词（玩家不燃烧，「暴晒」只是持影等待
+            //   的对象）；玩家脚位换算身体中心 +0.9（同 aiArcher 射击目标上身字面量先例）。
+            const bool playerExposed = sunBurnExposureAt(world, playerPos.x(), playerPos.y() + 0.9f,
+                                                         playerPos.z(), 0.9f, skyBrightness);
+            if (playerExposed) {
                 mx = 0.0f; mz = 0.0f; mdist = 0.0f;
-            } else { mx = sx; mz = sz; mdist = std::sqrt(sx * sx + sz * sz); }
+                attackSuppressed = true;
+            }
         }
-    } else {
-        e.seekingShade = false; // 不燃烧 → 清阴凉目标（回追玩家）
+        // selfExposed && 迟滞残窗：维持默认朝玩家的 mx/mz（交战承诺）；窗尽 → 下个 AI tick 走寻影分支。
     }
 
     // (3) 追踪：朝移动目标（阴凉方向 / 玩家方向）走 + 越障跳。yaw 朝目标（与 aiWander / player 同 yaw 约定：
@@ -3600,9 +3634,11 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     //   呈现层据 Survival 门控应用伤害。t321 节流门控防多 mob 围攻同帧齐抽（详见 kPlayerHitThrottle 注释）——
     //   m_playerHitCooldown>0（其它 mob 刚命中过）→ 本次 attack 不触发（mob 视觉仍挥击但无伤害），等节流过。
     //   t296 击退方向 = (玩家 − mob) XZ 归一（把玩家推开 mob）；distPlayer 极小（贴脸重合）→ 朝 mob 朝向兜底（yaw 约定
-    //     dir=(-sin,-cos)），防零向量。dx/dz/distPlayer 已在 (1) 前算好。t670 寻阴凉停驻时玩家贴身仍攻击（近战本能）。
+    //     dir=(-sin,-cos)），防零向量。dx/dz/distPlayer 已在 (1) 前算好。t951：寻影途中（暴晒态）玩家贴身
+    //     仍攻击（t670 近战本能——攻击不解位不致振荡）；持影等待期由 attackSuppressed 压门（见上）。
     if (distPlayer <= kAttackRange && std::abs(dy) <= kAttackVertRange
-        && e.attackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
+        && e.attackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f
+        && !attackSuppressed) { // t951：持影等待期压攻击（玩家暴晒未入影 → 不发起攻击；夜间恒 false 零变化）
         e.attackCooldown = kAttackCooldown;
         m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（围攻 mob 轮替出手）
         float kbX, kbZ;
@@ -3622,7 +3658,7 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
 //   发 mobAttackedPlayer 语义信号让呈现层路由 PlayerState（同 aiHostile attack 模式）。
 //   t480 idx = 本 mob 槽索引：传给 fireArrow 设箭 arrowShooter（箭命中玩家 → 驯服狼反击发射者）。
 bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
-                             float worldW, float worldD, float speedScale)
+                             float worldW, float worldD, float speedScale, float skyBrightness)
 {
     // 攻击（射箭）冷却递减（不论追踪与否；自然走完，复射不卡陈旧值）。钳到 0。
     if (e.attackCooldown > 0.0f) {
@@ -3831,6 +3867,47 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
     if (draw > 1.0f) draw = 1.0f;
     const float chaseSpd = kChaseSpeed * speedScale * (1.0f - draw);
 
+    // (2b) t951 白天阴影优先状态机（骸骨弓手版；迟滞与谓词同 aiHostile (2b)，契约见该处 + 头文件注释）。
+    //   差异面 = 远程攻击不解位：射击不因玩家暴晒压门（「骷髅可在阴影内射箭」——无需接近即无需玩家入影；
+    //   射界判定 lineOfSightClear 照旧），白天机器只管**走位**：
+    //     • 暴晒且迟滞窗尽 → 寻影优先（覆盖保持距离带——保命高于走位）；入影即停驻。
+    //     • 真遮蔽 → 移动候选落点暴晒则弃选（保持带照常运作，但任何一步踏进灼烧日光即放弃该 tick 位移
+    //       =「走位不出阴影」；弓手因此可贴在影内对露天玩家照射而自己不再挨晒）。
+    //   白名单 / 夜间旁路 / 只罩玩家路径（仇恨狼 / 铁傀儡分支不入场）同 aiHostile。
+    bool seekActive = false;    // 本 tick 以寻影为移动目标（覆盖保持带）
+    float seekDirX = 0.0f, seekDirZ = 0.0f;
+    const bool dayShadeAi = skyBrightness > kBurnSkyBrightness && undeadBurnsInDaylight(e.mobType);
+    if (dayShadeAi) {
+        const bool selfExposed = sunBurnExposureAt(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH, skyBrightness);
+        if (!selfExposed) {
+            e.shadeHoldTimer = kShadeHoldSeconds; // 遮蔽 → 迟滞窗常满
+            e.seekingShade = false;               // 已安全 → 清旧寻影目标
+        } else if (e.shadeHoldTimer > 0.0f) {
+            e.shadeHoldTimer -= dt;               // 暴晒 → 旧窗衰减（走位决策不逐 tick 翻转）
+        }
+        const bool sheltered = !selfExposed || e.shadeHoldTimer > 0.0f;
+        if (!sheltered) {
+            e.shadeRescanTimer -= dt;
+            if (!e.seekingShade || e.shadeRescanTimer <= 0.0f) {
+                int tx = -1, tz = -1;
+                if (findShadeTarget(world, qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()),
+                                    kShadeScanRadius, kShadeSkyLight, &tx, &tz)) {
+                    e.seekingShade = true;
+                    e.shadeTx = tx; e.shadeTz = tz;
+                } else {
+                    e.seekingShade = false; // 没搜到遮荫 → 兜底照常保持距离带走位（白昼照烧，登记取舍同 aiHostile）
+                }
+                e.shadeRescanTimer = kShadeRescanInterval;
+            }
+            if (e.seekingShade) {
+                seekDirX = (float(e.shadeTx) + 0.5f) - e.pos.x();
+                seekDirZ = (float(e.shadeTz) + 0.5f) - e.pos.z();
+                const float sd = std::sqrt(seekDirX * seekDirX + seekDirZ * seekDirZ);
+                if (sd > 1e-4f) { seekDirX /= sd; seekDirZ /= sd; seekActive = true; } // 单位向量 + 寻影态
+            }
+        }
+    }
+
     // (3) 保持距离：近于 kArcherKeepMin → 朝远离走；远于 kArcherKeepMax → 朝玩家走；其间 → 原地（仅朝向）。
     //   moveDirX/Z = 水平移动单位向量（朝向「期望远离 / 接近」方向）。wantMove=false 表示在保持带内 → 不水平位移。
     float moveDirX = 0.0f, moveDirZ = 0.0f;
@@ -3847,6 +3924,18 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
             moveDirZ = dz / distXZ;
             wantMove = true;
         }
+    }
+    // t951 白天寻影优先覆盖保持带（暴晒且迟滞窗尽 → 保命高于走位）；真遮蔽态的保持带候选落点若在灼烧
+    //   日光下 → 弃选该 tick 位移（「走位不出阴影」——一步踏进即被候选闸拦回，弓手滞留影内）。寻影态
+    //   不设候选闸（本身就在逃离日光，中间格暴露是路径必然）。白天机器旁路（夜间/非亡灵）时两闸恒不触发。
+    if (seekActive) {
+        moveDirX = seekDirX;
+        moveDirZ = seekDirZ;
+        wantMove = true;
+    } else if (wantMove && dayShadeAi
+               && sunBurnExposureAt(world, e.pos.x() + moveDirX * chaseSpd * dt, e.pos.y(),
+                                    e.pos.z() + moveDirZ * chaseSpd * dt, e.halfH, skyBrightness)) {
+        wantMove = false; // t951 候选落点暴晒 → 弃选（原地滞留影内，走位不出阴影）
     }
 
     // 越障跳（仅在要水平移动 + 贴地时；同 aiHostile 越障：前方 1 格墙 + 墙顶 2 格空气 → 跳）。
@@ -5327,7 +5416,7 @@ void EntityManager::tickVehicleRiding()
 // 移除用索引收集 + 循环后逆序 erase（保索引有效）。
 void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         float listenerHalfW, float listenerHeight, bool playerTargetable,
-                        bool playerSpectator)
+                        bool playerSpectator, float skyBrightness)
 {
     if (!world || m_entities.empty()) return;
     FrameProfiler::Scope profLoop("mobLoop"); // t500 perf：mob 桶子分解（EntityManager::tick 整段）
@@ -7033,7 +7122,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   t283 Bones（骷髅弓箭手）→ aiArcher（detect→keep-distance→shoot 远程射箭）。
                     //   t284 Stalker（潜行者/苦力怕）→ aiStalker（detect→chase→fuse→detonate 近距自爆）。
                     //   非追踪回退到 wander（在 aiHostile / aiArcher / aiStalker 内）。
-                    if (aiArcher(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiArcher(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, skyBrightness)) dirty = true;
                     // t331 拉弓期（chasing）每帧 bump revision → QML drawAmountAt 绑定刷新（驱动抬臂 + 弦后拉）；
                     //   即使 aiArcher 返 moved=false（拉弓减速到停），aimTimer 仍在变 → 须 dirty（同 Stalker inflate 模式）。
                     if (e.chasing) dirty = true;
@@ -7063,7 +7152,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     // 火球冷却 / 漂移状态在 aiEmberling 内推进；无独立每帧显示态需 bump（浮动画由 QML Animation
                     //   驱动非 revision 绑定，无需 term）。悬浮移动已由 dirty=true 覆盖（revision → QML position 绑定）。
                 } else {
-                    if (aiHostile(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    if (aiHostile(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, skyBrightness)) dirty = true;
                 }
             } else {
                 // 非吃草：扫描冷却倒数（仅羊）；AI wander；羊 idle 且冷却到 → 扫前方草丛决定是否开吃。
