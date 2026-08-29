@@ -20562,6 +20562,200 @@ Item {
                           ;
     }
 
+    // ── P-t939 单格坡静置矿车下滑规则探针（MinecartManager 直编；spec「单格上/下坡静置矿车仍静止——
+    //    应往下坡运动。口径（用户定稿）：未激活动力轨=减速可平衡坡上；普通轨=下滑；激活动力轨+探测轨=
+    //    往下坡运动」）──
+    //   根因：t909② 静置闸只读「邻轨层差」（连续坡每格 ±1）——单格坡（平轨里嵌一格凸/凹）的坡度全部
+    //   落在本格面上（railRiseAt 的 fx 线性坡），本格邻轨探针读 {上坡侧 +1, 平侧 0}，两头都无 -1 → 被
+    //   当平地停驻。修 = 静置闸 + 滑行坡向两处都补**本格面梯度**（cartRailGradient：与 Y 钉定/俯仰同一
+    //   张面 ±kCartPitchProbe 采样）+ 轨型闸（未激活动力轨 brake 刹住坡上车）。
+    //   rig：驼峰线（z=z0 行）x0-5..x0-2 平轨引道 + x0-1 上坡 incline + x0@Y+1 峰 + x0+1 下坡 incline +
+    //   x0+2..x0+3 平轨引出；独立电源行（z=z0+2）x0-2 平轨 + x0-1 通电动力轨（下 RedstoneBlock 直供）。
+    //   腿：(a) 单格上坡（x0-1 普通轨）静车 → 西向下坡滚 ≥1.5 格（kick-only 摩擦滑 ~0.5 格 → 阈值钉
+    //           「滑行半边的本格面重力覆盖」也在：自然滚落非蠕动）；
+    //       (b) 单格下坡（x0+1 普通轨）静车 → 东向 ≥1.5 格；
+    //       (c) 未激活动力轨同场景（x0-1 换 GoldenRail 无源）→ 位移 ≈0（口径①「减速可平衡坡上」钉）；
+    //       (d) 通电动力轨同场景（下方 RedstoneBlock 直供）→ 西向 ≥1.5 格（口径③ 动力轨半边：起步后
+    //           t735④ boost 接管）；
+    //       (e) 探测轨（x0+1 换 DetectorRail）→ 东向 ≥1.5 格（口径③ 探测轨半边）；
+    //       (f) 平地阴性：平轨 / 通电动力轨平地静车位移 ≈0（t735④「平地静置空车不被动力轨弹射」+
+    //           「下滑只发生在有下坡分量」）；滚落车 y 贴回平轨面（无悬浮）；
+    //       (g) 源码钉：brake 闸 / 静置闸梯度消费 / 滑行梯度覆盖 / helper 实现 / 头文件阈值常量。
+    {
+        // rig 选址：运行期扫描空区（t909 模式）。footprint x0-6..x0+4 × z0-1..z0+3 × kRigY-2..kRigY+3
+        //   （含 RedstoneBlock 层 Y-1 与峰 Y+1）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 6; xx + 4 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -6; dx <= 4 && clear; ++dx)
+                    for (int dz = -1; dz <= 3 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
+        if (x0 < 0) {
+            qInfo().noquote() << "  [t939 diag] no clear rig area found";
+        } else {
+            const auto clearSlopeRow = [&]() {
+                for (int i = -5; i <= 3; ++i)
+                    w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);          // 引道 + 两 incline（含峰前格）
+                w.setBlock(x0, kRigY + 1, z0, BR::Air, 0);              // 峰
+                w.setBlock(x0 - 1, kRigY - 1, z0, BR::Air, 0);          // 相位 3 直供源（若有）
+            };
+            // ── 相位 1：普通轨驼峰 + 平地阴性（腿 a/b/f）──
+            for (int i = -5; i <= 3; ++i)
+                if (i != 0) placeRigBlock(w, x0 + i, kRigY, z0, BR::Rail, 0);
+            placeRigBlock(w, x0, kRigY + 1, z0, BR::Rail, 0);           // 峰（两侧低一格的单格凸）
+            // 电源行：平轨 + 通电动力轨（下 RedstoneBlock 直供 —— t909 rig 同款）。
+            placeRigBlock(w, x0 - 1, kRigY - 1, z0 + 2, BR::RedstoneBlock, 0);
+            placeRigBlock(w, x0 - 2, kRigY, z0 + 2, BR::Rail, 0);
+            placeRigBlock(w, x0 - 1, kRigY, z0 + 2, BR::GoldenRail, 0);
+            tickN(w, 4);
+            const bool flatPoweredOk =
+                (w.stateAt(x0 - 1, kRigY, z0 + 2) & BR::GoldenRailStateOnFlag) != 0;
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 - 1, kRigY, z0, &w);                 // A：单格上坡（槽 0）
+                carts.spawnCart(x0 + 1, kRigY, z0, &w);                 // B：单格下坡（槽 1）
+                carts.spawnCart(x0 - 2, kRigY, z0 + 2, &w);             // F1：平轨阴性（槽 2）
+                carts.spawnCart(x0 - 1, kRigY, z0 + 2, &w);             // F2：通电动力轨平地（槽 3）
+                const float ax0 = carts.posAt(0).x(), bx0 = carts.posAt(1).x();
+                const float f1x0 = carts.posAt(2).x(), f2x0 = carts.posAt(3).x();
+                for (int t = 0; t < 400; ++t) carts.tickPushedCarts(0.016f, &w);
+                const float dA = ax0 - carts.posAt(0).x();              // 西向位移（正 = 向下坡）
+                const float dB = carts.posAt(1).x() - bx0;              // 东向位移
+                // (a) 单格上坡：西滚 ≥1.5（kCartSlopeKick-only 摩擦滑 ~0.5 格 → 阈值同时钉滑行半边的
+                //     本格面重力覆盖）；终位贴平轨引道面（无半坡悬浮）。
+                okA = dA >= 1.5f
+                    && std::fabs(carts.posAt(0).y() - (float(kRigY) + 0.45f)) < 0.03f
+                    && carts.posAt(0).x() > float(x0) - 5.5f;           // 留在 rig 内（未飞出死端）
+                // (b) 单格下坡：东滚 ≥1.5。
+                okB = dB >= 1.5f
+                    && std::fabs(carts.posAt(1).y() - (float(kRigY) + 0.45f)) < 0.03f
+                    && carts.posAt(1).x() < float(x0) + 4.0f;
+                // (f) 平地阴性：普通平轨 + 通电动力轨平地静车都 ≈0（t735④ 弹射豁免不破 —— 下滑只发生
+                //     在有下坡分量；flatPoweredOk 先钉动力轨确已通电，防腿空转）。
+                okF = flatPoweredOk
+                    && std::fabs(carts.posAt(2).x() - f1x0) <= 0.02f
+                    && std::fabs(carts.posAt(3).x() - f2x0) <= 0.02f;
+                if (!okA || !okB || !okF)
+                    qInfo().noquote() << "  [t939 diag] p1 dA" << dA << "dB" << dB
+                                      << "f1" << std::fabs(carts.posAt(2).x() - f1x0)
+                                      << "f2" << std::fabs(carts.posAt(3).x() - f2x0)
+                                      << "pow" << flatPoweredOk
+                                      << "A" << carts.posAt(0) << "B" << carts.posAt(1);
+                carts.clearAll();
+            }
+            // ── 相位 2：未激活动力轨平衡钉（腿 c；口径①「减速可平衡坡上——车停得住」）──
+            placeRigBlock(w, x0 - 1, kRigY, z0, BR::GoldenRail, 0);     // 上坡 incline 换断电动力轨
+            tickN(w, 2);
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 - 1, kRigY, z0, &w);
+                const float cx0 = carts.posAt(0).x(), cy0 = carts.posAt(0).y();
+                for (int t = 0; t < 400; ++t) carts.tickPushedCarts(0.016f, &w);
+                okC = std::fabs(carts.posAt(0).x() - cx0) <= 0.02f
+                    && std::fabs(carts.posAt(0).y() - cy0) <= 0.02f;    // 停在坡面原位（不被推离 incline）
+                if (!okC)
+                    qInfo().noquote() << "  [t939 diag] p2 d"
+                                      << std::fabs(carts.posAt(0).x() - cx0)
+                                      << "dy" << std::fabs(carts.posAt(0).y() - cy0);
+                carts.clearAll();
+            }
+            // ── 相位 3：通电动力轨同场景（腿 d；口径③ 动力轨半边 —— 有下坡分量才动）──
+            placeRigBlock(w, x0 - 1, kRigY - 1, z0, BR::RedstoneBlock, 0); // 直供源（红石块是合法支撑）
+            tickN(w, 4);
+            const bool inclinePoweredOk =
+                (w.stateAt(x0 - 1, kRigY, z0) & BR::GoldenRailStateOnFlag) != 0;
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 - 1, kRigY, z0, &w);
+                const float dx0 = carts.posAt(0).x();
+                for (int t = 0; t < 400; ++t) carts.tickPushedCarts(0.016f, &w);
+                const float dD = dx0 - carts.posAt(0).x();
+                okD = inclinePoweredOk && dD >= 1.5f
+                    && carts.posAt(0).x() > float(x0) - 5.5f;           // 加速滑入引道后摩擦停（未飞出）
+                if (!okD)
+                    qInfo().noquote() << "  [t939 diag] p3 dD" << dD << "pow" << inclinePoweredOk
+                                      << "D" << carts.posAt(0);
+                carts.clearAll();
+            }
+            // ── 相位 4：探测轨同场景（腿 e；口径③ 探测轨半边 —— 下坡 incline 换 DetectorRail）──
+            placeRigBlock(w, x0 + 1, kRigY, z0, BR::DetectorRail, 0);
+            {
+                MinecartManager carts;
+                carts.spawnCart(x0 + 1, kRigY, z0, &w);
+                const float ex0 = carts.posAt(0).x();
+                for (int t = 0; t < 400; ++t) carts.tickPushedCarts(0.016f, &w);
+                const float dE = carts.posAt(0).x() - ex0;
+                okE = dE >= 1.5f && carts.posAt(0).x() < float(x0) + 4.0f;
+                if (!okE)
+                    qInfo().noquote() << "  [t939 diag] p4 dE" << dE << "E" << carts.posAt(0);
+                carts.clearAll();
+            }
+            // 清场（先拆轨再拆源 —— 源格编辑会触发上方轨失撑坍落；全部拆完即等效）。
+            clearSlopeRow();
+            w.setBlock(x0 - 2, kRigY, z0 + 2, BR::Air, 0);
+            w.setBlock(x0 - 1, kRigY, z0 + 2, BR::Air, 0);
+            w.setBlock(x0 - 1, kRigY - 1, z0 + 2, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (g) 源码钉（t935/t936 模式：字符串钉——brake 闸 / 静置闸梯度消费 / 滑行梯度覆盖 / helper
+        //     实现 / 头文件阈值常量，任一消失即红）。
+        const QString exeDir939 = QCoreApplication::applicationDirPath();
+        const QString root939 = QDir(exeDir939 + QStringLiteral("/..")).absolutePath();
+        auto readSrc939 = [&root939](const QString &rel) -> QString {
+            QFile f(root939 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mc939 = readSrc939(QStringLiteral("src/Entities/minecartmanager.cpp"));
+        const QString mh939 = readSrc939(QStringLiteral("src/Entities/minecartmanager.h"));
+        const bool okG1 = mc939.contains(
+            QStringLiteral("(world->stateAt(sx, ry, sz) & BlockRegistry::GoldenRailStateOnFlag) == 0)"));
+        const bool okG2 = mc939.contains(
+            QStringLiteral("if (cartRailGradient(world, c.pos, ry, c.dirX, c.dirZ, grad)) {"));
+        const bool okG3 = mc939.contains(
+            QStringLiteral("if (cartRailGradient(world, c.pos, ry, c.dirX * float(gs), c.dirZ * float(gs), grad)) {"));
+        const bool okG4 = mc939.contains(
+            QStringLiteral("bool MinecartManager::cartRailGradient(World *world, const QVector3D &pos, int railY,"));
+        const bool okG5 = mh939.contains(QStringLiteral("static constexpr float kCartSlopeGradMin = 0.1f;"));
+        const bool okT939 = okA && okB && okC && okD && okE && okF
+                            && okG1 && okG2 && okG3 && okG4 && okG5;
+        if (!okT939) ++totalFail;
+        if (!okT939)
+            qInfo().noquote() << "  [t939 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "e" << okE << "f" << okF
+                              << "| g" << okG1 << okG2 << okG3 << okG4 << okG5
+                              << "| srcLen cpp" << mc939.size() << "h" << mh939.size();
+        qInfo().noquote() << (okT939 ? "PASS" : "FAIL")
+                          << "| t939 stationary carts slide down single-block slopes: the t909 static-start "
+                             "gate only read NEIGHBOR rail layer deltas (continuous slopes step +-1 per "
+                             "cell), so a single-block hump/dip embedded in a flat line - where the entire "
+                             "gradient lives on the cart's OWN cell surface (railRiseAt's fx ramp, neighbor "
+                             "probes read {uphill +1, flat 0}) - was classified flat and the cart stayed "
+                             "parked (user report). Fix adds a same-surface gradient sample "
+                             "(cartRailGradient, the very surface Y-pinning/pitch sampling reads, "
+                             "+-kCartPitchProbe window) to BOTH the static-start gate and the sliding "
+                             "slope classification (kick + slope-gravity roll, not friction creep), gated "
+                             "by rail type per the user's final rules: unpowered golden rail = brake that "
+                             "holds a parked cart on a slope (rule 1), plain/detector/powered rails roll "
+                             "downhill (rules 2+3, powered lerp takes over after the start); flat ground "
+                             "has no downhill component so all rail types stay parked and the t735(4) "
+                             "no-launch exemption survives. Probe legs: (a) single up-slope plain rail "
+                             "rolls west >=1.5 (kick-only coast is ~0.5, so the threshold also pins the "
+                             "sliding-half gravity overlay), ends glued to the flat lead surface, stays "
+                             "inside the rig; (b) single down-slope rolls east >=1.5; (c) unpowered "
+                             "golden rail on the same slope: zero displacement (balance pin); (d) powered "
+                             "golden rail (RedstoneBlock direct feed, flag verified) rolls west >=1.5; "
+                             "(e) detector rail rolls east >=1.5; (f) flat plain rail and flat POWERED "
+                             "golden rail carts stay put (t735(4) negative regression); (g) source pins "
+                             "for the brake gate, both gradient consumption sites, the helper, and the "
+                             "threshold constant"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
