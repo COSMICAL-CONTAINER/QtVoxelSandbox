@@ -21716,6 +21716,278 @@ Item {
                           ;
     }
 
+    // ── P-t945 仙人掌旁放铁轨（玩家放置全链）探针 ──
+    //   用户第五轮实测「仙人掌旁放铁轨放不了」——t911 只钉了 World 直编层（P-t911 探针经 w.setBlock 直写，
+    //   天然绕过 PlayerController::placeBlock 的放置预检链），玩家真实路径（射线 → 预检 → setBlock）此前无
+    //   行为级覆盖。本探针直编 PlayerController（t814 真消费端模式 + review27-8 挂窗 grab 载体）走**完整
+    //   放置链**：loadSavedState 定位/定向 → tick 刷射线 → setSelectedBlock(Rail) → placeBlock。
+    //   断言八段：
+    //   (a) 地面顶面瞄准（瞄仙人掌旁地面 → 目标 = 地面上方气格，贴仙人掌柱基）→ 放置成功 + 2 高整柱坍落
+    //       （两格全 Air + 各一次 blockDroppedAsItem(Cactus)）+ 铁轨留存；
+    //   (b) 仙人掌基座侧面瞄准（瞄 0.8 细柱选中面 → 目标 = 侧邻气格，同贴柱基）→ 同 (a)；
+    //   (c) 阴性·无支撑悬空轨位照旧拒（瞄 2 高柱**上层**侧面 → 目标下方 Air → 轨预检②拒）：放置不发生、
+    //       仙人掌无恙（放置被拒不触发邻接坍落——仙人掌坍落不是非法放置的免死金牌，用户定稿口径）；
+    //   (d) 阴性·空场悬空放轨照旧拒（无仙人掌镜像对照，钉轨支撑语义本身）；
+    //   (e) 生存模式全链（真实游玩口径）：hotbar 铁轨栈放置 + 消耗 1 件（t669）；
+    //   (f) 对称面·火把贴柱旁 → 放置成功 + 整柱坍落（轨族口径对薄格非实体族同成立）；
+    //   (g) 对称面·石头挤占柱旁 → 放置成功 + 整柱坍落（t445 ④ 非空门全族覆盖，钉口径防漂移）；
+    //   (h) 源码钉：placeBlock 铁轨预检块 + checkCactusOnEdit ④ 邻接坍落关键行（任一消失即红）。
+    {
+        // rig 选址：kRigY 高空全空盒扫描（同 t911 模式；dx -1..7、dz -1..1、dy -2..+4）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 7 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 7 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 4 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t945 rail-adjacent cactus player-path place: no clear rig area found";
+        } else {
+            WorldClock clockP945;
+            EntityManager entsP945; // 空管理器（无 mob / 无掉落物；放置链不依赖）
+            Hotbar hbP945;
+            PlayerController pcP945; // t814 真消费端模式（review27-8 挂窗 grab 载体；headless 无指针锁）
+            pcP945.setWorld(&w);
+            pcP945.setWorldClock(&clockP945);
+            pcP945.setEntityManager(&entsP945);
+            pcP945.setHotbar(&hbP945);
+            QQuickWindow probeWinP945;
+            pcP945.setParentItem(probeWinP945.contentItem());
+            pcP945.grab(); // m_window 就绪 → setCaptured(true) 走通（placeBlock 入口门）
+            pcP945.setSelectedBlock(int(BR::Rail));
+            // 掉落计数（blockDroppedAsItem 局部连接——只数本 rig 柱附近的 Cactus 掉落）。
+            int dropsP945 = 0;
+            const QMetaObject::Connection dropConnP945 = QObject::connect(
+                &w, &World::blockDroppedAsItem, &w,
+                [&dropsP945, x0, z0](int bx, int, int bz, int bid) {
+                    if (bid == int(BR::Cactus) && bz == z0 && bx >= x0 && bx <= x0 + 6)
+                        ++dropsP945;
+                });
+            // rig 搭建：石台面（kRigY-1，x0..x0+5）+ 2 高仙人掌柱（x0, kRigY/kRigY+1, z0，贴柱基可站地面）。
+            const auto buildRigP945 = [&]() {
+                for (int dx = 0; dx <= 5; ++dx) {
+                    w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                    for (int dy = 0; dy <= 2; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0, BR::Air, 0);
+                }
+                w.setBlock(x0, kRigY - 1, z0, BR::Sand, 0);      // 仙人掌合法沙支撑（场景保真）
+                w.setBlock(x0, kRigY,     z0, BR::Cactus, 0);
+                w.setBlock(x0, kRigY + 1, z0, BR::Cactus, 0);
+            };
+            const auto clearRigP945 = [&]() {
+                for (int dx = 0; dx <= 5; ++dx)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0, BR::Air, 0);
+            };
+            // 瞄准 + tick 刷射线：从眼位（脚位 +1.62）指向 aim 点（格面上一点），返命中格。
+            //   先 release+grab：grab 的光标居中（QCursor::setPos(windowCenterGlobal)）必须紧贴本次 tick ——
+            //   pollMouse 每次捕获 tick 读 QCursor::pos−窗口中心改写 yaw/pitch（headless 下窗口中心与真实
+            //   光标残留位的偏差会被一次性吞成视角踢变，跨腿累积漂移）→ 每腿重居中归零 delta，保证
+            //   loadSavedState 写入的 yaw/pitch 原样进 updateRaycast。
+            const auto aimP945 = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ, int mode) {
+                const float ex = feetX, ey = float(kRigY) + 1.62f, ez = feetZ;
+                const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+                const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+                const float pitch = std::asin(dy / len) * 57.2957795f;         // rad → deg（俯视为负）
+                const float yaw = std::atan2(-dx, -dz) * 57.2957795f;          // lookDirection 约定
+                pcP945.release();
+                pcP945.grab(); // 重新居中光标（pollMouse delta 归零；见上注）
+                pcP945.loadSavedState(feetX, float(kRigY), feetZ, yaw, pitch, mode);
+                pcP945.tick(); // updateRaycast 刷新命中（tick 公共入口；t889 先例）
+                return pcP945.hitBlock();
+            };
+            const auto pumpMsP945 = [](int ms) { // 放置 200ms CD 间隔（t128；m_evtClock 单调墙钟）
+                QElapsedTimer t;
+                t.start();
+                while (t.elapsed() < ms)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            };
+            buildRigP945();
+            // (a) 地面顶面瞄准：瞄 (x0+1.7, kRigY, z0+0.5)（= 石台顶面）→ 目标 (x0+1, kRigY, z0)。
+            const QVector3D hitA = aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                                           float(x0) + 1.7f, float(kRigY), float(z0) + 0.5f, 1);
+            pcP945.placeBlock();
+            const bool okA = hitA == QVector3D(float(x0 + 1), float(kRigY - 1), float(z0))
+                && w.blockAt(x0 + 1, kRigY, z0) == BR::Rail          // 放置成功（轨留存）
+                && w.blockAt(x0, kRigY, z0) == BR::Air               // 柱基坍落
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Air           // 柱上层坍落（整柱）
+                && dropsP945 == 2;                                       // 每格一次掉落
+            if (!okA)
+                qInfo().noquote() << "  [t945 diag] a hit" << hitA << "tgt"
+                                  << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsP945;
+            pumpMsP945(260);
+            // (b) 仙人掌基座侧面瞄准：瞄 0.8 细柱选中面 (x0+0.9, kRigY+0.5, z0+0.5) → 目标同 (a) 格。
+            clearRigP945();
+            buildRigP945();
+            dropsP945 = 0;
+            const QVector3D hitB = aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                                           float(x0) + 0.9f, float(kRigY) + 0.5f, float(z0) + 0.5f, 1);
+            pcP945.placeBlock();
+            const bool okB = hitB == QVector3D(float(x0), float(kRigY), float(z0))
+                && w.blockAt(x0 + 1, kRigY, z0) == BR::Rail
+                && w.blockAt(x0, kRigY, z0) == BR::Air
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
+                && dropsP945 == 2;
+            if (!okB)
+                qInfo().noquote() << "  [t945 diag] b hit" << hitB << "tgt"
+                                  << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsP945;
+            pumpMsP945(260);
+            // (c) 阴性·上层侧面（目标下方 Air → 轨预检②拒）：放置不发生、仙人掌无恙、零掉落。
+            clearRigP945();
+            buildRigP945();
+            dropsP945 = 0;
+            const QVector3D hitC = aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                                           float(x0) + 0.9f, float(kRigY) + 1.5f, float(z0) + 0.5f, 1);
+            pcP945.placeBlock();
+            const bool okC = hitC == QVector3D(float(x0), float(kRigY + 1), float(z0))
+                && w.blockAt(x0 + 1, kRigY + 1, z0) == BR::Air       // 拒放（悬空轨位）
+                && w.blockAt(x0, kRigY, z0) == BR::Cactus            // 仙人掌无恙（拒放不触发坍落）
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsP945 == 0;
+            if (!okC)
+                qInfo().noquote() << "  [t945 diag] c hit" << hitC << "tgt"
+                                  << int(w.blockAt(x0 + 1, kRigY + 1, z0))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsP945;
+            pumpMsP945(260);
+            // (d) 阴性·空场悬空放轨（无仙人掌镜像对照）：瞄石柱**侧面**（命中真实发生）→ 目标 = 柱旁气格、
+            //     其下方 Air → 轨预检②拒（非「射线落空」假阳性：断言命中格本身）。
+            clearRigP945();
+            w.setBlock(x0 + 1, kRigY - 1, z0, BR::Stone, 0); // 石柱三格（台面 + 立柱）
+            w.setBlock(x0 + 1, kRigY,     z0, BR::Stone, 0);
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Stone, 0);
+            dropsP945 = 0;
+            const QVector3D hitD = aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                                           float(x0) + 2.0f, float(kRigY) + 1.5f, float(z0) + 0.5f, 1);
+            pcP945.placeBlock();
+            const bool okD = hitD == QVector3D(float(x0 + 1), float(kRigY + 1), float(z0))
+                && w.blockAt(x0 + 2, kRigY + 1, z0) == BR::Air; // 悬空轨位照旧拒
+            if (!okD)
+                qInfo().noquote() << "  [t945 diag] d hit" << hitD << "tgt"
+                                  << int(w.blockAt(x0 + 2, kRigY + 1, z0));
+            // (e) 生存模式全链（真实游玩口径）：hotbar 槽 0 = 铁轨 ×16 + 仙人掌侧面瞄准 → 放置成功 + 整柱
+            //     坍落 + 槽内消耗 1 件（t669 C++ 消耗收口在放置动作本体，走通即证 Survival 放置链无额外拒绝）。
+            clearRigP945();
+            buildRigP945();
+            dropsP945 = 0;
+            hbP945.setStack(0, BR::Rail, 16);
+            hbP945.setSelectedSlot(0);
+            const QVector3D hitE = aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                                           float(x0) + 0.9f, float(kRigY) + 0.5f, float(z0) + 0.5f, 2); // 2 = Survival
+            pcP945.placeBlock();
+            const bool okE = hitE == QVector3D(float(x0), float(kRigY), float(z0))
+                && w.blockAt(x0 + 1, kRigY, z0) == BR::Rail
+                && w.blockAt(x0, kRigY, z0) == BR::Air
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
+                && dropsP945 == 2
+                && hbP945.countAt(0) == 15; // 生存放置消耗 1 件（t669 收口）
+            if (!okE)
+                qInfo().noquote() << "  [t945 diag] e hit" << hitE << "tgt"
+                                  << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsP945
+                                  << "stack" << hbP945.countAt(0);
+            pumpMsP945(260);
+            // (f) 对称面·火把（薄格非实体族同口径）：火把贴柱旁地面 → 放置成功 + 整柱坍落（同 World ④ 邻接
+            //     反应；预检只看支撑不看邻仙人掌 —— 非法化「邻仙人掌」的预检不存在，轨族如此火把族亦如此）。
+            clearRigP945();
+            buildRigP945();
+            dropsP945 = 0;
+            pcP945.setSelectedBlock(int(BR::Torch));
+            aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                    float(x0) + 1.7f, float(kRigY), float(z0) + 0.5f, 1);
+            pcP945.placeBlock();
+            const bool okF = w.blockAt(x0 + 1, kRigY, z0) == BR::Torch
+                && w.blockAt(x0, kRigY, z0) == BR::Air
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
+                && dropsP945 == 2;
+            if (!okF)
+                qInfo().noquote() << "  [t945 diag] f tgt"
+                                  << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsP945;
+            pumpMsP945(260);
+            // (g) 对称面·石头（实体方块挤占既有语义钉）：石头放柱旁 → 放置成功 + 整柱坍落（t445 ④ 非空门
+            //     天然覆盖所有非 Air 方块；本腿钉它防未来「只对轨族开坍落」的口径漂移）。
+            clearRigP945();
+            buildRigP945();
+            dropsP945 = 0;
+            pcP945.setSelectedBlock(int(BR::Stone));
+            aimP945(float(x0) + 3.5f, float(z0) + 0.5f,
+                    float(x0) + 1.7f, float(kRigY), float(z0) + 0.5f, 1);
+            pcP945.placeBlock();
+            const bool okG = w.blockAt(x0 + 1, kRigY, z0) == BR::Stone
+                && w.blockAt(x0, kRigY, z0) == BR::Air
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
+                && dropsP945 == 2;
+            if (!okG)
+                qInfo().noquote() << "  [t945 diag] g tgt"
+                                  << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsP945;
+            pumpMsP945(260);
+            // (h) 源码钉：放置预检轨支撑 + World ④ 邻接坍落关键行（t939/t940 字符串钉模式）。
+            const QString exeDirP945 = QCoreApplication::applicationDirPath();
+            const QString rootP945 = QDir(exeDirP945 + QStringLiteral("/..")).absolutePath();
+            auto readSrcP945 = [&rootP945](const QString &rel) -> QString {
+                QFile f(rootP945 + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString pcSrcP945 = readSrcP945(QStringLiteral("src/Game/playercontroller.cpp"));
+            const QString wSrcP945 = readSrcP945(QStringLiteral("src/World/world.cpp"));
+            const bool okH = pcSrcP945.contains(QStringLiteral(
+                "if (!BlockRegistry::isFullCube(below)) return; // ② 下方非完整立方支撑 → 拒（不挥）"))
+                && wSrcP945.contains(QStringLiteral("dropCactusColumn(nx, baseY, nz);"));
+            // 清场 + 释放（grab 析构配对）。
+            clearRigP945();
+            w.setBlock(x0 + 1, kRigY - 1, z0, BR::Air, 0);
+            QObject::disconnect(dropConnP945);
+            pcP945.release();
+            probeWinP945.deleteLater();
+            const bool okP945 = okA && okB && okC && okD && okE && okF && okG && okH;
+            if (!okP945) ++totalFail;
+            if (!okP945)
+                qInfo().noquote() << "  [t945 diag] a" << okA << "b" << okB << "c" << okC
+                                  << "d" << okD << "e" << okE << "f" << okF << "g" << okG
+                                  << "h" << okH;
+            qInfo().noquote() << (okP945 ? "PASS" : "FAIL")
+                              << "| t945 rail placement beside a cactus succeeds through the REAL player"
+                                 " placement path (raycast -> placeBlock prechecks -> setBlock) and fells"
+                                 " the whole cactus column: (a) aiming at the ground top beside the"
+                                 " column places the rail in the adjacent ground-level cell and drops"
+                                 " both column cells (one item each) with the rail retained; (b) aiming"
+                                 " at the cactus column's own 0.8 selection face resolves to the same"
+                                 " adjacent cell with the same outcome; (c) negative: aiming at the"
+                                 " upper column face targets a support-less cell and the placement is"
+                                 " rejected WITHOUT breaking the cactus (illegal placement gets no"
+                                 " cactus-collapse free pass - the pinned user caliber); (d) negative:"
+                                 " a floating rail spot far from any cactus stays rejected (rail"
+                                 " support semantics intact); (e) Survival mode end-to-end: same"
+                                 " placement through a hotbar rail stack with the stack consumed by"
+                                 " one (t669); (f) symmetry: a torch aimed beside the column also"
+                                 " places and fells it (no precheck illegalizes cactus-adjacent"
+                                 " targets for any block family); (g) symmetry: a solid stone beside"
+                                 " the column also places and fells it (the t445 non-air gate covers"
+                                 " every family - pinned against scope drift); (h) source pins for"
+                                 " the rail support precheck and the adjacency collapse call";
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
