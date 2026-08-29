@@ -812,7 +812,9 @@ public:
     //   红石族邻格」把接收器也算上，普通方块与空气在电力读数（powerSourceLevel / isRedstoneDust）里同为
     //   0，接收器旁的普通编辑（放 / 挖石头、沙级联着地）不改变任何读数却触发了全链重算 + 域内无种子的
     //   误熄两拍闪烁）→ 编辑格 + 受影响的粉连通域入
-    //   m_powerDirty 脏集；tickRedstone（WorldClock 10Hz 桥接）处理脏集 —— 从各脏锚点 BFS 收集连通粉域
+    //   m_powerDirty 脏集；t942 ② 轨 / 电源 / 粉编辑格另经 dirtyGoldenRailChainFrom 把贴邻动力轨链整链接入
+    //   脏集（源 / 粉是链的电平输入端——拆 / 放源若只入编辑格，链靠翻转波前逐 tick 收缩 = 激活残留窗）；
+    //   tickRedstone（WorldClock 10Hz 桥接）处理脏集 —— 从各脏锚点 BFS 收集连通粉域
     //   （上界 kPowerFloodCap 格防失控），域内每粉电力 = 16 - 距最近活跃源的线距（t707 源连通距离 BFS；
     //   源直供邻格 15、每经一粉 -1、爬墙斜角算一跳，距 >15 不达 → 0），写粉 state（连接位 + 电力级）+
     //   接收器通电位，一次 worldChanged 收口。t707 修正：旧 t692 双缓冲快照在去源时回声振荡（邻源格读
@@ -846,6 +848,15 @@ public:
     //   再重亮 = 用户实测「动力轨灭一下又亮」的两拍闪烁。与正向 BFS 同深（连接位对称 → 链距对称）→
     //   两向判据等价，终态不变（顺序无关不变量保持）。只读 m_chunks；仅接收器降沿评估路径调用。
     bool goldenRailChainHasFedSeed(int x, int y, int z) const;
+    // t936/t942 动力轨链入脏集走查（单一权威）：从 (x,y,z) 沿 goldenRailChainStep 把链上动力轨全部入
+    //   m_powerDirty（≤ kGoldenRailChainMax 步，seen 去重防环）。编辑格自身是动力轨 → 含自身；否则
+    //   （破坏后的 Air 位 / t942 源·粉编辑格——皆非轨无 state）不设连接位门槛、经 4 轴向三高探针发现
+    //   邻轨后沿链 BFS。调用方：notePowerWrite（t936 轨编辑 + t942 ② 源 / 粉编辑扩位——源 / 粉是链的
+    //   电平输入端，其编辑〔含 destroySphereSilent 爆炸批量逐格补 note〕须整链同 tick 入脏集，旧版翻转
+    //   波前逐 tick 收缩 = 「炸掉红石块 / 火把后部分动力轨仍激活」残留窗）与 recomputePowerLocal
+    //   Phase A2 粉电平翻转回插（t942 ③）。链几何判定禁第二套（goldenRailChainStep 单源）。写
+    //   m_powerDirty（非 const）。
+    void dirtyGoldenRailChainFrom(int x, int y, int z);
     // t656 电力脏集消费（WorldClock 10Hz 桥接；见上方系统头注释）。Q_INVOKABLE 同 tickWaterFlow 模式。
     Q_INVOKABLE void tickRedstone();
     // t937 ② 探针 / 调试：电力局部重算 pass 计数（recomputePowerLocal 实际执行的次数——脏集空 tick 不计）。

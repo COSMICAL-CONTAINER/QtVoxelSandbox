@@ -21014,6 +21014,220 @@ Item {
                           ;
     }
 
+    // ── P-t942 爆炸毁能量源后动力轨激活残留探针（World 直编 destroySphereSilent；spec「TNT/苦力怕炸掉
+    //    红石块/火把后部分动力轨仍激活」）──
+    //   根因（HEAD=4ce51b3 实测定位）：t683 已在 destroySphereSilent 逐破坏格补 notePowerWrite、t936 已给
+    //   「轨编辑」挂链走查，但**源 / 粉编辑格不走链**——炸掉红石块 / 火把后只有编辑格 + 其 6 正交邻（种子
+    //   轨）入评估域，种子轨翻转后靠「翻转波前」逐 tick 把链尾拉进脏集（8 根链实测 5 tick 仍部分亮 = 用户
+    //   所见激活残留窗；粉传形态源—粉—轨—链更长）。修法（t942 ②/③）：轨 / 电源 / 粉编辑格统一经
+    //   dirtyGoldenRailChainFrom（t936 走查提取的单源 helper，链几何判定仍 goldenRailChainStep 一套）整链
+    //   入脏集 + Phase A2 粉电平翻转回插同走查 → 爆炸批量补 note 的每格都把被毁能量源喂着的整链下一 tick
+    //   一次 pass 全灭。腿：
+    //   (a) 主腿：红石块直供平链 ×8 → r0.9 爆心钉源（只毁源）→ **1 tick 内**链全灭（旧版 t1 仍 7 亮）；
+    //   (b) 火把形态同腿（Torch 源，1 tick 全灭）；
+    //   (c) t936 破坏对称经爆炸路径：爆心钉中段轨（r0.9 只毁该轨）→ 源侧 3 根保持亮、远翼 4 根灭；
+    //   (d) t937 收窄不回退（经爆炸路径）：settled 后爆掉远离轨 / 源 / 粉的孤石 → powerRecomputePasses
+    //       计数不动 + 链保持 8/8（普通方块编辑零红石重算口径在 destroySphereSilent 批量路径同样成立）；
+    //   (e) 坡链形态（t910 几何）：上坡链爆源 → 1 tick 全灭（三高探针从源位发现 ±1 层种子轨）；
+    //   (f) 源码钉：helper 声明 + 定义恰一处（禁第二套链判定）、t942 ② 触发行（源 / 粉扩位）、Phase A2
+    //       走查行、destroySphereSilent 链尾 notePowerWrite 挂点（两爆炸入口共用）。
+    {
+        const auto scanRig942 = [&](int dxLo, int dxHi, int dyLo, int dyHi) {
+            int rx = -1, rz = -1;
+            for (int zz = 3; zz < 94 && rx < 0; zz += 2)
+                for (int xx = 4; xx + dxHi < 96 && rx < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = dxLo; dx <= dxHi && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = dyLo; dy <= dyHi && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { rx = xx; rz = zz; }
+                }
+            return QPair<int, int>(rx, rz);
+        };
+        const auto railOn942 = [&](int x, int y, int z) {
+            return (w.stateAt(x, y, z) & BR::GoldenRailStateOnFlag) != 0;
+        };
+        // (a) 主腿 + (b) 火把腿：源（RedstoneBlock / RedstoneTorch）直供平链 ×8 → 爆心钉源 r0.9（只毁源
+        //     格——邻轨距 1 > 0.81 幸存、支撑板距 1 幸存）→ 1 tick 全灭。
+        bool okA = false, okB = false;
+        for (int leg = 0; leg < 2; ++leg) {
+            const quint8 srcId = (leg == 0) ? quint8(BR::RedstoneBlock) : quint8(BR::RedstoneTorch);
+            const auto [x0, z0] = scanRig942(-2, 8, -2, 1);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t942 diag] leg" << leg << "no clear rig area found";
+                break;
+            }
+            for (int i = -1; i <= 7; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0); // 支撑板（防 t733 失撑掉落噪声）
+            w.setBlock(x0 - 1, kRigY, z0, srcId, 0);
+            for (int i = 0; i < 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::GoldenRail, 0);
+            tickN(w, 8);
+            int lit0 = 0;
+            for (int i = 0; i < 8; ++i) lit0 += railOn942(x0 + i, kRigY, z0);
+            const auto dv = w.destroySphereSilent(x0 - 1, kRigY, z0, 0.9f); // TNT/Stalker 爆炸的 World 层本体（两入口共用）
+            bool srcGone = w.blockAt(x0 - 1, kRigY, z0) == quint8(BR::Air);
+            int railsLeft = 0;
+            for (int i = 0; i < 8; ++i) railsLeft += w.blockAt(x0 + i, kRigY, z0) == quint8(BR::GoldenRail);
+            tickN(w, 1); // 「下一 tick 内」——一次 pass 全灭
+            int lit1 = 0;
+            for (int i = 0; i < 8; ++i) lit1 += railOn942(x0 + i, kRigY, z0);
+            const bool ok = lit0 == 8 && int(dv.size()) == 1 && srcGone && railsLeft == 8 && lit1 == 0;
+            if (leg == 0) okA = ok; else okB = ok;
+            if (!ok)
+                qInfo().noquote() << "  [t942 diag] leg" << leg << "lit0" << lit0 << "dv" << int(dv.size())
+                                  << "srcGone" << srcGone << "railsLeft" << railsLeft << "lit1" << lit1;
+            for (int i = -1; i <= 7; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+            for (int i = 0; i < 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (c) t936 破坏对称经爆炸路径：爆心钉中段 R4（r0.9 只毁该轨）→ 源侧 R1..R3 亮、远翼 R5..R8 灭。
+        bool okC = false;
+        {
+            const auto [x0, z0] = scanRig942(-2, 8, -2, 1);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t942 diag] leg C: no clear rig area found";
+            } else {
+                for (int i = -1; i <= 7; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+                for (int i = 0; i < 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::GoldenRail, 0);
+                tickN(w, 8);
+                int lit0 = 0;
+                for (int i = 0; i < 8; ++i) lit0 += railOn942(x0 + i, kRigY, z0);
+                const auto dv = w.destroySphereSilent(x0 + 3, kRigY, z0, 0.9f); // 中段轨格（i=3）
+                tickN(w, 2);
+                int nearLit = 0, farDark = 0;
+                for (int i = 0; i <= 2; ++i) nearLit += railOn942(x0 + i, kRigY, z0);
+                for (int i = 4; i <= 7; ++i) farDark += !railOn942(x0 + i, kRigY, z0);
+                okC = lit0 == 8 && int(dv.size()) == 1 && nearLit == 3 && farDark == 4;
+                if (!okC)
+                    qInfo().noquote() << "  [t942 diag] c lit0" << lit0 << "dv" << int(dv.size())
+                                      << "nearLit" << nearLit << "farDark" << farDark;
+                for (int i = -1; i <= 7; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+                for (int i = 0; i < 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (d) t937 收窄不回退（爆炸路径）：settled 亮链 → 快照计数 → 爆掉远离 rig 的孤石（6 邻全 Air——
+        //     非粉 ∪ 电源）→ 计数不动 + 链保持 8/8（destroySphereSilent 的逐格 notePowerWrite 走快路径早退）。
+        bool okD = false;
+        {
+            const auto [x0, z0] = scanRig942(-7, 8, -2, 1);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t942 diag] leg D: no clear rig area found";
+            } else {
+                for (int i = -1; i <= 7; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+                for (int i = 0; i < 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::GoldenRail, 0);
+                tickN(w, 8);
+                tickN(w, 2); // 沉降（波前脏集清空 → 稳态脏集空）
+                const int c0 = w.powerRecomputePasses();
+                w.setBlock(x0 - 5, kRigY, z0, BR::Stone, 0); // 孤石（距源 4 / 距最近轨 5；6 邻全 Air）
+                const auto dv = w.destroySphereSilent(x0 - 5, kRigY, z0, 0.9f); // 炸孤石（与轨 / 源 / 粉无关的普通方块）
+                tickN(w, 3);
+                const int c1 = w.powerRecomputePasses();
+                int litAfter = 0;
+                for (int i = 0; i < 8; ++i) litAfter += railOn942(x0 + i, kRigY, z0);
+                okD = c1 == c0 && litAfter == 8 && int(dv.size()) == 1;
+                if (!okD)
+                    qInfo().noquote() << "  [t942 diag] d passes" << c0 << "->" << c1
+                                      << "litAfter" << litAfter << "dv" << int(dv.size());
+                w.setBlock(x0 - 5, kRigY, z0, BR::Air, 0);
+                for (int i = -1; i <= 7; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                for (int i = 0; i < 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (e) 坡链形态（t910 几何）：上坡链 i=0..6（每轨 +1）源贴种子 → 爆源 → 1 tick 全灭。
+        bool okE = false;
+        {
+            const auto [x0, z0] = scanRig942(-2, 7, -2, 8);
+            if (x0 < 0) {
+                qInfo().noquote() << "  [t942 diag] leg E: no clear rig area found";
+            } else {
+                for (int i = -1; i <= 6; ++i) w.setBlock(x0 + i, kRigY - 1 + i, z0, BR::Stone, 0);
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+                for (int i = 0; i <= 6; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::GoldenRail, 0);
+                tickN(w, 8);
+                int lit0 = 0;
+                for (int i = 0; i <= 6; ++i) lit0 += railOn942(x0 + i, kRigY + i, z0);
+                const auto dv = w.destroySphereSilent(x0 - 1, kRigY, z0, 0.9f);
+                tickN(w, 1);
+                int lit1 = 0;
+                for (int i = 0; i <= 6; ++i) lit1 += railOn942(x0 + i, kRigY + i, z0);
+                okE = lit0 == 7 && int(dv.size()) == 1 && lit1 == 0;
+                if (!okE)
+                    qInfo().noquote() << "  [t942 diag] e lit0" << lit0 << "dv" << int(dv.size())
+                                      << "lit1" << lit1;
+                for (int i = -1; i <= 6; ++i) w.setBlock(x0 + i, kRigY - 1 + i, z0, BR::Air, 0);
+                for (int i = 0; i <= 6; ++i) w.setBlock(x0 + i, kRigY + i, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // (f) 源码钉（t935/t936 模式：源文件直读字符串钉——helper / 触发行 / 链尾挂点 / Phase A2 走查消失即红）。
+        const QString exeDir942 = QCoreApplication::applicationDirPath();
+        const QString root942 = QDir(exeDir942 + QStringLiteral("/..")).absolutePath();
+        auto readSrc942 = [&root942](const QString &rel) -> QString {
+            QFile f(root942 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString wh942 = readSrc942(QStringLiteral("src/World/world.h"));
+        const QString wc942 = readSrc942(QStringLiteral("src/World/world.cpp"));
+        const bool okF1 = wh942.contains(QStringLiteral("void dirtyGoldenRailChainFrom(int x, int y, int z);"))
+                       && wc942.count(QStringLiteral("void World::dirtyGoldenRailChainFrom(int x, int y, int z)")) == 1;
+        const bool okF2 = wc942.contains(QStringLiteral(
+                              "|| isPowerEmitterBlock(oldId) || isPowerEmitterBlock(newId)"))
+                       && wc942.contains(QStringLiteral(
+                              "|| BlockRegistry::isRedstoneDust(oldId) || BlockRegistry::isRedstoneDust(newId)"));
+        const bool okF3 = wc942.contains(QStringLiteral("t942 ③ 粉电平翻转"))
+                       && wc942.count(QStringLiteral("dirtyGoldenRailChainFrom(x, y, z);")) == 2;
+        const bool okF4 = wc942.contains(QStringLiteral(
+                              "notePowerWrite(d.x, d.y, d.z, d.oldId, BlockRegistry::Air);"))
+                       && wc942.contains(QStringLiteral("t942：本口即爆炸链尾的红石重扫挂点"));
+        const bool okF5 = wc942.contains(QStringLiteral("t936 动力轨放置 / 破坏沿重算")); // t936 正锚（注释块保留）
+        const bool okT942 = okA && okB && okC && okD && okE && okF1 && okF2 && okF3 && okF4 && okF5;
+        if (!okT942) ++totalFail;
+        if (!okT942)
+            qInfo().noquote() << "  [t942 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "e" << okE << "| f" << okF1 << okF2 << okF3 << okF4 << okF5
+                              << "| srcLen h" << wh942.size() << "c" << wc942.size();
+        qInfo().noquote() << (okT942 ? "PASS" : "FAIL")
+                          << "| t942 explosion destroying a power source leaves no stale charge on"
+                             " powered-rail chains: notePowerWrite only chain-walked RAIL edits"
+                             " (t936), so when a blast (destroySphereSilent's per-voxel"
+                             " notePowerWrite tail, shared by the TNT and stalker detonation"
+                             " entries) destroyed the redstone block or torch FEEDING a chain,"
+                             " only the edit cell and its 6-orthogonal neighbors entered the"
+                             " recompute domain - the seed rail flipped dark but the rest of the"
+                             " chain was only pulled in stepwise by the flip wavefront (8-rail"
+                             " chain measured 5 ticks still partly lit = the user's 'some powered"
+                             " rails stay activated' window; dust-relay layouts lingered longer)"
+                             " - while placement/break edits through setBlock had the same"
+                             " stepwise falling edge. Fix keeps ONE chain-walk authority"
+                             " (dirtyGoldenRailChainFrom, extracted from the t936 block, still"
+                             " stepping via goldenRailChainStep only) and fires it for rail,"
+                             " power-EMITTER and dust edits alike (edit cell is not a rail so the"
+                             " 3-height probe finds the seed it feeds with no connection-bit"
+                             " gate), plus the Phase A2 dust-power-change reinsert walks the"
+                             " same helper so surviving-dust-relayed chains converge in one pass"
+                             " too - the whole chain fed by a destroyed source goes dark in the"
+                             " NEXT single tick, and the bright edge keeps its one-pass semantics"
+                             " (t937 goldenPowered merge); the t937 fast-path narrowing is"
+                             " untouched (plain-block edits still zero-recompute through the"
+                             " explosion path). Probe legs: (a) redstone-block-fed flat chain of"
+                             " 8, blast pinned on the source only -> all dark within 1 tick (was"
+                             " 7-lit at t1), (b) same with a redstone torch source, (c) blast"
+                             " pinned on a mid-chain rail -> fed side stays lit 3, far wing dark"
+                             " 4 (t936 destruction symmetry via the explosion path), (d) blasting"
+                             " an unrelated lone stone -> powerRecomputePasses counter flat and"
+                             " chain stays 8/8 lit (narrowing not regressed), (e) climbing chain"
+                             " blast-the-source -> 1-tick full dark, (f) source pins: helper"
+                             " declared once + defined exactly once, the emitter/dust trigger"
+                             " lines, the Phase-A2 walk line pair, the destroySphereSilent tail"
+                             " notePowerWrite hook comment, and the preserved t936 comment anchor"
+                          ;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
