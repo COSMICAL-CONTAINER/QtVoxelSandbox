@@ -479,7 +479,7 @@ Item {
         return Math.abs(raw) | 0
     }
     // t917 档位预告（hover 悬浮窗文案）：selectEnchantsPreviewForItem 同 seed 复算取**首条**附魔名。
-    //   MC 1.0 语义：附魔台悬停选项预告**一条必定出现**的附魔、等级模糊（预告只显名 + ?，不显等级）。
+    //   MC 1.0 语义：附魔台悬停选项预告**一条必定出现**的附魔、等级模糊（预告只显名 + ......?，不显等级）。
     //   只显示一种（首条）、必定出现（首条就在施放产物 picks 里）、等级未知（?）——书路径（cat=8 全池）
     //   同样适用。itemReady 假 / 空产物 → 空串不显。
     function tierPreviewName(slotIdx) {
@@ -528,7 +528,7 @@ Item {
         // review28 #3：种子（连同 offered）**先行快照**——必须取在下方 H1 归一化写槽**之前**。
         //   书堆（count>1）路径 writeSlot 会写回槽 0 count → enchantRev++ **同步**触发 onEnchantRevChanged
         //   （QML 属性信号同线程直连）→ 换件快照键含 count（id0*4096+count）必变 → optionReroll++；
-        //   种子若在其后取（旧版 :545）= 施放用 reroll+1 的种子而 hover 预告用点击前的 → 「必得」预告
+        //   种子若在其后取（旧版 :545）= 施放用 reroll+1 的种子而 hover 预告用点击前的 → 预告
         //   与产物漂移（推翻 t917「预告与施放严格同源」承诺）。种子/快照类值应在第一次有副作用的写之前取
         //   （review 模式小结 #3：先写后读派生态必被同步信号处理器插队）。
         const offered = root.offeredFor(slotIdx)
@@ -795,7 +795,7 @@ Item {
                                 }
 
                                 // t917 hover 预告（用户「锋利? 耐久?」式）：悬停档位显示**一条必定出现**的
-                                //   附魔预告（名 + ? 等级模糊）。tierPreviewName 与 doEnchant 读同一 tierSeed
+                                //   附魔预告（名 + ......? 等级模糊，t955 格式）。tierPreviewName 与 doEnchant 读同一 tierSeed
                                 //   单一权威（预告 = 施放产物首条，绝不另算随机）；itemReady + 已解锁即显
                                 //   （青金石未放足也可先看预告——攒料期间的可读信息）。触碰 enchantRev →
                                 //   换物品 / 附魔后预告即时刷新；hover 进出驱动绑定重算（低频）。
@@ -819,9 +819,12 @@ Item {
                                     Text {
                                         id: previewText
                                         anchors.centerIn: parent
-                                        // 「必得 锐锋 ?」：必得 = 必定出现（产物首条）；? = 等级未知
-                                        //   （MC 1.0 附魔台悬停预告口径——只显一种、必定出现、等级模糊）。
-                                        text: "必得 " + optSlot.previewName + " ?"
+                                        // 「锐锋......?」（t955 用户口径：hover 预告去前置铺垫词——附魔名
+                                        //   本身即「必出」承诺，铺垫词无信息量）：附魔名 + 「......?」后缀——
+                                        //   省略号 = 产物词条列表未揭（预告只显首条）、? = 等级未知
+                                        //   （MC 1.0 附魔台悬停预告口径不变——只显一种、必定出现、等级模糊；
+                                        //   t917 预告与施放同源链零触碰，本条只换呈现格式）。
+                                        text: optSlot.previewName + "......?"
                                         color: "#c58af0"; font.pixelSize: 10; font.bold: true
                                     }
                                 }

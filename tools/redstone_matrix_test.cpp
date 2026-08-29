@@ -23835,6 +23835,49 @@ Item {
                              "scope";
     }
 
+    // ── t955 hover 预告格式改源码钉（用户第五轮口径「去掉『必得』字样——直接『效率......?』」；
+    //    纯 UI 文案项，hover 悬浮文案 headless 不可达——t931/t941/t954 源码钉先例）──
+    //    旧格式「必得 锐锋 ?」= 前置铺垫词 + 名 + 空格问号；新格式 = 附魔名 + 「......?」后缀
+    //    （省略号 = 产物词条列表未揭、? = 等级未知；t917「预告与施放严格同源」语义零变化——同一条
+    //    tierPreviewName 首条名，只换呈现格式）。钉三面：
+    //    ① 新格式源码形态 —— previewText 的 text 行含附魔名拼接与「......?」后缀（旧式前缀拼接 +
+    //       「 ?」尾巴形态全无）；
+    //    ② 「必得」字样全文件不存在（含注释——旧呈现格式的指纹词，注释残留 = 旧口径漂回的温床；
+    //       格式语义已由名本身承载，「必出」承诺不靠前置词）；
+    //    ③ 预告管线正锚 —— tierPreviewName 定义与调用仍在（格式改不碰 t917 同源链；预览文本仍
+    //       唯一出自它，防「格式改」顺手把预览源改掉）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile ef955(root + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
+        const QString e955 = ef955.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef955.readAll()) : QString();
+        // (a) 新格式形态：名拼接 + 「......?」后缀；旧式「'必得 ' + 名 + ' ?'」形态不复存在。
+        const bool okA955 = e955.contains(QStringLiteral("text: optSlot.previewName + \"......?\""))
+                         && !e955.contains(QStringLiteral("\" ?\""))
+                         && !e955.contains(QStringLiteral("+ optSlot.previewName + \" "));
+        // (b) 「必得」全文件不存在（含注释；utf-8 字面按码点比对——源码即 utf-8 读入）。
+        const bool okB955 = !e955.contains(QStringLiteral("必得"));
+        // (c) 预告管线正锚：tierPreviewName 仍是预览文本的唯一来源（t917 同源链零触碰）。
+        const bool okC955 = e955.contains(QStringLiteral("function tierPreviewName(slotIdx)"))
+                         && e955.contains(QStringLiteral("root.tierPreviewName(optSlot.idx)"));
+        const bool ok955 = okA955 && okB955 && okC955;
+        if (!ok955)
+            qInfo().noquote() << "  t955 diag: newFormat" << okA955 << "prefixGone" << okB955
+                              << "pipeline" << okC955;
+        if (!ok955) ++totalFail;
+        qInfo().noquote() << (ok955 ? "PASS" : "FAIL")
+                          << "| t955 enchant hover preview format: the guaranteed-prefix wording is "
+                             "gone - the tooltip renders the enchant name straight into the "
+                             "'......?' suffix (the name itself carries the guaranteed-appearance "
+                             "promise, the ellipsis = the rest of the result list unrevealed, "
+                             "? = level masked; the MC 1.0 one-enchant-level-blurred caliber is "
+                             "unchanged and the t917 preview==cast single-source chain is "
+                             "untouched), the old 'prefix + name + space-question' source form is "
+                             "extinct anywhere in the file including comments, and "
+                             "tierPreviewName remains the sole text source (pipeline positive "
+                             "anchor)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
