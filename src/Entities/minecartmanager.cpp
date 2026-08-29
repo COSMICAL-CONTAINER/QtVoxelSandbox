@@ -942,10 +942,17 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             // t909③ 下坡重力加速（g·sin45° 同上坡对称；向 ±kCartSlopeDownSpeed 收敛 —— v² = 2ad →
             //   kCartSlopeKick(1.0) 起步 ~2 格即到 10；旧版恒速不加速）。动力段已先行接管（boost 12.8
             //   > 溜坡 10，语义不冲突）。
+            //   t943 ② 收敛**双向化**：高于滑档的残速（boost 出段残速 / 碰撞获速 / 去穿插沿坡免费抬升
+            //   积累的势能）按 kCartFriction 指数衰减回滑档 —— 滑档成为系统真终端速度，臂顶捕获阈恒
+            //   可达 → 多车 V 闭合不漏车（用户「多矿车卡出 V 字」的能量棘轮面收口）。
+            const float sgnD = (c.speed >= 0.0f) ? 1.0f : -1.0f;
             if (std::fabs(c.speed) < kCartSlopeDownSpeed) {
-                c.speed += (c.speed >= 0.0f ? 1.0f : -1.0f) * kCartSlopeGravity * float(dt);
+                c.speed += sgnD * kCartSlopeGravity * float(dt);
                 if (std::fabs(c.speed) > kCartSlopeDownSpeed)
-                    c.speed = (c.speed >= 0.0f) ? kCartSlopeDownSpeed : -kCartSlopeDownSpeed;
+                    c.speed = sgnD * kCartSlopeDownSpeed;
+            } else {
+                const float alphaD = 1.0f - std::exp(-kCartFriction * float(dt));
+                c.speed -= (c.speed - sgnD * kCartSlopeDownSpeed) * alphaD;
             }
         }
         stepCartAlongRail(c, world, float(dt));
@@ -1057,8 +1064,30 @@ void MinecartManager::resolveCartCollisions(World *world)
         const int ryTgt = colRailY(tx, tz, landX, landZ);
         if (ryTgt >= 0 && std::fabs(float(ryTgt - rySelf)) <= 1.0f) {
             const int byc = int(std::floor(c.pos.y() - 0.1f));
-            if (!world->isCollidable(int(std::floor(landX)), byc, int(std::floor(landZ))))
-                return s; // 目标列近层（|Δ|≤1，坡面延续）有轨且落点腰位非实体 → 放行
+            if (!world->isCollidable(int(std::floor(landX)), byc, int(std::floor(landZ)))) {
+                // t943 ② 链可达闸（「多车卡出 V 字到隔壁」根因收口）：近层闸只验「目标列 ±1 层有轨」，
+                //   没验那根轨是不是**本轨链**的延续 —— 跨线立体场景（本链在目标列的延续轨在 rySelf+1，
+                //   同列另有下线 / 桥下线轨在 rySelf−1）里，宽容列扫自 topY 向下先摸到的是**下线**轨
+                //   （Δ=−1 过近层闸）→ 去穿插把车写进下线列，下一帧 pinCartY 沿同一列扫把它钉到下线
+                //   轨上 = 跨链跳线（用户实测「丝滑运动有概率卡出 V 字到隔壁」）。补两问，任一不成立
+                //   照旧钳当前格边界内：① 本格 state 持该位移向连接位（RailConnPx/Nx/Pz/Nz ——
+                //   pickTrackStep / t937 goldenRailChainStep 消费的同一物理连接权威，链端 / 孤轨向位移
+                //   天然被拒）；② 自 rySelf 三高探针沿位移向解到的链层差（railProbeDelta 单一权威）
+                //   == ryTgt−rySelf（落点 = 本链坡面延续层，而非同列并行链）。正常行驶的跨格（含爬坡
+                //   落点已在坡面高度）不经本闸（走 stepCartAlongRail 逐格心重选验证）。
+                const quint8 selfCon = quint8(world->stateAt(cx, rySelf, cz) & 0x0F);
+                const quint8 connBit = axisX ? (step > 0 ? quint8(BlockRegistry::RailConnPx)
+                                                         : quint8(BlockRegistry::RailConnNx))
+                                             : (step > 0 ? quint8(BlockRegistry::RailConnPz)
+                                                         : quint8(BlockRegistry::RailConnNz));
+                const int chainDelta = BlockRegistry::railProbeDelta(
+                    { world->blockAt(tx, rySelf, tz),
+                      world->blockAt(tx, rySelf + 1, tz),
+                      world->blockAt(tx, rySelf - 1, tz) });
+                if ((selfCon & connBit) != 0 && chainDelta != INT_MIN
+                    && chainDelta == ryTgt - rySelf)
+                    return s; // 目标列近层有轨 + 落点腰位非实体 + 落点仍在本链可达层 → 放行
+            }
         }
         const float bound = (step > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
         return (bound - cur) / d; // 钳到边界内（d=±1 → 同号同模换算）
@@ -1121,17 +1150,61 @@ void MinecartManager::resolveCartCollisions(World *world)
             const float pen = kCartCollideSep - dist;
             if (pen > 0.05f) {
                 // 复审 #3 (a)：位移过 clampShift 守卫（越界无轨 → 钳当前格边界内；离轨车不动）。
-                const float gA = clampShift(a, -aDot * (pen * 0.5f)); // A 沿 -n（背离 B）在其轨轴上的分量
-                const float gB = clampShift(b,  bDot * (pen * 0.5f)); // B 沿 +n（背离 A）在其轨轴上的分量
+                const float wantA = -aDot * (pen * 0.5f); // A 沿 -n（背离 B）在其轨轴上的分量
+                const float wantB =  bDot * (pen * 0.5f); // B 沿 +n（背离 A）在其轨轴上的分量
+                const float gA = clampShift(a, wantA);
+                const float gB = clampShift(b, wantB);
                 a.pos.setX(a.pos.x() + a.dirX * gA);
                 a.pos.setZ(a.pos.z() + a.dirZ * gA);
                 b.pos.setX(b.pos.x() + b.dirX * gB);
                 b.pos.setZ(b.pos.z() + b.dirZ * gB);
+                // t943 ② 挤压极限环消解（「多车挤压颤抖卡死」根因收口）：位移被钳（夹逼 / 墙 / 第三车
+                //   挡位，任一侧 |g| < |want|）未能分离、解算后仍重叠的对 = **持续挤压对** —— 冲量模型
+                //   的对撞分支把两车沿 n 反向弹开（各持 ~0.7|closing| 反向速），坡面上 t909② 静置 kick
+                //   （±1.0）与 t863① 反溜（−0.5）下一 tick 又把对朝彼此回灌 → 弹开-回灌极限环 = 用户
+                //   实测挤压颤抖。修 = 速度一致性：沿 n 追得更快的一侧速度钳到被追侧（后车 := 前车，
+                //   同 n 向速度一致 → 下帧无相对逼近 → 不再互撞），挤压对以耦合速度整体脱困 / 一起被
+                //   坡道重力带走；限幅 ±kCartBoostSpeed 同 t907 冲量钳。干净分离的对（两侧均未钳）不进
+                //   本分支 —— t735③ 追尾 / 对撞冲量传递语义零触碰。
+                //   t943 ② 钳向清速（自 t907(a) 笼挤压回归修正）：被钳一侧**不得持有指向钳制边界的
+                //   速度** —— 钳是位置闸，速度须守同一几何；否则下一 tick stepCartAlongRail 的段内位移
+                //   无跨格校验（只验格心重选），车被推过钳制边界进入墙 / 无轨列 → pinCartY 失轨 →
+                //   derailed 坠落（旧代码此不变量由 impulseDirOk 的冲量向守卫间接保证，本闸显式化）。
+                //   只清「穿入」分量，背离分量保留（lessons「闸门只挡穿入速度」条）。
+                const float dxAft = b.pos.x() - a.pos.x();
+                const float dzAft = b.pos.z() - a.pos.z();
+                const bool aClamped = std::fabs(gA) < std::fabs(wantA) - 1e-4f;
+                const bool bClamped = std::fabs(gB) < std::fabs(wantB) - 1e-4f;
+                if ((aClamped || bClamped)
+                    && dxAft * dxAft + dzAft * dzAft
+                       < (kCartCollideSep - 0.01f) * (kCartCollideSep - 0.01f)) {
+                    const float va = a.speed * aDot; // A 沿 n 的速度分量（>0 = 朝 B 逼近）
+                    const float vb = b.speed * bDot;
+                    if (va > vb + 1e-4f)
+                        a.speed = std::max(-kCartBoostSpeed,
+                                           std::min(kCartBoostSpeed, vb * aDot));
+                    else if (vb > va + 1e-4f)
+                        b.speed = std::max(-kCartBoostSpeed,
+                                           std::min(kCartBoostSpeed, va * bDot));
+                }
+                if (aClamped && a.speed * wantA > 0.0f) a.speed = 0.0f;
+                if (bClamped && b.speed * wantB > 0.0f) b.speed = 0.0f;
                 changed = true;
             }
         }
     }
-    if (changed) notifyChanged();
+    if (changed) {
+        // t943 ② 轨态姿态钉定（「横着卡在坡上」呈现面收口）：去穿插 / 冲量只动沿各自轨轴的分量，
+        //   车头 yaw 恒 = cartYawFromDir(dir)（spawn / stepCartAlongRail / t940 snap 同一公式）——
+        //   碰撞解析后对全部轨上态车统一重钉，防任何路径把 yaw 写偏出轨轴（幂等：正常帧零变化；
+        //   derailed 自由体不钉 —— 其朝向归自由物理语义）。
+        for (size_t i = 0; i < m_carts.size(); ++i) {
+            Cart &c = m_carts[i];
+            if (!c.alive || c.derailed) continue;
+            cartYawFromDir(c.dirX, c.dirZ, c.yaw);
+        }
+        notifyChanged();
+    }
 }
 
 // t735 ③ 行进矿车轻推玩家（实现见头注释）：|speed|>0.1 的活体车与玩家轴对齐 AABB 三轴相交 → 玩家沿车
@@ -1384,12 +1457,13 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     //   (d) 无输入且停驻 → 弹射档 0.35×kCartSpeed（t658 语义保留：机制等价 MC 动力轨是「发射器」，停着的
     //       矿车驶上动力轨即被弹射向前，无需玩家踩 W）。
     //   轨格判定同 pickTrackStep（中心下一格）；t691：轨层读前置钉定的 railY（非 floor(pos.y)-1）。
+    //   t943 ①：railPowered 提升到分支外共用 —— 无输入滑行半边（下方 coasting 分支）以「非动力段」为
+    //   前置闸，动力段 (a) 全额 boost 供能语义（t810 定稿）优先级不变。
+    const quint8 gb = (world && railY >= 0) ? world->blockAt(railX, railY, railZ) : quint8(BlockRegistry::Air);
+    const bool railPowered = (gb == BlockRegistry::GoldenRail)
+        && (world->stateAt(railX, railY, railZ) & BlockRegistry::GoldenRailStateOnFlag) != 0; // t658 通电位
     float targetV = proj * kCartSpeed;
-    {
-        const quint8 gb = (world && railY >= 0) ? world->blockAt(railX, railY, railZ) : quint8(BlockRegistry::Air);
-        const bool railPowered = (gb == BlockRegistry::GoldenRail)
-            && (world->stateAt(railX, railY, railZ) & BlockRegistry::GoldenRailStateOnFlag) != 0; // t658 通电位
-        if (railPowered) {
+    if (railPowered) {
             if (proj > 1e-3f) {
                 targetV = kCartBoostSpeed; // (b) 前进输入 → 全 boost 档
             } else if (proj < -1e-3f) {
@@ -1399,7 +1473,6 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
             } else {
                 targetV = 0.35f * kCartSpeed; // (d) 停驻弹射档（机制等价 MC 动力轨弹射停着的矿车）
             }
-        }
     }
     // t667 坡道重力（机制等价 MC 矿车上坡减速 / 下坡自加速、静止车在下坡上溜车）：
     //   以「行进方向上的邻轨高度差」（railProbeDelta：+1 上坡 / -1 下坡 / 0 平 / INT_MIN 无轨）修正目标
@@ -1408,36 +1481,97 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     //   倒行下坡同样加速倒溜）。静止车在下坡上 → 下坡标志放行下方 movement 闸门起步溜。渲染几何的坡面
     //   高度与矿车 Y 同读 railProbeDelta（钉轨面段），两者粒度一致。t691：轨层读前置钉定 railY。
     //   t810：targetV 声明上移至动力轨段前（该段先改写、坡道段在其上继续叠加）。
+    //
+    //   t943 ① 载人无输入滑行与空车同物理（「V 字载人变慢 / 顶点换向特别慢」根因分账）：旧版无输入
+    //   （proj≈0）走 targetV lerp —— 上坡 targetV=0 → 只剩 kCartFriction(2/s) 指数衰减（12.8 入坡要滑
+    //   v/k≈6.4 格才停，顶点前长时间 0.x blocks/s 爬行 = 用户「最高点速度正转负时特别慢」的精确机制；
+    //   指数衰减渐近零，永远没有「重力翻向」的干脆换向）；下坡靠 slopeDownAuto 抬 targetV 到 ±10 再以
+    //   kCartAccel(3/s) lerp（τ≈0.33s 起步拖沓）。而空车路径（tickPushedCarts t909③）是
+    //   kCartSlopeGravity(19.8/s²) 沿轨重力直接积分 —— 同一 V 里空车丝滑往返、载人爬行，物理口径劈叉。
+    //   修 = 无输入（|proj|≤ε）且**非动力段**时改走与空车同一套坡道积分：上坡 19.8/s² 减速 / 下坡向
+    //   ±kCartSlopeDownSpeed 收敛 / 平·无轨摩擦衰减 / 死区归零接 t863① 反溜（tryStallSlideback 同一
+    //   函数）；坡向分类同空车（邻轨层差 + t939 本格面梯度覆盖，负速倒行梯度跟行进向不跟车头）。
+    //   有输入（|proj|>ε）仍走 targetV lerp（t667 上坡收窄 / W 供能语义不动）；railPowered 的 (a)-(d)
+    //   四分支（t810）优先于 coasting；空车路径零触碰（t909 V 形永动 / t735④ / t939 探针原样）。
+    const bool coasting = !railPowered && std::fabs(proj) <= 1e-3f;
     bool slopeDownAuto = false; // 静止车下坡起步溜的闸门标志（speed==0 且行进侧下坡 → 允许移动）
-    if (world && railY >= 0) {
+    if (coasting) {
         const int gs = (c.speed >= 0.0f) ? 1 : -1;
         const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
-        const int slope = BlockRegistry::railProbeDelta(
+        int slope = BlockRegistry::railProbeDelta(
             { world->blockAt(railX + ndx, railY, railZ + ndz),
               world->blockAt(railX + ndx, railY + 1, railZ + ndz),
               world->blockAt(railX + ndx, railY - 1, railZ + ndz) });
-        if (slope != INT_MIN && slope < 0) { // t684：INT_MIN（该向无轨 / 死端）必须排除 —— 否则
-            //   停在死端 / 孤轨上的静止车把「无轨」当「下坡」→ slopeDownAuto 放行起步闸门 → 自动
-            //   冲出轨端悬空一格（速度永远非零 + 推进段指向无轨方向）。只有真下坡（邻轨低 1）才溜车。
-            //   t708 ⑤ 负速倒行对称：行进侧下坡（gs<0 = 倒在下坡上）→ 目标往 **-kCartSlopeDownSpeed**
-            //   方向抬（倒溜加速），不把倒退意图掰成正向（旧版 max 会把「倒行下坡」改成正推）。
-            slopeDownAuto = true;
-            targetV = (gs > 0) ? std::max(targetV, kCartSlopeDownSpeed)
-                               : std::min(targetV, -kCartSlopeDownSpeed);
+        // t939 滑行坡向覆盖（与空车路径同源同阈）：本格面梯度显著时覆盖邻轨层差（单格坡 / V 谷翼）。
+        {
+            float grad = 0.0f;
+            if (cartRailGradient(world, c.pos, railY, c.dirX * float(gs), c.dirZ * float(gs), grad)) {
+                if (grad > kCartSlopeGradMin) slope = 1;
+                else if (grad < -kCartSlopeGradMin) slope = -1;
+            }
         }
-        else if (slope > 0) targetV *= kCartUphillMul; // 上坡减速（正倒行同款收窄）
-    }
-    // 速度 lerp 接近目标（加速 / 摩擦统一：目标 0 时按 kCartFriction 衰减；目标 ±速时按 kCartAccel 接近）。
-    {
-        const float rate = (std::fabs(targetV) > 1e-3f) ? kCartAccel : kCartFriction;
-        const float alpha = 1.0f - std::exp(-rate * float(dt));
-        c.speed += (targetV - c.speed) * alpha;
-        if (std::fabs(c.speed) < 0.02f) {
-            c.speed = 0.0f; // 死区归零（防微速漂移）
-            // t863① 坡上失速反溜：停驻点在坡面（车头朝上坡）→ 反溜起步滑回坡脚，不悬停半空（机制等价
-            //   MC 1.0）。W 持续时 targetV>0 速度恒正不进死区 → 不与爬坡输入打架；S 刹停 / 松键滑停自然
-            //   接入。平面 / 采样失联 → 照旧停驻。
-            tryStallSlideback(c, world, railY);
+        if (slope == INT_MIN || slope >= 0) { // 平 / 上坡 / 无轨
+            if (slope > 0) {
+                // 上坡重力减速（g·sin45°，同空车 t909③ —— v²=v0²−2ad，顶点前速度线性归零非指数爬行）。
+                const float dec = kCartSlopeGravity * float(dt);
+                c.speed = (c.speed > 0.0f) ? std::max(0.0f, c.speed - dec)
+                                           : std::min(0.0f, c.speed + dec);
+            } else {
+                // 平面 / 无轨：摩擦衰减（帧率无关 exp 衰减，与旧版 coasting 平半边同参数）。
+                const float alpha = 1.0f - std::exp(-kCartFriction * float(dt));
+                c.speed -= c.speed * alpha;
+            }
+            if (std::fabs(c.speed) < 0.02f) {
+                c.speed = 0.0f; // 死区归零（防微速漂移）
+                // t863① 坡上失速反溜（与空车路径同一函数同一 kick）：车头朝上坡 → 反溜起步滑回坡脚。
+                tryStallSlideback(c, world, railY);
+            }
+        } else {
+            // t909③ 下坡重力加速（同空车 t909③：向 ±kCartSlopeDownSpeed 收敛；动力段已在前分支接管不进
+            //   此路）。t943 ② 收敛**双向化**：高于滑档的残速（boost 出段残速 / 碰撞获速 / 去穿插沿坡
+            //   免费抬升积累的势能）按 kCartFriction 指数衰减回滑档 —— 滑档成为系统真终端速度，臂顶
+            //   捕获阈恒可达 → 多车 V 闭合不漏车（用户「卡出 V 字」的能量棘轮面）。
+            const float sgnD = (c.speed >= 0.0f) ? 1.0f : -1.0f;
+            if (std::fabs(c.speed) < kCartSlopeDownSpeed) {
+                c.speed += sgnD * kCartSlopeGravity * float(dt);
+                if (std::fabs(c.speed) > kCartSlopeDownSpeed)
+                    c.speed = sgnD * kCartSlopeDownSpeed;
+            } else {
+                const float alphaD = 1.0f - std::exp(-kCartFriction * float(dt));
+                c.speed -= (c.speed - sgnD * kCartSlopeDownSpeed) * alphaD;
+            }
+        }
+    } else {
+        if (world && railY >= 0) {
+            const int gs = (c.speed >= 0.0f) ? 1 : -1;
+            const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
+            const int slope = BlockRegistry::railProbeDelta(
+                { world->blockAt(railX + ndx, railY, railZ + ndz),
+                  world->blockAt(railX + ndx, railY + 1, railZ + ndz),
+                  world->blockAt(railX + ndx, railY - 1, railZ + ndz) });
+            if (slope != INT_MIN && slope < 0) { // t684：INT_MIN（该向无轨 / 死端）必须排除 —— 否则
+                //   停在死端 / 孤轨上的静止车把「无轨」当「下坡」→ slopeDownAuto 放行起步闸门 → 自动
+                //   冲出轨端悬空一格（速度永远非零 + 推进段指向无轨方向）。只有真下坡（邻轨低 1）才溜车。
+                //   t708 ⑤ 负速倒行对称：行进侧下坡（gs<0 = 倒在下坡上）→ 目标往 **-kCartSlopeDownSpeed**
+                //   方向抬（倒溜加速），不把倒退意图掰成正向（旧版 max 会把「倒行下坡」改成正推）。
+                slopeDownAuto = true;
+                targetV = (gs > 0) ? std::max(targetV, kCartSlopeDownSpeed)
+                                   : std::min(targetV, -kCartSlopeDownSpeed);
+            }
+            else if (slope > 0) targetV *= kCartUphillMul; // 上坡减速（正倒行同款收窄）
+        }
+        // 速度 lerp 接近目标（加速 / 摩擦统一：目标 0 时按 kCartFriction 衰减；目标 ±速时按 kCartAccel 接近）。
+        {
+            const float rate = (std::fabs(targetV) > 1e-3f) ? kCartAccel : kCartFriction;
+            const float alpha = 1.0f - std::exp(-rate * float(dt));
+            c.speed += (targetV - c.speed) * alpha;
+            if (std::fabs(c.speed) < 0.02f) {
+                c.speed = 0.0f; // 死区归零（防微速漂移）
+                // t863① 坡上失速反溜：停驻点在坡面（车头朝上坡）→ 反溜起步滑回坡脚，不悬停半空（机制等价
+                //   MC 1.0）。W 持续时 targetV>0 速度恒正不进死区 → 不与爬坡输入打架；S 刹停 / 松键滑停自然
+                //   接入。平面 / 采样失联 → 照旧停驻。
+                tryStallSlideback(c, world, railY);
+            }
         }
     }
 
