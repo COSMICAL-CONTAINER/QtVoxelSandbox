@@ -360,6 +360,13 @@ private:
     //   被推起步等非到心时刻的方向重选不再让车带横向偏移驶出中心线（转向与速度/方向无关，位置几何连续；
     //   正常行驶恒在 .5 上 → no-op）。复审 #23：收敛由「一次钉回」改限速渐进（每 tick ≤kCartCenterSnapPerTick）
     //   —— 段中重选向不再一次性横移 ~0.5 格（被骑时玩家视点同步跳）。
+    //   t944 上坡阻挡：轨态推进原是「轨道特权」通道（只受轨连接位约束、从不读世界碰撞）—— 上坡段车体随
+    //   railRiseAt 梯度面升高，坡顶正上方放方块（车体升高后将占据的格）被直接穿墙。现每子步位移提交后对
+    //   「含上坡升后 Y 钉定」的候选位做车体 AABB × 世界碰撞 sub-AABB 探测（cartBodyBlockedAt），仅**上坡向
+    //   位移**（本格面梯度沿行进向 >kCartSlopeGradMin，t939 同一张面同阈）启用阻挡：命中 → 二分回钳到
+    //   最大自由前进位（clampRailMoveToFree）+ 速度清零，**不掉轨**（仍轨上态贴在坡下侧；移除方块后从静止
+    //   被动力轨 / 推力 / 骑乘输入自然恢复）。下坡 / 平移的重叠不拦（用户口径「下坡方向不做额外阻挡」——
+    //   下坡穿顶属既有低顶净空延续语义；平移重叠几何上不存在 —— 平轨车体格只含轨列，轨非碰撞体）。
     void stepCartAlongRail(Cart &c, World *world, float dt);
 
     // t708 钉轨面（共享：被骑 tickRiddenCart / 空车 tickPushedCarts 同一 Y 钉定）：把矿车 Y 钉到所在列向下
@@ -479,6 +486,23 @@ private:
     //   不经本函数）。返 false = 未吸（含防御：吸附瞬间轨被拆 → 保持自由物理，中途的速度 / 垂直轴钉定
     //   无害保留）。
     bool trySnapDerailedToRail(Cart &c, World *world);
+
+    // ── t944 上坡顶方块阻挡的私有实现面（接入点 = stepCartAlongRail 每子步位移提交后）──
+
+    // t944 车体阻挡原子查询：把 probe 置于候选位 → pinCartY 钉定候选位轨面（上坡升后车体格自然覆盖
+    //   阻挡判定）→ 按**行进轴定向**的车体 AABB（长轴半长 kCartHalfL / 宽轴半宽 kCartHalfW / 半高
+    //   kCartHalfH，与 checkCartEnvironment 同一定向口径）对其覆盖格逐格做「isCollidable 快筛 →
+    //   World::collisionAABBsAt 取 sub-AABB（世界碰撞盒单一权威，禁第二套盒表）严格重叠测试」。
+    //   严格不等号（盒 min < 车体 max 且 盒 max > 车体 min）：贴面接触不算相交（贴墙停驻不抖）。
+    //   outRailY 可空带出 pinCartY 的轨层（caller 上坡向闸用）。只写 probe 局部副本、不碰自车。
+    bool cartBodyBlockedAt(Cart &probe, World *world, int *outRailY = nullptr);
+
+    // t944 推进受阻钳回：本子步起点（自由锚）到受阻位之间沿行进轴二分收窄（6 轮 ≈ 1/64 格精度）到
+    //   「最大自由前进位」写回 c.pos + 就地重钉坡面（pinCartY，caller 既有重钉幂等）+ 速度清零
+    //   （t943 钳向清速同口径：指向阻挡格的穿入分量就是全部沿轨速度 —— 轨上速度是单标量）。
+    //   垂直轴保持受阻位收敛值（向心收敛不可能新入邻列 —— 收敛只向本列中心线挪，见
+    //   stepCartAlongRail t770② 段）。车保持轨上态（caller 只 break 推进循环，不置 derailed）。
+    void clampRailMoveToFree(Cart &c, World *world, float preX, float preZ);
 
     // t735 ③ 矿车碾过玩家的掉速率（1/s，指数衰减）：接触期间车速按此衰减（有阻力但不挡停 —— 机制等价
     //   矿车推着实体前进，推开后恢复动力轨 / 重力供能）。

@@ -5878,12 +5878,18 @@ int main(int argc, char *argv[])
     //   Review #2：scanRailColumn「实心即断」× 坡道车位居上 —— 坡段 rise>0.55 时 floor(pos.y) = 轨Y+1
     //   恰是贴坡天花板实心格 → 严格断扫返 -1 → 坡上死车 / 俯仰清零 / 采样失联三症状同根因（af9ec8e 的
     //   断扫在平轨天花板不触发 —— P18 平轨 pos.y=R+0.45 首扫格即轨；本探针补坡道变体）。修后骑乘族走
-    //   宽容版（实心正下是轨 + 骑乘高一致 → 放行）。断言：
-    //   (a) 低顶坡道全程不失联：Y 恒钉轨面（wantSurf+rideH ±0.02，同 P12b 口径）+ 驶到顶死端格心停驻
-    //       + 停稳守卫（修前症状①：pinCartY/tickRiddenCart 判离轨 → 坡 55%+ 处冻死，到不了顶）；
-    //   (b) 俯仰全程连续：|Δpitch| ≤ 46°/tick + |pitch| ≤ 45.5°（钳制上界；修前症状②：采样列失联 →
-    //       一帧跳回水平 45° 突变）+ 坡中段均值 ~+45；
-    //   (c) af9ec8e 隔板回归防线：地面车（kCartGroundH=0.3875）站实心地板、地板下 1 格平轨 —— mount +
+    //   宽容版（实心正下是轨 + 骑乘高一致 → 放行）。
+    //   **t944 重定scope（2026-08-29 用户第五轮口径覆盖 review#2 穿越承诺，t931/t941 最新口径优先先例）**：
+    //   坡格正上方的实心天花板 = 用户「上坡处上方放方块」的阻挡格 —— t944 起轨态推进对上坡向位移做车体
+    //   AABB 碰撞探测，贴顶穿越自此**被阻挡**（不再是通路）。本探针改双相钉：
+    //   相1（天花板在场）：爬坡车体格撞实心 → 被挡停在坡下侧 + 轨态保持（Y 恒钉轨面，yOk 全程）+
+    //       持续 W 稳定不穿墙（速度清零、钳回位渐近稳定）——宽容列扫的「坡上车位居上不失联」承重面由
+    //       停驻态继续钉住（被挡车停在坡上，floor(pos.y) 跨上层时列扫仍须解析到本轨）；
+    //   相2（移除天花板）：原 review#2 全套断言（Y 钉定 / 俯仰连续且 ≤45 / 坡中段 ~+45 / 顶死端格心
+    //       停驻 + 停稳守卫）在清顶后半程钉住 —— 兼作 t944「移除方块后车恢复通行」行为腿。
+    //   断言：
+    //   (a) 相1 阻挡 + 相2 恢复通行（上）；
+    //   (b) af9ec8e 隔板回归防线：地面车（kCartGroundH=0.3875）站实心地板、地板下 1 格平轨 —— mount +
     //       持续 W + 玩家推全链后钉死不动（宽容版一致性校验拒：差 1.9375 >> kRideScanTol 0.5）。
     {
         // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 4×31 网格已耗尽）。需 7×3×6（含隔离边）。
@@ -5921,22 +5927,45 @@ int main(int argc, char *argv[])
             carts.spawnCart(x0, kRigY, z0, &w);
             const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
             bool ok = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
-            bool yOk = true, pitchCont = true, pitchClamped = true;
-            float prevPitch = 0.0f, slopeSum = 0.0f;
-            int slopeN = 0;
+            // ── 相1（t944 阻挡：天花板在场 = 用户「上坡处上方放方块」）：爬坡 → 车体格撞实心 → 被挡停在
+            //    坡下侧（接触面 rise≈0.1）；轨态保持（Y 恒钉轨面，yOk 贯穿）+ 持续 W 稳定不穿墙。
+            bool yOk = true;
             QVector3D cp;
             for (int t = 0; t < 400; ++t) {
                 carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
                 carts.tickPushedCarts(0.016, &w);
                 if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOk = false; break; }
+            }
+            const QVector3D stuck = carts.posAt(0);
+            QVector3D stuck2 = stuck;
+            for (int t = 0; t < 20; ++t) { // 持续 W 阻挡稳定（速度清零 + 钳回位渐近稳定，不穿墙不漂移）
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                stuck2 = carts.posAt(0);
+            }
+            const bool blockedOk = yOk
+                && stuck.x() > float(x0 + 1) && stuck.x() < float(x0 + 1) + 0.45f // 坡下侧（未过坡中点）
+                && std::fabs(stuck.y() - (wantSurf(stuck.x()) + rideH)) < 0.02f   // 轨态保持（Y 钉坡面）
+                && (stuck2 - stuck).length() < 0.05f                              // 持续 W 不穿墙
+                && std::fabs(carts.pitchAt(0)) <= 45.5f;                          // 姿态正常（未出轨未翻）
+            // ── 相2（移除方块 = t944「移除方块后车恢复通行」）：原 review#2 全套断言在清顶后半程钉住。
+            w.setBlock(x0,     kRigY + 1, z0, BR::Air, 0);
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Air, 0);
+            bool pitchCont = true, pitchClamped = true;
+            float prevPitch = carts.pitchAt(0), slopeSum = 0.0f;
+            int slopeN = 0;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOk = false; break; }
                 const float p = carts.pitchAt(0);
-                if (t > 0 && std::fabs(p - prevPitch) > 46.0f) pitchCont = false;
+                if (std::fabs(p - prevPitch) > 46.0f) pitchCont = false;
                 if (std::fabs(p) > 45.5f) pitchClamped = false;
                 if (cp.x() > float(x0 + 1) + 0.3f && cp.x() < float(x0 + 1) + 0.7f) { slopeSum += p; ++slopeN; }
                 prevPitch = p;
             }
             const QVector3D fin = carts.posAt(0);
-            ok = ok && yOk && pitchCont && pitchClamped
+            ok = ok && blockedOk && yOk && pitchCont && pitchClamped
                 && slopeN >= 3 && std::fabs(slopeSum / float(slopeN) - 45.0f) < 2.5f
                 && std::fabs(fin.x() - float(x0 + 3) - 0.5f) < 0.01f
                 && std::fabs(fin.y() - float(kRigY + 1) - rideH) < 0.02f
@@ -5949,15 +5978,21 @@ int main(int argc, char *argv[])
                 }
             }
             if (!ok)
-                qInfo().noquote() << "  low-headroom uphill: final" << fin << "pitch" << carts.pitchAt(0)
+                qInfo().noquote() << "  low-headroom uphill: stuck" << stuck << "stuckDrift"
+                                  << (stuck2 - stuck).length() << "blockedOk" << blockedOk
+                                  << "final" << fin << "pitch" << carts.pitchAt(0)
                                   << "yOk" << yOk << "pitchCont" << pitchCont << "clamp" << pitchClamped
                                   << "slopeN" << slopeN
                                   << "slopeMean" << (slopeN ? slopeSum / float(slopeN) : 0.0f);
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                              << "| review#2 low-headroom ramp (ceiling flush above slope rail): cart "
-                                 "stays pinned (no dead-cart at rise>0.55), reaches top dead-end, pitch "
-                                 "continuous & clamped, ~+45 mid-slope";
+                              << "| review#2 low-headroom ramp re-scoped by t944 (ceiling flush above slope"
+                                 " rail now BLOCKS the climb - user's latest word): phase 1 the cart is"
+                                 " stopped on the lower slope flank, stays rail-pinned (Y on surface) and"
+                                 " holds under continued W (no wall-pass); phase 2 clearing the block"
+                                 " resumes the traverse to the top dead-end with the original review#2"
+                                 " assertions (Y pinned, pitch continuous & clamped, ~+45 mid-slope,"
+                                 " settle guard)";
             // (c) 隔板防线：清坡轨布局 → 地板（Y 实心）+ 地板下 1 格平轨（Y-1）+ 地面车（Y+1 空格）。
             carts.clearAll();
             for (int dx = 0; dx <= 3; ++dx) { // 清轨 / 天花板 / 高段（含越层残留）
@@ -21449,6 +21484,235 @@ Item {
                              " trembling deadlock); (d) source pins for the coasting gate, the chain"
                              " continuity lines, the velocity-consistency match, the clamp-direction"
                              " zeroing pair, and the yaw re-pin"
+                          ;
+    }
+
+    // ── P-t944 上坡顶方块阻挡探针（MinecartManager 直编；spec「上坡处上方放方块 → 矿车被挡住不能穿墙
+    //    过去（移动积分对坡向阻挡格的碰撞）」）──
+    //   根因：轨态推进（stepCartAlongRail）是「轨道特权」通道 —— 只受轨连接位约束、从不读世界碰撞；
+    //   上坡段车体随 railRiseAt 梯度面升高，坡顶正上方放方块（车体升高后将占据的格）被直接穿墙（对照：
+    //   脱轨自由物理 tickDerailedCart 有撞墙清速）。修 = 每子步位移提交后对「含上坡升后 Y 钉定」的候选位
+    //   做车体 AABB × World::collisionAABBsAt 探测（cartBodyBlockedAt），仅**上坡向位移**（本格面梯度沿
+    //   行进向 >kCartSlopeGradMin，t939 同一张面同阈）启用：命中 → 二分回钳到最大自由前进位
+    //   （clampRailMoveToFree）+ 速度清零（t943 钳向清速同口径）、不掉轨；下坡 / 平移的重叠不拦（用户
+    //   口径「下坡方向不做额外阻挡」—— 下坡穿顶属既有低顶净空延续；平移重叠几何上不存在）。
+    //   rig（EW 行 z0）：x0 低平（西死端）+ x0+1 坡格（东邻高一格）+ x0+2..x0+3 高平（东死端）；
+    //   阻挡格 = 坡格正上方 (x0+1, R+1) Stone。腿：
+    //   (a) 上坡被挡：骑乘 W(+X) → 停在坡下侧（x0+1 < x < x0+1.45，接触面 rise≈0.1）+ 轨态保持（Y 恒钉
+    //       轨面）+ 持续 W 稳定不穿墙（20 tick 漂移 <0.05）；
+    //   (b) 移除方块恢复通行：拆 Stone → 同车继续 W 驶到高平死端格心（Y = R+1+rideH）；
+    //   (c) 阴性·无障碍通行不变：新鲜车无障碍从静止同驱 → 全程通行到死端（探测零误拦）；
+    //   (d) 阴性·平轨隧道口同判：平轨 + 1 格净空石顶（含隧道口跨越）→ 照常穿行到死端（车体顶
+    //       R+0.9125 < 天花板底 R+1.0 恒不相交 = 检查不误拦 P18 同款合法净空）；
+    //   (e) 阴性·下坡不阻挡：阻挡格在场，峰上 spawn 车向西下坡 → 穿阻挡格列直达低平死端（用户口径
+    //       「下坡方向不做额外阻挡」钉住，防上行闸被简化掉）；
+    //   (f) 源码钉：入点锚 / 子步探测调用 / 上行闸梯度行 / 回钳调用 / 两函数定义 / 头文件声明。
+    {
+        // rig 选址：运行期扫描空区（t943 模式）。footprint x0-2..x0+4 × z0-1..z0+1 × kRigY-2..kRigY+3。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 6; xx + 5 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -2; dx <= 4 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
+        if (x0 < 0) {
+            qInfo().noquote() << "  [t944 diag] no clear rig area found";
+        } else {
+            const float rideH = 0.45f; // kCartRideH 镜像（P11/P12b 同款）
+            // 行清空 + 布局重建（各腿互不残留；幂等清 x0-1..x0+4 × R..R+2）。
+            const auto clearRow = [&]() {
+                for (int i = -1; i <= 4; ++i)
+                    for (int dy = 0; dy <= 2; ++dy)
+                        w.setBlock(x0 + i, kRigY + dy, z0, BR::Air, 0);
+            };
+            const auto buildSlope = [&](bool withBlock) {
+                clearRow();
+                w.setBlock(x0,     kRigY,     z0, BR::Rail, 0); // 低平（西死端）
+                w.setBlock(x0 + 1, kRigY,     z0, BR::Rail, 0); // 坡格（东邻高一格 → 坡面自西向东抬升）
+                w.setBlock(x0 + 2, kRigY + 1, z0, BR::Rail, 0); // 峰后高平
+                w.setBlock(x0 + 3, kRigY + 1, z0, BR::Rail, 0); // 高平（东死端）
+                if (withBlock)
+                    w.setBlock(x0 + 1, kRigY + 1, z0, BR::Stone, 0); // 阻挡格 = 坡格正上方
+            };
+            // 坡面期望（验收 Y 钉定）：x<x0+1 → R；x>x0+2 → R+1；坡格内 → R+(x-(x0+1))。
+            const auto wantSurf = [&](float x) {
+                if (x < float(x0 + 1)) return float(kRigY);
+                if (x > float(x0 + 2)) return float(kRigY + 1);
+                return float(kRigY) + (x - float(x0 + 1));
+            };
+            // (a) 上坡被挡（阻挡格在场）。
+            buildSlope(true);
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);
+            bool mounted = carts.tryMount(QVector3D(float(x0) + 0.5f, float(kRigY) + 2.0f,
+                                                    float(z0) + 0.5f),
+                                          QVector3D(0, -1, 0), 4.0f);
+            bool yOkA = true;
+            QVector3D cp;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOkA = false; break; }
+            }
+            const QVector3D stuck = carts.posAt(0);
+            QVector3D stuck2 = stuck;
+            for (int t = 0; t < 20; ++t) { // 持续 W 阻挡稳定（不穿墙不漂移）
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                stuck2 = carts.posAt(0);
+            }
+            okA = mounted && yOkA
+                && stuck.x() > float(x0 + 1) && stuck.x() < float(x0 + 1) + 0.45f // 坡下侧
+                && std::fabs(stuck.y() - (wantSurf(stuck.x()) + rideH)) < 0.02f   // 轨态保持
+                && (stuck2 - stuck).length() < 0.05f                              // 不穿墙
+                && std::fabs(carts.pitchAt(0)) <= 45.5f;
+            if (!okA)
+                qInfo().noquote() << "  [t944 diag] a mounted" << mounted << "yOk" << yOkA
+                                  << "stuck" << stuck << "drift" << (stuck2 - stuck).length()
+                                  << "pitch" << carts.pitchAt(0);
+            // (b) 移除方块 → 恢复通行（同车继续 W）。
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Air, 0);
+            bool yOkB = true;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOkB = false; break; }
+            }
+            const QVector3D finB = carts.posAt(0);
+            okB = yOkB
+                && std::fabs(finB.x() - float(x0 + 3) - 0.5f) < 0.05f
+                && std::fabs(finB.y() - float(kRigY + 1) - rideH) < 0.02f;
+            if (!okB)
+                qInfo().noquote() << "  [t944 diag] b yOk" << yOkB << "fin" << finB;
+            // (c) 阴性·无障碍通行不变：新鲜车（同 rig 已无阻挡格）从静止同驱全程通行。
+            carts.hitCartFromRay(QVector3D(finB.x(), finB.y() + 3.0f, finB.z()),
+                                 QVector3D(0, -1, 0), 4.0f, &w, true);
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const bool mountedC = carts.tryMount(QVector3D(float(x0) + 0.5f, float(kRigY) + 2.0f,
+                                                           float(z0) + 0.5f),
+                                                 QVector3D(0, -1, 0), 4.0f);
+            bool yOkC = true;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOkC = false; break; }
+            }
+            const QVector3D finC = carts.posAt(0);
+            okC = mountedC && yOkC
+                && std::fabs(finC.x() - float(x0 + 3) - 0.5f) < 0.05f
+                && std::fabs(finC.y() - float(kRigY + 1) - rideH) < 0.02f;
+            if (!okC)
+                qInfo().noquote() << "  [t944 diag] c mounted" << mountedC << "yOk" << yOkC
+                                  << "fin" << finC;
+            carts.clearAll();
+            // (d) 阴性·平轨隧道口同判：平轨（x0-1 露天引道 + x0..x0+3 石顶下）→ 照常穿行到东死端。
+            clearRow();
+            w.setBlock(x0 - 1, kRigY, z0, BR::Rail, 0);     // 露天引道（隧道口西侧）
+            for (int i = 0; i <= 3; ++i) {
+                w.setBlock(x0 + i, kRigY,     z0, BR::Rail, 0);  // 平轨
+                w.setBlock(x0 + i, kRigY + 1, z0, BR::Stone, 0); // 1 格净空石顶（P18 同款）
+            }
+            carts.spawnCart(x0 - 1, kRigY, z0, &w);
+            const bool mountedD = carts.tryMount(QVector3D(float(x0 - 1) + 0.5f, float(kRigY) + 2.0f,
+                                                           float(z0) + 0.5f),
+                                                 QVector3D(0, -1, 0), 4.0f);
+            bool yOkD = true;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (float(kRigY) + rideH)) > 0.02f) { yOkD = false; break; }
+            }
+            const QVector3D finD = carts.posAt(0);
+            okD = mountedD && yOkD
+                && std::fabs(finD.x() - float(x0 + 3) - 0.5f) < 0.05f // 穿过隧道口到东死端（未被拦）
+                && std::fabs(finD.y() - (float(kRigY) + rideH)) < 0.02f;
+            if (!okD)
+                qInfo().noquote() << "  [t944 diag] d mounted" << mountedD << "yOk" << yOkD
+                                  << "fin" << finD;
+            carts.clearAll();
+            // (e) 阴性·下坡不阻挡（阻挡格在场）：峰上 spawn 车向西下坡 → 穿阻挡格列直达低平死端。
+            buildSlope(true);
+            carts.spawnCart(x0 + 3, kRigY + 1, z0, &w); // 单端连接（西）→ spawn 定向 -X 下坡向
+            const bool mountedE = carts.tryMount(QVector3D(float(x0 + 3) + 0.5f, float(kRigY + 1) + 2.0f,
+                                                           float(z0) + 0.5f),
+                                                 QVector3D(0, -1, 0), 4.0f);
+            bool yOkE = true;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, -1.0f, 0.0f, cp); // 持续 W 向西（下坡）
+                carts.tickPushedCarts(0.016, &w);
+                if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) { yOkE = false; break; }
+            }
+            const QVector3D finE = carts.posAt(0);
+            okE = mountedE && yOkE
+                && finE.x() < float(x0 + 1)                                        // 已穿过阻挡格列
+                && std::fabs(finE.x() - float(x0) - 0.5f) < 0.05f                  // 低平死端格心
+                && std::fabs(finE.y() - (float(kRigY) + rideH)) < 0.02f;
+            if (!okE)
+                qInfo().noquote() << "  [t944 diag] e mounted" << mountedE << "yOk" << yOkE
+                                  << "fin" << finE;
+            carts.clearAll();
+            // 清场。
+            clearRow();
+            tickN(w, 2);
+        }
+        // (f) 源码钉（t939/t940 模式：字符串钉，任一消失即红）。
+        const QString exeDir944 = QCoreApplication::applicationDirPath();
+        const QString root944 = QDir(exeDir944 + QStringLiteral("/..")).absolutePath();
+        auto readSrc944 = [&root944](const QString &rel) -> QString {
+            QFile f(root944 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mc944 = readSrc944(QStringLiteral("src/Entities/minecartmanager.cpp"));
+        const QString mc944h = readSrc944(QStringLiteral("src/Entities/minecartmanager.h"));
+        const bool okF1 = mc944.contains(QStringLiteral(
+            "bool anchorFree = !cartBodyBlockedAt(anchorProbe, world);"));
+        const bool okF2 = mc944.contains(QStringLiteral(
+            "const bool blocked = cartBodyBlockedAt(probe, world, &pry);"));
+        const bool okF3 = mc944.contains(QStringLiteral(
+            "&& cartRailGradient(world, probe.pos, pry, tx, tz, grad)"));
+        const bool okF4 = mc944.contains(QStringLiteral(
+            "clampRailMoveToFree(c, world, preX, preZ);"));
+        const bool okF5 = mc944.contains(QStringLiteral(
+            "bool MinecartManager::cartBodyBlockedAt(Cart &probe, World *world, int *outRailY)"));
+        const bool okF6 = mc944.contains(QStringLiteral(
+            "void MinecartManager::clampRailMoveToFree(Cart &c, World *world, float preX, float preZ)"));
+        const bool okF7 = mc944h.contains(QStringLiteral(
+            "bool cartBodyBlockedAt(Cart &probe, World *world, int *outRailY = nullptr);"));
+        okF = okF1 && okF2 && okF3 && okF4 && okF5 && okF6 && okF7;
+        const bool okT944 = okA && okB && okC && okD && okE && okF;
+        if (!okT944) ++totalFail;
+        if (!okT944)
+            qInfo().noquote() << "  [t944 diag] a" << okA << "b" << okB << "c" << okC
+                              << "d" << okD << "e" << okE
+                              << "| f" << okF1 << okF2 << okF3 << okF4 << okF5 << okF6 << okF7
+                              << "| srcLen cpp" << mc944.size() << "h" << mc944h.size();
+        qInfo().noquote() << (okT944 ? "PASS" : "FAIL")
+                          << "| t944 block above an uphill rail stops the cart (no more wall-phasing"
+                             " through slope-top blocks): the rail-mode integrator was a privilege lane"
+                             " constrained only by rail connections, so a cart climbing a gradient"
+                             " surface phased straight through a block placed over the slope. Fix"
+                             " probes the committed substep position (cart AABB vs world collision"
+                             " sub-AABBs, Y pinned to the candidate's rail surface so the raised body"
+                             " cell is naturally covered) and gates the block to UPHILL travel only"
+                             " (same-surface gradient along travel > the t939 threshold) - downhill and"
+                             " flat overlaps stay unblocked per the user's caliber (low-headroom descent"
+                             " semantics kept; flat overlaps do not geometrically exist). Probe legs:"
+                             " (a) climbing into a block over the slope stops the cart on the lower"
+                             " flank, rail-locked with Y pinned to the surface, stable under continued W"
+                             " (no wall-pass); (b) removing the block resumes the traverse to the upper"
+                             " dead-end; (c) negative: an obstacle-free build traverses unchanged from a"
+                             " standing start; (d) negative: a flat 1-clearance tunnel mouth (P18"
+                             " geometry) is passed through - the cart top 0.9125 never meets a ceiling"
+                             " bottom at 1.0; (e) negative: with the block present a crest-spawned cart"
+                             " descends straight through the block column to the low dead-end (no"
+                             " downhill blocking); (f) source pins for the entry anchor, the substep"
+                             " probe call, the uphill gradient gate, the clamp call, both helper"
+                             " definitions, and the header declaration"
                           ;
     }
 

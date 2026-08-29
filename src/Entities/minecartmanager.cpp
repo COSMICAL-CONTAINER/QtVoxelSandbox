@@ -692,6 +692,13 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
     }
     float remain = std::fabs(step);
     int guard = 0;
+    // t944 入点位自由锚（每 tick 一次）：正常行驶的不变量是「上一次提交位已被本探测保证自由」；
+    //   tick 首位无此保证（方块可被外生写入车体：放置进实体 / 落沙掩埋 / 世界编辑）→ 显式探测一次。
+    //   入点位即重叠 = 嵌入车 → 本 tick 全程**逃逸豁免**（允许带重叠移动直至脱出，防永久冻结；
+    //   探测全程只写局部副本，绝不碰自车）。性能：每移动车每 tick 恒定 2 次探测（入点锚 + 每子步
+    //   1 次，常态 1 子步），每次 ≤2×2×2 格 isCollidable 快筛、命中格才取盒 —— 列扫同量级。
+    Cart anchorProbe = c;
+    bool anchorFree = !cartBodyBlockedAt(anchorProbe, world);
     // 复审 #23：本 tick 贴轨收敛预算（格）。旧「一次钉回」在段中重选向后把 ~0.5 格横向偏移瞬时吃掉 →
     //   被骑时玩家视点同步横跳一次（旧探针只验收终态测不出瞬移）。限速后每 tick 最多收
     //   kCartCenterSnapPerTick，0.5 格偏移 ~5 tick（83ms）渐进钉回。取舍：另一修法「改 dir 同时钉 pos」
@@ -725,6 +732,7 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
         //   恒真 → 跨格分支（连接重选 / 拐角转弯 / 尽头停）在稳定帧率下是**死代码**、仅 dt 卡顿尖峰偶发
         //   触发 → 矿车沿初始 dir 直线冲出轨道悬浮滑到地图边界（t734 用户报「离轨仍可移动」根因）。
         //   改「前方最近格心」后每跨一个格心必经一次到心重选，任意步长都被轨连接位约束（帧率无关）。
+        const float preX = c.pos.x(), preZ = c.pos.z(); // t944 本子步自由锚（提交位受阻时二分回钳的 lo 端）
         float nextCx = c.pos.x(), nextCz = c.pos.z();
         if (tx > 0.5f)       nextCx = std::floor(c.pos.x() + 0.5f) + 0.5f;
         else if (tx < -0.5f) nextCx = std::ceil(c.pos.x() - 0.5f) - 0.5f;
@@ -761,7 +769,99 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
             cartYawFromDir(c.dirX, c.dirZ, c.yaw);
             tx = float(ndx); tz = float(ndz); // 行进方向继续（正行沿新臂 / 倒行沿新臂退行 —— 拐角双向自动过弯）
         }
+        // t944 提交位阻挡探测（契约见 minecartmanager.h / 函数头 t944 段）：候选位 = 本子步刚提交的位置
+        //   （含上坡升后的 Y 钉定 —— cartBodyBlockedAt 内 pinCartY 就地钉候选副本）。仅**上坡向位移**启用
+        //   阻挡：本格面梯度沿行进向 >kCartSlopeGradMin（t939 同一张面同阈；梯度跟行进向不跟车头 —— 负速
+        //   倒行对称）—— 下坡 / 平移的重叠不拦（用户口径「下坡方向不做额外阻挡」：下坡穿顶是既有低顶净空
+        //   〔紧凑螺旋 / 多层轨下层坡段〕延续语义；平移重叠几何上不存在）；采样失联（死端前探 / 拐角垂直臂）
+        //   同不拦（保守放行，死端停车 / 坡顶飞出由 deadEnd 既有语义接管）。命中 → 自由锚存在则二分回钳 +
+        //   清速 + 终止本 tick 推进（车不掉轨、贴在坡下侧）；嵌入车（锚点本就重叠）→ 逃逸豁免继续。任一
+        //   「提交位受阻但放行」的路径锚点视同不自由 —— 下个子步的回钳 lo 端不得再取重叠位。
+        {
+            Cart probe = c;
+            int pry = -1;
+            const bool blocked = cartBodyBlockedAt(probe, world, &pry);
+            if (!blocked) {
+                anchorFree = true;
+            } else {
+                float grad = 0.0f;
+                const bool uphill = pry >= 0
+                    && cartRailGradient(world, probe.pos, pry, tx, tz, grad)
+                    && grad > kCartSlopeGradMin;
+                if (uphill && anchorFree) {
+                    clampRailMoveToFree(c, world, preX, preZ); // 内含速度清零（t943 钳向清速同口径）
+                    break;
+                }
+                anchorFree = false;
+            }
+        }
     }
+}
+
+// ── t944 上坡顶方块阻挡（用户第五轮实测：「上坡处上方放方块 → 矿车被挡住不能穿墙过去」）──
+//
+// 根因：轨态推进（stepCartAlongRail）是「轨道特权」通道 —— 只受轨连接位约束、从不读世界碰撞；上坡段
+//   车体随 railRiseAt 梯度面升高，坡顶正上方放方块（车体升高后将占据的格）被直接穿墙（对照：脱轨自由
+//   物理 tickDerailedCart 有撞墙清速 —— 唯轨态积分无碰撞）。修 = 每子步位移提交后对「含上坡升后 Y 钉定」
+//   的候选位做车体 AABB × 世界碰撞 sub-AABB 探测（下方两函数），仅上坡向位移启用（接入点闸见
+//   stepCartAlongRail t944 段），命中回钳 + 清速、不掉轨。既有探针零回归面：无障碍 rigs 轨迹逐位不变
+//   （探测只写局部副本）；平轨 1 格净空隧道（P18）车体顶 0.9125 < 天花板底 1.0 恒不相交；t907 去穿插 /
+//   t940 吸附 / V 形永动 / 骑乘窒息（玩家独立体系）不经本路径。
+
+// t944 车体阻挡原子查询（契约见 minecartmanager.h）。
+bool MinecartManager::cartBodyBlockedAt(Cart &probe, World *world, int *outRailY)
+{
+    if (outRailY) *outRailY = -1;
+    if (!world) return false;
+    const int railY = pinCartY(probe, world); // 候选位 Y 钉定（上坡升后的坡面高 —— 阻挡格随坡自然覆盖）
+    if (outRailY) *outRailY = railY;
+    const bool axisX = std::fabs(probe.dirX) > 0.5f;
+    const float ex = axisX ? kCartHalfL : kCartHalfW;  // 行进轴 = 斗长（checkCartEnvironment 同一定向口径）
+    const float ez = axisX ? kCartHalfW : kCartHalfL;
+    const float px = probe.pos.x(), py = probe.pos.y(), pz = probe.pos.z();
+    const int x0 = int(std::floor(px - ex)), x1 = int(std::floor(px + ex));
+    const int y0 = int(std::floor(py - kCartHalfH)), y1 = int(std::floor(py + kCartHalfH));
+    const int z0 = int(std::floor(pz - ez)), z1 = int(std::floor(pz + ez));
+    for (int y = y0; y <= y1; ++y) {
+        for (int z = z0; z <= z1; ++z) {
+            for (int x = x0; x <= x1; ++x) {
+                if (!world->isCollidable(x, y, z)) continue; // 格级快筛（覆盖格绝大多数为空气 / 轨）
+                BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
+                const int n = world->collisionAABBsAt(x, y, z, boxes,
+                                                      BlockRegistry::kMaxAABBsPerCell);
+                for (int b = 0; b < n; ++b) {
+                    const BlockRegistry::BlockAABB &bb = boxes[b];
+                    // 严格重叠（贴面接触不算 —— 贴墙停驻 / 货架面滑过不抖）。
+                    if (bb.minX < px + ex && bb.maxX > px - ex
+                        && bb.minY < py + kCartHalfH && bb.maxY > py - kCartHalfH
+                        && bb.minZ < pz + ez && bb.maxZ > pz - ez)
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// t944 推进受阻钳回（契约见 minecartmanager.h）：lo（子步起点，自由）→ hi（受阻位）沿行进轴二分
+//   收窄 6 轮（区间 ≤1 格 → 终分辨率 ≈1/64 格，贴合阻挡面观感），终值写回 + 就地重钉坡面 + 清速。
+void MinecartManager::clampRailMoveToFree(Cart &c, World *world, float preX, float preZ)
+{
+    const bool axisX = std::fabs(c.dirX) > 0.5f;
+    const float pre = axisX ? preX : preZ;           // 自由锚（caller 保证）
+    const float post = axisX ? c.pos.x() : c.pos.z(); // 受阻位
+    const float perp = axisX ? c.pos.z() : c.pos.x(); // 垂直轴保持（向心收敛不可能新入邻列，t770② 段）
+    float lo = pre, hi = post; // 不变式：lo 自由 / hi 受阻
+    for (int it = 0; it < 6; ++it) {
+        const float mid = 0.5f * (lo + hi);
+        Cart probe = c;
+        if (axisX) probe.pos = QVector3D(mid, c.pos.y(), perp);
+        else       probe.pos = QVector3D(perp, c.pos.y(), mid);
+        if (cartBodyBlockedAt(probe, world)) hi = mid; else lo = mid;
+    }
+    if (axisX) c.pos.setX(lo); else c.pos.setZ(lo);
+    pinCartY(c, world); // 钳回位就地钉坡面（caller 既有 pinCartY 幂等复钉）
+    c.speed = 0.0f;     // t943 钳向清速同口径：指向阻挡格的穿入分量 = 全部沿轨速度（单标量）
 }
 
 // t708 ③ 空矿车被推后的滑行（PlayerController.step 每帧调，骑乘分支之外）：扫全部未被骑的活体矿车，
@@ -956,7 +1056,8 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             }
         }
         stepCartAlongRail(c, world, float(dt));
-        // step 不碰 Y → 给新格重新钉坡面（下坡贴地滑 / 平轨贴面）；t769 返回值带出新轨层 → 俯仰随坡刷新。
+        // step 常态不碰 Y（t944 受阻钳回例外 —— 钳回位已就地钉定）→ 给新格重新钉坡面（下坡贴地滑 / 平轨
+        //   贴面）；t769 返回值带出新轨层 → 俯仰随坡刷新。
         updateCartPitch(c, world, pinCartY(c, world));
         const float dx = c.pos.x() - bx, dz = c.pos.z() - bz;
         if (dx * dx + dz * dz > 1e-6f) moved = true;
