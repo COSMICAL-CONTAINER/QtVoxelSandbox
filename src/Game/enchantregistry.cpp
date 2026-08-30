@@ -419,6 +419,16 @@ float EnchantRegistry::weaponAttackDamage(int itemId, const int *enchants)
          + 0.5f * float(findLevel(enchants, int(Sharpness)));
 }
 
+// t961 杀手系对族伤害加成（显示面单一权威；见头注释）。2.5×各级合计：亡灵 III = 7.5 / 节肢 I = 2.5 /
+//   无杀手 = 0（锐锋不算——互斥组 1 使锐锋与杀手不共存，即便数据异常同给也只各算各的）。tooltip 攻击
+//   行括号「(+M)」经 Hotbar::displayFamilyBonusText 取整显示；实战 2.5×级公式在 attackMob 对族分支
+//   （t476 起）同值生效，数值若调须两处同改（本函数 + attackMob 分支——实战逻辑 t961 未触碰）。
+float EnchantRegistry::familyAttackBonus(const int *enchants)
+{
+    return 2.5f * float(findLevel(enchants, int(UndeadSlay))
+                        + findLevel(enchants, int(ArthropodSlay)));
+}
+
 // t826 击退附魔强度（单一权威；见头注释）。每级 +3.0 倍冲量：无附魔 1.0（~1.1 格）/ I 4.0（~4.5 格）/
 //   II 7.0（~7.9 格），量级对齐 MC 1.0「击退 I 明显推离 / II 飞出数格」。负级防御钳 0。
 float EnchantRegistry::knockbackStrength(int level)

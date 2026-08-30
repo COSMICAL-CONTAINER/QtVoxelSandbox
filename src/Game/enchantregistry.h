@@ -240,6 +240,13 @@ public:
     //   仍基础值」类公式漂移：改加成系数只改这里，战斗与九处 UI 显示同步变。enchants 空指针 → 仅基础。
     static float weaponAttackDamage(int itemId, const int *enchants);
 
+    // t961 杀手系对族伤害加成（**显示面单一权威**）：亡灵杀手 + 节肢克星 各级 ×2.5 的合计（HP）。
+    //   实战结算（PlayerController::attackMob，t476 链）按受击 mob 族别取对应一支同值 2.5×级（蹒跚者 /
+    //   骸骨走亡灵支、蜘蛛走节肢支）；互斥组 1 保证两杀手不共存于同一物品 → 显示「合计」= 实际可生效的
+    //   那一支。tooltip 攻击行括号「(+M)」经 Hotbar::displayFamilyBonusText 取整显示 —— 每级 2.5 这个
+    //   数值只活本函数（显示层不复制常量，同 weaponAttackDamage 的单一权威纪律）。enchants 空指针 → 0。
+    static float familyAttackBonus(const int *enchants);
+
     // t826 击退附魔强度（单一权威）：strength = 1 + 3.0*level（无附魔 1.0 / I 4.0 / II 7.0）。
     //   EntityManager::knockback 水平总位移 ≈ kKnockbackHoriz×strength/kKnockbackDrag = 1.125 格×strength
     //   → 无附魔 ~1.1 格 / I ~4.5 格 / II ~7.9 格（MC 1.0 量级：I 明显推离 / II 飞出 ~8 格）。旧版

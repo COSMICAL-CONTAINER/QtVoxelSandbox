@@ -24657,6 +24657,115 @@ Item {
                              " endBowDraw/useFishingRod wiring pinned at source (t927(c) precedent)";
     }
 
+    // ── P-t961 杀手系攻击行族加成显示探针（R19.17 🅳；用户第五轮口径「亡灵杀手/截肢杀手的加成写进
+    //    剑攻击行——『攻击+7(+3)』格式（括号=对特定族加成）」）──
+    //    口径钉：+N = 现行 displayAttackDamage（物品基伤 + 锐锋；杀手系与锐锋互斥组 1 → 杀手剑的 N 即
+    //    基伤，不动），(+M) = 对特定族加成合计（EnchantRegistry::familyAttackBonus = 2.5×各级，与
+    //    attackMob 实战 t476 对族公式同值；互斥组 1 → 至多一支非零），括号本身即族加成语义（不展开族名）。
+    //    断言：
+    //    (a) 注册表权威数值腿：亡灵 III = 7.5 / 节肢 I = 2.5 / 无杀手 = 0 / 锐锋不算族加成；
+    //    (b) 显示组装行为腿（Hotbar 直调，t763 同台）：钻石剑 + 节肢 I → displayAttackDamage 仍 7（+N
+    //        口径不动）且后缀「(+3)」——拼形即用户口径「+7(+3)」；亡灵 III →「(+8)」（7.5 取整）；
+    //        无杀手 → 空串（行形态不变）；
+    //    (c) 源码钉：九处攻击行组装点（八面板 tooltip + HUD hover）全拼 displayFamilyBonusText（QML 不持
+    //        族加成数值——后缀值只活在注册表权威一处）；hotbar.cpp 桥本体含「(+」括号分支 + 走
+    //        familyAttackBonus 调用链（t960(g) 手法）。
+    {
+        // (a) 注册表权威数值腿。
+        const auto closeF = [](float got, float expect) { return std::abs(got - expect) < 1e-4f; };
+        const int smite3  = EnchantRegistry::pack(int(EnchantRegistry::UndeadSlay), 3);
+        const int bane1   = EnchantRegistry::pack(int(EnchantRegistry::ArthropodSlay), 1);
+        const int sharp3b = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+        const int smiteE[4] = {smite3, 0, 0, 0};
+        const int baneE[4]  = {bane1, 0, 0, 0};
+        const int sharpE[4] = {sharp3b, 0, 0, 0};
+        const int noneE[4]  = {0, 0, 0, 0};
+        bool okForm = closeF(EnchantRegistry::familyAttackBonus(smiteE), 7.5f)
+                   && closeF(EnchantRegistry::familyAttackBonus(baneE), 2.5f)
+                   && closeF(EnchantRegistry::familyAttackBonus(noneE), 0.0f)
+                   && closeF(EnchantRegistry::familyAttackBonus(sharpE), 0.0f)  // 锐锋非杀手系
+                   && EnchantRegistry::conflictGroup(int(EnchantRegistry::UndeadSlay)) == 1
+                   && EnchantRegistry::conflictGroup(int(EnchantRegistry::ArthropodSlay)) == 1;
+
+        // (b) 显示组装行为腿（Hotbar 直调）：+N 口径不动 + (+M) 后缀拼形。
+        Hotbar hb;
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const QVariantList baneL{bane1, 0, 0, 0};
+        const QVariantList smiteL{smite3, 0, 0, 0};
+        const QVariantList zeroL{0, 0, 0, 0};
+        const QString famBane  = hb.displayFamilyBonusText(baneL);
+        const QString famSmite = hb.displayFamilyBonusText(smiteL);
+        const QString famNone  = hb.displayFamilyBonusText(zeroL);
+        bool okShow = ToolRegistry::attackDamage(diaSword) == 7
+                   && hb.displayAttackDamage(diaSword, baneL) == 7            // +N = 基伤 7，不动
+                   && famBane == QStringLiteral("(+3)")                        // 拼 =「+7(+3)」用户口径形
+                   && hb.displayAttackDamage(diaSword, smiteL) == 7
+                   && famSmite == QStringLiteral("(+8)")                       // 7.5 → round 8
+                   && famNone.isEmpty();                                       // 无杀手 → 行形态不变
+        if (!okShow)
+            qInfo().noquote() << "  t961 show diag: famBane" << famBane << "famSmite" << famSmite
+                              << "famNoneEmpty" << famNone.isEmpty();
+
+        // (c) 源码钉：九处组装点 + hotbar.cpp 桥本体调用链。
+        bool okPin = true;
+        int pinnedFaces = 0;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            static const char *kFaces[9] = {
+                "src/ui/Inventory.qml", "src/ui/SurvivalInventory.qml", "src/ui/ChestUI.qml",
+                "src/ui/DispenserUI.qml", "src/ui/CraftingTableUI.qml", "src/ui/FurnaceUI.qml",
+                "src/ui/AnvilUI.qml", "src/ui/EnchantingTableUI.qml", "src/ui/Main.qml",
+            };
+            for (const char *f : kFaces) {
+                QFile qf(root + QLatin1Char('/') + QLatin1String(f));
+                const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+                // 组装点钉：displayFamilyBonusText( 与 displayAttackDamage( 同文件共现（该桥接名全工程
+                //   仅九处调用 + hotbar 一处实现，出现在文件内 = 该攻击行面拼了族加成后缀）。
+                if (t.isEmpty() || !t.contains(QLatin1String("displayAttackDamage"))
+                    || !t.contains(QLatin1String("displayFamilyBonusText("))) {
+                    okPin = false;
+                    qInfo().noquote() << "  t961 pin diag: face missing suffix call" << f;
+                } else {
+                    ++pinnedFaces;
+                }
+            }
+            QFile hf(root + QStringLiteral("/src/Game/hotbar.cpp"));
+            if (hf.open(QIODevice::ReadOnly)) {
+                const QString t = QString::fromUtf8(hf.readAll());
+                const int b0 = t.indexOf(QLatin1String("QString Hotbar::displayFamilyBonusText"));
+                const int b1 = t.indexOf(QLatin1String("bool Hotbar::enchantApplicableTo"));
+                QString body;
+                if (b0 >= 0 && b1 > b0) body = t.mid(b0, b1 - b0);
+                if (body.isEmpty() || !body.contains(QLatin1String("EnchantRegistry::familyAttackBonus"))
+                    || !body.contains(QLatin1String("(+%1"))) {  // 「(+」括号分支本体
+                    okPin = false;
+                    qInfo().noquote() << "  t961 pin diag: hotbar.cpp bridge body missing chain/branch";
+                }
+            } else {
+                okPin = false;
+                qInfo().noquote() << "  t961 pin diag: hotbar.cpp unreadable";
+            }
+        }
+
+        const bool ok961 = okForm && okShow && okPin;
+        if (!ok961)
+            qInfo().noquote() << "  t961 diag: form" << okForm << "show" << okShow << "pin" << okPin
+                              << "faces" << pinnedFaces;
+        if (!ok961) ++totalFail;
+        qInfo().noquote() << (ok961 ? "PASS" : "FAIL")
+                          << "| t961 slayer family bonus in the sword attack line: +N keeps the"
+                             " current display value (base + sharpness; slayers sit in mutual"
+                             " exclusion group 1 so a slayer sword's N is the plain base damage)"
+                             " and a (+M) suffix carries the vs-family bonus taken from the single"
+                             " registry authority familyAttackBonus (2.5/level, same formula the"
+                             " combat path applies); diamond sword + arthropod I assembles +7(+3),"
+                             " undead III rounds to (+8), no slayer keeps the old line shape via an"
+                             " empty suffix; all nine attack-line assembly sites (8 panel tooltips +"
+                             " HUD hover) route through displayFamilyBonusText, and the bridge body"
+                             " pins the registry call chain plus the (+ paren branch (t960(g)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -1307,7 +1307,9 @@ Item {
         // t825 显示与实战同源：displayAttackDamage = round(EnchantRegistry::weaponAttackDamage)
         //   （基础 + 锐锋 ×0.5/级；attackMob 同一权威函数算实战值）。
         const total = root.hotbar.displayAttackDamage(root.hoveredItemId, e)
-        return "+" + total + " 攻击"
+        // t961 杀手系族加成括注：带亡灵杀手 / 节肢克星 → 「+N(+M) 攻击」（M=对族加成合计，注册表权威
+        //   displayFamilyBonusText；无杀手 → 空串，行形态不变；+N=基伤+锐锋口径不动）。
+        return "+" + total + root.hotbar.displayFamilyBonusText(e) + " 攻击"
     }
     Rectangle {
         id: itemTip

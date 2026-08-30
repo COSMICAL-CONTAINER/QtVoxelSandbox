@@ -13394,7 +13394,11 @@ Window {
                         // t825 显示与实战同源：displayAttackDamage = round(weaponAttackDamage)，
                         //   attackMob 同一权威函数算实战值（公式只活在 EnchantRegistry 一处）。
                         const atk = hotbarVM.displayAttackDamage(id, eArr || [])
-                        tip += "\n\n攻击: " + atk + (sharp > 0 ? "（锐锋 " + hotbarVM.enchantLevelText(sharp) + " +" + (0.5 * sharp) + "）" : "")
+                        // t961 杀手系族加成括注：带亡灵杀手 / 节肢克星 → 「攻击: N(+M)…」（M=对族加成合计，
+                        //   注册表权威 displayFamilyBonusText；无杀手 → 空串行形态不变；fam 与消费同块作用域，
+                        //   review25 #6 教训——块内声明块外消费在 JS 是运行期 ReferenceError）。
+                        const fam = hotbarVM.displayFamilyBonusText(eArr || [])
+                        tip += "\n\n攻击: " + atk + fam + (sharp > 0 ? "（锐锋 " + hotbarVM.enchantLevelText(sharp) + " +" + (0.5 * sharp) + "）" : "")
                     }
                     return _r >= 0 ? tip : ""
                 }
