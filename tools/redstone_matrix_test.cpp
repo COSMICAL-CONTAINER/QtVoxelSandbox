@@ -73,6 +73,7 @@
 #include "mobbow.h"               // t966 同上（骷髅持弓预览）
 #include <QVector3D>              // t966 rig：近面世界坐标（scenePosition / 旋转后角点）
 #include <QQuaternion>            // t966 rig：sceneRotation（Quick3D 真实合成四元数，行为级读回）
+#include <QSet>                   // t967 探针：三分区不交性判定
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
 //   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t952 起
@@ -25821,6 +25822,387 @@ Item {
                              "by vertical drags; source pins keep the pure linear law line verbatim, "
                              "the old single-node composition string and any const faceSign / Math.cos "
                              "extinct, and the four-branch pitch/yaw split counted";
+    }
+
+    // ── P-t967 分类单选化 + 三大类重划探针（R19.17 🅴；用户第五轮口径「选一个物品又选一个生物，
+    //    出现在一起导致问题——共用一个选中态；分类重划三大类 生物/方块/物品材料，无 3D 贴图的归
+    //    物品材料」）──
+    //    病灶：旧版生物格点击只写 selectedMobFromSection/selectedMobName、不清 selectedId，而预览侧
+    //    床分支（selectedIsBed）/ 异形 3D 分支（selectedIsItem3D）的 visible 无 !selectedIsMob 守卫
+    //    （整立方分支的 review27 #4 家族互斥治不了**跨分类**双选）→ 先选床/活板门/火把/栅栏等再点
+    //    生物格 = 两套 3D 模型同时可见叠渲，而名字/类别行与形态·变体面板因 selectedIsMob 优先只显
+    //    生物侧（渲染双份 + 面板单份的复合坏面）。修法 = 选中收口 selectMob/selectItem 单一权威
+    //    （写本类 + 清另一类）+ categoryOfEntry 三大类单一权威（与预览路由谓词同源）。
+    //    (a) 源码钉：权威函数体互清形态 + 两 TapHandler 路由权威 + 旧内联双写形态绝迹 +
+    //        categoryOfEntry 判据链 + 三分区 Repeater/表头 + 谓词函数化委托。
+    //    (b) 归属表行为钉（真 rig，t966 装配法）：真 QQmlEngine 直载源树 ResourceBrowser.qml ——
+    //        paletteModel 三分区读回：分区完整性（两两不交 + 并集 == paletteModel）+ 代表条目逐类
+    //        断言（石头/火把/活板门/白床/草丛→方块、木棍/生物蛋邻位→各自类、狼→生物图鉴段）+
+    //        categoryOfEntry 直调返回值。
+    //    (c) 单选中态行为钉（同 rig 状态机 + 渲染面）：selectItem(火把)→selectMob(狼) →
+    //        selectedId==0 且可见几何集只剩 MobModel（可见 ItemShapeGeometry/BedModelGeometry 与
+    //        可见 MobModel 并存 = 双选中渲染面，结构性不可再现）；selectItem(白床)→selectMob(狼)
+    //        同钉床分支；反向 selectMob(狼)→selectItem(石头) → selectedMobFromSection==-1 且只剩
+    //        BlockCube；代表条目 ×4 循环「先物品后生物」selectedId 恒归 0；selectedTabName 三类
+    //        逐字断言。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rf967(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rb967 = rf967.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf967.readAll()) : QString();
+        // (a) 源码钉（阴性轮回退形态：selectMob 的清物品行注释化——QML 仍可加载，t957 教训）。
+        const int iSelMob967 = rb967.indexOf(QStringLiteral("function selectMob"));
+        const QString selMobBlock967 = iSelMob967 >= 0 ? rb967.mid(iSelMob967, 400) : QString();
+        const int iSelItem967 = rb967.indexOf(QStringLiteral("function selectItem"));
+        const QString selItemBlock967 = iSelItem967 >= 0 ? rb967.mid(iSelItem967, 400) : QString();
+        const int iCat967 = rb967.indexOf(QStringLiteral("function categoryOfEntry"));
+        const QString catBlock967 = iCat967 >= 0 ? rb967.mid(iCat967, 400) : QString();
+        const bool okA967 = iSelMob967 >= 0 && iSelItem967 >= 0 && iCat967 >= 0
+                         && selMobBlock967.contains(QStringLiteral("root.selectedMobFromSection = mobType"))
+                         && selMobBlock967.contains(QStringLiteral("root.selectedId = 0"))
+                         && selItemBlock967.contains(QStringLiteral("root.selectedMobFromSection = -1"))
+                         && catBlock967.contains(QStringLiteral("root.mobTypeForEgg(id) >= 0) return 0"))
+                         && catBlock967.contains(QStringLiteral("root.isCubeId(id) || root.isBedId(id) || root.isItem3DId(id)"))
+                         && rb967.count(QStringLiteral("onTapped: root.selectMob(modelData.mobType, modelData.name)")) == 1
+                         && rb967.count(QStringLiteral("onTapped: root.selectItem(modelData)")) == 1
+                         && !rb967.contains(QStringLiteral("root.selectedId = modelData"))
+                         && !rb967.contains(QStringLiteral("onTapped: { root.selectedMobFromSection"))
+                         && rb967.count(QStringLiteral("model: root.eggEntries")) == 1
+                         && rb967.count(QStringLiteral("model: root.blockEntries")) == 1
+                         && rb967.count(QStringLiteral("model: root.matEntries")) == 1
+                         && rb967.count(QStringLiteral("delegate: itemCell")) == 3
+                         && rb967.contains(QStringLiteral("text: \"生物蛋\""))
+                         && rb967.contains(QStringLiteral("text: \"方块\""))
+                         && rb967.contains(QStringLiteral("text: \"物品材料\""))
+                         && !rb967.contains(QStringLiteral("text: \"物品\"")) // 旧两段表头退役（「物品材料」不带封闭引号，不误伤）
+                         && rb967.contains(QStringLiteral("selectedIsItem3D: root.isItem3DId(root.selectedId)"))
+                         && rb967.contains(QStringLiteral("selectedIsCube: root.isCubeId(root.selectedId)"))
+                         && rb967.contains(QStringLiteral("selectedIsBed: root.isBedId(root.selectedId)"));
+        ok = ok && okA967;
+
+        // (b)(c) 行为 rig（t966 装配法：临时目录逃离 qrc 重映射 + 私有 URI；窗口不 show——
+        //     visible 绑定求值不依赖渲染回路，本探针只断言可见性旗标与选中状态）。
+        static bool sT967TypesRegistered = false;
+        if (!sT967TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT967", 1, 0, "Hotbar");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT967", 1, 0, "ResourcePackManager");
+            qmlRegisterType<BlockCube>("VoxelSandboxProbeT967", 1, 0, "BlockCube");
+            qmlRegisterType<ItemShapeGeometry>("VoxelSandboxProbeT967", 1, 0, "ItemShapeGeometry");
+            qmlRegisterType<BedModelGeometry>("VoxelSandboxProbeT967", 1, 0, "BedModelGeometry");
+            qmlRegisterType<MobModel>("VoxelSandboxProbeT967", 1, 0, "MobModel");
+            qmlRegisterType<EnchantBookBox>("VoxelSandboxProbeT967", 1, 0, "EnchantBookBox");
+            qmlRegisterType<MobBowGeometry>("VoxelSandboxProbeT967", 1, 0, "MobBowGeometry");
+            qmlRegisterType<UnitCube>("VoxelSandboxProbeT967", 1, 0, "UnitCube");
+            sT967TypesRegistered = true;
+        }
+        bool rigOk967 = false;
+        QString rigDiag967;
+        const QString uiDir967 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUi967 = QDir::temp().absoluteFilePath(
+                QStringLiteral("t967_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUi967);
+        for (const QString f : { QStringLiteral("ResourceBrowser.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("DarkScrollBar.qml") }) {
+            QFile::remove(probeUi967 + QLatin1Char('/') + f);
+            QFile(uiDir967 + QLatin1Char('/') + f).copy(probeUi967 + QLatin1Char('/') + f);
+        }
+        {
+            const QStringList qmlFiles967 = QDir(probeUi967).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles967) {
+                QFile p(probeUi967 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT967\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine967;
+        Hotbar hb967;
+        ResourcePackManager rp967;
+        QQuickWindow win967; // 永不 show（headless：visible 旗标求值不依赖渲染回路）
+        QQmlComponent comp967(&engine967,
+                              QUrl::fromLocalFile(probeUi967 + QStringLiteral("/ResourceBrowser.qml")));
+        QQuickItem *b967 = nullptr;
+        if (comp967.isError()) {
+            rigDiag967 = QStringLiteral("load: ") + comp967.errorString();
+        } else if ((b967 = qobject_cast<QQuickItem *>(comp967.create())) == nullptr) {
+            rigDiag967 = QStringLiteral("create failed");
+        } else {
+            b967->setParent(&engine967);
+            b967->setProperty("hotbar", QVariant::fromValue(&hb967));
+            b967->setProperty("resourcePack", QVariant::fromValue(&rp967));
+            b967->setProperty("atlasSource", QStringLiteral("qrc:/textures/atlas.png"));
+            b967->setProperty("packActive", false);
+            b967->setWidth(700);
+            b967->setHeight(500);
+            b967->setParentItem(win967.contentItem());
+            auto pump967 = []() {
+                for (int i = 0; i < 8; ++i)
+                    QCoreApplication::processEvents();
+            };
+            pump967();
+            // QML 函数直调（t874 qmlCall 手法：QML 脚本方法签名 = QVariant 形参）。
+            auto qmlCall967 = [](QObject *obj, const char *method, const QVariantList &args) -> bool {
+                if (args.size() == 1)
+                    return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)));
+                if (args.size() == 2)
+                    return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)), Q_ARG(QVariant, args.at(1)));
+                return false;
+            };
+            auto qmlFn967 = [](QObject *obj, const char *method, const QVariant &arg) -> QVariant {
+                QVariant ret;
+                if (!QMetaObject::invokeMethod(obj, method, Q_RETURN_ARG(QVariant, ret), Q_ARG(QVariant, arg)))
+                    return QVariant();
+                return ret;
+            };
+            // 当前**有效可见** Model 的几何类名集合。两个工程事实（本轮 rig 实测）：
+            //   ① 可见性须走**全祖链 visible 旗标**（property("visible") 只是本节点旗标：生物分支
+            //      Model 自身缺省 true、靠 pitch 父 Node 门控）——且不能用「类名 == QQuick3DNode」
+            //      识别 Node 层：QML 内联声明自定义属性的 Node（item3D yaw 子的 item3DScale /
+            //      etBookNode 的 etBookPackHit）运行期是动态元对象、类名带 _QML_N 后缀，精确匹配
+            //      会漏检其 visible=false → 未选附魔台也把书页计成可见（假绿面）。改为对每个祖先
+            //      有 visible 属性即检查，走到 QQuickWindow（rig 不 show、恒 false）为止不检查。
+            //   ② 几何类名同样有 _QML_N 后缀面（MobModel 块内声明 rodClock → "MobModel_QML_123"）
+            //      → 用 qobject_cast 继承判定（对动态元对象照常工作），不比类名字符串。
+            auto visGeoms967 = [b967]() {
+                auto effVis = [](QObject *m) {
+                    for (QObject *p = m; p != nullptr; p = p->parent()) {
+                        if (std::strcmp(p->metaObject()->className(), "QQuickWindow") == 0)
+                            break; // rig 窗口永不 show——其 visible=false 与 3D 分支无关
+                        const QVariant v = p->property("visible");
+                        if (v.isValid() && !v.toBool())
+                            return false;
+                    }
+                    return true;
+                };
+                auto tagOf = [](QObject *geo) -> QString {
+                    if (qobject_cast<MobModel *>(geo)) return QStringLiteral("MobModel");
+                    if (qobject_cast<ItemShapeGeometry *>(geo)) return QStringLiteral("ItemShapeGeometry");
+                    if (qobject_cast<BedModelGeometry *>(geo)) return QStringLiteral("BedModelGeometry");
+                    if (qobject_cast<BlockCube *>(geo)) return QStringLiteral("BlockCube");
+                    if (qobject_cast<EnchantBookBox *>(geo)) return QStringLiteral("EnchantBookBox");
+                    if (qobject_cast<UnitCube *>(geo)) return QStringLiteral("UnitCube");
+                    return QString();
+                };
+                QStringList geoms;
+                const auto models = b967->findChildren<QObject *>();
+                for (QObject *m : models) {
+                    if (std::strcmp(m->metaObject()->className(), "QQuick3DModel") != 0)
+                        continue;
+                    if (!m->property("visible").toBool() || !effVis(m))
+                        continue;
+                    QObject *geo = m->property("geometry").value<QObject *>();
+                    if (!geo)
+                        continue;
+                    const QString tag = tagOf(geo);
+                    if (!tag.isEmpty())
+                        geoms << tag;
+                }
+                return geoms;
+            };
+            rigOk967 = true;
+            // ═══ (b) 三大类归属表（分区完整性 + 代表条目逐类 + categoryOfEntry 直调）═══
+            const QVariantList pal967 = b967->property("paletteModel").toList();
+            const QVariantList egg967 = b967->property("eggEntries").toList();
+            const QVariantList blk967 = b967->property("blockEntries").toList();
+            const QVariantList mat967 = b967->property("matEntries").toList();
+            if (pal967.isEmpty()) {
+                rigOk967 = false;
+                rigDiag967 = QStringLiteral("palette empty");
+            } else {
+                // 分区完整性：两两不交 + 并集（多重集）== paletteModel。
+                QSet<int> seen967;
+                bool disjoint = true;
+                for (const QVariantList *lst : { &egg967, &blk967, &mat967 }) {
+                    for (const QVariant &v : *lst) {
+                        const int id = v.toInt();
+                        if (seen967.contains(id))
+                            disjoint = false;
+                        seen967.insert(id);
+                    }
+                }
+                QList<int> a967, c967;
+                for (const QVariant &v : pal967) a967 << v.toInt();
+                for (const QVariant &v : egg967) c967 << v.toInt();
+                for (const QVariant &v : blk967) c967 << v.toInt();
+                for (const QVariant &v : mat967) c967 << v.toInt();
+                std::sort(a967.begin(), a967.end());
+                std::sort(c967.begin(), c967.end());
+                const bool partitionOk = disjoint && a967 == c967;
+                // 代表条目逐类（用户口径代表 + 邻位外溢守卫）：石头/火把/木活板门/白床/草丛→方块；
+                //   木棍/弓/护甲→物品材料；猪生物蛋/狼生物蛋→生物。categoryOfEntry 直调 + 分区成员双证。
+                const int repsBlk967[] = { int(BR::Stone), int(BR::Torch), int(BR::WoodTrapdoor),
+                                           int(BR::BedWhite), int(BR::TallGrass) };
+                const int repsMat967[] = { int(RecipeRegistry::StickId), int(ToolRegistry::Bow),
+                                           int(RecipeRegistry::ArmorIdBase) };
+                const int repsEgg967[] = { int(RecipeRegistry::SpawnEggPigId), int(RecipeRegistry::SpawnEggWolfId) };
+                bool repsOk = partitionOk;
+                auto inList967 = [](const QVariantList &lst, int id) {
+                    for (const QVariant &v : lst)
+                        if (v.toInt() == id) return true;
+                    return false;
+                };
+                for (int id : repsBlk967)
+                    if (!(qmlFn967(b967, "categoryOfEntry", QVariant(id)).toInt() == 1 && inList967(blk967, id))) {
+                        repsOk = false;
+                        qInfo().noquote() << "  t967 diag(b): block-rep miss id" << id;
+                    }
+                for (int id : repsMat967)
+                    if (!(qmlFn967(b967, "categoryOfEntry", QVariant(id)).toInt() == 2 && inList967(mat967, id))) {
+                        repsOk = false;
+                        qInfo().noquote() << "  t967 diag(b): mat-rep miss id" << id;
+                    }
+                for (int id : repsEgg967)
+                    if (!(qmlFn967(b967, "categoryOfEntry", QVariant(id)).toInt() == 0 && inList967(egg967, id))) {
+                        repsOk = false;
+                        qInfo().noquote() << "  t967 diag(b): egg-rep miss id" << id;
+                    }
+                // 狼（图鉴段）→ 生物类：selectMob 后 selectedTabName 逐字「生物」+ 类别行「生物 / mobType N」。
+                if (!qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) }))
+                    rigOk967 = false;
+                pump967();
+                const bool wolfTab967 = b967->property("selectedTabName").toString() == QStringLiteral("生物")
+                                     && b967->property("selectedIsMob").toBool()
+                                     && b967->property("selectedMobFromSection").toInt() == int(EntityManager::MobWolf)
+                                     && b967->property("selectedId").toInt() == 0; // 单选中态：物品侧被清
+                if (!wolfTab967) {
+                    repsOk = false;
+                    qInfo().noquote() << "  t967 diag(b): wolf tab" << b967->property("selectedTabName").toString()
+                                      << "isMob" << b967->property("selectedIsMob").toBool()
+                                      << "selId" << b967->property("selectedId").toInt();
+                }
+                if (!repsOk) rigOk967 = false;
+
+                // ═══ (c) 单选中态行为钉（状态机 + 可见几何集双面）═══
+                // c1 物品→生物（用户症状原路径：异形 3D 分支无 !selectedIsMob 守卫的叠渲面）：
+                //    selectItem(火把) → ItemShapeGeometry 独显；再 selectMob(狼) → selectedId 归 0
+                //    且可见几何集只剩 MobModel（无 ItemShape/Bed/Cube 残留）。
+                auto drive967 = [&](bool stepOk, const char *tag) {
+                    if (!stepOk) {
+                        rigOk967 = false;
+                        qInfo().noquote() << "  t967 diag(c):" << tag;
+                    }
+                };
+                qmlCall967(b967, "selectItem", { QVariant(int(BR::Torch)) });
+                pump967();
+                QStringList g1 = visGeoms967();
+                const bool c1a = b967->property("selectedId").toInt() == int(BR::Torch)
+                              && g1.contains(QStringLiteral("ItemShapeGeometry")) && !g1.contains(QStringLiteral("MobModel"));
+                qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
+                pump967();
+                QStringList g2 = visGeoms967();
+                const bool c1b = b967->property("selectedId").toInt() == 0
+                              && b967->property("selectedMobFromSection").toInt() == int(EntityManager::MobWolf)
+                              && g2.contains(QStringLiteral("MobModel"))
+                              && !g2.contains(QStringLiteral("ItemShapeGeometry"))
+                              && !g2.contains(QStringLiteral("BedModelGeometry"))
+                              && !g2.contains(QStringLiteral("BlockCube"));
+                drive967(c1a && c1b, "c1 item(torch)->mob(wolf)");
+                if (!c1a || !c1b)
+                    qInfo().noquote() << "    g1" << g1.join(QLatin1Char(',')) << "| g2" << g2.join(QLatin1Char(','))
+                                      << "selId" << b967->property("selectedId").toInt();
+                // c2 床→生物（床分支同病面）：selectItem(白床) → BedModelGeometry 独显；再 selectMob(狼)
+                //    → 床几何消失、MobModel 独显。
+                qmlCall967(b967, "selectItem", { QVariant(int(BR::BedWhite)) });
+                pump967();
+                QStringList g3 = visGeoms967();
+                const bool c2a = g3.contains(QStringLiteral("BedModelGeometry")) && !g3.contains(QStringLiteral("MobModel"));
+                qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
+                pump967();
+                QStringList g4 = visGeoms967();
+                const bool c2b = g4.contains(QStringLiteral("MobModel")) && !g4.contains(QStringLiteral("BedModelGeometry"))
+                              && !g4.contains(QStringLiteral("ItemShapeGeometry")) && !g4.contains(QStringLiteral("BlockCube"));
+                drive967(c2a && c2b, "c2 item(bed)->mob(wolf)");
+                if (!c2a || !c2b)
+                    qInfo().noquote() << "    g3" << g3.join(QLatin1Char(',')) << "| g4" << g4.join(QLatin1Char(','));
+                // c3 反向 生物→物品：selectMob(狼) → selectItem(石头) → 生物段清 + BlockCube 独显。
+                qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
+                pump967();
+                qmlCall967(b967, "selectItem", { QVariant(int(BR::Stone)) });
+                pump967();
+                QStringList g5 = visGeoms967();
+                const bool c3 = b967->property("selectedMobFromSection").toInt() == -1
+                             && b967->property("selectedId").toInt() == int(BR::Stone)
+                             && g5.contains(QStringLiteral("BlockCube")) && !g5.contains(QStringLiteral("MobModel"))
+                             && b967->property("selectedTabName").toString() == QStringLiteral("方块");
+                drive967(c3, "c3 mob(wolf)->item(stone)");
+                // c4 物品材料/生物蛋类选中名面：木棍 → 「物品材料」、猪蛋 → 「生物」且走 mob 3D 预览。
+                qmlCall967(b967, "selectItem", { QVariant(int(RecipeRegistry::StickId)) });
+                pump967();
+                const bool c4a = b967->property("selectedTabName").toString() == QStringLiteral("物品材料")
+                              && !b967->property("selectedIsMob").toBool();
+                qmlCall967(b967, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggPigId)) });
+                pump967();
+                const bool c4b = b967->property("selectedTabName").toString() == QStringLiteral("生物")
+                              && b967->property("selectedIsMob").toBool();
+                drive967(c4a && c4b, "c4 stick/egg tab names");
+                // c5 状态机循环钉：代表条目 ×4「先物品后生物」→ selectedId 恒归 0（双选中不可再现）。
+                bool c5 = true;
+                const int loopIds967[] = { int(BR::Stone), int(BR::Torch), int(RecipeRegistry::StickId),
+                                           int(RecipeRegistry::SpawnEggPigId) };
+                for (int id : loopIds967) {
+                    qmlCall967(b967, "selectItem", { QVariant(id) });
+                    qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
+                    pump967();
+                    if (b967->property("selectedId").toInt() != 0
+                        || b967->property("selectedMobFromSection").toInt() != int(EntityManager::MobWolf)) {
+                        c5 = false;
+                        qInfo().noquote() << "  t967 diag(c5): id" << id << "selId"
+                                          << b967->property("selectedId").toInt();
+                    }
+                }
+                drive967(c5, "c5 loop exclusivity");
+            }
+        }
+        QDir(probeUi967).removeRecursively();
+        const bool okB967 = rigOk967;
+        ok = ok && okB967;
+        if (!ok)
+            qInfo().noquote() << "  [t967 diag] sourcePins" << okA967 << "rig" << okB967 << rigDiag967;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t967 browser single-selection + three-category regroup: the user's "
+                             "fifth-round report 'a mob and an item can be selected at the SAME time "
+                             "(pick an item then a mob and they appear together)' resolves to two "
+                             "independent selection variables (selectedMobFromSection for the mob "
+                             "gallery vs selectedId for the palette) whose only mutual exclusion was "
+                             "one-directional: item taps cleared the mob side but mob taps left "
+                             "selectedId stale, and the bed / item-shape preview branches gate their "
+                             "visibility on selectedIsBed / selectedIsItem3D with no !selectedIsMob "
+                             "guard (the full-cube branch's review27-4 family exclusion cannot cure a "
+                             "cross-category dual selection), so BedModelGeometry / ItemShapeGeometry "
+                             "and the MobModel rendered stacked while the name/category row and the "
+                             "form/variant panels followed selectedIsMob alone; the fix funnels every "
+                             "tap through selectMob / selectItem authorities that write their own side "
+                             "AND clear the other (selectedId = 0 sentinel), making the dual state "
+                             "unreachable by construction; categories regroup into Mobs / Blocks / "
+                             "Items-Materials via one authoritative categoryOfEntry predicate that "
+                             "reuses the very same id-level 3D routing functions (isCubeId / isBedId / "
+                             "isItem3DId) so the classification table IS the preview routing table: "
+                             "mob-gallery entries and spawn eggs (whose preview is the 3D mob model) "
+                             "are Mobs, palette entries with an exclusive 3D display (full cubes, "
+                             "beds, the t880/t925/t965 item-shape families) are Blocks, and "
+                             "everything without a 3D display (tools, materials, armor, and flat-icon "
+                             "cross/rail/plate families) is Items-Materials, per the user's 'no 3D "
+                             "goes to items-materials' caliber; legs: source pins (authority function "
+                             "bodies, tap routing, extinct inline dual-write forms, three Repeater "
+                             "partitions + section headers, predicate delegation), a real-QmlEngine "
+                             "rig reading the palette partition back (pairwise disjoint + union == "
+                             "paletteModel + representative pins: stone/torch/trapdoor/white-bed/tall-"
+                             "grass -> Blocks, stick/bow/armor -> Items-Materials, pig/wolf eggs -> "
+                             "Mobs, wolf gallery -> Mobs tab), and behavior pins driving the real "
+                             "selection state machine (torch then wolf: selectedId returns to 0 and "
+                             "the visible geometry set holds MobModel alone; bed then wolf likewise "
+                             "for the bed branch; wolf then stone flips back with BlockCube alone; "
+                             "stick/egg tab names; four-representative exclusivity loop)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
