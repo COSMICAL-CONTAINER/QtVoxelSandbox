@@ -5,13 +5,13 @@
 #include <algorithm> // std::clamp / std::min / std::max
 #include <vector>
 
-// 单一附魔数据表（spec t475）。改附魔属性（maxLevel / weight / 互斥组 / 名）只改这里，全工程生效。
-// 表行索引 == enchantId（连续 1..14；第 0 项是 NoEnchant 占位，使索引与枚举值 1:1 对齐）。
+// 单一附魔数据表（spec t475；t960 扩弓 / 钓竿专属六条）。改附魔属性（maxLevel / weight / 互斥组 / 名）
+// 只改这里，全工程生效。表行索引 == enchantId（连续 1..20；第 0 项是 NoEnchant 占位，使索引与枚举值 1:1 对齐）。
 //
 // t959 主类别（homeCategory，EnchantCategory；书附魔池按它成簇收窄——用户第五轮口径「书本附魔把很多
 //   工具+装甲附魔冲突地混在一起」）：锐锋族/击退/燃焰 = Weapon、效率/精准/时运 = Tool、保护系/水上亲和
-//   = Armor、耐久 = Universal（任何主类别池均可出）、NoEnchant 占位 = None。t960 弓/竿系专属附魔入表时
-//   在 EnchantCategory 加类（如 Bow）+ selectEnchantsForItem 主类别轮同步扩展。
+//   = Armor、耐久 = Universal（任何主类别池均可出）、NoEnchant 占位 = None。t960 弓/竿系专属附魔入表：
+//   EnchantCatBow（劲射/震击/燃箭/不竭）+ EnchantCatRod（唤潮/缠咬），kBookMainCats 主类别轮同步扩五类。
 //
 // 互斥组（exclusiveGroup，机制等价 MC「同组附魔不可共存」；t615 按 dev-plan §3 表全接线）：
 //   - 组 1：锐锋 / 亡灵杀手 / 节肢克星（三种伤害类型附魔三选一；MC 1.0 sharpness/Smite/BaneOfArthropods 互斥）。
@@ -19,23 +19,27 @@
 //   - 组 3：保护 / 火焰保护 / 摔落保护 / 弹射物保护（保护系四选一；MC 1.0 同件护甲只允许一种保护附魔——
 //     原表注「1.0 实际可共存」有误：MC 1.0 保护族同件互斥（Protection 与 Fire/Feather/Projectile Protection
 //     不可共存，t475 注释按「1.0 之后才加」理解错误），t615 按 dev-plan 定稿表补组 3）。
-//   - 组 0：无互斥（可与其他任意附魔共存）。
+//   - 组 0：无互斥（可与其他任意附魔共存）。t960 弓四件 / 竿两件全组 0（彼此无互斥面；不竭与「修复系」
+//     互斥是惯例，本作无修复系附魔 → 登记即可，未来入修复系时改组号）。
 //
-// 适用域（appliesToMask，t615 按 dev-plan §3 表细化）：
+// 适用域（appliesToMask，t615 按 dev-plan §3 表细化；t960 扩弓 / 竿位）：
 //   - 锐锋族（1/2/3）= Weapon|Tool（斧亦可，机制等价 MC 斧附武器系）|BookItem（书载体全池）。
 //   - 击退（4）/ 燃焰（5）= Weapon|BookItem（仅剑）。
 //   - 效率（6）= Tool|BookItem；精准采集（7）= Tool|BookItem；时运（8）= Tool|BookItem。
 //     （镐/铲/斧/锄的「精准采集不含锄、时运不含锄/斧」差异走 isApplicableForItem 逐物品精判——mask 是
 //     附魔台大类池门，isApplicableForItem 是铁砧逐条适用权威。）
-//   - 耐久（9）= Weapon|Tool|Armor|BookItem（全适用，机制等价 MC unbreaking 全装备通用）。
+//   - 耐久（9）= Weapon|Tool|Armor|BowItem|RodItem|BookItem（全适用，t960 起含弓 / 钓竿）。
 //   - 保护（10）/ 火焰保护（11）/ 弹射物保护（13）= Armor|BookItem（全护甲）。
 //   - 摔落保护（12）= Armor|BookItem（**仅靴**，走 isApplicableForItem 精判）。
 //   - 水上亲和（14）= Armor|BookItem（**仅头盔**，走 isApplicableForItem 精判）。
+//   - t960 弓四件（15-18）= BowItem|BookItem（**仅弓**——「专属」= 适用物品门严：上剑 / 镐 / 护甲全拒，
+//     书载体全过 → 铁砧敲弓附魔书 / 附魔台附弓均可达）。竿两件（19/20）= RodItem|BookItem（仅钓鱼竿）。
 //   书（BookItem 位）：附魔台附书时 t959 起主类别成簇收窄（单次产物 ⊆ 随机主类别 ∪ 通用；跨施法
-//     全 14 附魔长期仍都可达——见 selectEnchantsForItem 主类别 roll 注释）。
+//     全 20 附魔长期仍都可达——见 selectEnchantsForItem 主类别 roll 注释）。
 //
 // 权重（weight，机制等价 MC 附魔 rarity）：越大越常被选中。MC 1.0 经典值：锐锋/效率/保护 = 10（常见），
-//   精准采集 = 1（极稀有）、时运/燃焰/摔落保护/水上亲和 = 2、其余 = 5。
+//   精准采集 = 1（极稀有）、时运/燃焰/摔落保护/水上亲和 = 2、其余 = 5。t960 弓/竿系同分布对齐：
+//   劲射 = 10（常见）、震击 = 5、燃箭 = 2（稀有）、不竭 = 1（极稀有，同精准采集）、缠咬 = 5、唤潮 = 2。
 namespace {
 constexpr EnchantRegistry::EnchantDef kEnchants[int(EnchantRegistry::EnchantCount)] = {
     /* 0 NoEnchant      */ { 0, EnchantRegistry::EnchantCatNone, 0, 0, 0, 0, "none",            "" },
@@ -49,11 +53,12 @@ constexpr EnchantRegistry::EnchantDef kEnchants[int(EnchantRegistry::EnchantCoun
     /* 6 Efficiency     */ { EnchantRegistry::Efficiency,    EnchantRegistry::EnchantCatTool, EnchantRegistry::Tool | EnchantRegistry::BookItem,   5, 10, 2, "efficiency",    "\xe6\x95\x88\xe7\x8e\x87" },       // 效率（t615 组 2 采集系互斥）
     /* 7 SilkTouch      */ { EnchantRegistry::SilkTouch,     EnchantRegistry::EnchantCatTool, EnchantRegistry::Tool | EnchantRegistry::BookItem,   1,  1, 2, "silk_touch",    "\xe7\xb2\xbe\xe5\x87\x86\xe9\x87\x87\xe9\x9b\x86" }, // 精准采集（组 2）
     /* 8 Fortune        */ { EnchantRegistry::Fortune,       EnchantRegistry::EnchantCatTool, EnchantRegistry::Tool | EnchantRegistry::BookItem,   3,  2, 2, "fortune",       "\xe6\x97\xb6\xe8\xbf\x90" },       // 时运（组 2）
-    // ── 通用（武器/工具/护甲/书；appliesToMask = Weapon|Tool|Armor|BookItem；主类别 = Universal）──
+    // ── 通用（武器/工具/护甲/弓/钓竿/书；appliesToMask 全类；主类别 = Universal）──
     /* 9 Unbreaking     */ { EnchantRegistry::Unbreaking,
                              EnchantRegistry::EnchantCatUniversal,
-                             EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::Armor | EnchantRegistry::BookItem,
-                             3, 5, 0, "unbreaking",    "\xe8\x80\x90\xe4\xb9\x85" },       // 耐久
+                             EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::Armor
+                                 | EnchantRegistry::BowItem | EnchantRegistry::RodItem | EnchantRegistry::BookItem,
+                             3, 5, 0, "unbreaking",    "\xe8\x80\x90\xe4\xb9\x85" },       // 耐久（t960 扩弓 / 竿位）
     // ── 护甲（appliesToMask = Armor|BookItem；摔落保护仅靴 / 水上亲和仅头盔走 isApplicableForItem 精判；
     //    主类别 = Armor）──
     /*10 Protection     */ { EnchantRegistry::Protection,     EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4, 10, 3, "protection",    "\xe4\xbf\x9d\xe6\x8a\xa4" },       // 保护（t615 组 3 保护系互斥）
@@ -61,6 +66,14 @@ constexpr EnchantRegistry::EnchantDef kEnchants[int(EnchantRegistry::EnchantCoun
     /*12 FeatherFall    */ { EnchantRegistry::FeatherFall,    EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  2, 3, "feather_fall",  "\xe6\x91\x94\xe8\x90\xbd\xe4\xbf\x9d\xe6\x8a\xa4" }, // 摔落保护（组 3；仅靴）
     /*13 ProjectileProt */ { EnchantRegistry::ProjectileProt, EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "projectile_prot","\xe5\xbc\xb9\xe5\xb0\x84\xe7\x89\xa9\xe4\xbf\x9d\xe6\x8a\xa4" }, // 弹射物保护（组 3）
     /*14 AquaAffinity   */ { EnchantRegistry::AquaAffinity,   EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 1,  2, 0, "aqua_affinity", "\xe6\xb0\xb4\xe4\xb8\x8a\xe4\xba\xb2\xe5\x92\x8c" }, // 水上亲和（仅头盔）
+    // ── t960 弓专属四件（appliesToMask = BowItem|BookItem；仅弓；主类别 = Bow；全组 0）──
+    /*15 Might         */ { EnchantRegistry::Might,        EnchantRegistry::EnchantCatBow, EnchantRegistry::BowItem | EnchantRegistry::BookItem, 3, 10, 0, "might",         "\xe5\x8a\xb2\xe5\xb0\x84" },       // 劲射
+    /*16 BowShock      */ { EnchantRegistry::BowShock,     EnchantRegistry::EnchantCatBow, EnchantRegistry::BowItem | EnchantRegistry::BookItem, 2,  5, 0, "bow_shock",     "\xe9\x9c\x87\xe5\x87\xbb" },       // 震击
+    /*17 BrightDraw    */ { EnchantRegistry::BrightDraw,   EnchantRegistry::EnchantCatBow, EnchantRegistry::BowItem | EnchantRegistry::BookItem, 1,  2, 0, "bright_draw",   "\xe7\x87\x83\xe7\xae\xad" },       // 燃箭
+    /*18 NeverRun      */ { EnchantRegistry::NeverRun,     EnchantRegistry::EnchantCatBow, EnchantRegistry::BowItem | EnchantRegistry::BookItem, 1,  1, 0, "never_run",     "\xe4\xb8\x8d\xe7\xab\xad" },       // 不竭
+    // ── t960 钓竿专属两件（appliesToMask = RodItem|BookItem；仅钓鱼竿；主类别 = Rod；全组 0）──
+    /*19 TideCall      */ { EnchantRegistry::TideCall,     EnchantRegistry::EnchantCatRod, EnchantRegistry::RodItem | EnchantRegistry::BookItem, 3,  2, 0, "tide_call",     "\xe5\x94\xa4\xe6\xbd\xae" },       // 唤潮
+    /*20 BiteCall      */ { EnchantRegistry::BiteCall,     EnchantRegistry::EnchantCatRod, EnchantRegistry::RodItem | EnchantRegistry::BookItem, 3,  5, 0, "bite_call",     "\xe7\xbc\xa0\xe5\x92\xac" },       // 缠咬
 };
 
 // 编译期表大小守卫：EnchantCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -139,13 +152,17 @@ int EnchantRegistry::categoryForItem(int itemId)
         const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
         if (!t) return None;
         // 剑 → 武器；镐 / 斧 / 铲 → 工具；**锄 → None（t824：MC 1.0 锄无适用附魔 → 不可附魔）**；
-        // 弓 / 剪刀 / 钓鱼竿 → None（专属附魔本任务不做）。
-        //   锄判 None 连带收口三处门：① 附魔台槽 0 拒入（itemEnchantCategory==0）；② 本表 isApplicableForItem
-        //   的 mask 门（None & 任意 mask = 0）→ 铁砧书合并逐条拒；③ selectEnchantsForItem 空候选 → 不给选项。
+        // **弓 → BowItem / 钓鱼竿 → RodItem（t960：专属附魔入池 → 可附魔）**；剪刀 → None（无专属附魔）。
+        //   锄 / 剪刀判 None 连带收口三处门：① 附魔台槽 0 拒入（itemEnchantCategory==0）；② 本表
+        //   isApplicableForItem 的 mask 门（None & 任意 mask = 0）→ 铁砧书合并逐条拒；③
+        //   selectEnchantsForItem 空候选 → 不给选项。弓 / 竿判非 None 后同三门反向打开：附魔台可附、
+        //   铁砧可敲书、selectEnchants 给专属池（劲射/震击/燃箭/不竭 + 耐久 / 唤潮/缠咬 + 耐久）。
         if (t->type == int(BlockRegistry::Sword)) return Weapon;
         if (t->type == int(BlockRegistry::Pickaxe) || t->type == int(BlockRegistry::Axe)
             || t->type == int(BlockRegistry::Shovel)) return Tool;
-        return None; // 锄 / Bow / Shears / FishingRod
+        if (t->type == int(BlockRegistry::Bow)) return BowItem;
+        if (t->type == int(BlockRegistry::FishingRod)) return RodItem;
+        return None; // 锄 / Shears
     }
     // t615 书（BookId=0x238）→ BookItem：附魔台附书载体（全池随机 → 产附魔书 EnchantedBookId）。
     //   注：附魔书物品（EnchantedBookId=0x227）**不**返回 BookItem（书已附魔不可再附，itemReady 域外）。
@@ -159,7 +176,8 @@ int EnchantRegistry::categoryForItem(int itemId)
 //   - 击退（4）/燃焰（5）：仅剑（mask 已限 Weapon；斧落 mask 判定即拒）。
 //   - 精准采集（7）：镐/铲/斧（mask=Tool 含锄 → 此处锄拒）；时运（8）：镐/铲（锄/斧拒）。
 //   - 摔落保护（12）：仅靴（mask=Armor 含四部位 → 此处非靴拒）；水上亲和（14）：仅头盔（非头盔拒）。
-//   - 其余（效率全工具 / 耐久全适用 / 保护三族全护甲）：mask 判定即正确。
+//   - t960 弓四件（15-18）：仅弓（mask 已限 BowItem；其他物品落 mask 判定即拒）。竿两件（19/20）：仅钓竿。
+//   - 其余（效率全工具 / 耐久全适用含弓竿 / 保护三族全护甲）：mask 判定即正确。
 bool EnchantRegistry::isApplicableForItem(int enchantId, int itemId)
 {
     const EnchantDef *e = defAt(enchantId);
@@ -172,6 +190,8 @@ bool EnchantRegistry::isApplicableForItem(int enchantId, int itemId)
         const bool isAxe = (t->type == int(BlockRegistry::Axe));
         const bool isPick = (t->type == int(BlockRegistry::Pickaxe));
         const bool isShovel = (t->type == int(BlockRegistry::Shovel));
+        const bool isBow = (t->type == int(BlockRegistry::Bow));
+        const bool isRod = (t->type == int(BlockRegistry::FishingRod));
         switch (enchantId) {
         case Sharpness: case UndeadSlay: case ArthropodSlay:
             return isSword || isAxe;   // 锐锋族：剑 + 斧（锄 / 铲 / 弓拒）
@@ -181,6 +201,10 @@ bool EnchantRegistry::isApplicableForItem(int enchantId, int itemId)
             return isPick || isShovel || isAxe; // 精准采集：镐/铲/斧（锄拒）
         case Fortune:
             return isPick || isShovel; // 时运：镐/铲（锄 / 斧拒）
+        case Might: case BowShock: case BrightDraw: case NeverRun:
+            return isBow;              // 弓四件：仅弓（mask 已限 BowItem；书载体不走本分支）
+        case TideCall: case BiteCall:
+            return isRod;              // 竿两件：仅钓鱼竿
         default:
             break; // 效率（镐/斧/铲——锄经 categoryForItem=None 已在 mask 门拒）/ 耐久（全适用）等：mask 已过 → 适用
         }
@@ -246,26 +270,27 @@ QVariantList EnchantRegistry::selectEnchantsForItem(int itemId, int offeredLevel
     if (rs == 0) rs = 1;                // 防 LCG 陷 0
 
     // 1b) t959 书附魔主类别收窄（用户第五轮口径「书本附魔把很多工具+装甲附魔冲突地混在一起」）：
-    //   书载体 isApplicableForItem 全过 → 旧版一次施法从全 14 并集抽 1-3 条，产物常是「保护+效率+
+    //   书载体 isApplicableForItem 全过 → 旧版一次施法从全池并集抽 1-3 条，产物常是「保护+效率+
     //   锐锋」这类**任何单件物品都戴不上**的跨类乱炖。收窄 = 施法时先由同一 LCG 定一个**主类别**
-    //   （武器/工具/装甲三类均匀轮——选「均匀随机主类别」口径而非四类均匀轮换：「书」类本作暂无专属
-    //   附魔（弓/竿系 t960 预留扩展位，届时 kBookMainCats 加类即可），均匀轮换会把轮空类白掷），本轮
-    //   产物全部从「该类池 ∪ 通用（耐久）」抽 → 单次产物同类成簇、跨类混出绝迹；conflictGroup 同组
+    //   （武器/工具/装甲/弓/竿五类均匀轮——t959 起三类；t960 弓/竿系入表扩五类 = t959 预留的扩展位，
+    //   弓附魔只上弓 / 竿附魔只上钓竿的「专属」物品门不变，书是万能载体 → 书池五类轮换皆可出），
+    //   本轮产物全部从「该类池 ∪ 通用（耐久）」抽 → 单次产物同类成簇、跨类混出绝迹；conflictGroup 同组
     //   互斥由步骤 3 位集抽样在收窄池上照旧生效（保护系四件互斥 / 锐锋族三选一 / 采集系三选一）。
-    //   跨施法（不同 seed）主类别随机轮换 → 全 14 附魔在书池长期仍都可达（union 不收窄，只收窄单次
-    //   产物内部）。直附面（工具/武器/护甲）不经此分支——池本就按 isApplicableForItem 逐物品精判
+    //   跨施法（不同 seed）主类别随机轮换 → 全 20 附魔在书池长期仍都可达（union 不收窄，只收窄单次
+    //   产物内部）。直附面（工具/武器/护甲/弓/竿）不经此分支——池本就按 isApplicableForItem 逐物品精判
     //   （t824），无跨类混出问题。roll 在抽样**前**消耗同一 LCG 流 → 同 seed 恒同主类别，t917「预告
     //   与施放严格同源」（同 seed 同产物）与 PLAN §2-K 确定性契约保持。
     if (category == BookItem) {
-        static constexpr int kBookMainCats[3] = { EnchantCatWeapon, EnchantCatTool, EnchantCatArmor };
-        const int mainCat = kBookMainCats[lcgNext(rs) % 3u];
+        static constexpr int kBookMainCats[5] = { EnchantCatWeapon, EnchantCatTool, EnchantCatArmor,
+                                                  EnchantCatBow, EnchantCatRod };
+        const int mainCat = kBookMainCats[lcgNext(rs) % 5u];
         candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
                                         [mainCat](const EnchantDef *e) {
                                             return e->homeCategory != mainCat
                                                 && e->homeCategory != int(EnchantCatUniversal);
                                         }),
                          candidates.end());
-        if (candidates.empty()) return result; // 防御（三类主类别池恒非空，理论不可达）
+        if (candidates.empty()) return result; // 防御（五类主类别池恒非空，理论不可达）
     }
 
     // 2) 附魔数（1..3）：offeredLevel >= 10 → 至少 2；>= 20 → 至多 3；钳到候选数。机制等价 MC「高等级附魔台
@@ -311,7 +336,8 @@ QVariantList EnchantRegistry::selectEnchantsForItem(int itemId, int offeredLevel
         if (chosen->exclusiveGroup > 0 && chosen->exclusiveGroup < 32)
             pickedGroups |= (1u << (chosen->exclusiveGroup - 1));
 
-        // 4) 等级：基础 = round(maxLevel * lvl / 30)（offered 30 → 满；1 → 1 级）；maxLevel=1 恒 1。
+        // 4) 等级：基础 = round(maxLevel * lvl / 30)（offered 30 → 满；1 → 1 级）；maxLevel=1 恒 1
+        //    （精准采集 / 水上亲和 / t960 燃箭 / 不竭）。
         int eLevel = 1;
         if (chosen->maxLevel > 1) {
             eLevel = (chosen->maxLevel * lvl + 15) / 30; // 四舍五入（+15 = half-up）
@@ -398,4 +424,43 @@ float EnchantRegistry::weaponAttackDamage(int itemId, const int *enchants)
 float EnchantRegistry::knockbackStrength(int level)
 {
     return 1.0f + 3.0f * float(std::max(0, level));
+}
+
+// ── t960 弓 / 钓竿专属附魔效果公式（单一权威；数值自定，注释「用户口径：弓四件+竿两件专属」）──
+//   效果接线点：劲射 → playercontroller endBowDraw 箭伤计算；震击 / 燃箭 → Game 层算倍率 / 时长后经
+//   spawnArrowPlayer 参数下传（Entities 层不 include Game——分层铁律，箭实体携 per-entity 值，t505
+//   per-entity 字段先例）；不竭 → endBowDraw 免消耗；唤潮 / 缠咬 → useFishingRod 甩竿时算好经
+//   spawnBobber 参数下传（等待缩放 / 判定窗附加量存在浮标实体上，鱼跑重掷照用）。
+
+// 劲射：箭伤 = base + 1×级（满弓 6 → III 9）。mightLevel 负值防御钳 0（无上限钳——铁砧合并已封顶
+//   maxLevel=3，此处不做双重钳以免两处口径漂移）。
+int EnchantRegistry::bowArrowDamage(int baseDamage, int mightLevel)
+{
+    return baseDamage + std::max(0, mightLevel);
+}
+
+// 震击：箭击退倍率 = 1 + 1.0×级（I ×2 / II ×3；乘在箭基线击退强度上 → 位移同倍放大）。负级钳 0。
+float EnchantRegistry::bowKnockbackMultiplier(int level)
+{
+    return 1.0f + 1.0f * float(std::max(0, level));
+}
+
+// 燃箭：级 ≥1 → 点燃 5.0s（机制等价 MC flame 一击 5s 量级；max 1 不分级）；级 0 → 0（无点燃）。
+float EnchantRegistry::bowIgniteSeconds(int level)
+{
+    return level > 0 ? 5.0f : 0.0f;
+}
+
+// 唤潮：等待期倍率 = 1 − 0.2×级（I ×0.8 / II ×0.6 / III ×0.4 → [5,30]s 掷骰 → III [2,12]s）。
+//   级钳 [0,3]（防御：铁砧合并已封顶 maxLevel=3，防未来路径漏钳把等待缩成 0）。
+float EnchantRegistry::rodWaitScale(int level)
+{
+    return 1.0f - 0.2f * float(std::clamp(level, 0, 3));
+}
+
+// 缠咬：判定窗附加量 = 0.5s×级（I +0.5s / III +1.5s）。kBobberBiteWindowSec=1.0 基值用户口径钉死不动，
+//   附加式加宽；级钳 [0,3]（同上防御）。
+float EnchantRegistry::rodBiteWindowExtra(int level)
+{
+    return 0.5f * float(std::clamp(level, 0, 3));
 }

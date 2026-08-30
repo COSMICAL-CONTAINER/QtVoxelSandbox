@@ -621,7 +621,8 @@ int EntityManager::spawnArrow(const QVector3D &origin, const QVector3D &vel)
 
 // t304 玩家弓射出的箭：与 spawnArrow（骷髅射出，命中玩家 t283）对称，差异在 arrowFromPlayer=true（命中 mob）+
 //   arrowDamage 由蓄力决定（1..6）。tick Arrow 分支据 arrowFromPlayer 分流命中目标（true→mob / false→玩家）。
-void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage)
+void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage,
+                                     float kbMul, float igniteSec)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); player arrow spawn skipped at" << origin;
@@ -640,6 +641,10 @@ void EntityManager::spawnArrowPlayer(const QVector3D &origin, const QVector3D &v
     e.arrowSpawnMs = m_clock.elapsed(); // 任务（60s despawn）：spawn 墙钟（tick 硬上限用）
     e.arrowFromPlayer = true;                  // 命中 mob（非玩家）
     e.arrowDamage = damage > 0 ? damage : 1;   // 蓄力伤害（防御 ≥1）
+    // t960 弓附魔载荷（Game 层算好传入）：击退强度 = 基线 × 震击倍率（kbMul≤0 防御按基线）；
+    //   点燃时长直存（0 = 不点燃）。DMI 缺省 + 缺省参数 → 旧调用点（发射器 / 探针）行为逐字不变。
+    e.arrowKbStrength = kArrowKnockbackStrength * (kbMul > 0.0f ? kbMul : 1.0f);
+    e.arrowIgniteSec  = igniteSec > 0.0f ? igniteSec : 0.0f;
     acquireSlot(std::move(e));
     notifyEntitiesChanged();
 }
@@ -822,7 +827,8 @@ int EntityManager::spawnEnderPearl(const QVector3D &origin, const QVector3D &vel
 //   player.fishing 专属 delegate 绑 PlayerController 镜像的 bobberPosition），但 revision 照 bump（Game 层镜像
 //   读 posAt 需要数据新鲜度；Repeater 内无 Bobber 分支 → 无 delegate 开销）。达 kCap → 跳过 + 告警（防溢出）。
 //   返浮标槽索引（Game 层 m_bobberEntityIdx 跟踪）；达 kCap → -1。
-int EntityManager::spawnBobber(const QVector3D &origin, const QVector3D &vel, quint32 castSerial)
+int EntityManager::spawnBobber(const QVector3D &origin, const QVector3D &vel, quint32 castSerial,
+                               float waitScale, float biteWindowExtra)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); bobber spawn skipped at" << origin;
@@ -842,6 +848,11 @@ int EntityManager::spawnBobber(const QVector3D &origin, const QVector3D &vel, qu
                                         //   下 arrowLife 只慢不快（挂机浮标滞留 >180s），墙钟不依赖 dt 必然到期）
     e.bobberState = kBobberStFlying;
     e.bobberSerial = castSerial;   // 掷骰序号（等待值在落水 settle 时算）
+    // t960 钓竿附魔载荷（Game 层算好传入）：等待期倍率存实体（落水首掷 / 鱼跑重掷两处掷骰同乘）；
+    //   判定窗 = 基线常量 + 附加秒（kBobberBiteWindowSec 基值 1.0 用户口径钉死不动，附加式加宽）。
+    //   缺省参数（1.0 / 0）→ 旧调用点行为逐字不变。
+    e.bobberWaitScale  = waitScale > 0.0f ? waitScale : 1.0f;
+    e.bobberBiteWindow = kBobberBiteWindowSec + (biteWindowExtra > 0.0f ? biteWindowExtra : 0.0f);
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     notifyEntitiesChanged();
     return slot;
@@ -5806,9 +5817,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                                                 /*clearAggro=*/false)) { // review26 #8：投射物闪避只位移不清仇恨（MC 1.0 口径）
                                 // 瞬移失败兜底：普通命中（伤害 / 击退 / 音 / 移除，同下常规分支语义）。
                                 damageEntity(mi, e.arrowDamage);
+                                // t960 燃箭（瞬移失败兜底同点燃——「普通命中」语义对齐下方常规分支）。
+                                if (e.arrowIgniteSec > 0.0f) ignite(mi, e.arrowIgniteSec);
                                 const float fhx = e.vx, fhz = e.vz;
                                 const float flen = std::sqrt(fhx * fhx + fhz * fhz);
-                                if (flen > 1e-3f) knockback(mi, fhx / flen, fhz / flen, kArrowKnockbackStrength);
+                                // t960 震击：击退强度用箭实体携行值（spawnArrowPlayer 写 = 基线 × 震击倍率；
+                                //   0 防御兜底基线——玩家箭 spawn 后恒 >0，理论不可达）。
+                                if (flen > 1e-3f)
+                                    knockback(mi, fhx / flen, fhz / flen,
+                                              e.arrowKbStrength > 0.0f ? e.arrowKbStrength : kArrowKnockbackStrength);
                                 emit arrowHitMob(m.mobType);
                             }
                             qCInfo(lcEnt) << "player arrow deflected by nightwalker" << mi
@@ -5820,9 +5837,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         // t553 箭命中击退（机制对齐 MC 1.0 箭命中推开生物；用户「雪球应像箭一样击退」的参照 ——
                         //   本工程箭此前也不击退，一并补上使投射物行为一致）。方向 = 箭水平速度归一化（箭 → mob）；
                         //   强度 kArrowKnockbackStrength。箭已嵌入 / 贴脸慢速时 vx≈vz≈0 → knockback 内 yaw 兜底。
+                        // t960 震击：强度改用箭实体携行值（spawnArrowPlayer 写 = 基线 × 震击倍率；Game 层由
+                        //   EnchantRegistry::bowKnockbackMultiplier 出倍率——Entities 不读 Game，分层铁律）。
+                        // t960 燃箭：命中点燃（时长 Game 层 bowIgniteSeconds 出、spawn 写实体；damageEntity
+                        //   **之后** ignite——t919 燃焰同序：致死击 ignite 内 dead 守卫早退，尸体不燃）。
+                        if (e.arrowIgniteSec > 0.0f) ignite(mi, e.arrowIgniteSec);
                         const float ahx = e.vx, ahz = e.vz;
                         float alen = std::sqrt(ahx * ahx + ahz * ahz);
-                        if (alen > 1e-3f) knockback(mi, ahx / alen, ahz / alen, kArrowKnockbackStrength);
+                        if (alen > 1e-3f)
+                            knockback(mi, ahx / alen, ahz / alen,
+                                      e.arrowKbStrength > 0.0f ? e.arrowKbStrength : kArrowKnockbackStrength);
                         emit arrowHitMob(m.mobType); // t304 命中音（呈现层 playMobHurt，同近战 attackMob→mobAttacked）
                         qCInfo(lcEnt) << "player arrow hit mob" << mi << "for" << e.arrowDamage << "HP";
                         remove = true;
@@ -6523,16 +6547,20 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (e.bobberBiteTimer > 0.0f) continue; // 等待 / 窗口计时中
                 if (!e.bobberHasBite) {
                     // 等待到点 → 咬钩（进入窗口；呈现层水花 + 浮标下沉视觉由 hasBite 镜像驱动）。
+                    //   t960 缠咬：窗长 = spawn 时写定的 e.bobberBiteWindow（基线 kBobberBiteWindowSec +
+                    //   0.5s×级附加；基值常量用户口径钉死不动）；0 防御兜底基线（spawn 后恒 >0，理论不可达）。
                     e.bobberHasBite = true;
-                    e.bobberBiteTimer = kBobberBiteWindowSec;
+                    e.bobberBiteTimer = e.bobberBiteWindow > 0.0f ? e.bobberBiteWindow : kBobberBiteWindowSec;
                     emit bobberBit(e.pos.x(), e.pos.y(), e.pos.z());
                     dirty = true;
                 } else {
                     // 窗口过期 → 鱼跑了：小水花提示 + 重掷新确定性等待（序号 ++ → 新值）。
+                    //   t960 唤潮：重掷等待同乘 e.bobberWaitScale（spawn 写定，逐竿恒定——每轮等待都缩短）。
                     e.bobberHasBite = false;
                     ++e.bobberSerial;
                     e.bobberBiteTimer = bobberWaitSeconds(world->hashVoxel(
-                        int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), wbx, wby, wbz));
+                        int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), wbx, wby, wbz))
+                        * e.bobberWaitScale;
                     emit bobberEscaped(e.pos.x(), e.pos.y(), e.pos.z());
                     dirty = true;
                 }
@@ -6653,8 +6681,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.vx = e.vy = e.vz = 0.0f;
                 e.bobberState = kBobberStWater;
                 e.bobberHasBite = false;
+                // t960 唤潮：首掷等待同乘 e.bobberWaitScale（spawn 写定；基线 1.0 → 旧行为逐字不变）。
                 e.bobberBiteTimer = bobberWaitSeconds(world->hashVoxel(
-                    int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), bx, by, bz));
+                    int(quint32(world->seed()) ^ kBobberWaitHashSalt ^ e.bobberSerial), bx, by, bz))
+                    * e.bobberWaitScale;
                 emit bobberSplashed(e.pos.x(), e.pos.y(), e.pos.z()); // t884 ① 入水水花（浮定沿；呈现层 burstWaterCast）
                 dirty = true;
                 continue;

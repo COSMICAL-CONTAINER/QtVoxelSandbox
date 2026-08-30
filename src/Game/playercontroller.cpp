@@ -2527,6 +2527,13 @@ void PlayerController::beginBowDraw()
 //   Arrow tick 重力生成）；origin = 眼位 + 视线 × 0.6（防贴墙 spawn 入墙即没）。生存消耗 1 箭 + 弓 -1 耐久
 //   （创造不耗）。射出后 swingArm（射箭挥手反馈）。
 // t322：生存须背包有箭才可射（每发消耗 1，机制等价 MC 1.0）；创造射箭免费（不查箭 / 不消耗 / 不损耐久）。
+// t960 弓附魔接线（用户口径「弓四件专属」；公式单一权威 EnchantRegistry，探针数值腿同源共读）：
+//   - 劲射：箭伤 +1HP/级（bowArrowDamage 出——伤害与未来任何显示面共读一式）。
+//   - 不竭：射箭**不耗箭**（完全无限口径；beginBowDraw 仍须背包有 ≥1 箭才可拉弓——门槛不变，仅免消耗；
+//     弓耐久照常 -1。与「修复系」互斥是惯例，本作无修复系 → 组 0 登记，见注册表注释）。
+//   - 震击：箭击退倍率（bowKnockbackMultiplier 出）经 spawnArrowPlayer kbMul 下传（Entities 存 per-entity
+//     值 t505 先例——Entities 不 include Game）。
+//   - 燃箭：点燃时长（bowIgniteSeconds 出）同路下传，命中 ignite（t919 燃焰同序：damage 后点燃）。
 void PlayerController::endBowDraw()
 {
     if (!m_bowDrawing) return; // 非拉弓态（面包松开 / 误触）→ no-op
@@ -2545,20 +2552,32 @@ void PlayerController::endBowDraw()
     // 箭速 / 伤害按蓄力 lerp（charge² 让满弓手感更利：短蓄力箭慢弱、满弓快强）。
     const float charge = std::clamp(prog, 0.0f, 1.0f);
     const float speed = std::lerp(kBowMinSpeed, kBowMaxSpeed, charge * charge);
-    const int damage = kBowMinDamage + int(std::round(charge * float(kBowMaxDamage - kBowMinDamage)));
+    // t960 劲射：base（蓄力 lerp 1..6）+ 1HP×级（bowArrowDamage 单一权威；无附魔 = base 逐字不变）。
+    const int mightLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::Might) : 0;
+    const int damage = EnchantRegistry::bowArrowDamage(
+        kBowMinDamage + int(std::round(charge * float(kBowMaxDamage - kBowMinDamage))), mightLvl);
+    // t960 震击 / 燃箭：倍率 / 时长读选中弓附魔（等级 0 → 基线 1.0 / 0 = 旧行为）。
+    const int shockLvl  = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::BowShock) : 0;
+    const int brightLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::BrightDraw) : 0;
     const QVector3D look = lookDirection();
     const QVector3D origin = position() + look * 0.6f; // 眼位 + 视线前移 0.6（防贴墙入墙）
-    m_entityManager->spawnArrowPlayer(origin, look * speed, damage);
+    m_entityManager->spawnArrowPlayer(origin, look * speed, damage,
+                                      EnchantRegistry::bowKnockbackMultiplier(shockLvl),
+                                      EnchantRegistry::bowIgniteSeconds(brightLvl));
     // 生存消耗 1 箭 + 弓 -1 耐久；创造不耗（无限源）。
+    // t960 不竭：生存**不耗箭**（完全无限；背包有箭门槛已在上沿）+ 弓耐久照常 -1。
     if (m_mode == Survival) {
-        if (ar.group == 0) {
-            m_hotbar->takeStack(ar.index, 1);
-        } else {
-            // main 段无 takeStack：手读 count - 1 写回（归 0 清 id，保持「id==0 ⟺ count==0」不变式）。
-            const int nc = m_hotbar->mainCountAt(ar.index) - 1;
-            m_hotbar->mainSetStack(ar.index, nc > 0 ? RecipeRegistry::ArrowId : 0, nc > 0 ? nc : 0);
+        const bool infinite = m_hotbar && m_hotbar->selectedItemEnchantLevel(EnchantRegistry::NeverRun) > 0;
+        if (!infinite) {
+            if (ar.group == 0) {
+                m_hotbar->takeStack(ar.index, 1);
+            } else {
+                // main 段无 takeStack：手读 count - 1 写回（归 0 清 id，保持「id==0 ⟺ count==0」不变式）。
+                const int nc = m_hotbar->mainCountAt(ar.index) - 1;
+                m_hotbar->mainSetStack(ar.index, nc > 0 ? RecipeRegistry::ArrowId : 0, nc > 0 ? nc : 0);
+            }
         }
-        m_hotbar->damageSelectedItem(); // 弓 -1 耐久（归零自动清槽）
+        m_hotbar->damageSelectedItem(); // 弓 -1 耐久（归零自动清槽；不竭不免耐久）
     }
     emit swingArm(); // 射箭挥手反馈（一次「使用」动作）
 }
@@ -2711,8 +2730,16 @@ void PlayerController::useFishingRod()
     ++m_fishCastSerial; // 甩竿序号（确定性等待掷骰错峰：同世界同序号同等待值）
     const QVector3D eye = position();
     const QVector3D look = lookDirection();
+    // t960 钓竿附魔下传（用户口径「竿两件专属」；公式单一权威 EnchantRegistry，Entities 只收值——
+    //   分层铁律）：唤潮 = 等待期倍率（rodWaitScale；存在浮标实体上，落水首掷 / 鱼跑重掷同乘）；
+    //   缠咬 = 判定窗附加秒（rodBiteWindowExtra；kBobberBiteWindowSec 基值 1.0 用户口径钉死不动）。
+    //   无附魔 → 1.0 / 0 = 旧行为逐字不变。
+    const int tideLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::TideCall) : 0;
+    const int biteLvl = m_hotbar ? m_hotbar->selectedItemEnchantLevel(EnchantRegistry::BiteCall) : 0;
     const int slot = m_entityManager->spawnBobber(eye + look * kFishCastOriginOffset,
-                                                  look * kFishCastSpeed, m_fishCastSerial);
+                                                  look * kFishCastSpeed, m_fishCastSerial,
+                                                  EnchantRegistry::rodWaitScale(tideLvl),
+                                                  EnchantRegistry::rodBiteWindowExtra(biteLvl));
     if (slot < 0) return; // 实体槽满（kCap）→ 甩竿失败，不进钓鱼态
     m_bobberEntityIdx = slot;
     m_bobberPos = eye; // 首帧镜像（甩出点；后续 tick 由实体位置刷新）
