@@ -15,14 +15,20 @@ import VoxelSandbox
 // 用户诉求：「找不到入口」浏览所有可用方块 / 物品的样貌，尤其 pack 开启时看实际贴图效果。
 //
 // 布局（JEI 式）：
-//   左：可滚动全物品网格（创造调色板全集 = 方块段 + 工具段 + 材料段 + 护甲段；复用 Hotbar VM 的
-//       creativeBlocks/Tools/Materials/Armor，单一权威，UI 不另持副本）；
+//   左：可滚动三大类分区（t967 重划 = 生物〔图鉴 + 生物蛋〕/ 方块〔有专属 3D 展示的条目〕/
+//       物品材料〔无 3D 展示的工具·材料·护甲·平面 icon 族〕；三分判据 = categoryOfEntry 单一权威，
+//       与预览 3D 路由谓词同源。数据复用 Hotbar VM 的 creativeBlocks/Tools/Materials/Armor +
+//       mobModel 表，单一权威，UI 不另持副本）；
 //   右：选中物预览：
 //       - 整立方方块段 → 内嵌 View3D 旋转 BlockCube（复用既有几何 + 共享图集；lighting:NoLighting，
 //         渲染可见性铁律见 lessons-learned「渲染盲区静态化」）；
 //       - 工具段 / 材料段 / 护甲段 / cross / partial / 火把 → 大图标（复用 iconSourceForBlock /
 //         ToolIcon / MaterialIcon，与背包槽同渲染路由，§9a 自绘原创）。
-//   底：选中物中文名 + id + 类别标签（§9 override (b) 通用词）。
+//   底：选中物中文名 + id + 类别标签（§9 override (b) 通用词；t967 起前缀所属三大类名）。
+//
+// 选中态（t967 单选中化）：三大类共用一对选中状态（selectedId ↔ selectedMobFromSection，至多
+//   一方有效）——全部条目点击收口进 selectMob / selectItem 单一权威，任一分类选中即清另一分类
+//   （双选中曾致床 / 异形 3D 预览模型与 MobModel 叠渲，见权威函数区注释）。
 //
 // 复用既有渲染：方块预览的 BlockCube 几何与掉落实体 / 手持立方同一条已验证可见路径
 // （BlockCube + voxelAtlas + PrincipledMaterial.NoLighting）。图集 source 由 host 注入（resourcePack.atlasSource），
@@ -82,11 +88,38 @@ Item {
         //   t783 ② 迁入）：羊 = 剪毛/未剪 toggle + 毛色 swatch（仅羊有颜色变体）、雪傀儡 = 戴头/剪头 toggle。
         //   变体态存组件级属性（sheepSheared / snowGolemSheared / sheepWoolIndex），切换即时刷新预览。
     ]
-    // 生物段选中（mobType；-1 = 未选）。与物品选中互斥（点物品格清空、点生物格不改 selectedId）。
-    //   t751：剪毛变体条目已合并（每生物单条），selectedMobName 仅作显示名伴选（不再承担 sheared 判据——
-    //   变体态改由下方组件级属性承载，预览区悬浮变体面板切换）。
+    // 生物段选中（mobType；-1 = 未选）。t967 单选中化：与物品选中**结构性互斥**——两类条目点击
+    //   都收口进下方 selectMob / selectItem 单一权威，写本类状态的同时清另一类（旧版点生物格不清
+    //   selectedId → 床 / 异形 3D 预览模型与 MobModel 同时可见叠渲 = 用户「选一个物品又选一个生物，
+    //   出现在一起导致问题」病灶，见函数区注释）。t751：剪毛变体条目已合并（每生物单条），
+    //   selectedMobName 仅作显示名伴选（不再承担 sheared 判据——变体态改由下方组件级属性承载，
+    //   预览区悬浮变体面板切换）。
     property int selectedMobFromSection: -1
     property string selectedMobName: ""
+
+    // ── t967 单选中态（三大类共用一对选中状态）单一权威 ──
+    // 病灶全景（用户第五轮「选一个物品又选一个生物，出现在一起导致问题」）：旧版生物格点击只写
+    //   selectedMobFromSection / selectedMobName、**不清 selectedId**（物品格点击虽清生物段，反向
+    //   缺口仍在）。预览侧四分支可见性：整立方分支带全家族互斥守卫（review27 #4），但床分支
+    //   （selectedIsBed）与异形 3D 分支（selectedIsItem3D）的 visible 无 !selectedIsMob 守卫 →
+    //   先选床 / 活板门 / 火把 / 栅栏等再点生物格，BedModelGeometry / ItemShapeGeometry 与
+    //   MobModel **同时可见**叠渲于预览区；名字 / 类别行与形态·变体面板因 selectedIsMob 优先而
+    //   只显生物侧 = 「渲染双份 + 面板单份」的复合坏面。修法 = 选中收口：任何条目选中都走本节
+    //   函数，写本类 + 清另一类 → 任何时刻 selectedId（方块·物品材料·生物蛋侧）与
+    //   selectedMobFromSection（生物段侧）至多一方有效，双选中结构性不可再现。
+    //   selectedId = 0 为「无物品选中」哨兵（selectedIsCube / Bed / Item3D 对 0 恒 false → 预览
+    //   自然只剩生物分支；onSelectedIdChanged 的形态钮重置随之触发，语义正确）。
+    //   生物段点击路径：selectMob；物品格点击路径（含生物蛋格）：selectItem。
+    function selectMob(mobType, name) {
+        root.selectedMobFromSection = mobType
+        root.selectedMobName = name
+        root.selectedId = 0 // 清物品侧选中（0 = 无选中哨兵）——单选中态核心一步
+    }
+    function selectItem(id) {
+        root.selectedId = id
+        root.selectedMobFromSection = -1 // 清生物段侧选中（原内联互斥收编进单一权威）
+        root.selectedMobName = ""
+    }
     // ── t751 变体状态（组件级；预览区悬浮变体面板读写，预览绑定消费 → 切换即时刷新）──
     // 羊剪毛态（false=毛茸羊毛形态 / true=裸肤残毛形态；镜像游戏内 shearedAt 双态）。
     property bool sheepSheared: false
@@ -292,18 +325,23 @@ Item {
     //   薄板形态）→ 订正 135；② 动力铁轨（127）**查看器侧**新入 3D（贴地薄板 quad，形态按钮组
     //   未激活/激活亮金轨贴图差需真 3D 预览承载）——掉落物侧排除清单不变（Main.qml isItem3DFamily
     //   不收 127，轨道掉落仍 billboard；两侧家族表差集 = {16,59,110,127}）。
-    readonly property bool selectedIsItem3D: root.selectedId === 13 || root.selectedId === 20
-        || root.selectedId === 136 || root.selectedId === 15 || root.selectedId === 87
-        || root.selectedId === 58 || root.selectedId === 109 || root.selectedId === 16
-        || root.selectedId === 59 || root.selectedId === 110
-        || root.selectedId === 44 || root.selectedId === 24 || root.selectedId === 94
-        || root.selectedId === 43 || root.selectedId === 25 // t925：枯灌木 / 小麦
-        || root.selectedId === 17 || root.selectedId === 60 || root.selectedId === 88 // 栅栏族
-        || root.selectedId === 19 || root.selectedId === 135 || root.selectedId === 89 // 门族（t965：铁门订正 135，原误 71=青色羊毛）
-        || root.selectedId === 115 || root.selectedId === 48 // 白 / 红蘑菇
-        || root.selectedId === 102 || root.selectedId === 129 // 蛛网 / 红石火把
-        || root.selectedId === 112 || root.selectedId === 113 || root.selectedId === 114 // 拉杆 / 按钮
-        || root.selectedId === 127 // t965：动力铁轨（查看器限定 3D；形态态变贴地薄板预览）
+    // t967 谓词函数化：selectedIsItem3D 与三大类归属（categoryOfEntry）共用同一 id 级家族判据
+    //   =「分类表即预览路由表」单一权威（家族扩面只改 isItem3DId 一处，分类分区自动跟随）。
+    readonly property bool selectedIsItem3D: root.isItem3DId(root.selectedId)
+    function isItem3DId(id) {
+        return id === 13 || id === 20
+            || id === 136 || id === 15 || id === 87
+            || id === 58 || id === 109 || id === 16
+            || id === 59 || id === 110
+            || id === 44 || id === 24 || id === 94
+            || id === 43 || id === 25 // t925：枯灌木 / 小麦
+            || id === 17 || id === 60 || id === 88 // 栅栏族
+            || id === 19 || id === 135 || id === 89 // 门族（t965：铁门订正 135，原误 71=青色羊毛）
+            || id === 115 || id === 48 // 白 / 红蘑菇
+            || id === 102 || id === 129 // 蛛网 / 红石火把
+            || id === 112 || id === 113 || id === 114 // 拉杆 / 按钮
+            || id === 127 // t965：动力铁轨（查看器限定 3D；形态态变贴地薄板预览）
+    }
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -378,11 +416,15 @@ Item {
     // 选中物是否「整立方方块」（走 View3D 旋转预览）。路由谓词与 Main.qml 掉落实体 / 手持立方同源：
     //   排除 火把(13) / 异形段(isPartialBlock) / cross 段(isCrossBlock) / 工具段(isTool) / 材料·护甲段(isMaterial)。
     //   这些非整立方走大图标分支（iconSourceForBlock / ToolIcon / MaterialIcon）。
-    readonly property bool selectedIsCube: root.hotbar && root.selectedId !== 0 && root.selectedId !== 13
-        && !root.hotbar.isPartialBlock(root.selectedId)
-        && !root.hotbar.isCrossBlock(root.selectedId)
-        && !root.hotbar.isTool(root.selectedId)
-        && !root.hotbar.isMaterial(root.selectedId)
+    //   t967 谓词函数化：与三大类归属（categoryOfEntry）共用同一 id 级判据（单一权威）。
+    function isCubeId(id) {
+        return root.hotbar && id !== 0 && id !== 13
+            && !root.hotbar.isPartialBlock(id)
+            && !root.hotbar.isCrossBlock(id)
+            && !root.hotbar.isTool(id)
+            && !root.hotbar.isMaterial(id)
+    }
+    readonly property bool selectedIsCube: root.isCubeId(root.selectedId)
 
     // t784 选中物是否「床」（isBed 单一权威谓词，覆盖既存 8 色 0x20..0x27 + 补齐 8 色 0x4E..0x55 两段）。
     //   床在世界内是双格横置低 3D 异形（ShapeBed）——isPartialBlock/isCrossBlock/isMaterial 均否 → 旧版被
@@ -390,7 +432,8 @@ Item {
     //   根因）。本属性把床从整立方分支摘出，改走下方 BedModelGeometry 低 3D 床分支（几何与游戏内
     //   partialblockgeometry 床 case 同源 bedHalfBoxes；16 色变体联动：调色板床条目各持独立 id →
     //   blockId 绑 selectedId，选色即换被面瓦片，t751 变体联动同族——床色无共用模型控件故不设 variantPanel）。
-    readonly property bool selectedIsBed: root.hotbar && root.hotbar.isBed(root.selectedId)
+    function isBedId(id) { return root.hotbar && root.hotbar.isBed(id) }
+    readonly property bool selectedIsBed: root.isBedId(root.selectedId)
 
     // 选中物类别标签（§9 通用词；§2 分层：谓词经 Hotbar VM）。t663 拆分「材料 / 护甲」混串：isMaterial 是
     //   渲染路由谓词（含护甲段 0x300..），类别标签须先判 isArmor → 护甲显「护甲」、纯材料显「材料」
@@ -404,6 +447,33 @@ Item {
         if (root.hotbar.isCrossBlock(root.selectedId)) return "植物 / cross"
         if (root.selectedId === 13) return "光源"
         return "方块"
+    }
+
+    // ── t967 三大类归属（生物 / 方块 / 物品材料）单一权威表 ──
+    //   用户口径「无 3D 贴图的归物品材料」逐字落表；判据与预览 3D 路由**同源**（上面三个函数化
+    //   谓词）=「分类表即预览路由表」，分类不再自持一份家族清单：
+    //   0 = 生物：生物图鉴条目（mobModel 表段）+ 生物蛋（蛋的预览 = 对应 mob 3D 模型——有专属
+    //       3D 展示 → 归生物类，符合「有 3D 形态的进方块或生物类」）。
+    //   1 = 方块：有专属 3D 展示的调色板条目 = 整立方（isCubeId）∪ 床（isBedId）∪ 异形 3D 家族
+    //       （isItem3DId——t880/t925/t965 三批清单：火把/台阶/楼梯/栅栏/门/机关件/动力轨等）。
+    //   2 = 物品材料：其余全部（无 3D 展示、平面大图标展示）——工具 / 材料 / 护甲 / 未入 3D 家族
+    //       的 cross 族（树苗·花·睡莲·甘蔗·木梯）与普通·探测铁轨 / 压力板族（世界内薄盒、
+    //       查看器亦只给平面大图标）。
+    function categoryOfEntry(id) {
+        if (root.mobTypeForEgg(id) >= 0) return 0
+        if (root.isCubeId(id) || root.isBedId(id) || root.isItem3DId(id)) return 1
+        return 2
+    }
+    // 调色板三分区（下方三个 Repeater 的 model；两两不交、并集 = paletteModel，P-t967 完整性钉）。
+    readonly property var eggEntries: root.paletteModel.filter(function(id) { return root.categoryOfEntry(id) === 0 })
+    readonly property var blockEntries: root.paletteModel.filter(function(id) { return root.categoryOfEntry(id) === 1 })
+    readonly property var matEntries: root.paletteModel.filter(function(id) { return root.categoryOfEntry(id) === 2 })
+    // 选中条目所属三大类名（底部类别行前缀；与左侧分区同一判定源）。
+    readonly property string selectedTabName: {
+        if (root.selectedMobFromSection >= 0) return "生物"
+        if (!root.hotbar || root.selectedId === 0) return ""
+        const c = root.categoryOfEntry(root.selectedId)
+        return c === 1 ? "方块" : (c === 0 ? "生物" : "物品材料")
     }
 
     Component.onCompleted: {
@@ -554,13 +624,82 @@ Item {
                     anchors.fill: parent
                     spacing: 12
 
-                    // ── 左：可滚动全物品网格 ──
+                    // ── 左：可滚动三大类分区网格（生物 / 方块 / 物品材料，t967 重划）──
                     Rectangle {
                         width: parent.width - 322 - 12
                         height: parent.height
                         radius: 8
                         color: "#15191e"
                         border.color: "#2a323b"; border.width: 1
+                        // t967 物品格 delegate 组件化（方块 / 物品材料 / 生物蛋三分区共用）——
+                        //   图标路由（方块 Image / 工具 ToolIcon / 材料·护甲 MaterialIcon）+ 选中金边 +
+                        //   hover tooltip + selectItem 单一权威，三段零复制（原物品段内联 delegate 收编）。
+                        Component {
+                            id: itemCell
+                            Item {
+                                width: root.cellSize; height: root.cellSize
+                                // 凹陷斜面槽框（同创造背包槽位风格）。
+                                Rectangle { anchors.fill: parent; color: "#222831" }
+                                Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
+                                Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
+                                Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
+                                Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+
+                                // 物品图标（路由同创造背包 delegate：方块 Image / 工具 ToolIcon / 材料·护甲 MaterialIcon）。
+                                Item {
+                                    anchors.centerIn: parent
+                                    width: 30; height: 30
+                                    Image {
+                                        anchors.fill: parent
+                                        visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
+                                        // 触碰 packActive → pack 切换图标刷新（t745 双态路由：pack 开 = 运行期
+                                        //   pack 图集渲染 / 2D pack 立绘；pack 关 = 程序原生）。
+                                        source: { const _r = root.packActive; return _r >= 0 ? (root.hotbar.iconSourceForBlock(modelData)) : "" }
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                    }
+                                    ToolIcon {
+                                        anchors.fill: parent
+                                        visible: root.hotbar.isTool(modelData)
+                                        tier: root.hotbar.toolTier(modelData)
+                                        toolType: root.hotbar.toolType(modelData)
+                                    }
+                                    MaterialIcon {
+                                        anchors.fill: parent
+                                        visible: root.hotbar.isMaterial(modelData)
+                                        materialId: modelData
+                                    }
+                                }
+                                // 选中态高亮（金边）+ hover 高亮（绿边）。
+                                Rectangle {
+                                    anchors.fill: parent; color: "transparent"; radius: 2
+                                    border.color: root.selectedId === modelData ? "#ffd76a"
+                                                  : (cellHover.hovered ? "#7fe57f" : "transparent")
+                                    border.width: 2
+                                }
+                                HoverHandler {
+                                    id: cellHover
+                                    onHoveredChanged: {
+                                        // t617 tooltip：进入写名 + 格顶中心（panel 坐标系）+ 物品 id；
+                                        //   离开按名守卫清（t633 ①：hotbar 空守卫防注入前 hover 抛错吞掉
+                                        //   信号 → hoveredName 恒空 = 「名字全空白」根因；id 一并清）。
+                                        if (hovered) {
+                                            root.hoveredName = root.hotbar ? root.hotbar.nameForBlock(modelData) : ""
+                                            root.hoveredId = modelData
+                                            const p = parent.mapToItem(panel, parent.width / 2, 0)
+                                            root.hoveredTipPos = Qt.point(p.x, p.y)
+                                        } else if (root.hoveredName === (root.hotbar ? root.hotbar.nameForBlock(modelData) : "")) {
+                                            root.hoveredName = ""
+                                            root.hoveredId = -1
+                                        }
+                                    }
+                                }
+                                // 点物品格 → selectItem 单一权威（t967：写 selectedId 同时清生物段选中——
+                                //   单选中态；生物蛋 id 经 mobTypeForEgg 映射回 mob → 右侧仍显 3D 模型，
+                                //   但类别标签走「生物蛋」）。
+                                TapHandler { onTapped: root.selectItem(modelData) }
+                            }
+                        }
                         Flickable {
                             id: gridFlick
                             anchors.fill: parent
@@ -574,8 +713,10 @@ Item {
                             boundsBehavior: Flickable.StopAtBounds
                             ScrollBar.vertical: DarkScrollBar {}
 
-                            // 「生物」段（图鉴）+「物品」段（原调色板全集）上下排列（Column）。选中互斥：
-                            //   点生物格设 selectedMobFromSection（右侧显 3D 模型）；点物品格清空它回物品预览。
+                            // 「生物」段（图鉴 + 生物蛋）+「方块」段 +「物品材料」段上下排列（Column）。
+                            //   t967 三大类重划：分区 = categoryOfEntry 单一权威三分调色板（egg/block/mat
+                            //   Entries，两两不交、并集 = paletteModel）；选中互斥收口进 selectMob /
+                            //   selectItem 单一权威（任一分类选中即清另一分类——双选中结构性不可再现）。
                             Column {
                                 id: mobCol
                                 width: grid.width
@@ -675,13 +816,29 @@ Item {
                                             }
                                             // 选中生物段条目（t751 条目合并后每型单条；selectedMobName 仅作
                                             //   显示名伴选，变体不再拆条目——改预览区悬浮变体面板切换）。
-                                            TapHandler { onTapped: { root.selectedMobFromSection = modelData.mobType; root.selectedMobName = modelData.name } }
+                                            //   t967：走 selectMob 单一权威（清物品侧选中——单选中态）。
+                                            TapHandler { onTapped: root.selectMob(modelData.mobType, modelData.name) }
                                         }
                                     }
                                 }
 
+                                // t967 生物蛋小节（归生物类：蛋的预览 = 对应 mob 3D 模型，有专属 3D 展示；
+                                //   图标 / 选中路由与物品格共用 itemCell 组件）。
                                 Text {
-                                    text: "物品"
+                                    text: "生物蛋"
+                                    color: "#7fae7f"; font.pixelSize: 11
+                                }
+                                Grid {
+                                    columns: root.paletteCols
+                                    spacing: 4
+                                    Repeater {
+                                        model: root.eggEntries
+                                        delegate: itemCell
+                                    }
+                                }
+
+                                Text {
+                                    text: "方块"
                                     color: "#7fae7f"; font.pixelSize: 13; font.bold: true
                                 }
                                 Grid {
@@ -689,68 +846,21 @@ Item {
                                     columns: root.paletteCols
                                     spacing: 4
                                     Repeater {
-                                        model: root.paletteModel
-                                        delegate: Item {
-                                            width: root.cellSize; height: root.cellSize
-                                            // 凹陷斜面槽框（同创造背包槽位风格）。
-                                            Rectangle { anchors.fill: parent; color: "#222831" }
-                                            Rectangle { color: "#0a0a0a"; width: parent.width; height: 1; anchors.top: parent.top }
-                                            Rectangle { color: "#0a0a0a"; width: 1; height: parent.height; anchors.left: parent.left }
-                                            Rectangle { color: "#5a5a5a"; width: parent.width; height: 1; anchors.bottom: parent.bottom }
-                                            Rectangle { color: "#5a5a5a"; width: 1; height: parent.height; anchors.right: parent.right }
+                                        model: root.blockEntries
+                                        delegate: itemCell
+                                    }
+                                }
 
-                                            // 物品图标（路由同创造背包 delegate：方块 Image / 工具 ToolIcon / 材料·护甲 MaterialIcon）。
-                                            Item {
-                                                anchors.centerIn: parent
-                                                width: 30; height: 30
-                                                Image {
-                                                    anchors.fill: parent
-                                                    visible: !root.hotbar.isTool(modelData) && !root.hotbar.isMaterial(modelData)
-                                                    // 触碰 packActive → pack 切换图标刷新（t745 双态路由：pack 开 = 运行期 pack 图集渲染 / 2D pack 立绘；pack 关 = 程序原生）。
-                                                    source: { const _r = root.packActive; return _r >= 0 ? (root.hotbar.iconSourceForBlock(modelData)) : "" }
-                                                    fillMode: Image.PreserveAspectFit
-                                                    smooth: true
-                                                }
-                                                ToolIcon {
-                                                    anchors.fill: parent
-                                                    visible: root.hotbar.isTool(modelData)
-                                                    tier: root.hotbar.toolTier(modelData)
-                                                    toolType: root.hotbar.toolType(modelData)
-                                                }
-                                                MaterialIcon {
-                                                    anchors.fill: parent
-                                                    visible: root.hotbar.isMaterial(modelData)
-                                                    materialId: modelData
-                                                }
-                                            }
-                                            // 选中态高亮（金边）+ hover 高亮（绿边）。
-                                            Rectangle {
-                                                anchors.fill: parent; color: "transparent"; radius: 2
-                                                border.color: root.selectedId === modelData ? "#ffd76a"
-                                                              : (cellHover.hovered ? "#7fe57f" : "transparent")
-                                                border.width: 2
-                                            }
-                                            HoverHandler {
-                                                id: cellHover
-                                                onHoveredChanged: {
-                                                    // t617 tooltip：进入写名 + 格顶中心（panel 坐标系）+ 物品 id；
-                                                    //   离开按名守卫清（t633 ①：hotbar 空守卫防注入前 hover 抛错吞掉
-                                                    //   信号 → hoveredName 恒空 = 「名字全空白」根因；id 一并清）。
-                                                    if (hovered) {
-                                                        root.hoveredName = root.hotbar ? root.hotbar.nameForBlock(modelData) : ""
-                                                        root.hoveredId = modelData
-                                                        const p = parent.mapToItem(panel, parent.width / 2, 0)
-                                                        root.hoveredTipPos = Qt.point(p.x, p.y)
-                                                    } else if (root.hoveredName === (root.hotbar ? root.hotbar.nameForBlock(modelData) : "")) {
-                                                        root.hoveredName = ""
-                                                        root.hoveredId = -1
-                                                    }
-                                                }
-                                            }
-                                            // 点物品格 → 选中该物品 + 清空生物段选中（互斥；生物蛋 id 经
-                                            //   mobTypeForEgg 映射回 mob → 右侧仍显 3D 模型，但类别标签走「生物蛋」）。
-                                            TapHandler { onTapped: { root.selectedId = modelData; root.selectedMobFromSection = -1; root.selectedMobName = "" } }
-                                        }
+                                Text {
+                                    text: "物品材料"
+                                    color: "#7fae7f"; font.pixelSize: 13; font.bold: true
+                                }
+                                Grid {
+                                    columns: root.paletteCols
+                                    spacing: 4
+                                    Repeater {
+                                        model: root.matEntries
+                                        delegate: itemCell
                                     }
                                 }
                             }
@@ -1787,9 +1897,11 @@ Item {
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
                                 color: "#9fb0c0"; font.pixelSize: 12
-                                // 生物段 → 「生物 / mobType N」；生物蛋 → 「生物蛋 / 0x…」；其余 → 方块类别 + id。
+                                // 生物段 → 「生物 / mobType N」；生物蛋 → 「生物蛋 / 0x…」；其余 →
+                                //   所属三大类前缀（t967 selectedTabName）· 细分类别 + id。
                                 text: root.selectedIsMob && root.selectedMobCategory !== "" ? root.selectedMobCategory
-                                    : (root.selectedCategory + "    id: 0x" + (root.selectedId >= 0 ? root.selectedId.toString(16).toUpperCase() : "0"))
+                                    : ((root.selectedTabName !== "" ? root.selectedTabName + " · " : "")
+                                       + root.selectedCategory + "    id: 0x" + (root.selectedId >= 0 ? root.selectedId.toString(16).toUpperCase() : "0"))
                             }
 
                             // t783 ①②：t751 变体切换面板（剪毛/剪头 toggle + 16 色毛色圆点）原挂本列底部——
