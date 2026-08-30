@@ -101,8 +101,9 @@ public:
     static std::vector<Stack> roll(const std::vector<Entry> &pool, int rolls, quint32 seed);
 
     // review L7：给战利品附魔书（EnchantedBookId=0x227）随机生成 1-3 条附魔（机制等价 MC 1.0 战利品附魔书
-    //   「开箱即带随机附魔」，可直接上铁砧）。复用 EnchantRegistry::selectEnchantsForItem(BookId, offeredLevel, seed)（t824 起按物品；书=全池）
-    //   （同附魔台附书管线：全池加权随机 + 互斥组剔除 + 等级随 offeredLevel 趋 maxLevel）；offeredLevel 在
+    //   「开箱即带随机附魔」，可直接上铁砧）。复用 EnchantRegistry::selectEnchantsForItem(BookId, offeredLevel,
+    //   seed)（t824 起按物品；t959 起书池按主类别成簇——单次产物同类不跨类混出，跨施法全 14 附魔仍可达）
+    //   （同附魔台附书管线：主类别成簇池加权随机 + 互斥组剔除 + 等级随 offeredLevel 趋 maxLevel）；offeredLevel 在
     //   [5, 25) 均匀随机（跨 10/20 附魔数阈值 → 1..3 条均可能；低中档强度，机制等价 MC loot enchant level 随机）。
     //   返回 ItemStack.enchants[4] 同构的 QVariantList<int> 4 元素（每元素 = EnchantRegistry::pack 值；0 = 空槽），
     //   与 ItemEntity::enchants / Hotbar::addStack 的 packed-enchants 边界格式一致（caller 直传）。纯函数。

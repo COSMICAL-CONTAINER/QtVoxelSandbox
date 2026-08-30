@@ -29,6 +29,16 @@
 //   （1→3）+ 单附魔等级越高（趋近 maxLevel）。纯函数（无副作用 / 无 IO），附魔台 UI 点选项槽时调 → 把结果
 //   写入目标物品 ItemStack.enchants（Hotbar::enchantSelected）。
 //
+// t959 书附魔池主类别收窄（用户第五轮口径「书本附魔把很多工具+装甲附魔冲突地混在一起」）：书载体的
+//   候选池本 = isApplicableForItem 全过 → 全 14 附魔并集，无任何类别过滤 → 单次施法常出「保护+效率+
+//   锐锋」这类**任何单件物品都戴不上**的跨类乱炖。收窄口径 = 施法时先由同一确定性 LCG 定一个**主类别**
+//   （武器/工具/装甲三类均匀轮；「书」类本作暂无专属附魔——t960 弓/竿系入表时 EnchantCategory 加类 +
+//   主类别轮同步扩展），本轮产物全部从「该类池 ∪ 通用（耐久）」抽 → 单次产物同类成簇；同次产物内
+//   conflictGroup 互斥（保护系四件互斥 / 锐锋+亡灵+节肢三选一 / 采集系三选一）由既有位集抽样保证。
+//   跨施法主类别随机轮换 → 全 14 附魔在书池**长期仍都可达**（union 不收窄，只收窄单次产物内部）。
+//   直附面（对工具/武器/护甲直接施法）不经此分支 —— 池本就按 isApplicableForItem 逐物品精判（t824），
+//   不存在跨类混出。
+//
 // §4 法律 + §9：附魔名用**通用描述词**（锐锋 / 亡灵杀手 / 节肢克星 / 击退 / 燃焰 / 效率 / 精准采集 / 时运 /
 //   耐久 / 保护 / 火焰保护 / 摔落保护 / 弹射物保护 / 水上亲和）—— 非 MC 专名（sharpness / Smite / … 仅为
 //   机制等价参考，代码 / 用户可见字串绝不用原名）。机制对齐 MC Java 1.0.0，名词 / 数值原创。
@@ -49,9 +59,22 @@ public:
         Weapon = 1,  // bit0
         Tool   = 2,  // bit1
         Armor  = 4,  // bit2
-        // t615 附魔书载体位（bit3）：itemEnchantCategory(BookId) 返 BookItem；selectEnchants 对它取全附魔池
-        //   （所有 appliesToMask 含 BookItem 的附魔 —— 即全表），机制等价 MC「附魔台附书从全池随机」。
+        // t615 附魔书载体位（bit3）：itemEnchantCategory(BookId) 返 BookItem；selectEnchants 对它取
+        //   **t959 主类别成簇池**（施法先随机定主类别，产物 ⊆ 该类 ∪ 通用——见 selectEnchantsForItem），
+        //   机制等价 MC「附魔台附书从全池随机」的收窄版（单次产物不跨类混出）。
         BookItem = 8,
+    };
+
+    // t959 附魔「主类别」（**附魔归属哪类装备**；书附魔池按它成簇收窄）。与上方 Category（**物品**
+    //   类别，决定物品能附什么）是两个正交维度：本枚举答「这条附魔属于哪类装备的池」。universal（耐久）
+    //   不入任何单类 —— 任何主类别池都可出；none 仅 NoEnchant 占位行。取值连续小整数（非位掩码——
+    //   一条附魔只归一类，主类别轮按值均匀取样）。
+    enum EnchantCategory : int {
+        EnchantCatNone      = 0, // 占位（NoEnchant 行）/ 未归类
+        EnchantCatWeapon    = 1, // 武器系：锐锋 / 亡灵杀手 / 节肢克星 / 击退 / 燃焰
+        EnchantCatTool      = 2, // 工具系：效率 / 精准采集 / 时运
+        EnchantCatArmor     = 3, // 护甲系：保护 / 火焰保护 / 摔落保护 / 弹射物保护 / 水上亲和
+        EnchantCatUniversal = 4, // 通用：耐久（武器/工具/护甲/书全适用 → 任何主类别池均可出）
     };
 
     // 附魔 id（本表自有小整数段 1..14；0 = 无附魔 / 空槽哨兵）。追加新附魔在末尾续号，不重排（ItemStack.
@@ -84,6 +107,7 @@ public:
     // 附魔定义。表行索引 == enchantId（连续 1..14；详见 enchantregistry.cpp kEnchants）。
     struct EnchantDef {
         int id;              // EnchantId
+        int homeCategory;    // t959 附魔主类别（EnchantCategory；书附魔池按它成簇收窄 + 探针数据钉）
         int appliesToMask;   // Category 位掩码（适用物品类别并集；耐久 = Weapon|Tool|Armor）
         int maxLevel;        // 最大等级（1..5）
         int weight;          // 权重（越大越常被选中；机制等价 MC 附魔 rarity weight）
@@ -99,6 +123,12 @@ public:
 
     // 附魔是否适用给定物品类别（appliesToMask & catMask ≠ 0）。
     static bool isApplicable(int enchantId, int catMask);
+    // t959 附魔主类别查询（EnchantCategory 枚举值；非附魔 → EnchantCatNone）。书附魔池成簇的分流键 +
+    //   探针逐 id 数据钉读数。
+    static int homeCategory(int enchantId);
+    // t959 冲突组号查询（exclusiveGroup 单值形式；0 = 无互斥）。与 conflictsWith(id, other) 同一数据源
+    //   （逐附魔读组号 vs 成对判互斥）—— 探针数据钉 / 冲突提示文案用。
+    static int conflictGroup(int enchantId);
     // t615 附魔是否适用**具体物品**（据 ToolRegistry 类型 / ArmorRegistry 部位精判，非仅大类）：
     //   - 锐锋族（1/2/3）：剑 + 斧（Axe）。
     //   - 击退（4）/ 燃焰（5）：仅剑。
@@ -125,7 +155,7 @@ public:
     //   - 工具段（ToolRegistry::isTool）→ 据 ToolDef.type：Sword→Weapon / Pickaxe·Axe·Shovel→Tool /
     //     **Hoe→None（t824：锄 MC 1.0 无适用附魔 → 不可附魔——附魔台槽 0 拒入 / 铁砧书合并拒）** /
     //     Bow·Shears·FishingRod → None（本任务不做弓 / 剪刀 / 钓竿专属附魔）。
-    //   - t615 书（RecipeRegistry::BookId）→ BookItem（附魔台附书载体：全池随机 → 产附魔书）。
+    //   - t615 书（RecipeRegistry::BookId）→ BookItem（附魔台附书载体：t959 起主类别成簇池 → 产附魔书）。
     //   - 方块段 / 材料段（含附魔书物品本身——书不可再附）/ 越界 → None（不可附魔）。
     // 返回 Category 位值（None / Weapon / Tool / Armor / BookItem）；非位掩码叠加（单类别）。
     static int categoryForItem(int itemId);
@@ -136,8 +166,9 @@ public:
     //   候选池 = isApplicableForItem(enchantId, itemId) 逐条精判（**非旧版大类 mask 门**——旧 selectEnchants
     //   按 Category 过滤令镐 / 铲可出亡灵杀手（mask=Weapon|Tool 含 Tool 位）、胸甲可出摔落保护、锄可出效率，
     //   即用户报「镐子附上亡灵杀手」根因）。对齐 t763/t798 适用表：镐/铲→效率·耐久·时运·精准；斧→+锐锋族
-    //   （无时运）；剑→锐锋族·击退·燃焰·耐久；护甲按部位（靴+摔落保护 / 头盔+水上亲和）；书（BookId）→
-    //   全 14 附魔池（附书 / 战利品附魔书同入口）；锄 / 弓 / 剪刀 / 钓竿 → 空 list（不给选项）。
+    //   （无时运）；剑→锐锋族·击退·燃焰·耐久；护甲按部位（靴+摔落保护 / 头盔+水上亲和）；
+    //   书（BookId）→ **t959 主类别成簇池**（施法先随机定主类别，产物 ⊆ 该类 ∪ 通用——附魔台附书 /
+    //   战利品附魔书同入口同收窄）；锄 / 弓 / 剪刀 / 钓竿 → 空 list（不给选项）。
     //   offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 任意 int（同槽同 seed 同结果，重投换 seed
     //   换选项）。附魔数 = 1..3（offeredLevel 越高越多）；单附魔等级随 offeredLevel 趋 maxLevel。
     static QVariantList selectEnchantsForItem(int itemId, int offeredLevel, int seed);

@@ -8,6 +8,11 @@
 // 单一附魔数据表（spec t475）。改附魔属性（maxLevel / weight / 互斥组 / 名）只改这里，全工程生效。
 // 表行索引 == enchantId（连续 1..14；第 0 项是 NoEnchant 占位，使索引与枚举值 1:1 对齐）。
 //
+// t959 主类别（homeCategory，EnchantCategory；书附魔池按它成簇收窄——用户第五轮口径「书本附魔把很多
+//   工具+装甲附魔冲突地混在一起」）：锐锋族/击退/燃焰 = Weapon、效率/精准/时运 = Tool、保护系/水上亲和
+//   = Armor、耐久 = Universal（任何主类别池均可出）、NoEnchant 占位 = None。t960 弓/竿系专属附魔入表时
+//   在 EnchantCategory 加类（如 Bow）+ selectEnchantsForItem 主类别轮同步扩展。
+//
 // 互斥组（exclusiveGroup，机制等价 MC「同组附魔不可共存」；t615 按 dev-plan §3 表全接线）：
 //   - 组 1：锐锋 / 亡灵杀手 / 节肢克星（三种伤害类型附魔三选一；MC 1.0 sharpness/Smite/BaneOfArthropods 互斥）。
 //   - 组 2：效率 / 精准采集 / 时运（采集系三选一；MC 1.0 efficiency/silk-touch/fortune 互斥——原表漏，t615 补）。
@@ -26,33 +31,36 @@
 //   - 保护（10）/ 火焰保护（11）/ 弹射物保护（13）= Armor|BookItem（全护甲）。
 //   - 摔落保护（12）= Armor|BookItem（**仅靴**，走 isApplicableForItem 精判）。
 //   - 水上亲和（14）= Armor|BookItem（**仅头盔**，走 isApplicableForItem 精判）。
-//   书（BookItem 位）：附魔台附书时全 14 附魔候选（机制等价 MC「书 = 全池」）。
+//   书（BookItem 位）：附魔台附书时 t959 起主类别成簇收窄（单次产物 ⊆ 随机主类别 ∪ 通用；跨施法
+//     全 14 附魔长期仍都可达——见 selectEnchantsForItem 主类别 roll 注释）。
 //
 // 权重（weight，机制等价 MC 附魔 rarity）：越大越常被选中。MC 1.0 经典值：锐锋/效率/保护 = 10（常见），
 //   精准采集 = 1（极稀有）、时运/燃焰/摔落保护/水上亲和 = 2、其余 = 5。
 namespace {
 constexpr EnchantRegistry::EnchantDef kEnchants[int(EnchantRegistry::EnchantCount)] = {
-    /* 0 NoEnchant      */ { 0, 0, 0, 0, 0, "none",            "" },
-    // ── 武器（剑 + 斧（锐锋族）；appliesToMask = Weapon|Tool|BookItem）──
-    /* 1 Sharpness      */ { EnchantRegistry::Sharpness,     EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5, 10, 1, "sharpness",     "\xe9\x94\x90\xe9\x94\x8b" },       // 锐锋
-    /* 2 UndeadSlay     */ { EnchantRegistry::UndeadSlay,    EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5,  5, 1, "undead_slay",   "\xe4\xba\xa1\xe7\x81\xb5\xe6\x9d\x80\xe6\x89\x8b" }, // 亡灵杀手
-    /* 3 ArthropodSlay  */ { EnchantRegistry::ArthropodSlay, EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5,  5, 1, "arthropod_slay","\xe8\x8a\x82\xe8\x82\xa2\xe5\x85\x8b\xe6\x98\x9f" }, // 节肢克星
-    /* 4 Knockback      */ { EnchantRegistry::Knockback,     EnchantRegistry::Weapon | EnchantRegistry::BookItem, 2,  5, 0, "knockback",     "\xe5\x87\xbb\xe9\x80\x80" },       // 击退
-    /* 5 FireAspect     */ { EnchantRegistry::FireAspect,    EnchantRegistry::Weapon | EnchantRegistry::BookItem, 2,  2, 0, "fire_aspect",   "\xe7\x87\x83\xe7\x84\xb0" },       // 燃焰
-    // ── 工具（镐/锄/斧/铲；appliesToMask = Tool|BookItem）──
-    /* 6 Efficiency     */ { EnchantRegistry::Efficiency,    EnchantRegistry::Tool | EnchantRegistry::BookItem,   5, 10, 2, "efficiency",    "\xe6\x95\x88\xe7\x8e\x87" },       // 效率（t615 组 2 采集系互斥）
-    /* 7 SilkTouch      */ { EnchantRegistry::SilkTouch,     EnchantRegistry::Tool | EnchantRegistry::BookItem,   1,  1, 2, "silk_touch",    "\xe7\xb2\xbe\xe5\x87\x86\xe9\x87\x87\xe9\x9b\x86" }, // 精准采集（组 2）
-    /* 8 Fortune        */ { EnchantRegistry::Fortune,       EnchantRegistry::Tool | EnchantRegistry::BookItem,   3,  2, 2, "fortune",       "\xe6\x97\xb6\xe8\xbf\x90" },       // 时运（组 2）
-    // ── 通用（武器/工具/护甲/书；appliesToMask = Weapon|Tool|Armor|BookItem）──
+    /* 0 NoEnchant      */ { 0, EnchantRegistry::EnchantCatNone, 0, 0, 0, 0, "none",            "" },
+    // ── 武器（剑 + 斧（锐锋族）；appliesToMask = Weapon|Tool|BookItem；主类别 = Weapon）──
+    /* 1 Sharpness      */ { EnchantRegistry::Sharpness,     EnchantRegistry::EnchantCatWeapon, EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5, 10, 1, "sharpness",     "\xe9\x94\x90\xe9\x94\x8b" },       // 锐锋
+    /* 2 UndeadSlay     */ { EnchantRegistry::UndeadSlay,    EnchantRegistry::EnchantCatWeapon, EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5,  5, 1, "undead_slay",   "\xe4\xba\xa1\xe7\x81\xb5\xe6\x9d\x80\xe6\x89\x8b" }, // 亡灵杀手
+    /* 3 ArthropodSlay  */ { EnchantRegistry::ArthropodSlay, EnchantRegistry::EnchantCatWeapon, EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::BookItem, 5,  5, 1, "arthropod_slay","\xe8\x8a\x82\xe8\x82\xa2\xe5\x85\x8b\xe6\x98\x9f" }, // 节肢克星
+    /* 4 Knockback      */ { EnchantRegistry::Knockback,     EnchantRegistry::EnchantCatWeapon, EnchantRegistry::Weapon | EnchantRegistry::BookItem, 2,  5, 0, "knockback",     "\xe5\x87\xbb\xe9\x80\x80" },       // 击退
+    /* 5 FireAspect     */ { EnchantRegistry::FireAspect,    EnchantRegistry::EnchantCatWeapon, EnchantRegistry::Weapon | EnchantRegistry::BookItem, 2,  2, 0, "fire_aspect",   "\xe7\x87\x83\xe7\x84\xb0" },       // 燃焰
+    // ── 工具（镐/锄/斧/铲；appliesToMask = Tool|BookItem；主类别 = Tool）──
+    /* 6 Efficiency     */ { EnchantRegistry::Efficiency,    EnchantRegistry::EnchantCatTool, EnchantRegistry::Tool | EnchantRegistry::BookItem,   5, 10, 2, "efficiency",    "\xe6\x95\x88\xe7\x8e\x87" },       // 效率（t615 组 2 采集系互斥）
+    /* 7 SilkTouch      */ { EnchantRegistry::SilkTouch,     EnchantRegistry::EnchantCatTool, EnchantRegistry::Tool | EnchantRegistry::BookItem,   1,  1, 2, "silk_touch",    "\xe7\xb2\xbe\xe5\x87\x86\xe9\x87\x87\xe9\x9b\x86" }, // 精准采集（组 2）
+    /* 8 Fortune        */ { EnchantRegistry::Fortune,       EnchantRegistry::EnchantCatTool, EnchantRegistry::Tool | EnchantRegistry::BookItem,   3,  2, 2, "fortune",       "\xe6\x97\xb6\xe8\xbf\x90" },       // 时运（组 2）
+    // ── 通用（武器/工具/护甲/书；appliesToMask = Weapon|Tool|Armor|BookItem；主类别 = Universal）──
     /* 9 Unbreaking     */ { EnchantRegistry::Unbreaking,
+                             EnchantRegistry::EnchantCatUniversal,
                              EnchantRegistry::Weapon | EnchantRegistry::Tool | EnchantRegistry::Armor | EnchantRegistry::BookItem,
                              3, 5, 0, "unbreaking",    "\xe8\x80\x90\xe4\xb9\x85" },       // 耐久
-    // ── 护甲（appliesToMask = Armor|BookItem；摔落保护仅靴 / 水上亲和仅头盔走 isApplicableForItem 精判）──
-    /*10 Protection     */ { EnchantRegistry::Protection,     EnchantRegistry::Armor | EnchantRegistry::BookItem, 4, 10, 3, "protection",    "\xe4\xbf\x9d\xe6\x8a\xa4" },       // 保护（t615 组 3 保护系互斥）
-    /*11 FireProtection */ { EnchantRegistry::FireProtection, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "fire_protection","\xe7\x81\xab\xe7\x84\xb0\xe4\xbf\x9d\xe6\x8a\xa4" }, // 火焰保护（组 3）
-    /*12 FeatherFall    */ { EnchantRegistry::FeatherFall,    EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  2, 3, "feather_fall",  "\xe6\x91\x94\xe8\x90\xbd\xe4\xbf\x9d\xe6\x8a\xa4" }, // 摔落保护（组 3；仅靴）
-    /*13 ProjectileProt */ { EnchantRegistry::ProjectileProt, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "projectile_prot","\xe5\xbc\xb9\xe5\xb0\x84\xe7\x89\xa9\xe4\xbf\x9d\xe6\x8a\xa4" }, // 弹射物保护（组 3）
-    /*14 AquaAffinity   */ { EnchantRegistry::AquaAffinity,   EnchantRegistry::Armor | EnchantRegistry::BookItem, 1,  2, 0, "aqua_affinity", "\xe6\xb0\xb4\xe4\xb8\x8a\xe4\xba\xb2\xe5\x92\x8c" }, // 水上亲和（仅头盔）
+    // ── 护甲（appliesToMask = Armor|BookItem；摔落保护仅靴 / 水上亲和仅头盔走 isApplicableForItem 精判；
+    //    主类别 = Armor）──
+    /*10 Protection     */ { EnchantRegistry::Protection,     EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4, 10, 3, "protection",    "\xe4\xbf\x9d\xe6\x8a\xa4" },       // 保护（t615 组 3 保护系互斥）
+    /*11 FireProtection */ { EnchantRegistry::FireProtection, EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "fire_protection","\xe7\x81\xab\xe7\x84\xb0\xe4\xbf\x9d\xe6\x8a\xa4" }, // 火焰保护（组 3）
+    /*12 FeatherFall    */ { EnchantRegistry::FeatherFall,    EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  2, 3, "feather_fall",  "\xe6\x91\x94\xe8\x90\xbd\xe4\xbf\x9d\xe6\x8a\xa4" }, // 摔落保护（组 3；仅靴）
+    /*13 ProjectileProt */ { EnchantRegistry::ProjectileProt, EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 4,  5, 3, "projectile_prot","\xe5\xbc\xb9\xe5\xb0\x84\xe7\x89\xa9\xe4\xbf\x9d\xe6\x8a\xa4" }, // 弹射物保护（组 3）
+    /*14 AquaAffinity   */ { EnchantRegistry::AquaAffinity,   EnchantRegistry::EnchantCatArmor, EnchantRegistry::Armor | EnchantRegistry::BookItem, 1,  2, 0, "aqua_affinity", "\xe6\xb0\xb4\xe4\xb8\x8a\xe4\xba\xb2\xe5\x92\x8c" }, // 水上亲和（仅头盔）
 };
 
 // 编译期表大小守卫：EnchantCount 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -89,6 +97,20 @@ bool EnchantRegistry::isApplicable(int enchantId, int catMask)
 {
     const EnchantDef *e = defAt(enchantId);
     return e && (e->appliesToMask & catMask) != 0;
+}
+
+// t959 附魔主类别（见 .h 注释）。非附魔 → EnchantCatNone。
+int EnchantRegistry::homeCategory(int enchantId)
+{
+    const EnchantDef *e = defAt(enchantId);
+    return e ? e->homeCategory : int(EnchantCatNone);
+}
+
+// t959 冲突组号（exclusiveGroup 单值形式；与 conflictsWith 同一数据源）。非附魔 → 0（无互斥）。
+int EnchantRegistry::conflictGroup(int enchantId)
+{
+    const EnchantDef *e = defAt(enchantId);
+    return e ? e->exclusiveGroup : 0;
 }
 
 int EnchantRegistry::maxLevel(int enchantId)
@@ -194,9 +216,10 @@ bool EnchantRegistry::conflictsWith(int enchantId, int otherEnchantId)
 //   offered-level 量级）。纯函数。offeredLevel 1..30（来自 t474 书架加成映射到三槽）；seed 任意 int。
 //   与旧 selectEnchants(category,..) 的差别仅在候选池：isApplicableForItem(enchantId, itemId) 逐条精判
 //   （镐 / 铲不出亡灵杀手；胸甲不出摔落保护；锄 / 弓空池）替代大类 mask 门。书（BookId）mask 全过 →
-//   仍全池随机（附书 / 战利品附魔书同入口，loottable 复用）。
+//   t959 起主类别成簇收窄（附书 / 战利品附魔书同入口同收窄，loottable 复用；见下方主类别 roll 注释）。
 //   步骤：
 //     1) 候选 = 适用该物品的附魔（isApplicableForItem 精判，1..14 扫一遍）。
+//     1b) t959 书载体：LCG 先 roll 主类别（武器/工具/装甲三选一）→ 候选收窄到「该类 ∪ 通用」。
 //     2) 附魔数 count：offeredLevel 越高越多（1..3）；钳到候选数。
 //     3) 加权不放回抽样 count 个（同 MC rarity weight；命中后从候选移除 + 剔除同互斥组的余下候选）。
 //     4) 每个附魔等级：clamp(round(maxLevel * offeredLevel / 30) + 种子扰动, 1, maxLevel)。
@@ -217,6 +240,34 @@ QVariantList EnchantRegistry::selectEnchantsForItem(int itemId, int offeredLevel
     }
     if (candidates.empty()) return result;
 
+    // 种子扰动 LCG 初值（避免 seed=0 退化；同槽同 seed 仍确定性）。t959 上移到主类别 roll 之前——
+    //   书路径 1b) 要先消耗一次 LCG 定主类别，非书路径首个 LCG 消费点不变（流语义零漂移）。
+    uint rs = uint(seed) ^ 0x9e3779b9u;
+    if (rs == 0) rs = 1;                // 防 LCG 陷 0
+
+    // 1b) t959 书附魔主类别收窄（用户第五轮口径「书本附魔把很多工具+装甲附魔冲突地混在一起」）：
+    //   书载体 isApplicableForItem 全过 → 旧版一次施法从全 14 并集抽 1-3 条，产物常是「保护+效率+
+    //   锐锋」这类**任何单件物品都戴不上**的跨类乱炖。收窄 = 施法时先由同一 LCG 定一个**主类别**
+    //   （武器/工具/装甲三类均匀轮——选「均匀随机主类别」口径而非四类均匀轮换：「书」类本作暂无专属
+    //   附魔（弓/竿系 t960 预留扩展位，届时 kBookMainCats 加类即可），均匀轮换会把轮空类白掷），本轮
+    //   产物全部从「该类池 ∪ 通用（耐久）」抽 → 单次产物同类成簇、跨类混出绝迹；conflictGroup 同组
+    //   互斥由步骤 3 位集抽样在收窄池上照旧生效（保护系四件互斥 / 锐锋族三选一 / 采集系三选一）。
+    //   跨施法（不同 seed）主类别随机轮换 → 全 14 附魔在书池长期仍都可达（union 不收窄，只收窄单次
+    //   产物内部）。直附面（工具/武器/护甲）不经此分支——池本就按 isApplicableForItem 逐物品精判
+    //   （t824），无跨类混出问题。roll 在抽样**前**消耗同一 LCG 流 → 同 seed 恒同主类别，t917「预告
+    //   与施放严格同源」（同 seed 同产物）与 PLAN §2-K 确定性契约保持。
+    if (category == BookItem) {
+        static constexpr int kBookMainCats[3] = { EnchantCatWeapon, EnchantCatTool, EnchantCatArmor };
+        const int mainCat = kBookMainCats[lcgNext(rs) % 3u];
+        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                        [mainCat](const EnchantDef *e) {
+                                            return e->homeCategory != mainCat
+                                                && e->homeCategory != int(EnchantCatUniversal);
+                                        }),
+                         candidates.end());
+        if (candidates.empty()) return result; // 防御（三类主类别池恒非空，理论不可达）
+    }
+
     // 2) 附魔数（1..3）：offeredLevel >= 10 → 至少 2；>= 20 → 至多 3；钳到候选数。机制等价 MC「高等级附魔台
     //   选项给更多 / 更强附魔」。
     int count = 1;
@@ -227,9 +278,7 @@ QVariantList EnchantRegistry::selectEnchantsForItem(int itemId, int offeredLevel
     // 3) 加权不放回抽样 + 互斥组剔除。review M1 修：互斥组用**位集**（每非 0 组一位）而非单值——旧单值
     //   pickedExclusiveGroup 会被后选组覆盖（先选组 1 锐锋再遇组 2 效率时组 1 记录丢失 → Sharpness+Smite
     //   或 Protection+FireProtection 可能同存于产物，自相矛盾：铁砧 conflictsWith 会拒之）。组号 ≤3 →
-    //   quint32 位集足够（组号越界按无互斥处理，防御）。
-    uint rs = uint(seed) ^ 0x9e3779b9u; // 种子扰动（避免 seed=0 退化；同槽同 seed 仍确定性）
-    if (rs == 0) rs = 1;                // 防 LCG 陷 0
+    //   quint32 位集足够（组号越界按无互斥处理，防御）。rs 已在 1b) 前初始化（t959 上移）。
     quint32 pickedGroups = 0;           // 已选附魔的互斥组位集（bit(g-1) 置位；0 = 尚无互斥组）
     std::vector<int> pickedIds;
     pickedIds.reserve(size_t(count));
