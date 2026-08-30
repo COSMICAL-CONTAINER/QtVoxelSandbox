@@ -1894,6 +1894,17 @@ int Hotbar::displayAttackDamage(int itemId, const QVariantList &enchants) const
     return qRound(EnchantRegistry::weaponAttackDamage(itemId, e));
 }
 
+// t961 攻击行族加成后缀（见头注释）：round(EnchantRegistry::familyAttackBonus) →「(+M)」（亡灵 III
+//   7.5→8 / 节肢 I 2.5→3）；无杀手 / 0 → 空串。QVariantList → int[4]（同 displayAttackDamage 转换；
+//   缺项 / 越界槽补 0）。数值只活在注册表权威 familyAttackBonus 一处，本桥只做取整 + 括号组装。
+QString Hotbar::displayFamilyBonusText(const QVariantList &enchants) const
+{
+    int e[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 4 && i < int(enchants.size()); ++i) e[i] = enchants.at(i).toInt();
+    const int m = qRound(EnchantRegistry::familyAttackBonus(e));
+    return m > 0 ? QStringLiteral("(+%1)").arg(m) : QString();
+}
+
 // t615 附魔适用 / 冲突精判（透传 EnchantRegistry；铁砧敲附魔书逐条过滤，详见 .h 注释）。
 bool Hotbar::enchantApplicableTo(int enchantId, int itemId) const
 {

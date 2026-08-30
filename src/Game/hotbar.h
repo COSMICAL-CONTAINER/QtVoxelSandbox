@@ -236,6 +236,13 @@ public:
     //   目标无关部分（对族加成 / 暴击在实战侧叠加，显示不预告）。九处 tooltip 攻击行统一走本桥接，
     //   杜绝各 QML 持公式副本漂移。enchants = 4 槽 packed int 数组（enchantsAt 等返回格式；缺省仅基础）。
     Q_INVOKABLE int displayAttackDamage(int itemId, const QVariantList &enchants) const;
+    // t961 攻击行族加成后缀（杀手系显示面组装点）：物品附魔带亡灵杀手 / 节肢克星时返「(+M)」
+    //   （M = round(EnchantRegistry::familyAttackBonus)——对特定族加成合计，attackMob 实战 t476 同公式）；
+    //   无杀手附魔 → 空串（攻击行保持现行「+N 攻击」形态逐字不变）。口径钉（用户第五轮 t961）：
+    //   +N = 现行 displayAttackDamage（物品基伤 + 锐锋；杀手系与锐锋互斥组 1 → 杀手剑的 N 即基伤，
+    //   不动），(+M) = 对族加成合计 —— 括号本身即「对特定族加成」语义，hover 详情不展开族名（从简）。
+    //   九处 tooltip 攻击行（八面板 + HUD hover）在 N 之后拼接本后缀；t977 附魔详情浮显可在本组装点扩行。
+    Q_INVOKABLE QString displayFamilyBonusText(const QVariantList &enchants) const;
     // t615 附魔适用 / 冲突精判（透传 EnchantRegistry；铁砧敲附魔书逐条过滤用）：
     //   - enchantApplicableTo(enchantId, itemId)：附魔是否适用**具体物品**（剑类附魔不上镐 / 摔落保护仅靴 /
     //     水上亲和仅头盔等；dev-plan §3 表逐条）。AnvilUI 把书上附魔逐条试写 C 时判「不适用 → 不上（灰显）」。
