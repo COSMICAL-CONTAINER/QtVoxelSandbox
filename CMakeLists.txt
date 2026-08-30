@@ -602,6 +602,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_redstone_torch.png         # t638/t644 红石火把 flat 2D 图标（--from-pack：pack 常亮态贴图）
         textures/icon_redstone_dust.png          # t660 红石粉导线 flat 2D 图标（断电线向贴图放大；红石 tab 方块形态条目）
         textures/icon_tnt.png                    # t485 TNT 立方体图标（build_cube_icons.py；各面=深红药柱+横向捆带+亮黄标识；沙漠神殿陷阱方块）
+        textures/icon_lapis_outline.png          # t957 青金石「空缺风格」轮廓图标（build_lapis_outline.py 边缘提取离线生成：读 icon_lapis_item.png 像素→预乘亮度 Sobel→边缘近黑+内部压暗半透；附魔台青金石槽空位占位，EnchantingTableUI EnchantInputSlot）
         textures/icon_cut_sandstone.png          # t485 切制砂岩立方体图标（build_cube_icons.py；各面=暖沙色+内陷矩形装饰边框；金字塔外框装饰变体）
         textures/icon_mossy_cobble.png           # t486 苔石立方体图标（build_cube_icons.py；各面=圆石灰底+暗绿苔藓斑簇；丛林神殿主体）
         textures/icon_dispenser.png              # t486/t644 发射器立方体图标（--from-pack：正面为主投影，pack 贴图，与放置态一致）

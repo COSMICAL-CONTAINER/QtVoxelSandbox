@@ -24092,6 +24092,71 @@ Item {
                              "sharpness-3 / custom name intact, stale cursor overwritten, empty slot no-op";
     }
 
+    // ── t957 附魔台 UI 文案收口 + 青金石「空缺风格」轮廓图标（源码钉 ×2 + PNG 数据钉；R19.17）──
+    //    用户第五轮口径：① 删「武器/工具」字样与「左槽放……」提示行；② 青金石轮廓图标不像 →
+    //    边缘提取算法处理青金石 png（边缘变黑的空缺风格图标）。钉三面：
+    //    ① 文案退场 —— 槽位类别 caption 字面 + caption 属性面（property 声明 / eslot.caption 消费点）
+    //       与空槽 0 提示行字面全文件绝迹（字样回潮必先恢复属性面 → 结构双钉）；存留的右槽缺料
+    //       提示行正锚（删空态行没误伤整行组件，t916 语义半保留）。
+    //    ② 引用切换 —— t544 手绘 Canvas 占位（onPaint 指纹）绝迹，空槽占位改 Image 引用边缘提取
+    //       离线资产 icon_lapis_outline.png（tools/build_lapis_outline.py 生成），showLapisOutline 门仍在。
+    //    ③ PNG 数据钉 —— 资产本体结构断言：48×48、四角全透明、近黑不透明边缘像素成规模（「边缘
+    //       变黑」）、半透冷蓝内部残色成规模（空缺/镂空感）；源图 icon_lapis_item.png 同在（提取链
+    //       输入落盘，脚本重跑可复现）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile ef957(root + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
+        const QString e957 = ef957.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef957.readAll()) : QString();
+        // ① 文案退场：caption 绑定字面 + 属性声明 + 消费点 + 空态提示行字面四重绝迹；存留提示正锚。
+        const bool okA957 = !e957.contains(QStringLiteral("caption: \"武器/工具\""))
+                         && !e957.contains(QStringLiteral("property string caption"))
+                         && !e957.contains(QStringLiteral("eslot.caption"))
+                         && !e957.contains(QStringLiteral("左槽放工具"))
+                         && e957.contains(QStringLiteral("右槽放足青金石即解锁高栏"));
+        // ② 引用切换：旧手绘占位（onPaint）绝迹 → 新资产引用 + showLapisOutline 门仍在。
+        const bool okB957 = e957.contains(QStringLiteral("qrc:/textures/icon_lapis_outline.png"))
+                         && e957.contains(QStringLiteral("showLapisOutline: true"))
+                         && !e957.contains(QStringLiteral("onPaint:"));
+        // ③ PNG 数据钉：48×48 / 四角全透明 / 近黑边缘 ≥120 px / 半透冷蓝内部 ≥60 px。
+        QImage outline957(root + QStringLiteral("/textures/icon_lapis_outline.png"));
+        bool okC957 = outline957.width() == 48 && outline957.height() == 48;
+        int edgeDark957 = 0, ghostBlue957 = 0;
+        for (int y = 0; okC957 && y < outline957.height(); ++y) {
+            for (int x = 0; x < outline957.width(); ++x) {
+                const QColor p = outline957.pixelColor(x, y);
+                if (p.alpha() == 0) continue;
+                if (p.alpha() == 255 && p.red() < 40 && p.green() < 40 && p.blue() < 40) ++edgeDark957;
+                else if (p.alpha() < 200 && p.blue() > p.red() && p.blue() > 60) ++ghostBlue957;
+            }
+        }
+        okC957 = okC957
+                && outline957.pixelColor(2, 2).alpha() == 0 && outline957.pixelColor(45, 2).alpha() == 0
+                && outline957.pixelColor(2, 45).alpha() == 0 && outline957.pixelColor(45, 45).alpha() == 0
+                && edgeDark957 >= 120 && ghostBlue957 >= 60
+                && QFile::exists(root + QStringLiteral("/textures/icon_lapis_item.png"));
+        const bool ok957 = okA957 && okB957 && okC957;
+        if (!ok957)
+            qInfo().noquote() << "  t957 diag: wordingGone" << okA957 << "iconRef" << okB957
+                              << "pngData" << okC957 << "edgeDark" << edgeDark957
+                              << "ghostBlue" << ghostBlue957;
+        if (!ok957) ++totalFail;
+        qInfo().noquote() << (ok957 ? "PASS" : "FAIL")
+                          << "| t957 enchanting-table wording cleanup + lapis void-style outline icon: "
+                             "the slot category caption (binding literal, property declaration and "
+                             "consumer) and the empty-slot-0 hint line are extinct from the panel "
+                             "(the surviving lapis-shortage hint is pinned as the positive anchor - "
+                             "deleting the empty-state row did not take the whole hint component "
+                             "down), the t544 hand-drawn Canvas placeholder (onPaint fingerprint) is "
+                             "replaced by an Image referencing the offline edge-extracted asset "
+                             "icon_lapis_outline.png still gated by showLapisOutline, and the PNG "
+                             "data pin asserts the void-style structure (48x48, fully transparent "
+                             "corners, a solid population of near-black opaque edge pixels = edges "
+                             "turned black, semi-transparent cool-blue interior residue = hollow "
+                             "feel) with the extraction-chain source icon_lapis_item.png on disk "
+                             "(tools/build_lapis_outline.py reruns reproducibly)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
