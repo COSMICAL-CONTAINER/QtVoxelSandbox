@@ -889,6 +889,18 @@ add_executable(redstone_matrix_test
     #   自本探针起放开为「头 constexpr 静态断言 + 行为级直编并存」）。
     src/Renderer/mobmodel.cpp
     src/Renderer/mobmodel.h
+    # t966 拖拽方向 rig 探针附加：真 QQmlEngine 直载源树 ResourceBrowser.qml（预览变换图行为级断言），
+    #   组件实例化需浏览器用到的全部 Renderer 几何类型注册（BlockCube/ItemShapeGeometry/MobModel 已列，
+    #   下列四个补齐：UnitCube 羊眼/腿/傀儡头 overlay、BedModelGeometry 床分支、EnchantBookBox 附魔台书、
+    #   MobBowGeometry 骷髅持弓——均 QQuick3DGeometry 公开 API，Quick3D 已链）。
+    src/Renderer/unitcube.cpp
+    src/Renderer/unitcube.h
+    src/Renderer/bedmodelgeometry.cpp
+    src/Renderer/bedmodelgeometry.h
+    src/Renderer/enchantbookbox.cpp
+    src/Renderer/enchantbookbox.h
+    src/Renderer/mobbow.cpp
+    src/Renderer/mobbow.h
 )
 target_include_directories(redstone_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Core

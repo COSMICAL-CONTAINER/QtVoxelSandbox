@@ -67,6 +67,12 @@
                                    //   PLAN §2 低层永不 include 高层；互钉只能落在本测试 TU，它合法 include 全栈）
 #include "itemshapegeometry.h"    // t880 异形物品 3D 模型族探针（ItemShapeGeometry 几何契约直调：顶点数/bounds）；t965 形态按钮组态变直调共用
 #include "blockcube.h"            // t965 形态按钮组探针（BlockCube 状态态变顶面瓦片行为级直调——同 ItemShapeGeometry 先例）
+#include "unitcube.h"             // t966 拖拽方向 rig 探针（真 ResourceBrowser.qml 实例化所需类型注册——羊眼/腿/傀儡头 overlay 用）
+#include "bedmodelgeometry.h"     // t966 同上（床预览分支）
+#include "enchantbookbox.h"       // t966 同上（附魔台书预览）
+#include "mobbow.h"               // t966 同上（骷髅持弓预览）
+#include <QVector3D>              // t966 rig：近面世界坐标（scenePosition / 旋转后角点）
+#include <QQuaternion>            // t966 rig：sceneRotation（Quick3D 真实合成四元数，行为级读回）
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
 //   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t952 起
@@ -25585,6 +25591,236 @@ Item {
                              "cyan wool 71 and detector rail 128), geometry behavior pins "
                              "(ItemShapeGeometry + BlockCube direct), and browser source pins "
                              "(panel + z:10 floating-layer contract + default-form reset + wiring)";
+    }
+
+    // ── P-t966 预览拖拽方向 rig 探针（R19.17 🅴；用户第六轮口径「左右旋转到背面还是反的——
+    //    彻底查相位判定（spinAngle 基准/拖拽轴映射），实机 rig 验证」）──
+    //    符号面全景演化结论（git -S 全链 + 实机 rig 证伪）：水平拖自 t599 起就是纯线性
+    //    spinAngle += dx·0.6，全相位无符号面（近面屏幕位移恒同向，本 rig 腿 (b1) 即证）；唯一
+    //    相位相关符号面是 t921 的 faceSign = sign(cos(displayYaw)) 俯仰补偿——但真正的病根在
+    //    **变换图**：单节点 eulerRotation 的合成序是 Ry(yaw)·Rx(pitch)（yaw 世界系最外；本 rig
+    //    前置实验 scenePosition 读回实测，本 Qt 无 rotationOrder 旋钮）→ 俯仰铰链 =
+    //    Ry(θ)·X̂，屏幕投影随 cos(θ) 翻号（背面相位「上下拖拽反了」根因），且侧相位（|θ|→90°）
+    //    铰链顺向视口、竖直拖带出绕视轴平面内分量（拖拽轴被换走 = 用户「转到背面的过程手感
+    //    乱」）；t921 在定律上乘相位补偿 = 反向补丁叠相位面，过 ±90° 边界换向瞬间仍乱 → 未愈。
+    //    修法：四预览分支 eulerRotation 拆 **pitch 父（世界系俯仰，铰链恒屏幕水平）+ yaw 子
+    //    （自转转台）** 两层，定律回到纯线性（无任何相位判定）。rig 不复算数学：真 QQmlEngine
+    //    直载源树 ResourceBrowser.qml，真 Quick3D 节点 sceneRotation/scenePosition 读回（无窗口
+    //    show 亦传播，headless 行为级），模型空间单位立方六面心 → 世界系近面点（z 最大）在
+    //    1px 拖拽增量下的屏幕位移方向断言：
+    //    (b1) 四相位水平腿：spin 0/90/180/270 各 +0.6°（右拖 1px = DragHandler 1px=0.6° 定律）
+    //         → 近面位移向右；−0.6° 向左——「拖右近面向右」全相位一致（t599 契约恒保持）。
+    //    (b2) 俯仰腿：spin 前/侧/背三相位（显示 yaw -35/+90/+180）userPitch +0.6°（上拖 1px =
+    //         t599/t877 定稿符号）→ 近面向下（上拖看顶）全相位一致；横向分量 ≤ 25% 竖直
+    //         （恒铰链 = 不换轴；旧图侧相位该比值 ~40% 或近面 y 分量归零即红）；spinAngle 值
+    //         不被竖直拖触碰（轴纯度）。
+    //    (a) 源码钉（辅助，非替代）：纯线性定律行逐字 + const faceSign / Math.cos 绝迹 +
+    //        旧单节点合成串绝迹 + 四分支 pitch/yaw 两层计数 + 契约注释锚。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rf966(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rb966 = rf966.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf966.readAll()) : QString();
+        const bool okA966 = rb966.contains(QStringLiteral("root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))"))
+                         && !rb966.contains(QStringLiteral("const faceSign"))
+                         && !rb966.contains(QStringLiteral("Math.cos"))
+                         && !rb966.contains(QStringLiteral("eulerRotation: Qt.vector3d(-22 + root.userPitch"))
+                         && rb966.count(QStringLiteral("eulerRotation.x: -22 + root.userPitch")) == 4
+                         && rb966.count(QStringLiteral("eulerRotation.y: root.spinAngle - 35")) == 4
+                         && rb966.contains(QStringLiteral("t966 恒铰链俯仰"))
+                         && rb966.contains(QStringLiteral("t966 纯线性定律"));
+        // (b) 行为 rig（真链 harness：t956 装配法——临时目录逃离 qrc 重映射 + 私有 URI；窗口不 show）。
+        static bool sT966TypesRegistered = false;
+        if (!sT966TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT966", 1, 0, "Hotbar");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT966", 1, 0, "ResourcePackManager");
+            qmlRegisterType<BlockCube>("VoxelSandboxProbeT966", 1, 0, "BlockCube");
+            qmlRegisterType<ItemShapeGeometry>("VoxelSandboxProbeT966", 1, 0, "ItemShapeGeometry");
+            qmlRegisterType<BedModelGeometry>("VoxelSandboxProbeT966", 1, 0, "BedModelGeometry");
+            qmlRegisterType<MobModel>("VoxelSandboxProbeT966", 1, 0, "MobModel");
+            qmlRegisterType<EnchantBookBox>("VoxelSandboxProbeT966", 1, 0, "EnchantBookBox");
+            qmlRegisterType<MobBowGeometry>("VoxelSandboxProbeT966", 1, 0, "MobBowGeometry");
+            qmlRegisterType<UnitCube>("VoxelSandboxProbeT966", 1, 0, "UnitCube");
+            sT966TypesRegistered = true;
+        }
+        bool rigOk = false;
+        QString rigDiag;
+        double worstRatio966 = 0.0;
+        const QString uiDir966 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUi966 = QDir::temp().absoluteFilePath(
+                QStringLiteral("t966_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUi966);
+        for (const QString f : { QStringLiteral("ResourceBrowser.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("DarkScrollBar.qml") }) {
+            QFile::remove(probeUi966 + QLatin1Char('/') + f);
+            QFile(uiDir966 + QLatin1Char('/') + f).copy(probeUi966 + QLatin1Char('/') + f);
+        }
+        {
+            const QStringList qmlFiles966 = QDir(probeUi966).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles966) {
+                QFile p(probeUi966 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT966\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine966;
+        Hotbar hb966;
+        ResourcePackManager rp966;
+        QQuickWindow win966; // 永不 show（headless：Quick3D 节点变换传播不依赖渲染回路，前置 rig 实测）
+        QQmlComponent comp966(&engine966,
+                              QUrl::fromLocalFile(probeUi966 + QStringLiteral("/ResourceBrowser.qml")));
+        QQuickItem *b966 = nullptr;
+        QObject *cube966 = nullptr;
+        if (comp966.isError()) {
+            rigDiag = QStringLiteral("load: ") + comp966.errorString();
+        } else if ((b966 = qobject_cast<QQuickItem *>(comp966.create())) == nullptr) {
+            rigDiag = QStringLiteral("create failed");
+        } else {
+            b966->setParent(&engine966);
+            b966->setProperty("hotbar", QVariant::fromValue(&hb966));
+            b966->setProperty("resourcePack", QVariant::fromValue(&rp966));
+            b966->setProperty("atlasSource", QStringLiteral("qrc:/textures/atlas.png"));
+            b966->setProperty("packActive", false);
+            b966->setProperty("previewDragging", true); // 冻结自转动画（rig 显式驱动确定性；t599 拖拽语义）
+            b966->setProperty("selectedId", int(BR::Stone));
+            b966->setWidth(700);
+            b966->setHeight(500);
+            b966->setParentItem(win966.contentItem());
+            for (int i = 0; i < 8; ++i)
+                QCoreApplication::processEvents();
+            // 整立方预览 Model：可见 + geometry 是 BlockCube（傀儡头 BlockCube 不可见态被排除）。
+            const auto models966 = b966->findChildren<QObject *>();
+            for (QObject *m : models966) {
+                if (std::strcmp(m->metaObject()->className(), "QQuick3DModel") != 0)
+                    continue;
+                if (!m->property("visible").toBool())
+                    continue;
+                QObject *geo = m->property("geometry").value<QObject *>();
+                if (geo && std::strcmp(geo->metaObject()->className(), "BlockCube") == 0) {
+                    cube966 = m;
+                    break;
+                }
+            }
+            if (!cube966) {
+                rigDiag = QStringLiteral("visible BlockCube model not found");
+            } else {
+                auto pump966 = []() {
+                    for (int i = 0; i < 8; ++i)
+                        QCoreApplication::processEvents();
+                };
+                // 近面点 = Quick3D 真实 sceneRotation/scenePosition 下单位立方六面心的最大世界 z 者
+                //   （用户视角最近模型的表面锚点；屏幕系 = 世界系 x 右 / y 上——相机在 +Z 无旋转，
+                //   透视除正深度不改位移符号）。
+                auto near966 = [&](QObject *m) {
+                    const QQuaternion q = m->property("sceneRotation").value<QQuaternion>();
+                    const QVector3D p = m->property("scenePosition").value<QVector3D>();
+                    QVector3D best = q.rotatedVector(QVector3D(0.5f, 0, 0)) + p;
+                    const QVector3D kFace[6] = {
+                        QVector3D(0.5f, 0, 0), QVector3D(-0.5f, 0, 0), QVector3D(0, 0.5f, 0),
+                        QVector3D(0, -0.5f, 0), QVector3D(0, 0, 0.5f), QVector3D(0, 0, -0.5f)
+                    };
+                    for (int i = 1; i < 6; ++i) {
+                        const QVector3D w = q.rotatedVector(kFace[i]) + p;
+                        if (w.z() > best.z())
+                            best = w;
+                    }
+                    return best;
+                };
+                rigOk = true;
+                // (b1) 四相位水平腿（右拖 → 近面向右，左拖反之，0/90/180/270 全相位）。
+                const double kH966[4] = { 0.0, 90.0, 180.0, 270.0 };
+                for (double ph : kH966) {
+                    b966->setProperty("spinAngle", ph);
+                    pump966();
+                    const QVector3D base = near966(cube966);
+                    b966->setProperty("spinAngle", ph + 0.6);
+                    pump966();
+                    const QVector3D r = near966(cube966);
+                    b966->setProperty("spinAngle", ph - 0.6);
+                    pump966();
+                    const QVector3D l = near966(cube966);
+                    if (!((r.x() - base.x()) > 0.0 && (l.x() - base.x()) < 0.0)) {
+                        rigOk = false;
+                        qInfo().noquote() << "  t966 diag: yaw phase" << ph << "right dx"
+                                          << double(r.x() - base.x()) << "left dx" << double(l.x() - base.x());
+                    }
+                }
+                // (b2) 俯仰腿（上拖看顶全相位一致 + 恒铰链不换轴 + 轴纯度）。
+                const double kP966[3] = { 0.0, 125.0, 215.0 }; // 显示 yaw -35（正）/+90（侧）/+180（背）
+                for (double ph : kP966) {
+                    b966->setProperty("spinAngle", ph);
+                    b966->setProperty("userPitch", 0.0);
+                    pump966();
+                    const QVector3D base = near966(cube966);
+                    b966->setProperty("userPitch", 0.6);
+                    pump966();
+                    const QVector3D up = near966(cube966);
+                    b966->setProperty("userPitch", -0.6);
+                    pump966();
+                    const QVector3D dn = near966(cube966);
+                    const double dxU = std::fabs(double(up.x() - base.x()));
+                    const double dyU = std::fabs(double(up.y() - base.y()));
+                    const double ratio = dyU > 1e-12 ? dxU / dyU : 99.0;
+                    worstRatio966 = std::max(worstRatio966, ratio);
+                    const bool spinUntouched = b966->property("spinAngle").toDouble() == ph;
+                    if (!((up.y() - base.y()) < 0.0 && (dn.y() - base.y()) > 0.0) || ratio > 0.25
+                        || !spinUntouched) {
+                        rigOk = false;
+                        qInfo().noquote() << "  t966 diag: pitch phase" << ph << "up dy"
+                                          << double(up.y() - base.y()) << "down dy" << double(dn.y() - base.y())
+                                          << "axis ratio" << ratio << "spinUntouched" << spinUntouched;
+                    }
+                }
+            }
+        }
+        QDir(probeUi966).removeRecursively();
+        const bool okB966 = rigOk;
+        ok = okA966 && okB966;
+        if (!ok)
+            qInfo().noquote() << "  [t966 diag] sourcePins" << okA966 << "rig" << okB966 << rigDiag
+                              << "worstAxisRatio" << worstRatio966;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t966 preview drag direction final fix (user sixth round: left-right "
+                             "rotating to the back face is STILL reversed - t921 phase compensation did "
+                             "not cure): the sign-face panorama is now settled - horizontal drag has "
+                             "been purely linear since t599 (spinAngle += dx*0.6, no phase face, proven "
+                             "uniform by the rig's four-phase yaw legs); the only phase-dependent sign "
+                             "face was t921's sign(cos(displayYaw)) pitch increment patch, and the true "
+                             "root is the TRANSFORM GRAPH: a single-node eulerRotation composes as "
+                             "Ry(yaw)*Rx(pitch) with yaw outermost in world space (verified empirically "
+                             "against this Qt's Quick3D scene graph, which has no rotationOrder knob), "
+                             "so the pitch hinge Ry(theta)*X_axis projects onto the screen with a "
+                             "cos(theta) factor - it flips exactly on the back phase (the round-five "
+                             "symptom) and swings toward the view axis near the side phase where "
+                             "vertical drag leaks an in-plane spin component (the drag axis is "
+                             "swapped); t921's compensation patched the LAW on top of that phase face "
+                             "and re-flips at the +/-90 deg boundary mid-gesture, which is why the user "
+                             "still felt it wrong; the fix splits all four preview branches (full cube "
+                             "/ bed / item shape / mob) into a PITCH PARENT (world-frame tilt, hinge "
+                             "always the screen-horizontal X axis, projection never flips) over a YAW "
+                             "CHILD (spinAngle turntable) and restores the pure linear law with zero "
+                             "phase judgment; the behavioral rig loads the real source-tree "
+                             "ResourceBrowser.qml in a real QQmlEngine against real Quick3D nodes "
+                             "(sceneRotation/scenePosition read back, no re-implemented math) and "
+                             "asserts near-surface screen displacement under 1px drags: yaw right/left "
+                             "at spin 0/90/180/270 all move the near face right/left respectively, "
+                             "pitch up/down at front/side/back phases keeps 'up-drag sees the top' "
+                             "uniform with <=25% lateral leakage (old graph measured ~40% or a "
+                             "near-zero vertical component at the side phase) and yaw value untouched "
+                             "by vertical drags; source pins keep the pure linear law line verbatim, "
+                             "the old single-node composition string and any const faceSign / Math.cos "
+                             "extinct, and the four-branch pitch/yaw split counted";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
