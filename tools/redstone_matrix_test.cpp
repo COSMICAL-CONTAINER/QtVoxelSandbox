@@ -20999,8 +20999,10 @@ Item {
         const QString mh939 = readSrc939(QStringLiteral("src/Entities/minecartmanager.h"));
         const bool okG1 = mc939.contains(
             QStringLiteral("(world->stateAt(sx, ry, sz) & BlockRegistry::GoldenRailStateOnFlag) == 0)"));
+        // review0830 #8 适配（依据：静置闸梯度消费行前加 4 邻 ±1 层廉价预筛 maySlope —— 采样语义
+        //   与阈值不变，仅平地车早退；钉的仍是同一消费点的修后形态）。
         const bool okG2 = mc939.contains(
-            QStringLiteral("if (cartRailGradient(world, c.pos, ry, c.dirX, c.dirZ, grad)) {"));
+            QStringLiteral("if (maySlope && cartRailGradient(world, c.pos, ry, c.dirX, c.dirZ, grad)) {"));
         const bool okG3 = mc939.contains(
             QStringLiteral("if (cartRailGradient(world, c.pos, ry, c.dirX * float(gs), c.dirZ * float(gs), grad)) {"));
         const bool okG4 = mc939.contains(
@@ -21919,14 +21921,18 @@ Item {
         };
         const QString mc944 = readSrc944(QStringLiteral("src/Entities/minecartmanager.cpp"));
         const QString mc944h = readSrc944(QStringLiteral("src/Entities/minecartmanager.h"));
+        // review0830 #4 适配（依据：anchorFree 一职两用拆分为 embeddedAtEntry / lastFreePos，回钳 lo
+        //   端改用最近自由位——原 okF1「bool anchorFree = !cartBodyBlockedAt(...)」与 okF4
+        //   「clampRailMoveToFree(c, world, preX, preZ)」两行源形态随之演化；钉的是同一探测/回钳语义
+        //   的修后形态，其余五钉原样保留）。
         const bool okF1 = mc944.contains(QStringLiteral(
-            "bool anchorFree = !cartBodyBlockedAt(anchorProbe, world);"));
+            "const bool embeddedAtEntry = cartBodyBlockedAt(anchorProbe, world);"));
         const bool okF2 = mc944.contains(QStringLiteral(
             "const bool blocked = cartBodyBlockedAt(probe, world, &pry);"));
         const bool okF3 = mc944.contains(QStringLiteral(
             "&& cartRailGradient(world, probe.pos, pry, tx, tz, grad)"));
         const bool okF4 = mc944.contains(QStringLiteral(
-            "clampRailMoveToFree(c, world, preX, preZ);"));
+            "clampRailMoveToFree(c, world, lastFreePos.x(), lastFreePos.z());"));
         const bool okF5 = mc944.contains(QStringLiteral(
             "bool MinecartManager::cartBodyBlockedAt(Cart &probe, World *world, int *outRailY)"));
         const bool okF6 = mc944.contains(QStringLiteral(
@@ -21963,6 +21969,402 @@ Item {
                              " downhill blocking); (f) source pins for the entry anchor, the substep"
                              " probe call, the uphill gradient gate, the clamp call, both helper"
                              " definitions, and the header declaration"
+                          ;
+    }
+
+    // ── P-r0830B review-2026-08-30 批 B（矿车 / 红石中 #2/#3/#4 + 低 #8/#9/#10/#11/#12）探针 ──
+    //   七修一登（审查建议照单全收），每腿回退对应修法即红：
+    //   (a) #2（中）t942 垂直供电种子盲区：源悬于种子轨**正上方**、链向下爬坡延伸 ×8 —— 链邻轨与被炸
+    //       编辑格竖差 -2（水平 4 轴三高探针窗外，isReceivingPower 却按 6 正交邻读源 = 合法直供几何）
+    //       → 炸源 → 1 tick 全灭（旧版：种子轨只经锚点 6 邻以 receivers 身份熄灭、链靠 t704 翻转波前
+    //       逐 tick 收缩 = t1 仍 7 亮）。修 = dirtyGoldenRailChainFrom 非轨编辑格补探 (x, y±1, z) 垂直
+    //       种子（轨链永不垂直延伸，仅发现步需要 ±Y）。几何取「源上 + 链下行」形态：源在种子**下方**
+    //       的镜像形态会连带种子轨失撑坍落（t733 坍落自身触发轨编辑走查而掩盖盲区），上行镜像对称。
+    //   (b) #3（中）t943 载人静置车不受断电金轨刹车闸：断电金轨坡上空车停稳（t939 闸锚）→ 上客无输入
+    //       → 位移 ≈0（旧版 coasting 下坡分支从 0 积分直接开溜 ≈1 格 = 红）+ 有输入仍可推行腿（断电
+    //       刹车但推得动 —— W 走 else 分支不受闸影响）。机制等价 MC 1.0 断电 powered rail 刹车。
+    //   (c) #4（中）t944 anchorFree 一职两用（审查场景的可达化）：骑乘 W 爬单格坡 S（+X 邻轨高一层、
+    //       S 正上方石块），车一越坡底（x≥S+0.06）即拆 S 的 -X 侧轨 —— 后向梯度采样列失轨（失联窗）
+    //       → 全程车不得越过石列（旧版：失联子步无条件翻 anchorFree=false 并保留重叠提交位 → 下一 tick
+    //       入点探测判嵌入 → 整 tick 逃逸豁免 → 穿墙爬上东臂 = 红）。修 = 拆 embeddedAtEntry（本 tick
+    //       常量豁免开关）/ lastFreePos（回钳 lo 端），失联子步回退 pre 不保留重叠位。
+    //   (d) #8（低）t939 梯度采样预筛：平地静车梯度采样计数 = 0（4 邻三高探针任一 ±1 才进采样；
+    //       旧版平地车每 tick 恒 +1 = 红）。
+    //   (e) #9（低）t940 吸附防御先验证后写入：源码钉 staged 副本提交形态（旧「先写真实车后 pinCartY
+    //       验证」形态绝迹；防御失败零写入）。
+    //   (f) #10（低）t942 Phase A2 走查收窄：拆除无源粉线端格（邻粉连接位单独翻转、电力位不变）→
+    //       走查计数 delta 恰 1（仅 notePowerWrite 编辑走查；旧版邻粉 A2 再 +1 = 红）+ 对照腿：贴线端
+    //       放红石块（电力位变化）→ delta ≥2（收窄不破电平沿走查）。
+    //   (g) #11（低）t943 有输入分支补 t939 梯度覆盖：W 驱动西行下单格坡面（层差读 0 的口径劈叉面）
+    //       → 速度吃 slopeDownAuto 供能下探（阈值钉；旧版裸邻轨层差在坡面上向平侧回 8 巡航 = 红）。
+    //   (h) #12（低）t943 链可达闸「下线并行轨过拒」登记注释：源码钉（纯注释登记，注释消失即红）。
+    {
+        bool okA = false, okB = false, okC = false, okD = false, okE = false,
+             okF = false, okG = false, okH = false;
+        const QString exeDirRb = QCoreApplication::applicationDirPath();
+        const QString rootRb = QDir(exeDirRb + QStringLiteral("/..")).absolutePath();
+        auto readSrcRb = [&rootRb](const QString &rel) -> QString {
+            QFile f(rootRb + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString wcRb = readSrcRb(QStringLiteral("src/World/world.cpp"));
+        const QString mcRb = readSrcRb(QStringLiteral("src/Entities/minecartmanager.cpp"));
+
+        // ── (a) #2 垂直供电种子：源上链下行 ×8 → 炸源 → 1 tick 全灭 ──
+        {
+            int x0 = -1, z0 = -1;
+            for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+                for (int xx = 4; xx + 8 < 96 && x0 < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -2; dx <= 8 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -9; dy <= 3 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x0 = xx; z0 = zz; }
+                }
+            if (x0 < 0) {
+                qInfo().noquote() << "  [r0830B diag] a: no clear rig area found";
+            } else {
+                const auto railOnA = [&](int x, int y, int z) {
+                    return (w.stateAt(x, y, z) & BR::GoldenRailStateOnFlag) != 0;
+                };
+                w.setBlock(x0, kRigY - 1, z0, BR::Stone, 0);             // 种子轨支撑
+                for (int i = 1; i <= 7; ++i)
+                    w.setBlock(x0 + i, kRigY - i - 1, z0, BR::Stone, 0); // 链轨支撑（链向下爬坡）
+                w.setBlock(x0, kRigY + 1, z0, BR::RedstoneBlock, 0);     // 悬浮源：种子轨正上方（6 正交直供）
+                w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0);            // 种子轨
+                for (int i = 1; i <= 7; ++i)
+                    w.setBlock(x0 + i, kRigY - i, z0, BR::GoldenRail, 0);
+                tickN(w, 8);
+                int lit0 = 0;
+                for (int i = 0; i <= 7; ++i) lit0 += railOnA(x0 + i, kRigY - i, z0);
+                const auto dv = w.destroySphereSilent(x0, kRigY + 1, z0, 0.9f); // 只炸源
+                const bool srcGone = w.blockAt(x0, kRigY + 1, z0) == quint8(BR::Air);
+                int railsLeft = 0;
+                for (int i = 0; i <= 7; ++i)
+                    railsLeft += w.blockAt(x0 + i, kRigY - i, z0) == quint8(BR::GoldenRail);
+                tickN(w, 1); // 「下一 tick 全灭」——整链同 tick 入脏、一次 pass
+                int lit1 = 0;
+                for (int i = 0; i <= 7; ++i) lit1 += railOnA(x0 + i, kRigY - i, z0);
+                okA = lit0 == 8 && int(dv.size()) == 1 && srcGone && railsLeft == 8 && lit1 == 0;
+                if (!okA)
+                    qInfo().noquote() << "  [r0830B diag] a lit0" << lit0 << "dv" << int(dv.size())
+                                      << "srcGone" << srcGone << "railsLeft" << railsLeft
+                                      << "lit1" << lit1;
+                w.setBlock(x0, kRigY + 1, z0, BR::Air, 0);
+                for (int i = 0; i <= 7; ++i) w.setBlock(x0 + i, kRigY - i, z0, BR::Air, 0);
+                for (int i = 0; i <= 7; ++i) w.setBlock(x0 + i, kRigY - i - 1, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // ── (b) #3 断电金轨刹车闸载人半边 ──
+        {
+            int x0 = -1, z0 = -1;
+            for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+                for (int xx = 6; xx + 4 < 96 && x0 < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -1; dx <= 4 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -2; dy <= 3 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x0 = xx; z0 = zz; }
+                }
+            if (x0 < 0) {
+                qInfo().noquote() << "  [r0830B diag] b: no clear rig area found";
+            } else {
+                // 断电金轨坡（无任何源）：金平（西死端）+ 金坡格（东邻高一层）+ 普通轨高平 ×2。
+                //   轨不垫支撑（P-t944 rig 同款）：支撑石会落在爬坡车尾的 AABB 扫掠带内（t944 上坡闸
+                //   对「有垫真实坡」的中段回钳面），与本题（刹车闸 / 推行）无关的几何一并排除。
+                w.setBlock(x0,     kRigY,     z0, BR::GoldenRail, 0); // 西死端金平
+                w.setBlock(x0 + 1, kRigY,     z0, BR::GoldenRail, 0); // 金坡格（东邻 +1）
+                w.setBlock(x0 + 2, kRigY + 1, z0, BR::Rail, 0);
+                w.setBlock(x0 + 3, kRigY + 1, z0, BR::Rail, 0);
+                tickN(w, 2);
+                const bool poweredOff = (w.stateAt(x0 + 1, kRigY, z0) & BR::GoldenRailStateOnFlag) == 0;
+                MinecartManager carts;
+                carts.spawnCart(x0 + 1, kRigY, z0, &w);
+                const float ex0 = carts.posAt(0).x();
+                for (int t = 0; t < 100; ++t) carts.tickPushedCarts(0.016f, &w); // 空车静置（t939 闸锚）
+                const float emptyDx = std::fabs(carts.posAt(0).x() - ex0);
+                const bool mounted = carts.tryMount(
+                    QVector3D(float(x0 + 1) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f),
+                    QVector3D(0, -1, 0), 4.0f);
+                QVector3D cp;
+                const float mx0 = carts.posAt(0).x();
+                for (int t = 0; t < 300; ++t) { // 上客无输入 → 刹车闸停驻
+                    carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016f, &w);
+                }
+                const float rideDx = std::fabs(carts.posAt(0).x() - mx0);
+                for (int t = 0; t < 400; ++t) { // 有输入仍可推行（W 东行爬坡）
+                    carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016f, &w);
+                }
+                const float pushDx = carts.posAt(0).x() - mx0;
+                okB = poweredOff && mounted && emptyDx <= 0.02f && rideDx <= 0.05f && pushDx > 0.5f;
+                if (!okB)
+                    qInfo().noquote() << "  [r0830B diag] b pow" << poweredOff << "mounted" << mounted
+                                      << "emptyDx" << emptyDx << "rideDx" << rideDx
+                                      << "pushDx" << pushDx;
+                carts.clearAll();
+                for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY + (i >= 2 ? 1 : 0), z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // ── (c) #4 anchorFree 一职两用（坡底拆轨失联窗 → 不得穿墙） ──
+        {
+            int x0 = -1, z0 = -1;
+            for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+                for (int xx = 6; xx + 4 < 96 && x0 < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -4; dx <= 4 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -2; dy <= 3 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x0 = xx; z0 = zz; }
+                }
+            if (x0 < 0) {
+                qInfo().noquote() << "  [r0830B diag] c: no clear rig area found";
+            } else {
+                const float rideH = 0.45f;
+                // 单格坡 rig：西引道 ×3 + 坡格 S（东邻高一层）+ 东臂高平 ×3；阻挡格 = S 正上方石块。
+                for (int i = -3; i <= 0; ++i) {
+                    w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Rail, 0);
+                }
+                for (int i = 1; i <= 3; ++i) {
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Stone, 0);
+                    w.setBlock(x0 + i, kRigY + 1, z0, BR::Rail, 0);
+                }
+                w.setBlock(x0, kRigY + 1, z0, BR::Stone, 0); // 阻挡格
+                MinecartManager carts;
+                carts.spawnCart(x0 - 2, kRigY, z0, &w);
+                const bool mounted = carts.tryMount(
+                    QVector3D(float(x0 - 2) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f),
+                    QVector3D(0, -1, 0), 4.0f);
+                QVector3D cp;
+                bool replaced = false;
+                float maxX = carts.posAt(0).x();
+                for (int t = 0; t < 600; ++t) {
+                    carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016f, &w);
+                    const float px = carts.posAt(0).x();
+                    if (px > maxX) maxX = px;
+                    // 车一越坡底（fx ≥ 0.06）即拆 S 的 -X 侧轨 = 坡底无轨列（后向梯度探针失联窗）。
+                    if (!replaced && px >= float(x0) + 0.06f) {
+                        w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                        replaced = true;
+                    }
+                }
+                // 终位贴坡面（y 随 x 走 S 的 fx 线性面 —— 车停在坡下侧低段，非平轨高）。
+                const float finX = carts.posAt(0).x();
+                float faceRise = finX - float(x0);
+                if (faceRise < 0.0f) faceRise = 0.0f;
+                if (faceRise > 1.0f) faceRise = 1.0f;
+                okC = mounted && replaced && maxX < float(x0) + 0.45f && carts.aliveAt(0)
+                    && std::fabs(carts.posAt(0).y()
+                                 - (float(kRigY) + faceRise + rideH)) < 0.03f;
+                if (!okC)
+                    qInfo().noquote() << "  [r0830B diag] c mounted" << mounted << "replaced" << replaced
+                                      << "maxX" << maxX << "fin" << carts.posAt(0);
+                carts.clearAll();
+                for (int i = -3; i <= 0; ++i) {
+                    w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Air, 0);
+                }
+                for (int i = 1; i <= 3; ++i) {
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Air, 0);
+                    w.setBlock(x0 + i, kRigY + 1, z0, BR::Air, 0);
+                }
+                w.setBlock(x0, kRigY + 1, z0, BR::Air, 0);
+                tickN(w, 2);
+            }
+        }
+        // ── (d) #8 平地静车梯度采样计数 = 0 ──
+        {
+            int x0 = -1, z0 = -1;
+            for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+                for (int xx = 6; xx + 3 < 96 && x0 < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -1; dx <= 3 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -2; dy <= 2 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x0 = xx; z0 = zz; }
+                }
+            if (x0 < 0) {
+                qInfo().noquote() << "  [r0830B diag] d: no clear rig area found";
+            } else {
+                for (int i = 0; i <= 2; ++i) {
+                    w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Rail, 0);
+                }
+                MinecartManager carts;
+                carts.spawnCart(x0 + 1, kRigY, z0, &w);
+                const int g0 = carts.gradientProbeCount();
+                const float dx0 = carts.posAt(0).x();
+                for (int t = 0; t < 120; ++t) carts.tickPushedCarts(0.016f, &w);
+                okD = carts.gradientProbeCount() == g0
+                    && std::fabs(carts.posAt(0).x() - dx0) <= 0.02f; // 静置语义不变
+                if (!okD)
+                    qInfo().noquote() << "  [r0830B diag] d g" << (carts.gradientProbeCount() - g0)
+                                      << "dx" << std::fabs(carts.posAt(0).x() - dx0);
+                carts.clearAll();
+                for (int i = 0; i <= 2; ++i) {
+                    w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Air, 0);
+                }
+                tickN(w, 2);
+            }
+        }
+        // ── (e)(h) 源码钉：#9 staged 提交形态 + #12 链可达闸登记注释 ──
+        okE = mcRb.contains(QStringLiteral("Cart staged = c;"))
+           && mcRb.contains(QStringLiteral("const int pinnedY = pinCartY(staged, world);"))
+           && mcRb.contains(QStringLiteral("\n    c = staged;"))
+           && !mcRb.contains(QStringLiteral("if (pinnedY < 0) return false; // 防御（同层闸已验轨在列，此处失败 = 吸附瞬间轨被拆 / 列扫失效）：\n                                   //   保持 derailed 自由物理"));
+        okH = mcRb.contains(QStringLiteral("review0830 #12 登记取舍"))
+           && mcRb.contains(QStringLiteral("头顶并行"));
+        // ── (f) #10 Phase A2 走查收窄（连接位单独翻转零走查） ──
+        {
+            int x0 = -1, z0 = -1;
+            for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+                for (int xx = 6; xx + 4 < 96 && x0 < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -1; dx <= 4 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -2; dy <= 2 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x0 = xx; z0 = zz; }
+                }
+            if (x0 < 0) {
+                qInfo().noquote() << "  [r0830B diag] f: no clear rig area found";
+            } else {
+                for (int i = 0; i <= 3; ++i) {
+                    w.setBlock(x0 + i, kRigY - 1, z0, BR::Stone, 0);
+                    w.setBlock(x0 + i, kRigY,     z0, BR::RedstoneDust, 0); // 无源粉线 ×4
+                }
+                tickN(w, 8); // 沉降（初始连接位写入的走查全部发生在快照前）
+                const quint8 connBefore = quint8(w.stateAt(x0 + 2, kRigY, z0) & 0xF0);
+                const int w0 = w.railChainWalkCount();
+                w.setBlock(x0 + 3, kRigY, z0, BR::Air, 0); // 拆东端粉：邻粉连接位单独翻转、电力不变
+                tickN(w, 2);
+                const int w1 = w.railChainWalkCount();
+                const quint8 connAfter = quint8(w.stateAt(x0 + 2, kRigY, z0) & 0xF0);
+                // 对照：电力位变化仍走查（收窄不破 t942 ③ 电平沿语义）。
+                w.setBlock(x0 - 1, kRigY, z0, BR::RedstoneBlock, 0);
+                tickN(w, 3);
+                const int w2 = w.railChainWalkCount();
+                okF = (w1 - w0) == 1 && connBefore != connAfter && (w2 - w1) >= 2;
+                if (!okF)
+                    qInfo().noquote() << "  [r0830B diag] f dw1" << (w1 - w0) << "connChg"
+                                      << (connBefore != connAfter) << "dw2" << (w2 - w1);
+                w.setBlock(x0 - 1, kRigY, z0, BR::Air, 0);
+                for (int i = 0; i <= 2; ++i) {
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Air, 0);
+                    w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
+                }
+                tickN(w, 2);
+            }
+        }
+        // ── (g) #11 有输入分支梯度覆盖（下坡单格坡面吃 slopeDownAuto 供能） ──
+        {
+            int x0 = -1, z0 = -1;
+            for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+                for (int xx = 8; xx + 6 < 96 && x0 < 0; xx += 2) {
+                    bool clear = true;
+                    for (int dx = -3; dx <= 6 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -2; dy <= 3 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x0 = xx; z0 = zz; }
+                }
+            if (x0 < 0) {
+                qInfo().noquote() << "  [r0830B diag] g: no clear rig area found";
+            } else {
+                // 高平 ×6（R+1）+ 单格下坡面 B（R，西引道 R）：车从高平东端 W 西行，过坡面时层差读 0
+                //   （西邻同层引道）——梯度覆盖认坡（slopeDownAuto 供能下探），裸层差不认（回 8 巡航）。
+                w.setBlock(x0 - 2, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 - 1, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 - 2, kRigY,     z0, BR::Rail, 0); // 西引道 A
+                w.setBlock(x0 - 1, kRigY,     z0, BR::Rail, 0); // 下坡单格坡面 B（东邻 +1 → 本格面西倾）
+                for (int i = 0; i <= 5; ++i) {
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Stone, 0);
+                    w.setBlock(x0 + i, kRigY + 1, z0, BR::Rail, 0); // 高平 ×6
+                }
+                MinecartManager carts;
+                carts.spawnCart(x0 + 5, kRigY + 1, z0, &w);
+                const bool mounted = carts.tryMount(
+                    QVector3D(float(x0 + 5) + 0.5f, float(kRigY + 1) + 2.0f, float(z0) + 0.5f),
+                    QVector3D(0, -1, 0), 4.0f);
+                QVector3D cp;
+                float vMin = 0.0f;
+                float prevX = carts.posAt(0).x();
+                for (int t = 0; t < 500; ++t) {
+                    carts.tickRiddenCart(0.016, &w, -1.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016f, &w);
+                    const float p = carts.posAt(0).x();
+                    const float v = (p - prevX) / 0.016f;
+                    if (v < vMin) vMin = v;
+                    prevX = p;
+                }
+                okG = mounted && vMin <= -8.65f && carts.posAt(0).x() < float(x0 - 1);
+                if (!okG)
+                    qInfo().noquote() << "  [r0830B diag] g mounted" << mounted << "vMin" << vMin
+                                      << "fin" << carts.posAt(0);
+                carts.clearAll();
+                w.setBlock(x0 - 2, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 - 2, kRigY,     z0, BR::Air, 0);
+                w.setBlock(x0 - 1, kRigY,     z0, BR::Air, 0);
+                for (int i = 0; i <= 5; ++i) {
+                    w.setBlock(x0 + i, kRigY,     z0, BR::Air, 0);
+                    w.setBlock(x0 + i, kRigY + 1, z0, BR::Air, 0);
+                }
+                tickN(w, 2);
+            }
+        }
+        const bool okR0830B = okA && okB && okC && okD && okE && okF && okG && okH;
+        if (!okR0830B) ++totalFail;
+        if (!okR0830B)
+            qInfo().noquote() << "  [r0830B diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "| e" << okE << "f" << okF << "g" << okG << "h" << okH;
+        qInfo().noquote() << (okR0830B ? "PASS" : "FAIL")
+                          << "| review0830 batch B (carts/redstone #2 #3 #4 #8 #9 #10 #11 #12):"
+                             " (a) a source floating DIRECTLY ABOVE its seed rail with the chain"
+                             " descending off it puts the first chain rail 2 layers below the"
+                             " destroyed cell - outside the 4-axis three-height probe window while"
+                             " isReceivingPower legally reads the 6-orthogonal feed - so the old"
+                             " discovery found nothing and the chain shrank one rail per tick via"
+                             " the flip wavefront (t1 still 7 lit); the vertical-seed probe (x,"
+                             " y+-1, z) for non-rail edit cells now dirties the whole chain for a"
+                             " one-pass shutdown (source-below mirror rejected: the t733 support"
+                             " collapse of the seed rail would itself chain-walk and mask the"
+                             " blind spot); (b) a parked EMPTY cart on a de-powered golden slope"
+                             " holds (t939 brake anchor), but MOUNTING it used to route the"
+                             " stationary ride through the coasting slope integrator which"
+                             " started it rolling from zero (the t939 half-fix); the same gate"
+                             " now zeroes the ridden stationary cart while W input still pushes"
+                             " it (brake but pushable); (c) climbing a single-block slope under"
+                             " a stone with the rail BEHIND the cart torn out mid-climb (the"
+                             " review's rail-less column, made reachable) loses the backward"
+                             " gradient sample: the old code flipped anchorFree and KEPT the"
+                             " overlapping commit, so the next tick's embedded entry exempted"
+                             " the whole tick and the cart phased through the stone onto the"
+                             " upper arm; the split embeddedAtEntry/lastFreePos reverts the lost"
+                             " substep instead - the cart never crosses the block column; (d) a"
+                             " stationary cart on flat plain rail makes ZERO gradient samples"
+                             " (cheap 4-neighbor +-1-layer prefilter; was one ~30-blockAt sweep"
+                             " per tick); (e) source pins for the snap staging form (verify in a"
+                             " local copy, commit once); (f) tearing the end dust off a source-"
+                             " less dust line flips the neighbor's connection bits with power"
+                             " unchanged and the chain-walk counter moves by exactly 1 (the"
+                             " notePowerWrite edit walk only; was 2 with the wide A2 trigger),"
+                             " while feeding the line a redstone block still walks (>=2); (g)"
+                             " driving W west down a single-block slope face whose layer diff"
+                             " reads 0: the gradient overlay now engages slopeDownAuto on the"
+                             " input branch (speed dips past the -8 cruise target; was pinned at"
+                             " cruise); (h) source pin for the chain-reachability gate's"
+                             " registered under-line parallel-track tradeoff comment"
                           ;
     }
 

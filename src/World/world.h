@@ -851,7 +851,9 @@ public:
     // t936/t942 动力轨链入脏集走查（单一权威）：从 (x,y,z) 沿 goldenRailChainStep 把链上动力轨全部入
     //   m_powerDirty（≤ kGoldenRailChainMax 步，seen 去重防环）。编辑格自身是动力轨 → 含自身；否则
     //   （破坏后的 Air 位 / t942 源·粉编辑格——皆非轨无 state）不设连接位门槛、经 4 轴向三高探针发现
-    //   邻轨后沿链 BFS。调用方：notePowerWrite（t936 轨编辑 + t942 ② 源 / 粉编辑扩位——源 / 粉是链的
+    //   邻轨后沿链 BFS；review0830 #2 起非轨编辑格另补 (x, y±1, z) 垂直种子探针（isReceivingPower 按
+    //   6 正交邻读源，水平探针列永不含 ±Y——源在轨正上/下方且链爬坡延伸时的种子盲区）。调用方：
+    //   notePowerWrite（t936 轨编辑 + t942 ② 源 / 粉编辑扩位——源 / 粉是链的
     //   电平输入端，其编辑〔含 destroySphereSilent 爆炸批量逐格补 note〕须整链同 tick 入脏集，旧版翻转
     //   波前逐 tick 收缩 = 「炸掉红石块 / 火把后部分动力轨仍激活」残留窗）与 recomputePowerLocal
     //   Phase A2 粉电平翻转回插（t942 ③）。链几何判定禁第二套（goldenRailChainStep 单源）。写
@@ -862,6 +864,10 @@ public:
     // t937 ② 探针 / 调试：电力局部重算 pass 计数（recomputePowerLocal 实际执行的次数——脏集空 tick 不计）。
     //   矩阵 P-t937 用它断言「普通方块编辑零红石重算」（收窄面的行为级判据）；只读。
     int powerRecomputePasses() const { return m_powerRecomputePasses; }
+    // review0830 #10 探针 / 调试：动力轨链走查计数（dirtyGoldenRailChainFrom 实跑次数）。矩阵探针用它
+    //   断言「Phase A2 只在粉**电力位**变化时走查」（连接位单独变化零走查——走查触发面收窄的行为级
+    //   判据，口径见 recomputePowerLocal Phase A2 注释）；只读。运行期瞬态不进存档。
+    int railChainWalkCount() const { return m_railChainWalks; }
     // t656/t658 查询：(x,y,z) 处接收器是否被邻格供电（邻源激活或邻粉电力 >0）。供 MinecartManager
     //   boost 判定 / 调试。只读，不改栅格。
     bool isReceivingPower(int x, int y, int z) const;
@@ -1521,6 +1527,9 @@ private:
     // t937 ② 电力局部重算 pass 计数（recomputePowerLocal 实跑次数，脏集空 tick 不计）：矩阵探针
     //   「普通方块编辑零红石重算」的行为级判据 + 调试直读。运行期瞬态不进存档（同 m_powerDirty 取舍）。
     int m_powerRecomputePasses = 0;
+    // review0830 #10 动力轨链走查计数（dirtyGoldenRailChainFrom 实跑次数）：矩阵探针「Phase A2 走查
+    //   只由电力位变化触发」的行为级判据（见 railChainWalkCount 注释）。运行期瞬态不进存档。
+    int m_railChainWalks = 0;
     // review26 #6 火把 burnout 侧表（机制近似 MC 红石火把熔断；确定性计数——PLAN §2-K，非随机）：键 =
     //   火把格（packGrowthCell），值 = 翻转计数窗。t869 形状语义恢复端点 / 拐角回灌后，「端点粉贴火把基座」
     //   成为合法无稳态电路（5Hz 永续振荡）——MC 有 burnout 兜底（短窗内翻转过 N 次锁熄一段冷却），本表

@@ -445,6 +445,7 @@ bool MinecartManager::railSurfaceYAt(World *world, float sx, float sz, int topY,
 bool MinecartManager::cartRailGradient(World *world, const QVector3D &pos, int railY,
                                        float wx, float wz, float &outGrad) const
 {
+    ++m_gradientProbes; // review0830 #8 探针计数（平地静车预筛早退的行为级判据）
     if (!world || railY < 0) return false;
     float hF = 0.0f, hB = 0.0f;
     if (!railSurfaceYAt(world, pos.x() + wx * kCartPitchProbe,
@@ -588,17 +589,23 @@ bool MinecartManager::trySnapDerailedToRail(Cart &c, World *world)
     if (!pickTrackStep(world, c.pos, wx, wz, ndx, ndz)) return false;
     // 吸附（rail-locked 移动形态即正确终态 → 无条件，不等减速）：速度投影轨轴——选臂与速度向 dot ≥ 0
     //   → 沿轨分量非负保留；横向分量直接截断（t908 推车向量分解同口径：轨上车只受沿轨力）。
-    c.speed = vx * float(ndx) + vz * float(ndz);
-    c.dirX = float(ndx);
-    c.dirZ = float(ndz);
+    //   review0830 #9（review-0830 低 #9）先验证后写入：吸附的**全部**几何推导（速度投影 / 车头向 /
+    //   垂直轴钉定 / Y 钉定）先在局部副本 staged 上完成并验证（pinCartY 成功），才一次性提交到真实车
+    //   ——旧版先改真实车速度 / dir / 轴钉位再 pinCartY，防御失败提前 return 时留下半改写状态（先改
+    //   状态后验证反模式；当前几何无害且触发不可达，按反模式修正）。
+    Cart staged = c;
+    staged.speed = vx * float(ndx) + vz * float(ndz);
+    staged.dirX = float(ndx);
+    staged.dirZ = float(ndz);
     // 位置钉定（复用放置 / 行进同一套）：垂直轴钉轨心线（吸附的一次性「吸」位移 ≤0.5 格；沿轴坐标保留
     //   ——不整格传送）；Y 钉轨面（pinCartY 内 railRiseAt = 渲染坡面 / 放置 / 俯仰同一张面 → 坡轨钉到
-    //   坡面，不平地高度）；俯仰同放置即贴坡（updateCartPitch）；车头沿选中臂向（= 速度符号侧）。
-    if (std::fabs(c.dirX) > 0.5f) c.pos.setZ(std::floor(c.pos.z()) + 0.5f);
-    else                          c.pos.setX(std::floor(c.pos.x()) + 0.5f);
-    const int pinnedY = pinCartY(c, world);
+    //   坡面，不平地高度）。
+    if (std::fabs(staged.dirX) > 0.5f) staged.pos.setZ(std::floor(staged.pos.z()) + 0.5f);
+    else                               staged.pos.setX(std::floor(staged.pos.x()) + 0.5f);
+    const int pinnedY = pinCartY(staged, world);
     if (pinnedY < 0) return false; // 防御（同层闸已验轨在列，此处失败 = 吸附瞬间轨被拆 / 列扫失效）：
-                                   //   保持 derailed 自由物理；上方已写的速度投影 / 垂直轴钉定对自由体无害。
+                                   //   零写入（staged 仅副本），保持 derailed 自由物理 —— 原语义不变。
+    c = staged;
     updateCartPitch(c, world, pinnedY);
     c.derailed = false;
     c.fallVy = 0.0f;
@@ -697,8 +704,17 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
     //   入点位即重叠 = 嵌入车 → 本 tick 全程**逃逸豁免**（允许带重叠移动直至脱出，防永久冻结；
     //   探测全程只写局部副本，绝不碰自车）。性能：每移动车每 tick 恒定 2 次探测（入点锚 + 每子步
     //   1 次，常态 1 子步），每次 ≤2×2×2 格 isCollidable 快筛、命中格才取盒 —— 列扫同量级。
+    //   review0830 #4 一职两用拆分（root cause：旧 anchorFree 同时当「入点嵌入豁免开关」和「最近
+    //   一次探测自由的回钳 lo 端」，且「blocked 但 uphill 不成立」子步无条件翻 false 并保留重叠提交
+    //   位 → 一次梯度失联即连锁打开穿墙豁免：子步 N 失联 → anchorFree=false → 子步 N+1 uphill 判定
+    //   成功也不再回钳 → 重叠位继续推进 → 下一 tick 入点探测发现车已重叠 → 整 tick 豁免 → 车完整
+    //   穿过本应挡住它的方块）。拆为：embeddedAtEntry = tick 入点探测结果（本 tick 常量，**只**作
+    //   豁免开关）；lastFreePos = 最近一次探测自由的提交位（只作二分 lo 端）。梯度失联只损失一次
+    //   0.0x 格推进（回退本子步 pre），不再连锁。
     Cart anchorProbe = c;
-    bool anchorFree = !cartBodyBlockedAt(anchorProbe, world);
+    const bool embeddedAtEntry = cartBodyBlockedAt(anchorProbe, world);
+    QVector3D lastFreePos = c.pos; // 最近一次探测自由位（入点自由时即入点位；入点嵌入时无自由锚）
+    bool haveFreePos = !embeddedAtEntry;
     // 复审 #23：本 tick 贴轨收敛预算（格）。旧「一次钉回」在段中重选向后把 ~0.5 格横向偏移瞬时吃掉 →
     //   被骑时玩家视点同步横跳一次（旧探针只验收终态测不出瞬移）。限速后每 tick 最多收
     //   kCartCenterSnapPerTick，0.5 格偏移 ~5 tick（83ms）渐进钉回。取舍：另一修法「改 dir 同时钉 pos」
@@ -773,26 +789,37 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
         //   （含上坡升后的 Y 钉定 —— cartBodyBlockedAt 内 pinCartY 就地钉候选副本）。仅**上坡向位移**启用
         //   阻挡：本格面梯度沿行进向 >kCartSlopeGradMin（t939 同一张面同阈；梯度跟行进向不跟车头 —— 负速
         //   倒行对称）—— 下坡 / 平移的重叠不拦（用户口径「下坡方向不做额外阻挡」：下坡穿顶是既有低顶净空
-        //   〔紧凑螺旋 / 多层轨下层坡段〕延续语义；平移重叠几何上不存在）；采样失联（死端前探 / 拐角垂直臂）
-        //   同不拦（保守放行，死端停车 / 坡顶飞出由 deadEnd 既有语义接管）。命中 → 自由锚存在则二分回钳 +
-        //   清速 + 终止本 tick 推进（车不掉轨、贴在坡下侧）；嵌入车（锚点本就重叠）→ 逃逸豁免继续。任一
-        //   「提交位受阻但放行」的路径锚点视同不自由 —— 下个子步的回钳 lo 端不得再取重叠位。
+        //   〔紧凑螺旋 / 多层轨下层坡段〕延续语义；平移重叠几何上不存在）；命中 → 最近自由锚存在则二分
+        //   回钳 + 清速 + 终止本 tick 推进（车不掉轨、贴在坡下侧）；嵌入车（入点本就重叠）→ 逃逸豁免继续
+        //   （review0830 #4：豁免开关 = embeddedAtEntry 本 tick 常量，不再被子步重置）。review0830 #4
+        //   子步分类口径：采样失联（梯度返 false——死端前探 / 拐角垂直臂 / 坡底探针列失轨）→ 回退本子步
+        //   pre（不保留重叠提交位、不清豁免——旧版在此翻 anchorFree=false 并保留重叠位，把「受阻」偷换成
+        //   「豁免打开」＝穿墙连锁根因）；采样成立但不显著（|grad| ≤ 阈）→ 下坡 / 平移重叠既有放行口径，
+        //   照常带位继续且 lastFreePos 不更新（重叠位不得成为回钳 lo 端）。
         {
             Cart probe = c;
             int pry = -1;
             const bool blocked = cartBodyBlockedAt(probe, world, &pry);
             if (!blocked) {
-                anchorFree = true;
+                lastFreePos = c.pos;
+                haveFreePos = true;
             } else {
                 float grad = 0.0f;
-                const bool uphill = pry >= 0
-                    && cartRailGradient(world, probe.pos, pry, tx, tz, grad)
-                    && grad > kCartSlopeGradMin;
-                if (uphill && anchorFree) {
-                    clampRailMoveToFree(c, world, preX, preZ); // 内含速度清零（t943 钳向清速同口径）
+                const bool sampled = pry >= 0
+                    && cartRailGradient(world, probe.pos, pry, tx, tz, grad);
+                const bool uphill = sampled && grad > kCartSlopeGradMin;
+                if (uphill) {
+                    if (haveFreePos) {
+                        clampRailMoveToFree(c, world, lastFreePos.x(), lastFreePos.z()); // 内含速度清零（t943 钳向清速同口径）
+                        break;
+                    }
+                    // 入点即嵌入 → 本 tick 逃逸豁免：带重叠继续推进直至脱出（防永久冻结）。
+                } else if (!sampled) {
+                    c.pos.setX(preX); // 梯度失联 → 回退本子步起点（上一提交位）：重叠位不保留
+                    c.pos.setZ(preZ);
+                    c.speed = 0.0f;   // 受阻即停（指向阻挡格的穿入分量 = 全部沿轨速度，单标量）
                     break;
                 }
-                anchorFree = false;
             }
         }
     }
@@ -962,11 +989,28 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
                 flip = true;                                    // 翻向：行进侧改下坡
                 downhill = true;
             } else {
+                // review0830 #8 廉价预筛（行为等价，口径 = 采样窗 ±1 层）：梯度采样每次 ≈2 列扫 +
+                //   2 次 railRiseAt（约 30 次 blockAt），而「本格面倾斜」（railRiseAt 只叠 δ>0 邻）与
+                //   采样点落邻列 ±1 层轨都要求行进轴向或垂直轴向至少一邻带 ±1 层差 —— 4 邻全平 / 无轨
+                //   （平地静车常态）时梯度采样恒得 |grad|≈0，直接早退（fwd/bwd 探针复用上方结果，仅
+                //   垂直两邻补 2 次三高探针 ≈6 读；平地车 30 读/tick → 6 读/tick）。
+                const int pax = int(c.dirZ), paz = -int(c.dirX); // 行进轴垂直向（轨向四向 → ±1 整数）
+                const int p1 = BlockRegistry::railProbeDelta(
+                    { world->blockAt(sx + pax, ry, sz + paz),
+                      world->blockAt(sx + pax, ry + 1, sz + paz),
+                      world->blockAt(sx + pax, ry - 1, sz + paz) });
+                const int p2 = BlockRegistry::railProbeDelta(
+                    { world->blockAt(sx - pax, ry, sz - paz),
+                      world->blockAt(sx - pax, ry + 1, sz - paz),
+                      world->blockAt(sx - pax, ry - 1, sz - paz) });
+                const bool maySlope = fwdSlope == 1 || fwdSlope == -1
+                    || bwdSlope == 1 || bwdSlope == -1
+                    || p1 == 1 || p1 == -1 || p2 == 1 || p2 == -1;
                 // t939 ② 单格坡本格面梯度（连续坡邻轨层差已覆盖，本分支只在「本格面倾斜而两侧邻轨都
                 //   不低一格」时命中 —— 单格凸/凹正是这种几何）。V 谷翼偏离谷心的静置车同由本分支
                 //   送回谷底（rise=2|轴-0.5| 的翼面梯度）。
                 float grad = 0.0f;
-                if (cartRailGradient(world, c.pos, ry, c.dirX, c.dirZ, grad)) {
+                if (maySlope && cartRailGradient(world, c.pos, ry, c.dirX, c.dirZ, grad)) {
                     if (grad > kCartSlopeGradMin) { flip = true; downhill = true; }
                     else if (grad < -kCartSlopeGradMin) { downhill = true; }
                 }
@@ -1176,6 +1220,12 @@ void MinecartManager::resolveCartCollisions(World *world)
                 //   天然被拒）；② 自 rySelf 三高探针沿位移向解到的链层差（railProbeDelta 单一权威）
                 //   == ryTgt−rySelf（落点 = 本链坡面延续层，而非同列并行链）。正常行驶的跨格（含爬坡
                 //   落点已在坡面高度）不经本闸（走 stepCartAlongRail 逐格心重选验证）。
+                //   review0830 #12 登记取舍（不计缺陷，知情保守向）：目标列同时有自层延续轨与**头顶并行
+                //   线**轨（Δ=+1）时，宽容列扫自 topY 向下先摸到上轨 → chainDelta 读到的是上轨层差 →
+                //   != ryTgt−rySelf → 拒 —— 下层线两车分离被永久钳在格边界内（不崩溃、不跳线；挤压
+                //   速度一致性兜底收敛，持续挤压对以耦合速度整体被坡道重力带走）。修法需列扫带「目标层
+                //   精确解」或链身份标记（引入第二套轨层判定 / 跨帧链 ID），收益面窄（立体同列并行线
+                //   +同格挤压的复合布局），登记不修。
                 const quint8 selfCon = quint8(world->stateAt(cx, rySelf, cz) & 0x0F);
                 const quint8 connBit = axisX ? (step > 0 ? quint8(BlockRegistry::RailConnPx)
                                                          : quint8(BlockRegistry::RailConnNx))
@@ -1597,6 +1647,18 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
     const bool coasting = !railPowered && std::fabs(proj) <= 1e-3f;
     bool slopeDownAuto = false; // 静止车下坡起步溜的闸门标志（speed==0 且行进侧下坡 → 允许移动）
     if (coasting) {
+        // review0830 #3 断电刹车闸（t939 静置闸的载人半边统一——「统一了积分半边、漏了刹车半边」）：
+        //   静置（|speed|<1e-3）载人车停在**未激活**动力轨上时直接归零停驻，不进下方坡道积分（旧版经
+        //   下坡分支从 0 积分直接开溜 = 「空车停得住、人一坐上去就滑走」）。机制等价 t939 口径①
+        //   「未激活动力轨 = 减速闸」+ MC 1.0 断电 powered rail 刹住坡上车。玩家 W/S 输入（proj≠ε）
+        //   不进本分支（coasting 前置闸）→ else 分支照常推得动（断电刹车但可推行）。gb/stateAt 读的
+        //   是前置钉定轨层（railY ≥ 0 已由上方离轨分支保证）；coasting 已含 !railPowered，此处显式
+        //   复核 GoldenRail 本体 + 断电位，与空车静置闸（tickPushedCarts t939 ③）同式同源。
+        if (std::fabs(c.speed) < 1e-3f
+            && gb == BlockRegistry::GoldenRail
+            && (world->stateAt(railX, railY, railZ) & BlockRegistry::GoldenRailStateOnFlag) == 0) {
+            c.speed = 0.0f; // 归零停驻：不积分、不反溜（下方推进闸 speed==0 && !slopeDownAuto 不动）
+        } else {
         const int gs = (c.speed >= 0.0f) ? 1 : -1;
         const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
         int slope = BlockRegistry::railProbeDelta(
@@ -1642,14 +1704,28 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                 c.speed -= (c.speed - sgnD * kCartSlopeDownSpeed) * alphaD;
             }
         }
+        } // review0830 #3 断电刹车闸 else 收口（静置停驻不进坡道积分）
     } else {
         if (world && railY >= 0) {
             const int gs = (c.speed >= 0.0f) ? 1 : -1;
             const int ndx = int(c.dirX) * gs, ndz = int(c.dirZ) * gs;
-            const int slope = BlockRegistry::railProbeDelta(
+            int slope = BlockRegistry::railProbeDelta(
                 { world->blockAt(railX + ndx, railY, railZ + ndz),
                   world->blockAt(railX + ndx, railY + 1, railZ + ndz),
                   world->blockAt(railX + ndx, railY - 1, railZ + ndz) });
+            // review0830 #11 有输入分支补 t939 本格面梯度覆盖（「载人滑行与空车物理统一」第三消费点
+            //   同源化——空车静置闸 / coasting 已有同款）：邻轨层差只描述「下一格」，单格坡的坡度全部
+            //   落在本格面上（车头朝平侧下行时层差读 0 → 不吃 kCartUphillMul 收窄、slopeDownAuto 不认
+            //   单格坡）。同源同阈（kCartSlopeGradMin）、同「梯度跟行进向不跟车头」口径，覆盖层差分类；
+            //   采样失联（死端前探 / 拐角垂直臂）保留层差原判定。W 驱动翻单格凸坡由此吃收窄 / 下坡
+            //   起步溜与 coasting / 空车同判。
+            {
+                float grad = 0.0f;
+                if (cartRailGradient(world, c.pos, railY, c.dirX * float(gs), c.dirZ * float(gs), grad)) {
+                    if (grad > kCartSlopeGradMin) slope = 1;
+                    else if (grad < -kCartSlopeGradMin) slope = -1;
+                }
+            }
             if (slope != INT_MIN && slope < 0) { // t684：INT_MIN（该向无轨 / 死端）必须排除 —— 否则
                 //   停在死端 / 孤轨上的静止车把「无轨」当「下坡」→ slopeDownAuto 放行起步闸门 → 自动
                 //   冲出轨端悬空一格（速度永远非零 + 推进段指向无轨方向）。只有真下坡（邻轨低 1）才溜车。
