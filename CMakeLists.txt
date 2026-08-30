@@ -872,6 +872,10 @@ add_executable(redstone_matrix_test
     #   QQuick3DGeometry 实例化需 Qt6::Quick3D 链接（已在下方 target_link_libraries）。
     src/Renderer/itemshapegeometry.cpp
     src/Renderer/itemshapegeometry.h
+    # t965 形态按钮组探针：BlockCube 状态态变顶面瓦片（耕地干/湿、末地框无眼/有眼）行为级直调
+    #   （stateTileOverride Core 权威消费；同 ItemShapeGeometry t880 直调先例，Quick3D 已链）。
+    src/Renderer/blockcube.cpp
+    src/Renderer/blockcube.h
     # t860 cutout 段折叠探针：World 层 ChunkGeometry 直调（terrain 段 mesh 计入 cross 顶点的行为级断言
     #   —— 折叠 / 回退各留一枚探针红绿可辨）。依赖 partialblockgeometry（已列）+ world（已列）。
     src/World/chunkgeometry.cpp

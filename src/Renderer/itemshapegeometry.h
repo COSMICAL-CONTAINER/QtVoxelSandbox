@@ -38,6 +38,10 @@ class ItemShapeGeometry : public QQuick3DGeometry
     Q_OBJECT
     QML_NAMED_ELEMENT(ItemShapeGeometry)
     Q_PROPERTY(int blockId READ blockId WRITE setBlockId NOTIFY blockIdChanged)
+    // t965 形态按钮组：方块 state。**-1 = auto（未显式设置）**——掉落物 / 旧消费端不设本属性，
+    //   rebuild 落各形状旧默认（小麦=成熟穗 / 草丛=中草满格 / 其余 0），行为逐位零回归；
+    //   资源查看器形态面板显式写入按钮组 state（0 = 最普通形态）驱动态变几何/瓦片。
+    Q_PROPERTY(int blockState READ blockState WRITE setBlockState NOTIFY blockStateChanged)
 
 public:
     explicit ItemShapeGeometry(QQuick3DObject *parent = nullptr);
@@ -45,13 +49,19 @@ public:
     int blockId() const { return m_blockId; }
     void setBlockId(int id);
 
+    // t965 形态按钮组 state（-1 = auto，见 Q_PROPERTY 注释）。
+    int blockState() const { return m_blockState; }
+    void setBlockState(int s);
+
 signals:
     void blockIdChanged();
+    void blockStateChanged();
 
 private:
     void rebuild(); // 按 m_blockId 的 def.shape（+ 特型覆盖）建多盒/交叉片几何后整几何重传 GPU。
 
     int m_blockId = int(BlockRegistry::WoodSlab); // 默认木板台阶（合法非空，防未设 blockId 时空几何）
+    int m_blockState = -1; // t965：-1 = auto（旧默认形态）；≥0 = 显式 state（形态按钮组驱动）
 };
 
 #endif // ITEMSHAPEGEOMETRY_H

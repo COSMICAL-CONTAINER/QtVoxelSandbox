@@ -79,6 +79,17 @@ void BlockCube::setBlockId(int id)
     rebuild();
 }
 
+// t965 形态按钮组 state：值变 → rebuild（态变方块每面瓦片经 stateTileOverride 重选；钳负值到 0）。
+void BlockCube::setBlockState(int s)
+{
+    if (s < 0) s = 0; // 防御：state 非负（QML 侧不会传负，兜底）
+    s &= 0xFF;
+    if (s == m_blockState) return;
+    m_blockState = s;
+    emit blockStateChanged();
+    rebuild();
+}
+
 // t257 光照采样上下文 setter：值变 → rebuild（重烘顶点色；顶点位置 / UV 不变故仅 color 段刷新）。
 //   world 设 null（item entity / 手持 / HUD）→ 顶点色退回恒白 1.0。
 void BlockCube::setWorld(World *w)
@@ -141,7 +152,11 @@ void BlockCube::rebuild()
     const int bz = int(std::floor(m_worldPos.z()));
 
     for (int f = 0; f < 6; ++f) {
-        const int tile = BlockRegistry::tileIndex(quint8(m_blockId), BlockRegistry::Face(f));
+        // t965：每面瓦片先查 state 态变（耕地干/湿顶 26/27、末地框无眼/有眼顶 141/142——Core 单一权威），
+        //   无态变（-1）退 tileIndex 旧路径 → 非 t965 族消费端（手持 / 掉落物 / HUD）逐位零漂移。
+        int tile = BlockRegistry::stateTileOverride(quint8(m_blockId), f, quint8(m_blockState));
+        if (tile < 0)
+            tile = BlockRegistry::tileIndex(quint8(m_blockId), BlockRegistry::Face(f));
         const float u0 = float(tile) * kTileW + kHx;
         const float u1 = float(tile + 1) * kTileW - kHx;
         // t257：本面外侧邻格（面所朝方向）= 占格 + 外法线。光场基底取该邻格 sky/block（同 chunkgeometry

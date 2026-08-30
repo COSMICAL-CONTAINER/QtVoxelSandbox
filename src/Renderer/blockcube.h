@@ -45,6 +45,10 @@ class BlockCube : public QQuick3DGeometry
     Q_OBJECT
     QML_NAMED_ELEMENT(BlockCube)
     Q_PROPERTY(int blockId READ blockId WRITE setBlockId NOTIFY blockIdChanged)
+    // t965 形态按钮组：方块 state（缺省 0 = 放置缺省形态）。rebuild 每面瓦片经
+    //   BlockRegistry::stateTileOverride 态变（耕地干/湿顶面、末地框无眼/有眼顶面——Core 单一权威），
+    //   非态变方块/面退 tileIndex 旧路径（既有消费端零漂移）。
+    Q_PROPERTY(int blockState READ blockState WRITE setBlockState NOTIFY blockStateChanged)
     // t257 掉落沙光影（可选）：设 world + worldPos 后，rebuild 据世界位采样光场 + PCF 软影烘顶点色。
     Q_PROPERTY(World *world READ world WRITE setWorld NOTIFY worldChanged)
     Q_PROPERTY(QVector3D worldPos READ worldPos WRITE setWorldPos NOTIFY worldPosChanged)
@@ -61,6 +65,10 @@ public:
     int blockId() const { return m_blockId; }
     void setBlockId(int id);
 
+    // t965 形态按钮组 state（缺省 0；见 Q_PROPERTY 注释）。
+    int blockState() const { return m_blockState; }
+    void setBlockState(int s);
+
     // t257 光照采样上下文（同 chunkgeometry 语义；不设 world → 顶点色恒白）。
     World *world() const { return m_world; }
     void setWorld(World *w);
@@ -76,6 +84,7 @@ public:
 
 signals:
     void blockIdChanged();
+    void blockStateChanged();
     void worldChanged();
     void worldPosChanged();
     void sunDirChanged();
@@ -86,6 +95,7 @@ private:
     void rebuild(); // 顶点位置恒定；按 m_blockId 重算每面 UV；据 world+worldPos 烘顶点色后整几何重传。
 
     int m_blockId = int(BlockRegistry::Stone); // 默认石头（合法非空，防未设 blockId 时空 UV）
+    int m_blockState = 0;             // t965：放置缺省形态（0）；态变方块经 stateTileOverride 换瓦片
     World *m_world = nullptr;        // t257：null → 顶点色恒白 1.0（item entity / 手持 / HUD 既有全亮行为）
     QVector3D m_worldPos;             // t257：方块世界中心（posAt 给的 (x+0.5,y+0.5,z+0.5)；占格 = floor(worldPos)）
     QVector3D m_sunDir{0.f, 1.f, 0.f};// t257：太阳方向单位向量（同 chunkgeometry 默认天顶正午）
