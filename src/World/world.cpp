@@ -3565,9 +3565,17 @@ bool World::goldenRailChainHasFedSeed(int x, int y, int z) const
 //   或 t942 源 / 粉编辑格）不设连接位门槛，先 4 轴向三高探针发现邻轨（坡链 ±1 层同收），再沿链
 //   goldenRailChainStep BFS ≤ kGoldenRailChainMax 步（seen 去重，环轨不死循环）。调用方：
 //   notePowerWrite（t936 轨编辑 + t942 ② 源 / 粉编辑扩位）与 recomputePowerLocal Phase A2 粉电平
-//   翻转回插（t942 ③）—— 链几何判定禁第二套（goldenRailChainStep 单源）。
+//   翻转回插（t942 ③）—— 链几何判定禁第二套（goldenRailChainStep 单一权威）。
+//   review0830 #2 垂直供电种子补探：isReceivingPower 按 **6 正交邻**读源，而水平 4 轴探针列恒为
+//   (x±1, y-1..y+1, z) / (x, y-1..y+1, z±1)——永不含 (x, y±1, z)。源在轨正上 / 正下方（红石块顶
+//   放轨的紧凑布线）且链**爬坡延伸**时，种子轨的链邻 = 编辑格 ±（轴向, ±2 层）——在三高探针窗外，
+//   旧版发现步零收获 → 种子轨只经锚点 6 邻以 receivers 身份熄灭、链其余轨靠 t704 翻转波前逐 tick
+//   收缩（t942 核心承诺「整链同 tick 入脏、一次 pass 全灭」的垂直版未闭合）。修 = 仅**非轨编辑格**
+//   （轨链永不垂直延伸——goldenRailChainStep 只走水平轴向，轨编辑格自身入环已覆盖链上全部轨）补探
+//   (x, y±1, z) 两格是否动力轨并作为 BFS 起点。
 void World::dirtyGoldenRailChainFrom(int x, int y, int z)
 {
+    ++m_railChainWalks; // review0830 #10 探针计数（走查触发面收窄的行为级判据）
     struct RCell { int x, y, z; };
     std::vector<RCell> frontier, next;
     std::unordered_set<quint64> chainSeen;
@@ -3585,6 +3593,16 @@ void World::dirtyGoldenRailChainFrom(int x, int y, int z)
         frontier.push_back({x, y, z});
     }
     for (const auto &a : kAxC) tryStep(x, y, z, a, frontier);
+    // review0830 #2 垂直种子补探（仅非轨编辑格；理由见函数头注释）。
+    if (m_chunks.blockAt(x, y, z) != BlockRegistry::GoldenRail) {
+        for (const int dy : { 1, -1 }) {
+            const int sy = y + dy;
+            if (sy < 0 || sy >= m_height) continue;
+            if (m_chunks.blockAt(x, sy, z) == BlockRegistry::GoldenRail
+                && chainSeen.insert(packGrowthCell(x, sy, z)).second)
+                frontier.push_back({x, sy, z});
+        }
+    }
     for (int depth = 0; depth < kGoldenRailChainMax && !frontier.empty(); ++depth) {
         next.clear();
         for (const RCell &c : frontier) {
@@ -3882,6 +3900,11 @@ bool World::recomputePowerLocal()
         const auto it = dist.find(k);
         const int power = (it != dist.end()) ? (16 - it->second) : 0; // 距最近源 d → 16-d（d=1 → 邻源 15）
         const quint8 ns = quint8(conn << 4) | quint8(power & BlockRegistry::RedstoneDustPowerMask);
+        // review0830 #10 走查口径（注释即契约）：链走查的输入端是粉的**电力位**（动力轨经
+        //   isReceivingPower 读邻粉电力级；连接位只驱动渲染画线，不改任何电力读数）→ 仅电力位变化
+        //   才回插整链走查；连接位单独变化（邻格放 / 拆致 conn 位翻转、电力未变）零走查——旧版挂
+        //   `ns != cur` 内，连接位翻转也触发整链走查 + any（每次新建 2 vector + 1 unordered_set）。
+        const quint8 oldPower = quint8(cur & BlockRegistry::RedstoneDustPowerMask);
         if (ns != cur) {
             m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneDust, ns); // 静默直写 + 标脏（同 recomputeRailConnections 模式）
             // 通电翻转 → 粉微红光 7 增删 → 局部重 flood 方块光（幂等安全；断电时同检出光变）。
@@ -3907,8 +3930,9 @@ bool World::recomputePowerLocal()
             //   仍激活」的粉传形态；直接供能形态由 t942 ② 编辑侧走查覆盖，本处补幸存粉的中继形态）。
             //   走查与 notePowerWrite 同一权威（dirtyGoldenRailChainFrom 从粉位出发：粉位非轨无门槛，
             //   三高探针找贴邻种子轨）。升沿对称无害（t937 ② goldenPowered 本就一次 pass 点亮整链；多入
-            //   的脏锚点重算 no-op 不写 state）。
-            dirtyGoldenRailChainFrom(x, y, z);
+            //   的脏锚点重算 no-op 不写 state）。review0830 #10：仅电力位变化触发（见上方口径注释）。
+            if (power != oldPower)
+                dirtyGoldenRailChainFrom(x, y, z);
             any = true;
         }
     }

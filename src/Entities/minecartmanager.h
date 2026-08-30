@@ -59,6 +59,10 @@ public:
     int revision() const { return m_revision; }
     // 当前活体矿车数（不含已释放空槽）。
     Q_INVOKABLE int liveCount() const { return m_liveCount; }
+    // review0830 #8 探针 / 调试：cartRailGradient 本格面坡向采样累计调用数。矩阵探针用它断言
+    //   「平地静置车梯度采样调用为 0」（廉价 4 邻三高预筛早退的行为级判据，见 .cpp 静置闸注释）；
+    //   只读。运行期瞬态不进存档。
+    int gradientProbeCount() const { return m_gradientProbes; }
     // 第 i 个槽位是否活体。呈现层 delegate 据它 visible（空槽隐藏，slot 复用保 Repeater count 单调不降）。
     Q_INVOKABLE bool aliveAt(int i) const;
 
@@ -265,6 +269,10 @@ private:
     int m_riderCart = -1;   // 玩家当前骑的矿车索引（-1 = 未骑）
     std::vector<int> m_freeSlots; // slot-reuse：已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体矿车数
+    // review0830 #8 梯度采样计数（cartRailGradient 入口累计）：矩阵探针「平地静车梯度采样为 0」的
+    //   行为级判据（见 gradientProbeCount 注释）。cartRailGradient 是 const 查询 → mutable 计数。
+    //   运行期瞬态不进存档。
+    mutable int m_gradientProbes = 0;
     // t658 探测轨当前占用表（本帧被矿车压住的探测轨格；键 = packRailCell 世界坐标打包）。t736 起由
     //   updateDetectorRailOccupancy（tickPushedCarts 开头）每帧快照 prev、重建 cur；用 prev − cur 找
     //   离开沿清位断电。无探测轨场景恒空（零开销）。切世界不显式清（占用表陈旧项的 blockAt 守卫自然
@@ -364,9 +372,11 @@ private:
     //   railRiseAt 梯度面升高，坡顶正上方放方块（车体升高后将占据的格）被直接穿墙。现每子步位移提交后对
     //   「含上坡升后 Y 钉定」的候选位做车体 AABB × 世界碰撞 sub-AABB 探测（cartBodyBlockedAt），仅**上坡向
     //   位移**（本格面梯度沿行进向 >kCartSlopeGradMin，t939 同一张面同阈）启用阻挡：命中 → 二分回钳到
-    //   最大自由前进位（clampRailMoveToFree）+ 速度清零，**不掉轨**（仍轨上态贴在坡下侧；移除方块后从静止
-    //   被动力轨 / 推力 / 骑乘输入自然恢复）。下坡 / 平移的重叠不拦（用户口径「下坡方向不做额外阻挡」——
-    //   下坡穿顶属既有低顶净空延续语义；平移重叠几何上不存在 —— 平轨车体格只含轨列，轨非碰撞体）。
+    //   最大自由前进位（clampRailMoveToFree，lo 端 = 最近一次探测自由位）+ 速度清零，**不掉轨**（仍轨上
+    //   态贴在坡下侧）。下坡 / 平移的重叠不拦（用户口径「下坡方向不做额外阻挡」——下坡穿顶属既有低顶净空
+    //   延续语义；平移重叠几何上不存在）。review0830 #4 豁免语义拆分：本 tick 入点探测结果
+    //   embeddedAtEntry（常量）是**唯一**的逃逸豁免开关（入点嵌入 → 全 tick 允许带重叠移动直至脱出）；
+    //   梯度采样失联的受阻子步回退本子步起点（重叠位不保留），不再污染豁免开关 / 回钳 lo 端。
     void stepCartAlongRail(Cart &c, World *world, float dt);
 
     // t708 钉轨面（共享：被骑 tickRiddenCart / 空车 tickPushedCarts 同一 Y 钉定）：把矿车 Y 钉到所在列向下
@@ -497,8 +507,9 @@ private:
     //   outRailY 可空带出 pinCartY 的轨层（caller 上坡向闸用）。只写 probe 局部副本、不碰自车。
     bool cartBodyBlockedAt(Cart &probe, World *world, int *outRailY = nullptr);
 
-    // t944 推进受阻钳回：本子步起点（自由锚）到受阻位之间沿行进轴二分收窄（6 轮 ≈ 1/64 格精度）到
-    //   「最大自由前进位」写回 c.pos + 就地重钉坡面（pinCartY，caller 既有重钉幂等）+ 速度清零
+    // t944 推进受阻钳回：lo（最近一次探测自由的提交位坐标，caller 保证自由）→ hi（受阻位）沿行进轴
+    //   二分收窄（6 轮 ≈ 1/64 格精度，贴合阻挡面观感）到「最大自由前进位」写回 c.pos + 就地重钉坡面
+    //   （pinCartY，caller 既有重钉幂等）+ 速度清零
     //   （t943 钳向清速同口径：指向阻挡格的穿入分量就是全部沿轨速度 —— 轨上速度是单标量）。
     //   垂直轴保持受阻位收敛值（向心收敛不可能新入邻列 —— 收敛只向本列中心线挪，见
     //   stepCartAlongRail t770② 段）。车保持轨上态（caller 只 break 推进循环，不置 derailed）。
