@@ -23819,8 +23819,10 @@ Item {
                          && closeSlice954.contains(QStringLiteral("target: rightPageNode; property: \"pageAngle\"; to: 1"))
                          && openSlice954.contains(QStringLiteral("target: leftPageNode; property: \"pageAngle\"; to: -22"))
                          && openSlice954.contains(QStringLiteral("target: rightPageNode; property: \"pageAngle\"; to: 22"))
-                         && m954.contains(QStringLiteral("if (bookOpen) bookOpenAnim.restart()"))
-                         && m954.contains(QStringLiteral("else bookCloseAnim.restart()"));
+                         // review0830 #21：起摆前先停对向动画（迟滞带内快速往返 → 双动画同写 5 属性，
+                         // 旧形态只 restart 方向匹配动画 = 依赖「注册序后者后写获胜」的未文档化行为）。
+                         && m954.contains(QStringLiteral("if (bookOpen) { bookCloseAnim.stop(); bookOpenAnim.restart() }"))
+                         && m954.contains(QStringLiteral("else { bookOpenAnim.stop(); bookCloseAnim.restart() }"));
         // (b) 合拢厚度层存在：右页叠层薄片（id + 内缩尺寸）+ 封面抬升 / 基页下沉内移 / 书脊增高
         //     三系数绑定（合拢态总厚 ~0.06 ≈ 单页 2.7×，「封面+书脊厚度感」的几何面）。
         const bool okB954 = m954.contains(QStringLiteral("id: rightPageBlock"))
@@ -23828,7 +23830,10 @@ Item {
                          && m954.contains(QStringLiteral("property real stackLift: 1.0"))
                          && m954.contains(QStringLiteral("position: Qt.vector3d(0, 0.026 * stackLift, 0)"))
                          && m954.contains(QStringLiteral("property real gather: 1.0"))
-                         && m954.contains(QStringLiteral("position: Qt.vector3d(0.19 - 0.025 * gather, -0.006 * gather, 0.0)"))
+                         // review0830 #1：节点 position 改纯向脊平移（-0.025·gather，无 +0.19 前导项）
+                         //   ——子 Model 的 0.19 页偏移只算一次，枢轴留在书脊。旧出错形态
+                         //   `0.19 - 0.025 * gather` 曾被本钉钉成正向钉（给 bug 背书），已随本修替换。
+                         && m954.contains(QStringLiteral("position: Qt.vector3d(-0.025 * gather, -0.006 * gather, 0.0)"))
                          && m954.contains(QStringLiteral("property real closeAmt: 1.0"))
                          && m954.contains(QStringLiteral("scale: Qt.vector3d(0.032, 0.03 + 0.045 * closeAmt, 0.46)"))
                          && m954.contains(QStringLiteral("position: Qt.vector3d(0.0, -0.02 + 0.0225 * closeAmt, 0.0)"));
@@ -23862,6 +23867,218 @@ Item {
                              "window-level handler keeping the review28b statement surface behind "
                              "a typeof guard because inline-Component ids never resolve at window "
                              "scope";
+    }
+
+    // ── P-review0830-1 书本右页几何不变量运行期断言（Review_2026-08-30 #1 高危；审查 §六-1 结构性
+    //    建议「几何/变换类改动补运行期断言」的落点）──
+    //    病灶：t954 给 rightPageNode 新增节点级 position（`0.19 - 0.025 * gather`）却没清子 Model
+    //    原 0.19 页偏移 → 页偏移被数两遍（变换序 = T(节点 pos)·R·T(Model pos)）：敞开态右页内缘
+    //    x≈0.19 脱离书脊半个书宽、合拢态右页外缘 ≈0.545 甩出左封面（≈0.38）并排不叠合、flutter
+    //    静息页片悬在裂口。旧 P-t954 全源码钉且把出错行钉成正向钉 = 几何类改动的系统性盲区。
+    //    修 = 节点 position 改纯向脊平移（-0.025·gather），子 Model 0.19 不动，枢轴留书脊。
+    //    本探针 = 从**真 Main.qml 源**解析节点链常量（position 表达式按「a ± b·变量」仿射解析，
+    //    非逐字钉——改系数自动重算，改不出仿射形态即红 = 结构不可验证也算红）+ C++ 数学复算
+    //    T(节点 pos)·R(角)·T(Model pos) 变换链取页盒内缘/外缘点（审查建议的可达落点；Quick3D
+    //    序 = T·R·S 契约、Z 轴单轴旋转在 xy 平面内，t764 抬升账同款手算先例），断言五条数值不变量：
+    //    (1) 敞开态（gather=0）右页内缘世界 x ≈ 0（贴书脊；出病灶 = 0.19）；
+    //    (2) 合拢态（gather=1）右页外缘 x ≤ 左封面外缘 x + 容差（叠合非并排；出病灶 0.545 > 0.38）；
+    //    (3) 合拢态右页内缘 x ≤ 左封面内缘 x + 容差（右页压过书脊出基座；出病灶 0.165 > 0）；
+    //    (4) 敞开态 flutter 静息页片心（R(baseAngle)·(0.19, 0.004)）变换进右页盒体系仍在盒内
+    //        （|x|≤半宽 0.19 且 |y|≤半厚 0.011 = 嵌入非悬空；出病灶 y≈0.075 > 0.011）；
+    //    (5) 左页节点 position 无 x 分量（左右枢轴对称性——左页单偏移/右页双偏移即错位实锤）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile qfR1(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString mR1 = qfR1.open(QIODevice::ReadOnly) ? QString::fromUtf8(qfR1.readAll()) : QString();
+        // 仿射解析：分量表达式「[a][±b·var]」→ (a, b)；eval(v) = a + b·v。不支持形态（括号/函数）
+        //   一律解析失败 → 探针红（形态变了=不可验证，宁可红不可静默绿）。
+        auto parseAffineR1 = [](const QString &expr, bool *ok) -> QPair<double, double> {
+            *ok = false;
+            QString e = expr; e.remove(' ');
+            double a = 0.0, b = 0.0;
+            const int gi = e.indexOf(QStringLiteral("*gather"));
+            if (gi >= 0) {
+                int s = gi - 1;
+                while (s >= 0 && (e.at(s).isDigit() || e.at(s) == QLatin1Char('.'))) --s;
+                const int start = (s >= 0 && (e.at(s) == QLatin1Char('-') || e.at(s) == QLatin1Char('+'))) ? s : s + 1;
+                bool okc = false;
+                b = e.mid(start, gi - start).toDouble(&okc); // 含符号位
+                if (!okc) return { a, b };
+                e = e.left(start);
+                while (e.endsWith(QLatin1Char('+')) || e.endsWith(QLatin1Char('-'))) e.chop(1);
+            }
+            if (!e.isEmpty()) {
+                bool oka = false;
+                a = e.toDouble(&oka);
+                if (!oka) return { a, b };
+            }
+            *ok = true;
+            return { a, b };
+        };
+        // 仿射（变量名泛化版）：「[a][±b·var]」。
+        auto parseAffineVarR1 = [&parseAffineR1](const QString &expr, const QString &var, bool *ok) -> QPair<double, double> {
+            if (var == QStringLiteral("gather")) return parseAffineR1(expr, ok);
+            *ok = false;
+            QString e = expr; e.remove(' ');
+            QString g = e; g.replace(var, QStringLiteral("gather"));
+            return parseAffineR1(g, ok);
+        };
+        // 从 Qt.vector3d(...) 捕获三分量。
+        auto vecArgsR1 = [](const QString &src, int from, bool *ok) -> QStringList {
+            *ok = false;
+            const int i = src.indexOf(QStringLiteral("Qt.vector3d("), from);
+            if (i < 0) return {};
+            const int j = src.indexOf(QLatin1Char(')'), i);
+            if (j < 0) return {};
+            const QStringList parts = src.mid(i + 12, j - i - 12).split(QLatin1Char(','));
+            if (parts.size() != 3) return {};
+            *ok = true;
+            return parts;
+        };
+        bool parseOk = mR1.contains(QStringLiteral("id: rightPageNode"))
+                    && mR1.contains(QStringLiteral("id: leftPageNode"))
+                    && mR1.contains(QStringLiteral("id: flipPivot"));
+        // 右页链：节点 position（仿射·gather）+ Model 局部 position/scale（页盒 ±0.5 居中 → 半宽 = scaleX/2）。
+        double rNx0 = 0, rNx1 = 0, rNy0 = 0, rNy1 = 0, rMx = 0, rHalfW = 0, rHalfT = 0;
+        // 左封面链：节点 position（仿射·stackLift；x 恒 0 = 对称性腿）+ Model 局部 position/scale。
+        double lNx0 = 0, lNx1 = 0, lNy0 = 0, lNy1 = 0, lMx = 0, lHalfW = 0;
+        // flutter 静息页片：baseAngle + Model 局部 position。
+        double fBase = 0, fMx = 0, fMy = 0;
+        // 角度（动画目标值即两静息位）：open 右/左、closed 右/左。
+        double angROpen = 0, angRClose = 0, angLClose = 0;
+        if (parseOk) {
+            const int iR = mR1.indexOf(QStringLiteral("id: rightPageNode"));
+            const int iL = mR1.indexOf(QStringLiteral("id: leftPageNode"));
+            const int iS = mR1.indexOf(QStringLiteral("id: spineBar"));
+            const QString rs = (iR >= 0 && iS > iR) ? mR1.mid(iR, iS - iR) : QString();
+            const QString ls = (iL >= 0 && iR > iL) ? mR1.mid(iL, iR - iL) : QString();
+            bool ok1, ok2, ok3, ok4;
+            const QStringList npos = vecArgsR1(rs, 0, &ok1);           // 节点 position = 第一个 vector3d
+            const int iGeo = rs.indexOf(QStringLiteral("geometry:"));
+            const QStringList mpos = vecArgsR1(rs, iGeo, &ok2);        // Model 局部 position = geometry 后第一个
+            const int isc = rs.indexOf(QStringLiteral("scale: Qt.vector3d("), iGeo);
+            const QStringList mscl = vecArgsR1(rs, isc >= 0 ? isc : rs.size() - 1, &ok3);
+            auto ap1 = parseAffineR1(npos.value(0), &ok4);
+            auto ap2 = parseAffineR1(npos.value(1), &ok1);
+            parseOk = parseOk && ok1 && ok2 && ok3 && ok4 && rs.size() > 0;
+            rNx0 = ap1.first; rNx1 = ap1.first + ap1.second;
+            rNy0 = ap2.first; rNy1 = ap2.first + ap2.second;
+            rMx = mpos.value(0).toDouble();
+            rHalfW = mscl.value(0).toDouble() * 0.5;
+            rHalfT = mscl.value(1).toDouble() * 0.5;
+            const QStringList lnpos = vecArgsR1(ls, 0, &ok2);
+            const int liGeo = ls.indexOf(QStringLiteral("geometry:"));
+            const QStringList lmpos = vecArgsR1(ls, liGeo, &ok3);
+            const int lisc = ls.indexOf(QStringLiteral("scale: Qt.vector3d("), liGeo);
+            const QStringList lmscl = vecArgsR1(ls, lisc >= 0 ? lisc : ls.size() - 1, &ok4);
+            auto bp1 = parseAffineVarR1(lnpos.value(0), QStringLiteral("stackLift"), &ok1);
+            auto bp2 = parseAffineVarR1(lnpos.value(1), QStringLiteral("stackLift"), &ok2);
+            parseOk = parseOk && ok1 && ok2 && ok3 && ok4 && ls.size() > 0;
+            lNx0 = bp1.first; lNx1 = bp1.first + bp1.second;
+            lNy0 = bp2.first; lNy1 = bp2.first + bp2.second;
+            lMx = lmpos.value(0).toDouble();
+            lHalfW = lmscl.value(0).toDouble() * 0.5;
+            const int iF = mR1.indexOf(QStringLiteral("id: flipPivot"));
+            const QString fs = iF >= 0 ? mR1.mid(iF, 900) : QString();
+            const int fBaseIdx = fs.indexOf(QStringLiteral("property real baseAngle:"));
+            const int fiGeo = fs.indexOf(QStringLiteral("geometry:"));
+            const QStringList fmpos = vecArgsR1(fs, fiGeo, &ok1);
+            parseOk = parseOk && ok1 && fBaseIdx >= 0 && fiGeo >= 0;
+            if (parseOk) {
+                fBase = fs.mid(fBaseIdx, 40).split(QLatin1Char(':')).value(1).simplified().split(QLatin1Char(' ')).value(0).toDouble();
+                fMx = fmpos.value(0).toDouble();
+                fMy = fmpos.value(1).toDouble();
+            }
+            // 角度静息位取自动画目标（okA954 已钉其形态，此处提数）。
+            const int iO = mR1.indexOf(QStringLiteral("id: bookOpenAnim"));
+            const int iC = mR1.indexOf(QStringLiteral("id: bookCloseAnim"));
+            const int iT = mR1.indexOf(QStringLiteral("onBookOpenChanged:"));
+            if (iO >= 0 && iC > iO && iT > iC) {
+                const QString os = mR1.mid(iO, iC - iO);
+                const QString cs = mR1.mid(iC, iT - iC);
+                const QRegularExpression reR(QStringLiteral("target: rightPageNode; property: \"pageAngle\"; to: (-?[\\d.]+)"));
+                const QRegularExpression reL(QStringLiteral("target: leftPageNode; property: \"pageAngle\"; to: (-?[\\d.]+)"));
+                const QRegularExpressionMatch mo = reR.match(os);
+                const QRegularExpressionMatch mc = reR.match(cs);
+                const QRegularExpressionMatch ml = reL.match(cs);
+                parseOk = parseOk && mo.hasMatch() && mc.hasMatch() && ml.hasMatch();
+                if (parseOk) {
+                    angROpen = mo.captured(1).toDouble();
+                    angRClose = mc.captured(1).toDouble();
+                    angLClose = ml.captured(1).toDouble();
+                }
+            } else {
+                parseOk = false;
+            }
+        }
+        auto degCos = [](double d) { return std::cos(d * 3.14159265358979323846 / 180.0); };
+        auto degSin = [](double d) { return std::sin(d * 3.14159265358979323846 / 180.0); };
+        // 页盒 x 区间：T(节点 pos)·R(角)·T(Model pos) 后 ±半宽·cos(角)（min/max 兼容 ±178° 的负 cos）。
+        auto spanR1 = [](double nx, double ny, double mx, double halfW, double ang, double *innerX, double *outerX, double *cy) {
+            const double c = std::cos(ang * 3.14159265358979323846 / 180.0);
+            const double cx = nx + mx * c;
+            *cy = ny + mx * std::sin(ang * 3.14159265358979323846 / 180.0);
+            const double e1 = (mx - halfW) * c, e2 = (mx + halfW) * c;
+            *innerX = std::min(e1, e2) + nx;
+            *outerX = std::max(e1, e2) + nx;
+        };
+        bool okGeo = parseOk;
+        double dInnerOpen = 0, dOutR = 0, dOutL = 0, dInR = 0, dInL = 0, dFlipY = 0;
+        if (okGeo) {
+            // (1) 敞开态右页内缘 x ≈ 0（贴书脊）。
+            double cyOpen = 0, inOpen = 0, outOpen = 0;
+            spanR1(rNx0, rNy0, rMx, rHalfW, angROpen, &inOpen, &outOpen, &cyOpen);
+            dInnerOpen = inOpen;
+            okGeo = okGeo && std::fabs(inOpen) <= 0.005;
+            // (2)(3) 合拢态：右页外缘不甩出左封面外缘（叠合）+ 右页内缘压过左封面内缘（出基座）。
+            double inR = 0, outR = 0, inL = 0, outL = 0, cyL = 0;
+            spanR1(rNx1, rNy1, rMx, rHalfW, angRClose, &inR, &outR, &cyOpen);
+            spanR1(lNx1, lNy1, lMx, lHalfW, angLClose, &inL, &outL, &cyL);
+            dOutR = outR; dOutL = outL; dInR = inR; dInL = inL;
+            okGeo = okGeo && outR <= outL + 0.01 && inR <= inL + 0.01;
+            // (4) flutter 静息嵌入：flipPivot 是 rightPageNode 的**兄弟**（同挂 bobNode，无自己的
+            //     position，不吃右页节点位移）→ 页片心 = R(baseAngle)·T(局部 pos)（bobNode 系），
+            //     右页盒心 = T(节点 pos)·R(angle)·T(局部 pos)；Δ 回页盒系须在盒内（出病灶 y≈0.075）。
+            const double fcx = fMx * degCos(fBase) - fMy * degSin(fBase);
+            const double fcy = fMx * degSin(fBase) + fMy * degCos(fBase);
+            const double dx = fcx - (rNx0 + rMx * degCos(angROpen));
+            const double dy = fcy - (rNy0 + rMx * degSin(angROpen));
+            const double lx = dx * degCos(angROpen) + dy * degSin(angROpen);
+            const double ly = -dx * degSin(angROpen) + dy * degCos(angROpen);
+            dFlipY = ly;
+            okGeo = okGeo && std::fabs(lx) <= rHalfW + 1e-6 && std::fabs(ly) <= rHalfT + 1e-6;
+            // (5) 左页节点无 x 分量（枢轴对称）。
+            okGeo = okGeo && std::fabs(lNx0) <= 1e-9 && std::fabs(lNx1) <= 1e-9;
+        }
+        const bool okR1 = okGeo;
+        if (!okR1)
+            qInfo().noquote() << "  review0830-1 diag: parse" << parseOk << "openInnerX" << dInnerOpen
+                              << "closedOuterR" << dOutR << "vsL" << dOutL
+                              << "closedInnerR" << dInR << "vsL" << dInL
+                              << "flipLocalY" << dFlipY << "halfT" << rHalfT;
+        if (!okR1) ++totalFail;
+        qInfo().noquote() << (okR1 ? "PASS" : "FAIL")
+                          << "| review0830-1 book right-page geometry invariants (Review_2026-08-30 #1 "
+                             "high): t954 added a node-level position on rightPageNode while the child "
+                             "Model kept its original 0.19 page offset, so the offset was counted TWICE "
+                             "(transform order T(node pos)*R*T(model pos)) - the open-state inner edge "
+                             "sat 0.19 off the spine (half a page width), the closed-state right page "
+                             "slid out to ~0.545 beside the left cover (~0.38) instead of stacking, and "
+                             "the flutter page hung in the gap; the old P-t954 probe pinned the very "
+                             "buggy line as a positive pin, which is exactly the geometry-class blind "
+                             "spot review section six flags; the fix makes the node position a pure "
+                             "toward-spine translation (-0.025*gather) leaving the child 0.19 intact "
+                             "and the pivot on the spine; this probe parses the REAL Main.qml node "
+                             "chain constants (affine parse of the position expressions, not a verbatim "
+                             "pin - coefficient changes re-evaluate, unparseable shapes go red) and "
+                             "recomputes the T*R*T chain in C++ asserting five numeric invariants: "
+                             "open-state right-page inner edge ~ 0 on the spine, closed-state right "
+                             "outer edge within the left cover's outer edge (stacked not side-by-side), "
+                             "closed-state right inner edge crossing the spine onto the cover (the "
+                             "thickness base), the flutter rest flip center transformed into the right "
+                             "page box frame still inside the box (embedded, not floating), and the "
+                             "left page node carrying no x component (pivot symmetry)";
     }
 
     // ── t955 hover 预告格式改源码钉（用户第五轮口径「去掉『必得』字样——直接『效率......?』」；
@@ -24205,11 +24422,13 @@ Item {
         QFile af958(root + QStringLiteral("/src/ui/AnvilUI.qml"));
         const QString a958 = af958.open(QIODevice::ReadOnly) ? QString::fromUtf8(af958.readAll()) : QString();
         // ① 居中形态：opBlock 声明邻域三要素 + 旧顶对齐形态绝迹。
+        //   review0830 #7：块高 108 只容单行冲突文案（冲突行 top=96 剩 12px），3 行红字越过 134
+        //   操作区底 ~11px 泼进主栏 → 块高放 120（冲突行可用高 24 = 实测最坏合并文案 2 行整）。
         const int iBlk958 = a958.indexOf(QStringLiteral("id: opBlock"));
         const QString blk958 = iBlk958 >= 0 ? a958.mid(iBlk958, 240) : QString();
         const bool okA958 = iBlk958 >= 0
                 && blk958.contains(QStringLiteral("width: parent.width"))
-                && blk958.contains(QStringLiteral("height: 108"))
+                && blk958.contains(QStringLiteral("height: 120"))
                 && blk958.contains(QStringLiteral("anchors.verticalCenter: parent.verticalCenter"))
                 && !a958.contains(QStringLiteral("anchors.top: parent.top; anchors.topMargin: 2"));
         // ② 包裹结构：改名框链依序落在块声明与 flash 叠层之间。
@@ -24226,10 +24445,100 @@ Item {
         const bool okC958 = ren958.contains(QStringLiteral("anchors.top: parent.top"))
                 && !ren958.contains(QStringLiteral("topMargin"))
                 && row958.contains(QStringLiteral("anchors.top: renameBox.bottom; anchors.topMargin: 10"));
-        const bool ok958 = okA958 && okB958 && okC958;
+        // ④ 文本余量断言（review0830 #7；QML 布局无 static_assert 面 → 常量推算 + 真引擎实测双腿）：
+        //   从源解析块内几何常量（块高/区高/改名框高/槽行高/两级 topMargin），推算冲突行 top；
+        //   (a) 块内可用高（块高 − 冲突行 top）≥ 实测最坏合并冲突文案高（真 QQmlEngine 量 Text
+        //       implicitHeight，字体口径与运行环境一致）；
+        //   (b) 3 行理论最坏（3×实测单行高）在区内不得泼进下方主物品栏行（≤ 操作区底 + Column 行距 10）。
+        double blockH958 = 0, areaH958 = 0, confTop958 = 0, textH2 = 0, textH1 = 0;
+        bool measOk958 = false;
+        {
+            // 锚点后第一个数字（跳过任意间隔空白/换行缩进；t958 块内常量逐个定位，避免全文首个误配）。
+            auto numAt958 = [&a958](const QString &anchor, int from) -> double {
+                const int i = a958.indexOf(anchor, from);
+                if (i < 0) return -1;
+                int n = i + anchor.size();
+                while (n < a958.size() && !a958.at(n).isDigit()) {
+                    if (!a958.at(n).isSpace() && a958.at(n) != QLatin1Char('-')) return -1;
+                    ++n;
+                }
+                int e = n;
+                while (e < a958.size() && (a958.at(e).isDigit() || a958.at(e) == QLatin1Char('.'))) ++e;
+                return a958.mid(n, e - n).toDouble();
+            };
+            const int iArea958 = a958.indexOf(QStringLiteral("id: anvilArea"));
+            const int iRenId958 = a958.indexOf(QStringLiteral("id: renameBox"));
+            const double renH = numAt958(QStringLiteral("height: "), iRenId958);
+            const double rowH = numAt958(QStringLiteral("height: "), iRow958);
+            const double rowW = numAt958(QStringLiteral("width: "), iRow958);
+            blockH958 = numAt958(QStringLiteral("height: "), iBlk958);
+            areaH958 = numAt958(QStringLiteral("height: "), iArea958);
+            const double rowTopM = numAt958(QStringLiteral("anchors.topMargin: "),
+                                            a958.indexOf(QStringLiteral("anchors.top: renameBox.bottom")));
+            const double confTopM = numAt958(QStringLiteral("anchors.topMargin: "), iConf958);
+            const double colSpace = numAt958(QStringLiteral("spacing: "),
+                                             a958.indexOf(QStringLiteral("anchors.margins: 12")));
+            measOk958 = renH > 0 && rowH > 0 && rowW > 0 && blockH958 > 0 && areaH958 > 0
+                     && rowTopM >= 0 && confTopM >= 0 && colSpace >= 0;
+            if (measOk958) {
+                confTop958 = renH + rowTopM + rowH + confTopM;   // 改名框高 + 槽行上距 + 槽行高 + 冲突行上距
+                measOk958 = measOk958 && int(rowW + 60) == 236;  // 冲突行宽钉（文案量测宽度与真值同源）
+            }
+            // 真 QQmlEngine 量测（t956 真链装配法：Item 载体 + 隐藏 Text，无窗口可见性依赖——
+            //   implicitHeight 在 text/width 设定后经 polish 求值，processEvents 泵足）。
+            QQmlEngine eng958;
+            QQmlComponent comp958(&eng958);
+            comp958.setData(R"QML(import QtQuick
+Item {
+    width: 400; height: 200
+    Text {
+        objectName: "one958"
+        visible: false; width: 236
+        wrapMode: Text.WrapAnywhere; font.pixelSize: 9
+        text: "冲突：锋利 III　不适用：耐久 I"
+    }
+    Text {
+        objectName: "worst958"
+        visible: false; width: 236
+        wrapMode: Text.WrapAnywhere; font.pixelSize: 9
+        text: "冲突：锋利 III、摔落缓冲 IV、节肢杀手 III　不适用：耐久 I　替换 ×2"
+    }
+}
+)QML", QUrl());
+            QQuickItem host958;
+            QObject *mroot958 = comp958.isError() ? nullptr : comp958.create();
+            if (!mroot958) {
+                measOk958 = false;
+            } else {
+                mroot958->setParent(&eng958);
+                QQuickItem *mi = qobject_cast<QQuickItem *>(mroot958);
+                mi->setParentItem(&host958);
+                for (int i = 0; i < 8; ++i)
+                    QCoreApplication::processEvents();
+                const auto kids = mroot958->findChildren<QObject *>();
+                for (QObject *k : kids) {
+                    if (k->objectName() == QStringLiteral("one958"))
+                        textH1 = k->property("implicitHeight").toDouble();
+                    if (k->objectName() == QStringLiteral("worst958"))
+                        textH2 = k->property("implicitHeight").toDouble();
+                }
+                measOk958 = measOk958 && textH1 > 0 && textH2 >= textH1;
+                delete mroot958;
+            }
+        }
+        // (a) 块内冲突行可用高 ≥ 实测最坏文案高（含浮点容差）；(b) 3 行最坏不出操作区底 + 行距（不泼主栏）。
+        const double blockTop958 = (areaH958 - blockH958) / 2.0;
+        const bool okD958 = measOk958
+                && (blockH958 - confTop958) >= textH2 - 1e-9
+                && (blockTop958 + confTop958 + 3.0 * textH1) <= areaH958 + 10.0 + 1e-9;
+        const bool ok958 = okA958 && okB958 && okC958 && okD958;
         if (!ok958)
             qInfo().noquote() << "  t958 diag: centeredForm" << okA958 << "wrapStructure" << okB958
-                              << "rigidInner" << okC958 << "blk@" << iBlk958 << "ren@" << iRen958
+                              << "rigidInner" << okC958 << "textBudget" << okD958
+                              << "meas" << measOk958 << "blockH" << blockH958 << "areaH" << areaH958
+                              << "confTop" << confTop958 << "blockTop" << blockTop958
+                              << "textH1" << textH1 << "textH2" << textH2
+                              << "blk@" << iBlk958 << "ren@" << iRen958
                               << "row@" << iRow958 << "cost@" << iCost958 << "conf@" << iConf958
                               << "flash@" << iFlash958;
         if (!ok958) ++totalFail;
@@ -24237,7 +24546,10 @@ Item {
                           << "| t958 anvil panel operation content vertically centered: the operation "
                              "content (rename box + A+B->C slot row + level/conflict hint lines) is "
                              "wrapped in an opBlock content block (width tracking the operation area, "
-                             "height = the 108px natural content extent) pinned with "
+                             "height = the 120px content extent, review0830 #7: 108 left the conflict "
+                             "row only 12px = a single wrapped line, so a 2-3 line merge-conflict text "
+                             "spilled ~11px past the 134px operation area into the main inventory row) "
+                             "pinned with "
                              "anchors.verticalCenter to the operation-area midline - the old "
                              "top-pinned form (rename box anchored to parent.top with a fixed 2px top "
                              "margin, leaving a ~24px dead band below the A+B->C row inside the 134px "
@@ -24246,7 +24558,12 @@ Item {
                              "overlay comment, and the internal relationships stay byte-identical "
                              "(rename box flush at block top without a fixed margin, slot row still "
                              "renameBox.bottom + 10) - centering only translates the block, never "
-                             "re-lays-out its content";
+                             "re-lays-out its content; the text-budget leg parses the block geometry "
+                             "constants from the source and a real QQmlEngine-measured worst-case "
+                             "merge-conflict Text (same 9px/WrapAnywhere/236px caliber) asserting the "
+                             "in-block available height covers the measured worst text and the "
+                             "3-line theoretical worst never reaches past the operation area bottom "
+                             "+ column spacing (never paints over the inventory row)";
     }
 
     // ── t959 附魔池随机性收窄探针（R19.17 🅳；Game 层表 + Hotbar 桥接，无 World/QML —— t824 同台先例）──
@@ -25249,7 +25566,9 @@ Item {
                          && mn963.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)"))
                          && mn963.contains(QStringLiteral("scale: Qt.vector3d(0.36, 0.05, 0.06)"))
                          && mn963.contains(QStringLiteral("t963 驯服项圈"))
-                         && rb963.count(QStringLiteral("visible: root.selectedMobType === 11 && root.mobTamedPreview")) == 1
+                         && rb963.count(QStringLiteral("visible: root.selectedMobFromSection === 11 && root.mobTamedPreview")) == 2
+                         //   （review0830 #23：门左操作数改单源 selectedMobFromSection —— 同形 2 处 =
+                         //    猫项圈 Model + 驯服猫形态注 Text；双源 selectedMobType 门在 review0830-23 块绝迹钉）
                          && rb963.contains(QStringLiteral("? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)"))
                          && rb963.contains(QStringLiteral("t963 驯服猫红项圈"));
         ok = okA963 && okB963 && okC963;
@@ -25282,6 +25601,202 @@ Item {
                              "patterned sd>=15, <=5 dark pixels, >=8 light belly/muzzle pixels - the "
                              "old black coat meanLum 27.6 / sd 8.5 / 88% dark fails every clause), "
                              "and collar/single-source pins on both consumers";
+    }
+
+    // ── P-review0830-23 蛋路径项圈残留驯服态（Review_2026-08-30 #23 中危；审查 §六-4 建议
+    //    「toggle 状态机补切走序列行为腿 + 同文件门式互对拍 sync pin」的落点）──
+    //    病灶：t963 猫项圈可见门用双源 `selectedMobType`（= 生物段选中 **或** 蛋映射，蛋路径
+    //    0x24A→11 恒真）→ 「点豹猫 → 拨已驯服 → 再点豹猫蛋」序列下残留 mobTamedPreview 使野生
+    //    蛋戴红项圈（贴图门 :253 是单源 selectedMobFromSection → 贴图正确回野生 = 项圈孤证残留）。
+    //    同型狼项圈门（t920 即 review-0829 #7 flagged 后未修的同一处）一并修。修 = 两门改单源
+    //    `selectedMobFromSection`（与贴图门 :253 口径逐字一致）。
+    //    (a) 门式互对拍 sync pin：全文双源驯服门形态（selectedMobType === 1X && mobTamedPreview）
+    //        绝迹；单源驯服门（selectedMobFromSection === 1X && mobTamedPreview）逐处计数
+    //        （:253 贴图 / :1171 pack 例外 / :1380 狼项圈 / :1397 猫项圈 / :1439+:1449 眼 /
+    //        :1771 形态注）——同文件同类门必须同一左操作数，回潮即红。
+    //    (b) 切走序列行为腿（真 rig，t967 装配法）：真 QQmlEngine 直载源树 ResourceBrowser.qml，
+    //        驱动状态机 selectMob(豹猫) → mobTamedPreview=true → selectItem(豹猫蛋 0x24A)：
+    //        驯服态猫项圈 Model visible=true + 贴图含 tabby；切蛋后项圈 visible=false（修前恒 true
+    //        = 腿有判别力）+ 贴图回野生 + 眼 overlay 仍在（蛋路径程序贴图无脸纹 = 反空转正锚）；
+    //        狼项圈（蛋 0x249）镜像腿（review-0829 #7 遗留同步闭合）。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rfR23(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rbR23 = rfR23.open(QIODevice::ReadOnly) ? QString::fromUtf8(rfR23.readAll()) : QString();
+        const bool okAR23 = rbR23.count(QStringLiteral("root.selectedMobType === 10 && root.mobTamedPreview")) == 0
+                         && rbR23.count(QStringLiteral("root.selectedMobType === 11 && root.mobTamedPreview")) == 0
+                         && rbR23.count(QStringLiteral("root.selectedMobFromSection === 11 && root.mobTamedPreview")) == 6
+                         && rbR23.count(QStringLiteral("root.selectedMobFromSection === 10 && root.mobTamedPreview")) == 1
+                         && rbR23.contains(QStringLiteral("!(root.selectedMobFromSection === 11 && root.mobTamedPreview)"))
+                         && rbR23.contains(QStringLiteral("review0830 #23 单源"));
+        ok = ok && okAR23;
+
+        static bool sTR23TypesRegistered = false;
+        if (!sTR23TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeR23", 1, 0, "Hotbar");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeR23", 1, 0, "ResourcePackManager");
+            qmlRegisterType<BlockCube>("VoxelSandboxProbeR23", 1, 0, "BlockCube");
+            qmlRegisterType<ItemShapeGeometry>("VoxelSandboxProbeR23", 1, 0, "ItemShapeGeometry");
+            qmlRegisterType<BedModelGeometry>("VoxelSandboxProbeR23", 1, 0, "BedModelGeometry");
+            qmlRegisterType<MobModel>("VoxelSandboxProbeR23", 1, 0, "MobModel");
+            qmlRegisterType<EnchantBookBox>("VoxelSandboxProbeR23", 1, 0, "EnchantBookBox");
+            qmlRegisterType<MobBowGeometry>("VoxelSandboxProbeR23", 1, 0, "MobBowGeometry");
+            qmlRegisterType<UnitCube>("VoxelSandboxProbeR23", 1, 0, "UnitCube");
+            sTR23TypesRegistered = true;
+        }
+        bool rigOkR23 = false;
+        QString rigDiagR23;
+        const QString uiDirR23 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUiR23 = QDir::temp().absoluteFilePath(
+                QStringLiteral("review0830_23_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUiR23);
+        for (const QString f : { QStringLiteral("ResourceBrowser.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("DarkScrollBar.qml") }) {
+            QFile::remove(probeUiR23 + QLatin1Char('/') + f);
+            QFile(uiDirR23 + QLatin1Char('/') + f).copy(probeUiR23 + QLatin1Char('/') + f);
+        }
+        {
+            const QStringList qmlFilesR23 = QDir(probeUiR23).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFilesR23) {
+                QFile p(probeUiR23 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeR23\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engineR23;
+        Hotbar hbR23;
+        ResourcePackManager rpR23;
+        QQuickWindow winR23; // 永不 show（visible 旗标求值不依赖渲染回路，t967 先例）
+        QQmlComponent compR23(&engineR23,
+                              QUrl::fromLocalFile(probeUiR23 + QStringLiteral("/ResourceBrowser.qml")));
+        QQuickItem *bR23 = nullptr;
+        if (compR23.isError()) {
+            rigDiagR23 = QStringLiteral("load: ") + compR23.errorString();
+        } else if ((bR23 = qobject_cast<QQuickItem *>(compR23.create())) == nullptr) {
+            rigDiagR23 = QStringLiteral("create failed");
+        } else {
+            bR23->setParent(&engineR23);
+            bR23->setProperty("hotbar", QVariant::fromValue(&hbR23));
+            bR23->setProperty("resourcePack", QVariant::fromValue(&rpR23));
+            bR23->setProperty("atlasSource", QStringLiteral("qrc:/textures/atlas.png"));
+            bR23->setProperty("packActive", false);
+            bR23->setWidth(700);
+            bR23->setHeight(500);
+            bR23->setParentItem(winR23.contentItem());
+            for (int i = 0; i < 8; ++i)
+                QCoreApplication::processEvents();
+            // 项圈/眼 overlay 定位：材质基色 + Model scale 逐分量模糊匹配（t963 猫项圈 0.36/0.05/0.06、
+            //   t920 狼项圈 0.42/0.06/0.07、豹猫眼 0.035/0.04/0.02；inline 材质 parent() 即宿主 Model）。
+            auto overlayModelR23 = [bR23](const QColor &col, const QVector3D &scale) -> QObject * {
+                auto scEq = [](const QVector3D &a, const QVector3D &b) {
+                    return qFuzzyCompare(a.x(), b.x()) && qFuzzyCompare(a.y(), b.y()) && qFuzzyCompare(a.z(), b.z());
+                };
+                const auto kids = bR23->findChildren<QObject *>();
+                for (QObject *o : kids) {
+                    if (std::strcmp(o->metaObject()->className(), "QQuick3DPrincipledMaterial") != 0)
+                        continue;
+                    if (o->property("baseColor").value<QColor>() != col)
+                        continue;
+                    QObject *m = o->parent();
+                    if (!m || std::strcmp(m->metaObject()->className(), "QQuick3DModel") != 0)
+                        continue;
+                    if (scEq(m->property("scale").value<QVector3D>(), scale))
+                        return m;
+                }
+                return nullptr;
+            };
+            auto qmlCallR23 = [](QObject *obj, const char *method, const QVariantList &args) -> bool {
+                if (args.size() == 1)
+                    return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)));
+                if (args.size() == 2)
+                    return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)), Q_ARG(QVariant, args.at(1)));
+                return false;
+            };
+            QObject *catCollar = overlayModelR23(QColor(0xc2, 0x28, 0x28), QVector3D(0.36f, 0.05f, 0.06f));
+            QObject *wolfCollar = overlayModelR23(QColor(0xc2, 0x28, 0x28), QVector3D(0.42f, 0.06f, 0.07f));
+            QObject *catEye = overlayModelR23(QColor(0x1a, 0x1a, 0x1a), QVector3D(0.035f, 0.04f, 0.02f));
+            if (!catCollar || !wolfCollar || !catEye) {
+                rigOkR23 = false;
+                rigDiagR23 = QStringLiteral("overlay models not found");
+            } else {
+                auto pumpR23 = []() {
+                    for (int i = 0; i < 8; ++i)
+                        QCoreApplication::processEvents();
+                };
+                auto failR23 = [&](const char *tag) {
+                    rigOkR23 = false;
+                    qInfo().noquote() << "  review0830-23 diag:" << tag
+                                      << "catCollarVis" << catCollar->property("visible").toBool()
+                                      << "wolfCollarVis" << wolfCollar->property("visible").toBool()
+                                      << "eyeVis" << catEye->property("visible").toBool()
+                                      << "tex" << bR23->property("selectedMobTexSource").toString();
+                };
+                rigOkR23 = true;
+                // 用户复现序列：点豹猫 → 变体面板拨「已驯服」→ 再点豹猫蛋。
+                qmlCallR23(bR23, "selectMob", { QVariant(int(EntityManager::MobOcelot)), QVariant(QStringLiteral("豹猫")) });
+                bR23->setProperty("mobTamedPreview", true);
+                pumpR23();
+                const bool tamedCat = catCollar->property("visible").toBool()
+                                  && bR23->property("selectedMobTexSource").toString().contains(QStringLiteral("mob_cat_tabby"));
+                if (!tamedCat) failR23("tamedCat state");
+                qmlCallR23(bR23, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggOcelotId)) });
+                pumpR23();
+                const bool afterEgg = bR23->property("selectedId").toInt() == int(RecipeRegistry::SpawnEggOcelotId)
+                                  && bR23->property("selectedMobFromSection").toInt() == -1
+                                  && bR23->property("selectedMobType").toInt() == int(EntityManager::MobOcelot)
+                                  && !catCollar->property("visible").toBool()
+                                  && !bR23->property("selectedMobTexSource").toString().contains(QStringLiteral("mob_cat_tabby"))
+                                  && catEye->property("visible").toBool(); // 蛋路径程序贴图无脸纹 → 眼仍在（反空转正锚）
+                if (!afterEgg) failR23("ocelot egg switch");
+                // 狼镜像（review-0829 #7 遗留同病灶）：拨杆仍真 → 狼项圈显 → 切狼蛋 → 残留必须清。
+                qmlCallR23(bR23, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
+                pumpR23();
+                if (!wolfCollar->property("visible").toBool()) failR23("tamedWolf state");
+                qmlCallR23(bR23, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggWolfId)) });
+                pumpR23();
+                if (wolfCollar->property("visible").toBool()) failR23("wolf egg switch");
+            }
+        }
+        QDir(probeUiR23).removeRecursively();
+        const bool okBR23 = rigOkR23;
+        ok = ok && okBR23;
+        if (!ok)
+            qInfo().noquote() << "  [review0830-23 diag] syncPin" << okAR23 << "rig" << okBR23 << rigDiagR23;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review0830-23 spawn-egg path keeps the residual tamed collar state off "
+                             "wild eggs (Review_2026-08-30 #23; the review-0829 #7 pattern recurring "
+                             "AND being copied): t963's cat collar gate read the DUAL-source "
+                             "selectedMobType (mob-section selection OR egg->type mapping, which is "
+                             "always 11 on the ocelot-egg path), so the state machine 'tap ocelot -> "
+                             "toggle Tamed -> tap the ocelot egg' left a wild egg wearing the red "
+                             "collar while the texture gate (single-source selectedMobFromSection) "
+                             "correctly fell back to the wild coat - a lone contradicting overlay; "
+                             "the wolf collar gate is the same shape (the review-0829 #7 leftover "
+                             "itself); the fix aligns both gates to the texture gate's exact "
+                             "single-source caliber (selectedMobFromSection === N && mobTamedPreview); "
+                             "legs: a same-file gate-family sync pin (dual-source tamed-gate forms "
+                             "extinct, single-source forms counted at every consumer: texture source, "
+                             "pack-UV exception, wolf collar, cat collar, both eye overlays, the "
+                             "tamed-coat note) and a real-QmlEngine rig driving the user's sequence "
+                             "through the real ResourceBrowser.qml (selectMob -> mobTamedPreview=true "
+                             "-> selectItem egg): the tamed state shows the collar + tabby texture, "
+                             "the egg switch must drop the collar Model's visible flag to false, "
+                             "return the texture to wild, and keep the eye overlays on (the wild "
+                             "procedural coat has no face pattern - an anti-vacuity anchor proving "
+                             "the leg is not trivially everything-hidden), mirrored for the wolf "
+                             "collar and the wolf egg";
     }
 
     // ── P-t964 预览重置按钮 z 序探针（R19.17 🅴；用户第五轮口径「方块预览滚轮放大后遮住右下角

@@ -9458,7 +9458,8 @@ Window {
                 //   照 review28 #9 pageFlipAnim 同款先例：声明式门会与 restart 抢 running 绑定，且 ESC
                 //   硬档须能 stop+落定，见本 delegate 尾部 Connections）：
                 //   - 对向合拢：左页 -22°→-178°（外缘向右扫过书脊落右半上方，「左页向右」）；右页
-                //     +22°→+1° 压平并向书脊内移 gather（页盒 position.x 0.19→0.165，「右页向左」）——
+                //     +22°→+1° 压平并向书脊内移 gather（节点向脊平移 x −0.025·gather → 合拢页盒心
+                //     x ≈0.165，「右页向左」；子 Model 页偏移 0.19 不动，review0830 #1 见 rightPageNode 注）——
                 //     两页同拍 850ms 缓出运动（时长档位对标大摆单摆 550/500ms 的 1s 内一档）。
                 //   - 合拢后厚度层（dev-plan「封面盒+页叠层…厚度=内页层」）：左页随合拢抬升 stackLift
                 //     0→0.026（封面拱在页叠上方、外缘 0.015 出檐）、右页下沉 -0.006、右页叠层
@@ -9544,15 +9545,19 @@ Window {
                             }
                         }
                         // 右页：镜像（+22°）。t732 piece 1（纸页）：上面采纸页区（qrc 右半符文行 / 包纸页叠）。
-                        //   t954 合拢参与（「右页向左」）：+22°→+1° 压平之外再向书脊内移 gather（页盒心
-                        //   position.x 0.19→0.165、下沉 -0.006——对向合拢的右半拍 + 厚度基座）。
+                        //   t954 合拢参与（「右页向左」）：+22°→+1° 压平之外再向书脊内移 gather（节点平移
+                        //   x −0.025·gather、下沉 −0.006·gather → 合拢页盒心 x ≈0.165——对向合拢的右半拍 +
+                        //   厚度基座）。review0830 #1：节点 position 是**叠加位移**不是页盒心——子 Model 的
+                        //   0.19 页偏移只算一次，位移若再带 +0.19 前导项即双重偏移（敞开态右页脱离书脊半个
+                        //   书宽 / 合拢态两板并排不叠合 / flutter 静息页片悬在裂口），枢轴恒留书脊（几何不变
+                        //   量由矩阵 review0830-1 探针运行期断言：敞开内缘 x≈0 / 合拢叠合 / 页片嵌页体）。
                         Node {
                             id: rightPageNode
                             // t954：同左页——角度/内移系数改命令式动画驱动，初值 = 合拢静息位。
-                            //   gather 1 = 合拢（向书脊收 0.025 + 下沉 0.006 出基座层），0 = 敞开。
+                            //   gather 1 = 合拢（节点向书脊收 0.025 + 下沉 0.006 出基座层），0 = 敞开。
                             property real pageAngle: 1
                             property real gather: 1.0
-                            position: Qt.vector3d(0.19 - 0.025 * gather, -0.006 * gather, 0.0)
+                            position: Qt.vector3d(-0.025 * gather, -0.006 * gather, 0.0)
                             rotation: Rotation { axis: Qt.vector3d(0, 0, 1); angle: rightPageNode.pageAngle }
                             Model {
                                 geometry: EnchantBookBox { piece: 1; layout: bookPackHit ? 1 : 0 }
@@ -9712,8 +9717,11 @@ Window {
                 // t954 起摆入口：bookOpen 状态翻转即起摆对应方向（piece 封面/纸页切换保持即时绑
                 //   bookOpen——t914 契约，动画起摆时页片已是目标贴图）。
                 onBookOpenChanged: {
-                    if (bookOpen) bookOpenAnim.restart()
-                    else bookCloseAnim.restart()
+                    // review0830 #21：迟滞带（4.0/4.4 格）内快速往返时双动画会同写五属性（旧形态只
+                    //   restart 方向匹配动画，靠「动画注册序后者后写获胜」的未文档化行为兜底）——
+                    //   起摆前先 stop 对向动画，任一时刻至多一个过渡在写属性。
+                    if (bookOpen) { bookCloseAnim.stop(); bookOpenAnim.restart() }
+                    else { bookOpenAnim.stop(); bookCloseAnim.restart() }
                 }
                 // t954 硬档落定：过渡全部驱动属性直接写到 bookOpen 对应静息位（ESC 落在过渡中途 →
                 //   过渡作废、形态落定目标态；恢复侧无需命令——faceTimer 复跑后迟滞带内状态不变、
