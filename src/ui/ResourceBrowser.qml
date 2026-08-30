@@ -113,7 +113,8 @@ Item {
     // t920 狼（10）/豹猫（11）驯服态预览（变体面板两段切换）：第一段 驯服/未驯服（镜像游戏内 wolfTamed /
     //   ocelotTamed）；第二段仅驯服后可切 站立/坐下（镜像 wolfSitting / ocelotSitting——野狼/野豹猫不可命令坐，
     //   机制等价 MC 1.0；坐姿几何走 MobModel sitPose（t878② 已就绪），狼驯服态视觉 = 红项圈 overlay（t831），
-    //   豹猫驯服态 = 家猫贴图（mob_cat_*，游戏内 3 变体随机，图鉴取变体 0 黑猫代表）。蛋路径不设变体（同羊）。
+    //   豹猫驯服态 = 家猫贴图（mob_cat_*，游戏内 3 变体随机，图鉴取变体 0 棕虎斑代表——t963 家猫
+    //   花纹返修：旧全黑档退役，用户口径「驯服=家猫花纹，非全黑」）。蛋路径不设变体（同羊）。
     property bool mobTamedPreview: false
     property bool mobSitPreview: false
     // 生物段选中是否狼/豹猫（t920 驯服态面板门控；蛋路径 selectedMobFromSection<0 恒 false）。
@@ -213,10 +214,11 @@ Item {
     readonly property string selectedMobPackSrc: root.selectedMobType >= 0 && root.resourcePack && root.resourcePack.active
         ? root.resourcePack.mobTextureSource(root.selectedMobType) : ""
     // 最终贴图源：pack 命中 → pack；否则程序生成 mob_*.png（无 → 空串走纯色）。
-    //   t920 例外：已驯服豹猫 → 恒程序家猫贴图 mob_cat_black（变体 0 代表；demo 包无驯服猫 PNG，Main.qml
+    //   t920 例外：已驯服豹猫 → 恒程序家猫贴图 mob_cat_tabby（变体 0 棕虎斑代表，t963 花纹返修；
+    //   demo 包无驯服猫 PNG，Main.qml
     //   游戏内同款「驯服猫恒程序贴图」口径——pack 豹猫贴图只覆盖野生形态）。触碰驯服态属性即时刷新。
     readonly property string selectedMobTexSource: root.selectedMobFromSection === 11 && root.mobTamedPreview
-        ? "qrc:/textures/mob_cat_black.png"
+        ? "qrc:/textures/mob_cat_tabby.png"
         : (root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
                                           : root.mobFallbackTexture(root.selectedMobType))
     // 选中 mob 显示名：生物段选中 → selectedMobName + 变体后缀（t751：剪毛/剪头/毛色态随预览区悬浮
@@ -1219,6 +1221,23 @@ Item {
                                                 baseColor: "#c22828" // 驯服项圈红（Main.qml rgba(0.76,0.16,0.16) 同值）
                                             }
                                         }
+                                        // t963 驯服猫红项圈（用户第五轮「驯服后没看到项圈」；镜像 Main.qml 游戏
+                                        //   内 t963 猫项圈 + t920 狼项圈先例：站姿颈根 (0,0.14,-0.30) / 坐姿位 =
+                                        //   站姿绕豹猫坐姿根锚 (-0.12,0.32) 旋 18° = (0,0.319,-0.189)（t946 链派生
+                                        //   成对契约，豹猫颈围镜像数值系 0.36/0.05/0.06）。未驯服不显；门挂
+                                        //   mobTamedPreview（与 t920 贴图切换同一驯服拨杆位——单源）。图鉴不做
+                                        //   昼夜灰阶 / 受击红闪（纯色预览，同狼项圈 overlay 约定）。
+                                        Model {
+                                            visible: root.selectedMobType === 11 && root.mobTamedPreview
+                                            geometry: UnitCube {}
+                                            position: root.mobTamedActive && root.mobSitPreview
+                                                      ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)
+                                            scale: Qt.vector3d(0.36, 0.05, 0.06)
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                baseColor: "#c22828" // 驯服项圈红（狼项圈同值）
+                                            }
+                                        }
                                         // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
                                         //   (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前脸 z=-0.60 → 眼贴头前
                                         //   (±0.08,0.16,-0.61)（t819 头后移贴胸，眼随移）。
@@ -1579,12 +1598,13 @@ Item {
                                                 }
                                             }
                                         }
-                                        // t920 驯服猫形态注（仅豹猫驯服态）：游戏内三变体随机，图鉴取黑猫代表。
+                                        // t920 驯服猫形态注（仅豹猫驯服态）：游戏内三变体随机，图鉴取棕虎斑代表
+                                        //   （t963 家猫花纹返修——旧全黑代表退役）。
                                         Text {
                                             visible: root.selectedMobFromSection === 11 && root.mobTamedPreview
                                             width: parent.width
                                             horizontalAlignment: Text.AlignHCenter
-                                            text: "驯服后为家猫形态（黑猫变体代表 · 游戏内三变体随机）"
+                                            text: "驯服后为家猫形态（棕虎斑变体代表 · 游戏内三变体随机）"
                                             color: "#7fae7f"; font.pixelSize: 9
                                         }
                                         // 毛色 swatch 行（仅羊）：16 色与游戏内羊毛方块调色板同源（build_wool.py

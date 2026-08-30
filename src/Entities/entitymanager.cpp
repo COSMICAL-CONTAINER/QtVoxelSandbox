@@ -2212,7 +2212,7 @@ bool EntityManager::tameOcelot(int i)
         return false; // ~2/3 失败（生鱼仍消耗，机制等价 MC 喂鱼无论成败都耗）
     }
     e.ocelotTamed = true;
-    e.ocelotVariant = int(QRandomGenerator::global()->bounded(3)); // 随机毛色变体 0..2（黑 / 姜黄 / 奶油）
+    e.ocelotVariant = int(QRandomGenerator::global()->bounded(3)); // 随机毛色变体 0..2（棕虎斑 / 姜黄 / 奶油；t963 前变体 0 为全黑档）
     e.chasing = false;     // 清野豹猫残留追踪态（驯服即转跟随，防下帧误走敌对分支）
     e.chaseTimer = 0.0f;
     e.tameHeartTimer = kTameHeartDuration; // t831 驯服成功爱心（QML 心形经 inLoveAt 显；tickBreeding 衰减）

@@ -17,7 +17,8 @@
   - mob_squid.png    ：深褐橘斑软体底 + 浅腹纹 + 暗点（读作「鱿鱼软体皮」；t399）。
   - mob_wolf.png     ：灰狼毛皮底 + 深灰背脊 / 侧纹 + 浅灰腹纹（读作「灰狼皮毛」；t480）。
   - mob_ocelot.png   ：斑点橙棕底 + 深棕圆斑 + 浅奶黄腹纹（读作「丛林豹猫斑点皮」；t481 未驯服形态）。
-  - mob_cat_black.png ：乌黑底 + 深灰高光纹 + 暗灰腹（读作「黑猫」；t481 驯服毛色变体 0）。
+  - mob_cat_tabby.png ：暖棕底 + 深棕虎斑横带 + 浅奶黄口鼻/腹纹（读作「棕虎斑家猫」；t481 驯服毛色变体 0，
+                       t963 家猫花纹返修——旧变体 0 全黑档被判「驯服=变黑」错误观感退役，三变体皆家猫色）。
   - mob_cat_ginger.png：姜黄底 + 深橙横纹（虎斑）+ 浅奶黄腹（读作「姜黄虎斑猫」；t481 驯服毛色变体 1）。
   - mob_cat_cream.png ：奶油底 + 深褐面部/耳尖/尾尖深色点 + 浅白腹（读作「奶油暹罗猫」；t481 驯服毛色变体 2）。
   - mob_silverfish.png：灰白甲壳底 + 深灰体节横纹 + 暗头斑（读作「银灰多节小虫」；t487 要塞银鱼）。
@@ -27,7 +28,7 @@
 输出（覆盖写入 textures/）：
   mob_pig.png / mob_cow.png / mob_sheep.png / mob_sheep_sheared.png（t749 剪毛羊裸肤+残羊毛块）/ mob_shambler.png /
   mob_chicken.png / mob_squid.png / mob_wolf.png /
-  mob_ocelot.png / mob_cat_black.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png \
+  mob_ocelot.png / mob_cat_tabby.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png \
   mob_nightwalker.png / mob_nightwalker_eyes.png / mob_fireball.png / entity_endereye.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
@@ -500,35 +501,49 @@ def make_ocelot():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
-def make_cat_black():
-    """黑猫（Cat 毛色变体 0；机制等价 MC 1.0 驯服猫变体，§9 原创贴图非照搬）：
-    乌黑底 + 深灰高光纹 + 暗灰腹（读作「黑猫」）。每面铺同图（同全脸 UV 方案）→ 驯服豹猫转猫后据
-    ocelotVariantAt==0 切本贴图。黑色底上深灰纹让纯黑方块模型有毛皮质感（非死黑平面）。
+def make_cat_tabby():
+    """棕虎斑家猫（Cat 毛色变体 0；t963 家猫花纹返修——旧变体 0 全黑猫被判「驯服后变黑色」错误观感
+    （用户第五轮口径：驯服 = 家猫花纹，非全黑）→ 全黑档退役，变体 0 改暖棕虎斑家猫色）：
+    暖棕底 + 深棕虎斑横带 + 浅奶黄口鼻 / 腹纹。花纹自创：确定性条带函数（每 4 行一横带、带内固定相位
+    断缝成短段、逐带横向错位）+ 确定性相位噪点（毛皮质感非平面色块），非 MC 家猫三花色照搬。
+    每面铺同图（同全脸 UV 方案）→ 驯服豹猫转猫后据 ocelotVariantAt==0 切本贴图（变体 1 姜黄虎斑 /
+    2 奶油点色同为家猫色——驯服后不再出现全黑毛色）。
     """
     img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
-    base = (0x1a, 0x18, 0x18, 255)   # 乌黑主色 #1a1818（近黑，非 MC 猫精确色）
+    base = (0xb8, 0x84, 0x4a, 255)   # 暖棕主色 #b8844a（暖橘棕家猫色，非 MC 猫精确色）
     fill(img, base)
 
-    # 深灰高光纹（黑猫毛皮在光下的深灰光泽纹 —— 散布于皮面，固定坐标）
-    sheen = (0x38, 0x36, 0x34, 255)  # 深灰 #383634
+    # 毛发双色噪点（确定性相位抖动 (x·7+y·13)%11 → 基色区微明暗，读作毛皮而非平面色块）
+    lite = (0xc6, 0x94, 0x5c, 255)   # 浅暖棕 #c6945c
     blot(img, [
-        (2, 3), (3, 3), (4, 3),
-        (8, 2), (9, 2),
-        (12, 4), (13, 4),
-        (3, 8), (4, 8), (5, 8),
-        (7, 7), (8, 7),
-        (11, 9), (12, 9),
-        (13, 12), (14, 12),
-        (5, 13), (6, 13),
-    ], sheen)
+        (x, y) for y in range(TS) for x in range(TS) if (x * 7 + y * 13) % 11 == 0
+    ], lite)
 
-    # 暗灰腹纹（底部 2 行换略浅色，拟黑猫腹毛在暗处稍亮）
-    belly = (0x2e, 0x2c, 0x2a, 255)  # 暗灰 #2e2c2a
+    # 深棕虎斑横带（自创条带函数：每 4 行取 2 行作横带，逐带横向错位 3px，带内按 (x+off)%6 固定相位
+    #   留 1px 断缝 → 断续短段横纹，读作虎斑条带；仅铺基色区，底腹浅色行后铺不被覆盖）
+    stripe = (0x5c, 0x3a, 0x1a, 255)  # 深棕虎斑 #5c3a1a
+    stripe_cells = []
+    for y in range(2, TS - 2):
+        if (y - 2) % 4 in (0, 1):             # 每 4 行取 2 行作带
+            off = ((y - 2) // 4) * 3          # 逐带横向错位 → 条带不连续对齐
+            for x in range(TS):
+                if (x + off) % 6 != 5:        # 带内固定相位断缝 → 短段横纹
+                    stripe_cells.append((x, y))
+    blot(img, stripe_cells, stripe)
+
+    # 浅奶黄腹纹（底部 2 行换浅色，拟虎斑家猫腹 / 喉部浅毛）
+    light = (0xf0, 0xdc, 0xb4, 255)  # 奶黄 #f0dcb4
     blot(img, [
         (x, TS - 1) for x in range(2, TS - 2)
-    ], belly)
+    ], light)
 
-    out = os.path.join(SRC, "mob_cat_black.png")
+    # 浅奶黄口鼻浅斑（顶缘中央 4×2 浅斑，拟家猫口鼻 / 额前浅毛；全脸铺同图 → 读作面部浅色）
+    blot(img, [
+        (6, 0), (7, 0), (8, 0), (9, 0),
+        (6, 1), (7, 1), (8, 1), (9, 1),
+    ], light)
+
+    out = os.path.join(SRC, "mob_cat_tabby.png")
     img.save(out)
     print("wrote", os.path.relpath(out, HERE), img.size)
 
@@ -827,7 +842,7 @@ def main():
     make_squid()
     make_wolf()
     make_ocelot()
-    make_cat_black()
+    make_cat_tabby()
     make_cat_ginger()
     make_cat_cream()
     make_silverfish()

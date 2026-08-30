@@ -1406,7 +1406,8 @@ private:
         // t481 豹猫/猫态（仅 mobType==MobOcelot 用；其余 mob 留默认 false/0 不触发）：
         //   ocelotTamed=false → 丛林野豹猫（游荡被动）；true → 驯服猫（跟随主人 + 坐/站 + 繁殖）。
         //   ocelotSitting=true → 坐（留守原地不跟随；机制等价 MC 1.0 驯服猫右键坐）。toggleOcelotSit 翻转。
-        //   ocelotVariant = 驯服后毛色变体（0=黑 / 1=姜黄 / 2=奶油；驯服瞬间随机选，QML 据 ocelotVariantAt
+        //   ocelotVariant = 驯服后毛色变体（0=棕虎斑 / 1=姜黄 / 2=奶油；t963 家猫花纹返修——旧 0=全黑档
+        //     退役。驯服瞬间随机选，QML 据 ocelotVariantAt
         //     切 mob_cat_* 贴图；未驯服豹猫不读变体走 mob_ocelot 贴图）。spawnMobCore 默认成员初始化已清回
         //     （move 入槽覆盖旧值，同狼态初值约定）。
         bool  ocelotTamed = false;       // 是否已驯服（生鱼驯服；QML ocelotTamedAt 读）
