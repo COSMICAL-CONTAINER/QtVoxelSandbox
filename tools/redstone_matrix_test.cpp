@@ -26322,6 +26322,134 @@ Item {
                              "retained on both QML sides";
     }
 
+    // ── P-t969 火把贴图采样窗/UV 修正探针（R19.17 🅴；用户第五轮口径「中间悬空黑色部分——贴图采样窗
+    //    /UV 修正」）──
+    //    病灶（实机渲染复现钉死，headless View3D.grabToImage 像素差分）：ItemShapeGeometry 火把分支
+    //    侧脸 v 满高 [0,1]——torch 瓦片 row0 与 row14..15 是透明底（Mask 丢弃）→ 侧脸上下各留死带，
+    //    盒底真边与柄身可见内容之间出现透明断口；±Y 端面把含透明行的整条竖带压扁成 2/16 见方碎片，
+    //    悬在断口下方露背景底色 = 「悬空黑色部分」（渲染实测：柄底下方 6px 处一片菱形碎片，与柄身
+    //    隔一条全黑断口）。修法 = 侧脸 v 窗收正到不透明内容带 [2/16,15/16]（V 朝向契约：图像顶 ↔ v=1，
+    //    t489 像素级实测 + 本次渲染复测钉死——v 窗 [12/16,14/16] 采到图像 row8..16 焰带即证）；
+    //    ±Y 端面经 capTopV/capBotV 覆写采柄木全双列不透明带（顶 row6..7 / 底 row12..13；机制等价 MC
+    //    火把方块模型 up 面采 [7,6]..[9,8] 柄顶截面）——焰尖 row1 只占 x7 单列（x8 透明），任何含焰
+    //    行的端面窗中央必有透明孔 → 黑斑，故端面窗必须全窗不透明。
+    //    (a) UV 矩形钉（真几何顶点 UV × 图集内容真值比对——从 textures/atlas.png tile 17 逐像素扫
+    //        alpha≥128 的内容包围盒，折算到 v 空间〔v = 1 − 图像行/64〕，与几何六脸 UV 四角比对）：
+    //        ①全脸窗 ⊆ 内容带（旧满窗脸直接红）；②侧四脸窗与内容带相互贴合（收正而非仅在内——防
+    //        「窗缩太小躲进安全区丢内容」）；③±Y 端面窗 ⊆ 柄木全不透明带（防焰行透明孔黑斑——焰带
+    //        端面窗同样红）；④u 窗 ⊆ 火把本体柱内容列。
+    //    (b) 源码钉：内容带/端面窗常量行 + addShapeBox capTop/capBot 形参管线 + 火把调用接线 + 旧
+    //        满窗调用形绝迹。
+    {
+        bool ok = true;
+        QString diag;
+        // 内容真值：tile 17 逐像素扫 alpha≥128 包围盒（build_torch.py 画稿 4× NEAREST 上采样，内容
+        //   图像 row1..13 → px row4..56、列 7..8 → px 28..36）。
+        const QString exeDir969 = QCoreApplication::applicationDirPath();
+        const QString root969 = QDir(exeDir969 + QStringLiteral("/..")).absolutePath();
+        const QImage atlas969(root969 + QStringLiteral("/textures/atlas.png"));
+        bool okA = !atlas969.isNull();
+        if (!okA)
+            diag = QStringLiteral("atlas load failed");
+        const int kTilePx = 64, kTileIdx = 17;
+        int r0 = kTilePx, r1 = -1, c0 = kTilePx, c1 = -1;
+        if (okA) {
+            for (int y = 0; y < kTilePx; ++y)
+                for (int x = 0; x < kTilePx; ++x)
+                    if (qAlpha(atlas969.pixel(kTileIdx * kTilePx + x, y)) >= 128) {
+                        r0 = std::min(r0, y); r1 = std::max(r1, y);
+                        c0 = std::min(c0, x); c1 = std::max(c1, x);
+                    }
+            okA = r1 >= 0;
+            if (!okA)
+                diag = QStringLiteral("tile17 empty");
+        }
+        // v 空间内容带（图像顶 ↔ v=1）：v ∈ [1 − r1px/64, 1 − r0px/64]；柄木全不透明带 = 柄行 6..13
+        //   的内缩安全子带（px 24..56 全双列不透明，焰行 px4..23 含 x 列透明孔不进端面窗）。
+        const float kTol969 = 0.02f; // 半纹素(1/128≈0.008)+采样余量；远小于旧满窗越界量(~0.12)
+        const float contentV0 = 1.0f - float(r1 + 1) / float(kTilePx);
+        const float contentV1 = 1.0f - float(r0) / float(kTilePx);
+        const float woodV0 = 1.0f - 56.0f / float(kTilePx); // 0.125（柄行 6..13 px 下沿）
+        const float woodV1 = 1.0f - 24.0f / float(kTilePx); // 0.625（柄行 6..13 px 上沿）
+        if (okA) {
+            ItemShapeGeometry g969;
+            g969.setBlockId(int(BR::Torch));
+            const QByteArray vd969 = g969.vertexData();
+            const int vCount969 = int(vd969.size()) / 20; // stride = pos3+uv2 = 20B（类注释契约）
+            okA = okA && vCount969 == 24;
+            const float *vp969 = reinterpret_cast<const float *>(vd969.constData());
+            for (int f = 0; f < 6 && okA; ++f) {
+                float uMin = 9e9f, uMax = -9e9f, vMin = 9e9f, vMax = -9e9f;
+                for (int c = 0; c < 4; ++c) {
+                    const float u = vp969[(f * 4 + c) * 5 + 3];
+                    const float v = vp969[(f * 4 + c) * 5 + 4];
+                    uMin = std::min(uMin, u); uMax = std::max(uMax, u);
+                    vMin = std::min(vMin, v); vMax = std::max(vMax, v);
+                }
+                const bool isCap = (f == 2 || f == 3);
+                // ①全脸 v 窗 ⊆ 内容带（±半纹素余量）——旧满窗上下越界即红。
+                const bool insideContent = vMin >= contentV0 - kTol969 && vMax <= contentV1 + kTol969;
+                // ②侧四脸与内容带**相互贴合**（收正钉：下沿贴内容下沿、上沿贴内容上沿——窗只能
+                //   收正到内容带，不许缩窄丢内容躲绿）。
+                const bool rectified = isCap || (vMin <= contentV0 + kTol969 && vMax >= contentV1 - kTol969);
+                // ③端面窗 ⊆ 柄木全不透明带（黑斑防钉：焰行窗/满窗红）。
+                const bool capSafe = !isCap || (vMin >= woodV0 - kTol969 && vMax <= woodV1 + kTol969);
+                // ④u 窗 ⊆ 火把本体柱内容列（tile 局部 u = (u − 17/181)×181 折算回 [0,1]）。
+                const float tuMin = (uMin - float(kTileIdx) / float(BR::AtlasTileCount)) * float(BR::AtlasTileCount);
+                const float tuMax = (uMax - float(kTileIdx) / float(BR::AtlasTileCount)) * float(BR::AtlasTileCount);
+                const bool uSafe = tuMin >= float(c0) / float(kTilePx) - kTol969
+                                && tuMax <= float(c1 + 1) / float(kTilePx) + kTol969;
+                if (!(insideContent && rectified && capSafe && uSafe)) {
+                    okA = false;
+                    diag += QStringLiteral("f%1 v[%2,%3]u[%4,%5] ic%6 rc%7 cs%8 us%9")
+                                .arg(f).arg(vMin, 6, 'g', 4).arg(vMax, 6, 'g', 4)
+                                .arg(uMin, 6, 'g', 4).arg(uMax, 6, 'g', 4)
+                                .arg(int(insideContent)).arg(int(rectified))
+                                .arg(int(capSafe)).arg(int(uSafe));
+                }
+            }
+        }
+        // (b) 源码钉（t931/t941 文本钉先例；相对 exe ../ = 工程根）。
+        QFile isg969(root969 + QStringLiteral("/src/Renderer/itemshapegeometry.cpp"));
+        const QString src969 = isg969.open(QIODevice::ReadOnly) ? QString::fromUtf8(isg969.readAll()) : QString();
+        const bool okB = src969.contains(QStringLiteral("constexpr float kWv0 = 2.0f / 16.0f, kWv1 = 15.0f / 16.0f;"))
+            && src969.contains(QStringLiteral("constexpr float kCapV0 = 8.0f / 16.0f, kCapV1 = 10.0f / 16.0f;"))
+            && src969.contains(QStringLiteral("constexpr float kCapV2 = 2.0f / 16.0f, kCapV3 = 4.0f / 16.0f;"))
+            && src969.contains(QStringLiteral("float capTopV0 = -1.0f, float capTopV1 = -1.0f,"))
+            && src969.contains(QStringLiteral("float capBotV0 = -1.0f, float capBotV1 = -1.0f)"))
+            && src969.contains(QStringLiteral("-1, 0u, kCapV0, kCapV1, kCapV2, kCapV3);"))
+            && !src969.contains(QStringLiteral("bMax, kWu0, kWu1, 0.0f, 1.0f")); // 旧满窗火把调用绝迹
+        ok = ok && okA && okB;
+        if (!ok) {
+            ++totalFail;
+            qInfo().noquote() << "  [t969 diag]" << diag
+                              << "r0" << r0 << "r1" << r1 << "c0" << c0 << "c1" << c1
+                              << "pins" << int(okB);
+        }
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t969 torch texture sampling-window/UV fix: the floating black shard "
+                             "under the preview/dropped torch is the box end faces sampling the FULL "
+                             "tile-height window - the torch tile's rows 0 and 14-15 are transparent "
+                             "(Mask-discarded), so the side faces kept dead bands top and bottom and "
+                             "the +/-Y end faces squeezed the whole strip (transparent rows included) "
+                             "into a 2/16 wafer that hung below the visible stick across a fully "
+                             "transparent gap (reproduced headlessly: detached diamond shard 6px below "
+                             "the stick, black gap between); fix = side v window rectified onto the "
+                             "opaque content band [2/16,15/16] (V convention image-top = v 1, per the "
+                             "t489 pixel-proven contract - the window was derived flipped) and the "
+                             "end faces overridden via new capTopV/capBotV addShapeBox params to the "
+                             "fully two-column-opaque wood bands (top rows 6-7 / bottom rows 12-13, "
+                             "mechanism-equivalent to the MC torch block model sampling the stick "
+                             "cross-section on its up face) - no cap window may include a flame row "
+                             "because the flame tip row 1 is single-column (x8 transparent) and would "
+                             "punch a black hole mid-cap; legs: UV-rect pin reading the real "
+                             "ItemShapeGeometry(13) vertex UVs against the per-pixel opaque bbox of "
+                             "atlas tile 17 (all faces inside the content band, side faces mutually "
+                             "rectified with it, caps inside the wood band, u inside the stick "
+                             "columns) plus source pins on the window constants, the cap parameter "
+                             "plumbing and the extinct full-window torch call";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
