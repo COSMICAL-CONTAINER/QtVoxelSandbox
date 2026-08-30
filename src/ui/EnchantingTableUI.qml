@@ -16,7 +16,7 @@ import "InventoryOps.js" as InventoryOps
 //
 // t515 用户要求「以工作台为蓝本重做」：现版是 shell-mode 选中槽消耗 UI（无背包），右键能开但用户要的是
 //   工作台式「上方功能区 + 底部背包 4 行」布局。本任务把布局换成 CraftingTableUI 蓝本：
-//   - 上区「附魔功能区」（t549 重做：真附魔）：左区两输入槽（0=武器/工具槽 + 1=青金石槽）+ 右侧 3 档位
+//   - 上区「附魔功能区」（t549 重做：真附魔）：左区两输入槽（0=待附魔物品槽 + 1=青金石槽）+ 右侧 3 档位
 //     选项（消耗 XP 等级 + **槽 1 青金石**，附魔来源 = UI 输入槽非背包任意；点击 → selectEnchants 同
 //     seed 写入槽 0 物品附魔元数据，t475/t476 管线）。
 //   - 下区「3×9 主物品栏 + 9 hotbar 行」= 底部背包 4 行（与工作台 / 熔炉 / 箱子同布局），玩家可在此放 / 取
@@ -111,7 +111,7 @@ Item {
     property real lastTapMs: 0
     property string lastTapKey: ""
 
-    // ── t544/t549 本地 enchant 组存储：左武器/工具槽（index 0）+ 青金石槽（index 1）。与 hotbar VM 共享同一光标
+    // ── t544/t549 本地 enchant 组存储：左待附魔物品槽（index 0）+ 青金石槽（index 1）。与 hotbar VM 共享同一光标
     //   手持栈 heldBlock/heldCount；左键整组 / 右键半份同 resolveClick / resolveRightClick（InventoryOps 单一
     //   权威）。面板关闭时 returnEnchantToHotbar 把输入槽内容退回背包（同 CraftingTableUI returnCraftToHotbar 模式）。
     //   t549：**耐久 / 附魔随实例保真**（同 AnvilUI anvilDur/anvilEnch 模式）—— 工具进槽 0 须保住实例耐久，
@@ -145,7 +145,7 @@ Item {
     // t544：enchant 两槽参与快捷操作（左键拖动均分 / 双击拿同类 / 右键分半）。声明 enchant 为可拖拽本地组 →
     //   InventoryOps.groupIsDraggable 放行（addDragSlot 收集、redistributeLive 分发）、doMergeSameId 扫 enchant 槽。
     property var localDragGroups: ["enchant"]
-    // t544：enchant 组槽位数（doMergeSameId 扫描范围）。enchantSlots 长 2（武器/工具 + 青金石）。
+    // t544：enchant 组槽位数（doMergeSameId 扫描范围）。enchantSlots 长 2（待附魔物品 + 青金石）。
     function localSlotCount(group) { return group === "enchant" ? root.enchantSlots.length : 0 }
 
     // ── t515 / t544 / t549 面板专属槽路由：enchant 两槽走本地数组 + 版本号（main/hotbar 由 InventoryOps 统一经 VM）。
@@ -179,7 +179,7 @@ Item {
     //   已附魔物品重复附魔刷属性）。覆盖：普通左键（singleLeftClick / EnchantInputSlot TapHandler）、右键
     //   放一（singleRightClick / placeOneInSlot）、左键拖拽均分（redistributeLive eligible 过滤）、数字键
     //   交换（swapHoveredWithHotbar 双向问）。Shift+左键在 slotShiftLeftEnchant 自带同款守卫（t549）。
-    //   判定（仅 index 0 = 武器/工具槽；index 1 青金石槽不设限）：不可附魔（itemEnchantCategory==None，
+    //   判定（仅 index 0 = 待附魔物品槽；index 1 青金石槽不设限）：不可附魔（itemEnchantCategory==None，
     //   含附魔书 0x227 自身）或已带附魔 → 拒。旧 bug：左键整栈放置走 resolveClick B 无门禁 → 已附魔
     //   钻石剑可反复进台重附（锐锋1→锐锋2→耐久1 无限刷，t549 的 Shift 守卫只盖 Shift 路径）。
     //   门禁在写入**前**查询（写后 no-op = caller 已清光标 → 物品凭空丢失）；doEnchant 产物写入与关包
@@ -685,8 +685,9 @@ Item {
             }
 
             // ── 占位附魔功能区（t544 重做：两槽 + 右侧三选项竖排）──
-            // 布局：状态条（XP/青金石/书架→可选档位）+ 左区两槽（武器/工具槽 + 青金石槽）+ 右区 3 档位选项
-            //   竖排 + 提示文字。青金石槽空占位画青金石轮廓图标（参考 MaterialIcon drawLapis 的青金石形状）。
+            // 布局：状态条（XP/青金石/书架→可选档位）+ 左区两槽（待附魔物品槽 + 青金石槽）+ 右区 3 档位选项
+            //   竖排 + 提示文字。青金石槽空占位显青金石「空缺风格」轮廓图标（t957：tools/build_lapis_outline.py
+            //   边缘提取离线生成，见下方 EnchantInputSlot 注释）。
             //   真附魔效果后补；选项点击沿用 t474 占位交互（消耗 XP + 青金石 → flash + 重投选项名）。
             Item {
                 id: enchantArea
@@ -709,7 +710,7 @@ Item {
                     }
                 }
 
-                // 功能区主体：左区两槽（武器/工具 + 青金石）+ 右区三选项竖排。
+                // 功能区主体：左区两槽（待附魔物品 + 青金石）+ 右区三选项竖排。
                 Item {
                     id: body
                     anchors.top: statusbar.bottom; anchors.topMargin: 10
@@ -717,7 +718,7 @@ Item {
                     width: parent.width
                     height: 124
 
-                    // ── 左区：两槽（enchant 组：0=武器/工具槽，1=青金石槽）。本地数组读写（enchantRev 驱动
+                    // ── 左区：两槽（enchant 组：0=待附魔物品槽，1=青金石槽）。本地数组读写（enchantRev 驱动
                     //   刷新）；左键整组 / 右键半份取放（同主栏 / hotbar，InventoryOps 单一权威）。──
                     Column {
                         id: leftSlots
@@ -725,23 +726,22 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 12
 
-                        // 武器 / 工具槽（enchant index 0）。
+                        // 待附魔物品槽（enchant index 0）。t957：槽位 caption 文字已删（用户 8-28 口径
+                        //   「武器/工具」字样从 UI 退场）—— 空槽静默自明，物品类别由 tooltip / 选项亮灯表达。
                         EnchantInputSlot {
                             width: root.slotSize; height: root.slotSize
                             group: "enchant"; index: 0
                             // qml-touch：槽内容读数组 + enchantRev 触碰参与返回（数组写入不触发绑定，需 rev 触碰）。
                             slotId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[0] || 0) : 0 }
                             slotCount: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantCounts[0] || 0) : 0 }
-                            caption: "武器/工具"
                         }
-                        // 青金石槽（enchant index 1；空槽画青金石轮廓占位，指示接受青金石）。
+                        // 青金石槽（enchant index 1；空槽显青金石空缺风格轮廓图标，指示接受青金石）。
                         EnchantInputSlot {
                             width: root.slotSize; height: root.slotSize
                             group: "enchant"; index: 1
                             slotId: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantSlots[1] || 0) : 0 }
                             slotCount: { const _r = root.enchantRev; return _r >= 0 ? (root.enchantCounts[1] || 0) : 0 }
-                            caption: ""
-                            showLapisOutline: true   // 空槽占位画青金石轮廓（t544）
+                            showLapisOutline: true   // 空槽占位显青金石空缺轮廓（t544 引入 / t957 换边缘提取图标）
                         }
                     }
 
@@ -854,9 +854,10 @@ Item {
                     }
                 }
 
-                // t916 槽位说明行（用户原话落地：「左槽放工具/武器/书 · 右槽放足青金石即解锁高栏（创造
-                //   亦须摆满）· 书附魔成附魔书不需要显示」）。按状态分档——空态 / 未满态提示，满态静默：
-                //   - 槽 0 空 →「左槽放工具 / 武器 / 书」；
+                // t916 槽位说明行（按状态分档提示，满态静默）。t957 收口（用户 8-28 口径）：**空槽 0 的
+                //   提示行整行退场**——空态静默自明（物品类别由 tooltip / 选项亮灯表达），t916 原三态
+                //   收成两态：
+                //   - 槽 0 空 → **不显示**（t957 删除原空态文案；同轮槽位 caption 小字一并退场）；
                 //   - 槽 0 有物但槽 1 未放青金石 →「右槽放足青金石即解锁高栏（创造亦须摆满）」（「创造
                 //     亦须摆满」= t795 收口语义：创造也不免青金石 / 书架门）；
                 //   - 槽 0 有物且槽 1 已放青金石（含 书+青金石 → 附魔书 路径）→ **整行不显示**（用户
@@ -872,8 +873,7 @@ Item {
                         const _r = root.enchantRev
                         if (_r < 0) return ""
                         const id0 = root.enchantSlots[0] || 0
-                        if (id0 === 0) return "左槽放工具 / 武器 / 书"
-                        if (root.slot0HasEnch()) return ""
+                        if (id0 === 0 || root.slot0HasEnch()) return ""   // t957：空态静默（原空态提示行删除）
                         if (root.lapisCount < 1) return "右槽放足青金石即解锁高栏（创造亦须摆满）"
                         return ""
                     }
@@ -1140,61 +1140,33 @@ Item {
         onTriggered: root.justEnchanted = false
     }
 
-    // EnchantInputSlot 组件：左区两槽（武器/工具槽 + 青金石槽）。读本地 enchant 数组（enchantRev 驱动刷新）；
-    //   左键整组 / 右键半份取放（同主栏 / hotbar，InventoryOps 单一权威）。空槽时显 caption 小字；青金石槽
-    //   （showLapisOutline=true）空槽时画青金石轮廓占位（参考 MaterialIcon drawLapis 的青金石八边形形状，
-    //   t544 spec「青金石槽空白占位用青金石轮廓图标」；轮廓 = 暗淡描边 + 半透明底，指示该槽接受青金石）。
+    // EnchantInputSlot 组件：左区两槽（待附魔物品槽 + 青金石槽）。读本地 enchant 数组（enchantRev 驱动刷新）；
+    //   左键整组 / 右键半份取放（同主栏 / hotbar，InventoryOps 单一权威）。青金石槽（showLapisOutline=true）
+    //   空槽时显青金石「空缺风格」轮廓图标（t957：用户 8-28 口径「青金石轮廓图标不像」—— t544 的 Canvas
+    //   手绘八边形描边 + 「青金」小字辨识度差，整段退场；现用 tools/build_lapis_outline.py **边缘提取算法**
+    //   离线生成的 textures/icon_lapis_outline.png：读青金石物品像素图（icon_lapis_item.png，与
+    //   MaterialIcon drawLapis 同一像素规格物化）→ 预乘亮度 Sobel 梯度 → 边缘变黑不透明 + 内部压暗半透
+    //   （空缺/镂空感，附魔台槽位幽灵图标的经典样式）。构建期一次生成零运行时成本；qrc 资源。
     component EnchantInputSlot : Item {
         id: eslot
         property string group: "enchant"
         property int index: 0
         property int slotId: 0
         property int slotCount: 0
-        property string caption: ""
+        // t957：caption 属性随「武器/工具」字样一并删除（两实例均不再设槽位小字；空槽提示由
+        //   青金石轮廓图标 / 选项亮灯承担）。
         property bool showLapisOutline: false
 
         InvSlot { anchors.fill: parent; wellColor: "#262b30" }
-        // 空槽 + 青金石槽 → 青金石轮廓占位（Canvas 自绘八边形描边；参考 MaterialIcon drawLapis 形状）。
-        Canvas {
+        // 空槽 + 青金石槽 → 青金石「空缺风格」轮廓图标（t957 边缘提取离线生成资产；算法与空缺
+        //   风格参数见 tools/build_lapis_outline.py 头注。48×48 源在 30×30 槽内平滑缩小显示）。
+        Image {
             anchors.centerIn: parent
             width: 30; height: 30
             visible: eslot.slotId === 0 && eslot.showLapisOutline
-            onPaint: {
-                const ctx = getContext("2d"); ctx.reset()
-                ctx.imageSmoothingEnabled = false
-                // 青金石八边形轮廓（归一到 24×24 网格，参考 MaterialIcon drawLapis 行 6..17 / 列 5..18）：
-                //   顶点按周长序：顶(8,6)→(16,6)→右斜(18,7)→(19,8)→(19,15)→(18,16)→底(16,17)→(8,17)→
-                //   (6,16)→(5,15)→(5,8)→(6,7)→闭。整体平移到 Canvas 中心并放大到 30×30。
-                const s = 30 / 24.0
-                const ox = (30 - 24 * s) / 2   // = 0
-                const oxx = 0
-                const pts = [[8,6],[16,6],[18,7],[19,8],[19,15],[18,16],[16,17],[8,17],[6,16],[5,15],[5,8],[6,7]]
-                ctx.beginPath()
-                for (let i = 0; i < pts.length; ++i) {
-                    const px = oxx + pts[i][0] * s
-                    const py = ox + pts[i][1] * s
-                    if (i === 0) ctx.moveTo(px, py)
-                    else ctx.lineTo(px, py)
-                }
-                ctx.closePath()
-                // 半透明底（淡蓝，表青金石接受槽）+ 暗淡描边（轮廓）。
-                ctx.fillStyle = "rgba(34, 58, 160, 0.18)"
-                ctx.fill()
-                ctx.strokeStyle = "#4a66b8"
-                ctx.lineWidth = 1.2
-                ctx.stroke()
-                // 顶面高光菱（薄亮线，参考 drawLapis 顶面高光）。
-                ctx.strokeStyle = "#6082dc"
-                ctx.lineWidth = 1.0
-                ctx.beginPath()
-                ctx.moveTo(oxx + 8 * s, ox + 6 * s); ctx.lineTo(oxx + 16 * s, ox + 6 * s)
-                ctx.stroke()
-                // 中心小字「青金」提示（缩到能辨识；槽位 caption 已由调用方省略）。
-                ctx.fillStyle = "#7a8cc8"
-                ctx.font = "bold 6px sans-serif"
-                ctx.textAlign = "center"; ctx.textBaseline = "middle"
-                ctx.fillText("青金", 15, 22)
-            }
+            source: "qrc:/textures/icon_lapis_outline.png"
+            fillMode: Image.PreserveAspectFit
+            smooth: true
         }
         // 物品图标：方块段→等距立方体 Image；工具段→ToolIcon；材料段→MaterialIcon 自绘。
         Item {
@@ -1241,13 +1213,8 @@ Item {
             color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
             font.pixelSize: 13; font.bold: true
         }
-        // 槽位小字 caption（武器/工具 或 青金石；空槽时显，帮助辨识两槽布局；青金石槽 caption 空 → 用轮廓替代）。
-        Text {
-            anchors.centerIn: parent
-            text: eslot.slotId === 0 ? eslot.caption : ""
-            color: "#6a727a"; font.pixelSize: 9
-            visible: text.toString().length > 0 && eslot.slotId === 0 && !eslot.showLapisOutline
-        }
+        // t957：槽位小字 caption Text 已随「武器/工具」字样一并删除（原空槽时居中显 caption 小字，
+        //   两实例现均不设 caption → 组件整段退场；青金石槽空态由上方轮廓图标承担辨识）。
         TapHandler {
             acceptedButtons: Qt.LeftButton
             onTapped: {
@@ -1291,7 +1258,7 @@ Item {
             }
         }
         // t956 中键 = 复制该槽一整组到光标（t896 链补口；创造门内，源槽不动、元数据保真）。
-        //   集中落点：本组件一处改，武器/工具槽（index 0）与青金石槽（index 1）两实例同时生效。
+        //   集中落点：本组件一处改，待附魔物品槽（index 0）与青金石槽（index 1）两实例同时生效。
         //   t699 同款：readSlot 直读本地数组（绑定属性快照在同信号级联内可能 stale）。
         TapHandler {
             acceptedButtons: Qt.MiddleButton
