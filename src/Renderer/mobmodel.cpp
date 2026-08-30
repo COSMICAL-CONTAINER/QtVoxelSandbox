@@ -477,7 +477,7 @@ void MobModel::setSitPose(bool on)
 }
 
 // t782 燃烬者棒组公转角 setter（度）：值未变早退；变化 → rebuild 把 4 根棒挪到新轨道位（棒心
-//   (cos(i·90°+spin)·0.62, -0.03, sin(...)·0.62)，棒身恒竖直只轨道心公转——同 t728 旧 QML Repeater
+//   (cos(i·90°+spin)·0.52, -0.03±0.10 交错, sin(...)·0.52)，棒身恒竖直只轨道心公转——同 t728 旧 QML Repeater
 //   「父 Node eulerRotation.y 转 + 竖棒」的观感，机制等价 MC 烈焰人棒组环绕旋转）。QML 用
 //   `NumberAnimation on rodSpin`（0→360 无缝循环，帧率无关）。perf：量化 6°/步（60 步/圈 ≈ 27 步/s
 //   @2.2s/圈，视觉连续）防每帧微变 rebuild——同 setWalkPhase 量化动机，但步距更细（旋转是主视觉动画，
@@ -1044,13 +1044,15 @@ void MobModel::rebuild()
         //   t782 重做（t728 旧版 = 单头盒 + 棒组在 Main.qml 用 4 个 UnitCube 纯色 Repeater 手搓——图鉴/刷怪笼
         //   各自手抄且无贴图；且 setMobType 白名单缺 17 → 实际渲染猪几何，「猪模型套皮」根因）：
         //   头 + 4 棒全进本共享几何，三消费端（delegate / 图鉴 / 笼迷你）同源；棒带贴图。
-        //   几何参数：头 = 单一方盒 0.7³（t818 缩小：t782 初版 0.88³ 用户观感「头过大」→ 半长 0.44→0.35；
-        //   心 (0,+0.10,0) 不变 → 顶 +0.45 / 底 -0.25）；棒 ×4 = 细长竖盒 0.10×1.10×0.10（半 (0.05,0.55,0.05)，
-        //   心 y=-0.03 → 跨 [-0.58,+0.52] 伸过碰撞盒上下沿，烈焰人「棒长于头」比例），轨道半径 0.52（t818
-        //   随头同步收 0.62→0.52：棒内缘 0.47 与头半 0.35 间隙 0.12 不穿模；外缘 0.57 微出碰撞 halfW 0.5
-        //   ——纯视觉，hitbox/AI 不动），径向 90° 分布 + rodSpin 公转（棒身恒竖直只轨道心
-        //   转，QML NumberAnimation on rodSpin 连续驱动；迷你态静态角即可）。总跨 y [-0.58,+0.52]=1.10 <
-        //   碰撞 1.2。walkPhase 无四肢不读。
+        //   几何参数：头 = 单一方盒 0.42³（t968 再缩：用户「头×0.6 再缩」→ t818 的 0.7³ 半长 0.35×0.6=0.21，
+        //   头心 (0,+0.10,0) 不变绕心缩 → 顶 +0.31 / 底 -0.11）；棒 ×4 = 细长竖盒 0.10×1.10×0.10（半
+        //   (0.05,0.55,0.05)，基心 y=-0.03），轨道半径 0.52（t818 收定：棒内缘 0.47 与头半 0.21 间隙 0.26
+        //   不穿模；外缘 0.57 微出碰撞 halfW 0.5——纯视觉，hitbox/AI 不动），径向 90° 分布 + rodSpin 公转
+        //   （棒身恒竖直只轨道心转，QML NumberAnimation on rodSpin 连续驱动；迷你态静态角即可）。
+        //   t968 棒 Y 交错（用户「棒上下错开一点，不在同一平面」）：偶数棒基心 +0.10 / 奇数棒 -0.10 交替 →
+        //   棒心 y = +0.07 / -0.13 两档（棒 Y 值集合 ≥2 个不同值 = 非共面；每根跨度仍 1.10 竖直），总跨
+        //   y [-0.68,+0.62]=1.30（微出碰撞 1.2 上下沿 ≤0.08——同外缘出 halfW 先例，纯视觉 hitbox/AI 不动）。
+        //   walkPhase 无四肢不读。
         //   UV **两态均 MC box-UV**（g_boxUvAlways=true；MC Blaze 布局）：头 head(0,0)8×8×8 / 棒共用
         //   rod(0,16)2×8×2。base **64×32**（t782 修 t728 误 64×64：demo 包 blaze/blaze.png 实为 64×32
         //   base（256×128=×4 HD，resourcepackmanager t779 头像侧同实测；vanilla 64×64 在本工程包源不出现）
@@ -1060,13 +1062,15 @@ void MobModel::rebuild()
         g_texW = 64.0f; g_texH = 32.0f;
         g_boxUvAlways = true;
         setMobTex(0, 0, 8, 8, 8);
-        addBox(0.00f, 0.10f, 0.00f, 0.35f, 0.35f, 0.35f, verts, idx, bMin, bMax); // 单头（t818 缩小 0.7³）
+        addBox(0.00f, 0.10f, 0.00f, 0.21f, 0.21f, 0.21f, verts, idx, bMin, bMax); // 单头（t968 ×0.6 再缩：0.7³→0.42³，绕头心缩）
         const float rodSpin = qDegreesToRadians(m_rodSpin);
         for (int i = 0; i < 4; ++i) {
             const float ang = qDegreesToRadians(float(i) * 90.0f) + rodSpin;
             setMobTex(0, 16, 2, 8, 2);
-            addBox(std::cos(ang) * 0.52f, -0.03f, std::sin(ang) * 0.52f,
-                   0.05f, 0.55f, 0.05f, verts, idx, bMin, bMax); // 烈焰棒 ×4（竖直细长盒，轨道心公转；t818 半径 0.52）
+            // 烈焰棒 ×4（竖直细长盒，轨道心公转；t818 半径 0.52）+ t968 Y 交错：偶数棒 +0.10 / 奇数棒
+            //   -0.10 绕基心 -0.03 交替（棒 Y 值集合 ≥2 个不同值 = 非共面；转轴 / 半径 / 棒长全不动）。
+            addBox(std::cos(ang) * 0.52f, -0.03f + ((i % 2) == 0 ? 0.10f : -0.10f),
+                   std::sin(ang) * 0.52f, 0.05f, 0.55f, 0.05f, verts, idx, bMin, bMax);
         }
     } else if (m_mobType == 2) {
         // 牛：高大长身 + 头顶两小角盒（角随头俯仰；牛 headPitch 恒 0 → 实走快路径不动）。机制等价 MC 牛形态。

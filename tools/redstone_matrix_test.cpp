@@ -26205,6 +26205,123 @@ Item {
                              "stick/egg tab names; four-representative exclusivity loop)";
     }
 
+    // ── P-t968 燃烬者两修探针（R19.17 🅴；用户第五轮口径「头×0.6 再缩；烈焰棒上下错开一点（不在同一
+    //    平面）」）──
+    //    病灶：t818 的 0.7³ 头观感仍偏大（×0.6 再缩：半长 0.35→0.21=0.42³，绕头心 (0,+0.10,0) 缩、头位
+    //    不动）；4 根棒基心同 y=-0.03 全在同一水平面。修法 = mobmodel.cpp mobType 17 分支单点改（三消费端
+    //    delegate / 图鉴 / 笼迷你共享同一几何，t782 同源纪律——一处修三处）+ 棒 Y 交错（偶数棒 +0.10 /
+    //    奇数棒 -0.10 → 棒心 y=+0.07/-0.13 两档非共面；公转转轴 / 轨道半径 0.52 / 棒长 1.10 全不动）。
+    //    三消费端呈现参数随跨度演化（[-0.58,+0.52]=1.10 → [-0.68,+0.62]=1.30、体心 -0.02 → -0.03）：
+    //    笼迷你 0.38→0.32（0.42/1.30 归一口径）/ yOff 0.008→0.010；图鉴预览 1.1→0.95 / centY 0.02→0.03。
+    //    (a) 行为级真几何钉（MobModel 直编读 vertexData，P-t946 先例；rodSpin=0 → 棒在 0/90/180/270 轴位，
+    //        轴对齐盒分桶最稳）：头桶（|x|,|z| ≤ 0.25——棒内缘 0.47 在桶外）恰 24 顶点，max|x|=max|z|=0.21
+    //        （×0.6 钉）且 y∈[-0.11,+0.31]（绕心缩头位不动）；棒桶 96 顶点，顶沿集合 {0.62,0.42} /
+    //        底沿集合 {-0.48,-0.68}（各恰 2 个不同值 = 非共面断言「棒 Y 值集合 ≥2 个不同值」）+ 径向内缘
+    //        0.47（轨道半径/转轴保持）+ 外缘 0.57 + 总跨 1.30。
+    //    (b) 源码钉（t931/t941 文本钉先例——QML/几何值无 static_assert 面）：头尺寸表值行 + 棒 Y 交错
+    //        三元式 + 旧共面棒心/旧头尺寸绝迹 + 两消费端呈现参数随动 + 公转动画两处保持。
+    {
+        bool ok = true;
+        QString diag;
+        // (a) 行为级：真 MobModel mobType 17 顶点直读（stride 5 float = pos3+uv2，MobVtx 契约）。
+        MobModel g968;
+        g968.setMobType(17);
+        g968.setRodSpin(0.0f); // 静态轴位（6° 网格契约内）：棒在 0/90/180/270° 正交位，分桶判定最稳
+        const QByteArray vd968 = g968.vertexData();
+        const int vCount968 = int(vd968.size()) / 20;
+        const float *vp968 = reinterpret_cast<const float *>(vd968.constData());
+        auto q968 = [](float v) { return int(std::round(v * 100.0f)); }; // 棒顶/底沿量化到 0.01 档
+        int headCount = 0, rodCount = 0;
+        float hMaxX = 0.0f, hMaxZ = 0.0f, hMinY = 9e9f, hMaxY = -9e9f;
+        float rMinY = 9e9f, rMaxY = -9e9f, rMinAxis = 9e9f, rMaxX = 0.0f, rMaxZ = 0.0f;
+        QSet<int> rodTops, rodBottoms; // 棒 Y 值集合（非共面断言：各 ≥2 个不同值）
+        for (int i = 0; i < vCount968; ++i) {
+            const float x = vp968[i * 5], y = vp968[i * 5 + 1], z = vp968[i * 5 + 2];
+            if (std::fabs(x) <= 0.25f && std::fabs(z) <= 0.25f) { // 头桶（头半 0.21；棒内缘 0.47 > 0.25 不入桶）
+                ++headCount;
+                hMaxX = std::max(hMaxX, std::fabs(x));
+                hMaxZ = std::max(hMaxZ, std::fabs(z));
+                hMinY = std::min(hMinY, y);
+                hMaxY = std::max(hMaxY, y);
+            } else {                                              // 棒桶（4 棒 × 24 顶点）
+                ++rodCount;
+                rMinY = std::min(rMinY, y);
+                rMaxY = std::max(rMaxY, y);
+                rMinAxis = std::min(rMinAxis, std::max(std::fabs(x), std::fabs(z)));
+                rMaxX = std::max(rMaxX, std::fabs(x));
+                rMaxZ = std::max(rMaxZ, std::fabs(z));
+                if (y >= 0.35f)
+                    rodTops.insert(q968(y));
+                if (y <= -0.35f)
+                    rodBottoms.insert(q968(y));
+            }
+        }
+        // 头 ×0.6 钉：半长 0.21（=0.35×0.6）+ 绕头心 (0,+0.10,0) 缩（y 跨 [-0.11,+0.31]，头位不动）。
+        const bool okHead968 = headCount == 24
+            && std::fabs(hMaxX - 0.21f) < 2e-3f && std::fabs(hMaxZ - 0.21f) < 2e-3f
+            && std::fabs(hMinY - (-0.11f)) < 2e-3f && std::fabs(hMaxY - 0.31f) < 2e-3f;
+        // 棒非共面钉：顶沿 {0.62,0.42} / 底沿 {-0.48,-0.68} 各恰 2 个不同值（交错 ±0.10）；
+        //   轨道/转轴保持：径向内缘 0.47（=0.52-0.05）+ 外缘 0.57；总跨 [-0.68,+0.62]=1.30。
+        const bool okRods968 = rodCount == 96
+            && rodTops.size() == 2 && rodTops.contains(q968(0.62f)) && rodTops.contains(q968(0.42f))
+            && rodBottoms.size() == 2 && rodBottoms.contains(q968(-0.48f)) && rodBottoms.contains(q968(-0.68f))
+            && std::fabs(rMinY - (-0.68f)) < 2e-3f && std::fabs(rMaxY - 0.62f) < 2e-3f
+            && std::fabs(rMinAxis - 0.47f) < 2e-3f
+            && std::fabs(rMaxX - 0.57f) < 2e-3f && std::fabs(rMaxZ - 0.57f) < 2e-3f;
+        // (b) 源码钉（t931/t941 文本钉先例；相对 exe ../ = 工程根）。
+        const QString exeDir968 = QCoreApplication::applicationDirPath();
+        const QString root968 = QDir(exeDir968 + QStringLiteral("/..")).absolutePath();
+        auto readSrc968 = [&root968](const QString &rel) -> QString {
+            QFile f(root968 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mm968 = readSrc968(QStringLiteral("src/Renderer/mobmodel.cpp"));
+        const QString mn968 = readSrc968(QStringLiteral("src/ui/Main.qml"));
+        const QString rb968 = readSrc968(QStringLiteral("src/ui/ResourceBrowser.qml"));
+        const bool okB1 = mm968.contains(QStringLiteral("addBox(0.00f, 0.10f, 0.00f, 0.21f, 0.21f, 0.21f")) // 头 ×0.6 尺寸表值（0.35×0.6=0.21）
+            && mm968.contains(QStringLiteral("-0.03f + ((i % 2) == 0 ? 0.10f : -0.10f)"))                    // 棒 Y 交错三元式（非共面）
+            && !mm968.contains(QStringLiteral("0.35f, 0.35f, 0.35f"))                                        // 旧头尺寸绝迹
+            && !mm968.contains(QStringLiteral("* 0.52f, -0.03f, std::sin"));                                 // 旧共面棒心绝迹
+        const bool okB2 = mn968.contains(QStringLiteral("NumberAnimation on rodSpin"))                       // 公转动画保持（游戏内 delegate）
+            && mn968.contains(QStringLiteral("if (t === EntityManager.MobEmberling) return 0.32"))           // 笼迷你缩放随跨度 1.30 演化
+            && mn968.contains(QStringLiteral("if (t === EntityManager.MobEmberling) return 0.010"));         // 笼迷你 yOff 随体心 -0.03 演化
+        const bool okB3 = rb968.contains(QStringLiteral("if (t === 17) return 0.95"))                        // 图鉴预览缩放随跨度演化
+            && rb968.contains(QStringLiteral("case 17: return 0.03"))                                        // 图鉴居中随体心演化
+            && rb968.contains(QStringLiteral("rodSpin: root.selectedMobType === 17 ? rodClock : 0"));        // 公转动画保持（图鉴）
+        const bool okB968 = okB1 && okB2 && okB3;
+        ok = ok && okHead968 && okRods968 && okB968;
+        if (!ok)
+            diag += QStringLiteral("head=%1 rods=%2 pins=%3 hc=%4 rc=%5 tops=%6 bots=%7 b1=%8 b2=%9 b3=%10")
+                        .arg(int(okHead968)).arg(int(okRods968)).arg(int(okB968))
+                        .arg(headCount).arg(rodCount).arg(rodTops.size()).arg(rodBottoms.size())
+                        .arg(int(okB1)).arg(int(okB2)).arg(int(okB3));
+        if (!ok) {
+            ++totalFail;
+            qInfo().noquote() << "  [t968 diag]" << diag;
+        }
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t968 emberling two fixes: the head shrinks a further x0.6 "
+                             "(t818's 0.7^3 cube, half 0.35 -> 0.21 = 0.42^3) scaled about its "
+                             "own center (0,+0.10,0) so the head position holds (y span "
+                             "[-0.11,+0.31]); the four orbiting rods break out of one plane - "
+                             "even rods sit at center y +0.07, odd at -0.13 (base -0.03 +/- "
+                             "0.10), the rod Y value set holds exactly two distinct tops "
+                             "{0.62,0.42} and two distinct bottoms {-0.48,-0.68} (non-coplanar) "
+                             "while the spin axis, orbit radius 0.52 (inner edge 0.47 / outer "
+                             "0.57) and per-rod length 1.10 all stay put, total span now "
+                             "[-0.68,+0.62]=1.30; the fix lands once in the shared MobModel "
+                             "mobType-17 geometry so all three consumers (in-game delegate, "
+                             "browser preview, spawner-cage mini) move together, their "
+                             "presentation tables re-derived from the new span/center (cage mini "
+                             "0.38->0.32 / yOff 0.008->0.010, browser 1.1->0.95 / centY "
+                             "0.02->0.03); legs: behavioral vertex read of a real MobModel (24-"
+                             "vert head bucket at half 0.21 + 96-vert rod bucket with the "
+                             "two-tier Y sets and radius kept) plus source pins on the head size "
+                             "line, the stagger ternary, the extinct coplanar rod center and old "
+                             "head size, the consumer tables, and the rodSpin orbit animations "
+                             "retained on both QML sides";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
