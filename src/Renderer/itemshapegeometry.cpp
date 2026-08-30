@@ -121,6 +121,40 @@ void addCrossQuad(std::vector<ShapeVtx> &verts, std::vector<quint32> &idx,
         }
     }
 }
+
+// t965 追加一片**水平**双面 quad（贴地薄板族：动力铁轨查看器形态——mesher pushRailFlat 直线 NS 的
+//   同源形态）。四角 (x0,z0)(x1,z0)(x1,z1)(x0,z1) @ 高 y，UV u→x / v→z（mesher NS 直轨同映射）；
+//   yShift 形心居中同 addCrossQuad；双面发两 pass（绕序镜像）同 addCrossQuad。
+void addFlatQuad(std::vector<ShapeVtx> &verts, std::vector<quint32> &idx,
+                 float x0, float z0, float x1, float z1, float y,
+                 int tile, float yShift, QVector3D &bMin, QVector3D &bMax)
+{
+    const float u0 = float(tile) * kTileW + kHx;
+    const float u1 = float(tile + 1) * kTileW - kHx;
+    const float v0 = kHy, v1 = 1.0f - kHy;
+    const float yy = y + yShift;
+    const ShapeVtx quad[4] = {
+        { x0 - 0.5f, yy, z0 - 0.5f, u0, v0 }, { x1 - 0.5f, yy, z0 - 0.5f, u1, v0 },
+        { x1 - 0.5f, yy, z1 - 0.5f, u1, v1 }, { x0 - 0.5f, yy, z1 - 0.5f, u0, v1 },
+    };
+    for (int pass = 0; pass < 2; ++pass) {
+        const quint32 b = quint32(verts.size());
+        for (int c = 0; c < 4; ++c) {
+            const ShapeVtx &v = quad[c];
+            verts.push_back(v);
+            bMin.setX(std::min(bMin.x(), v.x)); bMax.setX(std::max(bMax.x(), v.x));
+            bMin.setY(std::min(bMin.y(), v.y)); bMax.setY(std::max(bMax.y(), v.y));
+            bMin.setZ(std::min(bMin.z(), v.z)); bMax.setZ(std::max(bMax.z(), v.z));
+        }
+        if (pass == 0) {
+            idx.push_back(b + 0); idx.push_back(b + 1); idx.push_back(b + 2);
+            idx.push_back(b + 0); idx.push_back(b + 2); idx.push_back(b + 3);
+        } else {
+            idx.push_back(b + 2); idx.push_back(b + 1); idx.push_back(b + 0);
+            idx.push_back(b + 3); idx.push_back(b + 2); idx.push_back(b + 0);
+        }
+    }
+}
 } // namespace
 
 ItemShapeGeometry::ItemShapeGeometry(QQuick3DObject *parent) : QQuick3DGeometry(parent)
@@ -137,8 +171,23 @@ void ItemShapeGeometry::setBlockId(int id)
     rebuild();
 }
 
-// 按 def.shape 泛化 + 特型覆盖（火把 / 附魔台）建几何。各形状盒区与 World partialblockgeometry
+// t965 形态按钮组 state：值变 → rebuild（态变族开合几何 / 高度 / 瓦片重算）。-1 = auto 哨兵（唯一合法
+//   负值，不得参与 & 0xFF 钳制）；其余钳到 quint8 非负域。
+void ItemShapeGeometry::setBlockState(int s)
+{
+    if (s != -1)
+        s = (s < 0) ? 0 : (s & 0xFF);
+    if (s == m_blockState) return;
+    m_blockState = s;
+    emit blockStateChanged();
+    rebuild();
+}
+
+// 按 def.shape 泛化 + 特型覆盖（火把 / 附魔台 / 动力铁轨）建几何。各形状盒区与 World partialblockgeometry
 //   同源；yShift = -(y0+y1)/2 形心居中（图标 y_mid 同口径）。
+// t965 形态按钮组：生效 state = 显式（≥0）直用；auto（-1，掉落物 / 旧消费路径）→ 各形状旧默认
+//   （小麦=成熟穗 WheatCropStageMax〔t925「图标显成熟态」口径〕/ 草丛=中草满格〔旧版唯一外观〕/ 其余 0）
+//   —— 未设 state 的既有消费端行为逐位零回归。
 void ItemShapeGeometry::rebuild()
 {
     std::vector<ShapeVtx> verts;
@@ -146,6 +195,15 @@ void ItemShapeGeometry::rebuild()
     QVector3D bMin(1e9f, 1e9f, 1e9f), bMax(-1e9f, -1e9f, -1e9f);
     const BlockRegistry::BlockDef &d = BlockRegistry::def(quint8(m_blockId));
     const int topT = d.topTile, botT = d.bottomTile, sideT = d.sideTile;
+    int effState = m_blockState;
+    if (effState < 0) {
+        if (m_blockId == int(BlockRegistry::WheatCrop))
+            effState = int(BlockRegistry::WheatCropStageMax);
+        else if (m_blockId == int(BlockRegistry::TallGrass))
+            effState = int(BlockRegistry::TallGrassMedium);
+        else
+            effState = 0;
+    }
     // 活板门族薄侧边 per-family 分流（铁=iron_block / 木=planks；World mesher t742/t879 同一语言）。
     const int trapSide = (m_blockId == int(BlockRegistry::IronTrapdoor))
         ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX)
@@ -182,12 +240,32 @@ void ItemShapeGeometry::rebuild()
             addShapeBox(verts, idx, bb.minX, bb.minY, bb.minZ, bb.maxX, bb.maxY, bb.maxZ,
                         boxTile, boxTile, boxTile, -0.5f, bMin, bMax);
         }
+    } else if (m_blockId == int(BlockRegistry::GoldenRail)) {
+        // t965 动力铁轨贴地薄板（查看器形态预览专用 case）：掉落物侧保留 billboard（Main.qml
+        //   isItem3DFamily t880「全部铁轨」排除清单不动——本分支仅查看器 selectedIsItem3D 新成员 127
+        //   消费）。几何 = 水平双面 quad 贴 y≈1/16（同 mesher rail case 直线 NS 基准形态——物品无邻居
+        //   语境取直轨）；瓦片经 stateTileOverride 态变（157 未激活 / 159 激活亮金——Core 单一权威）。
+        //   形心居中 yShift -1/16。
+        const int railT = BlockRegistry::stateTileOverride(quint8(m_blockId), int(BlockRegistry::PosX),
+                                                           quint8(effState));
+        const float ry = 1.0f / 16.0f;
+        addFlatQuad(verts, idx, 0.0f, 0.0f, 1.0f, 1.0f, ry,
+                    railT < 0 ? sideT : railT, -ry, bMin, bMax);
     } else {
         switch (d.shape) {
         case BlockRegistry::ShapeTrapdoor:
             // 合态薄板：全 footprint y[0,3/16]（同 mesher 合态 + 图标 trapdoor 盒）；形心居中 -3/32。
-            addShapeBox(verts, idx, 0.0f, 0.0f, 0.0f, 1.0f, 3.0f / 16.0f, 1.0f,
-                        topT, botT, trapSide, -3.0f / 32.0f, bMin, bMax);
+            // t965 开态（TrapdoorStateOpenFlag，朝向位取放置缺省 0=+X）：竖直薄板贴 +X 边（mesher 开态
+            //   facing 0 盒区 x[0.8125,1]×y[0,1]×z[0,1]）；大面（±X）格子板、四薄边（±Y/±Z）同族基材
+            //   （合态 t742/t879 per-face 语言镜像，面覆写掩码 0x3=±X）。
+            if (effState & int(BlockRegistry::TrapdoorStateOpenFlag)) {
+                addShapeBox(verts, idx, 0.8125f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                            trapSide, trapSide, trapSide, -0.5f, bMin, bMax,
+                            0.0f, 1.0f, 0.0f, 1.0f, sideT, 0x3u);
+            } else {
+                addShapeBox(verts, idx, 0.0f, 0.0f, 0.0f, 1.0f, 3.0f / 16.0f, 1.0f,
+                            topT, botT, trapSide, -3.0f / 32.0f, bMin, bMax);
+            }
             break;
         case BlockRegistry::ShapeSlab:
             addShapeBox(verts, idx, 0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f,
@@ -225,31 +303,49 @@ void ItemShapeGeometry::rebuild()
             break;
         }
         case BlockRegistry::ShapeDoor: {
-            // t925 门族（木 19 / 云杉 89 / 铁 71）：合态 facing +X 满高薄板（厚 3/16 贴 +X 边，同 mesher
+            // t925 门族（木 19 / 云杉 89 / 铁 135）：合态 facing +X 满高薄板（厚 3/16 贴 +X 边，同 mesher
             //   合态 state=0 盒区 [0.8125,1]×[0,1]×[0,1]）。大面（±X）贴下格门板瓦片（def.bottomTile=lower
             //   ——手持 / 掉落物 BlockCube 的门贴图同口径，item 语境无「上格」）；薄侧边（±Y/±Z 四面）贴
             //   同族基材（t674 mesher 同规则：木→planks / 云杉→spruce_planks / 铁→iron_block，经 def 取免
             //   字面量漂移）。形心居中 -0.5。
+            // t965 开态（DoorStateOpenFlag，朝向位取放置缺省 0=+X 合态基准）：薄板旋贴 +Z 边（mesher 开态
+            //   facing 0 盒区 x[0,1]×y[0,1]×z[0.8125,1]）；大面（±Z）门板、四薄边（±X/±Y）同族基材
+            //   （面覆写掩码 0x30=±Z）。
             const quint8 planksBlock = (m_blockId == int(BlockRegistry::SpruceDoor))
                 ? BlockRegistry::SprucePlanks
                 : (m_blockId == int(BlockRegistry::IronDoor))
                     ? BlockRegistry::IronBlock
                     : BlockRegistry::Planks;
             const int planksTile = BlockRegistry::def(planksBlock).sideTile;
-            addShapeBox(verts, idx, 0.8125f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
-                        planksTile, planksTile, botT, -0.5f, bMin, bMax,
-                        0.0f, 1.0f, 0.0f, 1.0f, planksTile, 0x3Cu); // 面覆写：±Y+±Z（bit2..5）→ planks
+            if (effState & int(BlockRegistry::DoorStateOpenFlag)) {
+                addShapeBox(verts, idx, 0.0f, 0.0f, 0.8125f, 1.0f, 1.0f, 1.0f,
+                            planksTile, planksTile, planksTile, -0.5f, bMin, bMax,
+                            0.0f, 1.0f, 0.0f, 1.0f, botT, 0x30u);
+            } else {
+                addShapeBox(verts, idx, 0.8125f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                            planksTile, planksTile, botT, -0.5f, bMin, bMax,
+                            0.0f, 1.0f, 0.0f, 1.0f, planksTile, 0x3Cu); // 面覆写：±Y+±Z（bit2..5）→ planks
+            }
             break;
         }
         default:
             if (BlockRegistry::isCrossBillboard(quint8(m_blockId))) {
                 // cross 族（草丛 / 枯灌木 / 蘑菇红白 / 蛛网 / 红石火把 / 小麦作物…）：两片对角交叉双面 quad
-                //   （同 World pushCrossQuad X 形）。t925 小麦作物物品取**成熟金黄穗**瓦片（基底 29 + StageMax 7
-                //   = 36）——调色板注释「图标显成熟态」同口径（物品无生长 state，嫩芽态近乎空白不可辨）。
-                const int crossT = (m_blockId == int(BlockRegistry::WheatCrop))
-                    ? topT + int(BlockRegistry::WheatCropStageMax) : topT;
-                addCrossQuad(verts, idx, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f, crossT, -0.5f, bMin, bMax);
-                addCrossQuad(verts, idx, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, crossT, -0.5f, bMin, bMax);
+                //   （同 World pushCrossQuad X 形）。
+                //   t925 旧口径「小麦物品取成熟金黄穗瓦片（基底 + StageMax，物品无生长 state 嫩芽不可辨）」
+                //   由 auto 态保留（effState=WheatCropStageMax → 同瓦片）；t965 形态按钮组显式 state 走
+                //   stateTileOverride（小麦阶段 29+age / 胡萝卜·马铃薯基底+age/2 / 红石火把 161/170——Core
+                //   单一权威），其余 cross 无态变落 def 顶瓦片。
+                int crossT = BlockRegistry::stateTileOverride(quint8(m_blockId), int(BlockRegistry::PosX),
+                                                              quint8(effState));
+                if (crossT < 0)
+                    crossT = topT;
+                // t965 草丛三变种高度（矮 0.5 / 中 1.0 / 高 2.0——tallGrassVariantHeight Core 权威；
+                //   auto=中草满格 = 旧版唯一外观）。其余 cross 恒满格；yShift=-h/2 形心居中。
+                const float gh = (m_blockId == int(BlockRegistry::TallGrass))
+                    ? BlockRegistry::tallGrassVariantHeight(quint8(effState)) : 1.0f;
+                addCrossQuad(verts, idx, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, gh, crossT, -gh * 0.5f, bMin, bMax);
+                addCrossQuad(verts, idx, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, gh, crossT, -gh * 0.5f, bMin, bMax);
                 break;
             }
             // 兜底：满立方（ShapeFull / 未知形；调用方本不该路由到此，防御性非空几何）。

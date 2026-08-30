@@ -2129,6 +2129,56 @@ void BlockRegistry::torchAttachOffset(quint8 state, int &dx, int &dy, int &dz)
     }
 }
 
+// ── t965 形态按钮组：state 感知瓦片/几何参数单一权威（声明处注释为完整契约）──
+// 各分支逐条镜像原 mesher 局部实现（partialblockgeometry / chunkgeometry 的态变三元收敛到此），
+// 行为与迁出前逐位一致；-1 = 无态变（caller 落 tileIndex / def 默认）。
+int BlockRegistry::stateTileOverride(quint8 blockId, int face, quint8 state)
+{
+    switch (blockId) {
+    case Farmland:
+        // t408/t639② 顶面干/湿两贴图：state 低 2 位湿润等级 >0 → farmland_wet(27)，否则 farmland_dry(26)。
+        if (face == int(Top))
+            return (state & FarmlandHydrationMask) != 0 ? 27 : 26;
+        return -1; // 侧/底恒 dirt（def sideTile），无态变
+    case EndPortal:
+        // t487/t664 框顶无眼 141 / 有眼 142（EndPortalStateActiveFlag；持末影之眼右键翻位）。
+        if (face == int(Top))
+            return (state & EndPortalStateActiveFlag) != 0 ? 142 : 141;
+        return -1; // 侧/底恒 endframe_side(140)
+    case RedstoneTorch:
+        // t638/t657 亮态 redstone_torch（def sideTile 161）/ 熄灭态 170 暗红熄焰（RedstoneTorchStateOffFlag）。
+        return (state & RedstoneTorchStateOffFlag) ? 170 : tileIndex(blockId, PosX);
+    case GoldenRail:
+        // t656/t658 未激活 rail_golden（def sideTile 157）/ 通电 159 亮金轨（GoldenRailStateOnFlag）。
+        return (state & GoldenRailStateOnFlag) ? 159 : tileIndex(blockId, PosX);
+    case DetectorRail:
+        // t638/t691 未激活 rail_detector（def sideTile 158）/ 矿车驶过通电 160 亮红（DetectorRailStateOnFlag bit4）。
+        return (state & DetectorRailStateOnFlag) ? 160 : tileIndex(blockId, PosX);
+    case WheatCrop: {
+        // t236 阶段贴图 29..36：state = 生长年龄 0..7，越界 clamp（不应出现，兜底）。
+        const int stage = qMin(int(state), int(WheatCropStageMax));
+        return def(blockId).topTile + stage;
+    }
+    case CarrotCrop:
+    case PotatoCrop: {
+        // t407 四视觉阶段：state（age）仍 0..7，贴图基底 + age/2（机制等价 MC 4 张阶段图覆盖 8 年龄）。
+        const int stage = qMin(int(state), int(WheatCropStageMax));
+        return def(blockId).topTile + stage / 2;
+    }
+    default:
+        return -1; // 其余方块无 state 感知瓦片（caller 落既有默认路径）
+    }
+}
+
+// 草丛变种高度（声明处注释为完整契约）：矮 0.5（半格）/ 中 1.0（满格，旧版外观）/ 高 2.0（越格）。
+float BlockRegistry::tallGrassVariantHeight(quint8 state)
+{
+    const int variant = qMin(int(state), int(TallGrassVariantMax));
+    return (variant == TallGrassShort) ? 0.5f
+         : (variant == TallGrassTall)  ? 2.0f
+                                       : 1.0f;
+}
+
 // t501 木梯贴墙方向（见头注释）：玩家点击命中面外法线推所贴墙面水平方向。仅水平面（ny==0）合法 —— 顶/底面
 //   非贴墙方向，返回 -1（placeBlock 拒绝放置）。4 向编码同 horizontalFacing（0=+X 1=-X 2=+Z 3=-Z）。
 //   「支撑墙所在方向」= 命中方块相对木梯格的方向：玩家点中 +X 面（nx>0）→ 木梯在命中方块 +X 侧 → 命中方块

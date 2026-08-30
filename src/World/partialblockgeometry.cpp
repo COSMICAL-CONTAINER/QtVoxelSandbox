@@ -318,7 +318,7 @@ int PartialBlockGeometry::append(
         //   176/177；
         //   tileIndex(PosX)=sideTile=lower 是手持 / 掉落物 BlockCube 的门贴图）。
         const BlockRegistry::BlockDef &doorDef = BlockRegistry::def(blockId);
-        const int doorTile = (state & 8) ? doorDef.topTile : doorDef.bottomTile; // bit3=上格 → upper / 下格 → lower
+        const int doorTile = (state & BlockRegistry::DoorStateUpperFlag) ? doorDef.topTile : doorDef.bottomTile; // bit3=上格 → upper / 下格 → lower
         // t674 薄侧边用同族平贴图（用户「门薄侧边用压缩门贴图很抽象」）：门板 3/16 厚的侧边（±Y 顶/底 +
         //   垂直于板面的两个薄侧，共 4 个薄面）改用**同族基材**瓦片（橡木门 → planks / 云杉门 →
         //   spruce_planks / t722 铁门 → iron_block——铁门薄边即铁皮包边，经 BlockRegistry::def 取免字面量
@@ -332,7 +332,7 @@ int PartialBlockGeometry::append(
         const int planksTile = BlockRegistry::def(planksBlock).sideTile;
         //   合：薄板贴在「朝向」边（朝向 +X → 板在 x[0.8125,1]）；开：板旋 90° 贴邻边。
         const int facing = state & 3;
-        const bool open = (state & 4) != 0;
+        const bool open = (state & BlockRegistry::DoorStateOpenFlag) != 0; // t965：bit2 开合位具名化（同热栏形态表）
         float bx0 = 0.f, bx1 = 1.f, bz0 = 0.f, bz1 = 1.f;
         const float t0 = 0.8125f, t1 = 1.0f, s0 = 0.0f, s1 = 0.1875f; // 厚 3/16
         if (!open) {
@@ -366,7 +366,7 @@ int PartialBlockGeometry::append(
         //   iron_trapdoor 格子板（四孔栅格 cutout 透视只在顶/底大面），四个薄侧边走 iron_block。木活板门
         //   t879② 起大面贴图 180（四镂空板）→ 薄侧边（3/16 板厚）走 planks(8)（木板包边，机制等价 MC 木
         //   活板门板厚边 = 木板；同铁活板门 per-face 语言）。两族 sideTile 分流，pushBox sideTile 机制复用。
-        const bool open = (state & 1) != 0;
+        const bool open = (state & BlockRegistry::TrapdoorStateOpenFlag) != 0; // t965：bit0 开合位具名化
         const int ironSideTile = (blockId == BlockRegistry::IronTrapdoor)
             ? BlockRegistry::tileIndex(BlockRegistry::IronBlock, BlockRegistry::PosX)
             : BlockRegistry::tileIndex(BlockRegistry::Planks, BlockRegistry::PosX);
@@ -402,11 +402,8 @@ int PartialBlockGeometry::append(
         //   t310 草变种（矮/中/高）：cross 高度 h 据 state 选——矮草 0.5（半格）、中草 1.0（满格，旧版外观）、
         //   高草 2.0（两格，顶点延伸进上格；同栅栏 y=1.5 越格渲染，上格必为空气，worldgen placeTallGrass 已守）。
         //   垂直 UV 仍取整张瓦片（v0..v1）→ 高草贴图被拉高 2×（草叶显更高）、矮草压缩半高 → 贴图自然表达变种。
-        //   state 越界 clamp 到 TallGrassVariantMax 防异常（不应出现，兜底）。
-        const int variant = std::min(int(state), int(BlockRegistry::TallGrassVariantMax));
-        const float h = (variant == BlockRegistry::TallGrassShort)  ? 0.5f
-                      : (variant == BlockRegistry::TallGrassTall)   ? 2.0f
-                                                                   : 1.0f;
+        //   t965：高度表收敛 BlockRegistry::tallGrassVariantHeight（查看器形态预览同源单一权威）；越界 clamp 兜底保留。
+        const float h = BlockRegistry::tallGrassVariantHeight(state);
         // Plane A：对角 (0,0,0)-(1,0,1)（-X-Z 角到 +X+Z 角）；Plane B：对角 (1,0,0)-(0,0,1)（+X-Z 角到 -X+Z 角）。
         pushCrossQuad(verts, idx, lx, ly, lz,
                       0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, h, 1.f,  0.f, h, 0.f, // Plane A: BL→BR→TR→TL
@@ -423,8 +420,9 @@ int PartialBlockGeometry::append(
         //   **每阶段不同贴图**（spec「每阶段不同贴图」）—— 阶段贴图本身编码生长（嫩芽→拔高→抽穗→金黄），cross 几何
         //   满格高不变（同 MC：作物模型尺寸不变、贴图的透明像素表达「未长到的部分」）。stage 越界（state>max，不应出现）
         //   clamp 到 WheatCropStageMax 防读图集越界。不做邻居剔除（cross 透明 + 作物，同 TallGrass；WheatCrop solid=false）。
-        const int stage = std::min(int(state), int(BlockRegistry::WheatCropStageMax));
-        const int wheatTile = tile + stage; // tile = 基底 wheat_stage_0(29)；wheatTile = 29..36（阶段 0..7）
+        //   t965：基底+stage 阶段瓦片收敛 BlockRegistry::stateTileOverride（查看器形态预览同源单一权威；
+        //   内部 clamp 到 WheatCropStageMax 兜底保留）。
+        const int wheatTile = BlockRegistry::stateTileOverride(blockId, int(BlockRegistry::PosX), quint8(state));
         pushCrossQuad(verts, idx, lx, ly, lz,
                       0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
                       wheatTile, light, tileW, hx, hy, v0, v1);
@@ -460,8 +458,8 @@ int PartialBlockGeometry::append(
         //   仅贴图张数对齐 MC（少画 4 张纹理、观感不减）。stage 越界（state>max，不应出现）clamp 到 max 防读图集越界。
         //   不做邻居剔除（cross 透明 + 作物，同 WheatCrop；CarrotCrop/PotatoCrop solid=false）。材质 alphaCutoff:0.5
         //   丢弃透明底。tile = 基底（CarrotCrop def 各面=69 / PotatoCrop def 各面=73）。
-        const int stage = std::min(int(state), int(BlockRegistry::WheatCropStageMax));
-        const int cropTile = tile + (stage / 2); // 4 阶段贴图：基底 + state/2（CarrotCrop 69..72 / PotatoCrop 73..76）
+        //   t965：基底+age/2 阶段瓦片收敛 BlockRegistry::stateTileOverride（查看器形态预览同源单一权威）。
+        const int cropTile = BlockRegistry::stateTileOverride(blockId, int(BlockRegistry::PosX), quint8(state));
         pushCrossQuad(verts, idx, lx, ly, lz,
                       0.f, 0.f, 0.f,  1.f, 0.f, 1.f,  1.f, 1.f, 1.f,  0.f, 1.f, 0.f, // Plane A: BL→BR→TR→TL
                       cropTile, light, tileW, hx, hy, v0, v1);
@@ -656,11 +654,11 @@ int PartialBlockGeometry::append(
         //   0 连接无坡（MC 拐角不爬坡）。矿车 Y 沿同公式重推（MinecartManager 钉轨面读同一 railProbeDelta），
         //   渲染几何与矿车高度严格一致。材质 alphaCutoff:0.5 丢弃透明底 → 仅轨像素显（Rail solid=false）。
         constexpr float yr  = 1.0f / 16.0f;  // 铁轨厚度（cell 底以上 1/16，贴地板防 z-fight）
-        int railTile = BlockRegistry::tileIndex(blockId, BlockRegistry::PosX); // 121/157/158（各自 def sideTile）
-        if (blockId == BlockRegistry::DetectorRail && (state & BlockRegistry::DetectorRailStateOnFlag))
-            railTile = 160; // t638 探测轨通电视觉（矿车驶过 bit0 → rail_detector_on 亮红）
-        if (blockId == BlockRegistry::GoldenRail && (state & BlockRegistry::GoldenRailStateOnFlag))
-            railTile = 159; // t658 动力轨通电贴图（电力驱动 bit4 → rail_golden_on 亮金轨 + 亮红连接点；t638 留图集备用瓦片的消费方）
+        // t965：通电态变瓦片（探测轨 158/160、动力轨 157/159）收敛 BlockRegistry::stateTileOverride
+        //   （查看器形态预览同源单一权威）；-1 兜底 = 直落 def 侧瓦片（普通轨 121 无态变）。
+        int railTile = BlockRegistry::stateTileOverride(blockId, int(BlockRegistry::PosX), state);
+        if (railTile < 0)
+            railTile = BlockRegistry::tileIndex(blockId, BlockRegistry::PosX);
         const bool straightOnly = (blockId != BlockRegistry::Rail); // 动力 / 探测轨直线 only（无拐角 / 十字）
         const quint8 con = quint8(state & 0x0F); // 形状只看低 4 位连接（bit5 轴偏好 / bit4 通电不参与）
         const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
@@ -793,9 +791,10 @@ int PartialBlockGeometry::append(
         //       quad 均含火把轴（剪影沿倾轴渲染）：W 片平行墙面（正对墙看的正视图，宽 0.8 整瓦）+ S 片
         //       垂直墙面（侧视深度窄带宽 0.2，t776 采瓦片中央焰列区）—— 两片火把列共轴重合（t776 修
         //       「横竖剪影错位不重合」）、剪影紧贴附着面、读作「斜插墙上的火把」。
-        int torchTile = tile;
-        if (state & BlockRegistry::RedstoneTorchStateOffFlag)
-            torchTile = 170; // t657 熄灭态（redstone_torch_off）
+        //   t965：亮/灭瓦片（161/170）收敛 BlockRegistry::stateTileOverride（查看器形态预览同源单一权威）。
+        int torchTile = BlockRegistry::stateTileOverride(blockId, int(BlockRegistry::PosX), state);
+        if (torchTile < 0)
+            torchTile = tile;
         int ax = 0, ay = 0, az = 0;
         BlockRegistry::torchAttachOffset(state, ax, ay, az);
         if (ax == 0 && az == 0) {
@@ -1040,7 +1039,8 @@ int PartialBlockGeometry::append(
         //   深色翻耕土 + 犁沟纹）—— 相邻水（经 World::tickFarmlandHydration 复算写 state）后顶面真正换成湿贴图（肉眼
         //   见变湿，非仅顶点色微暗）；4 级湿润再叠 mesher 顶点色暗化（darker=wetter，同前）。侧·底恒 dirt(2)。
         constexpr float kFarmlandTop = 0.9375f; // 15/16（与 collisionAABBs 耕地特例同高）
-        const int topTile = (state & BlockRegistry::FarmlandHydrationMask) > 0 ? 27 : 26; // 26=farmland_dry / 27=farmland_wet
+        // t965：顶面干/湿瓦片（26/27）收敛 BlockRegistry::stateTileOverride（查看器形态预览同源单一权威）。
+        const int topTile = BlockRegistry::stateTileOverride(blockId, int(BlockRegistry::Top), state);
         pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, kFarmlandTop, 0.f, 1.f,
                 tile, light, tileW, hx, hy, v0, v1,
                 topTile); // +Y 顶面：干 26 / 湿 27（据湿润等级）；侧·底用 tile(=sideTile dirt 2)

@@ -407,10 +407,10 @@ int ChunkGeometry::tileFor(quint8 block, int face, quint8 state) const
     //   中央暗绿凹槽）→ endframe_eye(142)（已放之眼：框面 + 中央之眼亮纹，放之眼后的可见反馈）。
     //   旧 t487 程序星空贴图（end_portal 129 / end_portal_active 130）仍在图集，但已无 BlockDef/tileFor
     //   引用（非 pack 程序回退改走 140..142 的 build_endframe.py 程序贴图）。
+    //   t965：顶面态变选择收敛 BlockRegistry::stateTileOverride（查看器形态预览同源单一权威）。
     if (block == BlockRegistry::EndPortal) {
-        if (face == int(BlockRegistry::Top))
-            return (state & BlockRegistry::EndPortalStateActiveFlag) != 0 ? 142 : 141;
-        return 140; // 侧 / 底 = endframe_side（框身）
+        const int overrideTile = BlockRegistry::stateTileOverride(block, face, state);
+        return overrideTile >= 0 ? overrideTile : 140; // 顶 = 141/142（Core 态变权威）；侧/底 = endframe_side
     }
     // t638 ② 南瓜朝向 per-face（同箱子 / 熔炉 / 发射器模式）：前面（刻面 pumpkin_face）所朝面由 state
     //   bit[1:0] 决定（放置时朝玩家，placeBlock 写 horizontalFacing^1；此前南瓜未写 state → 前面恒 -Z 固定

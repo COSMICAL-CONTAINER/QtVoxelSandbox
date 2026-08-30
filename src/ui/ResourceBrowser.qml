@@ -282,11 +282,16 @@ Item {
     //   活板门（20/136）/ 火把（13）/ 台阶四族（15/87/58/109）/ 楼梯三族（16/59/110）/ 雪层（44）/
     //   草丛（24）/ 附魔台（94，带书）→ ItemShapeGeometry 真实 3D 形状旋转预览（替代大图标平面图）。
     //   t925 二批扩面（凡右键可放置的方块都应有 3D 模型）：枯灌木（43）/ 小麦作物（25，成熟态瓦片）/
-    //   栅栏族（木 17 / 圆石墙 60 / 云杉 88，柱 + 双档满连形态）/ 门族（木 19 / 铁 71 / 云杉 89，薄板 +
+    //   栅栏族（木 17 / 圆石墙 60 / 云杉 88，柱 + 双档满连形态）/ 门族（木 19 / 铁 135 / 云杉 89，薄板 +
     //   同族基材薄边）/ 白蘑菇（115）/ 红蘑菇（48）/ 蜘蛛网（102）/ 红石火把（129）——cross 族走
     //   ItemShapeGeometry 交叉双面片；拉杆（112）/ 木·石按钮（113/114）——mechBoxes 单一几何源。
     //   字面量 = BlockRegistry id（QML 不 import C++ 枚举；两侧家族表注释互指——加族员须同步两处；
     //   掉落物排除清单沿用 t880：铁轨平贴族 / 楼梯三族 billboard）。
+    //   t965 两处修订：① 门族「铁 71」系**错 id**（71 = WoolCyan 青色羊毛——旧版把青羊毛暗路由进
+    //   ItemShapeGeometry 满格兜底〔观感凑巧同 BlockCube 掩盖〕、铁门 135 反而拿不到 3D 门预览/掉落
+    //   薄板形态）→ 订正 135；② 动力铁轨（127）**查看器侧**新入 3D（贴地薄板 quad，形态按钮组
+    //   未激活/激活亮金轨贴图差需真 3D 预览承载）——掉落物侧排除清单不变（Main.qml isItem3DFamily
+    //   不收 127，轨道掉落仍 billboard；两侧家族表差集 = {16,59,110,127}）。
     readonly property bool selectedIsItem3D: root.selectedId === 13 || root.selectedId === 20
         || root.selectedId === 136 || root.selectedId === 15 || root.selectedId === 87
         || root.selectedId === 58 || root.selectedId === 109 || root.selectedId === 16
@@ -294,10 +299,11 @@ Item {
         || root.selectedId === 44 || root.selectedId === 24 || root.selectedId === 94
         || root.selectedId === 43 || root.selectedId === 25 // t925：枯灌木 / 小麦
         || root.selectedId === 17 || root.selectedId === 60 || root.selectedId === 88 // 栅栏族
-        || root.selectedId === 19 || root.selectedId === 71 || root.selectedId === 89 // 门族
+        || root.selectedId === 19 || root.selectedId === 135 || root.selectedId === 89 // 门族（t965：铁门订正 135，原误 71=青色羊毛）
         || root.selectedId === 115 || root.selectedId === 48 // 白 / 红蘑菇
         || root.selectedId === 102 || root.selectedId === 129 // 蛛网 / 红石火把
         || root.selectedId === 112 || root.selectedId === 113 || root.selectedId === 114 // 拉杆 / 按钮
+        || root.selectedId === 127 // t965：动力铁轨（查看器限定 3D；形态态变贴地薄板预览）
     readonly property string selectedMobCategory: {
         if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
         const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
@@ -307,6 +313,21 @@ Item {
 
     // 当前选中物 id（默认首个；Component.onCompleted 兜底）。
     property int selectedId: 0
+    // ── t965 形态按钮组（预览区下沿悬浮面板 formPanel）──
+    // 支持表单一权威 = Hotbar::blockFormStates（Game 层；按钮 index → state 值表，空表=不支持）。
+    // 本侧零状态字面量：只消费表 + 维护选中钮 + 把 state 写进预览几何（BlockCube / ItemShapeGeometry
+    // 的 blockState 属性 → BlockRegistry::stateTileOverride 态变瓦片/开合几何——Core 单一权威）。
+    readonly property var selectedFormStates: root.hotbar && root.selectedId > 0
+        ? root.hotbar.blockFormStates(root.selectedId) : []
+    // 形态按钮组当前选中钮（0 = 表首 = 最普通/放置缺省形态——耕地干 / 门活板门合 / 草丛矮 /
+    //   红石火把亮 / 动力轨未激活 / 末地框无眼 / 作物初始阶段，用户「默认最普通形态」口径）。
+    property int selectedFormIndex: 0
+    // 换选物品即回默认形态（防上一件的钮位串味到新一件——state 表随 id 换，钮位语义不跨 id）。
+    onSelectedIdChanged: root.selectedFormIndex = 0
+    // 预览驱动 state（越界/非支持防御回 0 = 缺省形态）。
+    readonly property int selectedFormState: root.selectedFormIndex > 0
+        && root.selectedFormIndex < root.selectedFormStates.length
+        ? root.selectedFormStates[root.selectedFormIndex] : 0
     // t617 悬浮窗（同创造背包 t94 tooltip 模式）：hover 格写 hoveredName + hoveredTipPos（格顶中心，panel
     //   坐标系），离开按名守卫清除（防相邻格进出竞态互清）。tooltip 名 + 简述（类别 / mobType）。
     //   t633 ① 修「hover 名字空白」：①两 HoverHandler 补 hotbar 空守卫（hotbar 注入前 hover → 旧版
@@ -866,7 +887,9 @@ Item {
                                         //   多模型互斥不叠渲染）。
                                         visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed && !root.selectedIsItem3D // review27 #4：附魔台 94 不在 isPartialBlock → selectedIsCube 对 94 仍 true，与下方 ItemShapeGeometry 预览叠渲 z-fight（同 Main.qml 掉落物侧修法）；家族互斥钉死
                                         // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
-                                        geometry: BlockCube { blockId: root.selectedId }
+                                        // t965：blockState 绑形态按钮组（耕地干/湿顶面、末地框无眼/有眼顶面——
+                                        //   BlockRegistry::stateTileOverride Core 权威；非态变方块 state 0 零漂移）。
+                                        geometry: BlockCube { blockId: root.selectedId; blockState: root.selectedFormState }
                                         // 固定 -22° X 基倾（见顶面）+ userPitch 拖拽俯仰（t599）+ Y 自转
                                         //   （spinAngle，拖拽时由 DragHandler 写入）；-35° 基偏给 3/4 视角。
                                         eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
@@ -921,7 +944,10 @@ Item {
                                         scale: Qt.vector3d(item3DScale, item3DScale, item3DScale)
                                         eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
                                         Model {
-                                            geometry: ItemShapeGeometry { blockId: root.selectedId }
+                                            // t965：blockState 绑形态按钮组（门/活板门开合几何、草丛高度、
+                                            //   作物/红石火把/动力轨态变瓦片——ItemShapeGeometry 显式 state 路径；
+                                            //   auto 旧默认仅掉落物侧消费）。
+                                            geometry: ItemShapeGeometry { blockId: root.selectedId; blockState: root.selectedFormState }
                                             materials: PrincipledMaterial {
                                                 lighting: PrincipledMaterial.NoLighting
                                                 alphaMode: PrincipledMaterial.Mask
@@ -1656,6 +1682,72 @@ Item {
                                             horizontalAlignment: Text.AlignHCenter
                                             text: "毛色为图鉴预览着色 · 游戏内羊染色待后续"
                                             color: "#7fae7f"; font.pixelSize: 9
+                                        }
+                                    }
+                                }
+
+                                // ── t965 形态切换按钮组悬浮面板（预览区下沿内侧；与 variantPanel 同款
+                                //   悬浮语言/同层 z 约定）──
+                                //   支持方块「状态」形态切换：耕地干/湿、门+活板门未激活/激活、草丛矮/中/高、
+                                //   红石火把亮/灭、动力轨未激活/激活、末地框无眼/有眼、作物生长阶段（Hotbar::
+                                //   blockFormStates 单一权威，空表=不支持 → 面板不出现）。编号钮 1 2 3…，
+                                //   钮 1 = 表首 = 最普通/放置缺省形态（默认选中）。选中物切换回钮 1
+                                //   （onSelectedIdChanged 重置）；预览网格经 blockState → Core 态变即时刷新。
+                                //   生物段/生物蛋选中（selectedMobFromSection ≥ 0）不出现（变体归 variantPanel）。
+                                //   z 序：预览区浮层永远最前契约（t964 登记）→ 显式 z: 10 同 variantPanel。
+                                Rectangle {
+                                    id: formPanel
+                                    visible: root.selectedMobFromSection < 0 && root.selectedFormStates.length > 0
+                                    // t965 预览区浮层最前（同 variantPanel t783 / 重置按钮 t964 约定；
+                                    //   独立 z 行 = P-t964(b) 约定钉的计数形态，勿并注释入行）。
+                                    z: 10
+                                    width: parent.width - 58 // 同 variantPanel 收窄 58 让位右下角重置按钮（两面板互斥显隐恒不叠）
+                                    height: formCol.implicitHeight + 10
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 6
+                                    radius: 8
+                                    color: Qt.rgba(0.059, 0.078, 0.102, 0.85) // #0f141a 半透明（variantPanel 同色）
+                                    border.color: "#3a444f"; border.width: 1
+                                    Column {
+                                        id: formCol
+                                        width: parent.width - 10
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.top: parent.top
+                                        anchors.topMargin: 5
+                                        spacing: 5
+
+                                        Text {
+                                            text: "形态切换"
+                                            color: "#7fae7f"; font.pixelSize: 11; font.bold: true
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                        }
+                                        // 编号钮组（1 2 3…＝形态序；激活钮金边金字 = 选中格高亮同款语言）。
+                                        //   8 钮（作物阶段）最多：8×26+7×4 = 236 ≤ 面板内容宽 254 恒不溢出。
+                                        Row {
+                                            spacing: 4
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            Repeater {
+                                                model: root.selectedFormStates
+                                                delegate: Rectangle {
+                                                    width: 26; height: 26; radius: 5
+                                                    color: formSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
+                                                    border.color: index === root.selectedFormIndex ? "#ffd76a" : "#3a5a7a"
+                                                    border.width: index === root.selectedFormIndex ? 2 : 1
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: index + 1
+                                                        color: index === root.selectedFormIndex ? "#ffd76a" : "#7fb0e5"
+                                                        font.pixelSize: 12
+                                                    }
+                                                    MouseArea {
+                                                        id: formSegHover
+                                                        anchors.fill: parent; hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.selectedFormIndex = index
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

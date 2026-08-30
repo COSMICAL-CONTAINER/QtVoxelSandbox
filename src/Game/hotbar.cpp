@@ -916,6 +916,51 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::StoneBrickStairs) };                         // 石砖楼梯（整步+背墙；复用 ShapeStairs 几何 + 石砖贴图；可放置）
 }
 
+// ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
+//   state 值直读 BlockRegistry 具名位/常量（门 bit2 / 活板门 bit0 / 红石火把熄灭位 / 动力轨通电位 /
+//   末地框激活位 / 耕地湿润上界 / 作物阶段上界）——本表是「按钮 index → state」的唯一权威，
+//   QML 零复制（ResourceBrowser 经本查询建按钮组 + 驱动预览 state）。
+QVariantList Hotbar::blockFormStates(int blockId) const
+{
+    QVariantList s;
+    switch (blockId) {
+    case BlockRegistry::Farmland: // 耕地：干(0)/湿(3 最深——湿润等级低 2 位，最深档湿贴图观感最明确)
+        s = { 0, int(BlockRegistry::FarmlandHydrationMax) };
+        break;
+    case BlockRegistry::WoodDoor: // 门三族：未激活合(0)/激活开(bit2=DoorStateOpenFlag)；朝向位取放置缺省 0
+    case BlockRegistry::SpruceDoor:
+    case BlockRegistry::IronDoor:
+        s = { 0, int(BlockRegistry::DoorStateOpenFlag) };
+        break;
+    case BlockRegistry::WoodTrapdoor: // 活板门两族：未激活合(0)/激活开(bit0=TrapdoorStateOpenFlag)
+    case BlockRegistry::IronTrapdoor:
+        s = { 0, int(BlockRegistry::TrapdoorStateOpenFlag) };
+        break;
+    case BlockRegistry::TallGrass: // 草丛：矮(0)/中(1)/高(2)——TallGrass* 变种枚举即 state 值
+        s = { int(BlockRegistry::TallGrassShort), int(BlockRegistry::TallGrassMedium),
+              int(BlockRegistry::TallGrassTall) };
+        break;
+    case BlockRegistry::RedstoneTorch: // 红石火把：亮(0=放置缺省常亮)/灭(RedstoneTorchStateOffFlag)
+        s = { 0, int(BlockRegistry::RedstoneTorchStateOffFlag) };
+        break;
+    case BlockRegistry::GoldenRail: // 动力铁轨：未激活(0)/激活(GoldenRailStateOnFlag 通电亮金贴图)
+        s = { 0, int(BlockRegistry::GoldenRailStateOnFlag) };
+        break;
+    case BlockRegistry::EndPortal: // 末地传送门框架：无眼(0=放置缺省)/有眼(EndPortalStateActiveFlag)
+        s = { 0, int(BlockRegistry::EndPortalStateActiveFlag) };
+        break;
+    case BlockRegistry::WheatCrop: // 作物三族：生长阶段 0..7（共享 WheatCropStageMax 上界，t407 同机制）
+    case BlockRegistry::CarrotCrop:
+    case BlockRegistry::PotatoCrop:
+        for (int st = 0; st <= int(BlockRegistry::WheatCropStageMax); ++st)
+            s << st;
+        break;
+    default:
+        break; // 不支持形态切换 → 空表 = 按钮组不出现（面板可见性门）
+    }
+    return s;
+}
+
 QString Hotbar::iconSourceAt(int slot) const
 {
     return iconSourceForBlock(blockIdAt(slot));

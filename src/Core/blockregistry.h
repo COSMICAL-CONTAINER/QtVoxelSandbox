@@ -1641,6 +1641,19 @@ public:
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
     static int tileIndex(quint8 blockId, Face face);
 
+    // ── t965 形态按钮组：state 感知瓦片/几何参数单一权威 ──
+    //   资源查看器形态预览（BlockCube / ItemShapeGeometry）与 mesher 态变分支共用本查询，杜绝
+    //   「预览侧复刻一份 state→瓦片映射」的第二权威漂移（同 AtlasTileCount 收编魔数的历史教训）。
+    // stateTileOverride：据 (blockId, face, state) 返回**态变瓦片**序号；返回 -1 = 本方块/面无态变
+    //   （caller 落既有 tileIndex / def 默认路径，行为与旧版逐位一致）。覆盖族：
+    //   Farmland 顶 26(干)/27(湿)、EndPortal 顶 141(无眼)/142(有眼)、RedstoneTorch 161(亮)/170(灭)、
+    //   GoldenRail 157/159(通电亮金)、DetectorRail 158/160(通电视觉)、WheatCrop 29+age(0..7)、
+    //   CarrotCrop/PotatoCrop 基底+age/2（4 视觉阶段，t407 口径）。
+    static int stateTileOverride(quint8 blockId, int face, quint8 state);
+    // tallGrassVariantHeight：草丛变种 cross 高度（矮 0.5 / 中 1.0 / 高 2.0，state 越界 clamp 兜底）。
+    //   mesher TallGrass case 与查看器形态预览同源（高度值原散落 partialblockgeometry 局部三元）。
+    static float tallGrassVariantHeight(quint8 state);
+
     //   109=enchanting_table_top（t474/t620 附魔台顶面贴图；非 pack = 黑曜石深紫黑底 + 钻石青白菱斑 + 顶部立书轮廓，
     //      原创自绘 §9a；pack = enchanting_table_top.png；EnchantingTable 顶面=本 tile；tools/build_enchanting_table.py）。
     //   110=enchanting_table_side（t474/t620 附魔台侧面贴图（底面复用 obsidian(77)；非 pack = 黑曜石深紫黑底 +
@@ -2012,6 +2025,14 @@ public:
     //   本位不动附着位）。lightEmission 状态感知版：本位置位 → 0（不发光）；清位（亮）→ id-only 表 7。
     //   mesher（partialblockgeometry RedstoneTorch case）读本位换 off 贴图（暗红熄焰）。
     static constexpr quint8 RedstoneTorchStateOffFlag = 0x08;
+    // ── t965 形态按钮组开合位命名化（Game 形态表 / mesher / 查看器预览几何三消费端同源；原散落
+    //   字面量 4/8/1 收编为具名常量，防「改一处漏两处」位编码漂移）──
+    // 门 state bit2 = 开(1)/合(0)（Wood/Spruce/Iron 三族同码；右键 useBlock / 铁门红石接收器同翻此位）。
+    static constexpr quint8 DoorStateOpenFlag = 0x04;
+    // 门 state bit3 = 上格(1)/下格(0)（两格高门上下格贴图选择，partialblockgeometry door case 读）。
+    static constexpr quint8 DoorStateUpperFlag = 0x08;
+    // 活板门 state bit0 = 开(1，竖直贴边)/合(0，水平贴地)；bit[2:1] = 开时朝向（与门朝向编码同源）。
+    static constexpr quint8 TrapdoorStateOpenFlag = 0x01;
     // t638 木门透光：门上半格栅窗是透光窗格（机制等价 MC 1.0 门上半窗透光）。门 solid=false（不挡邻居面
     //   剔除）→ lightOpacity 默认 0 已全透；本常量仅作 mesher 立面透光语义锚点（门格光衰减 = 0，无遮），
     //   防 future「按 solid 满遮」重构回退。消费点：lightOpacity（WoodDoor/SpruceDoor 恒 0）。

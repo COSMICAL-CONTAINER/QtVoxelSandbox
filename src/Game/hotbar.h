@@ -332,6 +332,14 @@ public:
     Q_INVOKABLE QVariantList countList() const;
     // 创造背包网格：全部可放置方块 id（air 除外）。ViewModel 读 BlockRegistry（单一权威）；恒定。
     Q_INVOKABLE QVariantList creativeBlocks() const;
+    // ── t965 形态按钮组：方块「状态」形态支持表（Game 层单一权威；ResourceBrowser 形态面板消费）──
+    //   返回该方块可切换的 state 值表（**按钮 index → state**；空表 = 不支持形态切换 → 按钮组不出现）。
+    //   表首恒为 state 0 = 放置缺省形态（默认选中钮 1）——耕地=干 / 门·活板门=未激活合 / 草丛=矮 /
+    //   红石火把=亮 / 动力轨=未激活 / 末地传送门框架=无眼 / 作物=初始阶段（用户口径「默认最普通形态」）。
+    //   覆盖：耕地干/湿、门三族（木/云杉/铁）+ 活板门两族（木/铁）未激活/激活、草丛矮/中/高、
+    //   红石火把亮/灭、动力铁轨未激活/激活、末地传送门框架无眼/有眼、作物三族（小麦/胡萝卜/马铃薯）
+    //   生长阶段 0..7。state 编码直读 BlockRegistry 具名位/常量（免字面量漂移）。
+    Q_INVOKABLE QVariantList blockFormStates(int blockId) const;
     // 滚轮循环：delta>0 向右（下标+1），delta<0 向左（下标-1），环绕到 [0, slotCount)。
     Q_INVOKABLE void scroll(int delta);
 

@@ -26,6 +26,7 @@
 #include <QUrl>    // Review 2026-08-24 #5 探针（packFileUrl 查询串剥离断言：QUrl::toLocalFile）
 #include <QMetaObject> // t898 review27 #1 探针（sleepLying Q_PROPERTY 契约面：indexOfProperty/property 经 metaobject 读回）
 #include <cmath>
+#include <cstring> // t965 探针 std::memcpy（vertexData 直读顶点 u 分量）
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
 #include <QQmlEngine>   // t874/t875 真链探针：QQmlEngine + qmlRegisterType —— 真 QML 面板 × 真 C++ Hotbar 同台
@@ -64,7 +65,8 @@
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
                                    //   PLAN §2 低层永不 include 高层；互钉只能落在本测试 TU，它合法 include 全栈）
-#include "itemshapegeometry.h"    // t880 异形物品 3D 模型族探针（ItemShapeGeometry 几何契约直调：顶点数/bounds）
+#include "itemshapegeometry.h"    // t880 异形物品 3D 模型族探针（ItemShapeGeometry 几何契约直调：顶点数/bounds）；t965 形态按钮组态变直调共用
+#include "blockcube.h"            // t965 形态按钮组探针（BlockCube 状态态变顶面瓦片行为级直调——同 ItemShapeGeometry 先例）
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
 //   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t952 起
@@ -8931,7 +8933,8 @@ int main(int argc, char *argv[])
                 // 栅栏族（木 17 / 云杉 88）：柱 + 四向双档 = 9 盒 × 24。
                 { int(BR::WoodFence),   216, 0.501f, 0.501f, -0.501f },
                 { int(BR::SpruceFence), 216, 0.501f, 0.501f, -0.501f },
-                // 门族（木 19 / 云杉 89 / 铁 71）：单薄板；x ∈ [0.3125, 0.5]（+X 边厚 3/16 居中后非对称）。
+                // 门族（木 19 / 云杉 89 / 铁 135）：单薄板；x ∈ [0.3125, 0.5]（+X 边厚 3/16 居中后非对称）。
+                //   t965 订正：铁门 135（家族表旧字面量 71 系错 id=青色羊毛；几何类本就用 BR::IronDoor 不受影响）。
                 { int(BR::WoodDoor),   24, 0.501f, 0.501f, 0.31f },
                 { int(BR::SpruceDoor), 24, 0.501f, 0.501f, 0.31f },
                 { int(BR::IronDoor),   24, 0.501f, 0.501f, 0.31f },
@@ -8963,6 +8966,8 @@ int main(int argc, char *argv[])
             }
         }
         // 家族表同步源码钉：两侧 QML 谓词都含 t925 全部 14 个族员（字面量逐一）。
+        //   t965 订正：铁门 135（旧 71 系错 id=青色羊毛，两侧 QML 同步订正；查看器侧另新增 127
+        //   动力轨——掉落物侧排除清单不变，故 127 不进本同步表）。
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
             const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -8979,7 +8984,7 @@ int main(int argc, char *argv[])
             } else {
                 const QString selBlock = browser.mid(iSel, 1600);  // 谓词绑定块窗口（现长 ~750，余量防漂移误红）
                 const QString fnBlock = mainQml.mid(iFn, iFnEnd - iFn);
-                const QList<int> ids = { 43, 25, 17, 60, 88, 19, 71, 89, 115, 48, 102, 129, 112, 113, 114 };
+                const QList<int> ids = { 43, 25, 17, 60, 88, 19, 135, 89, 115, 48, 102, 129, 112, 113, 114 };
                 for (int id : ids) {
                     const QString lit = QStringLiteral("=== ") + QString::number(id);
                     if (!selBlock.contains(lit) || !fnBlock.contains(lit)) {
@@ -18364,7 +18369,9 @@ Item {
             QFile rf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
             const QString t = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
             const int i0 = t.indexOf(QStringLiteral("visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed"));
-            const int i1 = t.indexOf(QStringLiteral("geometry: BlockCube { blockId: root.selectedId }"), i0);
+            // t965 合法演化：BlockCube 绑定追加 blockState 形态按钮组接线（家族互斥钉意图不变——
+            //   锚串同步到新绑定形态，仍锚定查看器预览的 BlockCube 本体）。
+            const int i1 = t.indexOf(QStringLiteral("geometry: BlockCube { blockId: root.selectedId; blockState: root.selectedFormState }"), i0);
             if (i0 < 0 || i1 <= i0) {
                 ok4 = false;
                 qInfo().noquote() << "  [review27-4 diag] ResourceBrowser BlockCube slice miss";
@@ -25280,8 +25287,8 @@ Item {
     //        提及不算）+ 契约注释锚「t964 永远最前」；且 cubeView 头段（id → PerspectiveCamera
     //        之间）无 z 覆盖（缺省 0）—— 两侧合钉 = 「按钮层 z > 视口层 z」。阴性 = 删按钮
     //        `z: 10` 行 → 块扫描红（回归即测即红）。
-    //    (b) 约定钉：全文独立 `z: 10` 行恰 2 处（变体面板 t783 ② 先例 + 本按钮 t964）=「预览区浮层
-    //        永远最前」层级契约登记（t965 形态/分类按钮组入预览区按同约定加 z）。
+    //    (b) 约定钉：全文独立 `z: 10` 行恰 3 处（变体面板 t783 ② 先例 + 本按钮 t964 + t965 形态按钮组
+    //        按约定入层——钉合法演化）=「预览区浮层永远最前」层级契约登记（t967 分类按钮组同约定加 z）。
     //    (c) 身份钉：块内仍是缩放重置按钮本体（缩放态显隐谓词 + reset 写 1.0 + 右下角锚）防 z 钉漂移。
     {
         bool ok = true;
@@ -25307,11 +25314,14 @@ Item {
                          && btnBlock964.contains(QStringLiteral("t964 永远最前"))
                          && viewHead964.contains(QStringLiteral("anchors.fill: parent"))
                          && !viewHead964.contains(QStringLiteral("z:"));
-        // (b) 独立 z: 10 行（行首缩进 + 行尾，不把 z: 1000 计入）恰 2 处 = 面板 + 按钮。
+        // (b) 独立 z: 10 行（行首缩进 + 行尾，不把 z: 1000 计入）恰 3 处 = 面板 + 按钮 + t965 形态
+        //     按钮组（钉合法演化 P-t949(d) 先例：t965 形态面板按 t964 登记的「预览区浮层 z ≥ 10」
+        //     约定入层，约定本身不变、成员数 2→3）。
         const int zRows964 = rb964.count(QRegularExpression(QStringLiteral("^\\s*z: 10\\s*$"),
                                                              QRegularExpression::MultilineOption));
-        const bool okB964 = zRows964 == 2
-                         && rb964.contains(QStringLiteral("id: variantPanel"));
+        const bool okB964 = zRows964 == 3
+                         && rb964.contains(QStringLiteral("id: variantPanel"))
+                         && rb964.contains(QStringLiteral("id: formPanel"));
         // (c) 按钮本体身份（防层级钉漂到其他控件）。
         const bool okC964 = btnBlock964.contains(QStringLiteral("visible: cubeView.visible && Math.abs(root.previewZoom - 1.0) > 0.001"))
                          && btnBlock964.contains(QStringLiteral("onClicked: root.previewZoom = 1.0"))
@@ -25336,10 +25346,245 @@ Item {
                              "t965 mode/classification button group all carry explicit z >= 10, "
                              "always frontmost of the viewport); legs: button-block z pin + "
                              "contract comment anchor + viewport-head-stays-default-z pin (button "
-                             "layer z > viewport layer z), file-wide standalone z: 10 row count == 2 "
-                             "(panel + button), and identity pins keeping the z pin on the real "
+                             "layer z > viewport layer z), file-wide standalone z: 10 row count == 3 "
+                             "(panel + button + the t965 form button group joining the registered "
+                             "z >= 10 floating-layer convention), and identity pins keeping the z pin on the real "
                              "reset button (zoom-visibility predicate, reset-to-1.0 handler, "
                              "bottom-right anchor)";
+    }
+
+    // ── P-t965 形态切换按钮组系统探针（R19.17 🅴；用户第五轮口径「变体面板扩展成编号按钮组（1 2 3…
+    //    默认最普通形态）——耕地干/湿两态、门+活板门未激活/激活、草丛低/中/高三态、红石火把亮/灭、
+    //    动力铁轨未激活/激活、末地传送门框架有眼/无眼、作物（小麦/胡萝卜/马铃薯）生长阶段」）──
+    //    支持清单核实结论（state 表达方式逐项核自数据层实现，无臆造 API；无末地主题方块缺席项——
+    //    末地传送门框架即 EndPortal=111，state bit0 = 末影之眼放眼位）：
+    //      耕地 23 = state 低 2 位湿润等级（干 0 / 湿 3 最深；顶瓦 26/27）
+    //      门三族 19/89/135 = state bit2 开合（合 0 / 开 4；薄板几何换边）——135 系 t965 订正（旧
+    //        家族表字面量 71 是错 id=青色羊毛）
+    //      活板门两族 20/136 = state bit0 开合（合 0 / 开 1；水平薄板↔竖直薄板）
+    //      草丛 24 = state 即变种 0/1/2（cross 高 0.5/1.0/2.0）
+    //      红石火把 129 = state bit3 熄灭位（亮 0 / 灭 8；瓦 161/170）
+    //      动力轨 127 = state bit4 通电位（未激活 0 / 激活 16；瓦 157/159）
+    //      末地框 111 = state bit0 放眼位（无眼 0 / 有眼 1；顶瓦 141/142）
+    //      作物三族 25/55/56 = state 即生长阶段 0..7（小麦瓦 29+age；胡萝卜/马铃薯基底+age/2 四视觉阶段）
+    //    形态钮 n → 支持表 index n-1；钮 1 = 表首 state 0 = 放置缺省（最普通）形态（用户口径；
+    //    红石火把放置即常亮 → 钮 1=亮，灭是受供电的特殊态——用户原文「红石火把亮/灭」序同）。
+    //    (a) 支持表行为钉：Hotbar::blockFormStates 直调——13 支持项逐 id 数量/编码/默认态 + 8 不支持
+    //        项空表（含 71 青羊毛 / 128 探测轨——不在用户口径的邻位防外溢）。
+    //    (b) 预览几何行为级三类状态差（ItemShapeGeometry 直调 t880 先例 + BlockCube 直调新链）：
+    //        活板门/门开合 bounds 换边、草丛三态高度、作物阶段/红石火把/动力轨态变瓦片 UV、
+    //        耕地干湿/末地框无眼有眼顶面瓦片 + 非形态方块 state 惰性零漂移钉。
+    //    (c) 查看器源码钉：按钮组构建链（支持表消费 + 默认钮 1 + 换选重置 + 预览 blockState 接线 +
+    //        编号钮本体 + z:10 浮层契约〔P-t964(b) 同步演化恰 3〕+ 门族 135/127 家族钉与 71 绝迹）。
+    {
+        bool ok = true;
+        // (a) 支持表行为钉（Hotbar::blockFormStates 直调；Game 层单一权威）。
+        Hotbar hb965;
+        struct FormExpect { int id; int count; int first; int second; int last; };
+        const FormExpect fe965[] = {
+            { int(BR::Farmland),      2, 0, int(BR::FarmlandHydrationMax),    int(BR::FarmlandHydrationMax) },
+            { int(BR::WoodDoor),      2, 0, int(BR::DoorStateOpenFlag),       int(BR::DoorStateOpenFlag) },
+            { int(BR::SpruceDoor),    2, 0, int(BR::DoorStateOpenFlag),       int(BR::DoorStateOpenFlag) },
+            { int(BR::IronDoor),      2, 0, int(BR::DoorStateOpenFlag),       int(BR::DoorStateOpenFlag) },
+            { int(BR::WoodTrapdoor),  2, 0, int(BR::TrapdoorStateOpenFlag),   int(BR::TrapdoorStateOpenFlag) },
+            { int(BR::IronTrapdoor),  2, 0, int(BR::TrapdoorStateOpenFlag),   int(BR::TrapdoorStateOpenFlag) },
+            { int(BR::TallGrass),     3, int(BR::TallGrassShort), int(BR::TallGrassMedium), int(BR::TallGrassTall) },
+            { int(BR::RedstoneTorch), 2, 0, int(BR::RedstoneTorchStateOffFlag), int(BR::RedstoneTorchStateOffFlag) },
+            { int(BR::GoldenRail),    2, 0, int(BR::GoldenRailStateOnFlag),   int(BR::GoldenRailStateOnFlag) },
+            { int(BR::EndPortal),     2, 0, int(BR::EndPortalStateActiveFlag), int(BR::EndPortalStateActiveFlag) },
+            { int(BR::WheatCrop),     int(BR::WheatCropStageMax) + 1, 0, 1, int(BR::WheatCropStageMax) },
+            { int(BR::CarrotCrop),    int(BR::WheatCropStageMax) + 1, 0, 1, int(BR::WheatCropStageMax) },
+            { int(BR::PotatoCrop),    int(BR::WheatCropStageMax) + 1, 0, 1, int(BR::WheatCropStageMax) },
+        };
+        bool okA965 = true;
+        for (const FormExpect &e : fe965) {
+            const QVariantList forms = hb965.blockFormStates(e.id);
+            if (forms.size() != e.count || forms.first().toInt() != e.first
+                || forms.at(1).toInt() != e.second || forms.last().toInt() != e.last) {
+                okA965 = false;
+                qInfo().noquote() << "  t965 diag(a): id" << e.id << "count" << forms.size()
+                                  << "expect" << e.count << "first" << forms.value(0).toInt()
+                                  << "expect" << e.first;
+            }
+        }
+        // 不支持方块 → 空表（按钮组不出现；含 71 青羊毛/103 普通轨/128 探测轨三个邻位防外溢）。
+        const int unsupported965[] = { int(BR::Stone), int(BR::Dirt), int(BR::WoodSlab),
+                                       int(BR::Chest), int(BR::Glass), int(BR::WoolCyan),
+                                       int(BR::Rail), int(BR::DetectorRail) };
+        for (int id : unsupported965) {
+            if (!hb965.blockFormStates(id).isEmpty()) {
+                okA965 = false;
+                qInfo().noquote() << "  t965 diag(a): unsupported id" << id << "has form states";
+            }
+        }
+        ok = ok && okA965;
+
+        // (b) 预览几何行为级（态变瓦片 UV 从 vertexData 直读；item stride 20B=5 float、cube stride 36B=9 float）。
+        const int nTiles965 = int(BR::AtlasTileCount);
+        const float hx965 = 0.5f / (nTiles965 * int(BR::kAtlasTilePx));
+        auto tileOfU965 = [nTiles965, hx965](float u) {
+            return qRound((u - hx965) * float(nTiles965));
+        };
+        auto itemVtxU = [](const QByteArray &vd, int vIdx) {
+            float f;
+            std::memcpy(&f, vd.constData() + vIdx * 20 + 12, sizeof(float)); // 顶点第 4 float = u
+            return f;
+        };
+        auto cubeVtxU = [](const QByteArray &vd, int vIdx) {
+            float f;
+            std::memcpy(&f, vd.constData() + vIdx * 36 + 12, sizeof(float)); // pos3+uv2 → 第 4 float = u
+            return f;
+        };
+        bool okB965 = true;
+        {
+            ItemShapeGeometry g;
+            // 活板门：合(0) 水平薄板 yMax=3/32 ↔ 开(1) 竖直薄板贴 +X 边（yMax=0.5、xMin=0.3125）。
+            g.setBlockId(int(BR::WoodTrapdoor));
+            g.setBlockState(0);
+            const float tdClosedYMax = g.boundsMax().y();
+            g.setBlockState(int(BR::TrapdoorStateOpenFlag));
+            okB965 = okB965
+                && qAbs(tdClosedYMax - 3.0f / 32.0f) <= 0.001f
+                && g.boundsMax().y() >= 0.499f
+                && g.boundsMin().x() >= 0.31f;
+            // 门：合(0) 薄板 +X 边 ↔ 开(bit2) 薄板换 +Z 边（X 全幅）。
+            g.setBlockId(int(BR::WoodDoor));
+            g.setBlockState(0);
+            const float dClosedXMin = g.boundsMin().x();
+            const float dClosedZMin = g.boundsMin().z();
+            g.setBlockState(int(BR::DoorStateOpenFlag));
+            okB965 = okB965
+                && dClosedXMin >= 0.31f && dClosedZMin <= -0.49f
+                && g.boundsMin().z() >= 0.31f && g.boundsMin().x() <= -0.49f;
+            // 铁门（t965 订正后的 135 消费端）开合同款换边。
+            g.setBlockId(int(BR::IronDoor));
+            g.setBlockState(0);
+            const float idClosedXMin = g.boundsMin().x();
+            g.setBlockState(int(BR::DoorStateOpenFlag));
+            okB965 = okB965
+                && idClosedXMin >= 0.31f
+                && g.boundsMin().z() >= 0.31f && g.boundsMin().x() <= -0.49f;
+            // 草丛三态高度严格递增（矮 0.25 / 中 0.5 / 高 1.0 形心居中 yMax）。
+            g.setBlockId(int(BR::TallGrass));
+            float prevY965 = -1e9f;
+            for (int v = 0; v <= 2; ++v) {
+                g.setBlockState(v);
+                const float yMax = g.boundsMax().y();
+                if (yMax <= prevY965) {
+                    okB965 = false;
+                    qInfo().noquote() << "  t965 diag(b): tallgrass v" << v << "yMax" << yMax;
+                }
+                prevY965 = yMax;
+            }
+            okB965 = okB965 && prevY965 >= 0.999f;
+            // 作物阶段瓦片（state 0 嫩芽 29 ↔ state 7 成熟 36）——UV 态变即测即红。
+            g.setBlockId(int(BR::WheatCrop));
+            g.setBlockState(0);
+            const int wTile0 = tileOfU965(itemVtxU(g.vertexData(), 0));
+            g.setBlockState(int(BR::WheatCropStageMax));
+            const int wTile7 = tileOfU965(itemVtxU(g.vertexData(), 0));
+            okB965 = okB965 && wTile0 == 29
+                  && wTile7 == 29 + int(BR::WheatCropStageMax);
+            // 红石火把亮(0)=def 侧瓦 ↔ 灭(8)=170。
+            g.setBlockId(int(BR::RedstoneTorch));
+            g.setBlockState(0);
+            const int rtLit = tileOfU965(itemVtxU(g.vertexData(), 0));
+            g.setBlockState(int(BR::RedstoneTorchStateOffFlag));
+            const int rtOff = tileOfU965(itemVtxU(g.vertexData(), 0));
+            okB965 = okB965 && rtLit == int(BR::tileIndex(BR::RedstoneTorch, BR::PosX)) && rtOff == 170;
+            // 动力轨：贴地薄板 quad（8 顶点、扁平 yMax≈0）+ 未激活 157 ↔ 激活 159 亮金。
+            g.setBlockId(int(BR::GoldenRail));
+            g.setBlockState(0);
+            const int gVCount = int(g.vertexData().size()) / 20;
+            const float gYMax = g.boundsMax().y();
+            const float gYMin = g.boundsMin().y();
+            const int gTile0 = tileOfU965(itemVtxU(g.vertexData(), 0));
+            g.setBlockState(int(BR::GoldenRailStateOnFlag));
+            const int gTileOn = tileOfU965(itemVtxU(g.vertexData(), 0));
+            okB965 = okB965 && gVCount == 8
+                  && gYMax <= 0.001f && gYMin >= -0.001f
+                  && gTile0 == int(BR::tileIndex(BR::GoldenRail, BR::PosX)) && gTileOn == 159;
+            // 非形态方块 state 惰性（零漂移钉）：半砖 state 0↔5 几何逐字节一致。
+            g.setBlockId(int(BR::WoodSlab));
+            g.setBlockState(0);
+            const QByteArray slab0 = g.vertexData();
+            g.setBlockState(5);
+            okB965 = okB965 && slab0 == g.vertexData();
+        }
+        {
+            // BlockCube 顶面态变（顶面 = 面 2 → 顶点 8..11；顶点第 4 float = u）。
+            BlockCube bc;
+            bc.setBlockId(int(BR::EndPortal));
+            bc.setBlockState(0);
+            const int epNoEye = tileOfU965(cubeVtxU(bc.vertexData(), 8));
+            bc.setBlockState(int(BR::EndPortalStateActiveFlag));
+            const int epEye = tileOfU965(cubeVtxU(bc.vertexData(), 8));
+            okB965 = okB965 && epNoEye == 141 && epEye == 142;
+            // 耕地干(0) 26 ↔ 湿(3 最深) 27。
+            bc.setBlockId(int(BR::Farmland));
+            bc.setBlockState(0);
+            const int fmDry = tileOfU965(cubeVtxU(bc.vertexData(), 8));
+            bc.setBlockState(int(BR::FarmlandHydrationMax));
+            const int fmWet = tileOfU965(cubeVtxU(bc.vertexData(), 8));
+            okB965 = okB965 && fmDry == 26 && fmWet == 27;
+            // 非态变方块 state 惰性（石头 0↔7 逐字节一致 = 既有消费端零漂移）。
+            bc.setBlockId(int(BR::Stone));
+            bc.setBlockState(0);
+            const QByteArray stone0 = bc.vertexData();
+            bc.setBlockState(7);
+            okB965 = okB965 && stone0 == bc.vertexData();
+        }
+        ok = ok && okB965;
+
+        // (c) 查看器源码钉（按钮组构建链 + z 约定 + 门族订正）。
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rf965(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rb965 = rf965.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf965.readAll()) : QString();
+        const int iSel965 = rb965.indexOf(QStringLiteral("selectedIsItem3D:"));
+        const QString selBlock965 = iSel965 >= 0 ? rb965.mid(iSel965, 1600) : QString();
+        // formPanel 块内独立 z: 10 行（P-t964(b) 约定钉的计数形态——注释并入行不算数，同其首次阴性教训）。
+        const int iForm965 = rb965.indexOf(QStringLiteral("id: formPanel"));
+        const QString formBlock965 = iForm965 >= 0 ? rb965.mid(iForm965, 500) : QString();
+        const bool formZRow965 = formBlock965.contains(QRegularExpression(
+            QStringLiteral("^\\s*z: 10\\s*$"), QRegularExpression::MultilineOption));
+        const bool okC965 = rb965.contains(QStringLiteral("id: formPanel"))
+                         && formZRow965
+                         && rb965.contains(QStringLiteral("root.hotbar.blockFormStates(root.selectedId)"))
+                         && rb965.contains(QStringLiteral("property int selectedFormIndex: 0"))
+                         && rb965.contains(QStringLiteral("onSelectedIdChanged: root.selectedFormIndex = 0"))
+                         && rb965.count(QStringLiteral("blockState: root.selectedFormState")) == 2
+                         && rb965.contains(QStringLiteral("text: index + 1"))
+                         && selBlock965.contains(QStringLiteral("=== 135"))
+                         && selBlock965.contains(QStringLiteral("=== 127"))
+                         && !selBlock965.contains(QStringLiteral("=== 71"));
+        ok = ok && okC965;
+        if (!ok)
+            qInfo().noquote() << "  [t965 diag] table" << okA965 << "geometry" << okB965
+                              << "sourcePins" << okC965;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t965 form-toggle button group system: the browser variant panel extends "
+                             "into numbered state buttons (1 2 3..., button 1 = state 0 = the placed "
+                             "default form) driven by a single Game-layer support table "
+                             "(Hotbar::blockFormStates: farmland dry/wet via the 2-bit hydration level, "
+                             "wood/spruce/iron doors open on state bit2, wood/iron trapdoors open on "
+                             "bit0, tall grass short/mid/tall via variant states, redstone torch "
+                             "lit/unlit via the off flag, powered rail unpowered/powered via the on "
+                             "flag, end portal frame eyeless/eyed via the active flag, and the three "
+                             "crops expose all 8 growth stages 0..7); the preview meshes consume the "
+                             "same state through BlockRegistry::stateTileOverride (Core single "
+                             "authority, mesher branches now delegate to it too): trapdoor/door open "
+                             "geometry swaps the plate edge, grass cross height 0.5/1.0/2.0, crop "
+                             "stage / torch off / powered-rail tiles verified by UV, farmland "
+                             "dry-wet and frame eyeless-eyed top tiles verified per face; state on "
+                             "non-form blocks is inert byte-for-byte; the iron door family id was "
+                             "corrected 71(=cyan wool, a masked routing bug)->135 on both QML family "
+                             "tables and the powered rail joins the viewer-only 3D family; legs: "
+                             "support-table behavior pins (13 entries + 8 unsupported-empty incl. "
+                             "cyan wool 71 and detector rail 128), geometry behavior pins "
+                             "(ItemShapeGeometry + BlockCube direct), and browser source pins "
+                             "(panel + z:10 floating-layer contract + default-form reset + wiring)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
