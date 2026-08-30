@@ -50,10 +50,13 @@ function list4(v) {
 //    4 种 case：
 //      A 手持空 + 槽非空：拾取整栈（含工具耐久随实例走，curDur → heldDur 保真）。
 //      B 手持非空 + 槽空：放置整栈（heldDur → slotDur 保真）。
-//      C 手持非空 + 同 id：合并至 maxStackSize(id)（方块 64 / 工具段 1），余数留 held；槽满则无操作。
-//        工具段 cap=1 → 已有同 id 槽恒满 → 不合并（A/B/D 路径覆盖工具搬运）。耐久不进合并键（同 id 工具不可
-//        堆叠，故无「合并两把镐」语义）。
-//      D 手持非空 + 异 id：互换（双方耐久随各自实例交换）。
+//      C 手持非空 + 同 id + **可堆叠**（maxStackSize>1）：合并至 maxStackSize(id)，余数留 held；槽满则
+//        无操作（「满槽不换」是可堆叠物的既定口径——满栈撞满栈互换无信息量且破坏 shift/批量链的预检口径）。
+//      D 手持非空 + 异 id，**或同 id 但不可堆叠（maxStackSize≤1：工具 / 护甲 / 附魔书 / 桶）**：互换
+//        （双方耐久 / 附魔 / 名随各自实例交换）。t962：旧版同 id 恒入 C → 不可堆叠同 id（槽恒满 space≤0）
+//        落「槽满无操作」= 附魔书对附魔书槽左键恒 no-op（注释「A/B/D 路径覆盖工具搬运」对同 id 不成立——
+//        D 在同 id 下不可达）。现 cap≤1 同 id 落 D 互换：MC 语义「不可合并即互换」，且元数据随各自实例走
+//        （两本不同附魔的书交换 = 换书不换附魔；两把不同耐久的同款镐交换同理）。可堆叠满槽行为不变。
 //    纯函数（只读 root.hotbar），无副作用 —— 调用方据返回值写入对应槽 + 更新 held。
 //    t622 customName：随物品实例走（同耐久 / 附魔语义——A 拾取整件 → heldName=curName；B 放整件 →
 //      slotName=heldName；C 合并（可堆叠物品）不动槽名 / 光标名；D 互换双方名随各自实例交换）。
@@ -79,12 +82,14 @@ function resolveClick(root, curId, curCount, curDur, curEnch, curName) {
         return { slotId: heldId, slotCount: heldCount, slotDur: heldDur, slotEnch: heldEnch, slotName: heldName, // B 放整栈：耐久 / 附魔 / 名随物品入槽
                  heldId: 0, heldCount: 0, heldDur: 0, heldEnch: [0,0,0,0], heldName: "" }
     }
-    if (curId === heldId) {
+    if (curId === heldId && root.hotbar.maxStackSize(curId) > 1) {
         // C 合并：min(剩余空间, 手持数) 移入槽；手持余 0 → heldId 归 0（保持空栈不变式）。
+        //   仅可堆叠同类（cap>1）进本分支 —— t962：cap≤1 同 id（不可堆叠）不在此拦截，落到下方 D 互换
+        //   （合并在 cap=1 下无从发生，旧「槽满无操作」吞掉交换语义 = 附魔书对附魔书槽左键恒 no-op 根因）。
         //   t622 名不进合并路径（同附魔语义：合并不搬实例元数据；槽保留其名，光标余数保留其名）。
         const cap = root.hotbar.maxStackSize(curId)
         const space = cap - curCount
-        if (space <= 0) return null                                        // 槽已满（含工具段 cap=1）：无操作
+        if (space <= 0) return null                                        // 可堆叠同类槽已满：无操作（cap≤1 不进本分支，t962）
         const move = Math.min(space, heldCount)
         const remain = heldCount - move
         return {
