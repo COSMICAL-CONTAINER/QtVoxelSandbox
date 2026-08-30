@@ -1376,8 +1376,11 @@ Item {
                                             //   Model：站姿颈根 (0,0.16,-0.30) / 坐姿位 = 站姿绕坐姿根锚旋 18° (0,0.349,-0.175)
                                             //   （t946 链派生成对契约），横扁环带 x 微出躯干侧缘读作环颈）。未驯服不显；图鉴不做
                                             //   昼夜灰阶 / 受击红闪（纯色预览，同其他 overlay 眼/腿约定）。
+                                            //   review0830 #23 单源：门左操作数与贴图门同源 selectedMobFromSection——
+                                            //   双源 selectedMobType 含蛋路径映射（狼蛋 0x249→10 恒真），残留驯服态下
+                                            //   野生蛋会戴项圈（review-0829 #7 同病灶，本处一并修复）。
                                             Model {
-                                                visible: root.selectedMobType === 10 && root.mobTamedPreview
+                                                visible: root.selectedMobFromSection === 10 && root.mobTamedPreview
                                                 geometry: UnitCube {}
                                                 position: root.mobTamedActive && root.mobSitPreview
                                                           ? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)
@@ -1391,10 +1394,15 @@ Item {
                                             //   内 t963 猫项圈 + t920 狼项圈先例：站姿颈根 (0,0.14,-0.30) / 坐姿位 =
                                             //   站姿绕豹猫坐姿根锚 (-0.12,0.32) 旋 18° = (0,0.319,-0.189)（t946 链派生
                                             //   成对契约，豹猫颈围镜像数值系 0.36/0.05/0.06）。未驯服不显；门挂
-                                            //   mobTamedPreview（与 t920 贴图切换同一驯服拨杆位——单源）。图鉴不做
+                                            //   mobTamedPreview（与 t920 贴图切换同一驯服拨杆位）。
+                                            //   review0830 #23 单源：门左操作数与贴图门（selectedMobTexSource）同源
+                                            //   selectedMobFromSection——双源 selectedMobType 含蛋路径映射（豹猫蛋
+                                            //   0x24A→11 恒真），「点豹猫 → 拨已驯服 → 点豹猫蛋」序列残留驯服态使
+                                            //   野生蛋戴红项圈（贴图门单源正确回野生 = 项圈孤证残留）；切走序列行为
+                                            //   腿由矩阵 review0830-23 探针驱动真 rig 断言。图鉴不做
                                             //   昼夜灰阶 / 受击红闪（纯色预览，同狼项圈 overlay 约定）。
                                             Model {
-                                                visible: root.selectedMobType === 11 && root.mobTamedPreview
+                                                visible: root.selectedMobFromSection === 11 && root.mobTamedPreview
                                                 geometry: UnitCube {}
                                                 position: root.mobTamedActive && root.mobSitPreview
                                                           ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)
