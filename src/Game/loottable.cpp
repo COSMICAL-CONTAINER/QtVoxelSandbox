@@ -1,6 +1,6 @@
 #include "loottable.h"
 
-#include "enchantregistry.h" // review L7 enchantedBookEnchants：selectEnchantsForItem(BookId) 全池随机附魔
+#include "enchantregistry.h" // review L7 enchantedBookEnchants：selectEnchantsForItem(BookId) 随机附魔（t959 起主类别成簇）
 #include "recipe.h" // 材料段 id 常量（CoalId / RedstoneId / ...）+ BookId（t824 起附魔选择按物品；同层 Game，向下依赖 Core）
 
 #include <QRandomGenerator>
@@ -175,7 +175,7 @@ QVariantList LootTable::enchantedBookEnchants(quint32 seed)
     QRandomGenerator rng(seed);
     const int offered = 5 + int(rng.bounded(20)); // [5, 25)：<10 → 1 条 / 10..19 → 2 条 / >=20 → 3 条
     const QVariantList picks = EnchantRegistry::selectEnchantsForItem(
-        RecipeRegistry::BookId, offered, int(rng.generate())); // t824：书载体全池（isApplicableForItem 全过）
+        RecipeRegistry::BookId, offered, int(rng.generate())); // t824 按物品 + t959 书池主类别成簇（选择器单一权威内部收窄）
     QVariantList packed;
     packed.reserve(4);
     for (int i = 0; i < 4; ++i) {

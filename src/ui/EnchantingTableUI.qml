@@ -501,8 +501,9 @@ Item {
     }
     // t917 档位预告（hover 悬浮窗文案）：selectEnchantsPreviewForItem 同 seed 复算取**首条**附魔名。
     //   MC 1.0 语义：附魔台悬停选项预告**一条必定出现**的附魔、等级模糊（预告只显名 + ......?，不显等级）。
-    //   只显示一种（首条）、必定出现（首条就在施放产物 picks 里）、等级未知（?）——书路径（cat=8 全池）
-    //   同样适用。itemReady 假 / 空产物 → 空串不显。
+    //   只显示一种（首条）、必定出现（首条就在施放产物 picks 里）、等级未知（?）——书路径（cat=8，
+    //   t959 起产物按主类别成簇，收窄单一权威在 EnchantRegistry::selectEnchantsForItem 内部）同样适用。
+    //   itemReady 假 / 空产物 → 空串不显。
     function tierPreviewName(slotIdx) {
         if (!root.hotbar || !root.itemReady) return ""
         const picks = root.hotbar.selectEnchantsPreviewForItem(root.enchantItemId,
@@ -579,8 +580,10 @@ Item {
         const remainLapis = Math.max(0, root.lapisCount - lapCost)
         if (remainLapis > 0) InventoryOps.writeSlot(root, "enchant", 1, root.lapisId, remainLapis, 0)
         else                  InventoryOps.writeSlot(root, "enchant", 1, 0, 0, 0)
-        // 3) 同 seed 复算选择 → 写入槽 0 附魔元数据（保留耐久）。t615 书 → id 翻附魔书 + 全池随机
-        //    （itemEnchantCategory(BookId)=BookItem=8 → 全 14 附魔候选）。
+        // 3) 同 seed 复算选择 → 写入槽 0 附魔元数据（保留耐久）。t615 书 → id 翻附魔书 + 随机附魔
+        //    （itemEnchantCategory(BookId)=BookItem=8 → t959 起书池按主类别成簇：施法先随机定主类别
+        //    （武器/工具/装甲），产物 ⊆ 该类 ∪ 通用——收窄单一权威在 EnchantRegistry::selectEnchantsForItem
+        //    内部，预告（tierPreviewName）与施放（本处）同 seed 复算同一函数 = 严格同源零触碰）。
         //    t824 候选池按**物品**过滤（selectEnchantsPreviewForItem 单一权威）：镐不出亡灵杀手 /
         //    靴不出水上亲和 / 锄空池（categoryForItem=None 连 itemReady 门一起拒，锄根本进不了槽 0）。
         const cat = root.hotbar.itemEnchantCategory(root.enchantItemId)

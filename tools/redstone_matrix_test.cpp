@@ -24220,6 +24220,147 @@ Item {
                              "re-lays-out its content";
     }
 
+    // ── t959 附魔池随机性收窄探针（R19.17 🅳；Game 层表 + Hotbar 桥接，无 World/QML —— t824 同台先例）──
+    //    用户第五轮口径：「书本附魔把很多工具+装甲附魔冲突地混在一起——书附魔池按类别（工具/武器/装甲/书）
+    //    收窄 + 冲突组规则（同组互斥如保护系/锋利+截肢系）」。t959 收口：注册表每附魔加 homeCategory
+    //    （EnchantCategory：weapon/tool/armor/universal）+ conflictGroup（=exclusiveGroup 单值形式）；
+    //    selectEnchantsForItem 对书载体先由同一 LCG roll **主类别**（武器/工具/装甲三选一均匀轮——「书」类
+    //    本作暂无专属附魔，t960 弓/竿系预留扩展位），候选收窄到「该类 ∪ 通用（耐久）」；同次产物内同组
+    //    互斥由既有位集抽样（review M1）照旧保证。**单一权威落点**：收窄在 selectEnchantsForItem 内部 =
+    //    预告（tierPreviewName → Hotbar::selectEnchantsPreviewForItem）与施放（doEnchant 同桥）共用的那
+    //    一层，t917「预告==施放严格同源」契约结构性保持（review28 #3 种子快照序零触碰）。
+    //    断言：
+    //    (a) 注册表数据钉 —— 14 条附魔逐 id homeCategory / conflictGroup 与语义表一致（字段齐备；
+    //        表行多列初始化错位在此必红）；
+    //    (b) 书附魔行为腿（offered 2/12/30 × seed 0..399 共 1200 次施法）：
+    //        ① 单次产物**无跨类混出**（非通用附魔的 homeCategory 在单次产物内全一致 = 主类别成簇；
+    //           旧全池行为「锐锋(武器)+效率(工具)」式跨类产物必现 = 用户症状，阴性轮复现）；
+    //        ② 单次产物内部无同组互斥对（conflictsWith 两两判假）；
+    //        ③ 产物每条 isApplicableForItem(book)（书载体合法性）+ 等级 ∈ [1,maxLevel]；
+    //        ④ 跨 1200 次施法全 14 附魔都出现（主类别随机轮换 → union 不收窄，长期可达性）；
+    //        ⑤ 确定性：同 seed 两次施法产物逐条相等（主类别 roll 消耗同一 LCG 流，t917 同源前提）。
+    //    (c) 直附面腿 —— 镐/铲 ⊆ {效率,精准,时运,耐久}（**直附工具不出护甲/武器附魔**）且四元全在；
+    //        胸甲 ⊆ {保护,火焰保护,弹射物保护,耐久}（不出工具/武器系）——t824 逐物品过滤面不回归。
+    //    (d) t917 同源钉 —— 书物品 Hotbar::selectEnchantsPreviewForItem == EnchantRegistry::
+    //        selectEnchantsForItem 同 seed 逐条相等（收窄活在桥下共用层，QML 面无副本）。
+    {
+        Hotbar hb;
+        const int bookId   = RecipeRegistry::BookId;
+        const int diaPick  = int(ToolRegistry::PickaxeDiamond);
+        const int diaShovel = int(ToolRegistry::DiamondShovel);
+        const int diaChest = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 1;
+        const int E  = int(EnchantRegistry::Efficiency),    ST = int(EnchantRegistry::SilkTouch);
+        const int F  = int(EnchantRegistry::Fortune),       U  = int(EnchantRegistry::Unbreaking);
+        const int SH = int(EnchantRegistry::Sharpness),     UD = int(EnchantRegistry::UndeadSlay);
+        const int AR = int(EnchantRegistry::ArthropodSlay), KB = int(EnchantRegistry::Knockback);
+        const int FA = int(EnchantRegistry::FireAspect),    P  = int(EnchantRegistry::Protection);
+        const int FP = int(EnchantRegistry::FireProtection), PR = int(EnchantRegistry::ProjectileProt);
+        const int FF = int(EnchantRegistry::FeatherFall),   AA = int(EnchantRegistry::AquaAffinity);
+        const int WC = int(EnchantRegistry::EnchantCatWeapon), TC = int(EnchantRegistry::EnchantCatTool);
+        const int AC = int(EnchantRegistry::EnchantCatArmor),  UC = int(EnchantRegistry::EnchantCatUniversal);
+
+        // (a) 注册表数据钉：id → {homeCategory, conflictGroup} 语义表逐行比对（0 号占位行不在钉内）。
+        const int expectCat[15] = { 0, WC, WC, WC, WC, WC, TC, TC, TC, UC, AC, AC, AC, AC, AC };
+        const int expectGrp[15] = { 0,  1,  1,  1,  0,  0,  2,  2,  2,  0,  3,  3,  3,  3,  0 };
+        bool okData = true;
+        for (int i = 1; i < 15; ++i)
+            okData = okData && EnchantRegistry::homeCategory(i) == expectCat[i]
+                             && EnchantRegistry::conflictGroup(i) == expectGrp[i];
+
+        // (b) 书附魔行为腿：1200 次施法逐产物断言 ①②③ + 累计 ④。
+        const int offeredList[3] = { 2, 12, 30 };
+        bool okCluster = true, okNoConflict = true, okApplicable = true;
+        bool seenBook[15];
+        for (int i = 0; i < 15; ++i) seenBook[i] = false;
+        for (int oi = 0; oi < 3; ++oi) {
+            for (int seed = 0; seed < 400; ++seed) {
+                const QVariantList picks = EnchantRegistry::selectEnchantsForItem(bookId, offeredList[oi], seed);
+                if (picks.isEmpty()) { okCluster = false; continue; } // 书池恒非空（任一主类别池 ≥4 条）
+                int catSeen = 0;                                      // 本产物已见的非通用主类别（0 = 未定）
+                for (int a = 0; a < picks.size(); ++a) {
+                    const QVariantMap ma = picks.at(a).toMap();
+                    const int ida = ma.value(QStringLiteral("id")).toInt();
+                    const int la  = ma.value(QStringLiteral("level")).toInt();
+                    seenBook[ida] = true;
+                    if (!EnchantRegistry::isApplicableForItem(ida, bookId)) okApplicable = false;
+                    if (la < 1 || la > EnchantRegistry::maxLevel(ida)) okApplicable = false;
+                    const int ca = EnchantRegistry::homeCategory(ida);
+                    if (ca != UC) {                                   // 通用（耐久）任意主类别池合法
+                        if (catSeen == 0) catSeen = ca;
+                        else if (catSeen != ca) okCluster = false;    // ① 跨类混出 = 用户症状复现点
+                    }
+                    for (int b = a + 1; b < picks.size(); ++b) {
+                        const int idb = picks.at(b).toMap().value(QStringLiteral("id")).toInt();
+                        if (EnchantRegistry::conflictsWith(ida, idb)) okNoConflict = false; // ② 同组互斥对
+                    }
+                }
+            }
+        }
+        bool okUnion = true;
+        for (int i = 1; i < 15; ++i) okUnion = okUnion && seenBook[i];   // ④ 全 14 附魔长期仍都可达
+        // ⑤ 同 seed 确定性（主类别 roll 在抽样前消耗同一 LCG 流 → 同 seed 恒同产物）。
+        const QVariantList p1 = EnchantRegistry::selectEnchantsForItem(bookId, 21, 777);
+        const QVariantList p2 = EnchantRegistry::selectEnchantsForItem(bookId, 21, 777);
+        bool okDeterminism = p1.size() == p2.size() && !p1.isEmpty();
+        for (int i = 0; okDeterminism && i < p1.size(); ++i)
+            okDeterminism = p1.at(i).toMap().value(QStringLiteral("id")) == p2.at(i).toMap().value(QStringLiteral("id"))
+                         && p1.at(i).toMap().value(QStringLiteral("level")) == p2.at(i).toMap().value(QStringLiteral("level"));
+
+        // (c) 直附面腿：镐/铲 ⊆ 采集池、胸甲 ⊆ 护甲池（subset + requireAll 双向，防过滤过头砍空池）。
+        const auto poolScan = [&](int itemId, bool seen[15]) {
+            for (int i = 0; i < 15; ++i) seen[i] = false;
+            for (int oi = 0; oi < 3; ++oi)
+                for (int seed = 0; seed < 400; ++seed) {
+                    const QVariantList picks = EnchantRegistry::selectEnchantsForItem(itemId, offeredList[oi], seed);
+                    for (const QVariant &v : picks) seen[v.toMap().value(QStringLiteral("id")).toInt()] = true;
+                }
+        };
+        const auto poolIs = [&](int itemId, const std::vector<int> &allowed) {
+            bool seen[15];
+            poolScan(itemId, seen);
+            for (int i = 1; i < 15; ++i) {
+                const bool allowedHas = std::find(allowed.begin(), allowed.end(), i) != allowed.end();
+                if (seen[i] && !allowedHas) return false;   // 出现不允许的（直附工具出护甲/武器附魔）
+                if (allowedHas && !seen[i]) return false;   // 允许的没出现（池被砍空）
+            }
+            return true;
+        };
+        const std::vector<int> miningPool = { E, ST, F, U };
+        const std::vector<int> chestPool  = { P, FP, PR, U };
+        const bool okDirect = poolIs(diaPick, miningPool) && poolIs(diaShovel, miningPool)
+                           && poolIs(diaChest, chestPool);
+
+        // (d) t917 同源钉：书物品桥接 == 直调（同 seed 同产物——收窄在共用层，QML 面无副本）。
+        const QVariantList viaBridgeB = hb.selectEnchantsPreviewForItem(bookId, 17, 4242);
+        const QVariantList directB    = EnchantRegistry::selectEnchantsForItem(bookId, 17, 4242);
+        bool okBridge = viaBridgeB.size() == directB.size() && !directB.isEmpty();
+        for (int i = 0; okBridge && i < int(directB.size()); ++i)
+            okBridge = viaBridgeB.at(i).toMap().value(QStringLiteral("id")) == directB.at(i).toMap().value(QStringLiteral("id"))
+                    && viaBridgeB.at(i).toMap().value(QStringLiteral("level")) == directB.at(i).toMap().value(QStringLiteral("level"));
+
+        const bool ok959 = okData && okCluster && okNoConflict && okApplicable && okUnion
+                        && okDeterminism && okDirect && okBridge;
+        if (!ok959)
+            qInfo().noquote() << "  t959 diag: data" << okData << "cluster" << okCluster
+                              << "noConflict" << okNoConflict << "applicable" << okApplicable
+                              << "union" << okUnion << "determinism" << okDeterminism
+                              << "direct" << okDirect << "bridge" << okBridge;
+        if (!ok959) ++totalFail;
+        qInfo().noquote() << (ok959 ? "PASS" : "FAIL")
+                          << "| t959 enchant pool category narrowing: every enchant carries homeCategory"
+                             " (weapon/tool/armor/universal) + conflictGroup pinned per id; a book cast"
+                             " first rolls ONE main category from the same LCG stream and draws only"
+                             " from that category pool plus universal (unbreaking), so a single cast"
+                             " never mixes cross-category lines (the old full-pool union let"
+                             " sharpness-family + efficiency + protection coalesce into one book ="
+                             " the user symptom), same-group exclusives stay pairwise-absent within a"
+                             " product, all 14 enchants remain reachable across casts (union"
+                             " un-narrowed), same seed reproduces the identical product, direct"
+                             " item enchanting keeps the t824 per-item pools (pick/shovel mining-only"
+                             " - no armor lines on tools - chest armor-only), and the narrowing lives"
+                             " under the Hotbar bridge so preview==cast stays single-source (t917)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
