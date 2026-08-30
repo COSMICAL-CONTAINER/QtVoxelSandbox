@@ -6940,7 +6940,7 @@ Window {
                         if (entMobType === EntityManager.MobOcelot) return 0.40 - mobHalfH // t481 Ocelot/Cat 猫科（腿底 0.40）
                         if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
                         if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727/t781 Nightwalker（细肢人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
-                        if (entMobType === EntityManager.MobEmberling) return 0.0 // t782 Emberling（悬浮单头+4棒：MobModel 原点=碰撞中心，头心 +0.10/棒跨 [-0.58,+0.52] → offset=0 居中；整体悬浮由 hover 升空）
+                        if (entMobType === EntityManager.MobEmberling) return 0.0 // t782 Emberling（悬浮单头+4棒：MobModel 原点=碰撞中心，头心 +0.10/棒跨 [-0.68,+0.62]（t968 棒 Y 交错）→ offset=0 居中；整体悬浮由 hover 升空）
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
                         //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
@@ -8169,7 +8169,7 @@ Window {
                                 //   几何侧 rebuild 挪棒（walkPhase 同模式）。悬浮上下 sin 浮动（hover bob）：AI 只在
                                 //   C++ 设水平漂移，竖直由本 delegate sin 动画驱动（机制等价 MC 烈焰人悬浮飘动）。
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobEmberling
-                                position: Qt.vector3d(0, mobModelYOff, 0) // halfH=0.6 → offset=0（原点=碰撞中心，头心 +0.10/棒跨 [-0.58,+0.52]）
+                                position: Qt.vector3d(0, mobModelYOff, 0) // halfH=0.6 → offset=0（原点=碰撞中心，头心 +0.10/棒跨 [-0.68,+0.62]，t968 头 0.42³ + 棒 Y 交错）
                                 // 悬浮 bob 相位钟（恒跑 0→1→0 锯齿；程序化非受控动画，delegate 稀少零成本）。
                                 property real hoverPhase: 0
                                 SequentialAnimation on hoverPhase {
@@ -8181,7 +8181,7 @@ Window {
                                 property real hoverOff: Math.sin(emberNode.hoverPhase * 3.14159) * 0.14
                                 Node { // hover 浮动承载层（头 + 环绕棒整体上下浮动）
                                     position: Qt.vector3d(0, emberNode.hoverOff, 0)
-                                    Model { // 单头 + 4 烈焰棒（mobType 17 共享几何；头 0.88³ + 4 细长竖棒轨道半径 0.62）
+                                    Model { // 单头 + 4 烈焰棒（mobType 17 共享几何；头 0.42³ + 4 细长竖棒轨道半径 0.52、Y 交错 ±0.10，t968）
                                         geometry: MobModel {
                                             mobType: 17
                                             // pack 命中 blaze（demo 包实 64×32 base，t782 修正采样）→ MC box-UV；
@@ -10216,7 +10216,7 @@ Window {
                     if (t === EntityManager.MobPig) return 0.56         // 体高 0.75
                     if (t === EntityManager.MobCow) return 0.47         // 体高 0.90（含角尖）
                     if (t === EntityManager.MobSheep) return 0.55       // 体高 0.77
-                    if (t === EntityManager.MobEmberling) return 0.38   // t782 头+4棒全跨 1.12（[-0.58,0.54]；棒随共享几何在笼内可见）
+                    if (t === EntityManager.MobEmberling) return 0.32   // t782/t968 头+4棒全跨 1.30（[-0.68,0.62]，棒 Y 交错；0.42/1.30≈0.32；棒随共享几何在笼内可见）
                     if (t === EntityManager.MobBabyShambler) return 0.44 // t952 幼体全跨 ~0.97（[-0.45,0.515]；0.42/0.97≈0.43）
                     return 0.25                                          // Shambler/Bones 人形体高 ~1.65-1.69
                 }
@@ -10235,7 +10235,7 @@ Window {
                     if (t === EntityManager.MobWolf) return 0.013       // 脚 -0.42 / 顶 0.37
                     if (t === EntityManager.MobOcelot) return 0.023     // 脚 -0.40 / 顶 0.32
                     if (t === EntityManager.MobNightwalker) return 0.008 // 脚 -1.40 / 顶 1.30（t781；−0.16·(−0.10)/2）
-                    if (t === EntityManager.MobEmberling) return 0.008 // t782 头+棒跨 [-0.58,0.54]（体心 -0.02 → −0.38·(−0.04)/2）
+                    if (t === EntityManager.MobEmberling) return 0.010 // t782/t968 头+棒跨 [-0.68,0.62]（体心 -0.03 → −0.32·(−0.06)/2≈0.010）
                     return 0                                            // Shambler/Bones 等居中型
                 }
                 // t786/t787 迷你 mob 眼表（MobModel 局部坐标；坐标/尺寸/色与各实体 delegate 眼层一致，仅随父缩放

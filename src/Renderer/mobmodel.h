@@ -68,9 +68,11 @@
 //     pack 命中 enderman/enderman.png（base **64×32**）→ head(0,0)/body(32,16)/四肢共用(56,0)2×30×2
 //     真实盒区 box-UV；pack 关 → 全脸 UV + mob_nightwalker 程序贴图。
 //   17 = Emberling（燃烬者；t728/t782）：悬浮**单头 + 4 根烈焰棒**——无身体（机制等价 MC 1.0 烈焰人
-//     「一头 + 环绕旋转棒」造型，§9 区隔改名 + 原创贴图）。头 = 单一略大方盒（0.88³，心 (0,+0.10,0)）；
-//     棒 = 4 根细长竖盒（0.10×1.10×0.10）绕身公转（半径 0.62、径向 90° 分布），公转角由 rodSpin 属性
-//     驱动（QML NumberAnimation 连续旋转；刷怪笼迷你态可静态角度）——同 walkPhase 的 rebuild 驱动模式。
+//     「一头 + 环绕旋转棒」造型，§9 区隔改名 + 原创贴图）。头 = 单一方盒（0.42³，心 (0,+0.10,0)；
+//     t968 用户「头×0.6 再缩」：t818 的 0.7³ 半长 0.35×0.6=0.21）；棒 = 4 根细长竖盒（0.10×1.10×0.10）
+//     绕身公转（半径 0.52、径向 90° 分布；t968 棒心 y = -0.03±0.10 偶奇交错 = 上下错开非共面），公转角由
+//     rodSpin 属性驱动（QML NumberAnimation 连续旋转；刷怪笼迷你态可静态角度）——同 walkPhase 的
+//     rebuild 驱动模式。
 //     **两态均走 MC box-UV**（g_boxUvAlways）：头 head(0,0)8×8×8 / 棒 rod(0,16)2×8×2；pack 命中
 //     blaze/blaze.png（demo 包实为 **64×32** base，非 vanilla 64×64——t779 头像侧同实测）、pack 关走
 //     entity_emberling 程序贴图（64×32，build_entities_pack.py 按 blaze 布局自绘头区+棒条区，棒=烟灰
@@ -145,7 +147,7 @@ class MobModel : public QQuick3DGeometry
     //   见 Main.qml / ResourceBrowser.qml t946 注释互指）。
     Q_PROPERTY(bool sitPose READ sitPose WRITE setSitPose NOTIFY sitPoseChanged)
     // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
-    //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.62, -0.03, sin·0.62)，棒身恒竖直只轨道心公转）。
+    //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.52, -0.03±0.10 交错, sin·0.52)，棒身恒竖直只轨道心公转）。
     //   QML 用 NumberAnimation on rodSpin 驱动连续旋转（帧率无关；同 walkPhase 的 set→rebuild 模式，
     //   量化 6°/步防每帧微变 rebuild；review #36 契约：输入按最近取整落 6° 网格，静态值请传 6 的倍数）；
     //   刷怪笼迷你态只给静态角（48°）。其余 mobType 不读（无棒组）。
