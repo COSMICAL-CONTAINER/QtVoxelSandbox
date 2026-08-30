@@ -25270,6 +25270,78 @@ Item {
                              "and collar/single-source pins on both consumers";
     }
 
+    // ── P-t964 预览重置按钮 z 序探针（R19.17 🅴；用户第五轮口径「方块预览滚轮放大后遮住右下角
+    //    重置按钮——按钮应永远最前」）──
+    //    根因：按钮（t922）声明在 cubeView（View3D，anchors.fill 铺满预览区）**之前**——QML 兄弟层
+    //    缺省按声明序绘制，后声明的视口恒绘在按钮上层；且按钮仅在已缩放态显示（zoom≠1）= 恰逢
+    //    模型投影最大、像素铺进视口右下角的时刻 → 放大即遮。headless 无窗口合成不可见，按
+    //    t931/t963 纯视觉项先例走源码层级钉。
+    //    (a) 层级钉：t922 按钮注释锚 → `id: cubeView` 之间的按钮块必含**独立行** `z: 10`（注释内
+    //        提及不算）+ 契约注释锚「t964 永远最前」；且 cubeView 头段（id → PerspectiveCamera
+    //        之间）无 z 覆盖（缺省 0）—— 两侧合钉 = 「按钮层 z > 视口层 z」。阴性 = 删按钮
+    //        `z: 10` 行 → 块扫描红（回归即测即红）。
+    //    (b) 约定钉：全文独立 `z: 10` 行恰 2 处（变体面板 t783 ② 先例 + 本按钮 t964）=「预览区浮层
+    //        永远最前」层级契约登记（t965 形态/分类按钮组入预览区按同约定加 z）。
+    //    (c) 身份钉：块内仍是缩放重置按钮本体（缩放态显隐谓词 + reset 写 1.0 + 右下角锚）防 z 钉漂移。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile f964(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rb964 = f964.open(QIODevice::ReadOnly) ? QString::fromUtf8(f964.readAll()) : QString();
+        // 按钮块边界：t922 重置按钮注释（全文唯一）→ View3D 声明（id: cubeView，块尾界）。
+        const int anchor964 = rb964.indexOf(QStringLiteral("// t922 重置缩放按钮"));
+        const int view964 = anchor964 >= 0 ? rb964.indexOf(QStringLiteral("id: cubeView"), anchor964) : -1;
+        const QString btnBlock964 = anchor964 >= 0 && view964 > anchor964
+            ? rb964.mid(anchor964, view964 - anchor964) : QString();
+        // 视口头段边界：id: cubeView → PerspectiveCamera（其自身属性区，不含子项）。
+        const int cam964 = view964 >= 0 ? rb964.indexOf(QStringLiteral("PerspectiveCamera {"), view964) : -1;
+        const QString viewHead964 = view964 >= 0 && cam964 > view964
+            ? rb964.mid(view964, cam964 - view964) : QString();
+        // (a) 按钮层显式 z: 10（独立行形态——注释里的 "z: 10" 不算数）+ 契约锚；视口缺省 z 0
+        //     （头段无 z 覆盖）→ 按钮层 > 视口层。
+        const bool btnZRow964 = btnBlock964.contains(QRegularExpression(
+            QStringLiteral("^\\s*z: 10\\s*$"), QRegularExpression::MultilineOption));
+        const bool okA964 = !btnBlock964.isEmpty()
+                         && btnZRow964
+                         && btnBlock964.contains(QStringLiteral("t964 永远最前"))
+                         && viewHead964.contains(QStringLiteral("anchors.fill: parent"))
+                         && !viewHead964.contains(QStringLiteral("z:"));
+        // (b) 独立 z: 10 行（行首缩进 + 行尾，不把 z: 1000 计入）恰 2 处 = 面板 + 按钮。
+        const int zRows964 = rb964.count(QRegularExpression(QStringLiteral("^\\s*z: 10\\s*$"),
+                                                             QRegularExpression::MultilineOption));
+        const bool okB964 = zRows964 == 2
+                         && rb964.contains(QStringLiteral("id: variantPanel"));
+        // (c) 按钮本体身份（防层级钉漂到其他控件）。
+        const bool okC964 = btnBlock964.contains(QStringLiteral("visible: cubeView.visible && Math.abs(root.previewZoom - 1.0) > 0.001"))
+                         && btnBlock964.contains(QStringLiteral("onClicked: root.previewZoom = 1.0"))
+                         && btnBlock964.contains(QStringLiteral("anchors.bottom: parent.bottom"))
+                         && btnBlock964.contains(QStringLiteral("anchors.right: parent.right"));
+        ok = okA964 && okB964 && okC964;
+        if (!ok)
+            qInfo().noquote() << "  [t964 diag] block" << !btnBlock964.isEmpty() << "zPin" << okA964
+                              << "convention(zRows" << zRows964 << ")" << okB964 << "identity" << okC964;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t964 preview reset button z-order: wheel-zooming the block preview no "
+                             "longer covers the bottom-right reset button - the button was declared "
+                             "BEFORE the full-viewport View3D (cubeView) and QML sibling stacking "
+                             "paints later-declared siblings on top, so the viewport painted over "
+                             "it exactly when it is visible (zoom != 1 is when the zoomed model "
+                             "pixels reach the bottom-right corner); the fix lifts the button with "
+                             "an explicit z: 10 above the viewport default z 0 following the "
+                             "variantPanel precedent (explicit z guards against later sibling "
+                             "insertion re-flipping the order), registering the preview-area "
+                             "floating-layer contract (variant panel + reset button + the future "
+                             "t965 mode/classification button group all carry explicit z >= 10, "
+                             "always frontmost of the viewport); legs: button-block z pin + "
+                             "contract comment anchor + viewport-head-stays-default-z pin (button "
+                             "layer z > viewport layer z), file-wide standalone z: 10 row count == 2 "
+                             "(panel + button), and identity pins keeping the z pin on the real "
+                             "reset button (zoom-visibility predicate, reset-to-1.0 handler, "
+                             "bottom-right anchor)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
