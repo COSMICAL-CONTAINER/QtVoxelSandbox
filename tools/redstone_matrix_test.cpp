@@ -24766,6 +24766,396 @@ Item {
                              " pins the registry call chain plus the (+ paren branch (t960(g)";
     }
 
+    // ── P-t962 附魔书↔附魔书交换（R19.17 🅳 收官；用户第五轮口径「背包拿附魔书左键物品交换是对的，
+    //    但附魔书对附魔书槽的交换没做——补齐」）──
+    //    对「普通物品交换是对的」的分叉点根因双闸：
+    //    ① InventoryOps.resolveClick 同 id 恒入 C 合并臂 → 附魔书 maxStack=1 → 槽恒满 space≤0 → null =
+    //       no-op（旧注释「A/B/D 路径覆盖工具搬运」对同 id 不成立——D 互换在同 id 下旧不可达）；
+    //    ② EnchantingTableUI.localCanPlace 对附魔书（itemEnchantCategory=None）拒入槽 0——就算换算出来
+    //       也进不去（t648 门禁把书与非可附魔物一并扫进拒入面）。
+    //    修：cap≤1 同 id 落 D 互换（可堆叠满槽 no-op 与全部合并语义保持）+ 附魔书门禁豁免（itemReady 恒
+    //    假 → 书在槽 0 不可再附，t648 刷属性面不开放；t959 施法链只从「可附魔且未附魔」态出发零触碰）。
+    //    断言（t874/t956 真链 harness 先例：源树 QML + 真 C++ Hotbar，面板函数链直调——合成鼠标事件在
+    //    该 harness 有不可消除的拖动伪影，t874 定案函数链直调已覆盖真链关键面「真 QML × 真 C++ VM」）：
+    //    (a) 附魔台槽 0 书书左键交换 + 换回：附魔 / 名随各自实例双向往返不失真（B 书附魔落 1 号槽位、
+    //        A 书带实例名——钉逐槽 / 逐名保真，非「任一非零」粗粒度）；
+    //    (b) 豁免后的自由进出：空槽 0 放书 / 取回元数据保真；书在槽 0 doEnchant 恒拒（itemReady 门——
+    //        等级 / 青金石零消耗、槽内容不动，t648 防线对书路径不破）；
+    //    (c) 阴性腿：普通异 id 交换照旧（c1）；已附魔剑仍拒入槽 0（c2，豁免仅附魔书）；可堆叠同 id 满
+    //        槽撞同 id 仍 no-op（c3，满槽 / 合并口径保持）；
+    //    (d) 铁砧同病同修：A/B 两输入槽书书交换（铁砧面无门禁，纯 resolveClick 臂修复即愈）。
+    {
+        static bool sT962TypesRegistered = false;
+        if (!sT962TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT962", 1, 0, "Hotbar");
+            qmlRegisterType<PlayerState>("VoxelSandboxProbeT962", 1, 0, "PlayerState");
+            qmlRegisterType<PlayerController>("VoxelSandboxProbeT962", 1, 0, "PlayerController");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT962", 1, 0, "ResourcePackManager");
+            sT962TypesRegistered = true;
+        }
+        bool harnessOk = true;
+        QString diag;
+        const QString uiDir962 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUiDir = QDir::temp().absoluteFilePath(
+                QStringLiteral("t962_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUiDir);
+        for (const QString f : { QStringLiteral("AnvilUI.qml"), QStringLiteral("EnchantingTableUI.qml"),
+                                 QStringLiteral("InventoryOps.js"), QStringLiteral("InvSlot.qml"),
+                                 QStringLiteral("ToolIcon.qml"), QStringLiteral("MaterialIcon.qml") }) {
+            QFile::remove(probeUiDir + QLatin1Char('/') + f);
+            QFile(uiDir962 + QLatin1Char('/') + f).copy(probeUiDir + QLatin1Char('/') + f);
+        }
+        {
+            // 临时目录直载的 URL 改写（t874/t956 同款）：相对 js 导入 → 绝对 file URL（防 build qmldir
+            //   prefer 重定向染指）；面板 import → 探针私有 URI（私有 URI 无 qmldir → 走 C++ 注册）。
+            const QUrl jsUrl = QUrl::fromLocalFile(probeUiDir + QLatin1Char('/') + QStringLiteral("InventoryOps.js"));
+            const QStringList qmlFiles = QDir(probeUiDir).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles) {
+                QFile p(probeUiDir + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import \"InventoryOps.js\" as InventoryOps"),
+                          QStringLiteral("import \"") + jsUrl.toString() + QStringLiteral("\" as InventoryOps"));
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT962\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine962;
+        Hotbar vm962;
+        PlayerState ps962;
+        engine962.rootContext()->setContextProperty(QStringLiteral("t962Hotbar"), &vm962);
+        engine962.rootContext()->setContextProperty(QStringLiteral("t962PlayerState"), &ps962);
+        QQmlComponent wrapComp962(&engine962);
+        // 宿主桩：Main.qml 根（id: window）最小复刻（两面板经作用域链解析 window.shiftHeld 等）。
+        wrapComp962.setData(R"QML(import QtQuick
+Item {
+    id: window
+    width: 800; height: 1200
+    property bool shiftHeld: false
+    property string hoveredSlotKey: ""
+    function refocusKeyInput() { }
+    function closeAnvil() { }
+    function closeEnchantingTable() { }
+    function burstEnchantRunes(n) { }
+}
+)QML", QUrl());
+        QQuickItem host962;   // 独立场景根（无窗口，同 t874：函数链直调无需窗口事件）
+        QQuickItem *wrap962 = nullptr;
+        QObject *anvil962 = nullptr;
+        QObject *enchant962 = nullptr;
+        if (wrapComp962.isError()) {
+            harnessOk = false;
+            diag = QStringLiteral("wrapper: ") + wrapComp962.errorString();
+        } else {
+            wrap962 = qobject_cast<QQuickItem *>(wrapComp962.create());
+            if (!wrap962) {
+                harnessOk = false;
+                diag = QStringLiteral("wrapper create failed");
+            } else {
+                wrap962->setParent(&engine962);
+                wrap962->setParentItem(&host962);
+            }
+        }
+        auto loadPanel962 = [&](const char *fileName, QObject **out, double y) {
+            QFile src(probeUiDir + QLatin1Char('/') + QLatin1String(fileName));
+            if (!src.open(QIODevice::ReadOnly)) {
+                harnessOk = false;
+                diag = QString::fromLatin1(fileName) + QStringLiteral(" read failed");
+                return;
+            }
+            QQmlComponent comp(&engine962);
+            comp.setData(src.readAll(), QUrl::fromLocalFile(src.fileName()));
+            if (comp.isError()) {
+                harnessOk = false;
+                diag = QString::fromLatin1(fileName) + QStringLiteral(" load: ") + comp.errorString();
+                return;
+            }
+            *out = comp.create(qmlContext(wrap962));   // wrapper 作用域链（同 t874：面板内 window.id 解析）
+            QQuickItem *it = qobject_cast<QQuickItem *>(*out);
+            if (!it) {
+                harnessOk = false;
+                diag = QString::fromLatin1(fileName) + QStringLiteral(" create failed");
+                return;
+            }
+            (*out)->setProperty("hotbar", QVariant::fromValue(&vm962));
+            (*out)->setProperty("playerState", QVariant::fromValue(&ps962));
+            (*out)->setProperty("player", QVariant());
+            (*out)->setProperty("progress", QVariant());
+            (*out)->setProperty("theWorld", QVariant());   // EnchantingTableUI 有；AnvilUI 无此属性（setProperty 无害）
+            it->setWidth(800);
+            it->setHeight(600);
+            (*out)->setParent(wrap962);
+            it->setParentItem(wrap962);
+            it->setY(y);
+        };
+        if (harnessOk) {
+            loadPanel962("AnvilUI.qml", &anvil962, 0.0);
+            loadPanel962("EnchantingTableUI.qml", &enchant962, 600.0);
+        }
+
+        bool okA = false, okB = false, okC1 = false, okC2 = false, okC3 = false, okD = false;
+        if (harnessOk && anvil962 && enchant962) {
+            QCoreApplication::processEvents();
+            const int book = RecipeRegistry::EnchantedBookId;
+            const int plainBook = RecipeRegistry::BookId;
+            const int lapis = RecipeRegistry::LapisId;
+            const int sharp5 = (EnchantRegistry::Sharpness << 8) | 5;
+            const int fire1 = (EnchantRegistry::FireAspect << 8) | 1;
+            const int kb2 = (EnchantRegistry::Knockback << 8) | 2;
+            const int prot4 = (EnchantRegistry::Protection << 8) | 4;
+            const int sharp3 = (EnchantRegistry::Sharpness << 8) | 3;
+            const int pick = ToolRegistry::PickaxeIron;
+            const int sword = ToolRegistry::SwordIron;
+
+            auto call = [](QObject *obj, const char *method, const QVariantList &args) -> bool {
+                const QVariant v0 = args.value(0), v1 = args.value(1), v2 = args.value(2), v3 = args.value(3);
+                const QVariant v4 = args.value(4), v5 = args.value(5), v6 = args.value(6);
+                switch (args.size()) {
+                case 0:  return QMetaObject::invokeMethod(obj, method);
+                case 1:  return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0));
+                case 2:  return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0), Q_ARG(QVariant, v1));
+                case 3:  return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0), Q_ARG(QVariant, v1), Q_ARG(QVariant, v2));
+                case 4:  return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0), Q_ARG(QVariant, v1), Q_ARG(QVariant, v2), Q_ARG(QVariant, v3));
+                case 5:  return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0), Q_ARG(QVariant, v1), Q_ARG(QVariant, v2), Q_ARG(QVariant, v3), Q_ARG(QVariant, v4));
+                case 6:  return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0), Q_ARG(QVariant, v1), Q_ARG(QVariant, v2), Q_ARG(QVariant, v3), Q_ARG(QVariant, v4), Q_ARG(QVariant, v5));
+                default: return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, v0), Q_ARG(QVariant, v1), Q_ARG(QVariant, v2), Q_ARG(QVariant, v3), Q_ARG(QVariant, v4), Q_ARG(QVariant, v5), Q_ARG(QVariant, v6));
+                }
+            };
+            auto listEq4 = [](const QVariantList &a, int e0, int e1, int e2, int e3) {
+                return a.size() == 4 && a.at(0).toInt() == e0 && a.at(1).toInt() == e1
+                        && a.at(2).toInt() == e2 && a.at(3).toInt() == e3;
+            };
+            auto enchStr = [](const QVariantList &e) {
+                QString s;
+                for (int i = 0; i < e.size(); ++i)
+                    s += (i ? QStringLiteral(",") : QString()) + QString::number(e.at(i).toInt());
+                return s;
+            };
+            auto idAt = [](QObject *panel, const char *prop, int idx) -> int {
+                const QVariantList a = panel->property(prop).toList();
+                return (idx >= 0 && idx < a.size()) ? a.at(idx).toInt() : 0;
+            };
+            auto enchAt = [](QObject *panel, const char *prop, int idx) -> QVariantList {
+                const QVariantList outer = panel->property(prop).toList();
+                QVariantList e;
+                if (idx >= 0 && idx < outer.size())
+                    e = outer.at(idx).toList();
+                while (e.size() < 4)
+                    e.append(0);
+                return e;
+            };
+            auto nameAt = [](QObject *panel, const char *prop, int idx) -> QString {
+                const QVariantList a = panel->property(prop).toList();
+                return (idx >= 0 && idx < a.size()) ? a.at(idx).toString() : QString();
+            };
+            // 双击判定态复位（t874 同款：harness 同步连点恒 <280ms，须显式复位成「独立单击」）。
+            auto resetTap = [&](QObject *panel) {
+                panel->setProperty("lastTapMs", 0.0);
+                panel->setProperty("lastTapKey", QString());
+            };
+            auto clearVm = [&]() {
+                for (int i = 0; i < vm962.slotCount(); ++i)
+                    vm962.setStack(i, 0, 0);
+                for (int i = 0; i < vm962.mainCount(); ++i)
+                    vm962.mainSetStack(i, 0, 0);
+                vm962.setHeldBlock(0);
+            };
+            auto resetEnch = [&]() {
+                clearVm();
+                enchant962->setProperty("visible", false);   // 触发 returnEnchantToHotbar（槽空则零迭代）
+                enchant962->setProperty("visible", true);
+                clearVm();
+            };
+            auto resetAnvil = [&]() {
+                clearVm();
+                anvil962->setProperty("visible", false);     // 触发 returnAnvilToHotbar
+                anvil962->setProperty("visible", true);
+                clearVm();
+            };
+            // 直写本地槽（writeSlot 面板薄包装 → InventoryOps → localWriteSlot；探针铺底用——被测的
+            //   点击交换链从铺底态出发，铺底本身不走被测路径）。
+            auto putItem = [&](QObject *panel, const QString &group, int idx, int id, int count,
+                               const QVariantList &ench, const QString &nm) {
+                call(panel, "writeSlot", { QVariant(group), QVariant(idx), QVariant(id),
+                                           QVariant(count), QVariant(0), QVariant(ench), QVariant(nm) });
+            };
+
+            // (a) 附魔台槽 0 书书左键交换 + 换回（双向元数据保真）。
+            {
+                resetEnch();
+                putItem(enchant962, QStringLiteral("enchant"), 0, book, 1,
+                        QVariantList{sharp5, 0, 0, 0}, QStringLiteral("甲书"));      // A：锐锋 V 带名
+                vm962.setHeldBlock(book);
+                vm962.setHeldCount(1);
+                vm962.setHeldEnchants(QVariantList{0, fire1, 0, 0});                  // B：火触 I 落 1 号槽位（逐槽保真钉）+ 无名
+                vm962.setHeldCustomName(QString());
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });
+                const bool fwd = idAt(enchant962, "enchantSlots", 0) == book
+                        && idAt(enchant962, "enchantCounts", 0) == 1
+                        && listEq4(enchAt(enchant962, "enchantEnch", 0), 0, fire1, 0, 0)
+                        && nameAt(enchant962, "enchantNames", 0).isEmpty()
+                        && vm962.heldBlock() == book && vm962.heldCount() == 1
+                        && listEq4(vm962.heldEnchants(), sharp5, 0, 0, 0)
+                        && vm962.heldCustomName() == QStringLiteral("甲书");
+                // 换回：A（现光标）对 B（现槽 0）再左键 → 槽回到 A、光标回到 B（往返不失真）。
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });
+                const bool back = idAt(enchant962, "enchantSlots", 0) == book
+                        && listEq4(enchAt(enchant962, "enchantEnch", 0), sharp5, 0, 0, 0)
+                        && nameAt(enchant962, "enchantNames", 0) == QStringLiteral("甲书")
+                        && vm962.heldBlock() == book
+                        && listEq4(vm962.heldEnchants(), 0, fire1, 0, 0)
+                        && vm962.heldCustomName().isEmpty();
+                okA = fwd && back;
+                if (!okA)
+                    diag = QStringLiteral("(a) fwd=") + QVariant(fwd).toString()
+                            + QStringLiteral(" back=") + QVariant(back).toString()
+                            + QStringLiteral(" slot0ench=") + enchStr(enchAt(enchant962, "enchantEnch", 0))
+                            + QStringLiteral(" heldench=") + enchStr(vm962.heldEnchants());
+            }
+            // (b) 豁免自由进出：空槽 0 放书 / 取回 + 书在槽 0 doEnchant 恒拒（itemReady 门）。
+            {
+                resetEnch();
+                vm962.setHeldBlock(book);
+                vm962.setHeldCount(1);
+                vm962.setHeldEnchants(QVariantList{kb2, 0, 0, 0});
+                vm962.setHeldCustomName(QString());
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });   // 放入空槽 0
+                const bool in = idAt(enchant962, "enchantSlots", 0) == book
+                        && listEq4(enchAt(enchant962, "enchantEnch", 0), kb2, 0, 0, 0)
+                        && vm962.heldBlock() == 0;
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });   // 取回
+                const bool out = vm962.heldBlock() == book && listEq4(vm962.heldEnchants(), kb2, 0, 0, 0)
+                        && idAt(enchant962, "enchantSlots", 0) == 0;
+                // 书在槽 0 → 三档位施放恒拒（itemReady 门：category=None + 已带附魔）：等级 / 青金石
+                //   零消耗、槽内容不动 —— t648「不可再附」语义对附魔书路径保持。
+                putItem(enchant962, QStringLiteral("enchant"), 0, book, 1,
+                        QVariantList{sharp5, 0, 0, 0}, QString());
+                putItem(enchant962, QStringLiteral("enchant"), 1, lapis, 5, QVariantList{0, 0, 0, 0}, QString());
+                vm962.setHeldBlock(0);
+                const int levelBefore = ps962.property("level").toInt();
+                call(enchant962, "doEnchant", { QVariant(0) });
+                const bool rejected = idAt(enchant962, "enchantSlots", 0) == book
+                        && listEq4(enchAt(enchant962, "enchantEnch", 0), sharp5, 0, 0, 0)
+                        && idAt(enchant962, "enchantCounts", 1) == 5
+                        && ps962.property("level").toInt() == levelBefore;
+                okB = in && out && rejected;
+                if (!okB)
+                    diag = QStringLiteral("(b) in=") + QVariant(in).toString()
+                            + QStringLiteral(" out=") + QVariant(out).toString()
+                            + QStringLiteral(" rejected=") + QVariant(rejected).toString();
+            }
+            // (c1) 阴性：普通异 id 交换照旧（素品镐 ↔ 素品剑；用户口径「左键物品交换是对的」基线）。
+            {
+                resetEnch();
+                putItem(enchant962, QStringLiteral("enchant"), 0, pick, 1, QVariantList{0, 0, 0, 0}, QString());
+                vm962.setStack(3, sword, 1);
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });    // 拾剑
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });   // 剑对镐 → 交换
+                okC1 = idAt(enchant962, "enchantSlots", 0) == sword
+                        && vm962.heldBlock() == pick
+                        && listEq4(vm962.heldEnchants(), 0, 0, 0, 0);
+            }
+            // (c2) 阴性：已附魔剑仍拒入槽 0（t648 刷属性防线不破——豁免仅附魔书，不外溢已附魔工具）。
+            {
+                resetEnch();
+                vm962.setStack(3, sword, 1, ToolRegistry::maxDurability(sword) - 4,
+                               QVariantList{sharp3, 0, 0, 0}, QString());
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("hotbar")), QVariant(3) });
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });
+                okC2 = idAt(enchant962, "enchantSlots", 0) == 0
+                        && vm962.heldBlock() == sword
+                        && listEq4(vm962.heldEnchants(), sharp3, 0, 0, 0);
+            }
+            // (c3) 阴性：可堆叠同 id 满槽撞同 id 仍 no-op（t962 只放行 cap≤1 不可堆叠臂——满槽 /
+            //      合并口径在权威库层面保持）。
+            {
+                resetEnch();
+                putItem(enchant962, QStringLiteral("enchant"), 0, plainBook, 64, QVariantList{0, 0, 0, 0}, QString());
+                vm962.setHeldBlock(plainBook);
+                vm962.setHeldCount(20);
+                resetTap(enchant962);
+                call(enchant962, "slotLeft", { QVariant(QStringLiteral("enchant")), QVariant(0) });
+                okC3 = idAt(enchant962, "enchantSlots", 0) == plainBook
+                        && idAt(enchant962, "enchantCounts", 0) == 64
+                        && vm962.heldBlock() == plainBook && vm962.heldCount() == 20;
+            }
+            // (d) 铁砧同病同修：A/B 两输入槽书书交换（铁砧面无门禁，纯 resolveClick 臂修复即愈）。
+            {
+                resetAnvil();
+                putItem(anvil962, QStringLiteral("anvil"), 1, book, 1,
+                        QVariantList{prot4, 0, 0, 0}, QStringLiteral("乙书"));        // B 槽书 A
+                vm962.setHeldBlock(book);
+                vm962.setHeldCount(1);
+                vm962.setHeldEnchants(QVariantList{0, fire1, 0, 0});
+                vm962.setHeldCustomName(QString());
+                resetTap(anvil962);
+                call(anvil962, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(1) });
+                const bool legB = idAt(anvil962, "anvilSlots", 1) == book
+                        && listEq4(enchAt(anvil962, "anvilEnch", 1), 0, fire1, 0, 0)
+                        && nameAt(anvil962, "anvilNames", 1).isEmpty()
+                        && vm962.heldBlock() == book
+                        && listEq4(vm962.heldEnchants(), prot4, 0, 0, 0)
+                        && vm962.heldCustomName() == QStringLiteral("乙书");
+                putItem(anvil962, QStringLiteral("anvil"), 0, book, 1,
+                        QVariantList{sharp5, 0, 0, 0}, QString());                    // A 槽书 C
+                vm962.setHeldBlock(book);
+                vm962.setHeldCount(1);
+                vm962.setHeldEnchants(QVariantList{kb2, 0, 0, 0});                    // 光标书 D
+                vm962.setHeldCustomName(QString());
+                resetTap(anvil962);
+                call(anvil962, "slotLeft", { QVariant(QStringLiteral("anvil")), QVariant(0) });
+                const bool legA = idAt(anvil962, "anvilSlots", 0) == book
+                        && listEq4(enchAt(anvil962, "anvilEnch", 0), kb2, 0, 0, 0)
+                        && vm962.heldBlock() == book
+                        && listEq4(vm962.heldEnchants(), sharp5, 0, 0, 0);
+                okD = legB && legA;
+                if (!okD)
+                    diag = QStringLiteral("(d) legB=") + QVariant(legB).toString()
+                            + QStringLiteral(" legA=") + QVariant(legA).toString();
+            }
+            clearVm();
+        }
+        QDir(probeUiDir).removeRecursively();
+
+        const bool ok962 = harnessOk && okA && okB && okC1 && okC2 && okC3 && okD;
+        if (!ok962)
+            qInfo().noquote() << "  [t962 diag] harness" << harnessOk << "a" << okA << "b" << okB
+                              << "c1" << okC1 << "c2" << okC2 << "c3" << okC3 << "d" << okD << diag;
+        if (!ok962) ++totalFail;
+        qInfo().noquote() << (ok962 ? "PASS" : "FAIL")
+                          << "| t962 enchanted-book <-> enchanted-book slot swap: an enchanted book in "
+                             "hand left-clicking the enchanting-table slot 0 (or either anvil input slot) "
+                             "now swaps instead of silently doing nothing - InventoryOps.resolveClick "
+                             "routes same-id UNSTACKABLE stacks (maxStackSize<=1: tools/armor/books) to "
+                             "the D instance-swap arm whose metadata (enchants/durability/name) rides "
+                             "each side faithfully both ways, while stackable full-slot no-op and every "
+                             "merge semantic stay pinned, and EnchantingTableUI.localCanPlace exempts "
+                             "the enchanted book from the category/enchanted rejection so it can enter "
+                             "slot 0 (re-enchant remains blocked by the itemReady gate: tiers stay dark "
+                             "and doEnchant consumes zero xp/lapis with a book in slot); legs: real "
+                             "EnchantingTableUI.qml+AnvilUI.qml x real C++ Hotbar harness swaps book A "
+                             "(sharpness V named) against book B (fire-aspect I unnamed) and back with "
+                             "per-slot metadata fidelity, places into and takes back from the empty "
+                             "slot, verifies doEnchant rejection, keeps the plain pickaxe/sword swap "
+                             "and the enchanted-sword rejection and the 64-book full-slot no-op green, "
+                             "and swaps books in both anvil input slots";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

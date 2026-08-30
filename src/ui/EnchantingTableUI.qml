@@ -179,8 +179,12 @@ Item {
     //   已附魔物品重复附魔刷属性）。覆盖：普通左键（singleLeftClick / EnchantInputSlot TapHandler）、右键
     //   放一（singleRightClick / placeOneInSlot）、左键拖拽均分（redistributeLive eligible 过滤）、数字键
     //   交换（swapHoveredWithHotbar 双向问）。Shift+左键在 slotShiftLeftEnchant 自带同款守卫（t549）。
-    //   判定（仅 index 0 = 待附魔物品槽；index 1 青金石槽不设限）：不可附魔（itemEnchantCategory==None，
-    //   含附魔书 0x227 自身）或已带附魔 → 拒。旧 bug：左键整栈放置走 resolveClick B 无门禁 → 已附魔
+    //   判定（仅 index 0 = 待附魔物品槽；index 1 青金石槽不设限）：不可附魔（itemEnchantCategory==None）
+    //   或已带附魔 → 拒；**t962 豁免：附魔书（0x227）恒放行**（用户口径「附魔书对附魔书槽的交换」——
+    //   槽里换出、手里换进；书自身即附魔载体，category=None 属其常态而非「不可附魔物」）。刷属性防线不破：
+    //   附魔书在槽 0 时 itemReady 门（category===0 → false）恒假 → 三档位选项恒灰、doEnchant 前置守卫
+    //   恒拒，书上附魔永不进 selectEnchants 施法链（t959 施法链零触碰——它只从「可附魔且未附魔」的槽 0
+    //   物品出发，附魔书从不可达该态）。旧 bug：左键整栈放置走 resolveClick B 无门禁 → 已附魔
     //   钻石剑可反复进台重附（锐锋1→锐锋2→耐久1 无限刷，t549 的 Shift 守卫只盖 Shift 路径）。
     //   门禁在写入**前**查询（写后 no-op = caller 已清光标 → 物品凭空丢失）；doEnchant 产物写入与关包
     //   清槽不经 InventoryOps 放置路径，恒不受门禁影响。
@@ -194,6 +198,9 @@ Item {
         if (group !== "enchant" || index !== 0) return true
         if (id === 0 || count <= 0) return true    // 清空 / 取出恒放行
         if (!root.hotbar) return true
+        // t962：附魔书豁免（先于 category / 已附魔两拒——两拒对书恒真，正是交换被挡的第二道闸；
+        //   见上方块注释：itemReady 恒假保证书在槽 0 不可再附，豁免不开放任何刷属性面）。
+        if (id === root.enchantedBookId) return true
         if (root.hotbar.itemEnchantCategory(id) === 0) return false   // 不可附魔物不入槽 0
         let hasEnch = false
         // t874：enchants 形参可为 C++ 序列对象（Array.isArray 恒 false）→ 旧 `Array.isArray ? : []`
