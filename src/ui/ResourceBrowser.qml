@@ -812,15 +812,16 @@ Item {
                                         root.spinAngle = (root.spinAngle + dx * 0.6 + 360) % 360
                                         // t877 用户定稿符号（t599 原方向）：上拖看顶 / 下拖看底。
                                         //   【用户确认方向，勿再改】——t820 的 +dy 取反已按用户实测回退。
-                                        // t921 背面相位补偿（与 t877 契约的关系，钉死防误改回）：t877 定稿的是
-                                        //   **正面相位**（显示 yaw 未过 ±90°）的符号——本行不改该符号，只在
-                                        //   自转把背面转向相机时（显示 yaw = spinAngle-35 的 cos < 0，pitch 铰链
-                                        //   轴在屏幕上的投影反号）把**增量**乘 -1，使「上拖看顶」的屏幕感知在
-                                        //   背面相位与正面一致（用户定位的规律：转到底面朝人时上下拖拽反了）。
-                                        //   两态同向 = t877 契约保持并扩到全程，非翻转既有方向。
-                                        const yawRad = (root.spinAngle - 35) * Math.PI / 180
-                                        const faceSign = Math.cos(yawRad) >= 0 ? 1 : -1
-                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6 * faceSign))
+                                        // t966 纯线性定律（用户第六轮「左右转到背面仍反」终修）：定律本身
+                                        //   **零相位判定**——无 sin/cos / 象限分支 / faceSign。t921 曾在增量上乘
+                                        //   sign(cos(spinAngle-35)) 做背面相位补偿，但那本身就是一个相位相关的
+                                        //   符号面：显示 yaw 过 ±90° 的瞬间上下映射换号，「转到背面的过程」手感
+                                        //   即乱（实机 rig 实测：侧相位竖直拖的近面位移含 ~40% 横向分量 = 拖拽
+                                        //   轴被换走）。相位一致性改由**变换图**恒定承载：下方四个预览分支的
+                                        //   eulerRotation 已拆成 pitch 父（世界系俯仰，铰链恒屏幕水平）+ yaw 子
+                                        //   （自转转台）两层（锚「t966 恒铰链俯仰」）——俯仰铰链的屏幕投影不再随
+                                        //   自转相位翻转，「上拖看顶」全相位由结构恒成立，定律无需任何补偿。
+                                        root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))
                                     }
                                 }
                                 // t922 滚轮缩放（3D 预览态）：滚上放大 / 滚下缩小（每档 ×1.1，钳 [0.5, 3.0]）。
@@ -881,44 +882,58 @@ Item {
                                         clipFar: 100
                                         fieldOfView: 45
                                     }
-                                    Model {
-                                        // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel；选中床 → 只显
-                                        //   BedModelGeometry 低 3D 床；t880 异形物品 → 只显 ItemShapeGeometry，
-                                        //   多模型互斥不叠渲染）。
-                                        visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed && !root.selectedIsItem3D // review27 #4：附魔台 94 不在 isPartialBlock → selectedIsCube 对 94 仍 true，与下方 ItemShapeGeometry 预览叠渲 z-fight（同 Main.qml 掉落物侧修法）；家族互斥钉死
-                                        // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
-                                        // t965：blockState 绑形态按钮组（耕地干/湿顶面、末地框无眼/有眼顶面——
-                                        //   BlockRegistry::stateTileOverride Core 权威；非态变方块 state 0 零漂移）。
-                                        geometry: BlockCube { blockId: root.selectedId; blockState: root.selectedFormState }
-                                        // 固定 -22° X 基倾（见顶面）+ userPitch 拖拽俯仰（t599）+ Y 自转
-                                        //   （spinAngle，拖拽时由 DragHandler 写入）；-35° 基偏给 3/4 视角。
-                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
-                                        materials: PrincipledMaterial {
-                                            lighting: PrincipledMaterial.NoLighting
-                                            baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
-                                            // Mask + 0.5：leaves 等带 alpha 的整立方贴图 cutout 正确（同地形 terrain 段）；
-                                            //   其余不透明方块贴图 alpha=1 不受影响。
-                                            alphaMode: PrincipledMaterial.Mask
-                                            alphaCutoff: 0.5
-                                        }
-                                    }
+                                    // t966 恒铰链俯仰（拖拽方向全相位一致的变换图契约）：单节点 eulerRotation 的
+                                    //   合成序是 Ry(yaw)·Rx(pitch)（yaw 在世界系最外——实机 rig 实测钉死，本 Qt 的
+                                    //   eulerRotation 无 rotationOrder 旋钮）→ 俯仰铰链 = Ry(θ)·X̂，其屏幕投影随
+                                    //   cos(θ) 翻号 = 背面相位「上下拖拽反了」的根因；且侧相位（|θ|→90°）铰链
+                                    //   顺向视口、竖直拖带出绕视轴的平面内打转分量（拖拽轴被换走）。拆两层：
+                                    //   **pitch 父**（世界系俯仰 = 铰链恒 = 屏幕水平 X 轴，投影永不随自转翻号）+
+                                    //   **yaw 子**（spinAngle 自转/拖拽转台）。t599 的 -22° 基倾 / -35° 基偏与
+                                    //   t877 定稿拖拽符号逐字保留。四预览分支（整立方 / 床 / 异形 / 生物）同构。
+                                    Node {
+                                        eulerRotation.x: -22 + root.userPitch // t966 pitch 父：基倾 -22°（见顶面）+ 拖拽俯仰（t599）
+                                        Model {
+                                            // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel；选中床 → 只显
+                                            //   BedModelGeometry 低 3D 床；t880 异形物品 → 只显 ItemShapeGeometry，
+                                            //   多模型互斥不叠渲染）。
+                                            visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed && !root.selectedIsItem3D // review27 #4：附魔台 94 不在 isPartialBlock → selectedIsCube 对 94 仍 true，与下方 ItemShapeGeometry 预览叠渲 z-fight（同 Main.qml 掉落物侧修法）；家族互斥钉死
+                                            // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
+                                            // t965：blockState 绑形态按钮组（耕地干/湿顶面、末地框无眼/有眼顶面——
+                                            //   BlockRegistry::stateTileOverride Core 权威；非态变方块 state 0 零漂移）。
+                                            geometry: BlockCube { blockId: root.selectedId; blockState: root.selectedFormState }
+                                            // t966 yaw 子：spinAngle 自转（拖拽时由 DragHandler 写入）；-35° 基偏给 3/4 视角。
+                                            eulerRotation.y: root.spinAngle - 35
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                                // Mask + 0.5：leaves 等带 alpha 的整立方贴图 cutout 正确（同地形 terrain 段）；
+                                                //   其余不透明方块贴图 alpha=1 不受影响。
+                                                alphaMode: PrincipledMaterial.Mask
+                                                alphaCutoff: 0.5
+                                            }
+                                        } // t966 yaw 子收口（整立方分支 Model）
+                                    } // t966 pitch 父收口（整立方分支）
                                     // t784 床预览：游戏内低 3D 床模型（BedModelGeometry 双格拼装：床尾半 + 床头半，
                                     //   盒布局复用游戏内 bedHalfBoxes 单一权威）替代旧满格 BlockCube 立方。贴图同源共享
                                     //   图集（atlasSource → pack 开 = pack 床瓦片即时刷新）；腿/架/板贴 planks、枕头贴白
                                     //   wool、床垫贴床色被面瓦片——与游戏内逐瓦片一致。scale 1.15：双格床长 2（对角投影
                                     //   ~2.4）撑满镜头仍整床可见（单格高立方 1.0 的对比基准）；旋转/拖拽与方块分支共用
                                     //   spinAngle/userPitch（床仍在 cubeView 内，DragHandler 手势不变）。
-                                    Model {
-                                        visible: root.selectedIsBed
-                                        geometry: BedModelGeometry { blockId: root.selectedId }
-                                        scale: Qt.vector3d(1.15, 1.15, 1.15)
-                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
-                                        materials: PrincipledMaterial {
-                                            lighting: PrincipledMaterial.NoLighting
-                                            // 床瓦片（planks/wool/被面）全不透明 → 无需 Mask（同 bed 盒贴图约定）。
-                                            baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                    Node { // t966 pitch 父（床分支）：恒铰链俯仰层，契约见整立方分支同款注释。
+                                        eulerRotation.x: -22 + root.userPitch
+                                        Model {
+                                            visible: root.selectedIsBed
+                                            geometry: BedModelGeometry { blockId: root.selectedId }
+                                            scale: Qt.vector3d(1.15, 1.15, 1.15)
+                                            // t966 yaw 子：自转层（-35° 基偏 3/4 视角不变）。
+                                            eulerRotation.y: root.spinAngle - 35
+                                            materials: PrincipledMaterial {
+                                                lighting: PrincipledMaterial.NoLighting
+                                                // 床瓦片（planks/wool/被面）全不透明 → 无需 Mask（同 bed 盒贴图约定）。
+                                                baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                            }
                                         }
-                                    }
+                                    } // t966 pitch 父收口（床分支）
                                     // t880 异形物品 3D 预览：活板门/火把/台阶/木楼梯/雪层/草丛/附魔台 →
                                     //   ItemShapeGeometry 真实 3D 形状（几何与 World partialblockgeometry 形状
                                     //   同源、形心居中），替代大图标平面图。旋转/拖拽与方块分支共用
@@ -926,70 +941,73 @@ Item {
                                     //   透明底 / 火把窗 cutout 正确；不透明瓦片不受影响（同方块分支契约）。
                                     //   火把（13）形状细小（2/16 柱）→ scale 1.6 放到近立方视觉量级；其余 1.0
                                     //   （参数视觉钉死，待用户目视确认）。
-                                    Node {
-                                        visible: root.selectedIsItem3D
-                                        // t880 火把细柱 1.6 放大先例 → t925 小体型族同款放大（近立方视觉
-                                        //   量级可辨）：机关小体（拉杆/按钮 6/16 见方）×1.8、蘑菇剪影 / 红石
-                                        //   火把 ×1.5、栅栏横档细臂 ×1.2；其余 1.0（参数视觉钉死，待目视）。
-                                        property real item3DScale: {
-                                            if (root.selectedId === 13) return 1.6
-                                            if (root.selectedId === 112 || root.selectedId === 113
-                                                || root.selectedId === 114) return 1.8
-                                            if (root.selectedId === 48 || root.selectedId === 115
-                                                || root.selectedId === 129) return 1.5
-                                            if (root.selectedId === 17 || root.selectedId === 60
-                                                || root.selectedId === 88) return 1.2
-                                            return 1.0
-                                        }
-                                        scale: Qt.vector3d(item3DScale, item3DScale, item3DScale)
-                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
-                                        Model {
-                                            // t965：blockState 绑形态按钮组（门/活板门开合几何、草丛高度、
-                                            //   作物/红石火把/动力轨态变瓦片——ItemShapeGeometry 显式 state 路径；
-                                            //   auto 旧默认仅掉落物侧消费）。
-                                            geometry: ItemShapeGeometry { blockId: root.selectedId; blockState: root.selectedFormState }
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                alphaMode: PrincipledMaterial.Mask
-                                                alphaCutoff: 0.5
-                                                baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                    Node { // t966 pitch 父（异形分支）：恒铰链俯仰层，契约见整立方分支同款注释。
+                                        eulerRotation.x: -22 + root.userPitch
+                                        Node { // t966 yaw 子：自转层
+                                            visible: root.selectedIsItem3D
+                                            // t880 火把细柱 1.6 放大先例 → t925 小体型族同款放大（近立方视觉
+                                            //   量级可辨）：机关小体（拉杆/按钮 6/16 见方）×1.8、蘑菇剪影 / 红石
+                                            //   火把 ×1.5、栅栏横档细臂 ×1.2；其余 1.0（参数视觉钉死，待目视）。
+                                            property real item3DScale: {
+                                                if (root.selectedId === 13) return 1.6
+                                                if (root.selectedId === 112 || root.selectedId === 113
+                                                    || root.selectedId === 114) return 1.8
+                                                if (root.selectedId === 48 || root.selectedId === 115
+                                                    || root.selectedId === 129) return 1.5
+                                                if (root.selectedId === 17 || root.selectedId === 60
+                                                    || root.selectedId === 88) return 1.2
+                                                return 1.0
                                             }
-                                        }
-                                        // t880 附魔台预览**上面要有书**：台顶（形心居中系 y=+0.375）叠静态
-                                        //   敞开书（EnchantBookBox 两页 V 形——纸页 + 镜像纸页，机制等价放置态
-                                        //   bookDelegate 静息造型；贴图两态 pack 命中（entitySource("enchant_book")
-                                        //   宽 >64 → 布局 1 包书分区）/ qrc 程序书（布局 0），Main.qml bookPackHit
-                                        //   同判据）。页 0.38 宽 × 0.46 深 × 0.03 厚，各绕 Z 外倾 ±22° 成 V，
-                                        //   书心 y=+0.46（台顶上浮 ~0.08「悬浮书」观感）。
-                                        Node {
-                                            id: etBookNode
-                                            visible: root.selectedId === 94
-                                            position: Qt.vector3d(0, 0.46, 0)
-                                            property bool etBookPackHit: enchantBookPackTexBrowser.source.toString().length > 0
-                                                                         && root.resourcePack
-                                                                         && root.resourcePack.entityTextureWidth("enchant_book") > 64
-                                            Model { // 左页（纸页镜像 piece 4；-22° 外缘下倾）
-                                                geometry: EnchantBookBox { piece: 4; layout: etBookNode.etBookPackHit ? 1 : 0 }
-                                                position: Qt.vector3d(-0.176, 0.045, 0)
-                                                eulerRotation: Qt.vector3d(0, 0, -22)
-                                                scale: Qt.vector3d(0.38, 0.03, 0.46)
+                                            scale: Qt.vector3d(item3DScale, item3DScale, item3DScale)
+                                            eulerRotation.y: root.spinAngle - 35
+                                            Model {
+                                                // t965：blockState 绑形态按钮组（门/活板门开合几何、草丛高度、
+                                                //   作物/红石火把/动力轨态变瓦片——ItemShapeGeometry 显式 state 路径；
+                                                //   auto 旧默认仅掉落物侧消费）。
+                                                geometry: ItemShapeGeometry { blockId: root.selectedId; blockState: root.selectedFormState }
                                                 materials: PrincipledMaterial {
                                                     lighting: PrincipledMaterial.NoLighting
-                                                    baseColorMap: etBookNode.etBookPackHit ? enchantBookPackTexBrowser : enchantBookTexBrowser
+                                                    alphaMode: PrincipledMaterial.Mask
+                                                    alphaCutoff: 0.5
+                                                    baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
                                                 }
                                             }
-                                            Model { // 右页（纸页 piece 1；+22° 镜像成 V）
-                                                geometry: EnchantBookBox { piece: 1; layout: etBookNode.etBookPackHit ? 1 : 0 }
-                                                position: Qt.vector3d(0.176, 0.045, 0)
-                                                eulerRotation: Qt.vector3d(0, 0, 22)
-                                                scale: Qt.vector3d(0.38, 0.03, 0.46)
-                                                materials: PrincipledMaterial {
-                                                    lighting: PrincipledMaterial.NoLighting
-                                                    baseColorMap: etBookNode.etBookPackHit ? enchantBookPackTexBrowser : enchantBookTexBrowser
+                                            // t880 附魔台预览**上面要有书**：台顶（形心居中系 y=+0.375）叠静态
+                                            //   敞开书（EnchantBookBox 两页 V 形——纸页 + 镜像纸页，机制等价放置态
+                                            //   bookDelegate 静息造型；贴图两态 pack 命中（entitySource("enchant_book")
+                                            //   宽 >64 → 布局 1 包书分区）/ qrc 程序书（布局 0），Main.qml bookPackHit
+                                            //   同判据）。页 0.38 宽 × 0.46 深 × 0.03 厚，各绕 Z 外倾 ±22° 成 V，
+                                            //   书心 y=+0.46（台顶上浮 ~0.08「悬浮书」观感）。
+                                            Node {
+                                                id: etBookNode
+                                                visible: root.selectedId === 94
+                                                position: Qt.vector3d(0, 0.46, 0)
+                                                property bool etBookPackHit: enchantBookPackTexBrowser.source.toString().length > 0
+                                                                             && root.resourcePack
+                                                                             && root.resourcePack.entityTextureWidth("enchant_book") > 64
+                                                Model { // 左页（纸页镜像 piece 4；-22° 外缘下倾）
+                                                    geometry: EnchantBookBox { piece: 4; layout: etBookNode.etBookPackHit ? 1 : 0 }
+                                                    position: Qt.vector3d(-0.176, 0.045, 0)
+                                                    eulerRotation: Qt.vector3d(0, 0, -22)
+                                                    scale: Qt.vector3d(0.38, 0.03, 0.46)
+                                                    materials: PrincipledMaterial {
+                                                        lighting: PrincipledMaterial.NoLighting
+                                                        baseColorMap: etBookNode.etBookPackHit ? enchantBookPackTexBrowser : enchantBookTexBrowser
+                                                    }
+                                                }
+                                                Model { // 右页（纸页 piece 1；+22° 镜像成 V）
+                                                    geometry: EnchantBookBox { piece: 1; layout: etBookNode.etBookPackHit ? 1 : 0 }
+                                                    position: Qt.vector3d(0.176, 0.045, 0)
+                                                    eulerRotation: Qt.vector3d(0, 0, 22)
+                                                    scale: Qt.vector3d(0.38, 0.03, 0.46)
+                                                    materials: PrincipledMaterial {
+                                                        lighting: PrincipledMaterial.NoLighting
+                                                        baseColorMap: etBookNode.etBookPackHit ? enchantBookPackTexBrowser : enchantBookTexBrowser
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }
+                                        } // t966 yaw 子收口（异形分支）
+                                    } // t966 pitch 父收口（异形分支）
                                     // 生物预览（生物段 / 生物蛋选中）：MobModel 3D 模型替代大图标平图。
                                     //   pack 命中（selectedMobPackSrc 非空）→ packTextured（几何 T 字 UV 展开进 pack
                                     //   entity 贴图）+ baseColorMap = pack 贴图；pack 关 → 全脸 UV + 程序生成 mob_*.png /
@@ -1001,468 +1019,472 @@ Item {
                                     //   pack 激活即 HD 南瓜瓦片，机制等价 MC 1.0 雪傀儡戴刻面南瓜）。
                                     //   铁傀儡（13）review L14 改镜像游戏内：纯橙 UnitCube + 刻面双眼（非南瓜贴图）。
                                     //   头随父 Model 同转（自转/拖拽）。
-                                    Node {
+                                    Node { // t966 pitch 父（生物分支）：恒铰链俯仰层；position 上提 = 俯仰绕生物自身
+                                        //   中心（与旧单节点枢轴一致）。契约见整立方分支同款注释。
                                         visible: root.selectedIsMob
                                         position: Qt.vector3d(0, root.mobPreviewCentY(root.selectedMobType), 0)
-                                        scale: Qt.vector3d(root.mobPreviewScale(root.selectedMobType),
-                                                          root.mobPreviewScale(root.selectedMobType),
-                                                          root.mobPreviewScale(root.selectedMobType))
-                                        eulerRotation: Qt.vector3d(-22 + root.userPitch, root.spinAngle - 35, 0)
-                                        Model {
-                                            geometry: MobModel {
-                                                // Review 2026-08-24 #6：selectedMobType 在未选生物/生物蛋时
-                                                //   是 -1（合法「无选择」哨兵——mobPreviewCentY/Scale 同把 -1 当
-                                                //   预期输入优雅返 0）。本 Node 只 visible 门控（对象恒实例化、
-                                                //   绑定恒求值），裸传 -1 会让 setMobType 的越界 qWarning
-                                                //   （review #35 诊断信号）在每次选非生物条目时误报「接线 bug」，
-                                                //   污染真信号。钳到 1（Pig，同 setMobType 越界兜底）——不可见态
-                                                //   几何无观感；取 Loader active 门控的代价是 delegate 常驻变
-                                                //   按需重建（开图鉴翻条目更重），故取一行钳制。
-                                                mobType: Math.max(1, root.selectedMobType)
-                                                // t876 羊头分离 subset：毛茸态羊 → 头盒独立 subset（materials[1]
-                                                //   换绑本体层头区、不吃毛色 tint）；剪毛态 / 非羊 → false 单段绘制。
-                                                sheepSkinHead: root.sheepSkinHeadActive
-                                                // t920 坐姿几何：狼/豹猫驯服态 + 面板「坐下」段 → MobModel
-                                                //   sitPose 分支（t878②；与 Main.qml 游戏内 delegate 同一几何
-                                                //   源，非浏览器侧复刻）。未驯服不可坐（机制等价 MC 野狼/野豹猫
-                                                //   不可命令）；切换即时重建。
-                                                sitPose: root.mobTamedActive && root.mobSitPreview
-                                                // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
-                                                //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
-                                                // t949 贴图源 × UV 模式同源钉：驯服豹猫例外（t920 驯服猫 → 程序
-                                                //   mob_cat_* **全脸**贴图）必须同时关 box-UV——「贴图源」与「UV
-                                                //   模式」是两个独立开关，须同一条件门。旧版 packTextured 只看
-                                                //   pack 命中（mobType 11 开包恒命中）→ 驯服态预览几何以 box-UV
-                                                //   窗采程序猫贴图任意像素 = 混入狼样灰斑（用户第五轮「3D 贴图
-                                                //   混入狼的灰色贴图」根因；游戏内 delegate 的 ocelotPackHit 自带
-                                                //   !ocatTamed 故游戏内无此病——两消费端门条件现逐字同源）。
-                                                packTextured: (root.selectedMobPackSrc !== ""
-                                                               && !(root.selectedMobFromSection === 11 && root.mobTamedPreview))
-                                                    || (root.selectedMobSheared && root.selectedMobType === 3
-                                                        && root.sheepBodyPackSrc !== "")
-                                                // t782 燃烬者棒组公转（度；头+4棒共享几何）：仅选燃烬者时给动画角
-                                                //   （其余型恒 0——绑定时表达式结果不变 → 不触发 rebuild，无逐帧开销；
-                                                //   时钟恒跑属零成本 NumberAnimation，2.2s/圈同游戏内转速）。
-                                                property real rodClock: 0
-                                                rodSpin: root.selectedMobType === 17 ? rodClock : 0
-                                                NumberAnimation on rodClock {
-                                                    from: 0; to: 360; duration: 2200; loops: Animation.Infinite
-                                                }
-                                            }
-                                            // t876 双材质（仅羊毛茸态有 subset 1，其余 mobType 单段用 [0]）：
-                                            //   [0] = 身体（毛层 × 毛色 tint）；[1] = 羊头 subset（本体层头区自然色）。
-                                            materials: [
-                                                PrincipledMaterial {
-                                                    lighting: PrincipledMaterial.NoLighting
-                                                    // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
-                                                    // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
-                                                    //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
-                                                    //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
-                                                    //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
-                                                    // t663 ⑥ → t749 改：剪毛羊变体去**纯色**改贴图（pack 本体层 / 程序
-                                                    //   mob_sheep_sheared 裸肤 + 残羊毛块），贴图在身 → baseColor 白（同 t597）。
-                                                    // ── t751 不变式（剪头雪傀儡「下半身错误」修复结论）── 身体（MobModel）
-                                                    //   的贴图/颜色路由 = f(mobType, pack 态)，**与剪/戴变体无关**：唯一带
-                                                    //   selectedMobSheared 的身体分支是羊（3）的裸肤贴图切换（机制等价游戏内
-                                                    //   剪羊毛换裸皮）；雪傀儡（12）剪头仅切头 Model（下方南瓜 ↔ 纯雪头），
-                                                    //   身体两态逐位一致。历史根因：t663 旧版把 baseColorMap 写成
-                                                    //   `有贴图 && !selectedMobSheared` —— 任何剪后变体（含雪傀儡）在 pack 开时
-                                                    //   身体贴图被一并剥成纯白，与戴头形态（snow_golem 贴图有纹）并排对比即
-                                                    //   「下半身模型错误」（参照物戴头形态正确 = 贴图路由未受损）；t749 重写该
-                                                    //   绑定已恢复路由，t751 变体切换化后以本不变式钉死防回归。
-                                                    baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
-                                                        : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
-                                                    baseColor: {
-                                                        // t751/t876 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
-                                                        //   （白底羊毛贴图 × 染色 = 染色羊毛，调色板与羊毛方块 16 色同源）。
-                                                        //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色；t876 起 tint 只落
-                                                        //   subset 0 躯干毛层（头 subset 独立材质本体层自然色、腿 = t777
-                                                        //   四腿皮肤罩，同为 skin 层不 tint），对齐 MC 染色羊脸/腿不随毛色染
-                                                        //   （t816 脸罩方案退役——头盒直接换绑纹理源，非遮盖）；
-                                                        //   裸肤（剪毛后）不染色。生物蛋路径不 tint（变体仅生物段浏览）。
-                                                        if (root.selectedMobFromSection === 3 && !root.sheepSheared
-                                                            && root.sheepWoolIndex > 0)
-                                                            return root.woolPalette[root.sheepWoolIndex].tint
-                                                        return (root.selectedMobSheared && root.selectedMobType === 3)
-                                                            || root.selectedMobTexSource !== "" ? "#ffffff"
-                                                            : root.mobFallbackColor(root.selectedMobType)
-                                                    }
-                                                    // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
-                                                    //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
-                                                    // t781 夜行者：pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时
-                                                    //   Mask 裁（Main.qml 实体 delegate / 刷怪笼迷你态同款；程序贴图全不透明）。
-                                                    alphaMode: (root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared)
-                                                               || (root.selectedMobType === 16 && root.selectedMobPackSrc !== "")
-                                                               ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
-                                                    alphaCutoff: 0.5
-                                                },
-                                                PrincipledMaterial {
-                                                    // t876 subset 1 羊头：本体层头区自然色，不吃毛色 tint（镜像
-                                                    //   Main.qml 游戏内侧）。pack 开 → mobPrevTex 合成贴图头区（box-UV
-                                                    //   head(0,0)6×6×8 直采本体层真脸）；pack 关 → mobSheepHeadTex
-                                                    //   程序羊头贴图（全脸 UV）。无 subset 1 的 mobType / 剪毛态本材质
-                                                    //   不被消费（materials 多于 subset → 多余材质忽略）。
-                                                    lighting: PrincipledMaterial.NoLighting
-                                                    baseColor: "#ffffff" // 贴图在身 → 白透原色（t597）
-                                                    // review26 #18：判据改 selectedMobPackSrc（与下行 alphaMode 同源）——
-                                                    //   selectedMobTexSource 在 pack 关时也非空（= 回退 qrc 贴图）→ 旧三目
-                                                    //   恒走 mobPrevTex，注释声明的「pack 关 → mobSheepHeadTex」落空 = 程序
-                                                    //   羊头贴图死代码（图鉴侧从未激活）。
-                                                    baseColorMap: root.selectedMobPackSrc !== "" ? mobPrevTex : mobSheepHeadTex
-                                                    alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== ""
-                                                               ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
-                                                    alphaCutoff: 0.5
-                                                }
-                                            ]
-                                        }
-                                        // t663 ⑥ 羊眼 overlay（镜像 Main.qml t633 ③：sheep_fur.png 毛层头前无脸 →
-                                        //   眼恒显；Main.qml 颈枢 Node 绑 headPitch，图鉴静态 0 → 直立，直接定位）。
-                                        //   裸羊变体同显（裸肤色无脸）。
-                                        // t777 ① 修「预览眼埋进头内不显」：旧 z=-0.35 是把 Main.qml 颈枢**相对**坐标
-                                        //   （颈枢 (0,0.10,-0.29) + 眼相对 z -0.35）当绝对坐标用——头盒 z∈[-0.61,-0.29]
-                                        //   把眼整个包住 → 被头面遮挡恒不可见。烘焙正确绝对位：白眼底 z=-0.64（凸出
-                                        //   头前面 -0.61 外 0.03 无 z-fight）/ 黑瞳 z=-0.65（叠白眼底前），y=0.10。
-                                        // t777 ② pack 真脸门控：贴图自带脸（sheepPreviewPackFace）→ 隐 overlay 眼
-                                        //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。t876：t816 脸罩
-                                        //   退役（头 subset 独立材质自然色），眼显隐回归单一判据、无罩例外分支。
-                                        Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.055, 0.10, -0.64)
-                                            scale: Qt.vector3d(0.055, 0.055, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.055, 0.10, -0.64)
-                                            scale: Qt.vector3d(0.055, 0.055, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.055, 0.10, -0.65)
-                                            scale: Qt.vector3d(0.028, 0.028, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.055, 0.10, -0.65)
-                                            scale: Qt.vector3d(0.028, 0.028, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        // t777 ① 羊腿 skin 层：MobModel 单材质把羊毛贴图（pack 毛层 / 程序 mob_sheep
-                                        //   全脸）与 t789 毛色 tint 铺满全身**含四腿** → 用户观感「脚被羊毛完全覆盖」。
-                                        //   语义：羊毛只覆躯干/头，腿是 skin 层 → 四腿位叠独立纯色羊皮 Model
-                                        //   （#d6b890，t749 前剪毛羊裸肤同源色）罩住毛贴图腿。图鉴静态（walkPhase
-                                        //   恒 0 → 四腿轴对齐，中心 (±0.18,-0.28,±0.26)、全长 (0.18,0.32,0.18)，
-                                        //   镜像 mobmodel.cpp 羊分支 addLegs 实参）→ 静态盒可精确罩合；尺寸外扩
-                                        //   0.01/0.02 防共面 z-fight（顶沿没入躯干 / 底沿探出 0.01，预览无地面）。
-                                        //   独立材质不吃毛色 tint（有色羊腿仍羊皮色，t789 协同：tint 只乘毛层）；
-                                        //   剪毛态同罩（裸肤腿读作平滑皮肤）。鸡腿 t616 同款「几何外独立腿 Model」先例。
-                                        Model {
-                                            visible: root.selectedMobType === 3
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.18, -0.28, -0.26)
-                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 3
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.18, -0.28, -0.26)
-                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 3
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.18, -0.28, 0.26)
-                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 3
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.18, -0.28, 0.26)
-                                            scale: Qt.vector3d(0.19, 0.34, 0.19)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
-                                        }
-                                        // t663 ⑤ 蠹虫眼（2 颗黑点贴头前；镜像 Main.qml t487 delegate 位
-                                        //   (±0.05,0.00,-0.35) scale 0.03——头心 (0,0,-0.24) 半 (0.14,0.11,0.10)）。
-                                        Model {
-                                            visible: root.selectedMobType === 14
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.05, 0.00, -0.35)
-                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 14
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.05, 0.00, -0.35)
-                                            scale: Qt.vector3d(0.03, 0.03, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
-                                        }
-                                        // ── t750 图鉴 3D 预览对齐游戏内模型（六模型修复）──
-                                        // 抉择「共享组件 vs 浏览器复刻」：游戏内正确拼装深嵌 Main.qml mobHost
-                                        //   delegate（绑 entityManager 索引族 walkPhase/hurtFlash/rage/sit…），
-                                        //   抽共享组件须把十余条实体绑定参数化且回归面覆盖全部 17 种 mob——成本 /
-                                        //   风险远超收益；按任务行「评估成本」走**浏览器侧 1:1 复刻**（同 t598 傀儡
-                                        //   头 / t616 弓 + 鸡腿 / t663 羊眼先例），各块注明 Main.qml 锚点互指。几何级
-                                        //   差异（蠹虫分节；鱿鱼尖顶 t778 已随「单一生物模型」终态删除）已下沉
-                                        //   MobModel 共享层（mobmodel.cpp，两侧同源无双份维护）。
-                                        // t778 鱿鱼眼层整删 + 尖顶删（镜像 Main.qml squid delegate 同源修）：
-                                        //   原 t750① 给图鉴补过 2 颗黑点几何眼（pack 关态显；程序贴图 mob_squid
-                                        //   不画眼 → 眼靠几何盒）——与「鱿鱼=单一生物模型（去小鱿鱼、去眼睛）」
-                                        //   终态冲突 → 删。眼只来自 pack 贴图前脸纹素（pack 命中态自带眼）；程序
-                                        //   贴图态无脸纹（纯斑纹软体观感）。「头顶小鱿鱼」叠加层根源 = mobmodel.cpp
-                                        //   pack 态尖顶小盒（复用 mantle texOffs → 六面各显 mantle 对应面缩图含
-                                        //   前脸眼纹），t750 只删了 pack 关态、pack 态残留 → 本任务几何层整删，
-                                        //   图鉴 / 游戏内 / 刷怪笼迷你态三处共享单源一并修复（见 mobmodel.cpp
-                                        //   t778 注释）。
-                                        // t750 ② 狼尾（修复「像兔子」——缺尾缺眼的灰身立耳四足读作兔；镜像
-                                        //   Main.qml wolfTailPivot：尾根 (0,0.16,0.38) + 竖细盒毛色 0.55 灰；图鉴
-                                        //   静态取满血竖起 35°（游戏内随血量 35°..140°）。
-                                        //   t946 坐姿随移（Main.qml t878②→t946 成对契约）：尾根 = 站姿位绕坐姿根锚
-                                        //   (-0.14,0.36) 旋 18° = (0,0.139,0.472) + 垂尾搭地 35°+75°=110°
-                                        //   （机制等价 MC 坐狼垂尾）。
-                                        Node {
-                                            visible: root.selectedMobType === 10
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)
-                                            eulerRotation.x: root.mobTamedActive && root.mobSitPreview ? 110 : 35
+                                        eulerRotation.x: -22 + root.userPitch
+                                        Node { // t966 yaw 子：自转/拖拽转台层
+                                            scale: Qt.vector3d(root.mobPreviewScale(root.selectedMobType),
+                                                              root.mobPreviewScale(root.selectedMobType),
+                                                              root.mobPreviewScale(root.selectedMobType))
+                                            eulerRotation.y: root.spinAngle - 35
                                             Model {
+                                                geometry: MobModel {
+                                                    // Review 2026-08-24 #6：selectedMobType 在未选生物/生物蛋时
+                                                    //   是 -1（合法「无选择」哨兵——mobPreviewCentY/Scale 同把 -1 当
+                                                    //   预期输入优雅返 0）。本 Node 只 visible 门控（对象恒实例化、
+                                                    //   绑定恒求值），裸传 -1 会让 setMobType 的越界 qWarning
+                                                    //   （review #35 诊断信号）在每次选非生物条目时误报「接线 bug」，
+                                                    //   污染真信号。钳到 1（Pig，同 setMobType 越界兜底）——不可见态
+                                                    //   几何无观感；取 Loader active 门控的代价是 delegate 常驻变
+                                                    //   按需重建（开图鉴翻条目更重），故取一行钳制。
+                                                    mobType: Math.max(1, root.selectedMobType)
+                                                    // t876 羊头分离 subset：毛茸态羊 → 头盒独立 subset（materials[1]
+                                                    //   换绑本体层头区、不吃毛色 tint）；剪毛态 / 非羊 → false 单段绘制。
+                                                    sheepSkinHead: root.sheepSkinHeadActive
+                                                    // t920 坐姿几何：狼/豹猫驯服态 + 面板「坐下」段 → MobModel
+                                                    //   sitPose 分支（t878②；与 Main.qml 游戏内 delegate 同一几何
+                                                    //   源，非浏览器侧复刻）。未驯服不可坐（机制等价 MC 野狼/野豹猫
+                                                    //   不可命令）；切换即时重建。
+                                                    sitPose: root.mobTamedActive && root.mobSitPreview
+                                                    // t749 剪毛羊 pack 本体层是 box-UV 布局 → 同样开 T 字展开
+                                                    //   （程序 mob_sheep_sheared 是全脸 UV → 保持 false）。
+                                                    // t949 贴图源 × UV 模式同源钉：驯服豹猫例外（t920 驯服猫 → 程序
+                                                    //   mob_cat_* **全脸**贴图）必须同时关 box-UV——「贴图源」与「UV
+                                                    //   模式」是两个独立开关，须同一条件门。旧版 packTextured 只看
+                                                    //   pack 命中（mobType 11 开包恒命中）→ 驯服态预览几何以 box-UV
+                                                    //   窗采程序猫贴图任意像素 = 混入狼样灰斑（用户第五轮「3D 贴图
+                                                    //   混入狼的灰色贴图」根因；游戏内 delegate 的 ocelotPackHit 自带
+                                                    //   !ocatTamed 故游戏内无此病——两消费端门条件现逐字同源）。
+                                                    packTextured: (root.selectedMobPackSrc !== ""
+                                                                   && !(root.selectedMobFromSection === 11 && root.mobTamedPreview))
+                                                        || (root.selectedMobSheared && root.selectedMobType === 3
+                                                            && root.sheepBodyPackSrc !== "")
+                                                    // t782 燃烬者棒组公转（度；头+4棒共享几何）：仅选燃烬者时给动画角
+                                                    //   （其余型恒 0——绑定时表达式结果不变 → 不触发 rebuild，无逐帧开销；
+                                                    //   时钟恒跑属零成本 NumberAnimation，2.2s/圈同游戏内转速）。
+                                                    property real rodClock: 0
+                                                    rodSpin: root.selectedMobType === 17 ? rodClock : 0
+                                                    NumberAnimation on rodClock {
+                                                        from: 0; to: 360; duration: 2200; loops: Animation.Infinite
+                                                    }
+                                                }
+                                                // t876 双材质（仅羊毛茸态有 subset 1，其余 mobType 单段用 [0]）：
+                                                //   [0] = 身体（毛层 × 毛色 tint）；[1] = 羊头 subset（本体层头区自然色）。
+                                                materials: [
+                                                    PrincipledMaterial {
+                                                        lighting: PrincipledMaterial.NoLighting
+                                                        // pack 关且无程序贴图（bones/stalker/spider）→ null + 纯色 baseColor。
+                                                        // t597 修：渲染 = baseColorMap × baseColor —— pack 贴图在身时 baseColor 用白
+                                                        //   （贴图原色完整透出，同 Main.qml t597 修法）；mobFallbackColor 是 pack 关的
+                                                        //   纯色体色（stalker #3a5a3a / spider #2a1a1a 均暗色），乘上 pack 贴图会把
+                                                        //   贴图压暗近黑（图鉴预览同样「暗淡/无贴图」观感）。
+                                                        // t663 ⑥ → t749 改：剪毛羊变体去**纯色**改贴图（pack 本体层 / 程序
+                                                        //   mob_sheep_sheared 裸肤 + 残羊毛块），贴图在身 → baseColor 白（同 t597）。
+                                                        // ── t751 不变式（剪头雪傀儡「下半身错误」修复结论）── 身体（MobModel）
+                                                        //   的贴图/颜色路由 = f(mobType, pack 态)，**与剪/戴变体无关**：唯一带
+                                                        //   selectedMobSheared 的身体分支是羊（3）的裸肤贴图切换（机制等价游戏内
+                                                        //   剪羊毛换裸皮）；雪傀儡（12）剪头仅切头 Model（下方南瓜 ↔ 纯雪头），
+                                                        //   身体两态逐位一致。历史根因：t663 旧版把 baseColorMap 写成
+                                                        //   `有贴图 && !selectedMobSheared` —— 任何剪后变体（含雪傀儡）在 pack 开时
+                                                        //   身体贴图被一并剥成纯白，与戴头形态（snow_golem 贴图有纹）并排对比即
+                                                        //   「下半身模型错误」（参照物戴头形态正确 = 贴图路由未受损）；t749 重写该
+                                                        //   绑定已恢复路由，t751 变体切换化后以本不变式钉死防回归。
+                                                        baseColorMap: root.selectedMobSheared && root.selectedMobType === 3 ? mobShearedTex
+                                                            : (root.selectedMobTexSource !== "" ? mobPrevTex : null)
+                                                        baseColor: {
+                                                            // t751/t876 羊毛色预览着色：毛茸态 + 非白色 → 染色 tint 乘贴图
+                                                            //   （白底羊毛贴图 × 染色 = 染色羊毛，调色板与羊毛方块 16 色同源）。
+                                                            //   诚实边界：游戏内无染色羊机制，图鉴侧仅预览着色；t876 起 tint 只落
+                                                            //   subset 0 躯干毛层（头 subset 独立材质本体层自然色、腿 = t777
+                                                            //   四腿皮肤罩，同为 skin 层不 tint），对齐 MC 染色羊脸/腿不随毛色染
+                                                            //   （t816 脸罩方案退役——头盒直接换绑纹理源，非遮盖）；
+                                                            //   裸肤（剪毛后）不染色。生物蛋路径不 tint（变体仅生物段浏览）。
+                                                            if (root.selectedMobFromSection === 3 && !root.sheepSheared
+                                                                && root.sheepWoolIndex > 0)
+                                                                return root.woolPalette[root.sheepWoolIndex].tint
+                                                            return (root.selectedMobSheared && root.selectedMobType === 3)
+                                                                || root.selectedMobTexSource !== "" ? "#ffffff"
+                                                                : root.mobFallbackColor(root.selectedMobType)
+                                                        }
+                                                        // t663 ⑥ 羊毛层 Mask（图鉴羊「不对」回归修复）：合成贴图（t749）全不透明 →
+                                                        //   Mask 对它无影响；仅 pack 命中且非剪毛态保留（防御异形包毛层镂空）。
+                                                        // t781 夜行者：pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时
+                                                        //   Mask 裁（Main.qml 实体 delegate / 刷怪笼迷你态同款；程序贴图全不透明）。
+                                                        alphaMode: (root.selectedMobType === 3 && root.selectedMobPackSrc !== "" && !root.selectedMobSheared)
+                                                                   || (root.selectedMobType === 16 && root.selectedMobPackSrc !== "")
+                                                                   ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                                        alphaCutoff: 0.5
+                                                    },
+                                                    PrincipledMaterial {
+                                                        // t876 subset 1 羊头：本体层头区自然色，不吃毛色 tint（镜像
+                                                        //   Main.qml 游戏内侧）。pack 开 → mobPrevTex 合成贴图头区（box-UV
+                                                        //   head(0,0)6×6×8 直采本体层真脸）；pack 关 → mobSheepHeadTex
+                                                        //   程序羊头贴图（全脸 UV）。无 subset 1 的 mobType / 剪毛态本材质
+                                                        //   不被消费（materials 多于 subset → 多余材质忽略）。
+                                                        lighting: PrincipledMaterial.NoLighting
+                                                        baseColor: "#ffffff" // 贴图在身 → 白透原色（t597）
+                                                        // review26 #18：判据改 selectedMobPackSrc（与下行 alphaMode 同源）——
+                                                        //   selectedMobTexSource 在 pack 关时也非空（= 回退 qrc 贴图）→ 旧三目
+                                                        //   恒走 mobPrevTex，注释声明的「pack 关 → mobSheepHeadTex」落空 = 程序
+                                                        //   羊头贴图死代码（图鉴侧从未激活）。
+                                                        baseColorMap: root.selectedMobPackSrc !== "" ? mobPrevTex : mobSheepHeadTex
+                                                        alphaMode: root.selectedMobType === 3 && root.selectedMobPackSrc !== ""
+                                                                   ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
+                                                        alphaCutoff: 0.5
+                                                    }
+                                                ]
+                                            }
+                                            // t663 ⑥ 羊眼 overlay（镜像 Main.qml t633 ③：sheep_fur.png 毛层头前无脸 →
+                                            //   眼恒显；Main.qml 颈枢 Node 绑 headPitch，图鉴静态 0 → 直立，直接定位）。
+                                            //   裸羊变体同显（裸肤色无脸）。
+                                            // t777 ① 修「预览眼埋进头内不显」：旧 z=-0.35 是把 Main.qml 颈枢**相对**坐标
+                                            //   （颈枢 (0,0.10,-0.29) + 眼相对 z -0.35）当绝对坐标用——头盒 z∈[-0.61,-0.29]
+                                            //   把眼整个包住 → 被头面遮挡恒不可见。烘焙正确绝对位：白眼底 z=-0.64（凸出
+                                            //   头前面 -0.61 外 0.03 无 z-fight）/ 黑瞳 z=-0.65（叠白眼底前），y=0.10。
+                                            // t777 ② pack 真脸门控：贴图自带脸（sheepPreviewPackFace）→ 隐 overlay 眼
+                                            //   （防两双眼，镜像 Main.qml 游戏内修法 + 牛等既有语义）。t876：t816 脸罩
+                                            //   退役（头 subset 独立材质自然色），眼显隐回归单一判据、无罩例外分支。
+                                            Model {
+                                                visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
                                                 geometry: UnitCube {}
-                                                position: Qt.vector3d(0, 0.10, 0)
-                                                scale: Qt.vector3d(0.06, 0.20, 0.06)
-                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8c8c8c" }
+                                                position: Qt.vector3d(-0.055, 0.10, -0.64)
+                                                scale: Qt.vector3d(0.055, 0.055, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                             }
-                                        }
-                                        // t920 驯服狼红项圈（t831 驯服态视觉；镜像 Main.qml 游戏内 collar
-                                        //   Model：站姿颈根 (0,0.16,-0.30) / 坐姿位 = 站姿绕坐姿根锚旋 18° (0,0.349,-0.175)
-                                        //   （t946 链派生成对契约），横扁环带 x 微出躯干侧缘读作环颈）。未驯服不显；图鉴不做
-                                        //   昼夜灰阶 / 受击红闪（纯色预览，同其他 overlay 眼/腿约定）。
-                                        Model {
-                                            visible: root.selectedMobType === 10 && root.mobTamedPreview
-                                            geometry: UnitCube {}
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)
-                                            scale: Qt.vector3d(0.42, 0.06, 0.07)
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                baseColor: "#c22828" // 驯服项圈红（Main.qml rgba(0.76,0.16,0.16) 同值）
+                                            Model {
+                                                visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.055, 0.10, -0.64)
+                                                scale: Qt.vector3d(0.055, 0.055, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8e8e8" }
                                             }
-                                        }
-                                        // t963 驯服猫红项圈（用户第五轮「驯服后没看到项圈」；镜像 Main.qml 游戏
-                                        //   内 t963 猫项圈 + t920 狼项圈先例：站姿颈根 (0,0.14,-0.30) / 坐姿位 =
-                                        //   站姿绕豹猫坐姿根锚 (-0.12,0.32) 旋 18° = (0,0.319,-0.189)（t946 链派生
-                                        //   成对契约，豹猫颈围镜像数值系 0.36/0.05/0.06）。未驯服不显；门挂
-                                        //   mobTamedPreview（与 t920 贴图切换同一驯服拨杆位——单源）。图鉴不做
-                                        //   昼夜灰阶 / 受击红闪（纯色预览，同狼项圈 overlay 约定）。
-                                        Model {
-                                            visible: root.selectedMobType === 11 && root.mobTamedPreview
-                                            geometry: UnitCube {}
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)
-                                            scale: Qt.vector3d(0.36, 0.05, 0.06)
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                baseColor: "#c22828" // 驯服项圈红（狼项圈同值）
+                                            Model {
+                                                visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.055, 0.10, -0.65)
+                                                scale: Qt.vector3d(0.028, 0.028, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                             }
-                                        }
-                                        // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
-                                        //   (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前脸 z=-0.60 → 眼贴头前
-                                        //   (±0.08,0.16,-0.61)（t819 头后移贴胸，眼随移）。
-                                        //   t780：pack 命中 → box-UV 贴图头前脸自带双瞳 → overlay 隐（t777 双眼教训）。
-                                        //   t946 坐姿眼随移（Main.qml t878②→t946 成对契约）：坐姿头心 (0,0.324,-0.308)
-                                        //   + 眼偏移净 10° 随头旋 → (±0.08, 0.40, -0.49)。
-                                        Model {
-                                            visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(-0.08, 0.40, -0.49) : Qt.vector3d(-0.08, 0.16, -0.61)
-                                            scale: Qt.vector3d(0.04, 0.05, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0.08, 0.40, -0.49) : Qt.vector3d(0.08, 0.16, -0.61)
-                                            scale: Qt.vector3d(0.04, 0.05, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        // t750 ③ 豹猫眼（修复「没有脸」；镜像 Main.qml ocelot delegate：头心
-                                        //   (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前脸 z=-0.52 → 眼贴头前
-                                        //   (±0.07,0.15,-0.53)（t819 头后移贴胸，眼随移）。
-                                        //   t780：pack 命中 → 贴图头前脸自带眼点 → overlay 隐（同上）。
-                                        //   t920：已驯服豹猫贴图恒程序家猫（无脸纹）→ 眼恒显（镜像 Main.qml
-                                        //   「驯服猫不走 pack 判据」）；t946 坐姿眼随移（与狼同修）：坐姿头心
-                                        //   (0,0.306,-0.276) + 眼偏移净 10° 随头旋 → (±0.07, 0.36, -0.42)。
-                                        Model {
-                                            visible: root.selectedMobType === 11
-                                                     && (root.selectedMobPackSrc === ""
-                                                         || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
-                                            geometry: UnitCube {}
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(-0.07, 0.36, -0.42) : Qt.vector3d(-0.07, 0.15, -0.53)
-                                            scale: Qt.vector3d(0.035, 0.04, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 11
-                                                     && (root.selectedMobPackSrc === ""
-                                                         || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
-                                            geometry: UnitCube {}
-                                            position: root.mobTamedActive && root.mobSitPreview
-                                                      ? Qt.vector3d(0.07, 0.36, -0.42) : Qt.vector3d(0.07, 0.15, -0.53)
-                                            scale: Qt.vector3d(0.035, 0.04, 0.02)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
-                                        }
-                                        // t750 ④ / t781 夜行者头前五官层（修复「黑影无脸」；镜像 Main.qml nwHead：
-                                        //   细肢人形几何本体走共享 MobModel mobType 16（t781 头心 0.975 半 0.28 →
-                                        //   前脸 z=-0.28），图鉴此前漏此层 = 无脸黑影）：
-                                        //   眼发光层头前 (0,1.00,-0.30) 铺竖眼贴图（pack 命中 enderman_eyes 切包内
-                                        //   竖眼；Mask 裁透明底）+ 嘴非激怒态淡显暗唇（opacity 0.15，同游戏内静态）。
-                                        //   t781：pack 命中后身体贴图头前脸 row12 自带灰白双眼 → 隐 overlay 防四眼
-                                        //   （狼/豹猫 t780「pack 自带脸则隐」同规；程序贴图无脸纹 → 恒显）。
-                                        Model {
-                                            visible: root.selectedMobType === 16 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 1.00, -0.30)
-                                            scale: Qt.vector3d(0.34, 0.13, 0.03)
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                baseColor: "#e8dcff" // 紫白魅眼底色（贴图缺失兜底，同游戏内）
-                                                baseColorMap: nwEyesPackTex.source.toString().length > 0 ? nwEyesPackTex : mobNwEyesTex
-                                                alphaMode: PrincipledMaterial.Mask
-                                                alphaCutoff: 0.5
+                                            Model {
+                                                visible: root.selectedMobType === 3 && !root.sheepPreviewPackFace
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.055, 0.10, -0.65)
+                                                scale: Qt.vector3d(0.028, 0.028, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                             }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 16
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 0.72, -0.29)
-                                            scale: Qt.vector3d(0.18, 0.05, 0.03)
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                opacity: 0.15
-                                                baseColor: "#140f18" // 近黑紫（嘴缝/口腔）
+                                            // t777 ① 羊腿 skin 层：MobModel 单材质把羊毛贴图（pack 毛层 / 程序 mob_sheep
+                                            //   全脸）与 t789 毛色 tint 铺满全身**含四腿** → 用户观感「脚被羊毛完全覆盖」。
+                                            //   语义：羊毛只覆躯干/头，腿是 skin 层 → 四腿位叠独立纯色羊皮 Model
+                                            //   （#d6b890，t749 前剪毛羊裸肤同源色）罩住毛贴图腿。图鉴静态（walkPhase
+                                            //   恒 0 → 四腿轴对齐，中心 (±0.18,-0.28,±0.26)、全长 (0.18,0.32,0.18)，
+                                            //   镜像 mobmodel.cpp 羊分支 addLegs 实参）→ 静态盒可精确罩合；尺寸外扩
+                                            //   0.01/0.02 防共面 z-fight（顶沿没入躯干 / 底沿探出 0.01，预览无地面）。
+                                            //   独立材质不吃毛色 tint（有色羊腿仍羊皮色，t789 协同：tint 只乘毛层）；
+                                            //   剪毛态同罩（裸肤腿读作平滑皮肤）。鸡腿 t616 同款「几何外独立腿 Model」先例。
+                                            Model {
+                                                visible: root.selectedMobType === 3
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.18, -0.28, -0.26)
+                                                scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
                                             }
-                                        }
-                                        // t782 燃烬者环绕棒组移入 MobModel 共享几何（mobType 17 分支：头 + 4 棒
-                                        //   径向 90° 分布 + rodSpin 公转，上 rodClock 动画驱动）——旧 t750 ⑤ 手搓
-                                        //   4 根 UnitCube 纯色 Repeater 删除（无贴图且与游戏内各持一份易漂移；
-                                        //   「单悬浮头 + 旋转贴图棒」观感同游戏内 t728/t782 标志形态）。悬浮 bob
-                                        //   属游戏内游动动画，图鉴自转 + 棒组公转已给动态 → 不复刻。
-                                        // t616 骷髅弓箭手持弓（用户「能不能拿上弓箭」；同 t598 傀儡头补法——图鉴预览
-                                        //   此前只显 MobModel，游戏内弓（Main.qml 肩枢 Node）漏显 = 无弓骷髅）：Bones 时在
-                                        //   垂手旁挂 MobBowGeometry（静态持弓位 drawAmount=0，同 Main.qml t616 游戏内方案；
-                                        //   木褐色 #6b4526 独立于骨白体色）。MobBowGeometry 是 Renderer 层已注册 QML 类型
-                                        //   （import VoxelSandbox 解析），NoLighting 红线。
-                                        // review L13：z 由 -0.02 对齐游戏内合成位（肩枢+握把 z = -0.10）——旧值弓半埋臂内。
-                                        Model {
-                                            visible: root.selectedMobType === 5
-                                            geometry: MobBowGeometry { drawAmount: 0 }
-                                            position: Qt.vector3d(0.24, -0.37, -0.10)
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                baseColor: "#6b4526" // 木褐色（同 Main.qml 骨骼弓配色）
+                                            Model {
+                                                visible: root.selectedMobType === 3
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.18, -0.28, -0.26)
+                                                scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
                                             }
-                                        }
-                                        // t616 鸡细黄腿（用户「应该是细小的黄色腿」；同 Main.qml 游戏内方案——t598 让
-                                        //   几何腿共用 body texOffs 采到毛绒区 → 腿已从 MobModel 移除，本处补纯色细黄腿
-                                        //   #e8c53a 粗 0.06；图鉴静态（无 walkPhase），双腿直立）。
-                                        Model {
-                                            visible: root.selectedMobType === 8
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.07, -0.225, 0)
-                                            scale: Qt.vector3d(0.06, 0.35, 0.06)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 8
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.07, -0.225, 0)
-                                            scale: Qt.vector3d(0.06, 0.35, 0.06)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
-                                        }
-                                        // t598 傀儡南瓜头（雪傀儡 mobType 12；同 Main.qml t582 游戏内头方案：
-                                        //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
-                                        //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50 ——
-                                        //   碰撞中心局部坐标，随父 Node scale 缩放）。
-                                        //   t663 ⑥ → t751：剪头变体（悬浮面板「已剪头」toggle → selectedMobSheared）
-                                        //   → 南瓜头隐藏、下方纯雪头接管；身体两态不变（t751 不变式见材质注释）。
-                                        Model {
-                                            visible: root.selectedMobType === 12 && !root.selectedMobSheared
-                                            geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
-                                            position: Qt.vector3d(0, 1.14, 0)
-                                            scale: Qt.vector3d(0.50, 0.50, 0.50)
-                                            materials: PrincipledMaterial {
-                                                lighting: PrincipledMaterial.NoLighting
-                                                baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
-                                                alphaMode: PrincipledMaterial.Mask
-                                                alphaCutoff: 0.5
+                                            Model {
+                                                visible: root.selectedMobType === 3
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.18, -0.28, 0.26)
+                                                scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
                                             }
-                                        }
-                                        // t663 ⑥/⑦ → t751 剪头后纯雪头 + 柔灰刻面眼嘴（悬浮面板「已剪头」toggle 触发；
-                                        //   镜像 Main.qml t663 ⑦ 游戏内形态：
-                                        //   纯色雪白 #f0f4f8 同身体 + #4a5568 柔灰刻面五官——非近黑「骷髅」刻痕）。
-                                        Model {
-                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 1.14, 0)
-                                            scale: Qt.vector3d(0.50, 0.50, 0.50)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f0f4f8" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.13, 1.19, -0.27)
-                                            scale: Qt.vector3d(0.10, 0.11, 0.04)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.13, 1.19, -0.27)
-                                            scale: Qt.vector3d(0.10, 0.11, 0.04)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 12 && root.selectedMobSheared
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 1.07, -0.27)
-                                            scale: Qt.vector3d(0.26, 0.06, 0.04)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
-                                        }
-                                        // 铁傀儡头（纯橙 + 刻面双眼，镜像 Main.qml 游戏内 delegate；t635 pack 命中隐藏——
-                                        //   MobModel 贴图头接管。t663 ④ 头心 0.95→0.905 / 眼 1.00→0.955 消头-身缝）。
-                                        Model {
-                                            visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0, 0.905, 0)
-                                            scale: Qt.vector3d(0.72, 0.66, 0.72)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8821e" } // 橙（同游戏内；图鉴预览不调昼夜灰阶）
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(-0.14, 0.955, -0.38)
-                                            scale: Qt.vector3d(0.09, 0.11, 0.03)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
-                                        }
-                                        Model {
-                                            visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
-                                            geometry: UnitCube {}
-                                            position: Qt.vector3d(0.14, 0.955, -0.38)
-                                            scale: Qt.vector3d(0.09, 0.11, 0.03)
-                                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
-                                        }
-                                    }
+                                            Model {
+                                                visible: root.selectedMobType === 3
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.18, -0.28, 0.26)
+                                                scale: Qt.vector3d(0.19, 0.34, 0.19)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#d6b890" }
+                                            }
+                                            // t663 ⑤ 蠹虫眼（2 颗黑点贴头前；镜像 Main.qml t487 delegate 位
+                                            //   (±0.05,0.00,-0.35) scale 0.03——头心 (0,0,-0.24) 半 (0.14,0.11,0.10)）。
+                                            Model {
+                                                visible: root.selectedMobType === 14
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.05, 0.00, -0.35)
+                                                scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 14
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.05, 0.00, -0.35)
+                                                scale: Qt.vector3d(0.03, 0.03, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#101010" }
+                                            }
+                                            // ── t750 图鉴 3D 预览对齐游戏内模型（六模型修复）──
+                                            // 抉择「共享组件 vs 浏览器复刻」：游戏内正确拼装深嵌 Main.qml mobHost
+                                            //   delegate（绑 entityManager 索引族 walkPhase/hurtFlash/rage/sit…），
+                                            //   抽共享组件须把十余条实体绑定参数化且回归面覆盖全部 17 种 mob——成本 /
+                                            //   风险远超收益；按任务行「评估成本」走**浏览器侧 1:1 复刻**（同 t598 傀儡
+                                            //   头 / t616 弓 + 鸡腿 / t663 羊眼先例），各块注明 Main.qml 锚点互指。几何级
+                                            //   差异（蠹虫分节；鱿鱼尖顶 t778 已随「单一生物模型」终态删除）已下沉
+                                            //   MobModel 共享层（mobmodel.cpp，两侧同源无双份维护）。
+                                            // t778 鱿鱼眼层整删 + 尖顶删（镜像 Main.qml squid delegate 同源修）：
+                                            //   原 t750① 给图鉴补过 2 颗黑点几何眼（pack 关态显；程序贴图 mob_squid
+                                            //   不画眼 → 眼靠几何盒）——与「鱿鱼=单一生物模型（去小鱿鱼、去眼睛）」
+                                            //   终态冲突 → 删。眼只来自 pack 贴图前脸纹素（pack 命中态自带眼）；程序
+                                            //   贴图态无脸纹（纯斑纹软体观感）。「头顶小鱿鱼」叠加层根源 = mobmodel.cpp
+                                            //   pack 态尖顶小盒（复用 mantle texOffs → 六面各显 mantle 对应面缩图含
+                                            //   前脸眼纹），t750 只删了 pack 关态、pack 态残留 → 本任务几何层整删，
+                                            //   图鉴 / 游戏内 / 刷怪笼迷你态三处共享单源一并修复（见 mobmodel.cpp
+                                            //   t778 注释）。
+                                            // t750 ② 狼尾（修复「像兔子」——缺尾缺眼的灰身立耳四足读作兔；镜像
+                                            //   Main.qml wolfTailPivot：尾根 (0,0.16,0.38) + 竖细盒毛色 0.55 灰；图鉴
+                                            //   静态取满血竖起 35°（游戏内随血量 35°..140°）。
+                                            //   t946 坐姿随移（Main.qml t878②→t946 成对契约）：尾根 = 站姿位绕坐姿根锚
+                                            //   (-0.14,0.36) 旋 18° = (0,0.139,0.472) + 垂尾搭地 35°+75°=110°
+                                            //   （机制等价 MC 坐狼垂尾）。
+                                            Node {
+                                                visible: root.selectedMobType === 10
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)
+                                                eulerRotation.x: root.mobTamedActive && root.mobSitPreview ? 110 : 35
+                                                Model {
+                                                    geometry: UnitCube {}
+                                                    position: Qt.vector3d(0, 0.10, 0)
+                                                    scale: Qt.vector3d(0.06, 0.20, 0.06)
+                                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8c8c8c" }
+                                                }
+                                            }
+                                            // t920 驯服狼红项圈（t831 驯服态视觉；镜像 Main.qml 游戏内 collar
+                                            //   Model：站姿颈根 (0,0.16,-0.30) / 坐姿位 = 站姿绕坐姿根锚旋 18° (0,0.349,-0.175)
+                                            //   （t946 链派生成对契约），横扁环带 x 微出躯干侧缘读作环颈）。未驯服不显；图鉴不做
+                                            //   昼夜灰阶 / 受击红闪（纯色预览，同其他 overlay 眼/腿约定）。
+                                            Model {
+                                                visible: root.selectedMobType === 10 && root.mobTamedPreview
+                                                geometry: UnitCube {}
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)
+                                                scale: Qt.vector3d(0.42, 0.06, 0.07)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColor: "#c22828" // 驯服项圈红（Main.qml rgba(0.76,0.16,0.16) 同值）
+                                                }
+                                            }
+                                            // t963 驯服猫红项圈（用户第五轮「驯服后没看到项圈」；镜像 Main.qml 游戏
+                                            //   内 t963 猫项圈 + t920 狼项圈先例：站姿颈根 (0,0.14,-0.30) / 坐姿位 =
+                                            //   站姿绕豹猫坐姿根锚 (-0.12,0.32) 旋 18° = (0,0.319,-0.189)（t946 链派生
+                                            //   成对契约，豹猫颈围镜像数值系 0.36/0.05/0.06）。未驯服不显；门挂
+                                            //   mobTamedPreview（与 t920 贴图切换同一驯服拨杆位——单源）。图鉴不做
+                                            //   昼夜灰阶 / 受击红闪（纯色预览，同狼项圈 overlay 约定）。
+                                            Model {
+                                                visible: root.selectedMobType === 11 && root.mobTamedPreview
+                                                geometry: UnitCube {}
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)
+                                                scale: Qt.vector3d(0.36, 0.05, 0.06)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColor: "#c22828" // 驯服项圈红（狼项圈同值）
+                                                }
+                                            }
+                                            // t750 ② 狼眼（2 颗深点；镜像 Main.qml wolf delegate：头心
+                                            //   (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前脸 z=-0.60 → 眼贴头前
+                                            //   (±0.08,0.16,-0.61)（t819 头后移贴胸，眼随移）。
+                                            //   t780：pack 命中 → box-UV 贴图头前脸自带双瞳 → overlay 隐（t777 双眼教训）。
+                                            //   t946 坐姿眼随移（Main.qml t878②→t946 成对契约）：坐姿头心 (0,0.324,-0.308)
+                                            //   + 眼偏移净 10° 随头旋 → (±0.08, 0.40, -0.49)。
+                                            Model {
+                                                visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
+                                                geometry: UnitCube {}
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(-0.08, 0.40, -0.49) : Qt.vector3d(-0.08, 0.16, -0.61)
+                                                scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 10 && root.selectedMobPackSrc === ""
+                                                geometry: UnitCube {}
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(0.08, 0.40, -0.49) : Qt.vector3d(0.08, 0.16, -0.61)
+                                                scale: Qt.vector3d(0.04, 0.05, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                            }
+                                            // t750 ③ 豹猫眼（修复「没有脸」；镜像 Main.qml ocelot delegate：头心
+                                            //   (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前脸 z=-0.52 → 眼贴头前
+                                            //   (±0.07,0.15,-0.53)（t819 头后移贴胸，眼随移）。
+                                            //   t780：pack 命中 → 贴图头前脸自带眼点 → overlay 隐（同上）。
+                                            //   t920：已驯服豹猫贴图恒程序家猫（无脸纹）→ 眼恒显（镜像 Main.qml
+                                            //   「驯服猫不走 pack 判据」）；t946 坐姿眼随移（与狼同修）：坐姿头心
+                                            //   (0,0.306,-0.276) + 眼偏移净 10° 随头旋 → (±0.07, 0.36, -0.42)。
+                                            Model {
+                                                visible: root.selectedMobType === 11
+                                                         && (root.selectedMobPackSrc === ""
+                                                             || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
+                                                geometry: UnitCube {}
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(-0.07, 0.36, -0.42) : Qt.vector3d(-0.07, 0.15, -0.53)
+                                                scale: Qt.vector3d(0.035, 0.04, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 11
+                                                         && (root.selectedMobPackSrc === ""
+                                                             || (root.selectedMobFromSection === 11 && root.mobTamedPreview))
+                                                geometry: UnitCube {}
+                                                position: root.mobTamedActive && root.mobSitPreview
+                                                          ? Qt.vector3d(0.07, 0.36, -0.42) : Qt.vector3d(0.07, 0.15, -0.53)
+                                                scale: Qt.vector3d(0.035, 0.04, 0.02)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
+                                            }
+                                            // t750 ④ / t781 夜行者头前五官层（修复「黑影无脸」；镜像 Main.qml nwHead：
+                                            //   细肢人形几何本体走共享 MobModel mobType 16（t781 头心 0.975 半 0.28 →
+                                            //   前脸 z=-0.28），图鉴此前漏此层 = 无脸黑影）：
+                                            //   眼发光层头前 (0,1.00,-0.30) 铺竖眼贴图（pack 命中 enderman_eyes 切包内
+                                            //   竖眼；Mask 裁透明底）+ 嘴非激怒态淡显暗唇（opacity 0.15，同游戏内静态）。
+                                            //   t781：pack 命中后身体贴图头前脸 row12 自带灰白双眼 → 隐 overlay 防四眼
+                                            //   （狼/豹猫 t780「pack 自带脸则隐」同规；程序贴图无脸纹 → 恒显）。
+                                            Model {
+                                                visible: root.selectedMobType === 16 && root.selectedMobPackSrc === ""
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0, 1.00, -0.30)
+                                                scale: Qt.vector3d(0.34, 0.13, 0.03)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColor: "#e8dcff" // 紫白魅眼底色（贴图缺失兜底，同游戏内）
+                                                    baseColorMap: nwEyesPackTex.source.toString().length > 0 ? nwEyesPackTex : mobNwEyesTex
+                                                    alphaMode: PrincipledMaterial.Mask
+                                                    alphaCutoff: 0.5
+                                                }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 16
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0, 0.72, -0.29)
+                                                scale: Qt.vector3d(0.18, 0.05, 0.03)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    opacity: 0.15
+                                                    baseColor: "#140f18" // 近黑紫（嘴缝/口腔）
+                                                }
+                                            }
+                                            // t782 燃烬者环绕棒组移入 MobModel 共享几何（mobType 17 分支：头 + 4 棒
+                                            //   径向 90° 分布 + rodSpin 公转，上 rodClock 动画驱动）——旧 t750 ⑤ 手搓
+                                            //   4 根 UnitCube 纯色 Repeater 删除（无贴图且与游戏内各持一份易漂移；
+                                            //   「单悬浮头 + 旋转贴图棒」观感同游戏内 t728/t782 标志形态）。悬浮 bob
+                                            //   属游戏内游动动画，图鉴自转 + 棒组公转已给动态 → 不复刻。
+                                            // t616 骷髅弓箭手持弓（用户「能不能拿上弓箭」；同 t598 傀儡头补法——图鉴预览
+                                            //   此前只显 MobModel，游戏内弓（Main.qml 肩枢 Node）漏显 = 无弓骷髅）：Bones 时在
+                                            //   垂手旁挂 MobBowGeometry（静态持弓位 drawAmount=0，同 Main.qml t616 游戏内方案；
+                                            //   木褐色 #6b4526 独立于骨白体色）。MobBowGeometry 是 Renderer 层已注册 QML 类型
+                                            //   （import VoxelSandbox 解析），NoLighting 红线。
+                                            // review L13：z 由 -0.02 对齐游戏内合成位（肩枢+握把 z = -0.10）——旧值弓半埋臂内。
+                                            Model {
+                                                visible: root.selectedMobType === 5
+                                                geometry: MobBowGeometry { drawAmount: 0 }
+                                                position: Qt.vector3d(0.24, -0.37, -0.10)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColor: "#6b4526" // 木褐色（同 Main.qml 骨骼弓配色）
+                                                }
+                                            }
+                                            // t616 鸡细黄腿（用户「应该是细小的黄色腿」；同 Main.qml 游戏内方案——t598 让
+                                            //   几何腿共用 body texOffs 采到毛绒区 → 腿已从 MobModel 移除，本处补纯色细黄腿
+                                            //   #e8c53a 粗 0.06；图鉴静态（无 walkPhase），双腿直立）。
+                                            Model {
+                                                visible: root.selectedMobType === 8
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.07, -0.225, 0)
+                                                scale: Qt.vector3d(0.06, 0.35, 0.06)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 8
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.07, -0.225, 0)
+                                                scale: Qt.vector3d(0.06, 0.35, 0.06)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8c53a" }
+                                            }
+                                            // t598 傀儡南瓜头（雪傀儡 mobType 12；同 Main.qml t582 游戏内头方案：
+                                            //   BlockCube{blockId:100} + 图集瓦片 per-face 采 pumpkin_side/top/face）。
+                                            //   位置/尺寸与 Main.qml 游戏内 delegate 一致（雪：头心 y=1.14 宽 0.50 ——
+                                            //   碰撞中心局部坐标，随父 Node scale 缩放）。
+                                            //   t663 ⑥ → t751：剪头变体（悬浮面板「已剪头」toggle → selectedMobSheared）
+                                            //   → 南瓜头隐藏、下方纯雪头接管；身体两态不变（t751 不变式见材质注释）。
+                                            Model {
+                                                visible: root.selectedMobType === 12 && !root.selectedMobSheared
+                                                geometry: BlockCube { blockId: 100 } // 100 = BlockRegistry::Pumpkin（QML 不 import C++ 静态类故字面量，同 Main.qml 约定）
+                                                position: Qt.vector3d(0, 1.14, 0)
+                                                scale: Qt.vector3d(0.50, 0.50, 0.50)
+                                                materials: PrincipledMaterial {
+                                                    lighting: PrincipledMaterial.NoLighting
+                                                    baseColorMap: Texture { source: root.atlasSource; generateMipmaps: false }
+                                                    alphaMode: PrincipledMaterial.Mask
+                                                    alphaCutoff: 0.5
+                                                }
+                                            }
+                                            // t663 ⑥/⑦ → t751 剪头后纯雪头 + 柔灰刻面眼嘴（悬浮面板「已剪头」toggle 触发；
+                                            //   镜像 Main.qml t663 ⑦ 游戏内形态：
+                                            //   纯色雪白 #f0f4f8 同身体 + #4a5568 柔灰刻面五官——非近黑「骷髅」刻痕）。
+                                            Model {
+                                                visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0, 1.14, 0)
+                                                scale: Qt.vector3d(0.50, 0.50, 0.50)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f0f4f8" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.13, 1.19, -0.27)
+                                                scale: Qt.vector3d(0.10, 0.11, 0.04)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.13, 1.19, -0.27)
+                                                scale: Qt.vector3d(0.10, 0.11, 0.04)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 12 && root.selectedMobSheared
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0, 1.07, -0.27)
+                                                scale: Qt.vector3d(0.26, 0.06, 0.04)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#4a5568" }
+                                            }
+                                            // 铁傀儡头（纯橙 + 刻面双眼，镜像 Main.qml 游戏内 delegate；t635 pack 命中隐藏——
+                                            //   MobModel 贴图头接管。t663 ④ 头心 0.95→0.905 / 眼 1.00→0.955 消头-身缝）。
+                                            Model {
+                                                visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0, 0.905, 0)
+                                                scale: Qt.vector3d(0.72, 0.66, 0.72)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8821e" } // 橙（同游戏内；图鉴预览不调昼夜灰阶）
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(-0.14, 0.955, -0.38)
+                                                scale: Qt.vector3d(0.09, 0.11, 0.03)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                            }
+                                            Model {
+                                                visible: root.selectedMobType === 13 && root.selectedMobPackSrc === ""
+                                                geometry: UnitCube {}
+                                                position: Qt.vector3d(0.14, 0.955, -0.38)
+                                                scale: Qt.vector3d(0.09, 0.11, 0.03)
+                                                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a0e04" }
+                                            }
+                                        } // t966 yaw 子收口（生物分支）
+                                    } // t966 pitch 父收口（生物分支）
                                 }
 
                                 // 非整立方 / 非生物 → 大图标（路由同网格：方块段 iconSourceForBlock / 工具 ToolIcon / 材料·护甲 MaterialIcon）。
