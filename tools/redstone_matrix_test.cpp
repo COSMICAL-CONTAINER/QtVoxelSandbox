@@ -22962,10 +22962,12 @@ Item {
             QFile rf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
             const QString rsrc = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
             // 查看器消费端：packTextured 门含驯服猫例外（t949 新门）且与 t920 贴图切换同条件并存。
+            //   t963 钉合法演化（P-t950(f) 先例）：驯服猫变体 0 贴图源 mob_cat_black → mob_cat_tabby
+            //   （全黑档退役，家猫花纹返修）——钉的意图不变：图鉴驯服态 = 程序家猫贴图源。
             const bool pinBrowser = rsrc.contains(QStringLiteral(
                                       "!(root.selectedMobFromSection === 11 && root.mobTamedPreview))"))
                                     && rsrc.contains(QStringLiteral(
-                                      "? \"qrc:/textures/mob_cat_black.png\""));
+                                      "? \"qrc:/textures/mob_cat_tabby.png\""));
             ok = ok && distinct && pinGate && pinMain && pinBrowser;
             if (!(distinct && pinGate && pinMain && pinBrowser))
                 diag += QStringLiteral("d mapO=%1 mapW=%2 pinGate=%3 pinMain=%4 pinBrowser=%5 ")
@@ -25154,6 +25156,118 @@ Item {
                              "slot, verifies doEnchant rejection, keeps the plain pickaxe/sword swap "
                              "and the enchanted-sword rejection and the 64-book full-slot no-op green, "
                              "and swaps books in both anvil input slots";
+    }
+
+    // ── t963 豹猫查看器返修（R19.17 🅴：驯服后**变黑色**（错，驯服=家猫花纹）+ 没看到项圈；坐姿与狼
+    //    同 bug 已随 t946 连修闭合，本探针零触碰坐姿面）──
+    //    根因①（变黑）：驯服毛色变体 0 的程序贴图 mob_cat_black 本身就是全黑档——图鉴驯服拨杆恒取变体 0
+    //    代表（t949 注记「开包拨已驯服显全脸黑猫」），游戏内驯服也有 1/3 概率落黑 → 用户观感「驯服=变黑」。
+    //    修 = 全黑档退役：build_mob.py make_cat_black → make_cat_tabby（暖棕底 + 深棕虎斑横带 + 浅奶黄
+    //    口鼻/腹纹；确定性条带函数 + 相位噪点自创，非 MC 家猫三花色照搬），变体 1 姜黄 / 2 奶油同家猫色
+    //    不动——驯服后三变体皆家猫花纹，全工程 mob_cat_black 资产与引用绝迹。
+    //    根因②（无项圈）：狼驯服态有 t831 红项圈（游戏内 Main.qml + 图鉴 ResourceBrowser 双落点），豹猫
+    //    delegate 两处都无 → 镜像补齐（豹猫颈围缩放 0.36/0.05/0.06；站姿颈根 (0,0.14,-0.30)、坐姿位 =
+    //    站姿绕 t946 豹猫坐姿根锚 (-0.12,0.32) 旋 18° = (0,0.319,-0.189)，t946 成对契约同款换算）。
+    //    单源：贴图切换 / pack 判据 / 项圈可见三消费端全挂 ocatTamed 同一驯服态位（游戏内 Main.qml 全文
+    //    entityManager.ocelotTamedAt 直读恰 1 处 = 属性声明源）。
+    //    行为面注：驯服链本身零改动——真实输入链驯服 + 变体 0..2 断言由 P-t949(a) 持续覆盖；QML 呈现 /
+    //    贴图资产 headless 不可见，按 t931/t941/t957 纯视觉项先例走源码钉 + PNG 数据钉。
+    //    (a) 贴图源钉：两消费端（游戏内 Texture+变体分支 / 图鉴 selectedMobTexSource）指 mob_cat_tabby
+    //        + 全黑档四文件绝迹 + 旧资产不在盘。
+    //    (b) PNG 数据钉：16×16 全不透明 + 暖底（meanR−meanB ≥ 40）+ 花纹非纯色（亮度 sd ≥ 15）+
+    //        非全黑（lum<40 像素 ≤ 5）+ 浅色腹/口鼻斑在（lum≥190 ≥ 8 px）——旧全黑档（meanLum 27.6、
+    //        sd 8.5、88% 暗像素）全部断言必红 = 「驯服变黑」回归即测即红。
+    //    (c) 项圈两处存在钉 + ocatTamed 单源钉（游戏内 visible: ocatTamed 唯一 + ocelotTamedAt 直读恰 1
+    //        + 坐姿/站姿成对位置串；图鉴门挂 mobTamedPreview + 同款位置串 + 注释锚）。
+    {
+        bool ok = true;
+        QString diag;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        auto readSrc963 = [&root](const QString &rel) -> QString {
+            QFile f(root + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mn963 = readSrc963(QStringLiteral("src/ui/Main.qml"));
+        const QString rb963 = readSrc963(QStringLiteral("src/ui/ResourceBrowser.qml"));
+        const QString cm963 = readSrc963(QStringLiteral("CMakeLists.txt"));
+        const QString bm963 = readSrc963(QStringLiteral("tools/build_mob.py"));
+        // (a) 两消费端贴图源 = 家猫花纹程序贴图（变体 0 棕虎斑）+ 全黑档绝迹（含注释残留）。
+        const bool okA963 = mn963.contains(QStringLiteral("qrc:/textures/mob_cat_tabby.png"))
+                         && mn963.contains(QStringLiteral("if (v === 0) return mobCatTabbyTex"))
+                         && mn963.contains(QStringLiteral("if (ocatTamed) {"))
+                         && rb963.contains(QStringLiteral("? \"qrc:/textures/mob_cat_tabby.png\""))
+                         && !mn963.contains(QStringLiteral("mob_cat_black"))
+                         && !mn963.contains(QStringLiteral("mobCatBlack"))
+                         && !rb963.contains(QStringLiteral("mob_cat_black"))
+                         && !cm963.contains(QStringLiteral("mob_cat_black"))
+                         && !bm963.contains(QStringLiteral("mob_cat_black"))
+                         && !QFile::exists(root + QStringLiteral("/textures/mob_cat_black.png"));
+        // (b) PNG 数据钉：非全黑家猫花纹的结构断言（旧全黑档签名 meanLum 27.6 / sd 8.5 / 88% 暗像素）。
+        QImage tabby963(root + QStringLiteral("/textures/mob_cat_tabby.png"));
+        bool okB963 = tabby963.width() == 16 && tabby963.height() == 16;
+        double sumR963 = 0, sumB963 = 0, sumL963 = 0, sumL2963 = 0;
+        int opaque963 = 0, dark963 = 0, light963 = 0;
+        const int n963 = tabby963.width() * tabby963.height();
+        for (int y = 0; okB963 && y < tabby963.height(); ++y) {
+            for (int x = 0; x < tabby963.width(); ++x) {
+                const QColor p = tabby963.pixelColor(x, y);
+                if (p.alpha() == 255) ++opaque963;
+                const double l = 0.299 * p.red() + 0.587 * p.green() + 0.114 * p.blue();
+                sumR963 += p.red();
+                sumB963 += p.blue();
+                sumL963 += l;
+                sumL2963 += l * l;
+                if (l < 40.0) ++dark963;
+                if (l >= 190.0) ++light963;
+            }
+        }
+        const double meanL963 = sumL963 / n963;
+        const double sdL963 = std::sqrt(std::max(0.0, sumL2963 / n963 - meanL963 * meanL963));
+        okB963 = okB963 && opaque963 == n963
+                && (sumR963 - sumB963) / n963 >= 40.0
+                && sdL963 >= 15.0
+                && dark963 <= 5
+                && light963 >= 8;
+        // (c) 项圈两处存在钉 + ocatTamed 单源钉。
+        const bool okC963 = mn963.count(QStringLiteral("visible: ocatTamed")) == 1
+                         && mn963.count(QStringLiteral("entityManager.ocelotTamedAt(index)")) == 1
+                         && mn963.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)"))
+                         && mn963.contains(QStringLiteral("scale: Qt.vector3d(0.36, 0.05, 0.06)"))
+                         && mn963.contains(QStringLiteral("t963 驯服项圈"))
+                         && rb963.count(QStringLiteral("visible: root.selectedMobType === 11 && root.mobTamedPreview")) == 1
+                         && rb963.contains(QStringLiteral("? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)"))
+                         && rb963.contains(QStringLiteral("t963 驯服猫红项圈"));
+        ok = okA963 && okB963 && okC963;
+        if (!ok)
+            qInfo().noquote() << "  [t963 diag] texSrc" << okA963 << "pngData" << okB963
+                              << "collarPins" << okC963
+                              << "| meanL" << meanL963 << "sdL" << sdL963
+                              << "dark" << dark963 << "light" << light963;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t963 ocelot viewer rework: the tamed coat no longer turns BLACK - the "
+                             "old variant-0 procedural texture was itself the all-black coat (the "
+                             "viewer always previewed it and in-game taming landed on it 1/3 of the "
+                             "time, reading as 'taming turns the ocelot black'), so the black coat "
+                             "is retired: build_mob.py now generates mob_cat_tabby (warm "
+                             "orange-brown base, dark-brown tabby bands from a self-created "
+                             "deterministic band function + phase dither, light cream muzzle/belly; "
+                             "not imitating any existing cat coat) as variant 0 while variants 1/2 "
+                             "stay domestic, and every mob_cat_black asset reference is extinct; "
+                             "the red collar the wolf has when tamed is mirrored onto the ocelot in "
+                             "BOTH places (in-game Main.qml delegate and the ResourceBrowser 3D "
+                             "preview) scaled to the ocelot neck (0.36/0.05/0.06, standing root "
+                             "(0,0.14,-0.30), sit position derived by the t946 hip-root chain "
+                             "(0,0.319,-0.189)); texture switch, pack predicate and collar visibility "
+                             "all hang on the SAME ocatTamed state bit (exactly one direct "
+                             "ocelotTamedAt read remains in Main.qml); the sit-pose face needed no "
+                             "touch (closed by t946, zero overlap); legs: dual-consumer texture "
+                             "source pins + black-coat extinction across four files and the asset "
+                             "itself, PNG data pin (16x16 fully opaque, warm base meanR-meanB>=40, "
+                             "patterned sd>=15, <=5 dark pixels, >=8 light belly/muzzle pixels - the "
+                             "old black coat meanLum 27.6 / sd 8.5 / 88% dark fails every clause), "
+                             "and collar/single-source pins on both consumers";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

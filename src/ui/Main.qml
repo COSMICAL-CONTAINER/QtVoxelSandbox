@@ -4080,7 +4080,7 @@ Window {
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 犬科几何（细长躯干 + 尖头 + 立耳 + 4 腿）每面铺整张贴图。
         Texture { id: mobWolfTex; source: "qrc:/textures/mob_wolf.png"; generateMipmaps: false }
         Texture { id: mobOcelotTex;    source: "qrc:/textures/mob_ocelot.png";    generateMipmaps: false } // t481 豹猫（未驯服）
-        Texture { id: mobCatBlackTex;  source: "qrc:/textures/mob_cat_black.png"; generateMipmaps: false } // t481 猫变体 0（黑）
+        Texture { id: mobCatTabbyTex;  source: "qrc:/textures/mob_cat_tabby.png"; generateMipmaps: false } // t481 猫变体 0（棕虎斑家猫；t963 花纹返修——旧全黑档退役，用户口径「驯服=家猫花纹」）
         Texture { id: mobCatGingerTex; source: "qrc:/textures/mob_cat_ginger.png"; generateMipmaps: false } // t481 猫变体 1（姜黄）
         Texture { id: mobCatCreamTex;  source: "qrc:/textures/mob_cat_cream.png"; generateMipmaps: false } // t481 猫变体 2（奶油）
         // t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）：灰白甲壳底 + 深灰体节横纹 + 暗头斑（build_mob.py
@@ -8968,11 +8968,37 @@ Window {
                                     baseColorMap: {
                                         if (ocatTamed) {
                                             const v = entityManager.ocelotVariantAt(index)
-                                            if (v === 0) return mobCatBlackTex
+                                            if (v === 0) return mobCatTabbyTex
                                             if (v === 1) return mobCatGingerTex
                                             return mobCatCreamTex
                                         }
                                         return ocelotPackHit ? mobOcelotPackTex : mobOcelotTex
+                                    }
+                                }
+                                // t963 驯服项圈（用户第五轮「驯服后没看到项圈」；镜像 t831 狼项圈几何语义，
+                                //   机制等价 MC 1.0 驯服猫项圈）：颈根水平扁环带（UnitCube 细横盒，x 半 0.18
+                                //   微出豹猫躯干侧缘 ±0.15 → 两侧读作「环颈」；z 心 -0.30 = 头后缘 -0.24 与
+                                //   躯干前缘 -0.36 的嵌接区）。仅驯服猫可见——visible 直挂 **ocatTamed 同一
+                                //   驯服态位**（贴图切换 / pack 判据 / 项圈三消费端同源，禁第二套
+                                //   entityManager.ocelotTamedAt 读——单源钉 P-t963）。随父坐姿几何继承；
+                                //   项圈红 #c22828 × 昼夜灰阶（夜间随场景变暗，同狼项圈乘法）；受击红闪统一
+                                //   #ff0000（同身体语义）。纯视觉，无碰撞 / 交互语义。
+                                Model {
+                                    visible: ocatTamed
+                                    geometry: UnitCube {}
+                                    // t963 项圈随坐姿：站姿颈根 (0,0.14,-0.30) 绕豹猫坐姿根锚 (-0.12,0.32)
+                                    //   （mobmodel.cpp t946 豹猫分支）旋 18° = (0,0.319,-0.189)（t946 链派生成对
+                                    //   契约的豹猫镜像数值系；狼项圈同款换算，revision 触碰即时随切）。
+                                    position: ocatSit === 1 ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)
+                                    scale: Qt.vector3d(0.36, 0.05, 0.06) // 横扁环带（豹猫颈围：狼 0.42/0.06/0.07 系缩小）
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: {
+                                            const _r = mon.revision
+                                            const tl = terrainLight(worldClock.skyLight)
+                                            if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                            return _r >= 0 ? Qt.rgba(0.76 * tl.r, 0.16 * tl.g, 0.16 * tl.b, 1.0) : "#000000"
+                                        }
                                     }
                                 }
                                 // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前面 z=-0.52
