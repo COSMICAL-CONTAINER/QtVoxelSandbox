@@ -337,7 +337,13 @@ public:
     //   只拾 arrowFromPlayer=true 的嵌入箭），正是「玩家友方箭」语义（机制等价 MC 1.0 发射器箭可打生物可拾取）。
     //   ⚠️ 神殿陷阱 fallback（scanDispenserTraps）**不走本入口**（r195 高危回归修复）：陷阱箭须命中玩家 →
     //   走 spawnArrow（arrowFromPlayer=false）；走本入口会被 t324 自伤武装窗口（0.2s）放空 + 沦为无限箭农场。
-    Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage);
+    //   **t960 弓附魔下传参数**（Game 层算好传入；Entities 不 include Game——分层铁律，值存 per-entity
+    //   字段 t505 先例）：kbMul = 震击击退倍率（EnchantRegistry::bowKnockbackMultiplier 出，1 = 基线；
+    //   e.arrowKbStrength = kArrowKnockbackStrength × kbMul）；igniteSec = 燃箭点燃秒数
+    //   （EnchantRegistry::bowIgniteSeconds 出，0 = 不点燃）。缺省 1.0 / 0 = 旧行为逐字不变（发射器 /
+    //   既有调用点零改动）。
+    Q_INVOKABLE void spawnArrowPlayer(const QVector3D &origin, const QVector3D &vel, int damage,
+                                      float kbMul = 1.0f, float igniteSec = 0.0f);
     // t482/t505 雪球投射物（雪傀儡 aiSnowGolem 远程攻击 / t505 玩家右键抛掷）：在 origin 处生成一个携带初速度 vel
     //   （blocks/s，含 vy 抛物）的雪球实体。kind=Snowball、pushable=false（玩家走碰不推）、halfW/halfH=0.10
     //   （白色小球视觉 + 碰撞最小）。tick 内 Snowball 分支：重力改 vy（抛物）+ 速度位移 + 方块碰撞（命中即碎 →
@@ -420,8 +426,14 @@ public:
     //   咬钩窗口计时保持 dt——确定性掷骰的 tick 语义依赖；到期消散后 Game 层 updateFishing 镜像检测自动收竿）。
     //   收竿 / 获物 / 拉拽 / 耐久语义全收口在 Game 层（PlayerController::useFishingRod 拉 bobberHasBiteAt /
     //   bobberHookedMobAt 查询后结算；掉落物 / 暗渊珠「Entities 承载实体 + Game 收口语义」同款分层）。
+    //   **t960 钓竿附魔下传参数**（Game 层算好传入；Entities 不 include Game——分层铁律，值存 per-entity
+    //   字段 t505 先例）：waitScale = 唤潮等待期倍率（EnchantRegistry::rodWaitScale 出，1 = 基线；
+    //   e.bobberWaitScale 存实体 → 落水首掷 / 鱼跑重掷两处掷骰同乘）；biteWindowExtra = 缠咬判定窗附加秒
+    //   （EnchantRegistry::rodBiteWindowExtra 出，0 = 基线；e.bobberBiteWindow = kBobberBiteWindowSec +
+    //   extra——基值常量 1.0 用户口径钉死不动，附加式加宽）。缺省 1.0 / 0 = 旧行为逐字不变。
     //   达 kCap → 跳过 + 告警（防溢出）。返浮标槽索引（Game 层记 m_bobberEntityIdx 跟踪）；达 kCap → -1。
-    Q_INVOKABLE int spawnBobber(const QVector3D &origin, const QVector3D &vel, quint32 castSerial);
+    Q_INVOKABLE int spawnBobber(const QVector3D &origin, const QVector3D &vel, quint32 castSerial,
+                                float waitScale = 1.0f, float biteWindowExtra = 0.0f);
     // t836 供 Game 层收竿结算查询（拉起时读三值决定 获物 / 拉拽 / 空收）：bobberHasBiteAt = 咬钩窗口内
     //   （收竿 = 获物）；bobberHookedMobAt = 已钩 mob 槽索引（-1 无；收竿 = 拉拽该 mob）。越界 / 非活体
     //   Bobber → false / -1（同 aliveAt 越界安全语义）。
@@ -1199,6 +1211,12 @@ private:
         //   arrowDamage = 本箭命中时造成的伤害 HP（骷髅箭恒 kArrowDamage=2；玩家箭由弓蓄力 1..6 决定，spawnArrowPlayer 传）。
         bool arrowFromPlayer = false; // 是否玩家射出（命中目标分流：true→mob / false→玩家）
         int arrowDamage = 0;          // 命中伤害（HP；仅 kind==Arrow 用；骷髅箭 = kArrowDamage）
+        // t960 箭附魔载荷（仅 kind==Arrow 用；Game 层 spawn 时经 spawnArrowPlayer 参数写入——Entities 不
+        //   include Game，值由 caller 算好传入，t505 per-entity 字段先例）。DMI 缺省 = 旧基线行为：
+        //   arrowKbStrength=0 → 命中分支兜底 kArrowKnockbackStrength（骷髅箭不设 = 基线）；
+        //   arrowIgniteSec=0 → 命中不点燃。
+        float arrowKbStrength = 0.0f; // 命中击退强度（>0 生效；= kArrowKnockbackStrength × 震击倍率）
+        float arrowIgniteSec  = 0.0f; // 命中点燃时长（秒；>0 → 命中后 ignite 本时长，燃箭）
         // t480 箭发射者槽索引（骷髅箭专用；玩家箭 arrowFromPlayer=true 不设 = -1）：fireArrow 在 spawnArrow 后写
         //   它（= 发射的 Bones 槽索引）→ 箭命中玩家时注册驯服狼防御目标（m_wolfTarget = arrowShooter，主人受击 →
         //   狼攻击射箭的骸骨）。slot-reuse 索引稳定（release 不 shift），发射者存活期间索引有效。非 Arrow → -1 不读。
@@ -1303,6 +1321,12 @@ private:
         float bobberBiteTimer = 0.0f; // 等待 / 咬钩窗口倒计时（秒；两阶段复用，见上）
         bool  bobberHasBite = false;  // 咬钩窗口内（收竿 = 获物）
         quint32 bobberSerial = 0;     // 甩竿序号（确定性等待掷骰的错峰源；鱼跑重掷 ++）
+        // t960 浮标附魔载荷（仅 kind==Bobber 用；Game 层 spawn 时经 spawnBobber 参数写入——Entities 不
+        //   include Game，值由 caller 算好传入，t505 per-entity 字段先例）。DMI 缺省 = 旧基线行为：
+        //   bobberWaitScale=1 → 等待掷骰原值（两处掷骰点同乘——落水首掷 / 鱼跑重掷）；
+        //   bobberBiteWindow=0 → 咬钩时兜底 kBobberBiteWindowSec（spawn 已写真值，0 仅防御）。
+        float bobberWaitScale = 1.0f; // 等待期倍率（唤潮：1 − 0.2×级；EnchantRegistry::rodWaitScale 出）
+        float bobberBiteWindow = 0.0f;// 咬钩判定窗（秒；缠咬：kBobberBiteWindowSec + 0.5×级，基值常量不动）
         int   bobberHookedIdx = -1;   // 已钩 mob 槽索引（-1 = 无；仅 Hooked 态读）
         quint32 bobberHookedSerial = 0; // 已钩 mob 代际快照（与槽内 spawnSerial 比对防槽复用误绑）
         // review25 #12 Ground 态贴靠格快照（进入态时记录命中实体格 / 岩浆格；仅 Ground 分支节流复查读——

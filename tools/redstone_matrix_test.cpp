@@ -12042,8 +12042,9 @@ int main(int argc, char *argv[])
     //        钻石镐 / 铲 ⊆ {效率,精准,时运,耐久}（**亡灵杀手等武器系绝迹** + 池非空四元全在）；
     //        钻石斧 ⊆ 锐锋族+效率+精准+耐久（无时运）；钻石剑 ⊆ 锐锋族+击退+燃焰+耐久（无效率/采集系）；
     //        胸甲 ⊆ 保护/火焰保护/弹射物保护/耐久（无摔落/水上亲和）；靴 + 摔落保护；头盔 + 水上亲和；
-    //        锄 / 弓 / 剪刀 → 恒空（MC 1.0 锄无适用附魔 → 不给选项；categoryForItem 判 None）；
-    //        书 → 全 14 附魔都在池（附书全池语义不回归）；
+    //        锄 / 剪刀 → 恒空（MC 1.0 锄无适用附魔 → 不给选项；categoryForItem 判 None）；
+    //        弓 ⊆ 劲射/震击/燃箭/不竭/耐久、钓竿 ⊆ 唤潮/缠咬/耐久 且全在（t960：弓 / 竿专属池，
+    //        categoryForItem 判 BowItem / RodItem → 可附魔）；书 → 全 20 附魔都在池；
     //    (b) Hotbar 桥接 selectEnchantsPreviewForItem == EnchantRegistry 直调（同 seed 同产物）；
     //    (c) enchantSelected 对锄返 false（附魔台点档 no-op，不白扣 XP / 青金石）+ 对剑 true 且产物全在剑池
     //        + 已附魔再点返 false（防重复附魔闸不回归）。
@@ -12067,10 +12068,14 @@ int main(int argc, char *argv[])
         const int FA = int(EnchantRegistry::FireAspect),    P  = int(EnchantRegistry::Protection);
         const int FP = int(EnchantRegistry::FireProtection), PR = int(EnchantRegistry::ProjectileProt);
         const int FF = int(EnchantRegistry::FeatherFall),   AA = int(EnchantRegistry::AquaAffinity);
-        // 全 seed 扫池：seen[1..14] = 该物品选项池中出现过的附魔 id（1200 次抽取 → 稀有权重 1 的精准采集
-        //   也在书池 / 采集池中以概率 1-(1-p)^2400 ≈ 1 覆盖，假阴性率 < e^-30）。
-        const auto poolOf = [&](int itemId, bool seen[15]) {
-            for (int i = 0; i < 15; ++i) seen[i] = false;
+        const int MG = int(EnchantRegistry::Might),         BS = int(EnchantRegistry::BowShock);
+        const int BD = int(EnchantRegistry::BrightDraw),    NR = int(EnchantRegistry::NeverRun);
+        const int TC = int(EnchantRegistry::TideCall),      BC = int(EnchantRegistry::BiteCall);
+        const int NID = int(EnchantRegistry::EnchantCount); // t960 起 21（1..20；固定 15 数组会越界）
+        // 全 seed 扫池：seen[1..20] = 该物品选项池中出现过的附魔 id（1200 次抽取 → 稀有权重 1 的精准采集 /
+        //   不竭也在池中以概率 1-(1-p)^2400 ≈ 1 覆盖，假阴性率 < e^-30）。
+        const auto poolOf = [&](int itemId, bool *seen) {
+            for (int i = 0; i < NID; ++i) seen[i] = false;
             const int offeredList[3] = {2, 12, 30};
             for (int oi = 0; oi < 3; ++oi)
                 for (int seed = 0; seed < 400; ++seed) {
@@ -12080,9 +12085,9 @@ int main(int argc, char *argv[])
         };
         // 池 ⊆ 允许集 且 期望集全出现（防「过滤过头 → 空池 / 半池」反向回归）。
         const auto poolIs = [&](int itemId, const std::vector<int> &allowed, bool requireAll) {
-            bool seen[15];
+            bool seen[21];
             poolOf(itemId, seen);
-            for (int i = 1; i < 15; ++i) {
+            for (int i = 1; i < NID; ++i) {
                 const bool allowedHas = std::find(allowed.begin(), allowed.end(), i) != allowed.end();
                 if (seen[i] && !allowedHas) return false; // 出现了不允许的（如镐出亡灵杀手 = 用户症状）
                 if (requireAll && allowedHas && !seen[i]) return false; // 允许的没出现（池被砍空）
@@ -12095,8 +12100,10 @@ int main(int argc, char *argv[])
         const std::vector<int> chestPool  = {P, FP, PR, U};                // 胸甲 / 护腿
         const std::vector<int> bootsPool  = {P, FP, PR, U, FF};            // 靴 + 摔落保护
         const std::vector<int> helmPool   = {P, FP, PR, U, AA};            // 头盔 + 水上亲和
+        const std::vector<int> bowPool    = {MG, BS, BD, NR, U};           // t960 弓（专属四件 + 耐久）
+        const std::vector<int> rodPool    = {TC, BC, U};                   // t960 钓竿（专属两件 + 耐久）
         std::vector<int> bookPool;
-        for (int i = 1; i < 15; ++i) bookPool.push_back(i);               // 书 = 全 14 池
+        for (int i = 1; i < NID; ++i) bookPool.push_back(i);              // 书 = 全 20 池
         bool ok = poolIs(diaPick, miningPool, true)
                && poolIs(diaShovel, miningPool, true)
                && poolIs(diaAxe, axePool, true)
@@ -12104,14 +12111,18 @@ int main(int argc, char *argv[])
                && poolIs(diaChest, chestPool, true)
                && poolIs(diaBoots, bootsPool, true)
                && poolIs(diaHelm, helmPool, true)
+               && poolIs(bowId, bowPool, true)                            // t960：弓可附魔（专属池）
+               && poolIs(int(ToolRegistry::FishingRod), rodPool, true)    // t960：钓竿可附魔（专属池）
                && poolIs(bookId, bookPool, true);
-        // 锄 / 弓 / 剪刀 → 恒空池 + 类别 None（附魔台槽 0 拒入的三重门之一）。
-        bool seenHoe[15];
+        // 锄 / 剪刀 → 恒空池 + 类别 None（附魔台槽 0 拒入的三重门之一）；弓 / 钓竿 t960 起类别非 None。
+        bool seenHoe[21];
         poolOf(diaHoe, seenHoe);
-        for (int i = 1; i < 15; ++i) ok = ok && !seenHoe[i];
+        for (int i = 1; i < NID; ++i) ok = ok && !seenHoe[i];
         ok = ok && EnchantRegistry::categoryForItem(diaHoe) == EnchantRegistry::None
-               && EnchantRegistry::selectEnchantsForItem(bowId, 12, 7).isEmpty()
-               && EnchantRegistry::selectEnchantsForItem(shearsId, 12, 7).isEmpty();
+               && EnchantRegistry::categoryForItem(int(ToolRegistry::Shears)) == EnchantRegistry::None
+               && EnchantRegistry::selectEnchantsForItem(shearsId, 12, 7).isEmpty()
+               && EnchantRegistry::categoryForItem(bowId) == EnchantRegistry::BowItem
+               && EnchantRegistry::categoryForItem(int(ToolRegistry::FishingRod)) == EnchantRegistry::RodItem;
         // (b) 桥接 == 直调（同 seed 同产物；防 QML 侧再持副本）。
         const QVariantList viaBridge = hb.selectEnchantsPreviewForItem(diaSword, 17, 4242);
         const QVariantList direct    = EnchantRegistry::selectEnchantsForItem(diaSword, 17, 4242);
@@ -12141,8 +12152,10 @@ int main(int argc, char *argv[])
                           << "| t824 enchant pool filtered per item: pick/shovel subset {eff,silk,fortune,"
                              "unbreaking} (no undead-slay on pick = user symptom), axe adds sharpness-family "
                              "w/o fortune, sword weapon-only, chest w/o feather-fall, boots+feather/helm+aqua, "
-                             "hoe/bow/shears empty + category None, book keeps full 14; bridge==direct; "
-                             "enchantSelected rejects hoe & already-enchanted";
+                             "hoe/shears empty + category None, bow subset {might,bow-shock,bright-draw,"
+                             "never-run,unbreaking} and rod subset {tide-call,bite-call,unbreaking} all "
+                             "present (t960 exclusive pools, categories BowItem/RodItem), book keeps full 20; "
+                             "bridge==direct; enchantSelected rejects hoe & already-enchanted";
     }
 
     // ── t825 锋利最终伤害显示 = 实战同源探针（R19.13；Game 层公式 + Hotbar 桥接）──
@@ -24223,21 +24236,22 @@ Item {
     // ── t959 附魔池随机性收窄探针（R19.17 🅳；Game 层表 + Hotbar 桥接，无 World/QML —— t824 同台先例）──
     //    用户第五轮口径：「书本附魔把很多工具+装甲附魔冲突地混在一起——书附魔池按类别（工具/武器/装甲/书）
     //    收窄 + 冲突组规则（同组互斥如保护系/锋利+截肢系）」。t959 收口：注册表每附魔加 homeCategory
-    //    （EnchantCategory：weapon/tool/armor/universal）+ conflictGroup（=exclusiveGroup 单值形式）；
-    //    selectEnchantsForItem 对书载体先由同一 LCG roll **主类别**（武器/工具/装甲三选一均匀轮——「书」类
-    //    本作暂无专属附魔，t960 弓/竿系预留扩展位），候选收窄到「该类 ∪ 通用（耐久）」；同次产物内同组
+    //    （EnchantCategory：weapon/tool/armor/universal；t960 扩 bow/rod 两类）+ conflictGroup
+    //    （=exclusiveGroup 单值形式）；
+    //    selectEnchantsForItem 对书载体先由同一 LCG roll **主类别**（武器/工具/装甲五选一均匀轮——t959
+    //    起三类，t960 弓/竿系入表扩五类），候选收窄到「该类 ∪ 通用（耐久）」；同次产物内同组
     //    互斥由既有位集抽样（review M1）照旧保证。**单一权威落点**：收窄在 selectEnchantsForItem 内部 =
     //    预告（tierPreviewName → Hotbar::selectEnchantsPreviewForItem）与施放（doEnchant 同桥）共用的那
     //    一层，t917「预告==施放严格同源」契约结构性保持（review28 #3 种子快照序零触碰）。
     //    断言：
-    //    (a) 注册表数据钉 —— 14 条附魔逐 id homeCategory / conflictGroup 与语义表一致（字段齐备；
+    //    (a) 注册表数据钉 —— 20 条附魔逐 id homeCategory / conflictGroup 与语义表一致（字段齐备；
     //        表行多列初始化错位在此必红）；
     //    (b) 书附魔行为腿（offered 2/12/30 × seed 0..399 共 1200 次施法）：
     //        ① 单次产物**无跨类混出**（非通用附魔的 homeCategory 在单次产物内全一致 = 主类别成簇；
     //           旧全池行为「锐锋(武器)+效率(工具)」式跨类产物必现 = 用户症状，阴性轮复现）；
     //        ② 单次产物内部无同组互斥对（conflictsWith 两两判假）；
     //        ③ 产物每条 isApplicableForItem(book)（书载体合法性）+ 等级 ∈ [1,maxLevel]；
-    //        ④ 跨 1200 次施法全 14 附魔都出现（主类别随机轮换 → union 不收窄，长期可达性）；
+    //        ④ 跨 1200 次施法全 20 附魔都出现（主类别随机轮换 → union 不收窄，长期可达性）；
     //        ⑤ 确定性：同 seed 两次施法产物逐条相等（主类别 roll 消耗同一 LCG 流，t917 同源前提）。
     //    (c) 直附面腿 —— 镐/铲 ⊆ {效率,精准,时运,耐久}（**直附工具不出护甲/武器附魔**）且四元全在；
     //        胸甲 ⊆ {保护,火焰保护,弹射物保护,耐久}（不出工具/武器系）——t824 逐物品过滤面不回归。
@@ -24256,26 +24270,31 @@ Item {
         const int FA = int(EnchantRegistry::FireAspect),    P  = int(EnchantRegistry::Protection);
         const int FP = int(EnchantRegistry::FireProtection), PR = int(EnchantRegistry::ProjectileProt);
         const int FF = int(EnchantRegistry::FeatherFall),   AA = int(EnchantRegistry::AquaAffinity);
-        const int WC = int(EnchantRegistry::EnchantCatWeapon), TC = int(EnchantRegistry::EnchantCatTool);
+        const int WC = int(EnchantRegistry::EnchantCatWeapon), TC2 = int(EnchantRegistry::EnchantCatTool);
         const int AC = int(EnchantRegistry::EnchantCatArmor),  UC = int(EnchantRegistry::EnchantCatUniversal);
+        const int BC960 = int(EnchantRegistry::EnchantCatBow), RC960 = int(EnchantRegistry::EnchantCatRod);
+        const int NID = int(EnchantRegistry::EnchantCount); // t960 起 21（1..20；固定 15 数组会越界）
 
-        // (a) 注册表数据钉：id → {homeCategory, conflictGroup} 语义表逐行比对（0 号占位行不在钉内）。
-        const int expectCat[15] = { 0, WC, WC, WC, WC, WC, TC, TC, TC, UC, AC, AC, AC, AC, AC };
-        const int expectGrp[15] = { 0,  1,  1,  1,  0,  0,  2,  2,  2,  0,  3,  3,  3,  3,  0 };
+        // (a) 注册表数据钉：id → {homeCategory, conflictGroup} 语义表逐行比对（0 号占位行不在钉内；
+        //     t960 弓四件 = Bow / 竿两件 = Rod、组 0）。
+        const int expectCat[21] = { 0, WC, WC, WC, WC, WC, TC2, TC2, TC2, UC, AC, AC, AC, AC, AC,
+                                    BC960, BC960, BC960, BC960, RC960, RC960 };
+        const int expectGrp[21] = { 0,  1,  1,  1,  0,  0,   2,   2,   2,  0,  3,  3,  3,  3,   0,
+                                       0,     0,     0,     0,     0,     0 };
         bool okData = true;
-        for (int i = 1; i < 15; ++i)
+        for (int i = 1; i < NID; ++i)
             okData = okData && EnchantRegistry::homeCategory(i) == expectCat[i]
                              && EnchantRegistry::conflictGroup(i) == expectGrp[i];
 
         // (b) 书附魔行为腿：1200 次施法逐产物断言 ①②③ + 累计 ④。
         const int offeredList[3] = { 2, 12, 30 };
         bool okCluster = true, okNoConflict = true, okApplicable = true;
-        bool seenBook[15];
-        for (int i = 0; i < 15; ++i) seenBook[i] = false;
+        bool seenBook[21];
+        for (int i = 0; i < NID; ++i) seenBook[i] = false;
         for (int oi = 0; oi < 3; ++oi) {
             for (int seed = 0; seed < 400; ++seed) {
                 const QVariantList picks = EnchantRegistry::selectEnchantsForItem(bookId, offeredList[oi], seed);
-                if (picks.isEmpty()) { okCluster = false; continue; } // 书池恒非空（任一主类别池 ≥4 条）
+                if (picks.isEmpty()) { okCluster = false; continue; } // 书池恒非空（任一主类别池 ≥3 条）
                 int catSeen = 0;                                      // 本产物已见的非通用主类别（0 = 未定）
                 for (int a = 0; a < picks.size(); ++a) {
                     const QVariantMap ma = picks.at(a).toMap();
@@ -24297,7 +24316,7 @@ Item {
             }
         }
         bool okUnion = true;
-        for (int i = 1; i < 15; ++i) okUnion = okUnion && seenBook[i];   // ④ 全 14 附魔长期仍都可达
+        for (int i = 1; i < NID; ++i) okUnion = okUnion && seenBook[i];   // ④ 全 20 附魔长期仍都可达
         // ⑤ 同 seed 确定性（主类别 roll 在抽样前消耗同一 LCG 流 → 同 seed 恒同产物）。
         const QVariantList p1 = EnchantRegistry::selectEnchantsForItem(bookId, 21, 777);
         const QVariantList p2 = EnchantRegistry::selectEnchantsForItem(bookId, 21, 777);
@@ -24307,8 +24326,8 @@ Item {
                          && p1.at(i).toMap().value(QStringLiteral("level")) == p2.at(i).toMap().value(QStringLiteral("level"));
 
         // (c) 直附面腿：镐/铲 ⊆ 采集池、胸甲 ⊆ 护甲池（subset + requireAll 双向，防过滤过头砍空池）。
-        const auto poolScan = [&](int itemId, bool seen[15]) {
-            for (int i = 0; i < 15; ++i) seen[i] = false;
+        const auto poolScan = [&](int itemId, bool *seen) {
+            for (int i = 0; i < NID; ++i) seen[i] = false;
             for (int oi = 0; oi < 3; ++oi)
                 for (int seed = 0; seed < 400; ++seed) {
                     const QVariantList picks = EnchantRegistry::selectEnchantsForItem(itemId, offeredList[oi], seed);
@@ -24316,9 +24335,9 @@ Item {
                 }
         };
         const auto poolIs = [&](int itemId, const std::vector<int> &allowed) {
-            bool seen[15];
+            bool seen[21];
             poolScan(itemId, seen);
-            for (int i = 1; i < 15; ++i) {
+            for (int i = 1; i < NID; ++i) {
                 const bool allowedHas = std::find(allowed.begin(), allowed.end(), i) != allowed.end();
                 if (seen[i] && !allowedHas) return false;   // 出现不允许的（直附工具出护甲/武器附魔）
                 if (allowedHas && !seen[i]) return false;   // 允许的没出现（池被砍空）
@@ -24348,17 +24367,294 @@ Item {
         if (!ok959) ++totalFail;
         qInfo().noquote() << (ok959 ? "PASS" : "FAIL")
                           << "| t959 enchant pool category narrowing: every enchant carries homeCategory"
-                             " (weapon/tool/armor/universal) + conflictGroup pinned per id; a book cast"
+                             " (weapon/tool/armor/bow/rod/universal - t960 added the bow/rod categories)"
+                             " + conflictGroup pinned per id; a book cast"
                              " first rolls ONE main category from the same LCG stream and draws only"
                              " from that category pool plus universal (unbreaking), so a single cast"
                              " never mixes cross-category lines (the old full-pool union let"
                              " sharpness-family + efficiency + protection coalesce into one book ="
                              " the user symptom), same-group exclusives stay pairwise-absent within a"
-                             " product, all 14 enchants remain reachable across casts (union"
+                             " product, all 20 enchants remain reachable across casts (union"
                              " un-narrowed), same seed reproduces the identical product, direct"
                              " item enchanting keeps the t824 per-item pools (pick/shovel mining-only"
                              " - no armor lines on tools - chest armor-only), and the narrowing lives"
                              " under the Hotbar bridge so preview==cast stays single-source (t917)";
+    }
+
+    // ── P-t960 弓 / 钓竿专属附魔探针（R19.17 🅳；用户第五轮口径「弓（力量/冲击/火矢/无限类）、
+    //    钓竿（海之眷顾/饵钓类）——enchantregistry 扩池 + 适用物品门」；名称全原创，机制对位）──
+    //    注册表扩 6 条（弓四件 id 15-18 主类别 Bow / 竿两件 id 19-20 主类别 Rod，全组 0）+ Category
+    //    加 BowItem/RodItem 位（categoryForItem 弓→BowItem / 钓竿→RodItem；剪刀 / 锄仍 None）+
+    //    kBookMainCats 主类别轮三→五类（t959 预留扩展位生效，书池可出弓 / 竿附魔）。效果接线：
+    //    劲射=endBowDraw 箭伤 +1HP/级；震击/燃箭=Game 层倍率/时长经 spawnArrowPlayer 下传（per-entity
+    //    t505 先例，Entities 不 include Game）；不竭=endBowDraw 免箭消耗（门槛「背包有箭」不变）；
+    //    唤潮/缠咬=useFishingRod 甩竿经 spawnBobber 下传（等待 ×(1−0.2×级) / 判定窗 +0.5s×级——
+    //    kBobberBiteWindowSec=1.0 基值用户口径钉死不动，附加式加宽）。
+    //    断言：
+    //    (a) 注册表数据钉：6 条 id 的 主类别/冲突组/最高等级/权重/显示名 逐字段 vs 语义表；
+    //    (b) 适用物品门（「专属」核心）：弓四件 ⊆ 弓、竿两件 ⊆ 钓竿；剑/镐/护甲/锄/剪刀全拒；
+    //        书载体全过（t959 预留扩展位生效）；耐久扩弓 / 竿位；
+    //    (c) 书池可达腿：800 次施法弓四件 + 竿两件全部出现（主类别五轮换 → 书施法可达）；
+    //    (d) 效果公式数值腿（单一权威 EnchantRegistry 五函数精确值 + 钳制）；
+    //    (e) 唤潮 / 缠咬行为腿（t926 水槽 rig：同格同序号 → 同基线等待，settle 相对 tick ×0.4 同比；
+    //        判定窗 +0.5s → 咬钩→逃走窗长 ∈ [1.4,1.6]s；基线复跑 tick 数相等 = 确定性）；
+    //    (f) 震击 / 燃箭行为腿（t829(b) 直调 spawnArrowPlayer rig：0.8s 量测窗内 −x 位移积分随倍率
+    //        缩放——×6 对基线的确定界天然分离（基线 <2.2 / 高倍率 >5.2 / 间隔 >3.0）；燃箭箭命中后
+    //        isBurningAt 真、基线箭假）；
+    //    (g) Game 层接线源码钉（t927(c) 手法：endBowDraw / useFishingRod 去注释体内五个权威函数调用）。
+    {
+        // (a) 数据钉。
+        const int MG = int(EnchantRegistry::Might),       BS = int(EnchantRegistry::BowShock);
+        const int BD = int(EnchantRegistry::BrightDraw),  NR = int(EnchantRegistry::NeverRun);
+        const int TD = int(EnchantRegistry::TideCall),    BE = int(EnchantRegistry::BiteCall);
+        const int newIds[6]  = { MG, BS, BD, NR, TD, BE };
+        const int newCat[6]  = { int(EnchantRegistry::EnchantCatBow), int(EnchantRegistry::EnchantCatBow),
+                                 int(EnchantRegistry::EnchantCatBow), int(EnchantRegistry::EnchantCatBow),
+                                 int(EnchantRegistry::EnchantCatRod), int(EnchantRegistry::EnchantCatRod) };
+        const int newMax[6]  = { 3, 2, 1, 1, 3, 3 };
+        const int newW[6]    = { 10, 5, 2, 1, 2, 5 };
+        bool okData = int(EnchantRegistry::EnchantCount) == 21
+                      && EnchantRegistry::isEnchant(BE) && !EnchantRegistry::isEnchant(21);
+        for (int i = 0; i < 6; ++i)
+            okData = okData
+                  && EnchantRegistry::homeCategory(newIds[i]) == newCat[i]
+                  && EnchantRegistry::conflictGroup(newIds[i]) == 0          // 全组 0（不竭留待修复系）
+                  && EnchantRegistry::maxLevel(newIds[i]) == newMax[i]
+                  && EnchantRegistry::weight(newIds[i]) == newW[i]
+                  && !EnchantRegistry::displayName(newIds[i]).isEmpty()
+                  // 单类位判定（BookItem 位弓 / 竿 mask 都含，混入会恒真——书载体合法性走 (b) 门腿）
+                  && EnchantRegistry::isApplicable(newIds[i], EnchantRegistry::BowItem) == (i < 4)
+                  && EnchantRegistry::isApplicable(newIds[i], EnchantRegistry::RodItem) == (i >= 4)
+                  && EnchantRegistry::isApplicable(newIds[i], EnchantRegistry::BookItem);
+
+        // (b) 适用物品门（isApplicableForItem 逐物品精判 = 铁砧敲书权威；附魔台走同源池）。
+        const int bowId  = int(ToolRegistry::Bow);
+        const int rodId  = int(ToolRegistry::FishingRod);
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const int diaPick  = int(ToolRegistry::PickaxeDiamond);
+        const int diaHoe   = int(ToolRegistry::DiamondHoe);
+        const int diaChest = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 1;
+        const int bookId   = RecipeRegistry::BookId;
+        bool okGate = EnchantRegistry::categoryForItem(bowId) == EnchantRegistry::BowItem
+                   && EnchantRegistry::categoryForItem(rodId) == EnchantRegistry::RodItem
+                   && EnchantRegistry::categoryForItem(int(ToolRegistry::Shears)) == EnchantRegistry::None
+                   && EnchantRegistry::isApplicableForItem(int(EnchantRegistry::Unbreaking), bowId)
+                   && EnchantRegistry::isApplicableForItem(int(EnchantRegistry::Unbreaking), rodId);
+        for (int i = 0; i < 6; ++i) {
+            okGate = okGate && EnchantRegistry::isApplicableForItem(newIds[i], bookId)   // 书载体全过
+                   && EnchantRegistry::isApplicableForItem(newIds[i], bowId) == (i < 4)  // 弓四件只上弓
+                   && EnchantRegistry::isApplicableForItem(newIds[i], rodId) == (i >= 4);// 竿两件只上钓竿
+            const int others[5] = { diaSword, diaPick, diaHoe, diaChest, int(ToolRegistry::Shears) };
+            for (int o = 0; o < 5; ++o)
+                okGate = okGate && !EnchantRegistry::isApplicableForItem(newIds[i], others[o]);
+        }
+
+        // (c) 书池可达腿：800 次施法（主类别五轮换）弓四件 + 竿两件全部出现。
+        bool seenBook[21];
+        for (int i = 0; i < 21; ++i) seenBook[i] = false;
+        for (int seed = 0; seed < 800; ++seed) {
+            const QVariantList picks = EnchantRegistry::selectEnchantsForItem(bookId, 12 + (seed % 19), seed);
+            for (const QVariant &v : picks) seenBook[v.toMap().value(QStringLiteral("id")).toInt()] = true;
+        }
+        bool okBook = true;
+        for (int i = 0; i < 6; ++i) okBook = okBook && seenBook[newIds[i]];
+
+        // (d) 效果公式数值腿（单一权威精确值；改数值此处必红，接线与显示共读一式）。
+        const auto close = [](float got, float expect) { return std::abs(got - expect) < 1e-4f; };
+        bool okForm = EnchantRegistry::bowArrowDamage(6, 0) == 6
+                   && EnchantRegistry::bowArrowDamage(6, 1) == 7
+                   && EnchantRegistry::bowArrowDamage(6, 3) == 9
+                   && EnchantRegistry::bowArrowDamage(1, 2) == 3
+                   && EnchantRegistry::bowArrowDamage(6, -2) == 6          // 负级防御钳 0
+                   && close(EnchantRegistry::bowKnockbackMultiplier(0), 1.0f)
+                   && close(EnchantRegistry::bowKnockbackMultiplier(1), 2.0f)
+                   && close(EnchantRegistry::bowKnockbackMultiplier(2), 3.0f)
+                   && close(EnchantRegistry::bowIgniteSeconds(0), 0.0f)
+                   && close(EnchantRegistry::bowIgniteSeconds(1), 5.0f)
+                   && close(EnchantRegistry::bowIgniteSeconds(3), 5.0f)    // max 1 → 恒 5s
+                   && close(EnchantRegistry::rodWaitScale(0), 1.0f)
+                   && close(EnchantRegistry::rodWaitScale(1), 0.8f)
+                   && close(EnchantRegistry::rodWaitScale(3), 0.4f)
+                   && close(EnchantRegistry::rodWaitScale(5), 0.4f)        // 钳 [0,3]
+                   && close(EnchantRegistry::rodBiteWindowExtra(0), 0.0f)
+                   && close(EnchantRegistry::rodBiteWindowExtra(1), 0.5f)
+                   && close(EnchantRegistry::rodBiteWindowExtra(3), 1.5f)
+                   && close(EnchantRegistry::rodBiteWindowExtra(5), 1.5f); // 钳 [0,3]
+
+        // (e) 唤潮 / 缠咬行为腿（t926 同款水槽；同格同序号 → 同基线确定性等待，缩放腿免算哈希内部值）。
+        World wL;
+        wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(82);
+        EntityManager entsL;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickL = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) entsL.tick(qreal(dt), &wL, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wL.setBlock(x, fy, z, BR::Stone, 0);
+                wL.setBlock(x, fy + 1, z, BR::Water, 0); // 3×3 水池（t884(a)/t926 同款）
+            }
+        // 甩竿 → settle（入水浮定）/ 首咬 / 逃走 tick 数。等待腿用 **settle 相对** tick（spawn→settle 的
+        //   落 tide 段不随缩放变，spawn 相对比会把常量落水时间算进比例——首轮实测正是此坑）。
+        //   serial 恒 961 → 同格同基线等待。
+        const auto castAndWatch = [&](float scale, float extra, bool waitEscape,
+                                      int *settleOut, int *biteOut, int *escOut) {
+            *settleOut = *biteOut = *escOut = -1;
+            const int b = entsL.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0),
+                                            961, scale, extra);
+            for (int t = 1; b >= 0 && t <= 800; ++t) {
+                tickL(1, 0.05f);
+                if (*settleOut < 0 && entsL.bobberInWaterAt(b)) *settleOut = t;
+                const bool has = entsL.aliveAt(b) && entsL.bobberHasBiteAt(b);
+                if (*biteOut < 0 && has) *biteOut = t;
+                if (*biteOut >= 0 && *escOut < 0 && !has) *escOut = t;
+                if (*escOut >= 0) break;                 // 窗腿：逃走窗关即收
+                if (*biteOut >= 0 && !waitEscape) break; // 等待腿：咬钩即收
+            }
+            if (b >= 0) entsL.removeEntityAt(b);
+        };
+        int baseSettle = -1, baseBite = -1, baseEsc = -1;
+        int tideSettle = -1, tideBite = -1, tideEsc = -1;
+        int againSettle = -1, againBite = -1, againEsc = -1;
+        int wideSettle = -1, wideBite = -1, wideEsc = -1;
+        castAndWatch(1.0f, 0.0f, false, &baseSettle, &baseBite, &baseEsc);   // 基线等待
+        castAndWatch(0.4f, 0.0f, false, &tideSettle, &tideBite, &tideEsc);   // 唤潮 III（×0.4）
+        castAndWatch(1.0f, 0.0f, false, &againSettle, &againBite, &againEsc);// 基线复跑（确定性）
+        castAndWatch(1.0f, 0.5f, true, &wideSettle, &wideBite, &wideEsc);    // 缠咬 I（窗 +0.5s）
+        const int baseWait = (baseSettle >= 0 && baseBite > baseSettle) ? baseBite - baseSettle : -1;
+        const int tideWait = (tideSettle >= 0 && tideBite > tideSettle) ? tideBite - tideSettle : -1;
+        const int againWait = (againSettle >= 0 && againBite > againSettle) ? againBite - againSettle : -2;
+        const bool okTide = baseWait > 0 && tideWait > 0 && againWait == baseWait
+                         && std::abs(float(tideWait) - 0.4f * float(baseWait)) <= 1.2f;
+        const float wideWinSec = (wideBite > 0 && wideEsc > wideBite)
+                                     ? float(wideEsc - wideBite) * 0.05f : -1.0f;
+        const bool okBite = wideWinSec >= 1.4f && wideWinSec <= 1.6f; // 基线 1.0s 由 P-t926 行为腿钉死
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wL.setBlock(x, fy + 1, z, BR::Air, 0);
+                wL.setBlock(x, fy, z, BR::Air, 0);
+            }
+
+        // (f) 震击 / 燃箭行为腿（独立实体管理器同一世界）。**天空台**（y=92，天然地形远在其下——
+        //     t799 rig 教训：地面坐标可能撞世界生成地形，猪被挤出台外落自然地表、弹道被台阶挡）；
+        //     台上两格显式清空保证净空。短窗抢拍 t836(d) 口径：settle 3 + 飞行 2 tick ≪ 首游荡窗 30 tick。
+        //     箭速 24 b/s → 逐帧采样步 1.2 格 < 命中盒宽 1.6（外扩 kArrowHitHalfW=0.4 + 猪半宽 0.4 →
+        //     ±0.8，防高速逐帧采样跳过猪体——隧道效应）；2 tick 重力落差 0.21 格 ≪ 半身高 → 定平射命中。
+        //     量测窗 = 命中后 0.8s（16 tick）：击退速度 v0 = kKnockbackHoriz(4.5)×倍率、衰减率 4/s →
+        //     位移积分 ≈ 1.103×倍率（基线 ×1 → ~1.06 / 倍管 ×6 → ~6.36）。AI 游走是窗内**固定随机向**
+        //     （kWanderMin=2.0s > 窗长）≤0.8 格噪声、击退恒沿箭向（−x）→ 量 −x 向位移取确定界：
+        //     base ∈ [0.25, 1.95] / shock ∈ [5.5, 7.5]（最坏界含游走极值仍不相交，间隔断言 3.0 余量
+        //     ≥0.56 —— ×2 倍率首版与游走噪声同量级导致偶发假红，改 ×6 对比后界间天然分离）。
+        //     各跑 2 次取 base max / shock min 进一步压噪。倍率数值本体已由 (d) 形式腿钉死，本腿证
+        //     spawn→实体载荷→命中击退 全链随倍率缩放。
+        EntityManager entsA;
+        const auto tickA = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) entsA.tick(qreal(dt), &wL, farL, 0.3f, 1.8f, false);
+        };
+        for (int x = 16; x <= 26; ++x)
+            for (int z = 18; z <= 22; ++z) {
+                wL.setBlock(x, 92, z, BR::Stone, 0); // 天空台面（猪脚位 y=93）
+                wL.setBlock(x, 93, z, BR::Air, 0);   // 台上净空显式清（防世界生成残留）
+                wL.setBlock(x, 94, z, BR::Air, 0);
+            }
+        const auto shootPig = [&](float kbMul, float igniteSec, float *dispOut, bool *burnOut) {
+            *dispOut = -1.0f; *burnOut = false;
+            const int pig = entsA.spawnMobTyped(21, 93, 20, EntityManager::MobPig,
+                                                QStringLiteral("#e8a0a0"), 10);
+            if (pig < 0) return;
+            // settle 8 tick：落地/resting 需 ~4-5 tick（3 tick 会恰好抓在空中下落半程 → pp.y 偏低 →
+            //   箭按它平射首 tick 即切进台面格嵌入，永不碰猪——首轮实测根因）。仍 ≪ 首游荡窗 30 tick。
+            tickA(8, 0.05f);
+            const QVector3D pp = entsA.posAt(pig);
+            entsA.spawnArrowPlayer(QVector3D(pp.x() + 2.5f, pp.y(), pp.z()),
+                                   QVector3D(-24.0f, 0.0f, 0.0f), 2, kbMul, igniteSec);
+            int guard = 0;
+            while (guard++ < 60) {
+                bool arrowGone = true;
+                for (int i = 0; i < entsA.count(); ++i)
+                    if (entsA.aliveAt(i) && entsA.kindAt(i) == int(EntityManager::Arrow)) { arrowGone = false; break; }
+                if (arrowGone) break; // 命中帧（命中即移除）
+                tickA(1, 0.05f);
+            }
+            const float hitX = entsA.posAt(pig).x();
+            *burnOut = entsA.isBurningAt(pig);
+            tickA(16, 0.05f); // 0.8s 量测窗：击退全程衰减 + 覆盖多个 AI 时间片
+            *dispOut = hitX - entsA.posAt(pig).x(); // −x 向位移（击退恒沿箭向 = −x；游走随机向为噪）
+            entsA.removeEntityAt(pig);
+        };
+        float dB1 = -1.0f, dB2 = -1.0f, dS1 = -1.0f, dS2 = -1.0f, dTmp = -1.0f;
+        bool burnBase = true, burnFlame = false;
+        shootPig(1.0f, 0.0f, &dB1, &burnBase);        // 基线 #1：不点燃
+        shootPig(6.0f, 0.0f, &dS1, &burnFlame);       // 高倍率 #1（链路缩放腿）
+        shootPig(1.0f, 0.0f, &dB2, &burnFlame);       // 基线 #2
+        shootPig(6.0f, 0.0f, &dS2, &burnFlame);       // 高倍率 #2
+        shootPig(1.0f, 5.0f, &dTmp, &burnFlame);      // 燃箭（点燃腿；位移不读）
+        const float dBMax = std::max(dB1, dB2), dSMin = std::min(dS1, dS2);
+        const bool okArrow = dBMax > 0.2f && dBMax < 2.2f && dSMin > 5.2f
+                          && (dSMin - dBMax) > 3.0f
+                          && !burnBase && burnFlame;
+        for (int x = 16; x <= 26; ++x)
+            for (int z = 18; z <= 22; ++z)
+                wL.setBlock(x, 92, z, BR::Air, 0);
+
+        // (g) Game 层接线源码钉（t927(c) 手法：去注释函数体内五个权威函数调用——行为级不可达的
+        //     endBowDraw 蓄力链 / useFishingRod 甩竿参数由源钉锁接线，数值本体已由 (d) 钉死）。
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString pcPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                        QStringLiteral("src/Game/playercontroller.cpp"));
+            QFile f(pcPath);
+            if (f.open(QIODevice::ReadOnly)) {
+                const QString t = QString::fromUtf8(f.readAll());
+                const auto body = [&](const char *from, const char *to) {
+                    const int b0 = t.indexOf(QLatin1String(from));
+                    const int b1 = t.indexOf(QLatin1String(to));
+                    QString out;
+                    if (b0 < 0 || b1 <= b0) return out;
+                    for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n'))) {
+                        if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                        out += line; out += QLatin1Char('\n');
+                    }
+                    return out;
+                };
+                const QString bowBody = body("void PlayerController::endBowDraw()",
+                                             "void PlayerController::cancelBowDraw()");
+                const QString rodBody = body("void PlayerController::useFishingRod()",
+                                             "void PlayerController::updateFishing");
+                okPin = bowBody.contains(QStringLiteral("EnchantRegistry::bowArrowDamage"))
+                     && bowBody.contains(QStringLiteral("EnchantRegistry::NeverRun"))
+                     && bowBody.contains(QStringLiteral("EnchantRegistry::bowKnockbackMultiplier"))
+                     && bowBody.contains(QStringLiteral("EnchantRegistry::bowIgniteSeconds"))
+                     && rodBody.contains(QStringLiteral("EnchantRegistry::rodWaitScale"))
+                     && rodBody.contains(QStringLiteral("EnchantRegistry::rodBiteWindowExtra"));
+            }
+        }
+
+        const bool ok960 = okData && okGate && okBook && okForm && okTide && okBite && okArrow && okPin;
+        if (!ok960)
+            qInfo().noquote() << "  t960 diag: data" << okData << "gate" << okGate << "book" << okBook
+                              << "form" << okForm << "tide" << okTide
+                              << "waits base/tide/again" << baseWait << tideWait << againWait
+                              << "biteWin" << wideWinSec << "arrow" << okArrow
+                              << "dBMax" << dBMax << "dSMin" << dSMin
+                              << "burnBase" << burnBase << "burnFlame" << burnFlame << "pin" << okPin;
+        if (!ok960) ++totalFail;
+        qInfo().noquote() << (ok960 ? "PASS" : "FAIL")
+                          << "| t960 bow/rod exclusive enchantments: registry grows to 20 with the bow"
+                             " line (might +1HP/lv arrow damage, bow-shock x2/lv arrow knockback,"
+                             " bright-draw ignite-on-hit 5s, never-run no-arrow-consumption) and the"
+                             " rod line (tide-call wait x(1-0.2lv) faster bites, bite-call +0.5s/lv"
+                             " reel window on top of the pinned 1.0s base), all conflict-group 0;"
+                             " applicability gate is strict-exclusive (bow lines only on the bow, rod"
+                             " lines only on the rod, every other item refused, book carrier passes -"
+                             " the t959 main-category wheel grows 3->5 so book casts reach all six);"
+                             " single-authority formulas pinned numerically; behavioral legs: same-cell"
+                             " same-serial bobber wait shrinks x0.4 with determinism, +0.5s window"
+                             " measures 1.4-1.6s bite->escape, shock arrow pushes ~x2 baseline"
+                             " displacement and flame arrow leaves isBurning true (baseline false);"
+                             " endBowDraw/useFishingRod wiring pinned at source (t927(c) precedent)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
