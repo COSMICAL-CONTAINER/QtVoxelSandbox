@@ -46,12 +46,20 @@ constexpr float kHy = 0.5f / BlockRegistry::kAtlasTilePx;
 //   ——火把细柱采 torch 瓦片中央列带用；默认满窗）。bounds 累计实际顶点范围。
 //   t925 sideAltTile/sideAltMask：按面覆写瓦片（mask 第 f 位置 1 → 第 f 面用 sideAltTile）——门族薄侧边
 //   用同族基材瓦片（t674 mesher 同规则）免「压缩门贴图」观感；默认 -1/0 全不覆写（既有调用零改动）。
+//   t969 capTopV0..1 / capBotV0..1：端面 v 窗覆写（f=2 顶 / f=3 底；负值哨兵 = 沿用共享 wv 窗，既有
+//   调用零改动）。动机 = 火把端面垃圾窗：共享窗 v 满高（含瓦片上下透明行）铺到 2/16 见方端面上，端面
+//   把整条瓦片竖条压扁成一片「悬空碎屑」——透明行被 Mask 丢弃后端面漏出背景底色（用户观感「中间悬空
+//   黑色部分」），且侧脸可见内容止于内容带内、端面仍落盒底真边 → 碎屑与柄身之间隔一条透明断口（悬空
+//   感本体）。覆写后端面只采内容带内与该端相邻的 2px 色带（顶=焰带 / 底=柄木带），与端面侧面内容同色
+//   延续——两端色带不同（焰/木），故顶底各持一对。
 void addShapeBox(std::vector<ShapeVtx> &verts, std::vector<quint32> &idx,
                  float x0, float y0, float z0, float x1, float y1, float z1,
                  int topTile, int bottomTile, int sideTile, float yShift,
                  QVector3D &bMin, QVector3D &bMax,
                  float wu0 = 0.0f, float wu1 = 1.0f, float wv0 = 0.0f, float wv1 = 1.0f,
-                 int sideAltTile = -1, unsigned sideAltMask = 0u)
+                 int sideAltTile = -1, unsigned sideAltMask = 0u,
+                 float capTopV0 = -1.0f, float capTopV1 = -1.0f,
+                 float capBotV0 = -1.0f, float capBotV1 = -1.0f)
 {
     // cell-local [0,1]³ → 原点居中系：X/Z 平移 −0.5（满格 footprint 即 ±0.5；BlockCube 同基准），Y 用
     //   yShift 形心居中（各形状自身高度中点，图标 y_mid 同口径）。
@@ -67,8 +75,13 @@ void addShapeBox(std::vector<ShapeVtx> &verts, std::vector<quint32> &idx,
         const float tu1 = float(tile + 1) * kTileW - kHx;
         const float u0 = tu0 + wu0 * (tu1 - tu0);
         const float u1 = tu0 + wu1 * (tu1 - tu0);
-        const float v0 = kHy + wv0 * (1.0f - 2.0f * kHy);
-        const float v1 = kHy + wv1 * (1.0f - 2.0f * kHy);
+        // t969：±Y 端面 v 窗覆写（capTopV/capBotV 哨兵 ≥0 生效；侧四脸恒用共享 wv 窗）。
+        const float wva = (f == 2 && capTopV0 >= 0.0f) ? capTopV0
+                        : (f == 3 && capBotV0 >= 0.0f) ? capBotV0 : wv0;
+        const float wvb = (f == 2 && capTopV1 >= 0.0f) ? capTopV1
+                        : (f == 3 && capBotV1 >= 0.0f) ? capBotV1 : wv1;
+        const float v0 = kHy + wva * (1.0f - 2.0f * kHy);
+        const float v1 = kHy + wvb * (1.0f - 2.0f * kHy);
         const quint32 b = base + quint32(f * 4);
         for (int c = 0; c < 4; ++c) {
             const FaceCorner &fc = kFaceCorners[f][c];
@@ -211,12 +224,28 @@ void ItemShapeGeometry::rebuild()
 
     if (m_blockId == int(BlockRegistry::Torch)) {
         // 火把细立柱：2/16 见方 × 10/16 高（世界内火把模型量级）。贴图 torch 瓦片**中央列带**子窗
-        //   （u [7/16,9/16] 火把本体柱、v 满高含焰头）侧/顶/底同窗（火把 def 各面 = torch(17)；整瓦片
-        //   直铺会把 16px 宽透明底压进 2/16 窄面成碎条——子窗只采火把像素）。形心居中 yShift=-5/16。
+        //   （u [7/16,9/16] 火把本体柱）侧/顶/底同窗（火把 def 各面 = torch(17)；整瓦片直铺会把 16px
+        //   宽透明底压进 2/16 窄面成碎条——子窗只采火把像素）。形心居中 yShift=-5/16。
+        //   t969 v 窗收正到**内容带**（用户第五轮「中间悬空黑色部分」）：旧侧脸 v 满高 [0,1]——瓦片
+        //   row0 与 row14..15 是透明底，Mask 丢弃后侧脸上下各留一段被裁的死带，盒底真边与柄身可见
+        //   内容之间出现透明断口；±Y 端面又把含透明行的整条竖带压扁成 2/16 见方碎片，悬在断口下方
+        //   露背景底色 = 「悬空黑色部分」。修 = 侧脸 v 窗收正到不透明内容带（焰头+柄木，上下零死带）；
+        //   ±Y 端面经 capV 覆写采与该端相邻的 2px 内容色带（顶=焰带 / 底=柄木带，机制等价 MC 火把方块
+        //   模型端面采样柄截面），端面永不含透明行、不再悬空。
+        //   ⚠ V 朝向契约（lessons-learned t489 像素级实测）：**图像顶 ↔ v=1**（上传翻转）——下述窗口
+        //   全按「v = 1 − 图像行/16」折算（如瓦片图像 row1..2 = v [13/16,15/16]），勿按行号直写。
+        //   数值随 build_torch.py 画稿锚定（内容图像 row1..13；改画稿须同步）。
         constexpr float kT0 = 7.0f / 16.0f, kT1 = 9.0f / 16.0f, kHh = 10.0f / 16.0f;
         constexpr float kWu0 = 7.0f / 16.0f, kWu1 = 9.0f / 16.0f;
+        constexpr float kWv0 = 2.0f / 16.0f, kWv1 = 15.0f / 16.0f;        // 内容带（图像 row1..13）
+        // 端面窗**必须全窗不透明**（焰尖 row1 只占 x7 单列、x8 透明——任何含焰行的端面窗中央必有
+        //   透明孔 → Mask 丢弃 → 端面中央黑斑）。故顶/底端面都采柄木**全双列不透明**带（机制等价
+        //   MC 火把方块模型 up 面采 [7,6]..[9,8] 柄顶截面）：
+        constexpr float kCapV0 = 8.0f / 16.0f, kCapV1 = 10.0f / 16.0f;    // 顶端面：柄顶木带（图像 row6..7）
+        constexpr float kCapV2 = 2.0f / 16.0f, kCapV3 = 4.0f / 16.0f;     // 底端面：柄底木带（图像 row12..13）
         addShapeBox(verts, idx, kT0, 0.0f, kT0, kT1, kHh, kT1,
-                    topT, botT, sideT, -kHh * 0.5f, bMin, bMax, kWu0, kWu1, 0.0f, 1.0f);
+                    topT, botT, sideT, -kHh * 0.5f, bMin, bMax, kWu0, kWu1, kWv0, kWv1,
+                    -1, 0u, kCapV0, kCapV1, kCapV2, kCapV3);
     } else if (m_blockId == int(BlockRegistry::EnchantingTable)) {
         // 附魔台 0.75 矮盒（def shape=ShapeFull 但世界内走 mesher 显式 0.75 盒——本类同款；侧瓦片图集
         //   已裁顶 0.25 空白 → 整张贴 0.75 高侧面）。形心居中 -0.375。台顶悬浮书由 QML 叠 EnchantBookBox。
