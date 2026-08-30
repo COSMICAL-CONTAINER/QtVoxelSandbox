@@ -1079,148 +1079,162 @@ Item {
             // t606⑤：框宽收窄对齐槽行（376→176）+ 背景调浅（#2a2018 深棕 → #3a3226 浅棕）+ 文字垂直居中
             //   （TextInput anchors.fill 与 anchors.verticalCenter 叠用无效 → 文字贴顶；改 verticalAlignment）。
             // t626①：操作区 150→134（面板高度压缩批；改名框上距 4→2、槽行上距 16→10）。
+            // t958：操作内容垂直居中（用户第五轮「改名栏与 A+B→C 下方空一行——面板内容垂直居中」）——
+            //   旧布局操作内容整块 top 钉死在 anvilArea 顶（改名框 topMargin 2 起步），内容自然底 ~y110
+            //   落在 134 高的操作区内 → 底部恒留 ~24px 空行（上挤下空）。修 = 改名框 + A+B→C 槽行 +
+            //   等级/冲突提示行包进 opBlock 内容块（width 随操作区、height = 内容自然高 108），整块
+            //   anchors.verticalCenter 钉操作区中线 → 上下留白均分（各 13px）。块内锚关系逐字未动
+            //   （改名框/槽行/等级行相对位置刚性保持，仅整块平移）；flash 叠层仍在块外铺满整个操作区。
             Item {
                 id: anvilArea
                 width: parent.width
                 height: 134
 
-                // ── 改名框（t577 顶部；t606⑤ 收窄调浅居中；t626① 上距 2）── TextInput + 持焦时 Esc 关面板（规格⑥）。
-                //   t606②：放入物品自动填名（onAnvilRevChanged），框内恒真文本可编辑，无占位层。
-                Rectangle {
-                    id: renameBox
-                    anchors.top: parent.top; anchors.topMargin: 2
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: 176; height: 26
-                    color: "#3a3226"
-                    border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a"
-                                  : nameInput.activeFocus ? "#8a7a5a" : "#141008"
-                    border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2
-                                  : nameInput.activeFocus ? 2 : 1
-                    radius: 3
-                    TextInput {
-                        id: nameInput
-                        anchors.fill: parent
-                        anchors.leftMargin: 8; anchors.rightMargin: 8
-                        color: "#ffe6a8"; font.pixelSize: 12
-                        verticalAlignment: TextInput.AlignVCenter   // t606⑤ 文字垂直居中（原贴顶）
-                        selectByMouse: true
-                        maximumLength: 20
-                        clip: true
-                        onTextEdited: root.renameName = text
-                        // 规格⑥：改名框持焦时 Esc 由输入框自己处理 → 关面板（closeAnvil → grab + 焦点回键位层），
-                        //   不吞键（其余按键正常进输入框打字）。仿聊天输入框 Keys 处理（chatInput Keys.onPressed）。
-                        Keys.onPressed: (event) => {
-                            if (event.key === Qt.Key_Escape) {
-                                window.closeAnvil()
-                                event.accepted = true
-                            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                if (root.activeOp !== "" && root.affordCost) {
-                                    root.takeProduct()
+                // ── t958 操作内容块（改名框 + A+B→C 槽行 + 等级/冲突提示行）：垂直居中于操作区 ──
+                Item {
+                    id: opBlock
+                    width: parent.width
+                    height: 108
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    // ── 改名框（t577 顶部；t606⑤ 收窄调浅居中；t958 归块顶，上距由居中留白承担）── TextInput + 持焦时 Esc 关面板（规格⑥）。
+                    //   t606②：放入物品自动填名（onAnvilRevChanged），框内恒真文本可编辑，无占位层。
+                    Rectangle {
+                        id: renameBox
+                        anchors.top: parent.top
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 176; height: 26
+                        color: "#3a3226"
+                        border.color: (root.renaming && root.affordCost && root.activeOp !== "") ? "#ffd87a"
+                                      : nameInput.activeFocus ? "#8a7a5a" : "#141008"
+                        border.width: (root.renaming && root.affordCost && root.activeOp !== "") ? 2
+                                      : nameInput.activeFocus ? 2 : 1
+                        radius: 3
+                        TextInput {
+                            id: nameInput
+                            anchors.fill: parent
+                            anchors.leftMargin: 8; anchors.rightMargin: 8
+                            color: "#ffe6a8"; font.pixelSize: 12
+                            verticalAlignment: TextInput.AlignVCenter   // t606⑤ 文字垂直居中（原贴顶）
+                            selectByMouse: true
+                            maximumLength: 20
+                            clip: true
+                            onTextEdited: root.renameName = text
+                            // 规格⑥：改名框持焦时 Esc 由输入框自己处理 → 关面板（closeAnvil → grab + 焦点回键位层），
+                            //   不吞键（其余按键正常进输入框打字）。仿聊天输入框 Keys 处理（chatInput Keys.onPressed）。
+                            Keys.onPressed: (event) => {
+                                if (event.key === Qt.Key_Escape) {
+                                    window.closeAnvil()
                                     event.accepted = true
+                                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    if (root.activeOp !== "" && root.affordCost) {
+                                        root.takeProduct()
+                                        event.accepted = true
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // A + B → C 槽行（t576：A/B 间「+」号；t606① 上距 8→16 下移；t626① 上距 16→10 压高批微收）。
-                Item {
-                    id: slotRow
-                    anchors.top: renameBox.bottom; anchors.topMargin: 10
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: 176
-                    height: 40
-
-                    // 左输入槽（anvil 组 index 0；武器 / 工具 / 护甲）。
+                    // A + B → C 槽行（t576：A/B 间「+」号；t606① 上距 8→16 下移；t626① 上距 16→10 压高批微收）。
                     Item {
-                        x: 0; y: 0
-                        width: root.slotSize; height: root.slotSize
-                        AnvilSlot {
-                            anchors.fill: parent
-                            group: "anvil"; index: 0
-                            // qml-touch：槽内容读数组 + anvilRev 触碰参与返回（数组写入不触发绑定，需 rev 触碰）。
-                            slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[0] || 0) : 0 }
-                            slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[0] || 0) : 0 }
-                            slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilDur[0] || 0) : 0 }
-                            slotEnch: { const _r = root.anvilRev; return _r >= 0 ? (root.enchAt(0)) : [0, 0, 0, 0] }
+                        id: slotRow
+                        anchors.top: renameBox.bottom; anchors.topMargin: 10
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 176
+                        height: 40
+
+                        // 左输入槽（anvil 组 index 0；武器 / 工具 / 护甲）。
+                        Item {
+                            x: 0; y: 0
+                            width: root.slotSize; height: root.slotSize
+                            AnvilSlot {
+                                anchors.fill: parent
+                                group: "anvil"; index: 0
+                                // qml-touch：槽内容读数组 + anvilRev 触碰参与返回（数组写入不触发绑定，需 rev 触碰）。
+                                slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[0] || 0) : 0 }
+                                slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[0] || 0) : 0 }
+                                slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilDur[0] || 0) : 0 }
+                                slotEnch: { const _r = root.anvilRev; return _r >= 0 ? (root.enchAt(0)) : [0, 0, 0, 0] }
+                            }
+                        }
+                        // t576「+」号（A + B 两输入合并语义；配色同箭头灰）。
+                        Text {
+                            x: root.slotSize + 2; y: 0
+                            width: 14; height: root.slotSize
+                            text: "+"
+                            color: "#8a8a8a"; font.pixelSize: 20; font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        // 右输入槽（anvil 组 index 1；材料：铁锭等修复材料 / 附魔书 / t578 同物合并第二件）。
+                        Item {
+                            x: root.slotSize + 16; y: 0
+                            width: root.slotSize; height: root.slotSize
+                            AnvilSlot {
+                                anchors.fill: parent
+                                group: "anvil"; index: 1
+                                slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[1] || 0) : 0 }
+                                slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[1] || 0) : 0 }
+                                // t792：补 slotDur 绑定（原漏 → 同物合并第二件工具入 B 槽不显耐久条；写法同 A 槽）。
+                                slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilDur[1] || 0) : 0 }
+                                slotEnch: { const _r = root.anvilRev; return _r >= 0 ? (root.enchAt(1)) : [0, 0, 0, 0] }
+                            }
+                        }
+                        // 左→中箭头（输入流向产物）。
+                        Canvas {
+                            x: root.slotSize * 2 + 24; y: root.slotSize / 2 - 8
+                            width: 24; height: 16
+                            onPaint: {
+                                const ctx = getContext("2d"); ctx.reset()
+                                ctx.imageSmoothingEnabled = false
+                                ctx.fillStyle = "#8a8a8a"
+                                ctx.fillRect(0, 6, 16, 4)
+                                ctx.beginPath()
+                                ctx.moveTo(16, 0); ctx.lineTo(24, 8); ctx.lineTo(16, 16); ctx.closePath()
+                                ctx.fill()
+                            }
+                        }
+                        // 产物槽（anvil 组 index 2；preview 只显产物预览，点它取产物）。绿框提示可出产物。
+                        Item {
+                            x: root.slotSize * 2 + 56; y: 0
+                            width: root.slotSize; height: root.slotSize
+                            AnvilSlot {
+                                anchors.fill: parent
+                                group: "anvil"; index: 2
+                                preview: true
+                                slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.productId) : 0 }
+                                slotCount: 1
+                                slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.productDur) : 0 }
+                                slotEnch: root.productEnch
+                            }
                         }
                     }
-                    // t576「+」号（A + B 两输入合并语义；配色同箭头灰）。
+
+                    // 产物槽下等级绿字（规格⑤：等级显示在产物格下绿字；t576 无产物 → 静默空白（删灰字提示）；
+                    //   t606⑥ 改名不再带产物名——只显消耗「重命名 N 级」，名字在输入框 + 产物 tooltip 已有）。
                     Text {
-                        x: root.slotSize + 2; y: 0
-                        width: 14; height: root.slotSize
-                        text: "+"
-                        color: "#8a8a8a"; font.pixelSize: 20; font.bold: true
+                        anchors.top: slotRow.bottom; anchors.topMargin: 2
+                        anchors.horizontalCenter: slotRow.horizontalCenter
+                        anchors.horizontalCenterOffset: root.slotSize + 38   // 对准产物槽（槽心 = 行心 + 78）
+                        text: root.costText
+                        color: root.costColor
+                        font.pixelSize: 12; font.bold: true
+                        visible: text.toString().length > 0
+                    }
+
+                    // t615 冲突 / 不适用红字提示行（等级行下方；merge 时书上未写入的附魔逐条列出）。
+                    Text {
+                        anchors.top: slotRow.bottom; anchors.topMargin: 20
+                        anchors.horizontalCenter: slotRow.horizontalCenter
+                        width: slotRow.width + 60
                         horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Text.WrapAnywhere
+                        text: root.mergeConflictText
+                        color: "#e08a7f"
+                        font.pixelSize: 9
+                        visible: text.toString().length > 0
                     }
-                    // 右输入槽（anvil 组 index 1；材料：铁锭等修复材料 / 附魔书 / t578 同物合并第二件）。
-                    Item {
-                        x: root.slotSize + 16; y: 0
-                        width: root.slotSize; height: root.slotSize
-                        AnvilSlot {
-                            anchors.fill: parent
-                            group: "anvil"; index: 1
-                            slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilSlots[1] || 0) : 0 }
-                            slotCount: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilCounts[1] || 0) : 0 }
-                            // t792：补 slotDur 绑定（原漏 → 同物合并第二件工具入 B 槽不显耐久条；写法同 A 槽）。
-                            slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.anvilDur[1] || 0) : 0 }
-                            slotEnch: { const _r = root.anvilRev; return _r >= 0 ? (root.enchAt(1)) : [0, 0, 0, 0] }
-                        }
-                    }
-                    // 左→中箭头（输入流向产物）。
-                    Canvas {
-                        x: root.slotSize * 2 + 24; y: root.slotSize / 2 - 8
-                        width: 24; height: 16
-                        onPaint: {
-                            const ctx = getContext("2d"); ctx.reset()
-                            ctx.imageSmoothingEnabled = false
-                            ctx.fillStyle = "#8a8a8a"
-                            ctx.fillRect(0, 6, 16, 4)
-                            ctx.beginPath()
-                            ctx.moveTo(16, 0); ctx.lineTo(24, 8); ctx.lineTo(16, 16); ctx.closePath()
-                            ctx.fill()
-                        }
-                    }
-                    // 产物槽（anvil 组 index 2；preview 只显产物预览，点它取产物）。绿框提示可出产物。
-                    Item {
-                        x: root.slotSize * 2 + 56; y: 0
-                        width: root.slotSize; height: root.slotSize
-                        AnvilSlot {
-                            anchors.fill: parent
-                            group: "anvil"; index: 2
-                            preview: true
-                            slotId: { const _r = root.anvilRev; return _r >= 0 ? (root.productId) : 0 }
-                            slotCount: 1
-                            slotDur: { const _r = root.anvilRev; return _r >= 0 ? (root.productDur) : 0 }
-                            slotEnch: root.productEnch
-                        }
-                    }
-                }
-
-                // 产物槽下等级绿字（规格⑤：等级显示在产物格下绿字；t576 无产物 → 静默空白（删灰字提示）；
-                //   t606⑥ 改名不再带产物名——只显消耗「重命名 N 级」，名字在输入框 + 产物 tooltip 已有）。
-                Text {
-                    anchors.top: slotRow.bottom; anchors.topMargin: 2
-                    anchors.horizontalCenter: slotRow.horizontalCenter
-                    anchors.horizontalCenterOffset: root.slotSize + 38   // 对准产物槽（槽心 = 行心 + 78）
-                    text: root.costText
-                    color: root.costColor
-                    font.pixelSize: 12; font.bold: true
-                    visible: text.toString().length > 0
-                }
-
-                // t615 冲突 / 不适用红字提示行（等级行下方；merge 时书上未写入的附魔逐条列出）。
-                Text {
-                    anchors.top: slotRow.bottom; anchors.topMargin: 20
-                    anchors.horizontalCenter: slotRow.horizontalCenter
-                    width: slotRow.width + 60
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WrapAnywhere
-                    text: root.mergeConflictText
-                    color: "#e08a7f"
-                    font.pixelSize: 9
-                    visible: text.toString().length > 0
                 }
 
                 // 「操作成功」绿色 flash 叠层（取产物后短暂显，~600ms 淡出）。

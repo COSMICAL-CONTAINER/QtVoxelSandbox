@@ -24157,6 +24157,69 @@ Item {
                              "(tools/build_lapis_outline.py reruns reproducibly)";
     }
 
+    // ── t958 铁砧面板操作内容垂直居中（源码钉；R19.17 🅳）──
+    //    用户第五轮口径：「铁砧 UI 上下居中：改名栏与 A+B→C 下方空一行——面板内容垂直居中」。
+    //    旧布局把操作内容（改名框 / A+B→C 槽行 / 等级·冲突提示行）整块 top 钉死在 anvilArea 顶
+    //    （改名框 topMargin 2 起步），内容自然底 ~y110 落在 134 高的操作区内 → 底部恒留 ~24px 空行
+    //    （上挤下空）。钉三面（QML 布局无 static_assert 面，源码即契约；t954/t955 纯视觉项先例；
+    //    AnvilUI.qml 整文档可加载性由 t956 行为腿的真链直载覆盖，此处不重复 harness）：
+    //    ① 居中形态钉 —— 操作内容包进 opBlock 内容块（width 随操作区 / height = 内容自然高 108 /
+    //       anchors.verticalCenter 锚操作区中线），旧顶对齐形态（改名框 top 钉 + 固定 2px 上距）
+    //       全文件绝迹；
+    //    ② 包裹结构钉 —— id 链 opBlock → renameBox → slotRow → 两条 slotRow.bottom 锚（等级行 /
+    //       冲突行）依序全落在 flash 叠层注释之前（改名框起的三段链整体收进块内）；
+    //    ③ 内部刚性钉 —— 改名框贴块顶无固定上距（上下留白由居中锚承担）+ 槽行仍锚改名框下 10px
+    //       （块内相对关系逐字未动，居中只平移整块、不重排内部）。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile af958(root + QStringLiteral("/src/ui/AnvilUI.qml"));
+        const QString a958 = af958.open(QIODevice::ReadOnly) ? QString::fromUtf8(af958.readAll()) : QString();
+        // ① 居中形态：opBlock 声明邻域三要素 + 旧顶对齐形态绝迹。
+        const int iBlk958 = a958.indexOf(QStringLiteral("id: opBlock"));
+        const QString blk958 = iBlk958 >= 0 ? a958.mid(iBlk958, 240) : QString();
+        const bool okA958 = iBlk958 >= 0
+                && blk958.contains(QStringLiteral("width: parent.width"))
+                && blk958.contains(QStringLiteral("height: 108"))
+                && blk958.contains(QStringLiteral("anchors.verticalCenter: parent.verticalCenter"))
+                && !a958.contains(QStringLiteral("anchors.top: parent.top; anchors.topMargin: 2"));
+        // ② 包裹结构：改名框链依序落在块声明与 flash 叠层之间。
+        const int iRen958 = a958.indexOf(QStringLiteral("id: renameBox"));
+        const int iRow958 = a958.indexOf(QStringLiteral("id: slotRow"));
+        const int iCost958 = a958.indexOf(QStringLiteral("anchors.top: slotRow.bottom; anchors.topMargin: 2"));
+        const int iConf958 = a958.indexOf(QStringLiteral("anchors.top: slotRow.bottom; anchors.topMargin: 20"));
+        const int iFlash958 = a958.indexOf(QStringLiteral("「操作成功」绿色 flash 叠层"));
+        const bool okB958 = iBlk958 >= 0 && iBlk958 < iRen958 && iRen958 < iRow958
+                && iRow958 < iCost958 && iCost958 < iConf958 && iConf958 < iFlash958;
+        // ③ 内部刚性：改名框贴块顶无上距 + 槽行锚改名框下 10px（内部关系刚性保持）。
+        const QString ren958 = iRen958 >= 0 ? a958.mid(iRen958, 200) : QString();
+        const QString row958 = iRow958 >= 0 ? a958.mid(iRow958, 200) : QString();
+        const bool okC958 = ren958.contains(QStringLiteral("anchors.top: parent.top"))
+                && !ren958.contains(QStringLiteral("topMargin"))
+                && row958.contains(QStringLiteral("anchors.top: renameBox.bottom; anchors.topMargin: 10"));
+        const bool ok958 = okA958 && okB958 && okC958;
+        if (!ok958)
+            qInfo().noquote() << "  t958 diag: centeredForm" << okA958 << "wrapStructure" << okB958
+                              << "rigidInner" << okC958 << "blk@" << iBlk958 << "ren@" << iRen958
+                              << "row@" << iRow958 << "cost@" << iCost958 << "conf@" << iConf958
+                              << "flash@" << iFlash958;
+        if (!ok958) ++totalFail;
+        qInfo().noquote() << (ok958 ? "PASS" : "FAIL")
+                          << "| t958 anvil panel operation content vertically centered: the operation "
+                             "content (rename box + A+B->C slot row + level/conflict hint lines) is "
+                             "wrapped in an opBlock content block (width tracking the operation area, "
+                             "height = the 108px natural content extent) pinned with "
+                             "anchors.verticalCenter to the operation-area midline - the old "
+                             "top-pinned form (rename box anchored to parent.top with a fixed 2px top "
+                             "margin, leaving a ~24px dead band below the A+B->C row inside the 134px "
+                             "area) is extinct; the wrapped chain order (block -> renameBox -> slotRow "
+                             "-> the two slotRow.bottom hints) all lands before the success-flash "
+                             "overlay comment, and the internal relationships stay byte-identical "
+                             "(rename box flush at block top without a fixed margin, slot row still "
+                             "renameBox.bottom + 10) - centering only translates the block, never "
+                             "re-lays-out its content";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
