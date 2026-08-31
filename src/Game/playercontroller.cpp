@@ -1978,10 +1978,12 @@ void PlayerController::attackMob(int entityIndex)
     //   t825 起点收口：基础 + 锐锋走 EnchantRegistry::weaponAttackDamage 单一权威（tooltip 攻击行经
     //   Hotbar::displayAttackDamage 取整同值 —— 显示 = 实战的目标无关部分，公式永不漂移）。
     //   - 锐锋 Sharpness：+0.5*level HP（spec「0.5*level per hit」）。
-    //   - 亡灵杀手 UndeadSlay：对亡灵族 +2.5*level HP（目标门 = EntityManager::isUndeadFamily 单一权威，
-    //     review0830 #26——Shambler/Bones/幼体 BabyShambler；显示面 (+M) 数值权威 = familyAttackBonus，
-    //     两面各单一权威、对拍相等）。
-    //   - 节肢克星 ArthropodSlay：对节肢族（Spider 蜘蛛）+2.5*level HP。
+    //   - 亡灵杀手 UndeadSlay：对亡灵族（目标门 = EntityManager::isUndeadFamily 单一权威谓词，
+    //     review0830 #26——Shambler/Bones/幼体 BabyShambler）+ 节肢克星 ArthropodSlay：对节肢族
+    //     （Spider 蜘蛛）各 +2.5×级 HP；数值取 EnchantRegistry::familyAttackBonusFor 单支权威
+    //     （review0830 #25：每级倍率字面量只活注册表一处，实战与 tooltip 显示面同源——旧双写字面量
+    //     的「两处同改」漂移面关闭。族门在调用侧：按受击族取支，交叉——亡灵杀手打蜘蛛——节肢支
+    //     恒 0，族门不外泄，故不能改调合计面 familyAttackBonus）。
     //   互斥组 1 已保证锐锋 / 亡灵 / 节肢三选一（选择器剔冲突）→ 同一武器至多一类伤害加成生效。
     int heldEnch[4] = {0, 0, 0, 0};
     if (m_hotbar) m_hotbar->selectedItemEnchants(heldEnch);
@@ -1992,8 +1994,9 @@ void PlayerController::attackMob(int entityIndex)
         //   语义有意分立：亡灵族门不含头盔免烧豁免（戴盔亡灵不烧但仍吃对族加成）。
         const bool undead = EntityManager::isUndeadFamily(mobType);
         const bool arthropod = (mobType == int(EntityManager::MobSpider));
-        if (undead)     dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::UndeadSlay));
-        if (arthropod)  dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::ArthropodSlay));
+        // review0830 #25：对族加成数值改调注册表单支权威 familyAttackBonusFor（每级倍率与显示面同源）。
+        if (undead)     dmg += EnchantRegistry::familyAttackBonusFor(heldEnch, EnchantRegistry::UndeadSlay);
+        if (arthropod)  dmg += EnchantRegistry::familyAttackBonusFor(heldEnch, EnchantRegistry::ArthropodSlay);
     }
     if (crit) dmg *= 1.5f;                      // 暴击 = base × 1.5（含附魔加成）
     const int dmgInt = std::max(1, int(std::round(dmg))); // 至少 1 HP（防御：负 / 零兜底）

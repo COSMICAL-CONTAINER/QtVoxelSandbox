@@ -20,7 +20,8 @@ import QtQuick3D
 //   集合同样冻结在世界级缓存上）。
 // - 修法 = 用户菜单双通道（重扫复用 rescanPairs 单一实现，不写第二套扫描）：① **worldChanged 事件钩**
 //   （主通道，精确即时）——组件内 Connections 直连 root.world（呈现层只读信号，不反向写栅格，PLAN §2），
-//   脏标记 + 200ms 一次性合并窗（编辑风暴 N 次写只扫一次）；② **1s 低频自愈轮询**（兜底通道，用户菜单
+//   200ms trailing-edge 防抖窗（review0830 #20 收口：每次重入 restart 顺延窗，编辑风暴 N 次写只扫一次）；
+//   ② **1s 低频自愈轮询**（兜底通道，用户菜单
 //   另一选项）——任一通道断线时集合仍周期性对齐栅格真值；扫法便宜（台数 × 50 格 blockAt 只读），且被
 //   active && worldRunning 门住（菜单 / ESC 硬档零开销，review26-11 纯视觉 Timer 同约定）。两通道都到
 //   不达每帧直发红线：事件级信号 + 秒级轮询，无逐帧 QML 信号回归。
@@ -192,28 +193,23 @@ Node {
 
     // 通道二（t953 主修，事件钩）：World.worldChanged —— 一切 setBlock 写入的语义信号（玩家路径 +
     //   爆炸 t942 链 destroySphereSilent / 落块着地 setBlockFromEntity / 焚毁 t843 / 流体静默写等系统
-    //   路径全走它，N 写 1 emit 的批量收口也含）→ 脏标记，200ms 一次性合并窗后统一重扫。连接在组件内
+    //   路径全走它，N 写 1 emit 的批量收口也含）→ 200ms trailing-edge 防抖窗后统一重扫。连接在组件内
     //   直连注入的 root.world（宿主 Main.qml 零改动；world 在 Loader onLoaded 注入前为 null = 无连接，
     //   注入后 property 绑定重连——Connections.target 动态重挂，QtQuick 既有语义）。
-    //   防抖语义（用户口径「编辑风暴合并」）：爆炸一帧毁 N 书架 → N 次 worldChanged 只置一次脏 →
-    //   单次重扫；requestRescan 重入直接早退（窗内合并），restart 语义 = 风暴未停则窗顺延，风暴结束后
-    //   ≤200ms 收口（放书架 ≤0.5s 起流的既有承诺不破）。此 Timer 为数据维护非纯视觉表现件，不门
-    //   worldRunning：脏标记只在有真实写入时置位，硬暂停期世界停写 → 无脏 → 零触发（review26-11 门
-    //   约定的豁免面同 faceTimer 口径——暂停期天然无事件源）。
-    property bool rescanPending: false
+    //   防抖语义（用户口径「编辑风暴合并」；review0830 #20 收口——旧实现重入在 restart 前早退 = 固定
+    //   200ms 一次性窗，与「窗顺延」的注释不符，改真 trailing-edge 让注释与实现对齐）：requestRescan
+    //   每次重入 restart()，风暴未停则窗顺延、风暴全程只扫一次，风暴停止后 ≤200ms 收口（放书架 ≤0.5s
+    //   起流的既有承诺不破）。此 Timer 为数据维护非纯视觉表现件，不门 worldRunning：请求只在有真实写入
+    //   时发出，硬暂停期世界停写 → 无请求 → 零触发（review26-11 门约定的豁免面同 faceTimer 口径——
+    //   暂停期天然无事件源）。
     function requestRescan() {
-        if (root.rescanPending) return   // 窗内重入合并（风暴只扫一次）
-        root.rescanPending = true
-        rescanDebounce.restart()
+        rescanDebounce.restart()   // trailing-edge：每次重入顺延窗（风暴停后 ≤200ms 收口）
     }
     Timer {
         id: rescanDebounce
         interval: 200
         running: false
-        onTriggered: {
-            root.rescanPending = false
-            root.rescanPairs()
-        }
+        onTriggered: root.rescanPairs()
     }
     Connections {
         target: root.world

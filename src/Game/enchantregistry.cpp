@@ -80,6 +80,20 @@ constexpr EnchantRegistry::EnchantDef kEnchants[int(EnchantRegistry::EnchantCoun
 static_assert(sizeof(kEnchants) / sizeof(kEnchants[0]) == size_t(EnchantRegistry::EnchantCount),
               "kEnchants 表大小须与 EnchantRegistry::EnchantCount 一致；新附魔需补行");
 
+// review0830 #24 编译期字段校验：聚合初始化下未来新增行漏写 homeCategory 会静默得 0（== EnchantCatNone
+//   → 该附魔被**所有**书主类别池排除、仅直附面可达，运行期无任何报警）。上方 static_assert 只钉表行数，
+//   此处补字段面：1..N-1 行 homeCategory 须非 EnchantCatNone（0 号 NoEnchant 占位行豁免）——新附魔行
+//   漏写该字段 → 编译失败（与行数守卫同层的防漂移闸）。
+consteval bool enchantHomeCatsComplete()
+{
+    for (int i = 1; i < int(EnchantRegistry::EnchantCount); ++i) {
+        if (kEnchants[size_t(i)].homeCategory == EnchantRegistry::EnchantCatNone) return false;
+    }
+    return true;
+}
+static_assert(enchantHomeCatsComplete(),
+              "kEnchants 1..N-1 每行须写 homeCategory（EnchantCategory）；漏写 = 该附魔被所有书池静默排除");
+
 // 越界 / 非附魔 id → nullptr（统一入口；调用方判空）。表行索引 = enchantId（含第 0 项占位）。
 const EnchantRegistry::EnchantDef *defAt(int enchantId)
 {
@@ -419,14 +433,23 @@ float EnchantRegistry::weaponAttackDamage(int itemId, const int *enchants)
          + 0.5f * float(findLevel(enchants, int(Sharpness)));
 }
 
-// t961 杀手系对族伤害加成（显示面单一权威；见头注释）。2.5×各级合计：亡灵 III = 7.5 / 节肢 I = 2.5 /
-//   无杀手 = 0（锐锋不算——互斥组 1 使锐锋与杀手不共存，即便数据异常同给也只各算各的）。tooltip 攻击
-//   行括号「(+M)」经 Hotbar::displayFamilyBonusText 取整显示；实战 2.5×级公式在 attackMob 对族分支
-//   （t476 起）同值生效，数值若调须两处同改（本函数 + attackMob 分支——实战逻辑 t961 未触碰）。
+// t961 杀手系对族伤害加成（**显示与实战同源单一权威**；见头注释）。
+//   familyAttackBonusFor(enchants, id) = 单支权威：指定杀手系附魔（亡灵杀手 / 节肢克星）的 2.5×级——
+//   每级 2.5 这个数值**只活本函数**（全工程唯一字面量，review0830 #25 收口实战/显示双写漂移面）。
+//   非杀手系 id → 0。实战 attackMob 按受击 mob 族别取对应一支（族门在调用侧，交叉——如亡灵杀手打蜘蛛
+//   ——取节肢支恒 0，族门不外泄）。
+//   familyAttackBonus(enchants) = 显示面合计 = 两支相加（互斥组 1 → 至多一支非零 → 合计 == 实际可生效
+//   的那支）。tooltip 攻击行括号「(+M)」经 Hotbar::displayFamilyBonusText 取整显示。
+float EnchantRegistry::familyAttackBonusFor(const int *enchants, int enchantId)
+{
+    if (enchantId != int(UndeadSlay) && enchantId != int(ArthropodSlay)) return 0.0f;
+    return 2.5f * float(findLevel(enchants, enchantId));
+}
+
 float EnchantRegistry::familyAttackBonus(const int *enchants)
 {
-    return 2.5f * float(findLevel(enchants, int(UndeadSlay))
-                        + findLevel(enchants, int(ArthropodSlay)));
+    return familyAttackBonusFor(enchants, int(UndeadSlay))
+         + familyAttackBonusFor(enchants, int(ArthropodSlay));
 }
 
 // t826 击退附魔强度（单一权威；见头注释）。每级 +3.0 倍冲量：无附魔 1.0（~1.1 格）/ I 4.0（~4.5 格）/

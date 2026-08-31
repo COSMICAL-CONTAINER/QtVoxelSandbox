@@ -116,6 +116,10 @@ Item {
     // t228：请求宿主把光标手持栈**丢 1 件**为实体（右键拖出面板外；宿主接 player.dropHeldCursorOne）。
     //   左键整栈走 discardHeldRequested，右键逐个走本信号（spec「左键=全丢/右键=逐个」）。
     signal discardHeldOneRequested()
+    // review0830 #22：中键复制成功 → 请求宿主弹手（handPopAnim）——与 Inventory.qml 同名信号同一消费端
+    //   （Main.qml onItemTaken → handPopAnim.start，t120 手弹 = 拾取/拿取的视觉反馈）；中键复制 = 凭空
+    //   拿取，同给一致反馈（此前两面板中键复制静默无反馈，「逐字对齐 Inventory.qml 口径」实际缺此面）。
+    signal itemTaken()
 
     // ── 尺寸常量 ──
     readonly property int slotSize: 40
@@ -286,7 +290,9 @@ Item {
     //   - 实例元数据（耐久 / 附魔 / 名）随实例复制保真；enchants 经 list4 归一（t874：C++ 序列对象
     //     Array.isArray 恒 false，旧守卫会把中键复制的附魔静默清白板）；
     //   - 旧光标手持直接覆盖 = 创造「归还虚空」同效（Inventory 面板经 returnHeldToVoidRequested 信号链
-    //     归零后再赋新值，净效果与本处直赋一致；本面板无该信号线，语义不缺）。
+    //     归零后再赋新值，净效果与本处直赋一致；本面板无该信号线，语义不缺）；
+    //   - review0830 #22：成功复制后发 itemTaken()（守卫早退的 no-op 不发）——宿主手弹反馈与 Inventory
+    //     面板同一信号同一消费端（Main.qml onItemTaken → handPopAnim），「逐字对齐」口径自此含反馈面。
     //   创造门（t288 中键 pick 仅创造语义）：各中键 TapHandler enabled: root.creativeMode —— 非创造不响应。
     function copyStackToCursor(id, count, durability, enchants, name) {
         if (!root.hotbar || id === 0 || count <= 0) return
@@ -296,6 +302,7 @@ Item {
         const e = InventoryOps.list4(enchants)
         root.hotbar.setHeldEnchants(e)
         root.hotbar.heldCustomName = (typeof name === "string") ? name : ""
+        root.itemTaken()
     }
 
     // t549 铁砧 Shift+左键双向语义（spec「shift+左键应把工具直接放进去」；同附魔台 slotShiftLeftEnchant 模式）：
