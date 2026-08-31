@@ -295,6 +295,17 @@ public:
     //   mobType 仅被动七型 {Pig,Cow,Sheep,Chicken,Squid,Wolf,Ocelot} 合法（敌对型走 spawnHostileMob；
     //   非法值防御回退 Pig，同 spawnHostileMob 回退 Shambler 模式）。达 kCap 委托内静默跳过。
     Q_INVOKABLE void spawnPassiveMob(int x, int y, int z, int mobType);
+    // t973 生物格放方块检测（放置预检实体占用门，防活埋）：格 (bx,by,bz) 的**整格 AABB** 与任一**活体
+    //   mob**（alive && kind==Mob && !dead）的碰撞盒（pos±halfW / pos±halfH，与 mobAabbHitsSolid /
+    //   findMobHit 同一套 per-type 半宽表）**严格相交** → true。严格比较（边界相触不算）：mob 脚底正好
+    //   站在格顶面 / 身侧贴邻格壁 → 邻格照常可放（不拒贴面）；骑乘组合（t952 小僵尸骑鸡）骑手与载具
+    //   两盒各自独立判（挂载位骑手盒在载具上方，目标格撞任一即拒——逐实体遍历天然覆盖）。
+    //   排除面：dead（hp<=0 濒死 / 死亡动画帧）不拒；掉落物（ItemEntityManager）/ 箭 / 浮标 / 雪球 /
+    //   引燃 TNT / 下落方块等非 Mob kind 不拒（机制等价 MC preventEntitySpawning 语义：物品可以盖）；
+    //   矿车 / 船在各自 Manager，不在本查询域（骑乘矿车旁放方块不受干扰）。const 只读自身数据。
+    //   C++ 侧调用（非 QML 面板 API，同 mobTypeCountNear），由 PlayerController::placeBlock 放置预检调
+    //   （Game → Entities 向下依赖，同 hostileNearby trySleepAt 先例）。
+    bool mobOccupiesCell(int bx, int by, int bz) const;
     // t280 第 i 个实体是否**敌对**（hostile=true 的活体 Mob）。QML 据它对 Shambler/Bones 显燃烧火焰 Model
     //   （passive 永不燃烧 → 火焰仅敌对会显）。越界 / 非 hostile → false。
     Q_INVOKABLE bool isHostileAt(int i) const;

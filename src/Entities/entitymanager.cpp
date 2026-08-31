@@ -1119,6 +1119,25 @@ int EntityManager::mobTypeCountNear(const QVector3D &center, float radius, int m
     return n;
 }
 
+// t973 生物格放方块检测（头文件注释详述口径）：格 AABB [bx,bx+1]×[by,by+1]×[bz,bz+1] 与任一活体 mob
+//   碰撞盒严格相交 → true。排除面（alive/kind==Mob/!dead）与放置预检消费口径对齐：濒死 / 死亡动画帧
+//   不拦放置；非 Mob kind 实体（掉落物 / 箭 / 浮标 / 引燃 TNT 等）不拦——「物品可以盖」。骑乘组合两盒
+//   各自独立命中（挂载位骑手盒在载具上方，逐实体遍历天然覆盖，无需特判）。
+bool EntityManager::mobOccupiesCell(int bx, int by, int bz) const
+{
+    for (const Entity &e : m_entities) {
+        if (!e.alive || e.kind != Mob || e.dead) continue;
+        const float ex0 = e.pos.x() - e.halfW, ex1 = e.pos.x() + e.halfW;
+        const float ey0 = e.pos.y() - e.halfH, ey1 = e.pos.y() + e.halfH;
+        const float ez0 = e.pos.z() - e.halfW, ez1 = e.pos.z() + e.halfW;
+        // 严格 <（边界相触不算重叠）：脚底正好站在格顶 / 身侧贴邻格壁的 mob 不拦邻格放置。
+        if (ex0 < bx + 1 && bx < ex1 && ey0 < by + 1 && by < ey1
+            && ez0 < bz + 1 && bz < ez1)
+            return true;
+    }
+    return false;
+}
+
 // t280 第 i 个实体是否敌对（hostile=true 的活体 Mob）。越界 / 非敌对 → false。
 bool EntityManager::isHostileAt(int i) const
 {
