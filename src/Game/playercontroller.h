@@ -1244,7 +1244,8 @@ private:
     // t950 mob 装备拾取（tickMobEquipmentPickup）状态：扫描窗 dt 累积器 + 拾取概率（setEquipmentPickupChance
     //   缝写；初值 = 缺省常量）。非世界态（跨世界 reset 族）无需清——纯节流/标量，无跨世界语义。
     qreal m_equipPickupAccum = 0.0;               // 距下次扫描窗的 dt 累积（秒；到窗长即清零跑扫描）
-    qreal m_equipPickupChance = 0.3;              // 每窗每件装备拾取概率（用户第五轮口径「有概率拾取」）
+    qreal m_equipPickupChance = kEquipPickupChance; // 每窗每件装备拾取概率（review0830 #15：缺省单源——
+                                                    //   成员初始化走常量，双字面量形态绝迹）
     // t950 扫描参数常量（与 m_equipPickupChance 初值同源单一事实；探针经缝改写成员、常量供注释锚）。
     static constexpr qreal kEquipPickupChance = 0.3;       // 缺省拾取概率（MC 1.0 无此概率面——canPickUpLoot
                                                            //   必拾；本作取 0.3/窗让路过偶拾，连续经过必拾）

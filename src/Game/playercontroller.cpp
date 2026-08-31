@@ -1978,14 +1978,19 @@ void PlayerController::attackMob(int entityIndex)
     //   t825 起点收口：基础 + 锐锋走 EnchantRegistry::weaponAttackDamage 单一权威（tooltip 攻击行经
     //   Hotbar::displayAttackDamage 取整同值 —— 显示 = 实战的目标无关部分，公式永不漂移）。
     //   - 锐锋 Sharpness：+0.5*level HP（spec「0.5*level per hit」）。
-    //   - 亡灵杀手 UndeadSlay：对亡灵族（Shambler 蹒跚者 / Bones 骸骨）+2.5*level HP。
+    //   - 亡灵杀手 UndeadSlay：对亡灵族 +2.5*level HP（目标门 = EntityManager::isUndeadFamily 单一权威，
+    //     review0830 #26——Shambler/Bones/幼体 BabyShambler；显示面 (+M) 数值权威 = familyAttackBonus，
+    //     两面各单一权威、对拍相等）。
     //   - 节肢克星 ArthropodSlay：对节肢族（Spider 蜘蛛）+2.5*level HP。
     //   互斥组 1 已保证锐锋 / 亡灵 / 节肢三选一（选择器剔冲突）→ 同一武器至多一类伤害加成生效。
     int heldEnch[4] = {0, 0, 0, 0};
     if (m_hotbar) m_hotbar->selectedItemEnchants(heldEnch);
     float dmg = EnchantRegistry::weaponAttackDamage(heldItemId, heldEnch);
     if (m_hotbar) {
-        const bool undead = (mobType == int(EntityManager::MobShambler) || mobType == int(EntityManager::MobBones));
+        // review0830 #26：亡灵族目标门改单一权威谓词（t476 裸清单漏 t952 幼体 → 亡灵杀手对幼体不生效，
+        //   且 t961 显示面 (+M) 无条件显示 = 显示与实战劈叉）。isUndeadFamily 与 undeadBurnsInDaylight
+        //   语义有意分立：亡灵族门不含头盔免烧豁免（戴盔亡灵不烧但仍吃对族加成）。
+        const bool undead = EntityManager::isUndeadFamily(mobType);
         const bool arthropod = (mobType == int(EntityManager::MobSpider));
         if (undead)     dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::UndeadSlay));
         if (arthropod)  dmg += 2.5f * float(m_hotbar->selectedItemEnchantLevel(EnchantRegistry::ArthropodSlay));
@@ -5512,6 +5517,10 @@ void PlayerController::tickMobEquipmentPickup(qreal dt)
         if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones
             && mt != EntityManager::MobBabyShambler) continue; // ⑤ 仅僵尸/骷髅/小僵尸（t952 幼体入拾取白名单，可穿盔甲口径）
         if (m_entityManager->healthAt(mi) <= 0) continue;                   // ⑤ 尸体（死亡动画窗）不拾
+        // ⑤ 骑乘态不拾（review0830 #16，与 resolvePlayerPush 骑乘豁免口径对齐）：乘矿车/船/被驮的 mob
+        //   位置由载具钉位权威接管，路过掉落物照样拾取会让掉回件落在座位钉位格（非 mob 自主行为面）。
+        if (m_entityManager->rideCartAt(mi) >= 0 || m_entityManager->rideBoatAt(mi) >= 0
+            || m_entityManager->rideMobAt(mi) >= 0) continue;
         const QVector3D mp = m_entityManager->posAt(mi);
         const float feetY = mp.y() - m_entityManager->halfHeightAt(mi);
         for (int ii = 0; ii < itemN; ++ii) {
