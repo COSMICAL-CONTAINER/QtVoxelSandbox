@@ -1085,6 +1085,8 @@ Item {
                                     }
                                     // t640② 装备槽护甲耐久条（DurabilityBar；满耐久不显——t931 对齐 hotbar 口径，
                                     //   组件内统一判）。触碰 armorRevision → 受击损耗 / 换装后重算。
+                                    //   t976：显隐决策上收本 delegate（触碰 armorRevision 参与返回值）——组件单独
+                                    //   AOT 单元内跨两跳不重算（组件头 t976 契约），满耐久 t931 语义不变。
                                     DurabilityBar {
                                         anchors.left: parent.left; anchors.right: parent.right
                                         anchors.bottom: parent.bottom
@@ -1094,6 +1096,7 @@ Item {
                                         property int mDur: root.hotbar.armorRevision >= 0 ? root.hotbar.armorMaxDurability(armId) : 0
                                         curDur: cDur
                                         maxDur: mDur
+                                        visible: { const _r = root.hotbar.armorRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }
                                     }
                                     // t647 附魔光晕（生存 tab 装备槽）：已装备护甲带附魔 → 浅紫叠层（同 SurvivalInventory
                                     //   装备槽光晕）。触碰 armorRevision 重算。
@@ -1528,6 +1531,8 @@ Item {
                                 }
                                 // t640② 生存 tab 主栏工具耐久条（DurabilityBar；同 SurvivalInventory 主栏）。触碰
                                 //   mainRevision → 磨损 / 换槽后重算。非工具 / 空槽自隐。
+                                //   t976：显隐决策上收本 delegate（触碰 mainRevision 参与返回值）——组件单独
+                                //   AOT 单元内跨两跳不重算（组件头 t976 契约），满耐久 t931 语义不变。
                                 DurabilityBar {
                                     anchors.left: parent.left; anchors.right: parent.right
                                     anchors.bottom: parent.bottom
@@ -1537,6 +1542,7 @@ Item {
                                     property int mDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(mainId)) : 0 }
                                     curDur: cDur
                                     maxDur: mDur
+                                    visible: { const _r = root.hotbar.mainRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }
                                 }
                                 // t647 附魔光晕已移入图标容器（t696 图标内裁剪，见 mainIconBox 内 Rectangle）。
                                 // 左键整组（拾取 / 放置 / 合并 / 互换，resolveClick）；写经 hotbar.mainSetStack（VM 单一权威）。
@@ -1718,6 +1724,8 @@ Item {
 
                                 // t640② 生存 tab hotbar 行工具耐久条（DurabilityBar；同主栏）。触碰 slotRevision
                                 //   → 磨损 / 换槽后重算。非工具 / 空槽自隐。
+                                //   t976：显隐决策上收本 delegate（触碰 slotRevision 参与返回值）——组件单独
+                                //   AOT 单元内跨两跳不重算（组件头 t976 契约），满耐久 t931 语义不变。
                                 DurabilityBar {
                                     anchors.left: parent.left; anchors.right: parent.right
                                     anchors.bottom: parent.bottom
@@ -1727,6 +1735,7 @@ Item {
                                     property int mDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(slotId)) : 0 }
                                     curDur: cDur
                                     maxDur: mDur
+                                    visible: { const _r = root.hotbar.slotRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }
                                 }
                                 // t647 附魔光晕（生存 tab hotbar 槽）：同 SurvivalInventory hotbar 行光晕。触碰 slotRevision 重算。
                                 //   t696：紫晕**只罩 30×30 图标 rect**（用户口径「紫纹应只作用图标不糊整格」）
