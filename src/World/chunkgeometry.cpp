@@ -112,7 +112,11 @@ void ChunkGeometry::setSunDir(const QVector3D &dir)
     if (m_sunDir == dir) return;
     m_sunDir = dir;
     emit sunInputChanged();
-    if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
+    if (!m_chunkInRange) { // t472：窗外 chunk 静默跟随值变，不重建
+        // t972：方向/昼夜已跨重烘门 → 光照欠账（呈现层渐进同步排空），防夜晚远处仍显上烘亮度
+        if (sunRebuildDue(dir, m_dayMul)) m_lightStale = true;
+        return;
+    }
     if (m_vertexCount == 0) return; // 空段无顶点可打光 → 太阳步进零影响，跳过重建
     if (!sunRebuildDue(dir, m_dayMul)) return; // tXXX：方向变太小 / 未穿影带 / 未超硬顶 / dayMul 未累计超阈 → 只更新值不重建
     buildMesh(RebuildReason::Sun);
@@ -128,7 +132,12 @@ void ChunkGeometry::setDayMul(float m)
     if (m_dayMul == m) return;
     m_dayMul = m;
     emit dayMulChanged();
-    if (!m_chunkInRange) return; // t472：远端 chunk 静默跟随值变，不重建
+    if (!m_chunkInRange) { // t472：窗外 chunk 静默跟随值变，不重建
+        // t972：昼夜乘子累计变已跨重烘门 → 光照欠账（呈现层渐进同步排空；t972 起窗外可见，
+        //   不排空则夜晚远处地形仍显上烘正午亮度）
+        if (sunRebuildDue(m_sunDir, m)) m_lightStale = true;
+        return;
+    }
     if (m_vertexCount == 0) return; // 空段无顶点可打光 → 跳过重建
     if (!sunRebuildDue(m_sunDir, m)) return; // dayMul 未累计超阈 / sun 方向未跨门 / 未超硬顶 → 只更新值不重建
     buildMesh(RebuildReason::Sun); // dayMul 变属于光照层变化，复用 Sun reason（绕 chunk dirty，与 sun-step 同语义）
@@ -297,9 +306,50 @@ void ChunkGeometry::setChunkInRange(bool inRange)
     m_chunkInRange = inRange;
     emit chunkInRangeChanged();
     if (inRange) buildMesh(RebuildReason::Sun); // false→true：catch-up 错过的 sun/water/shadow/greedy 更新
-    // true→false：不重建（远 chunk 不绘制）
-    // 注：catch-up 不设 m_vertexCount==0 空段守卫 —— 出视距期间的编辑不重建（onWorldChanged 门控跳过），
-    //   远 chunk 的 m_vertexCount 可能陈旧（空→非空未反映），回程必须无条件重建（t472「dirty 不可靠」）。
+    // true→false：不重建（重建窗口外；错过部分记欠账由呈现层渐进同步排空，见 t972 onWorldChanged/setSunDir）
+    // 注：catch-up 不设 m_vertexCount==0 空段守卫 —— 出窗期间的编辑不重建（onWorldChanged 门控跳过），
+    //   窗外 chunk 的 m_vertexCount 可能陈旧（空→非空未反映），回程必须无条件重建（t472「dirty 不可靠」）。
+}
+
+// t972 载入世界空白区修复（三入口实现；契约见 .h 注释）。世界内容换代（beginLoad/regenerate 完成、
+//   enterWorld 内呈现层调）后对窗外段调用：旧世界 / 上局 mesh 立即作废（vertexCount→0 → QML
+//   `visible: vertexCount > 0` 绑定自动隐），防有限世界全幅可见后「窗外显上一世界地形」的陈旧错景。
+//   同步清两项欠账（欠账语义针对当前世界；换代后旧世界的错过不再有意义，重建由呈现层入队重新覆盖）。
+//   文档序（lessons t03/t35）：clear → setVertexData 空 → setStride → setIndexData 空 → bounds →
+//   原语 → addAttribute → update。不置脏（无世界事件，纯呈现层动作）。
+void ChunkGeometry::clearMesh()
+{
+    m_vertexCount = 0;
+    m_triangleCount = 0;
+    m_deferredRebuild = false;
+    m_lightStale = false;
+    clear();
+    setVertexData(QByteArray());
+    setStride(int(sizeof(Vtx)));
+    setIndexData(QByteArray());
+    setBounds(QVector3D(0, 0, 0), QVector3D(Chunk::kSize, m_world ? m_world->height() : 0, Chunk::kSize));
+    setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
+    addAttribute(QQuick3DGeometry::Attribute::PositionSemantic,
+                 int(offsetof(Vtx, x)), QQuick3DGeometry::Attribute::F32Type);
+    addAttribute(QQuick3DGeometry::Attribute::NormalSemantic,
+                 int(offsetof(Vtx, nx)), QQuick3DGeometry::Attribute::F32Type);
+    addAttribute(QQuick3DGeometry::Attribute::TexCoord0Semantic,
+                 int(offsetof(Vtx, u)), QQuick3DGeometry::Attribute::F32Type);
+    addAttribute(QQuick3DGeometry::Attribute::ColorSemantic,
+                 int(offsetof(Vtx, r)), QQuick3DGeometry::Attribute::F32Type);
+    addAttribute(QQuick3DGeometry::Attribute::IndexSemantic,
+                 0, QQuick3DGeometry::Attribute::U32Type);
+    update();
+    emit meshRebuilt(); // F3 顶点汇总同步归零（与 buildMesh 完成同一通知面）
+}
+
+// t972 渐进同步队列的排空动作：呈现层（Main.qml _meshSyncTimer）逐帧限量调，把窗外欠账 / 载入后的
+//   窗外重建请求落到与编辑同一条 buildMesh 链（Dirty 因由：内容驱动重建，与 finishLoad 首建同族）。
+//   无条件重建（不检 dirty / sunRebuildDue）——caller 依据 deferredRebuildPending()/lightStale() 决策，
+//   本方法只管执行（与 setChunkInRange catch-up 同款「决策在上、执行无条件」分工）。
+void ChunkGeometry::refreshMesh()
+{
+    buildMesh(RebuildReason::Dirty);
 }
 
 // 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
@@ -319,11 +369,18 @@ Chunk *ChunkGeometry::myChunk() const
 //   恒 true 清除，二者语义解耦、对任何太阳时序 immediate rebuild 都稳健（见 buildMesh 末尾清脏）。
 void ChunkGeometry::onWorldChanged()
 {
-    // t472 视距门控：远端 chunk（!m_chunkInRange）跳过编辑即时重建 —— 它不绘制（visible=false），
-    //   破块/放块无须当帧刷远端 mesh。dirty 标记会被 World::clearAllDirty 清掉，但远 chunk 重进视野
-    //   时 setChunkInRange(false→true) 的 catch-up buildMesh(Sun) 无条件重建，覆盖此情况（mesh 不会陈旧）。
+    // t472 重建窗口门控：窗外 chunk（!m_chunkInRange）跳过编辑即时重建 —— 重建是 CPU 大头，破块/放块
+    //   只需当帧刷玩家周边 mesh。dirty 标记会被 World::clearAllDirty 清掉，错过由两路兜底：
+    //   chunk 进窗口时 setChunkInRange(false→true) 的 catch-up buildMesh(Sun) 无条件重建；t972 起
+    //   窗外段也参与绘制（有限世界全幅可见），错过**当场记欠账**（m_deferredRebuild）→ 呈现层
+    //   渐进同步队列排空（refreshMesh），远处可见地形不再等玩家走近才更新。
     //   首次构建期（启动）chunkInRange 默认 true，此门控不影响首次 mesh 生成。
-    if (!m_chunkInRange) return;
+    if (!m_chunkInRange) {
+        if (Chunk *c0 = myChunk())
+            if (c0->dirty())
+                m_deferredRebuild = true; // t972：内容重建欠账（本次 worldChanged 的变更窗外未建）
+        return;
+    }
     Chunk *c = myChunk();
     if (!c || !c->dirty()) return;
     // t188 perf：流体专用脏跳过 —— 当本 chunk 自上次 clearAllDirty 以来只收到流体类写（Air/Water/Lava，
@@ -1214,6 +1271,8 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     m_lastBakedSunDir = m_sunDir;
     m_lastBakedDayMul = m_dayMul; // PLAN §2-H：记录「本次实际烘进顶点色的 dayMul」，下次 setDayMul 据此判量化门
     m_lastSunBakeNs = FrameProfiler::nowNs();
+    m_deferredRebuild = false; // t972：本次重建已覆盖窗外欠账（内容 + 光照同源同烘）
+    m_lightStale = false;
 
     // 可观测性（dev-spec t03 / t155 验收）：dirty = 编辑 / 初次加载即时重建（同步于 setBlock，破/放后当帧）；
     //   sun = 太阳跨步全量重建（绕 dirty，t155 编辑活跃期被 WorldClock 节流跳过）；water = 水段切换。

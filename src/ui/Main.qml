@@ -339,6 +339,9 @@ Window {
     //     不绘制几何；玩家走近时 Model.visible=true 即时复显（mesh 已在 chunkAnchor.onCompleted 一次性建好）。
     //   分层（PLAN §2）：本属呈现层 visibility 决策，只读 player.feetPosition（Game 层 Q_PROPERTY）+ 写各 chunk Model
     //     的 visible（Renderer 层自有属性），不写栅格 / 不反向依赖 Game。机制等价 MC render distance（仅渲视野半径内 chunk）。
+    // t972 语义收窄：本半径 = **网格重建/追平窗口**（chunkInRange 门控 sun/编辑重建 + catch-up），
+    //   不再是绘制半径——绘制全幅（有限世界边到边，对标 MC 1.0）；窗外 mesh 新鲜度由
+    //   kickWorldMeshSync 渐进同步保证。调大 = 更多段参与即时重建（sun-step 重建经济学变贵）。
     property int renderDistance: 3
     property int _playerCX: -1       // 玩家所在 chunk X（缓存；未初始化 -1，跨 chunk 边界才刷新）
     property int _playerCZ: -1       // 玩家所在 chunk Z（同上）
@@ -459,7 +462,7 @@ Window {
              + (player.hasHit ? "  hit: " + player.hitBlock.x + "," + player.hitBlock.y + "," + player.hitBlock.z : "  hit: -")
              + "\nworld: " + (window.worldChunksPerSide * 16) + "×" + (window.worldChunksPerSide * 16) + "×" + theWorld.height
              + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
-             + "  render r=" + window.renderDistance + " visible " + window.visibleChunkCount + "/" + (ncx * ncz)
+             + "  render r=" + window.renderDistance + " window " + window.visibleChunkCount + "/" + (ncx * ncz)
              + "\nmesh: " + meshMode + "  terrain verts: " + vx + "  tris: " + tr + "  (built 地形段)"
              + "\nentities: mobs " + mobLive + "/" + entityManager.count + "  items " + itemLive + "/" + itemEntities.count
              + "  orbs " + orbLive + "/" + xpOrbs.count
@@ -517,9 +520,12 @@ Window {
         window._refreshChunkVisibility()
     }
     // t470 切比雪夫半径内的 chunk Model.chunkInRange=true；外的 false。每 chunk 6 段 Model 共享 chunkCX/CZ，遍历
-    //   chunkObjects 一次性处理（每段独立设 chunkInRange，相邻段同 chunk 一并切换）。Model.visible 由各模板
-    //   的 `visible: chunkInRange && geo.vertexCount > 0` 绑定自动决定（双重剔除：远端 + 空段）。
-    //   visible 计数写 visibleChunkCount 供 F3 显示。玩家越界（cx<0 等）不影响——判 abs(dcx)<=r 自然过滤。
+    //   chunkObjects 一次性处理（每段独立设 chunkInRange，相邻段同 chunk 一并切换）。
+    //   **t972 语义收窄**：chunkInRange 只门控「CPU 何时重建 mesh」（窗外段 sun/编辑重建跳过 + 欠账
+    //   记账，由 kickWorldMeshSync 渐进同步排空），**不再门控绘制**——各段 Model.visible 只由
+    //   `geo.vertexCount > 0` 决定（有限世界全幅渲染，机制对标 MC 1.0；进入世界时空白区由
+    //   kickWorldMeshSync 秒级渐进填满，而非永久留白）。visibleChunkCount 即「重建窗口内 chunk 数」，
+    //   F3 行据此改名 window。玩家越界（cx<0 等）不影响——判 abs(dcx)<=r 自然过滤。
     function _refreshChunkVisibility() {
         const objs = window.chunkObjects
         const pcx = window._playerCX, pcz = window._playerCZ
@@ -542,8 +548,8 @@ Window {
         window.visibleChunkCount = vis
         // 防御：若 chunkObjects 长度 ≠ totalChunks*6（构造期未齐 / 异常），visibleChunkCount 不超 totalChunks。
         if (window.visibleChunkCount > totalChunks) window.visibleChunkCount = totalChunks
-        // t470 诊断日志：首次刷新 + chunk 跨界时记录可见数（确认 culling 生效 + 玩家移动后正确更新）。
-        // segVis = 实际 visible=true 的段数（chunkInRange && geo.vertexCount>0），验证空段剔除生效。
+        // t470 诊断日志：首次刷新 + chunk 跨界时记录窗口数（确认重建窗口生效 + 玩家移动后正确更新）。
+        // segVis = 实际 visible=true 的段数（t972 起 = geo.vertexCount>0），验证空段剔除生效。
         let segVis = 0
         for (let j = 0; j < objs.length; ++j) {
             const o = objs[j]
@@ -551,8 +557,90 @@ Window {
         }
         window.visibleSegmentCount = segVis
         console.info("[t470] chunk visibility: player chunk (" + pcx + "," + pcz + ") r=" + r
-                     + " chunks " + vis + "/" + totalChunks
+                     + " window chunks " + vis + "/" + totalChunks
                      + " segs visible " + segVis + "/" + objs.length)
+    }
+
+    // ── t972 载入世界空白区修复：窗外 mesh 渐进同步（近→远、每帧限量，复用 buildMesh 单一重建链）──
+    //   背景：t972 起各段 Model.visible 只由 vertexCount>0 决定（有限世界全幅渲染，对标 MC 1.0），
+    //   窗外段的 mesh 新鲜度由本机制保证：①世界内容换代（enterWorld 的 beginLoad/regenerate 完成、
+    //   玩家位姿/重建窗口定稿）后，对窗外段 clearMesh() 作废旧世界/上局残 mesh（防陈旧错景）并把
+    //   全部窗外段按「近→远」入队；②meshSyncTimer 每帧最多重建 1 段（buildMesh ~2-4ms，60Hz 帧预算
+    //   16.6ms 内无感）——进入世界后窗外区域秒级渐进填满（正常渐进加载），而非永久留白到走近/编辑。
+    //   ③稳态期（游玩中）低频扫描窗外欠账（deferredRebuildPending = 编辑/流体写被重建窗口跳过；
+    //   lightStale = sun/dayMul 跨烘门静默跟随），入同一队列排空——远处可见地形的内容/光照最终一致
+    //   （不排空则夜晚远处仍显上烘正午亮度）。重建动作全部走 ChunkGeometry.refreshMesh()（= 编辑
+    //   即时重建同一条 buildMesh(Dirty) 链），不另起第二套构建入口（PLAN 分层：呈现层只驱动、
+    //   网格化仍单点在 ChunkGeometry）。
+    readonly property int kMeshSyncPerTick: 1     // 每 tick 重建段数（帧预算：1×~3ms « 16.6ms）
+    property var _meshSyncQueue: []               // 待重建段几何（近→远有序；元素 = ChunkGeometry*）
+    property int _meshSyncScanPhase: 0            // 稳态欠账扫描相位（队列空时每 16 tick ≈1Hz 扫一轮）
+    function kickWorldMeshSync() {
+        window._meshSyncQueue = []
+        if (!window.chunksBuilt) return           // chunk 段未建（启动初期）→ 无可同步
+        const objs = window.chunkObjects
+        const step = window.cutoutSegmentRestored ? 6 : 5
+        const pcx = window._playerCX, pcz = window._playerCZ
+        const r = window.renderDistance
+        const groups = []
+        for (let i = 0; i < objs.length; i += step) {
+            const o = objs[i]
+            if (!o) continue
+            const inWin = (Math.abs(o.chunkCX - pcx) <= r && Math.abs(o.chunkCZ - pcz) <= r)
+            if (inWin) continue // 窗口内段：finishLoad/regenerate 的 worldChanged 已同步重建（fresh，跳过）
+            const segs = []
+            for (let k = 0; k < step && (i + k) < objs.length; ++k) {
+                const seg = objs[i + k]
+                if (!seg || !seg.geometry) continue
+                seg.geometry.clearMesh() // 旧世界/上局残 mesh 立即作废（visible 绑定按 vertexCount 自动隐）
+                segs.push(seg.geometry)
+            }
+            if (segs.length > 0)
+                groups.push({ cx: o.chunkCX, cz: o.chunkCZ,
+                              d: Math.max(Math.abs(o.chunkCX - pcx), Math.abs(o.chunkCZ - pcz)),
+                              segs: segs })
+        }
+        // 近→远排序（主键 = 切比雪夫距玩家 chunk，同距按欧氏）——玩家视野先取到近处地形
+        groups.sort(function (a, b) {
+            if (a.d !== b.d) return a.d - b.d
+            const da = (a.cx - pcx) * (a.cx - pcx) + (a.cz - pcz) * (a.cz - pcz)
+            const db = (b.cx - pcx) * (b.cx - pcx) + (b.cz - pcz) * (b.cz - pcz)
+            return da - db
+        })
+        for (let g = 0; g < groups.length; ++g)
+            for (let gi = 0; gi < groups[g].segs.length; ++gi)
+                window._meshSyncQueue.push(groups[g].segs[gi])
+        console.info("[t972] world mesh sync kicked: " + window._meshSyncQueue.length
+                     + " far segments queued (near->far)")
+    }
+    // 排空泵：仅游玩态跑（菜单/暂停 idle——硬档停语义同 worldRunning 口径，t889）。相位一 = 队列
+    //   （载入全量 or 稳态欠账）每 tick 排 1 段；相位二 = 队列空时每 16 tick 扫一轮欠账入队
+    //   （队列非空不扫 → 无重复入队；refreshMesh 内 buildMesh 双清欠账）。欠账扫描序 = 创建序
+    //   （行主序），光照欠账全域均匀、序不敏感。
+    Timer {
+        id: meshSyncTimer
+        interval: 16
+        repeat: true
+        running: window.appState === "playing"
+        onTriggered: {
+            if (window._meshSyncQueue.length === 0) {
+                window._meshSyncScanPhase = (window._meshSyncScanPhase + 1) % 16
+                if (window._meshSyncScanPhase !== 0) return
+                const objs = window.chunkObjects
+                for (let i = 0; i < objs.length; ++i) {
+                    const seg = objs[i]
+                    if (!seg || !seg.geometry) continue
+                    const geo = seg.geometry
+                    if (geo.deferredRebuildPending() || (geo.lightStale() && geo.vertexCount > 0))
+                        window._meshSyncQueue.push(geo)
+                }
+                if (window._meshSyncQueue.length === 0) return
+            }
+            for (let n = 0; n < window.kMeshSyncPerTick && window._meshSyncQueue.length > 0; ++n) {
+                const g = window._meshSyncQueue.shift()
+                if (g) g.refreshMesh()
+            }
+        }
     }
 
     // 进入游戏：切 playing 态 + 锁定指针（隐藏光标）+ 焦点回键位层。
@@ -671,6 +759,13 @@ Window {
         //   中心常量列，可能远离建家点）。显式补挂：只采用重生点、不动位姿（玩家仍从存档点进入世界）；
         //   新世界路径 respawn→snap 已采用 → pristine 判据不中 → no-op。
         player.adoptSpawnColumn()
+        // t972 载入世界空白区收口：世界内容（beginLoad+loadChunks+finishLoad / regenerate）与玩家
+        //   位姿、重建窗口（applyPlayerState → loadSavedState/respawn → positionChanged →
+        //   _refreshChunkVisibility 的 catch-up 已把窗口内段建 fresh）此刻全部定稿 → 对窗外段
+        //   清陈旧 mesh + 近→远入渐进同步队列（meshSyncTimer 每帧限量排空，秒级填满窗外，
+        //   无「进世界大片空白透过去、走近挖/放才刷新」）。须在 applyPlayerState 之后（窗口已按
+        //   本世界真位姿定格）、appState 切 playing 之前（Timer running 绑定随后生效即排空）。
+        kickWorldMeshSync()
         // t188 箱子按世界持久化 + 修跨世界泄漏：chestStore 跨世界长驻（同 hotbarVM），进世界前 loadAll
         //   整体替换内存（先清后填）—— 无存档 chests 表 → 空列表 → 清空，杜绝上一世界箱子残留串入新世界。
         //   存档 chests 由 saveAndExitToWorldList 经 saveAll(name, chestStore.allChests()) 落盘。
@@ -4301,10 +4396,12 @@ Window {
                 id: terrainModel
                 property int chunkCX: 0
                 property int chunkCZ: 0
-                // t470 渲染距离 + 空段剔除：chunkInRange 由 _refreshChunkVisibility 设（玩家跨 chunk 边界时）；
-                //   geo.vertexCount > 0 跳过空段（本段几乎总有内容，但绑定统一为「在范围内且非空」）。
+                // t470 重建窗口标志（CPU 重建门控，_refreshChunkVisibility 设）+ t972 空段剔除：
+                //   **visible 不再链 chunkInRange**（t972：有限世界全幅渲染，机制对标 MC 1.0 有限地图
+                //   边到边可见；t470 实测绘制剔除零 FPS 收益）——可见性只由「本段有顶点」决定，窗外段
+                //   的 mesh 新鲜度由 kickWorldMeshSync 渐进同步保证（进入世界 ~秒级填满，无永久空白区）。
                 property bool chunkInRange: true
-                visible: chunkInRange && terrainGeo.vertexCount > 0
+                visible: terrainGeo.vertexCount > 0
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
                     id: terrainGeo
@@ -4333,7 +4430,7 @@ Window {
                 property int chunkCX: 0
                 property int chunkCZ: 0
                 property bool chunkInRange: true
-                visible: chunkInRange && waterGeo.vertexCount > 0
+                visible: waterGeo.vertexCount > 0 // t972：可见性与重建窗口解链（全幅渲染，同 terrain 段）
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
                     id: waterGeo
@@ -4363,7 +4460,7 @@ Window {
                 property int chunkCX: 0
                 property int chunkCZ: 0
                 property bool chunkInRange: true
-                visible: chunkInRange && lavaGeo.vertexCount > 0
+                visible: lavaGeo.vertexCount > 0 // t972：可见性与重建窗口解链（全幅渲染，同 terrain 段）
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
                     id: lavaGeo
@@ -4396,7 +4493,7 @@ Window {
                 property int chunkCX: 0
                 property int chunkCZ: 0
                 property bool chunkInRange: true
-                visible: chunkInRange && glassGeo.vertexCount > 0
+                visible: glassGeo.vertexCount > 0 // t972：可见性与重建窗口解链（全幅渲染，同 terrain 段）
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
                     id: glassGeo
@@ -4432,7 +4529,7 @@ Window {
                 property int chunkCX: 0
                 property int chunkCZ: 0
                 property bool chunkInRange: true
-                visible: chunkInRange && iceGeo.vertexCount > 0
+                visible: iceGeo.vertexCount > 0 // t972：可见性与重建窗口解链（全幅渲染，同 terrain 段）
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
                     id: iceGeo
@@ -4490,7 +4587,7 @@ Window {
                 property int chunkCX: 0
                 property int chunkCZ: 0
                 property bool chunkInRange: true
-                visible: chunkInRange && crossGeo.vertexCount > 0
+                visible: crossGeo.vertexCount > 0 // t972：可见性与重建窗口解链（全幅渲染，同 terrain 段）
                 position: Qt.vector3d(chunkCX * 16, 0, chunkCZ * 16)
                 geometry: ChunkGeometry {
                     id: crossGeo
@@ -11793,7 +11890,7 @@ Window {
                     //   小→省 draw-call/GPU、视野收；大→视野广、吃性能。本工程 10×10 chunk 小世界半径 ≥5 时全可见
                     //   无 culling 收益，故默认 4（中心出生 81/100 chunk 可见）。改值触发 _refreshChunkVisibility
                     //   立即重算（onValueChanged 直调，无需等玩家跨界）。
-                    Text { text: "渲染距离（chunk 半径；当前 " + window.renderDistance
+                    Text { text: "重建半径（chunk 半径；当前 " + window.renderDistance
                                  + " → 可见 " + window.visibleChunkCount + "/" + (window.worldChunksPerSide * window.worldChunksPerSide)
                                  + " chunk）"
                            color: "#7fae7f"; font.pixelSize: 12 }
