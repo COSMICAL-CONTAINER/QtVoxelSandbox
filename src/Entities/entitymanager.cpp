@@ -891,6 +891,11 @@ bool EntityManager::pullMobToward(int mobIdx, const QVector3D &towardPos, float 
     e.vz = dz * speed;
     e.vy = upSpeed;           // t882 上抛分量（距离 / 角度调制后的传入值；拉离地面 + 空中拽飞弧高来源）
     e.resting = false;        // 解除静止 → tick 重力分支处理上抛→减速→下落→着地
+    // t970 拉拽摔伤豁免置位（消费点 = tick Mob 落地沿）：本次抛物线自身的落地不结算摔伤——用户口径
+    //   「拉拽是玩家动作，不该顺带摔死目标」。一次性语义：豁免在第一个落地沿无条件消费（t690 着地沿
+    //   无条件清窗同型），拉拽之后的自体坠落（被推下 / 自行走下）照常结算，**非常驻免摔**（字段语义
+    //   详见 Entity.fallExemptOnce 注释）。
+    e.fallExemptOnce = true;
     notifyEntitiesChanged();
     qCInfo(lcEnt) << "mob" << mobIdx << "hook-pulled toward player speed=" << speed << "up=" << upSpeed;
     return true;
@@ -7828,6 +7833,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
             }
             if (e.resting) {
+            // t970 坠落基准保鲜：贴地期间 fallPeakY 恒跟当前脚位（= 下一次腾空的起算点）。每 aiTick 重置
+            //   （节流面同支撑复探）；防「陈旧高基准」伪摔伤——落差只从本次腾空起累计（滞空 max 刷新见
+            //   下方重力段；落地沿结算消费后亦复位到落点）。
+            e.fallPeakY = e.pos.y() - e.halfH;
             // aiTick：复探支撑。
             // t362 改「footprint 任一列有支撑」（旧版仅中心列 cx/cz）：mob 走下 1 格台阶时，中心先越过台阶沿、
             //   但后半 footprint 仍压在更高支撑块上。旧版即判失支撑 → 重力把整格 snap 下沉到低地 → 此时 trailing
@@ -7922,6 +7931,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         }
         const float mobNewY = e.pos.y() + e.vy * float(dt);
 
+        // t970 滞空坠落基准：每帧 max 刷新历史最高脚位（上升段累计弧顶；落地沿据此结算摔伤，见落地分支）。
+        //   取积分前的当前位（弧顶由逐帧离散采样近似，粒度 vy·dt ≤ 1 格级阈值下可忽略）。
+        const float fallFeetNow = e.pos.y() - e.halfH;
+        if (fallFeetNow > e.fallPeakY) e.fallPeakY = fallFeetNow;
+
         // review25 #4 上浮天花板碰撞（vy>0 向上分支——垂直积分段原只为下落设计）：t828 持续浮力
         //   （鱿鱼 kSquidBuoyancy）使 vy 恒正，自由上移分支（下方 else 分支）原无任何向上阻挡检查 →
         //   头顶穿入固体格（冰面 / 封顶水池）后**中心**落入固体格的那一帧，落地扫描 mobSupportTopY
@@ -7984,6 +7998,25 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.resting = true;
                 e.jumpGX = 0.0f; // t670 越障跳滑流着地即停（防落地后继续漂移 / 推入墙）
                 e.jumpGZ = 0.0f;
+                // t970 mob 落地摔伤结算（机制等价 MC 1.0 生物摔落；玩家同式见 PlayerController t22 段）：
+                //   落差 = 滞空最高脚位 − 落点脚位（restTopY；峰值/落点同为 pos.y−halfH 脚位口径，
+                //   Emberling 悬浮偏移两端一致抵消）。① 拉拽一次性豁免**无条件消费**（t690 着地沿无条件
+                //   清窗同型：伤害判定读消费前值；钓竿拉拽抛物线的落地由此免摔，豁免不跨坠落存活）；
+                //   ② 落点脚位格 Water → 水缓冲豁免（机制等价玩家 t200；判定走下方 t298 mobFeetInWater
+                //   单一权威——浸没沉底时脚位格即水，同 mobSupportTopY「水非支撑」的沉底口径）；
+                //   ③ fall > kMobFallSafeBlocks → dmg = floor(fall − 阈值)，damageEntity 既有受击链承载
+                //   （红闪 + 归零 mobDied 掉落）。基准/豁免在结算前就地复位（下一程腾空从落点起算；
+                //   damageEntity 会 emit → 容器引用写入必须先于该调用，悬垂窗口纪律）。
+                const float fallDist = e.fallPeakY - restTopY; // 落差（格）
+                const bool pullExempt = e.fallExemptOnce;      // t970 拉拽一次性豁免（先取值后清）
+                e.fallExemptOnce = false;                      // 着地沿无条件消费
+                e.fallPeakY = restTopY;                        // 基准复位到落点
+                // 水缓冲判定走 t298 既有单一权威（pos 已 snap 到 restY → 脚位格 = floor(restTopY)）。
+                const bool feetInWater = mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH);
+                if (!pullExempt && !feetInWater && fallDist > kMobFallSafeBlocks) {
+                    damageEntity(idx, int(std::floor(fallDist - kMobFallSafeBlocks)));
+                    dirty = true;
+                }
             }
         } else if (mobNewY != e.pos.y()) {
             e.pos.setY(mobNewY); // 自由下落（无命中）

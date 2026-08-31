@@ -1580,6 +1580,19 @@ private:
         //   追击/持影决策）=「来回转向走出/退回阴影」抽搐的解药本体；窗尽仍暴晒 → 恢复寻影优先。
         //   放 struct 末尾区保聚合初始化不错位（t256 元教训）；DMI 兜底默认 0（无窗 = 首 tick 暴晒即寻影）。
         float shadeHoldTimer = 0.0f;
+        // t970 mob 坠落链态（仅 Mob kind 用；其余实体留默认不触发）——mob 通用落地摔伤结算两件套
+        //   （结算点 = tick Mob 落地沿 resting 翻 true 分支；常量与公式见 kMobFallSafeBlocks 注释）：
+        //   fallPeakY = 滞空期间最高**脚位** Y（pos.y − halfH；镜像玩家侧 m_peakY 口径）。贴地（resting）
+        //     期间每 aiTick 重置为当前脚位（腾空起算点保鲜，防跨事件陈旧高基准伪摔伤）；滞空期每帧 max
+        //     刷新（弧顶离散采样）；落地沿结算后复位到落点脚位。
+        //   fallExemptOnce = 一次性摔伤豁免（钓竿拉拽专用——t970 用户口径「拉拽是玩家动作，不该顺带摔死
+        //     目标」）：pullMobToward 置位；**下一个落地沿无条件消费**（t690 着地沿无条件清窗同型：伤害
+        //     判定读消费前值；落水等其它豁免路径同样消费，防陈旧豁免跨坠落存活）。**非常驻免摔**——豁免
+        //     只覆盖拉拽抛物线自身的第一次落地，之后的自体坠落（被推下 / 自行走下 / 再跳）照常结算。
+        //   放 struct 末尾区保聚合初始化不错位（t256 元教训）；DMI 兜底 + spawnMobCore 整体 move 入槽 →
+        //   槽复用自动清回 0/false。
+        float fallPeakY = 0.0f;        // 滞空最高脚位 Y（落差结算基准；贴地保鲜 / 滞空 max / 落地复位）
+        bool  fallExemptOnce = false;  // 一次性摔伤豁免（pullMobToward 置位；下个落地沿消费；非常驻）
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -2053,6 +2066,12 @@ private:
     static constexpr float kIdleChance = 0.25f;   // 每次选向进入 idle（speed=0 停驻）的概率
     static constexpr float kHurtFlashTime = 0.5f; // 受击红闪持续秒数（机制等价 MC mob 受击 10 tick = 0.5s）
     static constexpr float kDeathTime = 0.5f;     // 死亡到移除窗口（给 QML 播死亡动画；机制等价 MC 死亡动画）
+    // t970 mob 落地摔伤常量（机制等价 MC 1.0 生物摔落；与玩家侧 t22 同式同阈值）：落差 > kMobFallSafeBlocks
+    //   才伤，dmg = floor(落差 − kMobFallSafeBlocks)（每整格 1HP = 半心）。落差 = Entity.fallPeakY（滞空
+    //   最高脚位）− 支撑顶（脚位口径两端一致）；落点脚位格为 Water 时豁免（机制等价玩家 t200 水缓冲）；
+    //   钓竿拉拽的一次性豁免见 Entity.fallExemptOnce（拉拽抛物线自身落地免摔）。结算点在 tick Mob 落地沿
+    //   （resting 翻 true 分支）；伤害走 damageEntity 既有受击链（红闪 + 归零 mobDied 掉落）。
+    static constexpr float kMobFallSafeBlocks = 3.0f; // 起摔落差（格；≤3 格落地无伤，同玩家 t22 阈值）
     // t254 mob 窒息扣血间隔（机制同玩家 t160 的 kSuffocationInterval）：mob 头部（AABB 顶格）嵌实体可碰撞方块
     //   （被沙 / 方块埋住）时，每本间隔秒扣 1HP。机制等价 MC 1.0 窒息 1HP/s（每秒半心）；复用 damageEntity 链
     //   （扣血 + hurtFlash 红闪 + 血量归零 mobDied 死亡掉落），同玩家 fallDamageTaken(1)→takeDamage 链。

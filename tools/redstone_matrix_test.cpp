@@ -12367,7 +12367,16 @@ int main(int argc, char *argv[])
             qInfo().noquote() << "FAIL | t919 fire-aspect DoT finisher: no clear rig area found";
         } else {
             for (int dx = 0; dx <= 15; ++dx)
-                for (int dz = -3; dz <= 3; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+                for (int dz = -3; dz <= 3; ++dz) {
+                    w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+                    // t970 连带加固：2 格高石墙围死活动域（t897 口径——1 格墙会被越障跳翻越）。对照腿
+                    // 7.5s 长窗内 Shambler RNG 游走可走出无栏平台缘 → mob 坠落链（t970 起）结算边缘
+                    // 摔伤（9s 窗实测 1/3 轮 hp 5 假红）；伤害核账语义与墙无关。
+                    if (dx == 0 || dx == 15 || dz == -3 || dz == 3) {
+                        w.setBlock(x0 + dx, kRigY, z0 + dz, BR::Stone, 0);
+                        w.setBlock(x0 + dx, kRigY + 1, z0 + dz, BR::Stone, 0);
+                    }
+                }
             EntityManager ents;
             const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
             // 满血 20 = kHostileDefaultHealth（spawnHostileMob 同值；显式传参取回句柄索引）。
@@ -12401,7 +12410,13 @@ int main(int argc, char *argv[])
                                        << "| fire dead" << ents.deadAt(burned)
                                        << "burnedFlag" << diedBurnedFlag;
             for (int dx = 0; dx <= 15; ++dx)
-                for (int dz = -3; dz <= 3; ++dz) w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air);
+                for (int dz = -3; dz <= 3; ++dz) {
+                    w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air);
+                    if (dx == 0 || dx == 15 || dz == -3 || dz == 3) { // t970 连带加固墙随平台一并清
+                        w.setBlock(x0 + dx, kRigY, z0 + dz, BR::Air);
+                        w.setBlock(x0 + dx, kRigY + 1, z0 + dz, BR::Air);
+                    }
+                }
             tickN(w, 2);
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
@@ -19588,6 +19603,227 @@ Item {
                              "head'); floor dh 1.3 keeps same-level reels visibly airborne; -5 "
                              "durability unchanged; elevation-sweep rig with a fresh mob per "
                              "attempt per the t882(b) wander-window discipline";
+    }
+
+    // ── P-t970 钓获生物坠伤豁免探针（行为级 + 源码钉；t927 拉拽链的落地结算面）──
+    //    用户第五轮「被拉上来的生物落地有掉落伤害——免除/大幅减轻该次拉拽产生的坠伤（拉拽是玩家动作，
+    //    不该顺带摔死目标）」。修 = 两件套：① mob 通用落地摔伤链（此前缺席——落差基准/结算补齐，与玩家
+    //    t22 同式同阈值：落差 >3 起摔、每整格 1HP、落水豁免）；② 拉拽一次性豁免（pullMobToward 置
+    //    fallExemptOnce，落地沿无条件消费）——豁免只覆盖拉拽抛物线自身那次落地，之后的自体坠落照摔。
+    //    腿：(a) 高台猪被拉拽大弧落地 → HP 不变（峰值 ≥ 起点+6 先钉「弧够高」防小弧假绿）；
+    //        (b) 对照腿：同落差自落（空投 61→50，无拉拽）→ 照摔（HP 10→2 精确钉 = floor(11−3)=8 伤）；
+    //        (c) 豁免一次性消费：同一头猪先拉拽落地（20HP 满血穿过 ~11.8 格弧 = 第二豁免样本）再挖穿
+    //            其站立柱（3×3 支撑移除 = 确定性坠落驱动）落差 50→40 → 恰摔 7（HP 20→13 精确钉：
+    //            豁免随体存活则 0 伤 / 峰值滞留弧顶则 18 伤——双病同钉）；
+    //        (d) 水缓冲：井内自落（>3 格、落点脚位格 Water）→ HP 不变（t200 玩家镜像）；
+    //        (e) 源码钉：pullMobToward 体内豁免置位行 + tick 落地沿消费/基准复位/水豁免/伤害式 +
+    //            头文件阈值常量值（t882(c) 手法；kMobFallSafeBlocks private 不跨层读 → P18 镜像 3.0）。
+    //    直驱说明：(a)(c) 直调 pullMobToward（Entities 层拉拽入口本体）——竿→该入口的接线已由
+    //    P-t882(c)/P-t927 源码钉 + 行为腿锁死，此处直驱消掉甩钩仰角扫描 RNG（t882/t927 已知 flake 源），
+    //    不向矩阵基线引入新 flake。rig 全 setBlock 自凿先于砌筑（t933 教训：不信地形/净空带），独占局部
+    //    World；落点带 = 高台石板（顶 50，8..20×18..30）+ 环地板（顶 40）。
+    {
+        World wF;
+        wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(89);
+        EntityManager ents;
+        const QVector3D farF(-1000.0f, 10.0f, -1000.0f);
+        const auto tickF = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wF, farF, 0.3f, 1.8f, false);
+        };
+        constexpr float kMirrorFallSafe = 3.0f;   // EntityManager::kMobFallSafeBlocks（private 不跨层读，P18 模式）
+        constexpr float kMirrorGravity  = 28.0f;  // EntityManager::kGravity（世界重力，P18 模式）
+        // ── rig：先凿净空（6..32 × 40..72 × 16..34）后砌筑——地板顶 40 / 高台实心板顶 50 / 玩家柱顶 60 /
+        //    井（板面 1×1 开口、两格深水，四壁实心不外流）。
+        for (int x = 6; x <= 32; ++x)
+            for (int y = 40; y <= 72; ++y)
+                for (int z = 16; z <= 34; ++z) wF.setBlock(x, y, z, BR::Air, 0);
+        for (int x = 6; x <= 32; ++x)
+            for (int z = 16; z <= 34; ++z) wF.setBlock(x, 39, z, BR::Stone, 0);
+        for (int x = 8; x <= 20; ++x)
+            for (int y = 40; y <= 49; ++y)
+                for (int z = 18; z <= 30; ++z) wF.setBlock(x, y, z, BR::Stone, 0);
+        for (int y = 40; y <= 59; ++y) wF.setBlock(24, y, 24, BR::Stone, 0);
+        // 井 = 板面东南角 5×5 开口（16..20 × 26..30）两格深水——5×5 让空投期游走横漂（≤0.91 格 @0.9s 空落）
+        //   结构性逃不出去（出缘需 ≥2.1 格 = 2.3× 裕量，确定性不靠 RNG）；井心 (18.5,28.5) 与拉拽落点带
+        //   （x ≤ 14.8，拉向 +x 玩家柱）相隔 ≥ 3.1 格 → (a)(c) 的拉拽落点永不落井。四壁实心 + 底石不外流。
+        for (int wx = 16; wx <= 20; ++wx)
+            for (int wz = 26; wz <= 30; ++wz) {
+                wF.setBlock(wx, 49, wz, BR::Water, 0);
+                wF.setBlock(wx, 48, wz, BR::Water, 0);
+            }
+        // 拉拽驱动（t927 解算式现算 upSpeed：目标峰 = 玩家脚 60 + 眼 1.62 + 过头 0.6 − 目标中心；
+        // speed 9.0 ≈ 6+0.35×8.5 中距档；水平位移受击退拖拽 v0/4 限幅 ~2.3 格 → 落点恒在板内 = 确定性）。
+        const auto reelPig = [&](int pig, float *peakOut) {
+            const float startY = ents.posAt(pig).y();
+            const float dh = (60.0f + 1.62f + 0.6f) - startY;
+            const bool pulled = ents.pullMobToward(pig, QVector3D(24.5f, 60.0f, 24.5f), 9.0f,
+                                                   std::sqrt(2.0f * kMirrorGravity * dh));
+            float peak = startY;
+            int stillT = 0;
+            for (int t = 0; t < 300 && ents.aliveAt(pig); ++t) {
+                tickF(1, 0.05f);
+                const float y = ents.posAt(pig).y();
+                if (y > peak) peak = y;
+                if (t > 20 && y < startY + 0.05f) { ++stillT; if (stillT >= 3) break; } // 落回起高带 = 飞完
+            }
+            if (peakOut) *peakOut = peak;
+            return pulled;
+        };
+
+        // (a) 拉拽大弧落地免摔：起脚 50 → 弧顶 ~61.3（落差 ~11.3，无豁免将摔 floor(11.3−3)=8）→ 落回板。
+        bool okA = false;
+        float peakA = 0.0f;
+        int hpA = -1;
+        {
+            const int pig = ents.spawnMobTyped(12, 50, 24, EntityManager::MobPig,
+                                               QStringLiteral("#e8a0a0"), 10);
+            tickF(5, 0.05f); // 贴台 settle（首游荡窗内抢拍，t836(d) 纪律）
+            reelPig(pig, &peakA);
+            peakA -= 0.45f;                  // 中心 → 脚位口径（diag 用）
+            tickF(6, 0.05f);                 // 结算裕量（落地沿必已发生；防早读假绿/假红）
+            hpA = ents.healthAt(pig);
+            okA = peakA >= 56.0f             // 弧够高钉（峰值脚位 ≥ 起点 50 + 6；解算目标 ~61.3）
+                  && hpA == 10;              // 落地零伤（豁免消费；阴性轮此处 = 2 红）
+            ents.removeEntityAt(pig);
+        }
+
+        // (b) 对照腿：同落差自落（无拉拽空投 61→50 = 落差 11）→ 照摔 floor(11−3)=8 → HP 10−8=2 精确钉。
+        bool okB = false;
+        int hpB = -1;
+        {
+            const int pig = ents.spawnMobTyped(12, 61, 24, EntityManager::MobPig,
+                                               QStringLiteral("#e8a0a0"), 10);
+            for (int t = 0; t < 120 && ents.aliveAt(pig); ++t) {
+                tickF(1, 0.05f);
+                if (ents.posAt(pig).y() < 51.0f) break; // 已落板带
+            }
+            tickF(6, 0.05f); // 结算裕量（落地沿必已发生）
+            hpB = ents.healthAt(pig);
+            // 精确钉：spawn 脚位恰 61.0、板顶恰 50.0 → 落差 11.0 → dmg = floor(11−3) = 8（镜像常量现算）
+            const int expectB = 10 - int(std::floor(11.0f - kMirrorFallSafe));
+            okB = hpB == expectB;
+            ents.removeEntityAt(pig);
+        }
+
+        // (c) 豁免一次性消费：满血 20 猪先拉拽落地（满血穿过 = 第二豁免样本）→ 挖穿其站立柱（3×3 支撑
+        //     移除 = 确定性坠落驱动，替代击退推挤——推挤位移会被 RNG 游走对冲，实测一轮假红）→ 落差
+        //     50→40 = 10 → 7 伤 → 掉血 ≥4 = 豁免未随体存活（消费成立）。
+        bool okC = false;
+        int hpC = -1;
+        {
+            const int pig = ents.spawnMobTyped(12, 50, 24, EntityManager::MobPig,
+                                               QStringLiteral("#e8a0a0"), 20);
+            tickF(5, 0.05f);
+            const bool pulled = reelPig(pig, nullptr);
+            tickF(6, 0.05f); // 拉拽落地结算裕量
+            const int px = qFloor(ents.posAt(pig).x());
+            const int pz = qFloor(ents.posAt(pig).z());
+            for (int dx2 = -1; dx2 <= 1; ++dx2)          // 3×3 柱挖穿 40..49：footprint 任一列支撑
+                for (int dz2 = -1; dz2 <= 1; ++dz2)      // 都被移除（t362 复探口径对偶）→ 必失撑
+                    for (int y = 40; y <= 49; ++y)
+                        wF.setBlock(px + dx2, y, pz + dz2, BR::Air, 0);
+            for (int t = 0; t < 200 && ents.aliveAt(pig); ++t) {
+                tickF(1, 0.05f);
+                if (ents.posAt(pig).y() < 41.0f) break; // 已落地板带（地板顶 40）
+            }
+            tickF(6, 0.05f); // 结算裕量
+            hpC = ents.healthAt(pig);
+            // 精确钉 = 双铁证：①豁免一次性消费（豁免若随体存活 → 零伤 hpC 20）；②落地沿峰值复位
+            // （峰值若滞留拉拽弧顶 ~61.7 → 落差 21.7 → 18 伤 hpC 2；恰复位到落点 50 → 落差 10 → 7 伤）。
+            const int expectC = 20 - int(std::floor(10.0f - kMirrorFallSafe));
+            okC = pulled && hpC == expectC;
+            ents.removeEntityAt(pig);
+        }
+
+        // (d) 水缓冲：井心 (18,28) 上方空投（61→井底 48 = 落差 13，无水将摔 10）→ 落点脚位格 Water → 零伤。
+        bool okD = false;
+        int hpD = -1;
+        float yD = 0.0f;
+        {
+            const int pig = ents.spawnMobTyped(18, 61, 28, EntityManager::MobPig,
+                                               QStringLiteral("#e8a0a0"), 10);
+            for (int t = 0; t < 400 && ents.aliveAt(pig); ++t) {
+                tickF(1, 0.05f);
+                if (ents.posAt(pig).y() < 48.6f) break; // 沉底带（井底支撑顶 48 + halfH）
+            }
+            tickF(20, 0.05f); // 沉底/结算裕量（水中缓沉 ≤3 b/s）
+            yD = ents.posAt(pig).y();
+            hpD = ents.healthAt(pig);
+            okD = hpD == 10; // 水豁免（脚位格 Water）；无水同落差 = 10 伤必死
+            if (!okD)
+                qInfo().noquote() << "  [t970 d diag] finalY" << yD
+                                  << "finalXZ" << ents.posAt(pig).x() << ents.posAt(pig).z()
+                                  << "cells b50" << wF.blockAt(18, 50, 28) << "b49" << wF.blockAt(18, 49, 28)
+                                  << "b48" << wF.blockAt(18, 48, 28) << "b47" << wF.blockAt(18, 47, 28)
+                                  << "alive" << ents.aliveAt(pig);
+            ents.removeEntityAt(pig);
+        }
+
+        // (e) 源码钉：豁免置位行（pullMobToward 体界内）+ 落地沿消费/复位/水豁免/伤害式 + 头文件常量值。
+        bool okE = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString emPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                       QStringLiteral("src/Entities/entitymanager.cpp"));
+            const QString emhPath = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(
+                                        QStringLiteral("src/Entities/entitymanager.h"));
+            QFile fc(emPath), fh(emhPath);
+            if (fc.open(QIODevice::ReadOnly) && fh.open(QIODevice::ReadOnly)) {
+                const QString t = QString::fromUtf8(fc.readAll());
+                const QString th = QString::fromUtf8(fh.readAll());
+                const int b0 = t.indexOf(QStringLiteral("bool EntityManager::pullMobToward"));
+                const int b1 = t.indexOf(QStringLiteral("bool EntityManager::bobberHasBiteAt"));
+                QString pullBody;
+                if (b0 >= 0 && b1 > b0) {
+                    for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n'))) {
+                        if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                        pullBody += line; pullBody += QLatin1Char('\n');
+                    }
+                }
+                QString settleBody; // tick 落地沿（resting 翻 true 分支）邻域：豁免消费行 → 伤害式行
+                const int s0 = t.indexOf(QStringLiteral("e.fallExemptOnce = false"));
+                const int s1 = t.indexOf(QStringLiteral("damageEntity(idx, int(std::floor(fallDist"));
+                if (s0 >= 0 && s1 > s0) {
+                    for (const QString &line : t.mid(s0, s1 - s0).split(QLatin1Char('\n'))) {
+                        if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                        settleBody += line; settleBody += QLatin1Char('\n');
+                    }
+                }
+                okE = pullBody.contains(QStringLiteral("e.fallExemptOnce = true"))
+                      && settleBody.contains(QStringLiteral("e.fallPeakY = restTopY"))
+                      && settleBody.contains(QStringLiteral("mobFeetInWater("))
+                      && settleBody.contains(QStringLiteral("!pullExempt && !feetInWater"))
+                      && t.contains(QStringLiteral("if (fallFeetNow > e.fallPeakY)"))
+                      && t.contains(QStringLiteral("e.fallPeakY = e.pos.y() - e.halfH"))
+                      && th.contains(QStringLiteral("kMobFallSafeBlocks = 3.0f"));
+            }
+        }
+
+        const bool okT970 = okA && okB && okC && okD && okE;
+        if (!okT970) ++totalFail;
+        if (!okT970)
+            qInfo().noquote() << "  [t970 diag] okA" << okA << "peakA" << peakA << "hpA" << hpA
+                              << "| okB" << okB << "hpB" << hpB
+                              << "| okC" << okC << "hpC" << hpC
+                              << "| okD" << okD << "hpD" << hpD
+                              << "| okE" << okE;
+        qInfo().noquote() << (okT970 ? "PASS" : "FAIL")
+                          << "| t970 reeled-mob fall-damage exemption: a generic mob landing-settlement "
+                             "chain now exists (peak-feet vs landing-top, dmg = floor(fall - 3), water "
+                             "landing cancels, damage via the existing damageEntity hurt chain) and the "
+                             "fishing reel stamps a ONE-SHOT exemption consumed unconditionally at the "
+                             "next landing edge -- (a) a pig reeled in a ~11-block solved arc lands at "
+                             "full HP (peak >= start+6 pins a real arc; unexempted the same arc would "
+                             "deal 8), (b) control: an unpulled drop from the same 11-block fall takes "
+                             "exactly 8 (10->2 HP), (c) the SAME pig reeled at full 20 HP then dropped "
+                             "through a support-dug shaft falls 50->40 and lands at exactly 13 HP "
+                             "(=7 damage: zero if the exemption survived the body, 18 if the landing "
+                             "had not reset the fall baseline - both faces pinned), (d) a >3-block drop into a "
+                             "water well lands unharmed (t200 mirror), (e) source pins on the reel-side "
+                             "stamp inside pullMobToward, the landing-edge consume/peak-reset/water/"
+                             "damage lines, and the 3.0f threshold constant; reel driven directly "
+                             "through pullMobToward (the rod->entry wiring is P-t882(c)/P-t927 pinned) "
+                             "so no new hook-sweep RNG enters the baseline";
     }
 
     // ── P-t929 大峡谷孤立水格探针（worldgen 行为级：多 seed 生成 → 全图孤立水格 == 0）──
