@@ -29437,6 +29437,330 @@ Item {
                              " Inventory.qml x real Hotbar rig with a host-mirroring void-return sink";
     }
 
+    // ── P-t976 背包耐久条显隐回归修（用户第五轮：已消耗耐久的镐背包里不显条、hover 能看到耐久掉了）──
+    //    调查判决：HEAD 显示条件本身未反（t931 语义「满耐久隐、受损显」正确，引擎级 rig 全绿）；真根因
+    //    是**实机 qmlcachegen AOT 面**——DurabilityBar.qml 单独成编译单元，组件内 `visible` 被静态编译
+    //    （width/color 因跨对象属性静态不可解析自动回退解释执行，aotstats codegenResult 可证），显隐决策
+    //    隔着「面板单元绑定写 curDur/maxDur → 组件单元绑定再读」两跳跨单元链实机不重算（t498「进背包无
+    //    耐久显示、只在 hover tooltip 显」/ t976「已消耗耐久不显条」同症：tooltip 走信号处理器直读 VM 恒
+    //    新、条恒隐）。修法 = 五个使用点（Inventory 主栏/hotbar 行/护甲槽 + SurvivalInventory 主栏/hotbar
+    //    行）显隐决策上收面板 delegate 单元，表达形式触碰 revision 并参与返回值（qml-touch 三轮口径、
+    //    图标/数量已实证的同款 AOT 形状）；t931 语义（curDur<maxDur 隐满耐久）原样保留。
+    //    (a) 源码钉：三 revision 变体恰好各 1/1/1（Inventory）+ 1/1（SurvivalInventory）次出现 + 组件头
+    //        t976 契约段 + 组件内 t931 语义行保留（散改/漏改即红）。
+    //    (b) 行为腿（t874/t956/t975 装配法：真 SurvivalInventory.qml × 真 Hotbar；InvSlot 补入文件面）：
+    //        ①预置半耐久镐（hotbar 行 200/250、主栏 150/250）→ 条 visible 且彩段宽 ∝ 比例
+    //        ②满耐久镐（主栏 250/250）→ 条隐藏（t931 语义）
+    //        ③创建后到达（主栏 60/250）→ 条 visible（panel 存活期 revision 驱动重算）
+    //        ④live damage：选中满耐久镐 damageSelectedItem×30 → 220/250 条由隐转显（签名不与腿① 相撞）
+    //        ⑤空槽条自隐 + 总条数 40（4 护甲 armorDurBar 内联 + 27 主栏 + 9 hotbar 行）。
+    //    阴性轮：撤 SurvivalInventory 主栏 visible 上收行（回退组件内隐式决策）→ 恰 P-t976 FAIL → 复原绿。
+    {
+        bool okPin = false, behavOk = false;
+        QString behavDiag;
+        const QString exeDir976 = QCoreApplication::applicationDirPath();
+        const QString root976 = QDir(exeDir976 + QStringLiteral("/..")).absolutePath();
+        QFile inv976f(root976 + QStringLiteral("/src/ui/Inventory.qml"));
+        QFile surv976f(root976 + QStringLiteral("/src/ui/SurvivalInventory.qml"));
+        QFile bar976f(root976 + QStringLiteral("/src/ui/DurabilityBar.qml"));
+        const QString inv976s = inv976f.open(QIODevice::ReadOnly) ? QString::fromUtf8(inv976f.readAll()) : QString();
+        const QString surv976s = surv976f.open(QIODevice::ReadOnly) ? QString::fromUtf8(surv976f.readAll()) : QString();
+        const QString bar976s = bar976f.open(QIODevice::ReadOnly) ? QString::fromUtf8(bar976f.readAll()) : QString();
+        // 三 revision 变体逐字钉（决策上收面板单元：revision 参与返回值 + cDur/mDur 同源判定）。
+        const QString visMain976 = QStringLiteral("visible: { const _r = root.hotbar.mainRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }");
+        const QString visSlot976 = QStringLiteral("visible: { const _r = root.hotbar.slotRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }");
+        const QString visArmor976 = QStringLiteral("visible: { const _r = root.hotbar.armorRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }");
+        okPin = inv976s.count(visMain976) == 1
+                && inv976s.count(visSlot976) == 1
+                && inv976s.count(visArmor976) == 1
+                && surv976s.count(visMain976) == 1
+                && surv976s.count(visSlot976) == 1
+                && inv976s.count(QStringLiteral("t976")) >= 3
+                && surv976s.count(QStringLiteral("t976")) >= 2
+                && bar976s.contains(QStringLiteral("t976"))
+                && bar976s.contains(QStringLiteral("visible: maxDur > 0 && curDur > 0 && curDur < maxDur"));
+
+        // (b) 行为腿装配（t975 同款：临时目录逃离 qrc 重映射 + 私有 URI + wrapper 作用域）。
+        static bool sT976TypesRegistered = false;
+        if (!sT976TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT976", 1, 0, "Hotbar");
+            qmlRegisterType<PlayerController>("VoxelSandboxProbeT976", 1, 0, "PlayerController");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT976", 1, 0, "ResourcePackManager");
+            sT976TypesRegistered = true;
+        }
+        const QString uiDir976 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUiDir976 = QDir::temp().absoluteFilePath(
+                QStringLiteral("t976_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUiDir976);
+        for (const QString f : { QStringLiteral("SurvivalInventory.qml"), QStringLiteral("InventoryOps.js"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("DurabilityBar.qml"), QStringLiteral("DarkScrollBar.qml"),
+                                 QStringLiteral("InvSlot.qml") }) {
+            QFile::remove(probeUiDir976 + QLatin1Char('/') + f);
+            QFile(uiDir976 + QLatin1Char('/') + f).copy(probeUiDir976 + QLatin1Char('/') + f);
+        }
+        {
+            QFile stub976(probeUiDir976 + QStringLiteral("/CharacterPreview3D.qml"));
+            if (stub976.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                stub976.write(QByteArrayLiteral(
+                    "import QtQuick\n"
+                    "Item {\n"
+                    "    property var hotbar\n"
+                    "    property var player\n"
+                    "    property bool showHitboxes: false\n"
+                    "    property var mouseScene\n"
+                    "}\n"));
+                stub976.close();
+            }
+        }
+        {
+            const QUrl jsUrl976 = QUrl::fromLocalFile(probeUiDir976 + QLatin1Char('/') + QStringLiteral("InventoryOps.js"));
+            const QStringList qmlFiles976 = QDir(probeUiDir976).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles976) {
+                QFile p(probeUiDir976 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import \"InventoryOps.js\" as InventoryOps"),
+                          QStringLiteral("import \"") + jsUrl976.toString() + QStringLiteral("\" as InventoryOps"));
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT976\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine976;
+        Hotbar vm976;
+        QQmlComponent wrapComp976(&engine976);
+        wrapComp976.setData(R"QML(import QtQuick
+Item {
+    id: window
+    width: 800; height: 600
+    property bool shiftHeld: false
+    property bool showHitboxes: false
+    property var progress
+    function refocusKeyInput() { }
+    HoverHandler { id: cursorTracker }
+}
+)QML", QUrl());
+        QQuickItem host976;
+        QObject *panel976Obj = nullptr;
+        QFile invSrc976(probeUiDir976 + QLatin1Char('/') + QStringLiteral("SurvivalInventory.qml"));
+        if (wrapComp976.isError()) {
+            behavDiag = QStringLiteral("wrapper: ") + wrapComp976.errorString();
+        } else if (!invSrc976.open(QIODevice::ReadOnly)) {
+            behavDiag = QStringLiteral("SurvivalInventory read failed");
+        } else {
+            QQuickItem *wrapItem976 = qobject_cast<QQuickItem *>(wrapComp976.create());
+            if (!wrapItem976) {
+                behavDiag = QStringLiteral("wrapper create failed");
+            } else {
+                wrapItem976->setParent(&engine976);
+                wrapItem976->setParentItem(&host976);
+                QQmlComponent invComp976(&engine976);
+                invComp976.setData(invSrc976.readAll(), QUrl::fromLocalFile(invSrc976.fileName()));
+                if (invComp976.isError()) {
+                    behavDiag = QStringLiteral("SurvivalInventory load: ") + invComp976.errorString();
+                } else {
+                    panel976Obj = invComp976.create(qmlContext(wrapItem976));
+                    QQuickItem *ii976 = qobject_cast<QQuickItem *>(panel976Obj);
+                    if (!ii976) {
+                        behavDiag = QStringLiteral("SurvivalInventory create: ") + invComp976.errorString();
+                    } else {
+                        panel976Obj->setProperty("hotbar", QVariant::fromValue(&vm976));
+                        panel976Obj->setProperty("player", QVariant());
+                        panel976Obj->setProperty("progress", QVariant());
+                        ii976->setWidth(800);
+                        ii976->setHeight(600);
+                        panel976Obj->setParent(wrapItem976);
+                        ii976->setParentItem(wrapItem976);
+                    }
+                }
+            }
+        }
+        if (!panel976Obj) {
+            behavOk = false;
+        } else {
+            QCoreApplication::processEvents();
+            // 条目收集器：递归找「有 curDur+maxDur 属性」的条（DurabilityBar 实例 + armorDurBar 内联），
+            //   读 own visible 属性值 / curDur / maxDur / 彩段宽（子 Rectangle 中宽 < 槽条宽者）。
+            const auto collect976 = [](auto &&self, QQuickItem *item, QVariantList &out) -> void {
+                const QMetaObject *mo = item->metaObject();
+                if (mo->indexOfProperty("curDur") >= 0 && mo->indexOfProperty("maxDur") >= 0
+                    && mo->indexOfProperty("ratio") >= 0) {
+                    QVariantMap rec;
+                    rec.insert(QStringLiteral("visible"), item->property("visible").toBool());
+                    rec.insert(QStringLiteral("curDur"), item->property("curDur").toInt());
+                    rec.insert(QStringLiteral("maxDur"), item->property("maxDur").toInt());
+                    rec.insert(QStringLiteral("barW"), item->width());
+                    QVariantList kids;
+                    const auto children = item->childItems();
+                    for (QQuickItem *c : children) {
+                        if (QString::fromUtf8(c->metaObject()->className()).contains(QStringLiteral("Rectangle"))) {
+                            QVariantMap k;
+                            k.insert(QStringLiteral("w"), c->width());
+                            k.insert(QStringLiteral("h"), c->height());
+                            kids.append(k);
+                        }
+                    }
+                    rec.insert(QStringLiteral("kids"), kids);
+                    out.append(rec);
+                }
+                const auto next = item->childItems();
+                for (QQuickItem *c : next) self(self, c, out);
+            };
+            QVariantList bars976;
+            {
+                QQuickItem *panelItem976 = qobject_cast<QQuickItem *>(panel976Obj);
+                if (panelItem976) collect976(collect976, panelItem976, bars976);
+            }
+            const int pick976 = int(ToolRegistry::PickaxeIron);
+            const int pickMax976 = ToolRegistry::maxDurability(pick976);
+            if (bars976.size() != 40) {
+                behavDiag = QStringLiteral("bar count ") + QString::number(bars976.size());
+            } else do {
+                // ① 预置半耐久镐：hotbar 行 200/250、主栏 150/250 → visible + 彩段宽 ∝ 比例。
+                vm976.setStack(2, pick976, 1, 200);
+                vm976.mainSetStack(5, pick976, 1, 150);
+                QCoreApplication::processEvents();
+                QVariantList barsA;
+                {
+                    QQuickItem *panelItem976 = qobject_cast<QQuickItem *>(panel976Obj);
+                    if (panelItem976) collect976(collect976, panelItem976, barsA);
+                }
+                const auto findIn976 = [](const QVariantList &bars, int cur, int max) -> QVariantMap {
+                    for (const QVariant &v : bars) {
+                        const QVariantMap m = v.toMap();
+                        if (m.value(QStringLiteral("curDur")).toInt() == cur
+                            && m.value(QStringLiteral("maxDur")).toInt() == max)
+                            return m;
+                    }
+                    return {};
+                };
+                const QVariantMap hb976 = findIn976(barsA, 200, 250);
+                const QVariantMap mn976 = findIn976(barsA, 150, 250);
+                const qreal hbW976 = hb976.isEmpty() ? -1 : hb976.value(QStringLiteral("barW")).toReal();
+                const auto coloredW976 = [](const QVariantMap &m) -> qreal {
+                    const QVariantList kids = m.value(QStringLiteral("kids")).toList();
+                    const qreal barW = m.value(QStringLiteral("barW")).toReal();
+                    for (const QVariant &k : kids) {
+                        const QVariantMap km = k.toMap();
+                        const qreal w = km.value(QStringLiteral("w")).toReal();
+                        // 彩段 = 非「整条背景」的子 Rectangle（宽 < 槽条宽）；背景 anchors.fill 宽 == barW。
+                        if (w >= 0 && w < barW - 0.5)
+                            return w;
+                    }
+                    return -1;
+                };
+                if (hb976.isEmpty() || mn976.isEmpty()
+                        || !hb976.value(QStringLiteral("visible")).toBool()
+                        || !mn976.value(QStringLiteral("visible")).toBool()
+                        || hbW976 <= 0) {
+                    behavDiag = QStringLiteral("damaged bars: hb ") + (hb976.isEmpty() ? QStringLiteral("missing") : (hb976.value(QStringLiteral("visible")).toBool() ? QStringLiteral("vis") : QStringLiteral("hidden")))
+                                 + QStringLiteral(" mn ") + (mn976.isEmpty() ? QStringLiteral("missing") : (mn976.value(QStringLiteral("visible")).toBool() ? QStringLiteral("vis") : QStringLiteral("hidden")));
+                    break;
+                }
+                const qreal hbColW976 = coloredW976(hb976);
+                const qreal mnColW976 = coloredW976(mn976);
+                if (hbColW976 < hbW976 * 0.8 - 0.5 || hbColW976 > hbW976 * 0.8 + 0.5
+                        || mnColW976 < hbW976 * 0.6 - 0.5 || mnColW976 > hbW976 * 0.6 + 0.5) {
+                    behavDiag = QStringLiteral("colored width: hb ") + QString::number(hbColW976)
+                                 + QStringLiteral(" mn ") + QString::number(mnColW976)
+                                 + QStringLiteral(" (barW ") + QString::number(hbW976) + QStringLiteral(")");
+                    break;
+                }
+                // ② 满耐久镐（主栏 250/250）→ 条隐藏（t931 语义保持）。
+                vm976.mainSetStack(6, pick976, 1, -1);
+                QCoreApplication::processEvents();
+                QVariantList barsB;
+                {
+                    QQuickItem *panelItem976 = qobject_cast<QQuickItem *>(panel976Obj);
+                    if (panelItem976) collect976(collect976, panelItem976, barsB);
+                }
+                const QVariantMap full976 = findIn976(barsB, pickMax976, pickMax976);
+                if (full976.isEmpty() || full976.value(QStringLiteral("visible")).toBool()) {
+                    behavDiag = QStringLiteral("full bar: ") + (full976.isEmpty() ? QStringLiteral("missing") : QStringLiteral("visible"));
+                    break;
+                }
+                // ③ 创建后到达（主栏 60/250）→ 条 visible（revision 驱动重算）。
+                vm976.mainSetStack(8, pick976, 1, 60);
+                QCoreApplication::processEvents();
+                QVariantList barsC;
+                {
+                    QQuickItem *panelItem976 = qobject_cast<QQuickItem *>(panel976Obj);
+                    if (panelItem976) collect976(collect976, panelItem976, barsC);
+                }
+                const QVariantMap late976 = findIn976(barsC, 60, 250);
+                if (late976.isEmpty() || !late976.value(QStringLiteral("visible")).toBool()) {
+                    behavDiag = QStringLiteral("late arrival: ") + (late976.isEmpty() ? QStringLiteral("missing") : QStringLiteral("hidden"));
+                    break;
+                }
+                // ④ live damage：选中满耐久镐（hotbar 槽 7）→ 隐；damageSelectedItem×30 → 220/250 显
+                //    （220 与腿① 的 200 不撞签名，断言只能由槽 7 自己的条满足）。
+                vm976.setStack(7, pick976, 1, -1);
+                vm976.setSelectedSlot(7);
+                QCoreApplication::processEvents();
+                for (int k = 0; k < 30; ++k) vm976.damageSelectedItem();
+                QCoreApplication::processEvents();
+                if (vm976.durabilityAt(7) != 220) {
+                    behavDiag = QStringLiteral("damage vm dur ") + QString::number(vm976.durabilityAt(7));
+                    break;
+                }
+                QVariantList barsD;
+                {
+                    QQuickItem *panelItem976 = qobject_cast<QQuickItem *>(panel976Obj);
+                    if (panelItem976) collect976(collect976, panelItem976, barsD);
+                }
+                const QVariantMap live976 = findIn976(barsD, 220, 250);
+                if (live976.isEmpty() || !live976.value(QStringLiteral("visible")).toBool()) {
+                    behavDiag = QStringLiteral("live damage bar: ") + (live976.isEmpty() ? QStringLiteral("missing") : QStringLiteral("hidden"));
+                    break;
+                }
+                // ⑤ 空槽条自隐（curDur==0 / maxDur==0 的 armorDurBar 四条恒隐）。
+                const auto emptyHidden976 = [barsD]() -> bool {
+                    for (const QVariant &v : barsD) {
+                        const QVariantMap m = v.toMap();
+                        if (m.value(QStringLiteral("curDur")).toInt() == 0
+                                && m.value(QStringLiteral("maxDur")).toInt() == 0
+                                && m.value(QStringLiteral("visible")).toBool())
+                            return false;
+                    }
+                    return true;
+                };
+                if (!emptyHidden976()) {
+                    behavDiag = QStringLiteral("empty bar visible");
+                    break;
+                }
+                behavOk = true;
+            } while (false);
+        }
+        QDir(probeUiDir976).removeRecursively();
+
+        const bool ok976 = okPin && behavOk;
+        if (!ok976) ++totalFail;
+        if (!ok976)
+            qInfo().noquote() << "  [t976 diag] pin" << okPin << "behav" << behavOk << behavDiag;
+        qInfo().noquote() << (ok976 ? "PASS" : "FAIL")
+                          << "| t976 backpack durability-bar display regression (user fifth round:"
+                          << " consumed pickaxe shows NO bar in the inventory while hover tooltip shows"
+                          << " the dropped durability) - display condition itself is correct (t931"
+                          << " full-hides semantics kept) but lived inside the separately AOT-compiled"
+                          << " DurabilityBar.qml unit two hops away from the panel revision bindings,"
+                          << " the exact real-machine never-re-evaluates class (t498 'no durability in"
+                          << " backpack, only hover tooltip' same symptom); fix hoists the visibility"
+                          << " decision into each of the five usage sites' delegate unit as a"
+                          << " revision-touching expression (the app-proven icon/count shape); pinned by"
+                          << " source pins (three revision variants exactly once per panel, component"
+                          << " contract + t931 line kept) plus behavioral legs on the real"
+                          << " SurvivalInventory.qml x real Hotbar rig (damaged-visible with proportional"
+                          << " colored width / full-hidden / late-arrival-visible / live damageSelectedItem"
+                          << " flip / empty-hidden, 40 bars total)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

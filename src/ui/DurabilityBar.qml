@@ -8,6 +8,14 @@
 //   curDur<=0 / maxDur<=0（空槽 / 非耐久物）→ 隐藏。满耐久（curDur==maxDur）**不显条**（t931 用户口径翻案
 //   t498「背包常显」：新工具 / 新装备满耐久时槽内无条，受损后才见且持续显示——与 HUD hotbar t315/t349
 //   「满耐久隐条」完全同口径，统一两处观感）。
+//
+//   t976（**使用契约，逐槽必须遵守**）：每个使用点必须**自显 `visible:`**（表达形式触碰 revision 并参与
+//   返回值，qml-touch 三轮口径）：`visible: { const _r = root.hotbar.<rev>; return _r >= 0 && mDur > 0
+//   && cDur > 0 && cDur < mDur }`。理由：本组件单独成编译单元，qmlcachegen 把组件内 `visible` 编译为
+//   AOT（本文件 width/color 因跨对象属性无法静态解析自动回退解释执行，aotstats 可证）——显隐决策若
+//   留在组件内，就隔着「面板单元绑定写 curDur/maxDur → 组件单元绑定再读」两跳跨单元链，实机上不重算
+//   （t498「进背包无耐久显示、只在 hover tooltip 显」/ t976「已消耗耐久不显条」同症：数据面 hover 恒新、
+//   条恒隐）。决策上收到面板 delegate 单元（图标 / 数量同款已实证面）后，与实机行为一致。
 import QtQuick
 
 Item {
