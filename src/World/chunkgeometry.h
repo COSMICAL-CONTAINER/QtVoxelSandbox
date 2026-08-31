@@ -135,8 +135,14 @@ public:
     //   错过的 sun/water/shadow/greedy 变化一并应用（远 chunk 重新进视野时贴图 / 光照非陈旧）。
     //   true→false 不重建（远 chunk 不绘制，下次回 true 再 catch up）。默认 true（首帧 mesh 未绑前按近程
     //   处理，启动期 worldChanged 触发首次构建后再被 _refreshChunkVisibility 切换）。
-    //   分层（PLAN §2）：纯呈现层门控信号（bool），不依赖 Game 层；与 Model.visible 双重剔除（远端剔除
-    //   + 空段剔除）配套 —— visible 决定「GPU 是否绘制」，chunkInRange 决定「CPU 是否重建 mesh」。
+    //   分层（PLAN §2）：纯呈现层门控信号（bool），不依赖 Game 层。
+    //   **t972 语义收窄**：本属性只承担「CPU 何时重建」的门控，**不再承担「GPU 是否绘制」**——
+    //   Model.visible 只由 vertexCount>0 决定（有限世界全幅渲染，机制对标 MC 1.0 有限地图边到边可见；
+    //   t470 实测「600→154 段」的绘制剔除本就零 FPS 收益，绘制侧放开零成本，重建窗口经济学无损保留）。
+    //   窗外段错过重建不再靠 catch-up 兜底可见性：错过的**内容**重建记入 m_deferredRebuild、错过的
+    //   **光照**重烘记入 m_lightStale，由呈现层渐进同步队列（Main.qml kickWorldMeshSync / _meshSyncTimer）
+    //   以近→远、每帧限量节奏排空（refreshMesh 走与编辑同一条 buildMesh 链）——进入世界时窗外区域
+    //   秒级渐进填满，而非永久留白到玩家走近 / 编辑。
     Q_PROPERTY(bool chunkInRange READ chunkInRange WRITE setChunkInRange NOTIFY chunkInRangeChanged)
     // t223/tXXX 水贴图动画 phase（flipbook 帧索引 0/1）：**历史遗留属性**。tXXX 水动画重建消除——
     //   flipbook 翻页换帧（2s 一次全量水段 buildMesh，Swamp 场景 261 段/次）是 mesh 重建风暴第二根因；
@@ -200,6 +206,23 @@ public:
     // t223 水贴图动画 phase（0/1；仅水段使用）。值变 → 水段 buildMesh(Water)（地形段早退）。
     int waterAnimPhase() const { return m_waterAnimPhase; }
     void setWaterAnimPhase(int phase);
+
+    // t972 载入世界空白区修复——呈现层渐进同步三入口（重建链仍单点 buildMesh，不另起第二套构建）：
+    //   clearMesh()   世界内容换代（enterWorld 的 beginLoad/regenerate）后由呈现层对**窗外段**调：
+    //                 旧世界 / 上局残 mesh 立即清空（vertexCount→0 → Model.visible 绑定自动隐，
+    //                 防「换世界后窗外显上一世界地形」的陈旧错景），并清两项错过重建欠账。
+    //   refreshMesh() 渐进同步队列的排空动作：无条件走 buildMesh(Dirty)（与编辑即时重建同一条链，
+    //                 同因由计数），把当前世界数据烘成 mesh。承载「载入完成→近→远逐帧限量重建」。
+    //   deferredRebuildPending() / lightStale()：稳态期（游玩中）窗外段错过的**内容**重建（编辑 /
+    //                 流体写被 onWorldChanged 窗口门控跳过，dirty 随 clearAllDirty 清）与**光照**
+    //                 重烘（setSunDir/setDayMul 窗口静默跟随）的欠账查询——呈现层低频扫描把欠账段
+    //                 排进同一同步队列，使远处可见地形的光照 / 内容最终一致（否则夜晚远处仍显正午
+    //                 亮度 = t972 放开绘制后必须补的最终一致性）。空段（vertexCount==0）无光可烘，
+    //                 呈现层对 lightStale 段先查顶点数跳过，避免零顶点重建刷日志 / 计数。
+    Q_INVOKABLE void clearMesh();
+    Q_INVOKABLE void refreshMesh();
+    Q_INVOKABLE bool deferredRebuildPending() const { return m_deferredRebuild; }
+    Q_INVOKABLE bool lightStale() const { return m_lightStale; }
     // t472 视距门控（见 Q_PROPERTY 注释）：true=近程（重建启用）；false=远端（setter 跳过 buildMesh）。
     bool chunkInRange() const { return m_chunkInRange; }
     void setChunkInRange(bool inRange);
@@ -276,6 +299,9 @@ private:
     qint64 m_lastSunBakeNs = 0;
     int m_vertexCount = 0;   // 上次 buildMesh 的顶点数（t10 F3 叠层汇总）
     int m_triangleCount = 0; // 上次 buildMesh 的三角面数（idx.size()/3）
+    // t972 窗外欠账标记（呈现层渐进同步队列的排空依据；buildMesh / clearMesh 双清）：
+    bool m_deferredRebuild = false; // onWorldChanged 窗外跳过时 chunk 确为脏 → 内容重建欠账
+    bool m_lightStale = false;      // setSunDir/setDayMul 窗外静默跟随且 sunRebuildDue 判定该烘 → 光照欠账
 };
 
 #endif // CHUNKGEOMETRY_H

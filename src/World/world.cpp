@@ -99,6 +99,13 @@ void World::finishLoad()
             if (Chunk *c = m_chunks.chunk(cx, cz)) {
                 c->recomputeAllHeightmaps();
                 c->markDirty();
+                // t972：blob 直写不经 ChunkManager::setBlock（固体写会顺带清 fluidOnlyDirty）→
+                //   recreate 出厂 chunk 的 m_fluidOnlyDirty=true 原样带进本 worldChanged → t188
+                //   流体专用跳过分支把 terrain/glass/ice 段的载入首建整段吞掉（窗内段靠
+                //   setChunkInRange catch-up 巧合兜底、同 chunk 重进世界则显上一局 mesh）。
+                //   载入 = 全内容换代（固液混合任意），「本窗只收流体写」假定不成立 → 显式清，
+                //   与 generate 路径（worldgen 经 ChunkManager 写天然清）对齐，保全部段当帧重建。
+                c->clearFluidOnlyDirty();
             }
         }
     }

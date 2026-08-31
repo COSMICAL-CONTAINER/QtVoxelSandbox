@@ -20333,6 +20333,171 @@ Item {
                              ;
     }
 
+    // ── P-t972 载入世界空白区探针（R19.17 🅶 杂项组；行为级 ChunkGeometry 直驱，t860 先例）──
+    //   用户第五轮口径：进世界看到大片空白透过去（疑似回到原点计算/区块未请求），走近挖/放才刷新。
+    //   根因 = t470/t472 的可见性把 Model.visible 链在 chunkInRange（r=3 重建窗口）上：窗口外 chunk
+    //   即使已有 mesh 也被强制隐藏（有限 160×160 世界中心只见 49/100、角落仅 16/100），且载入只重建
+    //   窗口内段——窗外区要么永久留白、要么靠「走近跨界 catch-up / 编辑 worldChanged」才点状出现。
+    //   修复：①各段 Model.visible 只由 vertexCount>0 决定（有限世界全幅渲染，机制对标 MC 1.0 有限
+    //   地图；t470 实测绘制剔除零 FPS 收益）；②世界换代后呈现层对窗外段 clearMesh 作废旧残 mesh +
+    //   近→远入渐进同步队列（meshSyncTimer 每帧限量 refreshMesh，复用与编辑同一条 buildMesh(Dirty)
+    //   链）→ 进入世界秒级填满；③窗外段错过的内容重建 / 光照重烘记欠账（deferredRebuildPending /
+    //   lightStale），稳态低频排空保远处可见地形最终一致。本探针在局部 2×2 chunk 世界直驱三新入口
+    //   钉行为契约 + Main.qml 源码钉编排链（kickWorldMeshSync 挂载 / 可见性解链 / 排空泵）。
+    {
+        World wl972;
+        wl972.setWidth(32);
+        wl972.setDepth(32);
+        wl972.setHeight(128);
+        wl972.setSeed(20250831); // 旧世界（worldgen 全量地形，几何首建基线来源）
+        ChunkGeometry ga972, gb972; // ga=chunk(0,0) 窗内 / gb=chunk(1,1) 窗外（窗口 r=0 @ 玩家 chunk(0,0)）
+        ga972.setWorld(&wl972);
+        ga972.setCx(0);
+        ga972.setCz(0);
+        gb972.setWorld(&wl972);
+        gb972.setCx(1);
+        gb972.setCz(1);
+        const int oldCntA = ga972.vertexCount(); // 旧世界全量地形 mesh（generate 首建）
+        const int oldCntB = gb972.vertexCount();
+        gb972.setChunkInRange(false); // true→false：不重建（t472 语义），gb 停持旧世界 mesh
+        const bool okBaseline = oldCntA > 0 && oldCntB > 0;
+
+        // 「载入存档」等价流（同 WorldStore.loadChunks：blob 直写 chunk，不经 World 写入路径）：
+        //   beginLoad（零填充+全脏）→ 直写两根石柱 → finishLoad（重算 heightmap + 全脏 + worldChanged
+        //   + clearAllDirty）。窗内段 a 当帧重建为载入数据（brief 验收「玩家所格视距内空 mesh 计数=0」
+        //   的载入腿）；窗外段 b 被窗口门控跳过 → 记内容欠账（呈现层排空依据）。
+        wl972.beginLoad(20250831);
+        if (Chunk *ca = wl972.chunks().chunk(0, 0))
+            for (int y = 0; y <= 40; ++y) ca->setBlock(8, y, 8, BR::Stone);
+        if (Chunk *cb = wl972.chunks().chunk(1, 1))
+            for (int y = 0; y <= 38; ++y) cb->setBlock(4, y, 4, BR::Stone);
+        wl972.finishLoad();
+        const bool okWinLoaded = ga972.vertexCount() > 0 && ga972.vertexCount() != oldCntA;
+        const bool okLoadDebt = gb972.deferredRebuildPending(); // 载入变更窗外未建 → 欠账已记
+
+        // 渐进同步契约（clearMesh 作废陈旧 → refreshMesh 按当前世界数据重建，同一条 buildMesh 链）：
+        //   窗外段先仍持旧世界 mesh（未重建），clearMesh 后归零（visible 绑定自动隐 = 防陈旧错景），
+        //   refreshMesh 后非空且**顶点数随新世界数据变**（fresh = 按载入数据建，非旧 mesh 保留）。
+        const bool okStaleKept = gb972.vertexCount() == oldCntB;
+        gb972.clearMesh();
+        const bool okCleared = gb972.vertexCount() == 0;
+        gb972.refreshMesh();
+        const bool okRefilled = gb972.vertexCount() > 0 && gb972.vertexCount() != oldCntB;
+        const bool okDebtClearedByBuild = !gb972.deferredRebuildPending();
+
+        // 稳态欠账腿①内容：窗外编辑（载入后世界是空场，(29,41,29) 恒空气；圆石非重力族无级联）被
+        //   onWorldChanged 窗口门控跳过（dirty 随 clearAllDirty 清）→ 欠账当场记账，refreshMesh 排空。
+        wl972.setBlock(29, 41, 29, BR::Cobble, 0);
+        const bool okEditDebt = gb972.deferredRebuildPending();
+        gb972.refreshMesh();
+        const bool okEditDrained = !gb972.deferredRebuildPending();
+
+        // 稳态欠账腿②光照：窗外段 setDayMul 一步跨过 kDayMulThresh=0.03 重烘门 → lightStale 记账
+        //   （t972 起窗外可见，不排空则夜晚远处仍显上烘正午亮度），refreshMesh 排空后双清。
+        gb972.setDayMul(0.0f);
+        const bool okLightDebt = gb972.lightStale();
+        gb972.refreshMesh();
+        const bool okLightDrained = !gb972.lightStale();
+
+        // Main.qml 源码钉（呈现层编排链；滤注释行后判定，同 t860 先例）：可见性解链（六段模板 visible
+        //   只由 vertexCount 决定，旧「chunkInRange && …vertexCount」形态清零）+ kickWorldMeshSync
+        //   存在且在 enterWorld 内挂载 + 窗外段 clearMesh 作废 + 排空泵（shift + refreshMesh）。
+        bool okPin972 = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString candidates[2] = {
+                QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+                QDir(exeDir + QStringLiteral("/../..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+            };
+            QString qml;
+            for (const QString &c : candidates) {
+                QFile f(c);
+                if (f.open(QIODevice::ReadOnly)) { qml = QString::fromUtf8(f.readAll()); break; }
+            }
+            if (qml.isEmpty()) {
+                qInfo().noquote() << "  [t972 note] Main.qml not found near exe - source-pin skipped";
+                okPin972 = true; // 行为级断言仍有效（源码钉缺席不判红，同 r24 note 先例）
+            } else {
+                QString code;
+                for (const QString &line : qml.split(QLatin1Char('\n'))) {
+                    const QString t = line.trimmed();
+                    if (t.startsWith(QLatin1String("//")) || t.startsWith(QLatin1String("*"))
+                        || t.startsWith(QLatin1String("/*")))
+                        continue;
+                    code += line;
+                    code += QLatin1Char('\n');
+                }
+                const bool visTerrainUnchained = code.contains(QStringLiteral("visible: terrainGeo.vertexCount > 0"))
+                                                 && !code.contains(QStringLiteral("visible: chunkInRange && terrainGeo.vertexCount"));
+                const bool visFamilyUnchained =
+                    !code.contains(QStringLiteral("visible: chunkInRange && waterGeo"))
+                    && !code.contains(QStringLiteral("visible: chunkInRange && lavaGeo"))
+                    && !code.contains(QStringLiteral("visible: chunkInRange && glassGeo"))
+                    && !code.contains(QStringLiteral("visible: chunkInRange && iceGeo"))
+                    && !code.contains(QStringLiteral("visible: chunkInRange && crossGeo"));
+                const bool kickDefined = code.contains(QStringLiteral("function kickWorldMeshSync()"));
+                // 挂载点序钉：kick 调用须落在 enterWorld 内「位姿定稿（adoptSpawnColumn）」之后、
+                //   跨世界持久化装载（chestStore.loadAll）之前（startGame 定义在 enterWorld 之前，
+                //   文件序不可作上界锚——首版钉曾误用而恒红）。
+                const int idxAdopt = code.indexOf(QStringLiteral("player.adoptSpawnColumn()"));
+                const int idxKick = idxAdopt >= 0 ? code.indexOf(QStringLiteral("kickWorldMeshSync()"), idxAdopt) : -1;
+                const int idxChest = code.indexOf(QStringLiteral("chestStore.loadAll("));
+                const bool kickHooked = kickDefined && idxAdopt >= 0 && idxKick >= 0
+                                        && idxChest >= 0 && idxKick < idxChest;
+                const bool clearOnFar = code.contains(QStringLiteral("seg.geometry.clearMesh()"));
+                const bool pumpDrains = code.contains(QStringLiteral("_meshSyncQueue.shift()"))
+                                        && code.contains(QStringLiteral("g.refreshMesh()"));
+                okPin972 = visTerrainUnchained && visFamilyUnchained && kickDefined && kickHooked
+                           && clearOnFar && pumpDrains;
+                if (!okPin972)
+                    qInfo().noquote() << "  [t972 diag] visTerrain" << visTerrainUnchained
+                                      << "visFamily" << visFamilyUnchained << "kickDefined" << kickDefined
+                                      << "kickHooked" << kickHooked << "clearOnFar" << clearOnFar
+                                      << "pumpDrains" << pumpDrains;
+            }
+        }
+
+        const bool okT972 = okBaseline && okWinLoaded && okLoadDebt && okStaleKept && okCleared
+                            && okRefilled && okDebtClearedByBuild && okEditDebt && okEditDrained
+                            && okLightDebt && okLightDrained && okPin972;
+        if (!okT972)
+            qInfo().noquote() << "  [t972 diag] baseline" << okBaseline << "winLoaded" << okWinLoaded
+                              << "loadDebt" << okLoadDebt << "staleKept" << okStaleKept
+                              << "cleared" << okCleared << "refilled" << okRefilled
+                              << "debtCleared" << okDebtClearedByBuild << "editDebt" << okEditDebt
+                              << "editDrained" << okEditDrained << "lightDebt" << okLightDebt
+                              << "lightDrained" << okLightDrained << "pin" << okPin972
+                              << "| cntA" << oldCntA << "->" << ga972.vertexCount()
+                              << "cntB" << oldCntB << "->" << gb972.vertexCount();
+        if (!okT972) ++totalFail;
+        qInfo().noquote() << (okT972 ? "PASS" : "FAIL")
+                          << "| t972 world-entry blank region: the t470/t472 view culling chained "
+                             "Model.visible to the chunkInRange rebuild window, so on entering a world "
+                             "51-84 of the 100 finite-world chunks were force-hidden (and the window "
+                             "itself only rebuilt at load) -- the user saw large see-through voids that "
+                             "only filled near-dig/place. Fix: Model.visible derives from vertexCount "
+                             "alone (finite world renders edge to edge, MC 1.0 finite-map semantics; "
+                             "t470 measured zero FPS gain from draw culling so this is free), and the "
+                             "presentation layer kicks a progressive near-to-far mesh sync on world "
+                             "entry (clearMesh invalidates the previous world's out-of-window meshes "
+                             "so no stale terrain shows, then one bounded refreshMesh per frame drains "
+                             "the queue through the SAME buildMesh(Dirty) chain as edits -- seconds-"
+                             "scale fill, no synchronous full-rebuild stall). Probe legs (local 2x2 "
+                             "chunk world, direct ChunkGeometry drive per t860 precedent): the "
+                             "in-window segment rebuilds synchronously from loaded data at finishLoad "
+                             "(empty-mesh count in view radius = 0), the load books the out-of-window "
+                             "miss as deferredRebuildPending, clearMesh zeroes it and refreshMesh "
+                             "rebuilds fresh-from-current-data (vertex count tracks the new world, "
+                             "not the retained old mesh), an out-of-window edit and a past-threshold "
+                             "dayMul step each book their debt and refreshMesh clears both (steady-"
+                             "state eventual consistency for visible far terrain); Main.qml source "
+                             "pin locks the orchestration (six templates visible-unchained from "
+                             "chunkInRange, kickWorldMeshSync defined and hooked inside enterWorld "
+                             "after the player pose settles, clearMesh on far segments, shift+"
+                             "refreshMesh drain pump)"
+                             ;
+    }
+
     // ── P-t934 waitSync 渲染侧归因插桩探针（dev-plan R19.17 性能批二；t933 act-ct 先例的渲染线程侧续篇）──
     //   背景：用户实测 frame2 行 waitSync 76ms 一家独大而 render_cpu ~7ms / RenderStats render ~1ms——
     //   GUI 在同步屏障阻塞 76ms，渲染 pass 本身不慢。机械链（main.cpp t934 注释）：渲染线程要跑完上一帧的
