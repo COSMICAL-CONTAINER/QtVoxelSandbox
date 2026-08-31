@@ -29761,6 +29761,210 @@ Item {
                           << " flip / empty-hidden, 40 bars total)";
     }
 
+    // ── P-t977 切换物品栏物品名浮显（R19.17 🅶 杂项组收官；用户第五轮口径「切槽显示当前物品名——
+    //    血量/饱食度上方中间、白字；附魔物品显示详情（名称+耐久度+换行+逐条附魔带等级）；改名物品显示
+    //    改名后名字（多附魔工具区分用）。一定时长淡出」）──
+    //    (a) C++ 组装单一权威行为腿（真 Hotbar 直调 slotDetailText）：附魔+改名镐 = 改名行+耐久行+逐条
+    //        附魔罗马等级行（恰 4 行逐字）/ 普通方块单行名 / 空槽空串 / 护甲件护甲耐久行（工具段无行 →
+    //        ArmorRegistry 权威）/ 附魔书有附魔无耐久行。
+    //    (b) QML 行为腿（真 HeldItemNameFlash.qml × 真 Hotbar；headless 可达——组件纯 QtQuick，Timer/
+    //        NumberAnimation 走引擎动画时钟，无窗口依赖）：创建基线静默；切槽 → 文本=当前物品名且立即
+    //        不透明（无淡入）；附魔镐 → QML 消费面 == C++ 权威输出逐字；空槽切 → 立即隐；连续切槽 →
+    //        计时重置最终显最后槽（t0 切 A、t0+140 切 B：无 restart 则 B 于 t0+300 入淡出、有 restart
+    //        t0+370 采样仍全不透明——该采样点即「计时重置」判别点）+ t0+750 淡出收尾 opacity==0。
+    //    (c) 源码钉：Main.qml 挂载点（vitalsBar 上方 8px 居中 + 游玩态门 + hotbar 注入）+ 组件内白字 /
+    //        hold 2000 / fade 300 默认常量 + onSelectedSlotChanged 直读 Q_INVOKABLE（AOT 契约）+
+    //        lastShownSlot 同槽守卫 + 非活跃期基线重同步（读档灌 selectedSlot 不闪名）。
+    //    阴性轮：撤 flash() 的 holdTimer.restart()（计时重置回退）→ 恰 P-t977 FAIL → 复原绿。
+    {
+        bool okAsm = false, okQml = false, okPin = false;
+        QString diag977;
+        Hotbar vm977;
+        const int pick977 = int(ToolRegistry::PickaxeIron);
+        const int pickMax977 = ToolRegistry::maxDurability(pick977);
+        QVariantList ench977;
+        ench977.append(EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3));
+        ench977.append(EnchantRegistry::pack(int(EnchantRegistry::Efficiency), 2));
+        // 权威期望串（(a) C++ 直调与 (b) QML 消费面共用同一份逐字断言）。
+        const QString want977 = QStringLiteral("挖掘者\n耐久: 200/%1\n锐锋 III\n效率 II").arg(pickMax977);
+
+        // (a) 组装单一权威腿（真 Hotbar 直调）。
+        vm977.setStack(2, pick977, 1, 200, ench977, QStringLiteral("挖掘者"));
+        const bool okRenamed977 = vm977.slotDetailText(2) == want977;
+        vm977.setStack(3, int(BR::Dirt), 5);
+        const QString plain977 = vm977.slotDetailText(3);
+        const bool okPlain977 = !plain977.isEmpty() && plain977 == vm977.nameAt(3)
+                                && !plain977.contains(QLatin1Char('\n'));
+        const bool okEmpty977 = vm977.slotDetailText(4).isEmpty();
+        const int chest977 = int(RecipeRegistry::ArmorIdBase) + 4 * int(ArmorRegistry::Iron)
+                             + int(ArmorRegistry::Chestplate);
+        vm977.setStack(8, chest977, 1, 120);
+        const bool okArmor977 = vm977.slotDetailText(8)
+                == QStringLiteral("%1\n耐久: 120/%2").arg(ArmorRegistry::displayName(chest977))
+                                               .arg(ArmorRegistry::maxDurability(chest977));
+        vm977.setStack(1, int(RecipeRegistry::EnchantedBookId), 1, 0,
+                       QVariantList{ EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 5) });
+        const bool okBook977 = vm977.slotDetailText(1)
+                == (vm977.nameAt(1) + QStringLiteral("\n锐锋 V"));
+        okAsm = okRenamed977 && okPlain977 && okEmpty977 && okArmor977 && okBook977;
+        if (!okAsm)
+            diag977 = QStringLiteral("asm r=") + (okRenamed977 ? "1" : "0")
+                      + QStringLiteral(" p=") + (okPlain977 ? "1" : "0")
+                      + QStringLiteral(" e=") + (okEmpty977 ? "1" : "0")
+                      + QStringLiteral(" a=") + (okArmor977 ? "1" : "0")
+                      + QStringLiteral(" b=") + (okBook977 ? "1" : "0")
+                      + QStringLiteral(" got=\"") + vm977.slotDetailText(2) + QStringLiteral("\"");
+
+        // (b) QML 行为腿（真组件 × 真 Hotbar）。
+        const QString uiDir977 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        QQmlEngine engine977;
+        QQmlComponent comp977(&engine977, QUrl::fromLocalFile(uiDir977 + QStringLiteral("/HeldItemNameFlash.qml")));
+        QObject *flash977 = comp977.isError() ? nullptr : comp977.create();
+        if (!flash977) {
+            diag977 = QStringLiteral("component: ")
+                      + (comp977.isError() ? comp977.errorString() : QStringLiteral("create null"));
+        } else {
+            flash977->setParent(&engine977);
+            Hotbar vmQ977;
+            // 预置槽（均非选中槽 0 → setStack 不补发 selectedSlotChanged，不惊动浮显基线）。
+            vmQ977.setStack(2, int(BR::Dirt), 5);
+            vmQ977.setStack(5, int(BR::Log), 1);
+            QVariantList enchQ977;
+            enchQ977.append(EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3));
+            enchQ977.append(EnchantRegistry::pack(int(EnchantRegistry::Efficiency), 2));
+            vmQ977.setStack(6, pick977, 1, 200, enchQ977, QStringLiteral("挖掘者"));
+            flash977->setProperty("hotbar", QVariant::fromValue(&vmQ977));
+            flash977->setProperty("active", true);
+            // 探针专用短节拍（生产默认 2000/300 由 (c) 源码钉钉住；普通属性 → 此处可覆盖）。
+            flash977->setProperty("holdMs", 300);
+            flash977->setProperty("fadeMs", 100);
+            QCoreApplication::processEvents();
+            QObject *label977 = nullptr;
+            const auto kids977 = flash977->findChildren<QObject *>();
+            for (QObject *c : kids977) {
+                if (QString::fromUtf8(c->metaObject()->className()).contains(QStringLiteral("QQuickText"))) {
+                    label977 = c;
+                    break;
+                }
+            }
+            if (!label977) {
+                diag977 = QStringLiteral("label text not found");
+            } else {
+                const auto text977 = [label977]() { return label977->property("text").toString(); };
+                const auto opa977 = [label977]() { return label977->property("opacity").toReal(); };
+                const auto vis977 = [label977]() { return label977->property("visible").toBool(); };
+                const auto spin977 = [](QElapsedTimer &clock, qint64 untilMs) {
+                    while (!clock.hasExpired(untilMs))
+                        QCoreApplication::processEvents(QEventLoop::AllEvents, 8);
+                };
+                QElapsedTimer wall977;
+                do {
+                    // 基线：创建即静默（Component.onCompleted 只立基线，不浮显）。
+                    if (!text977().isEmpty() || opa977() > 0.001 || vis977()) {
+                        diag977 = QStringLiteral("baseline shows");
+                        break;
+                    }
+                    // ① 切槽 → 文本=当前物品名，立即全不透明（无淡入）。
+                    vmQ977.setSelectedSlot(2);
+                    QCoreApplication::processEvents();
+                    if (text977() != vmQ977.nameAt(2) || qAbs(opa977() - 1.0) > 0.001) {
+                        diag977 = QStringLiteral("switch: \"") + text977()
+                                  + QStringLiteral("\" op ") + QString::number(opa977());
+                        break;
+                    }
+                    // ② 附魔+改名镐 → QML 消费面 == C++ 权威输出（同一 slotDetailText 逐字）。
+                    vmQ977.setSelectedSlot(6);
+                    QCoreApplication::processEvents();
+                    if (text977() != want977) {
+                        diag977 = QStringLiteral("enchanted: \"") + text977() + QStringLiteral("\"");
+                        break;
+                    }
+                    // ③ 空槽切 → 不显（立即隐，无残留文本）。
+                    vmQ977.setSelectedSlot(7);
+                    QCoreApplication::processEvents();
+                    if (!text977().isEmpty() || opa977() > 0.001 || vis977()) {
+                        diag977 = QStringLiteral("empty slot shows: \"") + text977() + QStringLiteral("\"");
+                        break;
+                    }
+                    // ④ 连续切槽 → 计时重置最终显最后槽 + hold→fade→隐管线（判别点采样见块注）。
+                    wall977.restart();
+                    vmQ977.setSelectedSlot(5);
+                    spin977(wall977, 140);
+                    vmQ977.setSelectedSlot(2);
+                    QCoreApplication::processEvents();
+                    if (text977() != vmQ977.nameAt(2) || qAbs(opa977() - 1.0) > 0.001) {
+                        diag977 = QStringLiteral("storm last: \"") + text977()
+                                  + QStringLiteral("\" op ") + QString::number(opa977());
+                        break;
+                    }
+                    spin977(wall977, 370);
+                    if (qAbs(opa977() - 1.0) > 0.001) {
+                        diag977 = QStringLiteral("restart lost: op@370 ") + QString::number(opa977());
+                        break;
+                    }
+                    spin977(wall977, 750);
+                    if (opa977() > 0.001 || text977() != vmQ977.nameAt(2)) {
+                        diag977 = QStringLiteral("fade end: op@750 ") + QString::number(opa977())
+                                  + QStringLiteral(" text \"") + text977() + QStringLiteral("\"");
+                        break;
+                    }
+                    okQml = true;
+                } while (false);
+            }
+        }
+
+        // (c) 源码钉（挂载点 / 白字 / 时长常量 / AOT 契约面 / 守卫与基线重同步）。
+        const QString root977 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        QFile main977f(root977 + QStringLiteral("/src/ui/Main.qml"));
+        QFile flash977f(root977 + QStringLiteral("/src/ui/HeldItemNameFlash.qml"));
+        const QString main977s = main977f.open(QIODevice::ReadOnly) ? QString::fromUtf8(main977f.readAll()) : QString();
+        const QString flash977s = flash977f.open(QIODevice::ReadOnly) ? QString::fromUtf8(flash977f.readAll()) : QString();
+        okPin = main977s.count(QStringLiteral("HeldItemNameFlash {")) == 1
+                && main977s.count(QStringLiteral("anchors.bottom: vitalsBar.top\n"
+                                                "        anchors.bottomMargin: 8\n"
+                                                "        anchors.horizontalCenter: parent.horizontalCenter\n"
+                                                "        hotbar: hotbarVM")) == 1
+                && main977s.count(QStringLiteral("hotbar: hotbarVM\n"
+                                                 "        active: window.appState === \"playing\" && player.mode !== PlayerController.Spectator")) == 1
+                && main977s.count(QStringLiteral("t977")) >= 2
+                && flash977s.count(QStringLiteral("color: \"#ffffff\"")) == 1
+                && flash977s.count(QStringLiteral("property int holdMs: 2000")) == 1
+                && flash977s.count(QStringLiteral("property int fadeMs: 300")) == 1
+                && flash977s.count(QStringLiteral("function onSelectedSlotChanged()")) == 1
+                && flash977s.count(QStringLiteral("hotbar.slotDetailText(")) == 1
+                && flash977s.count(QStringLiteral("if (slot === root.lastShownSlot)")) == 1
+                && flash977s.count(QStringLiteral("root.lastShownSlot = root.hotbar.selectedSlot")) == 1
+                // 双行锚钉（防注释字面干扰：头注释亦含 holdTimer.restart() 字样，裸钉计数会误判——
+                //   锚住 flash() 内「立即显」行的下一行调用，散改/漏改即红）。
+                && flash977s.count(QStringLiteral("label.opacity = 1 // 立即显（opacity 直写不走 Behavior → 零淡入）\n"
+                                                  "        holdTimer.restart()")) == 1
+                && flash977s.count(QStringLiteral("t977")) >= 2;
+
+        const bool ok977 = okAsm && okQml && okPin;
+        if (!ok977) ++totalFail;
+        if (!ok977)
+            qInfo().noquote() << "  [t977 diag] asm" << okAsm << "qml" << okQml << "pin" << okPin << diag977;
+        qInfo().noquote() << (ok977 ? "PASS" : "FAIL")
+                          << "| t977 hotbar switch item-name flash (user fifth round: switching slots"
+                          << " shows the current item name centered above the hearts/hunger row in"
+                          << " white; enchanted items show details (name + durability + per-enchant"
+                          << " roman-level lines); renamed items show the renamed name; fades out"
+                          << " after a hold) - assembly single-sourced in Hotbar::slotDetailText"
+                          << " (AOT lesson: QML consumes the string via a signal-handler Q_INVOKABLE"
+                          << " read, never a cross-unit binding); same-slot content churn suppressed"
+                          << " by lastShownSlot guard; inactive window resyncs the baseline so the"
+                          << " world-load slot restore never flashes; pinned by exact-string assembly"
+                          << " legs (renamed+enchanted pickaxe 4-line / plain single-line / empty /"
+                          << " armor durability line / enchanted book without durability line),"
+                          << " behavioral legs on the real HeldItemNameFlash.qml x real Hotbar rig"
+                          << " (baseline silent / switch shows name at full opacity / enchanted text"
+                          << " equals the C++ authority / empty hides / switch-storm restart keeps the"
+                          << " last slot opaque past the first slot's deadline then fades to 0), and"
+                          << " source pins (mount above vitalsBar + active gate + hotbar injection,"
+                          << " white color, holdMs 2000 / fadeMs 300 defaults, handler + guard forms)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -1015,6 +1015,25 @@ QString Hotbar::nameAt(int slot) const
     return nameForBlock(blockIdAt(slot));
 }
 
+// t977 切槽物品名浮显文本（组装单一权威；格式契约见 hotbar.h 本方法声明处注释）。
+//   数据源全部本类已有 Q_INVOKABLE / 注册表权威：nameAt（改名优先 t477）/ toolMaxDurability +
+//   ArmorRegistry::maxDurability（「有无耐久」双段判定）/ durabilityAt / enchantListText（t590）。
+QString Hotbar::slotDetailText(int slot) const
+{
+    const int id = blockIdAt(slot);
+    if (id <= 0) return QString(); // 空槽 → 空串（QML 浮显不显）
+    QString text = nameAt(slot);
+    int maxDur = toolMaxDurability(id);
+    if (maxDur <= 0 && ArmorRegistry::isArmor(id))
+        maxDur = ArmorRegistry::maxDurability(id); // 护甲件（工具段无行）→ 护甲耐久权威
+    if (maxDur > 0)
+        text += QLatin1Char('\n') + QStringLiteral("耐久: %1/%2").arg(durabilityAt(slot)).arg(maxDur);
+    const QString ench = enchantListText(enchantsAt(slot));
+    if (!ench.isEmpty())
+        text += QLatin1Char('\n') + ench;
+    return text;
+}
+
 QString Hotbar::nameForBlock(int blockId) const
 {
     // 走单一权威：方块段→BlockRegistry::displayName；工具段→ToolRegistry::displayName（t33）；
