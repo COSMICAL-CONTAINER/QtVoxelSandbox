@@ -513,6 +513,14 @@ public:
     Q_INVOKABLE float headPitchAt(int i) const;
     // t239 mob 子类 id（t240 pig/cow/sheep；t242 据它选掉落物、t243 spawn egg 据 it 选生成类型）。越界→0。
     Q_INVOKABLE int mobTypeAt(int i) const;
+    // t476 亡灵族谓词（review0830 #26 单一权威提炼；**public**——Game 层 attackMob 消费，Game→Entities
+    //   向下依赖合规，同下方 rideCartAt 读口先例）：攻击伤害面的「亡灵族」目标门——亡灵杀手（UndeadSlay）
+    //   对族加成（PlayerController::attackMob 实战消费；t961 显示面 familyAttackBonus 为数值权威，两者
+    //   各管一面对拍相等）。与 undeadBurnsInDaylight（私有，日光白名单）语义**有意分立**：本门是
+    //   「亡灵族」，头盔免烧豁免不进本门（戴盔亡灵不烧但仍吃亡灵杀手对族加成——勿合并两门）；t952 起
+    //   含幼体 MobBabyShambler（旧裸清单漏幼体 = 显示 (+M) 实战无加成劈叉）。定义在 .cpp（邻
+    //   undeadBurnsInDaylight）。契约注释详私有一侧同名额。
+    static bool isUndeadFamily(int mobType);
     // t811 第 i 个 mob 乘坐的矿车 / 船槽索引（-1 = 未乘；载具管理器槽位号）。骑乘期 AI 冻结 + 位置钉座位
     //   （tickVehicleRiding）；越界 / 非 Mob → -1。矩阵探针 + QML 坐姿切换预留读口（同 moveSpeedAt 模式）。
     Q_INVOKABLE int rideCartAt(int i) const;
@@ -1751,11 +1759,15 @@ private:
     //   (2) 驯服 + 坐（ocelotSitting=true）：**留守** —— 不移动（跟随主人回来自动续跟）；机制等价 MC 坐猫。
     //   (3) 驯服 + 站：**跟随主人**（distXZ > kFollowMinDist 走近 / <= 停步；过远 kOcelotTeleportDist 瞬移到
     //       主人附近防掉队）；求偶期（loveTimer>0）优先寻偶（findNearestMate + 走近配偶，复用 t400 逻辑）。
+    //       review0830 #5 跟随门：playerSpectator=true（观察者）→ 跳过跟随段（走近 + 过远瞬移一并停），
+    //       回退 aiWander；创造/生存照常跟随。与 aiWolf 的门**同一字面量门形**（矩阵 sync pin 钉 count≥2，
+    //       审查六-3「对称提交配对称腿」）——门放求偶分支之后（求偶是 mob-mob 语义，不随主人模式翻转）、
+    //       跟随段之前（同 aiWolf 门位）。
     //   猫**不防御**（机制等价 MC 1.0 猫不攻击怪物 —— 与驯服狼的防御咬击区分；驱赶 Stalker 由 aiStalker 侧对
     //   猫/豹猫临近时逃离实现）。返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。idx = 本 mob 槽
     //   索引（求偶寻偶 findNearestMate 排除自身）。分层（PLAN §2）：只读 World::isSolid + 自身数据，无向上依赖。
     bool aiOcelot(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
-                  float speedScale);
+                  float speedScale, bool playerSpectator);
     // t482 雪傀儡 AI（tick Mob 分支 mobType==MobSnowGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
     //   MC 1.0 雪傀儡（防御造物：游荡 + 抛雪球打敌对 + 行走留雪 + 热/雨融化）：
     //   (1) 融化：沙漠群系（biomeIdAt==Desert，热）或降水（isPrecipitatingAt，雨/雪）或入水 → meltAccum 累加 →
@@ -1822,7 +1834,9 @@ private:
     //   为「暴晒即寻影 + 持影等玩家」双状态 + kShadeHoldSeconds 迟滞——解「来回转向走出/退回阴影」抽搐）：
     //   只罩**玩家目标路径**（仇恨狼 / 铁傀儡转火是 mob-mob 战斗语义，不随日光翻转——t947/t948 探针依赖
     //   + MC 亡灵被打仍还手）；夜间（skyBrightness<=kBurnSkyBrightness）整段旁路，行为与 t951 前逐位一致。
-    //   skyBrightness = 天光乘子（tick 透传，见 tick 注释；缺省 0 = 夜间语义）。
+    //   review0830 #17 登记：白天避光**仅罩追击路径**——非追击回退（aiWander）在阴影机之前早退，白天
+    //   游荡（玩家脱战）的亡灵原地照烧不避光（t670 旧版同位，非回归；显式取舍：避光是交战走位策略，
+    //   游荡态不加装 daylight 寻路机）。skyBrightness = 天光乘子（tick 透传，见 tick 注释；缺省 0 = 夜间语义）。
     bool aiHostile(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                    float speedScale = 1.0f, float skyBrightness = 0.0f);
     // t951 灼烧级日光暴露采样**单一权威**（定义在 .cpp；燃烧扣血 tickHostileLife 与 t951 白天阴影 AI 共用
@@ -1834,7 +1848,9 @@ private:
     static bool sunBurnExposureAt(World *world, float px, float py, float pz, float halfH, float skyBrightness);
     // t951 亡灵日光白名单（审查修 B6 名单的单一权威提炼）：仅 Shambler（蹒跚者）/ Bones（骸骨）晒燃——
     //   新敌对默认不晒燃，显式加白才燃。白天阴影 AI 同门：只有会晒燃的亡灵才做避光行为（Spider /
-    //   Silverfish / Stalker / Nightwalker / Emberling / 被动型零波及）。
+    //   Silverfish / Stalker / Nightwalker / Emberling / 被动型零波及）。review0830 #6：盔免烧豁免
+    //   （armorHelmet==0）与白名单**同式**叠加在两处 dayShadeAi 门上——免烧者不寻影不压攻击（避光是
+    //   会晒燃者的保命行为，免烧者无此动机，与燃烧调用点口径一致）。
     static bool undeadBurnsInDaylight(int mobType);
     // t283 骷髅弓箭手 AI（detect→keep-distance→shoot 三段；tick 内 hostile mob 且 mobType==MobBones 分支调，
     //   替代 aiHostile 的近战 attack）。spec t283「远程射箭（arrow 实体 + 抛物 + 命中伤害；保持距离）」。
@@ -1857,7 +1873,9 @@ private:
     //   阴影）」）：暴晒 → 寻影优先（覆盖保持距离带——保命高于走位）；真遮蔽 → **移动候选落点暴晒则弃选**
     //   （保持带照常运作但任何一步踏进灼烧日光即放弃该 tick 位移 = 走位不出阴影）；射击不因玩家暴晒压门
     //   （远程无需接近 = 无需玩家入影，「在阴影内可射箭」；射界判定 lineOfSightClear 照旧）。仇恨狼 /
-    //   铁傀儡转火分支不罩（mob-mob 语义，同 aiHostile t951 注）。skyBrightness 缺省 0 = 夜间语义。
+    //   铁傀儡转火分支不罩（mob-mob 语义，同 aiHostile t951 注）。review0830 #17 登记：白天避光仅罩
+    //   **追击路径**——非追击回退（aiWander）在阴影机之前早退，白天游荡的骸骨原地照烧不避光（t670
+    //   旧版同位，显式取舍同 aiHostile）。skyBrightness 缺省 0 = 夜间语义。
     bool aiArcher(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                   float speedScale = 1.0f, float skyBrightness = 0.0f);
     // t284 Stalker（潜行者；机制等价 MC 1.0 苦力怕）AI（detect→chase→fuse→detonate；tick 内 hostile mob 且

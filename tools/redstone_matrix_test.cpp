@@ -23696,6 +23696,9 @@ Item {
             QObject::connect(&ema, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
             const int zom = ema.spawnMobTyped(15, 85, 20, EntityManager::MobShambler,
                                               QStringLiteral("#4a6a3a"), 20);
+            // review0830 #6 适配（依据：盔免烧豁免入门后「裸装」从 RNG 巧合变显式前提）：脱 t377 随机
+            //   生成甲（~12.5% 带头盔 → 戴盔僵尸不再寻影，裸装腿会偶发红）。
+            ema.setMobArmorSet(zom, -1);
             // rig 光照真值钉（遮荫/露天两读数——与燃烧判定同一采样源，防檐没造出 shade 的伪绿）。
             const bool shadeTruth = wa.skyLightAt(23, 85, 23) < 15 && wa.skyLightAt(21, 85, 21) < 15;
             const bool sunTruth = wa.skyLightAt(15, 85, 20) == 15 && wa.skyLightAt(10, 85, 10) == 15;
@@ -23728,6 +23731,7 @@ Item {
             QObject::connect(&emb, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
             const int zom = emb.spawnMobTyped(23, 85, 23, EntityManager::MobShambler,
                                               QStringLiteral("#4a6a3a"), 20);
+            emb.setMobArmorSet(zom, -1); // review0830 #6 适配：脱 t377 随机甲（持影腿须裸装，同 (a) 注）
             const bool shadeTruth = wb.skyLightAt(23, 85, 23) < 15 && wb.skyLightAt(25, 85, 23) == 15;
             // 玩家阳光下 2.4 格（> kAttackRange 1.6 一步、< kDetectRange 16 追击压力满格）。
             const QVector3D playerSun(25.9f, 85.0f, 23.5f);
@@ -23757,6 +23761,7 @@ Item {
             QObject::connect(&emc, &EntityManager::mobAttackedPlayer, [&hits](int, int, float, float) { ++hits; });
             const int bones = emc.spawnMobTyped(21, 85, 21, EntityManager::MobBones,
                                                 QStringLiteral("#d8d8e0"), 20);
+            emc.setMobArmorSet(bones, -1); // review0830 #6 适配：脱 t377 随机甲（候选闸腿须裸装，同 (a) 注）
             const bool shadeTruth = wc.skyLightAt(21, 85, 21) < 15 && wc.skyLightAt(21, 85, 23) == 15;
             // 玩家阳光下 dist≈2.6（< kArcherKeepMin 5 → 保持带退避方向 = -z = 檐外；
             // ≤ kArcherShootRange 12 + 视线越檐清 → 射门常开）。
@@ -24097,6 +24102,13 @@ Item {
             const QString iconQml = readSrc(QStringLiteral("src/ui/MaterialIcon.qml"));
             // Entities：枚举 + Entity 双向链字段 + 概率常量（.h）。
             const bool pinEnum = entH.contains(QStringLiteral("MobBabyShambler = 19"));
+            // review0830 #18：音频层裸 19 镜像枚举配对钉——小蹒跚者环境音改写行（idx 19 → 4 = 复用成体
+            //   蹒跚者音色；Audio 层不 include entitymanager.h 故裸字面量）与 Entities 枚举值 19 配对
+            //   断言（本测试 TU 合法 include 全栈）：枚举值漂移 / 行被误删任一即红（历史 MC id 71 vs
+            //   内部 135 跨层字面量漂移的防线；预防性钉——现状即绿）。
+            const QString audioCpp = readSrc(QStringLiteral("src/Audio/audiomanager.cpp"));
+            const bool pinAudioMirror = audioCpp.contains(QStringLiteral("if (idx == 19) idx = 4;"))
+                                        && EntityManager::MobBabyShambler == 19;
             const bool pinFieldRide = entH.contains(QStringLiteral("int rideMob = -1;"));
             const bool pinFieldRider = entH.contains(QStringLiteral("int mobRider = -1;"));
             const bool pinChance = entH.contains(QStringLiteral("kChickenJockeyChance"));
@@ -24146,13 +24158,14 @@ Item {
                 && pinCombineHook && pinRoll && pinNatural && pinFreeze && pinMountSuspend
                 && pinPassWire && pinPushSkip && pinBurnWhite && pinBabyParams
                 && pinModelBranch && pinModelTable && pinPickupGate && pinEggCase && pinPalette
-                && pinBrowserEntry && pinBrowserEgg && pinLoader && pinTex && pinIcon;
+                && pinBrowserEntry && pinBrowserEgg && pinLoader && pinTex && pinIcon
+                && pinAudioMirror;
             ok = ok && pinsOk;
             if (!pinsOk)
                 diag += QStringLiteral("i enum=%1 ride=%2 rider=%3 chance=%4 setter=%5 hook=%6 roll=%7 "
                                        "nat=%8 frz=%9 susp=%10 wire=%11 push=%12 burn=%13 prm=%14 "
                                        "mbr=%15 mtb=%16 gate=%17 egg=%18 pal=%19 brE=%20 brg=%21 "
-                                       "ldr=%22 tex=%23 ico=%24 ")
+                                       "ldr=%22 tex=%23 ico=%24 aud=%25 ")
                             .arg(int(pinEnum)).arg(int(pinFieldRide)).arg(int(pinFieldRider))
                             .arg(int(pinChance)).arg(int(pinSetter)).arg(int(pinCombineHook))
                             .arg(int(pinRoll)).arg(int(pinNatural)).arg(int(pinFreeze))
@@ -24160,7 +24173,8 @@ Item {
                             .arg(int(pinBurnWhite)).arg(int(pinBabyParams)).arg(int(pinModelBranch))
                             .arg(int(pinModelTable)).arg(int(pinPickupGate)).arg(int(pinEggCase))
                             .arg(int(pinPalette)).arg(int(pinBrowserEntry)).arg(int(pinBrowserEgg))
-                            .arg(int(pinLoader)).arg(int(pinTex)).arg(int(pinIcon));
+                            .arg(int(pinLoader)).arg(int(pinTex)).arg(int(pinIcon))
+                            .arg(int(pinAudioMirror));
         }
         if (!ok) ++totalFail;
         if (!ok)
@@ -24187,6 +24201,491 @@ Item {
                              " pickup-gate extension, the egg-table case, the creative palette, the"
                              " encyclopedia entry/egg map, the delegate loader/texture and the egg"
                              " icon are source-pinned"
+                             ;
+    }
+
+    // ── P-r0830C review-2026-08-30 批 C（生物：中 #5/#6 + 低 #13/#14/#15/#16/#17/#18/#19/#26）探针 ──
+    //   十修一登（审查建议照单全收），驱动方式 = EntityManager / PlayerController / Hotbar / MinecartManager
+    //   直造直调（P-t947/t950/t951/t952 先例，独立小世界免态串扰）。每腿回退对应修法即红：
+    //   (a) #5（中）t947 豹猫缺观察者跟随门（同构宠物只修一侧）：驯服站猫距主人 6.0 → spectator 1.5s
+    //       → 距 ≥4.0（跟随会收进 2.5 停步带 = 旧版红）；主人距 15（> kOcelotTeleportDist 12）→
+    //       spectator 2s → 距 ≥10（瞬移补位会落 2-5 格环 = 旧版红）；创造/生存对照腿照常收进 ≤3.0
+    //       + 对称 sync pin（狼门与猫门同一字面量门形，审查六-3「对称提交配对称腿」，count ≥2）
+    //       + 分发点/签名透传钉。
+    //   (b) #6（中）t951 头盔免疫未纳入避光门：裸装对照腿（寻影照旧 = 修法零回归锚）+ 戴盔近战腿
+    //       （白天暴晒戴盔 Shambler 照常追到阳光下玩家并咬击 —— 旧版寻影弃追压攻击 = 红）+ 戴盔弓手腿
+    //       （dayShadeAi 关 → 候选落点暴晒弃选闸随之关闭 → 走位踏出檐外；旧版滞留檐内 = 红）
+    //       + 燃烧豁免行保持钉（「仍不燃烧」面的源级契约）+ 两处 dayShadeAi 盔豁免行 count==2 钉。
+    //   (c) #13（低）t952 mobAggroAgainst 受害者枚举门漏幼体：狼咬小蹒跚者 → 幼体转火追咬狼（狼掉血 =
+    //       幼体近战唯一伤害源）——旧版注册侧 no-op 幼体恒追玩家 = 红 + switch case 钉。
+    //   (d) #14（低）t947 攻击距离内矮障碍瞬态起跳：野狼贴脸（distXZ 1.4 ≤ kAttackRange 1.6）前方
+    //       0.6 格 1 格矮墙 → 继续咬击（hits ≥3）且全程贴地（跳起抬升 <0.15；旧版边咬边跳 ≥1.0 = 红）。
+    //   (e) #16（低）t950 骑乘态 mob 未被拾取扫描排除：乘矿车 Shambler 压着铁胸甲 6 窗恒不拾 + 同窗
+    //       裸装地面对照腿照拾（扫描活证）+ #15 概率缺省单源钉（成员初始化 = kEquipPickupChance）。
+    //   (f) #19（低）t952 骑乘解除后陈旧 jumpG 滑流：骑士组合东行撞墙（钉位恒 resting → aiHostile 跳
+    //       分支积东向滑流）→ 玩家移师西面（组合掉头西撤、无新跳覆盖）→ 杀鸡 → 下落期逐帧位移无东向帧
+    //       （旧版尾段滑流东漂 ~1 格 = 红签名）+ 钉位段清滑流行钉。
+    //   (g) #17（低）t951 非追击态不走寻影登记：纯注释钉（aiHostile 早退点 + aiArcher 同位 + 头文件口径）。
+    //   (h) #26（低）t952 attackMob 亡灵谓词未扩幼体（被 t961 显示面放大为显示与实战劈叉）：亡灵杀手 III
+    //       钻石剑 → 幼体实伤 15 == 成体实伤 15 == 基伤 7 + 显示面 (+8)（显示==实战对拍）；蜘蛛 7
+    //       （亡灵族门不外泄）+ 无附魔幼体 7（族门是使能方）+ isUndeadFamily 单一权威钉（与
+    //       undeadBurnsInDaylight 语义分立：亡灵族门不含头盔免烧豁免）。
+    //   #18（低）音频层裸 19 镜像配对钉落在 P-t952(i) pinEnum 组（现有 audiomanager 行 + 枚举值配对
+    //       断言，防未来枚举漂移——预防性钉，现状即绿）。
+    {
+        bool okA = false, okB = false, okC = false, okD = false,
+             okE = false, okF = false, okG = false, okH = false;
+        QString diag;
+        const QString exeDirC = QCoreApplication::applicationDirPath();
+        const QString rootC = QDir(exeDirC + QStringLiteral("/..")).absolutePath();
+        auto readSrcC = [&rootC](const QString &rel) -> QString {
+            QFile f(rootC + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString entCppC = readSrcC(QStringLiteral("src/Entities/entitymanager.cpp"));
+        const QString entHC = readSrcC(QStringLiteral("src/Entities/entitymanager.h"));
+        const QString pcCppC = readSrcC(QStringLiteral("src/Game/playercontroller.cpp"));
+        const QString pcHC = readSrcC(QStringLiteral("src/Game/playercontroller.h"));
+        auto countSubC = [](const QString &hay, const QString &needle) {
+            int n = 0;
+            for (int pos = hay.indexOf(needle); pos >= 0; pos = hay.indexOf(needle, pos + needle.size()))
+                ++n;
+            return n;
+        };
+        auto flatRigC = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        auto roofC = [](World &w, int x0, int z0, int n) {
+            for (int dx = 0; dx < n; ++dx)
+                for (int dz = 0; dz < n; ++dz) w.setBlock(x0 + dx, 88, z0 + dz, BR::Stone, 0);
+        };
+        auto cellInC = [](const QVector3D &p, int x0, int z0, int n) {
+            const int cx = int(std::floor(p.x())), cz = int(std::floor(p.z()));
+            return cx >= x0 && cx < x0 + n && cz >= z0 && cz < z0 + n;
+        };
+        auto distXZC = [](const QVector3D &p, const QVector3D &q) {
+            return QVector3D(p.x() - q.x(), 0.0f, p.z() - q.z()).length();
+        };
+        // 驯服站猫（~1/3 → 循环掷到成功；spawnMobTyped 默认站态，t947 驯狼同式）。
+        auto tamedCatAtC = [](EntityManager &em, int x, int z) -> int {
+            const int cat = em.spawnMobTyped(x, 85, z, EntityManager::MobOcelot,
+                                             QStringLiteral("#e8c890"), 10);
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && cat >= 0 && !tamed; ++attempt)
+                tamed = em.tameOcelot(cat);
+            return tamed ? cat : -1;
+        };
+        // 驯服站狼（t947 同式）。
+        auto tamedWolfAtC = [](EntityManager &em, int x, int z) -> int {
+            const int wolf = em.spawnMobTyped(x, 85, z, EntityManager::MobWolf,
+                                              QStringLiteral("#c8ccd4"), 10);
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && wolf >= 0 && !tamed; ++attempt)
+                tamed = em.tameWolf(wolf);
+            return tamed ? wolf : -1;
+        };
+
+        // ── (a) #5 豹猫观察者跟随门（镜像 t947 狼三腿 + 对称 sync pin）──
+        {
+            bool a1 = false, a2 = false, a3 = false;
+            {
+                World wa; flatRigC(wa);
+                EntityManager ema;
+                const int cat = tamedCatAtC(ema, 16, 22);
+                const QVector3D owner(22.5f, 85.0f, 22.5f); // 距猫落点 (16.5,22.5) 恰 6.0
+                if (cat >= 0) {
+                    for (int t = 0; t < 94; ++t) // 1.504s
+                        ema.tick(0.016f, &wa, owner, 0.3f, 1.8f, true, true); // spectator=true
+                    a1 = distXZC(ema.posAt(cat), owner) >= 4.0f;
+                    if (!a1) diag += QStringLiteral("a1 d=%1 ").arg(distXZC(ema.posAt(cat), owner));
+                } else diag += QStringLiteral("a1 tame failed ");
+            }
+            {
+                World wb; flatRigC(wb);
+                EntityManager emb;
+                const int cat = tamedCatAtC(emb, 16, 22);
+                const QVector3D owner(31.5f, 85.0f, 22.5f); // 距 15.0 > kOcelotTeleportDist 12
+                if (cat >= 0) {
+                    for (int t = 0; t < 125; ++t) // 2.0s
+                        emb.tick(0.016f, &wb, owner, 0.3f, 1.8f, true, true);
+                    a2 = distXZC(emb.posAt(cat), owner) >= 10.0f;
+                    if (!a2) diag += QStringLiteral("a2 d=%1 ").arg(distXZC(emb.posAt(cat), owner));
+                } else diag += QStringLiteral("a2 tame failed ");
+            }
+            {
+                World wc; flatRigC(wc);
+                EntityManager emc;
+                const int cat = tamedCatAtC(emc, 16, 22);
+                const QVector3D owner(22.5f, 85.0f, 22.5f);
+                if (cat >= 0) {
+                    for (int t = 0; t < 94; ++t) // 1.504s：猫速 4.0 > 距差 → 收进停步带
+                        emc.tick(0.016f, &wc, owner, 0.3f, 1.8f, true, false); // 创造/生存照常跟随
+                    a3 = distXZC(emc.posAt(cat), owner) <= 3.0f;
+                    if (!a3) diag += QStringLiteral("a3 d=%1 ").arg(distXZC(emc.posAt(cat), owner));
+                } else diag += QStringLiteral("a3 tame failed ");
+            }
+            // 对称 sync pin（审查六-3）：狼门与猫门同一字面量门形（同缩进两行体）——一侧回退即掉 1。
+            const int gateForms = countSubC(entCppC, QStringLiteral(
+                "if (playerSpectator)\n        return aiWander(e, dt, world, worldW, worldD, speedScale);"));
+            // 分发点透传 + 双宠物签名钉（头文件里两声明同以 playerSpectator 参数收尾）。
+            const bool pinDispatch = entCppC.contains(QStringLiteral(
+                "if (aiOcelot(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, playerSpectator))"))
+                && countSubC(entHC, QStringLiteral("bool playerSpectator);")) == 2;
+            okA = a1 && a2 && a3 && gateForms >= 2 && pinDispatch;
+            if (!(a1 && a2 && a3 && gateForms >= 2 && pinDispatch))
+                diag += QStringLiteral("a pins g=%1 dsp=%2 ").arg(gateForms).arg(int(pinDispatch));
+        }
+
+        // ── (b) #6 头盔免烧豁免入门（裸装对照 + 戴盔近战 + 戴盔弓手 + 燃烧豁免保持钉）──
+        {
+            // (b0) 裸装对照：白天暴晒僵尸走入石檐停驻（寻影照旧 = t951(a) 同 rig 的零回归锚）。
+            bool b0 = false;
+            {
+                World wb0; flatRigC(wb0);
+                roofC(wb0, 20, 20, 7);
+                EntityManager emb0;
+                const int zom = emb0.spawnMobTyped(15, 85, 20, EntityManager::MobShambler,
+                                                   QStringLiteral("#4a6a3a"), 20);
+                emb0.setMobArmorSet(zom, -1); // 裸装对照 = 显式裸装（脱 t377 随机甲 ~12.5% 头盔，同 t951 适配注）
+                const bool shadeTruth = zom >= 0 && wb0.skyLightAt(23, 85, 23) < 15;
+                const QVector3D player(15.5f, 85.0f, 30.5f); // 侦测圈内追击压力（同 t951(a)）
+                bool inShade = false;
+                if (zom >= 0) {
+                    for (int t = 0; t < 900 && !inShade; ++t) {
+                        emb0.tick(0.016f, &wb0, player, 0.3f, 1.8f, true, false, 1.0f);
+                        inShade = cellInC(emb0.posAt(zom), 20, 20, 7);
+                    }
+                }
+                b0 = zom >= 0 && shadeTruth && inShade;
+                if (!b0) diag += QStringLiteral("b0 zom=%1 sT=%2 in=%3 ")
+                                     .arg(zom).arg(int(shadeTruth)).arg(int(inShade));
+            }
+            // (b1) 戴盔近战腿：暴晒 + 盔 → 不寻影不压攻击，照常追到阳光下玩家并咬击。
+            bool b1 = false;
+            {
+                World wb1; flatRigC(wb1);
+                roofC(wb1, 20, 20, 7);
+                EntityManager emb1;
+                int hits = 0;
+                QObject::connect(&emb1, &EntityManager::mobAttackedPlayer,
+                                 [&hits](int, int, float, float) { ++hits; });
+                const int zom = emb1.spawnMobTyped(15, 85, 20, EntityManager::MobShambler,
+                                                   QStringLiteral("#4a6a3a"), 20);
+                const bool helmet = zom >= 0 && emb1.setMobArmorSet(zom, 1)
+                                    && emb1.mobArmorAt(zom, 0) != 0; // 头盔部位在位（豁免门的前置）
+                const QVector3D player(15.5f, 85.0f, 30.5f); // 阳光下玩家（暴晒 = 持影等待的对象）
+                bool closed = false;
+                if (zom >= 0 && helmet) {
+                    for (int t = 0; t < 900 && !closed; ++t) { // 14.4s：10.5 格追击 ≈ 3.8s + 咬击节流
+                        emb1.tick(0.016f, &wb1, player, 0.3f, 1.8f, true, false, 1.0f);
+                        closed = distXZC(emb1.posAt(zom), player) <= 2.0f && hits > 0;
+                    }
+                }
+                b1 = zom >= 0 && helmet && closed;
+                if (!b1) diag += QStringLiteral("b1 zom=%1 hel=%2 close=%3 hits=%4 ")
+                                     .arg(zom).arg(int(helmet)).arg(int(closed)).arg(hits);
+            }
+            // (b2) 戴盔弓手腿：dayShadeAi 关 → 候选落点暴晒弃选闸随之关闭 → 退避走位踏出檐外。
+            bool b2 = false;
+            {
+                World wb2; flatRigC(wb2);
+                roofC(wb2, 20, 20, 3);
+                EntityManager emb2;
+                const int bones = emb2.spawnMobTyped(21, 85, 21, EntityManager::MobBones,
+                                                     QStringLiteral("#d8d8e0"), 20);
+                const bool helmet = bones >= 0 && emb2.setMobArmorSet(bones, 1)
+                                    && emb2.mobArmorAt(bones, 0) != 0;
+                const bool shadeTruth = wb2.skyLightAt(21, 85, 21) < 15 && wb2.skyLightAt(21, 85, 23) == 15;
+                const QVector3D player(21.5f, 85.0f, 23.5f); // dist≈2.6 < kArcherKeepMin → 退避方向 = 檐外
+                bool leftRoof = false;
+                if (bones >= 0 && helmet) {
+                    for (int t = 0; t < 1200 && !leftRoof; ++t) { // 19.2s：拉弓/冷却多轮窗（t951(c) 同式）
+                        emb2.tick(0.016f, &wb2, player, 0.3f, 1.8f, true, false, 1.0f);
+                        leftRoof = !cellInC(emb2.posAt(bones), 20, 20, 3);
+                    }
+                }
+                b2 = bones >= 0 && helmet && shadeTruth && leftRoof;
+                if (!b2) diag += QStringLiteral("b2 bones=%1 hel=%2 sT=%3 left=%4 ")
+                                     .arg(bones).arg(int(helmet)).arg(int(shadeTruth)).arg(int(leftRoof));
+            }
+            // 燃烧豁免行保持（「仍不燃烧」面的源级契约——本 rig 不跑 tickHostileLife，燃烧面钉在燃烧
+            //   调用点原文上）+ 两处 dayShadeAi 盔豁免行（修法本体，count==2）。
+            const bool pinBurnKept = entCppC.contains(QStringLiteral(
+                "&& undeadBurnsInDaylight(e.mobType) && e.armorHelmet == 0;"));
+            const bool pinShadeHelmet = countSubC(entCppC, QStringLiteral(
+                "undeadBurnsInDaylight(e.mobType)\n                            && e.armorHelmet == 0;")) == 2;
+            okB = b0 && b1 && b2 && pinBurnKept && pinShadeHelmet;
+            if (!(b0 && b1 && b2 && pinBurnKept && pinShadeHelmet))
+                diag += QStringLiteral("b pins burn=%1 shade=%2 ").arg(int(pinBurnKept)).arg(int(pinShadeHelmet));
+        }
+
+        // ── (c) #13 狼咬幼体 → 幼体转火追咬狼（受害者枚举门补幼体）──
+        {
+            World wc; flatRigC(wc);
+            EntityManager emc;
+            emc.setChickenJockeyChance(0.0); // 防缺省 5% 随机组合污染（t952 同式）
+            const int wolf = tamedWolfAtC(emc, 16, 22);
+            const int baby = emc.spawnMobTyped(12, 85, 12, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 20);
+            const QVector3D player(22.5f, 85.0f, 22.5f); // 幼体侦测圈内（旧版被咬后仍追玩家的对照面）
+            bool bitten = false, fought = false;
+            if (wolf >= 0 && baby >= 0) {
+                emc.setWolfTarget(baby); // 狼群追咬幼体（t480 setWolfTarget 单一入口）
+                for (int t = 0; t < 1500 && !(bitten && fought); ++t) { // 24s 帽（t948(a) 同式）
+                    emc.tick(0.016f, &wc, player, 0.3f, 1.8f, true, false); // 夜间语义免日光干扰
+                    if (emc.healthAt(baby) < 20) bitten = true; // 狼首口落地（注册面前置证据）
+                    if (emc.healthAt(wolf) < 10) fought = true; // 幼体还手（仇恨转移 = 本任务断言）
+                }
+                const float dzw = distXZC(emc.posAt(baby), emc.posAt(wolf));
+                okC = bitten && fought && dzw <= 3.0f;
+                if (!okC) diag += QStringLiteral("c bit=%1 fight=%2 dzw=%3 ")
+                                      .arg(int(bitten)).arg(int(fought)).arg(dzw);
+            } else {
+                okC = false;
+                diag += QStringLiteral("c spawn/tame failed ");
+            }
+            // switch 门钉：幼体 case 在受害者门内（回退即红）。
+            okC = okC && entCppC.contains(QStringLiteral(
+                "case MobBabyShambler: break; // 仇恨 AI 消费面"));
+        }
+
+        // ── (d) #14 攻击距离内不起跳（跳探加 distXZ 门）──
+        {
+            World wd; flatRigC(wd);
+            EntityManager emd;
+            const int wolf = emd.spawnMobTyped(20, 85, 22, EntityManager::MobWolf,
+                                               QStringLiteral("#c8ccd4"), 10); // 未驯服 → 敌对玩家
+            for (int z = 21; z <= 23; ++z) wd.setBlock(21, 85, z, BR::Stone, 0); // 矮墙（狼前方 0.6 格探针位）
+            const QVector3D player(21.9f, 85.0f, 22.5f); // distXZ 1.4 ≤ kAttackRange 1.6 咬击带内
+            int hits = 0;
+            QObject::connect(&emd, &EntityManager::mobAttackedPlayer,
+                             [&hits](int, int, float, float) { ++hits; });
+            float baseY = 0.0f, maxY = 0.0f;
+            int airTicks = 0, maxAt = -1;
+            if (wolf >= 0) {
+                // 60 tick 稳定窗（实测 6 tick 时仍处落地下沉中段 85.2995 → 贴支撑顶 85.45 的 +0.15
+                //   上 snap 会被误读成起跳；1s 后真值静止，起跳签名 ≥0.9 与噪声硬分界）。
+                for (int t = 0; t < 60; ++t) emd.tick(0.016f, &wd, player, 0.3f, 1.8f, true, false);
+                baseY = emd.posAt(wolf).y();
+                maxY = baseY;
+                for (int t = 0; t < 625; ++t) { // 10s：咬击冷却 1s → ≥3 口（边咬证据）
+                    emd.tick(0.016f, &wd, player, 0.3f, 1.8f, true, false);
+                    const float yNow = emd.posAt(wolf).y();
+                    if (yNow > baseY + 0.05f) ++airTicks; // 离地帧计数（起跳签名）
+                    if (yNow > maxY) { maxY = yNow; maxAt = t; }
+                }
+            }
+            okD = wolf >= 0 && hits >= 3 && (maxY - baseY) < 0.15f;
+            diag += QStringLiteral("d wolf=%1 hits=%2 lift=%3 air=%4 maxAt=%5 base=%6 ")
+                        .arg(wolf).arg(hits).arg(maxY - baseY).arg(airTicks).arg(maxAt).arg(baseY);
+            // 跳探门钉：新门形在位 + 旧无距离门形绝迹（本函数内）。
+            okD = okD && entCppC.contains(QStringLiteral(
+                "if (e.resting && world && distXZ > kAttackRange) {"));
+        }
+
+        // ── (e) #16 骑乘态不拾 + 地面对照（+ #15 缺省单源钉）──
+        {
+            World we; flatRigC(we);
+            EntityManager eme;
+            eme.setChickenJockeyChance(0.0);
+            MinecartManager cartsE;
+            eme.setVehicleManagers(&cartsE, nullptr); // 载具注入（登乘扫描数据源）
+            ItemEntityManager ieme;
+            PlayerController pce;
+            pce.setEntityManager(&eme);
+            pce.setItemEntities(&ieme);
+            const int ironChest = int(RecipeRegistry::ArmorIdBase) + 1 * 4 + 1;    // t950 同式组装
+            const int leatherChest = int(RecipeRegistry::ArmorIdBase) + 0 * 4 + 1;
+            const int rider = eme.spawnMobTyped(20, 85, 20, EntityManager::MobShambler,
+                                                QStringLiteral("#4a6a3a"), 20);
+            if (rider >= 0) eme.setMobArmorSet(rider, -1); // 脱 spawn 随机甲（断言面纯净）
+            cartsE.spawnCart(20, 85, 20, &we); // 同格矿车（登乘带内）
+            eme.tickVehicleRiding();           // Pass C 登乘扫描（生产接线 = PlayerController 每帧调）
+            const bool boarded = rider >= 0 && eme.rideCartAt(rider) >= 0;
+            const int walker = eme.spawnMobTyped(30, 85, 30, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20); // 地面对照（远离车）
+            if (walker >= 0) eme.setMobArmorSet(walker, -1);
+            ieme.spawnItem(20, 85, 20, ironChest);    // 骑手脚下（座位钉位格）
+            ieme.spawnItem(30, 85, 30, leatherChest); // 对照脚下
+            QThread::msleep(560); // 越过掉落物新生免拾窗（kPickupDelayMs 墙钟，t950 同式）
+            pce.setEquipmentPickupChance(1.0);
+            for (int wi = 0; wi < 6; ++wi) pce.tickMobEquipmentPickup(0.5);
+            const bool riderSkipped = eme.mobArmorAt(rider, 1) == 0
+                && [&]() {
+                    for (int i = 0; i < ieme.count(); ++i)
+                        if (ieme.aliveAt(i) && ieme.itemIdAt(i) == ironChest) return true;
+                    return false;
+                }(); // 骑乘态：甲未穿 + 铁胸甲留存
+            const bool walkerPicked = walker >= 0 && eme.mobArmorAt(walker, 1) == leatherChest;
+            // #15 概率缺省单源钉：成员初始化走常量（双字面量形态绝迹）。
+            const bool pinChance = pcHC.contains(QStringLiteral("qreal m_equipPickupChance = kEquipPickupChance;"))
+                && !pcHC.contains(QStringLiteral("qreal m_equipPickupChance = 0.3;"));
+            okE = boarded && riderSkipped && walkerPicked && pinChance;
+            if (!(boarded && riderSkipped && walkerPicked && pinChance))
+                diag += QStringLiteral("e boarded=%1 skip=%2 walk=%3 pin=%4 ")
+                            .arg(int(boarded)).arg(int(riderSkipped)).arg(int(walkerPicked))
+                            .arg(int(pinChance));
+        }
+
+        // ── (f) #19 骑乘解除后陈旧滑流（钉位段清 jumpG）──
+        {
+            World wf; flatRigC(wf);
+            EntityManager emf;
+            emf.setChickenJockeyChance(1.0); // 必组合（t952 上端钉同式）
+            const int baby = emf.spawnMobTyped(20, 85, 20, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 20);
+            int chicken = -1;
+            for (int i = 0; i < emf.count(); ++i)
+                if (emf.aliveAt(i) && emf.mobTypeAt(i) == EntityManager::MobChicken) { chicken = i; break; }
+            for (int z = 19; z <= 21; ++z) wf.setBlock(23, 85, z, BR::Stone, 0); // 3 宽矮墙（跳探 0.6 格窗内）
+            QVector3D player(27.0f, 85.0f, 20.5f); // 东 → 骑手驱动组合东行撞墙
+            bool stalled = false, movedWest = false, eastDrift = false, unlinked = false;
+            if (baby >= 0 && chicken >= 0) {
+                for (int t = 0; t < 190 && !stalled; ++t) { // 3s：撞墙 stall（钉位恒 resting → 跳分支积东向滑流）
+                    emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+                    if (emf.posAt(baby).x() >= 22.3f) stalled = true;
+                }
+                // 侧压持续窗：stall 阈值 22.3 处跳探前向格仍是空气（fx = floor(22.9) = 22），须再压
+                //   ≥ 数个 AI tick 让骑手抵墙脸 22.55+（fx = 23 = 墙格）→ 跳分支反复点火积东向滑流。
+                for (int t = 0; t < 90 && stalled; ++t)
+                    emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+                player = QVector3D(13.0f, 85.0f, 20.5f); // 玩家移师西 → 骑手 AI 掉头（西向无障 → 不覆写滑流）
+                const float xWestStart = emf.posAt(baby).x();
+                for (int t = 0; t < 40; ++t) // 0.64s：组合西撤离墙（纯 AI ≈2.5 格；滑流东抗 ≈0.6 格）
+                    emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+                movedWest = emf.posAt(baby).x() <= 21.8f;
+                diag += QStringLiteral("f westDx=%1 ")
+                            .arg(xWestStart - emf.posAt(baby).x());
+                float prevX = emf.posAt(baby).x();
+                emf.damageEntity(chicken, 999); // 杀鸡 → 挂载解除 → 下落期（陈旧滑流施加窗）
+                for (int t = 0; t < 40; ++t) {
+                    emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+                    const float xNow = emf.posAt(baby).x();
+                    if (xNow - prevX > 0.02f) eastDrift = true; // 东向位移帧 = 陈旧滑流签名
+                    prevX = xNow;
+                }
+                unlinked = emf.rideMobAt(baby) == -1 && emf.aliveAt(baby) && !emf.deadAt(baby);
+            }
+            okF = baby >= 0 && chicken >= 0 && stalled && movedWest && unlinked && !eastDrift;
+            diag += QStringLiteral("f baby=%1 chk=%2 stall=%3 west=%4 east=%5 link=%6 x=%7 ")
+                        .arg(baby).arg(chicken).arg(int(stalled)).arg(int(movedWest))
+                        .arg(int(eastDrift)).arg(int(unlinked))
+                        .arg(baby >= 0 ? emf.posAt(baby).x() : -1.0f);
+            // 钉位段清滑流行钉（与清 vy 同段；行被删即红）。
+            okF = okF && entCppC.contains(QStringLiteral(
+                "if (e.jumpGX != 0.0f || e.jumpGZ != 0.0f) { e.jumpGX = 0.0f; e.jumpGZ = 0.0f; dirty = true; }"));
+        }
+
+        // ── (g) #17 非追击态不走寻影登记（纯注释钉：两 AI 早退点 + 头文件口径）──
+        okG = countSubC(entCppC, QStringLiteral("review0830 #17 登记")) >= 2
+           && entHC.contains(QStringLiteral("review0830 #17 登记"));
+
+        // ── (h) #26 亡灵杀手对幼体生效 + 显示==实战对拍 ──
+        {
+            World wh; flatRigC(wh);
+            EntityManager emh;
+            emh.setChickenJockeyChance(0.0); // 幼体独立生成（组合会改站位）
+            const int diaSword = int(ToolRegistry::DiamondSword); // 基伤 7
+            const int smite3 = EnchantRegistry::pack(int(EnchantRegistry::UndeadSlay), 3); // III → +7.5
+            const QVariantList smiteL{smite3, 0, 0, 0};
+            Hotbar hbh;
+            const QString famText = hbh.displayFamilyBonusText(smiteL); // t961 显示面 "(+8)"
+            const int famM = famText.startsWith(QStringLiteral("(+"))
+                                 ? famText.mid(2, famText.size() - 3).toInt() : -1;
+            // 单发实伤采样：attackMob 私有 → 走 Q_INVOKABLE beginMining 的真实攻击链（t242 路径 =
+            //   attackMob 唯一生产入口，t866「beginMining 不可直驱」注记的公开替代面）；命中即置攻击
+            //   冷却且直调不 tick 冷却不走 → 每 mob 独立 pc/hb 采样。m_hitDist 缺省 5.0（updateRaycast
+            //   未跑）→ 瞄 2.7 格内 mob 恒 mobDist ≤ m_hitDist；m_vel 零 → 暴击分支天然旁路。
+            QQuickWindow probeWinH;
+            auto hitOnceC = [&](int x, int z, int mobType, bool enchanted) -> int {
+                Hotbar hb;
+                PlayerController pc;
+                pc.setParentItem(probeWinH.contentItem());
+                pc.grab(); // m_captured（beginMining 入口门，t949 同式）
+                hb.setStack(0, diaSword, 1, -1, enchanted ? smiteL : QVariantList{0, 0, 0, 0});
+                hb.setSelectedSlot(0);
+                pc.setWorld(&wh);
+                pc.setEntityManager(&emh);
+                pc.setHotbar(&hb);
+                const int mob = emh.spawnMobTyped(x, 85, z, mobType, QStringLiteral("#4a6a3a"), 20);
+                if (mob < 0) return -1;
+                const QVector3D eye(float(x) + 0.5f, 86.62f, float(z) + 3.0f);
+                const QVector3D dir = (QVector3D(float(x) + 0.5f, 85.5f, float(z) + 0.5f) - eye).normalized();
+                pc.loadSavedState(eye.x(), 85.0f, eye.z(),
+                                  qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                                  qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+                pc.beginMining(); // findMobHit 命中 → attackMob（t476 附魔伤链）
+                return 20 - emh.healthAt(mob);
+            };
+            const int babyDmg = hitOnceC(20, 20, EntityManager::MobBabyShambler, true);
+            const int adultDmg = hitOnceC(30, 30, EntityManager::MobShambler, true);
+            const int spiderDmg = hitOnceC(10, 30, EntityManager::MobSpider, true);
+            const int plainDmg = hitOnceC(10, 10, EntityManager::MobBabyShambler, false);
+            // 显示==实战对拍：实战伤 = 基伤 7 + 显示面 (+M)；幼体 == 成体（族门同式）；族门不外泄蜘蛛；
+            //   无附魔 = 裸基伤（族门是使能方，非恒加成）。
+            okH = famText == QStringLiteral("(+8)") && famM == 8
+               && babyDmg == 7 + famM && adultDmg == babyDmg
+               && spiderDmg == 7 && plainDmg == 7;
+            if (!okH) diag += QStringLiteral("h fam=%1 M=%2 baby=%3 adult=%4 spider=%5 plain=%6 ")
+                                  .arg(famText).arg(famM).arg(babyDmg).arg(adultDmg)
+                                  .arg(spiderDmg).arg(plainDmg);
+            // 单一权威钉：独立谓词（亡灵族）在位 + attackMob 消费 + 旧裸清单绝迹 + 语义分立登记在案
+            //   （亡灵族门不含头盔免烧豁免——与 undeadBurnsInDaylight 的差）。
+            okH = okH && entCppC.contains(QStringLiteral("bool EntityManager::isUndeadFamily(int mobType)"))
+               && entHC.contains(QStringLiteral("static bool isUndeadFamily(int mobType);"))
+               && entHC.contains(QStringLiteral("头盔免烧豁免不进本门"))
+               && pcCppC.contains(QStringLiteral("const bool undead = EntityManager::isUndeadFamily(mobType);"))
+               && !pcCppC.contains(QStringLiteral(
+                   "mobType == int(EntityManager::MobShambler) || mobType == int(EntityManager::MobBones));"));
+        }
+
+        const bool okR0830C = okA && okB && okC && okD && okE && okF && okG && okH;
+        if (!okR0830C) ++totalFail;
+        if (!okR0830C)
+            qInfo().noquote() << "  [r0830C diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "| e" << okE << "f" << okF << "g" << okG << "h" << okH << "|" << diag;
+        qInfo().noquote() << (okR0830C ? "PASS" : "FAIL")
+                          << "| review0830 batch C (mobs #5 #6 #13 #14 #15 #16 #17 #18 #19 #26):"
+                             " (a) the tamed OCELOT mirrors the wolf's spectator gate - a standing"
+                             " cat holds off (>=4.0) and skips the far-teleport (>=10) while its"
+                             " owner spectates where following used to close/teleport, the"
+                             " creative/survival control still closes to the stop band (<=3.0),"
+                             " and the wolf/cat gates share one literal gate form (sync pin,"
+                             " count >=2) with the dispatch/signature pass-through pinned; (b)"
+                             " the helmet burn exemption now feeds the shade machine too: a"
+                             " BARE sun-lit shambler still retreats into the overhang (control),"
+                             " a HELMETED one charges straight to the sun-lit player and bites"
+                             " (no shade-seek, no attack suppression) instead of parking in the"
+                             " shade, and a helmeted bones archer walks OUT of the overhang once"
+                             " the sunlit-candidate gate switches off with dayShadeAi, while the"
+                             " burn-site exemption line stays pinned (still never burns); (c) a"
+                             " wolf bite on a BABY shambler registers revenge - the baby turns and"
+                             " melees the wolf (wolf hp drop, closed up) where the old enum gate"
+                             " silently no-oped; (d) an untamed wolf at bite range (1.4 <= 1.6)"
+                             " with a 1-high wall 0.6 ahead keeps biting (>=3 hits) without ever"
+                             " leaving the ground (lift <0.15; the transient hop used to lift"
+                             " ~1.0); (e) a cart-riding shambler standing on an iron chestplate"
+                             " never picks it across six windows while a bare ground control in"
+                             " the same scan does (riding excluded, resolvePlayerPush caliber),"
+                             " with the pickup-chance default pinned to the kEquipPickupChance"
+                             " constant; (f) after the jockey pair stalls against a wall (stale"
+                             " eastward jump glide) and the player flips to the west side, killing"
+                             " the chicken drops the baby with ZERO eastward per-tick drift frames"
+                             " (the old stale-glide streamer drifted ~1 block east mid-fall), and"
+                             " the pin-segment clear line is source-pinned; (g) the wander-state"
+                             " burns-in-place trade-off is comment-registered at both AI early-"
+                             " exits plus the header caliber; (h) an UndeadSlay-III diamond sword"
+                             " deals 15 to the BABY shambler == 15 to the adult == base 7 + the"
+                             " displayed (+8) (t961 show==combat pairing), 7 vs the spider (family"
+                             " gate does not leak) and 7 unenchanted (the gate enables, not adds),"
+                             " backed by the isUndeadFamily single authority (deliberately split"
+                             " from undeadBurnsInDaylight: the family gate carries no helmet"
+                             " exemption) with the bare t476 list extinct"
                              ;
     }
 

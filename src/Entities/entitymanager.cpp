@@ -1174,6 +1174,15 @@ bool EntityManager::undeadBurnsInDaylight(int mobType)
     return mobType == MobShambler || mobType == MobBones || mobType == MobBabyShambler;
 }
 
+// review0830 #26 亡灵族谓词单一权威（契约见头文件声明）：attackMob 亡灵杀手的目标门由 t476 裸清单
+//   （MobShambler || MobBones，t952 漏幼体 = 对幼体无加成且 t961 显示面 (+M) 劈叉）收口至此。
+//   与 undeadBurnsInDaylight 语义有意分立：本门 =「亡灵族」，头盔免烧豁免**不进**本门（戴盔亡灵
+//   不烧但仍吃亡灵杀手对族加成）。
+bool EntityManager::isUndeadFamily(int mobType)
+{
+    return mobType == MobShambler || mobType == MobBones || mobType == MobBabyShambler;
+}
+
 // t280 黑暗刷怪调度 + 敌对日光燃烧 + 远距消失（详见头文件方法注释）。三职责一方法收口敌对生命周期。
 //   分层（PLAN §2）：Entities 层，只读 World（blockAt/isSolid/skyLightAt/blockLightAt/heightAt/width/depth/height）
 //   + 自身实体数据；写 EntityManager（spawn / releaseSlot / damageEntity）。world==null → 早 return。
@@ -2125,10 +2134,13 @@ void EntityManager::wolfRetaliateAgainst(int victimIdx, int attackerIdx)
 //   mob 打伤 → 仇恨目标记为攻击者）。与 t923 wolfRetaliateAgainst（狼被打 → 狼群反击）互补：狼**主动
 //   攻击**面也要注册被咬者对狼的仇恨（t923 反击注册面核），敌对被咬后下个 AI tick 起转火追咬 / 转火
 //   射击本狼（消费侧 resolveAggroTarget，aiHostile / aiArcher 入口顶部）。受害者门：仅带仇恨 AI 的敌对型
-//   {Shambler / Spider / Silverfish（同落 aiHostile else 分发面）/ Bones}——Stalker（spec 只锁玩家不对
+//   {Shambler / Spider / Silverfish（同落 aiHostile else 分发面）/ Bones / BabyShambler（t952 幼体，
+//   review0830 #13 补门——幼体同走 aiHostile 三条追击路径）}——Stalker（spec 只锁玩家不对
 //   生物自爆，t712 同界）/ Nightwalker、Emberling（独立 AI）/ 被动七型（无仇恨系统，逃跑链不受影响）
 //   → 静默 no-op；攻击者门：活体 mob。slot+serial 双快照（同骷髅箭 arrowShooter+serial 槽复用防线）：
 //   攻击者槽复用换任后 serial 不匹配 → 消费侧判空落回玩家路径。重复注册覆盖旧仇恨（最新攻击者优先）。
+//   review0830 #13 长期方向（登记）：此枚举门宜改「是否具备仇恨 AI 能力」判定（mobType → 走
+//   aiHostile/aiArcher 的能力表单一权威），新敌对类型免再随类型清单漂移（#26 同族教训）。
 void EntityManager::mobAggroAgainst(int victimIdx, int attackerIdx)
 {
     if (victimIdx < 0 || attackerIdx < 0 || victimIdx == attackerIdx) return;
@@ -2136,7 +2148,8 @@ void EntityManager::mobAggroAgainst(int victimIdx, int attackerIdx)
     Entity &v = m_entities[size_t(victimIdx)];
     if (!v.alive || v.kind != Mob || v.dead) return; // 尸体 / 空槽不注册（咬击致死同帧已是 dead → no-op）
     switch (v.mobType) {
-    case MobShambler: case MobSpider: case MobSilverfish: case MobBones: break; // 仇恨 AI 消费面
+    case MobShambler: case MobSpider: case MobSilverfish: case MobBones:
+    case MobBabyShambler: break; // 仇恨 AI 消费面（t952 幼体扩段，review0830 #13）
     default: return; // Stalker / Nightwalker / Emberling / 被动型无此系统（入口门，见上）
     }
     const Entity &a = m_entities[size_t(attackerIdx)];
@@ -2773,7 +2786,10 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         //   先例）：每个 AI tick、resting 且朝目标移动就探前方脚位格（isJumpObstacle 单一权威 —— 作物/矮
         //   支撑豁免沿用），是 1 格墙 + 墙顶两格净空 → kJumpSpeed + t670 朝目标水平滑流。判定独立于 moved
         //   （不等撞停）也独立于 distXZ（贴脸障碍照跳；无墙时 isJumpObstacle 恒 false 不会原地蹦）。
-        if (e.resting && world && distXZ > 1e-4f) {
+        //   review0830 #14：攻击距离内不探跳（distXZ ≤ kAttackRange 咬击带内）——贴脸可咬时前方矮障碍
+        //   不再触发瞬态起跳（边咬边跳 1-2 跳）；跳探只服务「接近被挡」的越障，进入咬击带即无需越障。
+        //   跟随/寻偶路径不受影响（kFollowMinDist 2.5 > kAttackRange，chase 调用时 distXZ 恒 > 1.6）。
+        if (e.resting && world && distXZ > kAttackRange) {
             const float fdx = -std::sin(e.yawRad);
             const float fdz = -std::cos(e.yawRad);
             const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
@@ -2928,9 +2944,12 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
 //   (2) 驯服 + 坐 → 留守（不移动不跟随，机制等价 MC 坐猫）。
 //   (3) 驯服 + 站 → 跟随主人（走近 / 停步 / 过远瞬移）；求偶期优先寻偶。
 //   猫**不防御**（机制等价 MC 1.0 猫不攻击怪物 —— 驱赶 Stalker 由 aiStalker 侧对猫/豹猫临近时逃离实现）。
+//   review0830 #5 跟随门：playerSpectator=true（观察者）→ 跳过跟随段（走近 + 过远瞬移一并停——瞬移是
+//   跟随段的防掉队机制），回退 aiWander；创造/生存照常跟随。与 aiWolf 的门**同一字面量门形**（矩阵
+//   sync pin 钉 count≥2），门位同构：求偶分支之后（mob-mob 语义不随主人模式翻转）、跟随段之前。
 //   返是否真位移（驱动 dirty + moveSpeed + walkPhase 腿摆）。分层（PLAN §2）：只读 World::isSolid + 自身数据。
 bool EntityManager::aiOcelot(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
-                             float worldW, float worldD, float speedScale)
+                             float worldW, float worldD, float speedScale, bool playerSpectator)
 {
     // (1) 未驯服：被动游荡（丛林野豹猫；不攻击不敌对。驯服前的野生形态，机制等价 MC 1.0 野豹猫）。
     if (!e.ocelotTamed) {
@@ -2980,6 +2999,13 @@ bool EntityManager::aiOcelot(int idx, Entity &e, float dt, World *world, const Q
             return chase(mp.pos.x(), mp.pos.z(), kOcelotFollowSpeed * speedScale, md);
         }
     }
+
+    // review0830 #5 跟随门（与 aiWolf 同款门同字面量——对称 sync pin 消费端）：观察者主人 → 跳过整个
+    //   跟随段（走近 + 过远瞬移补位一并停），回退 aiWander（同 t290 不可锁定回退游荡先例）。门在求偶
+    //   分支之后：求偶寻偶是 mob-mob 语义，不随主人模式翻转（观察者下猫仍寻偶，同狼防御仍反击）。
+    //   创造/生存（false）不进此分支，跟随行为零变化。
+    if (playerSpectator)
+        return aiWander(e, dt, world, worldW, worldD, speedScale);
 
     // 跟随主人：distXZ > kFollowMinDist 走近（kFollowMinDist 内停步贴近）；过远 kOcelotTeleportDist 瞬移到主人
     //   附近安全位（防跟随永久掉队 —— 机制等价 MC 猫距主人过远传送；同狼 aiWolf 瞬移模式）。
@@ -3601,6 +3627,8 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     }
 
     // (2) 非追踪 → 回退到 wander（随机游荡，同 passive；mobType 非 sheep 故不吃草分支，纯游荡）。
+    //   review0830 #17 登记：白天避光仅罩追击路径 —— 本早退在 (2b) 阴影机之前，白天游荡（玩家脱战）
+    //   的亡灵原地照烧不避光（t670 旧版同位，非回归；显式取舍：避光是交战走位策略，游荡态不加装）。
     if (!e.chasing) {
         return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
@@ -3618,13 +3646,16 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     //     • 迟滞（kShadeHoldSeconds，Entity.shadeHoldTimer）：遮蔽即刷新；暴晒衰减；>0 期间「视作遮蔽」
     //       维持当前决策——交战中踏出光影边界 / 天光传播瞬态读数不触发立即 180° 折返（MC 僵尸日间交战
     //       也不秒退）。「追击→寻影」翻向最少隔一个迟滞窗 = 抽搐的结构性解药。
-    //   白名单 undeadBurnsInDaylight：只有会晒燃的亡灵做避光（Spider/Silverfish 走本函数但零波及）。
+    //   白名单 undeadBurnsInDaylight：只有会晒燃的亡灵做避光（Spider/Silverfish 走本函数但零波及）；
+    //   review0830 #6：盔免烧豁免（armorHelmet==0）同式入门 —— 戴盔亡灵「不烧」就也不寻影不压攻击
+    //   （免烧者无保命动机；t950 捡盔链放大面随燃烧门同口径闭合）。
     //   夜间（skyBrightness<=kBurnSkyBrightness）整段旁路 → 夜间行为与 t951 前逐位一致。
     //   只罩玩家目标路径：上方仇恨狼 / 铁傀儡转火分支不入场（mob-mob 战斗语义不随日光翻转，t947/t948）。
     float mx = dx, mz = dz; // 移动目标向量（默认朝玩家）
     float mdist = distPlayer;
     bool attackSuppressed = false; // t951：持影等待期压攻击（玩家暴晒未入影 → 不发起攻击）
-    const bool dayShadeAi = skyBrightness > kBurnSkyBrightness && undeadBurnsInDaylight(e.mobType);
+    const bool dayShadeAi = skyBrightness > kBurnSkyBrightness && undeadBurnsInDaylight(e.mobType)
+                            && e.armorHelmet == 0; // review0830 #6：盔免烧豁免同式入门（与燃烧调用点同式）
     if (dayShadeAi) {
         const bool selfExposed = sunBurnExposureAt(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH, skyBrightness);
         if (!selfExposed) {
@@ -3950,6 +3981,8 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
     }
     if (!e.chasing) {
         // 非追踪 → 回退 wander（随机游荡；mobType 非 sheep 不吃草，纯游荡）。
+        //   review0830 #17 登记：白天避光仅罩追击路径 —— 本早退在 (2b) 阴影机之前，白天游荡的骸骨
+        //   原地照烧不避光（t670 旧版同位，显式取舍同 aiHostile）。
         return aiWander(e, dt, world, worldW, worldD, speedScale); // t298 透传水中减速
     }
 
@@ -3969,10 +4002,13 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
     //     • 暴晒且迟滞窗尽 → 寻影优先（覆盖保持距离带——保命高于走位）；入影即停驻。
     //     • 真遮蔽 → 移动候选落点暴晒则弃选（保持带照常运作，但任何一步踏进灼烧日光即放弃该 tick 位移
     //       =「走位不出阴影」；弓手因此可贴在影内对露天玩家照射而自己不再挨晒）。
-    //   白名单 / 夜间旁路 / 只罩玩家路径（仇恨狼 / 铁傀儡分支不入场）同 aiHostile。
+    //   白名单 / 夜间旁路 / 只罩玩家路径（仇恨狼 / 铁傀儡分支不入场）同 aiHostile。review0830 #6：
+    //   盔免烧豁免（armorHelmet==0）同式入门 —— 戴盔骸骨不烧即不避光（候选落点暴晒弃选闸随
+    //   dayShadeAi 一并关闭，走位不再滞留阴影）。
     bool seekActive = false;    // 本 tick 以寻影为移动目标（覆盖保持带）
     float seekDirX = 0.0f, seekDirZ = 0.0f;
-    const bool dayShadeAi = skyBrightness > kBurnSkyBrightness && undeadBurnsInDaylight(e.mobType);
+    const bool dayShadeAi = skyBrightness > kBurnSkyBrightness && undeadBurnsInDaylight(e.mobType)
+                            && e.armorHelmet == 0; // review0830 #6：盔免烧豁免同式入门（与燃烧调用点同式）
     if (dayShadeAi) {
         const bool selfExposed = sunBurnExposureAt(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH, skyBrightness);
         if (!selfExposed) {
@@ -5562,6 +5598,11 @@ bool EntityManager::tickMobMounts(World *world, const QVector3D &playerPos, floa
             const QVector3D pin(e.pos.x(), mount.pos.y() + mount.halfH + e.halfH, e.pos.z());
             if (e.pos != pin) { e.pos = pin; pinMoved = true; dirty = true; }
             if (e.vy != 0.0f) e.vy = 0.0f;             // 挂载期垂直速度清零（主循环冻结不积分，防解除残留）
+            // review0830 #19：钉位段顺手清越障跳水平滑流（与清 vy 同段）——骑乘期骑手 AI（钉位恒
+            //   resting → aiHostile 越障跳分支可达）可设 jumpGX/jumpGZ，挂载态主循环早退不应用滑流
+            //   （陈旧值存活）；不在此清则解除骑乘（载具死）后下落期尾段把陈旧滑流施出 = 朝墙漂移。
+            if (e.jumpGX != 0.0f || e.jumpGZ != 0.0f) { e.jumpGX = 0.0f; e.jumpGZ = 0.0f; dirty = true; }
+            if (!e.resting) e.resting = true;          // 钉位态视作「支撑」（无物理语义，仅状态一致）
             if (!e.resting) e.resting = true;          // 钉位态视作「支撑」（无物理语义，仅状态一致）
             mount.moveSpeed = riderSpeed;              // 小鸡腿随骑士移动摆动（走相块下帧消费）
             e.moveSpeed = 0.0f;                        // 被驮不迈腿（同矿车乘客 walkPhase 冻结口径）
@@ -7406,7 +7447,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                                playerTargetable, playerSpectator))
                         dirty = true;
                 } else if (e.mobType == MobOcelot) {
-                    if (aiOcelot(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
+                    // review0830 #5：playerSpectator 透传 aiOcelot（观察者不跟随 + 不瞬移——与 aiWolf
+                    //   同款门同字面量；PlayerController 按 mode==Spectator 派生，同 aiWolf 通道）。
+                    if (aiOcelot(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, playerSpectator)) dirty = true;
                 } else if (e.mobRider >= 0) {
                     // t952 骑士载具 AI 挂起（小鸡被小僵尸驮乘期）：自身 wander / 求偶 / 坐站全停——移动由
                     //   tickMobMounts 钉位跟随骑手（「小僵尸的追击移动驱动小鸡」，dev-plan 最稳刀口径，分离后
