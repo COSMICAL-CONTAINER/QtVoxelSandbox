@@ -13690,6 +13690,23 @@ Window {
         }
     }
 
+    // t977 切换物品栏物品名浮显（R19.17 🅶 杂项组收官）：切槽（滚轮 / 数字键）→ 血量/饱食度行上方中央
+    //   显当前物品名，白字，停留 2s 后 0.3s 淡出（用户第五轮口径 t977）；附魔物品显详情（名称+耐久行+
+    //   逐条附魔带罗马等级），改名物品显改名后名字（多附魔工具区分）。空槽不显。文本组装走组件内信号
+    //   处理器直读 Hotbar Q_INVOKABLE slotDetailText（AOT 教训 t976/t177：跨单元绑定别当文本/显隐决策
+    //   ——组装在 C++ 单一权威，QML 只消费字符串；契约注释见 HeldItemNameFlash.qml）。挂载点与 t508
+    //   下船提示同行位（vitalsBar 上方 8px 居中）：同时显时叠字——两者均瞬态（2.3s / 5s）且同现需
+    //   「骑乘中切槽」，从简不互斥（登记取舍，用户口径未要求互斥）。Creative 亦显（hotbar 两模式都有；
+    //   观察者 active=false 连带不显——Spectator 无 hotbar，切槽无意义）。
+    HeldItemNameFlash {
+        id: heldItemNameFlash
+        anchors.bottom: vitalsBar.top
+        anchors.bottomMargin: 8
+        anchors.horizontalCenter: parent.horizontalCenter
+        hotbar: hotbarVM
+        active: window.appState === "playing" && player.mode !== PlayerController.Spectator
+    }
+
     // t508 骑船下船提示（spec「坐上船时物品栏上方提示按 shift 下船」）：玩家骑船时（player.boatManager.ridingIndex>=0）
     //   在 hotbar 上方（vitalsBar / xpBar 之上）居中显「按潜行键（Shift）下船」。触碰 boats.revision 令上下马瞬时刷新
     //   （tryMount / dismount / 撞毁都 bump revision）。纯 QtQuick Text 自绘（§9 override (a)），无 MC GUI PNG。

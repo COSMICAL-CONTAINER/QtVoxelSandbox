@@ -322,6 +322,16 @@ public:
     Q_INVOKABLE QString iconSourceAt(int slot) const;
     // 每槽物品的中文显示名（HUD/背包标签用；走 BlockRegistry::displayName）。空槽返回空串。
     Q_INVOKABLE QString nameAt(int slot) const;
+    // t977 切槽物品名浮显文本（HUD 切槽浮显的组装单一权威；QML 只消费字符串 —— AOT 教训 t976/t177：
+    //   文本组装不上 QML 绑定，呈现层经信号处理器 Q_INVOKABLE 直读，见 HeldItemNameFlash.qml 契约注释）。
+    //   格式（用户第五轮口径）：
+    //   - 空槽 → 空串（浮显不显；显「空手」从简不做，口径登记 dev-plan t977）；
+    //   - 普通物品 → 单行「名称」（nameAt：customName 改名优先，t477 —— 改名多附魔工具据此区分）；
+    //   - 附魔物品 → 「名称」+ 换行 + 「耐久: cur/max」行（带耐久物品才有；护甲段 toolMaxDurability=0
+    //     另查 ArmorRegistry —— hotbar 槽可持护甲件，t349「有无耐久」判法推广）+ 换行 + 逐条
+    //     「附魔名 罗马等级」（enchantListText 同款，t590）。耐久行与附魔行互不依赖：附魔书有附魔无
+    //     耐久行；带耐久无附魔 = 单行名。
+    Q_INVOKABLE QString slotDetailText(int slot) const;
     // 由物品 id 取图标 qrc 路径 / 中文显示名（创造背包按 id 列方块，复用 hotbar 同一套映射）。
     Q_INVOKABLE QString iconSourceForBlock(int blockId) const;
     Q_INVOKABLE QString nameForBlock(int blockId) const;

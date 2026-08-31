@@ -284,6 +284,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/Inventory.qml
         src/ui/InvSlot.qml
         src/ui/DurabilityBar.qml # t640② 背包 main/hotbar/craft 槽工具·护甲耐久条（HUD hotbar t315 模式推广）
+        src/ui/HeldItemNameFlash.qml # t977 切槽物品名浮显（血量/饱食度上方中央白字，hold 2s + fade 0.3s；文本组装走 Hotbar::slotDetailText 单一权威）
         src/ui/SurvivalInventory.qml
         src/ui/CharacterPreview3D.qml
         src/ui/CraftingTableUI.qml
