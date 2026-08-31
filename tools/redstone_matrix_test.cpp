@@ -17753,12 +17753,15 @@ Item {
     }
 
     // ── P-t896 创造拿取/复制语义（源码钉 QML 数量契约 + Hotbar VM 行为级数量钉）──
-    //    用户定稿：①调色板**左键拿取默认 1 个**（旧满栈 64 上手）；②**中键 = 复制一整组** —— 对背包物品
-    //    （hotbar / 主栏 / 合成 / 护甲槽）中键复制的是 maxStackSize(id) 整组，非源槽当前数量（旧
-    //    min(count,maxStack) 复制 2 件 → 放回 = 4 的「2变4 翻倍」）。钉：Inventory.qml 左键 TapHandler
-    //    heldCount=1 / 中键 TapHandler maxStackSize(modelData) / copyStackToCursor maxStackSize(id)
-    //    （min(count,…) 旧式必须消失）+ Hotbar::maxStackSize 行为级（方块 64 / 工具·桶 1 / 附魔书 1 ——
-    //    整组语义的数量单一权威，QML 三处全读它）。回退任一处（左键回 64 / 复制回源槽数）→ 对应钉红。
+    //    用户定稿：**中键 = 复制一整组** —— 对背包物品（hotbar / 主栏 / 合成 / 护甲槽）中键复制的是
+    //    maxStackSize(id) 整组，非源槽当前数量（旧 min(count,maxStack) 复制 2 件 → 放回 = 4 的
+    //    「2变4 翻倍」）。钉：Inventory.qml 中键 TapHandler maxStackSize(modelData) / copyStackToCursor
+    //    maxStackSize(id)（min(count,…) 旧式必须消失）+ Hotbar::maxStackSize 行为级（方块 64 / 工具·桶 1 /
+    //    附魔书 1 —— 整组语义的数量单一权威，QML 三处全读它）。
+    //    **t975 合法演化**（P-t949(d)/P-t950(f) 先例：用户口径再定稿 → 旧钉随新契约演化）：t896 的
+    //    「调色板左键默认 1 个」被用户 8-28 定稿翻案（左键回整组 / 右键接走单件），该键位分配钉由 P-t975
+    //    承接；本探针保留 t896 仍拥有的面——中键复制整组（调色板中键 + copyStackToCursor）+ 数量单一权威
+    //    + 旧式 min(count,…) 绝迹。回退复制面（中键回源槽数）→ 对应钉红。
     {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -17768,10 +17771,10 @@ Item {
         const QString fn = iFn >= 0 ? s.mid(iFn, 900) : QString();
         bool okCopy = fn.contains(QStringLiteral("heldCount = root.hotbar.maxStackSize(id)"))
                       && !fn.contains(QStringLiteral("Math.min(count"));
-        // 调色板两 TapHandler：第一个（左键）heldCount=1；第二个（中键）maxStackSize(modelData)。
+        // 调色板中键 TapHandler：heldBlock = modelData 的第二处出现（第一处在 t975 paletteTake 共用入口内），
+        //   邻近段仍直读 maxStackSize(modelData)（t896/t653① 中键复制面，t975 零触碰）。
         const int iTake1 = s.indexOf(QStringLiteral("root.hotbar.heldBlock = modelData"));
         const int iTake2 = iTake1 >= 0 ? s.indexOf(QStringLiteral("root.hotbar.heldBlock = modelData"), iTake1 + 10) : -1;
-        bool okLeft = iTake1 >= 0 && s.mid(iTake1, 700).contains(QStringLiteral("heldCount = 1"));
         bool okMid = iTake2 >= 0 && s.mid(iTake2, 400).contains(QStringLiteral("maxStackSize(modelData)"));
         // 行为级数量钉：整组语义的数量权威（方块/材料 64；桶·附魔书 1 —— 工具段同 1 由桶代表不可堆叠类）。
         Hotbar hbT896;
@@ -17779,19 +17782,19 @@ Item {
                           && hbT896.maxStackSize(RecipeRegistry::RedstoneId) == 64
                           && hbT896.maxStackSize(RecipeRegistry::BucketEmptyId) == 1
                           && hbT896.maxStackSize(RecipeRegistry::EnchantedBookId) == 1;
-        const bool ok = okCopy && okLeft && okMid && okVm;
+        const bool ok = okCopy && okMid && okVm;
         if (!ok)
-            qInfo().noquote() << "  [t896 diag] copy" << okCopy << "left" << okLeft
+            qInfo().noquote() << "  [t896 diag] copy" << okCopy
                               << "mid" << okMid << "vm" << okVm;
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t896 creative take/copy semantics: palette left-click now takes ONE item by "
-                             "default (full-stack pickup moves to middle-click), and middle-click on any "
-                             "inventory slot clones a FULL maxStackSize stack to the cursor instead of the "
-                             "slot's current count (the old min(count,max) clone let a 2-item slot become 4 "
-                             "when placed back - the reported 2-becomes-4 doubling); quantity authority stays "
-                             "Hotbar::maxStackSize (blocks 64, tools/buckets/armor 1) read by all three QML "
-                             "sites, pinned by source pin plus behavioral VM quantity probe";
+                          << "| t896 creative copy semantics (left-click quantity leg legally evolved to"
+                             " P-t975 per the user's 8-28 re-finalization): middle-click on any inventory"
+                             " slot clones a FULL maxStackSize stack to the cursor instead of the slot's"
+                             " current count (the old min(count,max) clone let a 2-item slot become 4"
+                             " when placed back - the reported 2-becomes-4 doubling); quantity authority"
+                             " stays Hotbar::maxStackSize (blocks 64, tools/buckets/armor 1) read by all"
+                             " QML copy sites, pinned by source pin plus behavioral VM quantity probe";
     }
 
     // ── P-t897 羊两修（行为级：吃草门 = 脚下草方块 + 静止 walkPhase 归零）──
@@ -29153,6 +29156,285 @@ Item {
                              " saveAndExitToWorldList, onClosing routes the window-close path through"
                              " the same chain and closes the store, and the WorldStore counter contract"
                              " (Q_PROPERTY + exactly 3 bump sites, saveAll's after the commit gate)";
+    }
+
+    // ── P-t975 创造拿取语义再反转（用户 8-28 定稿：调色板**左键 = 拿一组 / 右键 = 只拿一个**，
+    //    t896 的「左键默认 1 个」被翻案）──
+    //    逐入口清单（全库核）：创造拿取面唯一 = Inventory.qml 调色板格（无限源）；其余槽位面
+    //    （Inventory 护甲/合成/主栏/hotbar 行、AnvilUI、EnchantingTableUI、SurvivalInventory）左/右键走
+    //    InventoryOps 生存共享语义、中键走 t653①/t896/t956 复制面，均非「无限源拿取」，零触碰。
+    //    (a) 源码钉：paletteTake 单一入口三段结构（预设书 / 同格 toggle-or-续拿 / 异格·空手换拿）+
+    //        左键传 maxStackSize(modelData)+toggle、右键（Qt.RightButton 邻近段）传 1+无 toggle +
+    //        无限源拿取字面恰 2 处（共用入口 + 中键复制面）+ paletteTake 调用恰 2 处（逐入口数钉：
+    //        创造拿取只此左右两键，散写第三处即红）。
+    //    (b) 行为腿（t874/t956 装配法：临时目录 + 私有 URI + wrapper 作用域 + 真 Hotbar 直调；
+    //        returnHeldToVoidRequested 接宿主同义 sink——Main.qml 直连 `heldBlock = 0` 的行为级镜像）：
+    //        ①左键一组=64 ②左键同格 t318 归还虚空 ③右键空手=1 ④右键连点续拿=2 ⑤右键满组 cap no-op
+    //        ⑥右键异格换拿 1 件 ⑦左键异格换拿整组 ⑧工具左键「一组」=1（maxStackSize 权威，t33 口径）
+    //        ⑨预设附魔书右键 = 0x227×1 带预设附魔；itemTaken / voidReturn 发射计数精确钉
+    //        （拿取发、归还/满组 no-op 不发）。
+    //    阴性轮：左键数量回 1（翻案回滚）→ 恰 P-t975 FAIL → 复原绿。
+    {
+        bool okPin = false, behavOk = false;
+        QString behavDiag;
+        const QString exeDir975 = QCoreApplication::applicationDirPath();
+        const QString root975 = QDir(exeDir975 + QStringLiteral("/..")).absolutePath();
+        QFile inv975f(root975 + QStringLiteral("/src/ui/Inventory.qml"));
+        const QString inv975s = inv975f.open(QIODevice::ReadOnly) ? QString::fromUtf8(inv975f.readAll()) : QString();
+        const int iFn975 = inv975s.indexOf(QStringLiteral("function paletteTake(modelData, takeCount, toggleReturnOnSameId)"));
+        const QString fn975 = iFn975 >= 0 ? inv975s.mid(iFn975, 1400) : QString();
+        const int iLeft975 = inv975s.indexOf(QStringLiteral("root.paletteTake(modelData, root.hotbar.maxStackSize(modelData), true)"));
+        const int iRight975 = iLeft975 >= 0
+                ? inv975s.indexOf(QStringLiteral("acceptedButtons: Qt.RightButton"), iLeft975) : -1;
+        const QString rightSeg975 = iRight975 >= 0 ? inv975s.mid(iRight975, 300) : QString();
+        const int nTakeLit975 = inv975s.count(QStringLiteral("root.hotbar.heldBlock = modelData"));
+        const int nTakeCall975 = inv975s.count(QStringLiteral("root.paletteTake("));
+        okPin = iFn975 >= 0
+                && fn975.contains(QStringLiteral("root.hotbar.takeCreativeEnchantedBook(bi.ench)"))
+                && fn975.contains(QStringLiteral("if (toggleReturnOnSameId) {"))
+                && fn975.contains(QStringLiteral("root.returnHeldToVoidRequested()"))
+                && fn975.contains(QStringLiteral("heldCount < root.hotbar.maxStackSize(modelData)"))
+                && fn975.contains(QStringLiteral("root.hotbar.heldCount = root.hotbar.heldCount + 1"))
+                && fn975.contains(QStringLiteral("root.hotbar.heldCount = takeCount"))
+                && fn975.contains(QStringLiteral("root.itemTaken()"))
+                && iLeft975 >= 0
+                && iRight975 > iLeft975
+                && rightSeg975.contains(QStringLiteral("root.paletteTake(modelData, 1, false)"))
+                && nTakeLit975 == 2
+                && nTakeCall975 == 2;
+
+        // (b) 行为腿装配（t956 同款：临时目录逃离 qrc 重映射 + 私有 URI + wrapper 作用域）。
+        static bool sT975TypesRegistered = false;
+        if (!sT975TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT975", 1, 0, "Hotbar");
+            qmlRegisterType<PlayerController>("VoxelSandboxProbeT975", 1, 0, "PlayerController");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT975", 1, 0, "ResourcePackManager");
+            sT975TypesRegistered = true;
+        }
+        const QString uiDir975 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUiDir975 = QDir::temp().absoluteFilePath(
+                QStringLiteral("t975_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUiDir975);
+        for (const QString f : { QStringLiteral("Inventory.qml"), QStringLiteral("InventoryOps.js"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("DurabilityBar.qml"), QStringLiteral("DarkScrollBar.qml") }) {
+            QFile::remove(probeUiDir975 + QLatin1Char('/') + f);
+            QFile(uiDir975 + QLatin1Char('/') + f).copy(probeUiDir975 + QLatin1Char('/') + f);
+        }
+        // CharacterPreview3D 桩：角色预览是纯呈现 3D 组件，与本任务拿取语义无关（真件引 QtQuick3D 全
+        //   模块场景，harness 不装 —— t956 AnvilUI 装配法的「最小依赖面」策略）；四注入属性同签名。
+        {
+            QFile stub975(probeUiDir975 + QStringLiteral("/CharacterPreview3D.qml"));
+            if (stub975.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                stub975.write(QByteArrayLiteral(
+                    "import QtQuick\n"
+                    "Item {\n"
+                    "    property var hotbar\n"
+                    "    property var player\n"
+                    "    property bool showHitboxes: false\n"
+                    "    property var mouseScene\n"
+                    "}\n"));
+                stub975.close();
+            }
+        }
+        {
+            // import 重映射（t956 同款）：InventoryOps.js → 绝对路径；import VoxelSandbox → 私有 URI。
+            const QUrl jsUrl975 = QUrl::fromLocalFile(probeUiDir975 + QLatin1Char('/') + QStringLiteral("InventoryOps.js"));
+            const QStringList qmlFiles975 = QDir(probeUiDir975).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles975) {
+                QFile p(probeUiDir975 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import \"InventoryOps.js\" as InventoryOps"),
+                          QStringLiteral("import \"") + jsUrl975.toString() + QStringLiteral("\" as InventoryOps"));
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT975\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine975;
+        Hotbar vm975;
+        QQmlComponent wrapComp975(&engine975);
+        // wrapper 作用域：id: window（面板内 window.shiftHeld / window.progress / window.showHitboxes 解析）
+        //   + cursorTracker（previewMouseScene 绑定源）——均与拿取语义无关，仅保装载。
+        wrapComp975.setData(R"QML(import QtQuick
+Item {
+    id: window
+    width: 800; height: 600
+    property bool shiftHeld: false
+    property bool showHitboxes: false
+    property var progress
+    function refocusKeyInput() { }
+    HoverHandler { id: cursorTracker }
+}
+)QML", QUrl());
+        QQuickItem host975;   // 独立场景根（无窗口，同 t874/t956）
+        QObject *inv975Obj = nullptr;
+        QFile invSrc975(probeUiDir975 + QLatin1Char('/') + QStringLiteral("Inventory.qml"));
+        if (wrapComp975.isError()) {
+            behavDiag = QStringLiteral("wrapper: ") + wrapComp975.errorString();
+        } else if (!invSrc975.open(QIODevice::ReadOnly)) {
+            behavDiag = QStringLiteral("Inventory read failed");
+        } else {
+            QQuickItem *wrapItem = qobject_cast<QQuickItem *>(wrapComp975.create());
+            if (!wrapItem) {
+                behavDiag = QStringLiteral("wrapper create failed");
+            } else {
+                wrapItem->setParent(&engine975);
+                wrapItem->setParentItem(&host975);
+                QQmlComponent invComp975(&engine975);
+                invComp975.setData(invSrc975.readAll(), QUrl::fromLocalFile(invSrc975.fileName()));
+                if (invComp975.isError()) {
+                    behavDiag = QStringLiteral("Inventory load: ") + invComp975.errorString();
+                } else {
+                    inv975Obj = invComp975.create(qmlContext(wrapItem));
+                    QQuickItem *ii = qobject_cast<QQuickItem *>(inv975Obj);
+                    if (!ii) {
+                        behavDiag = QStringLiteral("Inventory create: ") + invComp975.errorString();
+                    } else {
+                        inv975Obj->setProperty("hotbar", QVariant::fromValue(&vm975));
+                        inv975Obj->setProperty("player", QVariant());
+                        inv975Obj->setProperty("progress", QVariant());
+                        ii->setWidth(800);
+                        ii->setHeight(600);
+                        inv975Obj->setParent(wrapItem);
+                        ii->setParentItem(wrapItem);
+                    }
+                }
+            }
+        }
+        if (!inv975Obj) {
+            behavOk = false;
+        } else {
+            QCoreApplication::processEvents();
+            // 宿主同义 sink：Main.qml 直连语义行为级镜像（onReturnHeldToVoidRequested: hotbarVM.heldBlock = 0）
+            //   + itemTaken 计数（连接失败恒 -1，腿内即红；t956 同款 QtObject 计数器）。
+            QQmlComponent sinkComp975(&engine975);
+            sinkComp975.setData(QByteArrayLiteral(
+                                   "import QtQuick\n"
+                                   "QtObject {\n"
+                                   "    property int voidCount: 0\n"
+                                   "    property int takenCount: 0\n"
+                                   "    property QtObject vm\n"
+                                   "    function voidReturn() { voidCount += 1; if (vm) vm.heldBlock = 0 }\n"
+                                   "    function takenBump() { takenCount += 1 }\n"
+                                   "}\n"), QUrl());
+            QObject *sink975 = sinkComp975.create();
+            if (sink975) sink975->setParent(inv975Obj);
+            if (sink975) sink975->setProperty("vm", QVariant::fromValue(&vm975));
+            const bool vConn975 = sink975 && QObject::connect(inv975Obj, SIGNAL(returnHeldToVoidRequested()),
+                                                              sink975, SLOT(voidReturn()));
+            const bool tConn975 = sink975 && QObject::connect(inv975Obj, SIGNAL(itemTaken()),
+                                                              sink975, SLOT(takenBump()));
+            const auto voids975 = [sink975]() { return sink975 ? sink975->property("voidCount").toInt() : -1; };
+            const auto taken975 = [sink975]() { return sink975 ? sink975->property("takenCount").toInt() : -1; };
+            auto invokeTake975 = [inv975Obj](int id, int count, bool toggle) {
+                return inv975Obj && QMetaObject::invokeMethod(inv975Obj, "paletteTake",
+                                                              Q_ARG(QVariant, QVariant(id)),
+                                                              Q_ARG(QVariant, QVariant(count)),
+                                                              Q_ARG(QVariant, QVariant(toggle)));
+            };
+            const int stone975 = int(BR::Stone);
+            const int dirt975 = int(BR::Dirt);
+            const int sword975 = int(ToolRegistry::DiamondSword);
+            const int stoneMax975 = vm975.maxStackSize(stone975);
+            const int sharpPack975 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 1);
+            // 调色板哨兵 id = Inventory.qml bookSentinel(-0x1000) - ench（bookInfoFor 映射方向）。
+            const int bookCell975 = -0x1000 - int(EnchantRegistry::Sharpness);
+            if (!vConn975 || !tConn975) {
+                behavDiag = QStringLiteral("sink connect failed");
+            } else do {
+                // ① 左键（空手）= 拿一组：maxStackSize 上手（64）。
+                if (!invokeTake975(stone975, stoneMax975, true)) { behavDiag = QStringLiteral("invoke 1 failed"); break; }
+                if (vm975.heldBlock() != stone975 || vm975.heldCount() != stoneMax975) {
+                    behavDiag = QStringLiteral("left stack: held ") + QString::number(vm975.heldBlock())
+                                 + QStringLiteral(" x") + QString::number(vm975.heldCount());
+                    break;
+                }
+                if (taken975() != 1 || voids975() != 0) { behavDiag = QStringLiteral("leg1 signals"); break; }
+                // ② 左键同格 = t318 切换式归还（sink 镜像宿主 heldBlock = 0；不重复发拿取反馈）。
+                if (!invokeTake975(stone975, stoneMax975, true)) { behavDiag = QStringLiteral("invoke 2 failed"); break; }
+                if (vm975.heldBlock() != 0 || vm975.heldCount() != 0 || voids975() != 1 || taken975() != 1) {
+                    behavDiag = QStringLiteral("left toggle: held ") + QString::number(vm975.heldBlock())
+                                 + QStringLiteral(" voids ") + QString::number(voids975());
+                    break;
+                }
+                // ③ 右键（空手）= 只拿一个：1 件上手。
+                if (!invokeTake975(stone975, 1, false)) { behavDiag = QStringLiteral("invoke 3 failed"); break; }
+                if (vm975.heldBlock() != stone975 || vm975.heldCount() != 1 || taken975() != 2) {
+                    behavDiag = QStringLiteral("right one: held ") + QString::number(vm975.heldCount());
+                    break;
+                }
+                // ④ 右键连点 = 续拿 +1（不接 t318 toggle —— 连点拿/还振荡防线）。
+                if (!invokeTake975(stone975, 1, false)) { behavDiag = QStringLiteral("invoke 4 failed"); break; }
+                if (vm975.heldCount() != 2 || voids975() != 1 || taken975() != 3) {
+                    behavDiag = QStringLiteral("right accumulate: x") + QString::number(vm975.heldCount());
+                    break;
+                }
+                // ⑤ 右键满组 = cap no-op（maxStackSize 单一权威；不重发反馈）。
+                vm975.setHeldCount(stoneMax975);
+                if (!invokeTake975(stone975, 1, false)) { behavDiag = QStringLiteral("invoke 5 failed"); break; }
+                if (vm975.heldCount() != stoneMax975 || voids975() != 1 || taken975() != 3) {
+                    behavDiag = QStringLiteral("right cap: x") + QString::number(vm975.heldCount());
+                    break;
+                }
+                // ⑥ 右键异格 = 换拿 1 件（旧物回虚空 + 新物 1 件上手）。
+                if (!invokeTake975(dirt975, 1, false)) { behavDiag = QStringLiteral("invoke 6 failed"); break; }
+                if (vm975.heldBlock() != dirt975 || vm975.heldCount() != 1 || voids975() != 2 || taken975() != 4) {
+                    behavDiag = QStringLiteral("right swap: held ") + QString::number(vm975.heldBlock());
+                    break;
+                }
+                // ⑦ 左键异格 = 换拿整组。
+                if (!invokeTake975(stone975, stoneMax975, true)) { behavDiag = QStringLiteral("invoke 7 failed"); break; }
+                if (vm975.heldBlock() != stone975 || vm975.heldCount() != stoneMax975 || voids975() != 3 || taken975() != 5) {
+                    behavDiag = QStringLiteral("left swap: x") + QString::number(vm975.heldCount());
+                    break;
+                }
+                // ⑧ 工具左键「一组」= maxStackSize 权威 = 1（t33 不可堆叠口径，左右键同量）。
+                if (!invokeTake975(sword975, vm975.maxStackSize(sword975), true)) { behavDiag = QStringLiteral("invoke 8 failed"); break; }
+                if (vm975.heldBlock() != sword975 || vm975.heldCount() != 1 || voids975() != 4 || taken975() != 6) {
+                    behavDiag = QStringLiteral("tool stack: x") + QString::number(vm975.heldCount());
+                    break;
+                }
+                // ⑨ 预设附魔书（哨兵格）= 专用拿取：0x227 ×1 + 预设附魔（锐锋 I）。
+                if (!invokeTake975(bookCell975, 1, false)) { behavDiag = QStringLiteral("invoke 9 failed"); break; }
+                const QVariantList he975 = vm975.heldEnchants();
+                if (vm975.heldBlock() != int(RecipeRegistry::EnchantedBookId) || vm975.heldCount() != 1
+                        || he975.size() != 4 || he975.at(0).toInt() != sharpPack975
+                        || voids975() != 5 || taken975() != 7) {
+                    behavDiag = QStringLiteral("book take: held ") + QString::number(vm975.heldBlock())
+                                 + QStringLiteral(" ench0 ") + (he975.isEmpty() ? QStringLiteral("-") : he975.at(0).toString());
+                    break;
+                }
+                behavOk = true;
+            } while (false);
+        }
+        QDir(probeUiDir975).removeRecursively();
+
+        const bool ok975 = okPin && behavOk;
+        if (!ok975) ++totalFail;
+        if (!ok975)
+            qInfo().noquote() << "  [t975 diag] pin" << okPin << "behav" << behavOk << behavDiag;
+        qInfo().noquote() << (ok975 ? "PASS" : "FAIL")
+                          << "| t975 creative take semantics re-reversed (user 8-28 final word, overriding"
+                             " t896's left-click-takes-one): palette LEFT-click takes a FULL maxStackSize"
+                             " stack and RIGHT-click takes exactly ONE item; both buttons share the"
+                             " paletteTake single entry (t632 preset-book / t318 same-cell toggle-return"
+                             " kept on the primary left button only / t136-t292-t356 swap-with-void-return"
+                             " structure unchanged, quantity assigned per button), while the middle-click"
+                             " copy face (t653/t896/t956) is untouched - repeated right-clicks accumulate"
+                             " one at a time capped at maxStackSize instead of oscillating take/void; the"
+                             " palette is the only unlimited-source creative take face in the codebase"
+                             " (slot faces keep shared survival semantics); pinned by source pins (entry"
+                             " structure, per-button quantity literals, exactly two infinite-source take"
+                             " literals and two paletteTake call sites) plus a behavioral leg on the real"
+                             " Inventory.qml x real Hotbar rig with a host-mirroring void-return sink";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
