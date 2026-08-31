@@ -443,6 +443,12 @@ public:
     //   层镜像 bobberInWater（QML 待机微飘 / 水面轨迹粒子的驱动条件——只在水面待咬段播，陆上静止 / 飞行 /
     //   钉 mob 段不播）。越界 / 非活体 Bobber → false（同 bobberHasBiteAt 越界安全语义）。
     Q_INVOKABLE bool bobberInWaterAt(int i) const;
+    // t971 鱼粒子预告窗查询（临近咬钩待机段——Game 层镜像 bobberApproach 供 QML 逼近粒子链触发门收窄，
+    //   用户口径「入水待机就有水粒子→收窄到临近咬钩才出现」）：Water 态 && 等待阶段（!hasBite）&&
+    //   剩余等待 ≤ kBobberParticleLeadSec。等待总长 < N（唤潮缩短）→ 落定即 true（短等待全程出现）；
+    //   咬钩窗口（hasBite）→ false（t926「窗口期水面突然安静」对比保留，本任务不碰）。越界 / 非活体
+    //   Bobber → false（同 bobberInWaterAt 越界安全语义）。
+    Q_INVOKABLE bool bobberApproachAt(int i) const;
     // t836 确定性等待掷骰（纯函数，矩阵探针直调锁两端可达）：h → kBobberWaitMinSec + (h % 2501) × 0.01
     //   ∈ [5.00, 30.00] 秒（h%2501∈[0,2500] → 两端恰可达：0 → 5.00 / 2500 → 30.00）。机制等价 MC 1.0
     //   「浮标入水后等 5-30s」区间；确定性来源 = World::hashVoxel(seed ^ 盐 ^ 甩竿序号)（PLAN §2-K，t791 同模式）。
@@ -2474,6 +2480,13 @@ private:
     static constexpr float kBobberFloatDip     = 0.125f; // 浮定水面浸没深度（blocks；半浸观感）
     static constexpr quint32 kBobberWaitHashSalt = 0xF15Cu; // 等待掷骰哈希盐（与其它 hashVoxel 消费者解耦）
     static constexpr float kBobberHookHitPad   = 0.15f;  // 钩 mob 命中盒外扩（blocks）
+    // t971 鱼粒子预告窗（秒；用户口径「一开始（入水待机）就有水粒子——应收窄到临近咬钩才出现」）：
+    //   t884③ 待机逼近粒子链的触发门收窄——只在剩余等待 ≤ N 秒才播（案① 咬钩前 N 秒前瞻窗，案②
+    //   等待期后段 25% 落选——N 前瞻与判定窗衔接更自然、预告感更强）。kBobberBiteWindowSec=1.0 用户
+    //   口径钉死不动，本常量只动「粒子何时开始冒」，不碰咬钩时序。等待总长 < N（唤潮 III ×0.4 →
+    //   等待下界 2.0s）→ 落定即全程出现（短等待不裸奔——预告窗盖满剩余等待）。单一权威谓词
+    //   bobberApproachAt；粒子发射面（QML 380ms 节流 / BlockParticles 池）不动，只动触发门。
+    static constexpr float kBobberParticleLeadSec = 2.5f;
     // （t882 起 kBobberHookPullUp 退役：上抛基值 2.8 上移 Game 层 kFishHookLiftBase——拉拽冲量全数由
     //   PlayerController 调制后经 pullMobToward(speed, upSpeed) 参数传入，本层不再持冲量常量。）
     static constexpr int kBobberStFlying = 0;  // 抛物飞行（含出膛初速段）

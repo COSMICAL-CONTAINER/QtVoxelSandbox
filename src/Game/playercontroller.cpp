@@ -2630,6 +2630,7 @@ void PlayerController::useFishingRod()
         m_fishing = false;
         m_hasBite = false;
         m_bobberInWater = false;
+        m_bobberApproach = false; // t971 预告窗镜像随收竿清零（同通知族，QML 粒子链即停）
         emit fishingChanged();
         emit swingArm(); // 收竿挥手反馈（一次「使用」动作）
         if (!valid) return; // 浮标已消散（出界 / 寿命）→ 无结算
@@ -2754,6 +2755,7 @@ void PlayerController::useFishingRod()
     m_fishing = true;
     m_hasBite = false;
     m_bobberInWater = false; // 甩出即 Flying（入水浮定后 updateFishing 镜像翻 true）
+    m_bobberApproach = false; // t971 预告窗镜像清零（入水后剩余等待 > N 仍 false，临近咬钩才翻 true）
     emit fishingChanged();
     emit swingArm(); // 甩竿挥手反馈
 }
@@ -2777,6 +2779,7 @@ void PlayerController::updateFishing(float dt)
         m_fishing = false;
         m_hasBite = false;
         m_bobberInWater = false;
+        m_bobberApproach = false; // t971 预告窗镜像随收竿态清零
         emit fishingChanged();
         return;
     }
@@ -2791,15 +2794,21 @@ void PlayerController::updateFishing(float dt)
         m_fishing = false;
         m_hasBite = false;
         m_bobberInWater = false;
+        m_bobberApproach = false; // t971 预告窗镜像随断线收竿态清零
         emit fishingChanged();
         return;
     }
     const bool bite = m_entityManager->bobberHasBiteAt(m_bobberEntityIdx);
     const bool inWater = m_entityManager->bobberInWaterAt(m_bobberEntityIdx);
-    if (p != m_bobberPos || bite != m_hasBite || inWater != m_bobberInWater) {
+    // t971 预告窗镜像（临近咬钩待机段）：每 tick 拉取、值变才发——预告窗开沿 / 咬钩沿各一次 fishingChanged，
+    //   非每帧直发（QML 逼近粒子链 running 绑它收窄触发门，用户口径「入水待机就有粒子→临近咬钩才出现」）。
+    const bool approach = m_entityManager->bobberApproachAt(m_bobberEntityIdx);
+    if (p != m_bobberPos || bite != m_hasBite || inWater != m_bobberInWater
+        || approach != m_bobberApproach) {
         m_bobberPos = p;
         m_hasBite = bite;
         m_bobberInWater = inWater;
+        m_bobberApproach = approach;
         emit fishingChanged();
     }
 }
@@ -2818,6 +2827,7 @@ void PlayerController::cancelFishing()
     m_fishing = false;
     m_hasBite = false;
     m_bobberInWater = false;
+    m_bobberApproach = false; // t971 预告窗镜像随清钓鱼态收口
     emit fishingChanged();
 }
 

@@ -28261,6 +28261,198 @@ Item {
                              "plumbing and the extinct full-window torch call";
     }
 
+    // ── P-t971 鱼粒子预告窗探针（R19.17 🅵 钓鱼组收官；用户第五轮口径「一开始（入水待机）就有水粒子——
+    //    应收窄到临近咬钩才出现」）──
+    //    t884③ 待机逼近粒子链（QML 380ms 拍 → BlockParticles.burstWaterApproach）的触发门收窄到咬钩前
+    //    kBobberParticleLeadSec=2.5s 前瞻窗（Entities 单一权威谓词 bobberApproachAt = Water ∧ 等待阶段
+    //    ∧ 剩余等待 ≤N；Game 镜像 bobberApproach → QML running）。发射节流 / 粒子池不动，只动触发门。
+    //    断言（gate = 粒子发射的充分条件——QML Timer running 逐项含之，gate 序列即「粒子拍」序列）：
+    //    (a) 基线腿：settle → ①前段静默（settle 后 2.0s 采样窗 gate 恒 false——最早可开门 = 等待下界
+    //        5s − N = 2.5s，窗口留 0.5s 裕量，「等待期前段粒子计数=0」）；②门开→咬钩沿 2.5s ±0.1
+    //        （dt 0.05 步进下 = 50 tick——N 值行为级钉死）；③门开后每 tick 恒 true 直到咬钩沿（预告窗内
+    //        无间隙——粒子持续到咬钩）；④咬钩判定窗内 gate 恒 false（t926「窗口期水面突然安静」对比
+    //        保留——本任务只收窄待机前段，不延窗）；⑤逃走重掷后 gate 即 false（新等待 ≥5s > N）；
+    //        ⑥入水水花 bobberSplashed 恰一次（抛竿反馈保留，与预告门解耦——有水花 ≠ 有预告粒子）。
+    //    (b) 唤潮腿：确定性预选短等待 serial（直调 bobberWaitSeconds∘hashVoxel——t836(b) 镜像手法；
+    //        base ≤5.5s → ×0.4 ≤2.2s < N）→ settle 当拍 gate 即 true 且等待期全程 true 到咬钩
+    //        （短等待不裸奔——预告窗盖满剩余等待；水花 +1 再证保留）。
+    //    (c) Game 镜像腿：pc 真甩竿（t884(c) 同 rig）→ settle 后 pc.tick 镜像 bobberApproach() 前段
+    //        恒 false → 驱动进预告窗镜像翻 true（且逐 tick 与实体谓词一致——QML Timer running 绑定链
+    //        行为级锁死）→ 收竿后镜像四值清零（reset 面抽验）。
+    //    (d) 源码钉（t926(b) 段界手法）：Main.qml 钓鱼段 running 含 player.bobberApproach（新门在）+
+    //        保留 !player.hasBite（窗口停拍不回退）+ interval: 380（发射节流不碰）。
+    //    阴性轮（回退验红已登记 commit；复原后随本矩阵全绿）：bobberApproachAt 去掉剩余等待门
+    //        （= t971 前语义，全待机期 true）→ (a)①②与 (c) 前段腿恰红；(b)(d) 不受影响。
+    {
+        World wT;
+        wT.setWidth(48); wT.setDepth(48); wT.setHeight(96); wT.setSeed(82);
+        EntityManager entsT;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto tickT = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) entsT.tick(qreal(dt), &wT, farL, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        for (int x = 5; x <= 7; ++x)
+            for (int z = 5; z <= 7; ++z) {
+                wT.setBlock(x, fy, z, BR::Stone, 0);
+                wT.setBlock(x, fy + 1, z, BR::Water, 0); // 3×3 水池（t884(a)/t926/t960(e) 同款）
+            }
+        int splashT = 0;
+        QObject::connect(&entsT, &EntityManager::bobberSplashed, &entsT,
+                         [&](float, float, float) { ++splashT; });
+
+        // (a) 基线腿：serial 971 → 直落 (6.5, 84.75, 6.5)（格 (6,84,6)），等待 = 确定性掷骰 ∈[5,30]s。
+        const int bA = entsT.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0), 971);
+        int settleA = -1, firstGateA = -1, biteA = -1, escA = -1;
+        bool earlySilentA = true, gateHeldA = true, winSilentA = true, rewaitSilentA = true;
+        for (int t = 1; bA >= 0 && t <= 700; ++t) {
+            tickT(1, 0.05f);
+            const bool inW = entsT.bobberInWaterAt(bA);
+            const bool has = entsT.bobberHasBiteAt(bA);
+            const bool gate = entsT.bobberApproachAt(bA);
+            if (settleA < 0 && inW) settleA = t;
+            if (settleA >= 0) {
+                if (biteA < 0) {
+                    if (has) {
+                        biteA = t;                                       // 咬钩沿（等待期终结）
+                    } else {
+                        if (t <= settleA + 40 && gate) earlySilentA = false;  // ①前段静默
+                        if (firstGateA < 0 && gate) firstGateA = t;           // 预告窗开沿
+                        else if (firstGateA >= 0 && !gate) gateHeldA = false; // ③窗内无间隙
+                    }
+                } else {
+                    if (escA < 0 && !has) escA = t;                       // 逃走沿（窗口过期）
+                    else if (escA >= 0 && gate) rewaitSilentA = false;    // ⑤重掷期静默
+                    if (gate) winSilentA = false;                         // ④窗口期静默
+                }
+            }
+            if (escA >= 0 && t >= escA + 20) break; // 重掷静默采样 1s（新等待 ≥5s > N，必然还关着）
+        }
+        const float leadSecA = (firstGateA > 0 && biteA > firstGateA)
+                                   ? float(biteA - firstGateA) * 0.05f : -1.0f;
+        const bool okA = bA >= 0 && settleA > 0 && splashT == 1              // ⑥水花保留恰一次
+                         && earlySilentA && firstGateA > settleA + 40        // ①不是一开始就有
+                         && leadSecA >= 2.4f && leadSecA <= 2.6f             // ②N=2.5 行为级
+                         && gateHeldA && winSilentA && rewaitSilentA;        // ③④⑤
+        if (bA >= 0) entsT.removeEntityAt(bA);
+
+        // (b) 唤潮腿：确定性预选短等待 serial（同格同盐直调掷骰；serial 2000..2199 内必含 ≤5.5s 样本
+        //     —— [5,30] 均匀 2501 档中 ≤5.5 占 51 档 ≈2%，200 样本空窗概率 ~1.7%×→ 仍空则判红人工复核）。
+        int shortSerial = -1;
+        for (quint32 s = 2000; s < 2200 && shortSerial < 0; ++s) {
+            const float w = EntityManager::bobberWaitSeconds(wT.hashVoxel(
+                int(quint32(wT.seed()) ^ 0xF15Cu /* EntityManager::kBobberWaitHashSalt 镜像 */ ^ s),
+                6, fy + 1, 6));
+            if (w <= 5.5f) shortSerial = int(s); // ×0.4（唤潮 III）≤2.2s < N=2.5 → 落定即预告窗内
+        }
+        int settleB = -1, biteB = -1;
+        bool fullCoverB = true;
+        const int splashBeforeB = splashT;
+        const int bB = shortSerial >= 0
+            ? entsT.spawnBobber(QVector3D(6.5f, float(fy + 4), 6.5f), QVector3D(0, 0, 0),
+                                quint32(shortSerial), 0.4f)
+            : -1;
+        for (int t = 1; bB >= 0 && t <= 120; ++t) { // 等待 ≤2.2s = 44 tick + 裕量
+            tickT(1, 0.05f);
+            const bool inW = entsT.bobberInWaterAt(bB);
+            const bool has = entsT.bobberHasBiteAt(bB);
+            if (settleB < 0 && inW) settleB = t;
+            if (settleB > 0 && !has && !entsT.bobberApproachAt(bB)) fullCoverB = false; // 全程预告
+            if (settleB > 0 && has) { biteB = t; break; }
+        }
+        const bool okB = shortSerial >= 0 && bB >= 0 && settleB > 0 && biteB > settleB
+                         && fullCoverB && splashT == splashBeforeB + 1;
+        if (bB >= 0) entsT.removeEntityAt(bB);
+
+        // (c) Game 镜像腿：pc 真甩竿（t884(c) 同 rig：立足柱 (3,83,6)，settle (5.5,84.75,6.5)）。
+        wT.setBlock(3, fy, 6, BR::Stone, 0); // 玩家立足柱
+        PlayerController pcT;
+        Hotbar hbT;
+        hbT.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hbT.setSelectedSlot(0);
+        pcT.setWorld(&wT);
+        pcT.setEntityManager(&entsT);
+        pcT.setHotbar(&hbT);
+        pcT.loadSavedState(3.5f, float(fy + 1), 6.5f, -90.0f, -20.0f, 2 /* Survival */);
+        pcT.useFishingRod();
+        int bobC = -1;
+        for (int i = 0; i < entsT.count(); ++i)
+            if (entsT.aliveAt(i) && entsT.kindAt(i) == int(EntityManager::Bobber)) { bobC = i; break; }
+        int settleC = -1;
+        bool earlyMirrorSilentC = true, mirrorOpensC = false, mirrorTracksC = true;
+        for (int t = 1; bobC >= 0 && t <= 700; ++t) {
+            tickT(1, 0.05f);
+            pcT.tick(); // 镜像刷新（updateFishing 拉四镜像——t971 approach 在内）
+            if (settleC < 0 && entsT.bobberInWaterAt(bobC)) settleC = t;
+            if (settleC < 0) continue;
+            const bool has = entsT.bobberHasBiteAt(bobC);
+            const bool gate = entsT.bobberApproachAt(bobC);
+            mirrorTracksC = mirrorTracksC && pcT.bobberApproach() == gate; // 镜像逐步一致
+            if (!has) {
+                if (t <= settleC + 40 && pcT.bobberApproach()) earlyMirrorSilentC = false; // 前段恒 false
+                if (pcT.bobberApproach()) mirrorOpensC = true;                             // 预告窗随行翻 true
+            } else {
+                break; // 咬钩沿即收（开沿已证；窗内镜像行为与 (a)④ 同源谓词）
+            }
+        }
+        bool okC = bobC >= 0 && settleC > 0 && pcT.fishing() && pcT.bobberInWater()
+                   && earlyMirrorSilentC && mirrorOpensC && mirrorTracksC;
+        pcT.useFishingRod(); // 收竿 → 镜像四值清零（t971 reset 面抽验）
+        okC = okC && !pcT.fishing() && !pcT.bobberApproach() && !pcT.hasBite() && !pcT.bobberInWater();
+
+        // (d) 源码钉（t926(b) 段界手法）：钓鱼段（fishingBobber → fishingRodTipWorld 界滤）running 新门在。
+        const QString exeDirT = QCoreApplication::applicationDirPath();
+        const QString rootT = QDir(exeDirT + QStringLiteral("/..")).absolutePath();
+        QFile mfT(rootT + QStringLiteral("/src/ui/Main.qml"));
+        const QString mtT = mfT.open(QIODevice::ReadOnly) ? QString::fromUtf8(mfT.readAll()) : QString();
+        const int d0 = mtT.indexOf(QStringLiteral("id: fishingBobber"));
+        const int d1 = d0 >= 0 ? mtT.indexOf(QStringLiteral("function fishingRodTipWorld"), d0) : -1;
+        const QString segT = (d0 >= 0 && d1 > d0) ? mtT.mid(d0, d1 - d0) : QString();
+        const bool okD = segT.contains(QStringLiteral("player.bobberApproach"))
+                         && segT.contains(QStringLiteral("!player.hasBite"))
+                         && segT.contains(QStringLiteral("interval: 380"));
+
+        const bool okT971 = okA && okB && okC && okD;
+        if (!okT971) ++totalFail;
+        if (!okT971)
+            qInfo().noquote() << "  [t971 diag] okA" << okA << "(settle" << settleA << "firstGate"
+                              << firstGateA << "bite" << biteA << "esc" << escA << "lead" << leadSecA
+                              << "early" << earlySilentA << "held" << gateHeldA << "winSil"
+                              << winSilentA << "rewait" << rewaitSilentA << "splash" << splashT
+                              << ") okB" << okB << "(serial" << shortSerial << "settle" << settleB
+                              << "bite" << biteB << "cover" << fullCoverB << ") okC" << okC
+                              << "(settle" << settleC << "early" << earlyMirrorSilentC
+                              << "opens" << mirrorOpensC << "tracks" << mirrorTracksC << ") okD" << okD;
+        qInfo().noquote() << (okT971 ? "PASS" : "FAIL")
+                          << "| t971 fish-particle lead window: the t884③ idle approach-particle "
+                             "chain (QML 380ms beat -> burstWaterApproach) no longer runs from the "
+                             "water-settle instant - its trigger gate narrows to the last "
+                             "kBobberParticleLeadSec=2.5s before the bite (user caliber: particles "
+                             "used to bubble the whole wait, now they announce the bite; option 1 "
+                             "of the brief, the N-second lookahead that hands off naturally into "
+                             "the pinned 1.0s judgment window), single authority "
+                             "EntityManager::bobberApproachAt (Water && waiting-phase && remaining "
+                             "<= N) mirrored as PlayerController bobberApproach into the QML "
+                             "running clause - emission throttle (380ms) and the particle pool "
+                             "untouched, only the gate moved; behavioral: baseline wait shows "
+                             "2.0s of post-settle silence (earliest possible open = 5s lower "
+                             "bound - N), gate-open->bite measures 2.5s +-0.1, gate holds every "
+                             "tick to the bite edge, stays false through the bite window (t926 "
+                             "sudden-quiet contrast preserved - this task narrows the wait, it "
+                             "does not extend into the window) and after the escape re-roll, "
+                             "while the cast splash still fires exactly once (cast feedback kept, "
+                             "decoupled from the lead gate); tide leg: a deterministically "
+                             "pre-selected short wait (base <=5.5s x0.4 <=2.2s < N) shows the "
+                             "gate true from the settle tick through the bite (short waits are "
+                             "fully covered, no naked window); Game mirror leg: a real pc cast "
+                             "tracks the entity predicate tick-by-tick, silent early, open in "
+                             "the window, all four mirrors cleared on reel; source pin: the "
+                             "Main.qml fishing segment running clause carries "
+                             "player.bobberApproach, keeps !player.hasBite and the 380ms "
+                             "interval; negative round registered in the commit (gate term "
+                             "removed -> baseline-early + mirror-early legs red, restored green)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -4655,7 +4655,7 @@ Window {
                 }
             }
         }
-        // t884③ 上钩前水面轨迹粒子（等待期每 380ms 一拍）：BlockParticles.burstWaterApproach 从浮标周边
+        // t884③ 上钩前水面轨迹粒子（临近咬钩段每 380ms 一拍）：BlockParticles.burstWaterApproach 从浮标周边
         //   确定性螺旋角出生水色微粒、沿径向游向浮标、抵达即消（「前端生成、尾端消除——像有东西游向鱼钩」；
         //   节律相位驱动非随机源，PLAN §2-K 呈现层纪律）。仅水中待咬段运行（bobberInWater && !hasBite——
         //   咬钩 / 鱼跑后停拍，窗口期保持「水面突然安静」的对比）。坐标取实时镜像 bobberPosition（浮定后
@@ -4663,11 +4663,16 @@ Window {
         //   ≤4 格**的鱼群逼近域（用户原话「水粒子在鱼钩随机方位随机距离不超过 4 格出现然后往鱼钩运动」，
         //   距离域 / 游速解算见 BlockParticles.burstWaterApproach——t884 的收缩粒子链模式保留，只换出生
         //   域与游速；t884 近距涟漪方案由本方案**取代**，登记于此）。
+        //   **t971 触发门收窄**（用户口径「一开始（入水待机）就有水粒子——应收窄到临近咬钩才出现」）：
+        //   running 加 player.bobberApproach（Game 层镜像 EntityManager::bobberApproachAt——剩余等待
+        //   ≤ kBobberParticleLeadSec=2.5s 的前瞻窗才 true；等待总长 < N（唤潮缩短）时落定即全程出现）。
+        //   入水待机前段不再冒粒子（预告感集中在临近咬钩）；发射节流（380ms 拍）/ 粒子池不动，只动触发门；
+        //   咬钩窗口停拍不变（t926 对比保留）。入水水花（bobberSplashed→burstWaterCast）是抛竿反馈，保留。
         Timer {
             interval: 380; repeat: true
             // 硬暂停（ESC）停拍（t889 全停语义）；软档 GUI 开照常（世界照跑）。
             running: player.fishing && player.bobberInWater && !player.hasBite
-                     && window.worldRunning
+                     && player.bobberApproach && window.worldRunning
             property int ph: 0
             onTriggered: {
                 ++ph
