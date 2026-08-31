@@ -44,6 +44,9 @@ Window {
     //   playing（显 View3D/HUD + grab 指针）。playing 经 ESC「保存并退出」回 worldlist；worldlist「返回」回 menu。
     //   准星/HUD 仅 playing 态显。初始 menu：启动不直接进游戏。
     property string appState: "menu"
+    // t974 上一次退出存档是否三写全部成功（初始 true = 尚未退出过）。运行期由 saveAndExitToWorldList /
+    //   onClosing 共用的 runExitSave 链写入；false = 写盘失败已重试仍败（进度未落盘，toast 已告知）。
+    property bool lastExitSaveOk: true
 
     // 背包子态（t18）：仅 playing 态有意义。开 → 释放指针（光标可见，可点格子，类暂停）；
     // 关 → 恢复 grab。Esc/E/点遮罩均可关。开时抑制暂停叠层（二者互斥：都是 !captured 态）。
@@ -897,6 +900,38 @@ Window {
             hotbar: hotbar, main: main, armor: armor
         }
     }
+    // t974 退出存档唯一实现（「保存并退出」按钮与窗口关闭兜底共用）：玩家态 / 地形+箱子+熔炉+发射器 /
+    //   进度三次**同步**写盘，返回三者是否全部成功。WorldStore 侧 saveAll 是单事务（DELETE 全量 +
+    //   INSERT，COMMIT 失败整事务回滚 = 半写永不可见）、savePlayerData / saveProgress 是单行 upsert
+    //   —— 调用返回即写已完成（SQLite commit 同步落盘，链上无任何 deferred / 分帧写）。返回值是
+    //   「写是否成功」的唯一权威：旧版三个调用返回值全部弃置（fire-and-forget），任一瞬态失败（外部
+    //   进程瞬持 .sqlite 文件锁：杀软 / 索引器 / 同步盘；磁盘满）即回滚留旧档、退出照常 = 用户实测
+    //   「保存退出偶发未保存：重进是上一次存档点」。caller 必须核验返回值（见 saveAndExitToWorldList
+    //   的完成门），WorldStore.saveOkCount 计数器为行为级观测面。
+    function runExitSave() {
+        const okPlayer = worldStore.savePlayerData(gatherPlayerState())
+        // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
+        // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
+        // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
+        const okWorld = worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers())
+        // progress 落盘（统计 + 成就，独立 upsert 单行表）。
+        const okProgress = worldStore.saveProgress(progress.toVariant())
+        return okPlayer && okWorld && okProgress
+    }
+    // t974 窗口关闭兜底存档：playing 态直接关窗（标题栏 X / Alt+F4）此前无任何落盘点 —— 进程即退，
+    //   自上次保存退出后的全部进度静默丢失（用户侧「偶发未保存」的另一半：退出走按钮=存、走关窗=丢，
+    //   从界面分不清）。此处同步跑同一条 runExitSave 链（写完再放行关闭 = 「退出前阻塞等写完成」）；
+    //   worldlist / menu 态无库打开，直接放行。中途态安全：onCoverGrabbed / finishExitToWorldList 均
+    //   以 worldStore.isOpen() 守门，此处提前 closeWorld 后它们按降级路径收尾，不双写不崩。
+    onClosing: (close) => {
+        if (window.appState === "playing" && worldStore.isOpen()) {
+            let okClose = runExitSave()
+            if (!okClose) okClose = runExitSave()
+            if (!okClose) console.warn("[t974] close save FAILED after retry - progress NOT saved:", currentWorldFile)
+            worldStore.closeWorld()
+        }
+        close.accepted = true
+    }
     // t176 保存并退出到世界列表（ESC 暂停叠层「保存并退出」按钮）：归还手持物 → 存玩家态 + 存地形 +
     //   截封面 → 关库 → 清实体 → 切 worldlist 态。spec「退出存」：每次退出都把当前进度落盘。
     //   t232 封面黑屏修复：旧用 view3d.grabToImage() → 全黑（grabToImage 只经 2D 场景图重渲，拍不到 View3D
@@ -923,13 +958,18 @@ Window {
         const file = currentWorldFile
         const hasOpen = worldStore.isOpen()
         if (hasOpen) {
-            worldStore.savePlayerData(gatherPlayerState())
-            // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
-            // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
-            // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
-            worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers())
-            // progress 落盘（统计 + 成就，独立 upsert 单行表）。
-            worldStore.saveProgress(progress.toVariant())
+            // t974 退出存档完成门：写盘同步完成**并核验结果**后才继续退出流程。失败 → 幂等重试一次
+            //   （写链全量重写语义：saveAll DELETE+INSERT / 两 upsert OR REPLACE，重放无副作用；两次调用
+            //   之间无 tick 可插入 —— 同步 JS 串行，快照不漂移）→ 仍失败则 toast 显式告知「本次进度未保存」
+            //   + console.warn 留痕，绝不静默丢档。完成门之后才置 coverGrabPending / 进抓帧退出流程 =
+            //   「写盘在退出前同步完成」的调用链序（矩阵 P-t974 源序钉）。
+            let exitSaveOk = runExitSave()
+            if (!exitSaveOk) exitSaveOk = runExitSave()
+            if (!exitSaveOk) {
+                console.warn("[t974] exit save FAILED after retry - progress NOT saved:", currentWorldFile)
+                showInfoToast("存档写入失败，本次进度未保存")
+            }
+            window.lastExitSaveOk = exitSaveOk
         }
         coverGrabPending = true   // 标记退出进行中（防 onGrabbed + 兜底定时器双调 finish）
         // 截封面：仅在 playing（View3D 抓得到画面）+ 有世界文件名（saveCover 据此写 sidecar PNG）时抓。

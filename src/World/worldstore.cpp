@@ -34,6 +34,15 @@ static const char *const kConn = "voxelsandbox_worldstore";
 
 WorldStore::WorldStore(QObject *parent) : QObject(parent) {}
 
+// t974 写完成计数统一收口（契约见 worldstore.h saveOkCount Q_PROPERTY 注释）：只在「持久化调用
+//   已成功落盘」的成功尾调用 —— saveAll 在 commit 成功后、savePlayerData / saveProgress 在 exec
+//   成功后。失败（事务回滚 / exec 失败）绝不调用，使计数与 false 返回值同源互证。
+void WorldStore::noteSaveOk()
+{
+    ++m_saveOkCount;
+    emit saveOkCountChanged();
+}
+
 WorldStore::~WorldStore()
 {
     // 析构关连接（Qt Sql 连接需显式 removeDatabase 释放文件句柄； QFile 删除等在连接关闭后才能生效）。
@@ -486,6 +495,7 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
         db.rollback();
         return false;
     }
+    noteSaveOk();   // t974：commit 成功 = 本事务（chunks+meta+chests+furnaces+dispensers）已落盘
     qCInfo(lcSave) << "saved" << saved << "chunks for world" << m_openFile;
     return true;
 }
@@ -566,6 +576,7 @@ bool WorldStore::savePlayerData(const QVariantMap &data)
         qCCritical(lcSave) << "savePlayerData: insert failed:" << q.lastError().text();
         return false;
     }
+    noteSaveOk();   // t974：exec 成功 = 玩家态已落盘（调用返回即写完成，同步无 deferred）
     return true;
 }
 
@@ -785,6 +796,7 @@ bool WorldStore::saveProgress(const QVariantMap &progress)
         qCCritical(lcSave) << "saveProgress failed:" << q.lastError().text();
         return false;
     }
+    noteSaveOk();   // t974：exec 成功 = 进度已落盘（同步 upsert，无 deferred）
     return true;
 }
 

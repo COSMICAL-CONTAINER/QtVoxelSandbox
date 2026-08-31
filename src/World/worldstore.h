@@ -47,6 +47,13 @@ class WorldStore : public QObject
     Q_OBJECT
     QML_NAMED_ELEMENT(WorldStore)
     Q_PROPERTY(World *world READ world WRITE setWorld NOTIFY worldChanged)
+    // t974 写完成计数（探针 / QML 观测面）：每次「持久化调用成功落盘」恰好 +1（savePlayerData /
+    //   saveAll / saveProgress 各计一次）。退出存档链的「写已同步完成」此前只是隐式假设 —— QML 侧
+    //   弃置三个写盘调用的返回值（fire-and-forget），任一瞬态失败（外部进程瞬持 .sqlite 文件锁：
+    //   杀软 / 索引器 / 同步盘；磁盘满）即整事务回滚、库中留上一次存档、退出照常 → 用户实测
+    //   「保存退出偶发未保存：重进是上一次存档点」。本计数把「写完成」变成可观测事实：一次完整
+    //   退出存档 = +3；失败调用不计数（与 false 返回值同源互证）。
+    Q_PROPERTY(int saveOkCount READ saveOkCount NOTIFY saveOkCountChanged)
 
 public:
     explicit WorldStore(QObject *parent = nullptr);
@@ -54,6 +61,7 @@ public:
 
     World *world() const { return m_world; }
     void setWorld(World *w);
+    int saveOkCount() const { return m_saveOkCount; }
 
     // 世界列表（扫描 saves/ 下 *.sqlite，逐个读 meta）。返回 QVariantList<QVariantMap>，每项含：
     //   file（文件名，相对 saves/，作唯一标识）/ name / seed / width / height / depth / playedAt（ms）。
@@ -130,6 +138,7 @@ public:
 
 signals:
     void worldChanged();
+    void saveOkCountChanged();
 
 private:
     // saves 目录解析（仿 main.cpp resolveLogFilePath：<exeDir>/../saves 开发期 / AppLocalDataLocation 部署）。
@@ -145,6 +154,11 @@ private:
     World *m_world = nullptr;
     bool m_open = false;       // 是否有库打开
     QString m_openFile;        // 当前打开库的相对文件名（saveAll 刷 meta 用）
+    int m_saveOkCount = 0;     // t974 写完成计数（见 saveOkCount Q_PROPERTY 注释；只增不清零）
+
+    // t974 成功落盘统一收口：++m_saveOkCount + emit（savePlayerData / saveAll / saveProgress 三处
+    //   成功尾各调一次 —— 计数只增不清零，跨保存累计；失败路径绝不调用）。
+    void noteSaveOk();
 
     // PRAGMA user_version；schema 变更时 +1 并写迁移。v2（t188）= 新增 chests 表（纯加表，旧库 IF NOT EXISTS 幂等补建）。
     //   t177 二轮复盘 新增 furnaces 表：同 chests 模式（纯加表，IF NOT EXISTS 幂等补建），**不** bump schema 版本
