@@ -201,6 +201,12 @@ class PlayerController : public QQuickItem
     //   同变一次发）。QML 据它只在「水面待咬段」播待机微飘 + 水面轨迹粒子（陆上静止 / 飞行 / 钉 mob / 咬钩
     //   下沉段都不播——咬钩段由 hasBite 分支接管视觉）。
     Q_PROPERTY(bool bobberInWater READ bobberInWater NOTIFY fishingChanged)
+    // t971 鱼粒子预告窗镜像（updateFishing 每 tick 拉 bobberApproachAt；同 fishingChanged 通知族——四镜像
+    //   同变一次发；值只在每个等待周期翻两次——预告窗开沿 / 咬钩沿，非每帧发）。QML 待机逼近粒子链
+    //   （t884③ 380ms 拍）触发门收窄：只在「临近咬钩」（剩余等待 ≤ EntityManager::kBobberParticleLeadSec，
+    //   用户口径「入水待机就有水粒子→收窄到临近咬钩才出现」）才播；咬钩窗口 / 鱼跑重掷长等待 / 飞行 /
+    //   陆上 / 钉 mob 段都不播（窗口停拍 = t926「水面突然安静」对比保留）。
+    Q_PROPERTY(bool bobberApproach READ bobberApproach NOTIFY fishingChanged)
     // 模式行为门控（t21）：由当前模式派生的能力标志（随 modeChanged 通知 QML）。
     // Spectator 禁放破（用户核心诉求：观察者不能破坏/放置）；飞仅 Creative/Spectator 可用。
     Q_PROPERTY(bool canBreak READ canBreak NOTIFY modeChanged)
@@ -353,6 +359,7 @@ public:
     QVector3D bobberPosition() const { return m_bobberPos; }
     bool hasBite() const { return m_hasBite; }
     bool bobberInWater() const { return m_bobberInWater; }
+    bool bobberApproach() const { return m_bobberApproach; } // t971 鱼粒子预告窗镜像（临近咬钩待机段）
 
     // 模式行为门控（t21，PLAN §2-D：模式标志由 PlayerController 持有，输入边缘统一查）。
     // 三模式差异化：Spectator 禁放破 + 可飞；Creative 可放破 + 可飞（双击空格切）；生存可放破 + 禁飞。
@@ -984,8 +991,9 @@ private:
     void cancelBowDraw();
     // t401/t836 持续钓鱼（每 tick 调，captured 时）：① 换槽（持物不再是钓竿）→ cancelFishing；② 浮标实体
     //   失效（出界 / 寿命消散 / 系统清理——aliveAt/kindAt 双查）→ 自动收竿态（fishing=false，浮标已不在，
-    //   无实体可清）；③ 镜像实体侧浮标位置 / 咬钩态（posAt / bobberHasBiteAt 拉取 → m_bobberPos / m_hasBite，
-    //   值变才 emit fishingChanged——QML 浮标 Model / 鱼线绑 bobberPosition 跟随）。咬钩时序本体在
+    //   无实体可清）；③ 镜像实体侧浮标位置 / 咬钩态 / t971 预告窗（posAt / bobberHasBiteAt / bobberApproachAt
+    //   拉取 → m_bobberPos / m_hasBite / m_bobberApproach，值变才 emit fishingChanged——QML 浮标 Model /
+    //   鱼线绑 bobberPosition 跟随，逼近粒子链 running 绑 bobberApproach 收窄触发门）。咬钩时序本体在
     //   EntityManager（Bobber Water 态），本方法不推进任何计时（dt 只保留签名兼容调用点）。
     void updateFishing(float dt);
     // t401/t836 清钓鱼态（收竿后 useFishingRod 已自理 / 换槽 / 失焦 / 暂停 / 重生）：移除浮标实体（若在）+
@@ -1518,6 +1526,7 @@ private:
     QVector3D m_bobberPos;
     bool m_hasBite = false;
     bool m_bobberInWater = false; // t884 浮标水中浮定态镜像（updateFishing 拉 bobberInWaterAt 刷新）
+    bool m_bobberApproach = false; // t971 鱼粒子预告窗镜像（updateFishing 拉 bobberApproachAt 刷新）
     int m_bobberEntityIdx = -1;
     quint32 m_fishCastSerial = 0;
 
