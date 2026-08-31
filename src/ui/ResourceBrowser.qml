@@ -1863,14 +1863,18 @@ Item {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                         }
                                         // 编号钮组（1 2 3…＝形态序；激活钮金边金字 = 选中格高亮同款语言）。
-                                        //   8 钮（作物阶段）最多：8×26+7×4 = 236 ≤ 面板内容宽 254 恒不溢出。
+                                        //   review0830 #27：8 钮（作物阶段）最多 8×25+7×4 = 228 ≤ formCol
+                                        //   内容宽 234 恒不溢出——宽链 322（右列）− 左右边距 2×10 = 302
+                                        //   （previewArea）→ formPanel −58 = 244 → formCol −10 = 234（旧注释
+                                        //   「≤254」漏算一层列边距；26px 钮 236 > 234 溢 2px 靠边框余量吸收——
+                                        //   钮宽收 25 由构造成立）。
                                         Row {
                                             spacing: 4
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             Repeater {
                                                 model: root.selectedFormStates
                                                 delegate: Rectangle {
-                                                    width: 26; height: 26; radius: 5
+                                                    width: 25; height: 26; radius: 5
                                                     color: formSegHover.hovered ? "#2a3a4a" : "#1a2a3a"
                                                     border.color: index === root.selectedFormIndex ? "#ffd76a" : "#3a5a7a"
                                                     border.width: index === root.selectedFormIndex ? 2 : 1

@@ -13996,6 +13996,8 @@ Window {
         onClosed: window.closeEnchantingTable()
         onDiscardHeldRequested: player.dropHeldCursor()
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
+        // review0830 #22：中键复制成功 → 手弹（同 Inventory 面板 t120 消费端——拾取/拿取一致的视觉反馈）。
+        onItemTaken: handPopAnim.start()
     }
 
     // t477 铁砧面板：右键铁砧方块打开（player.anvilOpened → openAnvil）。
@@ -14022,6 +14024,8 @@ Window {
         //   右键 1 件 dropHeldCursorOne。用户「铁砧界面物品应跟背包一样可拖出丢成掉落物」根因即本缺线。
         onDiscardHeldRequested: player.dropHeldCursor()
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
+        // review0830 #22：中键复制成功 → 手弹（同 Inventory 面板 t120 消费端——拾取/拿取一致的视觉反馈）。
+        onItemTaken: handPopAnim.start()
     }
 
     // t517 发射器物品栏面板：右键发射器方块打开（player.dispenserOpened → openDispenser）。仅 playing &&

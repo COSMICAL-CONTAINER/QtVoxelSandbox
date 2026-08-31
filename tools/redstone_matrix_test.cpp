@@ -15842,8 +15842,11 @@ Item {
     //    (b) 参数钉（用户 8-28 口径「再小再慢」源码钉）：glyphScale 0.21-0.32（t915 0.26-0.40 ×0.8）、
     //        driftSpeed 1.8（2.6 ×0.7）、ratePerShelf 0.40（0.55 放缓）、maxPerTick 4（封顶 8/s）、寿命钳
     //        0.9-2.2（随降速等比放宽——钳不放宽会截断慢飞令 t=1 提前到达 = 尾段重新加速，与调慢背反）。
-    //    (c) 通道源码钉：Connections onWorldChanged→requestRescan + rescanPending 脏标记 + 200ms 合并窗
-    //        + 1s watchdog（running 门 active && worldRunning —— review26-11 菜单/硬暂停零常驻约定）。
+    //    (c) 通道源码钉：Connections onWorldChanged→requestRescan + 200ms 防抖窗 + 1s watchdog
+    //        （running 门 active && worldRunning —— review26-11 菜单/硬暂停零常驻约定）。
+    //        review0830 #20：防抖真 trailing-edge 钉（requestRescan 体无早退、每次 restart()，旧
+    //        rescanPending 早退形态绝迹）——风暴合并行为腿对两形态同绿，注释-实现一致由本钉承载。
+    //    (d) #20 trailing-edge 钉（见探针块内注）。
     {
         bool ok953a = true;
         QString diag953;
@@ -16012,9 +16015,10 @@ Item {
                             && gf.contains(QStringLiteral("maxPerTick: 4"))
                             && gf.contains(QStringLiteral("flightLifeMin: 0.9"))
                             && gf.contains(QStringLiteral("flightLifeMax: 2.2"));
-        // (c) 通道钉：worldChanged 事件钩 + 脏标记合并窗 + 1s 自愈轮询（running 门 = review26-11 约定）。
+        // (c) 通道钉：worldChanged 事件钩 + 200ms 防抖窗 + 1s 自愈轮询（running 门 = review26-11 约定）。
+        //     review0830 #20：防抖改真 trailing-edge——requestRescan 体无早退、每次 restart()（风暴未停
+        //     窗顺延，注释与实现一致）；旧 rescanPending 脏标记早退形态绝迹（回退固定窗即 (d) 红）。
         const bool ok953c = gf.contains(QStringLiteral("function requestRescan()"))
-                            && gf.contains(QStringLiteral("property bool rescanPending: false"))
                             && gf.contains(QStringLiteral("target: root.world"))
                             && gf.contains(QStringLiteral("function onWorldChanged() { root.requestRescan() }"))
                             && gf.contains(QStringLiteral("id: rescanDebounce"))
@@ -16022,17 +16026,32 @@ Item {
                             && gf.contains(QStringLiteral("id: rescanWatchdog"))
                             && gf.contains(QStringLiteral("interval: 1000"))
                             && gf.contains(QStringLiteral("running: root.active && root.worldRunning"));
-        if (!ok953b || !ok953c)
-            qInfo().noquote() << "  t953 diag: okParams" << ok953b << "okChannels" << ok953c;
-        if (!ok953b || !ok953c)
+        // (d) #20 trailing-edge 钉：requestRescan 函数体内含 restart()、不含早退（旧「窗内早退固定窗」
+        //     形态必然带 return + rescanPending，回退即红——行为腿 ④ 风暴合并对两形态同绿，故钉源码面）。
+        QString rrBody953;
+        const int rr0953 = gf.indexOf(QStringLiteral("function requestRescan()"));
+        if (rr0953 >= 0) {
+            const int rr1953 = gf.indexOf(QLatin1Char('}'), rr0953);
+            if (rr1953 > rr0953) rrBody953 = gf.mid(rr0953, rr1953 - rr0953);
+        }
+        const bool ok953d = !rrBody953.isEmpty()
+                            && rrBody953.contains(QStringLiteral("rescanDebounce.restart()"))
+                            && !rrBody953.contains(QStringLiteral("return"))
+                            && !gf.contains(QStringLiteral("rescanPending"));
+        if (!ok953b || !ok953c || !ok953d)
+            qInfo().noquote() << "  t953 diag: okParams" << ok953b << "okChannels" << ok953c
+                              << "okTrailingEdge" << ok953d;
+        if (!ok953b || !ok953c || !ok953d)
             ++totalFail;
-        qInfo().noquote() << ((ok953b && ok953c) ? "PASS" : "FAIL")
+        qInfo().noquote() << ((ok953b && ok953c && ok953d) ? "PASS" : "FAIL")
                           << "| t953 glyph params + rescan channels source pin: glyph quads 0.21-0.32 "
                              "(t915 0.26-0.40 x0.8, user 'still a bit big'), drift 1.8 (x0.7, user 'a bit "
                              "fast'), rate 0.40/shelf + cap 4/tick (<=8/s), life clamp 0.9-2.2 scaled with "
                              "the slower drift (clamping would truncate slow flights and re-accelerate the "
-                             "tail); worldChanged event hook -> requestRescan dirty flag with 200ms "
-                             "storm-merge window + 1s self-heal watchdog gated active&&worldRunning "
+                             "tail); worldChanged event hook -> requestRescan TRUE trailing-edge debounce "
+                             "(every reentry restart()s the 200ms window, review0830 #20: the old "
+                             "dirty-flag early-return form froze the window contrary to its own comment "
+                             "and is pinned extinct) + 1s self-heal watchdog gated active&&worldRunning "
                              "(review26-11 pause convention)";
     }
 
@@ -25044,6 +25063,10 @@ Item {
     //       整组，非 min(5,64)=5）、工具整组=1、实例元数据（耐久 / 附魔 / 名）保真、旧光标手持被覆盖、
     //       空槽 no-op。（中键事件路由面与 enabled 门由 ①②③ 源码钉承载 —— QML 事件路由 C++ 矩阵全盲，
     //       同 t918 口径。）
+    //    ⑤ review0830 #22 拾取反馈钉：两面板声明 signal itemTaken() 且成功复制尾部发 root.itemTaken()
+    //       （no-op 早退不发）；Main.qml 三面板（Inventory + 附魔台 + 铁砧）同一消费端
+    //       onItemTaken → handPopAnim.start（中键获得与拾取一致的手弹视觉反馈）；行为腿直连信号计数：
+    //       两次成功复制恰 2 发、空槽 no-op 0 发（发点在守卫之后的实锤）。
     {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -25051,7 +25074,8 @@ Item {
         const QString e956 = ef956.open(QIODevice::ReadOnly) ? QString::fromUtf8(ef956.readAll()) : QString();
         QFile af956(root + QStringLiteral("/src/ui/AnvilUI.qml"));
         const QString a956 = af956.open(QIODevice::ReadOnly) ? QString::fromUtf8(af956.readAll()) : QString();
-        // ① 面板级复制函数：数量权威 + 序列归一 + 元数据保真三要素在函数体内；旧 min(count,…) 绝迹。
+        // ① 面板级复制函数：数量权威 + 序列归一 + 元数据保真三要素在函数体内；旧 min(count,…) 绝迹；
+        //    review0830 #22：函数尾部发 root.itemTaken()（反馈面与 Inventory.qml 同口径）。
         auto copyBodyOk = [](const QString &s) {
             const int iFn = s.indexOf(QStringLiteral("function copyStackToCursor"));
             if (iFn < 0) return false;
@@ -25059,8 +25083,19 @@ Item {
             return fn.contains(QStringLiteral("heldCount = root.hotbar.maxStackSize(id)"))
                     && fn.contains(QStringLiteral("InventoryOps.list4(enchants)"))
                     && fn.contains(QStringLiteral("heldDurability = (durability > 0) ? durability : 0"))
+                    && fn.contains(QStringLiteral("root.itemTaken()"))
                     && !s.contains(QStringLiteral("Math.min(count"));
         };
+        // ⑤ 信号面钉：signal 声明 + 宿主消费端三面板同一（Inventory / EnchantingTableUI / AnvilUI）。
+        auto takenSignalOk = [](const QString &s) {
+            return s.contains(QStringLiteral("signal itemTaken()"))
+                    && s.count(QStringLiteral("root.itemTaken()")) >= 1;
+        };
+        QFile mf956(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString m956 = mf956.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf956.readAll()) : QString();
+        const bool okTakenE = takenSignalOk(e956);
+        const bool okTakenA = takenSignalOk(a956);
+        const bool okTakenMain = m956.count(QStringLiteral("onItemTaken: handPopAnim.start()")) == 3;
         // ② 逐分支钉：每个中键 TapHandler 的邻近段同现创造门与复制调用（缺门 / 缺调用的散写分支即红）。
         auto midHandlersOk = [](const QString &s) {
             int pos = -1, n = 0;
@@ -25175,6 +25210,22 @@ Item {
             behavOk = false;
         } else {
             QCoreApplication::processEvents();
+            // ⑤ review0830 #22：直连 itemTaken 计数（QML 小 tap 对象收数，经典 SIGNAL/SLOT 字串连接——
+            //    信号不存在 → 连接失败计数恒 -1/0，(4) 步即红；发点在守卫后由 no-op 不计数实证）。
+            QQmlComponent tapComp956(&engine956);
+            tapComp956.setData(QByteArrayLiteral(
+                                   "import QtQuick\n"
+                                   "QtObject {\n"
+                                   "    property int count: 0\n"
+                                   "    function bump() { count += 1 }\n"
+                                   "}\n"), QUrl());
+            QObject *tap956 = tapComp956.create();
+            if (tap956) tap956->setParent(anvil956);   // 生命周期挂面板
+            const bool tapConn956 = tap956
+                && QObject::connect(anvil956, SIGNAL(itemTaken()), tap956, SLOT(bump()));
+            const auto takenCount956 = [tap956]() {
+                return tap956 ? tap956->property("count").toInt() : -1;
+            };
             const int stoneT = int(BR::Stone);
             const int swordT = int(ToolRegistry::DiamondSword);
             const int sharp3T = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
@@ -25214,15 +25265,25 @@ Item {
                 // (3) 空槽 no-op：光标仍持改名剑（复制面只认实有物品格）。
                 if (!invokeCopy(0, 0, 0, { 0, 0, 0, 0 }, QString())) { behavDiag = QStringLiteral("invoke empty failed"); break; }
                 if (vm956.heldBlock() != swordT || vm956.heldCustomName() != QStringLiteral("改名剑")) { behavDiag = QStringLiteral("empty-slot copy clobbered cursor"); break; }
+                // (4) review0830 #22 反馈发射：两次成功复制恰 2 发、空槽 no-op 0 发（发点在守卫之后的实锤；
+                //     信号不存在 → 连接失败恒红）。
+                if (!tapConn956 || takenCount956() != 2) {
+                    behavDiag = QStringLiteral("itemTaken: conn=%1 count=%2")
+                                    .arg(int(tapConn956)).arg(takenCount956());
+                    break;
+                }
                 behavOk = true;
             } while (false);
         }
         QDir(probeUiDir).removeRecursively();
 
-        const bool ok956 = okDefE && okDefA && okMidE && okMidA && okPreviewA && behavOk;
+        const bool ok956 = okDefE && okDefA && okMidE && okMidA && okPreviewA
+                           && okTakenE && okTakenA && okTakenMain && behavOk;
         if (!ok956)
             qInfo().noquote() << "  [t956 diag] defE" << okDefE << "defA" << okDefA << "midE" << okMidE
-                              << "midA" << okMidA << "preview" << okPreviewA << "behav" << behavOk
+                              << "midA" << okMidA << "preview" << okPreviewA
+                              << "takenE" << okTakenE << "takenA" << okTakenA
+                              << "takenMain" << okTakenMain << "behav" << behavOk
                               << behavDiag;
         if (!ok956) ++totalFail;
         qInfo().noquote() << (ok956 ? "PASS" : "FAIL")
@@ -25233,7 +25294,13 @@ Item {
                              "fidelity) and exactly three middle-button TapHandlers (input-slot component "
                              "+ main row + hotbar row) each creative-gated; the anvil product-preview slot "
                              "is excluded verbatim (copying a projected output would bypass takeProduct "
-                             "consumption, same precedent as the crafting result slot); behavioral leg "
+                             "consumption, same precedent as the crafting result slot); review0830 #22 "
+                             "pickup feedback: both panels declare signal itemTaken() and emit it at the "
+                             "end of a successful copy (no-op early-returns stay silent), the Main.qml "
+                             "consumer is the same onItemTaken -> handPopAnim.start line across all three "
+                             "panels, and the behavioral leg counts emissions over the real panel object "
+                             "(exactly 2 for the two successful copies, 0 for the empty-slot no-op); "
+                             "behavioral leg "
                              "drives the real AnvilUI.qml against the real Hotbar VM: 5-item stone source "
                              "copies as a 64 stack (not min(5,64)), tool copies as 1 with durability 37 / "
                              "sharpness-3 / custom name intact, stale cursor overwritten, empty slot no-op";
@@ -25479,7 +25546,9 @@ Item {
     //    一层，t917「预告==施放严格同源」契约结构性保持（review28 #3 种子快照序零触碰）。
     //    断言：
     //    (a) 注册表数据钉 —— 20 条附魔逐 id homeCategory / conflictGroup 与语义表一致（字段齐备；
-    //        表行多列初始化错位在此必红）；
+    //        表行多列初始化错位在此必红）。review0830 #24：语义表按 NID 定尺寸 + static_assert 同长
+    //        （EnchantCount 扩而表未扩 = 编译期红，非 OOB 静默）；注册表字段面另有 kEnchants 行内
+    //        consteval 校验（漏写 homeCategory 编译期红）。
     //    (b) 书附魔行为腿（offered 2/12/30 × seed 0..399 共 1200 次施法）：
     //        ① 单次产物**无跨类混出**（非通用附魔的 homeCategory 在单次产物内全一致 = 主类别成簇；
     //           旧全池行为「锐锋(武器)+效率(工具)」式跨类产物必现 = 用户症状，阴性轮复现）；
@@ -25507,23 +25576,30 @@ Item {
         const int WC = int(EnchantRegistry::EnchantCatWeapon), TC2 = int(EnchantRegistry::EnchantCatTool);
         const int AC = int(EnchantRegistry::EnchantCatArmor),  UC = int(EnchantRegistry::EnchantCatUniversal);
         const int BC960 = int(EnchantRegistry::EnchantCatBow), RC960 = int(EnchantRegistry::EnchantCatRod);
-        const int NID = int(EnchantRegistry::EnchantCount); // t960 起 21（1..20；固定 15 数组会越界）
+        // review0830 #24：constexpr（数组定尺寸用）——语义表与 NID 解耦的编译期闸见下方 static_assert。
+        constexpr int NID = int(EnchantRegistry::EnchantCount); // t960 起 21（1..20；固定 15 数组会越界）
 
         // (a) 注册表数据钉：id → {homeCategory, conflictGroup} 语义表逐行比对（0 号占位行不在钉内；
-        //     t960 弓四件 = Bow / 竿两件 = Rod、组 0）。
-        const int expectCat[21] = { 0, WC, WC, WC, WC, WC, TC2, TC2, TC2, UC, AC, AC, AC, AC, AC,
-                                    BC960, BC960, BC960, BC960, RC960, RC960 };
-        const int expectGrp[21] = { 0,  1,  1,  1,  0,  0,   2,   2,   2,  0,  3,  3,  3,  3,   0,
-                                       0,     0,     0,     0,     0,     0 };
+        //     t960 弓四件 = Bow / 竿两件 = Rod、组 0）。review0830 #24：语义表按 NID（EnchantCount）定
+        //     尺寸 + static_assert 同长——注册表扩条（EnchantCount 变）而本表未同步补行 → 编译期红
+        //     （旧定长 21 数组 + NID 循环在第 22 条上是 OOB 读 UB，可能静默通过而非报红，防护补丁）。
+        constexpr int expectCat[] = { 0, WC, WC, WC, WC, WC, TC2, TC2, TC2, UC, AC, AC, AC, AC, AC,
+                                      BC960, BC960, BC960, BC960, RC960, RC960 };
+        constexpr int expectGrp[] = { 0,  1,  1,  1,  0,  0,   2,   2,   2,  0,  3,  3,  3,  3,   0,
+                                          0,     0,     0,     0,     0,     0 };
+        static_assert(int(sizeof(expectCat) / sizeof(expectCat[0])) == NID
+                      && int(sizeof(expectGrp) / sizeof(expectGrp[0])) == NID,
+                      "P-t959 语义表须与 EnchantRegistry::EnchantCount 同步扩行（review0830 #24：防第 22 条 OOB 静默）");
         bool okData = true;
         for (int i = 1; i < NID; ++i)
             okData = okData && EnchantRegistry::homeCategory(i) == expectCat[i]
                              && EnchantRegistry::conflictGroup(i) == expectGrp[i];
 
-        // (b) 书附魔行为腿：1200 次施法逐产物断言 ①②③ + 累计 ④。
+        // (b) 书附魔行为腿：1200 次施法逐产物断言 ①②③ + 累计 ④。seenBook 按 NID 定尺寸
+        //     （review0830 #24：按下标 id 写入，旧定长 21 在第 22 条上 OOB 写 UB）。
         const int offeredList[3] = { 2, 12, 30 };
         bool okCluster = true, okNoConflict = true, okApplicable = true;
-        bool seenBook[21];
+        bool seenBook[NID];
         for (int i = 0; i < NID; ++i) seenBook[i] = false;
         for (int oi = 0; oi < 3; ++oi) {
             for (int seed = 0; seed < 400; ++seed) {
@@ -25569,7 +25645,7 @@ Item {
                 }
         };
         const auto poolIs = [&](int itemId, const std::vector<int> &allowed) {
-            bool seen[21];
+            bool seen[NID];   // review0830 #24：同 (b) seenBook——按下标 id 写入须随 EnchantCount 定尺寸
             poolScan(itemId, seen);
             for (int i = 1; i < NID; ++i) {
                 const bool allowedHas = std::find(allowed.begin(), allowed.end(), i) != allowed.end();
@@ -25683,9 +25759,12 @@ Item {
                 okGate = okGate && !EnchantRegistry::isApplicableForItem(newIds[i], others[o]);
         }
 
-        // (c) 书池可达腿：800 次施法（主类别五轮换）弓四件 + 竿两件全部出现。
-        bool seenBook[21];
-        for (int i = 0; i < 21; ++i) seenBook[i] = false;
+        // (c) 书池可达腿：800 次施法（主类别五轮换）弓四件 + 竿两件全部出现。seenBook 按 EnchantCount
+        //     定尺寸（review0830 #24：按下标 id 写入，旧定长 21 在第 22 条上 OOB 写 UB；EnchantCount
+        //     漂移另有 (a) 的 `== 21` 显式钉先红，此处保证不 UB）。
+        constexpr int nidT960 = int(EnchantRegistry::EnchantCount);
+        bool seenBook[nidT960];
+        for (int i = 0; i < nidT960; ++i) seenBook[i] = false;
         for (int seed = 0; seed < 800; ++seed) {
             const QVariantList picks = EnchantRegistry::selectEnchantsForItem(bookId, 12 + (seed % 19), seed);
             for (const QVariant &v : picks) seenBook[v.toMap().value(QStringLiteral("id")).toInt()] = true;
@@ -25903,7 +25982,8 @@ Item {
     //        无杀手 → 空串（行形态不变）；
     //    (c) 源码钉：九处攻击行组装点（八面板 tooltip + HUD hover）全拼 displayFamilyBonusText（QML 不持
     //        族加成数值——后缀值只活在注册表权威一处）；hotbar.cpp 桥本体含「(+」括号分支 + 走
-    //        familyAttackBonus 调用链（t960(g) 手法）。
+    //        familyAttackBonus 调用链（t960(g) 手法）；review0830 #25：attackMob 实战体同调注册表
+    //        familyAttackBonusFor 单支权威（族门在调用侧）+ 双写 2.5f 字面量绝迹（回退即红）。
     {
         // (a) 注册表权威数值腿。
         const auto closeF = [](float got, float expect) { return std::abs(got - expect) < 1e-4f; };
@@ -25980,6 +26060,29 @@ Item {
                 okPin = false;
                 qInfo().noquote() << "  t961 pin diag: hotbar.cpp unreadable";
             }
+            // review0830 #25：实战侧对族加成同调注册表单支权威 familyAttackBonusFor（族门在调用侧，
+            //   亡灵/节肢两支各取其一——合计面 familyAttackBonus 会把亡灵支放行到蜘蛛上破族门，故实战
+            //   取支变体；每级倍率字面量全工程只活 familyAttackBonusFor 一处）——attackMob 函数体内含
+            //   两支权威调用、旧双写 2.5f 字面量绝迹（回退双写或误调合计面即红）。
+            QFile pcf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            if (pcf.open(QIODevice::ReadOnly)) {
+                const QString t = QString::fromUtf8(pcf.readAll());
+                const int m0 = t.indexOf(QLatin1String("void PlayerController::attackMob"));
+                const int m1 = t.indexOf(QLatin1String("void PlayerController::"), m0 + 10);
+                QString body;
+                if (m0 >= 0 && m1 > m0) body = t.mid(m0, m1 - m0);
+                if (body.isEmpty()
+                    || !body.contains(QLatin1String("familyAttackBonusFor(heldEnch, EnchantRegistry::UndeadSlay)"))
+                    || !body.contains(QLatin1String("familyAttackBonusFor(heldEnch, EnchantRegistry::ArthropodSlay)"))
+                    || body.contains(QLatin1String("2.5f"))) {
+                    okPin = false;
+                    qInfo().noquote() << "  t961 pin diag: attackMob body missing familyAttackBonusFor"
+                                         " branches / retains the doubled 2.5f literal";
+                }
+            } else {
+                okPin = false;
+                qInfo().noquote() << "  t961 pin diag: playercontroller.cpp unreadable";
+            }
         }
 
         const bool ok961 = okForm && okShow && okPin;
@@ -25993,11 +26096,16 @@ Item {
                              " exclusion group 1 so a slayer sword's N is the plain base damage)"
                              " and a (+M) suffix carries the vs-family bonus taken from the single"
                              " registry authority familyAttackBonus (2.5/level, same formula the"
-                             " combat path applies); diamond sword + arthropod I assembles +7(+3),"
-                             " undead III rounds to (+8), no slayer keeps the old line shape via an"
-                             " empty suffix; all nine attack-line assembly sites (8 panel tooltips +"
-                             " HUD hover) route through displayFamilyBonusText, and the bridge body"
-                             " pins the registry call chain plus the (+ paren branch (t960(g)";
+                             " combat path applies - review0830 #25: the combat path now calls the"
+                             " registry per-branch authority familyAttackBonusFor with the family"
+                             " gate at the call site, the doubled 2.5f literal in attackMob is"
+                             " pinned extinct and the single numeric source lives in the registry"
+                             " so display==combat is by construction); diamond sword +"
+                             " arthropod I assembles +7(+3), undead III rounds to (+8), no slayer"
+                             " keeps the old line shape via an empty suffix; all nine attack-line"
+                             " assembly sites (8 panel tooltips + HUD hover) route through"
+                             " displayFamilyBonusText, and the bridge body pins the registry call"
+                             " chain plus the (+ paren branch (t960(g)";
     }
 
     // ── P-t962 附魔书↔附魔书交换（R19.17 🅳 收官；用户第五轮口径「背包拿附魔书左键物品交换是对的，
@@ -26799,6 +26907,7 @@ Item {
     //        耕地干湿/末地框无眼有眼顶面瓦片 + 非形态方块 state 惰性零漂移钉。
     //    (c) 查看器源码钉：按钮组构建链（支持表消费 + 默认钮 1 + 换选重置 + 预览 blockState 接线 +
     //        编号钮本体 + z:10 浮层契约〔P-t964(b) 同步演化恰 3〕+ 门族 135/127 家族钉与 71 绝迹）。
+    //    (d) review0830 #27 按钮组宽度契约腿（源码解析宽链常量 → 8 钮恒不溢出由构造成立）。
     {
         bool ok = true;
         // (a) 支持表行为钉（Hotbar::blockFormStates 直调；Game 层单一权威）。
@@ -26981,10 +27090,57 @@ Item {
                          && selBlock965.contains(QStringLiteral("=== 135"))
                          && selBlock965.contains(QStringLiteral("=== 127"))
                          && !selBlock965.contains(QStringLiteral("=== 71"));
-        ok = ok && okC965;
+        // (d) review0830 #27 按钮组宽度契约（由构造成立，非余量吸收）：从源码解析**全链**宽常量——
+        //     右列 width: 322 → 列内 Column anchors.margins 10（**四边各 10，宽度共减 2×10**）→
+        //     previewArea 302 → formPanel −58 = 244 → formCol −10 = 234 → 钮宽 / 行距，断言 8 钮最坏
+        //     行宽 8×钮宽 + 7×行距 ≤ formCol 内容宽。旧形态 26px 钮 236 > 234 溢 2px 靠边框余量吸收 +
+        //     注释写 254 漏算一层列边距（契约文本失实——漏算的正是这层 margins），钮宽 25 收口后
+        //     「8 钮恒不溢出」由构造成立——钮宽 / 任一层收窄回漂即本腿红。
+        const int iPanelD965 = rb965.indexOf(QStringLiteral("id: formPanel"));
+        const QString panelBlockD965 = iPanelD965 >= 0 ? rb965.mid(iPanelD965, 3200) : QString();
+        const auto digitsAfter = [](const QString &s, int from, int span) -> int {
+            const QString tail = s.mid(from, span);
+            QString num;
+            for (const QChar &c : tail) {
+                if (c.isDigit()) { num += c; continue; }
+                if (!num.isEmpty()) break;          // 数字后遇非数字 → 收（width: 25; height:… 形）
+            }
+            return num.isEmpty() ? -1 : num.toInt();
+        };
+        const int iCol322D965 = rb965.indexOf(QStringLiteral("width: 322; height: parent.height"));
+        const int iMarginD965 = iCol322D965 < 0 ? -1
+            : rb965.indexOf(QLatin1String("anchors.margins: "), iCol322D965);
+        const int colW965 = iCol322D965 < 0 ? -1 : 322;
+        const int colMargin965 = iMarginD965 < 0 ? -1
+            : digitsAfter(rb965, iMarginD965 + int(qstrlen("anchors.margins: ")), 8);
+        const int iBtnD965 = panelBlockD965.indexOf(QLatin1String("delegate: Rectangle {"));
+        const int iBtnW965 = iBtnD965 < 0 ? -1
+            : panelBlockD965.indexOf(QLatin1String("width: "), iBtnD965);
+        const int btnW965 = iBtnW965 < 0 ? -1
+            : digitsAfter(panelBlockD965, iBtnW965 + int(qstrlen("width: ")), 8);
+        const int iRowD965 = panelBlockD965.indexOf(QLatin1String("Row {"));
+        const int iRowSp965 = iRowD965 < 0 ? -1
+            : panelBlockD965.indexOf(QLatin1String("spacing: "), iRowD965);
+        const int rowSp965 = iRowSp965 < 0 ? -1
+            : digitsAfter(panelBlockD965, iRowSp965 + int(qstrlen("spacing: ")), 8);
+        const int iOffD965 = panelBlockD965.indexOf(QLatin1String("width: parent.width - "));
+        const int panelOff965 = iOffD965 < 0 ? -1
+            : digitsAfter(panelBlockD965, iOffD965 + int(qstrlen("width: parent.width - ")), 8);
+        const int iColOffD965 = panelBlockD965.indexOf(QLatin1String("width: parent.width - "),
+                                                       iOffD965 + 1);
+        const int colOff965 = iColOffD965 < 0 ? -1
+            : digitsAfter(panelBlockD965, iColOffD965 + int(qstrlen("width: parent.width - ")), 8);
+        const bool okD965 = colW965 > 0 && colMargin965 > 0 && btnW965 > 0 && rowSp965 >= 0
+                         && panelOff965 > 0 && colOff965 >= 0
+                         && (8 * btnW965 + 7 * rowSp965)
+                                <= (colW965 - 2 * colMargin965 - panelOff965 - colOff965);
+        ok = ok && okC965 && okD965;
         if (!ok)
             qInfo().noquote() << "  [t965 diag] table" << okA965 << "geometry" << okB965
-                              << "sourcePins" << okC965;
+                              << "sourcePins" << okC965 << "widthContract" << okD965
+                              << "colW" << colW965 << "colMargin" << colMargin965
+                              << "btnW" << btnW965 << "rowSp" << rowSp965
+                              << "panelOff" << panelOff965 << "colOff" << colOff965;
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t965 form-toggle button group system: the browser variant panel extends "
@@ -27007,7 +27163,10 @@ Item {
                              "support-table behavior pins (13 entries + 8 unsupported-empty incl. "
                              "cyan wool 71 and detector rail 128), geometry behavior pins "
                              "(ItemShapeGeometry + BlockCube direct), and browser source pins "
-                             "(panel + z:10 floating-layer contract + default-form reset + wiring)";
+                             "(panel + z:10 floating-layer contract + default-form reset + wiring "
+                             "+ review0830 #27 width contract parsed from the source: 8 worst-case "
+                             "buttons 8*w+7*sp fit inside the content column 322-2x10-58-10=234 by "
+                             "construction, not by border slack)";
     }
 
     // ── P-t966 预览拖拽方向 rig 探针（R19.17 🅴；用户第六轮口径「左右旋转到背面还是反的——

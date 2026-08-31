@@ -240,11 +240,15 @@ public:
     //   仍基础值」类公式漂移：改加成系数只改这里，战斗与九处 UI 显示同步变。enchants 空指针 → 仅基础。
     static float weaponAttackDamage(int itemId, const int *enchants);
 
-    // t961 杀手系对族伤害加成（**显示面单一权威**）：亡灵杀手 + 节肢克星 各级 ×2.5 的合计（HP）。
-    //   实战结算（PlayerController::attackMob，t476 链）按受击 mob 族别取对应一支同值 2.5×级（蹒跚者 /
-    //   骸骨走亡灵支、蜘蛛走节肢支）；互斥组 1 保证两杀手不共存于同一物品 → 显示「合计」= 实际可生效的
-    //   那一支。tooltip 攻击行括号「(+M)」经 Hotbar::displayFamilyBonusText 取整显示 —— 每级 2.5 这个
-    //   数值只活本函数（显示层不复制常量，同 weaponAttackDamage 的单一权威纪律）。enchants 空指针 → 0。
+    // t961 杀手系对族伤害加成（**显示与实战同源单一权威**）。familyAttackBonusFor(enchants, id) =
+    //   单支权威（亡灵杀手 / 节肢克星之一）的每级 2.5 倍——**每级 2.5 这个数值只活本函数**，实战
+    //   （PlayerController::attackMob，t476 链；族门在调用侧：蹒跚者 / 骸骨 / 幼体取亡灵支、蜘蛛取节肢
+    //   支，交叉恒 0 即族门不外泄）与显示合计面共用这一个字面量（review0830 #25 收口实战/显示双写
+    //   漂移面，同 weaponAttackDamage 的单一权威纪律）；非杀手系 id → 0。
+    //   familyAttackBonus(enchants) = 显示面合计 = 两支相加（互斥组 1 保证两杀手不共存于同一物品 →
+    //   至多一支非零，合计 == 实际可生效的那支）。tooltip 攻击行括号「(+M)」经
+    //   Hotbar::displayFamilyBonusText 取整显示。enchants 空指针 → 0。
+    static float familyAttackBonusFor(const int *enchants, int enchantId);
     static float familyAttackBonus(const int *enchants);
 
     // t826 击退附魔强度（单一权威）：strength = 1 + 3.0*level（无附魔 1.0 / I 4.0 / II 7.0）。
