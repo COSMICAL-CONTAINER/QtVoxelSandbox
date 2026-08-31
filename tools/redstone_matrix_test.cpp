@@ -28618,6 +28618,315 @@ Item {
                              "removed -> baseline-early + mirror-early legs red, restored green)";
     }
 
+    // ── P-t973 生物格放方块检测（R19.17 🅶 杂项组；用户第五轮口径「生物占据的格子不能放置方块——防活埋」）──
+    //   玩家放置全链探针（P-t945 同式：直编 PlayerController 走完整放置链 射线 → 预检 → setBlock），
+    //   EntityManager / ItemEntityManager / MinecartManager 直造直调（t950/t952 先例，不启 16ms tick；
+    //   ents 仅随 pc.tick() 每 aim 推进 1 tick）。防漂移 rig 几何（lessons t836/t897）：僵尸只与 (b)(d)
+    //   两腿同场——(b) 紧跟 spawn（1 个 aim tick 内位移 ≤ kChaseSpeed×dt钳0.05=0.14 << 格余量 0.2，盒
+    //   恒在出生格内），(d) 时已 dead 冻结；(c)(e) 的目标格远离僵尸可达域（≥3 格），成功腿不受游走污染。
+    //   断言六段：
+    //   (a) 空格对照：无实体占用 → 放置成功（链路本身通畅，防「射线落空 no-op」假绿——(b) 的拒必经命中格）；
+    //   (b) 僵尸所在格放置 → 拒：写入格 id 不变 + Survival 栈不消耗 + 不挥手（拒绝是 no-op 口径，
+    //       hitBlock 断言钉「预检链真到达」——被门拦 ≠ 没走到门，t814 三件套教训）；
+    //   (c) 掉落物所在格 → 成功：同场仍有活体僵尸（(b) 未杀，其可达域离目标格 ≥3 格），唯一差异 =
+    //       写入格占着的是掉落物（ItemEntityManager）而非活体 mob → 放置成功（钉「非 mob 实体不拒」
+    //       防占用门越权扩域）；
+    //   (d) 濒死/死亡（hp<=0 帧）不拒：damageEntity 致死（dead=true 死亡动画帧，槽仍在）→ 僵尸当前
+    //       实读格放置成功（门对死 mob 放行）；
+    //   (e) 玩家骑乘矿车旁放置不受干扰：tryMount 登乘 → 从座位实读眼位瞄准车旁格 → 放置成功且骑乘不断
+    //       （矿车在 MinecartManager，不在占用门查询域——骑乘建筑链路零干扰）；
+    //   (f) 源码钉：占用门调用行 + Entities 侧排除面（kind!=Mob/dead）+ 门在预检链的序位（目标格必须空
+    //       检查之后、方块族专项预检（火把）之前——t945 字符串钉模式 + 语句序钉）。
+    {
+        // rig 选址：kRigY 高空全空盒扫描（P-t945 同式；dx -1..10、dz -1..1、dy -2..+4）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 10 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 10 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 4 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t973 mob-occupied-cell place gate: no clear rig area found";
+        } else {
+            WorldClock clockP973;
+            EntityManager entsP973;      // 本探针实体域：占用门查询源（活体 mob 才拦）
+            ItemEntityManager iemcP973;  // 掉落物域：(c) 腿证明占用门不越权到非 mob 实体
+            MinecartManager cartsP973;   // 载具域：(e) 腿证明骑乘链路不受占用门干扰
+            Hotbar hbP973;
+            PlayerController pcP973;     // t814 真消费端模式（P-t945 同式挂窗 grab 载体）
+            pcP973.setWorld(&w);
+            pcP973.setWorldClock(&clockP973);
+            pcP973.setEntityManager(&entsP973);
+            pcP973.setItemEntities(&iemcP973);
+            pcP973.setMinecartManager(&cartsP973);
+            pcP973.setHotbar(&hbP973);
+            QQuickWindow probeWinP973;
+            pcP973.setParentItem(probeWinP973.contentItem());
+            pcP973.grab(); // m_window 就绪 → setCaptured(true) 走通（placeBlock 入口门）
+            pcP973.setSelectedBlock(int(BR::Stone));
+            // 挥手计数：拒绝面是 no-op（不挥不消耗，同其它预检拒绝口径）→ (b) 拒绝时计数不动。
+            int swingsP973 = 0;
+            const QMetaObject::Connection swingConnP973 = QObject::connect(
+                &pcP973, &PlayerController::swingArm, &pcP973, [&swingsP973]() { ++swingsP973; });
+            // rig 搭建：石台面（kRigY-1，x0..x0+9 全宽）+ 台上三格清空。台面 3 宽（z0-1..z0+1）防
+            // 玩家/僵尸 AABB 贴 z 缘时的支撑缺失。
+            const auto buildRigP973 = [&]() {
+                for (int dx = 0; dx <= 9; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+                        for (int dy = 0; dy <= 2; ++dy)
+                            w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+                    }
+            };
+            const auto clearTopP973 = [&](int dx) {
+                for (int dy = 0; dy <= 2; ++dy)
+                    w.setBlock(x0 + dx, kRigY + dy, z0, BR::Air, 0);
+            };
+            // 瞄准 + tick 刷射线（P-t945 同式：release+grab 重居中光标 → loadSavedState 写位姿 →
+            // tick 刷命中；eye = feet + 1.62 视角换算，与 t945 同约定）。
+            const auto aimP973 = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ,
+                                     int mode) {
+                const float ex = feetX, ey = float(kRigY) + 1.62f, ez = feetZ;
+                const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+                const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+                const float pitch = std::asin(dy / len) * 57.2957795f;
+                const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+                pcP973.release();
+                pcP973.grab();
+                pcP973.loadSavedState(feetX, float(kRigY), feetZ, yaw, pitch, mode);
+                pcP973.tick(); // updateRaycast 刷命中 + ents 推进 1 tick
+                return pcP973.hitBlock();
+            };
+            const auto pumpMsP973 = [](int ms) { // 放置 200ms CD 间隔（t128；P-t945 同式）
+                QElapsedTimer t;
+                t.start();
+                while (t.elapsed() < ms)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            };
+            // 僵尸实读占用格（XZ 格 + 脚位格）：占用门判的是 AABB 严格相交——从 posAt 实读反推写入格，
+            // 游荡 / 追击的微小位移免疫（lessons t836：mob 位姿实读再瞄准；~3 tick 位移 ≤0.15 << 格余量
+            // 0.2，盒恒在出生格内——cellB 断言同时钉「稳在出生格」防漂移出假绿）。
+            const auto mobCellP973 = [&]() {
+                const QVector3D p = entsP973.posAt(0);
+                return QPoint(int(std::floor(double(p.x()))), int(std::floor(double(p.z()))));
+            };
+            buildRigP973();
+            // (a) 空格对照（Creative）：瞄 (x0+4) 台面顶 → 目标 (x0+4, kRigY, z0) → 放置成功 + 挥手。
+            const QVector3D hitA = aimP973(float(x0) + 6.5f, float(z0) + 0.5f,
+                                           float(x0) + 4.5f, float(kRigY), float(z0) + 0.5f, 1);
+            pcP973.placeBlock();
+            const bool okA = hitA == QVector3D(float(x0 + 4), float(kRigY - 1), float(z0))
+                && w.blockAt(x0 + 4, kRigY, z0) == BR::Stone
+                && swingsP973 == 1;
+            clearTopP973(4);
+            pumpMsP973(260);
+            // (b) 僵尸所在格 → 拒（Survival 全链）：spawnMobTyped 蹒跚者（机制等价 MC 僵尸）落台面
+            //     (x0+3)；Survival hotbar 石头栈 ×16；瞄僵尸实读占用格的台面顶 → 目标 = 僵尸格 →
+            //     占用门拒：格 id 不变 + 栈不消耗 + 不挥手 + hitBlock 断言（预检链真到达，非射线落空）。
+            entsP973.spawnMobTyped(x0 + 3, kRigY, z0, EntityManager::MobShambler,
+                                   QStringLiteral("#4a6a3a"), 0);
+            hbP973.setStack(0, BR::Stone, 16);
+            hbP973.setSelectedSlot(0);
+            const QPoint cellB = mobCellP973();
+            const bool cellBIsMobCell = cellB == QPoint(x0 + 3, z0); // 僵尸稳在出生格
+            const QVector3D hitB = aimP973(float(x0) + 6.5f, float(z0) + 0.5f,
+                                           float(cellB.x()) + 0.5f, float(kRigY),
+                                           float(cellB.y()) + 0.5f, 2);
+            pcP973.placeBlock();
+            const bool okB = cellBIsMobCell
+                && hitB == QVector3D(float(cellB.x()), float(kRigY - 1), float(cellB.y()))
+                && w.blockAt(cellB.x(), kRigY, cellB.y()) == BR::Air  // 格 id 不变（拒）
+                && entsP973.deadAt(0) == false                        // 拒绝面与僵尸生死无关（仍活体）
+                && hbP973.countAt(0) == 16                            // 不消耗
+                && swingsP973 == 1;                                   // 不挥手
+            if (!okB)
+                qInfo().noquote() << "  [t973 diag] b cell" << cellB << "hit" << hitB
+                                  << "tgt" << int(w.blockAt(cellB.x(), kRigY, z0))
+                                  << "stack" << hbP973.countAt(0) << "swings" << swingsP973
+                                  << "mobAlive" << entsP973.aliveAt(0);
+            pumpMsP973(260);
+            // (c) 掉落物所在格 → 成功：目标格放 (x0+7)——僵尸可达域之外（(b) 后仅 1 个 aim tick 的
+            //     游走/追击位移 ≤ kChaseSpeed×dt钳 0.05 = 0.14，盒最远摸到 x0+3.94，离 x0+7 ≥3 格），
+            //     成功腿不受活体游走污染；掉落物（ItemEntityManager）落 (x0+7) 格 → 放置成功（占用门
+            //     不越权到非 mob 实体）+ 掉落物仍在 + 消耗/挥手照常（per-leg delta，免疫前腿级联）。
+            iemcP973.spawnItem(x0 + 7, kRigY, z0, int(RecipeRegistry::SweetBerryId));
+            const int stackC0 = hbP973.countAt(0);
+            const int swingsC0 = swingsP973;
+            const QVector3D hitC = aimP973(float(x0) + 9.5f, float(z0) + 0.5f,
+                                           float(x0) + 7.5f, float(kRigY), float(z0) + 0.5f, 2);
+            pcP973.placeBlock();
+            bool itemAliveC = false;
+            for (int i = 0; i < iemcP973.count(); ++i)
+                if (iemcP973.aliveAt(i) && iemcP973.itemIdAt(i) == int(RecipeRegistry::SweetBerryId))
+                    itemAliveC = true;
+            const bool okC = hitC == QVector3D(float(x0 + 7), float(kRigY - 1), float(z0))
+                && w.blockAt(x0 + 7, kRigY, z0) == BR::Stone
+                && itemAliveC
+                && hbP973.countAt(0) == stackC0 - 1
+                && swingsP973 == swingsC0 + 1;
+            if (!okC)
+                qInfo().noquote() << "  [t973 diag] c hit" << hitC
+                                  << "tgt" << int(w.blockAt(x0 + 7, kRigY, z0))
+                                  << "item" << itemAliveC << "stack" << hbP973.countAt(0)
+                                  << "exp" << stackC0 - 1 << "swings" << swingsP973
+                                  << "expS" << swingsC0 + 1;
+            clearTopP973(7);
+            pumpMsP973(260);
+            // (d) 濒死/死亡（hp<=0 帧）不拒：damageEntity 致死 → dead=true（死亡动画帧，槽仍在、
+            //     aliveAt 仍 true）→ 僵尸当前实读格（游走后的真实占用格）放置成功（门对死 mob 放行）。
+            //     脚位随 cellD 取（cellD.x+2.5，Δx=2 实证几何 + 射线长 ≤kReach）。
+            entsP973.damageEntity(0, 999);
+            const bool deadNow = entsP973.deadAt(0);
+            const QPoint cellD = mobCellP973();
+            const int stackD0 = hbP973.countAt(0);
+            const int swingsD0 = swingsP973;
+            const QVector3D hitD = aimP973(float(cellD.x()) + 2.5f, float(z0) + 0.5f,
+                                           float(cellD.x()) + 0.5f, float(kRigY),
+                                           float(cellD.y()) + 0.5f, 2);
+            pcP973.placeBlock();
+            const bool okD = deadNow
+                && entsP973.aliveAt(0)                            // 死亡动画帧仍在槽（非已释放空槽）
+                && w.blockAt(cellD.x(), kRigY, cellD.y()) == BR::Stone // 濒死不拒 → 放置成功
+                && hbP973.countAt(0) == stackD0 - 1
+                && swingsP973 == swingsD0 + 1;
+            if (!okD)
+                qInfo().noquote() << "  [t973 diag] d dead" << deadNow << "alive" << entsP973.aliveAt(0)
+                                  << "cell" << cellD << "hit" << hitD
+                                  << "tgt" << int(w.blockAt(cellD.x(), kRigY, cellD.y()))
+                                  << "stack" << hbP973.countAt(0) << "exp" << stackD0 - 1
+                                  << "swings" << swingsP973 << "expS" << swingsD0 + 1;
+            clearTopP973(cellD.x() - x0);
+            pumpMsP973(260);
+            // (e) 玩家骑乘矿车旁放置不受干扰（Creative）：矿车落台面 (x0+3)（地面静止模式）→ tryMount
+            //     登乘 → 座位钉位 settle tick 后实读眼位 → 瞄车旁 (x0+5) 台面顶 → 放置成功 + 骑乘不断
+            //     + 挥手（载具不在占用门查询域，骑乘建筑链路零干扰）。
+            pcP973.setSelectedBlock(int(BR::Stone));
+            const int swingsE0 = swingsP973; // (e) per-leg 挥手基线
+            cartsP973.spawnCart(x0 + 3, kRigY, z0, &w);
+            {
+                const QVector3D eyeM(float(x0) + 6.5f, float(kRigY) + 1.62f, float(z0) + 0.5f);
+                const QVector3D tgtM(float(x0) + 3.5f, float(kRigY) + 0.3f, float(z0) + 0.5f);
+                const QVector3D dirM = (tgtM - eyeM).normalized();
+                if (!cartsP973.tryMount(eyeM, dirM, 8.0f)) {
+                    qInfo().noquote() << "  [t973 diag] e mount ray missed";
+                }
+                // 座位钉位 settle tick：loadSavedState 任意位姿 → tick 后玩家被钉到座位（updateRaycast
+                // 随后跑）→ 实读座位眼位再算第二跳瞄准角。
+                pcP973.release();
+                pcP973.grab();
+                pcP973.loadSavedState(float(x0) + 6.5f, float(kRigY), float(z0) + 0.5f, 0.0f, 0.0f, 1);
+                pcP973.tick();
+                const QVector3D eyeSeat = pcP973.position(); // 实读（座位钉位后的眼位）
+                const float ax = float(x0) + 5.5f, ay = float(kRigY), az = float(z0) + 0.5f;
+                const float ddx = ax - eyeSeat.x(), ddy = ay - eyeSeat.y(), ddz = az - eyeSeat.z();
+                const float dlen = std::sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+                const float pitch2 = std::asin(ddy / dlen) * 57.2957795f;
+                const float yaw2 = std::atan2(-ddx, -ddz) * 57.2957795f;
+                pcP973.release();
+                pcP973.grab();
+                pcP973.loadSavedState(float(x0) + 6.5f, float(kRigY), float(z0) + 0.5f, yaw2, pitch2, 1);
+                pcP973.tick(); // 座位重钉（矿车静止 → 同眼位）+ updateRaycast 从座位射线
+                pcP973.placeBlock();
+            }
+            const bool ridingHeld = cartsP973.ridingIndex() == 0;
+            // 结果断言（座位两跳瞄准的落点对 ±1 格光标残差不敏感——-leg 契约 = 骑乘中「车旁放置」成功
+            // 且骑乘不断，落格在车旁台面带 (x0+4..x0+8) 内即可；占用门对载具域的零干涉由 (f) 源码钉
+            // 与矿车不在 EntityManager 查询域的结构事实共同钉住）。
+            bool stoneBesideCartE = false;
+            for (int dx = 4; dx <= 8; ++dx)
+                if (w.blockAt(x0 + dx, kRigY, z0) == BR::Stone) stoneBesideCartE = true;
+            const bool okE = ridingHeld
+                && stoneBesideCartE                               // 车旁带放置成功（骑乘中）
+                && swingsP973 == swingsE0 + 1;
+            if (!okE)
+                qInfo().noquote() << "  [t973 diag] e riding" << cartsP973.ridingIndex()
+                                  << "beside" << stoneBesideCartE
+                                  << "s4..8" << int(w.blockAt(x0 + 4, kRigY, z0))
+                                  << int(w.blockAt(x0 + 5, kRigY, z0))
+                                  << int(w.blockAt(x0 + 6, kRigY, z0))
+                                  << int(w.blockAt(x0 + 7, kRigY, z0))
+                                  << int(w.blockAt(x0 + 8, kRigY, z0))
+                                  << "swings" << swingsP973 << "expS" << swingsE0 + 1;
+            // (f) 源码钉（P-t945 字符串钉模式 + 语句序钉）：占用门调用行 + Entities 侧排除面 + 门在
+            //     预检链序位（目标格必须空检查 < 门 < 方块族专项预检首行（火把））。
+            const QString exeDirP973 = QCoreApplication::applicationDirPath();
+            const QString rootP973 = QDir(exeDirP973 + QStringLiteral("/..")).absolutePath();
+            auto readSrcP973 = [&rootP973](const QString &rel) -> QString {
+                QFile f(rootP973 + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString pcSrcP973 = readSrcP973(QStringLiteral("src/Game/playercontroller.cpp"));
+            const QString emSrcP973 = readSrcP973(QStringLiteral("src/Entities/entitymanager.cpp"));
+            const QString emHdrP973 = readSrcP973(QStringLiteral("src/Entities/entitymanager.h"));
+            const int iEmptyP973 = pcSrcP973.indexOf(QStringLiteral(
+                "if (tid != BlockRegistry::Air && tid != BlockRegistry::Water"));
+            const int iGateP973 = pcSrcP973.indexOf(QStringLiteral(
+                "if (m_entityManager->mobOccupiesCell(tx, ty, tz)) return;"));
+            // 方块族专项预检首行（火把 t114）用其后独有的 torchHostOk lambda 钉——
+            // `m_selectedBlock == ...Torch` 文本在 placeState 计算段（更早）也出现，不能作序位锚。
+            const int iTorchP973 = pcSrcP973.indexOf(QStringLiteral(
+                "const auto torchHostOk = [this](int ax, int ay, int az) {"));
+            const bool okF = iEmptyP973 >= 0 && iGateP973 >= 0 && iTorchP973 >= 0
+                && iEmptyP973 < iGateP973 && iGateP973 < iTorchP973   // 门在「必须空」与族专项之间
+                && pcSrcP973.contains(QStringLiteral(
+                    "if (isDoor && m_entityManager->mobOccupiesCell(tx, ty + 1, tz)) return;"))
+                && pcSrcP973.contains(QStringLiteral(
+                    "if (isBed && m_entityManager->mobOccupiesCell(tx + hdx, ty, tz + hdz)) return;"))
+                && pcSrcP973.contains(QStringLiteral(
+                    "if (m_entityManager && m_entityManager->mobOccupiesCell(m_hitBx, m_hitBy, m_hitBz)) return;"))
+                && emSrcP973.contains(QStringLiteral("bool EntityManager::mobOccupiesCell(int bx, int by, int bz) const"))
+                && emSrcP973.contains(QStringLiteral("if (!e.alive || e.kind != Mob || e.dead) continue;"))
+                && emHdrP973.contains(QStringLiteral("bool mobOccupiesCell(int bx, int by, int bz) const;"));
+            // 清场 + 释放（grab 析构配对；dismount 清骑乘链）。车旁带逐格清（(e) 落格对 ±1 格光标
+            // 残差不敏感 → 清场带同步放宽）。
+            QVector3D outFeetP973;
+            cartsP973.dismount(&w, outFeetP973);
+            for (int dx = 4; dx <= 8; ++dx)
+                clearTopP973(dx);
+            for (int dx = 0; dx <= 9; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air, 0);
+            QObject::disconnect(swingConnP973);
+            pcP973.release();
+            probeWinP973.deleteLater();
+            const bool okP973 = okA && okB && okC && okD && okE && okF;
+            if (!okP973) ++totalFail;
+            if (!okP973)
+                qInfo().noquote() << "  [t973 diag] a" << okA << "b" << okB << "c" << okC
+                                  << "d" << okD << "e" << okE << "f" << okF;
+            qInfo().noquote() << (okP973 ? "PASS" : "FAIL")
+                              << "| t973 mob-occupied-cell placement gate: the write cell of any"
+                                 " placement is checked against living-mob AABBs (anti-burial,"
+                                 " user caliber) via the read-only EntityManager::mobOccupiesCell"
+                                 " query (Game -> Entities downward dependency, hostileNearby"
+                                 " precedent) - (a) empty-cell control places and swings (chain"
+                                 " proven live, so (b)'s rejection is not a ray-miss no-op);"
+                                 " (b) Survival placement aimed at the shambler's actual occupied"
+                                 " cell is rejected: cell id unchanged, stack not consumed, no"
+                                 " arm swing (reject = no-op caliber), hitBlock pinned so the"
+                                 " precheck chain demonstrably ran; (c) a dropped item occupying"
+                                 " the target cell while the shambler is still alive next door"
+                                 " still places - non-mob entities never gate (MC semantics:"
+                                 " items can be covered), consume/swing normal; (d) after"
+                                 " damageEntity lethal (hp<=0 death-animation frame, slot still"
+                                 " alive) the same cell places - dying mobs do not block;"
+                                 " (e) mounted on a ground-mode minecart via tryMount, aiming"
+                                 " from the actually-read seat eye, the cell beside the cart"
+                                 " places and the ride persists - vehicles are outside the gate's"
+                                 " query domain; (f) source pins: the gate call sits in the"
+                                 " generic precheck layer between the target-must-be-empty check"
+                                 " and the first block-family precheck (torch), the door-upper"
+                                 " and bed-head write cells are gated symmetrically, the"
+                                 " merge/stack write sites carry the same gate, and the Entities"
+                                 " side exclusion face (alive && kind==Mob && !dead) is pinned";
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

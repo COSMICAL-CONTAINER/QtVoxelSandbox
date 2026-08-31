@@ -4609,6 +4609,9 @@ void PlayerController::placeBlock()
         const bool merge = hitUpper ? (m_hitNy < 0 || fracY < 0.5f) : (m_hitNy > 0 || fracY >= 0.5f);
         if (merge) {
             const quint8 fullId = BlockRegistry::slabFullBlock(quint8(m_selectedBlock));
+            // t973 实体占用门：合并 = 写入格变满格（碰撞盒从半格扩到整格），活体 mob 站本格（如站下半砖
+            //   顶、盒体占格上半）时合并即活埋 → 拒（同下方通用放置门口径；写入格 = 被合并的命中格）。
+            if (m_entityManager && m_entityManager->mobOccupiesCell(m_hitBx, m_hitBy, m_hitBz)) return;
             if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, fullId, 0)) return;
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, fullId,
                               BlockRegistry::DoubleSlabMarkerBit);
@@ -4635,6 +4638,7 @@ void PlayerController::placeBlock()
             const bool newUpper = (placeState & 1) != 0; // placeState 已据命中面 / 命中点 Y 算好（见上方 slab 分支）
             if (newUpper != tUpper) { // 互补半 → 合并目标格为整砖
                 const quint8 fullId = BlockRegistry::slabFullBlock(quint8(m_selectedBlock));
+                if (m_entityManager && m_entityManager->mobOccupiesCell(tx, ty, tz)) return; // t973 实体占用门（写入格 = 目标格，同通用门）
                 if (overlapsPlayerAABB(tx, ty, tz, fullId, 0)) return; // 合成满砖前查自埋（同 t163b）
                 m_world->setBlock(tx, ty, tz, fullId,
                                   BlockRegistry::DoubleSlabMarkerBit);
@@ -4658,6 +4662,9 @@ void PlayerController::placeBlock()
         const quint8 curState = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
         if (curState < BlockRegistry::SnowLayerStageMax) {
             const quint8 newState = quint8(curState + 1);
+            // t973 实体占用门：堆叠 = 写入格碰撞盒随层数增高（活体 mob 站雪层顶时盒体占本格上空）→ 拒
+            // （同通用门口径；写入格 = 被堆叠的命中格）。
+            if (m_entityManager && m_entityManager->mobOccupiesCell(m_hitBx, m_hitBy, m_hitBz)) return;
             if (overlapsPlayerAABB(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::SnowLayer, newState)) return;
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::SnowLayer, newState);
             m_lastPlaceMs = now;
@@ -4728,6 +4735,26 @@ void PlayerController::placeBlock()
         && !plateSidePlace) return; // misc 二轮：压力板贴墙侧放豁免玩家重叠（薄板不实质阻挡；其它方块仍守）
     if (isDoor && overlapsPlayerAABB(tx, ty + 1, tz, idByte, quint8(doorFacing | 8))) return;
     if (isBed && overlapsPlayerAABB(tx + hdx, ty, tz + hdz, idByte, quint8(bedFacing | 8))) return;
+    // t973 生物格放方块检测（用户第五轮「生物占据的格子不能放置方块——防活埋」）：写入格与任一**活体
+    //   mob** 碰撞盒严格相交 → 拒（不挥不消耗，同其它预检拒绝口径 no-op）。占用判定单一权威 =
+    //   EntityManager::mobOccupiesCell（Game → Entities 向下只读查询，同 hostileNearby 先例）。
+    //   序位：与上方「目标格必须空」(t198) /「不与玩家重叠」(t146) 同属通用放置预检层，在方块族专项
+    //   预检（火把 / 轨 / 梯 / 仙人掌…）之前——族专项预检只答「这个方块放这个位置合不合法」，本门只答
+    //   「这个格子被不被活体占着」，两问题正交。
+    //   门只看**写入格**占用：对着生物放（命中格在生物身后格）不归本门管——命中格自身是实体方块，射线
+    //   先撞它，写入格是相邻空格（是否生物占用由本门照常判）。玩家自埋面由上方 overlapsPlayerAABB 管，
+    //   本门不改玩家口径（放脚下把自己顶起的链路不受影响）。死亡 / 濒死（hp<=0，死亡动画帧）不拒；
+    //   掉落物 / 箭 / 浮标 / 引燃 TNT 等非 mob 实体不拒（MC 语义：物品可以盖）；矿车 / 船在各自 Manager
+    //   不在查询域——骑乘矿车旁放方块不受干扰。桶倒流体不走本链（上方桶分支已 return——MC 桶可对生物
+    //   倒，伤害面归伤害系统），本门只拦方块。创造 / 生存同规则（预检不读模式）。种子 / 树苗 / 浆果等
+    //   种植分支走各自专用路径（植物无碰撞不活埋，MC 同此），不经本门。骑乘组合（t952 小僵尸骑鸡）：
+    //   骑手与载具两盒各自独立判（查询内逐实体遍历），目标格撞任一即拒。门占两格 / 床占两格 → 下方
+    //   两写入格逐格查（与上方玩家重叠双格口径对称）。
+    if (m_entityManager) {
+        if (m_entityManager->mobOccupiesCell(tx, ty, tz)) return; // 目标格（foot / 单格方块写入格）
+        if (isDoor && m_entityManager->mobOccupiesCell(tx, ty + 1, tz)) return; // 门上格（双格写入格）
+        if (isBed && m_entityManager->mobOccupiesCell(tx + hdx, ty, tz + hdz)) return; // 床头格（双格写入格）
+    }
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
     // 需要支撑面」—— 平地或墙面）。判定用 torchSupportBlock（审查修 L12：isCollidable ∨ isFullCube
     // 合成判定，见其定义处注释 —— Spawner solid=false 后仍可贴，MC 1.0 允许；不挂空气 / 火把 / cross 族）。
