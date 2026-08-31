@@ -449,8 +449,9 @@ Item {
     readonly property int bevelLight: 0      // 凹陷斜面：底/右 亮边
 
     // t46/t49 左键整组（拾取/放置/合并/互换）+ 右键半份：算法见 InventoryOps.resolveClick /
-    //   resolveRightClick（四面板共享）。本面板 hotbar 行支持把物品在槽间搬动/互换（非「创造覆盖」销毁）；
-    //   调色板点击仍是「无限源拾取」（在 TapHandler 内直接 setHeldBlock，不走 resolveClick）。
+    //   resolveRightClick（四面板共享，生存共享语义——非创造拿取面）。本面板 hotbar 行支持把物品在槽间
+    //   搬动/互换（非「创造覆盖」销毁）；调色板点击仍是「无限源拾取」，不走 resolveClick —— t975 起收敛进
+    //   paletteTake 单一入口（左=一组 / 右=一件，用户 8-28 定稿；中键复制面独立不动）。
     //   t622：+ curName 第 5 参（main/hotbar 槽实例名透传）。
     function resolveClick(curId, curCount, curDur, curEnch, curName) { return InventoryOps.resolveClick(root, curId, curCount, curDur, curEnch, curName) }
     function resolveRightClick(curId, curCount, curDur, curEnch, curName) { return InventoryOps.resolveRightClick(root, curId, curCount, curDur, curEnch, curName) }
@@ -500,6 +501,45 @@ Item {
         const e = InventoryOps.list4(enchants)
         root.hotbar.setHeldEnchants(e)
         root.hotbar.heldCustomName = (typeof name === "string") ? name : ""
+        root.itemTaken()
+    }
+
+    // t975 创造调色板拿取（左/右键共用单一入口）：用户 8-28 定稿**再翻案 t896**——**左键 = 拿一组**
+    //   （maxStackSize 整组上手，恢复 t896 前的满栈语义）、**右键 = 只拿一个**（1 件上手）；t896 链的
+    //   中键复制面（下方中键 TapHandler + copyStackToCursor 槽位复制）零触碰不动。两键分支结构 = t896 前
+    //   左键原样（t632 书 / t318 toggle / t136-t292-t356 换拿），仅数量随键位分配（takeCount 由 TapHandler
+    //   分传，键位分配单一声明点）；调色板 = 无限源，源不清减。三段：
+    //   ① 预设附魔书（哨兵负 id，t632）：专用拿取 1 本（书 maxStack=1，左右键同得 1 本预设书）。
+    //   ② 光标已持**同格物品**：左键 = t318 切换式归还（点原格放回虚空、再点再拿起——「归还」意图只挂
+    //      主拿取键）；右键 = **续拿 +1**（「只拿一个」的连点语义；cap = maxStackSize 单一权威，满组
+    //      no-op，同 t896 数量权威 / InventoryOps 右键放一的 cap 口径）。右键**不接** t318 toggle——
+    //      否则「右键连点拿一个」会被「点原格归还」吞成拿/还振荡（t318 修的是左键主拿取流，语义不外溢）。
+    //   ③ 异格 / 空手 = 换拿（t136/t292/t356：旧光标物 returnHeldToVoidRequested 回虚空 → 新物上手；
+    //      takeCount 即本键位数量：左 = maxStackSize 整组、右 = 1 件）。
+    function paletteTake(modelData, takeCount, toggleReturnOnSameId) {
+        if (!root.hotbar) return
+        const bi = root.bookInfoFor(modelData)
+        if (bi) {
+            if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
+            root.hotbar.takeCreativeEnchantedBook(bi.ench)
+            root.itemTaken()
+            return
+        }
+        if (root.hotbar.heldBlock === modelData) {
+            if (toggleReturnOnSameId) {
+                root.returnHeldToVoidRequested()
+                return
+            }
+            // 右键续拿 +1（cap = maxStackSize 单一权威；满组 no-op 不重复发反馈）。
+            if (root.hotbar.heldCount < root.hotbar.maxStackSize(modelData)) {
+                root.hotbar.heldCount = root.hotbar.heldCount + 1
+                root.itemTaken()
+            }
+            return
+        }
+        if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
+        root.hotbar.heldBlock = modelData
+        root.hotbar.heldCount = takeCount
         root.itemTaken()
     }
 
@@ -889,49 +929,27 @@ Item {
                             }
                             TapHandler {
                                 enabled: modelData !== 0
-                                // 拾取到光标（创造调色板=无限源，不清减调色板）。方块满栈 64；工具不可堆叠 →
-                                // count=1（t33）。setHeldBlock 已对工具段 id 校验合法（isValidItemId 含工具段）。
-                                onTapped: {
-                                    // t632 预设附魔书（哨兵负 id）：走专用拿取（0x227 书 + 预设附魔到光标）。
-                                    //   同格归还判定对书恒不成立（heldBlock 恒 0x227 ≠ 哨兵负 id）→ 每次点击
-                                    //   走换拿（旧物回虚空 + 新书上手），语义同普通格换拿。
-                                    const bi = root.bookInfoFor(modelData)
-                                    if (bi) {
-                                        if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
-                                        root.hotbar.takeCreativeEnchantedBook(bi.ench)
-                                        root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
-                                        return
-                                    }
-                                    // t318：切换式归还（修 t292 遗留「点原格又拿起该格」）。创造调色板=无限源，
-                                    //   点「当前手持物同格（原格）」= 放回（heldBlock===modelData → returnHeldToVoidRequested，
-                                    //   凭空消失回虚空，创造不丢世界，t292）；再点同格 = 重新拿起。旧版无脑 dismiss+re-pick
-                                    //   → 点原格 dismiss 后立刻赋同值（heldBlock 复原），用户观感「没归还、重复拾取」。
-                                    //   现 heldBlock===modelData 早退走归还，构成 true toggle（拿起→点原格归还→再点拿起）。
-                                    //   t356：归还走 returnHeldToVoidRequested（=虚空），不复用 discardHeldRequested（=丢世界实体），
-                                    //   否则 t318 归还路径会把「丢世界」意图与「回虚空」混淆。
-                                    if (root.hotbar.heldBlock === modelData) {
-                                        root.returnHeldToVoidRequested()
-                                        return
-                                    }
-                                    // t136/t292：换拿前先显式 dismiss 旧光标手持栈（防被下方赋值直接覆盖成「凭空消失」
-                                    //   的隐性路径——显式走信号让宿主统一处理）。创造调色板=无限源，旧物 dismiss 即回
-                                    //   虚空（heldBlock=0，t292：不丢出到世界）；信号同线程直连，返回时 heldBlock 已为 0，
-                                    //   随后赋新值安全。空手（heldBlock===0）跳过。异格（heldBlock!==modelData）走此分支 =
-                                    //   换拿（旧物回虚空 → 新物上手，MC 创造调色板语义）。t356：同走 returnHeldToVoidRequested。
-                                    if (root.hotbar.heldBlock !== 0) root.returnHeldToVoidRequested()
-                                    root.hotbar.heldBlock = modelData
-                                    // t896 左键拿取**默认 1 个**（用户定稿语义）：调色板左键 = 单件上手，要整组走中键
-                                    //   （中键 = 复制一整组，见下方 TapHandler）。工具 / 桶本就 maxStack=1 → 行为不变；
-                                    //   方块 / 材料 64 类从满栈改单件。t174 的 maxStackSize 单一权威保留在中键与
-                                    //   copyStackToCursor（数量口径仍单一权威，只是左键语义取 1）。
-                                    root.hotbar.heldCount = 1
-                                    root.itemTaken()  // t120：创造拿物品 → 宿主弹手（handPopAnim）
-                                }
+                                // 左键 = 拿**一组**（t975 用户 8-28 定稿，翻案 t896 的左键 1 个）：数量 =
+                                //   maxStackSize(modelData)（方块/材料 64；工具/桶/护甲不可堆叠类天然 1 件，
+                                //   t33 口径经 maxStackSize 单一权威）。分支结构（t632 书 / t318 toggle /
+                                //   t136-t356 换拿）收敛进 paletteTake 单一入口（与右键共用，数量随键位分配）。
+                                onTapped: root.paletteTake(modelData, root.hotbar.maxStackSize(modelData), true)
+                            }
+                            // t975 右键 = 只拿**一个**（用户 8-28 定稿）：1 件上手；光标已持同格物品 →
+                            //   续拿 +1（cap = maxStackSize，见 paletteTake ②——右键不接 t318 toggle，
+                            //   连点 = 逐个续拿而非归还振荡）。per-slot 右键 TapHandler 与 root 右键
+                            //   DragHandler 共存模式同槽位面（t181/t166d：按下不动本 handler 抓，越阈值
+                            //   DragHandler 接管；调色板非右拖分发目标，groupIsDraggable 拒收）。
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                enabled: modelData !== 0
+                                onTapped: root.paletteTake(modelData, 1, false)
                             }
                             // t653① 中键 = 复制一整组到光标（创造 pick 语义）：与左键同取调色板无限源（满栈
                             //   maxStackSize），差异仅「不受 t318 原格归还 toggle 影响」（中键恒拿取，MC 中键
                             //   就是纯复制）。预设附魔书（哨兵）走同款专用拿取。
-                            //   t896：中键 = 整组（maxStackSize）—— 左键已改默认 1 个，整组需求全走中键。
+                            //   t896：中键 = 整组（maxStackSize）。t975 后左键同为整组（右键接走单件），中键
+                            //   复制面零触碰（复制语义：不受 t318 toggle、元数据面同 copyStackToCursor 口径）。
                             TapHandler {
                                 acceptedButtons: Qt.MiddleButton
                                 enabled: modelData !== 0
