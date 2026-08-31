@@ -74,6 +74,8 @@
 #include <QVector3D>              // t966 rig：近面世界坐标（scenePosition / 旋转后角点）
 #include <QQuaternion>            // t966 rig：sceneRotation（Quick3D 真实合成四元数，行为级读回）
 #include <QSet>                   // t967 探针：三分区不交性判定
+#include <QSqlDatabase>           // t974 竞态窗口阳性腿：第二连接 BEGIN EXCLUSIVE 瞬持库写锁
+#include <QSqlQuery>              // t974 同上（锁持有 / 释放 SQL）
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
 //   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t952 起
@@ -28925,6 +28927,232 @@ Item {
                                  " merge/stack write sites carry the same gate, and the Entities"
                                  " side exclusion face (alive && kind==Mob && !dead) is pinned";
         }
+    }
+
+    // ── P-t974 保存退出偶发未保存（用户第五轮：有概率重进是上一次存档点）──
+    //    调查判决：保存链（savePlayerData → saveAll → saveProgress）全部是同步 SQLite 写 —— 链上无
+    //    deferred / 分帧写，「异步写完成前退出」的假设不成立。真实的概率窗口有二：
+    //    (1) 退出存档是 fire-and-forget —— 三个写盘调用的返回值被弃置，任一瞬态失败（外部进程瞬持
+    //        .sqlite 文件锁：杀软 / 索引器 / 同步盘；磁盘满）即整事务回滚，库中留**上一次存档**、退出
+    //        照常进行 → 与症状逐字吻合（回滚 = 旧档完好，「重进是上一次存档点」）；
+    //    (2) playing 态直接关窗（标题栏 X / Alt+F4）无任何落盘点 —— 进程即退，自上次保存退出后的
+    //        全部进度静默丢失（用户从界面分不清本次走的是哪条退出路径 → 观感「偶发」）。
+    //    修法：QML 退出存档收口为 runExitSave()（三写 + 核验返回值 + 失败幂等重试一次 + toast 显式
+    //    告知），写完成门在 coverGrabPending / 退出流程置位**之前**（链序钉）；窗口关闭兜底 onClosing
+    //    走同一条链（写完再放行关闭）；WorldStore 加 saveOkCount 写完成计数（每次成功持久化 +1，
+    //    失败不计数 —— 与 false 返回值同源互证）作行为级观测面。原子性核验：saveAll 单事务
+    //    （DELETE 全量 + INSERT，COMMIT 失败整事务回滚）+ chunks 主键 (cx,cz) → 半写永不可见、
+    //    失败必回滚到旧档（本探针 (c) 腿实证）。
+    {
+        bool okA = false;   // 行为腿：保存退出 → 立即关库重载同档 → 关键状态往返一致（非上一次存档点）
+        bool okB = false;   // 写完成计数腿：三写成功恰好 +3；失败腿零计数
+        bool okC = false;   // 竞态窗口阳性腿：瞬持库写锁 → 三写全部失败（可检测）→ 回滚保旧档（症状复现）→ 锁释放重试成功
+        bool okD = false;   // 源码钉腿：写完成门链序 + onClosing 兜底 + 计数器契约
+
+        // rig：独立小世界（3×3 chunk）+ PID 后缀临时库（t822 先例：不污染 saves/，双实例互不覆盖）。
+        World wT974;
+        wT974.setWidth(48);
+        wT974.setDepth(48);
+        wT974.setHeight(96);
+        wT974.setSeed(97);
+        WorldStore storeT974;
+        storeT974.setWorld(&wT974);
+        const QString dbT974 = QDir::temp().absoluteFilePath(
+                QStringLiteral("voxel_t974_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+        QFile::remove(dbT974);
+
+        // 玩家态（gatherPlayerState v3 形状的最小代表：位 / 姿 / 模式 / 血饥 / xp / 选中槽 + 背包一格有物）。
+        const auto makeStackT974 = [](int id, int count) {
+            QVariantMap s;
+            s.insert(QStringLiteral("id"), id);
+            s.insert(QStringLiteral("count"), count);
+            s.insert(QStringLiteral("durability"), 0);
+            s.insert(QStringLiteral("enchants"), QVariantList{0, 0, 0, 0});
+            s.insert(QStringLiteral("name"), QString());
+            return s;
+        };
+        QVariantList hbT974, mnT974, arT974;
+        for (int i = 0; i < 9; ++i) hbT974.append(makeStackT974(0, 0));
+        for (int j = 0; j < 27; ++j) mnT974.append(makeStackT974(0, 0));
+        for (int k = 0; k < 4; ++k) arT974.append(makeStackT974(0, 0));
+        hbT974[4] = makeStackT974(int(BR::Stone), 3);
+        const auto makePlayerT974 = [&](double px) {
+            QVariantMap d;
+            d.insert(QStringLiteral("version"), 3);
+            d.insert(QStringLiteral("px"), px);
+            d.insert(QStringLiteral("py"), 33.0);
+            d.insert(QStringLiteral("pz"), 22.5);
+            d.insert(QStringLiteral("yaw"), 33.0);
+            d.insert(QStringLiteral("pitch"), -12.5);
+            d.insert(QStringLiteral("mode"), 1);
+            d.insert(QStringLiteral("health"), 17);
+            d.insert(QStringLiteral("hunger"), 18);
+            d.insert(QStringLiteral("xp"), 9);
+            d.insert(QStringLiteral("selectedSlot"), 4);
+            d.insert(QStringLiteral("hotbar"), hbT974);
+            d.insert(QStringLiteral("main"), mnT974);
+            d.insert(QStringLiteral("armor"), arT974);
+            return d;
+        };
+        const auto makeProgressT974 = [](int minutes) {
+            QVariantMap p;
+            p.insert(QStringLiteral("statPlayedMinutes"), minutes);
+            p.insert(QStringLiteral("achvList"), QVariantList{QStringLiteral("t974a"), QStringLiteral("t974b")});
+            return p;
+        };
+        const QVariantMap pdV1 = makePlayerT974(11.5);
+        const QVariantMap prV1 = makeProgressT974(7);
+
+        // (a) 第一次退出存档 S1（「上一次存档点」基线）→ 关库重开重载 → 断言基线可见。
+        okA = storeT974.openWorld(dbT974)
+              && !storeT974.hasChunks()
+              && storeT974.savePlayerData(pdV1)
+              && storeT974.saveAll(QStringLiteral("t974rig"), QVariantList(), QVariantList(), QVariantList())
+              && storeT974.saveProgress(prV1);
+        storeT974.closeWorld();
+        const int mxT974 = 24, mzT974 = 24;
+        const int myT974 = wT974.heightAt(mxT974, mzT974) + 2;
+        if (okA) {
+            okA = storeT974.openWorld(dbT974) && storeT974.hasChunks();
+            wT974.beginLoad(97);
+            const int loadedS1 = storeT974.loadChunks();
+            wT974.finishLoad();
+            const QVariantMap pdBack = storeT974.loadPlayerData();
+            okA = okA && loadedS1 == 9
+                  && pdBack.value(QStringLiteral("px")).toDouble() == 11.5
+                  && pdBack.value(QStringLiteral("xp")).toInt() == 9;
+            storeT974.closeWorld();
+        }
+        // (a)(b) 第二次会话：世界改动（标记块）+ 新玩家位 / 新进度 → 退出存档 S2（三写 + 计数核验）
+        //   → **立即 closeWorld**（复现「保存后马上退出拆链」的时序形态）→ 重开重载 → 断言看到的是
+        //   新档而非上一次存档点。
+        const quint8 markerT974 = wT974.blockAt(mxT974, myT974, mzT974) == quint8(BR::Stone)
+                                      ? quint8(BR::Dirt) : quint8(BR::Stone);
+        wT974.setBlock(mxT974, myT974, mzT974, markerT974, 0);
+        if (okA) {
+            // 新会话（S1 读档路径关库后重开）→ 世界改动 → 退出存档 S2（三写 + 计数核验）。
+            okA = storeT974.openWorld(dbT974);
+            const int c0 = storeT974.saveOkCount();
+            const bool s2p = storeT974.savePlayerData(makePlayerT974(44.5));
+            const bool s2w = storeT974.saveAll(QStringLiteral("t974rig"), QVariantList(), QVariantList(), QVariantList());
+            const bool s2r = storeT974.saveProgress(makeProgressT974(21));
+            const int c1 = storeT974.saveOkCount();
+            okB = s2p && s2w && s2r && c1 == c0 + 3;
+            storeT974.closeWorld();   // 保存后立刻拆链（竞态窗口的「退出」半边）
+            const bool reopenOk = storeT974.openWorld(dbT974);   // 立即重进（读档）
+            wT974.beginLoad(97);
+            const int loadedS2 = storeT974.loadChunks();
+            wT974.finishLoad();
+            const QVariantMap pdS2 = storeT974.loadPlayerData();
+            const QVariantMap prS2 = storeT974.loadProgress();
+            const QVariantList hbS2 = pdS2.value(QStringLiteral("hotbar")).toList();
+            okA = okA && okB && reopenOk && loadedS2 == 9
+                  && wT974.blockAt(mxT974, myT974, mzT974) == markerT974   // 新档落地（非上一次存档点）
+                  && pdS2.value(QStringLiteral("px")).toDouble() == 44.5
+                  && int(hbS2.size()) == 9
+                  && hbS2.at(4).toMap().value(QStringLiteral("id")).toInt() == int(BR::Stone)
+                  && hbS2.at(4).toMap().value(QStringLiteral("count")).toInt() == 3
+                  && prS2.value(QStringLiteral("statPlayedMinutes")).toInt() == 21;
+            if (!okA)
+                qInfo().noquote() << "  [t974 diag] a loaded=" << loadedS2
+                                  << "markerRead=" << int(wT974.blockAt(mxT974, myT974, mzT974))
+                                  << "markerExp=" << int(markerT974)
+                                  << "px=" << pdS2.value(QStringLiteral("px")).toDouble()
+                                  << "min=" << prS2.value(QStringLiteral("statPlayedMinutes")).toInt();
+        }
+        // (c) 竞态窗口阳性腿（确定性复现「偶发」）：第二连接 BEGIN EXCLUSIVE 瞬持库写锁（野外 =
+        //    杀软 / 索引器 / 同步盘的瞬态锁）→ 三写必须**全部失败且可检测**（false + 计数不动 =
+        //    修后 QML 完成门能看到的信号）→ 释放锁后重读：库中仍是**上一次存档点**（事务回滚保旧档
+        //    = 用户症状的库侧形态；半写永不可见 = 原子性核验）→ 重试三写成功 + 计数恢复 +3。
+        {
+            QSqlDatabase locker = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("t974_locker"));
+            locker.setDatabaseName(dbT974);
+            const bool lOpen = locker.open();
+            // 锁必须先于三写获取（BEGIN EXCLUSIVE 持库写锁 → WorldStore 主连接的全部写路径 SQLITE_BUSY）。
+            QSqlQuery lq(locker);
+            const bool lLock = lOpen && lq.exec(QStringLiteral("BEGIN EXCLUSIVE"));
+            const int cB = storeT974.saveOkCount();
+            const bool fP = storeT974.savePlayerData(makePlayerT974(99.5));
+            const bool fW = storeT974.saveAll(QStringLiteral("t974rig_failed"), QVariantList(), QVariantList(), QVariantList());
+            const bool fR = storeT974.saveProgress(makeProgressT974(99));
+            const int cA = storeT974.saveOkCount();
+            okC = lOpen && lLock && !fP && !fW && !fR && cA == cB;
+            lq.exec(QStringLiteral("ROLLBACK"));   // 释放（QSqlQuery 先于 removeDatabase 出作用域销毁）
+            locker.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("t974_locker"));
+        {
+            // 锁释放后：旧档完好（失败写被回滚）+ 重试成功（QML 幂等重试的 C++ 级验证）。
+            const QVariantMap pdKept = storeT974.loadPlayerData();
+            const int r0 = storeT974.saveOkCount();
+            const bool rP = storeT974.savePlayerData(makePlayerT974(44.5));
+            const bool rW = storeT974.saveAll(QStringLiteral("t974rig"), QVariantList(), QVariantList(), QVariantList());
+            const bool rR = storeT974.saveProgress(makeProgressT974(21));
+            okC = okC && pdKept.value(QStringLiteral("px")).toDouble() == 44.5   // (c) 失败写的 pd2=99.5 未落库
+                  && rP && rW && rR && storeT974.saveOkCount() == r0 + 3;
+            if (!okC)
+                qInfo().noquote() << "  [t974 diag] c keptPx=" << pdKept.value(QStringLiteral("px")).toDouble()
+                                  << "retry" << rP << rW << rR;
+        }
+        // (d) 源码钉：QML 写完成门链序（runExitSave 定义 < 完成门 < 重试 < toast < coverGrabPending 置位）
+        //     + onClosing 兜底同链 + WorldStore 计数器契约（Q_PROPERTY + 三处成功尾 bump，saveAll 的
+        //     bump 在 commit 成功门之后）。
+        {
+            const QString exeDirP974 = QCoreApplication::applicationDirPath();
+            const QString rootP974 = QDir(exeDirP974 + QStringLiteral("/..")).absolutePath();
+            auto readSrcP974 = [&rootP974](const QString &rel) -> QString {
+                QFile f(rootP974 + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString mainSrc = readSrcP974(QStringLiteral("src/ui/Main.qml"));
+            const QString wsHdr = readSrcP974(QStringLiteral("src/World/worldstore.h"));
+            const QString wsCpp = readSrcP974(QStringLiteral("src/World/worldstore.cpp"));
+            const int iRunExit = mainSrc.indexOf(QStringLiteral("function runExitSave()"));
+            const int iGate = mainSrc.indexOf(QStringLiteral("let exitSaveOk = runExitSave()"));
+            const int iRetry = mainSrc.indexOf(QStringLiteral("if (!exitSaveOk) exitSaveOk = runExitSave()"));
+            const int iToast = mainSrc.indexOf(QStringLiteral("存档写入失败，本次进度未保存"));
+            const int iCover = mainSrc.indexOf(QStringLiteral("coverGrabPending = true"));
+            const int iOnClose = mainSrc.indexOf(QStringLiteral("onClosing: (close) => {"));
+            const QString onCloseSlice = iOnClose >= 0 ? mainSrc.mid(iOnClose, 800) : QString();
+            const int iBump1 = wsCpp.indexOf(QStringLiteral("noteSaveOk();"));
+            const int iCommitGate = wsCpp.indexOf(QStringLiteral("if (!db.commit())"));
+            okD = iRunExit >= 0
+                  && iRunExit < mainSrc.indexOf(QStringLiteral("function saveAndExitToWorldList()"))
+                  && iGate >= 0 && iRetry >= 0 && iToast >= 0 && iCover >= 0
+                  && iGate < iCover          // 写完成门先于退出流程置位 = 「写盘在退出前同步完成」链序
+                  && mainSrc.contains(QStringLiteral("window.lastExitSaveOk = exitSaveOk"))
+                  && iOnClose >= 0
+                  && onCloseSlice.contains(QStringLiteral("runExitSave()"))
+                  && onCloseSlice.contains(QStringLiteral("worldStore.closeWorld()"))
+                  && wsHdr.contains(QStringLiteral("Q_PROPERTY(int saveOkCount READ saveOkCount NOTIFY saveOkCountChanged)"))
+                  && iBump1 >= 0 && iCommitGate >= 0 && iCommitGate < iBump1
+                  && wsCpp.count(QStringLiteral("noteSaveOk();")) == 3;
+        }
+        storeT974.closeWorld();
+        QFile::remove(dbT974);
+        const bool okP974 = okA && okB && okC && okD;
+        if (!okP974) ++totalFail;
+        if (!okP974)
+            qInfo().noquote() << "  [t974 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD;
+        qInfo().noquote() << (okP974 ? "PASS" : "FAIL")
+                          << "| t974 save-exit silent-loss race: the exit-save chain (player state +"
+                             " chunks transaction + progress) is synchronous SQLite - the probabilistic"
+                             " window is the discarded return values (fire-and-forget: one transient"
+                             " external lock / disk failure rolls the transaction back and the file"
+                             " keeps the PREVIOUS save while exit proceeds) plus the never-saving"
+                             " window-close path - (a) behavior leg: exit-save -> immediate close ->"
+                             " reopen -> reload sees the NEW save (marker block, player position,"
+                             " inventory stack, progress), not the previous one; (b) write-completion"
+                             " counter: the trio bumps saveOkCount by exactly +3, failures never count;"
+                             " (c) race-window positive leg, deterministic: a second connection holding"
+                             " BEGIN EXCLUSIVE (in the wild: AV / indexer / sync tools) makes all three"
+                             " writes fail detectably (false + flat counter), the rolled-back file keeps"
+                             " the previous save intact (half-writes never visible = atomicity proof),"
+                             " and the retry after lock release succeeds +3; (d) source pins: the"
+                             " runExitSave gate (check -> retry -> toast) precedes coverGrabPending in"
+                             " saveAndExitToWorldList, onClosing routes the window-close path through"
+                             " the same chain and closes the store, and the WorldStore counter contract"
+                             " (Q_PROPERTY + exactly 3 bump sites, saveAll's after the commit gate)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
