@@ -374,6 +374,11 @@ public:
     Q_INVOKABLE int maxStackSize(int id) const;
     // t263 工具最大耐久（透传 ToolRegistry::maxDurability；非工具 → 0）。QML tooltip / 创造取件初始化用。
     Q_INVOKABLE int toolMaxDurability(int id) const;
+    // review0901 #32 槽内物品最大耐久单一权威（双段判定，与 slotDetailText 同式）：工具段 →
+    //   toolMaxDurability；护甲件（工具段无行，hotbar 槽可持护甲）→ ArmorRegistry::maxDurability 兜底；
+    //   其余（方块 / 材料 / 空 id）→ 0 = 无耐久。HUD hotbar 条 + 背包四处 DurabilityBar 的 max 侧全部
+    //   消费本权威——修「切槽浮显护甲耐久行有数、耐久条单段判定无数」的口径劈叉（t977 浮显已是双段）。
+    Q_INVOKABLE int maxDurabilityFor(int itemId) const;
     // t304 弓箭最大伤害（满蓄力命中 HP；spec「弓伤害 tooltip」）。仅弓（toolType===Bow）有意义；其余返 0。
     //   QML tooltip 据本值显「攻击 1-N」（蓄力 1..N HP）；弓近战走徒手伤害（ToolRegistry::attackDamage 兜底），
     //   远程伤害由蓄力 + 箭命中决定（PlayerController bow fire / EntityManager Arrow）。

@@ -20404,6 +20404,62 @@ Item {
         gb972.refreshMesh();
         const bool okLightDrained = !gb972.lightStale();
 
+        // review0901 #34② 计数腿（重建面微优化，行为级直驱 + meshRebuilt 计数）：稳态欠账条目在队
+        //   等待期间被 setChunkInRange(false→true) catch-up 重建过（玩家走近）→ 排空端复查谓词
+        //   （vertexCount>0 && !deferredRebuildPending && !lightStale）命中 → 跳过 refreshMesh =
+        //   免一次纯浪费的重复重建（计数持平）；对照：进世界全量条目（clearMesh 后 vertexCount==0）
+        //   与稳态欠账条目（标记在）谓词不命中 → 必须重建（计数 +1）。谓词同式钉在 Main.qml 排空泵。
+        int rebuilds972 = 0;
+        bool okDedup972 = false;
+        {
+            const QMetaObject::Connection cntConn972 =
+                    QObject::connect(&gb972, &ChunkGeometry::meshRebuilt,
+                                     [&rebuilds972]() { ++rebuilds972; });
+            const int baseCnt972 = rebuilds972;
+            // 场景复现：条目已入稳态欠账队列（窗外编辑记账）→ 玩家走近 catch-up 重建（计数 +1、欠账双清）。
+            gb972.setChunkInRange(false);
+            wl972.setBlock(29, 42, 29, BR::Stone, 0);      // 远处编辑 → 排空队列挂着的内容欠账
+            const bool debtWhileQueued = gb972.deferredRebuildPending();
+            gb972.setChunkInRange(true);                    // 玩家走近 → catch-up buildMesh（无条件，t472）
+            const int afterCatchup = rebuilds972;
+            const bool catchupCleaned = debtWhileQueued && afterCatchup == baseCnt972 + 1
+                                        && !gb972.deferredRebuildPending() && gb972.vertexCount() > 0;
+            // 排空端谓词（Main.qml 排空循环同式）命中 → 跳过 = 零重复重建（避免计数腿）。
+            const bool skipDue972 = gb972.vertexCount() > 0
+                                    && !gb972.deferredRebuildPending() && !gb972.lightStale();
+            if (!skipDue972) gb972.refreshMesh();
+            const bool okAvoidRebuild = catchupCleaned && skipDue972
+                                        && rebuilds972 == afterCatchup;
+            // 对照①全量条目：clearMesh 后 vertexCount==0 → 谓词不命中 → 必须重建（进世界队列语义不变）。
+            //   注：clearMesh 也发 meshRebuilt（F3 顶点汇总归零通知）→ 计数取「刷新前后 delta」口径，
+            //   clearMesh 自身 +1 不参与断言（绝对计数会把归零通知误记成一次重建）。
+            gb972.setChunkInRange(false);                   // 真→假不重建（本腿不依赖 catch-up）
+            gb972.clearMesh();
+            const bool skipAfterClear = gb972.vertexCount() > 0
+                                        && !gb972.deferredRebuildPending() && !gb972.lightStale();
+            const int preBootRefresh = rebuilds972;
+            if (!skipAfterClear) gb972.refreshMesh();
+            const bool okBootstrapRebuilds = !skipAfterClear && rebuilds972 == preBootRefresh + 1
+                                             && gb972.vertexCount() > 0;
+            // 对照②稳态欠账条目：窗外跨阈值 dayMul → lightStale 记账（远端 setter 不直建）→ 谓词
+            //   不命中 → 必须重建（稳态排空语义不变）。
+            gb972.setDayMul(1.0f);
+            const bool debt2Booked = gb972.lightStale();
+            const bool skipWithDebt = gb972.vertexCount() > 0
+                                      && !gb972.deferredRebuildPending() && !gb972.lightStale();
+            const int preDebtRefresh = rebuilds972;
+            if (!skipWithDebt) gb972.refreshMesh();
+            const bool okDebtRebuilds = debt2Booked && !skipWithDebt
+                                        && rebuilds972 == preDebtRefresh + 1;
+            okDedup972 = okAvoidRebuild && okBootstrapRebuilds && okDebtRebuilds;
+            if (!okDedup972)
+                qInfo().noquote() << "  [t972 diag] dedup avoid" << okAvoidRebuild << "boot"
+                                  << okBootstrapRebuilds << "debt" << okDebtRebuilds
+                                  << "| queued" << debtWhileQueued << "skip" << skipDue972
+                                  << "cnt" << rebuilds972;
+            QObject::disconnect(cntConn972);
+        }
+
         // Main.qml 源码钉（呈现层编排链；滤注释行后判定，同 t860 先例）：可见性解链（六段模板 visible
         //   只由 vertexCount 决定，旧「chunkInRange && …vertexCount」形态清零）+ kickWorldMeshSync
         //   存在且在 enterWorld 内挂载 + 窗外段 clearMesh 作废 + 排空泵（shift + refreshMesh）。
@@ -20452,26 +20508,46 @@ Item {
                 const bool clearOnFar = code.contains(QStringLiteral("seg.geometry.clearMesh()"));
                 const bool pumpDrains = code.contains(QStringLiteral("_meshSyncQueue.shift()"))
                                         && code.contains(QStringLiteral("g.refreshMesh()"));
+                // review0901 #33/#34 登记（注释即契约）钉：读**原始** qml（上方 code 已滤注释行，
+                //   登记注释本体必须原样在——注释被改写/删除即红）。#33 = 排空泵「UI/呈现件豁免
+                //   worldRunning」显式登记（暂停期照跑是有意取舍，t889 清点按豁免登记）；
+                //   #34① = 全幅绘制的 Android 验证轮登记；#34② = 排空端复查谓词同式（代码形态，
+                //   原文钉防散改）+ 登记注释。
+                const bool pumpExemptionPin = qml.contains(QStringLiteral("UI/呈现件豁免 worldRunning"))
+                                              && qml.contains(QStringLiteral("暂停期本泵照跑"))
+                                              && qml.contains(QStringLiteral(
+                                                      "t889 硬档停清点时本 Timer 按「呈现件豁免」登记"));
+                const bool androidDrawPin = qml.contains(QStringLiteral("性能登记（review0901 #34①，绘制面）"))
+                                            && qml.contains(QStringLiteral("Android 验证轮"))
+                                            && qml.contains(QStringLiteral("draw 数"))
+                                            && qml.contains(QStringLiteral("恢复「绘制半径」开关"));
+                const bool drainSkipPin = qml.contains(QStringLiteral(
+                        "if (g.vertexCount > 0 && !g.deferredRebuildPending() && !g.lightStale()) continue"))
+                        && qml.contains(QStringLiteral("review0901 #34②（重建面微优化登记）"));
                 okPin972 = visTerrainUnchained && visFamilyUnchained && kickDefined && kickHooked
-                           && clearOnFar && pumpDrains;
+                           && clearOnFar && pumpDrains
+                           && pumpExemptionPin && androidDrawPin && drainSkipPin;
                 if (!okPin972)
                     qInfo().noquote() << "  [t972 diag] visTerrain" << visTerrainUnchained
                                       << "visFamily" << visFamilyUnchained << "kickDefined" << kickDefined
                                       << "kickHooked" << kickHooked << "clearOnFar" << clearOnFar
-                                      << "pumpDrains" << pumpDrains;
+                                      << "pumpDrains" << pumpDrains
+                                      << "pumpExempt" << pumpExemptionPin << "android" << androidDrawPin
+                                      << "drainSkip" << drainSkipPin;
             }
         }
 
         const bool okT972 = okBaseline && okWinLoaded && okLoadDebt && okStaleKept && okCleared
                             && okRefilled && okDebtClearedByBuild && okEditDebt && okEditDrained
-                            && okLightDebt && okLightDrained && okPin972;
+                            && okLightDebt && okLightDrained && okDedup972 && okPin972;
         if (!okT972)
             qInfo().noquote() << "  [t972 diag] baseline" << okBaseline << "winLoaded" << okWinLoaded
                               << "loadDebt" << okLoadDebt << "staleKept" << okStaleKept
                               << "cleared" << okCleared << "refilled" << okRefilled
                               << "debtCleared" << okDebtClearedByBuild << "editDebt" << okEditDebt
                               << "editDrained" << okEditDrained << "lightDebt" << okLightDebt
-                              << "lightDrained" << okLightDrained << "pin" << okPin972
+                              << "lightDrained" << okLightDrained << "dedup" << okDedup972
+                              << "pin" << okPin972
                               << "| cntA" << oldCntA << "->" << ga972.vertexCount()
                               << "cntB" << oldCntB << "->" << gb972.vertexCount();
         if (!okT972) ++totalFail;
@@ -20499,7 +20575,15 @@ Item {
                              "pin locks the orchestration (six templates visible-unchained from "
                              "chunkInRange, kickWorldMeshSync defined and hooked inside enterWorld "
                              "after the player pose settles, clearMesh on far segments, shift+"
-                             "refreshMesh drain pump)"
+                             "refreshMesh drain pump). review0901 additions: drain-side dedup "
+                             "counter leg (a steady-debt entry catch-up rebuilt by the player "
+                             "walking near is SKIPPED by the recheck predicate vertexCount>0 && "
+                             "no deferred && no lightStale = zero wasted rebuilds, while bootstrap "
+                             "entries (vertexCount==0 after clearMesh) and debt entries still "
+                             "rebuild, counted via meshRebuilt), plus raw-source registration "
+                             "pins (the drain pump's deliberate UI-chrome exemption from the "
+                             "worldRunning pause caliber, the edge-to-edge draw-cost Android "
+                             "verification registration, and the drain recheck predicate form)"
                              ;
     }
 
@@ -25004,6 +25088,9 @@ Item {
             // 钉位段清滑流行钉（与清 vy 同段；行被删即红）。
             okF = okF && entCppC.contains(QStringLiteral(
                 "if (e.jumpGX != 0.0f || e.jumpGZ != 0.0f) { e.jumpGX = 0.0f; e.jumpGZ = 0.0f; dirty = true; }"));
+            // review0901 #31：钉位段 resting 置位语句恰一处（批 C #19 编辑曾在既有行前叠插一行同文——
+            //   幂等无害但属残留；count 钉防同类手误再进，再叠/散改即红）。
+            okF = okF && entCppC.count(QStringLiteral("if (!e.resting) e.resting = true;")) == 1;
         }
 
         // ── (g) #17 非追击态不走寻影登记（纯注释钉：两 AI 早退点 + 头文件口径）──
@@ -29116,7 +29203,9 @@ Item {
             const int iToast = mainSrc.indexOf(QStringLiteral("存档写入失败，本次进度未保存"));
             const int iCover = mainSrc.indexOf(QStringLiteral("coverGrabPending = true"));
             const int iOnClose = mainSrc.indexOf(QStringLiteral("onClosing: (close) => {"));
-            const QString onCloseSlice = iOnClose >= 0 ? mainSrc.mid(iOnClose, 800) : QString();
+            // review0901 #30/#35/#36 起 onClosing 段扩长（归还链 + lastExitSaveOk 写入 + 重试登记注释），
+            //   截窗 800 → 1400 保 closeWorld 尾语句仍在切片内（钉意图不变：兜底路径走同链 + 关库）。
+            const QString onCloseSlice = iOnClose >= 0 ? mainSrc.mid(iOnClose, 1400) : QString();
             const int iBump1 = wsCpp.indexOf(QStringLiteral("noteSaveOk();"));
             const int iCommitGate = wsCpp.indexOf(QStringLiteral("if (!db.commit())"));
             okD = iRunExit >= 0
@@ -29131,12 +29220,326 @@ Item {
                   && iBump1 >= 0 && iCommitGate >= 0 && iCommitGate < iBump1
                   && wsCpp.count(QStringLiteral("noteSaveOk();")) == 3;
         }
+        // (e) review0901 #30 行为腿（真链「开铁砧放物品 → 走 onClosing 归还链 → 存档 → 重载物品在背包」）：
+        //     从 Main.qml 源码抽取 returnTransientItemsBeforeSave 函数体（brace 配平）**原样**嵌入 wrapper，
+        //     驱真 AnvilUI.qml × 真 C++ Hotbar（t962/t975 装配法：临时目录 + 私有 URI + window 作用域；
+        //     wrapper 只镜像 Main.qml 的面板开态 bool 与 closeXxx 归还臂——grab/焦点 chrome 略）。修前该
+        //     函数不存在 → 抽取失败本腿即红（现行 onClosing 关窗丢物复现）；修后链路真跑：铁砧 A 槽受损
+        //     铁镐 → 归还函数清槽入背包 VM → gatherPlayerState 同形快照落盘 → 重开重读物品在背包。
+        bool okE = false;
+        QString diagE;
+        {
+            const QString root974e = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+            QFile main974f(root974e + QStringLiteral("/src/ui/Main.qml"));
+            const QString main974s = main974f.open(QIODevice::ReadOnly)
+                                         ? QString::fromUtf8(main974f.readAll()) : QString();
+            const int iFn974 = main974s.indexOf(QStringLiteral("function returnTransientItemsBeforeSave()"));
+            QString fn974;
+            if (iFn974 >= 0) {
+                const int iOpen = main974s.indexOf(QLatin1Char('{'), iFn974);
+                int depth = 0;
+                for (int i = iOpen; i >= 0 && i < main974s.size(); ++i) {
+                    const QChar c = main974s.at(i);
+                    if (c == QLatin1Char('{')) ++depth;
+                    else if (c == QLatin1Char('}') && --depth == 0) {
+                        fn974 = main974s.mid(iFn974, i - iFn974 + 1);
+                        break;
+                    }
+                }
+            }
+            if (fn974.isEmpty()) {
+                diagE = QStringLiteral("returnTransientItemsBeforeSave not extractable (pre-fix shape)");
+            } else {
+                static bool sT974TypesRegistered = false;
+                if (!sT974TypesRegistered) {
+                    qmlRegisterType<Hotbar>("VoxelSandboxProbeT974", 1, 0, "Hotbar");
+                    qmlRegisterType<PlayerState>("VoxelSandboxProbeT974", 1, 0, "PlayerState");
+                    qmlRegisterType<PlayerController>("VoxelSandboxProbeT974", 1, 0, "PlayerController");
+                    qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT974", 1, 0, "ResourcePackManager");
+                    sT974TypesRegistered = true;
+                }
+                const QString uiDir974 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                             .filePath(QStringLiteral("../src/ui"));
+                const QString probeUiDir974 = QDir::temp().absoluteFilePath(
+                        QStringLiteral("t974_qml_%1").arg(QCoreApplication::applicationPid()));
+                QDir().mkpath(probeUiDir974);
+                for (const QString f : { QStringLiteral("AnvilUI.qml"), QStringLiteral("InventoryOps.js"),
+                                         QStringLiteral("InvSlot.qml"), QStringLiteral("ToolIcon.qml"),
+                                         QStringLiteral("MaterialIcon.qml") }) {
+                    QFile::remove(probeUiDir974 + QLatin1Char('/') + f);
+                    QFile(uiDir974 + QLatin1Char('/') + f).copy(probeUiDir974 + QLatin1Char('/') + f);
+                }
+                const QUrl jsUrl974 = QUrl::fromLocalFile(probeUiDir974 + QLatin1Char('/')
+                                                          + QStringLiteral("InventoryOps.js"));
+                const QStringList qmlFiles974 = QDir(probeUiDir974).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+                for (const QString &f : qmlFiles974) {
+                    QFile p(probeUiDir974 + QLatin1Char('/') + f);
+                    if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                        continue;
+                    QString t = QString::fromUtf8(p.readAll());
+                    p.close();
+                    t.replace(QStringLiteral("import \"InventoryOps.js\" as InventoryOps"),
+                              QStringLiteral("import \"") + jsUrl974.toString() + QStringLiteral("\" as InventoryOps"));
+                    t.replace(QStringLiteral("import VoxelSandbox\n"),
+                              QStringLiteral("import VoxelSandboxProbeT974\n"));
+                    if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                        p.write(t.toUtf8());
+                        p.close();
+                    }
+                }
+                QQmlEngine engine974;
+                Hotbar vm974;
+                PlayerState ps974;
+                QQmlComponent wrapComp974(&engine974);
+                // wrapper（id: window）：Main.qml 根最小复刻——面板开态四 bool + 三合成格 QtObject 桩
+                //   （本腿红面在铁砧槽，合成格桩 no-op 即可）+ closeXxx 归还臂镜像 + 原文归还函数。
+                wrapComp974.setData(QStringLiteral(
+                    "import QtQuick\n"
+                    "Item {\n"
+                    "    id: window\n"
+                    "    width: 800; height: 600\n"
+                    "    property bool shiftHeld: false\n"
+                    "    property string hoveredSlotKey: \"\"\n"
+                    "    property bool enchantingTableOpen: false\n"
+                    "    property bool anvilOpen: false\n"
+                    "    property bool dispenserOpen: false\n"
+                    "    property bool inventoryOpen: false\n"
+                    "    property var hotbarVM: null\n"
+                    "    property var anvilPanel: null\n"
+                    "    property var enchantingPanel: null\n"
+                    "    property var craftingTablePanel: QtObject { function returnCraftToHotbar() { } }\n"
+                    "    property var survivalPanel: QtObject { function returnCraftToHotbar() { } }\n"
+                    "    property var inventoryPanel: QtObject { function returnCraftToHotbar() { } }\n"
+                    "    function refocusKeyInput() { }\n"
+                    "    function closeEnchantingTable() {\n"
+                    "        if (!enchantingTableOpen) return\n"
+                    "        enchantingTableOpen = false\n"
+                    "        if (enchantingPanel) enchantingPanel.returnEnchantToHotbar()\n"
+                    "        returnHeldToHotbar()\n"
+                    "    }\n"
+                    "    function closeAnvil() {\n"
+                    "        if (!anvilOpen) return\n"
+                    "        anvilOpen = false\n"
+                    "        anvilPanel.returnAnvilToHotbar()\n"
+                    "        returnHeldToHotbar()\n"
+                    "    }\n"
+                    "    function closeDispenser() {\n"
+                    "        if (!dispenserOpen) return\n"
+                    "        dispenserOpen = false\n"
+                    "        returnHeldToHotbar()\n"
+                    "    }\n"
+                    "    function closeInventory() {\n"
+                    "        if (!inventoryOpen) return\n"
+                    "        inventoryOpen = false\n"
+                    "        returnHeldToHotbar()\n"
+                    "    }\n"
+                    "    function returnHeldToHotbar() {\n"
+                    "        if (!hotbarVM.heldBlock || hotbarVM.heldCount <= 0) return\n"
+                    "        const leftover = hotbarVM.addToAny(hotbarVM.heldBlock, hotbarVM.heldCount,\n"
+                    "                                           hotbarVM.heldDurability, hotbarVM.heldEnchants(),\n"
+                    "                                           hotbarVM.heldCustomName)\n"
+                    "        if (leftover > 0) hotbarVM.heldCount = leftover\n"
+                    "        else hotbarVM.heldBlock = 0\n"
+                    "    }\n"
+                    "    %1\n"
+                    "}\n").arg(fn974).toUtf8(), QUrl());
+                QQuickItem host974;
+                QQuickItem *wrap974 = nullptr;
+                QObject *anvil974 = nullptr;
+                if (wrapComp974.isError()) {
+                    diagE = QStringLiteral("wrapper: ") + wrapComp974.errorString();
+                } else {
+                    wrap974 = qobject_cast<QQuickItem *>(wrapComp974.create());
+                    if (!wrap974) {
+                        diagE = QStringLiteral("wrapper create failed");
+                    } else {
+                        wrap974->setParent(&engine974);
+                        wrap974->setParentItem(&host974);
+                    }
+                }
+                if (wrap974) {
+                    QFile anvilSrc974(probeUiDir974 + QLatin1Char('/') + QStringLiteral("AnvilUI.qml"));
+                    if (!anvilSrc974.open(QIODevice::ReadOnly)) {
+                        diagE = QStringLiteral("AnvilUI read failed");
+                    } else {
+                        QQmlComponent anvilComp974(&engine974);
+                        anvilComp974.setData(anvilSrc974.readAll(),
+                                             QUrl::fromLocalFile(anvilSrc974.fileName()));
+                        if (anvilComp974.isError()) {
+                            diagE = QStringLiteral("AnvilUI load: ") + anvilComp974.errorString();
+                        } else {
+                            anvil974 = anvilComp974.create(qmlContext(wrap974));
+                            QQuickItem *ai = qobject_cast<QQuickItem *>(anvil974);
+                            if (!ai) {
+                                diagE = QStringLiteral("AnvilUI create: ") + anvilComp974.errorString();
+                            } else {
+                                anvil974->setProperty("hotbar", QVariant::fromValue(&vm974));
+                                anvil974->setProperty("playerState", QVariant::fromValue(&ps974));
+                                anvil974->setProperty("player", QVariant());
+                                anvil974->setProperty("progress", QVariant());
+                                anvil974->setProperty("theWorld", QVariant());
+                                ai->setWidth(800);
+                                ai->setHeight(600);
+                                anvil974->setParent(wrap974);
+                                ai->setParentItem(wrap974);
+                            }
+                        }
+                    }
+                }
+                if (anvil974 && wrap974) {
+                    QCoreApplication::processEvents();
+                    const int pick974 = int(ToolRegistry::PickaxeIron);
+                    const QVariantList ench0974{0, 0, 0, 0};
+                    wrap974->setProperty("hotbarVM", QVariant::fromValue(&vm974));
+                    wrap974->setProperty("anvilPanel", QVariant::fromValue(anvil974));
+                    // 开铁砧放物品（真 writeSlot 路径：A 槽 = 受损铁镐一件，dur=87）。
+                    const bool putOk = QMetaObject::invokeMethod(anvil974, "writeSlot",
+                        Q_ARG(QVariant, QVariant(QStringLiteral("anvil"))), Q_ARG(QVariant, QVariant(0)),
+                        Q_ARG(QVariant, QVariant(pick974)), Q_ARG(QVariant, QVariant(1)),
+                        Q_ARG(QVariant, QVariant(87)), Q_ARG(QVariant, QVariant(ench0974)),
+                        Q_ARG(QVariant, QVariant(QString())));
+                    wrap974->setProperty("anvilOpen", QVariant(true));
+                    QVariant preSlot974;
+                    QMetaObject::invokeMethod(anvil974, "readSlot", Q_RETURN_ARG(QVariant, preSlot974),
+                                              Q_ARG(QVariant, QVariant(QStringLiteral("anvil"))),
+                                              Q_ARG(QVariant, QVariant(0)));
+                    const bool preHas = putOk && preSlot974.toMap().value(QStringLiteral("id")).toInt() == pick974
+                                        && preSlot974.toMap().value(QStringLiteral("count")).toInt() == 1;
+                    // 走 onClosing 链的归还半边（Main.qml 原文函数）。
+                    const bool ranChain = QMetaObject::invokeMethod(wrap974, QStringLiteral("returnTransientItemsBeforeSave")
+                                                                        .toLatin1().constData());
+                    QVariant postSlot974;
+                    QMetaObject::invokeMethod(anvil974, "readSlot", Q_RETURN_ARG(QVariant, postSlot974),
+                                              Q_ARG(QVariant, QVariant(QStringLiteral("anvil"))),
+                                              Q_ARG(QVariant, QVariant(0)));
+                    const bool postEmpty = postSlot974.toMap().value(QStringLiteral("id")).toInt() == 0;
+                    bool inVm = false;
+                    int vmDur = -1;
+                    for (int i = 0; i < vm974.slotCount() && !inVm; ++i)
+                        if (vm974.blockIdAt(i) == pick974) { inVm = true; vmDur = vm974.durabilityAt(i); }
+                    for (int i = 0; i < vm974.mainCount() && !inVm; ++i)
+                        if (vm974.mainBlockIdAt(i) == pick974) { inVm = true; vmDur = vm974.mainDurabilityAt(i); }
+                    // gatherPlayerState 同形快照 → 落盘 → 重开重读 → 物品在背包/hotbar（存档不丢闭环）。
+                    const auto mk974 = [](int id, int count, int dur) {
+                        QVariantMap s;
+                        s.insert(QStringLiteral("id"), id);
+                        s.insert(QStringLiteral("count"), count);
+                        s.insert(QStringLiteral("durability"), dur);
+                        s.insert(QStringLiteral("enchants"), QVariantList{0, 0, 0, 0});
+                        s.insert(QStringLiteral("name"), QString());
+                        return s;
+                    };
+                    QVariantList hb974e, mn974e, ar974e;
+                    for (int i = 0; i < 9; ++i)
+                        hb974e.append(mk974(vm974.blockIdAt(i), vm974.countAt(i), vm974.durabilityAt(i)));
+                    for (int i = 0; i < 27; ++i)
+                        mn974e.append(mk974(vm974.mainBlockIdAt(i), vm974.mainCountAt(i), vm974.mainDurabilityAt(i)));
+                    for (int k = 0; k < 4; ++k)
+                        ar974e.append(mk974(vm974.armorBlockIdAt(k), vm974.armorCountAt(k), vm974.armorDurabilityAt(k)));
+                    QVariantMap pd974e;
+                    pd974e.insert(QStringLiteral("version"), 3);
+                    pd974e.insert(QStringLiteral("hotbar"), hb974e);
+                    pd974e.insert(QStringLiteral("main"), mn974e);
+                    pd974e.insert(QStringLiteral("armor"), ar974e);
+                    const QString db974e = QDir::temp().absoluteFilePath(
+                            QStringLiteral("voxel_t974e_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+                    QFile::remove(db974e);
+                    World w974e;
+                    w974e.setWidth(48);
+                    w974e.setDepth(48);
+                    w974e.setHeight(96);
+                    w974e.setSeed(97);
+                    WorldStore store974e;
+                    store974e.setWorld(&w974e);
+                    bool persisted = store974e.openWorld(db974e) && store974e.savePlayerData(pd974e);
+                    store974e.closeWorld();
+                    persisted = persisted && store974e.openWorld(db974e);
+                    const QVariantMap pdBack974e = store974e.loadPlayerData();
+                    store974e.closeWorld();
+                    QFile::remove(db974e);
+                    bool backInBag = false;
+                    const auto scanBag974e = [&pdBack974e, &pick974, &backInBag](const QString &key) {
+                        const QVariantList arr = pdBack974e.value(key).toList();
+                        for (const QVariant &v : arr) {
+                            if (v.toMap().value(QStringLiteral("id")).toInt() == pick974) { backInBag = true; return; }
+                        }
+                    };
+                    scanBag974e(QStringLiteral("hotbar"));
+                    if (!backInBag) scanBag974e(QStringLiteral("main"));
+                    okE = preHas && ranChain && postEmpty && inVm && vmDur == 87
+                          && persisted && backInBag;
+                    if (!okE)
+                        diagE = QStringLiteral("put") + QString::number(int(preHas))
+                                + QStringLiteral(" chain") + QString::number(int(ranChain))
+                                + QStringLiteral(" emptied") + QString::number(int(postEmpty))
+                                + QStringLiteral(" inVm") + QString::number(int(inVm))
+                                + QStringLiteral(" dur") + QString::number(vmDur)
+                                + QStringLiteral(" persist") + QString::number(int(persisted))
+                                + QStringLiteral(" reload") + QString::number(int(backInBag));
+                } else if (diagE.isEmpty()) {
+                    diagE = QStringLiteral("rig incomplete");
+                }
+            }
+        }
+        // (f) review0901 #30/#35/#36 源码钉：归还序函数定义 + 两路径调用点先于存档 + lastExitSaveOk
+        //     两路径写入 + 世界列表角标消费面 + 重试无退避登记注释。
+        bool okF974 = false;
+        {
+            const QString root974f = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+            auto readSrc974f = [&root974f](const QString &rel) -> QString {
+                QFile f(root974f + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString main974m = readSrc974f(QStringLiteral("src/ui/Main.qml"));
+            const QString wl974s = readSrc974f(QStringLiteral("src/ui/WorldList.qml"));
+            const int iFnDef974 = main974m.indexOf(QStringLiteral("function returnTransientItemsBeforeSave()"));
+            const int iRunExitDef = iFnDef974 >= 0
+                                        ? main974m.indexOf(QStringLiteral("function runExitSave()"), iFnDef974) : -1;
+            const QString fnSlice974 = (iFnDef974 >= 0 && iRunExitDef > iFnDef974)
+                                           ? main974m.mid(iFnDef974, iRunExitDef - iFnDef974) : QString();
+            const int nRefs974 = main974m.count(QStringLiteral("returnTransientItemsBeforeSave()"));   // 定义 + 两路径调用 = 3
+            const int iGate974f = main974m.indexOf(QStringLiteral("let exitSaveOk = runExitSave()"));
+            const int iCallSave974 = iFnDef974 >= 0
+                                         ? main974m.indexOf(QStringLiteral("returnTransientItemsBeforeSave()"), iFnDef974 + 1) : -1;
+            const int iOnClose974f = main974m.indexOf(QStringLiteral("onClosing: (close) => {"));
+            const QString closeSlice974 = iOnClose974f >= 0 ? main974m.mid(iOnClose974f, 1400) : QString();
+            const int iCallClose974 = closeSlice974.indexOf(QStringLiteral("returnTransientItemsBeforeSave()"));
+            const int iSaveClose974 = closeSlice974.indexOf(QStringLiteral("runExitSave()"));
+            const int iBadgeBind974 = main974m.indexOf(QStringLiteral(
+                    "unsavedExitFile: window.lastExitSaveOk === false ? window.currentWorldFile : \"\""));
+            okF974 = iFnDef974 >= 0 && nRefs974 == 3
+                     && iCallSave974 >= 0 && iGate974f >= 0 && iCallSave974 < iGate974f
+                     && iCallClose974 >= 0 && iSaveClose974 >= 0 && iCallClose974 < iSaveClose974
+                     // 函数体归还臂钉（三面板 / 三合成格 / 关背包 / 手持兜底——抽公共函数漏臂即红）。
+                     && fnSlice974.contains(QStringLiteral("if (enchantingTableOpen) closeEnchantingTable()"))
+                     && fnSlice974.contains(QStringLiteral("if (anvilOpen) closeAnvil()"))
+                     && fnSlice974.contains(QStringLiteral("if (dispenserOpen) closeDispenser()"))
+                     && fnSlice974.count(QStringLiteral("returnCraftToHotbar()")) == 3
+                     && fnSlice974.contains(QStringLiteral("if (inventoryOpen) closeInventory()"))
+                     && fnSlice974.contains(QStringLiteral("returnHeldToHotbar()"))
+                     // #35：两路径写 lastExitSaveOk + 世界列表角标消费面。
+                     && main974m.contains(QStringLiteral("window.lastExitSaveOk = exitSaveOk"))
+                     && closeSlice974.contains(QStringLiteral("window.lastExitSaveOk = okClose"))
+                     && iBadgeBind974 >= 0
+                     && wl974s.contains(QStringLiteral("property string unsavedExitFile"))
+                     && wl974s.contains(QStringLiteral("root.unsavedExitFile === model.file"))
+                     && wl974s.contains(QStringLiteral("上次退出未保存"))
+                     // #36：重试无退避登记注释（按钮路径全登记 + 关窗路径指针 = 恰两处）。
+                     && main974m.count(QStringLiteral("review0901 #36")) == 2
+                     && main974m.contains(QStringLiteral("退避 ≤300ms"));
+            if (!okF974)
+                qInfo().noquote() << "  [t974 diag] f fnDef" << iFnDef974 << "refs" << nRefs974
+                                  << "callSave" << iCallSave974 << "gate" << iGate974f
+                                  << "callClose" << iCallClose974 << "saveClose" << iSaveClose974
+                                  << "badge" << iBadgeBind974;
+        }
         storeT974.closeWorld();
         QFile::remove(dbT974);
-        const bool okP974 = okA && okB && okC && okD;
+        const bool okP974 = okA && okB && okC && okD && okE && okF974;
         if (!okP974) ++totalFail;
         if (!okP974)
-            qInfo().noquote() << "  [t974 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD;
+            qInfo().noquote() << "  [t974 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "e" << okE << "f" << okF974 << diagE;
         qInfo().noquote() << (okP974 ? "PASS" : "FAIL")
                           << "| t974 save-exit silent-loss race: the exit-save chain (player state +"
                              " chunks transaction + progress) is synchronous SQLite - the probabilistic"
@@ -29155,7 +29558,21 @@ Item {
                              " runExitSave gate (check -> retry -> toast) precedes coverGrabPending in"
                              " saveAndExitToWorldList, onClosing routes the window-close path through"
                              " the same chain and closes the store, and the WorldStore counter contract"
-                             " (Q_PROPERTY + exactly 3 bump sites, saveAll's after the commit gate)";
+                             " (Q_PROPERTY + exactly 3 bump sites, saveAll's after the commit gate)."
+                             " review0901 additions: (e) behavioral leg on the real return-chain -"
+                             " the returnTransientItemsBeforeSave function source is extracted from"
+                             " Main.qml verbatim and driven against a real AnvilUI.qml x real C++"
+                             " Hotbar rig (damaged iron pickaxe into slot A -> chain runs -> slot"
+                             " emptied -> item in the VM bag with durability intact ->"
+                             " gatherPlayerState-shaped snapshot saved -> world reopened -> item back"
+                             " in the bag; pre-fix the function does not exist and the leg is red);"
+                             " (f) source pins: the shared function is defined with all return arms"
+                             " (three panels / three craft grids / close-inventory / held fallback)"
+                             " and is called before the save in BOTH exit paths (exactly 3 literal"
+                             " occurrences = definition + two call sites), lastExitSaveOk is written"
+                             " by both paths and consumed by the world-list '上次退出未保存' badge"
+                             " (unsavedExitFile binding), and the retry-without-backoff trade-off"
+                             " registration (<=300ms cap direction) is in place";
     }
 
     // ── P-t975 创造拿取语义再反转（用户 8-28 定稿：调色板**左键 = 拿一组 / 右键 = 只拿一个**，
@@ -29914,6 +30331,80 @@ Item {
             }
         }
 
+        // (d) review0901 #32 耐久口径统一腿（hotbar 槽内受损护甲件，槽 8 = 胸甲 dur 120 已由 (a) 预置）：
+        //     maxDurabilityFor 双段判定单一权威与浮显（slotDetailText 耐久行）/ 条（DurabilityBar max 侧）
+        //     两面同数——修前权威不存在（invoke 失败本腿即红）且条位消费 toolMaxDurability 单段（护甲件
+        //     =0 → 条恒隐，「浮显有数条无」劈叉；对照臂在真 DurabilityBar.qml 上复现两种形态）。
+        bool okDur977 = false;
+        QString diagDur977;
+        {
+            int maxAuth977 = -1;
+            const bool invokable977 = QMetaObject::invokeMethod(&vm977, "maxDurabilityFor",
+                                                                Q_RETURN_ARG(int, maxAuth977),
+                                                                Q_ARG(int, chest977));
+            const int maxSeg977 = vm977.toolMaxDurability(chest977);   // 单段判定值（护甲件 = 0 = 修前条位所见）
+            const QString detail977 = vm977.slotDetailText(8);
+            const int iSlash977 = detail977.indexOf(QLatin1Char('/'));
+            const int flashMax977 = iSlash977 >= 0 ? detail977.mid(iSlash977 + 1).trimmed().toInt() : -1;
+            const bool flashMatches977 = invokable977
+                                          && maxAuth977 == ArmorRegistry::maxDurability(chest977)
+                                          && maxSeg977 == 0
+                                          && flashMax977 == maxAuth977;   // 浮显数 == 权威数
+            // 工具照旧 / 非耐久物照旧（权威对既有段零行为漂移）。
+            int maxPick977 = -1, maxDirt977 = -1;
+            QMetaObject::invokeMethod(&vm977, "maxDurabilityFor", Q_RETURN_ARG(int, maxPick977), Q_ARG(int, pick977));
+            QMetaObject::invokeMethod(&vm977, "maxDurabilityFor", Q_RETURN_ARG(int, maxDirt977), Q_ARG(int, int(BR::Dirt)));
+            const bool othersOk977 = maxPick977 == pickMax977 && maxDirt977 == 0;
+            // 条侧行为腿：五条位的 delegate 显隐决策（t976 上收形态——决策面在面板 delegate 而非组件内，
+            //   组件内 visible 仅语义兜底、实机不可依赖）以权威 max 为输入 → 受损护甲显条；单段形态
+            //   （=0）→ 隐条（劈叉两态复现）。真 DurabilityBar 实例同吃权威值（wiring 校验经回读）。
+            QQmlEngine durEngine977;
+            QQmlComponent wrapBar977(&durEngine977);
+            // setData + 源树 base URL（t874 同式）：DurabilityBar 以同目录隐式组件解析（真源树组件）。
+            wrapBar977.setData(QStringLiteral(
+                "import QtQuick\n"
+                "Item {\n"
+                "    property int cDur: 0\n"
+                "    property int mDur: 0\n"
+                "    property bool barVisible: mDur > 0 && cDur > 0 && cDur < mDur\n"
+                "    DurabilityBar { id: embedded; width: 30; height: 3; curDur: cDur; maxDur: mDur }\n"
+                "    property int embeddedCur: embedded.curDur\n"
+                "    property int embeddedMax: embedded.maxDur\n"
+                "}\n").toUtf8(), QUrl::fromLocalFile(uiDir977 + QStringLiteral("/_t977_wrap.qml")));
+            QObject *wrapBar = wrapBar977.isError() ? nullptr : wrapBar977.create();
+            bool barShows977 = false, barHidesSingleSeg977 = false;
+            int embMax977 = -1, embCur977 = -1;
+            if (!wrapBar) {
+                diagDur977 = QStringLiteral("wrapBar: ")
+                             + (wrapBar977.isError() ? wrapBar977.errorString() : QStringLiteral("create null"));
+            } else {
+                wrapBar->setParent(&durEngine977);
+                wrapBar->setProperty("mDur", maxAuth977);   // 权威 max（修后条位消费面同值）
+                wrapBar->setProperty("cDur", 120);
+                QCoreApplication::processEvents();
+                barShows977 = wrapBar->property("barVisible").toBool();
+                embMax977 = wrapBar->property("embeddedMax").toInt();
+                embCur977 = wrapBar->property("embeddedCur").toInt();
+                wrapBar->setProperty("mDur", maxSeg977);    // 单段判定形态（0 → 修前条位恒隐）
+                QCoreApplication::processEvents();
+                barHidesSingleSeg977 = !wrapBar->property("barVisible").toBool();
+            }
+            okDur977 = flashMatches977 && othersOk977 && barShows977 && barHidesSingleSeg977
+                       && embMax977 == maxAuth977 && embCur977 == 120;
+            if (!okDur977)
+                diagDur977 = QStringLiteral("invk") + QString::number(int(invokable977))
+                             + QStringLiteral(" auth") + QString::number(maxAuth977)
+                             + QStringLiteral(" seg") + QString::number(maxSeg977)
+                             + QStringLiteral(" flash") + QString::number(flashMax977)
+                             + QStringLiteral(" pick") + QString::number(maxPick977)
+                             + QStringLiteral(" dirt") + QString::number(maxDirt977)
+                             + QStringLiteral(" barShow") + QString::number(int(barShows977))
+                             + QStringLiteral(" barHide1seg") + QString::number(int(barHidesSingleSeg977))
+                             + QStringLiteral(" emb") + QString::number(embMax977)
+                             + QStringLiteral("/") + QString::number(embCur977)
+                             + QStringLiteral(" | ") + diagDur977;
+        }
+
         // (c) 源码钉（挂载点 / 白字 / 时长常量 / AOT 契约面 / 守卫与基线重同步）。
         const QString root977 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         QFile main977f(root977 + QStringLiteral("/src/ui/Main.qml"));
@@ -29941,10 +30432,38 @@ Item {
                                                   "        holdTimer.restart()")) == 1
                 && flash977s.count(QStringLiteral("t977")) >= 2;
 
-        const bool ok977 = okAsm && okQml && okPin;
+        // review0901 #32 单一权威钉：C++ 权威（hotbar.h 声明 + slotDetailText 本身改走权威）+ 五处
+        //   条位全改调 maxDurabilityFor（HUD hotbar 1 + Inventory 2 + SurvivalInventory 2；每文件
+        //   条位行残留 toolMaxDurability 单段判定即红——hover tooltip 的 toolMaxDurability 消费面
+        //   不在 #32 范围，按精确参数形钉不误伤）。
+        const auto readSrc977b = [&root977](const QString &rel) -> QString {
+            QFile f(root977 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString hbHdr977 = readSrc977b(QStringLiteral("src/Game/hotbar.h"));
+        const QString hbCpp977 = readSrc977b(QStringLiteral("src/Game/hotbar.cpp"));
+        const QString inv977s = readSrc977b(QStringLiteral("src/ui/Inventory.qml"));
+        const QString sur977s = readSrc977b(QStringLiteral("src/ui/SurvivalInventory.qml"));
+        const bool durAuthPin =
+                hbHdr977.contains(QStringLiteral("Q_INVOKABLE int maxDurabilityFor(int itemId) const"))
+                && hbCpp977.contains(QStringLiteral("const int maxDur = maxDurabilityFor(id);"))
+                && hbCpp977.count(QStringLiteral("maxDurabilityFor(")) == 2   // 权威定义 + slotDetailText 调用
+                && main977s.count(QStringLiteral("hotbarVM.maxDurabilityFor(hotbarVM.blockIdAt(index))")) == 1
+                && !main977s.contains(QStringLiteral("hotbarVM.toolMaxDurability(hotbarVM.blockIdAt(index))"))
+                && inv977s.count(QStringLiteral("root.hotbar.maxDurabilityFor(mainId)")) == 1
+                && inv977s.count(QStringLiteral("root.hotbar.maxDurabilityFor(slotId)")) == 1
+                && !inv977s.contains(QStringLiteral("toolMaxDurability(mainId)"))
+                && !inv977s.contains(QStringLiteral("toolMaxDurability(slotId)"))
+                && sur977s.count(QStringLiteral("root.hotbar.maxDurabilityFor(mainId)")) == 1
+                && sur977s.count(QStringLiteral("root.hotbar.maxDurabilityFor(slotId)")) == 1
+                && !sur977s.contains(QStringLiteral("toolMaxDurability(mainId)"))
+                && !sur977s.contains(QStringLiteral("toolMaxDurability(slotId)"));
+
+        const bool ok977 = okAsm && okQml && okPin && okDur977 && durAuthPin;
         if (!ok977) ++totalFail;
         if (!ok977)
-            qInfo().noquote() << "  [t977 diag] asm" << okAsm << "qml" << okQml << "pin" << okPin << diag977;
+            qInfo().noquote() << "  [t977 diag] asm" << okAsm << "qml" << okQml << "pin" << okPin
+                              << "dur" << okDur977 << diagDur977 << "durPin" << durAuthPin << diag977;
         qInfo().noquote() << (ok977 ? "PASS" : "FAIL")
                           << "| t977 hotbar switch item-name flash (user fifth round: switching slots"
                           << " shows the current item name centered above the hearts/hunger row in"
@@ -29962,7 +30481,17 @@ Item {
                           << " equals the C++ authority / empty hides / switch-storm restart keeps the"
                           << " last slot opaque past the first slot's deadline then fades to 0), and"
                           << " source pins (mount above vitalsBar + active gate + hotbar injection,"
-                          << " white color, holdMs 2000 / fadeMs 300 defaults, handler + guard forms)";
+                          << " white color, holdMs 2000 / fadeMs 300 defaults, handler + guard forms)."
+                          << " review0901 additions: the durability caliber is unified -"
+                          << " maxDurabilityFor is the single dual-segment authority (tool segment"
+                          << " then ArmorRegistry fallback) consumed by slotDetailText AND all five"
+                          << " durability-bar sites (HUD hotbar + Inventory x2 + SurvivalInventory"
+                          << " x2); behavioral leg proves the flash text's durability max equals the"
+                          << " authority for a damaged armor piece in a hotbar slot while the"
+                          << " single-segment form (toolMaxDurability==0) renders no bar on the real"
+                          << " DurabilityBar.qml (pre-fix split reproduced), tools and non-durable"
+                          << " items unchanged; source pins lock the authority declaration, the"
+                          << " slotDetailText delegation, and all five call sites";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
