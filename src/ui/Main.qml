@@ -6810,7 +6810,12 @@ Window {
                     //   泄漏：reparent 后的 3D delegate count 减小不销毁，lessons-learned t170）。空槽 aliveAt=false
                     //   → 本 Node visible=false 隐藏整棵子树；slot 被复用时 aliveAt=true + 本槽监视器 bump → 重显
                     //   并重绑新实体数据。索引稳定（release 不 shift）→ delegate[index] 恒对齐 slot[index]。
-                    visible: { const _r = mon.revision; return _r >= 0 ? (entityManager.aliveAt(index)) : false }
+                    //   t978 可见性自愈网：visible 额外触碰 entityManager.count（NOTIFY=entitiesChanged，每次
+                    //   notify 都触发本绑定重算一次 aliveAt）——mon.revision 仍是主依赖（本槽可见态变化才重算其余
+                    //   ~49 条绑定，t935 收口不动），count 触碰只兜「监视器/依赖因任何机制失灵」的冻结面：死槽
+                    //   delegate 最迟下一拍 notify 必重读 aliveAt=false 归位（静止复制体 = 0）。成本 = 每 emit 每槽
+                    //   1 次 bool Q_INVOKABLE 重求值（64 槽 × 20Hz 量级，对照 t935 消掉的 50 绑定/槽可忽略）。
+                    visible: { const _r = mon.revision; const _c = entityManager.count; return _r >= 0 ? (entityManager.aliveAt(index)) : false }
                     // 触碰 revision 建立依赖（push 位移 / 重力下落 / t239 AI 行走 / 受击红闪 / 死亡移除
                     //   bump revision → 位置 / 配色 / kind / yaw 重算）。t117 FallingBlock 着地 releaseSlot 后
                     //   revision 自增 → delegate 对齐新 entity 数据（同 itemEntities delegate 模式）。
