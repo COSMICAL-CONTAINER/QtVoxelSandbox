@@ -492,7 +492,16 @@ public:
     //   （无孤儿）→ 下次进世界复用既有 delegate（aliveAt 翻回 true + revision bump 重绑新世界数据）。高水位受 kCap
     //   钳制（≤64 槽），属有界常驻开销，远优于跨世界无界泄漏。仅释放活体槽（已释放的跳过 → 幂等、保 liveCount /
     //   free list 一致）。emit entitiesChanged → QML 据 revision 把释放槽 delegate 翻 visible=false 隐藏（不销毁）。
+    //   t978 死槽纠正 bump：对「已死但有监视器（= 有 delegate 在看）」的槽强制 bump 一次。死槽指纹早在释放
+    //   notify 时已对齐死态 → 常规 notify 永不再 bump（t935 差分语义）→ 若其 delegate 可见态因任何机制冻结
+    //   （用户报的「静止复制生物」，t978），常规路径无自愈面；跨世界清场是唯一必经的整池刷新点，此处让冻结
+    //   delegate 重读 aliveAt 归位。**无监视器的死槽跳过**（无观众零成本，保 t935 死槽零 bump 经济学；
+    //   P-t935(b) 无预死槽 → 其精确 bump 计数不受扰；P-t978(b) 钉 corrective 恰 +1）。仅此入口纠正，不放
+    //   refreshSlotMonitors 常规路径（否则每 emit 白 bump，收口破产）。
     Q_INVOKABLE void clearAll() {
+        for (size_t i = 0; i < m_slotMonitors.size(); ++i) // t978 死槽纠正 bump（无监视器跳过，见上注释；须在释放循环**前**跑——此刻 !alive 恰 = 预死槽，放释放后会对刚释放槽纠正+差分双 bump，破 t935 精确计数）
+            if (m_slotMonitors[i] && !m_entities[i].alive)
+                m_slotMonitors[i]->bump(); // t978 corrective 恰 +1（冻结 delegate 自愈面）
         for (size_t i = 0; i < m_entities.size(); ++i)
             if (m_entities[i].alive) releaseSlot(int(i));
         notifyEntitiesChanged(); // t935 统一漏斗（含槽位指纹差分 → 释放槽 bump 隐藏；裸 emit 不刷指纹）
@@ -1713,6 +1722,11 @@ private:
         return slot;
     }
     // 释放槽位：alive=false + 入 free list + --m_liveCount。不 erase → count 不降 → Repeater delegate 稳定。
+    //   t978 幂等守卫：已释放槽（alive=false）直接早退 —— 重复释放会把同一索引入 free list 两次，之后两次
+    //   spawn 经 LIFO 弹出同一槽 std::move 覆盖（前者被无声吞掉 + liveCount 双计/负漂移，槽池簿记永久失真，
+    //   QML delegate 呈现随覆盖瞬间换任）。全部释放路径（tick toRemove / tickHostileLife / removeEntityAt /
+    //   detonatePrimedTnt / clearAll）调用前各自行 alive 检查，本守卫是兜底不变量：**free list 恒无重复索引
+    //   = 任何两次 spawn 必得两个不同活槽**（P-t978(a) 钉）。
     //   t488 perf：释放时把 kind 清回中性值（Item=非 Mob / 非 FallingBlock）→ 空槽的 QML delegate 内所有
     //   mobType Loader / FallingBlock Model 的 active/visible 条件（entKind===Mob/FallingBlock）立即翻 false →
     //   Loader 卸载重子树（MobModel + 多子 Model + 贴图），空槽 delegate 坍缩为裸隐藏 Node。高水位 slot-reuse
@@ -1724,6 +1738,7 @@ private:
     {
         if (idx < 0 || idx >= int(m_entities.size())) return;
         Entity &e = m_entities[size_t(idx)];
+        if (!e.alive) return; // t978 幂等守卫：已释放槽早退（free list 恒无重复索引，见上注释）
         e.alive = false;
         e.kind = Item; // t488：空槽视觉中性化（QML Loader 据此卸载重子树；见方法注释）
         m_freeSlots.push_back(idx);

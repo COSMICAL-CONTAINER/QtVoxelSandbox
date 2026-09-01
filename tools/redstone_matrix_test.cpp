@@ -20821,6 +20821,112 @@ Item {
                           ;
     }
 
+    // ── P-t978 生物复制体泄漏探针（R19.18 批六首项；用户 9-01 实测「新建世界生成瞬间双影 + 地上全是静止
+    //   复制生物」，F3 mobs 1/36 = C++ 1 活体 vs 36 槽高水位，复制体呈 QML delegate/槽池簿记形态）──
+    //   静态复制体的冻结机制在 C++ 既有路径层证伪为「无自发路径」（P-t935 已钉槽级 bump 语义；六处
+    //   releaseSlot 调用点审计各带 alive 守卫；指纹契约对全部 At() 访问器逐项核账无缺字段），但槽池簿记缺
+    //   **结构不变量**防线、QML delegate 可见性缺**自愈网**——本探针钉 t978 三层修复（真 EntityManager +
+    //   真监视器，非平行复写）：
+    //   (a) releaseSlot 幂等守卫：同一槽双释放不得把重复索引二次入 free list（pre-fix：两次 spawn 经 LIFO
+    //       弹出同一槽，第二次 std::move 无声覆盖前者 → 两 spawn 同槽号 + liveCount 失真 = 槽池簿记损坏面）；
+    //   (b) clearAll 死槽纠正 bump：预死槽（有监视器 = 有 delegate 在看）在跨世界清场时恰 +1 自愈（死槽
+    //       指纹早在释放 notify 已对齐死态 → 常规 notify 永不再 bump → 冻结 delegate 无常规自愈面；
+    //       pre-fix 恒 r1 不动 = 冻结复现）；复用槽 LIFO 与未复用死槽零额外 bump = t935 经济学不回退；
+    //   (c) 源码钉：releaseSlot 守卫行 + clearAll corrective + Main.qml visible 的 entityManager.count
+    //       自愈触碰在场，且 entityManager.revision 残留恒 0、mon.revision 迁移面 ≥100 不减（P-t935(d) 同钉）。
+    {
+        // (a) 双释放 → 两次 spawn 必得两个不同活槽。
+        EntityManager enta;
+        const int pa = enta.spawnMobTyped(10, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        QObject *mona = enta.slotMonitorAt(pa); // delegate 建立（监视器在案）
+        enta.removeEntityAt(pa);
+        enta.removeEntityAt(pa); // 双释放（防御口径：任何 caller 重复释放都不得污染 free list）
+        const int pb = enta.spawnMobTyped(12, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const int pc = enta.spawnMobTyped(14, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const bool okA = pa == 0 && mona != nullptr && pb == 0 && pc == 1
+                        && enta.aliveAt(pb) && enta.aliveAt(pc) && !enta.aliveAt(2)
+                        && enta.liveCount() == 2 && enta.count() == 2;
+        // (b) clearAll 死槽纠正 bump：0/1/2 三槽全建监视器 → 预杀槽 1 → clearAll 全槽翻死。
+        EntityManager entb;
+        auto monRevB = [&entb](int i) -> int {
+            QObject *m = entb.slotMonitorAt(i);
+            return m ? m->property("revision").toInt() : -1;
+        };
+        entb.spawnMobTyped(10, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30); // 槽 0
+        entb.spawnMobTyped(12, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30); // 槽 1
+        entb.spawnMobTyped(14, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30); // 槽 2
+        entb.slotMonitorAt(0); entb.slotMonitorAt(1); entb.slotMonitorAt(2);
+        entb.removeEntityAt(1); // 预死槽 1（释放 bump 后指纹对齐死态 → 常规 notify 永不再 bump = 冻结面原型）
+        const int r0 = monRevB(0), r1 = monRevB(1), r2 = monRevB(2);
+        entb.clearAll();
+        const bool okB = monRevB(0) == r0 + 1 && monRevB(2) == r2 + 1 // 活槽释放 bump（t935 语义不变）
+                       && monRevB(1) == r1 + 1                        // t978 corrective 恰 +1（pre-fix 恒 r1 = 冻结）
+                       && !entb.aliveAt(0) && !entb.aliveAt(1) && !entb.aliveAt(2);
+        const int pr = entb.spawnMobTyped(16, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+        const bool okB2 = pr == 2                       // LIFO 复用槽 2（P-t935(b) 同语义）
+                        && monRevB(2) == r2 + 2         // 复用恰再 +1
+                        && monRevB(1) == r1 + 1         // 未复用死槽零额外 bump（死槽经济学不回退）
+                        && entb.aliveAt(2) && !entb.aliveAt(1);
+        // (c) 源码钉：三层修复在场 + t935 迁移面不回退。
+        const QString exeDir978 = QCoreApplication::applicationDirPath();
+        const QString root978 = QDir(exeDir978 + QStringLiteral("/..")).absolutePath();
+        auto readSrc978 = [&root978](const QString &rel) -> QString {
+            QFile f(root978 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString emh978 = readSrc978(QStringLiteral("src/Entities/entitymanager.h"));
+        const QString qml978 = readSrc978(QStringLiteral("src/ui/Main.qml"));
+        const bool okC = emh978.contains(QStringLiteral("if (!e.alive) return; // t978"))
+                       && emh978.contains(QStringLiteral("m_slotMonitors[i]->bump(); // t978 corrective"))
+                       && qml978.contains(QStringLiteral("const _c = entityManager.count"))
+                       && !qml978.contains(QStringLiteral("entityManager.revision"));
+        int monCount978 = 0;
+        for (int pos978 = qml978.indexOf(QStringLiteral("mon.revision"));
+             pos978 >= 0; pos978 = qml978.indexOf(QStringLiteral("mon.revision"), pos978 + 1))
+            ++monCount978;
+        const bool okC2 = monCount978 >= 100;
+        const bool okT978 = okA && okB && okB2 && okC && okC2;
+        if (!okT978) ++totalFail;
+        if (!okT978)
+            qInfo().noquote() << "  [t978 diag] a" << okA << "b" << okB << "b2" << okB2
+                              << "c" << okC << "c2" << okC2
+                              << "(pa" << pa << "pb" << pb << "pc" << pc << "pr" << pr
+                              << "monRevB" << monRevB(0) << monRevB(1) << monRevB(2) << ")";
+        qInfo().noquote() << (okT978 ? "PASS" : "FAIL")
+                          << "| t978 mob-clone leak: the user's 9-01 playtest reports a duplicated "
+                             "projection at spawn-instant in fresh worlds and piles of static texture-only "
+                             "mob clones after long sessions (F3 mobs 1/36 = one live entity vs 36-slot "
+                             "high-water, so the clones present as QML delegate / slot-bookkeeping state, "
+                             "not C++ entities); static audit of the existing paths proved no spontaneous "
+                             "freeze (P-t935 already pins the per-slot bump semantics, all six releaseSlot "
+                             "callers alive-check first, and the fingerprint contract covers every "
+                             "At() accessor field), so the fix is three defensive layers, each "
+                             "probe-pinned here: (a) releaseSlot gains an idempotency guard -- a double "
+                             "release must never push the same index into the free list twice (pre-fix, "
+                             "two spawns then pop the same slot LIFO and the second std::move silently "
+                             "overwrites the first: same slot index twice + liveCount drift = the "
+                             "slot-pool corruption face); (b) clearAll gains a corrective bump for dead "
+                             "slots that already carry a monitor (= a delegate is watching): their "
+                             "fingerprint aligned to the dead state at the release notify, so routine "
+                             "notifies never bump them again and a frozen delegate has no routine "
+                             "self-heal face -- the cross-world teardown is the only mandatory "
+                             "whole-pool refresh point, so it force-bumps exactly once (monitor-less "
+                             "dead slots stay zero-bump, keeping the t935 economics; the LIFO reuse "
+                             "and unused-dead-slot zero-bump semantics are unchanged); (c) source pins "
+                             "for the guard line, the corrective line, and the Main.qml visible "
+                             "self-heal net (an entityManager.count touch -- NOTIFY entitiesChanged "
+                             "fires on every notify -- so a dead slot's delegate re-reads aliveAt and "
+                             "hides at the next emit no matter what failed in the monitor chain; cost "
+                             "is one bool Q_INVOKABLE re-eval per slot per emit against the ~50 "
+                             "bindings-per-slot t935 collapsed, and the entityManager.revision string "
+                             "stays extinct with the mon.revision migration surface >= 100); probe "
+                             "legs: (a) double-remove then two spawns land on distinct live slots "
+                             "with liveCount 2, (b) pre-killed slot 1 with a monitor advances exactly "
+                             "+1 on clearAll then stays put across an LIFO reuse of slot 2, (c) the "
+                             "three fix markers present with the t935 pins intact"
+                          ;
+    }
+
     // ── P-t936 动力轨传播顺序无关探针（World 直编；spec「不管先放什么，激活都沿动力铁轨链传到红石最远
     //    可达范围」—— 用户实测：先放上坡动力轨再激活一段，后放的其他上坡动力轨不被激活〔要全部摆好再激
     //    活才行〕）──
