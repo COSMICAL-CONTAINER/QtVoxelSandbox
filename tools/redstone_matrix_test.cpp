@@ -30600,6 +30600,190 @@ Item {
                           << " slotDetailText delegation, and all five call sites";
     }
 
+    // ── P-t996 打火石直点 TNT 引燃链探针（R19.18 批 t996；用户 9-01 实测「点燃 TNT 后原方块没清除——
+    //    持续闪烁动画不停、方块变成贴图、人物可以穿过去」）──
+    //   病根：t492 Bug B 删「右键 TNT 本体点燃」分支时打火石尚不存在（注释原文「本项目无打火石」）；
+    //   t724 打火石落地后**未补 TNT 分流** → 手持打火石右键 TNT 方块落进 t843 回退立地火路径：命中面
+    //   邻格 setBlock(Fire)，TNT 格不清、零 PrimedTnt 实体。用户看到的就是贴着 TNT 的那团火——flipbook
+    //   闪烁（「闪烁动画不停」）+ cross 面片（「变成贴图」）+ ShapeNone 无碰撞（「人物可以穿过去」），
+    //   且 TNT 本体永不被引燃（flammable 表刻意不含 TNT，t724 v1 注释「TNT 点燃走既有引燃链」——但
+    //   打火石这条「既有链」从未接上）。修法：placeBlock 打火石分支补 TNT 直点分流（机制等价 MC 1.0
+    //   flint and steel 点燃 TNT）——isTnt(命中格) → clearBlockSilent 原格置 Air（同 firePowerTnt/机关/
+    //   踩板三条引燃链单一尾）+ spawnPrimedTnt 引燃态实体接管闪烁渲染与碰撞 + 失撑三族补口。红石/机关/
+    //   踩板/发射器四条既有引燃链已由 P-t814/P-t856 钉死不动。断言四段：
+    //   (a) 真路径引燃（t945 真链模式：定位定向 → tick 刷射线 → placeBlock）：TNT 格清空（Air）+
+    //       PrimedTnt 实体在原格格心 + 满引信（fuseProgress==1）+ 命中面邻格**无** Fire（旧病灶回归
+    //       守卫——回退落火路径若再吃 TNT 点击即红）；
+    //   (b) 引信链全通：ents.tick 细步驱动 6.25s（> kPrimedTntFuseSec 5s）→ 实体移除（fuse 归 0
+    //       detonatePrimedTnt）+ 爆炸真发生（半径内哨兵石块被 destroySphereSilent 清掉）+ 原格仍 Air；
+    //   (c) 非 TNT 回退不回归：打火石点石头顶面 → 邻格照常落火（t724 语义保留，石面点火不被分流误吞）；
+    //   (d) 源码钉：placeBlock 打火石分支内 TNT 直点分流的条件 + 两调用锚（任一散失即红）。
+    {
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 7 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 7 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t996 flint-ignite TNT: no clear rig area found";
+        } else {
+            WorldClock clockT996;
+            EntityManager entsT996;       // PrimedTnt 断言源 + (b) 段 fuse 驱动
+            Hotbar hbT996;
+            PlayerController pcT996;      // t945 真链模式（挂窗 grab 载体；headless 无指针锁）
+            pcT996.setWorld(&w);
+            pcT996.setWorldClock(&clockT996);
+            pcT996.setEntityManager(&entsT996);
+            pcT996.setHotbar(&hbT996);
+            QQuickWindow probeWinT996;
+            pcT996.setParentItem(probeWinT996.contentItem());
+            pcT996.grab(); // m_window 就绪 → setCaptured(true) 走通（placeBlock 入口门）
+            hbT996.setStack(0, int(ToolRegistry::FlintAndSteel), 1); // 手持打火石（用户场景）
+            hbT996.setSelectedSlot(0);
+            // 瞄准 + tick 刷射线（t945 aimP945 同款：release+grab 重居中光标防 delta 踢变 →
+            //   loadSavedState 定位定向 → tick 刷 updateRaycast 命中）。
+            const auto aimT996 = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ) {
+                const float ex = feetX, ey = float(kRigY) + 1.62f, ez = feetZ;
+                const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+                const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+                const float pitch = std::asin(dy / len) * 57.2957795f;
+                const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+                pcT996.release();
+                pcT996.grab();
+                pcT996.loadSavedState(feetX, float(kRigY), feetZ, yaw, pitch, 1); // Creative（不耗耐久）
+                pcT996.tick();
+                return pcT996.hitBlock();
+            };
+            const auto pumpMsT996 = [](int ms) { // 放置 200ms CD 间隔（t128；m_evtClock 单调墙钟）
+                QElapsedTimer t;
+                t.start();
+                while (t.elapsed() < ms)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            };
+            const auto buildRigT996 = [&]() { // 石台面（kRigY-1）+ TNT（x0+2, kRigY, z0）
+                for (int dx = 0; dx <= 5; ++dx) {
+                    w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                    for (int dy = 0; dy <= 2; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0, BR::Air, 0);
+                }
+                w.setBlock(x0 + 2, kRigY, z0, BR::TntBlock, 0);
+            };
+            const auto clearRigT996 = [&]() {
+                for (int dx = 0; dx <= 5; ++dx)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0, BR::Air, 0);
+                entsT996.clearAll(); // 清引燃实体（防污染后续腿实体计数）
+            };
+
+            // (a) 真路径引燃：瞄 TNT -X 面内点 (x0+2.05, kRigY+0.5, z0+0.5)（命中格=TNT，法线 -X）。
+            buildRigT996();
+            const QVector3D hitA = aimT996(float(x0) + 0.5f, float(z0) + 0.5f,
+                                           float(x0) + 2.05f, float(kRigY) + 0.5f, float(z0) + 0.5f);
+            pumpMsT996(260);
+            pcT996.placeBlock(); // 手持打火石右键 TNT 本体
+            int idxA = -1;
+            for (int i = 0; i < entsT996.count(); ++i)
+                if (entsT996.isPrimedAt(i)) { idxA = i; break; }
+            const bool okA = hitA == QVector3D(float(x0 + 2), float(kRigY), float(z0)) // 射线命中的是 TNT 本格
+                && w.blockAt(x0 + 2, kRigY, z0) == BR::Air                    // 原格置 Air（fix 核心）
+                && idxA >= 0                                                  // PrimedTnt 实体接管
+                && std::abs(entsT996.posAt(idxA).x() - (x0 + 2.5f)) < 1e-3f   // 原格格心
+                && std::abs(entsT996.posAt(idxA).y() - (kRigY + 0.5f)) < 1e-3f
+                && std::abs(entsT996.posAt(idxA).z() - (z0 + 0.5f)) < 1e-3f
+                && entsT996.fuseProgressAt(idxA) >= 0.999f                    // 满引信（默认 5s 未起跳）
+                && w.blockAt(x0 + 1, kRigY, z0) == BR::Air                    // 旧病灶守卫：命中面邻格不落火
+                && w.blockAt(x0 + 3, kRigY, z0) == BR::Air;
+            if (!okA)
+                qInfo().noquote() << "  [t996 a diag] hit" << hitA
+                                  << "tntCell" << int(w.blockAt(x0 + 2, kRigY, z0))
+                                  << "adjNeg" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "idxA" << idxA
+                                  << "fuseProg" << (idxA >= 0 ? entsT996.fuseProgressAt(idxA) : -1.0f);
+
+            // (b) 引信链全通：哨兵石 (x0+4, kRigY, z0)（距爆心 2.0 < 半径 3）→ 细步 6.25s > 5s 引信。
+            w.setBlock(x0 + 4, kRigY, z0, BR::Stone, 0);
+            for (int i = 0; i < 400; ++i)
+                entsT996.tick(0.015625, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+            int primedAfterB = 0;
+            for (int i = 0; i < entsT996.count(); ++i)
+                if (entsT996.isPrimedAt(i)) ++primedAfterB;
+            const bool okB = idxA >= 0 && primedAfterB == 0                     // 引爆后实体移除
+                && w.blockAt(x0 + 2, kRigY, z0) == BR::Air                      // 原格仍 Air
+                && w.blockAt(x0 + 4, kRigY, z0) == BR::Air;                     // 爆炸真发生（哨兵被清）
+            if (!okB)
+                qInfo().noquote() << "  [t996 b diag] primedAfter" << primedAfterB
+                                  << "tntCell" << int(w.blockAt(x0 + 2, kRigY, z0))
+                                  << "sentinel" << int(w.blockAt(x0 + 4, kRigY, z0));
+
+            // (c) 非 TNT 回退不回归：石块顶面点火 → 顶邻格落火（t724 语义保留）。
+            clearRigT996();
+            w.setBlock(x0 + 2, kRigY, z0, BR::Stone, 0);
+            const QVector3D hitC = aimT996(float(x0) + 0.5f, float(z0) + 0.5f,
+                                           float(x0) + 2.5f, float(kRigY) + 1.0f, float(z0) + 0.5f);
+            pumpMsT996(260);
+            pcT996.placeBlock();
+            const bool okC = hitC == QVector3D(float(x0 + 2), float(kRigY), float(z0))
+                && w.blockAt(x0 + 2, kRigY + 1, z0) == BR::Fire                 // 顶邻格落火（回退路径健在）
+                && w.blockAt(x0 + 2, kRigY, z0) == BR::Stone;                   // 石头本体无恙
+            if (!okC)
+                qInfo().noquote() << "  [t996 c diag] hit" << hitC
+                                  << "fire" << int(w.blockAt(x0 + 2, kRigY + 1, z0))
+                                  << "stone" << int(w.blockAt(x0 + 2, kRigY, z0));
+            clearRigT996();
+
+            // (d) 源码钉：placeBlock 打火石分支（FlintAndSteel 守卫行 → PaintingId 分支行）滤注释后
+            //   必含 TNT 直点分流条件 + clearBlockSilent/spawnPrimedTnt 两调用（任一散失即红）。
+            bool okPin = false;
+            {
+                const QString exeDir = QCoreApplication::applicationDirPath();
+                const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+                QFile sf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+                const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
+                const int b0 = t.indexOf(QStringLiteral("heldItemId == int(ToolRegistry::FlintAndSteel))"));
+                const int b1 = t.indexOf(QStringLiteral("RecipeRegistry::PaintingId"));
+                if (b0 < 0 || b1 <= b0) {
+                    qInfo().noquote() << "  t996 flint-branch slice miss";
+                } else {
+                    QString body;
+                    for (const QString &line : t.mid(b0, b1 - b0).split(QLatin1Char('\n')))
+                        if (!line.trimmed().startsWith(QLatin1String("//"))) {
+                            body += line; body += QLatin1Char('\n');
+                        }
+                    okPin = body.contains(QStringLiteral("BlockRegistry::TntBlock && m_entityManager"))
+                        && body.count(QStringLiteral("clearBlockSilent(m_hitBx, m_hitBy, m_hitBz)")) == 1
+                        && body.count(QStringLiteral("spawnPrimedTnt(m_hitBx, m_hitBy, m_hitBz)")) == 1;
+                }
+            }
+
+            const bool okT996 = okA && okB && okC && okPin;
+            if (!okT996) ++totalFail;
+            qInfo().noquote() << (okT996 ? "PASS" : "FAIL")
+                              << "| t996 flint-and-steel on a TNT block ignites it in place (user"
+                              << " ninth-round report: after igniting, the original block never"
+                              << " cleared - an endless flicker, the block 'turned into a texture',"
+                              << " and the player could walk through it; root cause: the t492 Bug B"
+                              << " removal of direct TNT right-click ignition predates the flint"
+                              << " and steel, and t724 never added the TNT split, so the click fell"
+                              << " through to the fallback ground-fire path which placed a"
+                              << " flipbook-flickering, non-colliding cross-quad fire in the"
+                              << " face-adjacent cell while the TNT stayed forever unprimed):"
+                              << " the hit TNT cell is cleared to Air, a PrimedTnt entity takes over"
+                              << " at the cell center with a full default fuse, no fire lands in the"
+                              << " face-adjacent cells (pre-fix symptom guard); the fuse chain runs"
+                              << " to zero, removes the entity and really explodes (sentinel stone"
+                              << " inside the blast radius destroyed, cell still Air); flint on a"
+                              << " stone top face still falls back to placing fire (t724 semantics"
+                              << " kept); source pins lock the TNT split condition and the"
+                              << " clearBlockSilent + spawnPrimedTnt pair inside the flint branch";
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

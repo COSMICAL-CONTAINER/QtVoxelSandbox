@@ -4086,6 +4086,26 @@ void PlayerController::placeBlock()
             const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
             if (hitId == BlockRegistry::Fire || m_world->isBurningAt(m_hitBx, m_hitBy, m_hitBz))
                 return; // 幂等拒绝（纯 no-op）
+            // t996 打火石直点 TNT 引燃（机制等价 MC 1.0 flint and steel 右键 TNT 引燃；t492 Bug B 删
+            //   「右键 TNT 本体点燃」时打火石尚不存在——t724 打火石落地后未补 TNT 分流，点击落到下方
+            //   t843 回退立地火路径：命中面邻格 setBlock(Fire)（flipbook 闪烁 cross 面片、ShapeNone 无
+            //   碰撞）而 TNT 格永不清、零 PrimedTnt——用户「点燃后原方块没清除、持续闪烁不停、方块变成
+            //   贴图、人物可以穿过去」即这团火。修法与 firePowerTnt / 机关点火 / 踩板三条引燃链同一尾：
+            //   clearBlockSilent 原格置 Air（点火专用静默清，绕 occ 守卫——TNT 是实体方块）+
+            //   spawnPrimedTnt 引燃态实体接管闪烁渲染与碰撞（默认引信 ~5s；引爆时 detonateTntSphere
+            //   链式引燃邻接 TNT）+ 失撑三族补口（t744① / 审查 #5 同款）。优先于可燃判定（TNT 不在
+            //   flammable 表，此处前置分流语义更清晰）。
+            if (hitId == BlockRegistry::TntBlock && m_entityManager) {
+                m_world->clearBlockSilent(m_hitBx, m_hitBy, m_hitBz); // 原格置 Air（点火专用静默清，绕 occ 守卫）
+                m_entityManager->spawnPrimedTnt(m_hitBx, m_hitBy, m_hitBz); // 引燃态实体（默认引信；爆炸链式）
+                dropUnsupportedMechAround(m_hitBx, m_hitBy, m_hitBz); // t744①：TNT 格清空 → 附着机关失撑掉落
+                dropUnsupportedTorchesAround(m_hitBx, m_hitBy, m_hitBz); // 审查 #5：贴墙火把失撑（三族对称）
+                dropUnsupportedDustAbove(m_hitBx, m_hitBy, m_hitBz);    // 审查 #5：顶面红石粉失撑
+                if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（同点火；创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm(); // 点燃是一次「使用」动作 → 挥手（t29）
+                return; // TNT 已引燃 → 不再走回退立地火路径（命中面邻格不落火）
+            }
             // t843 直燃优先（第 4 次语义重做，机制对齐 MC 1.0 fire-on-face）：命中的是**可燃方块** → 该
             //   方块本身点燃进燃烧态（World::igniteFlammableAt：栅格 id 不变 + 面火 overlay + 计时烧毁 +
             //   同态蔓延），火不出现在旁边（用户「火在旁边烧、木制品点不燃」的根因修）；门整扇联动收口在
