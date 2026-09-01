@@ -2738,6 +2738,18 @@ private:
     //   TNT 链式逐个快速引爆的观感）。手点 / 机关 / 压力板点燃仍 5s（kPrimedTntFuseSec）。fuseProgressAt 按
     //   kPrimedTntFuseSec 归一 → 短 fuse 起始 progress 小 → 白闪起始即较快（连锁观感「已在燃」）。
     static constexpr float kChainFuseSec = 1.2f;          // 链式引燃 TNT 引信（秒；短于手点 5s，快速连锁）
+    // t997 爆炸波分期（多 TNT 同帧到期性能钳制）：kMaxTntDetonationsPerTick = 单次 EntityManager::tick 的
+    //   primed TNT 引爆预算（个/tick）——同帧到期簇 ≤ 预算照旧全爆；超额者引信重挂 kDetonationWaveRegroupSec
+    //   （≈1/60s，1 个 60Hz sim tick）下 tick 再爆，波次推进到全部爆完。契约：
+    //   - 总破坏量不变：分期不许吞爆炸（每个 primed TNT 最终都实爆，终态零 primed 残留）；
+    //   - 链式引燃语义不动：kChainFuseSec 1.2s 错峰引信原样——链式 TNT 本就逐个错峰、几乎不同帧扎堆，
+    //     预算只影响「同引信同帧到期簇」（同引信一片 TNT 同帧齐爆）；
+    //   - 动机：同帧 N 爆 = 每爆各走一遍 t933 批量链（1×联合盒 refloodBox + 1×worldChanged QML 扇出 +
+    //     1×clearAllDirty）→ N× 重叠 reflood + N× mesh 重建检查同帧叠加（t997 rig 实测 refloodN==36 /
+    //     worldChanged==36；用户 15FPS/66.7ms 帧 sim 仅 4.63ms → 大头在渲染/同步侧）；钳后每帧引爆成本
+    //     ≤ 预算 × 单爆。
+    static constexpr int   kMaxTntDetonationsPerTick = 4;            // 单 tick 引爆预算（个/tick）
+    static constexpr float kDetonationWaveRegroupSec = 1.0f / 60.0f; // 预算耗尽引信重挂时长（秒；≈1 个 60Hz tick）
     // t298 怪物受水流影响（spec「怪在水中正常走（错）→减速/浮（同玩家水中物理）」；机制等价玩家水中物理
     //   t174 浮力缓沉 + t159 水下减速 + t211 流水推动 —— mobs 不按空格故无 kSwimUp 上浮，仅被动缓沉）。
     //   数值与玩家同源（PlayerController kUnderwaterSpeedMul/kWaterGravity/kWaterSinkMax/kWaterFlowPush），保世界

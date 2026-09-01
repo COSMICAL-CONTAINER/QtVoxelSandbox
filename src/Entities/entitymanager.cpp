@@ -5685,6 +5685,10 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     const float worldD = float(world->depth());
     bool dirty = false;
     std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
+    // t997 爆炸波分期：本 tick 的 primed TNT 引爆预算（每 tick() 调用重置一次）。同帧到期簇 ≤ 预算照旧
+    //   全爆；超额者引信重挂 kDetonationWaveRegroupSec 下 tick 再爆（钳制点见下方 FallingBlock primed 分支；
+    //   常量契约见 entitymanager.h 注释：总破坏量不变、链式 1.2s 错峰引信语义不动、只影响同帧到期簇）。
+    int tntDetonationBudget = kMaxTntDetonationsPerTick;
     // t500 perf：tick 节拍 +1（每 60Hz tick 一次）；mob AI / 环境扫描错峰节流据它判本帧哪些 mob 跑重活。
     ++m_tickPhase;
     // t500 perf mob 子桶手动计时：mob-loop 内逐实体 aiTick 段（火烧 / 仙人掌 / AI 决策移动）累 aiNs；
@@ -6792,10 +6796,21 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // (1) fuse 倒计：每帧 -= dt（机制等价 MC primed TNT 80 tick fuse ~4s；本工程 ~5s）。到 0 → 引爆。
             e.fuse -= float(dt);
             if (e.fuse <= 0.0f) {
-                detonatePrimedTnt(idx, world, listener); // 球形破坏 + 链式引燃 + 衰减伤玩家 + explosion 音/视
-                // detonatePrimedTnt 内已 releaseSlot(idx) + bump revision/emit；这里直接 continue 跳过下方重力段
-                //   （实体已除不再模拟）。不 push toRemove（detonatePrimedTnt 已释放槽）。
-                continue;
+                // t997 爆炸波分期：单 tick 引爆预算钳制——同帧到期簇 ≤ kMaxTntDetonationsPerTick 照旧
+                //   全爆；超额者引信重挂 kDetonationWaveRegroupSec 下 tick 再爆（波次推进）。总破坏量
+                //   不变（分期不许吞爆炸）；链式引燃语义不动（链式 TNT 本就带 1.2s 错峰引信 kChainFuseSec
+                //   几乎不同帧扎堆，预算只钳「同引信同帧到期簇」——同帧 N 爆 = N× 联合盒 reflood + N×
+                //   worldChanged QML 扇出同帧叠加，用户 15FPS 帧的渲染/同步侧放大源）。
+                if (tntDetonationBudget > 0) {
+                    --tntDetonationBudget;
+                    detonatePrimedTnt(idx, world, listener); // 球形破坏 + 链式引燃 + 衰减伤玩家 + explosion 音/视
+                    // detonatePrimedTnt 内已 releaseSlot(idx) + bump revision/emit；这里直接 continue 跳过下方重力段
+                    //   （实体已除不再模拟）。不 push toRemove（detonatePrimedTnt 已释放槽）。
+                    continue;
+                }
+                // 预算耗尽 → 引信重挂，下 tick 归队再爆（落下方重力段照常模拟；分支末统一 dirty=true
+                //   bump revision —— fuse 变了，QML 白闪频率随 fuseProgressAt 同步）。
+                e.fuse = kDetonationWaveRegroupSec;
             }
             // (2) 重力下落（复用沙子物理；机制等价 MC primed TNT 受重力）。着地判定同沙子：下落路径扫首个实体
             //   方块 → 贴其顶面停下（vy=0），但 **不放置方块 / 不变掉落物**（primed 实体保持引燃态继续倒计）。

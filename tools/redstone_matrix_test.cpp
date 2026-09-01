@@ -30784,6 +30784,190 @@ Item {
         }
     }
 
+    // ── P-t997 多 TNT 同帧引爆性能归因 + 爆炸波分期探针（R19.18 批 t997；用户 9-01 实测 35d5a72
+    //    「放很多 TNT 爆炸仍很卡：15FPS / 66.7ms/frame / sim 仅 4.63ms」——t933 修的是单爆炸级联风暴
+    //    （逐格 recomputeLightAround + 逐柱 worldChanged），多 TNT 同爆 = N 个爆炸各自走一遍批量化后
+    //    的链，不在此前修复覆盖内）──
+    //   归因模型（destroySphereSilent t383 批量收口后单爆成本 = 1×refloodBox + 1×worldChanged +
+    //   1×clearAllDirty）：同帧 N 爆 → N× 联合盒 reflood（球重叠 ×N 浪费）+ N× worldChanged QML 扇出
+    //   （GUI 侧 25 chunk × N 次重建检查/帧——用户 F3 sim=4.63ms 占 7% → 大头在渲染/同步侧，本 rig
+    //   量 C++ 侧计数与 tick 耗时，present/vsync/GPU 侧须实机 F3 判读，不编数）。rig：6×6=36 primed
+    //   TNT 同引信（5s）同帧到期（模拟红石同帧点燃一片 TNT；无 TNT 方块 → 零链式引燃干扰，同帧爆
+    //   归因干净）→ 逐 1/60s 步进量：每 tick 引爆数分布（FrameProfiler 无 detonate 计数，实体扫描差分）
+    //   + refloodN/lightEditN/gravColN/cascN 差分 + worldChanged 计数 + 逐 tick 墙钟（引爆 tick vs 静默 tick）。
+    //   修复 = 爆炸波分期（entitymanager tick 单 tick 引爆预算 kMaxTntDetonationsPerTick，预算耗尽 →
+    //   引信重挂 kDetonationWaveRegroupSec 下 tick 再爆）：同帧成本 ≤ K 倍单爆，总破坏量不变（链式
+    //   引爆语义保留——链式 TNT 本就带 1.2s 错峰引信，分期只影响同帧到期簇）。断言三段：
+    //   (a) 分期行为：任意 tick 引爆数 ≤ 预算（pre-fix 36 全在同一 tick → 红）+ 全部 36 实爆（总量
+    //       不变，分期不许吞爆炸）+ 终态零 primed 残留；
+    //   (b) 归因计数不变式：worldChanged == refloodN（每爆批链恒 1 扇出 / 1 联合盒，t933 收口
+    //       口径）+ refloodN ∈ [1, totalDet]（每爆至多 1 联合盒）。阴性轮（pre-fix）实测恰
+    //       36/36 = N 倍放大源直读落盘；post-fix 分期后序波爆炸球可能整落在先波弹坑内 →
+    //       destroySphereSilent 的 destroyed 空早退 = 该爆零 reflood 零扇出（免费），实测 21/21
+    //       —— 分期顺带去掉重叠 reflood 的真实收益，「总量不变」契约指破坏方块量（totalDet==36）
+    //       而非 reflood 计数；
+    //   (c) 源码钉：entitymanager.h 预算常量 + entitymanager.cpp 预算钳制行（任一散失即红）。
+    {
+        int x0 = -1, z0 = -1;
+        // rig 选址（三级）：① stride 2 快扫（同 t996 模式）；② stride 1 全深细扫（奇对齐 + t814 扩深
+        //   128 后 z≥96 老扫描盲区）；③ 兜底：全图扫「占用最少」候选位 → setBlock Air 预清场后照常搭台。
+        //   背景：kRigY=41 的 39..44 层被丛林/沼泽冠层大片占据（首跑实测 ①② 全落空 → 「no clear rig
+        //   area found」假红），10×9×6 净空在本图不保证存在；③ 的预清场发生在 worldChanged 连接与
+        //   FrameProfiler 基线**之前** → rig 造价（清场 reflood/worldChanged）不进归因窗口，(b) 腿干净。
+        //   setBlock 同 id 早退（World::setBlock 无变化路径零信号零重 flood）→ 清 Air-over-Air 零成本。
+        const auto t997AreaClear = [&](int xx, int zz) {
+            for (int dx = -1; dx <= 8; ++dx)
+                for (int dz = -1; dz <= 7; ++dz)
+                    for (int dy = -2; dy <= 3; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) return false;
+            return true;
+        };
+        for (int zz = 3; zz < 90 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 8 < 96 && x0 < 0; xx += 2)
+                if (t997AreaClear(xx, zz)) { x0 = xx; z0 = zz; }
+        for (int zz = 3; zz + 7 < 128 && x0 < 0; ++zz)
+            for (int xx = 1; xx + 8 < 96 && x0 < 0; ++xx)
+                if (t997AreaClear(xx, zz)) { x0 = xx; z0 = zz; }
+        if (x0 < 0) {
+            int bestOcc = 1 << 30;
+            for (int zz = 3; zz + 7 < 128; ++zz)
+                for (int xx = 1; xx + 8 < 96; ++xx) {
+                    int occ = 0;
+                    for (int dx = -1; dx <= 8; ++dx)
+                        for (int dz = -1; dz <= 7; ++dz)
+                            for (int dy = -2; dy <= 3; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) ++occ;
+                    if (occ < bestOcc) { bestOcc = occ; x0 = xx; z0 = zz; }
+                }
+            if (x0 >= 0 && bestOcc > 0) {
+                qInfo().noquote() << "  [t997] no fully-clear rig area; pre-clearing best candidate"
+                                  << x0 << "," << z0 << "(occupancy" << bestOcc << "/540 cells, pre-baseline)";
+                for (int dx = -1; dx <= 8; ++dx)
+                    for (int dz = -1; dz <= 7; ++dz)
+                        for (int dy = -2; dy <= 3; ++dy)
+                            w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+            }
+        }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t997 mass-detonation staging: no clear rig area found";
+        } else {
+            EntityManager entsT997;
+            // rig：6×6 石台（kRigY-1）+ 36 primed TNT 同引信 5s（不摆 TNT 方块 → 零链式干扰）。
+            for (int dz = 0; dz <= 6; ++dz)
+                for (int dx = 0; dx <= 7; ++dx)
+                    w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+            // worldChanged 计数（本 rig 专享；scope 末 disconnect 防悬空 / 污染后续探针）。
+            int wcT997 = 0;
+            const QMetaObject::Connection wcConnT997 = QObject::connect(
+                &w, &World::worldChanged, &w, [&wcT997]() { ++wcT997; });
+            // 归因计数基线（FrameProfiler 全局桶，矩阵单线程顺序跑 → 窗口差分即本 rig 增量）。
+            //   基线**必须落在石台 setBlock 之后**：World::setBlock 每次成功写 = 1×recomputeLightAround
+            //   （refloodN/lightEditN 各 +1）+ 1×emit worldChanged —— 基线若在搭台前，56 格搭台会灌进窗口
+            //   （refloodD 恒 92 ≠ 36，(b) 腿永红）；清场段同理在 refloodD 快照之后、其 worldChanged 由
+            //   wcDetT997 快照隔离。搭台/清场是 rig 造价，不属「每爆 1 联合盒 / 1 扇出」的归因窗口。
+            //   spawnPrimedTnt 纯实体侧（不写世界、不发 World 信号）→ 窗口内恰 36 次引爆归因。
+            const qint64 reflood0 = FrameProfiler::instance()->countValue("refloodN");
+            const qint64 lightEdit0 = FrameProfiler::instance()->countValue("lightEditN");
+            const qint64 gravCol0 = FrameProfiler::instance()->countValue("gravColN");
+            const qint64 casc0 = FrameProfiler::instance()->countValue("cascN");
+            for (int dz = 0; dz < 6; ++dz)
+                for (int dx = 0; dx < 6; ++dx)
+                    entsT997.spawnPrimedTnt(x0 + dx, kRigY, z0 + dz);
+            // 逐 1/60s 步进（~11.7s cap）：每步前后实体扫描差分 = 本 tick 引爆数；墙钟逐 tick 记录。
+            constexpr int kT997Budget = 4; // 与 entitymanager.h kMaxTntDetonationsPerTick 同值（源码钉 (c) 对齐）
+            int primedBefore = 0;
+            for (int i = 0; i < entsT997.count(); ++i)
+                if (entsT997.isPrimedAt(i)) ++primedBefore;
+            int totalDet = 0, maxDetPerTick = 0;
+            qint64 maxTickNs = 0, totalTickNs = 0;
+            int steps = 0;
+            for (int s = 0; s < 700 && totalDet < primedBefore; ++s) {
+                int alive0 = 0;
+                for (int i = 0; i < entsT997.count(); ++i)
+                    if (entsT997.isPrimedAt(i)) ++alive0;
+                const qint64 t0 = FrameProfiler::nowNs();
+                entsT997.tick(1.0 / 60.0, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                const qint64 tickNs = FrameProfiler::nowNs() - t0;
+                totalTickNs += tickNs;
+                if (tickNs > maxTickNs) maxTickNs = tickNs;
+                int alive1 = 0;
+                for (int i = 0; i < entsT997.count(); ++i)
+                    if (entsT997.isPrimedAt(i)) ++alive1;
+                const int det = alive0 - alive1; // 本 tick 引爆数（ detonatePrimedTnt 移除实体；无链式源）
+                if (det > 0) {
+                    totalDet += det;
+                    if (det > maxDetPerTick) maxDetPerTick = det;
+                }
+                ++steps;
+            }
+            int primedAfter = 0;
+            for (int i = 0; i < entsT997.count(); ++i)
+                if (entsT997.isPrimedAt(i)) ++primedAfter;
+            const qint64 refloodD = FrameProfiler::instance()->countValue("refloodN") - reflood0;
+            const qint64 lightEditD = FrameProfiler::instance()->countValue("lightEditN") - lightEdit0;
+            const qint64 gravColD = FrameProfiler::instance()->countValue("gravColN") - gravCol0;
+            const qint64 cascD = FrameProfiler::instance()->countValue("cascN") - casc0;
+            const double maxTickMs = double(maxTickNs) / 1e6;
+            const double avgTickMs = steps > 0 ? double(totalTickNs) / 1e6 / double(steps) : 0.0;
+            const int wcDetT997 = wcT997; // 归因读数先快照：清场 setBlock（Air 化）每格发 worldChanged
+            // 清场（平台残留 + 断连接防悬空）。
+            for (int dz = -1; dz <= 7; ++dz)
+                for (int dx = -1; dx <= 8; ++dx)
+                    w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Air, 0);
+            entsT997.clearAll();
+            QObject::disconnect(wcConnT997);
+
+            const bool okA = totalDet == 36                       // 全部实爆（分期不吞爆炸）
+                && primedAfter == 0                               // 终态零 primed 残留
+                && maxDetPerTick <= kT997Budget;                  // 单 tick 引爆 ≤ 预算（pre-fix 36 → 红）
+            // (b) 归因计数不变式（见探针头注释 (b) 段）：每爆批链 1 扇出 / ≤1 联合盒；refloodD==wcDetT997
+            //     且 ∈ [1, totalDet]。pre-fix 恰 36/36（N 倍放大直读）；post-fix 分期去重后 21/21。
+            const bool okB = refloodD >= 1 && refloodD <= totalDet
+                && wcDetT997 == refloodD;                         // 每爆批链恒 1 worldChanged / ≤1 联合盒 reflood
+            bool okPin = false;
+            {
+                const QString exeDir = QCoreApplication::applicationDirPath();
+                const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+                QFile hf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+                QFile cf(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+                const QString h = hf.open(QIODevice::ReadOnly) ? QString::fromUtf8(hf.readAll()) : QString();
+                const QString c = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
+                okPin = h.contains(QStringLiteral("kMaxTntDetonationsPerTick"))
+                    && h.contains(QStringLiteral("kDetonationWaveRegroupSec"))
+                    && c.contains(QStringLiteral("kMaxTntDetonationsPerTick"))
+                    && c.contains(QStringLiteral("e.fuse = kDetonationWaveRegroupSec"));
+            }
+
+            const bool okT997 = okA && okB && okPin;
+            if (!okT997) ++totalFail;
+            if (!okT997)
+                qInfo().noquote() << "  [t997 diag] totalDet" << totalDet << "maxPerTick" << maxDetPerTick
+                                  << "primedAfter" << primedAfter << "refloodD" << refloodD
+                                  << "lightEditD" << lightEditD << "gravColD" << gravColD << "cascD" << cascD
+                                  << "wc" << wcDetT997 << "maxTickMs" << maxTickMs << "avgTickMs" << avgTickMs
+                                  << "steps" << steps << "pin" << okPin;
+            qInfo().noquote() << (okT997 ? "PASS" : "FAIL")
+                              << "| t997 mass TNT same-tick detonation staged by a per-tick budget;"
+                              << " attribution: 36 same-fuse primed TNT over a stone platform driven"
+                              << " in 1/60s ticks produced" << refloodD << "reflood boxes /" << wcDetT997
+                              << " worldChanged fanouts /" << lightEditD << " light edits /" << gravColD
+                              << " grav cols /" << cascD << " cascades for" << totalDet
+                              << " detonations (each explosion runs the t933-batched chain once:"
+                              << " 1x refloodBox + 1x worldChanged + 1x clearAllDirty, so N same-"
+                              << "tick explosions = N overlapping reflood boxes and N QML mesh-"
+                              << "recheck fanouts in one frame - the user F3 snapshot showed sim"
+                              << " only 4.63ms of 66.7ms, so the cure is bounding the per-frame"
+                              << " detonation wave); the budget spreads detonations <=4 per tick"
+                              << " (max tick" << maxTickMs << "ms vs avg" << avgTickMs
+                              << "ms in this rig) while total destruction and the 1.2s chain-"
+                              << "ignite semantics stay intact (all 36 really explode, zero primed"
+                              << " left); GUI-side present/vsync/GPU numbers still need on-device"
+                              << " F3; source pins lock the budget constant and the fuse-regroup"
+                              << " clamp";
+        }
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
