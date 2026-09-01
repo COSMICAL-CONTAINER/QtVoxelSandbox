@@ -16,6 +16,11 @@ Item {
     property string selectedName: ""
     // t192 重命名内联编辑态：true = 展开「输入框 + 确认/取消」替换「重命名」按钮。选中切走时自动复位。
     property bool renaming: false
+    // review0901 #35：「上次退出未保存」角标数据面（宿主 Main.qml 绑定注入；"" = 无）。最近一次退出
+    //   的世界（window.currentWorldFile）存档三写未全成（window.lastExitSaveOk===false）时 = 其文件名，
+    //   条目上挂角标把 t974 的失败 toast 补成可回溯面；重进该世界并成功退出后宿主侧翻 true → 角标自隐。
+    //   AOT 契约：本组件内显隐决策只读自身 property + model 字段，不跨单元直引 window。
+    property string unsavedExitFile: ""
 
     signal playRequested(string file, string name)
     signal backRequested()
@@ -173,6 +178,30 @@ Item {
                                                  ? "上次游玩: " + new Date(model.playedAt).toLocaleString()
                                                  : "未游玩")
                                         color: "#8aa0b0"; font.pixelSize: 12
+                                    }
+                                }
+                                // review0901 #35「上次退出未保存」角标（右上角小条）：该世界最近一次退出
+                                //   存档三写未全成（宿主经 unsavedExitFile 注入文件名）。纯同单元 property
+                                //   + model.file 判等（组件 AOT 契约），无每帧信号——lastExitSaveOk 是普通
+                                //   bool property，翻转即重求值。琥珀色小字条，不遮封面 / 名称列。
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.rightMargin: 8
+                                    anchors.topMargin: 6
+                                    radius: 4
+                                    color: "#4a3a14"
+                                    border.color: "#c8963c"
+                                    border.width: 1
+                                    visible: root.unsavedExitFile.length > 0
+                                             && root.unsavedExitFile === model.file
+                                    width: unsavedLabel.implicitWidth + 14
+                                    height: 18
+                                    Text {
+                                        id: unsavedLabel
+                                        anchors.centerIn: parent
+                                        text: "上次退出未保存"
+                                        color: "#e8c06a"; font.pixelSize: 11
                                     }
                                 }
                             }

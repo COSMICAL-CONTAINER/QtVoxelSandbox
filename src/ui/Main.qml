@@ -45,7 +45,9 @@ Window {
     //   准星/HUD 仅 playing 态显。初始 menu：启动不直接进游戏。
     property string appState: "menu"
     // t974 上一次退出存档是否三写全部成功（初始 true = 尚未退出过）。运行期由 saveAndExitToWorldList /
-    //   onClosing 共用的 runExitSave 链写入；false = 写盘失败已重试仍败（进度未落盘，toast 已告知）。
+    //   onClosing 两路径写入（review0901 #35 起 onClosing 失败路径也置 false）；false = 写盘失败已重试
+    //   仍败（进度未落盘，toast 已告知）。消费面 = 世界列表「上次退出未保存」角标（review0901 #35：
+    //   WorldList.unsavedExitFile 绑定，把 t974 的 toast 补成可回溯面——生产零消费的死属性即删）。
     property bool lastExitSaveOk: true
 
     // 背包子态（t18）：仅 playing 态有意义。开 → 释放指针（光标可见，可点格子，类暂停）；
@@ -575,6 +577,11 @@ Window {
     //   （不排空则夜晚远处仍显上烘正午亮度）。重建动作全部走 ChunkGeometry.refreshMesh()（= 编辑
     //   即时重建同一条 buildMesh(Dirty) 链），不另起第二套构建入口（PLAN 分层：呈现层只驱动、
     //   网格化仍单点在 ChunkGeometry）。
+    //   性能登记（review0901 #34①，绘制面）：visible 解链后有限世界**边到边全幅绘制**（本提交自述
+    //   segs visible 101→202，翻倍）。t470 开发机实测绘制剔除零 FPS 收益是单点数据（桌面 + 主线程
+    //   CPU 瓶颈）；Android 目标面 GPU 更弱，全幅 draw call 翻倍有回退风险——Android 验证轮须加
+    //   「进世界帧率 / draw 数」对照项；必要时设置页恢复「绘制半径」开关（现 UI 文案语义已随本提交
+    //   收窄为「重建半径」，恢复绘制开关时须把两语义拆开）。
     readonly property int kMeshSyncPerTick: 1     // 每 tick 重建段数（帧预算：1×~3ms « 16.6ms）
     property var _meshSyncQueue: []               // 待重建段几何（近→远有序；元素 = ChunkGeometry*）
     property int _meshSyncScanPhase: 0            // 稳态欠账扫描相位（队列空时每 16 tick ≈1Hz 扫一轮）
@@ -616,7 +623,10 @@ Window {
         console.info("[t972] world mesh sync kicked: " + window._meshSyncQueue.length
                      + " far segments queued (near->far)")
     }
-    // 排空泵：仅游玩态跑（菜单/暂停 idle——硬档停语义同 worldRunning 口径，t889）。相位一 = 队列
+    // 排空泵：running 只挂 appState（**不含 worldRunning**）——「UI/呈现件豁免 worldRunning」口径的
+    //   显式登记（t977 浮显 hold Timer 同款）：ESC 暂停叠层不改 appState，暂停期本泵照跑（每 16ms
+    //   渐进重建 1 段 ~2-4ms）= 有意取舍（暂停期继续填满远处地形，观感有利；弱机暂停菜单的周期性
+    //   小卡顿为已知代价）；t889 硬档停清点时本 Timer 按「呈现件豁免」登记，不算漏项。相位一 = 队列
     //   （载入全量 or 稳态欠账）每 tick 排 1 段；相位二 = 队列空时每 16 tick 扫一轮欠账入队
     //   （队列非空不扫 → 无重复入队；refreshMesh 内 buildMesh 双清欠账）。欠账扫描序 = 创建序
     //   （行主序），光照欠账全域均匀、序不敏感。
@@ -641,7 +651,17 @@ Window {
             }
             for (let n = 0; n < window.kMeshSyncPerTick && window._meshSyncQueue.length > 0; ++n) {
                 const g = window._meshSyncQueue.shift()
-                if (g) g.refreshMesh()
+                if (!g) continue
+                // review0901 #34②（重建面微优化登记）：排空前复查「这段是否仍需重建」。段需重建 ⇔
+                //   vertexCount==0（进世界全量队列条目：kickWorldMeshSync 已 clearMesh 作废旧 mesh，
+                //   或本就未建）或欠账标记在（稳态来源：deferredRebuild / lightStale）。若条目在队等待
+                //   期间已被 setChunkInRange(false→true) catch-up 重建过（玩家走近），三条件全清 →
+                //   跳过 = 免一次纯浪费的重复重建（正确性无损的省时；矩阵 P-t972 计数腿）。
+                //   进世界全量队列**有意不区分来源标记**：统一复查此三条件即同时覆盖两来源（全量条目
+                //   vertexCount==0 恒过、稳态欠账条目带标记恒过），队列元素保持裸 ChunkGeometry*，
+                //   不包 {geo, 来源} 结构（实现最净面）。
+                if (g.vertexCount > 0 && !g.deferredRebuildPending() && !g.lightStale()) continue
+                g.refreshMesh()
             }
         }
     }
@@ -900,6 +920,25 @@ Window {
             hotbar: hotbar, main: main, armor: armor
         }
     }
+    // review0901 #30：退出存档前的瞬态物品归还**唯一实现**（「保存并退出」按钮路径与 onClosing 关窗
+    //   兜底路径共用；⚠️ 新增任何退出/存档路径必须先调本函数再存档）。背景：gatherPlayerState 只快照
+    //   hotbar/main/armor 三数组——面板本地槽（附魔台 / 铁砧 / 发射器 A/B 槽，t650）+ 三处合成格
+    //   （t690c）+ 光标手持栈（t56）都是 QML 本地态、**永不进存档**，不先归还即静默丢物。t974 的关窗
+    //   新路径只同了存档链、漏了整条归还序（开着背包/面板关窗 = 物品消失），本函数把两路径收口同源。
+    //   全部归还调用幂等（槽已清则零迭代 / 早退），面板未开时为空操作；closeInventory 内 grab/焦点
+    //   副作用在退出场景无害（t650 防御纵深口径）。
+    function returnTransientItemsBeforeSave() {
+        if (enchantingTableOpen) closeEnchantingTable()   // t650：附魔台两输入槽 → 背包
+        if (anvilOpen) closeAnvil()                       // t650：铁砧 A/B 槽 → 背包
+        if (dispenserOpen) closeDispenser()               // t650：发射器面板光标栈 → 背包
+        // t690(c)：三处合成格材料回背包（工作台 3×3 / 生存背包 2×2 / 创造背包生存 tab 2×2）——直调
+        //   归还而非裸置 visible（绑定重求值可被引擎推迟，晚于 gatherPlayerState = §t650 同竞态）。
+        craftingTablePanel.returnCraftToHotbar()
+        survivalPanel.returnCraftToHotbar()
+        inventoryPanel.returnCraftToHotbar()
+        if (inventoryOpen) closeInventory()               // 内含 returnHeldToHotbar + grab/焦点
+        returnHeldToHotbar()                              // t56：背包外持物（箱子/熔炉面板光标栈）兜底
+    }
     // t974 退出存档唯一实现（「保存并退出」按钮与窗口关闭兜底共用）：玩家态 / 地形+箱子+熔炉+发射器 /
     //   进度三次**同步**写盘，返回三者是否全部成功。WorldStore 侧 saveAll 是单事务（DELETE 全量 +
     //   INSERT，COMMIT 失败整事务回滚 = 半写永不可见）、savePlayerData / saveProgress 是单行 upsert
@@ -925,9 +964,18 @@ Window {
     //   以 worldStore.isOpen() 守门，此处提前 closeWorld 后它们按降级路径收尾，不双写不崩。
     onClosing: (close) => {
         if (window.appState === "playing" && worldStore.isOpen()) {
+            // review0901 #30：关窗同按钮路径——存档前先走瞬态物品归还序（函数头契约：新增退出路径
+            //   必须先调它再存档）。t974 初版漏接此序 → 开着背包/面板关窗 = 面板槽/合成格/光标物品
+            //   不进 gatherPlayerState 快照而静默丢失。
+            returnTransientItemsBeforeSave()
+            // review0901 #36：失败 0ms 立即重试一次（无退避）——取舍登记见 saveAndExitToWorldList
+            //   重试段注释（两路径同型；锁窗场景两连败概率高，toast 已兜用户面）。
             let okClose = runExitSave()
             if (!okClose) okClose = runExitSave()
             if (!okClose) console.warn("[t974] close save FAILED after retry - progress NOT saved:", currentWorldFile)
+            // review0901 #35：与按钮路径对称写入（失败置 false）——世界列表「上次退出未保存」角标
+            //   消费本属性；关窗路径进程即退、角标当下不可见，写它保「两路径同写」的属性契约完整。
+            window.lastExitSaveOk = okClose
             worldStore.closeWorld()
         }
         close.accepted = true
@@ -940,21 +988,9 @@ Window {
     //   渲染完（盖住后）再抓 → onGrabbed 收尾（saveCover + finishExit）。兜底定时器防 frameSwapped 不发卡退出。
     function saveAndExitToWorldList() {
         if (coverGrabPending) return   // 防连点退出按钮重复触发（已有一次退出在进行）
-        // t650：退出存档前关附魔台 / 铁砧 / 发射器面板（显式同步归还 A/B 槽 → 背包）——否则面板内物品
-        //   不在背包、gatherPlayerState 存档时**不在快照里**（面板数组是 QML 本地、永不进存档）→ 退出再进
-        //   = 物品永久消失。正常流程 Esc 会先关面板（keyInput 分支），此处是防御纵深（暂停菜单可达路径
-        //   变更 / 未来新增入口时不破）。
-        if (enchantingTableOpen) closeEnchantingTable()
-        if (anvilOpen) closeAnvil()
-        if (dispenserOpen) closeDispenser()
-        // t690(c)：合成格同款显式同步归还（三个持有者：工作台 3×3 / 生存背包 2×2 / 创造背包生存 tab 2×2）。
-        //   仅设 craftingTableOpen=false / inventoryOpen=false 依赖面板 visible 绑定重求值（可被引擎推迟），
-        //   其 onVisibleChanged→returnCraftToHotbar 会晚于下方 gatherPlayerState（§t650 同竞态）→ 合成材料
-        //   不进存档。直调归还是幂等的（槽已清则零迭代）；面板未开时槽恒空 = 空循环无副作用。
-        craftingTablePanel.returnCraftToHotbar()
-        survivalPanel.returnCraftToHotbar()
-        inventoryPanel.returnCraftToHotbar()
-        returnHeldToHotbar()
+        // t650/t690c/t56 + review0901 #30：存档前瞬态物品归还序收口为共用函数（附魔台/铁砧/发射器
+        //   三面板槽 + 三处合成格 + 光标手持栈；面板数组是 QML 本地、永不进存档——详见函数头契约）。
+        returnTransientItemsBeforeSave()
         const file = currentWorldFile
         const hasOpen = worldStore.isOpen()
         if (hasOpen) {
@@ -963,6 +999,11 @@ Window {
             //   之间无 tick 可插入 —— 同步 JS 串行，快照不漂移）→ 仍失败则 toast 显式告知「本次进度未保存」
             //   + console.warn 留痕，绝不静默丢档。完成门之后才置 coverGrabPending / 进抓帧退出流程 =
             //   「写盘在退出前同步完成」的调用链序（矩阵 P-t974 源序钉）。
+            //   review0901 #36 登记取舍：重试为 0ms 间隔立即重放（无退避）——外部进程持 .sqlite 锁
+            //   （杀软/索引器/同步盘）常为百毫秒到秒级，两连败概率高，重试只覆盖「瞬态已释放」窄窗；
+            //   用户面由 toast 兜住（+ 世界列表「上次退出未保存」角标，#35），不静默。未来提质方向 =
+            //   先以小事务（saveProgress 单行 upsert）探锁、失败退避 ≤300ms 后再整链重试——上限卡死
+            //   防把关窗/退出阻塞成秒级「未响应」。
             let exitSaveOk = runExitSave()
             if (!exitSaveOk) exitSaveOk = runExitSave()
             if (!exitSaveOk) {
@@ -13419,15 +13460,17 @@ Window {
                     }
 
                     // t315 工具耐久条：槽底薄条，宽 ∝ remaining/max，色绿(>50%)/黄(20–50%)/红(<20%)。
-                    //   仅「带耐久」物品（toolMaxDurability>0）且 remaining<max（满耐久不显条）时可见。触碰 slotRevision 令耐久
-                    //   消耗后重算（durabilityAt / toolMaxDurability 是 Q_INVOKABLE，靠版本号触发）。机制等价
+                    //   仅「带耐久」物品（maxDur>0）且 remaining<max（满耐久不显条）时可见。触碰 slotRevision 令耐久
+                    //   消耗后重算（durabilityAt / maxDurabilityFor 是 Q_INVOKABLE，靠版本号触发）。机制等价
                     //   MC 1.0 工具耐久条（绿色随耗变黄转红、满耐久隐）；原创自绘 Rectangle，零 MC 资产（§9）。
                     //   t349：耐久条按「有无耐久」判（maxDur>0）而非 isTool 段 —— 显式含剪刀（toolType=Shears，maxDur=238，
                     //   t315 漏剪刀）；满耐久（curDur==maxDur）隐条，受损后绿/黄/红同其他工具。
+                    //   review0901 #32：max 侧改走 maxDurabilityFor 双段判定单一权威（工具段 + 护甲兜底）——
+                    //   hotbar 槽可持受损护甲件，条与切槽浮显（slotDetailText，已是双段）同口径同数。
                     Item {
                         id: durabilityBar
                         property int curDur: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.durabilityAt(index)) : 0 }
-                        property int maxDur: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.toolMaxDurability(hotbarVM.blockIdAt(index))) : 0 }
+                        property int maxDur: { const _r = hotbarVM.slotRevision; return _r >= 0 ? (hotbarVM.maxDurabilityFor(hotbarVM.blockIdAt(index))) : 0 }
                         property real ratio: maxDur > 0 ? curDur / maxDur : 0.0
                         anchors.left: parent.left
                         anchors.right: parent.right
@@ -13957,6 +14000,10 @@ Window {
         id: worldListPanel
         anchors.fill: parent
         store: worldStore
+        // review0901 #35：「上次退出未保存」角标数据面——最近一次退出（currentWorldFile 仍持其文件名）
+        //   且 lastExitSaveOk===false 时把文件名传入，条目上挂角标（重进该世界并成功退出即自动清除）。
+        //   绑定留在本单元（window 属性同单元可 AOT）；WorldList 内部只读自身 property（组件 AOT 契约）。
+        unsavedExitFile: window.lastExitSaveOk === false ? window.currentWorldFile : ""
         visible: window.appState === "worldlist"
         z: 200
         onPlayRequested: function(file, name) { window.enterWorld(file, name) }

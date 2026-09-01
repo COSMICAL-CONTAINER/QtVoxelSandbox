@@ -909,8 +909,10 @@ Item {
                             anchors.bottom: parent.bottom
                             anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
                             height: 3
+                            // review0901 #32：mDur 走 maxDurabilityFor 双段判定单一权威（工具段 + 护甲兜底）
+                            //   —— 主栏槽可持受损护甲件，条与切槽浮显（slotDetailText）同口径同数。
                             property int cDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.mainDurabilityAt(index)) : 0 }
-                            property int mDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(mainId)) : 0 }
+                            property int mDur: { const _r = root.hotbar.mainRevision; return _r >= 0 ? (root.hotbar.maxDurabilityFor(mainId)) : 0 }
                             curDur: cDur
                             maxDur: mDur
                             visible: { const _r = root.hotbar.mainRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }
@@ -1088,8 +1090,9 @@ Item {
                                 anchors.bottom: parent.bottom
                                 anchors.leftMargin: 3; anchors.rightMargin: 3; anchors.bottomMargin: 2
                                 height: 3
+                                // review0901 #32：mDur 走 maxDurabilityFor 双段判定单一权威（同主栏条）。
                                 property int cDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.durabilityAt(index)) : 0 }
-                                property int mDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.toolMaxDurability(slotId)) : 0 }
+                                property int mDur: { const _r = root.hotbar.slotRevision; return _r >= 0 ? (root.hotbar.maxDurabilityFor(slotId)) : 0 }
                                 curDur: cDur
                                 maxDur: mDur
                                 visible: { const _r = root.hotbar.slotRevision; return _r >= 0 && mDur > 0 && cDur > 0 && cDur < mDur }

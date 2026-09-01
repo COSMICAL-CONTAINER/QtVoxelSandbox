@@ -5637,8 +5637,7 @@ bool EntityManager::tickMobMounts(World *world, const QVector3D &playerPos, floa
             //   resting → aiHostile 越障跳分支可达）可设 jumpGX/jumpGZ，挂载态主循环早退不应用滑流
             //   （陈旧值存活）；不在此清则解除骑乘（载具死）后下落期尾段把陈旧滑流施出 = 朝墙漂移。
             if (e.jumpGX != 0.0f || e.jumpGZ != 0.0f) { e.jumpGX = 0.0f; e.jumpGZ = 0.0f; dirty = true; }
-            if (!e.resting) e.resting = true;          // 钉位态视作「支撑」（无物理语义，仅状态一致）
-            if (!e.resting) e.resting = true;          // 钉位态视作「支撑」（无物理语义，仅状态一致）
+            if (!e.resting) e.resting = true;          // 钉位态视作「支撑」（无物理语义，仅状态一致；review0901 #31 清编辑残留重复行，矩阵钉本语句恰一处）
             mount.moveSpeed = riderSpeed;              // 小鸡腿随骑士移动摆动（走相块下帧消费）
             e.moveSpeed = 0.0f;                        // 被驮不迈腿（同矿车乘客 walkPhase 冻结口径）
             continue;
