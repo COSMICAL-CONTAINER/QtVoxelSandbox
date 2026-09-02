@@ -1833,9 +1833,9 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     if (blockId == Painting)
         return raycastAABBs(blockId, state);
     // t938 铁轨族选中框贴薄板（同 Painting 先例——ShapeNone → shapeBoxes 空，轨原先选中框 / 裂纹叠层恒无
-    //   形状）：选体已整格化（raycast.cpp HitRail 特判，轨格全高可选），选中框 / 挖掘裂纹贴**实际轨形**
-    //   2/16 贴地薄板（与 raycastAABBs 同盒同源）——准星落在轨格即给出「瞄的是这条轨」的反馈，框体贴
-    //   轨视觉非满格黑边（同栅栏 t801 / 铁砧 t849「选中框贴实际形状」口径）。
+    //   形状）：选体 t983 起与射线同口径（t938 HitRail 整格特判废除，沿革全录见 raycast.h HitRail 注），
+    //   选中框 / 挖掘裂纹贴**实际轨形** 2/16 贴地薄板（与 raycastAABBs 同盒同源）——框体贴轨视觉非满格
+    //   黑边（同栅栏 t801 / 铁砧 t849「选中框贴实际形状」口径）。
     if (isRail(blockId))
         return raycastAABBs(blockId, state);
     return shapeBoxes(def(blockId).shape, state);
@@ -2035,12 +2035,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
         if (isRail(blockId)) {
             // t638 铁轨族薄板命中盒（spec「选下一格很难选到——铁轨薄板被选中优先级太高，应像木梯 t501
             //   透视不优先选中」）：mesher 画水平 quad 贴 cell 底（y=1/16，见 PartialBlockGeometry Rail
-            //   case 的 yr）。**t938 口径翻转（消费者分工）**：本盒不再服务选体——选体射线（HitRail，
-            //   raycast.cpp fullCell 特判）对轨格整格命中（轨格全高可选，修「挖轨变挖后面 / 放矿车不便」；
-            //   用户第五轮实测 overrule t638③ 的轨格内透视，轨**上方**空域仍透视）。本盒继续服务：
-            //   (a) 相机距离（HitPartial）—— 轨无碰撞，相机只被 2/16 薄板实体段钳制（t605 语义零改动）；
-            //   (b) 起点嵌轨格的 sub-AABB 分流（玩家眼位 1.62 实际不可达，兜底路径）。全格 footprint
-            //   （xz [0,1]）—— 轨横铺整格，只做垂直薄板化。防呆带 +1/16 容差（视觉 quad 厚 0）。
+            //   case 的 yr）。**t938 翻整格 → t983 终局翻回（选体口径反复的落点）**：t938 曾把本盒收窄为
+            //   仅服务相机（选体走 raycast.cpp fullCell 整格特判）；t983 整格特判与 HitRail 位一并移除
+            //   （站轨选块「指空打轨」——沿革全录见 raycast.h HitRail 注），本盒重新统一服务选体与相机
+            //   （HitPartial）同几何：瞄板命中、瞄上部空气穿透；另服务起点嵌轨格的 sub-AABB 分流（玩家
+            //   眼位 1.62 实际不可达，兜底路径）。全格 footprint（xz [0,1]）—— 轨横铺整格，只做垂直薄板化。
+            //   防呆带 +1/16 容差（视觉 quad 厚 0）。
             constexpr float kRailTop = 2.0f / 16.0f; // 薄板顶（视觉 1/16 + 1/16 容差）
             return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kRailTop, 1.0f}};
         }
@@ -2393,6 +2393,32 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
                 if (dxArm != 0) return hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
                 return hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
             }
+            // t983 ① 平行拒连（平地拐角路径）：侧臂（垂直于自轴偏好方向的臂）邻居若**同轴平行** → 该臂
+            //   是「平行相邻轨」（侧向相对非端点相对）→ 弃侧臂、保轴上臂单连——不产生指向平行旁轨的
+            //   半边拐角（spec「平行相邻轨不互连，只有端点相对才连」）。**平行判定读邻连接位**（矩阵
+            //   run1 回归收口 t737 环 ×3 拐角 / t809 L 形拐角只保 Z·单臂）：邻有连接位时只认「连接严格
+            //   平行于自轴」（不含指向自侧的垂直位）——增量铺设的瞬态邻居常持单垂直连接（如 Nx 单连
+            //   指向本格 = 端点相对进行时），其 bit5 未镜像（bit5 镜像只发生在对向双连，见 World 写回）
+            //   读作 0 = 形似 NS，旧 bit5 单一判据误杀 → 拐角拒连。邻无连接时只有 EW 自轴可依 bit5
+            //   显式判同轴（bit5=0 与 fresh 不可区分 → NS 自轴对 fresh 侧臂恒不拒，worldgen 缺省探针
+            //   sameState=0 / 环线首放兼容）；真拐角（两臂几何互垂、臂轴不同 / fresh / 垂直连接进行时）
+            //   照常成弯。
+            // （外层已闸 nArm==2 且 X/Z 各一臂）侧臂方向：自轴 EW → 轴上臂在 X、侧臂在 Z；自轴 NS → 反之。
+            const bool sideIsZ = ewPref;
+            const bool hasSideP = sideIsZ ? hasPZ : hasPX;
+            const bool hasSideN = sideIsZ ? hasNZ : hasNX;
+            if (hasSideP || hasSideN) {
+                const quint8 sideState = sideIsZ ? (hasSideP ? pz.sameState : nz.sameState)
+                                                 : (hasSideP ? px.sameState : nx.sameState);
+                const quint8 sc = quint8(sideState & 0x0F);
+                const bool sideParallel =
+                    (sc != 0 && (sc & (ewPref ? quint8(RailConnPz | RailConnNz)
+                                              : quint8(RailConnPx | RailConnNx))) == 0)
+                    || (sc == 0 && ewPref && (sideState & RailAxisEWFlag) != 0);
+                if (sideParallel)
+                    return ewPref ? (hasPX ? quint8(RailConnPx) : quint8(RailConnNx))
+                                  : (hasPZ ? quint8(RailConnPz) : quint8(RailConnNz));
+            }
             if (hasPX && hasPZ) return quint8(RailConnPx | RailConnPz);
             if (hasPX && hasNZ) return quint8(RailConnPx | RailConnNz);
             if (hasNX && hasPZ) return quint8(RailConnNx | RailConnPz);
@@ -2437,30 +2463,50 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
         }
     }
 
-    // ② 非普通轨（动力 / 探测）：直线投影（永不拐角 / 十字）。
+    // ② 非普通轨（动力 / 探测）：直线投影（永不拐角 / 十字）。**t983 ①「平行相邻轨不互连，只有端点
+    //    相对才连接」（MC 对齐；用户实测「三种铁轨平行放置时吸附怪异、完全不遵守规则」）**：既有定向
+    //    （bit5 放置面向 / 既有连接位 c）偏好轴向无邻时**保持 0 连接**（轴偏好由调用方守恒写回，孤轨
+    //    形态保留），绝不翻轴去接垂直旁轨——旁邻对既有定向轨是侧面相对、非端点相对；真孤新轨（state
+    //    全零，无面向无连接）唯一邻定轴（对该轨自身端点相对，MC 允许新轨朝唯一邻取向）。
     if (!isNormal) {
-        const bool bothX = hasPX && hasNX, bothZ = hasPZ && hasNZ;
-        if (bothX) return quint8(RailConnPx | RailConnNx);         // 对向双 X → EW 直线
-        if (bothZ) return quint8(RailConnPz | RailConnNz);         // 对向双 Z → NS 直线
-        if (ewPref && (hasPX || hasNX)) return hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
-        if (!ewPref && (hasPZ || hasNZ)) return hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
-        if (hasPX) return quint8(RailConnPx);
-        if (hasNX) return quint8(RailConnNx);
-        if (hasPZ) return quint8(RailConnPz);
-        if (hasNZ) return quint8(RailConnNz);
-        return 0;
+        // **t983 ① 统一口径（显式轴只连端点相对臂）**：既有定向轨（bit5 放置面向 / 既有连接位 c）轴上
+        //   单 / 双臂照连（直线 / 贯穿零回归），纯侧臂（平行旁轨单臂 / 双侧夹逼）一律 0 连接——不翻轴、
+        //   不吸成贯穿线（pre-fix bothZ 早退会把 EW 定向轨拽成 NS 贯穿 = 「平行放置吸附」的夹逼变体）。
+        //   轴取向读 ewPref（c 优先 bit5 兜底）：「连接位与轴偏好位可并存」的轨按现行走向守恒续连。真孤
+        //   新轨（state 全零，无面向无连接）唯一邻定轴（对该轨自身端点相对，MC 允许新轨朝唯一邻取向）。
+        if ((curState & RailAxisEWFlag) != 0 || c != 0) {
+            if (ewPref) return quint8((hasPX ? RailConnPx : 0) | (hasNX ? RailConnNx : 0));
+            return quint8((hasPZ ? RailConnPz : 0) | (hasNZ ? RailConnNz : 0));
+        }
+        if (hasPX && hasNX) return quint8(RailConnPx | RailConnNx); // fresh 对向双 X → EW 直线
+        if (hasPZ && hasNZ) return quint8(RailConnPz | RailConnNz); // fresh 对向双 Z → NS 直线
+        if (hasPZ) return quint8(RailConnPz);                       // 真孤新轨：唯一邻定轴（端点相对）；
+        if (hasNZ) return quint8(RailConnNz);                       //   单臂 tie-break 沿旧级联序 Z 先
+        if (hasPX) return quint8(RailConnPx);                       //   （fresh 恒 !ewPref，旧版 !ewPref
+        return hasNX ? quint8(RailConnNx) : quint8(0);              //   级联先火——t771(b) 动力轨坐弯位取 Pz 钉）
     }
 
     // ③ 普通轨非拐角非交汇（≤2 臂无垂直对）：贯穿轴 + 对轴成双并入。
     //   t812：旧「对轴两端都有轨 → 十字 4 位」分支退役——四向全连已在规则⑤直线化拦截，本路径
     //   bothX&&bothZ 不可达（保留注释防回归：交汇形态必须经规则⑤的稳定选轴，不得再产多臂）。
+    //   **t983 ①「平行相邻轨不互连，只有端点相对才连接」（MC 对齐；用户实测「三种铁轨平行放置吸附
+    //   怪异」）**：既有定向轨（bit5 放置面向 / 既有连接位 c）偏好轴向无邻时**保持 0 连接**，绝不翻轴
+    //   去连垂直旁轨——旁邻对既有定向轨是侧面相对非端点相对（旧版规则③兜底 cascade 会把平行旁轨当
+    //   连接 = 双双被拽翻轴「吸附」）；真孤新轨（state 全零）唯一邻定轴（对该轨自身端点相对，MC 允许
+    //   新轨朝唯一邻取向）。
     const bool bothX = hasPX && hasNX, bothZ = hasPZ && hasNZ;
+    const bool hasExplicitAxis = (curState & RailAxisEWFlag) != 0 || c != 0;
+    if (hasExplicitAxis) {
+        // **t983 ① 统一口径（同规则②）**：显式轴自格只连端点相对（轴上）臂——轴上单 / 双臂照连（直线 /
+        //   贯穿零回归），纯侧臂（平行旁轨单臂 / 双侧夹逼）0 连接（不偷垂直旁轨、不翻轴吸成贯穿线，轴偏
+        //   守恒）。轴取向读 ewPref（c 优先 bit5 兜底）。
+        if (ewPref) return quint8((hasPX ? RailConnPx : 0) | (hasNX ? RailConnNx : 0));
+        return quint8((hasPZ ? RailConnPz : 0) | (hasNZ ? RailConnNz : 0));
+    }
     bool throughX;
     if (bothX) throughX = true;
     else if (bothZ) throughX = false;
-    else if (ewPref && (hasPX || hasNX)) throughX = true;  // 单向 X（含既有轴偏）
-    else if (!ewPref && (hasPZ || hasNZ)) throughX = false; // 单向 Z
-    else throughX = bothX; // 防御（不可达：n != 0）
+    else throughX = hasPX || hasNX;      // 真孤新轨：唯一邻定轴
 
     quint8 r = 0;
     if (throughX) {
@@ -2477,18 +2523,10 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
     } else {
         if (hasPX && hasNX) { r |= RailConnPx; r |= RailConnNx; }
     }
-    // ④ 兜底：贯穿轴为空（fresh 轨旁只垂直单 stub 且轴偏相反）→ 若轴偏好向有空邻则取该向单端，
-    //   否则取任一单端（垂直 stub 也要能视觉/物理接上：场中新放轨没理由拒绝唯一邻居）。
-    if (r == 0) {
-        if (ewPref && (hasPX || hasNX))
-            r = hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
-        else if (!ewPref && (hasPZ || hasNZ))
-            r = hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
-        else if (hasPX) r = RailConnPx;
-        else if (hasNX) r = RailConnNx;
-        else if (hasPZ) r = RailConnPz;
-        else if (hasNZ) r = RailConnNz;
-    }
+    // ④ 兜底（t983 ① 后不可达）：轴选定的各前置路（bothX / bothZ / 偏好轴有邻 / 真孤新轨唯一邻定轴）
+    //   已保证贯穿轴至少一个连接位；本兜底自 t983 起不再「任取单端救垂直 stub」——旧版在「既有定向轨
+    //   偏好轴无邻」时抓垂直旁轨单端（hasPZ/hasNZ 兜底级联）正是「平行放置吸附怪异」的根因之一（见 ③
+    //   段注释），该形态现于 hasExplicitAxis 早退 0。保留直通 return + 注释防回归：垂直单 stub 永不建连。
     return r;
 }
 

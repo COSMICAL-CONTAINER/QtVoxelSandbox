@@ -1279,10 +1279,8 @@ void MinecartManager::resolveCartCollisions(World *world)
         //   腰位闸兜住：宽容列扫的 ±1 解析必经「实心格 + 骑乘高一致」双关（平地车隔地板钉下方轨的
         //   高差 0.9375 >> kRideScanTol 恒拒；rise>0.94 的地板下坡段例外在落点腰位 isCollidable 处再拒
         //   —— 恰是扫描判可达的那个实心格）。
-        const int ryTgt = colRailY(tx, tz, landX, landZ);
-        if (ryTgt >= 0 && std::fabs(float(ryTgt - rySelf)) <= 1.0f) {
-            const int byc = int(std::floor(c.pos.y() - 0.1f));
-            if (!world->isCollidable(int(std::floor(landX)), byc, int(std::floor(landZ)))) {
+        const int byc = int(std::floor(c.pos.y() - 0.1f));
+        if (!world->isCollidable(int(std::floor(landX)), byc, int(std::floor(landZ)))) {
                 // t943 ② 链可达闸（「多车卡出 V 字到隔壁」根因收口）：近层闸只验「目标列 ±1 层有轨」，
                 //   没验那根轨是不是**本轨链**的延续 —— 跨线立体场景（本链在目标列的延续轨在 rySelf+1，
                 //   同列另有下线 / 桥下线轨在 rySelf−1）里，宽容列扫自 topY 向下先摸到的是**下线**轨
@@ -1291,14 +1289,14 @@ void MinecartManager::resolveCartCollisions(World *world)
                 //   照旧钳当前格边界内：① 本格 state 持该位移向连接位（RailConnPx/Nx/Pz/Nz ——
                 //   pickTrackStep / t937 goldenRailChainStep 消费的同一物理连接权威，链端 / 孤轨向位移
                 //   天然被拒）；② 自 rySelf 三高探针沿位移向解到的链层差（railProbeDelta 单一权威）
-                //   == ryTgt−rySelf（落点 = 本链坡面延续层，而非同列并行链）。正常行驶的跨格（含爬坡
-                //   落点已在坡面高度）不经本闸（走 stepCartAlongRail 逐格心重选验证）。
-                //   review0830 #12 登记取舍（不计缺陷，知情保守向）：目标列同时有自层延续轨与**头顶并行
-                //   线**轨（Δ=+1）时，宽容列扫自 topY 向下先摸到上轨 → chainDelta 读到的是上轨层差 →
-                //   != ryTgt−rySelf → 拒 —— 下层线两车分离被永久钳在格边界内（不崩溃、不跳线；挤压
-                //   速度一致性兜底收敛，持续挤压对以耦合速度整体被坡道重力带走）。修法需列扫带「目标层
-                //   精确解」或链身份标记（引入第二套轨层判定 / 跨帧链 ID），收益面窄（立体同列并行线
-                //   +同格挤压的复合布局），登记不修。
+                //   解出**链延续精确层**并验其本体是轨。
+                //   **t983 ① 翻案 review0830-B #12（「under-line parallel-track tradeoff」登记项清算）**：
+                //   旧判据拿 chainDelta 对拍宽容列扫首轨层 ryTgt——「目标列同时有自层延续轨 + 头顶并行
+                //   线轨」时列扫先摸到上轨 → ryTgt 错层 → 恒拒，下层线两车分离被永久钳在格边界（登记面）。
+                //   改为**目标层精确解**：链延续层 = rySelf + chainDelta（三高探针值域 {-1,0,+1} = 隐式
+                //   近层闸，层约束不放宽），直接验该层格本体是轨；附加 ryChain ≤ floor(pos.y)（位移后
+                //   下一帧宽容列扫窗口顶）保「位移后 pinCartY 必能解析」不变量。头顶并行线轨不再劫持
+                //   判定，写墙防线（腰位闸）照旧前置。
                 const quint8 selfCon = quint8(world->stateAt(cx, rySelf, cz) & 0x0F);
                 const quint8 connBit = axisX ? (step > 0 ? quint8(BlockRegistry::RailConnPx)
                                                          : quint8(BlockRegistry::RailConnNx))
@@ -1308,10 +1306,12 @@ void MinecartManager::resolveCartCollisions(World *world)
                     { world->blockAt(tx, rySelf, tz),
                       world->blockAt(tx, rySelf + 1, tz),
                       world->blockAt(tx, rySelf - 1, tz) });
-                if ((selfCon & connBit) != 0 && chainDelta != INT_MIN
-                    && chainDelta == ryTgt - rySelf)
-                    return s; // 目标列近层有轨 + 落点腰位非实体 + 落点仍在本链可达层 → 放行
-            }
+                if ((selfCon & connBit) != 0 && chainDelta != INT_MIN) {
+                    const int ryChain = rySelf + chainDelta;
+                    if (ryChain <= int(std::floor(c.pos.y()))
+                        && BlockRegistry::isRail(world->blockAt(tx, ryChain, tz)))
+                        return s; // 目标列链延续层精确有轨 + 落点腰位非实体 → 放行
+                }
         }
         const float bound = (step > 0) ? float(cellCur + 1) - 1e-3f : float(cellCur) + 1e-3f;
         return (bound - cur) / d; // 钳到边界内（d=±1 → 同号同模换算）

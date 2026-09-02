@@ -1048,11 +1048,13 @@ void PlayerController::updateRaycast()
     //   选中方块本体，spec「爬梯时挖掘优先选中梯子 → 应像火把不优先选中、可透视穿过」）；仅当准星完全
     //   落在木梯视觉面（贴墙薄 quad 的精确 sub-AABB）时才命中木梯本身（可拆梯）。两标志位独立，故火把 / 木梯
     //   均在选体模式下「可选中、空气穿过」，与相机距离 / 桶射线的 Default / HitWater 互不干扰。
-    // t938：再纳入 HitRail —— 铁轨族整格命中（轨格全高可选）：修「瞄轨格中上部射线穿到后格 → 挖轨变挖后面 /
-    //   手持矿车右键放不上轨」（轨的屏幕可点击区域只剩 2/16 薄板一线）。轨上方空域照旧透视（t638③ 保留）；
-    //   相机距离射线（updateCameraDistance 传 HitPartial）不设本位 → 相机对轨仍是薄板，零回归。
+    // t983：铁轨族不再传 HitRail 整格命中（该位随特判一并移除）——preciseMode（HitTorch 位在）下轨走
+    //   raycastAABBs 薄板 sub-AABB 精确命中（真实相交盒 ~2/16）。t938 整格口径让射线从轨格顶面进入
+    //   （上部 15/16 是空气）即抢命中脚底轨 = 用户实测「站轨上前向放置前向铁轨，准星已指目标格却选不中，
+    //   实际选中脚底下的轨」；终局口径 = 指哪指哪：瞄轨板本体仍命中轨（挖轨 / 手持矿车上轨保持），瞄
+    //   轨格上部空气穿透命中前方目标。相机距离射线（HitPartial）对轨本就薄板，零改动。
     const RayHit h = raycastVoxel(*m_world, position(), lookDirection(), kReach,
-                                  RayFilter::HitTorch | RayFilter::HitLadder | RayFilter::HitRail);
+                                  RayFilter::HitTorch | RayFilter::HitLadder);
 
     // t212 命中点 Y（供 slab 上/下半放置 + 互补半合并判定，placeBlock 读）。lookDirection 已归一、dist 为起点
     //   到命中面欧氏距离（见 raycast.h）→ 命中点 = 眼位 + 视线*dist。**每帧刷新**（不随下方 changed 早退）：
