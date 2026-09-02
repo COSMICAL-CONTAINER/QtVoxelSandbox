@@ -22354,6 +22354,257 @@ Item {
                           ;
     }
 
+    // ── P-t981 V 形轨谷一次停驻 + 嵌入车失联冻结清算探针（MinecartManager 直编；spec「矿车放在 V 形铁轨
+    //    滑落到底部时卡住、来回振荡最后才停——谷底应一次平滑减速停驻（或按速度通过），不许往复振荡」
+    //    + review0831 #28 登记项（嵌入车 × 采样失联 = 每 tick 回退清速冻结）同域清算）──
+    //   根因分账（两症不同源——实证非同症，一并收口）：
+    //   ① 振荡：V 形凹谷格（行进轴两侧邻轨皆 +1 → railRiseAt 的 2|axis-0.5| 谷面）物理全量保守 —— 下坡
+    //      半幅 kCartSlopeGravity 加速、上坡半幅同量减速，谷内零耗散；t863① 失速反溜（-0.5）与 t909②
+    //      静置闸 kick（+1.0）在两壁停驻点反复再供能 → 两壁间极限环往复（腿 (a) 空场即复现 → #28 的
+    //      「嵌入冻结」非此症根因）。修 = tryValleyBottomCapture：|speed| ≤ kCartValleyEscape(=重力终端
+    //      10 —— 纯重力可达速度全捕) 的车进谷格即按「制动到谷心」速度律（a0 = v²/2d 每 tick 重算自校正）
+    //      一次平滑减速停驻谷心（谷心梯度 0 = 静置闸稳定不动点，停驻后所有闸门一致静止）；boost / 冲量
+    //      （>10）按速度通过。
+    //   ② review0831 #28：stepCartAlongRail 受阻三分法 !sampled 分支无条件回退+清速、不看 embeddedAtEntry
+    //      豁免 —— 嵌入车遇失联子步（前探列无轨 / 列扫容差拒）每 tick 被打回子步起点 = 永久冻结（推力 /
+    //      动力喂速全被吞）。修 = 补 haveFreePos 门（同 uphill 分支口径）：非嵌入回退、嵌入车豁免延续直至
+    //      脱出。
+    //   腿：
+    //   (a) 谷一次停驻：W(x0,Y+1) / V(x0+1,Y) / E(x0+2,Y+1) 三格轨；W 上 spawn 滑落 → x 向反转数 == 0
+    //       （pre-fix 极限环 ≥2）+ 终位 V 谷心 ±0.06 / 谷面高 ±0.03 + 静止守卫（60 tick 位移 <1e-3）；
+    //   (b) 按速度通过：西端 8 格通电动力轨（各自 RedstoneBlock 直供）接 V 谷；boost ~11.6 入谷 > 逃逸阈
+    //       → maxX 越谷心东侧 ≥0.9（谷没留住 = 通过；被捕车恒停谷心 ±0.06 不可能越过）；
+    //   (c) 嵌入车失联解冻（#28）：平轨 (x0..x0+3,Y) 骑乘东行，越过 (x0+2) 格心后将 (x0+3) 轨换 Stone
+    //       （车体前半已探入该格 = 入点嵌入）→ 续骑 → 车越过 x0+3.2（豁免推进穿石至死端飞出；pre-fix 恒
+    //       被回退冻结在 x0+2.8 上下）；
+    //   (d) 源码钉：两处捕获调用 / haveFreePos 门 / kCartValleyEscape / 捕获实现签名。
+    {
+        // ── (a) 谷一次停驻。rig 选址：footprint x0-1..x0+3 × z0-1..z0+1 × Y-1..Y+2。──
+        int xa = -1, za = -1;
+        for (int zz = 3; zz < 94 && xa < 0; zz += 2)
+            for (int xx = 6; xx + 3 < 96 && xa < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -1; dx <= 3 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xa = xx; za = zz; }
+            }
+        bool okA = false;
+        int revA = -1;
+        if (xa < 0) {
+            qInfo().noquote() << "  [t981 diag] a: no clear rig area";
+        } else {
+            w.setBlock(xa,     kRigY + 1, za, BR::Rail, 0); // 西壁（V 西邻 +1）
+            w.setBlock(xa + 1, kRigY,     za, BR::Rail, 0); // V 谷格（两侧皆 +1 → 谷面 2|fx-0.5|）
+            w.setBlock(xa + 2, kRigY + 1, za, BR::Rail, 0); // 东壁
+            tickN(w, 2);
+            const bool valleyOk =
+                BlockRegistry::railProbeDelta({ w.blockAt(xa + 2, kRigY, za),
+                                                w.blockAt(xa + 2, kRigY + 1, za),
+                                                w.blockAt(xa + 2, kRigY - 1, za) }) == 1;
+            MinecartManager carts;
+            carts.spawnCart(xa, kRigY + 1, za, &w); // 单端连接（东）→ 定向 +X 滑落向
+            const float vCenter = float(xa + 1) + 0.5f;
+            QVector3D prev = carts.posAt(0);
+            float accum = 0.0f;
+            int state = 0;
+            revA = 0;
+            bool inRig = true;
+            for (int t = 0; t < 600 && inRig; ++t) {
+                carts.tickPushedCarts(0.016, &w);
+                const QVector3D p = carts.posAt(0);
+                accum += p.x() - prev.x();
+                if (state == 0) {
+                    if (accum > 0.25f) { state = 1; accum = 0.0f; }
+                    else if (accum < -0.25f) { state = -1; accum = 0.0f; }
+                } else if (state > 0 && accum < -0.25f) { ++revA; state = -1; accum = 0.0f; }
+                else if (state < 0 && accum > 0.25f) { ++revA; state = 1; accum = 0.0f; }
+                if (std::fabs(p.y() - prev.y()) > 0.55f) inRig = false; // Y 平滑守卫
+                prev = p;
+            }
+            const QVector3D fin = carts.posAt(0);
+            bool restOk = true;
+            for (int t = 0; t < 60 && restOk; ++t) { // 静止守卫：捕获停驻后钉死（无 kick / 反溜再起）
+                carts.tickPushedCarts(0.016f, &w);
+                if ((carts.posAt(0) - fin).length() > 1e-3f) restOk = false;
+            }
+            okA = valleyOk && revA == 0 && inRig && restOk
+                && std::fabs(fin.x() - vCenter) <= 0.06f
+                && std::fabs(fin.y() - (float(kRigY) + 0.45f)) <= 0.03f;
+            if (!okA)
+                qInfo().noquote() << "  [t981 diag] a valley" << valleyOk << "rev" << revA
+                                  << "inRig" << inRig << "rest" << restOk << "fin" << fin;
+            carts.clearAll();
+            w.setBlock(xa,     kRigY + 1, za, BR::Air, 0);
+            w.setBlock(xa + 1, kRigY,     za, BR::Air, 0);
+            w.setBlock(xa + 2, kRigY + 1, za, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // ── (b) 按速度通过。rig 选址：footprint x0-10..x0+1 × z0-1..z0+1 × Y-1..Y+2。──
+        bool okB = false;
+        int xb = -1, zb = -1;
+        for (int zz = 3; zz < 94 && xb < 0; zz += 2)
+            for (int xx = 12; xx + 1 < 96 && xb < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -10; dx <= 1 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xb = xx; zb = zz; }
+            }
+        if (xb < 0) {
+            qInfo().noquote() << "  [t981 diag] b: no clear rig area";
+        } else {
+            // 动力平台与谷壁**同层**（R+1）—— 平台直通西壁零爬阶耗能，入谷速 = boost 全额（> 逃逸阈）。
+            for (int i = -9; i <= -2; ++i) { // 8 格通电动力轨（各自 RedstoneBlock 直供兼支撑）
+                w.setBlock(xb + i, kRigY,     zb, BR::RedstoneBlock, 0);
+                w.setBlock(xb + i, kRigY + 1, zb, BR::GoldenRail, 0);
+            }
+            w.setBlock(xb - 1, kRigY + 1, zb, BR::Rail, 0); // 西壁平段（东邻 V 低一格 → 跨谷壁）
+            w.setBlock(xb,     kRigY,     zb, BR::Rail, 0); // V 谷格（西邻上格 +1 / 东邻上格 +1）
+            w.setBlock(xb + 1, kRigY + 1, zb, BR::Rail, 0); // 东壁（东死端）
+            tickN(w, 8);
+            const bool poweredOk = (w.stateAt(xb - 2, kRigY + 1, zb) & BR::GoldenRailStateOnFlag) != 0;
+            MinecartManager carts;
+            carts.spawnCart(xb - 9, kRigY + 1, zb, &w); // 西端格心（静置闸不弹射 —— pushEmptyCart 起步）
+            const float valleyCenterB = float(xb) + 0.5f;
+            bool pushed = carts.pushEmptyCart(&w, QVector3D(float(xb - 9) - 0.2f,
+                                                             float(kRigY + 1) + 0.45f,
+                                                             float(zb) + 0.5f), 1.0f, 0.0f);
+            float maxX = carts.posAt(0).x();
+            for (int t = 0; t < 400; ++t) {
+                carts.tickPushedCarts(0.016f, &w);
+                if (carts.aliveAt(0)) maxX = std::max(maxX, carts.posAt(0).x());
+            }
+            okB = poweredOk && pushed && maxX > valleyCenterB + 0.9f; // 越谷心东侧 = 未被捕（通过）
+            if (!okB)
+                qInfo().noquote() << "  [t981 diag] b pow" << poweredOk << "push" << pushed
+                                  << "maxX" << maxX << "center" << valleyCenterB;
+            carts.clearAll();
+            for (int i = -9; i <= -2; ++i) {
+                w.setBlock(xb + i, kRigY,     zb, BR::Air, 0);
+                w.setBlock(xb + i, kRigY + 1, zb, BR::Air, 0);
+            }
+            w.setBlock(xb - 1, kRigY + 1, zb, BR::Air, 0);
+            w.setBlock(xb,     kRigY,     zb, BR::Air, 0);
+            w.setBlock(xb + 1, kRigY + 1, zb, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // ── (c) 嵌入车失联解冻（review0831 #28）。rig 选址：footprint x0-1..x0+6 × z0-1..z0+1 × Y-1..Y+2。──
+        bool okC = false;
+        int xc = -1, zc = -1;
+        for (int zz = 3; zz < 94 && xc < 0; zz += 2)
+            for (int xx = 6; xx + 6 < 96 && xc < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -1; dx <= 6 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xc = xx; zc = zz; }
+            }
+        if (xc < 0) {
+            qInfo().noquote() << "  [t981 diag] c: no clear rig area";
+        } else {
+            for (int i = 0; i <= 3; ++i) w.setBlock(xc + i, kRigY, zc, BR::Rail, 0); // 平轨 4 格（东端将嵌石）
+            tickN(w, 2);
+            MinecartManager carts;
+            carts.spawnCart(xc, kRigY, zc, &w);
+            const bool mounted = carts.tryMount(QVector3D(float(xc) + 0.5f, float(kRigY) + 2.0f,
+                                                          float(zc) + 0.5f), QVector3D(0, -1, 0), 4.0f);
+            bool placed = false;
+            float maxX = 0.0f;
+            QVector3D cp;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp); // W 持续东行
+                carts.tickPushedCarts(0.016, &w);
+                cp = carts.posAt(0);
+                maxX = std::max(maxX, cp.x());
+                // 越过 (x0+2) 格心（(x0+3) 轨在位时格心重选已过）→ 轨换 Stone：车体前半探入石格
+                //   （maxX = fx+1.0 > x0+3）= 入点嵌入；下一子步前探列扫描容差拒（石下无轨）→ 失联。
+                if (!placed && cp.x() >= float(xc + 2) + 0.5f) {
+                    w.setBlock(xc + 3, kRigY, zc, BR::Stone, 0);
+                    placed = true;
+                }
+            }
+            // post-fix：豁免推进穿石至石格格心 → deadEnd 停驻（速度 <3 分支；前探列无轨不构成坡顶飞出）
+            //   → maxX ≥ x0+3.5；pre-fix：每 tick 回退清速恒冻结在 ~x0+2.75（ == 用户「推不动」）。
+            okC = mounted && placed && maxX > float(xc) + 3.2f;
+            if (!okC)
+                qInfo().noquote() << "  [t981 diag] c mount" << mounted << "placed" << placed
+                                  << "maxX" << maxX << "fin" << carts.posAt(0);
+            carts.clearAll();
+            for (int i = 0; i <= 2; ++i) w.setBlock(xc + i, kRigY, zc, BR::Air, 0);
+            w.setBlock(xc + 3, kRigY, zc, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // ── (d) 源码钉（任一消失即红）。──
+        const QString exeDir981 = QCoreApplication::applicationDirPath();
+        const QString root981 = QDir(exeDir981 + QStringLiteral("/..")).absolutePath();
+        auto readSrc981 = [&root981](const QString &rel) -> QString {
+            QFile f(root981 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mc981 = readSrc981(QStringLiteral("src/Entities/minecartmanager.cpp"));
+        const QString mh981 = readSrc981(QStringLiteral("src/Entities/minecartmanager.h"));
+        const bool okD1 = mc981.contains(QStringLiteral(
+            "} else if (tryValleyBottomCapture(c, world, ry, dt)) {"));
+        const bool okD2 = mc981.contains(QStringLiteral(
+            "if (tryValleyBottomCapture(c, world, railY, dt)) {"));
+        const bool okD3 = mh981.contains(QStringLiteral(
+            "static constexpr float kCartValleyEscape = 10.0f;"));
+        const bool okD4 = mc981.contains(QStringLiteral(
+            "bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, qreal dt)"));
+        const bool okD5 = mc981.contains(QStringLiteral(
+            "if (haveFreePos) {\n                        c.pos.setX(preX);"));
+        const bool okD6 = mc981.contains(QStringLiteral("review0831 #28"));
+        const bool okT981 = okA && okB && okC && okD1 && okD2 && okD3 && okD4 && okD5 && okD6;
+        if (!okT981) ++totalFail;
+        if (!okT981)
+            qInfo().noquote() << "  [t981 diag] a" << okA << "b" << okB << "c" << okC
+                              << "| d" << okD1 << okD2 << okD3 << okD4 << okD5 << okD6;
+        qInfo().noquote() << (okT981 ? "PASS" : "FAIL")
+                          << "| t981 V-valley one-pass settle + embedded sampling-lost freeze"
+                             " (review0831 #28): an unpowered V-valley cell is fully conservative"
+                             " physics - downhill half accelerates by kCartSlopeGravity, uphill half"
+                             " decelerates by the same, zero dissipation inside the valley - while the"
+                             " stall slide-back (-0.5) and the static-start kick (+1.0) re-pump energy"
+                             " at each wall stop, so a cart sliding to the bottom enters a wall-to-wall"
+                             " limit cycle instead of settling (user report: stuck oscillating, only"
+                             " stops at the end). Fix adds tryValleyBottomCapture: a cart moving at or"
+                             " below kCartValleyEscape (= kCartSlopeDownSpeed 10, the gravity terminal"
+                             " - every purely gravity-reachable arrival speed is below it, boost and"
+                             " collision impulses above it) entering a V-valley cell (straight rail,"
+                             " both axis neighbors +1, same geometry as the railRiseAt valley branch)"
+                             " is taken over by a brake-to-center speed law (a = v^2/2d recomputed per"
+                             " tick, self-correcting), gliding to a single smooth stop at the valley"
+                             " bottom center where the gradient is zero and every gate agrees on rest;"
+                             " golden rails keep their own brake/boost semantics and fast carts pass"
+                             " through by speed. Same-domain registration review0831 #28 is verified"
+                             " NOT this symptom (leg (a) reproduces the oscillation with no embedded"
+                             " block) but is settled here: the !sampled branch of the stepCartAlongRail"
+                             " blocked-triage reverted and zeroed speed unconditionally, ignoring the"
+                             " embeddedAtEntry escape exemption - an embedded cart hitting a"
+                             " sampling-lost substep (probe column with no reachable rail) was reverted"
+                             " every tick and frozen solid (push feed swallowed; recovery only by"
+                             " breaking the overlapping block). Fix gates the revert on haveFreePos"
+                             " (same shape as the uphill branch): non-embedded carts still revert,"
+                             " embedded carts keep the carry-overlap exemption until they escape."
+                             " Probe legs: (a) cart spawned on the west wall of a 3-cell V glides down"
+                             " and settles with ZERO x-direction reversals (pre-fix limit cycle makes"
+                             " >=2), parks within 0.06 of the valley center at surface height and"
+                             " stays pinned for 60 ticks; (b) a boost-fed cart (8-cell powered golden"
+                             " run, arrival ~11.6 > escape threshold) crosses the valley center"
+                             " eastward by >=0.9 - the valley does not capture fast traffic; (c)"
+                             " mounted eastbound cart whose forward rail is swapped to stone after"
+                             " passing a cell center (body already probing the cell = embedded at"
+                             " entry) escapes past x0+3.2 post-fix (pre-fix frozen forever at ~x0+2.8"
+                             " = the user's immovable cart); (d) source pins for both capture call"
+                             " sites, the escape threshold, the capture implementation, the"
+                             " haveFreePos-gated revert and the #28 registration marker"
+                          ;
+    }
+
     // ── P-t944 上坡顶方块阻挡探针（MinecartManager 直编；spec「上坡处上方放方块 → 矿车被挡住不能穿墙
     //    过去（移动积分对坡向阻挡格的碰撞）」）──
     //   根因：轨态推进（stepCartAlongRail）是「轨道特权」通道 —— 只受轨连接位约束、从不读世界碰撞；

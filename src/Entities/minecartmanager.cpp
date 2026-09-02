@@ -476,6 +476,68 @@ bool MinecartManager::tryStallSlideback(Cart &c, World *world, int railY)
     return true;
 }
 
+// t981 V 谷底一次停驻捕获（实现；契约见 minecartmanager.h）。
+//   症状：矿车放 V 形轨谷（两侧斜坡相对成谷）滑落到底后卡住来回振荡最后才停 —— 根因 = 谷格物理全量
+//   保守（下坡半幅 kCartSlopeGravity 加速 / 上坡半幅同量减速，谷内零耗散）+ t863① 反溜（-0.5）与
+//   t909② 静置闸 kick（+1.0）在两壁停驻点反复再供能 → 两壁间极限环往复。修 = 「制动到谷心」速度律：
+//   a0 = v²/(2·d)（d = 沿运动向到谷心剩余距离，每 tick 用当前 v/d 重算 —— 常减速 PROFILE 下 v²=2·a0·d
+//   是自校正不变量，FP 漂移逐 tick 吸收），v 随 d 同步归零 → 一次平滑减速停驻谷底中心（谷心梯度 0 =
+//   静置闸稳定不动点：|hF-hB| 在 ±0.25 采样窗内恰为 0 → 不 kick、不反溜、永久静止），无往复。
+//   域（四重闸，任一不满足交还既有物理）：
+//   · 静置（|speed| ≤ 1e-3）不捕 —— 静置闸是谷心不动点的守门人（谷壁静置由它 kick 送入谷、谷心静置
+//     由它保持静止），本律只管「运动的」车；
+//   · |speed| > kCartValleyEscape（= 重力终端 10，boost 12.8 / 碰撞冲量可达）不捕 —— 「按速度通过」：
+//     凡纯重力可达的速度全部捕获，只有外源供能的车穿谷而过（终端速度按 exp 收敛恒自下方逼近 10，
+//     严格 < 10；boost 严格 > 10 —— 阈取 10 使两族零重叠）；
+//   · 金轨格不捕 —— 断电金轨刹车（t939③ brake）/ 通电 boost 既有轨型语义优先，本修不扩面（R-a 口径）；
+//   · 非 V 谷格不捕 —— 谷判定与 railRiseAt 谷面分支同几何同源（直轨〔非拐角 / 非 3+ 连接〕+ 行进轴
+//     两侧三高探针皆 +1 → rise = 2|axis-0.5| 谷面），普通坡 / 平轨 / 拐角零触碰。
+//   已越谷心正在爬对壁（d < 0）不捕：本 tick 放行既有上坡减速（高能穿透同一口径 —— 捕获只发生在
+//   「面向谷心」的半幅），车在对面壁失速回落后自然进入捕域被接住。
+bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, qreal dt)
+{
+    if (!world || railY < 0 || dt <= 0.0) return false;
+    if (std::fabs(c.speed) <= 1e-3f) return false;            // 静置 → 静置闸管辖（谷心不动点）
+    if (std::fabs(c.speed) > kCartValleyEscape) return false; // 高能 → 按速度通过
+    const int bcx = int(std::floor(c.pos.x()));
+    const int bcz = int(std::floor(c.pos.z()));
+    if (world->blockAt(bcx, railY, bcz) == BlockRegistry::GoldenRail) return false; // 金轨语义优先
+    // V 谷判定（railRiseAt 谷面分支同源镜像：同轴取法 / 同拐角十字排除 / 同三高探针）。
+    const auto dlt = [&](int dx, int dz) {
+        return BlockRegistry::railProbeDelta(
+            { world->blockAt(bcx + dx, railY, bcz + dz),
+              world->blockAt(bcx + dx, railY + 1, bcz + dz),
+              world->blockAt(bcx + dx, railY - 1, bcz + dz) });
+    };
+    const quint8 rst = world->stateAt(bcx, railY, bcz);
+    const quint8 con = quint8(rst & 0x0F);
+    const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
+    const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
+    const bool cpz = (con & BlockRegistry::RailConnPz) != 0;
+    const bool cnz = (con & BlockRegistry::RailConnNz) != 0;
+    const int nConn = int(cpx) + int(cnx) + int(cpz) + int(cnz);
+    const bool isCorner = (nConn == 2 && ((cpx || cnx) && (cpz || cnz)));
+    if (isCorner || nConn >= 3) return false;                 // 拐角 / 十字无谷面（mesher 同判）
+    const bool ew = (cpx || cnx) || (nConn == 0 && (rst & BlockRegistry::RailAxisEWFlag) != 0);
+    bool valley = false;
+    if (ew) { const int dp = dlt(1, 0), dn = dlt(-1, 0); valley = dp > 0 && dn > 0; }
+    else    { const int dp = dlt(0, 1), dn = dlt(0, -1); valley = dp > 0 && dn > 0; }
+    if (!valley) return false;
+    // 「制动到谷心」速度律：d = 沿运动向到谷心距离（运动向 = dir × speed 符号 —— 负速倒行对称）。
+    const float axisPos = ew ? c.pos.x() : c.pos.z();
+    const float center = std::floor(axisPos) + 0.5f;
+    const float dirAxis = ew ? c.dirX : c.dirZ;               // 轨向四向 → 恒 ±1
+    const float vAlong = c.speed * dirAxis;                   // 带符号沿轴速度（+ = 朝 +轴）
+    const float d = (vAlong >= 0.0f) ? (center - axisPos) : (axisPos - center);
+    if (d < -1e-4f) return false;                             // 越谷心爬对壁 → 放行（回落后再捕）
+    const float v = std::fabs(c.speed);
+    const float dd = std::max(d, 1e-3f);
+    const float dv = (v * v / (2.0f * dd)) * float(dt);       // a0·dt（a0 = v²/2d，每 tick 重算自校正）
+    if (dv >= v) c.speed = 0.0f;                              // 本 tick 内到心 → 停驻（残余 ≤ a0·dt² ≈ cm 级）
+    else c.speed -= (c.speed >= 0.0f) ? dv : -dv;
+    return true;
+}
+
 // t863② 地面 / 薄支撑真顶探测（头注释见 .h）：t865/t867 同族 —— World::supportTopYAt 碰撞真顶单一权威。
 float MinecartManager::groundSupportTopWithin(World *world, float x, float z,
                                               int topCellY, float refBottom) const
@@ -709,8 +771,9 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
     //   位 → 一次梯度失联即连锁打开穿墙豁免：子步 N 失联 → anchorFree=false → 子步 N+1 uphill 判定
     //   成功也不再回钳 → 重叠位继续推进 → 下一 tick 入点探测发现车已重叠 → 整 tick 豁免 → 车完整
     //   穿过本应挡住它的方块）。拆为：embeddedAtEntry = tick 入点探测结果（本 tick 常量，**只**作
-    //   豁免开关）；lastFreePos = 最近一次探测自由的提交位（只作二分 lo 端）。梯度失联只损失一次
-    //   0.0x 格推进（回退本子步 pre），不再连锁。
+    //   豁免开关）；lastFreePos = 最近一次探测自由的提交位（只作二分 lo 端）。梯度失联在**非嵌入**车
+    //   只损失一次 0.0x 格推进（回退本子步 pre），不再连锁；入点嵌入车的失联子步同 uphill 分支延续
+    //   逃逸豁免（带重叠推进直至脱出 —— t981 清算 review0831 #28，见受阻分支内注释）。
     Cart anchorProbe = c;
     const bool embeddedAtEntry = cartBodyBlockedAt(anchorProbe, world);
     QVector3D lastFreePos = c.pos; // 最近一次探测自由位（入点自由时即入点位；入点嵌入时无自由锚）
@@ -815,10 +878,17 @@ void MinecartManager::stepCartAlongRail(Cart &c, World *world, float dt)
                     }
                     // 入点即嵌入 → 本 tick 逃逸豁免：带重叠继续推进直至脱出（防永久冻结）。
                 } else if (!sampled) {
-                    c.pos.setX(preX); // 梯度失联 → 回退本子步起点（上一提交位）：重叠位不保留
-                    c.pos.setZ(preZ);
-                    c.speed = 0.0f;   // 受阻即停（指向阻挡格的穿入分量 = 全部沿轨速度，单标量）
-                    break;
+                    // t981 清算 review0831 #28：采样失联回退**仅非嵌入车**（haveFreePos = 最近自由锚存在）
+                    //   —— 入点嵌入车与 uphill 分支同口径走逃逸豁免（带重叠推进直至脱出）。旧版无条件回退
+                    //   + 清速把嵌入车每 tick 打回本子步起点 = 永久冻结（推力 / 动力喂速全被吞，「防永久
+                    //   冻结」豁免契约在该路径失效，拆掉重叠方块才恢复）。
+                    if (haveFreePos) {
+                        c.pos.setX(preX); // 梯度失联 → 回退本子步起点（上一提交位）：重叠位不保留
+                        c.pos.setZ(preZ);
+                        c.speed = 0.0f;   // 受阻即停（指向阻挡格的穿入分量 = 全部沿轨速度，单标量）
+                        break;
+                    }
+                    // 入点即嵌入 → 逃逸豁免延续（同 uphill 分支）：带重叠继续推进直至脱出。
                 }
             }
         }
@@ -1061,6 +1131,9 @@ void MinecartManager::tickPushedCarts(qreal dt, World *world)
             const float targetV = (c.speed >= 0.0f ? 1.0f : -1.0f) * kCartBoostSpeed;
             const float alpha = 1.0f - std::exp(-kCartAccel * float(dt));
             c.speed += (targetV - c.speed) * alpha;
+        } else if (tryValleyBottomCapture(c, world, ry, dt)) {
+            // t981 V 谷底捕获接管本 tick 坡向物理（速度律已写 c.speed；推进照走下方 stepCartAlongRail，
+            //   钉面 / 俯仰照旧 —— 谷壁滑降段俯仰随谷面连续，停驻谷心后归 0）。
         } else if (slope == INT_MIN || slope >= 0) { // 平 / 上坡 / 无轨
             if (slope > 0) {
                 // t909③ 上坡重力减速（g·sin45° = kCartFallGravity·0.7071 ≈ 19.8 blocks/s²，与世界重力
@@ -1673,7 +1746,11 @@ void MinecartManager::tickRiddenCart(qreal dt, World *world, float wishX, float 
                 else if (grad < -kCartSlopeGradMin) slope = -1;
             }
         }
-        if (slope == INT_MIN || slope >= 0) { // 平 / 上坡 / 无轨
+        if (tryValleyBottomCapture(c, world, railY, dt)) {
+            // t981 V 谷底捕获接管（与空车路径同一函数同一速度律 —— t943①「载人无输入滑行与空车同物理」
+            //   口径延续：同 V 同停驻语义，无输入骑行滑进谷底同样一次停驻；有输入（W/S）不进 coasting，
+            //   玩家供能照旧爬出，动力轨段在 coasting 前置闸已排除）。
+        } else if (slope == INT_MIN || slope >= 0) { // 平 / 上坡 / 无轨
             if (slope > 0) {
                 // 上坡重力减速（g·sin45°，同空车 t909③ —— v²=v0²−2ad，顶点前速度线性归零非指数爬行）。
                 const float dec = kCartSlopeGravity * float(dt);
