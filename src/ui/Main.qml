@@ -9011,9 +9011,9 @@ Window {
                             //   未驯服走 aiWolf 敌对玩家（追击咬击）；驯服后跟随主人 + 防御主人目标（攻击 / 受击来源的 mob）。
                             //   受击红闪（同既有 hurtFlashAt>0 → baseColor 红模式）。尾巴为**独立子 Model**（spec「尾巴角度
                             //   示血量」）：绕尾根枢旋转 —— 满血竖起（~35°）、残血下垂（~140°），机制等价 MC 狼尾随血量升降。
-                            //   坐姿（wolfSittingAt=true）→ t878② 起由 **MobModel sitPose 几何坐姿**承载（躯干上仰
-                            //   臀落地 + 头抬起微仰 + 后腿前折 + 前腿垂直撑地；替代旧「整模压缩 + 前倾」变换——用户判
-                            //   「身体前倾趴下」非坐）。眼为子节点（纯色 NoLighting，同猪眼模式）。
+                            //   坐姿（wolfSittingAt=true）→ t878② 起由 **MobModel sitPose 几何坐姿**承载
+                            //   （t987 前爪根锚链：臀部真落地 + 前腿站姿原位立撑 + 后腿折叠贴身 + 头微仰；
+                            //   替代旧「整模压缩 + 前倾」变换）。眼为子节点（纯色 NoLighting，同猪眼模式）。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobWolf
                                 property real wolfSit: { const _r = mon.revision; return _r >= 0 ? (entityManager.wolfSittingAt(index) ? 1 : 0) : 0 }
@@ -9061,12 +9061,13 @@ Window {
                                 // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
                                 //   0.02 半 0.15×0.40 → 后上角）。eulerRotation.x 正 → +Y 端朝 +Z（尾向后竖）；满血 → 140−105×1=35°
                                 //   （竖起）、残血 → 140−105×0=140°（下垂）。随 bodyYaw + 父 visible 继承。
-                                //   t946 坐姿：尾根随坐姿链派生——站姿尾根 (0,0.16,0.38) 绕坐姿根锚 (-0.14,0.36) 旋 18°
-                                //   = (0,0.139,0.472)（mobmodel.cpp kSitRootY/kSitRootZ/kSitPitch 成对契约）→ 尾根随移；
+                                //   t946 坐姿：尾根随坐姿链派生——站姿尾根 (0,0.16,0.38) 绕坐姿根锚旋（t878② 起 18°；
+                                //   t987 根锚改前爪着地点 (-0.42,-0.24)、后仰 24.4°）= (0,-0.148,0.564)（mobmodel.cpp
+                                //   kSitPivotY/kSitPivotZ/kSitPitch 成对契约）→ 尾根随移（挂臀顶）；
                                 //   坐狼尾下垂搭地（tailAngle +75° 折到 ~110..215° 区，机制等价 MC 坐狼垂尾）。
                                 Node {
                                     id: wolfTailPivot
-                                    position: wolfSit === 1 ? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)
+                                    position: wolfSit === 1 ? Qt.vector3d(0, -0.15, 0.56) : Qt.vector3d(0, 0.16, 0.38)
                                     property real tailAngle: {
                                         const _r = mon.revision
                                         const h = entityManager.healthAt(index)
@@ -9099,19 +9100,20 @@ Window {
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.61，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
                                 //   t780：pack 命中时贴图头前脸自带双瞳（demo 包 row6 实测）→ overlay 隐（t777 双眼教训）。
-                                //   t946 坐姿：坐姿头心 (0,0.324,-0.308)（t946 单根锚链派生位）+ 眼偏移 (±0.08,+0.04,-0.19)
-                                //   净 10° 随头旋 + 贴面外推 → 眼随移 (±0.08, 0.40, -0.49)（mobmodel.cpp 坐姿头位成对契约）。
+                                //   t946 坐姿→t987 新链：坐姿头心 (0,0.097,-0.195)（t987 前爪根锚链派生位）+ 眼偏移
+                                //   (±0.08,+0.04,-0.19) 净 8° 随头旋 + 贴面外推 → 眼随移 (±0.08, 0.16, -0.39)
+                                //   （mobmodel.cpp 坐姿头位成对契约）。
                                 Model {
                                     visible: !wolfPackHit
                                     geometry: UnitCube {}
-                                    position: wolfSit === 1 ? Qt.vector3d(-0.08, 0.40, -0.49) : Qt.vector3d(-0.08, 0.16, -0.61)
+                                    position: wolfSit === 1 ? Qt.vector3d(-0.08, 0.16, -0.39) : Qt.vector3d(-0.08, 0.16, -0.61)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: !wolfPackHit
                                     geometry: UnitCube {}
-                                    position: wolfSit === 1 ? Qt.vector3d(0.08, 0.40, -0.49) : Qt.vector3d(0.08, 0.16, -0.61)
+                                    position: wolfSit === 1 ? Qt.vector3d(0.08, 0.16, -0.39) : Qt.vector3d(0.08, 0.16, -0.61)
                                     scale: Qt.vector3d(0.04, 0.05, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
@@ -9128,7 +9130,7 @@ Window {
                             //   变体 0..2，ocelotVariantAt 选 mob_cat_* 贴图；未驯服用 mob_ocelot 斑点豹猫贴图）。驯服猫
                             //   跟随主人（aiOcelot follow）+ 空手右键坐/站切换。受击红闪（同既有 hurtFlashAt>0 → baseColor
                             //   红模式）。坐姿（ocelotSittingAt=true）→ t878② 起由 **MobModel sitPose 几何坐姿**承载
-                            //   （躯干上仰臀落地 + 头抬起微仰 + 后腿前折 + 前腿垂直撑地 + 竖尾；同狼模式，替代旧
+                            //   （t987 前爪根锚链，同狼模式：臀落地 + 前腿立撑 + 后腿折叠 + 竖尾；替代旧
                             //   「整模压缩 + 前倾」变换）。眼为子节点（纯色 NoLighting，同猪眼模式）。
                             Model {
                                 visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobOcelot
@@ -9191,20 +9193,20 @@ Window {
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.53，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
                                 //   t780：pack 命中（野生豹猫）时贴图头前脸自带眼点 → overlay 隐（t777 双眼教训）。
-                                //   t946 坐姿：坐姿头心 (0,0.306,-0.276)（t946 单根锚链派生位，与狼同修）+ 眼偏移
-                                //   (±0.07,+0.03,-0.15) 净 10° 随头旋 + 贴面外推 → 眼随移 (±0.07, 0.36, -0.42)
-                                //   （mobmodel.cpp 坐姿头位成对契约）。
+                                //   t946 坐姿→t987 新链：坐姿头心 (0,0.100,-0.135)（t987 前爪根锚链派生位，与狼
+                                //   同修）+ 眼偏移 (±0.07,+0.03,-0.15) 净 8° 随头旋 + 贴面外推 → 眼随移
+                                //   (±0.07, 0.15, -0.28)（mobmodel.cpp 坐姿头位成对契约）。
                                 Model {
                                     visible: !ocelotPackHit
                                     geometry: UnitCube {}
-                                    position: ocatSit === 1 ? Qt.vector3d(-0.07, 0.36, -0.42) : Qt.vector3d(-0.07, 0.15, -0.53)
+                                    position: ocatSit === 1 ? Qt.vector3d(-0.07, 0.15, -0.28) : Qt.vector3d(-0.07, 0.15, -0.53)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }
                                 Model {
                                     visible: !ocelotPackHit
                                     geometry: UnitCube {}
-                                    position: ocatSit === 1 ? Qt.vector3d(0.07, 0.36, -0.42) : Qt.vector3d(0.07, 0.15, -0.53)
+                                    position: ocatSit === 1 ? Qt.vector3d(0.07, 0.15, -0.28) : Qt.vector3d(0.07, 0.15, -0.53)
                                     scale: Qt.vector3d(0.035, 0.04, 0.02)
                                     materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a1a1a" }
                                 }

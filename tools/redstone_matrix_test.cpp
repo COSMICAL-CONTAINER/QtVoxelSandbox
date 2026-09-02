@@ -24178,21 +24178,22 @@ Item {
         }
     }
 
-    // ── P-t946 坐姿变换链连续域探针（狼/豹猫 t946 返修；t878② 断链形态回归拦截）──
+    // ── P-t946 坐姿变换链连续域探针（狼/豹猫；t946 断链形态回归拦截，t987 前爪根锚重推后照绿）──
     //   用户实测（第五轮）：「身体翘太高、身体与躯体分离中间透明」。根因 = t878② 坐姿把躯干绕枢 +40°
     //   上仰而头/耳/腿保持各段独立绝对坐标——变换链断开：抬起后的躯干底与臀下折叠腿顶之间悬空
-    //   ~0.10-0.23（「中间透明」），胸顶 0.48 反压头心 0.30（「翘太高」）。修复 = 臀部着地点单根锚派生
-    //   （mobmodel.cpp kSitRootY/kSitRootZ/kSitPitch + sitRot 链 lambda；躯干随动段全走链）。
+    //   ~0.10-0.23（「中间透明」），胸顶 0.48 反压头心 0.30（「翘太高」）。修复 = 单根锚派生
+    //   （mobmodel.cpp sitRot 链 lambda；躯干随动段全走链；t987 起根锚 = 前爪着地点 kSitPivotY/Z，
+    //   臀底角解析触地，链派生纪律不变）。
     //   本探针在**真几何顶点**上做连续域断言（MobModel 直编读 vertexData，同 t880 ItemShapeGeometry
     //   行为级先例；沿 +Y 射线三角奇偶内外判定，凸盒并集上与盒区间并集等价）：
     //   (a) 着地：坐姿整体 minY = 碰撞底面（狼 -0.42 / 豹猫 -0.40 ±0.05）——断链形态臀部悬空必红；
-    //   (b) 不翘太高：maxY 上界（狼 0.62 / 豹猫 0.58；修复态耳顶 0.568/0.50）——防未来再抬高的回归界；
+    //   (b) 不翘太高：maxY 上界（狼 0.62 / 豹猫 0.58；t987 修复态耳顶 0.342/0.295）——防未来再抬高的回归界；
     //   (c) 臀链连续：髋带 z∈[0.16,0.36]（豹猫 [0.10,0.30]）× x=±0.10 逐列采样——列内自着地至剪影顶
     //       的内部空隙 ≤ 0.075（断链形态实测 0.110-0.234 缝必红）+ 列底触地；
     //   (d) 胸链连续：前腿带 z∈[-0.30,-0.20]（豹猫 [-0.26,-0.18]）同判（断链形态前带离地必红）；
     //   (e) 站姿零回归：sitPose=false 站姿剪影界不变（狼 y[-0.42,0.37] / 豹猫 y[-0.40,0.32] ±0.05）；
-    //   (f) 源码钉：单根锚派生形态（kSitRootY/kSitRootZ 值 + 躯干 addBoxRot 枢轴引用 + 颈附 sitRot 链 +
-    //       大腿块/尾根锚绑定）+ Main.qml / ResourceBrowser.qml 眼/项圈/尾 overlay 成对契约新位
+    //   (f) 源码钉：单根锚派生形态（t987 kSitPivotY/kSitPivotZ 值 + 躯干 addBoxRot 枢轴引用 + 颈附
+    //       sitRot 链 + 大腿块 z 绑根锚）+ Main.qml / ResourceBrowser.qml 眼/尾 overlay 成对契约新位
     //       （t880/t902/t931 源码钉先例——QML 侧无行为级断言面）。
     {
         bool ok = true;
@@ -24354,8 +24355,10 @@ Item {
                 }
             }
         }
-        {   // (f) 源码钉：单根锚派生形态 + QML overlay 成对契约新位（眼/尾；项圈 overlay 已 t986
-            //   收编进 MobModel 几何 collarVisible，其成对位钉退役 → 移交 P-t986 环带钉）。
+        {   // (f) 源码钉：单根锚派生形态（t987 前爪根锚版：kSitPivotY/kSitPivotZ 值 + 躯干 addBoxRot 枢轴
+            //   引用 + 颈附 sitRot 链 + 大腿块 z 绑根锚）+ Main.qml / ResourceBrowser.qml 眼/尾 overlay
+            //   成对契约新位（眼/尾；项圈 overlay 已 t986 收编进 MobModel 几何 collarVisible，其成对位钉
+            //   退役 → 移交 P-t986 环带钉）。
             const QString exeDir = QCoreApplication::applicationDirPath();
             const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
             auto readSrc = [&root](const QString &rel) -> QString {
@@ -24363,37 +24366,37 @@ Item {
                 return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
             };
             const QString mm = readSrc(QStringLiteral("src/Renderer/mobmodel.cpp"));
-            const int wSit = mm.indexOf(QStringLiteral("t946 狼坐姿返修"));
-            const int oSit = mm.indexOf(QStringLiteral("t946 豹猫/猫坐姿返修"));
+            const int wSit = mm.indexOf(QStringLiteral("t987 狼坐姿返修"));
+            const int oSit = mm.indexOf(QStringLiteral("t987 豹猫/猫坐姿返修"));
             const int oEnd = mm.indexOf(QStringLiteral("} else if (m_mobType == 12)"));
             bool okPin = wSit >= 0 && oSit > wSit && oEnd > oSit;
             if (okPin) {
                 const QString wolf = mm.mid(wSit, oSit - wSit);
-                okPin = wolf.contains(QStringLiteral("constexpr float kSitRootY   = -0.14f"))
-                     && wolf.contains(QStringLiteral("kSitRootY, kSitRootZ, kSitPitch"))
+                okPin = wolf.contains(QStringLiteral("constexpr float kSitPivotY   = -0.42f"))
+                     && wolf.contains(QStringLiteral("kSitPivotY, kSitPivotZ, kSitPitch"))
                      && wolf.contains(QStringLiteral("sitRotY(0.12f, -0.24f)"))
-                     && wolf.contains(QStringLiteral("kSitRootZ - 0.12f"));
+                     && wolf.contains(QStringLiteral("kSitPivotZ + 0.48f"));
             }
             if (okPin) {
                 const QString oce = mm.mid(oSit, oEnd - oSit);
-                okPin = oce.contains(QStringLiteral("constexpr float kSitRootY   = -0.12f"))
-                     && oce.contains(QStringLiteral("kSitRootY, kSitRootZ, kSitPitch"))
+                okPin = oce.contains(QStringLiteral("constexpr float kSitPivotY   = -0.40f"))
+                     && oce.contains(QStringLiteral("kSitPivotY, kSitPivotZ, kSitPitch"))
                      && oce.contains(QStringLiteral("sitRotY(0.12f, -0.24f)"))
                      && oce.contains(QStringLiteral("sitRotZ(0.18f, 0.36f)"))
-                     && oce.contains(QStringLiteral("kSitRootZ - 0.12f"));
+                     && oce.contains(QStringLiteral("kSitPivotZ + 0.41f"));
             }
             const QString mn = readSrc(QStringLiteral("src/ui/Main.qml"));
             const QString rb = readSrc(QStringLiteral("src/ui/ResourceBrowser.qml"));
-            const bool okMn = mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0, 0.14, 0.47)"))
-                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(-0.08, 0.40, -0.49)"))
-                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0.08, 0.40, -0.49)"))
-                && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(-0.07, 0.36, -0.42)"))
-                && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0.07, 0.36, -0.42)"));
-            const bool okRb = rb.contains(QStringLiteral("? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)"))
-                && rb.contains(QStringLiteral("? Qt.vector3d(-0.08, 0.40, -0.49)"))
-                && rb.contains(QStringLiteral("? Qt.vector3d(0.08, 0.40, -0.49)"))
-                && rb.contains(QStringLiteral("? Qt.vector3d(-0.07, 0.36, -0.42)"))
-                && rb.contains(QStringLiteral("? Qt.vector3d(0.07, 0.36, -0.42)"));
+            const bool okMn = mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0, -0.15, 0.56)"))
+                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(-0.08, 0.16, -0.39)"))
+                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0.08, 0.16, -0.39)"))
+                && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(-0.07, 0.15, -0.28)"))
+                && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0.07, 0.15, -0.28)"));
+            const bool okRb = rb.contains(QStringLiteral("? Qt.vector3d(0, -0.15, 0.56) : Qt.vector3d(0, 0.16, 0.38)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(-0.08, 0.16, -0.39)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(0.08, 0.16, -0.39)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(-0.07, 0.15, -0.28)"))
+                && rb.contains(QStringLiteral("? Qt.vector3d(0.07, 0.15, -0.28)"));
             if (!okPin || !okMn || !okRb) {
                 ok = false;
                 diag += QStringLiteral(" pins mm=%1 mn=%2 rb=%3").arg(okPin).arg(okMn).arg(okRb);
@@ -24403,15 +24406,16 @@ Item {
         if (!ok)
             qInfo().noquote() << "  [t946 diag]" << diag;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t946 wolf/ocelot sit pose rebuilt on a single hip-root transform chain: the"
+                          << "| t946 wolf/ocelot sit pose rebuilt on a single root-anchor transform chain: the"
                              " t878 pose rotated the torso +40 deg about a hip pivot while head/ears/legs"
                              " stayed at independent absolute coordinates (broken chain -> the user-visible"
                              " 'chest reared too high with a transparent gap between body halves'). The fix"
                              " derives every torso-following segment (head via the rotated neck attach, ears"
-                             " via the head offset) from ONE root anchor + 18-deg pitch (mobmodel.cpp"
-                             " kSitRootY/kSitRootZ/kSitPitch + sitRot lambdas), with hind legs folded into a"
-                             " thigh block fully embedded into the torso underside and vertical front legs"
-                             " reaching the raised chest. Verified on REAL mesh vertices (MobModel direct"
+                             " via the head offset) from ONE root anchor + pitch (mobmodel.cpp sitRot"
+                             " lambdas; t987 re-rooted the chain onto the front-paw ground point"
+                             " kSitPivotY/kSitPivotZ with an analytic-landing pitch, discipline unchanged),"
+                             " with hind legs folded flat under the rump and standing-identical front legs."
+                             " Verified on REAL mesh vertices (MobModel direct"
                              " build; per-column coverage = normal-oriented crossing-depth union -- parity is"
                              " wrong here because the joints intentionally OVERLAP as separate closed boxes):"
                              " (a) sit minY == collision bottom (wolf -0.42 /"
@@ -24421,6 +24425,122 @@ Item {
                              " (e) standing-pose silhouette bounds unchanged (zero regression), (f) source"
                              " pins for the shared-root derivation form and the Main.qml/ResourceBrowser.qml"
                              " eye/collar/tail overlay pair-contract positions"
+                             ;
+    }
+
+    // ── P-t987 四足坐姿肢体返修探针（狼/豹猫；用户口径「完全像兔子——后脚多出好长一节接触地面、
+    //    腿凭空长高一节」）──
+    //    t946 形态病：根锚在臀部自身 → 18° 后仰几乎不动臀（躯干底仅沉 0.013）却把胸顶抬到 0.39——
+    //    坐高全靠前腿加长（0.34→0.54 立在抬高的胸下）+ 臀下 0.42 高「大腿柱」+ 贴地长爪板填空 =
+    //    视觉「腿凭空长高一节 + 后脚多出长段贴地」，读作兔子蹲。t987 修：根锚 = 前爪着地点（前腿站姿
+    //    占位不变量，站/坐切换前腿零变化），躯干绕它后仰（狼 24.4° / 豹猫 26.6°，tanθ 解析解使臀底角
+    //    精确触地）；前腿与站姿同盒立撑、后腿折叠 = 臀下侧埋矮块 + 贴地细爪板。
+    //    真几何顶点断言（MobModel 直编读 vertexData，P-t946/P-t968 先例）：
+    //    (a) 臀部着地：后臀带 z∈[0.40,0.50]（狼）/ [0.36,0.46]（豹猫）存在 y∈[ground-0.033,ground+0.01]
+    //        顶点（躯干臀底角触地 = 「臀部落地」本体；旧形态臀底 -0.143 悬空、该带有着地段全无必红）；
+    //    (b) 无穿地：坐姿全体顶点 min y ≥ ground − 0.005（穿地伸出段零容忍）；
+    //    (c) 前腿立撑形态钉：前腿柱**外半**（|x|∈[0.185,0.25] 狼 / [0.155,0.21] 豹猫——避开躯干最大
+    //        半宽 0.18/0.15 防躯干底边误触发）× z∈[-0.33,-0.15] / [-0.27,-0.13] 存在腿顶环带顶点
+    //        y∈[legTop−0.03,legTop+0.03]（狼 −0.05 / 豹猫 −0.02 = 站姿顶 −0.08/−0.06 埋胸 0.03/0.04；
+    //        旧形态前腿顶 0.12/0.09 该带无顶点必红 = 「腿加长」形态拦截）；
+    //    (d) 紧凑坐高钉：坐姿全顶点 maxY ≤ 站姿 maxY + 0.02（狼 0.37 / 豹猫 0.32；旧形态耳顶
+    //        0.568/0.50 = 「兔子直立」必红）；
+    //    (e) 站态对照零回归：sitPose=false 全顶点 AABB = 站姿界（狼 [−0.42,0.37] / 豹猫 [−0.40,0.32]）。
+    {
+        bool ok = true;
+        QString diag;
+        auto sitVertScan = [](int mobType, bool sit, float &mnY, float &mxY,
+                              bool &hipGround, bool &frontLegTop) {
+            MobModel g;
+            g.setMobType(mobType);
+            if (sit) g.setSitPose(true);
+            const QByteArray vd = g.vertexData();
+            const float *vp = reinterpret_cast<const float *>(vd.constData());
+            const int n = int(vd.size()) / 20;
+            mnY = 9e9f; mxY = -9e9f;
+            hipGround = false;
+            frontLegTop = false;
+            // 物种参数表：ground / 臀带 z 界 / 前腿柱外半 |x| 带 + z 带 / 站姿腿顶。
+            const float ground   = (mobType == 10) ? -0.42f : -0.40f;
+            const float hipZMin  = (mobType == 10) ?  0.40f :  0.36f;
+            const float axMin    = (mobType == 10) ?  0.185f :  0.155f;
+            const float axMax    = (mobType == 10) ?  0.25f :  0.21f;
+            const float legZMin  = (mobType == 10) ? -0.33f : -0.27f;
+            const float legZMax  = (mobType == 10) ? -0.15f : -0.13f;
+            const float legTop   = (mobType == 10) ? -0.05f : -0.02f; // 坐姿前腿顶（站姿顶 -0.08/-0.06 + 埋胸 0.03/0.04 补肩窝）
+            for (int i = 0; i < n; ++i) {
+                const float x = vp[i * 5], y = vp[i * 5 + 1], z = vp[i * 5 + 2];
+                mnY = std::min(mnY, y);
+                mxY = std::max(mxY, y);
+                if (!sit) continue;
+                if (z >= hipZMin && z <= hipZMin + 0.10f
+                    && y >= ground - 0.033f && y <= ground + 0.01f)
+                    hipGround = true;
+                const float ax = std::abs(x);
+                if (ax >= axMin && ax <= axMax && z >= legZMin && z <= legZMax
+                    && y >= legTop - 0.03f && y <= legTop + 0.03f)
+                    frontLegTop = true;
+            }
+        };
+        float wMn = 0, wMx = 0, oMn = 0, oMx = 0, sMn = 0, sMx = 0;
+        bool wHip = false, wLeg = false, oHip = false, oLeg = false;
+        sitVertScan(10, true, wMn, wMx, wHip, wLeg);
+        sitVertScan(11, true, oMn, oMx, oHip, oLeg);
+        if (!wHip || !oHip) {   // (a) 臀部着地
+            ok = false;
+            diag += QStringLiteral(" hip w=%1 o=%2").arg(int(wHip)).arg(int(oHip));
+        }
+        if (wMn < -0.42f - 0.005f || oMn < -0.40f - 0.005f) {   // (b) 无穿地
+            ok = false;
+            diag += QStringLiteral(" pierce wMin=%1 oMin=%2").arg(wMn, 0, 'f', 4).arg(oMn, 0, 'f', 4);
+        }
+        if (!wLeg || !oLeg) {   // (c) 前腿立撑形态钉
+            ok = false;
+            diag += QStringLiteral(" legTop w=%1 o=%2").arg(int(wLeg)).arg(int(oLeg));
+        }
+        sitVertScan(10, false, sMn, sMx, wHip, wLeg);   // (d) 坐高 ≤ 站高（站姿剪影 maxY 对照）+ (e) 狼站姿界
+        if (wMx > sMx + 0.02f) {
+            ok = false;
+            diag += QStringLiteral(" sitHi w=%1>stand%2").arg(wMx, 0, 'f', 3).arg(sMx, 0, 'f', 3);
+        }
+        if (std::abs(sMn - (-0.42f)) > 0.02f || std::abs(sMx - 0.37f) > 0.02f) {   // (e) 站态零回归（狼）
+            ok = false;
+            diag += QStringLiteral(" wolfStand [%1,%2]").arg(sMn, 0, 'f', 3).arg(sMx, 0, 'f', 3);
+        }
+        sitVertScan(11, false, sMn, sMx, oHip, oLeg);   // (d) 豹猫 + (e) 豹猫站姿界
+        if (oMx > sMx + 0.02f) {
+            ok = false;
+            diag += QStringLiteral(" sitHi o=%1>stand%2").arg(oMx, 0, 'f', 3).arg(sMx, 0, 'f', 3);
+        }
+        if (std::abs(sMn - (-0.40f)) > 0.02f || std::abs(sMx - 0.32f) > 0.02f) {
+            ok = false;
+            diag += QStringLiteral(" ocelotStand [%1,%2]").arg(sMn, 0, 'f', 3).arg(sMx, 0, 'f', 3);
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t987 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t987 quadruped sit-pose limb rework (wolf/ocelot): the t946 pose kept the"
+                             " root anchor on the rump itself, so the 18-deg rearing barely moved the hip"
+                             " (-0.013) while lifting the chest to 0.39 -- the sit height came from"
+                             " LENGTHENED front legs (0.34 -> 0.54) plus a 0.42-tall thigh pillar and a"
+                             " long ground slab under the haunch (user: 'the back foot grows a long extra"
+                             " section touching the ground, the legs grow a taller section out of nowhere"
+                             " -- looks exactly like a rabbit'). The rework roots the chain on the"
+                             " FRONT-PAW GROUND POINT (the standing front-leg footprint as the structural"
+                             " invariant) and pitches the torso by the analytic angle that lands the"
+                             " rump-bottom corner exactly on the ground (wolf 24.4 deg / ocelot 26.6"
+                             " deg): hips truly grounded, front legs in the standing footprint (tops sunk"
+                             " 0.03/0.04 into the chest to fill the shoulder notch, no 0.5 lengthening),"
+                             " hind legs folded as low side-buried haunch blocks plus flat forward paw"
+                             " slabs. Verified on REAL mesh vertices (MobModel direct build): (a) a"
+                             " grounded vertex exists in the rear-rump band z[0.40,0.50]/[0.36,0.46] (the"
+                             " old form's hip bottom hangs at -0.143 -> red), (b) zero sit vertices below"
+                             " the support plane (no through-ground protruding section), (c) the front-leg"
+                             " column's OUTER half holds a top-ring vertex within 0.03 of the sit leg top"
+                             " -0.05/-0.02 (the lengthened 0.12/0.09 tops -> red), (d) sit maxY <= standing"
+                             " maxY + 0.02 (compact crouch; the old upright 0.568/0.50 -> red), (e)"
+                             " standing-pose full-vertex AABB unchanged"
                              ;
     }
 
@@ -24436,8 +24556,9 @@ Item {
     //        扇区；「两红点」形态只占 2 扇区必红）+ 质心 = 站姿裸颈段心 (0.02,-0.23)；
     //    (b) 豹猫站态：同 (a)（颈围镜像数值系，质心同位）；
     //    (c) 坐态随移：狼/豹猫 sitPose=true 环带顶点质心 = 同一根锚链派生位（狼 sitRot(0.02,-0.23)
-    //        绕 (-0.14,0.36) 旋 18° = (0.194,-0.152)；豹猫绕 (-0.12,0.32) = (0.183,-0.160)）且扇区
-    //        ≥7（坐态仍整圈——QML overlay 时代的「随移成对契约」由几何单源派生取代）；
+    //        绕 t987 前爪根锚 (-0.42,-0.24) 旋 24.4° = (-0.015,-0.067)；豹猫绕 (-0.40,-0.20) 旋 26.6°
+    //        = (-0.013,-0.033)）且扇区 ≥7（坐态仍整圈——QML overlay 时代的「随移成对契约」由几何
+    //        单源派生取代）；
     //    (d) 源码钉：mobmodel.cpp 环带发射标记「t986 项圈环带」恰 4 处（狼/豹猫 × 坐/站）；
     //        Main.qml collarVisible 绑定 == 2（狼+豹猫）、ResourceBrowser.qml ≥1；双 QML 文件零
     //        旧 overlay 残留（坐姿位 vector3d(0,0.35,-0.175)/(0,0.32,-0.19) + 横扁环带 scale
@@ -24503,8 +24624,8 @@ Item {
         };
         checkRing("wolf", 10, false, 0.02f, -0.23f);   // (a) 站态整圈 + 裸颈段心
         checkRing("ocelot", 11, false, 0.02f, -0.23f); // (b) 豹猫镜像
-        checkRing("wolfSit", 10, true, 0.194f, -0.152f);   // (c) 坐态链派生随移
-        checkRing("ocelotSit", 11, true, 0.183f, -0.160f);
+        checkRing("wolfSit", 10, true, -0.015f, -0.067f);  // (c) 坐态链派生随移（t987 前爪根锚链解析位）
+        checkRing("ocelotSit", 11, true, -0.013f, -0.033f);
         {   // (d) 源码钉（t880/t902/t931 先例——QML 侧无行为级断言面）。
             const QString exeDir = QCoreApplication::applicationDirPath();
             const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -24563,8 +24684,8 @@ Item {
                              " direct build): collar adds exactly 96 verts in all four pose/species"
                              " combos (wolf/ocelot x stand/sit) spread over >=7 of 8 45-deg sectors"
                              " around the neck axis (two-dot form spans <=2), centroid at the bare-neck"
-                             " anchor (0.02,-0.23) or the sit-chain-derived spot (0.194,-0.152 /"
-                             " 0.183,-0.160); source pins: single-geometry emission x4 in mobmodel.cpp,"
+                             " anchor (0.02,-0.23) or the sit-chain-derived spot (-0.015,-0.067 /"
+                             " -0.013,-0.033; t987 front-paw root chain); source pins: single-geometry emission x4 in mobmodel.cpp,"
                              " collarVisible bindings in Main.qml x2 + ResourceBrowser (t782"
                              " three-consumer sharing), zero old overlay leftovers (no duplicate box"
                              " lists), and zero MC-asset wiring: the collar is procedural geometry"
@@ -24758,6 +24879,164 @@ Item {
                              " proactively every AI tick (aiHostile precedent) instead of only after a"
                              " full stop behind a >0.6 gate -- the wolf crosses a 2-thick full-depth"
                              " 1-high wall it cannot bite through and lands a bite beyond it"
+                             ;
+    }
+
+    // ── P-t988 驯服狼战斗 AI 探针（用户口径「狼帮我打僵尸 AI 还是不会走路 + 遇到要跳跃才能上的
+    //    格子不会跳、卡在那里」）──
+    //    通用 rig：44×44×96 局部世界（seed 26）y[85,95] 清 Air + y84 铺 Stone（t947 同款；独立小世界）。
+    //    注册链走**真实游戏路径**：僵尸侦测圈内咬中主人 → aiHostile melee 命中玩家块 m_wolfTarget=idx
+    //    （entitymanager.cpp t480 注册点），不直调 setWolfTarget（与 P-t947(c)/P-t948 直调面互补——用户
+    //    「指狼打僵尸」的实战序 = 打/被打任一先发生，注册面同一槽）。chase lambda（aiWolf 唯一移动路径）
+    //    驱动接近 + t947③ 主动越障跳（#14 压跳门 t988 收窄为「同层可咬」：(a)(b) 目标远/异层照跳，
+    //    同层贴脸压跳由 P-r0830C(d) rig 继续把守）。
+    //    (a) 平地对照（奔跑接近 + 抵达撕咬）：驯服站狼 (16,22)、僵尸 (24,22)、主人 (20.5,22.5)（狼距
+    //        4.5 < kWolfTeleportDist 12 防瞬移抢戏；僵尸侦测圈内）→ 断言狼 closing（min distXZ(狼,僵) ≤
+    //        kAttackRange 1.6）+ 僵尸掉血（首口落地），20s 事件驱动帽；
+    //    (b) 1 格台阶腿（跳上台阶 + 越台撕咬）：x∈[24,43] 全深 y85 石台（顶 86 = 1 格台阶，全深堵绕行）、
+    //        主人台上 (30.5,22.5)、僵尸台上 (28,22)、狼台下面 (20,22)（距主人 10.5 < 12 防瞬移；僵尸咬主人
+    //        注册目标 → 狼防御追击撞台 → 越障跳探（distXZ > 1.6 全程成立）→ 跳上台）→ 断言存在 tick
+    //        「狼 x ≥ 24.5 且 y ≥ 86.3」（上台 = 平地跳跃峰值不可达域：地面点 y 85.45，墙前原地跳峰值虽
+    //        过 86.3 但 x 恒 < 24.5 被台面碰撞拦回，两条件合取 = 真上台）+ 僵尸掉血（越台后续咬），
+    //        30s 帽。「不会走路 / 不会跳」两症状在此腿分别为「x 恒 <20 / y 恒 <86.3」。
+    //    (c) 台阶贴脸腿（t988 根因腿）：僵尸钉在台沿格（24,86,22，主人贴邻 1.0 咬距内 → 僵尸追主不动），
+    //        狼台下面压台面后距僵尸 0.8 ≤ kAttackRange → 旧 #14 门（纯 distXZ）压跳 = 永卡台面下隔台
+    //        扣血不上台（用户「要跳跃才能上的格子不会跳、卡在那里」的可复现形态）；修后异层目标
+    //        （|tdy|=1.0 > 0.5）带内照探跳 → 狼跳上台。判据同 (b) 合取，25s 帽。
+    {
+        bool ok = true;
+        QString diag;
+        auto flatRig988 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+        };
+        auto tamedWolfAt988 = [](EntityManager &em, int x, int z) -> int {
+            const int wolf = em.spawnMobTyped(x, 85, z, EntityManager::MobWolf,
+                                              QStringLiteral("#c8ccd4"), 10);
+            bool tamed = false;
+            for (int attempt = 0; attempt < 200 && wolf >= 0 && !tamed; ++attempt)
+                tamed = em.tameWolf(wolf);
+            return tamed ? wolf : -1;
+        };
+        auto distXZ988 = [](const QVector3D &p, const QVector3D &q) {
+            return QVector3D(p.x() - q.x(), 0.0f, p.z() - q.z()).length();
+        };
+        // (a) 平地对照：真注册链 + 奔跑接近 + 撕咬。
+        {
+            World wa; flatRig988(wa);
+            EntityManager ema;
+            const int wolf = tamedWolfAt988(ema, 16, 22);
+            const int zombie = ema.spawnMobTyped(24, 85, 22, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20);
+            const QVector3D owner(20.5f, 85.0f, 22.5f);
+            ok = ok && wolf >= 0 && zombie >= 0;
+            if (wolf >= 0 && zombie >= 0) {
+                float minD = 1e9f;
+                bool bitten = false;
+                for (int t = 0; t < 1250 && !bitten; ++t) { // 20s 事件驱动帽
+                    ema.tick(0.016f, &wa, owner, 0.3f, 1.8f, true, false);
+                    minD = std::min(minD, distXZ988(ema.posAt(wolf), ema.posAt(zombie)));
+                    if (ema.healthAt(zombie) < 20) bitten = true; // 狼首口落地
+                }
+                ok = ok && bitten && minD <= 1.6f;
+                if (!(bitten && minD <= 1.6f))
+                    diag += QStringLiteral("a bitten=%1 minD=%2 ").arg(int(bitten)).arg(minD, 0, 'f', 2);
+            } else diag += QStringLiteral("a spawn/tame failed ");
+        }
+        // (b) 1 格台阶：跳上台（x≥24.5 且 y≥86.3 合取）+ 越台撕咬。
+        {
+            World wb; flatRig988(wb);
+            for (int z = 0; z < 44; ++z)
+                for (int x = 24; x < 44; ++x)
+                    wb.setBlock(x, 85, z, BR::Stone, 0); // 全深石台（顶 86 = 1 格台阶；堵死绕行）
+            EntityManager emb;
+            const int wolf = tamedWolfAt988(emb, 20, 22);   // 台下面 (feet 85)
+            const int zombie = emb.spawnMobTyped(28, 86, 22, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20); // 台上 (feet 86)
+            const QVector3D owner(30.5f, 86.0f, 22.5f);     // 主人台上（僵尸咬主人 → 注册狼防御目标）
+            ok = ok && wolf >= 0 && zombie >= 0;
+            if (wolf >= 0 && zombie >= 0) {
+                bool onTop = false, bitten = false;
+                float maxX = 0.0f, maxY = 0.0f;
+                for (int t = 0; t < 1875 && !(onTop && bitten); ++t) { // 30s 事件驱动帽
+                    emb.tick(0.016f, &wb, owner, 0.3f, 1.8f, true, false);
+                    const QVector3D wp = emb.posAt(wolf);
+                    maxX = std::max(maxX, wp.x());
+                    maxY = std::max(maxY, wp.y());
+                    if (wp.x() >= 24.5f && wp.y() >= 86.3f) onTop = true; // 真上台合取判据
+                    if (emb.healthAt(zombie) < 20) bitten = true;          // 越台后首口
+                }
+                ok = ok && onTop && bitten;
+                if (!(onTop && bitten))
+                    diag += QStringLiteral("b onTop=%1 bitten=%2 maxX=%3 maxY=%4 zhp=%5 ")
+                                .arg(int(onTop)).arg(int(bitten))
+                                .arg(maxX, 0, 'f', 2).arg(maxY, 0, 'f', 2)
+                                .arg(emb.healthAt(zombie));
+            } else diag += QStringLiteral("b spawn/tame failed ");
+        }
+        // (c) 台阶贴脸腿（t988 修复面：目标在 1 格台阶上且已进咬距带 → 旧门压跳狼永卡台面下；
+        //     修复 = #14 压跳收窄为「同层可咬」，异层目标带内照探跳 → 狼跳上台撕咬）。
+        {
+            World wc; flatRig988(wc);
+            for (int z = 0; z < 44; ++z)
+                for (int x = 24; x < 44; ++x)
+                    wc.setBlock(x, 85, z, BR::Stone, 0); // 全深石台（顶 86 = 1 格台阶）
+            EntityManager emc;
+            const int wolf = tamedWolfAt988(emc, 22, 22);   // 台下面，贴台位（压台面后中心 x≈23.7）
+            const int zombie = emc.spawnMobTyped(24, 86, 22, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20); // 台上沿边格（中心 x=24.5，距狼压位点 0.8 ≤ 咬距带）
+            const QVector3D owner(25.0f, 86.0f, 22.5f);     // 台上距僵尸 1.0 ≤ 咬距带 → 僵尸钉在沿边不动（追主不移动）
+            ok = ok && wolf >= 0 && zombie >= 0;
+            if (wolf >= 0 && zombie >= 0) {
+                bool onTop = false, bitten = false;
+                float maxX = 0.0f, maxY = 0.0f;
+                for (int t = 0; t < 1560 && !(onTop && bitten); ++t) { // 25s 事件驱动帽
+                    emc.tick(0.016f, &wc, owner, 0.3f, 1.8f, true, false);
+                    const QVector3D wp = emc.posAt(wolf);
+                    maxX = std::max(maxX, wp.x());
+                    maxY = std::max(maxY, wp.y());
+                    if (t % 45 == 0)
+                        diag += QStringLiteral("[t=%1 w=(%2,%3,%4) z=(%5,%6,%7) zhp=%8 whp=%9] ")
+                                    .arg(t).arg(wp.x(), 0, 'f', 2).arg(wp.y(), 0, 'f', 2).arg(wp.z(), 0, 'f', 2)
+                                    .arg(emc.posAt(zombie).x(), 0, 'f', 2).arg(emc.posAt(zombie).y(), 0, 'f', 2)
+                                    .arg(emc.posAt(zombie).z(), 0, 'f', 2)
+                                    .arg(emc.healthAt(zombie)).arg(emc.healthAt(wolf));
+                    if (wp.x() >= 24.5f && wp.y() >= 86.3f) onTop = true; // 真上台合取判据（同 (b)）
+                    if (emc.healthAt(zombie) < 20) bitten = true;
+                }
+                ok = ok && onTop && bitten;
+                diag += QStringLiteral("c onTop=%1 bitten=%2 maxX=%3 maxY=%4 zhp=%5 ")
+                            .arg(int(onTop)).arg(int(bitten))
+                            .arg(maxX, 0, 'f', 2).arg(maxY, 0, 'f', 2)
+                            .arg(emc.healthAt(zombie));
+            } else diag += QStringLiteral("c spawn/tame failed ");
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << "  [t988 diag]" << diag; // TEMP t988 diagnostic
+        // qInfo().noquote() << "  [t988 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t988 tamed-wolf combat AI: command the wolf on a zombie (the real"
+                             " registration chain -- the shambler melee-hits the owner on its detect band"
+                             " and the hit site registers the shared m_wolfTarget) and the wolf RUNS to"
+                             " close (flat control: min wolf-zombie distance reaches the 1.6 bite band and"
+                             " the first bite lands within 20s) and hops the 1-block step on the way (step"
+                             " leg: a full-depth y85 stone platform tops out 1 above the floor, the wolf"
+                             " below reaches x>=24.5 WITH y>=86.3 -- the conjunction only holds once it"
+                             " stands on top; a ground jump peaks past 86.3 but the platform face keeps x"
+                             " pinned < 24.5, a blocked wolf stays at x<20) and lands its bite beyond the"
+                             " step within 30s; the ROOT FIX narrows the review0830 #14 bite-band jump"
+                             " suppression to SAME-FLOOR targets (|target dy| <= 0.5): an edge-pinned"
+                             " zombie on the step 0.8 XZ from the pressed wolf used to suppress the probe"
+                             " outright -- the wolf stood glued below the ledge biting through it, never"
+                             " climbing (leg c reproduces exactly that stuck-at-the-step report and now"
+                             " climbs within 25s) -- while the same-floor rig of review0830 C(d) keeps its"
+                             " no-hop-while-biting behavior (source pin evolved to the narrowed gate);"
+                             " the chase lambda stays the single movement drive and the follow/stand"
+                             " states keep their t947 bands (zero regression)"
                              ;
     }
 
@@ -25907,6 +26186,8 @@ Item {
     //       幼体近战唯一伤害源）——旧版注册侧 no-op 幼体恒追玩家 = 红 + switch case 钉。
     //   (d) #14（低）t947 攻击距离内矮障碍瞬态起跳：野狼贴脸（distXZ 1.4 ≤ kAttackRange 1.6）前方
     //       0.6 格 1 格矮墙 → 继续咬击（hits ≥3）且全程贴地（跳起抬升 <0.15；旧版边咬边跳 ≥1.0 = 红）。
+    //       t988 门收窄演化：压跳语义收窄为「同层可咬」（|tdy| ≤ 0.5）——本腿同层（dy=0）照旧压跳保持绿，
+    //       异层面由 P-t988(c) 承接。
     //   (e) #16（低）t950 骑乘态 mob 未被拾取扫描排除：乘矿车 Shambler 压着铁胸甲 6 窗恒不拾 + 同窗
     //       裸装地面对照腿照拾（扫描活证）+ #15 概率缺省单源钉（成员初始化 = kEquipPickupChance）。
     //   (f) #19（低）t952 骑乘解除后陈旧 jumpG 滑流：骑士组合东行撞墙（钉位恒 resting → aiHostile 跳
@@ -26170,9 +26451,9 @@ Item {
             okD = wolf >= 0 && hits >= 3 && (maxY - baseY) < 0.15f;
             diag += QStringLiteral("d wolf=%1 hits=%2 lift=%3 air=%4 maxAt=%5 base=%6 ")
                         .arg(wolf).arg(hits).arg(maxY - baseY).arg(airTicks).arg(maxAt).arg(baseY);
-            // 跳探门钉：新门形在位 + 旧无距离门形绝迹（本函数内）。
+            // 跳探门钉：新门形在位（t988 收窄：异层目标咬带内仍探跳）+ 旧无距离门形绝迹（本函数内）。
             okD = okD && entCppC.contains(QStringLiteral(
-                "if (e.resting && world && distXZ > kAttackRange) {"));
+                "if (e.resting && world && (distXZ > kAttackRange || std::abs(tdy) > 0.5f)) {"));
         }
 
         // ── (e) #16 骑乘态不拾 + 地面对照（+ #15 缺省单源钉）──

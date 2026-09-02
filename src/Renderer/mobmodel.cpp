@@ -759,10 +759,10 @@ void MobModel::rebuild()
         }
     } else if (m_mobType == 10) {
         // t480 Wolf（狼；机制等价 MC 1.0 狼，§9 原创模型 + 贴图）—— 中型犬科：细长躯干 + 前伸尖头 + 双立耳 + 4 腿。
-        //   尾巴**不在本几何** —— 呈现层 QML 据血量旋转独立尾巴 Model（spec「尾巴角度示血量」；独立子 Model
-        //   才能绕尾根枢独立旋转，嵌在几何里的尾巴无法单独动）。腿底本地 y=−0.42 贴 collision 底面（halfH=0.45
-        //   → Main.qml mobModelYOff=0.42−0.45=−0.03）。walkPhase 驱动 4 腿对角摆动（addLegs，同猪/牛/羊四足
-        //   walk cycle）；坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动，几何本身不参与。
+//   尾巴**不在本几何** —— 呈现层 QML 据血量旋转独立尾巴 Model（spec「尾巴角度示血量」；独立子 Model
+//   才能绕尾根枢独立旋转，嵌在几何里的尾巴无法单独动）。腿底本地 y=−0.42 贴 collision 底面（halfH=0.45
+//   → Main.qml mobModelYOff=0.42−0.45=−0.03）。walkPhase 驱动 4 腿对角摆动（addLegs，同猪/牛/羊四足
+//   walk cycle）；坐姿由 sitPose 开关在本几何内承载（t987 前爪根锚链：臀落地 + 前腿立撑 + 后腿折叠）。
         // t780 pack UV（demo 包 wolf/wolf.png base 64×32，六面不透明度像素实测）：head(0,0)6×6×4（前脸 row6
         //   双瞳实测，与 mobHeadRegions 狼头区同源）/ **body 采 mane(21,0)6×6×7**——vanilla body(18,14)6×6×8
         //   在 demo 包 HD 重绘里 top/bottom/back 三面 0% 不透明（躯干区未涂满），mane 区六面 100% 灰白渐层
@@ -780,50 +780,56 @@ void MobModel::rebuild()
         //   收进身体轮廓（旧版腿心恰在身侧缘 ±0.18 → 半条腿悬在身侧外读作「位置不对」）。
         g_texW = 64.0f; g_texH = 32.0f;
         if (m_sitPose) {
-            // t946 狼坐姿返修（t878② 旧坐姿**变换链断裂**：躯干绕枢 +40° 上仰把胸顶推到 y≈0.48，而头/耳/腿
-            //   仍是各段独立绝对坐标——抬起后的躯干底与臀下折叠腿顶之间悬空 ~0.10-0.23 透明缝（用户
-            //   「身体与躯体分离中间透明」），头心 0.30 反被压在胸顶 0.48 之下（用户「身体翘太高」）。
-            //   修复 = 以臀部着地点为**唯一根锚**重推坐姿：躯干随动段（头/耳）一律由根锚旋转派生（下
-            //   sitRot lambda），禁止独立世界坐标；后仰 18°（10-20° 带，用户「不翘太高」口径）→ 胸顶 0.39、
-            //   头顶 0.47、耳顶 0.57（总高 ~0.99 ≈ 1 格自然坐狼）。解析值（rig 全量核过，矩阵 P-t946 连续域
-            //   钉）：躯干底线 y(z) = -0.143-0.325(z-0.401)；后大腿块顶 0.00 沿 z[0.10,0.38] 全线嵌入躯干底；
-            //   前腿顶 0.12 嵌入胸底（z=-0.18 处胸底 0.046）。Main.qml 眼/项圈/尾 overlay 坐标 = 同一根锚
-            //   派生的成对契约（见 Main.qml t946 注释）。
-            constexpr float kSitRootY   = -0.14f;      // 根锚 y（臀底 = 折叠大腿块顶面着地高度）
-            constexpr float kSitRootZ   =  0.36f;      // 根锚 z（臀部略前收）
-            constexpr float kSitPitch   =  0.3141593f; // 躯干后仰 18°（绕根锚 nose-up）
-            constexpr float kSitHeadNet =  0.1745329f; // 头净俯仰 10°（随躯干链再微抬「看玩家」）
+            // t987 狼坐姿返修（t946 「臀锚后仰」形态被用户判「完全像兔子——后脚多出好长一节接触地面、
+            //   腿凭空长高一节」）：旧根锚 (-0.14,0.36) 落在躯干臀部自身上，18° 后仰绕它几乎不动臀部
+            //   （躯干底 -0.13 → -0.143 仅沉 0.013），胸顶却被抬到 0.39——坐高全靠前腿加长（0.34→0.54
+            //   立在抬高的胸下）+ 臀下 0.42 高「大腿柱」+ 贴地长爪板填空 = 视觉腿凭空长高一节 / 后脚多出
+            //   长段贴地，读作兔子蹲而非坐。修 = 根锚移到**前爪着地点**（前腿站姿占位 = 结构不变量，站/坐
+            //   切换前腿零变化），躯干绕它后仰 24.4°（tanθ = 臀底落距 0.29 / 臀根距 0.64 → 臀底角精确
+            //   触地 y=-0.42，解析验证 -0.4204）：臀部真落地、前腿占位同站姿立撑（顶埋胸 0.03 补肩窝，
+            //   不再 0.54 加长）、后腿折叠 = 侧边
+            //   矮臀块（顶 -0.14 全程嵌入倾斜躯干底，裸露楔形沿臀线渐没，无裸柱）+ 贴地前伸细爪板（后接
+            //   臀块、前接前腿后沿 = 后爪收拢贴身）。躯干随动段（头/耳）一律由根锚旋转派生（下方 sitRot
+            //   lambda，禁止独立世界坐标——t946 链派生纪律保持）；头净俯仰 8° 微仰看玩家（头顶 ~0.28 /
+            //   耳顶 ~0.34，坐高低于站姿 0.37 = 紧凑蹲坐非「兔子直立」）。解析值（矩阵 P-t946/P-t987
+            //   连续域钉）：躯干底线 y(z) = -0.0898-0.4528(z+0.2659)，地面接触段 z∈[0.43,0.463]；臀块顶
+            //   -0.14 在 z∈[0.10,0.38] 全线嵌入躯干底（-0.256..-0.382）；前腿顶 -0.08 与胸底（z=-0.24 处
+            //   -0.097）嵌接。Main.qml / ResourceBrowser 眼/尾 overlay 坐标 = 同一根锚派生的成对契约
+            //   （见两 QML t987 注释）。
+            constexpr float kSitPivotY   = -0.42f;      // 根锚 y（= 前爪着地 / collision 底面）
+            constexpr float kSitPivotZ   = -0.24f;      // 根锚 z（= 站姿前腿 z，占位不变量）
+            constexpr float kSitPitch    =  0.426f;     // 躯干后仰 24.4°（0.29·cos = 0.64·sin → 臀底角触地）
+            constexpr float kSitHeadNet  =  0.14f;      // 头净俯仰 8°（随躯干链再微抬「看玩家」）
             const float sitCa = std::cos(kSitPitch), sitSa = std::sin(kSitPitch);
             const float headCa = std::cos(kSitHeadNet), headSa = std::sin(kSitHeadNet);
             // 链派生（躯干随动段唯一合法定位方式）：站姿 (y,z) 绕根锚旋 → 坐姿坐标。站姿参考值：
             //   颈附着点 = 头盒后侧面心 (0.12,-0.24)；耳 = 颈附 + (±0.08, +0.18, -0.16)。
-            auto sitRotY = [&](float y, float z) { return kSitRootY + (y - kSitRootY) * sitCa - (z - kSitRootZ) * sitSa; };
-            auto sitRotZ = [&](float y, float z) { return kSitRootZ + (y - kSitRootY) * sitSa + (z - kSitRootZ) * sitCa; };
+            auto sitRotY = [&](float y, float z) { return kSitPivotY + (y - kSitPivotY) * sitCa - (z - kSitPivotZ) * sitSa; };
+            auto sitRotZ = [&](float y, float z) { return kSitPivotZ + (y - kSitPivotY) * sitSa + (z - kSitPivotZ) * sitCa; };
             setMobTex(21, 0, 6, 6, 7);
             addBoxRot( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f,
-                      kSitRootY, kSitRootZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕根锚 +18°：臀落地胸抬起）
-            const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.293, -0.130)
+                      kSitPivotY, kSitPivotZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕前爪根锚 +24.4°：臀落地胸不变）
+            const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.072, -0.017)
             const float neckZ = sitRotZ(0.12f, -0.24f);
             setMobTex(0, 0, 6, 6, 4);
             addHeadRot( 0.00f, neckY + 0.18f * headSa, neckZ - 0.18f * headCa, 0.14f, 0.15f, 0.18f,
-                        m_headPitch + kSitHeadNet, verts, idx, bMin, bMax); // 头（颈附链位 + 净 +10° 微仰「看玩家」）
+                        m_headPitch + kSitHeadNet, verts, idx, bMin, bMax); // 头（颈附链位 + 净 +8° 微仰「看玩家」）
             setMobTex(21, 0, 6, 6, 7);
             addBox(-0.08f, neckY + 0.18f * headCa + 0.16f * headSa,
                    neckZ + 0.18f * headSa - 0.16f * headCa, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（头随动链位）
             addBox( 0.08f, neckY + 0.18f * headCa + 0.16f * headSa,
                    neckZ + 0.18f * headSa - 0.16f * headCa, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
             setMobTex(0, 18, 2, 8, 2);
-            addBox(-0.16f, -0.21f, kSitRootZ - 0.12f, 0.08f, 0.21f, 0.14f, verts, idx, bMin, bMax); // 后大腿块（臀下折叠，z 绑根锚；顶 0.00 全线嵌入躯干底）
-            addBox( 0.16f, -0.21f, kSitRootZ - 0.12f, 0.08f, 0.21f, 0.14f, verts, idx, bMin, bMax);
-            addBox(-0.16f, -0.38f,  0.02f, 0.08f, 0.04f, 0.12f, verts, idx, bMin, bMax); // 折叠前爪（贴地前伸，衔接大腿块）
-            addBox( 0.16f, -0.38f,  0.02f, 0.08f, 0.04f, 0.12f, verts, idx, bMin, bMax);
-            setMobTex(0, 18, 2, 8, 2);
-            addBox(-0.16f, -0.15f, -0.26f, 0.08f, 0.27f, 0.08f, verts, idx, bMin, bMax); // 前腿垂直撑地（胸抬起 → 加长 0.54，顶 0.12 嵌胸底）
-            addBox( 0.16f, -0.15f, -0.26f, 0.08f, 0.27f, 0.08f, verts, idx, bMin, bMax);
+            addBox(-0.16f, -0.235f, -0.24f, 0.08f, 0.185f, 0.08f, verts, idx, bMin, bMax); // 前腿立撑（占位同站姿；顶 -0.05 比站姿高 0.03 埋入胸底——补坐姿躯干后仰让出的肩窝，防腿顶-头底透缝）
+            addBox( 0.16f, -0.235f, -0.24f, 0.08f, 0.185f, 0.08f, verts, idx, bMin, bMax);
+            addBox(-0.16f, -0.28f, kSitPivotZ + 0.48f, 0.08f, 0.14f, 0.14f, verts, idx, bMin, bMax); // 后大腿折叠块（臀下侧埋；顶 -0.14 全线嵌躯干底，无裸柱）
+            addBox( 0.16f, -0.28f, kSitPivotZ + 0.48f, 0.08f, 0.14f, 0.14f, verts, idx, bMin, bMax);
+            addBox(-0.16f, -0.365f, -0.05f, 0.05f, 0.055f, 0.12f, verts, idx, bMin, bMax); // 折叠后爪（贴地前伸；后接臀块前接前腿后沿）
+            addBox( 0.16f, -0.365f, -0.05f, 0.05f, 0.055f, 0.12f, verts, idx, bMin, bMax);
             // t986 项圈环带（坐态）：环带心 = 站姿裸颈段心 (0.02,-0.23) 绕**同一**坐姿根锚链派生
-            //   (0.194,-0.152)（单源 sitRot——项圈已从 QML overlay 收编进几何，随坐/站切换自动随移）；
-            //   四薄板围合偏移同站姿（上下 ±0.17 / 左右 ±0.20，轴对齐——18° 后仰下随移即读作环颈，
-            //   同 t946 overlay 随移口径）。subset 1 = 环带（QML materials[1] 项圈红）。
+            //   （t987 新链解析 (-0.015,-0.067)，矩阵 P-t986 (c) 同步钉）——单源 sitRot，项圈随坐/站
+            //   切换自动随移；四薄板围合偏移同站姿（上下 ±0.17 / 左右 ±0.20）。subset 1 = 环带
+            //   （QML materials[1] 项圈红）。
             if (m_collarVisible) {
                 const float cY = sitRotY(0.02f, -0.23f);
                 const float cZ = sitRotZ(0.02f, -0.23f);
@@ -862,9 +868,9 @@ void MobModel::rebuild()
         // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
         //   前伸圆头 + 双尖耳 + 长尾（几何内带尾，随身体贴图同纹）+ 4 细腿。未驯服 = 丛林豹猫（斑点橙棕贴图）、
         //   驯服 = 家猫（3 色变体贴图），几何共用（机制等价 MC 1.0 豹猫/猫同模型异贴图；毛色变体由 Main.qml
-        //   据 ocelotVariantAt 切贴图，几何不变）。腿底本地 y=−0.40 贴 collision 底面（halfH=0.35 →
-        //   Main.qml mobModelYOff=0.40−0.35=0.05）。walkPhase 驱动 4 腿对角摆动（addLegs，同狼四足 walk cycle）；
-        //   坐姿由 Main.qml delegate 变换（压缩 + 后倾）驱动，几何本身不参与。
+//   据 ocelotVariantAt 切贴图，几何不变）。腿底本地 y=−0.40 贴 collision 底面（halfH=0.35 →
+//   Main.qml mobModelYOff=0.40−0.35=0.05）。walkPhase 驱动 4 腿对角摆动（addLegs，同狼四足 walk cycle）；
+//   坐姿由 sitPose 开关在本几何内承载（t987 前爪根锚链，同狼模式：臀落地 + 前腿立撑 + 后腿折叠 + 竖尾）。
         // t780 pack UV（demo 包 cat/ocelot.png base 64×32，六面不透明度像素实测）：head(1,1)5×4×4（row6 双
         //   黑点眼实测，与 mobHeadRegions 豹猫头区同源）/ body(20,6)4×5×6（橙底深斑条纹六面 100%）/ 耳采头
         //   texOffs / leg(0,18)2×4×2；尾区 (12,19) 侧面 0% 不透明（demo 包未涂）→ 尾采 body texOffs 随身
@@ -877,43 +883,47 @@ void MobModel::rebuild()
         //   -0.08 深入躯干底 -0.11；腿底仍 -0.40 贴 collision 底面）+ legOffX 0.16→0.14 收进轮廓（身半宽 0.15）。
         g_texW = 64.0f; g_texH = 32.0f;
         if (m_sitPose) {
-            // t946 豹猫/猫坐姿返修（与狼同病同修——t878② 变换链断裂形态：躯干 +40° 绕枢上仰、头/耳/尾/腿
-            //   独立世界坐标 → 胸顶 0.42 压过头心 0.28 + 臀下折叠腿与躯干底间 ~0.10-0.12 透明缝，t963 登记
-            //   随本任务连修）。以臀部着地点为**唯一根锚**重推（链派生模式同狼分支）：后仰 18° + 头净 +10°
-            //   → 胸顶 0.35、头顶 0.43、耳顶 0.50（总高 0.90 自然坐猫）；竖尾锚在链派生尾根位（贴臀）。
-            constexpr float kSitRootY   = -0.12f;      // 根锚 y（臀底 = 折叠大腿块顶面着地高度）
-            constexpr float kSitRootZ   =  0.32f;      // 根锚 z
-            constexpr float kSitPitch   =  0.3141593f; // 躯干后仰 18°（绕根锚 nose-up）
-            constexpr float kSitHeadNet =  0.1745329f; // 头净俯仰 10°（随躯干链再微抬「看玩家」）
+            // t987 豹猫/猫坐姿返修（与狼同病同修——t946 臀锚后仰形态的豹猫镜像：臀几乎不沉、胸抬高、
+            //   前腿加长 + 臀下柱块 = 「兔子蹲」观感）：根锚移到**前爪着地点** (-0.40,-0.20)（站姿前腿 z
+            //   = 占位不变量），躯干绕它后仰 26.6°（tanθ = 臀底落距 0.29 / 臀根距 0.56 → 臀底角触地
+            //   y=-0.40，解析验证 -0.4005）；前腿占位同站姿立撑（顶埋胸 0.04 补肩窝，不 0.49 加长），
+            //   后腿折叠 = 侧边矮臀块
+            //   （顶 -0.12 全线嵌入倾斜躯干底）+ 贴地前伸细爪板（后接臀块前接前腿后沿）；竖尾锚在链派生
+            //   尾根位（贴臀竖起，尾根埋入臀顶）。链派生纪律同狼（头/耳/尾全走根锚链，禁独立世界坐标）；
+            //   头净俯仰 8°（耳顶 ~0.30 < 站姿 0.32，紧凑蹲坐）。
+            constexpr float kSitPivotY   = -0.40f;      // 根锚 y（= 前爪着地 / collision 底面）
+            constexpr float kSitPivotZ   = -0.20f;      // 根锚 z（= 站姿前腿 z，占位不变量）
+            constexpr float kSitPitch    =  0.4786f;    // 躯干后仰 26.6°（0.29·cos = 0.56·sin → 臀底角触地）
+            constexpr float kSitHeadNet  =  0.14f;      // 头净俯仰 8°（随躯干链再微抬「看玩家」）
             const float sitCa = std::cos(kSitPitch), sitSa = std::sin(kSitPitch);
             const float headCa = std::cos(kSitHeadNet), headSa = std::sin(kSitHeadNet);
             // 链派生（躯干随动段唯一合法定位方式）：站姿参考值 颈附 (0.12,-0.24)、耳 = 颈附 + (±0.06,+0.14,-0.12)。
-            auto sitRotY = [&](float y, float z) { return kSitRootY + (y - kSitRootY) * sitCa - (z - kSitRootZ) * sitSa; };
-            auto sitRotZ = [&](float y, float z) { return kSitRootZ + (y - kSitRootY) * sitSa + (z - kSitRootZ) * sitCa; };
+            auto sitRotY = [&](float y, float z) { return kSitPivotY + (y - kSitPivotY) * sitCa - (z - kSitPivotZ) * sitSa; };
+            auto sitRotZ = [&](float y, float z) { return kSitPivotZ + (y - kSitPivotY) * sitSa + (z - kSitPivotZ) * sitCa; };
             setMobTex(20, 6, 4, 5, 6);
             addBoxRot( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f,
-                      kSitRootY, kSitRootZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕根锚 +18°：臀落地胸抬起）
-            const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.281, -0.138)
+                      kSitPivotY, kSitPivotZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕前爪根锚 +26.6°：臀落地胸不变）
+            const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.080, 0.004)
             const float neckZ = sitRotZ(0.12f, -0.24f);
             setMobTex(1, 1, 5, 4, 4);
             addHeadRot( 0.00f, neckY + 0.14f * headSa, neckZ - 0.14f * headCa, 0.11f, 0.12f, 0.14f,
-                        m_headPitch + kSitHeadNet, verts, idx, bMin, bMax); // 头（颈附链位 + 净 +10° 微仰「看玩家」）
+                        m_headPitch + kSitHeadNet, verts, idx, bMin, bMax); // 头（颈附链位 + 净 +8° 微仰「看玩家」）
             setMobTex(20, 6, 4, 5, 6);
             addBox(-0.06f, neckY + 0.14f * headCa + 0.12f * headSa,
                    neckZ + 0.14f * headSa - 0.12f * headCa, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（头随动链位）
             addBox( 0.06f, neckY + 0.14f * headCa + 0.12f * headSa,
                    neckZ + 0.14f * headSa - 0.12f * headCa, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
-            addBox( 0.00f,  0.10f, sitRotZ(0.18f, 0.36f) + 0.02f, 0.04f, 0.15f, 0.04f, verts, idx, bMin, bMax); // 竖尾（链派生尾根位 0.451 +0.02 → 0.471 贴臀）
+            addBox( 0.00f, -0.02f, sitRotZ(0.18f, 0.36f), 0.04f, 0.22f, 0.04f, verts, idx, bMin, bMax); // 竖尾（链派生尾根位 0.564 贴臀；尾根埋入臀顶防悬空）
             setMobTex(0, 18, 2, 4, 2);
-            addBox(-0.14f, -0.19f, kSitRootZ - 0.12f, 0.06f, 0.21f, 0.13f, verts, idx, bMin, bMax); // 后大腿块（臀下折叠，z 绑根锚；顶 0.02 全线嵌入躯干底）
-            addBox( 0.14f, -0.19f, kSitRootZ - 0.12f, 0.06f, 0.21f, 0.13f, verts, idx, bMin, bMax);
-            addBox(-0.14f, -0.365f, -0.02f, 0.06f, 0.035f, 0.11f, verts, idx, bMin, bMax); // 折叠前爪（贴地前伸，衔接大腿块）
-            addBox( 0.14f, -0.365f, -0.02f, 0.06f, 0.035f, 0.11f, verts, idx, bMin, bMax);
-            setMobTex(0, 18, 2, 4, 2);
-            addBox(-0.14f, -0.155f, -0.22f, 0.06f, 0.245f, 0.06f, verts, idx, bMin, bMax); // 前腿垂直撑地（胸抬起 → 加长 0.49，顶 0.09 嵌胸底）
-            addBox( 0.14f, -0.155f, -0.22f, 0.06f, 0.245f, 0.06f, verts, idx, bMin, bMax);
+            addBox(-0.14f, -0.21f, -0.20f, 0.06f, 0.19f, 0.06f, verts, idx, bMin, bMax); // 前腿立撑（占位同站姿；顶 -0.02 比站姿高 0.04 埋入胸底——补坐姿躯干后仰让出的肩窝，防腿顶-头底透缝）
+            addBox( 0.14f, -0.21f, -0.20f, 0.06f, 0.19f, 0.06f, verts, idx, bMin, bMax);
+            addBox(-0.14f, -0.26f, kSitPivotZ + 0.41f, 0.06f, 0.14f, 0.12f, verts, idx, bMin, bMax); // 后大腿折叠块（臀下侧埋；顶 -0.12 全线嵌躯干底，无裸柱）
+            addBox( 0.14f, -0.26f, kSitPivotZ + 0.41f, 0.06f, 0.14f, 0.12f, verts, idx, bMin, bMax);
+            addBox(-0.14f, -0.365f, -0.06f, 0.04f, 0.035f, 0.11f, verts, idx, bMin, bMax); // 折叠后爪（贴地前伸；后接臀块前接前腿后沿）
+            addBox( 0.14f, -0.365f, -0.06f, 0.04f, 0.035f, 0.11f, verts, idx, bMin, bMax);
             // t986 项圈环带（坐态，豹猫颈围镜像数值系）：环带心 = 站姿裸颈段心 (0.02,-0.23) 绕同一
-            //   坐姿根锚 (-0.12,0.32) 链派生 (0.183,-0.160)；四薄板围合偏移上下 ±0.16 / 左右 ±0.165。
+            //   坐姿根锚链派生（t987 新链解析 (-0.013,-0.033)，矩阵 P-t986 (c) 同步钉）；四薄板围合
+            //   偏移上下 ±0.16 / 左右 ±0.165。
             if (m_collarVisible) {
                 const float cY = sitRotY(0.02f, -0.23f);
                 const float cZ = sitRotZ(0.02f, -0.23f);

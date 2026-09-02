@@ -139,13 +139,15 @@ class MobModel : public QQuick3DGeometry
     //   （旧单材质路径；剪毛态 / 刷怪笼迷你 / 其余 mobType 零回归）。materials 数少于 subset 时按
     //   QtQuick3D 文档「末材质兜余下 subset」退化（单材质仍整模可渲染）。
     Q_PROPERTY(bool sheepSkinHead READ sheepSkinHead WRITE setSheepSkinHead NOTIFY sheepSkinHeadChanged)
-    // t878②/t946 犬科/猫科坐姿（仅 mobType 10 狼 / 11 豹猫读）：true → 几何摆**坐姿**——以臀部着地点为
-    //   唯一根锚（mobmodel.cpp kSitRootY/kSitRootZ）+ 躯干后仰 18°：躯干绕根锚旋转、头/耳由同一根锚链派生
+    // t878②/t946/t987 犬科/猫科坐姿（仅 mobType 10 狼 / 11 豹猫读）：true → 几何摆**坐姿**——以前爪
+    //   着地点为唯一根锚（mobmodel.cpp kSitPivotY/kSitPivotZ；t987 起 = 站姿前腿占位不变量）+ 躯干后仰
+    //   （狼 24.4° / 豹猫 26.6°，tanθ 解析解使臀底角精确触地）：躯干绕根锚旋转、头/耳由同一根锚链派生
     //   （sitRot lambda，禁止独立世界坐标——t878② 各段独立绝对坐标的断链形态 = 「身体翘太高 + 分离中间
-    //   透明」根因）、后腿折叠为臀下大腿块 + 前腿垂直伸长撑地（坐姿胸前掌落地）。false（默认）→ 站姿
-    //   （原四足布局零回归）。QML 呈现层叠加件（眼/尾）按同一根锚派生的坐姿位偏移（成对契约，
-    //   见 Main.qml / ResourceBrowser.qml t946 注释互指）；项圈自 t986 起在本几何内（collarVisible，
-    //   坐/站位由同一 sitRot 链派生，QML 不再持 overlay 盒）。
+    //   透明」根因）、后腿折叠为臀下侧埋矮块 + 贴地细爪板、**前腿与站姿同盒立撑**（t987：不加长不抬胸
+    //   ——旧 t946 前腿加长 0.54 + 臀下 0.42 柱块被用户判「腿凭空长高一节 + 后脚长段贴地 = 完全像兔子」）。
+    //   false（默认）→ 站姿（原四足布局零回归）。QML 呈现层叠加件（眼/尾）按同一根锚派生的坐姿位偏移
+    //   （成对契约，见 Main.qml / ResourceBrowser.qml t987 注释互指）；项圈自 t986 起在本几何内
+    //   （collarVisible，坐/站位由同一 sitRot 链派生，QML 不再持 overlay 盒）。
     Q_PROPERTY(bool sitPose READ sitPose WRITE setSitPose NOTIFY sitPoseChanged)
     // t986 驯服项圈环带（仅 mobType 10 狼 / 11 豹猫读）：true → 几何追加**脖子一圈完整项圈**——
     //   露颈段（body 前缘 / head 后缘之间裸颈区）四条薄板围合环带（上/下/左/右），独立 subset 1
