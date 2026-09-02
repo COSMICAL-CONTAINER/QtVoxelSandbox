@@ -384,6 +384,15 @@ bool Hotbar::isMaterial(int itemId) const
     return itemId >= RecipeRegistry::MaterialIdBase;
 }
 
+// ── t989 生物蛋段判定（查看器资源浏览器 paletteModel 过滤蛋条目用）──
+//   透传 RecipeRegistry::mobTypeForSpawnEgg 单一权威表（非蛋 id → -1 → false）；QML 侧不再持蛋 id
+//   字面量镜像（旧 mobTypeForEgg 随查看器生物蛋分区退役）。**边界**：创造背包（Inventory.qml 材料
+//   tab）蛋条目照旧在列——本谓词只被查看器调色板消费。
+bool Hotbar::isSpawnEgg(int itemId) const
+{
+    return RecipeRegistry::mobTypeForSpawnEgg(itemId) >= 0;
+}
+
 // ── t345 护甲段判定 / 属性桥接（透传 ArmorRegistry；QML delegate + 装备槽校验用）──
 bool Hotbar::isArmor(int itemId) const { return ArmorRegistry::isArmor(itemId); }
 int Hotbar::armorPiece(int itemId) const { return ArmorRegistry::piece(itemId); }
