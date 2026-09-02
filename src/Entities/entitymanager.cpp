@@ -2795,8 +2795,9 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
     }
 
     // 水平追击移动 lambda（复用 aiHostile 逐轴 AABB 撤回 + 世界边界 clamp 模式）：朝 (tx,tz) 以 spd 走，
-    //   返是否真位移。捕获 e/dt/world/worldW/worldD（本函数内唯一移动路径；三处复用免三次内联副本）。
-    auto chase = [&](float tx, float tz, float spd, float distXZ) -> bool {
+    //   返是否真位移。tdy = 目标脚位高差（t988：异层目标在咬击带内也须探跳爬升，见下门注）。
+    //   捕获 e/dt/world/worldW/worldD（本函数内唯一移动路径；四处复用免内联副本）。
+    auto chase = [&](float tx, float tz, float spd, float distXZ, float tdy) -> bool {
         if (distXZ <= 1e-4f) { e.moveSpeed = 0.0f; return false; } // 目标重合 → 不位移（避免除零）
         const float ehw = e.halfW; // XZ 半宽（边界 clamp + 碰撞）
         const float ehh = e.halfH; // Y 半高（footprint 格扫）
@@ -2824,7 +2825,11 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         //   review0830 #14：攻击距离内不探跳（distXZ ≤ kAttackRange 咬击带内）——贴脸可咬时前方矮障碍
         //   不再触发瞬态起跳（边咬边跳 1-2 跳）；跳探只服务「接近被挡」的越障，进入咬击带即无需越障。
         //   跟随/寻偶路径不受影响（kFollowMinDist 2.5 > kAttackRange，chase 调用时 distXZ 恒 > 1.6）。
-        if (e.resting && world && distXZ > kAttackRange) {
+        //   t988 门收窄（用户「遇到要跳跃才能上的格子不会跳、卡在那里」）：#14 的压跳语义 = 「贴脸
+        //   **同层可咬**时不跳」——异层目标（|tdy| > 0.5，1 格台阶上/下的目标）在咬带内也必须探跳：
+        //   旧门把这类目标一并压死 = 狼贴台面 0.8-1.6 处隔台阶卡死（咬带内既不跳、血隔台扣但狼永不上台，
+        //   用户观感「不会跳、卡在那里」）。同层目标（|tdy| ≤ 0.5）带内照旧压跳（#14 行为钉 rig 保持绿）。
+        if (e.resting && world && (distXZ > kAttackRange || std::abs(tdy) > 0.5f)) {
             const float fdx = -std::sin(e.yawRad);
             const float fdz = -std::cos(e.yawRad);
             const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
@@ -2874,7 +2879,7 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         if (!e.chasing) return aiWander(e, dt, world, worldW, worldD, speedScale); // 非追踪 → 游荡
         // 追踪：yaw 朝玩家 + 走近 + 近距咬击（复用 aiHostile attack 门控：冷却 + t321 全局节流）。
         if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
-        const bool moved = chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, distXZ);
+        const bool moved = chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, distXZ, dy);
         if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange
             && e.wolfAttackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
             e.wolfAttackCooldown = kWolfAttackCooldown;
@@ -2899,7 +2904,8 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
             const float mdz = mp.pos.z() - e.pos.z();
             const float md = std::sqrt(mdx * mdx + mdz * mdz);
             if (md > 1e-4f) e.yawRad = std::atan2(-mdx, -mdz);
-            return chase(mp.pos.x(), mp.pos.z(), kWolfChaseSpeed * speedScale, md);
+            return chase(mp.pos.x(), mp.pos.z(), kWolfChaseSpeed * speedScale, md,
+                         mp.pos.y() - e.pos.y());
         }
     }
 
@@ -2915,7 +2921,7 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         const float dy = t.pos.y() - e.pos.y();
         const float distXZ = std::sqrt(dx * dx + dz * dz);
         if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
-        const bool moved = chase(t.pos.x(), t.pos.z(), kWolfChaseSpeed * speedScale, distXZ);
+        const bool moved = chase(t.pos.x(), t.pos.z(), kWolfChaseSpeed * speedScale, distXZ, dy);
         // 近距咬击目标 mob（damageEntity 复用受击链：扣血 + 红闪 + 归零 mobDied 死亡掉落；冷却门控防连抽）。
         if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange && e.wolfAttackCooldown <= 0.0f) {
             e.wolfAttackCooldown = kWolfAttackCooldown;
@@ -2968,7 +2974,8 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
     }
     if (followDist > 1e-4f) e.yawRad = std::atan2(-fdx, -fdz); // 跟随期间朝主人
     if (followDist > kFollowMinDist)
-        return chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, followDist);
+        return chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, followDist,
+                     playerPos.y() - e.pos.y());
     e.wanderSpeed = 0.0f;
     e.moveSpeed = 0.0f; // 已到位（贴近主人）→ 停步（腿停）
     return false;
