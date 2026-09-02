@@ -351,6 +351,15 @@ private:
     bool cartRailGradient(World *world, const QVector3D &pos, int railY,
                           float wx, float wz, float &outGrad) const;
 
+    // t981 V 谷底一次停驻捕获（tickPushedCarts 滑行半边 / tickRiddenCart coasting 半边共用；实现见 .cpp）：
+    //   车所在格 = V 形凹谷格（直轨、行进轴两侧邻轨三高探针皆 +1 —— 与 railRiseAt 谷面分支同几何同源）
+    //   且 |speed| ≤ kCartValleyEscape 且非金轨（断电刹车 / 通电 boost 既有轨型语义优先，不扩面）→ 以
+    //   「制动到谷心」速度律接管本 tick 坡向物理：a = v²/(2·d)（d = 沿运动向到谷心剩余距离，每 tick 重算
+    //   = 自校正常减速），v 与 d 同步归零 → 车一次平滑减速停驻谷底中心（谷心梯度 0 = 静置闸稳定不动点，
+    //   停驻后所有闸门一致静止，无往复）。返回 true = 已接管（caller 跳过既有坡向分类；推进仍走
+    //   stepCartAlongRail）。已越谷心正在爬对壁（d<0）不捕（高能穿透同口径；回落后再捕）。
+    bool tryValleyBottomCapture(Cart &c, World *world, int railY, qreal dt);
+
     // t769 车身俯仰刷新（纯呈现）：以车心为基准、沿车头向 ±kCartPitchProbe 两点采样轨面高（railSurfaceYAt）
     //   → pitch = atan2(前-后, 2·probe)。railY = 车所在列轨层（pinCartY 返回值 / 被骑停驻帧的前置钉定 railY）。
     //   详见 .cpp 实现处头注释（采样窗语义 / 跨段过渡 / 符号约定）。
@@ -376,7 +385,10 @@ private:
     //   态贴在坡下侧）。下坡 / 平移的重叠不拦（用户口径「下坡方向不做额外阻挡」——下坡穿顶属既有低顶净空
     //   延续语义；平移重叠几何上不存在）。review0830 #4 豁免语义拆分：本 tick 入点探测结果
     //   embeddedAtEntry（常量）是**唯一**的逃逸豁免开关（入点嵌入 → 全 tick 允许带重叠移动直至脱出）；
-    //   梯度采样失联的受阻子步回退本子步起点（重叠位不保留），不再污染豁免开关 / 回钳 lo 端。
+    //   梯度采样失联的受阻子步**仅非嵌入车**回退本子步起点（重叠位不保留、不污染豁免开关 / 回钳 lo 端）；
+    //   入点嵌入车的失联子步同 uphill 分支走逃逸豁免（带重叠推进直至脱出 —— t981 清算 review0831 #28：
+    //   旧文「失联回退」与豁免契约在「嵌入 × 失联」组合下互相矛盾，实现曾取回退 = 嵌入车被每 tick
+    //   回退清速冻结在重叠位，推力 / 动力喂速全被吞，拆掉重叠方块才恢复）。
     void stepCartAlongRail(Cart &c, World *world, float dt);
 
     // t708 钉轨面（共享：被骑 tickRiddenCart / 空车 tickPushedCarts 同一 Y 钉定）：把矿车 Y 钉到所在列向下
@@ -559,6 +571,13 @@ private:
     //   平拐角 0）——与 t863① tryStallSlideback 的 0.05 高差阈同口径（0.05 高差 ÷ 0.5 采样窗 = 0.1 梯度）。
     //   低于它的微起伏（拐角双线性残段 / 采样跨段过渡带）按平面处理（退回邻轨层差判定）。
     static constexpr float kCartSlopeGradMin = 0.1f;
+    // t981 V 谷底捕获逃逸阈（blocks/s）：|speed| ≤ 它的滑行车进入 V 形凹谷格（行进轴两侧邻轨皆 +1，
+    //   railRiseAt 的 2|axis-0.5| 谷面）即被「制动到谷心」速度律一次平滑减速停驻（用户口径「滑落到底一次
+    //   停驻，不许往复振荡」）；> 它（动力 boost / 碰撞弹射）按速度通过不捕获。取 kCartSlopeDownSpeed(10.0)
+    //   = 重力滑行终端速度：终端速度本身按 exp 收敛恒自下方逼近 10 → 凡纯重力可达的到达速全 < 10 全被捕，
+    //   只有外源供能（boost 12.8 / 冲量钳 12.8）严格 > 10 穿得过；阈若更低（如 1 格滑落到达速 6.4 之下不
+    //   可能，之上放行）会让重力车反复越谷 = 振荡复发。
+    static constexpr float kCartValleyEscape = 10.0f;
 };
 
 #endif // MINECARTMANAGER_H
