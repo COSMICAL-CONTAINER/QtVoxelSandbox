@@ -207,6 +207,32 @@ bool mobFeetInWater(World *world, float cx, float cy, float cz, float halfH)
     return world->blockAt(int(std::floor(cx)), fy, int(std::floor(cz))) == BlockRegistry::Water;
 }
 
+// t979 mob 口鼻线淹没判定（单一权威：t828 溺水 + t923 浮面「会淹才游」两处共用本谓词，旧式为两处
+//   各写的同式整格布尔）。水是分档液面（state 0=水源满格 1.0 / 流水 (8-state)/8 逐级降，见
+//   BlockRegistry::Water 的 t174/t197 state 编码——1/8 档=state 7、1/4 档=state 6）；旧整格
+//   blockAt==Water 布尔判把「脚踝水」误当「没顶」：矮 mob 口鼻线 pos.y+halfH·0.8 抬不到 1 格
+//   （猪 halfH=0.45 → 口鼻线在脚位上方 0.81），站在 1/8 水洼里口鼻线仍落在脚位水格 → 呼吸耗尽
+//   溺亡（用户实测「脚踝深水、猪一直往上跳还是淹死」根因；「往上跳」= 同一误判驱动的 t923 浮力
+//   在浅水空跳，不脱困）。本谓词改**口鼻线 vs 格内实际水面高度**连续比较：口鼻所在格非水 → 口鼻
+//   在空气中（不算淹没）；是水 → 格内液面（格底 + 满格 1.0 / (8-state)/8）≥ 口鼻线才算淹没。
+//   满格水源液面=格顶 → 与旧整格判在源块水完全等价（既有 t828/t923 探针行为不变）；仅浅水流水档
+//   修正误判。玩家侧核对（t202 eyeInWater 同为整格判）：玩家眼高 1.62 > 1 格，站立时眼位格恒在
+//   脚位格上一格，1/8、1/4 水洼结构性不可达眼位格 → 不同病，不顺手修（差异登记）。分层（PLAN §2）：
+//   纯只读 World::blockAt + stateAt，无写。t980 鱿鱼离水判据与本谓词同族（线 vs 水面的反向锚）。
+bool mobSnoutSubmergedInWater(World *world, float cx, float cy, float cz, float halfH)
+{
+    if (!world) return false;
+    const float mouthY = cy + halfH * 0.8f; // 口鼻线（旧 t828/t923 头位采样式原样保留——采样权威不变）
+    const int my = int(std::floor(mouthY));
+    if (my < 0) return false;
+    const int mx = int(std::floor(cx));
+    const int mz = int(std::floor(cz));
+    if (world->blockAt(mx, my, mz) != BlockRegistry::Water) return false; // 口鼻格非水 → 呼吸自由
+    const quint8 st = world->stateAt(mx, my, mz);                          // 越界返 0 → 下方按满格算（保守没顶）
+    const float surfaceY = float(my) + (st == 0 ? 1.0f : float(8 - st) / 8.0f); // 水源满格 / 流水降档
+    return surfaceY >= mouthY; // 液面没过口鼻线才算淹没（浅水档液面低于口鼻线 → 负）
+}
+
 // t362 mob 落地支撑复探：footprint XZ 任一列在支撑层 supportY 有可站立支撑 → true。
 //   取样同 mobAabbHitsSolid（floor(min)..ceil(max)-1，严格覆盖排除仅贴面列）。只读 World。
 //   用于替代旧版「仅中心列」支撑复探 —— 见 tick 内 resting 复探注释（修「mob 下 1 格台阶卡死」根因）。
@@ -7364,17 +7390,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             if (e.dead) continue;
 
             // t828 mob 水下窒息（spec「生物水下有呼吸时间，太久不浮上来掉血」；机制等价玩家 t202 溺水——
-            //   15s 呼吸耗尽后 1HP/s，节奏同玩家 10 气泡×1.5s + kDrownInterval 1s）。头部判定 = 身体中心上方
-            //   半高处格（floor(pos.y + halfH·0.8)——矮 mob（spider halfH 0.3）头位=身位、高 mob（夜行者 1.4）
-            //   头位在顶段，贴 MC「头浸水才耗气」；比中心格更贴「头」。**鱿鱼豁免**（水生不溺水，机制等价
-            //   MC 1.0 squid）。节流帧用累积 aiDt（t500：状态累积器必须累积 dt，平均速率与每帧一致）。头出水
-            //   → 双计时器清零（呼吸恢复，机制等价玩家出水气泡回满）。掉血走 damageEntity 受击链（红闪 +
-            //   归零 mobDied 掉落）；致死本帧 continue 由下方 AI 段前的 dead 分支兜（同火/仙人掌语义）。
+            //   15s 呼吸耗尽后 1HP/s，节奏同玩家 10 气泡×1.5s + kDrownInterval 1s）。头部判定 = t979
+            //   mobSnoutSubmergedInWater 单一权威（口鼻线 vs 格内实际水面高度——矮 mob 站 1/8、1/4 浅水
+            //   档不再误判没顶；满格水源与旧整格判完全等价，见谓词头注释）。**鱿鱼豁免**（水生不溺水，
+            //   机制等价 MC 1.0 squid；t980 在 else 分支给鱿鱼离水搁浅掉血——同一判据族两向用）。节流帧用
+            //   累积 aiDt（t500：状态累积器必须累积 dt，平均速率与每帧一致）。口鼻出水 → 双计时器清零
+            //   （呼吸恢复，机制等价玩家出水气泡回满）。掉血走 damageEntity 受击链（红闪 + 归零 mobDied
+            //   掉落）；致死本帧 continue 由下方 AI 段前的 dead 分支兜（同火/仙人掌语义）。
             if (e.mobType != MobSquid) {
-                const int dHeadY = qFloor(e.pos.y() + e.halfH * 0.8f);
-                const bool dHeadInWater = dHeadY >= 0
-                                          && world->blockAt(qFloor(e.pos.x()), dHeadY, qFloor(e.pos.z()))
-                                                 == BlockRegistry::Water;
+                const bool dHeadInWater = mobSnoutSubmergedInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH);
                 if (dHeadInWater) {
                     e.mobAirTimer += float(aiDt);
                     if (e.mobAirTimer >= kMobBreathSeconds) {
@@ -7868,16 +7892,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // t828 鱿鱼浮力打破 resting：水中的鱿鱼有持续净上涌（下方重力分流 +kSquidBuoyancy），不应贴底
             //   静置——但支撑复探对「水底固体」恒真 → 无此打破则下方浮力分支永不可达（resting continue 先于
             //   重力），鱿鱼仍贴底。脚位格在水 → 翻 resting=false 走浮力上升（头出水面落回普通重力 bobbing）。
-            // t923 泛化到全部陆栖 mob（浮面）：**头部格浸水**（与 t828 溺水头部判定同式）→ 打破 resting 走
-            //   下方泳浮分支升到水面（旧版仅鱿鱼有浮力，其余 mob 缓沉贴底 → 头长浸水 15s 溺亡 = 驯服狼困水
-            //   淹死根因）。浅水跋涉（头未没水）**不打破**——贴底站立继续走（无 resting 翻转振荡 / dirty 抖动）。
-            //   鱿鱼保持 t828 原脚位判据（水生恒浮，包括浅水格）。
+            // t923 泛化到全部陆栖 mob（浮面）：**口鼻线淹没**（t979 mobSnoutSubmergedInWater 单一权威——
+            //   溺水/浮面/resting 破除三消费点同源；旧整格判在 1/8、1/4 浅水档误破 resting → 每 aiTick
+            //   翻转振荡 dirty 抖动，新谓词浅水不破）→ 打破 resting 走下方泳浮分支升到水面（旧版仅鱿鱼有
+            //   浮力，其余 mob 缓沉贴底 → 头长浸水 15s 溺亡 = 驯服狼困水淹死根因）。浅水跋涉（口鼻线在
+            //   水面上）**不打破**——贴底站立继续走（无 resting 翻转振荡 / dirty 抖动）。鱿鱼保持 t828 原
+            //   脚位判据（水生恒浮，包括浅水格）。
             if (e.kind == Mob) {
                 const bool deepWater = (e.mobType == MobSquid)
                     ? (qFloor(e.pos.y() - e.halfH) >= 0
                        && world->blockAt(cx, qFloor(e.pos.y() - e.halfH), cz) == BlockRegistry::Water)
-                    : (qFloor(e.pos.y() + e.halfH * 0.8f) >= 0
-                       && world->blockAt(cx, qFloor(e.pos.y() + e.halfH * 0.8f), cz) == BlockRegistry::Water);
+                    : mobSnoutSubmergedInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH);
                 if (deepWater) {
                     e.resting = false;
                     dirty = true;
@@ -7960,15 +7985,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   钳制后仍保持「上涌快、回沉慢」的节律游动感。
                 e.vy += kSquidBuoyancy * float(dt);
                 if (e.vy > kSquidRiseMax) e.vy = kSquidRiseMax;
-            } else if (qFloor(e.pos.y() + e.halfH * 0.8f) >= 0
-                       && world->blockAt(cx, qFloor(e.pos.y() + e.halfH * 0.8f), cz)
-                              == BlockRegistry::Water) {
-                // t923 ② 陆栖 mob 主动浮面（头部格浸水 = 与溺水判定同式——「会淹才游」；机制等价 MC 1.0
-                //   生物水中游到水面，替代 t298 旧「恒缓沉贴底」简化）：净浮力上涌 + rise 钳制 → 头出水面后
+            } else if (mobSnoutSubmergedInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)) {
+                // t923 ② 陆栖 mob 主动浮面（口鼻线淹没 = t979 mobSnoutSubmergedInWater 单一权威——
+                //   「会淹才游」与 t828 溺水判据同源同谓词，源块水行为与旧整格判等价、浅水流水档不再
+                //   误触发空跳；机制等价 MC 1.0 生物水中游到水面）：净浮力上涌 + rise 钳制 → 口鼻出水后
                 //   本分支不触发、落回下方缓沉 → 水面贴平 bobbing 悬停（呼吸恢复不溺亡 + 追击水平照常）。
-                //   驯服狼困水淹死链（缓沉贴底 → 头浸 15s → 1HP/s → 死）由此断开；上岸最后一步由 aiWolf
-                //   chase 泳跃（vy=kJumpSpeed 直设）承接——钳制只作用于**浮力累积**（vy < riseMax 才加），
-                //   泳跃的高速 vy 原样穿过（否则跃出速度被夹回 1.2 = 跃不出水面）。
+                //   驯服狼困水淹死链（缓沉贴底 → 口鼻浸 15s → 1HP/s → 死）由此断开；上岸最后一步由
+                //   aiWolf chase 泳跃（vy=kJumpSpeed 直设）承接——钳制只作用于**浮力累积**（vy < riseMax
+                //   才加），泳跃的高速 vy 原样穿过（否则跃出速度被夹回 1.2 = 跃不出水面）。
                 if (e.vy < kMobSwimRiseMax)
                     e.vy = std::min(e.vy + kMobSwimBuoyancy * float(dt), kMobSwimRiseMax);
             } else {
