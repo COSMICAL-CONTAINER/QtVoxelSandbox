@@ -143,9 +143,18 @@ class MobModel : public QQuick3DGeometry
     //   唯一根锚（mobmodel.cpp kSitRootY/kSitRootZ）+ 躯干后仰 18°：躯干绕根锚旋转、头/耳由同一根锚链派生
     //   （sitRot lambda，禁止独立世界坐标——t878② 各段独立绝对坐标的断链形态 = 「身体翘太高 + 分离中间
     //   透明」根因）、后腿折叠为臀下大腿块 + 前腿垂直伸长撑地（坐姿胸前掌落地）。false（默认）→ 站姿
-    //   （原四足布局零回归）。QML 呈现层叠加件（眼/项圈/尾）按同一根锚派生的坐姿位偏移（成对契约，
-    //   见 Main.qml / ResourceBrowser.qml t946 注释互指）。
+    //   （原四足布局零回归）。QML 呈现层叠加件（眼/尾）按同一根锚派生的坐姿位偏移（成对契约，
+    //   见 Main.qml / ResourceBrowser.qml t946 注释互指）；项圈自 t986 起在本几何内（collarVisible，
+    //   坐/站位由同一 sitRot 链派生，QML 不再持 overlay 盒）。
     Q_PROPERTY(bool sitPose READ sitPose WRITE setSitPose NOTIFY sitPoseChanged)
+    // t986 驯服项圈环带（仅 mobType 10 狼 / 11 豹猫读）：true → 几何追加**脖子一圈完整项圈**——
+    //   露颈段（body 前缘 / head 后缘之间裸颈区）四条薄板围合环带（上/下/左/右），独立 subset 1
+    //   （QML materials[1] 纯色项圈红，不吃身体贴图——pack 命中与否无关，项圈恒红可见）。
+    //   替代旧 t831/t963「单横扁盒 overlay」——旧盒中心 z=-0.30 埋进头盒 z∈[-0.60,-0.24] 范围内，
+    //   只露 x ±0.03 两侧凸块 = 用户「差不多看到两个红点」根因；环带几何移到 head 后缘之后的裸颈段
+    //   且四面围合 → 任意 yaw 可辨完整一圈。false（默认）→ 无项圈盒、单 subset（未驯服态 / 刷怪笼
+    //   迷你 / 图鉴未拨驯服拨杆零回归；materials 少于 subset 时末材质兜底，单材质整模可渲染）。
+    Q_PROPERTY(bool collarVisible READ collarVisible WRITE setCollarVisible NOTIFY collarVisibleChanged)
     // t782 燃烬者棒组公转角（度，0..360）：仅 Emberling(mobType 17) 用——4 根烈焰棒绕身 Y 轴公转的当前角
     //   （棒 i 轨道位 = i·90° + rodSpin，盒心 (cos·0.52, -0.03±0.10 交错, sin·0.52)，棒身恒竖直只轨道心公转）。
     //   QML 用 NumberAnimation on rodSpin 驱动连续旋转（帧率无关；同 walkPhase 的 set→rebuild 模式，
@@ -190,6 +199,10 @@ public:
     bool sitPose() const { return m_sitPose; }
     void setSitPose(bool on);
 
+    // t986 驯服项圈环带开关；仅 mobType 10/11 读（其余 mobType 无项圈盒）。
+    bool collarVisible() const { return m_collarVisible; }
+    void setCollarVisible(bool on);
+
     // t782 燃烬者棒组公转角（度）；仅 Emberling 用。
     float rodSpin() const { return m_rodSpin; }
     void setRodSpin(float deg);
@@ -203,6 +216,7 @@ signals:
     void packTexturedChanged();
     void sheepSkinHeadChanged();
     void sitPoseChanged();
+    void collarVisibleChanged();
     void rodSpinChanged();
 
 private:
@@ -216,6 +230,7 @@ private:
     bool m_packTextured = false; // pack entity 贴图（MC box-UV 精确采样，R19 C3）；false → 全脸 UV（程序生成贴图）
     bool m_sheepSkinHead = false; // t876 羊头分离子集（仅 mobType 3；false → 无 subset 单段绘制零回归）
     bool m_sitPose = false; // t878② 坐姿（仅 mobType 10/11；false → 站姿零回归）
+    bool m_collarVisible = false; // t986 驯服项圈环带（仅 mobType 10/11；false → 无项圈盒零回归）
     float m_rodSpin = 0.0f; // t782 燃烬者棒组公转角（度）；仅 Emberling 用；0 → 棒在 0/90/180/270° 轴位
 };
 

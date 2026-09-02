@@ -9024,6 +9024,10 @@ Window {
                                     mobType: 10
                                     // t878② 坐姿几何（mobmodel.cpp 狼分支 sitPose 布局；坐/站即时切换）。
                                     sitPose: wolfSit === 1
+                                    // t986 驯服项圈环带：几何内裸颈段四薄板围合一圈（subset 1 =
+                                    //   materials[1] 项圈红），驯服态位单源读 wolfTamedAt（替代旧 t831
+                                    //   overlay 盒——「两个红点」根因见 mobmodel.cpp t986 注释）。
+                                    collarVisible: { const _r = mon.revision; return _r >= 0 && entityManager.wolfTamedAt(index) }
                                     // t780：pack 命中 → box-UV 展开 pack wolf.png（躯干采 mane 毛区，mobmodel.cpp t780
                                     //   分区实测）；pack 关 → 程序生成 mob_wolf 全脸 UV（原行为不变）。
                                     packTextured: wolfPackHit
@@ -9033,12 +9037,27 @@ Window {
                                 //   下沉」三件套整删——那是「趴下」观感根源）。wolfSit 绑 revision → toggle 即时切姿。
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
-                                materials: PrincipledMaterial {
-                                    lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
-                                    // t780 两态贴图：pack 命中 → pack wolf.png（box-UV）；否则程序 mob_wolf（全脸 UV）。
-                                    baseColorMap: wolfPackHit ? mobWolfPackTex : mobWolfTex
-                                }
+                                // t986 双材质：[0] = 身体（贴图态，原单材质原样）；[1] = 项圈环带 subset
+                                //   （mobmodel.cpp t986 环带盒），纯色项圈红 #c22828 × 昼夜灰阶（夜间随场景
+                                //   变暗）+ 受击红闪统一 #ff0000（语义承旧 t831 overlay 材质原样）。无项圈
+                                //   （未驯服）时 subset 仅 1 个 → materials[1] 不消费（末材质兜底规则不触发）。
+                                materials: [
+                                    PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                        // t780 两态贴图：pack 命中 → pack wolf.png（box-UV）；否则程序 mob_wolf（全脸 UV）。
+                                        baseColorMap: wolfPackHit ? mobWolfPackTex : mobWolfTex
+                                    },
+                                    PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: {
+                                            const _r = mon.revision
+                                            const tl = terrainLight(worldClock.skyLight)
+                                            if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                            return _r >= 0 ? Qt.rgba(0.76 * tl.r, 0.16 * tl.g, 0.16 * tl.b, 1.0) : "#000000"
+                                        }
+                                    }
+                                ]
                                 // 尾巴枢（身体后上部，绕根旋转）：尾根 = 身体后上 (0, 0.16, 0.38)（MobModel 局部坐标：躯干心
                                 //   0.02 半 0.15×0.40 → 后上角）。eulerRotation.x 正 → +Y 端朝 +Z（尾向后竖）；满血 → 140−105×1=35°
                                 //   （竖起）、残血 → 140−105×0=140°（下垂）。随 bodyYaw + 父 visible 继承。
@@ -9072,29 +9091,10 @@ Window {
                                         }
                                     }
                                 }
-                                // t831 驯服项链（spec「驯服后脖子有项链」；机制等价 MC 1.0 驯服狼红项圈）：颈根
-                                //   水平扁环带（UnitCube 细横盒，x 半 0.21 微出躯干侧缘 ±0.18 → 两侧读作「环颈」；
-                                //   z 心 -0.30 = 头后缘 -0.24 与躯干前缘 -0.40 的嵌接区）。仅驯服狼可见
-                                //   （wolfTamedAt；revision 绑定即时显/隐——驯服瞬间即现项链）。纯视觉，无碰撞 /
-                                //   交互语义；随父坐姿变换（压缩 + 后倾）继承。项圈红 #c22828 × 昼夜灰阶（夜间随
-                                //   场景变暗，同尾巴毛色乘法）；受击红闪统一 #ff0000（同身体语义）。
-                                Model {
-                                    visible: { const _r = mon.revision; return _r >= 0 && entityManager.wolfTamedAt(index) }
-                                    geometry: UnitCube {}
-                                    // t946 项圈随坐姿：站姿颈根 (0,0.16,-0.30) 绕坐姿根锚 (-0.14,0.36) 旋 18°
-                                    //   = (0,0.349,-0.175)（mobmodel.cpp 坐姿链派生成对契约；revision 触碰即时随切）。
-                                    position: wolfSit === 1 ? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)
-                                    scale: Qt.vector3d(0.42, 0.06, 0.07) // 横扁环带（x 微出躯干侧缘读作环颈）
-                                    materials: PrincipledMaterial {
-                                        lighting: PrincipledMaterial.NoLighting
-                                        baseColor: {
-                                            const _r = mon.revision
-                                            const tl = terrainLight(worldClock.skyLight)
-                                            if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
-                                            return _r >= 0 ? Qt.rgba(0.76 * tl.r, 0.16 * tl.g, 0.16 * tl.b, 1.0) : "#000000"
-                                        }
-                                    }
-                                }
+                                // t831 驯服项链 → t986 整删 overlay：旧「单横扁盒」心 z=-0.30 埋进头盒
+                                //   z∈[-0.60,-0.24] 范围，只露 x ±0.03 两侧凸块 = 用户「差不多看到两个红点」；
+                                //   项圈改由 MobModel 几何裸颈段四薄板围合一圈（collarVisible + materials[1]，
+                                //   三消费端同源——图鉴/迷你态同一几何，不再各自复刻 overlay 盒）。
                                 // 眼（2 颗深色点；头前侧。MobModel 头心 (0,0.12,-0.42) 半 (0.14,0.15,0.18) → 前面 z=-0.60
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.16、x=±0.08；z 贴头前面略凸（-0.61，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。
@@ -9142,6 +9142,11 @@ Window {
                                     mobType: 11
                                     // t878② 坐姿几何（mobmodel.cpp 豹猫分支 sitPose 布局；坐/站即时切换）。
                                     sitPose: ocatSit === 1
+                                    // t986 驯服项圈环带：几何内裸颈段四薄板围合一圈（subset 1 =
+                                    //   materials[1] 项圈红）。visible 直挂 **ocatTamed 同一驯服态位**
+                                    //   （P-t963 单源钉——贴图切换 / pack 判据 / 项圈同源，不二读
+                                    //   entityManager.ocelotTamedAt）。
+                                    collarVisible: ocatTamed
                                     // t780：野生豹猫 pack 命中 → box-UV 展开 pack ocelot.png（头(1,1)/身(20,6)/腿(0,18)，
                                     //   尾随身同纹，mobmodel.cpp t780 分区实测）；驯服猫 / pack 关 → 程序贴图全脸 UV（原行为）。
                                     packTextured: ocelotPackHit
@@ -9150,39 +9155,27 @@ Window {
                                 // t878② 坐姿全在几何内（臀/前掌恒贴地面 y=-0.40）→ Model 变换归一（旧三件套整删，同狼）。
                                 position: Qt.vector3d(0, mobModelYOff, 0)
                                 scale: Qt.vector3d(1.0, 1.0, 1.0)
-                                materials: PrincipledMaterial {
-                                    lighting: PrincipledMaterial.NoLighting
-                                    baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
-                                    // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
-                                    //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。t780：未驯服且 pack 命中 → pack
-                                    //   cat/ocelot.png（box-UV 斑点豹猫）。
-                                    baseColorMap: {
-                                        if (ocatTamed) {
-                                            const v = entityManager.ocelotVariantAt(index)
-                                            if (v === 0) return mobCatTabbyTex
-                                            if (v === 1) return mobCatGingerTex
-                                            return mobCatCreamTex
+                                // t986 双材质：[0] = 身体（贴图态，原单材质原样）；[1] = 项圈环带 subset
+                                //   （豹猫颈围镜像数值系，mobmodel.cpp t986）。项圈红 #c22828 × 昼夜灰阶 +
+                                //   受击红闪统一 #ff0000（语义承旧 t963 overlay 材质原样）。
+                                materials: [
+                                    PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                        // 驯服 → 据 ocelotVariantAt 选 3 色猫贴图；未驯服 → mob_ocelot 豹猫贴图（几何同，异贴图
+                                        //   区分豹猫/猫，机制等价 MC 1.0 同模型异贴图）。t780：未驯服且 pack 命中 → pack
+                                        //   cat/ocelot.png（box-UV 斑点豹猫）。
+                                        baseColorMap: {
+                                            if (ocatTamed) {
+                                                const v = entityManager.ocelotVariantAt(index)
+                                                if (v === 0) return mobCatTabbyTex
+                                                if (v === 1) return mobCatGingerTex
+                                                return mobCatCreamTex
+                                            }
+                                            return ocelotPackHit ? mobOcelotPackTex : mobOcelotTex
                                         }
-                                        return ocelotPackHit ? mobOcelotPackTex : mobOcelotTex
-                                    }
-                                }
-                                // t963 驯服项圈（用户第五轮「驯服后没看到项圈」；镜像 t831 狼项圈几何语义，
-                                //   机制等价 MC 1.0 驯服猫项圈）：颈根水平扁环带（UnitCube 细横盒，x 半 0.18
-                                //   微出豹猫躯干侧缘 ±0.15 → 两侧读作「环颈」；z 心 -0.30 = 头后缘 -0.24 与
-                                //   躯干前缘 -0.36 的嵌接区）。仅驯服猫可见——visible 直挂 **ocatTamed 同一
-                                //   驯服态位**（贴图切换 / pack 判据 / 项圈三消费端同源，禁第二套
-                                //   entityManager.ocelotTamedAt 读——单源钉 P-t963）。随父坐姿几何继承；
-                                //   项圈红 #c22828 × 昼夜灰阶（夜间随场景变暗，同狼项圈乘法）；受击红闪统一
-                                //   #ff0000（同身体语义）。纯视觉，无碰撞 / 交互语义。
-                                Model {
-                                    visible: ocatTamed
-                                    geometry: UnitCube {}
-                                    // t963 项圈随坐姿：站姿颈根 (0,0.14,-0.30) 绕豹猫坐姿根锚 (-0.12,0.32)
-                                    //   （mobmodel.cpp t946 豹猫分支）旋 18° = (0,0.319,-0.189)（t946 链派生成对
-                                    //   契约的豹猫镜像数值系；狼项圈同款换算，revision 触碰即时随切）。
-                                    position: ocatSit === 1 ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)
-                                    scale: Qt.vector3d(0.36, 0.05, 0.06) // 横扁环带（豹猫颈围：狼 0.42/0.06/0.07 系缩小）
-                                    materials: PrincipledMaterial {
+                                    },
+                                    PrincipledMaterial {
                                         lighting: PrincipledMaterial.NoLighting
                                         baseColor: {
                                             const _r = mon.revision
@@ -9191,7 +9184,9 @@ Window {
                                             return _r >= 0 ? Qt.rgba(0.76 * tl.r, 0.16 * tl.g, 0.16 * tl.b, 1.0) : "#000000"
                                         }
                                     }
-                                }
+                                ]
+                                // t963 驯服项圈 → t986 整删 overlay（镜像狼 t831 删除——「单横扁盒」埋头盒只露
+                                //   两侧凸块；项圈改 MobModel 几何 collarVisible 环带，单源 ocatTamed 同上）。
                                 // 眼（2 颗斜挑深色点；头前侧。MobModel 头心 (0,0.12,-0.38) 半 (0.11,0.12,0.14) → 前面 z=-0.52
                                 //   （t819 头后移贴胸，眼随移）；眼 y≈0.15、x=±0.07；z 贴头前面略凸（-0.53，同 t52
                                 //   贴脸防 z-fight）。同猪眼纯色子 Model 模式。

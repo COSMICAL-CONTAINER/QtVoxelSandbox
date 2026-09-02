@@ -476,6 +476,17 @@ void MobModel::setSitPose(bool on)
     rebuild();
 }
 
+// t986 驯服项圈环带开关 setter（仅 mobType 10/11 读）：值变 → rebuild 追加 / 撤销项圈环带盒 + subset。
+//   QML 绑驯服态位（Main.qml wolfTamedAt / ResourceBrowser mobTamedActive——与贴图切换同一驯服源，
+//   单源纪律同 P-t963）；驯服瞬间即现完整一圈项圈，未驯服 / 迷你态 / 图鉴野生态恒 false 零回归。
+void MobModel::setCollarVisible(bool on)
+{
+    if (on == m_collarVisible) return;
+    m_collarVisible = on;
+    emit collarVisibleChanged();
+    rebuild();
+}
+
 // t782 燃烬者棒组公转角 setter（度）：值未变早退；变化 → rebuild 把 4 根棒挪到新轨道位（棒心
 //   (cos(i·90°+spin)·0.52, -0.03±0.10 交错, sin(...)·0.52)，棒身恒竖直只轨道心公转——同 t728 旧 QML Repeater
 //   「父 Node eulerRotation.y 转 + 竖棒」的观感，机制等价 MC 烈焰人棒组环绕旋转）。QML 用
@@ -513,6 +524,9 @@ void MobModel::rebuild()
     // t876 羊头 subset 边界：头盒索引段起点（-1 = 本分支未设 / 无头分离）。仅 mobType 3 且 sheepSkinHead
     //   时在尾部 addSubset 消费（subset 0 = [0, start) 躯干+腿毛层、subset 1 = [start, end) 头盒）。
     int sheepHeadIdxStart = -1;
+    // t986 项圈环带 subset 边界：环带盒索引段起点（-1 = 本分支未设 / 无项圈）。仅 mobType 10/11 且
+    //   collarVisible 时在尾部 addSubset 消费（subset 0 = [0, start) 身体、subset 1 = [start, end) 环带）。
+    int collarIdxStart = -1;
 
     // R19 C3：设置 UV 模式（pack 关=全脸 / 开=MC box-UV 精确贴图）。g_texW/H 默认 64×32，各 mob 分支按其贴图
     //   base 尺寸覆写（zombie/snow_golem=64×64、iron_golem=128×128，其余四足/虫=64×32）。pack 关时 writeMobUV
@@ -806,6 +820,20 @@ void MobModel::rebuild()
             setMobTex(0, 18, 2, 8, 2);
             addBox(-0.16f, -0.15f, -0.26f, 0.08f, 0.27f, 0.08f, verts, idx, bMin, bMax); // 前腿垂直撑地（胸抬起 → 加长 0.54，顶 0.12 嵌胸底）
             addBox( 0.16f, -0.15f, -0.26f, 0.08f, 0.27f, 0.08f, verts, idx, bMin, bMax);
+            // t986 项圈环带（坐态）：环带心 = 站姿裸颈段心 (0.02,-0.23) 绕**同一**坐姿根锚链派生
+            //   (0.194,-0.152)（单源 sitRot——项圈已从 QML overlay 收编进几何，随坐/站切换自动随移）；
+            //   四薄板围合偏移同站姿（上下 ±0.17 / 左右 ±0.20，轴对齐——18° 后仰下随移即读作环颈，
+            //   同 t946 overlay 随移口径）。subset 1 = 环带（QML materials[1] 项圈红）。
+            if (m_collarVisible) {
+                const float cY = sitRotY(0.02f, -0.23f);
+                const float cZ = sitRotZ(0.02f, -0.23f);
+                collarIdxStart = int(idx.size());
+                setMobTex(21, 0, 6, 6, 7);
+                addBox(0.000f, cY + 0.17f, cZ, 0.230f, 0.030f, 0.030f, verts, idx, bMin, bMax); // 上带
+                addBox(0.000f, cY - 0.17f, cZ, 0.230f, 0.030f, 0.030f, verts, idx, bMin, bMax); // 下带
+                addBox(-0.200f,  cY, cZ, 0.030f, 0.210f, 0.030f, verts, idx, bMin, bMax); // 左带
+                addBox( 0.200f,  cY, cZ, 0.030f, 0.210f, 0.030f, verts, idx, bMin, bMax); // 右带
+            }
         } else {
         setMobTex(21, 0, 6, 6, 7);
         addBox( 0.00f,  0.02f,  0.00f, 0.18f, 0.15f, 0.40f, verts, idx, bMin, bMax); // 细长躯干（比猪窄瘦；采 mane 毛区）
@@ -815,6 +843,20 @@ void MobModel::rebuild()
         addBox(-0.08f,  0.30f, -0.40f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 左立耳（t819 采 mane 毛区，与头脸区分区）
         addBox( 0.08f,  0.30f, -0.40f, 0.035f, 0.07f, 0.035f, verts, idx, bMin, bMax); // 右立耳
         addLegs(-0.25f, 0.17f, 0.16f, 0.24f, 0.08f, 0, 18, 2, 8, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 腿（细长；t819 嵌髋 0.05 + 收进轮廓）
+        // t986 项圈环带（站态）：围合**裸颈段**（body 前缘 -0.40 与头后缘 -0.24 之间的暴露颈区）——
+        //   旧 t831 overlay 心 z=-0.30 埋在头盒 z∈[-0.60,-0.24] 范围内，只露 x ±0.03 两侧凸块 =
+        //   用户「差不多看到两个红点」根因。四薄板环绕 body 颈部横截面 x[-0.18,0.18] / y[-0.13,0.17]：
+        //   上带 y[0.16,0.22] / 下带 y[-0.18,-0.12] / 侧带 x[±0.17,±0.23]，各嵌体 0.01 防共面 z-fight、
+        //   外露 0.05 → 任意 yaw 可辨完整一圈。band z[-0.26,-0.20]（前 0.02 埋头盒防共面）；UV 采
+        //   mane 毛区（materials[1] 纯色无贴图不吃 UV，box-UV 契约仍填满防 pack 路径采错位）。
+        if (m_collarVisible) {
+            collarIdxStart = int(idx.size());
+            setMobTex(21, 0, 6, 6, 7);
+            addBox(0.000f,  0.190f, -0.230f, 0.230f, 0.030f, 0.030f, verts, idx, bMin, bMax); // 上带
+            addBox(0.000f, -0.150f, -0.230f, 0.230f, 0.030f, 0.030f, verts, idx, bMin, bMax); // 下带
+            addBox(-0.200f,  0.020f, -0.230f, 0.030f, 0.210f, 0.030f, verts, idx, bMin, bMax); // 左带
+            addBox( 0.200f,  0.020f, -0.230f, 0.030f, 0.210f, 0.030f, verts, idx, bMin, bMax); // 右带
+        }
         }
     } else if (m_mobType == 11) {
         // t481 豹猫/猫（Ocelot/Cat；机制等价 MC 1.0 豹猫，§9 原创模型 + 贴图）—— 中型猫科：细长躯干 +
@@ -870,6 +912,18 @@ void MobModel::rebuild()
             setMobTex(0, 18, 2, 4, 2);
             addBox(-0.14f, -0.155f, -0.22f, 0.06f, 0.245f, 0.06f, verts, idx, bMin, bMax); // 前腿垂直撑地（胸抬起 → 加长 0.49，顶 0.09 嵌胸底）
             addBox( 0.14f, -0.155f, -0.22f, 0.06f, 0.245f, 0.06f, verts, idx, bMin, bMax);
+            // t986 项圈环带（坐态，豹猫颈围镜像数值系）：环带心 = 站姿裸颈段心 (0.02,-0.23) 绕同一
+            //   坐姿根锚 (-0.12,0.32) 链派生 (0.183,-0.160)；四薄板围合偏移上下 ±0.16 / 左右 ±0.165。
+            if (m_collarVisible) {
+                const float cY = sitRotY(0.02f, -0.23f);
+                const float cZ = sitRotZ(0.02f, -0.23f);
+                collarIdxStart = int(idx.size());
+                setMobTex(20, 6, 4, 5, 6);
+                addBox(0.000f, cY + 0.160f, cZ, 0.190f, 0.025f, 0.030f, verts, idx, bMin, bMax); // 上带
+                addBox(0.000f, cY - 0.160f, cZ, 0.190f, 0.025f, 0.030f, verts, idx, bMin, bMax); // 下带
+                addBox(-0.165f,  cY, cZ, 0.025f, 0.170f, 0.030f, verts, idx, bMin, bMax); // 左带
+                addBox( 0.165f,  cY, cZ, 0.025f, 0.170f, 0.030f, verts, idx, bMin, bMax); // 右带
+            }
         } else {
         setMobTex(20, 6, 4, 5, 6);
         addBox( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f, verts, idx, bMin, bMax); // 细长躯干（比狼更窄长；猫科体型）
@@ -880,6 +934,17 @@ void MobModel::rebuild()
         addBox(-0.06f,  0.26f, -0.36f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 左尖耳（t819 采 body 毛区，与头脸区分区）
         addBox( 0.06f,  0.26f, -0.36f, 0.03f, 0.06f, 0.03f, verts, idx, bMin, bMax); // 右尖耳
         addLegs(-0.23f, 0.17f, 0.14f, 0.20f, 0.06f, 0, 18, 2, 4, 2, m_walkPhase, verts, idx, bMin, bMax); // 4 细腿（t819 嵌髋 0.05 + 收进轮廓）
+        // t986 项圈环带（站态，豹猫颈围镜像数值系）：围合裸颈段（body 前缘 -0.36 与头后缘 -0.24 之间），
+        //   环绕 body 横截面 x[-0.15,0.15] / y[-0.11,0.15]：上带 y[0.14,0.19] / 下带 y[-0.15,-0.10] /
+        //   侧带 x[±0.14,±0.19]，嵌体 0.01 防共面、外露 0.04；band z[-0.26,-0.20]（同狼）。
+        if (m_collarVisible) {
+            collarIdxStart = int(idx.size());
+            setMobTex(20, 6, 4, 5, 6);
+            addBox(0.000f,  0.165f, -0.230f, 0.190f, 0.025f, 0.030f, verts, idx, bMin, bMax); // 上带
+            addBox(0.000f, -0.125f, -0.230f, 0.190f, 0.025f, 0.030f, verts, idx, bMin, bMax); // 下带
+            addBox(-0.165f,  0.020f, -0.230f, 0.025f, 0.170f, 0.030f, verts, idx, bMin, bMax); // 左带
+            addBox( 0.165f,  0.020f, -0.230f, 0.025f, 0.170f, 0.030f, verts, idx, bMin, bMax); // 右带
+        }
         }
     } else if (m_mobType == 12) {
         // feat SnowGolem（雪傀儡；机制等价 MC 1.0 雪傀儡，§9 区隔原创模型 + pack 贴图）—— **柱身两雪块**上下堆叠。
@@ -1151,6 +1216,15 @@ void MobModel::rebuild()
         && sheepHeadIdxStart < int(idx.size())) {
         addSubset(0, sheepHeadIdxStart, bMin, bMax, QStringLiteral("wool"));
         addSubset(sheepHeadIdxStart, int(idx.size()) - sheepHeadIdxStart, bMin, bMax, QStringLiteral("head"));
+    }
+    // t986 项圈环带 subset（仅 mobType 10/11 + collarVisible）：subset 0 = 身体（materials[0] 贴图态），
+    //   subset 1 = 环带（materials[1] 纯色项圈红，无贴图不吃 UV → pack 命中与否项圈恒红可见——旧
+    //   overlay 单盒方案的三消费端同源化：几何一处、四处坐/站位全由本类派生）。bounds 同取整体 AABB
+    //   保守超集（subset 边界只进 Qt 拾取）。无项圈（未驯服 / 迷你 / 野生态）→ 单段绘制零回归。
+    if ((m_mobType == 10 || m_mobType == 11) && m_collarVisible && collarIdxStart > 0
+        && collarIdxStart < int(idx.size())) {
+        addSubset(0, collarIdxStart, bMin, bMax, QStringLiteral("body"));
+        addSubset(collarIdxStart, int(idx.size()) - collarIdxStart, bMin, bMax, QStringLiteral("collar"));
     }
     update();
 }
