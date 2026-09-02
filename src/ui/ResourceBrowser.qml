@@ -15,10 +15,12 @@ import VoxelSandbox
 // 用户诉求：「找不到入口」浏览所有可用方块 / 物品的样貌，尤其 pack 开启时看实际贴图效果。
 //
 // 布局（JEI 式）：
-//   左：可滚动三大类分区（t967 重划 = 生物〔图鉴 + 生物蛋〕/ 方块〔有专属 3D 展示的条目〕/
+//   左：可滚动三大类分区（t967 重划 = 生物〔图鉴〕/ 方块〔有专属 3D 展示的条目〕/
 //       物品材料〔无 3D 展示的工具·材料·护甲·平面 icon 族〕；三分判据 = categoryOfEntry 单一权威，
 //       与预览 3D 路由谓词同源。数据复用 Hotbar VM 的 creativeBlocks/Tools/Materials/Armor +
-//       mobModel 表，单一权威，UI 不另持副本）；
+//       mobModel 表，单一权威，UI 不另持副本。t989 翻案：生物蛋整段移除（用户口径「生物蛋纯属
+//       多余，上面已经有生物的查看了」+ 小僵尸蛋与别的蛋风格不统一）——调色板经 hotbar.isSpawnEgg
+//       （RecipeRegistry::mobTypeForSpawnEgg 单一权威透传）过滤蛋条目；创造背包蛋分区不受影响）；
 //   右：选中物预览：
 //       - 整立方方块段 → 内嵌 View3D 旋转 BlockCube（复用既有几何 + 共享图集；lighting:NoLighting，
 //         渲染可见性铁律见 lessons-learned「渲染盲区静态化」）；
@@ -52,7 +54,7 @@ Item {
     property string atlasSource
     // 资源包是否启用（host 传 resourcePack.active）。网格图标 source 绑定触碰它 → pack 切换图标刷新。
     property bool packActive
-    // 宿主注入：ResourcePackManager 整实例。生物图鉴 / 生物蛋预览需调 Q_INVOKABLE mobTextureSource(mobType)
+    // 宿主注入：ResourcePackManager 整实例。生物图鉴预览需调 Q_INVOKABLE mobTextureSource(mobType)
     //   （非 Q_PROPERTY，不能经 atlasSource/packActive 字符串传递），故整实例注入；读 .active → pack 切换即时刷新。
     property var resourcePack
 
@@ -61,14 +63,18 @@ Item {
 
     // 调色板全集（方块 + 工具 + 材料 + 护甲；不加创造背包那种尾部空槽占位 —— 浏览器只列实物）。
     // root.hotbar 由 null→对象 时重新求值（host 注入时机）。
+    // t989 生物蛋整段移除：过滤蛋 id（hotbar.isSpawnEgg = RecipeRegistry::mobTypeForSpawnEgg 单一
+    //   权威透传）→ paletteModel = 方块段 ∪ 物品材料段（P-t989 多重集并集钉）；生物段 = 图鉴 mobModel
+    //   表（独立于调色板，保留）。创造背包（Inventory.qml）蛋分区不动——仅查看器过滤。
     readonly property var paletteModel: root.hotbar
         ? root.hotbar.creativeBlocks().concat(root.hotbar.creativeTools())
-                                .concat(root.hotbar.creativeMaterials())
-                                .concat(root.hotbar.creativeArmor())
+                        .concat(root.hotbar.creativeMaterials())
+                        .concat(root.hotbar.creativeArmor())
+                          .filter(function(id) { return !root.hotbar.isSpawnEgg(id) })
         : []
 
-    // ── 生物图鉴（feat）：左「生物」段列 mob，选中 → 右侧 View3D 旋转显示 MobModel 3D 模型（替代大图标平图）；
-    //   选中「生物蛋」材料（0x20F..0x216/0x22C/0x22E + t785 补全 0x246/0x247/0x249/0x24A）同样直接显示对应 mob 模型。机制等价 MC 1.0 mob 形态，
+    // ── 生物图鉴（feat）：左「生物」段列 mob，选中 → 右侧 View3D 旋转显示 MobModel 3D 模型（替代大图标平图）。
+    //   t989 翻案登记：生物蛋材料段（原「选中生物蛋 → 蛋预览 3D mob 模型」路径）随蛋分区整段退役。机制等价 MC 1.0 mob 形态，
     //   名称 §9 区隔（Shambler↔zombie / Bones↔skeleton / Stalker↔creeper）。雪傀儡/铁傀儡条目 I3 追加——
     //   本任务已接入：加 mobType 12/13 两行 + mobPreviewCentY + mobFallbackColor 分支（mobPreviewScale 12/13→0.75
     //   既存）。pack 命中 snow_golem.png / iron_golem.png → View3D 显带 pack 纹理的雪块身 / 铁块身 MobModel；
@@ -105,11 +111,11 @@ Item {
     //   先选床 / 活板门 / 火把 / 栅栏等再点生物格，BedModelGeometry / ItemShapeGeometry 与
     //   MobModel **同时可见**叠渲于预览区；名字 / 类别行与形态·变体面板因 selectedIsMob 优先而
     //   只显生物侧 = 「渲染双份 + 面板单份」的复合坏面。修法 = 选中收口：任何条目选中都走本节
-    //   函数，写本类 + 清另一类 → 任何时刻 selectedId（方块·物品材料·生物蛋侧）与
+    //   函数，写本类 + 清另一类 → 任何时刻 selectedId（方块·物品材料侧）与
     //   selectedMobFromSection（生物段侧）至多一方有效，双选中结构性不可再现。
     //   selectedId = 0 为「无物品选中」哨兵（selectedIsCube / Bed / Item3D 对 0 恒 false → 预览
     //   自然只剩生物分支；onSelectedIdChanged 的形态钮重置随之触发，语义正确）。
-    //   生物段点击路径：selectMob；物品格点击路径（含生物蛋格）：selectItem。
+    //   生物段点击路径：selectMob；物品格点击路径：selectItem。
     function selectMob(mobType, name) {
         root.selectedMobFromSection = mobType
         root.selectedMobName = name
@@ -156,23 +162,10 @@ Item {
         || root.selectedMobFromSection === 11
     // 预览当前驯服激活态（面板第一段「已驯服」且选中狼/豹猫）。
     readonly property bool mobTamedActive: root.selectedMobTameable && root.mobTamedPreview
-    // 生物蛋材料 id → mobType（t785 起与 RecipeRegistry::mobTypeForSpawnEgg 单一权威表同源镜像——Core 层
-    //   QML 不能引 Game 头，字面量 + 注释互指；矩阵测试 t785 探针对 C++ 权威表全蛋断言防漂移）。
-    //   pig=1/cow=2/sheep=3/shambler=4/bones=5/stalker=6/spider=7/chicken=8/squid=9/wolf=10/ocelot=11/
-    //   nightwalker=16/emberling=17。非蛋 id → -1（无映射）。
-    function mobTypeForEgg(id) {
-        switch (id) {
-            case 0x20F: return 1; case 0x210: return 2; case 0x211: return 3;
-            case 0x213: return 4; case 0x214: return 5; case 0x215: return 6;
-            case 0x216: return 7; case 0x22C: return 8; case 0x22E: return 9;
-            case 0x246: return 16; // t727 夜行者生物蛋（SpawnEggNightwalkerId；与 PlayerController placeBlock 同源）
-            case 0x247: return 17; // t728 燃烬者生物蛋（SpawnEggEmberlingId；与 PlayerController placeBlock 同源）
-            case 0x249: return 10; // t785 狼生物蛋（SpawnEggWolfId；右键 → 生成野生狼）
-            case 0x24A: return 11; // t785 豹猫生物蛋（SpawnEggOcelotId；右键 → 生成野生豹猫）
-            case 0x25D: return 19; // t952 小蹒跚者生物蛋（SpawnEggBabyShamblerId；右键 → 生成幼体僵尸，生成时掷小鸡骑士组合骰）
-        }
-        return -1
-    }
+    // t989 翻案登记：原 mobTypeForEgg(id) 蛋 id → mobType QML 镜像表（全蛋字面量，t785 起与 Core
+    //   单一权威表注释互指）随查看器生物蛋分区整段退役——蛋键在本文件绝迹（仅存本登记），权威 =
+    //   Core RecipeRegistry::mobTypeForSpawnEgg 单一权威表，QML 经 hotbar.isSpawnEgg 透传消费。
+    //   创造背包蛋条目 / 右键生成 / 中键复制（PlayerController 蛋映射）均不受影响。
     // pack 关时程序生成贴图（build_mob.py 产物，§9a 原创；与 Main.qml mobHost delegate 同源）。返回空串 →
     //   纯色回退（bones/stalker/spider 无程序贴图 → baseColorMap:null + 纯色 baseColor，同 Main.qml 潜行者模式）。
     function mobFallbackTexture(t) {
@@ -239,10 +232,10 @@ Item {
         return 0
     }
 
-    // 选中 mobType 单一权威：生物段选中优先；否则选中物是生物蛋 → 蛋 → mobType 映射。
-    readonly property int selectedMobType: root.selectedMobFromSection >= 0 ? root.selectedMobFromSection
-        : (root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1)
-    // 是否「生物预览」态（生物段 / 生物蛋选中 → View3D 显 MobModel 3D 模型，替代大图标）。
+    // 选中 mobType 单一权威：生物段选中直读。t989 生物蛋路径退役（原「否则选中物是生物蛋 →
+    //   mobTypeForEgg(selectedId) 映射」回退分支随蛋分区移除）——非生物段选中恒 -1。
+    readonly property int selectedMobType: root.selectedMobFromSection
+    // 是否「生物预览」态（生物段选中 → View3D 显 MobModel 3D 模型，替代大图标）。
     readonly property bool selectedIsMob: root.selectedMobType >= 0
     // pack entity 贴图源（active 且映射命中 → file:///...；否则空串 → 程序生成 / 纯色回退）。
     readonly property string selectedMobPackSrc: root.selectedMobType >= 0 && root.resourcePack && root.resourcePack.active
@@ -256,7 +249,7 @@ Item {
         : (root.selectedMobPackSrc !== "" ? root.selectedMobPackSrc
                                           : root.mobFallbackTexture(root.selectedMobType))
     // 选中 mob 显示名：生物段选中 → selectedMobName + 变体后缀（t751：剪毛/剪头/毛色态随预览区悬浮
-    //   变体面板切换刷新）；否则按 mobType 反查 mobModel 表（生物蛋路径，t751 合并后每型单条恒得常规形态名）。
+    //   变体面板切换刷新）；否则按 mobType 反查 mobModel 表（t751 合并后每型单条恒得常规形态名）。
     readonly property string selectedMobDisplay: (root.selectedMobFromSection >= 0 && root.selectedMobName !== ""
         ? root.selectedMobName : mobNameForType(root.selectedMobType)) + root.mobVariantSuffix
     // mobType → mobModel 表名（t751 条目合并后每型单条，直接命中）。
@@ -267,7 +260,8 @@ Item {
         return ""
     }
     // t751 变体态派生（预览各渲染分支单一判据；变体面板切换 → 本属性 NOTIFY → 头/贴图/毛色绑定即时刷新）。
-    //   生物蛋路径（selectedMobFromSection<0）恒 false = 常规形态（蛋只孵常规形态，机制对齐游戏内）。
+    //   t989 原生物蛋路径（selectedMobFromSection<0 时恒 false = 常规形态）随蛋分区退役；现非生物段
+    //   选中本属性恒 false = 常规形态。
     readonly property bool selectedMobSheared:
         root.selectedMobFromSection === 3 ? root.sheepSheared
         : (root.selectedMobFromSection === 12 ? root.snowGolemSheared : false)
@@ -343,12 +337,9 @@ Item {
             || id === 112 || id === 113 || id === 114 // 拉杆 / 按钮
             || id === 127 // t965：动力铁轨（查看器限定 3D；形态态变贴地薄板预览）
     }
-    readonly property string selectedMobCategory: {
-        if (root.selectedMobFromSection >= 0) return "生物 / mobType " + root.selectedMobFromSection
-        const t = root.hotbar ? root.mobTypeForEgg(root.selectedId) : -1
-        if (t >= 0) return "生物蛋 / 0x" + root.selectedId.toString(16).toUpperCase()
-        return ""
-    }
+    // 选中生物类别行（t989 蛋分支退役：原「生物蛋 / 0x…」标签随蛋分区移除，仅生物段产出本行）。
+    readonly property string selectedMobCategory: root.selectedMobFromSection >= 0
+        ? "生物 / mobType " + root.selectedMobFromSection : ""
 
     // 当前选中物 id（默认首个；Component.onCompleted 兜底）。
     property int selectedId: 0
@@ -453,28 +444,27 @@ Item {
     // ── t967 三大类归属（生物 / 方块 / 物品材料）单一权威表 ──
     //   用户口径「无 3D 贴图的归物品材料」逐字落表；判据与预览 3D 路由**同源**（上面三个函数化
     //   谓词）=「分类表即预览路由表」，分类不再自持一份家族清单：
-    //   0 = 生物：生物图鉴条目（mobModel 表段）+ 生物蛋（蛋的预览 = 对应 mob 3D 模型——有专属
-    //       3D 展示 → 归生物类，符合「有 3D 形态的进方块或生物类」）。
+    //   0 = 生物：t989 翻案后本表**不再产出 0**——生物类条目 = 图鉴段（mobModel 表，独立于调色板）；
+    //       原蛋条目（蛋预览 = 对应 mob 3D 模型）随查看器生物蛋分区整段退役（paletteModel 过滤），
+    //       0 档仅作语义登记保留。
     //   1 = 方块：有专属 3D 展示的调色板条目 = 整立方（isCubeId）∪ 床（isBedId）∪ 异形 3D 家族
     //       （isItem3DId——t880/t925/t965 三批清单：火把/台阶/楼梯/栅栏/门/机关件/动力轨等）。
     //   2 = 物品材料：其余全部（无 3D 展示、平面大图标展示）——工具 / 材料 / 护甲 / 未入 3D 家族
     //       的 cross 族（树苗·花·睡莲·甘蔗·木梯）与普通·探测铁轨 / 压力板族（世界内薄盒、
     //       查看器亦只给平面大图标）。
     function categoryOfEntry(id) {
-        if (root.mobTypeForEgg(id) >= 0) return 0
         if (root.isCubeId(id) || root.isBedId(id) || root.isItem3DId(id)) return 1
         return 2
     }
-    // 调色板三分区（下方三个 Repeater 的 model；两两不交、并集 = paletteModel，P-t967 完整性钉）。
-    readonly property var eggEntries: root.paletteModel.filter(function(id) { return root.categoryOfEntry(id) === 0 })
+    // 调色板两分区（下方两个 Repeater 的 model；两两不交、并集 = paletteModel，P-t989 完整性钉；
+    //   t989 起蛋分区 eggEntries 退役）。
     readonly property var blockEntries: root.paletteModel.filter(function(id) { return root.categoryOfEntry(id) === 1 })
     readonly property var matEntries: root.paletteModel.filter(function(id) { return root.categoryOfEntry(id) === 2 })
     // 选中条目所属三大类名（底部类别行前缀；与左侧分区同一判定源）。
     readonly property string selectedTabName: {
         if (root.selectedMobFromSection >= 0) return "生物"
         if (!root.hotbar || root.selectedId === 0) return ""
-        const c = root.categoryOfEntry(root.selectedId)
-        return c === 1 ? "方块" : (c === 0 ? "生物" : "物品材料")
+        return root.categoryOfEntry(root.selectedId) === 1 ? "方块" : "物品材料"
     }
 
     Component.onCompleted: {
@@ -632,7 +622,7 @@ Item {
                         radius: 8
                         color: "#15191e"
                         border.color: "#2a323b"; border.width: 1
-                        // t967 物品格 delegate 组件化（方块 / 物品材料 / 生物蛋三分区共用）——
+                        // t967 物品格 delegate 组件化（方块 / 物品材料两分区共用；t989 蛋分区退役）——
                         //   图标路由（方块 Image / 工具 ToolIcon / 材料·护甲 MaterialIcon）+ 选中金边 +
                         //   hover tooltip + selectItem 单一权威，三段零复制（原物品段内联 delegate 收编）。
                         Component {
@@ -696,8 +686,7 @@ Item {
                                     }
                                 }
                                 // 点物品格 → selectItem 单一权威（t967：写 selectedId 同时清生物段选中——
-                                //   单选中态；生物蛋 id 经 mobTypeForEgg 映射回 mob → 右侧仍显 3D 模型，
-                                //   但类别标签走「生物蛋」）。
+                                //   单选中态；t989 原生物蛋映射备注随蛋分区退役）。
                                 TapHandler { onTapped: root.selectItem(modelData) }
                             }
                         }
@@ -714,7 +703,7 @@ Item {
                             boundsBehavior: Flickable.StopAtBounds
                             ScrollBar.vertical: DarkScrollBar {}
 
-                            // 「生物」段（图鉴 + 生物蛋）+「方块」段 +「物品材料」段上下排列（Column）。
+                            // 「生物」段（图鉴；t989 蛋小节退役）+「方块」段 +「物品材料」段上下排列（Column）。
                             //   t967 三大类重划：分区 = categoryOfEntry 单一权威三分调色板（egg/block/mat
                             //   Entries，两两不交、并集 = paletteModel）；选中互斥收口进 selectMob /
                             //   selectItem 单一权威（任一分类选中即清另一分类——双选中结构性不可再现）。
@@ -823,20 +812,9 @@ Item {
                                     }
                                 }
 
-                                // t967 生物蛋小节（归生物类：蛋的预览 = 对应 mob 3D 模型，有专属 3D 展示；
-                                //   图标 / 选中路由与物品格共用 itemCell 组件）。
-                                Text {
-                                    text: "生物蛋"
-                                    color: "#7fae7f"; font.pixelSize: 11
-                                }
-                                Grid {
-                                    columns: root.paletteCols
-                                    spacing: 4
-                                    Repeater {
-                                        model: root.eggEntries
-                                        delegate: itemCell
-                                    }
-                                }
+                                // t989 生物蛋小节整段退役（原 t967 蛋分区：表头 + eggEntries 格段——
+                                //   用户口径「生物蛋纯属多余，上面已经有生物的查看了」；蛋条目已从
+                                //   paletteModel 过滤，分区随之消失）。
 
                                 Text {
                                     text: "方块"
@@ -1004,7 +982,7 @@ Item {
                                     Node {
                                         eulerRotation.x: -22 + root.userPitch // t966 pitch 父：基倾 -22°（见顶面）+ 拖拽俯仰（t599）
                                         Model {
-                                            // 仅整立方方块时显示（选中 mob / 生物蛋 → 只显 MobModel；选中床 → 只显
+                                            // 仅整立方方块时显示（选中 mob → 只显 MobModel；选中床 → 只显
                                             //   BedModelGeometry 低 3D 床；t880 异形物品 → 只显 ItemShapeGeometry，
                                             //   多模型互斥不叠渲染）。
                                             visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed && !root.selectedIsItem3D // review27 #4：附魔台 94 不在 isPartialBlock → selectedIsCube 对 94 仍 true，与下方 ItemShapeGeometry 预览叠渲 z-fight（同 Main.qml 掉落物侧修法）；家族互斥钉死
@@ -1119,7 +1097,7 @@ Item {
                                             }
                                         } // t966 yaw 子收口（异形分支）
                                     } // t966 pitch 父收口（异形分支）
-                                    // 生物预览（生物段 / 生物蛋选中）：MobModel 3D 模型替代大图标平图。
+                                    // 生物预览（生物段选中；t989 原蛋路径随蛋分区退役）：MobModel 3D 模型替代大图标平图。
                                     //   pack 命中（selectedMobPackSrc 非空）→ packTextured（几何 T 字 UV 展开进 pack
                                     //   entity 贴图）+ baseColorMap = pack 贴图；pack 关 → 全脸 UV + 程序生成 mob_*.png /
                                     //   纯色（mobFallback*；bones/stalker/spider 无程序贴图 → baseColorMap:null）。
@@ -1179,7 +1157,7 @@ Item {
                                                         //   subset 0 躯干毛层（头 subset 独立材质本体层自然色、腿 = t777
                                                         //   四腿皮肤罩，同为 skin 层不 tint），对齐 MC 染色羊脸/腿不随毛色染
                                                         //   （t816 脸罩方案退役——头盒直接换绑纹理源，非遮盖）；
-                                                        //   裸肤（剪毛后）不染色。生物蛋路径不 tint（变体仅生物段浏览）。
+                                                        //   裸肤（剪毛后）不染色。
                                                         if (root.selectedMobFromSection === 3 && !root.sheepSheared
                                                             && root.sheepWoolIndex > 0)
                                                             return root.woolPalette[root.sheepWoolIndex].tint
@@ -1229,7 +1207,7 @@ Item {
                                                     //   限定 id 前缀——内层对象作用域链不含中间 Model（仅组件根），
                                                     //   裸名 mobCollarActive 在此 ReferenceError（t967 rig 实证）。
                                                     collarVisible: mobPreviewModel.mobCollarActive
-                                                    // Review 2026-08-24 #6：selectedMobType 在未选生物/生物蛋时
+                                                    // Review 2026-08-24 #6：selectedMobType 在未选生物时
                                                     //   是 -1（合法「无选择」哨兵——mobPreviewCentY/Scale 同把 -1 当
                                                     //   预期输入优雅返 0）。本 Node 只 visible 门控（对象恒实例化、
                                                     //   绑定恒求值），裸传 -1 会让 setMobType 的越界 qWarning
@@ -1822,7 +1800,7 @@ Item {
                                 //   blockFormStates 单一权威，空表=不支持 → 面板不出现）。编号钮 1 2 3…，
                                 //   钮 1 = 表首 = 最普通/放置缺省形态（默认选中）。选中物切换回钮 1
                                 //   （onSelectedIdChanged 重置）；预览网格经 blockState → Core 态变即时刷新。
-                                //   生物段/生物蛋选中（selectedMobFromSection ≥ 0）不出现（变体归 variantPanel）。
+                                //   生物段选中（selectedMobFromSection ≥ 0）不出现（变体归 variantPanel）。
                                 //   z 序：预览区浮层永远最前契约（t964 登记）→ 显式 z: 10 同 variantPanel。
                                 Rectangle {
                                     id: formPanel
@@ -1898,7 +1876,7 @@ Item {
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
                                 color: "#9fb0c0"; font.pixelSize: 12
-                                // 生物段 → 「生物 / mobType N」；生物蛋 → 「生物蛋 / 0x…」；其余 →
+                                // 生物段 → 「生物 / mobType N」；其余 →
                                 //   所属三大类前缀（t967 selectedTabName）· 细分类别 + id。
                                 text: root.selectedIsMob && root.selectedMobCategory !== "" ? root.selectedMobCategory
                                     : ((root.selectedTabName !== "" ? root.selectedTabName + " · " : "")

@@ -26115,7 +26115,10 @@ Item {
             // QML：图鉴条目 / 蛋映射 / delegate Loader + 程序贴图 / 蛋图标 case。
             const bool pinBrowserEntry = browserQml.contains(QStringLiteral(
                 "{ mobType: 19, name: \"小蹒跚者\" }"));
-            const bool pinBrowserEgg = browserQml.contains(QStringLiteral("case 0x25D: return 19;"));
+            // t989 演化（P-t949(d) 先例）：原钉 QML 蛋映射行 `case 0x25D: return 19;`——该镜像行随
+            //   查看器蛋分区整段退役（权威收编 RecipeRegistry::mobTypeForSpawnEgg，egg=1 钉不变）→
+            //   翻转为断言代码形态绝迹（登记注释可提及 0x25D，故钉带 case 前缀的代码形态）。
+            const bool pinBrowserEgg = !browserQml.contains(QStringLiteral("case 0x25D"));
             const bool pinLoader = mainQml.contains(QStringLiteral(
                 "active: entKind === EntityManager.Mob && entMobType === EntityManager.MobBabyShambler"));
             const bool pinTex = mainQml.contains(QStringLiteral("mob_baby_shambler.png"));
@@ -28584,8 +28587,11 @@ Item {
     //        驱动状态机 selectMob(豹猫) → mobTamedPreview=true → selectItem(豹猫蛋 0x24A)：
     //        驯服态**预览 MobModel collarVisible=true**（t986 起项圈=几何旗标，旧 overlay Model
     //        退役）+ 贴图含 tabby；切蛋后 collarVisible=false（修前恒 true = 腿有判别力）+ 贴图回
-    //        野生 + 眼 overlay 仍在（蛋路径程序贴图无脸纹 = 反空转正锚）；狼（蛋 0x249）镜像腿
-    //        （review-0829 #7 遗留同步闭合）。
+    //        野生。狼（蛋 0x249）镜像腿（review-0829 #7 遗留同步闭合）。
+    //        t989 演化（P-t949(d) 先例）：蛋路径随查看器蛋分区整体退役 → 「残留驯服态漏上蛋」
+    //        病面结构性不可再现；豹猫蛋腿翻转为「切蛋 = 蛋路径绝迹（selectedMobType 归 -1）+
+    //        驯服残留清零（项圈灭 / 非 tabby / 眼 overlay 随分支门灭）」，驯服态正相腿（拨杆 →
+    //        项圈显 + tabby）保绿不动。
     {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
@@ -28723,15 +28729,19 @@ Item {
                 const bool tamedCat = mobPreviewR23->property("collarVisible").toBool()
                                   && bR23->property("selectedMobTexSource").toString().contains(QStringLiteral("mob_cat_tabby"));
                 if (!tamedCat) failR23("tamedCat state");
+                // t989 演化（P-t949(d) 先例）：原腿钉「切蛋 → 野生形态残留清零」（蛋→mob 预览路径）；
+                //   蛋路径随查看器蛋分区整体退役 → 病面结构性不可再现，腿翻转为「切蛋 = 蛋路径绝迹 +
+                //   驯服残留清零」：selectedMobType 归 -1（旧蛋→11 映射绝迹）、项圈灭、贴图非 tabby、
+                //   预览眼 overlay 随分支门灭（旧蛋路径程序贴图无脸纹 → 眼恒显的反空转锚一并退役）。
                 qmlCallR23(bR23, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggOcelotId)) });
                 pumpR23();
                 const bool afterEgg = bR23->property("selectedId").toInt() == int(RecipeRegistry::SpawnEggOcelotId)
                                   && bR23->property("selectedMobFromSection").toInt() == -1
-                                  && bR23->property("selectedMobType").toInt() == int(EntityManager::MobOcelot)
+                                  && bR23->property("selectedMobType").toInt() == -1
                                   && !mobPreviewR23->property("collarVisible").toBool()
                                   && !bR23->property("selectedMobTexSource").toString().contains(QStringLiteral("mob_cat_tabby"))
-                                  && catEye->property("visible").toBool(); // 蛋路径程序贴图无脸纹 → 眼仍在（反空转正锚）
-                if (!afterEgg) failR23("ocelot egg switch");
+                                  && !catEye->property("visible").toBool(); // 蛋路径绝迹 → mob 预览分支整体不可见
+                if (!afterEgg) failR23("ocelot egg switch (t989: egg path extinct)");
                 // 狼镜像（review-0829 #7 遗留同病灶）：拨杆仍真 → 狼项圈显 → 切狼蛋 → 残留必须清。
                 qmlCallR23(bR23, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
                 pumpR23();
@@ -29404,17 +29414,15 @@ Item {
                          && selMobBlock967.contains(QStringLiteral("root.selectedMobFromSection = mobType"))
                          && selMobBlock967.contains(QStringLiteral("root.selectedId = 0"))
                          && selItemBlock967.contains(QStringLiteral("root.selectedMobFromSection = -1"))
-                         && catBlock967.contains(QStringLiteral("root.mobTypeForEgg(id) >= 0) return 0"))
                          && catBlock967.contains(QStringLiteral("root.isCubeId(id) || root.isBedId(id) || root.isItem3DId(id)"))
                          && rb967.count(QStringLiteral("onTapped: root.selectMob(modelData.mobType, modelData.name)")) == 1
                          && rb967.count(QStringLiteral("onTapped: root.selectItem(modelData)")) == 1
                          && !rb967.contains(QStringLiteral("root.selectedId = modelData"))
                          && !rb967.contains(QStringLiteral("onTapped: { root.selectedMobFromSection"))
-                         && rb967.count(QStringLiteral("model: root.eggEntries")) == 1
                          && rb967.count(QStringLiteral("model: root.blockEntries")) == 1
                          && rb967.count(QStringLiteral("model: root.matEntries")) == 1
-                         && rb967.count(QStringLiteral("delegate: itemCell")) == 3
-                         && rb967.contains(QStringLiteral("text: \"生物蛋\""))
+                         && rb967.count(QStringLiteral("delegate: itemCell")) == 2 // t989 演化（P-t949(d) 先例）：蛋分区退役 → itemCell 复用点 3→2
+                         && !rb967.contains(QStringLiteral("text: \"生物蛋\""))   // t989 演化：蛋表头绝迹
                          && rb967.contains(QStringLiteral("text: \"方块\""))
                          && rb967.contains(QStringLiteral("text: \"物品材料\""))
                          && !rb967.contains(QStringLiteral("text: \"物品\"")) // 旧两段表头退役（「物品材料」不带封闭引号，不误伤）
@@ -29555,17 +29563,16 @@ Item {
             rigOk967 = true;
             // ═══ (b) 三大类归属表（分区完整性 + 代表条目逐类 + categoryOfEntry 直调）═══
             const QVariantList pal967 = b967->property("paletteModel").toList();
-            const QVariantList egg967 = b967->property("eggEntries").toList();
             const QVariantList blk967 = b967->property("blockEntries").toList();
             const QVariantList mat967 = b967->property("matEntries").toList();
             if (pal967.isEmpty()) {
                 rigOk967 = false;
                 rigDiag967 = QStringLiteral("palette empty");
             } else {
-                // 分区完整性：两两不交 + 并集（多重集）== paletteModel。
+                // 分区完整性：两两不交 + 并集（多重集）== paletteModel（t989 演化：两分区）。
                 QSet<int> seen967;
                 bool disjoint = true;
-                for (const QVariantList *lst : { &egg967, &blk967, &mat967 }) {
+                for (const QVariantList *lst : { &blk967, &mat967 }) {
                     for (const QVariant &v : *lst) {
                         const int id = v.toInt();
                         if (seen967.contains(id))
@@ -29575,19 +29582,19 @@ Item {
                 }
                 QList<int> a967, c967;
                 for (const QVariant &v : pal967) a967 << v.toInt();
-                for (const QVariant &v : egg967) c967 << v.toInt();
                 for (const QVariant &v : blk967) c967 << v.toInt();
                 for (const QVariant &v : mat967) c967 << v.toInt();
                 std::sort(a967.begin(), a967.end());
                 std::sort(c967.begin(), c967.end());
                 const bool partitionOk = disjoint && a967 == c967;
                 // 代表条目逐类（用户口径代表 + 邻位外溢守卫）：石头/火把/木活板门/白床/草丛→方块；
-                //   木棍/弓/护甲→物品材料；猪生物蛋/狼生物蛋→生物。categoryOfEntry 直调 + 分区成员双证。
+                //   木棍/弓/护甲→物品材料。t989 演化（P-t949(d) 先例）：原「猪/狼蛋→生物」腿翻转为
+                //   「蛋绝迹」——蛋 id 不在 paletteModel / 任一分区，categoryOfEntry 不再产出 0。
                 const int repsBlk967[] = { int(BR::Stone), int(BR::Torch), int(BR::WoodTrapdoor),
                                            int(BR::BedWhite), int(BR::TallGrass) };
                 const int repsMat967[] = { int(RecipeRegistry::StickId), int(ToolRegistry::Bow),
                                            int(RecipeRegistry::ArmorIdBase) };
-                const int repsEgg967[] = { int(RecipeRegistry::SpawnEggPigId), int(RecipeRegistry::SpawnEggWolfId) };
+                const int repsEggGone967[] = { int(RecipeRegistry::SpawnEggPigId), int(RecipeRegistry::SpawnEggWolfId) };
                 bool repsOk = partitionOk;
                 auto inList967 = [](const QVariantList &lst, int id) {
                     for (const QVariant &v : lst)
@@ -29604,10 +29611,10 @@ Item {
                         repsOk = false;
                         qInfo().noquote() << "  t967 diag(b): mat-rep miss id" << id;
                     }
-                for (int id : repsEgg967)
-                    if (!(qmlFn967(b967, "categoryOfEntry", QVariant(id)).toInt() == 0 && inList967(egg967, id))) {
+                for (int id : repsEggGone967)
+                    if (inList967(pal967, id) || qmlFn967(b967, "categoryOfEntry", QVariant(id)).toInt() == 0) {
                         repsOk = false;
-                        qInfo().noquote() << "  t967 diag(b): egg-rep miss id" << id;
+                        qInfo().noquote() << "  t967 diag(b): egg-gone miss id" << id;
                     }
                 // 狼（图鉴段）→ 生物类：selectMob 后 selectedTabName 逐字「生物」+ 类别行「生物 / mobType N」。
                 if (!qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) }))
@@ -29678,20 +29685,22 @@ Item {
                              && g5.contains(QStringLiteral("BlockCube")) && !g5.contains(QStringLiteral("MobModel"))
                              && b967->property("selectedTabName").toString() == QStringLiteral("方块");
                 drive967(c3, "c3 mob(wolf)->item(stone)");
-                // c4 物品材料/生物蛋类选中名面：木棍 → 「物品材料」、猪蛋 → 「生物」且走 mob 3D 预览。
+                // c4 物品材料类选中名面 + t989 演化选蛋路径绝迹：木棍 → 「物品材料」；
+                //   猪蛋 id 直写 selectItem（旧版 → 「生物」+ mob 3D 预览）→ 现不产 mob 态
+                //   （selectedIsMob false = 蛋→mob 预览映射随蛋分区绝迹）。
                 qmlCall967(b967, "selectItem", { QVariant(int(RecipeRegistry::StickId)) });
                 pump967();
                 const bool c4a = b967->property("selectedTabName").toString() == QStringLiteral("物品材料")
                               && !b967->property("selectedIsMob").toBool();
                 qmlCall967(b967, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggPigId)) });
                 pump967();
-                const bool c4b = b967->property("selectedTabName").toString() == QStringLiteral("生物")
-                              && b967->property("selectedIsMob").toBool();
-                drive967(c4a && c4b, "c4 stick/egg tab names");
-                // c5 状态机循环钉：代表条目 ×4「先物品后生物」→ selectedId 恒归 0（双选中不可再现）。
+                const bool c4b = !b967->property("selectedIsMob").toBool()
+                              && b967->property("selectedTabName").toString() != QStringLiteral("生物");
+                drive967(c4a && c4b, "c4 stick tab + egg path extinct");
+                // c5 状态机循环钉：代表条目 ×3「先物品后生物」→ selectedId 恒归 0（双选中不可再现；
+                //   t989 演化：蛋 id 非调色板条目退出代表集）。
                 bool c5 = true;
-                const int loopIds967[] = { int(BR::Stone), int(BR::Torch), int(RecipeRegistry::StickId),
-                                           int(RecipeRegistry::SpawnEggPigId) };
+                const int loopIds967[] = { int(BR::Stone), int(BR::Torch), int(RecipeRegistry::StickId) };
                 for (int id : loopIds967) {
                     qmlCall967(b967, "selectItem", { QVariant(id) });
                     qmlCall967(b967, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
@@ -29746,7 +29755,299 @@ Item {
                              "selection state machine (torch then wolf: selectedId returns to 0 and "
                              "the visible geometry set holds MobModel alone; bed then wolf likewise "
                              "for the bed branch; wolf then stone flips back with BlockCube alone; "
-                             "stick/egg tab names; four-representative exclusivity loop)";
+                             "stick/egg tab names (t989 evolution: egg select path extinct); "
+                             "three-representative exclusivity loop)";
+    }
+
+    // ── P-t989 查看器生物蛋整段移除探针（R19.17 🅴；用户 9-01 口径「生物蛋纯属多余，上面已经有
+    //    生物的查看了」+「小僵尸蛋和别的蛋（风格）不统一」→ 查看器不再列蛋）──
+    //    翻案边界（t967 局部）：只动查看器——生物图鉴本体格保留（mobModel 表段）；创造背包
+    //    （Inventory.qml 材料 tab）蛋分区不动；右键生成 / 中键复制蛋链路不动。移除面 = 蛋分区表头 +
+    //    格段 + categoryOfEntry 蛋条目（本表不再产出 0）+ 蛋预览路径（原 mobTypeForEgg(selectedId)
+    //    → mob 3D 回退映射）+ paletteModel 蛋段（hotbar.isSpawnEgg 权威谓词过滤 = Game 层
+    //    RecipeRegistry::mobTypeForSpawnEgg 单一权威透传——QML 侧蛋 id 字面量镜像表整表退役）。
+    //    (a) 源码钉（注释剥离后断言「绝迹」——蛋键允许仅存注释性登记，故必须剥 // 与 /* */ 再钉，
+    //        剥离器带字符串字面量态防 file:// 类内容误吞）：mobTypeForEgg / eggEntries / 「生物蛋」
+    //        / 全部 14 蛋十六进制键在**代码**中绝迹；正向钉 = isSpawnEgg 过滤行 + 三分区 Repeater
+    //        结构 + t989 契约注释锚（裸源）。
+    //    (b) rig 腿（t966/t967 装配法）：paletteModel 非空 + 两分区（block/mat）两两不交 + 多重集
+    //        并集 == paletteModel（paletteModel = block+matEntries 并集，蛋段绝迹）；全部 14 蛋 id
+    //        逐个断言：不在 paletteModel / 不在任一分区 / categoryOfEntry != 0（== 2 材料档）；
+    //        图鉴本体保留（mobModel 表 17 条）；selectMob(狼) → 生物 tab 照旧；选蛋路径不存在
+    //        （selectItem(猪蛋) → 非生物预览态）；单选中收口照旧（selectItem(木棍) → selectMob(狼)
+    //        → selectedId 归 0）。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rf989(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rb989 = rf989.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf989.readAll()) : QString();
+        // 注释剥离器（Code/String/Line/Block 四态；字符串内 \\ 转义感知；块注释保留换行防行粘连）。
+        auto stripQmlComments989 = [](const QString &src) {
+            QString out;
+            out.reserve(src.size());
+            enum St { Code, Str, Line, Block };
+            St st = Code;
+            int i = 0;
+            const int n = src.size();
+            while (i < n) {
+                const QChar c = src.at(i);
+                const QChar nx = (i + 1 < n) ? src.at(i + 1) : QChar(u'\0');
+                if (st == Code) {
+                    if (c == u'"') { st = Str; out.append(c); }
+                    else if (c == u'/' && nx == u'/') { st = Line; ++i; }
+                    else if (c == u'/' && nx == u'*') { st = Block; ++i; }
+                    else out.append(c);
+                } else if (st == Str) {
+                    out.append(c);
+                    if (c == u'\\') { if (i + 1 < n) { out.append(src.at(i + 1)); ++i; } }
+                    else if (c == u'"') st = Code;
+                } else if (st == Line) {
+                    if (c == u'\n') { st = Code; out.append(c); }
+                } else { // Block
+                    if (c == u'*' && nx == u'/') { st = Code; ++i; }
+                    else if (c == u'\n') out.append(c);
+                }
+                ++i;
+            }
+            return out;
+        };
+        const QString code989 = stripQmlComments989(rb989);
+        static const char *kEggHex989[] = {
+            "0x20F", "0x210", "0x211", "0x213", "0x214", "0x215", "0x216", "0x22C", "0x22E",
+            "0x246", "0x247", "0x249", "0x24A", "0x25D"
+        };
+        bool eggKeysExtinct = true;
+        for (const char *k : kEggHex989)
+            if (code989.contains(QLatin1String(k))) {
+                eggKeysExtinct = false;
+                qInfo().noquote() << "  t989 diag(a): egg hex key survives in code:" << k;
+            }
+        const bool okA989 = rb989.contains(QStringLiteral("t989 生物蛋整段移除"))
+                         && rb989.contains(QStringLiteral("t989 翻案登记"))
+                         && eggKeysExtinct
+                         && !code989.contains(QStringLiteral("mobTypeForEgg"))
+                         && !code989.contains(QStringLiteral("eggEntries"))
+                         && !code989.contains(QStringLiteral("生物蛋"))
+                         && code989.contains(QStringLiteral("return !root.hotbar.isSpawnEgg(id)"))
+                         && rb989.count(QStringLiteral("model: root.blockEntries")) == 1
+                         && rb989.count(QStringLiteral("model: root.matEntries")) == 1
+                         && rb989.count(QStringLiteral("delegate: itemCell")) == 2
+                         && rb989.contains(QStringLiteral("text: \"生物\""))
+                         && rb989.contains(QStringLiteral("text: \"方块\""))
+                         && rb989.contains(QStringLiteral("text: \"物品材料\""));
+        // (b) 行为 rig（t966/t967 装配法）。
+        static bool sT989TypesRegistered = false;
+        if (!sT989TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT989", 1, 0, "Hotbar");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT989", 1, 0, "ResourcePackManager");
+            qmlRegisterType<BlockCube>("VoxelSandboxProbeT989", 1, 0, "BlockCube");
+            qmlRegisterType<ItemShapeGeometry>("VoxelSandboxProbeT989", 1, 0, "ItemShapeGeometry");
+            qmlRegisterType<BedModelGeometry>("VoxelSandboxProbeT989", 1, 0, "BedModelGeometry");
+            qmlRegisterType<MobModel>("VoxelSandboxProbeT989", 1, 0, "MobModel");
+            qmlRegisterType<EnchantBookBox>("VoxelSandboxProbeT989", 1, 0, "EnchantBookBox");
+            qmlRegisterType<MobBowGeometry>("VoxelSandboxProbeT989", 1, 0, "MobBowGeometry");
+            qmlRegisterType<UnitCube>("VoxelSandboxProbeT989", 1, 0, "UnitCube");
+            sT989TypesRegistered = true;
+        }
+        bool rigOk989 = false;
+        QString rigDiag989;
+        const QString uiDir989 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUi989 = QDir::temp().absoluteFilePath(
+                QStringLiteral("t989_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUi989);
+        for (const QString f : { QStringLiteral("ResourceBrowser.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("DarkScrollBar.qml") }) {
+            QFile::remove(probeUi989 + QLatin1Char('/') + f);
+            QFile(uiDir989 + QLatin1Char('/') + f).copy(probeUi989 + QLatin1Char('/') + f);
+        }
+        {
+            const QStringList qmlFiles989 = QDir(probeUi989).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles989) {
+                QFile p(probeUi989 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT989\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine989;
+        Hotbar hb989;
+        ResourcePackManager rp989;
+        QQuickWindow win989; // 永不 show（headless）
+        QQmlComponent comp989(&engine989,
+                              QUrl::fromLocalFile(probeUi989 + QStringLiteral("/ResourceBrowser.qml")));
+        QQuickItem *b989 = nullptr;
+        if (comp989.isError()) {
+            rigDiag989 = QStringLiteral("load: ") + comp989.errorString();
+        } else if ((b989 = qobject_cast<QQuickItem *>(comp989.create())) == nullptr) {
+            rigDiag989 = QStringLiteral("create failed");
+        } else {
+            b989->setParent(&engine989);
+            b989->setProperty("hotbar", QVariant::fromValue(&hb989));
+            b989->setProperty("resourcePack", QVariant::fromValue(&rp989));
+            b989->setProperty("atlasSource", QStringLiteral("qrc:/textures/atlas.png"));
+            b989->setProperty("packActive", false);
+            b989->setWidth(700);
+            b989->setHeight(500);
+            b989->setParentItem(win989.contentItem());
+            auto pump989 = []() {
+                for (int i = 0; i < 8; ++i)
+                    QCoreApplication::processEvents();
+            };
+            pump989();
+            auto qmlCall989 = [](QObject *obj, const char *method, const QVariantList &args) -> bool {
+                if (args.size() == 1)
+                    return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)));
+                if (args.size() == 2)
+                    return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)), Q_ARG(QVariant, args.at(1)));
+                return false;
+            };
+            auto qmlFn989 = [](QObject *obj, const char *method, const QVariant &arg) -> QVariant {
+                QVariant ret;
+                if (!QMetaObject::invokeMethod(obj, method, Q_RETURN_ARG(QVariant, ret), Q_ARG(QVariant, arg)))
+                    return QVariant();
+                return ret;
+            };
+            auto inList989 = [](const QVariantList &lst, int id) {
+                for (const QVariant &v : lst)
+                    if (v.toInt() == id) return true;
+                return false;
+            };
+            rigOk989 = true;
+            const QVariantList pal989 = b989->property("paletteModel").toList();
+            const QVariantList blk989 = b989->property("blockEntries").toList();
+            const QVariantList mat989 = b989->property("matEntries").toList();
+            if (pal989.isEmpty()) {
+                rigOk989 = false;
+                rigDiag989 = QStringLiteral("palette empty");
+            } else {
+                // 两分区两两不交 + 多重集并集 == paletteModel（蛋段绝迹 → 并集从三段缩两段）。
+                QSet<int> seen989;
+                bool disjoint989 = true;
+                for (const QVariantList *lst : { &blk989, &mat989 }) {
+                    for (const QVariant &v : *lst) {
+                        const int id = v.toInt();
+                        if (seen989.contains(id))
+                            disjoint989 = false;
+                        seen989.insert(id);
+                    }
+                }
+                QList<int> a989, c989;
+                for (const QVariant &v : pal989) a989 << v.toInt();
+                for (const QVariant &v : blk989) c989 << v.toInt();
+                for (const QVariant &v : mat989) c989 << v.toInt();
+                std::sort(a989.begin(), a989.end());
+                std::sort(c989.begin(), c989.end());
+                if (!disjoint989 || a989 != c989) {
+                    rigOk989 = false;
+                    rigDiag989 = QStringLiteral("partition union mismatch");
+                }
+                // 全部 14 蛋 id：不在调色板 / 不在任一分区 / categoryOfEntry 不再产出 0（== 2 材料档）。
+                const int eggsAll989[] = {
+                    int(RecipeRegistry::SpawnEggPigId), int(RecipeRegistry::SpawnEggCowId),
+                    int(RecipeRegistry::SpawnEggSheepId), int(RecipeRegistry::SpawnEggShamblerId),
+                    int(RecipeRegistry::SpawnEggBonesId), int(RecipeRegistry::SpawnEggStalkerId),
+                    int(RecipeRegistry::SpawnEggSpiderId), int(RecipeRegistry::SpawnEggChickenId),
+                    int(RecipeRegistry::SpawnEggSquidId), int(RecipeRegistry::SpawnEggNightwalkerId),
+                    int(RecipeRegistry::SpawnEggEmberlingId), int(RecipeRegistry::SpawnEggWolfId),
+                    int(RecipeRegistry::SpawnEggOcelotId), int(RecipeRegistry::SpawnEggBabyShamblerId)
+                };
+                for (int id : eggsAll989) {
+                    const int cat = qmlFn989(b989, "categoryOfEntry", QVariant(id)).toInt();
+                    if (inList989(pal989, id) || inList989(blk989, id) || inList989(mat989, id)
+                        || cat == 0 || cat != 2) {
+                        rigOk989 = false;
+                        qInfo().noquote() << "  t989 diag(b): egg id" << id << "cat" << cat
+                                          << "inPal" << inList989(pal989, id);
+                    }
+                }
+                // 图鉴本体保留（mobModel 表 17 条——蛋分区退役不动图鉴）。
+                const QVariantList gallery989 = b989->property("mobModel").toList();
+                if (gallery989.size() != 17) {
+                    rigOk989 = false;
+                    qInfo().noquote() << "  t989 diag(b): mobModel gallery size" << gallery989.size();
+                }
+                // 三分类照旧（方块 / 物品材料代表 + 图鉴段选中生物）。
+                if (qmlFn989(b989, "categoryOfEntry", QVariant(int(BR::Stone))).toInt() != 1
+                    || qmlFn989(b989, "categoryOfEntry", QVariant(int(RecipeRegistry::StickId))).toInt() != 2) {
+                    rigOk989 = false;
+                    qInfo().noquote() << "  t989 diag(b): category reps";
+                }
+                if (!qmlCall989(b989, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) }))
+                    rigOk989 = false;
+                pump989();
+                if (b989->property("selectedTabName").toString() != QStringLiteral("生物")
+                    || !b989->property("selectedIsMob").toBool()) {
+                    rigOk989 = false;
+                    qInfo().noquote() << "  t989 diag(b): wolf gallery tab";
+                }
+                // 选蛋路径不存在：selectItem(猪蛋) 直写 → 非生物预览态（旧蛋→mob 映射绝迹）。
+                if (!qmlCall989(b989, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggPigId)) }))
+                    rigOk989 = false;
+                pump989();
+                if (b989->property("selectedIsMob").toBool()) {
+                    rigOk989 = false;
+                    qInfo().noquote() << "  t989 diag(b): egg select still routes to mob preview";
+                }
+                // 单选中收口照旧：selectItem(木棍) → selectMob(狼) → selectedId 归 0。
+                if (!qmlCall989(b989, "selectItem", { QVariant(int(RecipeRegistry::StickId)) }))
+                    rigOk989 = false;
+                pump989();
+                if (!qmlCall989(b989, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) }))
+                    rigOk989 = false;
+                pump989();
+                if (b989->property("selectedId").toInt() != 0
+                    || b989->property("selectedMobFromSection").toInt() != int(EntityManager::MobWolf)) {
+                    rigOk989 = false;
+                    qInfo().noquote() << "  t989 diag(b): mutual exclusion selId"
+                                      << b989->property("selectedId").toInt();
+                }
+            }
+        }
+        QDir(probeUi989).removeRecursively();
+        const bool okB989 = rigOk989;
+        ok = okA989 && okB989;
+        if (!ok)
+            qInfo().noquote() << "  [t989 diag] sourcePins" << okA989 << "rig" << okB989 << rigDiag989;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t989 browser spawn-egg section removed (t967 partial reversal - user "
+                             "9-01: 'mob eggs are redundant, the mob gallery above already shows the "
+                             "mobs' + the baby-shambler egg reads stylistically off next to the other "
+                             "eggs): the viewer-side egg face is gone wholesale while the boundary "
+                             "holds - the mob GALLERY stays (mobModel table untouched), the creative "
+                             "inventory (Inventory.qml materials tab) keeps its egg section, and "
+                             "right-click spawning / pick-block egg routes are untouched; removal "
+                             "face = egg section header + grid, the categoryOfEntry egg entry (the "
+                             "table no longer yields category 0), the egg preview path (the old "
+                             "mobTypeForEgg(selectedId) fallback into the mob 3D branch) and the "
+                             "paletteModel egg segment - filtered via a new authoritative "
+                             "Hotbar::isSpawnEgg Q_INVOKABLE delegating to RecipeRegistry::"
+                             "mobTypeForSpawnEgg, so the QML-side egg-id literal mirror table retires "
+                             "wholesale (egg keys extinct from viewer code, comment-only "
+                             "registration per the t989 contract); P-t967 evolved lawfully per the "
+                             "P-t949(d) precedent (its egg legs now assert egg absence: no egg in "
+                             "any partition / categoryOfEntry never 0 / egg select path yields no "
+                             "mob state, two partition Repeaters, itemCell reuse count 3->2); legs: "
+                             "comment-stripped source pins (string-aware // and /* */ stripper so "
+                             "registration comments may keep the keys) asserting mobTypeForEgg / "
+                             "eggEntries / the egg header and all 14 egg hex keys extinct from CODE, "
+                             "plus the positive filter line and section structure; a real-QQmlEngine "
+                             "rig reading the real palette back: pairwise-disjoint block/mat "
+                             "partitions whose multiset union equals paletteModel, all 14 egg ids "
+                             "absent from palette and both partitions with categoryOfEntry==2, the "
+                             "17-entry mob gallery intact, wolf gallery tap still yields the Mobs "
+                             "tab, selectItem(pig egg) no longer produces the mob preview state, "
+                             "and the single-selection funnel (stick then wolf -> selectedId 0) "
+                             "unchanged";
     }
 
     // ── P-t968 燃烬者两修探针（R19.17 🅴；用户第五轮口径「头×0.6 再缩；烈焰棒上下错开一点（不在同一

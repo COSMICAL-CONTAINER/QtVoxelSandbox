@@ -185,6 +185,10 @@ public:
     //   供 QML delegate 据 isMaterial 切到材料图标 Canvas 自绘。isMaterial 在全工程是「非方块非工具 → QML 自绘
     //   MaterialIcon」的渲染路由谓词；护甲同属此类 → 亦走 MaterialIcon。与 isTool 互斥（材料段 > 工具段上界）。
     Q_INVOKABLE bool isMaterial(int itemId) const;
+    // t989 生物蛋段判定（查看器资源浏览器调色板过滤蛋条目用）：透传 RecipeRegistry::mobTypeForSpawnEgg
+    //   单一权威表（非蛋 id → -1 → false）。旧 QML 侧 mobTypeForEgg 蛋 id 字面量镜像表随 t989 退役——
+    //   查看器不再持蛋键。**边界**：创造背包（Inventory.qml 材料 tab）蛋条目照旧在列，仅查看器过滤。
+    Q_INVOKABLE bool isSpawnEgg(int itemId) const;
     // t219 不完整方块段判定：id 是否异形方块段 [FirstPartial, LastPartial]（木板台阶 / 楼梯 / 栅栏 /
     //   压力板 / 门 / 活板门）。供 QML 手持 / 掉落贴图据此切 BlockCube（整立方，6 面图集）vs BillboardQuad
     //   平图标（异形在世界内非整立方 → 手持 / 掉落走 dimetric 立体图标 icon_wood_*.png，非「满格木板立方」）。
