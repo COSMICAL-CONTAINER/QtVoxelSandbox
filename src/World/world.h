@@ -555,7 +555,10 @@ public:
     // t445 setBlock 编辑后仙人掌完整性复检（② 失撑 + ④ 邻接方块）。（x,y,z,oldId,id）= 本格刚发生的编辑。
     //   ②：本格被破为 Air 且被破块非 Cactus → 若正上方是 Cactus，则该 Cactus 失撑 → dropCactusColumn（递归整柱）。
     //      （被破块本身是 Cactus 时不在此处理 —— 玩家直破仙人掌的整柱坍落由 PlayerController 级联 spawnItem 负责，
-    //      避免双重掉落。）④：本格新放了非 Air 方块 → 水平 4 邻任一为 Cactus 即「邻接方块」→ 该 Cactus 整柱掉落。
+    //      避免双重掉落。）④：本格新放了**完整实体方块（isSolid）** → 水平 4 邻任一为 Cactus 即「邻接方块」→
+    //      该 Cactus 整柱掉落。**t984 口径翻案**（用户 9-01「我的口径是能放下来，而不是仙人掌会掉落」）：门槛由
+    //      「非 Air」收紧为 isSolid —— 轨族 / 火把 / 压力板等非完整方块邻接仙人掌不触发（放置成功、仙人掌不动），
+    //      与 t503 worldgen 4 邻守卫同谓词同源（worldgen / 放置 / 挖除口径一致）。
     //   静默 dropCactusColumn 不经 World::setBlock → 不重入本检查。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口）。
     void checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 

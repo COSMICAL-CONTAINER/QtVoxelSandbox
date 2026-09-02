@@ -11327,13 +11327,15 @@ int main(int argc, char *argv[])
         }
     }
 
-    // ── t911 铁轨贴仙人掌破坏探针（World 直编；spec「仙人掌旁放铁轨 → 仙人掌被破坏掉落（MC 语义：
-    //    铁轨非仙人掌合法邻面；自动下矿车系统前提）」）──
+    // ── t911 铁轨贴仙人掌探针（World 直编）──
+    //   **t984 口径翻案**（用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」）：
+    //   旧钉「轨贴仙人掌 → 整柱坍落（铁轨非法邻面）」作废；现钉「轨贴仙人掌 → 放置成功 + 仙人掌不动」
+    //   （仙人掌破坏校验只被完整实体方块 isSolid 触发，见 checkCactusOnEdit ④；自动下矿车 t866② 走
+    //   Entities 层接触判定，与方块邻接口径解耦不受影响）。
     //   断言三段：
-    //   (a) 铁轨贴 2 高仙人掌**上层**格放置 → 整柱坍落（上下两格全 Air + 每格 blockDroppedAsItem(Cactus)
-    //       各一次）+ 铁轨留存（非法邻面反应只毁仙人掌不毁铁轨）；
-    //   (b) 铁轨贴 1 高仙人掌（基座层）→ 同样坍落（基线场景钉语义）；
-    //   (c) 阴性对照：铁轨距仙人掌 2 格 → 仙人掌无恙（非邻接不触发）。
+    //   (a) 铁轨贴 2 高仙人掌**上层**格放置 → 放置成功（轨留存）+ 上下两格仙人掌原样 + 零掉落；
+    //   (b) 铁轨贴 1 高仙人掌（基座层）→ 同（基线场景钉语义）；
+    //   (c) 阴性对照：铁轨距仙人掌 2 格（不放置）→ 仙人掌无恙（保留旧对照腿）。
     {
         // rig 选址：运行期扫描空区。dx -1..6、dz -1..1、dy -2..+3。
         int x0 = -1, z0 = -1;
@@ -11348,7 +11350,7 @@ int main(int argc, char *argv[])
             }
         if (x0 < 0) {
             ++totalFail;
-            qInfo().noquote() << "FAIL | t911 rail-adjacent cactus break: no clear rig area found";
+            qInfo().noquote() << "FAIL | t911 rail-adjacent cactus: no clear rig area found";
         } else {
             // 掉落计数（blockDroppedAsItem 局部连接——句柄断开，不误伤其它探针的连接；只数本 rig 柱格）。
             int dropsAtCol = 0;
@@ -11363,21 +11365,20 @@ int main(int argc, char *argv[])
             w.setBlock(x0, kRigY, z0, BR::Cactus, 0);
             w.setBlock(x0, kRigY + 1, z0, BR::Cactus, 0);
             dropsAtCol = 0;
-            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Rail, 0);    // 铁轨贴仙人掌上层 → 整柱坍落
-            const bool okA = w.blockAt(x0, kRigY, z0) == BR::Air
-                          && w.blockAt(x0, kRigY + 1, z0) == BR::Air
-                          && w.blockAt(x0 + 1, kRigY + 1, z0) == BR::Rail
-                          && dropsAtCol == 2;                  // 整柱两格各一次掉落
+            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Rail, 0);    // 铁轨贴仙人掌上层 → 放置成功、仙人掌不动
+            const bool okA = w.blockAt(x0 + 1, kRigY + 1, z0) == BR::Rail
+                          && w.blockAt(x0, kRigY, z0) == BR::Cactus
+                          && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                          && dropsAtCol == 0;                  // 零掉落
             // (b) 1 高仙人掌 @（x0+2, Y）+ 铁轨贴基座层 (x0+3, Y)。
             w.setBlock(x0 + 2, kRigY - 1, z0, BR::Sand, 0);
             w.setBlock(x0 + 2, kRigY, z0, BR::Cactus, 0);
             dropsAtCol = 0;
             w.setBlock(x0 + 3, kRigY, z0, BR::Rail, 0);
-            const bool okB = w.blockAt(x0 + 2, kRigY, z0) == BR::Air
-                          && w.blockAt(x0 + 3, kRigY, z0) == BR::Rail
-                          && dropsAtCol == 1;
-            // (c) 阴性对照：仙人掌 @（x0+5, Y），与 (b) 留下的铁轨 (x0+3) 相距 2 格（x0+4 空）→ 放置
-            //     不触发坍落、仙人掌留存（非邻接不触发；世界侧反应规则只对新放的**邻面**生效）。
+            const bool okB = w.blockAt(x0 + 3, kRigY, z0) == BR::Rail
+                          && w.blockAt(x0 + 2, kRigY, z0) == BR::Cactus
+                          && dropsAtCol == 0;
+            // (c) 阴性对照：仙人掌 @（x0+5, Y），与 (b) 留下的铁轨 (x0+3) 相距 2 格（x0+4 空）→ 仙人掌留存。
             w.setBlock(x0 + 5, kRigY - 1, z0, BR::Sand, 0);
             w.setBlock(x0 + 5, kRigY, z0, BR::Cactus, 0);
             dropsAtCol = 0;
@@ -11385,24 +11386,25 @@ int main(int argc, char *argv[])
                           && dropsAtCol == 0;
             const bool ok = okA && okB && okC;
             if (!ok)
-                qInfo().noquote() << "  t911 colBreak" << okA << "baseBreak" << okB
+                qInfo().noquote() << "  t911 upperRail" << okA << "baseRail" << okB
                                   << "farControl" << okC
                                   << "a-cell" << int(w.blockAt(x0, kRigY, z0))
                                   << int(w.blockAt(x0, kRigY + 1, z0));
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                              << "| t911 rail-adjacent cactus break: placing a rail against a cactus "
-                                 "(mid-column or base level) fells the WHOLE cactus column (both cells air, "
-                                 "one drop per cell) while the rail stays, and a rail two cells away leaves "
-                                 "the cactus untouched (rails are illegal cactus neighbors - MC semantics, "
-                                 "prerequisite for cactus-based cart-dropper systems)";
-            // 清场
+                              << "| t911 rail placement beside a cactus leaves the cactus standing"
+                                 " (t984 reversed caliber: a rail next to a cactus, mid-column or"
+                                 " base level, places successfully and the whole column stays intact"
+                                 " with zero drops - only full solid cubes break cacti; the cactus"
+                                 " cart-dropper chain t866 uses entity contact damage and is"
+                                 " unaffected), and a rail two cells away leaves the cactus untouched";
+            // 清场（t984 口径仙人掌不再坍落 → 各腿仙人掌 / 铁轨 / 沙基座全部显式清空）
             QObject::disconnect(dropConn);
-            w.setBlock(x0 + 5, kRigY, z0, BR::Air, 0);
-            w.setBlock(x0 + 5, kRigY - 1, z0, BR::Air, 0);
-            w.setBlock(x0 + 3, kRigY, z0, BR::Air, 0);
-            w.setBlock(x0 + 1, kRigY + 1, z0, BR::Air, 0);
-            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
+            for (int dx = 0; dx <= 5; ++dx) {
+                for (int dy = 0; dy <= 1; ++dy)
+                    w.setBlock(x0 + dx, kRigY + dy, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+            }
             tickN(w, 2);
         }
     }
@@ -23607,16 +23609,19 @@ Item {
     //   天然绕过 PlayerController::placeBlock 的放置预检链），玩家真实路径（射线 → 预检 → setBlock）此前无
     //   行为级覆盖。本探针直编 PlayerController（t814 真消费端模式 + review27-8 挂窗 grab 载体）走**完整
     //   放置链**：loadSavedState 定位/定向 → tick 刷射线 → setSelectedBlock(Rail) → placeBlock。
+    //   **t984 口径翻案**（用户 9-01「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」）：
+    //   (a)(b)(e)(f) 的期望从「放置成功 + 整柱坍落」翻转为「放置成功 + 仙人掌无恙 + 零掉落」；(g) 石头
+    //   （完整实体方块 isSolid）邻接仍照旧整柱坍落——既有语义不回归钉。
     //   断言八段：
-    //   (a) 地面顶面瞄准（瞄仙人掌旁地面 → 目标 = 地面上方气格，贴仙人掌柱基）→ 放置成功 + 2 高整柱坍落
-    //       （两格全 Air + 各一次 blockDroppedAsItem(Cactus)）+ 铁轨留存；
+    //   (a) 地面顶面瞄准（瞄仙人掌旁地面 → 目标 = 地面上方气格，贴仙人掌柱基）→ 放置成功 + 仙人掌两格原样
+    //       + 零掉落 + 铁轨留存；
     //   (b) 仙人掌基座侧面瞄准（瞄 0.8 细柱选中面 → 目标 = 侧邻气格，同贴柱基）→ 同 (a)；
     //   (c) 阴性·无支撑悬空轨位照旧拒（瞄 2 高柱**上层**侧面 → 目标下方 Air → 轨预检②拒）：放置不发生、
     //       仙人掌无恙（放置被拒不触发邻接坍落——仙人掌坍落不是非法放置的免死金牌，用户定稿口径）；
     //   (d) 阴性·空场悬空放轨照旧拒（无仙人掌镜像对照，钉轨支撑语义本身）；
-    //   (e) 生存模式全链（真实游玩口径）：hotbar 铁轨栈放置 + 消耗 1 件（t669）；
-    //   (f) 对称面·火把贴柱旁 → 放置成功 + 整柱坍落（轨族口径对薄格非实体族同成立）；
-    //   (g) 对称面·石头挤占柱旁 → 放置成功 + 整柱坍落（t445 ④ 非空门全族覆盖，钉口径防漂移）；
+    //   (e) 生存模式全链（真实游玩口径）：hotbar 铁轨栈放置 + 消耗 1 件（t669）+ 仙人掌无恙；
+    //   (f) 对称面·火把贴柱旁 → 放置成功 + 仙人掌无恙 + 零掉落（非实体族同口径）；
+    //   (g) 对称面·石头挤占柱旁 → 放置成功 + 整柱坍落（t984 后完整实体方块邻接仍触发 ④，钉口径防漂移）；
     //   (h) 源码钉：placeBlock 铁轨预检块 + checkCactusOnEdit ④ 邻接坍落关键行（任一消失即红）。
     {
         // rig 选址：kRigY 高空全空盒扫描（同 t911 模式；dx -1..7、dz -1..1、dy -2..+4）。
@@ -23700,9 +23705,9 @@ Item {
             pcP945.placeBlock();
             const bool okA = hitA == QVector3D(float(x0 + 1), float(kRigY - 1), float(z0))
                 && w.blockAt(x0 + 1, kRigY, z0) == BR::Rail          // 放置成功（轨留存）
-                && w.blockAt(x0, kRigY, z0) == BR::Air               // 柱基坍落
-                && w.blockAt(x0, kRigY + 1, z0) == BR::Air           // 柱上层坍落（整柱）
-                && dropsP945 == 2;                                       // 每格一次掉落
+                && w.blockAt(x0, kRigY, z0) == BR::Cactus            // 仙人掌无恙（t984：轨邻接不破坏）
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsP945 == 0;                                       // 零掉落
             if (!okA)
                 qInfo().noquote() << "  [t945 diag] a hit" << hitA << "tgt"
                                   << int(w.blockAt(x0 + 1, kRigY, z0))
@@ -23719,9 +23724,9 @@ Item {
             pcP945.placeBlock();
             const bool okB = hitB == QVector3D(float(x0), float(kRigY), float(z0))
                 && w.blockAt(x0 + 1, kRigY, z0) == BR::Rail
-                && w.blockAt(x0, kRigY, z0) == BR::Air
-                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
-                && dropsP945 == 2;
+                && w.blockAt(x0, kRigY, z0) == BR::Cactus            // 仙人掌无恙（t984）
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsP945 == 0;
             if (!okB)
                 qInfo().noquote() << "  [t945 diag] b hit" << hitB << "tgt"
                                   << int(w.blockAt(x0 + 1, kRigY, z0))
@@ -23763,8 +23768,9 @@ Item {
             if (!okD)
                 qInfo().noquote() << "  [t945 diag] d hit" << hitD << "tgt"
                                   << int(w.blockAt(x0 + 2, kRigY + 1, z0));
-            // (e) 生存模式全链（真实游玩口径）：hotbar 槽 0 = 铁轨 ×16 + 仙人掌侧面瞄准 → 放置成功 + 整柱
-            //     坍落 + 槽内消耗 1 件（t669 C++ 消耗收口在放置动作本体，走通即证 Survival 放置链无额外拒绝）。
+            // (e) 生存模式全链（真实游玩口径）：hotbar 槽 0 = 铁轨 ×16 + 仙人掌侧面瞄准 → 放置成功 +
+            //     仙人掌无恙（t984）+ 槽内消耗 1 件（t669 C++ 消耗收口在放置动作本体，走通即证 Survival
+            //     放置链无额外拒绝）。
             clearRigP945();
             buildRigP945();
             dropsP945 = 0;
@@ -23775,9 +23781,9 @@ Item {
             pcP945.placeBlock();
             const bool okE = hitE == QVector3D(float(x0), float(kRigY), float(z0))
                 && w.blockAt(x0 + 1, kRigY, z0) == BR::Rail
-                && w.blockAt(x0, kRigY, z0) == BR::Air
-                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
-                && dropsP945 == 2
+                && w.blockAt(x0, kRigY, z0) == BR::Cactus            // 仙人掌无恙（t984）
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsP945 == 0
                 && hbP945.countAt(0) == 15; // 生存放置消耗 1 件（t669 收口）
             if (!okE)
                 qInfo().noquote() << "  [t945 diag] e hit" << hitE << "tgt"
@@ -23787,8 +23793,9 @@ Item {
                                   << "drops" << dropsP945
                                   << "stack" << hbP945.countAt(0);
             pumpMsP945(260);
-            // (f) 对称面·火把（薄格非实体族同口径）：火把贴柱旁地面 → 放置成功 + 整柱坍落（同 World ④ 邻接
-            //     反应；预检只看支撑不看邻仙人掌 —— 非法化「邻仙人掌」的预检不存在，轨族如此火把族亦如此）。
+            // (f) 对称面·火把（薄格非实体族同口径）：火把贴柱旁地面 → 放置成功 + 仙人掌无恙 + 零掉落
+            //     （t984 后非实体邻接不触发 ④；预检只看支撑不看邻仙人掌——非法化「邻仙人掌」的预检不存在，
+            //     轨族如此火把族亦如此）。
             clearRigP945();
             buildRigP945();
             dropsP945 = 0;
@@ -23797,9 +23804,9 @@ Item {
                     float(x0) + 1.7f, float(kRigY), float(z0) + 0.5f, 1);
             pcP945.placeBlock();
             const bool okF = w.blockAt(x0 + 1, kRigY, z0) == BR::Torch
-                && w.blockAt(x0, kRigY, z0) == BR::Air
-                && w.blockAt(x0, kRigY + 1, z0) == BR::Air
-                && dropsP945 == 2;
+                && w.blockAt(x0, kRigY, z0) == BR::Cactus            // 仙人掌无恙（t984）
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsP945 == 0;
             if (!okF)
                 qInfo().noquote() << "  [t945 diag] f tgt"
                                   << int(w.blockAt(x0 + 1, kRigY, z0))
@@ -23807,8 +23814,8 @@ Item {
                                   << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
                                   << "drops" << dropsP945;
             pumpMsP945(260);
-            // (g) 对称面·石头（实体方块挤占既有语义钉）：石头放柱旁 → 放置成功 + 整柱坍落（t445 ④ 非空门
-            //     天然覆盖所有非 Air 方块；本腿钉它防未来「只对轨族开坍落」的口径漂移）。
+            // (g) 对称面·石头（完整实体方块邻接仍坍落——t984 口径防漂移钉）：石头放柱旁 → 放置成功 +
+            //     整柱坍落（t984 收窄后 ④ 对 isSolid 方块照旧触发；本腿钉「只豁免非实体族」不是「全族豁免」）。
             clearRigP945();
             buildRigP945();
             dropsP945 = 0;
@@ -23853,24 +23860,194 @@ Item {
                                   << "h" << okH;
             qInfo().noquote() << (okP945 ? "PASS" : "FAIL")
                               << "| t945 rail placement beside a cactus succeeds through the REAL player"
-                                 " placement path (raycast -> placeBlock prechecks -> setBlock) and fells"
-                                 " the whole cactus column: (a) aiming at the ground top beside the"
-                                 " column places the rail in the adjacent ground-level cell and drops"
-                                 " both column cells (one item each) with the rail retained; (b) aiming"
-                                 " at the cactus column's own 0.8 selection face resolves to the same"
-                                 " adjacent cell with the same outcome; (c) negative: aiming at the"
-                                 " upper column face targets a support-less cell and the placement is"
-                                 " rejected WITHOUT breaking the cactus (illegal placement gets no"
-                                 " cactus-collapse free pass - the pinned user caliber); (d) negative:"
-                                 " a floating rail spot far from any cactus stays rejected (rail"
-                                 " support semantics intact); (e) Survival mode end-to-end: same"
-                                 " placement through a hotbar rail stack with the stack consumed by"
-                                 " one (t669); (f) symmetry: a torch aimed beside the column also"
-                                 " places and fells it (no precheck illegalizes cactus-adjacent"
-                                 " targets for any block family); (g) symmetry: a solid stone beside"
-                                 " the column also places and fells it (the t445 non-air gate covers"
-                                 " every family - pinned against scope drift); (h) source pins for"
-                                 " the rail support precheck and the adjacency collapse call";
+                                 " placement path (raycast -> placeBlock prechecks -> setBlock) and leaves"
+                                 " the cactus standing (t984 caliber): (a) aiming at the ground top beside"
+                                 " the column places the rail in the adjacent ground-level cell and both"
+                                 " column cells stay cactus with zero drops; (b) aiming at the cactus"
+                                 " column's own 0.8 selection face resolves to the same adjacent cell"
+                                 " with the same outcome; (c) negative: aiming at the upper column face"
+                                 " targets a support-less cell and the placement is rejected WITHOUT"
+                                 " breaking the cactus (illegal placement gets no free pass);"
+                                 " (d) negative: a floating rail spot far from any cactus stays rejected"
+                                 " (rail support semantics intact); (e) Survival mode end-to-end: same"
+                                 " placement through a hotbar rail stack with the stack consumed by one"
+                                 " (t669) and the cactus intact; (f) symmetry: a torch aimed beside the"
+                                 " column also places harmlessly (non-solid families never fell the"
+                                 " cactus); (g) symmetry: a solid stone beside the column still fells it"
+                                 " (t984 keeps the isSolid gate - pinned against scope drift); (h) source"
+                                 " pins for the rail support precheck and the adjacency collapse call";
+        }
+    }
+
+    // ── P-t984 仙人掌旁放非实体方块（行为级口径翻案）探针 ──
+    //   用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」：仙人掌破坏校验
+    //   （checkCactusOnEdit ④）只应被**完整实体方块**（BlockRegistry::isSolid —— 与 t503 worldgen 柱 4 邻
+    //   守卫同一谓词同源）的水平邻接触发；铁轨（三变体）/ 火把 / 压力板等非完整方块邻接放置 → 放置成功 +
+    //   仙人掌 id 不变 + 零掉落。断言六段：
+    //   (a) 2 高柱四邻逐一放 Rail / GoldenRail / DetectorRail / Torch → 全部留存 + 仙人掌两格原样 + 零掉落；
+    //   (b) 木 / 石压力板贴 1 高柱两侧 → 同（薄板族同口径）；
+    //   (c) 对照腿·石头（完整实体方块）贴柱 → 照旧整柱坍落（1 格 1 掉落，既有语义不回归）；
+    //   (d) 对照腿·沙（isSolid 实体，落沙落旁同谓词路径）贴柱 → 照旧坍落（worldgen / 放置 / 挖除口径一致）；
+    //   (e) 挖除链：柱旁轨留存时仙人掌无恙；挖邻轨不伤仙人掌；挖沙支撑 → ② 失撑整柱掉落（失撑链不回归）；
+    //   (f) 源码钉：④ 门槛 isSolid 行 + t503 worldgen 守卫 isSolid 行（任一消失即红）。
+    {
+        // rig 选址：kRigY 高空全空盒扫描（dx -1..2、dz -1..1、dy -2..+4）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 2 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 2 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -2; dy <= 4 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t984 non-solid neighbor beside cactus: no clear rig area found";
+        } else {
+            int dropsT984 = 0;
+            const QMetaObject::Connection dropConnT984 = QObject::connect(
+                &w, &World::blockDroppedAsItem, &w,
+                [&dropsT984, x0, z0](int bx, int, int bz, int bid) {
+                    if (bid == int(BR::Cactus) && bz == z0 && bx >= x0 - 1 && bx <= x0 + 1)
+                        ++dropsT984;
+                });
+            // rig 搭建：先清 3×3 的 Y/Y+1 层（前腿遗留的实心邻格会让新柱在放置瞬间被 ④ 误毁——先清后建），
+            //   再铺 3×3 石台面（kRigY-1，火把 / 轨 / 板合法支撑）+ 沙基座（x0, kRigY-1）+ 仙人掌柱（h=1/2）。
+            const auto buildRigT984 = [&](int h) {
+                for (int dy = 1; dy >= 0; --dy) // 自顶向下清（仙人掌 oldId=Cactus 跳过 ② 失撑，无级联坍落）
+                    for (int dx = -1; dx <= 1; ++dx)
+                        for (int dz = -1; dz <= 1; ++dz)
+                            w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        w.setBlock(x0 + dx, kRigY - 1, z0 + dz, BR::Stone, 0);
+                w.setBlock(x0, kRigY - 2, z0, BR::Stone, 0);     // 沙垫石：沙是重力方块，下方悬空会被重力链收走
+                w.setBlock(x0, kRigY - 1, z0, BR::Sand, 0);      // 仙人掌合法沙支撑（场景保真）
+                w.setBlock(x0, kRigY,     z0, BR::Cactus, 0);
+                if (h >= 2) w.setBlock(x0, kRigY + 1, z0, BR::Cactus, 0);
+            };
+            // (a) 轨三变体 + 火把四邻逐一贴 2 高柱基座层 → 放置成功 + 仙人掌不动 + 零掉落。
+            buildRigT984(2);
+            dropsT984 = 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);          // +X 邻：铁轨
+            w.setBlock(x0 - 1, kRigY, z0, BR::GoldenRail, 0);    // -X 邻：动力铁轨
+            w.setBlock(x0, kRigY, z0 + 1, BR::DetectorRail, 0);  // +Z 邻：探测铁轨
+            w.setBlock(x0, kRigY, z0 - 1, BR::Torch, 0);         // -Z 邻：火把
+            const bool okA = w.blockAt(x0 + 1, kRigY, z0) == BR::Rail
+                && w.blockAt(x0 - 1, kRigY, z0) == BR::GoldenRail
+                && w.blockAt(x0, kRigY, z0 + 1) == BR::DetectorRail
+                && w.blockAt(x0, kRigY, z0 - 1) == BR::Torch
+                && w.blockAt(x0, kRigY,     z0) == BR::Cactus    // 仙人掌两格原样
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsT984 == 0;
+            if (!okA)
+                qInfo().noquote() << "  [t984 diag] a" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << int(w.blockAt(x0 - 1, kRigY, z0))
+                                  << int(w.blockAt(x0, kRigY, z0 + 1))
+                                  << int(w.blockAt(x0, kRigY, z0 - 1))
+                                  << "c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsT984;
+            // (b) 木 / 石压力板贴 1 高柱两侧 → 同口径（薄板族）。
+            buildRigT984(1);
+            dropsT984 = 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::WoodPressurePlate, 0);
+            w.setBlock(x0 - 1, kRigY, z0, BR::StonePressurePlate, 0);
+            const bool okB = w.blockAt(x0 + 1, kRigY, z0) == BR::WoodPressurePlate
+                && w.blockAt(x0 - 1, kRigY, z0) == BR::StonePressurePlate
+                && w.blockAt(x0, kRigY, z0) == BR::Cactus
+                && dropsT984 == 0;
+            if (!okB)
+                qInfo().noquote() << "  [t984 diag] b" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << int(w.blockAt(x0 - 1, kRigY, z0))
+                                  << "c" << int(w.blockAt(x0, kRigY, z0))
+                                  << "drops" << dropsT984;
+            // (c) 对照腿·石头（完整实体方块）贴 1 高柱 → 照旧整柱坍落（既有语义不回归）。
+            buildRigT984(1);
+            dropsT984 = 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Stone, 0);
+            const bool okC = w.blockAt(x0 + 1, kRigY, z0) == BR::Stone
+                && w.blockAt(x0, kRigY, z0) == BR::Air           // 仙人掌碎
+                && dropsT984 == 1;
+            if (!okC)
+                qInfo().noquote() << "  [t984 diag] c" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c" << int(w.blockAt(x0, kRigY, z0))
+                                  << "drops" << dropsT984;
+            // (d) 对照腿·沙（isSolid 实体——落沙落旁 / worldgen 守卫同谓词）贴 1 高柱 → 照旧坍落。
+            buildRigT984(1);
+            dropsT984 = 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Sand, 0);
+            const bool okD = w.blockAt(x0 + 1, kRigY, z0) == BR::Sand
+                && w.blockAt(x0, kRigY, z0) == BR::Air
+                && dropsT984 == 1;
+            if (!okD)
+                qInfo().noquote() << "  [t984 diag] d" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c" << int(w.blockAt(x0, kRigY, z0))
+                                  << "drops" << dropsT984;
+            // (e) 挖除链：轨贴柱仙人掌无恙 → 挖邻轨仍无恙 → 挖沙支撑 ② 失撑整柱（2 格）掉落。
+            buildRigT984(2);
+            dropsT984 = 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);
+            bool okE = w.blockAt(x0, kRigY, z0) == BR::Cactus
+                && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                && dropsT984 == 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air, 0);           // 挖邻轨 → 仙人掌无恙（挖除链不伤）
+            okE = okE && w.blockAt(x0, kRigY, z0) == BR::Cactus
+                     && w.blockAt(x0, kRigY + 1, z0) == BR::Cactus
+                     && dropsT984 == 0;
+            w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);           // 挖沙支撑 → ② 失撑整柱掉落
+            okE = okE && w.blockAt(x0, kRigY, z0) == BR::Air
+                     && w.blockAt(x0, kRigY + 1, z0) == BR::Air
+                     && dropsT984 == 2;
+            if (!okE)
+                qInfo().noquote() << "  [t984 diag] e c0" << int(w.blockAt(x0, kRigY, z0))
+                                  << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
+                                  << "drops" << dropsT984;
+            // (f) 源码钉：④ 门槛 isSolid 行 + t503 worldgen 柱 4 邻守卫 isSolid 行（单一谓词两路径同源）。
+            const QString exeDirT984 = QCoreApplication::applicationDirPath();
+            const QString rootT984 = QDir(exeDirT984 + QStringLiteral("/..")).absolutePath();
+            auto readSrcT984 = [&rootT984](const QString &rel) -> QString {
+                QFile f(rootT984 + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString wSrcT984 = readSrcT984(QStringLiteral("src/World/world.cpp"));
+            const bool okF = wSrcT984.contains(QStringLiteral(
+                "if (id != BlockRegistry::Air && BlockRegistry::isSolid(id)) {"))
+                && wSrcT984.contains(QStringLiteral(
+                    "BlockRegistry::isSolid(m_chunks.blockAt(x + d[0], yy, z + d[1]))"));
+            if (!okF)
+                qInfo().noquote() << "  [t984 diag] f src pin miss";
+            // 清场：柱位自顶向下（oldId=Cactus 跳过 ② 失撑，无级联坍落）+ 3×3 台面带 + 沙下垫石。
+            w.setBlock(x0, kRigY - 2, z0, BR::Air, 0);
+            for (int dy = 1; dy >= 0; --dy)
+                w.setBlock(x0, kRigY + dy, z0, BR::Air, 0);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dy = -1; dy <= 1; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+            QObject::disconnect(dropConnT984);
+            tickN(w, 2);
+            const bool okT984 = okA && okB && okC && okD && okE && okF;
+            if (!okT984) ++totalFail;
+            if (!okT984)
+                qInfo().noquote() << "  [t984 diag] a" << okA << "b" << okB << "c" << okC
+                                  << "d" << okD << "e" << okE << "f" << okF;
+            qInfo().noquote() << (okT984 ? "PASS" : "FAIL")
+                              << "| t984 non-solid neighbors beside a cactus place successfully and"
+                                 " leave the cactus standing (reversed caliber per user): (a) rail,"
+                                 " golden rail, detector rail and torch on the four horizontal"
+                                 " neighbors of a 2-high column all stay with the cactus intact and"
+                                 " zero drops; (b) wood and stone pressure plates likewise; control"
+                                 " legs keep the existing semantics: (c) a full solid cube (stone)"
+                                 " beside the column still fells it (one drop), (d) sand (isSolid -"
+                                 " same predicate as the t503 worldgen guard and falling-sand path)"
+                                 " still fells it; (e) dig chain: rail-adjacent cactus survives,"
+                                 " digging the rail harms nothing, digging the sand support drops the"
+                                 " whole 2-high column via the support-loss chain; (f) source pins"
+                                 " for the isSolid gate in checkCactusOnEdit and the t503 worldgen"
+                                 " guard (one predicate, both paths)";
         }
     }
 

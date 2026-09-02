@@ -277,7 +277,9 @@ public:
                                   //   Cactus（机制等价 MC 仙人掌须沙地 / 仙人掌支撑）+ **水平 4 邻无方块**（t445 ④，机制等价 MC
                                   //   仙人掌不可邻接任何方块），否则拒放。**失撑 / 邻接方块即整柱转掉落物**（t445 ②/④）：World
                                   //   setBlock 破块时若正上方是仙人掌（且被破块非仙人掌本身）→ dropCactusColumn 递归向上把整柱
-                                  //   转 Air + 发 blockDroppedAsItem（呈掉落物）；放块时若邻接仙人掌 → 同（立即破坏掉落）。
+                                  //   转 Air + 发 blockDroppedAsItem（呈掉落物）；放块时若邻接仙人掌的是**完整实体方块**
+                                  //   （isSolid，t984 口径收窄——用户「能放下来，而不是仙人掌会掉落」）→ 整柱掉落；轨族 /
+                                  //   火把 / 压力板等非实体邻接不触发（放置成功、仙人掌不动）。
                                   //   进创造调色板。
         DeadBush       = 43, // 枯死的灌木：沙漠干旱地表的枯枝装饰（worldgen 在 desert 沙顶低密度散布）。**cross 形广告牌
                                   //   方块**（与 TallGrass / Sapling 同走 PartialBlockGeometry 的 cross 几何段，两片对角相交
