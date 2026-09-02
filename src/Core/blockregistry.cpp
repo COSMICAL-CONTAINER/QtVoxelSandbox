@@ -2328,10 +2328,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
 //   纯函数单一权威 —— World::checkRailOnEdit（破邻复检重算）/ placeMineshaft（worldgen 铺轨后统一算）
 //   共用，杜绝各处自写连接判定漂移。
 //
-// t666 规则集实现（与头注释逐条对应；t771 修①的臂轨种限定）：
+// t666 规则集实现（与头注释逐条对应；t771 修①的臂轨种限定；t982 立①的转弯×上坡互斥）：
 //   ① 拐角形成（普通轨 only，唯一允许的重新定向）：恰好 2 条互相垂直的邻轨（t771 起轨种不限——isRail
-//      家族任一可作臂）且各自反向同层±上下均无轨 → 返那两向（拐角 2 位）。动力 / 探测轨自身永远不拐角
-//      （弯道形态只呈现在普通轨格上，机制等价 MC 1.0；但它们可作普通轨拐角的配对臂）。
+//      家族任一可作臂）→ 返那两向（拐角 2 位）。**t982 用户铁律「一格铁轨绝对不可同时转弯和上坡」**：
+//      两臂须同层（三高探针层差均 0）才许弯；任一臂带坡度 → 禁弯，落成坡臂轴向直坡段（垂直臂弃连，
+//      坡上转弯处按平转弯 / 直上坡取一）。动力 / 探测轨自身永远不拐角（弯道形态只呈现在普通轨格上，
+//      机制等价 MC 1.0；但它们可作普通轨拐角的配对臂）。
 //   ② 非普通轨（动力 / 探测）：直线投影 —— 优先「对向贯穿轴」；否则保持既有轴偏好向的单端连接；
 //      否则任取单端；均无 → 0。绝不产生垂直 2 位 / 十字。
 //   ③ 普通轨：贯穿轴优先（保持既有轴偏好：既有对向双连接 / 既有单向 / 轴偏好位 bit5）。
@@ -2376,11 +2378,21 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
         const int nArm = int(hasPX) + int(hasNX) + int(hasPZ) + int(hasNZ);
         // ① 拐角：普通轨 && 恰好 1 X 臂 + 1 Z 臂。t771 起配对臂**轨种不限** —— isRail 家族任一（普通 / 动力 /
         //   探测）均可作臂（机制等价 MC 1.0「弯道形态只呈现在普通轨格上，但配对邻轨可以是任意轨种」）。
-        //   动力 / 探测轨**自身**仍永不弯（isNormal 守卫 + 规则②直线投影恒直）。t709：臂高放宽 —— 同层 /
-        //   上 / 下一格的轨均可配对（坡底拐弯）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 → 不构成拐角 →
-        //   bothX/bothZ 直线优先（t710「单格凹谷不允许直化」由该优先序保证）。t771 起臂存在性即 hasP*
-        //   （三高任一轨）—— 反向守卫（!hasN*）随 nArm==2 垂直配对自动成立，不再显式判。
+        //   动力 / 探测轨**自身**仍永不弯（isNormal 守卫 + 规则②直线投影恒直）。
+        //   **t982 转弯×上坡互斥（用户铁律：「一格铁轨绝对不可同时转弯和上坡」）**：两臂**同层**（各自三高
+        //   探针层差均 0）才许弯——弯道只属平地；任一臂带坡度（层差 ±1）→ 禁弯，落成**坡臂轴向的直坡段**
+        //   （坡度优先于转弯；坡上转弯处按 MC 口径取平转弯 / 直上坡之一，有坡必取直坡）。pre-fix 的坡臂
+        //   弯道（t709 坡底 / 坡顶拐角放宽）令 mesher 拐角 quad 沿坡臂整边抬 1.0（armLift）= 转弯贴图被
+        //   拉伸 45° 兼作上坡（用户症状），矿车 railRiseAt 同面爬坡过弯——该形态自此断绝（垂直臂弃连后
+        //   自行重算为指向本格侧面的独立 stub）。两 X 臂（含 V 形凹谷双上臂）/ 两 Z 臂 → 不构成拐角 →
+        //   bothX/bothZ 直线优先（t710「单格凹谷不允许直化」由该优先序保证，语义不变）。
         if (nArm == 2 && ((hasPX || hasNX) && (hasPZ || hasNZ))) {
+            const int dxArm = hasPX ? railProbeDelta(px) : railProbeDelta(nx);
+            const int dzArm = hasPZ ? railProbeDelta(pz) : railProbeDelta(nz);
+            if (dxArm != 0 || dzArm != 0) {
+                if (dxArm != 0) return hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
+                return hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
+            }
             if (hasPX && hasPZ) return quint8(RailConnPx | RailConnPz);
             if (hasPX && hasNZ) return quint8(RailConnPx | RailConnNz);
             if (hasNX && hasPZ) return quint8(RailConnNx | RailConnPz);
@@ -2409,6 +2421,16 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
             //   重接：0 → 正端 / 1 → 负端）。
             const bool hasStem = (c & stem) != 0;
             const bool hasPos = (c & posEnd) != 0, hasNeg = (c & negEnd) != 0;
+            // t982 互斥在转辙器上的延伸：弯道 2 位（岔尖 + 贯穿端）呈拐角贴图——若选中**带坡度**的贯穿端，
+            //   即「转弯兼上坡」违例形态。恰一端带坡时先选**平端**落弯（坡端弃弯）；两端同层 / 同坡度
+            //   （层差相等，双端齐坡 = 直坡段延续的 T）维持既有稳定序。岔尖自身带坡的组合布局 v1 不另
+            //   处理（登记：弯贴图沿岔尖边拉伸面遗留，收益面窄）。
+            const int dEndPos = throughX ? railProbeDelta(px) : railProbeDelta(pz);
+            const int dEndNeg = throughX ? railProbeDelta(nx) : railProbeDelta(nz);
+            if (dEndPos != dEndNeg) {
+                if (dEndPos == 0 && dEndNeg != 0) return quint8(stem | negEnd);
+                if (dEndNeg == 0 && dEndPos != 0) return quint8(stem | posEnd);
+            }
             if (hasStem && (hasPos != hasNeg)) return c;
             return (curState & RailSwitchCurveFlag)
                 ? quint8(stem | negEnd) : quint8(stem | posEnd);

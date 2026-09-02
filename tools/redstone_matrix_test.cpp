@@ -6048,17 +6048,16 @@ int main(int argc, char *argv[])
         }
     }
 
-    // ── P22 复审 #3（2026-08-23）坡臂拐角俯仰/Y 连续探针（MinecartManager 直编）──
-    //   Review #3：railRiseAt 拐角格取四边均值常数 0.25·Σe → 与相邻直臂格线性坡面在格边界不连续 →
-    //   俯仰采样窗跨界 atan2(-0.75,0.5)≈-56° 车头瞬甩 + 同帧 Y 钉面跳降 0.75（t709 拐角 quad 沿臂整边
-    //   抬升，矿车常数不贴）。修后拐角改 armLift 四角双线性（与 mesher 同一角点公式）。断言（高臂骑乘
-    //   下坡过拐角入平臂）：
-    //   (a) Y 连续：每 tick |Δy| ≤ 0.55（修前拐角入口一帧 -0.75；修后拐角内连续、平臂边界残差 ≤0.5
-    //       = t709 mesher 面自身的台阶，复审 #3 已知接受项）；
-    //   (b) 俯仰连续：每 tick |Δpitch| ≤ 46° 且 |pitch| ≤ 45.5°（钳制；修前 -56° 瞬甩两项都破）；
+    // ── P22 复审 #3（2026-08-23）拐角路由连续探针（MinecartManager 直编）【t982 改版】──
+    //   原腿钉「坡臂拐角双线性 rise 连续」（拐角格东臂 +1 / 南臂同层 → 拐角 quad 沿坡臂整边抬升 45°）。
+    //   t982 用户铁律「一格铁轨绝对不可同时转弯和上坡」落成 railConnections 规则①互斥后：坡臂拐角形态
+    //   断绝（任一臂带坡 → 禁弯，落成坡臂轴向直坡段，垂直臂弃连）→ 拐角只属平地、rise 恒 0，双线性
+    //   连续性由几何构造保证。本腿改钉**平地拐角**路由连续（零回归守卫）：
+    //   (a) Y 连续：每 tick |Δy| ≤ 0.55（全轨同层 → 恒 0 阶跃）；
+    //   (b) 俯仰连续：每 tick |Δpitch| ≤ 46° 且 |pitch| ≤ 45.5°（kCartPitchMaxDeg 护栏仍在）；
     //   (c) 过弯驶达南死端格心停驻 + 停稳守卫（连续性断言不放松「不出轨」底线）。
     {
-        // rig 寻址：运行期扫描空区（P20 先例）。需 6×6×5（含隔离边；高臂格到 Y+2）。
+        // rig 寻址：运行期扫描空区（P20 先例）。需 6×6×5（含隔离边；全轨同层 Y+1）。
         int cx = -1, cz = -1;
         for (int zz = 1; zz < 96 && cx < 0; zz += 3)
             for (int xx = 4; xx + 5 < 96; xx += 2) {
@@ -6071,20 +6070,20 @@ int main(int argc, char *argv[])
             }
         if (cx < 0) {
             ++totalFail;
-            qInfo().noquote() << "FAIL | review#3 slope-arm corner: no clear rig area found";
+            qInfo().noquote() << "FAIL | review#3 flat-corner route: no clear rig area found";
         } else {
             const float rideH = 0.45f;
-            // 高臂（西行下坡）：东端死端 (cx+2,Y+1) + (cx+1,Y+1)；拐角 (cx,Y)（东邻高 1 + 南臂同层）；
-            //   南平臂 (cx,Y,cz+1..cz+3) 死端。坡面由拐角格补齐（t709「低格画坡」）。
-            w.setBlock(cx + 2, kRigY + 1, cz, BR::Rail, 0);
-            w.setBlock(cx + 1, kRigY + 1, cz, BR::Rail, 0);
-            w.setBlock(cx,     kRigY,     cz, BR::Rail, 0);
-            w.setBlock(cx,     kRigY,     cz + 1, BR::Rail, 0);
-            w.setBlock(cx,     kRigY,     cz + 2, BR::Rail, 0);
-            w.setBlock(cx,     kRigY,     cz + 3, BR::Rail, 0);
+            const int kCy = kRigY + 1; // t982 后拐角只属平地 → 全轨同层
+            // 东平臂（死端 (cx+2)）+ 平拐角 (cx)（东臂 + 南臂同层）+ 南平臂 (cz+1..cz+3) 死端。
+            w.setBlock(cx + 2, kCy, cz, BR::Rail, 0);
+            w.setBlock(cx + 1, kCy, cz, BR::Rail, 0);
+            w.setBlock(cx,     kCy, cz, BR::Rail, 0);
+            w.setBlock(cx,     kCy, cz + 1, BR::Rail, 0);
+            w.setBlock(cx,     kCy, cz + 2, BR::Rail, 0);
+            w.setBlock(cx,     kCy, cz + 3, BR::Rail, 0);
             MinecartManager carts;
-            carts.spawnCart(cx + 2, kRigY + 1, cz, &w); // 单端连接（西）→ spawn 定向 -X 下坡向
-            bool mounted = carts.tryMount(QVector3D(float(cx + 2) + 0.5f, float(kRigY + 1) + 2.0f,
+            carts.spawnCart(cx + 2, kCy, cz, &w); // 单端连接（西）→ spawn 定向 -X 西行
+            bool mounted = carts.tryMount(QVector3D(float(cx + 2) + 0.5f, float(kCy) + 2.0f,
                                                     float(cz) + 0.5f),
                                           QVector3D(0, -1, 0), 4.0f);
             QVector3D prev = carts.posAt(0);
@@ -6093,20 +6092,20 @@ int main(int argc, char *argv[])
             QVector3D cp = prev;
             for (int t = 0; t < 900 && onFootprint; ++t) {
                 // 骑乘驱动（追推跑法摩擦磨停点随机、退化 wish 在死端形成推-停振荡，终点不确定；骑手
-                //   连续供速 + 死端「停在格心、零溢出」给出确定性终点）。wish 沿臂正向：西行段 (-1,0)，
-                //   过拐角心（z 越过 cz+0.5）后切 (0,+1) —— 死端处 dot<0 被滤 → 停驻不动。
+                // 连续供速 + 死端「停在格心、零溢出」给出确定性终点）。wish 沿臂正向：西行段 (-1,0)，
+                // 过拐角心（z 越过 cz+0.5）后切 (0,+1) —— 死端处 dot<0 被滤 → 停驻不动。
                 const bool southArm = cp.z() > float(cz) + 0.5f;
                 carts.tickRiddenCart(0.016, &w, southArm ? 0.0f : -1.0f,
                                      southArm ? 1.0f : 0.0f, cp);
                 carts.tickPushedCarts(0.016, &w);
                 cp = carts.posAt(0);
-                if (std::fabs(cp.y() - prev.y()) > 0.55f) yCont = false;   // (a) Y 连续（修前 -0.75）
+                if (std::fabs(cp.y() - prev.y()) > 0.55f) yCont = false;   // (a) Y 连续
                 const float p = carts.pitchAt(0);
-                if (t > 0 && std::fabs(p - prevPitch) > 46.0f) pitchCont = false; // (b) 俯仰连续（修前 ±56 瞬甩）
+                if (t > 0 && std::fabs(p - prevPitch) > 46.0f) pitchCont = false; // (b) 俯仰连续
                 if (std::fabs(p) > 45.5f) pitchClamped = false;
                 prevPitch = p;
                 const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
-                const bool onTrack = (bx >= cx && bx <= cx + 2 && bz == cz) // 高臂（含拐角列）
+                const bool onTrack = (bx >= cx && bx <= cx + 2 && bz == cz) // 东臂（含拐角列）
                                      || (bx == cx && bz >= cz + 1 && bz <= cz + 3); // 南臂
                 if (!onTrack) { onFootprint = false; break; }
                 prev = cp;
@@ -6117,7 +6116,7 @@ int main(int argc, char *argv[])
             bool ok = mounted && yCont && pitchCont && pitchClamped && onFootprint
                 && std::fabs(fin.x() - (float(cx) + 0.5f)) < 0.01f
                 && std::fabs(fin.z() - (float(cz + 3) + 0.5f)) < 0.01f
-                && std::fabs(fin.y() - (float(kRigY) + rideH)) < 0.02f;
+                && std::fabs(fin.y() - (float(kCy) + rideH)) < 0.02f;
             if (ok) {
                 for (int t = 0; t < 20 && ok; ++t) { // 停稳守卫（停止追推后钉死）
                     carts.tickPushedCarts(0.016f, &w);
@@ -6125,22 +6124,213 @@ int main(int argc, char *argv[])
                 }
             }
             if (!ok)
-                qInfo().noquote() << "  slope-arm corner: final" << fin << "rig cx" << cx << "cz" << cz
+                qInfo().noquote() << "  flat-corner route: final" << fin << "rig cx" << cx << "cz" << cz
                                   << "yCont" << yCont
                                   << "pitchCont" << pitchCont << "clamp" << pitchClamped
                                   << "onFootprint" << onFootprint;
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                              << "| review#3 slope-arm corner bilinear rise: Y step <=0.55/tick (was 0.75),"
-                                 " pitch continuous |d|<=46 (was ~56 snap) & clamped 45, parks at far dead-end";
+                              << "| review#3 flat-corner route continuity (t982 reshaped: slope-arm"
+                                 " corners are outlawed by the turn-x-ascend mutual exclusion, corners"
+                                 " are flat-only now so the bilinear-rise geometry class is gone -"
+                                 " this leg guards the flat-corner round trip): Y step <=0.55/tick,"
+                                 " pitch continuous |d|<=46 & clamped 45, parks at far dead-end";
             // 清场
             carts.clearAll();
-            w.setBlock(cx + 2, kRigY + 1, cz, BR::Air, 0);
-            w.setBlock(cx + 1, kRigY + 1, cz, BR::Air, 0);
-            w.setBlock(cx, kRigY, cz, BR::Air, 0);
-            for (int dz = 1; dz <= 3; ++dz) w.setBlock(cx, kRigY, cz + dz, BR::Air, 0);
+            w.setBlock(cx + 2, kCy, cz, BR::Air, 0);
+            w.setBlock(cx + 1, kCy, cz, BR::Air, 0);
+            w.setBlock(cx,     kCy, cz, BR::Air, 0);
+            for (int dz = 1; dz <= 3; ++dz) w.setBlock(cx, kCy, cz + dz, BR::Air, 0);
             tickN(w, 2);
         }
+    }
+
+    // ── P-t982 铁轨转弯×上坡互斥探针（World setBlock + MinecartManager 直编；spec「一格铁轨绝对不可
+    //    同时转弯和上坡——坡上转弯场景转弯贴图被拉伸 45° 兼作上坡；坡上转弯按 MC 口径落成平转弯 /
+    //    直上坡之一；直线坡 / 平转弯零回归」）──
+    //   根因：railConnections 规则①（t709 臂高放宽后）允许带坡臂的垂直对成弯 → mesher 拐角 quad 沿坡臂
+    //   整边抬 1.0（armLift）= 拐角贴图拉伸 45° 兼作上坡；矿车 railRiseAt 同面 45° 爬坡过弯。
+    //   修：规则①两臂同层（三高探针层差均 0）才许弯；任一臂带坡 → 禁弯，落成坡臂轴向直坡段（垂直臂
+    //   弃连，坡度优先于转弯）；规则⑤ T 分支弯道端恰一端带坡时选平端。腿：
+    //   (a) 坡顶接转弯（用户场景）逐格 shape：拐角候选格（东臂 +1 + 南臂同层）→ state = 直坡段（持 Px、
+    //       无 Pz —— turn 位与 ascend 位不再同置；railCornerArms false = 45° 拉伸形态断绝）；南臂 stub
+    //       单向指回（Nz——端点相对才连，坡格侧不回连）；
+    //   (b) 平转弯零回归：同层垂直对 → 拐角 2 位 + railCornerArms true；
+    //   (c) 坡底同判：东臂 -1 + 南臂同层 → 直坡段（Px），南臂弃连；
+    //   (d) 行为腿：骑乘东行爬坡到坡顶格（西臂 -1 + 南臂 stub，无东延续）→ 车直线停驻坡顶（z 恒轨心线、
+    //       不被拽上南臂）；pre-fix 该格成弯（Nx|Pz）→ 车过心即被甩向南臂（z 变）= 红；
+    //   (e) 源码钉：互斥判定两行 / T 分支平端优选。
+    {
+        // (a)(b)(c) shape 腿 rig 选址：footprint xt-2..xt+2 × zt-1..zt+2 × Y-2..Y+2。
+        int xt = -1, zt = -1;
+        for (int zz = 3; zz < 94 && xt < 0; zz += 4)
+            for (int xx = 6; xx + 2 < 96 && xt < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -2; dx <= 2 && clear; ++dx)
+                    for (int dz = -1; dz <= 2 && clear; ++dz)
+                        for (int dy = -2; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xt = xx; zt = zz; }
+            }
+        bool okA = false, okB = false, okC = false, okD = false;
+        if (xt < 0) {
+            qInfo().noquote() << "  [t982 diag] shape: no clear rig area";
+        } else {
+            const auto probe = [&](int dx, int dz, int dy) {
+                return BlockRegistry::RailProbe{ w.blockAt(xt + dx, kRigY + dy, zt + dz),
+                                                 w.blockAt(xt + dx, kRigY + dy + 1, zt + dz),
+                                                 w.blockAt(xt + dx, kRigY + dy - 1, zt + dz) };
+            };
+            // (a) 坡顶接转弯：候选格 (xt,Y)（东臂 (xt+1,Y+1) +1；南臂 (xt,Y,zt+1) 同层）。
+            w.setBlock(xt + 1, kRigY + 1, zt, BR::Rail, 0);
+            w.setBlock(xt,     kRigY,     zt, BR::Rail, 0);
+            w.setBlock(xt,     kRigY,     zt + 1, BR::Rail, 0);
+            tickN(w, 2);
+            const quint8 stA = w.stateAt(xt, kRigY, zt);
+            const quint8 conA = quint8(stA & 0x0F);
+            int aDummyXD = 0, aDummyZD = 0;
+            const bool aTurn = (conA & BR::RailConnPx) != 0          // 直坡段持东向连接（ascend 在）
+                            && (conA & BR::RailConnPz) == 0          // 转弯位断绝
+                            && BlockRegistry::railProbeDelta(probe(1, 0, 0)) == 1
+                            && !BlockRegistry::railCornerArms(conA, aDummyXD, aDummyZD);
+            const quint8 stStub = w.stateAt(xt, kRigY, zt + 1);
+            const bool aStub = (quint8(stStub & 0x0F) == BR::RailConnNz); // stub 单向指回
+            okA = aTurn && aStub;
+            if (!okA)
+                qInfo().noquote() << "  [t982 diag] a turn" << aTurn << "stub" << aStub
+                                  << "con" << conA << "stubCon" << (stStub & 0x0F);
+            w.setBlock(xt + 1, kRigY + 1, zt, BR::Air, 0);
+            w.setBlock(xt,     kRigY,     zt, BR::Air, 0);
+            w.setBlock(xt,     kRigY,     zt + 1, BR::Air, 0);
+            tickN(w, 2);
+            // (b) 平转弯零回归：同层垂直对 (xt+1,Y) + (xt,Y,zt+1)。
+            w.setBlock(xt + 1, kRigY, zt, BR::Rail, 0);
+            w.setBlock(xt,     kRigY, zt, BR::Rail, 0);
+            w.setBlock(xt,     kRigY, zt + 1, BR::Rail, 0);
+            tickN(w, 2);
+            const quint8 stB = w.stateAt(xt, kRigY, zt);
+            const quint8 conB = quint8(stB & 0x0F);
+            int bXD = 0, bZD = 0;
+            okB = conB == quint8(BR::RailConnPx | BR::RailConnPz)
+                && BlockRegistry::railCornerArms(conB, bXD, bZD)
+                && bXD == 1 && bZD == 1;
+            if (!okB)
+                qInfo().noquote() << "  [t982 diag] b con" << conB;
+            w.setBlock(xt + 1, kRigY, zt, BR::Air, 0);
+            w.setBlock(xt,     kRigY, zt, BR::Air, 0);
+            w.setBlock(xt,     kRigY, zt + 1, BR::Air, 0);
+            tickN(w, 2);
+            // (c) 坡底同判：候选格 (xt,Y)（东臂 (xt+1,Y-1) -1；南臂同层）→ 直坡段 Px。
+            w.setBlock(xt + 1, kRigY - 1, zt, BR::Rail, 0);
+            w.setBlock(xt,     kRigY,     zt, BR::Rail, 0);
+            w.setBlock(xt,     kRigY,     zt + 1, BR::Rail, 0);
+            tickN(w, 2);
+            const quint8 stC = w.stateAt(xt, kRigY, zt);
+            const quint8 conC = quint8(stC & 0x0F);
+            okC = (conC & BR::RailConnPx) != 0 && (conC & BR::RailConnPz) == 0
+                && BlockRegistry::railProbeDelta(probe(1, 0, 0)) == -1;
+            if (!okC)
+                qInfo().noquote() << "  [t982 diag] c con" << conC;
+            w.setBlock(xt + 1, kRigY - 1, zt, BR::Air, 0);
+            w.setBlock(xt,     kRigY,     zt, BR::Air, 0);
+            w.setBlock(xt,     kRigY,     zt + 1, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (d) 行为腿 rig 选址：footprint xd-1..xd+2 × zd-1..zd+1 × Y-1..Y+2。
+        int xd = -1, zd = -1;
+        for (int zz = 3; zz < 94 && xd < 0; zz += 4)
+            for (int xx = 6; xx + 2 < 96 && xd < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -1; dx <= 2 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xd = xx; zd = zz; }
+            }
+        if (xd < 0) {
+            qInfo().noquote() << "  [t982 diag] d: no clear rig area";
+        } else {
+            w.setBlock(xd,     kRigY,     zd, BR::Rail, 0); // 坡底平轨
+            w.setBlock(xd + 1, kRigY,     zd, BR::Rail, 0); // 坡格（东邻 +1 → 面自西向东抬）
+            w.setBlock(xd + 2, kRigY + 1, zd, BR::Rail, 0); // 坡顶格（t982 后 = 直坡段顶，南臂弃连）
+            w.setBlock(xd + 2, kRigY + 1, zd + 1, BR::Rail, 0); // 南臂 stub（坡格侧面）
+            tickN(w, 2);
+            const quint8 stTop = w.stateAt(xd + 2, kRigY + 1, zd);
+            MinecartManager carts;
+            carts.spawnCart(xd, kRigY, zd, &w);
+            const bool mounted = carts.tryMount(QVector3D(float(xd) + 0.5f, float(kRigY) + 2.0f,
+                                                          float(zd) + 0.5f), QVector3D(0, -1, 0), 4.0f);
+            QVector3D cp;
+            bool zPulled = false, reached = false;
+            for (int t = 0; t < 1200; ++t) {
+                // 蠕行东行（wish 大垂直分量 → proj≈0.0625 → targetV≈0.3 爬坡）——坡顶格心 deadEnd
+                //   停驻（<3 不飞出）。死亡车（防御）不采样。
+                carts.tickRiddenCart(0.016, &w, 0.0625f, 0.998f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (!carts.aliveAt(0)) break;
+                cp = carts.posAt(0);
+                if (std::fabs(cp.z() - (float(zd) + 0.5f)) > 0.02f) zPulled = true; // 被拽上南臂
+                if (std::fabs(cp.x() - (float(xd + 2) + 0.5f)) <= 0.3f
+                    && std::fabs(cp.z() - (float(zd) + 0.5f)) <= 0.02f) reached = true;
+            }
+            okD = mounted
+                && (quint8(stTop & 0x0F) == BR::RailConnNx)   // 坡顶 = 直坡段（西向连接，无弯位）
+                && reached && !zPulled;
+            if (!okD)
+                qInfo().noquote() << "  [t982 diag] d mount" << mounted << "top" << (stTop & 0x0F)
+                                  << "reached" << reached << "zPulled" << zPulled << "fin" << cp;
+            carts.clearAll();
+            w.setBlock(xd,     kRigY,     zd, BR::Air, 0);
+            w.setBlock(xd + 1, kRigY,     zd, BR::Air, 0);
+            w.setBlock(xd + 2, kRigY + 1, zd, BR::Air, 0);
+            w.setBlock(xd + 2, kRigY + 1, zd + 1, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (e) 源码钉（任一消失即红）。
+        const QString exeDir982 = QCoreApplication::applicationDirPath();
+        const QString root982 = QDir(exeDir982 + QStringLiteral("/..")).absolutePath();
+        auto readSrc982 = [&root982](const QString &rel) -> QString {
+            QFile f(root982 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString br982 = readSrc982(QStringLiteral("src/Core/blockregistry.cpp"));
+        const bool okE1 = br982.contains(QStringLiteral(
+            "const int dxArm = hasPX ? railProbeDelta(px) : railProbeDelta(nx);"));
+        const bool okE2 = br982.contains(QStringLiteral(
+            "if (dxArm != 0 || dzArm != 0) {"));
+        const bool okE3 = br982.contains(QStringLiteral(
+            "if (dEndPos == 0 && dEndNeg != 0) return quint8(stem | negEnd);"));
+        const bool okT982 = okA && okB && okC && okD && okE1 && okE2 && okE3;
+        if (!okT982) ++totalFail;
+        if (!okT982)
+            qInfo().noquote() << "  [t982 diag] a" << okA << "b" << okB << "c" << okC << "d" << okD
+                              << "| e" << okE1 << okE2 << okE3;
+        qInfo().noquote() << (okT982 ? "PASS" : "FAIL")
+                          << "| t982 rail turn x ascend mutual exclusion: railConnections corner rule"
+                             " (t709 arm-height relaxation) let a perpendicular pair with a SLOPED arm"
+                             " form a corner - the mesher corner quad then lifts its full slope-arm"
+                             " edge by 1.0 (armLift), stretching the corner texture 45 degrees to also"
+                             " serve as the ascent (user report), and the cart's railRiseAt mirror"
+                             " made it climb the stretched face through the turn. Fix: the corner"
+                             " forms only when BOTH arms are same-layer (three-high probe deltas =="
+                             " 0); any sloped arm forbids the bend and the cell becomes a straight"
+                             " ascending/descending segment along the sloped arm (slope beats turn,"
+                             " the perpendicular arm is dropped and re-resolves as an independent"
+                             " stub facing the cell's side), so a slope-top turn is exactly one of"
+                             " flat-turn or straight-slope and the 45-degree stretched form is gone;"
+                             " the t812 switch T branch prefers the flat through-end for its bend"
+                             " when exactly one end is sloped. Probe legs: (a) slope-top with a"
+                             " perpendicular same-level stub resolves to a straight east-ascending"
+                             " segment holding Px with NO Pz (turn and ascend bits never coexist,"
+                             " railCornerArms false) while the stub one-way faces it with Nz;"
+                             " (b) same-level perpendicular pair still corners (Px|Pz, arms +1/+1,"
+                             " flat-turn zero regression); (c) slope-bottom (east arm -1) likewise"
+                             " becomes a straight descending segment; (d) a mounted cart creeping"
+                             " east climbs and stops ON the slope-top cell center with z pinned to"
+                             " the rail line (pre-fix corner Nx|Pz flung the cart onto the south"
+                             " stub = red); (e) source pins for the mutual-exclusion lines and the"
+                             " flat-end preference"
+                          ;
     }
 
     // ── P23 复审 #23（2026-08-23）段中重选向横向收敛限速探针（MinecartManager 直编，同 P12c 场景）──
