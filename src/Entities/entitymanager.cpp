@@ -233,6 +233,41 @@ bool mobSnoutSubmergedInWater(World *world, float cx, float cy, float cz, float 
     return surfaceY >= mouthY; // 液面没过口鼻线才算淹没（浅水档液面低于口鼻线 → 负）
 }
 
+// t980 鱿鱼离水搁浅判定（t979 mobSnoutSubmergedInWater 的**同族反向**谓词——同一「采样线 vs 格内
+//   液面」比较式，一对两向用：空气呼吸者锚口鼻线（线在液面下 = 淹 → 溺水计时），水生者锚体底线
+//   （线在液面上 = 离水 → 搁浅掉血）；不造第二套平行判据）。体底线 = pos.y−halfH（AABB 底面，同
+//   mobFeetInWater 脚位线）：体底格非水 → 身体最低点已在空气中 → 搁浅；是水 → 格内液面低于体底线
+//   （浅水档托不住悬空的体底）→ 同样搁浅。与 mobFeetInWater 的分工：后者是**运动语义**（脚格沾水
+//   即水中物理/减速，t298/t399 既有口径，1/8 浅水档也照走水中物理），本谓词是**生存语义**（身体
+//   最低点离水才算「离水搁浅」——鱿鱼半浸在水洼里不干渴，机制等价 MC 1.0 squid 触水即存活的宽口径）。
+//   玩家侧无对应（玩家不因离水掉血）。无世界 → false（与溺水侧同保守向：宁可漏判不可误伤）。分层
+//   （PLAN §2）：纯只读 World::blockAt + stateAt。
+bool mobBodyAboveWaterSurface(World *world, float cx, float cy, float cz, float halfH)
+{
+    if (!world) return false;
+    const float bellyY = cy - halfH; // 体底线（AABB 底面）
+    const int by = int(std::floor(bellyY));
+    if (by < 0) return false; // 世界底之下查无水格（blockAt 越界返 Air）→ 不误判搁浅（保守向）
+    const int bx = int(std::floor(cx));
+    const int bz = int(std::floor(cz));
+    if (world->blockAt(bx, by, bz) != BlockRegistry::Water) return true; // 体底格非水 → 离水
+    const quint8 st = world->stateAt(bx, by, bz);
+    const float surfaceY = float(by) + (st == 0 ? 1.0f : float(8 - st) / 8.0f);
+    return surfaceY < bellyY; // 液面低于体底线（如 1/8 档托不住悬空体底）→ 仍算离水
+}
+
+// t980 鱿鱼搁浅常量（本文件局部——仅 aiSquid 搁浅挣扎分支 + tick 鱿鱼窒息块消费，数值口径随两处
+//   注释走，不进头文件公共契约面）：
+//   - kSquidFlopInterval=1.6s 挣扎周期（每周期随机换挣扎向；前段蠕动后段摊歇）。
+//   - kSquidStruggleBurst=0.6s 蠕动窗（周期前段；后 1.0s 摊歇——间歇感 = 非 kWalkSpeed 连续步态）。
+//   - kSquidStruggleSpeed=0.5 blocks/s 蠕动速（= kWalkSpeed 一半：陆上挣扎缓动，慢于水中漂游 0.8）。
+//   - kSquidStrandGraceSeconds=1.0s 离水宽限（防推挤跨水面 / 翻身瞬间的单帧误检尖峰；之后每
+//     kMobDrownInterval(1s) 扣 1HP 至死——10HP 鱿鱼离水 ~11s 死，节奏与 mob 溺水 1HP/s 同族）。
+static constexpr float kSquidFlopInterval       = 1.6f;
+static constexpr float kSquidStruggleBurst      = 0.6f;
+static constexpr float kSquidStruggleSpeed      = 0.5f;
+static constexpr float kSquidStrandGraceSeconds = 1.0f;
+
 // t362 mob 落地支撑复探：footprint XZ 任一列在支撑层 supportY 有可站立支撑 → true。
 //   取样同 mobAabbHitsSolid（floor(min)..ceil(max)-1，严格覆盖排除仅贴面列）。只读 World。
 //   用于替代旧版「仅中心列」支撑复探 —— 见 tick 内 resting 复探注释（修「mob 下 1 格台阶卡死」根因）。
@@ -2751,14 +2786,46 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
 }
 
 // t399 鱿鱼水生 AI（详见头文件 aiSquid 注释）。机制对齐 MC 1.0 squid：水里周期喷水推进（上浮 + 水平漂游）+
-//   通用重力缓沉 → 节律性游动；离水搁浅走 aiWander 慢爬。分层（PLAN §2）：只读 World::blockAt（mobFeetInWater
-//   脚位水格判，同文件静态助手）+ 自身数据；写 EntityManager 自身（pos / vy / yawRad / swimTimer）。无向上依赖。
+//   通用重力缓沉 → 节律性游动；离水搁浅走 t980 挣扎缓动（间歇低速蠕动，非行走步态；离水掉血在 tick
+//   窒息块）。分层（PLAN §2）：只读 World::blockAt（mobFeetInWater 脚位水格判，同文件静态助手）+ 自身
+//   数据；写 EntityManager 自身（pos / vy / yawRad / swimTimer / moveSpeed）。无向上依赖。
 bool EntityManager::aiSquid(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale)
 {
-    // 离水（搁浅）：委托 aiWander 陆地慢爬（机制等价 MC squid 上岸后笨拙挪动；不复用喷水推进）。speedScale 透传
-    //   （搁浅态不在水中 → speedScale=1.0 正常走速；若恰在浅水边沿 speedScale<1 亦无妨，慢爬更符合搁浅笨拙感）。
+    // 离水（搁浅）——t980 挣扎缓动（替代旧 aiWander 委托：鱿鱼无腿，陆上不该有正常行走摆动步态）。
+    //   swimTimer 复用为挣扎周期相位计（水中分支独占于搁浅分支，互斥无冲突）：每 kSquidFlopInterval
+    //   周期随机换一次挣扎向，周期前 kSquidStruggleBurst 段以 kSquidStruggleSpeed 低速蠕动（moveSpeed=
+    //   蠕动速 → walkPhase 低速间歇推进 = 触手拖拽式小摆，非 kWalkSpeed 连续步摆），后段摊歇（moveSpeed=0）。
+    //   speedScale 透传（水中减速语义不在搁浅态出现 → 通常 1.0；恰在浅水边沿 <1 亦无妨，更笨拙）。
+    //   逐轴（X 后 Z）边界 clamp + mobAabbHitsSolid 撤回防穿墙（同 aiWander 位移模式）。
     if (!mobFeetInWater(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH)) {
-        return aiWander(e, dt, world, worldW, worldD, speedScale);
+        e.swimTimer -= dt;
+        if (e.swimTimer <= 0.0f) {
+            e.swimTimer += kSquidFlopInterval; // 周期回绕（相位连续；搁浅入水再出时相位带旧值无害——重进
+                                               //   搁浅首周期可能短一截，观感即「刚落地的急促扑腾」）
+            e.yawRad = float(QRandomGenerator::global()->bounded(62832)) / 10000.0f; // 随机挣扎向
+        }
+        const float flopPhase = kSquidFlopInterval - e.swimTimer;   // 周期内相位 [0, interval)
+        const bool struggling = flopPhase < kSquidStruggleBurst;    // 前段蠕动、后段摊歇
+        const float spd = struggling ? kSquidStruggleSpeed * speedScale : 0.0f;
+        const float dx = -std::sin(e.yawRad) * spd * dt;
+        const float dz = -std::cos(e.yawRad) * spd * dt;
+        const float ehw = e.halfW;
+        const float ehh = e.halfH;
+        float newX = e.pos.x() + dx;
+        if (newX < ehw) newX = ehw;
+        if (newX > worldW - ehw) newX = worldW - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), e.pos.z(), ehw, ehh)) newX = e.pos.x();
+        float newZ = e.pos.z() + dz;
+        if (newZ < ehw) newZ = ehw;
+        if (newZ > worldD - ehw) newZ = worldD - ehw;
+        if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        bool moved = false;
+        if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
+        if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+        // 蠕动段 moveSpeed=低速值（walkPhase 间歇慢推）；摊歇/撞墙=0（触手停）。非 kWalkSpeed 值域
+        //   （0.5 < 1.0）本身即「非行走步态」的判别面（矩阵 P-t980 钉 moveSpeed 上界 + 间歇占比）。
+        e.moveSpeed = moved ? spd : 0.0f;
+        return moved;
     }
 
     // 水中：swimTimer 倒计时到 → 喷水推进（vy 上冲量 + 随机换向漂游方向）+ 重置随机周期。
@@ -7413,9 +7480,34 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     }
                 } else if (e.mobAirTimer > 0.0f || e.mobDrownTimer > 0.0f) {
                     e.mobAirTimer = 0.0f;
-                    e.mobDrownTimer = 0.0f; // 头出水 → 呼吸恢复（清累积，下次浸水重新计 15s）
+                    e.mobDrownTimer = 0.0f; // 口鼻出水 → 呼吸恢复（清累积，下次浸水重新计 15s）
                 }
                 if (e.dead) continue; // 溺死本帧不再走 AI / 重力（同火伤 / 仙人掌语义，防死尸位移）
+            } else {
+                // t980 鱿鱼离水搁浅窒息（MC 1.0 语义：水生者离水持续受伤至死——「鱿鱼上岸会死」）。
+                //   判据 = mobBodyAboveWaterSurface（t979 淹没谓词同族反向：体底线离水，半浸水洼不算）。
+                //   节奏：kSquidStrandGraceSeconds(1s) 宽限 → 每 kMobDrownInterval(1s) 扣 1HP（复用
+                //   受击链 + mobDied 掉落链）。计时器复用 mobAirTimer（干渴累积）+ mobDrownTimer（扣血
+                //   累积）——上方溺水块对鱿鱼整体跳过，两字段对其独占无冲突；回水即双清（止血，机制
+                //   等价入水立刻脱险）。
+                const bool stranded = mobBodyAboveWaterSurface(world, e.pos.x(), e.pos.y(), e.pos.z(), e.halfH);
+                if (stranded) {
+                    e.mobAirTimer += float(aiDt);
+                    if (e.mobAirTimer >= kSquidStrandGraceSeconds) {
+                        e.mobDrownTimer += float(aiDt);
+                        if (e.mobDrownTimer >= kMobDrownInterval) {
+                            e.mobDrownTimer -= kMobDrownInterval;
+                            if (!e.dead) {
+                                damageEntity(idx, 1); // 搁浅窒息 1HP/s（复用受击链）
+                                dirty = true;
+                            }
+                        }
+                    }
+                } else if (e.mobAirTimer > 0.0f || e.mobDrownTimer > 0.0f) {
+                    e.mobAirTimer = 0.0f;
+                    e.mobDrownTimer = 0.0f; // 回水 → 计时清零（立即止血）
+                }
+                if (e.dead) continue; // 搁浅致死本帧不再走 AI / 重力（同火/仙人掌/溺水语义，防死尸位移）
             }
 
             // t239 AI wander 自主移动（水平）：随机选向 + 时间片 + 逐轴 AABB 碰撞。位移 → dirty（驱动 QML 位置绑定）。

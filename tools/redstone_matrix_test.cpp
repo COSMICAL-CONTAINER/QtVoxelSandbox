@@ -32363,6 +32363,9 @@ Item {
         bool ok = true;
         int exitedTotal = 0; // (a) 合计脱困头数（诊断输出用）
         int trenchAlive = 0; // (b) 盖顶水槽存活满血头数（诊断输出用）
+        bool legFull[2] = {true, true}; // 分腿满血标记（diag 用）
+        int legExit[2] = {0, 0};        // 分腿脱困数（diag 用）
+        bool okDeep = false;            // (c) 没顶腿（diag 用）
         for (int leg = 0; leg < 2 && ok; ++leg) { // leg0 = 1/8(state7)、leg1 = 1/4(state6)
             const quint8 puddleState = leg == 0 ? quint8(7) : quint8(6);
             World w979;
@@ -32416,17 +32419,23 @@ Item {
             } else {
                 int exited = 0, alive = 0;
                 bool allFull = true;
+                bool everLeft[8] = {}; // 粘性脱困标记：任一采样点在洼外即计「能走出」（终态单点采样会被
+                                       //   随机游走折返骗过——t980 轮实测 5/8 假红根因，语义改「曾离开」）
                 for (int t = 0; t < 1250; ++t) { // 20s（≥ 溺水起罚 15s + 5s 余量：旧码判别腿必红）
                     em979.tick(0.016f, &w979, far979, 0.3f, 1.8f, false);
-                    if (t == 1249) {
+                    if (t % 8 == 0) { // 0.128s 采样（0.4 b/s 涉水速下猪无法在两采样间出洼又回洼）
                         for (int i = 0; i < 8; ++i) {
+                            const QVector3D p = em979.posAt(pigs[i]);
+                            if (qFloor(p.x()) != puddles[i][0] || qFloor(p.z()) != puddles[i][1])
+                                everLeft[i] = true; // 脚位格已离水洼（wander 走出 = 浅水不困不罚）
+                        }
+                    }
+                    if (t == 1249) {
+                        for (int i = 0; i < 8; ++i)
                             if (em979.healthAt(pigs[i]) != kPigMax || em979.deadAt(pigs[i]))
                                 allFull = false; // 新谓词：浅水档口鼻线在液面上 → 零溺水伤
-                            const QVector3D p = em979.posAt(pigs[i]);
-                            const bool inPuddle =
-                                qFloor(p.x()) == puddles[i][0] && qFloor(p.z()) == puddles[i][1];
-                            if (!inPuddle) ++exited; // 脚位格已离水洼（wander 走出 = 浅水不困不罚）
-                        }
+                        for (int i = 0; i < 8; ++i)
+                            if (everLeft[i]) ++exited;
                         for (int i = 0; i < 4; ++i)
                             if (em979.healthAt(trenchPigs[i]) == kPigMax && !em979.deadAt(trenchPigs[i]))
                                 ++alive; // 盖顶水槽（判别腿）：口鼻被钉水面下 0.9 格内仍零溺水伤
@@ -32434,10 +32443,13 @@ Item {
                 }
                 exitedTotal += exited;
                 trenchAlive += alive;
-                ok = ok && allFull && exited >= 6 && alive == 4; // ≥6/8 脱困 + 4/4 水槽满血
+                legFull[leg] = allFull;
+                legExit[leg] = exited;
+                ok = ok && allFull && exited >= 6 && alive == 4; // ≥6/8 曾脱困 + 4/4 水槽满血
             }
         }
-        // (c) 没顶腿：石盖水柜（t828 同款：水 y85..87 源块 + y88 石盖 → 浮力钉盖下口鼻恒没水）。
+        // (c) 没顶腿：石盖水柜（t828 同款：水 y85..87 源块 + y88 石盖 + **四周全高壁**——壁顶与盖平，
+        //     防浮力钉盖下的猪随 wander 水平漂出水柱、坠井外干地存活（RNG 漂移型假红，t980 轮实测））。
         {
             World w979b;
             w979b.setWidth(24); w979b.setDepth(24); w979b.setHeight(96); w979b.setSeed(22);
@@ -32447,16 +32459,23 @@ Item {
                 for (int z = 8; z < 16; ++z)
                     for (int y = 85; y <= 88; ++y)
                         w979b.setBlock(x, y, z, (y <= 87) ? BR::Water : BR::Stone, 0);
+            // 四周全高壁（y85..88）：把「盖下漂浮带」四面围死——漂浮猪水平漂移撞壁折返，恒在水柱上方。
+            for (int x = 7; x <= 16; ++x)
+                for (int z = 7; z <= 16; ++z) {
+                    const bool ring = (x == 7 || x == 16 || z == 7 || z == 16);
+                    if (ring)
+                        for (int y = 85; y <= 88; ++y) w979b.setBlock(x, y, z, BR::Stone, 0);
+                }
             EntityManager em979b;
             const QVector3D far979b(-1000.0f, 90.0f, -1000.0f);
             const int pigD = em979b.spawnMobTyped(11, 85, 11, EntityManager::MobPig,
                                                   QStringLiteral("#f0a8b0"), kPigMax);
-            bool okD = pigD >= 0;
-            if (okD) {
+            okDeep = pigD >= 0;
+            if (okDeep) {
                 for (int t = 0; t < 1250; ++t) em979b.tick(0.016f, &w979b, far979b, 0.3f, 1.8f, false);
-                okD = em979b.deadAt(pigD) || em979b.healthAt(pigD) <= 1; // 3HP − 1HP/s（15s 起）→ 20s 内死/残
+                okDeep = em979b.deadAt(pigD) || em979b.healthAt(pigD) <= 1; // 3HP − 1HP/s（15s 起）→ 20s 内死/残
             }
-            ok = ok && okD;
+            ok = ok && okDeep;
         }
         // (d) 源码钉（t880/t997 先例：QML 掉落表 headless 无行为缝 → 源码钉；谓词单一权威钉同段）。
         bool okPin = false;
@@ -32485,6 +32504,10 @@ Item {
         }
         ok = ok && okPin;
         if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  t979 diag: legFull" << int(legFull[0]) << int(legFull[1])
+                              << "legExit" << legExit[0] << legExit[1] << "trench" << trenchAlive
+                              << "/8 deep" << int(okDeep) << "pin" << okPin;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t979 pig ankle-deep water safety + drop table: open 1/8 and 1/4"
                              " level puddles zero drowning damage (full HP) and >=6/8 wade out ("
@@ -32494,6 +32517,122 @@ Item {
                              " still drowns (chain intact); snout-line-vs-surface single-authority"
                              " predicate shared by drown + swim-up + resting-break, pig drop is"
                              " meat-only with cooked-on-burn kept and cow leather untouched (pins)";
+    }
+
+    // ── P-t980 鱿鱼陆地生存两修（离水搁浅窒息掉血至死 + 陆地挣扎缓动非行走步态；局部世界 w980）──
+    //    旧状：鱿鱼离水不伤不死（窒息块整体跳过鱿鱼）+ 搁浅委托 aiWander = 正常行走步态（kWalkSpeed
+    //    连续步摆）——与「鱿鱼上岸会死 + 笨拙扑腾」的 MC 1.0 语义双缺。修法（与 t979 成对）：
+    //    生存 = mobBodyAboveWaterSurface（t979 淹没谓词同族反向：体底线 vs 格内液面，半浸水洼不算离水）
+    //    → 1s 宽限后每 1s 扣 1HP 至死（10HP 鱿鱼 ~11s 死）；步态 = aiSquid 搁浅分支改间歇挣扎（每
+    //    1.6s 周期随机换向、前 0.6s 以 0.5（=kWalkSpeed 一半）蠕动、后 1.0s 摊歇——moveSpeed 面即
+    //    walkPhase 驱动面，低速间歇值域本身排除 kWalkSpeed 连续步态）。
+    //    (a) 计时精确腿：干地鱿鱼（10HP）3.504s 恰扣 2 次（宽限 1s + 1HP/s → 第 1/2 次在 ~2.0/~3.0s，
+    //        边距 0.5s ≫ aiTick 量子 0.064s）→ health==8。
+    //    (b) 掉血至死腿：同鱿鱼推到 12s → 恰 10 次扣血 → health==0（死；末次 ~11.0s）。
+    //    (c) 陆地步态退化钉（与 a/b 同鱿鱼前 8.5s 采样窗）：max(moveSpeed) ∈ [0.4,0.56]（蠕动爆发恒
+    //        发生且上界 < kWalkSpeed=1.0 → 非行走步态）+ 零速样本占比 ≥ 0.3（摊歇窗 1.0/1.6=62.5%
+    //        理论值，间歇性可见）。
+    //    (d) 水中零回归腿：2 深水源井 + 石盖鱿鱼 15s 满血满活（盖顶防漂出；t828 浮面/喷水行为不受
+    //        搁浅链影响——水下体底线恒在液面下）。
+    //    (e) 源码钉：mobBodyAboveWaterSurface（成对谓词在位）+ kSquidFlopInterval/kSquidStruggleSpeed/
+    //        kSquidStrandGraceSeconds（挣扎步态 + 宽限常量，仅新分支存在）。
+    //    阴性轮（两刀，见提交正文）：①注释掉 tick 鱿鱼窒息 else 块 → (a)(b) 恰红（409/1，回到
+    //        「离水不死」旧世界）；②aiSquid 搁浅分支回退 aiWander 委托 → (c) max(moveSpeed) 触 1.0
+    //        恰红（行走步态复现）→ 均复原绿。
+    {
+        World w980;
+        w980.setWidth(40); w980.setDepth(40); w980.setHeight(96); w980.setSeed(23);
+        // 围栏平台：y84 石板 + y85..86 边墙（同 P-t979 口径，防 wander/蠕动出平台坠地形假红）。
+        for (int x = 6; x < 34; ++x)
+            for (int z = 6; z < 34; ++z) w980.setBlock(x, 84, z, BR::Stone, 0);
+        for (int x = 6; x < 34; ++x)
+            for (int z = 6; z < 34; ++z) {
+                const bool wall = (x == 6 || x == 33 || z == 6 || z == 33);
+                if (wall)
+                    for (int y = 85; y <= 86; ++y) w980.setBlock(x, y, z, BR::Stone, 0);
+            }
+        // (d) 水井：3×3 两深水源 + 四壁（y85..86）+ 顶盖（y87）——全密封（旧版无侧壁：鱿鱼漂出井口
+        //     上平台 → 搁浅致死假红，t980 首轮实测）。
+        for (int x = 14; x <= 16; ++x)
+            for (int z = 14; z <= 16; ++z) {
+                for (int y = 85; y <= 86; ++y) w980.setBlock(x, y, z, BR::Water, 0);
+                w980.setBlock(x, 87, z, BR::Stone, 0);
+            }
+        for (int x = 13; x <= 17; ++x)
+            for (int z = 13; z <= 17; ++z) {
+                const bool rim = (x == 13 || x == 17 || z == 13 || z == 17);
+                if (rim) {
+                    w980.setBlock(x, 85, z, BR::Stone, 0);
+                    w980.setBlock(x, 86, z, BR::Stone, 0);
+                    w980.setBlock(x, 87, z, BR::Stone, 0); // 侧壁加高到盖沿（防跃出侧沿）
+                }
+            }
+        EntityManager em980;
+        const QVector3D far980(-1000.0f, 90.0f, -1000.0f);
+        const int sqDry = em980.spawnMobTyped(10, 85, 10, EntityManager::MobSquid,
+                                              QStringLiteral("#6a4a3a"), 10);
+        const int sqWat = em980.spawnMobTyped(15, 85, 15, EntityManager::MobSquid,
+                                              QStringLiteral("#6a4a3a"), 10);
+        bool ok = sqDry >= 0 && sqWat >= 0;
+        float maxSpd = 0.0f;          // (c) 步态采样极值（作用域提出 if(ok) 供 FAIL diag / PASS 行输出）
+        int zeroSmp = 0, gaitSmp = 0; //     零速样本数 / 总样本数
+        int hp354 = -1, hp120 = -1;   // (a)/(b) 计时腿读数（diag 用）
+        int watHp = -1;               // (d) 水井鱿鱼终态血量（diag 用）
+        bool watDead = true, watAlive = false;
+        QVector3D watPos;             //     终态位置（diag 用：判是否漂出井 / 卡井沿）
+        if (ok) {
+            for (int t = 0; t < 750; ++t) { // 干地鱿鱼窗：12s（计时至死 + 步态采样）
+                em980.tick(0.016f, &w980, far980, 0.3f, 1.8f, false);
+                if (t == 219) {
+                    hp354 = em980.healthAt(sqDry);
+                    ok = ok && hp354 == 8;                     // (a) 3.504s 恰 2 次搁浅扣血
+                }
+                if (t >= 30 && t <= 530) {                     // (c) 步态采样窗 0.5..8.5s
+                    const float ms = em980.moveSpeedAt(sqDry);
+                    maxSpd = std::max(maxSpd, ms);
+                    if (ms <= 1e-4f) ++zeroSmp;
+                    ++gaitSmp;
+                }
+            }
+            hp120 = em980.healthAt(sqDry);
+            ok = ok && hp120 == 0;                         // (b) 12s 恰 10 次 → 死
+            ok = ok && maxSpd >= 0.4f && maxSpd <= 0.56f   // (c) 蠕动爆发在位且上界非行走速
+                 && zeroSmp * 3 >= gaitSmp;                //     零速占比 ≥ 1/3（间歇摊歇可见）
+            for (int t = 0; t < 938; ++t)                  // (d) 水井鱿鱼 15s
+                em980.tick(0.016f, &w980, far980, 0.3f, 1.8f, false);
+            watHp = em980.healthAt(sqWat);
+            watDead = em980.deadAt(sqWat);
+            watAlive = em980.aliveAt(sqWat);
+            watPos = em980.posAt(sqWat);
+            ok = ok && watHp == 10 && !watDead && watAlive;
+        }
+        // (e) 源码钉。
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile mf(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+            const QString c = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            okPin = c.contains(QStringLiteral("bool mobBodyAboveWaterSurface(World"))
+                 && c.contains(QStringLiteral("kSquidFlopInterval"))
+                 && c.contains(QStringLiteral("kSquidStruggleSpeed"))
+                 && c.contains(QStringLiteral("kSquidStrandGraceSeconds"));
+        }
+        ok = ok && okPin;
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  t980 diag: hp@3.5s" << hp354 << "hp@12s" << hp120
+                              << "maxSpd" << maxSpd << "zero/gait" << zeroSmp << "/" << gaitSmp
+                              << "watHp" << watHp << "watDead" << int(watDead)
+                              << "watAlive" << int(watAlive) << "watPos" << watPos
+                              << "pin" << okPin;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t980 squid land survival: beached squid takes 1HP/s stranding damage"
+                             " after a 1s grace (exactly 2 hits by 3.5s, dead by 12s) and its land"
+                             " gait degrades to intermittent struggling (max moveSpeed" << maxSpd
+                          << "< walk speed, >=1/3 samples at rest), water squid stays full HP with"
+                             " swim/bob intact; belly-line predicate pairs the t979 snout-line"
+                             " authority (pins)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
