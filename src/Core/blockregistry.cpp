@@ -1874,7 +1874,7 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     //   衰减 1/层）：叶层逐层渐暗、单片叶下仍亮。须置于 isSolid 默认分支**之前**（叶 solid=true 会先命中）。
     if (blockId == Leaves || blockId == SpruceLeaves) return 1;
     if (isSolid(blockId)) return 15;                  // 全实体方块：满遮光（保旧 isSolid 光照语义）
-    if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland/Cactus）
+    if (isBed(blockId)) return 15;                    // t457 床 solid=false（低 3D 渲染）但仍是 opaque 实体木床 → 满遮光（同 Farmland；Cactus t985 起转全透不满格）
     switch (blockId) {
     case WoodTrapdoor: // 审查修 L7：合 = 半遮 7 / 开 = 全透（与 IronTrapdoor 统一口径）。旧「合=15 满遮」
                        //   t879② 起大面贴图 180 四孔真透明 → 合态半遮（板体为主）与铁活板门口径一致。
@@ -1894,7 +1894,13 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）
     case StoneBrickSlab: return 7;                    // t487 石砖台阶半遮光（同 WoodSlab/CobbleSlab/SpruceSlab，半高占空比 0.5）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
-    case Cactus:       return 15;                     // t445 仙人掌 solid=false（0.8 细柱渲染）但仍是 opaque 实体植物 → 满遮光
+    case Cactus:       return 0;                      // t985 翻案（修仙人掌底接触阴影）：旧 t445「0.8 细柱仍是 opaque 实体植物 →
+                                                       //   满遮 15」令天光种子列在仙人掌格截断 + BFS 进入衰减 max(1,15)=15 → 仙人掌格
+                                                       //   天光恒 0；mesher 立方面光采面所朝邻格 → 沙顶面恰朝仙人掌格 → 接触处沙面整片
+                                                       //   压进暗部地板（用户「底部沙子与仙人掌接触的部分整片变成阴影」）。仙人掌不满格
+                                                       //   → 不遮天光（MC 语义；同轨/板/雪层等不满格族默认全透口径）；完整实体方块
+                                                       //   isSolid→15 照旧满遮（P-t985 石头对照腿钉不回归）。列顶/PCF 侧 t849/t850 已把
+                                                       //   仙人掌排除出 heightmap（双查之 AO 侧既有收口），本行收口光照侧。
     case EnchantingTable: return 15;                 // t620 附魔台 solid=false（0.75 矮盒渲染）但仍是 opaque 实体石台 → 满遮光
     case Anvil:        return 15;                     // t766 铁砧三阶段 solid=false（三盒异形渲染）但仍是 opaque
     case AnvilChipped: return 15;                     //   实体铁块（同 Farmland/Cactus/EnchantingTable 模式）→ 满遮光
