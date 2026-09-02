@@ -391,7 +391,7 @@ Item {
     //   可越 360（eulerRotation 角度语义等价）—— 统一不改写（动画运行期 DragHandler 不会同时写）。
     property real spinAngle: 0
     // t599 鼠标拖拽旋转态：dragging = DragHandler 活动中（暂停自转）；userPitch = 拖拽累计俯仰角偏移
-    //   （叠加在 -22° 基倾上，Y 拖上/下看顶/底——t877 恢复 t599 原方向；**用户确认方向，勿再改**：
+    //   （叠加在 +22° 俯视基偏上〔t990 翻案，原 −22°〕，Y 拖上/下看顶/底——t877 恢复 t599 原方向；**用户确认方向，勿再改**：
     //   t820 曾按「推球面」直觉取反符号，用户两轮实测均判反 → 本符号为用户定稿）。松手 resume
     //   动画把 spinAngle lerp 回自转相位（无跳变）。yaw 由 spinAngle 本身承载（拖拽水平位移直接写入
     //   spinAngle，自转从松手角度继续）。
@@ -501,7 +501,7 @@ Item {
     onVisibleChanged: restartSpinIfIdle()
     onSelectedIsCubeChanged: restartSpinIfIdle()
     onSelectedIsMobChanged: restartSpinIfIdle()
-    // t599 松手后 pitch 平滑归零（回标准 -22° 3/4 视角；yaw 已由自转从当前角度续转承接）。
+    // t599 松手后 pitch 平滑归零（回标准 +22° 俯视 3/4 视角〔t990 翻案〕；yaw 已由自转从当前角度续转承接）。
     NumberAnimation {
         id: resumePitchAnim
         target: root; property: "userPitch"; to: 0
@@ -867,7 +867,7 @@ Item {
                                 //   加 DragHandler —— 按住拖时暂停自转（previewDragging → NumberAnimation running=false），
                                 //   水平位移增量写 spinAngle（yaw，度；1px = 0.6° 手感系数）、垂直位移增量累计
                                 //   userPitch（pitch，度；上拖看顶 / 下拖看底，限 ±60° 防过翻）；松手 pitch 由
-                                //   resumePitchAnim 平滑归零（400ms OutCubic 回标准 -22° 3/4 视角），yaw 由自转从当前
+                                //   resumePitchAnim 平滑归零（400ms OutCubic 回标准 +22° 俯视 3/4 视角〔t990〕），yaw 由自转从当前
                                 //   角度无缝续转（NumberAnimation on spinAngle 重启从当前值推进，无跳变）。
                                 //   t877 恢复 t599 原符号（userPitch - dy*0.6）：t820 曾按「推球面」直觉取反
                                 //   （+dy），用户两轮实测均判「上下反了」→ 回退原方向并**写死定稿**——
@@ -977,10 +977,18 @@ Item {
                                     //   cos(θ) 翻号 = 背面相位「上下拖拽反了」的根因；且侧相位（|θ|→90°）铰链
                                     //   顺向视口、竖直拖带出绕视轴的平面内打转分量（拖拽轴被换走）。拆两层：
                                     //   **pitch 父**（世界系俯仰 = 铰链恒 = 屏幕水平 X 轴，投影永不随自转翻号）+
-                                    //   **yaw 子**（spinAngle 自转/拖拽转台）。t599 的 -22° 基倾 / -35° 基偏与
-                                    //   t877 定稿拖拽符号逐字保留。四预览分支（整立方 / 床 / 异形 / 生物）同构。
+                                    //   **yaw 子**（spinAngle 自转/拖拽转台）。-35° yaw 基偏与 t877 定稿拖拽
+                                    //   符号逐字保留。四预览分支（整立方 / 床 / 异形 / 生物）同构。
+                                    //   t990 基偏翻案（用户「方块默认视角从俯视变成仰视了」；git -S 证明基偏
+                                    //   数值从未变号——回归源是 t966 拆层本身）：旧单节点图合成 Ry(yaw)·Rx(pitch)
+                                    //   中 −22° 作用于模型局部系，自转带动倾角 → 顶/底面交替可见（翻滚观感，
+                                    //   「见顶面」半相位为真）；拆成世界系 pitch 父后同一 −22° 恒定 = top 法线
+                                    //   z 分量 sin(−22°) < 0 恒背相机 → **全自转相位恒见底面 = 恒定仰视**。
+                                    //   修 = 基偏 −22° → +22°（sin(+22°) > 0 = 顶面恒朝相机 = JEI 式恒定俯视
+                                    //   3/4；P-t990 rig 实证）。拖拽定律不受基偏号影响（上拖 → userPitch 增 →
+                                    //   eulerRotation.x 增 → 更俯视，t877 定稿符号两基偏号下方向均一致）。
                                     Node {
-                                        eulerRotation.x: -22 + root.userPitch // t966 pitch 父：基倾 -22°（见顶面）+ 拖拽俯仰（t599）
+                                        eulerRotation.x: 22 + root.userPitch // t990 俯视基偏：+22° 世界系俯（顶面恒朝相机）+ 拖拽俯仰（t599）
                                         Model {
                                             // 仅整立方方块时显示（选中 mob → 只显 MobModel；选中床 → 只显
                                             //   BedModelGeometry 低 3D 床；t880 异形物品 → 只显 ItemShapeGeometry，
@@ -1009,7 +1017,7 @@ Item {
                                     //   ~2.4）撑满镜头仍整床可见（单格高立方 1.0 的对比基准）；旋转/拖拽与方块分支共用
                                     //   spinAngle/userPitch（床仍在 cubeView 内，DragHandler 手势不变）。
                                     Node { // t966 pitch 父（床分支）：恒铰链俯仰层，契约见整立方分支同款注释。
-                                        eulerRotation.x: -22 + root.userPitch
+                                        eulerRotation.x: 22 + root.userPitch // t990 俯视基偏（同整立方分支契约）
                                         Model {
                                             visible: root.selectedIsBed
                                             geometry: BedModelGeometry { blockId: root.selectedId }
@@ -1031,7 +1039,7 @@ Item {
                                     //   火把（13）形状细小（2/16 柱）→ scale 1.6 放到近立方视觉量级；其余 1.0
                                     //   （参数视觉钉死，待用户目视确认）。
                                     Node { // t966 pitch 父（异形分支）：恒铰链俯仰层，契约见整立方分支同款注释。
-                                        eulerRotation.x: -22 + root.userPitch
+                                        eulerRotation.x: 22 + root.userPitch
                                         Node { // t966 yaw 子：自转层
                                             visible: root.selectedIsItem3D
                                             // t880 火把细柱 1.6 放大先例 → t925 小体型族同款放大（近立方视觉
@@ -1112,7 +1120,7 @@ Item {
                                         //   中心（与旧单节点枢轴一致）。契约见整立方分支同款注释。
                                         visible: root.selectedIsMob
                                         position: Qt.vector3d(0, root.mobPreviewCentY(root.selectedMobType), 0)
-                                        eulerRotation.x: -22 + root.userPitch
+                                        eulerRotation.x: 22 + root.userPitch
                                         Node { // t966 yaw 子：自转/拖拽转台层
                                             scale: Qt.vector3d(root.mobPreviewScale(root.selectedMobType),
                                                               root.mobPreviewScale(root.selectedMobType),

@@ -29179,7 +29179,7 @@ Item {
                          && !rb966.contains(QStringLiteral("const faceSign"))
                          && !rb966.contains(QStringLiteral("Math.cos"))
                          && !rb966.contains(QStringLiteral("eulerRotation: Qt.vector3d(-22 + root.userPitch"))
-                         && rb966.count(QStringLiteral("eulerRotation.x: -22 + root.userPitch")) == 4
+                         && rb966.count(QStringLiteral("eulerRotation.x: 22 + root.userPitch")) == 4 // t990 演化（P-t949(d) 先例）：俯视基偏翻 +22，四分支拆层计数钉意图不变
                          && rb966.count(QStringLiteral("eulerRotation.y: root.spinAngle - 35")) == 4
                          && rb966.contains(QStringLiteral("t966 恒铰链俯仰"))
                          && rb966.contains(QStringLiteral("t966 纯线性定律"));
@@ -30048,6 +30048,214 @@ Item {
                              "tab, selectItem(pig egg) no longer produces the mob preview state, "
                              "and the single-selection funnel (stick then wolf -> selectedId 0) "
                              "unchanged";
+    }
+
+    // ── P-t990 方块默认视角回归俯视探针（R19.17 🅴；用户口径「方块默认视角从俯视变成仰视了，
+    //    之前不是这样——git -S 查回归源修复」）──
+    //    考古结论（git -S "-22" / "userPitch" / eulerRotation 全链）：基偏数值从未翻号——t458 初版
+    //    单节点 eulerRotation(-22, spinAngle-35, 0) → t599 加 userPitch → t820 翻拖拽符号 → t877
+    //    回退定稿 → t966 (8eef0f4) 拆 pitch 父/yaw 子时把 −22 逐字搬进世界系 pitch 父。回归源 =
+    //    **t966 拆层本身**：旧单节点图合成 Ry(yaw)·Rx(pitch) 中 −22° 作用于模型局部系，自转带动
+    //    倾角 → 顶/底面在自转中交替可见（翻滚观感，「见顶面」注释半相位为真）；世界系 pitch 父后
+    //    同一 −22° 恒定 = top 法线 z 分量 sin(−22°) < 0 恒背相机（相机 +Z 轴）→ **全自转相位恒见
+    //    底面 = 恒定仰视**——用户观感「从俯视变成仰视」如实归因于节点层级变化（间接因，非基偏
+    //    翻号/丢失）。修 = 四分支基偏 −22° → +22°（sin(+22°) > 0 = 顶面恒朝相机 = JEI 式恒定俯视
+    //    3/4）；−35 yaw 基偏与 t877 定稿拖拽定律逐字不动（上拖 → userPitch 增 → 更俯视，两基偏号
+    //    下方向均一致——P-t966 行为腿数学上两号皆绿，不改判）。
+    //    (a) 源码钉：四分支 `eulerRotation.x: 22 + root.userPitch` 计数 == 4 + "eulerRotation.x: -22"
+    //        绝迹 + t990 契约注释锚 + −35 yaw 子计数 == 4 + 纯线性拖拽定律行（定律未动）。
+    //    (b) rig 腿（t966/t989 装配法）：真 QQmlEngine 直载源树 ResourceBrowser.qml——
+    //        ① 逐支钉：四分支 pitch 父 Node（裸 QQuick3DNode，无自定义属性）读回 eulerRotation.x
+    //           == 22 ± 0.5（userPitch 默认 0）恰好 4 支；
+    //        ② 行为钉（渲染面）：可见 BlockCube Model 的 sceneRotation 读回——top 法线 (0,1,0) 旋后
+    //           z 分量 ∈ (0.30, 0.45)（sin22°≈0.375：号 + 量级双钉）在 spin 0/90/180/270 全相位恒
+    //           成立（旧图恒负 = 病面），bottom 法线 z 恒 < 0；上拖 +0.6°（t877 定稿符号）→ top z
+    //           增（更俯视）。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile rf990(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString rb990 = rf990.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf990.readAll()) : QString();
+        const bool okA990 = rb990.count(QStringLiteral("eulerRotation.x: 22 + root.userPitch")) == 4
+                         && !rb990.contains(QStringLiteral("eulerRotation.x: -22"))
+                         && rb990.contains(QStringLiteral("t990 俯视基偏"))
+                         && rb990.count(QStringLiteral("eulerRotation.y: root.spinAngle - 35")) == 4
+                         && rb990.contains(QStringLiteral("root.userPitch = Math.max(-60, Math.min(60, root.userPitch - dy * 0.6))"));
+        // (b) 行为 rig（t966/t989 装配法）。
+        static bool sT990TypesRegistered = false;
+        if (!sT990TypesRegistered) {
+            qmlRegisterType<Hotbar>("VoxelSandboxProbeT990", 1, 0, "Hotbar");
+            qmlRegisterType<ResourcePackManager>("VoxelSandboxProbeT990", 1, 0, "ResourcePackManager");
+            qmlRegisterType<BlockCube>("VoxelSandboxProbeT990", 1, 0, "BlockCube");
+            qmlRegisterType<ItemShapeGeometry>("VoxelSandboxProbeT990", 1, 0, "ItemShapeGeometry");
+            qmlRegisterType<BedModelGeometry>("VoxelSandboxProbeT990", 1, 0, "BedModelGeometry");
+            qmlRegisterType<MobModel>("VoxelSandboxProbeT990", 1, 0, "MobModel");
+            qmlRegisterType<EnchantBookBox>("VoxelSandboxProbeT990", 1, 0, "EnchantBookBox");
+            qmlRegisterType<MobBowGeometry>("VoxelSandboxProbeT990", 1, 0, "MobBowGeometry");
+            qmlRegisterType<UnitCube>("VoxelSandboxProbeT990", 1, 0, "UnitCube");
+            sT990TypesRegistered = true;
+        }
+        bool rigOk990 = false;
+        QString rigDiag990;
+        const QString uiDir990 = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath())
+                                     .filePath(QStringLiteral("../src/ui"));
+        const QString probeUi990 = QDir::temp().absoluteFilePath(
+                QStringLiteral("t990_qml_%1").arg(QCoreApplication::applicationPid()));
+        QDir().mkpath(probeUi990);
+        for (const QString f : { QStringLiteral("ResourceBrowser.qml"), QStringLiteral("ToolIcon.qml"),
+                                 QStringLiteral("MaterialIcon.qml"), QStringLiteral("DarkScrollBar.qml") }) {
+            QFile::remove(probeUi990 + QLatin1Char('/') + f);
+            QFile(uiDir990 + QLatin1Char('/') + f).copy(probeUi990 + QLatin1Char('/') + f);
+        }
+        {
+            const QStringList qmlFiles990 = QDir(probeUi990).entryList({ QStringLiteral("*.qml") }, QDir::Files);
+            for (const QString &f : qmlFiles990) {
+                QFile p(probeUi990 + QLatin1Char('/') + f);
+                if (!p.open(QIODevice::ReadOnly | QIODevice::Text))
+                    continue;
+                QString t = QString::fromUtf8(p.readAll());
+                p.close();
+                t.replace(QStringLiteral("import VoxelSandbox\n"),
+                          QStringLiteral("import VoxelSandboxProbeT990\n"));
+                if (p.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+                    p.write(t.toUtf8());
+                    p.close();
+                }
+            }
+        }
+        QQmlEngine engine990;
+        Hotbar hb990;
+        ResourcePackManager rp990;
+        QQuickWindow win990; // 永不 show（headless：Quick3D 节点变换传播不依赖渲染回路，t966 先例）
+        QQmlComponent comp990(&engine990,
+                              QUrl::fromLocalFile(probeUi990 + QStringLiteral("/ResourceBrowser.qml")));
+        QQuickItem *b990 = nullptr;
+        if (comp990.isError()) {
+            rigDiag990 = QStringLiteral("load: ") + comp990.errorString();
+        } else if ((b990 = qobject_cast<QQuickItem *>(comp990.create())) == nullptr) {
+            rigDiag990 = QStringLiteral("create failed");
+        } else {
+            b990->setParent(&engine990);
+            b990->setProperty("hotbar", QVariant::fromValue(&hb990));
+            b990->setProperty("resourcePack", QVariant::fromValue(&rp990));
+            b990->setProperty("atlasSource", QStringLiteral("qrc:/textures/atlas.png"));
+            b990->setProperty("packActive", false);
+            b990->setProperty("previewDragging", true); // 冻结自转动画（rig 显式驱动确定性）
+            b990->setProperty("selectedId", int(BR::Stone));
+            b990->setWidth(700);
+            b990->setHeight(500);
+            b990->setParentItem(win990.contentItem());
+            auto pump990 = []() {
+                for (int i = 0; i < 8; ++i)
+                    QCoreApplication::processEvents();
+            };
+            pump990();
+            // ① 逐支钉：pitch 父 = 裸 QQuick3DNode（四分支 pitch 父均无自定义属性 → 精确类名），
+            //    eulerRotation.x ≈ 22（yaw 子/无关 Node x≈0）恰好 4 支（生物分支 Node 亦含其中）。
+            int pitchParents990 = 0;
+            double xSum990 = 0.0;
+            const auto nodes990 = b990->findChildren<QObject *>();
+            for (QObject *nd : nodes990) {
+                if (std::strcmp(nd->metaObject()->className(), "QQuick3DNode") != 0)
+                    continue;
+                const QVector3D e = nd->property("eulerRotation").value<QVector3D>();
+                if (qAbs(double(e.x()) - 22.0) < 0.5) {
+                    ++pitchParents990;
+                    xSum990 += double(e.x());
+                }
+            }
+            // ② 行为钉：可见 BlockCube Model 的 sceneRotation 下 top/bottom 法线朝向（渲染面）。
+            QObject *cube990 = nullptr;
+            for (QObject *m : nodes990) {
+                if (std::strcmp(m->metaObject()->className(), "QQuick3DModel") != 0)
+                    continue;
+                if (!m->property("visible").toBool())
+                    continue;
+                QObject *geo = m->property("geometry").value<QObject *>();
+                if (geo && std::strcmp(geo->metaObject()->className(), "BlockCube") == 0) {
+                    cube990 = m;
+                    break;
+                }
+            }
+            if (pitchParents990 != 4) {
+                rigDiag990 = QStringLiteral("pitch parent count %1").arg(pitchParents990);
+            } else if (!cube990) {
+                rigDiag990 = QStringLiteral("visible BlockCube model not found");
+            } else {
+                rigOk990 = true;
+                const double avgX990 = xSum990 / pitchParents990;
+                if (qAbs(avgX990 - 22.0) > 1e-6) {
+                    rigOk990 = false;
+                    qInfo().noquote() << "  t990 diag: pitch parent avg x" << avgX990;
+                }
+                // 全自转相位：top 法线 z ∈ (0.30, 0.45)（sin22°≈0.375 号 + 量级双钉；旧图恒负）。
+                const double kPhases990[4] = { 0.0, 90.0, 180.0, 270.0 };
+                for (double ph : kPhases990) {
+                    b990->setProperty("spinAngle", ph);
+                    b990->setProperty("userPitch", 0.0);
+                    pump990();
+                    const QQuaternion q = cube990->property("sceneRotation").value<QQuaternion>();
+                    const double topZ = double(q.rotatedVector(QVector3D(0, 1, 0)).z());
+                    const double botZ = double(q.rotatedVector(QVector3D(0, -1, 0)).z());
+                    if (!(topZ > 0.30 && topZ < 0.45 && botZ < 0.0)) {
+                        rigOk990 = false;
+                        qInfo().noquote() << "  t990 diag: phase" << ph << "topZ" << topZ << "botZ" << botZ;
+                    }
+                }
+                // 拖拽定律照旧：上拖（userPitch +0.6，t877 定稿符号）→ 更俯视（top z 增）。
+                b990->setProperty("spinAngle", 0.0);
+                b990->setProperty("userPitch", 0.0);
+                pump990();
+                double topZ0 = double(cube990->property("sceneRotation").value<QQuaternion>()
+                                          .rotatedVector(QVector3D(0, 1, 0)).z());
+                b990->setProperty("userPitch", 0.6);
+                pump990();
+                double topZup = double(cube990->property("sceneRotation").value<QQuaternion>()
+                                           .rotatedVector(QVector3D(0, 1, 0)).z());
+                if (!(topZup > topZ0)) {
+                    rigOk990 = false;
+                    qInfo().noquote() << "  t990 diag: up-drag topZ" << topZ0 << "->" << topZup;
+                }
+            }
+        }
+        QDir(probeUi990).removeRecursively();
+        const bool okB990 = rigOk990;
+        ok = okA990 && okB990;
+        if (!ok)
+            qInfo().noquote() << "  [t990 diag] sourcePins" << okA990 << "rig" << okB990 << rigDiag990;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t990 block default view restored to top-down (user: 'the block default "
+                             "view changed from top-down to bottom-up, it was not like this before'): "
+                             "git -S archaeology (the -22/userPitch/eulerRotation chain across t458/"
+                             "t599/t820/t877/t966) proves the base-tilt VALUE never flipped sign - "
+                             "the regression source is the t966 SPLIT itself: in the old single-node "
+                             "graph Ry(yaw)*Rx(pitch) the -22 deg tilt acted in the model-local frame "
+                             "so the spin carried it around and the top/bottom faces alternated "
+                             "visibility (a tumbling look; the 'sees the top face' comment was true "
+                             "for half the phase); once t966 moved the tilt into a world-frame pitch "
+                             "parent the same constant became absolute - the top-face normal's z "
+                             "component sin(-22 deg) is permanently negative (away from the +Z-axis "
+                             "camera), so EVERY spin phase shows the underside = a constant bottom-up "
+                             "view, the user's symptom honestly attributed to the node-hierarchy "
+                             "change; fix = flip the base -22 -> +22 on all four preview branches "
+                             "(sin(+22 deg) > 0 = top face always fronting the camera = the JEI-style "
+                             "constant top-down three-quarter view), the -35 yaw offset and the "
+                             "t877 user-approved drag law stay byte-identical (up-drag raises "
+                             "userPitch = more top-down under either base sign, so the P-t966 "
+                             "behavioral legs are green under both with no re-judgment; its base "
+                             "count pin evolved lawfully per the P-t949(d) precedent); legs: source "
+                             "pins (four split pitch bindings with +22, the -22 form extinct "
+                             "file-wide, the t990 contract anchor, four yaw children, the pure "
+                             "linear drag law line) plus a real-QQmlEngine rig reading the real "
+                             "scene graph back - exactly four bare QQuick3DNode pitch parents at "
+                             "eulerRotation.x == 22 (one per branch), and the visible BlockCube "
+                             "Model's sceneRotation mapped by the top/bottom face normals: top "
+                             "normal z within (0.30, 0.45) = sin22 magnitude AND sign, bottom "
+                             "normal z negative, invariant across spin 0/90/180/270 (the old graph "
+                             "was constant-negative), and an up-drag of +0.6 deg increases the top "
+                             "normal z (more top-down, the t877 contract intact)";
     }
 
     // ── P-t968 燃烬者两修探针（R19.17 🅴；用户第五轮口径「头×0.6 再缩；烈焰棒上下错开一点（不在同一
