@@ -24354,7 +24354,8 @@ Item {
                 }
             }
         }
-        {   // (f) 源码钉：单根锚派生形态 + QML overlay 成对契约新位。
+        {   // (f) 源码钉：单根锚派生形态 + QML overlay 成对契约新位（眼/尾；项圈 overlay 已 t986
+            //   收编进 MobModel 几何 collarVisible，其成对位钉退役 → 移交 P-t986 环带钉）。
             const QString exeDir = QCoreApplication::applicationDirPath();
             const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
             auto readSrc = [&root](const QString &rel) -> QString {
@@ -24384,13 +24385,11 @@ Item {
             const QString mn = readSrc(QStringLiteral("src/ui/Main.qml"));
             const QString rb = readSrc(QStringLiteral("src/ui/ResourceBrowser.qml"));
             const bool okMn = mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0, 0.14, 0.47)"))
-                && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0, 0.35, -0.175)"))
                 && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(-0.08, 0.40, -0.49)"))
                 && mn.contains(QStringLiteral("wolfSit === 1 ? Qt.vector3d(0.08, 0.40, -0.49)"))
                 && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(-0.07, 0.36, -0.42)"))
                 && mn.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0.07, 0.36, -0.42)"));
             const bool okRb = rb.contains(QStringLiteral("? Qt.vector3d(0, 0.14, 0.47) : Qt.vector3d(0, 0.16, 0.38)"))
-                && rb.contains(QStringLiteral("? Qt.vector3d(0, 0.35, -0.175) : Qt.vector3d(0, 0.16, -0.30)"))
                 && rb.contains(QStringLiteral("? Qt.vector3d(-0.08, 0.40, -0.49)"))
                 && rb.contains(QStringLiteral("? Qt.vector3d(0.08, 0.40, -0.49)"))
                 && rb.contains(QStringLiteral("? Qt.vector3d(-0.07, 0.36, -0.42)"))
@@ -24422,6 +24421,156 @@ Item {
                              " (e) standing-pose silhouette bounds unchanged (zero regression), (f) source"
                              " pins for the shared-root derivation form and the Main.qml/ResourceBrowser.qml"
                              " eye/collar/tail overlay pair-contract positions"
+                             ;
+    }
+
+    // ── P-t986 项圈一圈探针（驯服狼/豹猫「脖子完整一圈项链」；旧 t831/t963 overlay 退役）──
+    //    用户第五轮口径「差不多看到两个红点的样子」根因：旧单横扁盒 overlay 心 z=-0.30 埋进头盒
+    //    z∈[-0.60,-0.24] 范围内，只露 x ±0.03 两侧凸块（侧视两个红点）。修法 = 项圈收编 MobModel
+    //    几何（collarVisible 属性 + 独立 subset 1）：四薄板围合**裸颈段**（body 前缘与头后缘之间
+    //    暴露颈区，band z[-0.26,-0.20]）环绕颈部横截面 → 任意 yaw 可辨完整一圈；三消费端（实体
+    //    delegate / 图鉴预览 / 刷怪笼迷你）同一几何，QML 不再复刻 overlay 盒（t782 同源）。
+    //    探针（MobModel 直编读 vertexData，P-t946/P-t968 先例；发射序契约 = 身体盒在前、环带 4 盒
+    //    追加尾部 → 环带顶点 = vCount(true) − vCount(false) 差集，恰 4 盒 × 24 = 96）：
+    //    (a) 狼站态：+96 顶点且绕颈轴（环带平面 = XY）8×45° 扇区 ≥7 非空（矩形环四边+四角充满全
+    //        扇区；「两红点」形态只占 2 扇区必红）+ 质心 = 站姿裸颈段心 (0.02,-0.23)；
+    //    (b) 豹猫站态：同 (a)（颈围镜像数值系，质心同位）；
+    //    (c) 坐态随移：狼/豹猫 sitPose=true 环带顶点质心 = 同一根锚链派生位（狼 sitRot(0.02,-0.23)
+    //        绕 (-0.14,0.36) 旋 18° = (0.194,-0.152)；豹猫绕 (-0.12,0.32) = (0.183,-0.160)）且扇区
+    //        ≥7（坐态仍整圈——QML overlay 时代的「随移成对契约」由几何单源派生取代）；
+    //    (d) 源码钉：mobmodel.cpp 环带发射标记「t986 项圈环带」恰 4 处（狼/豹猫 × 坐/站）；
+    //        Main.qml collarVisible 绑定 == 2（狼+豹猫）、ResourceBrowser.qml ≥1；双 QML 文件零
+    //        旧 overlay 残留（坐姿位 vector3d(0,0.35,-0.175)/(0,0.32,-0.19) + 横扁环带 scale
+    //        (0.42,0.06,0.07)/(0.36,0.05,0.06) 四串全绝迹 = 「一处几何不复制」tripwire）。
+    {
+        bool ok = true;
+        QString diag;
+        struct RingV { float x, y, z; };
+        // 环带顶点收集：vCount(true) − vCount(false) 必恰 96（发射序契约；≠96 = 盒数/顶点格式漂移）。
+        //   MobModel 直编（顶点 stride 5 float = pos3+uv2；本探针只数顶点/读坐标，不读索引）。
+        auto ringOf = [](int mobType, bool sit, bool collar, std::vector<RingV> &out) -> int {
+            MobModel g;
+            g.setMobType(mobType);
+            if (sit) g.setSitPose(true);
+            g.setCollarVisible(collar);
+            const QByteArray vd = g.vertexData();
+            const float *vp = reinterpret_cast<const float *>(vd.constData());
+            const int total = int(vd.size()) / 20;
+            out.clear();
+            if (collar) {
+                for (int i = total - 96; i < total; ++i)
+                    out.push_back({vp[i * 5], vp[i * 5 + 1], vp[i * 5 + 2]});
+            }
+            return total;
+        };
+        // 环带平面 = XY（颈轴沿 Z）：绕 (0,cy) 8×45° 扇区占用数（矩形环解析值 8/8，「两红点」≤2）。
+        auto ringBins = [](const std::vector<RingV> &ring, float cy) {
+            int mask = 0;
+            for (const RingV &v : ring) {
+                float deg = std::atan2(v.y - cy, v.x) * 57.2957795f + 90.0f;
+                if (deg < 0.0f) deg += 360.0f;
+                int b = int(deg / 45.0f);
+                if (b > 7) b = 7;
+                mask |= 1 << b;
+            }
+            int n = 0;
+            for (int b = 0; b < 8; ++b) n += (mask >> b) & 1;
+            return n;
+        };
+        auto checkRing = [&](const char *tag, int mobType, bool sit, float cyExp, float czExp) {
+            std::vector<RingV> ring, none;
+            const int base = ringOf(mobType, sit, false, none);
+            const int with = ringOf(mobType, sit, true, ring);
+            const int extra = with - base;
+            if (extra != 96 || !none.empty()) {
+                ok = false;
+                diag += QStringLiteral(" %1 extra=%2 base0=%3").arg(tag).arg(extra).arg(int(none.empty()));
+            } else {
+                const int bins = ringBins(ring, cyExp);
+                if (bins < 7) {
+                    ok = false;
+                    diag += QStringLiteral(" %1 bins=%2").arg(tag).arg(bins);
+                }
+                float sx = 0, sy = 0, sz = 0;
+                for (const RingV &v : ring) { sx += v.x; sy += v.y; sz += v.z; }
+                sx /= float(ring.size()); sy /= float(ring.size()); sz /= float(ring.size());
+                if (std::abs(sx) > 0.01f || std::abs(sy - cyExp) > 0.04f || std::abs(sz - czExp) > 0.04f) {
+                    ok = false;
+                    diag += QStringLiteral(" %1 c=(%2,%3,%4)").arg(tag).arg(sx, 0, 'f', 3)
+                                .arg(sy, 0, 'f', 3).arg(sz, 0, 'f', 3);
+                }
+            }
+        };
+        checkRing("wolf", 10, false, 0.02f, -0.23f);   // (a) 站态整圈 + 裸颈段心
+        checkRing("ocelot", 11, false, 0.02f, -0.23f); // (b) 豹猫镜像
+        checkRing("wolfSit", 10, true, 0.194f, -0.152f);   // (c) 坐态链派生随移
+        checkRing("ocelotSit", 11, true, 0.183f, -0.160f);
+        {   // (d) 源码钉（t880/t902/t931 先例——QML 侧无行为级断言面）。
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            auto readSrc = [&root](const QString &rel) -> QString {
+                QFile f(root + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            auto countSub = [](const QString &hay, const QString &needle) {
+                int n = 0;
+                for (int p = hay.indexOf(needle); p >= 0; p = hay.indexOf(needle, p + needle.size()))
+                    ++n;
+                return n;
+            };
+            const QString mm = readSrc(QStringLiteral("src/Renderer/mobmodel.cpp"));
+            const QString mn = readSrc(QStringLiteral("src/ui/Main.qml"));
+            const QString rb = readSrc(QStringLiteral("src/ui/ResourceBrowser.qml"));
+            // 4 处发射点（狼/豹猫 × 坐/站）以环带边界赋值行为准（注释词会复用于说明段）。
+            const int emit4 = countSub(mm, QStringLiteral("collarIdxStart = int(idx.size());"));
+            const int mnBind = countSub(mn, QStringLiteral("collarVisible:"));
+            const int rbBind = countSub(rb, QStringLiteral("collarVisible:"));
+            const bool gone = !mn.contains(QStringLiteral("Qt.vector3d(0, 0.35, -0.175)"))
+                && !rb.contains(QStringLiteral("Qt.vector3d(0, 0.35, -0.175)"))
+                && !mn.contains(QStringLiteral("Qt.vector3d(0, 0.32, -0.19)"))
+                && !rb.contains(QStringLiteral("Qt.vector3d(0, 0.32, -0.19)"))
+                && !mn.contains(QStringLiteral("Qt.vector3d(0.42, 0.06, 0.07)"))
+                && !rb.contains(QStringLiteral("Qt.vector3d(0.42, 0.06, 0.07)"))
+                && !mn.contains(QStringLiteral("Qt.vector3d(0.36, 0.05, 0.06)"))
+                && !rb.contains(QStringLiteral("Qt.vector3d(0.36, 0.05, 0.06)"));
+            // (e) IP 门自证：项圈 = 程序自绘几何 + 纯色材质，零 MC 资产接线——三个实现文件对
+            //     MC 原版项圈贴图名（wolf_collar/cat_collar，原版 textures/entity 下文件名）零引用；
+            //     materials[1]/mobCollarMat 均无 baseColorMap → pack 命中与否项圈恒红，不消费任何包贴图
+            //     （dev 包 docs/Default HD 附带 wolf_collar.png 也不读——仓库不新增任何资产文件）。
+            const bool ipFree = !mm.contains(QStringLiteral("wolf_collar"))
+                && !mm.contains(QStringLiteral("cat_collar"))
+                && !mn.contains(QStringLiteral("wolf_collar"))
+                && !mn.contains(QStringLiteral("cat_collar"))
+                && !rb.contains(QStringLiteral("wolf_collar"))
+                && !rb.contains(QStringLiteral("cat_collar"));
+            if (emit4 != 4 || mnBind != 2 || rbBind < 1 || !gone || !ipFree) {
+                ok = false;
+                diag += QStringLiteral(" pins mm=%1 mn=%2 rb=%3 gone=%4 ip=%5")
+                            .arg(emit4).arg(mnBind).arg(rbBind).arg(int(gone)).arg(int(ipFree));
+            }
+        }
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t986 diag]" << diag;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t986 full collar ring: the old single flat-box overlay sat at z=-0.30,"
+                             " INSIDE the head box z-range, so only the two x-side tabs poked out"
+                             " (user: 'you can basically just see two red dots'). The collar now"
+                             " lives in MobModel geometry (collarVisible + dedicated subset 1): four"
+                             " thin slabs wrap the BARE neck segment (band z[-0.26,-0.20] between"
+                             " body front and head rear) around the neck cross-section, visible as a"
+                             " complete ring from any yaw. Verified on REAL mesh vertices (MobModel"
+                             " direct build): collar adds exactly 96 verts in all four pose/species"
+                             " combos (wolf/ocelot x stand/sit) spread over >=7 of 8 45-deg sectors"
+                             " around the neck axis (two-dot form spans <=2), centroid at the bare-neck"
+                             " anchor (0.02,-0.23) or the sit-chain-derived spot (0.194,-0.152 /"
+                             " 0.183,-0.160); source pins: single-geometry emission x4 in mobmodel.cpp,"
+                             " collarVisible bindings in Main.qml x2 + ResourceBrowser (t782"
+                             " three-consumer sharing), zero old overlay leftovers (no duplicate box"
+                             " lists), and zero MC-asset wiring: the collar is procedural geometry"
+                             " with a mapless solid-color material - wolf_collar/cat_collar texture"
+                             " names are referenced by no implementation file (IP gate: nothing"
+                             " shipped or consumed from the vanilla entity texture set)"
                              ;
     }
 
@@ -28091,17 +28240,21 @@ Item {
                 && sdL963 >= 15.0
                 && dark963 <= 5
                 && light963 >= 8;
-        // (c) 项圈两处存在钉 + ocatTamed 单源钉。
-        const bool okC963 = mn963.count(QStringLiteral("visible: ocatTamed")) == 1
+        // (c) 项圈两处存在钉 + ocatTamed 单源钉（t986 迁移：项圈从 overlay 盒改 MobModel 几何
+        //     collarVisible——单源语义不变：游戏内项圈直挂 ocatTamed 唯一 + ocelotTamedAt 直读恰 1
+        //     + 环带几何注释锚；图鉴门挂 mobCollarActive（= mobTamedActive 同一拨杆）+ 旧 overlay 位
+        //     串绝迹（P-t986 gone 钉兜底）；图鉴单源门族计数 5 = 贴图源/pack 例外/双眼/形态注
+        //     —— 猫项圈 overlay 门已随 t986 退役）。
+        const bool okC963 = mn963.count(QStringLiteral("collarVisible: ocatTamed")) == 1
                          && mn963.count(QStringLiteral("entityManager.ocelotTamedAt(index)")) == 1
-                         && mn963.contains(QStringLiteral("ocatSit === 1 ? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)"))
-                         && mn963.contains(QStringLiteral("scale: Qt.vector3d(0.36, 0.05, 0.06)"))
-                         && mn963.contains(QStringLiteral("t963 驯服项圈"))
-                         && rb963.count(QStringLiteral("visible: root.selectedMobFromSection === 11 && root.mobTamedPreview")) == 2
-                         //   （review0830 #23：门左操作数改单源 selectedMobFromSection —— 同形 2 处 =
-                         //    猫项圈 Model + 驯服猫形态注 Text；双源 selectedMobType 门在 review0830-23 块绝迹钉）
-                         && rb963.contains(QStringLiteral("? Qt.vector3d(0, 0.32, -0.19) : Qt.vector3d(0, 0.14, -0.30)"))
-                         && rb963.contains(QStringLiteral("t963 驯服猫红项圈"));
+                         && mn963.contains(QStringLiteral("t986 驯服项圈环带：几何内裸颈段四薄板围合一圈"))
+                         && mn963.contains(QStringLiteral("t963 驯服项圈 → t986 整删 overlay"))
+                         && rb963.count(QStringLiteral("root.selectedMobFromSection === 11 && root.mobTamedPreview")) == 5
+                         //   （review0830 #23：门左操作数改单源 selectedMobFromSection —— t986 起同形 5 处 =
+                         //    贴图源 + pack 例外 + 眼×2 + 形态注；猫项圈 overlay 门随 t986 退役 → mobCollarActive）
+                         && rb963.count(QStringLiteral("readonly property bool mobCollarActive")) == 1
+                         && rb963.contains(QStringLiteral("collarVisible: mobPreviewModel.mobCollarActive"))
+                         && rb963.contains(QStringLiteral("t920/t963 驯服狼·猫红项圈 → t986 整删 overlay"));
         ok = okA963 && okB963 && okC963;
         if (!ok)
             qInfo().noquote() << "  [t963 diag] texSrc" << okA963 << "pngData" << okB963
@@ -28143,13 +28296,15 @@ Item {
     //    `selectedMobFromSection`（与贴图门 :253 口径逐字一致）。
     //    (a) 门式互对拍 sync pin：全文双源驯服门形态（selectedMobType === 1X && mobTamedPreview）
     //        绝迹；单源驯服门（selectedMobFromSection === 1X && mobTamedPreview）逐处计数
-    //        （:253 贴图 / :1171 pack 例外 / :1380 狼项圈 / :1397 猫项圈 / :1439+:1449 眼 /
-    //        :1771 形态注）——同文件同类门必须同一左操作数，回潮即红。
+    //        （:254 贴图 / :1256 pack 例外 / :1433+:1445 眼 / :1765 形态注——狼/猫项圈门已随 t986
+    //        退役：项圈收编 MobModel 几何，门改挂 mobCollarActive（= mobTamedActive 同一拨杆，
+    //        selectedMobTameable 单源）→ 单源面只增不减，回潮即红）。
     //    (b) 切走序列行为腿（真 rig，t967 装配法）：真 QQmlEngine 直载源树 ResourceBrowser.qml，
     //        驱动状态机 selectMob(豹猫) → mobTamedPreview=true → selectItem(豹猫蛋 0x24A)：
-    //        驯服态猫项圈 Model visible=true + 贴图含 tabby；切蛋后项圈 visible=false（修前恒 true
-    //        = 腿有判别力）+ 贴图回野生 + 眼 overlay 仍在（蛋路径程序贴图无脸纹 = 反空转正锚）；
-    //        狼项圈（蛋 0x249）镜像腿（review-0829 #7 遗留同步闭合）。
+    //        驯服态**预览 MobModel collarVisible=true**（t986 起项圈=几何旗标，旧 overlay Model
+    //        退役）+ 贴图含 tabby；切蛋后 collarVisible=false（修前恒 true = 腿有判别力）+ 贴图回
+    //        野生 + 眼 overlay 仍在（蛋路径程序贴图无脸纹 = 反空转正锚）；狼（蛋 0x249）镜像腿
+    //        （review-0829 #7 遗留同步闭合）。
     {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
@@ -28158,9 +28313,11 @@ Item {
         const QString rbR23 = rfR23.open(QIODevice::ReadOnly) ? QString::fromUtf8(rfR23.readAll()) : QString();
         const bool okAR23 = rbR23.count(QStringLiteral("root.selectedMobType === 10 && root.mobTamedPreview")) == 0
                          && rbR23.count(QStringLiteral("root.selectedMobType === 11 && root.mobTamedPreview")) == 0
-                         && rbR23.count(QStringLiteral("root.selectedMobFromSection === 11 && root.mobTamedPreview")) == 6
-                         && rbR23.count(QStringLiteral("root.selectedMobFromSection === 10 && root.mobTamedPreview")) == 1
+                         && rbR23.count(QStringLiteral("root.selectedMobFromSection === 11 && root.mobTamedPreview")) == 5
+                         && rbR23.count(QStringLiteral("root.selectedMobFromSection === 10 && root.mobTamedPreview")) == 0
                          && rbR23.contains(QStringLiteral("!(root.selectedMobFromSection === 11 && root.mobTamedPreview)"))
+                         && rbR23.count(QStringLiteral("readonly property bool mobCollarActive")) == 1
+                         && rbR23.contains(QStringLiteral("collarVisible: mobPreviewModel.mobCollarActive"))
                          && rbR23.contains(QStringLiteral("review0830 #23 单源"));
         ok = ok && okAR23;
 
@@ -28254,12 +28411,17 @@ Item {
                     return QMetaObject::invokeMethod(obj, method, Q_ARG(QVariant, args.at(0)), Q_ARG(QVariant, args.at(1)));
                 return false;
             };
-            QObject *catCollar = overlayModelR23(QColor(0xc2, 0x28, 0x28), QVector3D(0.36f, 0.05f, 0.06f));
-            QObject *wolfCollar = overlayModelR23(QColor(0xc2, 0x28, 0x28), QVector3D(0.42f, 0.06f, 0.07f));
             QObject *catEye = overlayModelR23(QColor(0x1a, 0x1a, 0x1a), QVector3D(0.035f, 0.04f, 0.02f));
-            if (!catCollar || !wolfCollar || !catEye) {
+            // t986 迁移：项圈 overlay Model 退役 → 拨杆面改读预览 MobModel 的 collarVisible 几何旗标
+            //   （单源拨杆不变：mobCollarActive = mobTamedActive = selectedMobTameable × mobTamedPreview）。
+            //   类名前缀匹配：MobModel 块内声明 rodClock（t782）→ 动态元对象 "MobModel_QML_N"。
+            QObject *mobPreviewR23 = nullptr;
+            for (QObject *o : bR23->findChildren<QObject *>()) {
+                if (std::strncmp(o->metaObject()->className(), "MobModel", 8) == 0) { mobPreviewR23 = o; break; }
+            }
+            if (!mobPreviewR23 || !catEye) {
                 rigOkR23 = false;
-                rigDiagR23 = QStringLiteral("overlay models not found");
+                rigDiagR23 = QStringLiteral("mob model / eye overlay not found");
             } else {
                 auto pumpR23 = []() {
                     for (int i = 0; i < 8; ++i)
@@ -28268,8 +28430,7 @@ Item {
                 auto failR23 = [&](const char *tag) {
                     rigOkR23 = false;
                     qInfo().noquote() << "  review0830-23 diag:" << tag
-                                      << "catCollarVis" << catCollar->property("visible").toBool()
-                                      << "wolfCollarVis" << wolfCollar->property("visible").toBool()
+                                      << "collarVisible" << mobPreviewR23->property("collarVisible").toBool()
                                       << "eyeVis" << catEye->property("visible").toBool()
                                       << "tex" << bR23->property("selectedMobTexSource").toString();
                 };
@@ -28278,7 +28439,7 @@ Item {
                 qmlCallR23(bR23, "selectMob", { QVariant(int(EntityManager::MobOcelot)), QVariant(QStringLiteral("豹猫")) });
                 bR23->setProperty("mobTamedPreview", true);
                 pumpR23();
-                const bool tamedCat = catCollar->property("visible").toBool()
+                const bool tamedCat = mobPreviewR23->property("collarVisible").toBool()
                                   && bR23->property("selectedMobTexSource").toString().contains(QStringLiteral("mob_cat_tabby"));
                 if (!tamedCat) failR23("tamedCat state");
                 qmlCallR23(bR23, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggOcelotId)) });
@@ -28286,17 +28447,17 @@ Item {
                 const bool afterEgg = bR23->property("selectedId").toInt() == int(RecipeRegistry::SpawnEggOcelotId)
                                   && bR23->property("selectedMobFromSection").toInt() == -1
                                   && bR23->property("selectedMobType").toInt() == int(EntityManager::MobOcelot)
-                                  && !catCollar->property("visible").toBool()
+                                  && !mobPreviewR23->property("collarVisible").toBool()
                                   && !bR23->property("selectedMobTexSource").toString().contains(QStringLiteral("mob_cat_tabby"))
                                   && catEye->property("visible").toBool(); // 蛋路径程序贴图无脸纹 → 眼仍在（反空转正锚）
                 if (!afterEgg) failR23("ocelot egg switch");
                 // 狼镜像（review-0829 #7 遗留同病灶）：拨杆仍真 → 狼项圈显 → 切狼蛋 → 残留必须清。
                 qmlCallR23(bR23, "selectMob", { QVariant(int(EntityManager::MobWolf)), QVariant(QStringLiteral("狼")) });
                 pumpR23();
-                if (!wolfCollar->property("visible").toBool()) failR23("tamedWolf state");
+                if (!mobPreviewR23->property("collarVisible").toBool()) failR23("tamedWolf state");
                 qmlCallR23(bR23, "selectItem", { QVariant(int(RecipeRegistry::SpawnEggWolfId)) });
                 pumpR23();
-                if (wolfCollar->property("visible").toBool()) failR23("wolf egg switch");
+                if (mobPreviewR23->property("collarVisible").toBool()) failR23("wolf egg switch");
             }
         }
         QDir(probeUiR23).removeRecursively();
@@ -28319,11 +28480,14 @@ Item {
                              "single-source caliber (selectedMobFromSection === N && mobTamedPreview); "
                              "legs: a same-file gate-family sync pin (dual-source tamed-gate forms "
                              "extinct, single-source forms counted at every consumer: texture source, "
-                             "pack-UV exception, wolf collar, cat collar, both eye overlays, the "
-                             "tamed-coat note) and a real-QmlEngine rig driving the user's sequence "
+                             "pack-UV exception, both eye overlays, the tamed-coat note; the wolf/cat "
+                             "collar gates retired to the t986 geometry flag mobCollarActive -"
+                             "collarVisible, same tamed lever, single-source face preserved) and a "
+                             "real-QmlEngine rig driving the user's sequence "
                              "through the real ResourceBrowser.qml (selectMob -> mobTamedPreview=true "
-                             "-> selectItem egg): the tamed state shows the collar + tabby texture, "
-                             "the egg switch must drop the collar Model's visible flag to false, "
+                             "-> selectItem egg): the tamed state raises the preview MobModel's "
+                             "collarVisible flag + tabby texture, "
+                             "the egg switch must drop collarVisible to false, "
                              "return the texture to wild, and keep the eye overlays on (the wild "
                              "procedural coat has no face pattern - an anti-vacuity anchor proving "
                              "the leg is not trivially everything-hidden), mirrored for the wolf "
@@ -29092,7 +29256,9 @@ Item {
                 QStringList geoms;
                 const auto models = b967->findChildren<QObject *>();
                 for (QObject *m : models) {
-                    if (std::strcmp(m->metaObject()->className(), "QQuick3DModel") != 0)
+                    // t986 注：Model 自身带声明属性（预览 Model 的 mobCollarActive/材质路由属性）→
+                    //   动态元对象类名 "QQuick3DModel_QML_N"（同注① 的 Node 面）→ 只能前缀匹配。
+                    if (std::strncmp(m->metaObject()->className(), "QQuick3DModel", 13) != 0)
                         continue;
                     if (!m->property("visible").toBool() || !effVis(m))
                         continue;
