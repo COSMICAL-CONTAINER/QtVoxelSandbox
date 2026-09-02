@@ -32338,6 +32338,164 @@ Item {
         }
     }
 
+    // ── P-t979 猪两修（浅水淹没度溺水 + 掉落表；专用局部世界 w979a/b：围栏平台 + 浅水档水洼/盖顶水槽）──
+    //    根因：t828 溺水头判（旧）= floor(pos.y+halfH·0.8) 处**整格** blockAt==Water 布尔，无视水位档
+    //    （state 7=液面 1/8、state 6=液面 2/8，t197 语义）。猪 halfH=0.45 → 口鼻线在脚位上方 0.81 < 1 格
+    //    → 站 1/8 水洼里口鼻线仍落在脚位水格 → 判「没顶」启动呼吸耗尽（用户实测「脚踝水深、往上跳还是
+    //    淹死」；「往上跳」= 同一误判驱动的 t923 浮力浅水空跳）。修 = t979 mobSnoutSubmergedInWater 单一
+    //    权威（口鼻线 vs 格内液面连续比较；满格水源液面=格顶 → 与旧判在源块水等价 → t828/t923 既有探针
+    //    不变）。判据差异只在**连续淹没**窗显形（出水即双计时器清零）：开放水洼猪数秒走出、新旧两版都不
+    //    挨罚 → 判别腿用**盖顶水槽**（1 高走廊 + 脚踝水全覆盖：猪被天花板钉住口鼻、无法出水——真实对应
+    //    矮桥洞 / 隧道积水困死；旧码持续整格淹没 15s 必红）。
+    //    (a) 开放水洼腿 ×2（1/8=state7、1/4=state6）：围栏平台上 8 头猪各站一格孤立水洼（无 state 梯度 →
+    //        流推不扰），20s：全员满血 + ≥6/8 已走出水洼格（wander 脱困不受罚不压制；每头 P(20s 全 idle)
+    //        ≈0.25⁴≈0.4%，8 头全不动 ≈ 6e-21）。
+    //    (b) 盖顶水槽腿 ×2（1/8、1/4）：1 宽走廊脚踝水全覆盖 + 石盖（口鼻恒被钉在水面上方 0.9 格内），
+    //        4 头猪 20s 全员满血（旧码：头格恒水 → 15s 起 1HP/s → 3HP 猪死 → 恰红）。
+    //    (c) 没顶腿：3 深水源柜 + 石盖（t828 同款钉水法）钉住猪 → 溺水链仍有效（20s 内 3HP 猪死或 ≤1）。
+    //    (d) 源码钉：entitymanager.cpp 含 mobSnoutSubmergedInWater 谓词（定义 + 溺水/浮面/resting 破除
+    //        三消费 ≥4 处）+ 液面公式 (8 - st)；Main.qml 猪分支掉落表修正钉（熟排/生排火焰链保留 + t473 猪皮革移除、
+    //        牛皮革保留——掉落表在 QML 呈现层，headless 无 spawnItem 可断行为 → 源码钉先例 t880/t997）。
+    //    阴性轮（行为关键必须）：回退溺水判据为旧整格布尔（浮面/resting 保持新谓词）→ (b) 盖顶水槽腿恰红
+    //        （4 头全死：口鼻被钉持续淹没复现）→ 复原绿。
+    {
+        const int kPigMax = 3;
+        bool ok = true;
+        int exitedTotal = 0; // (a) 合计脱困头数（诊断输出用）
+        int trenchAlive = 0; // (b) 盖顶水槽存活满血头数（诊断输出用）
+        for (int leg = 0; leg < 2 && ok; ++leg) { // leg0 = 1/8(state7)、leg1 = 1/4(state6)
+            const quint8 puddleState = leg == 0 ? quint8(7) : quint8(6);
+            World w979;
+            w979.setWidth(44); w979.setDepth(44); w979.setHeight(96); w979.setSeed(21);
+            // 围栏平台：y84 石板（8..38²）+ y85..86 边墙（防 wander 出平台坠地形摔伤假红；猪无跳跃 AI）。
+            for (int x = 8; x < 38; ++x)
+                for (int z = 8; z < 38; ++z) w979.setBlock(x, 84, z, BR::Stone, 0);
+            for (int x = 8; x < 38; ++x)
+                for (int z = 8; z < 38; ++z) {
+                    const bool wall = (x == 8 || x == 37 || z == 8 || z == 37);
+                    if (wall)
+                        for (int y = 85; y <= 86; ++y) w979.setBlock(x, y, z, BR::Stone, 0);
+                }
+            // (a) 8 个孤立开放水洼（4×2 间隔布点；脚位格水位档由 state 给：1/8=7、1/4=6；探针不 tick
+            //     world → 流体静置）。
+            int puddles[8][2];
+            int n = 0;
+            for (int px = 0; px < 4; ++px)
+                for (int pz = 0; pz < 2; ++pz) {
+                    const int cx = 11 + px * 6, cz = 12 + pz * 14;
+                    w979.setBlock(cx, 85, cz, BR::Water, puddleState);
+                    puddles[n][0] = cx; puddles[n][1] = cz; ++n;
+                }
+            // (b) 盖顶水槽：z=26 一条 x=11..22 的 1 宽走廊——脚位格全覆盖脚踝水 + y86 石盖（口鼻被钉在
+            //     水面上方 <1 格、恒处水格内）+ 两侧 y85..86 壁 + 两端封头（物理困住：旧判据 15s 必罚）。
+            for (int cx = 11; cx <= 22; ++cx) {
+                w979.setBlock(cx, 85, 26, BR::Water, puddleState);
+                w979.setBlock(cx, 86, 26, BR::Stone, 0);
+                w979.setBlock(cx, 85, 25, BR::Stone, 0); w979.setBlock(cx, 86, 25, BR::Stone, 0);
+                w979.setBlock(cx, 85, 27, BR::Stone, 0); w979.setBlock(cx, 86, 27, BR::Stone, 0);
+            }
+            w979.setBlock(10, 85, 26, BR::Stone, 0); w979.setBlock(10, 86, 26, BR::Stone, 0);
+            w979.setBlock(23, 85, 26, BR::Stone, 0); w979.setBlock(23, 86, 26, BR::Stone, 0);
+            EntityManager em979;
+            const QVector3D far979(-1000.0f, 90.0f, -1000.0f);
+            int pigs[8], trench[4] = {13, 15, 17, 19};
+            bool spawned = true;
+            for (int i = 0; i < 8; ++i) {
+                pigs[i] = em979.spawnMobTyped(puddles[i][0], 85, puddles[i][1], EntityManager::MobPig,
+                                              QStringLiteral("#f0a8b0"), kPigMax);
+                spawned = spawned && pigs[i] >= 0;
+            }
+            int trenchPigs[4];
+            for (int i = 0; i < 4; ++i) {
+                trenchPigs[i] = em979.spawnMobTyped(trench[i], 85, 26, EntityManager::MobPig,
+                                                    QStringLiteral("#f0a8b0"), kPigMax);
+                spawned = spawned && trenchPigs[i] >= 0;
+            }
+            if (!spawned) {
+                ok = false;
+            } else {
+                int exited = 0, alive = 0;
+                bool allFull = true;
+                for (int t = 0; t < 1250; ++t) { // 20s（≥ 溺水起罚 15s + 5s 余量：旧码判别腿必红）
+                    em979.tick(0.016f, &w979, far979, 0.3f, 1.8f, false);
+                    if (t == 1249) {
+                        for (int i = 0; i < 8; ++i) {
+                            if (em979.healthAt(pigs[i]) != kPigMax || em979.deadAt(pigs[i]))
+                                allFull = false; // 新谓词：浅水档口鼻线在液面上 → 零溺水伤
+                            const QVector3D p = em979.posAt(pigs[i]);
+                            const bool inPuddle =
+                                qFloor(p.x()) == puddles[i][0] && qFloor(p.z()) == puddles[i][1];
+                            if (!inPuddle) ++exited; // 脚位格已离水洼（wander 走出 = 浅水不困不罚）
+                        }
+                        for (int i = 0; i < 4; ++i)
+                            if (em979.healthAt(trenchPigs[i]) == kPigMax && !em979.deadAt(trenchPigs[i]))
+                                ++alive; // 盖顶水槽（判别腿）：口鼻被钉水面下 0.9 格内仍零溺水伤
+                    }
+                }
+                exitedTotal += exited;
+                trenchAlive += alive;
+                ok = ok && allFull && exited >= 6 && alive == 4; // ≥6/8 脱困 + 4/4 水槽满血
+            }
+        }
+        // (c) 没顶腿：石盖水柜（t828 同款：水 y85..87 源块 + y88 石盖 → 浮力钉盖下口鼻恒没水）。
+        {
+            World w979b;
+            w979b.setWidth(24); w979b.setDepth(24); w979b.setHeight(96); w979b.setSeed(22);
+            for (int x = 4; x < 20; ++x)
+                for (int z = 4; z < 20; ++z) w979b.setBlock(x, 84, z, BR::Stone, 0);
+            for (int x = 8; x < 16; ++x)
+                for (int z = 8; z < 16; ++z)
+                    for (int y = 85; y <= 88; ++y)
+                        w979b.setBlock(x, y, z, (y <= 87) ? BR::Water : BR::Stone, 0);
+            EntityManager em979b;
+            const QVector3D far979b(-1000.0f, 90.0f, -1000.0f);
+            const int pigD = em979b.spawnMobTyped(11, 85, 11, EntityManager::MobPig,
+                                                  QStringLiteral("#f0a8b0"), kPigMax);
+            bool okD = pigD >= 0;
+            if (okD) {
+                for (int t = 0; t < 1250; ++t) em979b.tick(0.016f, &w979b, far979b, 0.3f, 1.8f, false);
+                okD = em979b.deadAt(pigD) || em979b.healthAt(pigD) <= 1; // 3HP − 1HP/s（15s 起）→ 20s 内死/残
+            }
+            ok = ok && okD;
+        }
+        // (d) 源码钉（t880/t997 先例：QML 掉落表 headless 无行为缝 → 源码钉；谓词单一权威钉同段）。
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile mf(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
+            QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
+            const QString c = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+            const QString q = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+            int pinCount = 0;
+            int from = 0;
+            while (true) {
+                const int at = int(c.indexOf(QStringLiteral("mobSnoutSubmergedInWater"), from));
+                if (at < 0) break;
+                ++pinCount;
+                from = at + 1;
+            }
+            okPin = pinCount >= 4                              // 定义 + 溺水/浮面/resting 破除三消费（单一权威不外散）
+                 && c.contains(QStringLiteral("(8 - st) / 8.0f")) // 液面分档公式在位
+                 && q.contains(QStringLiteral("const meat = burned ? 0x221 : 0x20B")) // 火焰熟排链保留
+                 && q.contains(QStringLiteral("t979 掉落表修正"))
+                 && !q.contains(QStringLiteral("猪也掉皮革"))     // t473 猪皮革口径移除
+                 && !q.contains(QStringLiteral("0x20D, 1) // 皮革 ×1（t473 扩到猪"))
+                 && q.contains(QStringLiteral("0x20D, 1) // 皮革 ×1（非肉，燃烧不变）")); // 牛皮革保留
+        }
+        ok = ok && okPin;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t979 pig ankle-deep water safety + drop table: open 1/8 and 1/4"
+                             " level puddles zero drowning damage (full HP) and >=6/8 wade out ("
+                          << exitedTotal << " exits), covered ankle-deep trench keeps all 4 pigs per"
+                             " leg at full HP with snout pinned under the lid (" << trenchAlive
+                          << "/8 alive across both levels), pinned under deep source water the pig"
+                             " still drowns (chain intact); snout-line-vs-surface single-authority"
+                             " predicate shared by drown + swim-up + resting-break, pig drop is"
+                             " meat-only with cooked-on-burn kept and cow leather untouched (pins)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
