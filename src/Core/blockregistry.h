@@ -263,8 +263,9 @@ public:
         Cactus         = 42, // 仙人掌：沙漠标志性植物方块（worldgen 在 desert 沙顶散布 1-3 格高柱；玩家可放置在沙 / 仙人掌
                                   //   上）。**t445 几何缩到 ~80% 居中**：mesher 经 PartialBlockGeometry 画 0.8×1.0×0.8 居中柱
                                   //   （X/Z [0.1,0.9] / Y 满高，机制对标 MC 1.0 仙人掌 14/16 细柱），非满格整立方。solid=false
-                                  //   （同 Farmland / glass 模式：非满格 → 不挡邻居面剔除 → 下方沙顶画出填住柱底环隙；光照仍满遮，
-                                  //   lightOpacity 特例返 15）、shape=ShapeFull（碰撞 / 选中仍走整格，与渲染解耦 → 实体碰撞 →
+                                  //   （同 Farmland / glass 模式：非满格 → 不挡邻居面剔除 → 下方沙顶画出填住柱底环隙；光照
+                                  //   t985 起全透（lightOpacity 0——不满格不遮天光，修「沙面接触整片阴影」；旧 t445 满遮 15
+                                  //   翻案））、shape=ShapeFull（碰撞 / 选中仍走整格，与渲染解耦 → 实体碰撞 →
                                   //   mob/玩家撞其侧或站其上即「接触」）、hardness=0.4（同 MC 1.0 仙人掌量级，软质）、
                                   //   toolType=NoTool（空手即采且掉落，机制等价 MC 仙人掌无工具要求）、requiresTool=false、
                                   //   dropId=自身（破仙人掌掉仙人掌方块，可放回）、dropCount=1、maxStack=64。各面贴图：顶·底=

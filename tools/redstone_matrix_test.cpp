@@ -24051,6 +24051,133 @@ Item {
         }
     }
 
+    // ── P-t985 仙人掌底接触阴影探针（不满格方块的光照 opacity 语义；t985）──
+    //   用户实测：仙人掌放沙子上「底部沙子与仙人掌接触的部分整片变成阴影」。根因归因（skyLight 与 AO
+    //   双查）：AO/PCF 侧 t849/t850 已把仙人掌排除出 heightmap（列顶实面落到沙顶，环隙无整格黑影）——
+    //   病灶在光照 lightOpacity(Cactus)=15（t445「opaque 实体植物满遮」旧口径）：天光种子列在仙人掌格
+    //   截断 + BFS 进入衰减 max(1,15)=15 → 仙人掌格天光恒 0；mesher 立方面光 = 面所朝邻格 skyLightAt
+    //   → 沙顶面恰朝仙人掌格 → 整面采 0 压到 kVcMin 暗部地板 = 「整片阴影」。修法 = Cactus opacity
+    //   15→0（MC 语义：不满格不遮天光；同轨/板/雪层默认全透口径）。reflood 兼容性：recomputeLightField /
+    //   refloodBox / recomputeLightAround / t933 批量 reflood 全链只读 lightOpacity 单一权威，改值自动生效；
+    //   仙人掌放/挖 opacity 0↔0 无翻转 → 光场不变无重算需要（光学上等同空气）。
+    //   断言五段：
+    //   (a) 沙顶 2 高仙人掌：两节仙人掌格 skyLightAt==15（修前 0——种子截断+满遮不渗；仙人掌底格即沙顶面
+    //       所朝采样格）+ 柱顶空气格 15（种子列穿透整柱）；
+    //   (b) AO 侧双查：仙人掌列 columnTopSurfaceY == 沙顶（t849 排除口径——细柱不入列顶，PCF 环隙无影）；
+    //   (c) 对照腿·石头贴沙照样暗（遮光/AO 不回归）：石格 skyLightAt==0（满遮照旧）+ columnTopSurfaceY ==
+    //       石顶（整立方入列顶）；
+    //   (d) 其它不满格方块同口径：铁轨 / 火把 / 石压力板 / 雪层贴沙 → 所占格 skyLightAt==15（支撑面不暗，
+    //       防漂移钉——本族本就全透，钉住不许跟回去）；
+    //   (e) 源码钉：lightOpacity Cactus 全透行 + 光 BFS 只读 lightOpacity 单一权威行（任一消失即红）。
+    {
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 2 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 1 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -3; dy <= 4 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                // 开天自检：rig 格天光满格（列上方直通世界顶）才入选——防丛林冠层/遗留结构假红（t997 rig 教训）。
+                if (clear && w.skyLightAt(xx, kRigY, zz) == 15) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t985 cactus contact shadow: no clear open-sky rig area found";
+        } else {
+            // 石板垫层（kRigY-2，3×3）：沙是重力方块，下方悬空会被重力链收走（t984 rig 同款垫石教训）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    w.setBlock(x0 + dx, kRigY - 2, z0 + dz, BR::Stone, 0);
+            // (a)+(b) 沙顶 2 高仙人掌：光照穿透（天光种子列过仙人掌直落沙顶）+ 列顶落沙顶。
+            w.setBlock(x0, kRigY - 1, z0, BR::Sand, 0);
+            w.setBlock(x0, kRigY,     z0, BR::Cactus, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::Cactus, 0);
+            const bool okA = w.skyLightAt(x0, kRigY,     z0) == 15   // 沙顶面所朝采样格（修前 0 = 阴影病灶）
+                && w.skyLightAt(x0, kRigY + 1, z0) == 15             // 上节仙人掌格同样透光
+                && w.skyLightAt(x0, kRigY + 2, z0) == 15;            // 柱顶空气格（种子列穿透）
+            const bool okB = std::fabs(w.columnTopSurfaceY(x0, z0) - float(kRigY)) < 0.01f;
+            if (!okA || !okB)
+                qInfo().noquote() << "  [t985 diag] ab sky@" << int(w.skyLightAt(x0, kRigY, z0))
+                                  << int(w.skyLightAt(x0, kRigY + 1, z0))
+                                  << int(w.skyLightAt(x0, kRigY + 2, z0))
+                                  << "colTop" << w.columnTopSurfaceY(x0, z0);
+            // (c) 对照腿·石头贴沙照样暗：完整实体满遮 + 入列顶（修法只豁免不满格，不放松实心遮光）。
+            w.setBlock(x0 + 1, kRigY - 1, z0, BR::Sand, 0);
+            w.setBlock(x0 + 1, kRigY,     z0, BR::Stone, 0);
+            const bool okC = w.skyLightAt(x0 + 1, kRigY, z0) == 0
+                && std::fabs(w.columnTopSurfaceY(x0 + 1, z0) - float(kRigY + 1)) < 0.01f;
+            if (!okC)
+                qInfo().noquote() << "  [t985 diag] c sky" << int(w.skyLightAt(x0 + 1, kRigY, z0))
+                                  << "colTop" << w.columnTopSurfaceY(x0 + 1, z0);
+            // (d) 其它不满格方块同口径：所占格天光满格（支撑面不暗）。
+            w.setBlock(x0 - 1, kRigY - 1, z0, BR::Sand, 0);
+            w.setBlock(x0 - 1, kRigY,     z0, BR::Rail, 0);
+            w.setBlock(x0, kRigY - 1, z0 - 1, BR::Sand, 0);
+            w.setBlock(x0, kRigY,     z0 - 1, BR::Torch, 0);
+            w.setBlock(x0, kRigY - 1, z0 + 1, BR::Sand, 0);
+            w.setBlock(x0, kRigY,     z0 + 1, BR::StonePressurePlate, 0);
+            w.setBlock(x0 - 1, kRigY - 1, z0 + 1, BR::Sand, 0);
+            w.setBlock(x0 - 1, kRigY,     z0 + 1, BR::SnowLayer, 0);
+            const bool okD = w.skyLightAt(x0 - 1, kRigY, z0) == 15
+                && w.skyLightAt(x0, kRigY, z0 - 1) == 15
+                && w.skyLightAt(x0, kRigY, z0 + 1) == 15
+                && w.skyLightAt(x0 - 1, kRigY, z0 + 1) == 15;
+            if (!okD)
+                qInfo().noquote() << "  [t985 diag] d rail" << int(w.skyLightAt(x0 - 1, kRigY, z0))
+                                  << "torch" << int(w.skyLightAt(x0, kRigY, z0 - 1))
+                                  << "plate" << int(w.skyLightAt(x0, kRigY, z0 + 1))
+                                  << "snow" << int(w.skyLightAt(x0 - 1, kRigY, z0 + 1));
+            // (e) 源码钉：opacity 全透行 + 光 BFS 单一权威行（t933 批量 reflood 同链同源）。
+            const QString exeDirT985 = QCoreApplication::applicationDirPath();
+            const QString rootT985 = QDir(exeDirT985 + QStringLiteral("/..")).absolutePath();
+            auto readSrcT985 = [&rootT985](const QString &rel) -> QString {
+                QFile f(rootT985 + QStringLiteral("/") + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString brSrcT985 = readSrcT985(QStringLiteral("src/Core/blockregistry.cpp"));
+            const QString wSrcT985 = readSrcT985(QStringLiteral("src/World/world.cpp"));
+            const bool okE = brSrcT985.contains(QStringLiteral("case Cactus:       return 0;"))
+                && wSrcT985.contains(QStringLiteral(
+                    "const quint8 nbOp = BlockRegistry::lightOpacity(m_chunks.blockAt(nx, ny, nz), m_chunks.stateAt(nx, ny, nz));"));
+            if (!okE)
+                qInfo().noquote() << "  [t985 diag] e src pin miss" << brSrcT985.isEmpty()
+                                  << wSrcT985.isEmpty();
+            // 清场：自顶向下拆（仙人掌 oldId=Cactus 跳过 ② 失撑级联；沙在柱拆完后拆不触发落沙）
+            //   + 3×3 台面带 + 石板垫层。
+            for (int dy = 1; dy >= 0; --dy)
+                w.setBlock(x0, kRigY + dy, z0, BR::Air, 0);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dy = 0; dy >= -2; --dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+            tickN(w, 2);
+            const bool okT985 = okA && okB && okC && okD && okE;
+            if (!okT985) ++totalFail;
+            if (!okT985)
+                qInfo().noquote() << "  [t985 diag] a" << okA << "b" << okB << "c" << okC
+                                  << "d" << okD << "e" << okE;
+            qInfo().noquote() << (okT985 ? "PASS" : "FAIL")
+                              << "| t985 a cactus standing on sand casts no contact shadow on the"
+                                 " support face (light-opacity semantics for non-full blocks,"
+                                 " reversed t445 full-shadow caliber): (a) both cactus cells of a"
+                                 " 2-high column on sand read skylight 15 - the cell the sand top"
+                                 " face samples used to sit at 0 because the seed column broke at"
+                                 " the cactus and the 15-opacity BFS refused to leak in, pressing"
+                                 " the whole contact face into the darkness floor; (b) the cactus"
+                                 " column stays out of the heightmap (columnTopSurfaceY == sand"
+                                 " top) so the AO/PCF side of the double check is pinned too;"
+                                 " control legs keep existing semantics: (c) a full stone cube on"
+                                 " sand still reads skylight 0 and still tops the column (full"
+                                 " cubes keep full shadow); (d) rail, torch, stone pressure plate"
+                                 " and snow layer on sand all keep skylight 15 in their cells"
+                                 " (non-full families stay transparent - drift guard); (e) source"
+                                 " pins for the transparent cactus opacity row and the light BFS"
+                                 " reading the single lightOpacity authority (t933 batch reflood"
+                                 " chain included)";
+        }
+    }
+
     // ── P-t946 坐姿变换链连续域探针（狼/豹猫 t946 返修；t878② 断链形态回归拦截）──
     //   用户实测（第五轮）：「身体翘太高、身体与躯体分离中间透明」。根因 = t878② 坐姿把躯干绕枢 +40°
     //   上仰而头/耳/腿保持各段独立绝对坐标——变换链断开：抬起后的躯干底与臀下折叠腿顶之间悬空
