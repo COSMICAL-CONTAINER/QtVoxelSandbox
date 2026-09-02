@@ -2108,6 +2108,10 @@ public:
         quint8 same;   // 同层 (x±1, y, z±1)
         quint8 up;     // 上层 (x±1, y+1, z±1)
         quint8 down;   // 下层 (x±1, y-1, z±1)
+        // t983 ① 同层邻轨 state（仅运行期 World::recomputeRailConnections 填充）：railConnections 拐角
+        //   路径的「平行拒连」读其 bit5 轴偏好，判定侧臂是否同轴平行轨。缺省 0（worldgen placeMineshaft
+        //   / 其余聚合构造点不填）= 邻居视为 fresh → 拒连不触发，worldgen 拐角形态零改动。
+        quint8 sameState = 0;
     };
     // 算 (x,y,z) 处 Rail 的连接 state（t666 规则集见上述头注释）：自格 id + 当前 state（轴偏好读它）
     // + 4 向三高探针 → 新连接位（0..0x0F）。纯函数（邻块 id 数组入参），供 World::recomputeRailConnections

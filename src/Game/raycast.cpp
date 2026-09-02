@@ -21,9 +21,9 @@
 //     相机不应被拉近视距，保 t40）。起点在不完整方块格的**空气部分**（如 1.5 格通道天花板上半砖的下半格）
 //     时穿过继续命中后方实体（否则退化返 invalid → 相机当「无墙」取满距 kCamMax 直穿，见下方起点分流注释）。
 //   - 铁桶（HitWater）：水挡（命中首个水格舀水）、火把 / 木梯穿过。
-//   - 选体（HitTorch|HitLadder|HitRail，t938）：铁轨族整格命中（轨格全高可选；薄板→整格的口径翻转见
-//     raycast.h HitRail 注释——用户第五轮实测「挖铁轨变挖后面 / 放矿车不便」overrule t638③ 的轨格内透视，
-//     轨**上方**空域透视保留）。相机（HitPartial）对轨维持 t638③ 薄板。
+//   - 选体（HitTorch|HitLadder，t938 设 / t983 收口）：火把 / 木梯挡（可选中 / 直挖）；铁轨族走 preciseMode
+//     薄板 sub-AABB 精确命中（t983：选块必须指哪指哪——整格口径〔t938〕让射线从轨格顶面空气段抢命中
+//     脚底轨，「站轨上前向放置选不中目标格」；终局 = 真实相交盒 ~2/16，瞄板选中轨、瞄上部空气穿透）。
 namespace {
 // t213 射线 vs cell-local sub-AABB（世界坐标 = cell + local）精确命中测试。
 //   选体射线进入含不完整方块 / 火把的体素后，须命中其中某个 sub-AABB 才算选中（空气部分穿过命中后方块）。
@@ -197,16 +197,14 @@ RayHit raycastVoxel(const World &world, QVector3D origin, QVector3D dir, float m
                                                     && !BlockRegistry::isAnvil(b)
                                                     && b != BlockRegistry::Cactus)
                               || b == BlockRegistry::Water
-                              || b == BlockRegistry::Lava || !preciseMode
-                              // t938 铁轨族选体整格：HitRail（选体模式独有）下轨格全高命中——进格即中（法线 =
-                              //   进格面），修「瞄轨格中上部（2/16 薄板上方的空气段）射线穿到后格 → 挖轨变挖后面 /
-                              //   手持矿车放不上轨」。轨上方空域（轨格上一格）不在轨格内 → 照旧透视命中后方
-                              //   （t638③「不优先」经上方路径保留）。仅选体模式：相机（HitPartial）不设 HitRail，
-                              //   轨走 raycastAABBs 薄板 sub-AABB（轨无碰撞不拉近视距，t605 零回归）；桶 / 钓竿
-                              //   非精确模式对轨本就整格（!preciseMode 支路），行为不变。四消费者铁律：本特判只
-                              //   动射线命中这一个消费者，isFullCube / collision / selection 各自语义不动
-                              //   （同 t639 耕地 / t849 铁砧·仙人掌的 raycast.cpp 收口先例，方向相反）。
-                              || ((filter & RayFilter::HitRail) && BlockRegistry::isRail(b));
+                              || b == BlockRegistry::Lava || !preciseMode;
+        // t983：铁轨族不再整格命中（t938 的 HitRail 整格特判移除）——preciseMode 下走下方 raycastAABBs
+        //   薄板 sub-AABB 精确路径（轨的真实相交盒 ~2/16）。整格口径（t938）让射线从轨格顶面进入即抢命中
+        //   脚底轨：站轨上前向放置时准星所指目标格的射线在脚下轨格上部 15/16 空气段就被截停 = 「指空打
+        //   轨」选不中目标。终局口径 = 指哪指哪：瞄轨板本体仍命中轨（挖轨 / 手持矿车上轨保持），瞄轨格
+        //   上部空气穿透命中后方目标；相机（HitPartial）对轨本就薄板（t605 零改动）；桶 / 钓竿非精确模式
+        //   对轨整格（!preciseMode 支路）行为不变。isFullCube / collision / selection 各消费者语义不动
+        //   （四消费者铁律，同 t639 耕地 / t849 铁砧先例）。
         if (fullCell) {
             h.valid = true;
             h.bx = cx; h.by = cy; h.bz = cz;
