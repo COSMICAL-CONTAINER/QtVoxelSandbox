@@ -690,6 +690,88 @@ int main(int argc, char *argv[])
                              "viewer preview consume the same mechBoxes source";
     }
 
+    // ── P-t993 玻璃增实探针（材质轴，pack 两态同调）：用户「玻璃透明度还是太透明」→ 世界玻璃段材质
+    //    opacity 0.30→0.45（迭代史 t405 0.45 → t899 0.30 → t993 0.45；与手持玻璃立方同值，收口 t899 起
+    //    世界段/手持的漂移）。断言三腿：
+    //    (a) 材质腿：Main.qml glassChunkComp 切片内唯一一处 opacity 赋值解析 == 0.45 且 ∈(0,1) 开区间
+    //        （Blend 半透：仍可透视且实体感）+ t993 契约锚在场；手持玻璃两处（第一/第三人称
+    //        heldCubeIsGlass 分支）同 0.45（玻璃三消费端同值钉）。
+    //    (b) 贴图契约腿（tile 逐像素）：textures/atlas.png tile 68（default_glass）全 64×64 px alpha==255
+    //        —— 「纹理不透 + 材质半透」同 water 模式契约（可透视性由材质 opacity 承担；贴图保持不透 =
+    //        实体感基底，且不触碰 terrain 段 Mask/alphaCutoff 契约、无透明段排序新面）。
+    //    (c) pack 两态一致钉：resourcepackmanager.cpp tileFilenameMap 含 {68, glass.png}（pack-on 覆写
+    //        tile 68 像素）而 (a) 切片内 opacity 赋值唯一且无条件（不随 pack 分支）→ 材质增实两态同调。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        // (a) 材质腿：glassChunkComp 切片解析
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString mainQml = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const int iGlass = mainQml.indexOf(QStringLiteral("id: glassChunkComp"));
+        const int iGlassEnd = mainQml.indexOf(QStringLiteral("// t468 冰段"), iGlass); // 冰段注释 = 玻璃段界标
+        if (iGlass < 0 || iGlassEnd <= iGlass) {
+            qInfo().noquote() << "  [t993 diag] glass slice miss" << iGlass << iGlassEnd;
+            ok = false;
+        } else {
+            const QString seg = mainQml.mid(iGlass, iGlassEnd - iGlass);
+            const int io = seg.indexOf(QStringLiteral("opacity:"));
+            const int ioe = seg.indexOf(QLatin1Char(';'), io);
+            const float op = (io >= 0 && ioe > io) ? seg.mid(io + int(qstrlen("opacity:")), ioe - io - int(qstrlen("opacity:"))).toFloat() : -1.0f;
+            const bool matOk = op > 0.0f && op < 1.0f && std::fabs(op - 0.45f) < 1e-3f
+                && seg.count(QStringLiteral("opacity:")) == 1 // 唯一且无条件（pack 两态同调 + 不随分支漂移）
+                && seg.contains(QStringLiteral("t993 玻璃再增实一档"));
+            const int held45 = mainQml.count(QStringLiteral("heldCubeIsGlass(player.selectedBlock) ? 0.45"));
+            if (!matOk || held45 != 2) {
+                qInfo().noquote() << "  [t993 diag] matOk" << matOk << "op" << op << "held45" << held45;
+                ok = false;
+            }
+        }
+        // (b) 贴图契约腿：tile 68 逐像素 alpha==255（纹理不透 + 材质半透，同 water 模式）
+        {
+            QImage atlas(root + QStringLiteral("/textures/atlas.png"));
+            constexpr int kGlassTile = 68;  // default_glass（BlockRegistry::AtlasTileCount=181 单行图集）
+            constexpr int kPx = 64;         // kAtlasTilePx 文档镜像
+            bool opaqueAll = false;
+            if (atlas.isNull() || atlas.width() < (kGlassTile + 1) * kPx) {
+                qInfo().noquote() << "  [t993 diag] atlas load miss";
+            } else {
+                const QImage tile = atlas.copy(kGlassTile * kPx, 0, kPx, kPx)
+                                        .convertToFormat(QImage::Format_RGBA8888);
+                opaqueAll = !tile.isNull();
+                for (int y = 0; y < tile.height() && opaqueAll; ++y) {
+                    const uchar *row = tile.constScanLine(y);
+                    for (int x = 0; x < tile.width(); ++x) {
+                        if (row[x * 4 + 3] != 255) { opaqueAll = false; break; }
+                    }
+                }
+            }
+            if (!opaqueAll) {
+                qInfo().noquote() << "  [t993 diag] glass tile alpha not fully opaque";
+                ok = false;
+            }
+        }
+        // (c) pack 两态一致钉：tileFilenameMap 走 glass.png 覆写 tile 68，材质不随 pack 分支
+        {
+            QFile rf(root + QStringLiteral("/src/Core/resourcepackmanager.cpp"));
+            const QString rsrc = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+            if (rsrc.isEmpty()
+                || !rsrc.contains(QStringLiteral("{68, QStringLiteral(\"glass.png\")}"))) {
+                qInfo().noquote() << "  [t993 diag] pack pin miss rsrc" << rsrc.isEmpty();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t993 glass solidified one notch: world glass segment material opacity "
+                             "0.30 -> 0.45 (t405 0.45 / t899 0.30 / t993 0.45 iteration history; unified "
+                             "with both held-cube glass paths = three glass consumers same value), "
+                             "texture stays fully opaque per the water-mode 'opaque texture + translucent "
+                             "material' contract (no Mask/alphaCutoff coupling, no sort-order new faces), "
+                             "pack-on replaces tile 68 pixels only so the material bump tunes both pack "
+                             "states identically";
+    }
+
     // P10 t733 铁轨失撑掉落（R19.11 三族统一；World::checkRailOnEdit 单一入口覆盖全部破坏路径）：支撑位被清
     //   为 Air → 正上方铁轨坍落为掉落物（blockDroppedAsItem，dropId=自身；连接位 / 通电位丢弃）。本探针驱动
     //   三族代表路径：① 挖掘（setBlock Air 破支撑，含创造——World 层无 drop 标志）② 爆炸（destroySphereSilent
