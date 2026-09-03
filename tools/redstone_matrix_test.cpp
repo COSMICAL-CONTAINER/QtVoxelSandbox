@@ -608,6 +608,88 @@ int main(int argc, char *argv[])
                           << "| mech per-attach geometry: floor=flat-thin-box, wall=flush-to-support, decode parity (t744)";
     }
 
+    // ── P-t992 按钮几何统一探针（墙面口径为基准）：用户「按钮放地上和放墙上大小不统一（以墙上为准）」
+    //    +「墙上形态比例也不协调」→ mechBoxes 按钮板统一为 MC 比例 6/16 宽 × 4/16 高 × 厚 2/16（按下
+    //    6×4×1）：五安装面（贴地 + 四墙）同一张 6×4 钮脸、同一厚度，尺寸不再随安装面漂移。旧版墙面钮
+    //    仅 2/16 高（y 7..9 = 细横条，比例失调），地面钮 6×6 见方 footprint（与墙面 6×2 观感两套尺寸）。
+    //    断言（木/石 × 五附着 × 激活两态，单盒按钮）：
+    //    (i)   厚度轴 extent == th（2 常态 / 1 按下——按下仅压薄不改脸，t628 零回归）；
+    //    (ii)  非厚度两轴 extent 恒 {4,6}/16 —— 同一钮脸（统一性钉）；
+    //    (iii) 钮脸位置钉：墙面钮 y 6..10 居中（比例协调 + 与墙 +Z 形同宽），地面钮宽沿 X 5..11（墙面
+    //          同宽口径）× 深 6..10；厚边贴支撑面（P9 已锁，随 t992 复锁）；
+    //    (iv)  源码钉：mechBoxes 按钮 t992 契约锚 + PX 墙面行字面量（渲染/射线/查看器三消费端同源自动）。
+    {
+        bool ok = true;
+        const float t = 1.0f / 16.0f;
+        const quint8 btnIds[2] = { BR::WoodButton, BR::StoneButton };
+        for (const quint8 id : btnIds) {
+            for (int active = 0; active <= 1; ++active) {
+                const float th = active ? 1.0f : 2.0f;
+                for (int attach = 0; attach <= 4; ++attach) {
+                    const quint8 state = quint8((active ? 1u : 0u)
+                                                | (quint8(attach) << BR::MechAttachShift));
+                    const auto boxes = BR::mechBoxes(id, state);
+                    if (boxes.size() != 1) { ok = false; continue; }
+                    const BR::BlockAABB &b = boxes.front();
+                    const float ex = (b.maxX - b.minX) / t;
+                    const float ey = (b.maxY - b.minY) / t;
+                    const float ez = (b.maxZ - b.minZ) / t;
+                    // 厚度轴：贴地=Y、四墙 X/X/Z/Z；其余两轴为钮脸。
+                    float thExt = -1.0f, faceA = -1.0f, faceB = -1.0f;
+                    switch (attach) {
+                    case 0: thExt = ey; faceA = ex; faceB = ez; break;
+                    case 1: case 2: thExt = ex; faceA = ey; faceB = ez; break;
+                    default: thExt = ez; faceA = ex; faceB = ey; break;
+                    }
+                    float lo = std::min(faceA, faceB), hi = std::max(faceA, faceB);
+                    const bool dimsOk = std::fabs(thExt - th) < 1e-3f      // (i) 厚度 = th
+                        && std::fabs(lo - 4.0f) < 1e-3f && std::fabs(hi - 6.0f) < 1e-3f; // (ii) 统一 4×6 脸
+                    // (iii) 位置钉：厚边贴支撑 + 墙面钮 y[6,10] 居中 + 地面钮宽沿 X[5,11]
+                    bool posOk = false;
+                    switch (attach) {
+                    case 0:
+                        posOk = std::fabs(b.minY) < 1e-4f
+                            && std::fabs(b.minX - 5.0f * t) < 1e-4f && std::fabs(b.maxX - 11.0f * t) < 1e-4f;
+                        break;
+                    case 1:  posOk = std::fabs(b.maxX - 1.0f) < 1e-4f; break;
+                    case 2:  posOk = std::fabs(b.minX) < 1e-4f; break;
+                    case 3:  posOk = std::fabs(b.maxZ - 1.0f) < 1e-4f; break;
+                    default: posOk = std::fabs(b.minZ) < 1e-4f; break;
+                    }
+                    if (attach != 0) // 墙面钮：y 6..10（4/16 高居中——旧 7..9 细横条的比例失调根除）
+                        posOk = posOk && std::fabs(b.minY - 6.0f * t) < 1e-4f
+                             && std::fabs(b.maxY - 10.0f * t) < 1e-4f;
+                    if (!dimsOk || !posOk) {
+                        qInfo().noquote() << "  [t992 diag] btn" << int(id) << "active" << active
+                                          << "attach" << attach << "ext" << ex << ey << ez
+                                          << "dimsOk" << dimsOk << "posOk" << posOk;
+                        ok = false;
+                    }
+                }
+            }
+        }
+        // (iv) 源码钉：mechBoxes 按钮 t992 锚 + PX 墙面行字面量（三消费端共用本函数，钉源即钉全部）
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile bf(root + QStringLiteral("/src/Core/blockregistry.cpp"));
+            const QString src = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+            if (src.isEmpty()
+                || !src.contains(QStringLiteral("t992 统一口径"))
+                || !src.contains(QStringLiteral("out.push_back({(16.0f - th) * t, 6.0f * t, 5.0f * t, 1.0f, 10.0f * t, 11.0f * t})"))) {
+                qInfo().noquote() << "  [t992 diag] source pin miss src" << src.isEmpty();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t992 button geometry unified to the wall baseline: plate 6/16 wide x 4/16 "
+                             "tall x 2/16 thick (pressed halves thickness only) on all five attach faces "
+                             "(floor footprint was a 6x6 nub vs the wall 6x2 sliver; MC-proportioned 4/16 "
+                             "tall face centered at mid-block), flush to support, world mesher / raycast / "
+                             "viewer preview consume the same mechBoxes source";
+    }
+
     // P10 t733 铁轨失撑掉落（R19.11 三族统一；World::checkRailOnEdit 单一入口覆盖全部破坏路径）：支撑位被清
     //   为 Air → 正上方铁轨坍落为掉落物（blockDroppedAsItem，dropId=自身；连接位 / 通电位丢弃）。本探针驱动
     //   三族代表路径：① 挖掘（setBlock Air 破支撑，含创造——World 层无 drop 标志）② 爆炸（destroySphereSilent

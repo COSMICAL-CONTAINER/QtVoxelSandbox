@@ -2256,17 +2256,20 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
     const int attach = (state >> MechAttachShift) & 0x07;
     constexpr float t = 1.0f / 16.0f;
     if (blockId != Lever) {
-        // 按钮：厚 2/16（按下 1/16），6/16 见方居中。机械三个 id 中非 Lever 即按钮（调用方守卫）。
+        // 按钮：**贴面板 6/16 宽 × 4/16 高 × 厚 2/16（按下 1/16）**——t992 统一口径（用户「放地上和放墙上
+        //   大小不统一，以墙上为准」+「墙上形态比例不协调」→ 对照 MC 按钮比例修：MC 钮板即 6×4×2
+        //   （按下 6×4×1），墙面安装 = 宽 6（水平）× 高 4（y 6..10 居中）；地面安装同面呈现 = footprint
+        //   6×4 × 高 2 —— 五种安装面同一张 6×4 钮脸、同一厚度，尺寸不再随安装面漂移）。旧版墙面钮仅
+        //   2/16 高（比例失调读作细横条）、地面钮 6×6 见方 footprint（与墙面 6×2 观感不一致）。
         //   t705 修：厚边贴**支撑面**（MechAttachOnXX = 支撑块方向 → 钮体贴该向格边）——旧版四向全镜像
-        //   （钮画在远离支撑的对侧格边 → 用户实测「贴墙出现在墙背面悬空」）。6×2×6 比例核对无误
-        //   （用户「有点正方形」= 悬空镜像使 6×6 大面朝玩家；贴墙后 2/16 厚度读出按钮感）。
+        //   （钮画在远离支撑的对侧格边 → 用户实测「贴墙出现在墙背面悬空」）。
         const float th = active ? 1.0f : 2.0f;
         switch (attach) {
-        case MechAttachOnPX:  out.push_back({(16.0f - th) * t, 7.0f * t, 5.0f * t, 1.0f, 9.0f * t, 11.0f * t}); break;
-        case MechAttachOnNX:  out.push_back({0.0f,      7.0f * t, 5.0f * t, th * t,    9.0f * t, 11.0f * t}); break;
-        case MechAttachOnPZ:  out.push_back({5.0f * t,  7.0f * t, (16.0f - th) * t, 11.0f * t, 9.0f * t, 1.0f}); break;
-        case MechAttachOnNZ:  out.push_back({5.0f * t,  7.0f * t, 0.0f,      11.0f * t, 9.0f * t, th * t}); break;
-        default:              out.push_back({5.0f * t,  0.0f,     5.0f * t, 11.0f * t, th * t,   11.0f * t}); break;
+        case MechAttachOnPX:  out.push_back({(16.0f - th) * t, 6.0f * t, 5.0f * t, 1.0f, 10.0f * t, 11.0f * t}); break;
+        case MechAttachOnNX:  out.push_back({0.0f,      6.0f * t, 5.0f * t, th * t,    10.0f * t, 11.0f * t}); break;
+        case MechAttachOnPZ:  out.push_back({5.0f * t,  6.0f * t, (16.0f - th) * t, 11.0f * t, 10.0f * t, 1.0f}); break;
+        case MechAttachOnNZ:  out.push_back({5.0f * t,  6.0f * t, 0.0f,      11.0f * t, 10.0f * t, th * t}); break;
+        default:              out.push_back({5.0f * t,  0.0f,     6.0f * t, 11.0f * t, th * t,   10.0f * t}); break;
         }
         return out;
     }
