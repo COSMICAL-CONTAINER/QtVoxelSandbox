@@ -4588,11 +4588,16 @@ Window {
                     dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     glassOnly: true
                 }
-                // t899 玻璃透明度再增实（用户 8-27 仍觉不够透）：opacity 0.45→**0.30**（迭代史：t405 初版
+                // t993 玻璃再增实一档（用户「透明度还是太透明」）：opacity 0.30→**0.45**（迭代史：t405 初版
                 //   0.45 + 1px 浅棱 → t838② 边框增实 2px 双色环（用户「边缘太透明」）→ t899 用户反转「整体
-                //   不够透、框感重」→ 增透 + 棱环收回单圈 1px 中等棱 delta~65，见 tools/build_glass.py 文件头
-                //   迭代史双钉）。透明度（材质 opacity）与框感（棱环宽度/深度）两条正交轴分开调。
-                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.30; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
+                //   不够透、框感重」→ 0.30 + 棱环收回单圈 1px 中等棱 → t993 用户再反转「仍太透明、要实体
+                //   感」→ 回 0.45，见 tools/build_glass.py 文件头迭代史双钉）。0.45 与手持玻璃立方两处
+                //   （第一/第三人称 heldCubeIsGlass 分支）同值——t899 起世界段 0.30 / 手持 0.45 的漂移就此
+                //   收口（玻璃三消费端同源）。透明度（材质 opacity）与框感（棱环宽度/深度）两条正交轴分开调。
+                //   pack-on/off 两态共用本材质（pack 只覆写 tile 68 像素、不触材质）→ 增实两态同调；
+                //   贴图保持全不透（alpha=255，同 water 模式「纹理不透 + 材质半透」契约），0.45 ∈ (0,1)
+                //   仍可透视、实体感明显。
+                materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColorMap: voxelAtlas; vertexColorsEnabled: true; opacity: 0.45; alphaMode: PrincipledMaterial.Blend; baseColor: Qt.rgba(0.92, 0.97, 1.0, 1.0) }
             }
         }
 
