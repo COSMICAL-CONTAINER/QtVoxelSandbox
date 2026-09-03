@@ -772,6 +772,104 @@ int main(int argc, char *argv[])
                              "states identically";
     }
 
+    // ── P-t994 刷怪笼迷你生物贴图链探针：用户「笼内迷你生物只有模型没有贴图、纯灰色」→ 根因 = t786 原稿
+    //    把贴图查表属性（miniProgTex/miniPackTex）声明在 miniMobBob 上，而全部消费端引用
+    //    miniMobSpin.miniPackTex（miniMobSpin 无此属性 → QML 绑定静默取 undefined → `undefined !== null`
+    //    恒真 → MobModel.packTextured 恒真（几何走 pack box-UV 而程序贴图缺席）+ 材质 baseColorMap=undefined
+    //    （无贴图纯灰、baseColor 恒走 tl 近白灰）+ 眼层 visible 恒假 = 用户全症状；模型形状仍对——几何
+    //    mobType 直读 spawnerRoot.cageMobType 不经查表）。断言三腿：
+    //    (a) 源码钉：spawnerDelegate 切片内破坏性引用形态 miniMobSpin.miniPackTex / miniProgTex 绝迹；
+    //        修正引用行 verbatim 在场（packTextured / baseColorMap 三元 / 眼层 visible）+ t994 作用域锚。
+    //    (b) 蛋→笼映射回程腿（表驱动，全 14 蛋型）：RecipeRegistry::mobTypeForSpawnEgg（蛋权威）→
+    //        BlockRegistry::spawnerStateForMob（编码）→ EntityManager::spawnerMobTypeForState（解码）==
+    //        原 mobType —— 蛋→笼 state→迷你呈现取型链逐型闭合；且每型的 EntityManager.Mob<名> 字面量在
+    //        Main.qml spawnerDelegate 切片内有行（迷你贴图/体色表覆盖全蛋型，无漏网灰型）。
+    //    (c) 三消费端同源钉：世界 delegate（Main.qml mobHost）/ 图鉴（ResourceBrowser.qml）/ 笼迷你共享
+    //        MobModel（几何一处修多处共享，t782 纪律）；笼迷你解码走 entityManager.spawnerMobTypeForState
+    //        （与 tickSpawners 同一权威）两处调用在场。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        QFile bf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString mainQml = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const QString browser = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+        const int iDel = mainQml.indexOf(QStringLiteral("id: spawnerDelegate"));
+        const int iDelEnd = mainQml.indexOf(QStringLiteral("t196 / t225 / t441 箱子盖子"), iDel);
+        if (iDel < 0 || iDelEnd <= iDel) {
+            qInfo().noquote() << "  [t994 diag] spawnerDelegate slice miss" << iDel << iDelEnd;
+            ok = false;
+        } else {
+            const QString seg = mainQml.mid(iDel, iDelEnd - iDel);
+            // (a) 源码钉：破坏形态绝迹 + 修正引用行 verbatim
+            const bool fixPins = !seg.contains(QStringLiteral("miniMobSpin.miniPackTex"))
+                && !seg.contains(QStringLiteral("miniMobSpin.miniProgTex"))
+                && seg.contains(QStringLiteral("packTextured: miniMobBob.miniPackTex !== null"))
+                && seg.contains(QStringLiteral("baseColorMap: miniMobBob.miniPackTex !== null ? miniMobBob.miniPackTex : miniMobBob.miniProgTex"))
+                && seg.contains(QStringLiteral("visible: miniMobBob.miniPackTex === null"))
+                && seg.contains(QStringLiteral("t994 作用域契约"));
+            if (!fixPins) {
+                qInfo().noquote() << "  [t994 diag] fix pins missing (broken-form residue or verbatim rows)";
+                ok = false;
+            }
+            // (b) 蛋→笼映射回程 + QML 迷你表逐型覆盖
+            EntityManager em994;
+            struct EggRow { int eggId; const char *qmlName; };
+            const EggRow eggs994[] = {
+                { RecipeRegistry::SpawnEggPigId,          "MobPig" },
+                { RecipeRegistry::SpawnEggCowId,          "MobCow" },
+                { RecipeRegistry::SpawnEggSheepId,        "MobSheep" },
+                { RecipeRegistry::SpawnEggShamblerId,     "MobShambler" },
+                { RecipeRegistry::SpawnEggBonesId,        "MobBones" },
+                { RecipeRegistry::SpawnEggStalkerId,      "MobStalker" },
+                { RecipeRegistry::SpawnEggSpiderId,       "MobSpider" },
+                { RecipeRegistry::SpawnEggChickenId,      "MobChicken" },
+                { RecipeRegistry::SpawnEggSquidId,        "MobSquid" },
+                { RecipeRegistry::SpawnEggNightwalkerId,  "MobNightwalker" },
+                { RecipeRegistry::SpawnEggEmberlingId,    "MobEmberling" },
+                { RecipeRegistry::SpawnEggWolfId,         "MobWolf" },
+                { RecipeRegistry::SpawnEggOcelotId,       "MobOcelot" },
+                { RecipeRegistry::SpawnEggBabyShamblerId, "MobBabyShambler" },
+            };
+            for (const EggRow &e : eggs994) {
+                const int mt = RecipeRegistry::mobTypeForSpawnEgg(e.eggId);
+                const quint8 st = BlockRegistry::spawnerStateForMob(mt);
+                const int back = em994.spawnerMobTypeForState(int(st));
+                const bool qmlRow = seg.contains(QStringLiteral("EntityManager.") + QString::fromLatin1(e.qmlName));
+                if (mt < 0 || back != mt || !qmlRow) {
+                    qInfo().noquote() << "  [t994 diag] egg" << QString::number(e.eggId, 16) << "mt" << mt
+                                      << "back" << back << "qmlRow" << qmlRow;
+                    ok = false;
+                }
+            }
+        }
+        // (c) 三消费端同源钉：世界 delegate / 图鉴 / 笼迷你共享 MobModel；解码权威两处调用
+        {
+            const bool sameSource = mainQml.contains(QStringLiteral("geometry: MobModel {"))
+                && browser.contains(QStringLiteral("MobModel {"))
+                && mainQml.contains(QStringLiteral("entityManager.spawnerMobTypeForState"));
+            int decodeCalls = 0, from = 0;
+            const QString needle = QStringLiteral("entityManager.spawnerMobTypeForState");
+            while ((from = mainQml.indexOf(needle, from)) >= 0) { ++decodeCalls; from += needle.length(); }
+            if (!sameSource || decodeCalls < 2) {
+                qInfo().noquote() << "  [t994 diag] sameSource" << sameSource << "decodeCalls" << decodeCalls;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t994 spawner cage mini texture chain: the t786 texture-lookup properties live "
+                             "on miniMobBob so every consumer (MobModel.packTextured / material baseColorMap+"
+                             "baseColor+alphaMode / eye visibility) references miniMobBob - the broken "
+                             "miniMobSpin.* form is extinct (it silently evaluated undefined, made "
+                             "undefined !== null constantly true, and starved the mini of its texture = the "
+                             "user's shape-correct but pure-gray mini); all 14 spawn eggs round-trip "
+                             "mobTypeForSpawnEgg -> spawnerStateForMob -> spawnerMobTypeForState and every "
+                             "type has a QML mini-table row; world delegate / gallery / cage mini share the "
+                             "same MobModel geometry source";
+    }
+
     // P10 t733 铁轨失撑掉落（R19.11 三族统一；World::checkRailOnEdit 单一入口覆盖全部破坏路径）：支撑位被清
     //   为 Air → 正上方铁轨坍落为掉落物（blockDroppedAsItem，dropId=自身；连接位 / 通电位丢弃）。本探针驱动
     //   三族代表路径：① 挖掘（setBlock Air 破支撑，含创造——World 层无 drop 标志）② 爆炸（destroySphereSilent

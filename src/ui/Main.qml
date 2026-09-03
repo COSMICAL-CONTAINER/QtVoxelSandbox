@@ -10520,6 +10520,13 @@ Window {
                         //   形态，直接采 pack wolf/ocelot 贴图）。材质规则（下 baseColor）：
                         //   贴图在身（pack 或程序）→ 近白 tint × 昼夜灰阶防压暗（t597）；无贴图型 → 体色 ×
                         //   灰阶（色值与各实体 delegate 一致：骨白 / 青绿 / 暗黑红）。
+                        //   t994 作用域契约：两条查表属性声明在本 Node（id miniMobBob）——其全部消费端
+                        //   （MobModel.packTextured / 材质 baseColorMap·baseColor·alphaMode / 眼层 visible）
+                        //   必须引用 **miniMobBob.xxx**。t786 原稿误把消费端引用冠 miniMobSpin 前缀（该 Node
+                        //   无此属性 → 绑定静默取 undefined → `undefined !== null` 恒真 → packTextured 恒真
+                        //   （几何走 pack box-UV）+ baseColorMap=undefined（无贴图纯灰）+ 眼层恒隐 = 用户
+                        //   「笼内只有模型没有贴图、纯灰色」全症状），t994 改指声明对象修正（矩阵 P-t994
+                        //   钉破坏形态字面量绝迹 + 修正行 verbatim）。
                         property QtObject miniProgTex: {
                             const t = spawnerRoot.cageMobType
                             if (t === EntityManager.MobShambler) return mobShamblerTex
@@ -10561,7 +10568,7 @@ Window {
                             //   静态角免逐帧 rebuild——迷你 delegate 非实体、无 revision 通道）。其余型恒 0。
                             //   review #36：MobModel.setRodSpin 按 6° 网格量化（round(deg/6)·6）—— 静态值
                             //   直接传 6 的倍数（原 45 会被量化成 48，改显式传 48 消除隐式改值）。
-                            geometry: MobModel { mobType: spawnerRoot.cageMobType; walkPhase: 0; packTextured: miniMobSpin.miniPackTex !== null
+                            geometry: MobModel { mobType: spawnerRoot.cageMobType; walkPhase: 0; packTextured: miniMobBob.miniPackTex !== null
                                 rodSpin: spawnerRoot.cageMobType === EntityManager.MobEmberling ? 48 : 0 }
                             position: Qt.vector3d(0, spawnerRoot.miniMobYOff(spawnerRoot.cageMobType), 0)
                             scale: Qt.vector3d(spawnerRoot.miniMobScale(spawnerRoot.cageMobType),
@@ -10569,11 +10576,11 @@ Window {
                                                spawnerRoot.miniMobScale(spawnerRoot.cageMobType))
                             materials: PrincipledMaterial {
                                 lighting: PrincipledMaterial.NoLighting
-                                baseColorMap: miniMobSpin.miniPackTex !== null ? miniMobSpin.miniPackTex : miniMobSpin.miniProgTex
+                                baseColorMap: miniMobBob.miniPackTex !== null ? miniMobBob.miniPackTex : miniMobBob.miniProgTex
                                 baseColor: {
                                     const tl = terrainLight(worldClock.skyLight)
                                     const t = spawnerRoot.cageMobType
-                                    if (miniMobSpin.miniPackTex !== null || miniMobSpin.miniProgTex !== null)
+                                    if (miniMobBob.miniPackTex !== null || miniMobBob.miniProgTex !== null)
                                         return tl // 贴图在身（pack 或程序）：近白 tint × 昼夜灰阶（t597 防压暗）
                                     if (t === EntityManager.MobBones)
                                         return Qt.rgba(0.85 * tl.r, 0.84 * tl.g, 0.77 * tl.b, 1.0) // 骨白（同实体 delegate）
@@ -10586,7 +10593,7 @@ Window {
                                 // t781：夜行者 pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时 Mask 裁
                                 //   （实体 delegate 同款；程序贴图全不透明不受影响，其余型保持 Opaque 零回归）。
                                 alphaMode: spawnerRoot.cageMobType === EntityManager.MobNightwalker
-                                           && miniMobSpin.miniPackTex !== null
+                                           && miniMobBob.miniPackTex !== null
                                            ? PrincipledMaterial.Mask : PrincipledMaterial.Opaque
                                 alphaCutoff: 0.5
                             }
@@ -10601,7 +10608,7 @@ Window {
                                     // [lessons-learned] Repeater 创建的 3D delegate 默认 parent=null（孤儿不渲染），
                                     //   onCompleted 显式 reparent 进 miniMobBody（mobBurnFlames 同款）。
                                     Component.onCompleted: if (parent === null) parent = miniMobBody
-                                    visible: miniMobSpin.miniPackTex === null
+                                    visible: miniMobBob.miniPackTex === null
                                     Model {
                                         geometry: UnitCube {}
                                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: modelData.color }
