@@ -1200,16 +1200,23 @@ private:
     //   SQLite round-trip 保真（旧存档无 type 位 → 解码端按 bit0 兼容分流，见 spawnerMobTypeForState）。
     void placeDungeons();
     // t484/t565 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（地板/轨道）+ 蜘蛛网 + 暴露矿石 +
-    //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft；**t565 重做为连通网络**）。carveCaves / carveCaveEntrances /
-    //   placeLavaLakes / placeDungeons 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kMineshaftMaxY=48]）
-    //   确定性散布矿井系统（hashColumn + seed 偏移，PLAN §2-K）：**中央 7×7×4 交叉洞室（角落洞穴，各巷道端口
-    //   互通 = 连通网络）+ 3..4 条 L 形折线巷道**（主向 lenA 段 + ±90° 转向 lenB 段，3×3 截面；清空气、铺地板
-    //   —— t565 按矿井 hash 选 Planks 或 Stone、按间距放 WoodFence 立柱、立柱顶按概率放 Torch 火把（t565 ③）、
-    //   中线**每段连续**铺 Rail 铁轨（t565 ④）+ 铺后统一算 RailConn 连接 state（直 / 拐角 / 十字形态）、间隙散布
-    //   Cobweb 蜘蛛网、巷壁散布 CoalOre/IronOre 矿石、洞室内放带 ChestStateMineshaftFlag 的 Chest 宝藏箱（首开
-    //   填充由 Main.qml.openChest 据标记触发 mineshaftChestPool））。巷道被周围实体岩封闭 → 黑暗 + 火把点光。
-    //   纯函数于 seed → 同 seed 同矿井分布（PLAN §2-K）。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由
-    //   isMineshaftChest 判定。
+    //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft；**t1001 逐方块重建：placeMineshaft 内部 piece 化**，
+    //   考据 minecraft.wiki Mineshaft/Structure）。carveCaves / carveCaveEntrances / placeLavaLakes /
+    //   placeDungeons 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kMineshaftMaxY=48]）确定性散布
+    //   矿井系统（hashColumn + seed 偏移，PLAN §2-K）。piece 表：
+    //     ① pieceStartRoom 起点厅 10×10（每矿井一座）+ 双段拱顶（外环净高 3 / 内芯 4 + 外环 Planks 拱带）+
+    //        hash 洗牌 4 主向取 3..4 出口（各向至多一条巷道）；
+    //     ② pieceCorridor 巷道 3×3 L 形折线 + 支撑组每 4 格（两侧 WoodFence 双柱 + 柱顶封盖：~55%
+    //        火把 / 其余 Planks 柱冠，组级 25% 缺失）+ 残缺轨（hash 70% 保留 → 不连续）+ 顶角蛛网
+    //        12% + 巷壁矿石 15%；
+    //     ③ pieceIntersection 交叉口 5×5 + 四角 WoodFence 双层双柱 + Planks 柱冠；
+    //     ④ pieceSlope 斜坡段（折线第二段对角下切：地板每 2 步降 1 格，无楼梯块）；
+    //     ⑤ pieceSpiderRoom 洞穴蛛网室 7×7×3（中央 Spawner state=SpawnerStateSpider【偏差登记：MobSpider】
+    //        + 笼 4 邻格三层必网 + 内部 ~45% 蛛网只贴实体块 + 两短端栅栏 + 2 宽连接廊）；
+    //     ⑥ 矿井箱（【偏差登记：箱落地轨旁】Chest+ChestStateMineshaftFlag，轨旁空地落地 → isMineshaftChest
+    //        首开填充 mineshaftChestPool）。
+    //   铺后统一算 RailConn 连接 state（直 / 拐角 / 十字形态）。地板按矿井 hash 选 Planks / Stone（t565 ⑤）。
+    //   巷道被周围实体岩封闭 → 黑暗 + 火把点光。纯函数于 seed → 同 seed 同矿井分布（PLAN §2-K）。
     void placeMineshaft();
     // t485 沙漠神殿（spec「沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/
     //   骨头/腐肉）+ TNT 陷阱（踩压力板引爆）」；机制等价 MC 1.0 沙漠神殿 desert temple）。placeMineshaft 之后、

@@ -4931,9 +4931,10 @@ int main(int argc, char *argv[])
         //   池 = 僵尸 50% / 骷髅 25% / 蜘蛛 25%，爬行者（Stalker）退出地牢池（旧 40/25/20/15 池作废，
         //   合法演化）→ 单世界/池化爬行者笼绝迹 + 池化份额窗断言（小样本宽窗）。探针自建临时世界
         //   （矩阵 harness 共享 nextSlot 已耗尽 —— t799 教训）。
-        auto classifyWorldSpawners = [](World &w, int counts[4], int &stronghold, int &legacyUntyped, int &unknown) {
+        auto classifyWorldSpawners = [](World &w, int counts[4], int &stronghold, int &legacyUntyped,
+                                        int &unknown, int &mineshaftWeb) {
             for (int i = 0; i < 4; ++i) counts[i] = 0;
-            stronghold = 0; legacyUntyped = 0; unknown = 0;
+            stronghold = 0; legacyUntyped = 0; unknown = 0; mineshaftWeb = 0;
             for (int y = 0; y < w.height(); ++y)
                 for (int z = 0; z < w.depth(); ++z)
                     for (int x = 0; x < w.width(); ++x) {
@@ -4943,6 +4944,19 @@ int main(int argc, char *argv[])
                         //   只由 placeStronghold 写出（地牢池无蠹虫），按要塞计。
                         if (st == BlockRegistry::SpawnerStateSilverfishFlag
                             || st == BlockRegistry::SpawnerStateSilverfish) { ++stronghold; continue; }
+                        // t1001 合法演化：废弃矿井蛛网室（placeMineshaft pieceSpiderRoom）也写 MobSpider 笼
+                        //   （偏差登记 MobSpider / state 0x0E）。按笼周 7×7×3 蛛网密度分流 —— 笼 4 邻格三层
+                        //   必网（≥8 网即达）= 矿井蛛笼，单列 mineshaftWeb 登记不入地牢池窗；地牢蛛笼零网
+                        //   不误伤（巷道穿过残留散网 ≤3 量级，远低于阈值）。
+                        if (EntityManager().spawnerMobTypeForState(int(st)) == EntityManager::MobSpider) {
+                            int webs = 0;
+                            for (int dx = -3; dx <= 3 && webs < 8; ++dx)
+                                for (int dz = -3; dz <= 3 && webs < 8; ++dz)
+                                    for (int dy = 1; dy <= 3 && webs < 8; ++dy)
+                                        if (w.blockAt(x + dx, y - 1 + dy, z + dz) == BlockRegistry::Cobweb)
+                                            ++webs;
+                            if (webs >= 8) { ++mineshaftWeb; continue; }
+                        }
                         switch (EntityManager().spawnerMobTypeForState(int(st))) {
                         case EntityManager::MobShambler: ++counts[0]; break;
                         case EntityManager::MobBones:    ++counts[1]; break;
@@ -4956,6 +4970,7 @@ int main(int argc, char *argv[])
         int pooled[4] = { 0, 0, 0, 0 };
         const quint32 seeds786[] = { 20260821u, 777u, 424242u, 1337u, 90210u };
         int worldsChecked = 0;
+        int pooledMineshaftWeb = 0; // t1001 矿井蛛笼池化登记（不入地牢池窗）
         for (quint32 sd : seeds786) {
             World w786;
             // t999：rig 尺寸对齐 t995 128²×64 同 seed 池（原 96²×48 池 ~8 笼样本对「Stalker 退出池」
@@ -4965,8 +4980,9 @@ int main(int argc, char *argv[])
             w786.setDepth(128);
             w786.setHeight(64);
             w786.setSeed(int(sd));
-            int c[4], strong, legacyU, unk;
-            classifyWorldSpawners(w786, c, strong, legacyU, unk);
+            int c[4], strong, legacyU, unk, mineWeb;
+            classifyWorldSpawners(w786, c, strong, legacyU, unk, mineWeb);
+            pooledMineshaftWeb += mineWeb;
             ++worldsChecked;
             if (unk != 0 || legacyU != 0) { // 地牢池全类型化、无未知型
                 qInfo().noquote() << "  [t786 diag] seed" << sd << "dungeon pool unknown/untyped:" << unk << legacyU;
@@ -5007,7 +5023,8 @@ int main(int argc, char *argv[])
         }
         // review0903 #3 先例：diag 恒打印 —— 绿跑也留池化分布数值（退化为旧池 / 权重漂移可早察）。
         qInfo().noquote() << "  [t786 diag] pooled shambler/bones/stalker/spider" << pooled[0] << pooled[1]
-                          << pooled[2] << pooled[3] << "/" << pooledTotal << "over" << worldsChecked << "worlds";
+                          << pooled[2] << pooled[3] << "/" << pooledTotal << "over" << worldsChecked
+                          << "worlds mineshaftWebCages" << pooledMineshaftWeb;
         // ③ tickSpawners 据 state 刷对应型：手摆僵尸笼（state=SpawnerStateShambler）+ 合法 spawn 位，
         //    累计 tick 超 kSpawnerInterval(6s) 后应出 Shambler（非 Bones/Silverfish）；再换骷髅笼反证。
         //    spawn 条件（玩家近 / cap）语义不变——探针只验「型随笼」。
@@ -34246,6 +34263,221 @@ Item {
                              " bounds match footprint ring/roof cells incl. y-range, save->load voxel"
                              " rebind keeps bounds correct with no re-toast, source pins (guard/reset/"
                              "route/def/constants)";
+    }
+
+    // ── P-t1001 废弃矿井逐方块重建探针（R19.19 批 t1001；placeMineshaft piece 化重写验收面）──
+    //    rig：t995 同款 5 seed（20260821/777/424242/1337/90210）× 128×128×64 世界池。矿井中心复刻：
+    //    placeMineshaft 外层候选扫描（grid 36 / 40% / 抖动位 / margin / y 公式）全同源 —— hashColumn
+    //    为私有方法 → 探针侧 FNV-1a 复刻（同 basis/prime/avalanche，算法行源码钉防漂移）；候选再验
+    //    起点厅拱带签名（footprint 边环 36 格 Planks @ sy+4）为净样（海列跳过 / 双矿井重叠破坏 → 弃样，
+    //    同 t995 净样口径）。
+    //    腿：①起点厅（每净样）：拱带 36/36 Planks + 内芯气柱（中心 sy+4 Air）+ 出口数 ∈ [2,4]（四向
+    //        房缘外首格 sy+2 头层空气探）且池内见 4 出口矿井（考据 up to 4 exits）；
+    //    ②巷道 3×3：出口巷 s=6 处 w=±1 双侧空气（3 宽在位）池化 ≥70%，双侧实壁 ≥60%；
+    //    ③支撑间距窗：出口巷 ±1 侧线成对 WoodFence 柱步距全部 ≡0 (mod 4) 且 ≥4、池内 min==4
+    //        （阴性轮敏感：kSupportInterval 回退 5 → 步距 5 mod 4 ≠ 0 → 恰红）；
+    //    ④蛛网室：MobSpider 刷怪笼在场（7×7×3 域蛛网密度窗 [35,65]%；笼 4 邻格三层必网 → t995 地牢
+    //        净样口径不受染：sy+3 层笼邻有网 → 空气游程 0 ≠ {5,7} 恒弃样；地牢蛛笼密度 0 → 不入样）
+    //        + 笼座实体地板（阴性轮敏感：pieceSpiderRoom 摘除 → 在场腿恰红）；
+    //    ⑤残缺轨窗：净样出口巷中线头层可走格轨占率 ∈ [50,90]%（<100% = 残缺真发生）；
+    //    ⑥箱贴轨（偏差「箱落地轨旁」）：每 ChestStateMineshaftFlag 箱四水平邻含 Rail 且池内 ≥1；
+    //    ⑦火把窗：矿井域 y∈{sy+3, sy+4} Torch 池化 ≥15（火把只出现在支撑过梁顶）；
+    //    ⑧源码钉：piece 表五件 + 支撑间隔常量行 + 笼 state 行 + 残缺轨率行 + hashColumn 算法行。
+    {
+        bool ok = true;
+        struct ShaftT1001 { int cx, cz, sy; };
+        std::vector<ShaftT1001> shaftsT1001;
+        int candT1001 = 0;
+        int exitMinT1001 = 99, exitMaxT1001 = 0;
+        int sectionTotal = 0, sectionClean = 0, sectionWalls = 0;
+        bool gapOkT1001 = true;
+        int gapMinT1001 = 999;
+        int railWalk = 0, railOn = 0;
+        int chestT1001 = 0;
+        bool chestRailSide = true;
+        bool spiderSeen = false;
+        int spiderWebPct = -1;
+        int torchT1001 = 0;
+        const quint32 seedsT1001[] = { 20260821u, 777u, 424242u, 1337u, 90210u };
+        EntityManager emT1001;
+        for (quint32 sd : seedsT1001) {
+            World wT1001;
+            wT1001.setWidth(128);
+            wT1001.setDepth(128);
+            wT1001.setHeight(64);
+            wT1001.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含 placeMineshaft）
+            // hashColumn 私有 → FNV-1a 复刻（与 World::hashColumn 同 basis / prime / avalanche；算法行钉源码）
+            auto colHashT1001 = [](int seed, int x, int z) -> quint32 {
+                quint32 h = 0x811c9dc5u;
+                auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+                step(quint32(seed));
+                step(quint32(x));
+                step(quint32(z));
+                h ^= h >> 16;
+                h *= 0x7feb352du;
+                h ^= h >> 15;
+                return h;
+            };
+            const int wW = wT1001.width(), wD = wT1001.depth();
+            const quint32 mineSeed = sd + 15047u; // 与 placeMineshaft 同偏移（mineSeed = m_seed + 15047）
+            for (int bx = 18; bx < wW; bx += 36) { // 复刻外层候选网格（kMineshaftGrid=36）
+                for (int bz = 18; bz < wD; bz += 36) {
+                    const quint32 r = colHashT1001(int(mineSeed), bx, bz);
+                    if ((r % 100u) >= 40u) continue;                    // kMinePct=40
+                    const int jx = int((r >> 1) & 0xFu) % 19 - 9;       // 抖动位（span=18，同源）
+                    const int jz = int((r >> 5) & 0xFu) % 19 - 9;
+                    const int cx = bx + jx, cz = bz + jz;
+                    if (cx < 16 || cz < 16 || cx >= wW - 16 || cz >= wD - 16) continue; // kMargin=16
+                    const int h = std::min(wT1001.heightAt(cx, cz), 63);
+                    const int yLo = 6;                            // kBedrockTop+2
+                    const int yHi = std::min(43, h - 11);         // kMineshaftMaxY-kRoomH-1 / h-kSurfaceFloor-kRoomH-1
+                    if (yHi <= yLo) continue;
+                    const int sy = yLo + int((r >> 9) & 0x1Fu) % (yHi - yLo + 1);
+                    ++candT1001;
+                    // 净样签名：起点厅拱带（10×10 footprint 边环 36 格 Planks @ sy+4）
+                    int band = 0;
+                    for (int dx = 0; dx < 10; ++dx)
+                        for (int dz = 0; dz < 10; ++dz) {
+                            const bool edge = (dx == 0 || dx == 9 || dz == 0 || dz == 9);
+                            if (edge && wT1001.blockAt(cx - 5 + dx, sy + 4, cz - 5 + dz) == BR::Planks)
+                                ++band;
+                        }
+                    if (band != 36) continue; // 海列 / 重叠破坏 / 口径漂移 → 弃样
+                    shaftsT1001.push_back({ cx, cz, sy });
+                    ok = ok && wT1001.blockAt(cx, sy + 4, cz) == BR::Air; // ① 内芯气柱（拱顶高段开放）
+                    // ① 出口 + ②③⑤ 巷道行走采样（段 A ≤ kTunnelLenMax=10 步 → 11 步窗）
+                    static const int kDirsT1001[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                    int exitN = 0;
+                    for (const auto &dd : kDirsT1001) {
+                        const int dx = dd[0], dz = dd[1];
+                        const int sx = cx + (dx > 0 ? 5 : (dx < 0 ? -6 : 0)); // 房缘外首格（同生成端）
+                        const int sz = cz + (dz > 0 ? 5 : (dz < 0 ? -6 : 0));
+                        if (wT1001.blockAt(sx, sy + 2, sz) != BR::Air) continue; // 此向无出口
+                        ++exitN;
+                        int prevPair = -1; // 成对栅栏柱步位（支撑间距核；杂源单柱不成对 → 忽略）
+                        int steps = 0, rails = 0;
+                        for (int s = 0; s < 11; ++s) {
+                            const int px = sx + dx * s, pz = sz + dz * s;
+                            if (wT1001.blockAt(px, sy + 2, pz) != BR::Air) break; // 头层堵 → 巷尽
+                            ++steps;
+                            if (wT1001.blockAt(px, sy + 1, pz) == BR::Rail) ++rails;
+                            const bool fL = wT1001.blockAt(px - dz, sy + 1, pz - dx) == BR::WoodFence;
+                            const bool fR = wT1001.blockAt(px + dz, sy + 1, pz + dx) == BR::WoodFence;
+                            if (fL && fR) { // 支撑双柱成对
+                                if (prevPair >= 0) {
+                                    const int gap = s - prevPair;
+                                    if (gap < 4 || gap % 4 != 0) gapOkT1001 = false; // ③ 间距 4 窗
+                                    if (gap < gapMinT1001) gapMinT1001 = gap;
+                                }
+                                prevPair = s;
+                            }
+                            if (s == 6) { // ② 3×3 截面（w=±1 空气 + w=±2 实壁统计）
+                                const bool aL = wT1001.blockAt(px - dz, sy + 2, pz - dx) == BR::Air;
+                                const bool aR = wT1001.blockAt(px + dz, sy + 2, pz + dx) == BR::Air;
+                                const bool wL = wT1001.blockAt(px - 2 * dz, sy + 2, pz - 2 * dx) != BR::Air;
+                                const bool wR = wT1001.blockAt(px + 2 * dz, sy + 2, pz + 2 * dx) != BR::Air;
+                                ++sectionTotal;
+                                if (aL && aR) {
+                                    ++sectionClean;
+                                    if (wL && wR) ++sectionWalls;
+                                }
+                            }
+                        }
+                        if (steps >= 8) { // ⑤ 残缺轨窗样本（足够长的净巷）
+                            railWalk += steps;
+                            railOn += rails;
+                        }
+                    }
+                    if (exitN < exitMinT1001) exitMinT1001 = exitN;
+                    if (exitN > exitMaxT1001) exitMaxT1001 = exitN;
+                    // ⑦ 火把窗（矿井域 y∈{sy+3, sy+4} Torch 计数；火把只在支撑立柱顶，考据「火把部分巷道」）
+                    for (int tx = std::max(0, cx - 24); tx <= std::min(wW - 1, cx + 24); ++tx)
+                        for (int tz = std::max(0, cz - 24); tz <= std::min(wD - 1, cz + 24); ++tz)
+                            for (int ty = sy + 3; ty <= sy + 4; ++ty)
+                                if (wT1001.blockAt(tx, ty, tz) == BR::Torch) ++torchT1001;
+                }
+            }
+            // ④⑥ 池级扫描：MobSpider 笼（蛛网室净样）+ 矿井箱贴轨
+            for (int y = 7; y < 60; ++y)
+                for (int z = 1; z < wD - 1; ++z)
+                    for (int x = 1; x < wW - 1; ++x) {
+                        const quint8 b = wT1001.blockAt(x, y, z);
+                        if (b == BR::Spawner) {
+                            if (emT1001.spawnerMobTypeForState(int(wT1001.stateAt(x, y, z)))
+                                != EntityManager::MobSpider) continue;
+                            if (wT1001.blockAt(x, y - 1, z) == BR::Air) continue; // 笼座须实体地板
+                            int webs = 0; // 7×7×3 域蛛网密度（笼心；笼自身格不计）
+                            for (int dx = -3; dx <= 3; ++dx)
+                                for (int dz = -3; dz <= 3; ++dz)
+                                    for (int dy = 1; dy <= 3; ++dy) {
+                                        if (dx == 0 && dz == 0 && dy == 1) continue;
+                                        if (wT1001.blockAt(x + dx, y - 1 + dy, z + dz) == BR::Cobweb)
+                                            ++webs;
+                                    }
+                            const int pct = webs * 100 / (49 * 3 - 1);
+                            if (pct >= 35 && pct <= 65) { // ④ 密度窗（地牢蛛笼密度 0 → 不入样）
+                                spiderSeen = true;
+                                spiderWebPct = pct;
+                            }
+                        } else if (b == BR::Chest) {
+                            if ((wT1001.stateAt(x, y, z) & BR::ChestStateMineshaftFlag) == 0) continue;
+                            ++chestT1001;
+                            bool railAdj = false; // ⑥ 偏差「箱落地轨旁」：四水平邻含 Rail
+                            static const int kChestNbT1001[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                            for (const auto &nb : kChestNbT1001)
+                                if (wT1001.blockAt(x + nb[0], y, z + nb[1]) == BR::Rail) railAdj = true;
+                            if (!railAdj) chestRailSide = false;
+                        }
+                    }
+        }
+        // ⑧ 源码钉（piece 表五件 + 阴性轮敏感常量 + 笼 state + 残缺轨率 + hash 复刻同源）
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile wf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
+            okPin = src.contains(QStringLiteral("constexpr int kSupportInterval  = 4;"))
+                 && src.contains(QStringLiteral("pieceStartRoom"))
+                 && src.contains(QStringLiteral("pieceCorridor"))
+                 && src.contains(QStringLiteral("pieceIntersection"))
+                 && src.contains(QStringLiteral("pieceSlope"))
+                 && src.contains(QStringLiteral("pieceSpiderRoom"))
+                 && src.contains(QStringLiteral("BlockRegistry::Spawner, BlockRegistry::SpawnerStateSpider"))
+                 && src.contains(QStringLiteral("(hashVoxel(mineSeed ^ 0x5A17u, ax, ry, az) % 100u) < kRailPct"))
+                 && src.contains(QStringLiteral("quint32 World::hashColumn(int seed, int x, int z) const"));
+        }
+        ok = ok && int(shaftsT1001.size()) >= 6;                            // 净样池充足
+        ok = ok && exitMinT1001 >= 2 && exitMinT1001 <= 4;                  // ① 出口 1-4 窗
+        ok = ok && exitMaxT1001 >= 4;                                       //    池内见 4 出口矿井
+        ok = ok && sectionTotal > 0 && sectionClean * 10 >= sectionTotal * 7;      // ② 3×3 在位 ≥70%
+        ok = ok && sectionClean > 0 && sectionWalls * 10 >= sectionClean * 6;      //    双侧实壁 ≥60%
+        ok = ok && gapOkT1001 && gapMinT1001 == 4;                          // ③ 支撑间距 4 窗
+        ok = ok && spiderSeen;                                              // ④ 蛛网室在场
+        const int railPctT1001 = railWalk > 0 ? railOn * 100 / railWalk : -1;
+        ok = ok && railWalk > 0 && railPctT1001 >= 50 && railPctT1001 <= 90; // ⑤ 残缺轨窗
+        ok = ok && chestT1001 >= 1 && chestRailSide;                        // ⑥ 箱贴轨
+        ok = ok && torchT1001 >= 15;                                        // ⑦ 火把窗
+        ok = ok && okPin;                                                   // ⑧ 源码钉
+        if (!ok)
+            qInfo().noquote() << "  [t1001 diag] shafts" << shaftsT1001.size() << "/" << candT1001
+                              << "exits" << exitMinT1001 << ".." << exitMaxT1001
+                              << "section" << sectionClean << "/" << sectionTotal << "walls"
+                              << sectionWalls << "gapMin" << gapMinT1001 << "gapOk" << gapOkT1001
+                              << "rail%" << railPctT1001 << "(" << railOn << "/" << railWalk << ")"
+                              << "spider" << spiderSeen << "web%" << spiderWebPct
+                              << "chests" << chestT1001 << "railSide" << chestRailSide
+                              << "torches" << torchT1001 << "pin" << okPin;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1001 mineshaft per-block rebuild: piece-based placeMineshaft (start"
+                             " room 10x10 with arched plank band + 3..4 radial exits, 3x3 corridors"
+                             " with supports every 4 (min pooled gap" << gapMinT1001 << "), fragmented"
+                             " rails" << railPctT1001 << "% in [50,90], 5x5 pillared intersections,"
+                             " diagonal slope pieces, cave-spider web rooms (spawner state Spider, web"
+                             " density" << spiderWebPct << "%), chests rail-side" << chestT1001
+                          << "torches" << torchT1001 << ") over" << shaftsT1001.size() << "clean"
+                             " shafts /" << candT1001 << "candidates, piece-table pins";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
