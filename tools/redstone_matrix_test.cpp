@@ -33504,6 +33504,195 @@ Item {
                              " authority (pins)";
     }
 
+    // ── t995 地底结构对照首批修正探针（共享 rig：多 seed 小世界池 → 地牢房间逐房采样；worldgen 行为级
+    //    + 源码钉，同 t759/t786 先例收录）──
+    // 修正是 t995「对照 MC 1.0 布局」首批三项（全落 placeDungeons）：
+    //    a) 房间石材 Cobble+Stone 混排 → Cobble+MossyCobble 苔石混排（地板苔率 50% 重于墙/顶 25%）；
+    //    b) 内空 7×7 恒定 → W/Z 各 hash 独立位随机 5/7（机制等价 MC 1.0 地牢 5×5..7×7 随机见方）；
+    //    c) 恒 1 箱 → 1-2 箱（~50% 对角角位再加一箱，同地牢 flag 首开各自填池）。
+    // rig：t786 同款 5 seed（20260821/777/424242/1337/90210）× 128×128×64 世界池（96² 每 5 seed 仅
+    //   ~3 间房样本太少 → 升 128² 候选格 16→25/世界）。以地牢刷怪笼（解码 ∈ 僵尸/骷髅/蜘蛛/爬行者；
+    //   要塞银鱼笼除外）为锚逐房采样。层位（锚 y = 刷怪笼层 = cy+1）：内空空气 cy..cy+3、地板板 cy-1、
+    //   顶板 cy+4、箱恒在 cy+1。采样：笼顶二层（cy+3 —— 无箱/无笼纯空气层）量 ±x/±z 连续 Air 游程 →
+    //   内空 W/D（对称且 ∈ {5,7} 才算净样，洞穴/矿井破墙样本弃置不进统计）；净样内统计地板（cy-1）与
+    //   墙环（cy..cy+2）+ 顶板（cy+4）苔石/圆石计数 + 箱层（cy+1）带 ChestStateDungeonFlag 的 Chest 数。
+    struct Room995 {
+        int w = 0, d = 0;
+        int mossyFloor = 0, cobbleFloor = 0; // 地板板（cy-1 = 锚 y-2）苔石/圆石计数
+        int mossyWall = 0, cobbleWall = 0;   // 墙环（cy..cy+2）+ 顶板（cy+4 = 锚 y+3）苔石/圆石计数
+        int chests = 0;                      // 箱层（cy+1 = 锚 y）带 ChestStateDungeonFlag 的 Chest 数
+        bool chest2Opposite = true;          // 二箱若存在，是否落在对角角位
+    };
+    std::vector<Room995> rooms995;
+    int dungeonRooms995 = 0; // 含破墙弃样（diag 用）
+    {
+        const quint32 seeds995[] = { 20260821u, 777u, 424242u, 1337u, 90210u }; // 同 t786 池
+        EntityManager em995;
+        for (quint32 sd : seeds995) {
+            World w995;
+            w995.setWidth(128);
+            w995.setDepth(128);
+            w995.setHeight(64);
+            w995.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含 placeDungeons）
+            for (int y = 7; y + 4 < w995.height(); ++y) // 地牢 cy ≥ 6 → 笼层 y = cy+1 ≥ 7；顶 cy+4 = y+3
+                for (int z = 1; z < w995.depth() - 1; ++z)
+                    for (int x = 1; x < w995.width() - 1; ++x) {
+                        if (w995.blockAt(x, y, z) != BlockRegistry::Spawner) continue;
+                        const int mt = em995.spawnerMobTypeForState(int(w995.stateAt(x, y, z)));
+                        if (mt != EntityManager::MobShambler && mt != EntityManager::MobBones
+                            && mt != EntityManager::MobSpider && mt != EntityManager::MobStalker)
+                            continue; // 要塞银鱼笼 / 未知型 → 非地牢
+                        ++dungeonRooms995;
+                        // 量内空（笼顶二层 y+2 = cy+3，纯空气层）±x/±z 连续 Air 游程（cap 6 防破墙长廊）。
+                        auto run995 = [&](int dx, int dz) {
+                            int n = 0;
+                            while (n < 6 && w995.blockAt(x + dx * (n + 1), y + 2, z + dz * (n + 1)) == BlockRegistry::Air)
+                                ++n;
+                            return n;
+                        };
+                        const int rxp = run995(1, 0), rxm = run995(-1, 0);
+                        const int rzp = run995(0, 1), rzm = run995(0, -1);
+                        const int rw = rxp + rxm + 1, rd = rzp + rzm + 1;
+                        if (rxp != rxm || rzp != rzm || (rw != 5 && rw != 7) || (rd != 5 && rd != 7))
+                            continue; // 洞穴/矿井破墙 / 非净样 → 弃置
+                        Room995 r;
+                        r.w = rw; r.d = rd;
+                        const int x0 = x - rxm, z0 = z - rzm; // 内空原点角（角箱位）
+                        const int x1 = x + rxp, z1 = z + rzp; // 内空对角角（二箱位）
+                        // 地板板（y-2 = cy-1）全幅矩形（含墙 footprint 下地板，同 placeDungeons 填充域）。
+                        for (int fx = x0 - 1; fx <= x1 + 1; ++fx)
+                            for (int fz = z0 - 1; fz <= z1 + 1; ++fz) {
+                                const quint8 fb = w995.blockAt(fx, y - 2, fz);
+                                if (fb == BlockRegistry::MossyCobble) ++r.mossyFloor;
+                                else if (fb == BlockRegistry::Cobble) ++r.cobbleFloor;
+                            }
+                        // 墙环（y-1..y+2 = cy..cy+2 的边界格）+ 顶板（y+3 = cy+4 全幅）苔/圆石计数。
+                        for (int wy = y - 1; wy <= y + 3; ++wy)
+                            for (int fx = x0 - 1; fx <= x1 + 1; ++fx)
+                                for (int fz = z0 - 1; fz <= z1 + 1; ++fz) {
+                                    const bool edge = (fx == x0 - 1 || fx == x1 + 1 || fz == z0 - 1 || fz == z1 + 1);
+                                    const bool cap = (wy == y + 3);
+                                    if (!edge && !cap) continue;
+                                    const quint8 wb = w995.blockAt(fx, wy, fz);
+                                    if (wb == BlockRegistry::MossyCobble) ++r.mossyWall;
+                                    else if (wb == BlockRegistry::Cobble) ++r.cobbleWall;
+                                }
+                        // 箱层（y = cy+1）地牢箱清点 + 二箱对角位核。
+                        for (int fx = x0; fx <= x1; ++fx)
+                            for (int fz = z0; fz <= z1; ++fz)
+                                if (w995.blockAt(fx, y, fz) == BlockRegistry::Chest
+                                    && (w995.stateAt(fx, y, fz) & BlockRegistry::ChestStateDungeonFlag) != 0) {
+                                    ++r.chests;
+                                    // 箱必落角位：原点角 (x0,z0) 或对角角 (x1,z1)，其余位置 = 形态破坏。
+                                    if (!(fx == x0 && fz == z0) && !(fx == x1 && fz == z1))
+                                        r.chest2Opposite = false;
+                                }
+                        rooms995.push_back(r);
+                    }
+        }
+    }
+    const int clean995 = int(rooms995.size());
+
+    // P-t995a 苔石混排探针：净样池 ≥4；池内地板苔/圆石两材质齐 + 墙顶两材质齐（混排真发生，非全苔/
+    //   全圆石退化）；池化地板苔率 > 墙顶苔率（50% vs 25% 方向性，整数叉积式防除零）；源码钉（旧
+    //   Cobble+Stone 形态绝迹 + 新苔石混排行 verbatim）。
+    {
+        bool ok = clean995 >= 4;
+        int mf = 0, cf = 0, mw = 0, cw = 0;
+        for (const Room995 &r : rooms995) {
+            mf += r.mossyFloor; cf += r.cobbleFloor; mw += r.mossyWall; cw += r.cobbleWall;
+        }
+        if (!(mf > 0 && cf > 0 && mw > 0 && cw > 0)) ok = false;
+        if (!(mf * (mw + cw) > mw * (mf + cf))) ok = false; // mf/(mf+cf) > mw/(mw+cw)
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile wf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
+            if (src.isEmpty()
+                || src.contains(QStringLiteral("(wb % 100u) < 25u ? BlockRegistry::Stone : BlockRegistry::Cobble"))
+                || !src.contains(QStringLiteral("return (wb % 100u) < mossyPct ? BlockRegistry::MossyCobble : BlockRegistry::Cobble; // t995 苔石混排"))) {
+                qInfo().noquote() << "  [t995a diag] source pin miss src" << src.isEmpty();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t995a dungeon masonry: cobble+MossyCobble mix (floor mossy rate 50% >"
+                             " wall/ceiling 25%) replaces the stale cobble+stone mix in placeDungeons,"
+                             " MC 1.0 dungeon masonry look; pooled floor mossy" << mf << "cobble" << cf
+                          << "wall mossy" << mw << "cobble" << cw << "over" << clean995 << "clean rooms";
+    }
+
+    // P-t995b 内空 5/7 随机探针：净样池 ≥4；全部净样 W/D ∈ {5,7}（采样构造已滤，此处防御复查）；
+    //   池内 5 与 7 两种尺寸均出现（随机化真发生，非恒 7 摆设）；源码钉（bit28/29 取值行 verbatim）。
+    {
+        bool ok = clean995 >= 4;
+        bool sawFive = false, sawSeven = false;
+        for (const Room995 &r : rooms995) {
+            if ((r.w != 5 && r.w != 7) || (r.d != 5 && r.d != 7)) ok = false;
+            if (r.w == 5 || r.d == 5) sawFive = true;
+            if (r.w == 7 || r.d == 7) sawSeven = true;
+        }
+        if (!sawFive || !sawSeven) {
+            qInfo().noquote() << "  [t995b diag] size variety missing sawFive" << sawFive
+                              << "sawSeven" << sawSeven << "clean" << clean995
+                              << "sampled" << dungeonRooms995;
+            ok = false;
+        }
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile wf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
+            if (!src.contains(QStringLiteral("const int roomW = ((r >> 28) & 1u) ? 5 : 7; // t995 内空宽 5/7"))
+                || !src.contains(QStringLiteral("const int roomD = ((r >> 29) & 1u) ? 5 : 7; // t995 内空深 5/7"))) {
+                qInfo().noquote() << "  [t995b diag] source pin miss";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t995b dungeon room size randomization: interior W/D hash-picked 5/7"
+                             " per room (MC 5x5..7x7 variety, was fixed 7x7), both sizes present across"
+                             " pooled seeds; clean rooms" << clean995 << "/" << dungeonRooms995;
+    }
+
+    // P-t995c 地牢 1-2 箱探针：每净样 1..2 箱（恒有原点角箱，最多原点+对角两箱）；池内 ≥1 间双箱房
+    //   （~50%/间，4+ 净样下全单箱概率 <7%，且种子固定 → 结果确定）；双箱房第二箱必在对角角位；
+    //   源码钉（对角二箱写入行 verbatim + bit30 注锚）。
+    {
+        bool ok = clean995 >= 4;
+        int twoChestRooms = 0;
+        for (const Room995 &r : rooms995) {
+            if (r.chests < 1 || r.chests > 2) ok = false;
+            if (r.chests == 2) {
+                ++twoChestRooms;
+                if (!r.chest2Opposite) ok = false;
+            }
+        }
+        if (twoChestRooms < 1) {
+            qInfo().noquote() << "  [t995c diag] no two-chest dungeon in pooled seeds, clean" << clean995;
+            ok = false;
+        }
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile wf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
+            if (!src.contains(QStringLiteral("if (((r >> 30) & 1u) == 0u) // t995 对角二箱（~50%）"))
+                || !src.contains(QStringLiteral("m_chunks.setBlock(cx + roomW - 1, cy + 1, cz + roomD - 1, BlockRegistry::Chest,"))) {
+                qInfo().noquote() << "  [t995c diag] source pin miss";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t995c dungeon chest count 1-2: every clean room has its corner chest and"
+                             " ~50% rooms carry a second chest at the far corner (MC 1.0 dungeon chest"
+                             " count), two-chest rooms" << twoChestRooms << "/" << clean995;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
