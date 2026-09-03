@@ -19,7 +19,10 @@
 //   「挖矿时间到」(←合成台) →「获得升级」→「钻石!」→「附魔师」→「书虫」/「铁匠」(←附魔师)；
 //   「耕种时间到」(←合成台，t752；与「出击时间」「挖矿时间到」并列的第三分支，首次合成任意材质锄头)
 //   →「农夫」(←耕种时间到，t752 由独立根重挂——「做锄头」作前置、「收获 10 作物」为其后继)。
-//   独立根线（t637；t752 后仅剩两条）：「起航」（骑船）/「发射!」（发射器触发）各自独立根。
+//   独立根线（t637；t752 后仅剩两条，t1000 起三条）：「起航」（骑船）/「发射!」（发射器触发）/
+//   「隔墙有眼」（t1000 进入要塞结构区域——用户口径「进入到末地要塞的结构里面去了」；标准 MC 同名进度
+//   跟随末影之眼，本工程无该物品 → 按进入结构落地：PlayerController tick 内 insideStronghold 边沿 →
+//   enteredStronghold 信号 → Main.qml 路由）各自独立根。
 //   父成就未解锁时子成就不解锁（unlock 前置检查）。iconId = 节点图标（QML 树节点显示）。
 const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
 {
@@ -66,6 +69,11 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
           int(RecipeRegistry::OakBoatId) },
         { "dispense",       nullptr,          "发射!",      "让发射器或投掷器弹出物品",
           int(BlockRegistry::Dispenser) },
+        // t1000 独立根：「隔墙有眼」——进入要塞结构区域解锁（触发链见文件头独立根线注释；判定权威 =
+        //   World::insideStronghold 足迹口径）。iconId = 末地传送门框架 EndPortal（要塞传送门房标志物，
+        //   111 家族）。
+        { "entered_stronghold", nullptr,      "隔墙有眼",   "发现了藏在地底深处的要塞",
+          int(BlockRegistry::EndPortal) },
     };
     return kDefs;
 }
@@ -231,6 +239,10 @@ void PlayerProgress::onBoatBoarded() { unlock("set_sail"); }
 
 // 发射器/投掷器弹出物品 → 「发射!」。
 void PlayerProgress::onDispensed() { unlock("dispense"); }
+
+// 进入要塞结构区域 → 「隔墙有眼」（t1000；player.enteredStronghold 一次性边沿信号经 Main.qml 路由）。
+//   unlock 幂等：重复进出的重复沿 / 读档重进的重放沿均早退，不重发 toast。
+void PlayerProgress::onEnteredStronghold() { unlock("entered_stronghold"); }
 
 // 附魔台附魔成功 → 「附魔师」。
 void PlayerProgress::onEnchanted() { unlock("enchanter"); }

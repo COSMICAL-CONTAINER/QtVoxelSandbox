@@ -239,6 +239,22 @@ void World::rebindStrongholdPortalFromVoxels()
             << m_strongholdPortalZ << "frames=" << c.count;
 }
 
+// t1000 成就「隔墙有眼」单一权威判定（契约见 world.h 声明处头注释）。结构原点 = m_strongholdPortal*
+//   记录值反解（记录偏移常量 kStrongholdPortalDy/Dz 与 placeStronghold 记录处同源引用，防漂移）；足迹 =
+//   水平 ±kStrongholdHalf（含墙环 cell）+ 竖直 [cy, cy+kStrongholdWallH+1]（含地板 / 顶板层）。连续坐标
+//   floor 取整后逐轴闭区间（cell 口径与 placeStronghold 体素足迹一一对应）。m_hasStronghold=false 恒 false。
+bool World::insideStronghold(double x, double y, double z) const
+{
+    if (!m_hasStronghold) return false;
+    const int cx = m_strongholdPortalX;                            // 记录点 dx 偏移 0
+    const int cy = m_strongholdPortalY - kStrongholdPortalDy;      // 记录 y = cy + 4 → 反解原点
+    const int cz = m_strongholdPortalZ - kStrongholdPortalDz;      // 记录 z = cz - 18 → 反解原点
+    const int bx = int(std::floor(x)), by = int(std::floor(y)), bz = int(std::floor(z));
+    return bx >= cx - kStrongholdHalf && bx <= cx + kStrongholdHalf
+        && bz >= cz - kStrongholdHalf && bz <= cz + kStrongholdHalf
+        && by >= cy && by <= cy + kStrongholdWallH + 1;
+}
+
 // t756 出生列确定性解析（机制等价 MC 1.0 spawn 搜索「自中心外扫找首个安全露天落点」；见头注释四守卫）。
 //   根因背景：placeTrees 无出生邻域豁免，固定出生列 (80,80) 恰命中密度筛选即生树（种子 42 即中）；而出生链
 //   只按 heightAt（纯 fBm 地表、不含树）贴 Y → 玩家脚底嵌树干 / 头部嵌树冠。此处改「假定出生列」为「选定
@@ -7732,9 +7748,11 @@ void World::placeStronghold()
     constexpr int kBedrockTop      = 4;     // 不动基岩顶（同 placeDungeons / placeMineshaft / placeJungleTemple）
     constexpr int kStrongholdMaxY  = 30;    // 要塞最高 y（spec「Y<30 地下深」；避开近地表 / 仅地下深处）
     constexpr int kSurfaceGap      = 5;     // 与地表保留的最小距离（要塞上方至少 5 格石顶 → 不破地表、封闭黑暗）
-    constexpr int kHalf            = 22;    // 建筑外圈半边（45×45 = (2*22+1)² 外圈；t713 扩建自 21×21 约 4.5× 面积）
+    constexpr int kHalf            = kStrongholdHalf; // 建筑外圈半边（45×45 = (2*22+1)² 外圈；t713 扩建自 21×21 约 4.5× 面积）。
+                                                       //   t1000 起引用类常量 kStrongholdHalf（与 insideStronghold
+                                                       //   判定同源，防两处字面量漂移）。
     constexpr int kMargin          = kHalf + 1; // 留边界（外圈半边 22 + 抖动余量 → 半径 ≤ 23 不越界）
-    constexpr int kWallH           = 8;     // 墙体高度层数（dy 1..8；地板 dy=0 / 顶板 dy=9 → 净高 8 格）。t759
+    constexpr int kWallH           = kStrongholdWallH; // 墙体高度层数（dy 1..8；地板 dy=0 / 顶板 dy=9 → 净高 8 格）。t759
                                             //   5→8：传送门房净空修复 —— 框架立于高台顶 dy=4，旧净高 5 时框架
                                             //   之上仅 1 格 Air（玩家 1.8 高无法跨过框架环走进环中心）；整体加高 3
                                             //   后框架顶之上 4 格 Air ≥ 验收「至少 3 格」。取「顶板上移 + 墙加高」
@@ -7743,6 +7761,7 @@ void World::placeStronghold()
                                             //   在新旧顶板交界处留「天然地形邻接面」（洞穴恰过即漏光破封闭黑暗）。
                                             //   入口走廊 / 北走廊 / 楼梯同为内部空间 → 净高同步 8（同步检查通过）。
                                             //   worldgen 常量改动仅新世界生效（旧存档体素不回填，B5 反推自适应）。
+                                            //   t1000 起引用类常量 kStrongholdWallH（同源防漂移）。
 
     int placed = 0;
     const int strongSeed = m_seed + 26513; // 要塞哈希偏移（与其它 worldgen hashColumn 解耦；纯整数加，确定性）
@@ -8021,10 +8040,11 @@ void World::placeStronghold()
         placeAt(candidates[size_t(bestIdx)][0], candidates[size_t(bestIdx)][1], candidates[size_t(bestIdx)][2]);
         // t729 记录要塞末地传送门中心格（供暗渊之眼右击寻路目标；见 world.h m_strongholdPortal* 头注释）。
         //   传送门房中心 = 环中心 (x), 门面 dy=4 (y), 房内 dz 中心 -18 (z)；全图唯一。重置先于判定（无候选 → 清）。
+        //   t1000：偏移引用类常量 kStrongholdPortalDy/Dz（与 insideStronghold 反解同源，防两处字面量漂移）。
         m_hasStronghold = true;
         m_strongholdPortalX = candidates[size_t(bestIdx)][0];
-        m_strongholdPortalY = candidates[size_t(bestIdx)][1] + 4;
-        m_strongholdPortalZ = candidates[size_t(bestIdx)][2] - 18;
+        m_strongholdPortalY = candidates[size_t(bestIdx)][1] + kStrongholdPortalDy;
+        m_strongholdPortalZ = candidates[size_t(bestIdx)][2] + kStrongholdPortalDz;
         ++placed;
     } else {
         m_hasStronghold = false; // 无候选要塞 → 清目标（世界重建 / 新种子时防陈旧坐标）

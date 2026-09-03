@@ -849,6 +849,12 @@ signals:
     //   掉落物任一路径成功）时发。呈现层 Connections → progress.onDispensed()（「发射!」）。仅玩家库存
     //   发射器路径（神殿陷阱 fallback 箭不算玩家机关成就）。同 cropHarvested 单向事件流模式。
     void dispenserFired();
+    // t1000 进入要塞结构区域（progress 成就埋点「隔墙有眼」）：tickImpl 内 World::insideStronghold（玩家
+    //   脚底）false→true **上升沿**发一次性事件信号（同 dispenserFired 事件级先例，禁每帧直发——上升沿
+    //   守卫 bool m_insideStronghold，setWorld / finishWorldLoad 重置）。呈现层 Connections →
+    //   progress.onEnteredStronghold()（unlock 幂等：重复进出的重复沿不重发 toast）。同 cropHarvested
+    //   单向事件流模式（PLAN §2 分层：Game/Physics 发语义事件，呈现层只消费）。
+    void enteredStronghold();
 
 public:
     // t889 整帧驱动入口（原 private slot）：QTimer(16ms) 连接它；矩阵探针（redstone_matrix_test）亦直调
@@ -1405,6 +1411,11 @@ private:
     bool m_eyeInWater = false;       // t201 眼位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInWaterChanged）
     bool m_eyeInLava = false;        // t351 眼位岩浆态缓存（tickImpl 每 tick 重算对比，翻转才 emit eyeInLavaChanged）
     bool m_feetInWater = false;      // t269 脚位水态缓存（tickImpl 每 tick 重算对比，翻转才 emit feetInWaterChanged）
+    // t1000 要塞进入沿守卫（enteredStronghold 一次性信号）：tickImpl 读 World::insideStronghold（脚底）
+    //   false→true 上升沿发信号后随值更新。换世界（setWorld）/ 读档重进（finishWorldLoad）重置 false
+    //   ——旧世界「已在要塞内」的陈旧 true 不得吞掉新世界的首个进入沿（两世界进度各自独立，进入事件
+    //   必须各自可发；unlock 幂等兜底防重复 toast）。
+    bool m_insideStronghold = false;
     // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
     float m_flowSoundLevel = 0.0f;
