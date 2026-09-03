@@ -19,7 +19,9 @@
 // state 编码（与 BlockRegistry::Id 注释 + playercontroller placeBlock 一致；机制等价 MC (id,metadata)）：
 //   slab        bit0      = 上半(1)/下半(0)
 //   stairs      bit[1:0]=朝向 0=+X 1=-X 2=+Z 3=-Z（楼梯朝该向开 / 背墙在对侧） bit2=上下倒置（整步在上、背墙在下）
-//   fence       —         （中心立柱 1.0 高（t801 视觉裁剪，碰撞仍 1.5）+ 四向横档连邻居；state=0；连接判定读 PartialNeighborCtx，t209）
+//   fence       —         （t991 对齐 MC：木/云杉 = 中心柱 4/16 见方 × 1.5 格高 + 四向双横杆（2/16 截面，
+//                          上下两道）连邻居；圆石墙 = 独立墙形（8/16 柱 + 1px 顶部凸缘 + 低连接拱）；
+//                          state=0；连接判定读 PartialNeighborCtx，t209 起 R1 口径不变）
 //   pressure_plate —      （贴地薄板；state bit0=踩下（t627）→ 板高压半 1/32；机制等价 MC 压力板被压下）
 //   lever/button —        （t662 重做：贴附着面小体——按钮凸钮单盒（按下压薄 1/16）/ 拉杆底座+摆棍两段阶梯盒；
 //                          state bit0=激活（t628）、bit[3:1]=附着面 0=贴地 1..4=四向贴墙（blockregistry.h
@@ -210,20 +212,19 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::WoodFence:
-    case BlockRegistry::CobbleFence: // t412 圆石墙（与 WoodFence 同几何；机制等价 MC 圆石墙）
     case BlockRegistry::SpruceFence: { // t466 云杉栅栏（与 WoodFence 同几何，tile=spruce_planks）
-        // t209 栅栏 = 中心立柱（0.4 见方）+ 四向横档（连接相邻栅栏 / 实体方块）。
-        //   t801 视觉高度裁到 **1 格**（立柱 y[0,1]，上档收进 1 格内）：旧 1.5 高视觉使立柱顶 + 上档探入
-        //   上格 0.5，贴栅栏放箱/靠墙摆件等场景见「0.5 格悬空穿模」观感。视觉与碰撞自此分离（机制等价
-        //   MC 栅栏语义：模型 1 格高、碰撞箱 1.5 高不可越——跳跃顶点 ~1.25 < 碰撞 1.5，玩家/怪物仍跳不过；
-        //   collisionAABBs(ShapeFence) 保持 {0.3,0,0.3,0.7,1.5,0.7} 不动，selectionAABBs/raycastAABBs/
-        //   solidTopOffset 同步 1.0 视觉）。贴图无需 v 区间适配：pushBox 各面 cu,cv 恒取单位 {0,1}
-        //   （整张瓦片铺满该面、随面拉伸采样），立柱 1.5→1.0 后侧贴图从 1.5:1 拉伸回到 1:1（比例反而更正）。
-        //   横档分上下两道（MC 式），每道从立柱中心延伸到格边；仅在该向「有连接」时画。连接判定 = 邻格为
-        //   任意栅栏（WoodFence/CobbleFence，t412 经 isFence 谓词）或 isSolid（实体整立方；不连空气/水/火把/
-        //   不完整方块，同 MC 栅栏只连栅栏与实体）。横档纯视觉（不进碰撞 AABB，机制等价 MC 栅栏 VoxelShape
-        //   仅立柱；玩家贴立柱碰撞即可挡）。
-        pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, 0.f, 1.0f, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        // t991 栅栏几何对齐 MC 1.0（用户「太难受了、完全不符合预期」→ 先对照 MC 形态逐项差修复：
+        //   t801 的 1.0 裁高被本任务按用户口径推翻，视觉/碰撞重归同高，柱顶探入上格与 MC 一致）。
+        //   木栅栏 = 中心柱（**4/16 见方** × **1.5 格高**——旧 0.4 见方过粗 / 1.0 高过矮，均不符 MC）
+        //   + 四向横杆（每向**两道**上下排列：下档 y 6/16..9/16、上档 y 12/16..15/16（MC 同值，t209 起
+        //   未变），截面收细到 **2/16 见方**（旧 0.4 厚横杆是「厚板」观感的主因），每道从格边延伸到
+        //   柱面（旧从格中心起 —— 柱内段纯 overdraw））。连接判定不变（t209 + Review#19 R1 口径：
+        //   isCollidable ∨ isFullCube——邻栅栏 / 实体方块连，空气 / 火把 / 水 / 无碰撞块不连 →
+        //   孤立栅栏 = 单柱）。横杆纯视觉（不进碰撞 AABB；碰撞仍走 shapeBoxes(ShapeFence) 的
+        //   {0.3,0,0.3,0.7,1.5,0.7} 立柱盒，跳跃越障语义零改动）。贴图无需 v 区间适配：pushBox 各面
+        //   cu,cv 恒取单位 {0,1}（整张瓦片铺满该面、随面拉伸采样）。selectionAABBs / raycastAABBs /
+        //   solidTopOffset 随视觉同步回 1.5 木柱盒（见 blockregistry.cpp 同名函数 t991 注）。
+        pushBox(verts, idx, lx, ly, lz, 0.375f, 0.625f, 0.f, 1.5f, 0.375f, 0.625f, tile, light, tileW, hx, hy, v0, v1);
         const auto connects = [](quint8 blk) {
             // 审查修 #19（Review 2026-08-23 低危）：t766 铁砧 solid=false 后旧谓词 isFence||isSolid 漏改 →
             //   栅栏不再向铁砧伸横档。改 R1 口径（a890bfa，同 torchSupportBlock 公式）：isCollidable ∨
@@ -232,25 +233,48 @@ int PartialBlockGeometry::append(
             //   isCollidable 的 state 参仅 shape 族判定（内部 Q_UNUSED），邻探针无 state 传 0 安全。
             return BlockRegistry::isCollidable(blk, quint8(0)) || BlockRegistry::isFullCube(blk);
         };
-        const float yLo0 = 0.375f,  yLo1 = 0.5625f; // 下档（MC 6/16..9/16）
-        const float yHi0 = 0.75f,   yHi1 = 0.9375f; // 上档（MC 12/16..15/16；t801 前为探入 1.5 区间的
-                                                    //   0.9375..1.125，随立柱同裁收进 1 格视觉内）
-        if (connects(nb.posX)) { // +X：x[中心, +X 边]
-            pushBox(verts, idx, lx, ly, lz, 0.5f, 1.0f, yLo0, yLo1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
-            pushBox(verts, idx, lx, ly, lz, 0.5f, 1.0f, yHi0, yHi1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        const float yLo0 = 0.375f,  yLo1 = 0.5625f;  // 下档（MC 6/16..9/16）
+        const float yHi0 = 0.75f,   yHi1 = 0.9375f;  // 上档（MC 12/16..15/16）
+        const float rTh0 = 0.4375f, rTh1 = 0.5625f;  // 横杆截面（MC 7/16..9/16，2px 见方）
+        if (connects(nb.posX)) { // +X：x[柱面 0.625, +X 格边]
+            pushBox(verts, idx, lx, ly, lz, 0.625f, 1.0f, yLo0, yLo1, rTh0, rTh1, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.625f, 1.0f, yHi0, yHi1, rTh0, rTh1, tile, light, tileW, hx, hy, v0, v1);
         }
-        if (connects(nb.negX)) { // -X：x[-X 边, 中心]
-            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.5f, yLo0, yLo1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
-            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.5f, yHi0, yHi1, 0.3f, 0.7f, tile, light, tileW, hx, hy, v0, v1);
+        if (connects(nb.negX)) { // -X：x[-X 格边, 柱面 0.375]
+            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.375f, yLo0, yLo1, rTh0, rTh1, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.375f, yHi0, yHi1, rTh0, rTh1, tile, light, tileW, hx, hy, v0, v1);
         }
-        if (connects(nb.posZ)) { // +Z：z[中心, +Z 边]
-            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yLo0, yLo1, 0.5f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
-            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yHi0, yHi1, 0.5f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+        if (connects(nb.posZ)) { // +Z：z[柱面 0.625, +Z 格边]
+            pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, yLo0, yLo1, 0.625f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, yHi0, yHi1, 0.625f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
         }
-        if (connects(nb.negZ)) { // -Z：z[-Z 边, 中心]
-            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yLo0, yLo1, 0.0f, 0.5f, tile, light, tileW, hx, hy, v0, v1);
-            pushBox(verts, idx, lx, ly, lz, 0.3f, 0.7f, yHi0, yHi1, 0.0f, 0.5f, tile, light, tileW, hx, hy, v0, v1);
+        if (connects(nb.negZ)) { // -Z：z[-Z 格边, 柱面 0.375]
+            pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, yLo0, yLo1, 0.0f, 0.375f, tile, light, tileW, hx, hy, v0, v1);
+            pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, yHi0, yHi1, 0.0f, 0.375f, tile, light, tileW, hx, hy, v0, v1);
         }
+        break;
+    }
+    case BlockRegistry::CobbleFence: { // t412 圆石墙 —— t991 拆出独立墙形（此前与 WoodFence 同 case 几何）
+        // t991 石栅栏（墙）对齐 MC 1.0 圆石墙形态（用户口径同木栅栏）：**中心柱**（8/16 见方 × 1 格高，
+        //   比 4/16 木柱敦实——墙/栅栏自此形制分家）+ **顶部凸缘**（10/16 见方 × 1px 檐口 y 15/16..1，
+        //   四侧外挑 1px——「墙垛顶帽」剪影，孤立/连接恒画）+ **低连接拱**（每向一道：y 10/16..15/16，
+        //   截面 6/16，从格边伸到柱面——拱顶嵌在凸缘下沿、比柱顶低半档 = 经典墙垛「柱高拱低」错落）。
+        //   连接判定与木栅栏同谓词（R1 口径，t991 木栅栏注）；拱纯视觉（碰撞仍 ShapeFence 立柱盒）。
+        pushBox(verts, idx, lx, ly, lz, 0.25f, 0.75f, 0.f, 0.9375f, 0.25f, 0.75f, tile, light, tileW, hx, hy, v0, v1); // 中心柱（凸缘下沿止）
+        pushBox(verts, idx, lx, ly, lz, 0.1875f, 0.8125f, 0.9375f, 1.0f, 0.1875f, 0.8125f, tile, light, tileW, hx, hy, v0, v1); // 顶部凸缘
+        const auto connectsWall = [](quint8 blk) {
+            return BlockRegistry::isCollidable(blk, quint8(0)) || BlockRegistry::isFullCube(blk); // 同 R1 口径（Review#19）
+        };
+        const float aY0 = 0.625f, aY1 = 0.9375f;     // 低连接拱 y（10/16..15/16，拱顶接凸缘下沿）
+        const float aTh0 = 0.3125f, aTh1 = 0.6875f;  // 拱截面（5/16..11/16，6px，窄于柱 → 拱读作「嵌进」柱间）
+        if (connectsWall(nb.posX)) // +X：x[柱面 0.75, +X 格边]
+            pushBox(verts, idx, lx, ly, lz, 0.75f, 1.0f, aY0, aY1, aTh0, aTh1, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsWall(nb.negX)) // -X：x[-X 格边, 柱面 0.25]
+            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.25f, aY0, aY1, aTh0, aTh1, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsWall(nb.posZ)) // +Z：z[柱面 0.75, +Z 格边]
+            pushBox(verts, idx, lx, ly, lz, aTh0, aTh1, aY0, aY1, 0.75f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsWall(nb.negZ)) // -Z：z[-Z 格边, 柱面 0.25]
+            pushBox(verts, idx, lx, ly, lz, aTh0, aTh1, aY0, aY1, 0.0f, 0.25f, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
     // t627 压力板家族五件（wood/cobble/stone/iron/gold 同 case）+ 踩下视觉：贴地薄板（1/16 厚 + 1/16 边距）；
