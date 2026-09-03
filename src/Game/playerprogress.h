@@ -30,6 +30,8 @@
 //   - onCropHarvested()：player.cropHarvested（成熟作物收割，C++ 信号）→ Main.qml 路由（「农夫」10 次）。
 //   - onBoatBoarded()：Main.qml ridingBoat 属性 false→true 边沿（「起航」）。
 //   - onDispensed()：player.dispenserFired（发射器/投掷器成功弹出，C++ 信号）→ Main.qml 路由（「发射!」）。
+//   - onEnteredStronghold()：player.enteredStronghold（进入要塞结构区域，C++ 一次性边沿信号）→ Main.qml
+//     路由（「隔墙有眼」，t1000）。
 //   - onEnchanted() / onEnchantedBookObtained()：EnchantingTableUI.doEnchant 成功末尾（「附魔师」/「书虫」）。
 //   - onAnvilUsed()：AnvilUI.takeProduct 成功末尾（「铁匠」）。
 //
@@ -127,6 +129,9 @@ public:
     Q_INVOKABLE void onBoatBoarded();
     // 发射器/投掷器成功弹出物品（player.dispenserFired → Main.qml 路由）。解锁「发射!」。
     Q_INVOKABLE void onDispensed();
+    // 进入要塞结构区域（player.enteredStronghold 一次性边沿信号 → Main.qml 路由）。解锁「隔墙有眼」
+    //   （t1000；unlock 幂等——重复进出的重复沿不重发 toast）。
+    Q_INVOKABLE void onEnteredStronghold();
     // 附魔台附魔成功（EnchantingTableUI.doEnchant 末尾）。解锁「附魔师」。
     Q_INVOKABLE void onEnchanted();
     // 附魔台附书产出附魔书（doEnchant 内 cat===Book 分支）。解锁「书虫」。

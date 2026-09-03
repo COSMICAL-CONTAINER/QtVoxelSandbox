@@ -3012,6 +3012,9 @@ Window {
         function onCropHarvested() { progress.onCropHarvested() }
         // t619 progress 成就：发射器/投掷器成功弹出物品（player.dispenserFired → progress.onDispensed「发射!」）。
         function onDispenserFired() { progress.onDispensed() }
+        // t1000 progress 成就：玩家进入要塞结构区域（player.enteredStronghold 一次性边沿信号 →
+        // progress.onEnteredStronghold「隔墙有眼」）。
+        function onEnteredStronghold() { progress.onEnteredStronghold() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87/t494：右键熔炉 → player 发 furnaceOpened(x,y,z) → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。

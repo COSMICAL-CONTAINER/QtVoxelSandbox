@@ -132,6 +132,27 @@ public:
     Q_INVOKABLE int strongholdPortalX() const { return m_strongholdPortalX; }
     Q_INVOKABLE int strongholdPortalY() const { return m_strongholdPortalY; }
     Q_INVOKABLE int strongholdPortalZ() const { return m_strongholdPortalZ; }
+    // ── t1000 要塞足迹常量（单一权威：placeStronghold 布局 + insideStronghold 判定同源引用，防两处漂移）──
+    //   t713 布局：水平足迹 dx/dz ∈ [-kStrongholdHalf,+kStrongholdHalf]（45×45 外圈）；竖直 dy ∈
+    //   [0, kStrongholdWallH+1]（地板 dy=0 / 墙体 dy 1..8 / 顶板 dy=9）。原为 placeStronghold 函数内
+    //   constexpr，t1000 上收为类常量（public static constexpr：探针直引断言足迹口径，同 pickItemIdForBlock
+    //   「纯值开放」先例）。
+    static constexpr int kStrongholdHalf = 22;  // 水平足迹半边（(2*22+1)² = 45×45 外圈）
+    static constexpr int kStrongholdWallH = 8;  // 墙体高度层数（dy 1..8；顶板 dy = kStrongholdWallH+1 = 9）
+    // t729 传送门记录点相对结构原点 (cx,cy,cz) 的偏移（placeStronghold 记录 m_strongholdPortal* =
+    //   (cx+0, cy+4, cz-18)，即 12 框架环中心；B5 读档反推 bindY 同值）。insideStronghold 反解原点同源引用。
+    static constexpr int kStrongholdPortalDy = 4;   // 框架层 y 偏移（记录 y = cy + 4）
+    static constexpr int kStrongholdPortalDz = -18; // 环中心 z 偏移（记录 z = cz - 18）
+    // t1000 成就「隔墙有眼」单一权威判定：点 (x,y,z)（玩家脚底，世界连续坐标）是否落在要塞结构足迹内。
+    //   bounds = 结构原点 (cx,cy,cz) 逐轴闭区间：水平 cell ∈ [cx±kStrongholdHalf] / [cz±kStrongholdHalf]
+    //   （含墙环 cell——「进入结构区域」的体素足迹口径）、竖直 cell ∈ [cy, cy+kStrongholdWallH+1]（含地板与
+    //   顶板层——地表行走脚位 ≥ cy+14 恒在外，不误触发）。原点由 m_strongholdPortal* 记录值 + 偏移常量
+    //   反解：世界生成 placeStronghold 记录 / 读档 rebindStrongholdPortalFromVoxels 从体素反推，两路径都
+    //   先于任何玩家 tick → 判定读档后即正确。**零新增序列化字段**——单一真相源 = portal 坐标（B5 反推
+    //   已能恢复），加字段反引入两条真相源。m_hasStronghold=false（无要塞世界 / 框架已毁存档）恒 false。
+    //   分层（PLAN §2）：纯只读谓词（零栅格访问，O(1) 算术），PlayerController（Game/Physics）tick 内
+    //   直调做进入沿检测（enteredStronghold 一次性信号）。
+    Q_INVOKABLE bool insideStronghold(double x, double y, double z) const;
     // t756 世界出生列坐标 getter（findSpawnColumn 解析；详见 m_spawnCol* 字段头注释）。Game 层
     //   （PlayerController::snapSpawnToGround）出生 / 重生定位采用本列 —— 出生格 + 头部格保证 Air、
     //   支撑格为实体且在真地表（修「种子 42 出生在树里」：旧链固定 (kSpawnX,kSpawnZ)=(80,80) 且只按

@@ -34077,6 +34077,177 @@ Item {
                              " stalker-free (pins)";
     }
 
+    // ── t1000 成就「隔墙有眼」探针（进入要塞结构区域解锁；行为级 + bounds 一致性 + 源码钉）──
+    //   (a) 行为腿：真 PlayerController + 真要塞世界 + 真 PlayerProgress（QML 路由的 C++ 等价直连）——
+    //       界外 tick 零信号；走进足迹 → 上升沿恰发一次 + 解锁 + 恰一 toast；界内连 tick 不重发；
+    //       重复进出信号再发但 unlock 幂等（toast 仍 1）；finishWorldLoad 重置守卫后界内首 tick 重产沿
+    //       （进度已解锁 → 无新 toast）。achievements() 含新条目（名「隔墙有眼」/ 独立根）。
+    //   (b) bounds 一致性：insideStronghold 对 placeStronghold 足迹边界内外采样（含墙环 cell / y 上下界）。
+    //   (b') 读档反推腿：真 WorldStore save → beginLoad + loadChunks + finishLoad（rebind 从体素反推
+    //       portal 坐标）→ bounds 仍判对 + 重进沿重发而 progress 回放后 unlock 幂等不重发 toast。
+    //   (c) 源码钉：tick 上升沿守卫 + finishWorldLoad 重置 + QML 路由行 + 定义行 + 常量同源。
+    //   被测世界：主世界 w 已被早前探针改种子 / 尺寸（44×44×96 seed26 一族），要塞有无不定 → 同 t759
+    //   fallback 模式自建 96×96×48 扫种子（每种子 ~64% 命中，24 发上限仅防退化）。
+    {
+        bool ok = true;
+        World wT1000;
+        wT1000.setWidth(96);
+        wT1000.setDepth(96);
+        wT1000.setHeight(48);
+        for (int s = 1; s <= 24 && !wT1000.hasStronghold(); ++s)
+            wT1000.setSeed(s);
+        ok = ok && wT1000.hasStronghold();
+        if (ok) {
+            const int px = wT1000.strongholdPortalX(), py = wT1000.strongholdPortalY(), pz = wT1000.strongholdPortalZ();
+            const int cx = px, cy = py - World::kStrongholdPortalDy, cz = pz - World::kStrongholdPortalDz; // 反解原点（同 insideStronghold 内部口径）
+            const int half = World::kStrongholdHalf;
+
+            // ── (b) bounds 一致性：足迹 cell 闭区间 [cx±22]/[cz±22] × [cy, cy+9] ──
+            ok = ok
+                 && wT1000.insideStronghold(cx + 0.5, cy + 1.0, cz + 0.5)                            // 大厅中心（内部）
+                 && wT1000.insideStronghold(px + 0.5, py + 0.5, pz + 0.5)                            // 传送门框架格
+                 && wT1000.insideStronghold(cx + half + 0.5, cy + 1.0, cz + 0.5)                     // +X 墙环 cell（含界）
+                 && wT1000.insideStronghold(cx - half + 0.5, cy + 1.0, cz - half + 0.5)              // -X/-Z 角墙 cell
+                 && wT1000.insideStronghold(cx + 0.5, double(cy + World::kStrongholdWallH + 1) + 0.5, cz + 0.5) // 顶板层 cell（含界）
+                 && !wT1000.insideStronghold(cx + half + 1.5, cy + 1.0, cz + 0.5)                    // +X 足迹外一格
+                 && !wT1000.insideStronghold(cx + 0.5, cy + 1.0, cz - half - 1.5)                    // -Z 足迹外一格
+                 && !wT1000.insideStronghold(cx + 0.5, double(cy - 1) + 0.5, cz + 0.5)               // 地板层下（y 下界外）
+                 && !wT1000.insideStronghold(cx + 0.5, double(cy + World::kStrongholdWallH + 2) + 0.5, cz + 0.5); // 顶板上（y 上界外）
+            // 足迹外采样点（世界界内；东出界翻西向镜像——cx∈[23,73] 必有一侧成立）。
+            const int outCellX = (cx + half + 9 < wT1000.width()) ? cx + half + 9 : cx - half - 9;
+            const double outX = double(outCellX) + 0.5;
+
+            // ── (a) 行为腿：真 PlayerController + 真 PlayerProgress（QML 路由 C++ 等价直连）──
+            PlayerProgress progressT1000;
+            int enteredCount = 0, toastCount = 0;
+            PlayerController pc; // 无窗口直造（componentComplete 不触发，无 16ms 定时器；tick 直调）
+            pc.setWorld(&wT1000);
+            QObject::connect(&pc, &PlayerController::enteredStronghold, &pc, [&]() {
+                ++enteredCount;
+                progressT1000.onEnteredStronghold(); // Main.qml Connections onEnteredStronghold 路由的 C++ 等价
+            });
+            QObject::connect(&progressT1000, &PlayerProgress::achievementUnlocked, &progressT1000,
+                             [&](const QString &, const QString &, const QString &) { ++toastCount; });
+            // 界外走动（脚位在足迹东/西 9 格外，XZ 界外 y 界内）：连 tick 零信号零解锁。
+            pc.loadSavedState(float(outX), float(cy + 1), float(cz) + 0.5f, -90.0f, 0.0f, 0 /* Spectator noclip：定点无重力，脚位不漂 */);
+            for (int t = 0; t < 5; ++t) pc.tick();
+            ok = ok && enteredCount == 0 && toastCount == 0
+                  && !progressT1000.isUnlocked(QStringLiteral("entered_stronghold"));
+            // 走进 bounds（大厅中心地板上）：首 tick 上升沿 → 恰 1 信号 + 解锁 + 恰 1 toast。
+            pc.loadSavedState(float(cx) + 0.5f, float(cy + 1), float(cz) + 0.5f, -90.0f, 0.0f, 0);
+            pc.tick();
+            ok = ok && enteredCount == 1 && toastCount == 1
+                  && progressT1000.isUnlocked(QStringLiteral("entered_stronghold"));
+            // 界内连 tick：守卫已置位 → 不再发（一次性事件信号，禁每帧直发）。
+            for (int t = 0; t < 9; ++t) pc.tick();
+            ok = ok && enteredCount == 1 && toastCount == 1;
+            // 重复进出：出（零信号——离开非事件）→ 再进（第二次沿）→ 信号 2 但 unlock 幂等 toast 仍 1。
+            pc.loadSavedState(float(outX), float(cy + 1), float(cz) + 0.5f, -90.0f, 0.0f, 0);
+            pc.tick();
+            ok = ok && enteredCount == 1;
+            pc.loadSavedState(float(cx) + 0.5f, float(cy + 1), float(cz) + 0.5f, -90.0f, 0.0f, 0);
+            pc.tick();
+            ok = ok && enteredCount == 2 && toastCount == 1;
+            // achievements() 含新条目：unlocked + 名「隔墙有眼」+ 独立根（parentId 空）。
+            bool foundEntry = false;
+            const QVariantList achT1000 = progressT1000.achievements();
+            for (const QVariant &v : achT1000) {
+                const QVariantMap m = v.toMap();
+                if (m.value(QStringLiteral("id")).toString() == QLatin1String("entered_stronghold"))
+                    foundEntry = m.value(QStringLiteral("unlocked")).toBool()
+                              && m.value(QStringLiteral("name")).toString() == QStringLiteral("隔墙有眼")
+                              && m.value(QStringLiteral("parentId")).toString().isEmpty();
+            }
+            ok = ok && foundEntry;
+            // 进世界重置钩子（finishWorldLoad：读档重进同指针路径 setWorld 不触发）→ 守卫清零 →
+            // 界内首 tick 重产沿（进度已解锁 → 无新 toast）。
+            pc.finishWorldLoad();
+            pc.tick();
+            ok = ok && enteredCount == 3 && toastCount == 1;
+
+            // ── (b') 读档反推腿：真 WorldStore 存取 + rebind 反推 portal 坐标 + progress 回放幂等 ──
+            const QString dbT1000 = QDir::temp().absoluteFilePath(
+                QStringLiteral("voxel_t1000_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+            QFile::remove(dbT1000);
+            WorldStore storeT1000;
+            storeT1000.setWorld(&wT1000);
+            bool okSave = storeT1000.openWorld(dbT1000)
+                          && storeT1000.saveAll(QStringLiteral("t1000rig"), QVariantList(), QVariantList(), QVariantList());
+            storeT1000.closeWorld();
+
+            World wLoad;
+            wLoad.setWidth(wT1000.width());
+            wLoad.setDepth(wT1000.depth());
+            wLoad.setHeight(wT1000.height());
+            WorldStore storeLoad;
+            storeLoad.setWorld(&wLoad);
+            bool okLoad = okSave && storeLoad.openWorld(dbT1000);
+            wLoad.beginLoad(wT1000.seed());          // 零填充（不 worldgen）
+            okLoad = okLoad && storeLoad.loadChunks() > 0;
+            wLoad.finishLoad();                      // ← rebindStrongholdPortalFromVoxels 从体素反推 portal 坐标
+            okLoad = okLoad && wLoad.hasStronghold()
+                     && wLoad.strongholdPortalX() == px && wLoad.strongholdPortalY() == py
+                     && wLoad.strongholdPortalZ() == pz
+                     && wLoad.insideStronghold(px + 0.5, py + 0.5, pz + 0.5)     // 读档后 bounds 仍判对
+                     && !wLoad.insideStronghold(outX, double(cy + 1), cz + 0.5); // 界外仍判外
+            ok = ok && okLoad;
+
+            PlayerProgress progressLoad;
+            int toastLoad = 0, loadEntered = 0;
+            QObject::connect(&progressLoad, &PlayerProgress::achievementUnlocked, &progressLoad,
+                             [&](const QString &, const QString &, const QString &) { ++toastLoad; });
+            progressLoad.loadVariant(progressT1000.toVariant()); // 静默回放（loadVariant 直插不 emit toast）
+            ok = ok && progressLoad.isUnlocked(QStringLiteral("entered_stronghold")) && toastLoad == 0;
+            PlayerController pcLoad;
+            pcLoad.setWorld(&wLoad);
+            QObject::connect(&pcLoad, &PlayerController::enteredStronghold, &pcLoad, [&]() {
+                ++loadEntered;
+                progressLoad.onEnteredStronghold(); // 路由同上（unlock 幂等核：重进不重发 toast）
+            });
+            pcLoad.loadSavedState(float(px) + 0.5f, float(py) + 0.5f, float(pz) + 0.5f, -90.0f, 0.0f, 0);
+            pcLoad.tick();
+            ok = ok && loadEntered == 1 && toastLoad == 0
+                  && progressLoad.isUnlocked(QStringLiteral("entered_stronghold"));
+            storeLoad.closeWorld();
+            QFile::remove(dbT1000);
+
+            // ── (c) 源码钉：边沿守卫 + 重置钩子 + QML 路由行 + 定义行 + 常量同源 ──
+            const QString exeDirT1000 = QCoreApplication::applicationDirPath();
+            const QString rootT1000 = QDir(exeDirT1000 + QStringLiteral("/..")).absolutePath();
+            const auto readSrcT1000 = [&rootT1000](const QString &rel) -> QString {
+                QFile f(rootT1000 + QLatin1Char('/') + rel);
+                return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            };
+            const QString pcCppT1000 = readSrcT1000(QStringLiteral("src/Game/playercontroller.cpp"));
+            const QString mainQmlT1000 = readSrcT1000(QStringLiteral("src/ui/Main.qml"));
+            const QString ppCppT1000 = readSrcT1000(QStringLiteral("src/Game/playerprogress.cpp"));
+            const QString worldHdrT1000 = readSrcT1000(QStringLiteral("src/World/world.h"));
+            const QString worldCppT1000 = readSrcT1000(QStringLiteral("src/World/world.cpp"));
+            const bool okPin =
+                pcCppT1000.contains(QStringLiteral("if (inStronghold && !m_insideStronghold)"))      // tick 上升沿守卫
+                && pcCppT1000.contains(QStringLiteral("读档重进同清进入沿守卫"))                       // finishWorldLoad 重置钩子
+                && mainQmlT1000.contains(QStringLiteral("function onEnteredStronghold() { progress.onEnteredStronghold() }")) // 路由行
+                && ppCppT1000.contains(QStringLiteral("{ \"entered_stronghold\", nullptr,"))          // 定义行（独立根）
+                && ppCppT1000.contains(QStringLiteral("隔墙有眼"))
+                && worldHdrT1000.contains(QStringLiteral("static constexpr int kStrongholdHalf = 22;")) // 足迹常量单一权威
+                && worldCppT1000.contains(QStringLiteral("kStrongholdHalf"))                          // placeStronghold 引用类常量（同源防漂移）
+                && worldCppT1000.contains(QStringLiteral("kStrongholdPortalDy"));
+            ok = ok && okPin;
+            if (!ok)
+                qInfo().noquote() << "  [t1000 diag] bounds" << (okLoad ? "ok" : "BAD") << "entered"
+                                  << enteredCount << "toast" << toastCount << "loadEntered" << loadEntered
+                                  << "toastLoad" << toastLoad << "entry" << foundEntry << "pin" << okPin;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1000 stronghold-entry achievement: edge-guarded enteredStronghold fires once"
+                             " on entering footprint (outside ticks silent, in-bounds re-ticks quiet,"
+                             " re-entry re-fires with idempotent toast, finishWorldLoad re-arms guard),"
+                             " bounds match footprint ring/roof cells incl. y-range, save->load voxel"
+                             " rebind keeps bounds correct with no re-toast, source pins (guard/reset/"
+                             "route/def/constants)";
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
