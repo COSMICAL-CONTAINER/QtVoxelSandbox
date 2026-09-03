@@ -298,8 +298,8 @@ int PartialBlockGeometry::append(
         // t662：机关 = 贴附着面的小体（非贴地薄板）。**几何源 = BlockRegistry::mechBoxes（与 raycastAABBs
         //   选中同一盒集，渲染 / 选中同源）**：state bit0=激活（t628：按钮按下压薄 / 拉杆扳向）、bit[3:1]=
         //   附着面（0=贴地 / 1..4=四向贴墙，放置吸附命中面 —— 见 blockregistry.h MechAttach*）。
-        //   - 按钮（Wood/StoneButton）：凸钮单盒（厚 2/16 → 按下 1/16，宽 6/16 居中；机制等价 MC 6×2×6px），
-        //     贴本方块 tile（132 木 / 133 石）。
+        //   - 按钮（Wood/StoneButton）：凸钮单盒（厚 2/16 → 按下 1/16，钮板 6/16 宽 × 4/16 高——t992
+        //     统一口径：五安装面同一张 6×4 钮脸，机制等价 MC 6×4×2px），贴本方块 tile（132 木 / 133 石）。
         //   - 拉杆（Lever）：底座盒贴 cobble(5)（圆石底座 —— t662 起不复用 lever(131) 侧视 sprite：那是一张
         //     平面立绘，贴 3D 小盒会整图拉伸错位；改 cobble 面后 pack 侧自动映射 cobblestone.png，机制等价
         //     MC lever = cobble base；pack lever.png 映射保留给物品图标专用）+ 摆棍两段阶梯盒贴 planks(8)
