@@ -6843,14 +6843,17 @@ void World::placeLavaLakes()
 //   + 角落放战利品箱。确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构与 placeUndergroundWaterPools /
 //   placeLavaLakes 同源（网格采样 + 概率筛选 + 抖动 + y 范围派生），但 carve 出的是矩形房间 + 周界填墙。
 //
-//   房间几何（固定 5×4×5 = 内部空气体积 W×H×D，墙体在 [-1, W]×[-1, H]×[-1, D] 外圈）：
-//     - 地板 / 顶板 / 四壁：填 Cobble（默认）+ Stone（按 hashVoxel 散布少量石块混排，机制等价 MC 1.0 地牢
-//       圆石 + 苔石 + 石砖混合墙体；本工程无 mossy_cobble / stone_brick 方块故用 cobble + stone 二者混排）。
+//   房间几何（t995 对照 MC 修正：内空 W×D ∈ {5,7}² 随机 × 高 4，墙体在 [-1, W]×[-1, H]×[-1, D] 外圈；
+//   t426 时代恒 7×7）：
+//     - 地板 / 顶板 / 四壁：Cobble 主体 + MossyCobble 苔石混排（t995 对照 MC 1.0 地牢「圆石 + 苔石混砌」
+//       修正 —— 工程自 t486 已有 MossyCobble 方块，旧「无苔石故用 Stone 点缀」口径作废；地板苔率 50% 重于
+//       墙 / 顶 25%，同 MC 地牢地板苔斑更密的观感）。per-cell hash 分流，确定性。
 //     - 内部 (0..W-1, 0..H-1, 0..D-1)：置 Air（清空原 stone / ore / cave air → 干净房间）。不动 Bedrock
 //       （基岩层不可破）。
 //     - 中央 (W/2, 1, D/2)：置 Spawner（地板上方一格 = 站立高度；玩家走过来触发刷怪）。t786 起 state 带
 //       mob 类型（僵尸/骷髅/蜘蛛/爬行者加权随机——蠹虫不在地牢池，要塞专属；见步骤 3 权重表）。
-//     - 角落 (0, 1, 0)：置 Chest（t393 填战利品内容；本任务仅放置空箱方块，机制等价 MC 1.0 地牢箱子）。
+//     - 战利品箱 1-2 个（t995 对照 MC「每间 1-2 箱」修正）：必放一箱于角位 (0, 1, 0)；~50% 概率（hash
+//       bit30）在对角角位 (W-1, 1, D-1) 再放一箱（同带地牢 flag → 首开各自填 dungeonChestPool）。
 //
 //   空腔被实体墙天然封闭 → 房间内无天光 → 黑暗（机制等价 MC 1.0 地牢黑暗环境 + 刷怪笼刷怪条件）。
 //   与既有洞穴重叠时（carveCaves 已挖空同位）→ 墙体在洞穴侧被截断，地牢轮廓仍可见（同 MC 1.0 地牢被洞穴
@@ -6864,11 +6867,11 @@ void World::placeDungeons()
     constexpr int kBedrockTop      = 4;      // 不动基岩（同 carveCaves / placeBedrock）
     constexpr int kSurfaceFloor    = 6;      // 与地表保留的最小距离（地牢上方至少 6 格石顶 → 不破地表、封闭黑暗）
     constexpr int kDungeonMaxY     = 36;     // 地牢最高 y（spec「地下」；避开近地表 / 仅地下深处）
-    constexpr int kRoomW           = 7;      // 房间内部宽度（t426：5→7，房间级而非「几格」；X 方向格子数）
+    constexpr int kRoomWMax        = 7;      // 房间最大内宽（t995：内空 W/Z 各按 hash 随机 5..7，机制等价 MC 1.0
+                                             //   地牢「5×5..7×7 随机见方」；t426 曾恒 7，现保留 7 为上界 / margin 基准）
     constexpr int kRoomH           = 4;      // 房间内部高度（Y 方向格子数；3-4 高范围，取 4 ≈ MC 1.0 地牢高度）
-    constexpr int kRoomD           = 7;      // 房间内部深度（t426：5→7；Z 方向格子数）
-    // 房间边界（墙在 [-1, kRoomW] / [-1, kRoomD] 外圈）→ 留 (kRoomW+2) 格 X/Z 边界防越界。
-    constexpr int kMargin          = (kRoomW > kRoomD ? kRoomW : kRoomD) + 1;
+    // 房间边界（墙在 [-1, 内空 W] / [-1, 内空 D] 外圈，最大 ±kRoomWMax）→ 留 (kRoomWMax+2) 格边界防越界。
+    constexpr int kMargin          = kRoomWMax + 1;
 
     int placed = 0;
     const int dungSeed = m_seed + 12037; // 地牢哈希偏移（与其它 worldgen hashColumn 解耦）
@@ -6891,28 +6894,36 @@ void World::placeDungeons()
             const int yRange = yHi - yLo + 1;
             const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 房间底面（地板）y
 
-            // 房间墙体材料：Cobble（默认）+ Stone（散布混排，机制等价 MC 1.0 苔石 / 石砖混入）。
-            //   per-cell hash 位 → ~25% Stone / ~75% Cobble（Cobble 主体显「圆石房」，Stone 点缀差异）。
-            auto wallBlock = [&](int wx, int wy, int wz) -> quint8 {
+            // t995 内空 5/7：房间 W/Z 各按 hash 独立高位（bit28 / bit29）取 5 或 7（机制等价 MC 1.0 地牢
+            //   「5×5..7×7 随机内空」；r 低 20 位已被概率 / 抖动 / cy 消耗，bit20-27 为刷怪笼权重位 →
+            //   取 bit28/29 独立采样，与既有位域零耦合）。
+            const int roomW = ((r >> 28) & 1u) ? 5 : 7; // t995 内空宽 5/7
+            const int roomD = ((r >> 29) & 1u) ? 5 : 7; // t995 内空深 5/7
+
+            // 房间石材：Cobble 主体 + MossyCobble 苔石混排（t995 对照 MC 1.0 地牢「圆石 + 苔石混砌」修正；
+            //   工程自 t486 已有 MossyCobble，旧 Cobble+Stone 混排口径作废）。地板苔率 50% / 墙顶 25%
+            //   （MC 地牢地板苔斑更密）；per-cell hash 位分流，确定性 → 同 seed 同墙。
+            auto wallBlock = [&](int wx, int wy, int wz, bool isFloor) -> quint8 {
                 const quint32 wb = hashVoxel(dungSeed ^ 0x5a5a, wx, wy, wz);
-                return (wb % 100u) < 25u ? BlockRegistry::Stone : BlockRegistry::Cobble;
+                const unsigned mossyPct = isFloor ? 50u : 25u; // 地板 50% / 墙·顶 25%
+                return (wb % 100u) < mossyPct ? BlockRegistry::MossyCobble : BlockRegistry::Cobble; // t995 苔石混排
             };
 
-            // 1) 周界填墙（地板 / 顶板 / 四壁）：遍历 [-1, kRoomW]×[−1, kRoomH]×[−1, kRoomD] 外圈，
+            // 1) 周界填墙（地板 / 顶板 / 四壁）：遍历 [-1, roomW]×[−1, kRoomH]×[−1, roomD] 外圈，
             //    对每个边界格置 wallBlock（不动 Bedrock）。内部空气在步骤 2 清空。
             for (int dy = -1; dy <= kRoomH; ++dy) {
                 const int yy = cy + dy;
                 if (yy < 0 || yy >= m_height) continue;
                 const bool yEdge = (dy == -1 || dy == kRoomH); // 地板（dy=-1）/ 顶板（dy=kRoomH）
-                for (int dx = -1; dx <= kRoomW; ++dx) {
-                    for (int dz = -1; dz <= kRoomD; ++dz) {
-                        const bool xEdge = (dx == -1 || dx == kRoomW);
-                        const bool zEdge = (dz == -1 || dz == kRoomD);
+                for (int dx = -1; dx <= roomW; ++dx) {
+                    for (int dz = -1; dz <= roomD; ++dz) {
+                        const bool xEdge = (dx == -1 || dx == roomW);
+                        const bool zEdge = (dz == -1 || dz == roomD);
                         if (!yEdge && !xEdge && !zEdge) continue; // 内部格由步骤 2 处理（清空气）
                         const int px = cx + dx, pz = cz + dz;
                         const quint8 cur = m_chunks.blockAt(px, yy, pz);
                         if (cur == BlockRegistry::Bedrock) continue; // 不动基岩（保留 worldgen 底层）
-                        m_chunks.setBlock(px, yy, pz, wallBlock(px, yy, pz));
+                        m_chunks.setBlock(px, yy, pz, wallBlock(px, yy, pz, dy == -1));
                     }
                 }
             }
@@ -6921,8 +6932,8 @@ void World::placeDungeons()
             for (int dy = 0; dy < kRoomH; ++dy) {
                 const int yy = cy + dy;
                 if (yy < 0 || yy >= m_height) continue;
-                for (int dx = 0; dx < kRoomW; ++dx) {
-                    for (int dz = 0; dz < kRoomD; ++dz) {
+                for (int dx = 0; dx < roomW; ++dx) {
+                    for (int dz = 0; dz < roomD; ++dz) {
                         const quint8 cur = m_chunks.blockAt(cx + dx, yy, cz + dz);
                         if (cur == BlockRegistry::Bedrock) continue;
                         m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Air);
@@ -6950,12 +6961,18 @@ void World::placeDungeons()
                 spawnerAcc += kDungeonSpawnerWeights[si];
                 if (spawnerPick < spawnerAcc) { spawnerState = kDungeonSpawnerStates[si]; break; }
             }
-            m_chunks.setBlock(cx + kRoomW / 2, cy + 1, cz + kRoomD / 2, BlockRegistry::Spawner, spawnerState);
+            m_chunks.setBlock(cx + roomW / 2, cy + 1, cz + roomD / 2, BlockRegistry::Spawner, spawnerState);
             // 4) 角落 Chest（与 Spawner 对角 = 角落 (0, 1, 0)）：t393 首开填充地牢战利品（ChestStore::populateDungeonLoot，
             //    由 Main.qml.openChest 据下面的 state 标记触发）。state 带 ChestStateDungeonFlag(bit2) 标「地牢生成箱」
             //    → World::isDungeonChest 返 true → 玩家首开时填充；玩家自放的箱子无此标记 → 不填（机制对齐 MC）。
             //    朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。
             m_chunks.setBlock(cx, cy + 1, cz, BlockRegistry::Chest, BlockRegistry::ChestStateDungeonFlag);
+            //    t995 对角二箱：~50% 概率（hash bit30，与尺寸位 bit28/29 / 笼型位 bit20-27 零耦合）在对角角位
+            //    (roomW-1, 1, roomD-1) 再放一箱 —— 机制等价 MC 1.0 地牢「每间 1-2 箱随机」；同带地牢 flag →
+            //    首开各自独立填 dungeonChestPool（ChestStore 按坐标逐箱填充，无共享）。
+            if (((r >> 30) & 1u) == 0u) // t995 对角二箱（~50%）
+                m_chunks.setBlock(cx + roomW - 1, cy + 1, cz + roomD - 1, BlockRegistry::Chest,
+                                  BlockRegistry::ChestStateDungeonFlag);
             ++placed;
         }
     }
