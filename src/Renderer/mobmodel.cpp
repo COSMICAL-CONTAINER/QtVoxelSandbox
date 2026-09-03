@@ -885,7 +885,7 @@ void MobModel::rebuild()
         if (m_sitPose) {
             // t987 豹猫/猫坐姿返修（与狼同病同修——t946 臀锚后仰形态的豹猫镜像：臀几乎不沉、胸抬高、
             //   前腿加长 + 臀下柱块 = 「兔子蹲」观感）：根锚移到**前爪着地点** (-0.40,-0.20)（站姿前腿 z
-            //   = 占位不变量），躯干绕它后仰 26.6°（tanθ = 臀底落距 0.29 / 臀根距 0.56 → 臀底角触地
+            //   = 占位不变量），躯干绕它后仰 27.4°（tanθ = 臀底落距 0.29 / 臀根距 0.56 → 臀底角触地
             //   y=-0.40，解析验证 -0.4005）；前腿占位同站姿立撑（顶埋胸 0.04 补肩窝，不 0.49 加长），
             //   后腿折叠 = 侧边矮臀块
             //   （顶 -0.12 全线嵌入倾斜躯干底）+ 贴地前伸细爪板（后接臀块前接前腿后沿）；竖尾锚在链派生
@@ -893,7 +893,7 @@ void MobModel::rebuild()
             //   头净俯仰 8°（耳顶 ~0.30 < 站姿 0.32，紧凑蹲坐）。
             constexpr float kSitPivotY   = -0.40f;      // 根锚 y（= 前爪着地 / collision 底面）
             constexpr float kSitPivotZ   = -0.20f;      // 根锚 z（= 站姿前腿 z，占位不变量）
-            constexpr float kSitPitch    =  0.4786f;    // 躯干后仰 26.6°（0.29·cos = 0.56·sin → 臀底角触地）
+            constexpr float kSitPitch    =  0.4786f;    // 躯干后仰 27.4°（0.29·cos = 0.56·sin → 臀底角触地）
             constexpr float kSitHeadNet  =  0.14f;      // 头净俯仰 8°（随躯干链再微抬「看玩家」）
             const float sitCa = std::cos(kSitPitch), sitSa = std::sin(kSitPitch);
             const float headCa = std::cos(kSitHeadNet), headSa = std::sin(kSitHeadNet);
@@ -902,7 +902,7 @@ void MobModel::rebuild()
             auto sitRotZ = [&](float y, float z) { return kSitPivotZ + (y - kSitPivotY) * sitSa + (z - kSitPivotZ) * sitCa; };
             setMobTex(20, 6, 4, 5, 6);
             addBoxRot( 0.00f,  0.02f,  0.00f, 0.15f, 0.13f, 0.36f,
-                      kSitPivotY, kSitPivotZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕前爪根锚 +26.6°：臀落地胸不变）
+                      kSitPivotY, kSitPivotZ, kSitPitch, verts, idx, bMin, bMax); // 躯干（站姿心不动，绕前爪根锚 +27.4°：臀落地胸不变）
             const float neckY = sitRotY(0.12f, -0.24f); // 颈附着点链上位 (0.080, 0.004)
             const float neckZ = sitRotZ(0.12f, -0.24f);
             setMobTex(1, 1, 5, 4, 4);

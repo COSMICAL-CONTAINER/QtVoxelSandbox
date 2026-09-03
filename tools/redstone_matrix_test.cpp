@@ -11690,7 +11690,7 @@ int main(int argc, char *argv[])
     // ── t911 铁轨贴仙人掌探针（World 直编）──
     //   **t984 口径翻案**（用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」）：
     //   旧钉「轨贴仙人掌 → 整柱坍落（铁轨非法邻面）」作废；现钉「轨贴仙人掌 → 放置成功 + 仙人掌不动」
-    //   （仙人掌破坏校验只被完整实体方块 isSolid 触发，见 checkCactusOnEdit ④；自动下矿车 t866② 走
+    //   （仙人掌破坏校验只被整立方方块 isFullCube 触发，见 checkCactusOnEdit ④；自动下矿车 t866② 走
     //   Entities 层接触判定，与方块邻接口径解耦不受影响）。
     //   断言三段：
     //   (a) 铁轨贴 2 高仙人掌**上层**格放置 → 放置成功（轨留存）+ 上下两格仙人掌原样 + 零掉落；
@@ -11755,7 +11755,7 @@ int main(int argc, char *argv[])
                               << "| t911 rail placement beside a cactus leaves the cactus standing"
                                  " (t984 reversed caliber: a rail next to a cactus, mid-column or"
                                  " base level, places successfully and the whole column stays intact"
-                                 " with zero drops - only full solid cubes break cacti; the cactus"
+                                 " with zero drops - only full-cube blocks break cacti; the cactus"
                                  " cart-dropper chain t866 uses entity contact damage and is"
                                  " unaffected), and a rail two cells away leaves the cactus untouched";
             // 清场（t984 口径仙人掌不再坍落 → 各腿仙人掌 / 铁轨 / 沙基座全部显式清空）
@@ -23971,7 +23971,7 @@ Item {
     //   放置链**：loadSavedState 定位/定向 → tick 刷射线 → setSelectedBlock(Rail) → placeBlock。
     //   **t984 口径翻案**（用户 9-01「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」）：
     //   (a)(b)(e)(f) 的期望从「放置成功 + 整柱坍落」翻转为「放置成功 + 仙人掌无恙 + 零掉落」；(g) 石头
-    //   （完整实体方块 isSolid）邻接仍照旧整柱坍落——既有语义不回归钉。
+    //   （整立方 isFullCube）邻接仍照旧整柱坍落——既有语义不回归钉。
     //   断言八段：
     //   (a) 地面顶面瞄准（瞄仙人掌旁地面 → 目标 = 地面上方气格，贴仙人掌柱基）→ 放置成功 + 仙人掌两格原样
     //       + 零掉落 + 铁轨留存；
@@ -24174,8 +24174,9 @@ Item {
                                   << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
                                   << "drops" << dropsP945;
             pumpMsP945(260);
-            // (g) 对称面·石头（完整实体方块邻接仍坍落——t984 口径防漂移钉）：石头放柱旁 → 放置成功 +
-            //     整柱坍落（t984 收窄后 ④ 对 isSolid 方块照旧触发；本腿钉「只豁免非实体族」不是「全族豁免」）。
+            // (g) 对称面·石头（整立方方块邻接仍坍落——t984 口径防漂移钉）：石头放柱旁 → 放置成功 +
+            //     整柱坍落（review0903 #1 后 ④ 对 isFullCube 整立方照旧触发；本腿钉「只豁免非整立方族」
+            //     不是「全族豁免」）。
             clearRigP945();
             buildRigP945();
             dropsP945 = 0;
@@ -24234,22 +24235,25 @@ Item {
                                  " (t669) and the cactus intact; (f) symmetry: a torch aimed beside the"
                                  " column also places harmlessly (non-solid families never fell the"
                                  " cactus); (g) symmetry: a solid stone beside the column still fells it"
-                                 " (t984 keeps the isSolid gate - pinned against scope drift); (h) source"
+                                 " (t984 keeps the full-cube gate - pinned against scope drift); (h) source"
                                  " pins for the rail support precheck and the adjacency collapse call";
         }
     }
 
-    // ── P-t984 仙人掌旁放非实体方块（行为级口径翻案）探针 ──
+    // ── P-t984 仙人掌旁放非整立方方块（行为级口径翻案）探针 ──
     //   用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」：仙人掌破坏校验
-    //   （checkCactusOnEdit ④）只应被**完整实体方块**（BlockRegistry::isSolid —— 与 t503 worldgen 柱 4 邻
-    //   守卫同一谓词同源）的水平邻接触发；铁轨（三变体）/ 火把 / 压力板等非完整方块邻接放置 → 放置成功 +
-    //   仙人掌 id 不变 + 零掉落。断言六段：
+    //   （checkCactusOnEdit ④）只应被**整立方方块**（BlockRegistry::isFullCube —— shape==ShapeFull，t213
+    //   单一权威谓词；review0903 #1 由 isSolid 代理修为整立方权威，与 t503 worldgen 柱 4 邻守卫同一谓词
+    //   同源）的水平邻接触发；铁轨（三变体）/ 火把 / 压力板等非整立方邻接放置 → 放置成功 + 仙人掌 id 不变 +
+    //   零掉落。断言七段：
     //   (a) 2 高柱四邻逐一放 Rail / GoldenRail / DetectorRail / Torch → 全部留存 + 仙人掌两格原样 + 零掉落；
     //   (b) 木 / 石压力板贴 1 高柱两侧 → 同（薄板族同口径）；
-    //   (c) 对照腿·石头（完整实体方块）贴柱 → 照旧整柱坍落（1 格 1 掉落，既有语义不回归）；
-    //   (d) 对照腿·沙（isSolid 实体，落沙落旁同谓词路径）贴柱 → 照旧坍落（worldgen / 放置 / 挖除口径一致）；
+    //   (c) 对照腿·石头（整立方）贴柱 → 照旧整柱坍落（1 格 1 掉落，既有语义不回归）；
+    //   (d) 对照腿·沙（整立方实体，落沙落旁同谓词路径）贴柱 → 照旧坍落（worldgen / 放置 / 挖除口径一致）；
     //   (e) 挖除链：柱旁轨留存时仙人掌无恙；挖邻轨不伤仙人掌；挖沙支撑 → ② 失撑整柱掉落（失撑链不回归）；
-    //   (f) 源码钉：④ 门槛 isSolid 行 + t503 worldgen 守卫 isSolid 行（任一消失即红）。
+    //   (f) 源码钉：④ 门槛 isFullCube 行 + t503 worldgen 守卫 isFullCube 行（任一消失即红）；
+    //   (g) 对照腿·玻璃（review0903 #1：solid=false 但 ShapeFull 的整立方）贴柱 → 照旧整柱坍落（isSolid
+    //       代理口径下漏放 → 本腿钉「整立方才是权威」，代理门槛回潮即红）。
     {
         // rig 选址：kRigY 高空全空盒扫描（dx -1..2、dz -1..1、dy -2..+4）。
         int x0 = -1, z0 = -1;
@@ -24335,7 +24339,7 @@ Item {
                 qInfo().noquote() << "  [t984 diag] c" << int(w.blockAt(x0 + 1, kRigY, z0))
                                   << "c" << int(w.blockAt(x0, kRigY, z0))
                                   << "drops" << dropsT984;
-            // (d) 对照腿·沙（isSolid 实体——落沙落旁 / worldgen 守卫同谓词）贴 1 高柱 → 照旧坍落。
+            // (d) 对照腿·沙（整立方实体——落沙落旁 / worldgen 守卫同谓词）贴 1 高柱 → 照旧坍落。
             buildRigT984(1);
             dropsT984 = 0;
             w.setBlock(x0 + 1, kRigY, z0, BR::Sand, 0);
@@ -24365,7 +24369,7 @@ Item {
                 qInfo().noquote() << "  [t984 diag] e c0" << int(w.blockAt(x0, kRigY, z0))
                                   << "c1" << int(w.blockAt(x0, kRigY + 1, z0))
                                   << "drops" << dropsT984;
-            // (f) 源码钉：④ 门槛 isSolid 行 + t503 worldgen 柱 4 邻守卫 isSolid 行（单一谓词两路径同源）。
+            // (f) 源码钉：④ 门槛 isFullCube 行 + t503 worldgen 柱 4 邻守卫 isFullCube 行（单一谓词两路径同源）。
             const QString exeDirT984 = QCoreApplication::applicationDirPath();
             const QString rootT984 = QDir(exeDirT984 + QStringLiteral("/..")).absolutePath();
             auto readSrcT984 = [&rootT984](const QString &rel) -> QString {
@@ -24374,11 +24378,23 @@ Item {
             };
             const QString wSrcT984 = readSrcT984(QStringLiteral("src/World/world.cpp"));
             const bool okF = wSrcT984.contains(QStringLiteral(
-                "if (id != BlockRegistry::Air && BlockRegistry::isSolid(id)) {"))
+                "if (id != BlockRegistry::Air && BlockRegistry::isFullCube(id)) {"))
                 && wSrcT984.contains(QStringLiteral(
-                    "BlockRegistry::isSolid(m_chunks.blockAt(x + d[0], yy, z + d[1]))"));
+                    "BlockRegistry::isFullCube(m_chunks.blockAt(x + d[0], yy, z + d[1]))"));
             if (!okF)
                 qInfo().noquote() << "  [t984 diag] f src pin miss";
+            // (g) 对照腿·玻璃（review0903 #1：solid=false 但 ShapeFull 的整立方）贴 1 高柱 → 照旧坍落
+            //     （isSolid 代理口径下玻璃漏放 → 本腿钉整立方权威，代理门槛回潮即红）。
+            buildRigT984(1);
+            dropsT984 = 0;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Glass, 0);
+            const bool okG = w.blockAt(x0 + 1, kRigY, z0) == BR::Glass
+                && w.blockAt(x0, kRigY, z0) == BR::Air
+                && dropsT984 == 1;
+            if (!okG)
+                qInfo().noquote() << "  [t984 diag] g" << int(w.blockAt(x0 + 1, kRigY, z0))
+                                  << "c" << int(w.blockAt(x0, kRigY, z0))
+                                  << "drops" << dropsT984;
             // 清场：柱位自顶向下（oldId=Cactus 跳过 ② 失撑，无级联坍落）+ 3×3 台面带 + 沙下垫石。
             w.setBlock(x0, kRigY - 2, z0, BR::Air, 0);
             for (int dy = 1; dy >= 0; --dy)
@@ -24389,25 +24405,27 @@ Item {
                         w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
             QObject::disconnect(dropConnT984);
             tickN(w, 2);
-            const bool okT984 = okA && okB && okC && okD && okE && okF;
+            const bool okT984 = okA && okB && okC && okD && okE && okF && okG;
             if (!okT984) ++totalFail;
             if (!okT984)
                 qInfo().noquote() << "  [t984 diag] a" << okA << "b" << okB << "c" << okC
-                                  << "d" << okD << "e" << okE << "f" << okF;
+                                  << "d" << okD << "e" << okE << "f" << okF << "g" << okG;
             qInfo().noquote() << (okT984 ? "PASS" : "FAIL")
-                              << "| t984 non-solid neighbors beside a cactus place successfully and"
+                              << "| t984 non-full-cube neighbors beside a cactus place successfully and"
                                  " leave the cactus standing (reversed caliber per user): (a) rail,"
                                  " golden rail, detector rail and torch on the four horizontal"
                                  " neighbors of a 2-high column all stay with the cactus intact and"
                                  " zero drops; (b) wood and stone pressure plates likewise; control"
-                                 " legs keep the existing semantics: (c) a full solid cube (stone)"
-                                 " beside the column still fells it (one drop), (d) sand (isSolid -"
-                                 " same predicate as the t503 worldgen guard and falling-sand path)"
-                                 " still fells it; (e) dig chain: rail-adjacent cactus survives,"
+                                 " legs keep the existing semantics: (c) a full cube (stone)"
+                                 " beside the column still fells it (one drop), (d) sand (a full"
+                                 " cube - same predicate as the t503 worldgen guard and falling-sand"
+                                 " path) still fells it; (e) dig chain: rail-adjacent cactus survives,"
                                  " digging the rail harms nothing, digging the sand support drops the"
                                  " whole 2-high column via the support-loss chain; (f) source pins"
-                                 " for the isSolid gate in checkCactusOnEdit and the t503 worldgen"
-                                 " guard (one predicate, both paths)";
+                                 " for the isFullCube gate in checkCactusOnEdit and the t503 worldgen"
+                                 " guard (one predicate, both paths); (g) glass (full cube with"
+                                 " solid=false - review0903 #1) still fells it (the old isSolid proxy"
+                                 " let glass slip through - pinned against regression)";
         }
     }
 
@@ -25259,9 +25277,10 @@ Item {
     //        「狼 x ≥ 24.5 且 y ≥ 86.3」（上台 = 平地跳跃峰值不可达域：地面点 y 85.45，墙前原地跳峰值虽
     //        过 86.3 但 x 恒 < 24.5 被台面碰撞拦回，两条件合取 = 真上台）+ 僵尸掉血（越台后续咬），
     //        30s 帽。「不会走路 / 不会跳」两症状在此腿分别为「x 恒 <20 / y 恒 <86.3」。
-    //    (c) 台阶贴脸腿（t988 根因腿）：僵尸钉在台沿格（24,86,22，主人贴邻 1.0 咬距内 → 僵尸追主不动），
-    //        狼台下面压台面后距僵尸 0.8 ≤ kAttackRange → 旧 #14 门（纯 distXZ）压跳 = 永卡台面下隔台
-    //        扣血不上台（用户「要跳跃才能上的格子不会跳、卡在那里」的可复现形态）；修后异层目标
+    //    (c) 台阶贴脸腿（**能力腿**——review0903 #2 如实化：本腿证「异层可爬可咬」的能力在位，**不是**
+    //        门形判别腿——自家插桩（diag 逐位）实证本腿对 #14 门形不敏感（击退放行距离子句使门形差异
+    //        不改变本腿终态）；门形回归（同层贴脸压跳）由 P-r0830C(d) 钉承担）：僵尸钉在台沿格（24,86,22，
+    //        主人贴邻 1.0 咬距内 → 僵尸追主不动），狼台下面压台面后距僵尸 0.8 ≤ kAttackRange → 异层目标
     //        （|tdy|=1.0 > 0.5）带内照探跳 → 狼跳上台。判据同 (b) 合取，25s 帽。
     {
         bool ok = true;
@@ -25338,8 +25357,8 @@ Item {
                                 .arg(emb.healthAt(zombie));
             } else diag += QStringLiteral("b spawn/tame failed ");
         }
-        // (c) 台阶贴脸腿（t988 修复面：目标在 1 格台阶上且已进咬距带 → 旧门压跳狼永卡台面下；
-        //     修复 = #14 压跳收窄为「同层可咬」，异层目标带内照探跳 → 狼跳上台撕咬）。
+        // (c) 台阶贴脸腿（能力腿：异层目标可爬可咬；review0903 #2 如实化——本腿非门形判别腿，
+        //     门形回归由 P-r0830C(d) 钉；历史修面 = #14 压跳收窄为「同层可咬」，异层目标带内照探跳）。
         {
             World wc; flatRig988(wc);
             for (int z = 0; z < 44; ++z)
@@ -25376,8 +25395,8 @@ Item {
             } else diag += QStringLiteral("c spawn/tame failed ");
         }
         if (!ok) ++totalFail;
-        qInfo().noquote() << "  [t988 diag]" << diag; // TEMP t988 diagnostic
-        // qInfo().noquote() << "  [t988 diag]" << diag;
+        if (!ok) // review0903 #9：diag 门控（原每跑必打印）+ 删注释残行
+            qInfo().noquote() << "  [t988 diag]" << diag;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t988 tamed-wolf combat AI: command the wolf on a zombie (the real"
                              " registration chain -- the shambler melee-hits the owner on its detect band"
@@ -25388,13 +25407,14 @@ Item {
                              " below reaches x>=24.5 WITH y>=86.3 -- the conjunction only holds once it"
                              " stands on top; a ground jump peaks past 86.3 but the platform face keeps x"
                              " pinned < 24.5, a blocked wolf stays at x<20) and lands its bite beyond the"
-                             " step within 30s; the ROOT FIX narrows the review0830 #14 bite-band jump"
-                             " suppression to SAME-FLOOR targets (|target dy| <= 0.5): an edge-pinned"
-                             " zombie on the step 0.8 XZ from the pressed wolf used to suppress the probe"
-                             " outright -- the wolf stood glued below the ledge biting through it, never"
-                             " climbing (leg c reproduces exactly that stuck-at-the-step report and now"
-                             " climbs within 25s) -- while the same-floor rig of review0830 C(d) keeps its"
-                             " no-hop-while-biting behavior (source pin evolved to the narrowed gate);"
+                             " step within 30s; the #14 bite-band jump suppression stays narrowed to"
+                             " SAME-FLOOR targets (|target dy| <= 0.5): leg c is a CAPABILITY leg -- the"
+                             " wolf can climb to and bite a cross-level target pinned at the ledge 0.8"
+                             " XZ away -- not a gate-shape discriminator (the probe's own diag showed"
+                             " the leg outcome is insensitive to the gate form via the knockback"
+                             " release-distance clause, review0903 #2); gate-shape regression"
+                             " (no-hop-while-biting on a same-floor target) is pinned by the"
+                             " review0830 C(d) rig (source pin evolved to the narrowed gate);"
                              " the chase lambda stays the single movement drive and the follow/stand"
                              " states keep their t947 bands (zero regression)"
                              ;
@@ -29139,9 +29159,10 @@ Item {
                              "-> selectItem egg): the tamed state raises the preview MobModel's "
                              "collarVisible flag + tabby texture, "
                              "the egg switch must drop collarVisible to false, "
-                             "return the texture to wild, and keep the eye overlays on (the wild "
-                             "procedural coat has no face pattern - an anti-vacuity anchor proving "
-                             "the leg is not trivially everything-hidden), mirrored for the wolf "
+                             "return the texture to wild, and the eye overlay goes OFF with the "
+                             "mob-preview branch gate (t989 evolution: the egg->mob preview path is "
+                             "extinct so the branch is hidden outright - the old always-on-eye "
+                             "anti-vacuity anchor retired with it), mirrored for the wolf "
                              "collar and the wolf egg";
     }
 
@@ -30110,8 +30131,10 @@ Item {
                              "partitions + section headers, predicate delegation), a real-QmlEngine "
                              "rig reading the palette partition back (pairwise disjoint + union == "
                              "paletteModel + representative pins: stone/torch/trapdoor/white-bed/tall-"
-                             "grass -> Blocks, stick/bow/armor -> Items-Materials, pig/wolf eggs -> "
-                             "Mobs, wolf gallery -> Mobs tab), and behavior pins driving the real "
+                             "grass -> Blocks, stick/bow/armor -> Items-Materials, pig/wolf eggs "
+                             "EXTINCT from the palette (t989 evolution: in no partition and "
+                             "categoryOfEntry no longer yields Mobs for them), wolf gallery -> "
+                             "Mobs tab), and behavior pins driving the real "
                              "selection state machine (torch then wolf: selectedId returns to 0 and "
                              "the visible geometry set holds MobModel alone; bed then wolf likewise "
                              "for the bed branch; wolf then stone flips back with BlockCube alone; "
@@ -33174,6 +33197,9 @@ Item {
                 const QString c = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
                 okPin = h.contains(QStringLiteral("kMaxTntDetonationsPerTick"))
                     && h.contains(QStringLiteral("kDetonationWaveRegroupSec"))
+                    // review0903 #8：值级钉（仿 P-t947 「= 4」声明形态钉）——预算上调（放松）或下调
+                    // （行为漂移）都恰红；本地镜像 kT997Budget=4 与声明值双向对齐。
+                    && h.contains(QStringLiteral("kMaxTntDetonationsPerTick = 4"))
                     && c.contains(QStringLiteral("kMaxTntDetonationsPerTick"))
                     && c.contains(QStringLiteral("e.fuse = kDetonationWaveRegroupSec"));
             }
@@ -33202,8 +33228,8 @@ Item {
                               << "ms in this rig) while total destruction and the 1.2s chain-"
                               << "ignite semantics stay intact (all 36 really explode, zero primed"
                               << " left); GUI-side present/vsync/GPU numbers still need on-device"
-                              << " F3; source pins lock the budget constant and the fuse-regroup"
-                              << " clamp";
+                              << " F3; source pins lock the budget constant and its = 4 literal"
+                              << " value (review0903 #8) plus the fuse-regroup clamp";
         }
     }
 
@@ -33373,10 +33399,11 @@ Item {
         }
         ok = ok && okPin;
         if (!ok) ++totalFail;
-        if (!ok)
-            qInfo().noquote() << "  t979 diag: legFull" << int(legFull[0]) << int(legFull[1])
-                              << "legExit" << legExit[0] << legExit[1] << "trench" << trenchAlive
-                              << "/8 deep" << int(okDeep) << "pin" << okPin;
+        // review0903 #3：diag 恒打印（原仅 FAIL 输出且截断丢信息）——PASS 态也留 trench/allFull 数值，
+        // 常规跑即可监察判别腿边际（水槽存活数贴近阈值等退化趋势）不待红。
+        qInfo().noquote() << "  t979 stats: legFull" << int(legFull[0]) << int(legFull[1])
+                          << "legExit" << legExit[0] << legExit[1] << "trench" << trenchAlive
+                          << "/8 deep" << int(okDeep) << "pin" << okPin;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t979 pig ankle-deep water safety + drop table: open 1/8 and 1/4"
                              " level puddles zero drowning damage (full HP) and >=6/8 wade out ("
@@ -33401,8 +33428,8 @@ Item {
     //    (c) 陆地步态退化钉（与 a/b 同鱿鱼前 8.5s 采样窗）：max(moveSpeed) ∈ [0.4,0.56]（蠕动爆发恒
     //        发生且上界 < kWalkSpeed=1.0 → 非行走步态）+ 零速样本占比 ≥ 0.3（摊歇窗 1.0/1.6=62.5%
     //        理论值，间歇性可见）。
-    //    (d) 水中零回归腿：2 深水源井 + 石盖鱿鱼 15s 满血满活（盖顶防漂出；t828 浮面/喷水行为不受
-    //        搁浅链影响——水下体底线恒在液面下）。
+    //    (d) 水中零回归腿：2 深水源井（双层封闭：y87 檐板 + y88 压顶壁环，review0903 #3）鱿鱼 15s 满血
+    //        满活（t828 浮面/喷水行为不受搁浅链影响——水下体底线恒在液面下）。
     //    (e) 源码钉：mobBodyAboveWaterSurface（成对谓词在位）+ kSquidFlopInterval/kSquidStruggleSpeed/
     //        kSquidStrandGraceSeconds（挣扎步态 + 宽限常量，仅新分支存在）。
     //    阴性轮（两刀，见提交正文）：①注释掉 tick 鱿鱼窒息 else 块 → (a)(b) 恰红（409/1，回到
@@ -33420,21 +33447,26 @@ Item {
                 if (wall)
                     for (int y = 85; y <= 86; ++y) w980.setBlock(x, y, z, BR::Stone, 0);
             }
-        // (d) 水井：3×3 两深水源 + 四壁（y85..86）+ 顶盖（y87）——全密封（旧版无侧壁：鱿鱼漂出井口
-        //     上平台 → 搁浅致死假红，t980 首轮实测）。
+        // (d) 水井：3×3 两深水源 + 四壁（y85..87）+ 内盖（y87）+ **双层封闭**（review0903 #3 硬化：
+        //     单层盖沿形态在提交后常规跑实证漏过一次——鱿鱼越过井沿上平台搁浅假红，matrix_run2 04:07）：
+        //     ①压顶——井壁环加高到 y88（高出内盖一层，盖沿平面无裸露壁顶可跨越）；②盖沿外挑——y87 实体
+        //     连铺到 12..18 外环（7×7 整片檐板，越沿者落在檐上仍被 y88 壁环挡回）。任何越沿路径须连续穿过
+        //     ≥2 层实体格，几何性杜绝（同 t979 (c) 没顶柜「全高壁」防漂出口径）。
         for (int x = 14; x <= 16; ++x)
             for (int z = 14; z <= 16; ++z) {
                 for (int y = 85; y <= 86; ++y) w980.setBlock(x, y, z, BR::Water, 0);
-                w980.setBlock(x, 87, z, BR::Stone, 0);
+                w980.setBlock(x, 87, z, BR::Stone, 0); // 内盖
             }
-        for (int x = 13; x <= 17; ++x)
-            for (int z = 13; z <= 17; ++z) {
-                const bool rim = (x == 13 || x == 17 || z == 13 || z == 17);
-                if (rim) {
-                    w980.setBlock(x, 85, z, BR::Stone, 0);
-                    w980.setBlock(x, 86, z, BR::Stone, 0);
-                    w980.setBlock(x, 87, z, BR::Stone, 0); // 侧壁加高到盖沿（防跃出侧沿）
+        for (int x = 12; x <= 18; ++x)
+            for (int z = 12; z <= 18; ++z) {
+                const bool rim5 = (x == 13 || x == 17 || z == 13 || z == 17);   // 井壁环（13..17 沿）
+                const bool flange = (x == 12 || x == 18 || z == 12 || z == 18); // 盖沿外挑环
+                if (rim5) {
+                    for (int y = 85; y <= 87; ++y) w980.setBlock(x, y, z, BR::Stone, 0);
+                    w980.setBlock(x, 88, z, BR::Stone, 0); // 压顶：壁高出内盖一层
                 }
+                if (flange)
+                    w980.setBlock(x, 87, z, BR::Stone, 0); // 外挑：与内盖同层连成 7×7 檐板
             }
         EntityManager em980;
         const QVector3D far980(-1000.0f, 90.0f, -1000.0f);

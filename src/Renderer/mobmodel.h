@@ -141,7 +141,7 @@ class MobModel : public QQuick3DGeometry
     Q_PROPERTY(bool sheepSkinHead READ sheepSkinHead WRITE setSheepSkinHead NOTIFY sheepSkinHeadChanged)
     // t878②/t946/t987 犬科/猫科坐姿（仅 mobType 10 狼 / 11 豹猫读）：true → 几何摆**坐姿**——以前爪
     //   着地点为唯一根锚（mobmodel.cpp kSitPivotY/kSitPivotZ；t987 起 = 站姿前腿占位不变量）+ 躯干后仰
-    //   （狼 24.4° / 豹猫 26.6°，tanθ 解析解使臀底角精确触地）：躯干绕根锚旋转、头/耳由同一根锚链派生
+    //   （狼 24.4° / 豹猫 27.4°，tanθ 解析解使臀底角精确触地）：躯干绕根锚旋转、头/耳由同一根锚链派生
     //   （sitRot lambda，禁止独立世界坐标——t878② 各段独立绝对坐标的断链形态 = 「身体翘太高 + 分离中间
     //   透明」根因）、后腿折叠为臀下侧埋矮块 + 贴地细爪板、**前腿与站姿同盒立撑**（t987：不加长不抬胸
     //   ——旧 t946 前腿加长 0.54 + 臀下 0.42 柱块被用户判「腿凭空长高一节 + 后脚长段贴地 = 完全像兔子」）。

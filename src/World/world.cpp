@@ -2428,21 +2428,24 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
         if (y + 1 < m_height && m_chunks.blockAt(x, y + 1, z) == BlockRegistry::Cactus)
             dropCactusColumn(x, y + 1, z);
     }
-    // ④ 邻接方块：本格新放**完整实体方块**（BlockRegistry::isSolid —— mesher 邻居面剔除语义单一权威谓词）
-    //   → 水平 4 邻任一为 Cactus 即「邻接方块」→ 该 Cactus 整柱掉落（覆盖玩家放沙旁 / 落沙落旁等非玩家放置
-    //   路径；机制等价 MC 仙人掌旁边贴实心方块才碎）。
+    // ④ 邻接方块：本格新放**整立方方块**（BlockRegistry::isFullCube —— shape == ShapeFull，t213 单一权威
+    //   谓词）→ 水平 4 邻任一为 Cactus 即「邻接方块」→ 该 Cactus 整柱掉落（覆盖玩家放沙旁 / 落沙落旁等非玩家
+    //   放置路径；机制等价 MC 仙人掌旁边贴完整方块才碎）。
     //   **t984 口径翻案**（用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」）：
     //   旧门槛 `id != Air`（非空即触发）把铁轨 / 火把 / 压力板等非完整方块也当「邻接方块」→ 贴仙人掌放置
-    //   成功后反手把仙人掌整柱炸掉（t911 旧钉「铁轨非仙人掌合法邻面」据此作废）。现门槛收紧为
-    //   `BlockRegistry::isSolid(id)` —— 与 t503 worldgen 仙人掌柱 4 邻守卫（placeDesertFlora）**同一谓词
-    //   同源**（其注释自 t445 起即声明「同 setBlock 放块路径 checkCactusOnEdit ④ 守卫」，本修使代码真正
-    //   兑现该契约，worldgen / 放置 / 挖除三路径口径一致）：实心方块（沙 / 石 / 木等）邻接才碎；轨族 /
-    //   火把 / 压力板 / 雪层等非实体（含仙人掌自身 solid=false）邻接不触发 → 放置成功、仙人掌不动。
+    //   成功后反手把仙人掌整柱炸掉（t911 旧钉「铁轨非仙人掌合法邻面」据此作废）。t984 先收紧为
+    //   `BlockRegistry::isSolid(id)`；**review0903 #1 再修为 `isFullCube(id)`**：isSolid 是 mesher 邻居面剔除
+    //   语义的代理，对 Glass / Ice / Spawner 等 solid=false 但 ShapeFull 的整立方漏放（MC 语义与 t984 修前
+    //   行为均应碎仙人掌）——整立方才是「完整方块」的权威口径。与 t503 worldgen 仙人掌柱 4 邻守卫
+    //   （placeDesertFlora）**同一谓词同源**（worldgen / 放置 / 挖除三路径口径一致）：整立方（沙 / 石 / 木 /
+    //   玻璃 / 冰 / 刷怪笼等）邻接才碎；轨族 / 火把 / 压力板 / 雪层 / 半砖等非整立方（含仙人掌自身
+    //   ShapeCactus）邻接不触发 → 放置成功、仙人掌不动。
     //   自动下矿车系统不受影响（仙人掌撞毁矿车 t866② 走 Entities 层接触判定，与方块邻接口径解耦）。
     //   **t911 整柱口径修**（保留）：命中可能在柱**中段**——先下探柱基再整柱坍落。
     //   **t945 玩家路径核验**（保留）：本分支只在**放置成功后**反应（无预检拒绝「邻仙人掌」放置位）。
-    //   被拒放置（悬空轨位）不到本分支。实心方块邻接仍坍落的既有语义由 P-t984 石头对照腿 + P-t945 (g) 钉。
-    if (id != BlockRegistry::Air && BlockRegistry::isSolid(id)) {
+    //   被拒放置（悬空轨位）不到本分支。整立方邻接仍坍落的既有语义由 P-t984 石头 / 玻璃对照腿 +
+    //   P-t945 (g) 钉。
+    if (id != BlockRegistry::Air && BlockRegistry::isFullCube(id)) {
         constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         for (const auto &d : kNb) {
             const int nx = x + d[0], nz = z + d[1];
@@ -5582,14 +5585,17 @@ void World::placeDesertFlora()
             const quint32 r = hashColumn(m_seed, x, z);
             const unsigned cr = r % 100u; // 密度位段
             if (cr < kCactusPct) {
-                // t503 仙人掌柱 4 邻守卫：仙人掌旁贴实心方块才碎（t984 口径：完整实体方块 isSolid 邻接才触发
-                //   checkCactusOnEdit ④；轨 / 火把 / 压力板等非实体邻接合法）。worldgen 散布时跳过「柱位任一格
-                //   的水平 4 邻有实体方块」的位置（否则生成即立即破坏掉落，等同浪费 + 留下掉落物堆积）。整柱
-                //   （surfaceY+1..surfaceY+height）4 邻全无实体方块（isSolid）才放置。沙丘起伏时邻格可能
-                //   更高（实体沙）→ 守卫跳过，仅平坦沙顶散布（机制等价 MC 沙漠仙人掌稀疏独立柱，不挤在沙丘边）。
-                //   注意 isSolid 取 mesher 邻居面剔除语义——**与 setBlock 放块路径 checkCactusOnEdit ④ 守卫
-                //   同一谓词同源**（t445 起声明、t984 起 ④ 门槛代码兑现为 isSolid）：worldgen / 放置 / 挖除
-                //   三路径口径一致；非 solid（草丛 / 火把 / 水 / 轨族 / 压力板）不算「邻接方块」。
+                // t503 仙人掌柱 4 邻守卫：仙人掌旁贴完整方块才碎（review0903 #1 口径：整立方 isFullCube 邻接才
+                //   触发 checkCactusOnEdit ④；轨 / 火把 / 压力板 / 雪层 / 半砖等非整立方邻接合法）。worldgen
+                //   散布时跳过「柱位任一格的水平 4 邻有整立方方块」的位置（否则生成即立即破坏掉落，等同浪费 +
+                //   留下掉落物堆积）。整柱（surfaceY+1..surfaceY+height）4 邻全无整立方方块（isFullCube）才放置。
+                //   沙丘起伏时邻格可能更高（实体沙）→ 守卫跳过，仅平坦沙顶散布（机制等价 MC 沙漠仙人掌稀疏
+                //   独立柱，不挤在沙丘边）。
+                //   注意 isFullCube 取 shape==ShapeFull 整立方语义——**与 setBlock 放块路径 checkCactusOnEdit ④
+    //   守卫同一谓词同源**（t445 起声明、t984 起兑现为谓词门槛、review0903 #1 起两路径同用
+    //   isFullCube）：worldgen / 放置 / 挖除三路径口径一致；非整立方（草丛 / 火把 / 水 / 轨族 /
+    //   压力板 / 雪层 / 半砖等异形；Glass / Ice / Spawner 虽 solid=false 但属整立方 → 算邻接）
+    //   不算「邻接方块」。
                 const int height = 1 + int((r >> 16) % 3u);
                 bool neighborsClear = true;
                 for (int i = 0; i < height && neighborsClear; ++i) {
@@ -5597,7 +5603,7 @@ void World::placeDesertFlora()
                     if (yy >= m_height) break;
                     constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
                     for (const auto &d : kNb) {
-                        if (BlockRegistry::isSolid(m_chunks.blockAt(x + d[0], yy, z + d[1]))) {
+                        if (BlockRegistry::isFullCube(m_chunks.blockAt(x + d[0], yy, z + d[1]))) {
                             neighborsClear = false; // 邻接实体方块 → 跳过此柱位
                             break;
                         }
@@ -6870,7 +6876,9 @@ void World::placeDungeons()
     constexpr int kRoomWMax        = 7;      // 房间最大内宽（t995：内空 W/Z 各按 hash 随机 5..7，机制等价 MC 1.0
                                              //   地牢「5×5..7×7 随机见方」；t426 曾恒 7，现保留 7 为上界 / margin 基准）
     constexpr int kRoomH           = 4;      // 房间内部高度（Y 方向格子数；3-4 高范围，取 4 ≈ MC 1.0 地牢高度）
-    // 房间边界（墙在 [-1, 内空 W] / [-1, 内空 D] 外圈，最大 ±kRoomWMax）→ 留 (kRoomWMax+2) 格边界防越界。
+    // 房间边界（墙在 [-1, 内空 W] / [-1, 内空 D] 外圈）→ kMargin = kRoomWMax+1：中心格满足 cx ≥ kMargin 时
+    //   墙体最大偏移 = kRoomWMax = 7 < kMargin = 8，最大墙列 cx-7 ≥ 1 ≥ 0、cx+7 ≤ width-8+7 = width-1，
+    //   恒在界内（安全论证：房间中心到最远墙格距离即 kRoomWMax，margin 取 +1 留 1 格余量）。
     constexpr int kMargin          = kRoomWMax + 1;
 
     int placed = 0;
