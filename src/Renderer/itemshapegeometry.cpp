@@ -313,21 +313,46 @@ void ItemShapeGeometry::rebuild()
                         topT, botT, sideT, -1.0f / 16.0f, bMin, bMax);
             break;
         case BlockRegistry::ShapeFence: {
-            // t925 栅栏族（木 17 / 圆石墙 60 / 云杉 88）：物品摆位取「满连形态」= 中心立柱 + 四向上下双档。
+            // t925 栅栏族（木 17 / 圆石墙 60 / 云杉 88）：物品摆位取「满连形态」= 中心立柱 + 四向横杆。
             //   世界内档臂由邻居连接态现场决定（partialblockgeometry fence case）；物品无邻居语境，满连展示
-            //   横档轮廓最可辨（MC 物品图标同款栅栏剪影）。盒区常数逐项同 mesher：柱 [0.3,0.7]²×y[0,1]（t801
-            //   视觉 1 格高；碰撞 1.5 不进物品形态）、下档 y[6/16,9/16]、上档 y[12/16,15/16]、±X 档 x 全幅
-            //   z[0.3,0.7] / ±Z 档 z 全幅 x[0.3,0.7]。形心居中 -0.5。
-            constexpr float yLo0 = 0.375f, yLo1 = 0.5625f;  // 下档（MC 6/16..9/16，mesher 同值）
-            constexpr float yHi0 = 0.75f,  yHi1 = 0.9375f;  // 上档（MC 12/16..15/16）
-            addShapeBox(verts, idx, 0.3f, 0.3f, 0.3f, 0.7f, 1.0f, 0.7f,
-                        topT, botT, sideT, -0.5f, bMin, bMax); // 中心立柱
-            for (int arm = 0; arm < 4; ++arm) {
-                const bool xAxis = (arm < 2); // ±X 档 / ±Z 档
-                const float x0 = xAxis ? 0.0f : 0.3f, x1 = xAxis ? 1.0f : 0.7f;
-                const float z0 = xAxis ? 0.3f : 0.0f, z1 = xAxis ? 0.7f : 1.0f;
-                addShapeBox(verts, idx, x0, yLo0, z0, x1, yLo1, z1, topT, botT, sideT, -0.5f, bMin, bMax);
-                addShapeBox(verts, idx, x0, yHi0, z0, x1, yHi1, z1, topT, botT, sideT, -0.5f, bMin, bMax);
+            //   横杆轮廓最可辨（MC 物品图标同款栅栏剪影）。t991 与世界 mesher 同源对齐 MC 形态：
+            //   - 木/云杉（9 盒）：柱 [0.375,0.625]²×y[0,1.5]（4/16 见方 × 1.5 格高）、下档 y[6/16,9/16]、
+            //     上档 y[12/16,15/16]、横杆截面 [7/16,9/16]（2px 见方），±X 档 x 柱面..格边 z[7/16,9/16] /
+            //     ±Z 档 z 柱面..格边 x[7/16,9/16]。形心居中 -0.75（柱高 1.5 的中点）。
+            //   - 圆石墙（6 盒）：墙形制分家——柱 [0.25,0.75]²×y[0,15/16] + 顶部凸缘 [3/16,13/16]²×
+            //     y[15/16,1] + 四向低连接拱 y[10/16,15/16] 截面 [5/16,11/16]。形心居中 -0.5。
+            if (m_blockId == int(BlockRegistry::CobbleFence)) {
+                constexpr float aY0 = 0.625f, aY1 = 0.9375f;    // 低连接拱 y（10/16..15/16，mesher 同值）
+                constexpr float aTh0 = 0.3125f, aTh1 = 0.6875f; // 拱截面（5/16..11/16）
+                addShapeBox(verts, idx, 0.25f, 0.0f, 0.25f, 0.75f, 0.9375f, 0.75f,
+                            topT, botT, sideT, -0.5f, bMin, bMax); // 中心柱
+                addShapeBox(verts, idx, 0.1875f, 0.9375f, 0.1875f, 0.8125f, 1.0f, 0.8125f,
+                            topT, botT, sideT, -0.5f, bMin, bMax); // 顶部凸缘
+                for (int arm = 0; arm < 4; ++arm) {
+                    const bool xAxis = (arm < 2);        // ±X 拱 / ±Z 拱
+                    const bool posSide = (arm % 2 == 0); // +X/+Z：柱面..格边；-X/-Z：格边..柱面
+                    const float lo = posSide ? 0.75f : 0.0f;
+                    const float hi = posSide ? 1.0f : 0.25f;
+                    const float x0 = xAxis ? lo : aTh0, x1 = xAxis ? hi : aTh1;
+                    const float z0 = xAxis ? aTh0 : lo, z1 = xAxis ? aTh1 : hi;
+                    addShapeBox(verts, idx, x0, aY0, z0, x1, aY1, z1, topT, botT, sideT, -0.5f, bMin, bMax);
+                }
+            } else {
+                constexpr float yLo0 = 0.375f,  yLo1 = 0.5625f;  // 下档（MC 6/16..9/16，mesher 同值）
+                constexpr float yHi0 = 0.75f,   yHi1 = 0.9375f;  // 上档（MC 12/16..15/16）
+                constexpr float rTh0 = 0.4375f, rTh1 = 0.5625f;  // 横杆截面（MC 7/16..9/16）
+                addShapeBox(verts, idx, 0.375f, 0.375f, 0.375f, 0.625f, 1.5f, 0.625f,
+                            topT, botT, sideT, -0.75f, bMin, bMax); // 中心立柱（4/16 × 1.5 格高）
+                for (int arm = 0; arm < 4; ++arm) {
+                    const bool xAxis = (arm < 2); // ±X 档 / ±Z 档
+                    const bool posSide = (arm % 2 == 0); // arm0/arm2 = +X/+Z：柱面..格边；arm1/arm3 反向
+                    const float x0 = xAxis ? (posSide ? 0.625f : 0.0f) : rTh0;
+                    const float x1 = xAxis ? (posSide ? 1.0f : 0.375f) : rTh1;
+                    const float z0 = xAxis ? rTh0 : (posSide ? 0.625f : 0.0f);
+                    const float z1 = xAxis ? rTh1 : (posSide ? 1.0f : 0.375f);
+                    addShapeBox(verts, idx, x0, yLo0, z0, x1, yLo1, z1, topT, botT, sideT, -0.75f, bMin, bMax);
+                    addShapeBox(verts, idx, x0, yHi0, z0, x1, yHi1, z1, topT, botT, sideT, -0.75f, bMin, bMax);
+                }
             }
             break;
         }

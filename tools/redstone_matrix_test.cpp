@@ -3777,17 +3777,110 @@ int main(int argc, char *argv[])
                              "re-render (t838(1) dimetric 3D cube projection; flat-2D was the t800 misdirection)";
     }
 
-    // ── t801 栅栏视觉高度探针（Core 表查询 + mesher 同源直调，P11/P19 模式；纯静态断言无 rig，不占
-    //    nextSlot 容量）：用户「栅栏视觉 1 格、实际跳不上去才对（1.5 多出 0.5 格悬空穿模）」→ 视觉 1.0 /
-    //    碰撞 1.5 分离（机制等价 MC 栅栏「模型 1 格 / 碰撞箱 1.5 不可越」）。断言两层：
-    //    (a) 几何：三变体（木/圆石/云杉）× 两形态（孤立四邻空气=只画立柱 / 四向连栅栏=立柱+8 段横档），
-    //        全部生成顶点 y ∈ [0-ε, 1.0+ε] 且最高点≈1.0（立柱裁到 1.0 且不缩水；修前立柱 1.5 / 上档
-    //        1.125 必越上界 FAIL）、最低点=0（落地）；连接形态须存在 x/z==0 与 ==1 顶点（横档真延伸到格边）；
-    //    (b) 分离：collisionAABBs 顶==1.5（> 跳跃顶点 ~1.25（playercontroller.h kJump=8.4 的文档镜像值，
-    //        同 P11 rideH 镜像先例）→ 玩家跳不过 + mob 支撑/越障链零改动）；selectionAABBs / raycastAABBs
-    //        顶==1.0（选中框 + 射线贴视觉，瞄立柱上方 0.5 空带穿过不优先选中）。
+    // ── t991 栅栏几何对齐 MC 探针（Core 表查询 + mesher 同源直调，P11/P19 模式；纯静态断言无 rig，不占
+    //    nextSlot 容量；P-t801 演化——t801 的「视觉 1.0 裁高」被用户口径推翻，本探针按 MC 1.0 形态重钉）：
+    //    用户「栅栏太难受了、完全不符合预期」→ 先对照 MC 形态逐项差修复。木栅栏 = 中心柱 4/16 见方 ×
+    //    1.5 格高 + 四向双横杆（2/16 截面，上下两道）；石栅栏（墙）= 8/16 柱 + 顶部凸缘 + 低连接拱；
+    //    相邻栅栏/贴墙自动连接（判定不变）。断言四层（木 17/云杉 88 与圆石墙 60 形制分家）：
+    //    (a) 木/云杉几何：孤立四邻空气 = 单柱（y ∈ [0,1.5]、水平 bounds = 4/16 柱径、无格边顶点）；
+    //        四向连栅栏 = 柱 + 8 道横杆（横杆真到格边、2/16 窄截面在场 0.4375/0.5625、上下两道 y 平面
+    //        6/16·9/16·12/16·15/16 四值齐 —— 旧 0.4 厚板绝无此值）。
+    //    (b) 圆石墙几何：孤立 = 柱 + 顶部凸缘（yMax≈1.0；凸缘外挑在场 x==3/16，8/16 柱径之外的唯一
+    //        水平极值）；四向连 = 低连接拱在场（y==10/16 顶点 = 拱底，低于凸缘下沿 —— 「柱高拱低」）。
+    //    （盒分离 + 同源源码钉两腿见下一个 t991b 探针块。）
     {
-        const quint8 fences[3] = { BR::WoodFence, BR::CobbleFence, BR::SpruceFence };
+        const quint8 woodFences[2] = { BR::WoodFence, BR::SpruceFence };
+        constexpr float kEps = 1e-4f;
+        const auto appendFence = [](quint8 fid, bool connected) {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            const quint8 nb = connected ? BR::WoodFence : quint8(BR::Air); // 连接判定 isCollidable||isFullCube：栅栏邻即连
+            nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = nb;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, fid, 0, lctx, nctx,
+                                         1.0f / 16.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            return verts;
+        };
+        bool ok = true;
+        // (a) 木/云杉：孤立单柱 / 连接双横杆
+        for (quint8 fid : woodFences) {
+            for (int connected = 0; connected <= 1; ++connected) {
+                const QVector<Vtx> verts = appendFence(fid, connected != 0);
+                float xMin = 1e9f, xMax = -1e9f, yMin = 1e9f, yMax = -1e9f;
+                bool edge = false, thinRail = false;
+                bool yLo = false, yLoT = false, yHi = false, yHiT = false;
+                for (const Vtx &v : verts) {
+                    xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                    yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+                    if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                        || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+                    if (std::fabs(v.z - 0.4375f) < kEps || std::fabs(v.x - 0.4375f) < kEps) thinRail = true;
+                    if (std::fabs(v.y - 0.375f)  < kEps) yLo  = true;
+                    if (std::fabs(v.y - 0.5625f) < kEps) yLoT = true;
+                    if (std::fabs(v.y - 0.75f)   < kEps) yHi  = true;
+                    if (std::fabs(v.y - 0.9375f) < kEps) yHiT = true;
+                }
+                const bool geoOk = !verts.isEmpty()
+                    && std::fabs(yMin) < kEps && std::fabs(yMax - 1.5f) < kEps; // 柱高 1.5（MC 24px）
+                // 孤立 = 单柱：水平 bounds 即 4/16 柱径、无格边顶点；连接 = 横杆到格边（bounds 0..1）
+                const bool boundsOk = connected
+                    ? (std::fabs(xMin) < kEps && std::fabs(xMax - 1.0f) < kEps)
+                    : (std::fabs(xMin - 0.375f) < kEps && std::fabs(xMax - 0.625f) < kEps);
+                const bool railOk = connected == (edge && thinRail && yLo && yLoT && yHi && yHiT);
+                if (!geoOk || !boundsOk || !railOk) {
+                    qInfo().noquote() << "  [t991 diag] wood fence" << int(fid) << "connected" << connected
+                                      << "verts" << verts.size() << "yMin" << yMin << "yMax" << yMax
+                                      << "xMin" << xMin << "xMax" << xMax << "edge" << edge
+                                      << "thinRail" << thinRail << "rails" << yLo << yLoT << yHi << yHiT;
+                    ok = false;
+                }
+            }
+        }
+        // (b) 圆石墙：孤立 = 柱 + 顶部凸缘；连接 = 低连接拱
+        for (int connected = 0; connected <= 1; ++connected) {
+            const QVector<Vtx> verts = appendFence(BR::CobbleFence, connected != 0);
+            float xMin = 1e9f, xMax = -1e9f, yMin = 1e9f, yMax = -1e9f;
+            bool flange = false, arch = false, edge = false;
+            for (const Vtx &v : verts) {
+                xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+                if (std::fabs(v.x - 0.1875f) < kEps) flange = true;      // 凸缘外挑 1px（8/16 柱径外唯一极值）
+                if (std::fabs(v.y - 0.625f)  < kEps) arch = true;        // 低连接拱底（低于凸缘下沿 15/16）
+                if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                    || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+            }
+            // 孤立 = 柱 + 凸缘：bounds 即凸缘外挑 3/16..13/16；连接 = 拱到格边（bounds 0..1）
+            const bool boundsOk = connected
+                ? (std::fabs(xMin) < kEps && std::fabs(xMax - 1.0f) < kEps)
+                : (std::fabs(xMin - 0.1875f) < kEps && std::fabs(xMax - 0.8125f) < kEps);
+            const bool wallOk = !verts.isEmpty()
+                && std::fabs(yMin) < kEps && std::fabs(yMax - 1.0f) < kEps
+                && boundsOk
+                && flange && connected == (arch && edge);
+            if (!wallOk) {
+                qInfo().noquote() << "  [t991 diag] wall connected" << connected << "verts" << verts.size()
+                                  << "yMin" << yMin << "yMax" << yMax << "xMin" << xMin << "xMax" << xMax
+                                  << "flange" << flange << "arch" << arch << "edge" << edge;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t991 fence geometry aligned to MC: wood/spruce = 4/16 post x 1.5 tall "
+                             "(isolated = bare post, no edge vertices) + two 2/16 rails per connected side "
+                             "reaching the cell edges at MC y bands 6-9/16 and 12-15/16; cobble wall split "
+                             "into its own shape (8/16 post + 1px top flange overhang + low connecting arch "
+                             "below the flange, isolated = post+flange only)";
+    }
+
+    // ── t991b 栅栏盒分离 + 同源源码钉（P-t801(b) 腿随 t991 视觉演化 + 新增源码钉腿）──
+    //    (c) 盒分离：collisionAABBs 顶==1.5（> 跳跃顶点 ~1.25（playercontroller.h kJump=8.4 的文档镜像值，
+    //        同 P11 rideH 镜像先例）→ 跳不过，mob 支撑/越障链零改动）；selectionAABBs / raycastAABBs 贴
+    //        视觉 —— 木/云杉顶 1.5 且 4/16 柱径、墙顶 1.0 且 8/16 柱径。
+    //    (d) 源码钉：partialblockgeometry / itemshapegeometry 两处 fence case 均带 t991 契约锚与 MC 截面
+    //        常数（世界渲染与查看器预览同源改）。
+    {
         constexpr float kEps = 1e-4f;
         constexpr float kJumpApex = 1.25f; // playercontroller.h kJump=8.4「顶点约 1.25 格」的文档镜像值（改跳跃力须同步）
         const auto topOf = [](const std::vector<BR::BlockAABB> &bs) {
@@ -3796,52 +3889,52 @@ int main(int argc, char *argv[])
             return t;
         };
         bool ok = true;
-        for (quint8 fid : fences) {
-            for (int connected = 0; connected <= 1; ++connected) {
-                QVector<Vtx> verts; QVector<quint32> idx;
-                PartialLightCtx lctx; lctx.light = 1.0f;
-                for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
-                PartialNeighborCtx nctx;
-                const quint8 nb = connected ? BR::WoodFence : quint8(BR::Air); // 连接判定 isFence||isSolid：栅栏邻即连
-                nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = nb;
-                PartialBlockGeometry::append(verts, idx, 0, 0, 0, fid, 0, lctx, nctx,
-                                             1.0f / 16.0f, 0.0f, 0.0f, 0.0f, 1.0f);
-                float yMin = 1e9f, yMax = -1e9f;
-                bool edgeX = false, edgeZ = false;
-                for (const Vtx &v : verts) {
-                    if (v.y < yMin) yMin = v.y;
-                    if (v.y > yMax) yMax = v.y;
-                    if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps) edgeX = true;
-                    if (std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edgeZ = true;
-                }
-                if (verts.isEmpty() || yMin > kEps || yMax > 1.0f + kEps || yMax < 1.0f - kEps) {
-                    qInfo().noquote() << "  [t801 diag] fence" << int(fid) << "connected" << connected
-                                      << "verts" << verts.size() << "yMin" << yMin << "yMax" << yMax;
-                    ok = false;
-                }
-                if (connected && (!edgeX || !edgeZ)) { // 横档须到格边（t209 连接逻辑不因裁高回归）
-                    qInfo().noquote() << "  [t801 diag] fence" << int(fid)
-                                      << "arms missing edgeX" << edgeX << "edgeZ" << edgeZ;
-                    ok = false;
-                }
-            }
+        // (c) 盒分离：碰撞 1.5 不可越；选中框/射线贴视觉（墙 8/16×1.0、木 4/16×1.5）
+        for (quint8 fid : { BR::WoodFence, BR::CobbleFence, BR::SpruceFence }) {
             const float colTop = topOf(BR::collisionAABBs(fid, 0));
-            const float selTop = topOf(BR::selectionAABBs(fid, 0));
-            const float rayTop = topOf(BR::raycastAABBs(fid, 0));
-            if (!(std::fabs(colTop - 1.5f) < kEps && colTop > kJumpApex
-                  && std::fabs(selTop - 1.0f) < kEps && std::fabs(rayTop - 1.0f) < kEps)) {
-                qInfo().noquote() << "  [t801 diag] fence" << int(fid) << "colTop" << colTop
-                                  << "selTop" << selTop << "rayTop" << rayTop;
+            const auto sel = BR::selectionAABBs(fid, 0);
+            const auto ray = BR::raycastAABBs(fid, 0);
+            const bool wall = (fid == BR::CobbleFence);
+            const float wantTop = wall ? 1.0f : 1.5f;
+            const float wantHalf = wall ? 0.75f : 0.625f;  // 柱面（0.25..0.75 墙 / 0.375..0.625 木）
+            const bool boxOk = !sel.empty() && !ray.empty()
+                && std::fabs(sel.front().minX - (1.0f - wantHalf)) < kEps
+                && std::fabs(sel.front().maxX - wantHalf) < kEps
+                && std::fabs(ray.front().minX - (1.0f - wantHalf)) < kEps
+                && std::fabs(ray.front().maxX - wantHalf) < kEps
+                && std::fabs(topOf(sel) - wantTop) < kEps && std::fabs(topOf(ray) - wantTop) < kEps;
+            if (!(std::fabs(colTop - 1.5f) < kEps && colTop > kJumpApex && boxOk)) {
+                qInfo().noquote() << "  [t991 diag] fence" << int(fid) << "colTop" << colTop
+                                  << "sel" << sel.size() << "ray" << ray.size();
+                ok = false;
+            }
+        }
+        // (d) 源码钉：两处 fence case 的 t991 锚 + MC 截面常数（世界 mesher / 查看器预览同源）
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile pf(root + QStringLiteral("/src/World/partialblockgeometry.cpp"));
+            QFile inf(root + QStringLiteral("/src/Renderer/itemshapegeometry.cpp"));
+            const QString pgeo = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const QString igeo = inf.open(QIODevice::ReadOnly) ? QString::fromUtf8(inf.readAll()) : QString();
+            if (pgeo.isEmpty() || igeo.isEmpty()
+                || !pgeo.contains(QStringLiteral("rTh0 = 0.4375f, rTh1 = 0.5625f"))
+                || !pgeo.contains(QStringLiteral("0.1875f, 0.8125f, 0.9375f, 1.0f, 0.1875f, 0.8125f"))
+                || !pgeo.contains(QStringLiteral("t991 栅栏几何对齐 MC"))
+                || !igeo.contains(QStringLiteral("0.375f, 0.375f, 0.375f, 0.625f, 1.5f, 0.625f"))
+                || !igeo.contains(QStringLiteral("t991 与世界 mesher 同源对齐 MC 形态"))) {
+                qInfo().noquote() << "  [t991 diag] source pin miss pgeo" << pgeo.isEmpty()
+                                  << "igeo" << igeo.isEmpty();
                 ok = false;
             }
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t801 fence visual height: mesher post+rails clipped to y<=1.0 for all 3 variants "
-                             "(isolated + connected, arms still reach cell edges), collision AABB stays 1.5 "
-                             "(jump apex ~1.25 < 1.5 -> still unjumpable, mob support/obstacle chain untouched), "
-                             "selection + raycast boxes synced to 1.0 visual - fixes 'fence model pokes 0.5 block "
-                             "above, clipping into neighbors' look";
+                          << "| t991b fence visual-tracking boxes + same-source pins: collision stays 1.5 "
+                             "(jump apex ~1.25 still blocked, mob chain untouched) while selection + raycast "
+                             "boxes track the new visuals (wall 8/16 x 1.0, wood 4/16 x 1.5), and both "
+                             "fence cases (world mesher + viewer preview) carry the t991 contract anchors "
+                             "with MC rail/flange constants";
     }
 
     // ── t802 全配方审计探针（纯 Game 层静态表查询 + 匹配器直调，无 World rig，不占 nextSlot 容量）──
@@ -9117,7 +9210,8 @@ int main(int argc, char *argv[])
     }
 
     // ── P-t925 3D 模型扩面第二批（t880 口径：每新形状 顶点数 + 包络 断言；栅栏 / 门 / 机关 / cross 扩面）──
-    //    几何契约（ItemShapeGeometry 直调）：栅栏族 = 柱 + 四向双档 9 盒（216 顶点）；门族 = 合态 +X 边
+    //    几何契约（ItemShapeGeometry 直调）：栅栏族 = 木/云杉 柱 + 四向双档 9 盒（216 顶点；t991 圆石墙
+    //    形制分家 = 柱+凸缘+四向拱 6 盒 144）；门族 = 合态 +X 边
     //    3/16 薄板（24 顶点，xMin ≥ 0.31 = 薄板非对称防退化满格）；cross 族扩面（枯灌木 / 小麦 / 红白蘑菇 /
     //    蛛网 / 红石火把）= 2 对角片 × 双面 16 顶点；拉杆 = mechBoxes 底座 + 两段摆棍 3 盒（72）且形心系
     //    yMax ≈ 0（棍顶 8/16）；按钮 = 单盒 24 且 yMax = -0.375（盒 y[0,2/16] 贴地小凸块，负 yMax 防退化
@@ -9129,9 +9223,12 @@ int main(int argc, char *argv[])
             ItemShapeGeometry g;
             struct Expect { int blockId; int vCount; float yMax; float xMax; float xMin; };
             const Expect exp[] = {
-                // 栅栏族（木 17 / 云杉 88）：柱 + 四向双档 = 9 盒 × 24。
-                { int(BR::WoodFence),   216, 0.501f, 0.501f, -0.501f },
-                { int(BR::SpruceFence), 216, 0.501f, 0.501f, -0.501f },
+                // 栅栏族（木 17 / 云杉 88）：柱 + 四向双档 = 9 盒 × 24。t991：柱 1.5 格高 → 形心居中
+                //   yShift -0.75，包络 yMax = 1.5-0.75 = 0.75。
+                { int(BR::WoodFence),   216, 0.751f, 0.501f, -0.501f },
+                { int(BR::SpruceFence), 216, 0.751f, 0.501f, -0.501f },
+                // t991 圆石墙（60）形制分家：柱 + 凸缘 + 四向拱 = 6 盒 × 24，柱高 1.0 → yMax = 0.5。
+                { int(BR::CobbleFence), 144, 0.501f, 0.501f, -0.501f },
                 // 门族（木 19 / 云杉 89 / 铁 135）：单薄板；x ∈ [0.3125, 0.5]（+X 边厚 3/16 居中后非对称）。
                 //   t965 订正：铁门 135（家族表旧字面量 71 系错 id=青色羊毛；几何类本就用 BR::IronDoor 不受影响）。
                 { int(BR::WoodDoor),   24, 0.501f, 0.501f, 0.31f },
@@ -9197,7 +9294,8 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t925 item 3D family batch 2: fences (post + four double arms, 9 boxes), "
+                          << "| t925 item 3D family batch 2: fences (wood/spruce post + four double arms, "
+                             "9 boxes; t991 cobble wall split to its own 6-box post+flange+arch shape), "
                              "doors (3/16 plate at +X edge with family-planks thin sides), lever (mechBoxes "
                              "base + stick, same source as world mesher) and buttons (single 2/16 nub) build "
                              "real multi-box shapes, the cross batch (dead bush / mature wheat / red+white "

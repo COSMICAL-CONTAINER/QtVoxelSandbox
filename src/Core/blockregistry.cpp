@@ -1596,13 +1596,13 @@ int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAA
     }
     case BlockRegistry::ShapeFence:
         // t209 立柱碰撞 1.5 高。maxY=1.5 探入上格 0.5 → 玩家跳跃顶点 ~1.25 < 1.5 跳不过（机制等价 MC 栅栏
-        //   1.5 高不可越）。仅立柱碰撞（横档纯视觉，不进 AABB；机制等价 MC 栅栏 VoxelShape 仅立柱）。玩家跨格
+        //   1.5 高不可越）。仅立柱碰撞（横杆纯视觉，不进 AABB；机制等价 MC 栅栏 VoxelShape 仅立柱）。玩家跨格
         //   X/Z 移动 + 跳跃时，PlayerController::overlapSubAABBs 的 Y 取样向下扩 1 格（catch 上格以下立柱探入的
         //   AABB），故 1.5 高碰撞对跳跃 / 立柱顶站立均生效。
-        //   t801 视觉/碰撞分离（MC 栅栏语义）：渲染立柱/横档已裁到 1.0 高（partialblockgeometry），本盒 1.5
-        //   **仅喂 collisionAABBs**（mob 支撑/越障 + 玩家碰撞链零改动）；selectionAABBs / raycastAABBs 对
-        //   isFence 特例 1.0 盒贴视觉（准星瞄立柱上方空带穿过，不再被 1.5 空带挡住优先选中）。
-        putAABB(out, cap, n, {0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（碰撞语义；视觉 1.0 见 t801）
+        //   t991 木/云杉视觉回归 MC 1.5 柱（partialblockgeometry）→ 视觉/碰撞重归同高；本盒 0.4 见方保留
+        //   （碰撞宽度不随 4/16 视觉柱收窄——邻接栅栏碰撞隙 0.6 不放宽，防玩家贴缝挤过，越障语义零改动）。
+        //   selectionAABBs / raycastAABBs / solidTopOffset 走各自 t991 特例（贴新视觉，墙/木分盒）。
+        putAABB(out, cap, n, {0.3f, 0, 0.3f, 0.7f, 1.5f, 0.7f}); // 中心立柱 0.4 见方 × 1.5 高（碰撞语义；视觉 1.5/1.0 见 t991）
         return n;
     case BlockRegistry::ShapePlate:
         putAABB(out, cap, n, {0.0625f, 0, 0.0625f, 0.9375f, 0.0625f, 0.9375f}); // 贴地薄板 1/16 厚
@@ -1774,7 +1774,7 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::collisionAABBs(quint8 block
 
 // review26 #20 collisionAABBs 的免构建顶面镜像（声明见 .h）：分支序 / 特例表逐字对齐 collisionAABBs，
 //   只返回 cell-local maxY（无碰撞盒 → -1.0f）。各 shape 的 maxY：Slab 上/下半 1.0/0.5、Stairs 整步+背墙
-//   必有一段到 1.0、Fence 1.5（t801 视觉 1.0 但碰撞 1.5 不变）、Plate 1/16、Door 满高 1.0、Trapdoor 合
+//   必有一段到 1.0、Fence 1.5（t991 木/云杉视觉回归 1.5 与碰撞同高；墙碰撞恒 1.5 不随 1.0 视觉柱）、Plate 1/16、Door 满高 1.0、Trapdoor 合
 //   0.1875 / 开 1.0、Bed kBedMattressTop、SnowLayer snowLayerHeight（state 驱动）、特例 LilyPad
 //   kLilyPadTop / Farmland 0.9375 / EnchantingTable 0.75 / 铁砧顶台满高 1.0 / Cactus 1.0。等价性由矩阵
 //   探针全 id × state 钉死（改形状只动一处 → 探针红）。
@@ -1812,13 +1812,14 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     //   （半砖 / 雪层 / 附魔台等 partial 块已有此先例）。渲染不受影响（PartialBlockGeometry 矮盒不变）。
     if (blockId == Farmland)
         return {BlockAABB{0, 0, 0, 1, 0.9375f, 1}};
-    // t801 栅栏选中框贴合 1.0 视觉（用户「栅栏视觉上就是 1 格」）：渲染立柱/横档已裁到 y[0,1]
-    //   （partialblockgeometry t801），选中框若仍走 shapeBoxes 的 1.5 → 瞄立柱顶上方 0.5 空气带也框住
-    //   栅栏（0.5 格悬空错位观感）。特例返 1.0 盒与视觉同高（同 t639 耕地矮框先例：选中框 = 实际可见
-    //   体形）；碰撞 1.5 保持不动（collisionAABBs 走 shapeBoxes 原盒——MC 栅栏「模型 1 格 / 碰撞 1.5
-    //   不可越」分离语义）。isFence 覆盖木/圆石/云杉三变体。
+    // t991 栅栏选中框贴视觉（沿用 t801 确立的「选中框 = 实际可见体形」口径，盒随 t991 几何同步）：
+    //   木/云杉 = 4/16 见方柱 × 1.5 格高（视觉回归 MC 24px 柱，见 partialblockgeometry t991 注）；圆石墙 =
+    //   8/16 见方柱 × 1 格高（墙形制分家）。碰撞 1.5 保持不动（collisionAABBs 走 shapeBoxes 原盒——
+    //   跳跃越障语义零改动）。isFence 覆盖木/圆石/云杉三变体。
     if (isFence(blockId))
-        return {BlockAABB{0.3f, 0, 0.3f, 0.7f, 1.0f, 0.7f}};
+        return (blockId == CobbleFence)
+            ? std::vector<BlockAABB>{BlockAABB{0.25f, 0, 0.25f, 0.75f, 1.0f, 0.75f}}
+            : std::vector<BlockAABB>{BlockAABB{0.375f, 0, 0.375f, 0.625f, 1.5f, 0.625f}};
     // t849 铁砧选中框贴三盒窄形（spec「黑色边框按整格显示 → 窄 AABB，对齐 t801 栅栏 selection 特例
     //   模式」）：anvilShapeBoxes 单一权威（与碰撞/渲染同源）→ 选中框贴实际铁砧轮廓（底座+腰柱+顶台
     //   三段黑边框），不再满格。机制等价 MC 铁砧 outline 按异形模型。
@@ -1963,7 +1964,8 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     switch (def(blockId).shape) {
     case ShapeSlab:     return (state & 1) ? 1.0f : 0.5f;     // 上半砖顶=1.0 / 下半砖顶=0.5
     case ShapeTrapdoor: return (state & 1) ? 1.0f : 0.1875f;  // 开=竖直板到顶 1.0 / 合=水平薄板顶 0.1875
-    case ShapeFence:    return 1.0f;                          // t801 视觉立柱 1.0 高（PCF 列顶实面随视觉；碰撞 1.5 见 collisionAABBs）
+    case ShapeFence:    return (blockId == CobbleFence) ? 1.0f  // t991：墙柱视觉 1.0（PCF 列顶随视觉）
+                                : 1.5f;                         // t991：木/云杉柱视觉回归 MC 1.5（碰撞同高）
     case ShapePlate:    return 0.0625f;                       // 贴地薄板 1/16 高
     case ShapeStairs:   return 1.0f;                          // 背墙到顶（整步+背墙最高点 = cellY+1）
     case ShapeFull:     return 1.0f;                          // 整立方
@@ -1990,12 +1992,14 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
         constexpr float kFarmlandTop = 15.0f / 16.0f; // 0.9375（与 partialblockgeometry 耕地矮盒 / collision 同高）
         return {BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, kFarmlandTop, 1.0f}};
     }
-    // t801 栅栏射线命中盒贴 1.0 视觉（与 selectionAABBs 的 isFence 特例同盒同源）：渲染立柱/横档已裁到
-    //   y[0,1]，准星瞄立柱顶上方 0.5 空气带的射线须穿过命中后方方块（不再被旧 1.5 sub-AABB 挡住优先
-    //   选中栅栏——同木梯 t501 / 铁轨 t638③「透视不优先选中」模式）；碰撞 1.5 不动（collisionAABBs 走
-    //   shapeBoxes 原盒，玩家/怪物跳跃越障语义零改动）。isFence 覆盖木/圆石/云杉三变体。
+    // t991 栅栏射线命中盒贴视觉（与 selectionAABBs 的 isFence 特例同盒同源，随 t991 几何同步）：木/云杉
+    //   = 4/16 柱 × 1.5（视觉即 MC 24px 柱，命中盒同高——准星瞄柱身全段皆中，柱顶以上空气带穿过命中
+    //   后方）；圆石墙 = 8/16 柱 × 1.0。碰撞 1.5 不动（collisionAABBs 走 shapeBoxes 原盒，玩家/怪物跳跃
+    //   越障语义零改动）。isFence 覆盖木/圆石/云杉三变体。
     if (isFence(blockId))
-        return {BlockAABB{0.3f, 0.0f, 0.3f, 0.7f, 1.0f, 0.7f}};
+        return (blockId == CobbleFence)
+            ? std::vector<BlockAABB>{BlockAABB{0.25f, 0.0f, 0.25f, 0.75f, 1.0f, 0.75f}}
+            : std::vector<BlockAABB>{BlockAABB{0.375f, 0.0f, 0.375f, 0.625f, 1.5f, 0.625f}};
     // t849 铁砧射线窄形三盒（与 anvilShapeBoxes 同源）：铁砧 isFullCube=true（ShapeFull）→ raycast.cpp
     //   的 fullCell 判定整格命中、sub-AABB 段不生效——本特例盒**单独不够**，fullCell 特判同步收口在
     //   raycast.cpp（t639 耕地先例：`isFullCube(b) && b != Farmland` 局部特例）。此处供 sub-AABB 段
