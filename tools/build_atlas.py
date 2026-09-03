@@ -391,6 +391,16 @@ TILES = [
     #   （旧 planks(8) 整面实心 = 用户「木活板门像木压力板」）。tools/build_doors_iron.py draw_wood_trapdoor。
     #   pack 关态程序瓦片；pack 映射 {180→trapdoor_oak.png}（demo 包老命名）。
     "default_wood_trapdoor",         # 180 wood_trapdoor（木活板门：木板色四镂空板；t879②）
+    # t998 结构新方块三张（要塞逐方块还原前置；机制等价 MC 1.0 stone brick 变体 + iron bars；名称 / 贴图
+    #   全原创自绘 §9a）。苔石砖 / 裂纹石砖与石砖 128 **同 RNG 基底**（同 seed 487 同调用序 → 砖底逐像素
+    #   同源，「同一块砖不同风化」变体叙事）；铁栏杆 alpha 恒不透明（薄杆面整张压缩采样，透明孔会在细面
+    #   采到透明列致消隐——以暗缝底达成同读感，见 build_iron_bars.py 头注）。
+    "default_mossy_stone_brick",     # 181 mossy_stone_brick（苔石砖各面同贴图；石砖底 + 暗绿苔斑簇；MossyStoneBrick
+                                     #    各面=本 tile；机制等价 MC 1.0 stone brick metadata 1；tools/build_mossy_stone_brick.py）
+    "default_cracked_stone_brick",   # 182 cracked_stone_brick（裂纹石砖各面同贴图；石砖底 + 深灰裂纹折线；CrackedStoneBrick
+                                     #    各面=本 tile；机制等价 MC 1.0 stone brick metadata 2；tools/build_cracked_stone_brick.py）
+    "default_iron_bars",             # 183 iron_bars（铁栏杆各面同贴图；暗缝底 + 周期 4 亮铁竖条 + y7..8 横带；IronBars 各面=
+                                     #    本 tile；机制等价 MC 1.0 iron bars；tools/build_iron_bars.py 程序生成）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

@@ -1041,7 +1041,35 @@ public:
         //   精准采集恒掉自身（同 silk 语义）；BlockDef.dropId=自身 仅是表兜底。生成 = 地下浅层矿袋
         //   （World::placeGravelPockets）+ 沙海盘沙滩与沙混排（generate inSandSea 列表层）。各面=gravel(179)。
         Gravel         = 139, // 沙砾：灰色松散砾石（受重力）；挖掉大概率自掉、小概率掉燧石
-        Count           = 140, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t998 结构新方块三件（要塞逐方块还原 R19.19 批首项的前置；机制等价 MC 1.0 stone brick 变体 +
+        //   iron bars；名称 / 贴图全原创自绘 §9a）。**追加在 enum 尾部（140..142）—— id 是存档格式的一部分，
+        //   插中间会破坏既有存档世界数据（世界按 id 存方块）；新方块永远尾部追加即契约。**
+        //   苔石砖（MossyStoneBrick）：石砖长苔变体（机制等价 MC 1.0 stone brick metadata 1 mossy——要塞
+        //   潮湿墙段的风化石砖）。整立方 opaque（solid=true / ShapeFull，与 stone/cobble/mossy 同走 culled
+        //   立方面路径）、hardness=1.5（同 stone 量级，需镐）、toolType=Pickaxe、requiresTool=true、minTier1
+        //   （木镐可破且掉落；同 StoneBrick）、dropId=自身（破苔石砖掉苔石砖，可放回）、dropCount=1、maxStack=64。
+        //   各面贴图=mossy_stone_brick(181)（石砖底 + 暗绿苔斑簇；与 default_stone_brick.png **同 RNG 基底**
+        //   逐像素同源，tools/build_mossy_stone_brick.py 程序生成 §9a）。音色归 GroupStone（石质，同 stone 族）。
+        //   进创造调色板（玩家可取用 / 放置）。
+        MossyStoneBrick   = 140, // 苔石砖：石砖长苔变体（机制等价 MC 1.0 mossy stone brick）；要塞墙体风化面 + 创造可放置
+        //   裂纹石砖（CrackedStoneBrick）：石砖开裂变体（机制等价 MC 1.0 stone brick metadata 2 cracked——
+        //   要塞承重段破损石砖）。属性与苔石砖全同口径（整立方 / 1.5 / Pickaxe / requiresTool / minTier1 /
+        //   自掉 / maxStack=64）。各面贴图=cracked_stone_brick(182)（石砖底 + 深灰裂纹折线；同 RNG 基底，
+        //   tools/build_cracked_stone_brick.py 程序生成 §9a）。音色 GroupStone。进创造调色板。
+        CrackedStoneBrick = 141, // 裂纹石砖：石砖开裂变体（机制等价 MC 1.0 cracked stone brick）；要塞墙体破损面 + 创造可放置
+        //   铁栏杆（IronBars）：金属薄杆栅格（机制等价 MC 1.0 iron bars——要塞窗棂 / 栏杆）。**异形薄杆几何**
+        //   （ShapeIronBars + PartialBlockGeometry IronBars case：中心细柱 2/16 见方 × 满格高 + 连接横板每向
+        //   一道 y[7/16,9/16]；连接判定同栅栏族 R1 口径——邻铁栏杆 / 贴实体方块面相连，孤立单柱）。solid=false
+        //   （薄杆不挡邻居面剔除，同栅栏族；碰撞走 shapeBoxes 子 AABB 立柱盒 4/16 见方 × 满格高——横板纯视觉
+        //   不进碰撞，同栅栏「横杆纯视觉」口径；1.0 高可跳跃越过，区别栅栏 1.5 不可越）、hardness=5.0（金属，
+        //   同 iron_block 量级）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落——对照铁块
+        //   「可放置金属方块需镐采掘」惯例；铁门 / 铁活板门 requiresTool=false 是红石机关件特例，栏杆是建筑
+        //   方块随铁块口径）、dropId=自身、dropCount=1、maxStack=64。各面贴图=iron_bars(183)（暗铁缝底 +
+        //   周期 4 亮铁竖条 + y7..8 横带，**alpha 恒不透明**——薄杆面整张压缩采样，透明孔会在 2px 细面上采到
+        //   透明列致面消隐，以暗缝底达成同读感；tools/build_iron_bars.py 程序生成 §9a）。音色 GroupStone
+        //   （金属质，同 iron_block 族）。进创造调色板（玩家可取用 / 放置）。
+        IronBars          = 142, // 铁栏杆：金属薄杆栅格（机制等价 MC 1.0 iron bars）；细柱+横板连接；要塞窗棂 + 创造可放置
+        Count           = 143, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1487,6 +1515,11 @@ public:
                             //   collision/selection/raycast = cell 底薄板 {0,0,0,1,height,1}（玩家立于薄层顶 = cell+height；
                             //   机制等价 MC 薄雪层可踩 + 半格平滑 auto-step 上行；高度 ≤0.5 时玩家 t163 auto-step
                             //   抬升 0.55 即可跨过，无需跳）。state 经 m_states 落 SQLite round-trip 保真。
+        ShapeIronBars = 10, // t998 铁栏杆：中心细柱（视觉 2/16 见方 × 满格高）+ 四向连接横板纯视觉（连接由 mesher
+                            //   读水平邻居 id 运行期决定，非 state 编码；同 WoodFence t209 模式）。碰撞 = 立柱盒
+                            //   {0.375,0,0.375,0.625,1,0.625}（4/16 见方 × 1.0，略宽于视觉柱；1.0 高可跳跃越过，
+                            //   区别 ShapeFence 1.5 不可越）；selection/raycast 特例给「十字条带」双盒覆盖横板
+                            //   走向（邻接无关，见 blockregistry.cpp selectionAABBs/raycastAABBs t998 注）。
     };
 
     // t505 积雪层（SnowLayer）层数上界（state 0..7 = 8 级高度）。机制等价 MC 1.0 snow layer 8 层
@@ -1745,7 +1778,16 @@ public:
     //       tools/build_doors_iron.py draw_wood_trapdoor 程序生成（§9 override (a)；零 MC 资产）。
     //       pack {180→trapdoor_oak.png}（1.8 老命名；缺则安全跳过保程序瓦片）。薄侧边（3/16 板厚）走
     //       planks(8)（mesher trapdoor case sideTile，机制等价 MC 木活板门板厚边 = 木板）。
-    static constexpr int AtlasTileCount = 181;
+    //   t998：181..183=结构新方块三张（要塞逐方块还原前置；MossyStoneBrick/CrackedStoneBrick/IronBars
+    //       各面=本 tile）：181=mossy_stone_brick（苔石砖：石砖底 + 暗绿苔斑簇；与 default_stone_brick.png
+    //       **同 RNG 基底**逐像素同源——「同一块砖不同风化」变体叙事）、182=cracked_stone_brick（裂纹石砖：
+    //       石砖底 + 深灰裂纹折线，裂纹 30 近黑深于砖缝 58 灰可辨）、183=iron_bars（铁栏杆：暗铁缝底 +
+    //       周期 4 亮铁竖条 + y7..8 横带；**alpha 恒不透明**——薄杆面整张压缩采样，透明孔会在 2px 细面上
+    //       采到透明列致面消隐，以暗缝底达成同读感）。tools/build_mossy_stone_brick.py /
+    //       build_cracked_stone_brick.py / build_iron_bars.py 程序生成（§9 override (a)；零 MC 资产）。
+    //       pack {181→mossy_stone_bricks.png / 182→cracked_stone_bricks.png / 183→iron_bars.png}
+    //       （现代命名；MC 1.0 / demo 1.8 包无独立文件——98 的 metadata 变体，包内缺安全跳过保程序瓦片）。
+    static constexpr int AtlasTileCount = 184;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

@@ -720,6 +720,12 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         // t761 沙砾：tile 179 gravel → pack 内 gravel.png（demo 包实存）。非 pack 回落程序生成
         //   default_gravel.png（tools/build_gravel.py 自绘灰砾石 + 卵石碎砾斑）。包内缺 PNG 时安全跳过。
         {179, QStringLiteral("gravel.png")},           // gravel（t761 沙砾：灰砾石+卵石碎砾斑）
+        // t998 结构新方块三 tile（苔石砖 / 裂纹石砖 / 铁栏杆）：现代（1.13+）命名 mossy_stone_bricks.png /
+        //   cracked_stone_bricks.png / iron_bars.png。MC 1.0 与 demo 1.8 包均无独立文件（苔/裂石砖是 1.0
+        //   stone brick id 98 的 metadata 变体）→ 包内缺安全跳过保程序瓦片（180 同款豁免路径）。
+        {181, QStringLiteral("mossy_stone_bricks.png")},   // mossy_stone_brick（t998 苔石砖；石砖底+苔斑）
+        {182, QStringLiteral("cracked_stone_bricks.png")}, // cracked_stone_brick（t998 裂纹石砖；石砖底+裂纹）
+        {183, QStringLiteral("iron_bars.png")},            // iron_bars（t998 铁栏杆；亮铁竖条栅格）
     };
     return kMap;
 }
@@ -2694,6 +2700,15 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
         addBox(0.125, 0.0, 0.3125, 0.875, 0.25, 0.6875, sideT, sideT, sideT);  // 底座
         addBox(0.375, 0.25, 0.4375, 0.625, 0.625, 0.5625, sideT, sideT, sideT); // 束腰
         addBox(0.1875, 0.625, 0.25, 0.8125, 0.8125, 0.75, topT, sideT, sideT);  // 砧面台（顶面 anvil_top）
+        break;
+    case BlockRegistry::IronBars: // t998 铁栏杆满连形态（栅栏族「物品无邻居语境取满连」同口径）：中心细柱
+        //   2/16 见方 × 满格高 + 四向横板（y[7/16,9/16]、截面 2/16，柱面..格边）——与 PartialBlockGeometry
+        //   IronBars case 的连接满连几何同盒集（细十字轮廓最可辨，图标贴放置观感）。
+        addBox(7.0 / 16.0, 0.0, 7.0 / 16.0, 9.0 / 16.0, 1.0, 9.0 / 16.0, sideT, sideT, sideT);         // 中心细柱
+        addBox(9.0 / 16.0, 7.0 / 16.0, 7.0 / 16.0, 1.0, 9.0 / 16.0, 9.0 / 16.0, sideT, sideT, sideT);  // +X 横板
+        addBox(0.0, 7.0 / 16.0, 7.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, sideT, sideT, sideT);  // -X 横板
+        addBox(7.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, 1.0, sideT, sideT, sideT);  // +Z 横板
+        addBox(7.0 / 16.0, 7.0 / 16.0, 0.0, 9.0 / 16.0, 9.0 / 16.0, 7.0 / 16.0, sideT, sideT, sideT);  // -Z 横板
         break;
     default:
         break;

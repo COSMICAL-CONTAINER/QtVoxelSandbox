@@ -277,6 +277,31 @@ int PartialBlockGeometry::append(
             pushBox(verts, idx, lx, ly, lz, aTh0, aTh1, aY0, aY1, 0.0f, 0.25f, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::IronBars: { // t998 铁栏杆 —— 栅栏族新形制（薄杆：细柱 + 居中横板；非木栅栏双档 / 圆石墙拱形）
+        // t998 铁栏杆几何（要塞窗棂 / 栏杆；机制等价 MC 1.0 iron bars——竖条栅格薄杆）：
+        //   **中心细柱**（2/16 见方 × 满格高 1.0——比 4/16 木栅栏柱更纤细的金属杆）+ **连接横板**（每向
+        //   一道：y 7/16..9/16 居中带、截面 2/16 见方与柱同厚，从柱面伸到格边——与邻杆 / 贴面方块拼接成
+        //   连续栏杆线）。连接判定同栅栏族 R1 口径（isCollidable ∨ isFullCube）：邻铁栏杆自身 isCollidable
+        //   （ShapeIronBars 命中 default 分支）→ 杆-杆相连；邻实体方块 → 贴面横板；空气 / 水 / 火把不连 →
+        //   孤立单柱。横板纯视觉（不进碰撞 AABB，同栅栏族口径；碰撞走 shapeBoxes(ShapeIronBars) 的 4/16
+        //   见方立柱盒，满格高 1.0 可跳跃越过）。贴图无需 UV 区间适配：pushBox 各面 cu,cv 恒取单位 {0,1}
+        //   （整张瓦片铺满该面、随面拉伸采样；iron_bars(183) 贴图 alpha 恒不透明，细面压缩采样不出孔）。
+        pushBox(verts, idx, lx, ly, lz, 0.4375f, 0.5625f, 0.f, 1.0f, 0.4375f, 0.5625f, tile, light, tileW, hx, hy, v0, v1); // 中心细柱（2/16 × 满格高）
+        const auto connectsBars = [](quint8 blk) {
+            return BlockRegistry::isCollidable(blk, quint8(0)) || BlockRegistry::isFullCube(blk); // 同栅栏族 R1 口径（Review#19）
+        };
+        const float aY0 = 0.4375f, aY1 = 0.5625f;   // 横板居中带（7/16..9/16）
+        const float rTh0 = 0.4375f, rTh1 = 0.5625f; // 横板截面（2/16，与柱同厚）
+        if (connectsBars(nb.posX)) // +X：x[柱面 0.5625, +X 格边]
+            pushBox(verts, idx, lx, ly, lz, 0.5625f, 1.0f, aY0, aY1, rTh0, rTh1, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsBars(nb.negX)) // -X：x[-X 格边, 柱面 0.4375]
+            pushBox(verts, idx, lx, ly, lz, 0.0f, 0.4375f, aY0, aY1, rTh0, rTh1, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsBars(nb.posZ)) // +Z：z[柱面 0.5625, +Z 格边]
+            pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, aY0, aY1, 0.5625f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsBars(nb.negZ)) // -Z：z[-Z 格边, 柱面 0.4375]
+            pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, aY0, aY1, 0.0f, 0.4375f, tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     // t627 压力板家族五件（wood/cobble/stone/iron/gold 同 case）+ 踩下视觉：贴地薄板（1/16 厚 + 1/16 边距）；
     //   踩下态（state bit0 = PressurePlateStatePressedFlag，updatePressurePlates 踩下沿置位 / 离开沿清位）
     //   把板高压半到 1/32（机制等价 MC 1.0 压力板被压下变矮——「踩下去」的视觉反馈）。踩下不改水平边距/碰撞。

@@ -237,6 +237,9 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::GoldPressurePlate:  // t644 plate
     case BlockRegistry::Glass:           // t800 入族 / t838① 画法回 3D 立方投影（见上注——无 qrc 手绘图，程序图集重渲是唯一原生路径）
     case BlockRegistry::RedstoneDust:    // t815 入族（见上注——qrc 手绘稿与瓦片生成器不同源已陈旧，图集重渲恒同源）
+    case BlockRegistry::MossyStoneBrick: // t998 入族（Glass 同款语义外延——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeFull 泛化立方投影）
+    case BlockRegistry::CrackedStoneBrick: // t998 入族（同上；瓦片 182 与石砖同 RNG 基底，图标随程序瓦片恒新）
+    case BlockRegistry::IronBars:          // t998 入族（薄杆异形——atlasIconSpecForBlock IronBars 特型盒集（细柱+四向横板满连形态），图标贴放置观感）
         return true;
     default:
         return false;
@@ -922,7 +925,12 @@ QVariantList Hotbar::creativeBlocks() const
              //   t760 起渲染走 spawnerHost delegate：cutout 铁笼 + 笼内旋转迷你蠹虫）；紧随要塞结构族
              //   （地牢/要塞两处 worldgen 结构均放此方块）。
              int(BlockRegistry::Spawner),                                    // 刷怪笼（铁笼内旋转迷你蠹虫；近玩家周期刷怪；破坏停止）
-             int(BlockRegistry::StoneBrickStairs) };                         // 石砖楼梯（整步+背墙；复用 ShapeStairs 几何 + 石砖贴图；可放置）
+             int(BlockRegistry::StoneBrickStairs),                           // 石砖楼梯（整步+背墙；复用 ShapeStairs 几何 + 石砖贴图；可放置）
+             // t998 结构新方块三件（要塞逐方块还原 R19.19 批首项前置；创造取用 / 建筑测试）。苔石砖 /
+             //   裂纹石砖紧随石砖族（同族变体）；铁栏杆是要塞窗棂 / 栏杆建筑件（薄杆异形可连接）。
+             int(BlockRegistry::MossyStoneBrick),                            // 苔石砖（石砖长苔变体；要塞墙体风化面；可放置）
+             int(BlockRegistry::CrackedStoneBrick),                          // 裂纹石砖（石砖开裂变体；要塞墙体破损面；可放置）
+             int(BlockRegistry::IronBars) };                                 // 铁栏杆（金属薄杆栅格；细柱+横板连接；可放置）
 }
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──

@@ -733,6 +733,13 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   掉落，同沙）。dropId=自身 / dropCount=1 是**表兜底**——真实掉落走 playercontroller finishMiningAt
     //   特例分支（大概率自掉、小概率只掉燧石 FlintId 0x248，概率常量可调；精准采集恒自掉）。
     /* gravel         */ {int(BlockRegistry::Gravel),             179,179,179,179, true, BlockRegistry::ShapeFull,     0.6f, int(BlockRegistry::Shovel),  0, false, int(BlockRegistry::Gravel),         1, 64, "gravel",         "沙砾"},
+    // ── t998 结构新方块三件（要塞逐方块还原 R19.19 批首项前置；属性注释见 blockregistry.h Id 枚举行）：
+    //   苔石砖 / 裂纹石砖 = 石砖变体（整立方 opaque，同 StoneBrick 全口径：1.5 / Pickaxe / requiresTool /
+    //   minTier1 / 自掉）；铁栏杆 = 金属薄杆异形（ShapeIronBars + solid=false 薄杆不挡邻剔、碰撞立柱盒、
+    //   5.0 金属需镐随铁块口径）。
+    /* mossy_stone_brick   */ {int(BlockRegistry::MossyStoneBrick),   181,181,181,181, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::MossyStoneBrick),   1, 64, "mossy_stone_brick",   "苔石砖"},
+    /* cracked_stone_brick */ {int(BlockRegistry::CrackedStoneBrick),182,182,182,182, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CrackedStoneBrick), 1, 64, "cracked_stone_brick", "裂纹石砖"},
+    /* iron_bars          */ {int(BlockRegistry::IronBars),          183,183,183,183, false, BlockRegistry::ShapeIronBars, 5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::IronBars),          1, 64, "iron_bars",           "铁栏杆"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -906,6 +913,13 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   **t691 教训**：本行须是独立真实初始化项（上一行行尾 // 注释不会吞掉本行——保持「一行一条目 + 行内
     //   注释」格式，防聚合初始化零填充回归）。
     /* gravel                 */ 13,
+    // t998 结构新方块三件 → MC 1.0 对齐：苔石砖 / 裂纹石砖是 MC 1.0 stone brick id 98 的 **metadata 1/2
+    //   变体**（本表单值只记 id；变体注记在此——本工程每变体独立 id，机制等价不依赖 metadata）。铁栏杆
+    //   MC 1.0 存在 id 101（Beta 1.8 加入，1.0 沿用）。**t691 教训**：一行一条目 + 行内注释，防聚合初始化
+    //   零填充回归。
+    /* mossy_stone_brick      */ 98,  // t998 苔石砖 → MC 1.0 stone brick id 98（metadata 1 = mossy；本工程独立 id）
+    /* cracked_stone_brick    */ 98,  // t998 裂纹石砖 → MC 1.0 stone brick id 98（metadata 2 = cracked；本工程独立 id）
+    /* iron_bars              */ 101, // t998 铁栏杆 → MC 1.0 iron bars id 101
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -974,6 +988,7 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
     if (blockId == IronDoor) return true; // t722 段外铁门（与 WoodDoor 同几何：ShapeDoor 满高薄板 + state 开合朝向）
     if (blockId == IronTrapdoor) return true; // t723 段外铁活板门（与 WoodTrapdoor 同几何：ShapeTrapdoor 水平/竖直薄板）
     if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
+    if (blockId == IronBars) return true; // t998 段外铁栏杆（薄杆异形：ShapeIronBars 细柱 + 运行期连接横板，同 CobbleFence 段外并入模式）
     if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（t662 几何重做：贴附着面小钮 / 底座+棍，mechBoxes 单一几何源）
     if (blockId == StonePressurePlate || blockId == IronPressurePlate
         || blockId == GoldPressurePlate) return true; // t627 段外压力板家族扩展（与 WoodPressurePlate 同几何：贴地薄板）
@@ -1665,6 +1680,14 @@ int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAA
         putAABB(out, cap, n, {0, 0, 0, 1, h, 1});
         return n;
     }
+    case BlockRegistry::ShapeIronBars:
+        // t998 铁栏杆碰撞 = 中心立柱盒（4/16 见方 × 满格高 1.0；略宽于 2/16 视觉柱——细金属杆碰撞盒取
+        //   gameplay 可判定的下限，防 2/16 视觉柱在 0.6 宽玩家 footprint 下的贴缝穿模争议；同木栅栏
+        //   「碰撞 0.4 宽于视觉 0.25」先例）。横板纯视觉不进 AABB（连接态是运行期邻居判定，碰撞无邻居
+        //   语境，同栅栏族「横杆纯视觉」口径）。满格高 1.0：跳跃顶点 ~1.25 > 1.0 → 可跳跃越过（机制等价
+        //   MC 铁栏杆 1 格高可跳过，区别栅栏 1.5 不可越）。
+        putAABB(out, cap, n, {0.375f, 0, 0.375f, 0.625f, 1.0f, 0.625f});
+        return n;
     }
     return 0; // 未知 shape → 空（兜底，同旧 shapeBoxes 兜底空 vector）
 }
@@ -1802,6 +1825,7 @@ float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
     case ShapeTrapdoor: return ((state & 1) != 0) ? 1.0f : 0.1875f;
     case ShapeBed:      return kBedMattressTop;
     case ShapeSnowLayer: return snowLayerHeight(state);
+    case ShapeIronBars: return 1.0f; // t998 铁栏杆立柱满格高（1.0 可跳跃越过，区别栅栏 1.5）
     }
     return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
 }
@@ -1839,6 +1863,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     //   黑边（同栅栏 t801 / 铁砧 t849「选中框贴实际形状」口径）。
     if (isRail(blockId))
         return raycastAABBs(blockId, state);
+    // t998 铁栏杆选中框 = 十字条带双盒（「选中框贴实际形状」口径 t801/t849/t938 铁条族延伸）：中心细柱 +
+    //   四向横板可能走向的**满连最大轮廓**（连接态是运行期邻居判定，selectionAABBs 无邻居语境 → 取邻接
+    //   无关的 2/16 宽竖条带满格高交叉——瞄杆身任意段含横板段皆中，格子四角 / 柱外空隙穿过）。
+    if (blockId == IronBars)
+        return std::vector<BlockAABB>{BlockAABB{0.4375f, 0, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带（柱 + ±Z 横板走向）
+                                      BlockAABB{0.0f, 0, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带（柱 + ±X 横板走向）
     return shapeBoxes(def(blockId).shape, state);
 }
 
@@ -1972,6 +2002,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeDoor:     return 1.0f;                          // 满高薄板
     case ShapeBed:      return kBedMattressTop;               // t457 床床垫顶 ~0.31（PCF 软影遮挡高度同床垫顶）
     case ShapeSnowLayer: return snowLayerHeight(state);       // t505 积雪层薄板顶 = snowLayerHeight(state)（1/8..1.0）
+    case ShapeIronBars: return 1.0f;                          // t998 铁栏杆立柱满格高（PCF 列顶随视觉立柱）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }
@@ -2010,6 +2041,12 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
     //   收口；此处盒与 selection/collision 同源（瞄柱外环隙的射线穿过命中后方）。
     if (blockId == Cactus)
         return {BlockAABB{0.1f, 0.0f, 0.1f, 0.9f, 1.0f, 0.9f}};
+    // t998 铁栏杆射线命中盒 = 与 selectionAABBs 同源的十字条带双盒（选体 t983 起与射线同口径，同 isRail
+    //   先例）：瞄杆身任意段（细柱 / 任一方向横板段）皆中——2/16 视觉细柱单独给盒会让「点横板挖栏杆」
+    //   穿透命中后方方块，十字条带覆盖柱 + 横板全走向，邻接无关。
+    if (blockId == IronBars)
+        return {BlockAABB{0.4375f, 0.0f, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带（柱 + ±Z 横板走向）
+                BlockAABB{0.0f, 0.0f, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带（柱 + ±X 横板走向）
     const Shape sh = def(blockId).shape;
     if (sh == ShapeFull)
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // 整格：射线进格即中（等同旧行为）
@@ -2633,6 +2670,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Dropper: // t609 投掷器 → 石质音色（石质机关盒，同发射器 / furnace 族）
     case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
+    case MossyStoneBrick: case CrackedStoneBrick: // t998 石砖变体 → 石质音色（同 stone brick 族，风化 / 开裂不改材质）
     case EndPortal: // t487 末地传送门框架 → 石质兜底音色（不可破，仅创造敲响兜底）
     case EndPortalSurface: // t664 门面 → 石质兜底音色（瞬破薄平面轻响）
     case MonsterEgg: // t665 怪物蛋（石砖形）→ 石质音色（同 stone_brick 敲击感；外表即石砖）
@@ -2642,6 +2680,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case StonePressurePlate: case IronPressurePlate: case GoldPressurePlate: // t627 压力板族扩展 → 石质音色（石质/金属质薄板）
     case IronDoor: // t722 铁门 → 石质音色（金属质，同 IronBlock / Rail 族；机制等价 MC iron door metal SoundType）
     case IronTrapdoor: // t723 铁活板门 → 石质音色（金属质，同铁门族）
+    case IronBars: // t998 铁栏杆 → 石质音色（金属质薄杆，同 iron_block 族；机制等价 MC iron bars metal SoundType）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

@@ -730,7 +730,7 @@ int main(int argc, char *argv[])
         // (b) 贴图契约腿：tile 68 逐像素 alpha==255（纹理不透 + 材质半透，同 water 模式）
         {
             QImage atlas(root + QStringLiteral("/textures/atlas.png"));
-            constexpr int kGlassTile = 68;  // default_glass（BlockRegistry::AtlasTileCount=181 单行图集）
+            constexpr int kGlassTile = 68;  // default_glass（BlockRegistry::AtlasTileCount 单行图集；t998 起 184）
             constexpr int kPx = 64;         // kAtlasTilePx 文档镜像
             bool opaqueAll = false;
             if (atlas.isNull() || atlas.width() < (kGlassTile + 1) * kPx) {
@@ -4197,6 +4197,216 @@ int main(int argc, char *argv[])
                              "boxes track the new visuals (wall 8/16 x 1.0, wood 4/16 x 1.5), and both "
                              "fence cases (world mesher + viewer preview) carry the t991 contract anchors "
                              "with MC rail/flange constants";
+    }
+
+    // ── P-t998 结构新方块三件探针（苔石砖 140 / 裂纹石砖 141 / 铁栏杆 142；Core 表钉 + 贴图逐像素 +
+    //    mesher 同源直调 + 调色板入口，纯静态断言无 rig，不占 nextSlot 容量）──
+    //    验收四腿：
+    //    (a) def / tileIndex 钉：三方块各面 tile 指向新瓦片 181/182/183；苔/裂石砖整立方石质口径（同
+    //        StoneBrick：1.5 / Pickaxe / requiresTool / minTier1 / 自掉）；铁栏杆金属口径（5.0 同铁块量级 /
+    //        Pickaxe / requiresTool / minTier1 / 自掉）+ 薄杆族判定（isPartialBlock / isCollidable /
+    //        非 isFence——与栅栏形制分家）。
+    //    (b) 贴图逐像素腿（textures/*.png 是入库资产非 build 产物，缺文件即 FAIL）：苔石砖 = 与石砖同
+    //        RNG 基底 + 暗绿苔斑簇在场（非苔区逐像素同石砖）；裂纹石砖 = 石砖基底 + <45 近黑裂纹线在场
+    //        （石砖本体最暗 58 砖缝 → 裂纹特征可分离）；铁栏杆 = 周期 4 竖条亮度分布（条 ≥110 / 缝 ≤90
+    //        带宽间隔）+ y7..8 横带贯穿 + alpha 恒不透明（薄杆面整张压缩采样契约，见 build_iron_bars.py）。
+    //    (c) 铁栏杆几何顶点腿（PartialBlockGeometry 直调，t991 模式）：孤立四邻空气 = 单柱（水平 bounds
+    //        = 2/16 柱径、满格高、无格边顶点）；四向连铁栏杆 = 柱 + 4 横板（真到格边、居中带 y 7/16·9/16
+    //        平面在场、2/16 截面）；贴方块面连接（邻 Stone 同样出横板——isFullCube 腿）。
+    //    (d) 盒分离 + 调色板入口钉：碰撞 = 4/16 立柱盒满格高（collisionTopY 1.0 可跳过）；选中 / 射线 =
+    //        十字条带双盒；creativeBlocks 含三方块且 iconSourceForBlock 全可解析（Glass 先例：无 qrc 手绘
+    //        图，程序图集重渲是唯一原生图标路径，回退链断链 = 空图标 FAIL 面）。
+    {
+        constexpr float kEps = 1e-4f;
+        bool ok = true;
+        // (a) def / tileIndex / 工具掉落口径钉
+        struct BarPin { quint8 id; int tile; };
+        const BarPin pins[3] = { { BR::MossyStoneBrick, 181 }, { BR::CrackedStoneBrick, 182 },
+                                 { BR::IronBars, 183 } };
+        for (const BarPin &p : pins) {
+            const BR::BlockDef &d = BR::def(p.id);
+            const bool tileOk = d.topTile == p.tile && d.bottomTile == p.tile
+                && d.sideTile == p.tile && d.frontTile == p.tile
+                && BR::tileIndex(p.id, BR::Top) == p.tile && BR::tileIndex(p.id, BR::Bottom) == p.tile
+                && BR::tileIndex(p.id, BR::PosX) == p.tile && BR::tileIndex(p.id, BR::NegZ) == p.tile;
+            const bool shapeOk = (p.id == BR::IronBars)
+                ? (!d.solid && d.shape == BR::ShapeIronBars && d.hardness == 5.0f)
+                : (d.solid && d.shape == BR::ShapeFull && d.hardness == 1.5f);
+            const bool toolOk = d.toolType == int(BR::Pickaxe) && d.requiresTool && d.minToolTier == 1
+                && d.dropId == int(p.id) && d.dropCount == 1;
+            if (!tileOk || !shapeOk || !toolOk || BR::AtlasTileCount < 184) {
+                qInfo().noquote() << "  [t998 diag] def" << int(p.id) << "tileOk" << tileOk
+                                  << "shapeOk" << shapeOk << "toolOk" << toolOk
+                                  << "atlas" << BR::AtlasTileCount;
+                ok = false;
+            }
+        }
+        if (BR::isFence(BR::IronBars) || !BR::isPartialBlock(BR::IronBars)
+            || !BR::isCollidable(BR::IronBars, quint8(0))) {
+            qInfo().noquote() << "  [t998 diag] bars family: isFence" << BR::isFence(BR::IronBars)
+                              << "partial" << BR::isPartialBlock(BR::IronBars)
+                              << "collidable" << BR::isCollidable(BR::IronBars, quint8(0));
+            ok = false;
+        }
+        // (b) 贴图逐像素腿（16×16 源；探针读源图，图集打包由 build_atlas.py 顺序契约 + 静态 assert 兜底）
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString texRoot = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        const auto loadTex = [&texRoot](const char *name) {
+            return QImage(texRoot + QStringLiteral("/textures/") + QString::fromLatin1(name)
+                          + QStringLiteral(".png"));
+        };
+        const QImage sb = loadTex("default_stone_brick");
+        const QImage ms = loadTex("default_mossy_stone_brick");
+        const QImage cs = loadTex("default_cracked_stone_brick");
+        const QImage ib = loadTex("default_iron_bars");
+        if (sb.size() != QSize(16, 16) || ms.size() != QSize(16, 16)
+            || cs.size() != QSize(16, 16) || ib.size() != QSize(16, 16)) {
+            qInfo().noquote() << "  [t998 diag] tex size" << sb.size() << ms.size() << cs.size() << ib.size();
+            ok = false;
+        } else {
+            int mossPx = 0, baseDiff = 0;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                const QRgb m = ms.pixel(x, y), s = sb.pixel(x, y);
+                const bool moss = qGreen(m) > qRed(m) + 15 && qGreen(m) > qBlue(m) + 15;
+                if (moss) ++mossPx;
+                else if (m != s) ++baseDiff; // 非苔区与石砖同 RNG 基底逐像素一致
+            }
+            if (mossPx < 24 || baseDiff > 4) {
+                qInfo().noquote() << "  [t998 diag] mossy mossPx" << mossPx << "baseDiff" << baseDiff;
+                ok = false;
+            }
+            int crackDark = 0, sbDark = 0, crackDiff = 0;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                const QRgb c = cs.pixel(x, y), s = sb.pixel(x, y);
+                const bool dark = qMax(qRed(c), qMax(qGreen(c), qBlue(c))) < 45; // 裂纹近黑（深于 58 砖缝）
+                if (dark) ++crackDark;
+                else if (c != s) ++crackDiff;
+                if (qMax(qRed(s), qMax(qGreen(s), qBlue(s))) < 45) ++sbDark;
+            }
+            if (crackDark < 12 || sbDark != 0 || crackDiff > 0) {
+                qInfo().noquote() << "  [t998 diag] cracked dark" << crackDark << "sbDark" << sbDark
+                                  << "crackDiff" << crackDiff;
+                ok = false;
+            }
+            int alphaBad = 0;
+            bool bandsOk = true, bandRowOk = true;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                const QRgb p = ib.pixel(x, y);
+                if (qAlpha(p) != 255) ++alphaBad; // alpha 恒不透明契约
+                const int lum = (qRed(p) + qGreen(p) + qBlue(p)) / 3;
+                if (y == 7 || y == 8) {
+                    if (x < 15 && lum < 110) bandRowOk = false; // y7..8 横带贯穿（x15 边框倒角豁免）
+                } else if (y != 15) {                            // y15 底边倒角豁免
+                    if (x % 4 < 2 ? lum < 110 : lum > 90) bandsOk = false; // 条亮（≥110）缝暗（≤90）带间隔
+                }
+            }
+            if (alphaBad != 0 || !bandsOk || !bandRowOk) {
+                qInfo().noquote() << "  [t998 diag] iron alphaBad" << alphaBad << "bandsOk" << bandsOk
+                                  << "bandRowOk" << bandRowOk;
+                ok = false;
+            }
+        }
+        // (c) 铁栏杆几何顶点腿（mesher 同源直调）
+        const auto appendBars = [](quint8 pxN, quint8 nxN, quint8 pzN, quint8 nzN) {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            nctx.posX = pxN; nctx.negX = nxN; nctx.posZ = pzN; nctx.negZ = nzN;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::IronBars, 0, lctx, nctx,
+                                         1.0f / 16.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            return verts;
+        };
+        {   // 孤立 = 单柱：水平 bounds = 2/16 柱径、满格高、无格边顶点
+            const QVector<Vtx> verts = appendBars(quint8(0), quint8(0), quint8(0), quint8(0));
+            float xMin = 1e9f, xMax = -1e9f, yMin = 1e9f, yMax = -1e9f;
+            bool edge = false;
+            for (const Vtx &v : verts) {
+                xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+                if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                    || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+            }
+            const bool isoOk = !verts.isEmpty()
+                && std::fabs(xMin - 0.4375f) < kEps && std::fabs(xMax - 0.5625f) < kEps
+                && std::fabs(yMin) < kEps && std::fabs(yMax - 1.0f) < kEps && !edge;
+            if (!isoOk) {
+                qInfo().noquote() << "  [t998 diag] bars isolated xMin" << xMin << "xMax" << xMax
+                                  << "yMax" << yMax << "edge" << edge << "verts" << verts.size();
+                ok = false;
+            }
+        }
+        {   // 四向连铁栏杆 = 柱 + 4 横板（真到格边 + 居中带平面 + 2/16 截面）；贴方块面同连（Stone 腿）
+            const QVector<Vtx> verts = appendBars(BR::IronBars, BR::IronBars, BR::IronBars, BR::IronBars);
+            float xMin = 1e9f, xMax = -1e9f, zMin = 1e9f, zMax = -1e9f;
+            bool yLo = false, yHi = false, thin = false, edge = false;
+            for (const Vtx &v : verts) {
+                xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                zMin = std::min(zMin, v.z); zMax = std::max(zMax, v.z);
+                if (std::fabs(v.y - 0.4375f) < kEps) yLo = true;   // 横板居中带下沿（7/16）
+                if (std::fabs(v.y - 0.5625f) < kEps) yHi = true;   // 横板居中带上沿（9/16）
+                if (std::fabs(v.z - 0.4375f) < kEps || std::fabs(v.x - 0.4375f) < kEps) thin = true; // 2/16 截面
+                if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                    || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+            }
+            const bool connOk = !verts.isEmpty()
+                && std::fabs(xMin) < kEps && std::fabs(xMax - 1.0f) < kEps
+                && std::fabs(zMin) < kEps && std::fabs(zMax - 1.0f) < kEps
+                && yLo && yHi && thin && edge;
+            if (!connOk) {
+                qInfo().noquote() << "  [t998 diag] bars connected xMin" << xMin << "xMax" << xMax
+                                  << "zMin" << zMin << "zMax" << zMax << "yLo/Hi" << yLo << yHi
+                                  << "thin" << thin << "edge" << edge;
+                ok = false;
+            }
+            const QVector<Vtx> vStone = appendBars(BR::Stone, quint8(0), quint8(0), quint8(0));
+            float sxMax = -1e9f;
+            bool sBand = false;
+            for (const Vtx &v : vStone) {
+                sxMax = std::max(sxMax, v.x);
+                if (std::fabs(v.y - 0.4375f) < kEps && v.x > 0.9f) sBand = true; // +X 横板远端在场
+            }
+            const bool stoneOk = std::fabs(sxMax - 1.0f) < kEps && sBand;
+            if (!stoneOk) {
+                qInfo().noquote() << "  [t998 diag] bars stone-nb xMax" << sxMax << "band" << sBand;
+                ok = false;
+            }
+        }
+        // (d) 盒分离 + 调色板入口钉
+        {
+            const std::vector<BR::BlockAABB> col = BR::collisionAABBs(BR::IronBars, 0);
+            const std::vector<BR::BlockAABB> sel = BR::selectionAABBs(BR::IronBars, 0);
+            const std::vector<BR::BlockAABB> ray = BR::raycastAABBs(BR::IronBars, 0);
+            bool boxOk = col.size() == 1 && sel.size() == 2 && ray.size() == 2
+                && std::fabs(col.front().minX - 0.375f) < kEps && std::fabs(col.front().maxX - 0.625f) < kEps
+                && std::fabs(col.front().maxY - 1.0f) < kEps
+                && std::fabs(sel.front().minX - 0.4375f) < kEps && std::fabs(sel.front().maxX - 0.5625f) < kEps
+                && std::fabs(sel.back().minX) < kEps && std::fabs(sel.back().maxX - 1.0f) < kEps
+                && std::fabs(ray.front().minX - 0.4375f) < kEps && std::fabs(ray.back().maxX - 1.0f) < kEps
+                && std::fabs(BR::collisionTopY(BR::IronBars, 0) - 1.0f) < kEps;
+            Hotbar hb;
+            const QVariantList blocks = hb.creativeBlocks();
+            bool palOk = true;
+            for (const BarPin &p : pins) {
+                bool in = false;
+                for (const QVariant &b : blocks) in = in || b.toInt() == int(p.id);
+                palOk = palOk && in && !hb.iconSourceForBlock(int(p.id)).isEmpty();
+            }
+            if (!boxOk || !palOk) {
+                qInfo().noquote() << "  [t998 diag] boxes col" << col.size() << "sel" << sel.size()
+                                  << "ray" << ray.size() << "boxOk" << boxOk << "palOk" << palOk;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t998 structure block trio: mossy/cracked stone brick full-cube stone "
+                             "profile (1.5 pickaxe tool-required, per-face tiles 181/182 carrying the "
+                             "same-RNG stone brick base with moss clusters / <45-dark crack lines and "
+                             "clean base elsewhere) and iron bars (tile 183 opaque periodic-4 bright-bar "
+                             "texture with mid band, 2/16 post + mid-band arms connecting to neighbor "
+                             "bars and full-cube faces, 4/16 full-height collision post with cross-strip "
+                             "selection/raycast, palette + icon entries pinned)";
     }
 
     // ── t802 全配方审计探针（纯 Game 层静态表查询 + 匹配器直调，无 World rig，不占 nextSlot 容量）──
@@ -9344,7 +9554,7 @@ int main(int argc, char *argv[])
     // ── P-t879 活板门双修（行为级 + 源码钉；专用断言不建 rig）──
     //    (a) 木活板门 def 贴图契约：大面（top/bottom）= 180 四镂空板、薄侧边（side/front）= planks(8)
     //        —— 旧全 8（planks 整面实心）= 用户「像木压力板」根因；
-    //    (b) 图集契约：AtlasTileCount==181 且 qrc atlas.png 宽 == 181×64（瓦片已随 180 重生——
+    //    (b) 图集契约：AtlasTileCount==184（t998 起追加到 184）且 qrc atlas.png 宽 == 184×64（瓦片已随 180 重生——
     //        陈旧图集 180×64 即红）+ tile 180 / 178 含 alpha 孔（四镂空真透明，cutout 语义的贴图前提）；
     //    (c) 源码钉：chunkgeometry isCutoutTrapX 同时含 IronTrapdoor 与 WoodTrapdoor（cutout 段
     //        路由——木活板门孔须 alphaCutoff 透视；驱动 ChunkGeometry 需渲染后端，行为级不可密闭，
@@ -9353,13 +9563,13 @@ int main(int argc, char *argv[])
         const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
         const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
                            && wtd.sideTile == 8 && wtd.frontTile == 8;
-        bool okAtlas = BR::AtlasTileCount == 181;
+        bool okAtlas = BR::AtlasTileCount == 184; // t998 起图集随结构新方块三 tile 追加到 184（追加不插中间——181..183 为 t998 新瓦片）
         // 测试二进制无 qrc（t815/t838 探针同因：图集资源不在测试 target）→ 直读源树 textures/atlas.png
         //   （构建机源树布局，与源码钉同根路径解析）。
         const QString exeDirA = QCoreApplication::applicationDirPath();
         const QString rootA = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
         QImage atlas(QDir(rootA).absoluteFilePath(QStringLiteral("textures/atlas.png")));
-        if (atlas.isNull() || atlas.width() != 181 * 64) {
+        if (atlas.isNull() || atlas.width() != 184 * 64) {
             okAtlas = false;
             qInfo().noquote() << "  t879 diag: atlas w =" << (atlas.isNull() ? -1 : atlas.width());
         } else {
@@ -9405,8 +9615,9 @@ int main(int argc, char *argv[])
         qInfo().noquote() << (okT879 ? "PASS" : "FAIL")
                           << "| t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 "
                              "(four-hole plank board, alpha cutout - the old all-planks solid plate read as "
-                             "a wooden pressure plate) with plank thin edges, atlas regenerated to 181 tiles "
-                             "with real alpha holes in tiles 178/180, and both trapdoors route to the cutout "
+                             "a wooden pressure plate) with plank thin edges, atlas regenerated (184 tiles "
+                             "since t998 appended 181..183; stale pre-t879 atlas width still fails) with "
+                             "real alpha holes in tiles 178/180, and both trapdoors route to the cutout "
                              "pass (source pin - holes need alphaCutoff to see through); iron side tiles use "
                              "iron_block / wood planks per family (mesher + runtime icon spec + offline icon)";
     }
@@ -30830,7 +31041,7 @@ Item {
                 const bool rectified = isCap || (vMin <= contentV0 + kTol969 && vMax >= contentV1 - kTol969);
                 // ③端面窗 ⊆ 柄木全不透明带（黑斑防钉：焰行窗/满窗红）。
                 const bool capSafe = !isCap || (vMin >= woodV0 - kTol969 && vMax <= woodV1 + kTol969);
-                // ④u 窗 ⊆ 火把本体柱内容列（tile 局部 u = (u − 17/181)×181 折算回 [0,1]）。
+                // ④u 窗 ⊆ 火把本体柱内容列（tile 局部 u = (u − 17/N)×N 折算回 [0,1]，N=AtlasTileCount 运行值）。
                 const float tuMin = (uMin - float(kTileIdx) / float(BR::AtlasTileCount)) * float(BR::AtlasTileCount);
                 const float tuMax = (uMax - float(kTileIdx) / float(BR::AtlasTileCount)) * float(BR::AtlasTileCount);
                 const bool uSafe = tuMin >= float(c0) / float(kTilePx) - kTol969
