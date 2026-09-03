@@ -398,8 +398,15 @@ void PlayerController::grab()
     if (m_dead) return;
     if (m_captured || !m_window) return;
     setCaptured(true);
-    QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor)); // 全局隐藏光标（最可靠；release 配对 restore）
-    QCursor::setPos(windowCenterGlobal());                         // 先居中，首次 delta 从中心起算
+    // 用户 2026-09-03 硬性要求（指针守卫）：窗口不可见/未激活（测试 rig 的隐藏窗口 / 最小化 / 失焦）
+    //   时**不碰真实指针**——测试环境下 m_window 是 0×0 隐藏窗，mapToGlobal 中心=(0,0)，setPos 会把
+    //   用户真实指针钉死在屏幕原点（真实事故）。捕获态照常建立（m_captured 驱动输入链，测试 rig 依赖），
+    //   只豁免「隐藏光标 + 居中」两个指针面；release 侧以 overrideCursor() 非空判配对（全库唯本类使用）。
+    //   测试跑法配套：一切测试命令加 QT_QPA_PLATFORM=offscreen（offscreen 下 QCursor::setPos 空操作）。
+    if (m_window->isVisible() && m_window->isActive()) {
+        QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor)); // 全局隐藏光标（最可靠；release 配对 restore）
+        QCursor::setPos(windowCenterGlobal());                        // 先居中，首次 delta 从中心起算
+    }
 }
 
 // t78 重生定位：传回出生点 + 清速度 / 挖掘态 / 飞行 / 蹲下疾跑（spec「立即重生」的物理态复位部分）。
@@ -527,7 +534,11 @@ void PlayerController::finishWorldLoad()
 void PlayerController::release()
 {
     if (!m_captured) return;
-    QGuiApplication::restoreOverrideCursor(); // 恢复光标 = 可点暂停菜单
+    // 指针守卫配对（grab 侧用户 2026-09-03 守卫）：仅当本类真的设置过覆盖光标才 restore——grab 在
+    //   窗口不可见/未激活时跳过 setOverrideCursor，无差别 restore 会弹空栈告警或误弹他人覆盖。
+    //   全库 overrideCursor 唯本类使用（git grep 核实），非空即本类所设。
+    if (QGuiApplication::overrideCursor())
+        QGuiApplication::restoreOverrideCursor(); // 恢复光标 = 可点暂停菜单
     m_keys.clear();                           // 丢弃按住的 WASD，防恢复时前冲
     setCaptured(false);
     clearHit();                               // 暂停 → 隐藏线框（未捕获时不选中）
@@ -590,6 +601,11 @@ QPoint PlayerController::windowCenterGlobal() const
 void PlayerController::pollMouse()
 {
     if (!m_window) return;
+    // 用户 2026-09-03 硬性要求（指针守卫，与 grab() 同门）：窗口不可见/未激活时不读也不动真实指针——
+    //   此时 mapToGlobal 中心无意义（测试 rig = (0,0)），delta 积分出的 yaw/pitch 是垃圾值，setPos 则
+    //   直接劫持真实指针。真实游戏流：失焦已被 eventFilter 的 WindowDeactivate → release 摘捕获，本
+    //   函数经 !m_captured 早退本就不可达；本门是纵深防御（captured 残留病理态 + 最小化组合）。
+    if (!m_window->isVisible() || !m_window->isActive()) return;
     // t853① 死亡态锁视角（纵深防御）：正常链 onDied → dropAllItems 置 m_dead + release（captured=false →
     //   tickImpl 的 !m_captured 早 return 已跳过本函数）。本闸门兜「死亡但 captured 残留 true」的任何漏
     //   release 路径（QML 死亡处理器异常被吞 / 未来新增死亡入口漏调 release）——尸体视角冻结，死亡屏
