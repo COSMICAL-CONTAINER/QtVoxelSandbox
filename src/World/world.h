@@ -1163,16 +1163,19 @@ private:
     //   （一定密度）」；机制等价 MC 1.0 地牢 / 怪物房间）。carveCaves / carveCaveEntrances / placeLavaLakes 之后、
     //   fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kDungeonMaxY]）确定性散布小型封闭房间：carve 一个
     //   W×H×D（t995 起内空 W/Z 按 hash 随机 5..7 × 高 4，机制等价 MC 1.0 地牢随机见方；旧版恒 7×4×7）
-    //   air 室 + 周界（地板 / 顶板 / 四壁）填 Cobble + MossyCobble 苔石混排（t995 对照 MC「圆石 + 苔石混砌」
-    //   修正，地板苔率 50% / 墙顶 25%；旧版 Cobble + Stone 混排口径作废）+ 中央放 Spawner + 角落放 Chest
-    //   （t995 起 ~50% 对角再加一箱 = 每间 1-2 箱，机制等价 MC；t393 战利品表填内容）。空腔被实体墙天然封闭
+    //   air 室 + 周界（地板 / 顶板 / 四壁）填石：地板逐块独立随机 25% 圆石 / 75% 苔石、墙 / 顶普通圆石
+    //   （t999 对照 minecraft.wiki Monster Room 逐方块考据；旧 t995「地板 50% / 墙顶 25%」口径作废）
+    //   + 中央放 Spawner + 墙脚豁口 1-5 个（2 高空气开口向邻近空气 / 洞穴挖穿，无空气邻域 → 全封登记）
+    //   + 战利品箱 0-2 个（t999 MC 尝试规则：2 箱位 × 各 3 次尝试，目标 Air 且四水平邻恰一实心 —— 贴墙；
+    //   偶然自然成双箱布局，项目无双箱合并态 → 相邻保持独立单箱，登记偏差；t393 战利品表填内容）。空腔被实体墙天然封闭
     //   → 房间内无天光 → 黑暗（机制等价 MC 1.0 地牢黑暗 / 刷怪笼刷怪条件）。与既有洞穴重叠时（carveCaves 已挖空同位）→ 墙体
     //   在洞穴侧被截断仍可见地牢轮廓（同 MC 1.0 地牢可被洞穴穿墙暴露）。纯函数于 seed（hashColumn）→ 同 seed
     //   同地牢分布（PLAN §2-K）。**Spawner 不存清单**：tickSpawners 在 EntityManager 内**扫玩家周围**Spawner
     //   块（按需扫描，player-near 才扫），故 World 无需维护 spawner 位置列表 —— 破坏即停止刷怪由 tickSpawners
     //   查 blockAt != Spawner 自然实现（无 setBlock 钩子）。存档 round-trip：Spawner 是普通方块 id，chunk blob
     //   随存随读，加载后 tickSpawners 仍能扫到（同 Chest 物品存 ChestStore 独立于 chunk）。t786 起 Spawner
-    //   **state 带 mob 类型**（bit1-5，地牢加权随机 / 要塞恒银鱼 / 创造放置默认僵尸），state 随 m_states 落
+    //   **state 带 mob 类型**（bit1-5，地牢加权随机 [t999 起僵尸 50%/骷髅 25%/蜘蛛 25%，爬行者退出池] /
+    //   要塞恒银鱼 / 创造放置默认僵尸），state 随 m_states 落
     //   SQLite round-trip 保真（旧存档无 type 位 → 解码端按 bit0 兼容分流，见 spawnerMobTypeForState）。
     void placeDungeons();
     // t484/t565 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（地板/轨道）+ 蜘蛛网 + 暴露矿石 +

@@ -6851,15 +6851,19 @@ void World::placeLavaLakes()
 //
 //   房间几何（t995 对照 MC 修正：内空 W×D ∈ {5,7}² 随机 × 高 4，墙体在 [-1, W]×[-1, H]×[-1, D] 外圈；
 //   t426 时代恒 7×7）：
-//     - 地板 / 顶板 / 四壁：Cobble 主体 + MossyCobble 苔石混排（t995 对照 MC 1.0 地牢「圆石 + 苔石混砌」
-//       修正 —— 工程自 t486 已有 MossyCobble 方块，旧「无苔石故用 Stone 点缀」口径作废；地板苔率 50% 重于
-//       墙 / 顶 25%，同 MC 地牢地板苔斑更密的观感）。per-cell hash 分流，确定性。
+//     - 地板：Cobble + MossyCobble 逐块独立随机 25% 圆石 / 75% 苔石（t999 对照 minecraft.wiki Monster
+//       Room 逐方块考据；旧 t995「地板 50% / 墙顶 25%」口径作废 —— t995a 探针合法演化）。墙 / 顶：普通
+//       圆石零苔。per-cell hash 分流，确定性。
 //     - 内部 (0..W-1, 0..H-1, 0..D-1)：置 Air（清空原 stone / ore / cave air → 干净房间）。不动 Bedrock
 //       （基岩层不可破）。
 //     - 中央 (W/2, 1, D/2)：置 Spawner（地板上方一格 = 站立高度；玩家走过来触发刷怪）。t786 起 state 带
-//       mob 类型（僵尸/骷髅/蜘蛛/爬行者加权随机——蠹虫不在地牢池，要塞专属；见步骤 3 权重表）。
-//     - 战利品箱 1-2 个（t995 对照 MC「每间 1-2 箱」修正）：必放一箱于角位 (0, 1, 0)；~50% 概率（hash
-//       bit30）在对角角位 (W-1, 1, D-1) 再放一箱（同带地牢 flag → 首开各自填 dungeonChestPool）。
+//       mob 类型；t999 起加权池 = 僵尸 50% / 骷髅 25% / 蜘蛛 25%（爬行者退出地牢池；见步骤 3 权重表）。
+//     - 墙脚豁口 1-5 个（t999 考据）：2 高空气开口，向邻近空气 / 洞穴逐格挖穿（≤12 格；无空气邻域 →
+//       此豁口放弃，全间皆弃 → 全封，日志登记），机制等价 MC 地牢「被洞穴暴露」的生成显式化。
+//     - 战利品箱 0-2 个（t999 MC 尝试规则）：2 箱位 × 各 3 次尝试，目标格 Air 且四水平邻恰一实心
+//       （贴墙；Chest 不计入实心 → 偶然自然成双箱布局。项目无双箱合并态：ChestState 仅低 2 位朝向 +
+//       结构 flag（bit2-6）无双箱语义，战利品逐坐标独立填 → 相邻两箱保持独立单箱，登记偏差）。全部
+//       尝试失败 → 0 箱（MC 少见态，登记）。旧 t995「角位必放 + ~50% 对角」口径作废（bit30 退役）。
 //
 //   空腔被实体墙天然封闭 → 房间内无天光 → 黑暗（机制等价 MC 1.0 地牢黑暗环境 + 刷怪笼刷怪条件）。
 //   与既有洞穴重叠时（carveCaves 已挖空同位）→ 墙体在洞穴侧被截断，地牢轮廓仍可见（同 MC 1.0 地牢被洞穴
@@ -6882,6 +6886,8 @@ void World::placeDungeons()
     constexpr int kMargin          = kRoomWMax + 1;
 
     int placed = 0;
+    int totalOpeningCells = 0; // t999 豁口合计（登记用）
+    int sealedRooms = 0;       // t999 全封房间数（无空气邻域 → 0 豁口，登记用）
     const int dungSeed = m_seed + 12037; // 地牢哈希偏移（与其它 worldgen hashColumn 解耦）
     for (int bx = kDungeonGrid / 2; bx < m_width; bx += kDungeonGrid) {
         for (int bz = kDungeonGrid / 2; bz < m_depth; bz += kDungeonGrid) {
@@ -6908,13 +6914,13 @@ void World::placeDungeons()
             const int roomW = ((r >> 28) & 1u) ? 5 : 7; // t995 内空宽 5/7
             const int roomD = ((r >> 29) & 1u) ? 5 : 7; // t995 内空深 5/7
 
-            // 房间石材：Cobble 主体 + MossyCobble 苔石混排（t995 对照 MC 1.0 地牢「圆石 + 苔石混砌」修正；
-            //   工程自 t486 已有 MossyCobble，旧 Cobble+Stone 混排口径作废）。地板苔率 50% / 墙顶 25%
-            //   （MC 地牢地板苔斑更密）；per-cell hash 位分流，确定性 → 同 seed 同墙。
+            // 房间石材（t999 对照 minecraft.wiki Monster Room 逐方块考据）：地板逐块独立随机 25% 圆石 /
+            //   75% 苔石；墙与顶恒普通圆石（零苔）。旧「地板 50% / 墙顶 25%」口径作废（t995a 探针合法演化：
+            //   断言翻转为地板苔率窗 + 墙零苔）。per-cell hash 位分流，确定性 → 同 seed 同墙。
             auto wallBlock = [&](int wx, int wy, int wz, bool isFloor) -> quint8 {
+                if (!isFloor) return BlockRegistry::Cobble; // t999 墙 / 顶普通圆石（零苔）
                 const quint32 wb = hashVoxel(dungSeed ^ 0x5a5a, wx, wy, wz);
-                const unsigned mossyPct = isFloor ? 50u : 25u; // 地板 50% / 墙·顶 25%
-                return (wb % 100u) < mossyPct ? BlockRegistry::MossyCobble : BlockRegistry::Cobble; // t995 苔石混排
+                return (wb % 100u) < 75u ? BlockRegistry::MossyCobble : BlockRegistry::Cobble; // t999 地板 75% 苔石
             };
 
             // 1) 周界填墙（地板 / 顶板 / 四壁）：遍历 [-1, roomW]×[−1, kRoomH]×[−1, roomD] 外圈，
@@ -6950,41 +6956,168 @@ void World::placeDungeons()
             }
             // 3) 中央 Spawner（地板上方一格 = cy+1 = 站立高度）。覆盖原空气格；不动非空气（防 cave 重叠时
             //    误覆盖既有方块，但步骤 2 已清空气 → 此处恒为 Air，覆盖安全）。
-            //    t786 类型化：地牢笼按 hash r 的 bit20-27（256 档）加权随机带 mob 类型 state（僵尸 40% /
-            //    骷髅 25% / 蜘蛛 20% / 爬行者 15%——机制等价 MC 1.0 地牢僵尸为主混合池；蠹虫不在地牢池，
-            //    要塞专属）。分层：World 不依赖 Entities → 表存 BlockRegistry 完整 state 常量（数值契约 =
-            //    EntityManager::MobType）；tickSpawners 经 EntityManager::spawnerMobTypeForState 解码同刷。
+            //    t999 考据口径：地牢笼按 hash r 的 bit20-27（256 档）加权随机带 mob 类型 state（僵尸 50% /
+            //    骷髅 25% / 蜘蛛 25% —— minecraft.wiki Monster Room；爬行者（Stalker）退出地牢池，旧
+            //    40/25/20/15 池作废 —— t786 加权分布腿合法演化；蠹虫不在地牢池，要塞专属）。分层：World
+            //    不依赖 Entities → 表存 BlockRegistry 完整 state 常量（数值契约 = EntityManager::MobType）；
+            //    tickSpawners 经 EntityManager::spawnerMobTypeForState 解码同刷。
             //    确定性（PLAN §2-K）：同 seed 同分布；r 低 20 位已被概率/jx/jz/cy 用走，bit20-27 独立采样。
-            static constexpr quint8 kDungeonSpawnerStates[4] = {
-                BlockRegistry::SpawnerStateShambler,  // 僵尸笼（102/256，最常见 → 创造放置默认亦此型）
+            static constexpr quint8 kDungeonSpawnerStates[3] = {
+                BlockRegistry::SpawnerStateShambler,  // 僵尸笼（128/256，最常见 → 创造放置默认亦此型）
                 BlockRegistry::SpawnerStateBones,     // 骷髅笼（64/256）
-                BlockRegistry::SpawnerStateSpider,    // 蜘蛛笼（51/256）
-                BlockRegistry::SpawnerStateStalker,   // 爬行者笼（39/256）
+                BlockRegistry::SpawnerStateSpider,    // 蜘蛛笼（64/256）
             };
-            static constexpr int kDungeonSpawnerWeights[4] = { 102, 64, 51, 39 }; // 合计 256（改权重须保持和 256）
+            static constexpr int kDungeonSpawnerWeights[3] = { 128, 64, 64 }; // 合计 256（t999 50/25/25；改权重须保持和 256）
             const int spawnerPick = int((r >> 20) & 0xFFu); // [0, 255]
             quint8 spawnerState = BlockRegistry::SpawnerStateShambler; // 兜底（权重和 <256 时最常见型）
             int spawnerAcc = 0;
-            for (int si = 0; si < 4; ++si) {
+            for (int si = 0; si < 3; ++si) {
                 spawnerAcc += kDungeonSpawnerWeights[si];
                 if (spawnerPick < spawnerAcc) { spawnerState = kDungeonSpawnerStates[si]; break; }
             }
             m_chunks.setBlock(cx + roomW / 2, cy + 1, cz + roomD / 2, BlockRegistry::Spawner, spawnerState);
-            // 4) 角落 Chest（与 Spawner 对角 = 角落 (0, 1, 0)）：t393 首开填充地牢战利品（ChestStore::populateDungeonLoot，
-            //    由 Main.qml.openChest 据下面的 state 标记触发）。state 带 ChestStateDungeonFlag(bit2) 标「地牢生成箱」
-            //    → World::isDungeonChest 返 true → 玩家首开时填充；玩家自放的箱子无此标记 → 不填（机制对齐 MC）。
-            //    朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。
-            m_chunks.setBlock(cx, cy + 1, cz, BlockRegistry::Chest, BlockRegistry::ChestStateDungeonFlag);
-            //    t995 对角二箱：~50% 概率（hash bit30，与尺寸位 bit28/29 / 笼型位 bit20-27 零耦合）在对角角位
-            //    (roomW-1, 1, roomD-1) 再放一箱 —— 机制等价 MC 1.0 地牢「每间 1-2 箱随机」；同带地牢 flag →
-            //    首开各自独立填 dungeonChestPool（ChestStore 按坐标逐箱填充，无共享）。
-            if (((r >> 30) & 1u) == 0u) // t995 对角二箱（~50%）
-                m_chunks.setBlock(cx + roomW - 1, cy + 1, cz + roomD - 1, BlockRegistry::Chest,
-                                  BlockRegistry::ChestStateDungeonFlag);
+            // 4) 墙脚豁口（t999 考据：1-5 个 2 高空气开口，通向邻近空气 / 洞穴 —— MC 地牢「被洞穴暴露」
+            //    的生成显式化；项目有限世界洞穴不一定贴邻 → 先搜「最近空气柱」再挖，搜不到 → 全封，日志
+            //    登记）。豁口数 = 1 + (r>>14 & 7)%5 ∈ [1,5]（r bit14-16，与既有位域零耦合；旧对角二箱位
+            //    bit30 随角箱口径一并退役）。
+            //    合格空气柱：房间 footprint（含墙环）之外、距外框曼哈顿 ≤ kOpeningMaxDepth，且列内
+            //    [cy-2, cy+3] 存在 Air（取距 cy 最近空气层为目标层 ty，同距取 y 低者 → 确定性；垂直窗
+            //    放宽 = 「挖向最近空气」口径 —— 洞穴地面与房脚 exact 对齐并非考据要求，到达后以竖向
+            //    连接段接通）。每豁口取当前最近未用柱（防多豁口聚同柱），自贴墙环格（主轴侧非角格）
+            //    经 L 形路径 2 高挖穿覆土；先扫后挖：路径 / 连接段遇 Bedrock / Water / Lava / Chest /
+            //    Spawner → 弃此柱取次近（不半挖、不触流体、不毁结构方块）。
+            constexpr int kOpeningMaxDepth = 12; // 空气柱搜索半径（距房间外框曼哈顿）
+            const int openingCount = 1 + int((r >> 14) & 7u) % 5; // t999 豁口数 1..5
+            constexpr int kOpenScanSide = 2 * (7 + 1 + kOpeningMaxDepth) + 1; // 扫描方边（最大内空 + 墙环 + 两侧半径，全跨度）
+            int candX[kOpenScanSide * kOpenScanSide], candZ[kOpenScanSide * kOpenScanSide];
+            int candY[kOpenScanSide * kOpenScanSide], candDist[kOpenScanSide * kOpenScanSide];
+            int candN = 0;
+            const int scanXLo = std::max(0, cx - roomW - 1 - kOpeningMaxDepth);
+            const int scanXHi = std::min(m_width - 1, cx + roomW + 1 + kOpeningMaxDepth);
+            const int scanZLo = std::max(0, cz - roomD - 1 - kOpeningMaxDepth);
+            const int scanZHi = std::min(m_depth - 1, cz + roomD + 1 + kOpeningMaxDepth);
+            const int probeY[6] = { cy, cy + 1, cy - 1, cy + 2, cy - 2, cy + 3 }; // 距房脚近者优先
+            for (int sz2 = scanZLo; sz2 <= scanZHi; ++sz2) { // 采集合格空气柱（z 外 x 内固定序 → 确定性）
+                for (int sx2 = scanXLo; sx2 <= scanXHi; ++sx2) {
+                    const int ddx = sx2 - cx, ddz = sz2 - cz;
+                    const int adx = ddx < 0 ? -ddx : ddx, adz = ddz < 0 ? -ddz : ddz;
+                    if (adx <= roomW + 1 && adz <= roomD + 1) continue; // 房间 footprint（含墙环）排除
+                    const int ddxo = adx > roomW + 1 ? adx - (roomW + 1) : 0; // 距外框曼哈顿距离
+                    const int ddzo = adz > roomD + 1 ? adz - (roomD + 1) : 0;
+                    const int dist = ddxo + ddzo;
+                    if (dist > kOpeningMaxDepth || candN >= kOpenScanSide * kOpenScanSide) continue;
+                    int ty = 0; // 目标空气层（探针序 = |ty-cy| 升序，同距 y 低者优先 → 确定性）
+                    bool found = false;
+                    for (int pi2 = 0; pi2 < 6 && !found; ++pi2)
+                        if (m_chunks.blockAt(sx2, probeY[pi2], sz2) == BlockRegistry::Air) {
+                            ty = probeY[pi2]; found = true;
+                        }
+                    if (!found) continue; // 列内无空气 → 非候选
+                    candX[candN] = sx2; candZ[candN] = sz2; candY[candN] = ty;
+                    candDist[candN] = dist; ++candN;
+                }
+            }
+            int openingsDug = 0;
+            bool candUsed[kOpenScanSide * kOpenScanSide] = {};
+            for (int oi = 0; oi < openingCount; ++oi) {
+                int best = -1; // 最近未用合格柱（同距取扫描序靠前 → 确定性）
+                for (int ci = 0; ci < candN; ++ci)
+                    if (!candUsed[ci] && (best < 0 || candDist[ci] < candDist[best])) best = ci;
+                if (best < 0) break; // 无空气柱可通 → 剩余豁口全弃（全封候选）
+                candUsed[best] = true;
+                const int tx = candX[best], tz = candZ[best], ty = candY[best];
+                const int ddx = tx - cx, ddz = tz - cz;
+                const bool xDom = (ddx < 0 ? -ddx : ddx) - (roomW + 1) >= (ddz < 0 ? -ddz : ddz) - (roomD + 1);
+                // 贴墙环格（主轴侧非角格）：豁口面孔 = 房间墙，位置随目标柱钳位
+                const int rx = xDom ? (cx + (ddx > 0 ? roomW : -1))
+                                    : std::min(cx + roomW - 1, std::max(cx, tx));
+                const int rz = xDom ? std::min(cz + roomD - 1, std::max(cz, tz))
+                                    : (cz + (ddz > 0 ? roomD : -1));
+                const int sxx = xDom ? (ddx > 0 ? 1 : -1) : (tx > rx ? 1 : (tx < rx ? -1 : 0));
+                const int szz = xDom ? (tz > rz ? 1 : (tz < rz ? -1 : 0)) : (ddz > 0 ? 1 : -1);
+                // L 形路径预扫（含贴墙环格 R 自身 = 破墙点；先 x 后 z / 先 z 后 x）+ 竖向连接段预扫：
+                // 遇 Bedrock / Water / Lava / Chest / Spawner → 弃柱（不半挖 / 不触流体 / 不毁结构）
+                bool blocked = false;
+                auto pathCellBlocked = [&](int qx, int qy, int qz) {
+                    const quint8 b = m_chunks.blockAt(qx, qy, qz);
+                    return b == BlockRegistry::Bedrock || b == BlockRegistry::Water
+                        || b == BlockRegistry::Lava || b == BlockRegistry::Chest
+                        || b == BlockRegistry::Spawner;
+                };
+                if (xDom) { // 先 x 直达目标列（含环格 R），再 z 归位
+                    for (int qx = rx; qx != tx + (sxx > 0 ? 1 : -1) && !blocked; qx += sxx)
+                        blocked = pathCellBlocked(qx, cy, rz) || pathCellBlocked(qx, cy + 1, rz);
+                    for (int qz = rz + szz; szz != 0 && qz != tz + (szz > 0 ? 1 : -1) && !blocked; qz += szz)
+                        blocked = pathCellBlocked(tx, cy, qz) || pathCellBlocked(tx, cy + 1, qz);
+                } else {    // 先 z 直达目标行（含环格 R），再 x 归位
+                    for (int qz = rz; qz != tz + (szz > 0 ? 1 : -1) && !blocked; qz += szz)
+                        blocked = pathCellBlocked(rx, cy, qz) || pathCellBlocked(rx, cy + 1, qz);
+                    for (int qx = rx + sxx; sxx != 0 && qx != tx + (sxx > 0 ? 1 : -1) && !blocked; qx += sxx)
+                        blocked = pathCellBlocked(qx, cy, tz) || pathCellBlocked(qx, cy + 1, tz);
+                }
+                for (int qy = cy + 2; !blocked && qy <= ty; ++qy)      // 竖向连接段（上行：cy+2..ty）
+                    blocked = pathCellBlocked(tx, qy, tz);
+                for (int qy = ty; !blocked && qy <= cy - 1; ++qy)      //           （下行：ty..cy-1）
+                    blocked = pathCellBlocked(tx, qy, tz);
+                if (blocked) continue; // 此柱路径不可挖 → 取次近柱
+                auto carveCellY = [&](int qx, int qy, int qz) {
+                    if (m_chunks.blockAt(qx, qy, qz) != BlockRegistry::Air)
+                        m_chunks.setBlock(qx, qy, qz, BlockRegistry::Air);
+                };
+                auto carveCellFoot = [&](int qx, int qz) { // 2 高豁口：脚部层 + 头部层
+                    carveCellY(qx, cy, qz);
+                    carveCellY(qx, cy + 1, qz);
+                };
+                if (xDom) {
+                    for (int qx = rx; qx != tx + (sxx > 0 ? 1 : -1); qx += sxx) carveCellFoot(qx, rz);
+                    for (int qz = rz + szz; szz != 0 && qz != tz + (szz > 0 ? 1 : -1); qz += szz)
+                        carveCellFoot(tx, qz);
+                } else {
+                    for (int qz = rz; qz != tz + (szz > 0 ? 1 : -1); qz += szz) carveCellFoot(rx, qz);
+                    for (int qx = rx + sxx; sxx != 0 && qx != tx + (sxx > 0 ? 1 : -1); qx += sxx)
+                        carveCellFoot(qx, tz);
+                }
+                if (ty >= cy + 2)
+                    for (int qy = cy + 2; qy <= ty; ++qy) carveCellY(tx, qy, tz); // 上行连接
+                else if (ty <= cy - 1)
+                    for (int qy = ty; qy <= cy - 1; ++qy) carveCellY(tx, qy, tz); // 下行连接
+                ++openingsDug;
+            }
+            totalOpeningCells += openingsDug;
+            if (openingsDug == 0) ++sealedRooms; // 四向皆无空气邻域 → 全封（登记）
+            // 5) 战利品箱（t999 MC 尝试规则，考据 minecraft.wiki Monster Room）：2 个箱位 × 各 3 次尝试。
+            //    每次尝试按 hashVoxel（箱位 + 尝试序独立盐）在内空取 (x,z)、y = cy+1；条件 = 目标格为 Air
+            //    且四水平邻**恰一个实心**（贴墙；Chest 不计入实心 → 沿墙第二箱可与首箱相邻 → 自然成双箱
+            //    布局；Spawner 计入实心，同 MC 通用 solid 判定）。全部尝试失败 → 0 箱（MC 少见态）。
+            //    t995 旧「角位必放 + ~50% 对角二箱」口径作废（bit30 退役）；t995c 探针合法演化为尝试规则
+            //    分布断言（0-2 箱 + 每箱贴墙核）。豁口先于箱（步骤 4 已定稿墙体 → 箱规则见最终几何）。
+            auto chestSolidNeighbors = [&](int px, int py, int pz) -> int {
+                static const int kChestDirs[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                int n = 0;
+                for (const auto &d : kChestDirs) {
+                    const quint8 nb = m_chunks.blockAt(px + d[0], py, pz + d[1]);
+                    if (nb != BlockRegistry::Air && nb != BlockRegistry::Chest) ++n; // Chest 不计入实心（自然成双）
+                }
+                return n;
+            };
+            for (int slot = 0; slot < 2; ++slot) { // t999 2 箱位 × 3 尝试
+                for (int attempt = 0; attempt < 3; ++attempt) {
+                    const quint32 cb = hashVoxel(dungSeed ^ (0xC7E5u + quint32(slot * 4 + attempt)), cx, cy, cz);
+                    const int px = cx + int(cb & 0xFu) % roomW;
+                    const int pz = cz + int((cb >> 8) & 0xFu) % roomD;
+                    if (m_chunks.blockAt(px, cy + 1, pz) != BlockRegistry::Air) continue; // 目标非空气
+                    if (chestSolidNeighbors(px, cy + 1, pz) != 1) continue; // t999 贴墙：恰一实心邻
+                    m_chunks.setBlock(px, cy + 1, pz, BlockRegistry::Chest, BlockRegistry::ChestStateDungeonFlag);
+                    break; // 本箱位落箱 → 下一箱位
+                }
+            }
             ++placed;
         }
     }
     qInfo() << "worldgen: underground dungeons =" << placed; // 同 seed → 同计数（确定性核对）
+    // t999 豁口登记（同 seed → 同数值；全封 = 四向皆无空气邻域的房间，考据允许态）
+    qInfo() << "worldgen: dungeon wall-foot openings =" << totalOpeningCells
+            << "(fully sealed rooms" << sealedRooms << "/" << placed << ")";
 }
 
 // t484/t565 废弃矿井（见 world.h 头注释）。机制等价 MC 1.0 废弃矿井 mineshaft：地下深处（Y<50）的**连通巷道
