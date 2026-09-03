@@ -1529,12 +1529,13 @@ int main(int argc, char *argv[])
     // P13 t759 要塞传送门房净空探针（worldgen 回归，非红石 —— 同 t737 环线先例收录）。断言：(a) 12 框架环
     //   逐格仍在记录层 strongholdPortalY（B5 三坐标一致性的生成侧镜像 —— t759 只抬顶板不动框架层）；
     //   (b) 每框架顶之上 4 格 Air + 第 5 格顶板石砖（净高 8：内部 dy 1..8 Air / 顶板 dy=9 = 框架层+5）→ 验收
-    //   「框架上方至少 3 格通行空间」；(c) 通行断面抽样：北走廊中段 / 东走廊中段离地 2..4 格 Air、楼梯顶步
-    //   之上 3 格 Air（同步检查入口 / 楼梯高度；不断言贴地 dy=1 —— 走廊蛛网（可穿过仅减速）允许存在）。
-    //   被测世界：优先主世界 w（默认种子 1337 的 96×96×48 生成即含 1 座要塞 → 零额外生成开销，且 rig 全在
-    //   y=41 浅层不触地下要塞）；主世界无要塞时（未来 worldgen 常量演进）独立 96×96 世界扫种子兜底 —— 尺寸
-    //   取 96 与主世界同：要塞 kMargin=23 抖动域 [-10,+5]，bx=60 候选族恒过边界（60+5 < 96-23）→ 每种子
-    //   ~64% 命中，24 发上限仅防退化（首版 64×64 抖动全域压边界 → 每种子仅 ~2% 命中 24 发全空，已修）。
+    //   「框架上方至少 3 格通行空间」；(c) 通行断面抽样（t1002 演化：piece 链重建后房体局部坐标不变 ——
+    //   北向直梯段 C3 中段 (0,rel -9) / 东监牢房 P10 中段 (14,0) 离地 2..4 格 Air、传送门房楼梯顶步
+    //   (0,rel -15,dy3) 之上 3 格 Air）+ (d) 格栅入口腿（t1002 新增）：入口门洞通行口 (1,dy1..2,rel -10)
+    //   通 Air、两侧铁栏杆在位（wiki「入口恒格栅」）。被测世界：优先主世界 w（默认种子 1337 的 96×96×48
+    //   生成即含 1 座要塞 → 零额外生成开销，且 rig 全在 y=41 浅层不触地下要塞）；主世界无要塞时（未来
+    //   worldgen 常量演进）独立 96×96 世界扫种子兜底 —— 尺寸取 96 与主世界同：要塞 kMargin=23 抖动域，
+    //   bx=60 候选族恒过边界（60+5 < 96-23）→ 每种子 ~64% 命中，24 发上限仅防退化。
     {
         const World *pw = &w;
         World fallbackW;
@@ -1580,30 +1581,43 @@ int main(int argc, char *argv[])
                 qInfo().noquote() << "  ring frame count" << frames << "!= 12";
                 ok = false;
             }
-            // (c) 通行断面抽样：北走廊中段 (dx=0,dz=-9) / 东走廊中段 (dx=14,dz=0) 自地板上 2..4 格；楼梯
-            //     顶步（dy=3）上 1..3 格（玩家站楼梯脚位 ~dy+3.5，头需再 2 格）。
+            // (c) 通行断面抽样（t1002 演化后坐标）：北向直梯段 C3 中段 (0,rel -9) / 东监牢房 P10 中段
+            //     (14,0) 自地板上 2..4 格；传送门房楼梯顶步（rel -15,dy3）上 1..3 格（玩家站楼梯脚位
+            //     ~dy+3.5，头需再 2 格）。
             const auto airRun = [&](int x, int yBase, int z, int from, int to) {
                 for (int up = from; up <= to; ++up)
                     if (pw->blockAt(x, yBase + up, z) != BR::Air) return false;
                 return true;
             };
             if (!airRun(px, cy, cz - 9, 2, 4)) {
-                qInfo().noquote() << "  north corridor headroom blocked";
+                qInfo().noquote() << "  north stair-corridor headroom blocked";
                 ok = false;
             }
             if (!airRun(px + 14, cy, cz, 2, 4)) {
-                qInfo().noquote() << "  east corridor headroom blocked";
+                qInfo().noquote() << "  east prison-hall headroom blocked";
                 ok = false;
             }
             if (!airRun(px, cy + 3, cz - 15, 1, 3)) {
                 qInfo().noquote() << "  stair top headroom blocked";
                 ok = false;
             }
+            // (d) 格栅入口腿（t1002 新增）：门洞面 z=rel -10 —— 通行口 (1,dy1..2) 通 Air、西柱/东顶梁
+            //     为铁栏杆（Wiki「入口恒格栅」；39 栏总数由 P-t1002 计）。
+            if (pw->blockAt(px + 1, cy + 1, cz - 10) != BR::Air
+                || pw->blockAt(px + 1, cy + 2, cz - 10) != BR::Air) {
+                qInfo().noquote() << "  grate entry gap blocked";
+                ok = false;
+            }
+            if (pw->blockAt(px - 1, cy + 1, cz - 10) != BR::IronBars
+                || pw->blockAt(px + 1, cy + 3, cz - 10) != BR::IronBars) {
+                qInfo().noquote() << "  grate entry bars missing";
+                ok = false;
+            }
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| stronghold portal room headroom: 4 air above frames + roof at +5, ring intact at"
-                             " recorded Y, corridor/stair clearance (t759)";
+                             " recorded Y, corridor/stair clearance + barred grate entry (t759/t1002)";
     }
 
     // ── t762 黑曜石挖掘规则探针（纯 Core/Game 表查询，无 World 交互）：① 无附魔钻石镐 miningTime == 12.0s
@@ -34263,6 +34277,182 @@ Item {
                              " bounds match footprint ring/roof cells incl. y-range, save->load voxel"
                              " rebind keeps bounds correct with no re-toast, source pins (guard/reset/"
                              "route/def/constants)";
+    }
+
+    // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
+    //    rig：t995/t1001 同款 5 seed（20260821/777/424242/1337/90210，缺要塞的种子跳过、备胎续扫，
+    //    ≥4 世界才判）× 128×128×64 世界池。断言五层：
+    //    (a) 传送门房逐方块：全图 EndPortal 恰 12 格且全在足迹内（12 框架环 + 至多一座要塞）+ 预嵌眼
+    //        池化窗（~10%/框）+ 岩浆 [80,200]（盆 9 + 河沟 ~108）+ 银鱼笼 ≥1 + 铁栏杆恰 59（传送门房
+    //        39 格栅 + 监狱厅 20）+ 铁门恰 4 格（监狱厅 2 门）+ 圆石楼梯恰 3（直梯段 C3）；
+    //    (b) piece 家具面（足迹域计数）：书架 [200,400]（大馆 231 固定 + 小馆可选 86）/ 梯 ≥7（大馆 7 +
+    //        储藏室 3）/ 栅栏 ≥10（大馆护栏）/ 要塞箱 ≥3（馆 2 + 储 1 + 箱走廊 0..6）/ 蛛网 ≥8（wiki
+    //        7% 口径期望 ~20）/ 火把 ≥10 / 石砖台阶 [40,80]（五向 36 + 螺旋 6 + 柱房 0..24）；
+    //    (c) 石砖变体逐块随机池化窗（dy1..8 壳体族格占比）：普通 [40,60]% / 苔 [25,35]% / 裂 [15,25]% /
+    //        怪物蛋 [3,8]%（期望 45/30/20/5；窗宽覆盖多 seed 二项噪声 + 家具 plain 砖不入党）；
+    //    (d) 确定性：首个有效 seed 重生成 → bounds 域 stride-3 抽样 FNV 一致（PLAN §2-K）；
+    //    (e) 源码钉：piece 上限 50 / 传送门保证旗（**阴性轮钉**：摘除即红）/ 权重表行字面（**阴性轮
+    //        钉**：打乱即红）/ 变体 45/75/95 比例字面 / 格架 spine 行（传送门链深 5 / 大图书馆 5 /
+    //        角房 7 ≥ 链深契约）/ 重试子 seed。
+    {
+        bool ok = true;
+        const quint32 seedsT1002[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u };
+        auto sampleHashT1002 = [](World &w, int cx, int cy, int cz) {
+            quint32 h = 0x811c9dc5u;
+            auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+            for (int dx = -World::kStrongholdHalf; dx <= World::kStrongholdHalf; dx += 3)
+                for (int dz = -World::kStrongholdHalf; dz <= World::kStrongholdHalf; dz += 3)
+                    for (int dy = 0; dy <= World::kStrongholdWallH + 1; ++dy) {
+                        step(quint32(w.blockAt(cx + dx, cy + dy, cz + dz)));
+                        step(quint32(w.stateAt(cx + dx, cy + dy, cz + dz)));
+                    }
+            h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15;
+            return h;
+        };
+        int  worldsChecked = 0, pooledFrames = 0, pooledEyes = 0, seedMiss = 0;
+        bool haveFirst = false;
+        quint32 firstSeed = 0, firstHash = 0;
+        for (quint32 sd : seedsT1002) {
+            if (worldsChecked >= 5) break;
+            World wT1002;
+            wT1002.setWidth(128);
+            wT1002.setDepth(128);
+            wT1002.setHeight(64);
+            wT1002.setSeed(int(sd)); // setter 内 generate() 全量 worldgen
+            if (!wT1002.hasStronghold()) { ++seedMiss; continue; }
+            const int px = wT1002.strongholdPortalX(), py = wT1002.strongholdPortalY(), pz = wT1002.strongholdPortalZ();
+            const int cx = px, cy = py - World::kStrongholdPortalDy, cz = pz - World::kStrongholdPortalDz;
+
+            // (a)+(b)+(c) 足迹域逐格计数（[cx±22] × [cy, cy+9]）。
+            int bars = 0, doors = 0, lava = 0, cobSt = 0, slabs = 0, shelf = 0, ladders = 0;
+            int fences = 0, chests = 0, webs = 0, torches = 0, silver = 0;
+            long family = 0, famPlain = 0, famMossy = 0, famCrack = 0, famEgg = 0;
+            for (int dx = -World::kStrongholdHalf; dx <= World::kStrongholdHalf; ++dx)
+                for (int dz = -World::kStrongholdHalf; dz <= World::kStrongholdHalf; ++dz)
+                    for (int dy = 0; dy <= World::kStrongholdWallH + 1; ++dy) {
+                        const quint8 id = wT1002.blockAt(cx + dx, cy + dy, cz + dz);
+                        switch (id) {
+                        case BR::IronBars:        ++bars; break;
+                        case BR::IronDoor:        ++doors; break;
+                        case BR::Lava:            ++lava; break;
+                        case BR::CobbleStairs:    ++cobSt; break;
+                        case BR::StoneBrickSlab:  ++slabs; break;
+                        case BR::Bookshelf:       ++shelf; break;
+                        case BR::Ladder:          ++ladders; break;
+                        case BR::WoodFence:       ++fences; break;
+                        case BR::Cobweb:          ++webs; break;
+                        case BR::Torch:           ++torches; break;
+                        default: break;
+                        }
+                        if (id == BR::Chest && (wT1002.stateAt(cx + dx, cy + dy, cz + dz) & BR::ChestStateStrongholdFlag)) ++chests;
+                        if (id == BR::Spawner) {
+                            const quint8 st = wT1002.stateAt(cx + dx, cy + dy, cz + dz);
+                            if (st == BR::SpawnerStateSilverfishFlag || st == BR::SpawnerStateSilverfish) ++silver;
+                        }
+                        if (dy >= 1 && dy <= World::kStrongholdWallH) { // 变体族池（墙体层）
+                            if (id == BR::StoneBrick)          { ++family; ++famPlain; }
+                            else if (id == BR::MossyStoneBrick)   { ++family; ++famMossy; }
+                            else if (id == BR::CrackedStoneBrick) { ++family; ++famCrack; }
+                            else if (id == BR::MonsterEgg)        { ++family; ++famEgg; }
+                        }
+                    }
+            // (a) 全图 EndPortal 扫描：恰 12 格（至多一座要塞 + 环完整）且全在足迹内。
+            int worldFrames = 0, framesInBounds = 0;
+            for (int x = 0; x < wT1002.width(); ++x)
+                for (int z = 0; z < wT1002.depth(); ++z)
+                    for (int y = 0; y < wT1002.height(); ++y)
+                        if (wT1002.blockAt(x, y, z) == BR::EndPortal) {
+                            ++worldFrames;
+                            if (x >= cx - World::kStrongholdHalf && x <= cx + World::kStrongholdHalf
+                                && z >= cz - World::kStrongholdHalf && z <= cz + World::kStrongholdHalf
+                                && y >= cy && y <= cy + World::kStrongholdWallH + 1)
+                                ++framesInBounds;
+                        }
+            // 预嵌眼（12 框位 state bit0）。
+            int eyes = 0;
+            for (int rdx = -2; rdx <= 2; ++rdx)
+                for (int rdz = -2; rdz <= 2; ++rdz) {
+                    const bool onRing = (rdx == -2 || rdx == 2) ? (rdz >= -1 && rdz <= 1)
+                                        : (rdz == -2 || rdz == 2) && (rdx >= -1 && rdx <= 1);
+                    if (onRing && (wT1002.stateAt(px + rdx, py, pz + rdz) & BR::EndPortalStateActiveFlag)) ++eyes;
+                }
+            pooledFrames += 12;
+            pooledEyes += eyes;
+
+            ok = ok && worldFrames == 12 && framesInBounds == 12;
+            ok = ok && bars == 59 && doors == 4 && cobSt == 3 && silver >= 1;
+            ok = ok && lava >= 80 && lava <= 200;
+            ok = ok && shelf >= 200 && shelf <= 400 && ladders >= 7 && fences >= 10;
+            ok = ok && chests >= 3 && webs >= 8 && torches >= 10;
+            ok = ok && slabs >= 40 && slabs <= 80;
+            ok = ok && family >= 3000;
+            ok = ok && famPlain * 100 >= family * 40 && famPlain * 100 <= family * 60;
+            ok = ok && famMossy * 100 >= family * 25 && famMossy * 100 <= family * 35;
+            ok = ok && famCrack * 100 >= family * 15 && famCrack * 100 <= family * 25;
+            ok = ok && famEgg   * 100 >= family *  3 && famEgg   * 100 <= family *  8;
+            if (!ok)
+                qInfo().noquote() << "  [t1002 diag] seed" << sd << "frames" << worldFrames << "/" << framesInBounds
+                                  << "bars" << bars << "doors" << doors << "cobSt" << cobSt << "silver" << silver
+                                  << "lava" << lava << "shelf" << shelf << "ladders" << ladders << "fences" << fences
+                                  << "chests" << chests << "webs" << webs << "torches" << torches << "slabs" << slabs
+                                  << "fam%" << (family ? famPlain * 100 / family : -1) << (family ? famMossy * 100 / family : -1)
+                                  << (family ? famCrack * 100 / family : -1) << (family ? famEgg * 100 / family : -1)
+                                  << "family" << family;
+
+            if (!haveFirst) { // (d) 确定性基线（首个有效世界）
+                haveFirst = true;
+                firstSeed = sd;
+                firstHash = sampleHashT1002(wT1002, cx, cy, cz);
+            }
+            ++worldsChecked;
+        }
+        ok = ok && worldsChecked >= 4;
+        if (haveFirst) { // (d) 同 seed 重生成 → 抽样 FNV 一致
+            World wR1002;
+            wR1002.setWidth(128);
+            wR1002.setDepth(128);
+            wR1002.setHeight(64);
+            wR1002.setSeed(int(firstSeed));
+            const int px = wR1002.strongholdPortalX(), py = wR1002.strongholdPortalY(), pz = wR1002.strongholdPortalZ();
+            ok = ok && wR1002.hasStronghold()
+                 && sampleHashT1002(wR1002, px, py - World::kStrongholdPortalDy, pz - World::kStrongholdPortalDz) == firstHash;
+        }
+        // 预嵌眼池化窗（~10%/框：均值 ~6/60；[0,18] 容多 seed 二项噪声）。
+        ok = ok && pooledEyes >= 0 && pooledEyes <= pooledFrames * 3 / 10;
+
+        // (e) 源码钉（world.cpp）：上限 / 保证旗 / 权重表行 / 变体比例 / 格架 spine 行 / 重试子 seed。
+        {
+            const QString exeDirT1002 = QCoreApplication::applicationDirPath();
+            const QString rootT1002 = QDir(exeDirT1002 + QStringLiteral("/..")).absolutePath();
+            QFile fT1002(rootT1002 + QStringLiteral("/src/World/world.cpp"));
+            const QString src = fT1002.open(QIODevice::ReadOnly) ? QString::fromUtf8(fT1002.readAll()) : QString();
+            const bool okPin =
+                src.contains(QStringLiteral("kStrongholdPieceCap      = 50;"))
+                && src.contains(QStringLiteral("kPortalChainDepth        = 5;"))
+                && src.contains(QStringLiteral("kLibraryMinChainDepth    = 4;"))
+                && src.contains(QStringLiteral("constexpr bool kPortalGrateGuaranteed = true;"))
+                && src.contains(QStringLiteral("attempt * 7919"))
+                && src.contains(QStringLiteral("{ PieceRoomEmpty,    6,"))
+                && src.contains(QStringLiteral("{ PieceRoomFountain, 5,"))
+                && src.contains(QStringLiteral("{ PieceCorridor,      10,"))
+                && src.contains(QStringLiteral("(m < 45u)"))
+                && src.contains(QStringLiteral("(m < 75u)"))
+                && src.contains(QStringLiteral("(m < 95u)"))
+                && src.contains(QStringLiteral("{ -13, -22,  13, -11, 5, PiecePortalRoom"))
+                && src.contains(QStringLiteral("{ -22,  -6, -12,  10, 5, PieceLibraryLarge"))
+                && src.contains(QStringLiteral("{ -22, -21, -14, -12, 7, -1"));
+            ok = ok && okPin;
+            if (!okPin)
+                qInfo().noquote() << "  [t1002 diag] source pins drifted (weight table / guarantee / variants / spine)";
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1002 stronghold piece-chain rebuild: 12-frame portal room (world-total EndPortal"
+                             " == 12, eyes" << pooledEyes << "/" << pooledFrames << "pooled, lava, silverfish cage,"
+                             " 39 grate bars + 20 prison bars = 59, 2 iron doors), furniture counts (bookshelf"
+                             " [200,400], ladders >=7, webs >=8 at wiki 7%, chests >=3, slabs [40,80]), per-block"
+                             " variant pool 45/30/20/5 in windows, deterministic re-gen, piece-table/guarantee"
+                             " source pins, seeds-miss" << seedMiss << "worlds" << worldsChecked;
     }
 
     // ── P-t1001 废弃矿井逐方块重建探针（R19.19 批 t1001；placeMineshaft piece 化重写验收面）──

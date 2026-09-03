@@ -7878,213 +7878,530 @@ void World::placeStronghold()
                 m_chunks.setBlock(px, yy, pz, id, state);
         };
 
-        // ── t713 要塞结构扩建（自 t665 的 21×21 走廊+房间布局放大约 4.5× 面积；45×45 水平足迹，竖直
-        //   dy ∈ [0,6] 地板/墙/顶板；各房间 / 走廊同步放大 + 新增东北 / 东南储藏龛）：
-        //     中央大厅（13×13）← 东入口走廊（5 宽×15 深）┐ + 东北 / 东南储藏龛（7×5 各带 1 宽门洞）
-        //                          ← 西走廊（5 宽×5 深）→ 图书馆（10×17 大房：书架墙 + 中央书架岛）
-        //                          ← 北走廊（5 宽×5 深）→ 传送门房（25×10：岩浆河 + 高台 + 楼梯 + 12 框架环）
-        //                          ← 南门洞（3 宽）→ 战利品/银鱼房（17×11：刷怪笼 + 宝箱 + 蛛网）
-        //   房间 / 走廊 = 内部空间（dy 1..8 清 Air，玩家可走；t759 墙高 5→8）；其余 = StoneBrick 墙（hash 变体：
-        //   ~10% MossyCobble 苔石砖观感 / ~8% MonsterEgg 怪物蛋嵌墙）。确定性（hashVoxel + strongSeed，
-        //   同 seed 同结构同散布，PLAN §2-K）。
-        // 1) 地板（dy=0）+ 顶板（dy=kWallH+1=9）：全幅 StoneBrick（封闭黑暗）。
+        // ── t1002 要塞 piece 链重建（R19.19 最大项；逐方块，形制忠实 minecraft.wiki/w/Stronghold 考据，
+        //    piece 全自有命名 StartSpiral / FiveWay / PortalRoom / LibraryLarge / LibrarySmall /
+        //    PrisonHall / StoreRoom / RoomCrossEmpty / RoomCrossFountain / RoomCrossPillar /
+        //    Corridor / ChestCorridor / FillerCorridor / StairsStraight）。引擎三段式：
+        //    A) 实心壳：45×45 全幅地板 (dy=0) / 顶板 (dy=9) 普通石砖（行走面统一 + t759「框架顶 +5 层
+        //       顶板」契约）+ dy1..8 变体砖**逐块随机**：普通 45% / 苔石砖 30% / 裂纹 20% / 怪物蛋 5%
+        //       （hashVoxel 逐体素确定性；机制等价 MC 要塞石砖 metadata 随机。替换 t713 旧「~8% 蛋 +
+        //       ~10% 苔圆石」嵌墙口径，差额属逐块随机化登记；苔圆石退役、换真苔石砖 t998）；
+        //    B) piece 链派型（不写块）：固定候选格架（17 slot 无重叠划分 + 16 门洞表，格架即布局契约，
+        //       注释即图）+ hash 驱动权重表逐浮动 slot 派型（房间表 / 走廊表分列）+ 固定 spine 链深标注
+        //       （StartSpiral=1 → … → PortalRoom=5 ≥ kPortalChainDepth=5 契约；图书馆 slot 链深 ≥
+        //       kLibraryMinChainDepth=4）+ 失败换子 seed 重试（kStrongholdChainAttempts 上限防御；
+        //       当前格架构造上恒过，循环保留为格架未来演化的防御）；
+        //    C) 逐 piece 落地：先全量掏刻内部（Air dy1..8）+ 门洞（1 宽 × 2 高），再逐 piece 家具盖章
+        //       （书架 / 阁楼木板 / 栅栏 / 梯 / 铁栏杆牢房 / 铁门 / 岩浆盆 / 12 框架环 / 刷怪笼逐方块）。
+        //    传送门房**固定于原点局部坐标**：环心 (0,4,-18) ≡ 类常量 kStrongholdPortalDy/Dz、房体与
+        //    t713 旧几何同位 → B5 读档框架反推 / insideStronghold 足迹 / t1000 成就 bounds 全链零改动
+        //    （t1000 依赖选型 (a) 强化版：不放宽常量、链半径天然 ≤ ±22，P-t1000 零演化）。
+        //    半径钳制登记：MC 链 ≤50 间 / 水平半径 112；本工程 160² 世界钳到 45×45 盒 → 17 间紧凑
+        //    piece（≤ kStrongholdPieceCap=50 ✓）；传送门房链深按 piece 路径长度口径 =5（MC「距起点
+        //    ≥5 间」）；图书馆 1-2 座（MC 0-2 → 保证 ≥1 属登记偏差：探针稳定 + 探索价值）；转角 piece
+        //    未单列 slot（格架转向由 FiveWay 四臂 / StartSpiral 三出口承担，登记近似）；t713 南房双
+        //    银鱼笼 / 双箱随旧布局退役（登记：银鱼由 5% 怪物蛋墙 ~430 格 + 传送门房笼承担，箱由图书馆 /
+        //    储藏室 / 箱走廊承担）。
+
+        // ── Phase A：实心壳（地板 / 顶板普通石砖；墙体逐块变体）。────────────────────────────────
         for (int dx = -kHalf; dx <= kHalf; ++dx) {
             for (int dz = -kHalf; dz <= kHalf; ++dz) {
-                put(dx, 0, dz, BlockRegistry::StoneBrick);
-                put(dx, kWallH + 1, dz, BlockRegistry::StoneBrick);
-            }
-        }
-
-        // 内部空间谓词（走廊 / 房间内部 → 清 Air；非内部 → 墙）。中央大厅 + 四向走廊 + 四设施房 + 两储藏龛。
-        //   t713 各矩形已做静态推演核对（tools 侧 Python 同款谓词 flood-fill 连通性 = 980 内部格全连通）。
-        auto insideSpace = [](int dx, int dz) {
-            if (dx >= -6 && dx <= 6 && dz >= -6 && dz <= 6) return true;       // 中央大厅（13×13）
-            if (dx >= 7 && dx <= 21 && dz >= -2 && dz <= 2) return true;       // 东入口走廊（5 宽×15 深）
-            if (dx >= 12 && dx <= 18 && dz >= -8 && dz <= -4) return true;     // 东北储藏龛（7×5）
-            if (dx >= 14 && dx <= 16 && dz == -3) return true;                 // 东北龛门洞（3 宽）
-            if (dx >= 12 && dx <= 18 && dz >= 4 && dz <= 8) return true;       // 东南储藏龛（7×5）
-            if (dx >= 14 && dx <= 16 && dz == 3) return true;                  // 东南龛门洞（3 宽）
-            if (dx >= -2 && dx <= 2 && dz >= -11 && dz <= -7) return true;     // 北走廊（5 宽×5 深）
-            if (dx >= -12 && dx <= 12 && dz >= -21 && dz <= -12) return true;  // 传送门房内部（25×10）
-            if (dx >= -1 && dx <= 1 && dz == 7) return true;                   // 南门洞（3 宽）
-            if (dx >= -8 && dx <= 8 && dz >= 8 && dz <= 18) return true;       // 战利品/银鱼房内部（17×11）
-            if (dx >= -11 && dx <= -7 && dz >= -2 && dz <= 2) return true;     // 西走廊（5 宽×5 深）
-            if (dx >= -21 && dx <= -12 && dz >= -8 && dz <= 8) return true;    // 图书馆内部（10×17）
-            return false;
-        };
-
-        // 2) 墙体 + 内部空间（y 1..8）：非内部格 = 石砖（hash 变体 MossyCobble 苔石 / MonsterEgg 怪物蛋嵌墙，
-        //    机制等价 MC 要塞石砖墙混嵌怪物蛋；确定性 → 同 seed 同墙同蛋）；内部格 = 清 Air（玩家可走入）。
-        for (int dy = 1; dy <= kWallH; ++dy) {
-            for (int dx = -kHalf; dx <= kHalf; ++dx) {
-                for (int dz = -kHalf; dz <= kHalf; ++dz) {
-                    if (insideSpace(dx, dz)) {
-                        put(dx, dy, dz, BlockRegistry::Air); // 走廊 / 房间内部
-                        continue;
-                    }
-                    // 墙格：确定性变体（hashVoxel 高 8 位分流 —— 苔石砖 ~10% / 怪物蛋 ~8% / 石砖余下）。
-                    const quint32 wh = hashVoxel(strongSeed ^ 0x665, cx + dx, cy + dy, cz + dz);
-                    if ((wh % 100u) < 8u)
-                        put(dx, dy, dz, BlockRegistry::MonsterEgg);    // 怪物蛋嵌墙（瞬破出蠹虫）
-                    else if ((wh % 100u) < 18u)
-                        put(dx, dy, dz, BlockRegistry::MossyCobble);   // 苔石砖变体（石砖同族观感）
-                    else
-                        put(dx, dy, dz, BlockRegistry::StoneBrick);
+                put(dx, 0, dz, BlockRegistry::StoneBrick);          // 地板（普通石砖：行走面统一）
+                put(dx, kWallH + 1, dz, BlockRegistry::StoneBrick); // 顶板（普通石砖：t759 契约层）
+                for (int dy = 1; dy <= kWallH; ++dy) {
+                    // 墙体逐块变体（确定性 hashVoxel → 同 seed 同散布，PLAN §2-K。**阴性轮钉**：比例
+                    //   字面 45/75/95 被 P-t1002 源码钉定）。
+                    const quint32 wv = hashVoxel(strongSeed ^ 0x5102u, cx + dx, cy + dy, cz + dz);
+                    const unsigned m = wv % 100u;
+                    put(dx, dy, dz, (m < 45u)  ? BlockRegistry::StoneBrick
+                                  : (m < 75u)  ? BlockRegistry::MossyStoneBrick
+                                  : (m < 95u)  ? BlockRegistry::CrackedStoneBrick
+                                               : BlockRegistry::MonsterEgg);
                 }
             }
         }
 
-        // 3) 中央大厅四角承重柱（(±3,±3)，dy 1..8 随 kWallH 撑到新顶）：石砖实心柱撑顶（扩厅观感 + 结构叙事；
-        //    柱距内部边 3 格 → 不挡四向走廊动线，仅大厅中心 7×7 仍开阔）。
-        for (int pxIdx = -1; pxIdx <= 1; pxIdx += 2) {
-            for (int pzIdx = -1; pzIdx <= 1; pzIdx += 2) {
-                for (int dy = 1; dy <= kWallH; ++dy)
-                    put(pxIdx * 3, dy, pzIdx * 3, BlockRegistry::StoneBrick);
+        // ── Phase B：piece 链派型（格架 + 权重表 + 链深 + 重试防御；不写块）。────────────────────
+        constexpr int kStrongholdPieceCap      = 50; // 链 piece 数上限（wiki ≤50；格架 17 ≤ 50 static_assert 钉）
+        constexpr int kPortalChainDepth        = 5;  // 传送门房最小链深（wiki「距起点 ≥5 间」；spine 恒 5 ✓）
+        constexpr int kLibraryMinChainDepth    = 4;  // 图书馆最小链深（wiki「距起点 ≥4 间」；图书馆 slot 深 5/7 ✓）
+        constexpr int kStrongholdChainAttempts = 8;  // 链派型失败换子 seed 重试上限（防御）
+
+        enum PieceKind {
+            PieceStartSpiral, PieceFiveWay, PiecePortalRoom,
+            PieceLibraryLarge, PieceLibrarySmall, PiecePrisonHall, PieceStoreRoom,
+            PieceRoomEmpty, PieceRoomFountain, PieceRoomPillar,
+            PieceCorridor, PieceChestCorridor, PieceFillerCorridor, PieceStairsStraight
+        };
+        // 格架 slot 表（footprint 含 1 圈墙；x0<x1 / z0<z1；z 负=北）。17 slot 互不重叠（静态推演核对：
+        //   相邻 slot 共享 2 格厚墙带，如 P6 墙列 x=-12 与 C5 墙列 x=-11），depth = 自 StartSpiral 起
+        //   piece 路径长度（1..7 全部 ≤ 链上限；探针钉 spine 行）。fixed: -1 = 浮动（权重表派型）。
+        struct ShSlot { int x0, z0, x1, z1, depth, fixed; };
+        constexpr ShSlot slotTable[17] = { // 命名避讳 Qt 空宏 `slots`（qobjectdefs.h），宏吞数组名编译期即碎
+            //    x0   z0   x1   z1  depth fixed
+            {  -4,  13,   4,  21, 1, PieceStartSpiral    }, // S0 起始螺旋梯（三出口 N/W/E）
+            {  -2,   8,   2,  12, 2, PieceCorridor       }, // C1 南北走廊（spine 固定）
+            {  -5,  -3,   5,   7, 3, PieceFiveWay        }, // P2 五向交叉（四臂 N/S/E/W）
+            {  -2, -10,   2,  -4, 4, PieceStairsStraight }, // C3 北向直梯段（spine 固定；登门前圆石楼梯坡）
+            { -13, -22,  13, -11, 5, PiecePortalRoom     }, // PR 传送门房（固定局部坐标，环心 (0,4,-18)）
+            { -11,  -2,  -6,   2, 4, -1                  }, // C5 西臂走廊（浮动）
+            { -22,  -6, -12,  10, 5, PieceLibraryLarge   }, // P6 大图书馆（固定；链深 5 ≥ 4 ✓）
+            { -19, -11, -15,  -7, 6, -1                  }, // C7 西北连接走廊（浮动）
+            { -22, -21, -14, -12, 7, -1                  }, // P8 西北角房（浮动；第二图书馆候选，链深 7 ≥ 4 ✓）
+            {   6,  -2,  11,   2, 4, -1                  }, // C9 东臂走廊（浮动）
+            {  12,  -6,  22,  10, 5, PiecePrisonHall     }, // P10 监狱厅（固定；铁栏杆牢房 + 铁门）
+            {  15, -11,  19,  -7, 6, -1                  }, // C11 东北连接走廊（浮动）
+            {  14, -21,  22, -12, 7, -1                  }, // P12 东北角房（浮动；第二图书馆候选）
+            { -11,  15,  -5,  19, 2, -1                  }, // C13 西南走廊（浮动）
+            { -22,  13, -12,  21, 3, PieceStoreRoom      }, // P14 储藏室（固定；圆石芯 + 木板阁楼 + 梯 + 上层箱）
+            {   5,  15,  11,  19, 2, -1                  }, // C15 东南走廊（浮动）
+            {  12,  13,  22,  21, 3, -1                  }, // P16 东南角房（浮动）
+        };
+        constexpr int kSlotCount       = int(sizeof(slotTable) / sizeof(slotTable[0]));
+        constexpr int kSlotPortal      = 4;
+        constexpr int kSlotLibLarge    = 6;
+        constexpr int kSlotLibPocketA  = 8;
+        constexpr int kSlotLibPocketB  = 12;
+        static_assert(kSlotCount <= kStrongholdPieceCap, "stronghold piece chain must stay within wiki 50-piece cap");
+        static_assert(slotTable[kSlotPortal].depth >= kPortalChainDepth, "portal room chain depth contract");
+        static_assert(slotTable[kSlotLibLarge].depth >= kLibraryMinChainDepth, "library chain depth contract");
+        // 门洞表（16 处：相邻 slot 墙带上掏 1 宽 × 2 高通行口；axis=1 → x=fix, z∈[lo,hi]；axis=0 → z=fix, x∈[lo,hi]）。
+        struct ShDoor { int fix, lo, hi, axis; };
+        constexpr ShDoor doors[16] = {
+            {   0,  12,  13, 1 }, // S0↔C1
+            {   0,   7,   8, 1 }, // C1↔P2
+            {   0,  -4,  -3, 1 }, // P2↔C3
+            {   0, -11, -10, 1 }, // C3↔PR（传送门房入口——铁栏杆格栅盖章见 stampPortalRoom g1）
+            {   0,  -6,  -5, 0 }, // P2↔C5
+            {   0, -12, -11, 0 }, // C5↔P6
+            { -17,  -7,  -6, 1 }, // P6↔C7
+            { -17, -12, -11, 1 }, // C7↔P8
+            {   0,   5,   6, 0 }, // P2↔C9
+            {   0,  11,  12, 0 }, // C9↔P10
+            {  17,  -7,  -6, 1 }, // P10↔C11
+            {  17, -12, -11, 1 }, // C11↔P12
+            {  17,  -5,  -4, 0 }, // S0↔C13
+            {  17, -12, -11, 0 }, // C13↔P14
+            {  17,   4,   5, 0 }, // S0↔C15
+            {  17,  11,  12, 0 }, // C15↔P16
+        };
+        // 权重表（权重自定、形制忠实；**阴性轮钉**：表行字面被 P-t1002 源码钉定，打乱即红）。
+        //   房间浮动表（P8/P12/P16 三间）：房间交叉变体（空 / 喷泉 / 柱）+ 小图书馆。
+        struct ShWeight { PieceKind kind; int w; const char *name; };
+        const ShWeight roomTable[] = {
+            { PieceRoomEmpty,    6, "RoomCrossEmpty"    },
+            { PieceRoomFountain, 5, "RoomCrossFountain" },
+            { PieceRoomPillar,   5, "RoomCrossPillar"   },
+            { PieceLibrarySmall, 4, "LibrarySmall"      },
+        };
+        //   走廊浮动表（C5/C7/C9/C11/C13/C15 六段）：直走廊（50% 侧龛）/ 箱走廊 / 填充走廊。
+        const ShWeight corrTable[] = {
+            { PieceCorridor,      10, "CorridorStraight" },
+            { PieceChestCorridor,  4, "ChestCorridor"    },
+            { PieceFillerCorridor, 4, "FillerCorridor"   },
+        };
+        auto isCorrSlot = [](int i) { return i == 5 || i == 7 || i == 9 || i == 11 || i == 13 || i == 15; };
+        auto weightedPick = [&](const ShWeight *table, int n, int sub, int slotIdx) {
+            int total = 0;
+            for (int i = 0; i < n; ++i) total += table[i].w;
+            unsigned r = hashVoxel(sub ^ 0x51CEu, 101 + slotIdx, 7, 0) % unsigned(total);
+            for (int i = 0; i < n; ++i) {
+                if (r < unsigned(table[i].w)) return table[i].kind;
+                r -= unsigned(table[i].w);
+            }
+            return table[n - 1].kind; // 不可达兜底
+        };
+        // 传送门房保证生成旗（MC：传送门房必生成，缺则整链重开——本引擎格架固定位置硬保证 + 核验防御；
+        //   **阴性轮钉**：置 false → 传送门房哈希概率化且不重试 → P-t1002 传送门腿恰红）。
+        constexpr bool kPortalGrateGuaranteed = true;
+        PieceKind kind[kSlotCount] = {};
+        bool portalStamped = false;
+        int  attempt = 0;
+        for (; attempt < kStrongholdChainAttempts; ++attempt) {
+            const int sub = strongSeed + attempt * 7919; // 子 seed（重试防御；确定性 → 同 seed 同链）
+            for (int i = 0; i < kSlotCount; ++i) {
+                if (slotTable[i].fixed >= 0) { kind[i] = PieceKind(slotTable[i].fixed); continue; }
+                kind[i] = weightedPick(isCorrSlot(i) ? corrTable : roomTable,
+                                       isCorrSlot(i) ? 3 : 4, sub, i);
+            }
+            // 图书馆座数 1-2（登记偏差 MC 0-2 → 保证 ≥1）：第二座挂 P8/P12 之一（链深 7 ≥ 4 ✓）。
+            const int nLib = 1 + int(hashVoxel(sub ^ 0xB00Cu, 202, 0, 0) % 2u);
+            if (nLib == 2)
+                kind[hashVoxel(sub ^ 0xB00Du, 203, 0, 0) % 2u ? kSlotLibPocketA : kSlotLibPocketB] = PieceLibrarySmall;
+            portalStamped = kPortalGrateGuaranteed
+                            || (hashVoxel(sub ^ 0x9E9u, 205, 0, 0) % 100u) < 55u; // 摘除保证 → 概率化
+            // 链契约核验：传送门房在场 + 图书馆 ∈ [1,2] 座 + piece 数 ≤ 上限。构造上恒过（portal 固定
+            //   slot / P6 固定大图书馆），循环为格架未来演化的防御（不重试无保证的 portal——「无保证」
+            //   语义即如此）。
+            int libs = 0;
+            for (int i = 0; i < kSlotCount; ++i)
+                if (kind[i] == PieceLibraryLarge || kind[i] == PieceLibrarySmall) ++libs;
+            if ((!kPortalGrateGuaranteed || portalStamped) && libs >= 1 && libs <= 2
+                && kSlotCount <= kStrongholdPieceCap)
+                break;
+        }
+
+        // ── Phase C：逐 piece 落地（先全量掏刻 + 门洞，后家具盖章）。────────────────────────────
+        auto carveInterior = [&](const ShSlot &s) {
+            for (int dx = s.x0 + 1; dx <= s.x1 - 1; ++dx)
+                for (int dz = s.z0 + 1; dz <= s.z1 - 1; ++dz)
+                    for (int dy = 1; dy <= kWallH; ++dy)
+                        put(dx, dy, dz, BlockRegistry::Air);
+        };
+        for (int i = 0; i < kSlotCount; ++i) carveInterior(slotTable[i]);
+        for (const ShDoor &d : doors)
+            for (int b = d.lo; b <= d.hi; ++b)
+                for (int dy = 1; dy <= 2; ++dy)
+                    put(d.axis ? d.fix : b, dy, d.axis ? b : d.fix, BlockRegistry::Air);
+
+        // slot 内部矩形（footprint 内缩 1 圈墙）。
+        auto iRect = [](const ShSlot &s, int &ix0, int &iz0, int &ix1, int &iz1) {
+            ix0 = s.x0 + 1; iz0 = s.z0 + 1; ix1 = s.x1 - 1; iz1 = s.z1 - 1;
+        };
+
+        // StartSpiral（起始螺旋梯）：中央承重柱 + 绕柱螺旋踏步（4 石砖楼梯 + 6 石砖台阶；wiki SPSD
+        //   187 砖 + 6 平滑石台阶——平滑石台阶方块本工程未收录 → 石砖台阶等价替（登记）；MC 多层盘旋
+        //   压平为绕柱装饰坡，单层引擎登记）+ 2 火把。
+        auto stampStartSpiral = [&](const ShSlot &s) {
+            const int mx = (s.x0 + s.x1) / 2, mz = (s.z0 + s.z1) / 2;
+            for (int dy = 1; dy <= kWallH; ++dy) put(mx, dy, mz, BlockRegistry::StoneBrick);
+            put(mx + 1, 1, mz,     BlockRegistry::StoneBrickStairs, 0);
+            put(mx,     1, mz + 1, BlockRegistry::StoneBrickSlab);
+            put(mx,     2, mz + 1, BlockRegistry::StoneBrickStairs, 2);
+            put(mx - 1, 2, mz,     BlockRegistry::StoneBrickSlab);
+            put(mx - 1, 3, mz,     BlockRegistry::StoneBrickStairs, 1);
+            put(mx,     3, mz - 1, BlockRegistry::StoneBrickSlab);
+            put(mx,     4, mz - 1, BlockRegistry::StoneBrickStairs, 3);
+            put(mx + 1, 4, mz - 1, BlockRegistry::StoneBrickSlab);
+            put(mx + 1, 5, mz,     BlockRegistry::StoneBrickSlab);
+            put(mx - 1, 5, mz + 1, BlockRegistry::StoneBrickSlab);
+            put(mx - 2, 1, mz - 2, BlockRegistry::Torch);
+            put(mx + 2, 1, mz + 2, BlockRegistry::Torch);
+        };
+
+        // FiveWay（五向交叉）：室内沿台阶环 + 中心十字 = 恰 36 石砖台阶 + 中央 1 火把（wiki SH5C
+        //   36 台阶 + 1 火把精确复刻；壳体石砖 ~560 ∈ wiki 536-572 带内）。MC 第五向「上」出口由
+        //   北向直梯段（C3）承担（登记近似）。
+        auto stampFiveWay = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            for (int dx = ix0; dx <= ix1; ++dx)
+                for (int dz = iz0; dz <= iz1; ++dz)
+                    if (dx == ix0 || dx == ix1 || dz == iz0 || dz == iz1)
+                        put(dx, 1, dz, BlockRegistry::StoneBrickSlab);
+            const int mx = (ix0 + ix1) / 2, mz = (iz0 + iz1) / 2;
+            put(mx + 1, 1, mz, BlockRegistry::StoneBrickSlab);
+            put(mx - 1, 1, mz, BlockRegistry::StoneBrickSlab);
+            put(mx, 1, mz + 1, BlockRegistry::StoneBrickSlab);
+            put(mx, 1, mz - 1, BlockRegistry::StoneBrickSlab);
+            put(mx, 1, mz, BlockRegistry::Torch);
+        };
+
+        // StairsStraight（直梯段）：贴墙圆石楼梯 3 级坡 + 台下实心填充（wiki SHSSD 275 砖 + 18 圆石
+        //   楼梯——壳体块数级达成；楼梯 18→3、平层化（单层引擎不改层高，坡为登坡装饰）登记近似）。
+        auto stampStairsStraight = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            put(ix0, 1, iz0,     BlockRegistry::CobbleStairs, 2);
+            put(ix0, 2, iz0 + 1, BlockRegistry::CobbleStairs, 2);
+            put(ix0, 1, iz0 + 1, BlockRegistry::StoneBrick);      // 台下填充（防悬浮）
+            put(ix0, 3, iz0 + 2, BlockRegistry::CobbleStairs, 2);
+            put(ix0, 1, iz0 + 2, BlockRegistry::StoneBrick);
+            put(ix0, 2, iz0 + 2, BlockRegistry::StoneBrick);
+        };
+
+        // PortalRoom（传送门房；**固定局部坐标**，与 t713 旧房体同位 → B5 读档反推 / t1000 bounds 零
+        //   回归）：石砖高台（13×6，dy1..3，台面 dy=4 可站立）+ 3×3 岩浆盆（dy=3，激活门面正下方
+        //   一格）+ 12 框架环（标准 ±2 方形环 = endPortalRingComplete 同几何，~10% 预嵌眼）+ 3 级
+        //   石砖楼梯（台下实心）+ 环沟岩浆河 + 南栏 + 银鱼刷怪笼（wiki SHPR 704 砖 + 15 岩浆 + 8 楼梯
+        //   + 12 框架 + 1 笼的块数级复刻；岩浆盆 9 + 河沟 ~108 ≥ 15 ✓）+ **39 铁栏杆格栅**（wiki 39
+        //   精确总数，三段分配：入口格栅 7 + 岩浆河护栏 24 + 高台护栏 8——MC 分配口径不同总和同，登记）。
+        auto stampPortalRoom = [&]() {
+            // a) 高台（x -6..6 × z -21..-16，dy1..3 实心）。
+            for (int dx = -6; dx <= 6; ++dx)
+                for (int dz = -21; dz <= -16; ++dz)
+                    for (int dy = 1; dy <= 3; ++dy)
+                        put(dx, dy, dz, BlockRegistry::StoneBrick);
+            // d) 3 级楼梯（x -1..1，dz -15..-13 逐级 dy 3..1，state=2 朝 +Z 开 → 自南向北登台）+ 台下填充。
+            for (int dx = -1; dx <= 1; ++dx) {
+                put(dx, 3, -15, BlockRegistry::StoneBrickStairs, 2);
+                put(dx, 2, -14, BlockRegistry::StoneBrickStairs, 2);
+                put(dx, 1, -13, BlockRegistry::StoneBrickStairs, 2);
+                put(dx, 1, -15, BlockRegistry::StoneBrick);
+                put(dx, 2, -15, BlockRegistry::StoneBrick);
+                put(dx, 1, -14, BlockRegistry::StoneBrick);
+            }
+            // e) 环沟岩浆河（dy=0，高台外围；三面围死稳态不流）+ 南侧石砖栏。
+            for (int dx = -12; dx <= 12; ++dx)
+                for (int dz = -21; dz <= -16; ++dz) {
+                    if (dx >= -6 && dx <= 6) continue;              // 高台 footprint（dy=0 已是地板石砖）
+                    if (dz >= -15) continue;                        // 仅 dz -21..-16 环沟带
+                    put(dx, 0, dz, BlockRegistry::Lava);
+                }
+            for (int dx = -12; dx <= 12; ++dx) {
+                if (dx >= -1 && dx <= 1) continue;                  // 楼梯 footprint
+                if (dx >= -6 && dx <= 6) continue;                  // 高台南沿
+                put(dx, 0, -15, BlockRegistry::StoneBrick);
+            }
+            // b) 3×3 岩浆盆（dy=3 高台内挖槽灌岩浆；盆底 dy=2 实心托底）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -19; dz <= -17; ++dz)
+                    put(dx, 3, dz, BlockRegistry::Lava);
+            // c) 12 框架环（中心 (0,4,-18)，四边各 3 不含四角）+ ~10% 预嵌眼（确定性 hash）。
+            for (int pdx = -2; pdx <= 2; ++pdx)
+                for (int pdz = -20; pdz <= -16; ++pdz) {
+                    const bool onRingExact = (pdx == -2 || pdx == 2) ? (pdz >= -19 && pdz <= -17)
+                                                : (pdz == -20 || pdz == -16) && (pdx >= -1 && pdx <= 1);
+                    if (!onRingExact) continue;
+                    const quint32 eh = hashVoxel(strongSeed ^ 0x664u, cx + pdx, cy + 4, cz + pdz);
+                    const quint8 st = (eh % 100u) < 10u ? BlockRegistry::EndPortalStateActiveFlag : 0u;
+                    put(pdx, 4, pdz, BlockRegistry::EndPortal, st);
+                }
+            // f) 银鱼刷怪笼（环中心正上方；t786 显式银鱼 type → tickSpawners 刷 Silverfish）。
+            put(0, 5, -18, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
+            // g) 39 铁栏杆格栅（wiki SHPR 39 精确总数）。
+            //    g1) 入口格栅（z=-10 门洞面 3 宽 × 3 高 = 9 − 东侧 1×2 通行口 = 7；wiki「入口恒格栅」，
+            //        通行口留 东列 dy1..2 供玩家侧身入内——门洞表只掏 x=0 单列、格栅柱又盖回 x=0 门洞面
+            //        → 通行口须在此**显式掏穿** C3/PR 双墙带（z=-10/-11）接房内，否则洞位留 Phase A 变体砖
+            //        入口堵死（t759 (d) 腿钉通行口 (1,dy1..2,-10) Air）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dy = 1; dy <= 3; ++dy) {
+                    if (dx == 1 && dy <= 2) {                       // 通行口：掏穿双墙带（z -10/-11）
+                        put(dx, dy, -10, BlockRegistry::Air);
+                        put(dx, dy, -11, BlockRegistry::Air);
+                        continue;
+                    }
+                    put(dx, dy, -10, BlockRegistry::IronBars);
+                }
+            //    g2) 岩浆河护栏（南栏 dy0 之上 dy1..2，x ±7..±12 两段 12 格 × 2 = 24；防坠河 + 栅窗观感）。
+            for (int dx = -12; dx <= 12; ++dx) {
+                if (dx >= -6 && dx <= 6) continue;                  // 高台 footprint
+                if (dx >= -1 && dx <= 1) continue;                  // 楼梯 footprint
+                put(dx, 1, -15, BlockRegistry::IronBars);
+                put(dx, 2, -15, BlockRegistry::IronBars);
+            }
+            //    g3) 高台边缘护栏（台面 dy4 上 1 高，x=±6 × z -20..-17 = 8；环区中带 x±2 不挡登台动线）。
+            for (int dz = -20; dz <= -17; ++dz) {
+                put(-6, 4, dz, BlockRegistry::IronBars);
+                put(6, 4, dz, BlockRegistry::IronBars);
+            }
+        };
+
+        // LibraryLarge（大图书馆；wiki SHLi 大：895 砖 + 233 书架 + 166 木板 + 46 栅栏 + 14 火把 +
+        //   7 梯 + 2 箱——书架 231 / 木板 104 / 栅栏 13 / 火把 14 ✓ / 梯 7 ✓ / 箱 2 ✓，块数级忠实，
+        //   木板 166→104 / 栅栏 46→13 登记近似）：贴墙书架带 dy1..3 + 阁楼木板层 dy4（梯洞）+ 阁楼
+        //   书架带 dy5..6 + 中央书架岛 3×9×3 + 栅栏护栏 + 贴北墙梯柱 dy1..7 + 阁楼双箱 + 双层 14 火把。
+        auto stampLibraryLarge = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            for (int dz = iz0; dz <= iz1; ++dz)
+                for (int dy = 1; dy <= 3; ++dy) {
+                    put(ix0, dy, dz, BlockRegistry::Bookshelf);         // 西墙书架带（90）
+                    put(ix1, dy, dz, BlockRegistry::Bookshelf);         // 东墙书架带
+                    if (dy <= 2) {                                       // 阁楼书架带 dy5..6（60）
+                        put(ix0 + 1, dy + 4, dz, BlockRegistry::Bookshelf);
+                        put(ix1 - 1, dy + 4, dz, BlockRegistry::Bookshelf);
+                    }
+                }
+            const int mx = (ix0 + ix1) / 2, mz = (iz0 + iz1) / 2;
+            for (int dx = ix0 + 1; dx <= ix1 - 1; ++dx)                  // 阁楼木板层 dy4（梯洞外满铺 104）
+                for (int dz = iz0; dz <= iz1; ++dz)
+                    if (!(dx == mx && dz == iz1)) put(dx, 4, dz, BlockRegistry::Planks);
+            for (int dx = mx - 1; dx <= mx + 1; ++dx)                    // 中央书架岛 3×9×3（81）
+                for (int dz = mz - 4; dz <= mz + 4; ++dz)
+                    for (int dy = 1; dy <= 3; ++dy)
+                        put(dx, dy, dz, BlockRegistry::Bookshelf);
+            for (int dy = 1; dy <= kWallH - 1; ++dy)                     // 梯柱 dy1..7（贴北墙 +Z → state 2）
+                put(mx, dy, iz1, BlockRegistry::Ladder, 2);              //   梯洞格 dy4 由本柱占据（爬穿阁楼）
+            for (int dx = ix0 + 1; dx <= ix1 - 1; ++dx) {                // 栅栏护栏（阁楼南北沿，梯口让位）
+                put(dx, 5, iz0, BlockRegistry::WoodFence);
+                if (dx != mx) put(dx, 5, iz1, BlockRegistry::WoodFence);
+            }
+            put(ix0 + 2, 5, iz1 - 1, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag); // 阁楼双箱
+            put(ix1 - 2, 5, iz0 + 1, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
+            for (int dz = iz0 + 1; dz <= iz1 - 1; dz += 4) {             // 下层 8 火把
+                put(ix0 + 2, 1, dz, BlockRegistry::Torch);
+                put(ix1 - 2, 1, dz, BlockRegistry::Torch);
+            }
+            for (int dz = iz0 + 1; dz <= iz1 - 1; dz += 6) {             // 阁楼 6 火把（岛肩位）
+                put(mx - 1, 5, dz, BlockRegistry::Torch);
+                put(mx + 1, 5, dz, BlockRegistry::Torch);
+            }
+        };
+
+        // LibrarySmall（小图书馆；wiki SHLi 小：627 砖 + 161 书架 + 32 木板 + 8 火把 + 1 箱——环墙
+        //   书架带 + 内环矮书架（块数级 ~86 登记）、4 火把（8→4 登记）、1 箱、无梯/栅栏/阁楼（单层）；
+        //   蛛网 7% 口径两型图书馆共用）。
+        auto stampLibrarySmall = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            for (int dx = ix0; dx <= ix1; ++dx)
+                for (int dz = iz0; dz <= iz1; ++dz)
+                    if (dx == ix0 || dx == ix1 || dz == iz0 || dz == iz1)
+                        for (int dy = 1; dy <= 3; ++dy)
+                            put(dx, dy, dz, BlockRegistry::Bookshelf);   // 环墙书架带
+            for (int dx = ix0 + 2; dx <= ix1 - 2; ++dx)                  // 内环书架（矮两阶）
+                for (int dz = iz0 + 2; dz <= iz1 - 2; ++dz)
+                    if (dx == ix0 + 2 || dx == ix1 - 2 || dz == iz0 + 2 || dz == iz1 - 2)
+                        for (int dy = 1; dy <= 2; ++dy)
+                            put(dx, dy, dz, BlockRegistry::Bookshelf);
+            put(ix0 + 2, 1, iz0 + 1, BlockRegistry::Torch);
+            put(ix1 - 2, 1, iz0 + 1, BlockRegistry::Torch);
+            put(ix0 + 2, 1, iz1 - 1, BlockRegistry::Torch);
+            put(ix1 - 2, 1, iz1 - 1, BlockRegistry::Torch);
+            put((ix0 + ix1) / 2, 1, iz0 + 1, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
+        };
+
+        // PrisonHall（监狱厅；wiki SHPH：300 砖 + 20 铁栏杆 + 2 铁门——栏杆 / 铁门精确复刻：三间北向
+        //   牢房，两间栅门房（双栏柱 6 + 顶栏 1 = 各 7 栏 + 1 铁门）+ 一间全栅房（6 栏）= 20 栏 + 2 铁门
+        //   （仅红石可开 = MC 铁门口径 ✓）；砖数壳体块数级）。
+        auto stampPrisonHall = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            const int fz = iz0 + 2;                                      // 牢房栅面 z（北墙内侧两格）
+            for (int c = 0; c < 3; ++c) {
+                const int cx0 = ix0 + c * 3;                             // 三间 3 宽牢房（9 宽内室恰分）
+                if (c < 2) {                                             // 栅门房
+                    for (int dy = 1; dy <= 3; ++dy) {
+                        put(cx0, dy, fz, BlockRegistry::IronBars);
+                        put(cx0 + 2, dy, fz, BlockRegistry::IronBars);
+                    }
+                    put(cx0 + 1, 1, fz, BlockRegistry::IronDoor, 2);     // 下格（朝 +Z 开面南）
+                    put(cx0 + 1, 2, fz, BlockRegistry::IronDoor, 10);    // 上格（bit3 上位 | 朝向 2）
+                    put(cx0 + 1, 3, fz, BlockRegistry::IronBars);
+                } else {                                                 // 全栅房
+                    for (int dx = cx0; dx <= cx0 + 2; ++dx)
+                        for (int dy = 1; dy <= 2; ++dy)
+                            put(dx, dy, fz, BlockRegistry::IronBars);
+                }
+            }
+            put(ix0 + 1, 1, iz1 - 1, BlockRegistry::Torch);
+            put(ix1 - 1, 1, iz1 - 1, BlockRegistry::Torch);
+        };
+
+        // StoreRoom（储藏室；wiki Store 变体：51 圆石 + 40 木板 + 3 梯 + 1 箱 + 1 火把——木板/梯/箱/火把
+        //   精确，圆石 39（3×3 芯 dy1..3 + 四角柱，51→39 登记））：圆石芯 + 木板阁楼 dy4（梯洞）+
+        //   贴芯梯柱 + 上层箱。
+        auto stampStoreRoom = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            const int mx = (ix0 + ix1) / 2, mz = (iz0 + iz1) / 2;
+            for (int dx = mx - 1; dx <= mx + 1; ++dx)                    // 圆石芯 3×3×3（27）
+                for (int dz = mz - 1; dz <= mz + 1; ++dz)
+                    for (int dy = 1; dy <= 3; ++dy)
+                        put(dx, dy, dz, BlockRegistry::Cobble);
+            for (int d = 1; d <= 3; ++d) {                               // 四角柱 1×1×3（+12 = 39 圆石）
+                put(mx - 2, d, mz - 2, BlockRegistry::Cobble);
+                put(mx + 2, d, mz - 2, BlockRegistry::Cobble);
+                put(mx - 2, d, mz + 2, BlockRegistry::Cobble);
+                put(mx + 2, d, mz + 2, BlockRegistry::Cobble);
+            }
+            for (int dx = ix0; dx <= ix1 - 1; ++dx)                      // 木板阁楼 dy4（梯洞外满铺）
+                for (int dz = iz0; dz <= iz1; ++dz)
+                    if (!(dx == mx + 1 && dz == mz)) put(dx, 4, dz, BlockRegistry::Planks);
+            for (int dy = 1; dy <= 4; ++dy)                              // 梯柱 dy1..4（贴芯 -X 面 → state 1；
+                put(mx + 1, dy, mz, BlockRegistry::Ladder, 1);           //   dy4 = 阁楼洞格，爬穿阁楼）
+            put(mx - 2, 5, mz, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag); // 上层箱
+            put(mx - 1, 1, iz0 + 1, BlockRegistry::Torch);
+        };
+
+        // RoomCrossEmpty（空房交叉）：中央 1 火把（wiki SHRC 406 砖壳体块数级）。
+        auto stampRoomEmpty = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            put((ix0 + ix1) / 2, 1, (iz0 + iz1) / 2, BlockRegistry::Torch);
+        };
+
+        // RoomCrossFountain（喷泉房）：3×3 池（8 砖沿 + 1 水心）+ 四角柱 4 砖（wiki +19 砖 +1 水 →
+        //   12 砖 + 1 水登记）；水被砖沿围死 + 地板托底 → 稳态不蔓延（同传送门房岩浆盆稳态口径）。
+        auto stampRoomFountain = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            const int mx = (ix0 + ix1) / 2, mz = (iz0 + iz1) / 2;
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    put(mx + dx, 1, mz + dz, (dx || dz) ? BlockRegistry::StoneBrick : BlockRegistry::Water);
+            for (int dx = -1; dx <= 1; dx += 2)
+                for (int dz = -1; dz <= 1; dz += 2)
+                    put(mx + dx, 2, mz + dz, BlockRegistry::StoneBrick);
+        };
+
+        // RoomCrossPillar（柱房）：中央 1×1×3 砖柱 + 顶棚 8 台阶环 + 柱脚 4 火把（wiki +3 砖 + 8 台阶 +
+        //   4 火把精确复刻）。
+        auto stampRoomPillar = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            const int mx = (ix0 + ix1) / 2, mz = (iz0 + iz1) / 2;
+            for (int dy = 1; dy <= 3; ++dy) put(mx, dy, mz, BlockRegistry::StoneBrick);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (dx || dz) put(mx + dx, kWallH, mz + dz, BlockRegistry::StoneBrickSlab);
+            for (int dx = -1; dx <= 1; dx += 2)
+                for (int dz = -1; dz <= 1; dz += 2)
+                    put(mx + dx, 1, mz + dz, BlockRegistry::Torch);
+        };
+
+        // Corridor（直走廊）：50% hash 侧龛（1×1×2 壁龛 + 龛内火把；近似 MC 50% 侧出口——格架无侧
+        //   slot，出口退化为壁龛，登记）。
+        auto stampCorridor = [&](const ShSlot &s, int sub, int idx) {
+            if ((hashVoxel(sub ^ 0xC0Au, idx, 11, 0) % 100u) >= 50u) return;
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            const bool negSide = (hashVoxel(sub ^ 0xC0Bu, idx, 12, 0) % 2u) == 0u;
+            int nx, nz;
+            if (ix1 - ix0 <= iz1 - iz0) {                                // 南北向走廊 → 东西壁龛
+                nx = negSide ? ix0 - 1 : ix1 + 1; nz = (iz0 + iz1) / 2;
+            } else {                                                     // 东西向走廊 → 南北壁龛
+                nx = (ix0 + ix1) / 2; nz = negSide ? iz0 - 1 : iz1 + 1;
+            }
+            put(nx, 1, nz, BlockRegistry::Air);
+            put(nx, 2, nz, BlockRegistry::Air);
+            put(nx, 1, nz, BlockRegistry::Torch);
+        };
+
+        // ChestCorridor（箱走廊）：角落 1 箱（要塞战利品 flag；wiki SHCC 1 箱 ✓）+ 对角 1 火把。
+        auto stampChestCorridor = [&](const ShSlot &s) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            put(ix0, 1, iz0, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
+            put(ix1, 1, iz1, BlockRegistry::Torch);
+        };
+
+        // FillerCorridor（填充走廊）：1-2 圆石塌方 rubble（wiki SHFC「半塌走廊」口径近似）。
+        auto stampFillerCorridor = [&](const ShSlot &s, int sub, int idx) {
+            int ix0, iz0, ix1, iz1; iRect(s, ix0, iz0, ix1, iz1);
+            const int mx = (ix0 + ix1) / 2, mz = (iz0 + iz1) / 2;
+            put(mx, 1, mz, (hashVoxel(sub ^ 0xF11Au, idx, 13, 0) % 2u) ? BlockRegistry::Cobble
+                                                                       : BlockRegistry::StoneBrick);
+            if (hashVoxel(sub ^ 0xF11Bu, idx, 14, 0) % 2u)
+                put(ix0 + (ix1 - mx), 1, mz, BlockRegistry::Cobble);
+        };
+
+        // 盖章分派（portal 仅在 portalStamped 时落地——「保证生成」语义见 kPortalGrateGuaranteed）。
+        const int subSeed = strongSeed + attempt * 7919;
+        for (int i = 0; i < kSlotCount; ++i) {
+            const ShSlot &s = slotTable[i];
+            switch (kind[i]) {
+            case PieceStartSpiral:    stampStartSpiral(s); break;
+            case PieceFiveWay:        stampFiveWay(s); break;
+            case PieceStairsStraight: stampStairsStraight(s); break;
+            case PieceLibraryLarge:   stampLibraryLarge(s); break;
+            case PieceLibrarySmall:   stampLibrarySmall(s); break;
+            case PiecePrisonHall:     stampPrisonHall(s); break;
+            case PieceStoreRoom:      stampStoreRoom(s); break;
+            case PieceRoomEmpty:      stampRoomEmpty(s); break;
+            case PieceRoomFountain:   stampRoomFountain(s); break;
+            case PieceRoomPillar:     stampRoomPillar(s); break;
+            case PieceCorridor:       stampCorridor(s, subSeed, i); break;
+            case PieceChestCorridor:  stampChestCorridor(s); break;
+            case PieceFillerCorridor: stampFillerCorridor(s, subSeed, i); break;
+            case PiecePortalRoom:     if (portalStamped) stampPortalRoom(); break;
             }
         }
 
-        // 4) **传送门房**（x -12..12, z -21..-12 内部 25×10）—— 岩浆河 + 石砖高台 + 3 级楼梯 + 12 框架环 +
-        //    3×3 岩浆盆 + 银鱼刷怪笼（机制等价 MC 1.0 传送门房：熔岩池环绕 + 石砖台 + 框架环 + 台上银鱼笼；
-        //    t664 框架/门面机制接线；t713 修「平台太小站不下 / 岩浆位置错 / 楼梯悬浮挡路」）：
-        //    （t759 净空修复：框架层 dy=4 之上 dy 5..8 全 Air —— 框架顶以上 4 格通行空间，玩家 1.8 高可跨过
-        //    框架环走进环中心（旧净高 5 时仅 1 格，跨不过去）；北走廊 / 东入口走廊 / 楼梯同为内部空间随墙高
-        //    同步净高 8，同步检查通行无局促）
-        //    a) **石砖高台**：x -6..6 × z -21..-16（13×6 footprint），dy 1..3 实心石砖 → 顶面 y=4 可站立
-        //       （13×6 台面远大于旧 5×1 单排，12 框架环 + 内圈 3×3 全部落在台上，玩家上台自如）；
-        //    b) **3×3 岩浆盆**：环内圈（x -1..1, z -19..-17）在 dy=3 层挖槽灌岩浆 —— 恰在门面（框架环激活后
-        //       tryOpenEndPortal 在 dy=4 生成 3×3 门面）**正下方一格**（修旧版岩浆在 dy=0 与平台错位）；
-        //       盆底 dy=2 仍是实心石砖托底（岩浆不下漏）；
-        //    c) **12 框架环**：中心 (0, 4, -18)，**标准 ±2 方形环**（与 endPortalRingComplete / tryOpenEndPortal
-        //       的环几何完全一致 —— review-r19.8 H2 修：旧放 5×3 矩形使完整性检查恒 false）。环 = 四边各 3 格
-        //       不含四角：x=±2 排 z∈{-19,-18,-17}；z=-20/-16 排 x∈{-1,0,1}。**预置眼睛**：约 10% 框架初始
-        //       state 激活（EndPortalStateActiveFlag，机制等价 MC 1.0 约 10% 框架自带眼睛；确定性 hashVoxel）；
-        //    d) **3 级石砖楼梯**：中轴 3 宽（x -1..1），dz -15..-13 三块 StoneBrickStairs 逐级 dy 3..1、
-        //       state=2（朝 +Z 开 → 背墙在 -Z 侧 / 整步在南半 —— 玩家自南（dz 大）向北走上台阶）。步行序列
-        //       地面 y=1 → 南半步 1.5 → 北半 2.0 → 2.5 → 3.0 → 3.5 → 4.0（高台顶）：每步 Δ0.5 ≤ 玩家
-        //       auto-step 0.55 → 可步行登台（修旧版楼梯悬浮挡路）。**台下实心填充**（dz -15 填 dy 1..2、
-        //       dz -14 填 dy 1、dz -13 天然地面）→ 楼梯不悬浮；
-        //    e) **环沟岩浆河**：高台外圈 dz -21..-16（dx -12..12 减高台减楼梯 footprint）dy=0 灌岩浆 +
-        //       高台南侧 dz=-15 行（高台外 dx ±7..±12）置石砖栏（防岩浆南漫入房间地面）—— 河被高台（实心）/
-        //       石砖栏 / 北墙三面围死 → 静态无 air 邻（worldgen 后 tickLavaFlow 稳态不流，机制等价 MC 传送门
-        //       房熔岩环沟）；岩浆与高台侧壁接触（高台石砖非木质）不触发焚毁；
-        //    f) **银鱼刷怪笼**：环中心正上方 (0, 5, -18)（高台顶 y=4 之上 1 格）—— 机制等价 MC 1.0 要塞
-        //       传送门房楼梯尽头 / 传送门上方的 silverfish spawner；SpawnerStateSilverfish（显式银鱼 type）→
-        //       tickSpawners 刷 Silverfish（复用 t487 既有机制，t786 类型化升级）。
-        // 4a) 高台（13×6 实心，dy 1..3）。
-        for (int dx = -6; dx <= 6; ++dx) {
-            for (int dz = -21; dz <= -16; ++dz) {
-                for (int dy = 1; dy <= 3; ++dy)
-                    put(dx, dy, dz, BlockRegistry::StoneBrick);
-            }
-        }
-        // 4d) 楼梯 + 台下填充（先放填充 / 楼梯，后挖岩浆盆 → 盆仅在内圈，无交叠）。
-        for (int dx = -1; dx <= 1; ++dx) {
-            // 楼梯三块（dz -15 dy3 / dz -14 dy2 / dz -13 dy1；state 2 = 朝 +Z 开）。
-            put(dx, 3, -15, BlockRegistry::StoneBrickStairs, 2);
-            put(dx, 2, -14, BlockRegistry::StoneBrickStairs, 2);
-            put(dx, 1, -13, BlockRegistry::StoneBrickStairs, 2);
-            // 台下实心填充（防悬浮）：dz -15 填 dy 1..2、dz -14 填 dy 1。
-            put(dx, 1, -15, BlockRegistry::StoneBrick);
-            put(dx, 2, -15, BlockRegistry::StoneBrick);
-            put(dx, 1, -14, BlockRegistry::StoneBrick);
-        }
-        // 4e) 环沟岩浆河 + 南侧石砖栏（dy=0）。
-        for (int dx = -12; dx <= 12; ++dx) {
-            for (int dz = -21; dz <= -16; ++dz) {
-                if (dx >= -6 && dx <= 6) continue;                 // 高台 footprint（dy=0 处已是地板石砖）
-                if (dz >= -15) continue;                            // 仅 dz -21..-16 环沟带
-                put(dx, 0, dz, BlockRegistry::Lava);                // 岩浆河（高台外围一圈）
-            }
-        }
-        for (int dx = -12; dx <= 12; ++dx) {                        // 南侧石砖栏（dz=-15 高台外）
-            if (dx >= -1 && dx <= 1) continue;                      // 楼梯 footprint（楼梯块自身实体）
-            if (dx >= -6 && dx <= 6) continue;                      // 高台南沿（实心）
-            put(dx, 0, -15, BlockRegistry::StoneBrick);
-        }
-        // 4b) 3×3 岩浆盆（dy=3 高台内挖槽灌岩浆；门面正下方一格）。
-        for (int dx = -1; dx <= 1; ++dx) {
-            for (int dz = -19; dz <= -17; ++dz)
-                put(dx, 3, dz, BlockRegistry::Lava);
-        }
-        // 4c) 12 框架环（中心 (0, 4, -18)，标准 ±2 方形环）+ 预置眼睛（~10%）。
-        for (int pdx = -2; pdx <= 2; ++pdx) {
-            for (int pdz = -20; pdz <= -16; ++pdz) {
-                // 方形环 12 格（四边各 3，不含四角）：x=±2 时 z∈{-19,-18,-17}；z=-20/-16 时 x∈{-1,0,1}。
-                const bool onRingExact = (pdx == -2 || pdx == 2) ? (pdz >= -19 && pdz <= -17)
-                                                                 : (pdz == -20 || pdz == -16) && (pdx >= -1 && pdx <= 1);
-                if (!onRingExact) continue;
-                // 预置眼睛（~10%）：确定性 hash → 该框架初始激活（无需玩家插眼；机制等价 MC 约 1/10 预置）。
-                const quint32 eh = hashVoxel(strongSeed ^ 0x664, cx + pdx, cy + 4, cz + pdz);
-                const quint8 st = (eh % 100u) < 10u ? BlockRegistry::EndPortalStateActiveFlag : 0u;
-                put(pdx, 4, pdz, BlockRegistry::EndPortal, st); // 末地传送门框架（state 0=未放 / bit0=已放眼）
-            }
-        }
-        // 4f) 银鱼刷怪笼（环中心正上方，高台顶 y=4 之上 1 格）。t786 起写 SpawnerStateSilverfish
-        //     （bit1-5 显式银鱼 type + bit0 旧标记；旧存档 state=1 由解码端 bit0 兼容路径同刷银鱼）。
-        put(0, 5, -18, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
-
-        // 5) 图书馆（x -21..-12, z -8..8 房间；内部 10×17）—— 书架墙（机制等价 MC 1.0 要塞图书馆：
-        //    书架贴墙排布，附魔台加成来源 t474）+ 中央书架岛 + 蛛网装饰。书架替换房间内壁（东墙内壁 x=-12 +
-        //    西墙内壁 x=-13 列、南北墙内壁 z=∓7 / ±7 行，dy 1..3 —— t713 书架墙从 2 高升 3 高配大厅净高）。
-        for (int dy = 1; dy <= 3; ++dy) {
-            for (int d = -7; d <= 7; ++d) {
-                put(-12, dy, d, BlockRegistry::Bookshelf);    // 东墙内壁书架列（面向房间）
-                put(-13, dy, d, BlockRegistry::Bookshelf);    // 西墙内壁书架列（x=-21 墙内侧一排）
-            }
-            for (int d = -20; d <= -13; ++d) {
-                put(d, dy, -7, BlockRegistry::Bookshelf);     // 南墙内壁书架行
-                put(d, dy, 7, BlockRegistry::Bookshelf);      // 北墙内壁书架行
-            }
-        }
-        // 中央书架岛（x -18..-15 × z -3..3，dy 1..2 两层 + 顶层 dy=3 中央一排）—— 大房中景 + 环岛走道。
-        for (int dx = -18; dx <= -15; ++dx) {
-            for (int dz = -3; dz <= 3; ++dz) {
-                put(dx, 1, dz, BlockRegistry::Bookshelf);
-                put(dx, 2, dz, BlockRegistry::Bookshelf);
-            }
-        }
-        for (int dx = -17; dx <= -16; ++dx)
-            put(dx, 3, 0, BlockRegistry::Bookshelf); // 岛顶中央点缀（十字顶饰）
-        // 图书馆中央蛛网 + 阶梯装饰（确定性；同 seed 同分布）。
-        {
-            const quint32 wh = hashVoxel(strongSeed ^ 0x665, cx - 10, cy + 1, cz - 1);
-            if ((wh % 100u) < 50u)
-                put(-10, 1, -1, BlockRegistry::Cobweb);
-            put(-10, 1, 0, BlockRegistry::StoneBrickSlab);
+        // 蛛网 7%（wiki 图书馆口径精确复刻：图书馆室内 dy1..4 空气格逐格 hash，仅空气格替换；
+        //   期望 ~20 网 vs wiki 均值 ~29 同量级）。
+        for (int i = 0; i < kSlotCount; ++i) {
+            if (kind[i] != PieceLibraryLarge && kind[i] != PieceLibrarySmall) continue;
+            int ix0, iz0, ix1, iz1; iRect(slotTable[i], ix0, iz0, ix1, iz1);
+            for (int dx = ix0; dx <= ix1; ++dx)
+                for (int dz = iz0; dz <= iz1; ++dz)
+                    for (int dy = 1; dy <= 4; ++dy) {
+                        if (m_chunks.blockAt(cx + dx, cy + dy, cz + dz) != BlockRegistry::Air) continue;
+                        if ((hashVoxel(strongSeed ^ 0x3EBu, cx + dx, cy + dy, cz + dz) % 100u) < 7u)
+                            put(dx, dy, dz, BlockRegistry::Cobweb);
+                    }
         }
 
-        // 6) 银鱼刷怪笼 + 战利品箱（南房，x -8..8, z 8..18）：双刷怪笼（房间放大 → 两笼错位散布）+ 双宝箱
-        //    （t786 起写 SpawnerStateSilverfish 显式 type；tickSpawners 据解码刷 Silverfish，机制等价 MC 1.0
-        //    要塞银鱼刷怪笼）+ 宝箱靠角（ChestStateStrongholdFlag → 首开填要塞战利品含末影之眼，激活传送门
-        //    关键物品）。
-        put(-4, 1, 12, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
-        put(4, 1, 15, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
-        put(6, 1, 17, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
-        put(-6, 1, 17, BlockRegistry::Chest, BlockRegistry::ChestStateStrongholdFlag);
-        // 南房中央蛛网（阴湿地牢氛围；确定性）。
-        {
-            const quint32 wh = hashVoxel(strongSeed ^ 0x665, cx + 0, cy + 1, cz + 12);
-            if ((wh % 100u) < 50u)
-                put(-1, 1, 12, BlockRegistry::Cobweb);
-        }
-
-        // 7) 走廊蛛网装饰（机制等价 MC 要塞走廊的残破感）：内部空间内确定性散布 Cobweb（~8%，**仅 dy=1
-        //    贴地**——不悬空；t713 移除旧版楼梯装饰散布 → 根除 t682「楼梯悬浮挡路」类回归），跳过全部设施房
-        //    （传送门房 / 图书馆 / 南房 / 储藏龛 —— 特征格所在房间整房跳过，比旧 bbox 精确跳过更保守）。
-        //    确定性 → 同 seed 同装饰（PLAN §2-K）。
-        for (int dx = -kHalf + 1; dx <= kHalf - 1; ++dx) {
-            for (int dz = -kHalf + 1; dz <= kHalf - 1; ++dz) {
-                if (!insideSpace(dx, dz)) continue; // 仅内部空间（走廊）装饰
-                if (dx >= -12 && dx <= 12 && dz >= -21 && dz <= -11) continue; // 传送门房 + 北走廊跳过（岩浆/楼梯/框架保留）
-                if (dx >= -21 && dx <= -12 && dz >= -8 && dz <= 8) continue;   // 图书馆跳过（书架保留）
-                if (dz >= 7 && dz <= 18) continue;                             // 南门洞 + 南房跳过（刷怪笼/宝箱保留）
-                if (dx >= 12 && dx <= 18 && (dz <= -3 || dz >= 3)) continue;   // 东北 / 东南储藏龛跳过
-                if (std::abs(dx) == 3 && std::abs(dz) == 3) continue;          // 大厅承重柱格（柱体保留）
-                const quint32 wh = hashVoxel(strongSeed ^ 0x487, cx + dx, cy + 1, cz + dz);
-                if ((wh % 100u) < 8u)
-                    put(dx, 1, dz, BlockRegistry::Cobweb);        // 蛛网（走廊残破感；贴地不悬空）
-            }
-        }
     };
 
     for (int bx = kStrongholdGrid / 2; bx < m_width; bx += kStrongholdGrid) {
