@@ -148,14 +148,17 @@ int main(int argc, char *argv[])
 
     World w;
     w.setWidth(96);
-    w.setDepth(128); // t814：96 → 128 —— rig 位耗尽（slotIdx=125 > 96 深度的 124 位上限）后 nextSlot 落
+    w.setDepth(144); // t814：96 → 128 —— rig 位耗尽（slotIdx=125 > 96 深度的 124 位上限）后 nextSlot 落
                      //   z≥96 越界区，setBlock 被静默拒绝 → 器件根本没放上 → 消费端探针全线假 FAIL。
                      //   深度扩到 128：既有 slot 0..123 坐标不变（列距 22 / 行距 3 只向后延伸），新 probe
                      //   落新增行（z=97 起）。世界生成按新深度 regenerate 一次（秒级）。
+                     //   t1005：128 → 144 —— P-t1005 四布局 rig 带 ±4 清场/弹坑足印，网格末行 z0=127 时
+                     //   z0+4=131 越界（首跑实锤：layout D 的 +Z 直供 TNT 落 z=128 被静默拒 → placeRigBlock
+                     //   qFatal 全程中止）。深度扩到 144 既有 slot 坐标不变，新行只向后延伸（t814 同款）。
     w.setHeight(48); // 3 次 setter 各 regenerate 一次（几秒内）；生成快
 
     // rig 寻址（2D 网格防越界——首版 x 单排递增在 x>48 后 setBlock 全被越界拒绝 = 假 FAIL）：x 列距 22
-    //   （容纳 16 粉 + 源 + 接收器的最长探针 18 格）、z 行距 3；96×128 → 4 列 × 42 行 = 168 rig 位。
+    //   （容纳 16 粉 + 源 + 接收器的最长探针 18 格）、z 行距 3；96×144 → 4 列 × 46 行 = 184 rig 位。
     //   t814 教训：耗尽后 setBlock 静默拒绝（无返回值无告警）→ 器件没放上 → 下游探针全线假 FAIL 且
     //   diag 指向消费端（真凶是选址）——故越界改为 qFatal 硬失败（响亮 > 静默腐烂）。
     int slotIdx = 0;
@@ -163,9 +166,12 @@ int main(int argc, char *argv[])
         const int col = slotIdx % 4, row = slotIdx / 4;
         // review24 低危（探针族）：耗尽检查移到 ++ 之前——旧版先 ++ 再检查，qFatal 报的编号比真失败的
         //   slot 大 1（off-by-one，diag 误导排查）；现报真实失败位号。
-        if (4 + row * 3 >= 128)
-            qFatal("rig grid exhausted: slot %d beyond 128-deep grid (4 cols x 42 rows = 168) - "
-                   "out-of-bounds setBlock is silently rejected = false FAIL farm", slotIdx);
+        //   t1005：守卫含 **+4 足印**（P-t1005 族 9×9 清场/石台 z0+4 须在界内；旧守卫只钉 z0 本格，
+        //   z0=127 行放行后 +Z 器件/清场写越界被静默拒 = rig D qFatal 的真凶）。
+        if (4 + row * 3 + 4 >= 144)
+            qFatal("rig grid exhausted: slot %d beyond 144-deep grid with +4 footprint "
+                   "(4 cols x 46 rows = 184) - out-of-bounds setBlock is silently rejected = "
+                   "false FAIL farm", slotIdx);
         ++slotIdx;
         return QPair<int, int>(4 + col * 22, 4 + row * 3);
     };
@@ -33499,6 +33505,148 @@ Item {
                               << " F3; source pins lock the budget constant and its = 4 literal"
                               << " value (review0903 #8) plus the fuse-regroup clamp";
         }
+    }
+
+    // ── P-t1005 红石块旁多 TNT 连锁引燃·终态清零探针（R19.20 批 t1005；用户实测回归「红石块旁多 TNT
+    //    同时连锁引爆 → 部分 TNT 持续闪烁不清除（永续 primed 残留）；单发引爆正常」——t997 波分期修复
+    //    后实机仍复现）──
+    //   真消费端链（P-t814 模式）：World::tickRedstone 通电上升沿 → powerTntTriggered → PlayerController::
+    //   firePowerTnt（同步镜像 Main.qml 转发 handler）= clearBlockSilent 清 TNT 方块 + spawnPrimedTnt
+    //   （5s 手点引信）；爆炸链式引燃走 detonateTntSphere 内 spawnPrimedTnt（1.2s + jitter 错峰）→
+    //   t997 预算重挂路径（同帧到期 > kMaxTntDetonationsPerTick=4 → e.fuse 重挂 1/60s）。真实时钟拓扑：
+    //   实体 tick 每帧 1/60s + World 红石 tick 每 6 帧（≈100ms，Main.qml WorldClock 驱动同款）。
+    //   四布局（验收三布局 + 同帧簇加严；红石块嵌阵 = 用户「红石块旁多 TNT」形态）：
+    //     A 2×2（R 角位：2 直供同帧 + 1 斜角链）；B 3×3（R 居中：4 直供同帧 + 4 斜角链）；
+    //     C 1×4 长链（R 头位：1 直供 + 3 爆炸链）；D 同帧簇加严（R 四水平 + 正上共 5 直供**同帧 5s
+    //     到期 > 预算 4** → 必经重挂路径 + 东向 2 格爆炸链）。
+    //   加严轮 E/F（首跑 A-D 全 settle 后按「更多直供数 / 更密阵 / 交错重供」加严）：
+    //     E 8-direct-2R（双 R 各 4 直供同帧 8 发 = 两倍深重挂 + 中缝纯链）；F dust-fed-2x6
+    //     （R→6 粉馈线 → 底排 6 直供超预算 + 顶排 6 叠置纯链 = 12 TNT 密阵，波 1 断供形态）。
+    //   断言：(a) 点火 sanity（≤6 红石 tick 内 primed 实体出现——链路本身通，防布线假阴）；(b) 有界
+    //   收敛（45s cap 内 settle：零存活 primed 且 rig 原 TNT 格全 Air，且该态**连续保持 120 帧**——
+    //   2s > 链式最大引信 1.8s，防波间空窗假收敛；cap 不 settle = 用户「永续闪烁」行为学复现 → 红）；
+    //   (c) 终态零残留（settle 点零存活 primed + 全部原 TNT 格 Air——「TNT 方块全部变 Air、无存活
+    //   primed 实体残留」逐字口径）。
+    {
+        PlayerController pc;
+        EntityManager ents;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        const QMetaObject::Connection tntFwd1005 = QObject::connect(
+            &w, &World::powerTntTriggered, &pc,
+            [&pc](int x, int y, int z) { pc.firePowerTnt(x, y, z); });
+
+        struct TntCell { int dx, dy, dz; };
+        // t1005 加严轮：rs/dust 均为多格列表（E 双红石块 8 直供 / F 粉馈线交错重供形态）。
+        struct T1005Rig { const char *name; QVector<TntCell> tnt; QVector<TntCell> rs; QVector<TntCell> dust; };
+        const QVector<T1005Rig> rigs1005 = {
+            { "2x2 R-corner",  {{1, 0, 0}, {0, 0, 1}, {1, 0, 1}}, {{0, 0, 0}}, {} },
+            { "3x3 R-center",  {{0, 0, 0}, {1, 0, 0}, {2, 0, 0}, {0, 0, 1}, {2, 0, 1},
+                                {0, 0, 2}, {1, 0, 2}, {2, 0, 2}}, {{1, 0, 1}}, {} },
+            { "1x4 chain",     {{1, 0, 0}, {2, 0, 0}, {3, 0, 0}, {4, 0, 0}}, {{0, 0, 0}}, {} },
+            { "5-same-frame",  {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0},
+                                {1, 0, 1}, {2, 0, 1}}, {{0, 0, 0}}, {} },
+            // 加严 E「8-direct-2R」：双红石块各带 4 直供（±x / +z / 上）同帧 8 发到期 = 预算 4 的
+            //    **两倍深重挂**（4 爆 + 4 重挂 → 次帧 4 爆），中缝 (0,0,2) 距两源均 2 格不直供 =
+            //    纯爆炸链——重挂窗与爆炸链同帧交叠的加严形态。
+            { "8-direct-2R",   {{-1, 0, 0}, {0, 0, 1}, {0, 1, 0}, {1, 0, 0},
+                                {0, 0, 3}, {1, 0, 4}, {-1, 0, 4}, {0, 1, 4},
+                                {0, 0, 2}}, {{0, 0, 0}, {0, 0, 4}}, {} },
+            // 加严 F「dust-fed-2x6」：红石块 → 6 粉馈线（交错重供形态——TNT 不贴源、经通电粉直供）
+            //    → 底排 6 直供同帧（超预算 4）+ 顶排 6 叠置纯链（粉斜角不供）= 12 TNT 密阵；粉线 /
+            //    源全在 1 号爆炸球内 → 波 1 断供（断供后不得有残燃）。
+            { "dust-fed-2x6",  {{-1, 0, 1}, {0, 0, 1}, {1, 0, 1}, {2, 0, 1}, {3, 0, 1}, {4, 0, 1},
+                                {-1, 1, 1}, {0, 1, 1}, {1, 1, 1}, {2, 1, 1}, {3, 1, 1}, {4, 1, 1}},
+                               {{-2, 0, 0}},
+                               {{-1, 0, 0}, {0, 0, 0}, {1, 0, 0}, {2, 0, 0}, {3, 0, 0}, {4, 0, 0}} },
+        };
+
+        bool ok1005 = true;
+        QString diag1005;
+        for (const T1005Rig &rig : rigs1005) {
+            const auto [x0, z0] = nextSlot();
+            const int y = kRigY;
+            // 先清后铺 9×9 石台（y-1；y..y+2 净空）——前探针弹坑残留不塌本台。
+            for (int dx = -4; dx <= 4; ++dx)
+                for (int dz = -4; dz <= 4; ++dz) {
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(x0 + dx, y + dy, z0 + dz, BR::Air, 0);
+                    w.setBlock(x0 + dx, y - 1, z0 + dz, BR::Stone, 0);
+                }
+            placeRigBlock(w, x0 + rig.rs[0].dx, y + rig.rs[0].dy, z0 + rig.rs[0].dz, BR::RedstoneBlock, 0);
+            for (int rsi = 1; rsi < rig.rs.size(); ++rsi)
+                placeRigBlock(w, x0 + rig.rs[rsi].dx, y + rig.rs[rsi].dy, z0 + rig.rs[rsi].dz,
+                              BR::RedstoneBlock, 0);
+            for (const TntCell &d : rig.dust)
+                placeRigBlock(w, x0 + d.dx, y + d.dy, z0 + d.dz, BR::RedstoneDust, 0);
+            const QVector<TntCell> placed = rig.tnt;
+            for (const TntCell &c : placed)
+                placeRigBlock(w, x0 + c.dx, y + c.dy, z0 + c.dz, BR::TntBlock, 0);
+
+            // (a) 点火 sanity：≤6 红石 tick 内 primed 实体出现。
+            int primed0 = 0;
+            for (int t = 0; t < 6 && primed0 == 0; ++t) {
+                w.tickRedstone();
+                for (int i = 0; i < ents.count(); ++i)
+                    if (ents.isPrimedAt(i)) ++primed0;
+            }
+            // (b) 有界收敛推进：实体 tick 每帧 1/60s + 红石 tick 每 6 帧；settle 态（零 primed + 原
+            //     TNT 格全 Air）连续保持 120 帧才算收敛（防波间空窗假收敛）。
+            int settledRun = 0, settleFrame = -1, maxPrimed = primed0;
+            bool settled = false;
+            const int kCapFrames1005 = 60 * 45;
+            for (int f = 0; f < kCapFrames1005 && !settled; ++f) {
+                if (f % 6 == 0) w.tickRedstone();
+                ents.tick(1.0 / 60.0, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                int live = 0;
+                for (int i = 0; i < ents.count(); ++i)
+                    if (ents.isPrimedAt(i)) ++live;
+                maxPrimed = qMax(maxPrimed, live);
+                bool blocksGone = true;
+                for (const TntCell &c : placed)
+                    if (w.blockAt(x0 + c.dx, y + c.dy, z0 + c.dz) != BR::Air) { blocksGone = false; break; }
+                if (live == 0 && blocksGone) {
+                    if (++settledRun >= 120) { settled = true; settleFrame = f; }
+                } else {
+                    settledRun = 0;
+                }
+            }
+            // (c) 终态零残留核对（settle 点或 cap 末）。
+            int liveEnd = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.isPrimedAt(i)) ++liveEnd;
+            bool cellsAir = true;
+            for (const TntCell &c : placed)
+                if (w.blockAt(x0 + c.dx, y + c.dy, z0 + c.dz) != BR::Air) cellsAir = false;
+            const bool okRig = primed0 > 0 && settled && liveEnd == 0 && cellsAir;
+            if (!okRig) {
+                ok1005 = false;
+                diag1005 += QStringLiteral("\n  [t1005 diag] %1: ignitePrimed=%2 settled=%3"
+                                           " settleFrame=%4 liveEnd=%5 cellsAir=%6 maxPrimed=%7")
+                                .arg(QString::fromLatin1(rig.name)).arg(primed0 > 0).arg(settled)
+                                .arg(settleFrame).arg(liveEnd).arg(cellsAir).arg(maxPrimed);
+            }
+            // 清场（实体 + rig 全格，防跨 rig / 跨探针污染）。
+            ents.clearAll();
+            for (int dx = -4; dx <= 4; ++dx)
+                for (int dz = -4; dz <= 4; ++dz)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(x0 + dx, y + dy, z0 + dz, BR::Air, 0);
+            tickN(w, 2);
+        }
+        QObject::disconnect(tntFwd1005);
+        if (!ok1005) ++totalFail;
+        qInfo().noquote() << (ok1005 ? "PASS" : "FAIL")
+                          << "| t1005 redstone-block adjacent multi-TNT chain ignition burns down:"
+                          << " 6 layouts (2x2 / 3x3 / 1x4 / 5-same-frame cluster over budget 4 /"
+                          << " 8-direct dual-source 2-deep regroup / dust-fed 2x6 dense array"
+                          << " wave-1 power-cut)"
+                          << " driven by the real consumer chain (tickRedstone -> powerTntTriggered"
+                          << " -> firePowerTnt) with per-frame entity ticks (1/60s) + per-6-frame"
+                          << " redstone ticks (100ms WorldClock topology) all settled to zero"
+                          << " surviving primed entities and all-Air rig cells inside the bounded"
+                          << " window (2s settle hysteresis > 1.8s max chain fuse)"
+                          << (ok1005 ? QString() : diag1005);
     }
 
     // ── P-t979 猪两修（浅水淹没度溺水 + 掉落表；专用局部世界 w979a/b：围栏平台 + 浅水档水洼/盖顶水槽）──
