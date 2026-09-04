@@ -1221,12 +1221,19 @@ private:
     // t485 沙漠神殿（spec「沙漠群系生成：金字塔外形（沙岩/切制沙岩）+ 地下密室 + 4 宝藏箱（钻石/金/青金石/
     //   骨头/腐肉）+ TNT 陷阱（踩压力板引爆）」；机制等价 MC 1.0 沙漠神殿 desert temple）。placeMineshaft 之后、
     //   fillWater 之前，**仅 Desert 群系**（isDesert 守卫，spec「沙漠群系生成」）确定性稀疏散布（grid 48，比矿井 36
-    //   更稀；spec「低频」）：选沙漠中心点（hashColumn + seed 偏移，PLAN §2-K）→ 地表铺金字塔（阶梯砂岩 Sandstone +
-    //   CutSandstone 顶饰，逐层缩半高成金字塔外形）→ 金字塔正下方地下挖密室（7×7×4 空气 + 砂岩墙 / 地板 / 顶板）→
-    //   密室四角放 4 只带 ChestStatePyramidFlag 标记的 Chest 宝藏箱 → 密室中央 CobblePressurePlate 压力板下垫 3×3
-    //   TntBlock（踩板 → playercontroller tick 扫 footprint 触发 detonateTntBlock → destroySphereSilent 球形破坏，
-    //   机制等价 MC 1.0 沙漠神殿 TNT 陷阱）。纯函数于 seed（hashColumn / hashVoxel / biomeAt）→ 同 seed 同神殿分布
-    //   （PLAN §2-K；确定性 + 不全图扫描，仅扫候选沙漠格）。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由
+    //   更稀；spec「低频」）。t1003 逐方块重建（对齐 minecraft.wiki Desert pyramid/Structure；子页逐格网格图片化未
+    //   能转换 → 材料表 + 机制知识设计，缺口登记）：选沙漠中心点（hashColumn + seed 偏移，PLAN §2-K）→
+    //     A) 21×21 逐层金字塔壳（层 0..10 半边 {10,10,9,9,8,8,7,7,6,6,5}，顶层 11×11 CutSandstone 顶冠【偏差 6：
+    //        刻纹→切制】）→ B) 地面大厅 15×15×4 → C) 地面风玫瑰：菱域棋盘 WoolOrange 24 格 + 中心 WoolBlue
+    //        （【偏差 3 时代口径：1.8 前羊毛版】；蓝块正下即陷阱）→ D) 塔面安卡纹样四面 WoolOrange（每面 21 格
+    //        四折对称）→ E) 入口三处（+Z 主入口 3 宽×3 高 + CutSandstone 门楣 / -Z 两副入口 u=±5）→ F) 顶窗四面
+    //        + L8/L9 顶部暗腔 → G) 地下密室（地板 S-12，内部 7×7×4 空气 + 砂岩壳封闭黑暗）→ H) 4 宝藏箱（北墙
+    //        ±2 / 南墙 ±2，朝向房心，ChestStatePyramidFlag → isPyramidChest 首开填充 pyramidChestPool）→
+    //     I) 密室中央地板 3×3 TntBlock + 中央正上 StonePressurePlate（踩板 → playercontroller tick 扫 footprint
+    //        触发 detonateTntBlock → destroySphereSilent 球形破坏 + TNT 连环，机制等价 MC 1.0 踩板引爆）→
+    //     J) 暗渠（+Z 面 u=+4 低处 1×2 入口 → 对角阶梯隧道潜入密室顶部侧壁，MC 神殿秘密通道机制）。
+    //   纯函数于 seed（hashColumn / hashVoxel / biomeAt）→ 同 seed 同神殿分布（PLAN §2-K；确定性 + 不全图扫描，
+    //   仅扫候选沙漠格）。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由
     //   isPyramidChest 判定 → pyramidChestPool（钻石 / 金 / 青金石 / 骨头 / 腐肉等）。
     void placeDesertTemple();
     // t486 丛林神殿（spec「丛林群系生成：苔石建筑 + 机关（绊线→发射器射箭，无红石用 dispenser 方块直接触发）
