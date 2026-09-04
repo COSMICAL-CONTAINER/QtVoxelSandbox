@@ -1578,6 +1578,18 @@ bool EntityManager::aliveAt(int i) const
     return m_entities[size_t(i)].alive;
 }
 
+// t1007：当前存活 PrimedTnt 数（kind==FallingBlock && primed 的活体槽扫描；n≤kCap=64 常数级，F3 10Hz
+//   读取零压力）。t1005/t1006 关单数据面（见头文件注释）：用户「永续闪烁 TNT」现场 primed>0 = 引擎实体
+//   残留（fuse 链真在 tick，查 t1005 布线形态）；primed==0 而画面仍闪 = 呈现层 delegate 冻结。
+int EntityManager::primedCount() const
+{
+    int n = 0;
+    for (const Entity &e : m_entities)
+        if (e.alive && e.kind == FallingBlock && e.primed) ++n;
+    return n;
+}
+
+
 QVector3D EntityManager::posAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return QVector3D();

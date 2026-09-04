@@ -36008,6 +36008,253 @@ Item {
                           << (ok1006 ? QString() : diag1006);
     }
 
+    // ── P-t1007 进程级卡顿泄漏 rig（R19.20 t1007；用户 f6e9a51 实测：跑一段时间掉到 7FPS、F3
+    //    items 93/93、render-side 行 gpu/prep+present 重、重进存档恢复 99FPS；重开 t997 归因遗留 +
+    //    t1005/t1006 关单数据采集面）──
+    //   offscreen 无 QRhi 渲染线程 → gpu/prep/present/vmem/pipelineCount 只能实机 F3 采（本探针登记，
+    //   不编数）；引擎侧等价面 = 双池计数曲线 + tick 墙钟 + 重载前后状态差分。复刻用户三高水位同场：
+    //   (a) 真路径 TNT 大量引爆：36 primed TNT（t997 同款 6×6 石台布局）+ connect
+    //       explosionDroppedItem → ItemEntityManager.spawnItem（Main.qml :2578 转发同构，掉落链真跑）
+    //       → 逐 1/60s tick 采样曲线（items live/slots、primed、mobs live、tick 墙钟）→ 断言：全部 36
+    //       实爆零 primed 残留、item live ≤ kCap（LRU 钳制在场）、双池 aliveSlots==liveCount 簿记不变量。
+    //   (b) item 高水位压力：250 个 named 掉落（name 非空跳过 kMergeRadius 合并 → 计数确定性）散布
+    //       独立格 → 断言 live == kCap=200 且 slots == 200（LRU 驱逐最老，超 cap 部分被逐，数量精确钉）。
+    //   (c) mobs 高水位：spawnMobTyped 铺满平台 → 断言恰 64 == kCap（spawnMobCore cap 拒第 65 个）。
+    //   (e1) 满池 tick 链墙钟（tick + tickHostileLife + tickSpawners + item tick = PlayerController
+    //       相位同构）→ diag 落盘 avg ms/f（归因对表数据，无红绿判据——机器相关量不作断言）。
+    //   (d) 重载状态面（Main.qml enterWorld 同构：双池 clearAll，实体非体素不进存档）：断言 live 全归零
+    //       + primed 归零 + 槽向量与高水位**保留**（slots 200/64 + hw 不回撤）——「重进存档即恢复」重置
+    //       的运行时状态面 = 活体集（+ 世界方块内容，rig 外）；保留面全部有界 ≤cap（t437 slot-reuse 设计
+    //       残留），无无界引擎泄漏。用户读数对表：重载后 F3 应 live 归零 hw 不变。
+    //   (e2) 空池 tick 链墙钟 → diag 落盘与 (e1) 同口径对照：若满池 sim 仍个位 ms（用户 F3 sim 4.63ms
+    //       口径），7FPS 的 ~14× 恶化必在渲染侧（与 F3 render-side gpu/prep+present 重读数一致）→ 根因
+    //       面 = 活体 delegate 渲染成本随活体数线性放大（每 delegate 内联 geometry/材质/贴图实例不共享、
+    //       无 instancing，draw-call 数 ∝ 活体数；t858 经验球已示范 instancing 出路，掉落物/mob 登记治理
+    //       路径——需实机曲线对表后定，offscreen 无视觉/渲染线程面不做盲修）。
+    //   (f) 源码钉：新 F3 读数链在场（entitymanager.h primedCount/slotHighWater、itementitymanager.h
+    //       liveHighWater、Main.qml entities 行 primed/del/64 hw token）——插桩不可静默消失（t1005/t1006
+    //       关单要靠它采数）。
+    {
+        bool ok1007 = true;
+        QString diag1007;
+        constexpr int kPlatY = 40;
+        constexpr int kPlatMin = 12, kPlatMax = 51; // 40×40 石台
+        World w7;
+        w7.setWidth(64); w7.setDepth(64); w7.setHeight(64); w7.setSeed(1007);
+        for (int x = kPlatMin; x <= kPlatMax; ++x)
+            for (int z = kPlatMin; z <= kPlatMax; ++z) {
+                w7.setBlock(x, kPlatY, z, BR::Stone, 0);
+                for (int y = kPlatY + 1; y <= kPlatY + 6; ++y) w7.setBlock(x, y, z, BR::Air, 0);
+            }
+        EntityManager em7;
+        ItemEntityManager im7;
+        const QVector3D farPos(-1000.0f, 80.0f, -1000.0f); // t997 rig 同款：玩家远置（不参与碰撞/伤害）
+        // 爆炸掉落转发链（Main.qml onExplosionDroppedItem 同构；批收口是 QML delegate 优化，offscreen
+        // 无 Repeater 不需要）。
+        const QMetaObject::Connection dropConn1007 = QObject::connect(
+            &em7, &EntityManager::explosionDroppedItem, &em7,
+            [&](int x, int y, int z, int itemId) { im7.spawnItem(x, y, z, itemId, 1); });
+
+        // ── (a) 36 primed TNT 真路径引爆 + 掉落转发 → 采样曲线 ──
+        for (int dz = 0; dz < 6; ++dz)
+            for (int dx = 0; dx < 6; ++dx)
+                em7.spawnPrimedTnt(20 + dx, kPlatY + 1, 20 + dz, 0.5f); // 短引信加速（链式语义无关本探针）
+        int primed0 = em7.primedCount();
+        if (primed0 != 36) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-a primed0 %1 != 36").arg(primed0);
+        }
+        int totalDet = 0, maxItemLive = 0, prevPrimed = primed0;
+        qint64 maxTickNs7 = 0, sumTickNs7 = 0;
+        int tickFrames = 0;
+        bool book1007 = true;
+        auto aliveSlots = [](EntityManager &em) {
+            int n = 0;
+            for (int i = 0; i < em.count(); ++i) if (em.aliveAt(i)) ++n;
+            return n;
+        };
+        auto itemAliveSlots = [](ItemEntityManager &im) {
+            int n = 0;
+            for (int i = 0; i < im.count(); ++i) if (im.aliveAt(i)) ++n;
+            return n;
+        };
+        for (int f = 0; f < 60 * 12 && em7.primedCount() > 0; ++f) {
+            const qint64 t0 = FrameProfiler::nowNs();
+            em7.tick(1.0 / 60.0, &w7, farPos, 0.3f, 1.8f, true, false, 0.0f);
+            im7.tick(1.0 / 60.0, &w7);
+            const qint64 tk = FrameProfiler::nowNs() - t0;
+            sumTickNs7 += tk; if (tk > maxTickNs7) maxTickNs7 = tk; ++tickFrames;
+            const int pc = em7.primedCount();
+            if (prevPrimed > pc) totalDet += prevPrimed - pc; // 本 tick 引爆数（引爆即 releaseSlot）
+            prevPrimed = pc;
+            if (f % 15 == 0) { // 0.25s 采样
+                const int il = im7.liveCount();
+                maxItemLive = std::max(maxItemLive, il);
+                if (il > 200 || aliveSlots(em7) != em7.liveCount() || itemAliveSlots(im7) != il) {
+                    book1007 = false;
+                    if (diag1007.size() < 2048)
+                        diag1007 += QStringLiteral("\n  [t1007 diag] leg-a t=%1s itemLive=%2 book/unsafe")
+                                        .arg(double(f) / 60.0, 0, 'f', 2).arg(il);
+                }
+            }
+        }
+        const int primedResidue = em7.primedCount();
+        const int itemLiveA = im7.liveCount(), itemSlotsA = im7.count();
+        const double avgTickAms = tickFrames > 0 ? double(sumTickNs7) / 1e6 / double(tickFrames) : 0.0;
+        const double maxTickAms = double(maxTickNs7) / 1e6;
+        if (totalDet != 36) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-a totalDet %1 != 36").arg(totalDet);
+        }
+        if (primedResidue != 0) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-a primed residue %1").arg(primedResidue);
+        }
+        if (itemLiveA > 200 || !book1007) ok1007 = false;
+        qInfo().noquote() << "  [t1007 diag] leg-a: det" << totalDet << "/36 residue" << primedResidue
+                          << "itemLive" << itemLiveA << "slots" << itemSlotsA
+                          << "avgTick" << avgTickAms << "ms maxTick" << maxTickAms << "ms book" << book1007;
+
+        // ── (b) item 高水位：250 named 掉落（跳过合并）→ 恰 200/200 ──
+        for (int i = 0; i < 250; ++i) {
+            const int sx = kPlatMin + 1 + (i % 25) * 2;  // 25×10 网格铺台面（named 不合并 → 格距只防堆叠）
+            const int sz = kPlatMin + 1 + (i / 25) * 2;
+            im7.spawnItem(sx, kPlatY + 1, sz, BR::Dirt, 1, QVariantList{}, QStringLiteral("t1007"), -1);
+        }
+        for (int f = 0; f < 30; ++f) im7.tick(1.0 / 60.0, &w7); // 落地沉降
+        const int itemLiveB = im7.liveCount(), itemSlotsB = im7.count(), itemHwB = im7.liveHighWater();
+        if (itemLiveB != 200 || itemSlotsB != 200 || itemHwB != 200) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-b live=%1 slots=%2 hw=%3 != 200/200/200")
+                            .arg(itemLiveB).arg(itemSlotsB).arg(itemHwB);
+        }
+        qInfo().noquote() << "  [t1007 diag] leg-b: 250 named spawns -> live" << itemLiveB
+                          << "slots" << itemSlotsB << "hw" << itemHwB << "(cap 200 LRU pinned)";
+
+        // ── (c) mobs 高水位：铺满 64 ──
+        int mobSpawned = 0;
+        for (int i = 0; i < 100; ++i) {
+            const int sx = kPlatMin + 1 + (i % 25) * 2;
+            const int sz = kPlatMin + 1 + (i / 25) * 2;
+            if (em7.spawnMobTyped(sx, kPlatY + 1, sz, EntityManager::MobPig,
+                                  QStringLiteral("#f0a8b0"), 10) < 0)
+                break;
+            ++mobSpawned;
+        }
+        const int mobLiveC = em7.liveCount(), mobSlotsC = em7.count(), mobHwC = em7.slotHighWater();
+        if (mobSpawned != 64 || mobLiveC != 64 || mobSlotsC != 64 || mobHwC != 64) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-c spawned=%1 live=%2 slots=%3 hw=%4 != 64x4")
+                            .arg(mobSpawned).arg(mobLiveC).arg(mobSlotsC).arg(mobHwC);
+        }
+        qInfo().noquote() << "  [t1007 diag] leg-c: pigs" << mobSpawned << "live" << mobLiveC
+                          << "slots" << mobSlotsC << "hw" << mobHwC << "(cap 64 pinned)";
+
+        // ── (e1) 满池 tick 链墙钟（tick + hostileLife + spawners + item = PlayerController 相位同构）──
+        qint64 sumFull = 0;
+        for (int f = 0; f < 60; ++f) { // 1s 模拟窗（满池 200 item + 64 mob）
+            const qint64 t0 = FrameProfiler::nowNs();
+            em7.tick(1.0 / 60.0, &w7, farPos, 0.3f, 1.8f, true, false, 0.0f);
+            em7.tickHostileLife(1.0 / 60.0, &w7, farPos, 0.0f);
+            em7.tickSpawners(1.0 / 60.0, &w7, farPos);
+            im7.tick(1.0 / 60.0, &w7);
+            sumFull += FrameProfiler::nowNs() - t0;
+        }
+        const double avgFullMs = double(sumFull) / 1e6 / 60.0;
+        if (aliveSlots(em7) != em7.liveCount() || itemAliveSlots(im7) != im7.liveCount()) ok1007 = false;
+        qInfo().noquote() << "  [t1007 diag] leg-e1 full-pool tick chain avg" << avgFullMs
+                          << "ms/f (items 200 + mobs" << em7.liveCount() << ")";
+
+        // ── (d) 重载状态面：clearAll 双池（enterWorld 同构）→ live 归零、有界残留保留 ──
+        im7.clearAll();
+        em7.clearAll();
+        const int itemLiveD = im7.liveCount(), itemSlotsD = im7.count(), itemHwD = im7.liveHighWater();
+        const int mobLiveD = em7.liveCount(), mobSlotsD = em7.count(), mobHwD = em7.slotHighWater();
+        const int primedD = em7.primedCount();
+        bool okD = itemLiveD == 0 && mobLiveD == 0 && primedD == 0
+                   && itemSlotsD == 200 && mobSlotsD == 64        // t437 slot-reuse 设计残留（有界）
+                   && itemHwD == 200 && mobHwD == 64;             // 高水位跨重载保留（判读基线）
+        if (!okD) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-d reload face: live %1/%2 primed %3 "
+                                       "slots %4/%5 hw %6/%7 (want 0/0/0 then 200/64 kept, 200/64 kept)")
+                            .arg(itemLiveD).arg(mobLiveD).arg(primedD)
+                            .arg(itemSlotsD).arg(mobSlotsD).arg(itemHwD).arg(mobHwD);
+        }
+        qInfo().noquote() << "  [t1007 diag] leg-d reload: itemLive" << itemLiveD << "mobLive" << mobLiveD
+                          << "primed" << primedD << "| kept slots" << itemSlotsD << "/" << mobSlotsD
+                          << "hw" << itemHwD << "/" << mobHwD;
+
+        // ── (e2) 空池 tick 链墙钟（与 e1 同口径对照；diag 落盘供实机曲线对表）──
+        qint64 sumEmpty = 0;
+        for (int f = 0; f < 60; ++f) {
+            const qint64 t0 = FrameProfiler::nowNs();
+            em7.tick(1.0 / 60.0, &w7, farPos, 0.3f, 1.8f, true, false, 0.0f);
+            em7.tickHostileLife(1.0 / 60.0, &w7, farPos, 0.0f);
+            em7.tickSpawners(1.0 / 60.0, &w7, farPos);
+            im7.tick(1.0 / 60.0, &w7);
+            sumEmpty += FrameProfiler::nowNs() - t0;
+        }
+        const double avgEmptyMs = double(sumEmpty) / 1e6 / 60.0;
+        qInfo().noquote() << "  [t1007 diag] leg-e2 empty-pool tick chain avg" << avgEmptyMs
+                          << "ms/f (live" << em7.liveCount() << "/"
+                          << im7.liveCount() << "; far-player dark spawner may refill = diag only)"
+                          << "| full/empty ratio" << (avgEmptyMs > 0.0 ? avgFullMs / avgEmptyMs : 0.0);
+
+        // ── (f) 源码钉：F3 增补读数链在场 ──
+        bool okPin7 = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile ehf(root + QStringLiteral("/src/Entities/entitymanager.h"));
+            QFile ihf(root + QStringLiteral("/src/Game/itementitymanager.h"));
+            QFile mqf(root + QStringLiteral("/src/ui/Main.qml"));
+            const QString eh = ehf.open(QIODevice::ReadOnly) ? QString::fromUtf8(ehf.readAll()) : QString();
+            const QString ih = ihf.open(QIODevice::ReadOnly) ? QString::fromUtf8(ihf.readAll()) : QString();
+            const QString mq = mqf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mqf.readAll()) : QString();
+            okPin7 = eh.contains(QStringLiteral("Q_INVOKABLE int primedCount() const"))
+                && eh.contains(QStringLiteral("Q_INVOKABLE int slotHighWater() const"))
+                && ih.contains(QStringLiteral("Q_INVOKABLE int liveHighWater() const"))
+                && mq.contains(QStringLiteral("\"  primed \" + primedN"))
+                && mq.contains(QStringLiteral("\"  del \" + delVis + \"/\" + delTot"))
+                && mq.contains(QStringLiteral("/64 hw \""));
+        }
+        if (!okPin7) {
+            ok1007 = false;
+            diag1007 += QStringLiteral("\n  [t1007 diag] leg-f F3 instrumentation source pin missing");
+        }
+
+        QObject::disconnect(dropConn1007);
+        if (!ok1007) ++totalFail;
+        qInfo().noquote() << (ok1007 ? "PASS" : "FAIL")
+                          << "| t1007 process-level stutter leak rig: the user's f6e9a51 playtest saw"
+                             "FPS decay to 7 with F3 items 93/93 and a heavy render-side line"
+                             "(gpu/prep/present) that a world re-entry resets to 99 FPS; offscreen has"
+                             "no QRhi render thread so gpu/prep/present/vmem stay on-device F3 readings"
+                             "(registered, never invented here) and this probe pins the ENGINE-side"
+                             "equivalent surface through the real explosion->drop forwarding chain:"
+                             "(a) 36 primed TNT (t997 6x6 layout) all detonate with zero primed residue"
+                             "while item live stays <= the 200 cap under the drop flood with per-sample"
+                             "aliveSlots==liveCount bookkeeping, (b) 250 named drops (merge-exempt)"
+                             "saturate EXACTLY live=200 slots=200 hw=200 (LRU eviction pinned),"
+                             "(c) mobs fill EXACTLY 64 = kCap, (e1) full-pool vs (e2) empty-pool tick"
+                             "chain wall time recorded in diag as the sim-side curve to table against"
+                             "the user F3 numbers (sim was 4.63ms of 66.7ms - single-digit sim at full"
+                             "pools localizes the 14x decay to the render side: live entity delegate"
+                             "draw cost scales linearly via per-delegate inline geometry/material"
+                             "instances with no instancing; the t858 xp-orb instancing precedent is the"
+                             "registered governance path, on-device curve comparison required before"
+                             "any rendering rework - no blind offscreen fix), (d) world re-entry"
+                             "(clearAll both pools, enterWorld-isomorphic) resets EXACTLY the live"
+                             "sets (items/mobs/primed -> 0) while bounded remnants persist by design"
+                             "(slot vectors 200/64, high waters 200/64) - no unbounded engine leak"
+                             "exists offscreen, so the recovery face is the live entity set; (f) source"
+                             "pins lock the new F3 telemetry (primedCount/slotHighWater/liveHighWater +"
+                             "the mobs-N/64-hw items-hw primed del V/T entities line shared with the"
+                             "t1005/t1006 closure data collection)"
+                          << (ok1007 ? QString() : diag1007);
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

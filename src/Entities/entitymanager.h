@@ -131,6 +131,16 @@ public:
     // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate 已 visible=false
     //   不参与绘制，count 会高估）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
     Q_INVOKABLE int liveCount() const { return m_liveCount; }
+    // t1007：当前存活 PrimedTnt 数（活体槽扫描 kind==FallingBlock && primed；n≤kCap=64 常数级）。F3 增补
+    //   读数（10Hz buildF3Text 普通 JS 读取，同 liveCount 口径，无 NOTIFY 绑定成本）——t1005 关单数据面：
+    //   用户看到「永续闪烁 TNT」时 primed>0 = 引擎实体残留（ fuse 链真在 tick）；primed==0 而画面仍闪
+    //   = 呈现层 delegate 冻结（白闪动画未随槽清零归位）。二者背离即实锤归属。
+    Q_INVOKABLE int primedCount() const;
+    // t1007：本会话活体槽高水位（历史 max(liveCount)；acquireSlot 时更新）。**clearAll 不重置**——
+    //   「重进存档」重置的是活体集与方块内容；高水位保留才有判读价值：重载后 live 归零而 hw 不变 =
+    //   上一世界确实到过这么多实体（有界 ≤kCap，槽池设计的已知残留面），配合 F3 delegate 数并排即可
+    //   区分 t1006 的「引擎增长」vs「呈现层克隆」——delegate 数远超 hw 才是克隆实锤。
+    Q_INVOKABLE int slotHighWater() const { return m_slotHighWater; }
     // t256：第 i 个槽位是否活体（= 已分配未释放）。呈现层 delegate 据它 visible：空槽 → 隐藏整棵 delegate
     //   （slot 复用保 Repeater count 单调不降、delegate 永不销毁，空槽仅隐藏不重建）。越界 → false。
     Q_INVOKABLE bool aliveAt(int i) const;
@@ -1646,6 +1656,8 @@ private:
     //   钳制（≤64 槽），与既有「峰值并发实体数」同量级，无额外常驻开销。
     std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
+    int m_slotHighWater = 0;      // t1007 本会话活体槽高水位（历史 max(m_liveCount)；acquireSlot 更新，
+                                  //   clearAll 不重置——跨重载判读面，见 slotHighWater() 注释）
     // t935 perf 粒度化 revision 的槽位状态（见 EntitySlotMonitor 头注释）：
     //   m_slotMonitors[i] = 槽 i 的监视器（QML delegate 首次询问时惰性创建；父对象 = this，永不销毁——
     //     delegate 的 var 引用终身有效；nullptr = 该槽尚无 delegate，无需 bump）。
@@ -1719,6 +1731,8 @@ private:
         // rv-low-batch1：写入全局单调 spawn 序号（槽代际；move 之后写 —— 覆盖被 move 的旧实体的默认 0）。
         m_entities[size_t(slot)].spawnSerial = ++m_spawnSerialCounter;
         ++m_liveCount;
+        // t1007：高水位随占槽更新（历史峰值；clearAll 释放不回撤，见 slotHighWater() 注释）。
+        if (m_liveCount > m_slotHighWater) m_slotHighWater = m_liveCount;
         return slot;
     }
     // 释放槽位：alive=false + 入 free list + --m_liveCount。不 erase → count 不降 → Repeater delegate 稳定。
