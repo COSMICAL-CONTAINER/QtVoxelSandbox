@@ -36,6 +36,8 @@
 #include <QQuickWindow> // t891 探针：pc 挂窗置 captured（placeBlock 入口门；grab 载体，无 show）
 #include <QMouseEvent>  // t949 探针：合成右键 press 直调 eventFilter（真实输入翻译链第一站）
 #include <QThread>      // t950 探针：msleep 越过掉落物新生免拾窗（isPickupReady 墙钟，无注入缝）
+#include <QRandomGenerator> // t1006 探针：进场散布复刻随机列（同 QML Math.random 语义位）
+#include <functional> // t1006 探针：视觉树 delegate 计数递归 lambda
 
 #include "blockregistry.h"
 #include "toolregistry.h" // t762 黑曜石挖掘规则探针（miningTime / canHarvest / miningSpeedMul 纯表查询）
@@ -35578,6 +35580,432 @@ Item {
                              "stairs + webs, deterministic re-gen, source pins, temples" << templesTotal
                           << "worlds" << worldsChecked << "seeds-miss" << seedMiss
                           << "ravine-skipped" << ravineSkipped;
+    }
+
+    // ── P-t1006 生物复制体未愈探针（R19.20 首项；用户 f6e9a51 实测「进场即有静止贴图生物 + 随时间无限
+    //   复制」，R19.18 t978 三层防御未对症；t1005 实体层 7 布局 + 64 槽压满全绿未复现 → 本探针按
+    //   dev-plan 假说 1/2/3/4 逐面重建用户路径）──
+    //   复现策略：全部走真 EntityManager + 真 World（+ 真 QQmlEngine），复刻「进场生成 + 长时游玩」：
+    //   (a) 进场生成复刻（spawnInitialMobs 引擎侧同构：固定 3 被动 + 散布 10 + 狼 2；鱿鱼 aquatic 面
+    //       平台上无水体，登记近似）+ 8 分钟模拟长 tick（tick + tickHostileLife + tickSpawners 全链，
+    //       skyBrightness=0 夜间满压暗刷）活体数增长曲线（判据：liveCount ≤ 进场 15 + 敌对全局 cap 30
+    //       + 2 容差；aliveSlots == liveCount 簿记不变量全程）+ **静止体检测**（石台出生群 90s 连续
+    //       零位移窗 → 静止复制体；合法 idle 上界 ~0.25^15≈1e-9，台外敌对地形群不判——洞穴密闭点
+    //       按设计可静止，与用户「进场即有」台面无关）。
+    //   (b) 刷怪笼路径单独布局（假说 1，R19.19 后用户世界现含地牢/矿井/要塞笼）：敌对双笼 240s 刷出
+    //       率曲线（闸门 = 全局 30 + 玩家 48m 区域 12 + 笼周 4m 球敌对在场 → 判据：峰值 ≤ 14、180s
+    //       后平台期无爬升）+ 被动笼同型 local cap 4 计量（判据 = 笼周 4m 球内同型 ≤ 4 恒成立 + 总量
+    //       ≤ kCap；被动无远距消失的慢积累面以 diag 量化登记）。
+    //   (c) QML delegate 语义（假说 4，权重上调面：真 QQmlEngine + mobHost 同构 Repeater——mon.revision
+    //       + t978 count 自愈触碰 + aliveAt 三绑定逐字同形）：spawn / 长tick / removeEntityAt /
+    //       clearAll / 复用重spawn 六相 delegate 可见数 == 引擎活体数（t978 三层防线在场回归）。
+    {
+        bool ok1006 = true;
+        QString diag1006;
+        constexpr int kPlatY = 70;      // 石台面（远超 worldgen 地形上限 → 台上群与台外暗刷群空间隔离）
+        constexpr int kPlatMin = 8, kPlatMax = 39; // 石台 [8,39]²（32×32）
+        // ── (a) 进场生成复刻 + 长 tick 增长曲线 + 静止体检测 ──
+        int maxLive = 0, entrySpawned = 0;
+        bool bookkeepingOk = true, staticBody = false;
+        QVector3D staticPos, staticAt;
+        {
+            World w6;
+            w6.setWidth(48); w6.setDepth(48); w6.setHeight(80); w6.setSeed(606);
+            for (int x = kPlatMin; x <= kPlatMax; ++x)
+                for (int z = kPlatMin; z <= kPlatMax; ++z) {
+                    w6.setBlock(x, kPlatY, z, BR::Stone, 0);
+                    w6.setBlock(x, kPlatY + 1, z, BR::Air, 0);
+                    w6.setBlock(x, kPlatY + 2, z, BR::Air, 0);
+                    w6.setBlock(x, kPlatY + 3, z, BR::Air, 0);
+                }
+            for (int x = kPlatMin; x <= kPlatMax; ++x)
+                for (int z = kPlatMin; z <= kPlatMax; ++z) {
+                    const bool wall = (x == kPlatMin || x == kPlatMax || z == kPlatMin || z == kPlatMax);
+                    if (wall)
+                        for (int y = kPlatY + 1; y <= kPlatY + 3; ++y) w6.setBlock(x, y, z, BR::Stone, 0);
+                }
+            EntityManager em6;
+            const int pc = 24;
+            const QVector3D playerPos(float(pc) + 0.5f, float(kPlatY + 1) + 0.45f, float(pc) + 0.5f);
+            // 进场复刻（Main.qml spawnInitialMobs 引擎侧同构；鱿鱼 aquatic 略登记）：
+            // 固定 3（猪/牛/羊 左前右 ±4）+ 散布 10（pickPassiveMobType 群系加权）+ 狼 2。
+            auto platSpawn = [&](int dx, int dz, int type) -> bool {
+                const int sx = pc + dx, sz = pc + dz;
+                if (sx < kPlatMin + 1 || sx > kPlatMax - 1 || sz < kPlatMin + 1 || sz > kPlatMax - 1)
+                    return false;
+                return em6.spawnMobTyped(sx, kPlatY + 1, sz, type, QStringLiteral("#f0a8b0"), 10) >= 0;
+            };
+            entrySpawned += platSpawn(-4, -2, EntityManager::MobPig) ? 1 : 0;
+            entrySpawned += platSpawn(0, -4, EntityManager::MobCow) ? 1 : 0;
+            entrySpawned += platSpawn(4, -2, EntityManager::MobSheep) ? 1 : 0;
+            for (int i = 0; i < 10; ++i) { // 散布 10：台内随机列（台上无树/水 → headroom 门恒过 = 同构）
+                const int sx = kPlatMin + 2 + int(QRandomGenerator::global()->bounded(kPlatMax - kPlatMin - 3));
+                const int sz = kPlatMin + 2 + int(QRandomGenerator::global()->bounded(kPlatMax - kPlatMin - 3));
+                const int mt = em6.pickPassiveMobType(w6.biomeIdAt(sx, sz));
+                if (em6.spawnMobTyped(sx, kPlatY + 1, sz, mt, QStringLiteral("#f0a8b0"), 10) >= 0)
+                    ++entrySpawned;
+            }
+            entrySpawned += platSpawn(-6, 3, EntityManager::MobWolf) ? 1 : 0;
+            entrySpawned += platSpawn(6, -5, EntityManager::MobWolf) ? 1 : 0;
+            if (entrySpawned != 15) {
+                ok1006 = false;
+                diag1006 += QStringLiteral("\n  [t1006 diag] entry spawned %1/15").arg(entrySpawned);
+            }
+            // 长 tick：480s 模拟（60Hz × 28800 帧），每秒采样。
+            constexpr int kFrames = 60 * 480;
+            const float dt6 = 1.0f / 60.0f;
+            std::vector<QVector3D> lastSamplePos;   // 每槽上次采样位
+            std::vector<int> stillSecs;             // 每槽连续静止秒数
+            int aliveSlotsPeak = 0;
+            int maxHostile = 0;
+            for (int f = 0; f < kFrames; ++f) {
+                em6.tick(dt6, &w6, playerPos, 0.3f, 1.8f, true, false, 0.0f); // 夜间满压（t951 缺省 0）
+                em6.tickHostileLife(dt6, &w6, playerPos, 0.0f);
+                em6.tickSpawners(dt6, &w6, playerPos);
+                if (f % 60 == 0) { // 每模拟秒采样
+                    int live = 0, hostiles = 0, aliveSlots = 0;
+                    const int n = em6.count();
+                    if (int(lastSamplePos.size()) < n) {
+                        lastSamplePos.resize(size_t(n), QVector3D(0, -1000.0f, 0));
+                        stillSecs.resize(size_t(n), 0);
+                    }
+                    for (int i = 0; i < n; ++i) {
+                        if (!em6.aliveAt(i)) { stillSecs[size_t(i)] = 0; continue; }
+                        ++aliveSlots;
+                        if (em6.kindAt(i) == EntityManager::Mob && !em6.deadAt(i)) {
+                            ++live;
+                            if (em6.isHostileAt(i)) ++hostiles;
+                        }
+                        // 静止体检测：仅台上群（y > kPlatY，台外洞穴密闭点按设计可静止不判）
+                        const QVector3D p = em6.posAt(i);
+                        if (p.y() > float(kPlatY) && em6.kindAt(i) == EntityManager::Mob && !em6.deadAt(i)) {
+                            QVector3D &lp = lastSamplePos[size_t(i)];
+                            if (lp.y() > -500.0f && (p - lp).length() < 0.05f) {
+                                ++stillSecs[size_t(i)];
+                                if (stillSecs[size_t(i)] >= 90 && !staticBody) {
+                                    staticBody = true; // 90s 连续零位移 = 静止复制体候选（合法 idle 上界 ~1e-9）
+                                    staticPos = p;
+                                    staticAt = QVector3D(float(f) / 60.0f, float(i), 0);
+                                }
+                            } else {
+                                stillSecs[size_t(i)] = 0;
+                            }
+                            lp = p;
+                        }
+                    }
+                    if (aliveSlots != em6.liveCount()) { // t978 簿记不变量：alive 槽数 == liveCount
+                        bookkeepingOk = false;
+                        if (diag1006.size() < 4096)
+                            diag1006 += QStringLiteral("\n  [t1006 diag] bookkeeping drift t=%1s aliveSlots=%2 liveCount=%3")
+                                            .arg(f / 60).arg(aliveSlots).arg(em6.liveCount());
+                    }
+                    maxLive = std::max(maxLive, live);
+                    aliveSlotsPeak = std::max(aliveSlotsPeak, aliveSlots);
+                    maxHostile = std::max(maxHostile, hostiles);
+                }
+            }
+            const int kLiveCeil = 15 + 30 + 2; // 进场 15 + 敌对全局 cap 30 + 容差 2
+            if (maxLive > kLiveCeil) {
+                ok1006 = false;
+                diag1006 += QStringLiteral("\n  [t1006 diag] live growth beyond ceiling: max=%1 > %2")
+                                .arg(maxLive).arg(kLiveCeil);
+            }
+            if (staticBody) {
+                ok1006 = false;
+                diag1006 += QStringLiteral("\n  [t1006 diag] STATIC BODY at t=%1s slot=%2 pos=(%3,%4,%5)")
+                                .arg(int(staticAt.x())).arg(int(staticAt.y()))
+                                .arg(staticPos.x()).arg(staticPos.y()).arg(staticPos.z());
+            }
+            if (!bookkeepingOk) ok1006 = false;
+            if (em6.liveCount() > kLiveCeil) { // 终态核对（480s 后仍在天花板内）
+                ok1006 = false;
+                diag1006 += QStringLiteral("\n  [t1006 diag] final live %1 > %2").arg(em6.liveCount()).arg(kLiveCeil);
+            }
+            qInfo().noquote() << "  [t1006 diag] leg-a: entry" << entrySpawned << "maxLive" << maxLive
+                              << "peakSlots" << aliveSlotsPeak << "maxHostile" << maxHostile
+                              << "finalLive" << em6.liveCount() << "slots" << em6.count()
+                              << "static" << staticBody << "book" << bookkeepingOk;
+        }
+        // ── (b) 刷怪笼路径（显式石壳封闭竞技场，与 worldgen 洞穴/地牢完全隔离——首跑实锤：3×3 刻写
+        //   袋靠 worldgen 石壁不封闭，敌对笼笼周 4m 球闸门被袋内滞留 mob 永久卡死只刷 1 只、被动袋
+        //   连通 worldgen 空腔致球内重入 6>4 假 breach——两层测量都必须显式壳才有效）──
+        {
+            // 敌对双笼开敞竞技场：17×17×3 内腔（x17..31, z7..21, y8..10）+ 全封闭石壳（y6..11 填充 +
+            // 内腔刻空）+ 双笼 (20,8,14)Shambler (28,8,14)Bones + 玩家 (24.5,9.5,20.5)（距笼 ~7.2 > 4m
+            // 球外；playerTargetable=true → 笼怪追击聚拢玩家侧 → 恒离球 → 笼持续补刷直到区域 cap 12）。
+            auto hostileArena = [](bool &anySpawn, int &peakTotal, int &sampleT180, int &sampleT234) {
+                World wC;
+                wC.setWidth(48); wC.setDepth(48); wC.setHeight(32); wC.setSeed(9);
+                for (int x = 16; x <= 32; ++x)
+                    for (int z = 6; z <= 22; ++z)
+                        for (int y = 6; y <= 11; ++y)
+                            wC.setBlock(x, y, z, BR::Stone, 0);
+                for (int x = 17; x <= 31; ++x)
+                    for (int z = 7; z <= 21; ++z)
+                        for (int y = 8; y <= 10; ++y)
+                            wC.setBlock(x, y, z, BR::Air, 0);
+                wC.setBlock(20, 8, 14, BR::Spawner, quint8(BR::SpawnerStateShambler));
+                wC.setBlock(28, 8, 14, BR::Spawner, quint8(BR::SpawnerStateBones));
+                EntityManager emC;
+                const QVector3D playerPos(24.5f, 9.5f, 20.5f);
+                anySpawn = false; peakTotal = 0; sampleT180 = -1; sampleT234 = -1;
+                for (int f = 0; f < 60 * 240; ++f) {
+                    emC.tick(1.0f / 60.0f, &wC, playerPos, 0.3f, 1.8f, true, false, 0.0f);
+                    emC.tickSpawners(1.0f / 60.0f, &wC, playerPos);
+                    if (f % 60 == 0) {
+                        int total = 0;
+                        for (int i = 0; i < emC.count(); ++i)
+                            if (emC.aliveAt(i) && emC.kindAt(i) == EntityManager::Mob && !emC.deadAt(i))
+                                ++total;
+                        anySpawn = anySpawn || total > 0;
+                        peakTotal = std::max(peakTotal, total);
+                        if (f == 60 * 180) sampleT180 = total;
+                        if (f == 60 * 234) sampleT234 = total;
+                    }
+                }
+            };
+            { // 判据：有刷出、峰值 ≤ 14（区域 cap 12 + 同周期双笼 +2 容差）、180s→234s 平台无爬升（Δ ≤ 2）、
+              //   平台非空（t180 ≥ 5 证坡道真实发生，防「永不触发」假绿——首跑 3×3 袋 rig 即此假相 peak=1）
+                bool anySpawn = false;
+                int peakTotal = 0, t180 = -1, t234 = -1;
+                hostileArena(anySpawn, peakTotal, t180, t234);
+                if (!anySpawn) { ok1006 = false; diag1006 += QStringLiteral("\n  [t1006 diag] hostile cage rig spawned nothing"); }
+                if (peakTotal > 14) {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] hostile cage growth: peak %1 > 14").arg(peakTotal);
+                }
+                if (t180 < 5) {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] hostile cage ramp never happened: t180=%1 (gate deadlock face)").arg(t180);
+                }
+                if (t180 >= 0 && t234 >= 0 && t234 - t180 > 2) {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] hostile cage creep after plateau: %1 -> %2").arg(t180).arg(t234);
+                }
+                qInfo().noquote() << "  [t1006 diag] leg-b hostile: spawned" << anySpawn << "peak" << peakTotal
+                                  << "plateau" << t180 << "->" << t234 << "(area cap 12 expected)";
+            }
+            // 被动笼两腿：(b1) **全显式石壳封闭袋**（7×7×5 石壳 + 3×3×2 内腔，无 worldgen 连通）——
+            //   袋全域在笼周 4m 球内 → 同型 gate 恰停 kSpawnerLocalCap=4：60 周期后总 pig 数 == 4（越界
+            //   = gate breach；不足 = gate 过死，两端都红）。(b2) 开敞竞技场单 pig 笼 240s——被动无远距
+            //   消失的慢积累面 diag 量化登记（蛋改型笼 = 生存不可达面，登记不判红；总量 ≤ kCap 判红）。
+            auto sealedPocketPigs = []() {
+                World wP;
+                wP.setWidth(32); wP.setDepth(32); wP.setHeight(24); wP.setSeed(5);
+                for (int x = 12; x <= 18; ++x)
+                    for (int z = 12; z <= 18; ++z)
+                        for (int y = 6; y <= 10; ++y)
+                            wP.setBlock(x, y, z, BR::Stone, 0);
+                for (int x = 13; x <= 15; ++x) // 3×3 内腔（y7..8 air，笼 y7 居中，底 y6 石）
+                    for (int z = 13; z <= 15; ++z)
+                        for (int y = 7; y <= 8; ++y)
+                            wP.setBlock(x, y, z, BR::Air, 0);
+                wP.setBlock(14, 7, 14, BR::Spawner, quint8(BR::spawnerStateForMob(EntityManager::MobPig)));
+                EntityManager emP;
+                const QVector3D playerPos(14.5f, 7.5f, 20.5f); // XZ 6 ≤ 16 激活圈（球外不需，袋本就全域在球内）
+                for (int i = 0; i < 600; ++i) emP.tickSpawners(0.1, &wP, playerPos); // 60s = 10 周期×6s ≥ 袋满节奏
+                int pigs = 0;
+                for (int i = 0; i < emP.count(); ++i)
+                    if (emP.aliveAt(i) && emP.kindAt(i) == EntityManager::Mob && emP.mobTypeAt(i) == EntityManager::MobPig)
+                        ++pigs;
+                return pigs;
+            };
+            {
+                const int pigs = sealedPocketPigs();
+                if (pigs != 4) {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] passive sealed pocket pig count %1 != 4 (kSpawnerLocalCap)").arg(pigs);
+                }
+                qInfo().noquote() << "  [t1006 diag] leg-b passive pocket: pigs" << pigs << "(gate cap 4 exact)";
+            }
+            auto openPigArena = []() {
+                World wP;
+                wP.setWidth(48); wP.setDepth(48); wP.setHeight(32); wP.setSeed(9);
+                for (int x = 16; x <= 32; ++x)
+                    for (int z = 6; z <= 22; ++z)
+                        for (int y = 6; y <= 11; ++y)
+                            wP.setBlock(x, y, z, BR::Stone, 0);
+                for (int x = 17; x <= 31; ++x)
+                    for (int z = 7; z <= 21; ++z)
+                        for (int y = 8; y <= 10; ++y)
+                            wP.setBlock(x, y, z, BR::Air, 0);
+                wP.setBlock(20, 8, 14, BR::Spawner, quint8(BR::spawnerStateForMob(EntityManager::MobPig)));
+                EntityManager emP;
+                const QVector3D playerPos(28.5f, 9.5f, 20.5f); // 球外
+                int peak = 0;
+                for (int f = 0; f < 60 * 240; ++f) {
+                    emP.tick(1.0f / 60.0f, &wP, playerPos, 0.3f, 1.8f, true, false, 0.0f);
+                    emP.tickSpawners(1.0f / 60.0f, &wP, playerPos);
+                    if (f % 60 == 0) {
+                        int total = 0;
+                        for (int i = 0; i < emP.count(); ++i)
+                            if (emP.aliveAt(i) && emP.kindAt(i) == EntityManager::Mob && !emP.deadAt(i))
+                                ++total;
+                        peak = std::max(peak, total);
+                    }
+                }
+                return peak;
+            };
+            {
+                const int peak = openPigArena();
+                if (peak > 64) {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] passive arena total beyond kCap: %1").arg(peak);
+                }
+                qInfo().noquote() << "  [t1006 diag] leg-b passive open-arena: peakPigs" << peak
+                                  << "in 240s (no-far-despawn slow creep = registered design gap, egg-cage user-unreachable)";
+            }
+        }
+        // ── (c) QML delegate 语义：mobHost 同构 Repeater × 真 EntityManager（t978 三层在场回归）──
+        {
+            static bool sEntRegistered1006 = false;
+            if (!sEntRegistered1006) {
+                qmlRegisterType<EntityManager>("VoxelSandboxProbe", 1, 0, "EntityManager");
+                sEntRegistered1006 = true;
+            }
+            qputenv("QML_DISABLE_DISK_CACHE", "1");
+            QQmlEngine eng6;
+            EntityManager emQ;
+            eng6.rootContext()->setContextProperty(QStringLiteral("ent"), &emQ);
+            QQmlComponent comp6(&eng6);
+            comp6.setData(R"QML(import QtQuick
+import VoxelSandboxProbe 1.0
+Item {
+    id: host
+    objectName: "t1006host"
+    Repeater {
+        model: ent.count
+        delegate: Item {
+            objectName: "t1006del"
+            property var mon: ent.slotMonitorAt(index)
+            property bool vis: { const _r = mon.revision; const _c = ent.count; return _r >= 0 ? (ent.aliveAt(index)) : false }
+        }
+    }
+}
+)QML", QUrl());
+            QObject *host6 = nullptr;
+            bool qmlOk = !comp6.isError();
+            if (!qmlOk)
+                diag1006 += QStringLiteral("\n  [t1006 diag] qml comp: ") + comp6.errorString();
+            else {
+                host6 = comp6.create();
+                qmlOk = host6 != nullptr;
+            }
+            // delegate 计数走**视觉树**（QQuickItem::childItems 递归；Repeater 建 delegate 的 QObject
+            // parent 为 null（仅 parentItem 指向宿主）→ findChildren 找不到 —— scratch 首跑实锤，
+            // 查 QObject 树恒 0 是假 red，查视觉树才是真 delegate 面）。
+            std::function<void(int *, int *)> walkDelegates = [host6](int *delsOut, int *visOut) {
+                int dels = 0, vis = 0;
+                std::function<void(QQuickItem *)> walk = [&](QQuickItem *it) {
+                    const auto ci = it->childItems();
+                    for (QQuickItem *c : ci) {
+                        if (c->objectName() == QStringLiteral("t1006del")) {
+                            ++dels;
+                            if (c->property("vis").toBool()) ++vis;
+                        }
+                        walk(c);
+                    }
+                };
+                if (QQuickItem *hi = qobject_cast<QQuickItem *>(host6)) walk(hi);
+                if (delsOut) *delsOut = dels;
+                if (visOut) *visOut = vis;
+            };
+            auto visCount = [walkDelegates]() -> int {
+                int vis = 0, dels = 0;
+                walkDelegates(&dels, &vis);
+                return vis;
+            };
+            auto aliveCount = [&emQ]() -> int {
+                int n = 0;
+                for (int i = 0; i < emQ.count(); ++i)
+                    if (emQ.aliveAt(i) && emQ.kindAt(i) == EntityManager::Mob && !emQ.deadAt(i)) ++n;
+                return n;
+            };
+            auto checkPhase = [&](const QString &phase, bool &ok) {
+                QCoreApplication::processEvents();
+                const int vis = visCount();
+                const int alive = aliveCount();
+                if (vis != alive) {
+                    ok = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] phase %1: visible delegates %2 != alive %3")
+                                    .arg(phase).arg(vis).arg(alive);
+                }
+            };
+            if (qmlOk) {
+                // 六相轮换：spawn 3 → 长 tick → 杀 1 → 复用重 spawn 2 → clearAll → 重 spawn 4。
+                emQ.spawnMobTyped(10, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+                emQ.spawnMobTyped(12, kRigY, 10, EntityManager::MobCow, QStringLiteral("#ee9999"), 30);
+                emQ.spawnMobTyped(14, kRigY, 10, EntityManager::MobSheep, QStringLiteral("#ee9999"), 30);
+                checkPhase(QStringLiteral("spawn3"), ok1006);
+                for (int f = 0; f < 120; ++f)
+                    emQ.tick(1.0f / 60.0f, &w, QVector3D(11.5f, 42.0f, 11.5f), 0.3f, 1.8f, true, false, 0.0f);
+                checkPhase(QStringLiteral("longtick"), ok1006);
+                int killSlot = -1;
+                for (int i = 0; i < emQ.count(); ++i)
+                    if (emQ.aliveAt(i) && emQ.kindAt(i) == EntityManager::Mob) { killSlot = i; break; }
+                if (killSlot >= 0) {
+                    emQ.removeEntityAt(killSlot);
+                    checkPhase(QStringLiteral("kill1"), ok1006);
+                } else {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] no mob slot to kill");
+                }
+                emQ.spawnMobTyped(10, kRigY, 12, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+                emQ.spawnMobTyped(16, kRigY, 10, EntityManager::MobChicken, QStringLiteral("#ee9999"), 30);
+                checkPhase(QStringLiteral("respawn2"), ok1006);
+                emQ.clearAll();
+                checkPhase(QStringLiteral("clearAll"), ok1006);
+                for (int i = 0; i < 4; ++i)
+                    emQ.spawnMobTyped(10 + i * 2, kRigY, 14, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
+                checkPhase(QStringLiteral("respawn4"), ok1006);
+                int delegates = 0, visFinal = 0;
+                walkDelegates(&delegates, &visFinal);
+                if (delegates != emQ.count()) { // Repeater model = count：delegate 数恒等槽数
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] delegate count %1 != slots %2").arg(delegates).arg(emQ.count());
+                }
+                if (visFinal != aliveCount()) {
+                    ok1006 = false;
+                    diag1006 += QStringLiteral("\n  [t1006 diag] final vis %1 != alive %2").arg(visFinal).arg(aliveCount());
+                }
+                delete host6;
+            } else {
+                ok1006 = false;
+            }
+            qInfo().noquote() << "  [t1006 diag] leg-c qml: comp" << qmlOk << "finalSlots" << emQ.count();
+        }
+        if (!ok1006) ++totalFail;
+        qInfo().noquote() << (ok1006 ? "PASS" : "FAIL")
+                          << "| t1006 mob-clone-unhealed: the user's f6e9a51 playtest reports static"
+                             "texture mobs already present on world entry and infinite duplication over"
+                             "time (t978's three defensive layers did not cure it); this probe rebuilds"
+                             "the user path on real EntityManager + real World + real QQmlEngine across"
+                             "the four hypotheses: (a) entry spawn replica (3 fixed + 10 biome-weighted"
+                             "scatter + 2 wolves on a sealed stone platform 20 blocks above terrain) with"
+                             "a 480s simulated night-pressure long tick (tick + tickHostileLife +"
+                             "tickSpawners full chain) asserting the live-count curve stays within the"
+                             "legit ceiling 15+30+2, the aliveSlots==liveCount bookkeeping invariant every"
+                             "simulated second, and a 90s consecutive zero-displacement static-body"
+                             "detector over platform mobs (legit idle upper bound ~0.25^15), (b) the"
+                             "R19.19 spawner-cage path laid out alone in explicitly shelled rigs"
+                             "(first-run lesson: a 3x3 pocket carved into worldgen stone is NOT sealed --"
+                             "a trapped mob deadlocks the hostile 4m-ball gate at 1 spawn and worldgen"
+                             "cave connections fake a passive gate breach), a dual hostile cage open"
+                             "arena 17x17x3 must ramp then plateau at the 12-near-player area cap (peak"
+                             "<= 14, t180 >= 5 proves the ramp, no creep 180s -> 234s), a fully shelled"
+                             "3x3 passive pocket (whole pocket inside the 4m ball) must hold EXACTLY 4"
+                             "pigs = kSpawnerLocalCap both sides of the gate, and an open passive arena"
+                             "quantifies in diag (registered design gap -- egg-modified cages being"
+                             "user-unreachable in survival) the no-far-despawn slow creep with total <= kCap,"
+                             "(c) the QML delegate semantics through a real QQmlEngine: a"
+                             "mobHost-isomorphic Repeater (mon.revision + t978 count self-heal touch +"
+                             "aliveAt binding verbatim) driven through six phases (spawn3 / long tick /"
+                             "kill1 / LIFO-reuse respawn2 / clearAll / respawn4) must keep visible"
+                             "delegate count == engine live count at every phase with delegate count =="
+                             "slot count (t978 three layers regression-pinned); probe legs: (a) growth"
+                             "curve + static detector green, (b) cage rates plateau at caps, (c) six-phase"
+                             "delegate/alive parity"
+                          << (ok1006 ? QString() : diag1006);
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
