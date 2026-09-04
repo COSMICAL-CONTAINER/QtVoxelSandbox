@@ -26,6 +26,7 @@
 #include <QUrl>    // Review 2026-08-24 #5 探针（packFileUrl 查询串剥离断言：QUrl::toLocalFile）
 #include <QMetaObject> // t898 review27 #1 探针（sleepLying Q_PROPERTY 契约面：indexOfProperty/property 经 metaobject 读回）
 #include <cmath>
+#include <cstdio>  // t1010 探针：消息钩子默认处理器兜底直写 stderr
 #include <cstring> // t965 探针 std::memcpy（vertexData 直读顶点 u 分量）
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
@@ -35580,6 +35581,247 @@ Item {
                              "stairs + webs, deterministic re-gen, source pins, temples" << templesTotal
                           << "worlds" << worldsChecked << "seeds-miss" << seedMiss
                           << "ravine-skipped" << ravineSkipped;
+    }
+
+    // ── P-t1010 沙漠/丛林神殿野外生成落位率探针（R19.20 t1010；用户实测「新世界未见到神殿」验收面）──
+    //    根因（联合概率过低，非放置静默失败）：160² 世界沙漠神殿仅 3×3=9 网格候选 × 45% 命中 ×
+    //    Desert 群系占比 ~15-20%（成片，非逐格独立）→ 期望 ~0.7 座/世界，近半数含沙漠世界 0 落位；
+    //    丛林同构（16 候选 × 50% × ~13.5% ≈ 1.1）。地表判定本身无错位：放置 surfaceY = heightAt 与
+    //    generate 地形填充同源（R19.19 的「64 高 vs 地表基线」错位仅存在于 rig 探针侧，见 P-t1003 注）。
+    //    修法：保底机制（对标 placeStronghold t564「收集候选 → 选最优落点」口径）—— 概率主路径 0 落位
+    //    且世界含该群系 → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1（确定性纯函数）。
+    //    rig：32 seed × 160×160×128（游戏本体 Main.qml 同尺寸）全量 worldgen；落位数 / 群系列数取自
+    //    qInstallMessageHandler 捕获的 worldgen 自报（"worldgen: biomes …" / "worldgen: … temples = N"
+    //    行 = 引擎单次 generate 的真实输出，非探针复刻；其余消息链式转发不吞）。断言五腿：
+    //    (a) 必落腿：desert 列 > 0 ⇒ 沙漠神殿 ≥1；jungle 列 > 0 ⇒ 丛林神殿 ≥1（逐 seed；t1010 主判据，
+    //        保底旗置 false 即红 —— 阴性轮钉）；
+    //    (b) rig 有效性：池内 ≥5 seed 含沙漠群系且 ≥5 seed 含丛林群系（空池则必落腿空转无意义）；
+    //    (c) 实块核对腿：各抽首个含群系 seed，y 带扫 Chest&PyramidFlag 聚簇（4 箱 Chebyshev≤6，
+    //        P-t1003 口径）/ IronDoor(state 0，y≥50，P-t1004 口径) 计数 == 日志自报座数 + 簇心群系核
+    //        （钉「自报计数 = 真实栅格落位」，防日志与栅格漂移）；
+    //    (d) 确定性腿：同 seed 二次独立构 World → 自报四元组逐项相等（PLAN §2-K）；
+    //    (e) 源码钉：两处保底旗行 / 两处保底入口行 / siteOk 收口行（world.cpp）。
+    {
+        bool ok = true;
+        const quint32 seedsT1010[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u,
+                                       42u, 999u, 31337u, 2024u, 8675309u, 271828u, 314159u, 123456789u,
+                                       7u, 12345u, 54321u, 8888u, 111u, 2222u, 33333u, 555555u,
+                                       7777777u, 97531u, 13579u, 24680u,
+                                       20250904u, 1010u, 1919u, 2026u }; // R19.19 历史池 28 + 本批 4
+        // 与 World::hashColumn 同源复刻（FNV-1a + avalanche；候选 diag 用，非判据）。
+        auto colHashT1010 = [](int seed, int x, int z) {
+            quint32 h = 0x811c9dc5u;
+            auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+            step(quint32(seed));
+            step(quint32(x));
+            step(quint32(z));
+            h ^= h >> 16;
+            h *= 0x7feb352du;
+            h ^= h >> 15;
+            return h;
+        };
+        // worldgen 自报捕获：一轮 generate 依次吐 biomes 行 → … temples 行；biomes 行开新帧，temples 行
+        // 回填末帧。构造期 setWidth/setDepth/setHeight 各产生一帧 → 构造后末帧 = setSeed 帧（seed 相同
+        // 时 setSeed 早退无帧，末帧即 setHeight 的全尺寸帧，语义仍正确）。其余消息链式转发不吞。
+        //   （qInstallMessageHandler 收函数指针 → 无捕获 lambda + static 着陆点。）
+        struct GenRecT1010 { int desertCols = -1, jungleCols = -1, desertT = -1, jungleT = -1; };
+        static std::vector<GenRecT1010> *s_sinkT1010 = nullptr;   // 帧序列着陆点（探针块内手动装/卸）
+        static QtMessageHandler s_prevHandlerT1010 = nullptr;     // 前任处理器（链式转发）
+        s_prevHandlerT1010 = qInstallMessageHandler(
+            [](QtMsgType type, const QMessageLogContext &ctx, const QString &m) {
+                if (s_sinkT1010) {
+                    if (m.startsWith(QStringLiteral("worldgen: biomes "))) {
+                        static const QRegularExpression reBiomes(
+                            QStringLiteral("desert = (\\d+).*jungle = (\\d+)"));
+                        const auto mm = reBiomes.match(m);
+                        GenRecT1010 rec;
+                        rec.desertCols = mm.hasMatch() ? mm.captured(1).toInt() : -2;
+                        rec.jungleCols = mm.hasMatch() ? mm.captured(2).toInt() : -2;
+                        s_sinkT1010->push_back(rec);
+                        return; // worldgen 自报行只入帧不转发（降噪）
+                    }
+                    if (m.startsWith(QStringLiteral("worldgen: desert temples = "))) {
+                        if (!s_sinkT1010->empty())
+                            s_sinkT1010->back().desertT =
+                                m.mid(int(qstrlen("worldgen: desert temples = "))).toInt();
+                        return;
+                    }
+                    if (m.startsWith(QStringLiteral("worldgen: jungle temples = "))) {
+                        if (!s_sinkT1010->empty())
+                            s_sinkT1010->back().jungleT =
+                                m.mid(int(qstrlen("worldgen: jungle temples = "))).toInt();
+                        return;
+                    }
+                }
+                if (s_prevHandlerT1010) s_prevHandlerT1010(type, ctx, m);
+                else std::fprintf(stderr, "%s\n", qUtf8Printable(m)); // 默认处理器兜底直写 stderr
+            });
+        int seedsWithDesert = 0, seedsWithJungle = 0;
+        int desertTemplesTotal = 0, jungleTemplesTotal = 0;
+        int desert0Seeds = 0, jungle0Seeds = 0; // 有群系 0 神殿 seed 计数（保底后应恒 0 = 必落腿的另一表述）
+        quint32 firstDesertSeed = 0, firstJungleSeed = 0;
+        GenRecT1010 firstDesertRec, firstJungleRec;
+        QStringList violT1010;
+        for (quint32 sd : seedsT1010) {
+            std::vector<GenRecT1010> framesT1010; // 每世界一清（末帧 = 本世界最终态）
+            s_sinkT1010 = &framesT1010;
+            World wT1010;
+            wT1010.setWidth(160);
+            wT1010.setDepth(160);
+            wT1010.setHeight(128); // t307 地表基线 64 → 世界高须 128（64 高 rig 恒拒，见 P-t1003 rig 注）
+            wT1010.setSeed(int(sd)); // setter 内 generate() 全量 worldgen
+            const GenRecT1010 rec = framesT1010.empty() ? GenRecT1010{} : framesT1010.back();
+            s_sinkT1010 = nullptr;
+            if (rec.desertCols < 0 || rec.jungleCols < 0 || rec.desertT < 0 || rec.jungleT < 0) {
+                violT1010 << QStringLiteral("seed %1 frame incomplete (%2 %3 %4 %5)")
+                                     .arg(sd).arg(rec.desertCols).arg(rec.jungleCols)
+                                     .arg(rec.desertT).arg(rec.jungleT);
+                continue;
+            }
+            // 候选 vs 实落 diag（同源复刻主路径网格 + 概率 + 抖动 + 群系短门；海域 / 高度 fbm 门不进
+            // diag → 归「其余拒」，量级小）。区分「候选就少」vs「候选被群系门拒」。
+            int dHash = 0, dDesert = 0, jHash = 0, jJungle = 0;
+            for (int bx = 24; bx < 160; bx += 48) // 沙漠神殿主路径候选（grid 48 / pct 45 / seed+19487）
+                for (int bz = 24; bz < 160; bz += 48) {
+                    const quint32 r = colHashT1010(int(sd) + 19487, bx, bz);
+                    if ((r % 100u) >= 45u) continue;
+                    ++dHash;
+                    const int cx = bx + int((r >> 1) & 0xFu) % 25 - 12;
+                    const int cz = bz + int((r >> 5) & 0xFu) % 25 - 12;
+                    if (cx >= 11 && cz >= 11 && cx < 149 && cz < 149
+                        && wT1010.biomeIdAt(cx, cz) == 2) ++dDesert;
+                }
+            for (int bx = 20; bx < 160; bx += 40) // 丛林神殿主路径候选（grid 40 / pct 50 / seed+22617）
+                for (int bz = 20; bz < 160; bz += 40) {
+                    const quint32 r = colHashT1010(int(sd) + 22617, bx, bz);
+                    if ((r % 100u) >= 50u) continue;
+                    ++jHash;
+                    const int cx = bx + int((r >> 1) & 0xFu) % 21 - 10;
+                    const int cz = bz + int((r >> 5) & 0xFu) % 21 - 10;
+                    if (cx >= 8 && cz >= 8 && cx < 152 && cz < 152
+                        && wT1010.biomeIdAt(cx, cz) == 6) ++jJungle;
+                }
+            const bool hasD = rec.desertCols > 0, hasJ = rec.jungleCols > 0;
+            seedsWithDesert += int(hasD);
+            seedsWithJungle += int(hasJ);
+            desertTemplesTotal += rec.desertT;
+            jungleTemplesTotal += rec.jungleT;
+            if (hasD && rec.desertT == 0) ++desert0Seeds;
+            if (hasJ && rec.jungleT == 0) ++jungle0Seeds;
+            if (hasD && rec.desertT < 1) // (a) 必落腿 —— 保底契约（保底旗置 false 即红）
+                violT1010 << QStringLiteral("seed %1 desert cols %2 but 0 temples").arg(sd).arg(rec.desertCols);
+            if (hasJ && rec.jungleT < 1)
+                violT1010 << QStringLiteral("seed %1 jungle cols %2 but 0 temples").arg(sd).arg(rec.jungleCols);
+            if (hasD && firstDesertSeed == 0) { firstDesertSeed = sd; firstDesertRec = rec; }
+            if (hasJ && firstJungleSeed == 0) { firstJungleSeed = sd; firstJungleRec = rec; }
+            qInfo().noquote() << "  [t1010 diag] seed" << sd << "desertCols" << rec.desertCols
+                              << "jungleCols" << rec.jungleCols << "| dTemples" << rec.desertT
+                              << "(dHash" << dHash << "dDesertGate" << dDesert << ") jTemples"
+                              << rec.jungleT << "(jHash" << jHash << "jJungleGate" << jJungle << ")";
+        }
+        ok = ok && violT1010.isEmpty();
+        for (const QString &v : violT1010)
+            qInfo().noquote() << "  [t1010 diag] VIOLATION:" << v;
+        const bool rigOkT1010 = seedsWithDesert >= 5 && seedsWithJungle >= 5; // (b) rig 有效性
+        ok = ok && rigOkT1010;
+        if (!rigOkT1010)
+            qInfo().noquote() << "  [t1010 diag] rig vacuous: desert seeds" << seedsWithDesert
+                              << "jungle seeds" << seedsWithJungle;
+        // (c) 实块核对腿：日志自报 == 真实栅格落位。
+        if (firstDesertSeed != 0) {
+            World wV;
+            wV.setWidth(160); wV.setDepth(160); wV.setHeight(128); wV.setSeed(int(firstDesertSeed));
+            struct PCB { int x, z; };
+            std::vector<PCB> pcs;
+            for (int x = 0; x < wV.width(); ++x)
+                for (int z = 0; z < wV.depth(); ++z)
+                    for (int y = 40; y <= 64; ++y) // 密室箱带：y = S-11 ∈ [50,56]（S~61..67）
+                        if (wV.blockAt(x, y, z) == BR::Chest
+                            && (wV.stateAt(x, y, z) & BR::ChestStatePyramidFlag))
+                            pcs.push_back({ x, z });
+            std::vector<bool> used(pcs.size(), false);
+            int clusters = 0, biomeMiss = 0;
+            for (size_t i = 0; i < pcs.size(); ++i) {
+                if (used[i]) continue;
+                int n = 0, sx = 0, sz = 0;
+                for (size_t j = i; j < pcs.size(); ++j)
+                    if (!used[j] && std::abs(pcs[j].x - pcs[i].x) <= 6
+                                  && std::abs(pcs[j].z - pcs[i].z) <= 6) {
+                        used[j] = true; ++n; sx += pcs[j].x; sz += pcs[j].z;
+                    }
+                if (n != 4) continue; // 残簇（峡谷切塔等，净样口径同 P-t1003）→ 数目对账腿兜红
+                ++clusters;
+                if (wV.biomeIdAt(sx / 4, sz / 4) != 2) ++biomeMiss; // 簇心群系核（Desert=2）
+            }
+            const bool cOk = clusters == firstDesertRec.desertT && biomeMiss == 0;
+            ok = ok && cOk;
+            if (!cOk)
+                qInfo().noquote() << "  [t1010 diag] desert block-count mismatch: clusters" << clusters
+                                  << "vs log" << firstDesertRec.desertT << "biomeMiss" << biomeMiss;
+        }
+        if (firstJungleSeed != 0) {
+            World wV;
+            wV.setWidth(160); wV.setDepth(160); wV.setHeight(128); wV.setSeed(int(firstJungleSeed));
+            int doors = 0, biomeMiss = 0;
+            for (int x = 0; x < wV.width(); ++x)
+                for (int z = 0; z < wV.depth(); ++z)
+                    for (int y = 50; y <= 80; ++y) // 丛林门下格 y = S+1 ∈ [60,70]；要塞监狱门 y≤30 天然分离
+                        if (wV.blockAt(x, y, z) == BR::IronDoor && wV.stateAt(x, y, z) == 0) {
+                            ++doors; // 每座丛林神殿恰 1 下格门（state 0；上格 0x08 不计）
+                            if (wV.biomeIdAt(x - 3, z) != 6) ++biomeMiss; // 门心群系核（cx=x-3，Jungle=6）
+                        }
+            const bool cOk = doors == firstJungleRec.jungleT && biomeMiss == 0;
+            ok = ok && cOk;
+            if (!cOk)
+                qInfo().noquote() << "  [t1010 diag] jungle block-count mismatch: doors" << doors
+                                  << "vs log" << firstJungleRec.jungleT << "biomeMiss" << biomeMiss;
+        }
+        // (d) 确定性腿：同 seed 二次独立构 World → 自报四元组逐项相等。
+        if (firstDesertSeed != 0) {
+            std::vector<GenRecT1010> frames2;
+            s_sinkT1010 = &frames2;
+            World wD;
+            wD.setWidth(160); wD.setDepth(160); wD.setHeight(128); wD.setSeed(int(firstDesertSeed));
+            s_sinkT1010 = nullptr;
+            const GenRecT1010 rec2 = frames2.empty() ? GenRecT1010{} : frames2.back();
+            const bool dOk = rec2.desertCols == firstDesertRec.desertCols
+                             && rec2.jungleCols == firstDesertRec.jungleCols
+                             && rec2.desertT == firstDesertRec.desertT
+                             && rec2.jungleT == firstDesertRec.jungleT;
+            ok = ok && dOk;
+            if (!dOk)
+                qInfo().noquote() << "  [t1010 diag] determinism drift on seed" << firstDesertSeed
+                                  << ":" << rec2.desertCols << rec2.jungleCols << rec2.desertT
+                                  << rec2.jungleT << "vs" << firstDesertRec.desertCols
+                                  << firstDesertRec.jungleCols << firstDesertRec.desertT
+                                  << firstDesertRec.jungleT;
+        }
+        qInstallMessageHandler(s_prevHandlerT1010); // 卸钩（其余探针 worldgen 行恢复原样）
+        // (e) 源码钉（world.cpp）：保底旗 / 保底入口 / siteOk 收口。
+        {
+            const QString exeDirT1010 = QCoreApplication::applicationDirPath();
+            const QString rootT1010 = QDir(exeDirT1010 + QStringLiteral("/..")).absolutePath();
+            QFile fT1010(rootT1010 + QStringLiteral("/src/World/world.cpp"));
+            const QString src = fT1010.open(QIODevice::ReadOnly) ? QString::fromUtf8(fT1010.readAll()) : QString();
+            const bool okPin =
+                src.contains(QStringLiteral("constexpr bool kDesertBiomeGuarantee = true;"))
+                && src.contains(QStringLiteral("constexpr bool kJungleBiomeGuarantee = true;"))
+                && src.contains(QStringLiteral("if (placed == 0 && kDesertBiomeGuarantee) {"))
+                && src.contains(QStringLiteral("if (placed == 0 && kJungleBiomeGuarantee) {"))
+                && src.contains(QStringLiteral("auto siteOk = [&](int cx, int cz) {"));
+            ok = ok && okPin;
+            if (!okPin)
+                qInfo().noquote() << "  [t1010 diag] source pins drifted (guarantee flags / siteOk)";
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1010 desert/jungle temple wild-generation rate: biome-presence implies"
+                             " >=1 temple per seed (stronghold-style nearest-center fallback when"
+                             " probabilistic grid lands 0), 32-seed full-scan log-captured counts with"
+                             " block-level cross-check, determinism re-gen, source pins, desert seeds"
+                          << seedsWithDesert << "jungle seeds" << seedsWithJungle << "desert temples"
+                          << desertTemplesTotal << "jungle temples" << jungleTemplesTotal
+                          << "zero-with-biome seeds" << (desert0Seeds + jungle0Seeds);
     }
 
     // ── P-t1006 生物复制体未愈探针（R19.20 首项；用户 f6e9a51 实测「进场即有静止贴图生物 + 随时间无限
