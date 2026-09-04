@@ -7688,41 +7688,69 @@ void World::placeDesertTemple()
     qInfo() << "worldgen: desert temples =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
-// t486 丛林神殿（见 world.h 头注释）。机制等价 MC 1.0 丛林神殿 jungle temple：丛林地表的苔石建筑 + 内部走廊 +
-//   发射器陷阱（踩压力板 → 邻接发射器射箭，无红石用 dispenser 直接触发）+ 宝藏箱。确定性散布
-//   （hashColumn + seed 偏移，PLAN §2-K）。
+// t486/t1004 丛林神殿（见 world.h 头注释）。机制等价 MC 1.0 丛林神殿 jungle temple：丛林地表的三层苔石
+//   建筑 + 发射器箭陷阱 + 拉杆谜题藏宝。确定性散布（hashColumn + seed 偏移，PLAN §2-K）。
 //
-//   结构几何（中心 (cx,surfaceY,cz)，surfaceY = 丛林草顶 heightAt；floorY = surfaceY，建筑坐于地表）：
-//     A) 苔石平台地板（floorY）：[-half, +half]² × 1 层 MossyCobble（覆盖草 / 土 / 石，不动 Bedrock）→
-//        建筑坐于平整苔石基座（spec「苔石建筑」）。
-//     B) 苔石围墙 + 天花板：围墙 = 外圈 (|dx|==half 或 |dz|==half) y∈[floorY+1 .. floorY+3]（3 高）MossyCobble；
-//        +X 墙中央 (dz=0) 留 2 高入口（floorY+1/floorY+2 不放墙 → 玩家可走入）；天花板 = y=floorY+4 全 [-half,+half]²
-//        MossyCobble（封顶无天光 → 内部黑暗，机制等价 MC 神殿阴暗环境）。不动 Bedrock。
-//     C) 内部空气（floorY+1 .. floorY+3 × [-half+1, +half-1]²）：清空气成 9×9×3 走廊（覆盖原土/石 → 干净室内）。
-//        + 顶上一格 (floorY+5) 清空气 → 屋顶不被地表 / 树叶埋（肉眼可见苔石顶）。
-//     D) 发射器陷阱（走廊两侧石壁嵌 Dispenser + 走廊地板 CobblePressurePlate）：
-//        - Dispenser 嵌入 ±Z 围墙（dz=±half，替换底部墙块 y=floorY+1），朝走廊中央（±Z 侧分别朝 ∓Z）；
-//          state 编码朝向（+Z 侧 dispenser 朝 -Z = state 3 / -Z 侧 dispenser 朝 +Z = state 2，同 chest/furnace 编码）。
-//        - CobblePressurePlate 置 Dispenser 朝向的相邻走廊格（dz=±(half-1)）y=floorY+1（玩家踩板 →
-//          playercontroller scanDispenserTraps 扫 footprint 查压力板的 4 水平邻格之一 == Dispenser → spawnArrow
-//          朝压力板方向射箭，机制等价 MC 1.0 丛林神殿发射器陷阱；无红石故「踩板直接触发」）。
-//        - 走廊纵深放 2 组（dx=-1 / dx=+1），玩家走入触发两次 → 多波箭雨（机制等价 MC 丛林神殿多发射器）。
-//     E) 宝藏箱（走廊尽头 -X 端 (dx=-(half-1), dz=0)，y=floorY+1）：带 ChestStateJungleFlag bit5 标记 →
-//        isJungleTempleChest 返 true → Main.qml.openChest 首开填充 jungleTempleChestPool 战利品（骨头 / 腐肉 /
-//        铁 / 金 / 钻石 / 箭 / 附魔书等）。
+//   t1004 逐方块重建（对齐 minecraft.wiki Jungle pyramid/Structure 材料表 + 蓝图注记 + R19.19 批头清单；
+//   子页逐格网格为图片化表格未能机器转换，缺口按材料表 + 机制知识设计并如实登记；层区间 -3..10 的地下
+//   基座层省略 —— 两箱置于地表层【登记】）：
 //
-//   placeDesertTemple 之后、fillWater 之前（仅 Jungle 群系 → 与海 / 湖独立；fillWater 仅填海域低洼，丛林内陆不被
-//   灌水）。纯函数于 seed + biomeAt（经 hashColumn / hashVoxel）→ 同 seed 同神殿分布（PLAN §2-K）。仅扫候选丛林
-//   格 → 不全图扫描。
+//   结构几何（中心 (cx,surfaceY,cz)，surfaceY = 丛林草顶 heightAt，floorY = surfaceY；footprint 15×15 半边 7，
+//   三层形制：地面层内空 y∈[S+1,S+3] + 楼板 S+4 / 二层内空 S+5..S+7 + 楼板 S+8 / 三层 11×11（半边 5）内空
+//   y∈[S+9,S+10] + 屋顶 S+11）：
+//     A) 苔石混排（偏差口径：Cobble/MossyCobble 逐格 hash 40% 苔，机制等价 MC「cobblestone or mossy」
+//        材料行）：地板 y=S 全幅 + 周界墙（|dx|=7 / |dz|=7，y S+1..S+3 / S+5..S+7）+ 楼板 S+4 / S+8 +
+//        屋顶 S+11 + 隔断 / 龛墙 / 电路支座同族。
+//     B) 地面布局：西入口（-X 墙 dz=0，2 高）；陷阱走廊（dz∈[-1,1]，dx∈[-6,-2]，北隔断 dz=-2 全高 /
+//        南隔断 dz=2 dx∈[-6,-4]）；宝藏龛（dx∈[4,6], dz∈[-1,1]，墙 = x=3 列 dz∈[-2,1] + dz=±2 行 dx∈[4,6]，
+//        角格 (3,·,2) 由组合锁汇流红石线封角）；西北侧室（dx∈[-6,-4], dz∈[-6,-4]，隔断 dz=-3 dx∈[-6,-4]
+//        留 dx=-5 门洞 + dx=-3 列 dz∈[-6,-3]）。
+//     C) 发射器陷阱 2 组（【偏差登记：MC 绊线钩+线 → 压力板触发】；「箭 2-14 发」编码于 dispenser state
+//        bit[5:2]，运行期陷阱路径恒有箭为既登记行为，state 供考据读数）：
+//        - 走廊中段（dx=-4）：±Z 侧隔断嵌 Dispenser 朝走廊（state 低 2 位 = 2(+Z)/3(-Z)）+ 走廊地板
+//          CobblePressurePlate (dx=-4, dz=±1) —— 踩板 4 水平邻发射器 → scanDispenserTraps 射箭。
+//        - 转角箱前（西北侧室北墙）：Dispenser (-5/-4, S+1, -7) 朝 +Z + 板 (-5/-4, S+1, -6)。
+//     D) 拉杆谜题（【偏差登记：MC 3 拉杆 + 粘性活塞门 → 项目无活塞：三拉杆红石 AND 门 + IronDoor；
+//        MC 谜题墙 3 刻纹石砖 → 3 拉杆底座 StoneBrick】【登记：MC 正确组合逐 seed 随机 → 本工程固定
+//        全 ON 唯一组合】；布局受两条件约束——t869 粉形状输出语义（dot 粉 / 贯穿直线侧向不供电，供电走
+//        「臂粉开放端 / 线端延长端 / 真实源直供」）+ 接收器 6 邻直读无形状（通电粉不得贴门格））：
+//        南墙 3 拉杆（x=-3/0/+3，y=S+2，dz=6，附着 +Z 墙）→ 双粉支线（dz=5/4，dz=4 粉持 +Z 臂 →
+//        形状输出指 +Z 侧）→ B 块（dz=3；拉杆 ON 直供 + 臂粉所指，两输入共挂）→ 侧附红石火把 NOT
+//        （dz=2，附着 B 块）→ 汇流红石线（dz=1，x∈[-3,2]）+ 拐角粉 (2,dz=2)（3 号火把 -X 侧馈入）→
+//        线端（x=2）+X 开放端直指终 NOT 座 B_m（3,dz=1，龛西墙格；贴邻 3 号火把常亮亦馈——两路均为
+//        「非全 ON」信号）→ 终级 NOT 火把（4,dz=1，附 -X 邻 B_m）→ 门侧红石粉（4,S+2,dz=0，与门保持
+//        1 格，6 邻直供）→ IronDoor（x=3 列 dz=0，2 格，仅红石驱动开合 t722）。红石拓扑 = 3 输入 AND
+//        （NOT-NOR-NOT）：恰全 ON 组合开门，其余 7 组合恒闭 —— 粉电平变化回插脏集 + 火把自回插桥接
+//        粉岛，约 5 tick 收敛（确定性方块事件链）。
+//     E) 宝藏箱 2 只（ChestStateJungleFlag bit5 → isJungleTempleChest 首开填充 jungleTempleChestPool）：
+//        主箱（谜题后龛内 dx=6, dz=0，朝 -X）+ 侧箱（西北侧室角 dx=-6, dz=-6，朝 +X）。
+//     F) 垂直交通：CobbleStairs 双跑（地面→二层 dz=-5 列 x=-1..2；二层→三层 dz=-4 列 x=1..4，末阶嵌
+//        楼板开口齐平）。蛛网 6 处定角装饰。
+//
+//   placeDesertTemple 之后、fillWater 之前（仅 Jungle 群系 → 与海 / 湖独立；fillWater 仅填海域低洼，丛林内陆
+//   不被灌水）。纯函数于 seed + biomeAt（经 hashColumn / hashVoxel）→ 同 seed 同神殿分布（PLAN §2-K）。
+//   仅扫候选丛林格 → 不全图扫描。**宝藏箱内容**：Chest 物品存 ChestStore，首开填充由 isJungleTempleChest
+//   判定 → jungleTempleChestPool（骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 / 附魔书等）。
 void World::placeJungleTemple()
 {
-    constexpr int kTempleGrid     = 40;     // 候选网格间距（略密于沙漠神殿 48 → 丛林群系本身较稀有，补偿密度使神殿可被发现）
-    constexpr unsigned kTemplePct = 50u;    // 候选命中概率（仅丛林候选 → 已天然稀有；50% 命中 → 160×160 世界约 1-2 座神殿，spec「低频」）
-    constexpr int kHalf           = 5;      // 建筑外圈半边（11×11 = (2*5+1)² 外圈；9×9 内部 = (2*4+1)²）
-    constexpr int kWallH          = 3;      // 围墙高度（内部空气层数 y∈[floorY+1 .. floorY+3]）
-    constexpr int kBedrockTop     = 4;      // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft / placeDesertTemple）
-    // 留边界（外圈半边 5 + 抖动余量 → 半径 ≤ 6 不越界）。
+    constexpr int kTempleGrid     = 40;     // 候选网格间距（略密于沙漠神殿 48 → 丛林群系本身较稀有，补偿密度）
+    constexpr unsigned kTemplePct = 50u;    // 候选命中概率（仅丛林候选 → 已天然稀有；spec「低频」）
+    constexpr int kHalf           = 7;      // 建筑外圈半边（15×15 = (2*7+1)²；内空 [-6,6]²）
+    constexpr int kRoofLift       = 12;     // 屋顶相对地表抬升（y=S+11；三层形制总高）
+    constexpr int kMossyPct       = 40u;    // 苔石混排苔占比（逐格 hash；机制等价 MC「cobble or mossy」）
+    constexpr int kBedrockTop     = 4;      // 不动基岩顶（同 carveCaves / placeDungeons / placeDesertTemple）
+    // 留边界（外圈半边 7 + 抖动余量 → 半径 ≤ 8 不越界）。
     constexpr int kMargin = kHalf + 1;
+
+    // t1004 组合锁电路局部坐标（dz 行；全 circuit 位于南半场，门在 x=3 列 dz=0）。
+    //   拉杆 x ∈ {-3, 0, +3}（y=S+2，dz=6，附 +Z 墙）；支线双粉 dz=5/4；B 块 dz=3；NOT 火把 dz=2；
+    //   汇流粉 dz=1（x∈[-3,2]）+ 拐角粉 (2,dz=2)；B_m (3, dz=1，龛西墙格)；终 NOT 火把 (4, dz=1)；
+    //   门侧粉 (4, S+2, dz=0)。
+    static const int kLevers[3] = { -3, 0, 3 };
+    // 汇流线平衡态（三 NOT 火把常亮馈电；state = conn<<4 | power：源邻 15，逐粉衰减 14；x=2 格持
+    //   Nx+Pz 双臂）。拐角粉 (2,dz=2) 恒 0x2F（Nz 臂 + 3 号火把直馈 15）。
+    static const quint8 kMergeStates[6] = { 0x1F, 0x3E, 0x3E, 0x3F, 0x3E, 0x6E };
+    static const quint8 kMergeElbowState = 0x2F;
 
     int placed = 0;
     const int templeSeed = m_seed + 22617; // 丛林神殿哈希偏移（与其它 worldgen hashColumn 解耦）
@@ -7736,130 +7764,183 @@ void World::placeJungleTemple()
             const int cx = bx + jx, cz = bz + jz;
             if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
                 continue; // 留 margin 边界（建筑半径 ≤ margin 不越界）
-            // 仅 Jungle 群系（spec「丛林群系生成」；biomeAt 收口单一权威）。非丛林 → 跳过（不在草原 / 森林 / 沙漠生神殿）。
+            // 仅 Jungle 群系（spec「丛林群系生成」；biomeAt 收口单一权威）。非丛林 → 跳过。
             if (biomeAt(cx, cz) != Biome::Jungle) continue;
             if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠神殿（避免与海水柱冲突）
             const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
-            const int floorY = surfaceY;            // 苔石地板 = 地表草顶（建筑坐于地表）
-            const int ceilY = floorY + kWallH + 1;  // 天花板 y（内部空气顶 + 1 = floorY+4）
-            if (floorY < kBedrockTop + 1) continue; // 地板太低（贴基岩）→ 跳过
-            if (ceilY >= m_height - 1) continue;    // 几何保护（surfaceY 异常高时防越界，留 1 格顶上清空气）
+            if (surfaceY + kRoofLift >= m_height) continue; // 屋顶越界保护（surfaceY 异常高防溢出）
+            if (surfaceY < kBedrockTop + 1) continue;       // 地板贴基岩 → 跳过
 
-            // A) 苔石平台地板（floorY）：[-half, +half]² × 1 层 MossyCobble（不动 Bedrock）。
-            for (int dx = -kHalf; dx <= kHalf; ++dx) {
+            // 单格写入辅助（越界 / 基岩守卫；与 placeDesertTemple 同模式）。
+            auto put = [&](int px, int yy, int pz, quint8 id, quint8 state = 0) {
+                if (px < 0 || px >= m_width || yy < 0 || yy >= m_height
+                    || pz < 0 || pz >= m_depth) return;
+                if (m_chunks.blockAt(px, yy, pz) == BlockRegistry::Bedrock) return; // 不动基岩
+                m_chunks.setBlock(px, yy, pz, id, state);
+            };
+            auto carveAir = [&](int px, int yy, int pz) {
+                if (px < 0 || px >= m_width || yy < 0 || yy >= m_height
+                    || pz < 0 || pz >= m_depth) return;
+                if (m_chunks.blockAt(px, yy, pz) == BlockRegistry::Bedrock) return;
+                m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
+            };
+            // 苔石混排（逐格 hash 40% 苔 —— 机制等价 MC 材料行「cobblestone or mossy cobblestone」）。
+            auto mixPut = [&](int px, int yy, int pz) {
+                const bool mossy = (hashVoxel(templeSeed ^ 0x9E37u, px, yy, pz) % 100u) < kMossyPct;
+                put(px, yy, pz, mossy ? BlockRegistry::MossyCobble : BlockRegistry::Cobble);
+            };
+
+            // ── A) 地板 y=S（全幅 15×15 混排；建筑坐于地表）。
+            for (int dx = -kHalf; dx <= kHalf; ++dx)
+                for (int dz = -kHalf; dz <= kHalf; ++dz)
+                    mixPut(cx + dx, surfaceY, cz + dz);
+
+            // ── B) 内空清场：地面层 [-6,6]²×[S+1,S+3] / 二层 [-6,6]²×[S+5,S+7] / 三层 [-4,4]²×[S+9,S+10]。
+            for (int dy = 1; dy <= 3; ++dy) {
+                for (int dx = -6; dx <= 6; ++dx)
+                    for (int dz = -6; dz <= 6; ++dz) {
+                        carveAir(cx + dx, surfaceY + dy, cz + dz);
+                        carveAir(cx + dx, surfaceY + dy + 4, cz + dz); // 二层（S+5..S+7）
+                    }
+            }
+            for (int dy = 9; dy <= 10; ++dy)
+                for (int dx = -4; dx <= 4; ++dx)
+                    for (int dz = -4; dz <= 4; ++dz)
+                        carveAir(cx + dx, surfaceY + dy, cz + dz);
+
+            // ── C) 周界墙（地面层 + 二层；西入口 -X 墙 dz=0 留 2 高门洞）。
+            for (int d = -kHalf; d <= kHalf; ++d) {
+                for (int sgn = -1; sgn <= 1; sgn += 2) {
+                    for (int dy = 1; dy <= 3; ++dy) {
+                        if (!(sgn == -1 && d == 0 && dy <= 2)) // -X 墙 dz=0 入口（2 高）
+                            mixPut(cx + sgn * kHalf, surfaceY + dy, cz + d);
+                        mixPut(cx + sgn * kHalf, surfaceY + dy + 4, cz + d); // 二层墙（S+5..S+7）
+                        mixPut(cx + d, surfaceY + dy, cz + sgn * kHalf);
+                        mixPut(cx + d, surfaceY + dy + 4, cz + sgn * kHalf);
+                    }
+                }
+            }
+            //   西入口门槛清障（-X 侧 dx=-7/-8 × dz=0 × 2 高切穿坡地：神殿坐于丛林斜坡时邻列地表高于
+            //   地板会埋住门洞；后置树干仍可能长入门洞 —— MC wiki 亦载「外部方块（树叶等）可能生成进
+            //   结构内部」，探针按净样口径弃样登记）。
+            for (int dx = -8; dx <= -7; ++dx)
+                for (int dy = 1; dy <= 2; ++dy)
+                    carveAir(cx + dx, surfaceY + dy, cz + 0);
+
+            // ── D) 隔断 / 龛墙 / 侧室（y S+1..S+3）。
+            for (int dy = 1; dy <= 3; ++dy) {
+                const int yy = surfaceY + dy;
+                for (int dx = -6; dx <= -2; ++dx) mixPut(cx + dx, yy, cz - 2); // 走廊北隔断
+                for (int dx = -6; dx <= -4; ++dx) mixPut(cx + dx, yy, cz + 2); // 走廊南隔断（短段）
+                for (int dz = -2; dz <= 1; ++dz) mixPut(cx + 3, yy, cz + dz);  // 宝藏龛西墙列（角格 dz=2 由汇流线封）
+                for (int dx = 4; dx <= 6; ++dx) {                              // 宝藏龛 ±Z 墙行
+                    mixPut(cx + dx, yy, cz - 2);
+                    mixPut(cx + dx, yy, cz + 2);
+                }
+                for (int dx = -6; dx <= -4; ++dx)                              // 西北侧室南隔断（dx=-5 留门洞）
+                    if (dx != -5) mixPut(cx + dx, yy, cz - 3);
+                for (int dz = -6; dz <= -3; ++dz) mixPut(cx - 3, yy, cz + dz); // 西北侧室东隔断列
+            }
+
+            // ── E) 楼板 / 三层墙 / 屋顶：S+4 / S+8 全幅 15×15（楼梯口嵌阶）；三层墙（|dx|=5 / |dz|=5，
+            //       y S+9..S+10，立于 S+8 楼板上）；屋顶 S+11 全幅 11×11。
+            for (int dx = -kHalf; dx <= kHalf; ++dx)
                 for (int dz = -kHalf; dz <= kHalf; ++dz) {
-                    const int px = cx + dx, pz = cz + dz;
-                    const quint8 cur = m_chunks.blockAt(px, floorY, pz);
-                    if (cur == BlockRegistry::Bedrock) continue;
-                    m_chunks.setBlock(px, floorY, pz, BlockRegistry::MossyCobble);
+                    if (!(dx == 2 && dz == -5)) mixPut(cx + dx, surfaceY + 4, cz + dz);
+                    if (!(dx == 4 && dz == -4)) mixPut(cx + dx, surfaceY + 8, cz + dz);
                 }
-            }
-
-            // B) 苔石围墙（外圈 y∈[floorY+1 .. floorY+3]）+ 天花板（y=ceilY）。
-            //    +X 墙中央 (dz=0) 留 2 高入口（floorY+1/floorY+2 不放墙 → 玩家可走入，机制等价 MC 神殿入口）。
-            for (int dy = 1; dy <= kWallH; ++dy) {
-                const int yy = floorY + dy;
-                if (yy >= m_height) break;
-                for (int d = -kHalf; d <= kHalf; ++d) {
-                    // -X / +X 墙（dx=±half），整列 dz；+X 墙 dz=0 留入口（dy<=2 不放）。
+            for (int d = -5; d <= 5; ++d)
+                for (int dy = 9; dy <= 10; ++dy)
                     for (int sgn = -1; sgn <= 1; sgn += 2) {
-                        const int px = cx + sgn * kHalf;
-                        if (sgn == 1 && d == 0 && dy <= 2) continue; // +X 墙 dz=0 入口（2 高）
-                        const quint8 cur = m_chunks.blockAt(px, yy, cz + d);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(px, yy, cz + d, BlockRegistry::MossyCobble);
+                        mixPut(cx + sgn * 5, surfaceY + dy, cz + d);
+                        mixPut(cx + d, surfaceY + dy, cz + sgn * 5);
                     }
-                    // -Z / +Z 墙（dz=±half），整行 dx。
-                    for (int sgn = -1; sgn <= 1; sgn += 2) {
-                        const int pz = cz + sgn * kHalf;
-                        const quint8 cur = m_chunks.blockAt(cx + d, yy, pz);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(cx + d, yy, pz, BlockRegistry::MossyCobble);
-                    }
-                }
-            }
-            // 天花板（y=ceilY，全 [-half,+half]² MossyCobble，封顶无天光）。
-            if (ceilY < m_height) {
-                for (int dx = -kHalf; dx <= kHalf; ++dx) {
-                    for (int dz = -kHalf; dz <= kHalf; ++dz) {
-                        const quint8 cur = m_chunks.blockAt(cx + dx, ceilY, cz + dz);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(cx + dx, ceilY, cz + dz, BlockRegistry::MossyCobble);
-                    }
-                }
+            for (int dx = -5; dx <= 5; ++dx)
+                for (int dz = -5; dz <= 5; ++dz)
+                    mixPut(cx + dx, surfaceY + 11, cz + dz);
+
+            // ── F) 垂直交通：CobbleStairs 双跑（state[1:0]=0 朝 +X 逐阶上行；末阶嵌楼板口齐平）。
+            for (int i = 0; i < 4; ++i) {
+                put(cx - 1 + i, surfaceY + 1 + i, cz - 5, BlockRegistry::CobbleStairs); // 地面 → 二层
+                put(cx + 1 + i, surfaceY + 5 + i, cz - 4, BlockRegistry::CobbleStairs); // 二层 → 三层
             }
 
-            // C) 内部空气（floorY+1 .. floorY+3 × [-half+1, +half-1]² = 9×9×3 走廊）+ 顶上 1 格清空气（屋顶可见）。
-            for (int dy = 1; dy <= kWallH; ++dy) {
-                const int yy = floorY + dy;
-                if (yy >= m_height) break;
-                for (int dx = -(kHalf - 1); dx <= (kHalf - 1); ++dx) {
-                    for (int dz = -(kHalf - 1); dz <= (kHalf - 1); ++dz) {
-                        const quint8 cur = m_chunks.blockAt(cx + dx, yy, cz + dz);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Air);
-                    }
-                }
+            // ── G) t1004 拉杆谜题（3 输入红石 AND 门 + IronDoor；电路拓扑见头注释 D 段）。布局受两条件
+            //   约束：(1) t869 粉形状输出语义——dot 粉 / 贯穿直线侧向不供电 → 支线双粉臂指 B 块、汇流线端
+            //   +X 开放端直指 B_m；(2) 接收器（铁门）6 邻直读无形状语义 → 通电粉不得贴门格 → 门侧粉退至
+            //   (4,S+2,dz=0)（带座），与门保持 1 格。
+            //   支座（混排）：支线双粉座 dz=5/4 + B 块座 dz=3（x=±3/0）、汇流粉座 dz=1（x∈[-3,2]）、
+            //   拐角粉座 (2,dz=2)、门侧粉座 (4,S+1,dz=0)；B_m 落龛西墙格 (3,S+2,dz=1)（座 = 墙体本身）。
+            for (const int lx : kLevers) {
+                mixPut(cx + lx, surfaceY + 1, cz + 5);
+                mixPut(cx + lx, surfaceY + 1, cz + 4);
+                mixPut(cx + lx, surfaceY + 1, cz + 3);
             }
-            if (ceilY + 1 < m_height) {
-                for (int dx = -kHalf; dx <= kHalf; ++dx) {
-                    for (int dz = -kHalf; dz <= kHalf; ++dz) {
-                        const quint8 cur = m_chunks.blockAt(cx + dx, ceilY + 1, cz + dz);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(cx + dx, ceilY + 1, cz + dz, BlockRegistry::Air);
-                    }
-                }
+            for (int mx = -3; mx <= 2; ++mx) mixPut(cx + mx, surfaceY + 1, cz + 1);
+            mixPut(cx + 2, surfaceY + 1, cz + 2);
+            mixPut(cx + 4, surfaceY + 1, cz + 0);
+            //   三支线双粉（dz=5/4，断电态）+ 三 B 块（dz=3；拉杆 ON 直供 B——真实源任意位供电——
+            //   臂粉形状输出同指 B；两输入共挂一块）。
+            for (const int lx : kLevers) {
+                put(cx + lx, surfaceY + 2, cz + 5, BlockRegistry::RedstoneDust, 0);
+                put(cx + lx, surfaceY + 2, cz + 4, BlockRegistry::RedstoneDust, 0);
+                put(cx + lx, surfaceY + 2, cz + 3, BlockRegistry::Cobble);
             }
+            //   三 NOT 火把（dz=2，附着 +Z 邻 B 块 = TorchOnPZ=4；常亮 ON）。
+            for (const int lx : kLevers)
+                put(cx + lx, surfaceY + 2, cz + 2, BlockRegistry::RedstoneTorch, 4);
+            //   汇流粉线（dz=1，x∈[-3,2]）+ 拐角粉 (2,dz=2)（3 号 NOT 火把 -X 侧馈入；
+            //   平衡态：三火把常亮，源邻 15 逐粉衰减 14；x=2 格持 Nx+Pz 双臂）。
+            for (int mx = -3; mx <= 2; ++mx)
+                put(cx + mx, surfaceY + 2, cz + 1, BlockRegistry::RedstoneDust, kMergeStates[mx + 3]);
+            put(cx + 2, surfaceY + 2, cz + 2, BlockRegistry::RedstoneDust, kMergeElbowState);
+            //   终 NOT：B_m (3,dz=1，龛西墙格；「非全 ON」双路信号——汇流线端 +X 开放端形状供电 + 贴邻
+            //   3 号火把常亮直供) + 熄灭态火把 (4,dz=1)（附着 -X 邻 B_m = TorchOnNX=1 | OffFlag 0x08）。
+            put(cx + 3, surfaceY + 2, cz + 1, BlockRegistry::Cobble);
+            put(cx + 4, surfaceY + 2, cz + 1, BlockRegistry::RedstoneTorch,
+                quint8(1 | BlockRegistry::RedstoneTorchStateOffFlag));
+            //   门侧粉（(4,S+2,dz=0)，断电态；亮时 6 邻直供铁门——接收器无形状语义；与门保持 1 格，
+            //   汇流粉任何残余电力都触不到门格）。
+            put(cx + 4, surfaceY + 2, cz + 0, BlockRegistry::RedstoneDust, 0);
+            //   三拉杆（y=S+2，dz=6，附 +Z 墙 = MechAttachOnPZ=3 → bit[3:1]=0x06；初态全 OFF）。
+            //   拉杆底座 3 格 StoneBrick（偏差登记：MC 谜题墙刻纹石砖 → 石砖底座）。
+            for (const int lx : kLevers) {
+                put(cx + lx, surfaceY + 2, cz + 7, BlockRegistry::StoneBrick);
+                put(cx + lx, surfaceY + 2, cz + 6, BlockRegistry::Lever, quint8(0x06));
+            }
+            //   IronDoor（x=3 列 dz=0，下格 state=0 朝 +X 合 / 上格 bit3；仅红石驱动开合 t722）。
+            put(cx + 3, surfaceY + 1, cz + 0, BlockRegistry::IronDoor, 0);
+            put(cx + 3, surfaceY + 2, cz + 0, BlockRegistry::IronDoor, 0x08);
 
-            // D) 发射器陷阱：走廊纵深 2 组（dx=-1 / dx=+1），每组 ±Z 两侧各一 Dispenser（嵌 ±Z 围墙 dz=±half，
-            //    y=floorY+1）+ 走廊地板 CobblePressurePlate（dz=±(half-1)，y=floorY+1，dispenser 朝向相邻格）。
-            //    dispenser state：+Z 侧（dz=+half）朝 -Z（state 3）/ -Z 侧（dz=-half）朝 +Z（state 2）
-            //    （chestFrontFace 编码 0=+X 1=-X 2=+Z 3=-Z）。
-            const int trapY = floorY + 1;
-            for (int tdx : {-1, 1}) {
-                // -Z 侧 dispenser（dz=-half）朝 +Z（state 2）+ 压力板（dz=-(half-1)）。
-                {
-                    const int px = cx + tdx, pz = cz - kHalf;
-                    if (trapY < m_height) {
-                        const quint8 cur = m_chunks.blockAt(px, trapY, pz);
-                        if (cur != BlockRegistry::Bedrock)
-                            m_chunks.setBlock(px, trapY, pz, BlockRegistry::Dispenser, /*state*/ 2);
-                    }
-                    const int ppz = cz - (kHalf - 1);
-                    if (trapY < m_height) {
-                        const quint8 cur = m_chunks.blockAt(px, trapY, ppz);
-                        if (cur == BlockRegistry::Air) // 仅空气格放（防覆盖已放宝藏箱）
-                            m_chunks.setBlock(px, trapY, ppz, BlockRegistry::CobblePressurePlate);
-                    }
-                }
-                // +Z 侧 dispenser（dz=+half）朝 -Z（state 3）+ 压力板（dz=+(half-1)）。
-                {
-                    const int px = cx + tdx, pz = cz + kHalf;
-                    if (trapY < m_height) {
-                        const quint8 cur = m_chunks.blockAt(px, trapY, pz);
-                        if (cur != BlockRegistry::Bedrock)
-                            m_chunks.setBlock(px, trapY, pz, BlockRegistry::Dispenser, /*state*/ 3);
-                    }
-                    const int ppz = cz + (kHalf - 1);
-                    if (trapY < m_height) {
-                        const quint8 cur = m_chunks.blockAt(px, trapY, ppz);
-                        if (cur == BlockRegistry::Air)
-                            m_chunks.setBlock(px, trapY, ppz, BlockRegistry::CobblePressurePlate);
-                    }
-                }
-            }
+            // ── H) 发射器陷阱 2 组（【偏差登记：绊线 → 压力板】；「箭 2-14 发」编码 state bit[5:2]）。
+            auto putTrap = [&](int px, int yy, int pz, quint8 facing) {
+                const quint8 ammo = quint8(2 + int(hashVoxel(templeSeed ^ 0xA2C0u, px, yy, pz) % 13)); // [2,14]
+                put(px, yy, pz, BlockRegistry::Dispenser, quint8(facing | (ammo << 2)));
+            };
+            //   走廊中段（dx=-4）：±Z 隔断嵌发射器朝走廊 + 走廊地板压力板。
+            putTrap(cx - 4, surfaceY + 1, cz - 2, 2); // 北侧朝 +Z（低 2 位编码，同 chestFrontFace）
+            putTrap(cx - 4, surfaceY + 1, cz + 2, 3); // 南侧朝 -Z
+            put(cx - 4, surfaceY + 1, cz - 1, BlockRegistry::CobblePressurePlate);
+            put(cx - 4, surfaceY + 1, cz + 1, BlockRegistry::CobblePressurePlate);
+            //   转角箱前（西北侧室北墙）：2 发射器朝 +Z + 2 压力板。
+            putTrap(cx - 5, surfaceY + 1, cz - 7, 2);
+            putTrap(cx - 4, surfaceY + 1, cz - 7, 2);
+            put(cx - 5, surfaceY + 1, cz - 6, BlockRegistry::CobblePressurePlate);
+            put(cx - 4, surfaceY + 1, cz - 6, BlockRegistry::CobblePressurePlate);
 
-            // E) 宝藏箱（走廊尽头 -X 端 dx=-(half-1), dz=0，y=floorY+1）：带 ChestStateJungleFlag 标记 → 首开填充
-            //    丛林神殿战利品。朝向低 2 位 = 0（chestFrontFace 兜底 NegZ；worldgen 不关心箱子朝向）。
-            {
-                const int px = cx - (kHalf - 1), pz = cz;
-                if (trapY < m_height) {
-                    const quint8 cur = m_chunks.blockAt(px, trapY, pz);
-                    if (cur != BlockRegistry::Bedrock) // 不动基岩（防御）
-                        m_chunks.setBlock(px, trapY, pz, BlockRegistry::Chest,
-                                          BlockRegistry::ChestStateJungleFlag);
-                }
-            }
+            // ── I) 宝藏箱 2 只（ChestStateJungleFlag → 首开填充丛林神殿战利品；低 2 位朝向）。
+            put(cx + 6, surfaceY + 1, cz + 0, BlockRegistry::Chest,
+                quint8(1 | BlockRegistry::ChestStateJungleFlag)); // 主箱（谜题龛内）朝 -X
+            put(cx - 6, surfaceY + 1, cz - 6, BlockRegistry::Chest,
+                quint8(1 | BlockRegistry::ChestStateJungleFlag)); // 侧箱（侧室角）朝 +X
+
+            // ── J) 蛛网 6 处定角装饰（机制等价 MC 丛林神殿阴暗角落蛛网观感）。
+            put(cx - 6, surfaceY + 3, cz - 6, BlockRegistry::Cobweb);
+            put(cx + 6, surfaceY + 3, cz + 6, BlockRegistry::Cobweb);
+            put(cx + 6, surfaceY + 7, cz - 6, BlockRegistry::Cobweb);
+            put(cx - 6, surfaceY + 7, cz + 6, BlockRegistry::Cobweb);
+            put(cx + 4, surfaceY + 10, cz + 4, BlockRegistry::Cobweb);
+            put(cx - 4, surfaceY + 10, cz - 4, BlockRegistry::Cobweb);
             ++placed;
         }
     }
