@@ -33634,13 +33634,167 @@ Item {
                         w.setBlock(x0 + dx, y + dy, z0 + dz, BR::Air, 0);
             tickN(w, 2);
         }
+
+        // ── t1005 加严 G「pool-full chain」（实体槽池打满下的链式引燃——「僵尸槽」假说复现面）──
+        //    假说（用户「部分 TNT 永续闪烁」的一种归因）：槽满时 spawn 路径产生「参与渲染但不被 tick」
+        //    的 primed 僵尸槽（alive 但引信永不归零）。本面把假说推到极限压力下证伪/坐实：
+        //    ① 槽压力前置：槽池先填 59 只羊（kCap=64 硬上限，t789 先例硬编码——spawn -1 即漂移响红；
+        //       封闭石栏内：防爆波波及（rig 位距 ≥22 > 半径 3）/ 防摔落伤（落地 0-1 格）/ 防游走出圈）；
+        //    ② 5 直供布局（复用 D 形态）点火 → 池恰满（59+5=64）→ 引爆波与链式 spawn 全程在满池压力
+        //       下跑（达 cap 路径 = spawnPrimedTnt 静默跳过：TNT 方块已被爆清 → 消失 ≠ 僵尸）；
+        //    ③ 满池前提钉：点火后补 spawn 必得 -1（若成功 = 64 上限前提漂移 → 响红，压力面失效）；
+        //    ④ 僵尸槽检测器：任一 isPrimedAt 槽的 fuseProgressAt 连续 30 帧（0.5s）逐位不变 = 不被 tick
+        //       的 primed 槽（正常路径 fuse 每帧 -=dt 必变；t997 重挂是跳变不是冻结；fuse 耗尽未爆的
+        //       永续 p==0 态同样判僵尸——正是用户症状的实体语义）；
+        //    ⑤ 检测器自检（防「永不出火的死检测器」假绿）：先 tick 数帧证 p 变化（不误报），再冻结
+        //       tick 读数 35 帧证必出火（不漏报）。
+        //    断言：filler 全成功 + 点火 sanity + 满池前提钉 + 有界收敛（零 primed + TNT 格全 Air +
+        //       120 帧滞回）+ 全程零僵尸槽。红 = 假说坐实（修实体侧）；绿 = 僵尸槽假说证伪（转渲染侧）。
+        {
+            const auto [bx0, bz0] = nextSlot(); // 羊栏 slot
+            const int byG = kRigY;
+            // 7×7 石台 + 2 高石墙（内部 5×5）。石台面（非 Grass）→ 羊不吃草不改地形。
+            for (int dx = -3; dx <= 3; ++dx)
+                for (int dz = -3; dz <= 3; ++dz) {
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(bx0 + dx, byG + dy, bz0 + dz, BR::Air, 0);
+                    w.setBlock(bx0 + dx, byG - 1, bz0 + dz, BR::Stone, 0); // 台面
+                    if (dx == -3 || dx == 3 || dz == -3 || dz == 3) {      // 2 高围墙
+                        w.setBlock(bx0 + dx, byG, bz0 + dz, BR::Stone, 0);
+                        w.setBlock(bx0 + dx, byG + 1, bz0 + dz, BR::Stone, 0);
+                    }
+                }
+            // ⑤ 检测器自检：spawn 1 primed → tick 数帧（p 必变，run 归零）→ 冻结 tick 读 35 帧（必出火）。
+            ents.spawnPrimedTnt(bx0 + 1, byG, bz0 + 1);
+            bool detTrips = false, detQuiet = true;
+            {
+                float pLast = -1.0f;
+                int run = 0;
+                for (int f = 0; f < 40 && !detTrips; ++f) {
+                    if (f < 5) // 前帧段照常 tick：证检测器不误报活动引信
+                        ents.tick(1.0 / 60.0, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                    float p = -1.0f;
+                    for (int i = 0; i < ents.count(); ++i)
+                        if (ents.isPrimedAt(i)) { p = ents.fuseProgressAt(i); break; }
+                    if (p < 0.0f) continue; // primed 已爆完（不应发生于 40 帧窗；防御）
+                    run = (p == pLast) ? run + 1 : 0;
+                    if (f >= 5 && run == 0) detQuiet = false; // 冻结段里 p 竟变了 = 自检失效
+                    pLast = p;
+                    if (run >= 30) detTrips = true; // 冻结 30 帧 → 检测器出火
+                }
+            }
+            ents.clearAll(); // 自检清场（池归零）再填 filler
+            // ① 槽压力前置：59 filler（64 硬上限硬编码，t789 先例；-1 = 上限漂移响红）。
+            int fillOk = 0;
+            for (int i = 0; i < 59; ++i)
+                if (ents.spawnMobTyped(bx0, byG, bz0, EntityManager::MobSheep,
+                                       QStringLiteral("#f5f0e8"), 10) >= 0) ++fillOk;
+            // ② TNT rig：复用 D「5-same-frame」形态（R 四水平 + 正上 5 直供 + 东向 2 纯链）。
+            const auto [gx0, gz0] = nextSlot();
+            const int gy = kRigY;
+            for (int dx = -4; dx <= 4; ++dx)
+                for (int dz = -4; dz <= 4; ++dz) {
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(gx0 + dx, gy + dy, gz0 + dz, BR::Air, 0);
+                    w.setBlock(gx0 + dx, gy - 1, gz0 + dz, BR::Stone, 0);
+                }
+            const T1005Rig &rigG = rigs1005[3];
+            placeRigBlock(w, gx0 + rigG.rs[0].dx, gy + rigG.rs[0].dy, gz0 + rigG.rs[0].dz,
+                          BR::RedstoneBlock, 0);
+            const QVector<TntCell> placedG = rigG.tnt;
+            for (const TntCell &c : placedG)
+                placeRigBlock(w, gx0 + c.dx, gy + c.dy, gz0 + c.dz, BR::TntBlock, 0);
+            // (a) 点火 sanity：≤6 红石 tick 内 primed 出现（59+5 → 池恰满 64）。
+            int primed0G = 0;
+            for (int t = 0; t < 6 && primed0G == 0; ++t) {
+                w.tickRedstone();
+                for (int i = 0; i < ents.count(); ++i)
+                    if (ents.isPrimedAt(i)) ++primed0G;
+            }
+            // ③ 满池前提钉：点火后补 spawn 必 -1（成功 = 64 上限前提漂移，压力面失效）。
+            const bool poolFullPinned = ents.spawnMobTyped(bx0, byG + 1, bz0,
+                                                           EntityManager::MobSheep,
+                                                           QStringLiteral("#f5f0e8"), 10) < 0;
+            // ④ 僵尸检测器状态表（槽 idx → 上次 fuseProgress / 冻结帧数；固定表免容器开销）。
+            float gLastP[512];
+            int gFrozen[512];
+            for (int i = 0; i < 512; ++i) { gLastP[i] = -1.0f; gFrozen[i] = 0; }
+            int zombieFrames = 0;
+            const auto detectZombies = [&]() {
+                const int n = ents.count();
+                for (int i = 0; i < n && i < 512; ++i) {
+                    if (!ents.isPrimedAt(i)) { gFrozen[i] = 0; gLastP[i] = -1.0f; continue; }
+                    const float p = ents.fuseProgressAt(i);
+                    if (p == gLastP[i]) {
+                        if (++gFrozen[i] >= 30) ++zombieFrames; // 冻结 0.5s = 不被 tick 的 primed 槽
+                    } else {
+                        gFrozen[i] = 0;
+                        gLastP[i] = p;
+                    }
+                }
+            };
+            // (b) 满池收敛推进：每帧实体 tick + 僵尸检测；settle 态（零 primed + TNT 格全 Air）
+            //     连续 120 帧（滞回同上）。
+            int settledRunG = 0, settleFrameG = -1, maxPrimedG = primed0G;
+            bool settledG = false;
+            const int kCapFramesG = 60 * 45;
+            for (int f = 0; f < kCapFramesG && !settledG; ++f) {
+                if (f % 6 == 0) w.tickRedstone();
+                ents.tick(1.0 / 60.0, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+                detectZombies();
+                int live = 0;
+                for (int i = 0; i < ents.count(); ++i)
+                    if (ents.isPrimedAt(i)) ++live;
+                maxPrimedG = qMax(maxPrimedG, live);
+                bool blocksGoneG = true;
+                for (const TntCell &c : placedG)
+                    if (w.blockAt(gx0 + c.dx, gy + c.dy, gz0 + c.dz) != BR::Air) { blocksGoneG = false; break; }
+                if (live == 0 && blocksGoneG) {
+                    if (++settledRunG >= 120) { settledG = true; settleFrameG = f; }
+                } else {
+                    settledRunG = 0;
+                }
+            }
+            // (c) 终态零残留核对。
+            int liveEndG = 0;
+            for (int i = 0; i < ents.count(); ++i)
+                if (ents.isPrimedAt(i)) ++liveEndG;
+            bool cellsAirG = true;
+            for (const TntCell &c : placedG)
+                if (w.blockAt(gx0 + c.dx, gy + c.dy, gz0 + c.dz) != BR::Air) cellsAirG = false;
+            const bool okG = fillOk == 59 && detTrips && detQuiet && primed0G > 0
+                             && poolFullPinned && settledG && liveEndG == 0 && cellsAirG
+                             && zombieFrames == 0;
+            if (!okG) {
+                ok1005 = false;
+                diag1005 += QStringLiteral("\n  [t1005 diag] pool-full G: fill=%1/59 detTrips=%2"
+                                           " detQuiet=%3 ignitePrimed=%4 poolFullPinned=%5"
+                                           " settled=%6 settleFrame=%7 liveEnd=%8 cellsAir=%9"
+                                           " maxPrimed=%10 zombieFrames=%11")
+                                .arg(fillOk).arg(detTrips).arg(detQuiet).arg(primed0G > 0)
+                                .arg(poolFullPinned).arg(settledG).arg(settleFrameG)
+                                .arg(liveEndG).arg(cellsAirG).arg(maxPrimedG).arg(zombieFrames);
+            }
+            // 清场（实体 + 羊栏 + TNT rig 全格，防跨探针污染）。
+            ents.clearAll();
+            for (int dx = -3; dx <= 3; ++dx)
+                for (int dz = -3; dz <= 3; ++dz)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(bx0 + dx, byG + dy, bz0 + dz, BR::Air, 0);
+            for (int dx = -4; dx <= 4; ++dx)
+                for (int dz = -4; dz <= 4; ++dz)
+                    for (int dy = -1; dy <= 2; ++dy)
+                        w.setBlock(gx0 + dx, gy + dy, gz0 + dz, BR::Air, 0);
+            tickN(w, 2);
+        }
         QObject::disconnect(tntFwd1005);
         if (!ok1005) ++totalFail;
         qInfo().noquote() << (ok1005 ? "PASS" : "FAIL")
                           << "| t1005 redstone-block adjacent multi-TNT chain ignition burns down:"
-                          << " 6 layouts (2x2 / 3x3 / 1x4 / 5-same-frame cluster over budget 4 /"
+                          << " 7 layouts (2x2 / 3x3 / 1x4 / 5-same-frame cluster over budget 4 /"
                           << " 8-direct dual-source 2-deep regroup / dust-fed 2x6 dense array"
-                          << " wave-1 power-cut)"
+                          << " wave-1 power-cut / pool-full 64-slot cap pressure with a"
+                          << " fuse-frozen zombie-slot detector + detector self-check)"
                           << " driven by the real consumer chain (tickRedstone -> powerTntTriggered"
                           << " -> firePowerTnt) with per-frame entity ticks (1/60s) + per-6-frame"
                           << " redstone ticks (100ms WorldClock topology) all settled to zero"
