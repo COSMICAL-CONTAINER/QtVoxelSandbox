@@ -407,6 +407,22 @@ Window {
         const ncx = window.worldChunksPerSide, ncz = window.worldChunksPerSide
         const frameMs = window.fps > 0 ? (1000.0 / window.fps) : 0.0
         const itemLive = itemEntities.liveCount(), mobLive = entityManager.liveCount(), orbLive = xpOrbs.liveCount()
+        // t1007 增补读数（全部 10Hz 普通 JS 读取，无 NOTIFY 绑定成本；t1005/t1006/t1007 三单共用的实机数据采集面）：
+        //   primedN = 存活 primed TNT 数（t1005：现场「永续闪烁」时 primed>0 = 引擎实体残留；==0 仍闪 =
+        //     呈现层 delegate 冻结实锤）。
+        //   mobHw / itemHw = 槽池高水位（会话历史峰值，clearAll 不重置）——重载后 live 归零而 hw 不变 =
+        //     上一世界确实到过的峰值（有界 ≤cap），判「引擎增长」vs「呈现层克隆」的基线。
+        //   delVis/delTot = mobHost 可见 delegate 数 / delegate 总数（与 mobs N 并排：delVis > mobLive =
+        //     呈现层克隆实锤；delTot = 槽数 × delegate 永不销毁设计恒等）。走视觉树 children 扫描（64 槽
+        //     ×10Hz 常数级），delegate 根以自有 mon 属性识别（mobBurnFlames 等子节点无 mon 不误计）。
+        const primedN = entityManager.primedCount()
+        const mobHw = entityManager.slotHighWater(), itemHw = itemEntities.liveHighWater()
+        let delVis = 0, delTot = 0
+        const mobKids = mobHost.children
+        for (let di = 0; di < mobKids.length; ++di) {
+            const dn = mobKids[di]
+            if (dn && typeof dn.mon !== "undefined") { ++delTot; if (dn.visible) ++delVis }
+        }
         // t857（R19.14）draw / 顶点 / pass 换 RenderStats 真值：View3D.renderStats 是 Quick3D 渲染后端
         //   逐帧统计（drawCallCount / drawVertexCount / renderPassCount / renderTime），替代旧 ~drawEst
         //   估算公式（visibleSegmentCount + itemLive + mobLive + torches + 6——那只是「应画 Model 数」的
@@ -469,8 +485,13 @@ Window {
              + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
              + "  render r=" + window.renderDistance + " window " + window.visibleChunkCount + "/" + (ncx * ncz)
              + "\nmesh: " + meshMode + "  terrain verts: " + vx + "  tris: " + tr + "  (built 地形段)"
-             + "\nentities: mobs " + mobLive + "/" + entityManager.count + "  items " + itemLive + "/" + itemEntities.count
+             // t1007 增补（口径见上方读取注释）：mobs 分母改钉引擎 kCap=64（旧 count=槽数 delegate 永不销毁
+             //   单调不降，读「12/47」会误读为「距满 35」）；hw=槽池高水位；primed=存活 primed TNT；
+             //   del=可见 delegate/总 delegate——delVis 与 mobLive 背离 = 呈现层克隆实锤（t1006 关单判据）。
+             + "\nentities: mobs " + mobLive + "/64 hw " + mobHw
+             + "  items " + itemLive + "/" + itemEntities.count + " hw " + itemHw
              + "  orbs " + orbLive + "/" + xpOrbs.count
+             + "  primed " + primedN + "  del " + delVis + "/" + delTot
              // t857 真值行：draw-calls / verts(已画) / passes / render ms 全部来自 RenderStats（非估算）。
              //   drawVertexCount 是「本帧实际画的顶点」（含视锥剔除 / 全部段与实体），区别上一行 mesh 的
              //   「地形段已建顶点」（t178-correctness.md:87 登记项随真值落地闭案：built 求和显式标注段域，

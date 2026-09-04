@@ -58,6 +58,11 @@ public:
     // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate visible=false
     //   不参与绘制）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
     Q_INVOKABLE int liveCount() const { return m_liveCount; }
+    // t1007：本会话活体高水位（历史 max(liveCount)；acquireSlot 更新）。**clearAll 不重置**——「重进存档」
+    //   重置的是活体集；高水位保留 = 上一世界确实到过的峰值（有界 ≤kCap=200，LRU 驱逐 + 5min despawn
+    //   双钳）。F3 与 items live/slots 并排（10Hz 普通 JS 读取）：live 高 + 逐 item 独立 geometry/材质实例
+    //   = draw-call 线性放大面；重载后 live 归零 hw 不变 = 峰值残留有界，非无限增长。
+    Q_INVOKABLE int liveHighWater() const { return m_liveHighWater; }
     // t256：第 i 个槽位是否活体。呈现层 delegate 据它 visible：空槽隐藏（slot 复用保 Repeater count
     //   单调不降、delegate 永不销毁）。越界 → false。pickupScan 也据此跳过空槽。
     Q_INVOKABLE bool aliveAt(int i) const;
@@ -265,6 +270,8 @@ private:
     //   均频繁 spawn/拾取，同族泄漏；slot 复用根治。高水位受 kCap(200) 钳制，与既有峰值并发同量级。
     std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
     int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
+    int m_liveHighWater = 0;      // t1007 本会话活体高水位（历史 max(m_liveCount)；acquireSlot 更新，
+                                  //   clearAll 不重置——跨重载判读面，见 liveHighWater() 注释）
 
     int acquireSlot(ItemEntity &&e)
     {
@@ -278,6 +285,8 @@ private:
             slot = int(m_entities.size()) - 1;
         }
         ++m_liveCount;
+        // t1007：高水位随占槽更新（历史峰值；clearAll 释放不回撤，见 liveHighWater() 注释）。
+        if (m_liveCount > m_liveHighWater) m_liveHighWater = m_liveCount;
         return slot;
     }
     void releaseSlot(int idx)
