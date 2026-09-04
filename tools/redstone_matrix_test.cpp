@@ -34955,6 +34955,329 @@ Item {
                           << worldsChecked << "seeds-miss" << seedMiss << "ravine-skipped" << ravineSkipped;
     }
 
+    // ── P-t1004 丛林神殿逐方块重建探针（R19.19 批 t1004；placeJungleTemple 三层 + 红石组合锁验收面）──
+    //    rig：t1003 同款 160×160×128 世界池（t307 地表基线 64 → 64 高 rig 塔顶守卫恒拒，见 P-t1003 注）+
+    //    28 seed 大池自举（缺神殿种子跳过不计），≥4 个含神殿世界且池内神殿 ≥5 座才判。
+    //    神殿定位 = 全图扫 IronDoor y≥50（丛林门立于地表 S+1≈62..68；要塞监狱门 y≤30 天然分离，worldgen
+    //    仅此两处生成铁门）→ cx = doorx-3, cz = doorz, S = heightAt(cx,cz)。断言九层：
+    //    (a) 三层形制：楼板 S+4 / S+8（15×15 混排）+ 屋顶 S+11（11×11）+ 地面/二层周界墙（|7|，高 3）+
+    //        三层墙（|5|，S+9..S+10）+ 西入口 2 高门洞（被坡地 / 后置树干堵塞 → 净样弃样）；
+    //        CobbleStairs 双跑 8 阶（dz=-5/-4 列嵌楼板齐平，硬判）；
+    //    (b) 苔石混排：建筑域 Cobble+MossyCobble 池化苔率窗 [25,55]%（hash 40% 期望）；
+    //    (c) 陷阱 2 组（【偏差登记：绊线→压力板】）：走廊中段 ±Z 对射（Dispenser (-4,S+1,±2) 朝走廊 +
+    //        板 (-4,S+1,±1)）+ 转角箱前（(-5/-4,S+1,-7) 朝 +Z + 板 (-5/-4,S+1,-6)）；4 发射器「箭 2-14 发」
+    //        state bit[5:2] ∈ [2,14]（考据读数编码）；
+    //    (d) 组合锁电路静态（3 Lever 全 OFF + StoneBrick 底座 3 + 支线双粉 6 断电 + B 块 3 + NOT 火把 3
+    //        常亮 state 4 + 汇流粉 6 平衡态 + 拐角粉 + 终 NOT 座 B_m（龛西墙格）+ 终 NOT 火把熄灭态 0x09 +
+    //        门侧粉断电 + IronDoor 2 格合（state 0 / 0x08））；
+    //    (e) 宝藏箱 2 只（(6,S+1,0) 谜题龛内 + (-6,S+1,-6) 侧室角；state = 朝向1|JungleFlag）+ 蛛网 6 定角；
+    //    (f) 行为级开门腿（8 组合 × 独立重生世界防火把熔断）：逐组合置 3 Lever（0x06|on）→ tickRedstone
+    //        收敛 → 恰组合 0b111（全 ON）IronDoor 两格 bit2 开，其余 7 组合恒闭 —— 确定性方块事件链；
+    //    (g) 确定性：首个净样神殿重生成 → 足迹域 stride-2 抽样 FNV 一致；
+    //    (h) 源码钉：拉杆 0x06 行 / 常亮火把 state 4 行 / 熄灭态火把行 / IronDoor 0x08 行 / 箭数 hash 行 /
+    //        苔率 kMossyPct 行 / 汇流平衡表行。
+    {
+        bool ok = true;
+        const quint32 seedsT1004[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u,
+                                       42u, 999u, 31337u, 2024u, 8675309u, 271828u, 314159u, 123456789u,
+                                       7u, 12345u, 54321u, 8888u, 111u, 2222u, 33333u, 555555u,
+                                       7777777u, 97531u, 13579u, 24680u };
+        const quint8 mergeExpect[6] = { 0x1F, 0x3E, 0x3E, 0x3F, 0x3E, 0x6E };
+        auto isCobbleFam = [](quint8 id) { return id == BR::Cobble || id == BR::MossyCobble; };
+        auto sampleHashT1004 = [](World &w, int cx, int cy, int cz) {
+            quint32 h = 0x811c9dc5u;
+            auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+            for (int dx = -8; dx <= 8; dx += 2)
+                for (int dz = -8; dz <= 8; dz += 2)
+                    for (int dy = 0; dy <= 12; ++dy) {
+                        step(quint32(w.blockAt(cx + dx, cy + dy, cz + dz)));
+                        step(quint32(w.stateAt(cx + dx, cy + dy, cz + dz)));
+                    }
+            h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15;
+            return h;
+        };
+        int worldsChecked = 0, templesTotal = 0, seedMiss = 0, ravineSkipped = 0;
+        bool haveFirst = false, behaviorDone = false;
+        quint32 firstSeed = 0, firstHash = 0;
+        int firstCx = 0, firstCy = 0, firstCz = 0;
+        for (quint32 sd : seedsT1004) {
+            if (worldsChecked >= 5) break;
+            World wT1004;
+            wT1004.setWidth(160);
+            wT1004.setDepth(160);
+            wT1004.setHeight(128); // t307 地表基线 64 → 世界高须 128（64 高 rig 恒拒，见 P-t1003 rig 注释）
+            wT1004.setSeed(int(sd)); // setter 内 generate() 全量 worldgen
+            // 全图扫 IronDoor y≥50 → 聚簇（同殿上下 2 格）。
+            struct JDoor { int x, y, z; };
+            std::vector<JDoor> jdoors;
+            for (int x = 0; x < wT1004.width(); ++x)
+                for (int z = 0; z < wT1004.depth(); ++z)
+                    for (int y = 50; y < wT1004.height(); ++y)
+                        if (wT1004.blockAt(x, y, z) == BR::IronDoor)
+                            jdoors.push_back({ x, y, z });
+            std::vector<bool> used(jdoors.size(), false);
+            int templesHere = 0;
+            for (size_t i = 0; i < jdoors.size(); ++i) {
+                if (used[i]) continue;
+                int cx = 0, cz = 0, pairs = 0;
+                for (size_t j = i; j < jdoors.size(); ++j) {
+                    if (used[j]) continue;
+                    if (std::abs(jdoors[j].x - jdoors[i].x) <= 1
+                        && std::abs(jdoors[j].z - jdoors[i].z) <= 1
+                        && std::abs(jdoors[j].y - jdoors[i].y) <= 2) {
+                        used[j] = true;
+                        ++pairs;
+                    }
+                }
+                if (pairs != 2) continue; // 残簇 → 弃
+                cx = jdoors[i].x - 3;     // 门在龛西墙列 x=+3
+                cz = jdoors[i].z;
+                // 主控收口修正：S 锚定**结构自身**（下层门 = S+1），不用 heightAt(cx,cz)——生成后
+                //   植被/坡度会改写地表高度（种子相关），heightAt 漂移一格即整体坐标系平移 = 静态腿
+                //   种子相关假红（424242/90210 两座净样神殿静默挂 static legs 的根因）。门簇是结构
+                //   固有锚点，读档/重生成同样成立。
+                const int S = jdoors[i].y - 1;
+                auto diagT = [&](const char *sec) {
+                    qInfo().noquote() << "  [t1004 diag] seed" << sd << "temple@" << cx << cz << "S" << S
+                                      << "section" << sec;
+                };
+                // (a) 三层形制净样门（峡谷切塔弃样，净样口径同 t995/t1001/t1003）。
+                bool shapeOk = true;
+                for (const int c : { -7, 7 }) {
+                    for (int dy : { 1, 3, 5, 7 }) {
+                        shapeOk = shapeOk && isCobbleFam(wT1004.blockAt(cx + c, S + dy, cz + 7))
+                                             && isCobbleFam(wT1004.blockAt(cx + c, S + dy, cz - 7))
+                                             && isCobbleFam(wT1004.blockAt(cx + 7, S + dy, cz + c))
+                                             && isCobbleFam(wT1004.blockAt(cx - 7, S + dy, cz + c));
+                    }
+                    shapeOk = shapeOk && isCobbleFam(wT1004.blockAt(cx + c, S + 4, cz + c))
+                                         && isCobbleFam(wT1004.blockAt(cx - c, S + 4, cz - c))
+                                         && isCobbleFam(wT1004.blockAt(cx + c, S + 8, cz - c))
+                                         && isCobbleFam(wT1004.blockAt(cx - c, S + 8, cz + c));
+                }
+                shapeOk = shapeOk && isCobbleFam(wT1004.blockAt(cx, S + 11, cz))
+                                     && isCobbleFam(wT1004.blockAt(cx + 5, S + 11, cz + 5))
+                                     && isCobbleFam(wT1004.blockAt(cx + 5, S + 10, cz))
+                                     && isCobbleFam(wT1004.blockAt(cx - 5, S + 10, cz))
+                                     && isCobbleFam(wT1004.blockAt(cx, S + 10, cz + 5))
+                                     && isCobbleFam(wT1004.blockAt(cx, S + 10, cz - 5));
+                if (!shapeOk) {
+                    ++ravineSkipped;
+                    diagT("shape broken (ravine?) -> sample discarded");
+                    continue;
+                }
+                ++templesHere;
+                // (a) 入口净样门 + 楼梯。入口 = 西墙 dz=0 两格气（worldgen 已 dx=-7/-8 切坡；后置树干
+                //     仍可能长入门洞 —— MC wiki 载「外部方块（树叶等）可生成进结构内部」→ 按净样口径
+                //     弃样登记，与峡谷切塔同桶）；楼梯 = 结构内定格，硬判。
+                const bool entranceOk = wT1004.blockAt(cx - 7, S + 1, cz) == BR::Air
+                                        && wT1004.blockAt(cx - 7, S + 2, cz) == BR::Air;
+                if (!entranceOk) {
+                    ++ravineSkipped;
+                    diagT("entrance blocked (slope/overgrowth) -> sample discarded");
+                    continue;
+                }
+                bool stairsOk = true;
+                for (int i = 0; i < 4; ++i) {
+                    stairsOk = stairsOk
+                        && wT1004.blockAt(cx - 1 + i, S + 1 + i, cz - 5) == BR::CobbleStairs
+                        && wT1004.blockAt(cx + 1 + i, S + 5 + i, cz - 4) == BR::CobbleStairs;
+                }
+                ok = ok && stairsOk;
+                // (b) 苔率池（建筑域 [±7]²×[S, S+11] 全族格）。
+                long famCobble = 0, famMossy = 0;
+                for (int dx = -7; dx <= 7; ++dx)
+                    for (int dz = -7; dz <= 7; ++dz)
+                        for (int dy = 0; dy <= 11; ++dy) {
+                            const quint8 b = wT1004.blockAt(cx + dx, S + dy, cz + dz);
+                            if (b == BR::Cobble) ++famCobble;
+                            else if (b == BR::MossyCobble) ++famMossy;
+                        }
+                const long famAll = famCobble + famMossy;
+                const bool mossOk = famAll >= 900
+                                    && famMossy * 100 >= famAll * 25 && famMossy * 100 <= famAll * 55;
+                ok = ok && mossOk;
+                // (c) 陷阱 2 组 + 箭数窗。
+                bool trapOk = true;
+                auto checkDisp = [&](int dx, int dy, int dz, int facing) {
+                    const quint8 id = wT1004.blockAt(cx + dx, S + dy, cz + dz);
+                    const quint8 st = wT1004.stateAt(cx + dx, S + dy, cz + dz);
+                    trapOk = trapOk && id == BR::Dispenser && (st & 3) == facing
+                             && int(st >> 2) >= 2 && int(st >> 2) <= 14;
+                };
+                checkDisp(-4, 1, -2, 2); // 走廊中段北（朝 +Z 入走廊）
+                checkDisp(-4, 1, 2, 3);  // 走廊中段南（朝 -Z）
+                checkDisp(-5, 1, -7, 2); // 转角箱前北墙 2 发射器
+                checkDisp(-4, 1, -7, 2);
+                trapOk = trapOk
+                    && wT1004.blockAt(cx - 4, S + 1, cz - 1) == BR::CobblePressurePlate
+                    && wT1004.blockAt(cx - 4, S + 1, cz + 1) == BR::CobblePressurePlate
+                    && wT1004.blockAt(cx - 5, S + 1, cz - 6) == BR::CobblePressurePlate
+                    && wT1004.blockAt(cx - 4, S + 1, cz - 6) == BR::CobblePressurePlate;
+                ok = ok && trapOk;
+                // (d) 组合锁电路静态。
+                bool lockOk = true;
+                for (const int lx : { -3, 0, 3 }) {
+                    lockOk = lockOk
+                        && wT1004.blockAt(cx + lx, S + 2, cz + 6) == BR::Lever
+                        && wT1004.stateAt(cx + lx, S + 2, cz + 6) == 0x06 // 附 +Z 墙、全 OFF
+                        && wT1004.blockAt(cx + lx, S + 2, cz + 7) == BR::StoneBrick
+                        && wT1004.blockAt(cx + lx, S + 2, cz + 5) == BR::RedstoneDust
+                        && wT1004.stateAt(cx + lx, S + 2, cz + 5) == 0
+                        && wT1004.blockAt(cx + lx, S + 2, cz + 4) == BR::RedstoneDust
+                        && wT1004.stateAt(cx + lx, S + 2, cz + 4) == 0
+                        && wT1004.blockAt(cx + lx, S + 2, cz + 3) == BR::Cobble // B 块（拉杆 / 火把共挂）
+                        && wT1004.blockAt(cx + lx, S + 2, cz + 2) == BR::RedstoneTorch
+                        && wT1004.stateAt(cx + lx, S + 2, cz + 2) == 4; // 常亮（附着 +Z）
+                    for (int dy = 1; dy <= 1; ++dy) {
+                        // 主控收口修正：座层只有 S+1（mixPut 三列支座）——S+2 层同格是粉尘/火把本体
+                        //   （worldgen put 落 surfaceY+2），旧 dy<=2 的家族检查把自家电路格判成缺座 = 全
+                        //   神殿系统性假红（424242/90210/5150 双殿四座全挂 static: lock 的根因）。
+                        lockOk = lockOk && isCobbleFam(wT1004.blockAt(cx + lx, S + dy, cz + 5))
+                                             && isCobbleFam(wT1004.blockAt(cx + lx, S + dy, cz + 4))
+                                             && isCobbleFam(wT1004.blockAt(cx + lx, S + dy, cz + 3));
+                    }
+                }
+                for (int mx = -3; mx <= 2; ++mx) {
+                    lockOk = lockOk
+                        && wT1004.blockAt(cx + mx, S + 2, cz + 1) == BR::RedstoneDust
+                        && wT1004.stateAt(cx + mx, S + 2, cz + 1) == mergeExpect[mx + 3]
+                        && isCobbleFam(wT1004.blockAt(cx + mx, S + 1, cz + 1));
+                }
+                lockOk = lockOk
+                    && wT1004.blockAt(cx + 2, S + 2, cz + 2) == BR::RedstoneDust
+                    && wT1004.stateAt(cx + 2, S + 2, cz + 2) == 0x2F // 拐角粉（3 号火把馈入）
+                    && isCobbleFam(wT1004.blockAt(cx + 2, S + 1, cz + 2))
+                    && wT1004.blockAt(cx + 3, S + 2, cz + 1) == BR::Cobble // B_m（龛西墙格）
+                    && wT1004.blockAt(cx + 4, S + 2, cz + 1) == BR::RedstoneTorch
+                    && wT1004.stateAt(cx + 4, S + 2, cz + 1) == 0x09 // 终 NOT 初始熄灭（TorchOnNX|OffFlag）
+                    && wT1004.blockAt(cx + 4, S + 2, cz + 0) == BR::RedstoneDust
+                    && wT1004.stateAt(cx + 4, S + 2, cz + 0) == 0
+                    && isCobbleFam(wT1004.blockAt(cx + 4, S + 1, cz + 0)) // 门侧粉座
+                    && wT1004.blockAt(cx + 3, S + 1, cz + 0) == BR::IronDoor
+                    && wT1004.stateAt(cx + 3, S + 1, cz + 0) == 0 // 合（下格）
+                    && wT1004.blockAt(cx + 3, S + 2, cz + 0) == BR::IronDoor
+                    && wT1004.stateAt(cx + 3, S + 2, cz + 0) == 0x08; // 上格
+                ok = ok && lockOk;
+                // (e) 宝藏箱 2 + 蛛网。
+                bool lootOk = wT1004.blockAt(cx + 6, S + 1, cz + 0) == BR::Chest
+                              && wT1004.stateAt(cx + 6, S + 1, cz + 0) == (BR::ChestStateJungleFlag | 1)
+                              && wT1004.blockAt(cx - 6, S + 1, cz - 6) == BR::Chest
+                              && wT1004.stateAt(cx - 6, S + 1, cz - 6) == (BR::ChestStateJungleFlag | 1);
+                int webs = 0;
+                for (const int dx : { -6, 6 }) {
+                    for (const int dz : { -6, 6 }) {
+                        if (wT1004.blockAt(cx + dx, S + 3, cz + dz) == BR::Cobweb) ++webs;
+                        if (wT1004.blockAt(cx + dx, S + 7, cz + dz) == BR::Cobweb) ++webs;
+                    }
+                    if (wT1004.blockAt(cx + 4, S + 10, cz + 4) == BR::Cobweb) ++webs;
+                    if (wT1004.blockAt(cx - 4, S + 10, cz - 4) == BR::Cobweb) ++webs;
+                }
+                lootOk = lootOk && webs >= 4;
+                ok = ok && lootOk;
+                if (!ok) {
+                    // 主控收口诊断（t1004 收口期）：static legs 是聚合腿，两座净样神殿（424242/90210）
+                    //   静默挂在这里——逐腿拆分定位（植被侵扰 / 坐标漂移 / 苔率越窗三类嫌疑）。
+                    if (!stairsOk) diagT("static: stairs");
+                    if (!mossOk)
+                        qInfo().noquote() << "  [t1004 diag] static: moss famAll" << famAll
+                                                          << "famMossy" << famMossy
+                                                          << "pct" << (famAll ? famMossy * 100 / famAll : -1);
+                    if (!trapOk) diagT("static: traps");
+                    if (!lockOk) diagT("static: lock");
+                    if (!lootOk) diagT("static: loot");
+                }
+                // (f) 行为级开门腿：首个净样神殿承担（8 组合 × 独立重生世界防熔断）。
+                if (!behaviorDone) {
+                    behaviorDone = true;
+                    firstSeed = sd;
+                    firstCx = cx;
+                    firstCy = S;
+                    firstCz = cz;
+                    bool comboOk = true;
+                    for (int combo = 0; combo < 8 && comboOk; ++combo) {
+                        World wB;
+                        wB.setWidth(160);
+                        wB.setDepth(160);
+                        wB.setHeight(128);
+                        wB.setSeed(int(sd)); // 独立重生：每组合全新熔断计时 + 初态
+                        if (wB.blockAt(cx + 3, S + 1, cz) != BR::IronDoor) { comboOk = false; break; }
+                        const int levers[3] = { -3, 0, 3 };
+                        for (int i = 0; i < 3; ++i) {
+                            const bool on = ((combo >> i) & 1) != 0;
+                            const quint8 want = quint8(0x06 | (on ? 1 : 0));
+                            if (on)
+                                wB.setBlock(cx + levers[i], S + 2, cz + 6, BR::Lever, want);
+                            // 全 OFF 组合与生成态一致（setBlock 同态早退）→ 只读回验。
+                            comboOk = comboOk
+                                && wB.stateAt(cx + levers[i], S + 2, cz + 6) == want;
+                        }
+                        for (int t = 0; t < 12 && comboOk; ++t) wB.tickRedstone(); // 确定性收敛（≤6 tick）
+                        const bool wantOpen = (combo == 7); // 唯一正确组合 = 全 ON
+                        const quint8 stLo = wB.stateAt(cx + 3, S + 1, cz);
+                        const quint8 stUp = wB.stateAt(cx + 3, S + 2, cz);
+                        comboOk = comboOk
+                            && ((stLo & 4) != 0) == wantOpen
+                            && ((stUp & 4) != 0) == wantOpen;
+                        if (!comboOk)
+                            qInfo().noquote() << "  [t1004 diag] combo" << combo << "lo" << stLo
+                                              << "up" << stUp << "(want open =" << wantOpen << ")";
+                    }
+                    ok = ok && comboOk;
+                }
+                if (!haveFirst) { // (g) 确定性基线
+                    haveFirst = true;
+                    firstHash = sampleHashT1004(wT1004, cx, S, cz);
+                }
+            }
+            templesTotal += templesHere;
+            if (templesHere == 0) { // 无（净样）神殿种子：跳过不计入有效世界
+                ++seedMiss;
+                qInfo().noquote() << "  [t1004 diag] seed" << sd << "no clean jungle temple (skipped)";
+                continue;
+            }
+            ++worldsChecked;
+        }
+        ok = ok && worldsChecked >= 4 && templesTotal >= 5 && behaviorDone; // 池化净样充足（阴性轮敏感）
+        if (haveFirst) { // (g) 同 seed 重生成 → 抽样 FNV 一致
+            World wR1004;
+            wR1004.setWidth(160);
+            wR1004.setDepth(160);
+            wR1004.setHeight(128);
+            wR1004.setSeed(int(firstSeed));
+            ok = ok && wR1004.blockAt(firstCx + 3, firstCy + 1, firstCz) == BR::IronDoor
+                 && sampleHashT1004(wR1004, firstCx, firstCy, firstCz) == firstHash;
+        }
+        // (h) 源码钉（world.cpp）：拉杆 / 火把 / 门 / 箭数 / 苔率 / 汇流平衡表。
+        {
+            const QString exeDirT1004 = QCoreApplication::applicationDirPath();
+            const QString rootT1004 = QDir(exeDirT1004 + QStringLiteral("/..")).absolutePath();
+            QFile fT1004(rootT1004 + QStringLiteral("/src/World/world.cpp"));
+            const QString src = fT1004.open(QIODevice::ReadOnly) ? QString::fromUtf8(fT1004.readAll()) : QString();
+            const bool okPin =
+                src.contains(QStringLiteral("put(cx + lx, surfaceY + 2, cz + 6, BlockRegistry::Lever, quint8(0x06));"))
+                && src.contains(QStringLiteral("put(cx + lx, surfaceY + 2, cz + 2, BlockRegistry::RedstoneTorch, 4);"))
+                && src.contains(QStringLiteral("quint8(1 | BlockRegistry::RedstoneTorchStateOffFlag));"))
+                && src.contains(QStringLiteral("put(cx + 3, surfaceY + 2, cz + 0, BlockRegistry::IronDoor, 0x08);"))
+                && src.contains(QStringLiteral("quint8(2 + int(hashVoxel(templeSeed ^ 0xA2C0u, px, yy, pz) % 13));"))
+                && src.contains(QStringLiteral("constexpr int kMossyPct       = 40u;"))
+                && src.contains(QStringLiteral("static const quint8 kMergeStates[6] = { 0x1F, 0x3E, 0x3E, 0x3F, 0x3E, 0x6E };"));
+            ok = ok && okPin;
+            if (!okPin)
+                qInfo().noquote() << "  [t1004 diag] source pins drifted (lever/torch/door/ammo/mossy/merge)";
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1004 jungle temple per-block rebuild: 3-story mossy-mixed cobble keep"
+                             "(15x15 two slabs + 11x11 top, pooled mossy window), dual dispenser arrow"
+                             "traps (corridor mid + corner-chest, ammo window 2-14 in state bits), 3-lever"
+                             "redstone AND combination lock (unique all-ON combo opens IronDoor behaviorally"
+                             "over 8 fresh-world combos, closed otherwise), 2 oriented jungle chests,"
+                             "stairs + webs, deterministic re-gen, source pins, temples" << templesTotal
+                          << "worlds" << worldsChecked << "seeds-miss" << seedMiss
+                          << "ravine-skipped" << ravineSkipped;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

@@ -1238,15 +1238,27 @@ private:
     void placeDesertTemple();
     // t486 丛林神殿（spec「丛林群系生成：苔石建筑 + 机关（绊线→发射器射箭，无红石用 dispenser 方块直接触发）
     //   + 宝藏箱」；机制等价 MC 1.0 丛林神殿 jungle temple）。placeDesertTemple 之后、fillWater 之前，**仅 Jungle
-    //   群系**（biomeAt == Jungle 守卫，spec「丛林群系生成」）确定性稀疏散布（grid 40，略密于沙漠神殿 48 补偿丛林群系
-    //   本身稀有；pct 50，spec「低频」→ 160×160 世界约 1-2 座）：选丛林中心点（hashColumn + seed 偏移，PLAN §2-K）→ 地表苔石建筑主体（MossyCobble 矩形围墙 +
-    //   顶板 + 地板，spec「苔石建筑」）→ 内部走廊（空气 + 苔石墙）→ 走廊内嵌 Dispenser 陷阱（发射器嵌入走廊石壁
-    //   朝向走廊中央 + 走廊地板 CobblePressurePlate 压力板；玩家踩板 → playercontroller tick 扫 footprint 触发
-    //   scanDispenserTraps → spawnArrow 朝压力板方向射箭，机制等价 MC 1.0 丛林神殿发射器陷阱；无红石系统故
-    //   「踩板直接触发」）→ 走廊尽头放 1 只带 ChestStateJungleFlag 标记的 Chest 宝藏箱。纯函数于 seed
-    //   （hashColumn / hashVoxel / biomeAt）→ 同 seed 同神殿分布（PLAN §2-K；确定性 + 不全图扫描，仅扫候选丛林格）。
-    //   **宝藏箱内容**：Chest 物品存 ChestStore，首开填充由 isJungleTempleChest 判定 → jungleTempleChestPool
-    //   （骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 / 附魔书等）。
+    //   群系**（biomeAt == Jungle 守卫）确定性稀疏散布（grid 40 / pct 50，spec「低频」）。t1004 逐方块重建（对齐
+    //   minecraft.wiki Jungle pyramid/Structure 材料表 + 蓝图注记；子页逐格网格图片化未能转换 → 缺口登记：地下基座
+    //   层省略、 vines 方块不存在未复刻）：选丛林中心点（hashColumn + seed 偏移，PLAN §2-K）→
+    //     A) 三层苔石混排建筑（15×15，逐格 hash 40% 苔 = MC「cobble or mossy」材料行）：地面层内空 S+1..S+3 +
+    //        楼板 S+4 / 二层内空 S+5..S+7 + 楼板 S+8 / 三层 11×11 内空 S+9..S+10 + 屋顶 S+11 →
+    //     B) 地面布局：西入口（2 高；门槛 dx=-7/-8 外切 2 格穿坡，防邻列地表埋门洞）；陷阱走廊（北隔断全高 / 南隔断短段）；宝藏龛（东端 3×3，IronDoor 封）；
+    //        西北侧室（隔断留门洞）→
+    //     C) 发射器陷阱 2 组（【偏差登记：MC 绊线钩+线 → CobblePressurePlate 压力板触发】；「箭 2-14 发」编码
+    //        dispenser state bit[5:2]，运行期陷阱路径恒有箭为既登记行为）：走廊中段 ±Z 对射 1 组 + 转角箱前 1 组
+    //        （踩板 4 水平邻发射器 → scanDispenserTraps 射箭，机制等价 MC 陷阱走廊）→
+    //     D) 拉杆谜题（【偏差登记：MC 3 拉杆 + 粘性活塞门 → 项目无活塞：3 Lever 红石 AND 门 + IronDoor（t722
+    //        仅红石驱动）；MC 刻纹石砖 → StoneBrick 底座；MC 组合逐 seed 随机 → 固定全 ON 唯一组合】：南墙 3 拉杆
+    //        → 双粉支线（t869 形状语义：臂粉开放端指 +Z 侧 B 块供电）→ B 块（拉杆直供 / 臂粉所指共挂）→ 侧附
+    //        红石火把 NOT → 汇流粉线 + 拐角粉 → 线端开放端直指终 NOT 座 B_m（龛西墙格）→ 终级 NOT → 门侧粉
+    //        （与门保持 1 格，通电粉不贴门格）6 邻直供 IronDoor；NOT-NOR-NOT 拓扑 = 3 输入 AND，恰全 ON 开门，
+    //        其余 7 组合恒闭；粉回插脏集 + 火把自回插桥接粉岛约 5 tick 确定性收敛）→
+    //     E) 宝藏箱 2 只（主箱谜题龛内 / 侧箱西北侧室角；ChestStateJungleFlag → isJungleTempleChest 首开填充
+    //        jungleTempleChestPool）→ F) CobbleStairs 双跑垂直交通 + 定角蛛网 6 处。
+    //   纯函数于 seed（hashColumn / hashVoxel / biomeAt）→ 同 seed 同神殿分布（PLAN §2-K；确定性 + 不全图扫描，
+    //   仅扫候选丛林格）。
+
     void placeJungleTemple();
     // t487 要塞（spec「地下深（Y<30）生成：石砖迷宫 + 末地传送门房（末地传送门方块 + 12 末影之眼激活 → 末地
     //   预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼」；机制等价 MC 1.0 要塞 stronghold）。
