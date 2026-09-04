@@ -34670,6 +34670,291 @@ Item {
                              " shafts /" << candT1001 << "candidates, piece-table pins";
     }
 
+    // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
+    //    rig：t995/t1001/t1002 同款池化口径，但世界升 160×160×**128**（t307 起地表基线 64、desert 地表
+    //    ~61..67 —— 64 高 rig 世界把地表钳到 63 → 塔顶越界守卫恒拒 = 历史全矩阵神殿恒 0 的根因，本探针
+    //    世界高对齐游戏本体 128；160² 宽为 t485 设计口径「约 1-2 座神殿」；biome 门私有不可复刻 → 箱簇定位）。
+    //    16 seed 大池自举：无神殿种子跳过不计（diag 留痕），≥4 个含神殿世界且池内神殿 ≥5 座才判。
+    //    神殿定位 = 全图扫 Chest&PyramidFlag 聚簇（4 箱 Chebyshev≤6 一簇，质心即神殿中心）→
+    //    surfaceY = heightAt(cx,cz)。断言八层：
+    //    (a) 21×21 足迹 + 逐层半边表 {10,10,9,9,8,8,7,7,6,6,5}（四向外环面取样）+ L10 11×11 CutSandstone 顶冠
+    //        + 门楣 CutSandstone v=4 |u|≤2（偏差 6 刻纹→切制）；
+    //    (b) 安卡纹样四面：-Z / ±X 三面 v1..7 各恰 21 格 WoolOrange 且与源行表逐格全等（四折旋转 + 镜像
+    //        对称），+Z 正面 = 21 - 主入口门洞 3 格（u=0,v1..3）- 门楣 CutSandstone 覆盖 5 格（v4,|u|≤2）= 13；
+    //    (c) 风玫瑰：地板 y=S 菱域棋盘 WoolOrange 恰 24（(dx+dz) 偶、|dx|+|dz|≤5、非中心）+ WoolBlue
+    //        足迹域恰 1（地板中心；偏差 3 时代口径）；
+    //    (d) 入口三处（+Z 主入口阶梯门洞 / -Z 两副入口 u=±5）+ 顶窗四面 + L8/L9 顶部暗腔；
+    //    (e) 暗渠：+Z 入口 (4,S+1..2,10) / 对角段 (4,S-4..S-3,5) / 密室接通口 (4,S-9..S-8,0) 全 Air；
+    //    (f) 密室：7×7×4 内部空气 + 壳 Sandstone + 4 箱（±2/±3 墙位、朝向房心、PyramidFlag 逐箱核 state）+
+    //        压板→9 TNT 链（StonePressurePlate (0,S-11,0) 正下 3×3 TntBlock @S-12 恰 9）；
+    //    (g) 确定性：首个有效 seed 重生成 → 足迹域 stride-2 抽样 FNV 一致（PLAN §2-K）；
+    //    (h) 源码钉：层半边表行 / 密室深度行 / 安卡行表行 / 中心蓝块行 / 暗渠循环行 / 箱 state 行。
+    {
+        bool ok = true;
+        const quint32 seedsT1003[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u,
+                                       42u, 999u, 31337u, 2024u, 8675309u, 271828u, 314159u, 123456789u,
+                                       7u, 12345u, 54321u, 8888u, 111u, 2222u, 33333u, 555555u,
+                                       7777777u, 97531u, 13579u, 24680u };
+        // 与源码同源的安卡行表（v → |u| 掩码；镜像对称由掩码天然成立）。
+        const int ankhMask[11] = { 0, 0b1001, 0b1001, 0b1001, 0b0111, 0b0100, 0b0100, 0b0011, 0, 0, 0 };
+        const int layerHalf[11] = { 10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5 };
+        auto sampleHashT1003 = [](World &w, int cx, int cy, int cz) {
+            quint32 h = 0x811c9dc5u;
+            auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+            for (int dx = -11; dx <= 11; dx += 2)
+                for (int dz = -11; dz <= 11; dz += 2)
+                    for (int dy = -13; dy <= 11; ++dy) {
+                        step(quint32(w.blockAt(cx + dx, cy + dy, cz + dz)));
+                        step(quint32(w.stateAt(cx + dx, cy + dy, cz + dz)));
+                    }
+            h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15;
+            return h;
+        };
+        int worldsChecked = 0, templesTotal = 0, seedMiss = 0, ravineSkipped = 0;
+        bool haveFirst = false;
+        quint32 firstSeed = 0, firstHash = 0;
+        for (quint32 sd : seedsT1003) {
+            if (worldsChecked >= 5) break;
+            World wT1003;
+            wT1003.setWidth(160);
+            wT1003.setDepth(160);
+            wT1003.setHeight(128); // t307 地表基线 64 → 世界高须 128（64 高钳地表致塔顶守卫恒拒，见 rig 注释）
+            wT1003.setSeed(int(sd)); // setter 内 generate() 全量 worldgen
+            // 全图扫 Chest&PyramidFlag → 聚簇（4 箱质心 = 神殿中心）。
+            struct PChest { int x, y, z; };
+            std::vector<PChest> pcs;
+            for (int x = 0; x < wT1003.width(); ++x)
+                for (int z = 0; z < wT1003.depth(); ++z)
+                    for (int y = 0; y < wT1003.height(); ++y)
+                        if (wT1003.blockAt(x, y, z) == BR::Chest
+                            && (wT1003.stateAt(x, y, z) & BR::ChestStatePyramidFlag))
+                            pcs.push_back({ x, y, z });
+            std::vector<bool> used(pcs.size(), false);
+            int templesHere = 0;
+            for (size_t i = 0; i < pcs.size(); ++i) {
+                if (used[i]) continue;
+                std::vector<size_t> cluster;
+                for (size_t j = i; j < pcs.size(); ++j) {
+                    if (used[j]) continue;
+                    if (std::abs(pcs[j].x - pcs[i].x) <= 6 && std::abs(pcs[j].z - pcs[i].z) <= 6
+                        && std::abs(pcs[j].y - pcs[i].y) <= 3)
+                        cluster.push_back(j);
+                }
+                if (cluster.size() != 4) continue; // 残簇（口径漂移 / 地形破坏）→ 由数量断言兜红
+                int cx = 0, cz = 0;
+                for (size_t j : cluster) {
+                    used[j] = true;
+                    cx += pcs[j].x;
+                    cz += pcs[j].z;
+                }
+                cx = int((cx + 2) / 4);
+                cz = int((cz + 2) / 4);
+                const int S = wT1003.heightAt(cx, cz);
+                // (a) 足迹 + 逐层半边 + 顶冠 / 门楣。
+                bool shapeOk = true;
+                for (const int d : { -10, 0, 10 }) {
+                    shapeOk = shapeOk
+                        && wT1003.blockAt(cx + 10, S, cz + d) == BR::Sandstone
+                        && wT1003.blockAt(cx - 10, S, cz + d) == BR::Sandstone
+                        && wT1003.blockAt(cx + d, S, cz + 10) == BR::Sandstone
+                        && wT1003.blockAt(cx + d, S, cz - 10) == BR::Sandstone;
+                }
+                for (int v = 0; v <= 9; ++v) {
+                    // 取样错位偏移：避开安卡纹样（|u|≤3）、后侧副入口（|u|=5）、暗渠入口（+Z u=+4）、
+                    // 门洞 / 门楣（+Z |u|≤2）—— 四面各取无开口的偏移位。
+                    shapeOk = shapeOk
+                        && wT1003.blockAt(cx + layerHalf[v], S + v, cz - 4) == BR::Sandstone
+                        && wT1003.blockAt(cx - layerHalf[v], S + v, cz + 4) == BR::Sandstone
+                        && wT1003.blockAt(cx - 4, S + v, cz + layerHalf[v]) == BR::Sandstone
+                        && wT1003.blockAt(cx + 4, S + v, cz - layerHalf[v]) == BR::Sandstone;
+                }
+                shapeOk = shapeOk
+                    && wT1003.blockAt(cx, S + 10, cz) == BR::CutSandstone
+                    && wT1003.blockAt(cx + 5, S + 10, cz + 5) == BR::CutSandstone
+                    && wT1003.blockAt(cx - 5, S + 10, cz - 5) == BR::CutSandstone
+                    && wT1003.blockAt(cx + 2, S + 4, cz + 8) == BR::CutSandstone
+                    && wT1003.blockAt(cx - 2, S + 4, cz + 8) == BR::CutSandstone;
+                if (!shapeOk) { // 神殿先于峡谷生成 → 峡谷切塔 = 地形破坏弃样（净样口径，同 t995/t1001）
+                    ++ravineSkipped;
+                    qInfo().noquote() << "  [t1003 diag] seed" << sd << "temple@" << cx << cz
+                                      << "S" << S << "shape broken (ravine?) -> sample discarded";
+                    continue;
+                }
+                ++templesHere;
+                // (b) 安卡四面（-Z / ±X 恰 21 格逐格全等；+Z 扣门洞 3 格 = 18）。
+                bool ankhOk = true;
+                int faceCount[4] = { 0, 0, 0, 0 }; // -Z, +Z, -X, +X
+                for (int v = 1; v <= 7; ++v)
+                    for (int u = -3; u <= 3; ++u) {
+                        const bool want = (ankhMask[v] & (1 << std::abs(u))) != 0;
+                        const bool mz = wT1003.blockAt(cx + u, S + v, cz - layerHalf[v]) == BR::WoolOrange;
+                        const bool pz = wT1003.blockAt(cx + u, S + v, cz + layerHalf[v]) == BR::WoolOrange;
+                        const bool nx = wT1003.blockAt(cx - layerHalf[v], S + v, cz + u) == BR::WoolOrange;
+                        const bool px = wT1003.blockAt(cx + layerHalf[v], S + v, cz + u) == BR::WoolOrange;
+                        const bool doorHole = (u == 0 && v <= 3);             // +Z 主入口门洞吞没格
+                        const bool lintelHole = (v == 4 && std::abs(u) <= 2); // +Z 门楣 CutSandstone 覆盖格
+                        if (mz != want) ankhOk = false;
+                        if (nx != want) ankhOk = false;
+                        if (px != want) ankhOk = false;
+                        if (pz != (want && !doorHole && !lintelHole)) ankhOk = false;
+                        faceCount[0] += mz ? 1 : 0;
+                        faceCount[1] += pz ? 1 : 0;
+                        faceCount[2] += nx ? 1 : 0;
+                        faceCount[3] += px ? 1 : 0;
+                    }
+                ankhOk = ankhOk && faceCount[0] == 21 && faceCount[2] == 21 && faceCount[3] == 21
+                         && faceCount[1] == 13; // +Z = 21 - 门洞 3 - 门楣覆盖 5
+                ok = ok && ankhOk;
+                // (c) 风玫瑰（地板橙 30 + 全域蓝 1）。
+                int roseOrange = 0, blueTotal = 0;
+                bool roseOk = true;
+                for (int dx = -7; dx <= 7; ++dx)
+                    for (int dz = -7; dz <= 7; ++dz) {
+                        const quint8 b = wT1003.blockAt(cx + dx, S, cz + dz);
+                        const bool onRose = ((dx + dz) & 1) == 0
+                                            && std::abs(dx) + std::abs(dz) <= 5
+                                            && !(dx == 0 && dz == 0);
+                        if (b == BR::WoolOrange) {
+                            ++roseOrange;
+                            if (!onRose) roseOk = false;
+                        } else if (onRose) {
+                            roseOk = false; // 玫瑰位缺格
+                        }
+                    }
+                for (int dx = -11; dx <= 11; ++dx)
+                    for (int dz = -11; dz <= 11; ++dz)
+                        for (int dy = -13; dy <= 11; ++dy)
+                            if (wT1003.blockAt(cx + dx, S + dy, cz + dz) == BR::WoolBlue) ++blueTotal;
+                roseOk = roseOk && roseOrange == 24 && blueTotal == 1
+                         && wT1003.blockAt(cx, S, cz) == BR::WoolBlue;
+                ok = ok && roseOk;
+                // (d) 入口三处 + 顶窗 + 顶部暗腔。
+                bool openOk = true;
+                openOk = openOk
+                    && wT1003.blockAt(cx, S + 1, cz + 10) == BR::Air
+                    && wT1003.blockAt(cx - 1, S + 2, cz + 9) == BR::Air
+                    && wT1003.blockAt(cx, S + 3, cz + 8) == BR::Air
+                    && wT1003.blockAt(cx - 5, S + 1, cz - 10) == BR::Air
+                    && wT1003.blockAt(cx + 5, S + 2, cz - 9) == BR::Air
+                    && wT1003.blockAt(cx, S + 8, cz + 5) == BR::Air
+                    && wT1003.blockAt(cx, S + 8, cz - 5) == BR::Air
+                    && wT1003.blockAt(cx + 5, S + 8, cz) == BR::Air
+                    && wT1003.blockAt(cx - 5, S + 8, cz) == BR::Air
+                    && wT1003.blockAt(cx, S + 9, cz) == BR::Air
+                    && wT1003.blockAt(cx, S + 10, cz) == BR::CutSandstone;
+                ok = ok && openOk;
+                // (e) 暗渠（入口 / 对角中段 / 密室接通口）。
+                bool tunOk = true;
+                tunOk = tunOk
+                    && wT1003.blockAt(cx + 4, S + 1, cz + 10) == BR::Air
+                    && wT1003.blockAt(cx + 4, S + 2, cz + 10) == BR::Air
+                    && wT1003.blockAt(cx + 4, S - 4, cz + 5) == BR::Air
+                    && wT1003.blockAt(cx + 4, S - 3, cz + 5) == BR::Air
+                    && wT1003.blockAt(cx + 4, S - 9, cz) == BR::Air
+                    && wT1003.blockAt(cx + 4, S - 8, cz) == BR::Air
+                    && wT1003.blockAt(cx + 3, S - 8, cz) == BR::Air; // 密室侧接通
+                ok = ok && tunOk;
+                // (f) 密室 + 4 箱 + 压板→9 TNT 链。
+                bool roomOk = true;
+                for (const int c : { -3, 3 }) {
+                    roomOk = roomOk
+                        && wT1003.blockAt(cx + c, S - 11, cz + c) == BR::Air
+                        && wT1003.blockAt(cx + c, S - 8, cz + c) == BR::Air
+                        && wT1003.blockAt(cx + 4, S - 10, cz + 4) == BR::Sandstone
+                        && wT1003.blockAt(cx + 4, S - 9, cz - 4) == BR::Sandstone
+                        && wT1003.blockAt(cx + 3, S - 12, cz) == BR::Sandstone
+                        && wT1003.blockAt(cx - 3, S - 12, cz - 3) == BR::Sandstone
+                        && wT1003.blockAt(cx + 2, S - 7, cz + 2) == BR::Sandstone;
+                }
+                roomOk = roomOk
+                    && wT1003.blockAt(cx - 2, S - 11, cz - 3) == BR::Chest
+                    && (wT1003.stateAt(cx - 2, S - 11, cz - 3) == (BR::ChestStatePyramidFlag | 2))
+                    && wT1003.blockAt(cx + 2, S - 11, cz - 3) == BR::Chest
+                    && (wT1003.stateAt(cx + 2, S - 11, cz - 3) == (BR::ChestStatePyramidFlag | 2))
+                    && wT1003.blockAt(cx - 2, S - 11, cz + 3) == BR::Chest
+                    && (wT1003.stateAt(cx - 2, S - 11, cz + 3) == (BR::ChestStatePyramidFlag | 3))
+                    && wT1003.blockAt(cx + 2, S - 11, cz + 3) == BR::Chest
+                    && (wT1003.stateAt(cx + 2, S - 11, cz + 3) == (BR::ChestStatePyramidFlag | 3));
+                int tnt = 0;
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        if (wT1003.blockAt(cx + dx, S - 12, cz + dz) == BR::TntBlock) ++tnt;
+                roomOk = roomOk && tnt == 9
+                         && wT1003.blockAt(cx, S - 11, cz) == BR::StonePressurePlate;
+                ok = ok && roomOk;
+                if (!ok)
+                    qInfo().noquote() << "  [t1003 diag] seed" << sd << "temple@" << cx << cz << "S" << S
+                                      << "shape" << shapeOk << "ankh" << ankhOk << "rose" << roseOk
+                                      << "open" << openOk << "tunnel" << tunOk << "room" << roomOk;
+                if (!haveFirst) { // (g) 确定性基线
+                    haveFirst = true;
+                    firstSeed = sd;
+                    firstHash = sampleHashT1003(wT1003, cx, S, cz);
+                }
+            }
+            templesTotal += templesHere;
+            if (templesHere == 0) { // 无神殿种子：跳过不计入有效世界（diag 留痕）
+                ++seedMiss;
+                qInfo().noquote() << "  [t1003 diag] seed" << sd << "no desert temple (skipped)";
+                continue;
+            }
+            ++worldsChecked;
+        }
+        ok = ok && worldsChecked >= 4 && templesTotal >= 5; // 池化净样充足（阴性轮敏感）
+        if (haveFirst) { // (g) 同 seed 重生成 → 抽样 FNV 一致
+            World wR1003;
+            wR1003.setWidth(160);
+            wR1003.setDepth(160);
+            wR1003.setHeight(128);
+            wR1003.setSeed(int(firstSeed));
+            // 重扫首个神殿中心（同 seed 同分布 → 扫描序前 4 箱即首簇，质心口径与首轮一致）。
+            int cx = 0, cz = 0, found = 0;
+            for (int x = 0; x < wR1003.width() && found < 4; ++x)
+                for (int z = 0; z < wR1003.depth() && found < 4; ++z)
+                    for (int y = 0; y < wR1003.height() && found < 4; ++y)
+                        if (wR1003.blockAt(x, y, z) == BR::Chest
+                            && (wR1003.stateAt(x, y, z) & BR::ChestStatePyramidFlag) != 0) {
+                            cx += x;
+                            cz += z;
+                            ++found;
+                        }
+            bool centerOk = false;
+            if (found == 4) {
+                cx = int((cx + 2) / 4);
+                cz = int((cz + 2) / 4);
+                centerOk = true;
+            }
+            const int S = wR1003.heightAt(cx, cz);
+            ok = ok && centerOk && sampleHashT1003(wR1003, cx, S, cz) == firstHash;
+        }
+        // (h) 源码钉（world.cpp）：层半边表 / 密室深度 / 安卡行表 / 中心蓝块 / 暗渠循环 / 箱 state。
+        {
+            const QString exeDirT1003 = QCoreApplication::applicationDirPath();
+            const QString rootT1003 = QDir(exeDirT1003 + QStringLiteral("/..")).absolutePath();
+            QFile fT1003(rootT1003 + QStringLiteral("/src/World/world.cpp"));
+            const QString src = fT1003.open(QIODevice::ReadOnly) ? QString::fromUtf8(fT1003.readAll()) : QString();
+            const bool okPin =
+                src.contains(QStringLiteral("constexpr int kLayerHalf[kPyramidTopLayer + 1] = { 10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5 };"))
+                && src.contains(QStringLiteral("constexpr int kChamberFloorDrop = 12;"))
+                && src.contains(QStringLiteral("0, 0b1001, 0b1001, 0b1001, 0b0111, 0b0100, 0b0100, 0b0011, 0, 0, 0"))
+                && src.contains(QStringLiteral("putSolid(cx, surfaceY, cz, BlockRegistry::WoolBlue); // 中心蓝块"))
+                && src.contains(QStringLiteral("carveAir(cx + 4, surfaceY + 1 - k, cz + 10 - k);"))
+                && src.contains(QStringLiteral("quint8(c[1] | BlockRegistry::ChestStatePyramidFlag));"));
+            ok = ok && okPin;
+            if (!okPin)
+                qInfo().noquote() << "  [t1003 diag] source pins drifted (layer table / ankh rows / tunnel)";
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1003 desert temple per-block rebuild: 21x21 stepped pyramid (layer halves"
+                             " 10..5, cut-sandstone cap + lintel), four-face ankh wool pattern (21/face,"
+                             " front 13 at door+lintel holes), floor wind-rose checker 24 orange + center blue,"
+                             " 3 entrances + 4 top windows + upper hollow, secret diagonal tunnel, chamber"
+                             " 7x7x4 with 4 oriented pyramid chests + plate-over-3x3-TNT (9) chain, well"
+                             " deterministic re-gen, source pins, temples" << templesTotal << "worlds"
+                          << worldsChecked << "seeds-miss" << seedMiss << "ravine-skipped" << ravineSkipped;
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

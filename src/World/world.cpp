@@ -7484,26 +7484,33 @@ void World::placeMineshaft()
             << "chests =" << chests; // 同 seed → 同计数（确定性核对；chests>0 = 箱落地轨旁在位）
 }
 
-// t485 沙漠神殿（见 world.h 头注释）。机制等价 MC 1.0 沙漠神殿 desert temple：沙漠地表的阶梯金字塔 + 正下方地下
-//   密室 + 4 宝藏箱 + 中央压力板下 TNT 陷阱（踩板引爆）。确定性散布（hashColumn + seed 偏移，PLAN §2-K）。
+// t485/t1003 沙漠神殿（见 world.h 头注释）。机制等价 MC 1.0 沙漠神殿 desert temple：沙漠地表的阶梯金字塔 +
+//   正下方地下密室 + 4 宝藏箱 + 中央压力板下 TNT 陷阱（踩板引爆）。确定性散布（hashColumn + seed 偏移，PLAN §2-K）。
+//
+//   t1003 逐方块重建（对齐 minecraft.wiki Desert pyramid/Structure 考据 + R19.19 批头清单；子页逐格网格为
+//   图片化表格未能机器转换，缺口按子页材料表 + 机制知识设计并如实登记）：
 //
 //   结构几何（中心 (cx,surfaceY,cz)，surfaceY = 沙漠沙顶 heightAt）：
-//     A) 金字塔（阶梯砂岩，逐层缩成金字塔外形）：
-//        - 8 层（layer 0..kPyramidH-1），layer L 位于 y=surfaceY+L，layer L 的水平半边 = kPyramidHalf - L。
-//        - 每层填一层 Sandstone 实心盘（[-half, +half]² 范围内逐格置 Sandstone，覆盖沙顶 / 空气，不动 Bedrock）；
-//          顶饰最高层（layer L==kPyramidH-1，半边=1 → 3×3）置 CutSandstone 区分顶冠（机制等价 MC 神殿顶部装饰）。
-//        - 层叠加 → 阶梯金字塔外形（底 15×15，每升 1 层半边 -1，顶 3×3 CutSandstone 顶冠）。
-//     B) 地下密室（金字塔正下方，封入地下）：
-//        - 内部 7×7×4 空气（roomW=7 / roomH=4）；地板 y=floorY=surfaceY-kChamberDepth（kChamberDepth=7，深地下）；
-//          内部空气 y∈[floorY+1 .. floorY+roomH]；天花板块 y=floorY+roomH+1=surfaceY-2。
-//        - 周界（地板 / 天花板 / 四壁）填 Sandstone（沙漠成岩，机制等价 MC 神殿密室砂岩墙）→ 封闭无天光（黑暗，
-//          spec「地下密室」）。不动 Bedrock。
-//     C) 4 宝藏箱（密室四角，y=floorY+1 站立高度）：带 ChestStatePyramidFlag bit4 标记 → isPyramidChest 返 true →
-//        Main.qml.openChest 首开填充 pyramidChestPool 战利品（钻石 / 金 / 青金石 / 骨头 / 腐肉等）。朝向低 2 位=0。
-//     D) TNT 陷阱（密室中央地板）：3×3 TntBlock 位于 y=floorY（密室地板层，中央 3×3 替换砂岩地板为 TNT），
-//        中央格正上方 y=floorY+1（站立层）置 CobblePressurePlate（沙漠石质主题）。玩家进入密室踩压力板 →
-//        playercontroller tick 扫 footprint 格（压力板 + 下方 TNT）→ detonateTntBlock → destroySphereSilent
-//        球形破坏（破坏方块 + 衰减伤玩家 + explosion 音/视，机制等价 MC 1.0 沙漠神殿踩板引爆 TNT）。
+//     A) 21×21 逐层金字塔壳（blueprint 层 0..10）：层 L 位于 y=surfaceY+L，半边表 kLayerHalf =
+//        {10,10,9,9,8,8,7,7,6,6,5}（底 21 两层一收 → 顶 11）；每层实心 Sandstone 盘（不动 Bedrock），
+//        顶层 11×11 CutSandstone 顶冠（偏差 6 时代口径：刻纹砂岩 → CutSandstone）。
+//     B) 地面大厅（[-7,7]² × y∈[S+1,S+4] 清空气；外墙随层收进 1..3 格厚）。
+//     C) 地面风玫瑰纹样：地板 y=S 菱域 |dx|+|dz|≤5 棋盘 WoolOrange（(dx+dz) 偶数格，24 格、四折旋转
+//        对称）+ 中心 WoolBlue 1 格（偏差 3 时代口径：1.8 前羊毛版橙 / 蓝 —— 蓝块正下方即压板 / TNT 陷阱）。
+//     D) 塔面安卡纹样：四面 WoolOrange（行表 v1..3 竖井+门侧条纹 / v4 横杠 / v5..6 环侧 / v7 环顶；
+//        每面 21 格、四折旋转对称；写在 layer v 外环面 lateral=±kLayerHalf[v] 阶梯面上）。
+//     E) 入口三处：正面（+Z）主入口 |u|≤1 × v∈[1,3] 阶梯门洞（外环 z=half..8 逐层穿环）+ v=4 |u|≤2
+//        CutSandstone 门楣；后侧（-Z）两副入口 u=±5 × v∈[1,2]。
+//     F) 顶窗 + 顶部暗腔：L8/L9 内腔 [-4,4]² 清空气；四面 v=8 |u|=0 穿环 1×1 窗洞。
+//     G) 地下密室：地板 y=floorY=S-12（blueprint「Layer -11: Chest + Pressure Plate」口径：板 / 箱立于
+//        floorY+1=S-11 层），内部 7×7×4 空气（y∈[S-11,S-8]），周界 Sandstone 壳封闭黑暗（不动 Bedrock）。
+//     H) 4 宝藏箱：北墙 (±2,-3) / 南墙 (±2,+3) 各 2 只、朝向房心（state 低 2 位 = chestFrontFace），带
+//        ChestStatePyramidFlag bit4 → isPyramidChest 返 true → 首开填充 pyramidChestPool 战利品。
+//     I) TNT 陷阱：密室中央地板层 3×3 TntBlock（9 格）+ 中央格正上 StonePressurePlate（MC 石质压力板）。
+//        玩家踩板 → playercontroller tick 扫 footprint（scanTntTraps）→ detonateTntBlock → destroySphereSilent
+//        球形破坏 + 邻接 TNT 连环引爆（机制等价 MC 1.0 踩板引爆 TNT 陷阱）。
+//     J) 暗渠（隐藏地窖入口）：+Z 面 u=+4 低处 1×2 入口 → 对角阶梯隧道（每步 z-1 / y-1，1×2 断面）沿
+//        +X 侧潜入密室顶部侧壁开口（y∈[S-9,S-8]）→ 玩家跳落 treasure room（MC 神殿秘密通道机制）。
 //
 //   placeMineshaft 之后、fillWater 之前（仅 Desert 群系 → 与海 / 湖独立；fillWater 仅填海域低洼，沙漠内陆不被灌水）。
 //   纯函数于 seed + biomeAt（经 hashColumn / hashVoxel）→ 同 seed 同神殿分布（PLAN §2-K）。仅扫候选沙漠格 → 不全图扫描。
@@ -7511,15 +7518,19 @@ void World::placeDesertTemple()
 {
     constexpr int kTempleGrid     = 48;     // 候选网格间距（比矿井 36 更稀 → 神殿更稀有；spec「低频」）
     constexpr unsigned kTemplePct = 45u;    // 候选命中概率（仅沙漠候选 → 已天然稀有；45% 命中 → 沙漠中可见但不密集）
-    constexpr int kPyramidHalf    = 7;      // 金字塔底半边（底 15×15 = (2*7+1)²）
-    constexpr int kPyramidH       = 8;      // 金字塔层数（layer 0..7；顶冠 layer 7 半边=0 → 但取 min 1 保 3×3 顶冠）
-    constexpr int kChamberDepth   = 7;      // 密室地板相对地表的深度（surfaceY-7；深地下、封入沙/石）
-    constexpr int kRoomW          = 7;      // 密室内部宽度（X/Z 格子数；7×7 内部）
-    constexpr int kRoomH          = 4;      // 密室内部高度（Y 空气层数）
-    constexpr int kTntHalf        = 1;      // TNT 陷阱半边（3×3 = (2*1+1)²，置于密室地板中央）
-    constexpr int kBedrockTop      = 4;      // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
-    // 留边界（金字塔底半边 7 + 密室半边 3 + 抖动余量 → 半径 ≤ 8 不越界）。
-    constexpr int kMargin = (kPyramidHalf > kRoomW / 2 ? kPyramidHalf : kRoomW / 2) + 1;
+    constexpr int kPyramidHalf    = 10;     // 金字塔底半边（底 21×21 = (2*10+1)²；t1003 对齐考据足迹）
+    constexpr int kPyramidTopLayer = 10;    // 顶层 layer 10（半边 5 → 11×11 CutSandstone 顶冠；blueprint 层 0..10）
+    constexpr int kHallHalf       = 7;      // 地面大厅内半边（15×15 内厅）
+    constexpr int kChamberFloorDrop = 12;   // 密室地板相对地表深度（floorY = surfaceY-12；blueprint「Layer -11:
+                                            //   Chest + Pressure Plate」口径 → 板 / 箱层 = 地表 -11 = floorY+1）
+    constexpr int kRoomHalf       = 3;      // 密室内部半边（7×7 内部）
+    constexpr int kRoomH          = 4;      // 密室内部高度（Y 空气层数 y ∈ [floorY+1 .. floorY+kRoomH]）
+    constexpr int kTntHalf        = 1;      // TNT 陷阱半边（3×3 = (2*1+1)²，置于密室地板层中央）
+    constexpr int kBedrockTop      = 4;     // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
+    // 逐层半边表（layer 0..10）：底 21 两层一收（21,21,19,...,11）→ 阶梯金字塔外形（blueprint 层宽序列）。
+    constexpr int kLayerHalf[kPyramidTopLayer + 1] = { 10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5 };
+    // 留边界（金字塔底半边 10 + 密室半边 3 + 抖动余量 → 半径 ≤ 11 不越界）。
+    constexpr int kMargin = kPyramidHalf + 1;
 
     int placed = 0;
     const int templeSeed = m_seed + 19487; // 神殿哈希偏移（与其它 worldgen hashColumn 解耦）
@@ -7537,88 +7548,139 @@ void World::placeDesertTemple()
             if (!isDesert(cx, cz)) continue;
             if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠神殿（避免与海水柱冲突）
             const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
-            const int floorY = surfaceY - kChamberDepth;
-            const int ceilBlockY = floorY + kRoomH + 1; // 天花板块 y（内部空气顶 + 1）
-            if (floorY < kBedrockTop + 1) continue; // 密室地板太低（贴基岩）→ 跳过本候选（保墙 / 地板完整）
-            if (ceilBlockY >= m_height) continue;   // 几何保护（surfaceY 异常高时防越界）
-            for (int layer = 0; layer < kPyramidH; ++layer) {
+            if (surfaceY + kPyramidTopLayer >= m_height) continue; // 塔顶越界保护（surfaceY 异常高防溢出）
+            const int floorY = surfaceY - kChamberFloorDrop;       // 密室地板 y（TNT 层）
+            if (floorY - 1 < kBedrockTop + 1) continue;            // 密室地板贴基岩 → 跳过本候选（保地板完整）
+
+            // 单格写入辅助（越界 / 基岩守卫；与 placeStronghold put 同模式）。t1003 全几何经此两口。
+            auto putSolid = [&](int px, int yy, int pz, quint8 id) {
+                if (px < 0 || px >= m_width || yy < 0 || yy >= m_height
+                    || pz < 0 || pz >= m_depth) return;
+                if (m_chunks.blockAt(px, yy, pz) == BlockRegistry::Bedrock) return; // 不动基岩
+                m_chunks.setBlock(px, yy, pz, id);
+            };
+            auto carveAir = [&](int px, int yy, int pz) {
+                if (px < 0 || px >= m_width || yy < 0 || yy >= m_height
+                    || pz < 0 || pz >= m_depth) return;
+                if (m_chunks.blockAt(px, yy, pz) == BlockRegistry::Bedrock) return;
+                m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
+            };
+
+            // ── A) 21×21 逐层金字塔壳：每层实心 Sandstone 盘，顶层 11×11 CutSandstone 顶冠（偏差 6）。
+            for (int layer = 0; layer <= kPyramidTopLayer; ++layer) {
                 const int yy = surfaceY + layer;
-                if (yy < 0 || yy >= m_height) continue;
-                const int half = kPyramidHalf - layer;
-                if (half < 1) break; // 金字塔已收顶（半边 ≤ 0）→ 上层不再画
-                const bool topCap = (layer == kPyramidH - 1) || (half <= 1); // 顶冠 / 最小层用 CutSandstone 区分
-                for (int dx = -half; dx <= half; ++dx) {
-                    for (int dz = -half; dz <= half; ++dz) {
-                        const int px = cx + dx, pz = cz + dz;
-                        const quint8 cur = m_chunks.blockAt(px, yy, pz);
-                        if (cur == BlockRegistry::Bedrock) continue; // 不动基岩
-                        m_chunks.setBlock(px, yy, pz,
-                                          topCap ? BlockRegistry::CutSandstone : BlockRegistry::Sandstone);
+                const int half = kLayerHalf[layer];
+                const bool topCap = (layer == kPyramidTopLayer);
+                for (int dx = -half; dx <= half; ++dx)
+                    for (int dz = -half; dz <= half; ++dz)
+                        putSolid(cx + dx, yy, cz + dz,
+                                 topCap ? BlockRegistry::CutSandstone : BlockRegistry::Sandstone);
+            }
+
+            // ── B) 地面大厅：[-7,7]² × y∈[S+1,S+4] 清空气（外墙随层收进 1..3 格厚）。
+            for (int dy = 1; dy <= 4; ++dy)
+                for (int dx = -kHallHalf; dx <= kHallHalf; ++dx)
+                    for (int dz = -kHallHalf; dz <= kHallHalf; ++dz)
+                        carveAir(cx + dx, surfaceY + dy, cz + dz);
+
+            // ── C) 地面风玫瑰纹样：菱域 |dx|+|dz|≤5 棋盘 WoolOrange（(dx+dz) 偶数格，24 格）+ 中心
+            //       WoolBlue（偏差 3 时代口径；蓝块正下方即压板 / TNT 陷阱 —— 玩家定位暗室的考据地标）。
+            for (int dx = -5; dx <= 5; ++dx) {
+                for (int dz = -5; dz <= 5; ++dz) {
+                    if (((dx + dz) & 1) != 0) continue;            // 棋盘半域（奇偶留空 → 棋盘观感）
+                    if (std::abs(dx) + std::abs(dz) > 5) continue; // 菱域半径（风玫瑰外形）
+                    if (dx == 0 && dz == 0) {
+                        putSolid(cx, surfaceY, cz, BlockRegistry::WoolBlue); // 中心蓝块
+                        continue;
                     }
+                    putSolid(cx + dx, surfaceY, cz + dz, BlockRegistry::WoolOrange);
                 }
             }
 
-            // B) 地下密室（金字塔正下方）：地板 y=floorY，内部 7×7×4 空气，周界砂岩墙 / 地板 / 顶板。
-            const int roomHalf = kRoomW / 2; // 3（内部 7×7 = [-3, +3]²）            // 周界填砂岩（地板 / 天花板 / 四壁）—— 遍历 [-roomHalf-1, roomHalf+1]³ 外圈，边界格置 Sandstone（不动 Bedrock）。
-            for (int dy = -1; dy <= kRoomH; ++dy) {
+            // ── D) 塔面安卡纹样：行表 v → |u| 在场掩码（bit0=|u|0 … bit3=|u|3）。v1..3 竖井 + 门侧条纹 /
+            //       v4 横杠 / v5..6 环侧 / v7 环顶 → 安卡（上环 + 横杠 + 下垂柱）；四面同一行表 → 四折旋转对称。
+            constexpr int kAnkhRowMask[kPyramidTopLayer + 1] = {
+                0, 0b1001, 0b1001, 0b1001, 0b0111, 0b0100, 0b0100, 0b0011, 0, 0, 0
+            };
+            for (int v = 1; v <= 7; ++v) {
+                const int half = kLayerHalf[v];
+                for (int u = -3; u <= 3; ++u) {
+                    if ((kAnkhRowMask[v] & (1 << (u < 0 ? -u : u))) == 0) continue;
+                    // 四面同写：±Z 面 (u,·,±half) / ±X 面 (±half,·,u) —— 阶梯面逐层内收（考据塔面纹样）。
+                    putSolid(cx + u, surfaceY + v, cz + half, BlockRegistry::WoolOrange);
+                    putSolid(cx + u, surfaceY + v, cz - half, BlockRegistry::WoolOrange);
+                    putSolid(cx + half, surfaceY + v, cz + u, BlockRegistry::WoolOrange);
+                    putSolid(cx - half, surfaceY + v, cz + u, BlockRegistry::WoolOrange);
+                }
+            }
+
+            // ── E) 入口三处：正面主入口（+Z：|u|≤1 × v∈[1,3]，外环 z=half..8 逐层穿环 → 阶梯门洞）+
+            //       CutSandstone 门楣（v=4 |u|≤2 外环面）；后侧两副入口（-Z：u=±5 × v∈[1,2]）。
+            for (int v = 1; v <= 3; ++v)
+                for (int u = -1; u <= 1; ++u)
+                    for (int z = kLayerHalf[v]; z >= 8; --z)
+                        carveAir(cx + u, surfaceY + v, cz + z);
+            for (int u = -2; u <= 2; ++u)
+                putSolid(cx + u, surfaceY + 4, cz + kLayerHalf[4], BlockRegistry::CutSandstone);
+            for (int v = 1; v <= 2; ++v)
+                for (const int us : { -5, 5 })
+                    for (int z = kLayerHalf[v]; z >= 8; --z)
+                        carveAir(cx + us, surfaceY + v, cz - z);
+
+            // ── F) 顶窗 + 顶部暗腔：L8/L9 内腔 [-4,4]² 清空气；四面 v=8 |u|=0 穿环 1×1 窗洞（z=half..5）。
+            for (int dy = 8; dy <= 9; ++dy)
+                for (int dx = -4; dx <= 4; ++dx)
+                    for (int dz = -4; dz <= 4; ++dz)
+                        carveAir(cx + dx, surfaceY + dy, cz + dz);
+            for (int d = kLayerHalf[8]; d >= 5; --d) {
+                carveAir(cx, surfaceY + 8, cz + d);
+                carveAir(cx, surfaceY + 8, cz - d);
+                carveAir(cx + d, surfaceY + 8, cz);
+                carveAir(cx - d, surfaceY + 8, cz);
+            }
+
+            // ── G) 地下密室：地板面 y=floorY（dy=0，中央 3×3 由 I) 步换 TNT）/ 天花板 y=floorY+kRoomH+1
+            //       壳 Sandstone，内部 7×7×4 清空气（y∈[floorY+1, floorY+4]，封闭黑暗；机制等价 MC 神殿
+            //       砂岩密室）。
+            for (int dy = 0; dy <= kRoomH + 1; ++dy) {
                 const int yy = floorY + dy;
-                if (yy < 0 || yy >= m_height) continue;
-                const bool yEdge = (dy == -1 || dy == kRoomH); // 地板（dy=-1）/ 天花板（dy=kRoomH）
-                for (int dx = -roomHalf - 1; dx <= roomHalf + 1; ++dx) {
-                    for (int dz = -roomHalf - 1; dz <= roomHalf + 1; ++dz) {
-                        const bool xEdge = (dx == -roomHalf - 1 || dx == roomHalf + 1);
-                        const bool zEdge = (dz == -roomHalf - 1 || dz == roomHalf + 1);
-                        if (!yEdge && !xEdge && !zEdge) continue; // 内部格由下一步清空气
-                        const int px = cx + dx, pz = cz + dz;
-                        const quint8 cur = m_chunks.blockAt(px, yy, pz);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(px, yy, pz, BlockRegistry::Sandstone);
-                    }
-                }
-            }
-            // 内部清空气（7×7×4，覆盖原沙 / 石 / 矿 → 干净密室；不动 Bedrock）。
-            for (int dy = 0; dy < kRoomH; ++dy) {
-                const int yy = floorY + dy;
-                if (yy < 0 || yy >= m_height) continue;
-                for (int dx = -roomHalf; dx <= roomHalf; ++dx) {
-                    for (int dz = -roomHalf; dz <= roomHalf; ++dz) {
-                        const quint8 cur = m_chunks.blockAt(cx + dx, yy, cz + dz);
-                        if (cur == BlockRegistry::Bedrock) continue;
-                        m_chunks.setBlock(cx + dx, yy, cz + dz, BlockRegistry::Air);
+                for (int dx = -kRoomHalf - 1; dx <= kRoomHalf + 1; ++dx) {
+                    for (int dz = -kRoomHalf - 1; dz <= kRoomHalf + 1; ++dz) {
+                        const bool edge = (dy == 0 || dy == kRoomH + 1
+                                           || dx == -kRoomHalf - 1 || dx == kRoomHalf + 1
+                                           || dz == -kRoomHalf - 1 || dz == kRoomHalf + 1);
+                        if (edge) putSolid(cx + dx, yy, cz + dz, BlockRegistry::Sandstone);
+                        else      carveAir(cx + dx, yy, cz + dz);
                     }
                 }
             }
 
-            // C) 4 宝藏箱（密室四角，y=floorY+1 站立高度）：带 ChestStatePyramidFlag 标记 → 首开填充神殿战利品。
-            //    四角 = 内部 [-roomHalf, -roomHalf] / [+roomHalf, -roomHalf] / [-roomHalf, +roomHalf] / [+roomHalf, +roomHalf]。
-            const int chestY = floorY + 1;
-            const int cornerOff[4][2] = {{-roomHalf, -roomHalf}, {roomHalf, -roomHalf},
-                                          {-roomHalf, roomHalf}, {roomHalf, roomHalf}};
-            for (const auto &c : cornerOff) {
-                const int px = cx + c[0], pz = cz + c[1];
-                if (chestY < m_height) {
-                    const quint8 cur = m_chunks.blockAt(px, chestY, pz);
-                    if (cur != BlockRegistry::Bedrock) // 不动基岩（防御）
-                        m_chunks.setBlock(px, chestY, pz, BlockRegistry::Chest,
-                                          BlockRegistry::ChestStatePyramidFlag);
-                }
+            // ── H) 4 宝藏箱：北墙 (±2,-3) / 南墙 (±2,+3)，state 低 2 位朝房心（2=+Z / 3=-Z）+
+            //       ChestStatePyramidFlag bit4 → 首开填充神殿战利品（坐标口径 blueprint Layer -11）。
+            constexpr int kChestOff[4][3] = { { -2, 2, -3 }, { 2, 2, -3 }, { -2, 3, 3 }, { 2, 3, 3 } };
+            for (const auto &c : kChestOff) {
+                const int px = cx + c[0], py = floorY + 1, pz = cz + c[2];
+                if (px < 0 || px >= m_width || py < 0 || py >= m_height
+                    || pz < 0 || pz >= m_depth) continue;
+                if (m_chunks.blockAt(px, py, pz) == BlockRegistry::Bedrock) continue; // 不动基岩（防御）
+                m_chunks.setBlock(px, py, pz, BlockRegistry::Chest,
+                                  quint8(c[1] | BlockRegistry::ChestStatePyramidFlag));
             }
 
-            // D) TNT 陷阱（密室中央地板）：3×3 TntBlock 于 y=floorY（替换砂岩地板），中央格上方 y=floorY+1 置压力板。
-            //    玩家踩压力板 → playercontroller 扫 footprint（压力板 + 下方 TNT）→ detonateTntBlock 球形破坏。
-            for (int dx = -kTntHalf; dx <= kTntHalf; ++dx) {
-                for (int dz = -kTntHalf; dz <= kTntHalf; ++dz) {
-                    const int px = cx + dx, pz = cz + dz;
-                    const quint8 cur = m_chunks.blockAt(px, floorY, pz);
-                    if (cur != BlockRegistry::Bedrock)
-                        m_chunks.setBlock(px, floorY, pz, BlockRegistry::TntBlock);
-                }
-            }
-            // 中央压力板（CobblePressurePlate，沙漠石质主题；圆石压力板区别于木质，更贴合神殿石质风）。
-            if (chestY < m_height) {
-                const quint8 cur = m_chunks.blockAt(cx, chestY, cz);
-                if (cur == BlockRegistry::Air) // 仅空气格放（防覆盖已放宝藏箱 / TNT）
-                    m_chunks.setBlock(cx, chestY, cz, BlockRegistry::CobblePressurePlate);
+            // ── I) TNT 陷阱：中央 3×3 TntBlock 置地板层 + 中央格正上 StonePressurePlate（MC 石质板）。
+            //       踩板 → scanTntTraps → detonateTntBlock 球形破坏 + 邻接 TNT 连环引爆（9 格一链）。
+            for (int dx = -kTntHalf; dx <= kTntHalf; ++dx)
+                for (int dz = -kTntHalf; dz <= kTntHalf; ++dz)
+                    putSolid(cx + dx, floorY, cz + dz, BlockRegistry::TntBlock);
+            putSolid(cx, floorY + 1, cz, BlockRegistry::StonePressurePlate);
+
+            // ── J) 暗渠（隐藏地窖入口）：+Z 面 u=+4 低处 1×2 入口 → 对角阶梯隧道（每步 z-1 / y-1，
+            //       1×2 断面）沿 +X 侧潜入，k=10 端头 (4, S-9..S-8, 0) 与密室顶部空气层接通。
+            carveAir(cx + 4, surfaceY + 1, cz + kLayerHalf[1]);
+            carveAir(cx + 4, surfaceY + 2, cz + kLayerHalf[1]);
+            for (int k = 1; k <= 10; ++k) {
+                carveAir(cx + 4, surfaceY + 1 - k, cz + 10 - k);
+                carveAir(cx + 4, surfaceY + 2 - k, cz + 10 - k);
             }
             ++placed;
         }
