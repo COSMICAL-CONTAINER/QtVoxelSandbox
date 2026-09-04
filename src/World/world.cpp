@@ -7148,11 +7148,12 @@ void World::placeDungeons()
 //        考据「铁轨残缺不连续」）；顶角蛛网 12% +
 //        巷壁矿石 15%（沿用 t565 口径）。
 //     ③ pieceIntersection 交叉口：巷道途中 5×5 通高开口 + 四角 WoodFence 双层双柱 + Planks 柱冠
-//        （考据交叉口木柱支撑）。
+//        （考据交叉口木柱支撑；**口径分歧登记**：/Structure 子页画 3×3 + 三层角柱，采批头 5×5 双层弃用子页形）。
 //     ④ pieceSlope 斜坡段：折线第二段改对角下切（无楼梯块；地板每 2 步降 1 格，3 宽截面随降，钳底
 //        ≥ 基岩顶+2）——考据斜坡巷道逐层下剖。
 //     ⑤ pieceSpiderRoom 洞穴蛛网室：7×7×3 巷侧支室 + 2 宽连接廊；中央 Spawner state=SpawnerStateSpider
-//        （**偏差登记**：洞穴蛛用 MobSpider，state 编码 blockregistry.h (7<<1)=0x0E，R19.19 批头）；
+//        （**偏差登记**：洞穴蛛用 MobSpider，state 编码 blockregistry.h (7<<1)=0x0E，R19.19 批头；
+//        **口径分歧登记**：/Structure 子页画 3×6×3，采批头 7×7 弃用子页形）；
 //        笼 4 邻格三层必网（同考据「笼行蛛网夹持」）+ 内部 hash ~45% 散布（只贴实体块 solidAround 守卫，
 //        考据蛛网密集藏笼）；两短端 WoodFence（考据 layer1 短端栅栏）。
 //     ⑥ 矿井箱：考据「轨上运输矿车」→ **偏差登记：箱落地轨旁**（自已铺 railCells 取一格，四向首个空地
@@ -7932,7 +7933,7 @@ void World::placeJungleTemple()
             put(cx + 6, surfaceY + 1, cz + 0, BlockRegistry::Chest,
                 quint8(1 | BlockRegistry::ChestStateJungleFlag)); // 主箱（谜题龛内）朝 -X
             put(cx - 6, surfaceY + 1, cz - 6, BlockRegistry::Chest,
-                quint8(1 | BlockRegistry::ChestStateJungleFlag)); // 侧箱（侧室角）朝 +X
+                quint8(BlockRegistry::ChestStateJungleFlag)); // 侧箱（侧室角）朝 +X（review0904 勘误：旧 state 1=−X 与两处「朝 +X」注释矛盾，判 state 错注释对）
 
             // ── J) 蛛网 6 处定角装饰（机制等价 MC 丛林神殿阴暗角落蛛网观感）。
             put(cx - 6, surfaceY + 3, cz - 6, BlockRegistry::Cobweb);
@@ -8255,7 +8256,7 @@ void World::placeStronghold()
         //   回归）：石砖高台（13×6，dy1..3，台面 dy=4 可站立）+ 3×3 岩浆盆（dy=3，激活门面正下方
         //   一格）+ 12 框架环（标准 ±2 方形环 = endPortalRingComplete 同几何，~10% 预嵌眼）+ 3 级
         //   石砖楼梯（台下实心）+ 环沟岩浆河 + 南栏 + 银鱼刷怪笼（wiki SHPR 704 砖 + 15 岩浆 + 8 楼梯
-        //   + 12 框架 + 1 笼的块数级复刻；岩浆盆 9 + 河沟 ~108 ≥ 15 ✓）+ **39 铁栏杆格栅**（wiki 39
+        //   + 12 框架 + 1 笼的块数级复刻；岩浆盆 9 + 河沟 72（12 列×6 行；review0904 勘误旧注释 ~108）≥ 15 ✓）+ **39 铁栏杆格栅**（wiki 39
         //   精确总数，三段分配：入口格栅 7 + 岩浆河护栏 24 + 高台护栏 8——MC 分配口径不同总和同，登记）。
         auto stampPortalRoom = [&]() {
             // a) 高台（x -6..6 × z -21..-16，dy1..3 实心）。

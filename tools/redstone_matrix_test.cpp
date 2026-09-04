@@ -34418,7 +34418,7 @@ Item {
                  && sampleHashT1002(wR1002, px, py - World::kStrongholdPortalDy, pz - World::kStrongholdPortalDz) == firstHash;
         }
         // 预嵌眼池化窗（~10%/框：均值 ~6/60；[0,18] 容多 seed 二项噪声）。
-        ok = ok && pooledEyes >= 0 && pooledEyes <= pooledFrames * 3 / 10;
+        ok = ok && pooledEyes >= 1 && pooledEyes <= pooledFrames * 3 / 10; // review0904：下界 0→1（原恒真，对「永不预嵌眼」回归无判别力；10%/框 × 5 世界期望 ~6）
 
         // (e) 源码钉（world.cpp）：上限 / 保证旗 / 权重表行 / 变体比例 / 格架 spine 行 / 重试子 seed。
         {
@@ -35163,17 +35163,17 @@ Item {
                 bool lootOk = wT1004.blockAt(cx + 6, S + 1, cz + 0) == BR::Chest
                               && wT1004.stateAt(cx + 6, S + 1, cz + 0) == (BR::ChestStateJungleFlag | 1)
                               && wT1004.blockAt(cx - 6, S + 1, cz - 6) == BR::Chest
-                              && wT1004.stateAt(cx - 6, S + 1, cz - 6) == (BR::ChestStateJungleFlag | 1);
+                              && wT1004.stateAt(cx - 6, S + 1, cz - 6) == BR::ChestStateJungleFlag; // 侧箱朝 +X（review0904 勘误随 world.cpp state 1→0）
                 int webs = 0;
-                for (const int dx : { -6, 6 }) {
+                for (const int dx : { -6, 6 })
                     for (const int dz : { -6, 6 }) {
                         if (wT1004.blockAt(cx + dx, S + 3, cz + dz) == BR::Cobweb) ++webs;
                         if (wT1004.blockAt(cx + dx, S + 7, cz + dz) == BR::Cobweb) ++webs;
                     }
-                    if (wT1004.blockAt(cx + 4, S + 10, cz + 4) == BR::Cobweb) ++webs;
-                    if (wT1004.blockAt(cx - 4, S + 10, cz - 4) == BR::Cobweb) ++webs;
-                }
-                lootOk = lootOk && webs >= 4;
+                // 顶角两网移出 dx 循环（review0904：原位各计两次 → 顶角缺失不红）；蛛网 6 处定角全查。
+                if (wT1004.blockAt(cx + 4, S + 10, cz + 4) == BR::Cobweb) ++webs;
+                if (wT1004.blockAt(cx - 4, S + 10, cz - 4) == BR::Cobweb) ++webs;
+                lootOk = lootOk && webs >= 6;
                 ok = ok && lootOk;
                 if (!ok) {
                     // 主控收口诊断（t1004 收口期）：static legs 是聚合腿，两座净样神殿（424242/90210）
