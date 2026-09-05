@@ -34975,6 +34975,189 @@ Item {
                              " shafts /" << candT1001 << "candidates, piece-table pins";
     }
 
+    // ── P-t1011 矿井火把密度窗 + 光源归因探针（t1011；placeMineshaft 跨中壁挂火把 + 照明口径验收面）──
+    //    用户实测「矿井里见光但 F3 bl:0 没看到火把」→ 归因：bl 通道非零必须近处有火把（lightEmission 14，
+    //    generate 末尾 recomputeLightField 种子全场传播；P-t1001 ⑦ 池化 ≥15 已证火把真落块）→ bl:0 的
+    //    「见光」必为天光通道：carveCaves 洞穴网络与矿井壁交叠出豁口、洞穴连通地表 → 天光 BFS 渗入巷道
+    //    （sl>0 / bl=0 格）。修复面 = 火把覆盖不足：原仅支撑柱顶 55%×2 侧（组级 25% 缺失）+ 斜坡段零火把
+    //    → 全暗巷腿出现率 ~3%（0.2×0.4×0.4：step0 双侧皆败 × step4/8 皆败）。t1011 跨中壁挂补光
+    //    （step ≡ 2 mod 4 顶层巷壁、TorchAttach 墙插 state、侧 hash 交替）→ 任何走廊步距最近火把 ≤ 4。
+    //    rig：t1001 同款候选复刻（hashColumn FNV 同源）扩 8 seed × 128×128×64，拱带 36 Planks 净样 →
+    //    逐出口直行采样（头层 sy+2 空气游程，同 t1001 行走口径）：
+    //    ① 照明窗（结构性）：巷内火把步距 ≤ 6（7-10 / 11+ 桶恒零 → 任何巷走位距最近火把 ≤ 6 步 =
+    //       块光 ≥ 8 光斑在位）+ 全暗前 5 步巷走（真可走段）池化 ≤ 1（修复前 ~3.2% 巷腿全暗 → 恰红）；
+    //    ② 密度窗：火把步距直方图（步）0-3 / 4-6 / 7-10 / 11+，0-3 桶占比 ≥ 40% 且 7-10 / 11+ 桶 == 0
+    //       （修复前柱间距 4 → 0-3 桶 ≈ 0 恰红；4-6 桶 = 交叉口 evStep=4/6 5×5 刻清邻位壁挂，光照由
+    //       邻火把兜住 → 如实入窗）；
+    //    ③ 壁挂落地：state 低 3 位 ∈ TorchAttach{1..4}（墙插）的巷道火把池化 ≥ 10；
+    //    ④ 块光归因：巷道火把格 blockLightAt ≥ 12 全过（14 种子在场 → 真传播，非残字段）；
+    //    ⑤ 起点厅角壁火把：4 角格直接查（墙插/地板回退），池化 ≥ 2×净样数（入口厅照明收口）；
+    //    ⑥ 天光豁口登记（遥测非断言）：sl>0 且 bl==0 的巷走头层格计数 —— 用户 F3 观感签名，豁口渗光
+    //       通道固有存在（与火把覆盖正交），登记不复零；巷走 max bl 最小值同为遥测（巷外连通敞域
+    //       〔洞穴长廊 / 邻矿井厅〕非矿井结构管辖，照明属后续批次口径）；
+    //    ⑦ 源码钉：壁挂判定行 / 壁挂落块行 / kTorchPct 行（阴性轮敏感）。
+    {
+        bool ok = true;
+        int walksT1011 = 0;             // 巷走池（rig 体量）
+        int darkPrefixT1011 = 0;        // ① 前 5 步（steps≥5 真可走段）全暗巷走数
+        int minWalkBlT1011 = 99;        // ⑥ 遥测：每巷走 max blockLight 的池化最小
+        int gapA = 0, gapB = 0, gapC = 0, gapD = 0; // ② 步距直方图 0-3/4-6/7-10/11+
+        int wallTorchesT1011 = 0;       // ③ 壁挂（墙插 state）火把
+        int torchProbesT1011 = 0, torchBlOkT1011 = 0; // ④ 块光归因探针
+        int roomTorchesT1011 = 0;       // ⑤ 起点厅角壁火把（4 角格直查）
+        int slSeepT1011 = 0;            // ⑥ sl>0 且 bl==0 头层格（天光豁口遥测）
+        int headCellsT1011 = 0;         //    巷走头层采样总数
+        int shaftsT1011 = 0, candT1011 = 0;
+        const quint32 seedsT1011[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 4242u, 2024u, 31337u };
+        for (quint32 sd : seedsT1011) {
+            World wT1011;
+            wT1011.setWidth(128);
+            wT1011.setDepth(128);
+            wT1011.setHeight(64);
+            wT1011.setSeed(int(sd)); // setter 内 generate() 全量 worldgen + recomputeLightField
+            auto colHashT1011b = [](int seed, int x, int z) -> quint32 { // hashColumn FNV 同源复刻（同 t1001）
+                quint32 h = 0x811c9dc5u;
+                auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+                step(quint32(seed));
+                step(quint32(x));
+                step(quint32(z));
+                h ^= h >> 16;
+                h *= 0x7feb352du;
+                h ^= h >> 15;
+                return h;
+            };
+            const int wW = wT1011.width(), wD = wT1011.depth();
+            const quint32 mineSeed = sd + 15047u;
+            for (int bx = 18; bx < wW; bx += 36) {
+                for (int bz = 18; bz < wD; bz += 36) {
+                    const quint32 r = colHashT1011b(int(mineSeed), bx, bz);
+                    if ((r % 100u) >= 40u) continue;
+                    const int jx = int((r >> 1) & 0xFu) % 19 - 9;
+                    const int jz = int((r >> 5) & 0xFu) % 19 - 9;
+                    const int cx = bx + jx, cz = bz + jz;
+                    if (cx < 16 || cz < 16 || cx >= wW - 16 || cz >= wD - 16) continue;
+                    const int h = std::min(wT1011.heightAt(cx, cz), 63);
+                    const int yLo = 6;
+                    const int yHi = std::min(43, h - 11);
+                    if (yHi <= yLo) continue;
+                    const int sy = yLo + int((r >> 9) & 0x1Fu) % (yHi - yLo + 1);
+                    ++candT1011;
+                    int band = 0; // 净样签名：起点厅拱带 36 Planks @ sy+4（同 t1001）
+                    for (int dx = 0; dx < 10; ++dx)
+                        for (int dz = 0; dz < 10; ++dz) {
+                            const bool edge = (dx == 0 || dx == 9 || dz == 0 || dz == 9);
+                            if (edge && wT1011.blockAt(cx - 5 + dx, sy + 4, cz - 5 + dz) == BR::Planks)
+                                ++band;
+                        }
+                    if (band != 36) continue;
+                    ++shaftsT1011;
+                    // ⑤ 起点厅角壁火把直查（4 角格头层墙插 / 地板回退 —— 与生成端同位）
+                    for (int sx2 = -1; sx2 <= 1; sx2 += 2)
+                        for (int sz2 = -1; sz2 <= 1; sz2 += 2) {
+                            const int px = (sx2 < 0) ? cx - 5 : cx + 4;
+                            const int pz = (sz2 < 0) ? cz - 5 : cz + 4;
+                            for (int ty = sy + 1; ty <= sy + 2; ++ty)
+                                if (wT1011.blockAt(px, ty, pz) == BR::Torch) { ++roomTorchesT1011; break; }
+                        }
+                    static const int kDirsT1011b[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                    for (const auto &dd : kDirsT1011b) {
+                        const int dx = dd[0], dz = dd[1];
+                        const int sx = cx + (dx > 0 ? 5 : (dx < 0 ? -6 : 0));
+                        const int sz = cz + (dz > 0 ? 5 : (dz < 0 ? -6 : 0));
+                        if (wT1011.blockAt(sx, sy + 2, sz) != BR::Air) continue; // 此向无出口
+                        int lastLit = -1;   // 上一火把步（步距直方图）
+                        int walkMaxBl = 0;  // 本巷走 head 级 max blockLight（遥测）
+                        int walkSteps = 0;  // 本巷走步数（暗前缀腿量纲）
+                        int prefixLit = 0;  // 前 5 步点亮步数（①）
+                        for (int s = 0; s < 11; ++s) {
+                            const int px = sx + dx * s, pz = sz + dz * s;
+                            if (wT1011.blockAt(px, sy + 2, pz) != BR::Air) break; // 头层堵 → 巷尽
+                            ++headCellsT1011;
+                            ++walkSteps;
+                            const quint8 bl = wT1011.blockLightAt(px, sy + 2, pz);
+                            const quint8 sl = wT1011.skyLightAt(px, sy + 2, pz);
+                            if (bl > walkMaxBl) walkMaxBl = bl;
+                            if (sl > 0 && bl == 0) ++slSeepT1011; // ⑥ 天光豁口签名（遥测）
+                            bool lit = false; // 截面 w=±1/0 × 三层火把扫描（柱顶/壁挂 sy+3、豁口地板回退 sy+1）
+                            for (int w = -1; w <= 1 && !lit; ++w) {
+                                const int tx = px + w * (-dz), tz = pz + w * dx; // 截面偏移同生成端（w⊥巷轴）
+                                for (int ty = sy + 1; ty <= sy + 3; ++ty) {
+                                    if (wT1011.blockAt(tx, ty, tz) != BR::Torch) continue;
+                                    lit = true;
+                                    const quint8 st = wT1011.stateAt(tx, ty, tz) & 0x07u;
+                                    if (st >= 1 && st <= 4) ++wallTorchesT1011; // ③ TorchAttach 墙插
+                                    ++torchProbesT1011;
+                                    if (wT1011.blockLightAt(tx, ty, tz) >= 12) ++torchBlOkT1011; // ④
+                                    break;
+                                }
+                            }
+                            if (s < 5 && lit) ++prefixLit; // ① 暗前缀统计窗
+                            if (lit) {
+                                if (lastLit >= 0) { // ② 步距分桶
+                                    const int gap = s - lastLit;
+                                    if (gap <= 3) ++gapA;
+                                    else if (gap <= 6) ++gapB;
+                                    else if (gap <= 10) ++gapC;
+                                    else ++gapD;
+                                }
+                                lastLit = s;
+                            }
+                        }
+                        ++walksT1011;
+                        if (walkMaxBl < minWalkBlT1011) minWalkBlT1011 = walkMaxBl; // ⑥ 遥测
+                        if (walkSteps >= 5 && prefixLit == 0) ++darkPrefixT1011; // ① 真可走段全暗前缀
+                    }
+                }
+            }
+        }
+        // ⑥ 源码钉（壁挂判定 / 落块 / kTorchPct —— 阴性轮敏感：摘壁挂块 → ①②③ 恰红 + 钉失）
+        bool okPin = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile wf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
+            okPin = src.contains(QStringLiteral("if (step % kSupportInterval == 2) {"))
+                 && src.contains(QStringLiteral("m_chunks.setBlock(px, wy, pz, BlockRegistry::Torch, attach);"))
+                 && src.contains(QStringLiteral("quint8(BlockRegistry::TorchOnNX)"))
+                 && src.contains(QStringLiteral("constexpr unsigned kTorchPct    = 55u;"));
+        }
+        const int gapsT1011 = gapA + gapB + gapC + gapD;
+        ok = ok && walksT1011 >= 40;                                  // rig 体量
+        ok = ok && darkPrefixT1011 <= 1;                              // ① 真可走段全暗前缀
+        ok = ok && gapsT1011 > 0 && gapC == 0 && gapD == 0            // ② 密度窗（步距 ≤ 6 → 块光 ≥ 8）
+             && gapA * 100 >= gapsT1011 * 40;
+        ok = ok && wallTorchesT1011 >= 10;                            // ③ 壁挂落地
+        ok = ok && torchProbesT1011 >= 20 && torchBlOkT1011 == torchProbesT1011; // ④ 块光归因
+        ok = ok && roomTorchesT1011 >= shaftsT1011 * 2;               // ⑤ 起点厅角壁火把
+        ok = ok && okPin;                                             // ⑦
+        if (!ok)
+            qInfo().noquote() << "  [t1011 diag] walks" << walksT1011 << "shafts" << shaftsT1011
+                              << "/" << candT1011 << "darkPrefix" << darkPrefixT1011
+                              << "minWalkBl" << minWalkBlT1011
+                              << "gaps 0-3/4-6/7-10/11+" << gapA << gapB << gapC << gapD
+                              << "wallTorches" << wallTorchesT1011
+                              << "roomTorches" << roomTorchesT1011
+                              << "torchBl" << torchBlOkT1011 << "/" << torchProbesT1011
+                              << "slSeep" << slSeepT1011 << "/" << headCellsT1011 << "pin" << okPin;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1011 mineshaft torch coverage + light attribution: mid-span paired"
+                             " wall torches + start-parlor corner torches (torch gap hist 0-3/4-6/"
+                             "7-10/11+" << gapA << gapB << gapC << gapD << "share"
+                             << (gapsT1011 > 0 ? gapA * 100 / gapsT1011 : -1) << "% 7-10/11+ zero"
+                             " = light trace within 6 steps everywhere, dark walkable prefixes"
+                             << darkPrefixT1011 << "<=1, wall-mount torches" << wallTorchesT1011
+                             << "room-corner torches" << roomTorchesT1011 << "torch-cell blockLight"
+                             << torchBlOkT1011 << "/" << torchProbesT1011 << ">=12, min walk bl"
+                             << minWalkBlT1011 << "(telemetry: corridor-external open volumes ="
+                             " caves/neighbor parlors out of mineshaft scope), skylight-seep sl>0/"
+                             "bl=0 cells" << slSeepT1011 << "/" << headCellsT1011
+                             << "(cave-opening daylight channel = the F3 bl:0 attribution,"
+                             " orthogonal to torch coverage) over"
+                          << walksT1011 << "walks /" << shaftsT1011 << "shafts, wall-torch pins";
+    }
+
     // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
     //    rig：t995/t1001/t1002 同款池化口径，但世界升 160×160×**128**（t307 起地表基线 64、desert 地表
     //    ~61..67 —— 64 高 rig 世界把地表钳到 63 → 塔顶越界守卫恒拒 = 历史全矩阵神殿恒 0 的根因，本探针
