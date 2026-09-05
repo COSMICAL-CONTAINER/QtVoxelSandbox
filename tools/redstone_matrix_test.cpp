@@ -22490,6 +22490,174 @@ Item {
                           ;
     }
 
+    // ── P-t1018 铁轨延伸松弛（t983 回炉）探针（World setBlock 直编；spec「沿轨线端点延伸铺设时，新轨
+    //    自动接续既有轨——连接由邻轨端点拓扑决定，放置朝向无关；平行侧邻拒连禁令不回退（t983 主口径
+    //    保住）」；用户原诉「现在延伸铺设不管朝向、接不上线」）──
+    //   根因：t983 显式轴闸（bit5 放置面向 / c 连接位）在「偏好轴无邻」时一律 0 连接——放置面向恰与
+    //   轨线轴相反时，端点延伸的新轨持错误轴偏好落 0 连接（且继续延伸仍落 0，轨线从此断在延伸点）。
+    //   修 = 延伸松弛：仅 c==0（bit5 纯放置面向）轨偏好轴零臂时，垂直轴「端点相对」邻
+    //   （railProbeEndpointAligned 单表判据：邻轨轴〔连接位优先 bit5 兜底 坡臂恒真〕含连接方向 = 轨线
+    //   端点对本格）照连，bit5 随实连轴镜像（World 写回单轴镜像扩展）；平行侧邻（邻轴垂直连接方向）
+    //   仍拒连 = t983 不回退；c!=0 轨既有连接即实拓扑，永不松。
+    //   腿：
+    //   (a) NS 轨线端点延伸双向：EW 面向（bit5，错误轴）放置 → 接续成线（新轨持 Nz + bit5 镜像清零 +
+    //       线端轨 Pz|Nz 互连）；NS 面向（state 0）放置 → 照常接续（唯一邻定轴零回归）——两向全接 =
+    //       朝向无关；
+    //   (b) 1 格断桥补接：普通轨断桥 EW 面向补接 → Pz|Nz 双臂贯穿 + 两断端闭合；动力轨同布局（三轨型
+    //       覆盖）；
+    //   (c) 平行侧邻拒连不回退（t1018 自守卫）：EW 面向孤轨 + 北侧 EW 面向平行轨 → 双 0 连接 + bit5
+    //       守恒（P-t983 腿 a 同构复钉，防松弛翻轴回潮）；
+    //   (d) 源码钉：端点相对判定实现 / 规则②③松弛行 / axisCon 守卫 / World 单轴镜像行。
+    {
+        // shape 腿 rig 选址：footprint x-2..x+2 × z-2..z+6 × Y-1..Y+2。
+        int xa = -1, za = -1;
+        for (int zz = 3; zz < 90 && xa < 0; zz += 4)
+            for (int xx = 6; xx + 2 < 96 && xa < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -2; dx <= 2 && clear; ++dx)
+                    for (int dz = -2; dz <= 6 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xa = xx; za = zz; }
+            }
+        bool okA = false, okB = false, okC = false;
+        if (xa < 0) {
+            qInfo().noquote() << "  [t1018 diag] shape: no clear rig area";
+        } else {
+            // (a) NS 线（z..z+2 三格 fresh）→ EW 面向延伸 (x,z+3) 接续；再清场 NS 面向延伸零回归。
+            auto buildLine = [&]() {
+                for (int i = 0; i <= 2; ++i) w.setBlock(xa, kRigY, za + i, BR::Rail, 0);
+                tickN(w, 2);
+            };
+            auto clearLine = [&]() {
+                for (int i = 0; i <= 3; ++i) w.setBlock(xa, kRigY, za + i, BR::Air, 0);
+                tickN(w, 2);
+            };
+            buildLine();
+            const quint8 conEnd0 = quint8(w.stateAt(xa, kRigY, za + 2) & 0x0F);
+            w.setBlock(xa, kRigY, za + 3, BR::Rail, BR::RailAxisEWFlag); // EW 面向（错误轴）延伸
+            tickN(w, 2);
+            const quint8 stN1 = w.stateAt(xa, kRigY, za + 3);
+            const quint8 conN1 = quint8(stN1 & 0x0F);
+            const bool ewKept1 = (stN1 & BR::RailAxisEWFlag) != 0;
+            const quint8 conEnd1 = quint8(w.stateAt(xa, kRigY, za + 2) & 0x0F);
+            const bool ewFacingConnect = conEnd0 == BR::RailConnNz && conN1 == BR::RailConnNz
+                && !ewKept1 && conEnd1 == quint8(BR::RailConnNz | BR::RailConnPz);
+            clearLine();
+            buildLine();
+            w.setBlock(xa, kRigY, za + 3, BR::Rail, 0); // NS 面向（state 0 = fresh）延伸
+            tickN(w, 2);
+            const quint8 conN2 = quint8(w.stateAt(xa, kRigY, za + 3) & 0x0F);
+            const quint8 conEnd2 = quint8(w.stateAt(xa, kRigY, za + 2) & 0x0F);
+            const bool nsFacingConnect = conN2 == BR::RailConnNz
+                && conEnd2 == quint8(BR::RailConnNz | BR::RailConnPz);
+            okA = ewFacingConnect && nsFacingConnect;
+            if (!okA)
+                qInfo().noquote() << "  [t1018 diag] a end0" << conEnd0 << "conN1" << conN1
+                                  << "ewKept" << ewKept1 << "end1" << conEnd1
+                                  << "conN2" << conN2 << "end2" << conEnd2;
+            clearLine();
+            // (b) 1 格断桥补接：普通轨 z / z+2 两断端 + EW 面向补接 (x,z+1) → Pz|Nz 贯穿闭合；
+            //     动力轨同布局（三轨型覆盖）。
+            w.setBlock(xa, kRigY, za,     BR::Rail, 0);
+            w.setBlock(xa, kRigY, za + 2, BR::Rail, 0);
+            tickN(w, 2);
+            w.setBlock(xa, kRigY, za + 1, BR::Rail, BR::RailAxisEWFlag);
+            tickN(w, 2);
+            const quint8 conBr = quint8(w.stateAt(xa, kRigY, za + 1) & 0x0F);
+            const quint8 conS0 = quint8(w.stateAt(xa, kRigY, za) & 0x0F);
+            const quint8 conS2 = quint8(w.stateAt(xa, kRigY, za + 2) & 0x0F);
+            const bool railBridge = conBr == quint8(BR::RailConnPz | BR::RailConnNz)
+                && conS0 == BR::RailConnPz && conS2 == BR::RailConnNz;
+            for (int i = 0; i <= 2; ++i) w.setBlock(xa, kRigY, za + i, BR::Air, 0);
+            tickN(w, 2);
+            w.setBlock(xa, kRigY, za,     BR::GoldenRail, 0);
+            w.setBlock(xa, kRigY, za + 2, BR::GoldenRail, 0);
+            tickN(w, 2);
+            w.setBlock(xa, kRigY, za + 1, BR::GoldenRail, BR::RailAxisEWFlag);
+            tickN(w, 2);
+            const quint8 conGBr = quint8(w.stateAt(xa, kRigY, za + 1) & 0x0F);
+            const quint8 conGS0 = quint8(w.stateAt(xa, kRigY, za) & 0x0F);
+            const quint8 conGS2 = quint8(w.stateAt(xa, kRigY, za + 2) & 0x0F);
+            // 金轨断端 = 单臂（规则② fresh 级联 `if (hasPZ) return RailConnPz`，与普通轨断端同构）：
+            //   矩阵 run1 实证 conGS0=4(Pz)/conGS2=8(Nz)——「断端 Pz|Nz」旧预期是对向双臂拓扑误写
+            //   （金轨桥本体 Pz|Nz 贯穿接续才是本腿断言面）。
+            const bool goldenBridge = conGBr == quint8(BR::RailConnPz | BR::RailConnNz)
+                && conGS0 == BR::RailConnPz && conGS2 == BR::RailConnNz;
+            okB = railBridge && goldenBridge;
+            if (!okB)
+                qInfo().noquote() << "  [t1018 diag] b rail" << railBridge << conBr << conS0 << conS2
+                                  << "golden" << goldenBridge << conGBr << conGS0 << conGS2;
+            for (int i = 0; i <= 2; ++i) w.setBlock(xa, kRigY, za + i, BR::Air, 0);
+            tickN(w, 2);
+            // (c) 平行侧邻拒连不回退（t1018 自守卫，P-t983 腿 a 同构复钉）。
+            w.setBlock(xa, kRigY, za,     BR::Rail, BR::RailAxisEWFlag);
+            w.setBlock(xa, kRigY, za + 1, BR::Rail, BR::RailAxisEWFlag);
+            tickN(w, 2);
+            const quint8 conP1 = quint8(w.stateAt(xa, kRigY, za) & 0x0F);
+            const quint8 conP2 = quint8(w.stateAt(xa, kRigY, za + 1) & 0x0F);
+            const bool axisKept = (w.stateAt(xa, kRigY, za) & BR::RailAxisEWFlag) != 0;
+            okC = conP1 == 0 && conP2 == 0 && axisKept;
+            if (!okC)
+                qInfo().noquote() << "  [t1018 diag] c" << conP1 << conP2 << axisKept;
+            w.setBlock(xa, kRigY, za,     BR::Air, 0);
+            w.setBlock(xa, kRigY, za + 1, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // (d) 源码钉（任一消失即红）。
+        const QString exeDir1018 = QCoreApplication::applicationDirPath();
+        const QString root1018 = QDir(exeDir1018 + QStringLiteral("/..")).absolutePath();
+        auto readSrc1018 = [&root1018](const QString &rel) -> QString {
+            QFile f(root1018 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString br1018 = readSrc1018(QStringLiteral("src/Core/blockregistry.cpp"));
+        const QString wd1018 = readSrc1018(QStringLiteral("src/World/world.cpp"));
+        const bool okD1 = br1018.contains(QStringLiteral(
+            "bool BlockRegistry::railProbeEndpointAligned(const RailProbe &p, bool xAxis)"));
+        const bool okD2 = br1018.contains(QStringLiteral(
+            "(hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)")); // 规则②③延伸松弛行
+        const bool okD3 = br1018.contains(QStringLiteral(
+            "if (axisCon != 0 || c != 0) return axisCon;")); // 轴上臂优先 / c!=0 永不松守卫
+        const bool okD4 = wd1018.contains(QStringLiteral(
+            "con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂 → NS 偏好"));
+        const bool okT1018 = okA && okB && okC && okD1 && okD2 && okD3 && okD4;
+        if (!okT1018) ++totalFail;
+        if (!okT1018)
+            qInfo().noquote() << "  [t1018 diag] a" << okA << "b" << okB << "c" << okC
+                              << "| d" << okD1 << okD2 << okD3 << okD4;
+        qInfo().noquote() << (okT1018 ? "PASS" : "FAIL")
+                          << "| t1018 rail extension relaxation (t983 rework): extending a line at"
+                             " its endpoint used to depend on placement facing - a new rail placed"
+                             " with the facing axis perpendicular to the line carried the wrong bit5"
+                             " axis preference, the explicit-axis gate (t983) kept it at 0"
+                             " connections and the line stayed broken at the extension point no"
+                             " matter how many more rails the player laid (user: extending never"
+                             " connects regardless of facing). Fix relaxes exactly that case: a rail"
+                             " whose state is placement-facing only (c == 0) with zero neighbors on"
+                             " its preferred axis connects along the perpendicular axis when the"
+                             " neighbor there is ENDPOINT-relative (neighbor's own axis contains the"
+                             " joining direction - railProbeEndpointAligned single table: connection"
+                             " bits first, bit5 fallback, slope arms always true), and bit5 mirrors"
+                             " the actually-connected axis on write-back (single-axis mirror"
+                             " extension); parallel SIDE neighbors (neighbor axis perpendicular to"
+                             " the joining direction) are still rejected - the t983 no-snap rule is"
+                             " NOT rolled back, and rails with existing connection bits (c != 0)"
+                             " never relax (their connections are the real topology). Probe legs:"
+                             " (a) NS line endpoint extension connects both ways - EW-facing"
+                             " (wrong-axis bit5) placement joins the line (Nz + bit5 mirrored clear,"
+                             " end rail closes Pz/Nz) and fresh NS placement still joins (single-"
+                             " neighbor axis, zero regression) = facing-independent; (b) a 1-gap"
+                             " bridge filled with an EW-facing rail closes both ends through Pz|Nz,"
+                             " same layout with golden rails (three-rail-family coverage); (c)"
+                             " parallel EW-facing rails stay mutually 0-connection with bit5"
+                             " conserved (t983 leg-a isomorph re-pinned against axis-flip"
+                             " regression); (d) source pins for the endpoint-aligned predicate, the"
+                             " rule-2/rule-3 relaxation lines, the axisCon guard and the World"
+                             " single-axis bit5 mirror"
+                          ;
+    }
+
     // ── P-t939 单格坡静置矿车下滑规则探针（MinecartManager 直编；spec「单格上/下坡静置矿车仍静止——
     //    应往下坡运动。口径（用户定稿）：未激活动力轨=减速可平衡坡上；普通轨=下滑；激活动力轨+探测轨=
     //    往下坡运动」）──
@@ -23392,7 +23560,9 @@ Item {
     //      「嵌入冻结」非此症根因）。修 = tryValleyBottomCapture：|speed| ≤ kCartValleyEscape(=重力终端
     //      10 —— 纯重力可达速度全捕) 的车进谷格即按「制动到谷心」速度律（a0 = v²/2d 每 tick 重算自校正）
     //      一次平滑减速停驻谷心（谷心梯度 0 = 静置闸稳定不动点，停驻后所有闸门一致静止）；boost / 冲量
-    //      （>10）按速度通过。
+    //      （>10）按速度通过。**t1019 演化：逃逸阈改能量判据（v² ≥ 2g·h 对面坡升 + 余量则放行）——行为
+    //      腿 (a)(b)(c) 口径不变**（(a) 谷底滑落到达能 < 阈仍捕 / (b) boost ~11.6 仍过 / (c) 与捕获无关），
+    //      逃逸阈钉同步演化见腿 (d)。
     //   ② review0831 #28：stepCartAlongRail 受阻三分法 !sampled 分支无条件回退+清速、不看 embeddedAtEntry
     //      豁免 —— 嵌入车遇失联子步（前探列无轨 / 列扫容差拒）每 tick 被打回子步起点 = 永久冻结（推力 /
     //      动力喂速全被吞）。修 = 补 haveFreePos 门（同 uphill 分支口径）：非嵌入回退、嵌入车豁免延续直至
@@ -23405,7 +23575,7 @@ Item {
     //   (c) 嵌入车失联解冻（#28）：平轨 (x0..x0+3,Y) 骑乘东行，越过 (x0+2) 格心后将 (x0+3) 轨换 Stone
     //       （车体前半已探入该格 = 入点嵌入）→ 续骑 → 车越过 x0+3.2（豁免推进穿石至死端飞出；pre-fix 恒
     //       被回退冻结在 x0+2.8 上下）；
-    //   (d) 源码钉：两处捕获调用 / haveFreePos 门 / kCartValleyEscape / 捕获实现签名。
+    //   (d) 源码钉：两处捕获调用 / haveFreePos 门 / t1019 能量余量常量（t981 逃逸阈钉合法演化）/ 捕获实现签名。
     {
         // ── (a) 谷一次停驻。rig 选址：footprint x0-1..x0+3 × z0-1..z0+1 × Y-1..Y+2。──
         int xa = -1, za = -1;
@@ -23580,7 +23750,7 @@ Item {
         const bool okD2 = mc981.contains(QStringLiteral(
             "if (tryValleyBottomCapture(c, world, railY, dt)) {"));
         const bool okD3 = mh981.contains(QStringLiteral(
-            "static constexpr float kCartValleyEscape = 10.0f;"));
+            "static constexpr float kCartValleyPassMarginH = 0.05f;")); // t1019 演化：逃逸阈钉 → 能量判据余量钉
         const bool okD4 = mc981.contains(QStringLiteral(
             "bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, qreal dt)"));
         const bool okD5 = mc981.contains(QStringLiteral(
@@ -23599,16 +23769,17 @@ Item {
                              " stall slide-back (-0.5) and the static-start kick (+1.0) re-pump energy"
                              " at each wall stop, so a cart sliding to the bottom enters a wall-to-wall"
                              " limit cycle instead of settling (user report: stuck oscillating, only"
-                             " stops at the end). Fix adds tryValleyBottomCapture: a cart moving at or"
-                             " below kCartValleyEscape (= kCartSlopeDownSpeed 10, the gravity terminal"
-                             " - every purely gravity-reachable arrival speed is below it, boost and"
-                             " collision impulses above it) entering a V-valley cell (straight rail,"
+                             " stops at the end). Fix adds tryValleyBottomCapture: a cart entering"
+                             " a V-valley cell (straight rail,"
                              " both axis neighbors +1, same geometry as the railRiseAt valley branch)"
                              " is taken over by a brake-to-center speed law (a = v^2/2d recomputed per"
                              " tick, self-correcting), gliding to a single smooth stop at the valley"
                              " bottom center where the gradient is zero and every gate agrees on rest;"
                              " golden rails keep their own brake/boost semantics and fast carts pass"
-                             " through by speed. Same-domain registration review0831 #28 is verified"
+                             " through by speed (t981 gated capture by the escape speed threshold;"
+                             " t1019 legally evolved that gate to the energy criterion v^2 >= 2g*h"
+                             " opposite-climb - both behavioral legs here are unchanged under it)."
+                             " Same-domain registration review0831 #28 is verified"
                              " NOT this symptom (leg (a) reproduces the oscillation with no embedded"
                              " block) but is settled here: the !sampled branch of the stepCartAlongRail"
                              " blocked-triage reverted and zeroed speed unconditionally, ignoring the"
@@ -23622,14 +23793,229 @@ Item {
                              " and settles with ZERO x-direction reversals (pre-fix limit cycle makes"
                              " >=2), parks within 0.06 of the valley center at surface height and"
                              " stays pinned for 60 ticks; (b) a boost-fed cart (8-cell powered golden"
-                             " run, arrival ~11.6 > escape threshold) crosses the valley center"
+                             " run, arrival ~11.6, energy above the opposite-climb threshold) crosses the valley center"
                              " eastward by >=0.9 - the valley does not capture fast traffic; (c)"
                              " mounted eastbound cart whose forward rail is swapped to stone after"
                              " passing a cell center (body already probing the cell = embedded at"
                              " entry) escapes past x0+3.2 post-fix (pre-fix frozen forever at ~x0+2.8"
                              " = the user's immovable cart); (d) source pins for both capture call"
-                             " sites, the escape threshold, the capture implementation, the"
+                             " sites, the t1019 energy-margin constant (t981 escape-threshold pin"
+                             " legally evolved), the capture implementation, the"
                              " haveFreePos-gated revert and the #28 registration marker"
+                          ;
+    }
+
+    // ── P-t1019 V 谷通过物理能量判据探针（MinecartManager 直编；spec「谷底捕获改能量判据——进谷速度
+    //    足以爬升对面坡（v² ≥ 2g·h 对面坡升）则通过；不足才谷心制动停驻；消灭『打转』极限环」；
+    //    t981 口径再翻案）──
+    //   t981 速度阈（|speed| ≤ 10 全捕 / >10 全过）改能量判据逐例二选一：g 用项目坡道运动学口径
+    //   kCartSlopeGravity（世界重力 28 × sin45° 沿轨分量，与谷内加速 / 上坡减速同一常量 → 能量账自洽）；
+    //   h_对面坡升 = 行进向逐格 +1 连续爬升段总高（单壁 V = 1.0 → 通过阈 v ≥ sqrt(2·19.8·1.05) ≈
+    //   6.45 blocks/s）；余量 0.05 格盖静置闸 kick（+1.0）贴阈再供能（crest-stall 回谷循环带收口）。
+    //   腿（采位置/速度曲线，两速度档各自「通过或单调减速」二选一、无往复）：
+    //   (a) 低速进谷 → 单调减速谷心停驻：3 格 V（W@Y+1 / V@Y / E@Y+1），W 上 spawn 静置闸起步（入谷
+    //       速 ~4.6，v² ~21 < 阈 ~41.6）→ 曲线断言：x 向反转数 == 0、入谷后 |v| 单调不增（容差 2e-3）、
+    //       到谷心距离单调不增（= 从未越心，容差 2e-3）、终位谷心 ±0.06、静止守卫（60 tick 位移 <1e-3）；
+    //   (b) 高速进谷 → 通过：8 格通电动力轨平台（与谷壁同层直通）接 V 谷，boost ~11.6 入谷（v² ~135 >
+    //       阈）→ 曲线断言：x 向反转数 == 0、x 全程单调不减（容差 2e-3）、越过谷心东 ≥0.9（被捕车恒停
+    //       谷心 ±0.06 不可能越过 = 谷没留住）；
+    //   (c) 源码钉：能量判据行 / 对面坡升扫描行 / 余量常量 / 扫描上限常量。
+    {
+        // ── (a) 低速档。rig 选址：footprint x0-1..x0+3 × z0-1..z0+1 × Y-1..Y+2。──
+        int xa = -1, za = -1;
+        for (int zz = 3; zz < 94 && xa < 0; zz += 2)
+            for (int xx = 6; xx + 3 < 96 && xa < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -1; dx <= 3 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xa = xx; za = zz; }
+            }
+        bool okA = false;
+        if (xa < 0) {
+            qInfo().noquote() << "  [t1019 diag] a: no clear rig area";
+        } else {
+            w.setBlock(xa,     kRigY + 1, za, BR::Rail, 0); // 西壁（V 西邻 +1）
+            w.setBlock(xa + 1, kRigY,     za, BR::Rail, 0); // V 谷格（两侧皆 +1 → 谷面 2|fx-0.5|）
+            w.setBlock(xa + 2, kRigY + 1, za, BR::Rail, 0); // 东壁
+            tickN(w, 2);
+            MinecartManager carts;
+            carts.spawnCart(xa, kRigY + 1, za, &w); // 单端连接（东）→ 静置闸起步滑落
+            const float vCenter = float(xa + 1) + 0.5f;
+            const float vEnter = float(xa + 1);     // 谷格西缘（入谷判定线）
+            QList<float> xs, vs;
+            QVector3D prev = carts.posAt(0);
+            float accum = 0.0f;
+            int state = 0;
+            int rev = 0;
+            bool inRig = true;
+            for (int t = 0; t < 600 && inRig; ++t) {
+                carts.tickPushedCarts(0.016, &w);
+                const QVector3D p = carts.posAt(0);
+                xs.append(p.x());
+                vs.append((p.x() - prev.x()) / 0.016f); // 视速（位置差分）
+                accum += p.x() - prev.x();
+                if (state == 0) {
+                    if (accum > 0.25f) { state = 1; accum = 0.0f; }
+                    else if (accum < -0.25f) { state = -1; accum = 0.0f; }
+                } else if (state > 0 && accum < -0.25f) { ++rev; state = -1; accum = 0.0f; }
+                else if (state < 0 && accum > 0.25f) { ++rev; state = 1; accum = 0.0f; }
+                if (std::fabs(p.y() - prev.y()) > 0.55f) inRig = false; // Y 平滑守卫
+                prev = p;
+            }
+            // 曲线断言：首个入谷 tick 起 |v| 单调不增 + 到心距离单调不增（制动律常减速 → 严格递减）。
+            int i0 = -1;
+            for (int i = 0; i < xs.size(); ++i)
+                if (xs.at(i) >= vEnter) { i0 = i; break; }
+            bool monoV = i0 >= 0, monoD = i0 >= 0;
+            for (int i = i0 + 1; i < xs.size(); ++i) {
+                if (std::fabs(vs.at(i)) > std::fabs(vs.at(i - 1)) + 2e-3f) monoV = false;
+                if (std::fabs(xs.at(i) - vCenter) > std::fabs(xs.at(i - 1) - vCenter) + 2e-3f)
+                    monoD = false;
+            }
+            const QVector3D fin = carts.posAt(0);
+            bool restOk = true;
+            for (int t = 0; t < 60 && restOk; ++t) { // 静止守卫：停驻后钉死（无 kick / 反溜再起）
+                carts.tickPushedCarts(0.016f, &w);
+                if ((carts.posAt(0) - fin).length() > 1e-3f) restOk = false;
+            }
+            okA = monoV && monoD && rev == 0 && inRig && restOk
+                && std::fabs(fin.x() - vCenter) <= 0.06f
+                && std::fabs(fin.y() - (float(kRigY) + 0.45f)) <= 0.03f;
+            if (!okA)
+                qInfo().noquote() << "  [t1019 diag] a i0" << i0 << "n" << xs.size() << "monoV"
+                                  << monoV << "monoD" << monoD << "rev" << rev << "inRig" << inRig
+                                  << "rest" << restOk << "fin" << fin;
+            carts.clearAll();
+            w.setBlock(xa,     kRigY + 1, za, BR::Air, 0);
+            w.setBlock(xa + 1, kRigY,     za, BR::Air, 0);
+            w.setBlock(xa + 2, kRigY + 1, za, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // ── (b) 高速档（通过）。rig 选址：footprint x0-10..x0+1 × z0-1..z0+1 × Y-1..Y+2。──
+        bool okB = false;
+        int xb = -1, zb = -1;
+        for (int zz = 3; zz < 94 && xb < 0; zz += 2)
+            for (int xx = 12; xx + 1 < 96 && xb < 0; ++xx) {
+                bool clear = true;
+                for (int dx = -10; dx <= 1 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 2 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { xb = xx; zb = zz; }
+            }
+        if (xb < 0) {
+            qInfo().noquote() << "  [t1019 diag] b: no clear rig area";
+        } else {
+            // 动力平台与谷壁同层（R+1）—— 平台直通西壁零爬阶耗能，入谷速 = boost 全额（能量 > 阈）。
+            for (int i = -9; i <= -2; ++i) { // 8 格通电动力轨（各自 RedstoneBlock 直供兼支撑）
+                w.setBlock(xb + i, kRigY,     zb, BR::RedstoneBlock, 0);
+                w.setBlock(xb + i, kRigY + 1, zb, BR::GoldenRail, 0);
+            }
+            w.setBlock(xb - 1, kRigY + 1, zb, BR::Rail, 0); // 西壁平段（东邻 V 低一格）
+            w.setBlock(xb,     kRigY,     zb, BR::Rail, 0); // V 谷格（两侧皆 +1）
+            w.setBlock(xb + 1, kRigY + 1, zb, BR::Rail, 0); // 东壁（东死端）
+            tickN(w, 8);
+            const bool poweredOk = (w.stateAt(xb - 2, kRigY + 1, zb) & BR::GoldenRailStateOnFlag) != 0;
+            MinecartManager carts;
+            carts.spawnCart(xb - 9, kRigY + 1, zb, &w);
+            const float valleyCenter = float(xb) + 0.5f;
+            const bool pushed = carts.pushEmptyCart(&w, QVector3D(float(xb - 9) - 0.2f,
+                                                                 float(kRigY + 1) + 0.45f,
+                                                                 float(zb) + 0.5f), 1.0f, 0.0f);
+            QList<float> xs;
+            float maxX = carts.posAt(0).x();
+            xs.append(maxX);
+            QVector3D prev = carts.posAt(0);
+            float accum = 0.0f;
+            int state = 0;
+            int rev = 0;
+            for (int t = 0; t < 400; ++t) {
+                carts.tickPushedCarts(0.016f, &w);
+                if (!carts.aliveAt(0)) break;
+                const QVector3D p = carts.posAt(0);
+                xs.append(p.x());
+                maxX = std::max(maxX, p.x());
+                accum += p.x() - prev.x();
+                if (state == 0) {
+                    if (accum > 0.25f) { state = 1; accum = 0.0f; }
+                    else if (accum < -0.25f) { state = -1; accum = 0.0f; }
+                } else if (state > 0 && accum < -0.25f) { ++rev; state = -1; accum = 0.0f; }
+                else if (state < 0 && accum > 0.25f) { ++rev; state = 1; accum = 0.0f; }
+                prev = p;
+            }
+            bool monoFwd = true; // x 全程单调不减（无往复；飞出 / 停驻都只进不退）
+            for (int i = 1; i < xs.size(); ++i)
+                if (xs.at(i) < xs.at(i - 1) - 2e-3f) monoFwd = false;
+            okB = poweredOk && pushed && monoFwd && rev == 0
+                && maxX > valleyCenter + 0.9f; // 越谷心东侧 = 未被捕（通过）
+            if (!okB)
+                qInfo().noquote() << "  [t1019 diag] b pow" << poweredOk << "push" << pushed
+                                  << "monoFwd" << monoFwd << "rev" << rev << "maxX" << maxX
+                                  << "center" << valleyCenter;
+            carts.clearAll();
+            for (int i = -9; i <= -2; ++i) {
+                w.setBlock(xb + i, kRigY,     zb, BR::Air, 0);
+                w.setBlock(xb + i, kRigY + 1, zb, BR::Air, 0);
+            }
+            w.setBlock(xb - 1, kRigY + 1, zb, BR::Air, 0);
+            w.setBlock(xb,     kRigY,     zb, BR::Air, 0);
+            w.setBlock(xb + 1, kRigY + 1, zb, BR::Air, 0);
+            tickN(w, 2);
+        }
+        // ── (c) 源码钉（任一消失即红）。──
+        const QString exeDir1019 = QCoreApplication::applicationDirPath();
+        const QString root1019 = QDir(exeDir1019 + QStringLiteral("/..")).absolutePath();
+        auto readSrc1019 = [&root1019](const QString &rel) -> QString {
+            QFile f(root1019 + QStringLiteral("/") + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mc1019 = readSrc1019(QStringLiteral("src/Entities/minecartmanager.cpp"));
+        const QString mh1019 = readSrc1019(QStringLiteral("src/Entities/minecartmanager.h"));
+        const bool okC1 = mc1019.contains(QStringLiteral(
+            "if (v2 >= pass2) return false;")); // 能量足 → 放行通过
+        const bool okC2 = mc1019.contains(QStringLiteral(
+            "const float pass2 = 2.0f * kCartSlopeGravity")); // 通过阈 = 2g·(h + 余量)
+        const bool okC3 = mc1019.contains(QStringLiteral(
+            "if (!BlockRegistry::isRail(world->blockAt(sx, railY + k, sz))) break;")); // 对面坡升扫描
+        const bool okC4 = mh1019.contains(QStringLiteral(
+            "static constexpr int kCartValleyClimbScanMax = 16;"));
+        const bool okT1019 = okA && okB && okC1 && okC2 && okC3 && okC4;
+        if (!okT1019) ++totalFail;
+        if (!okT1019)
+            qInfo().noquote() << "  [t1019 diag] a" << okA << "b" << okB
+                              << "| c" << okC1 << okC2 << okC3 << okC4;
+        qInfo().noquote() << (okT1019 ? "PASS" : "FAIL")
+                          << "| t1019 V-valley pass physics on the energy criterion (t981 rework):"
+                             " the old capture gate was a single speed threshold (|v| <= 10 captures"
+                             " everything gravity can reach, > 10 passes everything powered) which"
+                             " cannot ask the per-case question 'can THIS cart climb THIS opposite"
+                             " wall' - near-conservative valley physics returns exactly the rim-drop"
+                             " energy to a cart entering from an equal-height wall, so a threshold"
+                             " either traps energetic gravity traffic in the bowl or releases"
+                             " under-powered carts to fail on the far wall and re-enter (the spin"
+                             " limit cycle). Fix replaces the gate with the energy criterion: pass"
+                             " iff v^2 >= 2*kCartSlopeGravity*(h_opposite + margin), where g is the"
+                             " project's slope kinematics constant (world gravity 28 x sin45 along-"
+                             " track component, the same constant the valley integrates) and"
+                             " h_opposite is the total contiguous +1-per-cell climb of the far wall"
+                             " (scanned per travel direction, staircase walls fully counted - a"
+                             " deep bowl must not release a cart it cannot eject); the 0.05-block"
+                             " margin covers the settle-kick re-pump so a just-barely-escaping cart"
+                             " is captured instead of crest-stalling into the kick-back band."
+                             " Insufficient energy still brakes to a single smooth stop at the"
+                             " valley center (t981 law unchanged). Probe legs (position/velocity"
+                             " curves, pass-or-monotonic-decel, no oscillation in either speed"
+                             " tier): (a) low tier - cart released on the west rim of a 3-cell V"
+                             " enters at v^2 ~ 21 < threshold ~ 41.6, |v| non-increasing after"
+                             " valley entry, distance-to-center non-increasing (never crosses),"
+                             " zero x reversals, parks within 0.06 of the center, pinned for 60"
+                             " ticks; (b) high tier - boost-fed cart enters at v^2 ~ 135 > threshold,"
+                             " x strictly non-decreasing, zero reversals, crosses >= 0.9 east of the"
+                             " center (a captured cart cannot); (c) source pins for the energy"
+                             " pass line, the pass threshold, the opposite-climb scan and the scan"
+                             " cap constant"
                           ;
     }
 
