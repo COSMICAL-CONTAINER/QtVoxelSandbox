@@ -862,11 +862,42 @@ void BoatManager::breakRiddenBoat()
     notifyChanged();
 }
 
-bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world,
-                                 bool instantBreak)
+// t1015 指定船单盒射线命中距离（头注释见 .h）：几何与 findBoatHit 完全同式（X=kBoatHalfW /
+//   Y=kBoatHalfH / Z=kBoatHalfLen），只是把遍历收窄到指定槽 —— 供骑乘改判把「乘员 + 船」组合拆成
+//   两盒分别求交、按最近命中定目标。越界 / 空槽 → -1；dir 退化（零 / 非有限）→ -1（同 findBoatHit 守卫）。
+float BoatManager::rayHitDistAt(int i, const QVector3D &origin, const QVector3D &dir, float maxDist) const
 {
-    float dist = 0.0f;
-    const int idx = findBoatHit(origin, dir, maxDist, &dist);
+    if (i < 0 || i >= int(m_boats.size()) || !m_boats[size_t(i)].alive) return -1.0f;
+    if (!std::isfinite(dir.x()) || !std::isfinite(dir.y()) || !std::isfinite(dir.z())) return -1.0f;
+    const float dirLen2 = dir.x()*dir.x() + dir.y()*dir.y() + dir.z()*dir.z();
+    if (dirLen2 < 1e-8f) return -1.0f;
+    const Boat &b = m_boats[size_t(i)];
+    const float ext[3] = { kBoatHalfW, kBoatHalfH, kBoatHalfLen };
+    float tmin = 0.0f, tmax = maxDist;
+    bool hit = true;
+    const float p[3] = { b.pos.x(), b.pos.y(), b.pos.z() };
+    const float o[3] = { origin.x(), origin.y(), origin.z() };
+    const float d[3] = { dir.x(), dir.y(), dir.z() };
+    for (int k = 0; k < 3; ++k) {
+        const float mn = p[k] - ext[k], mx = p[k] + ext[k];
+        if (std::abs(d[k]) < 1e-8f) {
+            if (o[k] < mn || o[k] > mx) { hit = false; break; }
+            continue;
+        }
+        float t1 = (mn - o[k]) / d[k];
+        float t2 = (mx - o[k]) / d[k];
+        if (t1 > t2) std::swap(t1, t2);
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) { hit = false; break; }
+    }
+    if (!hit) return -1.0f;
+    return tmin >= 0.0f ? tmin : 0.0f;
+}
+
+// t1015 指定船结算（头注释见 .h；hitBoatFromRay 的指定目标版 —— 摧毁 / 掉落链逐行同源）。
+bool BoatManager::hitBoatAt(int idx, World *world, bool instantBreak)
+{
     if (idx < 0 || idx >= int(m_boats.size()) || !m_boats[size_t(idx)].alive) return false;
     // t508 挖船：移除该船 + 清骑乘态（若挖的是被骑的船）+ emit boatBroken → 呈层 spawnItem 掉船物品
     //   （机制等价 MC 1.0 攻击船 → 船破坏掉船物品）。格坐标取船中心所在格；boatType 决定掉哪种船物品。
@@ -916,4 +947,15 @@ bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, 
     emit boatBroken(dropX, dropY, dropZ, bt);
     notifyChanged();
     return true;
+}
+
+// t508 挖船（寻的 + 结算）：t1015 起寻的与结算分离 —— 本函数只跑 findBoatHit 寻的（最近活体船），
+//   结算链收口到 hitBoatAt（骑乘改判的指定目标路径 hitBoatAt(rideBoat, ...) 与此处逐行同源，杜绝
+//   「重路由结算」与「直击结算」两份实现漂移）。
+bool BoatManager::hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world,
+                                 bool instantBreak)
+{
+    float dist = 0.0f;
+    const int idx = findBoatHit(origin, dir, maxDist, &dist);
+    return hitBoatAt(idx, world, instantBreak);
 }

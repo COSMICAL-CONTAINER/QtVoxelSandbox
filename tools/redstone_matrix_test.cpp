@@ -12336,10 +12336,11 @@ int main(int argc, char *argv[])
             const bool okA2 = !carts.aliveAt(0) && ents.rideCartAt(mob) == -1
                               && ents.aliveAt(mob) && ents.healthAt(mob) == mobHp0
                               && brokenCount == 0;
-            // (a3) 源码钉（t889 先例）：beginMining mob 分支的重路由接线——乘骑判定（rideCartAt/rideBoatAt）
-            //      → 改判进 hitCartFromRay / hitBoatFromRay（review26 #4：**验返回值**〔`&&` 进冷却门条件 =
-            //      未命中不置冷却/不发挥手〕+ 射线长度 m_hitDist〔非 kReach 全程，不可隔墙打车〕）→ 未命中
-            //      车盒落回 attackMob（乘员本体照旧可打）。滤注释体（注释里的字面量不参与）。
+            // (a3) 源码钉（t889 先例；t1015 改版）：beginMining mob 分支的骑乘甄别接线——乘骑判定
+            //      （rideCartAt/rideBoatAt）→ **t1015 指定载具单盒甄别**（rayHitDistAt(乘员所乘的那台,
+            //      eye, look, m_hitDist) 与乘员距离比较取射线最近者）→ 命中载具盒进 hit*At 指定结算
+            //      （冷却门 && 判定 = 单击单目标）→ 乘员盒更近 / 载具未中落回 attackMob（乘员本体照旧
+            //      可打，review26 #4 语义保持）。滤注释体（注释里的字面量不参与）。
             bool okA3 = false;
             {
                 const QString exeDir = QCoreApplication::applicationDirPath();
@@ -12356,16 +12357,20 @@ int main(int argc, char *argv[])
                         if (!line.trimmed().startsWith(QLatin1String("//"))) {
                             body += line; body += QLatin1Char('\n');
                         }
-                    // 重路由语句面（review26 #4 契约）：乘骑判定 + 「冷却门 && hit*FromRay(…, m_hitDist, …)」
-                    // 值门调用（`&&` 前缀钉返回值被消费——无条件弃值调用的旧形态不再匹配）+ 分支内落回
-                    // attackMob（首个出现位须在各自值门调用之后）。
+                    // 骑乘甄别语句面（t1015 契约）：乘骑判定 + 「冷却门 && rayHitDistAt 指定载具单盒
+                    // 甄别（m_hitDist 射线长）」值门 → hit*At(指定槽) 结算 + 分支内落回 attackMob
+                    // （首个出现位须在各自值门调用之后）。
                     const int iRideC = body.indexOf(QStringLiteral("m_entityManager->rideCartAt(mobIdx)"));
                     const int iRideB = body.indexOf(QStringLiteral("m_entityManager->rideBoatAt(mobIdx)"));
-                    const int iHitC  = body.indexOf(QStringLiteral("&& m_minecartManager->hitCartFromRay(eye, look, m_hitDist, m_world,"));
-                    const int iHitB  = body.indexOf(QStringLiteral("&& m_boatManager->hitBoatFromRay(eye, look, m_hitDist, m_world,"));
+                    const int iDistC = body.indexOf(QStringLiteral("m_minecartManager->rayHitDistAt(rideCart, eye, look, m_hitDist)"));
+                    const int iDistB = body.indexOf(QStringLiteral("m_boatManager->rayHitDistAt(rideBoat, eye, look, m_hitDist)"));
+                    const int iHitC  = body.indexOf(QStringLiteral("m_minecartManager->hitCartAt(rideCart"));
+                    const int iHitB  = body.indexOf(QStringLiteral("m_boatManager->hitBoatAt(rideBoat"));
                     const int iAtkC  = iHitC >= 0 ? body.indexOf(QStringLiteral("attackMob(mobIdx);"), iHitC) : -1;
                     const int iAtkB  = iHitB >= 0 ? body.indexOf(QStringLiteral("attackMob(mobIdx);"), iHitB) : -1;
-                    okA3 = iRideC >= 0 && iRideB > iRideC && iHitC > iRideC && iHitB > iRideB
+                    okA3 = iRideC >= 0 && iRideB > iRideC
+                           && iDistC > iRideC && iDistB > iRideB
+                           && iHitC > iDistC && iHitB > iDistB
                            && iAtkC > iHitC && iAtkB > iHitB;
                 }
             }
@@ -37825,6 +37830,209 @@ Item {
                              "loses the table and every shape leg above reads the scattered"
                              "signature: ~96% singletons, conn26 ~ 0%)"
                           << (okF ? QString() : QStringLiteral("source pin missing"));
+    }
+
+    // ── P-t1015 载具攻击目标甄别探针（R19.20 t1015；机制等价 MC 1.0 骑乘组合 hitbox 拆分甄别）──
+    //    rig：共享世界清场 + 真 EntityManager/BoatManager/MinecartManager 注入 + tickVehicleRiding 真
+    //    登乘钉位 + beginMining 真攻击链（t866「不可直驱」的 Q_INVOKABLE 公开面，review0830C hitOnceC
+    //    同式：fresh pc 绕攻击冷却、m_hitDist 缺省 5.0、m_vel 零无暴击）。五腿：
+    //    (a) 生物坐船瞄乘员上半（乘员盒命中、船盒不在射线上）→ 乘员掉血、船无恙（review26 #4 旧行为保持）；
+    //    (b) 瞄船身（两盒都在射线上、船面更近）→ 船被拆、乘员不掉血（单目标，最近 AABB 甄别）；
+    //    (c) 甄别阴性腿：乘员身后挡**另一条**船（沿同射线、船盒接住上身射线）→ 只打乘员，两条船全无恙
+    //        —— 旧 t866 改判「重路由最近任意船」会把挡路的船误拆（revert 即红：乘员不掉血 + decoy 被毁）；
+    //    (d1) 矿车同族：瞄车身（两盒同射线、车面更近）→ 车扣 1 耐久（3→2）、乘员不掉血；
+    //    (d2) 瞄乘员上身（车盒不在射线上）→ 乘员掉血、车耐久不动。
+    //    (e) 源码钉：beginMining 骑乘改判的 rayHitDistAt 甄别行 + hit*At 指定目标结算行 + 两 manager
+    //        新读口签名（阴性轮敏感：旧重路由行被删即红）。
+    {
+        const auto [x0T1015, z0T1015] = nextSlot();
+        QQuickWindow probeWinT1015;
+        bool okA = false, okB = false, okC = false, okD = false, okE = false;
+        // 清场帮手：rig 柱体全域空气（mob 生成 t642 防嵌墙 + 射线净空），底铺石头场景面。
+        const auto clearVolT1015 = [&](int cx, int cz) {
+            for (int dx = -2; dx <= 3; ++dx)
+                for (int dz = -3; dz <= 3; ++dz)
+                    for (int dy = 0; dy <= 4; ++dy)
+                        w.setBlock(cx + dx, kRigY + dy, cz + dz, BR::Air, 0);
+            for (int dx = -2; dx <= 3; ++dx)
+                for (int dz = -3; dz <= 3; ++dz)
+                    w.setBlock(cx + dx, kRigY - 1, cz + dz, BR::Stone, 0);
+        };
+        // 攻击帮手（review0830C hitOnceC 同式）：fresh pc（攻击冷却不跨腿）+ 眼位/瞄点 → yaw/pitch →
+        //   loadSavedState + beginMining。eyeY 由脚位推（eye = feet + 1.62，r0830C 同约定）。
+        const auto attackT1015 = [&](EntityManager &em, BoatManager *bm, MinecartManager *cm,
+                                     const QVector3D &feet, const QVector3D &aim) {
+            PlayerController pc;
+            pc.setParentItem(probeWinT1015.contentItem());
+            pc.grab(); // m_captured（beginMining 入口门；t949 同式）
+            pc.setWorld(&w);
+            pc.setEntityManager(&em);
+            if (bm) pc.setBoatManager(bm);
+            if (cm) pc.setMinecartManager(cm);
+            const QVector3D eye(feet.x(), feet.y() + 1.62f, feet.z());
+            const QVector3D d = aim - eye;
+            const float len = d.length();
+            const float pitch = std::asin(d.y() / len) * 57.2957795f;
+            const float yaw = std::atan2(-d.x(), -d.z()) * 57.2957795f;
+            pc.loadSavedState(feet.x(), feet.y(), feet.z(), yaw, pitch, 2 /* Survival */);
+            pc.beginMining();
+        };
+        // 搭船 rig：船在 (bx,kRigY,bz) 格 + 猪同格生成 → tickVehicleRiding 登乘钉位（seat 0，+X 侧偏）。
+        //   返回 mob 槽号（-1 = 登乘失败，腿内 diag）。**tickVehicleRiding 三连调**：Pass C 登乘发生在
+        //   首调、Pass B 座位钉位在次调（t866 rig 的 tick+riding 循环同构）——单调只登乘不钉位，乘员
+        //   仍站生成点 = 甄别射线几何全错（首跑 diag a/c 假红归因：mobPos 停在 spawn 点）。
+        const auto boatRigT1015 = [&](EntityManager &em, BoatManager &bm, int bx, int bz) {
+            clearVolT1015(bx, bz);
+            bm.clearAll();
+            bm.spawnBoat(bx, kRigY, bz, BoatManager::Oak);
+            const int mob = em.spawnMobTyped(bx, kRigY, bz, EntityManager::MobPig, QStringLiteral("#f0a8b0"), 10);
+            em.setVehicleManagers(nullptr, &bm);
+            for (int t = 0; t < 3; ++t) em.tickVehicleRiding();
+            return mob;
+        };
+        // (a) 瞄乘员上半：水平射线 Y = kRigY+1.62（乘员盒 [1.0,1.9] 内、船盒顶 1.35 之下）。
+        {
+            EntityManager em;
+            BoatManager bm;
+            const int mob = boatRigT1015(em, bm, x0T1015, z0T1015);
+            const bool boarded = mob >= 0 && em.rideBoatAt(mob) == 0 && bm.mobPassengerAt(0, 0) == mob;
+            const int hp0 = em.healthAt(mob);
+            attackT1015(em, &bm, nullptr,
+                        QVector3D(float(x0T1015) + 0.8f, float(kRigY), float(z0T1015) + 3.5f),
+                        QVector3D(float(x0T1015) + 0.8f, float(kRigY) + 1.62f, float(z0T1015) + 0.5f));
+            okA = boarded && em.healthAt(mob) < hp0 && bm.aliveAt(0);
+            if (!okA)
+                qInfo().noquote() << "  [t1015 diag a] boarded" << boarded << "mob" << mob
+                                  << "hp" << hp0 << "->" << (mob >= 0 ? em.healthAt(mob) : -1)
+                                  << "boatAlive" << bm.aliveAt(0)
+                                  << "mobPos" << (mob >= 0 ? em.posAt(mob) : QVector3D());
+        }
+        // (b) 瞄船身：射线穿船盒面（X 进面 0.833 处 Y=1.187 ∈ 船盒 [0.65,1.35]）后才穿乘员盒
+        //     （0.967 处 Y=1.117 ∈ 乘员盒 [1.0,1.9]）→ 船更近 → 拆船、乘员不掉血。
+        {
+            const auto [xb, zb] = nextSlot();
+            EntityManager em;
+            BoatManager bm;
+            const int mob = boatRigT1015(em, bm, xb, zb);
+            const int hp0 = em.healthAt(mob);
+            attackT1015(em, &bm, nullptr,
+                        QVector3D(float(xb) - 2.5f, float(kRigY), float(zb) + 0.5f),
+                        QVector3D(float(xb) + 0.5f, float(kRigY) + 1.1f, float(zb) + 0.5f));
+            okB = mob >= 0 && !bm.aliveAt(0) && em.healthAt(mob) == hp0;
+            if (!okB)
+                qInfo().noquote() << "  [t1015 diag b] mob" << mob << "hp" << hp0
+                                  << "->" << (mob >= 0 ? em.healthAt(mob) : -1)
+                                  << "boatAlive" << bm.aliveAt(0);
+        }
+        // (c) 甄别阴性（本任务核心行为）：乘员身后沿同一上身射线挡 decoy 船 B（(x,kRigY+1,z-2) 格，
+        //     盒 Y [1.65,2.35] 接住 1.85 高的射线、Z 进面距 4.3 < m_hitDist 5.0）。旧改判重路由
+        //     hitBoatFromRay 会寻的到 B 并误拆；新甄别 rayHitDistAt(本乘员的 A 船) = 未中 → 打乘员。
+        {
+            const auto [xc, zc] = nextSlot();
+            EntityManager em;
+            BoatManager bm;
+            bm.clearAll();
+            clearVolT1015(xc, zc);
+            bm.spawnBoat(xc, kRigY, zc, BoatManager::Oak);          // A：乘员所乘
+            bm.spawnBoat(xc, kRigY + 1, zc - 2, BoatManager::Oak);  // B：decoy（A-B 中心距 √5 ≥ 1.4 可生成）
+            const int mob = em.spawnMobTyped(xc, kRigY, zc, EntityManager::MobPig, QStringLiteral("#f0a8b0"), 10);
+            em.setVehicleManagers(nullptr, &bm);
+            for (int t = 0; t < 3; ++t) em.tickVehicleRiding(); // 登乘（首调）+ 座位钉位（次调），同 boatRigT1015 注
+            const bool boarded = mob >= 0 && em.rideBoatAt(mob) == 0;
+            const int hp0 = em.healthAt(mob);
+            attackT1015(em, &bm, nullptr,
+                        QVector3D(float(xc) + 0.8f, float(kRigY) + 0.23f, float(zc) + 3.5f),
+                        QVector3D(float(xc) + 0.8f, float(kRigY) + 1.85f, float(zc) + 0.5f));
+            okC = boarded && em.healthAt(mob) < hp0 && bm.aliveAt(0) && bm.aliveAt(1);
+            if (!okC)
+                qInfo().noquote() << "  [t1015 diag c] boarded" << boarded << "mob" << mob
+                                  << "hp" << hp0 << "->" << (mob >= 0 ? em.healthAt(mob) : -1)
+                                  << "A" << bm.aliveAt(0) << "B" << bm.aliveAt(1);
+        }
+        // (d1)(d2) 矿车同族：轨格落车 + 猪同格登乘（钉位 Y = 车心 +0.1375）。
+        const auto cartRigT1015 = [&](EntityManager &em, MinecartManager &cm, int cx, int cz) {
+            clearVolT1015(cx, cz);
+            cm.clearAll();
+            w.setBlock(cx, kRigY, cz, BR::Rail, 0);
+            cm.spawnCart(cx, kRigY, cz, &w);
+            const int mob = em.spawnMobTyped(cx, kRigY, cz, EntityManager::MobPig, QStringLiteral("#f0a8b0"), 10);
+            em.setVehicleManagers(&cm, nullptr);
+            for (int t = 0; t < 3; ++t) em.tickVehicleRiding(); // 登乘（首调）+ 座位钉位（次调），同 boatRigT1015 注
+            return mob;
+        };
+        {
+            const auto [xd, zd] = nextSlot();
+            EntityManager em;
+            MinecartManager cm;
+            // (d1) 瞄车身：水平射线 Y = 车心高（车盒 [−0.45,+0.45] 与乘员盒 [−0.3125,+0.5875] 相对车心
+            //      都含 0）→ 车面进距 3.55 < 乘员面 3.6 → 车更近 → 车扣 1 耐久、乘员不掉血。
+            const int mob = cartRigT1015(em, cm, xd + 2, zd);
+            const int hp0 = em.healthAt(mob);
+            attackT1015(em, nullptr, &cm,
+                        QVector3D(float(xd) - 1.5f, float(kRigY) + 0.45f - 1.62f, float(zd) + 0.5f),
+                        QVector3D(float(xd) + 2.5f, float(kRigY) + 0.45f, float(zd) + 0.5f));
+            const bool okD1 = mob >= 0 && cm.aliveAt(0) && cm.hpAt(0) == 2 && em.healthAt(mob) == hp0;
+            // (d2) 瞄乘员上身（独立 rig）：射线 Y = kRigY+0.95（乘员盒顶 1.0375 内、车盒顶 0.9 之上）
+            //      → 车盒不在射线上 → 打乘员、车耐久不动。
+            const auto [xd2, zd2] = nextSlot();
+            EntityManager em2;
+            MinecartManager cm2;
+            const int mob2 = cartRigT1015(em2, cm2, xd2 + 2, zd2);
+            const int hp02 = em2.healthAt(mob2);
+            attackT1015(em2, nullptr, &cm2,
+                        QVector3D(float(xd2) - 1.5f, float(kRigY) + 0.95f - 1.62f, float(zd2) + 0.5f),
+                        QVector3D(float(xd2) + 2.5f, float(kRigY) + 0.95f, float(zd2) + 0.5f));
+            const bool okD2 = mob2 >= 0 && em2.healthAt(mob2) < hp02 && cm2.aliveAt(0) && cm2.hpAt(0) == 3;
+            okD = okD1 && okD2;
+            if (!okD)
+                qInfo().noquote() << "  [t1015 diag d] d1 mob" << mob << "hp" << hp0
+                                  << "->" << (mob >= 0 ? em.healthAt(mob) : -1)
+                                  << "cartHp" << cm.hpAt(0) << "alive" << cm.aliveAt(0)
+                                  << "| d2 mob" << mob2 << "hp" << hp02
+                                  << "->" << (mob2 >= 0 ? em2.healthAt(mob2) : -1)
+                                  << "cartHp" << cm2.hpAt(0) << "alive" << cm2.aliveAt(0);
+        }
+        // (e) 源码钉：骑乘改判的甄别行 / 指定结算行 / 新读口签名（旧重路由行绝迹）。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile pcf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            QFile mmh(root + QStringLiteral("/src/Entities/minecartmanager.h"));
+            QFile bmh(root + QStringLiteral("/src/Entities/boatmanager.h"));
+            const QString pcCpp = pcf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pcf.readAll()) : QString();
+            const QString mmHdr = mmh.open(QIODevice::ReadOnly) ? QString::fromUtf8(mmh.readAll()) : QString();
+            const QString bmHdr = bmh.open(QIODevice::ReadOnly) ? QString::fromUtf8(bmh.readAll()) : QString();
+            okE = pcCpp.contains(QStringLiteral("m_minecartManager->rayHitDistAt(rideCart, eye, look, m_hitDist)"))
+                && pcCpp.contains(QStringLiteral("m_boatManager->rayHitDistAt(rideBoat, eye, look, m_hitDist)"))
+                && pcCpp.contains(QStringLiteral("m_minecartManager->hitCartAt(rideCart"))
+                && pcCpp.contains(QStringLiteral("m_boatManager->hitBoatAt(rideBoat"))
+                && mmHdr.contains(QStringLiteral("float rayHitDistAt(int idx, const QVector3D &origin"))
+                && bmHdr.contains(QStringLiteral("float rayHitDistAt(int i, const QVector3D &origin"))
+                && pcCpp.contains(QStringLiteral("t1015 甄别"));
+        }
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        if (!okC) ++totalFail;
+        if (!okD) ++totalFail;
+        if (!okE) ++totalFail;
+        qInfo().noquote() << (okA && okB && okC && okD && okE ? "PASS" : "FAIL")
+                          << "| t1015 vehicle-attack target discrimination rig: mob riding a boat,"
+                             "ray through the rider's upper half damages the rider only (boat"
+                             "intact), ray through the hull with BOTH boxes on the ray picks the"
+                             "nearer boat surface -> boat breaks and the rider keeps full HP"
+                             "(single target per click), and the decoy leg pins the t1015 core:"
+                             "a second boat parked BEHIND the rider catching the same upper-body"
+                             "ray is no longer hit - the rider takes the damage and BOTH boats"
+                             "survive (old t866 re-route resolved 'nearest any boat' and would"
+                             "dismantle the wrong decoy); cart family mirrors both faces (hull"
+                             "click costs exactly 1 of 3 cart HP with rider unharmed, upper-body"
+                             "click hurts the rider with cart HP untouched); source pins lock"
+                             "the rayHitDistAt nearest-AABB discrimination and the hit*At pinned"
+                             "settlement (negative-round sensitive)"
+                          << (okA && okB && okC && okD && okE
+                                  ? QString()
+                                  : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4 e=%5")
+                                        .arg(okA).arg(okB).arg(okC).arg(okD).arg(okE));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";

@@ -163,6 +163,21 @@ public:
     bool hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist,
                         World *world = nullptr, bool instantBreak = false);
 
+    // ── t1015 载具攻击目标甄别（骑乘组合碰撞盒拆分；C++ 直调，同上非 Q_INVOKABLE）──
+    // 第 idx 辆矿车的**单盒**射线命中距离（slab ray-AABB，几何与 findCartHit 完全同式，只是把遍历
+    //   收窄到指定槽）。命中 → 返命中距离 tmin（≥0；起点已在盒内返 0）；未命中 / 越界 / 空槽 → -1。
+    //   供 PlayerController.beginMining 骑乘改判用：乘员 AABB 与车 AABB 重叠时，把「骑乘组合」拆成
+    //   两个独立盒分别求交，取**射线最近**者定目标（旧行为 = 乘员命中即重路由「最近任意车」，别的
+    //   车挡在乘员身后会被误拆）。纯几何只读，无副作用。
+    float rayHitDistAt(int idx, const QVector3D &origin, const QVector3D &dir, float maxDist) const;
+
+    // 对**指定**矿车结算一次攻击（t1015 指定目标版 hitCartFromRay：跳过 findCartHit 寻的，直接结算
+    //   idx 车 —— 甄别已由 caller 用 rayHitDistAt + 乘员距离比较完成，此处只负责耐久 / 摧毁链）。
+    //   结算语义与 hitCartFromRay 完全同链：instantBreak（创造）直接摧毁无掉落；生存 hp>1 扣 1 血
+    //   摇晃、末击 releaseSlot + emit cartBroken（箱子矿车 chestCartBroken 同构）；挖被玩家骑的车
+    //   （idx == m_riderCart）清骑乘态。越界 / 空槽 → false（无结算）。
+    bool hitCartAt(int idx, World *world = nullptr, bool instantBreak = false);
+
     // 尝试骑乘：跑 findCartHit 命中矿车 → 设 m_riderCart + 返 true；未命中 / 命中当前骑的 → false。
     //   由 PlayerController placeBlock 矿车段调（右键瞄矿车 → 上车，优先于放矿车）。
     bool tryMount(const QVector3D &origin, const QVector3D &dir, float maxDist);
