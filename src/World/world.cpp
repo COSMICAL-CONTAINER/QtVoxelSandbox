@@ -6123,137 +6123,197 @@ void World::placeBedrock()
     }
 }
 
-//   确定性矿石散布（t84/t279/t308/t569，PLAN §2-K）：遍历 stone 区段（generate 把 y<h-2 的格填 Stone，沙漠/沙滩表层
-//   除外），按 hashVoxel(seed,x,y,z) 的不同位段做密度筛选 → 替换为煤矿 / 铜矿 / 铁矿 / 金矿 / 钻石矿 / 红石矿。
-//   **高度分层**（机制等价 MC 1.0 矿物随深度分层 + spec t308「铜铁金按序更稀少」）：
-//     - 钻石（diamond_ore）：深层 y∈[kDiamondMin=5, kDiamondMax=40]（紧贴基岩 kBedrockTop=4 之上）。
-//       密度最低（稀有，0.4%）。**t308 深度修正**：上界 16→40（用户 research 后定，地表 ~62、洞穴贯穿深层 →
-//       深挖更易见钻矿石；密度仍最低故整体稀有度不变）。需铁镐（minTier3）。
-//     - 金（gold_ore）：深层 y∈[kOreMin=5, kGoldMax=25]（机制等价 MC 金矿深层富集）。密度次低（稀有，0.5%）。
-//       金属族中最稀有（spec「铜铁金按序更稀少」→ 金最稀有）。需铁镐（minTier3）。掉金原矿→熔炉烧金锭。
-//     - 青金（lapis_ore，t471）：深层 y∈[kOreMin=5, kLapisMax=31]（机制等价 MC 1.0 青金矿 Y<32 浅深层富集）。
-//       密度中低（稀有，0.6%）。需石镐（minTier2，同 iron/copper 门槛）。掉青金石物品（附魔前置材料，t471）。
-//     - 红 石（redstone_ore，t569）：最深层 y∈[kOreMin=5, kRedstoneMax=16]（机制等价 MC 1.0 红石矿 Y<16
-//       深层富集）。密度与钻石相当（0.4%）。需铁镐（minTier3，同 diamond/gold 门槛）。掉 4 红石粉（指南针 /
-//       钟合成材料）。玩家走过 / 挖掘时点亮微弱红光（playercontroller scanRedstoneOre，机制等价 MC 触发发光）。
-//     - 铁（iron_ore）：中层 y∈[kOreMin=5, kIronMax=30]（机制等价 MC 铁矿中下层富集）。中等密度（0.7%）。
-//       需石镐（minTier2）。掉铁原矿→熔炉烧铁锭。
-//     - 铜（copper_ore）：浅中层 y∈[kOreMin=5, kCopperMax=45]（机制等价 MC 铜矿浅中层富集）。密度次高（0.9%）。
-//       金属族中最常见 / 最浅（spec「铜铁金按序更稀少」→ 铜最常见）。需石镐（minTier2）。掉铜原矿→熔炉烧铜锭。
-//     - 煤（coal_ore）：浅层 y∈[kCoalMin=8, stoneTop]（机制等价 MC 煤矿靠近地表富集）。最高密度（1.0%）。
-//       木镐可挖（minTier1）。直接掉煤炭（燃料 / 火把原料，无需冶炼）。
-//   判定用两路独立哈希（r = hashVoxel(seed,...) 给钻石/铁/煤沿用旧位段 0/8/16，保旧矿脉分布；r2 = hashVoxel
-//   (seed^黄金比例常量,...) 给金/铜/青金/红石独立流）→ 7 矿各自独立。判定序（重叠区稀有矿优先）：钻石 > 金 >
-//   青金 > 红石 > 铁 > 铜 > 煤（先中者胜、一格至多一矿）。仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期
-//   随机源（QTime/时钟/全局 RNG）。
+//   t1014 矿脉化 worldgen（MC 1.0 式矿脉，取代旧逐体素散点 t84/t279/t308/t471/t569）：
 //
-//   **洞穴裸露矿物**（spec 核心）：worldgen 顺序 scatterOres → carveCaves，carveCaves（t278）挖走 stone/ore
-//   暴露矿脉于洞壁。各矿按深度分层 + 洞穴贯穿 → 各层洞壁天然见对应矿脉（spec「洞穴 carve 自然暴露」）。
+//   旧口径（已退役）：全 stone 区段逐体素双路 hash 密度筛选（0.4%~1.0%/体素）→ 全图胡椒面散点。
+//   P-t1014 基线实测散点签名（5 seed × 128×128×64，carve 后存活）：煤/铜/铁/金/钻/青连通域
+//   ≥96% 为孤块、连接率 conn4 ≈ 0%（矿脉化阴性轮敏感签名）。
+//
+//   新口径：**每矿种脉形 profile + 每 16×16 cell 定数成脉**（机制等价 MC 1.0「每 chunk N 次
+//   vein try」口径的确定性投影）——每 cell 每矿种脉数 = kBase + (hash%100 < kFrac)%，cell 内
+//   hash 抖动落点，逐 profile 印章（stamp）：
+//   ── 六矿种脉形 profile（煤/铁按用户逐字口径；金/红石/钻石/青金按 MC 1.0 wiki size 口径，
+//      高度带「以项目现有高度带为准对齐」逐字沿用旧散点常量；铜为 t308 项目自产矿种按 blob 并入）──
+//     - 煤   coal：2×2×5 长条（横轴 hash 二选一）+ 周围 6 邻壳 hash 贴连散块（25%）→ 均值 ~28 块/脉
+//     - 铁   iron：2×2×2 立方 + 8 角斜对贴块（35%）→ 均值 ~11 块/脉（MC 1.0 size 8 口径）
+//     - 金   gold：MC 1.0 size 8 → 8 步漂移游走 blob（60% 主轴漂移 + 40% 全向 6 邻）
+//     - 钻石 diam：MC 1.0 size 8 → 8 步 blob（上界 40 = t308 用户口径「深挖更易见」）
+//     - 红石 rs  ：MC 1.0 size 8 → 8 步 blob（y<16 最深层）
+//     - 青金 lapis：MC 1.0 size 7 → 7 步 blob（y<32 一带）
+//     - 铜   copper：t308 项目矿种（MC 无 1.0 对应）→ 8 步 blob（y<45 浅中层）
+//
+//   经济（**频率经济不涨总矿量**，用户硬口径）：每矿种总块数与旧散点 carve 后存活口径持平
+//   （±12% 窗；P-t1014 基线 @128×128×64：coal 7868 / copper 5084 / iron 2467 / gold 1526 /
+//   diamond 2106 / lapis 2530 / redstone 28393）。kBase/kFrac 即按此校准。
+//   【登记（既有口径如实沿用，非本单新引入）】旧红石散点 (r2>>24)%10000 为 8 位截断 → 有效密度
+//   40/256≈15.6%（≠当年代注释 0.4%）→ 红石散点总量被推高约 40×。t1014 按字面「与现散点口径
+//   持平」沿用该有效密度校准脉频（每 cell ~60 脉 → 深层红石近镶嵌毯状成片）；密度再平衡属后续
+//   玩法平衡任务，不在本单内擅自改动。
+//
+//   脉内断连（用户口径「允许断连、基本都连接起来」）：游走 blob / 长条 / 立方自身 6 连通；重叠带
+//   先到先得（印章序同旧判定序：钻>金>青>红>铁>铜>煤）+ carve 切穿 + 非石格拒绝 → 天然小断连率。
+//   连接率窗 conn4 ≥ 60%（P-t1014 量出）。
+//
+//   结构避让（既有优先级别破）：本 pass 仍先于 placeGravelPockets / carveCaves / 矿井 / 神殿 /
+//   要塞——结构覆盖矿石、gravel 只置换 Stone、carve 挖走 stone/ore 暴露矿脉于洞壁，语义全保留。
+//   海列 cell 整格跳过 / 逐格 stone 区段上界 y ≤ h-3 / 基岩层不布矿 / 仅置换 Stone，均沿用旧口径
+//   （逐格重查 heightAt → 高度带按列自适应，128 高世界煤脉自然上探）。矿井巷壁暴露矿（t565
+//   IronOre/CoalOre，见 placeMineshaft）独立于本 pass，不受影响。
+//   确定性：全部 hashVoxel(seed ⊕ 矿盐, ...) 纯函数（PLAN §2-K），同 seed 同矿脉；禁运行期随机源。
 void World::scatterOres()
 {
+    constexpr int kBedrockTop = 4; // 同 placeBedrock：基岩层 y 0..4 不布矿（旧 kOreMin=5 同源）
+    constexpr int kCell       = 16; // 成脉网格（MC chunk 水平口径）
+
+    // 高度带（逐字沿用旧散点常量——「以项目现有高度带为准对齐」）。
     constexpr int kOreMin      = 5;   // 矿物起始 y（紧贴基岩 kBedrockTop=4 之上；基岩层 y 0..4 不布矿）
-    constexpr int kCoalMin     = 8;   // 煤起始 y（仅浅层；机制等价 MC 煤靠近地表富集）
-    constexpr int kDiamondMin  = 5;   // 钻石起始 y（= kOreMin，紧贴基岩）
-    constexpr int kDiamondMax  = 40;  // 钻石上界 y（t308：16→40，用户 research 后定；地表 ~62 深挖更易见）
-    constexpr int kGoldMax     = 25;  // 金上界 y（t308；机制等价 MC 金矿深层富集；金属族最深）
-    constexpr int kLapisMax    = 31;  // 青金上界 y（t471；机制等价 MC 1.0 青金矿 Y<32 浅深层富集）
-    constexpr int kRedstoneMax = 16;  // 红石上界 y（t569；机制等价 MC 1.0 红石矿 Y<16 最深层富集）
-    constexpr int kIronMax     = 30;  // 铁上界 y（机制等价 MC 铁矿中下层富集）
-    constexpr int kCopperMax   = 45;  // 铜上界 y（t308；机制等价 MC 铜矿浅中层富集；金属族最浅）
+    constexpr int kCoalMin     = 8;
+    constexpr int kDiamondMin  = 5;
+    constexpr int kDiamondMax  = 40;
+    constexpr int kGoldMax     = 25;
+    constexpr int kLapisMax    = 31;
+    constexpr int kRedstoneMax = 16;
+    constexpr int kIronMax     = 30;
+    constexpr int kCopperMax   = 45;
 
-    // 密度（/10000，每体素命中概率）：钻石 / 红石最稀 < 金 < 青金 < 铁 < 铜 < 煤（最常见）。
-    //   spec t308「铜铁金按序更稀少」→ 铜(0.9%) > 铁(0.7%) > 金(0.5%)；钻石(0.4%) / 煤(1.0%) 各为两端。
-    //   青金(0.6%) 介于金(0.5%) 与 铁(0.7%) 之间（MC 1.0 青金稀有度近金 / 铁）。红石(0.4%) 与钻石相当
-    //   （t569；MC 1.0 红石在最深层 Y<16 与钻石共层、稀有度相当）。洞穴 carve 暴露后矿脉出露更
-    //   可见（spec「洞穴裸露矿物」）；密度调到「分层肉眼可辨 + 不过密糊洞壁」。
-    constexpr unsigned kDiamondPct  = 40;   // /10000 → 0.4%（钻石，需铁镐 minTier3；稀有深层）
-    constexpr unsigned kGoldPct     = 50;   // /10000 → 0.5%（金，需铁镐 minTier3；金属族最稀有，t308）
-    constexpr unsigned kLapisPct    = 60;   // /10000 → 0.6%（青金，需石镐 minTier2；t471 附魔前置材料，深层 Y<32）
-    constexpr unsigned kRedstonePct = 40;   // /10000 → 0.4%（红石，需铁镐 minTier3；t569 最深层 Y<16，稀有度同钻石）
-    constexpr unsigned kIronPct     = 70;   // /10000 → 0.7%（铁，需石镐 minTier2；中层）
-    constexpr unsigned kCopperPct   = 90;   // /10000 → 0.9%（铜，需石镐 minTier2；金属族最常见 / 最浅，t308）
-    constexpr unsigned kCoalPct     = 100;  // /10000 → 1.0%（煤，木镐可挖 minTier1；浅层最常见）
+    // 脉形 profile（kBase/kFrac = 每 cell 脉数经济校准，见头注释；kSteps = blob 游走步数；
+    //   kShellPct = 煤壳/铁角贴块概率；kKind = 0 blob 游走 / 1 煤长条 / 2 铁立方角）。
+    struct VeinProfile {
+        quint8  block;
+        quint32 salt;     // 矿盐（t1014 专用盐值；cell / 落点 / 逐块决策三流解耦）
+        int     yMin, yMax;
+        int     base, frac, steps, shellPct, kind;
+    };
+    // 数组序 = 印章序（重叠区稀有矿先到先得，同旧散点判定序：钻>金>青>红>铁>铜>煤）。
+    constexpr VeinProfile kProfiles[] = {
+        { BlockRegistry::DiamondOre,  0x01D1A5u, kDiamondMin, kDiamondMax,  5, 50, 8,  0, 0 },
+        { BlockRegistry::GoldOre,     0x0A0D7Bu, kOreMin, kGoldMax,         4, 15, 8,  0, 0 },
+        { BlockRegistry::LapisOre,    0x01A915u, kOreMin, kLapisMax,        7, 60, 7,  0, 0 },
+        { BlockRegistry::RedstoneOre, 0x2ED57Eu, kOreMin, kRedstoneMax,    82, 75, 8, 0, 0 },
+        { BlockRegistry::IronOre,     0x12D0E1u, kOreMin, kIronMax,         4, 40, 0, 35, 2 },
+        { BlockRegistry::CopperOre,   0x0C09E5u, kOreMin, kCopperMax,      13, 92, 8,  0, 0 },
+        { BlockRegistry::CoalOre,     0x0C0A15u, kCoalMin,    60,           4, 60, 0, 25, 1 },
+    };
+    static constexpr int kOreKindCount = 7;
 
-    int coalPlaced = 0, copperPlaced = 0, ironPlaced = 0, goldPlaced = 0, diamondPlaced = 0, lapisPlaced = 0, redstonePlaced = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
-            const int h = std::min(heightAt(x, z), m_height - 1);
-            // t149：水位阈值取代旧 kSandLevel=3 —— 沙滩带(wl±1)/水下(h<wl) 列表层为沙、沙漠整柱沙，
-            //   这些列无 stone 区段（或被水位淹没），跳过（与 generate / placeTrees 同阈值）。
-            if (h <= kWaterLevel + 1) continue;
+    // 置矿原语：越界 / 基岩层 / 海列 / stone 区段上界（y > h-3，同旧「y < h-2」）/ 非 Stone 拒绝。
+    //   heightAt 逐格调 → 矿带按列自适应；先到先得由「仅置换 Stone」保证（重叠带稀有矿优先）。
+    const auto tryOre = [&](int x, int y, int z, quint8 id) -> bool {
+        if (x < 0 || x >= m_width || z < 0 || z >= m_depth || y < 0 || y >= m_height) return false;
+        if (y <= kBedrockTop) return false;
+        const int h = std::min(heightAt(x, z), m_height - 1);
+        if (h <= kWaterLevel + 1) return false;
+        if (y > h - 3) return false;
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone) return false;
+        m_chunks.setBlock(x, y, z, id);
+        return true;
+    };
 
-            // stone 区段：y < h-2（与 generate 填 Stone 同阈值；y in [h-2,h] 是 dirt/grass）。
-            // 上界 h-3 即「< h-2」的最大整数；y 非负由循环保证。
-            const int stoneTop = h - 3;
-            for (int y = 0; y <= stoneTop; ++y) {
-                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone)
-                    continue; // 仅替换 stone（防御：树根/边界异常格不动；已生成的它种矿也不动）
-                const quint32 r  = hashVoxel(m_seed, x, y, z);
-                // 第二路独立哈希流（黄金比例常量作 seed salt → 与 r 良好解耦）给金 / 铜判定，避免与 r 的
-                //   位段（0/8/16）重叠；钻石/铁/煤沿用 r 的旧位段保旧矿脉分布不变（仅钻石 Y 上界扩到 40）。
-                const quint32 r2 = hashVoxel(int(quint32(m_seed) ^ 0x9E3779B9u), x, y, z);
-                // 判定序（重叠区稀有矿优先）：钻石 > 金 > 铁 > 铜 > 煤。先中者胜 → 一格至多一矿。
-                if (y >= kDiamondMin && y <= kDiamondMax) {
-                    if (((r       ) % 10000u) < kDiamondPct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::DiamondOre);
-                        ++diamondPlaced;
-                        continue;
-                    }
-                }
-                if (y >= kOreMin && y <= kGoldMax) {
-                    if (((r2      ) % 10000u) < kGoldPct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::GoldOre);
-                        ++goldPlaced;
-                        continue;
-                    }
-                }
-                if (y >= kOreMin && y <= kLapisMax) {
-                    // 青金走 r2 >> 16 位段（r2 现仅用位段 0=金 / 8=铜，位段 16 空闲）→ 与金 / 铜独立，
-                    //   不扰旧矿脉分布。判定序位于金之后、铁之前（重叠区稀有度近金，先于铁）。
-                    if (((r2 >> 16) % 10000u) < kLapisPct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::LapisOre);
-                        ++lapisPlaced;
-                        continue;
-                    }
-                }
-                if (y >= kOreMin && y <= kRedstoneMax) {
-                    // 红石走 r2 >> 24 位段（r2 现用位段 0=金 / 8=铜 / 16=青金，位段 24 空闲）→ 与金 / 铜 /
-                    //   青金独立，不扰旧矿脉分布（t569）。判定序位于青金之后、铁之前（重叠区 Y<16 与钻石 /
-                    //   金 / 青金共层，稀有矿优先；红石与钻石稀有度相当故置于铁 / 铜前）。
-                    if (((r2 >> 24) % 10000u) < kRedstonePct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::RedstoneOre);
-                        ++redstonePlaced;
-                        continue;
-                    }
-                }
-                if (y >= kOreMin && y <= kIronMax) {
-                    if (((r  >> 8) % 10000u) < kIronPct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::IronOre);
-                        ++ironPlaced;
-                        continue;
-                    }
-                }
-                if (y >= kOreMin && y <= kCopperMax) {
-                    if (((r2 >> 8) % 10000u) < kCopperPct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::CopperOre);
-                        ++copperPlaced;
-                        continue;
-                    }
-                }
-                if (y >= kCoalMin) {
-                    if (((r  >> 16) % 10000u) < kCoalPct) {
-                        m_chunks.setBlock(x, y, z, BlockRegistry::CoalOre);
-                        ++coalPlaced;
-                        continue;
+    static const int kD6[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+    int placedByKind[kOreKindCount] = {};
+
+    for (int cz = 0; cz < m_depth; cz += kCell) {
+        for (int cx = 0; cx < m_width; cx += kCell) {
+            // cell 中心列高：海列 cell 整格跳过（同旧整列口径）；煤带上界按 cell 自适应。
+            const int hc = std::min(heightAt(std::min(cx + kCell / 2, m_width - 1),
+                                             std::min(cz + kCell / 2, m_depth - 1)), m_height - 1);
+            if (hc <= kWaterLevel + 1) continue;
+            for (int k = 0; k < kOreKindCount; ++k) {
+                const VeinProfile &p = kProfiles[k];
+                // 每 cell 脉数 = base + (hash%100 < frac)%（每矿种独立盐流，确定性）。
+                const int veinN = p.base
+                    + int((hashVoxel(int(quint32(m_seed) ^ p.salt), cx, 0x5E1D, cz) % 100u) < quint32(p.frac) ? 1 : 0);
+                for (int i = 0; i < veinN; ++i) {
+                    // 落点：cell 内 hash 抖动（bit0-3 x / bit4-7 z / bit8+ y 带 / bit16-18 姿态）。
+                    const quint32 hv = hashVoxel(int(quint32(m_seed) ^ (p.salt * 31u + 17u)), cx, i, cz);
+                    const int span = (p.kind == 1)
+                        ? std::max(1, std::min(p.yMax, hc - 5) - p.yMin + 1) // 煤带上界随 cell 列高（长条+壳 ≤ h-3）
+                        : (p.kind == 2)
+                            ? std::max(1, p.yMax - p.yMin) // 铁立方占 vy..vy+1 → 抖动上界收一格保 vy+1 ≤ 带
+                            : p.yMax - p.yMin + 1;
+                    const int vx = cx + int(hv & 15u);
+                    const int vz = cz + int((hv >> 4) & 15u);
+                    const int vy = p.yMin + int((hv >> 8) % quint32(span));
+                    const int decSalt = int(quint32(m_seed) ^ (p.salt ^ 0x51E1Du));
+
+                    if (p.kind == 1) {
+                        // ── 煤：2×2×5 长条（横轴 hash 二选一）+ 周围 6 邻壳 hash 贴连散块 ──
+                        const bool axX = (hv >> 16) & 1u;
+                        int core[20][3];
+                        int nCore = 0;
+                        for (int t = 0; t < 5; ++t)
+                            for (int a = 0; a < 2; ++a)
+                                for (int b = 0; b < 2; ++b) {
+                                    const int x = vx + (axX ? t : a);
+                                    const int y = vy + b;
+                                    const int z = axX ? vz + a : vz + t;
+                                    if (tryOre(x, y, z, p.block)) ++placedByKind[k];
+                                    core[nCore][0] = x; core[nCore][1] = y; core[nCore][2] = z; ++nCore;
+                                }
+                        for (int c = 0; c < nCore; ++c)
+                            for (const auto &d : kD6) {
+                                const int nx = core[c][0] + d[0];
+                                const int ny = core[c][1] + d[1];
+                                const int nz = core[c][2] + d[2];
+                                bool inCore = false;
+                                for (int q = 0; q < nCore && !inCore; ++q)
+                                    inCore = core[q][0] == nx && core[q][1] == ny && core[q][2] == nz;
+                                if (inCore) continue;
+                                if ((hashVoxel(decSalt, nx, ny, nz) % 100u) >= quint32(p.shellPct)) continue;
+                                if (tryOre(nx, ny, nz, p.block)) ++placedByKind[k];
+                            }
+                    } else if (p.kind == 2) {
+                        // ── 铁：2×2×2 立方 + 8 角斜对贴块（hash 贴块；角块 y 同样夹进矿带 → 带内零溢出）──
+                        for (int a = 0; a < 2; ++a)
+                            for (int b = 0; b < 2; ++b)
+                                for (int c = 0; c < 2; ++c)
+                                    if (tryOre(vx + a, vy + b, vz + c, p.block)) ++placedByKind[k];
+                        for (int a = -1; a <= 2; a += 3)
+                            for (int b = -1; b <= 2; b += 3)
+                                for (int c = -1; c <= 2; c += 3) {
+                                    const int cy = vy + b;
+                                    if (cy < p.yMin || cy > p.yMax) continue; // 角块不越带
+                                    if ((hashVoxel(decSalt, vx + a, cy, vz + c) % 100u) < quint32(p.shellPct))
+                                        if (tryOre(vx + a, cy, vz + c, p.block)) ++placedByKind[k];
+                                }
+                    } else {
+                        // ── blob：MC 1.0 size 口径漂移游走（60% 主轴漂移 / 失位或越带转全向 6 邻）──
+                        int x = vx, y = vy, z = vz;
+                        const int axis = int((hv >> 16) % 3u);
+                        const int sgn = ((hv >> 18) & 1u) ? 1 : -1;
+                        bool offStone = false; // 失位（非石/带外）→ 转全向步，防贴壁耗步
+                        for (int s = 0; s < p.steps; ++s) {
+                            if (tryOre(x, y, z, p.block)) ++placedByKind[k];
+                            else offStone = true;
+                            const quint32 rv = hashVoxel(decSalt, x, y, z);
+                            int dx = 0, dy = 0, dz = 0;
+                            if (!offStone && int(rv % 100u) < 60) {
+                                dx = (axis == 0) ? sgn : 0;
+                                dy = (axis == 1) ? sgn : 0;
+                                dz = (axis == 2) ? sgn : 0;
+                            } else {
+                                const int d = int((rv >> 8) % 6u);
+                                dx = kD6[d][0]; dy = kD6[d][1]; dz = kD6[d][2];
+                            }
+                            // 矿带硬夹：下一步 y 出带 → 抹平竖向分量（纯竖漂移则改全向水平步）。
+                            if (y + dy < p.yMin || y + dy > p.yMax) {
+                                dy = 0;
+                                if (dx == 0 && dz == 0) {
+                                    const int d = int((rv >> 8) % 6u);
+                                    dx = kD6[d][0]; dz = kD6[d][2];
+                                }
+                            }
+                            x += dx; y += dy; z += dz;
+                        }
                     }
                 }
             }
         }
     }
-    qInfo() << "worldgen: ores placed = coal" << coalPlaced << "copper" << copperPlaced
-            << "iron" << ironPlaced << "gold" << goldPlaced
-            << "diamond" << diamondPlaced << "lapis" << lapisPlaced
-            << "redstone" << redstonePlaced; // 同 seed → 同计数（确定性核对）
+    qInfo() << "worldgen: ores placed = coal" << placedByKind[6] << "copper" << placedByKind[5]
+            << "iron" << placedByKind[4] << "gold" << placedByKind[1]
+            << "diamond" << placedByKind[0] << "lapis" << placedByKind[2]
+            << "redstone" << placedByKind[3]; // 同 seed → 同计数（确定性核对）
 }
 
 // t761 沙砾矿袋（见 world.h 头注释）。机制等价 MC 1.0 地下 gravel 砾石袋：地下浅层小团 Gravel 替换 Stone。
