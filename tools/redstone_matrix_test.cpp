@@ -30,6 +30,7 @@
 #include <cstring> // t965 探针 std::memcpy（vertexData 直读顶点 u 分量）
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
+#include <map>       // t1012 探针 std::map（carveCell 地板点位登记，阴影模型）
 #include <QQmlEngine>   // t874/t875 真链探针：QQmlEngine + qmlRegisterType —— 真 QML 面板 × 真 C++ Hotbar 同台
 #include <QQmlContext>  // t874/t875 真链探针：rootContext()->setContextProperty + qmlContext（wrapper 作用域链）
 #include <QQmlComponent> // t874/t875 真链探针：setData+base URL 直载源树 AnvilUI.qml / EnchantingTableUI.qml
@@ -4967,10 +4968,11 @@ int main(int argc, char *argv[])
                         //   只由 placeStronghold 写出（地牢池无蠹虫），按要塞计。
                         if (st == BlockRegistry::SpawnerStateSilverfishFlag
                             || st == BlockRegistry::SpawnerStateSilverfish) { ++stronghold; continue; }
-                        // t1001 合法演化：废弃矿井蛛网室（placeMineshaft pieceSpiderRoom）也写 MobSpider 笼
-                        //   （偏差登记 MobSpider / state 0x0E）。按笼周 7×7×3 蛛网密度分流 —— 笼 4 邻格三层
-                        //   必网（≥8 网即达）= 矿井蛛笼，单列 mineshaftWeb 登记不入地牢池窗；地牢蛛笼零网
-                        //   不误伤（巷道穿过残留散网 ≤3 量级，远低于阈值）。
+                        // t1001 合法演化：废弃矿井蛛网走廊（placeMineshaft pieceSpiderRoom，t1012 ② 起
+                        //   走廊形）也写 MobSpider 笼（偏差登记 MobSpider / state 0x0E）。按笼周 7×7×3
+                        //   蛛网计数分流 —— 走廊形夹网巢保底 ≥8 网（笼位 ±1 轴邻格恒 3 层满网）= 矿井蛛笼，
+                        //   单列 mineshaftWeb 登记不入地牢池窗；地牢蛛笼零网不误伤（巷道穿过残留散网
+                        //   ≤3 量级，远低于阈值）。
                         if (EntityManager().spawnerMobTypeForState(int(st)) == EntityManager::MobSpider) {
                             int webs = 0;
                             for (int dx = -3; dx <= 3 && webs < 8; ++dx)
@@ -34768,12 +34770,15 @@ Item {
     //    同 t995 净样口径）。
     //    腿：①起点厅（每净样）：拱带 36/36 Planks + 内芯气柱（中心 sy+4 Air）+ 出口数 ∈ [2,4]（四向
     //        房缘外首格 sy+2 头层空气探）且池内见 4 出口矿井（考据 up to 4 exits）；
-    //    ②巷道 3×3：出口巷 s=6 处 w=±1 双侧空气（3 宽在位）池化 ≥70%，双侧实壁 ≥60%；
+    //    ②巷道 3×3：出口巷全步采样 w=±1 双侧未封（内容物白名单 Air/Cobweb/WoodFence/Torch = 巷道
+    //        合法占用，支撑双柱 t1001 设计本占 w=±1 sy+1..sy+2）池化 ≥70%，双侧实壁 ≥50%（t1012 段 B
+    //        推进修复后支廊口 / 交叉口 / 邻巷拐腿 legitimately 开墙 → 全步池化窗，见采样处注释）；
     //    ③支撑间距窗：出口巷 ±1 侧线成对 WoodFence 柱步距全部 ≡0 (mod 4) 且 ≥4、池内 min==4
     //        （阴性轮敏感：kSupportInterval 回退 5 → 步距 5 mod 4 ≠ 0 → 恰红）；
-    //    ④蛛网室：MobSpider 刷怪笼在场（7×7×3 域蛛网密度窗 [35,65]%；笼 4 邻格三层必网 → t995 地牢
-    //        净样口径不受染：sy+3 层笼邻有网 → 空气游程 0 ≠ {5,7} 恒弃样；地牢蛛笼密度 0 → 不入样）
-    //        + 笼座实体地板（阴性轮敏感：pieceSpiderRoom 摘除 → 在场腿恰红）；
+    //    ④蛛网走廊（t1012 ② 走廊形重校）：MobSpider 刷怪笼在场（笼座实体地板 + 7×7×3 域 ≥8 网
+    //        〔= t786「≥8 网即矿井蛛笼」分流同口径；走廊形夹网巢保底〕+ 笼邻 4 向 × 3 层零开露空气
+    //        〔满网签名〕；t995 地牢净样口径不受染：sy+3 层笼邻有网 → 空气游程 0 ≠ {5,7} 恒弃样；
+    //        地牢蛛笼零网 → 不入样）（阴性轮敏感：pieceSpiderRoom 摘除 → 在场腿恰红）；
     //    ⑤残缺轨窗：净样出口巷中线头层可走格轨占率 ∈ [50,90]%（<100% = 残缺真发生）；
     //    ⑥箱贴轨（偏差「箱落地轨旁」）：每 ChestStateMineshaftFlag 箱四水平邻含 Rail 且池内 ≥1；
     //    ⑦火把窗：矿井域 y∈{sy+3, sy+4} Torch 池化 ≥15（火把只出现在支撑过梁顶）；
@@ -34866,9 +34871,19 @@ Item {
                                 }
                                 prevPair = s;
                             }
-                            if (s == 6) { // ② 3×3 截面（w=±1 空气 + w=±2 实壁统计）
-                                const bool aL = wT1001.blockAt(px - dz, sy + 2, pz - dx) == BR::Air;
-                                const bool aR = wT1001.blockAt(px + dz, sy + 2, pz + dx) == BR::Air;
+                            { // ② 3×3 截面（w=±1 未封 + w=±2 实壁；全步池化 —— t1012 ③ 段 B 推进修复后
+                              //   巷侧 legitimately 被蛛网支廊口 / 交叉口 5×5 / 邻巷拐腿开墙，单步窗
+                              //   （旧 s==6）碰撞率过高 → 全步池化稀释局部开墙，实壁率仍锚「巷道嵌岩」）
+                              //   t1012 口径修正：「在位」= 未被天然岩壁封死，内容物白名单（Air / Cobweb /
+                              //   WoodFence / Torch）= 巷道合法占用 —— 支撑双柱按 t1001 设计就占 w=±1
+                              //   sy+1..sy+2（旧 s==6 单步窗 6%4=2 恰躲开支撑步；全步池化后支撑步 ~1/4
+                              //   必含步 0/4 豁免缺失柱，误判「不在位」把池化率拉到 66%<70%，非生成回归）。
+                                const auto inPlaceT1001 = [](quint8 b) {
+                                    return b == BR::Air || b == BR::Cobweb
+                                        || b == BR::WoodFence || b == BR::Torch;
+                                };
+                                const bool aL = inPlaceT1001(wT1001.blockAt(px - dz, sy + 2, pz - dx));
+                                const bool aR = inPlaceT1001(wT1001.blockAt(px + dz, sy + 2, pz + dx));
                                 const bool wL = wT1001.blockAt(px - 2 * dz, sy + 2, pz - 2 * dx) != BR::Air;
                                 const bool wR = wT1001.blockAt(px + 2 * dz, sy + 2, pz + 2 * dx) != BR::Air;
                                 ++sectionTotal;
@@ -34901,7 +34916,8 @@ Item {
                             if (emT1001.spawnerMobTypeForState(int(wT1001.stateAt(x, y, z)))
                                 != EntityManager::MobSpider) continue;
                             if (wT1001.blockAt(x, y - 1, z) == BR::Air) continue; // 笼座须实体地板
-                            int webs = 0; // 7×7×3 域蛛网密度（笼心；笼自身格不计）
+                            int webs = 0; // 7×7×3 域蛛网计数（笼心；笼自身格不计）+ 笼邻开露空气（满网签名）
+                            int openAir = 0;
                             for (int dx = -3; dx <= 3; ++dx)
                                 for (int dz = -3; dz <= 3; ++dz)
                                     for (int dy = 1; dy <= 3; ++dy) {
@@ -34909,8 +34925,13 @@ Item {
                                         if (wT1001.blockAt(x + dx, y - 1 + dy, z + dz) == BR::Cobweb)
                                             ++webs;
                                     }
+                            static const int kCageNbT1001[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                            for (const auto &nb : kCageNbT1001)
+                                for (int dy = 1; dy <= 3; ++dy)
+                                    if (wT1001.blockAt(x + nb[0], y - 1 + dy, z + nb[1]) == BR::Air)
+                                        ++openAir;
                             const int pct = webs * 100 / (49 * 3 - 1);
-                            if (pct >= 35 && pct <= 65) { // ④ 密度窗（地牢蛛笼密度 0 → 不入样）
+                            if (webs >= 8 && openAir == 0) { // ④ 走廊形签名（t786 ≥8 分流同口径 + 满网零开露）
                                 spiderSeen = true;
                                 spiderWebPct = pct;
                             }
@@ -34945,10 +34966,10 @@ Item {
         ok = ok && int(shaftsT1001.size()) >= 6;                            // 净样池充足
         ok = ok && exitMinT1001 >= 2 && exitMinT1001 <= 4;                  // ① 出口 1-4 窗
         ok = ok && exitMaxT1001 >= 4;                                       //    池内见 4 出口矿井
-        ok = ok && sectionTotal > 0 && sectionClean * 10 >= sectionTotal * 7;      // ② 3×3 在位 ≥70%
-        ok = ok && sectionClean > 0 && sectionWalls * 10 >= sectionClean * 6;      //    双侧实壁 ≥60%
+        ok = ok && sectionTotal > 0 && sectionClean * 10 >= sectionTotal * 7;      // ② 3×3 未封在位 ≥70%（内容物白名单）
+        ok = ok && sectionClean > 0 && sectionWalls * 10 >= sectionClean * 5;      //    双侧实壁 ≥50%（全步窗，t1012）
         ok = ok && gapOkT1001 && gapMinT1001 == 4;                          // ③ 支撑间距 4 窗
-        ok = ok && spiderSeen;                                              // ④ 蛛网室在场
+        ok = ok && spiderSeen;                                              // ④ 蛛网走廊在场（t1012 走廊形）
         const int railPctT1001 = railWalk > 0 ? railOn * 100 / railWalk : -1;
         ok = ok && railWalk > 0 && railPctT1001 >= 50 && railPctT1001 <= 90; // ⑤ 残缺轨窗
         ok = ok && chestT1001 >= 1 && chestRailSide;                        // ⑥ 箱贴轨
@@ -34967,10 +34988,12 @@ Item {
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t1001 mineshaft per-block rebuild: piece-based placeMineshaft (start"
                              " room 10x10 with arched plank band + 3..4 radial exits, 3x3 corridors"
-                             " with supports every 4 (min pooled gap" << gapMinT1001 << "), fragmented"
+                             " with supports every 4 (min pooled gap" << gapMinT1001
+                          << ", rock-embedded walls" << (sectionClean > 0 ? sectionWalls * 100 / sectionClean : -1)
+                          << "% all-steps), fragmented"
                              " rails" << railPctT1001 << "% in [50,90], 5x5 pillared intersections,"
-                             " diagonal slope pieces, cave-spider web rooms (spawner state Spider, web"
-                             " density" << spiderWebPct << "%), chests rail-side" << chestT1001
+                             " diagonal slope pieces, cave-spider web corridors (spawner state Spider,"
+                             " box webs>=8 full-web fill" << spiderWebPct << "%), chests rail-side" << chestT1001
                           << "torches" << torchT1001 << ") over" << shaftsT1001.size() << "clean"
                              " shafts /" << candT1001 << "candidates, piece-table pins";
     }
@@ -35156,6 +35179,252 @@ Item {
                              << "(cave-opening daylight channel = the F3 bl:0 attribution,"
                              " orthogonal to torch coverage) over"
                           << walksT1011 << "walks /" << shaftsT1011 << "shafts, wall-torch pins";
+    }
+
+    // ── P-t1012 矿井几何三项探针（t1012 ①② + t1011 移交段 B 推进回归；placeMineshaft 几何回归验收面）──
+    //    rig：t1001/t1011 同款候选复刻（hashColumn FNV 同源 + 起点厅拱带 36 Planks 净样）；hashVoxel 已
+    //    public（t836）→ 阴影模型直调 World 同一哈希权威重放生成端几何（lenA/lenB/turnSign/ev 事件 /
+    //    走廊形选型全同源），零复刻漂移。四腿：
+    //    ① 段 B 推进（t1012 ③ 回归腿）：阴影模型按修复后推进语义（leg==1||step>0，t565 口径）重放每条
+    //       巷道两腿游标 → 段 B 每 step 截面头层（curY+2）不得是未动过的天然岩层（Stone/Dirt/Gravel/
+    //       Sand/矿/基岩；后续结构〔神殿 / 要塞〕与既有矿井结构占用合法）。回归态（leg==0&&step>0 +
+    //       入腿预推进）段 B 整腿不推进 → 阴影点位落天然实体 → 恰红（L 第二腿缺失 / 斜坡同柱逐层坑
+    //       同腿兼钉）。
+    //    ② 地板政策（t1012 ①）：阴影模型登记全部 carveCell 地板点位（起点厅 10×10 / 巷道截面 w∈[-1,1] /
+    //       交叉口 5×5 / 蛛网走廊廊体；同列被 >1 个不同 y 重刻 → 政策歧义弃样）→ actual∈{Stone,Planks}
+    //       时断言 下方 Air ↔ Planks（空腔桥面）、下方实地 ↔ Stone（嵌岩石底）；池内两分支齐现
+    //       （政策真执行，防空转绿）。
+    //    ③ 蛛网走廊（t1012 ②）：阴影模型重放走廊形选型（宽 1-2 / 高 2-3 / 长 3-6 / 笼位居中 + 夹网巢）
+    //       → 廊体阴影点位逐格须 Cobweb（笼格 = Spawner；跨巷道重刻容忍 → 池级匹配率窗）；世界侧扫
+    //       MobSpider 笼：笼座实体地板 + 7×7×3 盒 ≥8 网（t786「≥8 网即矿井蛛笼」分流同口径）+ 笼邻
+    //       4 向 × 3 层零开露空气（满网签名）；池内净笼 ≥3。
+    //    ④ 源码钉：段 B 推进条件行 / 地板政策行 / 走廊形选型行 / 满网落块行（阴性轮敏感）。
+    {
+        bool ok = true;
+        int legBCellsT1012 = 0;          // ① 段 B 阴影点位总数（量纲）
+        int legBSolidT1012 = 0;          // ① 段 B 阴影点位落天然实体数（回归签名；修复后恒 0）
+        int floorViolT1012 = 0;          // ② 地板政策违例（下方 Air ↔ Planks 不一致）
+        int floorStoneT1012 = 0, floorPlanksT1012 = 0; // ② 两分支池化出现数（嵌岩 / 空腔）
+        int branchesT1012 = 0;           // ③ 蛛网走廊阴影重放数
+        int branchDimOkT1012 = 0;        // ③ 选型落在 1-2 / 2-3 / 3-6 窗内的走廊数
+        int webMatchT1012 = 0, webCellsT1012 = 0; // ③ 廊体阴影点位 = Cobweb/Spawner 匹配
+        int cagesT1012 = 0, cleanCagesT1012 = 0;  // ③ 世界侧 MobSpider 笼 / 满网净笼
+        bool pinT1012 = false;
+        const quint32 seedsT1012[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 4242u, 2024u, 31337u };
+        EntityManager emT1012;
+        for (quint32 sd : seedsT1012) {
+            World wT1012;
+            wT1012.setWidth(128);
+            wT1012.setDepth(128);
+            wT1012.setHeight(64);
+            wT1012.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含 placeMineshaft）
+            auto colHashT1012 = [](int seed, int x, int z) -> quint32 { // hashColumn FNV 同源复刻（同 t1001）
+                quint32 h = 0x811c9dc5u;
+                auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
+                step(quint32(seed));
+                step(quint32(x));
+                step(quint32(z));
+                h ^= h >> 16;
+                h *= 0x7feb352du;
+                h ^= h >> 15;
+                return h;
+            };
+            const int wW = wT1012.width(), wD = wT1012.depth();
+            const quint32 mineSeed = sd + 15047u;
+            for (int bx = 18; bx < wW; bx += 36) { // 复刻外层候选网格（kMineshaftGrid=36）
+                for (int bz = 18; bz < wD; bz += 36) {
+                    const quint32 r = colHashT1012(int(mineSeed), bx, bz);
+                    if ((r % 100u) >= 40u) continue;
+                    const int jx = int((r >> 1) & 0xFu) % 19 - 9;
+                    const int jz = int((r >> 5) & 0xFu) % 19 - 9;
+                    const int cx = bx + jx, cz = bz + jz;
+                    if (cx < 16 || cz < 16 || cx >= wW - 16 || cz >= wD - 16) continue;
+                    const int h = std::min(wT1012.heightAt(cx, cz), 63);
+                    const int yLo = 6;
+                    const int yHi = std::min(43, h - 11);
+                    if (yHi <= yLo) continue;
+                    const int sy = yLo + int((r >> 9) & 0x1Fu) % (yHi - yLo + 1);
+                    int band = 0; // 净样签名：起点厅拱带 36 Planks @ sy+4（同 t1001；海列 / 重叠破坏弃样）
+                    for (int dx = 0; dx < 10; ++dx)
+                        for (int dz = 0; dz < 10; ++dz) {
+                            const bool edge = (dx == 0 || dx == 9 || dz == 0 || dz == 9);
+                            if (edge && wT1012.blockAt(cx - 5 + dx, sy + 4, cz - 5 + dz) == BR::Planks)
+                                ++band;
+                        }
+                    if (band != 36) continue;
+                    // ── 阴影模型：按修复后生成端语义重放（hashVoxel 同一权威；巷道 ci 升序同生成端）──
+                    const quint32 eh = wT1012.hashVoxel(mineSeed ^ 0xE017u, cx, sy, cz);
+                    int dirsT[4] = { 0, 1, 2, 3 };
+                    for (int i = 3; i > 0; --i) { // Fisher-Yates（同生成端）
+                        const int j = int((eh >> (2 * i)) & 3u) % (i + 1);
+                        const int t = dirsT[i]; dirsT[i] = dirsT[j]; dirsT[j] = t;
+                    }
+                    const int corridors = 3 + int((eh >> 8) & 1u);
+                    std::map<std::pair<int, int>, int> floorY; // carveCell 地板点位（(x,z) → 最后 carve y；多 y 重刻 → -1 弃样）
+                    auto trackFloor = [&floorY](int px, int pz, int fy) {
+                        auto it = floorY.find({ px, pz });
+                        if (it == floorY.end()) floorY[{ px, pz }] = fy;
+                        else if (it->second != fy) it->second = -1; // 多 y 重刻 → 政策歧义弃样
+                    };
+                    for (int ci = 0; ci < corridors; ++ci) {
+                        int dx = (dirsT[ci] == 0) ? 1 : (dirsT[ci] == 1) ? -1 : 0;
+                        int dz = (dirsT[ci] == 2) ? 1 : (dirsT[ci] == 3) ? -1 : 0;
+                        const quint32 rh = wT1012.hashVoxel(mineSeed ^ (0xDEC0u + quint32(ci)), cx, sy, cz);
+                        const int lenA = 5 + int((rh >> 2) & 0xFu) % 6;
+                        const int lenB = 5 + int((rh >> 6) & 0xFu) % 6;
+                        const int turnSign = ((rh >> 10) & 1u) ? 1 : -1;
+                        const quint32 ev = wT1012.hashVoxel(mineSeed ^ (0x1717u + quint32(ci) * 0x9E37u), cx, sy, cz);
+                        const unsigned evRoll = ev % 100u;
+                        const int evStep = 2 + int((ev >> 8) & 7u) % (lenA - 3);
+                        const bool slopeLegB = evRoll >= 85u; // pieceSlope 段（evRoll ≥ 60+25）
+                        int ax = cx + (dx > 0 ? 5 : (dx < 0 ? -6 : 0)); // 起点厅房缘外首格（同生成端）
+                        int az = cz + (dz > 0 ? 5 : (dz < 0 ? -6 : 0));
+                        int curY = sy;
+                        for (int leg = 0; leg < 2; ++leg) {
+                            const int legLen = (leg == 0) ? lenA : lenB;
+                            bool inSlope = false;
+                            if (leg == 1) {
+                                const int ndx = turnSign * dz, ndz = -turnSign * dx;
+                                dx = ndx; dz = ndz;
+                                inSlope = slopeLegB;
+                            }
+                            for (int step = 0; step < legLen; ++step) {
+                                if (leg == 1 || step > 0) { ax += dx; az += dz; } // 修复后推进语义（t565）
+                                if (inSlope && (step & 1) != 0) curY = std::max(curY - 1, 6);
+                                for (int w = -1; w <= 1; ++w) // 3 宽截面地板登记
+                                    trackFloor(ax + w * (-dz), az + w * dx, curY);
+                                if (leg == 1) { // ① 段 B 推进腿：截面头层不得是未动过的天然岩层
+                                    ++legBCellsT1012;
+                                    const quint8 hb = wT1012.blockAt(ax, curY + 2, az);
+                                    // 天然实体 = 未被 carve 触及的岩层（回归态段 B 点位即落此类 → 恰红）。
+                                    //   后续结构（神殿 / 要塞石砖等 placeMineshaft 之后落位）与既有矿井结构
+                                    //   （支撑 / 拱带 / 蛛网 / 火把 / 笼 / 箱 / 轨）占用均合法 → 非天然即过。
+                                    const bool natural = hb == BR::Stone || hb == BR::Dirt
+                                        || hb == BR::Gravel || hb == BR::Sand
+                                        || hb == BR::CoalOre || hb == BR::IronOre
+                                        || hb == BR::Bedrock;
+                                    if (natural) ++legBSolidT1012;
+                                }
+                                if (leg == 0 && step == evStep) { // 途中事件重放（同生成端落位）
+                                    if (evRoll < 60u) { // pieceSpiderRoom 走廊形重放（t1012 ②）
+                                        const int ppx = (dirsT[ci] < 2) ? 0 : 1;
+                                        const int ppz = (dirsT[ci] < 2) ? 1 : 0;
+                                        const int tdx = (dirsT[ci] == 0) ? 1 : (dirsT[ci] == 1) ? -1 : 0;
+                                        const int tdz = (dirsT[ci] == 2) ? 1 : (dirsT[ci] == 3) ? -1 : 0;
+                                        const int sgn = (wT1012.hashVoxel(mineSeed ^ 0x5ED1u, ax, sy, az) & 1u) ? 1 : -1;
+                                        const quint32 dh = wT1012.hashVoxel(mineSeed ^ 0x5C1Au, ax, sy, az);
+                                        const int snw = 1 + int(dh & 1u);        // 宽 1-2
+                                        const int snh = 2 + int((dh >> 2) & 1u); // 高 2-3
+                                        const int snl = 3 + int((dh >> 4) & 3u) % 4; // 长 3-6
+                                        const int cageOff = 2 + snl / 2;         // 笼位（廊体 = off 2..snl+1）
+                                        ++branchesT1012;
+                                        if (snw >= 1 && snw <= 2 && snh >= 2 && snh <= 3
+                                            && snl >= 3 && snl <= 6)
+                                            ++branchDimOkT1012;
+                                        for (int off = 2; off <= snl + 1; ++off)
+                                            for (int w2 = 0; w2 < snw; ++w2) {
+                                                const int px = ax + ppx * sgn * off + tdx * w2;
+                                                const int pz = az + ppz * sgn * off + tdz * w2;
+                                                const int nh = (off >= cageOff - 1 && off <= cageOff + 1) ? 3 : snh;
+                                                trackFloor(px, pz, sy);
+                                                for (int dy = 1; dy <= nh; ++dy) { // 满网点位（笼格 = Spawner）
+                                                    ++webCellsT1012;
+                                                    const quint8 wb = wT1012.blockAt(px, sy + dy, pz);
+                                                    const bool cageCell = (off == cageOff && w2 == 0 && dy == 1);
+                                                    if (wb == BR::Cobweb || (cageCell && wb == BR::Spawner))
+                                                        ++webMatchT1012;
+                                                }
+                                            }
+                                    } else if (evRoll < 85u) { // pieceIntersection 5×5 地板登记
+                                        for (int dx2 = -2; dx2 <= 2; ++dx2)
+                                            for (int dz2 = -2; dz2 <= 2; ++dz2)
+                                                trackFloor(ax + dx2, az + dz2, sy);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (int dx = 0; dx < 10; ++dx) // 起点厅 10×10 地板登记（生成端先于巷道 carve；歧义口径与序无关）
+                        for (int dz = 0; dz < 10; ++dz)
+                            trackFloor(cx - 5 + dx, cz - 5 + dz, sy);
+                    // ② 地板政策（候选内登记完后统一核）：下方 Air ↔ Planks、下方实地 ↔ Stone
+                    for (const auto &kv : floorY) {
+                        const int fy = kv.second;
+                        if (fy < 0) continue; // 多 y 重刻 → 政策歧义弃样
+                        const quint8 actual = wT1012.blockAt(kv.first.first, fy, kv.first.second);
+                        if (actual != BR::Stone && actual != BR::Planks) continue; // 被重刻清空 / 结构占用 → 弃样
+                        const quint8 below = wT1012.blockAt(kv.first.first, fy - 1, kv.first.second);
+                        if (actual == BR::Planks) {
+                            ++floorPlanksT1012;
+                            if (below != BR::Air) ++floorViolT1012; // 空腔桥面政策违例
+                        } else {
+                            ++floorStoneT1012;
+                            if (below == BR::Air) ++floorViolT1012; // 嵌岩石底政策违例
+                        }
+                    }
+                }
+            }
+            // ③ 世界侧 MobSpider 笼净样（满网 + 笼座实体 + ≥8 盒网〔t786 分流同口径〕+ 零开露）
+            for (int y = 7; y < 60; ++y)
+                for (int z = 1; z < wD - 1; ++z)
+                    for (int x = 1; x < wW - 1; ++x) {
+                        if (wT1012.blockAt(x, y, z) != BR::Spawner) continue;
+                        if (emT1012.spawnerMobTypeForState(int(wT1012.stateAt(x, y, z)))
+                            != EntityManager::MobSpider) continue;
+                        ++cagesT1012;
+                        if (wT1012.blockAt(x, y - 1, z) == BR::Air) continue; // 笼座须实体地板
+                        int webs = 0, openAir = 0;
+                        for (int dx = -3; dx <= 3; ++dx)
+                            for (int dz = -3; dz <= 3; ++dz)
+                                for (int dy = 1; dy <= 3; ++dy) {
+                                    if (dx == 0 && dz == 0 && dy == 1) continue;
+                                    if (wT1012.blockAt(x + dx, y - 1 + dy, z + dz) == BR::Cobweb) ++webs;
+                                }
+                        static const int kCageNbT1012[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                        for (const auto &nb : kCageNbT1012)
+                            for (int dy = 1; dy <= 3; ++dy)
+                                if (wT1012.blockAt(x + nb[0], y - 1 + dy, z + nb[1]) == BR::Air) ++openAir;
+                        if (webs >= 8 && openAir == 0) ++cleanCagesT1012;
+                    }
+        }
+        // ④ 源码钉（段 B 推进条件 / 地板政策 / 走廊形选型 / 满网落块 —— 阴性轮敏感：任一 revert → 钉失）
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile wf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
+            pinT1012 = src.contains(QStringLiteral("if (leg == 1 || step > 0) { ax += dx; az += dz; }"))
+                && src.contains(QStringLiteral("overCavity ? BlockRegistry::Planks : BlockRegistry::Stone"))
+                && src.contains(QStringLiteral("const int snl = kSpiderCorrLenMin"))
+                && src.contains(QStringLiteral("const int cageOff = 2 + snl / 2;"))
+                && src.contains(QStringLiteral("m_chunks.setBlock(px2, py2, pz2, BlockRegistry::Cobweb, 0);"));
+        }
+        ok = ok && legBCellsT1012 >= 100 && legBSolidT1012 == 0;            // ① 段 B 全腿推进（L 折线 / 斜坡对角下切）
+        ok = ok && floorStoneT1012 >= 5 && floorPlanksT1012 >= 1;           // ② 政策两分支真执行
+        ok = ok && floorViolT1012 == 0;                                     // ② 零违例
+        ok = ok && branchesT1012 >= 5 && branchDimOkT1012 == branchesT1012; // ③ 走廊形选型窗
+        ok = ok && webCellsT1012 > 0 && webMatchT1012 * 100 >= webCellsT1012 * 75; // ③ 满网匹配率（自巷拐腿
+        //   重刻 / 后续结构占用 legitimately 清网 → 池级 75% 窗；旧 7×7 房间形此值 ~30% → 恰红）
+        ok = ok && cagesT1012 >= 3 && cleanCagesT1012 >= 3;                 // ③ 世界侧满网净笼
+        ok = ok && pinT1012;                                                // ④
+        if (!ok)
+            qInfo().noquote() << "  [t1012 diag] legB" << legBCellsT1012 - legBSolidT1012
+                              << "/" << legBCellsT1012 << "floorViol" << floorViolT1012
+                              << "stone/planks" << floorStoneT1012 << "/" << floorPlanksT1012
+                              << "branches" << branchDimOkT1012 << "/" << branchesT1012
+                              << "webMatch" << webMatchT1012 << "/" << webCellsT1012
+                              << "cages" << cleanCagesT1012 << "/" << cagesT1012
+                              << "pin" << pinT1012;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1012 mineshaft geometry trio: corridor leg-B advancement restored"
+                             "(t565 semantics, solid head cells" << legBSolidT1012 << "/" << legBCellsT1012
+                          << "), per-column floor policy (embedded=stone" << floorStoneT1012
+                          << "/cavity=planks" << floorPlanksT1012 << ", violations" << floorViolT1012
+                          << "), spider web corridors 1-2x2-3x3-6 full-webbed (branches"
+                          << branchDimOkT1012 << "/" << branchesT1012 << ", web fill" << webMatchT1012
+                          << "/" << webCellsT1012 << ", clean cages" << cleanCagesT1012 << "/"
+                          << cagesT1012 << "), geometry pins";
     }
 
     // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
