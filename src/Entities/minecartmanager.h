@@ -413,11 +413,13 @@ private:
 
     // t981 V 谷底一次停驻捕获（tickPushedCarts 滑行半边 / tickRiddenCart coasting 半边共用；实现见 .cpp）：
     //   车所在格 = V 形凹谷格（直轨、行进轴两侧邻轨三高探针皆 +1 —— 与 railRiseAt 谷面分支同几何同源）
-    //   且 |speed| ≤ kCartValleyEscape 且非金轨（断电刹车 / 通电 boost 既有轨型语义优先，不扩面）→ 以
-    //   「制动到谷心」速度律接管本 tick 坡向物理：a = v²/(2·d)（d = 沿运动向到谷心剩余距离，每 tick 重算
-    //   = 自校正常减速），v 与 d 同步归零 → 车一次平滑减速停驻谷底中心（谷心梯度 0 = 静置闸稳定不动点，
-    //   停驻后所有闸门一致静止，无往复）。返回 true = 已接管（caller 跳过既有坡向分类；推进仍走
-    //   stepCartAlongRail）。已越谷心正在爬对壁（d<0）不捕（高能穿透同口径；回落后再捕）。
+    //   且进谷能量不足以爬升对面坡（t1019 能量判据：v² < 2·kCartSlopeGravity·(h_对面坡升 + 余量)）且非
+    //   金轨（断电刹车 / 通电 boost 既有轨型语义优先，不扩面）→ 以「制动到谷心」速度律接管本 tick 坡向
+    //   物理：a = v²/(2·d)（d = 沿运动向到谷心剩余距离，每 tick 重算 = 自校正常减速），v 与 d 同步归零 →
+    //   车一次平滑减速停驻谷底中心（谷心梯度 0 = 静置闸稳定不动点，停驻后所有闸门一致静止，无往复）。
+    //   能量足（v² ≥ 2g·h 对面坡升 + 余量）→ 放行交还既有上坡物理按速度爬坡穿过（用户口径「通过或单调
+    //   减速二选一，无往复」）。返回 true = 已接管（caller 跳过既有坡向分类；推进仍走 stepCartAlongRail）。
+    //   已越谷心正在爬对壁（d<0）不捕（穿透 / 爬升同口径；失速回落后再捕）。
     bool tryValleyBottomCapture(Cart &c, World *world, int railY, qreal dt);
 
     // t769 车身俯仰刷新（纯呈现）：以车心为基准、沿车头向 ±kCartPitchProbe 两点采样轨面高（railSurfaceYAt）
@@ -635,13 +637,17 @@ private:
     //   平拐角 0）——与 t863① tryStallSlideback 的 0.05 高差阈同口径（0.05 高差 ÷ 0.5 采样窗 = 0.1 梯度）。
     //   低于它的微起伏（拐角双线性残段 / 采样跨段过渡带）按平面处理（退回邻轨层差判定）。
     static constexpr float kCartSlopeGradMin = 0.1f;
-    // t981 V 谷底捕获逃逸阈（blocks/s）：|speed| ≤ 它的滑行车进入 V 形凹谷格（行进轴两侧邻轨皆 +1，
-    //   railRiseAt 的 2|axis-0.5| 谷面）即被「制动到谷心」速度律一次平滑减速停驻（用户口径「滑落到底一次
-    //   停驻，不许往复振荡」）；> 它（动力 boost / 碰撞弹射）按速度通过不捕获。取 kCartSlopeDownSpeed(10.0)
-    //   = 重力滑行终端速度：终端速度本身按 exp 收敛恒自下方逼近 10 → 凡纯重力可达的到达速全 < 10 全被捕，
-    //   只有外源供能（boost 12.8 / 冲量钳 12.8）严格 > 10 穿得过；阈若更低（如 1 格滑落到达速 6.4 之下不
-    //   可能，之上放行）会让重力车反复越谷 = 振荡复发。
-    static constexpr float kCartValleyEscape = 10.0f;
+    // t1019 V 谷捕获能量判据（t981 逃逸阈 |speed|≤10 的再翻案）：进谷速度足以爬升对面坡（v² ≥
+    //   2·kCartSlopeGravity·(h_对面坡升 + 本余量)，g 用项目坡道运动学口径 kCartSlopeGravity = 世界重力
+    //   28 × sin45° 沿轨分量，与上 / 下坡积分同一常量 → 能量账自洽）则放行按速度通过；不足才谷心制动
+    //   停驻（用户口径「通过或单调减速二选一，无往复」）。h_对面坡升 = 沿行进向逐格 +1 的连续爬升段
+    //   总高（V 谷单壁 = 1.0；阶梯壁逐格累加——深谷壁必须足额计入，否则臂中失速回溜 = 打转极限环复发）。
+    //   本余量（格高）盖住静置闸 kick（+1.0 → v² +1.0）等贴阈再供能项：恰够爬出阈值的贴阈车判「不足」
+    //   → 谷心停驻（防 crest-stall → 静置闸 kick 回谷的循环带；余量 0.05 格 ≈ v² 2.0 > kick 1.0）。
+    static constexpr float kCartValleyPassMarginH = 0.05f;
+    // t1019 对面坡升扫描上限（格）：沿行进向逐格 +1 的连续爬升段最长步数（防病态长阶梯；16 格 = 工程
+    //   轨道 far 超出该爬升的车速必先被坡道物理减速，扫描截断不影响行为）。
+    static constexpr int kCartValleyClimbScanMax = 16;
 };
 
 #endif // MINECARTMANAGER_H
