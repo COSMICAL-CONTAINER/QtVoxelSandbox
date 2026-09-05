@@ -131,6 +131,14 @@ public:
     Q_INVOKABLE void setDay(int day);
     Q_INVOKABLE void addPhase(float delta);
 
+    // t1016 存档时刻恢复（WorldStore 加载链调）：把存档里保存的 (phase, day) 原样写回时钟（applyTime
+    //   直调，**无** setPhase 的 day+1 副作用 —— 恢复不是「再过一天」，月相 = day%8 随 day 精确复原）。
+    //   PLAN §2-H「时间单向」是睡觉机制的不变量；/time 指令（misc 二轮）已开「玩家显式特权可任意设」
+    //   先例，加载存档 = 恢复退出时刻（dev-spec t1016「存退重进保留退出时刻」），同属显式事件而非
+    //   呈现层漂移写。phase 归一到 [0,1)、day 钳 ≥0（同 applyTime）。旧存档缺时间字段 → caller 传
+    //   默认 (0,0) = 新世界默认时刻（晴天正午起），与 regenerate 后的首帧时钟一致。
+    Q_INVOKABLE void restoreTime(float phase, qint64 day);
+
     // t155 编辑活跃期反馈入口（呈现层 QML 经 World::worldChanged 调）：记录「最近一次编辑」时间戳，
     //   供 onTick 判定编辑活跃期（近 kEditCooldownMs 内有编辑）→ 跳过太阳跨步全量重建，避免抢帧。
     //   分层（PLAN §2）：Game 层时间源，不 include / 不依赖 World；编辑信号由 QML 桥接转发（无 C++ 向上依赖）。

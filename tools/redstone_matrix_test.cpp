@@ -38035,6 +38035,128 @@ Item {
                                         .arg(okA).arg(okB).arg(okC).arg(okD).arg(okE));
     }
 
+    // ── P-t1016 世界时间持久化探针（R19.20 t1016；存退重进保留退出时刻 + weather/天数）──
+    //    (a) 真 WorldStore SQLite：saveAll 第 5 参时钟快照（phase/day/weather）落 world_meta → 关库
+    //        重开 → loadWorldTime 逐键相等（phase 'g'9 float 短往返逐位还原 / day qint64 / 枚举 int）；
+    //    (b) 旧档兼容：不含时间键的存档（旧 saveAll 四参调用）→ loadWorldTime 逐键缺省
+    //        （0.0 / 0 / 0 = 新世界首帧晴天），不炸不跳；
+    //    (c) 恢复链：WorldClock.restoreTime 精确复原 (phase, day)（无 setPhase 的 day+1 副作用，月相
+    //        = day%8 随之复原）+ World.setWeatherState 设态 / 同态零噪声 / 非法值拒；
+    //    (d) 源码钉：Main.qml 退出链第 5 参 + enterWorld 恢复接线 + 两 C++ 恢复入口签名（阴性轮敏感）。
+    {
+        World wT1016;
+        wT1016.setWidth(48);
+        wT1016.setDepth(48);
+        wT1016.setHeight(96);
+        wT1016.setSeed(1016);
+        WorldStore storeT1016;
+        storeT1016.setWorld(&wT1016);
+        bool okA = false, okB = false, okC = false, okD = false;
+        // (a) 快照落盘 → 关库重开 → 读回逐键相等。
+        const QString dbT1016 = QDir::temp().absoluteFilePath(
+                QStringLiteral("voxel_t1016_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+        QFile::remove(dbT1016);
+        {
+            QVariantMap wt;
+            wt.insert(QStringLiteral("phase"), 0.3f); // 非整二进制相位（'g'9 短往返保真面）
+            wt.insert(QStringLiteral("day"), qlonglong(3));
+            wt.insert(QStringLiteral("weather"), 2); // Snow
+            okA = storeT1016.openWorld(dbT1016)
+                && storeT1016.saveAll(QStringLiteral("t1016rig"), QVariantList(), QVariantList(), QVariantList(), wt);
+            storeT1016.closeWorld();
+            QVariantMap back;
+            if (okA && storeT1016.openWorld(dbT1016)) back = storeT1016.loadWorldTime();
+            storeT1016.closeWorld();
+            okA = okA && back.value(QStringLiteral("phase")).toFloat() == 0.3f
+                && back.value(QStringLiteral("day")).toLongLong() == 3
+                && back.value(QStringLiteral("weather")).toInt() == 2;
+            if (!okA)
+                qInfo().noquote() << "  [t1016 diag a] back =" << back;
+        }
+        // (b) 旧档缺键 → 逐键缺省（默认早晨相位 0 / 第 0 天 / Clear 晴天）。
+        {
+            const QString dbOld = QDir::temp().absoluteFilePath(
+                    QStringLiteral("voxel_t1016old_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+            QFile::remove(dbOld);
+            bool built = storeT1016.openWorld(dbOld)
+                && storeT1016.saveAll(QStringLiteral("t1016old")); // 四参旧调用形态：不写任何时间键
+            storeT1016.closeWorld();
+            QVariantMap back;
+            if (built && storeT1016.openWorld(dbOld)) back = storeT1016.loadWorldTime();
+            storeT1016.closeWorld();
+            okB = built && back.value(QStringLiteral("phase")).toFloat() == 0.0f
+                && back.value(QStringLiteral("day")).toLongLong() == 0
+                && back.value(QStringLiteral("weather")).toInt() == 0;
+            if (!okB)
+                qInfo().noquote() << "  [t1016 diag b] built" << built << "back =" << back;
+            QFile::remove(dbOld);
+        }
+        // (c) 恢复链：restoreTime 精确复原（无 day+1）；setWeatherState 设态 / 同态零 emit / 非法拒。
+        {
+            WorldClock clockT1016;
+            clockT1016.setPhase(0.5f); // 先搅动（setPhase 自带 day+1，恢复须覆盖而非叠加）
+            clockT1016.restoreTime(0.75f, 3);
+            const bool clockOk = clockT1016.dayPhase() == 0.75f
+                && clockT1016.dayCount() == 3
+                && clockT1016.moonPhase() == 3; // 月相 = day%8 随 day 复原（无 setPhase +1 漂移）
+            int weatherEmits = 0;
+            const QMetaObject::Connection connW = QObject::connect(
+                &wT1016, &World::weatherChanged, &wT1016, [&weatherEmits]() { ++weatherEmits; });
+            wT1016.setWeatherState(2); // Clear → Snow：设态 + emit
+            const bool setOk = wT1016.weatherState() == 2 && weatherEmits == 1;
+            wT1016.setWeatherState(2); // 同态恢复：零噪声
+            wT1016.setWeatherState(9); // 非法：静默拒（保当前态，枚举不变量）
+            const bool noiseOk = wT1016.weatherState() == 2 && weatherEmits == 1;
+            wT1016.setWeatherState(0); // 回 Clear：emit
+            const bool backOk = wT1016.weatherState() == 0 && weatherEmits == 2;
+            QObject::disconnect(connW);
+            okC = clockOk && setOk && noiseOk && backOk;
+            if (!okC)
+                qInfo().noquote() << "  [t1016 diag c] clockOk" << clockOk << "phase" << clockT1016.dayPhase()
+                                  << "day" << clockT1016.dayCount() << "moon" << clockT1016.moonPhase()
+                                  << "setOk" << setOk << "noiseOk" << noiseOk << "backOk" << backOk;
+        }
+        // (d) 源码钉：QML 退出链第 5 参 + enterWorld 恢复接线 + C++ 恢复入口签名。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile mqf(root + QStringLiteral("/src/ui/Main.qml"));
+            QFile wch(root + QStringLiteral("/src/World/worldclock.h"));
+            QFile wh(root + QStringLiteral("/src/World/world.h"));
+            const QString mq = mqf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mqf.readAll()) : QString();
+            const QString clockHdr = wch.open(QIODevice::ReadOnly) ? QString::fromUtf8(wch.readAll()) : QString();
+            const QString worldHdr = wh.open(QIODevice::ReadOnly) ? QString::fromUtf8(wh.readAll()) : QString();
+            okD = mq.contains(QStringLiteral("{ phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState }"))
+                && mq.contains(QStringLiteral("worldClock.restoreTime(wt.phase, wt.day)"))
+                && mq.contains(QStringLiteral("theWorld.setWeatherState(wt.weather)"))
+                && clockHdr.contains(QStringLiteral("Q_INVOKABLE void restoreTime(float phase, qint64 day);"))
+                && worldHdr.contains(QStringLiteral("Q_INVOKABLE void setWeatherState(int state);"));
+        }
+        QFile::remove(dbT1016);
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        if (!okC) ++totalFail;
+        if (!okD) ++totalFail;
+        qInfo().noquote() << (okA && okB && okC && okD ? "PASS" : "FAIL")
+                          << "| t1016 world-clock persistence rig: the exit save writes the clock"
+                             "snapshot {phase,day,weather} through saveAll's 5th arg into"
+                             "world_meta inside the SAME transaction as chunks/meta, a close/"
+                             "reopen round-trips all three keys exactly (float 'g'9 short"
+                             "round-trip phase, qint64 day, enum weather); a legacy save without"
+                             "the time keys loads per-key defaults (phase 0 / day 0 / weather"
+                             "Clear = a fresh world's first frame, no crash); restoreTime puts"
+                             "back (phase, day) EXACTLY with no setPhase day+1 side effect"
+                             "(moon phase = day%8 follows), and setWeatherState sets the state"
+                             "with one emit, stays silent on same-state restore, and silently"
+                             "rejects out-of-enum values; source pins lock the QML exit-chain"
+                             "5th arg, the enterWorld restore wiring and both C++ restore"
+                             "entries (negative-round sensitive)"
+                          << (okA && okB && okC && okD
+                                  ? QString()
+                                  : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
+                                        .arg(okA).arg(okB).arg(okC).arg(okD));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }

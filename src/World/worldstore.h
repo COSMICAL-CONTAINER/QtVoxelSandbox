@@ -103,8 +103,19 @@ public:
     //   chests 为 ChestStore::allChests() 产物（每项 {x,y,z,slots:[{id,count}×27]}；空列表 → 清空 chests 表）。
     //   furnaces 为 FurnaceStore::allFurnaces() 产物（每项 {x,y,z,slots:[{id,count}×3], burn, smelt}；空 → 清空）。
     //   dispensers 为 DispenserStore::allDispensers() 产物（每项 {x,y,z,slots:[{id,count}×9]}；空 → 清空 dispensers 表）。
+    //   t1016 worldTime：世界时钟快照（caller Main.qml 传 {phase, day, weather}，WorldClock.dayPhase /
+    //   dayCount + World.weatherState 的裸原语打包 —— Game 层时钟不能被 World 层向上依赖，经 QML 编排
+    //   传入，同 player_state 裸原语边界先例）。非空 map → 三键（clock_phase / clock_day / weather）与
+    //   chunks / meta 同事务原子写入 world_meta；空 map（缺省 / 老探针调用）→ 不写不删（键保留旧值，
+    //   兼容「不感知时间的 caller 不应抹掉已存时刻」）。缺键回退：phase 缺 → 不写该键（下同）。
     //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
-    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {});
+    Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {},
+                             const QVariantMap &worldTime = {});
+    // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int}。
+    //   旧存档缺键 → 逐键缺省（phase 0.0 = 新世界默认相位 / day 0 / weather 0 = Clear 晴天）——
+    //   「新增字段对旧存档缺省（默认早晨 / 晴天）」，加载端拿默认值恢复 = 与新世界首帧时钟一致，
+    //   不炸不跳。未打开 → 空 map（caller 判空跳过恢复）。
+    Q_INVOKABLE QVariantMap loadWorldTime() const;
     // 读当前库的 chests 表为 QVariantList（同 saveAll 的 chests 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
     Q_INVOKABLE QVariantList loadChests() const;

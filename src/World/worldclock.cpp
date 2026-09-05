@@ -129,6 +129,12 @@ void WorldClock::addPhase(float delta)
     applyTime(p, (m_dayCount >= 0 ? m_dayCount : 0) + carry);
 }
 
+// t1016 存档时刻恢复（头注释见 .h）：applyTime 直调（无 setPhase 的 day+1），(phase, day) 原样落回。
+void WorldClock::restoreTime(float phase, qint64 day)
+{
+    applyTime(phase, day);
+}
+
 // t155 编辑活跃期反馈：呈现层 QML 在 World::worldChanged 时调本方法，把「最近编辑」时间戳记为当前
 //   m_elapsedMs（与 onTick 跨步判定同基准）。onTick 据此判 editingActive() → 编辑活跃期跳过太阳跨步。
 //   仅记时间戳，不改时间本身（无 setTime，PLAN §2 时间单向流逝）。
