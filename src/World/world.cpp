@@ -3081,13 +3081,18 @@ void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
            | (rb == BlockRegistry::GoldenRail ? BlockRegistry::GoldenRailStateOnFlag : 0)));
     con = quint8(con | preserved);
     // t666 轴偏好位镜像当前轴（有连接时）：直轨最后形态 = 孤轨形态（MC 轨断连后保留 metadata 语义）。
-    //   拐角（2 垂直位）不算轴 → 保持现有偏好位不变。
+    //   拐角（2 垂直位）不算轴 → 保持现有偏好位不变。t1018：单轴连接也镜像——延伸松弛可产生与放置
+    //   面向（bit5）相反的连接（EW 面向新轨接续 NS 线端），bit5 随实连轴翻转，孤轨形态 = 最后实连轴。
     if ((con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) ==
         (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx))
         con = quint8(con | BlockRegistry::RailAxisEWFlag);      // 贯穿 X → EW 偏好
     else if ((con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) ==
              (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz))
         con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // 贯穿 Z → NS 偏好
+    else if ((con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) != 0)
+        con = quint8(con | BlockRegistry::RailAxisEWFlag);      // t1018 单 X 臂 → EW 偏好
+    else if ((con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) != 0)
+        con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂 → NS 偏好
     if (con == curState) return; // 连接未变 → 不写（防无谓标脏）
     m_chunks.setBlock(x, y, z, rb, con); // 静默直写 + 标脏（含边界邻接）
     // 铁轨族 solid=false 不遮光 → 光场无变化，免 recomputeLightAround。

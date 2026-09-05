@@ -2395,6 +2395,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::mechBoxes(quint8 blockId, q
 //      否则任取单端；均无 → 0。绝不产生垂直 2 位 / 十字。
 //   ③ 普通轨：贯穿轴优先（保持既有轴偏好：既有对向双连接 / 既有单向 / 轴偏好位 bit5）。
 //   ④ 0 连接 → 0（轴偏好位由调用方按 curState 守恒写回 —— 孤轨轴向保活）。
+//   ⑥ t1018 延伸松弛（t983 回炉）：c==0（bit5 纯放置面向）轨偏好轴零臂时，垂直轴「端点相对」邻
+//      （railProbeEndpointAligned 单表判据：邻轨轴含连接方向 = 轨线端点对本格）照连——连接由邻轨
+//      端点拓扑决定、放置朝向无关（用户「沿轨线端点延伸铺设接不上线」收口）；平行侧邻（邻轴垂直）
+//      仍拒连 = t983 主口径不回退。c!=0 轨既有连接即实拓扑，永不松。
 //   ⑤ t812 3+ 臂交汇（普通轨 only，规则③前拦截）：四向全连 → 直线一对（轴偏好级联，直线优先于弯，
 //      十字多臂输出退役）；三向 T 交叉 → 转辙器弯道 2 位（稳定优先：既有合法弯保持；否则 bit6
 //      RailSwitchCurveFlag 选侧）。红石升沿切弯由 World 电力层走 railSwitchToggledState（事件驱动，
@@ -2531,9 +2535,21 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
         //   不吸成贯穿线（pre-fix bothZ 早退会把 EW 定向轨拽成 NS 贯穿 = 「平行放置吸附」的夹逼变体）。
         //   轴取向读 ewPref（c 优先 bit5 兜底）：「连接位与轴偏好位可并存」的轨按现行走向守恒续连。真孤
         //   新轨（state 全零，无面向无连接）唯一邻定轴（对该轨自身端点相对，MC 允许新轨朝唯一邻取向）。
+        //   **t1018 延伸松弛（t983 回炉；仅 c==0 = bit5 纯放置面向轨）**：偏好轴零臂而垂直轴有
+        //   「端点相对」邻（railProbeEndpointAligned：邻轨轴含连接方向 = 轨线端点对本格）→ 按邻拓扑
+        //   接续（放置朝向无关——用户「沿轨线端点延伸铺设接不上线」根因 = 面向轴与线轴相反时偏好轴
+        //   零臂落 0 连接，轨线从此断在延伸点）；平行侧邻（邻轴垂直连接方向）仍拒连 = t983 主口径
+        //   不回退（P-t983 腿 a/b 零回归同闸验证）。c!=0 轨既有连接即实拓扑，永不松（断端 stub 保持 0）。
         if ((curState & RailAxisEWFlag) != 0 || c != 0) {
-            if (ewPref) return quint8((hasPX ? RailConnPx : 0) | (hasNX ? RailConnNx : 0));
-            return quint8((hasPZ ? RailConnPz : 0) | (hasNZ ? RailConnNz : 0));
+            const quint8 axisCon = ewPref
+                ? quint8((hasPX ? RailConnPx : 0) | (hasNX ? RailConnNx : 0))
+                : quint8((hasPZ ? RailConnPz : 0) | (hasNZ ? RailConnNz : 0));
+            if (axisCon != 0 || c != 0) return axisCon;
+            if (ewPref)
+                return quint8((hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)
+                            | (hasNZ && railProbeEndpointAligned(nz, false) ? RailConnNz : 0));
+            return quint8((hasPX && railProbeEndpointAligned(px, true) ? RailConnPx : 0)
+                        | (hasNX && railProbeEndpointAligned(nx, true) ? RailConnNx : 0));
         }
         if (hasPX && hasNX) return quint8(RailConnPx | RailConnNx); // fresh 对向双 X → EW 直线
         if (hasPZ && hasNZ) return quint8(RailConnPz | RailConnNz); // fresh 对向双 Z → NS 直线
@@ -2557,8 +2573,17 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
         // **t983 ① 统一口径（同规则②）**：显式轴自格只连端点相对（轴上）臂——轴上单 / 双臂照连（直线 /
         //   贯穿零回归），纯侧臂（平行旁轨单臂 / 双侧夹逼）0 连接（不偷垂直旁轨、不翻轴吸成贯穿线，轴偏
         //   守恒）。轴取向读 ewPref（c 优先 bit5 兜底）。
-        if (ewPref) return quint8((hasPX ? RailConnPx : 0) | (hasNX ? RailConnNx : 0));
-        return quint8((hasPZ ? RailConnPz : 0) | (hasNZ ? RailConnNz : 0));
+        //   **t1018 延伸松弛（t983 回炉；仅 c==0 = bit5 纯放置面向轨，与规则②同口径）**：偏好轴零臂而
+        //   垂直轴有端点相对邻 → 按邻拓扑接续（放置朝向无关）；平行侧邻仍拒连（t983 不回退）。
+        const quint8 axisCon = ewPref
+            ? quint8((hasPX ? RailConnPx : 0) | (hasNX ? RailConnNx : 0))
+            : quint8((hasPZ ? RailConnPz : 0) | (hasNZ ? RailConnNz : 0));
+        if (axisCon != 0 || c != 0) return axisCon;
+        if (ewPref)
+            return quint8((hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)
+                        | (hasNZ && railProbeEndpointAligned(nz, false) ? RailConnNz : 0));
+        return quint8((hasPX && railProbeEndpointAligned(px, true) ? RailConnPx : 0)
+                    | (hasNX && railProbeEndpointAligned(nx, true) ? RailConnNx : 0));
     }
     bool throughX;
     if (bothX) throughX = true;
@@ -2595,6 +2620,23 @@ int BlockRegistry::railProbeDelta(const RailProbe &p)
     if (isRail(p.up)) return 1;
     if (isRail(p.down)) return -1;
     return INT_MIN;
+}
+
+// t1018 端点相对判定（契约见 blockregistry.h；railConnections 规则②③延伸松弛共用单表）：
+//   「连接由邻轨端点拓扑决定，放置朝向无关」的唯一几何判据。三档：
+//   · 坡臂（up/down 层有轨）→ 恒真：坡的走向必含该水平方向（坡臂在任何朝向下都是端点相对的延伸）。
+//   · 邻轨连接位 sc 含该方向连接位 → 真：邻轨以端点（连接位）对着本格方向的轴向延续。
+//   · sc==0（无连接孤轨）→ 按 bit5 读轴（EW=±X / 清=±Z，fresh 与 NS 不可区分按 NS 保守读）：
+//     邻轴含连接方向 → 真（孤轨端点对本格）；邻轴垂直 → 假（平行侧邻，t983 拒连口径延续）。
+bool BlockRegistry::railProbeEndpointAligned(const RailProbe &p, bool xAxis)
+{
+    if (isRail(p.up) || isRail(p.down)) return true; // 坡臂：走向必含该水平方向
+    const quint8 sc = quint8(p.sameState & 0x0F);
+    if (xAxis)
+        return (sc & (RailConnPx | RailConnNx)) != 0
+            || (sc == 0 && (p.sameState & RailAxisEWFlag) != 0);
+    return (sc & (RailConnPz | RailConnNz)) != 0
+        || (sc == 0 && (p.sameState & RailAxisEWFlag) == 0);
 }
 
 // t737 铁轨拐角「连接位 → 两臂走向」（单一权威，见 blockregistry.h 头注释）：con 低 4 位恰 1 X + 1 Z 位
