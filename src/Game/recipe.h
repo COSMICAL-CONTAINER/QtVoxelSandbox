@@ -422,6 +422,14 @@ public:
     //   图标（亮绿幼体配色，drawSpawnEgg("babyshambler")，§9 原创）；无 pack 映射（资源包回退自绘，
     //   同近期材料段物品模式）。创造调色板补全（hotbar creativeMaterials 蛋区尾）。
     static constexpr int SpawnEggBabyShamblerId = 0x25D; // 生物蛋（小蹒跚者）：右键 → 生成小蹒跚者（幼体僵尸；t952）
+    // t1012③ 生物蛋（洞穴蜘蛛）（材料段 0x25E，小蹒跚者蛋之上首个空闲号）。机制等价 MC cave spider spawn
+    //   egg——创造模式物品，右键地面 → mobTypeForSpawnEgg 单一权威表 → MobCaveSpider（蜘蛛同族 0.7× 小体型
+    //   敌对，命中挂中毒 DoT）；右键刷怪笼 → spawnerStateForMob(20)=0x28 改型。可堆叠 64（材料段默认）；
+    //   非方块 → 右键在 selectedBlock Air 守卫之前分流走蛋分支（同全蛋族）。MaterialIcon 自绘蛋形图标
+    //   （暗蓝壳 + 红眼簇 + 蓝腿线，drawSpawnEgg("cavespider")，§9 原创）；pack 映射 itemFilenameMap
+    //   0x25E → cave_spider_spawn_egg.png（缺则安全跳过回退自绘，同 t785 蛋补全模式）。创造调色板补全
+    //   （hotbar creativeMaterials 蛋区尾）。
+    static constexpr int SpawnEggCaveSpiderId = 0x25E; // 生物蛋（洞穴蜘蛛）：右键 → 生成洞穴蜘蛛（t1012③）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

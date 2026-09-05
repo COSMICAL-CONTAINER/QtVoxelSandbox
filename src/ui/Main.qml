@@ -1874,6 +1874,7 @@ Window {
             "bones": EntityManager.MobBones,
             "stalker": EntityManager.MobStalker,
             "spider": EntityManager.MobSpider,
+            "cavespider": EntityManager.MobCaveSpider, // t1012③ 洞穴蜘蛛（/summon cavespider、/kill @e[type=cavespider]）
             "chicken": EntityManager.MobChicken,
             "squid": EntityManager.MobSquid
         }
@@ -1916,7 +1917,7 @@ Window {
         const tid = window.mobTypeIdFromName(typeFilter)
         if (tid < 0) {
             return "未知实体类型: " + typeFilter +
-                   "（可用: test, pig, cow, sheep, shambler, bones, stalker, spider）"
+                   "（可用: test, pig, cow, sheep, shambler, babyshambler, bones, stalker, spider, caveSpider(=cavespider), chicken, squid）"
         }
         let removed = 0
         for (let i = 0; i < entityManager.count; ++i) {
@@ -2620,6 +2621,7 @@ Window {
             xpForMob[EntityManager.MobBones]    = 5   // 骸骨（骷髅）：5 XP
             xpForMob[EntityManager.MobStalker]  = 5   // 潜行者（苦力怕）：5 XP（自爆型，同敌对量级）
             xpForMob[EntityManager.MobSpider]   = 5   // 蜘蛛：5 XP
+            xpForMob[EntityManager.MobCaveSpider] = 5 // t1012③ 洞穴蜘蛛：5 XP（同族敌对量级）
             // t443 被动 mob 也掉少量 XP（spec「杀被动 mob（牛/羊/猪/鸡）也掉 XP」）：1-3 XP 随机。
             //   牛/羊/猪/鸡/鱿鱼均掉（被动经济生物）；MobTest 不在表 → 不掉。每次死亡独立掷骰（mob 死亡非
             //   worldgen，无确定性约束，同 onMobDied 既有 Math.random 稀有掉落模式）。
@@ -2693,6 +2695,10 @@ Window {
                 // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
                 itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2
                 itemEntities.spawnItem(x, y, z, 0x219, 1)
+            } else if (mobType === EntityManager.MobCaveSpider) {
+                // t1012③ 洞穴蜘蛛掉落：线 ×0-1（机制等价 MC 1.0 cave spider 掉 0-1 string——
+                //   小体型低收益口径，区别成体蜘蛛恒 1-2；线 id 0x219 = RecipeRegistry::StringId 同上字面量约定）。
+                if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x219, 1)
             } else if (mobType === EntityManager.MobStalker) {
                 // t485 潜行者（苦力怕）掉落：火药 ×1-2（机制等价 MC 1.0 苦力怕掉火药 gunpowder）。
                 //   0x239 = RecipeRegistry::GunpowderId（材料段火药；⚠️ QML 不 import C++ 静态类故用字面量，同 onMobDied
@@ -2825,6 +2831,7 @@ Window {
                 else if (mobType === EntityManager.MobBabyShambler) cause = PlayerState.Shambler // t952 小蹒跚者死因同族「被蹒跚者杀死」（幼体近战同一死因语义）
                 else if (mobType === EntityManager.MobBones) cause = PlayerState.Bones
                 else if (mobType === EntityManager.MobSpider) cause = PlayerState.Spider
+                else if (mobType === EntityManager.MobCaveSpider) cause = PlayerState.Spider // t1012③ 洞穴蜘蛛死因同族「被蜘蛛杀死」（同族近战同一死因语义）
                 else if (mobType === EntityManager.MobStalker) cause = PlayerState.Stalker
                 else if (mobType === EntityManager.MobTnt) cause = PlayerState.Tnt   // t494：TNT 爆炸死因（独立于潜行者自爆）
                 else if (mobType === EntityManager.MobIronGolem) cause = PlayerState.GolemSlain // t712：重拳直接击杀（旧落 Generic「不明原因」；摔落路径另走 GolemLaunchFall）
@@ -2842,6 +2849,13 @@ Window {
                     hotbarVM.damageArmor()
                 }
                 playerState.takeDamage(finalAmt, cause)
+                // t1012③ 洞穴蜘蛛命中中毒 DoT（机制等价 MC 1.0 cave spider 攻击附带 Poison；普通难度 7s）：
+                //   **沿用现有效果链**——applyStatusEffect(EffectPoison) 挂 t669/t715 既有 m_poisonTimer 时序源
+                //   （每 kPoisonInterval=1.25s 经 poisonDamageTaken 独立链扣 1 HP、绕护甲、等级 1 剩 1 血不致死、
+                //   效果栏显 icon_effect_poison），不新造平行 DoT 系统（同 t728 燃烬者火球点燃挂 EffectFire 先例）。
+                //   仅 Survival（onMobAttackedPlayer 整体门控内 + applyStatusEffect 内再门控双保险）。
+                if (mobType === EntityManager.MobCaveSpider)
+                    player.applyStatusEffect(PlayerState.EffectPoison, 7.0, 1)
             }
             player.wakeUp()  // t388 受击即醒（mob 近战 / 箭 / 爆炸中断睡觉 fade；非 Survival 亦醒，防御）
         }
@@ -4327,6 +4341,9 @@ Window {
         Texture { id: mobBonesPackTex;    source: resourcePack.active ? resourcePack.mobTextureSource(5) : ""; generateMipmaps: false }
         Texture { id: mobStalkerPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(6) : ""; generateMipmaps: false }
         Texture { id: mobSpiderPackTex;   source: resourcePack.active ? resourcePack.mobTextureSource(7) : ""; generateMipmaps: false }
+        // t1012③ 洞穴蜘蛛 pack 身体贴图（包内缺 cave_spider.png → 安全 miss，delegate 回退蜘蛛共享几何 +
+        //   程序蓝染 tint，0.7× 缩放在 delegate scale）。
+        Texture { id: mobCaveSpiderPackTex; source: resourcePack.active ? resourcePack.mobTextureSource(20) : ""; generateMipmaps: false }
         Texture { id: mobChickenPackTex;  source: resourcePack.active ? resourcePack.mobTextureSource(8) : ""; generateMipmaps: false }
         // feat 雪/铁傀儡 pack entity 贴图（机制等价 MC 1.0 雪傀儡 / 铁傀儡，§9 区隔：贴图仅贴雪块身 / 铁块身；
         //   南瓜头 + 刻面眼/嘴是单独的橙色南瓜 Model，不是贴图的一部分）。pack 命中 → Main.qml 傀儡 delegate 把
@@ -7151,6 +7168,8 @@ Window {
                         if (entMobType === EntityManager.MobStalker) return 0.90 * 0.85 - mobHalfH
                         if (entMobType === EntityManager.MobBones) return 0.90 - mobHalfH   // t287 Bones 人形（腿底 0.90）
                         if (entMobType === EntityManager.MobSpider) return 0.30 - mobHalfH  // t285 Spider 宽矮（腿底 0.30）
+                        // t1012③ CaveSpider（蜘蛛同族几何 0.7×：腿底 0.30×0.7=0.21；halfH=0.21 → offset=0 腿底贴地）
+                        if (entMobType === EntityManager.MobCaveSpider) return 0.30 * 0.7 - mobHalfH
                         if (entMobType === EntityManager.MobChicken) return 0.40 - mobHalfH // t398 Chicken 小型鸟（腿底 0.40）
                         if (entMobType === EntityManager.MobSquid) return 0.46 - mobHalfH // t399 Squid 触腕底 0.46（贴 collision 底面）
                         if (entMobType === EntityManager.MobWolf) return 0.42 - mobHalfH // t480 Wolf 犬科（腿底 0.42）
@@ -8858,6 +8877,71 @@ Window {
                         onLoaded: if (item) item.parent = mobDelegate
                     }
                     Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobCaveSpider
+                        sourceComponent: Component {
+                            // t1012③ CaveSpider（洞穴蜘蛛；mobType 20）：**蜘蛛同族 MobModel 几何共享分支**
+                            //   （mobmodel.cpp mobType 7/20 同源，零几何漂移）+ delegate **0.7× 缩放**（机制等价
+                            //   MC cave spider 0.7×0.7×0.7 缩比；碰撞盒 halfW 0.32/halfH 0.21 由 EntityManager
+                            //   单独设，视觉 0.7 贴合）+ **蓝染 tint**（pack 命中 → 蓝 tint × 贴图原色；miss →
+                            //   暗蓝纯色体色，§9 原创配色）。眼 = 4 颗红眼同蜘蛛（子 Model 随父 0.7× 自动缩放）。
+                            //   hostile → EntityManager aiHostile 自动追击（kCaveSpiderAttackDamage=2 低伤 +
+                            //   命中中毒 DoT 走 onMobAttackedPlayer 的 applyStatusEffect(EffectPoison) 链）。
+                            Model {
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobCaveSpider
+                                geometry: MobModel {
+                                    mobType: 20
+                                    packTextured: mobCaveSpiderPackTex.source.toString().length > 0
+                                    walkPhase: { const _r = mon.revision; return _r >= 0 ? (entityManager.walkPhaseAt(index)) : 0 }
+                                }
+                                position: Qt.vector3d(0, mobModelYOff, 0)
+                                scale: Qt.vector3d(0.7, 0.7, 0.7) // t1012③ 蜘蛛同模 0.7×
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColorMap: mobCaveSpiderPackTex.source.toString().length > 0 ? mobCaveSpiderPackTex : null
+                                    baseColor: {
+                                        const _r = mon.revision
+                                        const tl = terrainLight(worldClock.skyLight)
+                                        if (_r >= 0 && entityManager.hurtFlashAt(index) > 0) return "#ff0000"
+                                        if (_r < 0) return "#000000"
+                                        if (mobCaveSpiderPackTex.source.toString().length > 0)
+                                            return Qt.rgba(0.45 * tl.r, 0.70 * tl.g, 1.0 * tl.b, 1.0) // pack 贴图在身：蓝染 tint × 昼夜灰阶
+                                        return Qt.rgba(0.10 * tl.r, 0.22 * tl.g, 0.38 * tl.b, 1.0) // 暗蓝纯色体色（蓝染回退）
+                                    }
+                                }
+                                // 4 红眼（蜘蛛同款眼位 pack 感知 visible；子 Model 随父 0.7× 自动缩放）。
+                                Model {
+                                    visible: mobCaveSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, 0.04, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    visible: mobCaveSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, 0.04, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    visible: mobCaveSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.07, -0.08, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                                Model {
+                                    visible: mobCaveSpiderPackTex.source.toString().length === 0
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.07, -0.08, -0.51)
+                                    scale: Qt.vector3d(0.05, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff2020" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
                         active: entKind === EntityManager.Mob && entMobType === EntityManager.MobSilverfish
                         sourceComponent: Component {
                             // t487 Silverfish（银鱼；mobType 14）：MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿；
@@ -10428,6 +10512,7 @@ Window {
                 //   2.70 高取 0.16（瘦影观感即其体型）、燃烬者单头盒 0.47。观感需人工目视（dev-plan 注记）。
                 function miniMobScale(t) {
                     if (t === EntityManager.MobSpider) return 0.50       // 体高 0.43、宽 ~1.5 → 宽约束取窄
+                    if (t === EntityManager.MobCaveSpider) return 0.35   // t1012③ 洞穴蜘蛛（蜘蛛同模 0.7×：0.50×0.7）
                     if (t === EntityManager.MobSilverfish) return 1.30  // 体高 0.29 → 放大补齐观感高度
                     if (t === EntityManager.MobStalker) return 0.22     // 体高 1.90（含头顶）
                     if (t === EntityManager.MobNightwalker) return 0.16 // 体高 2.70（t781 细肢人形三格高 → 瘦影；0.42/2.70≈0.156）
@@ -10448,6 +10533,7 @@ Window {
                     if (t === EntityManager.MobBones) return -0.019
                     if (t === EntityManager.MobStalker) return 0.011    // Stalker 体心在原点上方 → 下移补偿
                     if (t === EntityManager.MobSpider) return 0.043
+                    if (t === EntityManager.MobCaveSpider) return 0.030 // t1012③（蜘蛛 0.043×0.7 同模缩放）
                     if (t === EntityManager.MobSilverfish) return 0.007
                     if (t === EntityManager.MobPig) return 0.059        // 脚 -0.48 / 顶 0.27 → 体心偏上 → 下移
                     if (t === EntityManager.MobCow) return 0.023        // 脚 -0.50 / 顶 0.40
@@ -10478,6 +10564,10 @@ Window {
                     if (t === EntityManager.MobStalker)
                         return [E(-0.09, 0.805, -0.29, 0.055, 0.065, "#1a1a1a"), E(0.09, 0.805, -0.29, 0.055, 0.065, "#1a1a1a")]
                     if (t === EntityManager.MobSpider)
+                        return [E(-0.07, 0.04, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, 0.04, -0.51, 0.05, 0.05, "#ff2020"),
+                                E(-0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020")]
+                    // t1012③ 洞穴蜘蛛：蜘蛛同款 4 红眼（同模同位；随父 miniMobScale 0.35 缩放）。
+                    if (t === EntityManager.MobCaveSpider)
                         return [E(-0.07, 0.04, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, 0.04, -0.51, 0.05, 0.05, "#ff2020"),
                                 E(-0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020"), E(0.07, -0.08, -0.51, 0.05, 0.05, "#ff2020")]
                     if (t === EntityManager.MobSilverfish)
@@ -10573,6 +10663,7 @@ Window {
                             if (t === EntityManager.MobBones && mobBonesPackTex.source.toString().length > 0) return mobBonesPackTex
                             if (t === EntityManager.MobStalker && mobStalkerPackTex.source.toString().length > 0) return mobStalkerPackTex
                             if (t === EntityManager.MobSpider && mobSpiderPackTex.source.toString().length > 0) return mobSpiderPackTex
+                            if (t === EntityManager.MobCaveSpider && mobCaveSpiderPackTex.source.toString().length > 0) return mobCaveSpiderPackTex // t1012③
                             if (t === EntityManager.MobPig && mobPigPackTex.source.toString().length > 0) return mobPigPackTex
                             if (t === EntityManager.MobCow && mobCowPackTex.source.toString().length > 0) return mobCowPackTex
                             if (t === EntityManager.MobSheep && mobSheepPackTex.source.toString().length > 0) return mobSheepPackTex
@@ -10612,6 +10703,8 @@ Window {
                                         return Qt.rgba(0.37 * tl.r, 0.66 * tl.g, 0.23 * tl.b, 1.0) // 青绿（同实体 delegate）
                                     if (t === EntityManager.MobSpider)
                                         return Qt.rgba(0.16 * tl.r, 0.10 * tl.g, 0.10 * tl.b, 1.0) // 暗黑红（同实体 delegate）
+                                    if (t === EntityManager.MobCaveSpider)
+                                        return Qt.rgba(0.10 * tl.r, 0.22 * tl.g, 0.38 * tl.b, 1.0) // t1012③ 暗蓝染（同实体 delegate 回退体色）
                                     return tl
                                 }
                                 // t781：夜行者 pack enderman 头前透明下巴（底色 RGB 黄）→ pack 命中时 Mask 裁

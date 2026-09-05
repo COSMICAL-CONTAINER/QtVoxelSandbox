@@ -777,6 +777,25 @@ Item {
                     R(18, 9, 1, 1, leg)
                     R(18, 11, 2, 1, leg)
                     R(18, 13, 1, 1, leg)
+                } else if (kind === "cavespider") {
+                    // 洞穴蜘蛛（t1012③）：暗蓝染壳 + 红眼簇 + 两侧蓝腿线（蜘蛛同族纹样蓝染一档——
+                    //   机制等价 MC cave spider spawn egg 蓝+红眼身份）。纯原创抽象纹样（§9 区隔）。
+                    const shell = "#1c3a52", lite = "#2c5a7a", dark = "#0c1c2e"
+                    const eye = "#c81818", leg = "#10263a"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光（暗蓝提亮）
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 红眼簇（同蜘蛛蛋复眼族，居中偏上）
+                    R(9, 9, 1, 1, eye); R(11, 9, 1, 1, eye); R(13, 9, 1, 1, eye)
+                    R(10, 10, 1, 1, eye); R(12, 10, 1, 1, eye)
+                    // 两侧蓝腿线（每侧 3 段深蓝短线，从蛋身向外辐射，表「洞穴蜘蛛腿」）
+                    R(5, 9, 1, 1, leg)
+                    R(4, 11, 2, 1, leg)
+                    R(5, 13, 1, 1, leg)
+                    R(18, 9, 1, 1, leg)
+                    R(18, 11, 2, 1, leg)
+                    R(18, 13, 1, 1, leg)
                 } else if (kind === "chicken") {
                     // 鸡（t398）：白羽壳 + 棕褐翅斑 + 顶红色鸡冠（鸡冠一眼辨「鸡」）。纯原创抽象纹样（§9 区隔）。
                     const shell = "#f5f0e4", lite = "#ffffff", dark = "#d8d0c2"
@@ -1988,6 +2007,7 @@ Item {
             case 0x249: drawSpawnEgg("wolf");    break // t785 生物蛋（狼；右键 → 生成野生狼）
             case 0x24A: drawSpawnEgg("ocelot");  break // t785 生物蛋（豹猫；右键 → 生成野生豹猫）
             case 0x25D: drawSpawnEgg("babyshambler"); break // t952 生物蛋（小蹒跚者；右键 → 生成幼体僵尸）
+            case 0x25E: drawSpawnEgg("cavespider"); break // t1012③ 生物蛋（洞穴蜘蛛；右键 → 生成洞穴蜘蛛）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

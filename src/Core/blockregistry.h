@@ -2219,6 +2219,15 @@ public:
     //   dropUnsupportedLaddersAround 据此定位唯一支撑墙格。
     static void ladderSupportOffset(quint8 state, int &dx, int &dz);
 
+    // t1012④ 附着块族单一权威谓词（机制等价 MC 1.0「流水冲毁 non-solid 附着物」）：id ∈ {火把（各
+    //   TorchAttach state 共用 id 13）/ 红石火把（129，含熄灭位 state）/ 蜘蛛网（102）} → true。消费点 =
+    //   World::tickWaterFlow 扩散/下落落点（流水进入附着块格 → setWaterSilent 置 Air + blockDroppedAsItem
+    //   按 dropId 掉落——掉落链对齐玩家挖除）。后续新增水毁附着物只扩本表一处（新造平行系统禁止）。
+    static bool isAttachableBlock(quint8 id)
+    {
+        return id == Torch || id == RedstoneTorch || id == Cobweb;
+    }
+
     // t225 箱子朝向（存 chunk state，低 2 位编码水平朝向）：放置时记录箱子「前面（锁面，chest_front 贴图）」
     //   朝哪一侧，mesher 据此把 chest_front 贴到对应面（其余三侧面 chest_side、顶/底 chest_top）。机制等价
     //   MC 1.0 箱子放置时锁面朝向玩家。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）= 箱子前面所朝方向。
@@ -2296,6 +2305,11 @@ public:
     static constexpr quint8 SpawnerStateStalker = 0x0C;   // (6<<1) 追踪者笼
     static constexpr quint8 SpawnerStateSpider = 0x0E;    // (7<<1) 蜘蛛笼
     static constexpr quint8 SpawnerStateSilverfish = 0x1D; // (14<<1)|1 银鱼笼（bit0 兼容旧标记）
+    // t1012③ 洞穴蜘蛛笼 state（type 位 = EntityManager::MobCaveSpider(20)<<1 = 0x28；枚举尾追加 =
+    //   存档兼容契约，勿在既有枚举值间插入）。矿井 pieceSpiderRoom 走廊笼转正写本值（MC 口径：矿井蛛网
+    //   走廊的刷怪笼就是洞穴蜘蛛笼；旧 SpawnerStateSpider=0x0E 偏差笼随转正退役，旧存档 0x0E 仍解码
+    //   MobSpider 不断档）。解码白名单在 EntityManager::spawnerMobTypeForState（单一权威）。
+    static constexpr quint8 SpawnerStateCaveSpider = 0x28; // (20<<1) 洞穴蜘蛛笼（t1012③）
     // t786 刷怪笼 type → state 编码（raw int 意为 EntityManager::MobType 枚举值；分层：Core 不引用枚举本体，
     //   仅数值契约，矩阵测试锁死）。仅做位域编码（低 6 位内），**不校验** type 合法性（非法值由解码端
     //   spawnerMobTypeForState 兜底回退——编码端早于类型表存在，保持无依赖纯函数）。placedState 见

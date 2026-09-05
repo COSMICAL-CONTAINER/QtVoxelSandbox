@@ -480,6 +480,10 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         // t952 小蹒跚者（MobBabyShambler）：0.5×0.9 幼体盒（<1 格高口径 halfH=0.45<0.5；机制等价 MC 幼体
         //   僵尸 0.3×0.95 的量级收紧——本工程盒沿用 0.5 宽步进；移速 / 伤害倍率在 aiHostile 分支读常量）。
         case MobBabyShambler: e.halfW = 0.25f; e.halfH = 0.45f; e.hostile = true; break;
+        // t1012③ 洞穴蜘蛛（MobCaveSpider）：蜘蛛同族 **0.7× 小体型**盒（机制等价 MC 1.0 cave spider
+        //   0.7×0.7×0.7 缩比——spider 0.9×0.6 × 0.7 → 0.64 宽（halfW 0.32）/ 0.42 高（halfH 0.21）；
+        //   halfH 0.21 恰 = MobModel 蜘蛛腿底 0.30 × 0.7 → QML mobModelYOff=0 腿底贴地零偏移）。
+        case MobCaveSpider: e.halfW = 0.32f; e.halfH = 0.21f; e.hostile = true; break;
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
@@ -1028,6 +1032,10 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
         color = QStringLiteral("#2a1a1a");
     } else if (mobType == MobSilverfish) {
         color = QStringLiteral("#c8c2b8"); // Silverfish：灰白甲壳色（机制等价 MC 银鱼；原创配色，t487）
+    } else if (mobType == MobCaveSpider) {
+        // t1012③ 洞穴蜘蛛：暗蓝染体色（机制等价 MC cave spider 蓝黑体色；占位串——渲染走 MobModel 蜘蛛
+        //   共享几何 + QML delegate 0.7× 蓝染 tint 不读 color，文档锚同 Spider 家族模式）。
+        color = QStringLiteral("#1c3a52");
     } else if (mobType == MobNightwalker) {
         color = QStringLiteral("#2a1f2a"); // Nightwalker：暗紫黑体色（机制等价 MC 末影人暗黑体型；原创配色，t727）
     } else if (mobType == MobEmberling) {
@@ -1115,6 +1123,7 @@ int EntityManager::spawnerMobTypeForState(int state) const
         case MobNightwalker:
         case MobEmberling:
         case MobBabyShambler: // t952 小蹒跚者蛋（0x25D）右键刷怪笼改型（组合骰在 spawnMobCore 末段照掷）
+        case MobCaveSpider:   // t1012③ 洞穴蜘蛛笼（SpawnerStateCaveSpider=0x28；worldgen pieceSpiderRoom 转正写入）
             return typeBits;
         default:
             return MobShambler;
@@ -2256,8 +2265,8 @@ void EntityManager::mobAggroAgainst(int victimIdx, int attackerIdx)
     Entity &v = m_entities[size_t(victimIdx)];
     if (!v.alive || v.kind != Mob || v.dead) return; // 尸体 / 空槽不注册（咬击致死同帧已是 dead → no-op）
     switch (v.mobType) {
-    case MobShambler: case MobSpider: case MobSilverfish: case MobBones:
-    case MobBabyShambler: break; // 仇恨 AI 消费面（t952 幼体扩段，review0830 #13）
+    case MobShambler: case MobSpider: case MobCaveSpider: case MobSilverfish: case MobBones:
+    case MobBabyShambler: break; // 仇恨 AI 消费面（t952 幼体扩段，review0830 #13；t1012③ 洞穴蜘蛛同走 aiHostile 面入列）
     default: return; // Stalker / Nightwalker / Emberling / 被动型无此系统（入口门，见上）
     }
     const Entity &a = m_entities[size_t(attackerIdx)];
@@ -3592,9 +3601,15 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     //   （本函数内全部 kChaseSpeed 消费点统一经 chaseBase 缩放——仇恨狼 / 铁傀儡 / 玩家三条追击路径同参数，
     //   防单点漏改漂移），近战伤害 kBabyShamblerAttackDamage（成体一半档；三条伤害出口同换）。
     //   成体 Shambler/Spider/Silverfish 走原值零变化（mul=1、dmg=kAttackDamage）。
+    // t1012③ 洞穴蜘蛛参数分支：追击速与蜘蛛同速（mul=1，MC cave spider 移速 ≡ spider）、近战
+    //   kCaveSpiderAttackDamage=2（MC 简单/普通难度 cave spider 2 = 低一档；**毒伤不在引擎侧扣血**——
+    //   mobAttackedPlayer 携 mobType → 呈现层 onMobAttackedPlayer 据型挂 applyStatusEffect(EffectPoison)
+    //   中毒 DoT，走 t669/t715 既有 m_poisonTimer 链，不新造平行伤害系统）。
     const bool isBabyShambler = (e.mobType == MobBabyShambler);
+    const bool isCaveSpider = (e.mobType == MobCaveSpider);
     const float chaseBase = kChaseSpeed * (isBabyShambler ? kBabyShamblerChaseSpeedMul : 1.0f);
-    const int meleeDamage = isBabyShambler ? kBabyShamblerAttackDamage : kAttackDamage;
+    const int meleeDamage = isBabyShambler ? kBabyShamblerAttackDamage
+                          : (isCaveSpider ? kCaveSpiderAttackDamage : kAttackDamage);
 
     // t948 仇恨转移（狼咬敌对 → 被咬者转火攻击咬它的驯服狼；机制等价 MC 1.0 revenge target——被咬敌对
     //   改追攻击狼而非玩家）：注册单一入口 mobAggroAgainst（狼咬击命中处调），本分支消费。目标优先级：
