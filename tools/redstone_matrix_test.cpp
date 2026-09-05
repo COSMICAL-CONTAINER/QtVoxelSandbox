@@ -82,11 +82,11 @@
 #include <QSqlQuery>              // t974 同上（锁持有 / 释放 SQL）
 
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
-//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t952 起
-//   上界 = MobBabyShambler=19，实值经核：MobTest=0 .. MobBabyShambler=19 共 20 值）。枚举中部插值 /
+//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t1012③ 起
+//   上界 = MobCaveSpider=20，实值经核：MobTest=0 .. MobCaveSpider=20 共 21 值）。枚举中部插值 /
 //   尾部新增忘补表行时本断言编译期拦截（t782「整表错位静默钳猪」根因的复刻防线）。
-static_assert(MobModel::kValidMobTypeCount == EntityManager::MobBabyShambler + 1,
-              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobBabyShambler）——"
+static_assert(MobModel::kValidMobTypeCount == EntityManager::MobCaveSpider + 1,
+              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobCaveSpider）——"
               "新增 mobType 须同步 kValidMobModelType 表 + mobmodel.h kValidMobTypeCount");
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
@@ -4838,7 +4838,8 @@ int main(int argc, char *argv[])
         bool ok = RecipeRegistry::SpawnEggNightwalkerId == 0x246   // t785 新 id 分配锁（重排破存档兼容）
                   && RecipeRegistry::SpawnEggEmberlingId == 0x247
                   && RecipeRegistry::SpawnEggWolfId == 0x249
-                  && RecipeRegistry::SpawnEggOcelotId == 0x24A;
+                  && RecipeRegistry::SpawnEggOcelotId == 0x24A
+                  && RecipeRegistry::SpawnEggCaveSpiderId == 0x25E; // t1012③ 洞穴蜘蛛蛋（尾追加锁）
         const int allEggs[] = {
             RecipeRegistry::SpawnEggPigId, RecipeRegistry::SpawnEggCowId, RecipeRegistry::SpawnEggSheepId,
             RecipeRegistry::SpawnEggShamblerId, RecipeRegistry::SpawnEggBonesId, RecipeRegistry::SpawnEggStalkerId,
@@ -4846,6 +4847,7 @@ int main(int argc, char *argv[])
             RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
             RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
             RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；蛋区尾追加保连续同列）
+            RecipeRegistry::SpawnEggCaveSpiderId,   // t1012③ 洞穴蜘蛛蛋（0x25E；蛋区尾追加保连续同列）
         };
         const int expectMob[] = {
             EntityManager::MobPig, EntityManager::MobCow, EntityManager::MobSheep,
@@ -4854,6 +4856,7 @@ int main(int argc, char *argv[])
             EntityManager::MobNightwalker, EntityManager::MobEmberling,
             EntityManager::MobWolf, EntityManager::MobOcelot,
             EntityManager::MobBabyShambler,
+            EntityManager::MobCaveSpider,
         };
         const int eggCount = int(sizeof(allEggs) / sizeof(allEggs[0]));
         for (int i = 0; i < eggCount; ++i) {
@@ -4904,9 +4907,9 @@ int main(int argc, char *argv[])
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t785 spawn-egg completion: 14 eggs (nightwalker/emberling moved into the "
+                          << "| t785 spawn-egg completion: 15 eggs (nightwalker/emberling moved into the "
                              "contiguous egg block + wolf 0x249 / ocelot 0x24A new + t952 baby-shambler "
-                             "0x25D appended) all map to correct "
+                             "0x25D + t1012 cave-spider 0x25E appended) all map to correct "
                              "EntityManager mob types via single-authority table, all present & contiguous "
                              "in creative palette with names, all have generative tint entries (egg icon "
                              "look & palette layout = QML, manual check)";
@@ -4921,7 +4924,8 @@ int main(int argc, char *argv[])
         // ① 编码 → 解码互逆（五类型全表）：BlockRegistry::spawnerStateForMob(Core 层 raw int)→ state 常量
         //   → EntityManager::spawnerMobTypeForState 解码回原型。同时锁位布局常量本身。
         const int types786[] = { EntityManager::MobShambler, EntityManager::MobBones,
-                                 EntityManager::MobStalker, EntityManager::MobSpider, EntityManager::MobSilverfish };
+                                 EntityManager::MobStalker, EntityManager::MobSpider, EntityManager::MobSilverfish,
+                                 EntityManager::MobCaveSpider }; // t1012③ 洞穴蜘蛛笼型入 round-trip 全表
         for (int t : types786) {
             const quint8 st = BlockRegistry::spawnerStateForMob(t);
             if (em786.spawnerMobTypeForState(int(st)) != t) {
@@ -4934,17 +4938,20 @@ int main(int argc, char *argv[])
             || BlockRegistry::SpawnerStateShambler != 0x08 || BlockRegistry::SpawnerStateBones != 0x0A
             || BlockRegistry::SpawnerStateStalker != 0x0C || BlockRegistry::SpawnerStateSpider != 0x0E
             || BlockRegistry::SpawnerStateSilverfish != 0x1D
+            || BlockRegistry::SpawnerStateCaveSpider != 0x28 // t1012③ 洞穴蜘蛛笼（枚举尾追加型）
             || BlockRegistry::SpawnerStateSilverfishFlag != 0x01) {
             qInfo() << "  [t786 diag] spawner state bit-layout constants drifted";
             ok = false;
         }
         // ①b 旧存档兼容：state=0（旧地牢笼）→ Shambler；state=1（t487 旧要塞银鱼笼）→ Silverfish；
         //   非法 type 位 → 兜底 Shambler 不崩不误刷。t787 注：旧样本 0x21（type16）扩表后是合法
-        //   Nightwalker（蛋改型）→ 非法样本换 0x29（type20 > MobBabyShambler=19 越界，t952 扩表后
-        //   0x27/type19 已是合法 BabyShambler）；0x3E（type31）仍非法。
+        //   Nightwalker（蛋改型）→ 非法样本换 0x29（type20）；t1012③ MobCaveSpider=20 转正后 0x28/
+        //   0x29（type20|bit0）均合法 → 非法样本再移 0x2A（type21 > MobCaveSpider=20 越界）；
+        //   0x3E（type31）仍非法。旧蜘蛛笼 0x0E 解码 MobSpider 不断档（存档兼容）。
         if (em786.spawnerMobTypeForState(0) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(1) != EntityManager::MobSilverfish
-            || em786.spawnerMobTypeForState(0x28 | 0x01) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(0x0E) != EntityManager::MobSpider
+            || em786.spawnerMobTypeForState(0x2A) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(0x3E) != EntityManager::MobShambler) {
             qInfo() << "  [t786 diag] legacy/invalid-state decode wrong";
             ok = false;
@@ -4969,11 +4976,13 @@ int main(int argc, char *argv[])
                         if (st == BlockRegistry::SpawnerStateSilverfishFlag
                             || st == BlockRegistry::SpawnerStateSilverfish) { ++stronghold; continue; }
                         // t1001 合法演化：废弃矿井蛛网走廊（placeMineshaft pieceSpiderRoom，t1012 ② 起
-                        //   走廊形）也写 MobSpider 笼（偏差登记 MobSpider / state 0x0E）。按笼周 7×7×3
-                        //   蛛网计数分流 —— 走廊形夹网巢保底 ≥8 网（笼位 ±1 轴邻格恒 3 层满网）= 矿井蛛笼，
-                        //   单列 mineshaftWeb 登记不入地牢池窗；地牢蛛笼零网不误伤（巷道穿过残留散网
-                        //   ≤3 量级，远低于阈值）。
-                        if (EntityManager().spawnerMobTypeForState(int(st)) == EntityManager::MobSpider) {
+                        //   走廊形）也写蜘蛛族笼（t1012③ 偏差转正：state 0x0E MobSpider → 0x28
+                        //   MobCaveSpider，旧值仅旧存档）。按笼周 7×7×3 蛛网计数分流 —— 走廊形夹网巢
+                        //   保底 ≥8 网（笼位 ±1 轴邻格恒 3 层满网）= 矿井蛛笼，单列 mineshaftWeb 登记
+                        //   不入地牢池窗；地牢蛛笼零网不误伤（巷道穿过残留散网 ≤3 量级，远低于阈值）。
+                        const int decoded786 = EntityManager().spawnerMobTypeForState(int(st));
+                        if (decoded786 == EntityManager::MobSpider
+                            || decoded786 == EntityManager::MobCaveSpider) {
                             int webs = 0;
                             for (int dx = -3; dx <= 3 && webs < 8; ++dx)
                                 for (int dz = -3; dz <= 3 && webs < 8; ++dz)
@@ -4982,7 +4991,7 @@ int main(int argc, char *argv[])
                                             ++webs;
                             if (webs >= 8) { ++mineshaftWeb; continue; }
                         }
-                        switch (EntityManager().spawnerMobTypeForState(int(st))) {
+                        switch (decoded786) {
                         case EntityManager::MobShambler: ++counts[0]; break;
                         case EntityManager::MobBones:    ++counts[1]; break;
                         case EntityManager::MobStalker:  ++counts[2]; break;
@@ -5304,6 +5313,7 @@ int main(int argc, char *argv[])
             RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
             RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
             RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；round-trip 覆盖随全表扩展）
+            RecipeRegistry::SpawnEggCaveSpiderId,   // t1012③ 洞穴蜘蛛蛋（0x25E；round-trip 覆盖随全表扩展）
         };
         for (int eggId : eggs787) {
             const int mt = RecipeRegistry::mobTypeForSpawnEgg(eggId);
@@ -5316,9 +5326,10 @@ int main(int argc, char *argv[])
             }
         }
         // ② 哨兵 / 越界 type 编码后解码仍兜底 Shambler（0=MobTest / 12 SnowGolem / 13 IronGolem / 15 Tnt /
-        //    18 Anvil / 20 越界 —— 均无蛋不可经笼改型写入，白名单拒绝。t952 注：type19 已扩为合法
-        //    BabyShambler（蛋 0x25D 可改型写入）→ 越界样本上移到 20）。
-        const int sentinels787[] = { 0, 12, 13, 15, 18, 20 };
+        //    18 Anvil / 21 越界 —— 均无蛋不可经笼改型写入，白名单拒绝。t952 注：type19 已扩为合法
+        //    BabyShambler（蛋 0x25D 可改型写入）→ 越界样本上移到 20；t1012③ 注：type20 已扩为合法
+        //    CaveSpider（worldgen 矿井蛛笼 0x28 直写）→ 越界样本再上移到 21）。
+        const int sentinels787[] = { 0, 12, 13, 15, 18, 21 };
         for (int st_ : sentinels787) {
             if (em787.spawnerMobTypeForState(int(BlockRegistry::spawnerStateForMob(st_))) != EntityManager::MobShambler) {
                 qInfo().noquote() << "  [t787 diag] sentinel type" << st_ << "not rejected by decode whitelist";
@@ -30477,7 +30488,7 @@ Item {
         const QString code989 = stripQmlComments989(rb989);
         static const char *kEggHex989[] = {
             "0x20F", "0x210", "0x211", "0x213", "0x214", "0x215", "0x216", "0x22C", "0x22E",
-            "0x246", "0x247", "0x249", "0x24A", "0x25D"
+            "0x246", "0x247", "0x249", "0x24A", "0x25D", "0x25E" // t1012③ 洞穴蜘蛛蛋入绝迹键表
         };
         bool eggKeysExtinct = true;
         for (const char *k : kEggHex989)
@@ -30631,9 +30642,9 @@ Item {
                                           << "inPal" << inList989(pal989, id);
                     }
                 }
-                // 图鉴本体保留（mobModel 表 17 条——蛋分区退役不动图鉴）。
+                // 图鉴本体保留（mobModel 表 18 条——蛋分区退役不动图鉴；t1012③ 洞穴蜘蛛条目合法追加）。
                 const QVariantList gallery989 = b989->property("mobModel").toList();
-                if (gallery989.size() != 17) {
+                if (gallery989.size() != 18) {
                     rigOk989 = false;
                     qInfo().noquote() << "  t989 diag(b): mobModel gallery size" << gallery989.size();
                 }
@@ -30701,12 +30712,12 @@ Item {
                              "mob state, two partition Repeaters, itemCell reuse count 3->2); legs: "
                              "comment-stripped source pins (string-aware // and /* */ stripper so "
                              "registration comments may keep the keys) asserting mobTypeForEgg / "
-                             "eggEntries / the egg header and all 14 egg hex keys extinct from CODE, "
+                             "eggEntries / the egg header and all 15 egg hex keys extinct from CODE, "
                              "plus the positive filter line and section structure; a real-QQmlEngine "
                              "rig reading the real palette back: pairwise-disjoint block/mat "
-                             "partitions whose multiset union equals paletteModel, all 14 egg ids "
+                             "partitions whose multiset union equals paletteModel, all 15 egg ids "
                              "absent from palette and both partitions with categoryOfEntry==2, the "
-                             "17-entry mob gallery intact, wolf gallery tap still yields the Mobs "
+                             "18-entry mob gallery intact, wolf gallery tap still yields the Mobs "
                              "tab, selectItem(pig egg) no longer produces the mob preview state, "
                              "and the single-selection funnel (stick then wolf -> selectedId 0) "
                              "unchanged";
@@ -34907,14 +34918,14 @@ Item {
                                 if (wT1001.blockAt(tx, ty, tz) == BR::Torch) ++torchT1001;
                 }
             }
-            // ④⑥ 池级扫描：MobSpider 笼（蛛网室净样）+ 矿井箱贴轨
+            // ④⑥ 池级扫描：MobCaveSpider 笼（蛛网室净样；t1012③ 偏差转正 0x0E→0x28）+ 矿井箱贴轨
             for (int y = 7; y < 60; ++y)
                 for (int z = 1; z < wD - 1; ++z)
                     for (int x = 1; x < wW - 1; ++x) {
                         const quint8 b = wT1001.blockAt(x, y, z);
                         if (b == BR::Spawner) {
                             if (emT1001.spawnerMobTypeForState(int(wT1001.stateAt(x, y, z)))
-                                != EntityManager::MobSpider) continue;
+                                != EntityManager::MobCaveSpider) continue;
                             if (wT1001.blockAt(x, y - 1, z) == BR::Air) continue; // 笼座须实体地板
                             int webs = 0; // 7×7×3 域蛛网计数（笼心；笼自身格不计）+ 笼邻开露空气（满网签名）
                             int openAir = 0;
@@ -34959,7 +34970,7 @@ Item {
                  && src.contains(QStringLiteral("pieceIntersection"))
                  && src.contains(QStringLiteral("pieceSlope"))
                  && src.contains(QStringLiteral("pieceSpiderRoom"))
-                 && src.contains(QStringLiteral("BlockRegistry::Spawner, BlockRegistry::SpawnerStateSpider"))
+                 && src.contains(QStringLiteral("BlockRegistry::Spawner, BlockRegistry::SpawnerStateCaveSpider")) // t1012③ 转正（旧 SpawnerStateSpider 钉退役）
                  && src.contains(QStringLiteral("(hashVoxel(mineSeed ^ 0x5A17u, ax, ry, az) % 100u) < kRailPct"))
                  && src.contains(QStringLiteral("quint32 World::hashColumn(int seed, int x, int z) const"));
         }
@@ -34992,7 +35003,7 @@ Item {
                           << ", rock-embedded walls" << (sectionClean > 0 ? sectionWalls * 100 / sectionClean : -1)
                           << "% all-steps), fragmented"
                              " rails" << railPctT1001 << "% in [50,90], 5x5 pillared intersections,"
-                             " diagonal slope pieces, cave-spider web corridors (spawner state Spider,"
+                             " diagonal slope pieces, cave-spider web corridors (spawner state CaveSpider,"
                              " box webs>=8 full-web fill" << spiderWebPct << "%), chests rail-side" << chestT1001
                           << "torches" << torchT1001 << ") over" << shaftsT1001.size() << "clean"
                              " shafts /" << candT1001 << "candidates, piece-table pins";
@@ -35196,8 +35207,8 @@ Item {
     //       （政策真执行，防空转绿）。
     //    ③ 蛛网走廊（t1012 ②）：阴影模型重放走廊形选型（宽 1-2 / 高 2-3 / 长 3-6 / 笼位居中 + 夹网巢）
     //       → 廊体阴影点位逐格须 Cobweb（笼格 = Spawner；跨巷道重刻容忍 → 池级匹配率窗）；世界侧扫
-    //       MobSpider 笼：笼座实体地板 + 7×7×3 盒 ≥8 网（t786「≥8 网即矿井蛛笼」分流同口径）+ 笼邻
-    //       4 向 × 3 层零开露空气（满网签名）；池内净笼 ≥3。
+    //       MobCaveSpider 笼（t1012③ 偏差转正，旧 MobSpider 0x0E 登记退役）：笼座实体地板 + 7×7×3 盒
+    //       ≥8 网（t786「≥8 网即矿井蛛笼」分流同口径）+ 笼邻 4 向 × 3 层零开露空气（满网签名）；池内净笼 ≥3。
     //    ④ 源码钉：段 B 推进条件行 / 地板政策行 / 走廊形选型行 / 满网落块行（阴性轮敏感）。
     {
         bool ok = true;
@@ -35364,13 +35375,14 @@ Item {
                     }
                 }
             }
-            // ③ 世界侧 MobSpider 笼净样（满网 + 笼座实体 + ≥8 盒网〔t786 分流同口径〕+ 零开露）
+            // ③ 世界侧 MobCaveSpider 笼净样（t1012③ 偏差转正：pieceSpiderRoom 笼 state=0x28 → 解码
+            //   MobCaveSpider；满网 + 笼座实体 + ≥8 盒网〔t786 分流同口径〕+ 零开露）
             for (int y = 7; y < 60; ++y)
                 for (int z = 1; z < wD - 1; ++z)
                     for (int x = 1; x < wW - 1; ++x) {
                         if (wT1012.blockAt(x, y, z) != BR::Spawner) continue;
                         if (emT1012.spawnerMobTypeForState(int(wT1012.stateAt(x, y, z)))
-                            != EntityManager::MobSpider) continue;
+                            != EntityManager::MobCaveSpider) continue;
                         ++cagesT1012;
                         if (wT1012.blockAt(x, y - 1, z) == BR::Air) continue; // 笼座须实体地板
                         int webs = 0, openAir = 0;
@@ -35421,10 +35433,195 @@ Item {
                              "(t565 semantics, solid head cells" << legBSolidT1012 << "/" << legBCellsT1012
                           << "), per-column floor policy (embedded=stone" << floorStoneT1012
                           << "/cavity=planks" << floorPlanksT1012 << ", violations" << floorViolT1012
-                          << "), spider web corridors 1-2x2-3x3-6 full-webbed (branches"
+                          << "), spider web corridors 1-2x2-3x3-6 full-webbed with cave-spider cages (branches"
                           << branchDimOkT1012 << "/" << branchesT1012 << ", web fill" << webMatchT1012
                           << "/" << webCellsT1012 << ", clean cages" << cleanCagesT1012 << "/"
                           << cagesT1012 << "), geometry pins";
+    }
+
+    // ── P-t1012③④ 洞穴蜘蛛真变种 + 水破坏附着块探针（R19.20 t1012 第二棒；engine 侧行为腿）──
+    //    ③ 洞穴蜘蛛真变种（转正偏差 1）四腿：
+    //      (a) 枚举/state/蛋契约：MobCaveSpider==20（**枚举尾追加**=存档兼容契约）+ SpawnerStateCaveSpider
+    //          ==(20<<1)=0x28（bit1-5 type 位编码 round-trip）+ kValidMobTypeCount==21（MobModel 白名单
+    //          镜像，static_assert 同源三级防线）+ 蛋表双向（mobTypeForSpawnEgg(0x25E)=20 /
+    //          mobTypeEggId(20)=0x25E）+ 旧蜘蛛笼 0x0E 解码不断档（存档兼容）+ 新笼 0x28 解码 MobCaveSpider。
+    //      (b) 0.7× 小体型实体腿：spawnMobTyped(20) → halfW 0.32 / halfH 0.21 / hostile=true，且与蜘蛛
+    //          (halfW 0.45/halfH 0.30) 恰 0.7× 比例（引擎侧缩放字段断言；渲染视觉实机确认登记 dev-plan）。
+    //      (c) 中毒 DoT 行为腿：Survival applyStatusEffect(EffectPoison, 3.75s) → 真时钟泵 pc.tick() →
+    //          poisonDamageTaken 每段 1HP 多段命中 ≥2（t669/t715 既有 m_poisonTimer 链，绕 fallDamageTaken
+    //          ——「沿用现有链」口径的引擎侧证据）；
+    //      (d) 无效对照：Creative 下 applyStatusEffect 静默丢弃（无敌模式不吃 DoT）。
+    //    ④ 水破坏附着块（附着块族单一权威 + 流体更新钩）rig 腿：悬空石平台 6×6（y=P4Y，worldgen 沉降后
+    //      落 rig 免地形水干扰），中线布 水源(S) / 石头对照(S+1) / 火把(S-1) / 蛛网(S-2) / 红石火把(S-3)。
+    //      tickWaterFlow 沉降泵后断言：三附着块格全数 → Air 且有 dropId 掉落信号（Torch→13 自身 /
+    //      RedstoneTorch→129 自身 / Cobweb→0x219 线，对齐玩家挖除掉落链）；石头对照被水漫但**完好**
+    //     （阴性腿：isAttachableBlock(Stone)=false）；非附着块不产生掉落（掉落计数恰 3）。
+    {
+        bool ok = true;
+        // diag 载荷（绿跑静默；红跑打印定位失败腿）。
+        int diagPoison = -1, diagDrops = -1;
+        int diagTorch = -1, diagWeb = -1, diagRTorch = -1;
+        int diagHT = -1, diagHRT = -1, diagHS = -1, diagSurf = -1;
+        // ---- ③(a) 契约腿 ----
+        ok = ok && int(EntityManager::MobCaveSpider) == 20; // 枚举尾追加（勿插中间——存档兼容契约）
+        ok = ok && BR::SpawnerStateCaveSpider == quint8(0x28); // (20<<1)
+        ok = ok && BR::spawnerStateForMob(int(EntityManager::MobCaveSpider)) == quint8(0x28);
+        ok = ok && MobModel::kValidMobTypeCount == 21;
+        {
+            EntityManager emT34a;
+            ok = ok && emT34a.spawnerMobTypeForState(0x28) == EntityManager::MobCaveSpider; // 新笼解码
+            ok = ok && emT34a.spawnerMobTypeForState(0x0E) == EntityManager::MobSpider;     // 旧蜘蛛笼解码不断档
+            ok = ok && emT34a.spawnerMobTypeForState(BR::SpawnerStateCaveSpider) == EntityManager::MobCaveSpider;
+        }
+        ok = ok && RecipeRegistry::mobTypeForSpawnEgg(RecipeRegistry::SpawnEggCaveSpiderId)
+                     == EntityManager::MobCaveSpider; // 蛋→mob 单一权威表
+        ok = ok && RecipeRegistry::SpawnEggCaveSpiderId == 0x25E;
+        ok = ok && PlayerController::mobTypeEggId(EntityManager::MobCaveSpider) // 中键 pick 双向往返（t653②，static 单表）
+                     == RecipeRegistry::SpawnEggCaveSpiderId;
+
+        // ---- ③(b) 0.7× 小体型实体腿（真 worldgen 世界免扰角落 spawn）----
+        {
+            World wT34;
+            wT34.setWidth(48); wT34.setDepth(48); wT34.setHeight(64); wT34.setSeed(4242);
+            EntityManager emT34b;
+            // 找一块实体地表（上方两层空气）：候选列网格 × y 自高向低，取首个合格列（单列硬编码
+            //   在山地 / 洞穴 seed 下可能整列无「实体+双层空气」采样位 → 假红，diag surf=-2 即此）。
+            int gy = -1, gx = 24, gz = 24;
+            for (int cx2 = 18; cx2 <= 30 && gy < 0; ++cx2)
+                for (int cz2 = 18; cz2 <= 30 && gy < 0; ++cz2)
+                    for (int y = 60; y >= 8; --y) {
+                        if (wT34.blockAt(cx2, y, cz2) != BR::Air && wT34.blockAt(cx2, y + 1, cz2) == BR::Air
+                            && wT34.blockAt(cx2, y + 2, cz2) == BR::Air) { gy = y + 1; gx = cx2; gz = cz2; break; }
+                    }
+            diagSurf = gy;
+            if (gy > 0) {
+                const int sSpider = emT34b.spawnMobTyped(gx, gy, gz, EntityManager::MobSpider,
+                                                         QStringLiteral("#2a1a1a"), 0);
+                const int sCave = emT34b.spawnMobTyped(gx, gy, gz, EntityManager::MobCaveSpider,
+                                                       QStringLiteral("#1c3a52"), 0);
+                ok = ok && sSpider >= 0 && sCave >= 0;
+                ok = ok && emT34b.mobTypeAt(sCave) == EntityManager::MobCaveSpider;
+                ok = ok && emT34b.isHostileAt(sCave);
+                // 恰 0.7× 比例（蜘蛛 0.45/0.30 → 洞蛛 0.32/0.21；0.45×0.7=0.315 引擎取 0.32 步进 →
+                //   断言绝对值窗 ≤0.01 覆盖步进舍入，halfH 0.21=0.30×0.7 精确）。
+                ok = ok && qAbs(emT34b.halfHeightAt(sCave) - emT34b.halfHeightAt(sSpider) * 0.7f) < 1e-4f;
+                ok = ok && qAbs(emT34b.radiusAt(sCave) - 0.32f) < 1e-4f
+                         && qAbs(emT34b.halfHeightAt(sCave) - 0.21f) < 1e-4f;
+                ok = ok && emT34b.radiusAt(sSpider) > emT34b.radiusAt(sCave)
+                         && emT34b.halfHeightAt(sSpider) > emT34b.halfHeightAt(sCave); // 小于成体蜘蛛
+            } else {
+                ok = false; // rig 找不到地表（病态世界）→ 响亮红
+                diagSurf = -2;
+            }
+        }
+
+        // ---- ③(c)(d) 中毒 DoT 行为腿（真时钟泵，同 P-t890 tickP 模式）----
+        {
+            World wT34p;
+            wT34p.setWidth(48); wT34p.setDepth(48); wT34p.setHeight(64); wT34p.setSeed(77);
+            Hotbar hbT34;
+            PlayerController pcT34;
+            pcT34.setWorld(&wT34p);
+            pcT34.setHotbar(&hbT34);
+            int poisonHits = 0, poisonHp = -1;
+            QObject::connect(&pcT34, &PlayerController::poisonDamageTaken, &pcT34,
+                             [&](int hp) { ++poisonHits; poisonHp = hp; });
+            const auto pumpT34 = [](int ms) {
+                QElapsedTimer t; t.start();
+                while (t.elapsed() < ms)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            };
+            const auto tickT34 = [&](int n) {
+                for (int i = 0; i < n; ++i) { pumpT34(17); pcT34.tick(); }
+            };
+            // (d) Creative 对照先跑：applyStatusEffect 静默丢弃 → 零毒伤（无敌模式不吃 DoT）。
+            //     泵窗 90 tick ≈ 1.53s > kPoisonInterval=1.25s 首段窗 → 若误生效必已发首击（对照腿有判别力）。
+            pcT34.setMode(PlayerController::Creative);
+            pcT34.applyStatusEffect(PlayerState::EffectPoison, 3.75f, 1);
+            tickT34(90);
+            ok = ok && poisonHits == 0;
+            // (c) Survival 主腿：3.75s 毒 → 每段 1HP，~1.25s 间隔 → 4.6s 泵窗内 ≥2 段（3 段满窗，
+            //     调度抖动留 1 段余量；每段恰 1 HP 断言 = 「血量多段下降」引擎侧证据）。
+            pcT34.setMode(PlayerController::Survival);
+            pcT34.applyStatusEffect(PlayerState::EffectPoison, 3.75f, 1);
+            tickT34(270); // ~4.6s 真时钟
+            diagPoison = poisonHits;
+            ok = ok && poisonHits >= 2 && poisonHp == 1;
+        }
+
+        // ---- ④ 水毁附着块 rig 腿 ----
+        {
+            World wT34w;
+            wT34w.setWidth(64); wT34w.setDepth(64); wT34w.setHeight(64); wT34w.setSeed(9);
+            // worldgen 水沉降（同 t933 口径：推进到连续静默），免地形水体扩散扰 rig。
+            int wcT34w = 0;
+            QObject::connect(&wT34w, &World::worldChanged, &wT34w, [&]() { ++wcT34w; });
+            const auto settleT34w = [&]() {
+                int quiet = 0;
+                for (int i = 0; i < 2000 && quiet < 10; ++i) {
+                    const int wc0 = wcT34w;
+                    wT34w.tickWaterFlow(); wT34w.tickWaterFlow(); wT34w.tickWaterFlow();
+                    quiet = (wcT34w == wc0) ? quiet + 1 : 0;
+                }
+            };
+            settleT34w();
+            // 悬空石平台 6×6 @ y=P4Y（高空无 worldgen 水干扰；平台 = water grounded 面）。
+            constexpr int P4Y = 41, P4X = 28, P4Z = 28;
+            for (int dx = -3; dx <= 2; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    wT34w.setBlock(P4X + dx, P4Y, P4Z + dz, BR::Stone, 0); // 平台面
+                    for (int dy = 1; dy <= 3; ++dy) {                      // 净空
+                        if (wT34w.blockAt(P4X + dx, P4Y + dy, P4Z + dz) != BR::Air)
+                            wT34w.setWaterSilent(P4X + dx, P4Y + dy, P4Z + dz, BR::Air, 0);
+                    }
+                }
+            // 中线布置：水源 S(28) | 石头对照 S+1(29) | 火把 S-1(27) | 蛛网 S-2(26) | 红石火把 S-3(25)。
+            const int sy4 = P4Y + 1, sz4 = P4Z;
+            wT34w.setBlock(P4X, sy4, sz4, BR::Water, 0);          // 源（桶倒路径同款 setBlock 源写入）
+            wT34w.setBlock(P4X + 1, sy4, sz4, BR::Stone, 0);      // 非附着对照（水漫不毁）
+            wT34w.setBlock(P4X - 1, sy4, sz4, BR::Torch, 0);      // 附着：火把（TorchFloor state=0）
+            wT34w.setBlock(P4X - 2, sy4, sz4, BR::Cobweb, 0);     // 附着：蛛网
+            wT34w.setBlock(P4X - 3, sy4, sz4, BR::RedstoneTorch, 0); // 附着：红石火把
+            // 掉落收集（等价 Main.qml onBlockDroppedAsItem 消费面）。
+            int dropsT34w = 0;
+            std::vector<int> dropIdsT34w;
+            QObject::connect(&wT34w, &World::blockDroppedAsItem, &wT34w,
+                             [&](int, int, int, int id) { ++dropsT34w; dropIdsT34w.push_back(id); });
+            settleT34w();
+            // 三附着块全数被冲毁 → Air（随后流水灌入：同 tick「冲毁+入水」，断言 Air ∨ Water 兼容续流）。
+            const quint8 afterTorch = wT34w.blockAt(P4X - 1, sy4, sz4);
+            const quint8 afterWeb = wT34w.blockAt(P4X - 2, sy4, sz4);
+            const quint8 afterRTorch = wT34w.blockAt(P4X - 3, sy4, sz4);
+            ok = ok && (afterTorch == BR::Air || afterTorch == BR::Water);
+            ok = ok && (afterWeb == BR::Air || afterWeb == BR::Water);
+            ok = ok && (afterRTorch == BR::Air || afterRTorch == BR::Water);
+            ok = ok && afterTorch != BR::Torch && afterWeb != BR::Cobweb && afterRTorch != BR::RedstoneTorch;
+            // 石头对照完好（阴性腿：非附着块不被水毁）。
+            ok = ok && wT34w.blockAt(P4X + 1, sy4, sz4) == BR::Stone;
+            // 掉落链：恰 3 件，id 对齐玩家挖除（Torch→自身 13 / RedstoneTorch→自身 129 / Cobweb→线 0x219）。
+            ok = ok && dropsT34w == 3;
+            const int haveTorch = int(std::count(dropIdsT34w.begin(), dropIdsT34w.end(), int(BR::Torch)));
+            const int haveRTorch = int(std::count(dropIdsT34w.begin(), dropIdsT34w.end(), int(BR::RedstoneTorch)));
+            const int haveString = int(std::count(dropIdsT34w.begin(), dropIdsT34w.end(), 0x219));
+            ok = ok && haveTorch == 1 && haveRTorch == 1 && haveString == 1;
+            // 源仍为水（冲刷不吞源）且平台被浸（水流扩散工作面证据）。
+            ok = ok && wT34w.blockAt(P4X, sy4, sz4) == BR::Water
+                     && wT34w.stateAt(P4X, sy4, sz4) == 0;
+            diagTorch = afterTorch; diagWeb = afterWeb; diagRTorch = afterRTorch;
+            diagDrops = dropsT34w; diagHT = haveTorch; diagHRT = haveRTorch; diagHS = haveString;
+        }
+
+        if (!ok)
+            qInfo().noquote() << "  [t1012csd diag] poison" << diagPoison << "surf" << diagSurf
+                              << "cells(t/w/rt)" << diagTorch << diagWeb << diagRTorch
+                              << "drops" << diagDrops << "ids(t/rt/str)" << diagHT << diagHRT << diagHS;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1012 cave-spider variant + water attachment breakup: MobCaveSpider=20 enum-tail"
+                             " + spawner state 0x28 roundtrip (old 0x0E decode kept) + egg 0x25E both-way"
+                             " + 0.7x mini hitbox (0.32x0.21 hostile) + poison DoT multi-tick (armor-bypass"
+                             " chain, creative-inert) + wash torch/cobweb/redstone-torch to Air with dropId"
+                             " drops (stone control intact)";
     }
 
     // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
