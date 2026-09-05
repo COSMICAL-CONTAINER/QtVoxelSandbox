@@ -858,6 +858,10 @@ add_executable(redstone_matrix_test
     src/Game/playercontroller.h
     src/Game/dispenserstore.cpp
     src/Game/dispenserstore.h
+    # t1013 箱子矿车内容键探针附加：Game 层 ChestStore（转正 / 回生 / 掉落链断言源；同 dispenserstore
+    #   依赖面 —— 只向下依赖 Core/Qt，不引入 World/QML）。
+    src/Game/cheststore.cpp
+    src/Game/cheststore.h
     src/Game/loottable.cpp
     src/Game/raycast.cpp
     src/Entities/xporbmanager.cpp
