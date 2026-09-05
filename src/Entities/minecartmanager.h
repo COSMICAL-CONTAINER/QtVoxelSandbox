@@ -16,6 +16,9 @@
 // 左键挖矿车（t735 ②）：创造单击即毁 + 掉矿车物品（可重放）；生存需连击 kCartHitPoints 下（每击受击
 //   摇晃 —— 呈层据 hpAt 绑定驱动摇晃动画），最后一击才毁 + 掉落（用户明确要求的多击耐久语义；机制
 //   等价口径下 MC 1.0 矿车本是一击即毁，此为按本工程 spec 的有意偏差）。
+// 箱子矿车变体（t1013）：spawnChestCart 生成的 chest=true 车 —— 同一套轨物理（推 / 动力轨 / 碰撞），
+//   差异：不可骑、右键开箱（内容键寻址 ChestStore）、毁时掉车+箱+内容物、呈现车斗内箱体；worldgen
+//   矿井标记箱由 PlayerController::convertMineshaftChests 进世界时转正为本变体（头注释详见 spawnChestCart）。
 //
 // 数据形态：每个矿车实体 = {世界坐标 pos（矿车中心，车底贴轨板顶 —— t734 基准=轨格 cell 底+1/16）、水平行进方向 dirX/dirZ（单位向量，
 //   轨向四向之一）、朝向 yawDeg（呈现层 Model 据它定向）、速度 speed（blocks/s，W 前进加速 / 松键摩擦衰减）、
@@ -80,9 +83,31 @@ public:
     //   类型做 QMetaType 注册 → 「Meta Types must be fully defined」编译错）。仅 PlayerController placeBlock
     //   调（QML 无调用点 —— Main.qml 只读 count/revision/posAt/yawAt）。
     void spawnCart(int x, int y, int z, World *world = nullptr);
+    // ── t1013 箱子矿车（R19.20 转正偏差 2：矿井箱 → 箱子矿车实体；机制等价 MC 1.0 minecart with chest）──
+    // 在内容键格 (keyX,keyY,keyZ)（= worldgen 矿井标记箱原格 / ChestStore 寻址键，永不随车移动）生成
+    // 一辆箱子矿车。落格选择：键格本身是轨 → 就地轨上模式；否则**四邻首个轨格**（矿井箱 R19.19 规则
+    // 「立轨旁空地」→ 车落轨上，推动 / 动力轨行驶语义直接可用）；全无轨 → 键格地面静止模式（t734）。
+    // 变体语义（与普通矿车共享全部物理，差异只在交互 / 掉落 / 呈现）：
+    //   · 默认静止（speed=0），可被玩家推动（pushEmptyCart）/ 动力轨激活沿轨移动（tickPushedCarts 全
+    //     车种通用物理，零特判）；
+    //   · **不可骑乘**：tryMount 命中箱子矿车 → 拒（内容容器语义；右键 = 开箱，由 PlayerController
+    //     placeBlock 箱车分支先行分流为 chestOpened）；
+    //   · 挖除（hitCartFromRay 生存末击 / 创造瞬破 / 仙人掌岩浆）→ emit chestCartBroken(散布格, 内容键)
+    //     → 呈层掉车 + 箱 + 内容物逐件弹出 + ChestStore 清键条目；虚空卷没 → 无掉落移除且**保留**内容键
+    //     条目（重进世界经存档 cart 条目回生 = 内容物不丢，用户回退诉求）。
+    //   C++ 直调（PlayerController::convertMineshaftChests 调；非 Q_INVOKABLE —— 同 spawnCart 的
+    //   World* moc 约定）。keyX/Y/Z = 内容键（ChestStore "x,y,z" 键三元组）。
+    void spawnChestCart(int x, int y, int z, World *world, int keyX, int keyY, int keyZ);
 
     // 玩家当前骑的矿车索引（-1 = 未骑）。PlayerController.step 据它判骑乘分支。
     Q_INVOKABLE int ridingIndex() const { return m_riderCart; }
+
+    // t1013 第 i 个矿车是否箱子矿车（呈现层 delegate 据它显车斗内箱体变体；越界 / 空槽返 false）。
+    Q_INVOKABLE bool chestAt(int i) const;
+
+    // t1013 箱子矿车内容键读口（C++ 直调）：第 i 个矿车的 ChestStore 寻址键三元组（outKey 写；
+    //   越界 / 空槽写 -1,-1,-1 返 false）。普通矿车键 = 生成格（不参与寻址，恒不查询）。
+    bool chestKeyAt(int i, int &outKeyX, int &outKeyY, int &outKeyZ) const;
 
     // ── t811 生物乘客座位（mob 自动登乘机制；C++ 直调，EntityManager::tickVehicleRiding 用，同层互调）──
     // 第 i 个矿车的生物乘客槽索引（EntityManager 槽；-1 = 无生物乘坐）。越界 / 空槽 → -1。矿车乘员总数限 1
@@ -110,6 +135,8 @@ public:
     Q_INVOKABLE int hpAt(int i) const;
 
     // 切世界清空（同 BoatManager.clearAll 模式）：释放全部活体槽（保 slot-reuse 单调不变量）+ 清骑乘态。
+    //   t1013：箱子矿车同槽模型一并释放（内容物不在本类 —— ChestStore 按内容键独立持久，切世界由
+    //   Main.qml enterWorld 的 chestStore.loadAll 整体替换，车实体经 convertMineshaftChests 回生）。
     Q_INVOKABLE void clearAll() {
         for (size_t i = 0; i < m_carts.size(); ++i)
             if (m_carts[i].alive) releaseSlot(int(i));
@@ -245,6 +272,12 @@ public:
 signals:
     void entitiesChanged();                        // spawn / 挖毁 / 骑乘物理推进触发；驱动 count/revision + QML 绑定刷新
     void cartBroken(int x, int y, int z);          // 矿车被「挖」（攻击，生存末击）→ 呈层据它 spawnItem 掉 MinecartId 物品；t767 起创造瞬破不发（主动破坏掉落仅生存，t571①）
+    // t1013 箱子矿车被毁（生存末击 / 创造瞬破 / 仙人掌岩浆环境摧毁；虚空不发）→ 呈层据它掉
+    //   车物品 + 箱方块物品 + 内容键条目逐槽弹出（x,y,z = 掉落散布格；keyX/Y/Z = ChestStore 寻址键，
+    //   呈层读槽后 clearChest 清条目）。箱子矿车不发 cartBroken（防车物品双掉 —— 本信号已含车）。
+    //   **对 t767 的有意偏差**：创造瞬破也发（纯车创造无掉落语义保留）—— 箱车内容物是用户物品数据，
+    //   静默清键 = 数据丢失，违背「挖除掉车+箱+内容物」验收；全模式掉落，偏差登记。
+    void chestCartBroken(int x, int y, int z, int keyX, int keyY, int keyZ);
 
 private:
     struct Cart {
@@ -262,6 +295,14 @@ private:
                               //   （④）→ 水平 dir×speed 平抛 + 重力 fallVy，落地（轨面重挂 / 地面真顶贴面）退出。
                               //   地面静止车（t734 放宽放置）恒 false（支撑复探保贴面，仅失支撑才转 true）。
         float fallVy = 0.0f;  // t863 自由物理垂直速度（blocks/s，向下为负；kCartFallGravity 驱动）。
+        // t1013 箱子矿车变体：chest = 变体标志（不可骑 / 右键开箱 / 毁时掉车+箱+内容物 / 呈现箱体）；
+        //   keyX/Y/Z = 内容键格（ChestStore "x,y,z" 寻址键 = worldgen 标记箱原格，**不随车移动** ——
+        //   车沿轨驶离后 UI / 掉落 / 回生仍按生成格键寻址，实体非持久而键条目持久的锚点）。普通矿车
+        //   chest=false 且键 = 生成格（恒不查询）。DMI → 槽复用 spawnCart 的 Cart c{} 默认清回。
+        bool chest = false;
+        int keyX = 0;
+        int keyY = 0;
+        int keyZ = 0;
         bool alive = true;   // slot-reuse 槽位占用标志（放末位：聚合初始化尾字段缺省取 default member init）
     };
     std::vector<Cart> m_carts;
@@ -278,6 +319,10 @@ private:
     //   离开沿清位断电。无探测轨场景恒空（零开销）。切世界不显式清（占用表陈旧项的 blockAt 守卫自然
     //   跳过；下帧重建覆盖）。
     std::unordered_set<quint64> m_detectorOccupied;
+
+    // t1013 spawnCart / spawnChestCart 共用实现（体 = 原 spawnCart 全量：cap 守卫 / 贴轨面 / 朝向 / 坡面
+    //   / 俯仰 / 耐久全同；差异仅 chest 标志 + 内容键随槽落）。spawnCart = chest=false + 键=生成格委托。
+    void spawnCartImpl(int x, int y, int z, World *world, bool chest, int keyX, int keyY, int keyZ);
 
     int acquireSlot(Cart &&c)
     {
@@ -462,7 +507,11 @@ private:
     //   车）+ releaseSlot + survivalDrop 时按 t735① 非实心邻格散布掉落格 emit cartBroken（创造瞬破 /
     //   虚空不掉）。生物乘员不在此处理 —— releaseSlot 置 alive=false 后 EntityManager::tickVehicleRiding
     //   对账链（mobPassengerAt 指空槽）自动自释放恢复 AI（乘员自动下来的 Entities 侧半边）。返 true。
-    bool destroyCartTail(int idx, World *world, bool survivalDrop);
+    //   **t1013 箱子矿车分流**：chest 车**不发 cartBroken** 改发 chestCartBroken(散布格, 内容键)——
+    //   voidLoss=false 的摧毁（生存末击 / 创造瞬破 / 仙人掌岩浆）全模式发（t767 偏差登记，见信号注释）；
+    //   voidLoss=true（虚空卷没）不发 → ChestStore 内容键条目保留 → 重进世界回生（内容物不丢）。
+    //   voidLoss = 虚空卷没专用（无掉落移除；调用方：tickDerailedCart / checkCartEnvironment 的 y<0 分支）。
+    bool destroyCartTail(int idx, World *world, bool survivalDrop, bool voidLoss = false);
 
     // t735 ① 掉落格散布（destroyCartTail 用）：掉「首个非实心水平邻格」随机一格（邻格上方一格也须非实
     //   心，防掉进 1 格深坑壁内）；4 邻全实心 → 掉车中心格上一格；无 world → 保留中心格。

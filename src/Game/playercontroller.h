@@ -17,6 +17,7 @@
 #include "boatmanager.h"        // t469 船实体管理器（骑乘 / WASD 操控 / 冰上加速 / 撞坏掉落）
 #include "minecartmanager.h"    // t565 矿车实体管理器（轨上骑乘 / WASD 前后推 / 拐角自动转弯）
 #include "dispenserstore.h"     // t579 发射器 per-block 9 槽内容（压力板触发取物发射 / 扣库存）
+#include "cheststore.h"         // t1013 箱子矿车内容键存储（进世界转正登记 / 回生扫描 / 挖毁清键）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
@@ -80,6 +81,12 @@ class PlayerController : public QQuickItem
     //   不发射」（神殿陷阱箭路径不受影响——那条路径不读库存，恒有箭）。分层（PLAN §2）：DispenserStore 属
     //   Game/ViewModel（纯存储），PlayerController 同层直调（同 Hotbar），无向上依赖。
     Q_PROPERTY(DispenserStore *dispenserStore READ dispenserStore WRITE setDispenserStore NOTIFY dispenserStoreChanged)
+    // t1013 箱子矿车内容键存储（同 dispenserStore 注入模式）：convertMineshaftChests 进世界转正链用 ——
+    //   扫 worldgen 矿井标记箱 → 摘块 + registerCart 登记内容键 + spawnChestCart 落车；并据存档 cart 键
+    //   条目回生未毁的矿车（实体不进存档，内容物走 chests 表持久）。null 防御：转正链整体跳过（无存档
+    //   回生面，worldgen 标记箱保持方块形态 = t1013 前行为）。分层：ChestStore 属 Game/ViewModel 纯存储，
+    //   PlayerController 同层直调（同 DispenserStore / Hotbar），无向上依赖。
+    Q_PROPERTY(ChestStore *chestStore READ chestStore WRITE setChestStore NOTIFY chestStoreChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -303,6 +310,16 @@ public:
     void setMinecartManager(MinecartManager *m);
     DispenserStore *dispenserStore() const { return m_dispenserStore; }
     void setDispenserStore(DispenserStore *s);
+    ChestStore *chestStore() const { return m_chestStore; }
+    void setChestStore(ChestStore *s);
+    // t1013 矿井箱 → 箱子矿车转正（进世界一次性；Main.qml enterWorld 在 chestStore.loadAll + carts.clearAll
+    //   之后调）。Q_INVOKABLE 无参（全靠注入面：m_world / m_minecartManager / m_chestStore）。两路：
+    //   (a) 全图扫 Chest+ChestStateMineshaftFlag（collectBlocksOfId 复用 t691 扫描面）→ clearMineshaftChest
+    //       静默摘块 + chestStore->registerCart（内容键 = 标记格）+ minecartManager->spawnChestCart（键格
+    //       轨上 / 四邻轨格 / 键格地面三态落车）—— 覆盖新世界 worldgen 标记与 R19.19 老档未转正标记箱；
+    //   (b) 存档回生：chestStore->cartCells()（chests 表 "cart":true 键）→ 本轮未转正的键直接落车（车被
+    //       挖毁时键条目已清 → 不回生；内容物在键条目里跨存档持久）。幂等：同键双路以本轮已落车键集去重。
+    Q_INVOKABLE void convertMineshaftChests();
 
     QVector3D position() const { return m_pos + QVector3D(0, m_eyeHeight, 0); }
     float yaw() const { return m_yaw; }
@@ -633,6 +650,7 @@ signals:
     void boatManagerChanged(); // t469 船管理器注入变更
     void minecartManagerChanged(); // t565 矿车管理器注入变更
     void dispenserStoreChanged();  // t579 发射器内容存储注入变更
+    void chestStoreChanged();      // t1013 箱子矿车内容键存储注入变更
     void positionChanged();
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
@@ -1255,6 +1273,7 @@ private:
     BoatManager *m_boatManager = nullptr;        // t469 船：浮水 tick + 骑乘操控 / 放船 / 下船（Q_PROPERTY 绑定）
     MinecartManager *m_minecartManager = nullptr; // t565 矿车：轨上骑乘操控 / 放车 / 下车（Q_PROPERTY 绑定）
     DispenserStore *m_dispenserStore = nullptr;   // t579 发射器 per-block 9 槽内容（压力板触发取物发射，Q_PROPERTY 绑定）
+    ChestStore *m_chestStore = nullptr;           // t1013 箱子矿车内容键存储（转正 / 回生 / 挖毁清键，Q_PROPERTY 绑定）
     // t950 mob 装备拾取（tickMobEquipmentPickup）状态：扫描窗 dt 累积器 + 拾取概率（setEquipmentPickupChance
     //   缝写；初值 = 缺省常量）。非世界态（跨世界 reset 族）无需清——纯节流/标量，无跨世界语义。
     qreal m_equipPickupAccum = 0.0;               // 距下次扫描窗的 dt 累积（秒；到窗长即清零跑扫描）

@@ -831,6 +831,10 @@ Window {
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
         carts.clearAll()    // t565 矿车同族实体（非体素不进存档），切世界必清（清骑乘态 + 空槽复用）
+        // t1013 矿井箱 → 箱子矿车转正 / 回生（进世界一次性，须在 chestStore.loadAll（存档键条目就位）与
+        //   carts.clearAll（槽表清空）之后）：C++ 全图扫 worldgen 标记箱 → 静默摘块 + 登记内容键 + 邻轨落车；
+        //   并据存档 "cart" 键条目回生未毁的矿车（实体不进存档；挖毁时键条目已清 → 不回生，内容物不丢）。
+        player.convertMineshaftChests()
         // t312：清聊天历史（不持久化 / 不跨世界；新世界从空起）。
         chatMessages.clear()
         // t240 进世界生成猪 / 牛 / 羊各一只于玩家进世界点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
@@ -1418,6 +1422,12 @@ Window {
     //   x/y/z = 所开箱子的方块世界坐标（player.chestOpened 携带 → ChestStore 据此寻址该箱子的 27 槽）。
     function openChest(x, y, z) {
         if (appState !== "playing" || chestOpen) return
+        // t1013 箱子矿车内容键判定：键格是矿车生成格（ChestStore "cart" 标记）→ 跳过 t226「箱上方完整
+        //   立方压盖」门控（矿车沿轨移动，键格上方是什么与开箱无关；机制等价 MC 1.0 storage minecart
+        //   任意姿态可开）与方块盖子动画（盖子 overlay 钉在键格坐标 —— 车可能已驶离，钉格动画 = 幽灵盖；
+        //   开箱反馈 = ChestUI 面板本身，登记简化口径）。
+        const isCartCell = chestStore.isCartCell(x, y, z)
+        if (!isCartCell) {
         // t226 箱子上方阻挡开盖判定（机制等价 MC 1.0：箱子正上方格若为「完整立方」方块 → 盖子被压住，
         //   不开 UI / 不放盖子动画；上方为空气 / 不完整方块（半砖 / 栅栏 / 楼梯 / 火把 / 水）或另一只箱子 → 可开）。
         //   谓词用 BlockRegistry::isFullCube（theWorld.isFullCubeAt；t213/t220/t226 共用基础谓词的世界坐标版）。
@@ -1429,6 +1439,7 @@ Window {
         //   World（blockAt + isFullCubeAt），不写栅格；chestOpened 信号仍由 Game/Physics 发，本处决定是否呈现开盖。
         const aboveId = theWorld.blockAt(x, y + 1, z)
         if (aboveId !== 22 /* BlockRegistry::Chest */ && theWorld.isFullCubeAt(x, y + 1, z)) return
+        } // t1013 非矿车键才走方块箱遮挡门控
         if (inventoryOpen) closeInventory()
         if (craftingTableOpen) closeCraftingTable()
         if (furnaceOpen) closeFurnace()
@@ -1448,6 +1459,10 @@ Window {
         //   isMineshaftChest 返 true。首开时由 LootTable::mineshaftChestPool 抽 6 件（矿物 / 附魔书 / 铁锭等）
         //   分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢箱机制（一份首开一次性 roll）。
         if (theWorld.isMineshaftChest(x, y, z)) chestStore.populateMineshaftLoot(x, y, z)
+        // t1013 箱子矿车首开填充：键格经转正后已是 Air（isMineshaftChest 恒 false）→ 按内容键标记分流。
+        //   registerCart 登记的「键 + 全空条目」= 未开箱 → 矿井池首开 roll（gate 在 ChestStore 内：非空 /
+        //   非矿车键条目 no-op）。同一份首开一次性 roll，坐标确定性 seed → 同键同战利品。
+        if (isCartCell) chestStore.populateMineshaftLoot(x, y, z)
         // t485 沙漠神殿箱首开填充战利品：worldgen placeDesertTemple 给神殿箱 state 置 ChestStatePyramidFlag(bit4) →
         //   isPyramidChest 返 true。首开时由 LootTable::pyramidChestPool 抽 4 件（钻石 / 金 / 青金石 / 骨头 / 腐肉等）
         //   分散入随机空槽（坐标确定性 seed → 同箱同战利品）。同地牢 / 矿井箱机制（一份首开一次性 roll）。
@@ -1465,7 +1480,8 @@ Window {
         chestOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（箱子）
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
-        chestLidAngle = kChestLidOpenAngle
+        //   t1013 矿车键不显盖子（overlay 钉键格 = 幽灵盖；见函数头注释简化口径）。
+        if (!isCartCell) chestLidAngle = kChestLidOpenAngle
         player.release()
     }
     function closeChest() {
@@ -2535,6 +2551,31 @@ Window {
         }
     }
 
+    // t1013 箱子矿车挖毁 → 掉车 + 箱 + 内容物（语义事件路由，同 onCartBroken 模式；PLAN §2 分层）。
+    //   chestCartBroken 由 destroyCartTail 箱车分流发（生存末击 / 创造瞬破 / 仙人掌岩浆全模式 —— 对 t767
+    //   的有意偏差：纯车创造瞬破无掉落，箱车若同口径会把内容键条目静默清掉 = 用户物品数据丢失；虚空
+    //   卷没不发本信号 → 键条目保留 → 重进世界回生）。x,y,z = 掉落散布格；keyX/Y/Z = ChestStore 寻址键。
+    //   掉落序：矿车物品（0x23E 可重放）+ 箱方块物品（id 22，生存挖箱同款掉落物）+ 内容键逐非空槽
+    //   spawnItem（附魔 / 改名 / 耐久随实体走，同 onBlockBroken(22) 逐槽口径）→ clearChest 清键条目
+    //   （存档后不再回生被毁矿车）。
+    Connections {
+        target: carts
+        function onChestCartBroken(x, y, z, keyX, keyY, keyZ) {
+            itemEntities.spawnItem(x, y, z, 0x23E /*MinecartId*/, 1)
+            itemEntities.spawnItem(x, y, z, 22 /*Chest 方块物品*/, 1)
+            for (let ci = 0; ci < chestStore.slotCount; ++ci) {
+                const cid = chestStore.slotIdAt(keyX, keyY, keyZ, ci)
+                const ccount = chestStore.slotCountAt(keyX, keyY, keyZ, ci)
+                if (cid !== 0 && ccount > 0)
+                    itemEntities.spawnItem(x, y, z, cid, ccount,
+                                           chestStore.slotEnchantsAt(keyX, keyY, keyZ, ci),
+                                           chestStore.slotNameAt(keyX, keyY, keyZ, ci),
+                                           chestStore.slotDurabilityAt(keyX, keyY, keyZ, ci))
+            }
+            chestStore.clearChest(keyX, keyY, keyZ)
+        }
+    }
+
     // t402 经验球拾取 → 玩家累积 XP（语义事件路由，同 fallDamageTaken→takeDamage 模式；
     //   PLAN §2 分层：Entities 发语义事件、呈现层只消费）。拾取音复用掉落物拾取声（playPickup）。
     Connections {
@@ -2942,6 +2983,8 @@ Window {
         minecartManager: carts
         // t579：注入发射器内容存储（踩压力板触发发射器取内容物发射 / 扣库存；同 peer VM 注入模式）。
         dispenserStore: dispenserStore
+        // t1013：注入箱子矿车内容键存储（进世界 convertMineshaftChests 转正 / 回生链用；同 peer VM 注入模式）。
+        chestStore: chestStore
         // t889：世界模拟总闸绑 window.worldRunning —— 硬档 tickImpl 早退（实体桶 / step 全停）+ 复跑顺延
         //   墙钟寿命；软档 step 零输入照跑（照坠 / 照烧 / 照溺）。见 PlayerController .h 属性头注释。
         worldRunning: window.worldRunning
@@ -6802,6 +6845,25 @@ Window {
                         position: Qt.vector3d(0, 0, 0.41)
                         scale: Qt.vector3d(0.775, 0.725, 0.08)
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ffffff"; baseColorMap: cartPackHit ? cartPackTex : cartTex }
+                    }
+                    // t1013 箱子矿车变体（chestAt 表达式注册 revision 依赖，t498/t556 铁律）：车斗内箱体
+                    //   两件套（原创方块化，§4 零 MC 专名）—— 主箱体 + 深色箱盖，坐车斗底板（板面本地
+                    //   -0.3125）之上、车帮（顶 +0.375）之内；普通矿车 chestAt=false 双件皆隐。NoLighting
+                    //   同车体（可见 Model 红线；材质纯色，箱体贴图属方块 atlas 不跨用）。
+                    Node {
+                        visible: carts.revision >= 0 ? carts.chestAt(index) : false
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, -0.1025, 0)
+                            scale: Qt.vector3d(0.58, 0.42, 0.58)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#8a5a2b" }
+                        }
+                        Model {
+                            geometry: UnitCube {}
+                            position: Qt.vector3d(0, 0.1525, 0)
+                            scale: Qt.vector3d(0.61, 0.09, 0.61)
+                            materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#6f451f" }
+                        }
                     }
                     // F3+B 矿车碰撞箱（同 boat hitbox 模式；PLAN §2-F F3 调试叠层）：
                     //   kCartHalfW=0.45 / kCartHalfH=0.45 / kCartHalfL=0.5 → scale=(2·半W, 2·半H, 2·半L)+0.01 外扩避面重叠。

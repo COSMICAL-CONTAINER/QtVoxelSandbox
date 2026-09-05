@@ -45,8 +45,37 @@ bool MinecartManager::aliveAt(int i) const
 
 void MinecartManager::spawnCart(int x, int y, int z, World *world)
 {
+    spawnCartImpl(x, y, z, world, /*chest=*/false, x, y, z); // 普通车键 = 生成格（不参与寻址）
+}
+
+// t1013 箱子矿车生成（头注释见 .h）：先按「键格轨上 / 四邻轨格 / 键格地面」选落格，再走与 spawnCart
+//   同一实现（变体只多 chest 标志 + 内容键，物理 / 贴轨 / 朝向公式零分叉）。
+void MinecartManager::spawnChestCart(int x, int y, int z, World *world, int keyX, int keyY, int keyZ)
+{
+    int sx = x, sz = z;
+    if (world && !BlockRegistry::isRail(world->blockAt(x, y, z))) {
+        // 键格非轨（矿井箱 R19.19 规则立轨旁空地）→ 四邻首个轨格：车落轨上（可推 / 可动力行驶）。
+        //   四邻多轨（巷道曲线邻接）取枚举序首个 —— 起步向由 tick 停驻重选向 / 推动 wish 决定，无歧义。
+        static constexpr int kNb[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (const auto &d : kNb) {
+            if (BlockRegistry::isRail(world->blockAt(x + d[0], y, z + d[1]))) {
+                sx = x + d[0];
+                sz = z + d[1];
+                break;
+            }
+        }
+    }
+    spawnCartImpl(sx, y, sz, world, /*chest=*/true, keyX, keyY, keyZ);
+}
+
+void MinecartManager::spawnCartImpl(int x, int y, int z, World *world, bool chest, int keyX, int keyY, int keyZ)
+{
     if (m_liveCount >= kCap) { qWarning("vo.entities: MinecartManager spawnCart cap reached (%d)", kCap); return; }
     Cart c;
+    c.chest = chest;       // t1013 变体标志 + 内容键（普通车 = 生成格，恒不查询）
+    c.keyX = keyX;
+    c.keyY = keyY;
+    c.keyZ = keyZ;
     // t734 ① 贴轨修真：轨面基准 = 轨格 cell 底 + 薄板 1/16（mesher yr 常量），**非 cell 顶**。旧版
     //   y+1.0+kCartRideH 把「格底薄板」当「格顶」→ 矿车悬浮约一整格（primed TNT / 雪傀儡 restY 基准
     //   同族错：渲染面贴格底、物理从格顶叠）。轨上：车底（渲染底板下沿 = 中心 −0.15）贴轨板顶 →
@@ -132,6 +161,25 @@ int MinecartManager::hpAt(int i) const
     return m_carts[size_t(i)].hp;
 }
 
+// t1013 箱子矿车变体读口（呈现层 delegate 据它显车斗内箱体；越界 / 空槽返 false）。
+bool MinecartManager::chestAt(int i) const
+{
+    if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return false;
+    return m_carts[size_t(i)].chest;
+}
+
+// t1013 内容键读口（C++ 直调：PlayerController placeBlock 箱车分支 → chestOpened(键) → ChestStore 寻址）。
+bool MinecartManager::chestKeyAt(int i, int &outKeyX, int &outKeyY, int &outKeyZ) const
+{
+    outKeyX = outKeyY = outKeyZ = -1;
+    if (i < 0 || i >= int(m_carts.size()) || !m_carts[size_t(i)].alive) return false;
+    const Cart &c = m_carts[size_t(i)];
+    outKeyX = c.keyX;
+    outKeyY = c.keyY;
+    outKeyZ = c.keyZ;
+    return c.chest;
+}
+
 int MinecartManager::findCartHit(const QVector3D &origin, const QVector3D &dir, float maxDist, float *outDist) const
 {
     int bestIdx = -1;
@@ -180,6 +228,10 @@ bool MinecartManager::tryMount(const QVector3D &origin, const QVector3D &dir, fl
     // t811 满员拒载：矿车乘员总数限 1（玩家 XOR 生物）—— 生物已占座 → 拒玩家上（返 false 不改态；
     //   机制等价 t811 spec「矿车限 1 只」总数口径：玩家占了 mob 不上，mob 占了玩家也不上）。
     if (idx >= 0 && idx < int(m_carts.size()) && m_carts[size_t(idx)].mobPassenger >= 0) return false;
+    // t1013 箱子矿车不可骑：内容容器语义 —— 右键 = 开箱（PlayerController placeBlock 箱车分支先行
+    //   分流为 chestOpened）；本守卫兜底其余 tryMount 路径（含箱车挡在普通车前 —— findCartHit 命中
+    //   箱车即拒，防「想骑后车却骑进箱子」）。机制等价 MC 1.0 storage minecart 右键开箱不骑。
+    if (m_carts[size_t(idx)].chest) return false;
     m_riderCart = idx;
     notifyChanged();
     return true;
@@ -594,7 +646,7 @@ void MinecartManager::tickDerailedCart(int idx, Cart &c, World *world, float dt)
     if (!landed) {
         c.pos.setY(newY); // 自由下落继续
         // 虚空：跌出世界底部 → 无掉落移除（mob void-loss 同款兜底；防永久下落每帧刷 emit）。
-        if (c.pos.y() < 0.0f) { destroyCartTail(idx, world, /*survivalDrop=*/false); return; }
+        if (c.pos.y() < 0.0f) { destroyCartTail(idx, world, /*survivalDrop=*/false, /*voidLoss=*/true); return; } // t1013 虚空：箱车内容键条目保留（回生）
     }
     // ── 水平：dir×speed 积分 + 撞可碰撞格清零（车身格 = 中心下一格；撞墙清速度顺墙停）──
     //   t907 子步化（spec「任何弹射不得越实体墙」）：旧版一步欧拉（nx = pos + dir·speed·dt）只验
@@ -1984,16 +2036,30 @@ void MinecartManager::scatterDropCell(const QVector3D &cp, World *world,
     }
 }
 
-// t866② 击毁通用尾部（头注释见 .h）：清玩家骑乘态 + 释放槽 + 生存掉落（散布格 emit cartBroken → 呈层
-//   spawnItem 掉 MinecartId）。生物乘员由对账链自动释放（tickVehicleRiding Pass A/B：座位指空槽 / 反向
+// t866② 击毁通用尾部（头注释见 .h）：清玩家骑乘态 + 释放槽 + 掉落信号分流 —— 普通车生存掉落散布格
+//   emit cartBroken → 呈层 spawnItem 掉 MinecartId；t1013 箱子矿车改发 chestCartBroken(散布格, 内容键)
+//   （生存末击 / 创造瞬破 / 仙人掌岩浆全模式，t767 偏差登记；虚空 voidLoss=true 不发 → 内容键条目保留
+//   → 重进世界回生）。生物乘员由对账链自动释放（tickVehicleRiding Pass A/B：座位指空槽 / 反向
 //   链断 → mob 自恢复 AI 原地 + resting 解除重力落地 = 「乘员自动下来」）。
-bool MinecartManager::destroyCartTail(int idx, World *world, bool survivalDrop)
+bool MinecartManager::destroyCartTail(int idx, World *world, bool survivalDrop, bool voidLoss)
 {
     if (idx < 0 || idx >= int(m_carts.size()) || !m_carts[size_t(idx)].alive) return false;
     const QVector3D cp = m_carts[size_t(idx)].pos;
+    const bool chest = m_carts[size_t(idx)].chest; // t1013：releaseSlot 前捕获（槽复用会整槽覆盖）
+    const int keyX = m_carts[size_t(idx)].keyX;
+    const int keyY = m_carts[size_t(idx)].keyY;
+    const int keyZ = m_carts[size_t(idx)].keyZ;
     if (idx == m_riderCart) m_riderCart = -1; // 挖 / 毁骑乘中的矿车 → 玩家自然下车（重力接手）
     releaseSlot(idx);
-    if (survivalDrop) {
+    if (chest) {
+        // t1013 箱子矿车：非虚空摧毁全模式掉落（车+箱+内容物由呈层据键处理；对 t767 有意偏差 ——
+        //   创造瞬破若同纯车「无掉落」口径，内容键条目将被静默清掉 = 用户物品数据丢失）。
+        if (!voidLoss) {
+            int dropX = 0, dropY = 0, dropZ = 0;
+            scatterDropCell(cp, world, dropX, dropY, dropZ);
+            emit chestCartBroken(dropX, dropY, dropZ, keyX, keyY, keyZ);
+        }
+    } else if (survivalDrop) {
         int dropX = 0, dropY = 0, dropZ = 0;
         scatterDropCell(cp, world, dropX, dropY, dropZ);
         emit cartBroken(dropX, dropY, dropZ);
@@ -2012,7 +2078,7 @@ void MinecartManager::checkCartEnvironment(World *world)
         const Cart &c = m_carts[i];
         if (!c.alive) continue;
         if (c.pos.y() < 0.0f) { // 虚空：跌出世界底部 → 移除（防永久下落刷 emit）
-            destroyCartTail(int(i), world, /*survivalDrop=*/false);
+            destroyCartTail(int(i), world, /*survivalDrop=*/false, /*voidLoss=*/true); // t1013 虚空分支
             continue;
         }
         // AABB 覆盖格（对轴外接 + **朝向定向**：行进轴 = 斗长轴 kCartHalfL（1.0 长），垂直轴 = 斗宽

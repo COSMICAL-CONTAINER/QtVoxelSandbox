@@ -9,6 +9,7 @@
 
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 
 // 箱子内容存储（Game 层 ViewModel；t173）。机制等价 MC 1.0「箱子内容存于方块」：每只箱子（按
 // 世界方块坐标键控）持一份 27 槽物品内容，跨 UI 开关 / 跨面板持久（非 QML 本地态）；多只箱子各自
@@ -73,10 +74,25 @@ public:
                              int durability = -1);
     // 移除某箱子条目（破块清孤儿；不存在则 no-op）。spec「破箱掉落内容」属 Phase 1.1+，本轮直接弃内容。
     Q_INVOKABLE void clearChest(int x, int y, int z);
+
+    // ── t1013 箱子矿车内容键面（R19.20 转正偏差 2）──
+    // 箱子矿车（MinecartManager chest=true 车）的内容物沿用本存储的 27 槽，但寻址键 = **生成格**（worldgen
+    //   矿井标记箱原格），不随车移动 —— 实体不进存档而键条目进 chests 表（"cart":true 标记），重进世界由
+    //   PlayerController::convertMineshaftChests 据条目回生实体 = 内容物不丢（用户回退诉求）。
+    // registerCart：登记 / 升级内容键（幂等）。已有条目（R19.19 时代开过的标记箱）只置 cart 标记，27 槽
+    //   原样保留；无条目则建**全空** 27 槽条目再记键（「键 + 空条目 + cart」= 可落盘的回生标记，allChests
+    //   遍历的是条目表；战利品首开时才填充，gate 见 populateMineshaftLoot）。
+    Q_INVOKABLE void registerCart(int x, int y, int z);
+    // 该格是否箱子矿车内容键（Main.qml.openChest 据它跳过「箱上遮挡不开盖」门控 + 走矿井战利品首开填充）。
+    Q_INVOKABLE bool isCartCell(int x, int y, int z) const;
+    // 全部内容键平面列表 [x,y,z,...]（回生扫描用；顺序 = 键哈希序，无游戏语义）。
+    Q_INVOKABLE QVariantList cartCells() const;
     // 清空全部箱子（跨世界切换时 Main.qml.enterWorld 经 loadAll 间接调；亦可直调）。空 → no-op（不无故发信号）。
     Q_INVOKABLE void clearAll();
     // 收集所有「含 ≥1 非空槽」的箱子为 QVariantList（每项 {x,y,z,slots:[{id,count}×27]}），供 Main.qml 传
     //   worldStore.saveAll(name, ...) 落盘。全空箱子跳过（落盘省行；加载后缺失条目 = 空 27 槽，行为等价）。
+    //   t1013 豁免：箱子矿车内容键（"cart":true 项）即使 27 槽全空也落盘 —— 键条目是回生标记，未开过
+    //   的矿车也要按键回生；老存档无 "cart" 键 → 读回 false，向后兼容。
     Q_INVOKABLE QVariantList allChests() const;
     // 用存档 QVariantList（同 allChests 形状）整体替换内存内容（先清空再填充；单次 emit chestChanged）。
     //   Main.qml.enterWorld 调：chestStore.loadAll(worldStore.loadChests()) —— 替换语义即「清旧世界残留 +
@@ -89,10 +105,13 @@ public:
     //   该坐标是地牢箱（theWorld.isDungeonChest —— 由 chest state bit2 标记，worldgen 写入；玩家放置的无此标记）。
     //   分层（PLAN §2）：本层 Game，依赖同层 LootTable + QtCore；不依赖 World（「是否地牢箱」由 caller 查 World）。
     Q_INVOKABLE bool populateDungeonLoot(int x, int y, int z);
-    // t484 首开填充废弃矿井战利品（机制等价 MC 1.0 mineshaft chest loot）。与 populateDungeonLoot 同源语义：
-    //   仅对「尚未有条目」的箱子生效（首次开），用 LootTable::mineshaftChestPool + 坐标确定性 seed 抽 6 件
-    //   （矿物 / 附魔书 / 铁锭等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）须先确认该坐标是矿井箱
-    //   （theWorld.isMineshaftChest —— 由 chest state bit3 标记，worldgen placeMineshaft 写入）。
+    // t484 首开填充废弃矿井战利品（机制等价 MC 1.0 mineshaft chest loot；**t1013 gate 更新**）：矿井箱
+    //   已转正为箱子矿车实体，本方法只对「箱子矿车内容键」（registerCart 登记，键可无 27 槽条目）或
+    //   旧档残留标记箱条目生效：无条目 → 抽 kMineshaftRolls 件建条目；条目存在但为**空的矿车键**（转正
+    //   登记、未开过）→ 同样填充（键条目 = 回生标记，非「已开」）；条目存在且非空 / 非矿车键 → no-op 返
+    //   false（杜绝清空后重开再生战利品，机制对齐 MC「战利品 roll 一次」）。填充后键升级为矿车键（内容
+    //   随矿车回生链持久）。用 LootTable::mineshaftChestPool + 坐标确定性 seed 抽 6 件（矿物 / 附魔书 /
+    //   铁锭等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）按 isCartCell 旧档 isMineshaftChest 调。
     Q_INVOKABLE bool populateMineshaftLoot(int x, int y, int z);
     // t485 首开填充沙漠神殿战利品（机制等价 MC 1.0 desert temple chest loot）。与 populateDungeonLoot /
     //   populateMineshaftLoot 同源语义：仅对「尚未有条目」的箱子生效（首次开），用 LootTable::pyramidChestPool
@@ -137,11 +156,16 @@ private:
 
     // 坐标 → 箱子内容。QString 键（"x,y,z"）—— 简单可读、无位打包范围限制；箱子数少，性能非热点。
     std::unordered_map<QString, Chest> m_chests;
+    // t1013 箱子矿车内容键集（与 m_chests 并行的标记面：键可在 27 槽全空时独立存在 —— 未开箱的矿车
+    //   也要回生；allChests 对 cart 键豁免「全空不落盘」跳过）。clearChest / clearAll / loadAll 同步维护。
+    std::unordered_set<QString> m_cartKeys;
     int m_revision = 0;
 
     static QString key(int x, int y, int z); // "x,y,z"
     // 反解 key() 产物（"x,y,z" → x,y,z；坐标可负）。格式不符 → false。
     static bool parseKey(const QString &k, int &x, int &y, int &z);
+    // t1013 条目 27 槽是否全空（populateMineshaftLoot 的矿车键首开 gate：「键 + 全空条目」= 未开箱）。
+    static bool allSlotsEmpty(const Chest &c);
     // review L7 战利品 Stack → Slot 转换（五个 populate*Loot 共用的单一权威）：附魔书（EnchantedBookId）
     //   额外经 LootTable::enchantedBookEnchants 随机生成 1-3 条附魔（seed = 箱子 seed 混 slot 序号 → 同箱
     //   同战利品可复现，PLAN §2-K）；其余物品附魔恒 0。
