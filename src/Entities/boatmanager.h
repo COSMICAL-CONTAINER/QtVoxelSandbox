@@ -128,6 +128,20 @@ public:
     bool hitBoatFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist, World *world = nullptr,
                         bool instantBreak = false);
 
+    // ── t1015 载具攻击目标甄别（骑乘组合碰撞盒拆分；C++ 直调，同上非 Q_INVOKABLE）──
+    // 第 i 条船的**单盒**射线命中距离（slab ray-AABB，几何与 findBoatHit 完全同式：X=kBoatHalfW /
+    //   Y=kBoatHalfH / Z=kBoatHalfLen，只是把遍历收窄到指定槽）。命中 → 返命中距离 tmin（≥0；起点已在
+    //   盒内返 0）；未命中 / 越界 / 空槽 → -1。供 PlayerController.beginMining 骑乘改判用：乘员 AABB 与
+    //   船 AABB 重叠时，把「骑乘组合」拆成两个独立盒分别求交，取**射线最近**者定目标（旧行为 = 乘员命中
+    //   即重路由「最近任意船」，别的船挡在乘员身后会被误拆）。纯几何只读，无副作用。
+    float rayHitDistAt(int i, const QVector3D &origin, const QVector3D &dir, float maxDist) const;
+
+    // 对**指定**船结算一次攻击（t1015 指定目标版 hitBoatFromRay：跳过 findBoatHit 寻的，直接结算 idx 船
+    //   —— 甄别已由 caller 用 rayHitDistAt + 乘员距离比较完成，此处只负责摧毁 / 掉落链）。结算语义与
+    //   hitBoatFromRay 完全同链：清玩家骑乘态（若挖的是被骑的船）+ releaseSlot + 创造瞬破无掉落 /
+    //   生存 boatBroken 非实心邻格散布掉落。越界 / 空槽 → false（无结算）。
+    bool hitBoatAt(int idx, World *world = nullptr, bool instantBreak = false);
+
     // 尝试骑乘：跑 findBoatHit 命中船 → 设 m_riderBoat + 返 true；未命中 → false（不改态）。由 PlayerController
     //   placeBlock 船段调（右键瞄船 → 上船）。t508 换船：已骑乘时命中**另一艘**船（idx != m_riderBoat）→ 直接切到
     //   新船（spec「骑船时右键另一艘船来坐上去」；旧船释放骑乘态自然浮水）；命中当前骑的船 → no-op（返 false）。

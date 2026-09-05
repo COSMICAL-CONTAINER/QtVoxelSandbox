@@ -1308,37 +1308,42 @@ void PlayerController::beginMining()
         const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
         if (mobIdx >= 0 && mobDist <= m_hitDist) {
             // t866① 载具乘员攻击改判（用户报「矿车载生物时打矿车 → 打到生物 → 生物永远下不来」）：乘骑
-            //   mob 被钉在载具座位（AABB 与车 / 船体重叠）→ 射线恒先中乘员。攻击语义归**载具本体**：进
-            //   矿车耐久 / 船击毁链（末击摧毁 → 车毁 → 对账链自动释放乘员恢复 AI = 「乘员自动下来」；玩家
-            //   骑的被毁车自然下车）。乘员本体不掉血 —— 攻击意图是拆载具不是打乘客（机制等价 MC 打船 /
-            //   打车载实体先伤载具）。冷却门内吞点击（不误伤乘员，同下方车 / 船分支口径）。
-            //   review26 #4：重路由必须验 hit*FromRay 返回值 —— 乘员 AABB 高出车盒一大截（Zombie 半高 0.95，
-            //   头顶高出车盒顶约 1.2 格），准星瞄乘员可见上身/头部时射线命中 mob 但不与车盒相交 → 返回 false。
-            //   未命中车盒 → 落回 attackMob 打乘员本体（恢复 t242 旧行为；冷却/挥手由 attackMob 自管，不再出现
-            //   「冷却已置位+挥手已发但零效果」的静默吞击）。冷却内短路不调 hit（吞点击口径不变），attackMob 自带
-            //   冷却门同样早退。重路由射线长度用 m_hitDist（命中方块距离；无命中 = kReach）而非 kReach 全程 ——
-            //   与 mob/船/矿车三分支「实体比方块近才优先」同口径，极端角度不可隔墙打车/船。
+            //   mob 被钉在载具座位（AABB 与车 / 船体重叠）→ 射线常同时穿过乘员与载具两盒。t1015 甄别
+            //   （用户报「生物坐船时点生物打到生物、点船打到船、单击不双计」）：把「骑乘组合碰撞盒」
+            //   **拆分**成乘员盒 + 本乘员乘坐的**那一台**载具盒（t866 旧改判 = 重路由「射线最近任意
+            //   车 / 船」，别的载具挡在乘员身后会被误拆 = 点生物打到别的船），对两盒分别求交，取**射线
+            //   最近**者定唯一目标（hit*At 指定车 / 船结算，与 hit*FromRay 寻的+结算同链逐行同源）：
+            //   · 载具盒更近（瞄船身 / 车身，乘员盒在车盒面之后）→ 攻击意图是拆载具 → 结算载具耐久 /
+            //     击毁链（乘员不掉血，末击毁 → 对账链自动释放乘员恢复 AI =「乘员自动下来」）。
+            //   · 乘员盒更近或载具盒未中（瞄乘员可见上身 / 头部，review26 #4 场景；以及本乘员的车不在
+            //     射线上）→ 打乘员本体（恢复 t242 旧行为）。
+            //   单次攻击只结算一个目标（两分支互斥 return，无二次伤害 = 不双计）。冷却门内吞点击（不
+            //   误伤乘员 / 载具，同旧口径；attackMob / hit*At 自带守卫同样早退）。甄别射线长度用
+            //   m_hitDist（命中方块距离；无命中 = kReach）而非 kReach 全程 —— 与 mob / 船 / 矿车三分支
+            //   「实体比方块近才优先」同口径，极端角度不可隔墙打车 / 船。载具盒与乘员盒同距（贴面重叠）
+            //   → 判归载具（t866① 攻击意图 = 拆载具的默认语义延续，<= 比较）。
             const int rideCart = m_entityManager->rideCartAt(mobIdx);
             if (rideCart >= 0 && m_minecartManager) {
-                if (m_attackCooldown <= 0.0f
-                    && m_minecartManager->hitCartFromRay(eye, look, m_hitDist, m_world,
-                                                         /*instantBreak=*/m_mode == Creative)) {
+                const float cartDist = m_minecartManager->rayHitDistAt(rideCart, eye, look, m_hitDist);
+                if (m_attackCooldown <= 0.0f && cartDist >= 0.0f && cartDist <= mobDist) {
+                    m_minecartManager->hitCartAt(rideCart, m_world, /*instantBreak=*/m_mode == Creative);
                     m_attackCooldown = kAttackCooldown; // 拆载具同攻击冷却（连击定耐久节奏）
                     emit swingArm();
                     return;
                 }
-                attackMob(mobIdx); // 未中车盒（瞄乘员上身）→ 打乘员；冷却内 attackMob 自吞（同旧口径）
+                attackMob(mobIdx); // 乘员盒更近 / 本乘员的车未中（瞄上身）→ 打乘员；冷却内 attackMob 自吞（同旧口径）
                 return;
             }
             const int rideBoat = m_entityManager->rideBoatAt(mobIdx);
             if (rideBoat >= 0 && m_boatManager) {
-                if (m_attackCooldown <= 0.0f
-                    && m_boatManager->hitBoatFromRay(eye, look, m_hitDist, m_world, m_mode == Creative)) {
+                const float boatDist = m_boatManager->rayHitDistAt(rideBoat, eye, look, m_hitDist);
+                if (m_attackCooldown <= 0.0f && boatDist >= 0.0f && boatDist <= mobDist) {
+                    m_boatManager->hitBoatAt(rideBoat, m_world, m_mode == Creative);
                     m_attackCooldown = kAttackCooldown;
                     emit swingArm();
                     return;
                 }
-                attackMob(mobIdx); // 未中船体（瞄乘员上身）→ 打乘员（review26 #4 同矿车分支）
+                attackMob(mobIdx); // 乘员盒更近 / 本乘员的船未中（瞄上身）→ 打乘员（review26 #4 同矿车分支）
                 return;
             }
             attackMob(mobIdx);

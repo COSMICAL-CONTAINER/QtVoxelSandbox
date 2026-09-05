@@ -1988,11 +1988,43 @@ void MinecartManager::updateDetectorRailEdges(World *world,
     }
 }
 
-bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist,
-                                     World *world, bool instantBreak)
+// t1015 指定车单盒射线命中距离（头注释见 .h）：几何与 findCartHit 完全同式（slab ray-AABB，X=
+//   kCartHalfW / Y=kCartHalfH / Z=kCartHalfL），只是把遍历收窄到指定槽 —— 供骑乘改判把「乘员 + 车」
+//   组合拆成两盒分别求交、按最近命中定目标。越界 / 空槽 → -1；dir 退化（零 / 非有限）→ -1（同
+//   findCartHit 守卫口径）。
+float MinecartManager::rayHitDistAt(int idx, const QVector3D &origin, const QVector3D &dir, float maxDist) const
 {
-    float dist = 0.0f;
-    const int idx = findCartHit(origin, dir, maxDist, &dist);
+    if (idx < 0 || idx >= int(m_carts.size()) || !m_carts[size_t(idx)].alive) return -1.0f;
+    if (!std::isfinite(dir.x()) || !std::isfinite(dir.y()) || !std::isfinite(dir.z())) return -1.0f;
+    const float dirLen2 = dir.x()*dir.x() + dir.y()*dir.y() + dir.z()*dir.z();
+    if (dirLen2 < 1e-8f) return -1.0f;
+    const Cart &c = m_carts[size_t(idx)];
+    const float ext[3] = { kCartHalfW, kCartHalfH, kCartHalfL };
+    float tmin = 0.0f, tmax = maxDist;
+    bool hit = true;
+    const float p[3] = { c.pos.x(), c.pos.y(), c.pos.z() };
+    const float o[3] = { origin.x(), origin.y(), origin.z() };
+    const float d[3] = { dir.x(), dir.y(), dir.z() };
+    for (int k = 0; k < 3; ++k) {
+        const float mn = p[k] - ext[k], mx = p[k] + ext[k];
+        if (std::abs(d[k]) < 1e-8f) {
+            if (o[k] < mn || o[k] > mx) { hit = false; break; }
+            continue;
+        }
+        float t1 = (mn - o[k]) / d[k];
+        float t2 = (mx - o[k]) / d[k];
+        if (t1 > t2) std::swap(t1, t2);
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) { hit = false; break; }
+    }
+    if (!hit) return -1.0f;
+    return tmin >= 0.0f ? tmin : 0.0f;
+}
+
+// t1015 指定车结算（头注释见 .h；hitCartFromRay 的指定目标版 —— 耐久 / 摧毁 / 掉落链逐行同源）。
+bool MinecartManager::hitCartAt(int idx, World *world, bool instantBreak)
+{
     if (idx < 0 || idx >= int(m_carts.size()) || !m_carts[size_t(idx)].alive) return false;
     Cart &c = m_carts[size_t(idx)];
     // t735 ② 生存耐久：非最后一击 → 只扣血 + 受击摇晃（notifyChanged bump revision → 呈层 hpAt 绑定
@@ -2007,6 +2039,14 @@ bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &d
     // 摧毁（生存最后一击 / 创造瞬破）：destroyCartTail（t866② 起与仙人掌 / 岩浆环境摧毁共用尾部 ——
     //   清骑乘态 + 释放槽 + 生存掉落散布 + emit cartBroken；t767 创造瞬破 survivalDrop=false 无掉落）。
     return destroyCartTail(idx, world, /*survivalDrop=*/!instantBreak);
+}
+
+bool MinecartManager::hitCartFromRay(const QVector3D &origin, const QVector3D &dir, float maxDist,
+                                     World *world, bool instantBreak)
+{
+    float dist = 0.0f;
+    const int idx = findCartHit(origin, dir, maxDist, &dist);
+    return hitCartAt(idx, world, instantBreak); // t1015：结算链收口到 hitCartAt（本函数只管寻的）
 }
 
 // t735 ① 掉落格散布（destroyCartTail 用；头注释见 .h）：掉「首个非实心水平邻格」随机一格（邻格上方
