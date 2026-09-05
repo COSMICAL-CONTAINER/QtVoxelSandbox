@@ -7140,11 +7140,14 @@ void World::placeDungeons()
 //   minecraft.wiki Mineshaft/Structure 子页 + 主条目）：placeMineshaft 内部 piece 化重写，piece 表 ——
 //     ① pieceStartRoom 起点厅：10×10 footprint（每矿井恰一座；考据「up to 4 exits + spawns once」），
 //        拱顶 = 外环净高 3 / 内芯净高 4 双段剖面 + 外环 sy+4 一圈 Planks 拱带（springing course）；
-//        出口 = hash 洗牌 4 主向取前 3..4 向（各向至多一条巷道 → 出口数 3..4 ∈ 考据 1-4 窗）。
+//        出口 = hash 洗牌 4 主向取前 3..4 向（各向至多一条巷道 → 出口数 3..4 ∈ 考据 1-4 窗）；
+//        t1011 角壁火把 ×4（头层墙插 + 洞穴壁空地板回退 → 入口厅宏观可见照明）。
 //     ② pieceCorridor 巷道：自起点厅房缘放射，3 宽 × 3 高截面 + L 形折线（沿用 t565）；支撑组每
 //        kSupportInterval=4 格一道（两侧 WoodFence 双柱 sy+1..sy+2 + 柱顶封盖：~55% Torch 火把 /
 //        其余 Planks 木板柱冠（考据蓝图「layer 3 木板封柱顶」）；组级 hash 25% 缺失 = 考据「部分
-//        支撑缺失」，step 0/4 豁免锚定间距窗）；残缺轨（中线 hash 70% 保留 →
+//        支撑缺失」，step 0/4 豁免锚定间距窗）；t1011 跨中壁挂火把（step ≡ 2 mod interval 顶层
+//        巷壁两侧成对墙插、洞穴合并段壁空 → 贴面格地板火把回退、斜坡段同布）→ 相邻火把步距 ≤ 2 格；
+//        残缺轨（中线 hash 70% 保留 →
 //        考据「铁轨残缺不连续」）；顶角蛛网 12% +
 //        巷壁矿石 15%（沿用 t565 口径）。
 //     ③ pieceIntersection 交叉口：巷道途中 5×5 通高开口 + 四角 WoodFence 双层双柱 + Planks 柱冠
@@ -7163,6 +7166,11 @@ void World::placeDungeons()
 //   贴图；与运行期 checkRailOnEdit 同一权威）。地板按矿井 hash（(r>>20)&1）选 Planks / Stone（t565 ⑤）。
 //   巷道被周围实体岩天然封闭 → 内部无天光 → 黑暗 + 火把点光（机制等价 MC 1.0 矿井环境）。与既有洞穴重叠时
 //   （carveCaves 已挖空同位）→ 结构仍画出（矿井叠加于洞穴，同 placeDungeons 墙体被洞穴截断）。
+//   t1011 光源归因登记（用户实测「矿井里见光但 F3 bl:0 没看到火把」）：bl 通道非零必须近处有火把（火把
+//   lightEmission 14、recomputeLightField 全场重 flood 于 generate 末尾），bl:0 的「见光」必为**天光通道**
+//   —— 矿井段壁与 carveCaves 洞穴网络交叠处形成豁口，洞穴连通地表 → 天光 BFS 经豁口渗入巷道（skyLightAt>0、
+//   F3 sl 非零），观感即「有光但无火把」。修复面 = 火把覆盖不足（原柱顶 55%×2 侧 + 斜坡段零火把 → 局部
+//   长暗段），非火把不落块（P-t1001 ⑦ 池化火把 ≥15 已证落块）。t1011 跨中壁挂补光后密度窗由 P-t1011 钉。
 //   placeDungeons 之后、fillWater 之前（独立于海平面；fillWater 仅填地表低洼 → 地下矿井不被灌水）。
 void World::placeMineshaft()
 {
@@ -7377,6 +7385,38 @@ void World::placeMineshaft()
                                 }
                             }
                         }
+                        // t1011 壁挂火把（跨中补光，宏观可见照明口径）：跨中步（step ≡ 2 mod kSupportInterval）
+                        //   两侧巷壁贴面格顶层（curY+kTunnelH，与柱顶火把同高带）各挂一只壁火把（成对壁灯，
+                        //   斜坡段同样布设、curY 随地板降 → 斜坡段不再零火把全黑）。主形态 = 墙插（TorchAttach
+                        //   墙插编码，mesher 倾柄位姿 / finishMiningAt 附着格定位同运行期墙火把）；**豁口回退**
+                        //   = 巷壁被既有洞穴掏空（carveCaves 同位重叠 → w=±2 顶层空气，墙插守卫拒绝）时改落
+                        //   贴面格地板火把（TorchFloor，支撑 = 地板 floorBlock，洞穴合并段照明不缺位 —— 用户
+                        //   「见光无火把」巷道恰多为此形态）。仅空气格才落（不出浮空火把/不覆轨网）。先于本步
+                        //   蛛网顶角判定 → 同格火把优先（蛛网仅空气格）。密度账：柱顶 55%×2 侧 + 跨中成对
+                        //   必挂（墙插或地板回退）→ 相邻火把步距 ≤ 2 格，任何走廊位置火把本体或其 14 级光斑
+                        //   可见（P-t1011 密度窗钉）。
+                        if (step % kSupportInterval == 2) {
+                            const int wy = curY + kTunnelH; // 顶层（柱顶同高带）
+                            for (int w = -1; w <= 1; w += 2) {
+                                const int px = ax + w * (-dz), pz = az + w * dx;  // 巷壁贴面格（w=±1）
+                                const int wx = px + w * (-dz), wz = pz + w * dx;  // 支撑壁（w=±2）
+                                if (wy >= m_height) continue;
+                                if (m_chunks.blockAt(px, wy, pz) != BlockRegistry::Air) continue;
+                                if (m_chunks.blockAt(wx, wy, wz) != BlockRegistry::Air) { // 主形态：墙插
+                                    quint8 attach = BlockRegistry::TorchFloor; // 兜底（dx/dz 单位轴 → 必命中下四分支）
+                                    if (w * (-dz) == -1)      attach = BlockRegistry::TorchOnNX;
+                                    else if (w * (-dz) == 1)  attach = BlockRegistry::TorchOnPX;
+                                    else if (w * dx == -1)    attach = BlockRegistry::TorchOnNZ;
+                                    else                      attach = BlockRegistry::TorchOnPZ;
+                                    m_chunks.setBlock(px, wy, pz, BlockRegistry::Torch, attach);
+                                } else if (curY >= 0 // 豁口回退：壁空（洞穴合并段）→ 贴面格地板火把
+                                           && curY < m_height
+                                           && m_chunks.blockAt(px, curY, pz) != BlockRegistry::Air
+                                           && m_chunks.blockAt(px, curY + 1, pz) == BlockRegistry::Air) {
+                                    m_chunks.setBlock(px, curY + 1, pz, BlockRegistry::Torch, 0);
+                                }
+                            }
+                        }
                         // 残缺轨（中线 hash 保留率 kRailPct → 考据「铁轨残缺不连续」；仅空气格放；
                         //   斜坡段随地板降层）。
                         {
@@ -7440,6 +7480,26 @@ void World::placeMineshaft()
                     }
                 for (int ci = 0; ci < corridors; ++ci) // 放射巷道（洗牌向 → 各向至多一条）
                     pieceCorridor(ci, dirs[ci]);
+                // t1011 起点厅角壁火把 ×4（入口厅宏观可见照明收口 —— 用户入井即见光亮；角格远离四轴
+                //   出口嘴 → P-t1001 出口探针不受扰）。主形态 = 墙插（±X 外壁，TorchAttach 墙插 state）；
+                //   壁被洞穴掏空 → 贴面格地板火把回退（同巷道壁挂口径，不出浮空火把）。
+                for (int sx2 = -1; sx2 <= 1; sx2 += 2)
+                    for (int sz2 = -1; sz2 <= 1; sz2 += 2) {
+                        const int px = (sx2 < 0) ? cx - kRoomHalf : cx + kRoomHalf - 1;
+                        const int pz = (sz2 < 0) ? cz - kRoomHalf : cz + kRoomHalf - 1;
+                        const int py = sy + 2; // 头层（环带 sy+4 之下 → 拱带 36 格不受扰）
+                        if (py >= m_height) continue;
+                        if (m_chunks.blockAt(px, py, pz) != BlockRegistry::Air) continue;
+                        if (m_chunks.blockAt(px + sx2, py, pz) != BlockRegistry::Air) {
+                            putStruct(px, py, pz, BlockRegistry::Torch,
+                                      (sx2 < 0) ? quint8(BlockRegistry::TorchOnNX)
+                                                : quint8(BlockRegistry::TorchOnPX));
+                        } else if (sy >= 0 && sy < m_height
+                                   && m_chunks.blockAt(px, sy, pz) != BlockRegistry::Air
+                                   && m_chunks.blockAt(px, sy + 1, pz) == BlockRegistry::Air) {
+                            putStruct(px, sy + 1, pz, BlockRegistry::Torch, BlockRegistry::TorchFloor);
+                        }
+                    }
             }
 
             // t565 ④ 铁轨连接统一重算（直 / 拐角 / 十字形态由邻轨互连自动得出；与运行期 checkRailOnEdit
