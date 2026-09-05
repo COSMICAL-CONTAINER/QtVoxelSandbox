@@ -1481,8 +1481,15 @@ int   BlockRegistry::minToolTier(quint8 blockId) { return def(blockId).minToolTi
 bool  BlockRegistry::requiresTool(quint8 blockId){ return def(blockId).requiresTool; } // t265 掉落是否需匹配工具
 
 // 审查修 R1：火把 / 红石火把附着支撑判定（三方共用单一权威，语义见 .h 注释）。
+// t1017 仙人掌不作附着支撑（用户报「火把能插在仙人掌上」；机制等价 MC 1.0 仙人掌非可附着面）：
+//   本谓词是附着族支撑的单一权威 —— 火把 / 红石火把放置预检（playercontroller placeBlock）、火把
+//   玩家破块保留复检（dropUnsupportedTorchesAround）、World 静默清格复检（recheckAttachmentsAfterClear）
+//   三处同源读它。在此一处排除 Cactus（ShapeFull 且 isCollidable 双真 → 旧公式恒放行 = 缺口根因），
+//   三消费端同口径收紧：放置拒 + 旧存档残留在仙人掌上的火把 / 红石火把在邻域复检时按失撑脱落（掉落
+//   链既有语义，无新路径）。石头等常规支撑面零影响（对照面）。
 bool BlockRegistry::torchSupportBlock(quint8 blockId, quint8 state)
 {
+    if (blockId == Cactus) return false; // t1017：仙人掌不作任何附着块支撑（六面含顶；放置 / 复检同源）
     return isCollidable(blockId, state) || isFullCube(blockId);
 }
 int   BlockRegistry::dropId(quint8 blockId)      { return def(blockId).dropId; }

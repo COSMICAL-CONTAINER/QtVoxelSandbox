@@ -38157,6 +38157,261 @@ Item {
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
     }
 
+    // ── P-t1017 仙人掌不可附着探针（R19.20 t1017；机制等价 MC 1.0 仙人掌非可附着面）──
+    //    (a) 谓词腿：torchSupportBlock 单一权威对 Cactus 翻假（Stone/Sand 常规支撑对照不回退）；
+    //    (b) 行为腿（P-t945 真瞄准链）：2 高仙人掌柱 五个可瞄面（顶 + 四侧）× {火把, 红石火把,
+    //        石按钮} 全 15 组合全拒（目标格恒 Air、柱无恙；底面目标格被沙/下柱占据 = 占位拒绝不可瞄，
+    //        天花板面语义由 (c) 腿钉）；石方块同 15 组合全准（放置成功）——附着族同口径对照；
+    //    (c) 悬空石底面（天花板语义对照）：火把 / 红石火把 / 石按钮贴底面全拒 = 既有 t738/机关「底面
+    //        不挂装」共享规则，非仙人掌特化（钉「底面拒」不随本批漂移）；
+    //    (d) 源码钉：torchSupportBlock Cactus 排除行 + 机关 / 木梯预检 Cactus 拒绝（阴性轮敏感）。
+    {
+        const auto [x0T1017, z0T1017] = nextSlot();
+        QQuickWindow probeWinT1017;
+        WorldClock clockT1017;
+        EntityManager entsT1017; // 空管理器（放置链不依赖）
+        Hotbar hbT1017;
+        PlayerController pcT1017;
+        pcT1017.setWorld(&w);
+        pcT1017.setWorldClock(&clockT1017);
+        pcT1017.setEntityManager(&entsT1017);
+        pcT1017.setHotbar(&hbT1017);
+        pcT1017.setParentItem(probeWinT1017.contentItem());
+        // 瞄准帮手（P-t945 aimP945 同式）：release+grab 重居中 → loadSavedState → tick 刷射线，返命中格。
+        const auto aimT1017 = [&](float feetX, float feetY, float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = feetX, ey = feetY + 1.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT1017.release();
+            pcT1017.grab();
+            pcT1017.loadSavedState(feetX, feetY, feetZ, yaw, pitch, 1 /* Creative（Mode 枚举 0=Spectator/1=Creative/2=Survival）：放置不消耗；0 会落观察者 canPlace=false → 全部放置被观察者门拒 = 仙人掌腿假绿 */);
+            pcT1017.tick(); // updateRaycast 刷新命中（t889 先例）
+            return pcT1017.hitBlock();
+        };
+        const auto pumpMsT1017 = [](int ms) { // 放置 200ms CD 间隔（t128）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        bool okA = false, okB = false, okC = false, okD = false;
+        // (a) 谓词腿。
+        okA = !BlockRegistry::torchSupportBlock(quint8(BR::Cactus), 0)
+            && BlockRegistry::torchSupportBlock(quint8(BR::Stone), 0)
+            && BlockRegistry::torchSupportBlock(quint8(BR::Sand), 0);
+        // (b) 行为腿：仙人掌柱（沙基 2 高）+ 顶面立足柱（**-X 侧旁柱**，不占目标格；首跑实锤：柱在
+        //     +X 侧挡住 +X 侧面瞄准线〔ray 中柱段 hit (x+2,kRigY+1)〕→ 移 -X 侧，+X/-Z 侧瞄线净空）。
+        {
+            const auto [xc, zc] = nextSlot();
+            for (int dx = -2; dx <= 3; ++dx)
+                for (int dz = -3; dz <= 2; ++dz) {
+                    for (int dy = -1; dy <= 4; ++dy) w.setBlock(xc + dx, kRigY + dy, zc + dz, BR::Air, 0);
+                    w.setBlock(xc + dx, kRigY - 1, zc + dz, BR::Stone, 0);
+                }
+            w.setBlock(xc, kRigY - 1, zc, BR::Sand, 0);       // 仙人掌合法沙支撑
+            w.setBlock(xc, kRigY, zc, BR::Cactus, 0);          // 下柱
+            w.setBlock(xc, kRigY + 1, zc, BR::Cactus, 0);      // 上柱
+            w.setBlock(xc - 2, kRigY, zc, BR::Stone, 0);       // 立足柱（-X 侧；顶面瞄准自柱顶直瞄下）
+            w.setBlock(xc - 2, kRigY + 1, zc, BR::Stone, 0);
+            w.setBlock(xc - 2, kRigY + 2, zc, BR::Stone, 0);
+            // t1017（探针加宽）：五个可瞄面（顶 + 四侧）× 三附着 kind 全组合 —— 仙人掌 15 组合全拒
+            //     （目标格恒 Air、柱无恙），石头 15 组合全准（放置成功）。仙人掌**底面**目标格被沙 /
+            //     下柱占据 = 占位拒绝（不可瞄，射线先中沙 / 下柱），天花板面语义由 (c) 腿钉住 ——
+            //     六面口径下可瞄五面全组合 + 底面两腿即完整覆盖。
+            const int kindsT1017[3] = { BR::Torch, BR::RedstoneTorch, BR::StoneButton };
+            const float feetF[5][3] = { // 每面立足脚位（feet）
+                { float(xc) - 1.5f, float(kRigY + 3), float(zc) + 0.5f }, // 顶面：-X 立足柱顶直瞄下
+                { float(xc) + 3.5f, float(kRigY),     float(zc) + 0.5f }, // +X 面
+                { float(xc) - 1.5f, float(kRigY + 3), float(zc) + 0.5f }, // -X 面（立足柱顶斜瞄下）
+                { float(xc) + 0.5f, float(kRigY),     float(zc) + 2.5f }, // +Z 面
+                { float(xc) + 0.5f, float(kRigY),     float(zc) - 2.5f }, // -Z 面
+            };
+            const float aimF[5][3] = { // 每面瞄点（细柱面内缩 0.05 / 顶面内缩 0.1 防边界 ε）
+                { float(xc) + 0.5f,  float(kRigY) + 1.9f, float(zc) + 0.5f },
+                { float(xc) + 0.85f, float(kRigY) + 0.5f, float(zc) + 0.5f },
+                { float(xc) + 0.15f, float(kRigY) + 0.5f, float(zc) + 0.5f },
+                { float(xc) + 0.5f,  float(kRigY) + 0.5f, float(zc) + 0.85f },
+                { float(xc) + 0.5f,  float(kRigY) + 0.5f, float(zc) + 0.15f },
+            };
+            const int hitExpF[5][3] = { // 每面期望命中格（hitBlock = 被瞄的柱格）
+                { xc, kRigY + 1, zc }, // 上柱（顶面瞄上柱）
+                { xc, kRigY,     zc },
+                { xc, kRigY,     zc },
+                { xc, kRigY,     zc },
+                { xc, kRigY,     zc },
+            };
+            const int tgtF[5][3] = { // 每面目标格（预期放置位；仙人掌上全拒 → 恒 Air）
+                { xc, kRigY + 2, zc },
+                { xc + 1, kRigY, zc },
+                { xc - 1, kRigY, zc },
+                { xc, kRigY, zc + 1 },
+                { xc, kRigY, zc - 1 },
+            };
+            okB = w.blockAt(xc, kRigY, zc) == BR::Cactus && w.blockAt(xc, kRigY + 1, zc) == BR::Cactus;
+            const auto diagB = [&](int k, const QVector3D &hit, const QVector3D &tgt, bool pass) {
+                QVector3D where(0, 0, 0);
+                for (int ddx = -1; ddx <= 1; ++ddx)
+                    for (int ddy = -1; ddy <= 1; ++ddy)
+                        for (int ddz = -1; ddz <= 1; ++ddz)
+                            if (w.blockAt(int(hit.x()) + ddx, int(hit.y()) + ddy, int(hit.z()) + ddz)
+                                == quint8(kindsT1017[k]))
+                                where = QVector3D(int(hit.x()) + ddx, int(hit.y()) + ddy, int(hit.z()) + ddz);
+                qInfo().noquote() << "  [t1017 diag b] kind" << k << "pass" << pass << "hit" << hit
+                                  << "nrm" << pcT1017.hitNormal() << "tgt" << tgt
+                                  << "cell" << int(w.blockAt(tgt.x(), tgt.y(), tgt.z()))
+                                  << "hitCellBlock" << int(w.blockAt(hit.x(), hit.y(), hit.z()))
+                                  << "kindNearHit" << where;
+            };
+            for (int f = 0; f < 5 && okB; ++f) {
+                for (int k = 0; k < 3 && okB; ++k) {
+                    pcT1017.setSelectedBlock(kindsT1017[k]);
+                    const QVector3D hit = aimT1017(feetF[f][0], feetF[f][1], feetF[f][2],
+                                                   aimF[f][0], aimF[f][1], aimF[f][2]);
+                    const QVector3D hitExp(hitExpF[f][0], hitExpF[f][1], hitExpF[f][2]);
+                    const QVector3D tgt(tgtF[f][0], tgtF[f][1], tgtF[f][2]);
+                    const bool aimed = hit == hitExp; // 射线确实命中仙人掌目标面（防「瞄空即拒」假阳性）
+                    pcT1017.placeBlock();
+                    pumpMsT1017(260);
+                    const bool rejected = w.blockAt(tgtF[f][0], tgtF[f][1], tgtF[f][2]) == BR::Air;
+                    if (!aimed || !rejected)
+                        diagB(k, hit, tgt, aimed && rejected);
+                    okB = okB && aimed && rejected;
+                }
+            }
+            okB = okB && w.blockAt(xc, kRigY, zc) == BR::Cactus && w.blockAt(xc, kRigY + 1, zc) == BR::Cactus;
+            // 石方块对照：同五面同三 kind 全准（top / ±X / ±Z 放置成功）——附着族同口径对照。
+            const auto [xs, zs] = nextSlot();
+            for (int dx = -2; dx <= 3; ++dx)
+                for (int dz = -3; dz <= 2; ++dz) {
+                    for (int dy = -1; dy <= 4; ++dy) w.setBlock(xs + dx, kRigY + dy, zs + dz, BR::Air, 0);
+                    w.setBlock(xs + dx, kRigY - 1, zs + dz, BR::Stone, 0);
+                }
+            w.setBlock(xs, kRigY, zs, BR::Stone, 0);
+            w.setBlock(xs - 2, kRigY, zs, BR::Stone, 0);      // 立足柱（-X 侧，同仙人掌 rig 布局）
+            w.setBlock(xs - 2, kRigY + 1, zs, BR::Stone, 0);
+            w.setBlock(xs - 2, kRigY + 2, zs, BR::Stone, 0);
+            const float feetS[5][3] = {
+                { float(xs) - 1.5f, float(kRigY + 3), float(zs) + 0.5f }, // 顶面
+                { float(xs) + 3.5f, float(kRigY),     float(zs) + 0.5f }, // +X 面
+                { float(xs) - 1.5f, float(kRigY + 3), float(zs) + 0.5f }, // -X 面
+                { float(xs) + 0.5f, float(kRigY),     float(zs) + 2.5f }, // +Z 面
+                { float(xs) + 0.5f, float(kRigY),     float(zs) - 2.5f }, // -Z 面
+            };
+            const float aimS[5][3] = { // 整立方面内缩 0.05（顶面 0.1）
+                { float(xs) + 0.5f,  float(kRigY) + 0.9f, float(zs) + 0.5f },
+                { float(xs) + 0.95f, float(kRigY) + 0.5f, float(zs) + 0.5f },
+                { float(xs) + 0.05f, float(kRigY) + 0.5f, float(zs) + 0.5f },
+                { float(xs) + 0.5f,  float(kRigY) + 0.5f, float(zs) + 0.95f },
+                { float(xs) + 0.5f,  float(kRigY) + 0.5f, float(zs) + 0.05f },
+            };
+            const int tgtS[5][3] = {
+                { xs, kRigY + 1, zs },  // 顶面
+                { xs + 1, kRigY, zs },  // +X 面
+                { xs - 1, kRigY, zs },  // -X 面
+                { xs, kRigY, zs + 1 },  // +Z 面
+                { xs, kRigY, zs - 1 },  // -Z 面
+            };
+            for (int f = 0; f < 5 && okB; ++f) {
+                for (int k = 0; k < 3 && okB; ++k) {
+                    pcT1017.setSelectedBlock(kindsT1017[k]);
+                    const QVector3D hit = aimT1017(feetS[f][0], feetS[f][1], feetS[f][2],
+                                                   aimS[f][0], aimS[f][1], aimS[f][2]);
+                    const QVector3D hitExp(xs, kRigY, zs); // 石整立方：五面命中格同为石格
+                    const QVector3D tgt(tgtS[f][0], tgtS[f][1], tgtS[f][2]);
+                    const bool aimed = hit == hitExp;
+                    pcT1017.placeBlock();
+                    pumpMsT1017(260);
+                    const bool placed = w.blockAt(tgtS[f][0], tgtS[f][1], tgtS[f][2]) == quint8(kindsT1017[k]);
+                    if (!aimed || !placed) {
+                        QVector3D where(0, 0, 0);
+                        for (int ddx = -1; ddx <= 1; ++ddx)
+                            for (int ddy = -1; ddy <= 1; ++ddy)
+                                for (int ddz = -1; ddz <= 1; ++ddz)
+                                    if (w.blockAt(xs + ddx, kRigY + ddy, zs + ddz) == quint8(kindsT1017[k]))
+                                        where = QVector3D(xs + ddx, kRigY + ddy, zs + ddz);
+                        qInfo().noquote() << "  [t1017 diag b-stone] face" << f << "kind" << k
+                                          << "aimed" << aimed << "hit" << hit
+                                          << "nrm" << pcT1017.hitNormal() << "tgt" << tgt << "cell"
+                                          << int(w.blockAt(tgtS[f][0], tgtS[f][1], tgtS[f][2]))
+                                          << "hitCellBlock" << int(w.blockAt(xs, kRigY, zs))
+                                          << "kindNearHit" << where;
+                    }
+                    okB = okB && aimed && placed;
+                    // 同面三 kind 共用目标格：验完即清，下一组合从净空格重跑（防占位拒绝假阴性）。
+                    w.setBlock(tgtS[f][0], tgtS[f][1], tgtS[f][2], BR::Air, 0);
+                }
+            }
+        }
+        // (c) 悬空石底面（天花板共享规则对照）：火把 / 红石火把 / 石按钮贴底面全拒（既有语义，非本批新增）。
+        {
+            const auto [xf, zf] = nextSlot();
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    for (int dy = -2; dy <= 3; ++dy) w.setBlock(xf + dx, kRigY + dy, zf + dz, BR::Air, 0);
+                    w.setBlock(xf + dx, kRigY - 2, zf + dz, BR::Stone, 0);
+                }
+            w.setBlock(xf, kRigY + 2, zf, BR::Stone, 0); // 悬空石（石无支撑语义可浮空）
+            const int kindsT1017b[3] = { BR::Torch, BR::RedstoneTorch, BR::StoneButton };
+            okC = true;
+            for (int k = 0; k < 3 && okC; ++k) {
+                pcT1017.setSelectedBlock(kindsT1017b[k]);
+                const QVector3D hit = aimT1017(float(xf) + 0.5f, float(kRigY - 2), float(zf) + 0.5f,
+                                               float(xf) + 0.5f, float(kRigY + 2), float(zf) + 0.5f);
+                const QVector3D hitExp(xf, kRigY + 2, zf);       // 悬空石格（底面被瞄）
+                const QVector3D tgt(xf, kRigY + 1, zf);          // 底面 → 目标 = 悬空石下方格
+                const bool aimed = hit == hitExp;
+                pcT1017.placeBlock();
+                pumpMsT1017(260);
+                const bool rejected = w.blockAt(xf, kRigY + 1, zf) == BR::Air;
+                if (!aimed || !rejected)
+                    qInfo().noquote() << "  [t1017 diag c] kind" << k << "aimed" << aimed << "hit" << hit
+                                      << "hitExp" << hitExp << "tgt" << tgt << "cell"
+                                      << int(w.blockAt(xf, kRigY + 1, zf));
+                okC = okC && aimed && rejected;
+            }
+        }
+        // (d) 源码钉：三处 Cactus 拒绝行（torchSupportBlock 单一权威 + 机关预检 + 木梯预检）。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile brf(root + QStringLiteral("/src/Core/blockregistry.cpp"));
+            QFile pcf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
+            const QString brCpp = brf.open(QIODevice::ReadOnly) ? QString::fromUtf8(brf.readAll()) : QString();
+            const QString pcCpp = pcf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pcf.readAll()) : QString();
+            okD = brCpp.contains(QStringLiteral("if (blockId == Cactus) return false; // t1017"))
+                && pcCpp.contains(QStringLiteral("mechSup == BlockRegistry::Cactus"))
+                && pcCpp.contains(QStringLiteral("hitBlock == BlockRegistry::Cactus"));
+        }
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        if (!okC) ++totalFail;
+        if (!okD) ++totalFail;
+        qInfo().noquote() << (okA && okB && okC && okD ? "PASS" : "FAIL")
+                          << "| t1017 cactus-rejects-attachables rig: the single-authority"
+                             "torchSupportBlock predicate now returns false for Cactus (stone/sand"
+                             "controls keep supporting), and through the REAL aim->placeBlock"
+                             "chain all three attachable kinds (torch / redstone torch / stone"
+                             "button) are rejected on a 2-high cactus column across ALL FIVE"
+                             "aimable faces (top + four sides; the bottom face's target cell is"
+                             "buried by sand/the lower column so placement there is already"
+                             "occupancy-rejected, and the ceiling rule is pinned by the"
+                             "floating-stone leg) - 15/15 combinations keep their target cells"
+                             "Air with the column intact, while the SAME 15 operations on a"
+                             "stone block all place correctly - plus the"
+                             "floating-stone bottom-face leg pins that ceiling rejection is the"
+                             "pre-existing shared rule, not cactus-specific; source pins lock"
+                             "the cactus rejection in torchSupportBlock and the mech/ladder"
+                             "precheck guards (negative-round sensitive: reverting the cactus"
+                             "exclusion lets torches attach to the column and the predicate leg"
+                             "reads red)"
+                          << (okA && okB && okC && okD
+                                  ? QString()
+                                  : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
+                                        .arg(okA).arg(okB).arg(okC).arg(okD));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
