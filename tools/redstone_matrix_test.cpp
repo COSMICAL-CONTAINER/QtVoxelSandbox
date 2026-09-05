@@ -66,6 +66,7 @@
 #include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）；t858 feeder 探针共用
 #include "xporbinstancing.h"      // t858 经验球 instancing 试点探针（feeder 实例表内容级断言）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
+#include "cheststore.h"           // t1013 箱子矿车内容键存储（转正 / 回生 / 掉落链断言源）
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
                                    //   PLAN §2 低层永不 include 高层；互钉只能落在本测试 TU，它合法 include 全栈）
@@ -36230,6 +36231,355 @@ Item {
                              "stairs + webs, deterministic re-gen, source pins, temples" << templesTotal
                           << "worlds" << worldsChecked << "seeds-miss" << seedMiss
                           << "ravine-skipped" << ravineSkipped;
+    }
+
+    // ── P-t1013 箱子矿车探针（R19.20 t1013 转正偏差 2；机制等价 MC 1.0 minecart with chest）──
+    //    rig：共享世界轨线 + worldgen 标记箱 + PlayerController/MinecartManager/ChestStore 真注入
+    //    （convertMineshaftChests 真 Q_INVOKABLE 转正链，非复刻）。六腿：
+    //    (a) 转正链：标记箱（Chest+ChestStateMineshaftFlag）→ convertMineshaftChests 路 (a) 摘块 +
+    //        registerCart 内容键 + spawnChestCart 四邻轨格落车（轨面全姿态）；clearMineshaftChest 静默性
+    //        （blockBroken 计数不增 —— 走 setBlock 会发 blockBroken(22) 触发掉内容/清键，静默是承重的）。
+    //    (b) 交互：tryMount 箱车拒载（不可骑）+ 普通车同射线可骑对照 + chestKeyAt 内容键契约（右键
+    //        开箱分支 findCartHit→chestKeyAt→chestOpened(键) 的 C++ 面）。
+    //    (c) 掉落链：内容槽预填（含附魔 / 名字 / 耐久元数据）→ 生存 3 击末击毁 → chestCartBroken 恰一次
+    //        携正确键 + cartBroken 0 次（防车物品双掉）；创造瞬破同发（t767 有意偏差：箱车全模式掉落，
+    //        静默清键 = 数据丢失）；虚空卷没不发（键保留 → 回生面）。
+    //    (d) 移动：默认静止（speed 0）→ 玩家 pushEmptyCart 沿轨推走 ≥1 格（可被推动；动力轨激活走
+    //        tickPushedCarts 全车种既有物理，P12 族已钉，不重测）。
+    //    (e) 存档回生：registerCart「键 + 全空条目」经 allChests（"cart":true，全空豁免跳过）→ loadAll
+    //        round-trip 保真 → convertMineshaftChests 路 (b) 按键回生实体；populateMineshaftLoot 首开
+    //        gate（键+空条目 roll / 已填 no-op / 非矿车键条目 no-op）；挖毁 clearChest 清键 → 不回生。
+    //    (f) 源码钉：变体字段 / chestCartBroken 信号 / tryMount 拒载 / convertMineshaftChests /
+    //        Main.qml delegate 箱体 / onChestCartBroken / enterWorld 接线（阴性轮敏感）。
+    {
+        const auto [x0T1013, z0T1013] = nextSlot();
+        bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
+        // (a) 轨线 4 格 + 标记箱立 (x0+1, z0+1)（键格；4 邻含轨格 (x0+1, z0) → 转正落车该轨上）。
+        for (int i = 0; i < 4; ++i) w.setBlock(x0T1013 + i, kRigY, z0T1013, BR::Rail, 0);
+        const int keyX = x0T1013 + 1, keyY = kRigY, keyZ = z0T1013 + 1;
+        w.setBlock(keyX, keyY, keyZ, BR::Chest, BR::ChestStateMineshaftFlag);
+        tickN(w, 2);
+        {
+            ChestStore csT1013;
+            MinecartManager cartsT1013;
+            PlayerController pcT1013;
+            pcT1013.setWorld(&w);
+            pcT1013.setMinecartManager(&cartsT1013);
+            pcT1013.setChestStore(&csT1013);
+            int brokenPlain = 0, brokenChest = 0;
+            int chestKeyArgX = -1, chestKeyArgY = -1, chestKeyArgZ = -1;
+            int dropArgX = -1, dropArgY = -1, dropArgZ = -1;
+            const QMetaObject::Connection connPlainT1013 =
+                QObject::connect(&cartsT1013, &MinecartManager::cartBroken, &w, [&](int, int, int) { ++brokenPlain; });
+            const QMetaObject::Connection connChestT1013 =
+                QObject::connect(&cartsT1013, &MinecartManager::chestCartBroken, &w,
+                                 [&](int dx, int dy, int dz, int kx, int ky, int kz) {
+                                     ++brokenChest;
+                                     dropArgX = dx; dropArgY = dy; dropArgZ = dz;
+                                     chestKeyArgX = kx; chestKeyArgY = ky; chestKeyArgZ = kz;
+                                 });
+            // (a) 静默性 + 转正三合一：clearMineshaftChest 不发 blockBroken（worldChanged 除外）。
+            int blockBrokenCount = 0;
+            const QMetaObject::Connection connBBT1013 =
+                QObject::connect(&w, &World::blockBroken, &w, [&](int, int, int) { ++blockBrokenCount; });
+            const int bbBefore = blockBrokenCount;
+            okA = w.isMineshaftChest(keyX, keyY, keyZ);
+            const int preLiveT1013 = cartsT1013.liveCount(); // 共享世界 worldgen 标记（若有）也在本轮转正
+            pcT1013.convertMineshaftChests();
+            const float rideDoc = 0.45f; // kCartRideH 文档镜像值（t734 贴轨面；P11 同款）
+            const int liveAfterConvertT1013 = cartsT1013.liveCount();
+            // 本 rig 的车按射线寻址（共享世界可能另有 worldgen 矿井标记被一并转正 → 槽位不可作身份）。
+            const QVector3D rigAboveT1013(float(keyX) + 0.5f, float(keyY) + 2.0f, float(keyZ - 1) + 0.5f);
+            const int mineIdxT1013 = cartsT1013.findCartHit(rigAboveT1013, QVector3D(0, -1, 0), 4.0f, nullptr);
+            okA = okA
+                && w.blockAt(keyX, keyY, keyZ) == BR::Air          // 标记箱摘除
+                && blockBrokenCount == bbBefore                    // 静默（不发 blockBroken）
+                && csT1013.isCartCell(keyX, keyY, keyZ)            // 内容键登记
+                && liveAfterConvertT1013 > preLiveT1013
+                && mineIdxT1013 >= 0
+                && cartsT1013.chestAt(mineIdxT1013)                // 变体标志
+                && std::fabs(cartsT1013.posAt(mineIdxT1013).x() - (keyX + 0.5f)) < 0.01f
+                && std::fabs(cartsT1013.posAt(mineIdxT1013).z() - (keyZ - 1 + 0.5f)) < 0.01f // 落四邻轨格 (keyX, keyZ-1)
+                && std::fabs(cartsT1013.posAt(mineIdxT1013).y() - (keyY + rideDoc)) < 0.01f; // 轨面全姿态
+            int kkx = -1, kky = -1, kkz = -1;
+            okA = okA && cartsT1013.chestKeyAt(mineIdxT1013, kkx, kky, kkz)
+                && kkx == keyX && kky == keyY && kkz == keyZ;      // 内容键 = 生成格（非落车格）
+            if (!okA)
+                qInfo().noquote() << "  [t1013 diag a]" << "block=" << w.blockAt(keyX, keyY, keyZ)
+                    << "bb=" << blockBrokenCount << "/" << bbBefore
+                    << "cartCell=" << csT1013.isCartCell(keyX, keyY, keyZ)
+                    << "pre=" << preLiveT1013 << "post=" << liveAfterConvertT1013
+                    << "mineIdx=" << mineIdxT1013
+                    << "pos=" << (mineIdxT1013 >= 0 ? cartsT1013.posAt(mineIdxT1013) : QVector3D())
+                    << "keys=" << kkx << kky << kkz;
+            // (b) 交互：箱车拒载（右键开箱分支的前置契约 —— findCartHit 命中 + chestKeyAt 供键）。
+            {
+                const QVector3D above(float(keyX) + 0.5f, float(keyY) + 2.0f, float(keyZ - 1) + 0.5f);
+                float hitDist = 0.0f;
+                const int hitIdx = cartsT1013.findCartHit(above, QVector3D(0, -1, 0), 4.0f, &hitDist);
+                int tx = -1, ty = -1, tz = -1;
+                okB = hitIdx >= 0 && cartsT1013.chestAt(hitIdx)
+                    && cartsT1013.chestKeyAt(hitIdx, tx, ty, tz) && tx == keyX && ty == keyY && tz == keyZ
+                    && !cartsT1013.tryMount(above, QVector3D(0, -1, 0), 4.0f) // 不可骑
+                    && cartsT1013.ridingIndex() < 0;
+            }
+            // 对照：同射线形态的普通车可骑（拒载是箱车特化，非射线/骑乘链回归）。
+            {
+                w.setBlock(x0T1013, kRigY, z0T1013 + 4, BR::Rail, 0);
+                MinecartManager plain;
+                plain.spawnCart(x0T1013, kRigY, z0T1013 + 4, &w);
+                const QVector3D above2(float(x0T1013) + 0.5f, float(kRigY) + 2.0f, float(z0T1013 + 4) + 0.5f);
+                okB = okB && plain.tryMount(above2, QVector3D(0, -1, 0), 4.0f) && plain.ridingIndex() == 0;
+                plain.clearAll();
+                w.setBlock(x0T1013, kRigY, z0T1013 + 4, BR::Air);
+            }
+            // (c) 掉落链：预填内容键 27 槽（槽 0 带元数据；槽 1 普通栈；其余空）→ 生存末击毁。
+            //   断言全部 rig 作用域（aliveAt 捕获槽位），不用全局 liveCount 算术 —— 共享世界 worldgen
+            //   标记箱同轮转正的 W 车数量随 seed 而定（可与 rig 车同柱/同轨），全局计数必踩假红。
+            csT1013.setSlot(keyX, keyY, keyZ, 0, 409, 1, {7, 0, 0, 0}, QStringLiteral("renamed"), 42);
+            csT1013.setSlot(keyX, keyY, keyZ, 1, 4, 5);
+            const auto findByKeyT1013 = [&cartsT1013](int kx, int ky, int kz) {
+                for (int i = 0; i < cartsT1013.count(); ++i) {
+                    int ax = -1, ay = -1, az = -1;
+                    if (cartsT1013.aliveAt(i) && cartsT1013.chestKeyAt(i, ax, ay, az)
+                        && ax == kx && ay == ky && az == kz)
+                        return i;
+                }
+                return -1;
+            };
+            int dbgLiveC[8] = {};
+            bool dbgH[3] = {};
+            bool okCSurvival = false, okCCreative = false, okCVoid = false;
+            int oursIdx2 = -1, voidIdx = -1;
+            bool cHit = false;
+            {
+                const QVector3D above(float(keyX) + 0.5f, float(keyY) + 2.0f, float(keyZ - 1) + 0.5f);
+                const QVector3D down(0, -1, 0);
+                const int oursIdx = cartsT1013.findCartHit(above, down, 4.0f, nullptr); // 本 rig 的车（(b) 已钉 key=生成格）
+                dbgLiveC[0] = cartsT1013.liveCount();
+                // 生存：kCartHitPoints=3 → 前 2 击扣血（不掉不毁），末击毁 + 发信号。
+                dbgH[0] = cartsT1013.hitCartFromRay(above, down, 4.0f, &w, false);
+                dbgLiveC[1] = cartsT1013.liveCount();
+                dbgH[1] = dbgH[0] && cartsT1013.hitCartFromRay(above, down, 4.0f, &w, false);
+                dbgLiveC[2] = cartsT1013.liveCount();
+                dbgH[2] = dbgH[1] && cartsT1013.hitCartFromRay(above, down, 4.0f, &w, false);
+                dbgLiveC[3] = cartsT1013.liveCount();
+                const bool hit = dbgH[0] && dbgH[1] && dbgH[2];
+                okCSurvival = hit && brokenChest == 1 && brokenPlain == 0 // 箱车信号恰一次；车物品信号 0（防双掉）
+                    && chestKeyArgX == keyX && chestKeyArgY == keyY && chestKeyArgZ == keyZ
+                    && oursIdx >= 0 && !cartsT1013.aliveAt(oursIdx);      // 本 rig 的车已毁（槽级断言）
+                // 呈层 handler 契约（信号时点内容仍可读 + 元数据保真 → 逐槽 spawnItem 后 clearChest）：
+                okCSurvival = okCSurvival && dropArgY >= 0
+                    && csT1013.slotIdAt(keyX, keyY, keyZ, 0) == 409
+                    && csT1013.slotDurabilityAt(keyX, keyY, keyZ, 0) == 42
+                    && csT1013.slotNameAt(keyX, keyY, keyZ, 0) == QStringLiteral("renamed")
+                    && csT1013.slotIdAt(keyX, keyY, keyZ, 1) == 4;
+                csT1013.clearChest(keyX, keyY, keyZ);
+                // 键摘除：rig 键不再寻址（世界 W 键可共存 —— 共享世界 worldgen 标记同轮转正登记，非本腿清场对象）。
+                okCSurvival = okCSurvival && !csT1013.isCartCell(keyX, keyY, keyZ)
+                    && csT1013.slotIdAt(keyX, keyY, keyZ, 0) == 0;
+                okC = okCSurvival;
+                // 创造瞬破（t767 偏差面）：箱车同发（全模式掉落，内容物不被静默清）。
+                csT1013.registerCart(keyX, keyY, keyZ);
+                cartsT1013.spawnChestCart(keyX, keyY, keyZ, &w, keyX, keyY, keyZ);
+                oursIdx2 = findByKeyT1013(keyX, keyY, keyZ);
+                dbgLiveC[4] = cartsT1013.liveCount();
+                brokenChest = 0;
+                cHit = cartsT1013.hitCartFromRay(above, down, 4.0f, &w, true);
+                dbgLiveC[5] = cartsT1013.liveCount();
+                okCCreative = cHit && brokenChest == 1
+                    && oursIdx2 >= 0 && !cartsT1013.aliveAt(oursIdx2) // 生+毁相抵（槽级）
+                    && chestKeyArgX == keyX && chestKeyArgY == keyY && chestKeyArgZ == keyZ;
+                okC = okC && okCCreative;
+                csT1013.clearChest(keyX, keyY, keyZ);
+                // 虚空卷没：不发信号 + 键保留（重进世界回生面）。
+                csT1013.registerCart(keyX, -1, keyZ);
+                cartsT1013.spawnChestCart(keyX, -1, keyZ, &w, keyX, -1, keyZ); // y<0 → 地面姿态 pos.y<0
+                voidIdx = findByKeyT1013(keyX, -1, keyZ);
+                dbgLiveC[6] = cartsT1013.liveCount();
+                brokenChest = 0;
+                cartsT1013.checkCartEnvironment(&w);
+                dbgLiveC[7] = cartsT1013.liveCount();
+                okCVoid = brokenChest == 0 && voidIdx >= 0 && !cartsT1013.aliveAt(voidIdx)
+                    && csT1013.isCartCell(keyX, -1, keyZ); // 键保留 → 回生不丢内容
+                okC = okC && okCVoid;
+                csT1013.clearChest(keyX, -1, keyZ);
+            }
+            if (!okC) {
+                QString dumpT1013;
+                for (int i = 0; i < cartsT1013.count(); ++i) {
+                    int ax = -1, ay = -1, az = -1;
+                    cartsT1013.chestKeyAt(i, ax, ay, az);
+                    dumpT1013 += QStringLiteral(" [%1]a%2(%3,%4,%5)k%6,%7,%8")
+                        .arg(i).arg(cartsT1013.aliveAt(i) ? 1 : 0)
+                        .arg(cartsT1013.posAt(i).x(), 0, 'f', 1).arg(cartsT1013.posAt(i).y(), 0, 'f', 1)
+                        .arg(cartsT1013.posAt(i).z(), 0, 'f', 1).arg(ax).arg(ay).arg(az);
+                }
+                qInfo().noquote() << "  [t1013 diag c]" << "h=" << dbgH[0] << dbgH[1] << dbgH[2]
+                    << "live=" << dbgLiveC[0] << dbgLiveC[1] << dbgLiveC[2] << dbgLiveC[3]
+                    << dbgLiveC[4] << dbgLiveC[5] << dbgLiveC[6] << dbgLiveC[7]
+                    << "survival=" << okCSurvival << "creative=" << okCCreative << "cHit=" << cHit
+                    << "ours2=" << oursIdx2 << "void=" << okCVoid << "voidIdx=" << voidIdx
+                    << "bc=" << brokenChest << "bp=" << brokenPlain
+                    << "key=" << chestKeyArgX << chestKeyArgY << chestKeyArgZ
+                    << "drop=" << dropArgX << dropArgY << dropArgZ
+                    << "s0=" << csT1013.slotIdAt(keyX, keyY, keyZ, 0)
+                    << "s1=" << csT1013.slotIdAt(keyX, keyY, keyZ, 1) << "carts:" << dumpT1013;
+            }
+            // (d) 移动：默认静止 → 玩家沿轨推动 ≥1 格（轨东段留空 → 推 +X）。
+            csT1013.registerCart(keyX, keyY, keyZ);
+            cartsT1013.spawnChestCart(keyX, keyY, keyZ, &w, keyX, keyY, keyZ); // 落 (keyX, keyZ-1) 轨格
+            {
+                const int pushIdx = cartsT1013.findCartHit(rigAboveT1013, QVector3D(0, -1, 0), 4.0f, nullptr);
+                const float startX = cartsT1013.posAt(pushIdx).x();
+                QVector3D playerFeet(float(keyX) + 0.5f, float(keyY), float(keyZ - 1) + 0.5f);
+                for (int t = 0; t < 40; ++t) {
+                    cartsT1013.pushEmptyCart(&w, playerFeet, 1.0f, 0.0f);
+                    cartsT1013.tickPushedCarts(0.016, &w);
+                    playerFeet = QVector3D(cartsT1013.posAt(pushIdx).x(), float(keyY), cartsT1013.posAt(pushIdx).z());
+                }
+                okD = pushIdx >= 0
+                    && std::fabs(cartsT1013.posAt(pushIdx).y() - (keyY + rideDoc)) < 0.01f // 沿轨不脱
+                    && (cartsT1013.posAt(pushIdx).x() - startX) > 1.0f;
+                cartsT1013.clearAll(); // (e) 前全清（含共享世界的 worldgen 转正车）→ 回生断言回到绝对计数
+            }
+            // (e) 存档回生：键 + 全空条目 → allChests "cart" 标记（全空豁免）→ loadAll round-trip →
+            //     convert 路 (b) 按键回生；populate 首开 gate 三态。
+            csT1013.registerCart(keyX, keyY, keyZ); // 键 + 全空条目（未开箱回生标记）
+            const QVariantList savedT1013 = csT1013.allChests();
+            bool cartSaved = false;
+            for (const QVariant &v : savedT1013) {
+                const QVariantMap cm = v.toMap();
+                if (cm.value(QStringLiteral("x")).toInt() == keyX
+                    && cm.value(QStringLiteral("y")).toInt() == keyY
+                    && cm.value(QStringLiteral("z")).toInt() == keyZ) {
+                    cartSaved = cm.value(QStringLiteral("cart")).toBool();
+                    const QVariantList slotsT = cm.value(QStringLiteral("slots")).toList();
+                    bool anyFull = false;
+                    for (const QVariant &sv : slotsT) {
+                        const QVariantMap sm = sv.toMap();
+                        if (sm.value(QStringLiteral("id")).toInt() != 0) anyFull = true;
+                    }
+                    cartSaved = cartSaved && !anyFull; // 全空条目也落盘（回生标记）
+                }
+            }
+            // 只回放 rig 键条目：共享世界 worldgen 标记箱若在同轮 (a) 一并转正，其键也会进 savedT1013
+            //   （数量随 regenerate seed 布局而定，非本探针可控基数，硬编码必假 FAIL）—— 过滤后 loadAll /
+            //   回生断言回到确定性单键口径（round-trip 保真语义不变：rig 条目经 allChests→loadAll 仍
+            //   cart:true + 27 空槽；worldgen 键的回生面由 (a) 腿 pre/post 相对计数覆盖）。
+            QVariantList savedRigT1013;
+            for (const QVariant &v : savedT1013) {
+                const QVariantMap cm = v.toMap();
+                if (cm.value(QStringLiteral("x")).toInt() == keyX
+                    && cm.value(QStringLiteral("y")).toInt() == keyY
+                    && cm.value(QStringLiteral("z")).toInt() == keyZ)
+                    savedRigT1013.append(v);
+            }
+            ChestStore csLoaded;
+            csLoaded.loadAll(savedRigT1013);
+            // cartCells() 是扁平 [x,y,z,...] 三元组表：恰 1 键 ⟺ size 3。
+            okE = cartSaved && csLoaded.isCartCell(keyX, keyY, keyZ)
+                && csLoaded.cartCells().size() == 3;
+            // 回生：convert 路 (b)（键无车 → 落车）；车已毁清键的负例已在 (c) 钉（cartCells 空不回生）。
+            pcT1013.setChestStore(&csLoaded);
+            pcT1013.convertMineshaftChests();
+            const int respawnIdxT1013 = cartsT1013.findCartHit(rigAboveT1013, QVector3D(0, -1, 0), 4.0f, nullptr);
+            const bool eLive1 = cartsT1013.liveCount() == 1;
+            const bool eIdx = respawnIdxT1013 >= 0;
+            const bool eChest = eIdx && cartsT1013.chestAt(respawnIdxT1013); // 槽复用 LIFO → 槽位不定，按射线寻址
+            const bool eKey = csLoaded.isCartCell(keyX, keyY, keyZ);
+            okE = okE && eLive1 && eIdx && eChest && eKey;
+            // populate 首开 gate：键 + 空条目 → roll 成功且键保持；二调 no-op；非矿车键条目 no-op。
+            const bool ePop1 = csLoaded.populateMineshaftLoot(keyX, keyY, keyZ);
+            bool rolledAny = false;
+            for (int i = 0; i < 27; ++i)
+                if (csLoaded.slotIdAt(keyX, keyY, keyZ, i) != 0) rolledAny = true;
+            const bool ePop2 = rolledAny && csLoaded.isCartCell(keyX, keyY, keyZ)
+                && !csLoaded.populateMineshaftLoot(keyX, keyY, keyZ);
+            csLoaded.setSlot(keyX + 9, keyY, keyZ, 0, 4, 1); // 非矿车键既有条目
+            const bool ePop3 = !csLoaded.populateMineshaftLoot(keyX + 9, keyY, keyZ);
+            okE = okE && ePop1 && ePop2 && ePop3;
+            if (!okE) {
+                QString dumpE;
+                for (int i = 0; i < cartsT1013.count(); ++i) {
+                    int ax = -1, ay = -1, az = -1;
+                    cartsT1013.chestKeyAt(i, ax, ay, az);
+                    dumpE += QStringLiteral(" [%1]a%2(%3,%4,%5)k%6,%7,%8")
+                        .arg(i).arg(cartsT1013.aliveAt(i) ? 1 : 0)
+                        .arg(cartsT1013.posAt(i).x(), 0, 'f', 1).arg(cartsT1013.posAt(i).y(), 0, 'f', 1)
+                        .arg(cartsT1013.posAt(i).z(), 0, 'f', 1).arg(ax).arg(ay).arg(az);
+                }
+                qInfo().noquote() << "  [t1013 diag e]" << "cartSaved=" << cartSaved
+                    << "cells=" << csLoaded.cartCells().size()
+                    << "isCart=" << csLoaded.isCartCell(keyX, keyY, keyZ)
+                    << "live=" << cartsT1013.liveCount()
+                    << "eLive1=" << eLive1 << "eIdx=" << eIdx << "eChest=" << eChest << "eKey=" << eKey
+                    << "pop1=" << ePop1 << "rolledAny=" << rolledAny << "pop2=" << ePop2 << "pop3=" << ePop3
+                    << "carts:" << dumpE;
+            }
+            QObject::disconnect(connBBT1013);
+            QObject::disconnect(connPlainT1013);
+            QObject::disconnect(connChestT1013);
+        }
+        // (f) 源码钉：变体面全链（阴性轮敏感 —— revert 任一行即红）。
+        {
+            const QString exeDirT1013 = QCoreApplication::applicationDirPath();
+            const QString rootT1013 = QDir(exeDirT1013 + QStringLiteral("/..")).absolutePath();
+            QFile mhT1013(rootT1013 + QStringLiteral("/src/Entities/minecartmanager.h"));
+            QFile mcT1013(rootT1013 + QStringLiteral("/src/Entities/minecartmanager.cpp"));
+            QFile pcT1013f(rootT1013 + QStringLiteral("/src/Game/playercontroller.cpp"));
+            QFile mqT1013(rootT1013 + QStringLiteral("/src/ui/Main.qml"));
+            const QString mh = mhT1013.open(QIODevice::ReadOnly) ? QString::fromUtf8(mhT1013.readAll()) : QString();
+            const QString mcpp = mcT1013.open(QIODevice::ReadOnly) ? QString::fromUtf8(mcT1013.readAll()) : QString();
+            const QString pcpp = pcT1013f.open(QIODevice::ReadOnly) ? QString::fromUtf8(pcT1013f.readAll()) : QString();
+            const QString mq = mqT1013.open(QIODevice::ReadOnly) ? QString::fromUtf8(mqT1013.readAll()) : QString();
+            okF = mh.contains(QStringLiteral("void chestCartBroken(int x, int y, int z, int keyX, int keyY, int keyZ);"))
+                && mh.contains(QStringLiteral("bool chest = false;"))
+                && mh.contains(QStringLiteral("Q_INVOKABLE bool chestAt(int i) const;"))
+                && mcpp.contains(QStringLiteral("if (m_carts[size_t(idx)].chest) return false;")) // tryMount 拒载
+                && mcpp.contains(QStringLiteral("emit chestCartBroken(dropX, dropY, dropZ, keyX, keyY, keyZ);"))
+                && pcpp.contains(QStringLiteral("emit chestOpened(keyX, keyY, keyZ);"))
+                && pcpp.contains(QStringLiteral("void PlayerController::convertMineshaftChests()"))
+                && mq.contains(QStringLiteral("function onChestCartBroken(x, y, z, keyX, keyY, keyZ)"))
+                && mq.contains(QStringLiteral("carts.chestAt(index)"))
+                && mq.contains(QStringLiteral("player.convertMineshaftChests()"))
+                && mq.contains(QStringLiteral("if (isCartCell) chestStore.populateMineshaftLoot(x, y, z)"));
+        }
+        // 清场（轨 / 标记箱位 / 对照位）。
+        for (int i = 0; i < 4; ++i) w.setBlock(x0T1013 + i, kRigY, z0T1013, BR::Air);
+        w.setBlock(keyX, keyY, keyZ, BR::Air);
+        w.setBlock(x0T1013, kRigY, z0T1013 + 4, BR::Air);
+        tickN(w, 2);
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1013 chest-minecart conversion: mineshaft marker chest -> silent block removal"
+                             " (no blockBroken) + cart key registered + cart spawned on adjacent rail cell in"
+                             " full rail posture with key = spawn cell (convertMineshaftChests path a)";
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1013 chest-cart interaction: findCartHit + chestKeyAt contract for the"
+                             " right-click-open branch, tryMount rejects chest cart (plain cart control mounts)";
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| t1013 chest-cart break chain: survival 3-hit final blow emits chestCartBroken"
+                             " exactly once with cart key (cartBroken zero = no double minecart drop), slot"
+                             " metadata readable at signal time then clearChest, creative instant-break also"
+                             " emits (t767 deviation: contents never silently voided), void loss emits nothing"
+                             " and keeps the key for respawn";
+        if (!okD) ++totalFail;
+        qInfo().noquote() << (okD ? "PASS" : "FAIL")
+                          << "| t1013 chest-cart movement: spawns static, player push moves it along the rail"
+                             " >=1 cell pinned to rail surface (powered-rail physics shared, pinned by P12 family)";
+        if (!okE) ++totalFail;
+        qInfo().noquote() << (okE ? "PASS" : "FAIL")
+                          << "| t1013 chest-cart persistence: empty cart-key entry survives allChests"
+                             " (cart-flag true, empty-exemption) -> loadAll round-trip -> convertMineshaftChests"
+                             " path (b) respawns the entity; populateMineshaftLoot first-open gate (empty cart"
+                             " key rolls once, filled/non-cart entries no-op)";
+        if (!okF) ++totalFail;
+        qInfo().noquote() << (okF ? "PASS" : "FAIL")
+                          << "| t1013 source pins: variant fields + chestCartBroken signal + tryMount reject +"
+                             " convert chain + Main.qml delegate/lid-skip/handler/enterWorld wiring";
     }
 
     // ── P-t1010 沙漠/丛林神殿野外生成落位率探针（R19.20 t1010；用户实测「新世界未见到神殿」验收面）──
