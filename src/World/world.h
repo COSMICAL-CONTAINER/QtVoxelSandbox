@@ -233,6 +233,12 @@ public:
     //   只读消费。
     int weatherState() const { return int(m_weather); }
     float weatherDarkness() const;
+    // t1016 存档天气恢复（WorldStore 加载链 / Main.qml enterWorld 调）：把存档里保存的天气态写回。
+    //   非法值（<0 / >3 / 非枚举域）静默拒（保当前态不变，防脏档破坏 m_weather 枚举不变量）；合法值
+    //   → 设态 + 重置该态的剩余时长（Clear / 降水各自的随机时长窗，同 tickWeather 转换时的设时口径
+    //   —— 恢复的是「态」非「剩余秒数」，剩余时长重抽 = 与 resetWeather 进世界重起同型的合理近似）
+    //   + 态真翻才 emit weatherChanged（驱动 QML 天空变暗 / 粒子切换）。
+    Q_INVOKABLE void setWeatherState(int state);
     // 局部降水类型（群系解析）：返回 Weather 枚举 int（0=Clear / 1=Rain / 2=Snow / 3=Thunder）。
     //   Clear→Clear；沙漠→Clear（永不降水）；山地(Hills)→Snow（冷）；草原/森林→随全局态（雨/雪/雷）。
     //   QML 据此选粒子类型；EntityManager / PlayerController 据此判灭火 / 日光燃烧门控。OOB 安全（biomeAt 纯函数）。

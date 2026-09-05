@@ -413,7 +413,8 @@ void WorldStore::closeWorld()
     m_openFile.clear();
 }
 
-bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers)
+bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers,
+                         const QVariantMap &worldTime)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -455,7 +456,7 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     QSqlQuery mq(db);
     mq.prepare(QStringLiteral("INSERT OR REPLACE INTO world_meta (key, value) VALUES (?, ?)"));
-    const QList<QPair<QString, QString>> metas = {
+    QList<QPair<QString, QString>> metas = {
         {QStringLiteral("name"), name},
         {QStringLiteral("seed"), QString::number(m_world->seed())},
         {QStringLiteral("width"), QString::number(cm.width())},
@@ -466,6 +467,20 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
         {QStringLiteral("world_version"), QString::number(kWorldVersion)},
         {QStringLiteral("chunk_count"), QString::number(saved)}
     };
+    // t1016 世界时钟快照（caller 传非空 map 才写；同事务原子 —— 时间与地形同一存档点，杜绝「半新」
+    //   存档）。phase 用 'g'/9 位有效数字：float 短往返表示（读回 toFloat 逐位还原）；day qint64 直接
+    //   十进制；weather 枚举 int。缺键跳过该键（不写半截快照）。
+    if (!worldTime.isEmpty()) {
+        if (worldTime.contains(QStringLiteral("phase")))
+            metas.append({QStringLiteral("clock_phase"),
+                          QString::number(worldTime.value(QStringLiteral("phase")).toFloat(), 'g', 9)});
+        if (worldTime.contains(QStringLiteral("day")))
+            metas.append({QStringLiteral("clock_day"),
+                          QString::number(worldTime.value(QStringLiteral("day")).toLongLong())});
+        if (worldTime.contains(QStringLiteral("weather")))
+            metas.append({QStringLiteral("weather"),
+                          QString::number(worldTime.value(QStringLiteral("weather")).toInt())});
+    }
     for (const auto &kv : metas) {
         mq.addBindValue(kv.first);
         mq.addBindValue(kv.second);
@@ -507,6 +522,32 @@ QVariantMap WorldStore::loadMeta() const
     QSqlQuery q(QSqlDatabase::database(kConn));
     if (!q.exec(QStringLiteral("SELECT key, value FROM world_meta"))) return out;
     while (q.next()) out.insert(q.value(0).toString(), q.value(1).toString());
+    return out;
+}
+
+// t1016 读世界时钟快照（头注释见 .h）。逐键缺省：clock_phase→0.0（新世界默认相位）、clock_day→0、
+//   weather→0（Clear 晴天）—— 旧存档缺字段拿默认值恢复，加载端行为 = 新世界首帧，不炸不跳。
+//   phase 以 toFloat 还原（写侧 'g'/9 位有效数字为 float 短往返表示，逐位还原）；day toLongLong。
+QVariantMap WorldStore::loadWorldTime() const
+{
+    QVariantMap out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT key, value FROM world_meta"))) return out;
+    QVariantMap meta;
+    while (q.next()) meta.insert(q.value(0).toString(), q.value(1).toString());
+    out.insert(QStringLiteral("phase"),
+               meta.contains(QStringLiteral("clock_phase"))
+                   ? QVariant(meta.value(QStringLiteral("clock_phase")).toString().toFloat())
+                   : QVariant(0.0f));
+    out.insert(QStringLiteral("day"),
+               meta.contains(QStringLiteral("clock_day"))
+                   ? QVariant(qlonglong(meta.value(QStringLiteral("clock_day")).toLongLong()))
+                   : QVariant(qlonglong(0)));
+    out.insert(QStringLiteral("weather"),
+               meta.contains(QStringLiteral("weather"))
+                   ? QVariant(meta.value(QStringLiteral("weather")).toInt())
+                   : QVariant(0));
     return out;
 }
 

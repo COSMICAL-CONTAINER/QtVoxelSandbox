@@ -4881,6 +4881,26 @@ void World::resetWeather()
     if (changed) emit weatherChanged();
 }
 
+// t1016 存档天气恢复（头注释见 .h）：设态 + 按该态的随机时长窗重抽剩余时长（与 tickWeather 转换时
+//   设时同口径；恢复「态」不恢复「剩余秒数」——秒数不进存档，重抽 = 进世界后正常随机模拟续跑）。
+//   非法 state 静默拒（保当前态，防脏档破枚举不变量）；态未翻（同态恢复）不 emit（零噪声）。
+void World::setWeatherState(int state)
+{
+    if (state < int(Weather::Clear) || state > int(Weather::Thunder)) return;
+    auto *rng = QRandomGenerator::global();
+    const Weather next = Weather(state);
+    if (next == Weather::Clear) {
+        m_weatherTimer = kClearWeatherMin + float(rng->generateDouble()) * (kClearWeatherMax - kClearWeatherMin);
+    } else {
+        const float lo = (next == Weather::Thunder) ? kThunderDurMin : kWeatherDurMin;
+        const float hi = (next == Weather::Thunder) ? kThunderDurMax : kWeatherDurMax;
+        m_weatherTimer = lo + float(rng->generateDouble()) * (hi - lo);
+    }
+    const bool changed = (m_weather != next);
+    m_weather = next;
+    if (changed) emit weatherChanged(); // 态翻转 → 驱动 QML 天空变暗 + 粒子切换
+}
+
 // t385 天气 tick（见 world.h 头注释）。机制等价 MC 1.0 天气：晴 ↔ 降水（雨/雪/雷）随机时长转换。
 void World::tickWeather(qreal dt)
 {

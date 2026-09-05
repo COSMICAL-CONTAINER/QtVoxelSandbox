@@ -826,6 +826,18 @@ Window {
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
+        // t1016 世界时刻 / 天气恢复：存退重进保留退出时刻（dev-spec「存档保留退出时刻」）。读
+        //   loadWorldTime() 快照（旧存档缺键 → 默认 phase 0 / day 0 / weather 0 = 新世界首帧晴天，
+        //   恢复无害）→ restoreTime 精确复原昼夜相位 + 天数（月相 = day%8 随之复原）+ setWeatherState
+        //   复原天气态。须在本函数内 theWorld 已完成 beginLoad/regenerate 之后（天气与地形无关，仅
+        //   顺序可读性）；worldClock.running 绑 window.worldRunning，此处写 phase/day 即时派生亮度 /
+        //   太阳方向（applyTime 即时 emit），进世界首帧即存档时刻的昼夜观感。
+        {
+            const wt = worldStore.loadWorldTime()
+            worldClock.restoreTime(wt.phase, wt.day)
+            theWorld.setWeatherState(wt.weather)
+            console.info("[t1016] world time restored: phase=" + wt.phase + " day=" + wt.day + " weather=" + wt.weather)
+        }
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -977,7 +989,10 @@ Window {
         // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
         // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
         // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
-        const okWorld = worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers())
+        // t1016：世界时钟快照同事务落盘（saveAll 第 5 参 = {phase, day, weather}，WorldClock /
+        //        World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排传入）。
+        const okWorld = worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers(),
+                                           { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState })
         // progress 落盘（统计 + 成就，独立 upsert 单行表）。
         const okProgress = worldStore.saveProgress(progress.toVariant())
         return okPlayer && okWorld && okProgress
