@@ -2172,6 +2172,13 @@ public:
     //   注：**只抬不掏**（渲染约定）——本格 quad 端边抬高量 = max(delta,0)×权重，delta≤0 不拉低（坡由低端
     //   轨自己画，高端平铺，避免边界双重几何；见 partialblockgeometry.h RailDelta 注释）。
     static int railProbeDelta(const RailProbe &p);
+    // t1018 端点相对判定（railConnections 延伸松弛的唯一判据；实现见 blockregistry.cpp 头注释）：邻探针
+    //   p（含 t983 起填充的 sameState）在该水平方向（xAxis = true → ±X 臂 / false → ±Z 臂）上是否
+    //   「端点相对」——邻轨自身轴（连接位优先、bit5 兜底、坡臂恒真）**包含连接方向** = 邻轨以端点对着
+    //   本格（轨线延伸，可接续）；否则邻轴垂直于连接方向 = 平行侧邻（线身旁）→ 拒连（t983 主口径）。
+    //   sc==0 && bit5==0 的 fresh 侧臂读作 NS（与 t983 平行拒连同一保守口径：NS 方向视为端点相对、
+    //   EW 方向不相对——bit5=0 与 fresh 不可区分）。
+    static bool railProbeEndpointAligned(const RailProbe &p, bool xAxis);
     // t737 铁轨拐角「连接位 → 两臂走向」单一权威：con 低 4 位恰为 1 X 臂 + 1 Z 臂（拐角形态，railConnections
     //   规则①产物）→ 返回 X 臂向 outXD ∈ {+1,-1} 与 Z 臂向 outZD ∈ {+1,-1}，true；其余形态（0 / 对向直 /
     //   十字）→ false。**消费方**：(a) mesher 拐角贴图象限映射（PartialBlockGeometry Rail case —— 出口臂贴
