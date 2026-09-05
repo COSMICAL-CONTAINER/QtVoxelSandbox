@@ -528,19 +528,25 @@ bool MinecartManager::tryStallSlideback(Cart &c, World *world, int railY)
     return true;
 }
 
-// t981 V 谷底一次停驻捕获（实现；契约见 minecartmanager.h）。
+// t981 V 谷底一次停驻捕获（实现；契约见 minecartmanager.h）。**t1019 口径再翻案：捕获闸从速度阈改能量判据**。
 //   症状：矿车放 V 形轨谷（两侧斜坡相对成谷）滑落到底后卡住来回振荡最后才停 —— 根因 = 谷格物理全量
 //   保守（下坡半幅 kCartSlopeGravity 加速 / 上坡半幅同量减速，谷内零耗散）+ t863① 反溜（-0.5）与
 //   t909② 静置闸 kick（+1.0）在两壁停驻点反复再供能 → 两壁间极限环往复。修 = 「制动到谷心」速度律：
 //   a0 = v²/(2·d)（d = 沿运动向到谷心剩余距离，每 tick 用当前 v/d 重算 —— 常减速 PROFILE 下 v²=2·a0·d
 //   是自校正不变量，FP 漂移逐 tick 吸收），v 随 d 同步归零 → 一次平滑减速停驻谷底中心（谷心梯度 0 =
 //   静置闸稳定不动点：|hF-hB| 在 ±0.25 采样窗内恰为 0 → 不 kick、不反溜、永久静止），无往复。
+//   t1019 能量判据（替代 t981 的 |speed| ≤ kCartValleyEscape(10) 速度阈）：进谷速度足以爬升对面坡
+//   （v² ≥ 2·kCartSlopeGravity·(h_对面坡升 + kCartValleyPassMarginH)）→ 放行交还既有上坡物理按速度
+//   爬坡穿过；不足才捕获谷心制动。g 用项目坡道运动学口径（与世界重力同源的沿轨分量，上 / 下坡积分
+//   同一常量 → 判据与谷内物理能量账自洽）。h_对面坡升 = 沿行进向逐格 +1 的连续爬升段总高（单壁 V =
+//   1.0；阶梯壁逐格累加——深谷壁足额计入，臂中失速回溜不复活打转）。余量 0.05 格盖静置闸 kick 贴阈
+//   再供能（crest-stall → kick 回谷循环带收口）。速度阈的问题：谷格物理近保守，纯重力从等高壁顶滑落
+//   谷底的到达能量恰 = 爬出对面壁所需——速度阈只能一刀切（≤10 全捕 = 高能重力车被谷「吸住」；
+//   >10 全放 = 贴阈不足车放去爬壁失败 → 打转），能量判据按「这辆车能不能爬出这面壁」逐例二选一。
 //   域（四重闸，任一不满足交还既有物理）：
 //   · 静置（|speed| ≤ 1e-3）不捕 —— 静置闸是谷心不动点的守门人（谷壁静置由它 kick 送入谷、谷心静置
 //     由它保持静止），本律只管「运动的」车；
-//   · |speed| > kCartValleyEscape（= 重力终端 10，boost 12.8 / 碰撞冲量可达）不捕 —— 「按速度通过」：
-//     凡纯重力可达的速度全部捕获，只有外源供能的车穿谷而过（终端速度按 exp 收敛恒自下方逼近 10，
-//     严格 < 10；boost 严格 > 10 —— 阈取 10 使两族零重叠）；
+//   · 能量足（上式）不捕 —— 「按速度通过」：交还既有上坡减速物理，能爬出去的车自然穿谷而过；
 //   · 金轨格不捕 —— 断电金轨刹车（t939③ brake）/ 通电 boost 既有轨型语义优先，本修不扩面（R-a 口径）；
 //   · 非 V 谷格不捕 —— 谷判定与 railRiseAt 谷面分支同几何同源（直轨〔非拐角 / 非 3+ 连接〕+ 行进轴
 //     两侧三高探针皆 +1 → rise = 2|axis-0.5| 谷面），普通坡 / 平轨 / 拐角零触碰。
@@ -550,7 +556,6 @@ bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, q
 {
     if (!world || railY < 0 || dt <= 0.0) return false;
     if (std::fabs(c.speed) <= 1e-3f) return false;            // 静置 → 静置闸管辖（谷心不动点）
-    if (std::fabs(c.speed) > kCartValleyEscape) return false; // 高能 → 按速度通过
     const int bcx = int(std::floor(c.pos.x()));
     const int bcz = int(std::floor(c.pos.z()));
     if (world->blockAt(bcx, railY, bcz) == BlockRegistry::GoldenRail) return false; // 金轨语义优先
@@ -582,6 +587,21 @@ bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, q
     const float vAlong = c.speed * dirAxis;                   // 带符号沿轴速度（+ = 朝 +轴）
     const float d = (vAlong >= 0.0f) ? (center - axisPos) : (axisPos - center);
     if (d < -1e-4f) return false;                             // 越谷心爬对壁 → 放行（回落后再捕）
+    // t1019 能量判据：进谷速度足以爬升对面坡则放行（交还既有上坡物理）。h_对面坡升 = 沿行进向逐格
+    //   +1 的连续爬升段总高（谷定义保证 k=1 壁格在 railY+1；阶梯壁逐格累加，扫描步与 railProbeDelta
+    //   同一层约定）。g = kCartSlopeGravity（项目坡道运动学口径，与谷内加速 / 上坡减速同一常量）。
+    const int climbStep = (vAlong >= 0.0f) ? 1 : -1;
+    int hOpp = 0;
+    for (int k = 1; k <= kCartValleyClimbScanMax; ++k) {
+        const int sx = ew ? bcx + climbStep * k : bcx;
+        const int sz = ew ? bcz : bcz + climbStep * k;
+        if (!BlockRegistry::isRail(world->blockAt(sx, railY + k, sz))) break;
+        hOpp = k;
+    }
+    const float v2 = c.speed * c.speed;
+    const float pass2 = 2.0f * kCartSlopeGravity
+        * (float(hOpp) + kCartValleyPassMarginH);             // 通过阈 = 2g·(h 对面坡升 + 余量)
+    if (v2 >= pass2) return false;                            // 能量足 → 按速度通过（爬对面坡）
     const float v = std::fabs(c.speed);
     const float dd = std::max(d, 1e-3f);
     const float dv = (v * v / (2.0f * dd)) * float(dt);       // a0·dt（a0 = v²/2d，每 tick 重算自校正）
