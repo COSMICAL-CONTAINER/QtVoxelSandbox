@@ -274,6 +274,57 @@ void PlayerController::setDispenserStore(DispenserStore *s)
     emit dispenserStoreChanged();
 }
 
+// t1013 箱子矿车内容键存储注入（同 setDispenserStore 模式）。convertMineshaftChests 转正 / 回生链用；
+//   null 时转正链整体跳过（标记箱保持方块形态 = t1013 前行为，防御路径）。
+void PlayerController::setChestStore(ChestStore *s)
+{
+    if (m_chestStore == s) return;
+    m_chestStore = s;
+    emit chestStoreChanged();
+}
+
+// t1013 矿井箱 → 箱子矿车转正（Q_INVOKABLE；Main.qml enterWorld 在 chestStore.loadAll（存档键条目就位）+
+//   carts.clearAll（槽表清空）之后调，两路合一）。实现面（头注释见 .h）：
+//   路 (a) worldgen 标记箱转正：collectBlocksOfId(Chest) 全图扫（~19ms 一次性，t691 同族）→ 标记位过滤 →
+//     clearMineshaftChest（静默摘块：不发 blockBroken 防 onBlockBroken(22) 掉内容/清键/破块音）→
+//     registerCart（内容键 = 标记格，已开过的 R19.19 老档条目 27 槽原样升级）→ spawnChestCart（落车）。
+//   路 (b) 存档回生：cartCells()（chests 表 "cart":true 键）中本轮未转正的键 → spawnChestCart（键格轨上 /
+//     四邻轨格 / 键格地面三态由 spawnChestCart 内选）。车被挖毁时呈层已 clearChest 清键 → 自然不回生；
+//     虚空卷没保留键 → 重进世界回生（内容物不丢，登记口径）。
+//   防御：world / minecartManager / chestStore 任一未注入 → no-op。cartCells 键损坏 / 重复 → 集合去重吸收。
+void PlayerController::convertMineshaftChests()
+{
+    if (!m_world || !m_minecartManager || !m_chestStore) return;
+    QSet<qint64> spawnedKeys; // 本轮已落车内容键（packKey 同族；世界坐标 ≤ 4096 → 20bit 移位打包安全）
+    auto packKey = [](int x, int y, int z) -> qint64 {
+        return (qint64(quint32(x)) << 40) ^ (qint64(quint32(y)) << 20) ^ qint64(quint32(z));
+    };
+    // 路 (a)：worldgen 标记箱（新世界 worldgen 刚落的 / R19.19 老档存进 blob 的）→ 摘块 + 登记 + 落车。
+    const QVariantList cells = m_world->collectBlocksOfId(BlockRegistry::Chest);
+    for (int i = 0; i + 2 < cells.size(); i += 3) {
+        const int x = cells.at(i).toInt();
+        const int y = cells.at(i + 1).toInt();
+        const int z = cells.at(i + 2).toInt();
+        if (!m_world->isMineshaftChest(x, y, z)) continue; // 标记位唯一授权（玩家 / 其它结构箱不动）
+        m_world->clearMineshaftChest(x, y, z);             // 静默摘块（blob 记 Air → 存档后不再复见）
+        m_chestStore->registerCart(x, y, z);               // 内容键登记 / 升级（27 槽原样保留）
+        m_minecartManager->spawnChestCart(x, y, z, m_world, x, y, z); // 键格 / 四邻轨格落车
+        spawnedKeys.insert(packKey(x, y, z));
+    }
+    // 路 (b)：存档回生（chests 表 "cart":true 键；实体不进存档 → 车体每次进世界按键重建）。
+    const QVariantList cartCells = m_chestStore->cartCells();
+    for (int i = 0; i + 2 < cartCells.size(); i += 3) {
+        const int x = cartCells.at(i).toInt();
+        const int y = cartCells.at(i + 1).toInt();
+        const int z = cartCells.at(i + 2).toInt();
+        if (spawnedKeys.contains(packKey(x, y, z))) continue; // 路 (a) 已转正（防同键双车）
+        m_minecartManager->spawnChestCart(x, y, z, m_world, x, y, z);
+        spawnedKeys.insert(packKey(x, y, z));
+    }
+    if (!spawnedKeys.isEmpty())
+        qInfo() << "vo.entities: mineshaft chest carts converted/respawned =" << spawnedKeys.size();
+}
+
 void PlayerController::onWindowChanged(QQuickWindow *win)
 {
     if (m_window) m_window->removeEventFilter(this);
@@ -4452,12 +4503,28 @@ void PlayerController::placeBlock()
         }
     }
     // t565 矿车交互（spec「右键铁轨放矿车 / 右键矿车骑乘 / WASD 沿轨行驶」；机制等价 MC 1.0 minecart）。
-    //   两分支（同船交互模式）：(a) 骑乘（优先）：跑独立矿车命中射线（tryMount 内 findCartHit）命中矿车 →
+    //   三分支（同船交互模式）：(a0) t1013 右键箱子矿车 → 开箱（chestOpened 携内容键）；(a) 骑乘（优先于
+    //   放置）：跑独立矿车命中射线（tryMount 内 findCartHit）命中矿车 →
     //   上车（不要求 m_hasHit —— 瞄的是实体非方块）。(b) 放矿车：手持矿车物品（MinecartId）+ 命中方块
     //   是 Rail → 在该轨格生成矿车（spawnCart，pos = 格中心车底贴轨板顶）；命中非轨 → 命中面邻格地面放
     //   置（t734 放宽，静止待拾取）。生存消耗 1 / 创造不耗。矿车物品非方块
     //   （材料段）→ selectedBlock 归 Air，须在 m_selectedBlock==Air 守卫之前分流（同船 / 桶 / 蛋模式）。
     if (m_minecartManager) {
+        // (a0) t1013 箱子矿车：右键命中 → 开箱 UI（chestOpened 携**内容键** = 生成格坐标，非车当前位 ——
+        //   ChestStore 按键寻址，车沿轨驶离后 UI / 存取仍对同一份内容）。优先于骑乘（箱子矿车不可骑 ——
+        //   tryMount 内守卫兜底），对齐右键箱子方块开箱语义；sneak 绕过开箱（同箱子 shift+右键放置语义，
+        //   开箱分支 findCartHit 独立射线（同 (a)；sneak 原始键态直读 —— 本段在 m_hasHit 块外，
+        //   placeBlock 的 sneakPlace 局部量不在作用域，语义同源 §2-D m_keys 单一输入路径）。
+        if (!m_keys.value(Qt::Key_Shift)) {
+            float chestDist = 0.0f;
+            const int chestIdx = m_minecartManager->findCartHit(position(), lookDirection(), kReach, &chestDist);
+            int keyX = -1, keyY = -1, keyZ = -1;
+            if (chestIdx >= 0 && m_minecartManager->chestKeyAt(chestIdx, keyX, keyY, keyZ)) {
+                m_lastPlaceMs = now;
+                emit chestOpened(keyX, keyY, keyZ);
+                return;
+            }
+        }
         // (a) 骑乘：命中矿车 → 上车（即便手持矿车物品也不另放，机制等价 MC 右键矿车优先上车）。
         //   rv-low-batch2 骑乘互斥：骑船时不得再上矿车（旧版两 rider 同时置位成幽灵骑乘态）。守卫：骑船中
         //   → 跳过上矿车（先 shift 下船才能换乘，与船侧守卫对称，机制等价 MC 同一时刻只能骑一个载具）。

@@ -97,6 +97,14 @@ public:
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStateMineshaftFlag) != 0;
     }
+    // t1013 矿井箱转正摘除：把 worldgen placeMineshaft 写下的矿井标记箱（Chest + ChestStateMineshaftFlag）
+    //   **静默**移除（clearBlockSilent 路径：写后钩子族 / worldChanged（mesh 重建）/ 存档 blob 全套照走，
+    //   唯独不发 blockBroken/blockPlaced）。静默是承重的：走 setBlock 会发 blockBroken(Chest) → 呈现层
+    //   onBlockBroken(22) 掉内容 + clearChest → 刚登记的箱子矿车内容键条目被当场清掉 + 进世界瞬响破块音。
+    //   调用方 = PlayerController::convertMineshaftChests（进世界转正链；摘块 → ChestStore.registerCart →
+    //   MinecartManager::spawnChestCart）。非矿井标记箱格（玩家箱 / 地牢 / 神殿 / 要塞 / 丛林箱 / 非箱子）
+    //   → false 不动（worldgen 标记位是唯一授权）。越界 → false。
+    Q_INVOKABLE bool clearMineshaftChest(int x, int y, int z);
     // t485 该格箱子是否「沙漠神殿生成箱」（worldgen placeDesertTemple 写入的箱子，state 带
     //   ChestStatePyramidFlag bit4；玩家放置的箱子 / 地牢箱 / 矿井箱无此位）。Main.qml.openChest 据此判
     //   「是否首开填充沙漠神殿战利品」（LootTable::pyramidChestPool：钻石 / 金 / 青金石 / 骨头 / 腐肉等）。
@@ -1217,8 +1225,8 @@ private:
     //     ④ pieceSlope 斜坡段（折线第二段对角下切：地板每 2 步降 1 格，无楼梯块）；
     //     ⑤ pieceSpiderRoom 洞穴蛛网室 7×7×3（中央 Spawner state=SpawnerStateSpider【偏差登记：MobSpider】
     //        + 笼 4 邻格三层必网 + 内部 ~45% 蛛网只贴实体块 + 两短端栅栏 + 2 宽连接廊）；
-    //     ⑥ 矿井箱（【偏差登记：箱落地轨旁】Chest+ChestStateMineshaftFlag，轨旁空地落地 → isMineshaftChest
-    //        首开填充 mineshaftChestPool）。
+    //     ⑥ 矿井箱（t1013 起 = 箱子矿车**生成标记**：Chest+ChestStateMineshaftFlag 落轨旁空地，进世界
+    //        convertMineshaftChests 摘块转正为箱子矿车实体；内容键 = 标记格寻址 ChestStore）。
     //   铺后统一算 RailConn 连接 state（直 / 拐角 / 十字形态）。地板按矿井 hash 选 Planks / Stone（t565 ⑤）。
     //   巷道被周围实体岩封闭 → 黑暗 + 火把点光。纯函数于 seed → 同 seed 同矿井分布（PLAN §2-K）。
     void placeMineshaft();

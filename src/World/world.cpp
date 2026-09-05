@@ -759,6 +759,16 @@ bool World::clearBlockSilent(int x, int y, int z)
     return true;
 }
 
+// t1013 矿井箱转正摘除（头注释见 .h）：worldgen 标记位（Chest + ChestStateMineshaftFlag）是唯一授权 ——
+//   守卫不过（玩家箱 / 其它结构箱 / 非箱子 / 越界）一律 false 不动。过守卫 → clearBlockSilent（写后钩子
+//   族 / worldChanged / 存档 blob 全套，不发 blockBroken —— 防 onBlockBroken(22) 掉内容 + clearChest 把
+//   转正链刚登记的内容键条目当场清掉）。
+bool World::clearMineshaftChest(int x, int y, int z)
+{
+    if (!isMineshaftChest(x, y, z)) return false;
+    return clearBlockSilent(x, y, z);
+}
+
 // t174 水流静默写入（同 setBlockFromEntity 语义：直写 + worldChanged，不发 broken/placed）。支持 state
 //   （水流等级 1..7）；无条件覆盖（蒸发时 id=Air state=0，水流改 state 时直接覆盖）。无变化（id+state 均同）
 //   → false（防无谓 worldChanged 重建）。越界 → false。caller（tickWaterFlow）保证 id 合法（Water/Air）。
@@ -7202,8 +7212,9 @@ void World::placeDungeons()
 //        笼位及其轴两邻格恒 3 层 carve（夹网巢 → 笼周 Chebyshev≤2 三层满网 ≥8 网 → t786「≥8 网 = 矿井
 //        蛛笼」分流口径在任意宽 × 高 × 长选型下都不破）；旧 7×7 双短端栅栏随房间形废除（走廊形无短端，
 //        口径登记）。
-//     ⑥ 矿井箱：考据「轨上运输矿车」→ **偏差登记：箱落地轨旁**（自已铺 railCells 取一格，四向首个空地
-//        落 Chest + ChestStateMineshaftFlag → isMineshaftChest 首开填充矿井战利品）。
+//     ⑥ 矿井箱：t1013 起 = **箱子矿车生成标记**（考据「轨上运输矿车」转正；R19.19 偏差「箱落地轨旁」
+//        退役）：自已铺 railCells 取一格，四向首个空地落 Chest + ChestStateMineshaftFlag，进世界由
+//        convertMineshaftChests 摘块转正为箱子矿车实体（内容键 = 标记格，详见 placeMineshaft 段内注释）。
 //   保留 t565 既有口径：网格 36 / 40% 频率、Y<48、矿石 15%、hashColumn/hashVoxel 确定性（PLAN §2-K）。
 //   铺后统一经 BlockRegistry::railConnections 算连接 state（直 / 拐角 / 十字形态自动得出，mesher 据此切
 //   贴图；与运行期 checkRailOnEdit 同一权威）。t1012 ① 地板政策：嵌岩段（下方实地）直接 Stone 不铺木板、
@@ -7561,8 +7572,12 @@ void World::placeMineshaft()
                 m_chunks.setBlock(rx, ry, rz, BlockRegistry::Rail, quint8(con & 0x0F));
             }
 
-            // ⑥ 矿井箱（考据「轨上运输矿车」→ 偏差登记：箱落地轨旁）：从已铺 railCells hash 取一格，
-            //   四向（hash 起转）首个空地落 Chest + ChestStateMineshaftFlag → isMineshaftChest 首开填充。
+            // ⑥ 矿井箱（t1013 起 = 箱子矿车**生成标记**，R19.19 偏差「箱落地轨旁」退役）：从已铺 railCells
+            //   hash 取一格，四向（hash 起转）首个空地落 Chest + ChestStateMineshaftFlag。worldgen 阶段
+            //   实体管理器不存在（Entities 层不可从 World 触达 + 实体不进存档）→ 标记块即持久化面：进世界
+            //   时 PlayerController::convertMineshaftChests 全图扫标记 → clearMineshaftChest 静默摘块 +
+            //   ChestStore.registerCart（内容键 = 标记格）+ spawnChestCart（邻轨吸附落车）。玩家挖毁箱车
+            //   → ChestStore 键条目清 → 存档后不再回生；未毁 → 条目持久 → 重进世界按键回生（内容物不丢）。
             if (!railCells.empty()) {
                 const quint32 ch = hashVoxel(mineSeed ^ 0xC8E5u, cx, sy, cz);
                 const std::array<int, 3> &rc = railCells[static_cast<size_t>(ch % railCells.size())];
