@@ -31,6 +31,8 @@
 #include <algorithm> // t795 探针 std::max（环带切比雪夫距离判定）
 #include <vector>   // t824 探针 std::vector<int>（池允许集）
 #include <map>       // t1012 探针 std::map（carveCell 地板点位登记，阴影模型）
+#include <queue>        // t1014 探针 std::queue（矿脉连通域 BFS）
+#include <unordered_set> // t1014 探针 std::unordered_set（矿块格坐标集）
 #include <QQmlEngine>   // t874/t875 真链探针：QQmlEngine + qmlRegisterType —— 真 QML 面板 × 真 C++ Hotbar 同台
 #include <QQmlContext>  // t874/t875 真链探针：rootContext()->setContextProperty + qmlContext（wrapper 作用域链）
 #include <QQmlComponent> // t874/t875 真链探针：setData+base URL 直载源树 AnvilUI.qml / EnchantingTableUI.qml
@@ -37494,6 +37496,335 @@ Item {
                              "the mobs-N/64-hw items-hw primed del V/T entities line shared with the"
                              "t1005/t1006 closure data collection)"
                           << (ok1007 ? QString() : diag1007);
+    }
+
+    // ── P-t1014 矿脉化逐矿种探针（R19.20 t1014；scatterOres 散点 → MC 1.0 式矿脉的验收面）──
+    //    rig：t1001/t995 同款 5 seed（20260821/777/424242/1337/90210）× 128×128×64 世界池 +
+    //    同 seed 复跑（确定性腿）。逐矿种全图连通域普查（6 连通形态口径 + 26 连通「贴连」观感口径——
+    //    铁角斜对贴块按角触并入主域，对应用户口径「基本都连接起来」）。
+    //    基线（旧散点 carve 后存活，同 rig 5 seed 实测）：coal 7868 / copper 5084 / iron 2467 /
+    //    gold 1526 / diamond 2106 / lapis 2530 / redstone 28393（±13% 经济窗；**频率经济不涨总矿量**）。
+    //    旧散点签名（阴性轮敏感）：连通域 ≥96% 为孤块、conn26 ≈ 0%、中带域中位长轴 -1（无域可采）。
+    //    腿：(a) 煤 2×2×5 长条+贴连散块 (b) 铁 2×2×2+角贴块 (c) 金/红石 MC1.0 blob (d) 钻/青/铜 blob
+    //        (e) 经济总量 ±13% 窗 + 同 seed 复跑 7 矿总量全等 (f) 源码钉（脉形表/三印章/矿盐/石门）。
+    {
+        struct OreStatT1014 {
+            int total = 0, comps = 0, conn26 = 0, inBand = 0;
+            int ymin = 999, ymax = -1;
+            int histMid = 0;      // size 7..12 域数（铁=裸立方域 / blob=主脉域）
+            int hist41 = 0;       // size 41+ 域数（红石密带合板窗）
+            int midLongMed = -1, midShortMed = -1; // size 7..40 域 bbox 排序最长/最短边中位
+        };
+        const quint32 seedsT1014[] = { 20260821u, 777u, 424242u, 1337u, 90210u };
+        const int oresT1014[7] = { BR::CoalOre, BR::CopperOre, BR::IronOre, BR::GoldOre,
+                                   BR::DiamondOre, BR::LapisOre, BR::RedstoneOre };
+        const char *oreNamesT1014[7] = { "coal", "copper", "iron", "gold", "diamond", "lapis", "redstone" };
+        // 高度带（world.cpp kProfiles 同源；bandLo/Hi = 严格带，slack 矿种用 inBand% 判）。
+        const int bandT1014[7][2] = { { 8, 60 }, { 5, 45 }, { 5, 30 }, { 5, 25 }, { 5, 40 }, { 5, 31 }, { 5, 16 } };
+        const bool strictBandT1014[7] = { false, true, false, true, true, true, true }; // 煤/铁留矿井巷壁暴露矿豁免（≥99% 口径）
+
+        auto censusT1014 = [&](World &wv, int oreId, int bandLo, int bandHi, OreStatT1014 &st) {
+            const int W = wv.width(), D = wv.depth(), H = wv.height();
+            std::unordered_set<quint32> cells;
+            for (int y = 0; y < H; ++y)
+                for (int z = 0; z < D; ++z)
+                    for (int x = 0; x < W; ++x)
+                        if (wv.blockAt(x, y, z) == oreId) {
+                            cells.insert(quint32(x + W * (z + D * y)));
+                            if (y >= bandLo && y <= bandHi) ++st.inBand;
+                            st.ymin = std::min(st.ymin, y);
+                            st.ymax = std::max(st.ymax, y);
+                        }
+            st.total = int(cells.size());
+            static const int D6[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+            static const int D26[26][3] = {
+                { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 },
+                { 1, 1, 0 }, { 1, -1, 0 }, { -1, 1, 0 }, { -1, -1, 0 }, { 1, 0, 1 }, { 1, 0, -1 },
+                { -1, 0, 1 }, { -1, 0, -1 }, { 0, 1, 1 }, { 0, 1, -1 }, { 0, -1, 1 }, { 0, -1, -1 },
+                { 1, 1, 1 }, { 1, 1, -1 }, { 1, -1, 1 }, { 1, -1, -1 }, { -1, 1, 1 }, { -1, 1, -1 },
+                { -1, -1, 1 }, { -1, -1, -1 }
+            };
+            std::vector<int> midLong, midShort;
+            auto bfs = [&](quint32 start, const int (*dirs)[3], int ndir,
+                           std::unordered_set<quint32> &vis, int bbOut[6]) -> int {
+                std::queue<quint32> q;
+                q.push(start);
+                vis.insert(start);
+                int size = 0;
+                bbOut[0] = bbOut[2] = bbOut[4] = 1 << 30;
+                bbOut[1] = bbOut[3] = bbOut[5] = -1;
+                while (!q.empty()) {
+                    const quint32 cur = q.front(); q.pop();
+                    const int x = int(cur % W), t = int(cur / W), z = int(t % D), y = int(t / D);
+                    ++size;
+                    bbOut[0] = std::min(bbOut[0], x); bbOut[1] = std::max(bbOut[1], x);
+                    bbOut[2] = std::min(bbOut[2], y); bbOut[3] = std::max(bbOut[3], y);
+                    bbOut[4] = std::min(bbOut[4], z); bbOut[5] = std::max(bbOut[5], z);
+                    for (int i = 0; i < ndir; ++i) {
+                        const int nx = x + dirs[i][0], ny = y + dirs[i][1], nz = z + dirs[i][2];
+                        if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                        const quint32 k = quint32(nx + W * (nz + D * ny));
+                        if (cells.count(k) && !vis.count(k)) { vis.insert(k); q.push(k); }
+                    }
+                }
+                return size;
+            };
+            { // 6 连通：域数 / 尺寸桶 / 中带域 bbox
+                std::unordered_set<quint32> vis;
+                int bb[6];
+                for (quint32 s : cells) {
+                    if (vis.count(s)) continue;
+                    const int size = bfs(s, D6, 6, vis, bb);
+                    ++st.comps;
+                    if (size >= 7 && size <= 12) ++st.histMid;
+                    if (size >= 41) ++st.hist41;
+                    if (size >= 7 && size <= 40) {
+                        int dims[3] = { bb[1] - bb[0] + 1, bb[3] - bb[2] + 1, bb[5] - bb[4] + 1 };
+                        std::sort(dims, dims + 3);
+                        midLong.push_back(dims[2]);
+                        midShort.push_back(dims[0]);
+                    }
+                }
+            }
+            { // 26 连通：贴连观感连接率（角触并入）
+                std::unordered_set<quint32> vis;
+                int bb[6];
+                for (quint32 s : cells) {
+                    if (vis.count(s)) continue;
+                    const int size = bfs(s, D26, 26, vis, bb);
+                    if (size >= 4) st.conn26 += size;
+                }
+            }
+            std::sort(midLong.begin(), midLong.end());
+            std::sort(midShort.begin(), midShort.end());
+            st.midLongMed = midLong.empty() ? -1 : midLong[midLong.size() / 2];
+            st.midShortMed = midShort.empty() ? -1 : midShort[midShort.size() / 2];
+        };
+
+        OreStatT1014 statT1014[5][7];
+        OreStatT1014 regenT1014[7];
+        for (int si = 0; si < 5; ++si) {
+            World wT1014;
+            wT1014.setWidth(128);
+            wT1014.setDepth(128);
+            wT1014.setHeight(64);
+            wT1014.setSeed(int(seedsT1014[si]));
+            for (int oi = 0; oi < 7; ++oi)
+                censusT1014(wT1014, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1], statT1014[si][oi]);
+            if (si == 0) // 确定性腿素材：同 seed 复跑
+            {
+                World wR;
+                wR.setWidth(128);
+                wR.setDepth(128);
+                wR.setHeight(64);
+                wR.setSeed(int(seedsT1014[0]));
+                for (int oi = 0; oi < 7; ++oi)
+                    censusT1014(wR, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1], regenT1014[oi]);
+            }
+        }
+
+        auto inWin = [](int v, int lo, int hi) { return v >= lo && v <= hi; };
+
+        // ── (a) 煤：2×2×5 长条+贴连散块（域数窗 / 长条 bbox 中位窗 / conn26 / 高度带 ≥99% 严带）──
+        bool okA = true;
+        {
+            QString diagA;
+            for (int si = 0; si < 5; ++si) {
+                const OreStatT1014 &s = statT1014[si][0];
+                const bool ok = inWin(s.total, 6845, 8891) && inWin(s.comps, 300, 470)
+                    && inWin(s.midLongMed, 5, 8) && inWin(s.midShortMed, 3, 4)
+                    && s.conn26 * 100 >= s.total * 85
+                    && s.ymin >= 7 && s.ymax <= 60 && s.inBand * 100 >= s.total * 99;
+                if (!ok) diagA += QStringLiteral(" seed%1:t%2/c%3/l%4/sh%5/cn%6/y[%7,%8]/ib%9")
+                                     .arg(si).arg(s.total).arg(s.comps).arg(s.midLongMed)
+                                     .arg(s.midShortMed).arg(s.conn26 * 100 / std::max(1, s.total))
+                                     .arg(s.ymin).arg(s.ymax).arg(s.inBand);
+                okA = okA && ok;
+            }
+            if (!okA)
+                qInfo().noquote() << "  [t1014 diag a] coal vein-shape misses:" << diagA;
+        }
+
+        // ── (b) 铁：2×2×2 立方（中带域 bbox 恰 2×2×2）+ 角贴块（26 连通并入 → conn26 高）──
+        bool okB = true;
+        {
+            QString diagB;
+            for (int si = 0; si < 5; ++si) {
+                const OreStatT1014 &s = statT1014[si][2];
+                const bool ok = inWin(s.total, 2146, 2788) && inWin(s.comps, 790, 1000)
+                    && s.midLongMed == 2 && s.midShortMed == 2
+                    && inWin(s.histMid, 150, 215)
+                    && s.conn26 * 100 >= s.total * 90
+                    && s.ymin >= 5 && s.ymax <= 40 && s.inBand * 100 >= s.total * 99;
+                if (!ok) diagB += QStringLiteral(" seed%1:t%2/c%3/l%4/sh%5/hm%6/cn%7/y[%8,%9]/ib%10")
+                                     .arg(si).arg(s.total).arg(s.comps).arg(s.midLongMed)
+                                     .arg(s.midShortMed).arg(s.histMid)
+                                     .arg(s.conn26 * 100 / std::max(1, s.total))
+                                     .arg(s.ymin).arg(s.ymax).arg(s.inBand);
+                okB = okB && ok;
+            }
+            if (!okB)
+                qInfo().noquote() << "  [t1014 diag b] iron vein-shape misses:" << diagB;
+        }
+
+        // ── (c) 金 / 红石 MC 1.0 blob（尺寸窗 / 严带 / conn26；红石密带合板 hist41 窗）──
+        bool okC = true;
+        {
+            QString diagC;
+            for (int si = 0; si < 5; ++si) {
+                const OreStatT1014 &g = statT1014[si][3];
+                const OreStatT1014 &r = statT1014[si][6];
+                const bool okG = inWin(g.total, 1328, 1724) && inWin(g.comps, 225, 275)
+                    && g.conn26 * 100 >= g.total * 85 && g.inBand == g.total
+                    && g.ymin >= 5 && g.ymax <= 25 && g.midShortMed <= 2;
+                const bool okR = inWin(r.total, 24702, 32084) && inWin(r.comps, 1390, 1650)
+                    && r.conn26 * 100 >= r.total * 95 && r.inBand == r.total
+                    && r.hist41 <= 160 && r.midShortMed <= 2;
+                if (!okG || !okR)
+                    diagC += QStringLiteral(" seed%1 gold:t%2/c%3/cn%4/ib%5 redstone:t%6/c%7/cn%8/h41%9")
+                                 .arg(si).arg(g.total).arg(g.comps)
+                                 .arg(g.conn26 * 100 / std::max(1, g.total)).arg(g.inBand)
+                                 .arg(r.total).arg(r.comps)
+                                 .arg(r.conn26 * 100 / std::max(1, r.total)).arg(r.hist41);
+                okC = okC && okG && okR;
+            }
+            if (!okC)
+                qInfo().noquote() << "  [t1014 diag c] gold/redstone misses:" << diagC;
+        }
+
+        // ── (d) 钻 / 青 / 铜 MC 1.0 blob（尺寸窗 / 严带 / conn26 / 细长 bbox 中位）──
+        bool okD = true;
+        {
+            QString diagD;
+            for (int si = 0; si < 5; ++si) {
+                const OreStatT1014 &d = statT1014[si][4];
+                const OreStatT1014 &l = statT1014[si][5];
+                const OreStatT1014 &c = statT1014[si][1];
+                const bool okDi = inWin(d.total, 1832, 2380) && inWin(d.comps, 315, 375)
+                    && d.conn26 * 100 >= d.total * 85 && d.inBand == d.total
+                    && inWin(d.midLongMed, 4, 8) && d.midShortMed <= 2;
+                const bool okLa = inWin(l.total, 2201, 2859) && inWin(l.comps, 420, 485)
+                    && l.conn26 * 100 >= l.total * 85 && l.inBand == l.total
+                    && inWin(l.midLongMed, 4, 8) && l.midShortMed <= 2;
+                const bool okCu = inWin(c.total, 4423, 5745) && inWin(c.comps, 790, 990)
+                    && c.conn26 * 100 >= c.total * 85 && c.inBand == c.total
+                    && inWin(c.midLongMed, 4, 8) && c.midShortMed <= 2;
+                if (!okDi || !okLa || !okCu)
+                    diagD += QStringLiteral(" seed%1 dia:t%2/c%3/cn%4 lap:t%5/c%6/cn%7 cop:t%8/c%9/cn%10")
+                                 .arg(si).arg(d.total).arg(d.comps).arg(d.conn26 * 100 / std::max(1, d.total))
+                                 .arg(l.total).arg(l.comps).arg(l.conn26 * 100 / std::max(1, l.total))
+                                 .arg(c.total).arg(c.comps).arg(c.conn26 * 100 / std::max(1, c.total));
+                okD = okD && okDi && okLa && okCu;
+            }
+            if (!okD)
+                qInfo().noquote() << "  [t1014 diag d] diamond/lapis/copper misses:" << diagD;
+        }
+
+        // ── (e) 经济总量（**不涨总矿量**：逐 seed 落旧散点 carve 后基线 ±13% 窗）+ 同 seed 复跑全等 ──
+        bool okE = true;
+        {
+            // 基线（旧散点 5 seed carve 后存活均值）：P-t1014 头注释同源。
+            const int baseT1014[7] = { 7868, 5084, 2467, 1526, 2106, 2530, 28393 };
+            const int loT1014[7] = { 6845, 4423, 2146, 1328, 1832, 2201, 24702 };
+            const int hiT1014[7] = { 8891, 5745, 2788, 1724, 2380, 2859, 32084 };
+            QString diagE;
+            for (int oi = 0; oi < 7; ++oi) {
+                for (int si = 0; si < 5; ++si) {
+                    const int t = statT1014[si][oi].total;
+                    if (!inWin(t, loT1014[oi], hiT1014[oi]))
+                        diagE += QStringLiteral(" %1/s%2:%3").arg(oreNamesT1014[oi]).arg(si).arg(t);
+                }
+                okE = okE && regenT1014[oi].total == statT1014[0][oi].total; // 同 seed 复跑确定性
+            }
+            if (!okE)
+                qInfo().noquote() << "  [t1014 diag e] economy/regen misses:" << diagE;
+        }
+
+        // ── (f) 源码钉：脉形表 / 三印章分支 / 矿盐 / 逐块石门（阴性敏感——revert 散点即失）──
+        bool okF = false;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile sf(root + QStringLiteral("/src/World/world.cpp"));
+            const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
+            okF = t.contains(QStringLiteral("constexpr VeinProfile kProfiles"))
+                && t.contains(QStringLiteral("0x2ED57Eu"))   // 红石矿盐（t1014）
+                && t.contains(QStringLiteral("0x0C0A15u"))   // 煤矿盐（t1014）
+                && t.contains(QStringLiteral("0x12D0E1u"))   // 铁矿盐（t1014）
+                && t.contains(QStringLiteral("const bool axX = (hv >> 16) & 1u;"))   // 煤长条横轴选型
+                && t.contains(QStringLiteral("p.kind == 2"))                          // 铁立方角印章分支
+                && t.contains(QStringLiteral("offStone"))                             // blob 失位转全向
+                && t.contains(QStringLiteral("if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone) return false;")); // 仅置换 Stone
+        }
+
+        for (int oi = 0; oi < 7; ++oi) { // profile 表数据落账（六矿种 + 铜）：5 seed 范围摘要
+            int tmin = 1 << 30, tmax = -1, cmin = 1 << 30, cmax = -1, cnMin = 100, cnMax = -1;
+            for (int si = 0; si < 5; ++si) {
+                const OreStatT1014 &s = statT1014[si][oi];
+                tmin = std::min(tmin, s.total); tmax = std::max(tmax, s.total);
+                cmin = std::min(cmin, s.comps); cmax = std::max(cmax, s.comps);
+                const int cn = s.conn26 * 100 / std::max(1, s.total);
+                cnMin = std::min(cnMin, cn); cnMax = std::max(cnMax, cn);
+            }
+            qInfo().noquote() << QString::asprintf("  [t1014 profile] %-8s total[%d..%d] comps[%d..%d] conn26[%d%%..%d%%] mid[%d,%d]",
+                oreNamesT1014[oi], tmin, tmax, cmin, cmax, cnMin, cnMax,
+                statT1014[0][oi].midLongMed, statT1014[0][oi].midShortMed);
+        }
+
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1014(a) coal 2x2x5 bar + hash-glued scatter: per-seed vein components"
+                             "300..470 (scattered baseline was ~7500 singletons), mid-size component"
+                             "bbox median long axis 5..8 short axis 3..4 (bar+glue silhouette),"
+                             "26-adjacency connection >= 85%, band y[8,60] with >= 99% strictness"
+                             "and absolute [7,60] (mineshaft wall ore exemption), economy per-seed"
+                             "6845..8891 (old-scatter carve-survival baseline 7868 +-13% -> total ore"
+                             "NOT inflated)"
+                          << (okA ? QString() : QStringLiteral("shape/window miss, see diag"));
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1014(b) iron 2x2x2 cube + diagonal corner blocks: mid-size components"
+                             "are bare cubes (bbox median exactly 2x2x2), 150..215 cubes per world,"
+                             "corner blocks merge under 26-adjacency -> connection >= 90% (they are"
+                             "diagonal so 6-conn singletons are expected and fine), band y[5,30]"
+                             ">= 99% strict with <= 40 absolute (mineshaft exemption), economy"
+                             "2146..2788 (baseline 2467 +-13%)"
+                          << (okB ? QString() : QStringLiteral("shape/window miss, see diag"));
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| t1014(c) gold + redstone MC1.0-size blobs: gold 1328..1724 total in"
+                             "225..275 walk-veins strictly inside y[5,25]; redstone 24702..32084 in"
+                             "1390..1650 veins strictly inside y[5,16] with merged-sheet tail capped"
+                             "(hist41 <= 160, registered effective-density carryover - the legacy"
+                             "(r2>>24)%10000 8-bit truncation is preserved per economy parity, see"
+                             "world.cpp ledger note), connection >= 95%"
+                          << (okC ? QString() : QStringLiteral("shape/window miss, see diag"));
+        if (!okD) ++totalFail;
+        qInfo().noquote() << (okD ? "PASS" : "FAIL")
+                          << "| t1014(d) diamond/lapis/copper MC1.0-size blobs: diamond 1832..2380 in"
+                             "315..375 veins y[5,40]; lapis 2201..2859 in 420..485 veins y[5,31];"
+                             "copper 4423..5745 in 790..990 veins y[5,45]; all strictly banded,"
+                             "connection >= 85%, scraggly walk silhouette (bbox median long 4..8,"
+                             "short <= 2 like vanilla scraggle)"
+                          << (okD ? QString() : QStringLiteral("shape/window miss, see diag"));
+        if (!okE) ++totalFail;
+        qInfo().noquote() << (okE ? "PASS" : "FAIL")
+                          << "| t1014(e) frequency economy + determinism: all 7 ore species land"
+                             "per-seed within +-13% of the old-scatter carve-survival baseline"
+                             "(coal 7868 / copper 5084 / iron 2467 / gold 1526 / diamond 2106 /"
+                             "lapis 2530 / redstone 28393) - veining must not inflate total ore -"
+                             "and a same-seed regeneration reproduces all 7 totals EXACTLY"
+                             "(pure hashVoxel worldgen, no runtime RNG)"
+                          << (okE ? QString() : QStringLiteral("economy window or regen miss, see diag"));
+        if (!okF) ++totalFail;
+        qInfo().noquote() << (okF ? "PASS" : "FAIL")
+                          << "| t1014(f) source pins: world.cpp keeps the kProfiles vein table, the"
+                             "per-ore salts, the coal bar orientation pick, the iron cube/corner"
+                             "stamp branch, the blob off-stone redirect and the stone-only gate"
+                             "(negative-round sensitive: reverting scatterOres to per-voxel scatter"
+                             "loses the table and every shape leg above reads the scattered"
+                             "signature: ~96% singletons, conn26 ~ 0%)"
+                          << (okF ? QString() : QStringLiteral("source pin missing"));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
