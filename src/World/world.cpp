@@ -1120,6 +1120,26 @@ void World::tickWaterFlow()
         else if (it->second > lvl) it->second = lvl;
     };
 
+    // t1012④ 水冲刷附着块登记（附着块族单一权威 = BlockRegistry::isAttachableBlock：火把各 state /
+    //   红石火把 / 蜘蛛网）：扩散落点是附着块格 → 记入 washed（保留被毁 id 供 dropId 掉落），本 tick 应用段
+    //   置 Air + 发 blockDroppedAsItem，随后 adds 对同格写 Water = 同 tick「冲毁 + 入水」。机制等价 MC 1.0
+    //   「流水冲毁非实体附着物并掉落」。掉落链对齐玩家挖除（BlockRegistry::dropId——火把/红石火把掉自身、
+    //   蛛网掉线 0x219）。石头等非附着块不 wash（阴性对照腿）。washKeys 去重（多源指向同一格只毁一次）。
+    struct WashedCell { int x, y, z; quint8 id; }; // 被毁格 + 原方块 id（dropId 掉落用）
+    std::vector<WashedCell> washed;
+    std::unordered_set<long long> washKeys;
+    auto tryWashCell = [&](int x, int y, int z) -> bool {
+        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) return false;
+        const quint8 id = m_chunks.blockAt(x, y, z);
+        if (!BlockRegistry::isAttachableBlock(id)) return false;
+        const long long k = keyOf(x, y, z);
+        if (!washKeys.count(k)) {
+            washKeys.insert(k);
+            washed.push_back({x, y, z, id});
+        }
+        return true;
+    };
+
     // 下方格类别：y==0 视为实体底（基岩层不可下落）；否则查 m_chunks。
     //   0=air(下落) / 1=solid(grounded，水平蔓延) / 2=water(水下柱，本格既不下落也不蔓延)。
     auto belowKind = [&](int x, int y, int z) -> int {
@@ -1217,6 +1237,10 @@ void World::tickWaterFlow()
         if (bk == 0) {
             // 下落：写下方为流水 level=1（**非源** —— 修 t174「下落成源灌满盆地」bug）。
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
+        } else if (bk == 1 && tryWashCell(c.x, c.y - 1, c.z)) {
+            // t1012④ 下方是附着块（贴地火把等）→ 冲毁登记 + 同 tick 灌入流水 level=1（同下落口径；
+            //   机制等价 MC 流水浇毁脚下火把）。
+            tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
         }
         // 水平蔓延：仅当本格 grounded（下方为实体方块，bk==1）才向水平 air 邻居扩散；air → 写 level+1；
         //   既有流水 → re-level 下调。t350 修「单桶水流遇崖边悬空 cascade → 淹平面（tsunami）」：
@@ -1235,6 +1259,10 @@ void World::tickWaterFlow()
                 const quint8 nbId = m_chunks.blockAt(nx, c.y, nz);
                 if (nbId == BlockRegistry::Air) {
                     // 蔓延到 air（首达即最低 level，机制对齐 MC 最短源距）。
+                    tryAdd(nbKey, quint8(c.level + 1));
+                } else if (tryWashCell(nx, c.y, nz)) {
+                    // t1012④ 邻格是附着块（墙面火把 / 红石火把 / 蛛网）→ 冲毁登记 + 同 tick 灌入流水
+                    //   （level+1 同 air 蔓延口径；机制等价 MC 流水漫过冲毁附着物并掉落）。
                     tryAdd(nbKey, quint8(c.level + 1));
                 } else if (nbId == BlockRegistry::Water) {
                     // t224 re-leveling：既有流水邻居若能被提供更低 level（更近源）→ 下调之。
@@ -1268,6 +1296,18 @@ void World::tickWaterFlow()
         anyChange |= setWaterSilent(s.x, s.y, s.z, BlockRegistry::Water, 0);
     for (const WCell &e : evaps)
         anyChange |= setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
+    // t1012④ 水冲刷附着块应用：置 Air + 发 blockDroppedAsItem（dropId 对齐玩家挖除）。先于 adds——
+    //   同格 tryAdd 已登记 → 随后写 Water，同 tick 完成「冲毁 + 入水」。setWaterSilent 内部 notePowerWrite
+    //   承接红石火把被毁的红石重算链（t976/t977 AOT 教训口径：跨单元绑定不在本调用重估，QML 读该格的
+    //   绑定经本 tick 末尾一次 emit worldChanged 的信号 handler 读取）。掉落信号在 m_batchFluid 批量写期间
+    //   发出：blockDroppedAsItem 只驱动呈现层 ItemEntityManager 生成掉落实体（不写栅格 / 不发 worldChanged），
+    //   与批量协议正交（同 detonateStalker 批内发 explosionDroppedItem 先例）。
+    for (const WashedCell &wsh : washed) {
+        if (setWaterSilent(wsh.x, wsh.y, wsh.z, BlockRegistry::Air, 0)) {
+            emit blockDroppedAsItem(wsh.x, wsh.y, wsh.z, BlockRegistry::dropId(wsh.id));
+            anyChange = true;
+        }
+    }
     for (const auto &kv : adds) {
         const long long k = kv.first;
         const int x = static_cast<int>(k % W);
@@ -7157,7 +7197,8 @@ void World::placeDungeons()
 //     ⑤ pieceSpiderRoom 洞穴蛛网走廊（t1012 ② 用户裁决，弃 t1001 7×7×3 房间形）：巷侧垂直向支廊 =
 //        1-2 宽 × 2-3 高 × 3-6 长窄廊（hash 选型；对齐 /Structure 子页 3×6×3 走廊形口径）+ 满网
 //        （廊体全部空气格 → Cobweb，旧 45% 散布与 solidAround 守卫随房间形废除）+ 笼（Spawner
-//        state=SpawnerStateSpider，偏差登记 MobSpider / blockregistry.h (7<<1)=0x0E 保持）；笼位居廊中，
+//        state=SpawnerStateCaveSpider——t1012③ 偏差转正：旧「偏差登记 MobSpider / 0x0E 保持」退役，
+//        矿井蛛网走廊的刷怪笼就是洞穴蜘蛛笼，state=(20<<1)=0x28）；笼位居廊中，
 //        笼位及其轴两邻格恒 3 层 carve（夹网巢 → 笼周 Chebyshev≤2 三层满网 ≥8 网 → t786「≥8 网 = 矿井
 //        蛛笼」分流口径在任意宽 × 高 × 长选型下都不破）；旧 7×7 双短端栅栏随房间形废除（走廊形无短端，
 //        口径登记）。
@@ -7265,8 +7306,9 @@ void World::placeMineshaft()
             //    pieceStartRoom 落地并放射巷道 → 统一重算轨连接 → 矿井箱落地轨旁）──
 
             // ⑤ pieceSpiderRoom 洞穴蛛网走廊（t1012 ② 走廊形）：1-2 宽 × 2-3 高 × 3-6 长窄廊 + 满网 +
-            //   笼（Spawner state=SpawnerStateSpider，偏差登记 MobSpider / 0x0E 保持）；笼位居中、笼位 ±1
-            //   轴邻格恒 3 层夹网巢（笼周满网 ≥8 → t786 分流口径不破）。
+            //   笼（Spawner state=SpawnerStateCaveSpider——t1012③ **偏差转正**：旧「登记偏差 MobSpider /
+            //   0x0E 保持」退役，矿井蛛网走廊的刷怪笼就是洞穴蜘蛛笼（MC 口径），state=(20<<1)=0x28）；
+            //   笼位居中、笼位 ±1 轴邻格恒 3 层夹网巢（笼周满网 ≥8 → t786 分流口径不破）。
             const auto pieceSpiderRoom = [&](int ax2, int az2, int dirIdx) {
                 const int ppx = (dirIdx < 2) ? 0 : 1; // 支廊轴 = 巷道垂直向（dir 0/1 = X 向巷道 → Z 向支廊）
                 const int ppz = (dirIdx < 2) ? 1 : 0;
@@ -7287,7 +7329,7 @@ void World::placeMineshaft()
                         carveCell(ax2 + ppx * sgn * off + tdx * w2,
                                   az2 + ppz * sgn * off + tdz * w2, sy, nestH(off));
                 putStruct(ax2 + ppx * sgn * cageOff, sy + 1, az2 + ppz * sgn * cageOff,
-                          BlockRegistry::Spawner, BlockRegistry::SpawnerStateSpider);
+                          BlockRegistry::Spawner, BlockRegistry::SpawnerStateCaveSpider); // t1012③ 偏差转正：洞穴蜘蛛笼（旧 MobSpider 0x0E 退役）
                 for (int off = 2; off <= snl + 1; ++off) { // 满网：廊体全部空气格 → Cobweb（笼格 / 基岩不动）
                     for (int w2 = 0; w2 < snw; ++w2)
                         for (int dy2 = 1; dy2 <= nestH(off); ++dy2) {

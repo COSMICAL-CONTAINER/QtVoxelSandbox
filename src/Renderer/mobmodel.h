@@ -169,10 +169,10 @@ public:
 
     // review24 低危收尾（#35）：合法 mobType 白名单长度（= .cpp kValidMobModelType 项数，两处编译期互钉；
     //   枚举侧上界互钉在矩阵探针 TU——tools/redstone_matrix_test.cpp 持 kValidMobTypeCount ==
-    //   EntityManager::MobBabyShambler+1 断言，t952 起上界 = 小蹒跚者 19）。public 常量的原因：Renderer 在
+    //   EntityManager::MobCaveSpider+1 断言，t1012③ 起上界 = 洞穴蜘蛛 20）。public 常量的原因：Renderer 在
     //   Entities 之下（PLAN §2 分层），本层不得 include entitymanager.h，跨层钉契约只能经头文件常量由上层
     //   消费端完成。新增 mobType 时补 .cpp 表行 + 同步本值 + 探针断言三级全过。
-    static constexpr int kValidMobTypeCount = 20; // == EntityManager::MobBabyShambler(19) + 1（镜像值，探针钉死）
+    static constexpr int kValidMobTypeCount = 21; // == EntityManager::MobCaveSpider(20) + 1（镜像值，探针钉死）
 
     int mobType() const { return m_mobType; }
     void setMobType(int type);

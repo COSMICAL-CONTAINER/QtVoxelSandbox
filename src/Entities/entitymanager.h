@@ -240,7 +240,7 @@ public:
     //   分支（同 Arrow）。死亡掉 0-1 燃烬棒（BlazeRodId 0x245，t726）+ 3 XP（呈现层 onMobDied 分流）。死因
     //   DeathCause::Emberling「被燃烬者的火球焚杀」（t727 Nightwalker 先例）。§9 原创：名称 / 模型（MobModel
     //   中心头盒 + QML 环绕旋转竖棒）/ 贴图（t717 已建 entity_emberling 程序贴图 + pack blaze.png）全原创。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18, MobBabyShambler = 19 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）；t952 MobBabyShambler=19 小蹒跚者（幼体僵尸：<1 格高 halfH=0.45、移速快 kBabyShamblerChaseSpeedMul、低伤 kBabyShamblerAttackDamage、可穿盔甲——t950 拾取门 / t377 随机甲门 / setMobArmorSet 族门均入白名单；概率与小鸡组成「小鸡骑士」——kChickenJockeyChance，见 rideMob/mobRider 双向链）
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18, MobBabyShambler = 19, MobCaveSpider = 20 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）；t952 MobBabyShambler=19 小蹒跚者（幼体僵尸：<1 格高 halfH=0.45、移速快 kBabyShamblerChaseSpeedMul、低伤 kBabyShamblerAttackDamage、可穿盔甲——t950 拾取门 / t377 随机甲门 / setMobArmorSet 族门均入白名单；概率与小鸡组成「小鸡骑士」——kChickenJockeyChance，见 rideMob/mobRider 双向链）；t1012 MobCaveSpider=20 洞穴蜘蛛（机制等价 MC 1.0 cave spider——**枚举尾追加 = 存档兼容契约，勿插中间**；矿井蛛网走廊刷怪笼转正型：蜘蛛同族小体型 halfH=0.21〔0.7×〕+ 命中中毒 DoT〔呈现层 applyStatusEffect(EffectPoison) 挂 t669 毒薯同源 m_poisonTimer 链〕；渲染走 MobModel 蜘蛛几何共享分支 + QML delegate 0.7× 缩放蓝染 tint；worldgen pieceSpiderRoom 笼 state=SpawnerStateCaveSpider=(20<<1)=0x28）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -275,8 +275,9 @@ public:
     //   BlockRegistry（bit1-5 = MobType 枚举值 <<1；bit0 = 旧要塞银鱼标记）。规则：
     //     type 位非零 → 取 type；属「可刷型白名单」才认（t786 五敌对 {Shambler,Bones,Stalker,Spider,
     //       Silverfish} + t787 生物蛋改型全蛋表 {Pig,Cow,Sheep,Chicken,Squid,Wolf,Ocelot,Nightwalker,
-    //       Emberling} = 13 蛋类型 + 无蛋的 Silverfish 共 14 型），非法值（枚举漂移 / 手改存档 —— 如
-    //       MobTest/SnowGolem/IronGolem/Tnt/Anvil 哨兵与 >18 越界值）回退 Shambler；
+    //       Emberling} + t952 BabyShambler 蛋 + t1012③ CaveSpider（无蛋新敌对型）= 16 型），非法值
+    //       （枚举漂移 / 手改存档 —— 如 MobTest/SnowGolem/IronGolem/Tnt/Anvil 哨兵与 >20 越界值）回退
+    //       Shambler；
     //     type 位零 且 bit0=1 → 旧存档要塞银鱼笼（t487 时代 state 恒 1）→ Silverfish；
     //     type 位零 且 bit0=0 → 旧地牢笼 / 兜底 → Shambler（旧版地牢本 Shambler/Bones 随机无从恢复 → 取最
     //       常见型确定性回退）。const 纯函数于入参，不读 World。
@@ -2229,6 +2230,10 @@ private:
     static constexpr int   kBabyShamblerAttackDamage  = 2;    // 小蹒跚者近战伤害（HP；低伤口径 ≈ 成体一半）
     static constexpr float kBabyShamblerSpawnChance   = 0.05f; // 黑暗刷怪蹒跚者翻幼体概率（5%）
     static constexpr float kChickenJockeyChance       = 0.05f; // 小蹒跚者生成时组合小鸡骑士概率（5%）
+    // t1012③ 洞穴蜘蛛（MobCaveSpider）常量：近战伤害 2 HP（机制等价 MC 1.0 cave spider 简单/普通难度
+    //   2 = 比 spider kAttackDamage=3 低一档；毒伤另行走呈现层 applyStatusEffect(EffectPoison) 挂
+    //   t669/t715 既有 m_poisonTimer 中毒链——引擎侧不双扣）。追击速与蜘蛛同速（不设倍率常量）。
+    static constexpr int   kCaveSpiderAttackDamage    = 2;    // 洞穴蜘蛛近战伤害（HP；低伤 + 中毒 DoT 身份）
     // t392 刷怪笼周期刷怪常量（spec「periodically spawns ONE hostile mob while a player is within range;
     //   spawn capped」；机制等价 MC 1.0 刷怪笼：玩家在 16 格内 + 笼周 6 只上限 + 每 ~5-10s 刷一只）。数值为本工程
     //   小世界量身调，非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。独立于 tickHostileLife 的「黑暗刷怪」

@@ -446,6 +446,8 @@ void AudioManager::playHurt()
 //   量级（生物受击反馈；§9 原创合成，与玩家 hurt 区分）。PlayerController.mobAttacked(mobType,crit) 触发。
 void AudioManager::playMobHurt(int mobType)
 {
+    // t1012③ 洞穴蜘蛛（20）受击同族采蜘蛛嘶嗡（同 ambient 路由别名先例，防落通用 yelp）。
+    if (mobType == 20) mobType = 7;
     if (mobType >= 4 && mobType <= 7) {
         // 敌对专属受击音：复用其 ambient idle clip（已在 mobIdleClips[4..7] 加载）。
         d->replay(d->mobIdleClips[size_t(mobType)], m_volume * 0.9f);
@@ -496,6 +498,8 @@ void AudioManager::playMobAmbient(int mobType)
     int idx = mobType;
     // t952 小蹒跚者（mobType 19）同族采蹒跚者哀嚎（幼体 = 成体同音色，无独立合成 clip；区别于 generic 兜底）。
     if (idx == 19) idx = 4;
+    // t1012③ 洞穴蜘蛛（mobType 20）同族采蜘蛛嘶鸣（同族同音色先例；无独立合成 clip，区别于 generic 兜底）。
+    if (idx == 20) idx = 7;
     if (idx < 0 || idx >= 8) idx = 0; // 越界 → generic 兜底（永不静默：spec 缺组用最常见音色）
     d->replay(d->mobIdleClips[size_t(idx)], m_volume * 0.85f);
 }

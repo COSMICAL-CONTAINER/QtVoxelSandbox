@@ -173,7 +173,8 @@ void PlayerProgress::onMobKilled(int mobType)
     ++m_mobsKilled;
     using MT = EntityManager::MobType;
     if (mobType == MT::MobShambler || mobType == MT::MobBones
-        || mobType == MT::MobStalker || mobType == MT::MobSpider)
+        || mobType == MT::MobStalker || mobType == MT::MobSpider
+        || mobType == MT::MobCaveSpider) // t1012③ 洞穴蜘蛛计入「怪物猎人」（敌对型同列）
         unlock("monster_hunter");
     bumpAndEmit();
 }

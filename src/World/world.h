@@ -344,6 +344,10 @@ public:
     //   —— 既有流水邻居若能被提供更低 level（更近源）则下调（旧「只写 air、首达者独占」致中线阶梯边界 → 下调
     //   使中线格 = min(两源距)，多 tick 收敛为 V 形平滑）。MC level 语义 = min(源到该格曼哈顿距离)，两流相遇
     //   天然平滑无硬边界。worldgen 海/湖全为水源 → 稳态零变化；玩家单桶水仅 1 源邻居 → 不升源（同 MC）。
+    //   **t1012④ 水冲刷附着块**：扩散（水平蔓延）/下落落点是附着块族（BlockRegistry::isAttachableBlock
+    //   单一权威：火把各 state / 红石火把 / 蜘蛛网）→ 置 Air + 发 blockDroppedAsItem（dropId 对齐玩家挖除）
+    //   + 同 tick 灌入流水。桶倒水（setBlock 源）与已放置源流动共用本路径（覆盖「桶倒 + 流动冲刷」两面）；
+    //   红石火把被毁经 setWaterSilent 内 notePowerWrite 走既有红石重算链；石头等非附着块不 wash（对照腿）。
     Q_INVOKABLE void tickWaterFlow();
     // t343 岩浆流 tick（spec「岩浆慢流（比水慢）」；机制等价 MC 1.0 主世界岩浆——比水慢 ~30 倍、扩散距离更短、
     //   **无源再生**）。由呈现层 Main.qml 经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到

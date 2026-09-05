@@ -1444,6 +1444,7 @@ int RecipeRegistry::mobTypeForSpawnEgg(int itemId)
     case SpawnEggWolfId:        return EntityManager::MobWolf;        // t785 狼（野生）
     case SpawnEggOcelotId:      return EntityManager::MobOcelot;      // t785 豹猫（野生）
     case SpawnEggBabyShamblerId: return EntityManager::MobBabyShambler; // t952 小蹒跚者（幼体僵尸；生成时掷小鸡骑士组合骰）
+    case SpawnEggCaveSpiderId:   return EntityManager::MobCaveSpider;   // t1012③ 洞穴蜘蛛（0.7× 蓝染 + 中毒 DoT）
     default: return -1;
     }
 }

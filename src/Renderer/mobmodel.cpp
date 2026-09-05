@@ -348,7 +348,7 @@ namespace {
 //   「猪模型套皮」根因同款）。表驱动后：新分支只需在此表补一行 true，漏补时下方 qWarning 即时暴露。
 //   表项与 rebuild 分支号一一对应（1 猪[else 兜底分支] / 2 牛 / 3 羊 / 4 Shambler / 5 Bones / 6 Stalker /
 //   7 Spider / 8 Chicken / 9 Squid / 10 Wolf / 11 Ocelot / 12 SnowGolem / 13 IronGolem / 14 Silverfish /
-//   16 Nightwalker / 17 Emberling / 19 BabyShambler）。
+//   16 Nightwalker / 17 Emberling / 19 BabyShambler / 20 CaveSpider〔与 7 共享蜘蛛几何分支，t1012③〕）。
 //   刻意 false 的号位：0 MobTest（QML 走 UnitCube 不进本类）、15 MobTnt / 18 MobAnvil（死因哨兵 mobType，
 //   非真实 mob——仅 mobAttackedPlayer 载荷用，传入本类必是接线 bug）。
 constexpr bool kValidMobModelType[] = {
@@ -372,6 +372,7 @@ constexpr bool kValidMobModelType[] = {
     /* 17 Emberling */   true,
     /* 18 Anvil 哨兵 */  false,
     /* 19 BabyShambler */ true, // t952 小蹒跚者（幼体僵尸：头大身小比例人形盒）
+    /* 20 CaveSpider */    true, // t1012③ 洞穴蜘蛛（与 7 Spider 共享几何；0.7× 缩放/蓝染在 QML delegate）
 };
 // review24 低危收尾（#35）：表长钉死到头常量（t782 根因复刻防线——MobType 枚举中部插值 / 尾部新增忘补
 //   表行时，本断言 + 矩阵探针「kValidMobTypeCount == EntityManager::MobBabyShambler+1」两级编译期拦截；
@@ -677,13 +678,15 @@ void MobModel::rebuild()
         setMobTex(0, 0, 8, 8, 8);
         addBox( 0.00f,  0.710f,  0.00f, 0.26f, 0.290f, 0.26f, verts, idx, bMin, bMax); // 大头（0.52³，t616 拉高版；t671 再拉高）
         addLegs(-0.6504f, 0.2496f, 0.265f, 0.265f, 0.1325f, 0, 16, 4, 6, 4, m_walkPhase, verts, idx, bMin, bMax); // 四短腿（t671 拉高版，腿底仍贴 -0.90）
-    } else if (m_mobType == 7) {
+    } else if (m_mobType == 7 || m_mobType == 20) {
         // t285/t302 Spider（蜘蛛；机制等价 MC 1.0 蜘蛛，§9 区隔）—— 宽矮躯干 + 前伸小头 + **8 腿**（4 对沿躯干
         //   Z 分布，t302 升级自 t285 简化 4 腿）。腿底本地 y ≈ −0.30 贴 collision 底面（EntityManager halfH=0.30）。
         //   爬墙留后续（t285 spec 未含；本任务只做模型 + 步态动画）。8 腿绕躯干侧面髋枢做 Z 轴步态摆动
         //   （addSpiderLegs），baseDown 外端下倾 + walkPhase 驱动 tetrapod 交替步态。眼由 Main.qml delegate 补
         //   （4 颗红眼，同猪/牛/羊纯色子 Model 模式）。声音 / 受击音由 AudioManager.playMobAmbient/playMobHurt
         //   据 mobType=7 路由（t294 mob_idle_spider 已就绪，本任务复用）。
+        //   t1012③：CaveSpider（mobType 20 洞穴蜘蛛）**共享本几何分支**（机制等价 MC cave spider = 蜘蛛同模
+        //   0.7× 缩比；缩放与蓝染 tint 在 Main.qml delegate 的 scale/baseColor 完成，几何单源零漂移）。
         // R19 C3 UV（MC Spider base 64×32；U1 §7）：head(32,4)8×8×8 / body1(0,12)10×8×12（宽矮躯干=主腹节）/
         //   leg(18,0)16×2×2。本工程蜘蛛几何 = 1 宽躯干 + 1 前伸头 + 8 腿；躯干采 body1、头采 head、腿采 leg。
         g_texW = 64.0f; g_texH = 32.0f;

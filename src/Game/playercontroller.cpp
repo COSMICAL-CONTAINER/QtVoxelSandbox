@@ -2028,7 +2028,8 @@ void PlayerController::attackMob(int entityIndex)
         //   且 t961 显示面 (+M) 无条件显示 = 显示与实战劈叉）。isUndeadFamily 与 undeadBurnsInDaylight
         //   语义有意分立：亡灵族门不含头盔免烧豁免（戴盔亡灵不烧但仍吃对族加成）。
         const bool undead = EntityManager::isUndeadFamily(mobType);
-        const bool arthropod = (mobType == int(EntityManager::MobSpider));
+        const bool arthropod = (mobType == int(EntityManager::MobSpider)
+                                || mobType == int(EntityManager::MobCaveSpider)); // t1012③ 洞穴蜘蛛同属节肢族
         // review0830 #25：对族加成数值改调注册表单支权威 familyAttackBonusFor（每级倍率与显示面同源）。
         if (undead)     dmg += EnchantRegistry::familyAttackBonusFor(heldEnch, EnchantRegistry::UndeadSlay);
         if (arthropod)  dmg += EnchantRegistry::familyAttackBonusFor(heldEnch, EnchantRegistry::ArthropodSlay);
@@ -4266,6 +4267,7 @@ void PlayerController::placeBlock()
                 case EntityManager::MobWolf:        color = QStringLiteral("#c8ccd4"); break; // t785 浅灰蓝（机制等价狼；蛋刷野生）
                 case EntityManager::MobOcelot:      color = QStringLiteral("#e8c890"); break; // t785 奶油底褐纹（机制等价豹猫；蛋刷野生）
                 case EntityManager::MobBabyShambler: color = QStringLiteral("#5a7a42"); break; // t952 亮黄绿幼体色（占位串：小蹒跚者走 MobModel + 贴图不读 color，文档锚同族）
+                case EntityManager::MobCaveSpider:   color = QStringLiteral("#1c3a52"); break; // t1012③ 暗蓝染（机制等价洞穴蜘蛛；占位串走 MobModel 不读 color，文档锚同 Spider 家族）
                 default: break; // 防御（入口条件已排除 -1；表值恒非空 mobType）
                 }
                 // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
@@ -5443,6 +5445,7 @@ int PlayerController::mobTypeEggId(int mobType)
     case EntityManager::MobWolf:     return RecipeRegistry::SpawnEggWolfId;           // t878④（中键复制狼蛋）
     case EntityManager::MobOcelot:   return RecipeRegistry::SpawnEggOcelotId;         // t878④（中键复制豹猫蛋）
     case EntityManager::MobBabyShambler: return RecipeRegistry::SpawnEggBabyShamblerId; // t952（中键复制小蹒跚者蛋）
+    case EntityManager::MobCaveSpider:   return RecipeRegistry::SpawnEggCaveSpiderId;   // t1012③（中键复制洞穴蜘蛛蛋）
     default: return 0; // 无蛋物品的 mob（Test/Golem/Silverfish/Tnt 哨兵）
     }
 }

@@ -522,6 +522,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpawnEggWolfId),        // t785 生物蛋（狼）：右键 → 生成野生狼
         int(RecipeRegistry::SpawnEggOcelotId),      // t785 生物蛋（豹猫）：右键 → 生成野生豹猫
         int(RecipeRegistry::SpawnEggBabyShamblerId), // t952 生物蛋（小蹒跚者）：右键 → 生成幼体僵尸（生成时掷小鸡骑士组合骰）
+        int(RecipeRegistry::SpawnEggCaveSpiderId),   // t1012③ 生物蛋（洞穴蜘蛛）：右键 → 生成洞穴蜘蛛（0.7× 蓝染 + 中毒 DoT）
         // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
         //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
@@ -1184,6 +1185,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggWolfId)   return QStringLiteral("生物蛋（狼）");   // 右键 → 生成野生狼
         if (blockId == RecipeRegistry::SpawnEggOcelotId) return QStringLiteral("生物蛋（豹猫）"); // 右键 → 生成野生豹猫
         if (blockId == RecipeRegistry::SpawnEggBabyShamblerId) return QStringLiteral("生物蛋（小蹒跚者）"); // 右键 → 生成幼体僵尸（t952）
+        if (blockId == RecipeRegistry::SpawnEggCaveSpiderId)   return QStringLiteral("生物蛋（洞穴蜘蛛）"); // 右键 → 生成洞穴蜘蛛（t1012③）
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

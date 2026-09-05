@@ -893,6 +893,7 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x247, QStringLiteral("blaze_spawn_egg.png")},    // 生物蛋（燃烬者；机制等价 blaze egg）
         {0x249, QStringLiteral("wolf_spawn_egg.png")},     // 生物蛋（狼；t785 蛋补全）
         {0x24A, QStringLiteral("ocelot_spawn_egg.png")},   // 生物蛋（豹猫；t785 蛋补全）
+        {0x25E, QStringLiteral("cave_spider_spawn_egg.png")}, // 生物蛋（洞穴蜘蛛；t1012③；现代包有则直用，缺 → spawnEggTint 生成式回退）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},
@@ -971,6 +972,7 @@ const QList<QPair<int, QString>> &mobEntityMap()
         {13, QStringLiteral("iron_golem/iron_golem.png")}, // MobIronGolem → entity/iron_golem/iron_golem.png（子目录；mobTextureSource 命中子目录）
         {16, QStringLiteral("enderman/enderman.png")}, // MobNightwalker → entity/enderman/enderman.png（t727 夜行者，机制等价 MC enderman，§9 改名；眼睛发光层走 entitySource("nightwalker_eyes") 独立取，不占本 body 表项）
         {17, QStringLiteral("blaze/blaze.png")}, // MobEmberling → entity/blaze/blaze.png（t728 燃烬者，机制等价 MC blaze，§9 改名；单头悬浮 - 头盒 UV 从该贴图采样）
+        {20, QStringLiteral("cave_spider/cave_spider.png")}, // MobCaveSpider → entity/cave_spider/cave_spider.png（t1012③ 洞穴蜘蛛，机制等价 MC cave spider，§9 同族；包内缺该 PNG 时安全跳过 → QML 回退蜘蛛共享几何 + 程序蓝染 tint，0.7× 缩放/蓝染在呈现层）
     };
     return kMap;
 }
@@ -2163,6 +2165,12 @@ const EggTint *spawnEggTint(int itemId)
     if (itemId == 0x25D) {
         static const EggTint kBabyShambler = { { 0x5a, 0x7a, 0x42 }, { 0x6a, 0x4a, 0x2a } };
         return &kBabyShambler;
+    }
+    // t1012③ 洞穴蜘蛛：暗蓝染壳 + 红眼斑（cave spider shell #1c3a52 / eye #c81818——蜘蛛蛋同族红眼斑、
+    //   壳色蓝染一档区别蜘蛛近黑壳）。
+    if (itemId == 0x25E) {
+        static const EggTint kCaveSpider = { { 0x1c, 0x3a, 0x52 }, { 0xc8, 0x18, 0x18 } };
+        return &kCaveSpider;
     }
     return nullptr;
 }
