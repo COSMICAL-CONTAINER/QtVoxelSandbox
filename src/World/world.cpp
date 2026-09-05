@@ -7154,16 +7154,21 @@ void World::placeDungeons()
 //        （考据交叉口木柱支撑；**口径分歧登记**：/Structure 子页画 3×3 + 三层角柱，采批头 5×5 双层弃用子页形）。
 //     ④ pieceSlope 斜坡段：折线第二段改对角下切（无楼梯块；地板每 2 步降 1 格，3 宽截面随降，钳底
 //        ≥ 基岩顶+2）——考据斜坡巷道逐层下剖。
-//     ⑤ pieceSpiderRoom 洞穴蛛网室：7×7×3 巷侧支室 + 2 宽连接廊；中央 Spawner state=SpawnerStateSpider
-//        （**偏差登记**：洞穴蛛用 MobSpider，state 编码 blockregistry.h (7<<1)=0x0E，R19.19 批头；
-//        **口径分歧登记**：/Structure 子页画 3×6×3，采批头 7×7 弃用子页形）；
-//        笼 4 邻格三层必网（同考据「笼行蛛网夹持」）+ 内部 hash ~45% 散布（只贴实体块 solidAround 守卫，
-//        考据蛛网密集藏笼）；两短端 WoodFence（考据 layer1 短端栅栏）。
+//     ⑤ pieceSpiderRoom 洞穴蛛网走廊（t1012 ② 用户裁决，弃 t1001 7×7×3 房间形）：巷侧垂直向支廊 =
+//        1-2 宽 × 2-3 高 × 3-6 长窄廊（hash 选型；对齐 /Structure 子页 3×6×3 走廊形口径）+ 满网
+//        （廊体全部空气格 → Cobweb，旧 45% 散布与 solidAround 守卫随房间形废除）+ 笼（Spawner
+//        state=SpawnerStateSpider，偏差登记 MobSpider / blockregistry.h (7<<1)=0x0E 保持）；笼位居廊中，
+//        笼位及其轴两邻格恒 3 层 carve（夹网巢 → 笼周 Chebyshev≤2 三层满网 ≥8 网 → t786「≥8 网 = 矿井
+//        蛛笼」分流口径在任意宽 × 高 × 长选型下都不破）；旧 7×7 双短端栅栏随房间形废除（走廊形无短端，
+//        口径登记）。
 //     ⑥ 矿井箱：考据「轨上运输矿车」→ **偏差登记：箱落地轨旁**（自已铺 railCells 取一格，四向首个空地
 //        落 Chest + ChestStateMineshaftFlag → isMineshaftChest 首开填充矿井战利品）。
 //   保留 t565 既有口径：网格 36 / 40% 频率、Y<48、矿石 15%、hashColumn/hashVoxel 确定性（PLAN §2-K）。
 //   铺后统一经 BlockRegistry::railConnections 算连接 state（直 / 拐角 / 十字形态自动得出，mesher 据此切
-//   贴图；与运行期 checkRailOnEdit 同一权威）。地板按矿井 hash（(r>>20)&1）选 Planks / Stone（t565 ⑤）。
+//   贴图；与运行期 checkRailOnEdit 同一权威）。t1012 ① 地板政策：嵌岩段（下方实地）直接 Stone 不铺木板、
+//   洞穴空腔段（下方被 carveCaves 掏空）铺 Planks 桥面保可走（用户口径；t565 ⑤ 全矿井 hash 二选一废除）。
+//   t1012 ③ 段 B 推进回归修复：pieceCorridor 恢复 t565 推进条件 `leg==1 || step>0`（t1001 重写回归 →
+//   段 B 不推进、L 第二腿缺失 / 斜坡段同柱逐层坑，见 pieceCorridor 内注释）。
 //   巷道被周围实体岩天然封闭 → 内部无天光 → 黑暗 + 火把点光（机制等价 MC 1.0 矿井环境）。与既有洞穴重叠时
 //   （carveCaves 已挖空同位）→ 结构仍画出（矿井叠加于洞穴，同 placeDungeons 墙体被洞穴截断）。
 //   t1011 光源归因登记（用户实测「矿井里见光但 F3 bl:0 没看到火把」）：bl 通道非零必须近处有火把（火把
@@ -7192,10 +7197,10 @@ void World::placeMineshaft()
     constexpr unsigned kCobwebPct   = 12u;    // 巷道顶角蛛网概率（每段每侧 ~12%；沿用 t565）
     constexpr unsigned kOrePct      = 15u;    // 巷壁矿石概率（每段每侧 ~15%；沿用 t565）
     constexpr unsigned kTorchPct    = 55u;    // 支撑组火把概率（每组 ~55% → 考据「火把部分巷道」）
-    constexpr unsigned kSpiderRoomPct = 60u;  // 巷道事件：蛛网室支室概率（余下 25% 交叉口 / ~15% 斜坡段）
+    constexpr unsigned kSpiderRoomPct = 60u;  // 巷道事件：蛛网走廊支廊概率（余下 25% 交叉口 / ~15% 斜坡段）
     constexpr unsigned kIntersectionPct = 25u; // 巷道事件：交叉口概率
-    constexpr int kSpiderHalf       = 3;      // 蛛网室半幅（7×7 footprint）
-    constexpr unsigned kSpiderWebPct = 45u;   // 蛛网室内部蛛网散布概率（+ 笼邻格必网 → 密度 ~50%）
+    constexpr int kSpiderCorrLenMin = 3;      // t1012 ② 蛛网走廊长度下限（3-6 长 hash 选型）
+    constexpr int kSpiderCorrLenMax = 6;      // t1012 ② 蛛网走廊长度上限
     constexpr int kMargin           = 16;     // 留边界（折线巷道两段 + 起点厅半径 → 较大余量防越界；极端越界由 carve 守卫钳制）
 
     const int mineSeed = m_seed + 15047; // 矿井哈希偏移（与其它 worldgen hashColumn 解耦）
@@ -7221,19 +7226,25 @@ void World::placeMineshaft()
             const int yRange = yHi - yLo + 1;
             const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 地板 y（起点厅 / 巷道底面）
 
-            // t565 ⑤ 地板材质：按矿井 hash 二选一（Planks 旧观感 / Stone 石底变体）。全矿井统一。
-            const quint8 floorBlock = ((r >> 20) & 1u) ? BlockRegistry::Stone : BlockRegistry::Planks;
+            // t1012 ① 地板政策（用户口径，t565 ⑤「全矿井 hash 二选一」废除）：材质不再按矿井 hash 统一，
+            //   而随每列下方实际承载切换（carveCell 内逐格判定）——嵌岩段（下方实地）直接 Stone 不铺木板；
+            //   洞穴空腔段（下方被 carveCaves 掏空）铺 Planks 桥面保可走。
 
             // t565 ④ 铁轨铺设记录：铺完统一算连接 state（直 / 拐角 / 十字形态）；t1001 ⑥ 矿井箱
             //   「落地轨旁」亦从本表取锚（考据轨上运输矿车 → 偏差落地等价）。
             std::vector<std::array<int, 3>> railCells;
 
             // 逐格铺地板 + 清空气（px,pz 列，地板 y0、内部空气 y0+1..y0+roomH；不动 Bedrock；越界钳制）。
+            //   t1012 ① 地板政策：下方 Air = 洞穴空腔 → Planks 桥面；下方实地（默认嵌岩）→ Stone 石底。
             const auto carveCell = [&](int px, int pz, int y0, int roomH) {
                 if (px < 0 || pz < 0 || px >= m_width || pz >= m_depth) return; // 防御（margin 已保证不越界）
                 const quint8 fb0 = m_chunks.blockAt(px, y0, pz);
-                if (fb0 != BlockRegistry::Bedrock)
-                    m_chunks.setBlock(px, y0, pz, floorBlock);
+                if (fb0 != BlockRegistry::Bedrock) {
+                    const bool overCavity = y0 > 0
+                        && m_chunks.blockAt(px, y0 - 1, pz) == BlockRegistry::Air;
+                    m_chunks.setBlock(px, y0, pz,
+                                      overCavity ? BlockRegistry::Planks : BlockRegistry::Stone);
+                }
                 for (int dy = 1; dy <= roomH; ++dy) {
                     const int yy = y0 + dy;
                     if (yy >= m_height) break;
@@ -7253,53 +7264,41 @@ void World::placeMineshaft()
             // ── t1001 piece 表（顺序：pieceSpiderRoom / pieceIntersection / pieceCorridor 定义 →
             //    pieceStartRoom 落地并放射巷道 → 统一重算轨连接 → 矿井箱落地轨旁）──
 
-            // ⑤ pieceSpiderRoom 洞穴蛛网室：7×7×3 巷侧支室 + 2 宽连接廊；中央 Spawner
-            //   state=SpawnerStateSpider（偏差登记 MobSpider / blockregistry.h (7<<1)=0x0E）；
-            //   笼 4 邻格三层必网 + 内部 ~45% hash 散布（只贴实体块 → solidAround 守卫）；两短端栅栏。
+            // ⑤ pieceSpiderRoom 洞穴蛛网走廊（t1012 ② 走廊形）：1-2 宽 × 2-3 高 × 3-6 长窄廊 + 满网 +
+            //   笼（Spawner state=SpawnerStateSpider，偏差登记 MobSpider / 0x0E 保持）；笼位居中、笼位 ±1
+            //   轴邻格恒 3 层夹网巢（笼周满网 ≥8 → t786 分流口径不破）。
             const auto pieceSpiderRoom = [&](int ax2, int az2, int dirIdx) {
-                const int ppx = (dirIdx < 2) ? 0 : 1; // 支室轴 = 巷道垂直向（dir 0/1 = X 向巷道 → Z 向支室）
+                const int ppx = (dirIdx < 2) ? 0 : 1; // 支廊轴 = 巷道垂直向（dir 0/1 = X 向巷道 → Z 向支廊）
                 const int ppz = (dirIdx < 2) ? 1 : 0;
-                const int sgn = (hashVoxel(mineSeed ^ 0x5ED1u, ax2, sy, az2) & 1u) ? 1 : -1; // 巷道哪侧
-                const int rx2 = ax2 + ppx * sgn * (kSpiderHalf + 4); // 房心（留 2 格连接廊）
-                const int rz2 = az2 + ppz * sgn * (kSpiderHalf + 4);
-                for (int off = 2; off <= kSpiderHalf + 1; ++off) { // 连接廊（2 宽 × 3 高）
-                    const int gx = ax2 + ppx * sgn * off, gz = az2 + ppz * sgn * off;
-                    for (int w2 = -1; w2 <= 0; ++w2)
-                        carveCell(gx + ppz * w2, gz + ppx * w2, sy, kTunnelH);
-                }
-                for (int dx2 = -kSpiderHalf; dx2 <= kSpiderHalf; ++dx2) // 房体 7×7×3 + 地板
-                    for (int dz2 = -kSpiderHalf; dz2 <= kSpiderHalf; ++dz2)
-                        carveCell(rx2 + dx2, rz2 + dz2, sy, kTunnelH);
-                putStruct(rx2, sy + 1, rz2, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSpider);
-                const auto solidAround = [&](int px2, int py2, int pz2) { // 蛛网只贴实体块（6 邻任一实心）
-                    static const int kNb6[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
-                                                    { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
-                    for (const auto &nb : kNb6) {
-                        const quint8 b = m_chunks.blockAt(px2 + nb[0], py2 + nb[1], pz2 + nb[2]);
-                        if (b != BlockRegistry::Air && b != BlockRegistry::Cobweb) return true;
-                    }
-                    return false;
+                const int tdx = (dirIdx == 0) ? 1 : (dirIdx == 1) ? -1 : 0; // 巷轴（廊宽展开向）
+                const int tdz = (dirIdx == 2) ? 1 : (dirIdx == 3) ? -1 : 0;
+                const int sgn = (hashVoxel(mineSeed ^ 0x5ED1u, ax2, sy, az2) & 1u) ? 1 : -1; // 巷道哪侧（t1001 盐保留）
+                const quint32 dh = hashVoxel(mineSeed ^ 0x5C1Au, ax2, sy, az2); // 走廊形选型 hash（t1012 盐）
+                const int snw = 1 + int(dh & 1u);         // 宽 1-2
+                const int snh = 2 + int((dh >> 2) & 1u);  // 高 2-3
+                const int snl = kSpiderCorrLenMin
+                    + int((dh >> 4) & 3u) % (kSpiderCorrLenMax - kSpiderCorrLenMin + 1); // 长 3-6
+                const int cageOff = 2 + snl / 2;          // 笼位（廊体 = off 2..snl+1，居中）
+                const auto nestH = [&](int off) {         // 笼位 ±1 轴邻格恒 3 层（夹网巢）
+                    return (off >= cageOff - 1 && off <= cageOff + 1) ? 3 : snh;
                 };
-                for (int dx2 = -kSpiderHalf; dx2 <= kSpiderHalf; ++dx2) { // 蛛网：笼邻必网 + ~45% 散布
-                    for (int dz2 = -kSpiderHalf; dz2 <= kSpiderHalf; ++dz2) {
-                        if (dx2 == 0 && dz2 == 0) continue; // 笼柱不覆网
-                        const int adx2 = dx2 < 0 ? -dx2 : dx2, adz2 = dz2 < 0 ? -dz2 : dz2;
-                        for (int dy2 = 1; dy2 <= kTunnelH; ++dy2) {
-                            const int px2 = rx2 + dx2, py2 = sy + dy2, pz2 = rz2 + dz2;
-                            const bool nearCage = (adx2 + adz2 == 1); // 笼 4 邻格三层必网
-                            if (!nearCage
-                                && (hashVoxel(mineSeed ^ 0xABE5u, px2, py2, pz2) % 100u) >= kSpiderWebPct)
-                                continue;
+                for (int off = 2; off <= snl + 1; ++off)  // 廊体 carve（穿墙 2 格起）
+                    for (int w2 = 0; w2 < snw; ++w2)
+                        carveCell(ax2 + ppx * sgn * off + tdx * w2,
+                                  az2 + ppz * sgn * off + tdz * w2, sy, nestH(off));
+                putStruct(ax2 + ppx * sgn * cageOff, sy + 1, az2 + ppz * sgn * cageOff,
+                          BlockRegistry::Spawner, BlockRegistry::SpawnerStateSpider);
+                for (int off = 2; off <= snl + 1; ++off) { // 满网：廊体全部空气格 → Cobweb（笼格 / 基岩不动）
+                    for (int w2 = 0; w2 < snw; ++w2)
+                        for (int dy2 = 1; dy2 <= nestH(off); ++dy2) {
+                            const int px2 = ax2 + ppx * sgn * off + tdx * w2;
+                            const int pz2 = az2 + ppz * sgn * off + tdz * w2;
+                            const int py2 = sy + dy2;
+                            if (py2 >= m_height) continue;
                             if (m_chunks.blockAt(px2, py2, pz2) != BlockRegistry::Air) continue;
-                            if (!solidAround(px2, py2, pz2)) continue; // 蛛网只贴实体块
                             m_chunks.setBlock(px2, py2, pz2, BlockRegistry::Cobweb, 0);
                         }
-                    }
                 }
-                putStruct(rx2 + ppx * kSpiderHalf, sy + 1, rz2 + ppz * kSpiderHalf,
-                          BlockRegistry::WoodFence, 0); // 两短端栅栏（考据 layer1 短端）
-                putStruct(rx2 - ppx * kSpiderHalf, sy + 1, rz2 - ppz * kSpiderHalf,
-                          BlockRegistry::WoodFence, 0);
             };
 
             // ③ pieceIntersection 交叉口：5×5 通高开口 + 四角 WoodFence 双层双柱（sy+1..sy+2）+
@@ -7334,7 +7333,9 @@ void World::placeMineshaft()
                 bool slopeLegB = false; // ④ pieceSlope：段 B 对角下切标记
                 int curY = sy;          // 斜坡段当前地板 y
                 // 起点：段 0 = 起点厅房缘外一格（+ 向 +kRoomHalf / - 向 -(kRoomHalf+1)）；段 1 = 段 A
-                //   末端续接（先推进再 carve，免重复刻）。
+                //   末端续接（t1012 ③ 回归修复：恢复 t565 推进条件 `leg==1 || step>0` —— 段 B 首步自段 A
+                //   末格沿新向推进入拐角肘格；t1001 重写误改成段 B 入腿预推进 + `leg==0 && step>0` →
+                //   段 B 整腿不推进、lenB 步重复刻同一截面（L 折线第二腿缺失 / 斜坡段变同柱逐层坑））。
                 int ax = cx + (dx > 0 ? kRoomHalf : (dx < 0 ? -(kRoomHalf + 1) : 0));
                 int az = cz + (dz > 0 ? kRoomHalf : (dz < 0 ? -(kRoomHalf + 1) : 0));
                 for (int leg = 0; leg < 2; ++leg) {
@@ -7343,11 +7344,10 @@ void World::placeMineshaft()
                     if (leg == 1) {
                         const int ndx = turnSign * dz, ndz = -turnSign * dx; // 转向 ±90°：(dx,dz) → (dz,-dx) × turnSign
                         dx = ndx; dz = ndz;
-                        ax += dx; az += dz;
                         inSlope = slopeLegB;
                     }
                     for (int step = 0; step < legLen; ++step) {
-                        if (leg == 0 && step > 0) { ax += dx; az += dz; }
+                        if (leg == 1 || step > 0) { ax += dx; az += dz; } // t565 推进条件（t1012 ③ 恢复；段 B 逐格推进）
                         if (inSlope && (step & 1) != 0) // pieceSlope：每 2 步地板降 1 格（对角下切，无楼梯块）
                             curY = std::max(curY - 1, kBedrockTop + 2); // 钳底不贴基岩
                         for (int w = -1; w <= 1; ++w) // 3 宽截面（地板 + kTunnelH 高空气）
@@ -7390,7 +7390,7 @@ void World::placeMineshaft()
                         //   斜坡段同样布设、curY 随地板降 → 斜坡段不再零火把全黑）。主形态 = 墙插（TorchAttach
                         //   墙插编码，mesher 倾柄位姿 / finishMiningAt 附着格定位同运行期墙火把）；**豁口回退**
                         //   = 巷壁被既有洞穴掏空（carveCaves 同位重叠 → w=±2 顶层空气，墙插守卫拒绝）时改落
-                        //   贴面格地板火把（TorchFloor，支撑 = 地板 floorBlock，洞穴合并段照明不缺位 —— 用户
+                        //   贴面格地板火把（TorchFloor，支撑 = 地板 Stone/Planks，洞穴合并段照明不缺位 —— 用户
                         //   「见光无火把」巷道恰多为此形态）。仅空气格才落（不出浮空火把/不覆轨网）。先于本步
                         //   蛛网顶角判定 → 同格火把优先（蛛网仅空气格）。密度账：柱顶 55%×2 侧 + 跨中成对
                         //   必挂（墙插或地板回退）→ 相邻火把步距 ≤ 2 格，任何走廊位置火把本体或其 14 级光斑
