@@ -4947,7 +4947,9 @@ void PlayerController::placeBlock()
         const int lf = BlockRegistry::ladderFaceFromNormal(m_hitNx, m_hitNy, m_hitNz);
         if (lf < 0) return; // ① 非侧面（顶/底面）→ 拒
         const quint8 hitBlock = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
-        if (!BlockRegistry::isFullCube(hitBlock)) return; // ② 非完整立方支撑 → 拒
+        // t1017 附着族同口径：仙人掌不作附着支撑（梯贴墙 = 附着语义；Cactus ShapeFull 恰过 isFullCube
+        //   门 = 缺口，显式排除，与火把族 torchSupportBlock / 机关预检同批同口径）。
+        if (!BlockRegistry::isFullCube(hitBlock) || hitBlock == BlockRegistry::Cactus) return; // ② 非完整立方 / 仙人掌支撑 → 拒
     }
     // t662 机关方块（Lever / WoodButton / StoneButton）放置预检（机制等价 MC 1.0 lever/button 须贴完整方块面）：
     //   ① 命中面外法线合法（顶面贴地 / 四向侧面贴墙；底面 ny<0 = 天花板挂装 v1 不支持 → 拒）；
@@ -4957,7 +4959,11 @@ void PlayerController::placeBlock()
         || m_selectedBlock == BlockRegistry::WoodButton
         || m_selectedBlock == BlockRegistry::StoneButton) {
         if (BlockRegistry::mechAttachFromNormal(m_hitNx, m_hitNy, m_hitNz) < 0) return; // 底面 → 拒
-        if (!BlockRegistry::isFullCube(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) return; // 非完整支撑 → 拒
+        // t1017 附着族同口径：仙人掌不作附着支撑（机制等价 MC 仙人掌非可附着面；按钮虽只挂完整立方，
+        //   Cactus 恰 ShapeFull → isFullCube 恒真 = 缺口，显式排除。与 torchSupportBlock 的 Cactus
+        //   排除同批同口径 —— 附着族支撑黑名单一致）。
+        const quint8 mechSup = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
+        if (!BlockRegistry::isFullCube(mechSup) || mechSup == BlockRegistry::Cactus) return; // 非完整支撑 / 仙人掌 → 拒
     }
     // t394/t445 仙人掌放置预检：（1）仅可放在沙子或仙人掌正上方（机制等价 MC 1.0 仙人掌须沙地 / 仙人掌支撑）。
     //   目标格的下方须为 Sand 或 Cactus；否则拒绝放置（不挥）。命中方块顶面放置 → target 下方 = 命中方块
