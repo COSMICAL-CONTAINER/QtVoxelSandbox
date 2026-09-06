@@ -301,6 +301,11 @@ Window {
     //   逐格平铺；细分成 per-block 子格又与 culled 输出一致、无顶点收益）→ t183 默认 false 恢复逐格清晰贴图。
     //   逐格清晰 + 顶点预算兼得需纹理数组（自研 RHI，dev-plan 偏差 1/2）。ESC 设置面板仍可手动开 greedy 对比。
     property bool greedyMeshing: false
+    // t1023 AO 环境光遮蔽开关（平滑光照调研首批小步单项）：true → 地形段逐格 culled 路径角点
+    //   接触阴影（经典 MC AO，kAoFactor 曲线，墙根/拐角暗角）。**默认 false 出厂关**——待用户实机
+    //   目视确认观感与帧成本后另单翻默认（t1023 报告；同 t183 greedy 的「开关先行、默认保守」先例）。
+    //   ESC 视频设置开关绑此；AO 只采样地形段逐格 culled 路径（greedy/流体/异形段不采样）。
+    property bool aoEnabled: false
     // t223/tXXX 水贴图动画 phase（flipbook 帧索引）：**已废弃删除**（tXXX 水动画重建消除，静态水单帧）——
     //   旧属性驱动 2s 一次水段全量重建（Swamp 261 段/次，mesh 重建风暴第二根因）。waterAnimTimer 随动删除，
     //   水段 mesh 恒用 phase 0 帧（C++ 侧 setWaterAnimPhase 也不再触发重建；属性 + Timer 无消费方即删）。
@@ -4660,6 +4665,7 @@ Window {
                     sunDir: worldClock.sunDir
                     shadowsEnabled: window.shadowsEnabled
                     greedyMeshing: window.greedyMeshing
+                    aoEnabled: window.aoEnabled // t1023：AO 接触阴影（地形段逐格 culled 路径消费；默认关）
                     dayMul: window.skyDayMul  // R19 B6：昼夜天光乘子（仅乘天光分量，方块光时间不变）
                     chunkInRange: terrainModel.chunkInRange // t472：视距门控传给 mesher（远端跳过 sun/water/编辑重建）
                     // review28 #4：t860 折叠开关绑 window.cutoutSegmentRestored 总开关（false=折叠全收；
@@ -6590,9 +6596,15 @@ Window {
                         materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#ff3030" }
                     }
                     // 绕 Y 匀速自转（~3s 一圈），loops 无限。
-                    NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite }
-                    // 上下浮动 0.15 格（~2s 周期），InOutSine 近似 sin 手感（spec：上下浮动 sin）。
+                    // t1023 性能门控：`Animation on` 永不停表（QML visible:false 不暂停动画，t561 火焰同款
+                    //   教训；t1007 登记的治理路径 b）——槽池 200 delegate 全生命期恒跑 rotY+bobY 两条无限
+                    //   动画（含空槽 / 拾取后的隐藏 delegate）= 恒定 ~2×槽数条动画烧 GUI 帧。`running:
+                    //   entRoot.visible` 门控（同 t696 附魔壳呼吸的 established 模式）：隐藏即停表，复用重显
+                    //   时 from 重启（槽复用 = 新实体，转角归零即新物品语义）。
+                    NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite; running: entRoot.visible }
+                    // 上下浮动 0.15 格（~2s 周期），InOutSine 近似 sin 手感（spec：上下浮动 sin）。t1023 同上门控。
                     SequentialAnimation on bobY {
+                        running: entRoot.visible
                         loops: Animation.Infinite
                         NumberAnimation { from: 0; to: 0.15; duration: 1000; easing.type: Easing.InOutSine }
                         NumberAnimation { from: 0.15; to: 0; duration: 1000; easing.type: Easing.InOutSine }
@@ -9665,9 +9677,10 @@ Window {
                             }
                         }
                         // 飞行自旋（t807 面内 roll：billboard 恒正对相机，图标绕自身 Z 原地打转读作「翻滚的眼珠」）；
-                        //   碎裂窗口由缩放淡出覆盖视觉。
+                        //   碎裂窗口由缩放淡出覆盖视觉。t1023：mob 族同向门控（t1007 治理路径 c）——entKind
+                        //   非 EnderEye 的 47 槽 delegate 里本动画也恒跑；running 绑本节点 visible（kind 门控）。
                         property real spin: 0
-                        NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite }
+                        NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite; running: endereyeNode.visible }
                         Node { // 珠体承载层（碎裂缩放作用层；billboard 朝相机旋转在 Model 上，均匀缩放与旋转可交换）
                             scale: Qt.vector3d(endereyeNode.shatterScale, endereyeNode.shatterScale, endereyeNode.shatterScale)
                             Model {
@@ -9707,8 +9720,9 @@ Window {
                         id: enderpearlNode
                         visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.EnderPearl) : false }
                         // 飞行自旋（t807 面内 roll：billboard 恒正对相机，图标绕自身 Z 打转；珠形近对称仅高光微动）。
+                        //   t1023：mob 族同向门控（同 endereyeNode）。
                         property real spin: 0
-                        NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
+                        NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: enderpearlNode.visible }
                         Model {
                             geometry: BillboardQuad {}
                             scale: Qt.vector3d(0.30, 0.30, 0.30) // 同掉落物材料段 billboard 统一尺寸
@@ -12291,6 +12305,26 @@ Window {
                                 onClicked: window.shadowsEnabled = !window.shadowsEnabled }
                         }
                         Text { text: window.shadowsEnabled ? "开（软影，较吃性能）" : "关（无影，更快 — 测卡顿用）"
+                               color: "#cccccc"; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    // t1023 AO 环境光遮蔽开关（平滑光照首批小步；默认关，同阴影开关的 Row 自绘模式）：
+                    //   开 → 地形段墙根 / 拐角接触阴影暗角（经典 MC AO 曲线 1.0/0.8/0.6/0.5）；
+                    //   关 → 顶点色与 t1023 前逐字节一致（因子恒 1.0 零开销旁路，可回退 = 翻本开关）。
+                    Text { text: "环境光遮蔽（AO 接触阴影）"
+                           color: "#7fae7f"; font.pixelSize: 12 }
+                    Row {
+                        spacing: 8
+                        Rectangle {
+                            id: aoToggleBox
+                            width: 22; height: 22; radius: 4
+                            color: window.aoEnabled ? "#2a5a3a" : "#2a2a2a"
+                            border.color: window.aoEnabled ? "#5fe57f" : "#555555"; border.width: 1
+                            Text { anchors.centerIn: parent; text: window.aoEnabled ? "✓" : ""
+                                   color: "#7fe57f"; font.pixelSize: 16; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: window.aoEnabled = !window.aoEnabled }
+                        }
+                        Text { text: window.aoEnabled ? "开（墙根/拐角暗角，稍吃重建）" : "关（默认，平坦顶点光）"
                                color: "#cccccc"; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
                     }
                     // t470 渲染距离滑条（用户报 9 FPS 主因 = 全 100 chunk 渲染无视距；动态调可见 chunk 半径）。

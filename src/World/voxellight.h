@@ -41,6 +41,23 @@ constexpr int   kMaxShadow = 2;     // 步进上限 2 格（每顶点 2×4=8 次
 constexpr float kVcMin = 0.08f; // 暗部地板最低亮度（洞穴/阴影最低，仍远低于火把光池 0.93 保持对比）
 constexpr float kVcMax = 1.0f;
 
+// t1023（R19.20）AO 环境光遮蔽因子曲线（平滑光照调研的首批小步单项）：角点邻域实体遮挡数
+//   0..3 → 顶点色乘子（接触阴影暗角；1 档 20% 压暗、2 档 40%、夹死 3 档 50% 封底）。
+//   经典 MC AO 规则：两侧邻格**同时**被实体遮挡时钳 3（角点不再叠加）——防薄墙 / 凹内角处
+//   角点被双侧+对角三重遮挡过度压黑。mesher（chunkgeometry 地形段 culled 路径）单一消费方；
+//   曲线在此单点定义，与 kVcMin/kVcMax 同族（调一处全场景同步）。
+//   默认关（ChunkGeometry.aoEnabled=false 出厂）——待用户实机目视确认后另单翻默认（t1023 报告）。
+constexpr float kAoFactor[4] = { 1.0f, 0.8f, 0.6f, 0.5f };
+
+// t1023 角点 AO 因子：occSide1/occSide2 = 面邻格基沿面内两轴 ±1 的两侧邻格实体遮挡，
+//   occCorner = 对角格。双侧同遮 → 钳 3（不数角点）。
+inline float aoCornerFactor(bool occSide1, bool occSide2, bool occCorner)
+{
+    const int count = (occSide1 && occSide2) ? 3
+                                             : (int(occSide1) + int(occSide2) + int(occCorner));
+    return kAoFactor[count];
+}
+
 // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图 PCF 0..1 软过渡）。
 //   给定世界空间顶点 (wx,wy,wz)，沿太阳「水平方向」步进 kMaxShadow 格，逐步采样路径所过列的列顶实面
 //   （= 该列正交深度；t360 列顶实面世界 y = heightmap + solidTopOffset，按方块真实模型高度：整立方 1.0 /
