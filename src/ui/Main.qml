@@ -1,5 +1,10 @@
 import QtQuick
 import QtQuick3D
+// t1022：设置面板 Flickable 的 ScrollBar（Attached Property）来自 QtQuick.Controls——纯 QML 模块不经
+//   C++ 链接（同 Inventory.qml t127 先例，windeployqt --qmldir 扫 import 自动部署）。主文件历史零
+//   Controls import（attached 名字解析是运行时的，qmlcachegen 编译期不报错、运行时才炸——本次冒烟抓到）。
+//   文件内类型名与 Controls 无重叠（无内联同名组件），限定到本文件安全。
+import QtQuick.Controls
 // t415c 资源包目录选择器（FolderDialog；原生文件夹拾取，MC 式 UX）。
 import QtQuick.Dialogs
 // t41：QML 源文件迁入 src/ui/ 子目录后，不再位于模块根 → 丢失对模块 C++ 类型
@@ -137,6 +142,14 @@ Window {
     //   回主菜单 / 点击恢复游戏时一并复位。属纯呈现态，PLAN §2 分层（UI 层）。
     // pause-menu ESC 关：settingsOpen 为 true 时按 ESC → settingsOpen=false（回暂停菜单，不直接 unpause）。
     property bool settingsOpen: false
+    // t1022：设置面板任何路径关闭（Esc / 返回 / 回主菜单 / 死亡接管）时若键位录制未收尾 → 复位录制态
+    //   并归还 keyInput 焦点（录制器独占键盘期间面板被关，若不归还焦点游戏键将全部失聪）。
+    onSettingsOpenChanged: {
+        if (!settingsOpen && settingsPanelT22.recordingAction !== "") {
+            settingsPanelT22.recordingAction = ""
+            keyInput.forceActiveFocus()
+        }
+    }
     // pause-menu 暂停菜单「进度」按钮子态（5 行布局行2）：显成就列表（progress.achievements() delegate +
     //   revision 触碰刷新）。仅暂停叠层有意义（!captured）；Esc / 返回按钮关。纯呈现态，PLAN §2 分层（UI 层）。
     //   t840：成就面板回**居中模态**（t790 右下角 dock 是理解偏差——用户原意是「新建」右下角快捷悬浮栏
@@ -2069,6 +2082,13 @@ Window {
     //   只读本地 gitignored 包 PNG，零 MC 资产进 qrc（PLAN §9 红线）。无包时引擎仍用程序生成图集正常工作。
     ResourcePackManager { id: resourcePack }
 
+    // t1022 键位映射表（Core 层，QML 门面）：「动作 → Qt 键」单一权威 + settings.json "keyBindings"
+    //   节持久化（缺节/缺行/坏值 → 全默认，旧档向后兼容）。消费两侧同权威：keyInput 各分支经
+    //   keybindsMgr.keyFor(action) 比较当前映射（信号 handler 内直调，t976/t977 AOT 教训）；
+    //   引擎侧经 player.keybinds 注入 → setKey 入口 canonicalKey 规范化。设置页键位组（录制捕获 /
+    //   冲突拒收提示 / 恢复默认）经 applyBinding/resetDefaults 编辑，revision 驱动行显示刷新。
+    KeybindManager { id: keybindsMgr }
+
     // t155 编辑活跃期 → 太阳步进节流桥接：World 任一编辑（破 / 放 / 落沙着地 / 尺寸初始化）发 worldChanged；
     //   呈现层把「编辑活跃」反馈给 WorldClock.noteEditActivity()，使其在编辑活跃期（近 1.5s 内有编辑）跳过
     //   太阳跨步全量 mesh 重建（避免与编辑即时重建争帧）。纯 QML 桥接，不引入 C++ 跨层依赖
@@ -3040,6 +3060,8 @@ Window {
         dispenserStore: dispenserStore
         // t1013：注入箱子矿车内容键存储（进世界 convertMineshaftChests 转正 / 回生链用；同 peer VM 注入模式）。
         chestStore: chestStore
+        // t1022：注入键位映射表（setKey 入口 canonicalKey 规范化 —— 运动键重映射全局生效的引擎侧权威）。
+        keybinds: keybindsMgr
         // t889：世界模拟总闸绑 window.worldRunning —— 硬档 tickImpl 早退（实体桶 / step 全停）+ 复跑顺延
         //   墙钟寿命；软档 step 零输入照跑（照坠 / 照烧 / 照溺）。见 PlayerController .h 属性头注释。
         worldRunning: window.worldRunning
@@ -11721,6 +11743,10 @@ Window {
     }
 
     // 键盘：G 切模式、1–9 直选 hotbar 槽、WASD/Space/Shift 传给控制器。Esc 由 C++ 事件过滤器拦截。
+    // t1022：可映射动作（chat/inventory/drop/camera/debugTime/modeCycle/debugOverlay 七个 UI 动作 +
+    //   运动六键经透传 → player.keybinds canonicalKey 规范化）全部经 keybindsMgr.keyFor(action) 比较
+    //   当前映射（信号 handler 内 Q_INVOKABLE 直调，t976/t977 AOT 教训）；Esc / 数字 1-9 / Enter 别名 /
+    //   F3 组合弦 B、G / Ctrl 整栈修饰位为固定约定不入映射表。
     // 注：原 1/2/3 用于直选模式，现让位给 hotbar（t06 验收要求 1–9 选槽）；模式切换统一由 G 循环
     // （N 与数字键无冲突认知，但 G 是更通用的「Game mode」约定，避免与未来键位争用）。
     // 切换在指针捕获与未捕获时都可用 —— keyInput 始终持焦点（未捕获时也可预选槽）。
@@ -11747,7 +11773,9 @@ Window {
             //   重生 / 回主菜单）唯一可达的指针逃生口。若按「死亡态 ESC 无效」给该 C++ 分支加 m_dead
             //   拒绝 → 纵深场景真死锁（视角冻结 + 指针不可见 + ESC 无效 + 按钮不可点）。分工：QML 闸门管
             //   菜单路由，C++ eventFilter 管指针逃生（playercontroller.cpp ESC 分支旁有同义注释）。
-            if (playerState.dead && e.key !== Qt.Key_T && e.key !== Qt.Key_Return
+            //   t1022：T 放行键改键位映射表查询（chat 重绑后死亡态放行新键；Enter/Enter 固定别名不变）。
+            if (playerState.dead && e.key !== keybindsMgr.keyFor("chat")
+                    && e.key !== Qt.Key_Return
                     && e.key !== Qt.Key_Enter) {
                 e.accepted = true; return
             }
@@ -11756,8 +11784,8 @@ Window {
             //   故聊天打开键不与 Esc/E 冲突（聊天开着时 Esc 由 chatInput 自己处理关聊天，见下方 TextField）。
             //   聊天开期间 keyInput 不持焦点（chatInput 持焦）→ movement 键不透传 player（无需额外守卫，
             //   与背包面板同模式）。**t691：死亡态放行**（开聊天看 / 发遗言；chatInput 独立持焦，运动键
-            //   不透传——死亡尸体不受聊天焦点影响）。
-            if ((e.key === Qt.Key_T || e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+            //   不透传——死亡尸体不受聊天焦点影响）。t1022：聊天键走映射表（chat 可重绑；Enter 别名固定）。
+            if ((e.key === keybindsMgr.keyFor("chat") || e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                     && window.appState === "playing"
                     && !window.inventoryOpen && !window.craftingTableOpen && !window.furnaceOpen && !window.chestOpen
                     && !window.enchantingTableOpen && !window.anvilOpen && !window.dispenserOpen   // t549：三 UI 开时 T 不开聊天（先关面板）
@@ -11768,7 +11796,8 @@ Window {
             // 背包（t18）：E 开关。Esc 在背包打开时关闭（captured=false 时 Esc 不被 C++ 事件过滤器
             // 拦截，落到 QML；captured=true 时 Esc 仍走 C++ → release → 暂停叠层，原行为不变）。
             // t50：工作台面板同样 E/Esc 关（与背包互斥）。t87：熔炉面板亦同（E / Esc 关）。
-            if (e.key === Qt.Key_E && window.appState === "playing") {
+            // t1022：背包键走映射表（inventory 可重绑）。
+            if (e.key === keybindsMgr.keyFor("inventory") && window.appState === "playing") {
                 if (window.resourceBrowserOpen) window.resourceBrowserOpen = false // review-L16：浏览器盖背包 → E 先关它
                 else if (window.craftingTableOpen) window.closeCraftingTable()
                 else if (window.furnaceOpen) window.closeFurnace()
@@ -11826,7 +11855,8 @@ Window {
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
             //   f3Visible 仅 playing 态 toggle（menu 态主菜单全屏覆盖，叠层不可见）；切换不依赖指针捕获。
-            if (e.key === Qt.Key_F3) {
+            //   t1022：调试叠层键走映射表（debugOverlay 可重绑；f3Held 同键跟踪）。
+            if (e.key === keybindsMgr.keyFor("debugOverlay")) {
                 window.f3Held = true
                 if (window.appState === "playing") window.f3Visible = !window.f3Visible
                 e.accepted = true; return
@@ -11844,9 +11874,9 @@ Window {
             if (e.key === Qt.Key_G && window.appState === "playing" && window.f3Held) {
                 window.showChunkBounds = !window.showChunkBounds; e.accepted = true; return
             }
-            if (e.key === Qt.Key_F5) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27）
-            if (e.key === Qt.Key_F6) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09）
-            if (e.key === Qt.Key_G) { player.cycleMode(); e.accepted = true; return }
+            if (e.key === keybindsMgr.keyFor("camera")) { player.cycleCamera(); e.accepted = true; return } // 相机模式循环（t27；t1022 camera 可重绑）
+            if (e.key === keybindsMgr.keyFor("debugTime")) { worldClock.toggleDebugFast(); e.accepted = true; return } // 昼夜调试加速（t09；t1022 debugTime 可重绑）
+            if (e.key === keybindsMgr.keyFor("modeCycle")) { player.cycleMode(); e.accepted = true; return } // 模式循环（t1022 modeCycle 可重绑；F3+G 区块弦的 G 固定，见上分支）
             // t239 调试：按 M 在玩家前方生成一个测试 mob（验证 AI wander / 重力 / 碰撞 / 受击 / 死亡基类）。
             //   t243 spawn eggs 落地后此键可移除；现阶段无 spawn 入口（t142 已删旧测试 mob），靠它让 base 可观测。
             //   生成在玩家脚底前 2 格、高 1 格（重力 tick 落到地表）；走过去可推动，左键攻击路径待 t242 接。
@@ -11863,7 +11893,8 @@ Window {
             //   out/chest，经 InventoryOps.readSlot/writeSlot 路由）；否则（游戏内 / 未悬停）→ 从**选中槽**丢
             //   （dropHeld/dropHeldStack 自检捕获态：未捕获/背包开时早退，与既有行为不回退）。Q 始终早退 →
             //   不透传 player.setKey（Q 非移动键）。
-            if (e.key === Qt.Key_Q) {
+            //   t1022：丢弃键走映射表（drop 可重绑；Ctrl=整栈修饰位固定，e.modifiers 判定不变）。
+            if (e.key === keybindsMgr.keyFor("drop")) {
                 const bagOpen = window.inventoryOpen || window.craftingTableOpen || window.furnaceOpen || window.chestOpen
                     || window.enchantingTableOpen || window.anvilOpen || window.dispenserOpen   // t549：三 UI 同背包语义（悬停槽丢弃）
                 const ctrl = (e.modifiers & Qt.ControlModifier) !== 0
@@ -11918,7 +11949,8 @@ Window {
         Keys.onReleased: (e) => {
             if (e.isAutoRepeat) return
             // t143：F3 松开同步 f3Held=false（无条件，与 shiftHeld 同模式）；F3 不透传 player.setKey。
-            if (e.key === Qt.Key_F3) { window.f3Held = false; return }
+            //   t1022：与 press 侧同键位映射表（debugOverlay；Shift 松开仍物理键跟踪 shiftHeld UI 态）。
+            if (e.key === keybindsMgr.keyFor("debugOverlay")) { window.f3Held = false; return }
             // t110：Shift 松开同步 shiftHeld；背包开时不透传 player.setKey（与 press 守卫对称，防 Shift 状态
             //   与 player.m_keys 不同步）。非 Shift / 非背包态照旧透传。
             if (e.key === Qt.Key_Shift) {
@@ -12161,20 +12193,60 @@ Window {
         //   滚动（面板加高到 820）。仅 settingsOpen 显；Esc / 返回按钮关回暂停菜单。背景遮罩仅吸收点击（§9 lessons
         //   「全屏遮罩 onClicked 会误关」→ 此处无 close 语义，纯防穿透到背后暂停叠层的恢复 grab）。
         Item {
+            id: settingsPanelT22
             anchors.fill: parent
             visible: window.settingsOpen
             z: 50 // 在 pauseOverlay 内暂停内容之上
+            // t1022 键位编辑态（面板域）：recordingAction = 正在录制的动作 id（"" = 空闲）；statusT22 =
+            //   冲突/错误提示文案（下一次成功绑定或 Esc 取消时清空）；keyActions = 13 动作行集
+            //   （id 与 KeybindManager actionTable 单一权威同键，name 为行显示中文名）。
+            property string recordingAction: ""
+            property string statusT22: ""
+            property var keyActions: [
+                { id: "forward",      name: "前进" },
+                { id: "back",         name: "后退" },
+                { id: "left",         name: "左移" },
+                { id: "right",        name: "右移" },
+                { id: "jump",         name: "跳跃" },
+                { id: "sneak",        name: "潜行" },
+                { id: "inventory",    name: "背包" },
+                { id: "drop",         name: "丢弃" },
+                { id: "chat",         name: "聊天" },
+                { id: "camera",       name: "视角" },
+                { id: "debugTime",    name: "时间加速" },
+                { id: "modeCycle",    name: "模式切换" },
+                { id: "debugOverlay", name: "调试信息" }
+            ]
+            function actionNameT22(actionId) {
+                for (let i = 0; i < keyActions.length; ++i)
+                    if (keyActions[i].id === actionId) return keyActions[i].name
+                return actionId
+            }
             Rectangle {
                 anchors.fill: parent
                 color: Qt.rgba(0, 0, 0, 0.7)
                 MouseArea { anchors.fill: parent; onClicked: {} } // 吸收点击，不穿透到背后暂停叠层
             }
             Rectangle {
-                width: 460; height: 820; radius: 10
+                width: 460; height: Math.min(820, window.height - 32); radius: 10
                 anchors.centerIn: parent
                 color: "#1e1e1e"; border.color: "#3a3a3a"; border.width: 1
-                Column {
-                    anchors.fill: parent; anchors.margins: 20; spacing: 10
+                // t1022：内容列改 Flickable 承载（键位设置组加入后内容超面板高；「加高面板硬塞」已到
+                //   极限 —— 820 已逼近 768 屏高，故统一滚动 + DarkScrollBar（与背包/世界列表同款）。
+                //   列宽保持原 anchors.margins 20 的等效 420（parent.width - 40），既有子项零改动。
+                Flickable {
+                    id: settingsFlick
+                    anchors.fill: parent
+                    clip: true
+                    contentWidth: width
+                    contentHeight: settingsCol.height + 40   // 上下 margins 20×2
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: DarkScrollBar {}
+                    Column {
+                        id: settingsCol
+                        x: 20; y: 20
+                        width: parent.width - 40
+                        spacing: 10
                     Text { text: "选项"; color: "#eeeeee"; font.pixelSize: 22; font.bold: true
                            anchors.horizontalCenter: parent.horizontalCenter }
                     // t458 资源查看器入口（醒目大按钮）：用户诉求「找不到入口浏览所有方块 / 物品样貌」→
@@ -12385,6 +12457,125 @@ Window {
                         value: window.heldBlockZ
                         onValueChanged: window.heldBlockZ = value
                     }
+                    // ── t1022 键位设置（键位重映射：点击录制捕获 / 冲突拒收提示 / 恢复默认）──
+                    //   权威链：applyBinding 写 KeybindManager 内存表 + settings.json "keyBindings" 节
+                    //   → revision++ → 行显示经 revision 触碰绑定刷新（t976 AOT 教训）；引擎侧同实例
+                    //   经 player.keybinds canonicalKey 规范化即时生效（无需重启）。录制焦点：keyRecorderT22
+                    //   独占键盘（chatInput 同款焦点搬移），完成/取消归还 keyInput。
+                    Text { text: "键位设置"
+                           color: "#e5c07f"; font.pixelSize: 15; font.bold: true
+                           width: parent.width; topPadding: 6 }
+                    Text { text: "点击键位框录制新键（Esc 取消）。一键多动作冲突自动拒收；Esc 关面板、数字 1-9 选槽、Ctrl+丢弃=整栈 为固定约定。"
+                           color: "#9aa0a6"; font.pixelSize: 11; wrapMode: Text.WordWrap; width: parent.width }
+                    Grid {
+                        columns: 2
+                        spacing: 8
+                        width: parent.width
+                        Repeater {
+                            model: settingsPanelT22.keyActions
+                            delegate: Row {
+                                spacing: 6
+                                width: (settingsCol.width - 8) / 2
+                                height: 26
+                                Text {
+                                    text: modelData.name
+                                    color: settingsPanelT22.recordingAction === modelData.id ? "#e5c07f" : "#cccccc"
+                                    font.pixelSize: 12
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 66
+                                    elide: Text.ElideRight
+                                }
+                                Rectangle {
+                                    id: keyBtnT22
+                                    width: parent.width - 66 - 6
+                                    height: 24
+                                    radius: 5
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: settingsPanelT22.recordingAction === modelData.id
+                                           ? "#4a3a1a" : (keyBtnAreaT22.containsMouse ? "#2a3a4a" : "#1a2a3a")
+                                    border.color: settingsPanelT22.recordingAction === modelData.id ? "#e5c07f" : "#3a5a7a"
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        // t976 AOT 教训：触碰 revision 再查 keyFor —— Q_INVOKABLE 无 NOTIFY，
+                                        //   绑定须有可见依赖才随重映射刷新（返回值参与表达式防静态折叠）。
+                                        text: {
+                                            const _r = keybindsMgr.revision
+                                            if (settingsPanelT22.recordingAction === modelData.id) return "按任意键…"
+                                            const k = keybindsMgr.keyFor(modelData.id)
+                                            return _r >= 0 && k !== 0 ? keybindsMgr.keyDisplayName(k) : "（未设置）"
+                                        }
+                                        color: settingsPanelT22.recordingAction === modelData.id ? "#e5c07f" : "#7fb0e5"
+                                        font.pixelSize: 12
+                                    }
+                                    MouseArea {
+                                        id: keyBtnAreaT22
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            settingsPanelT22.recordingAction = modelData.id
+                                            settingsPanelT22.statusT22 = ""
+                                            keyRecorderT22.forceActiveFocus()   // 键盘独占（chatInput 同款）
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text {
+                        text: settingsPanelT22.statusT22
+                        color: "#e57f7f"; font.pixelSize: 11
+                        wrapMode: Text.WordWrap; width: parent.width
+                        visible: settingsPanelT22.statusT22.length > 0
+                    }
+                    // t1022 键盘录制捕获器：recordingAction 非空时持 activeFocus（keyInput 让焦 → 游戏键
+                    //   不漏进引擎）；任意键 = 应用（冲突拒收+提示），Esc = 取消；完成/取消归还 keyInput。
+                    Item {
+                        id: keyRecorderT22
+                        Keys.onPressed: (e) => {
+                            if (settingsPanelT22.recordingAction === "") return
+                            e.accepted = true
+                            if (e.key === Qt.Key_Escape) {   // 取消录制（不落 keyInput 的关面板分支）
+                                settingsPanelT22.recordingAction = ""
+                                keyInput.forceActiveFocus()
+                                return
+                            }
+                            const act = settingsPanelT22.recordingAction
+                            const res = keybindsMgr.applyBinding(act, e.key)
+                            if (res === KeybindManager.ApplyOk) {
+                                settingsPanelT22.statusT22 = ""
+                            } else if (res === KeybindManager.ApplyConflict) {
+                                settingsPanelT22.statusT22 = "冲突：「" + keybindsMgr.keyDisplayName(e.key)
+                                    + "」已映射到「" + settingsPanelT22.actionNameT22(keybindsMgr.actionOfKey(e.key))
+                                    + "」，请换键或先改绑该动作"
+                            } else {
+                                settingsPanelT22.statusT22 = "无法识别的按键"
+                            }
+                            settingsPanelT22.recordingAction = ""
+                            keyInput.forceActiveFocus()
+                        }
+                    }
+                    // 恢复默认键位：13 动作全回 canonical 默认 + 持久化（行显示随 revision 刷新）。
+                    Row {
+                        Rectangle {
+                            width: 120; height: 28; radius: 6
+                            color: resetKeysAreaT22.containsMouse ? "#3a2a2a" : "#2a1a1a"
+                            border.color: "#5a3a3a"; border.width: 1
+                            Text { anchors.centerIn: parent; text: "恢复默认键位"
+                                   color: "#e5a07f"; font.pixelSize: 12 }
+                            MouseArea {
+                                id: resetKeysAreaT22
+                                anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    keybindsMgr.resetDefaults()
+                                    settingsPanelT22.statusT22 = ""
+                                    settingsPanelT22.recordingAction = ""
+                                }
+                            }
+                        }
+                    }
                     // 返回按钮：关选项面板回暂停菜单。
                     Rectangle {
                         width: 120; height: 32; radius: 6
@@ -12400,6 +12591,7 @@ Window {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: window.settingsOpen = false
                         }
+                    }
                     }
                 }
             }
