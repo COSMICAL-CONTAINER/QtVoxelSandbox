@@ -5759,6 +5759,21 @@ bool EntityManager::tickMobMounts(World *world, const QVector3D &playerPos, floa
             }
             const QVector3D pin(e.pos.x(), mount.pos.y() + mount.halfH + e.halfH, e.pos.z());
             if (e.pos != pin) { e.pos = pin; pinMoved = true; dirty = true; }
+            // t1008② 越障跳意图转移（「小僵尸的追击移动驱动小鸡」延伸到跳跃轴）：骑手 aiHostile
+            //   越障跳门在骑乘态照样点火（钉位恒 resting → 门可达，review0830 #19 已实证），但点火后
+            //   的 vy/滑流在旧链钉位段被一并清掉 = 骑士组合结构上跳不过 1 格台阶（实机「小僵尸追玩家
+            //   跳不过 1 格障碍」复现根因：小鸡骑士被台面卡死——骑手 AABB 压在台面格内被逐轴撤回，
+            //   每 AI tick 重探跳重清零，30s+ 原地踏步）。修法 = 骑手本拍点了跳（vy == kJumpSpeed，
+            //   越障跳门专属初速——击退 kKnockbackUp 更小不会误触）且载具尚贴地（mount.resting）→
+            //   载具以同款 kJumpSpeed 起跳：载具物理（重力 / 落地扫描）主循环照跑 → 整体升到台面顶，
+            //   骑手 AABB 随钉位 Y 抬过台面后 AI 水平推进恢复 → 钉位把载具 XZ 拖上台（落地扫描落台顶）
+            //   = 组合翻越台阶。载具已在空中 → 不重点火（防逐 AI tick 重置 vy = 组合火箭升空）。
+            //   骑手 vy/滑流照旧清零（主循环不积分骑手垂直态，上升由钉位 Y 随载具顶承接）。
+            if (e.vy >= kJumpSpeed && mount.resting) {
+                mount.vy = kJumpSpeed;
+                mount.resting = false;                 // 解除静止 → 主循环重力分支接管载具上跳
+                dirty = true;
+            }
             if (e.vy != 0.0f) e.vy = 0.0f;             // 挂载期垂直速度清零（主循环冻结不积分，防解除残留）
             // review0830 #19：钉位段顺手清越障跳水平滑流（与清 vy 同段）——骑乘期骑手 AI（钉位恒
             //   resting → aiHostile 越障跳分支可达）可设 jumpGX/jumpGZ，挂载态主循环早退不应用滑流
