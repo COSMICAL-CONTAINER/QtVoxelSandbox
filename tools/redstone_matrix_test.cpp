@@ -27581,18 +27581,23 @@ Item {
             QVector3D player(27.0f, 85.0f, 20.5f); // 东 → 骑手驱动组合东行撞墙
             bool stalled = false, movedWest = false, eastDrift = false, unlinked = false;
             if (baby >= 0 && chicken >= 0) {
-                for (int t = 0; t < 190 && !stalled; ++t) { // 3s：撞墙 stall（钉位恒 resting → 跳分支积东向滑流）
+                for (int t = 0; t < 190 && !stalled; ++t) { // 3s：撞墙 stall（钉位恒 resting → 跳分支积东向滑流；
+                                                            //   t1008② 起跳意图转移载具 → 组合会翻过 1 格矮墙，
+                                                            //   本相位只要求「抵墙带」触发，过墙不否定后续断言）
                     emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
                     if (emf.posAt(baby).x() >= 22.3f) stalled = true;
                 }
                 // 侧压持续窗：stall 阈值 22.3 处跳探前向格仍是空气（fx = floor(22.9) = 22），须再压
-                //   ≥ 数个 AI tick 让骑手抵墙脸 22.55+（fx = 23 = 墙格）→ 跳分支反复点火积东向滑流。
+                //   ≥ 数个 AI tick 让骑手抵墙脸 22.55+（fx = 23 = 墙格）→ 跳分支反复点火积东向滑流
+                //   （t1008② 起点火同时转移载具起跳 = 组合翻墙东行——陈旧滑流的「点火-清零」循环不变）。
                 for (int t = 0; t < 90 && stalled; ++t)
                     emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
                 player = QVector3D(13.0f, 85.0f, 20.5f); // 玩家移师西 → 骑手 AI 掉头（西向无障 → 不覆写滑流）
                 const float xWestStart = emf.posAt(baby).x();
-                for (int t = 0; t < 40; ++t) // 0.64s：组合西撤离墙（纯 AI ≈2.5 格；滑流东抗 ≈0.6 格）
-                    emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f);
+                for (int t = 0; t < 180 && emf.posAt(baby).x() > 19.0f; ++t) // 西撤至离墙带 + 离玩家
+                    emf.tick(0.016f, &wf, player, 0.3f, 1.8f, true, false, 0.0f); // 尚远（≤19；t1008② 起
+                // 组合过墙翻到东侧，西撤须再翻墙一次——距离闸（非旧 40tick 定长帽）对「卡墙/过墙」两态
+                // 同收敛；杀鸡点离玩家 ≥6 格 → 解除挂载后独立追击恒向西，>0.02 东向帧只剩滑流签名）。
                 movedWest = emf.posAt(baby).x() <= 21.8f;
                 diag += QStringLiteral("f westDx=%1 ")
                             .arg(xWestStart - emf.posAt(baby).x());
@@ -27711,11 +27716,15 @@ Item {
                              " never picks it across six windows while a bare ground control in"
                              " the same scan does (riding excluded, resolvePlayerPush caliber),"
                              " with the pickup-chance default pinned to the kEquipPickupChance"
-                             " constant; (f) after the jockey pair stalls against a wall (stale"
-                             " eastward jump glide) and the player flips to the west side, killing"
-                             " the chicken drops the baby with ZERO eastward per-tick drift frames"
-                             " (the old stale-glide streamer drifted ~1 block east mid-fall), and"
-                             " the pin-segment clear line is source-pinned; (g) the wander-state"
+                             " constant; (f) after the jockey pair engages the wall with the"
+                             " player east -- the rider's gate cycles eastward jump intent at the"
+                             " face and since t1008 the mount-hop takes the pair over the top --"
+                             " and the player flips to the west side (the evolved window lets the"
+                             " pair re-cross westward), killing the chicken drops the baby with"
+                             " ZERO eastward per-tick drift frames (the old stale-glide streamer"
+                             " drifted ~1 block east mid-fall; the pin-segment discard of the"
+                             " rider's vy/glide is the regression core and stays source-pinned);"
+                             " (g) the wander-state"
                              " burns-in-place trade-off is comment-registered at both AI early-"
                              " exits plus the header caliber; (h) an UndeadSlay-III diamond sword"
                              " deals 15 to the BABY shambler == 15 to the adult == base 7 + the"
@@ -38796,6 +38805,134 @@ Item {
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
+    }
+
+    // ── P-t1008 小僵尸两修探针（① 生物蛋图标管线统一 ② 小鸡骑士组合越障跳）──
+    //    通用 rig：44×44×96 局部世界（seed 26）y[85,95] 清 Air + y84 铺 Stone（P-t988 同款）+
+    //    x∈[24,44) 全深 y85 石台（顶 86 = 1 格台阶，全深堵绕行）。
+    //    (a) 蛋管线统一三面钉：itemFilenameMap 补 0x25D 行（t952 引入小蹒跚者蛋时漏本表行 =
+    //        15 蛋唯一缺行 → pack 开时小僵尸蛋恒走 MaterialIcon 自绘 Canvas、其余 14 蛋走
+    //        spawn_egg.png 两层染色生成管线 = 用户「小僵尸蛋与别的蛋风格不统一」观感分叉根源；
+    //        滤注释源钉锁语句面）+ spawnEggTint(0x25D) 直调非空且幼体亮黄绿 base（t785 直调
+    //        先例——生成式回退的染色权威）+ MaterialIcon case 0x25D 自绘分支在位（pack 关回退）。
+    //    (b) 小鸡骑士越障行为腿（t1008② 修复面）：setChickenJockeyChance(1.0) 生成必组合 →
+    //        小僵尸（骑手）台下追台上玩家被台面卡：骑手 aiHostile 越障跳门点火（钉位恒 resting
+    //        → 门可达）但旧链钉位段把 vy/滑流清零 = 组合结构上跳不过（diag 实证 30s+ 原地踏步）；
+    //        t1008② 跳意图转移载具（vy==kJumpSpeed 且载具贴地 → 载具同款起跳）→ 组合翻越上台
+    //        （骑手 x≥24.5 且 y≥86.3 合取：台下面平地跳峰值虽过 86.3 但 x 恒 <24.5 被台面碰撞拦回，
+    //        P-t988(b) 同款真上台判据）+ 抵达咬击带（distXZ ≤ 1.6）。30s 帽。阴性轮敏感：摘除
+    //        tickMobMounts 跳意图转移块 → 本腿恰红（组合永卡台下面），(a)(c) 照绿。
+    //    (c) 非骑乘小僵尸对照腿：plain baby（chance=0 全独立）同台面追玩家 → aiHostile 链
+    //        t670 越障跳既有照绿（防本单意外破坏独立追击链；也钉「② 病灶仅在挂载链」的口径）。
+    {
+        bool okA = false, okB = false, okC = false;
+        QString diag1008;
+        auto flatRig1008 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(26);
+            for (int x = 0; x < 44; ++x)
+                for (int z = 0; z < 44; ++z) {
+                    for (int y = 85; y <= 95; ++y) w.setBlock(x, y, z, BR::Air, 0);
+                    w.setBlock(x, 84, z, BR::Stone, 0);
+                }
+            for (int z = 0; z < 44; ++z)
+                for (int x = 24; x < 44; ++x)
+                    w.setBlock(x, 85, z, BR::Stone, 0); // 全深石台（顶 86 = 1 格台阶；堵死绕行）
+        };
+        auto distXZ1008 = [](const QVector3D &p, const QVector3D &q) {
+            return QVector3D(p.x() - q.x(), 0.0f, p.z() - q.z()).length();
+        };
+        // (a) 蛋管线统一：映射行（滤注释）+ 生成式染色表行（真直调）+ 自绘回退 case。
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile rpf(root + QStringLiteral("/src/Core/resourcepackmanager.cpp"));
+            const QString rp = rpf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rpf.readAll()) : QString();
+            QString code; // 滤注释体（t836(e)/t1017(d) 同手法：注册注释可留字面量，语句面才作数）
+            for (const QString &line : rp.split(QLatin1Char('\n'))) {
+                if (line.trimmed().startsWith(QLatin1String("//"))) continue;
+                code += line; code += QLatin1Char('\n');
+            }
+            const bool mapRow = code.contains(
+                QStringLiteral("{0x25D, QStringLiteral(\"zombie_spawn_egg.png\")}"));
+            const EggTint *tint1008 = spawnEggTint(0x25D);
+            const bool tintRow = tint1008 != nullptr
+                                 && tint1008->base[0] == 0x5a && tint1008->base[1] == 0x7a
+                                 && tint1008->base[2] == 0x42 && tint1008->spot[0] == 0x6a;
+            QFile miq(root + QStringLiteral("/src/ui/MaterialIcon.qml"));
+            const QString mi = miq.open(QIODevice::ReadOnly) ? QString::fromUtf8(miq.readAll()) : QString();
+            const bool drawCase = mi.contains(QStringLiteral("drawSpawnEgg(\"babyshambler\")"));
+            okA = mapRow && tintRow && drawCase;
+            if (!okA) diag1008 += QStringLiteral("a mapRow=%1 tintRow=%2 drawCase=%3 ")
+                                      .arg(mapRow).arg(tintRow).arg(drawCase);
+        }
+        // (b) 小鸡骑士越障行为腿：跳意图转移 → 组合翻越 1 格台阶 + 抵达咬击带。
+        {
+            World wb; flatRig1008(wb);
+            EntityManager emb;
+            emb.setChickenJockeyChance(1.0); // 生成必组合（矩阵缝写口径，P-t952 同源）
+            const int baby = emb.spawnMobTyped(20, 85, 22, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 20);
+            const QVector3D player(30.5f, 86.0f, 22.5f); // 台上玩家（侦测圈内 → 直追）
+            bool onTop = false, reached = false;
+            if (baby >= 0) {
+                for (int t = 0; t < 1875 && !(onTop && reached); ++t) { // 30s 事件驱动帽
+                    emb.tick(0.016, &wb, player, 0.3f, 1.8f, true, false);
+                    const QVector3D p = emb.posAt(baby);
+                    if (p.x() >= 24.5f && p.y() >= 86.3f) onTop = true; // 真上台合取判据
+                    if (distXZ1008(p, player) <= 1.6f) reached = true;  // 越台后进咬击带
+                }
+                diag1008 += QStringLiteral("b final=(%1,%2,%3) ")
+                                .arg(emb.posAt(baby).x(), 0, 'f', 2)
+                                .arg(emb.posAt(baby).y(), 0, 'f', 2)
+                                .arg(emb.posAt(baby).z(), 0, 'f', 2);
+            } else diag1008 += QStringLiteral("b spawn failed ");
+            okB = baby >= 0 && onTop && reached;
+        }
+        // (c) 非骑乘对照：plain baby 独立追击链越障照绿（chance=0 防组合翻态伪影）。
+        {
+            World wc; flatRig1008(wc);
+            EntityManager emc;
+            emc.setChickenJockeyChance(0.0); // 生成恒独立（防 5% 缺省掷骰引入 flake）
+            const int baby = emc.spawnMobTyped(20, 85, 22, EntityManager::MobBabyShambler,
+                                               QStringLiteral("#5a7a42"), 20);
+            const QVector3D player(30.5f, 86.0f, 22.5f);
+            bool onTop = false, reached = false;
+            if (baby >= 0) {
+                for (int t = 0; t < 1875 && !(onTop && reached); ++t) { // 30s 事件驱动帽
+                    emc.tick(0.016, &wc, player, 0.3f, 1.8f, true, false);
+                    const QVector3D p = emc.posAt(baby);
+                    if (p.x() >= 24.5f && p.y() >= 86.3f) onTop = true;
+                    if (distXZ1008(p, player) <= 1.6f) reached = true;
+                }
+            } else diag1008 += QStringLiteral("c spawn failed ");
+            okC = baby >= 0 && onTop && reached;
+        }
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okA && okB && okC ? "PASS" : "FAIL")
+                          << "| t1008 baby-shambler duo: (a) the spawn-egg icon pipeline is"
+                             " unified -- itemFilenameMap gains the 0x25D row (the only missing"
+                             " egg id since t952; with a pack ON the baby egg used to fall back"
+                             " to the hand-drawn MaterialIcon canvas while the other 14 eggs"
+                             " took the two-template spawn_egg.png tint pipeline = the"
+                             " user-visible style split), spawnEggTint(0x25D) keeps the brighter"
+                             " baby-green family tint for the generated fallback, and the"
+                             " MaterialIcon case stays as the pack-off fallback; (b) the chicken"
+                             " jockey complex now crosses a 1-block step while chasing the player:"
+                             " the rider's aiHostile jump gate fires in the mounted state (pin"
+                             " keeps resting=true so the gate is reachable) but the mount pin used"
+                             " to discard vy/glide wholesale = the complex stalled at the step"
+                             " face forever -- the jump intent now transfers to the mount (exact"
+                             " kJumpSpeed while the mount is grounded), its own gravity/landing"
+                             " physics lifts the complex, the rider's AABB clears the step and"
+                             " the XZ pin drags the mount onto the top (rider x>=24.5 CONJ"
+                             " y>=86.3 plus reaching the 1.6 bite band, 30s cap); (c) the"
+                             " unmounted baby control leg pins the plain hostile chain still"
+                             " hops the step by itself (the lesion was mount-chain only)"
+                          << (okA && okB && okC
+                                  ? QString()
+                                  : QStringLiteral("diag %1").arg(diag1008));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
