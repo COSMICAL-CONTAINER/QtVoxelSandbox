@@ -35000,6 +35000,347 @@ Item {
                              "route/def/constants)";
     }
 
+    // ── t1020 成就树扩展探针（面板 A：四结构区域重推导 + 足迹一致性 + 读档重推导）──
+    //    rig：96×96×48 逐种子扫描（seeds 1..80，每结构独立记首个命中种子；地牢加验刷怪笼在位 /
+    //    两神殿加验落位中心方块完好 —— 被峡谷 / 矿井巷道切损的种子弃样续扫）。断言三层：
+    //    (a) 区域表面：四结构 structureRegionCount ≥1 + bounds 闭区间采样（中心 / 三轴角格含界 /
+    //        XZ 界外一格 / y 上下界外）+ 足迹-体素同源（地牢 = 周界内刷怪笼格、沙漠 = 金字塔中心
+    //        floor 砂岩、丛林 = 苔石混排地板）；
+    //    (a') 读档重推导腿：真 WorldStore 存 → beginLoad + loadChunks + finishLoad（rebuild 从
+    //        seed 纯算术重推导）→ 四结构区域表与生成期逐项相等 + insideDungeon 判读一致。
+    {
+        World wT20Dun, wT20Mine, wT20Des, wT20Jun;
+        // 高 96：沙漠 / 丛林神殿坐落**地表**（siteOk 守卫 surfaceY+顶冠 < m_height）→ 48 高世界
+        //   地表普遍 ≥38 → 神殿恒拒（t1020 首轮 80 seed 全空根因）；96 高给足地表带。地牢 / 矿井
+        //   在 y<48 地下，高度只影响 heightAt 钳制 → 96 高统一四世界。
+        wT20Dun.setWidth(96);  wT20Dun.setDepth(96);  wT20Dun.setHeight(96);
+        wT20Mine.setWidth(96); wT20Mine.setDepth(96); wT20Mine.setHeight(96);
+        wT20Des.setWidth(96);  wT20Des.setDepth(96);  wT20Des.setHeight(96);
+        wT20Jun.setWidth(96);  wT20Jun.setDepth(96);  wT20Jun.setHeight(96);
+        int seedT20Dun = -1, seedT20Mine = -1, seedT20Des = -1, seedT20Jun = -1;
+        // 足迹-体素同源抽验：地牢刷怪笼在位（placeDungeons 步骤 3 无条件落笼）／沙漠金字塔层 0 实心盘
+        //   边缘 Sandstone（dx=+7 避开风玫瑰羊毛覆盖 —— 中心格 = WoolBlue 蓝块，见 intactT20 内注）／
+        //   丛林神殿中心地板 Cobble/MossyCobble（t1004 A 地板全幅混排）。矿井包络无单点同源块（巷道材质
+        //   hash 分段）→ 免验（登记）。
+        auto intactT20 = [](World &w, int kind, const QVariantList &rg) -> bool {
+            const int mnx = rg[0].toInt(), mny = rg[1].toInt(), mnz = rg[2].toInt();
+            const int mxx = rg[3].toInt(), mxz = rg[5].toInt();
+            if (kind == World::StructureDungeon) {
+                const int roomW = mxx - mnx - 1, roomD = mxz - mnz - 1;
+                return w.blockAt(mnx + 1 + roomW / 2, mny + 2, mnz + 1 + roomD / 2)
+                           == BlockRegistry::Spawner; // 刷怪笼格 = (cx+roomW/2, cy+1, cz+roomD/2)
+            }
+            if (kind == World::StructureDesertTemple)
+                // 锚点 = 层 0 实心盘边缘点（dx=+7：风玫瑰菱域 |dx|+|dz|≤5 之外不被橙/蓝羊毛覆盖；
+                //   大厅清空自 S+1 起、入口/顶窗 carve 均 v≥1 → 盘面恒 Sandstone。不可取中心格 ——
+                //   placeDesertTemple C) 步 putSolid(cx,S,cz,WoolBlue) 风玫瑰蓝块覆盖中心（t1003 钉），
+                //   t1020 首轮 des=-1 根因即锚点误取中心）。仍属足迹 bbox 内「足迹-体素同源」抽验。
+                return w.blockAt(mnx + World::kDesertTempleHalf + 7,
+                                 mny + World::kDesertTempleChamberDrop + 1,
+                                 mnz + World::kDesertTempleHalf) == BlockRegistry::Sandstone;
+            if (kind == World::StructureJungleTemple) {
+                const quint8 b = w.blockAt(mnx + World::kJungleTempleHalf, mny,
+                                           mnz + World::kJungleTempleHalf);
+                return b == BlockRegistry::Cobble || b == BlockRegistry::MossyCobble;
+            }
+            return true; // StructureMineshaft
+        };
+        for (int s = 1; s <= 80
+             && (seedT20Dun < 0 || seedT20Mine < 0 || seedT20Des < 0 || seedT20Jun < 0); ++s) {
+            if (seedT20Dun < 0) {
+                wT20Dun.setSeed(s);
+                if (wT20Dun.structureRegionCount(World::StructureDungeon) > 0)
+                    seedT20Dun = intactT20(wT20Dun, World::StructureDungeon,
+                                           wT20Dun.structureRegion(World::StructureDungeon, 0)) ? s : -1;
+            }
+            if (seedT20Mine < 0) {
+                wT20Mine.setSeed(s);
+                if (wT20Mine.structureRegionCount(World::StructureMineshaft) > 0)
+                    seedT20Mine = intactT20(wT20Mine, World::StructureMineshaft,
+                                            wT20Mine.structureRegion(World::StructureMineshaft, 0)) ? s : -1;
+            }
+            if (seedT20Des < 0) {
+                wT20Des.setSeed(s);
+                if (wT20Des.structureRegionCount(World::StructureDesertTemple) > 0)
+                    seedT20Des = intactT20(wT20Des, World::StructureDesertTemple,
+                                           wT20Des.structureRegion(World::StructureDesertTemple, 0)) ? s : -1;
+            }
+            if (seedT20Jun < 0) {
+                wT20Jun.setSeed(s);
+                if (wT20Jun.structureRegionCount(World::StructureJungleTemple) > 0)
+                    seedT20Jun = intactT20(wT20Jun, World::StructureJungleTemple,
+                                           wT20Jun.structureRegion(World::StructureJungleTemple, 0)) ? s : -1;
+            }
+        }
+        // bounds 闭区间采样（中心 + 三轴角格含界 + XZ 界外一格 + y 上下界外；纯谓词零栅格访问）。
+        auto boundsT20 = [](World &w, int kind) -> bool {
+            if (w.structureRegionCount(kind) <= 0) return false;
+            const QVariantList rg = w.structureRegion(kind, 0);
+            const double mnx = rg[0].toDouble(), mny = rg[1].toDouble(), mnz = rg[2].toDouble();
+            const double mxx = rg[3].toDouble(), mxy = rg[4].toDouble(), mxz = rg[5].toDouble();
+            const double cx = (mnx + mxx) / 2.0 + 0.5, cy = mny + 1.0, cz = (mnz + mxz) / 2.0 + 0.5;
+            return w.insideStructureRegion(kind, cx, cy, cz)                                // 中心
+                && w.insideStructureRegion(kind, mnx + 0.5, mny + 0.5, mnz + 0.5)          // -X/-Y/-Z 角格（含界）
+                && w.insideStructureRegion(kind, mxx + 0.5, mxy + 0.5, mxz + 0.5)          // +X/+Y/+Z 角格（含界）
+                && !w.insideStructureRegion(kind, mnx - 0.5, cy, cz)                       // -X 足迹外一格
+                && !w.insideStructureRegion(kind, cx, cy, mxz + 1.5)                       // +Z 足迹外一格
+                && !w.insideStructureRegion(kind, cx, mny - 0.5, cz)                       // y 下界外
+                && !w.insideStructureRegion(kind, cx, mxy + 1.5, cz);                      // y 上界外
+        };
+        bool okA = seedT20Dun > 0 && seedT20Mine > 0 && seedT20Des > 0 && seedT20Jun > 0
+                   && boundsT20(wT20Dun, World::StructureDungeon)
+                   && boundsT20(wT20Mine, World::StructureMineshaft)
+                   && boundsT20(wT20Des, World::StructureDesertTemple)
+                   && boundsT20(wT20Jun, World::StructureJungleTemple);
+        if (!okA)
+            qInfo().noquote() << "  [t1020 diag] seeds dun/mine/des/jun =" << seedT20Dun
+                              << seedT20Mine << seedT20Des << seedT20Jun;
+
+        // ── (a') 读档重推导腿：区域表逐项相等（四 kind）+ insideDungeon 判读一致 ──
+        const QVariantList dunRgT20 = wT20Dun.structureRegion(World::StructureDungeon, 0);
+        const int dunMinX = dunRgT20[0].toInt(), dunMinY = dunRgT20[1].toInt(), dunMinZ = dunRgT20[2].toInt();
+        const int dunMaxX = dunRgT20[3].toInt();
+        const int dunCx = dunMinX + 1, dunCy = dunMinY + 1, dunCz = dunMinZ + 1; // 反解原点（同足迹定义）
+        const QString dbT20 = QDir::temp().absoluteFilePath(
+            QStringLiteral("voxel_t1020_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+        QFile::remove(dbT20);
+        WorldStore storeT20;
+        storeT20.setWorld(&wT20Dun);
+        bool okSaveT20 = storeT20.openWorld(dbT20)
+                          && storeT20.saveAll(QStringLiteral("t1020rig"), QVariantList(), QVariantList(), QVariantList());
+        storeT20.closeWorld();
+        World wT20Load;
+        wT20Load.setWidth(wT20Dun.width());
+        wT20Load.setDepth(wT20Dun.depth());
+        wT20Load.setHeight(wT20Dun.height());
+        WorldStore storeT20Load;
+        storeT20Load.setWorld(&wT20Load);
+        bool okLoadT20 = okSaveT20 && storeT20Load.openWorld(dbT20);
+        wT20Load.beginLoad(wT20Dun.seed());
+        okLoadT20 = okLoadT20 && storeT20Load.loadChunks() > 0;
+        wT20Load.finishLoad(); // ← rebuildStructureRegions 从 seed 纯算术重推导（零序列化 / 零体素扫描）
+        auto regionsEqT20 = [](const World &a, const World &b, int kind) -> bool {
+            if (a.structureRegionCount(kind) != b.structureRegionCount(kind)) return false;
+            for (int i = 0; i < a.structureRegionCount(kind); ++i)
+                if (a.structureRegion(kind, i) != b.structureRegion(kind, i)) return false;
+            return true;
+        };
+        okLoadT20 = okLoadT20
+            && regionsEqT20(wT20Dun, wT20Load, World::StructureDungeon)
+            && regionsEqT20(wT20Dun, wT20Load, World::StructureMineshaft)
+            && regionsEqT20(wT20Dun, wT20Load, World::StructureDesertTemple)
+            && regionsEqT20(wT20Dun, wT20Load, World::StructureJungleTemple)
+            && wT20Load.insideDungeon(double(dunCx) + 0.5, double(dunCy) + 1.0, double(dunCz) + 0.5);
+        okA = okA && okLoadT20;
+        if (!okLoadT20)
+            qInfo().noquote() << "  [t1020 diag] load-rebind" << (okSaveT20 ? "ok" : "BAD")
+                              << "counts" << wT20Dun.structureRegionCount(World::StructureDungeon)
+                              << wT20Load.structureRegionCount(World::StructureDungeon);
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1020 structure-region re-derivation: seed-pure sites() recompute fills"
+                             " dungeon/mineshaft/desert/jungle region tables (bounds closed-interval"
+                             " sampling incl. corner and out-of-range cells, voxel-tie checks:"
+                             " dungeon spawner / pyramid sandstone / jungle mossy floor), save->load"
+                             " rebuild reproduces identical region tables with no serialization"
+                             "(seeds dun/mine/des/jun ="
+                          << seedT20Dun << seedT20Mine << seedT20Des << seedT20Jun << ")";
+
+    // ── t1020 成就树扩展探针（面板 B：structureEntered 行为沿 + 成就钩子 + 源码钉；与面板 A 同作用域
+    //    —— 复用 wT20Dun / wT20Load / dbT20 / storeT20Load）──
+    //    (b) 行为腿：真 PlayerController + 真地牢世界 + 真 PlayerProgress（QML 路由 C++ 等价直连）——
+    //        足迹外 tick 零信号；走进 → 上升沿恰发一次 + 解锁 + 恰一 toast；界内连 tick 不重发；
+    //        重复进出再发但 unlock 幂等；finishWorldLoad 重置守卫后界内首 tick 重产沿（无新 toast）。
+    //    (b') 钩子腿：首杀四生物（怪物猎人同事件双解锁）/ 首煤铁红石父前置门控 / 骑矿车·钓鱼·
+    //        箱车 / 结构 kind 映射 1..3 / 幂等不重 toast；achievements() 恰 31 条 + 新条目形状。
+    //    (c) 源码钉：tick 上升沿守卫 + 读档重置 + QML 路由行 + 定义行 + 类常量同源。
+    {
+        // dunCx/dunCy/dunCz/dunMaxX 复用面板 A 反解值（同作用域）。
+        const double outXT20 = (dunMaxX + 9 < wT20Dun.width()) ? double(dunMaxX) + 9.5
+                                                               : double(dunMinX) - 8.5;
+        // ── (b) 行为腿 ──
+        PlayerProgress progT20A;
+        int enteredT20[World::StructureKindCount] = { 0, 0, 0, 0 };
+        int toastT20 = 0;
+        PlayerController pcT20;
+        pcT20.setWorld(&wT20Dun);
+        QObject::connect(&pcT20, &PlayerController::structureEntered, &pcT20, [&](int kind) {
+            ++enteredT20[kind];
+            progT20A.onStructureEntered(kind); // Main.qml Connections onStructureEntered 路由的 C++ 等价
+        });
+        QObject::connect(&progT20A, &PlayerProgress::achievementUnlocked, &progT20A,
+                         [&](const QString &, const QString &, const QString &) { ++toastT20; });
+        bool okB = true;
+        // 足迹外走动：连 tick 零信号零解锁。
+        pcT20.loadSavedState(float(outXT20), float(dunCy + 1), float(dunCz) + 0.5f, -90.0f, 0.0f, 0);
+        for (int t = 0; t < 5; ++t) pcT20.tick();
+        okB = okB && enteredT20[0] == 0 && toastT20 == 0
+              && !progT20A.isUnlocked(QStringLiteral("entered_dungeon"));
+        // 走进房间足迹：首 tick 上升沿 → 恰 1 信号 + 解锁 + 恰 1 toast。
+        pcT20.loadSavedState(float(dunCx) + 0.5f, float(dunCy + 1), float(dunCz) + 0.5f, -90.0f, 0.0f, 0);
+        pcT20.tick();
+        okB = okB && enteredT20[0] == 1 && toastT20 == 1
+              && progT20A.isUnlocked(QStringLiteral("entered_dungeon"));
+        // 界内连 tick：守卫已置位 → 不再发（一次性事件信号）。
+        for (int t = 0; t < 9; ++t) pcT20.tick();
+        okB = okB && enteredT20[0] == 1 && toastT20 == 1;
+        // 重复进出：出（零信号）→ 再进（第二次沿）→ 信号 2 但 unlock 幂等 toast 仍 1。
+        pcT20.loadSavedState(float(outXT20), float(dunCy + 1), float(dunCz) + 0.5f, -90.0f, 0.0f, 0);
+        pcT20.tick();
+        okB = okB && enteredT20[0] == 1;
+        pcT20.loadSavedState(float(dunCx) + 0.5f, float(dunCy + 1), float(dunCz) + 0.5f, -90.0f, 0.0f, 0);
+        pcT20.tick();
+        okB = okB && enteredT20[0] == 2 && toastT20 == 1;
+        // 进世界重置钩子（finishWorldLoad）→ 守卫清零 → 界内首 tick 重产沿（进度已解锁 → 无新 toast）。
+        pcT20.finishWorldLoad();
+        pcT20.tick();
+        okB = okB && enteredT20[0] == 3 && toastT20 == 1;
+        // ── (b') 钩子腿（fresh 进度 VM；toast 台账见各步注释。先补主线祖先链 open_inventory→get_wood→
+        //    crafting_table —— unlock 父前置检查吞无父链的首杀 / 首矿解锁（t1020 首轮 toastB=6 卡
+        //    独立根的根因），同真实生存顺序）──
+        PlayerProgress progT20B;
+        int toastT20B = 0;
+        QObject::connect(&progT20B, &PlayerProgress::achievementUnlocked, &progT20B,
+                         [&](const QString &, const QString &, const QString &) { ++toastT20B; });
+        progT20B.onInventoryOpened();                                       // open_inventory（1，根）
+        progT20B.onItemPicked(int(BlockRegistry::Log));                     // get_wood（2）
+        progT20B.onCraft(int(BlockRegistry::CraftingTable));                // crafting_table（3）
+        progT20B.onCraft(int(ToolRegistry::SwordWood));                     // sword_time（4）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("sword_time"))
+              && progT20B.isUnlocked(QStringLiteral("crafting_table"));
+        progT20B.onMobKilled(int(EntityManager::MobSpider));                // monster_hunter（5）+ kill_spider（6）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("monster_hunter"))
+              && progT20B.isUnlocked(QStringLiteral("kill_spider")) && toastT20B == 6;
+        progT20B.onMobKilled(int(EntityManager::MobBones));                 // kill_bones（7）
+        progT20B.onMobKilled(int(EntityManager::MobStalker));               // kill_stalker（8）
+        progT20B.onMobKilled(int(EntityManager::MobSilverfish));            // kill_silverfish（9）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("kill_bones"))
+              && progT20B.isUnlocked(QStringLiteral("kill_stalker"))
+              && progT20B.isUnlocked(QStringLiteral("kill_silverfish")) && toastT20B == 9;
+        progT20B.onItemPicked(int(RecipeRegistry::CoalId));                 // 父「挖矿时间到」未解锁 → 吞（9）
+        okB = okB && !progT20B.isUnlocked(QStringLiteral("get_coal")) && toastT20B == 9;
+        progT20B.onCraft(int(ToolRegistry::PickaxeWood));                   // mining_time（10）
+        progT20B.onItemPicked(int(RecipeRegistry::CoalId));                 // get_coal（11）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("mining_time"))
+              && progT20B.isUnlocked(QStringLiteral("get_coal")) && toastT20B == 11;
+        progT20B.onCraft(int(ToolRegistry::PickaxeStone));                  // upgrade（12）
+        progT20B.onItemPicked(int(RecipeRegistry::IronOreDropId));          // get_iron（13）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("upgrade"))
+              && progT20B.isUnlocked(QStringLiteral("get_iron")) && toastT20B == 13;
+        progT20B.onItemPicked(int(RecipeRegistry::RedstoneId));             // 父「钻石!」未解锁 → 吞（13）
+        okB = okB && !progT20B.isUnlocked(QStringLiteral("get_redstone")) && toastT20B == 13;
+        progT20B.onItemPicked(int(RecipeRegistry::DiamondId));              // get_diamond（14）
+        progT20B.onItemPicked(int(RecipeRegistry::RedstoneId));             // get_redstone（15）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("get_diamond"))
+              && progT20B.isUnlocked(QStringLiteral("get_redstone")) && toastT20B == 15;
+        progT20B.onRodeMinecart();                                          // ride_minecart（16）
+        progT20B.onFishCaught();                                            // first_catch（17）
+        progT20B.onChestCartOpened();                                       // chest_cart_loot（18）
+        progT20B.onStructureEntered(1);                                     // entered_mineshaft（19）
+        progT20B.onStructureEntered(2);                                     // entered_desert_temple（20）
+        progT20B.onStructureEntered(3);                                     // entered_jungle_temple（21）
+        okB = okB && progT20B.isUnlocked(QStringLiteral("ride_minecart"))
+              && progT20B.isUnlocked(QStringLiteral("first_catch"))
+              && progT20B.isUnlocked(QStringLiteral("chest_cart_loot"))
+              && progT20B.isUnlocked(QStringLiteral("entered_mineshaft"))
+              && progT20B.isUnlocked(QStringLiteral("entered_desert_temple"))
+              && progT20B.isUnlocked(QStringLiteral("entered_jungle_temple")) && toastT20B == 21;
+        progT20B.onRodeMinecart();                                          // 幂等：不再 toast
+        progT20B.onFishCaught();
+        progT20B.onChestCartOpened();
+        progT20B.onStructureEntered(3);
+        progT20B.onStructureEntered(99);                                    // 越界 kind 防御忽略
+        okB = okB && toastT20B == 21;
+        // achievements() 恰 31 条 + 新条目形状（名 / 父链 / 独立根 / 图标 id 非 0）。
+        const QVariantList achT20 = progT20B.achievements();
+        int totalDefsT20 = 0;
+        bool spiderShape = false, dungeonShape = false, cartShape = false;
+        for (const QVariant &v : achT20) {
+            const QVariantMap m = v.toMap();
+            ++totalDefsT20;
+            const QString id = m.value(QStringLiteral("id")).toString();
+            if (id == QLatin1String("kill_spider"))
+                spiderShape = m.value(QStringLiteral("unlocked")).toBool()
+                           && m.value(QStringLiteral("name")).toString() == QStringLiteral("织网终结者")
+                           && m.value(QStringLiteral("parentId")).toString() == QLatin1String("monster_hunter");
+            if (id == QLatin1String("entered_dungeon"))
+                dungeonShape = m.value(QStringLiteral("name")).toString() == QStringLiteral("地牢探秘")
+                            && m.value(QStringLiteral("parentId")).toString().isEmpty()
+                            && m.value(QStringLiteral("iconId")).toInt() == int(BlockRegistry::Spawner);
+            if (id == QLatin1String("ride_minecart"))
+                cartShape = m.value(QStringLiteral("name")).toString() == QStringLiteral("轨道骑士")
+                         && m.value(QStringLiteral("parentId")).toString().isEmpty()
+                         && m.value(QStringLiteral("iconId")).toInt() == int(RecipeRegistry::MinecartId);
+        }
+        okB = okB && totalDefsT20 == 31 && spiderShape && dungeonShape && cartShape;
+        // 读档回放：loadVariant 静默恢复 → 界内重进沿重发而 toast 不重发。
+        PlayerProgress progT20Load;
+        int toastT20Load = 0, enteredT20Load = 0;
+        progT20Load.loadVariant(progT20A.toVariant());
+        okB = okB && progT20Load.isUnlocked(QStringLiteral("entered_dungeon"));
+        PlayerController pcT20Load;
+        pcT20Load.setWorld(&wT20Load);
+        QObject::connect(&pcT20Load, &PlayerController::structureEntered, &pcT20Load, [&](int kind) {
+            if (kind == World::StructureDungeon) ++enteredT20Load;
+            progT20Load.onStructureEntered(kind);
+        });
+        QObject::connect(&progT20Load, &PlayerProgress::achievementUnlocked, &progT20Load,
+                         [&](const QString &, const QString &, const QString &) { ++toastT20Load; });
+        pcT20Load.loadSavedState(float(dunCx) + 0.5f, float(dunCy + 1), float(dunCz) + 0.5f, -90.0f, 0.0f, 0);
+        pcT20Load.tick();
+        okB = okB && enteredT20Load == 1 && toastT20Load == 0;
+        storeT20Load.closeWorld();
+        QFile::remove(dbT20);
+        if (!okB)
+            qInfo().noquote() << "  [t1020 diag] entered" << enteredT20[0] << "toast" << toastT20
+                              << "toastB" << toastT20B << "defs" << totalDefsT20
+                              << "shape" << spiderShape << dungeonShape << cartShape
+                              << "loadEntered" << enteredT20Load << "loadToast" << toastT20Load;
+
+        // ── (c) 源码钉：边沿守卫 + 重置钩子 + QML 路由行 + 定义行 + 类常量同源 ──
+        const QString exeDirT20 = QCoreApplication::applicationDirPath();
+        const QString rootT20 = QDir(exeDirT20 + QStringLiteral("/..")).absolutePath();
+        const auto readSrcT20 = [&rootT20](const QString &rel) -> QString {
+            QFile f(rootT20 + QLatin1Char('/') + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString pcCppT20 = readSrcT20(QStringLiteral("src/Game/playercontroller.cpp"));
+        const QString pcHdrT20 = readSrcT20(QStringLiteral("src/Game/playercontroller.h"));
+        const QString mainQmlT20 = readSrcT20(QStringLiteral("src/ui/Main.qml"));
+        const QString ppCppT20 = readSrcT20(QStringLiteral("src/Game/playerprogress.cpp"));
+        const QString ppHdrT20 = readSrcT20(QStringLiteral("src/Game/playerprogress.h"));
+        const QString worldHdrT20 = readSrcT20(QStringLiteral("src/World/world.h"));
+        const QString worldCppT20 = readSrcT20(QStringLiteral("src/World/world.cpp"));
+        const bool okPinT20 =
+            pcCppT20.contains(QStringLiteral("if (inStruct && !m_insideStructure[k])"))              // tick 上升沿守卫
+            && pcCppT20.contains(QStringLiteral("读档重进同清四结构进入沿守卫"))                       // finishWorldLoad 重置钩子
+            && pcHdrT20.contains(QStringLiteral("void structureEntered(int kind);"))                 // 信号声明
+            && mainQmlT20.contains(QStringLiteral("function onStructureEntered(kind) { progress.onStructureEntered(kind) }")) // 路由行
+            && mainQmlT20.contains(QStringLiteral("if (ridingCart) progress.onRodeMinecart()"))
+            && mainQmlT20.contains(QStringLiteral("if (isCartCell) progress.onChestCartOpened()"))
+            && mainQmlT20.contains(QStringLiteral("progress.onFishCaught()"))
+            && ppCppT20.contains(QStringLiteral("{ \"entered_dungeon\", nullptr,"))                   // 定义行（独立根）
+            && ppCppT20.contains(QStringLiteral("轨道骑士"))
+            && ppCppT20.contains(QStringLiteral("if (mobType == MT::MobSpider || mobType == MT::MobCaveSpider)"))
+            && ppHdrT20.contains(QStringLiteral("Q_INVOKABLE void onStructureEntered(int kind);"))
+            && worldHdrT20.contains(QStringLiteral("enum StructureKind"))                             // 区域 kind 契约
+            && worldHdrT20.contains(QStringLiteral("static constexpr int kDesertTempleHalf = 10;"))   // 足迹常量单一权威
+            && worldCppT20.contains(QStringLiteral("rebuildStructureRegions"))
+            && worldCppT20.contains(QStringLiteral("kDesertBiomeGuarantee"));                          // t1010 保底旗迁移存活
+        okB = okB && okPinT20;
+        if (!okPinT20)
+            qInfo().noquote() << "  [t1020 diag] source pins drifted (guard/reset/route/def/constants)";
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1020 achievement-tree expansion: structureEntered edge fires once per"
+                             " dungeon entry with idempotent toast and finishWorldLoad re-arm,"
+                             " first-kill x4 co-unlocks with monster_hunter, first-ore parent gating"
+                             " (coal/iron/redstone), minecart/fish/chest-cart hooks, kind mapping,"
+                             " 31 defs with shape checks, save->load replay without re-toast,"
+                             " source pins (guard/reset/route/def/constants)";
+    }
+    } // t1020 面板 A+B 共用作用域收口（B 复用 A 的探针世界 / 存档句柄）
+
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
     //    rig：t995/t1001 同款 5 seed（20260821/777/424242/1337/90210，缺要塞的种子跳过、备胎续扫，
     //    ≥4 世界才判）× 128×128×64 世界池。断言五层：
