@@ -3,6 +3,8 @@
 #include <QByteArray>
 #include <QFile>
 #include <QLoggingCategory>
+#include <QRandomGenerator> // t1021 滴水/虫鸣随机间隔与音量抖动（呈现层调度随机性，非 worldgen 确定性范畴）
+#include <QTimer>           // t1021 滴水/虫鸣随机间隔单发重臂调度器（Data 成员）
 
 #include <array>
 #include <deque>
@@ -157,6 +159,33 @@ struct AudioManager::Data
     // t386 雷声单件（雷雨天随机闪电）。较长 SFX（~2.6s 低频轰鸣长尾）→ maxFrames 须放宽到 4s（默认 2s 会把
     //   长尾截断 → 雷「轰隆」戛然而止，同 ambient_wind 长 clip 教训）。World::lightningStruck → playThunder 触发。
     Clip thunderClip{":/sounds/thunder.wav"};
+    // ── t1021 结构环境音（四音）+ 事件音补缺（三音）──
+    // 要塞低鸣单件（8s 循环低频嗡鸣床；looping=true，start/stopStrongholdHum 控开关）。要塞 region 门控。
+    Clip strongholdHumClip{":/sounds/stronghold_hum.wav"};
+    bool strongholdHumPlaying = false;
+    // 低鸣基础音量系数（合成峰值 0.7 + base 0.30 = 背景床级；低频嗡鸣常驻不宜压过前景 SFX）。
+    static constexpr float kStrongholdHumBaseVol = 0.30f;
+    // 沙漠夜风单件（8s 循环空旷风床；looping=true，start/stopDesertNightWind 控开关）。
+    //   沙漠神殿区 + 夜 + 露天三重门控（zone=3，PlayerController 复合判定）。
+    Clip desertNightWindClip{":/sounds/desert_night_wind.wav"};
+    bool desertNightWindPlaying = false;
+    // 夜风基础音量系数（同低鸣量级 = 背景床级）。
+    static constexpr float kDesertWindBaseVol = 0.30f;
+    // 矿井滴水单发 clip（~0.55s 单滴「叮-咚」含两级巷道回声）。AudioManager 内部 QTimer 随机间隔调度。
+    Clip mineshaftDripClip{":/sounds/mineshaft_drip.wav"};
+    // 丛林虫鸣单发 clip（~1.1s 蟋蟀式颤音簇）。同上 QTimer 调度；昼稀 / 夜密只变间隔不变音色。
+    Clip jungleChirpClip{":/sounds/jungle_chirps.wav"};
+    // 滴水 / 虫鸣随机间隔调度器（单发 QTimer 重臂式：timeout 内播音 + 重臂新随机间隔；stop 后
+    //   active=false 不再重臂 —— 无堆叠、无 metronome 感）。QTimer 挂本 Data（AudioManager 构造时接续）。
+    QTimer dripTimer;
+    bool dripsActive = false;
+    QTimer chirpTimer;
+    bool chirpsActive = false;
+    bool chirpsDense = false;   // 虫鸣密度（true=夜晚密集 1.6-5.0s / false=昼稀疏 5.5-13.0s）
+    // 事件音补缺单件：成就解锁 toast chime / 箱子开 / 箱子关（replay 单件，同 hurt/door 模式）。
+    Clip achievementClip{":/sounds/achievement.wav"};
+    Clip chestOpenClip{":/sounds/chest_open.wav"};
+    Clip chestCloseClip{":/sounds/chest_close.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -234,6 +263,15 @@ struct AudioManager::Data
     {
         return masterVolume * kAmbientBaseVol * ambientLevel;
     }
+    // t1021 两循环结构环境音最终音量 = master × base（无 level 项 —— 门控已由 zone 启停承担，音量恒定）。
+    float strongholdHumVol(float masterVolume) const
+    {
+        return masterVolume * kStrongholdHumBaseVol;
+    }
+    float desertWindVol(float masterVolume) const
+    {
+        return masterVolume * kDesertWindBaseVol;
+    }
     // t223 水流声最终音量 = master × base × level（level 由玩家到最近流水格的距离映射，近=1/远→0）。
     float waterFlowVol(float masterVolume) const
     {
@@ -300,6 +338,17 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->uiClickClip);
     // t386 雷声较长 SFX（~2.6s），maxFrames 放宽到 4s 保完整长尾轰鸣（同长 clip 教训，避免 2s 截断戛然而止）。
     d->loadClip(d->thunderClip, ma_uint64(Data::kSampleRate) * 4);
+    // t1021 两循环结构环境音（低鸣 / 夜风）同为 8.0s 长循环（首末 80ms 淡化无缝），maxFrames 放宽到 16s
+    //   保完整解码（同 ambient_wind / water_flow / lava 的长 clip 教训）。
+    d->loadClip(d->strongholdHumClip, ma_uint64(Data::kSampleRate) * 16);
+    d->loadClip(d->desertNightWindClip, ma_uint64(Data::kSampleRate) * 16);
+    // t1021 滴水（~0.55s）/ 虫鸣（~1.1s）单发短 SFX + 三事件音单件（成就 ~0.85s / 箱开 ~0.34s / 箱关
+    //   ~0.24s），默认 2s maxFrames 远大于各自长度。
+    d->loadClip(d->mineshaftDripClip);
+    d->loadClip(d->jungleChirpClip);
+    d->loadClip(d->achievementClip);
+    d->loadClip(d->chestOpenClip);
+    d->loadClip(d->chestCloseClip);
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
@@ -316,6 +365,13 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->waterStepClip);
     d->initSound(d->uiClickClip);
     d->initSound(d->thunderClip);
+    d->initSound(d->strongholdHumClip);
+    d->initSound(d->desertNightWindClip);
+    d->initSound(d->mineshaftDripClip);
+    d->initSound(d->jungleChirpClip);
+    d->initSound(d->achievementClip);
+    d->initSound(d->chestOpenClip);
+    d->initSound(d->chestCloseClip);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
     if (d->engineOk && d->ambientClip.ok) {
         ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
@@ -331,6 +387,35 @@ AudioManager::AudioManager(QObject *parent)
         ma_sound_set_looping(&d->lavaFlowClip.sound, MA_TRUE);
         ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
     }
+    // t1021 两循环结构环境音：sound init 成功后置循环 + 初始音量（start* 才 start；由 zone 门控驱动）。
+    if (d->engineOk && d->strongholdHumClip.ok) {
+        ma_sound_set_looping(&d->strongholdHumClip.sound, MA_TRUE);
+        ma_sound_set_volume(&d->strongholdHumClip.sound, d->strongholdHumVol(m_volume));
+    }
+    if (d->engineOk && d->desertNightWindClip.ok) {
+        ma_sound_set_looping(&d->desertNightWindClip.sound, MA_TRUE);
+        ma_sound_set_volume(&d->desertNightWindClip.sound, d->desertWindVol(m_volume));
+    }
+    // t1021 滴水 / 虫鸣随机间隔调度（单发 QTimer 重臂式）：timeout 内播音 + 按（虫鸣）密度重臂新随机
+    //   间隔；stop 置 inactive 后 timeout 直接早退不再重臂 —— 无堆叠、无 metronome 感。播不出声
+    //   （engine / clip 降级）时 start* 早退、timer 永不启动，此处 lambda 恒不触发。
+    d->dripTimer.setSingleShot(true);
+    connect(&d->dripTimer, &QTimer::timeout, this, [this]() {
+        if (!d->dripsActive) return;
+        const float jitter = 0.75f + 0.25f * float(QRandomGenerator::global()->generateDouble());
+        d->replay(d->mineshaftDripClip, m_volume * 0.55f * jitter);
+        d->dripTimer.start(1400 + QRandomGenerator::global()->bounded(3400)); // 后续 1.4-4.8s
+    });
+    d->chirpTimer.setSingleShot(true);
+    connect(&d->chirpTimer, &QTimer::timeout, this, [this]() {
+        if (!d->chirpsActive) return;
+        const float jitter = 0.70f + 0.30f * float(QRandomGenerator::global()->generateDouble());
+        d->replay(d->jungleChirpClip, m_volume * 0.45f * jitter);
+        if (d->chirpsDense)
+            d->chirpTimer.start(1600 + QRandomGenerator::global()->bounded(3400)); // 夜密 1.6-5.0s
+        else
+            d->chirpTimer.start(5500 + QRandomGenerator::global()->bounded(7500)); // 昼稀 5.5-13.0s
+    });
 
     qCInfo(lcAudio).nospace().noquote()
         << "AudioManager init: engine=" << d->engineOk
@@ -355,7 +440,14 @@ AudioManager::AudioManager(QObject *parent)
         << " lava=" << d->lavaFlowClip.ok
         << " water_step=" << d->waterStepClip.ok
         << " ui_click=" << d->uiClickClip.ok
-        << " thunder=" << d->thunderClip.ok;
+        << " thunder=" << d->thunderClip.ok
+        << " stronghold_hum=" << d->strongholdHumClip.ok
+        << " desert_night_wind=" << d->desertNightWindClip.ok
+        << " mineshaft_drip=" << d->mineshaftDripClip.ok
+        << " jungle_chirps=" << d->jungleChirpClip.ok
+        << " achievement=" << d->achievementClip.ok
+        << " chest_open=" << d->chestOpenClip.ok
+        << " chest_close=" << d->chestCloseClip.ok;
 }
 
 AudioManager::~AudioManager()
@@ -384,6 +476,13 @@ AudioManager::~AudioManager()
     if (d->waterStepClip.ok) ma_sound_uninit(&d->waterStepClip.sound);
     if (d->uiClickClip.ok) ma_sound_uninit(&d->uiClickClip.sound);
     if (d->thunderClip.ok) ma_sound_uninit(&d->thunderClip.sound);
+    if (d->strongholdHumClip.ok) ma_sound_uninit(&d->strongholdHumClip.sound);
+    if (d->desertNightWindClip.ok) ma_sound_uninit(&d->desertNightWindClip.sound);
+    if (d->mineshaftDripClip.ok) ma_sound_uninit(&d->mineshaftDripClip.sound);
+    if (d->jungleChirpClip.ok) ma_sound_uninit(&d->jungleChirpClip.sound);
+    if (d->achievementClip.ok) ma_sound_uninit(&d->achievementClip.sound);
+    if (d->chestOpenClip.ok) ma_sound_uninit(&d->chestOpenClip.sound);
+    if (d->chestCloseClip.ok) ma_sound_uninit(&d->chestCloseClip.sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -609,6 +708,102 @@ void AudioManager::setLavaFlowLevel(float level)
         ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
 }
 
+// ── t1021 结构环境音（四音）── 两循环音（低鸣 / 夜风）同 startWaterFlow/startAmbient 模式（looping 长音 +
+//   幂等 start/stop；门控由 PlayerController::structureAmbientZone 发出、Main.qml 分流，音频层只消费）；
+//   两单发音（滴水 / 虫鸣）由本类内部 QTimer 随机间隔调度（start 启动调度器、stop 停表，播放仍在 replay）。
+void AudioManager::startStrongholdHum()
+{
+    // 幂等：已在播早退。降级（engine / clip 失败）静默早退（§2-E）。
+    if (!d->engineOk || !d->strongholdHumClip.ok || d->strongholdHumPlaying) return;
+    ma_sound_set_volume(&d->strongholdHumClip.sound, d->strongholdHumVol(m_volume));
+    if (ma_sound_start(&d->strongholdHumClip.sound) != MA_SUCCESS) {
+        qCWarning(lcAudio) << "stronghold hum start 失败（要塞低鸣降级）";
+        return;
+    }
+    d->strongholdHumPlaying = true;
+}
+
+void AudioManager::stopStrongholdHum()
+{
+    // 幂等：未在播早退。stop + seek 回 0（下次 start 从头，避免中途续播突兀；同 stopAmbient）。
+    if (!d->engineOk || !d->strongholdHumClip.ok || !d->strongholdHumPlaying) return;
+    ma_sound_stop(&d->strongholdHumClip.sound);
+    ma_sound_seek_to_pcm_frame(&d->strongholdHumClip.sound, 0);
+    d->strongholdHumPlaying = false;
+}
+
+void AudioManager::startMineshaftDrips()
+{
+    // 幂等：调度器已在跑早退。降级早退（timer 永不启动 → timeout lambda 恒不触发）。
+    if (!d->engineOk || !d->mineshaftDripClip.ok || d->dripsActive) return;
+    d->dripsActive = true;
+    // 首滴快些（进矿井 0.6-2.1s 内听到第一滴），随后 timeout 内按 1.4-4.8s 随机重臂。
+    d->dripTimer.start(600 + QRandomGenerator::global()->bounded(1500));
+}
+
+void AudioManager::stopMineshaftDrips()
+{
+    // 幂等：未在跑早退（降级态 dripsActive 恒 false → stop 天然 no-op）。
+    if (!d->dripsActive) return;
+    d->dripTimer.stop();
+    d->dripsActive = false;
+}
+
+void AudioManager::startDesertNightWind()
+{
+    if (!d->engineOk || !d->desertNightWindClip.ok || d->desertNightWindPlaying) return;
+    ma_sound_set_volume(&d->desertNightWindClip.sound, d->desertWindVol(m_volume));
+    if (ma_sound_start(&d->desertNightWindClip.sound) != MA_SUCCESS) {
+        qCWarning(lcAudio) << "desert night wind start 失败（沙漠夜风降级）";
+        return;
+    }
+    d->desertNightWindPlaying = true;
+}
+
+void AudioManager::stopDesertNightWind()
+{
+    if (!d->engineOk || !d->desertNightWindClip.ok || !d->desertNightWindPlaying) return;
+    ma_sound_stop(&d->desertNightWindClip.sound);
+    ma_sound_seek_to_pcm_frame(&d->desertNightWindClip.sound, 0);
+    d->desertNightWindPlaying = false;
+}
+
+void AudioManager::startJungleChirps(bool dense)
+{
+    // 密度先行记下：已激活时仅切密度（下次 timeout 重臂按新密度取间隔，不重启当前节拍）。
+    d->chirpsDense = dense;
+    // 幂等：调度器已在跑早退。降级早退（同 startMineshaftDrips）。
+    if (!d->engineOk || !d->jungleChirpClip.ok || d->chirpsActive) return;
+    d->chirpsActive = true;
+    // 首声 0.8-2.6s 内（进丛林神殿先听到一声虫鸣确认氛围），随后按密度随机重臂。
+    d->chirpTimer.start(800 + QRandomGenerator::global()->bounded(1800));
+}
+
+void AudioManager::stopJungleChirps()
+{
+    if (!d->chirpsActive) return;
+    d->chirpTimer.stop();
+    d->chirpsActive = false;
+}
+
+// ── t1021 事件音补缺（三音）── replay 单件（同 hurt / door 模式：seek 重发不堆叠；降级静默早退 §2-E）。
+void AudioManager::playAchievement()
+{
+    // 成就解锁是明确正反馈事件 → 0.9 前景级（同 hurt 量级略响；钟琴上行三音不刺耳）。
+    d->replay(d->achievementClip, m_volume * 0.9f);
+}
+
+void AudioManager::playChestOpen()
+{
+    // 开箱音 0.85（前景交互反馈；不压过 break/pickup）。箱子矿车同源（openChest 单一通道）。
+    d->replay(d->chestOpenClip, m_volume * 0.85f);
+}
+
+void AudioManager::playChestClose()
+{
+    d->replay(d->chestCloseClip, m_volume * 0.85f);
+}
+
 void AudioManager::setVolume(float v)
 {
     if (v < 0.0f) v = 0.0f;
@@ -625,4 +820,9 @@ void AudioManager::setVolume(float v)
     // t343：岩浆声同为持续 looping 声，master 音量变后须即时同步。
     if (d->engineOk && d->lavaFlowClip.ok && d->lavaFlowPlaying)
         ma_sound_set_volume(&d->lavaFlowClip.sound, d->lavaFlowVol(m_volume));
+    // t1021：两循环结构环境音同为持续 looping 声，master 音量变后须即时同步。
+    if (d->engineOk && d->strongholdHumClip.ok && d->strongholdHumPlaying)
+        ma_sound_set_volume(&d->strongholdHumClip.sound, d->strongholdHumVol(m_volume));
+    if (d->engineOk && d->desertNightWindClip.ok && d->desertNightWindPlaying)
+        ma_sound_set_volume(&d->desertNightWindClip.sound, d->desertWindVol(m_volume));
 }

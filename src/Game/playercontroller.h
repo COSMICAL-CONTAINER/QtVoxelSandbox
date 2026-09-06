@@ -247,6 +247,9 @@ class PlayerController : public QQuickItem
     //   节奏）算最近岩浆格距离 → level。Main.qml Connections 据此 start/stop AudioManager 岩浆声 + setLavaFlowLevel。
     //   仅 playing 且近岩浆时 >0；菜单态扫描仍跑但通常无岩浆格 → 0 → 自动停。只读 World（向下依赖）；无世界 → 0。
     Q_PROPERTY(float lavaSoundLevel READ lavaSoundLevel NOTIFY lavaSoundLevelChanged)
+    // t1021 结构环境音区：值域枚举 StructureAmbientZone（public 段，0=无 / 1=要塞低鸣 / 2=矿井滴水 /
+    //   3=沙漠夜风 / 4=虫鸣昼稀 / 5=虫鸣夜密；推导与 emit 纪律详见该枚举头注释）。
+    Q_PROPERTY(int structureAmbientZone READ structureAmbientZone NOTIFY structureAmbientZoneChanged)
     // t344 玩家火烧态（岩浆 / 火点燃；仅 Survival 着火 + 火伤）：脚位 / 身体格 == Lava → 着火（fireTimer=
     //   kFireDuration，复用 EntityManager 火烧常量保一致手感）；fireTimer>0 时每 kFireDamageInterval 秒扣 1HP
     //   （fallDamageTaken(1, Fire) 复用 takeDamage→damaged 链）+ 掷随机提前熄灭。状态翻转才发 burningChanged
@@ -289,6 +292,22 @@ public:
     //   仅 Walk↔Sprint↔Crouch 三态；详见 moveState 属性注释。
     enum MoveState { Walk, Sprint, Crouch };
     Q_ENUM(MoveState)
+    // t1021 结构环境音区（Q_PROPERTY structureAmbientZone 的 int 值域；public 供探针 / QML 数值契约）：
+    //   玩家当前所处结构对应的氛围音种类，每 tick 在 env 桶由 t1020 region 表（insideStronghold /
+    //   insideStructureRegion 四谓词）+ 复合门（沙漠=夜 + 露天；丛林=夜密度）重推导 —— 音频层
+    //   （AudioManager）只消费本值、绝不反查区域（PLAN §2 分层：Game 层判定 → 呈现层分流 → Core 层播放，
+    //   同 flowSoundLevel 先例）。多结构重叠取先折叠先得（要塞 > 矿井 > 沙漠 > 丛林，见 tickImpl 折叠序；
+    //   确定性）。值真变才 emit（界内连 tick 零重发，禁每帧抖 QML）；setWorld / finishWorldLoad 静默清 0
+    //   （下一 tick 重推导重发 —— QML 退出世界已有显式全停兜底，重进后首 tick 值变即恢复对应环境音）。
+    //   Main.qml Connections onStructureAmbientZoneChanged 分流启停四环境音。
+    enum StructureAmbientZone {
+        AmbientNone = 0,        // 无结构环境音（含地牢——四音不覆盖地牢，登记口径）
+        AmbientStronghold = 1,  // 要塞低鸣（持续低频循环）
+        AmbientMineshaft = 2,   // 矿井滴水（随机间隔单滴）
+        AmbientDesertTemple = 3,// 沙漠夜风（区内 + 夜 + 露天）
+        AmbientJungleDay = 4,   // 丛林虫鸣昼（稀疏）
+        AmbientJungleNight = 5  // 丛林虫鸣夜（密集）
+    };
 
     explicit PlayerController(QQuickItem *parent = nullptr);
 
@@ -404,6 +423,9 @@ public:
     // t343 近岩浆 proximity 岩浆声强度（Q_PROPERTY lavaSoundLevel READ）：玩家到最近岩浆格的距离映射 [0,1]。
     //   无世界 / 无近岩浆 → 0。定义在 .cpp。
     float lavaSoundLevel() const;
+    // t1021 结构环境音区（Q_PROPERTY structureAmbientZone READ，StructureAmbientZone 值域）：tickImpl env 桶
+    //   每 tick 重推导的缓存值；无世界 → AmbientNone。定义在 .cpp。
+    int structureAmbientZone() const;
     // t344 玩家火烧态（Q_PROPERTY burning READ）：m_burning 缓存（tickImpl 算时序、翻转才 emit burningChanged）。
     //   仅 Survival 着火（Creative/Spectator 无敌）。Main.qml 据它显底部火焰叠层。
     bool burning() const { return m_burning; }
@@ -676,6 +698,9 @@ signals:
     void feetInWaterChanged(); // t269 脚位水态翻转（驱动水中走路声分流；值真变才发，免每帧抖 QML 绑定）
     void flowSoundLevelChanged(); // t223 近流水 proximity 强度变（驱动 AudioManager 水流声 start/stop/setLevel）
     void lavaSoundLevelChanged(); // t343 近岩浆 proximity 强度变（驱动 AudioManager 岩浆声 start/stop/setLevel）
+    // t1021 结构环境音区变（StructureAmbientZone 值域）：驱动 Main.qml 分流启停 AudioManager 四结构环境音。
+    //   值真变才发（界内连 tick 零重发）；setWorld / finishWorldLoad 静默清 0 不发（下一 tick 重推导）。
+    void structureAmbientZoneChanged();
     void burningChanged(); // t344 玩家火烧态翻转（驱动底部火焰叠层显隐；值真变才发，免每帧抖 QML 绑定）
     // t715 活跃状态效果快照（QVariantList<{type, seconds, level}>，PlayerState::StatusEffect 序）：PlayerController
     //   tickImpl 每帧组装（中毒 / 缓慢 / 着火 三效果 v1），与上一帧快照深比较（逐项 type/整秒/level）真变才发。
@@ -1453,6 +1478,10 @@ private:
     float m_flowScanTimer = 0.0f;
     // t343 近岩浆 proximity 岩浆声：m_lavaSoundLevel = 最近岩浆格距离映射 [0,1]（tickImpl 同 flowScan 节奏重扫）。
     float m_lavaSoundLevel = 0.0f;
+    // t1021 结构环境音区（StructureAmbientZone 值域）：tickImpl env 桶每 tick 重推导缓存（值真变才 emit
+    //   structureAmbientZoneChanged）。setWorld / finishWorldLoad 静默清 0（同 m_insideStructure 重置纪律；
+    //   QML 退出世界显式全停兜底，重进后首 tick 值变即重发 → 对应环境音恢复）。
+    int m_structureAmbientZone = AmbientNone;
     // t344 玩家火烧态（岩浆 / 火点燃；仅 Survival）：m_burning 缓存（翻转才 emit burningChanged），
     //   m_fireTimer 火烧剩余秒（>0 着火；tickImpl 推进，归零熄灭），m_fireDmgTimer 火伤累积（每 kFireDamageInterval 扣 1HP）。
     //   常量复用 EntityManager::kFire*（Game→Entities 向下依赖，玩家与 mob 火烧同值保一致手感）。

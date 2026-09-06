@@ -149,6 +149,35 @@ public:
     //   feetInWater 分流：水中 → playWaterStep，陆地 → playStep(blockId)。音量略低于普通 step（水下传播衰减
     //   + 不抢水流声前景）。seek 重发不堆叠（同其他单件模式）；engine/clip 失败静默降级（§2-E，不崩）。
     Q_INVOKABLE void playWaterStep();
+    // ── t1021 结构环境音（四音）+ 事件音补缺（三音）：机制等价 MC 结构氛围声（§9 原创程序合成，零 MC
+    //    资产；build_sounds.py gen_stronghold_hum / gen_mineshaft_drip / gen_jungle_chirps /
+    //    gen_desert_night_wind / gen_achievement / gen_chest_open / gen_chest_close）。空间门控由 Game 层
+    //    PlayerController::structureAmbientZone（复用 t1020 region 表 + 夜 / 露天复合门）发出，Main.qml
+    //    Connections 分流到本组方法 —— 音频层只消费 zone 判定结果、绝不反查区域（PLAN §2 分层：依赖只
+    //    向下；同 waterFlow/lavaFlow 的 Game 层 proximity → 呈现层桥接先例）。engine / clip 失败 → 各方法
+    //    静默早退（§2-E，不崩）。
+    // 要塞低鸣（8s 循环低频嗡鸣床）：zone=1（要塞区内，昼夜无关）期间 start、离开 stop。
+    Q_INVOKABLE void startStrongholdHum();
+    Q_INVOKABLE void stopStrongholdHum();
+    // 矿井滴水（随机间隔单滴）：内部 QTimer 单发重臂式调度（首滴 0.6-2.1s / 后续 1.4-4.8s 随机间隔，
+    //   每次播放音量随机抖动）—— 无既有「随机间隔」机制，按 EntityManager mob ambientTimer（t250 随机
+    //   8-16s 周期 idle）先例登记为 AudioManager 内部轻量 QTimer（zone=2 期间运行、离开停止）。
+    Q_INVOKABLE void startMineshaftDrips();
+    Q_INVOKABLE void stopMineshaftDrips();
+    // 沙漠夜风（8s 循环空旷风床）：zone=3（沙漠神殿区 + 夜 + 露天三重门，昼 / 密室无风）期间 start。
+    Q_INVOKABLE void startDesertNightWind();
+    Q_INVOKABLE void stopDesertNightWind();
+    // 丛林虫鸣（随机间隔颤音簇 one-shot）：dense=true 夜晚密集（1.6-5.0s 间隔）/ false 昼稀疏
+    //   （5.5-13.0s）；已激活时再调仅切密度（下次重臂生效，不重启节拍）。zone=4/5 期间运行。
+    Q_INVOKABLE void startJungleChirps(bool dense);
+    Q_INVOKABLE void stopJungleChirps();
+    // 事件音补缺一：成就解锁 toast 音（progress.achievementUnlocked → Main.qml 路由）。结构进入等成就
+    //   toast 同源共享本音（toast 系统单一通道 = 「结构进入提示音」随之覆盖，不另造重复音）。
+    Q_INVOKABLE void playAchievement();
+    // 事件音补缺二 / 三：箱子开 / 关音（Main.qml openChest / closeChest 单一通道路由；方块箱与箱子
+    //   矿车同源 —— 箱车开箱走同一 openChest，机制等价 MC storage minecart 开箱声）。
+    Q_INVOKABLE void playChestOpen();
+    Q_INVOKABLE void playChestClose();
 
     float volume() const { return m_volume; }
     void setVolume(float v);
