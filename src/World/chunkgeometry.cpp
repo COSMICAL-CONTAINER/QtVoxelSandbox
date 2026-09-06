@@ -280,6 +280,19 @@ void ChunkGeometry::setGreedyMeshing(bool on)
     buildMesh(RebuildReason::Dirty);
 }
 
+// t1023 AO 环境光遮蔽开关变 → 地形段逐格 culled 路径重网格化（角点接触阴影重烘）。值未变早退。
+//   Dirty reason（同 setGreedyMeshing：内容驱动重建，绕过 sun-step 节流）。t472 视距门控：
+//   远端 chunk 静默更新值，回 true 时 catch-up。范围钉死：仅逐格 culled 路径采样（greedy 合并键
+//   不含 AO / 流体水面观感未验 / 异形 cross 段走 PartialLightCtx——均不采样，t1023 报告登记后续）。
+void ChunkGeometry::setAoEnabled(bool on)
+{
+    if (m_aoEnabled == on) return;
+    m_aoEnabled = on;
+    emit aoEnabledChanged();
+    if (!m_chunkInRange) return; // t472：远端跳过，回 true catch-up
+    buildMesh(RebuildReason::Dirty);
+}
+
 // t223/tXXX 水贴图动画 phase（flipbook 换帧）——**tXXX 起不再触发重建**（水动画重建消除，静态水单帧）。
 //   旧行为：2s 一次全量水段 buildMesh(Water) 换 2 帧 UV（Swamp 场景 261 段/次），是 mesh 重建风暴第二根因；
 //   2 帧 UV 子区换帧不必重建整段（重跑 mesher + 逐顶点烘光 + GPU 重传）。现改静态水：本 setter 只记录值 +
@@ -588,6 +601,28 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     constexpr float kVcMin = VoxelLight::kVcMin; // 暗部地板最低亮度（洞穴/阴影最低，仍远低于火把光池 0.93 保持对比）
     constexpr float kVcMax = VoxelLight::kVcMax;
     const float dayMul = m_dayMul; // 本帧烘光的昼夜天光乘子（只乘 sky 项，保 block 项时间不变）
+
+    // t1023 AO 角点遮挡因子（地形段逐格 culled 路径专属；m_aoEnabled=true 才被调用）：
+    //   经典 MC AO——面邻格（空气侧）为基，沿面内两轴 ±1 的两侧格 + 对角格共 3 探针，遮挡判据 =
+    //   occludesNeighborFace（满格不透明立方，叶不遮——与邻面剔除同一谓词单一权威），因子曲线 =
+    //   VoxelLight::kAoFactor（双侧同遮钳 3，防薄墙 / 凹角三重压黑）。探针走 blockAtWorld 跨 chunk
+    //   路由（边界角点正确；越界 = Air = 无遮挡）。
+    const auto aoCorner = [this](int nax, int nay, int naz,
+                                 int axisU, int axisV, int signU, int signV) -> float {
+        const int s1[3] = { nax + (axisU == 0 ? signU : 0),
+                            nay + (axisU == 1 ? signU : 0),
+                            naz + (axisU == 2 ? signU : 0) };
+        const int s2[3] = { nax + (axisV == 0 ? signV : 0),
+                            nay + (axisV == 1 ? signV : 0),
+                            naz + (axisV == 2 ? signV : 0) };
+        const int kc[3] = { s1[0] + (axisV == 0 ? signV : 0),
+                            s1[1] + (axisV == 1 ? signV : 0),
+                            s1[2] + (axisV == 2 ? signV : 0) };
+        const bool o1 = occludesNeighborFace(blockAtWorld(s1[0], s1[1], s1[2]));
+        const bool o2 = occludesNeighborFace(blockAtWorld(s2[0], s2[1], s2[2]));
+        const bool oc = occludesNeighborFace(blockAtWorld(kc[0], kc[1], kc[2]));
+        return VoxelLight::aoCornerFactor(o1, o2, oc);
+    };
 
     if (c && m_world) {
         // ---- PASS 1：不完整方块（异形）合批进同一 chunk mesh（t133 PartialBlockGeometry）----
@@ -1194,6 +1229,9 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                             // t406 耕地 +Y 顶面湿润暗化（darker=wetter；仅 Farmland 顶面带等级，其余 = 1.0）。
                             const float brightMul = (b == BlockRegistry::Farmland && f == int(BlockRegistry::Top))
                                 ? farmlandHydrBrightMul(quint8(st & BlockRegistry::FarmlandHydrationMask)) : 1.0f;
+                            // t1023 AO 面内两轴（±X 面→Y/Z；±Y 面→X/Z；±Z 面→X/Y）——角点侧/对角探针偏移用。
+                            const int aoAxisU = (f <= 1) ? 1 : 0;
+                            const int aoAxisV = (f <= 1) ? 2 : (f <= 3 ? 2 : 1);
                             const quint32 base = quint32(verts.size());
                             for (int cc = 0; cc < 4; ++cc) {
                                 const float dx = F.c[cc][0], dy = F.c[cc][1], dz = F.c[cc][2];
@@ -1201,6 +1239,14 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 // PLAN §2-H：dayMul 只乘天光分量（立方面），block 项保留 → 夜间火把/熔炉光照亮的方块面仍全亮。
                                 const float vc = std::clamp(std::max(nbSkyF * (1.0f - shadow) * dayMul, nbBlockF),
                                                             kVcMin, kVcMax);
+                                // t1023 AO 接触阴影（aoEnabled 默认关 → 因子恒 1.0，三探针零开销旁路）：
+                                //   角点实体遮挡 → kAoFactor 曲线乘顶点色。乘在光场钳制**后**（AO 是几何暗角
+                                //   非光场分量，允许低过 kVcMin 地板——暗角即压暗语义）。
+                                const float vcl = vc * (m_aoEnabled
+                                    ? aoCorner(ax, ay, az, aoAxisU, aoAxisV,
+                                               F.c[cc][aoAxisU] ? 1 : -1,
+                                               F.c[cc][aoAxisV] ? 1 : -1)
+                                    : 1.0f);
                                 float cu, cv;
                                 if (f == 0 || f == 1) { cu = dz; cv = dy; }       // ±X
                                 else if (f == 4 || f == 5) { cu = dx; cv = dy; }  // ±Z
@@ -1210,7 +1256,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
                                 v.nx = F.nrm[0]; v.ny = F.nrm[1]; v.nz = F.nrm[2];
                                 v.u = u0 + cu * (u1 - u0);
                                 v.v = v0 + cv * (v1 - v0);
-                                v.r = vc * brightMul; v.g = vc * brightMul; v.b = vc * brightMul; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色 × t406 耕地湿润暗化（非耕地 brightMul=1.0）
+                                v.r = vcl * brightMul; v.g = vcl * brightMul; v.b = vcl * brightMul; v.a = 1.0f; // t151 光场 × t153 PCF 软影顶点色 × t406 耕地湿润暗化（非耕地 brightMul=1.0）× t1023 AO 接触阴影（默认关 = 恒 1.0）
                                 verts.append(v);
                             }
                             idx.append(base + 0); idx.append(base + 1); idx.append(base + 2);

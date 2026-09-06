@@ -123,6 +123,17 @@ public:
     //   顶点格式 / dev-plan 偏差 1/2），属推迟项。**t183 默认 false**（用户实测拉伸不可接受）；ESC 设置面板仍可手动
     //   打开 greedy（性能对比 / 纹理数组落地后切回）。值变 → buildMesh 重网格化。
     Q_PROPERTY(bool greedyMeshing READ greedyMeshing WRITE setGreedyMeshing NOTIFY greedyMeshingChanged)
+    // t1023（R19.20）AO 环境光遮蔽开关（平滑光照调研的首批小步单项）：true → 地形段逐格 culled
+    //   路径每面 4 角点做经典 MC AO 三探针（面邻格基 + 两侧 + 对角，实体遮挡计数、双侧钳 3），
+    //   遮挡因子（VoxelLight::kAoFactor 曲线，单一权威）乘顶点色 → 墙根 / 拐角接触阴影暗角。
+    //   **默认 false（出厂关）**——t1023 弹性口径：平滑光照全量版（角点 4 格光场平均）改造面大
+    //   （greedy 合并键冲突 / 视觉全场景回归 / ~2-4× 光采样），登记 docs/perf-batch3-research-2026-09.md
+    //   路线不硬做；AO 单项先行，待用户实机目视确认后另单翻默认。值变 → buildMesh 重网格化
+    //   （同 setGreedyMeshing 的 Dirty 路径 + t472 视距门控）。
+    //   范围（钉死）：仅地形段逐格 culled 路径（greedy 合并键不含 AO、流体水面接触阴影观感未验、
+    //   异形/cross 段走 PartialLightCtx 上下文——均不采样，登记后续）。乘法语义：AO 乘在光场钳制后
+    //   （接触阴影允许低过 kVcMin 地板——暗角即压暗语义，非光场分量）。
+    Q_PROPERTY(bool aoEnabled READ aoEnabled WRITE setAoEnabled NOTIFY aoEnabledChanged)
     // t472 性能：chunk 是否在玩家渲染距离内（视距门控，修 t470 视距盲点 + 砍 mesh 重建风暴）。
     //   由所在段 Model.chunkInRange 绑定注入（Main.qml `_refreshChunkVisibility` 据玩家所在 chunk +
     //   renderDistance 切比雪夫半径切换）。**false = 远端 chunk**：sun 步进（setSunDir）/ 水翻页
@@ -203,6 +214,9 @@ public:
     // t178 贪婪网格化开关（true=greedy 合并同面；false=逐格 culled）。值变 → 重网格化。
     bool greedyMeshing() const { return m_greedyMeshing; }
     void setGreedyMeshing(bool on);
+    // t1023 AO 环境光遮蔽开关（见 Q_PROPERTY 注释）。值变 → 重网格化（地形段 culled 路径角点重烘）。
+    bool aoEnabled() const { return m_aoEnabled; }
+    void setAoEnabled(bool on);
     // t223 水贴图动画 phase（0/1；仅水段使用）。值变 → 水段 buildMesh(Water)（地形段早退）。
     int waterAnimPhase() const { return m_waterAnimPhase; }
     void setWaterAnimPhase(int phase);
@@ -245,6 +259,7 @@ signals:
     void iceOnlyChanged(); // t468：冰段开关变（QML 改 iceOnly → 重建，冰段 / 地形段重网格化）
     void shadowsEnabledChanged(); // t166b：阴影开关变（→ buildMesh 重算顶点光 PCF）
     void greedyMeshingChanged();  // t178：贪婪网格化开关变（→ buildMesh 重网格化）
+    void aoEnabledChanged();      // t1023：AO 环境光遮蔽开关变（→ 地形段 culled 角点重烘 AO）
     void waterAnimPhaseChanged(); // t223/tXXX：水贴图动画 phase 变（历史遗留；tXXX 起**不再触发 buildMesh**，静态水单帧，见 Q_PROPERTY 注释）
     void chunkInRangeChanged();   // t472：视距门控变（false→true 触发一次 catch-up buildMesh）
     // buildMesh 完成（顶点 / 三角面数已更新；t10 F3 叠层据此刷新汇总）。
@@ -290,6 +305,7 @@ private:
     bool m_iceOnly = false; // t468：true=只网格化冰族段（Ice/PackIce/BlueIce 透明整立方半透）；false=地形段跳冰族
     bool m_shadowsEnabled = true; // t166b：PCF 软影开关（false → sunShadowAt 返 0，跳过 per-vertex 采样）
     bool m_greedyMeshing = false; // t178/t183：贪婪网格化开关（true=合并同面但贴图拉伸；false=逐格 culled 贴图清晰，t183 默认）
+    bool m_aoEnabled = false;     // t1023：AO 环境光遮蔽开关（默认关出厂；地形段 culled 路径角点接触阴影）
     int m_waterAnimPhase = 0; // t223/tXXX：水贴图动画 phase（**历史遗留**，静态水后恒 0；setter 不重建，见 Q_PROPERTY 注释）
     bool m_chunkInRange = true; // t472：视距门控（false=远端跳过 buildMesh；false→true catch-up 一次）
     // tXXX sun-step 粗量化：上次「实际烘进顶点色的太阳方向」与时刻（buildMesh 末尾更新）。setSunDir 据此
