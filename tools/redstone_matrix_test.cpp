@@ -41,6 +41,7 @@
 #include <QMouseEvent>  // t949 探针：合成右键 press 直调 eventFilter（真实输入翻译链第一站）
 #include <QThread>      // t950 探针：msleep 越过掉落物新生免拾窗（isPickupReady 墙钟，无注入缝）
 #include <QRandomGenerator> // t1006 探针：进场散布复刻随机列（同 QML Math.random 语义位）
+#include <QDirIterator>    // t1023 探针：src/ 递归扫线程原语（meshing 线程模式事实钉）
 #include <functional> // t1006 探针：视觉树 delegate 计数递归 lambda
 
 #include "blockregistry.h"
@@ -39890,6 +39891,262 @@ Item {
                           << (okA && okB && okC
                                   ? QString()
                                   : QStringLiteral("diag %1").arg(diag1008));
+    }
+
+    // ── P-t1023 性能批三（R19.20；docs/perf-batch3-research-2026-09.md）三腿 ──
+    //   (a) 隐藏 delegate 永停表动画 `running: visible` 门控源码钉（t1007 治理路径 b/c 最小步；
+    //       QML visible:false 不暂停 Animation on（t561 火焰同源）——槽池 200 item delegate 的
+    //       rotY+bobY 与 47 mob delegate 的 endereye/enderpearl spin 在空槽/隐藏态恒烧 GUI 帧）。
+    //   (b) AO 环境光遮蔽行为级（t1023 平滑光照调研首批小步；ChunkGeometry 直驱 t860 先例 +
+    //       vertexData 直读 t965 先例）：默认关平坦基线 / 开启角点曲线精确值 / round-trip 逐字节。
+    //   (c) meshing 线程模式事实钉（t906 复核）：src/ 零线程原语 与 F3 `threads: 0/0 (sync meshing)`
+    //       事实行互锁——未来线程化立项必须两处同步更新（防 F3 谎报）。
+
+    // (a) 源码钉：注释滤除后四条门控文本必须全体在场（任何一处被删/改绑即红；t860 源码钉先例）。
+    {
+        QString qml;
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString candidates[2] = {
+                QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+                QDir(exeDir + QStringLiteral("/../..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")),
+            };
+            for (const QString &c : candidates) {
+                QFile f(c);
+                if (f.open(QIODevice::ReadOnly)) { qml = QString::fromUtf8(f.readAll()); break; }
+            }
+        }
+        if (qml.isEmpty()) {
+            qInfo().noquote() << "  [t1023a note] Main.qml not found near exe - animation-gate source pin skipped";
+        } else {
+            QString code;
+            for (const QString &line : qml.split(QLatin1Char('\n'))) {
+                const QString t = line.trimmed();
+                if (t.startsWith(QLatin1String("//")) || t.startsWith(QLatin1String("*"))
+                    || t.startsWith(QLatin1String("/*")))
+                    continue;
+                code += line;
+                code += QLatin1Char('\n');
+            }
+            const auto countOf = [](const QString &hay, const QString &needle) {
+                int n = 0, pos = 0;
+                while ((pos = hay.indexOf(needle, pos)) >= 0) { ++n; pos += needle.size(); }
+                return n;
+            };
+            // rotY 自转（item delegate，3s/圈）+ bobY 浮动（2s InOutSine）：running 绑 delegate 根 visible。
+            const bool gateRotY = code.contains(QStringLiteral(
+                "NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite; running: entRoot.visible }"));
+            const bool gateBobY = code.contains(QStringLiteral("SequentialAnimation on bobY"))
+                                  && countOf(code, QStringLiteral("running: entRoot.visible")) >= 2;
+            // mob 族同向（t1007-c）：endereye/enderpearl spin（面内 roll）running 绑各自 kind 门控节点。
+            const bool gateEye = code.contains(QStringLiteral(
+                "NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite; running: endereyeNode.visible }"));
+            const bool gatePearl = code.contains(QStringLiteral(
+                "NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: enderpearlNode.visible }"));
+            const bool okGate = gateRotY && gateBobY && gateEye && gatePearl;
+            if (!okGate) ++totalFail;
+            qInfo().noquote() << (okGate ? "PASS" : "FAIL")
+                              << "| t1023a hidden-delegate animation gates (t1007-b/c minimal step):"
+                                 " QML 'Animation on' never stops for visible:false (t561 flame lesson),"
+                                 " so the 200-slot item pool kept running rotY spin + bobY float on"
+                                 " every delegate including empty/picked-up hidden slots (~2x slots"
+                                 " of constant animation burn) and all 47 mob delegates kept the"
+                                 " ender-eye/ender-pearl roll spinning regardless of entKind - the"
+                                 " fix gates all four infinite animations on delegate/node visibility"
+                                 " (running: entRoot.visible / endereyeNode.visible /"
+                                 " enderpearlNode.visible), the t696 established pattern; hidden"
+                                 " delegates stop paying animation ticks and slot-reuse restarts"
+                                 " from 'from' = fresh-entity semantics"
+                              << (okGate ? QString()
+                                         : QStringLiteral("diag rotY %1 bobY %2 eye %3 pearl %4")
+                                               .arg(gateRotY).arg(gateBobY).arg(gateEye).arg(gatePearl));
+        }
+    }
+
+    // (b) AO 行为级：确定性 rig 场景（3×3 石台 @y=42 + L 形双墙 @y=43）→ 中心格顶面四角点的
+    //     遮挡档位精确可算。遮挡判据 = occludesNeighborFace（与邻面剔除同谓词）；因子曲线 =
+    //     VoxelLight::kAoFactor {1.0, 0.8, 0.6, 0.5}，双侧同遮钳 3。断言以「无遮挡角点色 = flat」
+    //     为基准（对光场值稳健），AO 角点 = flat × 曲线值精确钉。
+    {
+        const auto [xb, zb] = nextSlot();
+        const int x1 = xb + 1, z1 = zb; // 中心格（足印 ±2；行距 3 内不蹭邻行器件）
+        const int cy = 42;              // 平台层（kRigY+1）
+        // 清场盒 5×5×7（几何未附前置 Air 便宜——无重建风暴）：扫净 rig 残余/上界到 46。
+        for (int x = x1 - 2; x <= x1 + 2; ++x)
+            for (int z = z1 - 2; z <= z1 + 2; ++z)
+                for (int y = 40; y <= 46; ++y)
+                    w.setBlock(x, y, z, BR::Air, 0);
+        ChunkGeometry geo;
+        geo.setWorld(&w);
+        geo.setCx(x1 / 16);
+        geo.setCz(z1 / 16);
+        // 平台 3×3 + L 形双墙（-X 侧 + -Z 侧）：中心格顶面 (-x,-z) 角双侧同遮钳 3 → 0.5，
+        //   (+x,-z)/(-x,+z) 单侧 → 0.8，(+x,+z) 无遮挡 → 1.0。
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(x1 + dx, cy, z1 + dz, BR::Stone, 0);
+        w.setBlock(x1 - 1, cy + 1, z1, BR::Stone, 0);
+        w.setBlock(x1, cy + 1, z1 - 1, BR::Stone, 0);
+
+        const int lx = x1 - (x1 / 16) * 16, lz = z1 - (z1 / 16) * 16;
+        // 顶点直读（stride 48B = 12 float：pos3+normal3+uv2+color4；Vtx 布局 x,y,z,nx,ny,nz,u,v,r,g,b,a
+        //   → ny = float[4]、r = float[8]——t1023 首跑教训：角点色断言最初误取 float[5]（nz），滤出的是
+        //   +Z 侧面顶点而非顶面 → 全线假值 + (1,1) 角 n=0 假红）。ultra 面隔离：同角位常有多张共角顶面
+        //   （邻格平台块顶面 / 树冠叶顶），各面光场与 AO 探针集不同 → 「按坐标收集全部顶点色断言同值」
+        //   在真实地形（树冠遮天天光有梯度）不成立。改为 **四连顶点四边形隔离**：culled 路径每面 4 角点
+        //   连续 append（base..base+3），找出「4 个连续顶点全为 y=43 顶面且位置集恰为中心格顶面四角」
+        //   的四元组——单位方格四角仅中心面唯一覆盖（邻面只共边），与邻块/树冠顶点天然隔离。
+        const auto findCenterQuad = [&](const QByteArray &buf) -> std::vector<float> {
+            // 返回按 {(-1,-1),(+1,-1),(+1,+1),(-1,+1)} 角序（= F.c[2] 的 (x,z) 序）排列的 4 个 r 值；
+            // 找不到四元组返回空。
+            const float *vf = reinterpret_cast<const float *>(buf.constData());
+            const int floats = int(buf.size()) / int(sizeof(float));
+            const int vTotal = floats / 12;
+            for (int v = 0; v + 4 <= vTotal; ++v) {
+                const float *q = vf + v * 12;
+                bool allTop = true;
+                for (int k = 0; k < 4 && allTop; ++k) {
+                    allTop = q[k * 12 + 4] > 0.99f                     // ny（float[4]，非 nz[5]）
+                             && qFuzzyCompare(q[k * 12 + 1], float(cy + 1));
+                }
+                if (!allTop) continue;
+                // 四角位置集恰为 (lx..lx+1) × (lz..lz+1)（每角恰好出现一次）。
+                bool match[2][2] = { { false, false }, { false, false } };
+                for (int k = 0; k < 4; ++k) {
+                    const float vx = q[k * 12 + 0], vz = q[k * 12 + 2];
+                    const int ix = qFuzzyCompare(vx, float(lx)) ? 0 : (qFuzzyCompare(vx, float(lx + 1)) ? 1 : -1);
+                    const int iz = qFuzzyCompare(vz, float(lz)) ? 0 : (qFuzzyCompare(vz, float(lz + 1)) ? 1 : -1);
+                    if (ix < 0 || iz < 0 || match[ix][iz]) { allTop = false; break; }
+                    match[ix][iz] = true;
+                }
+                if (!allTop) continue;
+                // F.c[2]（+Y 面）cc 序：(0,1),(1,1),(1,0),(0,0) → r 序 = (0,1),(1,1),(1,0),(0,0) 角。
+                return { q[8], q[20], q[32], q[44] };
+            }
+            return {};
+        };
+
+        const QByteArray flatBuf = geo.vertexData(); // aoEnabled 默认 false（出厂关）
+        const int vCount = geo.vertexCount();
+        // 平坦基线：AO 关 → 顶点色与 t1023 前逐位同公式 → 四角同色（平坦语义；值随光场，树冠遮天天光梯度下 < 1 合法）。
+        const std::vector<float> flatQ = findCenterQuad(flatBuf);
+        bool okFlat = vCount > 0 && flatQ.size() == 4;
+        float flat = -1.0f;
+        if (okFlat) {
+            flat = flatQ[2]; // (1,1) 无遮挡角
+            okFlat = flat > 0.0f;
+            for (float r : flatQ)
+                okFlat = okFlat && std::fabs(r - flat) < 1e-5f;
+        }
+
+        geo.setAoEnabled(true); // Dirty 重建（同 setGreedyMeshing 路径）
+        const QByteArray aoBuf = geo.vertexData();
+        const int vCountAo = geo.vertexCount();
+        bool okAo = vCountAo == vCount; // AO 不改拓扑，只改顶点色
+        const std::vector<float> aoQ = findCenterQuad(aoBuf);
+        okAo = okAo && aoQ.size() == 4;
+        QString diagAo;
+        if (aoQ.size() == 4) {
+            const struct { int idx; float ao; } ladder[4] = {
+                { 3, 0.5f }, { 2, 0.8f }, { 0, 0.8f }, { 1, 1.0f }, // F.c[2] cc 序 (x,z)：cc3=(0,0) 双侧钳 3 / cc2=(1,0)+cc0=(0,1) 单侧 / cc1=(1,1) 无遮挡
+            };
+            for (const auto &c : ladder) {
+                const float expect = flat * c.ao; // 乘在光场钳制后（接触阴影暗角语义）
+                const bool good = std::fabs(aoQ[c.idx] - expect) < 1e-5f;
+                okAo = okAo && good;
+                if (!good)
+                    diagAo += QStringLiteral("[corner%1 r=%2 expect=%3] ")
+                                  .arg(c.idx).arg(aoQ[c.idx], 0, 'f', 4).arg(expect, 0, 'f', 4);
+            }
+        } else {
+            diagAo += QStringLiteral("[quad not found n=%1] ").arg(int(aoQ.size()));
+        }
+
+        geo.setAoEnabled(false); // round-trip：关回后顶点缓冲逐字节复原（可回退行为级）
+        const bool okRt = geo.vertexData() == flatBuf;
+
+        // rig 清洁（t860 先例）：拆场景。
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(x1 + dx, cy, z1 + dz, BR::Air, 0);
+        w.setBlock(x1 - 1, cy + 1, z1, BR::Air, 0);
+        w.setBlock(x1, cy + 1, z1 - 1, BR::Air, 0);
+
+        const bool okT1023b = okFlat && okAo && okRt;
+        if (!okT1023b) ++totalFail;
+        qInfo().noquote() << (okT1023b ? "PASS" : "FAIL")
+                          << "| t1023b ambient-occlusion toggle (smooth-lighting research first small"
+                             " step): terrain culled path gains per-corner classic MC AO - three"
+                             " occlusion probes per vertex (side/side/diagonal around the face's"
+                             " neighbor cell, occluder predicate = occludesNeighborFace, the same"
+                             " authority as face culling), factor curve kAoFactor {1.0,0.8,0.6,0.5}"
+                             " with the both-sides-clamp-to-3 rule, multiplied after the light-field"
+                             " clamp (contact shadows may dip below kVcMin); default OFF keeps"
+                             " vertex colors bit-identical (zero-cost bypass), ON pins the exact"
+                             " corner ladder {0.5, 0.8, 0.8, 1.0} x flat on an L-wall rig (diagonal"
+                             " corner double-clamped, two single-side, one open), and OFF again"
+                             " restores the vertex buffer byte-for-byte (revert lever is the one"
+                             " window.aoEnabled switch); greedy/fluid/partial segments deliberately"
+                             " not sampled (merge-key/view contract registered in the t1023 report)"
+                          << (okT1023b ? QString()
+                                       : QStringLiteral("diag flat=%1 v=%2/%3 okFlat=%4 okRt=%5 %6")
+                                             .arg(flat, 0, 'f', 4).arg(vCount).arg(vCountAo)
+                                             .arg(okFlat).arg(okRt).arg(diagAo));
+    }
+
+    // (c) meshing 线程模式事实钉（t906 复核）：src/ 全树 *.cpp/*.h 零线程原语 与 Main.qml F3 行
+    //     `threads: 0/0 (sync meshing)` 互锁——两事实须同时在场；线程化立项（t1023 报告 §1.3 路线）
+    //     时必须同步更新 F3 行与本探针，防「F3 谎报 0/0」。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString srcRoot = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        if (!QDir(srcRoot).exists()) {
+            qInfo().noquote() << "  [t1023c note] src/ not found near exe - meshing-thread fact pin skipped";
+        } else {
+            const QStringList tokens = {
+                QStringLiteral("QThreadPool"), QStringLiteral("QThread"), QStringLiteral("QtConcurrent"),
+                QStringLiteral("QFuture"), QStringLiteral("moveToThread"), QStringLiteral("std::thread"),
+                QStringLiteral("std::async"),
+            };
+            int files = 0, hits = 0;
+            QString hitDetail;
+            QDirIterator it(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
+                            QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                QFile f(it.next());
+                if (!f.open(QIODevice::ReadOnly)) continue;
+                ++files;
+                const QString content = QString::fromUtf8(f.readAll());
+                for (const QString &tok : tokens) {
+                    if (content.contains(tok)) {
+                        ++hits;
+                        hitDetail += it.filePath() + QStringLiteral(":") + tok + QStringLiteral(" ");
+                    }
+                }
+            }
+            bool f3Present = false;
+            QFile mf(QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src/ui/Main.qml")));
+            if (mf.open(QIODevice::ReadOnly))
+                f3Present = QString::fromUtf8(mf.readAll())
+                                .contains(QStringLiteral("threads: 0/0 (sync meshing)"));
+            const bool okThreadPin = files > 0 && hits == 0 && f3Present;
+            if (!okThreadPin) ++totalFail;
+            qInfo().noquote() << (okThreadPin ? "PASS" : "FAIL")
+                              << "| t1023c sync-meshing fact pin (t906 recheck): src tree scans"
+                             " zero threading primitives (QThreadPool/QThread/QtConcurrent/QFuture/"
+                             "moveToThread/std::thread/std::async) across"
+                              << files
+                              << "files, and the F3 line 'threads: 0/0 (sync meshing)' stays pinned"
+                                 " - the F3 string is a t906-documented fact (never a degraded"
+                                 " thread pool: one never existed; meshing is synchronous on the"
+                                 " GUI thread via ChunkGeometry direct-connected slots), so the"
+                                 " two facts are interlocked: threading the mesher (t1023 report"
+                                 " section 1.3 route: halo snapshot base then worker pool) must"
+                                 " update both the F3 line and this probe in the same change"
+                              << (okThreadPin ? QString()
+                                              : QStringLiteral("diag files=%1 hits=%2 f3=%3 %4")
+                                                    .arg(files).arg(hits).arg(f3Present).arg(hitDetail));
+        }
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
