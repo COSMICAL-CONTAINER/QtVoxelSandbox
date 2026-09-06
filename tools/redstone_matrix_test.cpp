@@ -35341,6 +35341,332 @@ Item {
     }
     } // t1020 面板 A+B 共用作用域收口（B 复用 A 的探针世界 / 存档句柄）
 
+    // ── t1021 音效层探针（面板 A：结构环境音 region 门控行为——要塞内→低鸣请求发出 / 离开→停；
+    //    矿井滴水 / 沙漠夜风（夜+露天复合门）/ 丛林虫鸣（昼夜密度分流）/ 地牢无音登记口径）──
+    //    rig：96×96×96 单世界逐种子扫描（seeds 1..80，一份 worldgen 同填四张 region 表，四结构各自记
+    //    首个命中种子 —— t1020 四世界分扫的省时变体）+ 96×96×48 要塞世界（t1000 同款 seeds 1..24 扫
+    //    hasStronghold）。真 PlayerController（Spectator noclip 定点 tick，同 t1000 口径）+ 真 WorldClock
+    //    （setPhase 钉正午 / 子夜控制 isNight）。断言：足迹外 zone=0；要塞内→1 且界内连 tick 零重发、
+    //    离开→0；矿井内→2（昼夜无关）；沙漠顶冠露天格：昼→0 / 夜→3、地下角格（不见天）夜→0；丛林内
+    //    昼→4 / 夜→5；地牢内→0（四音不覆盖地牢）；足迹外采样点选在五谓词全外（防重叠结构串扰）。
+    {
+        World wT21;
+        wT21.setWidth(96); wT21.setDepth(96); wT21.setHeight(96);
+        int seedT21Dun = -1, seedT21Mine = -1, seedT21Des = -1, seedT21Jun = -1;
+        for (int s = 1; s <= 80
+             && (seedT21Dun < 0 || seedT21Mine < 0 || seedT21Des < 0 || seedT21Jun < 0); ++s) {
+            wT21.setSeed(s);
+            const auto hit = [&](int kind) {
+                return wT21.structureRegionCount(kind) > 0
+                       && wT21.structureRegion(kind, 0).size() == 6;
+            };
+            if (seedT21Dun < 0 && hit(World::StructureDungeon)) seedT21Dun = s;
+            if (seedT21Mine < 0 && hit(World::StructureMineshaft)) seedT21Mine = s;
+            if (seedT21Des < 0 && hit(World::StructureDesertTemple)) seedT21Des = s;
+            if (seedT21Jun < 0 && hit(World::StructureJungleTemple)) seedT21Jun = s;
+        }
+        // 要塞世界（t1000 同款 48 高；要塞与四结构 region 表无关，走 hasStronghold / insideStronghold）。
+        World wT21S;
+        wT21S.setWidth(96); wT21S.setDepth(96); wT21S.setHeight(48);
+        for (int s = 1; s <= 24 && !wT21S.hasStronghold(); ++s)
+            wT21S.setSeed(s);
+        bool okA = seedT21Dun > 0 && seedT21Mine > 0 && seedT21Des > 0 && seedT21Jun > 0
+                   && wT21S.hasStronghold();
+        if (!okA)
+            qInfo().noquote() << "  [t1021 diag] seeds dun/mine/des/jun =" << seedT21Dun
+                              << seedT21Mine << seedT21Des << seedT21Jun
+                              << "stronghold=" << wT21S.hasStronghold();
+        if (okA) {
+            PlayerController pcT21; // 无窗口直造（componentComplete 不触发，无 16ms 定时器；tick 直调）
+            WorldClock clockT21;    // 真 Game 层时间源（setPhase 钉相位 → isNight 纯函数即时翻转）
+            pcT21.setWorldClock(&clockT21);
+            clockT21.setPhase(0.0f); // 正午（昼）
+            int emitsT21 = 0;
+            QObject::connect(&pcT21, &PlayerController::structureAmbientZoneChanged, &pcT21,
+                             [&]() { ++emitsT21; });
+            // ── 要塞腿（wT21S）：足迹外（五谓词外围采样）→0；厅内→1；界内连 tick 零重发；离开→0 ──
+            const int sPx = wT21S.strongholdPortalX(), sPy = wT21S.strongholdPortalY(),
+                      sPz = wT21S.strongholdPortalZ();
+            const int sCx = sPx, sCy = sPy - World::kStrongholdPortalDy,
+                      sCz = sPz - World::kStrongholdPortalDz; // 反解原点（t1000 同口径）
+            const int sHalf = World::kStrongholdHalf;
+            const double sFeetY = double(sCy + 1) + 0.5;
+            double sOutX = -1.0;
+            for (double off : {9.5, 14.5, 19.5, 24.5, 29.5, 34.5}) {
+                if (sCx + sHalf + off < wT21S.width()
+                    && !wT21S.insideStronghold(sCx + sHalf + off, sFeetY, double(sCz) + 0.5)) {
+                    sOutX = double(sCx) + sHalf + off; break;
+                }
+                if (sCx - sHalf - off > 0
+                    && !wT21S.insideStronghold(sCx - sHalf - off, sFeetY, double(sCz) + 0.5)) {
+                    sOutX = double(sCx) - sHalf - off; break;
+                }
+            }
+            okA = okA && sOutX > 0;
+            pcT21.setWorld(&wT21S);
+            pcT21.loadSavedState(float(sOutX), float(sFeetY), float(sCz) + 0.5f, -90.0f, 0.0f, 0);
+            for (int t = 0; t < 3; ++t) pcT21.tick();
+            okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientNone);
+            // 要塞内 → 低鸣请求发出（zone=1）。
+            pcT21.loadSavedState(float(sCx) + 0.5f, float(sFeetY), float(sCz) + 0.5f, -90.0f, 0.0f, 0);
+            pcT21.tick();
+            okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientStronghold);
+            const int emitsBeforeT21 = emitsT21;
+            for (int t = 0; t < 6; ++t) pcT21.tick();
+            okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientStronghold)
+                  && emitsT21 == emitsBeforeT21; // 界内连 tick：值不变零重发（禁每帧抖 QML）
+            // 离开 → 停（zone=0 请求发出；Main.qml 侧 stop 由路由行源码钉 + 降级链承担）。
+            pcT21.loadSavedState(float(sOutX), float(sFeetY), float(sCz) + 0.5f, -90.0f, 0.0f, 0);
+            pcT21.tick();
+            okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientNone);
+
+            // ── 四结构腿（wT21）：逐 kind re-setSeed（同 seed 同表，t1020 面板 A' seed-pure 口径）──
+            pcT21.setWorld(&wT21);
+            auto outsideAllT21 = [&wT21](double x, double y, double z) -> bool {
+                return !wT21.insideStronghold(x, y, z)
+                    && !wT21.insideStructureRegion(World::StructureDungeon, x, y, z)
+                    && !wT21.insideStructureRegion(World::StructureMineshaft, x, y, z)
+                    && !wT21.insideStructureRegion(World::StructureDesertTemple, x, y, z)
+                    && !wT21.insideStructureRegion(World::StructureJungleTemple, x, y, z);
+            };
+            // 足迹外采样点：bbox 东西向逐档外移（9.5..34.5），取首个五谓词全外的点（防重叠结构串扰）。
+            auto pickOutsideT21 = [&](int kind) -> double {
+                const QVariantList rg = wT21.structureRegion(kind, 0);
+                const double mnx = rg[0].toDouble(), mxx = rg[3].toDouble();
+                const double mnz = rg[2].toDouble(), mxz = rg[5].toDouble();
+                const double cy = rg[1].toDouble() + 1.5;
+                const double cz = (mnz + mxz) / 2.0 + 0.5;
+                for (double off : {9.5, 14.5, 19.5, 24.5, 29.5, 34.5}) {
+                    if (mxx + off < wT21.width() && outsideAllT21(mxx + off, cy, cz))
+                        return mxx + off;
+                    if (mnx - off > 0 && outsideAllT21(mnx - off, cy, cz))
+                        return mnx - off;
+                }
+                return -1.0;
+            };
+            // 矿井腿：bbox 中心（区域表口径足迹，与体素巷道开口无关）→ 昼 2；夜仍 2（滴水昼夜无关）；
+            //   离开足迹 → 0。
+            wT21.setSeed(seedT21Mine);
+            {
+                const QVariantList rm = wT21.structureRegion(World::StructureMineshaft, 0);
+                const double cx = (rm[0].toDouble() + rm[3].toDouble()) / 2.0 + 0.5;
+                const double cy = rm[1].toDouble() + 1.5;
+                const double cz = (rm[2].toDouble() + rm[5].toDouble()) / 2.0 + 0.5;
+                const double outX = pickOutsideT21(World::StructureMineshaft);
+                okA = okA && outX > 0;
+                pcT21.loadSavedState(float(cx), float(cy), float(cz), -90.0f, 0.0f, 0);
+                clockT21.setPhase(0.0f);
+                pcT21.tick();
+                okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientMineshaft);
+                clockT21.setPhase(0.5f); // 子夜
+                pcT21.tick();
+                okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientMineshaft);
+                pcT21.loadSavedState(float(outX), float(cy), float(cz), -90.0f, 0.0f, 0);
+                pcT21.tick();
+                okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientNone);
+            }
+            // 沙漠腿：bbox 角列 (min+1,min+1) 自下而上找首个见天格（金字塔坡 / 顶冠露天格，确定性）——
+            //   昼→0（无夜不风）；同格夜→3；地下角格 (min+1,min+1,min+1)（深埋不见天，先钉 skyLight<15）
+            //   夜→0（夜探密室无风）。
+            wT21.setSeed(seedT21Des);
+            {
+                const QVariantList rd = wT21.structureRegion(World::StructureDesertTemple, 0);
+                const int mnx = rd[0].toInt(), mny = rd[1].toInt(), mnz = rd[2].toInt();
+                const int mxy = rd[4].toInt();
+                int exY = -1;
+                for (int y = mny; y <= mxy; ++y) {
+                    if (wT21.skyLightAt(mnx + 1, y, mnz + 1) >= 15) { exY = y; break; }
+                }
+                const bool underCellDark = wT21.skyLightAt(mnx + 1, mny + 1, mnz + 1) < 15;
+                okA = okA && exY > 0 && underCellDark;
+                if (exY > 0 && underCellDark) {
+                    pcT21.loadSavedState(float(mnx + 1) + 0.5f, float(exY) + 0.5f,
+                                         float(mnz + 1) + 0.5f, -90.0f, 0.0f, 0);
+                    clockT21.setPhase(0.0f); // 正午
+                    pcT21.tick();
+                    okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientNone);
+                    clockT21.setPhase(0.5f); // 子夜
+                    pcT21.tick();
+                    okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientDesertTemple);
+                    // 地下角格（不见天）：夜仍无风（三重门的露天项排除密室 / 厅内）。
+                    pcT21.loadSavedState(float(mnx + 1) + 0.5f, float(mny + 1) + 0.5f,
+                                         float(mnz + 1) + 0.5f, -90.0f, 0.0f, 0);
+                    pcT21.tick();
+                    okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientNone);
+                }
+            }
+            // 丛林腿：苔石建筑内地板格（bbox 角内 floor 上一格）→ 昼 4（稀疏）/ 夜 5（密集）。
+            wT21.setSeed(seedT21Jun);
+            {
+                const QVariantList rj = wT21.structureRegion(World::StructureJungleTemple, 0);
+                const double jx = rj[0].toDouble() + World::kJungleTempleHalf + 0.5;
+                const double jy = rj[1].toDouble() + 1.5;
+                const double jz = rj[2].toDouble() + World::kJungleTempleHalf + 0.5;
+                pcT21.loadSavedState(float(jx), float(jy), float(jz), -90.0f, 0.0f, 0);
+                clockT21.setPhase(0.0f);
+                pcT21.tick();
+                okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientJungleDay);
+                clockT21.setPhase(0.5f);
+                pcT21.tick();
+                okA = okA && pcT21.structureAmbientZone() == int(PlayerController::AmbientJungleNight);
+            }
+            // 地牢腿：bbox 中心 → 0（四音不覆盖地牢，登记口径；若与矿井区重叠则按优先级 2 亦合法 ——
+            //   采样点换五谓词外判定不可用（此腿要的就是在区内），改取「仅地牢」格防串扰）。
+            wT21.setSeed(seedT21Dun);
+            {
+                const QVariantList rdn = wT21.structureRegion(World::StructureDungeon, 0);
+                const double cx = (rdn[0].toDouble() + rdn[3].toDouble()) / 2.0 + 0.5;
+                const double cy = rdn[1].toDouble() + 1.5;
+                const double cz = (rdn[2].toDouble() + rdn[5].toDouble()) / 2.0 + 0.5;
+                pcT21.loadSavedState(float(cx), float(cy), float(cz), -90.0f, 0.0f, 0);
+                clockT21.setPhase(0.0f);
+                pcT21.tick();
+                const int zoneDunT21 = pcT21.structureAmbientZone();
+                const bool dunOnlyT21 = wT21.insideStructureRegion(World::StructureDungeon, cx, cy, cz)
+                    && !wT21.insideStructureRegion(World::StructureMineshaft, cx, cy, cz)
+                    && !wT21.insideStructureRegion(World::StructureDesertTemple, cx, cy, cz)
+                    && !wT21.insideStructureRegion(World::StructureJungleTemple, cx, cy, cz)
+                    && !wT21.insideStronghold(cx, cy, cz);
+                okA = okA && dunOnlyT21 && zoneDunT21 == int(PlayerController::AmbientNone);
+            }
+        }
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1021 structure-ambient gating: structureAmbientZone derived per tick from"
+                             " t1020 region tables -- outside=0, stronghold in->1 (steady in-region re-ticks"
+                             " zero re-emit) out->0, mineshaft->2 day and night, desert temple exposed cell"
+                             " 0 by day / 3 at midnight / underground cell silent at night, jungle temple"
+                             " 4 by day / 5 at night, dungeon-only cell stays 0 (no ambience registered)"
+                             " (seeds dun/mine/des/jun ="
+                          << seedT21Dun << seedT21Mine << seedT21Des << seedT21Jun << ")";
+    }
+
+    // ── t1021 音效层探针（面板 B：四环境音 + 三事件音 wav 资产存在性 / WAV 格式合法性 + 全链源码钉）──
+    //    (a) 资产腿：sounds/ 七新 wav 存在且格式合法（RIFF/WAVE、PCM s16 mono 44100、data 非空、时长
+    //        落各自期望带——循环音 ≥6s、单发音 ≤2.5s）；CMake qrc 已登记。
+    //    (b) 源码钉：PlayerController zone 属性 / 值域枚举 / 折叠 emit 门 / 复合门 / 重置钩子；Main.qml
+    //        zone 分流路由 + 成就 chime + 箱子开/关路由；AudioManager Q_INVOKABLE 面；build_sounds.py
+    //        生成器在位（重生成面可复现）。
+    {
+        bool okB = true;
+        const QString rootT21 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        // WAV 解析：走 chunk 遍历（不假设 44 字节头 —— fmt 扩展 / 附加块兼容），钉 PCM s16 mono 44100。
+        auto parseWavT21 = [](const QString &path, double *secsOut, QString *err) -> bool {
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly)) { *err = QStringLiteral("open-fail"); return false; }
+            const QByteArray b = f.readAll();
+            if (b.size() < 44 || b.mid(0, 4) != "RIFF" || b.mid(8, 4) != "WAVE") {
+                *err = QStringLiteral("riff-wave-magic"); return false;
+            }
+            bool haveFmt = false, haveData = false;
+            quint16 fmtTag = 0, chans = 0, bits = 0;
+            quint32 rate = 0;
+            qint64 dataSize = 0;
+            int pos = 12;
+            while (pos + 8 <= b.size()) {
+                const QString id = QString::fromLatin1(b.mid(pos, 4));
+                const qint64 sz = qint64(quint8(b[pos + 4])) | (qint64(quint8(b[pos + 5])) << 8)
+                                | (qint64(quint8(b[pos + 6])) << 16) | (qint64(quint8(b[pos + 7])) << 24);
+                if (id == QLatin1String("fmt ") && pos + 8 + 16 <= b.size()) {
+                    fmtTag = quint16(quint8(b[pos + 8])) | (quint16(quint8(b[pos + 9])) << 8);
+                    chans = quint16(quint8(b[pos + 10])) | (quint16(quint8(b[pos + 11])) << 8);
+                    rate = quint32(quint8(b[pos + 12])) | (quint32(quint8(b[pos + 13])) << 8)
+                         | (quint32(quint8(b[pos + 14])) << 16) | (quint32(quint8(b[pos + 15])) << 24);
+                    bits = quint16(quint8(b[pos + 22])) | (quint16(quint8(b[pos + 23])) << 8);
+                    haveFmt = true;
+                } else if (id == QLatin1String("data")) {
+                    dataSize = sz;
+                    haveData = true;
+                }
+                pos += int(8 + sz + (sz & 1)); // RIFF 块 2 字节对齐
+            }
+            if (!haveFmt || !haveData) { *err = QStringLiteral("missing-chunk"); return false; }
+            if (fmtTag != 1 || chans != 1 || rate != 44100 || bits != 16) {
+                *err = QStringLiteral("not-pcm16-mono-44100"); return false;
+            }
+            if (dataSize <= 0) { *err = QStringLiteral("empty-data"); return false; }
+            *secsOut = double(dataSize) / (double(rate) * 2.0); // s16 mono → 字节 / (44100*2)
+            return true;
+        };
+        struct WavSpecT21 { const char *name; double minSec; double maxSec; };
+        const WavSpecT21 wavSpecsT21[] = {
+            {"stronghold_hum.wav", 6.0, 10.0},      // 8s 循环低鸣
+            {"mineshaft_drip.wav", 0.2, 1.5},       // 单滴（含两级回声）
+            {"jungle_chirps.wav", 0.5, 2.5},        // 颤音簇 one-shot
+            {"desert_night_wind.wav", 6.0, 10.0},   // 8s 循环夜风
+            {"achievement.wav", 0.3, 1.5},          // 成就 chime
+            {"chest_open.wav", 0.15, 1.0},          // 箱子开启
+            {"chest_close.wav", 0.10, 1.0},         // 箱子关闭
+        };
+        for (const WavSpecT21 &spec : wavSpecsT21) {
+            double secs = 0.0;
+            QString err;
+            const QString path = rootT21 + QStringLiteral("/sounds/") + QString::fromLatin1(spec.name);
+            if (!parseWavT21(path, &secs, &err) || secs < spec.minSec || secs > spec.maxSec) {
+                okB = false;
+                qInfo().noquote() << "  [t1021 diag] wav" << spec.name << "bad:" << err << "secs" << secs;
+            }
+        }
+        // ── 源码钉：zone 推导 / 路由 / 播放 API / 生成器全链在位 ──
+        const auto readSrcT21 = [&rootT21](const QString &rel) -> QString {
+            QFile f(rootT21 + QLatin1Char('/') + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString pcHdrT21 = readSrcT21(QStringLiteral("src/Game/playercontroller.h"));
+        const QString pcCppT21 = readSrcT21(QStringLiteral("src/Game/playercontroller.cpp"));
+        const QString mainQmlT21 = readSrcT21(QStringLiteral("src/ui/Main.qml"));
+        const QString audioHdrT21 = readSrcT21(QStringLiteral("src/Audio/audiomanager.h"));
+        const QString cmakeT21 = readSrcT21(QStringLiteral("CMakeLists.txt"));
+        const QString soundsPyT21 = readSrcT21(QStringLiteral("tools/build_sounds.py"));
+        const bool okPinT21 =
+            pcHdrT21.contains(QStringLiteral("Q_PROPERTY(int structureAmbientZone READ structureAmbientZone NOTIFY structureAmbientZoneChanged)"))
+            && pcHdrT21.contains(QStringLiteral("AmbientJungleNight = 5"))
+            && pcCppT21.contains(QStringLiteral("if (ambientZone != m_structureAmbientZone)"))
+            && pcCppT21.contains(QStringLiteral("if (night && exposed)"))
+            && pcCppT21.contains(QStringLiteral("m_structureAmbientZone = AmbientNone;")) // setWorld + finishWorldLoad 双重置
+            && mainQmlT21.contains(QStringLiteral("function onStructureAmbientZoneChanged()"))
+            && mainQmlT21.contains(QStringLiteral("audio.startStrongholdHum()"))
+            && mainQmlT21.contains(QStringLiteral("audio.startMineshaftDrips()"))
+            && mainQmlT21.contains(QStringLiteral("audio.startDesertNightWind()"))
+            && mainQmlT21.contains(QStringLiteral("audio.startJungleChirps(true)"))
+            && mainQmlT21.contains(QStringLiteral("audio.playAchievement()"))
+            && mainQmlT21.contains(QStringLiteral("audio.playChestOpen()"))
+            && mainQmlT21.contains(QStringLiteral("audio.playChestClose()"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startStrongholdHum();"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startMineshaftDrips();"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startDesertNightWind();"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startJungleChirps(bool dense);"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void playAchievement();"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void playChestOpen();"))
+            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void playChestClose();"))
+            && cmakeT21.contains(QStringLiteral("sounds/stronghold_hum.wav"))
+            && cmakeT21.contains(QStringLiteral("sounds/mineshaft_drip.wav"))
+            && cmakeT21.contains(QStringLiteral("sounds/jungle_chirps.wav"))
+            && cmakeT21.contains(QStringLiteral("sounds/desert_night_wind.wav"))
+            && cmakeT21.contains(QStringLiteral("sounds/achievement.wav"))
+            && cmakeT21.contains(QStringLiteral("sounds/chest_open.wav"))
+            && cmakeT21.contains(QStringLiteral("sounds/chest_close.wav"))
+            && soundsPyT21.contains(QStringLiteral("def gen_stronghold_hum"))
+            && soundsPyT21.contains(QStringLiteral("def gen_mineshaft_drip"))
+            && soundsPyT21.contains(QStringLiteral("def gen_jungle_chirps"))
+            && soundsPyT21.contains(QStringLiteral("def gen_desert_night_wind"))
+            && soundsPyT21.contains(QStringLiteral("def gen_achievement"))
+            && soundsPyT21.contains(QStringLiteral("def gen_chest_open"))
+            && soundsPyT21.contains(QStringLiteral("def gen_chest_close"));
+        okB = okB && okPinT21;
+        if (!okPinT21)
+            qInfo().noquote() << "  [t1021 diag] source pins drifted (zone/property/route/api/gen)";
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1021 sound-layer assets and wiring: seven new wavs exist with valid"
+                             " PCM s16 mono 44100 headers and expected durations (two 8s loops,"
+                             " drip/chirps/achievement/chest-open/chest-close one-shots), qrc"
+                             " registered, and the full chain pinned (zone property/enum/fold-emit"
+                             " gate/night+exposed gate/dual resets in PlayerController, QML zone"
+                             " dispatch + achievement chime + chest open/close routing, AudioManager"
+                             " Q_INVOKABLE surface, build_sounds.py generators)";
+    }
+
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
     //    rig：t995/t1001 同款 5 seed（20260821/777/424242/1337/90210，缺要塞的种子跳过、备胎续扫，
     //    ≥4 世界才判）× 128×128×64 世界池。断言五层：
