@@ -133,6 +133,8 @@ void PlayerController::setWorld(World *w)
     m_insideStronghold = false;   // t1000：换世界清要塞进入沿守卫（同坐标瞬态表清理先例——新世界重新判沿）
     for (int k = 0; k < World::StructureKindCount; ++k)
         m_insideStructure[k] = false; // t1020：换世界同清四结构进入沿守卫（读档重进同清，见 finishWorldLoad）
+    m_structureAmbientZone = AmbientNone; // t1021：换世界清结构环境音区（静默清 0，下一 tick 重推导重发 ——
+                                          //   QML 退出世界显式全停兜底，重进后首 tick 值变即恢复对应环境音）
     // t756：世界换代（regenerate / beginLoad / setSeed / review #20 尺寸 setter 重建均 emit seedChanged）
     //   → 复位重生点（onWorldSeedChanged：旧世界出生列 / 床位坐标不再指向当前世界）。UniqueConnection 防重复
     //   挂接（theWorld 单例 + setWorld 幂等早退，此处理论只连一次）。
@@ -590,6 +592,9 @@ void PlayerController::finishWorldLoad()
     //   进度已解锁 → unlock 幂等早退，不重发 toast）。
     for (int k = 0; k < World::StructureKindCount; ++k)
         m_insideStructure[k] = false;   // 读档重进同清进入沿守卫（t1020 四结构）
+    // t1021：读档重进同清结构环境音区（同上口径：静默清 0，载入后首 tick 重推导重发 → 对应环境音恢复；
+    //   QML 退出世界显式全停兜底 —— 不清则存档停区内时 zone 不变不发，重进后环境音永不恢复）。
+    m_structureAmbientZone = AmbientNone;
 }
 
 void PlayerController::release()
@@ -892,16 +897,51 @@ void PlayerController::tickImpl()
     //   !m_captured 早 return 之前（同 t1000 要塞沿先例：暂停 / 背包开时位置不变、判定稳定）。守卫
     //   m_insideStructure[] 重置点：setWorld（换世界指针）/ finishWorldLoad（读档重进同指针路径）/
     //   本处随值更新。无世界 → 恒 false。
+    // t1021 结构环境音区推导：复用下方 t1020 同一 loop 的四结构在区布尔（零额外谓词调用）折叠出当前
+    //   环境音区（StructureAmbientZone 值域）。优先级 = 先折叠先得：要塞 > 矿井 > 沙漠 > 丛林（loop 序
+    //   dungeon/mineshaft/desert/jungle，dungeon 恒 None 天然跳过 —— 四音不覆盖地牢，登记口径）。复合门：
+    //   沙漠夜风须「夜（worldClock.isNight）+ 露天（skyLightAt≥15 同 t385/t386 见天口径）」——白天 / 密室
+    //   （头顶遮挡）无风；丛林虫鸣昼夜皆响、夜晚密集（昼/夜切 zone 值，密度由播放端调度间隔承担）。
+    //   要塞低鸣区内恒响（昼夜无关）。放在 !m_captured 早 return 之前（同上方各环境态先例：暂停 / 背包开
+    //   时判定稳定）；无世界 → None。值真变才 emit（界内连 tick 零重发，禁每帧抖 QML）。
+    int ambientZone = AmbientNone;
     if (m_world) {
-        for (int k = 0; k < World::StructureKindCount; ++k) {
-            const bool inStruct = m_world->insideStructureRegion(k, double(m_pos.x()), double(m_pos.y()), double(m_pos.z()));
-            if (inStruct && !m_insideStructure[k])
-                emit structureEntered(k); // 一次性事件信号（边沿触发；禁每帧直发）
-            m_insideStructure[k] = inStruct;
+        if (m_insideStronghold) {
+            ambientZone = AmbientStronghold; // 要塞低鸣：区内恒响（低频嗡鸣床循环，昼夜无关）
+        } else {
+            for (int k = 0; k < World::StructureKindCount; ++k) {
+                const bool inStruct = m_world->insideStructureRegion(k, double(m_pos.x()), double(m_pos.y()), double(m_pos.z()));
+                if (inStruct && !m_insideStructure[k])
+                    emit structureEntered(k); // 一次性事件信号（边沿触发；禁每帧直发）
+                m_insideStructure[k] = inStruct;
+                if (inStruct && ambientZone == AmbientNone) {
+                    const bool night = m_worldClock && m_worldClock->isNight();
+                    if (k == World::StructureMineshaft)
+                        ambientZone = AmbientMineshaft; // 滴水：区内恒调度（昼夜无关）
+                    else if (k == World::StructureDesertTemple) {
+                        // 沙漠夜风三重门：区内 + 夜 + 露天（脚位格见天；金字塔坡面 / 顶冠露天格成立，
+                        //   密室 / 厅内头顶遮挡不成立 → 夜探密室无风，回坡面才起风）。
+                        const bool exposed =
+                            m_world->skyLightAt(int(std::floor(double(m_pos.x()))),
+                                                int(std::floor(double(m_pos.y()))),
+                                                int(std::floor(double(m_pos.z())))) >= 15;
+                        if (night && exposed)
+                            ambientZone = AmbientDesertTemple;
+                    } else if (k == World::StructureJungleTemple) {
+                        // 丛林虫鸣：区内昼夜皆响，夜晚密集（密度 = 播放端调度间隔；zone 切 4/5 值驱动）。
+                        ambientZone = night ? AmbientJungleNight : AmbientJungleDay;
+                    }
+                    // StructureDungeon → 恒 None（无对应环境音，登记口径）。
+                }
+            }
         }
     } else {
         for (int k = 0; k < World::StructureKindCount; ++k)
             m_insideStructure[k] = false; // 退出世界清守卫（下次进世界重新判沿）
+    }
+    if (ambientZone != m_structureAmbientZone) {
+        m_structureAmbientZone = ambientZone;
+        emit structureAmbientZoneChanged(); // 值真变才发（Main.qml 分流启停对应环境音）
     }
     // t223 近流水 proximity 水流声：节流扫描（每 kFlowScanInterval 秒一次）算最近流水格距离 → level。
     //   放在 !m_captured 早 return 之前 → 暂停 / 背包开时仍刷新（玩家停流水旁开背包，水流声应持续）；
@@ -6594,6 +6634,13 @@ float PlayerController::scanFlowSoundLevel() const
 float PlayerController::lavaSoundLevel() const
 {
     return m_lavaSoundLevel;
+}
+
+// t1021 structureAmbientZone 属性 READ：返回 m_structureAmbientZone（tickImpl env 桶每 tick 重推导缓存值，
+//   StructureAmbientZone 值域；无世界 → AmbientNone）。
+int PlayerController::structureAmbientZone() const
+{
+    return m_structureAmbientZone;
 }
 
 // t343 近岩浆 proximity 扫描（机制同 scanFlowSoundLevel，但查 Lava 格——源 / 流皆算：岩浆湖多为源，

@@ -1104,6 +1104,10 @@ Window {
         audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
         audio.stopWaterFlow() // t223 水流声：退出世界停（菜单态无声；离开流水范围本会自停，此处显式保干净）
         audio.stopLavaFlow()  // t343 岩浆声：退出世界停（同水流声）
+        audio.stopStrongholdHum()    // t1021 结构环境音四音：退出世界显式全停（zone 静默清 0 不发信号，
+        audio.stopMineshaftDrips()   //   重进后首 tick 值变重发 → 对应音恢复；此处先保退出即刻无声）
+        audio.stopDesertNightWind()
+        audio.stopJungleChirps()
     }
     // 返回主菜单：先释放指针（恢复光标 + 清按住的按键），关存档连接 + 清实体，再切 menu 态。
     function returnToMenu() {
@@ -1137,6 +1141,10 @@ Window {
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
         audio.stopWaterFlow() // t223 水流声：回主菜单停（菜单态无声）
         audio.stopLavaFlow()  // t343 岩浆声：回主菜单停（同水流声）
+        audio.stopStrongholdHum()    // t1021 结构环境音四音：回主菜单显式全停（同退出世界口径）
+        audio.stopMineshaftDrips()
+        audio.stopDesertNightWind()
+        audio.stopJungleChirps()
     }
     // t240 进世界生成猪 / 牛 / 羊各一只（玩家进世界点附近地表）。EntityManager 已注册 mobType 1/2/3 +
     //   spawnMobTyped 入口；生物蛋系统推迟到 t243，故本任务暂以固定 spawn 让模型 + 贴图肉眼可见。
@@ -1497,6 +1505,7 @@ Window {
         // t1020 progress 成就：首次打开箱子矿车（t1013 内容键链：矿井标记箱转正的箱车，首开即填充
         //   矿井池 → 「开箱取物」口径解锁「移动金库」）。幂等 unlock。
         if (isCartCell) progress.onChestCartOpened()
+        audio.playChestOpen()   // t1021 开箱音（方块箱 + 箱子矿车同源：走到此即已过全部门控，真开箱）
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         //   t1013 矿车键不显盖子（overlay 钉键格 = 幽灵盖；见函数头注释简化口径）。
         if (!isCartCell) chestLidAngle = kChestLidOpenAngle
@@ -1505,6 +1514,7 @@ Window {
     function closeChest() {
         if (!chestOpen) return
         chestOpen = false
+        audio.playChestClose()  // t1021 关箱音（与开门音区分的合盖闷响；同 openChest 单一通道口径）
         // t196：触发盖子合回动画（chestLidAngle→0）；可见性绑定让合盖期间盖子仍显，到位后自动隐。
         chestLidAngle = 0
         returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeInventory / closeCraftingTable / closeFurnace）
@@ -2231,6 +2241,32 @@ Window {
             }
         }
     }
+    // t1021 结构环境音：PlayerController.structureAmbientZone（每 tick 由 t1020 region 表 + 夜 / 露天复合门
+    //   重推导：0=无 / 1=要塞低鸣 / 2=矿井滴水 / 3=沙漠夜风 / 4=虫鸣昼稀 / 5=虫鸣夜密）→ AudioManager 四结构
+    //   环境音分流启停。进区先全停再启对应音（单音床互斥；AudioManager 内 start/stop 幂等兜底）。值真变才发
+    //   （界内连 tick 零重发）。纯呈现层桥接（同 flowSoundLevel 先例：Game 层判定 → 呈现层分流 → Core 层播放；
+    //   引擎 / clip 失败时 AudioManager 内部静默降级 §2-E，此处无需守卫）。退出世界 / 回主菜单由下方显式全停。
+    Connections {
+        target: player
+        function onStructureAmbientZoneChanged() {
+            const z = player.structureAmbientZone
+            audio.stopStrongholdHum()
+            audio.stopMineshaftDrips()
+            audio.stopDesertNightWind()
+            audio.stopJungleChirps()
+            if (z === 1) {
+                audio.startStrongholdHum()
+            } else if (z === 2) {
+                audio.startMineshaftDrips()
+            } else if (z === 3) {
+                audio.startDesertNightWind()
+            } else if (z === 4) {
+                audio.startJungleChirps(false)   // 昼：稀疏间隔
+            } else if (z === 5) {
+                audio.startJungleChirps(true)    // 夜：密集间隔
+            }
+        }
+    }
 
     // 昼↔夜颜色 / 亮度 lerp 辅助（t09）：m=worldClock.skyLight ∈ [0,1]（0=子夜、1=正午）。
     // day 颜色 #9ec6e8 = (0.620,0.776,0.910)；night 颜色 #0b1026 = (0.043,0.063,0.149)。
@@ -2609,6 +2645,7 @@ Window {
     Connections {
         target: progress
         function onAchievementUnlocked(id, name, desc) {
+            audio.playAchievement()   // t1021 成就解锁 chime（结构进入等成就 toast 同源共享本音 = 结构进入提示音）
             window.showInfoToast("成就解锁：" + name)
         }
     }

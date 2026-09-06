@@ -39,10 +39,13 @@ import math
 import struct
 import wave
 import random
+import sys
 from pathlib import Path
 
-import soundfile as sf
-from scipy.signal import resample_poly
+# t1021：soundfile / scipy 改为 **load_cc0 内懒加载** —— 重型依赖仅 CC0 ogg 解码 / 重采样需要；
+# 程序合成 clip（含 t1021 全部七音）纯 stdlib 即可重生成（python tools/build_sounds.py --only stronghold_hum,...），
+# 无 numpy / soundfile / scipy 的机器不再因模块级 import 整体失败。默认全量重生成路径行为不变。
+
 
 # t381：声效质量真修（RECURRENCE of t366）。前两轮（t328 加共振峰 / t366 删白噪层）后实测仍不合格：
 #   脚步「闷」、动物叫「像没声」。频谱诊断（实测 sounds/*.wav）定位两个**真根因**（非音量、非路由——
@@ -115,10 +118,14 @@ def load_cc0(name, target_peak=0.85):
     """t381：加载 vendored Kenney CC0 ogg → 44100 Hz mono float 样本（DC 阻隔 + 峰值归一）。
 
     Kenney.nl 全资产 CC0 1.0 Universal（无需署名、零 MC 资产）。专业母带的录制 / 设计音效，一听即辨
-    （脚步「踏」、破坏「碎」、拾取「叮」），远胜前两轮程序合成的「闷 / 像没声」。立体声 → mono（均值），
+    （脚步「踏」、破坏「碎」、拾取「叮」），远胜前两轮程序合成的「闷 / 没声」。立体声 → mono（均值），
     非 44100 → scipy 重采样（与 AudioManager kSampleRate=44100 一致，避免 miniaudio 二次重采样丢高频）。
     finalize 复用同一 DC 阻隔 + 峰值归一管线，统一各 clip 播放电平（由 AudioManager 各级音量系数控相对响度）。
+    t1021：soundfile / scipy 懒加载（仅本函数需要；程序合成路径纯 stdlib 即可跑）。
     """
+    import soundfile as sf
+    from scipy.signal import resample_poly
+
     path = CC0_DIR / (name + ".ogg")
     data, sr = sf.read(str(path), always_2d=False, dtype="float64")  # ndarray
     if data.ndim > 1:
@@ -752,37 +759,295 @@ def gen_lava():
     return finalize(out)
 
 
+# ── t1021 结构环境音（四音）+ 事件音补缺（三音）────────────────────────────────────────────
+#    全部程序合成（纯 stdlib + 既有 finalize 管线；确定性随机；零 MC 资产，§9 原创）。播放端契约见
+#    src/Audio/audiomanager.h t1021 段：四环境音由 PlayerController::structureAmbientZone（t1020 region 表
+#    + 夜 / 露天复合门）经 Main.qml 分流启停；两循环音（低鸣 / 夜风）走 start/stop looping 对，两单发音
+#    （滴水 / 虫鸣）由 AudioManager 内部 QTimer 随机间隔调度。事件音（成就 chime / 箱子开 / 关）为
+#    replay 单件。循环音必须首末淡化 + 禁宽带高通层（t366 白噪教训）。
+
+
+def gen_stronghold_hum():
+    """要塞低鸣（t1021）：8s 无缝循环低频嗡鸣床。
+    双微失谐低频正弦（52 / 52.7Hz → ~0.7Hz 拍频，听感「嗡鸣缓慢起伏」）+ 低五度哼鸣（78.2Hz 弱）+
+    次声体感层（36.5Hz 极弱）+ 两级级联一阶低通噪声「空气」床（同 ambient_wind 教训：循环长音禁宽带
+    高通层）+ 双慢 LFO 调幅（0.11 / 0.07Hz 呼吸感）。首末 80ms 淡化无缝循环。机制等价 MC 要塞的压迫
+    低鸣氛围（§9 原创程序合成；零 MC 资产）。AudioManager.startStrongholdHum（要塞 region 门控循环）。"""
+    dur = 8.0
+    n = int(SR * dur)
+    rnd = random.Random(10211)
+    # 两级级联一阶低通噪声床（截止极低 → 「空气感」低频絮流，非嘶嘶白噪；同 gen_ambient_wind 级联式）。
+    a1 = 0.992
+    s1 = 0.0
+    bed = [0.0] * n
+    for i in range(n):
+        w = rnd.uniform(-1, 1)
+        s1 = a1 * s1 + (1.0 - a1) * w
+        bed[i] = s1
+    a2 = 0.988
+    s2 = 0.0
+    for i in range(n):
+        s2 = a2 * s2 + (1.0 - a2) * bed[i]
+        bed[i] = s2
+    bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
+    # 双慢 LFO（拟嗡鸣呼吸 / 石室空气脉动）。
+    lfo1 = 2 * math.pi * 0.11
+    lfo2 = 2 * math.pi * 0.07
+    ph1 = rnd.uniform(0, 2 * math.pi)
+    ph2 = rnd.uniform(0, 2 * math.pi)
+    fade_n = int(SR * 0.08)  # 80ms 首末淡化（循环无缝，同 ambient_wind）
+    out = [0.0] * n
+    for i in range(n):
+        t = i / SR
+        # 拍频嗡鸣主体（52/52.7Hz 双正弦拍）+ 低五度（78.2Hz）+ 次声体感（36.5Hz）。
+        hum = (math.sin(2 * math.pi * 52.0 * t) * 0.50
+               + math.sin(2 * math.pi * 52.7 * t) * 0.45
+               + math.sin(2 * math.pi * 78.2 * t) * 0.18
+               + math.sin(2 * math.pi * 36.5 * t) * 0.14)
+        am = 0.62 + 0.22 * math.sin(lfo1 * t + ph1) + 0.16 * math.sin(lfo2 * t + ph2)
+        s = hum * (0.72 + 0.28 * am) + bed[i] * bed_inv * 0.30 * am
+        if i < fade_n:
+            s *= i / fade_n
+        elif i > n - fade_n:
+            s *= (n - 1 - i) / fade_n
+        out[i] = s
+    return finalize(out, target_peak=0.7)  # 低于满刻度 → 柔和背景级（AudioManager base 再压）
+
+
+def gen_mineshaft_drip():
+    """矿井滴水（t1021）：单滴「叮-咚」水珠声，~0.55s。
+    高频水珠 plink（1900→850Hz 指数下扫正弦 × 快衰减 —— 表面张力回弹的音高下滑）+ 起始微噪声 tick +
+    两级洞窟回声（+0.14s ×0.38 / +0.27s ×0.16 同一 plink 的延迟副本，拟巷道空间反射）。
+    「随机间隔单滴」由 AudioManager 内部 QTimer 调度（clip 本体 = 一滴；间隔在播放端随机化）。
+    机制等价 MC 矿井 / 洞穴偶发滴水（§9 原创程序合成；零 MC 资产）。"""
+    dur = 0.55
+    n = int(SR * dur)
+    rnd = random.Random(10212)
+    plink_n = int(SR * 0.09)
+    plink = [0.0] * plink_n
+    ph = 0.0
+    for i in range(plink_n):
+        tp = i / SR
+        f = 850.0 + (1900.0 - 850.0) * math.exp(-tp / 0.022)  # 指数下扫（水珠回弹音高下滑）
+        ph += f / SR
+        tick = rnd.uniform(-1, 1) * 0.10 * math.exp(-tp / 0.0022)  # 起始微噪声 tick（水膜破裂瞬态）
+        plink[i] = (math.sin(2 * math.pi * ph) * 0.9 + tick) * math.exp(-tp / 0.024)
+    out = [0.0] * n
+    for delay, gain in ((0.0, 1.0), (0.14, 0.38), (0.27, 0.16)):  # 直达 + 两级巷道回声
+        d0 = int(SR * delay)
+        for i in range(plink_n):
+            j = d0 + i
+            if j < n:
+                out[j] += plink[i] * gain
+    return finalize(out, target_peak=0.9)
+
+
+def gen_jungle_chirps():
+    """丛林虫鸣（t1021）：高频颤音簇 one-shot，~1.1s。
+    6-9 个不规则分布的蟋蟀式颤音（4300-5300Hz 载波 × 60-90Hz AM 粗颤 × 高斯短包络 22-40ms），
+    各颤音随机增益 / 载波 / 起点 = 虫群此起彼伏。单发 clip；「夜晚密集」由 AudioManager 调度间隔控制
+    （昼稀 / 夜密同簇音色，不再造第二份）。机制等价 MC 丛林夜晚虫鸣氛围（§9 原创程序合成；零 MC 资产）。"""
+    dur = 1.1
+    n = int(SR * dur)
+    rnd = random.Random(10213)
+    trills = []
+    t0 = 0.02
+    while t0 < dur - 0.12:
+        trills.append((t0, rnd.uniform(4300.0, 5300.0), rnd.uniform(60.0, 90.0),
+                       rnd.uniform(0.022, 0.040), rnd.uniform(0.35, 0.9)))
+        t0 += rnd.uniform(0.06, 0.20)
+    out = [0.0] * n
+    for bt, bf, bam, bw, ba in trills:
+        b0 = int(SR * bt)
+        span = int(SR * bw * 5.0)
+        ph = 0.0
+        for i in range(span):
+            j = b0 + i
+            if j >= n:
+                break
+            tt = i / SR
+            ph += bf / SR
+            am = 0.5 + 0.5 * math.sin(2 * math.pi * bam * tt)  # 颤音 AM（振翅 / 鸣膜粗颤）
+            env = math.exp(-(tt ** 2) / (2 * bw * bw))         # 高斯短包络（喳-喳颗粒）
+            out[j] += ba * env * am * math.sin(2 * math.pi * ph)
+    return finalize(out, target_peak=0.9)
+
+
+def gen_desert_night_wind():
+    """沙漠夜风（t1021）：8s 无缝循环空旷夜风。
+    三级级联一阶低通噪声（中低截止 → 「呜咽」中低频风体：高于 ambient_wind 的纯低频床、低于流水的
+    中频颗粒）+ 深慢双 LFO 起伏（0.09 / 0.05Hz 拟夜间阵风明灭，谷值钳到近静）。首末 80ms 淡化无缝。
+    机制等价 MC 沙漠夜晚空旷风声（§9 原创程序合成；零 MC 资产）。AudioManager.startDesertNightWind
+    （沙漠神殿区 + 夜 + 露天三重门控循环）。"""
+    dur = 8.0
+    n = int(SR * dur)
+    rnd = random.Random(10214)
+    # 三级级联一阶低通（a=0.978→0.965→0.90：通带从中低频滑向中频 → 空旷「呜咽」风体，非低频轰也不是嘶嘶）。
+    a1 = 0.978
+    s1 = 0.0
+    bed = [0.0] * n
+    for i in range(n):
+        w = rnd.uniform(-1, 1)
+        s1 = a1 * s1 + (1.0 - a1) * w
+        bed[i] = s1
+    a2 = 0.965
+    s2 = 0.0
+    for i in range(n):
+        s2 = a2 * s2 + (1.0 - a2) * bed[i]
+        bed[i] = s2
+    a3 = 0.90
+    s3 = 0.0
+    for i in range(n):
+        s3 = a3 * s3 + (1.0 - a3) * bed[i]
+        bed[i] = s3
+    bed_inv = 1.0 / max(1e-6, max(abs(s) for s in bed))
+    lfo1 = 2 * math.pi * 0.09
+    lfo2 = 2 * math.pi * 0.05
+    ph1 = rnd.uniform(0, 2 * math.pi)
+    ph2 = rnd.uniform(0, 2 * math.pi)
+    fade_n = int(SR * 0.08)
+    out = [0.0] * n
+    for i in range(n):
+        t = i / SR
+        am = 0.45 + 0.35 * math.sin(lfo1 * t + ph1) + 0.20 * math.sin(lfo2 * t + ph2)
+        if am < 0.06:
+            am = 0.06  # 谷值钳近静（夜风一阵一阵，非恒定轰鸣）
+        s = bed[i] * bed_inv * am
+        if i < fade_n:
+            s *= i / fade_n
+        elif i > n - fade_n:
+            s *= (n - 1 - i) / fade_n
+        out[i] = s
+    return finalize(out, target_peak=0.7)
+
+
+def gen_achievement():
+    """成就解锁 toast 音（t1021）：三音上行钟琴 arpeggio（E5→G#5→B5，错峰 0.11s）。
+    每音 = 基频 + 0.5×二次谐 + 0.22×三次谐（钟铃质感）× 快起（6ms）慢衰（τ≈160ms）指数包络；
+    末音留足衰减尾。机制等价 MC advancement toast 提示音（§9 原创程序合成；零 MC 资产）。由
+    Main.qml onAchievementUnlocked → playAchievement 路由 —— 结构进入等成就 toast 同源共享
+    （toast 系统单一通道，即「结构进入提示音」，不另造重复音）。"""
+    dur = 0.85
+    n = int(SR * dur)
+    notes = [(659.26, 0.00), (830.61, 0.11), (987.77, 0.22)]  # E5 / G#5 / B5 上行
+    out = [0.0] * n
+    for f0, t_on in notes:
+        b = int(SR * t_on)
+        ph = 0.0
+        for i in range(n - b):
+            tt = i / SR
+            ph += f0 / SR
+            attack = min(1.0, tt / 0.006)
+            env = attack * math.exp(-tt / 0.16)
+            tone = (math.sin(2 * math.pi * ph) + 0.5 * math.sin(2 * math.pi * 2 * ph)
+                    + 0.22 * math.sin(2 * math.pi * 3 * ph))
+            out[b + i] += tone * env * 0.8
+    return finalize(out, target_peak=0.85)
+
+
+def gen_chest_open():
+    """箱子开启音（t1021）：门闩「咔」+ 木盖轴「吱呀」上掀，~0.34s。
+    起始闩扣 tok（700Hz 空心短音 + 噪声 tick）+ 0.05s 起的木轴 creak（150→195→170Hz 半正弦摇摆的
+    4 谐波簇 + 摩擦颗粒，幅度 60ms 慢起、末段衰减）—— 拟铰链涩摩擦上掀。机制等价 MC 箱子开盖声
+    （§9 原创程序合成；零 MC 资产）。由 Main.qml openChest → playChestOpen 路由（方块箱 + 箱子
+    矿车同源单一通道）。"""
+    dur = 0.34
+    n = int(SR * dur)
+    rnd = random.Random(10216)
+    out = [0.0] * n
+    # 闩扣 tok（t=0 起：700Hz 空心短音 + 极短噪声 tick）。
+    for i in range(int(SR * 0.03)):
+        tt = i / SR
+        tok = math.sin(2 * math.pi * 700.0 * tt) * math.exp(-tt / 0.006)
+        tick = rnd.uniform(-1, 1) * 0.22 * math.exp(-tt / 0.0016)
+        out[i] += (tok * 0.5 + tick) * 0.8
+    # 木轴 creak：基频 150→195→170 半正弦摇摆（涩摩擦的忽紧忽松）+ 4 谐波簇 + 颗粒噪声。
+    ph = 0.0
+    for i in range(n):
+        tt = i / SR
+        if tt < 0.05:
+            continue
+        tc = tt - 0.05
+        f = 150.0 + 45.0 * math.sin(math.pi * min(1.0, tc / 0.29))
+        ph += f / SR
+        body = (math.sin(2 * math.pi * ph) + 0.45 * math.sin(2 * math.pi * 2 * ph)
+                + 0.28 * math.sin(2 * math.pi * 3 * ph) + 0.15 * math.sin(2 * math.pi * 4 * ph))
+        grain = rnd.uniform(-1, 1) * 0.05
+        rise = min(1.0, tc / 0.06)
+        out[i] += (body + grain) * rise * math.exp(-max(0.0, tc - 0.20) / 0.05) * 0.5
+    return finalize(out, target_peak=0.85)
+
+
+def gen_chest_close():
+    """箱子关闭音（t1021）：木盖「啪嗒」合盖闷响 + 闩扣落位 click，~0.24s。
+    起始盖板落座（120Hz 体击 + 190Hz 泛音 × 快衰减 τ≈35ms + 极短噪声 tap）+ t=0.10s 闩扣 tok
+    （500Hz × τ≈8ms）。与开门音区分（合盖 = 闷击落座感，开门 = 涩摩擦上扬感）。机制等价 MC 箱子
+    合盖声（§9 原创程序合成；零 MC 资产）。由 Main.qml closeChest → playChestClose 路由。"""
+    dur = 0.24
+    n = int(SR * dur)
+    rnd = random.Random(10217)
+    out = [0.0] * n
+    for i in range(n):
+        tt = i / SR
+        body = (math.sin(2 * math.pi * 120.0 * tt) * 0.6
+                + math.sin(2 * math.pi * 190.0 * tt) * 0.25)
+        tap = rnd.uniform(-1, 1) * 0.35 * math.exp(-tt / 0.0025)
+        out[i] += (body * 0.7 + tap) * math.exp(-tt / 0.035)
+        if tt >= 0.10:
+            td = tt - 0.10
+            out[i] += math.sin(2 * math.pi * 500.0 * td) * 0.4 * math.exp(-td / 0.008)
+    return finalize(out, target_peak=0.85)
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
     out_dir.mkdir(exist_ok=True)
+    # --only 解析提前到材质池之前：子集重生成不需要（也无法在无 heavy deps 机器上）跑 CC0 材质池。
+    only = None
+    if len(sys.argv) > 2 and sys.argv[1] == "--only":
+        only = set(sys.argv[2].split(","))
     # 材质分组 clip 池：{break,mining,step}_{stone,wood,grass,sand,leaves}.wav（15 文件）
     for name in MATERIALS:
         for kind in ("break", "mining", "step"):
+            if only is not None and f"{kind}_{name}" not in only:
+                continue
             samples = synth_material(name, kind)
             path = out_dir / f"{kind}_{name}.wav"
             write_wav(path, samples)
             print(f"wrote {path} ({len(samples)} frames, {len(samples)/SR:.2f}s)")
-    # 单件音（t328 重做合成 + 新增 ui_click）：
-    for name, gen in [("place", gen_place), ("pickup", gen_pickup),
-                      ("ui_click", gen_ui_click),
-                      ("door_open", gen_door_open), ("door_close", gen_door_close),
-                      ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
-                      ("explosion", gen_explosion),
-                      ("tool_break", gen_tool_break),
-                      ("ambient_wind", gen_ambient_wind),
-                      ("water_flow", gen_water_flow),
-                      ("water_step", gen_water_step),
-                      ("lava", gen_lava),
-                      ("thunder", gen_thunder),
-                      ("mob_idle", gen_mob_idle_generic),
-                      ("mob_idle_pig", gen_mob_idle_pig),
-                      ("mob_idle_cow", gen_mob_idle_cow),
-                      ("mob_idle_sheep", gen_mob_idle_sheep),
-                      ("mob_idle_shambler", gen_mob_idle_shambler),
-                      ("mob_idle_bones", gen_mob_idle_bones),
-                      ("mob_idle_stalker", gen_mob_idle_stalker),
-                      ("mob_idle_spider", gen_mob_idle_spider)]:
+    # 单件音（t328 重做合成 + 新增 ui_click）：t1021 起支持 --only name[,name...] 子集重生成
+    #   （程序合成 clip 纯 stdlib；CC0 clip 子集仍需懒加载的 soundfile/scipy）。默认无参 = 全量重生成。
+    clips = [("place", gen_place), ("pickup", gen_pickup),
+             ("ui_click", gen_ui_click),
+             ("door_open", gen_door_open), ("door_close", gen_door_close),
+             ("hurt", gen_hurt), ("mob_hurt", gen_mob_hurt),
+             ("explosion", gen_explosion),
+             ("tool_break", gen_tool_break),
+             ("ambient_wind", gen_ambient_wind),
+             ("water_flow", gen_water_flow),
+             ("water_step", gen_water_step),
+             ("lava", gen_lava),
+             ("thunder", gen_thunder),
+             ("mob_idle", gen_mob_idle_generic),
+             ("mob_idle_pig", gen_mob_idle_pig),
+             ("mob_idle_cow", gen_mob_idle_cow),
+             ("mob_idle_sheep", gen_mob_idle_sheep),
+             ("mob_idle_shambler", gen_mob_idle_shambler),
+             ("mob_idle_bones", gen_mob_idle_bones),
+             ("mob_idle_stalker", gen_mob_idle_stalker),
+             ("mob_idle_spider", gen_mob_idle_spider),
+             # t1021 结构环境音四音 + 事件音补缺三音（见各 gen_* 头注释；播放端 src/Audio/audiomanager.h）。
+             ("stronghold_hum", gen_stronghold_hum),
+             ("mineshaft_drip", gen_mineshaft_drip),
+             ("jungle_chirps", gen_jungle_chirps),
+             ("desert_night_wind", gen_desert_night_wind),
+             ("achievement", gen_achievement),
+             ("chest_open", gen_chest_open),
+             ("chest_close", gen_chest_close)]
+    for name, gen in clips:
+        if only is not None and name not in only:
+            continue
         samples = gen()
         path = out_dir / f"{name}.wav"
         write_wav(path, samples)

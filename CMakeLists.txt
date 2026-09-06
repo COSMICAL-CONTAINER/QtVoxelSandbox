@@ -753,6 +753,13 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/mob_idle_bones.wav
         sounds/mob_idle_stalker.wav
         sounds/mob_idle_spider.wav
+        sounds/stronghold_hum.wav                   # t1021 要塞低鸣（要塞 region 门控 8s 循环；build_sounds.py 程序合成 §9 原创）
+        sounds/mineshaft_drip.wav                   # t1021 矿井滴水（矿井 region 门控随机间隔单滴；同上）
+        sounds/jungle_chirps.wav                    # t1021 丛林虫鸣（丛林神殿 region 门控颤音簇，昼稀/夜密由调度间隔控制）
+        sounds/desert_night_wind.wav                # t1021 沙漠夜风（沙漠神殿区+夜+露天三重门控 8s 循环；同上）
+        sounds/achievement.wav                      # t1021 成就解锁 toast 音（structureEntered 等成就 toast 同源共享）
+        sounds/chest_open.wav                       # t1021 箱子开启音（方块箱 + 箱子矿车同源；openChest 单一通道）
+        sounds/chest_close.wav                      # t1021 箱子关闭音（closeChest 单一通道）
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。
