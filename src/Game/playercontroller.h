@@ -873,6 +873,13 @@ signals:
     //   progress.onEnteredStronghold()（unlock 幂等：重复进出的重复沿不重发 toast）。同 cropHarvested
     //   单向事件流模式（PLAN §2 分层：Game/Physics 发语义事件，呈现层只消费）。
     void enteredStronghold();
+    // t1020 进入四结构区域（progress 成就埋点「地牢探秘 / 废矿来客 / 沙漠寻踪 / 丛林秘境」）：tickImpl 内
+    //   World::insideDungeon / insideMineshaft / insideDesertTemple / insideJungleTemple（玩家脚底）各自
+    //   false→true **上升沿**发一次性事件信号，kind = World::StructureKind（同 enteredStronghold 事件级
+    //   先例，禁每帧直发 —— 上升沿守卫 bool 数组 m_insideStructure[World::StructureKindCount]，setWorld /
+    //   finishWorldLoad 重置）。呈现层 Connections → progress.onStructureEntered(kind)（unlock 幂等：重复
+    //   进出的重复沿不重发 toast）。同 enteredStronghold 单向事件流模式（PLAN §2 分层）。
+    void structureEntered(int kind);
 
 public:
     // t889 整帧驱动入口（原 private slot）：QTimer(16ms) 连接它；矩阵探针（redstone_matrix_test）亦直调
@@ -1435,6 +1442,11 @@ private:
     //   ——旧世界「已在要塞内」的陈旧 true 不得吞掉新世界的首个进入沿（两世界进度各自独立，进入事件
     //   必须各自可发；unlock 幂等兜底防重复 toast）。
     bool m_insideStronghold = false;
+    // t1020 四结构进入沿守卫（structureEntered(kind) 一次性信号）：tickImpl 读 World::inside*（脚底）
+    //   false→true 上升沿发信号后随值更新。换世界（setWorld）/ 读档重进（finishWorldLoad）全清 false
+    //   ——同 m_insideStronghold 口径（旧世界陈旧 true 不得吞新世界首个进入沿；unlock 幂等兜底防重复
+    //   toast）。下标 = World::StructureKind。
+    bool m_insideStructure[World::StructureKindCount] = {};
     // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
     float m_flowSoundLevel = 0.0f;

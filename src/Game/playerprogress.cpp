@@ -19,10 +19,14 @@
 //   「挖矿时间到」(←合成台) →「获得升级」→「钻石!」→「附魔师」→「书虫」/「铁匠」(←附魔师)；
 //   「耕种时间到」(←合成台，t752；与「出击时间」「挖矿时间到」并列的第三分支，首次合成任意材质锄头)
 //   →「农夫」(←耕种时间到，t752 由独立根重挂——「做锄头」作前置、「收获 10 作物」为其后继)。
-//   独立根线（t637；t752 后仅剩两条，t1000 起三条）：「起航」（骑船）/「发射!」（发射器触发）/
+//   独立根线（t637；t752 后仅剩两条，t1000 起三条，t1020 起十条）：「起航」（骑船）/「发射!」（发射器触发）/
 //   「隔墙有眼」（t1000 进入要塞结构区域——用户口径「进入到末地要塞的结构里面去了」；标准 MC 同名进度
 //   跟随末影之眼，本工程无该物品 → 按进入结构落地：PlayerController tick 内 insideStronghold 边沿 →
-//   enteredStronghold 信号 → Main.qml 路由）各自独立根。
+//   enteredStronghold 信号 → Main.qml 路由）各自独立根；t1020 追加七条独立根：探索四结构（「地牢探秘」
+//   「废矿来客」「沙漠寻踪」「丛林秘境」——World::inside* 区域沿信号，判定权威 = rebuildStructureRegions
+//   重推导足迹）+ 生活三条（「轨道骑士」骑矿车 / 「愿者上钩」钓鱼首获 / 「移动金库」箱车取物）。
+//   t1020 亦扩两条既有埋点判定：onMobKilled 首杀四生物（蜘蛛/骸骨/潜行者/银鱼，挂「怪物猎人」下）/
+//   onItemPicked 首煤·首铁·首红石（矿脉首矿，挂挖矿线下）。
 //   父成就未解锁时子成就不解锁（unlock 前置检查）。iconId = 节点图标（QML 树节点显示）。
 const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
 {
@@ -74,6 +78,39 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
         //   111 家族）。
         { "entered_stronghold", nullptr,      "隔墙有眼",   "发现了藏在地底深处的要塞",
           int(BlockRegistry::EndPortal) },
+        // ── t1020 成就树四分支扩展（采矿 / 战斗 / 探索 / 生活；总数 17→31）──
+        // 采矿支（首矿链：挂在既有挖矿线下，父先于子 DFS 序）：
+        { "get_coal",       "mining_time",    "煤炭!",      "首次获得煤炭",
+          int(RecipeRegistry::CoalId) },
+        { "get_iron",       "upgrade",        "铁矿!",      "首次获得铁原矿",
+          int(RecipeRegistry::IronOreDropId) },
+        { "get_redstone",   "get_diamond",    "红石!",      "首次获得红石粉",
+          int(RecipeRegistry::RedstoneId) },
+        // 战斗支（首杀各生物代表，挂「怪物猎人」下；同事件首杀 → 父先行解锁，同 tick 双解锁）：
+        { "kill_spider",    "monster_hunter", "织网终结者", "首次击杀蜘蛛",
+          int(RecipeRegistry::SpawnEggSpiderId) },
+        { "kill_bones",     "monster_hunter", "白骨收藏家", "首次击杀骸骨",
+          int(RecipeRegistry::SpawnEggBonesId) },
+        { "kill_stalker",   "monster_hunter", "拆弹专家",   "首次击杀潜行者",
+          int(RecipeRegistry::SpawnEggStalkerId) },
+        { "kill_silverfish", "monster_hunter", "石中蛀虫",  "首次击杀银鱼",
+          int(BlockRegistry::StoneBrick) },
+        // 探索支（进入四结构区域，各独立根 —— 同「隔墙有眼」t1000 先例，不挂线避免父前置吞沿）：
+        { "entered_dungeon", nullptr,        "地牢探秘",   "发现了藏在地底的怪物房间",
+          int(BlockRegistry::Spawner) },
+        { "entered_mineshaft", nullptr,      "废矿来客",   "发现了废弃的地下矿井",
+          int(BlockRegistry::Planks) },
+        { "entered_desert_temple", nullptr,  "沙漠寻踪",   "发现了沙漠中的神殿",
+          int(BlockRegistry::CutSandstone) },
+        { "entered_jungle_temple", nullptr,  "丛林秘境",   "发现了丛林深处的神殿",
+          int(BlockRegistry::Lever) },
+        // 生活支（载具 / 渔获 / 箱车，各独立根）：
+        { "ride_minecart",  nullptr,          "轨道骑士",   "骑上矿车沿铁轨行驶",
+          int(RecipeRegistry::MinecartId) },
+        { "first_catch",    nullptr,          "愿者上钩",   "用钓竿钓起一件获物",
+          int(RecipeRegistry::RawFishId) },
+        { "chest_cart_loot", nullptr,         "移动金库",   "打开装货的矿车取走物品",
+          int(BlockRegistry::Chest) },
     };
     return kDefs;
 }
@@ -168,6 +205,9 @@ void PlayerProgress::onPlayTimeTick(float dt)
 }
 
 // 击杀 mob：累加 + 判「怪物猎人」（敌对 mob Shambler=4/Bones=5/Stalker=6/Spider=7；§9 改名）。
+// t1020 首杀各生物：蜘蛛 / 骸骨 / 潜行者 / 银鱼（洞穴蜘蛛计入蜘蛛系 —— 同族，不设独立成就）。父
+//   「怪物猎人」同事件先行解锁（首杀即怪猎 + 对应首杀，同 tick 双解锁；infoToast 单槽 → 后者覆盖
+//   前者文案，两项均入树 —— MC advancement 链同观感，登记）。
 void PlayerProgress::onMobKilled(int mobType)
 {
     ++m_mobsKilled;
@@ -176,6 +216,14 @@ void PlayerProgress::onMobKilled(int mobType)
         || mobType == MT::MobStalker || mobType == MT::MobSpider
         || mobType == MT::MobCaveSpider) // t1012③ 洞穴蜘蛛计入「怪物猎人」（敌对型同列）
         unlock("monster_hunter");
+    if (mobType == MT::MobSpider || mobType == MT::MobCaveSpider)
+        unlock("kill_spider");
+    if (mobType == MT::MobBones)
+        unlock("kill_bones");
+    if (mobType == MT::MobStalker)
+        unlock("kill_stalker");
+    if (mobType == MT::MobSilverfish)
+        unlock("kill_silverfish");
     bumpAndEmit();
 }
 
@@ -204,6 +252,8 @@ void PlayerProgress::onCraft(int resultId)
 }
 
 // 拾取物品：累加 + Log/SpruceLog→「获得原木」；DiamondId→「钻石!」（t619）。
+// t1020 矿脉首矿：CoalId→「煤炭!」（挂「挖矿时间到」，木镐可挖）/ IronOreDropId→「铁矿!」（挂
+//   「获得升级」，石镐可挖）/ RedstoneId→「红石!」（挂「钻石!」，红石矿需铁镐采掘同进度位阶）。
 void PlayerProgress::onItemPicked(int itemId)
 {
     ++m_itemsPicked;
@@ -211,6 +261,12 @@ void PlayerProgress::onItemPicked(int itemId)
         unlock("get_wood");
     if (itemId == int(RecipeRegistry::DiamondId))
         unlock("get_diamond");
+    if (itemId == int(RecipeRegistry::CoalId))
+        unlock("get_coal");
+    if (itemId == int(RecipeRegistry::IronOreDropId))
+        unlock("get_iron");
+    if (itemId == int(RecipeRegistry::RedstoneId))
+        unlock("get_redstone");
     bumpAndEmit();
 }
 
@@ -253,6 +309,32 @@ void PlayerProgress::onEnchantedBookObtained() { unlock("bookworm"); }
 
 // 铁砧成功操作 → 「铁匠」。
 void PlayerProgress::onAnvilUsed() { unlock("blacksmith"); }
+
+// ── t1020 新埋点（成就树四分支扩展）──
+
+// 进入结构区域 → 对应探索成就（kind 数值契约 = World::StructureKind：0 地牢 / 1 废弃矿井 /
+//   2 沙漠神殿 / 3 丛林神殿；本层不持 World（PLAN §2 Game/ViewModel 零向上依赖），数值契约注释
+//   绑定同 BlockRegistry 字面量先例）。unlock 幂等：重复进出的重复沿 / 读档重进的重放沿均早退，
+//   不重发 toast（同 onEnteredStronghold）。越界 kind 防御忽略。
+void PlayerProgress::onStructureEntered(int kind)
+{
+    switch (kind) {
+    case 0: unlock("entered_dungeon"); break;        // World::StructureDungeon
+    case 1: unlock("entered_mineshaft"); break;      // World::StructureMineshaft
+    case 2: unlock("entered_desert_temple"); break;  // World::StructureDesertTemple
+    case 3: unlock("entered_jungle_temple"); break;  // World::StructureJungleTemple
+    default: break;                                  // 越界防御（契约外 kind 忽略）
+    }
+}
+
+// 骑上矿车 → 「轨道骑士」（幂等 unlock；重复上下车只首次弹 toast）。
+void PlayerProgress::onRodeMinecart() { unlock("ride_minecart"); }
+
+// 钓竿收竿获物 → 「愿者上钩」（幂等 unlock；获物实体由 Game 层直调生成，本埋点仅成就口径）。
+void PlayerProgress::onFishCaught() { unlock("first_catch"); }
+
+// 打开箱子矿车 → 「移动金库」（幂等 unlock；t1013 链：矿井标记箱转正的箱车，首开填充矿井池）。
+void PlayerProgress::onChestCartOpened() { unlock("chest_cart_loot"); }
 
 // 设当前天数（WorldClock.dayCount 单调）。仅当 > 当前 daysPlayed 时更新。
 void PlayerProgress::setDayCount(int day)

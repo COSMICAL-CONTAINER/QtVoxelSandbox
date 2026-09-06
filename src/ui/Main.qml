@@ -1494,6 +1494,9 @@ Window {
         if (theWorld.isStrongholdChest(x, y, z)) chestStore.populateStrongholdLoot(x, y, z)
         chestOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（箱子）
+        // t1020 progress 成就：首次打开箱子矿车（t1013 内容键链：矿井标记箱转正的箱车，首开即填充
+        //   矿井池 → 「开箱取物」口径解锁「移动金库」）。幂等 unlock。
+        if (isCartCell) progress.onChestCartOpened()
         // t196：触发盖子翻开动画（chestLidAngle 0→全开，Behavior 平滑过渡）；chestLidPivot 据坐标 + 朝向摆位。
         //   t1013 矿车键不显盖子（overlay 钉键格 = 幽灵盖；见函数头注释简化口径）。
         if (!isCartCell) chestLidAngle = kChestLidOpenAngle
@@ -3108,6 +3111,13 @@ Window {
         // t1000 progress 成就：玩家进入要塞结构区域（player.enteredStronghold 一次性边沿信号 →
         // progress.onEnteredStronghold「隔墙有眼」）。
         function onEnteredStronghold() { progress.onEnteredStronghold() }
+        // t1020 progress 成就：玩家进入四结构区域（player.structureEntered(kind) 一次性边沿信号，
+        // kind = World::StructureKind → progress.onStructureEntered(kind)「地牢探秘/废矿来客/沙漠寻踪/
+        // 丛林秘境」）。信号 handler 直调 Q_INVOKABLE（t976/t977 AOT 教训：不放跨组件单元绑定）。
+        function onStructureEntered(kind) { progress.onStructureEntered(kind) }
+        // t1020 progress 成就：钓竿收竿获物（player.fishCaught 通知信号 → progress.onFishCaught
+        // 「愿者上钩」；获物实体已由 Game 层直调生成，本路由仅成就口径）。
+        function onFishCaught(itemId, count, px, py, pz, dirX, dirZ, speed) { progress.onFishCaught() }
         // t50：右键工作台 → player 发 craftingTableOpened → 开 3×3 合成面板（释放指针 / 关包互斥）。
         function onCraftingTableOpened() { window.openCraftingTable() }
         // t87/t494：右键熔炉 → player 发 furnaceOpened(x,y,z) → 开 FurnaceUI 冶炼面板（释放指针 / 关包互斥）。
@@ -13979,6 +13989,9 @@ Window {
     onRidingCartChanged: {
         if (ridingCart) { dismountHintVisible = true; dismountHintTimer.restart() }
         else { dismountHintVisible = true; dismountHintTimer.stop() }
+        // t1020 progress 成就：首次骑上矿车（false→true 边沿）→「轨道骑士」。onRodeMinecart 内幂等
+        //   unlock，重复上下车只首次弹 toast（同 onRidingBoatChanged → onBoatBoarded 先例）。
+        if (ridingCart) progress.onRodeMinecart()
     }
     // t530 下船提示 ~5s 自动消失（机制等价 MC 1.0 骑船提示短暂出现；现常驻改为限时）：首次上船显提示 +
     //   dismountHintTimer 5s 后把 dismountHintVisible 置 false → 提示自动隐（玩家已知晓按键）。重新上船（ridingBoat

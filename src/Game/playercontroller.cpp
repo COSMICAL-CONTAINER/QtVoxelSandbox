@@ -131,6 +131,8 @@ void PlayerController::setWorld(World *w)
     m_buttonRecoverCells.clear(); // t628：换世界清按钮自动复位表（防跨世界同坐标串扰；键按世界坐标打包，同 m_dispenserCooldowns）
     m_dispenserPoweredCells.clear(); // t689：换世界清机器电力基线集（防跨世界同坐标串扰；键同冷却编码）
     m_insideStronghold = false;   // t1000：换世界清要塞进入沿守卫（同坐标瞬态表清理先例——新世界重新判沿）
+    for (int k = 0; k < World::StructureKindCount; ++k)
+        m_insideStructure[k] = false; // t1020：换世界同清四结构进入沿守卫（读档重进同清，见 finishWorldLoad）
     // t756：世界换代（regenerate / beginLoad / setSeed / review #20 尺寸 setter 重建均 emit seedChanged）
     //   → 复位重生点（onWorldSeedChanged：旧世界出生列 / 床位坐标不再指向当前世界）。UniqueConnection 防重复
     //   挂接（theWorld 单例 + setWorld 幂等早退，此处理论只连一次）。
@@ -584,6 +586,10 @@ void PlayerController::finishWorldLoad()
     // t1000：读档重进同清进入沿守卫（本路径 setWorld 因指针未变不触发）——存档若停在要塞内，载入后
     //   首 tick 重产一次进入沿（进度 loadVariant 已恢复解锁 → unlock 幂等早退，不重发 toast）。
     m_insideStronghold = false;
+    // t1020：读档重进同清四结构进入沿守卫（同 t1000 口径：存档停在结构内 → 载入后首 tick 重产沿，
+    //   进度已解锁 → unlock 幂等早退，不重发 toast）。
+    for (int k = 0; k < World::StructureKindCount; ++k)
+        m_insideStructure[k] = false;   // 读档重进同清进入沿守卫（t1020 四结构）
 }
 
 void PlayerController::release()
@@ -878,6 +884,24 @@ void PlayerController::tickImpl()
         m_insideStronghold = inStronghold;
     } else if (m_insideStronghold) {
         m_insideStronghold = false; // 退出世界清守卫（下次进世界重新判沿）
+    }
+    // t1020 成就「地牢探秘 / 废矿来客 / 沙漠寻踪 / 丛林秘境」进入沿检测：每 tick 读 World::inside*
+    //   四谓词（脚底；区域表线性扫描，O(区域数) 纯算术零栅格访问），各自 false→true 上升沿发一次性
+    //   事件信号 structureEntered(kind)（kind = World::StructureKind；呈现层 Connections →
+    //   progress.onStructureEntered(kind) 解锁；unlock 幂等——重复进出的重复沿不重复弹 toast）。放
+    //   !m_captured 早 return 之前（同 t1000 要塞沿先例：暂停 / 背包开时位置不变、判定稳定）。守卫
+    //   m_insideStructure[] 重置点：setWorld（换世界指针）/ finishWorldLoad（读档重进同指针路径）/
+    //   本处随值更新。无世界 → 恒 false。
+    if (m_world) {
+        for (int k = 0; k < World::StructureKindCount; ++k) {
+            const bool inStruct = m_world->insideStructureRegion(k, double(m_pos.x()), double(m_pos.y()), double(m_pos.z()));
+            if (inStruct && !m_insideStructure[k])
+                emit structureEntered(k); // 一次性事件信号（边沿触发；禁每帧直发）
+            m_insideStructure[k] = inStruct;
+        }
+    } else {
+        for (int k = 0; k < World::StructureKindCount; ++k)
+            m_insideStructure[k] = false; // 退出世界清守卫（下次进世界重新判沿）
     }
     // t223 近流水 proximity 水流声：节流扫描（每 kFlowScanInterval 秒一次）算最近流水格距离 → level。
     //   放在 !m_captured 早 return 之前 → 暂停 / 背包开时仍刷新（玩家停流水旁开背包，水流声应持续）；

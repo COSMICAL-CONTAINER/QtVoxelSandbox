@@ -34,6 +34,10 @@
 //     路由（「隔墙有眼」，t1000）。
 //   - onEnchanted() / onEnchantedBookObtained()：EnchantingTableUI.doEnchant 成功末尾（「附魔师」/「书虫」）。
 //   - onAnvilUsed()：AnvilUI.takeProduct 成功末尾（「铁匠」）。
+//   - t1020 新埋点（成就树四分支扩展）：onStructureEntered(int kind)（player.structureEntered 边沿信号，
+//     地牢/矿井/沙漠神殿/丛林神殿四探索成就）/ onRodeMinecart()（Main.qml ridingCart 边沿，「轨道骑士」）/
+//     onFishCaught()（player.fishCaught 通知信号，「愿者上钩」）/ onChestCartOpened()（openChest 的
+//     isCartCell 分支，「移动金库」）；另 onMobKilled / onItemPicked 扩展首杀四生物 / 首煤铁红石判定。
 //
 // 成就解锁逻辑在埋点方法内判定（如 onCraft(SwordWood) → unlock("出击时间")）。unlock 时先查前置依赖：
 //   父成就未解锁 → 忽略本次解锁事件（progress-tree 三轮；机制等价 MC 1.0 父成就未达成则子成就解锁不生效）。
@@ -138,6 +142,19 @@ public:
     Q_INVOKABLE void onEnchantedBookObtained();
     // 铁砧成功执行一次修复/合并/重命名（AnvilUI.takeProduct 末尾）。解锁「铁匠」。
     Q_INVOKABLE void onAnvilUsed();
+    // ── t1020 新埋点（成就树四分支扩展：采矿 / 战斗 / 探索 / 生活）──
+    // 进入结构区域（kind = World::StructureKind 数值契约：0 地牢 / 1 废弃矿井 / 2 沙漠神殿 / 3 丛林
+    //   神殿；本层不持 World —— Game/ViewModel 零向上依赖，数值契约同 BlockRegistry 直引模式注释绑定）。
+    //   player.structureEntered 一次性边沿信号 → Main.qml 路由。解锁对应探索成就（unlock 幂等）。
+    Q_INVOKABLE void onStructureEntered(int kind);
+    // 首次骑上矿车（Main.qml ridingCart false→true 边沿，同 onBoatBoarded 船先例）。解锁「轨道骑士」。
+    Q_INVOKABLE void onRodeMinecart();
+    // 钓竿收竿获物（player.fishCaught 通知信号 → Main.qml 路由；获物实体已由 Game 层直调生成）。
+    //   解锁「愿者上钩」。
+    Q_INVOKABLE void onFishCaught();
+    // 首次打开箱子矿车（Main.qml.openChest 的 isCartCell 分支 —— t1013 内容键链：矿井标记箱转正的
+    //   箱子矿车，首开填充矿井池）。解锁「移动金库」。
+    Q_INVOKABLE void onChestCartOpened();
 
     // ── 列表数据（Q_INVOKABLE；QML delegate 触碰 revision 取最新）──
     // 全部成就 [{id, name, desc, unlocked, parentId, parentName, depth, locked, col, row, iconId}, ...]
