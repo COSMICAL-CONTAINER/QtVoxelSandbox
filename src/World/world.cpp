@@ -83,6 +83,9 @@ void World::beginLoad(int seed)
     m_hasStronghold = false;
     m_spawnColX = -1; // t756：出生列同步清（防旧世界残留坐标误导出生定位）；finishLoad 末从存档体素重新解析
     m_spawnColZ = -1;
+    // t1020：结构区域表同步清（防旧世界区域残留误导进入判定）；finishLoad 末 rebuildStructureRegions
+    //   从 seed 纯算术重推导落表（错误中断路径 = 空表 → inside* 恒 false，安全）。
+    for (int k = 0; k < StructureKindCount; ++k) m_structureRegions[k].clear();
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     gravLightReset();        // t933：网格重置 → 重力级联光照联合盒 / 批标志防御清（正常路径级联收尾已清；防任何中途路径残留批态）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
@@ -147,6 +150,9 @@ void World::finishLoad()
     //   且玩家可能已挖掉 / 改造原出生列（建房 / 种树）。须在 recomputeAllHeightmaps 之后（heightmapAt 判据
     //   依赖重算后的列顶）。一次性有界环扫（加载期可接受）。
     findSpawnColumn();
+    // t1020：结构区域表重落表（同 B5 重推导口径 —— 候选选择是 seed 的纯函数（PLAN §2-K），读档后
+    //   纯算术重推导 = 生成期同表；零序列化、零体素扫描，旧存档（t1020 前生成）立即可判）。
+    rebuildStructureRegions();
 }
 
 // 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞末地传送门中心格回写 m_strongholdPortal*。旧版三坐标
@@ -253,6 +259,333 @@ bool World::insideStronghold(double x, double y, double z) const
     return bx >= cx - kStrongholdHalf && bx <= cx + kStrongholdHalf
         && bz >= cz - kStrongholdHalf && bz <= cz + kStrongholdHalf
         && by >= cy && by <= cy + kStrongholdWallH + 1;
+}
+
+// ── t1020 成就树扩展：四结构「进入区域」判定（契约见 world.h 声明处头注释）──
+
+// inside* 四谓词共享实现：区域表线性扫描（每结构 ~0-8 个区域，O(区域数) 纯算术零栅格访问；每 tick
+//   PlayerController 至多 4 次调用 × 4 谓词 —— 成本可忽略，同 insideStronghold O(1) 先例量级）。
+//   cell 闭区间口径与足迹定义一一对应（连续坐标 floor 取整；同 insideStronghold）。
+bool World::insideStructureRegion(int kind, double x, double y, double z) const
+{
+    if (kind < 0 || kind >= StructureKindCount) return false;
+    const int bx = int(std::floor(x)), by = int(std::floor(y)), bz = int(std::floor(z));
+    for (const StructureSite &s : m_structureRegions[kind]) {
+        if (bx >= s.minX && bx <= s.maxX && by >= s.minY && by <= s.maxY
+            && bz >= s.minZ && bz <= s.maxZ)
+            return true;
+    }
+    return false;
+}
+
+bool World::insideDungeon(double x, double y, double z) const
+{
+    return insideStructureRegion(StructureDungeon, x, y, z);
+}
+
+bool World::insideMineshaft(double x, double y, double z) const
+{
+    return insideStructureRegion(StructureMineshaft, x, y, z);
+}
+
+bool World::insideDesertTemple(double x, double y, double z) const
+{
+    return insideStructureRegion(StructureDesertTemple, x, y, z);
+}
+
+bool World::insideJungleTemple(double x, double y, double z) const
+{
+    return insideStructureRegion(StructureJungleTemple, x, y, z);
+}
+
+// 区域表读取（矩阵探针 / F3 调试口径）。region = [minX,minY,minZ,maxX,maxY,maxZ]（cell 闭区间）。
+int World::structureRegionCount(int kind) const
+{
+    if (kind < 0 || kind >= StructureKindCount) return -1;
+    return int(m_structureRegions[kind].size());
+}
+
+QVariantList World::structureRegion(int kind, int index) const
+{
+    QVariantList out;
+    if (kind < 0 || kind >= StructureKindCount) return out;
+    if (index < 0 || index >= int(m_structureRegions[kind].size())) return out;
+    const StructureSite &s = m_structureRegions[kind][size_t(index)];
+    out << s.minX << s.minY << s.minZ << s.maxX << s.maxY << s.maxZ;
+    return out;
+}
+
+// 结构区域表重建（generate 末 / finishLoad 末各调一次；先清后填幂等）。区域表 = 四结构候选表的直接
+//   投影（候选表自带足迹闭区间）→ 「同 seed 同区域」由候选选择单源（sites() 上收）+ 纯函数性（PLAN
+//   §2-K）双保险；旧存档（t1020 前生成）finishLoad 重推导后立即可判，无序列化迁移面。
+void World::rebuildStructureRegions()
+{
+    for (int k = 0; k < StructureKindCount; ++k) m_structureRegions[k].clear();
+    m_structureRegions[StructureDungeon] = dungeonSites();
+    m_structureRegions[StructureMineshaft] = mineshaftSites();
+    m_structureRegions[StructureDesertTemple] = desertTempleSites();
+    m_structureRegions[StructureJungleTemple] = jungleTempleSites();
+}
+
+// 地牢候选表（选择段自 placeDungeons 原循环头逐字迁移 —— 概率 / 抖动 / margin / 海列 / 高度窗 /
+//   房间尺寸位域全部同值同序；placeDungeons 几何与 rebuildStructureRegions 共同消费本表 → 选择单源）。
+//   足迹 = 周界墙环闭区间 [cx-1, cx+roomW]×[cz-1, cz+roomD]×[cy-1, cy+kDungeonRoomH]（同 placeDungeons
+//   步骤 1 周界遍历域；「进入结构」口径 = 踏进墙环即算，同 t1000 要塞墙环 cell 先例）。
+std::vector<World::StructureSite> World::dungeonSites() const
+{
+    constexpr int kDungeonGrid  = 24;     // 候选网格间距（同 placeDungeons，t426 口径）
+    constexpr unsigned kDungeonPct = 10u; // 候选命中概率（t426：10%）
+    constexpr int kBedrockTop   = 4;      // 不动基岩（同 carveCaves / placeDungeons）
+    constexpr int kSurfaceFloor = 6;      // 与地表保留的最小距离
+    constexpr int kDungeonMaxY  = 36;     // 地牢最高 y（spec「地下」）
+    constexpr int kRoomWMax     = 7;      // 房间最大内宽（kMargin 基准）
+    constexpr int kMargin       = kRoomWMax + 1;
+    std::vector<StructureSite> out;
+    const int dungSeed = m_seed + kDungeonSeedOff;
+    for (int bx = kDungeonGrid / 2; bx < m_width; bx += kDungeonGrid) {
+        for (int bz = kDungeonGrid / 2; bz < m_depth; bz += kDungeonGrid) {
+            const quint32 r = hashColumn(dungSeed, bx, bz);
+            if ((r % 100u) >= kDungeonPct) continue; // 概率筛选
+            const int span = kDungeonGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+                continue; // 留 margin 格边界
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠地牢
+            const int h = std::min(heightAt(cx, cz), m_height - 1);
+            const int yLo = kBedrockTop + 2;
+            const int yHi = std::min(kDungeonMaxY - kDungeonRoomH, h - kSurfaceFloor - kDungeonRoomH);
+            if (yHi <= yLo) continue; // 此列地下空间不足
+            const int yRange = yHi - yLo + 1;
+            const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 房间底面（地板）y
+            const int roomW = ((r >> 28) & 1u) ? 5 : 7; // t995 内空宽 5/7（bit28）
+            const int roomD = ((r >> 29) & 1u) ? 5 : 7; // t995 内空深 5/7（bit29）
+            StructureSite s;
+            s.cx = cx; s.cz = cz; s.y = cy;
+            s.roomW = roomW; s.roomD = roomD; s.r = r; // 几何消费位域（刷怪笼权重 / 豁口数原样携带）
+            s.minX = cx - 1; s.maxX = cx + roomW;
+            s.minZ = cz - 1; s.maxZ = cz + roomD;
+            s.minY = cy - 1; s.maxY = cy + kDungeonRoomH;
+            out.push_back(s);
+        }
+    }
+    return out;
+}
+
+// 废弃矿井候选表（选择段自 placeMineshaft 原循环头逐字迁移，同 dungeonSites 单源口径）。
+//   足迹 = 「起点厅 + 巷道最大延伸」包络闭区间：水平半边 kEnvHalf = 起点厅半幅 5 + 巷道两腿最远
+//   10+10 = 距中心 25，+1 墙环 = 26；竖直 [sy-6, sy+5]（斜坡段地板每 2 步降 1、≤10 步 → 最低 sy-5，
+//   含下壁 -6；拱带 / 支撑柱冠最高 sy+4，含顶 +5）。口径 = t1000 要塞 45×45 外圈足迹同款「结构区域
+//   足迹含墙环实心」—— 包络内巷道间实心岩同算入区（登记：不逐 piece 精确，进出起点厅必触发）。
+std::vector<World::StructureSite> World::mineshaftSites() const
+{
+    constexpr int kMineshaftGrid    = 36;     // 候选网格间距（同 placeMineshaft）
+    constexpr unsigned kMinePct     = 40u;    // 候选命中概率
+    constexpr int kBedrockTop       = 4;      // 不动基岩
+    constexpr int kSurfaceFloor     = 6;      // 与地表保留的最小距离
+    constexpr int kMineshaftMaxY    = 48;     // 矿井最高 y（spec「Y<50」）
+    constexpr int kRoomH            = 4;      // 矿井高度预算（y 范围公式沿用 t565 口径）
+    constexpr int kMargin           = 16;     // 留边界（同 placeMineshaft）
+    constexpr int kEnvHalf          = 26;     // 巷道包络半边（5 + 10 + 10 + 1 墙环，推导见函数头）
+    constexpr int kEnvYLoDrop       = 6;      // 包络竖直下探（斜坡最低 sy-5 + 下壁 1）
+    constexpr int kEnvYHiLift       = 5;      // 包络竖直上探（拱带 sy+4 + 顶 1）
+    std::vector<StructureSite> out;
+    const int mineSeed = m_seed + kMineshaftSeedOff;
+    for (int bx = kMineshaftGrid / 2; bx < m_width; bx += kMineshaftGrid) {
+        for (int bz = kMineshaftGrid / 2; bz < m_depth; bz += kMineshaftGrid) {
+            const quint32 r = hashColumn(mineSeed, bx, bz);
+            if ((r % 100u) >= kMinePct) continue; // 概率筛选
+            const int span = kMineshaftGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+                continue; // 留 margin 边界
+            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠矿井
+            const int h = std::min(heightAt(cx, cz), m_height - 1);
+            const int yLo = kBedrockTop + 2;
+            const int yHi = std::min(kMineshaftMaxY - kRoomH - 1, h - kSurfaceFloor - kRoomH - 1);
+            if (yHi <= yLo) continue; // 此列地下空间不足
+            const int yRange = yHi - yLo + 1;
+            const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 地板 y（起点厅 / 巷道底面）
+            StructureSite s;
+            s.cx = cx; s.cz = cz; s.y = sy;
+            s.minX = cx - kEnvHalf; s.maxX = cx + kEnvHalf;
+            s.minZ = cz - kEnvHalf; s.maxZ = cz + kEnvHalf;
+            s.minY = sy - kEnvYLoDrop; s.maxY = sy + kEnvYHiLift;
+            out.push_back(s);
+        }
+    }
+    return out;
+}
+
+// 沙漠神殿落位五守卫（t1010 siteOk lambda 上收方法：margin / 群系 / 海域 / 塔顶越界 / 密室贴基岩，
+//   同序同语义逐字迁移；概率主路径（desertTempleSites）/ 保底补座（同函数）/ tryPlace 落位（place*）
+//   三路共用 → 落位判据永不漂移）。
+bool World::desertTempleSiteOk(int cx, int cz) const
+{
+    constexpr int kMargin = kDesertTempleHalf + 1; // 留边界（金字塔 + 密室半径 ≤ margin 不越界）
+    constexpr int kBedrockTop = 4;                 // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
+    if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+        return false; // 留 margin 边界
+    // 仅 Desert 群系（spec「沙漠群系生成」；biomeAt 收口单一权威）。非沙漠 → 拒。
+    if (!isDesert(cx, cz)) return false;
+    if (seaColumnHeight(cx, cz) >= 0) return false;            // 海域不叠神殿（避免与海水柱冲突）
+    const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
+    if (surfaceY + kDesertTempleTopLayer >= m_height) return false; // 塔顶越界保护（surfaceY 异常高防溢出）
+    const int floorY = surfaceY - kDesertTempleChamberDrop;    // 密室地板 y（TNT 层）
+    return floorY - 1 >= kBedrockTop + 1;                      // 密室地板贴基岩 → 拒（保地板完整）
+}
+
+// 沙漠神殿候选表（t485 主路径 + t1010 保底补座选择段自 placeDesertTemple 逐字迁移；tryPlace 落位几何
+//   留在 placeDesertTemple 消费本表）。足迹 = 金字塔 + 地下密室联合 bbox：水平 [cx±kDesertTempleHalf]
+//   （21×21 外圈）、竖直 [surfaceY-kDesertTempleChamberDrop-1, surfaceY+kDesertTempleTopLayer]（密室
+//   壳底到顶冠；机制等价 MC 1.0 advancement 结构 bbox —— 踏进金字塔 / 密室任一即算进入神殿）。
+std::vector<World::StructureSite> World::desertTempleSites() const
+{
+    constexpr int kTempleGrid     = 48;     // 候选网格间距（比矿井 36 更稀 → 神殿更稀有；spec「低频」）
+    constexpr unsigned kTemplePct = 45u;    // 候选命中概率（仅沙漠候选 → 已天然稀有）
+    std::vector<StructureSite> sites;
+    const int templeSeed = m_seed + kDesertTempleSeedOff;
+
+    // 主路径（t485 原口径逐字保留）：48 格网格候选 × 45% 命中 × 抖动 ±12 → 过 siteOk 五守卫入选。
+    for (int bx = kTempleGrid / 2; bx < m_width; bx += kTempleGrid) {
+        for (int bz = kTempleGrid / 2; bz < m_depth; bz += kTempleGrid) {
+            const quint32 r = hashColumn(templeSeed, bx, bz);
+            if ((r % 100u) >= kTemplePct) continue; // 概率筛选
+            const int span = kTempleGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (!desertTempleSiteOk(cx, cz)) continue;
+            StructureSite s;
+            s.cx = cx; s.cz = cz; s.y = std::min(heightAt(cx, cz), m_height - 1);
+            s.minX = cx - kDesertTempleHalf; s.maxX = cx + kDesertTempleHalf;
+            s.minZ = cz - kDesertTempleHalf; s.maxZ = cz + kDesertTempleHalf;
+            s.minY = s.y - kDesertTempleChamberDrop - 1; s.maxY = s.y + kDesertTempleTopLayer;
+            sites.push_back(s);
+        }
+    }
+
+    // t1010 保底（对标 placeStronghold t564「收集候选 → 选最优落点」口径）：沙漠神殿网格稀（160² 仅
+    //   3×3=9 网格候选）× 45% 命中 × Desert 群系占比 ~15-20%（成片）→ 期望 ~0.7 座/世界，近半数含沙漠
+    //   世界 0 落位（用户实测「新世界未见到神殿」根因：联合概率过低，非放置静默失败 —— 地表 y 取
+    //   heightAt 与地形填充同源，R19.19 的 64 高错位仅存在于 rig 探针侧）。概率主路径 0 落位且世界含
+    //   Desert 群系 → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1：确定性纯函数（同 seed 同
+    //   点位，PLAN §2-K）→ 「有沙漠群系必见神殿」。中心距离并列 → 扫描序（x 外 z 内）先到者胜，仍确定。
+    //   t1020 迁移注：placed == 0 ⟺ 主路径入选表空（siteOk 预筛 → tryPlace 恒成功），语义同位。
+    constexpr bool kDesertBiomeGuarantee = true; // 阴性轮钉：置 false → 含沙漠世界可 0 落位 → P-t1010 必落腿红
+    int placed = int(sites.size());
+    if (placed == 0 && kDesertBiomeGuarantee) {
+        bool hasDesert = false; // 群系在场扫描（biomeAt 列级 memo，generate 主循环已填满 → 纯数组读）
+        for (int x = 0; x < m_width && !hasDesert; ++x)
+            for (int z = 0; z < m_depth && !hasDesert; ++z)
+                hasDesert = isDesert(x, z);
+        if (hasDesert) {
+            int bestX = -1, bestZ = -1;
+            double bestDistSq = 1e18;
+            const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
+            for (int x = 0; x < m_width; ++x)
+                for (int z = 0; z < m_depth; ++z) {
+                    if (!isDesert(x, z)) continue; // 先群系短门（memo 读）→ 贵守卫（海 / 高度 fbm）只跑沙漠列
+                    if (!desertTempleSiteOk(x, z)) continue;
+                    const double dx = double(x) - centerX, dz = double(z) - centerZ;
+                    const double d = dx * dx + dz * dz;
+                    if (d < bestDistSq) { bestDistSq = d; bestX = x; bestZ = z; } // 距中心最近（同要塞口径）
+                }
+            if (bestX >= 0) { // 极小世界（边长 < 2×margin）可无合格列 → 如实 0
+                StructureSite s;
+                s.cx = bestX; s.cz = bestZ; s.y = std::min(heightAt(bestX, bestZ), m_height - 1);
+                s.minX = bestX - kDesertTempleHalf; s.maxX = bestX + kDesertTempleHalf;
+                s.minZ = bestZ - kDesertTempleHalf; s.maxZ = bestZ + kDesertTempleHalf;
+                s.minY = s.y - kDesertTempleChamberDrop - 1; s.maxY = s.y + kDesertTempleTopLayer;
+                sites.push_back(s);
+            }
+        }
+    }
+    return sites;
+}
+
+// 丛林神殿落位五守卫（t1010 siteOk lambda 上收方法：margin / 群系 / 海域 / 屋顶越界 / 地板贴基岩，
+//   同序同语义逐字迁移；三路共用口径同 desertTempleSiteOk）。
+bool World::jungleTempleSiteOk(int cx, int cz) const
+{
+    constexpr int kMargin = kJungleTempleHalf + 1; // 留边界（建筑半径 ≤ margin 不越界）
+    constexpr int kBedrockTop = 4;                 // 不动基岩顶（同 carveCaves / placeDungeons / placeDesertTemple）
+    if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+        return false; // 留 margin 边界
+    // 仅 Jungle 群系（spec「丛林群系生成」；biomeAt 收口单一权威）。非丛林 → 拒。
+    if (biomeAt(cx, cz) != Biome::Jungle) return false;
+    if (seaColumnHeight(cx, cz) >= 0) return false;            // 海域不叠神殿（避免与海水柱冲突）
+    const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
+    if (surfaceY + kJungleTempleRoofY + 1 >= m_height) return false; // 屋顶越界保护（roof y=S+11 + 头部余量）
+    return surfaceY >= kBedrockTop + 1;                        // 地板贴基岩 → 拒
+}
+
+// 丛林神殿候选表（t486 主路径 + t1010 保底补座选择段自 placeJungleTemple 逐字迁移）。足迹 =
+//   苔石建筑 bbox：水平 [cx±kJungleTempleHalf]（15×15）、竖直 [surfaceY, surfaceY+kJungleTempleRoofY]
+//   （地板层到屋顶层；建筑坐于地表无地下基座 —— t1004 登记口径）。
+std::vector<World::StructureSite> World::jungleTempleSites() const
+{
+    constexpr int kTempleGrid     = 40;     // 候选网格间距（略密于沙漠神殿 48 → 丛林群系本身较稀有，补偿密度）
+    constexpr unsigned kTemplePct = 50u;    // 候选命中概率（仅丛林候选 → 已天然稀有；spec「低频」）
+    std::vector<StructureSite> sites;
+    const int templeSeed = m_seed + kJungleTempleSeedOff;
+
+    // 主路径（t486 原口径逐字保留）：40 格网格候选 × 50% 命中 × 抖动 ±10 → 过 siteOk 五守卫入选。
+    for (int bx = kTempleGrid / 2; bx < m_width; bx += kTempleGrid) {
+        for (int bz = kTempleGrid / 2; bz < m_depth; bz += kTempleGrid) {
+            const quint32 r = hashColumn(templeSeed, bx, bz);
+            if ((r % 100u) >= kTemplePct) continue; // 概率筛选
+            const int span = kTempleGrid / 2;
+            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
+            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
+            const int cx = bx + jx, cz = bz + jz;
+            if (!jungleTempleSiteOk(cx, cz)) continue;
+            StructureSite s;
+            s.cx = cx; s.cz = cz; s.y = std::min(heightAt(cx, cz), m_height - 1);
+            s.minX = cx - kJungleTempleHalf; s.maxX = cx + kJungleTempleHalf;
+            s.minZ = cz - kJungleTempleHalf; s.maxZ = cz + kJungleTempleHalf;
+            s.minY = s.y; s.maxY = s.y + kJungleTempleRoofY;
+            sites.push_back(s);
+        }
+    }
+
+    // t1010 保底（同 placeDesertTemple 口径）：丛林神殿 4×4=16 候选 × 50% 命中 × Jungle 占比 ~13.5%
+    //   （成片）→ 期望 ~1.1 座/世界，仍约四成含丛林世界 0 落位。概率主路径 0 落位且世界含 Jungle 群系
+    //   → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1：确定性纯函数（同 seed 同点位）→
+    //   「有丛林群系必见神殿」。极小世界（边长 < 2×margin）可无合格列 → 如实 0（登记）。
+    constexpr bool kJungleBiomeGuarantee = true; // 阴性轮钉：置 false → 含丛林世界可 0 落位 → P-t1010 必落腿红
+    int placed = int(sites.size()); // t1020：placed == 0 ⟺ 主路径入选表空（同 desertTempleSites 口径）
+    if (placed == 0 && kJungleBiomeGuarantee) {
+        bool hasJungle = false; // 群系在场扫描（biomeAt 列级 memo → 纯数组读）
+        for (int x = 0; x < m_width && !hasJungle; ++x)
+            for (int z = 0; z < m_depth && !hasJungle; ++z)
+                hasJungle = biomeAt(x, z) == Biome::Jungle;
+        if (hasJungle) {
+            int bestX = -1, bestZ = -1;
+            double bestDistSq = 1e18;
+            const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
+            for (int x = 0; x < m_width; ++x)
+                for (int z = 0; z < m_depth; ++z) {
+                    if (biomeAt(x, z) != Biome::Jungle) continue; // 先群系短门（memo 读）→ 贵守卫只跑丛林列
+                    if (!jungleTempleSiteOk(x, z)) continue;
+                    const double dx = double(x) - centerX, dz = double(z) - centerZ;
+                    const double d = dx * dx + dz * dz;
+                    if (d < bestDistSq) { bestDistSq = d; bestX = x; bestZ = z; } // 距中心最近（同要塞口径）
+                }
+            if (bestX >= 0) {
+                StructureSite s;
+                s.cx = bestX; s.cz = bestZ; s.y = std::min(heightAt(bestX, bestZ), m_height - 1);
+                s.minX = bestX - kJungleTempleHalf; s.maxX = bestX + kJungleTempleHalf;
+                s.minZ = bestZ - kJungleTempleHalf; s.maxZ = bestZ + kJungleTempleHalf;
+                s.minY = s.y; s.maxY = s.y + kJungleTempleRoofY;
+                sites.push_back(s);
+            }
+        }
+    }
+    return sites;
 }
 
 // t756 出生列确定性解析（机制等价 MC 1.0 spawn 搜索「自中心外扫找首个安全露天落点」；见头注释四守卫）。
@@ -5231,6 +5564,8 @@ void World::generate()
     //   全源 → 零候选 → 即清标志停扫）。一次性确认扫描（防御：避免标志初始 false 漏掉 worldgen 引入的流场）。
     m_waterDirty = true;
     m_lavaDirty = true;
+    // t1020：结构区域表落表（place* 选择已收口 sites() → 本重推导 = 同表投影；纯算术零体素访问）。
+    rebuildStructureRegions();
 }
 
 // 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。纯函数，不依赖任何运行期随机源
@@ -7023,48 +7358,23 @@ void World::placeLavaLakes()
 //   fillWater 之前（房间独立于海平面；fillWater 仅填地表低洼 → 地下房间不被灌水）。
 void World::placeDungeons()
 {
-    constexpr int kDungeonGrid     = 24;     // 候选网格间距（t426：18→24，比岩浆湖 16 明显更稀 → 地牢更稀有）
-    constexpr unsigned kDungeonPct = 10u;    // 候选命中概率（t426：35%→10%，spec「稀有但房间级」；10% → 每网格平均 ~0.10 个地牢）
-    constexpr int kBedrockTop      = 4;      // 不动基岩（同 carveCaves / placeBedrock）
-    constexpr int kSurfaceFloor    = 6;      // 与地表保留的最小距离（地牢上方至少 6 格石顶 → 不破地表、封闭黑暗）
-    constexpr int kDungeonMaxY     = 36;     // 地牢最高 y（spec「地下」；避开近地表 / 仅地下深处）
-    constexpr int kRoomWMax        = 7;      // 房间最大内宽（t995：内空 W/Z 各按 hash 随机 5..7，机制等价 MC 1.0
-                                             //   地牢「5×5..7×7 随机见方」；t426 曾恒 7，现保留 7 为上界 / margin 基准）
-    constexpr int kRoomH           = 4;      // 房间内部高度（Y 方向格子数；3-4 高范围，取 4 ≈ MC 1.0 地牢高度）
-    // 房间边界（墙在 [-1, 内空 W] / [-1, 内空 D] 外圈）→ kMargin = kRoomWMax+1：中心格满足 cx ≥ kMargin 时
-    //   墙体最大偏移 = kRoomWMax = 7 < kMargin = 8，最大墙列 cx-7 ≥ 1 ≥ 0、cx+7 ≤ width-8+7 = width-1，
-    //   恒在界内（安全论证：房间中心到最远墙格距离即 kRoomWMax，margin 取 +1 留 1 格余量）。
-    constexpr int kMargin          = kRoomWMax + 1;
+    constexpr int kRoomH           = kDungeonRoomH; // 房间内部高度（Y 方向格子数；与 dungeonSites() 选择窗同源类常量）
 
     int placed = 0;
     int totalOpeningCells = 0; // t999 豁口合计（登记用）
     int sealedRooms = 0;       // t999 全封房间数（无空气邻域 → 0 豁口，登记用）
-    const int dungSeed = m_seed + 12037; // 地牢哈希偏移（与其它 worldgen hashColumn 解耦）
-    for (int bx = kDungeonGrid / 2; bx < m_width; bx += kDungeonGrid) {
-        for (int bz = kDungeonGrid / 2; bz < m_depth; bz += kDungeonGrid) {
-            const quint32 r = hashColumn(dungSeed, bx, bz);
-            if ((r % 100u) >= kDungeonPct) continue; // 概率筛选
-            const int span = kDungeonGrid / 2;
-            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
-            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
-            const int cx = bx + jx, cz = bz + jz;
-            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
-                continue; // 留 margin 格边界（房间墙体半径 ≤ margin 不越界）
-            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠地牢（避免与海水柱冲突）
-            const int h = std::min(heightAt(cx, cz), m_height - 1);
-            // 地牢 y 范围：基岩之上 ~ kDungeonMaxY 之下；上方至少留 kSurfaceFloor 格石顶（不破地表、封闭黑暗）。
-            const int yLo = kBedrockTop + 2;
-            const int yHi = std::min(kDungeonMaxY - kRoomH, h - kSurfaceFloor - kRoomH);
-            if (yHi <= yLo) continue; // 此列地下空间不足（极低洼 / 山顶浅层）→ 跳过
-            const int yRange = yHi - yLo + 1;
-            const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 房间底面（地板）y
-
-            // t995 内空 5/7：房间 W/Z 各按 hash 独立高位（bit28 / bit29）取 5 或 7（机制等价 MC 1.0 地牢
-            //   「5×5..7×7 随机内空」；r 低 20 位已被概率 / 抖动 / cy 消耗，bit20-27 为刷怪笼权重位 →
-            //   取 bit28/29 独立采样，与既有位域零耦合）。
-            const int roomW = ((r >> 28) & 1u) ? 5 : 7; // t995 内空宽 5/7
-            const int roomD = ((r >> 29) & 1u) ? 5 : 7; // t995 内空深 5/7
-
+    const int dungSeed = m_seed + kDungeonSeedOff; // 地牢哈希偏移（与 dungeonSites() 同源类常量，防两处漂移）
+    // t1020 候选选择上收：概率筛选 / 网格抖动 / margin / 海列 / 高度窗 / 内空尺寸位域已收口 dungeonSites()
+    //   （单一权威 —— 本函数只消费表驱动几何；rebuildStructureRegions 区域重推导同表 → 「同 seed 同候选」
+    //   由结构保证。原循环头选择段逐字迁移，逐值同序，行为零变化）。
+    const std::vector<StructureSite> sites = dungeonSites();
+    for (const StructureSite &site : sites) {
+        const quint32 r = site.r;
+        const int cx = site.cx, cz = site.cz;
+        const int cy = site.y;
+        const int roomW = site.roomW;
+        const int roomD = site.roomD;
+        {
             // 房间石材（t999 对照 minecraft.wiki Monster Room 逐方块考据）：地板逐块独立随机 25% 圆石 /
             //   75% 苔石；墙与顶恒普通圆石（零苔）。旧「地板 50% / 墙顶 25%」口径作废（t995a 探针合法演化：
             //   断言翻转为地板苔率窗 + 墙零苔）。per-cell hash 位分流，确定性 → 同 seed 同墙。
@@ -7316,15 +7626,10 @@ void World::placeDungeons()
 //   placeDungeons 之后、fillWater 之前（独立于海平面；fillWater 仅填地表低洼 → 地下矿井不被灌水）。
 void World::placeMineshaft()
 {
-    constexpr int kMineshaftGrid    = 36;     // 候选网格间距（比地牢 24 更稀 → 矿井更稀有；spec「随机生成」）
-    constexpr unsigned kMinePct     = 40u;    // 候选命中概率（每网格平均 ~0.40 个矿井 → 160×160 世界约 6 个矿井）
-    constexpr int kBedrockTop       = 4;      // 不动基岩（同 carveCaves / placeDungeons）
-    constexpr int kSurfaceFloor     = 6;      // 与地表保留的最小距离（矿井上方至少 6 格石顶 → 不破地表、封闭黑暗）
-    constexpr int kMineshaftMaxY    = 48;     // 矿井最高 y（spec「Y<50」；地下深处）
+    constexpr int kBedrockTop       = 4;      // 不动基岩（斜坡段钳底用；同 carveCaves / placeDungeons）
     constexpr int kRoomHalf         = 5;      // t1001 起点厅半幅（10×10 footprint [cx-5, cx+4]×[cz-5, cz+4]）
     constexpr int kRoomRingH        = 3;      // 起点厅外环净高（拱顶低段；外环 = 距边 0 的格子）
     constexpr int kRoomCoreH        = 4;      // 起点厅内芯净高（拱顶高段；比外环高 1 → 双段拱剖面）
-    constexpr int kRoomH            = 4;      // 矿井高度预算（y 范围公式沿用 t565 口径）
     constexpr int kTunnelLenMin     = 5;      // 巷道单段最短长度（段数；L 形两段各取 → 总长 10..20）
     constexpr int kTunnelLenMax     = 10;     // 巷道单段最长长度
     constexpr int kTunnelH          = 3;      // 巷道内部高度（空气层数；y=sy+1..sy+kTunnelH）
@@ -7338,30 +7643,17 @@ void World::placeMineshaft()
     constexpr unsigned kIntersectionPct = 25u; // 巷道事件：交叉口概率
     constexpr int kSpiderCorrLenMin = 3;      // t1012 ② 蛛网走廊长度下限（3-6 长 hash 选型）
     constexpr int kSpiderCorrLenMax = 6;      // t1012 ② 蛛网走廊长度上限
-    constexpr int kMargin           = 16;     // 留边界（折线巷道两段 + 起点厅半径 → 较大余量防越界；极端越界由 carve 守卫钳制）
 
-    const int mineSeed = m_seed + 15047; // 矿井哈希偏移（与其它 worldgen hashColumn 解耦）
+    const int mineSeed = m_seed + kMineshaftSeedOff; // 矿井哈希偏移（与 mineshaftSites() 同源类常量，防两处漂移）
     int placed = 0;
     int chests = 0; // 矿井宝箱计数（日志核对 > 0；t1001 箱落地轨旁）
-    for (int bx = kMineshaftGrid / 2; bx < m_width; bx += kMineshaftGrid) {
-        for (int bz = kMineshaftGrid / 2; bz < m_depth; bz += kMineshaftGrid) {
-            const quint32 r = hashColumn(mineSeed, bx, bz);
-            if ((r % 100u) >= kMinePct) continue; // 概率筛选
-            const int span = kMineshaftGrid / 2;
-            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
-            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
-            const int cx = bx + jx, cz = bz + jz;
-            // 留 margin 边界（巷道极端越界段由 carveCell 边界守卫钳制，t565 同口径）。
-            if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
-                continue;
-            if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠矿井（避免与海水柱冲突）
-            const int h = std::min(heightAt(cx, cz), m_height - 1);
-            // 矿井 y 范围：基岩之上 ~ kMineshaftMaxY 之下；上方至少留 kSurfaceFloor 格石顶。
-            const int yLo = kBedrockTop + 2;
-            const int yHi = std::min(kMineshaftMaxY - kRoomH - 1, h - kSurfaceFloor - kRoomH - 1);
-            if (yHi <= yLo) continue; // 此列地下空间不足 → 跳过
-            const int yRange = yHi - yLo + 1;
-            const int sy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 地板 y（起点厅 / 巷道底面）
+    // t1020 候选选择上收（同 placeDungeons 口径）：概率筛选 / 网格抖动 / margin / 海列 / 高度窗已收口
+    //   mineshaftSites()（单一权威；rebuildStructureRegions 区域重推导同表）。原循环头选择段逐字迁移，
+    //   逐值同序，行为零变化。
+    for (const StructureSite &msSite : mineshaftSites()) {
+        const int cx = msSite.cx, cz = msSite.cz;
+        const int sy = msSite.y;
+        {
 
             // t1012 ① 地板政策（用户口径，t565 ⑤「全矿井 hash 二选一」废除）：材质不再按矿井 hash 统一，
             //   而随每列下方实际承载切换（carveCell 内逐格判定）——嵌岩段（下方实地）直接 Stone 不铺木板；
@@ -7719,24 +8011,19 @@ void World::placeMineshaft()
 //   纯函数于 seed + biomeAt（经 hashColumn / hashVoxel）→ 同 seed 同神殿分布（PLAN §2-K）。仅扫候选沙漠格 → 不全图扫描。
 void World::placeDesertTemple()
 {
-    constexpr int kTempleGrid     = 48;     // 候选网格间距（比矿井 36 更稀 → 神殿更稀有；spec「低频」）
-    constexpr unsigned kTemplePct = 45u;    // 候选命中概率（仅沙漠候选 → 已天然稀有；45% 命中 → 沙漠中可见但不密集）
-    constexpr int kPyramidHalf    = 10;     // 金字塔底半边（底 21×21 = (2*10+1)²；t1003 对齐考据足迹）
-    constexpr int kPyramidTopLayer = 10;    // 顶层 layer 10（半边 5 → 11×11 CutSandstone 顶冠；blueprint 层 0..10）
+    constexpr int kPyramidHalf    = kDesertTempleHalf;      // 金字塔底半边（t1020 上收类常量：siteOk / 区域足迹同源）
+    constexpr int kPyramidTopLayer = kDesertTempleTopLayer; // 顶层 layer 10（半边 5 → 11×11 CutSandstone 顶冠；blueprint 层 0..10）
     constexpr int kHallHalf       = 7;      // 地面大厅内半边（15×15 内厅）
-    constexpr int kChamberFloorDrop = 12;   // 密室地板相对地表深度（floorY = surfaceY-12；blueprint「Layer -11:
+    constexpr int kChamberFloorDrop = 12;   // 密室地板相对地表深度（= kDesertTempleChamberDrop 类常量同值；
+                                            //   本字面量为 P-t1003 源码钉契约；blueprint「Layer -11:
                                             //   Chest + Pressure Plate」口径 → 板 / 箱层 = 地表 -11 = floorY+1）
     constexpr int kRoomHalf       = 3;      // 密室内部半边（7×7 内部）
     constexpr int kRoomH          = 4;      // 密室内部高度（Y 空气层数 y ∈ [floorY+1 .. floorY+kRoomH]）
     constexpr int kTntHalf        = 1;      // TNT 陷阱半边（3×3 = (2*1+1)²，置于密室地板层中央）
-    constexpr int kBedrockTop      = 4;     // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
     // 逐层半边表（layer 0..10）：底 21 两层一收（21,21,19,...,11）→ 阶梯金字塔外形（blueprint 层宽序列）。
     constexpr int kLayerHalf[kPyramidTopLayer + 1] = { 10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5 };
-    // 留边界（金字塔底半边 10 + 密室半边 3 + 抖动余量 → 半径 ≤ 11 不越界）。
-    constexpr int kMargin = kPyramidHalf + 1;
 
     int placed = 0;
-    const int templeSeed = m_seed + 19487; // 神殿哈希偏移（与其它 worldgen hashColumn 解耦）
 
     // 单格写入辅助（越界 / 基岩守卫；与 placeStronghold put 同模式）。t1003 全几何经此两口。
     //   t1010 起上提至落位器外层 —— 概率主路径与保底补座两路共用（口一致 → 保底不产生口径外写入）。
@@ -7754,16 +8041,9 @@ void World::placeDesertTemple()
     };
     // t1010 落位门单源收口（siteOk）：margin / 群系 / 海域 / 塔顶越界 / 密室贴基岩 五守卫，与旧内联
     //   逐条同序同语义（t485 原口径零变化）；概率主路径与保底补座共用 → 两路落位判据永不漂移。
+    //   t1020：判据本体上收 desertTempleSiteOk()（本薄包装仅存 t1010 源码钉字面 + tryPlace 消费口）。
     auto siteOk = [&](int cx, int cz) {
-        if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
-            return false; // 留 margin 边界（金字塔 + 密室半径 ≤ margin 不越界）
-        // 仅 Desert 群系（spec「沙漠群系生成」；biomeAt 收口单一权威）。非沙漠 → 拒（不在草原 / 森林生神殿）。
-        if (!isDesert(cx, cz)) return false;
-        if (seaColumnHeight(cx, cz) >= 0) return false;            // 海域不叠神殿（避免与海水柱冲突）
-        const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
-        if (surfaceY + kPyramidTopLayer >= m_height) return false; // 塔顶越界保护（surfaceY 异常高防溢出）
-        const int floorY = surfaceY - kChamberFloorDrop;           // 密室地板 y（TNT 层）
-        return floorY - 1 >= kBedrockTop + 1;                      // 密室地板贴基岩 → 拒（保地板完整）
+        return desertTempleSiteOk(cx, cz);
     };
     // t1010 单座落位器（tryPlace）：过 siteOk 五守卫 → 几何 A..J 全量落地。几何体原样包一层作用域
     //   （缩进容器，逐字节零漂移 → t1003 源码钉 / 逐方块断言零回归）；返回是否实际落位。
@@ -7893,45 +8173,12 @@ void World::placeDesertTemple()
         return true;
     };
 
-    // 主路径（t485 原口径逐字保留）：48 格网格候选 × 45% 命中 × 抖动 ±12 → 过 siteOk 五守卫落位。
-    for (int bx = kTempleGrid / 2; bx < m_width; bx += kTempleGrid) {
-        for (int bz = kTempleGrid / 2; bz < m_depth; bz += kTempleGrid) {
-            const quint32 r = hashColumn(templeSeed, bx, bz);
-            if ((r % 100u) >= kTemplePct) continue; // 概率筛选
-            const int span = kTempleGrid / 2;
-            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
-            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
-            const int cx = bx + jx, cz = bz + jz;
-            if (tryPlace(cx, cz)) ++placed;
-        }
-    }
-
-    // t1010 保底（对标 placeStronghold t564「收集候选 → 选最优落点」口径）：沙漠神殿网格稀（160² 仅
-    //   3×3=9 网格候选）× 45% 命中 × Desert 群系占比 ~15-20%（成片）→ 期望 ~0.7 座/世界，近半数含沙漠
-    //   世界 0 落位（用户实测「新世界未见到神殿」根因：联合概率过低，非放置静默失败 —— 地表 y 取
-    //   heightAt 与地形填充同源，R19.19 的 64 高错位仅存在于 rig 探针侧）。概率主路径 0 落位且世界含
-    //   Desert 群系 → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1：确定性纯函数（同 seed 同
-    //   点位，PLAN §2-K）→ 「有沙漠群系必见神殿」。中心距离并列 → 扫描序（x 外 z 内）先到者胜，仍确定。
-    constexpr bool kDesertBiomeGuarantee = true; // 阴性轮钉：置 false → 含沙漠世界可 0 落位 → P-t1010 必落腿红
-    if (placed == 0 && kDesertBiomeGuarantee) {
-        bool hasDesert = false; // 群系在场扫描（biomeAt 列级 memo，generate 主循环已填满 → 纯数组读）
-        for (int x = 0; x < m_width && !hasDesert; ++x)
-            for (int z = 0; z < m_depth && !hasDesert; ++z)
-                hasDesert = isDesert(x, z);
-        if (hasDesert) {
-            int bestX = -1, bestZ = -1;
-            double bestDistSq = 1e18;
-            const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
-            for (int x = 0; x < m_width; ++x)
-                for (int z = 0; z < m_depth; ++z) {
-                    if (!isDesert(x, z)) continue; // 先群系短门（memo 读）→ 贵守卫（海 / 高度 fbm）只跑沙漠列
-                    if (!siteOk(x, z)) continue;
-                    const double dx = double(x) - centerX, dz = double(z) - centerZ;
-                    const double d = dx * dx + dz * dz;
-                    if (d < bestDistSq) { bestDistSq = d; bestX = x; bestZ = z; } // 距中心最近（同要塞口径）
-                }
-            if (bestX >= 0 && tryPlace(bestX, bestZ)) ++placed; // 极小世界（边长 < 2×margin）可无合格列 → 如实 0
-        }
+    // t1020 候选选择上收：概率主路径（48 格网格候选 × 45% 命中 × 抖动 ±12 → 过 siteOk 五守卫）与
+    //   t1010 保底补座（主路径 0 落位且含沙漠群系 → 距世界中心最近合格列补座 ≥1）的选择段已收口
+    //   desertTempleSites()（单一权威；rebuildStructureRegions 区域重推导同表）。本函数只消费表驱动
+    //   落位（siteOk 预筛 → tryPlace 恒成功 → 落位数 = 候选数，与原口径一致）。
+    for (const StructureSite &dtSite : desertTempleSites()) {
+        if (tryPlace(dtSite.cx, dtSite.cz)) ++placed;
     }
     qInfo() << "worldgen: desert temples =" << placed; // 同 seed → 同计数（确定性核对）
 }
@@ -7981,14 +8228,8 @@ void World::placeDesertTemple()
 //   判定 → jungleTempleChestPool（骨头 / 腐肉 / 铁 / 金 / 钻石 / 箭 / 附魔书等）。
 void World::placeJungleTemple()
 {
-    constexpr int kTempleGrid     = 40;     // 候选网格间距（略密于沙漠神殿 48 → 丛林群系本身较稀有，补偿密度）
-    constexpr unsigned kTemplePct = 50u;    // 候选命中概率（仅丛林候选 → 已天然稀有；spec「低频」）
-    constexpr int kHalf           = 7;      // 建筑外圈半边（15×15 = (2*7+1)²；内空 [-6,6]²）
-    constexpr int kRoofLift       = 12;     // 屋顶相对地表抬升（y=S+11；三层形制总高）
+    constexpr int kHalf           = kJungleTempleHalf; // 建筑外圈半边（t1020 上收类常量：siteOk / 区域足迹同源）
     constexpr int kMossyPct       = 40u;    // 苔石混排苔占比（逐格 hash；机制等价 MC「cobble or mossy」）
-    constexpr int kBedrockTop     = 4;      // 不动基岩顶（同 carveCaves / placeDungeons / placeDesertTemple）
-    // 留边界（外圈半边 7 + 抖动余量 → 半径 ≤ 8 不越界）。
-    constexpr int kMargin = kHalf + 1;
 
     // t1004 组合锁电路局部坐标（dz 行；全 circuit 位于南半场，门在 x=3 列 dz=0）。
     //   拉杆 x ∈ {-3, 0, +3}（y=S+2，dz=6，附 +Z 墙）；支线双粉 dz=5/4；B 块 dz=3；NOT 火把 dz=2；
@@ -8001,7 +8242,7 @@ void World::placeJungleTemple()
     static const quint8 kMergeElbowState = 0x2F;
 
     int placed = 0;
-    const int templeSeed = m_seed + 22617; // 丛林神殿哈希偏移（与其它 worldgen hashColumn 解耦）
+    const int templeSeed = m_seed + kJungleTempleSeedOff; // 丛林神殿哈希偏移（与 jungleTempleSites() 同源类常量）
 
     // 单格写入辅助（越界 / 基岩守卫；与 placeDesertTemple 同模式）。
     //   t1010 起上提至落位器外层 —— 概率主路径与保底补座两路共用（口一致 → 保底不产生口径外写入）。
@@ -8019,15 +8260,9 @@ void World::placeJungleTemple()
     };
     // t1010 落位门单源收口（siteOk）：margin / 群系 / 海域 / 屋顶越界 / 地板贴基岩 五守卫，与旧内联
     //   逐条同序同语义（t486 原口径零变化）；概率主路径与保底补座共用 → 两路落位判据永不漂移。
+    //   t1020：判据本体上收 jungleTempleSiteOk()（本薄包装仅存 t1010 源码钉字面 + tryPlace 消费口）。
     auto siteOk = [&](int cx, int cz) {
-        if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
-            return false; // 留 margin 边界（建筑半径 ≤ margin 不越界）
-        // 仅 Jungle 群系（spec「丛林群系生成」；biomeAt 收口单一权威）。非丛林 → 拒。
-        if (biomeAt(cx, cz) != Biome::Jungle) return false;
-        if (seaColumnHeight(cx, cz) >= 0) return false;            // 海域不叠神殿（避免与海水柱冲突）
-        const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
-        if (surfaceY + kRoofLift >= m_height) return false;        // 屋顶越界保护（surfaceY 异常高防溢出）
-        return surfaceY >= kBedrockTop + 1;                        // 地板贴基岩 → 拒
+        return jungleTempleSiteOk(cx, cz);
     };
     // t1010 单座落位器（tryPlace）：过 siteOk 五守卫 → 几何 A..J 全量落地。几何体原样包一层作用域
     //   （缩进容器，逐字节零漂移 → t1004 源码钉 / 逐方块断言零回归）；返回是否实际落位。
@@ -8196,43 +8431,12 @@ void World::placeJungleTemple()
         return true;
     };
 
-    // 主路径（t486 原口径逐字保留）：40 格网格候选 × 50% 命中 × 抖动 ±10 → 过 siteOk 五守卫落位。
-    for (int bx = kTempleGrid / 2; bx < m_width; bx += kTempleGrid) {
-        for (int bz = kTempleGrid / 2; bz < m_depth; bz += kTempleGrid) {
-            const quint32 r = hashColumn(templeSeed, bx, bz);
-            if ((r % 100u) >= kTemplePct) continue; // 概率筛选
-            const int span = kTempleGrid / 2;
-            const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
-            const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
-            const int cx = bx + jx, cz = bz + jz;
-            if (tryPlace(cx, cz)) ++placed;
-        }
-    }
-
-    // t1010 保底（同 placeDesertTemple 口径）：丛林神殿 4×4=16 候选 × 50% 命中 × Jungle 占比 ~13.5%
-    //   （成片）→ 期望 ~1.1 座/世界，仍约四成含丛林世界 0 落位。概率主路径 0 落位且世界含 Jungle 群系
-    //   → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1：确定性纯函数（同 seed 同点位）→
-    //   「有丛林群系必见神殿」。极小世界（边长 < 2×margin）可无合格列 → 如实 0（登记）。
-    constexpr bool kJungleBiomeGuarantee = true; // 阴性轮钉：置 false → 含丛林世界可 0 落位 → P-t1010 必落腿红
-    if (placed == 0 && kJungleBiomeGuarantee) {
-        bool hasJungle = false; // 群系在场扫描（biomeAt 列级 memo → 纯数组读）
-        for (int x = 0; x < m_width && !hasJungle; ++x)
-            for (int z = 0; z < m_depth && !hasJungle; ++z)
-                hasJungle = biomeAt(x, z) == Biome::Jungle;
-        if (hasJungle) {
-            int bestX = -1, bestZ = -1;
-            double bestDistSq = 1e18;
-            const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
-            for (int x = 0; x < m_width; ++x)
-                for (int z = 0; z < m_depth; ++z) {
-                    if (biomeAt(x, z) != Biome::Jungle) continue; // 先群系短门（memo 读）→ 贵守卫只跑丛林列
-                    if (!siteOk(x, z)) continue;
-                    const double dx = double(x) - centerX, dz = double(z) - centerZ;
-                    const double d = dx * dx + dz * dz;
-                    if (d < bestDistSq) { bestDistSq = d; bestX = x; bestZ = z; } // 距中心最近（同要塞口径）
-                }
-            if (bestX >= 0 && tryPlace(bestX, bestZ)) ++placed;
-        }
+    // t1020 候选选择上收：概率主路径（40 格网格候选 × 50% 命中 × 抖动 ±10 → 过 siteOk 五守卫）与
+    //   t1010 保底补座（主路径 0 落位且含丛林群系 → 距世界中心最近合格列补座 ≥1）的选择段已收口
+    //   jungleTempleSites()（单一权威；rebuildStructureRegions 区域重推导同表）。本函数只消费表驱动
+    //   落位（siteOk 预筛 → tryPlace 恒成功 → 落位数 = 候选数，与原口径一致）。
+    for (const StructureSite &jtSite : jungleTempleSites()) {
+        if (tryPlace(jtSite.cx, jtSite.cz)) ++placed;
     }
     qInfo() << "worldgen: jungle temples =" << placed; // 同 seed → 同计数（确定性核对）
 }

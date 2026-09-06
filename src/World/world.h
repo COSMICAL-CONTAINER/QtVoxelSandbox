@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QHash> // t843 燃烧态侧表 m_burningCells（坐标→剩余燃烧窗数）
+#include <QVariantList> // t1020 structureRegion getter 返回类型（Q_INVOKABLE moc 契约）
 #include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）/ quint64（树叶衰减队列键）
 #include <QtQml/qqml.h>
 
@@ -151,6 +152,18 @@ public:
     //   (cx+0, cy+4, cz-18)，即 12 框架环中心；B5 读档反推 bindY 同值）。insideStronghold 反解原点同源引用。
     static constexpr int kStrongholdPortalDy = 4;   // 框架层 y 偏移（记录 y = cy + 4）
     static constexpr int kStrongholdPortalDz = -18; // 环中心 z 偏移（记录 z = cz - 18）
+    // ── t1020 结构区域常量（单一权威：worldgen place* 几何 / sites() 候选重推导 / 区域足迹三处同源
+    //    引用，防字面量漂移；同 kStrongholdHalf 上收先例）──
+    static constexpr int kDungeonSeedOff = 12037;        // 地牢 worldgen hash 偏移（placeDungeons / dungeonSites 同源）
+    static constexpr int kDungeonRoomH = 4;              // 地牢房间内部高度（选择 y 范围 + 周界几何同源）
+    static constexpr int kMineshaftSeedOff = 15047;      // 废弃矿井 hash 偏移（placeMineshaft / mineshaftSites 同源）
+    static constexpr int kDesertTempleSeedOff = 19487;   // 沙漠神殿 hash 偏移（placeDesertTemple / desertTempleSites 同源）
+    static constexpr int kDesertTempleHalf = 10;         // 金字塔足迹半边（21×21 外圈；几何 kPyramidHalf 同源）
+    static constexpr int kDesertTempleTopLayer = 10;     // 顶层序号（顶冠层 y = surfaceY + 10）
+    static constexpr int kDesertTempleChamberDrop = 12;  // 密室地板深度（floorY = surfaceY - 12）
+    static constexpr int kJungleTempleSeedOff = 22617;   // 丛林神殿 hash 偏移（placeJungleTemple / jungleTempleSites 同源）
+    static constexpr int kJungleTempleHalf = 7;          // 苔石建筑足迹半边（15×15）
+    static constexpr int kJungleTempleRoofY = 11;        // 屋顶层相对地表（y = surfaceY + 11）
     // t1000 成就「隔墙有眼」单一权威判定：点 (x,y,z)（玩家脚底，世界连续坐标）是否落在要塞结构足迹内。
     //   bounds = 结构原点 (cx,cy,cz) 逐轴闭区间：水平 cell ∈ [cx±kStrongholdHalf] / [cz±kStrongholdHalf]
     //   （含墙环 cell——「进入结构区域」的体素足迹口径）、竖直 cell ∈ [cy, cy+kStrongholdWallH+1]（含地板与
@@ -161,6 +174,34 @@ public:
     //   分层（PLAN §2）：纯只读谓词（零栅格访问，O(1) 算术），PlayerController（Game/Physics）tick 内
     //   直调做进入沿检测（enteredStronghold 一次性信号）。
     Q_INVOKABLE bool insideStronghold(double x, double y, double z) const;
+    // ── t1020 成就树扩展：四结构「进入区域」判定（同 t1000 insideStronghold 先例：worldgen 布局与判定
+    //    同源足迹、PlayerController tick 内直调做进入沿检测、零新增序列化字段）──
+    //    结构区域枚举（structureRegion* getters 的 kind 参数；PlayerController 沿检测信号同码）。
+    //    **枚举尾追加 StructureKindCount = 存档兼容无关、但探针 / QML 路由契约，勿插中间**。
+    enum StructureKind {
+        StructureDungeon = 0,      // 地牢（placeDungeons 房间足迹）
+        StructureMineshaft = 1,    // 废弃矿井（placeMineshaft 起点厅 + 巷道包络）
+        StructureDesertTemple = 2, // 沙漠神殿（金字塔 + 地下密室 bbox）
+        StructureJungleTemple = 3, // 丛林神殿（苔石建筑 bbox）
+        StructureKindCount = 4
+    };
+    // 单一权威判定：点 (x,y,z)（玩家脚底，世界连续坐标）是否落入对应结构任一已生成足迹（cell 闭区间，
+    //    同 insideStronghold 的 floor 取整口径）。区域表 = rebuildStructureRegions 在 generate / finishLoad
+    //    末从 seed 纯算术重推导（**零新增序列化、零体素扫描**——worldgen 选择段是 seed 的纯函数（PLAN
+    //    §2-K），同 seed 同表；旧存档加载后立即可判，同 B5「重推导优于序列化」口径）。分层（PLAN §2）：
+    //    纯只读谓词（O(区域数) 算术，零栅格访问），PlayerController（Game/Physics）tick 内直调。
+    Q_INVOKABLE bool insideDungeon(double x, double y, double z) const;
+    Q_INVOKABLE bool insideMineshaft(double x, double y, double z) const;
+    Q_INVOKABLE bool insideDesertTemple(double x, double y, double z) const;
+    Q_INVOKABLE bool insideJungleTemple(double x, double y, double z) const;
+    // 结构区域表读取（矩阵探针 / F3 调试口径，同 strongholdPortal* getter 先例）：kind = StructureKind；
+    //    index ∈ [0, structureRegionCount(kind))。region 返回 [minX,minY,minZ,maxX,maxY,maxZ]（cell 闭
+    //    区间足迹）。kind 越界 / index 越界 → count -1 / region 空表（防御）。
+    Q_INVOKABLE int structureRegionCount(int kind) const;
+    Q_INVOKABLE QVariantList structureRegion(int kind, int index) const;
+    // inside* 四谓词的共享实现（kind = StructureKind；越界 kind 防御返 false）。public：PlayerController
+    //    （Game/Physics）tick 沿检测按 kind 直调（Game 层 C++ 直调，同 insideStronghold 先例）。
+    bool insideStructureRegion(int kind, double x, double y, double z) const;
     // t756 世界出生列坐标 getter（findSpawnColumn 解析；详见 m_spawnCol* 字段头注释）。Game 层
     //   （PlayerController::snapSpawnToGround）出生 / 重生定位采用本列 —— 出生格 + 头部格保证 Air、
     //   支撑格为实体且在真地表（修「种子 42 出生在树里」：旧链固定 (kSpawnX,kSpawnZ)=(80,80) 且只按
@@ -1216,6 +1257,32 @@ private:
     //   **state 带 mob 类型**（bit1-5，地牢加权随机 [t999 起僵尸 50%/骷髅 25%/蜘蛛 25%，爬行者退出池] /
     //   要塞恒银鱼 / 创造放置默认僵尸），state 随 m_states 落
     //   SQLite round-trip 保真（旧存档无 type 位 → 解码端按 bit0 兼容分流，见 spawnerMobTypeForState）。
+    // ── t1020 结构候选上收 + 区域重推导（声明契约详见 world.cpp 各实现头注释）──
+    // 结构候选点：锚点 (cx,cz,y)（地牢 / 矿井 = 结构地板 y；神殿 = 地表 y）+ 足迹 cell 闭区间
+    //    [minX,maxX]×[minY,maxY]×[minZ,maxZ]（进入判定 / 探针消费）。roomW/roomD/r 仅地牢几何消费
+    //    （周界尺寸 + 候选 hash 位域：刷怪笼权重 bit20-27 / 豁口数 bit14-16）；矿井 / 神殿置 0。
+    struct StructureSite {
+        int cx = 0, cz = 0, y = 0;
+        int minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+        int roomW = 0, roomD = 0;
+        quint32 r = 0;
+    };
+    // 候选选择单源上收（worldgen 原循环头选择段逐字迁移）：placeDungeons / placeMineshaft /
+    //    placeDesertTemple / placeJungleTemple 的几何落位与 rebuildStructureRegions 的区域重推导共同
+    //    消费本表 → 「同 seed 同候选」由结构保证，选择逻辑永不再现两份。纯函数于 seed（hashColumn /
+    //    heightAt / seaColumnHeight / biomeAt 全为 seed 的纯函数，PLAN §2-K）→ 读档后重推导 = 生成期
+    //    同表（**零序列化、零体素扫描**，同 B5 重推导口径）。
+    std::vector<StructureSite> dungeonSites() const;
+    std::vector<StructureSite> mineshaftSites() const;
+    std::vector<StructureSite> desertTempleSites() const;
+    std::vector<StructureSite> jungleTempleSites() const;
+    // 神殿落位五守卫（t1010 siteOk lambda 上收方法；概率主路径 / 保底补座 / place* tryPlace 三路共用
+    //    → 落位判据永不漂移。place* 内保留同名薄包装 lambda 仅为存 P-t1010 源码钉字面）。
+    bool desertTempleSiteOk(int cx, int cz) const;
+    bool jungleTempleSiteOk(int cx, int cz) const;
+    // 结构区域表重建（generate 末 / finishLoad 末各调一次；先清后填幂等）：逐结构 sites() 重推导 →
+    //    m_structureRegions 落表。加载期一次性纯算术（~网格候选数 × 常数守卫），非每 tick。
+    void rebuildStructureRegions();
     void placeDungeons();
     // t484/t565 废弃矿井（spec「地下（Y<50）随机生成：木栅栏立柱 + 矿车道（地板/轨道）+ 蜘蛛网 + 暴露矿石 +
     //   宝藏箱子」；机制等价 MC 1.0 废弃矿井 mineshaft；**t1001 逐方块重建：placeMineshaft 内部 piece 化**，
@@ -1368,6 +1435,10 @@ private:
     //   世界残留误导），finishLoad 末由 rebindStrongholdPortalFromVoxels 从体素反推回写（审查修 B5：读档不丢）。
     bool m_hasStronghold = false;
     int m_strongholdPortalX = 0, m_strongholdPortalY = 0, m_strongholdPortalZ = 0;
+    // t1020 结构区域表（kind → 候选点集，含足迹闭区间）：rebuildStructureRegions 在 generate /
+    //    finishLoad 末从 seed 纯算术重推导落表（先清后填；beginLoad 后未 finishLoad 的错误路径 =
+    //    空表 → inside* 恒 false，安全）。每世界区域数：地牢 ~1-3 / 矿井 ~1-8 / 神殿各 0-2，内存可忽略。
+    std::vector<StructureSite> m_structureRegions[StructureKindCount];
     // t756 世界出生列（玩家初始出生 / 未睡床时的重生列）：findSpawnColumn 解析记录（见其声明注释的四守卫）。
     //   修「种子 42 出生在树里」：placeTrees 无出生邻域豁免 → 固定出生列 (80,80) 恰命中密度筛选即生树，
     //   旧出生链只按 heightAt（不含树的纯 fBm 地表）贴 Y → 玩家脚底嵌进树干 / 头部嵌进树冠。出生列改为
