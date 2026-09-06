@@ -15,6 +15,7 @@
 
 #include "blockregistry.h"      // 方块 id（默认手持方块 / 破放校验）
 #include "boatmanager.h"        // t469 船实体管理器（骑乘 / WASD 操控 / 冰上加速 / 撞坏掉落）
+#include "keybindmanager.h"     // t1022 键位映射表（setKey 入口 canonicalKey 规范化；Game→Core 向下依赖）
 #include "minecartmanager.h"    // t565 矿车实体管理器（轨上骑乘 / WASD 前后推 / 拐角自动转弯）
 #include "dispenserstore.h"     // t579 发射器 per-block 9 槽内容（压力板触发取物发射 / 扣库存）
 #include "cheststore.h"         // t1013 箱子矿车内容键存储（进世界转正登记 / 回生扫描 / 挖毁清键）
@@ -57,6 +58,11 @@ class PlayerController : public QQuickItem
     //   EntityManager::tickHostileLife（驱动 spawn 光判定 + 白天燃烧）。Game→World 向下依赖合规（WorldClock
     //   属 World 层）。null 时跳过敌对生命周期（无昼夜 → 无 spawn / 无燃烧，安全降级）。
     Q_PROPERTY(WorldClock *worldClock READ worldClock WRITE setWorldClock NOTIFY worldClockChanged)
+    // t1022 键位映射表（同 worldClock peer 注入模式，QML 注入 Core 层 KeybindManager 单一权威）。
+    //   setKey() 入口经 canonicalKey 把「物理键 → 归属动作的 canonical 键」翻译后再进 m_keys /
+    //   蹲疾跑状态机 —— 引擎内部（step / shift 状态机 / sneakPlace 等全部 m_keys 消费点）零改动，
+    //   重映射即全局生效。null（未注入 / 探针旧装配）→ 不翻译，原始键直入（旧行为不变，安全降级）。
+    Q_PROPERTY(KeybindManager *keybinds READ keybinds WRITE setKeybinds NOTIFY keybindsChanged)
     // t402 经验球管理器（同 world/hotbar/itemEntities/entityManager/worldClock 模式，QML 注入 peer ViewModel）。
     //   每帧调 xpOrbManager.tick(dt, 玩家中心)（磁吸 + 拾取，独立于捕获态——菜单 / 暂停时球仍向玩家飞，
     //   世界模拟连续，同 itemEntities.tick）。拾取经语义信号 xpPickedUp → 呈现层路由 PlayerState.addXp。
@@ -321,6 +327,9 @@ public:
     void setEntityManager(EntityManager *m);
     WorldClock *worldClock() const { return m_worldClock; }
     void setWorldClock(WorldClock *c);
+    // t1022 键位映射表注入（同 worldClock 访问器序；null 合法 = 不翻译）。
+    KeybindManager *keybinds() const { return m_keybinds; }
+    void setKeybinds(KeybindManager *kb);
     XpOrbManager *xpOrbManager() const { return m_xpOrbManager; }
     void setXpOrbManager(XpOrbManager *m);
     BoatManager *boatManager() const { return m_boatManager; }
@@ -668,6 +677,7 @@ signals:
     void itemEntitiesChanged();
     void entityManagerChanged();
     void worldClockChanged();
+    void keybindsChanged();   // t1022 键位映射表注入变更
     void xpOrbManagerChanged(); // t402 经验球管理器注入变更
     void boatManagerChanged(); // t469 船管理器注入变更
     void minecartManagerChanged(); // t565 矿车管理器注入变更
@@ -1301,6 +1311,7 @@ private:
     ItemEntityManager *m_itemEntities = nullptr; // 拾取扫描数据源 + removeAt 销毁（Q_PROPERTY 绑定）
     EntityManager *m_entityManager = nullptr;    // 统一实体（t95 测试生物）：重力 tick + 玩家推动（Q_PROPERTY 绑定）
     WorldClock *m_worldClock = nullptr;          // t280 黑暗刷怪：读 skyLight 驱动敌对 spawn / 燃烧（Q_PROPERTY 绑定）
+    KeybindManager *m_keybinds = nullptr;        // t1022 键位映射表：setKey 入口 canonicalKey 规范化（null = 不翻译）
     XpOrbManager *m_xpOrbManager = nullptr;      // t402 经验球：磁吸 + 拾取扫描（Q_PROPERTY 绑定）
     BoatManager *m_boatManager = nullptr;        // t469 船：浮水 tick + 骑乘操控 / 放船 / 下船（Q_PROPERTY 绑定）
     MinecartManager *m_minecartManager = nullptr; // t565 矿车：轨上骑乘操控 / 放车 / 下车（Q_PROPERTY 绑定）

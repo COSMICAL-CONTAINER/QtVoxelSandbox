@@ -51,6 +51,11 @@ qt_add_executable(voxelsandbox
     #   Core 只依赖 Qt Core/Gui；QtQuick（image provider）留在 main.cpp 胶水层（依赖只向下）。
     src/Core/resourcepackmanager.cpp
     src/Core/resourcepackmanager.h
+    # t1022 键位重映射（Core 叶子）：「动作 → Qt 键」映射表单一权威 + settings.json "keyBindings" 节
+    #   持久化（读缺节/缺行/坏值落默认向后兼容；写保留其它字段）+ 冲突检测拒收。QML 设置页经
+    #   Q_INVOKABLE 编辑；PlayerController::setKey 经 canonicalKey 在单一入口规范化（引擎内部零改动）。
+    src/Core/keybindmanager.cpp
+    src/Core/keybindmanager.h
     # perf：帧时间分解探针（PLAN §2-F / §4 帧时间切分）。进程全局单例：C++ 各热路径
     #   （PlayerController tickImpl / ChunkGeometry buildMesh / World tick 函数）经 RAII Scope 把各阶段
     #   CPU 耗时累加进具名桶，每 ~1s flush → QML F3 叠层只读 + qInfo 落日志。诊断「每帧固定开销」
@@ -827,6 +832,10 @@ add_executable(redstone_matrix_test
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
+    # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
+    #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
+    src/Core/keybindmanager.cpp
+    src/Core/keybindmanager.h
     # t813 构建版本戳探针（stamp YYYY-MM-DD HH:MM 格式 / git 短哈希 7-10 hex；Core 叶子直编）。
     src/Core/buildinfo.cpp
     src/Game/toolregistry.cpp

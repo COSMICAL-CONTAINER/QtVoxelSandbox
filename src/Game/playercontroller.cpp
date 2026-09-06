@@ -244,6 +244,16 @@ void PlayerController::setWorldClock(WorldClock *c)
     emit worldClockChanged();
 }
 
+// t1022 键位映射表注入（同 setWorldClock 模式）。null（未注入 / 旧探针装配）→ setKey 不翻译，
+//   原始键直入 m_keys（旧行为不变）；注入后 setKey 入口 canonicalKey 规范化（单一 choke 点，
+//   全部 m_keys 消费点零改动即受映射）。
+void PlayerController::setKeybinds(KeybindManager *kb)
+{
+    if (m_keybinds == kb) return;
+    m_keybinds = kb;
+    emit keybindsChanged();
+}
+
 // t402 注入经验球管理器（同 setItemEntities / setEntityManager 模式）：仅记录指针 + 发信号
 //   （QML 注入 peer ViewModel，运行期连接、非编译期反向依赖；PLAN §2 分层）。tick 驱动见 tickImpl。
 void PlayerController::setXpOrbManager(XpOrbManager *m)
@@ -343,6 +353,13 @@ void PlayerController::onWindowChanged(QQuickWindow *win)
 // ---- 输入 ----
 void PlayerController::setKey(int key, bool pressed)
 {
+    // t1022 键位重映射（单一 choke 点）：物理键 → 归属动作的 canonical 键（如 forward 重绑 ↑ 后，
+    //   ↑ 与 W 都译成 Key_W），再进下方 m_keys / 蹲疾跑状态机 —— step() / 蹲态机 / sneakPlace 等
+    //   全部 m_keys 消费点零改动即受映射。无归属键原样透传（未登记键 / 未重绑旧键语义保留）。
+    //   release 侧对称翻译（QML 同一映射查两次 → m_keys 进出同键，不残留）。null 权威（未注入）
+    //   不翻译 = 旧行为。
+    if (m_keybinds)
+        key = m_keybinds->canonicalKey(key);
     // t655 死亡态输入闸门：m_dead 期间拒收一切游戏键（WASD / 跳 / 蹲 / 疾跑双击 / 双击空格切飞全部
     //   停摆；spec「死亡态锁移动/攻击/背包键，只接受重生按钮与聊天」）。QML keyInput 层有同款守卫（先
     //   拦），此处 C++ 侧兜底 —— 任何漏网透传路径（未来新增键位 / 面板）都不至于让尸体走动。release
