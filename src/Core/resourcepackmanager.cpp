@@ -893,6 +893,13 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x247, QStringLiteral("blaze_spawn_egg.png")},    // 生物蛋（燃烬者；机制等价 blaze egg）
         {0x249, QStringLiteral("wolf_spawn_egg.png")},     // 生物蛋（狼；t785 蛋补全）
         {0x24A, QStringLiteral("ocelot_spawn_egg.png")},   // 生物蛋（豹猫；t785 蛋补全）
+        // t1008① 生物蛋（小蹒跚者）pack 直连补映射（t952 引入 0x25D 时漏本表行——15 蛋唯一缺行）：
+        //   缺行时 itemIconSource 恒空串 → MaterialIcon 恒走自绘 Canvas，而其余 14 蛋（pack 开）走
+        //   spawn_egg.png 两层染色生成管线 = 用户「小僵尸蛋与别的蛋风格不统一」观感分叉根源。补行后
+        //   与全蛋族同管线：现代包有 zombie_spawn_egg.png 直用（机制等价 MC 幼体僵尸 ≡ 僵尸家族蛋名）；
+        //   demo 包缺独立蛋图 → spawnEggTint(0x25D) 生成式回退（t952 表行：亮一档黄绿幼体染色——
+        //   同管线成蛋形 + 同族染色可辨，区别成体蹒跚者蛋暗绿）。
+        {0x25D, QStringLiteral("zombie_spawn_egg.png")},   // 生物蛋（小蹒跚者；t1008① 补映射，缺 → spawnEggTint 生成式回退）
         {0x25E, QStringLiteral("cave_spider_spawn_egg.png")}, // 生物蛋（洞穴蜘蛛；t1012③；现代包有则直用，缺 → spawnEggTint 生成式回退）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
