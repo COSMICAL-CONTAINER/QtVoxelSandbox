@@ -58,6 +58,7 @@
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
 #include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
 #include "resourcepackmanager.h"  // t785 生物蛋探针（生成式染色表 spawnEggTint 条目存在性直调）
+#include "keybindmanager.h"       // t1022 键位重映射探针（默认表完整性 / 冲突拒收 / settings.json round-trip）
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）
 #include "boatmanager.h"          // t805 船上岸回归探针（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留）
 #include "buildinfo.h"            // t813 构建版本戳探针（stamp / gitHash 格式断言；Core 叶子直编）
@@ -35665,6 +35666,295 @@ Item {
                              " gate/night+exposed gate/dual resets in PlayerController, QML zone"
                              " dispatch + achievement chime + chest open/close routing, AudioManager"
                              " Q_INVOKABLE surface, build_sounds.py generators)";
+    }
+
+    // ── t1022 键位重映射探针（面板 A：KeybindManager 默认表完整性 + settings.json 真 round-trip +
+    //    冲突拒收 + 旧档缺节/坏值向后兼容 + 恢复默认 + 显示名；显式 setStorePath 密闭于临时目录，
+    //    绝不触碰工程根真实 settings.json——t779/t785 探针密闭语义同款）──
+    {
+        using KM = KeybindManager;
+        bool okA = true;
+        QString diagT22;
+        // (a) 默认表完整性：恰 13 动作、每动作默认键合法且两两不冲突（一键一动作不变式）、
+        //     id/canonical 逐项钉死（单一权威表被重排/漏行/改键在此暴露——引擎 canonical 语义锚）。
+        const QList<KM::ActionDef> &tableA = KM::actionTable();
+        if (tableA.size() != 13)
+            diagT22 += QStringLiteral("table size %1 ").arg(tableA.size());
+        okA = okA && tableA.size() == 13;
+        struct ExpT22 { const char *id; int key; };
+        const ExpT22 expT22[] = {
+            {"forward", Qt::Key_W},  {"back", Qt::Key_S},   {"left", Qt::Key_A},
+            {"right", Qt::Key_D},    {"jump", Qt::Key_Space}, {"sneak", Qt::Key_Shift},
+            {"inventory", Qt::Key_E}, {"drop", Qt::Key_Q},  {"chat", Qt::Key_T},
+            {"camera", Qt::Key_F5},  {"debugTime", Qt::Key_F6}, {"modeCycle", Qt::Key_G},
+            {"debugOverlay", Qt::Key_F3},
+        };
+        QSet<int> seenKeysT22;
+        for (int i = 0; i < tableA.size() && i < 13; ++i) {
+            const bool rowOk = tableA[i].canonical == expT22[i].key
+                && QByteArray(tableA[i].id) == expT22[i].id
+                && tableA[i].canonical >= 0x20 && !seenKeysT22.contains(tableA[i].canonical);
+            if (!rowOk)
+                diagT22 += QStringLiteral("row%1 ").arg(i);
+            okA = okA && rowOk;
+            seenKeysT22.insert(tableA[i].canonical);
+        }
+        // (b) 重映射→持久化→重载→映射保持（真 settings.json round-trip）+ 其它字段保留。
+        const QString storeDirT22 = QDir::tempPath()
+            + QStringLiteral("/voxel_t1022_probe_%1").arg(QCoreApplication::applicationPid());
+        QDir().mkpath(storeDirT22);
+        const QString storeAT22 = storeDirT22 + QStringLiteral("/settings.json");
+        const auto writeTextT22 = [](const QString &path, const QByteArray &body) {
+            QFile f(path);
+            return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(body) == body.size();
+        };
+        writeTextT22(storeAT22, "{\"playerSkin\":\"alex\"}");
+        KM kbT22;
+        kbT22.setStorePath(storeAT22);   // 缺 keyBindings 节 → 全默认（旧档向后兼容面）
+        okA = okA && kbT22.keyFor(QStringLiteral("forward")) == Qt::Key_W
+                  && kbT22.keyFor(QStringLiteral("sneak")) == Qt::Key_Shift;
+        okA = okA && kbT22.applyBinding(QStringLiteral("forward"), Qt::Key_Up) == int(KM::ApplyOk);
+        {
+            QFile f(storeAT22);
+            const QString bodyA = f.open(QIODevice::ReadOnly)
+                ? QString::fromUtf8(f.readAll()) : QString();
+            const bool persistedA = bodyA.contains(QStringLiteral("\"keyBindings\""))
+                && bodyA.contains(QStringLiteral("\"forward\""))
+                && bodyA.contains(QStringLiteral("\"playerSkin\""));   // 其它字段保留（writeSettings 管线同款）
+            if (!persistedA) diagT22 += QStringLiteral("persist %1 ").arg(bodyA.size());
+            okA = okA && persistedA;
+        }
+        KM kbT22b;
+        kbT22b.setStorePath(storeAT22);  // 重载（模拟重启）：映射保持
+        okA = okA && kbT22b.keyFor(QStringLiteral("forward")) == Qt::Key_Up;
+        okA = okA && kbT22b.canonicalKey(Qt::Key_Up) == Qt::Key_W;   // 反向规范化：↑ → 引擎 W
+        okA = okA && kbT22b.canonicalKey(Qt::Key_W) == Qt::Key_W;    // canonical 自身恒等
+        okA = okA && kbT22b.actionOfKey(Qt::Key_Up) == QStringLiteral("forward");
+        okA = okA && kbT22b.keyFor(QStringLiteral("back")) == Qt::Key_S; // 未动的动作保持默认
+        // (c) 冲突检测拒收（一键多动作）+ 旧 canonical 让出后可被认领 + 幂等 + 未知动作/非法键。
+        okA = okA && kbT22b.applyBinding(QStringLiteral("back"), Qt::Key_Up) == int(KM::ApplyConflict);
+        okA = okA && kbT22b.keyFor(QStringLiteral("back")) == Qt::Key_S;   // 拒收后映射不变
+        okA = okA && kbT22b.applyBinding(QStringLiteral("back"), Qt::Key_W) == int(KM::ApplyOk); // W 已让出 → 可认领
+        okA = okA && kbT22b.canonicalKey(Qt::Key_W) == Qt::Key_S;
+        okA = okA && kbT22b.applyBinding(QStringLiteral("forward"), Qt::Key_Up) == int(KM::ApplyOk); // 自身同值幂等
+        okA = okA && kbT22b.applyBinding(QStringLiteral("nosuch"), Qt::Key_P) == int(KM::ApplyUnknownAction);
+        okA = okA && kbT22b.keyFor(QStringLiteral("nosuch")) == 0;
+        okA = okA && kbT22b.applyBinding(QStringLiteral("jump"), 0) == int(KM::ApplyUnknownAction); // 非法键拒收
+        // (d) 恢复默认：内存回落 + 落盘改写 + 无归属键透传复位。
+        kbT22b.resetDefaults();
+        okA = okA && kbT22b.keyFor(QStringLiteral("forward")) == Qt::Key_W
+                  && kbT22b.keyFor(QStringLiteral("back")) == Qt::Key_S;
+        okA = okA && kbT22b.canonicalKey(Qt::Key_Up) == Qt::Key_Up;   // 无归属 → 原样透传
+        {
+            QFile f(storeAT22);
+            const QString bodyB = f.open(QIODevice::ReadOnly)
+                ? QString::fromUtf8(f.readAll()) : QString();
+            okA = okA && !bodyB.contains(QStringLiteral("16777235")); // Key_Up 十进制值已从盘上消失
+        }
+        // (e) 部分节 / 坏值：仅 jump 重绑生效，坏值动作落默认，其余动作不串。
+        const QString storeBT22 = storeDirT22 + QStringLiteral("/settings_partial.json");
+        writeTextT22(storeBT22,
+                     QByteArray("{\"keyBindings\":{\"jump\":74,\"sneak\":5}}")); // 74=Key_J；5 非法
+        KM kbT22c;
+        kbT22c.setStorePath(storeBT22);
+        okA = okA && kbT22c.keyFor(QStringLiteral("jump")) == (Qt::Key_J)
+              && kbT22c.keyFor(QStringLiteral("sneak")) == Qt::Key_Shift
+              && kbT22c.keyFor(QStringLiteral("forward")) == Qt::Key_W;
+        // (f) 键显示名（设置页行按钮文本权威）。
+        okA = okA && kbT22.keyDisplayName(Qt::Key_W) == QStringLiteral("W");
+        if (!okA)
+            qInfo().noquote() << "  [t1022 diag]" << diagT22;
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1022 key-remap table: 13-action default table complete with"
+                             " pairwise-unique canonical keys (pinned id->key order), remap"
+                             " persists into settings.json keyBindings preserving sibling"
+                             " fields, reload restores the mapping (forward->Up canonicalizes"
+                             " to engine W), conflicting apply is rejected with mapping intact,"
+                             " vacated canonical key is claimable, unknown action/invalid key"
+                             " rejected, resetDefaults round-trips to file, partial section"
+                             " keeps defaults for missing/invalid rows, keyDisplayName W";
+    }
+
+    // ── t1022 键位重映射探针（面板 B：引擎侧生效链——真 PlayerController × KeybindManager 注入，
+    //    模拟按键事件（setKey 物理键）→ canonical 翻译 → m_keys → 动作触发（跳/蹲/前进位移）；
+    //    null 注入对照（未注入 = 原始键直入旧行为）；QML 路由/设置页/引擎 choke 点/构建接线源码钉）──
+    {
+        using KM = KeybindManager;
+        bool okB = true;
+        QString diagT22B;
+        World wT22;
+        wT22.setWidth(32); wT22.setDepth(32); wT22.setHeight(48);
+        // 高空石平台（kRigY=41 同款；地形最高 ~33，41 必空）：12×12 立足面供跳/蹲/走行为腿。
+        for (int x = 6; x <= 26; ++x)
+            for (int z = 6; z <= 26; ++z)
+                wT22.setBlock(x, 41, z, BR::Stone, 0);
+        // 密闭（t779/t785 先例）：显式 setStorePath 指临时目录 —— 本面板 applyBinding 会触发 persist()，
+        //   不密闭则写穿工程根真实 settings.json（本单实现头注释明令禁止）。文件先落盘再 setStorePath
+        //   （load() 读该文件全默认起步，构造期对真实档的一次只读不落地，随即被覆盖）。
+        const QString storeDirB22 = QDir::tempPath()
+            + QStringLiteral("/voxel_t1022_probeB_%1").arg(QCoreApplication::applicationPid());
+        QDir().mkpath(storeDirB22);
+        const QString storeBT22Engine = storeDirB22 + QStringLiteral("/settings.json");
+        const auto writeTextB22 = [](const QString &path, const QByteArray &body) {
+            QFile f(path);
+            return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(body) == body.size();
+        };
+        writeTextB22(storeBT22Engine, "{}");   // 空档（面板 A 作用域外，本面板自备密闭存储）
+        KM kbT22B;
+        kbT22B.setStorePath(storeBT22Engine);
+        // 密闭哨兵：面板开头抓工程根真实 settings.json 字节快照（可能不存在），面板末断言逐字节
+        //   未变 —— 本面板任何 applyBinding 写穿真实档（含未来真实档已有 keyBindings 节场景）在此暴露。
+        const QString realStoreT22 = QDir(QCoreApplication::applicationDirPath()
+                                          + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("settings.json"));
+        QByteArray realSnapT22;
+        {
+            QFile f(realStoreT22);
+            if (f.open(QIODevice::ReadOnly)) realSnapT22 = f.readAll();
+        }
+        PlayerController pcT22;   // 无窗口直造（t1021 同款；tick 直调）
+        pcT22.setWorld(&wT22);
+        pcT22.setKeybinds(&kbT22B);   // 引擎侧映射注入（Main.qml keybinds: keybindsMgr 同链）
+        // 墙钟泵（t889 pumpFor 同款 busy-wait）：tickImpl 的 dt = m_clock.restart() 墙钟差，探针连调
+        //   tick() 间隔仅微秒 → dt≈0 → 重力/位移零推进（首跑全腿假红根因：jump/crouch/walk 全不触发）。
+        //   每 tick 前 busy-wait ≥17ms 喂出真实 dt≈0.017s（钳 50ms 内）。
+        const auto tickB = [&](PlayerController &pc, int n) {
+            for (int i = 0; i < n; ++i) {
+                QElapsedTimer wait22; wait22.start();
+                while (wait22.elapsed() < 17)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                pc.tick();
+            }
+        };
+        // (i) 默认恒等腿：Space（canonical 直入）→ 生存跳起离地又落地。
+        // yaw=180：前向 = (-sin yaw, -cos yaw) = (0,+1) = +Z（首跑踩过的坑：yaw -90 前进朝 +X，
+        //   (iv)(v) 的 z 位移断言恒假——朝向轴与断言轴对齐）。
+        pcT22.loadSavedState(16.5f, 42.05f, 16.5f, 180.0f, 0.0f, 2); // Survival；脚位平台顶上方
+        tickB(pcT22, 12);
+        okB = okB && pcT22.onGround();
+        const float y0T22 = pcT22.feetPosition().y();
+        pcT22.setKey(Qt::Key_Space, true);
+        bool jumpedDefaultT22 = false;
+        for (int t = 0; t < 30 && !jumpedDefaultT22; ++t) {
+            tickB(pcT22, 1);
+            jumpedDefaultT22 = pcT22.feetPosition().y() > y0T22 + 0.25f;
+        }
+        pcT22.setKey(Qt::Key_Space, false);
+        tickB(pcT22, 40);
+        if (!jumpedDefaultT22 || !pcT22.onGround())
+            diagT22B += QStringLiteral("i jump=%1 gnd=%2 ").arg(jumpedDefaultT22).arg(pcT22.onGround());
+        okB = okB && jumpedDefaultT22 && pcT22.onGround();
+        // (ii) 重映射跳跃腿：jump→C 后按 C（物理键）→ canonical Space → 真跳（模拟按键事件→动作触发）。
+        okB = okB && kbT22B.applyBinding(QStringLiteral("jump"), Qt::Key_C) == int(KM::ApplyOk);
+        const float y1T22 = pcT22.feetPosition().y();
+        pcT22.setKey(Qt::Key_C, true);
+        bool jumpedRemapT22 = false;
+        for (int t = 0; t < 30 && !jumpedRemapT22; ++t) {
+            tickB(pcT22, 1);
+            jumpedRemapT22 = pcT22.feetPosition().y() > y1T22 + 0.25f;
+        }
+        pcT22.setKey(Qt::Key_C, false);
+        tickB(pcT22, 40);
+        if (!jumpedRemapT22 || !pcT22.onGround())
+            diagT22B += QStringLiteral("ii jump=%1 gnd=%2 ").arg(jumpedRemapT22).arg(pcT22.onGround());
+        okB = okB && jumpedRemapT22 && pcT22.onGround();
+        // (iii) 潜行重映射腿：sneak→X → setKey(X) → canonical Shift → 蹲态机 Crouch；松开回 Walk。
+        okB = okB && kbT22B.applyBinding(QStringLiteral("sneak"), Qt::Key_X) == int(KM::ApplyOk);
+        pcT22.setKey(Qt::Key_X, true);
+        const bool crouchT22 = pcT22.moveState() == PlayerController::Crouch;
+        pcT22.setKey(Qt::Key_X, false);
+        const bool standT22 = pcT22.moveState() == PlayerController::Walk; // 露天平台可站立
+        if (!crouchT22 || !standT22)
+            diagT22B += QStringLiteral("iii crouch=%1 stand=%2 ").arg(crouchT22).arg(standT22);
+        okB = okB && crouchT22 && standT22;
+        // (iv) 前进重映射腿：forward→↑ → setKey(↑) → canonical W → +Z 位移（yaw 180 = 朝 +Z）；
+        //      且让出的 W 无归属透传仍前进（未重绑旧键语义保留口径）。24 tick（≈0.4s）：走加速段
+        //      起步低速，8 tick 位移不足 0.2 阈（先例走位腿 24-60 tick 同量级）。
+        okB = okB && kbT22B.applyBinding(QStringLiteral("forward"), Qt::Key_Up) == int(KM::ApplyOk);
+        const float z0T22 = pcT22.feetPosition().z();
+        pcT22.setKey(Qt::Key_Up, true);
+        tickB(pcT22, 24);
+        pcT22.setKey(Qt::Key_Up, false);
+        tickB(pcT22, 2);
+        const bool fwdRemapT22 = pcT22.feetPosition().z() > z0T22 + 0.2f;
+        const float z1T22 = pcT22.feetPosition().z();
+        pcT22.setKey(Qt::Key_W, true);
+        tickB(pcT22, 24);
+        pcT22.setKey(Qt::Key_W, false);
+        tickB(pcT22, 2);
+        const bool fwdLegacyT22 = pcT22.feetPosition().z() > z1T22 + 0.2f;
+        if (!fwdRemapT22 || !fwdLegacyT22)
+            diagT22B += QStringLiteral("iv remap=%1 legacy=%2 ").arg(fwdRemapT22).arg(fwdLegacyT22);
+        okB = okB && fwdRemapT22 && fwdLegacyT22;
+        // (v) null 注入对照：未注入映射 → 原始键直入 m_keys（旧行为不变，安全降级面）。
+        PlayerController pcT22b;
+        pcT22b.setWorld(&wT22);
+        pcT22b.loadSavedState(20.5f, 42.05f, 12.5f, 180.0f, 0.0f, 2);
+        tickB(pcT22b, 12);
+        const float z0bT22 = pcT22b.feetPosition().z();
+        pcT22b.setKey(Qt::Key_W, true);
+        tickB(pcT22b, 24);
+        pcT22b.setKey(Qt::Key_W, false);
+        okB = okB && pcT22b.feetPosition().z() > z0bT22 + 0.2f;
+        // ── 源码钉：QML 路由（keyInput 七动作查询 + 设置页编辑面 + 焦点归还）+ 引擎 choke 点 +
+        //    注入属性 + 构建接线（app/test 双目标）──
+        const QString rootT22 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const auto readSrcT22 = [&rootT22](const QString &rel) -> QString {
+            QFile f(rootT22 + QLatin1Char('/') + rel);
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+        };
+        const QString mainQmlT22 = readSrcT22(QStringLiteral("src/ui/Main.qml"));
+        const QString pcHdrT22 = readSrcT22(QStringLiteral("src/Game/playercontroller.h"));
+        const QString pcCppT22 = readSrcT22(QStringLiteral("src/Game/playercontroller.cpp"));
+        const QString cmakeT22 = readSrcT22(QStringLiteral("CMakeLists.txt"));
+        const bool okPinT22 =
+            mainQmlT22.contains(QStringLiteral("KeybindManager { id: keybindsMgr }"))
+            && mainQmlT22.contains(QStringLiteral("keybinds: keybindsMgr"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"chat\")"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"inventory\")"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"drop\")"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"camera\")"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"debugTime\")"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"modeCycle\")"))
+            && mainQmlT22.count(QStringLiteral("keybindsMgr.keyFor(\"debugOverlay\")")) >= 2 // press+release
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.applyBinding(act, e.key)"))
+            && mainQmlT22.contains(QStringLiteral("KeybindManager.ApplyConflict"))
+            && mainQmlT22.contains(QStringLiteral("keybindsMgr.resetDefaults()"))
+            && mainQmlT22.contains(QStringLiteral("恢复默认键位"))
+            && mainQmlT22.contains(QStringLiteral("按任意键…"))
+            && mainQmlT22.contains(QStringLiteral("冲突：「"))
+            && mainQmlT22.contains(QStringLiteral("settingsPanelT22.recordingAction = modelData.id"))
+            && mainQmlT22.contains(QStringLiteral("const _r = keybindsMgr.revision")) // t976 AOT 触碰守卫
+            && mainQmlT22.contains(QStringLiteral("keyRecorderT22.forceActiveFocus()"))
+            && pcHdrT22.contains(QStringLiteral("Q_PROPERTY(KeybindManager *keybinds READ keybinds WRITE setKeybinds NOTIFY keybindsChanged)"))
+            && pcCppT22.contains(QStringLiteral("key = m_keybinds->canonicalKey(key);"))
+            && cmakeT22.count(QStringLiteral("src/Core/keybindmanager.cpp")) >= 2;    // app + test 双目标
+        // 密闭哨兵断言：真实 settings.json 逐字节未变（写穿本单头注释明令禁止面在此暴露）。
+        QByteArray realAfterT22;
+        {
+            QFile f(realStoreT22);
+            if (f.open(QIODevice::ReadOnly)) realAfterT22 = f.readAll();
+        }
+        const bool hermeticT22 = realAfterT22 == realSnapT22;
+        if (!hermeticT22) diagT22B += QStringLiteral("hermetic ");
+        okB = okB && hermeticT22;
+        if (!okPinT22) diagT22B += QStringLiteral("pins ");
+        okB = okB && okPinT22;
+        if (!okB)
+            qInfo().noquote() << "  [t1022 diag B]" << diagT22B;
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1022 key-remap engine chain: injected KeybindManager makes"
+                             " PlayerController.setKey canonicalize simulated key events --"
+                             " default Space jumps, rebound C jumps, rebound X sneaks into"
+                             " Crouch and releases to Walk, rebound Up walks forward (+Z at"
+                             " yaw 180) while the vacated W still forwards via passthrough,"
+                             " non-injected controller keeps raw-key legacy behavior, all"
+                             " probe writes stay hermetic to a temp store (project-root"
+                             " settings.json byte-identical sentinel), and"
+                             " the full wiring is pinned (QML seven-action keyFor routing +"
+                             " recorder/conflict/reset settings panel + revision-touch guard"
+                             " + engine canonical choke point + CMake dual-target sources)";
     }
 
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
