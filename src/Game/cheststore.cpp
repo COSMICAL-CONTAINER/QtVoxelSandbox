@@ -129,7 +129,8 @@ void ChestStore::clearChest(int x, int y, int z)
 {
     const QString k = key(x, y, z);
     const bool hadCart = m_cartKeys.erase(k) > 0;
-    if (m_chests.erase(k) > 0 || hadCart) {
+    const bool hadLooted = m_lootedKeys.erase(k) > 0; // review0907 A-P1-1：looted 标记随条目同清（破块清孤儿）
+    if (m_chests.erase(k) > 0 || hadCart || hadLooted) {
         ++m_revision;
         emit chestChanged();
     }
@@ -137,11 +138,13 @@ void ChestStore::clearChest(int x, int y, int z)
 
 // t188 清空全部箱子（跨世界切换防泄漏）。空 → no-op（不无故发信号 / 不增 revision，幂等）。
 //   t1013：矿车内容键集同清（loadAll 整体替换语义 = 旧世界键残留一并清，防跨世界串扰）。
+//   review0907 A-P1-1：looted 标记集同清（同整体替换语义）。
 void ChestStore::clearAll()
 {
-    if (m_chests.empty() && m_cartKeys.empty()) return;
+    if (m_chests.empty() && m_cartKeys.empty() && m_lootedKeys.empty()) return;
     m_chests.clear();
     m_cartKeys.clear();
+    m_lootedKeys.clear();
     ++m_revision;
     emit chestChanged();
 }
@@ -220,6 +223,8 @@ QVariantList ChestStore::allChests() const
         cm.insert(QStringLiteral("z"), z);
         if (m_cartKeys.count(it->first) > 0)
             cm.insert(QStringLiteral("cart"), true); // t1013 箱子矿车内容键标记（老存档无此键，向后兼容）
+        if (m_lootedKeys.count(it->first) > 0)
+            cm.insert(QStringLiteral("looted"), true); // review0907 A-P1-1：矿井战利品已 roll 标记（老存档无此键 → 从未 roll）
         cm.insert(QStringLiteral("slots"), slotList);
         out.append(cm);
     }
@@ -233,6 +238,7 @@ void ChestStore::loadAll(const QVariantList &chests)
 {
     m_chests.clear();
     m_cartKeys.clear(); // t1013：矿车键随整体替换语义同清（防旧世界键残留串扰）
+    m_lootedKeys.clear(); // review0907 A-P1-1：looted 标记随整体替换语义同清
     for (const QVariant &v : chests) {
         const QVariantMap cm = v.toMap();
         bool okx = false, oky = false, okz = false;
@@ -266,6 +272,8 @@ void ChestStore::loadAll(const QVariantList &chests)
         m_chests[key(x, y, z)] = chest;
         if (cm.value(QStringLiteral("cart")).toBool()) // t1013 箱子矿车内容键（老存档无此键 → false）
             m_cartKeys.insert(key(x, y, z));
+        if (cm.value(QStringLiteral("looted")).toBool()) // review0907 A-P1-1：已 roll 标记（老存档无此键 → false = 从未 roll）
+            m_lootedKeys.insert(key(x, y, z));
     }
     ++m_revision;
     emit chestChanged(); // 状态整体替换 → 通知 ChestUI delegate 重读（即便结果为空，刷新到空态）
@@ -314,16 +322,21 @@ bool ChestStore::populateDungeonLoot(int x, int y, int z)
     return true; // 已填充（首开一次性 roll 成功）
 }
 
-// t484 首开填充废弃矿井战利品（实现；t1013 gate 更新，语义见 .h）。矿井箱已转正为箱子矿车：内容键由
-//   registerCart 先行登记（键 + 全空条目 = 未开箱回生标记），「键 + 空条目」正是首开态；非矿车键的既有
-//   条目（普通方块箱）保持旧 gate（存在即已开过 / 已填充 → 不再生）。
+// t484 首开填充废弃矿井战利品（实现；t1013 gate 更新 + review0907 A-P1-1 looted 标志，语义见 .h）。
+//   矿井箱已转正为箱子矿车：内容键由 registerCart 先行登记（键 + 全空条目 = 未开箱回生标记），「键 +
+//   空条目」正是首开态；非矿车键的既有条目（普通方块箱）保持旧 gate（存在即已开过 / 已填充 → 不再生）。
+//   review0907 A-P1-1：全空豁免落盘让「取空后的条目」与「未开箱条目」在落盘面上不可区分 → 首开取空后
+//   再开会按同 seed 重 roll 同样战利品（无限再生）。修法 = roll 发生时置独立持久 looted 标志（随
+//   allChests "looted":true 落盘 / loadAll 读回），gate 加 &&!looted：取空重开不再生（首开一次性口径
+//   与方块箱「条目存在即不再生」对齐——回生与 loot 是两个面，空条目豁免落盘的回生语义不变）。
 bool ChestStore::populateMineshaftLoot(int x, int y, int z)
 {
     const QString k = key(x, y, z);
     const auto it = m_chests.find(k);
     if (it != m_chests.end()) {
         const bool emptyCartEntry = m_cartKeys.count(k) > 0 && allSlotsEmpty(it->second);
-        if (!emptyCartEntry) return false; // 已开过 / 已填充（或非矿车键既有条目）→ 不再生（首开一次性）
+        if (!emptyCartEntry || m_lootedKeys.count(k) > 0)
+            return false; // 已开过 / 已填充 / 已 roll 后取空（或非矿车键既有条目）→ 不再生（首开一次性）
     }
 
     // 坐标确定性 seed（PLAN §2-K）：同坐标箱子 → 同战利品（与 populateDungeonLoot 同模式，盐不同 → 两表独立）。
@@ -356,6 +369,7 @@ bool ChestStore::populateMineshaftLoot(int x, int y, int z)
 
     m_chests[k] = std::move(chest);
     m_cartKeys.insert(k); // t1013：填充后键升级为矿车键（内容随矿车回生链持久）
+    m_lootedKeys.insert(k); // review0907 A-P1-1：roll 发生即置已 roll 标志（取空重开不再生的持久面）
     ++m_revision;
     emit chestChanged();
     return true;

@@ -105,13 +105,15 @@ public:
     //   该坐标是地牢箱（theWorld.isDungeonChest —— 由 chest state bit2 标记，worldgen 写入；玩家放置的无此标记）。
     //   分层（PLAN §2）：本层 Game，依赖同层 LootTable + QtCore；不依赖 World（「是否地牢箱」由 caller 查 World）。
     Q_INVOKABLE bool populateDungeonLoot(int x, int y, int z);
-    // t484 首开填充废弃矿井战利品（机制等价 MC 1.0 mineshaft chest loot；**t1013 gate 更新**）：矿井箱
-    //   已转正为箱子矿车实体，本方法只对「箱子矿车内容键」（registerCart 登记，键可无 27 槽条目）或
-    //   旧档残留标记箱条目生效：无条目 → 抽 kMineshaftRolls 件建条目；条目存在但为**空的矿车键**（转正
-    //   登记、未开过）→ 同样填充（键条目 = 回生标记，非「已开」）；条目存在且非空 / 非矿车键 → no-op 返
-    //   false（杜绝清空后重开再生战利品，机制对齐 MC「战利品 roll 一次」）。填充后键升级为矿车键（内容
-    //   随矿车回生链持久）。用 LootTable::mineshaftChestPool + 坐标确定性 seed 抽 6 件（矿物 / 附魔书 /
-    //   铁锭等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）按 isCartCell 旧档 isMineshaftChest 调。
+    // t484 首开填充废弃矿井战利品（机制等价 MC 1.0 mineshaft chest loot；**t1013 gate 更新** +
+    //   **review0907 A-P1-1 looted 标志**）：矿井箱已转正为箱子矿车实体，本方法只对「箱子矿车内容键」
+    //   （registerCart 登记，键可无 27 槽条目）或旧档残留标记箱条目生效：无条目 → 抽 kMineshaftRolls 件
+    //   建条目；条目存在但为**空的矿车键**（转正登记、未开箱）→ 同样填充（键条目 = 回生标记，非「已开」）；
+    //   条目存在且非空 / 非矿车键 / **looted 已置（roll 后取空重开）** → no-op 返 false（杜绝清空后重开
+    //   再生战利品——独立持久标志让「已 roll」与「未开箱」两态分离，机制对齐 MC「战利品 roll 一次」）。
+    //   填充后键升级为矿车键（内容随矿车回生链持久）。用 LootTable::mineshaftChestPool + 坐标确定性
+    //   seed 抽 6 件（矿物 / 附魔书 / 铁锭等，PLAN §2-K 同箱同战利品）。caller（Main.qml.openChest）
+    //   按 isCartCell 旧档 isMineshaftChest 调。
     Q_INVOKABLE bool populateMineshaftLoot(int x, int y, int z);
     // t485 首开填充沙漠神殿战利品（机制等价 MC 1.0 desert temple chest loot）。与 populateDungeonLoot /
     //   populateMineshaftLoot 同源语义：仅对「尚未有条目」的箱子生效（首次开），用 LootTable::pyramidChestPool
@@ -159,6 +161,13 @@ private:
     // t1013 箱子矿车内容键集（与 m_chests 并行的标记面：键可在 27 槽全空时独立存在 —— 未开箱的矿车
     //   也要回生；allChests 对 cart 键豁免「全空不落盘」跳过）。clearChest / clearAll / loadAll 同步维护。
     std::unordered_set<QString> m_cartKeys;
+    // review0907 A-P1-1 矿井战利品已 roll 标记集（与 m_cartKeys 同款并行标记面）：populateMineshaftLoot
+    //   roll 发生时置位并随 allChests（"looted":true）落盘、loadAll 读回。根因：矿车键「全空条目豁免落盘」
+    //   让「取空后的条目」与「未开箱条目」在落盘面上不可区分 → 首开取空后再开按同 seed 重 roll 同样 6 件
+    //   （会话内 + 跨存档无限再生）。独立持久标志 = 「已 roll」与「未开箱」两态分离，gate 加 &&!looted 后
+    //   取空重开不再生（机制对齐 MC「战利品 roll 一次」）；老存档无 "looted" 键 → 读回 false = 从未 roll，
+    //   向后兼容（m_cartKeys 本身 t1013 新引入，无更旧档兼容面）。clearChest / clearAll / loadAll 同步维护。
+    std::unordered_set<QString> m_lootedKeys;
     int m_revision = 0;
 
     static QString key(int x, int y, int z); // "x,y,z"
