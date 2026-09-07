@@ -3416,16 +3416,20 @@ void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
     // t666 轴偏好位镜像当前轴（有连接时）：直轨最后形态 = 孤轨形态（MC 轨断连后保留 metadata 语义）。
     //   拐角（2 垂直位）不算轴 → 保持现有偏好位不变。t1018：单轴连接也镜像——延伸松弛可产生与放置
     //   面向（bit5）相反的连接（EW 面向新轨接续 NS 线端），bit5 随实连轴翻转，孤轨形态 = 最后实连轴。
+    //   review0907 A-P3-1：单轴分支加交叉轴零位守卫——拐角（X+Z 各一位）同样满足「本轴有位」，原条件
+    //   会把拐角误判成单轴而翻转偏好位（与上行「拐角不算轴」注释相悖，属防雷收口）。
     if ((con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) ==
         (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx))
         con = quint8(con | BlockRegistry::RailAxisEWFlag);      // 贯穿 X → EW 偏好
     else if ((con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) ==
              (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz))
         con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // 贯穿 Z → NS 偏好
-    else if ((con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) != 0)
-        con = quint8(con | BlockRegistry::RailAxisEWFlag);      // t1018 单 X 臂 → EW 偏好
-    else if ((con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) != 0)
-        con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂 → NS 偏好
+    else if ((con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) != 0
+             && (con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) == 0)
+        con = quint8(con | BlockRegistry::RailAxisEWFlag);      // t1018 单 X 臂（无 Z 位）→ EW 偏好
+    else if ((con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) != 0
+             && (con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) == 0)
+        con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂（无 X 位）→ NS 偏好
     if (con == curState) return; // 连接未变 → 不写（防无谓标脏）
     m_chunks.setBlock(x, y, z, rb, con); // 静默直写 + 标脏（含边界邻接）
     // 铁轨族 solid=false 不遮光 → 光场无变化，免 recomputeLightAround。
@@ -6538,6 +6542,9 @@ void World::scatterOres()
 
     // 脉形 profile（kBase/kFrac = 每 cell 脉数经济校准，见头注释；kSteps = blob 游走步数；
     //   kShellPct = 煤壳/铁角贴块概率；kKind = 0 blob 游走 / 1 煤长条 / 2 铁立方角）。
+    //   review0907 A-P1-2：煤 yMax=0 哨兵 = 无硬帽，上界纯列自适应（hc-5，对齐旧散点 stoneTop=h-3
+    //   口径）—— 原 60 硬帽使 128 高世界高山列煤脉被封顶（与头注释「128 高世界煤脉自然上探」声明相悖）；
+    //   64 高 rig 里 hc-5 ≤ 58 < 60 本就不触发帽 → 腿行为不变（只放开 128 高世界上探）。
     struct VeinProfile {
         quint8  block;
         quint32 salt;     // 矿盐（t1014 专用盐值；cell / 落点 / 逐块决策三流解耦）
@@ -6552,7 +6559,7 @@ void World::scatterOres()
         { BlockRegistry::RedstoneOre, 0x2ED57Eu, kOreMin, kRedstoneMax,    82, 75, 8, 0, 0 },
         { BlockRegistry::IronOre,     0x12D0E1u, kOreMin, kIronMax,         4, 40, 0, 35, 2 },
         { BlockRegistry::CopperOre,   0x0C09E5u, kOreMin, kCopperMax,      13, 92, 8,  0, 0 },
-        { BlockRegistry::CoalOre,     0x0C0A15u, kCoalMin,    60,           4, 60, 0, 25, 1 },
+        { BlockRegistry::CoalOre,     0x0C0A15u, kCoalMin,     0,           4, 60, 0, 25, 1 },
     };
     static constexpr int kOreKindCount = 7;
 
@@ -6586,8 +6593,10 @@ void World::scatterOres()
                 for (int i = 0; i < veinN; ++i) {
                     // 落点：cell 内 hash 抖动（bit0-3 x / bit4-7 z / bit8+ y 带 / bit16-18 姿态）。
                     const quint32 hv = hashVoxel(int(quint32(m_seed) ^ (p.salt * 31u + 17u)), cx, i, cz);
+                    // review0907 A-P1-2：煤（kind==1）yMax=0 哨兵 → 上界 = hc-5 纯列自适应（逐块仍受
+                    //   tryOre 的 y ≤ h-3 逐列石门兜底；64 高世界 hc-5 ≤ 58 与旧 min(60,·) 等价）。
                     const int span = (p.kind == 1)
-                        ? std::max(1, std::min(p.yMax, hc - 5) - p.yMin + 1) // 煤带上界随 cell 列高（长条+壳 ≤ h-3）
+                        ? std::max(1, (p.yMax > 0 ? std::min(p.yMax, hc - 5) : hc - 5) - p.yMin + 1) // 煤带上界随 cell 列高（长条+壳 ≤ h-3）
                         : (p.kind == 2)
                             ? std::max(1, p.yMax - p.yMin) // 铁立方占 vy..vy+1 → 抖动上界收一格保 vy+1 ≤ 带
                             : p.yMax - p.yMin + 1;
