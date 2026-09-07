@@ -22621,8 +22621,12 @@ Item {
             "(hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)")); // 规则②③延伸松弛行
         const bool okD3 = br1018.contains(QStringLiteral(
             "if (axisCon != 0 || c != 0) return axisCon;")); // 轴上臂优先 / c!=0 永不松守卫
+        // review0907 A-P3-1：单 Z 臂镜像行随拐角守卫更新（钉新行全文 + Z 臂守卫条件；旧钉
+        //   「单 Z 臂 → NS 偏好」是 A-P3-1 改写前的旧行，守卫只收口拐角误镜像、行为腿 (a)-(c) 不变）。
         const bool okD4 = wd1018.contains(QStringLiteral(
-            "con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂 → NS 偏好"));
+            "con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂（无 X 位）→ NS 偏好"))
+            && wd1018.contains(QStringLiteral(
+            "&& (con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) == 0)"));
         const bool okT1018 = okA && okB && okC && okD1 && okD2 && okD3 && okD4;
         if (!okT1018) ++totalFail;
         if (!okT1018)
@@ -35543,6 +35547,93 @@ Item {
                           << seedT21Dun << seedT21Mine << seedT21Des << seedT21Jun << ")";
     }
 
+    // ── t1021 音效层探针（面板 C：review0907 A-P2-1 要塞足迹 × 矿井 region 重叠格 structureEntered
+    //    边沿不被要塞态吞 —— 边沿检测无条件执行；环境音区折叠要塞优先级保留）──
+    //    rig：96×96×48 世界逐 seed 扫描（1..48），找「有要塞 + 足迹∩矿井包络 AABB 重叠点 B + 足迹内
+    //    矿井区外点 A」的世界（A 先建立 m_insideStronghold=true + mineshaft 边沿基线 → B 断言
+    //    entered_mineshaft 边沿仍触发）。原实现把四结构 loop 挂在 m_insideStronghold 的 else 臂：
+    //    要塞区内重叠格处进入事件被整 tick 跳过（本面板 B 点腿阴性敏感）。zone 断言：A/B 两点均
+    //    要塞低鸣（折叠单独做后要塞最高优先级不变）。
+    {
+        World wT21C;
+        wT21C.setWidth(96); wT21C.setDepth(96); wT21C.setHeight(48);
+        bool foundC = false;
+        int foundSeedC = -1;
+        double axC = -1, ayC = -1, azC = -1; // A：要塞足迹内、矿井区外（建立要塞态 + 边沿基线）
+        double bxC = -1, byC = -1, bzC = -1; // B：要塞足迹 ∩ 矿井包络 重叠格（边沿阳性点）
+        for (int s = 1; s <= 48 && !foundC; ++s) {
+            wT21C.setSeed(s);
+            if (!wT21C.hasStronghold()) continue;
+            const int sCx = wT21C.strongholdPortalX();
+            const int sCy = wT21C.strongholdPortalY() - World::kStrongholdPortalDy;
+            const int sCz = wT21C.strongholdPortalZ() - World::kStrongholdPortalDz;
+            const int sHalf = World::kStrongholdHalf;
+            const int sYLo = sCy, sYHi = sCy + World::kStrongholdWallH + 1;
+            for (int mi = 0; mi < wT21C.structureRegionCount(World::StructureMineshaft) && !foundC; ++mi) {
+                const QVariantList rm = wT21C.structureRegion(World::StructureMineshaft, mi);
+                const int ix0 = std::max(sCx - sHalf, rm[0].toInt());
+                const int ix1 = std::min(sCx + sHalf, rm[3].toInt());
+                const int iy0 = std::max(sYLo, rm[1].toInt());
+                const int iy1 = std::min(sYHi, rm[4].toInt());
+                const int iz0 = std::max(sCz - sHalf, rm[2].toInt());
+                const int iz1 = std::min(sCz + sHalf, rm[5].toInt());
+                if (ix0 > ix1 || iy0 > iy1 || iz0 > iz1) continue; // 足迹盒 × 矿井包络盒不相交
+                const int bxc = (ix0 + ix1) / 2, byc = (iy0 + iy1) / 2, bzc = (iz0 + iz1) / 2;
+                for (int corner = 0; corner < 4 && !foundC; ++corner) {
+                    const int axc = (corner & 1) ? sCx + sHalf - 1 : sCx - sHalf + 1;
+                    const int azc = (corner & 2) ? sCz + sHalf - 1 : sCz - sHalf + 1;
+                    for (int ayc : { sYHi, sYLo, byc }) { // A 的 y 优先取矿井 y 带外要塞层（更稳在区外）
+                        if (ayc < sYLo || ayc > sYHi) continue;
+                        const bool aOk = wT21C.insideStronghold(axc + 0.5, ayc + 0.5, azc + 0.5)
+                            && !wT21C.insideStructureRegion(World::StructureMineshaft, axc + 0.5, ayc + 0.5, azc + 0.5);
+                        const bool bOk = wT21C.insideStronghold(bxc + 0.5, byc + 0.5, bzc + 0.5)
+                            && wT21C.insideStructureRegion(World::StructureMineshaft, bxc + 0.5, byc + 0.5, bzc + 0.5);
+                        if (aOk && bOk) {
+                            axC = axc + 0.5; ayC = ayc + 0.5; azC = azc + 0.5;
+                            bxC = bxc + 0.5; byC = byc + 0.5; bzC = bzc + 0.5;
+                            foundC = true; foundSeedC = s;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        bool okC = foundC;
+        if (okC) {
+            PlayerController pcT21C; // 无窗口直造（Spectator noclip 定点 tick，同面板 A 口径）
+            int mineEnteredC = 0;
+            QObject::connect(&pcT21C, &PlayerController::structureEntered, &pcT21C,
+                             [&mineEnteredC](int k) { if (k == int(World::StructureMineshaft)) ++mineEnteredC; });
+            pcT21C.setWorld(&wT21C);
+            // A 点：要塞足迹内、矿井区外 → zone=要塞低鸣 + mineshaft 边沿基线（0 次）。
+            pcT21C.loadSavedState(float(axC), float(ayC), float(azC), -90.0f, 0.0f, 0);
+            pcT21C.tick();
+            const int mineAfterA = mineEnteredC;
+            okC = okC && mineAfterA == 0
+                && pcT21C.structureAmbientZone() == int(PlayerController::AmbientStronghold);
+            // B 点：重叠格 → entered_mineshaft 边沿仍触发（修复核心）+ zone 保持要塞（优先级保留）。
+            pcT21C.loadSavedState(float(bxC), float(byC), float(bzC), -90.0f, 0.0f, 0);
+            pcT21C.tick();
+            okC = okC && mineEnteredC == mineAfterA + 1
+                && pcT21C.structureAmbientZone() == int(PlayerController::AmbientStronghold);
+        }
+        if (!okC)
+            qInfo().noquote() << "  [t1021 diag C]" << "found=" << foundC << "seed=" << foundSeedC;
+        else
+            qInfo().noquote() << "  [t1021 diag C] overlap seed =" << foundSeedC
+                              << "A=(" << axC << ayC << azC << ") B=(" << bxC << byC << bzC << ")";
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| t1021 stronghold-footprint x mineshaft-region overlap (review0907"
+                             " A-P2-1): standing inside the stronghold footprint does NOT swallow"
+                             " structureEntered edges anymore -- point A (footprint, outside mineshaft"
+                             " region) establishes the stronghold state with a clean mineshaft edge"
+                             " baseline, point B (footprint AND mineshaft envelope overlap) still fires"
+                             " entered_mineshaft on the next tick, and the ambient zone stays"
+                             " stronghold (priority fold kept; the old else-branch skipped the whole"
+                             " region loop inside strongholds) (seed =" << foundSeedC << ")";
+    }
+
     // ── t1021 音效层探针（面板 B：四环境音 + 三事件音 wav 资产存在性 / WAV 格式合法性 + 全链源码钉）──
     //    (a) 资产腿：sounds/ 七新 wav 存在且格式合法（RIFF/WAVE、PCM s16 mono 44100、data 非空、时长
     //        落各自期望带——循环音 ≥6s、单发音 ≤2.5s）；CMake qrc 已登记。
@@ -35729,7 +35820,9 @@ Item {
         kbT22b.setStorePath(storeAT22);  // 重载（模拟重启）：映射保持
         okA = okA && kbT22b.keyFor(QStringLiteral("forward")) == Qt::Key_Up;
         okA = okA && kbT22b.canonicalKey(Qt::Key_Up) == Qt::Key_W;   // 反向规范化：↑ → 引擎 W
-        okA = okA && kbT22b.canonicalKey(Qt::Key_W) == Qt::Key_W;    // canonical 自身恒等
+        // review0907 A-P2-2 4a：无归属键丢弃（Key_unknown）—— 旧断言「Key_W 原样透传（canonical 自身
+        //   恒等）」正是被修的隐藏别名缺陷（forward 改 ↑ 后物理 W 经透传恒等继续驱动前进）。
+        okA = okA && kbT22b.canonicalKey(Qt::Key_W) == Qt::Key_unknown;
         okA = okA && kbT22b.actionOfKey(Qt::Key_Up) == QStringLiteral("forward");
         okA = okA && kbT22b.keyFor(QStringLiteral("back")) == Qt::Key_S; // 未动的动作保持默认
         // (c) 冲突检测拒收（一键多动作）+ 旧 canonical 让出后可被认领 + 幂等 + 未知动作/非法键。
@@ -35741,11 +35834,20 @@ Item {
         okA = okA && kbT22b.applyBinding(QStringLiteral("nosuch"), Qt::Key_P) == int(KM::ApplyUnknownAction);
         okA = okA && kbT22b.keyFor(QStringLiteral("nosuch")) == 0;
         okA = okA && kbT22b.applyBinding(QStringLiteral("jump"), 0) == int(KM::ApplyUnknownAction); // 非法键拒收
-        // (d) 恢复默认：内存回落 + 落盘改写 + 无归属键透传复位。
+        // (c2) review0907 A-P2-2 4b：固定不可映射黑名单守卫 —— Esc / 数字键（登记口径固定键）作为绑定
+        //      目标被拒（ApplyForbiddenKey），映射不变；同值重绑黑名单内默认键（modeCycle→G）幂等 Ok。
+        okA = okA && kbT22b.applyBinding(QStringLiteral("forward"), Qt::Key_Escape) == int(KM::ApplyForbiddenKey);
+        okA = okA && kbT22b.applyBinding(QStringLiteral("forward"), Qt::Key_3) == int(KM::ApplyForbiddenKey);
+        okA = okA && kbT22b.keyFor(QStringLiteral("forward")) == Qt::Key_Up;  // 拒收后映射不变
+        okA = okA && kbT22b.applyBinding(QStringLiteral("inventory"), Qt::Key_B) == int(KM::ApplyForbiddenKey);
+        okA = okA && kbT22b.applyBinding(QStringLiteral("drop"), Qt::Key_Control) == int(KM::ApplyForbiddenKey);
+        okA = okA && kbT22b.keyFor(QStringLiteral("modeCycle")) == Qt::Key_G; // 默认 G 在黑名单内（登记口径）
+        okA = okA && kbT22b.applyBinding(QStringLiteral("modeCycle"), Qt::Key_G) == int(KM::ApplyOk); // 同值幂等不回归
+        // (d) 恢复默认：内存回落 + 落盘改写 + 无归属键丢弃（4a 语义）。
         kbT22b.resetDefaults();
         okA = okA && kbT22b.keyFor(QStringLiteral("forward")) == Qt::Key_W
                   && kbT22b.keyFor(QStringLiteral("back")) == Qt::Key_S;
-        okA = okA && kbT22b.canonicalKey(Qt::Key_Up) == Qt::Key_Up;   // 无归属 → 原样透传
+        okA = okA && kbT22b.canonicalKey(Qt::Key_Up) == Qt::Key_unknown; // 无归属 → 丢弃（非透传）
         {
             QFile f(storeAT22);
             const QString bodyB = f.open(QIODevice::ReadOnly)
@@ -35771,10 +35873,13 @@ Item {
                              " pairwise-unique canonical keys (pinned id->key order), remap"
                              " persists into settings.json keyBindings preserving sibling"
                              " fields, reload restores the mapping (forward->Up canonicalizes"
-                             " to engine W), conflicting apply is rejected with mapping intact,"
-                             " vacated canonical key is claimable, unknown action/invalid key"
-                             " rejected, resetDefaults round-trips to file, partial section"
-                             " keeps defaults for missing/invalid rows, keyDisplayName W";
+                             " to engine W), unowned physical keys DISCARD to Key_unknown"
+                             " (review0907 alias fix), conflicting apply is rejected with"
+                             " mapping intact, vacated canonical key is claimable, fixed"
+                             " keys (Esc/digits/B/G/Ctrl) rejected ApplyForbiddenKey with"
+                             " modeCycle->G idempotent re-apply kept, unknown action/invalid"
+                             " key rejected, resetDefaults round-trips to file, partial"
+                             " section keeps defaults for missing/invalid rows, keyDisplayName W";
     }
 
     // ── t1022 键位重映射探针（面板 B：引擎侧生效链——真 PlayerController × KeybindManager 注入，
@@ -35869,8 +35974,9 @@ Item {
             diagT22B += QStringLiteral("iii crouch=%1 stand=%2 ").arg(crouchT22).arg(standT22);
         okB = okB && crouchT22 && standT22;
         // (iv) 前进重映射腿：forward→↑ → setKey(↑) → canonical W → +Z 位移（yaw 180 = 朝 +Z）；
-        //      且让出的 W 无归属透传仍前进（未重绑旧键语义保留口径）。24 tick（≈0.4s）：走加速段
-        //      起步低速，8 tick 位移不足 0.2 阈（先例走位腿 24-60 tick 同量级）。
+        //      且让出的 W（无任何动作值集归属）**不再驱动**（review0907 A-P2-2 4a 别名丢弃：旧断言
+        //      「W 透传仍前进」正是被修的隐藏别名缺陷）。24 tick（≈0.4s）：走加速段起步低速，
+        //      8 tick 位移不足 0.2 阈（先例走位腿 24-60 tick 同量级）。
         okB = okB && kbT22B.applyBinding(QStringLiteral("forward"), Qt::Key_Up) == int(KM::ApplyOk);
         const float z0T22 = pcT22.feetPosition().z();
         pcT22.setKey(Qt::Key_Up, true);
@@ -35883,10 +35989,10 @@ Item {
         tickB(pcT22, 24);
         pcT22.setKey(Qt::Key_W, false);
         tickB(pcT22, 2);
-        const bool fwdLegacyT22 = pcT22.feetPosition().z() > z1T22 + 0.2f;
-        if (!fwdRemapT22 || !fwdLegacyT22)
-            diagT22B += QStringLiteral("iv remap=%1 legacy=%2 ").arg(fwdRemapT22).arg(fwdLegacyT22);
-        okB = okB && fwdRemapT22 && fwdLegacyT22;
+        const bool fwdAliasKilledT22 = std::fabs(pcT22.feetPosition().z() - z1T22) < 0.05f;
+        if (!fwdRemapT22 || !fwdAliasKilledT22)
+            diagT22B += QStringLiteral("iv remap=%1 aliasKilled=%2 ").arg(fwdRemapT22).arg(fwdAliasKilledT22);
+        okB = okB && fwdRemapT22 && fwdAliasKilledT22;
         // (v) null 注入对照：未注入映射 → 原始键直入 m_keys（旧行为不变，安全降级面）。
         PlayerController pcT22b;
         pcT22b.setWorld(&wT22);
@@ -35949,13 +36055,84 @@ Item {
                              " PlayerController.setKey canonicalize simulated key events --"
                              " default Space jumps, rebound C jumps, rebound X sneaks into"
                              " Crouch and releases to Walk, rebound Up walks forward (+Z at"
-                             " yaw 180) while the vacated W still forwards via passthrough,"
+                             " yaw 180) while the vacated W is dead (review0907 alias fix:"
+                             " unowned keys discard instead of passthrough),"
                              " non-injected controller keeps raw-key legacy behavior, all"
                              " probe writes stay hermetic to a temp store (project-root"
                              " settings.json byte-identical sentinel), and"
                              " the full wiring is pinned (QML seven-action keyFor routing +"
                              " recorder/conflict/reset settings panel + revision-touch guard"
                              " + engine canonical choke point + CMake dual-target sources)";
+    }
+
+    // ── t1022 键位重映射探针（面板 C：review0907 A-P2-2 两病灶修复面 —— 隐藏别名丢弃 + 固定键黑名单
+    //    强制；纯 KeybindManager 层，密闭临时存储）──
+    //    (i) 别名丢弃：forward→C 后 canonicalKey(C)=W（翻译生效）而 canonicalKey(W)=Key_unknown
+    //        （物理旧键不再驱动 —— 原「无归属透传」让 W 经 canonical 恒等继续前进）。
+    //    (ii) 黑名单强制：applyBinding 目标命中登记口径固定键（Esc / 数字 / B / G / Ctrl / 修饰）→
+    //         ApplyForbiddenKey 拒收，映射不变；Esc/鼠标旁路面不经 canonicalKey choke（登记口径备案）。
+    //    (iii) 幂等不回归：黑名单内默认键同值重绑（modeCycle→G / sneak→Shift）保持 ApplyOk。
+    //    (iv) load() 侧强制：settings.json 带黑名单键值（jump=51 即 Key_3 / chat=16777216 即 Esc）→
+    //         读回落默认（值域守卫口径延伸到黑名单；非法值落默认语义不变）。
+    {
+        using KM = KeybindManager;
+        bool okC22 = true;
+        QString diagT22C;
+        const QString storeDirC22 = QDir::tempPath()
+            + QStringLiteral("/voxel_t1022_probeC_%1").arg(QCoreApplication::applicationPid());
+        QDir().mkpath(storeDirC22);
+        const QString storeCT22 = storeDirC22 + QStringLiteral("/settings.json");
+        {
+            QFile f(storeCT22);
+            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            f.write("{}");
+        }
+        KM kbC22;
+        kbC22.setStorePath(storeCT22);
+        // (i) 别名丢弃。
+        okC22 = okC22 && kbC22.applyBinding(QStringLiteral("forward"), Qt::Key_C) == int(KM::ApplyOk);
+        okC22 = okC22 && kbC22.canonicalKey(Qt::Key_C) == Qt::Key_W;        // 新键翻译生效
+        okC22 = okC22 && kbC22.canonicalKey(Qt::Key_W) == Qt::Key_unknown;  // 旧键别名丢弃（4a 核心）
+        // (iii) 幂等不回归（先于 (ii) 验 —— 需 modeCycle 当前值 = G 默认）：黑名单内默认键同值重绑
+        //       保持 ApplyOk（幂等判定先于黑名单守卫，sneak→Shift 同理）。
+        okC22 = okC22 && kbC22.keyFor(QStringLiteral("modeCycle")) == Qt::Key_G
+                          && kbC22.applyBinding(QStringLiteral("modeCycle"), Qt::Key_G) == int(KM::ApplyOk)
+                          && kbC22.applyBinding(QStringLiteral("sneak"), Qt::Key_Shift) == int(KM::ApplyOk);
+        // (ii) 黑名单强制（4b 核心）：拒收 + 映射不变。G 默认被 modeCycle 占用（先让它让出，排除
+        //      ApplyConflict 分流干扰，单独钉 G 的黑名单面）；其余固定键本就无占用。
+        okC22 = okC22 && kbC22.applyBinding(QStringLiteral("modeCycle"), Qt::Key_P) == int(KM::ApplyOk);
+        const int forbiddenTargetsC22[6] = { Qt::Key_Escape, Qt::Key_3, Qt::Key_0,
+                                             Qt::Key_B, Qt::Key_G, Qt::Key_Control };
+        for (int fk : forbiddenTargetsC22) {
+            const int res = kbC22.applyBinding(QStringLiteral("jump"), fk);
+            if (res != int(KM::ApplyForbiddenKey))
+                diagT22C += QStringLiteral("fb%1=%2 ").arg(fk).arg(res);
+            okC22 = okC22 && res == int(KM::ApplyForbiddenKey);
+        }
+        okC22 = okC22 && kbC22.keyFor(QStringLiteral("jump")) == Qt::Key_Space; // 拒收后映射不变
+        // (iv) load() 侧黑名单强制：坏键值落默认（51=Key_3；16777216=Key_Escape）。
+        const QString storeC22b = storeDirC22 + QStringLiteral("/settings_forbidden.json");
+        {
+            QFile f(storeC22b);
+            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            f.write(QByteArray("{\"keyBindings\":{\"jump\":51,\"chat\":16777216}}"));
+        }
+        KM kbC22b;
+        kbC22b.setStorePath(storeC22b);
+        okC22 = okC22 && kbC22b.keyFor(QStringLiteral("jump")) == Qt::Key_Space   // 黑名单值 → 默认
+                          && kbC22b.keyFor(QStringLiteral("chat")) == Qt::Key_T;
+        if (!okC22)
+            qInfo().noquote() << "  [t1022 diag C]" << diagT22C;
+        if (!okC22) ++totalFail;
+        qInfo().noquote() << (okC22 ? "PASS" : "FAIL")
+                          << "| t1022 alias-kill + forbidden-key blacklist (review0907 A-P2-2):"
+                             " after forward->C the physical old key W canonicalizes to Key_unknown"
+                             " (discarded by the setKey choke; no hidden passthrough alias), fixed"
+                             " registration keys (Esc / digits 0-9 / B / G / Ctrl) are rejected as"
+                             " bind targets with ApplyForbiddenKey and the mapping stays intact,"
+                             " same-value re-apply of blacklisted defaults (modeCycle->G,"
+                             " sneak->Shift) stays ApplyOk, and load() falls blacklisted"
+                             " settings.json values back to defaults";
     }
 
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
@@ -37595,7 +37772,7 @@ Item {
 
     // ── P-t1013 箱子矿车探针（R19.20 t1013 转正偏差 2；机制等价 MC 1.0 minecart with chest）──
     //    rig：共享世界轨线 + worldgen 标记箱 + PlayerController/MinecartManager/ChestStore 真注入
-    //    （convertMineshaftChests 真 Q_INVOKABLE 转正链，非复刻）。六腿：
+    //    （convertMineshaftChests 真 Q_INVOKABLE 转正链，非复刻）。七腿：
     //    (a) 转正链：标记箱（Chest+ChestStateMineshaftFlag）→ convertMineshaftChests 路 (a) 摘块 +
     //        registerCart 内容键 + spawnChestCart 四邻轨格落车（轨面全姿态）；clearMineshaftChest 静默性
     //        （blockBroken 计数不增 —— 走 setBlock 会发 blockBroken(22) 触发掉内容/清键，静默是承重的）。
@@ -37611,9 +37788,12 @@ Item {
     //        gate（键+空条目 roll / 已填 no-op / 非矿车键条目 no-op）；挖毁 clearChest 清键 → 不回生。
     //    (f) 源码钉：变体字段 / chestCartBroken 信号 / tryMount 拒载 / convertMineshaftChests /
     //        Main.qml delegate 箱体 / onChestCartBroken / enterWorld 接线（阴性轮敏感）。
+    //    (g) review0907 A-P1-1：loot 不再生 —— roll 后取空重开不再 roll（looted 持久标志 gate）+
+    //        "looted":true 落盘 round-trip（cart 回生标记同条目共存，旧档缺键 = 从未 roll）。
     {
         const auto [x0T1013, z0T1013] = nextSlot();
         bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
+        bool okG = false; // review0907 A-P1-1 战利品不再生腿（roll → 取空 → 重开不再生 + looted 落盘）
         // (a) 轨线 4 格 + 标记箱立 (x0+1, z0+1)（键格；4 邻含轨格 (x0+1, z0) → 转正落车该轨上）。
         for (int i = 0; i < 4; ++i) w.setBlock(x0T1013 + i, kRigY, z0T1013, BR::Rail, 0);
         const int keyX = x0T1013 + 1, keyY = kRigY, keyZ = z0T1013 + 1;
@@ -37877,6 +38057,42 @@ Item {
                     << "pop1=" << ePop1 << "rolledAny=" << rolledAny << "pop2=" << ePop2 << "pop3=" << ePop3
                     << "carts:" << dumpE;
             }
+            // (g) review0907 A-P1-1 战利品不再生：roll（(e) 的 ePop1 已 roll 于 csLoaded 键格）→ 取空
+            //     全部 27 槽（复现「首开取空」）→ 再开（openChest 每次 open 都调 populate）断言**不再
+            //     roll**（返 false + 槽保持空，同 seed 重 roll 的无限再生在此暴露）+ looted 落盘
+            //     round-trip（allChests "looted":true → loadAll 读回 → gate 仍拒 = 跨存档面同断言）。
+            //     旧档豁免语义不破：空条目仍随 "cart":true 落盘（回生面），looted 只封 loot 面。
+            {
+                for (int i = 0; i < 27; ++i)
+                    csLoaded.setSlot(keyX, keyY, keyZ, i, 0, 0); // 取空全部槽（条目仍在 + 全空）
+                const bool regenRejected = !csLoaded.populateMineshaftLoot(keyX, keyY, keyZ);
+                bool allEmptyAfter = true;
+                for (int i = 0; i < 27; ++i)
+                    if (csLoaded.slotIdAt(keyX, keyY, keyZ, i) != 0) allEmptyAfter = false;
+                QVariantList savedGT1013;
+                for (const QVariant &v : csLoaded.allChests()) {
+                    const QVariantMap cm = v.toMap();
+                    if (cm.value(QStringLiteral("x")).toInt() == keyX
+                        && cm.value(QStringLiteral("y")).toInt() == keyY
+                        && cm.value(QStringLiteral("z")).toInt() == keyZ)
+                        savedGT1013.append(v);
+                }
+                bool lootedSaved = false;
+                if (!savedGT1013.isEmpty()) {
+                    const QVariantMap cm = savedGT1013.first().toMap();
+                    lootedSaved = cm.value(QStringLiteral("looted")).toBool()
+                        && cm.value(QStringLiteral("cart")).toBool(); // 回生标记与 loot 标记同条目共存
+                }
+                ChestStore csGT1013;
+                csGT1013.loadAll(savedGT1013); // round-trip（跨存档面）
+                const bool lootedRoundTrip = csGT1013.isCartCell(keyX, keyY, keyZ)
+                    && !csGT1013.populateMineshaftLoot(keyX, keyY, keyZ);
+                okG = regenRejected && allEmptyAfter && lootedSaved && lootedRoundTrip;
+                if (!okG)
+                    qInfo().noquote() << "  [t1013 diag g]" << "regenRejected=" << regenRejected
+                        << "allEmpty=" << allEmptyAfter << "lootedSaved=" << lootedSaved
+                        << "roundTrip=" << lootedRoundTrip;
+            }
             QObject::disconnect(connBBT1013);
             QObject::disconnect(connPlainT1013);
             QObject::disconnect(connChestT1013);
@@ -37936,6 +38152,14 @@ Item {
                              " (cart-flag true, empty-exemption) -> loadAll round-trip -> convertMineshaftChests"
                              " path (b) respawns the entity; populateMineshaftLoot first-open gate (empty cart"
                              " key rolls once, filled/non-cart entries no-op)";
+        if (!okG) ++totalFail;
+        qInfo().noquote() << (okG ? "PASS" : "FAIL")
+                          << "| t1013 loot no-regen (review0907 A-P1-1): mineshaft cart loot rolls once --"
+                             " take all 27 slots empty then reopen -> populateMineshaftLoot rejected and"
+                             " slots stay empty (same-seed re-roll infinite regen fixed by persistent"
+                             " looted flag); looted:true survives allChests->loadAll round-trip with"
+                             " cart respawn flag coexisting on the same entry (old-save compatible:"
+                             " missing looted key = never rolled)";
         if (!okF) ++totalFail;
         qInfo().noquote() << (okF ? "PASS" : "FAIL")
                           << "| t1013 source pins: variant fields + chestCartBroken signal + tryMount reject +"
@@ -39115,6 +39339,41 @@ Item {
                 && t.contains(QStringLiteral("if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone) return false;")); // 仅置换 Stone
         }
 
+        // ── (g) review0907 A-P1-2 128 高世界煤脉自然上探：煤 yMax=0 哨兵（上界纯列自适应 hc-5，
+        //     对齐旧散点 stoneTop=h-3 口径）→ 高山列（hills amp 7 → 地表可 ~71）煤脉可越过 y=60。
+        //     原 yMax=60 硬帽把 128 高世界（游戏本体口径）的煤封顶——头注释「128 高世界煤脉自然上探」
+        //     声明落空。rig 兼容：64 高世界 hc-5 ≤ 58 < 60，本就不触发帽 → (a)-(f) 腿行为不变。
+        //     5 seed 联合断言（任一 seed 出现 y>61 煤块即过；逐 seed 计数落 diag）。
+        //     **阈值 62 的由来（阴性轮实测回灌）**：帽顶 60 的长条姿态上探恰好 +1 越界到 y=61（三
+        //     seed 实证 maxY=61），y>60 口径对硬帽摘除不敏感（假绿）→ 收紧到 62：帽下 62+ 恒 0，
+        //     列自适应下 s777 实测到 63（diag y<=63）→ 恰红恰绿。
+        bool okG = false;
+        {
+            const quint32 seedsHiT1014[] = { 20260821u, 777u, 424242u, 1337u, 90210u };
+            QString diagG;
+            for (int si = 0; si < 5; ++si) {
+                World wHi;
+                wHi.setWidth(128);
+                wHi.setDepth(128);
+                wHi.setHeight(128);
+                wHi.setSeed(int(seedsHiT1014[si]));
+                int aboveCount = 0, maxYSeen = -1;
+                for (int y = 62; y < 128; ++y)
+                    for (int z = 0; z < 128; ++z)
+                        for (int x = 0; x < 128; ++x)
+                            if (wHi.blockAt(x, y, z) == BR::CoalOre) {
+                                ++aboveCount;
+                                maxYSeen = std::max(maxYSeen, y);
+                            }
+                diagG += QStringLiteral(" s%1:%2(y<=%3)").arg(seedsHiT1014[si]).arg(aboveCount).arg(maxYSeen);
+                okG = okG || aboveCount > 0;
+            }
+            if (!okG)
+                qInfo().noquote() << "  [t1014 diag g] 128-high coal-above-61 misses:" << diagG;
+            else
+                qInfo().noquote() << "  [t1014 diag g] 128-high coal-above-61 counts:" << diagG;
+        }
+
         for (int oi = 0; oi < 7; ++oi) { // profile 表数据落账（六矿种 + 铜）：5 seed 范围摘要
             int tmin = 1 << 30, tmax = -1, cmin = 1 << 30, cmax = -1, cnMin = 100, cnMax = -1;
             for (int si = 0; si < 5; ++si) {
@@ -39183,6 +39442,18 @@ Item {
                              "loses the table and every shape leg above reads the scattered"
                              "signature: ~96% singletons, conn26 ~ 0%)"
                           << (okF ? QString() : QStringLiteral("source pin missing"));
+        if (!okG) ++totalFail;
+        qInfo().noquote() << (okG ? "PASS" : "FAIL")
+                          << "| t1014(g) 128-high-world coal climbs above y=60 (review0907 A-P1-2):"
+                             "coal profile yMax=0 sentinel makes the band ceiling purely column-adaptive"
+                             "(hc-5, matching the legacy per-column stoneTop=h-3 scatter rule), so hill"
+                             "columns (surface up to ~71 at 128 world height) carry coal veins above the"
+                             "old hard cap of 60 -- the 64-high rig worlds never trigger the cap (hc-5"
+                             "<= 58) so legs (a)-(f) are unchanged; threshold is y>=62 because the"
+                             "capped bar overshoots the 60 ceiling by exactly one block (y=61,"
+                             "diag-verified negative round), and at least one of 5 seeds must show"
+                             "coal at y>=62 (per-seed counts in diag)"
+                          << (okG ? QString() : QStringLiteral("no coal above 61 in any seed"));
     }
 
     // ── P-t1015 载具攻击目标甄别探针（R19.20 t1015；机制等价 MC 1.0 骑乘组合 hitbox 拆分甄别）──
