@@ -548,7 +548,9 @@ bool MinecartManager::tryStallSlideback(Cart &c, World *world, int railY)
 //   · 静置（|speed| ≤ 1e-3）不捕 —— 静置闸是谷心不动点的守门人（谷壁静置由它 kick 送入谷、谷心静置
 //     由它保持静止），本律只管「运动的」车；
 //   · 能量足（上式）不捕 —— 「按速度通过」：交还既有上坡减速物理，能爬出去的车自然穿谷而过；
-//   · 金轨格不捕 —— 断电金轨刹车（t939③ brake）/ 通电 boost 既有轨型语义优先，本修不扩面（R-a 口径）；
+//   · 通电金轨格不捕（review0906 #7 收窄，旧为金轨格无条件豁免）—— 通电 boost 既有轨型语义优先；
+//     断电金轨谷格照捕：t939③ 刹车只在静置分支管不住滑行车（旧豁免 = 断电金轨谷 t981 往复复发），
+//     捕获停驻谷心后 |speed|→0 恰落入 t939③ 静置刹车 = 稳定停住；
 //   · 非 V 谷格不捕 —— 谷判定与 railRiseAt 谷面分支同几何同源（直轨〔非拐角 / 非 3+ 连接〕+ 行进轴
 //     两侧三高探针皆 +1 → rise = 2|axis-0.5| 谷面），普通坡 / 平轨 / 拐角零触碰。
 //   已越谷心正在爬对壁（d < 0）不捕：本 tick 放行既有上坡减速（高能穿透同一口径 —— 捕获只发生在
@@ -559,7 +561,14 @@ bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, q
     if (std::fabs(c.speed) <= 1e-3f) return false;            // 静置 → 静置闸管辖（谷心不动点）
     const int bcx = int(std::floor(c.pos.x()));
     const int bcz = int(std::floor(c.pos.z()));
-    if (world->blockAt(bcx, railY, bcz) == BlockRegistry::GoldenRail) return false; // 金轨语义优先
+    // review0906 #7：豁免收窄为「通电金轨」—— 通电 boost 语义优先（t658/t735④ 同一判定位）。旧版
+    //   无条件豁免的口径劈叉：注释声称「断电金轨刹车（t939③）」兜底，而 t939③ 刹车实际只在
+    //   |speed|<1e-3 静置分支内 —— 滑行车（coasting）在断电金轨谷格交还纯保守谷物理（零耗散）+
+    //   两壁 kick 再供能 = t981 往复复发。断电金轨谷格现在照捕：捕获停驻谷心（|speed|→0）后恰落入
+    //   t939③ 静置刹车分支（断电动力轨 continue）= 稳定停住，两语义无缝衔接。
+    if (world->blockAt(bcx, railY, bcz) == BlockRegistry::GoldenRail
+        && (world->stateAt(bcx, railY, bcz) & BlockRegistry::GoldenRailStateOnFlag) != 0)
+        return false;                                         // 通电金轨 boost 语义优先
     // V 谷判定（railRiseAt 谷面分支同源镜像：同轴取法 / 同拐角十字排除 / 同三高探针）。
     const auto dlt = [&](int dx, int dz) {
         return BlockRegistry::railProbeDelta(
@@ -596,8 +605,17 @@ bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, q
     for (int k = 1; k <= kCartValleyClimbScanMax; ++k) {
         const int sx = ew ? bcx + climbStep * k : bcx;
         const int sz = ew ? bcz : bcz + climbStep * k;
-        if (!BlockRegistry::isRail(world->blockAt(sx, railY + k, sz))) break;
-        hOpp = k;
+        // review0906 #16：三高探针（railProbeDelta 同口径：k-1 / k / k+1 三层）代替单层 `railY+k` 有轨
+        //   即 break —— +2 跳升 / L 形爬升壁（邻列层差 ±2 落不进单层探针）不再把扫描提前打断成低 hOpp
+        //   （阈值被低估 → 能量边界车被放行去爬爬不出的壁）。层差计入爬升账：hOpp = k + δ
+        //   （δ∈{-1,0,+1}——δ=0 楼梯壁照旧、δ=+1 跳升足额计入、δ=-1 壁顶平台段不虚增）；三高皆无轨
+        //   （dK == INT_MIN）才是真壁尾。k±1 越界 blockAt 返 Air 安全（ChunkManager 语义）。
+        const int dK = BlockRegistry::railProbeDelta(
+            { world->blockAt(sx, railY + k, sz),
+              world->blockAt(sx, railY + k + 1, sz),
+              world->blockAt(sx, railY + k - 1, sz) });
+        if (dK == INT_MIN) break;
+        hOpp = k + dK;
     }
     const float v2 = c.speed * c.speed;
     const float pass2 = 2.0f * kCartSlopeGravity
