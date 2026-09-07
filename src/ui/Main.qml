@@ -847,14 +847,17 @@ Window {
         // t1016 世界时刻 / 天气恢复：存退重进保留退出时刻（dev-spec「存档保留退出时刻」）。读
         //   loadWorldTime() 快照（旧存档缺键 → 默认 phase 0 / day 0 / weather 0 = 新世界首帧晴天，
         //   恢复无害）→ restoreTime 精确复原昼夜相位 + 天数（月相 = day%8 随之复原）+ setWeatherState
-        //   复原天气态。须在本函数内 theWorld 已完成 beginLoad/regenerate 之后（天气与地形无关，仅
-        //   顺序可读性）；worldClock.running 绑 window.worldRunning，此处写 phase/day 即时派生亮度 /
-        //   太阳方向（applyTime 即时 emit），进世界首帧即存档时刻的昼夜观感。
+        //   复原天气态。review0906 #14：天气仅存档**真带** weather 键（hasWeather）才恢复——缺键
+        //   （旧档 / 新世界）保持 beginLoad/generate 已跑的 resetWeather 首场晴偏短窗（20/45s，
+        //   「进世界即见天气」口径），防无条件 setWeatherState(Clear) 把初始窗重抽为常规 45/120s。
+        //   须在本函数内 theWorld 已完成 beginLoad/regenerate 之后（天气与地形无关，仅顺序可读性）；
+        //   worldClock.running 绑 window.worldRunning，此处写 phase/day 即时派生亮度 / 太阳方向
+        //   （applyTime 即时 emit），进世界首帧即存档时刻的昼夜观感。
         {
             const wt = worldStore.loadWorldTime()
             worldClock.restoreTime(wt.phase, wt.day)
-            theWorld.setWeatherState(wt.weather)
-            console.info("[t1016] world time restored: phase=" + wt.phase + " day=" + wt.day + " weather=" + wt.weather)
+            if (wt.hasWeather) theWorld.setWeatherState(wt.weather)
+            console.info("[t1016] world time restored: phase=" + wt.phase + " day=" + wt.day + " weather=" + wt.weather + " hasWeather=" + wt.hasWeather)
         }
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()

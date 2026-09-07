@@ -111,10 +111,13 @@ public:
     //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
     Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {},
                              const QVariantMap &worldTime = {});
-    // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int}。
-    //   旧存档缺键 → 逐键缺省（phase 0.0 = 新世界默认相位 / day 0 / weather 0 = Clear 晴天）——
-    //   「新增字段对旧存档缺省（默认早晨 / 晴天）」，加载端拿默认值恢复 = 与新世界首帧时钟一致，
-    //   不炸不跳。未打开 → 空 map（caller 判空跳过恢复）。
+    // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int,
+    //   hasWeather: bool}。旧存档缺键 → 逐键缺省（phase 0.0 = 新世界默认相位 / day 0 / weather 0 =
+    //   Clear 晴天）——「新增字段对旧存档缺省（默认早晨 / 晴天）」，加载端拿默认值恢复 = 与新世界
+    //   首帧时钟一致，不炸不跳。review0906 #14：hasWeather = 存档是否**真带** weather 键（缺键默认
+    //   weather 0 与「真存过 Clear」不可区分 → 消费端仅 hasWeather 才 setWeatherState，缺键走
+    //   resetWeather 首场晴偏短窗，防无条件恢复把初始 20/45s 窗重抽为常规 45/120s）。未打开 → 空 map
+    //   （caller 判空跳过恢复）。
     Q_INVOKABLE QVariantMap loadWorldTime() const;
     // 读当前库的 chests 表为 QVariantList（同 saveAll 的 chests 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
