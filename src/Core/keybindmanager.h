@@ -56,7 +56,10 @@ public:
         ApplyUnknownAction, // 动作 id 不在表内（QML 传错 id 的防线）
         ApplyConflict,      // 目标键已被其它动作占用（拒收；actionOfKey 可取占用方）
         ApplyForbiddenKey   // review0907 A-P2-2 4b：目标键在固定不可映射黑名单（Esc / 数字 1-9 / Enter /
-                            //   B / G / 修饰键等登记口径固定键；拒收，映射不变。QML 录制器 else 臂兜底提示）
+                            //   B / G / 修饰键等登记口径固定键；拒收，映射不变。QML 录制器单出「该键为
+                            //   固定功能键，不可绑定」文案）。例外：动作**自身 canonical 默认键**放行
+                            //   （review0907 B #2 单向门修复——sneak 可单独绑回 Shift）。判定先于
+                            //   ApplyConflict（#5：被占用的固定键报「固定键」非「冲突」）
     };
     Q_ENUM(ApplyResult)
 
