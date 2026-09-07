@@ -40,9 +40,39 @@ const QList<KeybindManager::ActionDef> &kActionTable()
 }
 
 // 合法键判定（settings.json 值域守卫）：0 / Key_unknown / <Space 非键值拒收 → 落默认。
+//   review0907 A-P2-2 4b：固定不可映射黑名单落实为守卫（与上方登记口径同源全列）——原实现仅查
+//   key>=0x20，Esc(0x01000000) / 数字 1-9 / B / G / Ctrl 等组合弦与固定键都能绑进去（口径不符）。
+//   注意：黑名单只拦「绑定目标」，不动 kActionTable 默认值（canonical 经构造 / resetDefaults 直播种，
+//   不走本守卫；同值重绑的幂等路径见 applyBinding 先于黑名单判定）。修饰键（Shift）是 sneak 的默认
+//   canonical：作为目标恒拒收，默认语义不受影响。鼠标键（攻击 / 放置 / 中键拾取）本就非键盘域，
+//   无对应键值可入，登记口径在此仅备案。
 bool isValidKeyValue(int key)
 {
-    return key >= 0x20 && key != Qt::Key_unknown;
+    if (key < 0x20 || key == Qt::Key_unknown) return false;
+    switch (key) {
+    case Qt::Key_Escape:                      // 指针 / 菜单逃生口（重绑软锁风险）
+    case Qt::Key_Return:
+    case Qt::Key_Enter:                       // chat 固定别名
+    case Qt::Key_B:
+    case Qt::Key_G:                           // F3 组合弦修饰位
+    case Qt::Key_Control:
+    case Qt::Key_Shift:
+    case Qt::Key_Alt:
+    case Qt::Key_Meta:                        // 组合弦 / 丢弃整栈修饰位（Ctrl）及其余修饰键
+    case Qt::Key_0:
+    case Qt::Key_1:
+    case Qt::Key_2:
+    case Qt::Key_3:
+    case Qt::Key_4:
+    case Qt::Key_5:
+    case Qt::Key_6:
+    case Qt::Key_7:
+    case Qt::Key_8:
+    case Qt::Key_9:                           // hotbar 九槽阵列（含 0 备用位，按登记口径全列）
+        return false;
+    default:
+        return true;
+    }
 }
 
 } // namespace
@@ -161,7 +191,11 @@ int KeybindManager::canonicalKey(int physicalKey) const
     for (const ActionDef &def : kActionTable())
         if (m_bindings.value(QString::fromLatin1(def.id)) == physicalKey)
             return def.canonical;   // 命中归属动作 → 翻译成引擎 canonical 键
-    return physicalKey;             // 无归属 → 原样透传（未登记键 / 未重绑旧键语义保留）
+    // review0907 A-P2-2 4a：无归属 → 丢弃（Key_unknown）。原「原样透传」是隐藏别名缺陷——改绑
+    //   forward W→C 后物理 W 不在任何动作值集里，透传恒等于 canonical 自身恒等（Key_W==Key_W），
+    //   旧键继续驱动前进。引擎消费点（m_keys / step / 蹲态机）全部是绑定动作的 canonical 键，
+    //   丢弃即「该键无动作」的正确语义；PlayerController::setKey 侧对称早退（press / release 同门）。
+    return Qt::Key_unknown;
 }
 
 QString KeybindManager::actionOfKey(int key) const
@@ -177,13 +211,19 @@ int KeybindManager::applyBinding(const QString &action, int key)
     bool found = false;
     for (const ActionDef &def : kActionTable())
         if (QString::fromLatin1(def.id) == action) { found = true; break; }
-    if (!found || !isValidKeyValue(key))
+    // 顶部只查「像键值」（非 0 / 非 Key_unknown / ≥0x20）；黑名单细查后置（见下），保证拒收码分流
+    //   正确：未知动作 → ApplyUnknownAction，固定键 → ApplyForbiddenKey。
+    if (!found || key < 0x20 || key == Qt::Key_unknown)
         return int(ApplyUnknownAction);
     const QString owner = actionOfKey(key);
     if (!owner.isEmpty() && owner != action)
         return int(ApplyConflict);   // 一键多动作 → 拒收（QML 提示占用方）
     if (m_bindings.value(action) == key)
         return int(ApplyOk);         // 幂等：同值重复应用零副作用（不重写盘 / 不抖 revision）
+    // review0907 A-P2-2 4b：固定不可映射黑名单守卫（幂等判定之后 —— 同值重绑如 modeCycle→G（其默认
+    //   canonical 恰在黑名单内）保持 ApplyOk 不回归；新目标命中黑名单 → ApplyForbiddenKey 拒收）。
+    if (!isValidKeyValue(key))
+        return int(ApplyForbiddenKey);
     m_bindings.insert(action, key);
     persist();
     ++m_revision;
