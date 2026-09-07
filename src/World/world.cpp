@@ -6526,8 +6526,10 @@ void World::placeBedrock()
 //
 //   结构避让（既有优先级别破）：本 pass 仍先于 placeGravelPockets / carveCaves / 矿井 / 神殿 /
 //   要塞——结构覆盖矿石、gravel 只置换 Stone、carve 挖走 stone/ore 暴露矿脉于洞壁，语义全保留。
-//   海列 cell 整格跳过 / 逐格 stone 区段上界 y ≤ h-3 / 基岩层不布矿 / 仅置换 Stone，均沿用旧口径
-//   （逐格重查 heightAt → 高度带按列自适应，128 高世界煤脉自然上探）。矿井巷壁暴露矿（t565
+//   逐列海检（tryOre h ≤ wl+1 拒）/ 逐格 stone 区段上界 y ≤ h-3 / 基岩层不布矿 / 仅置换 Stone，
+//   均沿用旧口径（逐格重查 heightAt → 高度带按列自适应，128 高世界煤脉自然上探）。review0906
+//   #11：cell 级海列整格跳过已移除（旧口径按中心列一票否决整 cell = 海岸带整 16×16 零矿 patch，
+//   ≠ 旧散点逐列跳过分布；现纯海 cell 在 tryOre 逐列被拒，分布恢复旧貌）。矿井巷壁暴露矿（t565
 //   IronOre/CoalOre，见 placeMineshaft）独立于本 pass，不受影响。
 //   确定性：全部 hashVoxel(seed ⊕ 矿盐, ...) 纯函数（PLAN §2-K），同 seed 同矿脉；禁运行期随机源。
 void World::scatterOres()
@@ -6587,10 +6589,14 @@ void World::scatterOres()
 
     for (int cz = 0; cz < m_depth; cz += kCell) {
         for (int cx = 0; cx < m_width; cx += kCell) {
-            // cell 中心列高：海列 cell 整格跳过（同旧整列口径）；煤带上界按 cell 自适应。
+            // review0906 #11：cell 中心列高**不再作海列整格跳过**——旧口径按中心列一票否决整个
+            //   16×16 cell，海洋中心 cell 内的陆地列（海岸过渡带）从此完全无矿 = 整 16×16 零矿
+            //   patch，与旧散点「逐列跳过」分布不符。恢复旧分布：海列拒绝兜底在 tryOre 逐列海检
+            //   （h ≤ wl+1 即拒；veinN 计算便宜，纯海 cell 的脉在逐列 tryOre 全数被拒 = 零成本余量）。
+            //   hc 仍保留：煤带（kind==1）上界的 cell 列高自适应（纯海 cell 中煤落点 y 同受逐列
+            //   tryOre 兜底，无矿溢出）。
             const int hc = std::min(heightAt(std::min(cx + kCell / 2, m_width - 1),
                                              std::min(cz + kCell / 2, m_depth - 1)), m_height - 1);
-            if (hc <= kWaterLevel + 1) continue;
             for (int k = 0; k < kOreKindCount; ++k) {
                 const VeinProfile &p = kProfiles[k];
                 // 每 cell 脉数 = base + (hash%100 < frac)%（每矿种独立盐流，确定性）。
@@ -6674,8 +6680,12 @@ void World::scatterOres()
                             if (y + dy < p.yMin || y + dy > p.yMax) {
                                 dy = 0;
                                 if (dx == 0 && dz == 0) {
-                                    const int d = int((rv >> 8) % 6u);
-                                    dx = kD6[d][0]; dz = kD6[d][2];
+                                    // review0906 #18：重挑**限水平 4 向**——旧 6 向重挑仍可能抽中竖向
+                                    //   （kD6[2]/[3]）→ dy 已抹平 + dx=dz=0 = 零位移步，同格重试到步数
+                                    //   耗尽（脉提前夭折，尺寸分布有偏）。水平 4 向保证重挑必走一步。
+                                    static const int kH4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                                    const int d = int((rv >> 8) % 4u);
+                                    dx = kH4[d][0]; dz = kH4[d][1];
                                 }
                             }
                             x += dx; y += dy; z += dz;
