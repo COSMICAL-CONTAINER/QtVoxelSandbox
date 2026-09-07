@@ -40898,14 +40898,95 @@ Item {
             QStringList missD;
             missD << pinSet(root + QStringLiteral("/src/Core/blockregistry.cpp"), {
                 {"torch-support-cactus", "if (blockId == Cactus) return false;"},
+                // review0906 #8：单一权威本体 + 公式行（预检/复检四处共享）
+                {"mech-ladder-support-fn", "bool BlockRegistry::mechLadderSupportBlock(quint8 blockId)"},
+                {"mech-ladder-support-formula", "return blockId != Cactus && isFullCube(blockId);"},
             });
             missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
-                {"mech-precheck-cactus", "mechSup == BlockRegistry::Cactus"},
-                {"hit-precheck-cactus", "hitBlock == BlockRegistry::Cactus"},
+                // review0906 #8：预检两处 + 复检两处全部走单一权威（裸 isFullCube 复检 = 劈叉回潮）
+                {"mech-precheck-authority", "if (!BlockRegistry::mechLadderSupportBlock(mechSup)) return;"},
+                {"ladder-precheck-authority", "if (!BlockRegistry::mechLadderSupportBlock(hitBlock)) return;"},
+                {"ladder-recheck-authority", "BlockRegistry::mechLadderSupportBlock(m_world->blockAt(sx, sy, sz))", 2},
             });
             okD = missD.isEmpty();
             if (!okD)
                 qInfo().noquote() << "  [t1017 diag d] pin miss:" << missD.join(QLatin1Char(','));
+        }
+        // (e) review0906 #8 邻块编辑后失撑掉落行为腿：旧档残影注入（直接 setBlock 模拟 pre-t1017
+        //     旧档）—— 侧贴仙人掌的梯子（梯子非整立方 → checkCactusOnEdit ④ 不触发，柱存活）+
+        //     仙人掌顶贴地拉杆（顶面附着不触 ④ 水平邻接口径 → 稳定残留）。触发 = 挖**另一侧邻格**
+        //     （支撑本体仙人掌全程存活 = 口径劈叉面：放置预检拒仙人掌、复检裸 isFullCube 对
+        //     Cactus 恒真 → 旧档附着块永不掉）。NEW：复检走 mechLadderSupportBlock 单一权威 →
+        //     Cactus 不算合格支撑 → 挖邻块即掉。石墙梯对照（挖支撑本体）验挖掘链本身不带假红。
+        bool okE8 = false;
+        {
+            const auto [xn8, zn8] = nextSlot();
+            for (int dx = -3; dx <= 5; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) {
+                    for (int dy = -1; dy <= 4; ++dy) w.setBlock(xn8 + dx, kRigY + dy, zn8 + dz, BR::Air, 0);
+                    w.setBlock(xn8 + dx, kRigY - 1, zn8 + dz, BR::Stone, 0);
+                }
+            w.setBlock(xn8, kRigY - 1, zn8, BR::Sand, 0);     // 仙人掌合法沙支撑
+            w.setBlock(xn8, kRigY,     zn8, BR::Cactus, 0);   // 下柱
+            w.setBlock(xn8, kRigY + 1, zn8, BR::Cactus, 0);   // 上柱
+            w.setBlock(xn8 + 1, kRigY,     zn8, BR::Ladder, 1); // state=1 → 支撑墙 -X = 仙人掌（旧档注入）
+            w.setBlock(xn8,     kRigY + 2, zn8, BR::Lever, 0);  // 贴地附着 → 支撑 = 仙人掌顶（旧档注入）
+            tickN(w, 2);
+            const bool rigOk8 = w.blockAt(xn8, kRigY, zn8) == BR::Cactus
+                && w.blockAt(xn8, kRigY + 1, zn8) == BR::Cactus
+                && w.blockAt(xn8 + 1, kRigY, zn8) == BR::Ladder
+                && w.blockAt(xn8, kRigY + 2, zn8) == BR::Lever;
+            // 触发一：挖梯子**另一侧邻格**石块（P-t945 真瞄准链 + 创造瞬破 = finishMiningAt 全链；
+            //   石头水平邻是梯子格非仙人掌 → ④ 不触发；支撑仙人掌全程存活 = 口径劈叉面）。
+            w.setBlock(xn8 + 2, kRigY, zn8, BR::Stone, 0);
+            tickN(w, 2);
+            pcT1017.setSelectedBlock(BR::Stone);
+            aimT1017(float(xn8) + 4.5f, float(kRigY), float(zn8) + 0.5f,
+                     float(xn8) + 3.4f, float(kRigY) + 0.5f, float(zn8) + 0.5f);
+            pcT1017.beginMining(); // 创造瞬破命中石 → dropUnsupportedLaddersAround / MechAround 复检
+            pcT1017.endMining();
+            pumpMsT1017(60);
+            tickN(w, 2);
+            const bool ladderDropped8 = w.blockAt(xn8 + 1, kRigY, zn8) == BR::Air
+                && w.blockAt(xn8 + 2, kRigY, zn8) == BR::Air
+                && w.blockAt(xn8, kRigY, zn8) == BR::Cactus;   // 柱无恙（防「柱先塌带走梯子」假绿）
+            // 触发二：拉杆正上方触发块（放置位水平邻非仙人掌 → ④ 不触发；挖它 → 拉杆 6 邻复检；
+            //   自 +X 下方斜瞄石底面 — 射线在拉杆薄盒上方掠过不截胡）。
+            w.setBlock(xn8, kRigY + 3, zn8, BR::Stone, 0);
+            tickN(w, 2);
+            aimT1017(float(xn8) + 3.5f, float(kRigY), float(zn8) + 0.5f,
+                     float(xn8) + 1.05f, float(kRigY) + 3.1f, float(zn8) + 0.5f);
+            pcT1017.beginMining();
+            pcT1017.endMining();
+            pumpMsT1017(60);
+            tickN(w, 2);
+            const bool leverDropped8 = w.blockAt(xn8, kRigY + 2, zn8) == BR::Air
+                && w.blockAt(xn8, kRigY + 3, zn8) == BR::Air
+                && w.blockAt(xn8, kRigY + 1, zn8) == BR::Cactus;
+            // 石墙梯对照（挖掘链 sanity）：支撑本体被挖 → 梯必掉（新旧代码同绿，防 harness 假红）。
+            //   石柱放 +4（贴柱水平邻 = 整立方触发 ④ 整柱坍落，特避）；自 +X 瞄石 +X 面（梯子盒在
+            //   石的 -X 侧背后，射线先中石）。
+            w.setBlock(xn8 + 4, kRigY, zn8, BR::Stone, 0);
+            w.setBlock(xn8 + 3, kRigY, zn8, BR::Ladder, 0);    // state=0 → 支撑墙 +X = 石头
+            tickN(w, 2);
+            aimT1017(float(xn8) + 5.5f, float(kRigY), float(zn8) + 0.5f,
+                     float(xn8) + 4.6f, float(kRigY) + 0.5f, float(zn8) + 0.5f);
+            pcT1017.beginMining();
+            pcT1017.endMining();
+            pumpMsT1017(60);
+            tickN(w, 2);
+            const bool ctrlDropped8 = w.blockAt(xn8 + 3, kRigY, zn8) == BR::Air
+                && w.blockAt(xn8 + 4, kRigY, zn8) == BR::Air;
+            okE8 = rigOk8 && ladderDropped8 && leverDropped8 && ctrlDropped8;
+            if (!okE8)
+                qInfo().noquote() << "  [t1017 diag e] rig" << rigOk8 << "ladder" << ladderDropped8
+                                  << "lever" << leverDropped8 << "ctrl" << ctrlDropped8;
+            for (int dx = -3; dx <= 5; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) {
+                    for (int dy = -1; dy <= 4; ++dy) w.setBlock(xn8 + dx, kRigY + dy, zn8 + dz, BR::Air, 0);
+                    w.setBlock(xn8 + dx, kRigY - 1, zn8 + dz, BR::Air, 0);
+                }
+            tickN(w, 2);
         }
         if (!okA) ++totalFail;
         if (!okB) ++totalFail;
@@ -40933,6 +41014,25 @@ Item {
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
+        if (!okE8) ++totalFail;
+        qInfo().noquote() << (okE8 ? "PASS" : "FAIL")
+                          << "| t1017(e) neighbor-edit drop leg (review0906 #8): old-save residue"
+                             " injects a ladder side-attached to a LIVE cactus column (a ladder is"
+                             " not a full cube so the cactus neighbor-collapse rule never fires -"
+                             " the residue persists exactly as in pre-t1017 saves) and a"
+                             " floor-mounted lever on the column top (top-face attachment does not"
+                             " touch the cactus horizontal-neighbor rule either). Mining a"
+                             " DIFFERENT neighbor of each attached block (support cactus alive"
+                             " throughout) runs the 6-neighbor recheck: the rechecks used bare"
+                             " isFullCube which Cactus (ShapeFull) always passes - the placement"
+                             " precheck rejected cactus while the residue never dropped (the"
+                             " reject-vs-residue split). Both rechecks now read the shared"
+                             " mechLadderSupportBlock authority (isFullCube && != Cactus), so the"
+                             " ladder and the lever drop on the neighbor edit while the column"
+                             " stays intact; a stone-wall ladder whose support block is mined"
+                             " directly still drops (harness sanity control)"
+                          << (okE8 ? QString()
+                                   : QStringLiteral("diag see [t1017 diag e]"));
     }
 
     // ── P-t1008 小僵尸两修探针（① 生物蛋图标管线统一 ② 小鸡骑士组合越障跳）──

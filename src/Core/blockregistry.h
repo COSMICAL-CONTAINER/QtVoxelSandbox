@@ -1925,6 +1925,15 @@ public:
     //   + 邻近爆炸会被误判失撑掉落；上提为公共谓词后三处同源。
     static bool torchSupportBlock(quint8 blockId, quint8 state);
 
+    // t1017/review0906 #8 木梯 / 机关（Lever / WoodButton / StoneButton）附着支撑判定（单一权威，
+    //   torchSupportBlock 同款模式）：可作梯/机关支撑的方块 = isFullCube（完整立方，t501/t662 放置
+    //   口径）**且非 Cactus**（仙人掌 ShapeFull 恰过 isFullCube 门 = 缺口；机制等价 MC 1.0 仙人掌
+    //   非可附着面）。供四处同源：木梯放置预检 / 机关放置预检（playercontroller placeBlock）、
+    //   木梯失撑复检（dropUnsupportedLaddersAround）/ 机关失撑复检（dropUnsupportedMechAround）
+    //   —— 旧版预检拒仙人掌、复检裸 isFullCube 的口径劈叉（「放置拒、残留不掉」：旧存档挂在仙人掌
+    //   上的梯/机关在仙人掌存活期间永不掉落）由本谓词一并收口。石头等常规支撑面零影响。
+    static bool mechLadderSupportBlock(quint8 blockId);
+
     // t334 per-block 光衰减量（lightOpacity；机制等价 MC 1.0 lightOpacity 0..15）：光穿入该格时损失的光级。
     //   flood-fill（World recomputeLightField / refloodBox）据本值算邻格衰减 = max(1, lightOpacity)，取代旧的
     //   isSolid 二值遮光（旧实现在所有 solid=false 的异形方块上恒「全透」，致合活版门 / 台阶也透光 —— 与形状语义矛盾）。
