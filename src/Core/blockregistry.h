@@ -1925,10 +1925,20 @@ public:
     //   + 邻近爆炸会被误判失撑掉落；上提为公共谓词后三处同源。
     static bool torchSupportBlock(quint8 blockId, quint8 state);
 
+    // review0906 #9 支撑语义统一权威（isFullCube 包装层，**不动 isFullCube 本体**——渲染 / 剔除 /
+    //   出生列 / 重力方块坍落等非附着消费端零回归）：可作「完整立方支撑」的方块 = isFullCube
+    //   **且非 Cactus**（仙人掌 15/16 缩体，MC 1.0 非可附着 / 可支撑面；ShapeFull 恰过 isFullCube
+    //   门 = 贴面件漏网根因）。供贴地 / 贴面支撑语义全族同源：铁轨放置（t666② 下方完整立方）、
+    //   积雪层放置（t554 下方完整立方）、木梯 / 机关（mechLadderSupportBlock 委托本谓词 = wave-D1
+    //   单一权威纳入同一处）、红石粉 / 门（isTopFlushSupport 的完整立方分支读它）。改支撑黑名单
+    //   只动本谓词一处（新造平行公式禁止）。
+    static bool solidSupportBlock(quint8 blockId);
+
     // t1017/review0906 #8 木梯 / 机关（Lever / WoodButton / StoneButton）附着支撑判定（单一权威，
     //   torchSupportBlock 同款模式）：可作梯/机关支撑的方块 = isFullCube（完整立方，t501/t662 放置
     //   口径）**且非 Cactus**（仙人掌 ShapeFull 恰过 isFullCube 门 = 缺口；机制等价 MC 1.0 仙人掌
-    //   非可附着面）。供四处同源：木梯放置预检 / 机关放置预检（playercontroller placeBlock）、
+    //   非可附着面）。review0906 #9 起委托 solidSupportBlock 统一权威（本谓词保留专名作四处既有
+    //   消费端的语义名）。供四处同源：木梯放置预检 / 机关放置预检（playercontroller placeBlock）、
     //   木梯失撑复检（dropUnsupportedLaddersAround）/ 机关失撑复检（dropUnsupportedMechAround）
     //   —— 旧版预检拒仙人掌、复检裸 isFullCube 的口径劈叉（「放置拒、残留不掉」：旧存档挂在仙人掌
     //   上的梯/机关在仙人掌存活期间永不掉落）由本谓词一并收口。石头等常规支撑面零影响。
@@ -2246,12 +2256,18 @@ public:
     static void ladderSupportOffset(quint8 state, int &dx, int &dz);
 
     // t1012④ 附着块族单一权威谓词（机制等价 MC 1.0「流水冲毁 non-solid 附着物」）：id ∈ {火把（各
-    //   TorchAttach state 共用 id 13）/ 红石火把（129，含熄灭位 state）/ 蜘蛛网（102）} → true。消费点 =
-    //   World::tickWaterFlow 扩散/下落落点（流水进入附着块格 → setWaterSilent 置 Air + blockDroppedAsItem
-    //   按 dropId 掉落——掉落链对齐玩家挖除）。后续新增水毁附着物只扩本表一处（新造平行系统禁止）。
+    //   TorchAttach state 共用 id 13）/ 红石火把（129，含熄灭位 state）/ 蜘蛛网（102）/ 木梯（62，
+    //   review0906 #10 并入 —— MC 1.0 流水同样冲毁梯子；dropId(Ladder)=自身 → 掉落链免费成立，与
+    //   玩家挖除同链）} → true。消费点 = World::tickWaterFlow 扩散/下落落点（流水进入附着块格 →
+    //   setWaterSilent 置 Air + blockDroppedAsItem 按 dropId 掉落——掉落链对齐玩家挖除）。后续新增
+    //   水毁附着物只扩本表一处（新造平行系统禁止）。
+    //   **Rail 刻意排除（review0906 #10 登记，非遗漏）**：MC 1.0 流水同样毁轨，但本工程 worldgen
+    //   矿井在洞穴带成片铺轨（含水下洞穴 / 海底峡谷切穿面），轨入水毁族会让矿井轨道网被一次洞口
+    //   洪流成片掏空——矿井矿车玩法场景资产不可再生（worldgen 只在生成期铺一次）。梯子只挂在玩家
+    //   /结构竖井壁上、毁后可随手重放，无此顾虑。若后续加「轨道防水保护 / 矿井轨重铺」再收口。
     static bool isAttachableBlock(quint8 id)
     {
-        return id == Torch || id == RedstoneTorch || id == Cobweb;
+        return id == Torch || id == RedstoneTorch || id == Cobweb || id == Ladder;
     }
 
     // t225 箱子朝向（存 chunk state，低 2 位编码水平朝向）：放置时记录箱子「前面（锁面，chest_front 贴图）」

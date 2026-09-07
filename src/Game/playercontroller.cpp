@@ -4903,7 +4903,9 @@ void PlayerController::placeBlock()
     //   同格叠加走上方堆叠分支，不经本判）。
     if (m_selectedBlock == BlockRegistry::SnowLayer) {
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
-        const bool belowSupport = BlockRegistry::isFullCube(below)
+        // review0906 #9：完整立方分支改读 solidSupportBlock 统一权威（排除 Cactus——旧裸 isFullCube
+        //   对仙人掌恒真 = 雪层可贴仙人掌顶漏网，MC 1.0 仙人掌缩体非可支撑面）。满层雪分支语义不变。
+        const bool belowSupport = BlockRegistry::solidSupportBlock(below)
             || (below == BlockRegistry::SnowLayer
                 && m_world->stateAt(tx, ty - 1, tz) == BlockRegistry::SnowLayerStageMax);
         if (!belowSupport) return; // 下方非完整立方 / 非满层雪 → 悬空 / 侧放 → 拒（不挥）
@@ -5030,8 +5032,10 @@ void PlayerController::placeBlock()
     //     瞄柱上层放不了）。P-t945 (c) 钉「拒放且仙人掌无恙」，防未来把坍落错挂到被拒放置上。
     if (BlockRegistry::isRail(quint8(m_selectedBlock))) {
         if (BlockRegistry::isRail(m_world->blockAt(tx, ty, tz))) return; // ① 同格已有轨 → 拒
+        // review0906 #9：② 改读 solidSupportBlock 统一权威（完整立方且非 Cactus）——旧裸 isFullCube
+        //   对仙人掌恒真 = 轨可依仙人掌放置漏网（MC 1.0 仙人掌缩体非可支撑面）。石/沙等常规支撑零影响。
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
-        if (!BlockRegistry::isFullCube(below)) return; // ② 下方非完整立方支撑 → 拒（不挥）
+        if (!BlockRegistry::solidSupportBlock(below)) return; // ② 下方非完整立方 / 仙人掌支撑 → 拒（不挥）
     }
     // t501 木梯放置预检（spec「须完整方块侧支撑」）：木梯贴**完整立方方块的侧面**（机制等价 MC 1.0 ladder
     //   须贴实体方块面）。两重守卫：
