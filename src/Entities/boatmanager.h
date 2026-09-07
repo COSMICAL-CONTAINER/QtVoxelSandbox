@@ -130,10 +130,12 @@ public:
 
     // ── t1015 载具攻击目标甄别（骑乘组合碰撞盒拆分；C++ 直调，同上非 Q_INVOKABLE）──
     // 第 i 条船的**单盒**射线命中距离（slab ray-AABB，几何与 findBoatHit 完全同式：X=kBoatHalfW /
-    //   Y=kBoatHalfH / Z=kBoatHalfLen，只是把遍历收窄到指定槽）。命中 → 返命中距离 tmin（≥0；起点已在
-    //   盒内返 0）；未命中 / 越界 / 空槽 → -1。供 PlayerController.beginMining 骑乘改判用：乘员 AABB 与
-    //   船 AABB 重叠时，把「骑乘组合」拆成两个独立盒分别求交，取**射线最近**者定目标（旧行为 = 乘员命中
-    //   即重路由「最近任意船」，别的船挡在乘员身后会被误拆）。纯几何只读，无副作用。
+    //   Y=kBoatHalfH / Z=kBoatHalfLen，只是把遍历收窄到指定槽）。命中 → 返命中距离 tmin（>0）；起点在
+    //   盒内 / 未命中 / 越界 / 空槽 → -1（review0906 #13：旧版盒内返 0 = 眼位落入船盒时点乘员恒判船胜；
+    //   findBoatHit 登乘寻的不改，两射线口径分叉同 MinecartManager::rayHitDistAt 登记注释）。
+    //   供 PlayerController.beginMining 骑乘改判用：乘员 AABB 与船 AABB 重叠时，把「骑乘组合」拆成
+    //   两个独立盒分别求交，取**射线最近**者定目标（旧行为 = 乘员命中即重路由「最近任意船」，别的船
+    //   挡在乘员身后会被误拆）。纯几何只读，无副作用。
     float rayHitDistAt(int i, const QVector3D &origin, const QVector3D &dir, float maxDist) const;
 
     // 对**指定**船结算一次攻击（t1015 指定目标版 hitBoatFromRay：跳过 findBoatHit 寻的，直接结算 idx 船

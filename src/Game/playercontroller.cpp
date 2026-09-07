@@ -4614,7 +4614,11 @@ void PlayerController::placeBlock()
             float chestDist = 0.0f;
             const int chestIdx = m_minecartManager->findCartHit(position(), lookDirection(), kReach, &chestDist);
             int keyX = -1, keyY = -1, keyZ = -1;
-            if (chestIdx >= 0 && m_minecartManager->chestKeyAt(chestIdx, keyX, keyY, keyZ)) {
+            // review0906 #12b 开箱遮挡守卫（与攻击 / 骑乘「实体须不晚于命中方块」同口径）：本射线用
+            //   kReach 全程且 findCartHit 不做体素遮挡 → 旧版可隔墙右键开箱车取物品。补 chestDist <=
+            //   m_hitDist（主选体未命中 = m_hitDist kReach 恒过；箱车贴脸且无方块挡 = 正常开箱）。
+            if (chestIdx >= 0 && (!m_hasHit || chestDist <= m_hitDist)
+                && m_minecartManager->chestKeyAt(chestIdx, keyX, keyY, keyZ)) {
                 m_lastPlaceMs = now;
                 emit chestOpened(keyX, keyY, keyZ);
                 return;
