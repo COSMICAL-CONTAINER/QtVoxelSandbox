@@ -80,12 +80,18 @@ void WorldClock::skipToDawn()
 
 // misc 二轮 `/time` 指令内部统一应用：把目标 phase + day 写进 m_elapsedMs，重派生并 emit 全套信号
 //   （phase / day / moonPhase / 太阳量化步）。由 setPhase/setDay/addPhase 共用。允许任意设/加（含回退）。
+//   review0906 #15：elapsed 折算用**整数拆分**（day·periodMs 整乘 + double 折算 phase 段）——旧
+//   `(float(day)+phase)*periodMs` 全程 float，day ≳ 2²² 后 float ULP（该量级 ≈ 0.4 天）吞掉 phase
+//   小数：restoreTime 落回的相位立即跳回整刻（正常游玩不可达，改档 / 脏档大 day 可触发且无告警）。
+//   拆分后 day 段整型精确、phase 段 double 折算（截断误差 ≤ 1ms ≪ 100ms tick 粒度），onTick 从
+//   elapsed 重派生的 phase / dayCount 与直写值一致（round-trip 相位保真）。
 void WorldClock::applyTime(float phase, qint64 day)
 {
     const float periodMs = periodSecs() * 1000.f;
     phase = phase - std::floor(phase);            // 归一化到 [0,1)
     if (day < 0) day = 0;
-    m_elapsedMs = qint64((float(day) + phase) * periodMs);
+    const qint64 periodI = qint64(periodMs);      // 1200000（或调试 30000）—— 整数毫秒，无舍入
+    m_elapsedMs = day * periodI + qint64(double(phase) * double(periodI));
     m_phase = phase;
     m_dayCount = day;
     emit dayPhaseChanged();

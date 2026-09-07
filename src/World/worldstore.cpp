@@ -528,6 +528,10 @@ QVariantMap WorldStore::loadMeta() const
 // t1016 读世界时钟快照（头注释见 .h）。逐键缺省：clock_phase→0.0（新世界默认相位）、clock_day→0、
 //   weather→0（Clear 晴天）—— 旧存档缺字段拿默认值恢复，加载端行为 = 新世界首帧，不炸不跳。
 //   phase 以 toFloat 还原（写侧 'g'/9 位有效数字为 float 短往返表示，逐位还原）；day toLongLong。
+//   review0906 #14：hasWeather = 存档是否**真带** weather 键（缺键默认 0 与「真存过 Clear」不可区分
+//   = enterWorld 无条件 setWeatherState 把 resetWeather 的首场晴偏短窗（20/45s）重抽为常规窗
+//   45/120s 的根因）。消费端（Main.qml enterWorld）仅 hasWeather 才恢复天气态；缺键走 resetWeather
+//   原窗（初始短窗口径恢复）。
 QVariantMap WorldStore::loadWorldTime() const
 {
     QVariantMap out;
@@ -544,6 +548,8 @@ QVariantMap WorldStore::loadWorldTime() const
                meta.contains(QStringLiteral("clock_day"))
                    ? QVariant(qlonglong(meta.value(QStringLiteral("clock_day")).toLongLong()))
                    : QVariant(qlonglong(0)));
+    out.insert(QStringLiteral("hasWeather"),
+               QVariant(meta.contains(QStringLiteral("weather"))));
     out.insert(QStringLiteral("weather"),
                meta.contains(QStringLiteral("weather"))
                    ? QVariant(meta.value(QStringLiteral("weather")).toInt())
