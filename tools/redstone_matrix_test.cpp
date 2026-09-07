@@ -24208,6 +24208,98 @@ Item {
                                       << ":" << diagB2;
             }
         }
+        // ── (d) 带内中速档腿（review0906 #6）：入格缘 v² ∈ [25,39] —— 错杀带 [21.8, 41.58) 内的可达判别
+        //     域（单格 boost 档实测入谷 v² ~38：L1D0=38.5 / L1D4=37.8，更低档不可达——衰减每平格仅
+        //     ~0.18 v²，坡下降增益又计入采样点之后）。判别双向裕度：旧式直比阈 38.5 < 41.58 = 捕（裕
+        //     3.1）；谷底账 38.5 + 2g·d ≈ 58.3 ≥ 41.58 = 放行爬上东壁（裕 16.7）。旧式判据在下行半幅
+        //     早评当前 v² → 该档全捕 = 本腿红（阴性轮敏感）。初速靠运行时自搜索（(b2) 同式 —— boost
+        //     lerp 无解析式）：平台长 L∈1..4 × 平段衰减格 D∈0..4 逐试，取入谷 v² 落带内档，断言「过谷
+        //     心爬上东壁」（maxX > center+0.6 = 完整翻越；被捕车恒停谷心 ±0.06 不可能）+ 无极限环
+        //     （rev ≤ 1 —— 翻越东壁死端后单次回溜落谷被接住是文档化近阈形态）。
+        bool okD6 = false;
+        {
+            int x4 = -1, z4 = -1; // 选址：x 跨 11 格（平台≤4 + 平段≤4 + 谷 1 + 东壁 1 + 余量）× z±1
+            for (int zz = 3; zz < 94 && x4 < 0; zz += 2)
+                for (int xx = 6; xx + 10 < 96 && x4 < 0; ++xx) {
+                    bool clear = true;
+                    for (int dx = 0; dx <= 10 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -1; dy <= 2 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x4 = xx; z4 = zz; }
+                }
+            if (x4 < 0) {
+                qInfo().noquote() << "  [t1019 diag] d: no clear rig area";
+            } else {
+                QString diagD6;
+                for (int L = 1; L <= 4 && !okD6; ++L) {
+                    for (int D = 0; D <= 4 && !okD6; ++D) {
+                        for (int i = 0; i < L; ++i) {
+                            w.setBlock(x4 + 1 + i, kRigY,     z4, BR::RedstoneBlock, 0);
+                            w.setBlock(x4 + 1 + i, kRigY + 1, z4, BR::GoldenRail, 0);
+                        }
+                        for (int i = 0; i < D; ++i)
+                            w.setBlock(x4 + 1 + L + i, kRigY + 1, z4, BR::Rail, 0);
+                        const int vx4 = x4 + 1 + L + D;     // 谷格
+                        w.setBlock(vx4,     kRigY,     z4, BR::Rail, 0);
+                        w.setBlock(vx4 + 1, kRigY + 1, z4, BR::Rail, 0);
+                        tickN(w, 8);
+                        MinecartManager carts;
+                        carts.spawnCart(x4 + 1, kRigY + 1, z4, &w);
+                        const bool pushedD6 = carts.pushEmptyCart(&w,
+                            QVector3D(float(x4 + 1) - 0.2f, float(kRigY + 1) + 0.45f, float(z4) + 0.5f),
+                            1.0f, 0.0f);
+                        const float centerD6 = float(vx4) + 0.5f;
+                        float vEntryD = -1.0f, maxXD = carts.posAt(0).x();
+                        QVector3D prevD = carts.posAt(0);
+                        float accumD = 0.0f;
+                        int stateD = 0, revD = 0;
+                        bool enteredD = false;
+                        for (int t = 0; t < 600; ++t) {
+                            carts.tickPushedCarts(0.016f, &w);
+                            if (!carts.aliveAt(0)) break;
+                            const QVector3D p = carts.posAt(0);
+                            const float step = p.x() - prevD.x();
+                            maxXD = std::max(maxXD, p.x());
+                            if (!enteredD && p.x() >= float(vx4)) {
+                                enteredD = true;
+                                vEntryD = std::fabs(step) / 0.016f;
+                            }
+                            accumD += step;
+                            if (stateD == 0) {
+                                if (accumD > 0.25f) { stateD = 1; accumD = 0.0f; }
+                                else if (accumD < -0.25f) { stateD = -1; accumD = 0.0f; }
+                            } else if (stateD > 0 && accumD < -0.25f) { ++revD; stateD = -1; accumD = 0.0f; }
+                            else if (stateD < 0 && accumD > 0.25f) { ++revD; stateD = 1; accumD = 0.0f; }
+                            prevD = p;
+                        }
+                        const float v2D6 = vEntryD * vEntryD;
+                        const bool inBandD = vEntryD > 0.0f && v2D6 >= 25.0f && v2D6 <= 39.0f;
+                        const bool passedD6 = maxXD > centerD6 + 0.6f; // 翻上东壁（被捕车不可能）
+                        const bool trialOkD = pushedD6 && enteredD && inBandD
+                            && revD <= 1 && passedD6;
+                        diagD6 += QStringLiteral("L%1D%2:v2=%3%4%5%6 ")
+                            .arg(L).arg(D).arg(v2D6, 0, 'f', 1)
+                            .arg(inBandD ? QStringLiteral("BAND") : QStringLiteral("-"))
+                            .arg(revD <= 1 ? QString() : QStringLiteral("!rev%1").arg(revD))
+                            .arg(passedD6 ? QString() : QStringLiteral("!pass"));
+                        carts.clearAll();
+                        for (int i = 0; i < L; ++i) {
+                            w.setBlock(x4 + 1 + i, kRigY,     z4, BR::Air, 0);
+                            w.setBlock(x4 + 1 + i, kRigY + 1, z4, BR::Air, 0);
+                        }
+                        for (int i = 0; i < D; ++i)
+                            w.setBlock(x4 + 1 + L + i, kRigY + 1, z4, BR::Air, 0);
+                        w.setBlock(vx4,     kRigY,     z4, BR::Air, 0);
+                        w.setBlock(vx4 + 1, kRigY + 1, z4, BR::Air, 0);
+                        tickN(w, 2);
+                        if (trialOkD) okD6 = true;
+                    }
+                }
+                if (!okD6)
+                    qInfo().noquote() << "  [t1019 diag] d no in-band trial:" << diagD6;
+            }
+        }
         // ── (c) 源码钉（任一消失即红）。──
         const QString exeDir1019 = QCoreApplication::applicationDirPath();
         const QString root1019 = QDir(exeDir1019 + QStringLiteral("/..")).absolutePath();
@@ -24218,7 +24310,7 @@ Item {
         const QString mc1019 = readSrc1019(QStringLiteral("src/Entities/minecartmanager.cpp"));
         const QString mh1019 = readSrc1019(QStringLiteral("src/Entities/minecartmanager.h"));
         const bool okC1 = mc1019.contains(QStringLiteral(
-            "if (v2 >= pass2) return false;")); // 能量足 → 放行通过
+            "if (v2ValleyFloor >= pass2) return false;")); // 能量足（谷底账）→ 放行通过（review0906 #6 折算）
         const bool okC2 = mc1019.contains(QStringLiteral(
             "const float pass2 = 2.0f * kCartSlopeGravity")); // 通过阈 = 2g·(h + 余量)
         const bool okC3 = mc1019.contains(QStringLiteral(
@@ -24280,6 +24372,33 @@ Item {
                              " margin flips the behavior of the in-window trial first here"
                           << (okB2 ? QString()
                                    : QStringLiteral("diag no trial in window, see [t1019 diag] b2"));
+        if (!okD6) ++totalFail;
+        qInfo().noquote() << (okD6 ? "PASS" : "FAIL")
+                          << "| t1019(d) in-band mid-tier leg (review0906 #6): a cart entering the"
+                             " valley cell at v^2 in [25, 39] - inside the ~[21.8, 41.6)"
+                             " wrong-capture band (the reachable single-cell-boost tier measures"
+                             " ~38 at the rim; lower tiers are unreachable - flat decay bleeds"
+                             " only ~0.2 v^2 per cell and the west-descent gain lands after the"
+                             " sampling point) - must PASS through, because the criterion now"
+                             " charges the energy to the valley-floor account: the downhill half"
+                             " still returns ~2*g*d = ~19.8 v^2 while the cart slides to the"
+                             " center, so the sampled account 38.5 + 19.8 = 58.3 clears the"
+                             " pass threshold 41.58 (old-capture margin 3.1, new-pass margin"
+                             " 16.7) and the cart crests the far wall (crosses"
+                             " 0.6+ past the center; a captured cart parks within 0.06 of it and"
+                             " can never). The old gate sampled the CURRENT v^2 every tick of the"
+                             " downhill half - capture is takeover (skip slope physics, v monotone"
+                             " down) so the cart never got its 'slide to the floor, grow, then be"
+                             " released' chance and mid-band entries were wrongly braked to a stop"
+                             " at the center (legs (a)/(b) straddle the band edges and stayed"
+                             " green on both formulas; this leg is the discriminator). Runtime"
+                             " self-search over platform L in 1..4 x flat decay D in 0..4 picks"
+                             " the trial whose measured valley-entry v^2 lands in-band; rev <= 1"
+                             " tolerates the documented single climb-and-return after the far-"
+                             " wall dead end (a re-entry at low energy is then captured - no"
+                             " limit cycle)"
+                          << (okD6 ? QString()
+                                   : QStringLiteral("diag no in-band trial, see [t1019 diag] d"));
     }
 
     // ── P-t944 上坡顶方块阻挡探针（MinecartManager 直编；spec「上坡处上方放方块 → 矿车被挡住不能穿墙
