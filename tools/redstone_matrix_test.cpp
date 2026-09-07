@@ -22564,7 +22564,8 @@ Item {
     //   根因：t983 显式轴闸（bit5 放置面向 / c 连接位）在「偏好轴无邻」时一律 0 连接——放置面向恰与
     //   轨线轴相反时，端点延伸的新轨持错误轴偏好落 0 连接（且继续延伸仍落 0，轨线从此断在延伸点）。
     //   修 = 延伸松弛：仅 c==0（bit5 纯放置面向）轨偏好轴零臂时，垂直轴「端点相对」邻
-    //   （railProbeEndpointAligned 单表判据：邻轨轴〔连接位优先 bit5 兜底 坡臂恒真〕含连接方向 = 轨线
+    //   （railProbeEndpointAligned 单表判据：邻轨轴〔连接位优先 bit5 兜底；坡臂 review0906 #5 起读
+    //   对应层 state，不再恒真〕含连接方向 = 轨线
     //   端点对本格）照连，bit5 随实连轴镜像（World 写回单轴镜像扩展）；平行侧邻（邻轴垂直连接方向）
     //   仍拒连 = t983 不回退；c!=0 轨既有连接即实拓扑，永不松。
     //   腿：
@@ -22588,7 +22589,7 @@ Item {
                             if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
                 if (clear) { xa = xx; za = zz; }
             }
-        bool okA = false, okB = false, okC = false;
+        bool okA = false, okB = false, okC = false, okE5 = false;
         if (xa < 0) {
             qInfo().noquote() << "  [t1018 diag] shape: no clear rig area";
         } else {
@@ -22671,6 +22672,51 @@ Item {
             w.setBlock(xa, kRigY, za,     BR::Air, 0);
             w.setBlock(xa, kRigY, za + 1, BR::Air, 0);
             tickN(w, 2);
+            // (e) review0906 #5 上层垂直定向线腿（坡臂分支行为覆盖 —— 旧腿全为同层邻居）：
+            //     上层既有 EW 线（fresh 自连：中段 Px|Nx、东端 Nx）+ 东端**正南一格下层**的 EW 面向
+            //     （bit5）fresh 轨 —— 该轨偏好轴（X）零臂、垂直轴（Z）唯一邻是「上层的东端」（坡臂，
+            //     upState=Nx）：线轴垂直于连接方向 = 非端点相对，坡臂必须拒连（旧「坡臂恒真」让该轨持
+            //     Nz 单向幽灵臂；端点自身 nArm=2 走 axisCon 存在性路径不回连 → mesher 翘头坡 / 矿车
+            //     单向驶入不可返；**不取线中段下方**——中段会经规则⑤ 3 臂 T 交叉重排成转辙器，
+            //     与本修复无关）。阳性对照：线上游净空区上层 fresh stub（state 0 → NS 保守读 =
+            //     端点相对）坡臂照连成合法坡段（拒绝非一刀切）。
+            for (int i = -1; i <= 1; ++i)
+                w.setBlock(xa + i, kRigY + 1, za + 1, BR::Rail, 0); // 上层 EW 线（fresh 自连成线）
+            tickN(w, 2);
+            const quint8 conLineMid5 = quint8(w.stateAt(xa, kRigY + 1, za + 1) & 0x0F);
+            const quint8 conLineEnd5 = quint8(w.stateAt(xa + 1, kRigY + 1, za + 1) & 0x0F);
+            w.setBlock(xa + 1, kRigY, za + 2, BR::Rail, BR::RailAxisEWFlag); // 幽灵臂施害轨（东端正南下层）
+            tickN(w, 2);
+            const quint8 stGhost5 = w.stateAt(xa + 1, kRigY, za + 2);
+            const quint8 conGhost5 = quint8(stGhost5 & 0x0F);
+            const quint8 conLineMid5b = quint8(w.stateAt(xa, kRigY + 1, za + 1) & 0x0F);
+            const quint8 conLineEnd5b = quint8(w.stateAt(xa + 1, kRigY + 1, za + 1) & 0x0F);
+            // 阳性对照（线上游净空区，与线隔 2 格无探针耦合）：上层 fresh stub + 其 **−Z 向**下层的
+            //     EW 面向轨 —— stub 对下轨是 −Z 单臂（fresh 级联 → Nz=8），下轨对 stub 是 +Z 坡臂
+            //     （fresh stub upState=0 → NS 保守读 = 端点相对 → Pz=4）= 两向互连合法坡段。
+            w.setBlock(xa - 1, kRigY + 1, za - 1, BR::Rail, 0); // 上层 fresh stub
+            tickN(w, 2);
+            w.setBlock(xa - 1, kRigY, za - 2, BR::Rail, BR::RailAxisEWFlag);
+            tickN(w, 2);
+            const quint8 conPos5 = quint8(w.stateAt(xa - 1, kRigY, za - 2) & 0x0F);
+            const quint8 conStub5 = quint8(w.stateAt(xa - 1, kRigY + 1, za - 1) & 0x0F);
+            okE5 = conLineMid5 == quint8(BR::RailConnPx | BR::RailConnNx) && conLineEnd5 == BR::RailConnNx
+                && conGhost5 == 0                                        // 幽灵臂拒连（保持 stub）
+                && (stGhost5 & BR::RailAxisEWFlag) != 0                  // bit5 守恒（0 连接不翻轴）
+                && conLineMid5b == conLineMid5 && conLineEnd5b == conLineEnd5 // 线端不回连（前提自洽）
+                && conPos5 == BR::RailConnPz && conStub5 == BR::RailConnNz; // 阳性坡段互连（+Z 下轨 / −Z stub）
+            if (!okE5)
+                qInfo().noquote() << "  [t1018 diag] e line" << conLineMid5 << "end" << conLineEnd5
+                                  << "ghost" << conGhost5
+                                  << "axisKept" << int(stGhost5 & BR::RailAxisEWFlag)
+                                  << "line2" << conLineMid5b << "end2" << conLineEnd5b
+                                  << "pos" << conPos5 << "stub" << conStub5;
+            for (int i = -1; i <= 1; ++i)
+                w.setBlock(xa + i, kRigY + 1, za + 1, BR::Air, 0);
+            w.setBlock(xa + 1, kRigY, za + 2, BR::Air, 0);
+            w.setBlock(xa - 1, kRigY + 1, za - 1, BR::Air, 0);
+            w.setBlock(xa - 1, kRigY, za - 2, BR::Air, 0);
+            tickN(w, 2);
         }
         // (d) 源码钉（任一消失即红）。B-P1-1 迁移：滤注释钉（pinSet）；原 okD4 钉串拼进尾注释
         //     「// t1018 单 Z 臂…」（尾注释措辞改动即误红的隐患钉，B-P2-2 同族核查确认）→ 改钉
@@ -22682,6 +22728,9 @@ Item {
             {"fn-railProbeEndpointAligned", "bool BlockRegistry::railProbeEndpointAligned(const RailProbe &p, bool xAxis)"},
             {"rule2-endpoint-relax", "(hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)"}, // 规则②③延伸松弛行
             {"axis-arm-first-guard", "if (axisCon != 0 || c != 0) return axisCon;"}, // 轴上臂优先 / c!=0 永不松守卫
+            {"slope-arm-layer-state", "const quint8 slopeState = isRail(p.up) ? p.upState : p.downState;"}, // review0906 #5 坡臂读对应层 state
+            {"slope-arm-corner-guard-x", "|| railProbeEndpointAligned(hasPX ? px : nx, true)"}, // review0906 #5 规则① t982 坡优先路径坡臂端点判读（合法演化：19:34 起 xArmOk 表格中段——slopeFresh 承接行尾分号，钉缩为表达式本体）
+            {"slope-arm-corner-guard-z", "|| railProbeEndpointAligned(hasPZ ? pz : nz, false)"}, // review0906 #5 规则① t982 坡优先路径坡臂端点判读（同上 z 镜像行）
         });
         const QStringList missDwd = pinSet(root1018 + QStringLiteral("/src/World/world.cpp"), {
             {"zmirror-single-guard", "(con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) != 0"}, // 单 Z 臂分支（!= 0；贯穿分支为 ==）
@@ -22707,7 +22756,8 @@ Item {
                              " its preferred axis connects along the perpendicular axis when the"
                              " neighbor there is ENDPOINT-relative (neighbor's own axis contains the"
                              " joining direction - railProbeEndpointAligned single table: connection"
-                             " bits first, bit5 fallback, slope arms always true), and bit5 mirrors"
+                             " bits first, bit5 fallback, slope arms read the actual layer state"
+                             " (review0906 #5)), and bit5 mirrors"
                              " the actually-connected axis on write-back (single-axis mirror"
                              " extension); parallel SIDE neighbors (neighbor axis perpendicular to"
                              " the joining direction) are still rejected - the t983 no-snap rule is"
@@ -22725,6 +22775,30 @@ Item {
                              " rule-2/rule-3 relaxation lines, the axisCon guard and the World"
                              " single-axis bit5 mirror"
                           ;
+        if (!okE5) ++totalFail;
+        qInfo().noquote() << (okE5 ? "PASS" : "FAIL")
+                          << "| t1018(e) slope-arm layer-state leg (review0906 #5): an up-layer"
+                             " PERPENDICULAR directed line (EW mid-rail, c = Px|Nx) must not"
+                             " accept a slope arm from a fresh EW-facing rail one block below -"
+                             " the old slope-arm branch returned true unconditionally (RailProbe"
+                             " structurally lacked up/down layer state), so the new rail kept a"
+                             " one-way ghost connection the line never reciprocates (its c != 0"
+                             " axisCon existence path cannot add the down link): mesher drew a"
+                             " head-tilted ramp and carts drove in one direction only. The slope"
+                             " branch now reads the actual layer state (upState/downState filled"
+                             " by the runtime recompute) EVERYWHERE slope arms are consumed -"
+                             " the rule-2/3 relaxation table AND the rule-1 t982 corner slope-"
+                             " priority path (a ghost slope arm no longer hijacks the line end's"
+                             " existing connection and sever the line: the legitimate arm is"
+                             " kept as a single connection instead): connection bits must"
+                             " contain the joining axis, else reject (ghost rail stays a"
+                             " 0-connection stub"
+                             " with bit5 conserved, line unchanged); a fresh up-layer stub"
+                             " (state 0, conservative NS read = endpoint-relative) still forms"
+                             " the legitimate two-way slope segment (positive control against"
+                             " blanket rejection)"
+                          << (okE5 ? QString()
+                                   : QStringLiteral("diag see [t1018 diag] e"));
     }
 
     // ── P-t939 单格坡静置矿车下滑规则探针（MinecartManager 直编；spec「单格上/下坡静置矿车仍静止——

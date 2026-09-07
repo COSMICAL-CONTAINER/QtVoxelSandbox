@@ -2451,6 +2451,29 @@ quint8 BlockRegistry::railConnections(quint8 selfId, quint8 curState,
             const int dxArm = hasPX ? railProbeDelta(px) : railProbeDelta(nx);
             const int dzArm = hasPZ ? railProbeDelta(pz) : railProbeDelta(nz);
             if (dxArm != 0 || dzArm != 0) {
+                // review0906 #5 收口（t1018(e) 腿）：坡臂同须「端点相对」——读坡邻对应层 state
+                //   （upState/downState，运行期 recompute 填充）的连接位 / bit5 轴（railProbeEndpointAligned
+                //   单表）。旧版坡臂存在即胜（t982 坡优先）对「上层垂直定向线」放行 = 线端被幽灵坡臂劫持：
+                //   既有单连（如 Nx 指向线身）被改写成指向下方 stub 的单向坡臂（对方 c!=0 axisCon 存在性
+                //   路径不回连）——线在端点处被斩断 + mesher 翘头坡 / 矿车单向驶入不可返，与规则②③路径
+                //   同病。**真 fresh 坡邻（对应层 state 全零 = 无连接无面向）保守接受**：与 fresh 的 NS
+                //   不可区分口径一致，worldgen 统一重算 / 邻置收敛窗（stub 尚未写回回指位）行为零变；
+                //   邻持显式矛盾 state（连接位不含本轴 / bit5 面向异轴）才拒。弃幽灵坡臂后保合格臂单连
+                //   （不落本规则后段成弯——弯道前提「两臂皆立」已失，t982 禁弯铁律不触）；双幽灵坡臂 →
+                //   0 连接 stub（bit5 轴偏好由调用方守恒写回）。
+                const auto slopeFresh = [](const RailProbe &p) {
+                    return (isRail(p.up) ? p.upState : p.downState) == 0;
+                };
+                const bool xArmOk = dxArm == 0
+                    || railProbeEndpointAligned(hasPX ? px : nx, true)
+                    || slopeFresh(hasPX ? px : nx);
+                const bool zArmOk = dzArm == 0
+                    || railProbeEndpointAligned(hasPZ ? pz : nz, false)
+                    || slopeFresh(hasPZ ? pz : nz);
+                if (!xArmOk && !zArmOk) return quint8(0); // 双幽灵坡臂 → stub
+                if (xArmOk != zArmOk)                     // 单臂合格 → 单连（弃幽灵坡臂，不弯）
+                    return xArmOk ? (hasPX ? quint8(RailConnPx) : quint8(RailConnNx))
+                                  : (hasPZ ? quint8(RailConnPz) : quint8(RailConnNz));
                 if (dxArm != 0) return hasPX ? quint8(RailConnPx) : quint8(RailConnNx);
                 return hasPZ ? quint8(RailConnPz) : quint8(RailConnNz);
             }
@@ -2624,13 +2647,29 @@ int BlockRegistry::railProbeDelta(const RailProbe &p)
 
 // t1018 端点相对判定（契约见 blockregistry.h；railConnections 规则②③延伸松弛共用单表）：
 //   「连接由邻轨端点拓扑决定，放置朝向无关」的唯一几何判据。三档：
-//   · 坡臂（up/down 层有轨）→ 恒真：坡的走向必含该水平方向（坡臂在任何朝向下都是端点相对的延伸）。
+//   · 坡臂（up/down 层有轨）→ 读对应层 state（review0906 #5：upState / downState，运行期
+//     recomputeRailConnections 填充）的连接位 / bit5 轴判端点相对——坡的走向必含**某个**水平方向，
+//     但未必含**本格连接方向**：旧版坡臂恒真对「上层垂直定向线」（c!=0 无本方向连接位，如坡臂指向
+//     一条 EW 线的中段却沿 Z 臂连接）放行 = 单向幽灵臂（对方 c!=0 走 axisCon 存在性路径不回连：
+//     mesher 翘头坡 / 矿车单向驶入不可返，直到对方被拆才自愈）。现与同层同判：该层 state 含本轴向
+//     连接位 → 真（坡臂以该轴端点对本格）；c!=0 不含 → 假（线身旁）；sc==0（worldgen / 转辙器路径
+//     缺省 0 或真 fresh 坡臂 stub）→ bit5 保守读轴（与同层 fresh 同口径，NS 方向视为端点相对）。
+//     up/down 同层并存（工程不可达：轨不可叠放）取 up 优先（railProbeDelta 同序）。
 //   · 邻轨连接位 sc 含该方向连接位 → 真：邻轨以端点（连接位）对着本格方向的轴向延续。
 //   · sc==0（无连接孤轨）→ 按 bit5 读轴（EW=±X / 清=±Z，fresh 与 NS 不可区分按 NS 保守读）：
 //     邻轴含连接方向 → 真（孤轨端点对本格）；邻轴垂直 → 假（平行侧邻，t983 拒连口径延续）。
 bool BlockRegistry::railProbeEndpointAligned(const RailProbe &p, bool xAxis)
 {
-    if (isRail(p.up) || isRail(p.down)) return true; // 坡臂：走向必含该水平方向
+    if (isRail(p.up) || isRail(p.down)) {
+        // 坡臂：review0906 #5 —— 该层邻居 state 的连接位 / 轴须包含连接方向（不再恒真）
+        const quint8 slopeState = isRail(p.up) ? p.upState : p.downState;
+        const quint8 sc = quint8(slopeState & 0x0F);
+        if (xAxis)
+            return (sc & (RailConnPx | RailConnNx)) != 0
+                || (sc == 0 && (slopeState & RailAxisEWFlag) != 0);
+        return (sc & (RailConnPz | RailConnNz)) != 0
+            || (sc == 0 && (slopeState & RailAxisEWFlag) == 0);
+    }
     const quint8 sc = quint8(p.sameState & 0x0F);
     if (xAxis)
         return (sc & (RailConnPx | RailConnNx)) != 0

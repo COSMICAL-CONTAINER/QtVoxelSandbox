@@ -3400,7 +3400,9 @@ void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
         return { m_chunks.blockAt(x + dx, y, z + dz),
                  m_chunks.blockAt(x + dx, y + 1, z + dz),
                  m_chunks.blockAt(x + dx, y - 1, z + dz),
-                 m_chunks.stateAt(x + dx, y, z + dz) }; // t983 ① 平行拒连读侧臂 bit5 轴
+                 m_chunks.stateAt(x + dx, y, z + dz), // t983 ① 平行拒连读侧臂 bit5 轴
+                 m_chunks.stateAt(x + dx, y + 1, z + dz), // review0906 #5 坡臂判读上层邻连接位/轴
+                 m_chunks.stateAt(x + dx, y - 1, z + dz) }; // review0906 #5 坡臂判读下层邻连接位/轴
     };
     const quint8 curState = m_chunks.stateAt(x, y, z);
     quint8 con = BlockRegistry::railConnections(rb, curState,
