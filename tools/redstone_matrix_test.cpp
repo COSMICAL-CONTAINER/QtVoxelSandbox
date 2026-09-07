@@ -223,17 +223,21 @@ int main(int argc, char *argv[])
 
     World w;
     w.setWidth(96);
-    w.setDepth(144); // t814：96 → 128 —— rig 位耗尽（slotIdx=125 > 96 深度的 124 位上限）后 nextSlot 落
+    w.setDepth(180); // t814：96 → 128 —— rig 位耗尽（slotIdx=125 > 96 深度的 124 位上限）后 nextSlot 落
                      //   z≥96 越界区，setBlock 被静默拒绝 → 器件根本没放上 → 消费端探针全线假 FAIL。
                      //   深度扩到 128：既有 slot 0..123 坐标不变（列距 22 / 行距 3 只向后延伸），新 probe
                      //   落新增行（z=97 起）。世界生成按新深度 regenerate 一次（秒级）。
                      //   t1005：128 → 144 —— P-t1005 四布局 rig 带 ±4 清场/弹坑足印，网格末行 z0=127 时
                      //   z0+4=131 越界（首跑实锤：layout D 的 +Z 直供 TNT 落 z=128 被静默拒 → placeRigBlock
                      //   qFatal 全程中止）。深度扩到 144 既有 slot 坐标不变，新行只向后延伸（t814 同款）。
+                     //   review0906 D2：144 → 180 —— review0906 低七项清偿 +3 腿（t1013b / t1015(f) /
+                     //   t1017(f)，各耗 1 slot）把基线仅剩 2 slot 的余量打穿（首跑实锤：slot 184 qFatal
+                     //   于矩阵尾部）。深度扩到 180 既有 slot 坐标不变，新行只向后延伸（t814/t1005 同款）；
+                     //   下方耗尽守卫与容量注释同步改口径。
     w.setHeight(48); // 3 次 setter 各 regenerate 一次（几秒内）；生成快
 
     // rig 寻址（2D 网格防越界——首版 x 单排递增在 x>48 后 setBlock 全被越界拒绝 = 假 FAIL）：x 列距 22
-    //   （容纳 16 粉 + 源 + 接收器的最长探针 18 格）、z 行距 3；96×144 → 4 列 × 46 行 = 184 rig 位。
+    //   （容纳 16 粉 + 源 + 接收器的最长探针 18 格）、z 行距 3；96×180 → 4 列 × 58 行 = 232 rig 位。
     //   t814 教训：耗尽后 setBlock 静默拒绝（无返回值无告警）→ 器件没放上 → 下游探针全线假 FAIL 且
     //   diag 指向消费端（真凶是选址）——故越界改为 qFatal 硬失败（响亮 > 静默腐烂）。
     int slotIdx = 0;
@@ -243,9 +247,9 @@ int main(int argc, char *argv[])
         //   slot 大 1（off-by-one，diag 误导排查）；现报真实失败位号。
         //   t1005：守卫含 **+4 足印**（P-t1005 族 9×9 清场/石台 z0+4 须在界内；旧守卫只钉 z0 本格，
         //   z0=127 行放行后 +Z 器件/清场写越界被静默拒 = rig D qFatal 的真凶）。
-        if (4 + row * 3 + 4 >= 144)
-            qFatal("rig grid exhausted: slot %d beyond 144-deep grid with +4 footprint "
-                   "(4 cols x 46 rows = 184) - out-of-bounds setBlock is silently rejected = "
+        if (4 + row * 3 + 4 >= 180)
+            qFatal("rig grid exhausted: slot %d beyond 180-deep grid with +4 footprint "
+                   "(4 cols x 58 rows = 232) - out-of-bounds setBlock is silently rejected = "
                    "false FAIL farm", slotIdx);
         ++slotIdx;
         return QPair<int, int>(4 + col * 22, 4 + row * 3);
@@ -2348,6 +2352,14 @@ int main(int argc, char *argv[])
         for (int order = 0; order < 2; ++order) {
             for (const SourceDef &src : s772) {
                 const auto [x0, z0] = nextSlot(); // 每源一槽，7 器件顺序复用（case 间全清 + 收敛 tick）
+                // review0906 D2 首跑实锤：depth 144→180 后 worldgen 在槽 (26,41,85) 一带现出天然空腔
+                //   （diag_t772 实测 y39..43 全空气）——活板门浮空放置后，源放置这一「邻格编辑」触发 t851
+                //   失撑复检（hasAttach 无任何实体面：火把/拉杆非 trapdoorSupportBlock）→ 板当即脱落 =
+                //   torch/lever → IronTrapdoor 假红（RedstoneBlock case 因红石块自身算实体面而幸存；
+                //   D1 的 144 世界该槽恰埋实心山体 = 从未触发）。本探针语义 =「源—器件相邻供电」，与
+                //   地形无关 → 显式铺接收器正下方支撑石，选址不再依赖 y41 恰好实心（t814 教训同源：
+                //   器件必须自带落位保障）。
+                w.setBlock(x0 + 1, kRigY - 1, z0, BR::Stone, 0);
                 for (const RecvDef &rc : r772) {
                     const int srcX = x0, recvX = x0 + 1;
                     if (order == 0) {
@@ -13289,6 +13301,18 @@ int main(int argc, char *argv[])
                 if (clear) { x0 = xx; z0 = zz; }
             }
         if (x0 < 0) {
+            // review0906 D2 首跑实锤：depth 144→180 后 worldgen 洞穴/地表分布整体迁移（worm 起点按
+            //   深度取模重排），原扫描域（z<125）不再保有一体 16×7 净空腔 =「no clear rig area」假红。
+            //   扫描式选址本质上依赖地形（t814 教训同源）→ 退化为远端定址 + 自净空：z=169 行（slot
+            //   220+，本轮尾部 ≈ slot 184 = 行 46 = z 142，永不触及）清出工作盒后照常铺设。
+            x0 = 8;
+            z0 = 169;
+            for (int dx = 0; dx <= 15; ++dx)
+                for (int dz = -3; dz <= 3; ++dz)
+                    for (int dy = -1; dy <= 3; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+        }
+        if (x0 < 0) {
             ++totalFail;
             qInfo().noquote() << "FAIL | t919 fire-aspect DoT finisher: no clear rig area found";
         } else {
@@ -13379,6 +13403,16 @@ int main(int argc, char *argv[])
                 if (clear) { x0 = xx; z0 = zz; }
             }
         if (x0 < 0) {
+            // review0906 D2 fallback（同 t919）：depth 180 世界gen 迁移后扫描域无 18×5 净空腔 →
+            //   远端定址 + 自净空（z=169 行本轮永不触及），选址不再依赖地形。
+            x0 = 8;
+            z0 = 169;
+            for (int dx = 0; dx <= 17; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    for (int dy = -1; dy <= 3; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+        }
+        if (x0 < 0) {
             ++totalFail;
             qInfo().noquote() << "FAIL | t826 knockback by level: no clear rig area found";
         } else {
@@ -13448,6 +13482,16 @@ int main(int argc, char *argv[])
                             if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
                 if (clear) { x0 = xx; z0 = zz; }
             }
+        if (x0 < 0) {
+            // review0906 D2 fallback（同 t919）：depth 180 世界gen 迁移后扫描域无 16×7 净空腔 →
+            //   远端定址 + 自净空（z=169 行本轮永不触及），选址不再依赖地形。
+            x0 = 8;
+            z0 = 169;
+            for (int dx = 0; dx <= 15; ++dx)
+                for (int dz = -3; dz <= 3; ++dz)
+                    for (int dy = -1; dy <= 3; ++dy)
+                        w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air, 0);
+        }
         if (x0 < 0) {
             ++totalFail;
             qInfo().noquote() << "FAIL | t827 fire-aspect ignite: no clear rig area found";
@@ -25399,7 +25443,7 @@ Item {
             const QString pcSrcP945 = readSrcP945(QStringLiteral("src/Game/playercontroller.cpp"));
             const QString wSrcP945 = readSrcP945(QStringLiteral("src/World/world.cpp"));
             const bool okH = pcSrcP945.contains(QStringLiteral(
-                "if (!BlockRegistry::isFullCube(below)) return; // ② 下方非完整立方支撑 → 拒（不挥）"))
+                "if (!BlockRegistry::solidSupportBlock(below)) return; // ② 下方非完整立方 / 仙人掌支撑 → 拒（不挥）"))
                 && wSrcP945.contains(QStringLiteral("dropCactusColumn(nx, baseY, nz);"));
             // 清场 + 释放（grab 析构配对）。
             clearRigP945();
@@ -39956,6 +40000,140 @@ Item {
                           << (ok1007 ? QString() : diag1007);
     }
 
+    // ── P-t1013b 回生落车守卫 + 开箱遮挡腿（review0906 #12；t1013 回生链的行为面补钉）──
+    //    (a) 落格守卫：回生键格被玩家填实（Stone）→ spawnCartImpl 向上扫首个可落格（车落键格上
+    //        一格地面姿态），不再嵌墙成幽灵实体；键寻址不受落格位移影响（chestKeyAt 仍返回原键）。
+    //        （阴性敏感：摘守卫 → 车嵌在 Stone 格内 pos.y 回落到键格 → 腿红。）
+    //    (b) 开箱遮挡：玩家与箱车之间隔墙（主选体命中 m_hitDist ≈ 1.6 < chestDist ≈ 3.2）→ 右键
+    //        不再 emit chestOpened（旧 kReach 全程无遮挡 = 隔墙开箱取物品）；拆墙同几何 → 恰一次
+    //        emit 携正确内容键（遮挡守卫未过杀贴脸开箱）。
+    {
+        const auto [xa12, za12] = nextSlot();
+        bool okA12 = false;
+        {
+            ChestStore cs12;
+            MinecartManager carts12;
+            // 键格 = 轨线旁 2 格空地（4 邻无轨 → spawnChestCart 落键格；填实后守卫向上扫）。
+            const int keyX12 = xa12 + 2;
+            for (int dx = -2; dx <= 4; ++dx)
+                for (int dz = -3; dz <= 3; ++dz) {
+                    for (int dy = -1; dy <= 4; ++dy) w.setBlock(xa12 + dx, kRigY + dy, za12 + dz, BR::Air, 0);
+                    w.setBlock(xa12 + dx, kRigY - 1, za12 + dz, BR::Stone, 0);
+                }
+            w.setBlock(xa12, kRigY, za12, BR::Rail, 0);      // 轨线（与键格隔 1 空格 → 非四邻）
+            w.setBlock(keyX12, kRigY, za12, BR::Stone, 0);   // 玩家把回生键格填实
+            tickN(w, 2);
+            cs12.registerCart(keyX12, kRigY, za12);
+            carts12.spawnChestCart(keyX12, kRigY, za12, &w, keyX12, kRigY, za12);
+            int fx = -1, fy = -1, fz = -1;
+            int idx12 = -1;
+            for (int i = 0; i < carts12.count() && idx12 < 0; ++i) {
+                if (carts12.aliveAt(i) && carts12.chestKeyAt(i, fx, fy, fz)
+                    && fx == keyX12 && fy == kRigY && fz == za12)
+                    idx12 = i;
+            }
+            const float groundDoc12 = 0.3875f; // kCartGroundH 文档镜像（t734 地面静止姿态）
+            okA12 = idx12 >= 0
+                && w.blockAt(keyX12, kRigY, za12) == BR::Stone // 键格仍被填实（车不嵌其中）
+                && std::fabs(carts12.posAt(idx12).x() - (keyX12 + 0.5f)) < 0.01f
+                && std::fabs(carts12.posAt(idx12).z() - (za12 + 0.5f)) < 0.01f
+                && std::fabs(carts12.posAt(idx12).y() - (float(kRigY + 1) + groundDoc12)) < 0.01f; // 上一格地面姿态
+            if (!okA12)
+                qInfo().noquote() << "  [t1013b diag a] idx" << idx12
+                                  << "keyCell" << int(w.blockAt(keyX12, kRigY, za12))
+                                  << "pos" << (idx12 >= 0 ? carts12.posAt(idx12) : QVector3D());
+            carts12.clearAll();
+            cs12.clearChest(keyX12, kRigY, za12);
+        }
+        bool okB12 = false;
+        {
+            ChestStore cs12;
+            MinecartManager carts12;
+            PlayerController pc12;
+            // review0906 D2 首跑归因：m_selectedBlock 默认 Stone（t06 hotbar 绑定）——phase-1 隔墙点击
+            //   在箱车分支被守卫正确拒后落到通用放置分支，把 Stone 误放到墙击面邻格；phase-2 拆墙后这颗
+            //   「幽灵石头」距眼 ~0.54 抢占主选（m_hitDist < chestDist）→ 守卫拒开箱 = opens 0 假红。
+            //   空手（Air）分流：箱车开箱分支不读 selectedBlock，通用放置无物可放。
+            pc12.setSelectedBlock(BR::Air);
+            QQuickWindow probeWin12;
+            pc12.setWorld(&w);
+            pc12.setMinecartManager(&carts12);
+            pc12.setChestStore(&cs12);
+            pc12.setParentItem(probeWin12.contentItem());
+            // 箱车在轨格 (xa12+2, za12)；玩家 (xa12+2, za12+3.5) 同列瞄准车心；墙 = (xa12+2, kRigY+1, za12+1)。
+            const int cx12 = xa12 + 2;
+            w.setBlock(cx12, kRigY, za12, BR::Rail, 0);
+            cs12.registerCart(cx12, kRigY, za12);
+            carts12.spawnChestCart(cx12, kRigY, za12, &w, cx12, kRigY, za12);
+            int chestOpens12 = 0;
+            int openK12[3] = { -1, -1, -1 };
+            QObject::connect(&pc12, &PlayerController::chestOpened, &pc12, [&](int kx, int ky, int kz) {
+                ++chestOpens12;
+                openK12[0] = kx; openK12[1] = ky; openK12[2] = kz;
+            });
+            const float feetY12 = float(kRigY);
+            const QVector3D aim12(float(cx12) + 0.5f, float(kRigY) + 0.45f, float(za12) + 0.5f);
+            const auto pump12 = [](int ms) {
+                QElapsedTimer t;
+                t.start();
+                while (t.elapsed() < ms)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            };
+            const auto aim12f = [&](float fx12, float fy12, float fz12, float ax, float ay, float az) {
+                const float ex = fx12, ey = fy12 + 1.62f, ez = fz12;
+                const float dx = ax - ex, dy = ay - ey, dz = az - ez;
+                const float ln = std::sqrt(dx * dx + dy * dy + dz * dz);
+                pc12.release();
+                pc12.grab();
+                pc12.loadSavedState(fx12, fy12, fz12,
+                                    std::atan2(-dx, -dz) * 57.2957795f,
+                                    std::asin(dy / ln) * 57.2957795f, 1 /* Creative */);
+                pc12.tick(); // updateRaycast 刷新命中（aimT1017 同式）
+                return pc12.hitBlock();
+            };
+            // 隔墙：墙格 (cx12, kRigY+1, za12+1) 在视线上（射线 z 3.5→0.5、y 1.62→0.45，穿该格 y 层）。
+            w.setBlock(cx12, kRigY + 1, za12 + 1, BR::Stone, 0);
+            tickN(w, 2);
+            const QVector3D hitW = aim12f(float(cx12) + 0.5f, feetY12, float(za12) + 3.5f,
+                                          aim12.x(), aim12.y(), aim12.z());
+            pc12.placeBlock();
+            pump12(260);
+            const bool wallHit = hitW == QVector3D(cx12, kRigY + 1, za12 + 1); // 主选体确实命中墙
+            const bool blockedOk = wallHit && chestOpens12 == 0;              // 隔墙不开箱
+            // 拆墙对照：同几何 → 开箱恰一次携键（守卫不过杀）。
+            w.setBlock(cx12, kRigY + 1, za12 + 1, BR::Air, 0);
+            tickN(w, 2);
+            aim12f(float(cx12) + 0.5f, feetY12, float(za12) + 3.5f, aim12.x(), aim12.y(), aim12.z());
+            pc12.placeBlock();
+            pump12(260);
+            const bool openOk = chestOpens12 == 1 && openK12[0] == cx12
+                && openK12[1] == kRigY && openK12[2] == za12;
+            okB12 = blockedOk && openOk;
+            if (!okB12)
+                qInfo().noquote() << "  [t1013b diag b] wallHit" << wallHit << "hitCell" << hitW
+                                  << "opens" << chestOpens12 << "key" << openK12[0] << openK12[1] << openK12[2];
+            carts12.clearAll();
+            cs12.clearChest(cx12, kRigY, za12);
+        }
+        if (!okA12) ++totalFail;
+        if (!okB12) ++totalFail;
+        qInfo().noquote() << (okA12 && okB12 ? "PASS" : "FAIL")
+                          << "| t1013b respawn-into-solid guard + chest-open occlusion (review0906"
+                             " #12): (a) a respawn whose key cell the player filled with stone no"
+                             "longer embeds a ghost cart inside the block - spawnCartImpl scans up"
+                             "to the first non-collidable cell (cart lands on top of the filled"
+                             "cell in ground posture, key addressing unchanged, key cell untouched)"
+                             "and refuses outright if the column is full (key kept in ChestStore"
+                             "for the next enterWorld retry); (b) right-clicking a chest cart"
+                             "BEHIND a wall no longer opens it - the open ray is clamped by the"
+                             "main-selection hit distance (wall hit ~1.6 < cart ~3.2 -> chestOpened"
+                             "not emitted), and the same geometry with the wall removed opens exactly"
+                             "once with the correct content key (the guard does not over-reject"
+                             "point-blank opens)"
+                          << (okA12 && okB12 ? QString()
+                                             : QStringLiteral("diag a/b see [t1013b diag a]/[t1013b diag b]"));
+    }
+
     // ── P-t1014 矿脉化逐矿种探针（R19.20 t1014；scatterOres 散点 → MC 1.0 式矿脉的验收面）──
     //    rig：t1001/t995 同款 5 seed（20260821/777/424242/1337/90210）× 128×128×64 世界池 +
     //    同 seed 复跑（确定性腿）。逐矿种全图连通域普查（6 连通形态口径 + 26 连通「贴连」观感口径——
@@ -39981,8 +40159,20 @@ Item {
         const int bandT1014[7][2] = { { 8, 60 }, { 5, 45 }, { 5, 30 }, { 5, 25 }, { 5, 40 }, { 5, 31 }, { 5, 16 } };
         const bool strictBandT1014[7] = { false, true, false, true, true, true, true }; // 煤/铁留矿井巷壁暴露矿豁免（≥99% 口径）
 
-        auto censusT1014 = [&](World &wv, int oreId, int bandLo, int bandHi, OreStatT1014 &st) {
+        auto censusT1014 = [&](World &wv, int oreId, int bandLo, int bandHi, OreStatT1014 &st, int &seaLand) {
             const int W = wv.width(), D = wv.depth(), H = wv.height();
+            // review0906 #11 海列 cell 分布腿素材：cell 中心列高缓存（8×8 cell 网格，0 = 未算）。
+            //   59 = kWaterLevel(58)+1 镜像（world.cpp cell 跳过 / tryOre 海检同款阈值；测试侧文档锚）。
+            int cellHc[8][8];
+            for (int a = 0; a < 8; ++a)
+                for (int b = 0; b < 8; ++b) cellHc[a][b] = 0;
+            const auto cellCenterH = [&](int x, int z) -> int {
+                const int a = std::min(x / 16, 7), b = std::min(z / 16, 7);
+                if (cellHc[a][b] == 0)
+                    cellHc[a][b] = std::min(wv.heightAt(std::min(a * 16 + 8, W - 1),
+                                                        std::min(b * 16 + 8, D - 1)), H - 1) + 1; // +1 防 0 歧义
+                return cellHc[a][b] - 1;
+            };
             std::unordered_set<quint32> cells;
             for (int y = 0; y < H; ++y)
                 for (int z = 0; z < D; ++z)
@@ -39992,6 +40182,11 @@ Item {
                             if (y >= bandLo && y <= bandHi) ++st.inBand;
                             st.ymin = std::min(st.ymin, y);
                             st.ymax = std::max(st.ymax, y);
+                            // review0906 #11：海洋中心 cell（中心列 h ≤ 59）内的陆地列（本列 h ≥ 60）
+                            //   矿块计数——旧 cell 级跳过把整个 cell 一票否决 = 此计数恒 0（仅邻 cell
+                            //   blob 越界蹭入少量）；恢复逐列海检兜底后海岸带陆地列恢复成矿。
+                            if (cellCenterH(x, z) <= 59 && std::min(wv.heightAt(x, z), H - 1) >= 60)
+                                ++seaLand;
                         }
             st.total = int(cells.size());
             static const int D6[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
@@ -40058,9 +40253,27 @@ Item {
             st.midLongMed = midLong.empty() ? -1 : midLong[midLong.size() / 2];
             st.midShortMed = midShort.empty() ? -1 : midShort[midShort.size() / 2];
         };
+        // review0906 #11 (h) 结构钉素材：海中心 cell 数 / 陆地列数普查（16×16 cell 网格，cellCenterH
+        //   与 censusT1014 同口径：中心列 heightAt clamp H-1 ≤ 59 = 海 cell；列 ≥ 60 = 陆地列）。
+        auto censusSeaMetaT1014 = [&](World &wv, int &seaCellsAcc, int &landColsAcc, int &maxSeaCenterH, bool reset) {
+            const int W = wv.width(), D = wv.depth(), H = wv.height();
+            if (reset) { seaCellsAcc = 0; landColsAcc = 0; maxSeaCenterH = -1; }
+            for (int cz = 0; cz < D; cz += 16)
+                for (int cx = 0; cx < W; cx += 16) {
+                    const int hc = std::min(wv.heightAt(std::min(cx + 8, W - 1),
+                                                        std::min(cz + 8, D - 1)), H - 1);
+                    if (hc > 59) continue;
+                    ++seaCellsAcc;
+                    maxSeaCenterH = std::max(maxSeaCenterH, hc);
+                    for (int z = cz; z < std::min(cz + 16, D); ++z)
+                        for (int x = cx; x < std::min(cx + 16, W); ++x)
+                            if (std::min(wv.heightAt(x, z), H - 1) >= 60) ++landColsAcc;
+                }
+        };
 
         OreStatT1014 statT1014[5][7];
         OreStatT1014 regenT1014[7];
+        int seaLandT1014[5] = { 0, 0, 0, 0, 0 }; // review0906 #11：海中心 cell 陆地列矿块（逐 seed 累计 7 矿）
         for (int si = 0; si < 5; ++si) {
             World wT1014;
             wT1014.setWidth(128);
@@ -40068,7 +40281,8 @@ Item {
             wT1014.setHeight(64);
             wT1014.setSeed(int(seedsT1014[si]));
             for (int oi = 0; oi < 7; ++oi)
-                censusT1014(wT1014, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1], statT1014[si][oi]);
+                censusT1014(wT1014, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1], statT1014[si][oi],
+                            seaLandT1014[si]);
             if (si == 0) // 确定性腿素材：同 seed 复跑
             {
                 World wR;
@@ -40076,8 +40290,10 @@ Item {
                 wR.setDepth(128);
                 wR.setHeight(64);
                 wR.setSeed(int(seedsT1014[0]));
-                for (int oi = 0; oi < 7; ++oi)
-                    censusT1014(wR, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1], regenT1014[oi]);
+                for (int oi = 0; oi < 7; ++oi) {
+                    int regenSea = 0;
+                    censusT1014(wR, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1], regenT1014[oi], regenSea);
+                }
             }
         }
 
@@ -40135,7 +40351,7 @@ Item {
                 const bool okG = inWin(g.total, 1328, 1724) && inWin(g.comps, 225, 275)
                     && g.conn26 * 100 >= g.total * 85 && g.inBand == g.total
                     && g.ymin >= 5 && g.ymax <= 25 && g.midShortMed <= 2;
-                const bool okR = inWin(r.total, 24702, 32084) && inWin(r.comps, 1390, 1650)
+                const bool okR = inWin(r.total, 24702, 32084) && inWin(r.comps, 1300, 1650)
                     && r.conn26 * 100 >= r.total * 95 && r.inBand == r.total
                     && r.hist41 <= 160 && r.midShortMed <= 2;
                 if (!okG || !okR)
@@ -40213,6 +40429,7 @@ Item {
                 {"coal-axis-pick", "const bool axX = (hv >> 16) & 1u;"},   // 煤长条横轴选型
                 {"iron-cube-branch", "p.kind == 2"},                       // 铁立方角印章分支
                 {"blob-offstone-redirect", "if (!offStone && int(rv % 100u) < 60) {"}, // blob 失位转全向判定
+                {"blob-clamp-hrepick", "dx = kH4[d][0]; dz = kH4[d][1];"}, // review0906 #18 竖向重挑限水平 4 向
                 {"stone-only-gate", "if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone) return false;"}, // 仅置换 Stone
             });
             okF = missF.isEmpty();
@@ -40255,6 +40472,44 @@ Item {
                 qInfo().noquote() << "  [t1014 diag g] 128-high coal-above-61 counts:" << diagG;
         }
 
+        // ── (h) review0906 #11 海列分布腿：海中心 cell 内的陆地列（海岸过渡带）矿量非零 ──
+        //     旧 cell 级跳过（中心列 h ≤ 59 一票否决整 16×16 cell）= 该计数仅剩邻 cell blob 越界
+        //     蹭入的少量补偿；移除 cell 跳过、恢复 tryOre 逐列海检兜底后，海岸带陆地列恢复成矿
+        //     （旧散点分布原貌）。rig：t1014 五固定 seed 的 128×128×64 窗内**没有任何海中心 cell**
+        //     （diag_t1014h 首跑实测 seaCells=0 —— 高度图基线 ~64、近岸过渡带列中心落在 60+ = cell
+        //     跳过在这些世界本就从不触发），故本腿自建**专测海 seed**（40 seed 扫描命中 4 个，取前
+        //     2：150461 / 174218，各恰 1 个滩心 cell = minCenterH 58/59，陆地列 236/238）。断言：两
+        //     seed 计数各 ≥ 200（实测 747 / 782 —— 正裕量 ~3.5 倍；旧口径只剩越界蹭入，阴轮实测见
+        //     dev-plan D2 段）。计数走同一 censusT1014（口径零分叉）。
+        bool okH = false;
+        {
+            const int seaSeedsH[2] = { 150461, 174218 };
+            int seaLandSeedsH[2] = { 0, 0 };
+            int seaCellsH = 0, landColsH = 0, maxHSeaH = -1;
+            OreStatT1014 scratchH[7];
+            QString diagH;
+            for (int k = 0; k < 2; ++k) {
+                World wSea;
+                wSea.setWidth(128);
+                wSea.setDepth(128);
+                wSea.setHeight(64);
+                wSea.setSeed(seaSeedsH[k]);
+                for (int oi = 0; oi < 7; ++oi)
+                    censusT1014(wSea, oresT1014[oi], bandT1014[oi][0], bandT1014[oi][1],
+                                scratchH[oi], seaLandSeedsH[k]); // 计数走同 censusT1014（口径零分叉）
+                diagH += QStringLiteral(" s%1:%2").arg(seaSeedsH[k]).arg(seaLandSeedsH[k]);
+                // diag 侧结构钉：确有海中心 cell（防 seed 漂移把腿打成 vacuous 绿）。
+                censusSeaMetaT1014(wSea, seaCellsH, landColsH, maxHSeaH, k == 0);
+            }
+            okH = seaLandSeedsH[0] >= 200 && seaLandSeedsH[1] >= 200 && seaCellsH >= 2;
+            qInfo().noquote() << "  [t1014 diag h] sea-seed land-column ore counts:" << diagH
+                              << "dedicated seaCells" << seaCellsH;
+            (void)landColsH;
+            (void)maxHSeaH;
+            if (!okH)
+                qInfo().noquote() << "  [t1014 diag h] sea-cell land-column distribution leg misses";
+        }
+
         for (int oi = 0; oi < 7; ++oi) { // profile 表数据落账（六矿种 + 铜）：5 seed 范围摘要
             int tmin = 1 << 30, tmax = -1, cmin = 1 << 30, cmax = -1, cnMin = 100, cnMax = -1;
             for (int si = 0; si < 5; ++si) {
@@ -40292,10 +40547,13 @@ Item {
         qInfo().noquote() << (okC ? "PASS" : "FAIL")
                           << "| t1014(c) gold + redstone MC1.0-size blobs: gold 1328..1724 total in"
                              "225..275 walk-veins strictly inside y[5,25]; redstone 24702..32084 in"
-                             "1390..1650 veins strictly inside y[5,16] with merged-sheet tail capped"
+                             "1300..1650 veins strictly inside y[5,16] with merged-sheet tail capped"
                              "(hist41 <= 160, registered effective-density carryover - the legacy"
                              "(r2>>24)%10000 8-bit truncation is preserved per economy parity, see"
-                             "world.cpp ledger note), connection >= 95%"
+                             "world.cpp ledger note), connection >= 95% (redstone vein-count window"
+                             "lowered 1390 -> 1300 for review0906 #18: the horizontal-only repick"
+                             "removes zero-displacement retry deaths so walks travel farther and"
+                             "~5% fewer larger components form - totals and connection unchanged)"
                           << (okC ? QString() : QStringLiteral("shape/window miss, see diag"));
         if (!okD) ++totalFail;
         qInfo().noquote() << (okD ? "PASS" : "FAIL")
@@ -40335,6 +40593,25 @@ Item {
                              "diag-verified negative round), and at least one of 5 seeds must show"
                              "coal at y>=62 (per-seed counts in diag)"
                           << (okG ? QString() : QStringLiteral("no coal above 61 in any seed"));
+        if (!okH) ++totalFail;
+        qInfo().noquote() << (okH ? "PASS" : "FAIL")
+                          << "| t1014(h) coastal land columns inside sea-centered cells carry ore"
+                             "(review0906 #11): the old cell-level skip vetoed a whole 16x16 cell on"
+                             "its center column height, so land columns of sea-centered cells"
+                             "(the coastal transition belt) went completely oreless - whole zero-ore"
+                             "patches unlike the legacy per-column skip; the skip is gone and pure-sea"
+                             "cells are now rejected per-column inside tryOre (h <= wl+1), restoring"
+                             "the legacy distribution. Rig = two dedicated sea-bearing seeds"
+                             "(150461 / 174218 - a 40-seed diag sweep found the t1014 fixed-seed"
+                             "windows contain NO sea-centered cell at all, so the skip never fired"
+                             "there; each dedicated seed carries exactly one beach-centered cell,"
+                             "center h 58/59): each seed must show >= 200 ore blocks on land columns"
+                             "(h >= 60) of its sea-centered cell (measured 747 / 782 under the"
+                             "restored per-column rejection - the old skip reads wander-in overflow"
+                             "only, see the D2 lesion round) and the census structurally confirms the"
+                             "sea cells exist (no vacuous green on seed drift)"
+                          << (okH ? QString()
+                                  : QStringLiteral("sea-cell land-column distribution miss, see diag"));
     }
 
     // ── P-t1015 载具攻击目标甄别探针（R19.20 t1015；机制等价 MC 1.0 骑乘组合 hitbox 拆分甄别）──
@@ -40522,6 +40799,28 @@ Item {
             if (!okE)
                 qInfo().noquote() << "  [t1015 diag e] pin miss:" << missE.join(QLatin1Char(','));
         }
+        // (f) review0906 #13 眼位落入载具盒：攻击者脚位 = 车心 y − 1.62 → 眼（= position()）恰在
+        //     车厢盒内（车心柱、车心高）。旧 rayHitDistAt 盒内返 0 →「0 ≤ 任何 mobDist」恒真 = 点
+        //     乘员身体恒判载具胜（车扣血、乘员无恙）。改盒内 -1（未中）→ 甄别落回乘员本体：乘员
+        //     掉血、车耐久不动。findCartHit（登乘寻的）不改 —— 登乘依赖盒内命中，口径分叉见源码。
+        bool okF13 = false;
+        {
+            const auto [xf13, zf13] = nextSlot();
+            EntityManager em13;
+            MinecartManager cm13;
+            const int mob13 = cartRigT1015(em13, cm13, xf13 + 2, zf13); // 轨格落车 (xf13+2, zf13)
+            const bool boarded13 = mob13 >= 0 && em13.rideCartAt(mob13) == 0;
+            const int hp013 = em13.healthAt(mob13);
+            attackT1015(em13, nullptr, &cm13,
+                        QVector3D(float(xf13) + 2.5f, float(kRigY) + 0.45f - 1.62f, float(zf13) + 0.5f),
+                        QVector3D(float(xf13) + 2.5f, float(kRigY) + 0.45f + 0.1375f, float(zf13) + 0.5f));
+            okF13 = boarded13 && em13.healthAt(mob13) < hp013
+                && cm13.aliveAt(0) && cm13.hpAt(0) == 3; // 车耐久不动（3/3）= 未误判载具
+            if (!okF13)
+                qInfo().noquote() << "  [t1015 diag f] boarded" << boarded13 << "mob" << mob13
+                                  << "hp" << hp013 << "->" << (mob13 >= 0 ? em13.healthAt(mob13) : -1)
+                                  << "cartHp" << cm13.hpAt(0) << "alive" << cm13.aliveAt(0);
+        }
         if (!okA) ++totalFail;
         if (!okB) ++totalFail;
         if (!okC) ++totalFail;
@@ -40545,6 +40844,20 @@ Item {
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4 e=%5")
                                         .arg(okA).arg(okB).arg(okC).arg(okD).arg(okE));
+        if (!okF13) ++totalFail;
+        qInfo().noquote() << (okF13 ? "PASS" : "FAIL")
+                          << "| t1015(f) attacker-eye-inside-vehicle-box leg (review0906 #13):"
+                             "with the attacker's eye standing INSIDE the cart's hitbox (cart"
+                             "center column, cart-center height), a click on the boarded rider's"
+                             "body damages the rider and leaves the cart at full 3/3 HP - the"
+                             "discrimination ray used to return 0 for in-box origins, and"
+                             "'0 <= any mobDist' made the vehicle win EVERY tie, so pointing at"
+                             "the body through your own overlap hit the cart instead;"
+                             "rayHitDistAt now reports -1 (miss) for in-box origins on both the"
+                             "cart and boat managers while findCartHit/findBoatHit (mount and"
+                             "open-chest seeking) keep their in-box-hit semantics"
+                          << (okF13 ? QString()
+                                    : QStringLiteral("diag see [t1015 diag f]"));
     }
 
     // ── P-t1016 世界时间持久化探针（R19.20 t1016；存退重进保留退出时刻 + weather/天数）──
@@ -40581,7 +40894,8 @@ Item {
             storeT1016.closeWorld();
             okA = okA && back.value(QStringLiteral("phase")).toFloat() == 0.3f
                 && back.value(QStringLiteral("day")).toLongLong() == 3
-                && back.value(QStringLiteral("weather")).toInt() == 2;
+                && back.value(QStringLiteral("weather")).toInt() == 2
+                && back.value(QStringLiteral("hasWeather")).toBool() == true; // review0906 #14：真带键
             if (!okA)
                 qInfo().noquote() << "  [t1016 diag a] back =" << back;
         }
@@ -40598,7 +40912,8 @@ Item {
             storeT1016.closeWorld();
             okB = built && back.value(QStringLiteral("phase")).toFloat() == 0.0f
                 && back.value(QStringLiteral("day")).toLongLong() == 0
-                && back.value(QStringLiteral("weather")).toInt() == 0;
+                && back.value(QStringLiteral("weather")).toInt() == 0
+                && back.value(QStringLiteral("hasWeather")).toBool() == false; // review0906 #14：缺键
             if (!okB)
                 qInfo().noquote() << "  [t1016 diag b] built" << built << "back =" << back;
             QFile::remove(dbOld);
@@ -40637,7 +40952,8 @@ Item {
             missD << pinSet(root + QStringLiteral("/src/ui/Main.qml"), {
                 {"qml-exit-chain-5th", "{ phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState }"},
                 {"qml-restore-time", "worldClock.restoreTime(wt.phase, wt.day)"},
-                {"qml-restore-weather", "theWorld.setWeatherState(wt.weather)"},
+                // review0906 #14：仅真带 weather 键才恢复（缺键保 resetWeather 首场晴偏短窗）
+                {"qml-restore-weather-guard", "if (wt.hasWeather) theWorld.setWeatherState(wt.weather)"},
             });
             missD << pinSet(root + QStringLiteral("/src/World/worldclock.h"), {
                 {"hdr-restoreTime", "Q_INVOKABLE void restoreTime(float phase, qint64 day);"},
@@ -40672,6 +40988,94 @@ Item {
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
+    }
+
+    // ── P-t1016b 天气键来源 + 大 day 相位保真（review0906 #14 / #15）──
+    //    (a) #14 来源腿：带 weather 键存档 round-trip → hasWeather true（消费端恢复天气态）；
+    //        旧档形态（四参 saveAll 不写时间键）→ hasWeather false —— 缺键默认 weather 0 与
+    //        「真存过 Clear」从此可区分（enterWorld 仅 hasWeather 才 setWeatherState，缺键保
+    //        resetWeather 首场晴偏短窗 20/45s，不被重抽为常规 45/120s）。
+    //    (b) #15 相位保真腿：WorldClock 冻结表 + restoreTime(day=5,000,003 ≳ 2²², phase 0.3725)
+    //        → dayPhase 复原（旧 float 折算在该量级 ULP ≈ 0.4 天吞相位小数 = 跳回整刻）、
+    //        dayCount / moonPhase(=day%8) 精确；小 day 惯量（3）不变对照。
+    {
+        World wT1016b;
+        wT1016b.setWidth(48);
+        wT1016b.setDepth(48);
+        wT1016b.setHeight(96);
+        wT1016b.setSeed(1016);
+        WorldStore storeT1016b;
+        storeT1016b.setWorld(&wT1016b);
+        bool okA16 = false, okB16 = false;
+        // (a) 带键 vs 缺键：hasWeather 来源腿。
+        {
+            const QString dbA = QDir::temp().absoluteFilePath(
+                    QStringLiteral("voxel_t1016b_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+            QFile::remove(dbA);
+            QVariantMap wt;
+            wt.insert(QStringLiteral("weather"), 2); // Snow：真存过非晴态
+            bool built = storeT1016b.openWorld(dbA)
+                && storeT1016b.saveAll(QStringLiteral("t1016b"), QVariantList(), QVariantList(), QVariantList(), wt);
+            storeT1016b.closeWorld();
+            QVariantMap back;
+            if (built && storeT1016b.openWorld(dbA)) back = storeT1016b.loadWorldTime();
+            storeT1016b.closeWorld();
+            const bool withKey = built && back.value(QStringLiteral("hasWeather")).toBool()
+                && back.value(QStringLiteral("weather")).toInt() == 2;
+            const QString dbOld = QDir::temp().absoluteFilePath(
+                    QStringLiteral("voxel_t1016bold_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+            QFile::remove(dbOld);
+            built = storeT1016b.openWorld(dbOld)
+                && storeT1016b.saveAll(QStringLiteral("t1016bold")); // 四参旧调用形态：不写任何时间键
+            storeT1016b.closeWorld();
+            if (built && storeT1016b.openWorld(dbOld)) back = storeT1016b.loadWorldTime();
+            storeT1016b.closeWorld();
+            const bool noKey = built && !back.value(QStringLiteral("hasWeather")).toBool()
+                && back.value(QStringLiteral("weather")).toInt() == 0;
+            okA16 = withKey && noKey;
+            if (!okA16)
+                qInfo().noquote() << "  [t1016b diag a] withKey" << withKey << "noKey" << noKey
+                                  << "back =" << back;
+            QFile::remove(dbA);
+            QFile::remove(dbOld);
+        }
+        // (b) 大 day round-trip 相位保真（冻结 100ms tick 防跨 tick 相位推进扰断言）。
+        {
+            WorldClock clockB16;
+            clockB16.setRunning(false);
+            const qint64 bigDay16 = 5000003LL; // ≳ 2²²：float 折算 ULP 在此量级 ≈ 0.4 天
+            clockB16.restoreTime(0.3725f, bigDay16);
+            const bool bigOk = qAbs(clockB16.dayPhase() - 0.3725f) < 5e-4f
+                && clockB16.dayCount() == bigDay16
+                && clockB16.moonPhase() == int(bigDay16 % 8); // 5000003 % 8 = 3
+            clockB16.restoreTime(0.75f, 3); // 小 day 惯量对照（P-t1016(c) 同参不回退）
+            const bool smallOk = clockB16.dayPhase() == 0.75f && clockB16.dayCount() == 3
+                && clockB16.moonPhase() == 3;
+            okB16 = bigOk && smallOk;
+            if (!okB16)
+                qInfo().noquote() << "  [t1016b diag b] bigOk" << bigOk
+                                  << "phase" << clockB16.dayPhase() << "day" << clockB16.dayCount()
+                                  << "moon" << clockB16.moonPhase() << "smallOk" << smallOk;
+        }
+        if (!okA16) ++totalFail;
+        if (!okB16) ++totalFail;
+        qInfo().noquote() << (okA16 && okB16 ? "PASS" : "FAIL")
+                          << "| t1016b weather-key provenance + large-day phase fidelity"
+                             "(review0906 #14 / #15): loadWorldTime now reports hasWeather so the"
+                             "missing-key default (weather 0) is distinguishable from a genuinely"
+                             "saved Clear - enterWorld restores the weather state ONLY when the key"
+                             "exists, keeping resetWeather's short first-clear window (20/45s,"
+                             "'weather visible shortly after entering a world') for old saves and"
+                             "fresh worlds instead of re-rolling it to the regular 45/120s window;"
+                             "and applyTime derives elapsed ms by integer day*period + double phase"
+                             "split, so restoreTime round-trips phase EXACTLY at day 5,000,003"
+                             "(past 2^22 where the old float folding quantized phase in ~0.4-day"
+                             "ULP steps - dirty/hand-edited saves silently snapped to whole ticks)"
+                             "with dayCount and moonPhase (=day%8) exact and the small-day path"
+                             "unchanged"
+                          << (okA16 && okB16 ? QString()
+                                             : QStringLiteral("diag a=%1 b see [t1016b diag b]")
+                                                   .arg(okA16));
     }
 
     // ── P-t1017 仙人掌不可附着探针（R19.20 t1017；机制等价 MC 1.0 仙人掌非可附着面）──
@@ -40900,13 +41304,21 @@ Item {
                 {"torch-support-cactus", "if (blockId == Cactus) return false;"},
                 // review0906 #8：单一权威本体 + 公式行（预检/复检四处共享）
                 {"mech-ladder-support-fn", "bool BlockRegistry::mechLadderSupportBlock(quint8 blockId)"},
+                // review0906 #9：公式行上移 solidSupportBlock 统一权威，mechLadderSupportBlock 委托
                 {"mech-ladder-support-formula", "return blockId != Cactus && isFullCube(blockId);"},
+                {"solid-support-fn", "bool BlockRegistry::solidSupportBlock(quint8 blockId)"},
+                {"mech-ladder-delegates", "return solidSupportBlock(blockId);"},
+                {"trapdoor-support-cactus", "if (blockId == Cactus) return false;", 2}, // torch + trapdoor 两处排除行
+                {"topflush-solid-support", "return solidSupportBlock(belowId) || (isSlab(belowId) && (belowState & 1) != 0);"},
             });
             missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
                 // review0906 #8：预检两处 + 复检两处全部走单一权威（裸 isFullCube 复检 = 劈叉回潮）
                 {"mech-precheck-authority", "if (!BlockRegistry::mechLadderSupportBlock(mechSup)) return;"},
                 {"ladder-precheck-authority", "if (!BlockRegistry::mechLadderSupportBlock(hitBlock)) return;"},
                 {"ladder-recheck-authority", "BlockRegistry::mechLadderSupportBlock(m_world->blockAt(sx, sy, sz))", 2},
+                // review0906 #9：铁轨 / 雪层放置预检切 solidSupportBlock 统一权威
+                {"rail-precheck-solid-support", "if (!BlockRegistry::solidSupportBlock(below)) return;"},
+                {"snow-precheck-solid-support", "const bool belowSupport = BlockRegistry::solidSupportBlock(below)"},
             });
             okD = missD.isEmpty();
             if (!okD)
@@ -40988,6 +41400,110 @@ Item {
                 }
             tickN(w, 2);
         }
+        // (f) review0906 #9 同族贴地 / 贴面件漏网收口：活板门 / 红石粉 / 雪层 / 铁轨 / 门 全族
+        //     依仙人掌放置拒放（旧 trapdoorSupportBlock / isTopFlushSupport / 裸 isFullCube 谓词对
+        //     Cactus（ShapeFull）恒真 = 全族漏网；现支撑语义包装层统一排除）。谓词腿（三包装谓词
+        //     对 Cactus 翻假 + Stone 对照不回退）+ 行为腿（真瞄准链：贴侧面活板门 + 站顶面四件）+
+        //     对照腿（雪层 / 铁轨站石头顶照常放置 = 收紧未过杀）。
+        bool okF9 = false;
+        {
+            const auto [xn9, zn9] = nextSlot();
+            for (int dx = -2; dx <= 7; ++dx)
+                for (int dz = -3; dz <= 2; ++dz) {
+                    for (int dy = -1; dy <= 5; ++dy) w.setBlock(xn9 + dx, kRigY + dy, zn9 + dz, BR::Air, 0);
+                    w.setBlock(xn9 + dx, kRigY - 1, zn9 + dz, BR::Stone, 0);
+                }
+            w.setBlock(xn9, kRigY - 1, zn9, BR::Sand, 0);       // 仙人掌合法沙支撑
+            w.setBlock(xn9, kRigY,     zn9, BR::Cactus, 0);      // 下柱
+            w.setBlock(xn9, kRigY + 1, zn9, BR::Cactus, 0);      // 上柱
+            w.setBlock(xn9 - 2, kRigY, zn9, BR::Stone, 0);       // 立足柱（-X 侧，顶面瞄准同 (b)）
+            w.setBlock(xn9 - 2, kRigY + 1, zn9, BR::Stone, 0);
+            w.setBlock(xn9 - 2, kRigY + 2, zn9, BR::Stone, 0);
+            w.setBlock(xn9 + 5, kRigY, zn9, BR::Stone, 0);       // 对照石（+X 远端；非柱邻不触 ④）
+            tickN(w, 2);
+            const bool rigOk9 = w.blockAt(xn9, kRigY, zn9) == BR::Cactus
+                && w.blockAt(xn9, kRigY + 1, zn9) == BR::Cactus;
+            // 谓词腿：三支撑包装谓词对 Cactus 全假，Stone 全真（上半砖齐平支撑对照不回退）。
+            const quint8 cac = quint8(BR::Cactus), sto = quint8(BR::Stone);
+            const quint8 slabTop = quint8(BR::WoodSlab); // 上半砖 state bit0=1 → isTopFlushSupport 真
+            const bool okPred9 = !BlockRegistry::trapdoorSupportBlock(cac, 0)
+                && BlockRegistry::trapdoorSupportBlock(sto, 0)
+                && !BlockRegistry::isTopFlushSupport(cac, 0)
+                && BlockRegistry::isTopFlushSupport(sto, 0)
+                && BlockRegistry::isTopFlushSupport(slabTop, 1)
+                && !BlockRegistry::isTopFlushSupport(slabTop, 0)
+                && !BlockRegistry::isDustSupport(cac, 0)
+                && !BlockRegistry::solidSupportBlock(cac)
+                && BlockRegistry::solidSupportBlock(sto);
+            // 行为腿 · 贴侧面：活板门瞄上柱 +X 面 → 目标 (xn+1, kRigY+1)（下方 Air = 贴地路不可用，
+            //   唯一可依附面 = 仙人掌侧面；旧谓词放行 = 缺口面）。
+            pcT1017.setSelectedBlock(BR::WoodTrapdoor);
+            const QVector3D hitTd = aimT1017(float(xn9) + 3.5f, float(kRigY), float(zn9) + 0.5f,
+                                             float(xn9) + 0.85f, float(kRigY) + 1.5f, float(zn9) + 0.5f);
+            pcT1017.placeBlock();
+            pumpMsT1017(260);
+            const bool tdAimed = hitTd == QVector3D(xn9, kRigY + 1, zn9);
+            const bool tdRejected = w.blockAt(xn9 + 1, kRigY + 1, zn9) == BR::Air;
+            // 行为腿 · 站顶面：红石粉（手持 RedstoneId）/ 雪层 / 铁轨 / 门 瞄上柱顶面 → 目标
+            //   (xn, kRigY+2)（下方 = 仙人掌；旧口径全放行）。红石粉走 hotbar heldItemId 分流，
+            //   验后还原空手（防 heldItemId 残留劫持后续 placeBlock 分流）。
+            const float feetTop9[3] = { float(xn9) - 1.5f, float(kRigY + 3), float(zn9) + 0.5f };
+            const float aimTop9[3] = { float(xn9) + 0.5f, float(kRigY) + 1.9f, float(zn9) + 0.5f };
+            hbT1017.setHeldBlock(RecipeRegistry::RedstoneId);
+            const QVector3D hitDu = aimT1017(feetTop9[0], feetTop9[1], feetTop9[2],
+                                             aimTop9[0], aimTop9[1], aimTop9[2]);
+            pcT1017.placeBlock();
+            pumpMsT1017(260);
+            hbT1017.setHeldBlock(0);
+            const bool duAimed = hitDu == QVector3D(xn9, kRigY + 1, zn9);
+            const bool duRejected = w.blockAt(xn9, kRigY + 2, zn9) == BR::Air;
+            bool topAllRejected = true;
+            const int topKinds9[3] = { BR::SnowLayer, BR::Rail, BR::WoodDoor };
+            for (int k = 0; k < 3 && topAllRejected; ++k) {
+                pcT1017.setSelectedBlock(topKinds9[k]);
+                const QVector3D hit = aimT1017(feetTop9[0], feetTop9[1], feetTop9[2],
+                                               aimTop9[0], aimTop9[1], aimTop9[2]);
+                pcT1017.placeBlock();
+                pumpMsT1017(260);
+                if (hit != QVector3D(xn9, kRigY + 1, zn9)
+                    || w.blockAt(xn9, kRigY + 2, zn9) != BR::Air
+                    || w.blockAt(xn9, kRigY + 3, zn9) != BR::Air) // 门两格同查（防半截门落上格）
+                    topAllRejected = false;
+            }
+            const bool colOk9 = w.blockAt(xn9, kRigY, zn9) == BR::Cactus
+                && w.blockAt(xn9, kRigY + 1, zn9) == BR::Cactus; // 柱无恙（防放置触 ④ 坍落假象）
+            // 对照腿：雪层 / 铁轨站石头顶照常放置（新谓词未过杀常规支撑）。
+            pcT1017.setSelectedBlock(BR::SnowLayer);
+            const QVector3D hitSnowC = aimT1017(float(xn9) + 7.5f, float(kRigY), float(zn9) + 0.5f,
+                                                float(xn9) + 5.5f, float(kRigY) + 0.95f, float(zn9) + 0.5f);
+            pcT1017.placeBlock();
+            pumpMsT1017(260);
+            const bool snowCtrl = hitSnowC == QVector3D(xn9 + 5, kRigY, zn9)
+                && w.blockAt(xn9 + 5, kRigY + 1, zn9) == BR::SnowLayer;
+            w.setBlock(xn9 + 5, kRigY + 1, zn9, BR::Air, 0); // 清雪层（占位会拒铁轨 → 先清再对照）
+            pcT1017.setSelectedBlock(BR::Rail);
+            const QVector3D hitRailC2 = aimT1017(float(xn9) + 7.5f, float(kRigY), float(zn9) + 0.5f,
+                                                 float(xn9) + 5.5f, float(kRigY) + 0.95f, float(zn9) + 0.5f);
+            pcT1017.placeBlock();
+            pumpMsT1017(260);
+            const bool railCtrl2 = hitRailC2 == QVector3D(xn9 + 5, kRigY, zn9)
+                && w.blockAt(xn9 + 5, kRigY + 1, zn9) == BR::Rail;
+            okF9 = rigOk9 && okPred9 && tdAimed && tdRejected && duAimed && duRejected
+                && topAllRejected && colOk9 && snowCtrl && railCtrl2;
+            if (!okF9)
+                qInfo().noquote() << "  [t1017 diag f] rig" << rigOk9 << "pred" << okPred9
+                                  << "tdAim" << tdAimed << "tdRej" << tdRejected
+                                  << "duAim" << duAimed << "duRej" << duRejected
+                                  << "top" << topAllRejected << "col" << colOk9
+                                  << "snowC" << snowCtrl << "railC" << railCtrl2;
+            // 清场（同 (e) 尾清场口径）。
+            for (int dx = -2; dx <= 7; ++dx)
+                for (int dz = -3; dz <= 2; ++dz) {
+                    for (int dy = -1; dy <= 5; ++dy) w.setBlock(xn9 + dx, kRigY + dy, zn9 + dz, BR::Air, 0);
+                    w.setBlock(xn9 + dx, kRigY - 1, zn9 + dz, BR::Air, 0);
+                }
+            tickN(w, 2);
+        }
         if (!okA) ++totalFail;
         if (!okB) ++totalFail;
         if (!okC) ++totalFail;
@@ -41033,6 +41549,95 @@ Item {
                              " directly still drops (harness sanity control)"
                           << (okE8 ? QString()
                                    : QStringLiteral("diag see [t1017 diag e]"));
+        if (!okF9) ++totalFail;
+        qInfo().noquote() << (okF9 ? "PASS" : "FAIL")
+                          << "| t1017(f) attach-family cactus sweep (review0906 #9): the ground/"
+                             "face-support wrapper predicates (trapdoorSupportBlock /"
+                             "isTopFlushSupport / isDustSupport / solidSupportBlock, the last now"
+                             "the shared authority mechLadderSupportBlock delegates to) all return"
+                             "false for Cactus while stone and top-half-slab controls keep"
+                             "supporting, and through the REAL aim->placeBlock chain a trapdoor"
+                             "against the column's side face (its only candidate attach face -"
+                             "nothing below), plus redstone dust, snow layer, rail and door on the"
+                             "column top are ALL rejected with their target cells staying Air and"
+                             "the column intact (pre-fix every one of these placed: ShapeFull"
+                             "cactus passed the bare predicates), while snow layer and rail on a"
+                             "stone block still place (the tightening does not over-reject)"
+                          << (okF9 ? QString()
+                                   : QStringLiteral("diag see [t1017 diag f]"));
+    }
+
+    // ── P-t1012c 水冲毁梯子腿（review0906 #10；机制等价 MC 1.0 流水冲毁 ladder）──
+    //    (a) 谓词腿：isAttachableBlock 单一权威含 Ladder；Rail 刻意排除（登记口径 —— 矿井轨网
+    //        worldgen 资产不可再生，防洞口洪流成片掏轨）、Stone 阴性对照；
+    //    (b) 行为腿：悬空石平台 + 石墙 + 贴墙梯（state=0 支撑墙 +X）+ 水源贴梯扩散 → 梯被冲毁
+    //        （格 Air ∨ Water 同 tick 入水）+ blockDroppedAsItem 掉自身 id（dropId(Ladder)=Ladder，
+    //        与玩家挖除掉落链同源）；对照：水源反向扩散轨格 → 铁轨完好（刻意排除的行为面钉）。
+    {
+        bool okA10 = !BlockRegistry::isAttachableBlock(quint8(BR::Stone))
+            && !BlockRegistry::isAttachableBlock(quint8(BR::Rail))
+            && BlockRegistry::isAttachableBlock(quint8(BR::Ladder))
+            && BlockRegistry::isAttachableBlock(quint8(BR::Torch))
+            && BlockRegistry::isAttachableBlock(quint8(BR::Cobweb))
+            && BlockRegistry::dropId(quint8(BR::Ladder)) == int(BR::Ladder); // 掉落链免费成立面
+        bool okB10 = false;
+        {
+            World wW10;
+            wW10.setWidth(48); wW10.setDepth(48); wW10.setHeight(64); wW10.setSeed(9);
+            // worldgen 水沉降（t34w④ 同口径：推进到连续静默，免地形水体扩散扰 rig）。
+            int wc10 = 0;
+            QObject::connect(&wW10, &World::worldChanged, &wW10, [&]() { ++wc10; });
+            const auto settle10 = [&]() {
+                int quiet = 0;
+                for (int i = 0; i < 2000 && quiet < 10; ++i) {
+                    const int wc0 = wc10;
+                    wW10.tickWaterFlow(); wW10.tickWaterFlow(); wW10.tickWaterFlow();
+                    quiet = (wc10 == wc0) ? quiet + 1 : 0;
+                }
+            };
+            settle10();
+            // 悬空石平台一排 y=40（x 22..30）：墙 x=28（双层防绕）、梯 x=27 贴墙（state=0 → 支撑 +X），
+            //   水源 x=26（+X 扩散进梯格）；轨对照 x=24（水源 -X 扩散路径尽端，下方石面 = grounded）。
+            constexpr int PY10 = 40, PZ10 = 24;
+            for (int x = 22; x <= 30; ++x)
+                for (int dy = 1; dy <= 3; ++dy)
+                    if (wW10.blockAt(x, PY10 + dy, PZ10) != BR::Air)
+                        wW10.setWaterSilent(x, PY10 + dy, PZ10, BR::Air, 0);
+            for (int x = 22; x <= 30; ++x) wW10.setBlock(x, PY10, PZ10, BR::Stone, 0);
+            wW10.setBlock(28, PY10 + 1, PZ10, BR::Stone, 0); // 支撑墙
+            wW10.setBlock(28, PY10 + 2, PZ10, BR::Stone, 0);
+            wW10.setBlock(27, PY10 + 1, PZ10, BR::Ladder, 0); // state=0 → 支撑墙 +X = 石墙
+            wW10.setBlock(24, PY10 + 1, PZ10, BR::Rail, 0);   // 轨对照（刻意排除的行为面）
+            int drops10 = 0;
+            int dropId10 = -1;
+            QObject::connect(&wW10, &World::blockDroppedAsItem, &wW10,
+                             [&](int, int, int, int id) { ++drops10; dropId10 = id; });
+            wW10.setBlock(26, PY10 + 1, PZ10, BR::Water, 0); // 源（桶倒路径同款源写入）
+            settle10();
+            const quint8 afterLadder = wW10.blockAt(27, PY10 + 1, PZ10);
+            const bool ladderWashed = afterLadder == BR::Air || afterLadder == BR::Water;
+            const bool railIntact = wW10.blockAt(24, PY10 + 1, PZ10) == BR::Rail;
+            okB10 = ladderWashed && railIntact && drops10 >= 1 && dropId10 == int(BR::Ladder);
+            if (!okB10)
+                qInfo().noquote() << "  [t1012c diag b] ladderCell" << int(afterLadder)
+                                  << "rail" << int(wW10.blockAt(24, PY10 + 1, PZ10))
+                                  << "drops" << drops10 << "dropId" << dropId10;
+        }
+        if (!okA10) ++totalFail;
+        if (!okB10) ++totalFail;
+        qInfo().noquote() << (okA10 && okB10 ? "PASS" : "FAIL")
+                          << "| t1012c water-wash ladder leg (review0906 #10): the attachable-block"
+                             "water-destroy family now includes Ladder (dropId = itself so the drop"
+                             "chain is free) while Rail stays deliberately excluded (registered:"
+                             "worldgen mineshaft rail networks are non-renewable scene assets - one"
+                             "cave-mouth flood must not gut them; stone negative control) -"
+                             "behaviorally a water source spreading into a wall-attached ladder cell"
+                             "washes it to Air/Water and emits blockDroppedAsItem with the ladder's"
+                             "own id (same chain as player mining), while the rail cell on the"
+                             "opposite spread path of the same source stays fully intact"
+                          << (okA10 && okB10 ? QString()
+                                             : QStringLiteral("diag a=%1 b see [t1012c diag b]")
+                                                   .arg(okA10));
     }
 
     // ── P-t1008 小僵尸两修探针（① 生物蛋图标管线统一 ② 小鸡骑士组合越障跳）──
