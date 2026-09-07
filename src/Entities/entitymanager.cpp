@@ -1544,9 +1544,17 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                         if (cy < 0 || cy >= worldH - 1) continue;        // 须留一格空间在上（mob 占 2 格高/水柱同）
                         const quint8 here = world->blockAt(cx, cy, cz);
                         const quint8 above = world->blockAt(cx, cy + 1, cz);
+                        // 跨批高危 #1（09-06 review）：Cobweb 格豁免——t1012② 满网蛛网走廊把笼周 8 邻 +
+                        //   上格全填 Cobweb（非 Air），陆生谓词「here/above == Air」恒假 → 洞穴蜘蛛笼
+                        //   （唯一自然来源）永久零刷。机制等价 MC：cave spider 在网窝里照常刷（蛛网无碰撞，
+                        //   不阻生成）。取「豁免」而非「刷出后清网」：清网会破 t786「笼周 ≥8 网 = 矿井蛛笼」
+                        //   分流口径（刷几代网就没了），豁免零 worldgen 面。仅豁 Cobweb（火把 / 草 / 轨等
+                        //   其余非实体格维持 Air-only 口径不变，review26 #19 支撑收口不受扰）。
+                        const bool hereOk = here == BlockRegistry::Air || here == BlockRegistry::Cobweb;
+                        const bool aboveOk = above == BlockRegistry::Air || above == BlockRegistry::Cobweb;
                         const bool okCell = wantWater
                             ? (here == BlockRegistry::Water && above == BlockRegistry::Water)
-                            : (here == BlockRegistry::Air && above == BlockRegistry::Air
+                            : (hereOk && aboveOk
                                // review26 #19：支撑收口 isCollidable（t865 单一权威）——水 / 岩浆本就
                                //   ShapeNone 无碰撞（旧显式排除随之免费包含），花草 / 轨 / 火把不再当支撑。
                                && world->isCollidable(cx, cy - 1, cz));
@@ -5625,6 +5633,10 @@ void EntityManager::tickVehicleRiding()
                 if (!m_cartMgr->aliveAt(i)) continue;
                 if (m_cartMgr->mobPassengerAt(i) >= 0) continue;    // 生物已占座 → 满
                 if (m_cartMgr->ridingIndex() == i) continue;        // 玩家正骑 → 满（乘员总数限 1）
+                // 跨批遗留 #4（09-06 review 中 #4）：箱子矿车拒载生物——对齐玩家侧 tryMount 拒箱车
+                //   （minecartmanager.cpp「箱子矿车不可骑」守卫）：内容容器语义，蜘蛛钉坐进车斗模型
+                //   视觉穿插。读口 chestAt 已有（呈现层同用），一行守卫即可。
+                if (m_cartMgr->chestAt(i)) continue;
                 const QVector3D d = m_cartMgr->posAt(i) - e.pos;
                 if (std::abs(d.y()) > kEmBoardDy) continue;
                 const float dxz2 = d.x() * d.x() + d.z() * d.z();
