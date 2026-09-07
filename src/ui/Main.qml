@@ -12583,6 +12583,10 @@ Window {
                                 settingsPanelT22.statusT22 = "冲突：「" + keybindsMgr.keyDisplayName(e.key)
                                     + "」已映射到「" + settingsPanelT22.actionNameT22(keybindsMgr.actionOfKey(e.key))
                                     + "」，请换键或先改绑该动作"
+                            } else if (res === KeybindManager.ApplyForbiddenKey) {
+                                // review0907 B #1：固定键单出专文案（键可识别，只是登记口径不可绑——
+                                //   落通用 else 臂会误显「无法识别的按键」）。
+                                settingsPanelT22.statusT22 = "该键为固定功能键，不可绑定（Esc 关面板 / 数字 1-9 选槽 / 修饰键组合弦等）"
                             } else {
                                 settingsPanelT22.statusT22 = "无法识别的按键"
                             }
