@@ -536,7 +536,8 @@ bool MinecartManager::tryStallSlideback(Cart &c, World *world, int railY)
 //   是自校正不变量，FP 漂移逐 tick 吸收），v 随 d 同步归零 → 一次平滑减速停驻谷底中心（谷心梯度 0 =
 //   静置闸稳定不动点：|hF-hB| 在 ±0.25 采样窗内恰为 0 → 不 kick、不反溜、永久静止），无往复。
 //   t1019 能量判据（替代 t981 的 |speed| ≤ kCartValleyEscape(10) 速度阈）：进谷速度足以爬升对面坡
-//   （v² ≥ 2·kCartSlopeGravity·(h_对面坡升 + kCartValleyPassMarginH)）→ 放行交还既有上坡物理按速度
+//   （谷底账 v² + 2g·d ≥ 2·kCartSlopeGravity·(h_对面坡升 + kCartValleyPassMarginH)，d = 到谷心剩余
+//   下行水平距离 —— review0906 #6 折算，见判据行注释）→ 放行交还既有上坡物理按速度
 //   爬坡穿过；不足才捕获谷心制动。g 用项目坡道运动学口径（与世界重力同源的沿轨分量，上 / 下坡积分
 //   同一常量 → 判据与谷内物理能量账自洽）。h_对面坡升 = 沿行进向逐格 +1 的连续爬升段总高（单壁 V =
 //   1.0；阶梯壁逐格累加——深谷壁足额计入，臂中失速回溜不复活打转）。余量 0.05 格盖静置闸 kick 贴阈
@@ -601,7 +602,13 @@ bool MinecartManager::tryValleyBottomCapture(Cart &c, World *world, int railY, q
     const float v2 = c.speed * c.speed;
     const float pass2 = 2.0f * kCartSlopeGravity
         * (float(hOpp) + kCartValleyPassMarginH);             // 通过阈 = 2g·(h 对面坡升 + 余量)
-    if (v2 >= pass2) return false;                            // 能量足 → 按速度通过（爬对面坡）
+    // review0906 #6：判据折算到谷底账 —— 车在下行半幅（d>0）时谷物理还要继续回收下行收益（梯度积分
+    //   每 0.5 格水平下行 +2g·0.5 ≈ 19.8 v²）；旧式「当前 v² 直比阈」在下行半幅早评 = 漏算剩余下行收益
+    //   （hOpp=1 时入格缘 v²∈[~21.8, 41.6) 的本可通过车被错杀停谷心，「能过则过」未兑现）。改：
+    //   v² + 2g·d（d = 沿运动向到谷心剩余水平距离）≥ 阈才放行 —— 采样即「滑到谷心时的能量账」，
+    //   与谷内梯度积分同常量同量纲；越心（d<0）已在上游放行不参与。
+    const float v2ValleyFloor = v2 + 2.0f * kCartSlopeGravity * std::max(d, 0.0f);
+    if (v2ValleyFloor >= pass2) return false;                 // 谷底账能量足 → 按速度通过（爬对面坡）
     const float v = std::fabs(c.speed);
     const float dd = std::max(d, 1e-3f);
     const float dv = (v * v / (2.0f * dd)) * float(dt);       // a0·dt（a0 = v²/2d，每 tick 重算自校正）
