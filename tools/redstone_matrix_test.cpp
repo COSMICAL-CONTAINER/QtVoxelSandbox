@@ -147,6 +147,72 @@ float fishCatchSpeedMirror(const QVector3D &bobPos, const QVector3D &playerFeet)
     return std::sqrt((dx / T) * (dx / T) + (dz / T) * (dz / T) + vy * vy);
 }
 
+// ── 套件级源码钉帮手（review0907 B-P1-1）────────────────────────────────────────────
+// 痛点：套件 ~896 处 contains 源码钉多为裸 contains（不滤注释）——把被钉语句整行注释掉，
+//   或注释文本里恰好出现 needle 时钉不红 = 假绿。本帮手统一「读文件 → 字符串感知剥注释 →
+//   needle 只在非注释文本 contains（含 count>=minCount 形态）」，t989 stripQmlComments989 /
+//   t1008a 逐行滤 / t1023a 滤块注释三处先例的套件级抽版。
+// 注释语义按后缀分派：.txt/.py/.cmake → '#' 到行尾（CMake/Python）；其余（C++/QML）→
+//   '//' 行注释 + '/* */' 块注释。字符串感知（"..." 与 '...'，反斜杠逃逸），注释体丢弃、
+//   注释起止各补一空格防 token 粘连、换行保留。
+// 返回：失配 pin 的 id 列表（"id(x出现次数<minCount)" 形态；空 = 全绿），调用方自行落 diag。
+// needle 纪律：必须锚真实语句（剥注释后仍在）。**禁止**把 needle 拼进尾注释（如「// t1017」
+//   ——剥注释后必失配）；显示名 / UI 文案钉只允许作为 copy 钉单独列账（t1022B 先例），不得与
+//   接线钉混计。struct 有 ctor（minCount 缺省 1），聚合 braced 初始化直接可用。
+struct SrcPin
+{
+    SrcPin(const char *i, const char *ndl, int mc = 1) : id(i), needle(ndl), minCount(mc) {}
+    const char *id;
+    const char *needle;
+    int minCount;
+};
+inline QStringList pinSet(const QString &path, std::initializer_list<SrcPin> pins)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QStringList() << QStringLiteral("<file-unreadable:%1>").arg(path);
+    const QString src = QString::fromUtf8(f.readAll());
+    const bool hashLine = path.endsWith(QLatin1String(".txt")) || path.endsWith(QLatin1String(".py"))
+        || path.endsWith(QLatin1String(".cmake"));
+    QString code;
+    code.reserve(src.size());
+    enum St { Code, Str, Chr, Line, Block };
+    St st = Code;
+    int i = 0;
+    const int n = src.size();
+    while (i < n) {
+        const QChar c = src.at(i);
+        const QChar nx = (i + 1 < n) ? src.at(i + 1) : QChar(u'\0');
+        if (st == Code) {
+            if (c == u'"') { st = Str; code.append(c); }
+            else if (c == u'\'') { st = Chr; code.append(c); }
+            else if (hashLine && c == u'#') { st = Line; code.append(u' '); }
+            else if (c == u'/' && nx == u'/') { st = Line; code.append(u' '); ++i; }
+            else if (c == u'/' && nx == u'*') { st = Block; code.append(u' '); ++i; }
+            else code.append(c);
+        } else if (st == Str || st == Chr) {
+            code.append(c);
+            if (c == u'\\') { if (i + 1 < n) { code.append(src.at(i + 1)); ++i; } }
+            else if ((st == Str && c == u'"') || (st == Chr && c == u'\'')) st = Code;
+        } else if (st == Line) {
+            if (c == u'\n') { st = Code; code.append(c); }
+        } else { // Block
+            if (c == u'*' && nx == u'/') { st = Code; code.append(u' '); ++i; }
+            else if (c == u'\n') code.append(c);
+        }
+        ++i;
+    }
+    QStringList miss;
+    const auto missTag = [](const SrcPin &p, int cnt) {
+        return QStringLiteral("%1(x%2<%3)").arg(QLatin1String(p.id)).arg(cnt).arg(p.minCount);
+    };
+    for (const SrcPin &p : pins) {
+        const int cnt = code.count(QString::fromUtf8(p.needle));
+        if (cnt < p.minCount) miss << missTag(p, cnt);
+    }
+    return miss;
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -22606,32 +22672,29 @@ Item {
             w.setBlock(xa, kRigY, za + 1, BR::Air, 0);
             tickN(w, 2);
         }
-        // (d) 源码钉（任一消失即红）。
-        const QString exeDir1018 = QCoreApplication::applicationDirPath();
-        const QString root1018 = QDir(exeDir1018 + QStringLiteral("/..")).absolutePath();
-        auto readSrc1018 = [&root1018](const QString &rel) -> QString {
-            QFile f(root1018 + QStringLiteral("/") + rel);
-            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
-        };
-        const QString br1018 = readSrc1018(QStringLiteral("src/Core/blockregistry.cpp"));
-        const QString wd1018 = readSrc1018(QStringLiteral("src/World/world.cpp"));
-        const bool okD1 = br1018.contains(QStringLiteral(
-            "bool BlockRegistry::railProbeEndpointAligned(const RailProbe &p, bool xAxis)"));
-        const bool okD2 = br1018.contains(QStringLiteral(
-            "(hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)")); // 规则②③延伸松弛行
-        const bool okD3 = br1018.contains(QStringLiteral(
-            "if (axisCon != 0 || c != 0) return axisCon;")); // 轴上臂优先 / c!=0 永不松守卫
-        // review0907 A-P3-1：单 Z 臂镜像行随拐角守卫更新（钉新行全文 + Z 臂守卫条件；旧钉
-        //   「单 Z 臂 → NS 偏好」是 A-P3-1 改写前的旧行，守卫只收口拐角误镜像、行为腿 (a)-(c) 不变）。
-        const bool okD4 = wd1018.contains(QStringLiteral(
-            "con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag)); // t1018 单 Z 臂（无 X 位）→ NS 偏好"))
-            && wd1018.contains(QStringLiteral(
-            "&& (con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) == 0)"));
-        const bool okT1018 = okA && okB && okC && okD1 && okD2 && okD3 && okD4;
+        // (d) 源码钉（任一消失即红）。B-P1-1 迁移：滤注释钉（pinSet）；原 okD4 钉串拼进尾注释
+        //     「// t1018 单 Z 臂…」（尾注释措辞改动即误红的隐患钉，B-P2-2 同族核查确认）→ 改钉
+        //     语句本体 minCount 2（贯穿 Z + 单 Z 臂两处镜像行全须在场）+ 单 Z 臂守卫行
+        //     （A-P3-1 交叉轴零位守卫，语句本体不变仍钉）。
+        const QString root1018 = QDir(QCoreApplication::applicationDirPath()
+                                      + QStringLiteral("/..")).absolutePath();
+        const QStringList missDbr = pinSet(root1018 + QStringLiteral("/src/Core/blockregistry.cpp"), {
+            {"fn-railProbeEndpointAligned", "bool BlockRegistry::railProbeEndpointAligned(const RailProbe &p, bool xAxis)"},
+            {"rule2-endpoint-relax", "(hasPZ && railProbeEndpointAligned(pz, false) ? RailConnPz : 0)"}, // 规则②③延伸松弛行
+            {"axis-arm-first-guard", "if (axisCon != 0 || c != 0) return axisCon;"}, // 轴上臂优先 / c!=0 永不松守卫
+        });
+        const QStringList missDwd = pinSet(root1018 + QStringLiteral("/src/World/world.cpp"), {
+            {"zmirror-single-guard", "(con & (BlockRegistry::RailConnPz | BlockRegistry::RailConnNz)) != 0"}, // 单 Z 臂分支（!= 0；贯穿分支为 ==）
+            {"zmirror-pref-stmt", "con = quint8(con & quint8(~BlockRegistry::RailAxisEWFlag));", 2}, // 贯穿 Z + 单 Z 臂两镜像行
+            {"cross-axis-zero-guard", "&& (con & (BlockRegistry::RailConnPx | BlockRegistry::RailConnNx)) == 0)"}, // A-P3-1 守卫
+        });
+        const bool okD = missDbr.isEmpty() && missDwd.isEmpty();
+        const bool okT1018 = okA && okB && okC && okD;
         if (!okT1018) ++totalFail;
         if (!okT1018)
             qInfo().noquote() << "  [t1018 diag] a" << okA << "b" << okB << "c" << okC
-                              << "| d" << okD1 << okD2 << okD3 << okD4;
+                              << "| d br:" << missDbr.join(QLatin1Char(','))
+                              << "wd:" << missDwd.join(QLatin1Char(','));
         qInfo().noquote() << (okT1018 ? "PASS" : "FAIL")
                           << "| t1018 rail extension relaxation (t983 rework): extending a line at"
                              " its endpoint used to depend on placement facing - a new rail placed"
@@ -35304,38 +35367,53 @@ Item {
                               << "loadEntered" << enteredT20Load << "loadToast" << toastT20Load;
 
         // ── (c) 源码钉：边沿守卫 + 重置钩子 + QML 路由行 + 定义行 + 类常量同源 ──
-        const QString exeDirT20 = QCoreApplication::applicationDirPath();
-        const QString rootT20 = QDir(exeDirT20 + QStringLiteral("/..")).absolutePath();
-        const auto readSrcT20 = [&rootT20](const QString &rel) -> QString {
-            QFile f(rootT20 + QLatin1Char('/') + rel);
-            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
-        };
-        const QString pcCppT20 = readSrcT20(QStringLiteral("src/Game/playercontroller.cpp"));
-        const QString pcHdrT20 = readSrcT20(QStringLiteral("src/Game/playercontroller.h"));
-        const QString mainQmlT20 = readSrcT20(QStringLiteral("src/ui/Main.qml"));
-        const QString ppCppT20 = readSrcT20(QStringLiteral("src/Game/playerprogress.cpp"));
-        const QString ppHdrT20 = readSrcT20(QStringLiteral("src/Game/playerprogress.h"));
-        const QString worldHdrT20 = readSrcT20(QStringLiteral("src/World/world.h"));
-        const QString worldCppT20 = readSrcT20(QStringLiteral("src/World/world.cpp"));
-        const bool okPinT20 =
-            pcCppT20.contains(QStringLiteral("if (inStruct && !m_insideStructure[k])"))              // tick 上升沿守卫
-            && pcCppT20.contains(QStringLiteral("读档重进同清四结构进入沿守卫"))                       // finishWorldLoad 重置钩子
-            && pcHdrT20.contains(QStringLiteral("void structureEntered(int kind);"))                 // 信号声明
-            && mainQmlT20.contains(QStringLiteral("function onStructureEntered(kind) { progress.onStructureEntered(kind) }")) // 路由行
-            && mainQmlT20.contains(QStringLiteral("if (ridingCart) progress.onRodeMinecart()"))
-            && mainQmlT20.contains(QStringLiteral("if (isCartCell) progress.onChestCartOpened()"))
-            && mainQmlT20.contains(QStringLiteral("progress.onFishCaught()"))
-            && ppCppT20.contains(QStringLiteral("{ \"entered_dungeon\", nullptr,"))                   // 定义行（独立根）
-            && ppCppT20.contains(QStringLiteral("轨道骑士"))
-            && ppCppT20.contains(QStringLiteral("if (mobType == MT::MobSpider || mobType == MT::MobCaveSpider)"))
-            && ppHdrT20.contains(QStringLiteral("Q_INVOKABLE void onStructureEntered(int kind);"))
-            && worldHdrT20.contains(QStringLiteral("enum StructureKind"))                             // 区域 kind 契约
-            && worldHdrT20.contains(QStringLiteral("static constexpr int kDesertTempleHalf = 10;"))   // 足迹常量单一权威
-            && worldCppT20.contains(QStringLiteral("rebuildStructureRegions"))
-            && worldCppT20.contains(QStringLiteral("kDesertBiomeGuarantee"));                          // t1010 保底旗迁移存活
-        okB = okB && okPinT20;
-        if (!okPinT20)
-            qInfo().noquote() << "  [t1020 diag] source pins drifted (guard/reset/route/def/constants)";
+        //     B-P1-1 迁移：滤注释钉（pinSet）。两处改锚（B-P2-2 / B-P2-5）：
+        //     · 「读档重进同清四结构进入沿守卫」原是 playercontroller.cpp 注释文本 → 改锚清零
+        //       **语句** `m_insideStructure[k] = false;` minCount 3（setWorld / finishWorldLoad /
+        //       leaveWorld 三处生命周期边界全须在场；少任一处即红 —— 三口同清契约）；
+        //     · 「轨道骑士」显示名钉 → 改锚稳定标识符：解锁定义行 `{ "ride_minecart",`（显示名
+        //       文案可自由改版，def id 行才是接线契约）。
+        {
+            const QString rootT20 = QDir(QCoreApplication::applicationDirPath()
+                                         + QStringLiteral("/..")).absolutePath();
+            const auto srcT20 = [&rootT20](const QString &rel) {
+                return rootT20 + QLatin1Char('/') + rel;
+            };
+            QStringList missPinT20;
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/Game/playercontroller.cpp")), {
+                {"tick-edge-guard", "if (inStruct && !m_insideStructure[k])"},   // tick 上升沿守卫
+                {"reset-hook-clear", "m_insideStructure[k] = false;", 3},        // 三处重置清零语句
+            });
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/Game/playercontroller.h")), {
+                {"sig-structureEntered", "void structureEntered(int kind);"},    // 信号声明
+            });
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/ui/Main.qml")), {
+                {"qml-route-structureEntered", "function onStructureEntered(kind) { progress.onStructureEntered(kind) }"}, // 路由行
+                {"qml-route-rodeMinecart", "if (ridingCart) progress.onRodeMinecart()"},
+                {"qml-route-chestCartOpened", "if (isCartCell) progress.onChestCartOpened()"},
+                {"qml-route-fishCaught", "progress.onFishCaught()"},
+            });
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/Game/playerprogress.cpp")), {
+                {"def-entered-dungeon", "{ \"entered_dungeon\", nullptr,"},      // 定义行（独立根）
+                {"def-ride-minecart-row", "{ \"ride_minecart\","},               // def id 行（显示名钉改锚）
+                {"def-spider-kind", "if (mobType == MT::MobSpider || mobType == MT::MobCaveSpider)"},
+            });
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/Game/playerprogress.h")), {
+                {"invokable-structureEntered", "Q_INVOKABLE void onStructureEntered(int kind);"},
+            });
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/World/world.h")), {
+                {"enum-StructureKind", "enum StructureKind"},                    // 区域 kind 契约
+                {"const-kDesertTempleHalf", "static constexpr int kDesertTempleHalf = 10;"}, // 足迹常量单一权威
+            });
+            missPinT20 << pinSet(srcT20(QStringLiteral("src/World/world.cpp")), {
+                {"fn-rebuildStructureRegions", "rebuildStructureRegions"},
+                {"const-kDesertBiomeGuarantee", "kDesertBiomeGuarantee"},        // t1010 保底旗迁移存活
+            });
+            const bool okPinT20 = missPinT20.isEmpty();
+            if (!okPinT20)
+                qInfo().noquote() << "  [t1020 diag] source pins drifted:" << missPinT20.join(QLatin1Char(','));
+            okB = okB && okPinT20;
+        }
         if (!okB) ++totalFail;
         qInfo().noquote() << (okB ? "PASS" : "FAIL")
                           << "| t1020 achievement-tree expansion: structureEntered edge fires once per"
@@ -35701,54 +35779,64 @@ Item {
             }
         }
         // ── 源码钉：zone 推导 / 路由 / 播放 API / 生成器全链在位 ──
-        const auto readSrcT21 = [&rootT21](const QString &rel) -> QString {
-            QFile f(rootT21 + QLatin1Char('/') + rel);
-            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
-        };
-        const QString pcHdrT21 = readSrcT21(QStringLiteral("src/Game/playercontroller.h"));
-        const QString pcCppT21 = readSrcT21(QStringLiteral("src/Game/playercontroller.cpp"));
-        const QString mainQmlT21 = readSrcT21(QStringLiteral("src/ui/Main.qml"));
-        const QString audioHdrT21 = readSrcT21(QStringLiteral("src/Audio/audiomanager.h"));
-        const QString cmakeT21 = readSrcT21(QStringLiteral("CMakeLists.txt"));
-        const QString soundsPyT21 = readSrcT21(QStringLiteral("tools/build_sounds.py"));
-        const bool okPinT21 =
-            pcHdrT21.contains(QStringLiteral("Q_PROPERTY(int structureAmbientZone READ structureAmbientZone NOTIFY structureAmbientZoneChanged)"))
-            && pcHdrT21.contains(QStringLiteral("AmbientJungleNight = 5"))
-            && pcCppT21.contains(QStringLiteral("if (ambientZone != m_structureAmbientZone)"))
-            && pcCppT21.contains(QStringLiteral("if (night && exposed)"))
-            && pcCppT21.contains(QStringLiteral("m_structureAmbientZone = AmbientNone;")) // setWorld + finishWorldLoad 双重置
-            && mainQmlT21.contains(QStringLiteral("function onStructureAmbientZoneChanged()"))
-            && mainQmlT21.contains(QStringLiteral("audio.startStrongholdHum()"))
-            && mainQmlT21.contains(QStringLiteral("audio.startMineshaftDrips()"))
-            && mainQmlT21.contains(QStringLiteral("audio.startDesertNightWind()"))
-            && mainQmlT21.contains(QStringLiteral("audio.startJungleChirps(true)"))
-            && mainQmlT21.contains(QStringLiteral("audio.playAchievement()"))
-            && mainQmlT21.contains(QStringLiteral("audio.playChestOpen()"))
-            && mainQmlT21.contains(QStringLiteral("audio.playChestClose()"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startStrongholdHum();"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startMineshaftDrips();"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startDesertNightWind();"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void startJungleChirps(bool dense);"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void playAchievement();"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void playChestOpen();"))
-            && audioHdrT21.contains(QStringLiteral("Q_INVOKABLE void playChestClose();"))
-            && cmakeT21.contains(QStringLiteral("sounds/stronghold_hum.wav"))
-            && cmakeT21.contains(QStringLiteral("sounds/mineshaft_drip.wav"))
-            && cmakeT21.contains(QStringLiteral("sounds/jungle_chirps.wav"))
-            && cmakeT21.contains(QStringLiteral("sounds/desert_night_wind.wav"))
-            && cmakeT21.contains(QStringLiteral("sounds/achievement.wav"))
-            && cmakeT21.contains(QStringLiteral("sounds/chest_open.wav"))
-            && cmakeT21.contains(QStringLiteral("sounds/chest_close.wav"))
-            && soundsPyT21.contains(QStringLiteral("def gen_stronghold_hum"))
-            && soundsPyT21.contains(QStringLiteral("def gen_mineshaft_drip"))
-            && soundsPyT21.contains(QStringLiteral("def gen_jungle_chirps"))
-            && soundsPyT21.contains(QStringLiteral("def gen_desert_night_wind"))
-            && soundsPyT21.contains(QStringLiteral("def gen_achievement"))
-            && soundsPyT21.contains(QStringLiteral("def gen_chest_open"))
-            && soundsPyT21.contains(QStringLiteral("def gen_chest_close"));
-        okB = okB && okPinT21;
-        if (!okPinT21)
-            qInfo().noquote() << "  [t1021 diag] source pins drifted (zone/property/route/api/gen)";
+        //     B-P1-1 迁移：滤注释钉（pinSet）—— 本组 33 条全量过帮手（音频路由行注释化即红，
+        //     敏感度证明轮 2026-09-06 留档：注释掉 startMineshaftDrips 路由行恰本组红、其余绿）。
+        {
+            const auto srcT21 = [&rootT21](const QString &rel) {
+                return rootT21 + QLatin1Char('/') + rel;
+            };
+            QStringList missPinT21;
+            missPinT21 << pinSet(srcT21(QStringLiteral("src/Game/playercontroller.h")), {
+                {"prop-zone", "Q_PROPERTY(int structureAmbientZone READ structureAmbientZone NOTIFY structureAmbientZoneChanged)"},
+                {"enum-jungle-night", "AmbientJungleNight = 5"},
+            });
+            missPinT21 << pinSet(srcT21(QStringLiteral("src/Game/playercontroller.cpp")), {
+                {"zone-fold-gate", "if (ambientZone != m_structureAmbientZone)"},
+                {"zone-night-exposed", "if (night && exposed)"},
+                {"zone-reset", "m_structureAmbientZone = AmbientNone;", 2}, // setWorld + finishWorldLoad 双重置
+            });
+            missPinT21 << pinSet(srcT21(QStringLiteral("src/ui/Main.qml")), {
+                {"qml-onZoneChanged", "function onStructureAmbientZoneChanged()"},
+                {"qml-route-hum", "audio.startStrongholdHum()"},
+                {"qml-route-drips", "audio.startMineshaftDrips()"},
+                {"qml-route-wind", "audio.startDesertNightWind()"},
+                {"qml-route-chirps", "audio.startJungleChirps(true)"},
+                {"qml-route-achievement", "audio.playAchievement()"},
+                {"qml-route-chestOpen", "audio.playChestOpen()"},
+                {"qml-route-chestClose", "audio.playChestClose()"},
+            });
+            missPinT21 << pinSet(srcT21(QStringLiteral("src/Audio/audiomanager.h")), {
+                {"api-startStrongholdHum", "Q_INVOKABLE void startStrongholdHum();"},
+                {"api-startMineshaftDrips", "Q_INVOKABLE void startMineshaftDrips();"},
+                {"api-startDesertNightWind", "Q_INVOKABLE void startDesertNightWind();"},
+                {"api-startJungleChirps", "Q_INVOKABLE void startJungleChirps(bool dense);"},
+                {"api-playAchievement", "Q_INVOKABLE void playAchievement();"},
+                {"api-playChestOpen", "Q_INVOKABLE void playChestOpen();"},
+                {"api-playChestClose", "Q_INVOKABLE void playChestClose();"},
+            });
+            missPinT21 << pinSet(srcT21(QStringLiteral("CMakeLists.txt")), {
+                {"cmake-stronghold_hum", "sounds/stronghold_hum.wav"},
+                {"cmake-mineshaft_drip", "sounds/mineshaft_drip.wav"},
+                {"cmake-jungle_chirps", "sounds/jungle_chirps.wav"},
+                {"cmake-desert_night_wind", "sounds/desert_night_wind.wav"},
+                {"cmake-achievement", "sounds/achievement.wav"},
+                {"cmake-chest_open", "sounds/chest_open.wav"},
+                {"cmake-chest_close", "sounds/chest_close.wav"},
+            });
+            missPinT21 << pinSet(srcT21(QStringLiteral("tools/build_sounds.py")), {
+                {"gen-stronghold_hum", "def gen_stronghold_hum"},
+                {"gen-mineshaft_drip", "def gen_mineshaft_drip"},
+                {"gen-jungle_chirps", "def gen_jungle_chirps"},
+                {"gen-desert_night_wind", "def gen_desert_night_wind"},
+                {"gen-achievement", "def gen_achievement"},
+                {"gen-chest_open", "def gen_chest_open"},
+                {"gen-chest_close", "def gen_chest_close"},
+            });
+            const bool okPinT21 = missPinT21.isEmpty();
+            okB = okB && okPinT21;
+            if (!okPinT21)
+                qInfo().noquote() << "  [t1021 diag] source pins drifted:" << missPinT21.join(QLatin1Char(','));
+        }
         if (!okB) ++totalFail;
         qInfo().noquote() << (okB ? "PASS" : "FAIL")
                           << "| t1021 sound-layer assets and wiring: seven new wavs exist with valid"
@@ -36004,38 +36092,56 @@ Item {
         pcT22b.setKey(Qt::Key_W, false);
         okB = okB && pcT22b.feetPosition().z() > z0bT22 + 0.2f;
         // ── 源码钉：QML 路由（keyInput 七动作查询 + 设置页编辑面 + 焦点归还）+ 引擎 choke 点 +
-        //    注入属性 + 构建接线（app/test 双目标）──
-        const QString rootT22 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
-        const auto readSrcT22 = [&rootT22](const QString &rel) -> QString {
-            QFile f(rootT22 + QLatin1Char('/') + rel);
-            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
-        };
-        const QString mainQmlT22 = readSrcT22(QStringLiteral("src/ui/Main.qml"));
-        const QString pcHdrT22 = readSrcT22(QStringLiteral("src/Game/playercontroller.h"));
-        const QString pcCppT22 = readSrcT22(QStringLiteral("src/Game/playercontroller.cpp"));
-        const QString cmakeT22 = readSrcT22(QStringLiteral("CMakeLists.txt"));
-        const bool okPinT22 =
-            mainQmlT22.contains(QStringLiteral("KeybindManager { id: keybindsMgr }"))
-            && mainQmlT22.contains(QStringLiteral("keybinds: keybindsMgr"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"chat\")"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"inventory\")"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"drop\")"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"camera\")"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"debugTime\")"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.keyFor(\"modeCycle\")"))
-            && mainQmlT22.count(QStringLiteral("keybindsMgr.keyFor(\"debugOverlay\")")) >= 2 // press+release
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.applyBinding(act, e.key)"))
-            && mainQmlT22.contains(QStringLiteral("KeybindManager.ApplyConflict"))
-            && mainQmlT22.contains(QStringLiteral("keybindsMgr.resetDefaults()"))
-            && mainQmlT22.contains(QStringLiteral("恢复默认键位"))
-            && mainQmlT22.contains(QStringLiteral("按任意键…"))
-            && mainQmlT22.contains(QStringLiteral("冲突：「"))
-            && mainQmlT22.contains(QStringLiteral("settingsPanelT22.recordingAction = modelData.id"))
-            && mainQmlT22.contains(QStringLiteral("const _r = keybindsMgr.revision")) // t976 AOT 触碰守卫
-            && mainQmlT22.contains(QStringLiteral("keyRecorderT22.forceActiveFocus()"))
-            && pcHdrT22.contains(QStringLiteral("Q_PROPERTY(KeybindManager *keybinds READ keybinds WRITE setKeybinds NOTIFY keybindsChanged)"))
-            && pcCppT22.contains(QStringLiteral("key = m_keybinds->canonicalKey(key);"))
-            && cmakeT22.count(QStringLiteral("src/Core/keybindmanager.cpp")) >= 2;    // app + test 双目标
+        //    注入属性 + 构建接线（app/test 双目标）。B-P1-1 迁移：滤注释钉（pinSet）+ 分列记账
+        //    （B-P2-5）：**接线钉**（wiring，18 条：语句/属性/构建接线）与 **copy 钉**（3 条：
+        //    「恢复默认键位 / 按任意键… / 冲突：「」——用户可见字符串存在性，非接线）分开计数，
+        //    PASS 行文案分列，不再混称接线钉。
+        {
+            const QString rootT22 = QDir(QCoreApplication::applicationDirPath()
+                                         + QStringLiteral("/..")).absolutePath();
+            const auto srcT22 = [&rootT22](const QString &rel) {
+                return rootT22 + QLatin1Char('/') + rel;
+            };
+            QStringList missPinW22; // 接线钉（wiring）
+            missPinW22 << pinSet(srcT22(QStringLiteral("src/ui/Main.qml")), {
+                {"qml-inst-keybindMgr", "KeybindManager { id: keybindsMgr }"},
+                {"qml-prop-keybinds", "keybinds: keybindsMgr"},
+                {"qml-keyFor-chat", "keybindsMgr.keyFor(\"chat\")"},
+                {"qml-keyFor-inventory", "keybindsMgr.keyFor(\"inventory\")"},
+                {"qml-keyFor-drop", "keybindsMgr.keyFor(\"drop\")"},
+                {"qml-keyFor-camera", "keybindsMgr.keyFor(\"camera\")"},
+                {"qml-keyFor-debugTime", "keybindsMgr.keyFor(\"debugTime\")"},
+                {"qml-keyFor-modeCycle", "keybindsMgr.keyFor(\"modeCycle\")"},
+                {"qml-keyFor-debugOverlay", "keybindsMgr.keyFor(\"debugOverlay\")", 2}, // press+release
+                {"qml-applyBinding", "keybindsMgr.applyBinding(act, e.key)"},
+                {"qml-conflict-enum", "KeybindManager.ApplyConflict"},
+                {"qml-resetDefaults", "keybindsMgr.resetDefaults()"},
+                {"qml-recording-action", "settingsPanelT22.recordingAction = modelData.id"},
+                {"qml-revision-guard", "const _r = keybindsMgr.revision"}, // t976 AOT 触碰守卫
+                {"qml-recorder-focus", "keyRecorderT22.forceActiveFocus()"},
+            });
+            missPinW22 << pinSet(srcT22(QStringLiteral("src/Game/playercontroller.h")), {
+                {"prop-keybinds", "Q_PROPERTY(KeybindManager *keybinds READ keybinds WRITE setKeybinds NOTIFY keybindsChanged)"},
+            });
+            missPinW22 << pinSet(srcT22(QStringLiteral("src/Game/playercontroller.cpp")), {
+                {"choke-canonical", "key = m_keybinds->canonicalKey(key);"},
+            });
+            missPinW22 << pinSet(srcT22(QStringLiteral("CMakeLists.txt")), {
+                {"cmake-keybindmgr", "src/Core/keybindmanager.cpp", 2},    // app + test 双目标
+            });
+            const QStringList missPinC22 = pinSet(srcT22(QStringLiteral("src/ui/Main.qml")), {
+                {"copy-reset-label", "恢复默认键位"},   // copy 钉：用户可见字符串存在性（非接线）
+                {"copy-recording-prompt", "按任意键…"},
+                {"copy-conflict-prefix", "冲突：「"},
+            });
+            const bool okPinW22 = missPinW22.isEmpty();  // 接线钉组
+            const bool okPinC22 = missPinC22.isEmpty();  // copy 钉组（独立记账，不与接线混计）
+            okB = okB && okPinW22 && okPinC22;
+            if (!okPinW22)
+                diagT22B += QStringLiteral("pinsW[%1] ").arg(missPinW22.join(QLatin1Char(',')));
+            if (!okPinC22)
+                diagT22B += QStringLiteral("pinsC[copy] %1 ").arg(missPinC22.join(QLatin1Char(',')));
+        }
         // 密闭哨兵断言：真实 settings.json 逐字节未变（写穿本单头注释明令禁止面在此暴露）。
         QByteArray realAfterT22;
         {
@@ -36045,8 +36151,6 @@ Item {
         const bool hermeticT22 = realAfterT22 == realSnapT22;
         if (!hermeticT22) diagT22B += QStringLiteral("hermetic ");
         okB = okB && hermeticT22;
-        if (!okPinT22) diagT22B += QStringLiteral("pins ");
-        okB = okB && okPinT22;
         if (!okB)
             qInfo().noquote() << "  [t1022 diag B]" << diagT22B;
         if (!okB) ++totalFail;
@@ -36062,7 +36166,10 @@ Item {
                              " settings.json byte-identical sentinel), and"
                              " the full wiring is pinned (QML seven-action keyFor routing +"
                              " recorder/conflict/reset settings panel + revision-touch guard"
-                             " + engine canonical choke point + CMake dual-target sources)";
+                             " + engine canonical choke point + CMake dual-target sources;"
+                             " 18 wiring pins, comment-filtered) SEPARATELY COUNTED from"
+                             " 3 copy pins (user-visible string existence: reset/recording/"
+                             " conflict labels - presence pinning, not wiring)";
     }
 
     // ── t1022 键位重映射探针（面板 C：review0907 A-P2-2 两病灶修复面 —— 隐藏别名丢弃 + 固定键黑名单
@@ -38097,29 +38204,35 @@ Item {
             QObject::disconnect(connPlainT1013);
             QObject::disconnect(connChestT1013);
         }
-        // (f) 源码钉：变体面全链（阴性轮敏感 —— revert 任一行即红）。
+        // (f) 源码钉：变体面全链（阴性轮敏感 —— revert 任一行即红）。B-P1-1 迁移：滤注释钉
+        //     （pinSet 套件帮手，t989/t1008a/t1023a 先例抽版）——语句整行注释化即红，注释文本
+        //     出现 needle 不再顶钉；needle 全部迁移前经同算法核对表验证锚在非注释语句行。
         {
-            const QString exeDirT1013 = QCoreApplication::applicationDirPath();
-            const QString rootT1013 = QDir(exeDirT1013 + QStringLiteral("/..")).absolutePath();
-            QFile mhT1013(rootT1013 + QStringLiteral("/src/Entities/minecartmanager.h"));
-            QFile mcT1013(rootT1013 + QStringLiteral("/src/Entities/minecartmanager.cpp"));
-            QFile pcT1013f(rootT1013 + QStringLiteral("/src/Game/playercontroller.cpp"));
-            QFile mqT1013(rootT1013 + QStringLiteral("/src/ui/Main.qml"));
-            const QString mh = mhT1013.open(QIODevice::ReadOnly) ? QString::fromUtf8(mhT1013.readAll()) : QString();
-            const QString mcpp = mcT1013.open(QIODevice::ReadOnly) ? QString::fromUtf8(mcT1013.readAll()) : QString();
-            const QString pcpp = pcT1013f.open(QIODevice::ReadOnly) ? QString::fromUtf8(pcT1013f.readAll()) : QString();
-            const QString mq = mqT1013.open(QIODevice::ReadOnly) ? QString::fromUtf8(mqT1013.readAll()) : QString();
-            okF = mh.contains(QStringLiteral("void chestCartBroken(int x, int y, int z, int keyX, int keyY, int keyZ);"))
-                && mh.contains(QStringLiteral("bool chest = false;"))
-                && mh.contains(QStringLiteral("Q_INVOKABLE bool chestAt(int i) const;"))
-                && mcpp.contains(QStringLiteral("if (m_carts[size_t(idx)].chest) return false;")) // tryMount 拒载
-                && mcpp.contains(QStringLiteral("emit chestCartBroken(dropX, dropY, dropZ, keyX, keyY, keyZ);"))
-                && pcpp.contains(QStringLiteral("emit chestOpened(keyX, keyY, keyZ);"))
-                && pcpp.contains(QStringLiteral("void PlayerController::convertMineshaftChests()"))
-                && mq.contains(QStringLiteral("function onChestCartBroken(x, y, z, keyX, keyY, keyZ)"))
-                && mq.contains(QStringLiteral("carts.chestAt(index)"))
-                && mq.contains(QStringLiteral("player.convertMineshaftChests()"))
-                && mq.contains(QStringLiteral("if (isCartCell) chestStore.populateMineshaftLoot(x, y, z)"));
+            const QString rootT1013 = QDir(QCoreApplication::applicationDirPath()
+                                           + QStringLiteral("/..")).absolutePath();
+            QStringList missF;
+            missF << pinSet(rootT1013 + QStringLiteral("/src/Entities/minecartmanager.h"), {
+                {"sig-chestCartBroken", "void chestCartBroken(int x, int y, int z, int keyX, int keyY, int keyZ);"},
+                {"field-chest", "bool chest = false;"},
+                {"invokable-chestAt", "Q_INVOKABLE bool chestAt(int i) const;"},
+            });
+            missF << pinSet(rootT1013 + QStringLiteral("/src/Entities/minecartmanager.cpp"), {
+                {"trymount-reject", "if (m_carts[size_t(idx)].chest) return false;" }, // tryMount 拒载
+                {"emit-chestCartBroken", "emit chestCartBroken(dropX, dropY, dropZ, keyX, keyY, keyZ);"},
+            });
+            missF << pinSet(rootT1013 + QStringLiteral("/src/Game/playercontroller.cpp"), {
+                {"emit-chestOpened", "emit chestOpened(keyX, keyY, keyZ);"},
+                {"fn-convertMineshaftChests", "void PlayerController::convertMineshaftChests()"},
+            });
+            missF << pinSet(rootT1013 + QStringLiteral("/src/ui/Main.qml"), {
+                {"qml-handler-onChestCartBroken", "function onChestCartBroken(x, y, z, keyX, keyY, keyZ)"},
+                {"qml-route-chestAt", "carts.chestAt(index)"},
+                {"qml-route-convert", "player.convertMineshaftChests()"},
+                {"qml-route-populateLoot", "if (isCartCell) chestStore.populateMineshaftLoot(x, y, z)"},
+            });
+            okF = missF.isEmpty();
+            if (!okF)
+                qInfo().noquote() << "  [t1013 diag f] pin miss:" << missF.join(QLatin1Char(','));
         }
         // 清场（轨 / 标记箱位 / 对照位）。
         for (int i = 0; i < 4; ++i) w.setBlock(x0T1013 + i, kRigY, z0T1013, BR::Air);
@@ -39323,20 +39436,25 @@ Item {
         }
 
         // ── (f) 源码钉：脉形表 / 三印章分支 / 矿盐 / 逐块石门（阴性敏感——revert 散点即失）──
+        //     B-P1-1 迁移：滤注释钉（pinSet）；offStone 弱标识符升格为失位转全向的**判定语句**。
         bool okF = false;
         {
-            const QString exeDir = QCoreApplication::applicationDirPath();
-            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
-            QFile sf(root + QStringLiteral("/src/World/world.cpp"));
-            const QString t = sf.open(QIODevice::ReadOnly) ? QString::fromUtf8(sf.readAll()) : QString();
-            okF = t.contains(QStringLiteral("constexpr VeinProfile kProfiles"))
-                && t.contains(QStringLiteral("0x2ED57Eu"))   // 红石矿盐（t1014）
-                && t.contains(QStringLiteral("0x0C0A15u"))   // 煤矿盐（t1014）
-                && t.contains(QStringLiteral("0x12D0E1u"))   // 铁矿盐（t1014）
-                && t.contains(QStringLiteral("const bool axX = (hv >> 16) & 1u;"))   // 煤长条横轴选型
-                && t.contains(QStringLiteral("p.kind == 2"))                          // 铁立方角印章分支
-                && t.contains(QStringLiteral("offStone"))                             // blob 失位转全向
-                && t.contains(QStringLiteral("if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone) return false;")); // 仅置换 Stone
+            const QString worldPath = QDir(QCoreApplication::applicationDirPath()
+                                           + QStringLiteral("/..")).absoluteFilePath(
+                QStringLiteral("src/World/world.cpp"));
+            const QStringList missF = pinSet(worldPath, {
+                {"table-kProfiles", "constexpr VeinProfile kProfiles"},
+                {"salt-redstone", "0x2ED57Eu"},   // 红石矿盐（t1014）
+                {"salt-coal", "0x0C0A15u"},       // 煤矿盐（t1014）
+                {"salt-iron", "0x12D0E1u"},       // 铁矿盐（t1014）
+                {"coal-axis-pick", "const bool axX = (hv >> 16) & 1u;"},   // 煤长条横轴选型
+                {"iron-cube-branch", "p.kind == 2"},                       // 铁立方角印章分支
+                {"blob-offstone-redirect", "if (!offStone && int(rv % 100u) < 60) {"}, // blob 失位转全向判定
+                {"stone-only-gate", "if (m_chunks.blockAt(x, y, z) != BlockRegistry::Stone) return false;"}, // 仅置换 Stone
+            });
+            okF = missF.isEmpty();
+            if (!okF)
+                qInfo().noquote() << "  [t1014 diag f] pin miss:" << missF.join(QLatin1Char(','));
         }
 
         // ── (g) review0907 A-P1-2 128 高世界煤脉自然上探：煤 yMax=0 哨兵（上界纯列自适应 hc-5，
@@ -39617,22 +39735,29 @@ Item {
                                   << "cartHp" << cm2.hpAt(0) << "alive" << cm2.aliveAt(0);
         }
         // (e) 源码钉：骑乘改判的甄别行 / 指定结算行 / 新读口签名（旧重路由行绝迹）。
+        //     B-P1-1 迁移：滤注释钉（pinSet）；原「t1015 甄别」注释文本钉改锚甄别**入口语句**
+        //     （rideCartAt / rideBoatAt 两行 —— 改判分支的乘骑判定，剥注释后必须仍在）。
         {
-            const QString exeDir = QCoreApplication::applicationDirPath();
-            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
-            QFile pcf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
-            QFile mmh(root + QStringLiteral("/src/Entities/minecartmanager.h"));
-            QFile bmh(root + QStringLiteral("/src/Entities/boatmanager.h"));
-            const QString pcCpp = pcf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pcf.readAll()) : QString();
-            const QString mmHdr = mmh.open(QIODevice::ReadOnly) ? QString::fromUtf8(mmh.readAll()) : QString();
-            const QString bmHdr = bmh.open(QIODevice::ReadOnly) ? QString::fromUtf8(bmh.readAll()) : QString();
-            okE = pcCpp.contains(QStringLiteral("m_minecartManager->rayHitDistAt(rideCart, eye, look, m_hitDist)"))
-                && pcCpp.contains(QStringLiteral("m_boatManager->rayHitDistAt(rideBoat, eye, look, m_hitDist)"))
-                && pcCpp.contains(QStringLiteral("m_minecartManager->hitCartAt(rideCart"))
-                && pcCpp.contains(QStringLiteral("m_boatManager->hitBoatAt(rideBoat"))
-                && mmHdr.contains(QStringLiteral("float rayHitDistAt(int idx, const QVector3D &origin"))
-                && bmHdr.contains(QStringLiteral("float rayHitDistAt(int i, const QVector3D &origin"))
-                && pcCpp.contains(QStringLiteral("t1015 甄别"));
+            const QString root = QDir(QCoreApplication::applicationDirPath()
+                                      + QStringLiteral("/..")).absolutePath();
+            QStringList missE;
+            missE << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
+                {"cart-dist", "m_minecartManager->rayHitDistAt(rideCart, eye, look, m_hitDist)"},
+                {"boat-dist", "m_boatManager->rayHitDistAt(rideBoat, eye, look, m_hitDist)"},
+                {"cart-settle", "m_minecartManager->hitCartAt(rideCart"},
+                {"boat-settle", "m_boatManager->hitBoatAt(rideBoat"},
+                {"discriminate-cart-entry", "const int rideCart = m_entityManager->rideCartAt(mobIdx);"},
+                {"discriminate-boat-entry", "const int rideBoat = m_entityManager->rideBoatAt(mobIdx);"},
+            });
+            missE << pinSet(root + QStringLiteral("/src/Entities/minecartmanager.h"), {
+                {"hdr-rayHitDistAt-cart", "float rayHitDistAt(int idx, const QVector3D &origin"},
+            });
+            missE << pinSet(root + QStringLiteral("/src/Entities/boatmanager.h"), {
+                {"hdr-rayHitDistAt-boat", "float rayHitDistAt(int i, const QVector3D &origin"},
+            });
+            okE = missE.isEmpty();
+            if (!okE)
+                qInfo().noquote() << "  [t1015 diag e] pin miss:" << missE.join(QLatin1Char(','));
         }
         if (!okA) ++totalFail;
         if (!okB) ++totalFail;
@@ -39741,20 +39866,25 @@ Item {
                                   << "setOk" << setOk << "noiseOk" << noiseOk << "backOk" << backOk;
         }
         // (d) 源码钉：QML 退出链第 5 参 + enterWorld 恢复接线 + C++ 恢复入口签名。
+        //     B-P1-1 迁移：滤注释钉（pinSet）。
         {
-            const QString exeDir = QCoreApplication::applicationDirPath();
-            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
-            QFile mqf(root + QStringLiteral("/src/ui/Main.qml"));
-            QFile wch(root + QStringLiteral("/src/World/worldclock.h"));
-            QFile wh(root + QStringLiteral("/src/World/world.h"));
-            const QString mq = mqf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mqf.readAll()) : QString();
-            const QString clockHdr = wch.open(QIODevice::ReadOnly) ? QString::fromUtf8(wch.readAll()) : QString();
-            const QString worldHdr = wh.open(QIODevice::ReadOnly) ? QString::fromUtf8(wh.readAll()) : QString();
-            okD = mq.contains(QStringLiteral("{ phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState }"))
-                && mq.contains(QStringLiteral("worldClock.restoreTime(wt.phase, wt.day)"))
-                && mq.contains(QStringLiteral("theWorld.setWeatherState(wt.weather)"))
-                && clockHdr.contains(QStringLiteral("Q_INVOKABLE void restoreTime(float phase, qint64 day);"))
-                && worldHdr.contains(QStringLiteral("Q_INVOKABLE void setWeatherState(int state);"));
+            const QString root = QDir(QCoreApplication::applicationDirPath()
+                                      + QStringLiteral("/..")).absolutePath();
+            QStringList missD;
+            missD << pinSet(root + QStringLiteral("/src/ui/Main.qml"), {
+                {"qml-exit-chain-5th", "{ phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState }"},
+                {"qml-restore-time", "worldClock.restoreTime(wt.phase, wt.day)"},
+                {"qml-restore-weather", "theWorld.setWeatherState(wt.weather)"},
+            });
+            missD << pinSet(root + QStringLiteral("/src/World/worldclock.h"), {
+                {"hdr-restoreTime", "Q_INVOKABLE void restoreTime(float phase, qint64 day);"},
+            });
+            missD << pinSet(root + QStringLiteral("/src/World/world.h"), {
+                {"hdr-setWeatherState", "Q_INVOKABLE void setWeatherState(int state);"},
+            });
+            okD = missD.isEmpty();
+            if (!okD)
+                qInfo().noquote() << "  [t1016 diag d] pin miss:" << missD.join(QLatin1Char(','));
         }
         QFile::remove(dbT1016);
         if (!okA) ++totalFail;
@@ -39997,16 +40127,22 @@ Item {
             }
         }
         // (d) 源码钉：三处 Cactus 拒绝行（torchSupportBlock 单一权威 + 机关预检 + 木梯预检）。
+        //     B-P1-1 迁移：滤注释钉（pinSet）；原钉串拼进尾注释「// t1017」——剥注释后必失配的
+        //     隐患钉，现只钉语句本体（尾注释可自由演化不再牵动钉）。
         {
-            const QString exeDir = QCoreApplication::applicationDirPath();
-            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
-            QFile brf(root + QStringLiteral("/src/Core/blockregistry.cpp"));
-            QFile pcf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
-            const QString brCpp = brf.open(QIODevice::ReadOnly) ? QString::fromUtf8(brf.readAll()) : QString();
-            const QString pcCpp = pcf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pcf.readAll()) : QString();
-            okD = brCpp.contains(QStringLiteral("if (blockId == Cactus) return false; // t1017"))
-                && pcCpp.contains(QStringLiteral("mechSup == BlockRegistry::Cactus"))
-                && pcCpp.contains(QStringLiteral("hitBlock == BlockRegistry::Cactus"));
+            const QString root = QDir(QCoreApplication::applicationDirPath()
+                                      + QStringLiteral("/..")).absolutePath();
+            QStringList missD;
+            missD << pinSet(root + QStringLiteral("/src/Core/blockregistry.cpp"), {
+                {"torch-support-cactus", "if (blockId == Cactus) return false;"},
+            });
+            missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
+                {"mech-precheck-cactus", "mechSup == BlockRegistry::Cactus"},
+                {"hit-precheck-cactus", "hitBlock == BlockRegistry::Cactus"},
+            });
+            okD = missD.isEmpty();
+            if (!okD)
+                qInfo().noquote() << "  [t1017 diag d] pin miss:" << missD.join(QLatin1Char(','));
         }
         if (!okA) ++totalFail;
         if (!okB) ++totalFail;
