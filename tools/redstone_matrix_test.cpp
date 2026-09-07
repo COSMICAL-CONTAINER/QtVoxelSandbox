@@ -23888,6 +23888,8 @@ Item {
     //   (b) 高速进谷 → 通过：8 格通电动力轨平台（与谷壁同层直通）接 V 谷，boost ~11.6 入谷（v² ~135 >
     //       阈）→ 曲线断言：x 向反转数 == 0、x 全程单调不减（容差 2e-3）、越过谷心东 ≥0.9（被捕车恒停
     //       谷心 ±0.06 不可能越过 = 谷没留住）；
+    //   (b2) 临界档（review0907 B-P2-3）：运行时自搜索动力平台长 L×平段衰减格 D 共 8 档，取入谷 v²
+    //       落通过阈 ±10% 窗的档，断言「通过或停驻二选一、无往复」（rev ≤ 1）——判据漂移最敏感点；
     //   (c) 源码钉：能量判据行 / 对面坡升扫描行 / 余量常量 / 扫描上限常量。
     {
         // ── (a) 低速档。rig 选址：footprint x0-1..x0+3 × z0-1..z0+1 × Y-1..Y+2。──
@@ -24033,6 +24035,105 @@ Item {
             w.setBlock(xb + 1, kRigY + 1, zb, BR::Air, 0);
             tickN(w, 2);
         }
+        // ── (b2) 临界档腿（review0907 B-P2-3 最小版）：调车初速使入谷 v² 贴近通过阈
+        //     2g(h+margin)（±10% 窗），断言「通过或停驻二选一、无往复」（不判方向只判无极限环
+        //     —— rev ≤ 1：单次爬壁回溜不算打转，反复往复才算）。动力轨 boost 是逐 tick 朝 12.8
+        //     档 lerp（无解析式），初速靠**运行时自搜索**：平台长 L∈1..4 × 平段衰减格 D∈0..1 共
+        //     8 档逐试，入谷帧差分测 v²，任一档落窗且行为二选一即绿；判据漂移（阈式 / 余量改版）
+        //     时阈边行为翻转最先在本腿暴露。阈值同值镜像生产式（常量私有不可直引；生产常量另由
+        //     (c) 腿钉与 t1019(d) 常量钉互锁，漂移两头同抓）。
+        bool okB2 = false;
+        {
+            int x2 = -1, z2 = -1; // 选址：x 跨 8 格（平台≤4 + 平段≤1 + 谷 1 + 东壁 1 + 余量）× z±1
+            for (int zz = 3; zz < 94 && x2 < 0; zz += 2)
+                for (int xx = 6; xx + 8 < 96 && x2 < 0; ++xx) {
+                    bool clear = true;
+                    for (int dx = 0; dx <= 7 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -1; dy <= 2 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { x2 = xx; z2 = zz; }
+                }
+            if (x2 < 0) {
+                qInfo().noquote() << "  [t1019 diag] b2: no clear rig area";
+            } else {
+                const float gM = 19.799f;                  // = MinecartManager::kCartSlopeGravity（私有）
+                const float pass2M = 2.0f * gM * (1.0f + 0.05f); // h_对面坡升 1（单壁 V）+ margin 0.05 = 41.58
+                QString diagB2;
+                for (int L = 1; L <= 4 && !okB2; ++L) {
+                    for (int D = 0; D <= 1 && !okB2; ++D) {
+                        // 建 rig：平台 L 格通电动力轨（红石块直供）| 平段 D 格普通轨（摩擦衰减细调）
+                        //   | 谷格（西侧平段邻接 = 西壁 +1，与 (a) 单壁 V 同构）| 东壁（对面坡，东死端）。
+                        for (int i = 0; i < L; ++i) {
+                            w.setBlock(x2 + 1 + i, kRigY,     z2, BR::RedstoneBlock, 0);
+                            w.setBlock(x2 + 1 + i, kRigY + 1, z2, BR::GoldenRail, 0);
+                        }
+                        for (int i = 0; i < D; ++i)
+                            w.setBlock(x2 + 1 + L + i, kRigY + 1, z2, BR::Rail, 0);
+                        const int vx = x2 + 1 + L + D;     // 谷格
+                        w.setBlock(vx,     kRigY,     z2, BR::Rail, 0);
+                        w.setBlock(vx + 1, kRigY + 1, z2, BR::Rail, 0);
+                        tickN(w, 8);
+                        MinecartManager carts;
+                        carts.spawnCart(x2 + 1, kRigY + 1, z2, &w); // 平台西端起步（东向单端连接）
+                        const bool pushedB2 = carts.pushEmptyCart(&w,
+                            QVector3D(float(x2 + 1) - 0.2f, float(kRigY + 1) + 0.45f, float(z2) + 0.5f),
+                            1.0f, 0.0f);
+                        const float centerB2 = float(vx) + 0.5f;
+                        float vEntry = -1.0f, maxX = carts.posAt(0).x();
+                        QVector3D prev = carts.posAt(0), fin = prev;
+                        float accum = 0.0f;
+                        int state = 0, rev = 0;
+                        bool entered = false;
+                        for (int t = 0; t < 600; ++t) {
+                            carts.tickPushedCarts(0.016f, &w);
+                            if (!carts.aliveAt(0)) break;
+                            const QVector3D p = carts.posAt(0);
+                            const float step = p.x() - prev.x();
+                            maxX = std::max(maxX, p.x());
+                            if (!entered && p.x() >= float(vx)) { // 入谷帧：差分速度 = 进谷 v
+                                entered = true;
+                                vEntry = std::fabs(step) / 0.016f;
+                            }
+                            accum += step; // 反转计数状态机（(a)/(b) 同式：±0.25 迟滞）
+                            if (state == 0) {
+                                if (accum > 0.25f) { state = 1; accum = 0.0f; }
+                                else if (accum < -0.25f) { state = -1; accum = 0.0f; }
+                            } else if (state > 0 && accum < -0.25f) { ++rev; state = -1; accum = 0.0f; }
+                            else if (state < 0 && accum > 0.25f) { ++rev; state = 1; accum = 0.0f; }
+                            prev = p;
+                            fin = p;
+                        }
+                        const float v2 = vEntry * vEntry;
+                        const bool inWin = vEntry > 0.0f && std::fabs(v2 - pass2M) <= 0.10f * pass2M;
+                        const bool passedB2 = maxX > centerB2 + 0.9f;      // 越谷心东侧 = 通过
+                        const bool stoppedB2 = std::fabs(fin.x() - centerB2) <= 0.15f; // 谷心停驻
+                        const bool trialOk = pushedB2 && entered && inWin && rev <= 1
+                            && (passedB2 || stoppedB2);
+                        diagB2 += QStringLiteral("L%1D%2:v2=%3%4%5%6%7 ")
+                            .arg(L).arg(D).arg(v2, 0, 'f', 1)
+                            .arg(inWin ? QStringLiteral("WIN") : QStringLiteral("-"))
+                            .arg(pushedB2 ? QString() : QStringLiteral("!push"))
+                            .arg(rev <= 1 ? QString() : QStringLiteral("!rev%1").arg(rev))
+                            .arg((passedB2 || stoppedB2) ? QString() : QStringLiteral("!outc"));
+                        carts.clearAll();
+                        for (int i = 0; i < L; ++i) {
+                            w.setBlock(x2 + 1 + i, kRigY,     z2, BR::Air, 0);
+                            w.setBlock(x2 + 1 + i, kRigY + 1, z2, BR::Air, 0);
+                        }
+                        for (int i = 0; i < D; ++i)
+                            w.setBlock(x2 + 1 + L + i, kRigY + 1, z2, BR::Air, 0);
+                        w.setBlock(vx,     kRigY,     z2, BR::Air, 0);
+                        w.setBlock(vx + 1, kRigY + 1, z2, BR::Air, 0);
+                        tickN(w, 2);
+                        if (trialOk) okB2 = true;
+                    }
+                }
+                if (!okB2)
+                    qInfo().noquote() << "  [t1019 diag] b2 none in +-10% window of" << pass2M
+                                      << ":" << diagB2;
+            }
+        }
         // ── (c) 源码钉（任一消失即红）。──
         const QString exeDir1019 = QCoreApplication::applicationDirPath();
         const QString root1019 = QDir(exeDir1019 + QStringLiteral("/..")).absolutePath();
@@ -24053,7 +24154,7 @@ Item {
         const bool okT1019 = okA && okB && okC1 && okC2 && okC3 && okC4;
         if (!okT1019) ++totalFail;
         if (!okT1019)
-            qInfo().noquote() << "  [t1019 diag] a" << okA << "b" << okB
+            qInfo().noquote() << "  [t1019 diag] a" << okA << "b" << okB << "b2(critical)" << okB2
                               << "| c" << okC1 << okC2 << okC3 << okC4;
         qInfo().noquote() << (okT1019 ? "PASS" : "FAIL")
                           << "| t1019 V-valley pass physics on the energy criterion (t981 rework):"
@@ -24073,6 +24174,8 @@ Item {
                              " deep bowl must not release a cart it cannot eject); the 0.05-block"
                              " margin covers the settle-kick re-pump so a just-barely-escaping cart"
                              " is captured instead of crest-stalling into the kick-back band."
+                             " A critical-energy leg (review0907 B-P2-3) is reported separately"
+                             " below (its own PASS line)."
                              " Insufficient energy still brakes to a single smooth stop at the"
                              " valley center (t981 law unchanged). Probe legs (position/velocity"
                              " curves, pass-or-monotonic-decel, no oscillation in either speed"
@@ -24086,6 +24189,23 @@ Item {
                              " pass line, the pass threshold, the opposite-climb scan and the scan"
                              " cap constant"
                           ;
+        if (!okB2) ++totalFail;
+        qInfo().noquote() << (okB2 ? "PASS" : "FAIL")
+                          << "| t1019(b2) critical-energy boundary leg (review0907 B-P2-3): runtime"
+                             " self-search over powered-platform lengths L in 1..4 x flat decay"
+                             " cells D in 0..1 finds a trial whose measured valley-entry v^2 lands"
+                             " within +-10% of the mirrored pass threshold 2*19.799*(1+0.05)"
+                             " = 41.58 (boost is a per-tick lerp toward the 12.8 cap with no"
+                             " closed form, so the leg calibrates itself each run instead of"
+                             " hardcoding a platform length), then asserts the boundary contract:"
+                             " pass (crosses 0.9 east of center) OR stop (parks within 0.15 of"
+                             " center) - never a limit cycle (<= 1 x-reversal; a single climb-and-"
+                             " return on the far wall is the documented near-threshold capture"
+                             " shape, repeated reciprocation is the killed spin cycle). Most"
+                             " sensitive spot for criterion drift: a changed threshold formula or"
+                             " margin flips the behavior of the in-window trial first here"
+                          << (okB2 ? QString()
+                                   : QStringLiteral("diag no trial in window, see [t1019 diag] b2"));
     }
 
     // ── P-t944 上坡顶方块阻挡探针（MinecartManager 直编；spec「上坡处上方放方块 → 矿车被挡住不能穿墙
@@ -29001,7 +29121,13 @@ Item {
         shootPig(6.0f, 0.0f, &dS2, &burnFlame);       // 高倍率 #2
         shootPig(1.0f, 5.0f, &dTmp, &burnFlame);      // 燃箭（点燃腿；位移不读）
         const float dBMax = std::max(dB1, dB2), dSMin = std::min(dS1, dS2);
-        const bool okArrow = dBMax > 0.2f && dBMax < 2.2f && dSMin > 5.2f
+        // review0907 B-P1-2：dBMax 绝对上限 2.2 → 实测包络 3.0。依据：套件历史 13 次偶红 diag
+        //   全部是 dBMax ∈ [2.202, 2.279] 擦线超限（0.8s 量测窗叠了猪游走随机位移，与击退位移同
+        //   量级），dSMin 同期 9.06..9.84 从未威胁 5.2 下限。相对判据 dSMin > 4*dBMax 被同批数据
+        //   否决（最差组合 9.06 < 4×2.28 = 9.12 仍红）。3.0 = 观测最大 2.279 + 31% 余量；判别力
+        //   承载移到间隔断言（dSMin − dBMax > 3.0，实测最差 6.77）与 ×6 倍率腿 —— 正中箭位移显著
+        //   小于蓄满箭的原判别面不变。
+        const bool okArrow = dBMax > 0.2f && dBMax < 3.0f && dSMin > 5.2f
                           && (dSMin - dBMax) > 3.0f
                           && !burnBase && burnFlame;
         for (int x = 16; x <= 26; ++x)
@@ -40324,7 +40450,13 @@ Item {
             }
         }
         if (qml.isEmpty()) {
-            qInfo().noquote() << "  [t1023a note] Main.qml not found near exe - animation-gate source pin skipped";
+            // B-P2-1：Main.qml 找不到 = 布局破坏（源码钉失去锚点即失察面）—— 原静默 note 弃钉
+            //   是探针自砍覆盖面，改响红（t1023(a) 本体的滤注释逻辑保持不变）。
+            ++totalFail;
+            qInfo().noquote() << "FAIL"
+                              << "| t1023a hidden-delegate animation gates: Main.qml not found near"
+                                 " exe (exeDir/../.. src/ui) - layout broken, source pin loud-miss"
+                                 " (review0907 B-P2-1: was a silent note that skipped the pin)";
         } else {
             QString code;
             for (const QString &line : qml.split(QLatin1Char('\n'))) {
@@ -40508,7 +40640,12 @@ Item {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString srcRoot = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
         if (!QDir(srcRoot).exists()) {
-            qInfo().noquote() << "  [t1023c note] src/ not found near exe - meshing-thread fact pin skipped";
+            // B-P2-1：src/ 找不到 = 布局破坏 —— 事实钉失去锚点即失察面，同 (a) 改响红。
+            ++totalFail;
+            qInfo().noquote() << "FAIL"
+                              << "| t1023c sync-meshing fact pin: src/ tree not found near exe"
+                                 " (exeDir/../src) - layout broken, fact pin loud-miss"
+                                 " (review0907 B-P2-1: was a silent note that skipped the pin)";
         } else {
             const QStringList tokens = {
                 QStringLiteral("QThreadPool"), QStringLiteral("QThread"), QStringLiteral("QtConcurrent"),
