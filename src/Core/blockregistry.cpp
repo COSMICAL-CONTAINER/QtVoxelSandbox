@@ -1492,6 +1492,13 @@ bool BlockRegistry::torchSupportBlock(quint8 blockId, quint8 state)
     if (blockId == Cactus) return false; // t1017：仙人掌不作任何附着块支撑（六面含顶；放置 / 复检同源）
     return isCollidable(blockId, state) || isFullCube(blockId);
 }
+
+// review0906 #8 木梯 / 机关附着支撑判定（实现见 .h 注释）：isFullCube 且非 Cactus —— 与预检（放置拒）
+//   / 复检（残留掉）四处共享的单一权威，杜绝「预检收紧、复检裸 isFullCube」再劈叉。
+bool BlockRegistry::mechLadderSupportBlock(quint8 blockId)
+{
+    return blockId != Cactus && isFullCube(blockId);
+}
 int   BlockRegistry::dropId(quint8 blockId)      { return def(blockId).dropId; }
 int   BlockRegistry::dropCount(quint8 blockId)   { return def(blockId).dropCount; }
 int   BlockRegistry::maxStack(quint8 blockId)    { return def(blockId).maxStack; }
