@@ -71,6 +71,19 @@ void MinecartManager::spawnChestCart(int x, int y, int z, World *world, int keyX
 void MinecartManager::spawnCartImpl(int x, int y, int z, World *world, bool chest, int keyX, int keyY, int keyZ)
 {
     if (m_liveCount >= kCap) { qWarning("vo.entities: MinecartManager spawnCart cap reached (%d)", kCap); return; }
+    // review0906 #12a 落格守卫：落格被可碰撞方块占实（t1013 路 (b) 回生键格被玩家填实 = 幽灵嵌墙车，
+    //   仍可隔墙射线开箱）→ 向上扫首个可落格（车贴轨 / 贴地基准按新格重算，键寻址不受落格位移影响 —
+    //   内容键 (keyX,keyY,keyZ) 与落格解耦）。玩家放置路径不受扰（placeBlock 已验证落格 Air，恒首格即停）。
+    //   顶到世界顶仍无空格 → 拒绝生成（箱车键保留在 ChestStore → 下次进世界重试，内容不丢；普通车
+    //   无键，调用方放置预检本就保证可落，此路不可达）。world 空（防御路径）→ 不查（保持旧行为）。
+    int sy = y;
+    if (world) {
+        while (sy < world->height() && world->isCollidable(x, sy, z)) ++sy;
+        if (sy >= world->height()) {
+            qWarning("vo.entities: spawnCart: no free cell above (%d,%d,%d) - spawn deferred", x, y, z);
+            return;
+        }
+    }
     Cart c;
     c.chest = chest;       // t1013 变体标志 + 内容键（普通车 = 生成格，恒不查询）
     c.keyX = keyX;
@@ -80,15 +93,15 @@ void MinecartManager::spawnCartImpl(int x, int y, int z, World *world, bool ches
     //   y+1.0+kCartRideH 把「格底薄板」当「格顶」→ 矿车悬浮约一整格（primed TNT / 雪傀儡 restY 基准
     //   同族错：渲染面贴格底、物理从格顶叠）。轨上：车底（渲染底板下沿 = 中心 −0.15）贴轨板顶 →
     //   中心 = y + rise + kCartRideH；非轨格（t734 放宽地面放置）：底贴 cell 底静止（kCartGroundH）。
-    const bool onRail = world && BlockRegistry::isRail(world->blockAt(x, y, z));
+    const bool onRail = world && BlockRegistry::isRail(world->blockAt(x, sy, z));
     c.pos = QVector3D(float(x) + 0.5f,
-                      float(y) + (onRail ? kCartRideH : kCartGroundH),
+                      float(sy) + (onRail ? kCartRideH : kCartGroundH),
                       float(z) + 0.5f);
     // t708 ② 初始朝向沿轨延伸（不再固定 +Z）：据目标轨格连接位定轴 —— X 轴连接 → 沿 X（单端取该延伸向、
     //   对向取 +X）；仅 Z 连接 → 沿 Z（单端取该向、对向取 +Z）；孤轨（0 连接）→ 默认 +Z（旧行为兜底）。
     //   车头由 tick 停驻重选向 / 玩家 S 反推（负速倒行）按 wish 重定向 —— 「双方向」由推 / 倒行机制承担。
     if (onRail) {
-        const quint8 st = world->stateAt(x, y, z);
+        const quint8 st = world->stateAt(x, sy, z);
         const quint8 con = quint8(st & 0x0F);
         const bool cpx = (con & BlockRegistry::RailConnPx) != 0;
         const bool cnx = (con & BlockRegistry::RailConnNx) != 0;
@@ -104,9 +117,9 @@ void MinecartManager::spawnCartImpl(int x, int y, int z, World *world, bool ches
             const bool ew = (cpx || cnx) || (nConn == 0 && (st & BlockRegistry::RailAxisEWFlag) != 0);
             const auto dlt = [&](int dx, int dz) {
                 return BlockRegistry::railProbeDelta(
-                    { world->blockAt(x + dx, y, z + dz),
-                      world->blockAt(x + dx, y + 1, z + dz),
-                      world->blockAt(x + dx, y - 1, z + dz) });
+                    { world->blockAt(x + dx, sy, z + dz),
+                      world->blockAt(x + dx, sy + 1, z + dz),
+                      world->blockAt(x + dx, sy - 1, z + dz) });
             };
             float rise = 0.0f;
             if (ew) {
@@ -116,14 +129,14 @@ void MinecartManager::spawnCartImpl(int x, int y, int z, World *world, bool ches
                 const int dpz = dlt(0, 1);  if (dpz > 0) rise += float(dpz) * 0.5f;
                 const int dnz = dlt(0, -1); if (dnz > 0) rise += float(dnz) * 0.5f;
             }
-            c.pos.setY(float(y) + rise + kCartRideH); // t734：cell 底 + 坡面高（去掉旧 +1.0 格顶基准）
+            c.pos.setY(float(sy) + rise + kCartRideH); // t734：cell 底 + 坡面高（去掉旧 +1.0 格顶基准）
         }
         // 朝向 yaw 与 dir 同一公式（-Z 前 = 0 约定；见 tickRiddenCart yaw 更新注释）。
         c.yaw = std::atan2(-c.dirX, -c.dirZ) * 57.2957795f;
         while (c.yaw < 0.0f) c.yaw += 360.0f;
         // t769 放置即贴坡：初始俯仰按轨面几何取（坡格中心 ±0.25 采样 → 1:1 坡恰 45°；平格 / 拐角 0）——
         //   停驻车（speed==0 不进 tick 推进）放置在坡上即刻平行轨面，无需先行驶一段。
-        updateCartPitch(c, world, y);
+        updateCartPitch(c, world, sy);
     } else {
         // t734 非轨格放置（地面静止车）/ 无世界兜底：默认 +Z 朝向（静态 —— 推进侧无轨守卫保证不动）。
         c.dirX = 0.0f; c.dirZ = 1.0f;
@@ -2037,6 +2050,11 @@ void MinecartManager::updateDetectorRailEdges(World *world,
 //   kCartHalfW / Y=kCartHalfH / Z=kCartHalfL），只是把遍历收窄到指定槽 —— 供骑乘改判把「乘员 + 车」
 //   组合拆成两盒分别求交、按最近命中定目标。越界 / 空槽 → -1；dir 退化（零 / 非有限）→ -1（同
 //   findCartHit 守卫口径）。
+//   review0906 #13：**起点在盒内 → -1（未中）**——旧版盒内返 0，攻击甄别 `0 ≤ 任何 mobDist` 恒真 =
+//   「攻击者眼位落入载具盒（矿车爬坡段车厢盒抬到与玩家眼高重叠 / 贴轨站立瞬间 / 船冲到身上）时点
+//   乘员身体恒判载具胜」，「点身体打身体」承诺失效。本函数唯一消费面 = 攻击甄别（与 mobDist 比
+//   近），盒内 -1 → 甄别自然落回乘员本体；findCartHit（登乘 tryMount / 右键开箱寻的）**不改**——
+//   登乘语义「挨着车即可上」依赖盒内命中（返 0 合法），两条射线口径就此分叉（登记注释）。
 float MinecartManager::rayHitDistAt(int idx, const QVector3D &origin, const QVector3D &dir, float maxDist) const
 {
     if (idx < 0 || idx >= int(m_carts.size()) || !m_carts[size_t(idx)].alive) return -1.0f;
@@ -2064,7 +2082,9 @@ float MinecartManager::rayHitDistAt(int idx, const QVector3D &origin, const QVec
         if (tmin > tmax) { hit = false; break; }
     }
     if (!hit) return -1.0f;
-    return tmin >= 0.0f ? tmin : 0.0f;
+    // review0906 #13：slab 法 tmin 初始化 0 → 盒内起点 tmin 恒为 0（无 slab 抬升）。tmin>0 才是
+    //   「盒外真命中」；tmin==0 = 起点在盒内（或恰贴面）→ 返 -1 视为未中（见函数头注释）。
+    return tmin > 0.0f ? tmin : -1.0f;
 }
 
 // t1015 指定车结算（头注释见 .h；hitCartFromRay 的指定目标版 —— 耐久 / 摧毁 / 掉落链逐行同源）。

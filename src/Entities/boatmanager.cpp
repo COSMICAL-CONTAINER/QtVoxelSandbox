@@ -865,6 +865,9 @@ void BoatManager::breakRiddenBoat()
 // t1015 指定船单盒射线命中距离（头注释见 .h）：几何与 findBoatHit 完全同式（X=kBoatHalfW /
 //   Y=kBoatHalfH / Z=kBoatHalfLen），只是把遍历收窄到指定槽 —— 供骑乘改判把「乘员 + 船」组合拆成
 //   两盒分别求交、按最近命中定目标。越界 / 空槽 → -1；dir 退化（零 / 非有限）→ -1（同 findBoatHit 守卫）。
+//   review0906 #13：**起点在盒内 → -1（未中）**——旧版盒内返 0，攻击甄别 `0 ≤ 任何 mobDist` 恒真 =
+//   眼位落入船盒时点乘员恒判船胜。本函数唯一消费面 = 攻击甄别；findBoatHit（tryMount 登乘寻的）
+//   不改（登乘语义依赖盒内命中返 0），两射线口径分叉同 MinecartManager::rayHitDistAt 登记注释。
 float BoatManager::rayHitDistAt(int i, const QVector3D &origin, const QVector3D &dir, float maxDist) const
 {
     if (i < 0 || i >= int(m_boats.size()) || !m_boats[size_t(i)].alive) return -1.0f;
@@ -892,7 +895,8 @@ float BoatManager::rayHitDistAt(int i, const QVector3D &origin, const QVector3D 
         if (tmin > tmax) { hit = false; break; }
     }
     if (!hit) return -1.0f;
-    return tmin >= 0.0f ? tmin : 0.0f;
+    // review0906 #13：tmin==0 = 起点在盒内（slab 法无抬升）→ 返 -1 视为未中（见函数头注释）。
+    return tmin > 0.0f ? tmin : -1.0f;
 }
 
 // t1015 指定船结算（头注释见 .h；hitBoatFromRay 的指定目标版 —— 摧毁 / 掉落链逐行同源）。
