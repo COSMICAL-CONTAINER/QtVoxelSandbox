@@ -22,8 +22,8 @@
 //   2) 反向 canonicalKey(physicalKey)：物理键 → 归属动作的 canonical 键（PlayerController::setKey
 //      入口规范化用）。canonical 恒等于该动作的默认键 —— 引擎内部（m_keys / step / shift 状态机）
 //      **零改动**照旧读 Qt::Key_W/Space/Shift 等原始常量，重映射只在 setKey 单 choke 点翻译。
-//      无归属的物理键原样透传（未重绑的旧键天然保留原语义，如 forward 改 ↑ 后 W 仍前进——
-//      W 是 forward 的 canonical，identity 命中；未登记键如 F3/数字键不受影响）。
+//      无归属的物理键返回 Key_unknown 丢弃（review0907 A-P2-2 4a 语义收紧：防改绑后旧键经透传
+//      恒等继续驱动 —— 「forward 改 ↑ 后 W 仍前进」正是被修的隐藏别名缺陷）。
 //
 // 冲突检测（spec「一键多动作提示」）：applyBinding(action, key) 时 key 已被其它动作占用 → 拒收
 //   （返回 kApplyConflict，映射不变）；QML 经 actionOfKey(key) 取占用方中文名提示。
@@ -54,7 +54,9 @@ public:
     enum ApplyResult {
         ApplyOk = 0,        // 应用成功（内存 + settings.json）
         ApplyUnknownAction, // 动作 id 不在表内（QML 传错 id 的防线）
-        ApplyConflict       // 目标键已被其它动作占用（拒收；actionOfKey 可取占用方）
+        ApplyConflict,      // 目标键已被其它动作占用（拒收；actionOfKey 可取占用方）
+        ApplyForbiddenKey   // review0907 A-P2-2 4b：目标键在固定不可映射黑名单（Esc / 数字 1-9 / Enter /
+                            //   B / G / 修饰键等登记口径固定键；拒收，映射不变。QML 录制器 else 臂兜底提示）
     };
     Q_ENUM(ApplyResult)
 
@@ -73,7 +75,11 @@ public:
 
     // 正向查询：动作 id → 当前映射键。未知动作 → 0。
     Q_INVOKABLE int keyFor(const QString &action) const;
-    // 反向规范化：物理键 → 归属动作的 canonical 键；无归属原样透传。PlayerController::setKey 消费。
+    // 反向规范化：物理键 → 归属动作的 canonical 键；**无归属 → Qt::Key_unknown（丢弃）**。
+    //   review0907 A-P2-2 4a 语义收紧（原「无归属原样透传」为隐藏别名缺陷）：动作值集之外的物理键不再
+    //   透传 —— 改绑 forward W→C 后物理 W 不在任何动作值集里 → 丢弃，不再经 canonical 恒等继续驱动前进
+    //   （引擎消费点全部是绑定动作的 canonical 键，丢弃即「该键无动作」的正确语义）。旁路面不受影响：
+    //   Esc / 鼠标 / 录制器走各自独立路径不经本 choke。PlayerController::setKey 消费（Key_unknown 早退）。
     Q_INVOKABLE int canonicalKey(int physicalKey) const;
     // 键 → 当前占用它的动作 id（空串 = 无占用；QML 冲突提示取占用方显示名）。
     Q_INVOKABLE QString actionOfKey(int key) const;
