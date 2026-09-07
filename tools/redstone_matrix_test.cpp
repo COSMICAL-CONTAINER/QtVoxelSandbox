@@ -35341,6 +35341,56 @@ Item {
                              "(seeds dun/mine/des/jun ="
                           << seedT20Dun << seedT20Mine << seedT20Des << seedT20Jun << ")";
 
+        // ── (a'') 矿井包络行为腿（review0907 低 #3 勘误 + 探针盲区收口）：Rail 为矿井 worldgen 唯一
+        //    放置块（Cobweb 有丛林神殿定角 / 要塞书馆散布噪声，不可用作签名）→ 全图 Rail 格必须全部
+        //    落进矿井区域表 bbox（巷道 piece 不出包络）；region-0 水平半边恰 = 2×kEnvHalf = 32
+        //    （重推导值钉：L 形垂直两腿，负向 6 + lenA-1 9 = 15 + 1 墙环 = 16；旧 26 = 两腿共线误推。
+        //    演化点：piece 几何演化时随 world.cpp 推导注释同步改）。
+        {
+            bool okEnv = false;
+            int railCellsEnv = 0, railOutsideEnv = 0;
+            const int regionsMineEnv = wT20Mine.structureRegionCount(World::StructureMineshaft);
+            if (regionsMineEnv > 0) {
+                std::vector<QVariantList> rgsEnv;
+                rgsEnv.reserve(regionsMineEnv);
+                for (int i = 0; i < regionsMineEnv; ++i)
+                    rgsEnv.push_back(wT20Mine.structureRegion(World::StructureMineshaft, i));
+                for (int y = 0; y < wT20Mine.height(); ++y)
+                    for (int z = 0; z < wT20Mine.depth(); ++z)
+                        for (int x = 0; x < wT20Mine.width(); ++x) {
+                            if (wT20Mine.blockAt(x, y, z) != BR::Rail) continue;
+                            ++railCellsEnv;
+                            bool inEnv = false;
+                            for (const auto &rg : rgsEnv)
+                                if (x >= rg[0].toInt() && x <= rg[3].toInt()
+                                    && y >= rg[1].toInt() && y <= rg[4].toInt()
+                                    && z >= rg[2].toInt() && z <= rg[5].toInt()) { inEnv = true; break; }
+                            if (!inEnv) ++railOutsideEnv;
+                        }
+                const QVariantList rg0Env = wT20Mine.structureRegion(World::StructureMineshaft, 0);
+                const int halfXEnv = rg0Env[3].toInt() - rg0Env[0].toInt();
+                const int halfZEnv = rg0Env[5].toInt() - rg0Env[2].toInt();
+                okEnv = railCellsEnv > 0 && railOutsideEnv == 0
+                        && halfXEnv == 32 && halfZEnv == 32;
+                if (!okEnv)
+                    qInfo().noquote() << "  [t1020 diag env] regions=" << regionsMineEnv
+                                      << "rails=" << railCellsEnv << "outside=" << railOutsideEnv
+                                      << "halfX=" << halfXEnv << "halfZ=" << halfZEnv;
+            } else {
+                qInfo().noquote() << "  [t1020 diag env] no mineshaft region (seedT20Mine="
+                                  << seedT20Mine << ")";
+            }
+            if (!okEnv) ++totalFail;
+            qInfo().noquote() << (okEnv ? "PASS" : "FAIL")
+                              << "| t1020 mineshaft envelope behavior leg (review0907 low #3): every"
+                                 " worldgen Rail cell (" << railCellsEnv << ") lies inside a mineshaft"
+                                 " region bbox (corridor pieces never stick out of the envelope) and"
+                                 " the region-0 horizontal half-extent is 32 = 2 x kEnvHalf 16"
+                                 " (L-shaped perpendicular legs: 6 + 9 + 1 wall ring; old 26 was a"
+                                 " collinear mis-derivation), so the entered-mineshaft bbox and the"
+                                 " ambient audio zone no longer double the real footprint";
+        }
+
     // ── t1020 成就树扩展探针（面板 B：structureEntered 行为沿 + 成就钩子 + 源码钉；与面板 A 同作用域
     //    —— 复用 wT20Dun / wT20Load / dbT20 / storeT20Load）──
     //    (b) 行为腿：真 PlayerController + 真地牢世界 + 真 PlayerProgress（QML 路由 C++ 等价直连）——
@@ -36366,6 +36416,97 @@ Item {
                              " same-value re-apply of blacklisted defaults (modeCycle->G,"
                              " sneak->Shift) stays ApplyOk, and load() falls blacklisted"
                              " settings.json values back to defaults";
+    }
+
+    // ── t1022 键位重映射探针（面板 D：review0907 B #1/#2/#5 显示层与拒收码语义腿——纯 KeybindManager
+    //    层 + QML 钉，密闭临时存储）──
+    //    (i) keyDisplayName 只拒非键值（#1 回归修复签名）：Shift / G / Esc（sneak / modeCycle 默认键
+    //        与固定键，恰在绑定黑名单内）返回非空正确名——33cdf6c 显示层复用黑名单把设置页两行键名
+    //        滤成空串；0 / Key_unknown 仍空（「（未设置）」门不误开）。
+    //    (ii) 单键绑回默认（#2 单向门修复）：sneak→C 后 applyBinding(sneak, Shift) ApplyOk
+    //        （own-canonical 放行）；modeCycle→P 后绑回 G 同理。
+    //    (iii) 拒收码分流顺序（#5 二义修复）：绑到被其它动作占用的黑名单键（sneak 占 Shift /
+    //        modeCycle 占 G）→ ApplyForbiddenKey 而非 ApplyConflict（黑名单先于 conflict）；非黑名单
+    //        占用键（inventory 占 E）仍 ApplyConflict（对照腿，分流面不倒挂）。
+    //    (iv) QML 钉：录制器 ApplyForbiddenKey 分流行（接线钉）+「该键为固定功能键」文案（copy 钉，
+    //        单独记账不与接线混计——t1022B 先例）。
+    {
+        using KM = KeybindManager;
+        bool okD22 = true;
+        QString diagT22D;
+        const QString storeDirD22 = QDir::tempPath()
+            + QStringLiteral("/voxel_t1022_probeD_%1").arg(QCoreApplication::applicationPid());
+        QDir().mkpath(storeDirD22);
+        const QString storeDT22 = storeDirD22 + QStringLiteral("/settings.json");
+        {
+            QFile f(storeDT22);
+            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            f.write("{}");
+        }
+        KM kbD22;
+        kbD22.setStorePath(storeDT22);
+        // (i) 显示层腿。
+        const bool dispShiftD22 = kbD22.keyDisplayName(Qt::Key_Shift) == QStringLiteral("Shift");
+        const bool dispGD22 = kbD22.keyDisplayName(Qt::Key_G) == QStringLiteral("G");
+        const bool dispEscD22 = kbD22.keyDisplayName(Qt::Key_Escape) == QStringLiteral("Esc");
+        const bool dispEmptyD22 = kbD22.keyDisplayName(0).isEmpty()
+            && kbD22.keyDisplayName(Qt::Key_unknown).isEmpty();
+        if (!(dispShiftD22 && dispGD22 && dispEscD22 && dispEmptyD22))
+            diagT22D += QStringLiteral("disp[%1%2%3%4] ")
+                .arg(dispShiftD22).arg(dispGD22).arg(dispEscD22).arg(dispEmptyD22);
+        okD22 = okD22 && dispShiftD22 && dispGD22 && dispEscD22 && dispEmptyD22;
+        // (ii) 单键绑回默认（own-canonical 放行；先走开再绑回，幂等路径不参与）。
+        const bool backSneakD22 = kbD22.applyBinding(QStringLiteral("sneak"), Qt::Key_C) == int(KM::ApplyOk)
+            && kbD22.applyBinding(QStringLiteral("sneak"), Qt::Key_Shift) == int(KM::ApplyOk)
+            && kbD22.keyFor(QStringLiteral("sneak")) == Qt::Key_Shift;
+        const bool backModeD22 = kbD22.applyBinding(QStringLiteral("modeCycle"), Qt::Key_P) == int(KM::ApplyOk)
+            && kbD22.applyBinding(QStringLiteral("modeCycle"), Qt::Key_G) == int(KM::ApplyOk)
+            && kbD22.keyFor(QStringLiteral("modeCycle")) == Qt::Key_G;
+        if (!(backSneakD22 && backModeD22))
+            diagT22D += QStringLiteral("back[%1%2] ").arg(backSneakD22).arg(backModeD22);
+        okD22 = okD22 && backSneakD22 && backModeD22;
+        // (iii) 分流顺序：黑名单先于 conflict（此时 sneak=Shift / modeCycle=G 在位）；非黑名单占用
+        //       仍 conflict 对照；拒收后映射不变。
+        const bool forbShiftD22 = kbD22.applyBinding(QStringLiteral("forward"), Qt::Key_Shift)
+            == int(KM::ApplyForbiddenKey);
+        const bool forbGD22 = kbD22.applyBinding(QStringLiteral("jump"), Qt::Key_G)
+            == int(KM::ApplyForbiddenKey);
+        const bool stillConflictD22 = kbD22.applyBinding(QStringLiteral("forward"), Qt::Key_E)
+            == int(KM::ApplyConflict); // inventory 占 E（非黑名单占用 → 冲突面保持）
+        const bool intactD22 = kbD22.keyFor(QStringLiteral("forward")) == Qt::Key_W
+            && kbD22.keyFor(QStringLiteral("jump")) == Qt::Key_Space;
+        if (!(forbShiftD22 && forbGD22 && stillConflictD22 && intactD22))
+            diagT22D += QStringLiteral("order[%1%2%3%4] ")
+                .arg(forbShiftD22).arg(forbGD22).arg(stillConflictD22).arg(intactD22);
+        okD22 = okD22 && forbShiftD22 && forbGD22 && stillConflictD22 && intactD22;
+        // (iv) QML 钉（注释感知 pinSet）：ApplyForbiddenKey 分流行 = 接线钉；专文案 = copy 钉。
+        const QString rootD22 = QDir(QCoreApplication::applicationDirPath()
+                                     + QStringLiteral("/..")).absolutePath();
+        const QStringList missW22D = pinSet(rootD22 + QStringLiteral("/src/ui/Main.qml"), {
+            {"qml-forbidden-enum", "KeybindManager.ApplyForbiddenKey"},
+        });
+        const QStringList missC22D = pinSet(rootD22 + QStringLiteral("/src/ui/Main.qml"), {
+            {"copy-forbidden-msg", "该键为固定功能键"},   // copy 钉：用户可见字符串存在性
+        });
+        const bool pinWokD22 = missW22D.isEmpty();
+        const bool pinCokD22 = missC22D.isEmpty(); // copy 钉独立记账（不与接线混计）
+        if (!pinWokD22 || !pinCokD22)
+            diagT22D += QStringLiteral("pins[%1|%2] ")
+                .arg(missW22D.join(QLatin1Char(',')), missC22D.join(QLatin1Char(',')));
+        okD22 = okD22 && pinWokD22 && pinCokD22;
+        if (!okD22)
+            qInfo().noquote() << "  [t1022 diag D]" << diagT22D;
+        if (!okD22) ++totalFail;
+        qInfo().noquote() << (okD22 ? "PASS" : "FAIL")
+                          << "| t1022 keybind display layer + reject ordering (review0907 B #1/#2/#5):"
+                             " keyDisplayName returns correct non-empty names for blacklisted default"
+                             " keys Shift/G/Esc while staying empty for non-key values (settings-page"
+                             " rows no longer blank), own-canonical rebind back to defaults is allowed"
+                             " (sneak->Shift, modeCycle->G after moving away), blacklist precedes"
+                             " conflict (occupied fixed key = ApplyForbiddenKey; non-blacklisted"
+                             " occupied key still ApplyConflict), and the QML recorder has the"
+                             " dedicated fixed-key branch (1 wiring pin, comment-filtered)"
+                             " SEPARATELY COUNTED from 1 copy pin (fixed-key message presence)";
     }
 
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
@@ -37395,6 +37536,74 @@ Item {
                              " drops (stone control intact)";
     }
 
+    // ── P-t1012⑤ 满网蛛网走廊刷怪笼刷新腿（review0907 B 跨批高危 #1 修复面）──
+    //    病灶：t1012② 满网走廊把笼周 8 邻 × 上层全填 Cobweb（非 Air）→ tickSpawners 陆生谓词
+    //    「here/above == Air」恒假 → 洞穴蜘蛛笼（唯一自然来源）永久零刷。修复 = 谓词对 Cobweb 格豁免
+    //    （机制等价 MC：cave spider 在网窝里照常刷；不取「刷出后清网」以免破 t786「≥8 网 = 蛛笼」分流）。
+    //    rig：worldgen 真矿井 seed 池自举（扫 0x28 洞蛛笼 + 满网签名——P-t1012 ③ 净笼判据严格化为
+    //    「笼周 8 邻 × 2 层全非 Air」，钉死「豁免即唯一使能」：摘豁免〔阴性轮〕本腿必红）→ 玩家激活
+    //    圈内直调 tickSpawners 长 tick（80×0.1s 累计 8s > kSpawnerInterval=6s，P-t786 同式）→ 笼邻
+    //    Cobweb 格刷出 MobCaveSpider。
+    {
+        bool okCageSpawn = false;
+        int diagSeedT1212c = -1, diagCageWorldsT1212c = 0;
+        const quint32 seedsT1212c[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 4242u, 2024u, 31337u };
+        EntityManager emT1212c;
+        for (quint32 sd : seedsT1212c) {
+            World wC;
+            wC.setWidth(128); wC.setDepth(128); wC.setHeight(64);
+            wC.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含 placeMineshaft 满网走廊）
+            // 扫 0x28 洞蛛笼 + 满网净笼签名（P-t1012 ③ 同款判据 + 8 邻 × 2 层全非 Air 严格化）。
+            int cageX = -1, cageY = -1, cageZ = -1;
+            const int wW = wC.width(), wD = wC.depth();
+            for (int y = 7; y < 60 && cageX < 0; ++y)
+                for (int z = 1; z < wD - 1 && cageX < 0; ++z)
+                    for (int x = 1; x < wW - 1 && cageX < 0; ++x) {
+                        if (wC.blockAt(x, y, z) != BR::Spawner) continue;
+                        if (emT1212c.spawnerMobTypeForState(int(wC.stateAt(x, y, z)))
+                            != EntityManager::MobCaveSpider) continue;
+                        if (wC.blockAt(x, y - 1, z) == BR::Air) continue; // 笼座须实体地板
+                        static const int kNbCageT1212c[8][2] = {
+                            { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+                            { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+                        };
+                        bool fullWeb = true; // 满网签名：笼周 8 邻 × (y, y+1) 两层全非 Air（全 Cobweb）
+                        for (const auto &nb : kNbCageT1212c)
+                            for (int dy = 0; dy <= 1; ++dy)
+                                if (wC.blockAt(x + nb[0], y + dy, z + nb[1]) == BR::Air) fullWeb = false;
+                        if (!fullWeb) continue;
+                        cageX = x; cageY = y; cageZ = z;
+                    }
+            if (cageX < 0) continue; // 本 seed 无满网净笼 → 池续扫
+            ++diagCageWorldsT1212c;
+            // 激活圈内长 tick：累计 8s > kSpawnerInterval=6s（首周期到点即扫）。
+            const QVector3D playerPos(float(cageX) + 0.5f, float(cageY) + 0.5f, float(cageZ) + 0.5f);
+            for (int t = 0; t < 80; ++t) emT1212c.tickSpawners(0.1, &wC, playerPos);
+            for (int i = 0; i < emT1212c.count(); ++i) {
+                if (!emT1212c.aliveAt(i)) continue;
+                if (emT1212c.mobTypeAt(i) != EntityManager::MobCaveSpider) continue;
+                const QVector3D d = emT1212c.posAt(i) - playerPos;
+                if (std::abs(d.x()) <= 2.0f && std::abs(d.z()) <= 2.0f) { // 笼邻 2 格内刷出洞蛛
+                    okCageSpawn = true;
+                    break;
+                }
+            }
+            diagSeedT1212c = int(sd);
+            break;                 // 首个含笼世界即判（池自举只为找到 rig；不再多生成）
+        }
+        if (!okCageSpawn)
+            qInfo().noquote() << "  [t1012cage diag] seed" << diagSeedT1212c
+                              << "cageWorlds" << diagCageWorldsT1212c;
+        if (!okCageSpawn) ++totalFail;
+        qInfo().noquote() << (okCageSpawn ? "PASS" : "FAIL")
+                          << "| t1012 full-web corridor cage spawns (review0907 B cross-batch high #1):"
+                             " worldgen cave-spider cage embedded in a fully webbed corridor (8-neighbor"
+                             " x 2-layer all-non-air precondition) ticks past kSpawnerInterval with the"
+                             " player in range and spawns a MobCaveSpider on a Cobweb neighbor cell"
+                             " (land spawn predicate exempts Cobweb here/above; negative-round:"
+                             " removing the exemption re-blocks every candidate = loud red)";
+    }
+
     // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
     //    rig：t995/t1001/t1002 同款池化口径，但世界升 160×160×**128**（t307 起地表基线 64、desert 地表
     //    ~61..67 —— 64 高 rig 世界把地表钳到 63 → 塔顶越界守卫恒拒 = 历史全矩阵神殿恒 0 的根因，本探针
@@ -38027,6 +38236,7 @@ Item {
         const auto [x0T1013, z0T1013] = nextSlot();
         bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
         bool okG = false; // review0907 A-P1-1 战利品不再生腿（roll → 取空 → 重开不再生 + looted 落盘）
+        bool okH = false; // review0907 B 跨批高危 #3 放置守卫腿（cart 键格放箱拒 + 普通格对照）+ #4 箱车拒载生物腿
         // (a) 轨线 4 格 + 标记箱立 (x0+1, z0+1)（键格；4 邻含轨格 (x0+1, z0) → 转正落车该轨上）。
         for (int i = 0; i < 4; ++i) w.setBlock(x0T1013 + i, kRigY, z0T1013, BR::Rail, 0);
         const int keyX = x0T1013 + 1, keyY = kRigY, keyZ = z0T1013 + 1;
@@ -38326,6 +38536,103 @@ Item {
                         << "allEmpty=" << allEmptyAfter << "lootedSaved=" << lootedSaved
                         << "roundTrip=" << lootedRoundTrip;
             }
+            // (h) review0907 B 跨批高危 #3 + 遗留 #4：cart 键格放 Chest 双容器别名守卫 + 箱车拒载生物。
+            //     病灶 #3：转正后标记格是 Air，在该格放 Chest → 方块箱（坐标寻址）与箱车（键寻址）共享
+            //     同一份 27 槽条目互见互取；破箱 clearChest 抹回生键 → 车凭空消失。修 = 通用放置预检层
+            //     （t973 同层）「Chest + isCartCell(目标格) → 拒（不挥不消耗，t1017 附着拒绝族口径）」。
+            //     病灶 #4：生物登乘扫描（Pass C）漏箱车排除 → 蜘蛛钉坐箱车视觉穿插；修 = 扫描循环
+            //     chestAt(i) 一行 continue（对齐玩家侧 tryMount 拒箱车语义）。
+            {
+                WorldClock clockT1013h;
+                EntityManager entsT1013h;
+                Hotbar hbT1013h;
+                pcT1013.setWorldClock(&clockT1013h);
+                pcT1013.setEntityManager(&entsT1013h);
+                pcT1013.setHotbar(&hbT1013h);
+                QQuickWindow probeWinT1013h;
+                pcT1013.setParentItem(probeWinT1013h.contentItem());
+                // 瞄准帮手（P-t945 aimP945 / P-t1017 aimT1017 同式）：release+grab 重居中 →
+                //   loadSavedState（Creative=1，放置不消耗不观察者门拒）→ tick 刷射线，返命中格。
+                const auto aimT1013h = [&](float feetX, float feetY, float feetZ,
+                                           float aimX, float aimY, float aimZ) {
+                    const float ex = feetX, ey = feetY + 1.62f, ez = feetZ;
+                    const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+                    const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+                    const float pitch = std::asin(dy / len) * 57.2957795f;
+                    const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+                    pcT1013.release();
+                    pcT1013.grab();
+                    pcT1013.loadSavedState(feetX, feetY, feetZ, yaw, pitch, 1 /* Creative */);
+                    pcT1013.tick(); // updateRaycast 刷新命中（t889 先例）
+                    return pcT1013.hitBlock();
+                };
+                const auto pumpMsT1013h = [](int ms) { // 放置 200ms CD 间隔（t128）
+                    QElapsedTimer t;
+                    t.start();
+                    while (t.elapsed() < ms)
+                        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                };
+                // 放置 rig：新槽石台（kRigY-1 地板 + 上方净空），键格 K = 台面上一格（Air）。
+                const auto [pxH, pzH] = nextSlot();
+                for (int dx = 0; dx <= 4; ++dx) {
+                    w.setBlock(pxH + dx, kRigY - 1, pzH, BR::Stone, 0);
+                    for (int dy = 0; dy <= 3; ++dy)
+                        w.setBlock(pxH + dx, kRigY + dy, pzH, BR::Air, 0);
+                }
+                const int keyHX = pxH + 1, keyHY = kRigY, keyHZ = pzH;
+                csLoaded.registerCart(keyHX, keyHY, keyHZ); // 键格登记（守卫的触发前提）
+                pcT1013.setSelectedBlock(int(BR::Chest));
+                // 眼位 (px+2.5, kRigY+1.62) 瞄 (px+1.7, kRigY)（K 正下方石块顶面内缩点，P-t945 同式）
+                //   → 命中 (px+1, kRigY-1, pz) 顶面 → 目标格 = K。
+                const QVector3D hitH = aimT1013h(float(pxH) + 2.5f, float(kRigY), float(pzH) + 0.5f,
+                                                 float(pxH) + 1.7f, float(kRigY), float(pzH) + 0.5f);
+                const bool aimedH = hitH == QVector3D(float(keyHX), float(kRigY - 1), float(pzH));
+                pcT1013.placeBlock();
+                pumpMsT1013h(260);
+                const bool rejectedH = w.blockAt(keyHX, keyHY, keyHZ) == BR::Air; // 键格放置被拒
+                // 对照：摘键后同一瞄点同选块 → 放置成功（守卫只拦键格，普通格不受扰）。
+                csLoaded.clearChest(keyHX, keyHY, keyHZ);
+                pcT1013.placeBlock();
+                pumpMsT1013h(260);
+                const bool controlH = w.blockAt(keyHX, keyHY, keyHZ) == BR::Chest;
+                w.setBlock(keyHX, keyHY, keyHZ, BR::Air, 0); // 清场
+                csLoaded.clearChest(keyHX, keyHY, keyHZ);
+                if (!aimedH || !rejectedH || !controlH)
+                    qInfo().noquote() << "  [t1013 diag h-place] aimed=" << aimedH << "hit=" << hitH
+                                      << "rejected=" << rejectedH << "control=" << controlH;
+                // 箱车拒载生物：Pass C 扫描对 chestAt(i) 跳过（对齐 tryMount 玩家侧拒箱车）。
+                //   (e) 回生的箱车仍在场（射线重寻址防槽漂移）；生物生在箱车同格（XZ 距 0）→
+                //   tickVehicleRiding 后不得登乘。对照：普通矿车 + 同格生物 → 恰登乘（载具侧查证，
+                //   证明负腿非「登乘链整体失效」假绿）。
+                bool chestRefusedH = false, plainAcceptedH = false;
+                const int hCartIdx = cartsT1013.findCartHit(rigAboveT1013, QVector3D(0, -1, 0), 4.0f, nullptr);
+                if (hCartIdx >= 0 && cartsT1013.chestAt(hCartIdx)) {
+                    entsT1013h.setVehicleManagers(&cartsT1013, nullptr);
+                    const int mobH = entsT1013h.spawnMobTyped(keyX, kRigY, keyZ - 1,
+                                                              EntityManager::MobSpider,
+                                                              QStringLiteral("#2a1a1a"), 0);
+                    // 对照普通车：轨线东端（(d) 已 clearAll，槽空闲；远离箱车 ≥0.8 登乘半径）。
+                    cartsT1013.spawnCart(x0T1013, kRigY, z0T1013, &w);
+                    int plainIdxH = -1;
+                    for (int i = 0; i < cartsT1013.count(); ++i)
+                        if (cartsT1013.aliveAt(i) && !cartsT1013.chestAt(i)) { plainIdxH = i; break; }
+                    const int mobH2 = plainIdxH >= 0
+                        ? entsT1013h.spawnMobTyped(x0T1013, kRigY, z0T1013, EntityManager::MobPig,
+                                                   QStringLiteral("#e0a0a0"), 0)
+                        : -1;
+                    entsT1013h.tickVehicleRiding();
+                    entsT1013h.tickVehicleRiding();
+                    chestRefusedH = mobH >= 0 && cartsT1013.mobPassengerAt(hCartIdx) < 0;
+                    plainAcceptedH = mobH2 >= 0 && plainIdxH >= 0
+                        && cartsT1013.mobPassengerAt(plainIdxH) == mobH2;
+                    entsT1013h.setVehicleManagers(nullptr, nullptr);
+                }
+                okH = aimedH && rejectedH && controlH && chestRefusedH && plainAcceptedH;
+                if (!okH)
+                    qInfo().noquote() << "  [t1013 diag h-ride] cartIdx=" << hCartIdx
+                                      << "chestRefused=" << chestRefusedH
+                                      << "plainAccepted=" << plainAcceptedH;
+            }
             QObject::disconnect(connBBT1013);
             QObject::disconnect(connPlainT1013);
             QObject::disconnect(connChestT1013);
@@ -38399,6 +38706,15 @@ Item {
                              " looted flag); looted:true survives allChests->loadAll round-trip with"
                              " cart respawn flag coexisting on the same entry (old-save compatible:"
                              " missing looted key = never rolled)";
+        if (!okH) ++totalFail;
+        qInfo().noquote() << (okH ? "PASS" : "FAIL")
+                          << "| t1013 cart-key cell guard + chest-cart mob mount (review0907 B cross-batch"
+                             " high #3 / legacy #4): placing a Chest block onto a registered cart key cell"
+                             " is rejected as a no-op (no double-container aliasing, clearChest can never"
+                             " erase the respawn key via a block chest), the same aim places normally"
+                             " once the key is cleared (plain cells undisturbed), and the mob board scan"
+                             " skips chest carts (spider at the cart cell stays unseated while a pig on a"
+                             " plain cart seats, matching the player-side tryMount rejection)";
         if (!okF) ++totalFail;
         qInfo().noquote() << (okF ? "PASS" : "FAIL")
                           << "| t1013 source pins: variant fields + chestCartBroken signal + tryMount reject +"
