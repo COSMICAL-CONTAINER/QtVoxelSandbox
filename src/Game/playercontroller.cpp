@@ -355,11 +355,14 @@ void PlayerController::setKey(int key, bool pressed)
 {
     // t1022 键位重映射（单一 choke 点）：物理键 → 归属动作的 canonical 键（如 forward 重绑 ↑ 后，
     //   ↑ 与 W 都译成 Key_W），再进下方 m_keys / 蹲疾跑状态机 —— step() / 蹲态机 / sneakPlace 等
-    //   全部 m_keys 消费点零改动即受映射。无归属键原样透传（未登记键 / 未重绑旧键语义保留）。
-    //   release 侧对称翻译（QML 同一映射查两次 → m_keys 进出同键，不残留）。null 权威（未注入）
-    //   不翻译 = 旧行为。
-    if (m_keybinds)
+    //   全部 m_keys 消费点零改动即受映射。release 侧对称翻译（QML 同一映射查两次 → m_keys 进出同键，
+    //   不残留）。null 权威（未注入）不翻译 = 旧行为。
+    //   review0907 A-P2-2 4a：canonicalKey 无归属返 Key_unknown（隐藏别名丢弃）→ 此处对称早退
+    //   （press / release 同门，m_keys 不残留 Key_unknown 冗余项；无动作的键本就无消费点）。
+    if (m_keybinds) {
         key = m_keybinds->canonicalKey(key);
+        if (key == Qt::Key_unknown) return;
+    }
     // t655 死亡态输入闸门：m_dead 期间拒收一切游戏键（WASD / 跳 / 蹲 / 疾跑双击 / 双击空格切飞全部
     //   停摆；spec「死亡态锁移动/攻击/背包键，只接受重生按钮与聊天」）。QML keyInput 层有同款守卫（先
     //   拦），此处 C++ 侧兜底 —— 任何漏网透传路径（未来新增键位 / 面板）都不至于让尸体走动。release
@@ -915,43 +918,45 @@ void PlayerController::tickImpl()
     //   m_insideStructure[] 重置点：setWorld（换世界指针）/ finishWorldLoad（读档重进同指针路径）/
     //   本处随值更新。无世界 → 恒 false。
     // t1021 结构环境音区推导：复用下方 t1020 同一 loop 的四结构在区布尔（零额外谓词调用）折叠出当前
-    //   环境音区（StructureAmbientZone 值域）。优先级 = 先折叠先得：要塞 > 矿井 > 沙漠 > 丛林（loop 序
-    //   dungeon/mineshaft/desert/jungle，dungeon 恒 None 天然跳过 —— 四音不覆盖地牢，登记口径）。复合门：
+    //   环境音区（StructureAmbientZone 值域）。优先级 = 先折叠先得：矿井 > 沙漠 > 丛林（loop 序
+    //   dungeon/mineshaft/desert/jungle，dungeon 恒 None 天然跳过 —— 四音不覆盖地牢，登记口径）；
+    //   **review0907 A-P2-1：要塞低鸣折叠单独做（loop 后无条件覆盖，要塞最高优先级保留）** —— 原实现
+    //   把整个 loop 挂在 m_insideStronghold 的 else 臂上，要塞区内四结构 region 检查 + structureEntered
+    //   边沿 + m_insideStructure 更新被整 tick 跳过（要塞足迹与矿井等 region 重叠处，进入事件永不触发）。
+    //   拆开后边沿检测无条件执行，要塞折叠只决定环境音取值（不再吞边沿）。复合门：
     //   沙漠夜风须「夜（worldClock.isNight）+ 露天（skyLightAt≥15 同 t385/t386 见天口径）」——白天 / 密室
     //   （头顶遮挡）无风；丛林虫鸣昼夜皆响、夜晚密集（昼/夜切 zone 值，密度由播放端调度间隔承担）。
-    //   要塞低鸣区内恒响（昼夜无关）。放在 !m_captured 早 return 之前（同上方各环境态先例：暂停 / 背包开
-    //   时判定稳定）；无世界 → None。值真变才 emit（界内连 tick 零重发，禁每帧抖 QML）。
+    //   放在 !m_captured 早 return 之前（同上方各环境态先例：暂停 / 背包开时判定稳定）；无世界 → None。
+    //   值真变才 emit（界内连 tick 零重发，禁每帧抖 QML）。
     int ambientZone = AmbientNone;
     if (m_world) {
-        if (m_insideStronghold) {
-            ambientZone = AmbientStronghold; // 要塞低鸣：区内恒响（低频嗡鸣床循环，昼夜无关）
-        } else {
-            for (int k = 0; k < World::StructureKindCount; ++k) {
-                const bool inStruct = m_world->insideStructureRegion(k, double(m_pos.x()), double(m_pos.y()), double(m_pos.z()));
-                if (inStruct && !m_insideStructure[k])
-                    emit structureEntered(k); // 一次性事件信号（边沿触发；禁每帧直发）
-                m_insideStructure[k] = inStruct;
-                if (inStruct && ambientZone == AmbientNone) {
-                    const bool night = m_worldClock && m_worldClock->isNight();
-                    if (k == World::StructureMineshaft)
-                        ambientZone = AmbientMineshaft; // 滴水：区内恒调度（昼夜无关）
-                    else if (k == World::StructureDesertTemple) {
-                        // 沙漠夜风三重门：区内 + 夜 + 露天（脚位格见天；金字塔坡面 / 顶冠露天格成立，
-                        //   密室 / 厅内头顶遮挡不成立 → 夜探密室无风，回坡面才起风）。
-                        const bool exposed =
-                            m_world->skyLightAt(int(std::floor(double(m_pos.x()))),
-                                                int(std::floor(double(m_pos.y()))),
-                                                int(std::floor(double(m_pos.z())))) >= 15;
-                        if (night && exposed)
-                            ambientZone = AmbientDesertTemple;
-                    } else if (k == World::StructureJungleTemple) {
-                        // 丛林虫鸣：区内昼夜皆响，夜晚密集（密度 = 播放端调度间隔；zone 切 4/5 值驱动）。
-                        ambientZone = night ? AmbientJungleNight : AmbientJungleDay;
-                    }
-                    // StructureDungeon → 恒 None（无对应环境音，登记口径）。
+        for (int k = 0; k < World::StructureKindCount; ++k) {
+            const bool inStruct = m_world->insideStructureRegion(k, double(m_pos.x()), double(m_pos.y()), double(m_pos.z()));
+            if (inStruct && !m_insideStructure[k])
+                emit structureEntered(k); // 一次性事件信号（边沿触发；禁每帧直发）
+            m_insideStructure[k] = inStruct;
+            if (inStruct && ambientZone == AmbientNone) {
+                const bool night = m_worldClock && m_worldClock->isNight();
+                if (k == World::StructureMineshaft)
+                    ambientZone = AmbientMineshaft; // 滴水：区内恒调度（昼夜无关）
+                else if (k == World::StructureDesertTemple) {
+                    // 沙漠夜风三重门：区内 + 夜 + 露天（脚位格见天；金字塔坡面 / 顶冠露天格成立，
+                    //   密室 / 厅内头顶遮挡不成立 → 夜探密室无风，回坡面才起风）。
+                    const bool exposed =
+                        m_world->skyLightAt(int(std::floor(double(m_pos.x()))),
+                                            int(std::floor(double(m_pos.y()))),
+                                            int(std::floor(double(m_pos.z())))) >= 15;
+                    if (night && exposed)
+                        ambientZone = AmbientDesertTemple;
+                } else if (k == World::StructureJungleTemple) {
+                    // 丛林虫鸣：区内昼夜皆响，夜晚密集（密度 = 播放端调度间隔；zone 切 4/5 值驱动）。
+                    ambientZone = night ? AmbientJungleNight : AmbientJungleDay;
                 }
+                // StructureDungeon → 恒 None（无对应环境音，登记口径）。
             }
         }
+        if (m_insideStronghold)
+            ambientZone = AmbientStronghold; // 要塞低鸣：区内恒响（低频嗡鸣床循环，昼夜无关）；最高优先级
     } else {
         for (int k = 0; k < World::StructureKindCount; ++k)
             m_insideStructure[k] = false; // 退出世界清守卫（下次进世界重新判沿）
