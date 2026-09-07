@@ -1041,8 +1041,12 @@ bool BlockRegistry::isTrapdoor(quint8 blockId)
 // t851 活板门依附面判定（单一权威，见 .h 注释）：isCollidable 且排除活板门/门自身 —— MC 1.0 附着语义
 //   「依附实体方块面」，附着物自身不互相依附（同火把 torchSupportBlock 排除火把的先例口径：火把非
 //   solid 天然不算，活板门/门是碰撞实体必须显式排除，否则「板套板悬浮叠」绕过校验）。
+//   review0906 #9：再排除 Cactus（仙人掌 ShapeFull 恒过 isCollidable 门 = 贴面漏网；MC 1.0 仙人掌
+//   15/16 缩体非可附着面）——放置预检与 World 失撑复检（checkTrapdoorDoorSupportOnEdit）同读本谓词，
+//   一处收紧双端同口径；旧存档贴仙人掌的活板门在复检时按失撑脱落（掉落链既有语义）。
 bool BlockRegistry::trapdoorSupportBlock(quint8 blockId, quint8 state)
 {
+    if (blockId == Cactus) return false; // review0906 #9：仙人掌不作依附面（六面含顶）
     if (isTrapdoor(blockId) || isDoor(blockId)) return false; // 附着族自身不算面（防板套板 / 板贴门）
     return isCollidable(blockId, state);
 }
@@ -1325,9 +1329,13 @@ bool BlockRegistry::isDustSupport(quint8 belowId, quint8 belowState)
 
 // t741 「支撑面与格顶齐平」通用支撑判定（单一权威，见 .h 头注释）：完整立方 或 上半砖（顶面与格顶
 //   齐平）。供门族放置（门站地面，playercontroller isDoor 分支）与红石粉（isDustSupport 委托）共用。
+//   review0906 #9：完整立方分支走 solidSupportBlock 统一权威（排除 Cactus——仙人掌顶 15/16 缩体非
+//   齐平支撑面，门/粉贴仙人掌顶放置漏网；放置预检与失撑复检（checkDoorSupportOnEdit /
+//   dropUnsupportedDustAround 族）同读本谓词，一处收紧双端同口径）。上半砖分支不涉仙人掌（isSlab
+//   对 Cactus 恒假），语义不变。
 bool BlockRegistry::isTopFlushSupport(quint8 belowId, quint8 belowState)
 {
-    return isFullCube(belowId) || (isSlab(belowId) && (belowState & 1) != 0);
+    return solidSupportBlock(belowId) || (isSlab(belowId) && (belowState & 1) != 0);
 }
 
 // t620 红石灯统一谓词（单一权威，见头注释）：blockId == RedstoneLamp 即红石灯。供 PlayerController
@@ -1495,7 +1503,14 @@ bool BlockRegistry::torchSupportBlock(quint8 blockId, quint8 state)
 
 // review0906 #8 木梯 / 机关附着支撑判定（实现见 .h 注释）：isFullCube 且非 Cactus —— 与预检（放置拒）
 //   / 复检（残留掉）四处共享的单一权威，杜绝「预检收紧、复检裸 isFullCube」再劈叉。
+//   review0906 #9：委托 solidSupportBlock 统一权威（公式同一处维护，消费端语义名不变）。
 bool BlockRegistry::mechLadderSupportBlock(quint8 blockId)
+{
+    return solidSupportBlock(blockId);
+}
+
+// review0906 #9 支撑语义统一权威（实现见 .h 注释）：isFullCube 且非 Cactus。
+bool BlockRegistry::solidSupportBlock(quint8 blockId)
 {
     return blockId != Cactus && isFullCube(blockId);
 }
