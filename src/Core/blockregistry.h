@@ -2157,6 +2157,14 @@ public:
         //   路径的「平行拒连」读其 bit5 轴偏好，判定侧臂是否同轴平行轨。缺省 0（worldgen placeMineshaft
         //   / 其余聚合构造点不填）= 邻居视为 fresh → 拒连不触发，worldgen 拐角形态零改动。
         quint8 sameState = 0;
+        // review0906 #5 上下层邻轨 state（与 sameState 同一填充纪律：仅运行期 recomputeRailConnections
+        //   填；worldgen / 转辙器聚合构造点缺省 0 = fresh 保守读）：railProbeEndpointAligned 坡臂分支
+        //   （up/down 层邻轨）读对应层 state 的连接位 / bit5 轴，判「坡臂邻是否端点相对」—— 旧版坡臂
+        //   恒真（结构性缺失上下层 state）对「上层垂直定向线（c!=0 无本方向连接位）」放行 = 单向幽灵臂
+        //   （对方 axisCon 存在性路径不回连：mesher 翘头坡 / 矿车单向驶入不可返）。缺省 0 与 fresh 不可
+        //   区分按 NS 保守读（同 sameState 口径），worldgen 平轨铺设不触坡臂分支零改动。
+        quint8 upState = 0;
+        quint8 downState = 0;
     };
     // 算 (x,y,z) 处 Rail 的连接 state（t666 规则集见上述头注释）：自格 id + 当前 state（轴偏好读它）
     // + 4 向三高探针 → 新连接位（0..0x0F）。纯函数（邻块 id 数组入参），供 World::recomputeRailConnections
@@ -2173,9 +2181,11 @@ public:
     //   轨自己画，高端平铺，避免边界双重几何；见 partialblockgeometry.h RailDelta 注释）。
     static int railProbeDelta(const RailProbe &p);
     // t1018 端点相对判定（railConnections 延伸松弛的唯一判据；实现见 blockregistry.cpp 头注释）：邻探针
-    //   p（含 t983 起填充的 sameState）在该水平方向（xAxis = true → ±X 臂 / false → ±Z 臂）上是否
-    //   「端点相对」——邻轨自身轴（连接位优先、bit5 兜底、坡臂恒真）**包含连接方向** = 邻轨以端点对着
-    //   本格（轨线延伸，可接续）；否则邻轴垂直于连接方向 = 平行侧邻（线身旁）→ 拒连（t983 主口径）。
+    //   p（含 t983 起填充的 sameState / review0906 #5 起填充的 upState / downState）在该水平方向
+    //   （xAxis = true → ±X 臂 / false → ±Z 臂）上是否「端点相对」——邻轨自身轴（连接位优先、bit5 兜底）
+    //   **包含连接方向** = 邻轨以端点对着本格（轨线延伸，可接续）；否则邻轴垂直于连接方向 = 平行侧邻
+    //   （线身旁）→ 拒连（t983 主口径）。同层读 sameState；坡臂（up/down 层有轨）读对应层 state
+    //   （review0906 #5：旧「坡臂恒真」对上层垂直定向线放行 = 单向幽灵臂，已废）。
     //   sc==0 && bit5==0 的 fresh 侧臂读作 NS（与 t983 平行拒连同一保守口径：NS 方向视为端点相对、
     //   EW 方向不相对——bit5=0 与 fresh 不可区分）。
     static bool railProbeEndpointAligned(const RailProbe &p, bool xAxis);
