@@ -24300,6 +24300,115 @@ Item {
                     qInfo().noquote() << "  [t1019 diag] d no in-band trial:" << diagD6;
             }
         }
+        // ── (e/f) 金轨谷格腿（review0906 #7）：谷格换断电金轨（无红石块供能）—— 旧版无条件豁免把
+        //     滑行车交还纯保守谷物理 + 两壁 kick 再供能 = t981 往复在断电金轨谷复发（t939③ 刹车只在
+        //     静置分支，管不住滑行车）。收窄后断电金轨谷格照捕：静置闸起步（入谷 v² ~21，谷底账
+        //     40.8 < 41.58）→ 捕获停驻谷心（无往复 + 60 tick 静止守卫；停驻 |speed|→0 恰落入 t939③
+        //     静置刹车 = 稳定不动点）。(f) 通电对照（红石块直供谷格金轨）：boost 在谷格接管 → 通过
+        //     （豁免语义仍在，防收窄误伤通电轨型）。几何与 (a) 单壁 V 同构（谷格西东两邻皆 +1）。
+        bool okG7 = false;
+        {
+            int xg = -1, zg = -1;
+            for (int zz = 3; zz < 94 && xg < 0; zz += 2)
+                for (int xx = 6; xx + 3 < 96 && xg < 0; ++xx) {
+                    bool clear = true;
+                    for (int dx = -1; dx <= 3 && clear; ++dx)
+                        for (int dz = -1; dz <= 1 && clear; ++dz)
+                            for (int dy = -1; dy <= 2 && clear; ++dy)
+                                if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                    if (clear) { xg = xx; zg = zz; }
+                }
+            if (xg < 0) {
+                qInfo().noquote() << "  [t1019 diag] e: no clear rig area";
+            } else {
+                const auto buildVG = [&](bool powered) {
+                    w.setBlock(xg,     kRigY + 1, zg, BR::Rail, 0);       // 西壁
+                    if (powered) w.setBlock(xg + 1, kRigY - 1, zg, BR::RedstoneBlock, 0);
+                    w.setBlock(xg + 1, kRigY,     zg, BR::GoldenRail, 0); // 谷格 = 金轨
+                    w.setBlock(xg + 2, kRigY + 1, zg, BR::Rail, 0);       // 东壁（死端）
+                    tickN(w, 8);
+                };
+                const auto clearVG = [&]() {
+                    w.setBlock(xg,     kRigY + 1, zg, BR::Air, 0);
+                    w.setBlock(xg + 1, kRigY,     zg, BR::Air, 0);
+                    w.setBlock(xg + 2, kRigY + 1, zg, BR::Air, 0);
+                    w.setBlock(xg + 1, kRigY - 1, zg, BR::Air, 0);
+                    tickN(w, 2);
+                };
+                const float centerG = float(xg + 1) + 0.5f;
+                const auto runCartG = [&](int &revOut, float &maxXOut, QVector3D &finOut) {
+                    MinecartManager carts;
+                    carts.spawnCart(xg, kRigY + 1, zg, &w); // 西壁单端连接（东）→ 静置闸起步滑落
+                    maxXOut = carts.posAt(0).x();
+                    QVector3D prev = carts.posAt(0);
+                    float accum = 0.0f;
+                    int state = 0;
+                    revOut = 0;
+                    for (int t = 0; t < 600; ++t) {
+                        carts.tickPushedCarts(0.016f, &w);
+                        if (!carts.aliveAt(0)) break;
+                        const QVector3D p = carts.posAt(0);
+                        maxXOut = std::max(maxXOut, p.x());
+                        accum += p.x() - prev.x();
+                        if (state == 0) {
+                            if (accum > 0.25f) { state = 1; accum = 0.0f; }
+                            else if (accum < -0.25f) { state = -1; accum = 0.0f; }
+                        } else if (state > 0 && accum < -0.25f) { ++revOut; state = -1; accum = 0.0f; }
+                        else if (state < 0 && accum > 0.25f) { ++revOut; state = 1; accum = 0.0f; }
+                        prev = p;
+                        finOut = p;
+                    }
+                    carts.clearAll();
+                };
+                // (e) 断电：捕获停驻谷心，无往复、静止守卫。
+                buildVG(false);
+                const bool unpoweredOkG = (w.stateAt(xg + 1, kRigY, zg) & BR::GoldenRailStateOnFlag) == 0;
+                int revE = 0;
+                float maxXE = 0.0f;
+                QVector3D finE;
+                runCartG(revE, maxXE, finE);
+                bool restOkE = true;
+                {
+                    // 静止守卫（(a) 同式）：整段重跑 600 tick 后从终位起测 60 tick 位移
+                    //（捕获制动律末段每 tick 位移仍 >1e-3，须等完全停驻再测）。
+                    MinecartManager carts;
+                    carts.spawnCart(xg, kRigY + 1, zg, &w);
+                    QVector3D finR;
+                    for (int t = 0; t < 600; ++t) {
+                        carts.tickPushedCarts(0.016f, &w);
+                        if (!carts.aliveAt(0)) break;
+                        finR = carts.posAt(0);
+                    }
+                    for (int t = 0; t < 60 && restOkE; ++t) {
+                        carts.tickPushedCarts(0.016f, &w);
+                        if ((carts.posAt(0) - finR).length() > 1e-3f) restOkE = false;
+                    }
+                    carts.clearAll();
+                }
+                const bool okE7 = unpoweredOkG && revE == 0
+                    && maxXE <= centerG + 0.6f                    // 未通过（被捕）
+                    && std::fabs(finE.x() - centerG) <= 0.15f     // 停驻谷心
+                    && restOkE;                                   // 无 kick/反溜再起
+                if (!okE7)
+                    qInfo().noquote() << "  [t1019 diag] e pow" << unpoweredOkG << "rev" << revE
+                                      << "maxX" << maxXE << "fin" << finE << "rest" << restOkE
+                                      << "center" << centerG;
+                clearVG();
+                // (f) 通电对照：boost 谷格接管 → 通过（豁免仍在）。
+                buildVG(true);
+                const bool poweredOkG = (w.stateAt(xg + 1, kRigY, zg) & BR::GoldenRailStateOnFlag) != 0;
+                int revF = 0;
+                float maxXF = 0.0f;
+                QVector3D finF;
+                runCartG(revF, maxXF, finF);
+                const bool okF7 = poweredOkG && maxXF > centerG + 0.6f && revF <= 1;
+                if (!okF7)
+                    qInfo().noquote() << "  [t1019 diag] f pow" << poweredOkG << "rev" << revF
+                                      << "maxX" << maxXF << "fin" << finF << "center" << centerG;
+                clearVG();
+                okG7 = okE7 && okF7;
+            }
+        }
         // ── (c) 源码钉（任一消失即红）。──
         const QString exeDir1019 = QCoreApplication::applicationDirPath();
         const QString root1019 = QDir(exeDir1019 + QStringLiteral("/..")).absolutePath();
@@ -24314,7 +24423,7 @@ Item {
         const bool okC2 = mc1019.contains(QStringLiteral(
             "const float pass2 = 2.0f * kCartSlopeGravity")); // 通过阈 = 2g·(h + 余量)
         const bool okC3 = mc1019.contains(QStringLiteral(
-            "if (!BlockRegistry::isRail(world->blockAt(sx, railY + k, sz))) break;")); // 对面坡升扫描
+            "if (dK == INT_MIN) break;")); // 对面坡升扫描（review0906 #16 三高探针口径）
         const bool okC4 = mh1019.contains(QStringLiteral(
             "static constexpr int kCartValleyClimbScanMax = 16;"));
         const bool okT1019 = okA && okB && okC1 && okC2 && okC3 && okC4;
@@ -24399,6 +24508,25 @@ Item {
                              " limit cycle)"
                           << (okD6 ? QString()
                                    : QStringLiteral("diag no in-band trial, see [t1019 diag] d"));
+        if (!okG7) ++totalFail;
+        qInfo().noquote() << (okG7 ? "PASS" : "FAIL")
+                          << "| t1019(e/f) golden-rail valley legs (review0906 #7): the valley-cell"
+                             " exemption used to fire on GoldenRail regardless of power state,"
+                             " while the t939 (3) unpowered-brake lives only in the |speed| < 1e-3"
+                             " static branch - a COASTING cart on an unpowered golden rail in a V"
+                             " valley was handed back the near-conservative valley physics plus"
+                             " both wall re-pump kicks: the t981 reciprocation symptom revived on"
+                             " unpowered golden valleys. The exemption now requires"
+                             " GoldenRailStateOnFlag (the same bit the boost path reads): (e)"
+                             " unpowered - the gravity cart (static-gate start, entry v^2 ~ 21,"
+                             " valley-floor account 40.8 < 41.58) is captured, parks at the center"
+                             " with zero reversals and stays pinned for 60 ticks (once stopped,"
+                             " the t939 (3) static brake takes over = stable rest); (f) powered"
+                             " control - the boost lerp takes over in the valley and the cart"
+                             " passes the far wall, proving the narrowing did not swallow the"
+                             " powered-rail semantics"
+                          << (okG7 ? QString()
+                                   : QStringLiteral("diag see [t1019 diag] e/f"));
     }
 
     // ── P-t944 上坡顶方块阻挡探针（MinecartManager 直编；spec「上坡处上方放方块 → 矿车被挡住不能穿墙
