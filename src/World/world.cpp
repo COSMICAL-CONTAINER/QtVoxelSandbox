@@ -374,10 +374,14 @@ std::vector<World::StructureSite> World::dungeonSites() const
 }
 
 // 废弃矿井候选表（选择段自 placeMineshaft 原循环头逐字迁移，同 dungeonSites 单源口径）。
-//   足迹 = 「起点厅 + 巷道最大延伸」包络闭区间：水平半边 kEnvHalf = 起点厅半幅 5 + 巷道两腿最远
-//   10+10 = 距中心 25，+1 墙环 = 26；竖直 [sy-6, sy+5]（斜坡段地板每 2 步降 1、≤10 步 → 最低 sy-5，
-//   含下壁 -6；拱带 / 支撑柱冠最高 sy+4，含顶 +5）。口径 = t1000 要塞 45×45 外圈足迹同款「结构区域
-//   足迹含墙环实心」—— 包络内巷道间实心岩同算入区（登记：不逐 piece 精确，进出起点厅必触发）。
+//   足迹 = 「起点厅 + 巷道最大延伸」包络闭区间。L 形两腿**垂直**（review0907 低 #3 勘误：旧注释按
+//   两腿共线 5+10+10 推出 26，把腿 B 的延伸错加到腿 A 轴上）：腿 A 自起点厅房缘（正向 cx+5 /
+//   负向 cx−6）沿一轴推进 lenA−1 ≤ 9 → 轴向最远 6+9 = 15；腿 B 自肘点沿**另一轴**推进 lenB ≤ 10
+//   （另一轴上腿 A 段自身已覆盖 15）；蛛网支廊垂直向 ≤ snl+1 = 7。水平半边 = 15 + 1 墙环 = 16；
+//   竖直 [sy-6, sy+5]（斜坡段地板每 2 步降 1、≤10 步 → 最低 sy-5，含下壁 -6；拱带 / 支撑柱冠最高
+//   sy+4，含顶 +5）。口径 = t1000 要塞 45×45 外圈足迹同款「结构区域足迹含墙环实心」—— 包络内巷道间
+//   实心岩同算入区（登记：不逐 piece 精确，进出起点厅必触发）。包络收窄使「废矿来客」触发 bbox 与
+//   矿井氛围音 zone 门控同源收窄（预期效果）；区域表纯重推导，旧档无迁移面。
 std::vector<World::StructureSite> World::mineshaftSites() const
 {
     constexpr int kMineshaftGrid    = 36;     // 候选网格间距（同 placeMineshaft）
@@ -387,7 +391,7 @@ std::vector<World::StructureSite> World::mineshaftSites() const
     constexpr int kMineshaftMaxY    = 48;     // 矿井最高 y（spec「Y<50」）
     constexpr int kRoomH            = 4;      // 矿井高度预算（y 范围公式沿用 t565 口径）
     constexpr int kMargin           = 16;     // 留边界（同 placeMineshaft）
-    constexpr int kEnvHalf          = 26;     // 巷道包络半边（5 + 10 + 10 + 1 墙环，推导见函数头）
+    constexpr int kEnvHalf          = 16;     // 巷道包络半边（负向腿最远 6 + lenA-1 9 = 15，+1 墙环 = 16；L 形垂直两腿，推导见函数头）
     constexpr int kEnvYLoDrop       = 6;      // 包络竖直下探（斜坡最低 sy-5 + 下壁 1）
     constexpr int kEnvYHiLift       = 5;      // 包络竖直上探（拱带 sy+4 + 顶 1）
     std::vector<StructureSite> out;

@@ -4970,6 +4970,15 @@ void PlayerController::placeBlock()
         if (isDoor && m_entityManager->mobOccupiesCell(tx, ty + 1, tz)) return; // 门上格（双格写入格）
         if (isBed && m_entityManager->mobOccupiesCell(tx + hdx, ty, tz + hdz)) return; // 床头格（双格写入格）
     }
+    // 跨批高危 #3（09-06 review）：箱子矿车内容键格禁放 Chest（双容器别名收口）。转正后标记格是 Air，
+    //   在该格放 Chest 方块 → 方块箱（坐标寻址）与箱车右键（键寻址）打开同一份 27 槽条目互见互取；
+    //   破箱 clearChest 把矿车回生键一并抹掉 → 车凭空消失。键格查询 isCartCell 现成（ChestStore 单一
+    //   权威）→ 接进通用放置预检层（与 t973 同层：只答「这个格子被不被保留」，族专项预检之前）。
+    //   拒绝 = 不挥不消耗（同 t1017 附着拒绝族 no-op 口径）。仅拦 Chest（熔炉 / 工作台无 ChestStore
+    //   寻址面不受扰）；已有错误放置的旧档登记不迁移（历史不可辨，登记 dev-plan）。创造 / 生存同规则。
+    if (m_selectedBlock == BlockRegistry::Chest && m_chestStore
+        && m_chestStore->isCartCell(tx, ty, tz))
+        return;
     // t114 火把放置预检：火把需挂到实体邻居（下 / 四侧之一为实体方块），否则拒绝（机制等价 MC「火把
     // 需要支撑面」—— 平地或墙面）。判定用 torchSupportBlock（审查修 L12：isCollidable ∨ isFullCube
     // 合成判定，见其定义处注释 —— Spawner solid=false 后仍可贴，MC 1.0 允许；不挂空气 / 火把 / cross 族）。
