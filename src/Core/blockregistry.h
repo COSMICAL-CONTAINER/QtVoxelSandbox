@@ -116,6 +116,9 @@ public:
                                   //   raycast 经 isFullCube=true 走整格命中 —— 三者解耦：碰撞矮、选中满、射线整格，零相互干扰）。
                                   //   state 低 2 位编码湿润等级 0..3（见 FarmlandHydrationMask），由 playercontroller 耕地时 +
                                   //   World::tickFarmlandHydration 周期复算据水源邻近距离写入。越湿顶面顶点色越暗（darker=wetter）。
+                                  //   t1026 登记（可简化口径）：MC「耕地被水流冲回泥土 / 被实体踩踏退化（概率回泥土或拔作物）」
+                                  //   **简化登记未实现**——水冲刷附着块清单（t1012④ wash 列表）不含耕地（耕地非附着块），
+                                  //   无水蚀退化；踩踏退化同 WheatCrop 注（line ~124）留后续任务。主干闭环 = 锄→种→长→收。
         WheatCrop      = 25, // 小麦作物（t236）：机制等价 MC 1.0 小麦作物（wheat crop）。**cross 形广告牌方块**
                                   //   （与 TallGrass 同走 PartialBlockGeometry 的 cross 几何段 [FirstCross, LastCross]；
                                   //   两片对角相交的双面 quad，alpha 透明底 cutout）。**生长阶段存 chunk state**（state = 阶段

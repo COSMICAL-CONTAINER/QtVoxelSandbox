@@ -1764,7 +1764,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         int dropId = BlockRegistry::dropId(brokenId);
         int dropCount = std::max(1, BlockRegistry::dropCount(brokenId));
         // t247 草丛 / 小麦作物掉落产出收敛到 dropCropDrops（玩家破块 / 失撑共用同一 spawnItem 逻辑）：
-        //   - WheatCrop：按 state 判成熟（t237 收割 —— 成熟掉 1 小麦物品 + 1-2 种子 / 未成熟仅 1 种子）；
+        //   - WheatCrop：按 state 判成熟（t237 收割 —— 成熟掉 1 小麦物品 + 1-3 种子（t1026 上调）/ 未成熟仅 1 种子）；
         //   - TallGrass：1/kTallGrassSeedDropDenom 概率掉种（t246）。
         //   同 PlanksFromDoubleSlabBit 双半砖模式：特殊掉落在通用 BlockDef 表之上提前分流，特例 else 走通用 dropId/dropCount。
         //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
@@ -2015,12 +2015,13 @@ void PlayerController::dropUnsupportedMechAround(int x, int y, int z)
 }
 
 // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用，见 playercontroller.h 头注释）。
-//   WheatCrop：按 state 判成熟（t237）—— 成熟(state>=WheatCropStageMax)掉 1× 小麦物品(WheatId) + 1-2× 种子
-//   （SeedId，可再种）/ 未成熟仅 1× 种子。两实体散布到破格 + 非实体水平邻格做视觉分离。
+//   WheatCrop：按 state 判成熟（t237）—— 成熟(state>=WheatCropStageMax)掉 1× 小麦物品(WheatId) + 1-3× 种子
+//   （SeedId，可再种；t1026 由 t237 的 1-2 上调对齐 dev-plan 口径）/ 未成熟仅 1× 种子。两实体散布到破格 +
+//   非实体水平邻格做视觉分离。
 //   t407 CarrotCrop/PotatoCrop：成熟掉 1-4× 对应物品（CarrotId/PotatoId，机制等价 MC 1.0「成熟作物掉 1-4」；
 //   MC carrot/potato 物品本身即种子 + 产物，故不再额外掉种子 —— 区别于小麦的种子 + 麦粒双产物）/ 未成熟仅 1×。
 //   TallGrass：1/kTallGrassSeedDropDenom 概率掉 1× 种子（t246，BlockDef.dropId/dropCount 恒返 1 种子作基础兜底，
-//   本分支概率门控覆盖通用 drop 路径）。种子 1-2 / 概率均走 QRandomGenerator（玩家交互掉落的随机性，非 worldgen
+//   本分支概率门控覆盖通用 drop 路径）。种子 1-3 / 概率均走 QRandomGenerator（玩家交互掉落的随机性，非 worldgen
 //   确定性范畴 §2-K）。失撑调用同走此逻辑 → 成熟作物失撑仍掉产物（机制等价 MC「作物被任何方式移除都掉产物」）。
 void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 state)
 {
@@ -2033,7 +2034,9 @@ void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 stat
     if (id == BlockRegistry::WheatCrop) {
         const bool mature = state >= BlockRegistry::WheatCropStageMax;
         const int wheatCount = mature ? 1 : 0;
-        const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 3) : 1; // 成熟 1-2 / 未成熟 1
+        // t1026 对齐 dev-plan 口径「成熟挖 → 1 小麦 + 1-3 种子」（t237 旧值 1-2；bounded(lo,hi) 上界开区间
+        //   → bounded(1,4) = {1,2,3}）：收获自给循环更宽裕（1 麦 + 1-3 种 ≥ 消耗 1 种/株 → 净增益恒正）。
+        const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 4) : 1; // 成熟 1-3 / 未成熟 1
         constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         int sx = x, sz = z;
         for (const auto &o : kHoriz) {
