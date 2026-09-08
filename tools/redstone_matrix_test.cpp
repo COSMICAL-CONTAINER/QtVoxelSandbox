@@ -42856,6 +42856,336 @@ Item {
                                         .arg(lureOff).arg(wired).arg(pinsOk));
     }
 
+    // ── P-t1026a 小麦农业闭环行为腿（R19.21 t1026；真实玩家路径：placeBlock 锄/种 + beginMining 收割 +
+    //    World::tickCropGrowth 直泵）──
+    //   链基建自 t234（锄→耕地）/ t236（种子→作物 + 生长 tick）/ t237（收割掉落）/ t246（草丛掉种）已
+    //   落地，本探针为验收面（dev-plan t1026 探针清单：锄地转换 / 播种落作物 / 阶段随机推进 / 成熟收获
+    //   掉落表 / 未熟掉种子）+ 口径对齐（t1026：成熟种子 1-2 → 1-3）：
+    //   (a) 锄地转换（真 placeBlock 链）：持木锄生存瞄泥土/草方块顶面 → 该格转 Farmland（湿润 state=0，
+    //       无水源 → 干）+ 耐久 -1（槽不空）；瞄石头 → 不转换（锄对非可耕地无效应）；
+    //   (b) 播种（真 placeBlock 链）：持 8 种子瞄耕地 → 耕地正上方落 WheatCrop state=0 + 消耗 1 种子；
+    //       瞄非耕地（泥土）→ 不种不耗；再瞄已种作物（命中格=作物非耕地）→ 不覆盖不耗；
+    //   (c) 阶段随机推进（tick 泵 + 确定性骰子复刻）：tickCropGrowth 的散布骰子是纯函数
+    //       hashVoxel(seed ^ 窗口×φ, x, y*7+stage, z) & 0xFFFF % 100 < 6（干耕地 1× 倍率、无雨）→ 探针
+    //       外部复刻骰子精确预测开露作物逐阶段命中窗口序号；25 次 tick = 1 窗（kCropTickInterval 节流），
+    //       泵到预测窗数后断言：① 作物到 WheatCropStageMax=7；② 实际升阶段窗口序列 ≡ 模拟序列（确定性
+    //       契约行为级钉死）；③ 每窗至多 +1 且单调（random-tick 逐阶语义）。三道生长门各一阴性对照株：
+    //       遮黑株（6 邻全石包罩 → skyLight 0 < kCropMinLight=9 → 泵毕仍 stage 0；摘光照门时该株骰子流
+    //       在泵域内必命中——阴性轮可达域守卫）；非耕地支撑株（下方泥土 → 不长）；已熟株（stage 7 → 不再动）；
+    //   (d) 成熟收获掉落表（真 beginMining 生存链）：收割 (b) 长熟的作物 → 恰 2 次 spawnItem：
+    //       1× WheatId(0x209) + 1× SeedId(0x208) count ∈ [1,3]（t1026 口径；阴性轮摘小麦行/改掉落 → 本腿红）；
+    //   (e) 未熟收获：stage 3 作物 → 恰 1 次 spawnItem：仅 1× SeedId（无小麦）。
+    //   rig：独立 40×40×32 世界 seed 10261（t1025 净空纪律：显式石板地板 + 上方全清 → 天光 15；骰子依赖
+    //   seed+窗口序号 → 独立世界保 m_cropIntervalIndex 从 0 起算）。
+    {
+        bool ok = true;
+        World wF;
+        wF.setWidth(40);
+        wF.setDepth(40);
+        wF.setHeight(32); // 3 次 setter 各 regenerate；y≥16 工作带显式净空（t1025 fBm 地形教训）
+        wF.setSeed(10261);
+        for (int x = 4; x <= 35; ++x) {
+            for (int z = 10; z <= 22; ++z)
+                wF.setBlock(x, 15, z, BR::Stone, 0); // 石板地板（站立面）
+            for (int z = 14; z <= 18; ++z)           // 农田带（z=16 ± 2）上方显式净空 → 开露列天光 15
+                for (int y = 16; y <= 31; ++y)
+                    wF.setBlock(x, y, z, BR::Air, 0); // t1025 fBm 地形教训：工作带清空，禁赌 worldgen
+        }
+        Hotbar hbF;
+        PlayerController pcF; // t814 真消费端模式（无窗口直造；挂窗 grab 载体同 P-t945）
+        pcF.setWorld(&wF);
+        pcF.setHotbar(&hbF);
+        QQuickWindow winF;
+        pcF.setParentItem(winF.contentItem());
+        pcF.grab();
+        // 掉落收集（等价 Main.qml onSpawnItem 直连计数，t852 先例）。
+        QVector<int> dropIdF, dropCntF;
+        const QMetaObject::Connection dropConnF = QObject::connect(
+            &pcF, &PlayerController::spawnItem, &pcF,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropIdF.push_back(id);
+                dropCntF.push_back(count);
+            });
+        // 瞄准帮手（P-t945 同款：re-grab 光标归零 delta → loadSavedState 定位定向 → tick 刷射线）。
+        const auto aimF = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ, int mode) {
+            const float ex = feetX, ey = 16.0f + 1.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcF.release();
+            pcF.grab();
+            pcF.loadSavedState(feetX, 16.0f, feetZ, yaw, pitch, mode);
+            pcF.tick();
+            return pcF.hitBlock();
+        };
+        const auto pumpMsF = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // 挖掘帮手：beginMining（m_leftDown=true）→ tick 泵（processEvents 喂真实 dt → updateMining 墙钟
+        //   积分进度；hardness 0 → miningTime 0.05s 地板）至目标格 Air → endMining（防续挖下一目标）。
+        //   t1026a 二跑教训（t1022 同款）：updateMining 的 dt = m_clock.restart() 墙钟差（:927）——连 tick
+        //   时 dt≈0 → progress += 0*speed 恒 0 → 6000 tick 挖不满瞬破门槛（postBlock 25 / progTicks 6002 /
+        //   prog 0 三联签名）。每 tick 前 busy-wait ≥17ms 保 dt>0（t889 pumpFor / t1022 面板同先例）。
+        const auto mineBlockF = [&](int bx, int by, int bz) {
+            pcF.beginMining();
+            for (int i = 0; i < 6000 && wF.blockAt(bx, by, bz) != BR::Air; ++i) {
+                QElapsedTimer dtw;
+                dtw.start();
+                while (dtw.elapsed() < 17)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+                pcF.tick();
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            }
+            pcF.endMining();
+        };
+        // 农田布局（z=16 一排；间距 4 防瞄准串扰）：A 锄+种 / B 遮黑株 / C 非耕地株 / D 已熟株 /
+        //   E 草方块锄转 / F 石头阴性 / G 泥土播种阴性 / H 未熟收割。
+        struct Plot { int x; int id; };
+        const Plot plots[8] = { { 12, BR::Dirt },  { 16, BR::Farmland }, { 20, BR::Dirt },
+                                { 24, BR::Farmland }, { 8, BR::Grass }, { 28, BR::Stone },
+                                { 30, BR::Dirt },  { 32, BR::Farmland } };
+        for (const Plot &p : plots) wF.setBlock(p.x, 15, 16, quint8(p.id), 0);
+        // (a) 锄地转换：持木锄（生存）瞄 A 泥土顶面 → Farmland + 干态 state；同链瞄 E 草方块 → Farmland。
+        hbF.setStack(0, int(ToolRegistry::HoeWood), 1);
+        hbF.setSelectedSlot(0);
+        const QVector3D hitHoeA = aimF(15.5f, 16.5f, 12.5f, 15.90f, 16.5f, 2);
+        pcF.placeBlock();
+        pumpMsF(260);
+        const QVector3D hitHoeE = aimF(11.5f, 16.5f, 8.5f, 15.90f, 16.5f, 2);
+        pcF.placeBlock();
+        pumpMsF(260);
+        // 阴性：瞄 F 石头 → 锄无效应（不转换）。
+        const QVector3D hitHoeF = aimF(31.5f, 16.5f, 28.5f, 15.90f, 16.5f, 2);
+        pcF.placeBlock();
+        pumpMsF(260);
+        const bool hoeOk = hitHoeA == QVector3D(12, 15, 16)
+            && wF.blockAt(12, 15, 16) == BR::Farmland
+            && (wF.stateAt(12, 15, 16) & BR::FarmlandHydrationMask) == 0 // 无水源 → 干
+            && wF.blockAt(8, 15, 16) == BR::Farmland                     // 草方块同链可锄
+            && hitHoeF == QVector3D(28, 15, 16)
+            && wF.blockAt(28, 15, 16) == BR::Stone                       // 石头照旧
+            && hbF.blockIdAt(0) == int(ToolRegistry::HoeWood);           // 耐久 -1 未破损（t263 链走通）
+        if (!hoeOk)
+            qInfo().noquote() << "  [t1026a diag] hoe hitA" << hitHoeA << "idA"
+                              << int(wF.blockAt(12, 15, 16)) << "idE" << int(wF.blockAt(8, 15, 16))
+                              << "hitF" << hitHoeF << "idF" << int(wF.blockAt(28, 15, 16))
+                              << "hoeSlot" << hbF.blockIdAt(0);
+        // (b) 播种：8 种子瞄 A 耕地 → 上方落 WheatCrop stage0 + 消耗 1；瞄 G 泥土 → 不种不耗；
+        //     再瞄 A 作物本体（命中格=作物）→ 不覆盖不耗。
+        hbF.setStack(0, RecipeRegistry::SeedId, 8);
+        hbF.setSelectedSlot(0);
+        const QVector3D hitSeedA = aimF(15.5f, 16.5f, 12.5f, 15.90f, 16.5f, 2);
+        pcF.placeBlock();
+        pumpMsF(260);
+        const QVector3D hitSeedG = aimF(33.5f, 16.5f, 30.5f, 15.90f, 16.5f, 2);
+        pcF.placeBlock();
+        pumpMsF(260);
+        const QVector3D hitSeedRe = aimF(15.5f, 16.5f, 12.5f, 16.5f, 16.5f, 2);
+        pcF.placeBlock();
+        pumpMsF(260);
+        const bool seedOk = hitSeedA == QVector3D(12, 15, 16)
+            && wF.blockAt(12, 16, 16) == BR::WheatCrop && wF.stateAt(12, 16, 16) == 0
+            && hbF.countAt(0) == 7                                       // 生存消耗 1 种子
+            && hitSeedG == QVector3D(30, 15, 16)
+            && wF.blockAt(30, 16, 16) == BR::Air && hbF.countAt(0) == 7  // 非耕地拒种不耗
+            && hitSeedRe == QVector3D(12, 16, 16)
+            && wF.blockAt(12, 17, 16) == BR::Air && hbF.countAt(0) == 7; // 已种格不覆盖不耗
+        if (!seedOk)
+            qInfo().noquote() << "  [t1026a diag] seed hitA" << hitSeedA << "crop"
+                              << int(wF.blockAt(12, 16, 16)) << "cnt" << hbF.countAt(0)
+                              << "hitG" << hitSeedG << "gAbove" << int(wF.blockAt(30, 16, 16))
+                              << "hitRe" << hitSeedRe << "reAbove" << int(wF.blockAt(12, 17, 16));
+        // (c) 生长门对照株 rig：B 遮黑（6 邻石罩 → 天光 0）/ C 非耕地支撑 / D 已熟锚（stage 7）。
+        wF.setBlock(16, 16, 16, BR::WheatCrop, 0);
+        wF.setBlock(16, 17, 16, BR::Stone, 0); // 罩顶
+        wF.setBlock(15, 16, 16, BR::Stone, 0); // 四侧罩 → B 格 6 邻全不透明 → skyLight 0
+        wF.setBlock(17, 16, 16, BR::Stone, 0);
+        wF.setBlock(16, 16, 15, BR::Stone, 0);
+        wF.setBlock(16, 16, 17, BR::Stone, 0);
+        wF.setBlock(20, 16, 16, BR::WheatCrop, 0);   // C：下方泥土（非耕地）→ 支撑门拒长
+        wF.setBlock(24, 16, 16, BR::WheatCrop, 7);   // D：已熟锚 → 阶段不再动
+        const bool lightPre = wF.skyLightAt(12, 16, 16) >= 9 && wF.skyLightAt(16, 16, 16) == 0
+            && wF.skyLightAt(20, 16, 16) >= 9;
+        // 确定性骰子复刻（world.cpp tickCropGrowth 同式：干耕地 1× 倍率 growPct=6、无雨；窗口序号自 0）。
+        const auto diceHitsF = [&](int k, int stage, int cx, int cy, int cz) -> bool {
+            const int mixedSeed = int(quint32(wF.seed()) ^ (quint32(k) * 0x9E3779B9u));
+            return int(wF.hashVoxel(mixedSeed, cx, cy * 7 + stage, cz) & 0xFFFFu) % 100 < 6;
+        };
+        QVector<int> simAdvF; // 开露作物 A 的模拟升阶段窗口序列
+        {
+            int stage = 0;
+            for (int k = 0; k < 3000 && stage < 7; ++k)
+                if (diceHitsF(k, stage, 12, 16, 16)) { ++stage; simAdvF.push_back(k); }
+            if (stage < 7) simAdvF.clear(); // 骰子流 3000 窗未熟 = 病态 seed → 守卫红（确定性，复跑恒定）
+        }
+        int darkHitF = -1; // 遮黑株 B「无光照门时会长的首窗」——阴性轮可达域守卫（摘门 → 必在泵域内生长）
+        for (int k = 0; k < 3000 && darkHitF < 0; ++k)
+            if (diceHitsF(k, 0, 16, 16, 16)) darkHitF = k;
+        const int pumpW = simAdvF.isEmpty() ? -1 : std::max(simAdvF.last(), darkHitF);
+        QVector<int> actAdvF; // 实际升阶段窗口序列（逐窗采样：25 tick = 1 窗）
+        int prevStageF = 0;
+        bool monoF = true;
+        for (int k = 0; k <= pumpW; ++k) {
+            for (int c = 0; c < 25; ++c) wF.tickCropGrowth(); // kCropTickInterval=25 tick = 1 窗
+            const int st = wF.stateAt(12, 16, 16);
+            if (st - prevStageF > 1 || st - prevStageF < 0 || st > 7) monoF = false;
+            if (st - prevStageF == 1) actAdvF.push_back(k);
+            prevStageF = st;
+        }
+        const bool growthOk = lightPre && !simAdvF.isEmpty() && darkHitF >= 0
+            && actAdvF == simAdvF                                        // 实际 ≡ 模拟（确定性契约）
+            && monoF                                                     // 每窗至多 +1 单调
+            && wF.blockAt(12, 16, 16) == BR::WheatCrop && prevStageF == BR::WheatCropStageMax
+            && wF.stateAt(16, 16, 16) == 0                               // 遮黑株不长（阴性轮敏感）
+            && wF.stateAt(20, 16, 16) == 0                               // 非耕地支撑株不长
+            && wF.stateAt(24, 16, 16) == BR::WheatCropStageMax;          // 已熟株恒 7
+        if (!growthOk)
+            qInfo().noquote() << "  [t1026a diag] growth lightPre" << lightPre << "simN" << simAdvF.size()
+                              << "darkHit" << darkHitF << "actN" << actAdvF.size() << "mono" << monoF
+                              << "stageA" << prevStageF << "stageB" << wF.stateAt(16, 16, 16)
+                              << "stageC" << wF.stateAt(20, 16, 16) << "stageD" << wF.stateAt(24, 16, 16);
+        // (d) 成熟收获（A 株已熟）：空手生存挖 → 恰 2 件：1× 小麦 + 1-3× 种子（t1026 口径）。
+        hbF.setStack(0, 0, 0);
+        dropIdF.clear();
+        dropCntF.clear();
+        int progCntD = 0;
+        const QMetaObject::Connection progConnD = QObject::connect(
+            &pcF, &PlayerController::miningProgressChanged, &pcF, [&progCntD]() { ++progCntD; });
+        const QVector3D hitHarvA = aimF(15.5f, 16.5f, 12.5f, 16.5f, 16.5f, 2);
+        mineBlockF(12, 16, 16);
+        QObject::disconnect(progConnD);
+        qInfo().noquote() << "  [t1026a TDIAG d] postBlock" << int(wF.blockAt(12, 16, 16))
+                          << "captured" << pcF.captured() << "progTicks" << progCntD
+                          << "mining" << pcF.mining() << "prog" << pcF.miningProgress()
+                          << "mode" << int(pcF.mode()) << "worldRunning" << pcF.worldRunning();
+        bool matOk = hitHarvA == QVector3D(12, 16, 16) && wF.blockAt(12, 16, 16) == BR::Air
+            && dropIdF.size() == 2;
+        int wheatN = 0, seedTotal = 0;
+        for (int i = 0; i < dropIdF.size(); ++i) {
+            if (dropIdF[i] == RecipeRegistry::WheatId && dropCntF[i] == 1) ++wheatN;
+            if (dropIdF[i] == RecipeRegistry::SeedId) seedTotal += dropCntF[i];
+        }
+        matOk = matOk && wheatN == 1 && seedTotal >= 1 && seedTotal <= 3;
+        if (!matOk)
+            qInfo().noquote() << "  [t1026a diag] mature drops n" << dropIdF.size() << "wheat" << wheatN
+                              << "seeds" << seedTotal << "hit" << hitHarvA;
+        // (e) 未熟收获（H 株 stage 3，泵后种下防泵中生长漂移）：恰 1 件：仅 1× 种子。
+        wF.setBlock(32, 16, 16, BR::WheatCrop, 3);
+        dropIdF.clear();
+        dropCntF.clear();
+        const QVector3D hitHarvH = aimF(35.5f, 16.5f, 32.5f, 16.5f, 16.5f, 2);
+        mineBlockF(32, 16, 16);
+        const bool immOk = hitHarvH == QVector3D(32, 16, 16) && wF.blockAt(32, 16, 16) == BR::Air
+            && dropIdF.size() == 1 && dropIdF[0] == RecipeRegistry::SeedId && dropCntF[0] == 1;
+        qInfo().noquote() << "  [t1026a TDIAG e] postBlock" << int(wF.blockAt(32, 16, 16))
+                          << "captured" << pcF.captured()
+                          << "mining" << pcF.mining() << "prog" << pcF.miningProgress()
+                          << "mode" << int(pcF.mode()) << "worldRunning" << pcF.worldRunning()
+                          << "hit" << hitHarvH;
+        if (!immOk)
+            qInfo().noquote() << "  [t1026a diag] immature drops n" << dropIdF.size()
+                              << "id0" << (dropIdF.isEmpty() ? -1 : dropIdF[0])
+                              << "cnt0" << (dropCntF.isEmpty() ? -1 : dropCntF[0]) << "hit" << hitHarvH;
+        QObject::disconnect(dropConnF);
+        ok = hoeOk && seedOk && growthOk && matOk && immOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1026a wheat farming loop (real player path): hoe right-click converts "
+                             "dirt AND grass tops to dry farmland in survival (hydration state 0, one "
+                             "durability tick, stone refuses); 8 seeds plant a stage-0 wheat crop above "
+                             "the farmland consuming exactly one seed while plain dirt and an already-"
+                             "planted crop refuse; tick-pumped growth reproduces the deterministic "
+                             "scatter dice exactly (actual advance windows == simulated windows, +1 "
+                             "monotonic per window) maturing the open crop to stage 7 while the "
+                             "stone-enclosed dark crop (skyLight 0 < 9), the no-farmland-support crop "
+                             "and the already-mature anchor all hold stage; harvesting the mature crop "
+                             "bare-handed yields exactly 1 wheat + 1-3 seeds and harvesting the stage-3 "
+                             "crop yields exactly 1 seed (negative-round sensitive: crop light gate + "
+                             "harvest drop table)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag hoe=%1 seed=%2 growth=%3 mature=%4 imm=%5")
+                                        .arg(hoeOk).arg(seedOk).arg(growthOk).arg(matOk).arg(immOk));
+    }
+
+    // ── P-t1026b 面包配方（3 小麦一行三格）+ 农业链源码钉（R19.21 t1026）──
+    //   (a) 有序 3×3 顶/中/底行平移全通（shapedEqual 最小包围盒对齐 = MC 一行三格可在台内任意行摆放）→
+    //       BreadId(0x20A) × 1；
+    //   (b) 口径阴性：竖列不合（MC 面包仅横排；非镜像非旋转）/ 2×2 放不下 3 宽 / 3 种子串不顶小麦用；
+    //   (c) 源码钉（滤注释 pinSet；阴性轮红腿：摘 world.cpp 光照门 → P-t1026a 遮黑株腿红 + cpp-crop-light-gate
+    //       钉红；改 playercontroller.cpp 收割掉落表 → P-t1026a 收获腿红 + cpp-crop-drop 钉红）：
+    //       锄转换 / 播种 / 生长门与写入 / 掉落表 / 草丛掉种分母 / 面包配方行 / 存档契约 id（Farmland=23、
+    //       WheatCrop=25 枚举尾段既有位，漂移即红）。
+    {
+        bool ok = true;
+        const int Wf = RecipeRegistry::WheatId;
+        const int gTop[9] = { Wf, Wf, Wf, 0, 0, 0, 0, 0, 0 };
+        const int gMid[9] = { 0, 0, 0, Wf, Wf, Wf, 0, 0, 0 };
+        const int gBot[9] = { 0, 0, 0, 0, 0, 0, Wf, Wf, Wf };
+        const int gCol[9] = { 0, Wf, 0, 0, Wf, 0, 0, Wf, 0 };
+        const int gTwo[4] = { Wf, Wf, Wf, 0 };
+        const int gSeedRow[9] = { RecipeRegistry::SeedId, RecipeRegistry::SeedId, RecipeRegistry::SeedId,
+                                  0, 0, 0, 0, 0, 0 };
+        const auto breadAt = [](const int *g, int n) -> const RecipeRegistry::Recipe * {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(g, n);
+            return (r && r->outputId == RecipeRegistry::BreadId && r->outputCount == 1) ? r : nullptr;
+        };
+        const bool rowsOk = breadAt(gTop, 3) && breadAt(gMid, 3) && breadAt(gBot, 3);
+        const bool negsOk = !RecipeRegistry::match(gCol, 3)   // 竖列非面包（横排口径）
+            && !RecipeRegistry::match(gTwo, 2)                // 2×2 容不下 3 宽（需工作台）
+            && !RecipeRegistry::match(gSeedRow, 3);           // 种子不顶小麦原料
+        if (!rowsOk || !negsOk)
+            qInfo().noquote() << "  [t1026b diag] rows" << rowsOk << "negs" << negsOk;
+        const QString exeDirB = QCoreApplication::applicationDirPath();
+        const QString rootB = QDir(exeDirB + QStringLiteral("/..")).absolutePath();
+        QStringList missB;
+        missB << pinSet(rootB + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-hoe-convert", "m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Farmland, quint8(hydr));"},
+            {"cpp-seed-plant", "m_world->setBlock(wx, wy, wz, cs.cropBlockId, 0);"},
+            {"cpp-crop-drop-wheat", "emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);"},
+            {"cpp-crop-drop-seed", "const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 4) : 1;"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/Game/playercontroller.h"), {
+            {"hdr-grass-seed-denom", "static constexpr int kTallGrassSeedDropDenom = 8;"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/World/world.cpp"), {
+            {"cpp-crop-light-gate", "if (m_chunks.skyLightAt(c.x, c.y, c.z) < kCropMinLight) continue;"},
+            {"cpp-crop-support-gate", "if (m_chunks.blockAt(c.x, c.y - 1, c.z) != BlockRegistry::Farmland)"},
+            {"cpp-crop-stage-write", "anyChange |= setWaterSilent(g.x, g.y, g.z, g.id, quint8(g.stage + 1));"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/World/world.h"), {
+            {"hdr-crop-min-light", "static constexpr int kCropMinLight     = 9;"},
+            {"hdr-crop-grow-pct", "static constexpr int kCropGrowPct      = 6;"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/Game/recipe.cpp"), {
+            {"cpp-bread-row", "{ RecipeRegistry::WheatId, RecipeRegistry::WheatId, RecipeRegistry::WheatId,"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/Core/blockregistry.h"), {
+            {"hdr-farmland-id-contract", "Farmland       = 23,"},
+            {"hdr-wheat-id-contract", "WheatCrop      = 25,"},
+        });
+        const bool pinsOkB = missB.isEmpty();
+        if (!pinsOkB)
+            qInfo().noquote() << "  [t1026b diag] pin miss:" << missB.join(QLatin1Char(','));
+        ok = rowsOk && negsOk && pinsOkB;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1026b bread recipe + farming source pins: three wheat in a row crafts "
+                             "1 bread from the top, middle and bottom rows of a 3x3 table (shaped "
+                             "bounding-box translation = MC one-row-of-three caliber), while a vertical "
+                             "column, a 2x2 grid and a row of seeds all refuse; source pins lock the "
+                             "hoe->farmland and seed->crop wiring, the crop growth light/support gates "
+                             "and stage write, the harvest drop table (1 wheat + 1-3 seeds mature, 1 "
+                             "seed immature), the 1/8 tall-grass seed denominator, the bread recipe row "
+                             "and the save-contract block ids (Farmland=23, WheatCrop=25)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag rows=%1 negs=%2 pins=%3")
+                                        .arg(rowsOk).arg(negsOk).arg(pinsOkB));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
