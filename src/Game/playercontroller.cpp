@@ -1547,6 +1547,19 @@ void PlayerController::beginMining()
         return;
     }
 
+    // t1028 攻击音符盒 → 发声（MC 口径「攻击音符盒=播放当前调音音」；本工程左键=挖掘语义，发声后
+    //   挖掘照常进行——按住仍会挖破，与 MC「攻击响、持续挖可破」一致，dev-plan 允许口径）。挂在
+    //   mob / 船 / 矿车攻击分流之后、模式分流（创造瞬破 / 生存累积）之前：创造单击也先响再瞬破、
+    //   生存按下沿响一次（长按只有 m_leftDown 边缘这一次 beginMining，不重复响 = 每次攻击一声）。
+    //   音高 = 命中格 state 调音段；音色族 = 下方方块材质投影（blockAt 越界返 Air → piano 兜底）。
+    //   发声走信号链（音频层只消费，PLAN §2 分层；同 mobAttacked 模式）。
+    if (m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::NoteBlock) {
+        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        const int pitch = BlockRegistry::noteBlockPitch(st);
+        const int family = int(BlockRegistry::noteTimbreFamily(m_world->blockAt(m_hitBx, m_hitBy - 1, m_hitBz)));
+        emit noteBlockAttackPlayed(m_hitBx, m_hitBy, m_hitBz, pitch, family);
+    }
+
     if (m_mode == Creative) {
         // 创造：瞬破（progress 直接 1.0 等价），不掉落。仍发 swingArm（finishMiningAt 末尾发，动作真发生）。
         // 不进入累积态（mining 留 false）→ 不显裂纹叠层（瞬破无需裂纹）。
@@ -3555,6 +3568,24 @@ void PlayerController::placeBlock()
             // t152：开合音（ns.bit0 = 新的开合态；willOpen 已是本次结果，等价 (ns & 1)）。
             emit doorToggled(willOpen);
             emit swingArm();
+            return;
+        }
+        // t1028 右键音符盒 → 循环调音 + 播放新音（useBlock 语义，MC 同款：右键 = 调音并发声）。
+        //   音高段 +1 回绕 (p+1)%25（25 档 0..24；noteBlockTunedState 单一权威，bit5 通电记忆位保留）。
+        //   id 不变只 state 变 → World::setBlock 5 参数版走重网格化路径（发 worldChanged 不发
+        //   broken/placed，同门/活板门口径）。发声走信号链（音频层只消费，PLAN §2 分层）：携新音高 +
+        //   音色族（下方方块材质投影；悬空/越界下方=air → piano 兜底）+ 音名（播报文案单一权威）。
+        //   MC 右键调音的音高提示=本工程系统播报「音高：C#4」（呈现层 appendChatMessage，t1024 文案先例）。
+        if (hitId == BlockRegistry::NoteBlock) {
+            const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+            const quint8 ns = BlockRegistry::noteBlockTunedState(st);
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
+            m_lastPlaceMs = now;
+            const int pitch = BlockRegistry::noteBlockPitch(ns);
+            const int family = int(BlockRegistry::noteTimbreFamily(m_world->blockAt(m_hitBx, m_hitBy - 1, m_hitBz)));
+            emit noteBlockTuned(m_hitBx, m_hitBy, m_hitBz, pitch, family,
+                                BlockRegistry::noteBlockNoteName(pitch));
+            emit swingArm(); // 调音也是一次「使用」动作 → 挥手（t29）
             return;
         }
     }

@@ -3885,6 +3885,7 @@ bool World::isPowerFamilyBlock(quint8 id)
         || BR::isDispenser(id) || BR::isDropper(id)      // 接收器：发射器 / 投掷器（t658）
         || id == BR::IronDoor                            // 接收器：铁门（t722，仅红石驱动开合）
         || id == BR::IronTrapdoor                        // 接收器：铁活板门（t723，仅红石驱动开合）
+        || id == BR::NoteBlock                           // 接收器：音符盒（t1028，通电上升沿发声；bit5 记忆位）
         || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id) // 源：拉杆 / 按钮（state bit0）
         || BR::isPressurePlate(id)                       // 源：压力板（state bit0）
         || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
@@ -4394,6 +4395,7 @@ bool World::recomputePowerLocal()
             || BlockRegistry::isDispenser(b) || BlockRegistry::isDropper(b)
             || b == BlockRegistry::IronDoor            // t722 铁门（仅红石驱动开合；上下两格各自入集，接收器分支内同翻）
             || b == BlockRegistry::IronTrapdoor        // t723 铁活板门（仅红石驱动开合；单格）
+            || b == BlockRegistry::NoteBlock           // t1028 音符盒（通电上升沿发声；bit5 通电记忆位做真沿）
             || b == BlockRegistry::Rail)               // t812 普通轨转辙器（T 交叉升沿切弯；非转辙器
                                                        //   形态分支内 no-op）
             receivers.insert(packGrowthCell(x, y, z));
@@ -4543,6 +4545,28 @@ bool World::recomputePowerLocal()
             const bool on = (st & 1) != 0;
             if (on != powered) {
                 m_chunks.setBlock(x, y, z, b, quint8(powered ? (st | 1) : (st & quint8(~1))));
+                any = true;
+            }
+        } else if (b == BlockRegistry::NoteBlock) {
+            // t1028 音符盒：通电**上升沿**发声一次（MC 口径：稳定通电不复响、断电再通再响）。沿检测 =
+            //   state bit5 通电记忆位（RailSwitchPoweredFlag 先例——没有记忆位则每次电力复算触达都误判
+            //   新升沿 = 连音振荡；TNT 的 `if(powered) emit` 不适用：TNT 点燃即清 Air 天然一次性，音符盒
+            //   通电后仍在）。升沿：bit5=0 且 powered → 发 noteBlockPlayed(坐标, 音高, 音色族) + 置 bit5；
+            //   降沿：只清 bit5（不发声）。音高 = state 低 5 位调音段（右键调音写入，0..24 半音）；音色族
+            //   = 下方方块材质投影（BlockRegistry::noteTimbreFamily 单一权威，越界 y=0 兜底 piano）。
+            //   World 层只发语义事件不出声（refactor-plan §29.4：音频走 Event 链，Main.qml →
+            //   AudioManager.playNote）。bit5 写入走 m_chunks.setBlock 静默写（同门/轨模式：标脏 +
+            //   tickRedstone 末尾 1 次 worldChanged；音高段原样保留）。
+            const bool was = (st & BlockRegistry::NoteBlockStatePoweredFlag) != 0;
+            if (powered != was) {
+                m_chunks.setBlock(x, y, z, b,
+                                  quint8(powered ? (st | BlockRegistry::NoteBlockStatePoweredFlag)
+                                                 : (st & quint8(~BlockRegistry::NoteBlockStatePoweredFlag))));
+                if (powered)
+                    emit noteBlockPlayed(x, y, z, BlockRegistry::noteBlockPitch(st),
+                                         int(inBounds(x, y - 1, z)
+                                                 ? BlockRegistry::noteTimbreFamily(m_chunks.blockAt(x, y - 1, z))
+                                                 : BlockRegistry::NoteTimbrePiano));
                 any = true;
             }
         } else if (b == BlockRegistry::Rail) {

@@ -7,6 +7,7 @@
 #include <QTimer>           // t1021 滴水/虫鸣随机间隔单发重臂调度器（Data 成员）
 
 #include <array>
+#include <cstdio>           // t1028 makeNotePath snprintf（路径拼接）
 #include <deque>
 #include <string>
 #include <vector>
@@ -186,6 +187,12 @@ struct AudioManager::Data
     Clip achievementClip{":/sounds/achievement.wav"};
     Clip chestOpenClip{":/sounds/chest_open.wav"};
     Clip chestCloseClip{":/sounds/chest_close.wav"};
+    // ── t1028 音符盒 25 档音高 clip 池（note_pitch_00..24.wav；gen_note_piano 程序合成 §9 原创）──
+    //   下标 = BlockRegistry::noteBlockPitch(state) 调音段（0..24，n=9=A4=440Hz）。qrcPath 构造时
+    //   makeNotePath 拼长寿命（同 groupClips pathStore 纪律）；0.85s 短 SFX → 默认 2s maxFrames 安全。
+    //   音色族（Main.qml 传入 family）= 播放速率倍移近似（ma_sound_set_pitch；NO_PITCH 优化**不开**）。
+    static constexpr int kNotePitchCount = 25; // 与 BlockRegistry::NoteBlockPitchCount 同口径（本层不依赖 Core 头）
+    Clip noteClips[kNotePitchCount] = {};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -197,6 +204,15 @@ struct AudioManager::Data
     const char *makePath(const char *kind, int groupIdx)
     {
         pathStore.emplace_back(std::string(":/sounds/") + kind + "_" + groupName(groupIdx) + ".wav");
+        return pathStore.back().c_str();
+    }
+
+    // t1028 在 pathStore 内构造一条音符盒音高路径（:/sounds/note_pitch_NN.wav，NN 两位十进制）。
+    const char *makeNotePath(int pitch)
+    {
+        char buf[40];
+        std::snprintf(buf, sizeof(buf), ":/sounds/note_pitch_%02d.wav", pitch);
+        pathStore.emplace_back(buf);
         return pathStore.back().c_str();
     }
 
@@ -251,6 +267,17 @@ struct AudioManager::Data
     {
         if (!engineOk || !c.ok) return;
         ma_sound_seek_to_pcm_frame(&c.sound, 0);
+        ma_sound_set_volume(&c.sound, vol);
+        ma_sound_start(&c.sound);
+    }
+
+    // t1028 音符盒重播（带播放速率 = 音色族倍移）：同 replay 截断重发语义 + ma_sound_set_pitch。
+    //   noteClips 的 initSound 只带 MA_SOUND_FLAG_NO_SPATIALIZATION（全库统一，无 NO_PITCH）→ 速率倍移直接生效。
+    void replayNote(Clip &c, float vol, float rate)
+    {
+        if (!engineOk || !c.ok) return;
+        ma_sound_seek_to_pcm_frame(&c.sound, 0);
+        ma_sound_set_pitch(&c.sound, rate);
         ma_sound_set_volume(&c.sound, vol);
         ma_sound_start(&c.sound);
     }
@@ -349,6 +376,11 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->achievementClip);
     d->loadClip(d->chestOpenClip);
     d->loadClip(d->chestCloseClip);
+    // t1028 音符盒 25 档音高 clip 池（0.85s 短 SFX，默认 2s maxFrames 安全；路径 makeNotePath 长寿命化）。
+    for (int n = 0; n < Data::kNotePitchCount; ++n) {
+        d->noteClips[size_t(n)].qrcPath = d->makeNotePath(n);
+        d->loadClip(d->noteClips[size_t(n)]);
+    }
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
     d->initSound(d->doorOpenClip);
@@ -372,6 +404,9 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->achievementClip);
     d->initSound(d->chestOpenClip);
     d->initSound(d->chestCloseClip);
+    // t1028 音符盒 25 档音高 sound init（NO_SPATIALIZATION，随 Clip 池逐个降级）。
+    for (int n = 0; n < Data::kNotePitchCount; ++n)
+        d->initSound(d->noteClips[size_t(n)]);
     // t177 环境音：sound init 成功后置循环 + 初始音量（startAmbient 才 start；不在此自动开）。
     if (d->engineOk && d->ambientClip.ok) {
         ma_sound_set_looping(&d->ambientClip.sound, MA_TRUE);
@@ -802,6 +837,25 @@ void AudioManager::playChestOpen()
 void AudioManager::playChestClose()
 {
     d->replay(d->chestCloseClip, m_volume * 0.85f);
+}
+
+// ── t1028 音符盒发声（契约面见 audiomanager.h playNote 注释）──
+//   音量 = master × 0.9（乐器独奏前景级，MC 音符盒显著可闻）；音色族 = ma_sound_set_pitch 速率倍移
+//   （bass ×0.5 低八度 / kick ×1.0 原速 / snare ×2.0 高八度「清脆」；piano 原速）——登记简化：同一
+//   钢琴采样倍移，非 MC 独立乐器采样。per-pitch clip 池：seek 0 截断重发同 pitch、异 pitch 并行
+//   （多音符盒和弦观感）。越界 pitch / family clamp + 兜底（防 QML 传参脏值，永不崩）。
+void AudioManager::playNote(int pitch, int family)
+{
+    const int p = qBound(0, pitch, Data::kNotePitchCount - 1);
+    float rate = 1.0f; // NoteTimbrePiano / 未知兜底
+    switch (family) {
+    case 1: rate = 0.5f; break;  // NoteTimbreBass（木下方 → 低音拨弦）
+    case 2: rate = 1.0f; break;  // NoteTimbreKick（石下方 → 低鼓原速）
+    case 3: rate = 2.0f; break;  // NoteTimbreSnare（沙下方 → 高八度脆响）
+    default: break;
+    }
+    Clip &c = d->noteClips[size_t(p)];
+    d->replayNote(c, m_volume * 0.9f, rate);
 }
 
 void AudioManager::setVolume(float v)

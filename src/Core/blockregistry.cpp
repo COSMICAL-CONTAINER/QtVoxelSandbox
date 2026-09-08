@@ -740,6 +740,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* mossy_stone_brick   */ {int(BlockRegistry::MossyStoneBrick),   181,181,181,181, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::MossyStoneBrick),   1, 64, "mossy_stone_brick",   "苔石砖"},
     /* cracked_stone_brick */ {int(BlockRegistry::CrackedStoneBrick),182,182,182,182, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::CrackedStoneBrick), 1, 64, "cracked_stone_brick", "裂纹石砖"},
     /* iron_bars          */ {int(BlockRegistry::IronBars),          183,183,183,183, false, BlockRegistry::ShapeIronBars, 5.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::IronBars),          1, 64, "iron_bars",           "铁栏杆"},
+    // ── t1028 音符盒（NoteBlock；机制等价 MC 1.0 note block，属性注释见 blockregistry.h Id 枚举 NoteBlock 行）：
+    //   整立方 opaque（solid=true / ShapeFull 同 MC 实体乐器方块）、hardness=0.8（MC 同档）/ Axe 加速 /
+    //   requiresTool=false（空手可采且掉落）；dropId=自身、maxStack=64。各面=note_block(184)（深木框 +
+    //   盆膜 + 原创音符标记；tools/build_note_block.py 程序生成 §9a）。音高 / 通电记忆在 state（低 5 位
+    //   pitch + bit5 升沿记忆），表行不表达（同门/轨族 state 语义在 World/mesher 呈现层消费）。
+    /* note_block         */ {int(BlockRegistry::NoteBlock),          184,184,184,184, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::NoteBlock),         1, 64, "note_block",     "音符盒"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -2814,6 +2820,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case RedstoneTorch: // t638 红石火把 → 木质音色（木质柄，同火把 / 木梯族；torch 在 default 兜底）
     case Bookshelf: // t474 书架 → 木质音色（木板边框，同 planks 族）
     case Painting: // t720 画作 → 木质音色（木质画框）
+    case NoteBlock: // t1028 音符盒 → 木质音色（木制乐器盒，MC 1.0 note block wood SoundType 同口径；
+                    //   注意：这是「敲击盒体」的材质音色，与发声（playNote 钢琴音）是两条链）
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）
@@ -2845,6 +2853,29 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
         return GroupLeaves;
     default:
         return GroupDefault; // air / torch / water / 越界 / 未知 → 兜底（AudioManager 复用 Stone 音色）
+    }
+}
+
+// t1028 音高 → 音名（「C4」「A4」「C#5」）：半音名表 + 八度折算（n=0 → C4；n%12 名、n/12 叠八度）。
+//   频率口径 f = 440×2^((n-9)/12)（n=9 = A4 = 440Hz，dev-plan t1028 公式；build_sounds.py gen_note_piano
+//   同源实现）。越界 clamp 进 0..24（防 caller 未守卫时输出乱名）。UI 文案单一权威（调音播报 / 探针同源）。
+QString BlockRegistry::noteBlockNoteName(int pitch)
+{
+    static const char *kNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const int p = qBound(0, pitch, NoteBlockPitchCount - 1);
+    return QString::fromLatin1(kNames[p % 12]) + QString::number(4 + p / 12);
+}
+
+// t1028 音色族（下方方块材质定族；MC 1.0 口径登记 3 族 + 兜底钢琴）：materialGroup 投影（单一权威，
+//   不另立方块清单）——木=bass（低音拨弦）/ 石=kick（低鼓）/ 沙=snare（军鼓）/ 其余（含悬空）=piano。
+//   播放端（AudioManager::playNote）按族做速率倍移近似（登记简化：同一钢琴采样，非独立采样）。
+BlockRegistry::NoteTimbreFamily BlockRegistry::noteTimbreFamily(quint8 belowId)
+{
+    switch (materialGroup(belowId)) {
+    case GroupWood:   return NoteTimbreBass;   // 木=bass
+    case GroupStone:  return NoteTimbreKick;   // 石=kick
+    case GroupSand:   return NoteTimbreSnare;  // 沙=snare
+    default:          return NoteTimbrePiano;  // 其余 / 悬空（air）= piano
     }
 }
 

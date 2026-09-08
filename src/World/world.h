@@ -1049,6 +1049,14 @@ signals:
     //   （PlayerController 暴露的 QML 入口 → fireDispenserAt，per-dispenser 冷却 / state 朝向 / 库存分派
     //   全复用既有机关触发链——「与既有机关触发并存」的收口点）。方向 = 机器 state 朝向（单一方向源 t608）。
     void powerDispenserTriggered(int x, int y, int z);
+    // t1028 音符盒被红石电力触发**发声**（通电上升沿一次——state bit5 通电记忆位做真沿检测，稳定通电
+    //   不复响 / 断电再通再响，MC 口径；记忆位写本格 state，存档 round-trip 保真）。World 层只发语义
+    //   事件（坐标 + 音高 + 音色族），绝不直接出声（refactor-plan §29.4「音频走 Event，不写进 World」；
+    //   powerTntTriggered 同款单向事件流）——呈现层 Main.qml 路由 AudioManager.playNote(pitch, family)
+    //   播程序合成钢琴音。pitch = 调音段 0..24 半音（BlockRegistry::noteBlockPitch），family =
+    //   NoteTimbreFamily（下方方块材质定族，0=piano / 1=bass / 2=kick / 3=snare）。攻击触发不走本信号
+    //   （Game 层 PlayerController::noteBlockAttackPlayed 自发——非电力路径）。
+    void noteBlockPlayed(int x, int y, int z, int pitch, int family);
 
 private:
     void generate();          // 重建置换表 + ChunkManager + 填充地形（静默，不 emit）

@@ -999,6 +999,52 @@ def gen_chest_close():
     return finalize(out, target_peak=0.85)
 
 
+# t1028 音符盒 25 档音高（MC 口径 0..24 半音）：piano-ish 正弦谐波合成（dev-plan「运行期正弦合成
+# piano-ish 音色复用 t1021 程序化管线」→ 实取 t1021 同款 build_sounds.py 离线管线 = 预案 B 登记取舍：
+# AudioManager 现存面是 qrc wav 播放（无运行期合成入口），一次性生成 25 短 wav 进 qrc 即「程序化管线」，
+# 零 MC 资产 / 零新资产格式）。频率口径 f = 440×2^((n-9)/12)（n=9 = A4 = 440Hz，C4 起）。
+def note_freq(n):
+    """半音 n（0..24）→ 频率 Hz：A4=440 基准等程律（n=9 → 440）。"""
+    return 440.0 * (2.0 ** ((n - 9) / 12.0))
+
+
+def gen_note_piano(n):
+    """音符盒第 n 档（0..24 半音）piano-ish 单音，~0.85s。
+
+    音色（正弦谐波叠加 + 分谐振动 + 逐泛音快衰减 = 拨/击弦「piano-ish」近似，§9 原创）：
+      - 谐波列 1..6，幅度 ~1/k^1.35（谱倾斜近 -8dB/oct，柔而不钝；k=1 基频为主）。
+      - 基频带轻微失谐第二弦（+0.15% 频率、幅 0.18）→ 拍频「弦共鸣」感（钢琴双弦失谐近似）。
+      - 逐泛音衰减：k 越大 τ 越短（τ_k = 0.55/√k s）→ 亮起音后快速转柔（击弦衰减物理近似）。
+      - 整体包络：attack ≈ 2ms 起（击弦瞬态）+ 指数衰减 τ≈0.5s；末尾 12ms 三角窗收口防爆音。
+      - 高音档（n≥18）τ 收短 ×0.75（高音弦短、余音更促——音域听感一致性）。
+    播放端：AudioManager::playNote(pitch, family) 按 BlockRegistry::noteBlockPitch 调音段选本组 clip；
+      音色族 = 播放速率倍移近似（木 bass ×0.5 / 石 kick ×1.0 / 沙 snare ×2.0，登记简化非独立采样）。
+    """
+    f0 = note_freq(n)
+    dur = 0.85
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    tau_scale = 0.75 if n >= 18 else 1.0
+    harm_amp = [0.0, 1.0, 0.39, 0.24, 0.13, 0.08, 0.05]  # 1/k^1.35 近似（手调微柔化）
+    for i in range(n_s):
+        t = i / SR
+        s = 0.0
+        for k in range(1, 7):
+            tau = (0.55 / math.sqrt(k)) * tau_scale
+            env = math.exp(-t / tau)
+            s += harm_amp[k] * env * math.sin(2 * math.pi * f0 * k * t)
+        # 失谐第二弦（基频 +0.15%，幅 0.18，同主衰减 τ）→ 慢拍频共鸣感。
+        s += 0.18 * math.exp(-t / (0.55 * tau_scale)) * math.sin(2 * math.pi * f0 * 1.0015 * t)
+        # attack（2ms 线性起）× 整体慢衰减。
+        attack = min(1.0, t / 0.002)
+        out[i] = s * attack * math.exp(-t / 0.5)
+    # 末尾 12ms 三角窗收口（防截断爆音；write 前同 finalize 峰值归一 0.9）。
+    fade = int(SR * 0.012)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.9)
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -1045,8 +1091,12 @@ def main():
              ("achievement", gen_achievement),
              ("chest_open", gen_chest_open),
              ("chest_close", gen_chest_close)]
+    # t1028 音符盒 25 档音高（note_pitch_00..24.wav）：--only 支持 "note" 全组 / 单档名。
+    for n in range(25):
+        clips.append((f"note_pitch_{n:02d}", (lambda nn: lambda: gen_note_piano(nn))(n)))
     for name, gen in clips:
-        if only is not None and name not in only:
+        if only is not None and name not in only and not (
+                name.startswith("note_pitch_") and "note" in only):
             continue
         samples = gen()
         path = out_dir / f"{name}.wav"
