@@ -131,6 +131,10 @@ public:
     // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate 已 visible=false
     //   不参与绘制，count 会高估）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
     Q_INVOKABLE int liveCount() const { return m_liveCount; }
+    // review0905 #6：实体槽上限暴露（kCap 单一权威）。F3 entities 行分母读此处——旧 Main.qml 字面量
+    //   "/64" 在 kCap 将来变更（如按设备分级）时即静默错读。普通 JS 读（10Hz buildF3Text，同 liveCount
+    //   口径，无 NOTIFY 绑定成本）。
+    Q_INVOKABLE int cap() const { return kCap; }
     // t1007：当前存活 PrimedTnt 数（活体槽扫描 kind==FallingBlock && primed；n≤kCap=64 常数级）。F3 增补
     //   读数（10Hz buildF3Text 普通 JS 读取，同 liveCount 口径，无 NOTIFY 绑定成本）——t1005 关单数据面：
     //   用户看到「永续闪烁 TNT」时 primed>0 = 引擎实体残留（ fuse 链真在 tick）；primed==0 而画面仍闪

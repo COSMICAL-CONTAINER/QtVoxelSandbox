@@ -503,10 +503,12 @@ Window {
              + "  chunks: " + ncx + "×" + ncz + " = " + (ncx * ncz)
              + "  render r=" + window.renderDistance + " window " + window.visibleChunkCount + "/" + (ncx * ncz)
              + "\nmesh: " + meshMode + "  terrain verts: " + vx + "  tris: " + tr + "  (built 地形段)"
-             // t1007 增补（口径见上方读取注释）：mobs 分母改钉引擎 kCap=64（旧 count=槽数 delegate 永不销毁
-             //   单调不降，读「12/47」会误读为「距满 35」）；hw=槽池高水位；primed=存活 primed TNT；
-             //   del=可见 delegate/总 delegate——delVis 与 mobLive 背离 = 呈现层克隆实锤（t1006 关单判据）。
-             + "\nentities: mobs " + mobLive + "/64 hw " + mobHw
+             // t1007 增补（口径见上方读取注释）：mobs 分母钉引擎 kCap（entityManager.cap() 读口，
+             //   review0905 #6 起单一权威——旧字面量 "/64" 在 kCap 变更时会静默错读；旧 count=槽数
+             //   delegate 永不销毁单调不降，读「12/47」会误读为「距满 35」）；hw=槽池高水位；
+             //   primed=存活 primed TNT；del=可见 delegate/总 delegate——delVis 与 mobLive 背离 =
+             //   呈现层克隆实锤（t1006 关单判据）。
+             + "\nentities: mobs " + mobLive + "/" + entityManager.cap() + " hw " + mobHw
              + "  items " + itemLive + "/" + itemEntities.count + " hw " + itemHw
              + "  orbs " + orbLive + "/" + xpOrbs.count
              + "  primed " + primedN + "  del " + delVis + "/" + delTot
