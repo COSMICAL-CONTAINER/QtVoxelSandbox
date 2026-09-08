@@ -8137,6 +8137,14 @@ void World::placeDesertTemple()
 
             // ── D) 塔面安卡纹样：行表 v → |u| 在场掩码（bit0=|u|0 … bit3=|u|3）。v1..3 竖井 + 门侧条纹 /
             //       v4 横杠 / v5..6 环侧 / v7 环顶 → 安卡（上环 + 横杠 + 下垂柱）；四面同一行表 → 四折旋转对称。
+            //       review0905 #5 考据收口（minecraft.wiki Desert_Pyramid/Structure 蓝图 raw wikitext
+            //       逐层解析，2026-09-07 抓取；原文归档 docs/review0905_wiki_desert_pyramid/）：MC 本尊
+            //       完整安卡形（橙陶瓦环+横杠+垂柱、蓝陶瓦心）只在**地面层中央**（蓝图 Layer 0）与密室
+            //       （Layer -4）各一次；外立面仅前侧双角塔面有「双竖橙条 + 錾制砂岩心」条带装饰（非完整
+            //       安卡），门楣上方即切制砂岩（蓝图 Layer 3 前排 AAA），且本尊整体埋沙、无地面门洞 ——
+            //       MC 外立面**本就无完整安卡**。本项目把安卡再创作居中于四面（登记偏差 3 时代羊毛口径的
+            //       延伸）：正面被门洞 + 门楣截断 = 与 MC「门面门洞区无完整纹样」忠实同构，非缺陷
+            //       （P-t1003 断言按此口径）。
             constexpr int kAnkhRowMask[kPyramidTopLayer + 1] = {
                 0, 0b1001, 0b1001, 0b1001, 0b0111, 0b0100, 0b0100, 0b0011, 0, 0, 0
             };
@@ -8289,6 +8297,10 @@ void World::placeJungleTemple()
     static const int kLevers[3] = { -3, 0, 3 };
     // 汇流线平衡态（三 NOT 火把常亮馈电；state = conn<<4 | power：源邻 15，逐粉衰减 14；x=2 格持
     //   Nx+Pz 双臂）。拐角粉 (2,dz=2) 恒 0x2F（Nz 臂 + 3 号火把直馈 15）。
+    //   ⚠ review0905 #2 耦合告示：本表 + 下方 kMergeElbowState 是**手写红石稳态字节**（worldgen 直写
+    //   首帧，靠脏集回插 + 火把自回插 ~5 tick 收敛到真稳态）——与红石电力语义强耦合。改任何红石常量 /
+    //   传播规则（火把馈电 15、粉逐格衰减、t869 形状连接、conn 编码）必须同步重推本表并重跑 P-t1004
+    //   （逐格静态 + 8 组合行为腿）。登记与可选根治方案见 dev-plan t1004 回标。
     static const quint8 kMergeStates[6] = { 0x1F, 0x3E, 0x3E, 0x3F, 0x3E, 0x6E };
     static const quint8 kMergeElbowState = 0x2F;
 
