@@ -414,7 +414,7 @@ void WorldStore::closeWorld()
 }
 
 bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers,
-                         const QVariantMap &worldTime)
+                         const QVariantMap &worldTime, const QVariantMap &bedSpawn)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -480,6 +480,22 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
         if (worldTime.contains(QStringLiteral("weather")))
             metas.append({QStringLiteral("weather"),
                           QString::number(worldTime.value(QStringLiteral("weather")).toInt())});
+    }
+    // t1024 床位重生锚（caller 传非空 map 才写；四键与 chunks / meta 同事务原子）。valid → 四键全写
+    //   （bed_x 'g'9 float 短往返，同 clock_phase 口径）；!valid → 只写 bed_valid=0（显式失效位，
+    //   挖锚床后退出存档 = 下次进世界不回填床位）。空 map（老探针 / 不感知床锚的 caller）→ 不写不删。
+    if (!bedSpawn.isEmpty()) {
+        if (bedSpawn.value(QStringLiteral("valid")).toBool()) {
+            metas.append({QStringLiteral("bed_x"),
+                          QString::number(bedSpawn.value(QStringLiteral("x")).toFloat(), 'g', 9)});
+            metas.append({QStringLiteral("bed_y"),
+                          QString::number(bedSpawn.value(QStringLiteral("y")).toFloat(), 'g', 9)});
+            metas.append({QStringLiteral("bed_z"),
+                          QString::number(bedSpawn.value(QStringLiteral("z")).toFloat(), 'g', 9)});
+            metas.append({QStringLiteral("bed_valid"), QStringLiteral("1")});
+        } else {
+            metas.append({QStringLiteral("bed_valid"), QStringLiteral("0")});
+        }
     }
     for (const auto &kv : metas) {
         mq.addBindValue(kv.first);
@@ -554,6 +570,32 @@ QVariantMap WorldStore::loadWorldTime() const
                meta.contains(QStringLiteral("weather"))
                    ? QVariant(meta.value(QStringLiteral("weather")).toInt())
                    : QVariant(0));
+    return out;
+}
+
+// t1024 读床位重生锚（头注释见 .h）。逐键缺省：bed_valid 缺或 0 / 坐标缺 → hasBed=false（coords 0）
+//   —— 旧存档（t1024 前）无床键 = 「从未睡过床」，回世界出生点重生（t388 起既有语义）。valid=1 但
+//   坐标键缺（异常半写；事务原子下不应出现）→ 防御性按无床处理。消费端仅 hasBed 才回填。
+QVariantMap WorldStore::loadBedSpawn() const
+{
+    QVariantMap out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT key, value FROM world_meta"))) return out;
+    QVariantMap meta;
+    while (q.next()) meta.insert(q.value(0).toString(), q.value(1).toString());
+    const bool hasCoords = meta.contains(QStringLiteral("bed_x"))
+        && meta.contains(QStringLiteral("bed_y"))
+        && meta.contains(QStringLiteral("bed_z"));
+    const bool valid = meta.contains(QStringLiteral("bed_valid"))
+        && meta.value(QStringLiteral("bed_valid")).toInt() == 1 && hasCoords;
+    out.insert(QStringLiteral("hasBed"), QVariant(valid));
+    out.insert(QStringLiteral("x"), QVariant(hasCoords
+        ? double(meta.value(QStringLiteral("bed_x")).toString().toFloat()) : double(0)));
+    out.insert(QStringLiteral("y"), QVariant(hasCoords
+        ? double(meta.value(QStringLiteral("bed_y")).toString().toFloat()) : double(0)));
+    out.insert(QStringLiteral("z"), QVariant(hasCoords
+        ? double(meta.value(QStringLiteral("bed_z")).toString().toFloat()) : double(0)));
     return out;
 }
 
