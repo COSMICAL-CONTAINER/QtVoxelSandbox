@@ -7873,6 +7873,14 @@ void World::placeMineshaft()
                             for (int w = -1; w <= 1; w += 2) {
                                 const int px = ax + w * (-dz), pz = az + w * dx;  // 巷壁贴面格（w=±1）
                                 const int wx = px + w * (-dz), wz = pz + w * dx;  // 支撑壁（w=±2）
+                                // review0905 #4 卫生收口：本块原用裸 blockAt/setBlock（无显式界内判断）
+                                //   ——极端越界巷道（margin 失守段）会借「blockAt 越界返 Air」走地板回退
+                                //   分支多落火把 / 静默漏放，越界语义与同函数其余写入（putStruct 守卫口：
+                                //   越界静默跳过）不一致。现贴面格 / 支撑壁越界 → 整对跳过（不落火把不回退
+                                //   地板），写入收口 putStruct 同口 → 四向语义对齐（P-t1011 正常域数字不变）。
+                                if (px < 0 || pz < 0 || px >= m_width || pz >= m_depth
+                                    || wx < 0 || wz < 0 || wx >= m_width || wz >= m_depth)
+                                    continue;
                                 if (wy >= m_height) continue;
                                 if (m_chunks.blockAt(px, wy, pz) != BlockRegistry::Air) continue;
                                 if (m_chunks.blockAt(wx, wy, wz) != BlockRegistry::Air) { // 主形态：墙插
@@ -7881,12 +7889,12 @@ void World::placeMineshaft()
                                     else if (w * (-dz) == 1)  attach = BlockRegistry::TorchOnPX;
                                     else if (w * dx == -1)    attach = BlockRegistry::TorchOnNZ;
                                     else                      attach = BlockRegistry::TorchOnPZ;
-                                    m_chunks.setBlock(px, wy, pz, BlockRegistry::Torch, attach);
+                                    putStruct(px, wy, pz, BlockRegistry::Torch, attach);
                                 } else if (curY >= 0 // 豁口回退：壁空（洞穴合并段）→ 贴面格地板火把
                                            && curY < m_height
                                            && m_chunks.blockAt(px, curY, pz) != BlockRegistry::Air
                                            && m_chunks.blockAt(px, curY + 1, pz) == BlockRegistry::Air) {
-                                    m_chunks.setBlock(px, curY + 1, pz, BlockRegistry::Torch, 0);
+                                    putStruct(px, curY + 1, pz, BlockRegistry::Torch, 0);
                                 }
                             }
                         }
