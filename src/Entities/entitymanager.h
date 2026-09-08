@@ -631,6 +631,23 @@ public:
     //   无成长可加（feedBaby 守卫返 false），机制等价 MC「喂幼崽加速生长、喂成体进 love mode」。不查 breedCooldown
     //   （幼崽无繁殖冷却；喂食只加速成长，同 MC）。bump revision + emit → 喂食是状态变更，通知纪律同 enterLoveMode。
     Q_INVOKABLE bool feedBaby(int i);
+    // t1025 繁殖计时测试缝（R19.21「探针用测试缝调短」；产品默认 = MC 口径常量）：写繁殖冷却 / 幼崽成长
+    //   的**运行期秒数**（负值 clamp 0）。仅影响此后设置的冷却 / 成长值（tickBreeding / enterLoveMode 产崽
+    //   路径改读两成员）——已挂上的计时器不被重写（自然衰减到 0）。探针用；产品路径零调用（缺省 = 常量）。
+    Q_INVOKABLE void setBreedTimings(float breedCooldownSec, float babyGrowSec);
+    // t1025 食物引诱门控（spec「MC 动物被手持繁殖食物的玩家吸引」；Game 层判定同喂食映射）：PlayerController
+    //   据当前持物写各物种引诱开关（牛/羊=小麦 / 猪=胡萝卜·马铃薯 / 鸡=种子；t960 caller 算好写值的分层先例
+    //   ——物品 id 属 Game 层，Entities 只收 bool）。active=true 且玩家在 kFoodLureRange 内 → 动物 yaw 钉向
+    //   玩家走近（求偶寻偶优先级更高：已在求偶期走寻偶不受扰）。探针可 Q_INVOKABLE 直调驱动。
+    Q_INVOKABLE void setFoodLure(int mobType, bool active);
+    // t1025 第 mobType 物种的食物引诱开关当前值（探针断言面；setFoodLure 写、AI 引诱段读）。
+    Q_INVOKABLE bool foodLureAt(int mobType) const;
+    // t1025 第 i 个 mob 的幼崽成长剩余秒数（growTimer）。探针断言「产崽即挂 kBabyGrowTime / 喂幼崽减
+    //   kBabyFeedGrow / 缝调短后到点长大」用；非幼崽 / 非 mob / 越界 → 0。
+    Q_INVOKABLE float growTimerAt(int i) const;
+    // t1025 第 i 个 mob 的繁殖冷却剩余秒数（breedCooldown）。探针断言「配对后双亲进 kBreedCooldown /
+    //   冷却中喂食不触发求偶 / 到点解禁」用；非 mob / 越界 → 0。
+    Q_INVOKABLE float breedCooldownAt(int i) const;
     // t400 第 i 个 mob 是否处于求偶期（loveTimer>0）。QML delegate 据它显心形 Model（繁殖可观察反馈 ——
     //   玩家喂食后立即见心，确认求偶已触发）。非 mob / 越界 / 未求偶 → false。
     Q_INVOKABLE bool inLoveAt(int i) const;
@@ -1684,6 +1701,16 @@ private:
     //   站立的狼都追击咬击它（机制等价 MC 1.0 驯服狼群攻主人目标）。-1 = 无目标。slot-reuse 索引稳定；aiWolf
     //   每 AI tick 校验目标存活（alive && kind==Mob && !dead），失效即清（防追尸体 / 追释放槽）。
     int m_wolfTarget = -1;
+    // t1025 繁殖计时运行期值（测试缝，setBreedTimings 写；缺省 = MC 口径常量）：tickBreeding 配对设冷却 /
+    //   产崽挂成长都读这两成员 —— 产品路径零 seam 调用即恒 MC 值（300s 冷却 / 1200s 成长）；探针缝调短跑
+    //   「冷却门 / 成长到点」行为腿。不持久化（会话级运行参数，同 m_chickenJockeyChance 缝先例）。
+    float m_breedCooldownSec = kBreedCooldown;
+    float m_babyGrowSec      = kBabyGrowTime;
+    // t1025 食物引诱门控表（setFoodLure 写；PlayerController 据持物更新，Game 层判定食物映射——Entities
+    //   不向上依赖物品 id，PLAN §2）：下标 = mobType（MobCaveSpider=20 为枚举尾，容量 21 足容）。缺省全 false
+    //   = 无引诱（空手 / 非食物物品时动物不追随玩家）。运行期状态不持久化（每次持物变更即重写）。
+    static constexpr int kMobTypeCount = 21; // MobCaveSpider = 20（枚举尾）+1
+    bool m_foodLure[kMobTypeCount] = {};
     // t392 刷怪笼 spawn 节流累积器（秒）：tickSpawners 每 tick 累加 dt，达 kSpawnerInterval 才扫描玩家周围 Spawner
     //   块（按需扫描，避免每帧扫 ~28³ 体素；playerPos 由 PlayerController 传 m_pos）。同 m_spawnAccum 模式。
     float m_spawnAccumSpawner = 0.0f;
@@ -2073,6 +2100,16 @@ private:
     //   loveTimer>0 且 mobType==e.mobType 的 mob 索引（排除 self）；无 → -1。供求偶者设 yaw 朝配偶 → aiWander
     //   行走相遇。O(n) 每 mob 每帧，n≤64 可忽略。const 只读。
     int findNearestMate(int idx) const;
+    // t1025 最近成年同种查找（tick Mob 分支幼崽跟随调）：返 kBabyFollowRange 内最近一只 alive && !dead &&
+    //   kind==Mob && mobType==e.mobType && !baby 的 mob 索引（排除 self）；无 → -1。供幼崽设 yaw 朝父母 →
+    //   aiWander 行走跟随（机制等价 MC 幼畜跟随最近成年同种）。O(n) 每 mob 每帧，n≤64 可忽略。const 只读。
+    int findNearestAdultSameType(int idx) const;
+    // t1025 按 mobType 写碰撞盒（halfW/halfH）+ hostile 标志（= spawnMobCore 的 switch 本体，t1025 抽出
+    //   单一权威）：spawnMobCore 生成时与 tickBreeding 幼崽长大还原时共用 —— 长大翻 baby=false 后按类型
+    //   还原成体盒（t952 小蹒跚者同款「物理盒即缩放」机制的逆操作）。mobType 显式传参（spawnMobCore 的
+    //   e.mobType 在盒赋值之后才写 —— 读字段会恒落 MobTest 默认盒，首跑实锤教训）。hostile 重赋幂等
+    //   （spawnHostileMob 已设 / 兜底再判，语义不变）。静态纯函数（只写 e 的三字段）。
+    static void applyMobCollisionBox(int mobType, Entity &e);
     // t481 最近豹猫/猫查找（aiStalker 驱赶调）：返距 pos 在 range 内最近一只 alive && !dead && kind==Mob &&
     //   mobType==MobOcelot 的 mob 索引；无 → -1。O(n) 每 Stalker 每 AI tick，n≤64 可忽略。const 只读。
     int nearestOcelot(const QVector3D &pos, float range) const;
@@ -2303,24 +2340,38 @@ private:
     static constexpr float kMobSwimBuoyancy = 3.0f; // 陆栖 mob 头浸水净浮力加速度（blocks/s²；正=上浮）
     static constexpr float kMobSwimRiseMax  = 1.2f; // 陆栖 mob 上浮速度上限（blocks/s；钳制防跃出水面）
     // t400 繁殖常量（spec t400「同种 2 只喂对应食物 → 生幼崽；种群上限防泛滥」；机制对齐 MC 1.0 breeding：
-    //   喂食触发 love mode → 同种配对产幼崽 + 5 分钟冷却 + 幼崽 20 分钟长大；数值为本工程小世界量身调，
-    //   非 MC 精确复刻 —— PLAN §4「机制对标」非数值 1:1）。
+    //   喂食触发 love mode → 同种配对产幼崽 + 5 分钟冷却 + 幼崽 20 分钟长大。t1025 起**数值回标 MC 口径**
+    //   （R19.21 t1025「MC 对标玩法」：现实秒折算 —— 5 min 冷却 = 300s、20 min 成长 = 1200s；探针经
+    //   setBreedTimings 测试缝调短跑，产品默认恒 MC 值，见两成员缺省）。
     //   - kLoveDuration：求偶期持续秒数。MC love mode ~30s 找配偶窗口；取 30（求偶者有充足时间被寻偶 AI 拉到一起）。
-    //   - kBreedCooldown：繁殖后冷却秒数。MC 5 分钟；取 60（明显长于求偶期 30 → 一对 mob 1 分钟内只繁 1 次，
-    //     防刷屏；又远短于 MC 5 分钟便于测试观察「冷却中再喂无效」）。
-    //   - kBabyGrowTime：幼崽长大秒数。MC 20 分钟；取 120（2 分钟，肉眼可观察「幼崽渐大成体」而不冗长）。
+    //   - kBreedCooldown：繁殖后冷却秒数。MC 5 分钟；取 300（现实秒折算；冷却中喂食不再触发求偶——「爱心不再
+    //     出现」，机制等价 MC 繁殖冷却）。
+    //   - kBabyGrowTime：幼崽长大秒数。MC 20 分钟；取 1200（现实秒折算）。
     //   - kBreedRange：配对 XZ 中心距上界（blocks）。MC 求偶者贴近即繁；取 3.0（mob 半宽 0.4 + 接触余量 →
     //     中心距 3 内算「相遇」；求偶期主动寻偶 AI 把它们拉到一起，故无需大半径）。
     //   - kPassiveMobCap：可繁殖被动 mob 总数上限（pig/cow/sheep/chicken 成体 + 幼崽）。达上限 → 配对不再产
     //     幼崽（防种群爆炸；spec「种群上限」）。取 24（小世界合理密度；与 kHostileMobCap=30 同量级）。
-    //   - kBabyScale：幼崽模型缩放（QML delegate Node scale via babyScaleAt）。MC 幼崽 ~0.5 倍体型；取 0.5。
+    //   - kBabyScale：幼崽缩放（QML delegate Node scale via babyScaleAt + **碰撞盒同倍缩**——t1025 起 bred
+    //     幼崽与 t952 小蹒跚者同款机制：halfW/halfH ×kBabyScale 物理盒缩小，长大还原；非 t400 旧版仅视觉缩）。
+    //     MC 幼崽 ~0.5 倍体型；取 0.5。
+    //   - kBabyFeedGrow：每次喂幼崽减成长时间（秒；≈kBabyGrowTime 的 10% —— MC 喂幼崽减 ~10% 剩余时间，t479）。
+    //   t1025 新增（幼崽跟随 / 食物引诱；机制对齐 MC 1.0 幼畜跟随成年同种 + 动物被手持繁殖食物的玩家吸引）：
+    //   - kBabyFollowRange：幼崽认亲搜索半径（blocks；XZ）。取 16（MC 幼崽跟随最近成年同种的感知量级）。
+    //   - kBabyFollowStopDist：幼崽贴身停步距离（blocks）。取 1.5（近身即停，防推挤父母）。
+    //   - kFoodLureRange：食物引诱感知半径（blocks；XZ）。取 10（MC 动物被手持繁殖食物吸引的感知量级）。
+    //   - kFoodLureStopDist：引诱贴身停步距离（blocks）。取 1.2（近身即停；两引诱同种相遇仍 < kBreedRange
+    //     → 玩家持食物聚拢动物即可触发配对，同 MC 手法）。
     static constexpr float kLoveDuration    = 30.0f; // 求偶期持续（秒；MC love mode ~30s 窗口）
-    static constexpr float kBreedCooldown   = 60.0f; // 繁殖后冷却（秒；防同对立即再繁；MC 5 分钟，本工程取 60 便测试）
-    static constexpr float kBabyGrowTime    = 120.0f; // 幼崽长大（秒；MC 20 分钟，本工程取 120 便观察）
-    static constexpr float kBabyFeedGrow    = 12.0f;  // 每次喂幼崽减成长时间（秒；≈kBabyGrowTime 的 10% —— MC 喂幼崽减 ~10% 剩余时间，t479）
+    static constexpr float kBreedCooldown   = 300.0f; // 繁殖后冷却（秒；MC 5 分钟现实秒折算，t1025 回标）
+    static constexpr float kBabyGrowTime    = 1200.0f; // 幼崽长大（秒；MC 20 分钟现实秒折算，t1025 回标）
+    static constexpr float kBabyFeedGrow    = 120.0f;  // 每次喂幼崽减成长时间（秒；≈kBabyGrowTime 的 10% —— MC 喂幼崽减 ~10% 剩余时间，t479；t1025 随基准回标）
     static constexpr float kBreedRange      = 3.0f;  // 配对 XZ 中心距上界（blocks；求偶寻偶 AI 把双方拉到一起后触发）
     static constexpr int   kPassiveMobCap   = 24;    // 可繁殖被动 mob 总数上限（防种群爆炸；spec「种群上限」）
-    static constexpr float kBabyScale       = 0.5f;  // 幼崽模型缩放（babyScaleAt 返它；成体 1.0）
+    static constexpr float kBabyScale       = 0.5f;  // 幼崽缩放（babyScaleAt 返它；成体 1.0；碰撞盒同倍，t1025）
+    static constexpr float kBabyFollowRange    = 16.0f; // 幼崽认亲搜索半径（blocks；t1025）
+    static constexpr float kBabyFollowStopDist = 1.5f;  // 幼崽贴身停步距离（blocks；t1025）
+    static constexpr float kFoodLureRange      = 10.0f; // 食物引诱感知半径（blocks；t1025）
+    static constexpr float kFoodLureStopDist   = 1.2f;  // 引诱贴身停步距离（blocks；t1025）
     // t480 狼常量（spec「骨头驯服 ~33% / 坐站切换 / 跟随 + 防御 / 咬击」；机制对齐 MC 1.0 驯服狼：跟随主人、
     //   攻击主人攻击/咬伤主人的 mob、咬击伤害；数值为本工程量身调，非 MC 精确复刻 —— PLAN §4「机制对标」
     //   非数值 1:1）。

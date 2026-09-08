@@ -441,28 +441,26 @@ int EntityManager::spawnMobTypedYaw(int x, int y, int z, int mobType, const QStr
 //   pos / 血量 / AI 初值 / 护甲随机）+ acquireSlot，返槽索引（达 kCap → -1 + 告警）。不 bump revision / 不 emit
 //   （caller 决定 emit 时机：spawnMobTyped 立即 emit；tickBreeding 批量产幼崽后统一一次 emit，避免高频扇出
 //   notify 风暴，同 t320/t354 批量收口纪律）。
-int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString &color, int maxHealth)
+
+// t1025 碰撞盒单一权威（原 spawnMobCore 内联 switch 本体抽出；spawnMobCore 生成 + tickBreeding 幼崽长大
+//   还原两处共用）。按显式传入的 mobType 设 halfW/halfH + hostile 标志（**勿改读 e.mobType**——spawnMobCore
+//   调用点 e.mobType 尚未赋值，首跑实锤全 mob 落默认盒/hostile=0 的级联红）。t252/t293 收紧贴合 MobModel
+//   身体（旧值「大一圈」：被动 0.9 宽 vs 躯干 0.6~0.7、敌对 0.9 宽 vs MC 0.6 / 身体 0.4~0.8、牛 1.4 高 vs
+//   身体 0.87）。现按「MobModel 实际身体半宽 + 小余量」取值：敌对 halfW=0.30（机制等价 MC 1.0 僵尸 / 骷髅 /
+//   苦力怕 0.6 宽——手臂略超盒属 MC 风格，hitbox 只包躯干核心）；被动 halfW=0.40（躯干 0.6~0.7 + 余量，头 /
+//   长身可能略超 Z 盒，同 MC 四足 hitbox 不含吻部）；牛 halfH 0.70→0.50（身体 0.87 高，旧 1.4 偏大）；其余
+//   halfH 不变（已贴合：人形 1.8 = MC 玩家身高、spider 0.6）。标识符 / 模型全原创（§9 区隔，不照搬 MC 美术）。
+//   hostile 标志据 mobType 设（spawnHostileMob 入口已设，spawnMobTyped 兜底也判一次——重赋幂等，长大还原
+//   路径复用零行为差）。
+void EntityManager::applyMobCollisionBox(int mobType, Entity &e)
 {
-    if (m_liveCount >= kCap) {
-        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawnMobCore skipped at" << x << y << z;
-        return -1;
-    }
-    Entity e;
-    // t252/t293 碰撞箱按 mobType 设。t293 收紧贴合 MobModel 身体（旧值「大一圈」：被动 0.9 宽 vs 躯干 0.6~0.7、
-    //   敌对 0.9 宽 vs MC 0.6 / 身体 0.4~0.8、牛 1.4 高 vs 身体 0.87）。现按「MobModel 实际身体半宽 + 小余量」
-    //   取值：敌对 halfW=0.30（机制等价 MC 1.0 僵尸 / 骷髅 / 苦力怕 0.6 宽——手臂略超盒属 MC 风格，hitbox 只包
-    //   躯干核心）；被动 halfW=0.40（躯干 0.6~0.7 + 余量，头 / 长身可能略超 Z 盒，同 MC 四足 hitbox 不含吻部）；
-    //   牛 halfH 0.70→0.50（身体 0.87 高，旧 1.4 偏大）；其余 halfH 不变（已贴合：人形 1.8 = MC 玩家身高、
-    //   spider 0.6）。mobModelYOff = modelLegBottom − halfH 自动随 halfH 调（腿底恒贴 collision 底面，免悬空）。
-    //   标识符 / 模型全原创（§9 区隔，不照搬 MC 美术）。hostile 标志据 mobType 设（spawnHostileMob 入口已设，
-    //   spawnMobTyped 兜底也判一次）。
     switch (mobType) {
         case MobPig:      e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9（躯干 0.7 宽 + 余量；旧 0.9 偏大）
         case MobCow:      e.halfW = 0.40f; e.halfH = 0.50f; break; // 0.8×1.0（躯干 0.64 宽 / 身体 0.87 高；旧 0.9×1.4 偏大一圈）
         case MobSheep:    e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9（躯干 0.6 宽 + 余量；旧 0.9 偏大）
         case MobShambler: e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 僵尸 0.6 宽；旧 0.9 偏大）
         case MobBones:    e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 骷髅 0.6 宽；旧 0.9 偏大）
-        case MobStalker:  e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 苦力怕 0.6 宽；旧 0.9 偏大一圈；t284）
+        case MobStalker:  e.halfW = 0.30f; e.halfH = 0.90f; e.hostile = true; break; // 0.6×1.8（机制等价 MC 苦力怕 0.6 宽；旧 1.1 偏大一圈；t284）
         case MobSpider:   e.halfW = 0.45f; e.halfH = 0.30f; e.hostile = true; break; // 0.9×0.6 宽矮（躯干 0.8 宽 + 余量；旧 1.1 偏大；快速，t285）
         case MobChicken:  e.halfW = 0.30f; e.halfH = 0.40f; break; // 0.6×0.8 小型鸟（躯干 0.4 宽 / 站立 0.7 高；t398）
         case MobSquid:    e.halfW = 0.40f; e.halfH = 0.45f; break; // 0.8×0.9 水生软体（机制等价 MC 1.0 squid 0.8 宽；t399）
@@ -486,6 +484,16 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
         case MobCaveSpider: e.halfW = 0.32f; e.halfH = 0.21f; e.hostile = true; break;
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
+}
+
+int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString &color, int maxHealth)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); spawnMobCore skipped at" << x << y << z;
+        return -1;
+    }
+    Entity e;
+    applyMobCollisionBox(mobType, e); // t1025 碰撞盒单一权威（原内联 switch 本体抽出；显式传参——e.mobType 此处尚未赋值）
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
     //   免首帧 collision 底面嵌入地面再 snap（cow halfH=0.70 时旧 +0.5 会嵌 0.2 进支撑方块）。
     //   t728 燃烬者（Emberling）：+kEmberlingHoverOffset 抬升 → spawn 即悬空 ~0.4 格（机制等价 MC 烈焰人飞浮）。
@@ -2181,6 +2189,50 @@ bool EntityManager::feedBaby(int i)
     return true; // caller 据返值消耗 1 食物（生存）
 }
 
+// t1025 繁殖计时测试缝（见 .h 注释）：写运行期冷却 / 成长秒数（负值 clamp 0）。产品路径零调用（缺省 =
+//   MC 口径常量 kBreedCooldown=300 / kBabyGrowTime=1200）；探针缝调短跑「冷却门 / 成长到点」行为腿。
+//   不 bump revision / 不 emit：两值只被「此后新设的计时器」读取，不直接呈现（同 m_chickenJockeyChance
+//   缝不通知先例）。
+void EntityManager::setBreedTimings(float breedCooldownSec, float babyGrowSec)
+{
+    m_breedCooldownSec = std::max(0.0f, breedCooldownSec);
+    m_babyGrowSec      = std::max(0.0f, babyGrowSec);
+    qCInfo(lcEnt) << "breed timings set: cooldown" << m_breedCooldownSec << "s / baby grow" << m_babyGrowSec << "s";
+}
+
+// t1025 食物引诱门控写入（见 .h 注释）：mobType 越界静默 no-op（防御；m_foodLure 容量 = 枚举尾 +1）。
+//   不 bump revision / 不 emit：门控是 AI 输入（下一 AI tick 生效），无直接呈现面。
+void EntityManager::setFoodLure(int mobType, bool active)
+{
+    if (mobType < 0 || mobType >= kMobTypeCount) return;
+    m_foodLure[mobType] = active;
+}
+
+// t1025 引诱门控读取（探针断言面 + AI 引诱段同源）。越界 → false。
+bool EntityManager::foodLureAt(int mobType) const
+{
+    if (mobType < 0 || mobType >= kMobTypeCount) return false;
+    return m_foodLure[mobType];
+}
+
+// t1025 幼崽成长剩余秒数（探针断言面）。非 mob / 越界 → 0。
+float EntityManager::growTimerAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob) return 0.0f;
+    return e.growTimer;
+}
+
+// t1025 繁殖冷却剩余秒数（探针断言面）。非 mob / 越界 → 0。
+float EntityManager::breedCooldownAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob) return 0.0f;
+    return e.breedCooldown;
+}
+
 // t480 第 i 只 mob 是否已驯服狼（wolfTamed=true）。仅 MobWolf 用；其余 mob 恒 false。越界 → false。
 bool EntityManager::wolfTamedAt(int i) const
 {
@@ -2440,6 +2492,27 @@ int EntityManager::findNearestMate(int idx) const
     return best;
 }
 
+// t1025 最近成年同种查找（见 .h 注释）：幼崽跟随 AI 调。门 = alive && !dead && kind==Mob && 同种 && !baby
+//   （成年）；XZ 距 ≤ kBabyFollowRange（MC 幼畜认亲感知量级，超半径不跨图认亲）。O(n) 每 mob 每帧。
+int EntityManager::findNearestAdultSameType(int idx) const
+{
+    if (idx < 0 || idx >= int(m_entities.size())) return -1;
+    const Entity &self = m_entities[size_t(idx)];
+    int best = -1;
+    float bestDistSq = kBabyFollowRange * kBabyFollowRange;
+    for (int j = 0; j < int(m_entities.size()); ++j) {
+        if (j == idx) continue;
+        const Entity &m = m_entities[size_t(j)];
+        if (!m.alive || m.dead || m.kind != Mob) continue;
+        if (m.baby || m.mobType != self.mobType) continue; // 同种**成年**（幼崽不互认，机制等价 MC 跟随成体）
+        const float dx = m.pos.x() - self.pos.x();
+        const float dz = m.pos.z() - self.pos.z();
+        const float d2 = dx * dx + dz * dz;
+        if (d2 <= bestDistSq) { best = j; bestDistSq = d2; }
+    }
+    return best;
+}
+
 // t481 最近豹猫/猫查找（aiStalker 驱赶调）：返距 pos 在 range 内最近一只 alive && !dead && kind==Mob &&
 //   mobType==MobOcelot 的 mob 索引；无 → -1。XZ 距离（Stalker 逃离是水平行为，Y 不参与）。O(n) 每 Stalker
 //   每 AI tick，n≤kCap=64 可忽略。const 只读自身数据。
@@ -2494,6 +2567,14 @@ bool EntityManager::tickBreeding(qreal dt)
             if (e.growTimer <= 0.0f) {
                 e.growTimer = 0.0f;
                 e.baby = false; // 长大成体（QML babyScaleAt 1.0 → 重缩回正常体型）
+                // t1025 成长还原（幼崽缩放基建的逆操作）：按类型还原成体碰撞盒（applyMobCollisionBox 单一
+                //   权威）+ 血量上限加倍还原（产崽时减半的精确逆：maxHealth×2、health×2 clamp 上限）+ pos.y
+                //   重锚（盒底恒贴地 —— halfH 变高 Δ，collision 中心同步抬 Δ，防还原盒嵌入地面卡住移动）。
+                const float babyHalfH = e.halfH;
+                applyMobCollisionBox(e.mobType, e);
+                e.maxHealth = std::max(1, e.maxHealth * 2); // 产崽减半的精确逆（×2）；当前血量同倍回上限
+                e.health = std::min(e.health * 2, e.maxHealth);
+                e.pos.setY(e.pos.y() + (e.halfH - babyHalfH));
                 dirty = true;
                 qCInfo(lcEnt) << "baby grew up at pos" << e.pos << "type" << e.mobType;
             }
@@ -2528,9 +2609,10 @@ bool EntityManager::tickBreeding(qreal dt)
             const float dy = m.pos.y() - e.pos.y();
             if (dx * dx + dz * dz > rangeSq) continue;        // XZ 中心距超 KBreedRange → 未相遇
             if (std::abs(dy) > 2.0f) continue;                 // 垂直跨层不算（防跨地板盲配）
-            // 配对成功：双方退求偶 + 进冷却；幼崽生在双方中点（地表上方，重力 tick 贴地）。
-            e.loveTimer = 0.0f; e.breedCooldown = kBreedCooldown;
-            m.loveTimer = 0.0f; m.breedCooldown = kBreedCooldown;
+            // 配对成功：双方退求偶 + 进冷却（t1025：运行期值 m_breedCooldownSec，缺省 = MC 5 min 口径）；
+            //   幼崽生在双方中点（地表上方，重力 tick 贴地）。
+            e.loveTimer = 0.0f; e.breedCooldown = m_breedCooldownSec;
+            m.loveTimer = 0.0f; m.breedCooldown = m_breedCooldownSec;
             const float bx = (e.pos.x() + m.pos.x()) * 0.5f;
             const float by = std::min(e.pos.y(), m.pos.y());
             const float bz = (e.pos.z() + m.pos.z()) * 0.5f;
@@ -2552,7 +2634,17 @@ bool EntityManager::tickBreeding(qreal dt)
         if (slot >= 0) {
             Entity &baby = m_entities[size_t(slot)];
             baby.baby = true;            // 标幼崽（QML babyScaleAt → 0.5 缩小）
-            baby.growTimer = kBabyGrowTime; // 长大倒计时
+            baby.growTimer = m_babyGrowSec; // 长大倒计时（t1025：运行期值，缺省 = MC 20 min 口径）
+            // t1025 幼崽缩放基建对齐（t952 小蹒跚者同款「物理盒即缩放」机制，非 t400 旧版仅 QML 视觉缩）：
+            //   碰撞盒 ×kBabyScale（halfW/halfH 同倍）+ **最大血量减半**（spec「幼崽不可繁殖/血量减半」；幼崽
+            //   血量上限 = 成体一半，当前血量随上限回满）。pos.y 贴 collision 底面重锚（spawnMobCore 按成体盒
+            //   pos.y = 格底 + halfH；缩盒后改 格底 + 幼体 halfH，免首帧嵌地）。
+            const float adultHalfH = baby.halfH;
+            baby.halfW *= kBabyScale;
+            baby.halfH *= kBabyScale;
+            baby.maxHealth = std::max(1, baby.maxHealth / 2);
+            baby.health = baby.maxHealth;
+            baby.pos.setY(baby.pos.y() - (adultHalfH - baby.halfH));
             if (b.mobType == MobWolf)
                 baby.wolfTamed = b.tamed; // t480：狼幼崽继承父代驯服态（配对仅驯服狼 → 恒 true；驯服幼崽跟随主人）
             if (b.mobType == MobOcelot) {
@@ -6312,7 +6404,18 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         //   到 0 长大成体，机制等价 MC 鸡蛋孵出的是小鸡非成年鸡）。maxHealth 传 0 →
                         //   spawnMobCore 内部用 kDefaultMaxHealth（同 spawn egg 路径）。
                         m_entities[size_t(slot)].baby = true;
-                        m_entities[size_t(slot)].growTimer = kBabyGrowTime;
+                        m_entities[size_t(slot)].growTimer = m_babyGrowSec;
+                        // t1025 幼崽缩放基建对齐（同 tickBreeding 产崽段：物理盒 ×kBabyScale + 血量减半 +
+                        //   pos.y 贴底重锚——蛋孵小鸡与繁殖幼崽同款幼体形态，单点语义不分叉）。
+                        {
+                            Entity &hatch = m_entities[size_t(slot)];
+                            const float adultHalfH = hatch.halfH;
+                            hatch.halfW *= kBabyScale;
+                            hatch.halfH *= kBabyScale;
+                            hatch.maxHealth = std::max(1, hatch.maxHealth / 2);
+                            hatch.health = hatch.maxHealth;
+                            hatch.pos.setY(hatch.pos.y() - (adultHalfH - hatch.halfH));
+                        }
                         qCInfo(lcEnt) << "egg hatched baby chicken at" << hatchPos;
                     }
                 }
@@ -7699,6 +7802,43 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.yawRad = std::atan2(-mdx, -mdz);
                         e.wanderSpeed = kWalkSpeed; // 强制行走（覆盖 idle 可能）
                         e.wanderTimer = 0.4f;       // 防 aiWander 本帧重新随机选向（0.4s > 一帧 dt，下帧再重设）
+                    }
+                }
+                // t1025 食物引诱（spec「MC 动物被手持繁殖食物的玩家吸引」）：玩家手持该物种繁殖食物
+                //   （PlayerController 据持物经 setFoodLure 写门控——食物映射在 Game 层，Entities 只收 bool，
+                //   PLAN §2 分层）且玩家在 kFoodLureRange 内 → yaw 钉向玩家 + 强制行走（寻偶优先级更高：
+                //   上块已在求偶期钉向配偶，本块以 loveTimer<=0 门控互斥；同寻偶仅设 yaw/speed/timer，
+                //   位移交 aiWander）。贴身（≤ kFoodLureStopDist）不再钉向（停步防推挤玩家；两引诱同种
+                //   相遇仍 < kBreedRange → 持食物聚拢动物即可配对，同 MC 手法）。门控表全 false（空手 /
+                //   非食物）→ 本块 no-op，动物照常 wander。
+                else if (e.loveTimer <= 0.0f && e.mobType >= 0 && e.mobType < kMobTypeCount
+                         && m_foodLure[e.mobType]) {
+                    const float pdx = listener.x() - e.pos.x();
+                    const float pdz = listener.z() - e.pos.z();
+                    const float pd2 = pdx * pdx + pdz * pdz;
+                    if (pd2 > kFoodLureStopDist * kFoodLureStopDist
+                        && pd2 <= kFoodLureRange * kFoodLureRange) {
+                        e.yawRad = std::atan2(-pdx, -pdz); // 朝玩家（同 -sin/-cos yaw 约定）
+                        e.wanderSpeed = kWalkSpeed;        // 强制行走走向玩家
+                        e.wanderTimer = 0.4f;              // 防 aiWander 本帧重新随机选向
+                    }
+                }
+                // t1025 幼崽跟随父母（spec「幼崽跟随最近的成年同种」；机制等价 MC 幼畜跟随成体）：幼崽在
+                //   kBabyFollowRange 内认最近成年同种为亲 → yaw 钉向 + 强制行走，贴身（≤ kBabyFollowStopDist）
+                //   停步。引诱优先（上块：玩家持食物时幼崽同成体一样被吸引，同 MC）；无成年同种（独苗）→
+                //   照常 wander。仅设 yaw/speed/timer，位移交 aiWander（复用逐轴碰撞撤回 + 边界 clamp）。
+                else if (e.baby && isBreedableType(e.mobType)) {
+                    const int parent = findNearestAdultSameType(idx);
+                    if (parent >= 0) {
+                        const Entity &pp = m_entities[size_t(parent)];
+                        const float pdx = pp.pos.x() - e.pos.x();
+                        const float pdz = pp.pos.z() - e.pos.z();
+                        const float pd2 = pdx * pdx + pdz * pdz;
+                        if (pd2 > kBabyFollowStopDist * kBabyFollowStopDist) {
+                            e.yawRad = std::atan2(-pdx, -pdz); // 朝父母（同 -sin/-cos yaw 约定）
+                            e.wanderSpeed = kWalkSpeed;        // 强制行走跟随
+                            e.wanderTimer = 0.4f;              // 防 aiWander 本帧重新随机选向
+                        }
                     }
                 }
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(aiDt);

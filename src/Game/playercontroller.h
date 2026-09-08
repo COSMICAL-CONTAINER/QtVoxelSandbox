@@ -989,6 +989,11 @@ private:
     QPoint windowCenterGlobal() const;
     QVector3D lookDirection() const;             // 视线方向（与相机 eulerRotation 同源）
     void updateRaycast();                        // 每帧沿视线 DDA，更新命中态
+    // t1025 食物引诱门控更新：读 m_hotbar->selectedItemId() 按繁殖食物映射（牛/羊=小麦 / 猪=胡萝卜·马铃薯 /
+    //   鸡=种子，与 useBlock 喂食分流同一映射帮手 breedFoodMatches）写 m_entityManager->setFoodLure 四物种。
+    //   连接 Hotbar selectedSlotChanged / slotsChanged（setHotbar 内 UniqueConnection）+ setEntityManager /
+    //   setHotbar 注入时即刷一次；无 hotbar / 无 entityManager → 全物种清门控（空手语义）。
+    void updateFoodLure();
     void updateCameraDistance();                 // 每帧算第三人称相机距离（钳制防穿墙，t40）
     void clearHit();                             // 暂停/失焦时隐藏线框
     // t146 放置校验：按「将放置方块的实际形状 sub-AABB」判是否与玩家 AABB 相交（不完整方块可能只占

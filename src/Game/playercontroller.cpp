@@ -55,6 +55,22 @@ bool isWolfMeatItem(int itemId)
 // 审查修 L12/R1：火把 / 红石火把附着支撑判定已上提为 BlockRegistry::torchSupportBlock 公共谓词
 //   （isCollidable ∨ isFullCube，语义详注见 blockregistry.h）—— 放置预检 / 玩家挖掘失撑 / EntityManager
 //   爆炸与水下链式失撑三方同源，防「放得上却立刻掉」口径漂移。本地 helper 删除（原 L12 版）。
+
+// t1025 繁殖食物匹配（单一权威）：该物种是否吃该物品（机制等价 MC 1.0 繁殖食物映射：牛/羊=小麦、
+//   猪=胡萝卜·马铃薯、鸡=种子）。物品 id 属 RecipeRegistry（Game 层）；Entities 层的 enterLoveMode /
+//   setFoodLure 不向上依赖物品 id（PLAN §2）。useBlock 喂食分流与 updateFoodLure 引诱门控同源消费，
+//   防「喂食认的食物引诱不认」口径漂移。狼/豹猫肉食/鱼食映射不经本表（isWolfMeatItem / RawFishId
+//   各自既有判定，驯服门另控）。
+bool breedFoodMatches(int mobType, int itemId)
+{
+    if (mobType == EntityManager::MobCow || mobType == EntityManager::MobSheep)
+        return itemId == RecipeRegistry::WheatId;
+    if (mobType == EntityManager::MobPig)
+        return itemId == RecipeRegistry::CarrotId || itemId == RecipeRegistry::PotatoId;
+    if (mobType == EntityManager::MobChicken)
+        return itemId == RecipeRegistry::SeedId;
+    return false;
+}
 } // namespace
 
 // t467 食物饥饿恢复量（单一权威）：返回 itemId 作为食物一次恢复的饥饿值；非食物 → 0。
@@ -244,6 +260,13 @@ void PlayerController::setHotbar(Hotbar *h)
 {
     if (m_hotbar == h) return;
     m_hotbar = h;
+    // t1025 食物引诱门控：持物变更（换槽 / 槽内容变 = 拾取 / 消耗 / 丢弃）即重算引诱表
+    //   （UniqueConnection 防重复装配时叠连）。QML 侧也直接绑这些信号刷浮动图标，C++ 侧零冲突。
+    if (m_hotbar) {
+        connect(m_hotbar, &Hotbar::selectedSlotChanged, this, &PlayerController::updateFoodLure, Qt::UniqueConnection);
+        connect(m_hotbar, &Hotbar::slotsChanged, this, &PlayerController::updateFoodLure, Qt::UniqueConnection);
+    }
+    updateFoodLure(); // 注入即刷（新装配 / 换世界后门控表立即对齐当前持物）
     emit hotbarChanged();
 }
 
@@ -261,7 +284,21 @@ void PlayerController::setEntityManager(EntityManager *m)
 {
     if (m_entityManager == m) return;
     m_entityManager = m;
+    updateFoodLure(); // t1025：换实体管理器（进世界 / 重载）即按当前持物重刷引诱门控表
     emit entityManagerChanged();
+}
+
+// t1025 食物引诱门控更新（见 .h 注释）：把「当前持物是否为各物种繁殖食物」写进 EntityManager 门控表
+//   （setFoodLure；AI 引诱段下一 tick 生效）。无 hotbar / 无 entityManager → 全物种清门控（空手语义，
+//   换世界后旧世界门控不残留）。映射与 useBlock 喂食分流同源（breedFoodMatches 单一权威）。
+void PlayerController::updateFoodLure()
+{
+    if (!m_entityManager) return;
+    const int held = m_hotbar ? m_hotbar->selectedItemId() : 0;
+    m_entityManager->setFoodLure(EntityManager::MobCow, breedFoodMatches(EntityManager::MobCow, held));
+    m_entityManager->setFoodLure(EntityManager::MobSheep, breedFoodMatches(EntityManager::MobSheep, held));
+    m_entityManager->setFoodLure(EntityManager::MobPig, breedFoodMatches(EntityManager::MobPig, held));
+    m_entityManager->setFoodLure(EntityManager::MobChicken, breedFoodMatches(EntityManager::MobChicken, held));
 }
 
 // t280 黑暗刷怪：注入 WorldClock（同 world/hotbar/itemEntities/entityManager 模式）。
@@ -3951,15 +3988,10 @@ void PlayerController::placeBlock()
         bool fed = false;
         if (mobIdx >= 0) {
             const int mt = m_entityManager->mobTypeAt(mobIdx);
-            // 食物匹配（Game 层判定，RecipeRegistry id + EntityManager mobType）：
+            // 食物匹配（Game 层判定，RecipeRegistry id + EntityManager mobType；t1025 收口 breedFoodMatches
+            //   单一权威，与 updateFoodLure 引诱门控同源）：
             //   牛/羊 → 小麦；猪 → 胡萝卜 / 马铃薯；鸡 → 种子。机制等价 MC 1.0 各动物对应繁殖食物。
-            bool match = false;
-            if (mt == EntityManager::MobCow || mt == EntityManager::MobSheep)
-                match = (heldItemId == RecipeRegistry::WheatId);
-            else if (mt == EntityManager::MobPig)
-                match = (heldItemId == RecipeRegistry::CarrotId || heldItemId == RecipeRegistry::PotatoId);
-            else if (mt == EntityManager::MobChicken)
-                match = (heldItemId == RecipeRegistry::SeedId);
+            const bool match = breedFoodMatches(mt, heldItemId);
             // enterLoveMode 内含成体 / 冷却 / 已求偶 / 可繁殖 mob 守卫；返 true 才算喂成功（消耗食物）。
             // t479 幼崽喂食分流（机制等价 MC 1.0 喂幼崽加速长大）：isBabyAt 判「是否幼崽」→ 幼崽走 feedBaby
             //   （growTimer 减 kBabyFeedGrow 加速成长，不触发求偶）；成体走 enterLoveMode（求偶）。二者互斥：
