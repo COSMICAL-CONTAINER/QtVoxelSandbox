@@ -42227,6 +42227,316 @@ Item {
         }
     }
 
+    // ── P-t1024a 睡觉跳夜 + 床位重生锚 + 拒睡双门（R19.21 t1024；t388/t457 状态机之上的完整床语义）──
+    //   (a) 夜间入睡即设锚（MC「睡上即设重生点」口径）+ 跳夜时间面：Settled 满 2s 自动 sleepAdvanceToDawn
+    //       → skipToDawn 精确跳清晨 phase 0.75（子夜 0.5 起跳 = +0.25 周期，float 短往返逐位还原）；
+    //   (b) 重生回床位：respawn() → m_pos = m_spawnPos（床位）→ snapSpawnToGround 贴床顶（heightAt
+    //       返床层 → +1 = 床顶，feet == 床位）；
+    //   (c) 敌对拒睡门（阴性轮敏感：摘门 → 本腿红）：床周 8 格内 MobShambler（hostile）→ sleepRefused
+    //       「你不能休息，附近有怪物」（spec 文案）+ 零位移 + 不清锚；
+    //   (d) 雷暴拒睡门（阴性轮敏感）：夜间 + 无敌对 + World.weatherState=Thunder → 拒「雷暴中无法入
+    //       睡」；放晴后同条件可睡（正控制：证明 (c)(d) 是唯一拦截者）。
+    {
+        World wT24;
+        wT24.setWidth(48); wT24.setDepth(48); wT24.setHeight(96); wT24.setSeed(1024);
+        // regenerate（worldgen 地形；heightAt 纯函数与栅格同源）：respawn 的 snapSpawnToGround 贴
+        //   heightAt 地表 → 床必须贴地表放置，重生落点才恰为床顶（浮空 rig 下 heightAt 返 fBm 地表
+        //   而非床层，断言按 rig 可达域纸面推演）。在 pc.setWorld 之前跑（seedChanged 无监听者）。
+        wT24.regenerate(1024);
+        int bx24 = 8, bz24 = 8, by24 = wT24.heightAt(8, 8);
+        for (int cx = 9; cx <= 20; ++cx) { // 取扫描段最高地表列（必为陆地；水位 58，plains ≥ ~60）
+            const int h = wT24.heightAt(cx, bz24);
+            if (h > by24) { by24 = h; bx24 = cx; }
+        }
+        WorldClock clockT24;
+        EntityManager entsT24;
+        PlayerController pcT24;
+        pcT24.setWorld(&wT24);
+        pcT24.setWorldClock(&clockT24);
+        pcT24.setEntityManager(&entsT24);
+        QQuickWindow probeWinT24;
+        pcT24.setParentItem(probeWinT24.contentItem());
+        pcT24.grab(); // m_captured（updateSleep 只在 captured 路径跑；t891/R8 同款）
+        const auto pumpT24 = [&pcT24](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            pcT24.tick();
+        };
+        // 工作体积清空（床层 h..h+4 净空；坡地补支撑）→ 床贴地表（in-game 床位格语义：床顶 = h+1
+        // = heightAt+1 = respawn 贴地表落点）。
+        for (int dx = -2; dx <= 3; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                for (int dy = 0; dy <= 4; ++dy)
+                    wT24.setBlock(bx24 + dx, by24 + dy, bz24 + dz, BR::Air, 0);
+        wT24.setBlock(bx24, by24 - 1, bz24, BR::Stone, 0);     // 坡地兜底支撑（地形缺口防御）
+        wT24.setBlock(bx24 - 1, by24 - 1, bz24, BR::Stone, 0);
+        wT24.setBlock(bx24, by24, bz24, BR::BedWhite, quint8(0));     // foot（D=+X）
+        wT24.setBlock(bx24 - 1, by24, bz24, BR::BedWhite, quint8(8)); // head
+        QString refusedT24;
+        int refusedCountT24 = 0;
+        const QMetaObject::Connection connR24 = QObject::connect(
+            &pcT24, &PlayerController::sleepRefused, &pcT24,
+            [&refusedT24, &refusedCountT24](const QString &r) { refusedT24 = r; ++refusedCountT24; });
+
+        // (a) 夜间入睡即设锚 + 跳清晨（setPhase(0.5)=子夜；sleep Lying 1s + Settled 2s + Waking 0.8s）。
+        clockT24.setPhase(0.5f);
+        pcT24.trySleepAt(bx24, by24, bz24);
+        // QML 契约面（review27 #1 同族）：bedSpawnValid 必须在 metaobject 属性表内（QML 属性语法
+        // player.bedSpawnValid 走 QMetaObject 解析；C++ 直调探针测不到该面）。
+        const QMetaObject *moT24 = pcT24.metaObject();
+        const int propIdxT24 = moT24->indexOfProperty("bedSpawnValid");
+        const bool metaAnchor = propIdxT24 >= 0 && moT24->property(propIdxT24).read(&pcT24).toBool();
+        const bool okEntry = pcT24.sleeping() && pcT24.bedSpawnValid() && metaAnchor
+            && pcT24.spawnPoint() == QVector3D(float(bx24) + 0.5f, float(by24) + 1.0f, float(bz24) + 0.5f);
+        for (int t = 0; t < 400 && pcT24.sleeping(); ++t) pumpT24(17);
+        const bool okDawn = !pcT24.sleeping()
+            && std::abs(clockT24.dayPhase() - 0.75f) < 1e-3f; // 跳夜时间面：昼夜钟被置到清晨
+        // (b) 重生回床位：respawn → m_spawnPos（床位）→ snapSpawnToGround 贴 heightAt 地表
+        //     （床贴地表放置 → 落点恰为床顶 = 床位）。
+        pcT24.respawn();
+        const QVector3D bedSpawnT24(float(bx24) + 0.5f, float(by24) + 1.0f, float(bz24) + 0.5f);
+        const bool okRespawn = pcT24.bedSpawnValid() && pcT24.feetPosition() == bedSpawnT24;
+        // (c) 敌对拒睡门：床周 3 格 MobShambler（hostile，床位同层净空格）→ 拒 + 零位移 + 锚保留。
+        entsT24.spawnMobTyped(bx24 + 3, by24, bz24, EntityManager::MobShambler, QStringLiteral("#3f7f3f"), 10);
+        clockT24.setPhase(0.5f); // 夜（setPhase 特权指令，与睡觉单向不冲突）
+        const QVector3D beforeHostile = pcT24.feetPosition();
+        refusedT24.clear();
+        pcT24.trySleepAt(bx24, by24, bz24);
+        const bool okHostile = !pcT24.sleeping() && refusedT24 == QStringLiteral("你不能休息，附近有怪物")
+            && pcT24.feetPosition() == beforeHostile && pcT24.bedSpawnValid(); // 拒睡不清锚
+        // (d) 雷暴拒睡门：清敌对 → 夜 + Thunder → 拒；放晴同条件 → 可睡（正控制）。
+        entsT24.clearAll();
+        wT24.setWeatherState(3); // Thunder
+        refusedT24.clear();
+        pcT24.trySleepAt(bx24, by24, bz24);
+        const bool okThunder = !pcT24.sleeping() && refusedT24 == QStringLiteral("雷暴中无法入睡");
+        wT24.setWeatherState(0); // Clear
+        pcT24.trySleepAt(bx24, by24, bz24);
+        const bool okControl = pcT24.sleeping(); // 正控制：无敌对 + 无雷暴的夜可睡
+        pcT24.wakeUp();
+        QObject::disconnect(connR24);
+        pcT24.release();
+        probeWinT24.deleteLater();
+        const bool okA = okEntry && okDawn && okRespawn && okHostile && okThunder && okControl;
+        if (!okA)
+            qInfo().noquote() << "  [t1024a diag] entry" << okEntry << "dawn" << okDawn
+                              << "respawn" << okRespawn << "hostile" << okHostile
+                              << "thunder" << okThunder << "control" << okControl
+                              << "phase" << clockT24.dayPhase()
+                              << "refused" << refusedT24 << "n" << refusedCountT24
+                              << "feet" << pcT24.feetPosition().x() << pcT24.feetPosition().y()
+                              << pcT24.feetPosition().z()
+                              << "spawn" << pcT24.spawnPoint().x() << pcT24.spawnPoint().y()
+                              << pcT24.spawnPoint().z();
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1024a bed semantics: right-clicking a bed at night starts sleep AND "
+                             "anchors the respawn point at the bed the moment sleep begins (MC "
+                             "sleep-sets-spawn semantics; bedSpawnValid is a real Q_PROPERTY resolved "
+                             "via QMetaObject like QML does); the settled timer auto-skips the night "
+                             "with the day clock landing exactly on dawn phase 0.75 (the skip-night "
+                             "time face), respawn() then places the player back on the bed top; an "
+                             "hostile shambler within the 8-block bed radius refuses sleep with the "
+                             "spec message (zero displacement, anchor kept), a thunderstorm refuses "
+                             "with its own message, and clearing both lets the same night sleep "
+                             "succeed (positive control - the two gates are the only blockers, "
+                             "negative-round sensitive)"
+                          << (okA ? QString()
+                                  : QStringLiteral("diag entry=%1 dawn=%2 respawn=%3 hostile=%4 "
+                                                   "thunder=%5 control=%6")
+                                        .arg(okEntry).arg(okDawn).arg(okRespawn)
+                                        .arg(okHostile).arg(okThunder).arg(okControl));
+    }
+
+    // ── P-t1024b 挖锚床失效链（真实注视挖掘链驱动；阴性轮敏感：摘 finishMiningAt 清锚钩子 → 本腿红）──
+    //   床锚经 setBedSpawn（存档恢复入口，enterWorld 同款）设位 → 玩家站床顶 pitch -90（真实捕获 +
+    //   updateRaycast 选体）→ beginMining 创造瞬破 → finishMiningAt 床分支：配对格联动清（t428）+
+    //   锚床判定 → clearBedSpawn（重生点回世界出生点 kSpawn pristine）+ bedSpawnLost 恰发一次。
+    {
+        World wT24b;
+        wT24b.setWidth(48); wT24b.setDepth(48); wT24b.setHeight(96); wT24b.setSeed(1025);
+        PlayerController pcT24b;
+        pcT24b.setWorld(&wT24b);
+        QQuickWindow probeWinT24b;
+        pcT24b.setParentItem(probeWinT24b.contentItem());
+        pcT24b.grab();
+        const int bx24b = 8, by24b = 40, bz24b = 8;
+        for (int dx = 5; dx <= 10; ++dx)
+            for (int dz = 6; dz <= 10; ++dz) {
+                for (int dy = 0; dy <= 3; ++dy) wT24b.setBlock(dx, by24b + dy, dz, BR::Air, 0);
+                wT24b.setBlock(dx, by24b - 1, dz, BR::Stone, 0);
+            }
+        wT24b.setBlock(bx24b, by24b, bz24b, BR::BedWhite, quint8(0));
+        wT24b.setBlock(bx24b - 1, by24b, bz24b, BR::BedWhite, quint8(8));
+        int lostT24b = 0;
+        const QMetaObject::Connection connL24 = QObject::connect(
+            &pcT24b, &PlayerController::bedSpawnLost, &pcT24b, [&lostT24b]() { ++lostT24b; });
+        pcT24b.setBedSpawn(float(bx24b) + 0.5f, float(by24b) + 1.0f, float(bz24b) + 0.5f); // 读档恢复入口
+        const bool okSet = pcT24b.bedSpawnValid()
+            && pcT24b.spawnPoint() == QVector3D(float(bx24b) + 0.5f, float(by24b) + 1.0f, float(bz24b) + 0.5f);
+        // 真实注视挖掘链：站床顶 + pitch -90 → tick 刷选体 → 创造 beginMining 瞬破命中格（锚床 foot）。
+        pcT24b.loadSavedState(float(bx24b) + 0.5f, float(by24b) + 1.0f, float(bz24b) + 0.5f,
+                              0.0f, -90.0f, 1 /* Creative */);
+        pcT24b.tick(); // updateRaycast：垂直向下射线命中脚下床格
+        pcT24b.beginMining();
+        const bool okBroken = wT24b.blockAt(bx24b, by24b, bz24b) == BR::Air
+            && wT24b.blockAt(bx24b - 1, by24b, bz24b) == BR::Air; // 配对格联动清
+        const bool okInvalidated = !pcT24b.bedSpawnValid() && lostT24b == 1
+            && pcT24b.spawnPoint() == QVector3D(80.0f, 80.0f, 80.0f); // 回世界出生点 kSpawn pristine
+        QObject::disconnect(connL24);
+        pcT24b.release();
+        probeWinT24b.deleteLater();
+        const bool okB = okSet && okBroken && okInvalidated;
+        if (!okB)
+            qInfo().noquote() << "  [t1024b diag] set" << okSet << "broken" << okBroken
+                              << "invalidated" << okInvalidated << "lost" << lostT24b
+                              << "valid" << pcT24b.bedSpawnValid()
+                              << "spawn" << pcT24b.spawnPoint().x() << pcT24b.spawnPoint().y()
+                              << pcT24b.spawnPoint().z()
+                              << "footId" << wT24b.blockAt(bx24b, by24b, bz24b)
+                              << "headId" << wT24b.blockAt(bx24b - 1, by24b, bz24b);
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1024b respawn-anchor invalidation: mining the anchor bed through "
+                             "the real gaze chain (captured controller, straight-down raycast, "
+                             "creative beginMining) breaks both bed halves via the pair-clear and "
+                             "invalidates the bed spawn in the same finishMiningAt pass - "
+                             "bedSpawnValid flips false, bedSpawnLost fires exactly once and the "
+                             "spawn point snaps back to the world spawn constant (80,80,80), so a "
+                             "later death respawns at world spawn instead of a floating bed "
+                             "coordinate (negative-round sensitive)"
+                          << (okB ? QString()
+                                  : QStringLiteral("diag set=%1 broken=%2 invalidated=%3 lost=%4")
+                                        .arg(okSet).arg(okBroken).arg(okInvalidated).arg(lostT24b));
+    }
+
+    // ── P-t1024c 床位重生锚持久化 round-trip（真 SQLite；t1016 模式）+ 源码钉 ──
+    //   (a) 有效锚：saveAll 第 6 参 {valid,x,y,z} → bed_x('g'9)/bed_y/bed_z/bed_valid=1 四键与 chunks/
+    //       meta 同事务 → 关库重开 loadBedSpawn 逐键还原；
+    //   (b) 失效锚：{valid:false} → bed_valid=0 门（挖锚床后退出 = 下次进世界不回填，即使坐标键残留）；
+    //   (c) 旧档缺键：五参旧调用 → hasBed=false（从未睡过床 → 世界出生点重生，t388 起既有语义）；
+    //   (d) 源码钉：QML 进/出世界编排 + C++ 入口签名 + 拒睡/雷暴门与文案（阴性轮敏感）。
+    {
+        World wT24c;
+        wT24c.setWidth(48); wT24c.setDepth(48); wT24c.setHeight(96); wT24c.setSeed(1026);
+        WorldStore storeT24c;
+        storeT24c.setWorld(&wT24c);
+        bool okA = false, okB = false, okC = false, okD = false;
+        const QString dbT24 = QDir::temp().absoluteFilePath(
+                QStringLiteral("voxel_t1024_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+        QFile::remove(dbT24);
+        // (a) 有效锚 round-trip。
+        {
+            QVariantMap bs;
+            bs.insert(QStringLiteral("valid"), true);
+            bs.insert(QStringLiteral("x"), 8.5);
+            bs.insert(QStringLiteral("y"), 41.0);
+            bs.insert(QStringLiteral("z"), 8.5);
+            okA = storeT24c.openWorld(dbT24)
+                && storeT24c.saveAll(QStringLiteral("t1024rig"), QVariantList(), QVariantList(), QVariantList(),
+                                     QVariantMap(), bs);
+            storeT24c.closeWorld();
+            QVariantMap back;
+            if (okA && storeT24c.openWorld(dbT24)) back = storeT24c.loadBedSpawn();
+            storeT24c.closeWorld();
+            okA = okA && back.value(QStringLiteral("hasBed")).toBool() == true
+                && back.value(QStringLiteral("x")).toDouble() == 8.5
+                && back.value(QStringLiteral("y")).toDouble() == 41.0
+                && back.value(QStringLiteral("z")).toDouble() == 8.5;
+            if (!okA)
+                qInfo().noquote() << "  [t1024c diag a] back =" << back;
+        }
+        // (b) 失效锚：bed_valid=0 门压过残留坐标键。
+        {
+            QVariantMap bsNo;
+            bsNo.insert(QStringLiteral("valid"), false);
+            const bool wrote = storeT24c.openWorld(dbT24)
+                && storeT24c.saveAll(QStringLiteral("t1024rig"), QVariantList(), QVariantList(), QVariantList(),
+                                     QVariantMap(), bsNo);
+            storeT24c.closeWorld();
+            QVariantMap back;
+            if (wrote && storeT24c.openWorld(dbT24)) back = storeT24c.loadBedSpawn();
+            storeT24c.closeWorld();
+            okB = wrote && back.value(QStringLiteral("hasBed")).toBool() == false;
+            if (!okB)
+                qInfo().noquote() << "  [t1024c diag b] wrote" << wrote << "back =" << back;
+        }
+        // (c) 旧档形态：五参 saveAll（无床锚键）→ hasBed=false + coords 0。独立库（防 (b) 的
+        //     bed_valid=0 残留污染旧档形态面）。
+        {
+            const QString dbOld24 = QDir::temp().absoluteFilePath(
+                    QStringLiteral("voxel_t1024old_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+            QFile::remove(dbOld24);
+            const bool wrote = storeT24c.openWorld(dbOld24)
+                && storeT24c.saveAll(QStringLiteral("t1024old"));
+            storeT24c.closeWorld();
+            QVariantMap back;
+            if (wrote && storeT24c.openWorld(dbOld24)) back = storeT24c.loadBedSpawn();
+            storeT24c.closeWorld();
+            okC = wrote && back.value(QStringLiteral("hasBed")).toBool() == false
+                && back.value(QStringLiteral("x")).toDouble() == 0.0;
+            if (!okC)
+                qInfo().noquote() << "  [t1024c diag c] wrote" << wrote << "back =" << back;
+            QFile::remove(dbOld24);
+        }
+        QFile::remove(dbT24);
+        // (d) 源码钉：QML 编排（恢复 / 退出第 6 参 / 两处用户面文案）+ C++ 契约面（签名 / 门 / 文案）。
+        //     B-P1-1 迁移：滤注释钉（pinSet）。中文文案钉为 copy 钉（t1022B 先例，单独列账）。
+        {
+            const QString root = QDir(QCoreApplication::applicationDirPath()
+                                      + QStringLiteral("/..")).absolutePath();
+            QStringList missD;
+            missD << pinSet(root + QStringLiteral("/src/ui/Main.qml"), {
+                {"qml-restore-bedspawn", "if (bs && bs.hasBed) player.setBedSpawn(bs.x, bs.y, bs.z)"},
+                {"qml-exit-chain-6th-valid", "{ valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }"},
+                {"qml-exit-chain-6th-invalid", "{ valid: false }"},
+                {"qml-respawn-at-bed-toast", "if (player.bedSpawnValid) window.appendChatMessage(\"\", \"你已回到床边重生\", true)"},
+                {"qml-bedspawn-set-toast-copy", "重生点已设置"},
+                {"qml-bedspawn-lost-handler", "function onBedSpawnLost()"},
+                {"qml-bedspawn-lost-toast-copy", "床被破坏，重生点已失效"},
+            });
+            missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.h"), {
+                {"hdr-bedSpawnValid-prop", "Q_PROPERTY(bool bedSpawnValid READ bedSpawnValid NOTIFY bedSpawnValidChanged)"},
+                {"hdr-setBedSpawn", "Q_INVOKABLE void setBedSpawn(float x, float y, float z);"},
+                {"hdr-clearBedSpawn", "void clearBedSpawn();"},
+                {"hdr-bedSpawnLost-signal", "void bedSpawnLost();"},
+            });
+            missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
+                {"cpp-thunder-gate", "m_world->weatherState() == kWeatherThunder"},
+                {"cpp-hostile-copy", "你不能休息，附近有怪物"},
+                {"cpp-thunder-copy", "雷暴中无法入睡"},
+                {"cpp-anchor-clear-hook", "emit bedSpawnLost();"},
+            });
+            missD << pinSet(root + QStringLiteral("/src/World/worldstore.h"), {
+                {"hdr-loadBedSpawn", "Q_INVOKABLE QVariantMap loadBedSpawn() const;"},
+            });
+            okD = missD.isEmpty();
+            if (!okD)
+                qInfo().noquote() << "  [t1024c diag d] pin miss:" << missD.join(QLatin1Char(','));
+        }
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        if (!okC) ++totalFail;
+        if (!okD) ++totalFail;
+        qInfo().noquote() << (okA && okB && okC && okD ? "PASS" : "FAIL")
+                          << "| t1024c bed-spawn persistence rig: the exit save writes the respawn "
+                             "anchor {valid,x,y,z} through saveAll's 6th arg into world_meta "
+                             "inside the SAME transaction as chunks/meta (bed_x 'g'9 short "
+                             "round-trip + bed_valid gate); a close/reopen round-trips the bed "
+                             "spawn exactly; the invalid form writes bed_valid=0 which gates the "
+                             "stale coordinate keys off (mined-bed-then-exit must not restore the "
+                             "bed); a legacy five-arg save has no bed keys and loads hasBed=false "
+                             "(world-spawn respawn, pre-t1024 semantics); source pins lock the QML "
+                             "restore wiring, both exit-chain forms, the respawn/lost toasts, all "
+                             "four C++ contract surfaces and the two refusal gates with their spec "
+                             "wording (negative-round sensitive)"
+                          << (okA && okB && okC && okD
+                                  ? QString()
+                                  : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
+                                        .arg(okA).arg(okB).arg(okC).arg(okD));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
