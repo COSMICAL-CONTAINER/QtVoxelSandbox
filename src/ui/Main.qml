@@ -861,6 +861,16 @@ Window {
             if (wt.hasWeather) theWorld.setWeatherState(wt.weather)
             console.info("[t1016] world time restored: phase=" + wt.phase + " day=" + wt.day + " weather=" + wt.weather + " hasWeather=" + wt.hasWeather)
         }
+        // t1024 床位重生锚恢复：存档带 bed_valid=1 → player.setBedSpawn 回填床位（死亡 respawn 回床 +
+        //   挖床失效链的持久化半边）。旧存档 / 从未睡过床 → hasBed=false 跳过（保持 seedChanged 复位后的
+        //   世界出生点 pristine，adoptSpawnColumn 口径不变）。须在 player 侧（位姿 / 重生点已按本世界
+        //   复位）之后；setBedSpawn 只写重生点不动位姿（respawn 才消费）。
+        {
+            const bs = worldStore.loadBedSpawn()
+            if (bs && bs.hasBed) player.setBedSpawn(bs.x, bs.y, bs.z)
+            console.info("[t1024] bed spawn restored: hasBed=" + (bs ? bs.hasBed : "no-db")
+                         + (bs && bs.hasBed ? " pos=" + bs.x + "," + bs.y + "," + bs.z : ""))
+        }
         // 清上一世界的掉落物 / mob / 经验球残留（实体非体素，不进存档，切世界必清）
         itemEntities.clearAll()
         entityManager.clearAll()
@@ -1014,8 +1024,13 @@ Window {
         // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
         // t1016：世界时钟快照同事务落盘（saveAll 第 5 参 = {phase, day, weather}，WorldClock /
         //        World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排传入）。
+        // t1024：床位重生锚同事务落盘（saveAll 第 6 参 = {valid, x, y, z}，PlayerController 的
+        //        bedSpawnValid + spawnPoint 裸原语打包；有效写四键、失效写 bed_valid=0）。
         const okWorld = worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers(),
-                                           { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState })
+                                           { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState },
+                                           player.bedSpawnValid
+                                               ? { valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }
+                                               : { valid: false })
         // progress 落盘（统计 + 成就，独立 upsert 单行表）。
         const okProgress = worldStore.saveProgress(progress.toVariant())
         return okPlayer && okWorld && okProgress
@@ -1305,9 +1320,11 @@ Window {
     // t78 立即重生（死亡界面按钮）：满血 + 清死亡态 + 传回出生点 + 清挖掘/飞行态 + 重新锁定指针回游戏。
     //   PlayerState.respawn 复位血量/死亡态；PlayerController.respawn 传回出生点 + 清物理态；
     //   重新 grab（死亡时已 release 让光标点按钮）→ 回到 captured 游戏态。
+    //   t1024：重生点为床位（bedSpawnValid）→ 系统播报「已回到床边重生」（MC 床重生锚语义的用户面）。
     function respawnPlayer() {
         playerState.respawn()   // 清 dead（visible 绑自动隐死亡界面）+ 满血满饥
         player.respawn()        // 传回出生点 + 清速度/挖掘/飞行/蹲下疾跑
+        if (player.bedSpawnValid) window.appendChatMessage("", "你已回到床边重生", true) // t1024 床位重生提示
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -3123,8 +3140,16 @@ Window {
         // t715 状态效果快照 → PlayerState.setActiveEffects（Physics 层 tickImpl 组装活跃效果列表、真变才发；
         //   Game 层持显值，同 airUpdated→setAir 模式。HUD 右上角效果栏读 playerState.effectList 渲染）。
         function onActiveEffectsChanged(effects) { playerState.setActiveEffects(effects) }
-        // t388 睡觉被拒（白天 / 附近有怪物）→ 系统播报中文文案（同死亡播报 appendChatMessage 模式）。
+        // t388 睡觉被拒（白天 / 雷暴 / 附近有怪物）→ 系统播报中文文案（同死亡播报 appendChatMessage 模式）。
         function onSleepRefused(reason) { window.appendChatMessage("", reason, true) }
+        // t1024 床锚翻转沿：成功入睡（或读档回填）置真 → 系统播报「重生点已设置」（dev-plan 文案；
+        // 挖床 / 换代置假静默——失效用户面走 onBedSpawnLost / 世界出生点语义，不在此重复播报）。
+        function onBedSpawnValidChanged() {
+            if (player.bedSpawnValid) window.appendChatMessage("", "重生点已设置", true)
+        }
+        // t1024 床锚丢失（挖掉睡过的锚床任一半）→ 系统播报（重生点已失效回世界出生点的用户面；
+        // respawn 链 bedSpawnValid 已假 → 不再报「回床边重生」）。
+        function onBedSpawnLost() { window.appendChatMessage("", "床被破坏，重生点已失效", true) }
         // t35：生存破可掉落方块（drop=true）→ player 发 spawnItem → 转发到 manager 生成实体。
         // 创造 / 不可采掘时 player 不发本信号（无实体产出）。ViewModel 不持有 PlayerController，
         // 经 Connections 解耦（同 fallDamageTaken→PlayerState 模式；PLAN §2 分层）。

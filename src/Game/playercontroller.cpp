@@ -204,10 +204,39 @@ void PlayerController::snapSpawnToGround()
 //   不动 m_pos（位姿由随后的 respawn / loadSavedState 定位）。
 void PlayerController::onWorldSeedChanged()
 {
+    clearBedSpawn(); // t1024 床位重生锚随世界换代失效（旧世界床位坐标不指当前世界；床锚不跨世界）
     const QVector3D pristine{kSpawnX, kSpawnY, kSpawnZ};
     if (m_spawnPos != pristine) {
         m_spawnPos = pristine;
         emit spawnPointChanged(); // t567 指南针基准复位（随后 snap 采用新出生列时再刷新）
+    }
+}
+
+// t1024 床位重生锚回填（存档恢复入口；契约见 .h）：spawn 点反解锚格（x.5/y/z.5 → floor 整格、
+//   Y-1 = 床层），valid 置真 + 全套 emit。setBedSpawn 不动 m_pos（读档位姿 = 存档点优先；
+//   respawn 才消费 m_spawnPos）。
+void PlayerController::setBedSpawn(float x, float y, float z)
+{
+    m_spawnPos = QVector3D(x, y, z);
+    m_bedAnchorX = int(std::floor(x));
+    m_bedAnchorY = int(std::floor(y)) - 1; // 写入约定 m_spawnPos.y = 床层 by + 1 → 反解床层
+    m_bedAnchorZ = int(std::floor(z));
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); }
+    emit spawnPointChanged(); // t567 指南针基准 → 床位
+}
+
+// t1024 床位重生锚失效（单点收口；契约见 .h）：复位 kSpawn pristine + 清锚 + valid 翻假。
+//   幂等（已 pristine 且 invalid → 静默零 emit，防世界换代 / 连环挖床抖 QML）。
+void PlayerController::clearBedSpawn()
+{
+    const QVector3D pristine{kSpawnX, kSpawnY, kSpawnZ};
+    const bool wasValid = m_bedSpawnValid;
+    m_bedSpawnValid = false;
+    m_bedAnchorX = 0; m_bedAnchorY = -1; m_bedAnchorZ = 0;
+    if (wasValid) emit bedSpawnValidChanged();
+    if (m_spawnPos != pristine) {
+        m_spawnPos = pristine;
+        emit spawnPointChanged();
     }
 }
 
@@ -1621,6 +1650,18 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         BlockRegistry::bedPartnerOffset(brokenState, pdx, pdz);
         if (BlockRegistry::isBed(m_world->blockAt(x + pdx, y, z + pdz)))
             m_world->setBlock(x + pdx, y, z + pdz, BlockRegistry::Air);
+        // t1024 床位重生锚失效链：挖掉**锚床**任一半（本格或其配对格 == 睡过的锚格，同层）→ 重生点
+        //   失效回世界出生点（kSpawn pristine）+ 发 bedSpawnLost（呈现层系统播报）。锚床判定按格
+        //   （m_bedAnchor*；睡床写入/读档反解两路同约定）。非锚床（世界里的其它床）不受影响。
+        //   【自然破坏（爆炸/岩浆）不在此链：玩家挖掘口径 = spec「床被挖」】。
+        if (m_bedSpawnValid && y == m_bedAnchorY) {
+            const bool brokeAnchor = (x == m_bedAnchorX && z == m_bedAnchorZ)
+                                  || (x + pdx == m_bedAnchorX && z + pdz == m_bedAnchorZ);
+            if (brokeAnchor) {
+                clearBedSpawn();
+                emit bedSpawnLost();
+            }
+        }
     }
     emit playerMined(x, y, z, int(brokenId), drop); // 破块语义事件（含 drop 标志；当前无消费端，留扩展）
     // t214 火把失支撑立即掉落：破块后扫 6 邻火把，其**附着格**（state 编码）若已非 solid（含本格刚被置
@@ -3020,7 +3061,11 @@ void PlayerController::sleepAdvanceToDawn()
     // 跳清晨（WorldClock 时间向前快进到黎明 phase；PLAN §2-H 时间单向，只加 m_elapsedMs）。
     if (m_worldClock) m_worldClock->skipToDawn();
     // 设重生点 = 床位（床格中心 + 上方 1.0 = 玩家站床顶；respawn 时 snapSpawnToGround 再贴地表兜底）。
+    //   t1024：锚格 / m_spawnPos / bedSpawnValid 已在 trySleepAt 成功入睡瞬间写入（MC「睡上即设重生点」
+    //   口径），此处重复写同值幂等——保留写入以独立自洽（早于 t1024 的语义防回归）。
     m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
+    m_bedAnchorX = m_sleepBx; m_bedAnchorY = m_sleepBy; m_bedAnchorZ = m_sleepBz;
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); }
     emit spawnPointChanged();   // t567 HUD 指南针指针重算（出生点 → 床位）
     m_sleepPhase = kSleepPhaseWaking;
     m_sleepPhaseTimer = 0.0f;
@@ -3042,11 +3087,19 @@ void PlayerController::trySleepAt(int bx, int by, int bz)
         emit sleepRefused(QStringLiteral("只有在夜晚才能睡觉"));
         return;
     }
+    // t1024 雷暴拒睡（spec「白天/雷暴不可睡」）：雷态 = World::Weather::Thunder。枚举刻意私有
+    //   （world.h「不外泄类型」，weatherState() 返 int 编码，Thunder=3 为其单一权威注释）——本层与
+    //   QML 消费端同按 int 编码比对（同 isPrecipitatingAt 内部口径），局部常量免裸数字。
+    static constexpr int kWeatherThunder = 3; // World::Weather::Thunder（int 编码）
+    if (m_world && m_world->weatherState() == kWeatherThunder) {
+        emit sleepRefused(QStringLiteral("雷暴中无法入睡"));
+        return;
+    }
     // 床周敌对判定（EntityManager.hostileNearby；球心=床格中心，机制等价 MC 床周 8 格内有敌对即不能睡）。
     if (m_entityManager) {
         const QVector3D bedCenter(float(bx) + 0.5f, float(by) + 0.5f, float(bz) + 0.5f);
         if (m_entityManager->hostileNearby(bedCenter, kSleepMonsterRadius)) {
-            emit sleepRefused(QStringLiteral("附近有怪物，无法入睡"));
+            emit sleepRefused(QStringLiteral("你不能休息，附近有怪物")); // t1024 文案对齐 dev-plan 规格
             return;
         }
     }
@@ -3080,6 +3133,13 @@ void PlayerController::trySleepAt(int bx, int by, int bz)
     m_pitch = 0.0f;                   // 躺床视线水平沿床轴（上仰由 QML lieTilt 表达）
     if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); } // 清走路摆臂（防躺床腿摆）
     m_sleepOutDone = false;           // 出床瞬移待触发（Waking 入口 / 中断取消走 leaveBedTeleport）
+    // t1024 床位重生锚在**成功入睡瞬间**即生效（机制等价 MC「睡上床即设重生点」——按钮醒 / 受惊醒
+    //   也保锚，只有没睡成（白天 / 雷暴 / 怪物拒睡）不设）。锚格 = 点击格（head/foot 皆可，挖任一半
+    //   即失效）；m_spawnPos = 床格上方（sleepAdvanceToDawn 重复写同值，幂等）。
+    m_bedAnchorX = bx; m_bedAnchorY = by; m_bedAnchorZ = bz;
+    m_spawnPos = QVector3D(float(bx) + 0.5f, float(by) + 1.0f, float(bz) + 0.5f);
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); }
+    emit spawnPointChanged();         // t567 HUD 指南针基准 → 床位（同 sleepAdvanceToDawn 口径）
     emit positionChanged();           // 相机 / 第三人称模型瞬移跟随（同 respawn 尾）
     emit yawChanged();
     emit pitchChanged();

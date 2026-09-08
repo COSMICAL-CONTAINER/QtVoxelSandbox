@@ -283,6 +283,13 @@ class PlayerController : public QQuickItem
     //   C++ 直调探针测不到该契约面（review26 #4 TapHandler 同族教训的 Q_PROPERTY 版）——P-t898 探针
     //   经 QMetaObject::indexOfProperty("sleepLying") 断言属性表项存在且读回值与直调一致。
     Q_PROPERTY(bool sleepLying READ sleepLying NOTIFY sleepingChanged)
+    // t1024 床位重生锚有效位：true = 当前重生点 m_spawnPos 是一张「成功睡过的床」（MC 床重生锚语义）
+    //   ——死亡 respawn 回床位（respawn 已读 m_spawnPos，t388 起）+ 存档持久化（Main.qml 经
+    //   WorldStore.saveAll 第 6 参落 bed_x/y/z/bed_valid 四键、enterWorld 读 loadBedSpawn 经
+    //   setBedSpawn 回填）。挖掉锚床任一半（finishMiningAt 床分支）/ 世界换代（onWorldSeedChanged）
+    //   → false + 重生点回世界出生点 kSpawn pristine（clearBedSpawn 单点收口）。呈现层只读消费
+    //   （同 sleeping 家族模式）：respawnPlayer 提示「已在床位重生」、退出存档打包第 6 参。
+    Q_PROPERTY(bool bedSpawnValid READ bedSpawnValid NOTIFY bedSpawnValidChanged)
     // 掉落伤害事件（t22）：生存模式着地时按落差结算，发出本次应扣 HP（每 HP = 半心）。
     // 不直接持有 PlayerState（保持 Physics/Game→呈现 的单向事件流，分层干净；与 blockBroken
     // 同模式）：呈现层经 Connections 路由到 PlayerState.takeDamage。0 表示无伤害（不路出）。
@@ -360,6 +367,8 @@ public:
     // t567 出生点 / 重生点（只读；HUD 指南针方位角基准）。值 = m_spawnPos（初值 kSpawn 世界中心出生列；
     // 睡床后 = 床位）。坐标为脚底中心约定（同 m_pos）。
     QVector3D spawnPoint() const { return m_spawnPos; }
+    // t1024 床位重生锚有效位（见 Q_PROPERTY(bool bedSpawnValid) 头注释）。true 期间 m_spawnPos 即床位。
+    bool bedSpawnValid() const { return m_bedSpawnValid; }
     float cameraDistance() const { return m_cameraDistance; } // 第三人称相机距离（钳制后；t40）
     bool captured() const { return m_captured; }
     // t889 世界模拟总闸（语义见 Q_PROPERTY(bool worldRunning) 头注释）。
@@ -665,6 +674,15 @@ public:
     //   kSpawn 常量直到首次死亡才被 respawn 顺带采用。**不动 m_pos**（读档位姿 = 存档点优先）；新世界路径
     //   respawn→snap 已采用 → pristine 判据不中 → no-op。返回是否本次采用（QML 侧可忽略）。
     Q_INVOKABLE bool adoptSpawnColumn();
+    // t1024 床位重生锚回填（存档恢复入口；Main.qml enterWorld 传 WorldStore.loadBedSpawn 的裸原语）：
+    //   m_spawnPos = (x,y,z) + 锚格 = floor 坐标反解（x-0.5/y-1/z-0.5 的整格；睡床写入约定为格心+0.5、
+    //   脚底=床层 by+1）+ bedSpawnValid=true + 全套 emit。呈现层不能向上依赖 WorldStore 解析（PLAN §2
+    //   同 loadWorldTime 编排先例），裸 float 边界传入。
+    Q_INVOKABLE void setBedSpawn(float x, float y, float z);
+    // t1024 床位重生锚失效（单点收口）：m_spawnPos 复位 kSpawn pristine + bedSpawnValid=false +
+    //   锚格清零 + emit（指南针基准 / 有效位同步刷）。挖掉锚床（finishMiningAt 床分支）与世界换代
+    //   （onWorldSeedChanged）共用；幂等（已失效静默）。
+    void clearBedSpawn();
     // t238 设饥饿值（存档加载用；与 PlayerState.setHunger 配对）：clamp 到 [0, kMaxHunger]；同步本类的
     //   Physics 层饥饿累积器 m_hunger + emit hungerUpdated（让 Main.qml 路由到 playerState.setHunger 把
     //   Game 层显值与 Physics 层值对齐——存档只持久化 playerState.hunger，本方法把同一值灌回 Physics 层
@@ -686,6 +704,12 @@ signals:
     void positionChanged();
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
+    // t1024 床位重生锚有效位翻转（睡床成功设锚 true / 挖锚床或换代 false）。呈现层 Connections 据此
+    //   可刷 HUD；床锚失效另发 bedSpawnLost（含语义文案触发面）。
+    void bedSpawnValidChanged();
+    // t1024 床锚丢失事件（挖掉锚床任一半时发；换代复位不发——切世界无需用户面提示）。呈现层据此
+    //   系统播报「重生点已失效」（同 sleepRefused 文案链模式）。
+    void bedSpawnLost();
     // 每帧水平位移增量（格；reportHorizSpeed 在 step 各出口算 dx/dz 后 emit）。纯水平 √(dx²+dz²)，
     //   不含跳跃 / 下落的 dy。progress 走过路程埋点：呈现层 Connections → progress.onMove(deltaBlocks) 累加。
     //   delta>阈值才发（静止站位不刷信号，免每帧无谓 QML 调用；同 reportHorizSpeed dt<=1e-5 早退语义）。
@@ -1410,6 +1434,11 @@ private:
     //   World 选定出生列（出生格+头部格 Air、实体支撑、真地表）。世界换代（seedChanged）由 onWorldSeedChanged
     //   复位回 kSpawn pristine（旧世界出生列 / 旧世界床位不跨世界，床位本就不持久化——同既有语义）。
     QVector3D m_spawnPos{kSpawnX, kSpawnY, kSpawnZ};
+    // t1024 床位重生锚态：m_bedSpawnValid=true 期间 m_spawnPos 是床位（respawn 回床 + 存档持久化）；
+    //   m_bedAnchorX/Y/Z = 锚床格（成功入睡点击格，head/foot 皆可——挖掉任一半即失效）。挖锚床
+    //   （finishMiningAt 床分支）/ 世界换代（onWorldSeedChanged）→ clearBedSpawn 单点复位 kSpawn pristine。
+    bool m_bedSpawnValid = false;
+    qint32 m_bedAnchorX = 0, m_bedAnchorY = -1, m_bedAnchorZ = 0;
     QVector3D m_vel{0, 0, 0};
     float m_yaw = 0, m_pitch = -42;
     Mode m_mode = Spectator;

@@ -108,9 +108,13 @@ public:
     //   传入，同 player_state 裸原语边界先例）。非空 map → 三键（clock_phase / clock_day / weather）与
     //   chunks / meta 同事务原子写入 world_meta；空 map（缺省 / 老探针调用）→ 不写不删（键保留旧值，
     //   兼容「不感知时间的 caller 不应抹掉已存时刻」）。缺键回退：phase 缺 → 不写该键（下同）。
+    //   t1024 bedSpawn：床位重生锚（caller 传 {valid: bool, x, y, z}，PlayerController.spawnPoint +
+    //   bedSpawnValid 的裸原语打包）。非空且 valid → 四键（bed_x 'g'9 / bed_y / bed_z / bed_valid=1）；
+    //   非空且 !valid → 写 bed_valid=0（显式失效，挖床后退出 = 下次进世界不回填床位）；空 map → 不写
+    //   不删（同 worldTime 老调用兼容）。四键与 chunks / meta 同事务原子。
     //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
     Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {},
-                             const QVariantMap &worldTime = {});
+                             const QVariantMap &worldTime = {}, const QVariantMap &bedSpawn = {});
     // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int,
     //   hasWeather: bool}。旧存档缺键 → 逐键缺省（phase 0.0 = 新世界默认相位 / day 0 / weather 0 =
     //   Clear 晴天）——「新增字段对旧存档缺省（默认早晨 / 晴天）」，加载端拿默认值恢复 = 与新世界
@@ -119,6 +123,11 @@ public:
     //   resetWeather 首场晴偏短窗，防无条件恢复把初始 20/45s 窗重抽为常规 45/120s）。未打开 → 空 map
     //   （caller 判空跳过恢复）。
     Q_INVOKABLE QVariantMap loadWorldTime() const;
+    // t1024 读床位重生锚（与 saveAll 第 6 参同形）：{hasBed: bool, x: double, y: double, z: double}。
+    //   旧存档缺键 → hasBed=false（coords 0）——「新增字段对旧存档缺省」，消费端（Main.qml enterWorld）
+    //   仅 hasBed 才 player.setBedSpawn 回填；缺床锚 = 世界出生点重生（t388 起既有语义）。未打开 → 空 map
+    //   由 caller 判空跳过（与 loadWorldTime 同形；本实现恒插 hasBed 键，空库亦返 {hasBed:false,...}）。
+    Q_INVOKABLE QVariantMap loadBedSpawn() const;
     // 读当前库的 chests 表为 QVariantList（同 saveAll 的 chests 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 chestStore.loadAll 整体替换内存（清旧世界残留 + 填本世界箱子）。
     Q_INVOKABLE QVariantList loadChests() const;
