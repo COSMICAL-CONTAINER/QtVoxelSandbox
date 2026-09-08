@@ -240,6 +240,7 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::MossyStoneBrick: // t998 入族（Glass 同款语义外延——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeFull 泛化立方投影）
     case BlockRegistry::CrackedStoneBrick: // t998 入族（同上；瓦片 182 与石砖同 RNG 基底，图标随程序瓦片恒新）
     case BlockRegistry::IronBars:          // t998 入族（薄杆异形——atlasIconSpecForBlock IronBars 特型盒集（细柱+四向横板满连形态），图标贴放置观感）
+    case BlockRegistry::NoteBlock:         // t1028 入族（Glass 同款语义外延——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeFull 泛化立方投影）
         return true;
     default:
         return false;
@@ -906,6 +907,10 @@ QVariantList Hotbar::creativeBlocks() const
              //   开=竖直贴边（ShapeTrapdoor 同 WoodTrapdoor 几何）；配方 6 铁锭横摆 3×2 → 1。归红石 tab
              //   （redstoneIds 含 136 → 方块 tab 自动隐藏，与铁门同页）。
              int(BlockRegistry::IronTrapdoor),                               // 铁活板门（红石开合；6 铁锭合成）
+             // t1028 音符盒（机制等价 MC 1.0 note block；右键调音 + 攻击/红石上升沿发声的木制乐器）。
+             //   归红石 tab（Inventory.qml redstoneIds 含 143 → 方块 tab 自动隐藏，机关件与红石灯同页——
+             //   音符盒是红石触发发声的红石机关件，MC 创造栏同归类）。配方 8 木板环 + 1 红石粉。
+             int(BlockRegistry::NoteBlock),                                  // 音符盒（右键调音；攻击/红石发声）
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）

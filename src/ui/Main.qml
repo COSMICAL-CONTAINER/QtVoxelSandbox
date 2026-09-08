@@ -3232,6 +3232,16 @@ Window {
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
+        // t1028 右键音符盒调音 → player 发 noteBlockTuned(x,y,z,pitch,family,noteName) → 音频层播新调音音
+        //   （MC 右键=调音并播放）+ 系统播报音高提示（dev-plan 文案「音高：C#3」格式；noteName 由
+        //   BlockRegistry::noteBlockNoteName 单一权威生成，QML 不另立名表）。音频层只消费，PLAN §2 分层。
+        function onNoteBlockTuned(x, y, z, pitch, family, noteName) {
+            audio.playNote(pitch, family)
+            window.appendChatMessage("", "音高：" + noteName, true)
+        }
+        // t1028 攻击音符盒发声（左键按下沿；挖掘照常）→ 路由 audio.playNote（纯发声，无播报——攻击是
+        //   演奏交互非配置动作）。同 onDoorToggled 音频层只消费模式。
+        function onNoteBlockAttackPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }
         // t242/t248/t295 玩家攻击 mob（spec「受伤音效」）→ 据 mobType 播对应受击音：被动（0-3）走通用
         //   mob_hurt.wav（t248 专属 mob 受击声，区别于玩家 hurt.wav；spec「受击音换专属 mob 受伤声」，替代
         //   旧复用 playHurt 路径）；敌对（4-7）走各专属音（t295「骨头敲击/蜘蛛嘶/僵尸哀嚎/苦力怕爆炸声」——
@@ -11536,6 +11546,10 @@ Window {
         //   fireDispenserAt：per-dispenser 冷却 / state 朝向 / 库存分派全复用既有机关触发链——「与既有机关
         //   触发并存」的收口点）。方向 = 机器 state 朝向（t608 单一方向源，压力板 / 电力方位不参与）。
         function onPowerDispenserTriggered(x, y, z) { player.fireDispenserAtQml(x, y, z) }
+        // t1028 音符盒被红石电力触发发声（通电上升沿一次，state bit5 记忆位真沿）→ 路由 audio.playNote
+        //   （pitch = 调音段 0..24 半音 / family = 下方方块音色族，World 层算好随信号下传——音频层只消费，
+        //   World 绝不直接出声，refactor-plan §29.4「音频走 Event」+ powerTntTriggered 同款单向事件流）。
+        function onNoteBlockPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }
         // t527 积雪层整柱失撑坍落 → 转 entityManager.spawnFallingBlockState 生成携带层数 metadata 的下落实体。
         //   World 低层（checkSnowLayerOnEdit）发语义事件（柱底坐标 + 总层数 1..8），呈现层只消费（PLAN §2 分层：
         //   World 不反向依赖 Entities）。layers 1..8 → state=layers-1（0..7）保留层数；blockId=44=SnowLayer（与

@@ -903,6 +903,18 @@ signals:
     //   spec「useBlock 发 doorToggled(open) 信号 → Main.qml 路由」。门两格同翻时只发一次（玩家点的是其中一格，
     //   配对格被动跟随；一次开合动作 = 一次音）。
     void doorToggled(bool open);
+    // t1028 音符盒右键调音（useBlock）：音高段 +1 回绕（(p+1)%25，MC 同款 25 档）写入 state 后发。
+    //   携新音高 pitch（0..24 半音）/ 音色族 family（下方方块材质投影，BlockRegistry::NoteTimbreFamily）/
+    //   音名 noteName（BlockRegistry::noteBlockNoteName 单一权威，如「C#4」——呈现层系统播报
+    //   「音高：C#4」直接拼接，不另立第二份名表）。呈现层 Connections 路由：audio.playNote(pitch, family)
+    //   （MC 右键=调音并播放新音）+ appendChatMessage 播报。与 swingArm 同发（调音也是一次「使用」）。
+    void noteBlockTuned(int x, int y, int z, int pitch, int family, const QString &noteName);
+    // t1028 音符盒攻击发声（左键 beginMining 命中音符盒）：MC 口径「攻击音符盒=发声」——每次左键按下沿
+    //   播当前调音音（挖掘照常进行，按住可破 = MC 同款「攻击响、持续挖仍破」）。World::noteBlockPlayed
+    //   （红石路径）的 Game 层兄弟信号：携命中格坐标 + 当前音高 + 音色族，呈现层路由 audio.playNote
+    //   （不播报文案——攻击是纯发声交互）。同 mobAttacked 单向事件流模式（PLAN §2 分层：Game 层发语义
+    //   事件，呈现 / 音频层只消费）。
+    void noteBlockAttackPlayed(int x, int y, int z, int pitch, int family);
     // t242 玩家攻击 mob（spec「玩家左键攻击生物→受伤音效」）：beginMining 在通过模式门控后、破块前
     //   先做 findMobHit；命中活体 mob 且（无方块命中 OR mob 比方块更近）→ 走攻击路径（damageEntity +
     //   swingArm）替代破块，并发本信号。呈现层 Connections 路由到 AudioManager.playMobHurt（t248 专属 mob

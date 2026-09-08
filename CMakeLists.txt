@@ -477,6 +477,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_door_iron_upper.png      # t717 铁门上半贴图（build_doors_iron.py；门板+下部 2×2 格栅窗；tile 176；t722 IronDoor 接入）
         textures/default_door_iron_lower.png      # t717 铁门下半贴图（build_doors_iron.py；门板+锁孔板+底部横带；tile 177；t722 IronDoor 接入）
         textures/default_iron_trapdoor.png        # t717 铁活板门贴图（build_doors_iron.py；格子板+栅格孔；tile 178；t723 IronTrapdoor 接入）
+        textures/default_note_block.png           # t1028 音符盒贴图（build_note_block.py；深木框+盆膜+原创音符标记；tile 184；NoteBlock 接入）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
         textures/default_brown_mushroom.png       # t507 白蘑菇 / 棕蘑菇 cross 贴图（build_brown_mushroom.py；透明底+米色菌柄+棕色菌盖浅黄褐斑；alphaCutoff cutout；蘑菇汤原料）
@@ -765,6 +766,31 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/achievement.wav                      # t1021 成就解锁 toast 音（structureEntered 等成就 toast 同源共享）
         sounds/chest_open.wav                       # t1021 箱子开启音（方块箱 + 箱子矿车同源；openChest 单一通道）
         sounds/chest_close.wav                      # t1021 箱子关闭音（closeChest 单一通道）
+        sounds/note_pitch_00.wav                    # t1028 音符盒 25 档音高钢琴音（build_sounds.py gen_note_piano
+        sounds/note_pitch_01.wav                    #   程序合成 §9 原创；n=0..24 半音，n=9=A4=440Hz；
+        sounds/note_pitch_02.wav                    #   AudioManager.noteClips[pitch] 按调音段选播；音色族=
+        sounds/note_pitch_03.wav                    #   播放速率倍移近似（木×0.5/石×1.0/沙×2.0，登记简化）。
+        sounds/note_pitch_04.wav
+        sounds/note_pitch_05.wav
+        sounds/note_pitch_06.wav
+        sounds/note_pitch_07.wav
+        sounds/note_pitch_08.wav
+        sounds/note_pitch_09.wav
+        sounds/note_pitch_10.wav
+        sounds/note_pitch_11.wav
+        sounds/note_pitch_12.wav
+        sounds/note_pitch_13.wav
+        sounds/note_pitch_14.wav
+        sounds/note_pitch_15.wav
+        sounds/note_pitch_16.wav
+        sounds/note_pitch_17.wav
+        sounds/note_pitch_18.wav
+        sounds/note_pitch_19.wav
+        sounds/note_pitch_20.wav
+        sounds/note_pitch_21.wav
+        sounds/note_pitch_22.wav
+        sounds/note_pitch_23.wav
+        sounds/note_pitch_24.wav
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

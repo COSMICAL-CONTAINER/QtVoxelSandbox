@@ -1072,7 +1072,24 @@ public:
         //   透明列致面消隐，以暗缝底达成同读感；tools/build_iron_bars.py 程序生成 §9a）。音色 GroupStone
         //   （金属质，同 iron_block 族）。进创造调色板（玩家可取用 / 放置）。
         IronBars          = 142, // 铁栏杆：金属薄杆栅格（机制等价 MC 1.0 iron bars）；细柱+横板连接；要塞窗棂 + 创造可放置
-        Count           = 143, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1028 音符盒（NoteBlock；机制等价 MC 1.0 note block id 25）：木制乐器方块——右键循环调音
+        //   （state 低 5 位 = 音高 0..24 半音，(p+1)%25 回绕，MC 同款 25 档）、攻击（左键按下沿）与红石
+        //   通电**上升沿**触发发声（发声=呈现层 Audio 链播程序合成钢琴音，World 层只发语义事件——
+        //   refactor-plan §29.4「不直接把音频逻辑写入 World」+ powerTntTriggered 同款单向事件流）。
+        //   整立方 opaque（solid=true / ShapeFull，同 MC 实体方块）、hardness=0.8（MC 1.0 note block
+        //   0.8 同档）、toolType=Axe（木质加速，MC wood SoundType）、requiresTool=false（空手可采且掉落，
+        //   机制等价 MC）、dropId=自身、dropCount=1、maxStack=64。各面贴图=note_block(184)（深木框 +
+        //   居中盆膜 + 原创小音符标记，tools/build_note_block.py 程序生成 §9a）。音色归 GroupWood（木质）。
+        //   **state 编码**（复用 chunk m_states，存档 round-trip 保真）：
+        //     bit[4:0]（NoteBlockStatePitchMask）= 音高 0..24 半音（0=C4 起，A4=9=440Hz；调音循环写）。
+        //     bit5（NoteBlockStatePoweredFlag）  = 红石通电记忆位（RailSwitchPoweredFlag 先例）：上升沿
+        //       发声 + 置位 / 下降沿清位——稳定通电不重复响（MC 口径每升沿响一次），断电再通再响。
+        //   **音色族**（noteTimbreFamily，登记 3 族 MC 1.0 口径：木=bass / 石=kick / 沙=snare——
+        //   下方方块材质定族；播放简化=同一钢琴采样按族速率倍移，独立采样登记后续）。
+        //   配方：8 木板环 + 1 红石粉 → 1 音符盒（工作台，MC 1.0 同料）。进红石 tab 创造调色板
+        //   （音符盒是红石机关件——红石触发发声）。
+        NoteBlock         = 143, // 音符盒：右键调音（0-24 半音循环）+ 攻击/红石上升沿发声；下方方块定音色族
+        Count           = 144, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1790,7 +1807,10 @@ public:
     //       build_cracked_stone_brick.py / build_iron_bars.py 程序生成（§9 override (a)；零 MC 资产）。
     //       pack {181→mossy_stone_bricks.png / 182→cracked_stone_bricks.png / 183→iron_bars.png}
     //       （现代命名；MC 1.0 / demo 1.8 包无独立文件——98 的 metadata 变体，包内缺安全跳过保程序瓦片）。
-    static constexpr int AtlasTileCount = 184;
+    //   t1028：184=note_block（音符盒：深木框 + 居中盆膜 + 原创小音符标记；NoteBlock 各面=本 tile）。
+    //       tools/build_note_block.py 程序生成（§9 override (a)；零 MC 资产）。pack 无对应文件
+    //       （1.8 包 noteblock.png 命名/画风不合本工程程序瓦片纪律，缺安全跳过保程序瓦片）。
+    static constexpr int AtlasTileCount = 185;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、
@@ -2169,6 +2189,31 @@ public:
     //   复算触达都会误判「新上升沿」反复切弯（振荡）——本位是升沿检测的跨 tick 记忆。断电后（本位=0）
     //   再通电 → 新上升沿 → 再切弯（反复扳拉杆 = 弯道来回切换）。存档 round-trip 保真。
     static constexpr quint8 RailSwitchPoweredFlag = 0x80;
+    // ── t1028 音符盒（NoteBlock）state 常量（语义见 Id 枚举 NoteBlock 行注释）──
+    // 音高段：bit[4:0] = 0..24 半音（右键调音循环写；发声链读它作 playNote 参数——单一权威）。
+    static constexpr quint8 NoteBlockStatePitchMask = 0x1F;
+    // 音高档上界（MC 口径 25 档：0..24；调音回绕 (p+1) % 25）。
+    static constexpr int NoteBlockPitchCount = 25;
+    // 红石通电记忆位（bit5）：RailSwitchPoweredFlag 同款升沿检测跨 tick 记忆——上升沿发声 + 置位 /
+    //   下降沿清位；稳定通电期间不复响（没有本位则每次电力复算触达都误判新升沿 = 连音振荡）。
+    //   存档 round-trip 保真。
+    static constexpr quint8 NoteBlockStatePoweredFlag = 0x20;
+    // 读 state 的音高段（0..24）。
+    static constexpr int noteBlockPitch(quint8 state) { return int(state & NoteBlockStatePitchMask); }
+    // 右键调音单一权威：音高段 +1 回绕（(p+1) % 25），bit5 通电记忆位原样保留。
+    static quint8 noteBlockTunedState(quint8 state)
+    {
+        const int p = (noteBlockPitch(state) + 1) % NoteBlockPitchCount;
+        return quint8(quint8(p) | (state & NoteBlockStatePoweredFlag));
+    }
+    // 音高 → 音名（「C4」「A4」「C#5」……）：n=0 → C4，n%12 走半音名表，n/12 叠八度；
+    //   频率口径 f = 440×2^((n-9)/12)（n=9 = A4 = 440Hz，dev-plan t1028 公式）。UI 文案单一权威
+    //   （PlayerController 调音播报 / 探针断言同源，防两处手抄漂移）。
+    static QString noteBlockNoteName(int pitch);
+    // 音色族（MC 1.0 口径登记 3 族 + 兜底钢琴）：下方方块材质定族——木=bass / 石=kick / 沙=snare，
+    //   其余（含悬空）= piano。materialGroup(id) 复用（音色族即材质组的投影，单一权威不另立表）。
+    enum NoteTimbreFamily : int { NoteTimbrePiano = 0, NoteTimbreBass = 1, NoteTimbreKick = 2, NoteTimbreSnare = 3 };
+    static NoteTimbreFamily noteTimbreFamily(quint8 belowId);
     // 三高探针：每个水平方向（±X / ±Z）的邻格在上/中/下三层的方块 id（0 = 空气 / 非轨）。
     //   坡度（t667）存在性判定即查 up / down 层（邻居轨坐在 1 格高台阶上 / 邻居轨低 1 格）。
     struct RailProbe {

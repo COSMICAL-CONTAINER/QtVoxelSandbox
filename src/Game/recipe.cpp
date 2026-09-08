@@ -984,6 +984,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Planks), 0,                         int(BlockRegistry::Planks),
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks) },
       int(BlockRegistry::Chest), 1, 1, "chest" },
+    // t1028 音符盒（note block）：8 木板环 + 中心 1 红石粉 → 1 音符盒（有序 3×3，仅工作台）。机制等价
+    //   MC 1.0 note block 配方（8 planks ring + redstone dust center → 1）。多重集 {Planks:8, Redstone:1}
+    //   唯一（箱子 {Planks:8} 中心空、熔炉 {Cobble:8} 同形异料、TNT {火药:5,沙:4}）→ 不冲突；经板材族
+    //   等价回退，云杉木板环同样合成。NoteBlock=143（枚举尾段，save-contract 不动）。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks),  int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), RecipeRegistry::RedstoneId,  int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks),  int(BlockRegistry::Planks) },
+      int(BlockRegistry::NoteBlock), 1, 1, "note_block" },
     // ladder：7 木棒 H 形（棒-空-棒 / 棒-棒-棒 / 棒-空-棒）→ 3 梯子（有序 3×3，仅工作台）。机制等价
     //   MC 1.0 ladder（7 sticks → 3）。Ladder=62 方块既存（攀爬机制完整）但配方漏注册。多重集 {Stick:7}
     //   唯一（画作 {棒:8,毛:1} 均异）→ 不冲突。

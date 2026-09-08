@@ -401,6 +401,8 @@ TILES = [
                                      #    各面=本 tile；机制等价 MC 1.0 stone brick metadata 2；tools/build_cracked_stone_brick.py）
     "default_iron_bars",             # 183 iron_bars（铁栏杆各面同贴图；暗缝底 + 周期 4 亮铁竖条 + y7..8 横带；IronBars 各面=
                                      #    本 tile；机制等价 MC 1.0 iron bars；tools/build_iron_bars.py 程序生成）
+    "default_note_block",            # 184 note_block（音符盒各面同贴图；深木框 + 居中盆膜 + 原创小音符标记；NoteBlock 各面=
+                                     #    本 tile；机制等价 MC 1.0 note block；tools/build_note_block.py 程序生成 §9a）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
