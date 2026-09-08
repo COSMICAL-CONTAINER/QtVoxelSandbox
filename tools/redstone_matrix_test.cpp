@@ -42537,6 +42537,325 @@ Item {
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
     }
 
+    // ── P-t1025a 繁殖链 MC 口径：喂食恋爱 → 双满产崽 → 幼崽缩放字段/血量减半 → 冷却门 → 幼崽不可繁殖 →
+    //    缝调短冷却开合 → 成长还原成体（R19.21 t1025；t400/t479 繁殖链之上的口径回标 + t952 幼体基建对齐）──
+    //   (a) 常量口径钉（MC 对标登记面，现实秒折算：恋爱窗 30s / 繁殖冷却 5min=300s / 成长 20min=1200s /
+    //       幼崽 0.5× / 配对距 3 / 喂幼减 10%≈120s）——漂移即红 = 口径登记本体；
+    //   (b) 喂食恋爱 + 双满产崽 + 幼崽字段（默认 MC 计时；0.38s 窗内幼崽远未长大、冷却远未到期）：
+    //       inLoveAt 双真 → 配对产崽 + 双亲退恋进冷却（breedCooldownAt≈300）+ 幼崽 babyScaleAt=0.5 /
+    //       halfHeightAt=成体×0.5（物理盒同倍缩，t952 小蹒跚者同款机制）/ maxHealth 5=减半 / growTimer 挂满
+    //       1200s；
+    //   (c) 冷却门（阴性轮敏感：摘 enterLoveMode 冷却行 → 本腿红）：冷却中再喂 → false（爱心不再触发）；
+    //   (d) 幼崽不可繁殖门（阴性轮敏感：摘 enterLoveMode 幼崽行 → 本腿红）：幼崽求偶 false / 幼崽可喂
+    //       feedBaby（growTimer 精确减 kBabyFeedGrow）/ 成体喂幼 false；
+    //   (e) 缝调短冷却开合（setBreedTimings 测试缝，产品默认恒 MC 值）：1s 冷却内 false → 1.6s 后归零可再求偶
+    //       （门「关→开」双向实证，300s 真值跑不动的折算口径）；
+    //   (f) 成长还原：0.8s 成长缝 → 幼崽到点 baby=false + babyScaleAt 1.0 + halfHeightAt 还原成体盒 + 血量
+    //       上限/当前 ×2 还原 10（减半的精确逆）+ growTimer 归零。
+    {
+        bool ok = true;
+        // (a) 常量口径：t400 常量段为 private（勿为探针动可见性）→ 数值面由两处锁定：
+        //     ① t1025b (d) 的 pinSet 头文件钉（= 300.0f / = 1200.0f / 30.0f / 0.5f / 3.0f / 120.0f 字面量行）；
+        //     ② 本探针行为腿（breedCooldownAt≈300 / growTimer>1199 / babyScaleAt=0.5 / 喂幼减恰 120）。
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        auto mkRig = [](World &w, quint32 seed) {
+            w.setWidth(32); w.setDepth(32); w.setHeight(24); w.setSeed(seed);
+            for (int x = 8; x <= 24; ++x)     // 石板地板：kGravity=28 下长窗自由落体会跌出世界被移除
+                for (int z = 8; z <= 24; ++z)
+                    w.setBlock(x, 10, z, BR::Stone, 0);
+            // t1025 首跑教训：未 regenerate 的 World 也带 fBm 程序地形（blockAtWorld 纯函数回填，t789 rig
+            //   「空世界」实为地形世界）——seed 1025-1028 的地表高于 y=10 → 石板被掩埋、mob 生成即嵌入
+            //   （stuck-escape + 窒息扣血 = 引诱/跟随位移腿与成长血量腿全红的根因）。工作体积显式净空：
+            //   地板上方 11..16 清 Air（同 t1024a「工作体积清空」纪律：探针选址自带保障，禁赌 worldgen）。
+            for (int x = 8; x <= 24; ++x)
+                for (int z = 8; z <= 24; ++z)
+                    for (int y = 11; y <= 16; ++y)
+                        w.setBlock(x, y, z, BR::Air, 0);
+        };
+        // (b) 喂食恋爱 + 双满产崽 + 幼崽字段（sheep；默认 MC 计时）。
+        EntityManager emA;
+        World wA; mkRig(wA, 1025);
+        const int pa = emA.spawnMobTyped(14, 11, 15, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        const int pb = emA.spawnMobTyped(15, 11, 15, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        const bool fed = pa >= 0 && pb >= 0 && emA.enterLoveMode(pa) && emA.enterLoveMode(pb)
+            && emA.inLoveAt(pa) && emA.inLoveAt(pb);
+        for (int t = 0; t < 24; ++t) emA.tick(0.016f, &wA, farL, 0.3f, 1.8f, false);
+        int babyA = -1;
+        for (int i = 0; i < emA.count(); ++i)
+            if (emA.aliveAt(i) && emA.isBabyAt(i) && emA.mobTypeAt(i) == EntityManager::MobSheep) babyA = i;
+        const bool paired = fed && babyA >= 0 && !emA.inLoveAt(pa) && !emA.inLoveAt(pb)
+            && emA.breedCooldownAt(pa) > 299.0f && emA.breedCooldownAt(pb) > 299.0f; // 挂满 300（窗内衰减 ≤0.4s）
+        const bool babyFields = babyA >= 0
+            && std::abs(emA.babyScaleAt(babyA) - 0.5f) < 1e-4f
+            && std::abs(emA.halfHeightAt(babyA) - 0.225f) < 1e-4f  // sheep 成体 halfH 0.45 × 0.5（物理盒同倍缩）
+            && emA.maxHealthAt(babyA) == 5 && emA.healthAt(babyA) == 5
+            && emA.growTimerAt(babyA) > 1199.0f;   // 产崽即挂满 1200s（窗内衰减 ≤0.4s）
+        // (c) 冷却门（阴性轮敏感）。
+        const bool cooldownGate = babyA >= 0 && !emA.enterLoveMode(pa) && !emA.enterLoveMode(pb);
+        // (d) 幼崽不可繁殖门（阴性轮敏感）+ 喂幼加速成长。
+        const float growBefore = babyA >= 0 ? emA.growTimerAt(babyA) : -1.0f;
+        const bool babyGate = babyA >= 0 && !emA.enterLoveMode(babyA)
+            && emA.feedBaby(babyA)
+            && emA.growTimerAt(babyA) <= growBefore - 120.0f + 0.01f  // 精确减 kBabyFeedGrow=120（行为锁）
+            && !emA.feedBaby(pa);
+        // (e) 缝调短冷却开合（pig；1s 冷却缝）。
+        EntityManager emB;
+        emB.setBreedTimings(1.0f, 1200.0f);
+        World wB; mkRig(wB, 1026);
+        const int paB = emB.spawnMobTyped(14, 11, 15, EntityManager::MobPig, QStringLiteral("#ee9999"), 10);
+        const int pbB = emB.spawnMobTyped(15, 11, 15, EntityManager::MobPig, QStringLiteral("#ee9999"), 10);
+        const bool fedB = paB >= 0 && pbB >= 0 && emB.enterLoveMode(paB) && emB.enterLoveMode(pbB);
+        for (int t = 0; t < 24; ++t) emB.tick(0.016f, &wB, farL, 0.3f, 1.8f, false);
+        const bool gateClosed = fedB && emB.breedCooldownAt(paB) > 0.0f && !emB.enterLoveMode(paB);
+        for (int t = 0; t < 100; ++t) emB.tick(0.016f, &wB, farL, 0.3f, 1.8f, false); // 1.6s > 1s 缝冷却
+        const bool gateReopened = emB.breedCooldownAt(paB) == 0.0f && emB.enterLoveMode(paB)
+            && emB.inLoveAt(paB);
+        // (f) 成长还原（cow；0.8s 成长缝）。
+        EntityManager emC;
+        emC.setBreedTimings(300.0f, 0.8f);
+        World wC; mkRig(wC, 1027);
+        const int paC = emC.spawnMobTyped(14, 11, 15, EntityManager::MobCow, QStringLiteral("#a52a2a"), 10);
+        const int pbC = emC.spawnMobTyped(15, 11, 15, EntityManager::MobCow, QStringLiteral("#a52a2a"), 10);
+        const bool fedC = paC >= 0 && pbC >= 0 && emC.enterLoveMode(paC) && emC.enterLoveMode(pbC);
+        for (int t = 0; t < 24; ++t) emC.tick(0.016f, &wC, farL, 0.3f, 1.8f, false);
+        int babyC = -1;
+        for (int i = 0; i < emC.count(); ++i)
+            if (emC.aliveAt(i) && emC.isBabyAt(i) && emC.mobTypeAt(i) == EntityManager::MobCow) babyC = i;
+        for (int t = 0; t < 100; ++t) emC.tick(0.016f, &wC, farL, 0.3f, 1.8f, false); // 1.6s > 0.8s 缝成长
+        const bool grown = fedC && babyC >= 0 && !emC.isBabyAt(babyC)
+            && std::abs(emC.babyScaleAt(babyC) - 1.0f) < 1e-4f
+            && std::abs(emC.halfHeightAt(babyC) - 0.50f) < 1e-4f   // cow 成体盒还原
+            && emC.maxHealthAt(babyC) == 10 && emC.healthAt(babyC) == 10  // 减半的精确逆
+            && emC.growTimerAt(babyC) == 0.0f;
+        // (d) 源码钉（滤注释 pinSet；两道求偶门钉钉在 P-t1025a——与被护行为腿同行，阴性轮摘门时
+        //     钉随行红 = 恰红面收敛在 P-t1025a，P-t1025b 保绿证其余系统零回归）。
+        const QString exeDirA = QCoreApplication::applicationDirPath();
+        const QString rootA25 = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
+        QStringList missA;
+        missA << pinSet(rootA25 + QStringLiteral("/src/Entities/entitymanager.cpp"), {
+            {"cpp-love-cooldown-gate", "if (e.breedCooldown > 0.0f) return false;"},
+            {"cpp-love-baby-gate", "if (e.baby) return false;"},
+        });
+        const bool pinsA = missA.isEmpty();
+        if (!pinsA)
+            qInfo().noquote() << "  [t1025a diag] pin miss:" << missA.join(QLatin1Char(','));
+        if (!grown)
+            qInfo().noquote() << "  [t1025a diag2] cow babyC" << babyC << "isBaby" << emC.isBabyAt(babyC)
+                              << "alive" << emC.aliveAt(babyC) << "dead" << emC.deadAt(babyC)
+                              << "type" << emC.mobTypeAt(babyC) << "scale" << emC.babyScaleAt(babyC)
+                              << "halfH" << emC.halfHeightAt(babyC) << "maxHp" << emC.maxHealthAt(babyC)
+                              << "hp" << emC.healthAt(babyC) << "growT" << emC.growTimerAt(babyC)
+                              << "y" << emC.posAt(babyC).y();
+        ok = ok && paired && babyFields && cooldownGate && babyGate && gateClosed && gateReopened && grown
+            && pinsA;
+        if (!ok)
+            qInfo().noquote() << "  [t1025a diag] paired" << paired << "babyFields" << babyFields
+                              << "cooldownGate" << cooldownGate << "babyGate" << babyGate
+                              << "gateClosed" << gateClosed << "gateReopened" << gateReopened
+                              << "grown" << grown << "babyA" << babyA << "babyC" << babyC
+                              << "pinsA" << pinsA;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1025a breeding MC-parity: constants locked to the registered conversion "
+                             "(love 30s / breed cooldown 5min=300s / baby growth 20min=1200s / baby "
+                             "0.5x / pair range 3 / baby-feed -10%); feeding two adult sheep puts both "
+                             "in love, pairing spawns one baby while both parents drop out of love into "
+                             "the breed cooldown; the baby has scale 0.5 with a physically halved "
+                             "collision box (t952 baby mechanism, halfHeight 0.225), halved max health "
+                             "5 and a full 1200s growth timer; feeding during the cooldown is refused "
+                             "(hearts stay off); a baby refuses love mode but accepts feedBaby which "
+                             "shaves exactly kBabyFeedGrow off the growth timer while an adult refuses "
+                             "feedBaby; the setBreedTimings seam shortens the cooldown to 1s which "
+                             "closes then reopens the gate on real ticks; a 0.8s growth-seam cow baby "
+                             "grows up in-place restoring the adult collision box, scale 1.0 and "
+                             "doubled health to 10 (negative-round sensitive: cooldown gate + baby "
+                             "no-love gate)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag paired=%1 fields=%2 cdGate=%3 babyGate=%4 "
+                                                   "closed=%5 reopened=%6 grown=%7")
+                                        .arg(paired).arg(babyFields).arg(cooldownGate)
+                                        .arg(babyGate).arg(gateClosed).arg(gateReopened).arg(grown));
+    }
+
+    // ── P-t1025b 幼崽跟随父母 + 食物引诱 + Game 层门控接线（R19.21 t1025 AI 行为腿）──
+    //   (a) 幼崽跟随最近成年同种：产崽 → 杀双亲（dead 不作认亲目标）→ 远端放同种成年羊 + 异种成年牛对照 →
+    //       幼崽净位移朝羊 + yaw 精确钉向羊（非牛）——认亲「同种 + 最近 + 成年」三口径；
+    //   (b) 食物引诱：setFoodLure(pig,true) → 半径内猪 yaw 钉向玩家 + 净位移朝玩家；半径外猪不受扰（游走
+    //       距离有界 + yaw 不钉）；关门 → 解钉回 wander；
+    //   (c) Game 层接线（真 Hotbar 信号链）： WheatId → 牛/羊门控真 / SeedId → 鸡真 / CarrotId → 猪真 /
+    //       空手 → 全清（breedFoodMatches 单一权威，喂食分流与引诱同源）；
+    //   (d) 源码钉（滤注释 pinSet；阴性轮行为腿在 P-t1025a，钉只锁接线存在性）。
+    {
+        bool ok = true;
+        EntityManager em;
+        World w;
+        w.setWidth(32); w.setDepth(32); w.setHeight(24); w.setSeed(1028);
+        for (int x = 8; x <= 24; ++x)
+            for (int z = 8; z <= 24; ++z)
+                w.setBlock(x, 10, z, BR::Stone, 0);
+        // t1025 首跑教训（同 P-t1025a mkRig）：未 regenerate 的 World 仍带 fBm 程序地形 → 显式净空工作体积。
+        for (int x = 8; x <= 24; ++x)
+            for (int z = 8; z <= 24; ++z)
+                for (int y = 11; y <= 16; ++y)
+                    w.setBlock(x, y, z, BR::Air, 0);
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        // (a) 幼崽跟随。
+        const int pa = em.spawnMobTyped(14, 11, 15, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        const int pb = em.spawnMobTyped(15, 11, 15, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        em.enterLoveMode(pa);
+        em.enterLoveMode(pb);
+        for (int t = 0; t < 24; ++t) em.tick(0.016f, &w, farL, 0.3f, 1.8f, false);
+        int baby = -1;
+        for (int i = 0; i < em.count(); ++i)
+            if (em.aliveAt(i) && em.isBabyAt(i) && em.mobTypeAt(i) == EntityManager::MobSheep) baby = i;
+        em.damageEntity(pa, 999); // 双亲死亡 → dead 不作认亲目标（0.5s 死亡动画后释放槽）
+        em.damageEntity(pb, 999);
+        const int cowC = em.spawnMobTyped(10, 11, 15, EntityManager::MobCow, QStringLiteral("#a52a2a"), 10);
+        const int shD = em.spawnMobTyped(22, 11, 15, EntityManager::MobSheep, QStringLiteral("#f5f0e8"), 10);
+        const QVector3D b0 = baby >= 0 ? em.posAt(baby) : QVector3D();
+        for (int t = 0; t < 48; ++t) em.tick(0.016f, &w, farL, 0.3f, 1.8f, false); // 12 AI 步 ≈ 0.77s
+        auto wrapAngle = [](float a) {
+            while (a > float(M_PI)) a -= float(2 * M_PI);
+            while (a < -float(M_PI)) a += float(2 * M_PI);
+            return a;
+        };
+        // t1025 二跑教训：yawAt 返回**度**（t239 QML eulerRotation.y 面约定，qRadiansToDegrees）——
+        //   与 atan2 推导的目标方位（弧度）直比恒差 57.3 倍（首跑 diagF yaw=-87.68 vs toSheep=-1.5236
+        //   即 -1.5303 rad：钉向本身已成立，纯单位面假红）。比较位统一转弧度（10480 行矿车探针同款换算）。
+        auto yawRadAt = [&em](int i) { return em.yawAt(i) * float(M_PI) / 180.0f; };
+        bool follow = false;
+        if (baby >= 0 && shD >= 0 && cowC >= 0) {
+            const QVector3D b1 = em.posAt(baby);
+            const QVector3D sh1 = em.posAt(shD);
+            const QVector3D cow1 = em.posAt(cowC);
+            const float toSheep = std::atan2(-(sh1.x() - b1.x()), -(sh1.z() - b1.z()));
+            const float toCow = std::atan2(-(cow1.x() - b1.x()), -(cow1.z() - b1.z()));
+            const QVector3D disp = b1 - b0;
+            const QVector3D want = sh1 - b0;
+            follow = QVector3D::dotProduct(disp, want) > 0.05f                    // 净位移朝羊
+                && std::abs(wrapAngle(yawRadAt(baby) - toSheep)) < 0.15f          // yaw 钉向羊（最后 AI 步钉）
+                && std::abs(wrapAngle(yawRadAt(baby) - toCow)) > 0.3f;            // 且非朝牛（异种不认）
+            qInfo().noquote() << "  [t1025b diagF] baby" << baby << "shD" << shD << "cowC" << cowC
+                              << "b0" << b0.x() << b0.y() << b0.z() << "b1" << b1.x() << b1.y() << b1.z()
+                              << "yawRad" << yawRadAt(baby) << "toSheep" << toSheep << "toCow" << toCow
+                              << "dot" << QVector3D::dotProduct(disp, want)
+                              << "isBaby" << em.isBabyAt(baby) << "shType" << em.mobTypeAt(shD);
+        }
+        // (b) 食物引诱（pig；玩家 listener 静置于 (4.5, 11, 15)）。
+        em.clearAll();
+        em.setFoodLure(EntityManager::MobPig, true);
+        const bool lureState = em.foodLureAt(EntityManager::MobPig) && !em.foodLureAt(EntityManager::MobCow);
+        const int pigIn = em.spawnMobTyped(10, 11, 15, EntityManager::MobPig, QStringLiteral("#ee9999"), 10);
+        const int pigFar = em.spawnMobTyped(24, 11, 15, EntityManager::MobPig, QStringLiteral("#ee9999"), 10);
+        const QVector3D playerL(4.5f, 11.0f, 15.0f);
+        const QVector3D p0 = pigIn >= 0 ? em.posAt(pigIn) : QVector3D();
+        const float farDist0 = pigFar >= 0
+            ? std::sqrt(std::pow(em.posAt(pigFar).x() - playerL.x(), 2)
+                        + std::pow(em.posAt(pigFar).z() - playerL.z(), 2)) : 0.0f;
+        for (int t = 0; t < 48; ++t) em.tick(0.016f, &w, playerL, 0.3f, 1.8f, false);
+        bool lureIn = false, lureFar = false;
+        if (pigIn >= 0 && pigFar >= 0) {
+            const QVector3D p1 = em.posAt(pigIn);
+            const float toPlayer = std::atan2(-(playerL.x() - p1.x()), -(playerL.z() - p1.z()));
+            lureIn = QVector3D::dotProduct(p1 - p0, playerL - p0) > 0.05f
+                && std::abs(wrapAngle(yawRadAt(pigIn) - toPlayer)) < 0.05f;
+            const QVector3D f1 = em.posAt(pigFar);
+            const float toPlayerFar = std::atan2(-(playerL.x() - f1.x()), -(playerL.z() - f1.z()));
+            const float farDist1 = std::sqrt(std::pow(f1.x() - playerL.x(), 2)
+                                             + std::pow(f1.z() - playerL.z(), 2));
+            lureFar = farDist1 > farDist0 - 1.0f   // 半径外不被拽近（游走漂移 ≤ 0.8 格）
+                && std::abs(wrapAngle(yawRadAt(pigFar) - toPlayerFar)) > 1e-3f; // yaw 不钉
+            qInfo().noquote() << "  [t1025b diagL] pigIn" << pigIn << "p0" << p0.x() << p0.z()
+                              << "p1" << p1.x() << p1.z() << "yawRad" << yawRadAt(pigIn)
+                              << "toPlayer" << toPlayer << "dot"
+                              << QVector3D::dotProduct(p1 - p0, playerL - p0)
+                              << "lure" << em.foodLureAt(EntityManager::MobPig);
+        }
+        em.setFoodLure(EntityManager::MobPig, false);
+        for (int t = 0; t < 48; ++t) em.tick(0.016f, &w, playerL, 0.3f, 1.8f, false);
+        bool lureOff = false;
+        if (pigIn >= 0) {
+            const QVector3D p2 = em.posAt(pigIn);
+            const float toPlayer = std::atan2(-(playerL.x() - p2.x()), -(playerL.z() - p2.z()));
+            lureOff = std::abs(wrapAngle(yawRadAt(pigIn) - toPlayer)) > 1e-3f; // 解钉（wander 重随机，恰合概率 ~0）
+        }
+        // (c) Game 层接线（真 Hotbar 信号链 slotsChanged → updateFoodLure → setFoodLure）。
+        EntityManager emW;
+        Hotbar hbW;
+        PlayerController pcW;
+        pcW.setEntityManager(&emW);
+        pcW.setHotbar(&hbW);
+        hbW.setStack(hbW.selectedSlot(), RecipeRegistry::WheatId, 1);
+        const bool wireWheat = emW.foodLureAt(EntityManager::MobCow) && emW.foodLureAt(EntityManager::MobSheep)
+            && !emW.foodLureAt(EntityManager::MobPig) && !emW.foodLureAt(EntityManager::MobChicken);
+        hbW.setStack(hbW.selectedSlot(), RecipeRegistry::SeedId, 1);
+        const bool wireSeed = emW.foodLureAt(EntityManager::MobChicken) && !emW.foodLureAt(EntityManager::MobCow)
+            && !emW.foodLureAt(EntityManager::MobSheep) && !emW.foodLureAt(EntityManager::MobPig);
+        hbW.setStack(hbW.selectedSlot(), RecipeRegistry::CarrotId, 1);
+        const bool wireCarrot = emW.foodLureAt(EntityManager::MobPig) && !emW.foodLureAt(EntityManager::MobCow)
+            && !emW.foodLureAt(EntityManager::MobChicken);
+        hbW.setStack(hbW.selectedSlot(), 0, 0);
+        const bool wireClear = !emW.foodLureAt(EntityManager::MobCow) && !emW.foodLureAt(EntityManager::MobSheep)
+            && !emW.foodLureAt(EntityManager::MobPig) && !emW.foodLureAt(EntityManager::MobChicken);
+        const bool wired = wireWheat && wireSeed && wireCarrot && wireClear;
+        // (d) 源码钉（滤注释；锁接线/门/缝存在性——阴性轮红腿是 P-t1025a 的行为面）。
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QStringList miss;
+        miss << pinSet(root + QStringLiteral("/src/Entities/entitymanager.h"), {
+            {"hdr-love-duration-mc", "static constexpr float kLoveDuration    = 30.0f;"},
+            {"hdr-breed-cooldown-mc", "static constexpr float kBreedCooldown   = 300.0f;"},
+            {"hdr-baby-grow-mc", "static constexpr float kBabyGrowTime    = 1200.0f;"},
+            {"hdr-baby-scale-mc", "static constexpr float kBabyScale       = 0.5f;"},
+            {"hdr-breed-range-mc", "static constexpr float kBreedRange      = 3.0f;"},
+            {"hdr-baby-feed-grow-mc", "static constexpr float kBabyFeedGrow    = 120.0f;"},
+            {"hdr-follow-range-mc", "static constexpr float kBabyFollowRange    = 16.0f;"},
+            {"hdr-lure-range-mc", "static constexpr float kFoodLureRange      = 10.0f;"},
+            {"hdr-seam-decl", "Q_INVOKABLE void setBreedTimings(float breedCooldownSec, float babyGrowSec);"},
+            {"hdr-lure-decl", "Q_INVOKABLE void setFoodLure(int mobType, bool active);"},
+            {"hdr-lure-table", "bool m_foodLure[kMobTypeCount] = {};"},
+        });
+        miss << pinSet(root + QStringLiteral("/src/Entities/entitymanager.cpp"), {
+            {"cpp-baby-box-halve", "baby.halfW *= kBabyScale;"},            {"cpp-baby-hp-halve", "baby.maxHealth = std::max(1, baby.maxHealth / 2);"},
+            {"cpp-grow-restore-box", "applyMobCollisionBox(e.mobType, e);"},
+            {"cpp-baby-follow-hook", "const int parent = findNearestAdultSameType(idx);"},
+            {"cpp-lure-gate", "m_foodLure[e.mobType]"},
+        });
+        miss << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-food-map-single", "const bool match = breedFoodMatches(mt, heldItemId);"},
+            {"cpp-lure-refresh", "m_entityManager->setFoodLure(EntityManager::MobCow, breedFoodMatches(EntityManager::MobCow, held));"},
+        });
+        miss << pinSet(root + QStringLiteral("/src/Game/playercontroller.h"), {
+            {"hdr-lure-refresh-decl", "void updateFoodLure();"},
+        });
+        const bool pinsOk = miss.isEmpty();
+        if (!pinsOk)
+            qInfo().noquote() << "  [t1025b diag] pin miss:" << miss.join(QLatin1Char(','));
+        ok = ok && follow && lureState && lureIn && lureFar && lureOff && wired && pinsOk;
+        if (!ok)
+            qInfo().noquote() << "  [t1025b diag] follow" << follow << "lureState" << lureState
+                              << "lureIn" << lureIn << "lureFar" << lureFar << "lureOff" << lureOff
+                              << "wired" << wired;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1025b baby-follow + food-lure: a baby orphaned by killing both parents "
+                             "locks yaw onto and walks toward the nearest adult of the SAME species "
+                             "while ignoring the adult cow control (follow-nearest-adult semantics); "
+                             "with the pig food-lure gate on, a pig inside the 10-block radius pins "
+                             "yaw on and walks toward the player, a pig beyond the radius keeps "
+                             "bounded wander drift with unpinned yaw, and turning the gate off "
+                             "unpins; the Game-layer wiring drives the gate table through the real "
+                             "Hotbar slotsChanged chain (wheat->cow+sheep, seeds->chicken, "
+                             "carrot->pig, empty hand clears all - one breedFoodMatches authority "
+                             "shared with the feeding path); source pins lock the seam/lure contract "
+                             "surfaces, both love gates and the baby box/HP halving"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag follow=%1 lureState=%2 lureIn=%3 lureFar=%4 "
+                                                   "lureOff=%5 wired=%6 pins=%7")
+                                        .arg(follow).arg(lureState).arg(lureIn).arg(lureFar)
+                                        .arg(lureOff).arg(wired).arg(pinsOk));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
