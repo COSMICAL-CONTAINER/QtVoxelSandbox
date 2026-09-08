@@ -164,6 +164,13 @@ public:
     static constexpr int kJungleTempleSeedOff = 22617;   // 丛林神殿 hash 偏移（placeJungleTemple / jungleTempleSites 同源）
     static constexpr int kJungleTempleHalf = 7;          // 苔石建筑足迹半边（15×15）
     static constexpr int kJungleTempleRoofY = 11;        // 屋顶层相对地表（y = surfaceY + 11）
+    // review0905 #3：神殿保底「出生区可见」半径（单一权威：desertTempleSites / jungleTempleSites 保底
+    //   触发门 + P-t1010b 探针同源引用）。语义 = 距世界中心 R 格内 0 座神殿即补座（R 覆盖出生游走圈：
+    //   160² 世界中心 (80,80)、R=56 ≈ 出生环走半径上限；小世界 R 超半边 → 门恒开 → 退化为旧「全世界
+    //   0 座」口径；**R 内有群系但无合格列〔海域 / 贴基岩 / margin 守卫〕→ 补座落全图最近合格列，可
+    //   在 R 外 = 如实退化，探针契约相应为「R 内合格列 ⇒ R 内神殿」，登记**）。探针断言须与本值同源
+    //   （World::kTempleSpawnGuaranteeRadius 直读，勿复制字面量）。
+    static constexpr int kTempleSpawnGuaranteeRadius = 56;
     // t1000 成就「隔墙有眼」单一权威判定：点 (x,y,z)（玩家脚底，世界连续坐标）是否落在要塞结构足迹内。
     //   bounds = 结构原点 (cx,cy,cz) 逐轴闭区间：水平 cell ∈ [cx±kStrongholdHalf] / [cz±kStrongholdHalf]
     //   （含墙环 cell——「进入结构区域」的体素足迹口径）、竖直 cell ∈ [cy, cy+kStrongholdWallH+1]（含地板与
@@ -264,6 +271,11 @@ public:
     //   PLAN §2-K 确定性，同 seed 同群系图）。分层（PLAN §2）：World 低层只读查询，不依赖 Entities / Renderer。
     //   消费点：EntityManager::pickPassiveMobType 据本值加权选被动生物类型（t374 群系化刷怪）。
     Q_INVOKABLE int biomeIdAt(int x, int z) const { return int(biomeAt(x, z)); }
+    // review0905 #3：神殿落位合格判定（siteOk 五守卫：margin / 群系 / 海域 / 顶越界 / 贴基岩）公开只读口。
+    //   worldgen 三路（主路径 / 保底补座 / tryPlace 落位）共用的同一纯函数（world.cpp 定义处单一权威）——
+    //   探针 P-t1010b 据此判「R 内存在合格列」（保底契约前提），与实现零复刻漂移。
+    bool desertTempleSiteOk(int cx, int cz) const;
+    bool jungleTempleSiteOk(int cx, int cz) const;
 
     // t385 天气系统（机制等价 MC 1.0 天气：clear/rain/snow/thunder 随机转换；天空变暗；按群系）。
     //   全局单一天气态（weatherState）+ tickWeather 随机时长转换（QRandomGenerator 运行期模拟；天气是动态模拟
@@ -1278,8 +1290,7 @@ private:
     std::vector<StructureSite> jungleTempleSites() const;
     // 神殿落位五守卫（t1010 siteOk lambda 上收方法；概率主路径 / 保底补座 / place* tryPlace 三路共用
     //    → 落位判据永不漂移。place* 内保留同名薄包装 lambda 仅为存 P-t1010 源码钉字面）。
-    bool desertTempleSiteOk(int cx, int cz) const;
-    bool jungleTempleSiteOk(int cx, int cz) const;
+    //    review0905 #3 起声明上提至 public（探针 P-t1010b 合格列前提同源直读；定义仍在 world.cpp）。
     // 结构区域表重建（generate 末 / finishLoad 末各调一次；先清后填幂等）：逐结构 sites() 重推导 →
     //    m_structureRegions 落表。加载期一次性纯算术（~网格候选数 × 常数守卫），非每 tick。
     void rebuildStructureRegions();
