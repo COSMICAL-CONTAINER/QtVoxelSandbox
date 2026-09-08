@@ -9,15 +9,15 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1026
-current_task_status: IN_PROGRESS
-last_completed_task: t1025
-last_task_closure_commit: cb23dd0
-last_verified_commit: 0682795
+current_task: t1028
+current_task_status: READY
+last_completed_task: t1026
+last_task_closure_commit: bceef37
+last_verified_commit: bceef37
 last_governance_review: 2026-09-08
 governance_review_due: false
-completed_tasks_since_governance_review: 0
-next_task: t1028
+completed_tasks_since_governance_review: 3
+next_task: t1029
 next_task_source: docs/dev-plan.md R19.21 execution order
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -34,10 +34,9 @@ needs_human: false
 
 ## Recovery Point
 
-- 最近闭环：t1025 动物繁殖（11a1a2f/9bcaff0/cb23dd0，矩阵 483→485）。daf76f0 为 amend 前悬空对象，作废。
-- 治理审计：2026-09-08 首次初始化审计 **GREEN**（docs/governance-audit-2026-09-08.md）。
-- 进行中：t1026 小麦农业（子agent WIP 4 文件，未提交——blockregistry.h/playercontroller/探针 +310）。
-- 下一最小动作：续接收口 t1026（三教训：mtime/可达域/pinSet），绿后回标并进 t1028。
+- 最近闭环：t1026 小麦农业（7ad0e9e/c3db460/bceef37，矩阵 485→487）。收口根因=探针 mineBlockF dt 坑（t1022 同款），已入账。
+- 治理审计：2026-09-08 首次初始化审计 **GREEN**（docs/governance-audit-2026-09-08.md）；此后已完成 3 任务（t1024/t1025/t1026），审计触发点=第 5 任务（t1029）后。
+- 下一最小动作：t1028 音符盒（新方块+调音+红石触发+程序合成音色）。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。
 - 若任务完成：更新当前任务、状态、最新 commit、验证结果、任务计数和下一触发点，并与 dev-plan 同一 docs 闭环提交。
 
