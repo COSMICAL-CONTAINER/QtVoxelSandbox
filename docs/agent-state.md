@@ -10,16 +10,16 @@
 project: QtMinecraft
 state: READY
 current_task: t1026
-current_task_status: READY
+current_task_status: IN_PROGRESS
 last_completed_task: t1025
-last_task_closure_commit: daf76f0
-last_verified_commit: daf76f0
-last_governance_review: null
-governance_review_due: true
+last_task_closure_commit: cb23dd0
+last_verified_commit: 0682795
+last_governance_review: 2026-09-08
+governance_review_due: false
 completed_tasks_since_governance_review: 0
-next_task: t1026
+next_task: t1028
 next_task_source: docs/dev-plan.md R19.21 execution order
-active_write_lease: none_observed
+active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
 needs_human: false
@@ -34,8 +34,10 @@ needs_human: false
 
 ## Recovery Point
 
-- 最近闭环：t1025 动物繁殖，fix/test/docs 已完成，矩阵 483→485。
-- 下一最小动作：先按治理文档完成一次初始化方向审计；若 GREEN，再读取 t1026 的完整任务条目和依赖，开始单任务闭环。
+- 最近闭环：t1025 动物繁殖（11a1a2f/9bcaff0/cb23dd0，矩阵 483→485）。daf76f0 为 amend 前悬空对象，作废。
+- 治理审计：2026-09-08 首次初始化审计 **GREEN**（docs/governance-audit-2026-09-08.md）。
+- 进行中：t1026 小麦农业（子agent WIP 4 文件，未提交——blockregistry.h/playercontroller/探针 +310）。
+- 下一最小动作：续接收口 t1026（三教训：mtime/可达域/pinSet），绿后回标并进 t1028。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。
 - 若任务完成：更新当前任务、状态、最新 commit、验证结果、任务计数和下一触发点，并与 dev-plan 同一 docs 闭环提交。
 
