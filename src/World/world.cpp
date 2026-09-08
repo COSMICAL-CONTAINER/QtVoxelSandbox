@@ -472,16 +472,27 @@ std::vector<World::StructureSite> World::desertTempleSites() const
         }
     }
 
-    // t1010 保底（对标 placeStronghold t564「收集候选 → 选最优落点」口径）：沙漠神殿网格稀（160² 仅
-    //   3×3=9 网格候选）× 45% 命中 × Desert 群系占比 ~15-20%（成片）→ 期望 ~0.7 座/世界，近半数含沙漠
-    //   世界 0 落位（用户实测「新世界未见到神殿」根因：联合概率过低，非放置静默失败 —— 地表 y 取
-    //   heightAt 与地形填充同源，R19.19 的 64 高错位仅存在于 rig 探针侧）。概率主路径 0 落位且世界含
-    //   Desert 群系 → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1：确定性纯函数（同 seed 同
-    //   点位，PLAN §2-K）→ 「有沙漠群系必见神殿」。中心距离并列 → 扫描序（x 外 z 内）先到者胜，仍确定。
-    //   t1020 迁移注：placed == 0 ⟺ 主路径入选表空（siteOk 预筛 → tryPlace 恒成功），语义同位。
-    constexpr bool kDesertBiomeGuarantee = true; // 阴性轮钉：置 false → 含沙漠世界可 0 落位 → P-t1010 必落腿红
-    int placed = int(sites.size());
-    if (placed == 0 && kDesertBiomeGuarantee) {
+    // t1010 保底（review0905 #3 口径升级：触发门从「全世界 0 座」改「出生圈 R 内 0 座」）。原口径：沙漠
+    //   神殿网格稀（160² 仅 3×3=9 网格候选）× 45% 命中 × Desert 群系占比 ~15-20%（成片）→ 期望 ~0.7
+    //   座/世界，近半数含沙漠世界 0 落位（用户实测「新世界未见到神殿」根因：联合概率过低，非放置静默
+    //   失败 —— 地表 y 取 heightAt 与地形填充同源，R19.19 的 64 高错位仅存在于 rig 探针侧）。但
+    //   「placed == 0」只兜全世界 0 座 —— 主路径恰在世界角落落 1 座时保底不触发，出生区（世界中心游走
+    //   圈）仍 0 神殿，用户主诉「所在地即 Desert 却从未见神殿」只解了一半。现口径：主路径最近座距世界
+    //   中心 > kTempleSpawnGuaranteeRadius（world.h 单一权威，56 覆盖出生游走圈）且世界含 Desert 群系
+    //   → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1；补座选列逻辑不变（已选距中心最近合格
+    //   列 → 只要 R 内存在合格列，补座天然落 R 内）。确定性纯函数（同 seed 同点位，PLAN §2-K）→「出生
+    //   圈内有沙漠群系必见神殿」。中心距离并列 → 扫描序（x 外 z 内）先到者胜，仍确定。极小世界（边长 <
+    //   2×margin，或 R 超半边 → 门恒开）如实 0 / 退化为旧口径，登记。
+    //   t1020 迁移注：主路径入选表空 ⟺ 距离门取 +∞（保底必触发），语义同位。
+    constexpr bool kDesertBiomeGuarantee = true; // 阴性轮钉：置 false → 含沙漠世界可出生区 0 落位 → P-t1010b 必落腿红
+    const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
+    double nearestCenterSq = 1e18; // 主路径最近座到中心距离平方（入选表空 → +∞ → 保底必触发）
+    for (const StructureSite &s : sites) {
+        const double dx = double(s.cx) - centerX, dz = double(s.cz) - centerZ;
+        nearestCenterSq = std::min(nearestCenterSq, dx * dx + dz * dz);
+    }
+    const double guaranteeRSq = double(kTempleSpawnGuaranteeRadius) * double(kTempleSpawnGuaranteeRadius);
+    if (nearestCenterSq > guaranteeRSq && kDesertBiomeGuarantee) {
         bool hasDesert = false; // 群系在场扫描（biomeAt 列级 memo，generate 主循环已填满 → 纯数组读）
         for (int x = 0; x < m_width && !hasDesert; ++x)
             for (int z = 0; z < m_depth && !hasDesert; ++z)
@@ -489,7 +500,6 @@ std::vector<World::StructureSite> World::desertTempleSites() const
         if (hasDesert) {
             int bestX = -1, bestZ = -1;
             double bestDistSq = 1e18;
-            const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
             for (int x = 0; x < m_width; ++x)
                 for (int z = 0; z < m_depth; ++z) {
                     if (!isDesert(x, z)) continue; // 先群系短门（memo 读）→ 贵守卫（海 / 高度 fbm）只跑沙漠列
@@ -556,13 +566,22 @@ std::vector<World::StructureSite> World::jungleTempleSites() const
         }
     }
 
-    // t1010 保底（同 placeDesertTemple 口径）：丛林神殿 4×4=16 候选 × 50% 命中 × Jungle 占比 ~13.5%
-    //   （成片）→ 期望 ~1.1 座/世界，仍约四成含丛林世界 0 落位。概率主路径 0 落位且世界含 Jungle 群系
-    //   → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1：确定性纯函数（同 seed 同点位）→
-    //   「有丛林群系必见神殿」。极小世界（边长 < 2×margin）可无合格列 → 如实 0（登记）。
-    constexpr bool kJungleBiomeGuarantee = true; // 阴性轮钉：置 false → 含丛林世界可 0 落位 → P-t1010 必落腿红
-    int placed = int(sites.size()); // t1020：placed == 0 ⟺ 主路径入选表空（同 desertTempleSites 口径）
-    if (placed == 0 && kJungleBiomeGuarantee) {
+    // t1010 保底（review0905 #3 口径升级，同 desertTempleSites 注）：丛林神殿 4×4=16 候选 × 50% 命中
+    //   × Jungle 占比 ~13.5%（成片）→ 期望 ~1.1 座/世界。旧「placed == 0」只兜全世界 0 座 —— 主路径在
+    //   世界角落落座时出生区仍 0 神殿。现口径：主路径最近座距世界中心 > kTempleSpawnGuaranteeRadius
+    //   （world.h 单一权威）且世界含 Jungle 群系 → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座
+    //   ≥1：确定性纯函数（同 seed 同点位）→「出生圈内有丛林群系必见神殿」。极小世界（边长 < 2×margin，
+    //   或 R 超半边 → 门恒开退化为旧口径）可无合格列 → 如实 0（登记）。
+    //   t1020 迁移注：主路径入选表空 ⟺ 距离门取 +∞（同 desertTempleSites 口径）。
+    constexpr bool kJungleBiomeGuarantee = true; // 阴性轮钉：置 false → 含丛林世界可出生区 0 落位 → P-t1010b 必落腿红
+    const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
+    double nearestCenterSq = 1e18; // 主路径最近座到中心距离平方（入选表空 → +∞ → 保底必触发）
+    for (const StructureSite &s : sites) {
+        const double dx = double(s.cx) - centerX, dz = double(s.cz) - centerZ;
+        nearestCenterSq = std::min(nearestCenterSq, dx * dx + dz * dz);
+    }
+    const double guaranteeRSq = double(kTempleSpawnGuaranteeRadius) * double(kTempleSpawnGuaranteeRadius);
+    if (nearestCenterSq > guaranteeRSq && kJungleBiomeGuarantee) {
         bool hasJungle = false; // 群系在场扫描（biomeAt 列级 memo → 纯数组读）
         for (int x = 0; x < m_width && !hasJungle; ++x)
             for (int z = 0; z < m_depth && !hasJungle; ++z)
@@ -570,7 +589,6 @@ std::vector<World::StructureSite> World::jungleTempleSites() const
         if (hasJungle) {
             int bestX = -1, bestZ = -1;
             double bestDistSq = 1e18;
-            const double centerX = double(m_width) * 0.5, centerZ = double(m_depth) * 0.5;
             for (int x = 0; x < m_width; ++x)
                 for (int z = 0; z < m_depth; ++z) {
                     if (biomeAt(x, z) != Biome::Jungle) continue; // 先群系短门（memo 读）→ 贵守卫只跑丛林列
