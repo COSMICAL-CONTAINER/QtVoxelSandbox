@@ -37429,7 +37429,7 @@ Item {
             QFile wf(root + QStringLiteral("/src/World/world.cpp"));
             const QString src = wf.open(QIODevice::ReadOnly) ? QString::fromUtf8(wf.readAll()) : QString();
             okPin = src.contains(QStringLiteral("if (step % kSupportInterval == 2) {"))
-                 && src.contains(QStringLiteral("m_chunks.setBlock(px, wy, pz, BlockRegistry::Torch, attach);"))
+                 && src.contains(QStringLiteral("putStruct(px, wy, pz, BlockRegistry::Torch, attach);")) // review0905 #4 收口 putStruct 同口（旧裸 setBlock 针随行迁移）
                  && src.contains(QStringLiteral("quint8(BlockRegistry::TorchOnNX)"))
                  && src.contains(QStringLiteral("constexpr unsigned kTorchPct    = 55u;"));
         }
@@ -37980,6 +37980,9 @@ Item {
     //        + 门楣 CutSandstone v=4 |u|≤2（偏差 6 刻纹→切制）；
     //    (b) 安卡纹样四面：-Z / ±X 三面 v1..7 各恰 21 格 WoolOrange 且与源行表逐格全等（四折旋转 + 镜像
     //        对称），+Z 正面 = 21 - 主入口门洞 3 格（u=0,v1..3）- 门楣 CutSandstone 覆盖 5 格（v4,|u|≤2）= 13；
+    //        review0905 #5 考据收口：MC 门面本就无完整安卡（完整安卡形〔橙陶瓦、蓝陶瓦心〕只在地面中央
+    //        与密室，外立面仅前侧双角塔条带装饰、门楣上即切制砂岩 —— wiki Desert_Pyramid/Structure 蓝图）
+    //        → 门面截断 = 忠实同构，非缺陷（不追「四面等量」）。
     //    (c) 风玫瑰：地板 y=S 菱域棋盘 WoolOrange 恰 24（(dx+dz) 偶、|dx|+|dz|≤5、非中心）+ WoolBlue
     //        足迹域恰 1（地板中心；偏差 3 时代口径）；
     //    (d) 入口三处（+Z 主入口阶梯门洞 / -Z 两副入口 u=±5）+ 顶窗四面 + L8/L9 顶部暗腔；
@@ -37997,6 +38000,64 @@ Item {
         // 与源码同源的安卡行表（v → |u| 掩码；镜像对称由掩码天然成立）。
         const int ankhMask[11] = { 0, 0b1001, 0b1001, 0b1001, 0b0111, 0b0100, 0b0100, 0b0011, 0, 0, 0 };
         const int layerHalf[11] = { 10, 10, 9, 9, 8, 8, 7, 7, 6, 6, 5 };
+        // (a) 形制采样（足迹四向 + 逐层半边错位点 + 顶冠 / 门楣）—— review0905 #3 首跑修：拉成 lambda 供
+        //    主循环与 (g) 重扫同款复用。首跑 (g) 用「扫序前 4 箱」朴素质心重定位神殿，与主循环「首个恰 4 箱
+        //    净簇」选择口径错位（世界含残簇 / 多神殿时二者可不同座——保底上线后多神殿世界常见：首跑 seed
+        //    777 实证 = 主路径座被峡谷削至 3 箱〔残簇静默跳过〕+ 保底新增座，重扫质心 = 3+1 跨座错位 → FNV
+        //    静默失配假红）；现重扫与主循环同构（全簇迭代 + 恰 4 箱 + 形制筛），选择口径永不漂移。
+        auto t1003ShapeOk = [&layerHalf](World &w, int cx, int cz, int S) {
+            for (const int d : { -10, 0, 10 }) {
+                if (!(w.blockAt(cx + 10, S, cz + d) == BR::Sandstone
+                    && w.blockAt(cx - 10, S, cz + d) == BR::Sandstone
+                    && w.blockAt(cx + d, S, cz + 10) == BR::Sandstone
+                    && w.blockAt(cx + d, S, cz - 10) == BR::Sandstone))
+                    return false;
+            }
+            for (int v = 0; v <= 9; ++v) {
+                // 取样错位偏移：避开安卡纹样（|u|≤3）、后侧副入口（|u|=5）、暗渠入口（+Z u=+4）、
+                // 门洞 / 门楣（+Z |u|≤2）—— 四面各取无开口的偏移位。
+                if (!(w.blockAt(cx + layerHalf[v], S + v, cz - 4) == BR::Sandstone
+                    && w.blockAt(cx - layerHalf[v], S + v, cz + 4) == BR::Sandstone
+                    && w.blockAt(cx - 4, S + v, cz + layerHalf[v]) == BR::Sandstone
+                    && w.blockAt(cx + 4, S + v, cz - layerHalf[v]) == BR::Sandstone))
+                    return false;
+            }
+            return w.blockAt(cx, S + 10, cz) == BR::CutSandstone
+                && w.blockAt(cx + 5, S + 10, cz + 5) == BR::CutSandstone
+                && w.blockAt(cx - 5, S + 10, cz - 5) == BR::CutSandstone
+                && w.blockAt(cx + 2, S + 4, cz + 8) == BR::CutSandstone
+                && w.blockAt(cx - 2, S + 4, cz + 8) == BR::CutSandstone;
+        };
+        // (g) 净簇重扫（与主循环同构：全图 PyramidFlag 箱扫 → Chebyshev(6,6,3) 聚簇 → 恰 4 箱 → 形制筛 →
+        //    首个净簇质心）。返回是否寻得；寻得时回填质心坐标。
+        auto t1003FirstCleanCentroid = [&t1003ShapeOk](World &w, int &cxOut, int &czOut) {
+            struct PCg { int x, y, z; };
+            std::vector<PCg> pcg;
+            for (int x = 0; x < w.width(); ++x)
+                for (int z = 0; z < w.depth(); ++z)
+                    for (int y = 0; y < w.height(); ++y)
+                        if (w.blockAt(x, y, z) == BR::Chest
+                            && (w.stateAt(x, y, z) & BR::ChestStatePyramidFlag))
+                            pcg.push_back({ x, y, z });
+            std::vector<bool> usedG(pcg.size(), false);
+            for (size_t i = 0; i < pcg.size(); ++i) {
+                if (usedG[i]) continue;
+                int n = 0, sx = 0, sz = 0;
+                for (size_t j = i; j < pcg.size(); ++j)
+                    if (!usedG[j] && std::abs(pcg[j].x - pcg[i].x) <= 6
+                                  && std::abs(pcg[j].z - pcg[i].z) <= 6
+                                  && std::abs(pcg[j].y - pcg[i].y) <= 3) {
+                        usedG[j] = true; ++n; sx += pcg[j].x; sz += pcg[j].z;
+                    }
+                if (n != 4) continue;
+                const int cgx = int((sx + 2) / 4), cgz = int((sz + 2) / 4);
+                const int Sg = w.heightAt(cgx, cgz);
+                if (!t1003ShapeOk(w, cgx, cgz, Sg)) continue;
+                cxOut = cgx; czOut = cgz;
+                return true;
+            }
+            return false;
+        };
         auto sampleHashT1003 = [](World &w, int cx, int cy, int cz) {
             quint32 h = 0x811c9dc5u;
             auto step = [&h](quint32 v) { h ^= v; h *= 0x01000193u; };
@@ -38049,30 +38110,8 @@ Item {
                 cx = int((cx + 2) / 4);
                 cz = int((cz + 2) / 4);
                 const int S = wT1003.heightAt(cx, cz);
-                // (a) 足迹 + 逐层半边 + 顶冠 / 门楣。
-                bool shapeOk = true;
-                for (const int d : { -10, 0, 10 }) {
-                    shapeOk = shapeOk
-                        && wT1003.blockAt(cx + 10, S, cz + d) == BR::Sandstone
-                        && wT1003.blockAt(cx - 10, S, cz + d) == BR::Sandstone
-                        && wT1003.blockAt(cx + d, S, cz + 10) == BR::Sandstone
-                        && wT1003.blockAt(cx + d, S, cz - 10) == BR::Sandstone;
-                }
-                for (int v = 0; v <= 9; ++v) {
-                    // 取样错位偏移：避开安卡纹样（|u|≤3）、后侧副入口（|u|=5）、暗渠入口（+Z u=+4）、
-                    // 门洞 / 门楣（+Z |u|≤2）—— 四面各取无开口的偏移位。
-                    shapeOk = shapeOk
-                        && wT1003.blockAt(cx + layerHalf[v], S + v, cz - 4) == BR::Sandstone
-                        && wT1003.blockAt(cx - layerHalf[v], S + v, cz + 4) == BR::Sandstone
-                        && wT1003.blockAt(cx - 4, S + v, cz + layerHalf[v]) == BR::Sandstone
-                        && wT1003.blockAt(cx + 4, S + v, cz - layerHalf[v]) == BR::Sandstone;
-                }
-                shapeOk = shapeOk
-                    && wT1003.blockAt(cx, S + 10, cz) == BR::CutSandstone
-                    && wT1003.blockAt(cx + 5, S + 10, cz + 5) == BR::CutSandstone
-                    && wT1003.blockAt(cx - 5, S + 10, cz - 5) == BR::CutSandstone
-                    && wT1003.blockAt(cx + 2, S + 4, cz + 8) == BR::CutSandstone
-                    && wT1003.blockAt(cx - 2, S + 4, cz + 8) == BR::CutSandstone;
+                // (a) 足迹 + 逐层半边 + 顶冠 / 门楣（t1003ShapeOk 同款：(g) 重扫复用同一选择口径）。
+                const bool shapeOk = t1003ShapeOk(wT1003, cx, cz, S);
                 if (!shapeOk) { // 神殿先于峡谷生成 → 峡谷切塔 = 地形破坏弃样（净样口径，同 t995/t1001）
                     ++ravineSkipped;
                     qInfo().noquote() << "  [t1003 diag] seed" << sd << "temple@" << cx << cz
@@ -38206,25 +38245,16 @@ Item {
             wR1003.setDepth(160);
             wR1003.setHeight(128);
             wR1003.setSeed(int(firstSeed));
-            // 重扫首个神殿中心（同 seed 同分布 → 扫描序前 4 箱即首簇，质心口径与首轮一致）。
-            int cx = 0, cz = 0, found = 0;
-            for (int x = 0; x < wR1003.width() && found < 4; ++x)
-                for (int z = 0; z < wR1003.depth() && found < 4; ++z)
-                    for (int y = 0; y < wR1003.height() && found < 4; ++y)
-                        if (wR1003.blockAt(x, y, z) == BR::Chest
-                            && (wR1003.stateAt(x, y, z) & BR::ChestStatePyramidFlag) != 0) {
-                            cx += x;
-                            cz += z;
-                            ++found;
-                        }
-            bool centerOk = false;
-            if (found == 4) {
-                cx = int((cx + 2) / 4);
-                cz = int((cz + 2) / 4);
-                centerOk = true;
-            }
-            const int S = wR1003.heightAt(cx, cz);
-            ok = ok && centerOk && sampleHashT1003(wR1003, cx, S, cz) == firstHash;
+            // 重扫首神殿中心：与主循环同构的净簇选择（t1003FirstCleanCentroid —— 同序同筛，选择永不漂移）。
+            int cx = 0, cz = 0;
+            const bool centerOk = t1003FirstCleanCentroid(wR1003, cx, cz);
+            const int S = centerOk ? wR1003.heightAt(cx, cz) : 0;
+            const quint32 reHash = centerOk ? sampleHashT1003(wR1003, cx, S, cz) : 0;
+            ok = ok && centerOk && reHash == firstHash;
+            if (!centerOk || reHash != firstHash) // review0905 #3 起 (g) 失配带现场 diag（原静默判假）
+                qInfo().noquote() << "  [t1003 diag] re-gen mismatch: seed" << firstSeed
+                                  << "centerOk" << centerOk << "center@" << cx << cz << "S" << S
+                                  << "reHash" << reHash << "vs firstHash" << firstHash;
         }
         // (h) 源码钉（world.cpp）：层半边表 / 密室深度 / 安卡行表 / 中心蓝块 / 暗渠循环 / 箱 state。
         {
@@ -38247,7 +38277,10 @@ Item {
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t1003 desert temple per-block rebuild: 21x21 stepped pyramid (layer halves"
                              " 10..5, cut-sandstone cap + lintel), four-face ankh wool pattern (21/face,"
-                             " front 13 at door+lintel holes), floor wind-rose checker 24 orange + center blue,"
+                             " front 13 at door+lintel holes - MC-faithful per wiki blueprint: the"
+                             " complete ankh figure lives on the floor centre and the cellar, facades"
+                             " carry only striped front-tower bands, no complete pattern above the"
+                             " door), floor wind-rose checker 24 orange + center blue,"
                              " 3 entrances + 4 top windows + upper hollow, secret diagonal tunnel, chamber"
                              " 7x7x4 with 4 oriented pyramid chests + plate-over-3x3-TNT (9) chain, well"
                              " deterministic re-gen, source pins, temples" << templesTotal << "worlds"
@@ -39091,8 +39124,10 @@ Item {
     //    Desert 群系占比 ~15-20%（成片，非逐格独立）→ 期望 ~0.7 座/世界，近半数含沙漠世界 0 落位；
     //    丛林同构（16 候选 × 50% × ~13.5% ≈ 1.1）。地表判定本身无错位：放置 surfaceY = heightAt 与
     //    generate 地形填充同源（R19.19 的「64 高 vs 地表基线」错位仅存在于 rig 探针侧，见 P-t1003 注）。
-    //    修法：保底机制（对标 placeStronghold t564「收集候选 → 选最优落点」口径）—— 概率主路径 0 落位
-    //    且世界含该群系 → 全图合格列（同 siteOk 五守卫）选距世界中心最近补座 ≥1（确定性纯函数）。
+    //    修法：保底机制（对标 placeStronghold t564「收集候选 → 选最优落点」口径）—— review0905 #3 起
+    //    触发门 =「主路径最近座距世界中心 > kTempleSpawnGuaranteeRadius(56)」且世界含该群系 → 全图合格
+    //    列（同 siteOk 五守卫）选距世界中心最近补座 ≥1（确定性纯函数）；旧「全世界 0 座」门在世界角落
+    //    1 座时不触发（出生区仍 0 神殿）→ 由 P-t1010b 出生圈加严腿钉住。
     //    rig：32 seed × 160×160×128（游戏本体 Main.qml 同尺寸）全量 worldgen；落位数 / 群系列数取自
     //    qInstallMessageHandler 捕获的 worldgen 自报（"worldgen: biomes …" / "worldgen: … temples = N"
     //    行 = 引擎单次 generate 的真实输出，非探针复刻；其余消息链式转发不吞）。断言五腿：
@@ -39165,6 +39200,24 @@ Item {
         quint32 firstDesertSeed = 0, firstJungleSeed = 0;
         GenRecT1010 firstDesertRec, firstJungleRec;
         QStringList violT1010;
+        // ── P-t1010b 加严腿（review0905 #3）数据面：出生圈 R 内神殿座数（块级扫：沙漠 = PyramidFlag
+        //    箱或 CutSandstone 任一块〔全高扫〕/ 丛林 = IronDoor 下格 state 0 y≥40 + 门心 (x-3,z) 群系核
+        //    == Jungle，或 Lever / Dispenser 任一块〔全高扫〕）。证据块均 worldgen 独占（grep 全树核实），
+        //    峡谷削塔后的残损神殿由大面积独占块（顶冠/门楣 ~126 块、拉杆/发射器）兜底在场——三跑迭代
+        //    实证链：y 带漏计（跑1）→「恰 4 箱完整簇」藏残簇（跑2 seed 777 三箱座）→ 箱组/门被整组
+        //    削光（跑3 seed 42/2026 箱 0、777/97531/20250904 门 0）→ 独占块证据终版。证据距世界中心
+        //    ≤ R+4 计「圈内」（箱-心偏移 Chebyshev ≤3 / 丛林门偏移 +3 容差）。R 直读 World::
+        //    kTempleSpawnGuaranteeRadius（world.h 单一权威，勿复制字面量）。
+        //    判据（review0905 #3 首跑修正：前提从「群系列在 R 内」校正为「**合格列**在 R 内」——首跑实证
+        //    R 内有群系 ≠ R 内有合格列〔海域 / 贴基岩 / margin 守卫拒〕，此时保底补座落全图最近合格列、
+        //    如实在 R 外 = world.h 登记的实现契约内退化，非缺陷）：R 内合格列 ⇒ R 内神殿箱 / 门在场
+        //    ≥1（保底必触发且落座 ≤R，或主路径已覆盖）；R 内簇数 ≤ 日志总数（保底不重复不膨胀；
+        //    n≥1 簇互斥且单神殿箱永不分裂 → 簇数 ≤ 有箱神殿数，方向安全）。
+        //    群系列在 R 计数保留 = diag 面（契约退化的观察窗口）。合格列判定 = World::desertTempleSiteOk /
+        //    jungleTempleSiteOk 同源直读（review0905 #3 起公开，零复刻漂移）。
+        QStringList violT1010b;
+        int seedsDesertEligR = 0, seedsJungleEligR = 0, desertRTotal = 0, jungleRTotal = 0;
+        int seedsDesertBiomeR = 0, seedsJungleBiomeR = 0;
         for (quint32 sd : seedsT1010) {
             std::vector<GenRecT1010> framesT1010; // 每世界一清（末帧 = 本世界最终态）
             s_sinkT1010 = &framesT1010;
@@ -39221,6 +39274,114 @@ Item {
                               << "jungleCols" << rec.jungleCols << "| dTemples" << rec.desertT
                               << "(dHash" << dHash << "dDesertGate" << dDesert << ") jTemples"
                               << rec.jungleT << "(jHash" << jHash << "jJungleGate" << jJungle << ")";
+            // (f-t1010b 数据面) 出生圈 R 内神殿块级扫（本世界 wT1010 在域内直接扫，避免二次 worldgen）。
+            {
+                const double cR = double(World::kTempleSpawnGuaranteeRadius);
+                const double ccx = double(wT1010.width()) * 0.5, ccz = double(wT1010.depth()) * 0.5;
+                auto inCircle = [cR, ccx, ccz](double x, double z, double pad) {
+                    const double dx = x - ccx, dz = z - ccz;
+                    return dx * dx + dz * dz <= (cR + pad) * (cR + pad); // pad = 质心半格 / 丛林门偏移容差
+                };
+                // 群系列 / 合格列在圈检查（Desert=2 / Jungle=6，biomeIdAt 列级读；合格列 = siteOk 同源
+                //   直读——siteOk 首门即群系门 → 只在群系列上判合格不漏列）。
+                bool desertBiomeR = false, jungleBiomeR = false;
+                bool desertEligR = false, jungleEligR = false;
+                for (int x = 0; x < wT1010.width(); ++x) {
+                    if (desertBiomeR && jungleBiomeR && desertEligR && jungleEligR) break;
+                    for (int z = 0; z < wT1010.depth(); ++z) {
+                        const double dx = double(x) - ccx, dz = double(z) - ccz;
+                        if (dx * dx + dz * dz > cR * cR) continue;
+                        const int b = wT1010.biomeIdAt(x, z);
+                        if (b == 2) {
+                            desertBiomeR = true;
+                            desertEligR = desertEligR || wT1010.desertTempleSiteOk(x, z);
+                        } else if (b == 6) {
+                            jungleBiomeR = true;
+                            jungleEligR = jungleEligR || wT1010.jungleTempleSiteOk(x, z);
+                        }
+                    }
+                }
+                // 神殿证据块单遍全高扫（证据独占性 = worldgen 全树 grep 核实）：
+                //   沙漠 = PyramidFlag 箱（独占位）或 **CutSandstone 任一块**（worldgen 仅沙漠神殿顶冠
+                //   + 门楣使用，~126 块/座）——三跑实证峡谷可把 R 内保底神殿的**箱组整组削光**（seed 42 /
+                //   2026 箱 0 在场），顶冠/门楣大面积分布不可能全灭；丛林 = IronDoor 下格 state 0 y≥40 +
+                //   门心 (x-3,z) 群系核 == Jungle（同 (c) 出处核；每座恰 1 下格门）或 **Lever / Dispenser
+                //   任一块**（worldgen 仅丛林神殿拉杆谜题 / 发射器陷阱使用）——门贴地表（S+1）最易被
+                //   峡谷整门削掉（seed 777/97531/20250904 实证）。箱-心偏移 Chebyshev ≤3、门偏移 +3 →
+                //   证据距世界中心 ≤ R+4 计「圈内」。群系 / 合格列在圈 = 前提与 diag（上方块内已扫）。
+                struct PCBb { int x, y, z; };
+                std::vector<PCBb> pcsB;
+                int desertCutSandR = 0;
+                for (int x = 0; x < wT1010.width(); ++x)
+                    for (int z = 0; z < wT1010.depth(); ++z)
+                        for (int y = 0; y < wT1010.height(); ++y) {
+                            const quint8 id = wT1010.blockAt(x, y, z);
+                            if (id == BR::CutSandstone) {
+                                if (inCircle(double(x), double(z), 4.0)) ++desertCutSandR;
+                                continue;
+                            }
+                            if (id == BR::Chest
+                                && (wT1010.stateAt(x, y, z) & BR::ChestStatePyramidFlag))
+                                pcsB.push_back({ x, y, z });
+                        }
+                int desertChestsR = 0;
+                for (const PCBb &c : pcsB)
+                    if (inCircle(double(c.x), double(c.z), 4.0)) ++desertChestsR;
+                std::vector<bool> usedB(pcsB.size(), false);
+                int desertR = 0;
+                for (size_t i = 0; i < pcsB.size(); ++i) {
+                    if (usedB[i]) continue;
+                    int n = 0, sx = 0, sz = 0;
+                    for (size_t j = i; j < pcsB.size(); ++j)
+                        if (!usedB[j] && std::abs(pcsB[j].x - pcsB[i].x) <= 6
+                                      && std::abs(pcsB[j].z - pcsB[i].z) <= 6
+                                      && std::abs(pcsB[j].y - pcsB[i].y) <= 3) {
+                            usedB[j] = true; ++n; sx += pcsB[j].x; sz += pcsB[j].z;
+                        }
+                    if (n < 1) continue; // 恒假（n≥1）；防御式保留
+                    if (inCircle(double(sx) / n, double(sz) / n, 4.0)) ++desertR;
+                }
+                // 丛林门 y≥40（隔离要塞监狱门 y≤32）；Lever / Dispenser 全高（worldgen 独占丛林神殿）。
+                int jungleR = 0, jungleLeverDispR = 0;
+                for (int x = 0; x < wT1010.width(); ++x)
+                    for (int z = 0; z < wT1010.depth(); ++z)
+                        for (int y = 0; y < wT1010.height(); ++y) {
+                            const quint8 id = wT1010.blockAt(x, y, z);
+                            if (id != BR::IronDoor && id != BR::Lever && id != BR::Dispenser) continue;
+                            if (!inCircle(double(x), double(z), 4.0)) continue;
+                            if (id == BR::Lever || id == BR::Dispenser) { ++jungleLeverDispR; continue; }
+                            if (y >= 40 && wT1010.stateAt(x, y, z) == 0
+                                && wT1010.biomeIdAt(x - 3, z) == 6) ++jungleR;
+                        }
+                seedsDesertBiomeR += int(desertBiomeR);
+                seedsJungleBiomeR += int(jungleBiomeR);
+                seedsDesertEligR += int(desertEligR);
+                seedsJungleEligR += int(jungleEligR);
+                desertRTotal += desertR;
+                jungleRTotal += jungleR;
+                // leg1（在场）：合格列在 R ⇒ 神殿证据在 R（保底必触发且落座 ≤R，或主路径已覆盖）。
+                //   证据 = 箱 ∨ 切制砂岩 / 门 ∨ 拉杆 ∨ 发射器（全部独占块；整座被峡谷抹平才可能全灭 =
+                //   净样口径外的登记退化，diag 留痕）。
+                if (desertEligR && desertChestsR < 1 && desertCutSandR < 1)
+                    violT1010b << QStringLiteral("seed %1 desert eligible cols in R but no temple evidence"
+                                                 " in R (chests 0 cut-sand 0, total %2)")
+                                              .arg(sd).arg(rec.desertT);
+                if (jungleEligR && jungleR < 1 && jungleLeverDispR < 1)
+                    violT1010b << QStringLiteral("seed %1 jungle eligible cols in R but no temple evidence"
+                                                 " in R (doors 0 lever/dispenser 0, total %2)")
+                                              .arg(sd).arg(rec.jungleT);
+                if (desertR > rec.desertT) // R 内 ⊆ 总数（不重复/不膨胀对账；簇数 ≤ 有箱神殿数，方向安全）
+                    violT1010b << QStringLiteral("seed %1 desert temples in R %2 > log total %3")
+                                              .arg(sd).arg(desertR).arg(rec.desertT);
+                if (jungleR > rec.jungleT)
+                    violT1010b << QStringLiteral("seed %1 jungle temples in R %2 > log total %3")
+                                              .arg(sd).arg(jungleR).arg(rec.jungleT);
+                qInfo().noquote() << "  [t1010b diag] seed" << sd << "desertInR(bio/elig)" << desertBiomeR
+                                  << "/" << desertEligR << "desertChestsInR" << desertChestsR
+                                  << "desertCutSandInR" << desertCutSandR << "desertClustersInR" << desertR
+                                  << "jungleInR(bio/elig)" << jungleBiomeR << "/" << jungleEligR
+                                  << "jungleDoorsInR" << jungleR << "jungleLeverDispInR" << jungleLeverDispR;
+            }
         }
         ok = ok && violT1010.isEmpty();
         for (const QString &v : violT1010)
@@ -39300,31 +39461,60 @@ Item {
                                   << firstDesertRec.jungleT;
         }
         qInstallMessageHandler(s_prevHandlerT1010); // 卸钩（其余探针 worldgen 行恢复原样）
-        // (e) 源码钉（world.cpp）：保底旗 / 保底入口 / siteOk 收口。
+        // (e) 源码钉（world.cpp / world.h）：保底旗 / 出生圈 R 常量 / 保底触发门（review0905 #3 起为
+        //     「距中心 > R」distance 门）/ siteOk 收口。
         {
             const QString exeDirT1010 = QCoreApplication::applicationDirPath();
             const QString rootT1010 = QDir(exeDirT1010 + QStringLiteral("/..")).absolutePath();
             QFile fT1010(rootT1010 + QStringLiteral("/src/World/world.cpp"));
+            QFile hT1010(rootT1010 + QStringLiteral("/src/World/world.h"));
             const QString src = fT1010.open(QIODevice::ReadOnly) ? QString::fromUtf8(fT1010.readAll()) : QString();
+            const QString srch = hT1010.open(QIODevice::ReadOnly) ? QString::fromUtf8(hT1010.readAll()) : QString();
             const bool okPin =
                 src.contains(QStringLiteral("constexpr bool kDesertBiomeGuarantee = true;"))
                 && src.contains(QStringLiteral("constexpr bool kJungleBiomeGuarantee = true;"))
-                && src.contains(QStringLiteral("if (placed == 0 && kDesertBiomeGuarantee) {"))
-                && src.contains(QStringLiteral("if (placed == 0 && kJungleBiomeGuarantee) {"))
+                && srch.contains(QStringLiteral("static constexpr int kTempleSpawnGuaranteeRadius = 56;"))
+                && src.contains(QStringLiteral("if (nearestCenterSq > guaranteeRSq && kDesertBiomeGuarantee) {"))
+                && src.contains(QStringLiteral("if (nearestCenterSq > guaranteeRSq && kJungleBiomeGuarantee) {"))
                 && src.contains(QStringLiteral("auto siteOk = [&](int cx, int cz) {"));
             ok = ok && okPin;
             if (!okPin)
-                qInfo().noquote() << "  [t1010 diag] source pins drifted (guarantee flags / siteOk)";
+                qInfo().noquote() << "  [t1010 diag] source pins drifted (guarantee flags / R gate / siteOk)";
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t1010 desert/jungle temple wild-generation rate: biome-presence implies"
-                             " >=1 temple per seed (stronghold-style nearest-center fallback when"
-                             " probabilistic grid lands 0), 32-seed full-scan log-captured counts with"
+                             " >=1 temple per seed (stronghold-style nearest-center fallback when no"
+                             " temple sits within spawn radius of world center, review0905 #3),"
+                             " 32-seed full-scan log-captured counts with"
                              " block-level cross-check, determinism re-gen, source pins, desert seeds"
                           << seedsWithDesert << "jungle seeds" << seedsWithJungle << "desert temples"
                           << desertTemplesTotal << "jungle temples" << jungleTemplesTotal
                           << "zero-with-biome seeds" << (desert0Seeds + jungle0Seeds);
+        // ── P-t1010b 加严腿（review0905 #3）：保底「出生区可见」口径 —— 世界中心 R 内无神殿时保底必
+        //    触发且落座 ≤R（群系列在圈 ⇒ 圈内神殿 ≥1，块级核对）；中心 R 内已有主路径神殿时保底不触发
+        //    （不重复：R 内座数 ⊆ 日志总数，distance 门保证不二次补座）。R = World::
+        //    kTempleSpawnGuaranteeRadius。阴性轮钉：触发门还原 placed==0 → 「角落有神殿 / 主路径全在
+        //    圈外」世界圈内 0 座 → 本腿恰红。
+        {
+            bool okB = violT1010b.isEmpty();
+            for (const QString &v : violT1010b)
+                qInfo().noquote() << "  [t1010b diag] VIOLATION:" << v;
+            if (!okB) ++totalFail;
+            qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                              << "| t1010b temple guarantee spawn-circle proximity: eligible desert/jungle"
+                                 " site columns inside spawn radius R of world center imply >=1 temple of"
+                                 " that kind inside R (guarantee fires on empty circle and lands"
+                                 " nearest-center, no duplicate when main path already covers the circle;"
+                                 " biome-in-R without eligible cols degrades to nearest-eligible landing,"
+                                 " registered; lesion revert to placed==0 goes red on corner-temple"
+                                 " seeds), 32-seed block-level full-height chest/door presence scan,"
+                                 " eligible-in-R seeds"
+                              << seedsDesertEligR << "/" << seedsJungleEligR << "biome-in-R seeds"
+                              << seedsDesertBiomeR << "/" << seedsJungleBiomeR
+                              << "desert chest-clusters in R" << desertRTotal
+                              << "jungle temples in R" << jungleRTotal;
+        }
     }
 
     // ── P-t1006 生物复制体未愈探针（R19.20 首项；用户 f6e9a51 实测「进场即有静止贴图生物 + 随时间无限
@@ -39962,7 +40152,9 @@ Item {
                 && ih.contains(QStringLiteral("Q_INVOKABLE int liveHighWater() const"))
                 && mq.contains(QStringLiteral("\"  primed \" + primedN"))
                 && mq.contains(QStringLiteral("\"  del \" + delVis + \"/\" + delTot"))
-                && mq.contains(QStringLiteral("/64 hw \""));
+                // review0905 #6：分母字面量 "/64" → entityManager.cap() 读口（kCap 单一权威），钉随行迁移。
+                && eh.contains(QStringLiteral("Q_INVOKABLE int cap() const { return kCap; }"))
+                && mq.contains(QStringLiteral("\"/\" + entityManager.cap() + \" hw \" + mobHw"));
         }
         if (!okPin7) {
             ok1007 = false;
@@ -39995,7 +40187,7 @@ Item {
                              "(slot vectors 200/64, high waters 200/64) - no unbounded engine leak"
                              "exists offscreen, so the recovery face is the live entity set; (f) source"
                              "pins lock the new F3 telemetry (primedCount/slotHighWater/liveHighWater +"
-                             "the mobs-N/64-hw items-hw primed del V/T entities line shared with the"
+                             "the mobs-N/cap()-hw items-hw primed del V/T entities line shared with the"
                              "t1005/t1006 closure data collection)"
                           << (ok1007 ? QString() : diag1007);
     }
