@@ -288,7 +288,7 @@ int main(int argc, char *argv[])
         Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(layers); ++snowFellCount;
     });
 
-    // ── 矩阵维度（t740 全量：任务点名 9 源 + 石/铁/金压力板 3 补充源；接收器 7 族）──
+    // ── 矩阵维度（t740 全量：任务点名 9 源 + 石/铁/金压力板 3 补充源；接收器 8 族——t1028 增音符盒）──
     const SourceDef sources[] = {
         { "RedstoneTorch(lit)",   BR::RedstoneTorch,      0,                            true,  false },
         { "RedstoneBlock",        BR::RedstoneBlock,      0,                            true,  false },
@@ -311,6 +311,9 @@ int main(int argc, char *argv[])
         { "Dropper",      BR::Dropper,       0,                            true  },
         { "IronDoor",     BR::IronDoor,      0x04,                         false },
         { "IronTrapdoor", BR::IronTrapdoor,  0x01,                         false },
+        // t1028 音符盒（通电上升沿发声）：state 判据 = bit5 通电记忆位（升沿置位 / 降沿清位）——
+        //   本矩阵按 state 型覆盖 12 源 × 升/降沿；「发声信号 + 不复响」行为腿走 P-t1028a 专探针。
+        { "NoteBlock",    BR::NoteBlock,     BR::NoteBlockStatePoweredFlag, false },
     };
 
     qInfo().noquote() << "=== t740 redstone activation matrix (World-layer harness) ===";
@@ -815,7 +818,7 @@ int main(int argc, char *argv[])
         // (b) 贴图契约腿：tile 68 逐像素 alpha==255（纹理不透 + 材质半透，同 water 模式）
         {
             QImage atlas(root + QStringLiteral("/textures/atlas.png"));
-            constexpr int kGlassTile = 68;  // default_glass（BlockRegistry::AtlasTileCount 单行图集；t998 起 184）
+            constexpr int kGlassTile = 68;  // default_glass（BlockRegistry::AtlasTileCount 单行图集；t1028 起 185）
             constexpr int kPx = 64;         // kAtlasTilePx 文档镜像
             bool opaqueAll = false;
             if (atlas.isNull() || atlas.width() < (kGlassTile + 1) * kPx) {
@@ -9716,8 +9719,9 @@ int main(int argc, char *argv[])
     // ── P-t879 活板门双修（行为级 + 源码钉；专用断言不建 rig）──
     //    (a) 木活板门 def 贴图契约：大面（top/bottom）= 180 四镂空板、薄侧边（side/front）= planks(8)
     //        —— 旧全 8（planks 整面实心）= 用户「像木压力板」根因；
-    //    (b) 图集契约：AtlasTileCount==184（t998 起追加到 184）且 qrc atlas.png 宽 == 184×64（瓦片已随 180 重生——
-    //        陈旧图集 180×64 即红）+ tile 180 / 178 含 alpha 孔（四镂空真透明，cutout 语义的贴图前提）；
+    //    (b) 图集契约：AtlasTileCount==185（t1028 起追加到 185；t998 曾追加到 184）且 qrc atlas.png 宽 ==
+    //        185×64（瓦片已随 180 重生——陈旧图集 180×64 即红）+ tile 180 / 178 含 alpha 孔（四镂空真透明，
+    //        cutout 语义的贴图前提）；
     //    (c) 源码钉：chunkgeometry isCutoutTrapX 同时含 IronTrapdoor 与 WoodTrapdoor（cutout 段
     //        路由——木活板门孔须 alphaCutoff 透视；驱动 ChunkGeometry 需渲染后端，行为级不可密闭，
     //        t870/t889 源码钉先例）+ mesher trapdoor case 木/铁 sideTile 分流（planks/iron_block）。
@@ -9725,13 +9729,13 @@ int main(int argc, char *argv[])
         const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
         const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
                            && wtd.sideTile == 8 && wtd.frontTile == 8;
-        bool okAtlas = BR::AtlasTileCount == 184; // t998 起图集随结构新方块三 tile 追加到 184（追加不插中间——181..183 为 t998 新瓦片）
+        bool okAtlas = BR::AtlasTileCount == 185; // t1028 起图集随音符盒 tile 184 追加到 185（追加不插中间——存档契约）
         // 测试二进制无 qrc（t815/t838 探针同因：图集资源不在测试 target）→ 直读源树 textures/atlas.png
         //   （构建机源树布局，与源码钉同根路径解析）。
         const QString exeDirA = QCoreApplication::applicationDirPath();
         const QString rootA = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
         QImage atlas(QDir(rootA).absoluteFilePath(QStringLiteral("textures/atlas.png")));
-        if (atlas.isNull() || atlas.width() != 184 * 64) {
+        if (atlas.isNull() || atlas.width() != 185 * 64) {
             okAtlas = false;
             qInfo().noquote() << "  t879 diag: atlas w =" << (atlas.isNull() ? -1 : atlas.width());
         } else {
@@ -9777,8 +9781,9 @@ int main(int argc, char *argv[])
         qInfo().noquote() << (okT879 ? "PASS" : "FAIL")
                           << "| t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 "
                              "(four-hole plank board, alpha cutout - the old all-planks solid plate read as "
-                             "a wooden pressure plate) with plank thin edges, atlas regenerated (184 tiles "
-                             "since t998 appended 181..183; stale pre-t879 atlas width still fails) with "
+                             "a wooden pressure plate) with plank thin edges, atlas regenerated (185 tiles "
+                             "since t1028 appended 184; t998 appended 181..183 before; stale pre-t879 atlas "
+                             "width still fails) with "
                              "real alpha holes in tiles 178/180, and both trapdoors route to the cutout "
                              "pass (source pin - holes need alphaCutoff to see through); iron side tiles use "
                              "iron_block / wood planks per family (mesher + runtime icon spec + offline icon)";
@@ -43184,6 +43189,304 @@ Item {
                           << (ok ? QString()
                                   : QStringLiteral("diag rows=%1 negs=%2 pins=%3")
                                         .arg(rowsOk).arg(negsOk).arg(pinsOkB));
+    }
+
+    // ── P-t1028a 音符盒红石触发链（R19.21 t1028；World 接收器真消费端探针，powerTntTriggered 计数模式）──
+    //   (a) 初始 off：tick 泵零误触发（无源静默）；
+    //   (b) 通电上升沿：恰一响（noteBlockPlayed 恰 +1），pitch 参数 = 预调音 9（A4）、family 参数 =
+    //       下方方块材质投影（planks→bass(1)），bit5 记忆位置位且音高段原样保留；
+    //   (c) 稳定通电续泵：不复响（bit5 记忆位做真沿——摘沿判定的阴性轮此处红）；
+    //   (d) 断电下降沿：静音 + bit5 清位（重臂就绪）；
+    //   (e) 再通电：再响（重臂闭环，恰 2 次）；
+    //   (f) 音色族三族 + 悬空兜底参数断言：stone→kick(2) / sand→snare(3) / air→piano(0)。
+    {
+        bool ok = true;
+        World wT28a;
+        wT28a.setWidth(48); wT28a.setDepth(64); wT28a.setHeight(96); wT28a.setSeed(10281);
+        // 四 rig（列距 4）：各坐不同下方材质（planks/stone/sand/悬空）；拉杆各贴 -X 邻格独立供电。
+        //   工作带 y=20 显式净空 + y=19 石板地板（t1025 fBm 地形教训：禁赌 worldgen）；
+        //   悬空 rig 的地板格挖空（下方真 Air → piano 兜底腿）。
+        struct NoteRig { int x; quint8 below; int family; };
+        const NoteRig rigs[4] = { { 8, BR::Planks, 1 }, { 12, BR::Stone, 2 },
+                                  { 16, BR::Sand, 3 }, { 20, BR::Air, 0 } };
+        for (int x = 4; x <= 26; ++x)
+            for (int z = 20; z <= 24; ++z) {
+                for (int y = 20; y <= 24; ++y) wT28a.setBlock(x, y, z, BR::Air, 0);
+                wT28a.setBlock(x, 19, z, BR::Stone, 0);
+            }
+        for (const NoteRig &r : rigs) {
+            if (r.below != BR::Air) wT28a.setBlock(r.x, 19, 22, r.below, 0);
+            else                    wT28a.setBlock(r.x, 19, 22, BR::Air, 0); // 悬空：挖空地板
+            wT28a.setBlock(r.x, 20, 22, BR::NoteBlock, quint8(9)); // 预调音 A4（pitch=9，探针直写跳过调音链）
+            wT28a.setBlock(r.x - 1, 20, 22, BR::Lever, 0);         // 拉杆贴 -X（初始 off）
+        }
+        int played = 0, lastPitch = -1, lastFamily = -1, lastX = -1;
+        QObject::connect(&wT28a, &World::noteBlockPlayed, &wT28a,
+                         [&](int x, int, int, int pitch, int family) {
+                             ++played; lastPitch = pitch; lastFamily = family; lastX = x;
+                         });
+        const auto leverSet = [&](const NoteRig &r, int on) {
+            wT28a.setBlock(r.x - 1, 20, 22, BR::Lever, quint8(on));
+        };
+        const auto rigState = [&](const NoteRig &r) { return wT28a.stateAt(r.x, 20, 22); };
+        // (a) 初始 off：零误触发。(b)-(e) 全边沿语义走 rig 0（planks→bass）。(f) 族参数走 rig 1..3。
+        const NoteRig &r0 = rigs[0];
+        tickN(wT28a, 4);
+        const bool okIdle = played == 0;
+        leverSet(r0, 1);
+        tickN(wT28a, 4);
+        const bool okRise = played == 1 && lastPitch == 9 && lastFamily == 1 && lastX == r0.x
+            && (rigState(r0) & BR::NoteBlockStatePoweredFlag) != 0   // 记忆位置位
+            && (rigState(r0) & BR::NoteBlockStatePitchMask) == 9;    // 音高段写位不扰动
+        tickN(wT28a, 8);
+        const bool okHold = played == 1;                              // 稳定通电不复响
+        leverSet(r0, 0);
+        tickN(wT28a, 4);
+        const bool okFall = played == 1                               // 下降沿静音
+            && (rigState(r0) & BR::NoteBlockStatePoweredFlag) == 0;   // 记忆位清（重臂就绪）
+        leverSet(r0, 1);
+        tickN(wT28a, 4);
+        const bool okRearm = played == 2 && lastPitch == 9;           // 再通再响
+        bool okFam = true;
+        int famFail = -1, famExp = -1, famGot = -1, famGotX = -1, famGotPlayed = -1, famGotPitch = -1;
+        for (int i = 1; i < 4; ++i) {
+            const NoteRig &r = rigs[i];
+            const int played0 = played;
+            leverSet(r, 1);
+            tickN(wT28a, 4);
+            if (played != played0 + 1 || lastPitch != 9 || lastFamily != r.family || lastX != r.x) {
+                okFam = false;
+                if (famFail < 0) {
+                    famFail = i; famExp = r.family; famGot = lastFamily; famGotX = lastX;
+                    famGotPlayed = played; famGotPitch = lastPitch;
+                }
+            }
+            leverSet(r, 0);
+            tickN(wT28a, 4); // 复位（防跨 rig 记忆串扰）
+        }
+        QObject::disconnect(&wT28a, nullptr, nullptr, nullptr);
+        ok = okIdle && okRise && okHold && okFall && okRearm && okFam;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1028a note-block redstone chain: an idle rig never fires; the lever "
+                             "rising edge fires noteBlockPlayed exactly once carrying the tuned pitch "
+                             "(9=A4) and the below-block timbre family (planks=bass) and latches the "
+                             "powered memory bit without disturbing the pitch field; sustained power "
+                             "never re-fires (true edge via the state memory bit); the falling edge "
+                             "is silent and clears the memory bit; re-powering fires again (re-arm); "
+                             "family projection asserts stone=kick, sand=snare, floating=piano "
+                             "(negative-round sensitive: edge-judgment removal)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag idle=%1 rise=%2 hold=%3 fall=%4 rearm=%5 fam=%6 "
+                                                   "played=%7 pitch=%8 fam=%9 famFailLeg=%10 exp=%11 "
+                                                   "got=%12 gotX=%13 gotPlayed=%14 gotPitch=%15")
+                                        .arg(okIdle).arg(okRise).arg(okHold).arg(okFall)
+                                        .arg(okRearm).arg(okFam).arg(played)
+                                        .arg(lastPitch).arg(lastFamily)
+                                        .arg(famFail).arg(famExp).arg(famGot)
+                                        .arg(famGotX).arg(famGotPlayed).arg(famGotPitch));
+    }
+
+    // ── P-t1028b 真实玩家路径：右键调音 round-trip（25 次≡回 0，MC 口径 25 档）+ 调音发声链
+    //    （noteBlockTuned 携新音高 + 音名「A4」单一权威）+ 攻击发声（左键按下沿，pitch=当前调音，
+    //    挖掘照常破掉掉自身）──阴性轮敏感：调音回绕摘 mod → round-trip 腿红。
+    {
+        World wT28b;
+        wT28b.setWidth(48); wT28b.setDepth(48); wT28b.setHeight(96); wT28b.setSeed(10282);
+        Hotbar hbT28b;
+        PlayerController pcT28b; // t814 真消费端模式（无窗口直造；挂窗 grab 载体同 P-t945/t1026a）
+        pcT28b.setWorld(&wT28b);
+        pcT28b.setHotbar(&hbT28b);
+        QQuickWindow winT28b;
+        pcT28b.setParentItem(winT28b.contentItem());
+        pcT28b.grab();
+        // rig：y=15 工作层；planks 地台 + 音符盒（下方 planks → 攻击发声 family=bass(1)）；上方净空。
+        const int nx28b = 12, ny28b = 15, nz28b = 16;
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 20; ++z) {
+                for (int y = 15; y <= 20; ++y) wT28b.setBlock(x, y, z, BR::Air, 0);
+                wT28b.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT28b.setBlock(nx28b, ny28b, nz28b, BR::NoteBlock, 0); // 初始调音 0（C4）
+        // 调音 / 攻击信号记录（等价 Main.qml 路由直连计数）。
+        QVector<int> tunedPitches;
+        QVector<QString> tunedNames;
+        int attackPlayed = 0, attackPitch = -1, attackFamily = -1;
+        const QMetaObject::Connection cTun = QObject::connect(
+            &pcT28b, &PlayerController::noteBlockTuned, &pcT28b,
+            [&](int, int, int, int pitch, int, const QString &name) {
+                tunedPitches.push_back(pitch); tunedNames.push_back(name);
+            });
+        const QMetaObject::Connection cAtk = QObject::connect(
+            &pcT28b, &PlayerController::noteBlockAttackPlayed, &pcT28b,
+            [&](int, int, int, int pitch, int family) {
+                ++attackPlayed; attackPitch = pitch; attackFamily = family;
+            });
+        // 瞄准帮手（t1026a 同款：re-grab 光标归零 → loadSavedState 定向 → tick 刷射线）。
+        const auto aimT28b = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ, int mode) {
+            const float ex = feetX, ey = 15.0f + 1.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT28b.release();
+            pcT28b.grab();
+            pcT28b.loadSavedState(feetX, 15.0f, feetZ, yaw, pit, mode);
+            pcT28b.tick();
+            return pcT28b.hitBlock();
+        };
+        const auto pumpMsT28b = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 调音 round-trip：空手生存瞄音符盒顶面，右键 25 次 → 音高序列 1..24,0（(p+1)%25 回绕）
+        //     恰 25 次 noteBlockTuned；第 9 次音名断言「A4」（noteBlockNoteName 单一权威，n=9=440Hz）；
+        //     终态 state 音高段 == 0（round-trip 契约：25 次≡回 0）。
+        const QVector3D hitTun = aimT28b(14.5f, 16.5f, float(nx28b) + 0.5f, float(ny28b) + 0.9f,
+                                         float(nz28b) + 0.5f, 2 /* Survival */);
+        for (int i = 0; i < 25; ++i) {
+            pcT28b.placeBlock();
+            pumpMsT28b(260);
+        }
+        bool okTun = hitTun == QVector3D(nx28b, ny28b, nz28b)
+            && tunedPitches.size() == 25
+            && tunedPitches.front() == 1 && tunedPitches.back() == 0
+            && tunedPitches[8] == 9 && tunedNames[8] == QStringLiteral("A4")
+            && (wT28b.stateAt(nx28b, ny28b, nz28b) & BR::NoteBlockStatePitchMask) == 0;
+        if (!okTun)
+            qInfo().noquote() << "  [t1028b diag] tune hit" << hitTun << "n" << tunedPitches.size()
+                              << "front" << (tunedPitches.isEmpty() ? -1 : tunedPitches.front())
+                              << "back" << (tunedPitches.isEmpty() ? -1 : tunedPitches.back())
+                              << "p9" << (tunedPitches.size() > 8 ? tunedPitches[8] : -1)
+                              << "name9" << (tunedNames.size() > 8 ? tunedNames[8] : QString())
+                              << "st" << wT28b.stateAt(nx28b, ny28b, nz28b);
+        // (2) 攻击发声：生存左键按下沿 → 恰一响（pitch=当前调音 0，family=下方 planks→bass 1）；
+        //     发声不占挖掘链——照常累积破块（MC 攻击响 + 持续挖可破口径）→ 破后 Air + 掉自身 ×1。
+        QVector<int> dropIds28b;
+        const QMetaObject::Connection cDrop = QObject::connect(
+            &pcT28b, &PlayerController::spawnItem, &pcT28b,
+            [&](int, int, int, int id, int, const QVariantList &, const QString &, int) {
+                dropIds28b.push_back(id);
+            });
+        const QVector3D hitAtk = aimT28b(14.5f, 16.5f, float(nx28b) + 0.5f, float(ny28b) + 0.9f,
+                                         float(nz28b) + 0.5f, 2);
+        pcT28b.beginMining();
+        const bool okAtkOnce = attackPlayed == 1 && attackPitch == 0 && attackFamily == 1
+            && hitAtk == QVector3D(nx28b, ny28b, nz28b);
+        // 挖掘泵（t1026a 同款：每 tick busy-wait ≥17ms 保 updateMining 墙钟 dt>0）。
+        for (int i = 0; i < 6000 && wT28b.blockAt(nx28b, ny28b, nz28b) != BR::Air; ++i) {
+            QElapsedTimer dtw;
+            dtw.start();
+            while (dtw.elapsed() < 17)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            pcT28b.tick();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+        }
+        pcT28b.endMining();
+        const bool okMined = wT28b.blockAt(nx28b, ny28b, nz28b) == BR::Air
+            && dropIds28b.size() == 1 && dropIds28b[0] == int(BR::NoteBlock)
+            && attackPlayed == 1; // 挖掘过程不补响（按下沿恰一次）
+        QObject::disconnect(cDrop);
+        QObject::disconnect(cTun);
+        QObject::disconnect(cAtk);
+        pcT28b.release();
+        winT28b.deleteLater();
+        const bool okB = okTun && okAtkOnce && okMined;
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1028b note-block player path: 25 survival right-clicks on the note "
+                             "block cycle the pitch through 1..24 and wrap back to 0 exactly "
+                             "(25-slot round trip, MC caliber) emitting noteBlockTuned each time "
+                             "with the ninth carrying note name A4; the left-click attack edge "
+                             "fires noteBlockAttackPlayed exactly once with the current pitch (0) "
+                             "and below-block family (planks=bass) while survival mining still "
+                             "progresses and drops the note block itself (negative-round "
+                             "sensitive: tuning wrap removal)"
+                          << (okB ? QString()
+                                  : QStringLiteral("diag tun=%1 atkOnce=%2 mined=%3 atkP=%4 atkF=%5 drops=%6")
+                                        .arg(okTun).arg(okAtkOnce).arg(okMined).arg(attackPitch)
+                                        .arg(attackFamily).arg(dropIds28b.size()));
+    }
+
+    // ── P-t1028c 音符盒配方（8 木板环 + 红石粉芯，MC 1.0 同料）+ 全链源码钉 ──
+    //   (a) 配方：环 + 芯 → NoteBlock ×1（最小包围盒 3×3）；环 + 空芯 = 箱子（环本身不是音符盒，
+    //       防形状混recipes）；2×2 放不下。
+    //   (b) 源码钉（滤注释 pinSet；阴性轮红腿：摘 world.cpp 沿判定 → P-t1028a 腿红 + cpp-note-edge 钉红；
+    //       摘调音回绕 → P-t1028b round-trip 腿红 + hdr-note-tuned 钉红）。
+    {
+        bool ok = true;
+        const int P = int(BlockRegistry::Planks);
+        const int gNote[9] = { P, P, P, P, RecipeRegistry::RedstoneId, P, P, P, P };
+        const int gRing[9] = { P, P, P, P, 0, P, P, P, P };
+        // 注：match(grid, n) 的 n = 网格**维度**（2=背包 2×2 / 3=工作台 3×3），非元素数（t1026b 同口径）。
+        const auto noteAt = [](const int *g, int n) -> const RecipeRegistry::Recipe * {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(g, n);
+            return (r && r->outputId == int(BlockRegistry::NoteBlock) && r->outputCount == 1) ? r : nullptr;
+        };
+        const bool recOk = noteAt(gNote, 3) != nullptr;
+        const RecipeRegistry::Recipe *ring = RecipeRegistry::match(gRing, 3);
+        const bool negOk = ring == nullptr || ring->outputId != int(BlockRegistry::NoteBlock); // 空芯环非音符盒（= 箱子，防形状混同）
+        if (!recOk || !negOk)
+            qInfo().noquote() << "  [t1028c diag] rec" << recOk << "neg" << negOk;
+        const QString exeDirC = QCoreApplication::applicationDirPath();
+        const QString rootC = QDir(exeDirC + QStringLiteral("/..")).absolutePath();
+        QStringList missC;
+        missC << pinSet(rootC + QStringLiteral("/src/World/world.cpp"), {
+            {"cpp-note-edge", "const bool was = (st & BlockRegistry::NoteBlockStatePoweredFlag) != 0;"},
+            {"cpp-note-emit", "emit noteBlockPlayed(x, y, z, BlockRegistry::noteBlockPitch(st),"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/World/world.h"), {
+            {"hdr-note-signal", "void noteBlockPlayed(int x, int y, int z, int pitch, int family);"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-note-tune-emit", "emit noteBlockTuned(m_hitBx, m_hitBy, m_hitBz, pitch, family,"},
+            {"cpp-note-atk-emit", "emit noteBlockAttackPlayed(m_hitBx, m_hitBy, m_hitBz, pitch, family);"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/Core/blockregistry.h"), {
+            {"hdr-note-id-contract", "NoteBlock         = 143,"},
+            {"hdr-note-tuned", "static quint8 noteBlockTunedState(quint8 state)"},
+            {"hdr-note-pitchcount", "static constexpr int NoteBlockPitchCount = 25;"},
+            {"hdr-note-pitchmask", "static constexpr quint8 NoteBlockStatePitchMask = 0x1F;"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/Core/blockregistry.cpp"), {
+            {"hdr-note-family", "BlockRegistry::NoteTimbreFamily BlockRegistry::noteTimbreFamily(quint8 belowId)"},
+            {"hdr-note-notename", "QString BlockRegistry::noteBlockNoteName(int pitch)"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/Audio/audiomanager.cpp"), {
+            {"aud-note-play", "void AudioManager::playNote(int pitch, int family)"},
+            {"aud-note-rate", "d->replayNote(c, m_volume * 0.9f, rate);"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/ui/Main.qml"), {
+            {"qml-note-redstone", "function onNoteBlockPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }"},
+            {"qml-note-tuned", "function onNoteBlockTuned(x, y, z, pitch, family, noteName) {"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/src/Game/recipe.cpp"), {
+            {"cpp-note-recipe", "int(BlockRegistry::Planks), RecipeRegistry::RedstoneId,  int(BlockRegistry::Planks),"},
+        });
+        missC << pinSet(rootC + QStringLiteral("/tools/build_sounds.py"), {
+            {"py-note-gen", "def gen_note_piano(n):"},
+        });
+        const bool pinsOkC = missC.isEmpty();
+        if (!pinsOkC)
+            qInfo().noquote() << "  [t1028c diag] pin miss:" << missC.join(QLatin1Char(','));
+        ok = recOk && negOk && pinsOkC;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1028c note-block recipe + full-chain source pins: eight planks "
+                             "ringed around one redstone dust crafts exactly 1 note block (MC 1.0 "
+                             "caliber, 3x3 table) while the plain empty-centered ring (a chest) "
+                             "refuses; source pins lock the rising-edge memory-bit judgment and "
+                             "the World semantic signal, the tuning and attack emissions in "
+                             "PlayerController, the save-contract id (NoteBlock=143) and the "
+                             "25-slot pitch state helpers with the note-name and timbre-family "
+                             "single authorities, the AudioManager playNote playback entry and "
+                             "the QML redstone/tuned routing, the recipe row and the "
+                             "gen_note_piano synthesis generator"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag rec=%1 neg=%2 pins=%3")
+                                        .arg(recOk).arg(negOk).arg(pinsOkC));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
