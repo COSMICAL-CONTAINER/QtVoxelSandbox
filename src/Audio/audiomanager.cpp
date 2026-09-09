@@ -191,7 +191,10 @@ struct AudioManager::Data
     //   下标 = BlockRegistry::noteBlockPitch(state) 调音段（0..24，n=9=A4=440Hz）。qrcPath 构造时
     //   makeNotePath 拼长寿命（同 groupClips pathStore 纪律）；0.85s 短 SFX → 默认 2s maxFrames 安全。
     //   音色族（Main.qml 传入 family）= 播放速率倍移近似（ma_sound_set_pitch；NO_PITCH 优化**不开**）。
-    static constexpr int kNotePitchCount = 25; // 与 BlockRegistry::NoteBlockPitchCount 同口径（本层不依赖 Core 头）
+    //   同步点登记（review0909 #3b）：kNotePitchCount 与 BlockRegistry::NoteBlockPitchCount（blockregistry.h
+    //   =25，矩阵钉 hdr-note-pitchcount）手抄同口径——Audio 层不 include Core 头的分层选择保留；两侧各
+    //   挂矩阵钉（本侧 aud-note-pitchcount / Core 侧 hdr-note-pitchcount），漂移即红非静默失效。
+    static constexpr int kNotePitchCount = 25;
     Clip noteClips[kNotePitchCount] = {};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）

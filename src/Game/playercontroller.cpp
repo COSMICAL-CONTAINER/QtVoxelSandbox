@@ -22,6 +22,13 @@
 //   矿石 / 部分方块生效。本工程矿石段：煤 / 铁 / 钻 / 铜 / 金 / 青金 / 红石（破块掉冶炼材料，掉落数 ×时运有意义）。
 //   非矿石（草 / 石 / 圆石等掉落数恒 1 的方块）时运不放大 —— MC 时运对石 / 圆石无效，避免无限石刷。
 namespace {
+// review0909 #1（雷暴入睡考据定案）：World::Weather int 编码局部镜像——枚举刻意私有（world.h
+//   「不外泄类型」，weatherState() 返 int 编码，Thunder=3 为其单一权威注释），本层与 QML 消费端
+//   同按 int 编码比对（同 isPrecipitatingAt 内部口径），具名常量免裸数字。trySleepAt 可睡门 +
+//   sleepAdvanceToDawn 醒来清雷暴两处共用。
+constexpr int kWeatherClear = 0;   // World::Weather::Clear
+constexpr int kWeatherThunder = 3; // World::Weather::Thunder
+
 bool isFortuneOre(quint8 blockId)
 {
     switch (blockId) {
@@ -237,7 +244,7 @@ void PlayerController::setBedSpawn(float x, float y, float z)
     m_bedAnchorX = int(std::floor(x));
     m_bedAnchorY = int(std::floor(y)) - 1; // 写入约定 m_spawnPos.y = 床层 by + 1 → 反解床层
     m_bedAnchorZ = int(std::floor(z));
-    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); }
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(true); } // true = 读档回填沿（QML 静默，review0909 #5）
     emit spawnPointChanged(); // t567 指南针基准 → 床位
 }
 
@@ -249,7 +256,7 @@ void PlayerController::clearBedSpawn()
     const bool wasValid = m_bedSpawnValid;
     m_bedSpawnValid = false;
     m_bedAnchorX = 0; m_bedAnchorY = -1; m_bedAnchorZ = 0;
-    if (wasValid) emit bedSpawnValidChanged();
+    if (wasValid) emit bedSpawnValidChanged(false); // 置假沿（QML 只播置真沿，此向静默）
     if (m_spawnPos != pristine) {
         m_spawnPos = pristine;
         emit spawnPointChanged();
@@ -3113,12 +3120,18 @@ void PlayerController::sleepAdvanceToDawn()
 {
     // 跳清晨（WorldClock 时间向前快进到黎明 phase；PLAN §2-H 时间单向，只加 m_elapsedMs）。
     if (m_worldClock) m_worldClock->skipToDawn();
+    // review0909 #1：雷暴中**完成**睡眠 → 清雷暴回 Clear（wiki Bed："sleeping resets the weather
+    //   cycle, changing the weather to clear conditions"；本项目天气为单态模拟 → setWeatherState(Clear)
+    //   设态 + 重抽时长即同型「重置天气循环」）。只挂跳晨完成沿——wakeUp 按钮早退不算（MC 语义：
+    //   真正睡过夜才重置天气，提前下床保留雷暴）。
+    if (m_world && m_world->weatherState() == kWeatherThunder)
+        m_world->setWeatherState(kWeatherClear);
     // 设重生点 = 床位（床格中心 + 上方 1.0 = 玩家站床顶；respawn 时 snapSpawnToGround 再贴地表兜底）。
     //   t1024：锚格 / m_spawnPos / bedSpawnValid 已在 trySleepAt 成功入睡瞬间写入（MC「睡上即设重生点」
     //   口径），此处重复写同值幂等——保留写入以独立自洽（早于 t1024 的语义防回归）。
     m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
     m_bedAnchorX = m_sleepBx; m_bedAnchorY = m_sleepBy; m_bedAnchorZ = m_sleepBz;
-    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); }
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(false); } // false = 入睡设锚沿
     emit spawnPointChanged();   // t567 HUD 指南针指针重算（出生点 → 床位）
     m_sleepPhase = kSleepPhaseWaking;
     m_sleepPhaseTimer = 0.0f;
@@ -3131,21 +3144,19 @@ void PlayerController::sleepAdvanceToDawn()
     if (m_sleepSettled) { m_sleepSettled = false; emit sleepSettledChanged(); }
 }
 
-// t388/t457 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）。机制等价 MC 1.0 床：夜间 + 床周无怪物才睡。
+// t388/t457 尝试在命中床 (bx,by,bz) 入睡（placeBlock useBlock 床分支调）。机制等价 MC 床：夜间或雷暴
+// + 床周无怪物才睡（review0909 #1 考据翻转：雷暴是合法入睡窗口，白天雷暴亦可睡）。
 void PlayerController::trySleepAt(int bx, int by, int bz)
 {
     if (m_sleeping) return; // 睡觉序列进行中再右键无效（防重入）
-    // 夜间判定（WorldClock.isNight 纯函数；无 worldClock → 当非夜间拒绝，安全降级）。
-    if (!m_worldClock || !m_worldClock->isNight()) {
-        emit sleepRefused(QStringLiteral("只有在夜晚才能睡觉"));
-        return;
-    }
-    // t1024 雷暴拒睡（spec「白天/雷暴不可睡」）：雷态 = World::Weather::Thunder。枚举刻意私有
-    //   （world.h「不外泄类型」，weatherState() 返 int 编码，Thunder=3 为其单一权威注释）——本层与
-    //   QML 消费端同按 int 编码比对（同 isPrecipitatingAt 内部口径），局部常量免裸数字。
-    static constexpr int kWeatherThunder = 3; // World::Weather::Thunder（int 编码）
-    if (m_world && m_world->weatherState() == kWeatherThunder) {
-        emit sleepRefused(QStringLiteral("雷暴中无法入睡"));
+    // 夜间 / 雷暴可睡门（review0909 #1 wiki 考据定案：minecraft.wiki/w/Bed——"You can sleep only
+    //   at night or during thunderstorms"，雷暴天白天亦可入睡；完成睡醒跳晨时清雷暴回 Clear，
+    //   见 sleepAdvanceToDawn）。旧口径「白天/雷暴不可睡」= 反 MC 实现，随本修翻转（考据出处与
+    //   定案登记 dev-plan review0909 清偿小节）。无 worldClock → 当非夜间且非雷暴拒绝（安全降级，
+    //   同旧口径降级方向）；无 world 的退化态按非雷暴处理（weatherState 无从读起，不解引用空指针）。
+    const bool thunderSleepOk = m_world && m_world->weatherState() == kWeatherThunder;
+    if (!m_worldClock || (!m_worldClock->isNight() && !thunderSleepOk)) {
+        emit sleepRefused(QStringLiteral("只能在夜晚或雷暴中睡觉")); // 文案对齐 MC 拒睡语（夜/雷暴二选一窗口）
         return;
     }
     // 床周敌对判定（EntityManager.hostileNearby；球心=床格中心，机制等价 MC 床周 8 格内有敌对即不能睡）。
@@ -3187,11 +3198,18 @@ void PlayerController::trySleepAt(int bx, int by, int bz)
     if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); } // 清走路摆臂（防躺床腿摆）
     m_sleepOutDone = false;           // 出床瞬移待触发（Waking 入口 / 中断取消走 leaveBedTeleport）
     // t1024 床位重生锚在**成功入睡瞬间**即生效（机制等价 MC「睡上床即设重生点」——按钮醒 / 受惊醒
-    //   也保锚，只有没睡成（白天 / 雷暴 / 怪物拒睡）不设）。锚格 = 点击格（head/foot 皆可，挖任一半
+    //   也保锚，只有没睡成（白天且非雷暴 / 怪物拒睡）不设）。锚格 = 点击格（head/foot 皆可，挖任一半
     //   即失效）；m_spawnPos = 床格上方（sleepAdvanceToDawn 重复写同值，幂等）。
     m_bedAnchorX = bx; m_bedAnchorY = by; m_bedAnchorZ = bz;
     m_spawnPos = QVector3D(float(bx) + 0.5f, float(by) + 1.0f, float(bz) + 0.5f);
-    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); }
+    // review0909 #5 修正：入睡设锚沿**恒发**（restored=false；QML 播「重生点已设置」）。旧
+    //   `if (!m_bedSpawnValid)` 守卫把「锚已有效后的再入睡沿」静默吞掉——读档回填锚（restored=true
+    //   沿后）或同床重睡时，入睡设锚沿不发 → 播报源契约断线（t1024a sleepAnnounce 腿红根因）。
+    //   MC 口径：每次成功入睡都重设重生点并提示（wiki Bed：使用床成功入睡即 "Respawn point set"，
+    //   同床重复入睡同播）；「读档回填沿静默」属 setBedSpawn(restored=true) 侧语义，与此沿正交。
+    //   sleepAdvanceToDawn 的幂等重写仍走守卫（同一入睡会话不二次播报）。
+    m_bedSpawnValid = true;
+    emit bedSpawnValidChanged(false); // false = 入睡设锚沿（QML 播报，review0909 #5）
     emit spawnPointChanged();         // t567 HUD 指南针基准 → 床位（同 sleepAdvanceToDawn 口径）
     emit positionChanged();           // 相机 / 第三人称模型瞬移跟随（同 respawn 尾）
     emit yawChanged();
@@ -3571,12 +3589,16 @@ void PlayerController::placeBlock()
             return;
         }
         // t1028 右键音符盒 → 循环调音 + 播放新音（useBlock 语义，MC 同款：右键 = 调音并发声）。
+        //   review0909 #2：补 !sneakPlace 门（对齐同函数工作台/熔炉/箱子/附魔台/铁砧/发射器/投掷器
+        //   各分支模式——潜行持方块右键 = 旁路 useBlock 走下方放置路径，放置语义不被调音吞；空手潜行
+        //   右键 → 下方 m_selectedBlock==Air 守卫拦，无动作。同 MC 潜行右键旁路口径）。注意门 / 床 /
+        //   活板门分支同款缺门是**存量**（非本修顺手改，防行为面扩大——dev-plan review0909 登记簿）。
         //   音高段 +1 回绕 (p+1)%25（25 档 0..24；noteBlockTunedState 单一权威，bit5 通电记忆位保留）。
         //   id 不变只 state 变 → World::setBlock 5 参数版走重网格化路径（发 worldChanged 不发
         //   broken/placed，同门/活板门口径）。发声走信号链（音频层只消费，PLAN §2 分层）：携新音高 +
         //   音色族（下方方块材质投影；悬空/越界下方=air → piano 兜底）+ 音名（播报文案单一权威）。
         //   MC 右键调音的音高提示=本工程系统播报「音高：C#4」（呈现层 appendChatMessage，t1024 文案先例）。
-        if (hitId == BlockRegistry::NoteBlock) {
+        if (!sneakPlace && hitId == BlockRegistry::NoteBlock) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 ns = BlockRegistry::noteBlockTunedState(st);
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);

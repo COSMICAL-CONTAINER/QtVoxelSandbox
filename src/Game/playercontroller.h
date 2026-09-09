@@ -705,8 +705,10 @@ signals:
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
     // t1024 床位重生锚有效位翻转（睡床成功设锚 true / 挖锚床或换代 false）。呈现层 Connections 据此
-    //   可刷 HUD；床锚失效另发 bedSpawnLost（含语义文案触发面）。
-    void bedSpawnValidChanged();
+    //   可刷 HUD；床锚失效另发 bedSpawnLost（含语义文案触发面）。restored = 来源沿（review0909 #5）：
+    //   false = 入睡设锚（QML 播「重生点已设置」）；true = 读档回填（enterWorld → setBedSpawn，QML
+    //   静默——每次进世界复读系统消息属 UX 噪音）；置假沿恒 false（QML 只播置真沿，不新增播报面）。
+    void bedSpawnValidChanged(bool restored);
     // t1024 床锚丢失事件（挖掉锚床任一半时发；换代复位不发——切世界无需用户面提示）。呈现层据此
     //   系统播报「重生点已失效」（同 sleepRefused 文案链模式）。
     void bedSpawnLost();

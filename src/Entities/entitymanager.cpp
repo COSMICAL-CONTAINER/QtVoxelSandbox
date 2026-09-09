@@ -7833,9 +7833,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   上块已在求偶期钉向配偶，本块以 loveTimer<=0 门控互斥；同寻偶仅设 yaw/speed/timer，
                 //   位移交 aiWander）。贴身（≤ kFoodLureStopDist）不再钉向（停步防推挤玩家；两引诱同种
                 //   相遇仍 < kBreedRange → 持食物聚拢动物即可配对，同 MC 手法）。门控表全 false（空手 /
-                //   非食物）→ 本块 no-op，动物照常 wander。
-                else if (e.loveTimer <= 0.0f && e.mobType >= 0 && e.mobType < kMobTypeCount
-                         && m_foodLure[e.mobType]) {
+                //   非食物）→ 本块 no-op，动物照常 wander。review0909 #7：补观察者门 !playerSpectator
+                //   （同 aiWolf/aiOcelot 跟随门先例——观察者不可交互、非攻击目标，不应吸引动物围观；
+                //   变量在本 tick 作用域已可用，同 t947① 透传通道）。
+                else if (!playerSpectator && e.loveTimer <= 0.0f && e.mobType >= 0
+                         && e.mobType < kMobTypeCount && m_foodLure[e.mobType]) {
                     const float pdx = listener.x() - e.pos.x();
                     const float pdz = listener.z() - e.pos.z();
                     const float pd2 = pdx * pdx + pdz * pdz;
