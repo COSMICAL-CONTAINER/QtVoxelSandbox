@@ -2434,7 +2434,7 @@ Window {
     //   t965 订正：门族「铁 71」系**错 id**（71 = WoolCyan 青色羊毛；铁门实为 135）——旧表把青羊毛暗路由
     //   进 ItemShapeGeometry 满格兜底（观感凑巧同 BlockCube 掩盖）、铁门掉落反而拿不到 3D 薄板形态。
     //   掉落物侧铁轨排除清单不变（动力轨 127 仅查看器侧 3D——ResourceBrowser selectedIsItem3D 注释互指）。
-    //   t1027（R19.21）家族表收编 C++ 单一权威（ItemEntityManager::isItem3DFamily，24 id 原样搬运）：
+    //   t1027（R19.21）家族表收编 C++ 单一权威（ItemEntityManager::isItem3DFamily，25 id 原样搬运）：
     //   instancing 治理要求 QML delegate 排除侧与 C++ feeder 收纳侧（BlockDropInstancing）对同族判定
     //   逐位一致，本函数退化薄委托（id 表见 itementitymanager.cpp，源码钉 P-t1027b 护航）。
     function isItem3DFamily(id) {
