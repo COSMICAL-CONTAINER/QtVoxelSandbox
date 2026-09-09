@@ -269,6 +269,14 @@ public:
     //   C++ 直调端钉概率两端，同 PlayerController::setEquipmentPickupChance 先例）。纯标量状态（非世界态，
     //   跨世界 reset 族无需清）。QML 调试命令可直调。
     Q_INVOKABLE void setChickenJockeyChance(qreal chance);
+    // t1029 wander 冻结测试缝（headless 矩阵探针确定性化）：true 期间 aiWander 顶部早退——不推进
+    //   wanderTimer、不消费 QRandomGenerator（全局 RNG 流原地不动）、不写 wanderSpeed / 位移，仅归零
+    //   moveSpeed（腿停）；tick 的重力 / 水推 / 击退等物理分支不受影响（冻结 ≠ 悬停）。缺省 false =
+    //   生产路径零改动（不调本方法即与旧行为逐字节一致）。动机：t882/t927/t960 三族钓鱼 / 射箭探针的
+    //   偶红同源 = 甩钩窗内猪 wander RNG 漂移（review0907 B-P3-4）；P-t882/P-t927/P-t960 显式冻结后
+    //   目标静态 → 仰角扫描 / 位移包络全确定。纯标量运行期状态（不持久化，同 m_chickenJockeyChance /
+    //   setBreedTimings 缝先例）；最小侵入 = 一个成员 + 一个 setter + aiWander 一个早退，不动 RNG 类结构。
+    Q_INVOKABLE void setWanderFrozen(bool frozen);
     // t374 被动生物群系化生成类型选取：据群系 id（World::biomeIdAt 编码：0=Plains, 1=Hills, 2=Desert,
     //   3=Forest）按 kPassiveSpawnWeights 加权随机返 MobPig/MobCow/MobSheep/MobChicken 之一。机制等价 MC 1.0
     //   群系化被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
@@ -1711,6 +1719,10 @@ private:
     //   = 无引诱（空手 / 非食物物品时动物不追随玩家）。运行期状态不持久化（每次持物变更即重写）。
     static constexpr int kMobTypeCount = 21; // MobCaveSpider = 20（枚举尾）+1
     bool m_foodLure[kMobTypeCount] = {};
+    // t1029 wander 冻结测试缝状态（setWanderFrozen 写；缺省 false = 照常 wander）。true 时 aiWander
+    //   顶部早退（跳过 RNG 消费 / 速度写入 / 位移，物理重力保留）——headless 探针把甩钩窗内的猪钉在原地。
+    //   运行期标量不持久化（同 m_chickenJockeyChance / m_breedCooldownSec 缝先例）。
+    bool m_wanderFrozen = false;
     // t392 刷怪笼 spawn 节流累积器（秒）：tickSpawners 每 tick 累加 dt，达 kSpawnerInterval 才扫描玩家周围 Spawner
     //   块（按需扫描，避免每帧扫 ~28³ 体素；playerPos 由 PlayerController 传 m_pos）。同 m_spawnAccum 模式。
     float m_spawnAccumSpawner = 0.0f;

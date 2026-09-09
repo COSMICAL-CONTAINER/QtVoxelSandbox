@@ -1921,6 +1921,18 @@ void EntityManager::setChickenJockeyChance(qreal chance)
     qCInfo(lcEnt) << "chicken jockey chance set to" << m_chickenJockeyChance;
 }
 
+// t1029 wander 冻结测试缝写（见 .h 声明注释）：headless 矩阵探针（P-t882/P-t927/P-t960 钓鱼 / 射箭族）
+//   把甩钩 / 量测窗内 mob 的 wander RNG 噪声源确定性化——冻结期 aiWander 顶部早退（RNG 流不推进），
+//   tick 物理（重力 / 水推 / 击退 / 拉拽）照常。产品路径零调用（缺省 false 行为不变，同
+//   m_chickenJockeyChance / setBreedTimings 缝先例）。不 bump revision / 不 emit：纯 AI 输入门控，
+//   无直接呈现面（位移面变化由后续 tick 的既有 dirty 链路自然携带）。
+void EntityManager::setWanderFrozen(bool frozen)
+{
+    if (frozen == m_wanderFrozen) return;
+    m_wanderFrozen = frozen;
+    qCInfo(lcEnt) << "wander frozen set to" << m_wanderFrozen;
+}
+
 // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。越界 → 0。
 //   仅 Shambler/Bones spawn 时随机分配；QML delegate 据 it 叠 layer 贴图护甲壳（t719 ArmorLayerBox）。
 int EntityManager::mobArmorAt(int i, int piece) const
@@ -2856,6 +2868,17 @@ void EntityManager::ignite(int i, float duration)
 //   返回是否真位移（驱动 dirty + moveSpeed）。moveSpeed = 行走速度（撞墙/idle=0）供 t241 腿摆。
 bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale)
 {
+    // t1029 wander 冻结测试缝（setWanderFrozen 置位；缺省 false 不进本分支 = 生产路径零改动）：
+    //   早退在时间片推进 / RNG 选向 / 速度写入**之前**——wanderTimer 保持、QRandomGenerator 全局流
+    //   不消费（后续随机路径不受本缝扰动）、yawRad / wanderSpeed / 位置全部保持；仅 moveSpeed 归零
+    //   （腿停，walkPhase 不推进）。tick 的重力 / 水推 / 击退 / 拉拽等物理分支在 aiWander 之外，冻结
+    //   ≠ 悬停（P-t1029 行为腿钉「冻结中空中生成仍落地」）。解冻后 wanderTimer 多为生成初值 0 →
+    //   下帧立即重掷选向，无缝恢复原噪声路径。
+    if (m_wanderFrozen) {
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
     // 时间片倒计时 → 选新向（随机 yaw + idle/行走 + 重置 timer）。
     e.wanderTimer -= dt;
     if (e.wanderTimer <= 0.0f) {
