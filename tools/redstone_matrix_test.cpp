@@ -17403,6 +17403,9 @@ Item {
         World wP;
         wP.setWidth(48); wP.setDepth(48); wP.setHeight(96); wP.setSeed(79);
         EntityManager ents;
+        // t1029 wander 冻结缝：甩钩 / 收杆全程把猪钉在原地（历史偶红 = 窗内猪 wander RNG 漂移，
+        //   okFar-false 签名；t970 直驱先例的管理器级等价物）。物理（重力 settle / 拉拽）不受影响。
+        ents.setWanderFrozen(true);
         const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
         const auto tickP = [&](int n, float dt) {
             for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wP, farL, 0.3f, 1.8f, false);
@@ -17460,7 +17463,8 @@ Item {
         QString farDiag;
         for (int pi = 6; pi <= 17 && !okFar; ++pi) {
             const float pitch = float(pi) * 2.0f; // 12°..34°（直瞄平射 ~13 格处已落到台下，必须仰射）
-            // 每次尝试换新猪（短窗确定性：settle+甩+飞 ≤1.3s < 首游荡窗 1.5s——重试不叠猪龄）
+            // 每次尝试换新猪（t882 原短窗确定性口径：settle+甩+飞 ≤1.3s < 首游荡窗 1.5s；t1029 缝
+            //   冻结 wander 后猪全程定身，重试窗纪律保留作冗余防御——重试不叠猪龄）
             const int pigF = ents.spawnMobTyped(26, fy + 1, 6, EntityManager::MobPig,
                                                 QStringLiteral("#e8a0a0"), 10);
             tickP(5, 0.05f);
@@ -20488,11 +20492,15 @@ Item {
     //    (a) 猪（轻型）峰值 ≥ 玩家脚位 − 1（89.0；解算目标眼位 91.62 + 0.6 → 理想 ~92.7）；
     //    (b) 铁傀儡（重型 halfH 1.20）峰值 > 起点 + 2（仍明显拽起）且 < 猪峰值 − 1（重型折扣可观察）；
     //    (c) 两者耐久均 -5（钩住收杆口径不变）。
-    //    flake 声明：与 t882(b) 同口径（mob 首游荡窗内完成甩钩的确定性），偶发 RNG 漂移复跑清。
+    //    flake 声明（t1029 起退役）：原口径「与 t882(b) 同源（mob 首游荡窗内甩钩 RNG），偶发漂移复跑清」
+    //    —— wander 冻结缝接管后甩钩窗全确定，本腿不再依赖复跑清。
     {
         World wG;
         wG.setWidth(48); wG.setDepth(48); wG.setHeight(96); wG.setSeed(83);
         EntityManager ents;
+        // t1029 wander 冻结缝：同 t882（甩钩窗内 mob wander RNG = 历史偶红源；铁傀儡非追击回退
+        //   aiWander 同被冻结）。峰值跟踪只读拉拽抛物线物理，不受影响。
+        ents.setWanderFrozen(true);
         const QVector3D farG(-1000.0f, 10.0f, -1000.0f);
         const auto tickG = [&](int n, float dt) {
             for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wG, farG, 0.3f, 1.8f, false);
@@ -20802,6 +20810,102 @@ Item {
                              "damage lines, and the 3.0f threshold constant; reel driven directly "
                              "through pullMobToward (the rod->entry wiring is P-t882(c)/P-t927 pinned) "
                              "so no new hook-sweep RNG enters the baseline";
+    }
+
+    // ── P-t1029 wander 冻结测试缝探针（行为级 + 源码钉；t882/t927/t960 三族钓鱼 flaky 治理的缝本体）──
+    //    review0907 B-P3-4：三族偶红同源 = 甩钩 / 量测窗内猪 wander RNG（t882 okFar-false / t960 dBMax
+    //    擦线 / t927 同族签名）。缝 = EntityManager::setWanderFrozen(bool)（t970「直驱消 RNG」的管理器级
+    //    等价物；最小侵入 = 一成员 + 一 setter + aiWander 顶部早退，不动 RNG 类结构）。腿：
+    //    (a) 冻结行为：冻结中 2×800 tick（80s，≥16 个 wander 时间片）位置/朝向/腿摆保持——yaw 保持
+    //        生成初值本身即「RNG 流未被消费」的判别面；moveSpeed 恒 0（wander 速度写入被跳过）；
+    //    (b) 重力保留：冻结中空中生成的第二头猪仍落台静息（静息 Y 与 (a) 同值——restY = 支撑顶 + halfH
+    //        单一权威贴面），XZ 定身——冻结 ≠ 悬停（重力 / 击退 / 拉拽物理在 aiWander 之外）；
+    //    (c) 解冻恢复：冻结期 wanderTimer 未推进（保持生成初值 0）→ setWanderFrozen(false) 后首个
+    //        AI tick 到期重掷 yaw——缝关即恢复原噪声路径（关缝阴性轮的历史签名复现基础）；
+    //    (d) 源码钉：aiWander 早退语句本体 + setter 实现 + 头文件声明 / 缺省 false 成员（pinSet 剥注释，
+    //        阴轮摘缝即红）。(c) 假红质量：重掷恰回 yaw=0 概率 1/62832，叠加 3s 行走窗 idle 概率
+    //        （kIdleChance≈25%/片）→ <5e-6，远低于被治理的原噪声（套件史 13 次 t882/t960 偶红）。
+    {
+        World wS;
+        wS.setWidth(48); wS.setDepth(48); wS.setHeight(96); wS.setSeed(97);
+        EntityManager ents;
+        ents.setWanderFrozen(true); // 缝存在性：C++ 直调编译期即证；后续全部腿在冻结态跑
+        const QVector3D farS(-1000.0f, 10.0f, -1000.0f);
+        const auto tickS = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(dt), &wS, farS, 0.3f, 1.8f, false);
+        };
+        const int fy = 83;
+        for (int x = 15; x <= 17; ++x) // 3×3 石台 + 生成列净空自凿（t933 教训：不赌地形/净空带）
+            for (int z = 5; z <= 7; ++z) wS.setBlock(x, fy, z, BR::Stone, 0);
+        for (int x = 15; x <= 17; ++x)
+            for (int z = 5; z <= 7; ++z)
+                for (int y = fy + 1; y <= fy + 12; ++y) wS.setBlock(x, y, z, BR::Air, 0);
+
+        // (a) 冻结行为腿：生成（空中）→ 800 tick settle+冻结窗 → 快照 → 再 800 tick → 逐位不变。
+        const int pigA = ents.spawnMobTyped(16, fy + 4, 6, EntityManager::MobPig,
+                                            QStringLiteral("#e8a0a0"), 10);
+        tickS(800, 0.05f);
+        const QVector3D posA0 = ents.posAt(pigA);
+        const float yawA0 = ents.yawAt(pigA);
+        tickS(800, 0.05f);
+        const bool okFrozen = ents.posAt(pigA) == posA0
+                           && ents.yawAt(pigA) == yawA0
+                           && ents.moveSpeedAt(pigA) == 0.0f
+                           && ents.walkPhaseAt(pigA) == 0.0f
+                           && posA0.x() == 16.5f && posA0.z() == 6.5f; // 生成列定身（x+0.5 spawn 约定）
+
+        // (b) 重力保留腿：更高空中生成（冻结中）→ 落同一台面同一静息位（restY = 支撑顶 + halfH）。
+        const int pigB = ents.spawnMobTyped(17, fy + 8, 6, EntityManager::MobPig,
+                                            QStringLiteral("#e8a0a0"), 10);
+        tickS(800, 0.05f);
+        const QVector3D posB = ents.posAt(pigB);
+        const bool okGravity = posB.y() == posA0.y() // 同台面贴面静息（冻结不悬停；落地沿精确贴面）
+                            && posB.x() == 17.5f && posB.z() == 6.5f; // 垂直下落不带水平位移
+
+        // (c) 解冻恢复腿：解冻后 wanderTimer(0) 到期重掷 yaw（首个 AI tick；60 tick 缓冲窗覆盖
+        //     t500 错峰门），yaw/位置任一破「全等」即证 wander 恢复。
+        ents.setWanderFrozen(false);
+        tickS(1, 0.05f);
+        bool okUnfrozen = ents.yawAt(pigA) != yawA0 || ents.posAt(pigA) != posA0;
+        tickS(60, 0.05f);
+        okUnfrozen = okUnfrozen || ents.yawAt(pigA) != yawA0 || ents.posAt(pigA) != posA0;
+
+        // (d) 源码钉（缝语句本体；pinSet 剥注释——摘缝 / 改签名即红）。
+        const QString exeDirS = QCoreApplication::applicationDirPath();
+        QStringList missS = pinSet(
+            QDir(exeDirS + QStringLiteral("/..")).absoluteFilePath(
+                QStringLiteral("src/Entities/entitymanager.cpp")), {
+            {"cpp-wander-freeze-guard", "if (m_wanderFrozen) {"},
+            {"cpp-wander-freeze-setter", "void EntityManager::setWanderFrozen(bool frozen)"},
+        });
+        missS << pinSet(
+            QDir(exeDirS + QStringLiteral("/..")).absoluteFilePath(
+                QStringLiteral("src/Entities/entitymanager.h")), {
+            {"hdr-wander-freeze-decl", "Q_INVOKABLE void setWanderFrozen(bool frozen);"},
+            {"hdr-wander-freeze-default", "bool m_wanderFrozen = false;"},
+        });
+        const bool okPinS = missS.isEmpty();
+        if (!okPinS)
+            qInfo().noquote() << "  [t1029 diag] pin miss:" << missS.join(QLatin1Char(','));
+
+        const bool okT1029 = okFrozen && okGravity && okUnfrozen && okPinS;
+        if (!okT1029) ++totalFail;
+        if (!okT1029)
+            qInfo().noquote() << "  [t1029 diag] okFrozen" << okFrozen << "okGravity" << okGravity
+                              << "okUnfrozen" << okUnfrozen << "okPin" << okPinS;
+        qInfo().noquote() << (okT1029 ? "PASS" : "FAIL")
+                          << "| t1029 wander-freeze test seam: EntityManager::setWanderFrozen(bool) "
+                             "short-circuits aiWander before the time-slice countdown / RNG re-roll / "
+                             "speed write / displacement (global QRandomGenerator stream untouched, "
+                             "moveSpeed zeroed, walk phase idle) while gravity and the knockback / "
+                             "reel physics stay live -- the manager-level equivalent of the t970 "
+                             "direct-drive RNG purge and the single kill switch for the shared "
+                             "t882/t927/t960 wander noise; legs: an 80s frozen window keeps "
+                             "position/yaw/walk-phase bit-identical, an air-spawned frozen pig still "
+                             "settles onto the platform at the same rest height (freeze != hover), "
+                             "unfreeze re-rolls the yaw within one AI tick (seam-off restores the "
+                             "legacy noise path), and source pins lock the aiWander guard, the "
+                             "setter body, the header declaration and the default-false member";
     }
 
     // ── P-t929 大峡谷孤立水格探针（worldgen 行为级：多 seed 生成 → 全图孤立水格 == 0）──
@@ -29449,6 +29553,9 @@ Item {
         //     各跑 2 次取 base max / shock min 进一步压噪。倍率数值本体已由 (d) 形式腿钉死，本腿证
         //     spawn→实体载荷→命中击退 全链随倍率缩放。
         EntityManager entsA;
+        // t1029 wander 冻结缝：0.8s 量测窗内猪 wander 随机向 = dBMax 历史擦线偶红源（review0907
+        //   B-P1-2 放宽 3.0 的依据即此噪声）。冻结后位移 = 击退积分纯确定值，包络断言保持不动。
+        entsA.setWanderFrozen(true);
         const auto tickA = [&](int n, float dt) {
             for (int i = 0; i < n; ++i) entsA.tick(qreal(dt), &wL, farL, 0.3f, 1.8f, false);
         };
