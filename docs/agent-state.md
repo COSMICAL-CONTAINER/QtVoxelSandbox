@@ -14,9 +14,9 @@ current_task_status: READY
 last_completed_task: t1026
 last_task_closure_commit: bceef37
 last_verified_commit: bceef37
-last_governance_review: 2026-09-08
+last_governance_review: 2026-09-09
 governance_review_due: false
-completed_tasks_since_governance_review: 3
+completed_tasks_since_governance_review: 0
 next_task: t1029
 next_task_source: docs/dev-plan.md R19.21 execution order
 active_write_lease: main_orchestrator_serial_queue
