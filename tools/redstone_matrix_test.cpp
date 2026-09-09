@@ -9906,7 +9906,7 @@ int main(int argc, char *argv[])
         //   t965 订正：铁门 135（旧 71 系错 id=青色羊毛，两侧 QML 同步订正；查看器侧另新增 127
         //   动力轨——掉落物侧排除清单不变，故 127 不进本同步表）。
         //   t1027 合法演化：掉落侧家族表自 Main.qml isItem3DFamily 字面量收编 C++ 单一权威
-        //   （ItemEntityManager::isItem3DFamily switch 表，24 id 原样；Main.qml 函数退化薄委托）——
+        //   （ItemEntityManager::isItem3DFamily switch 表，25 id 原样；Main.qml 函数退化薄委托）——
         //   掉落侧锚串同步迁移到 itementitymanager.cpp 表体（case <id> 逐一），t965 锚串演化先例。
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
@@ -19449,7 +19449,7 @@ Item {
     // ── P-t1027b 族谓词单一权威行为级 + QML 接线源码钉（t1027 首批）──
     //   QML delegate 排除侧（Main.qml plain-cube visible 链 hasBucket）与 C++ feeder 收纳侧
     //   （BlockDropInstancing 过滤 isPlainCubeDrop）必须逐位同判，否则双渲（共面 z-fight）或丢渲。
-    //   谓词已自 Main.qml isItem3DFamily 字面量表收编（t880 建 / t925 扩 / t965 订正，24 id 原样）→
+    //   谓词已自 Main.qml isItem3DFamily 字面量表收编（t880 建 / t925 扩 / t965 订正，25 id 原样）→
     //   C++ 行为级全枚举 + QML 薄委托 / 桶池接线源码钉（QML 渲染分支 headless 不可行为级断言，
     //   review27-4 源码钉先例；阴性轮敏感：摘 hasBucket 排除 / 摘 feeder 过滤各自翻红）。
     {
@@ -19464,7 +19464,7 @@ Item {
                  && ItemEntityManager::isPlainCubeDrop(int(BR::Wool));
         for (int id = int(BR::FirstWoolVariant); id <= int(BR::LastWoolVariant); ++id)
             okPred = okPred && ItemEntityManager::isPlainCubeDrop(id);
-        // 3D 形状家族 24 id：isItem3DFamily 全 true 且永不进整立方族（与 Main.qml 旧表逐 id 等值）
+        // 3D 形状家族 25 id：isItem3DFamily 全 true 且永不进整立方族（与 Main.qml 旧表逐 id 等值）
         static const int kFam1027[] = { 13, 20, 136, 15, 87, 58, 109, 44, 24, 94,
                                         43, 25, 17, 60, 88, 19, 135, 89, 115, 48,
                                         102, 129, 112, 113, 114 };
@@ -19490,32 +19490,46 @@ Item {
         const int v1 = qml1027.indexOf(QStringLiteral("geometry: BlockCube { blockId: entRoot.entId }"), v0);
         const bool okDeleg = v0 >= 0 && v1 > v0
                              && qml1027.mid(v0, v1 - v0).contains(QStringLiteral("&& !blockDropInstHost.hasBucket(entRoot.entId)"));
-        // 桶池接线钉：feeder 实例（manager 同源 + familyId 桶 id）+ 指派 handler（t976/t977 教训：信号 handler 普通 JS）
-        const bool okHost = qml1027.contains(QStringLiteral("id: blockDropInstHost"))
-                            && qml1027.contains(QStringLiteral("BlockDropInstancing {"))
-                            && qml1027.contains(QStringLiteral("manager: itemEntities"))
-                            && qml1027.contains(QStringLiteral("familyId: blockDropInstHost.buckets[index]"))
-                            && qml1027.contains(QStringLiteral("function reassignDropBuckets"))
-                            && qml1027.contains(QStringLiteral("blockDropInstHost.reassignDropBuckets()"));
         // 家族谓词薄委托钉：Main.qml isItem3DFamily 函数体只余 C++ 委托（字面量表收编后不再内联）
         const int if0 = qml1027.indexOf(QStringLiteral("function isItem3DFamily(id)"));
         const int if1 = qml1027.indexOf(QLatin1Char('}'), if0);
         const bool okQmlDeleg = if0 >= 0 && if1 > if0
                                 && qml1027.mid(if0, if1 - if0).contains(QStringLiteral("return itemEntities.isItem3DFamily(id)"))
                                 && !qml1027.mid(if0, if1 - if0).contains(QStringLiteral("id === "));
-        QFile ih1027(root1027 + QStringLiteral("/src/Game/itementitymanager.h"));
-        const QString ihh1027 = ih1027.open(QIODevice::ReadOnly) ? QString::fromUtf8(ih1027.readAll()) : QString();
-        const bool okHdr = ihh1027.contains(QStringLiteral("Q_INVOKABLE static bool isItem3DFamily(int itemId);"))
-                           && ihh1027.contains(QStringLiteral("Q_INVOKABLE static bool isPlainCubeDrop(int itemId);"))
-                           && ihh1027.contains(QStringLiteral("int(BlockRegistry::Count) <= 0x100"));
-        QFile bf1027(root1027 + QStringLiteral("/src/Game/blockdropinstancing.cpp"));
-        const QString bb1027 = bf1027.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf1027.readAll()) : QString();
-        const bool okFeeder = bb1027.contains(QStringLiteral("ItemEntityManager::isPlainCubeDrop(itemId)"))
-                              && bb1027.contains(QStringLiteral("itemId != m_familyId"));
-        const bool okB1027 = okPred && okDeleg && okHost && okQmlDeleg && okHdr && okFeeder;
+        // 接线 / 谓词声明 / feeder 过滤源钉（R19.21 批次 review 收口：裸 contains 迁 pinSet 剥注释——
+        //   「注释掉该行」式 QML 回归在裸 contains 下不翻红（review0906 #19 comment-masked pin 同族），
+        //   迁移后即红；okDeleg / okQmlDeleg 是 indexOf+mid 范围序断言 pinSet 表达不了故保留为结构面，
+        //   其关键子句由本组 pinSet 针（hasbucket-exclude / thin-delegate）补注释免疫）
+        QStringList miss1027 = pinSet(
+            QDir(exeDir1027 + QStringLiteral("/..")).absoluteFilePath(
+                QStringLiteral("src/ui/Main.qml")), {
+            {"qml-blockdrop-host-id", "id: blockDropInstHost"},
+            {"qml-blockdrop-host-type", "BlockDropInstancing {"},
+            {"qml-blockdrop-host-manager", "manager: itemEntities"},
+            {"qml-blockdrop-host-familyid", "familyId: blockDropInstHost.buckets[index]"},
+            {"qml-blockdrop-reassign-fn", "function reassignDropBuckets"},
+            {"qml-blockdrop-reassign-call", "blockDropInstHost.reassignDropBuckets()"},
+            {"qml-blockdrop-hasbucket-exclude", "&& !blockDropInstHost.hasBucket(entRoot.entId)"},
+            {"qml-item3d-thin-delegate", "return itemEntities.isItem3DFamily(id)"},
+        });
+        miss1027 << pinSet(
+            QDir(exeDir1027 + QStringLiteral("/..")).absoluteFilePath(
+                QStringLiteral("src/Game/itementitymanager.h")), {
+            {"hdr-item3d-invokable", "Q_INVOKABLE static bool isItem3DFamily(int itemId);"},
+            {"hdr-plaincube-invokable", "Q_INVOKABLE static bool isPlainCubeDrop(int itemId);"},
+            {"hdr-count-upper-bound", "int(BlockRegistry::Count) <= 0x100"},
+        });
+        miss1027 << pinSet(
+            QDir(exeDir1027 + QStringLiteral("/..")).absoluteFilePath(
+                QStringLiteral("src/Game/blockdropinstancing.cpp")), {
+            {"feeder-plaincube-filter", "ItemEntityManager::isPlainCubeDrop(itemId)"},
+            {"feeder-familyid-neq", "itemId != m_familyId"},
+        });
+        const bool okPins1027 = miss1027.isEmpty();
+        const bool okB1027 = okPred && okDeleg && okQmlDeleg && okPins1027;
         if (!okB1027)
-            qInfo().noquote() << "  [t1027 diag] pred" << okPred << "deleg" << okDeleg << "host" << okHost
-                              << "qmlDeleg" << okQmlDeleg << "hdr" << okHdr << "feeder" << okFeeder;
+            qInfo().noquote() << "  [t1027 diag] pred" << okPred << "deleg" << okDeleg
+                              << "qmlDeleg" << okQmlDeleg << "pin miss:" << miss1027.join(QLatin1Char(','));
         if (!okB1027) ++totalFail;
         qInfo().noquote() << (okB1027 ? "PASS" : "FAIL")
                           << "| t1027 family predicate single authority: ItemEntityManager::isItem3DFamily "
@@ -20981,8 +20995,10 @@ Item {
     //    review0907 B-P3-4：三族偶红同源 = 甩钩 / 量测窗内猪 wander RNG（t882 okFar-false / t960 dBMax
     //    擦线 / t927 同族签名）。缝 = EntityManager::setWanderFrozen(bool)（t970「直驱消 RNG」的管理器级
     //    等价物；最小侵入 = 一成员 + 一 setter + aiWander 顶部早退，不动 RNG 类结构）。腿：
-    //    (a) 冻结行为：冻结中 2×800 tick（80s，≥16 个 wander 时间片）位置/朝向/腿摆保持——yaw 保持
-    //        生成初值本身即「RNG 流未被消费」的判别面；moveSpeed 恒 0（wander 速度写入被跳过）；
+    //    (a) 冻结行为：冻结中 2×800 tick（80s，≥16 个 wander 时间片）位置/朝向/腿摆零写入 + 生成列
+    //        定身——断言面证「窗内状态不变」；「守卫先于 RNG 抽取 / 全局流未被消费」是实现声明：
+    //        (d) 缝钉锚语句存在而非其在 aiWander 内的次序，不能升格为断言结论（R19.21 批次
+    //        review B-P3 备案，注释措辞按断言面收敛）；moveSpeed 恒 0（wander 速度写入被跳过）；
     //    (b) 重力保留：冻结中空中生成的第二头猪仍落台静息（静息 Y 与 (a) 同值——restY = 支撑顶 + halfH
     //        单一权威贴面），XZ 定身——冻结 ≠ 悬停（重力 / 击退 / 拉拽物理在 aiWander 之外）；
     //    (c) 解冻恢复：冻结期 wanderTimer 未推进（保持生成初值 0）→ setWanderFrozen(false) 后首个
