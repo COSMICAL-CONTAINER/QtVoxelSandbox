@@ -191,6 +191,10 @@ qt_add_executable(voxelsandbox
     #   向下只读 Entities 层 XpOrbManager；Quick3D 公开 API，无自定义 shader——RHI 囚笼合规）。
     src/Game/xporbinstancing.cpp
     src/Game/xporbinstancing.h
+    # t1027（R19.21）掉落物 instancing 治理首批：方块整立方掉落族 per-id 桶 feeder（Game 层呈现适配器，
+    #   向下只读 Game 层 ItemEntityManager + 家族谓词静态权威；t858 同款 Quick3D 公开 API 模式）。
+    src/Game/blockdropinstancing.cpp
+    src/Game/blockdropinstancing.h
     # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
     src/Entities/entitymanager.cpp
     src/Entities/entitymanager.h
@@ -931,6 +935,10 @@ add_executable(redstone_matrix_test
     #   活体过滤）。依赖 xporbmanager（已列）；Quick3D 公开 API。
     src/Game/xporbinstancing.cpp
     src/Game/xporbinstancing.h
+    # t1027 掉落物 instancing 首批探针：Game 层 BlockDropInstancing feeder 直调（族分桶正确性 /
+    #   实例数=活体数 / 拾取-合并-despawn 零扰动）。依赖 itementitymanager（已列）+ blockregistry（已列）。
+    src/Game/blockdropinstancing.cpp
+    src/Game/blockdropinstancing.h
     # t946 坐姿变换链连续域探针附加：Renderer 层 MobModel 直编（真几何顶点射线剪影断言——t880
     #   ItemShapeGeometry 行为级先例；review24 时「只用头内 constexpr、不链 mobmodel.cpp」的旧注释口径
     #   自本探针起放开为「头 constexpr 静态断言 + 行为级直编并存」）。

@@ -2434,15 +2434,11 @@ Window {
     //   t965 订正：门族「铁 71」系**错 id**（71 = WoolCyan 青色羊毛；铁门实为 135）——旧表把青羊毛暗路由
     //   进 ItemShapeGeometry 满格兜底（观感凑巧同 BlockCube 掩盖）、铁门掉落反而拿不到 3D 薄板形态。
     //   掉落物侧铁轨排除清单不变（动力轨 127 仅查看器侧 3D——ResourceBrowser selectedIsItem3D 注释互指）。
+    //   t1027（R19.21）家族表收编 C++ 单一权威（ItemEntityManager::isItem3DFamily，24 id 原样搬运）：
+    //   instancing 治理要求 QML delegate 排除侧与 C++ feeder 收纳侧（BlockDropInstancing）对同族判定
+    //   逐位一致，本函数退化薄委托（id 表见 itementitymanager.cpp，源码钉 P-t1027b 护航）。
     function isItem3DFamily(id) {
-        return id === 13 || id === 20 || id === 136 || id === 15 || id === 87
-            || id === 58 || id === 109 || id === 44 || id === 24 || id === 94
-            || id === 43 || id === 25 // t925：枯灌木 / 小麦
-            || id === 17 || id === 60 || id === 88 // 栅栏族
-            || id === 19 || id === 135 || id === 89 // 门族（t965：铁门订正 135，原误 71=青色羊毛）
-            || id === 115 || id === 48 // 白 / 红蘑菇
-            || id === 102 || id === 129 // 蛛网 / 红石火把
-            || id === 112 || id === 113 || id === 114 // 拉杆 / 按钮
+        return itemEntities.isItem3DFamily(id)
     }
 
     // t377 mob 护甲 tier 色（t719 起 UnitCube+tier 色路径退役——ArmorLayerBox + layer 贴图接管 mob 穿甲
@@ -6252,7 +6248,7 @@ Window {
                     //   仅留火把像素 → 透明底不再显黑（机制同手持火把 viewModelHand / CrackBox 的 alphaCutoff 路径）。
                     //   仅火把（id 13）启用；其余方块贴图无 alpha，保持 alphaCutoff=0（默认不透明）。
                     Model {
-                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isBed(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId) && !isItem3DFamily(entRoot.entId) // review27 #4：附魔台 94 不在 isPartialBlock（mesher 靠 chunkgeometry 显式 case）→ 旧链对 94 仍 true，与下方 ItemShapeGeometry 分支叠渲共面 z-fight；家族整体互斥（其余族员已被前五谓词挡住，本条对它们冗余但钉死互斥不变量）
+                        visible: entRoot.entId !== 13 && !hotbarVM.isPartialBlock(entRoot.entId) && !hotbarVM.isCrossBlock(entRoot.entId) && !hotbarVM.isBed(entRoot.entId) && !hotbarVM.isTool(entRoot.entId) && !hotbarVM.isMaterial(entRoot.entId) && !isItem3DFamily(entRoot.entId) && !blockDropInstHost.hasBucket(entRoot.entId) // review27 #4：附魔台 94 不在 isPartialBlock（mesher 靠 chunkgeometry 显式 case）→ 旧链对 94 仍 true，与下方 ItemShapeGeometry 分支叠渲共面 z-fight；家族整体互斥（其余族员已被前五谓词挡住，本条对它们冗余但钉死互斥不变量）。t1027：hasBucket 排除 = 已入 instancing 桶（blockDropInstHost）的整立方 id 走合批 Model，未入桶（桶池满溢出）id 保底走本 delegate——两侧谓词同源 ItemEntityManager::isPlainCubeDrop 单一权威
                         geometry: BlockCube { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6651,6 +6647,86 @@ Window {
                         loops: Animation.Infinite
                         NumberAnimation { from: 0; to: 0.15; duration: 1000; easing.type: Easing.InOutSine }
                         NumberAnimation { from: 0.15; to: 0; duration: 1000; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
+
+            // t1027（R19.21）掉落物 instancing 治理首批：**方块整立方族**（挖掘产出主面，泥土/石头/圆石/
+            //   木板/砂/羊毛 16 色…——活体数期望最大的族，t1007 三角对表 93 items 场景渲染主因）合批。
+            //   结构：固定桶池（8 桶）× per-id instanced Model——族内 per-id 差异只在 BlockCube 几何 UV
+            //   （per-face 图集瓦片按 blockId 烘进几何），故桶粒度 = itemId：每活跃整立方 id 占一桶，桶内
+            //   全实例共享同一 BlockCube 几何 + 同一材质（同 t858 经验球「单 Model 单实例表」模式，1 draw /
+            //   桶）。旋转/浮动动画下沉 C++ feeder 解析式（BlockDropInstancing，公式逐字对齐旧 delegate 的
+            //   rotY 3s/圈 + bob 0↔0.15 2s 周期；槽 ×0.37s 错峰 = 旧「相位 = 创建时刻」的等价视觉错开）。
+            //   桶指派走信号 handler 普通 JS（reassignDropBuckets，t976/t977 AOT 教训：跨组件单元绑定静态
+            //   编译不重估，绝不绑定时改表）；桶池满 → 溢出 id 走上方 delegate 旧路径（visible 链 hasBucket
+            //   排除同源谓词），优雅降级不丢渲。拾取/despawn/合并/物理零改动（feeder 只读，C++ 数据链原样）。
+            //   分层（PLAN §2）：本 host 纯呈现编排；族谓词单一权威在 ItemEntityManager（C++）。
+            Node {
+                id: blockDropInstHost
+                readonly property int kBucketCount: 8
+                // 桶池：buckets[k] = 已指派的整立方方块 id（0 = 空桶）。整体替换赋值 → property var 自动
+                //   notify → hasBucket 绑定（delegate visible 链）随指派重算。
+                property var buckets: [0, 0, 0, 0, 0, 0, 0, 0]
+
+                function hasBucket(id) {
+                    const b = blockDropInstHost.buckets
+                    for (let k = 0; k < b.length; ++k) if (b[k] === id) return true
+                    return false
+                }
+
+                // 桶重指派：扫活体整立方 id 计数 → 在用桶保持（防几何重建抖动）→ 空桶按活体数降序、
+                // id 升序并列补位（确定性 tiebreak 防指派抖动）→ 消失 id 释放。entitiesChanged 驱动。
+                function reassignDropBuckets() {
+                    const counts = ({})
+                    const n = itemEntities.count
+                    for (let i = 0; i < n; ++i) {
+                        if (!itemEntities.aliveAt(i)) continue
+                        const id = itemEntities.itemIdAt(i)
+                        if (!itemEntities.isPlainCubeDrop(id)) continue
+                        counts[id] = (counts[id] || 0) + 1
+                    }
+                    const prev = blockDropInstHost.buckets
+                    const next = [0, 0, 0, 0, 0, 0, 0, 0]
+                    const freeSlots = []
+                    const kept = []
+                    for (let k = 0; k < blockDropInstHost.kBucketCount; ++k) {
+                        const id = (k < prev.length) ? prev[k] : 0
+                        if (id > 0 && counts[id] > 0) { next[k] = id; kept.push(id) }
+                        else freeSlots.push(k)
+                    }
+                    const cands = Object.keys(counts).map(Number).filter(function(id) { return kept.indexOf(id) < 0 })
+                    cands.sort(function(a, b) { return (counts[b] - counts[a]) || (a - b) })
+                    while (freeSlots.length > 0 && cands.length > 0) next[freeSlots.shift()] = cands.shift()
+                    blockDropInstHost.buckets = next
+                }
+
+                Component.onCompleted: reassignDropBuckets()
+                Connections {
+                    target: itemEntities
+                    function onEntitiesChanged() { blockDropInstHost.reassignDropBuckets() }
+                }
+
+                Repeater {
+                    model: blockDropInstHost.kBucketCount
+                    delegate: Node {
+                        visible: blockDropInstHost.buckets[index] > 0
+                        Model {
+                            // 几何 per-id：桶指派变化才重建（setBlockId 兜底 Stone，空桶 visible=false 不渲染）。
+                            geometry: BlockCube { blockId: blockDropInstHost.buckets[index] }
+                            instancing: BlockDropInstancing {
+                                manager: itemEntities
+                                familyId: blockDropInstHost.buckets[index]
+                            }
+                            // 材质与旧 delegate plain-cube 分支逐字同参（NoLighting + voxelAtlas + 天光乘子
+                            // baseColor；实例表已携 0.3 缩放 / 自转 / bob，Model 本体 transform 恒 identity）。
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColorMap: voxelAtlas
+                                baseColor: terrainLight(worldClock.skyLight)
+                                alphaCutoff: 0.0
+                            }
+                        }
                     }
                 }
             }

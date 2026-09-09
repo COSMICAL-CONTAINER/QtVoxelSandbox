@@ -9,6 +9,8 @@
 
 #include <vector>
 
+#include "blockregistry.h" // t1027 家族谓词用 BlockRegistry::Count/isPartialBlock/isCrossBillboard/isBed（Game→Core 向下合规）
+
 // 方块掉落实体管理器（t35；Entities/Game ViewModel 层）。
 //
 // 生存模式破坏**可掉落**方块时，在该格生成一个 item entity（旋转 / 浮动的小方块图标），
@@ -66,6 +68,19 @@ public:
     // t256：第 i 个槽位是否活体。呈现层 delegate 据它 visible：空槽隐藏（slot 复用保 Repeater count
     //   单调不降、delegate 永不销毁）。越界 → false。pickupScan 也据此跳过空槽。
     Q_INVOKABLE bool aliveAt(int i) const;
+
+    // ── t1027（R19.21）掉落物渲染家族谓词（单一权威；instancing 治理首批）──
+    //   「QML delegate 排除侧」与「C++ feeder 收纳侧」（BlockDropInstancing）必须对同族判定逐位一致，
+    //   否则双渲（共面 z-fight）或丢渲。谓词落 C++ 静态，QML 的 isItem3DFamily 函数退化薄委托
+    //   （Main.qml t880 字面量表原样收编，值不变）。
+    // 3D 形状族（t880 建 / t925 扩 / t965 订正）：火把 13；活板门 20/136；台阶 15/87/58/109；雪层 44；
+    //   草丛 24；附魔台 94；枯灌木 43；小麦 25；栅栏 17/60/88；门 19/135/89；蘑菇 115/48；蛛网 102；
+    //   红石火把 129；拉杆 112；按钮 113/114。改族只改此处 + ItemShapeGeometry 几何 case 表。
+    Q_INVOKABLE static bool isItem3DFamily(int itemId);
+    // 方块整立方掉落族（t1027 首批 instancing 治理面）：合法方块段内、非异形（partial）/ cross / 床 /
+    //   3D 家族 → BlockCube 满格立方渲染路由。工具（0x100+）/ 材料（0x200+）段经 id < BlockRegistry::Count
+    //   上界自然排除（下 static_assert 钉死该前提；段界挪动须回改本谓词）。
+    Q_INVOKABLE static bool isPlainCubeDrop(int itemId);
     // t743：第 i 个槽位实体是否**已着地**（resting——落在支撑方块顶面静止；飞行 / 浮水 / 瀑布下沉恒
     //   false）。压力板掉落物触发（updatePressurePlates 掉落物分支）据它门控：着地 = 物品与板面真实
     //   接触才压板（机制等价 MC 物品实体压板），飞行掠过板顶不误触。空槽 / 越界 → false。
@@ -347,5 +362,11 @@ private:
     static constexpr float kMergeRadius = 2.0f;
     // （t804 kItemFireBurnSec 火焚时长常量已随 t844 需求反转退役：入火瞬灭无窗。）
 };
+
+// t1027：isPlainCubeDrop 用 id < Count 上界排除工具（0x100+）/ 材料（0x200+）段——方块枚举一旦膨胀
+//   越过工具段下界，该排除静默失效（工具 id 会被误收进整立方族）→ 编译期钉死前提。
+static_assert(int(BlockRegistry::Count) <= 0x100,
+              "t1027: BlockRegistry::Count must stay below the 0x100 tool segment - "
+              "isPlainCubeDrop excludes tools/materials via the Count bound alone");
 
 #endif // ITEMENTITYMANAGER_H
