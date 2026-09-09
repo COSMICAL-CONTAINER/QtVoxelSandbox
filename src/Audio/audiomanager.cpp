@@ -854,7 +854,7 @@ void AudioManager::playNote(int pitch, int family)
     case 3: rate = 2.0f; break;  // NoteTimbreSnare（沙下方 → 高八度脆响）
     default: break;
     }
-    Clip &c = d->noteClips[size_t(p)];
+    auto &c = d->noteClips[size_t(p)]; // Clip 是 Data 嵌套类型——AudioManager 作用域裸名不可见（app 目标编译教训：矩阵目标不含 audiomanager.cpp）
     d->replayNote(c, m_volume * 0.9f, rate);
 }
 
