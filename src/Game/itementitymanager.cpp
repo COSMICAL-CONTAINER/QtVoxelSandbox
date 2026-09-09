@@ -14,6 +14,36 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
     m_clock.start(); // t53：拾取延迟判定的墙钟起点（elapsed 单调递增，免 dt 耦合）
 }
 
+// ── t1027 掉落物渲染家族谓词（单一权威；实现见头注释）──
+bool ItemEntityManager::isItem3DFamily(int itemId)
+{
+    // 家族表自 Main.qml isItem3DFamily（t880 建 / t925 扩 / t965 订正铁门 135）逐 id 收编，值不变：
+    //   火把 13；活板门 20/136；台阶 15/87/58/109；雪层 44；草丛 24；附魔台 94；枯灌木 43；小麦 25；
+    //   栅栏 17/60/88；门 19/135/89；蘑菇 115/48；蛛网 102；红石火把 129；拉杆 112；按钮 113/114。
+    switch (itemId) {
+    case 13: case 20: case 136: case 15: case 87:
+    case 58: case 109: case 44: case 24: case 94:
+    case 43: case 25:
+    case 17: case 60: case 88:
+    case 19: case 135: case 89:
+    case 115: case 48:
+    case 102: case 129:
+    case 112: case 113: case 114:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool ItemEntityManager::isPlainCubeDrop(int itemId)
+{
+    if (itemId <= 0 || itemId >= int(BlockRegistry::Count)) return false; // air / 越界 / 工具·材料段（见 static_assert）
+    if (BlockRegistry::isPartialBlock(quint8(itemId))) return false;      // 异形段（台阶 16 / 半砖…）→ billboard / 3D 族
+    if (BlockRegistry::isCrossBillboard(quint8(itemId))) return false;    // cross 段（花 / 树苗…）→ flat billboard
+    if (BlockRegistry::isBed(quint8(itemId))) return false;               // 床段（含 8 色扩展床）→ bed 图标 billboard
+    return !isItem3DFamily(itemId);                                       // 3D 形状族（火把 / 门 / 栅栏…）排除
+}
+
 // 生成掉落实体：存格中心坐标 + id + count，bump 版本号发 entitiesChanged → QML Repeater 追加 delegate。
 // spec「实体数量有上限（防溢出）」。t320 cap 行为改 LRU 驱逐：达 kCap 时不再「跳过新 spawn」（玩家视角是
 //   破块没掉落 = bug），而是驱逐最老活体（min spawnMs）腾位（机制等价 MC kMaxItemEntities 滑动窗 + LRU
