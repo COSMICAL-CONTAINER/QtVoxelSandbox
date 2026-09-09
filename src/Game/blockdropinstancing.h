@@ -25,7 +25,7 @@
 //   ① 方块整立方族（本批）：BlockCube + 共享 voxelAtlas。族内 per-id 差异只在几何 UV（BlockCube 按
 //      blockId 烘 per-face 图集瓦片），故桶粒度 = itemId：每个活跃整立方 id 占一个桶位，桶内全部实例
 //      共享同一 BlockCube 几何 + 同一材质 → 同 id 掉落物合批。
-//   ② 3D 形状族（isItem3DFamily 24 id，ItemShapeGeometry + voxelAtlas）——登记分步。
+//   ② 3D 形状族（isItem3DFamily 25 id，ItemShapeGeometry + voxelAtlas）——登记分步。
 //   ③ 异形 billboard 族（partial/cross/bed 非 3D，BillboardQuad + per-id 图标 Texture）——登记分步。
 //   ④ 工具 3D 族（五类几何 + 弓，tier 色 per-instance color 可承载）——登记分步。
 //   ⑤ 工具 / 材料 billboard 族（ToolIcon / MaterialIcon sourceItem per-id）——登记分步。
