@@ -3540,3 +3540,38 @@ t1005-t1023（19 项）。**建议顺序：回归清算 t1005→t1006→t1007（
   → **✅✅ 落地（2026-09-09）：`setWanderFrozen(bool)` 缝（最小侵入=Q_INVOKABLE setter + `m_wanderFrozen=false` 成员 + aiWander 顶部早退），矩阵 502→503（+1 腿），三族钓鱼 flaky 灭源收敛。**（86cc7fc + 82e72f8）缝语义（t970「直驱消 RNG」的管理器级等价物）：冻结期 aiWander 在时间片倒计时 / QRandomGenerator 选向 / wanderSpeed 写入 / 位移**之前**早退——wanderTimer 保持、全局 RNG 流不消费、位置/yaw/walkPhase 逐位不动、仅 moveSpeed 归零（腿停）；tick 的重力 / 水推 / 击退 / 拉拽物理在 aiWander 之外（**冻结 ≠ 悬停**）；缺省 false 生产路径零调用零改动（m_chickenJockeyChance / setBreedTimings 缝先例）。接线：P-t882 / P-t927（铁傀儡非追击回退 aiWander 同被冻）/ P-t960 射箭量测腿（entsA）构造即冻结——甩钩窗 / 0.8s 量测窗内猪 wander RNG 噪声源（review0907 B-P3-4 同源判定；亦即 review0907 B-P1-2 把 t960 dBMax 上限 2.2→3.0 的放宽依据）灭。探针 P-t1029 四腿：(a) 冻结 2×800 tick（80s ≫ wander 时间片）位置/yaw/walkPhase/moveSpeed 逐位不变（yaw 钉在生成初值=RNG 流未被消费的判别面）；(b) 冻结中空中生成仍落台静息（restY=支撑顶+halfH 与 (a) 同值）；(c) 解冻后 wanderTimer（冻结期保持生成初值 0）首个 AI tick 重掷 yaw=缝关即恢复原噪声路径（重掷恰回初值+全窗 idle 的假红质量 <5e-6 登记）；(d) pinSet 剥注释钉 aiWander 早退语句本体 / setter / 头文件声明 / 缺省成员。**三连跑验收（本单核心）**：缝开态全矩阵 ×3 恒 **503 PASS / 0 FAIL**（matrix_t1029_seam1/2/3.log），t882/t927/t960/t1029 四腿全绿零偶红。**阴性轮**：仅摘三腿 `setWanderFrozen(true)` 调用（引擎缝与 P-t1029 保留，其余零回归）→ 3 跑内**恰复现台账历史签名**：neg1/neg2 干净，neg3 **恰红 502 PASS / 1 FAIL = t882 diag `okNear true okFar false pitch -1 okPin true`**（= t1024 登记的 matrix_run3/4.log okFar-false 签名本体：仰角扫描 12 訊全空 = 猪游走出可达窗；关缝偶红率观测 1/3；matrix_t1029_neg1/2/3.log）。restore 后复跑恒绿。**flaky 台账收敛**：t882/t927/t960 同源噪声（甩钩 / 量测窗猪 wander RNG）经缝灭源；P-t882(b)/t927 首游荡窗重试纪律保留作冗余防御（原 flake 声明退役）；t960 dBMax 3.0 宽包络原样保留（量测位移已=击退积分确定值，放宽依据由缝补齐——review0908 #4 的「白纸放宽」项就此闭合）。
 
 执行顺序：t1024 → t1025 → t1026 → t1028 → t1029 → t1027（性能大项殿后）。每项独立 commit + dev-plan ✅✅；全部完成后照例只读 review + 统计。矩阵基线 **480**。offscreen 纪律与三教训（时间戳/可达域/pinSet）沿用。
+
+### R19.21 批次 review 收口（2026-09-09 23:15，双只读 reviewer + 主控亲自修复）
+
+**reviewer 结论（窗口 b91cb87..6c13e51）**：A 代码正确性 **pass**——P0/P1/P2 全 0，存档兼容（feeder 只读四 const 读口/冻结缝缺省零持久化/announce 契约两消费点/雷暴不触 weather 键）、状态机互逆（雷暴清态唯一调用点=完成沿、冻结≠悬停、引诱链序无穿透）、时序（主线程 COW 实例表/桶指派无震荡/hasBucket 两侧同源）、资源（>8 id 降级不丢渲/换世界全清/25 wav 零触碰）、声明面（moc include/static_assert/25 id 表逐值零漂移）、五修对表全绿；2 P3。B 探针+台账 **pass**——0 P1 / 1 P2 / 3 P3；十个阴性/验收日志逐个精确吻合，矩阵链 480→505 算术自洽，19e280d 勘误逐句核实，台账不一致=0。
+
+**发现处置（fix 1bf02e9 + test 6abfb5c，主控亲自）**：
+- **P2-1 已修**：P-t1027b 的 11 针裸 contains 迁 **pinSet 剥注释** + 新增 hasBucket 排除/薄委托 2 针（comment-masked pin 同族，review0906 #19）。**阴性轮**：Main.qml:6251 hasBucket 子句注释掩蔽 → **恰红 504/1 = P-t1027b**，diag `pred true deleg true qmlDeleg true pin miss: qml-blockdrop-hasbucket-exclude`——旧范围钉被掩蔽恒真 + 新 pinSet 针翻红的对照实证（matrix_reviewfix_neg.log）；restore 后终跑 **505/0**（matrix_reviewfix_pos/final.log）。okDeleg/okQmlDeleg 为 indexOf+mid 范围序断言，结构性豁免 pinSet（保留），关键子句已由 pinSet 针补注释免疫。
+- **P3 已修**：3D 族计数标签「24 id」→「25 id」（t880 建 10 + t925 扩 15，值面零漂移，5 处注释）；P-t1029a 注释措辞按断言面收敛（「守卫先于 RNG 抽取/全局流未被消费」为实现声明，(d) 缝钉锚语句存在非次序，不能升格为断言结论）。
+- **P3 登记**：①桶满 8 降级路径 + 桶指派抖动零行为覆盖（探针活体 ≤2 桶 ≤3 只）→ instancing 批 2 补腿；②8 桶 = 8 个恒走 16ms Precise QTimer（空场景 500 次/秒唤醒 ×8 放大 t858 恒跑模式）→ 批 2 评估共享单 ticker 或 `running` 门控（t1023 动画门控先例）；③早期验收日志名被覆写（matrix_run2/run.log 已非原名内容，数字经链互证无损）→ **纪律（本批起执行）：验收日志一律带任务号**。
+- 连带：本次直编测试 TU（blockdropinstancing.h 依赖触发）暴露 3 处存量 store 清理辅助 `QFile::open` nodiscard 警告（:37028/:37058/:37101，与收口 diff 无关，test-only 零行为影响，登记不修）。
+- 验证：app 目标重建 EXIT=0（binary 23:11 与源对齐）+ offscreen 冒烟 12s 存活 0 字节日志（GUI 子系统既往口径）。
+
+**批次统计（cc238ee..6abfb5c）**：35 提交（fix 11 / test 9 / docs 15），62 文件 +4948/−168（src+tools 24 文件 +3261/−165）；矩阵 **480→505 PASS / 0 FAIL**（+25：t1024 +3 / t1025 +2 / t1026 +2 / t1028 +15 / t1029 +1 / t1027 +2；review0909 清偿腿净 +0）；全程 offscreen、阴性轮齐、app 构建+冒烟齐。
+
+**待实机确认总表（12 项，t1024/t1025/t1029 无待确认项）**：t1026 耕地湿润变暗·小麦八阶段观感·面包合成 UI·锄耐久｜t1027 F3 draw call 前后对比·instanced 旋转/浮动一致性·桶满 8 降级观感·日夜天光调制一致性｜t1028 25 半音爬升·三族音色差异（石=×1.0 同声为登记简化）·红石连奏·调音文案。明细见各单回标。
+
+---
+
+## R19.22 生存伙伴批（t1030-t1035，6 项；2026-09-09 立项，用户常设授权自动执行）
+
+主线延续「和我世界差不多的产品」：生存循环第二块 = **驯服与伙伴**（狼/豹猫是 MC 标志性伙伴生物，骨头/生鱼道具链已半在库）+ 两个 review 登记收口 + instancing 批 2。
+
+**t1030 骨粉与作物催熟**：骨头→骨粉（3 骨粉/骨，合成或直接掉落物形态）；骨粉右键小麦/耕地作物推进 2-3 生长阶段（消耗 1 骨粉，未熟不可再催到熟的边界口径按 MC）；骷髅掉骨链盘点（若骷髅无掉骨则补掉落表）。探针：合成/催熟推进/耗尽/边界。**先盘点：骷髅掉落表、WheatCrop state 推进口的随机 tick 依赖面。**
+
+**t1031 狼驯服**：骨头右键野狼概率驯服（MC 口径 1/3 尝试，烟雾/爱心粒子反馈）；驯服态=项圈红领（渲染面）+ 坐下/跟随切换（右键）+ 跟随传送边界；驯服狼参战（玩家攻击目标联动，复用 attack-target 体系）；野狼主动敌对口径（MC 狼中立方，不主动攻击）。探针：驯服概率缝（RNG 注入或统计窗）/坐下跟随/项圈渲染钉/参战。**分层注意：驯服态在 Entities，项圈渲染在 QML，骨道物品在 Game——沿 t1025 引诱表先例。**
+
+**t1032 掉落物 instancing 批 2 + review 登记收口**：3D 形状族 per-id 桶（ItemShapeGeometry 几何缓存共享）；**补桶满 8 降级路径行为腿**（≥9 种同屏整立方 id，第 9 种起 delegate 渲染不断链不双渲——P3 登记①）；**8×16ms 定时器收口评估**（共享单 ticker 或全桶空 `running:false` 门控——P3 登记②，若做须阴性轮定时器行为）。探针：族 2 分桶/降级腿/定时器门控腿。
+
+**t1033 床锚自然破坏联动**：爆炸/岩浆等非玩家路径销毁锚床 → clearBedSpawn（review0909 #4；经信号/回调转发守分层——Entities 清块路径不可反向依赖 Game，沿 seedChanged 收口模式经 QML 编排或信号）。探针：TNT 炸锚床 → 重生点失效 + 播报恰一次；水冲不触（床非附着块不在 wash 清单，口径登记）。
+
+**t1034 门/床/活板门 sneakPlace 存量缺门收口**：useBlock 三分支补 `!sneakPlace` 门（review0909 #2 存量登记项；对齐机关件模式；防「潜行持方块无法对门/床面放置」）。探针：三件潜行右键放置/非潜行正常使用两向。
+
+**t1035 豹猫驯服**：生鱼喂食驯服（MC 口径走近缓慢喂食，驯服后信任态不跟随不项圈——与狼模型刻意分化）；生鱼来源盘点（若钓鱼无鱼则登记简化或补钓鱼产出）。探针：驯服/信任态/与狼的分化口径。
+
+执行顺序：t1030 → t1031 → t1032（性能中段插）→ t1033 → t1034 → t1035。矩阵基线 **505**。offscreen 纪律 + 三教训 + 验收日志带任务号新纪律沿用。每项独立 commit + ✅✅ 回标 + agent-state 同步（新纪律：每任务 docs 闭环必须同步 agent-state）。
