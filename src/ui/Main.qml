@@ -3140,12 +3140,14 @@ Window {
         // t715 状态效果快照 → PlayerState.setActiveEffects（Physics 层 tickImpl 组装活跃效果列表、真变才发；
         //   Game 层持显值，同 airUpdated→setAir 模式。HUD 右上角效果栏读 playerState.effectList 渲染）。
         function onActiveEffectsChanged(effects) { playerState.setActiveEffects(effects) }
-        // t388 睡觉被拒（白天 / 雷暴 / 附近有怪物）→ 系统播报中文文案（同死亡播报 appendChatMessage 模式）。
+        // t388 睡觉被拒（非夜间且非雷暴 / 附近有怪物；review0909 #1 起雷暴为合法入睡窗口）→ 系统播报
+        //   中文文案（同死亡播报 appendChatMessage 模式）。
         function onSleepRefused(reason) { window.appendChatMessage("", reason, true) }
-        // t1024 床锚翻转沿：成功入睡（或读档回填）置真 → 系统播报「重生点已设置」（dev-plan 文案；
-        // 挖床 / 换代置假静默——失效用户面走 onBedSpawnLost / 世界出生点语义，不在此重复播报）。
-        function onBedSpawnValidChanged() {
-            if (player.bedSpawnValid) window.appendChatMessage("", "重生点已设置", true)
+        // t1024 床锚置真沿 → 系统播报「重生点已设置」（dev-plan 文案）。restored = 来源沿（review0909 #5）：
+        //   false = 入睡设锚（播报）；true = 读档回填（enterWorld → setBedSpawn，静默——每次进世界复读
+        //   一条系统消息属 UX 噪音，对比 onBedSpawnLost / 换代清锚的刻意静默口径）。置假沿不播报。
+        function onBedSpawnValidChanged(restored) {
+            if (player.bedSpawnValid && !restored) window.appendChatMessage("", "重生点已设置", true)
         }
         // t1024 床锚丢失（挖掉睡过的锚床任一半）→ 系统播报（重生点已失效回世界出生点的用户面；
         // respawn 链 bedSpawnValid 已假 → 不再报「回床边重生」）。
@@ -3233,7 +3235,8 @@ Window {
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
         // t1028 右键音符盒调音 → player 发 noteBlockTuned(x,y,z,pitch,family,noteName) → 音频层播新调音音
-        //   （MC 右键=调音并播放）+ 系统播报音高提示（dev-plan 文案「音高：C#3」格式；noteName 由
+        //   （MC 右键=调音并播放）+ 系统播报音高提示（dev-plan 文案「音高：C#4」格式——n=0 起音名为
+        //   C4..C6 八度口径，review0909 #10 消歧义；noteName 由
         //   BlockRegistry::noteBlockNoteName 单一权威生成，QML 不另立名表）。音频层只消费，PLAN §2 分层。
         function onNoteBlockTuned(x, y, z, pitch, family, noteName) {
             audio.playNote(pitch, family)

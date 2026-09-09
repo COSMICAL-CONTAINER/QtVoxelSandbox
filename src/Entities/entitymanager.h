@@ -1715,9 +1715,10 @@ private:
     float m_breedCooldownSec = kBreedCooldown;
     float m_babyGrowSec      = kBabyGrowTime;
     // t1025 食物引诱门控表（setFoodLure 写；PlayerController 据持物更新，Game 层判定食物映射——Entities
-    //   不向上依赖物品 id，PLAN §2）：下标 = mobType（MobCaveSpider=20 为枚举尾，容量 21 足容）。缺省全 false
-    //   = 无引诱（空手 / 非食物物品时动物不追随玩家）。运行期状态不持久化（每次持物变更即重写）。
-    static constexpr int kMobTypeCount = 21; // MobCaveSpider = 20（枚举尾）+1
+    //   不向上依赖物品 id，PLAN §2）：下标 = mobType（容量 = 枚举尾 + 1 **自动跟随**，review0909 #3——
+    //   勿再手抄数字：MobType 枚举「新类型尾追加」扩展时容量随行，忘改即编译红而非静默越界）。
+    //   缺省全 false = 无引诱（空手 / 非食物物品时动物不追随玩家）。运行期状态不持久化（每次持物变更即重写）。
+    static constexpr int kMobTypeCount = MobCaveSpider + 1; // 枚举尾自动跟随（MobCaveSpider=20 → 21）
     bool m_foodLure[kMobTypeCount] = {};
     // t1029 wander 冻结测试缝状态（setWanderFrozen 写；缺省 false = 照常 wander）。true 时 aiWander
     //   顶部早退（跳过 RNG 消费 / 速度写入 / 位移，物理重力保留）——headless 探针把甩钩窗内的猪钉在原地。
