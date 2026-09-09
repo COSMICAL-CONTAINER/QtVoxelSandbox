@@ -42339,15 +42339,24 @@ Item {
         }
     }
 
-    // ── P-t1024a 睡觉跳夜 + 床位重生锚 + 拒睡双门（R19.21 t1024；t388/t457 状态机之上的完整床语义）──
+    // ── P-t1024a 睡觉跳夜 + 床位重生锚 + 拒睡门 + 雷暴可睡 + 播报来源契约（R19.21 t1024；review0909
+    //    #1/#5 清偿；t388/t457 状态机之上的完整床语义）──
     //   (a) 夜间入睡即设锚（MC「睡上即设重生点」口径）+ 跳夜时间面：Settled 满 2s 自动 sleepAdvanceToDawn
     //       → skipToDawn 精确跳清晨 phase 0.75（子夜 0.5 起跳 = +0.25 周期，float 短往返逐位还原）；
     //   (b) 重生回床位：respawn() → m_pos = m_spawnPos（床位）→ snapSpawnToGround 贴床顶（heightAt
     //       返床层 → +1 = 床顶，feet == 床位）；
     //   (c) 敌对拒睡门（阴性轮敏感：摘门 → 本腿红）：床周 8 格内 MobShambler（hostile）→ sleepRefused
     //       「你不能休息，附近有怪物」（spec 文案）+ 零位移 + 不清锚；
-    //   (d) 雷暴拒睡门（阴性轮敏感）：夜间 + 无敌对 + World.weatherState=Thunder → 拒「雷暴中无法入
-    //       睡」；放晴后同条件可睡（正控制：证明 (c)(d) 是唯一拦截者）。
+    //   (d) 雷暴可睡 + 醒来清雷暴（review0909 #1 wiki 考据翻转：MC「You can sleep only at night or
+    //       during thunderstorms」，雷暴 = 合法入睡窗口；阴性轮敏感：摘 sleepAdvanceToDawn 清雷暴行
+    //       → okThunderClear 腿红）：夜 + Thunder → 入睡成功；Settled 满 2s 自动跳晨 → weather 回
+    //       Clear（睡醒清雷暴）+ 时间面照常落 0.75；白天 + Clear → 拒「只能在夜晚或雷暴中睡觉」；
+    //       白天 + Thunder → 亦可睡但 wakeUp 按钮早退**不清**天气（清只挂跳晨完成沿）；夜 + Clear →
+    //       可睡（正控制：(c)(d) 门是唯一拦截者）；
+    //   (e) 播报来源契约（review0909 #5；阴性轮敏感：摘 QML !restored 门 → qml 钉红）：
+    //       bedSpawnValidChanged(bool restored)——读档回填沿（clearBedSpawn → setBedSpawn，enterWorld
+    //       同款）restored=true（QML 静默，进世界不再复读「重生点已设置」）；入睡设锚沿 restored=false
+    //       （QML 播报）。
     {
         World wT24;
         wT24.setWidth(48); wT24.setDepth(48); wT24.setHeight(96); wT24.setSeed(1024);
@@ -42390,6 +42399,15 @@ Item {
         const QMetaObject::Connection connR24 = QObject::connect(
             &pcT24, &PlayerController::sleepRefused, &pcT24,
             [&refusedT24, &refusedCountT24](const QString &r) { refusedT24 = r; ++refusedCountT24; });
+        // review0909 #5 播报来源契约：bedSpawnValidChanged(bool restored) 全沿记录（(valid, restored)
+        // 对）。QML 播报面 = restored==false 的置真沿；读档回填沿（restored=true）必须静默。
+        QVector<bool> emitValidT24, emitRestoredT24;
+        const QMetaObject::Connection connE24 = QObject::connect(
+            &pcT24, &PlayerController::bedSpawnValidChanged, &pcT24,
+            [&pcT24, &emitValidT24, &emitRestoredT24](bool restored) {
+                emitValidT24.push_back(pcT24.bedSpawnValid());
+                emitRestoredT24.push_back(restored);
+            });
 
         // (a) 夜间入睡即设锚 + 跳清晨（setPhase(0.5)=子夜；sleep Lying 1s + Settled 2s + Waking 0.8s）。
         clockT24.setPhase(0.5f);
@@ -42417,26 +42435,66 @@ Item {
         pcT24.trySleepAt(bx24, by24, bz24);
         const bool okHostile = !pcT24.sleeping() && refusedT24 == QStringLiteral("你不能休息，附近有怪物")
             && pcT24.feetPosition() == beforeHostile && pcT24.bedSpawnValid(); // 拒睡不清锚
-        // (d) 雷暴拒睡门：清敌对 → 夜 + Thunder → 拒；放晴同条件 → 可睡（正控制）。
+        // (d) 雷暴可睡 + 醒来清雷暴 + 白天拒睡（review0909 #1 考据翻转：MC wiki Bed「You can sleep
+        //     only at night or during thunderstorms」——旧「雷暴拒睡」反 MC，已翻为可睡窗口）。
         entsT24.clearAll();
         wT24.setWeatherState(3); // Thunder
         refusedT24.clear();
         pcT24.trySleepAt(bx24, by24, bz24);
-        const bool okThunder = !pcT24.sleeping() && refusedT24 == QStringLiteral("雷暴中无法入睡");
-        wT24.setWeatherState(0); // Clear
+        const bool okThunder = pcT24.sleeping(); // 夜 + 雷暴 → 入睡成功（不再拒）
+        for (int t = 0; t < 400 && pcT24.sleeping(); ++t) pumpT24(17);
+        // 跳晨完成沿 → 雷暴被清回 Clear + 时间面照常落清晨 0.75（阴性轮敏感：摘 sleepAdvanceToDawn
+        // 清雷暴行 → 本腿红）。
+        const bool okThunderClear = !pcT24.sleeping() && wT24.weatherState() == 0
+            && std::abs(clockT24.dayPhase() - 0.75f) < 1e-3f;
+        // 白天 + Clear → 拒（新口径文案：MC 拒睡语「夜 / 雷暴二选一」窗口面）。
+        clockT24.setPhase(0.2f); // 白天
+        refusedT24.clear();
         pcT24.trySleepAt(bx24, by24, bz24);
-        const bool okControl = pcT24.sleeping(); // 正控制：无敌对 + 无雷暴的夜可睡
+        const bool okDayRefuse = !pcT24.sleeping()
+            && refusedT24 == QStringLiteral("只能在夜晚或雷暴中睡觉");
+        // 白天 + Thunder → 亦可睡（MC 白天雷暴窗口）；wakeUp 按钮早退**不清**天气（清只挂跳晨完成沿，
+        // MC「真正睡过夜才重置天气」语义）。
+        wT24.setWeatherState(3);
+        pcT24.trySleepAt(bx24, by24, bz24);
+        const bool okDayThunder = pcT24.sleeping();
+        pcT24.wakeUp();
+        const bool okWakeKeepsStorm = !pcT24.sleeping() && wT24.weatherState() == 3;
+        // 正控制：无敌对 + 无雷暴的夜可睡（证明 (c)(d) 门是唯一拦截者）。
+        wT24.setWeatherState(0); // Clear
+        clockT24.setPhase(0.5f); // 夜（setPhase 特权指令，与睡觉单向不冲突）
+        pcT24.trySleepAt(bx24, by24, bz24);
+        const bool okControl = pcT24.sleeping();
+        pcT24.wakeUp();
+        // (e) 播报来源契约（review0909 #5）：读档回填沿 restored=true（QML 静默）→ 入睡设锚沿
+        //     restored=false（QML 播「重生点已设置」）。
+        const int nEmitT24 = emitRestoredT24.size();
+        pcT24.clearBedSpawn(); // 置假沿（restored=false；QML 只播置真沿，此向静默）
+        pcT24.setBedSpawn(float(bx24) + 0.5f, float(by24) + 1.0f, float(bz24) + 0.5f); // 回填沿（enterWorld 同款）
+        const bool okRestoreQuiet = emitRestoredT24.size() == nEmitT24 + 2
+            && !emitValidT24[nEmitT24] && !emitRestoredT24[nEmitT24]           // 置假沿
+            && emitValidT24[nEmitT24 + 1] && emitRestoredT24[nEmitT24 + 1];    // 回填沿 restored=true
+        pcT24.trySleepAt(bx24, by24, bz24); // 入睡设锚沿 restored=false
+        const bool okSleepAnnounce = pcT24.sleeping() && emitRestoredT24.size() == nEmitT24 + 3
+            && emitValidT24[nEmitT24 + 2] && !emitRestoredT24[nEmitT24 + 2];
         pcT24.wakeUp();
         QObject::disconnect(connR24);
+        QObject::disconnect(connE24);
         pcT24.release();
         probeWinT24.deleteLater();
-        const bool okA = okEntry && okDawn && okRespawn && okHostile && okThunder && okControl;
+        const bool okA = okEntry && okDawn && okRespawn && okHostile && okThunder && okThunderClear
+            && okDayRefuse && okDayThunder && okWakeKeepsStorm && okControl && okRestoreQuiet
+            && okSleepAnnounce;
         if (!okA)
             qInfo().noquote() << "  [t1024a diag] entry" << okEntry << "dawn" << okDawn
                               << "respawn" << okRespawn << "hostile" << okHostile
-                              << "thunder" << okThunder << "control" << okControl
-                              << "phase" << clockT24.dayPhase()
+                              << "thunder" << okThunder << "thunderClear" << okThunderClear
+                              << "dayRefuse" << okDayRefuse << "dayThunder" << okDayThunder
+                              << "wakeKeepsStorm" << okWakeKeepsStorm << "control" << okControl
+                              << "restoreQuiet" << okRestoreQuiet << "sleepAnnounce" << okSleepAnnounce
+                              << "phase" << clockT24.dayPhase() << "weather" << wT24.weatherState()
                               << "refused" << refusedT24 << "n" << refusedCountT24
+                              << "emits" << emitRestoredT24.size()
                               << "feet" << pcT24.feetPosition().x() << pcT24.feetPosition().y()
                               << pcT24.feetPosition().z()
                               << "spawn" << pcT24.spawnPoint().x() << pcT24.spawnPoint().y()
@@ -42450,15 +42508,24 @@ Item {
                              "with the day clock landing exactly on dawn phase 0.75 (the skip-night "
                              "time face), respawn() then places the player back on the bed top; an "
                              "hostile shambler within the 8-block bed radius refuses sleep with the "
-                             "spec message (zero displacement, anchor kept), a thunderstorm refuses "
-                             "with its own message, and clearing both lets the same night sleep "
-                             "succeed (positive control - the two gates are the only blockers, "
-                             "negative-round sensitive)"
+                             "spec message (zero displacement, anchor kept); a thunderstorm is a "
+                             "LEGAL sleep window (review0909 #1 wiki caliber: sleeping at night or "
+                             "during thunderstorms) - night+thunder sleeps, finishing the sleep "
+                             "clears the storm back to Clear alongside the dawn skip, day+clear "
+                             "refuses with the MC wording, day+thunder sleeps but an early wakeUp "
+                             "keeps the storm (only a completed night resets weather), and a clear "
+                             "night sleeps (positive control); the announce-source contract carries "
+                             "restored=true on the save-restore edge (QML silent) and restored=false "
+                             "on the sleep-set edge (QML announces) - negative-round sensitive"
                           << (okA ? QString()
                                   : QStringLiteral("diag entry=%1 dawn=%2 respawn=%3 hostile=%4 "
-                                                   "thunder=%5 control=%6")
+                                                   "thunder=%5 thunderClear=%6 dayRefuse=%7 "
+                                                   "dayThunder=%8 wakeKeepsStorm=%9 control=%10 "
+                                                   "restoreQuiet=%11 sleepAnnounce=%12")
                                         .arg(okEntry).arg(okDawn).arg(okRespawn)
-                                        .arg(okHostile).arg(okThunder).arg(okControl));
+                                        .arg(okHostile).arg(okThunder).arg(okThunderClear)
+                                        .arg(okDayRefuse).arg(okDayThunder).arg(okWakeKeepsStorm)
+                                        .arg(okControl).arg(okRestoreQuiet).arg(okSleepAnnounce));
     }
 
     // ── P-t1024b 挖锚床失效链（真实注视挖掘链驱动；阴性轮敏感：摘 finishMiningAt 清锚钩子 → 本腿红）──
@@ -42605,11 +42672,15 @@ Item {
                 {"qml-exit-chain-6th-invalid", "{ valid: false }"},
                 {"qml-respawn-at-bed-toast", "if (player.bedSpawnValid) window.appendChatMessage(\"\", \"你已回到床边重生\", true)"},
                 {"qml-bedspawn-set-toast-copy", "重生点已设置"},
+                // review0909 #5：读档回填沿（restored=true）静默——QML 播报只挂入睡设锚沿。
+                {"qml-bedspawn-restore-quiet", "if (player.bedSpawnValid && !restored) window.appendChatMessage(\"\", \"重生点已设置\", true)"},
                 {"qml-bedspawn-lost-handler", "function onBedSpawnLost()"},
                 {"qml-bedspawn-lost-toast-copy", "床被破坏，重生点已失效"},
             });
             missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.h"), {
                 {"hdr-bedSpawnValid-prop", "Q_PROPERTY(bool bedSpawnValid READ bedSpawnValid NOTIFY bedSpawnValidChanged)"},
+                // review0909 #5：信号携来源沿（restored=true 读档回填 / false 入睡设锚）。
+                {"hdr-bedSpawnValid-signal-src", "void bedSpawnValidChanged(bool restored);"},
                 {"hdr-setBedSpawn", "Q_INVOKABLE void setBedSpawn(float x, float y, float z);"},
                 {"hdr-clearBedSpawn", "void clearBedSpawn();"},
                 {"hdr-bedSpawnLost-signal", "void bedSpawnLost();"},
@@ -42617,7 +42688,10 @@ Item {
             missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.cpp"), {
                 {"cpp-thunder-gate", "m_world->weatherState() == kWeatherThunder"},
                 {"cpp-hostile-copy", "你不能休息，附近有怪物"},
-                {"cpp-thunder-copy", "雷暴中无法入睡"},
+                // review0909 #1：雷暴改为合法入睡窗口（wiki 考据），白天拒睡文案对齐 MC「夜 / 雷暴」窗口面；
+                // 跳晨完成沿清雷暴回 Clear（醒来清雷暴）。
+                {"cpp-day-copy", "只能在夜晚或雷暴中睡觉"},
+                {"cpp-thunder-clear-dawn", "m_world->setWeatherState(kWeatherClear);"},
                 {"cpp-anchor-clear-hook", "emit bedSpawnLost();"},
             });
             missD << pinSet(root + QStringLiteral("/src/World/worldstore.h"), {
@@ -42640,9 +42714,11 @@ Item {
                              "stale coordinate keys off (mined-bed-then-exit must not restore the "
                              "bed); a legacy five-arg save has no bed keys and loads hasBed=false "
                              "(world-spawn respawn, pre-t1024 semantics); source pins lock the QML "
-                             "restore wiring, both exit-chain forms, the respawn/lost toasts, all "
-                             "four C++ contract surfaces and the two refusal gates with their spec "
-                             "wording (negative-round sensitive)"
+                             "restore wiring, both exit-chain forms, the respawn/lost toasts, the "
+                             "restore-quiet announce gate (review0909 #5), all "
+                             "four C++ contract surfaces, the hostile refusal and the night-or-"
+                             "thunder sleep window with its wording plus the storm-clear on dawn "
+                             "(review0909 #1) (negative-round sensitive)"
                           << (okA && okB && okC && okD
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
@@ -43395,8 +43471,9 @@ Item {
     }
 
     // ── P-t1028b 真实玩家路径：右键调音 round-trip（25 次≡回 0，MC 口径 25 档）+ 调音发声链
-    //    （noteBlockTuned 携新音高 + 音名「A4」单一权威）+ 攻击发声（左键按下沿，pitch=当前调音，
-    //    挖掘照常破掉掉自身）──阴性轮敏感：调音回绕摘 mod → round-trip 腿红。
+    //    （noteBlockTuned 携新音高 + 音名「A4」单一权威）+ 潜行旁路门（review0909 #2）+ 攻击发声
+    //    （左键按下沿，pitch=当前调音，挖掘照常破掉掉自身）──阴性轮敏感：调音回绕摘 mod → round-trip
+    //    腿红；摘音符盒 !sneakPlace 门 → 潜行腿红（潜行右键仍调音 + 木板未落地）。
     {
         World wT28b;
         wT28b.setWidth(48); wT28b.setDepth(48); wT28b.setHeight(96); wT28b.setSeed(10282);
@@ -43469,6 +43546,28 @@ Item {
                               << "p9" << (tunedPitches.size() > 8 ? tunedPitches[8] : -1)
                               << "name9" << (tunedNames.size() > 8 ? tunedNames[8] : QString())
                               << "st" << wT28b.stateAt(nx28b, ny28b, nz28b);
+        // (1b) 潜行旁路门（review0909 #2）：潜行持方块右键音符盒 → 旁路调音走放置（MC 潜行右键旁路
+        //      useBlock 口径，同工作台/箱子等分支；非潜行右键 → 调音已由 (1) 的 25 次空手右键证明——
+        //      门只拦潜行路径）。瞄准 +X 侧脸（放置落侧邻格，顶面留给 (2) 攻击腿的瞄准惯例）。
+        //      阴性轮敏感：摘 playercontroller.cpp 音符盒分支 !sneakPlace 门 → 潜行右键仍调音
+        //      （tunedPitches 增长、音高位翻、侧邻格无木板）→ 本腿红。
+        const int nTunedBeforeSneak = tunedPitches.size();
+        const QVector3D hitSneak = aimT28b(14.5f, 16.5f, float(nx28b) + 0.9f, float(ny28b) + 0.5f,
+                                          float(nz28b) + 0.5f, 2);
+        pcT28b.setKey(Qt::Key_Shift, true);  // 潜行（placeBlock 的 sneakPlace = m_keys 原始键态，t523 口径）
+        // 手持木板：placeBlock 的放置路径读 player.selectedBlock（Q_PROPERTY）——Hotbar 光标栈
+        //   setHeldBlock 不喂此面（生产由 QML 绑定 player.selectedBlock 承担，探针无 QML 引擎），
+        //   C++ 直调是 t945/t973 同款惯例。缺此行 m_selectedBlock 落默认 Stone（playercontroller.h
+        //   t06 默认）→ 潜行旁路腿放置照常发生但材质错成 Stone（修前红根因：非门断线）。
+        pcT28b.setSelectedBlock(int(BR::Planks));
+        pcT28b.placeBlock();
+        pumpMsT28b(260);
+        pcT28b.setKey(Qt::Key_Shift, false); // 松潜行（站起复位，(2) 攻击腿站立眼位瞄准惯例不变）
+        pcT28b.setSelectedBlock(int(BR::Air)); // 清手持回空手（(2) 左键攻击语义与持物隔离）
+        const bool okSneakPlace = hitSneak == QVector3D(nx28b, ny28b, nz28b)
+            && tunedPitches.size() == nTunedBeforeSneak // 调音零次（潜行旁路 useBlock）
+            && (wT28b.stateAt(nx28b, ny28b, nz28b) & BR::NoteBlockStatePitchMask) == 0 // 音高位不变
+            && wT28b.blockAt(nx28b + 1, ny28b, nz28b) == BR::Planks; // 木板落侧脸邻格（放置成功）
         // (2) 攻击发声：生存左键按下沿 → 恰一响（pitch=当前调音 0，family=下方 planks→bass 1）；
         //     发声不占挖掘链——照常累积破块（MC 攻击响 + 持续挖可破口径）→ 破后 Air + 掉自身 ×1。
         QVector<int> dropIds28b;
@@ -43500,21 +43599,24 @@ Item {
         QObject::disconnect(cAtk);
         pcT28b.release();
         winT28b.deleteLater();
-        const bool okB = okTun && okAtkOnce && okMined;
+        const bool okB = okTun && okSneakPlace && okAtkOnce && okMined;
         if (!okB) ++totalFail;
         qInfo().noquote() << (okB ? "PASS" : "FAIL")
                           << "| t1028b note-block player path: 25 survival right-clicks on the note "
                              "block cycle the pitch through 1..24 and wrap back to 0 exactly "
                              "(25-slot round trip, MC caliber) emitting noteBlockTuned each time "
-                             "with the ninth carrying note name A4; the left-click attack edge "
+                             "with the ninth carrying note name A4; sneaking with a held block and "
+                             "right-clicking bypasses tuning and places the block on the adjacent "
+                             "face instead (review0909 #2 sneakPlace gate, MC sneak-use bypass); "
+                             "the left-click attack edge "
                              "fires noteBlockAttackPlayed exactly once with the current pitch (0) "
                              "and below-block family (planks=bass) while survival mining still "
                              "progresses and drops the note block itself (negative-round "
-                             "sensitive: tuning wrap removal)"
+                             "sensitive: tuning wrap removal, sneakPlace gate removal)"
                           << (okB ? QString()
-                                  : QStringLiteral("diag tun=%1 atkOnce=%2 mined=%3 atkP=%4 atkF=%5 drops=%6")
-                                        .arg(okTun).arg(okAtkOnce).arg(okMined).arg(attackPitch)
-                                        .arg(attackFamily).arg(dropIds28b.size()));
+                                  : QStringLiteral("diag tun=%1 sneak=%2 atkOnce=%3 mined=%4 atkP=%5 atkF=%6 drops=%7")
+                                        .arg(okTun).arg(okSneakPlace).arg(okAtkOnce).arg(okMined)
+                                        .arg(attackPitch).arg(attackFamily).arg(dropIds28b.size()));
     }
 
     // ── P-t1028c 音符盒配方（8 木板环 + 红石粉芯，MC 1.0 同料）+ 全链源码钉 ──
@@ -43550,6 +43652,8 @@ Item {
         missC << pinSet(rootC + QStringLiteral("/src/Game/playercontroller.cpp"), {
             {"cpp-note-tune-emit", "emit noteBlockTuned(m_hitBx, m_hitBy, m_hitBz, pitch, family,"},
             {"cpp-note-atk-emit", "emit noteBlockAttackPlayed(m_hitBx, m_hitBy, m_hitBz, pitch, family);"},
+            // review0909 #2：调音分支补潜行旁路门（对齐同函数容器/机关件分支模式）。
+            {"cpp-note-sneak-gate", "if (!sneakPlace && hitId == BlockRegistry::NoteBlock) {"},
         });
         missC << pinSet(rootC + QStringLiteral("/src/Core/blockregistry.h"), {
             {"hdr-note-id-contract", "NoteBlock         = 143,"},
@@ -43564,6 +43668,9 @@ Item {
         missC << pinSet(rootC + QStringLiteral("/src/Audio/audiomanager.cpp"), {
             {"aud-note-play", "void AudioManager::playNote(int pitch, int family)"},
             {"aud-note-rate", "d->replayNote(c, m_volume * 0.9f, rate);"},
+            // review0909 #3b：Audio 层手抄镜像钉（与 hdr-note-pitchcount 成对——两侧漂移即红，
+            // 替代跨层 include 的分层保留同步方案）。
+            {"aud-note-pitchcount", "static constexpr int kNotePitchCount = 25;"},
         });
         missC << pinSet(rootC + QStringLiteral("/src/ui/Main.qml"), {
             {"qml-note-redstone", "function onNoteBlockPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }"},
