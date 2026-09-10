@@ -3575,3 +3575,11 @@ t1005-t1023（19 项）。**建议顺序：回归清算 t1005→t1006→t1007（
 **t1035 豹猫驯服**：生鱼喂食驯服（MC 口径走近缓慢喂食，驯服后信任态不跟随不项圈——与狼模型刻意分化）；生鱼来源盘点（若钓鱼无鱼则登记简化或补钓鱼产出）。探针：驯服/信任态/与狼的分化口径。
 
 执行顺序：t1030 → t1031 → t1032（性能中段插）→ t1033 → t1034 → t1035。矩阵基线 **505**。offscreen 纪律 + 三教训 + 验收日志带任务号新纪律沿用。每项独立 commit + ✅✅ 回标 + agent-state 同步（新纪律：每任务 docs 闭环必须同步 agent-state）。
+
+### Review_2026-09-10 处置（2026-09-10，用户审查文件入库；窗口 b91cb87..4c83422，无高/中缺陷）
+
+用户下发的 24h 窗审查（docs/Review_2026-09-10.md）四项，按其清偿表处置：
+- **#1（待定夺 → 定夺为修）**：`bedSpawnValidChanged(bool restored)` 参数语义与 Qt NOTIFY 属性约定相悖（参数=来源沿≠属性新值；当前 QML 全命令式现读不咬人）。**立项 t1036**（t1030 后顺手小单）：信号改回无参 `bedSpawnValidChanged()` + 播报源另立 `bedSpawnAnnounce(bool restored)`（只在入睡设锚沿 emit）；改动面 ≈6 处（信号声明+4 emit+QML handler:3145+矩阵钉 hdr-bedSpawnValid-signal-src+P-t1024a (e) restored 断言改挂新信号）；阴性轮=摘播报信号腿恰红。
+- **#2（待办）**：headless 可做的本批落——①lessons 盲区登记：**QML 编排面（信号 handler 改表类逻辑，如 reassignDropBuckets/hasBucket）headless 探针不可行为级断言**，与 t1028 app-target 编译盲区（d27d980）同型；勘误一处审查细节：本项目 qmlcachegen 在构建期跑（build/.rcc/qmlcache/*_qml.cpp.obj），QML **语法**错误构建期即报，盲区实为**语义/JS 编排逻辑**面。②冒烟证据链修正：0 字节 smoke 根因=stdout 走 logs/voxelsandbox.log——今后 app 冒烟同时留存该日志尾部。③**实机项（用户）**：创造模式丢/破 ≥10 种整立方 id（羊毛多色+石/泥）核对每掉落恰渲一次（无 z-fight/丢渲、动画在位），再拾取至 <8 种验证桶释放无缝回 delegate——入实机确认清单。
+- **#3（登记，已含）**：8 桶 16ms 恒走 QTimer = t1032 登记面（空转门/共享 ticker，扩桶池时加）。补充细节采纳：空桶 tick 仍每 16ms markDirty + 渲染 sync 重取 8 张空表。
+- **#4（登记）**：桶指派「在用桶保持」不让位系防几何重建抖动刻意取舍；若实测热族长期走 delegate，加带滞后让位（候选 >2× 桶内才换+确定性 tiebreak）——记入 t1032/instancing 后续批评估项。
