@@ -43130,6 +43130,231 @@ Item {
                                         .arg(okSet).arg(okBroken).arg(okInvalidated).arg(lostT24b));
     }
 
+    // ── P-t1033a 爆炸清锚床失效链（真实引信链驱动；review0909 #4 遗留清偿；阴性轮敏感：摘
+    //    PlayerController::setWorld 内 blockDestroyedBed connect（语义信号断链）→ 本腿红）──
+    //   锚床经 setBedSpawn（存档恢复入口，t1024b 同款）设位 → 床旁 TNT 引燃（clearBlockSilent +
+    //   spawnPrimedTnt = 踩板 / 机关 / 电力三条引燃链单一尾）→ ents.tick 细步 6.25s（> kPrimedTntFuseSec
+    //   5s；固定 dt 无墙钟依赖，t996(b) 同款）→ detonatePrimedTnt → World::destroySphereSilent 球形破坏
+    //   （TNT / 苦力怕两爆炸入口共用 = 一处覆盖）→ 床两半消失 + blockDestroyedBed 语义信号逐半双发 →
+    //   PlayerController 收口（seedChanged 同款 setWorld 直连）：bedSpawnValid 置假 + bedSpawnLost 恰一次
+    //   （两半双信号被 m_bedSpawnValid 门幂等塌缩成一次播报，与玩家挖掘链同汇 clearBedSpawn 单点）+
+    //   spawnPoint 回 kSpawn pristine (80,80,80)（重生回世界出生点，不再悬空指已消失床）。
+    {
+        World wT33a;
+        wT33a.setWidth(48); wT33a.setDepth(48); wT33a.setHeight(96); wT33a.setSeed(1033);
+        EntityManager entsT33a; // PrimedTnt 断言源 + 引信驱动（t996 同款，不挂 PC——爆炸链与玩家物理正交）
+        PlayerController pcT33a;
+        pcT33a.setWorld(&wT33a); // blockDestroyedBed → onWorldBedBlockDestroyed 直连在此建立
+        const int bx33 = 20, by33 = 40, bz33 = 20;
+        const auto buildBedRigT33 = [&](World &w, int bx, int by, int bz) {
+            for (int dx = -3; dx <= 4; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) {
+                    w.setBlock(bx + dx, by - 1, bz + dz, BR::Stone, 0); // 石台（爆炸波及无妨，仅承载床）
+                    for (int dy = 0; dy <= 4; ++dy)
+                        if (w.blockAt(bx + dx, by + dy, bz + dz) != BR::Air)
+                            w.setBlock(bx + dx, by + dy, bz + dz, BR::Air, 0);
+                }
+            w.setBlock(bx, by, bz, BR::BedWhite, quint8(0));     // foot（配对 head 在 -X，t1024b 同款）
+            w.setBlock(bx - 1, by, bz, BR::BedWhite, quint8(8)); // head
+        };
+        buildBedRigT33(wT33a, bx33, by33, bz33);
+        int lostT33a = 0;
+        const QMetaObject::Connection connL33a = QObject::connect(
+            &pcT33a, &PlayerController::bedSpawnLost, &pcT33a, [&lostT33a]() { ++lostT33a; });
+        pcT33a.setBedSpawn(float(bx33) + 0.5f, float(by33) + 1.0f, float(bz33) + 0.5f);
+        const bool okSet = pcT33a.bedSpawnValid()
+            && pcT33a.spawnPoint() == QVector3D(float(bx33) + 0.5f, float(by33) + 1.0f, float(bz33) + 0.5f);
+        // 引燃：TNT 格静默清 + PrimedTnt 实体接管（引燃链统一尾，防格内 TntBlock 残留被链式二次引燃）。
+        wT33a.setBlock(bx33 + 2, by33, bz33, BR::TntBlock, 0);
+        const bool okIgnited = wT33a.clearBlockSilent(bx33 + 2, by33, bz33);
+        entsT33a.spawnPrimedTnt(bx33 + 2, by33, bz33);
+        for (int i = 0; i < 400; ++i) // 6.25s > 5s 引信（t996(b) 固定 dt 细步同款，无墙钟依赖）
+            entsT33a.tick(0.015625, &wT33a, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+        const bool okBroken = wT33a.blockAt(bx33, by33, bz33) == BR::Air
+            && wT33a.blockAt(bx33 - 1, by33, bz33) == BR::Air; // 床两半都在球内（foot 距 2 / head 距 3 ≤ r3）被清
+        const bool okInvalidated = !pcT33a.bedSpawnValid() && lostT33a == 1
+            && pcT33a.spawnPoint() == QVector3D(80.0f, 80.0f, 80.0f); // 恰一次播报 + 回 pristine 世界出生点
+        QObject::disconnect(connL33a);
+        const bool okA = okSet && okIgnited && okBroken && okInvalidated;
+        if (!okA)
+            qInfo().noquote() << "  [t1033a diag] set" << okSet << "ignited" << okIgnited
+                              << "broken" << okBroken << "invalidated" << okInvalidated
+                              << "lost" << lostT33a << "valid" << pcT33a.bedSpawnValid()
+                              << "spawn" << pcT33a.spawnPoint().x() << pcT33a.spawnPoint().y()
+                              << pcT33a.spawnPoint().z()
+                              << "footId" << int(wT33a.blockAt(bx33, by33, bz33))
+                              << "headId" << int(wT33a.blockAt(bx33 - 1, by33, bz33));
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1033a explosion invalidates bed anchor: an ignited TNT beside the "
+                             "anchor bed runs the real fuse chain (PrimedTnt entity, fixed-dt 6.25s > "
+                             "5s fuse) and detonates through World::destroySphereSilent (the single "
+                             "chokepoint shared by TNT and creeper explosions), destroying both bed "
+                             "halves; the new blockDestroyedBed semantic signal (one per destroyed "
+                             "half, fired after the world write burst) reaches PlayerController via "
+                             "the seedChanged-style setWorld connect, collapses the double hit "
+                             "through the m_bedSpawnValid gate into exactly one bedSpawnLost "
+                             "announcement and snaps the spawn point back to the pristine world "
+                             "spawn (80,80,80) instead of a floating bed coordinate (negative-round "
+                             "sensitive: removing the connect turns this leg red)"
+                          << (okA ? QString()
+                                  : QStringLiteral("diag set=%1 ignited=%2 broken=%3 invalidated=%4 lost=%5")
+                                        .arg(okSet).arg(okIgnited).arg(okBroken)
+                                        .arg(okInvalidated).arg(lostT33a));
+    }
+
+    // ── P-t1033b 爆炸锚失效幂等面（阴性轮敏感：摘槽内 m_bedSpawnValid 门 / 锚判等 → 对应腿红）──
+    //   (i) 未设锚：床上 TNT 照炸（床两半消失）→ bedSpawnLost / bedSpawnValidChanged 均**零**发（无效锚
+    //       的用户面零 emit——爆炸链不得给从未睡过床的玩家播「重生点已失效」）；
+    //   (ii) 非锚床：锚设在 B 床（同层异位 10 格）→ A 位复置床被炸（同 y 过 Y 门）→ 零 lost、B 锚与
+    //       spawnPoint 纹丝不动（判等谓词 x/z 面有判别力；clearBedSpawn 幂等不被无谓触发）。
+    {
+        World wT33b;
+        wT33b.setWidth(48); wT33b.setDepth(48); wT33b.setHeight(96); wT33b.setSeed(1034);
+        EntityManager entsT33b;
+        PlayerController pcT33b;
+        pcT33b.setWorld(&wT33b);
+        const int ax33 = 20, ay33 = 40, az33 = 20; // A 位（爆炸靶）
+        const int bx33b = 30, by33b = 40, bz33b = 30; // B 位（锚床）
+        const auto buildBedRigT33b = [&](World &w, int bx, int by, int bz) {
+            for (int dx = -3; dx <= 4; ++dx)
+                for (int dz = -2; dz <= 2; ++dz) {
+                    w.setBlock(bx + dx, by - 1, bz + dz, BR::Stone, 0);
+                    for (int dy = 0; dy <= 4; ++dy)
+                        if (w.blockAt(bx + dx, by + dy, bz + dz) != BR::Air)
+                            w.setBlock(bx + dx, by + dy, bz + dz, BR::Air, 0);
+                }
+            w.setBlock(bx, by, bz, BR::BedWhite, quint8(0));
+            w.setBlock(bx - 1, by, bz, BR::BedWhite, quint8(8));
+        };
+        const auto detonateAtT33b = [&](World &w, int tx, int ty, int tz) {
+            w.setBlock(tx, ty, tz, BR::TntBlock, 0);
+            w.clearBlockSilent(tx, ty, tz);
+            EntityManager ents; // 局部管理器：爆完即弃（实体清零，防跨腿串扰）
+            ents.spawnPrimedTnt(tx, ty, tz);
+            for (int i = 0; i < 400; ++i)
+                ents.tick(0.015625, &w, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+        };
+        buildBedRigT33b(wT33b, ax33, ay33, az33);
+        int lostT33b = 0, validFiresT33b = 0;
+        const QMetaObject::Connection connL33b = QObject::connect(
+            &pcT33b, &PlayerController::bedSpawnLost, &pcT33b, [&lostT33b]() { ++lostT33b; });
+        const QMetaObject::Connection connV33b = QObject::connect(
+            &pcT33b, &PlayerController::bedSpawnValidChanged, &pcT33b,
+            [&validFiresT33b]() { ++validFiresT33b; });
+        // (i) 未设锚炸床。
+        detonateAtT33b(wT33b, ax33 + 2, ay33, az33);
+        const bool okNoAnchor = wT33b.blockAt(ax33, ay33, az33) == BR::Air // 照炸（爆炸本体不受锚态影响）
+            && wT33b.blockAt(ax33 - 1, ay33, az33) == BR::Air
+            && lostT33b == 0 && validFiresT33b == 0 && !pcT33b.bedSpawnValid(); // 用户面零 emit
+        // (ii) 非锚床炸毁，锚床（B 位）保留。
+        buildBedRigT33b(wT33b, bx33b, by33b, bz33b);
+        pcT33b.setBedSpawn(float(bx33b) + 0.5f, float(by33b) + 1.0f, float(bz33b) + 0.5f);
+        const bool okAnchorSet = pcT33b.bedSpawnValid() && validFiresT33b == 1; // 仅设锚沿 1 发（true）
+        buildBedRigT33b(wT33b, ax33, ay33, az33);
+        detonateAtT33b(wT33b, ax33 + 2, ay33, az33);
+        const bool okNonAnchor = wT33b.blockAt(ax33, ay33, az33) == BR::Air
+            && wT33b.blockAt(ax33 - 1, ay33, az33) == BR::Air
+            && lostT33b == 0 && validFiresT33b == 1
+            && pcT33b.bedSpawnValid()
+            && pcT33b.spawnPoint() == QVector3D(float(bx33b) + 0.5f, float(by33b) + 1.0f, float(bz33b) + 0.5f);
+        QObject::disconnect(connL33b);
+        QObject::disconnect(connV33b);
+        const bool okB = okNoAnchor && okAnchorSet && okNonAnchor;
+        if (!okB)
+            qInfo().noquote() << "  [t1033b diag] noAnchor" << okNoAnchor << "anchorSet" << okAnchorSet
+                              << "nonAnchor" << okNonAnchor << "lost" << lostT33b
+                              << "validFires" << validFiresT33b << "valid" << pcT33b.bedSpawnValid();
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1033b explosion anchor-clear idempotence faces: blasting a bed "
+                             "while no spawn anchor is set destroys the bed but emits zero user-"
+                             "facing edges (no bedSpawnLost, no bedSpawnValidChanged - players who "
+                             "never slept keep a silent world); with the anchor set on a different "
+                             "bed ten cells away on the same Y layer, re-detonating the first bed "
+                             "still emits nothing and the anchor plus spawn point stay untouched "
+                             "(the y-gate + x/z anchor-match predicate discriminates same-layer "
+                             "neighbor beds; negative-round sensitive: dropping the m_bedSpawnValid "
+                             "gate or the anchor match turns the matching leg red)"
+                          << (okB ? QString()
+                                  : QStringLiteral("diag noAnchor=%1 anchorSet=%2 nonAnchor=%3 lost=%4 fires=%5")
+                                        .arg(okNoAnchor).arg(okAnchorSet).arg(okNonAnchor)
+                                        .arg(lostT33b).arg(validFiresT33b));
+    }
+
+    // ── P-t1033c 非玩家口径登记钉（水冲不触床）+ 玩家挖掘既有链回归（双链不双播报）──
+    //   (i) 水冲：锚床贴邻落水源 → tickWaterFlow 推进 → 流水工作面成立（邻格成流）但床格仍 Bed——
+    //       isAttachableBlock 冲刷清单（火把 / 红石火把 / 蛛网 / 木梯，t1012④ 单一权威）不含床 → 床非
+    //       附着块水冲不触（口径登记探针钉）→ 锚保留零 lost；
+    //   (ii) 挖掘回归：同一锚床经真实注视挖掘链（t1024b 同款：站床顶 pitch -90 → 创造瞬破）挖除 →
+    //       lost 恰 1（先水后挖累计恰一次 = 爆炸新链 + 玩家挖掘既有链同汇 clearBedSpawn 单点，不双播报；
+    //       t1024b 存量腿继续独立钉挖掘链本体）。
+    {
+        World wT33c;
+        wT33c.setWidth(48); wT33c.setDepth(48); wT33c.setHeight(96); wT33c.setSeed(1035);
+        PlayerController pcT33c;
+        pcT33c.setWorld(&wT33c);
+        QQuickWindow probeWinT33c;
+        pcT33c.setParentItem(probeWinT33c.contentItem());
+        pcT33c.grab(); // m_captured → 真实注视链（t1024b 同款）
+        const int bx33c = 20, by33c = 40, bz33c = 20;
+        for (int dx = -3; dx <= 6; ++dx)
+            for (int dz = -2; dz <= 2; ++dz) {
+                wT33c.setBlock(bx33c + dx, by33c - 1, bz33c + dz, BR::Stone, 0);
+                for (int dy = 0; dy <= 4; ++dy)
+                    if (wT33c.blockAt(bx33c + dx, by33c + dy, bz33c + dz) != BR::Air)
+                        wT33c.setBlock(bx33c + dx, by33c + dy, bz33c + dz, BR::Air, 0);
+            }
+        wT33c.setBlock(bx33c, by33c, bz33c, BR::BedWhite, quint8(0));
+        wT33c.setBlock(bx33c - 1, by33c, bz33c, BR::BedWhite, quint8(8));
+        int lostT33c = 0;
+        const QMetaObject::Connection connL33c = QObject::connect(
+            &pcT33c, &PlayerController::bedSpawnLost, &pcT33c, [&lostT33c]() { ++lostT33c; });
+        pcT33c.setBedSpawn(float(bx33c) + 0.5f, float(by33c) + 1.0f, float(bz33c) + 0.5f);
+        // (i) 水冲：源在 foot +3 格（t34w 水源同款 setBlock 源写入）→ 定步推进水流。
+        wT33c.setBlock(bx33c + 3, by33c, bz33c, BR::Water, 0);
+        for (int i = 0; i < 40; ++i) wT33c.tickWaterFlow();
+        const bool okWashed = wT33c.blockAt(bx33c + 2, by33c, bz33c) == BR::Water // 流水工作面（真流到床旁）
+            && wT33c.blockAt(bx33c, by33c, bz33c) == BR::BedWhite                 // 床 foot 不被冲
+            && wT33c.blockAt(bx33c - 1, by33c, bz33c) == BR::BedWhite             // 床 head 不被冲
+            && pcT33c.bedSpawnValid() && lostT33c == 0;                           // 锚保留零播报
+        // (ii) 真实注视挖掘链挖锚床 foot（t1024b 同款）。
+        pcT33c.loadSavedState(float(bx33c) + 0.5f, float(by33c) + 1.0f, float(bz33c) + 0.5f,
+                              0.0f, -90.0f, 1 /* Creative */);
+        pcT33c.tick(); // updateRaycast：垂直向下射线命中脚下床格
+        pcT33c.beginMining();
+        const bool okMined = wT33c.blockAt(bx33c, by33c, bz33c) == BR::Air
+            && wT33c.blockAt(bx33c - 1, by33c, bz33c) == BR::Air;
+        const bool okSingleLost = !pcT33c.bedSpawnValid() && lostT33c == 1
+            && pcT33c.spawnPoint() == QVector3D(80.0f, 80.0f, 80.0f); // 先水后挖累计恰一次
+        QObject::disconnect(connL33c);
+        pcT33c.release();
+        probeWinT33c.deleteLater();
+        const bool okC = okWashed && okMined && okSingleLost;
+        if (!okC)
+            qInfo().noquote() << "  [t1033c diag] washed" << okWashed << "mined" << okMined
+                              << "singleLost" << okSingleLost << "lost" << lostT33c
+                              << "valid" << pcT33c.bedSpawnValid()
+                              << "flowCell" << int(wT33c.blockAt(bx33c + 2, by33c, bz33c))
+                              << "footId" << int(wT33c.blockAt(bx33c, by33c, bz33c))
+                              << "headId" << int(wT33c.blockAt(bx33c - 1, by33c, bz33c));
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| t1033c non-player caliber pins: flowing water right up against the "
+                             "anchored bed proves the flow works (neighbor cell turns to flowing "
+                             "water) yet never touches the bed - the t1012④ wash list "
+                             "(isAttachableBlock: torches, cobweb, ladder) deliberately excludes "
+                             "beds, so the anchor survives with zero announcements (caliber "
+                             "registration probe); afterwards mining the same anchor bed through "
+                             "the real gaze chain (t1024b pattern) invalidates it with bedSpawnLost "
+                             "firing exactly once across the water + mine sequence - the new "
+                             "explosion relay and the legacy mining path converge on the single "
+                             "clearBedSpawn chokepoint without double announcements"
+                          << (okC ? QString()
+                                  : QStringLiteral("diag washed=%1 mined=%2 singleLost=%3 lost=%4")
+                                        .arg(okWashed).arg(okMined).arg(okSingleLost).arg(lostT33c));
+    }
+
     // ── P-t1024c 床位重生锚持久化 round-trip（真 SQLite；t1016 模式）+ 源码钉 ──
     //   (a) 有效锚：saveAll 第 6 参 {valid,x,y,z} → bed_x('g'9)/bed_y/bed_z/bed_valid=1 四键与 chunks/
     //       meta 同事务 → 关库重开 loadBedSpawn 逐键还原；
