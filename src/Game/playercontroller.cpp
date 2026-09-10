@@ -162,6 +162,9 @@ void PlayerController::setWorld(World *w)
     //   → 复位重生点（onWorldSeedChanged：旧世界出生列 / 床位坐标不再指向当前世界）。UniqueConnection 防重复
     //   挂接（theWorld 单例 + setWorld 幂等早退，此处理论只连一次）。
     connect(w, &World::seedChanged, this, &PlayerController::onWorldSeedChanged, Qt::UniqueConnection);
+    // t1033：爆炸等非玩家路径毁床 → 锚失效（blockDestroyedBed 语义事件，seedChanged 收口同款直连；
+    //   UniqueConnection 防重复挂接，同上）。
+    connect(w, &World::blockDestroyedBed, this, &PlayerController::onWorldBedBlockDestroyed, Qt::UniqueConnection);
     snapSpawnToGround(); // t137：世界注入后贴地表（构造期 m_pos=kSpawnY 兜底，此处覆盖为真实地表）
     emit worldChanged();
 }
@@ -233,6 +236,24 @@ void PlayerController::onWorldSeedChanged()
         m_spawnPos = pristine;
         emit spawnPointChanged(); // t567 指南针基准复位（随后 snap 采用新出生列时再刷新）
     }
+}
+
+// t1033 非玩家路径毁床的锚失效收口（契约见 .h；World::blockDestroyedBed 语义事件 → 本槽）。
+//   判等谓词与 finishMiningAt 床分支（t1024）逐字同构：y 同层 + 本格 ∨ 配对格 == 锚格。配对偏移解自
+//   被毁前 state（destroySphereSilent 在 setBlock(Air) 前 capture，随信号携行；bedPartnerOffset 单一
+//   权威）。命中 → clearBedSpawn 单点收口 + emit bedSpawnLost（t1024 既有 QML 播报「床被破坏，重生点
+//   已失效」自动生效，不新增播报面）。床两半同毁 → 双信号：首发清锚 m_bedSpawnValid 翻假，次发早退
+//   → bedSpawnLost 恰一次（玩家挖掘链 + 爆炸链双路径同汇本收口，不双播报）。
+void PlayerController::onWorldBedBlockDestroyed(int x, int y, int z, int state)
+{
+    if (!m_bedSpawnValid || y != m_bedAnchorY) return; // 未设锚 / 异层 → 零 emit（幂等面）
+    int pdx = 0, pdz = 0;
+    BlockRegistry::bedPartnerOffset(quint8(state), pdx, pdz);
+    const bool brokeAnchor = (x == m_bedAnchorX && z == m_bedAnchorZ)
+                          || (x + pdx == m_bedAnchorX && z + pdz == m_bedAnchorZ);
+    if (!brokeAnchor) return; // 非锚床（同层它床）→ 锚保留
+    clearBedSpawn();
+    emit bedSpawnLost();
 }
 
 // t1024 床位重生锚回填（存档恢复入口；契约见 .h）：spawn 点反解锚格（x.5/y/z.5 → floor 整格、
