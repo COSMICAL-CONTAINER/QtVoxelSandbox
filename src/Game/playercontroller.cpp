@@ -244,7 +244,7 @@ void PlayerController::setBedSpawn(float x, float y, float z)
     m_bedAnchorX = int(std::floor(x));
     m_bedAnchorY = int(std::floor(y)) - 1; // 写入约定 m_spawnPos.y = 床层 by + 1 → 反解床层
     m_bedAnchorZ = int(std::floor(z));
-    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(true); } // true = 读档回填沿（QML 静默，review0909 #5）
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); } // 读档回填沿（t1036 纯属性 NOTIFY 无参、不 announce——QML 静默，review0909 #5）
     emit spawnPointChanged(); // t567 指南针基准 → 床位
 }
 
@@ -256,7 +256,7 @@ void PlayerController::clearBedSpawn()
     const bool wasValid = m_bedSpawnValid;
     m_bedSpawnValid = false;
     m_bedAnchorX = 0; m_bedAnchorY = -1; m_bedAnchorZ = 0;
-    if (wasValid) emit bedSpawnValidChanged(false); // 置假沿（QML 只播置真沿，此向静默）
+    if (wasValid) emit bedSpawnValidChanged(); // 置假沿（t1036 无参 NOTIFY，不 announce——QML 只播置真沿，此向静默）
     if (m_spawnPos != pristine) {
         m_spawnPos = pristine;
         emit spawnPointChanged();
@@ -3131,7 +3131,7 @@ void PlayerController::sleepAdvanceToDawn()
     //   口径），此处重复写同值幂等——保留写入以独立自洽（早于 t1024 的语义防回归）。
     m_spawnPos = QVector3D(float(m_sleepBx) + 0.5f, float(m_sleepBy) + 1.0f, float(m_sleepBz) + 0.5f);
     m_bedAnchorX = m_sleepBx; m_bedAnchorY = m_sleepBy; m_bedAnchorZ = m_sleepBz;
-    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(false); } // false = 入睡设锚沿
+    if (!m_bedSpawnValid) { m_bedSpawnValid = true; emit bedSpawnValidChanged(); } // 守卫沿（t1036 无参 NOTIFY，不 announce——同一入睡会话不二次播报）
     emit spawnPointChanged();   // t567 HUD 指南针指针重算（出生点 → 床位）
     m_sleepPhase = kSleepPhaseWaking;
     m_sleepPhaseTimer = 0.0f;
@@ -3202,14 +3202,15 @@ void PlayerController::trySleepAt(int bx, int by, int bz)
     //   即失效）；m_spawnPos = 床格上方（sleepAdvanceToDawn 重复写同值，幂等）。
     m_bedAnchorX = bx; m_bedAnchorY = by; m_bedAnchorZ = bz;
     m_spawnPos = QVector3D(float(bx) + 0.5f, float(by) + 1.0f, float(bz) + 0.5f);
-    // review0909 #5 修正：入睡设锚沿**恒发**（restored=false；QML 播「重生点已设置」）。旧
-    //   `if (!m_bedSpawnValid)` 守卫把「锚已有效后的再入睡沿」静默吞掉——读档回填锚（restored=true
-    //   沿后）或同床重睡时，入睡设锚沿不发 → 播报源契约断线（t1024a sleepAnnounce 腿红根因）。
-    //   MC 口径：每次成功入睡都重设重生点并提示（wiki Bed：使用床成功入睡即 "Respawn point set"，
-    //   同床重复入睡同播）；「读档回填沿静默」属 setBedSpawn(restored=true) 侧语义，与此沿正交。
-    //   sleepAdvanceToDawn 的幂等重写仍走守卫（同一入睡会话不二次播报）。
+    // review0909 #5 修正：入睡设锚沿 validChanged **恒发**（t1036 起无参纯属性 NOTIFY；QML 播报走
+    //   下方 bedSpawnAnnounce）。旧 `if (!m_bedSpawnValid)` 守卫把「锚已有效后的再入睡沿」静默吞掉
+    //   ——读档回填锚后或同床重睡时，入睡设锚沿不发 → 播报源契约断线（t1024a sleepAnnounce 腿红
+    //   根因）。MC 口径：每次成功入睡都重设重生点并提示（wiki Bed：使用床成功入睡即 "Respawn point
+    //   set"，同床重复入睡同播）；「读档回填沿静默」属 setBedSpawn 侧语义，与此沿正交。
+    //   sleepAdvanceToDawn 的幂等重写仍走守卫（同一入睡会话不二次通知 / 不二次播报）。
     m_bedSpawnValid = true;
-    emit bedSpawnValidChanged(false); // false = 入睡设锚沿（QML 播报，review0909 #5）
+    emit bedSpawnValidChanged();      // t1036 纯属性 NOTIFY（无参；Qt 6.11 约定 NOTIFY 参数=属性新值）
+    emit bedSpawnAnnounce(false);     // 播报源唯一发射沿（QML 播「重生点已设置」，review0909 #5）
     emit spawnPointChanged();         // t567 HUD 指南针基准 → 床位（同 sleepAdvanceToDawn 口径）
     emit positionChanged();           // 相机 / 第三人称模型瞬移跟随（同 respawn 尾）
     emit yawChanged();

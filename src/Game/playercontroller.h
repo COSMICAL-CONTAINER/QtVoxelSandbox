@@ -705,10 +705,16 @@ signals:
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
     // t1024 床位重生锚有效位翻转（睡床成功设锚 true / 挖锚床或换代 false）。呈现层 Connections 据此
-    //   可刷 HUD；床锚失效另发 bedSpawnLost（含语义文案触发面）。restored = 来源沿（review0909 #5）：
-    //   false = 入睡设锚（QML 播「重生点已设置」）；true = 读档回填（enterWorld → setBedSpawn，QML
-    //   静默——每次进世界复读系统消息属 UX 噪音）；置假沿恒 false（QML 只播置真沿，不新增播报面）。
-    void bedSpawnValidChanged(bool restored);
+    //   可刷 HUD；床锚失效另发 bedSpawnLost（含语义文案触发面）。t1036 无参化（纯属性 NOTIFY）：
+    //   Qt 6.11 properties 约定 NOTIFY 信号若有参数必须 = 属性新值——旧签名 (bool restored) 的参数
+    //   语义是「来源沿」非属性新值（入睡沿 emit false 而属性同拍变 true），对声明式绑定是陷阱；
+    //   播报源语义随迁独立信号 bedSpawnAnnounce（下方），本信号回归属性通知单一职责。
+    void bedSpawnValidChanged();
+    // t1036 播报源信号（与 bedSpawnValidChanged 职责分离；review0909 #5 播报来源契约随迁）：只在
+    //   入睡设锚沿 emit（restored=false，QML 播「重生点已设置」）。读档回填沿（setBedSpawn）与置假
+    //   沿（clearBedSpawn）**不**发本信号——每次进世界复读系统消息属 UX 噪音、置假向无播报面
+    //   （QML 只播置真沿）；sleepAdvanceToDawn 的幂等守卫沿亦不发（同一入睡会话不二次播报）。
+    void bedSpawnAnnounce(bool restored);
     // t1024 床锚丢失事件（挖掉锚床任一半时发；换代复位不发——切世界无需用户面提示）。呈现层据此
     //   系统播报「重生点已失效」（同 sleepRefused 文案链模式）。
     void bedSpawnLost();
