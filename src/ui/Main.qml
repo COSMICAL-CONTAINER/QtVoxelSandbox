@@ -6269,8 +6269,13 @@ Window {
                     //   书是迷你版「台上有书」读感）。Mask+0.5 + opacity 0.99：活板门孔 / cross 透明底 / 火把
                     //   窗透明像素 cutout；不透明瓦片不受影响（同手持 billboard alpha-test 契约）。
                     //   木楼梯（16）掉落物**不进**（MC 平贴语义保留 billboard——isItem3DFamily 注释）。
+                    //   t1032（R19.22）批 2 instancing：hasShapeBucket 排除 = 已入形状桶
+                    //   （blockShapeInstHost）的 3D 族 id 走合批 Model（桶内单 ItemShapeGeometry 单材质
+                    //   全实例共享），未入桶（桶池满溢出 / 桶释放瞬间）id 保底走本 delegate——两侧谓词
+                    //   同源 ItemEntityManager::isItem3DFamily 单一权威（feeder shapeFamily 模式 +
+                    //   reassignShapeBuckets 重算侧同判，批 1 hasBucket 纪律沿用）。
                     Model {
-                        visible: isItem3DFamily(entRoot.entId)
+                        visible: isItem3DFamily(entRoot.entId) && !blockShapeInstHost.hasShapeBucket(entRoot.entId)
                         geometry: ItemShapeGeometry { blockId: entRoot.entId }
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6282,41 +6287,47 @@ Window {
                             baseColor: terrainLight(worldClock.skyLight)
                             baseColorMap: voxelAtlas
                         }
-                        // t880 附魔台掉落物顶悬浮小书（两页 V；enchantBookPackTex 两态与放置态同源，
-                        //   宽 ≤64 pack 按 miss 处理走 qrc 布局 0——bookDelegate bookPackHit 同判据）。
-                        //   材质经显式 id 引用判据（t610 教训：材质 parent 解析到 Model，parent.parent
-                        //   在构造期求值为 null → TypeError）。
-                        //   review27 #9：局部坐标与 ResourceBrowser 预览 / 放置态 bookDelegate **同款**
-                        //   （书心 y=+0.46 > 台顶 +0.375、页 ±0.176、页 scale 0.38×0.03×0.46）——父级
-                        //   Model 的 0.3 统一缩小，**不做预缩放**。旧版 y=0.14（0.46×0.3 误做预缩放）被
-                        //   父级再乘 0.3 → 实际 0.042 < 台顶 0.1125，书整个埋进台体内部不可见。
-                        Node {
-                            id: dropBookNode
-                            visible: entRoot.entId === 94
-                            position: Qt.vector3d(0, 0.46, 0)
-                            property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
-                                                        && resourcePack.entityTextureWidth("enchant_book") > 64
-                            Model { // 左页（纸页镜像 piece 4；外缘下倾 -22°）
-                                geometry: EnchantBookBox { piece: 4; layout: dropBookNode.bookPackHit ? 1 : 0 }
-                                position: Qt.vector3d(-0.176, 0.045, 0)
-                                eulerRotation: Qt.vector3d(0, 0, -22)
-                                scale: Qt.vector3d(0.38, 0.03, 0.46)
-                                materials: PrincipledMaterial {
-                                    lighting: PrincipledMaterial.NoLighting
-                                    baseColor: terrainLight(worldClock.skyLight)
-                                    baseColorMap: dropBookNode.bookPackHit ? enchantBookPackTex : enchantBookTex
-                                }
+                    }
+                    // t880 附魔台掉落物顶悬浮小书（两页 V；enchantBookPackTex 两态与放置态同源，
+                    //   宽 ≤64 pack 按 miss 处理走 qrc 布局 0——bookDelegate bookPackHit 同判据）。
+                    //   材质经显式 id 引用判据（t610 教训：材质 parent 解析到 Model，parent.parent
+                    //   在构造期求值为 null → TypeError）。
+                    //   review27 #9：局部坐标与 ResourceBrowser 预览 / 放置态 bookDelegate **同款**
+                    //   （书心 y=+0.46 > 台顶 +0.375、页 ±0.176、页 scale 0.38×0.03×0.46）。
+                    //   t1032：本 Node 自 shape Model 子级**上移为 entRoot 直接子节点**——94 入形状桶
+                    //   后该 Model visible=false（shape 走合批），instancing 表无法承载 per-instance
+                    //   子树 → 书保留 delegate 逐实体渲染（桶内/桶外两路径书观感一致，不丢渲）。
+                    //   世界变换逐位不变换算：旧 = T(0,bobY,0)·S(0.3)·T(0,0.46,0)，新 =
+                    //   T(0,bobY+0.46×0.3,0)·S(0.3)（均匀缩放下 S·T = 缩放平移向量，逐位等价；
+                    //   rotY 继承 entRoot 两路径相同）。页 scale/position 原样（外层 0.3 统一缩小保留，
+                    //   不做预缩放——review27 #9 口径）。
+                    Node {
+                        id: dropBookNode
+                        visible: entRoot.entId === 94
+                        position: Qt.vector3d(0, entRoot.bobY + 0.46 * 0.3, 0)
+                        scale: Qt.vector3d(0.3, 0.3, 0.3)
+                        property bool bookPackHit: enchantBookPackTex.source.toString().length > 0
+                                                    && resourcePack.entityTextureWidth("enchant_book") > 64
+                        Model { // 左页（纸页镜像 piece 4；外缘下倾 -22°）
+                            geometry: EnchantBookBox { piece: 4; layout: dropBookNode.bookPackHit ? 1 : 0 }
+                            position: Qt.vector3d(-0.176, 0.045, 0)
+                            eulerRotation: Qt.vector3d(0, 0, -22)
+                            scale: Qt.vector3d(0.38, 0.03, 0.46)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: terrainLight(worldClock.skyLight)
+                                baseColorMap: dropBookNode.bookPackHit ? enchantBookPackTex : enchantBookTex
                             }
-                            Model { // 右页（纸页 piece 1；+22° 镜像成 V）
-                                geometry: EnchantBookBox { piece: 1; layout: dropBookNode.bookPackHit ? 1 : 0 }
-                                position: Qt.vector3d(0.176, 0.045, 0)
-                                eulerRotation: Qt.vector3d(0, 0, 22)
-                                scale: Qt.vector3d(0.38, 0.03, 0.46)
-                                materials: PrincipledMaterial {
-                                    lighting: PrincipledMaterial.NoLighting
-                                    baseColor: terrainLight(worldClock.skyLight)
-                                    baseColorMap: dropBookNode.bookPackHit ? enchantBookPackTex : enchantBookTex
-                                }
+                        }
+                        Model { // 右页（纸页 piece 1；+22° 镜像成 V）
+                            geometry: EnchantBookBox { piece: 1; layout: dropBookNode.bookPackHit ? 1 : 0 }
+                            position: Qt.vector3d(0.176, 0.045, 0)
+                            eulerRotation: Qt.vector3d(0, 0, 22)
+                            scale: Qt.vector3d(0.38, 0.03, 0.46)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: terrainLight(worldClock.skyLight)
+                                baseColorMap: dropBookNode.bookPackHit ? enchantBookPackTex : enchantBookTex
                             }
                         }
                     }
@@ -6727,6 +6738,106 @@ Window {
                                 baseColorMap: voxelAtlas
                                 baseColor: terrainLight(worldClock.skyLight)
                                 alphaCutoff: 0.0
+                            }
+                        }
+                    }
+                }
+            }
+
+            // t1032（R19.22）掉落物 instancing 治理第二批：**3D 形状族**（isItem3DFamily 25 id——火把
+            //   13 / 活板门 20·136 / 台阶 15·87·58·109 / 雪层 44 / 草丛 24 / 附魔台 94 / 枯灌木 43 /
+            //   小麦 25 / 栅栏 17·60·88 / 门 19·135·89 / 蘑菇 115·48 / 蛛网 102 / 红石火把 129 / 拉杆
+            //   112 / 按钮 113·114；木楼梯 16 不在族——t880 billboard 语义保留）按批 1（t1027
+            //   blockDropInstHost）同款压成 per-id 桶 × 单 instanced Model。族内 per-id 差异只在
+            //   ItemShapeGeometry 几何（形状 + 图集 UV 按 blockId 烘），桶粒度 = itemId：每活跃 3D 族
+            //   id 占一桶，**桶内全实例共享同一 ItemShapeGeometry + 同一材质**（单 Model 单几何，
+            //   instancing 全实例同 geometry 指针 = Quick3D 语义）→ 1 draw / 桶。动画下沉 feeder 解析式
+            //   （BlockDropInstancing shapeFamily 模式，公式与批 1 逐字同源：rotY 3s/圈 + bob 0↔0.15
+            //   2s 周期 + slot×0.37s 错峰 = 旧 delegate 等价视觉错开）。材质与旧 ItemShapeGeometry 分支
+            //   逐字同参（NoLighting + Mask + alphaCutoff 0.5 + opacity 0.99 cutout 契约 + voxelAtlas +
+            //   天光乘子 baseColor）。两侧谓词同源：feeder 收纳侧 ItemEntityManager::isItem3DFamily
+            //   （shapeFamily 模式），本 host 重算侧 itemEntities.isItem3DFamily 薄委托，delegate 排除侧
+            //   hasShapeBucket（桶态投影）——批 1 hasBucket 纪律沿用。桶满 8 溢出 → 旧 delegate 路径
+            //   保底（visible 链 hasShapeBucket 排除同源谓词，优雅降级不丢渲）。在用桶保持不让位
+            //   （review0910 #4 刻意取舍维持现状，防几何重建抖动）。空转门（review0910 #3）：本池
+            //   feeder 从设计起带门（familyId<=0 / 桶内活体 0 不走钟，活跃沿 start+markDirty 兜底），
+            //   批 1 池同批收口同款门。附魔台（94）台顶悬浮小书保留 delegate 逐实体渲染（dropBookNode
+            //   已上移 entRoot 直属——instancing 无法承载 per-instance 子树，两路径观感一致）。
+            //   review0910 #2 盲区登记：本 host 的 reassignShapeBuckets / hasShapeBucket 是纯 QML JS
+            //   编排（信号 handler 改表类），headless 探针不可行为级断言（与 reassignDropBuckets 同型
+            //   盲区）——源码钉 + 实机确认项（≥10 种 3D 族 id 定向冒烟）覆盖。
+            Node {
+                id: blockShapeInstHost
+                readonly property int kBucketCount: 8
+                // 桶池：buckets[k] = 已指派的 3D 族方块 id（0 = 空桶）。整体替换赋值 → property var 自动
+                //   notify → hasShapeBucket 绑定（delegate visible 链）随指派重算。
+                property var buckets: [0, 0, 0, 0, 0, 0, 0, 0]
+
+                function hasShapeBucket(id) {
+                    const b = blockShapeInstHost.buckets
+                    for (let k = 0; k < b.length; ++k) if (b[k] === id) return true
+                    return false
+                }
+
+                // 桶重指派（批 1 reassignDropBuckets 同款）：扫活体 3D 族 id 计数 → 在用桶保持（防几何
+                //   重建抖动，review0910 #4 不让位）→ 空桶按活体数降序、id 升序并列补位（确定性
+                //   tiebreak 防指派抖动）→ 消失 id 释放。entitiesChanged 驱动。谓词与 feeder 收纳侧
+                //   同源（itemEntities.isItem3DFamily 薄委托 → ItemEntityManager 静态单一权威）。
+                function reassignShapeBuckets() {
+                    const counts = ({})
+                    const n = itemEntities.count
+                    for (let i = 0; i < n; ++i) {
+                        if (!itemEntities.aliveAt(i)) continue
+                        const id = itemEntities.itemIdAt(i)
+                        if (!itemEntities.isItem3DFamily(id)) continue
+                        counts[id] = (counts[id] || 0) + 1
+                    }
+                    const prev = blockShapeInstHost.buckets
+                    const next = [0, 0, 0, 0, 0, 0, 0, 0]
+                    const freeSlots = []
+                    const kept = []
+                    for (let k = 0; k < blockShapeInstHost.kBucketCount; ++k) {
+                        const id = (k < prev.length) ? prev[k] : 0
+                        if (id > 0 && counts[id] > 0) { next[k] = id; kept.push(id) }
+                        else freeSlots.push(k)
+                    }
+                    const cands = Object.keys(counts).map(Number).filter(function(id) { return kept.indexOf(id) < 0 })
+                    cands.sort(function(a, b) { return (counts[b] - counts[a]) || (a - b) })
+                    while (freeSlots.length > 0 && cands.length > 0) next[freeSlots.shift()] = cands.shift()
+                    blockShapeInstHost.buckets = next
+                }
+
+                Component.onCompleted: reassignShapeBuckets()
+                Connections {
+                    target: itemEntities
+                    function onEntitiesChanged() { blockShapeInstHost.reassignShapeBuckets() }
+                }
+
+                Repeater {
+                    model: blockShapeInstHost.kBucketCount
+                    delegate: Node {
+                        visible: blockShapeInstHost.buckets[index] > 0
+                        Model {
+                            // 几何 per-id 共享缓存（桶指派变化才重建）：单 Model 单 ItemShapeGeometry
+                            //   单材质，桶内全实例经 instancing 共享（同 id 全实例同几何，批 1 桶同款；
+                            //   空桶 visible=false 不渲染，setBlockId 兜底 WoodSlab 不出真渲）。
+                            geometry: ItemShapeGeometry { blockId: blockShapeInstHost.buckets[index] }
+                            instancing: BlockDropInstancing {
+                                shapeFamily: true
+                                manager: itemEntities
+                                familyId: blockShapeInstHost.buckets[index]
+                            }
+                            // 材质与旧 delegate ItemShapeGeometry 分支逐字同参（NoLighting + Mask +
+                            //   alphaCutoff 0.5 + opacity 0.99 <1 强制透明通道尊重贴图 alpha 的 cutout
+                            //   契约 + voxelAtlas + 天光乘子 baseColor；实例表已携 0.3 缩放 / 自转 /
+                            //   bob，Model 本体 transform 恒 identity）。
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                alphaMode: PrincipledMaterial.Mask
+                                alphaCutoff: 0.5
+                                opacity: 0.99
+                                baseColor: terrainLight(worldClock.skyLight)
+                                baseColorMap: voxelAtlas
                             }
                         }
                     }
