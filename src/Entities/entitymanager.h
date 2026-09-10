@@ -181,7 +181,8 @@ public:
     //   减速 + kWaterGravity 缓沉 + 流水推动），aiSquid 在其上叠加周期 vy 上冲量 → 「喷水上浮 → 缓沉」节律性游动。
     //   t480 狼（wolf）= MobWolf(10)：机制等价 MC 1.0 狼 —— 驯服战斗伙伴。森林/针叶林群系生成（biomeIdAt==3 Forest
     //   / ==4 Snowy），中性 non-hostile（hostile=false → 不参与黑暗刷怪 / 日光燃烧 / 远距消失，生命周期同 passive）。
-    //   未驯服狼攻击玩家（aiWolf 敌对分支，机制等价 MC 1.0 野狼攻击）；骨头右键概率驯服（~33%，kWolfTameChance）→
+    //   野狼**中立方**（t1031 口径收口：aiWolf 未驯服分支纯游荡、不主动攻击玩家——机制等价 MC 1.0 野狼中性；
+    //   旧 t480「野狼主动敌对」分支退役，被玩家打后的激怒反击面登记不做，见 dev-plan t1031）；骨头右键概率驯服（~33%，kWolfTameChance）→
     //   驯服狼跟随主人 + 防御（主人攻击 / 主人受击来源的 mob → 狼追击咬击）+ 坐/站切换（右键坐留守 / 再右键站跟随）；
     //   喂生/熟肉 → love mode 繁殖产幼崽（复用 t400 框架，MobWolf 入 isBreedableType + 食物匹配表）。死亡不掉落
     //   （机制等价 MC 1.0 狼无常规掉落；仍掉少量 XP，见 Main.qml onMobDied）。§9 原创：名称 / 模型（方块化犬科 +
@@ -277,6 +278,13 @@ public:
     //   目标静态 → 仰角扫描 / 位移包络全确定。纯标量运行期状态（不持久化，同 m_chickenJockeyChance /
     //   setBreedTimings 缝先例）；最小侵入 = 一个成员 + 一个 setter + aiWander 一个早退，不动 RNG 类结构。
     Q_INVOKABLE void setWanderFrozen(bool frozen);
+    // t1031 驯服概率测试缝（headless 矩阵探针确定性化，MC 口径 1/3 每次尝试两端钉死）：roll >= 0 期间
+    //   tameWolf 不消费全局 RNG，改以 roll 千分比作本次驯服样本（sample = (roll % 1000) / 1000.0；样本
+    //   < kWolfTameChance=0.33 → 驯中）：setTameRollOverride(0) = 必成、setTameRollOverride(999) = 必败，
+    //   同值重复调用结果恒同（探针只钉状态面：驯服态位 / 爱心沿 / 骨头消耗，勿赌统计窗）。-1（缺省）=
+    //   生产路径零改动（照常 QRandomGenerator::global 掷骰）。纯标量运行期状态（不持久化，同
+    //   m_chickenJockeyChance / setBreedTimings / setWanderFrozen 缝先例）； setter 本身生产路径零调用。
+    Q_INVOKABLE void setTameRollOverride(int roll);
     // t374 被动生物群系化生成类型选取：据群系 id（World::biomeIdAt 编码：0=Plains, 1=Hills, 2=Desert,
     //   3=Forest）按 kPassiveSpawnWeights 加权随机返 MobPig/MobCow/MobSheep/MobChicken 之一。机制等价 MC 1.0
     //   群系化被动刷怪池（平原牛羊富集、森林猪富集；非排斥，仅概率差异）。群系 id 越界 → 兜底按 Plains。const 只读。
@@ -1724,6 +1732,10 @@ private:
     //   顶部早退（跳过 RNG 消费 / 速度写入 / 位移，物理重力保留）——headless 探针把甩钩窗内的猪钉在原地。
     //   运行期标量不持久化（同 m_chickenJockeyChance / m_breedCooldownSec 缝先例）。
     bool m_wanderFrozen = false;
+    // t1031 驯服概率缝状态（setTameRollOverride 写；缺省 -1 = 不接管，tameWolf 照常掷全局 RNG）。>= 0 时
+    //   作驯服样本千分比（(roll%1000)/1000.0 < kWolfTameChance → 驯中）；生产路径零调用（探针专用，同
+    //   m_wanderFrozen 缝先例）。运行期标量不持久化。
+    int m_tameRollOverride = -1;
     // t392 刷怪笼 spawn 节流累积器（秒）：tickSpawners 每 tick 累加 dt，达 kSpawnerInterval 才扫描玩家周围 Spawner
     //   块（按需扫描，避免每帧扫 ~28³ 体素；playerPos 由 PlayerController 传 m_pos）。同 m_spawnAccum 模式。
     float m_spawnAccumSpawner = 0.0f;
@@ -1841,9 +1853,9 @@ private:
     bool aiSquid(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale = 1.0f);
     // t480 狼 AI（tick Mob 分支 mobType==MobWolf 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐 MC 1.0 狼
     //   三态：
-    //   (1) 未驯服（wolfTamed=false）：**敌对玩家** —— 侦测范围（kWolfDetectRange）内追击 + 近距咬击
-    //       （emit mobAttackedPlayer(kWolfAttackDamage, MobWolf) → 呈现层仅 Survival 应用伤害，同 aiHostile
-    //       攻击模式）；非追踪 → 回退 aiWander。playerTargetable=false（创造/观察者）→ 不追咬（同 t290 门控）。
+    //   (1) 未驯服（wolfTamed=false）：**中立方**（t1031 口径收口）—— 纯 aiWander 游荡、不主动攻击玩家
+    //       （机制等价 MC 1.0 野狼中性：只在被激怒后反击，激怒反击面登记不做）；旧 t480 主动敌对分支
+    //       （kWolfDetectRange 侦测追击咬玩家）随本口径退役，playerTargetable 形参保留签名兼容（Q_UNUSED）。
     //   (2) 驯服 + 坐（wolfSitting=true）：**留守** —— 不移动不攻击（跟随主人回来自动续跟）；机制等价 MC 坐狼。
     //   (3) 驯服 + 站：**跟随 + 防御** —— 有防御目标（m_wolfTarget：主人攻击 / 主人受击来源的 mob）→ 追击并
     //       咬击该 mob（damageEntity(targetIdx, kWolfAttackDamage)）；无目标 → 跟随主人（distXZ > kFollowMinDist
@@ -2388,8 +2400,8 @@ private:
     // t480 狼常量（spec「骨头驯服 ~33% / 坐站切换 / 跟随 + 防御 / 咬击」；机制对齐 MC 1.0 驯服狼：跟随主人、
     //   攻击主人攻击/咬伤主人的 mob、咬击伤害；数值为本工程量身调，非 MC 精确复刻 —— PLAN §4「机制对标」
     //   非数值 1:1）。
-    //   - kWolfDetectRange：未驯服狼侦测玩家范围（blocks；XZ）。取 12（略低于敌对 kDetectRange=16 —— 野狼非
-    //     夜间刷怪敌对，属「地盘性攻击」，侦测近些；玩家走近才受袭）。
+    //   - kWolfDetectRange：**t1031 退役**（野狼中立收口后无侦测语义——未驯服狼纯游荡，常量随之删除；
+    //     旧值 12 连同其注释一并移除，防「常量在位但无人读」的死配置面）。
     //   - kWolfChaseSpeed：追击 / 跟随速度（blocks/s）。3.5 介于玩家走速 4.3 与 wander 1.0 之间 —— 跟随不掉队
     //     但玩家正常走略快（疾跑可拉开；机制等价 MC 狼跟随速度略低于玩家）。
     //   - kWolfAttackDamage：狼咬击伤害（HP）。用户口径（R19.17 第五轮实测 t947）：狼 4 HP/口一带 —— 满血
@@ -2402,7 +2414,6 @@ private:
     //     传送；本工程取 24（小世界）+ 近主人选安全位，防跟随永久掉队（狼速 3.5 < 玩家 4.3）。
     //   - kWolfTameChance：骨头驯服概率（spec「~33%」）。取 0.33（机制等价 MC 1.0 狼 33% 驯服概率；失败骨头
     //     仍消耗）。
-    static constexpr float kWolfDetectRange    = 12.0f; // 未驯服狼侦测玩家范围（blocks；XZ）
     static constexpr float kWolfChaseSpeed     = 3.5f;  // 追击 / 跟随速度（blocks/s）
     static constexpr int   kWolfAttackDamage   = 4;     // 狼咬击伤害（HP）
     static constexpr float kWolfAttackCooldown = 1.0f;  // 咬击间隔（秒）
