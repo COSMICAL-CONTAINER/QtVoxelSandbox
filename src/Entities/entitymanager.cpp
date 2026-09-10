@@ -1933,6 +1933,16 @@ void EntityManager::setWanderFrozen(bool frozen)
     qCInfo(lcEnt) << "wander frozen set to" << m_wanderFrozen;
 }
 
+// t1031 驯服概率测试缝写（见 .h 声明注释）：roll >= 0 接管 tameWolf 的驯服样本（千分比 → <0.33 驯中），
+//   -1 恢复全局 RNG 掷骰。生产路径零调用（P-t1031 探针专用，同 setWanderFrozen / setChickenJockeyChance
+//   缝先例）。不 bump revision / 不 emit：纯下次驯服尝试的输入门控，无直接呈现面。
+void EntityManager::setTameRollOverride(int roll)
+{
+    if (roll == m_tameRollOverride) return;
+    m_tameRollOverride = roll;
+    qCInfo(lcEnt) << "tame roll override set to" << m_tameRollOverride;
+}
+
 // t377 第 i 个 mob 的护甲物品 id（piece 0=头盔 / 1=胸甲 / 2=护腿 / 3=靴子；0=该部位无护甲）。越界 → 0。
 //   仅 Shambler/Bones spawn 时随机分配；QML delegate 据 it 叠 layer 贴图护甲壳（t719 ArmorLayerBox）。
 int EntityManager::mobArmorAt(int i, int piece) const
@@ -2264,9 +2274,13 @@ bool EntityManager::wolfSittingAt(int i) const
 }
 
 // t480 骨头驯服（spec「右键概率驯服 ~33%」；机制等价 MC 1.0 狼 33% 驯服概率 + 失败骨头仍消耗）。
-//   未驯服活体狼 → ~kWolfTameChance 概率驯服（wolfTamed=true + 清敌对追踪态 chasing/fuse 残留 → aiWolf
-//   转跟随/防御态）+ bump revision（QML 切狼外观 / 行为态）+ 返 true；未中 → 返 false（caller 照常消耗骨头）。
-//   已驯服 / 非 wolf / dead / 越界 → 返 false（caller 不消耗）。Q_INVOKABLE 兼调试 + PlayerController 骨头分支双入口。
+//   未驯服活体狼 → ~kWolfTameChance 概率驯服（wolfTamed=true + 清野狼追踪态 chasing 残留 → aiWolf
+//   转跟随/防御态）+ bump revision（QML 切狼外观 / 行为态 + 爱心沿）+ 返 true；未中 → 返 false（caller
+//   照常消耗骨头；**失败反馈登记简化**：仅日志，MC 失败冒烟粒子不做——探针只钉状态面，见 dev-plan t1031）。
+//   已驯服 / 非 wolf / dead / 越界 → 返 false（caller 不消耗）。Q_INVOKABLE 兼调试 + PlayerController 骨头
+//   分支双入口。t1031 测试缝：m_tameRollOverride >= 0 时驯服样本取缝值千分比（(roll%1000)/1000.0），不
+//   消费全局 RNG——P-t1031 钉必成(0)/必败(999)两端；缺省 -1 = 照常 QRandomGenerator::global 掷骰（生产
+//   路径零调用即零改动，同 m_wanderFrozen 缝先例）。
 bool EntityManager::tameWolf(int i)
 {
     if (i < 0 || i >= int(m_entities.size())) return false;
@@ -2274,7 +2288,10 @@ bool EntityManager::tameWolf(int i)
     if (e.kind != Mob || e.mobType != MobWolf) return false; // 仅 wolf 可驯
     if (e.dead || !e.alive) return false;                    // 尸体 / 空槽不可驯
     if (e.wolfTamed) return false;                           // 已驯服 → 不重复（caller 不消耗骨头）
-    if (QRandomGenerator::global()->generateDouble() >= double(kWolfTameChance)) {
+    const double roll = m_tameRollOverride >= 0
+        ? double(m_tameRollOverride % 1000) / 1000.0 // t1031 缝接管（同值恒同果，探针确定性）
+        : QRandomGenerator::global()->generateDouble();
+    if (roll >= double(kWolfTameChance)) {
         qCInfo(lcEnt) << "tame attempt failed (slot" << i << ") - bone consumed, wolf stays wild";
         return false; // ~67% 失败（骨头仍消耗，机制等价 MC 喂骨无论成败都耗）
     }
@@ -3008,7 +3025,8 @@ bool EntityManager::aiSquid(Entity &e, float dt, World *world, float worldW, flo
 }
 
 // t480 狼 AI（详见头文件 aiWolf 注释）。机制对齐 MC 1.0 狼三态：
-//   (1) 未驯服 → 敌对玩家（侦测 → 追击 → 近距咬击；非追踪回退 wander）。
+//   (1) 未驯服 → 中立方（t1031 口径收口：纯 aiWander 游荡、不主动攻击玩家；旧主动敌对分支退役，
+//       激怒反击面登记不做）。
 //   (2) 驯服 + 坐 → 留守（不移动不攻击）。
 //   (3) 驯服 + 站 → 跟随主人 + 防御（追击咬击 m_wolfTarget 目标 mob）；求偶期优先寻偶。
 //       t947 ① 跟随门：观察者（playerSpectator）不跟随（走近/瞬移全停 → 回退 wander）；③ chase 越障跳
@@ -3095,39 +3113,13 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         return moved;
     };
 
-    // (1) 未驯服：敌对玩家（玩家可锁定才追咬；创造/观察者不可锁定 → 纯游荡，同 t290 门控）。
+    // (1) 未驯服：**中立方**（t1031 口径收口：机制等价 MC 1.0 野狼中性——不主动攻击玩家；被玩家攻击后
+    //     的激怒反击面本单登记不做，见 dev-plan t1031）。旧 t480 主动敌对分支（kWolfDetectRange 侦测 →
+    //     追击 → 近距咬玩家 emit mobAttackedPlayer）整体退役：与「骨头右键驯服」的驯兽语义冲突（敌对面
+    //     会先咬死玩家再谈驯服）且 MC 野狼本中性。非驯语义 → 纯游荡（同被动生物）。
     if (!e.wolfTamed) {
-        if (!playerTargetable) {
-            if (e.chasing) { e.chasing = false; e.chaseTimer = 0.0f; } // 清追踪残留（防模式切换后仍追）
-            return aiWander(e, dt, world, worldW, worldD, speedScale);
-        }
-        const float dx = playerPos.x() - e.pos.x();
-        const float dz = playerPos.z() - e.pos.z();
-        const float dy = playerPos.y() - e.pos.y();
-        const float distXZ = std::sqrt(dx * dx + dz * dz);
-        // detect + chase memory（同 aiHostile）：进入 kWolfDetectRange → 追踪 + 刷新记忆；脱离后记忆期内续追。
-        if (distXZ <= kWolfDetectRange) {
-            e.chasing = true;
-            e.chaseTimer = kChaseMemory;
-        } else if (e.chasing) {
-            e.chaseTimer -= dt;
-            if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
-        }
-        if (!e.chasing) return aiWander(e, dt, world, worldW, worldD, speedScale); // 非追踪 → 游荡
-        // 追踪：yaw 朝玩家 + 走近 + 近距咬击（复用 aiHostile attack 门控：冷却 + t321 全局节流）。
-        if (distXZ > 1e-4f) e.yawRad = std::atan2(-dx, -dz);
-        const bool moved = chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, distXZ, dy);
-        if (distXZ <= kAttackRange && std::abs(dy) <= kAttackVertRange
-            && e.wolfAttackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
-            e.wolfAttackCooldown = kWolfAttackCooldown;
-            m_playerHitCooldown = kPlayerHitThrottle; // t321 串行化玩家受击（野狼群围攻轮替出手）
-            float kbX, kbZ;
-            if (distXZ > 1e-3f) { kbX = dx / distXZ; kbZ = dz / distXZ; }
-            else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); }
-            emit mobAttackedPlayer(kWolfAttackDamage, int(MobWolf), kbX, kbZ);
-            qCInfo(lcEnt) << "untamed wolf" << idx << "bit player for" << kWolfAttackDamage << "HP";
-        }
-        return moved;
+        Q_UNUSED(playerTargetable) // 旧敌对分支的锁定门形参随收口退役（签名保留 = caller 零改动）
+        return aiWander(e, dt, world, worldW, worldD, speedScale);
     }
 
     // (2)(3) 驯服 + 站。
