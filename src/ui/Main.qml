@@ -3139,10 +3139,12 @@ Window {
         // t388 睡觉被拒（非夜间且非雷暴 / 附近有怪物；review0909 #1 起雷暴为合法入睡窗口）→ 系统播报
         //   中文文案（同死亡播报 appendChatMessage 模式）。
         function onSleepRefused(reason) { window.appendChatMessage("", reason, true) }
-        // t1024 床锚置真沿 → 系统播报「重生点已设置」（dev-plan 文案）。restored = 来源沿（review0909 #5）：
-        //   false = 入睡设锚（播报）；true = 读档回填（enterWorld → setBedSpawn，静默——每次进世界复读
-        //   一条系统消息属 UX 噪音，对比 onBedSpawnLost / 换代清锚的刻意静默口径）。置假沿不播报。
-        function onBedSpawnValidChanged(restored) {
+        // t1024 床锚置真沿 → 系统播报「重生点已设置」（dev-plan 文案）。t1036 信号职责分离：本
+        //   handler 改挂播报源 bedSpawnAnnounce(restored)（只在入睡设锚沿 emit，restored 恒 false）
+        //   ——读档回填沿（enterWorld → setBedSpawn）与置假沿不发本信号（每次进世界复读一条系统
+        //   消息属 UX 噪音，对比 onBedSpawnLost / 换代清锚的刻意静默口径）；bedSpawnValidChanged
+        //   已无参化（纯属性 NOTIFY，Qt 6.11 约定），不再承载播报语义。
+        function onBedSpawnAnnounce(restored) {
             if (player.bedSpawnValid && !restored) window.appendChatMessage("", "重生点已设置", true)
         }
         // t1024 床锚丢失（挖掉睡过的锚床任一半）→ 系统播报（重生点已失效回世界出生点的用户面；
