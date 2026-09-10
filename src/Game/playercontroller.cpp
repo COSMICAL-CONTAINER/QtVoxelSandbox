@@ -3504,10 +3504,11 @@ void PlayerController::placeBlock()
     //   熔炉 / 箱子 / 附魔台 / 铁砧）跳过「打开界面」useBlock，改走放置路径（把选中方块放在该功能方块朝玩家
     //   的面相邻空格）。判据 = Key_Shift 原始按下态（m_keys，§2-D 单一输入路径），覆盖所有模式（生存蹲 / 创造
     //   飞态 shift 下降 / 创造走），非 m_moveState==Crouch（后者飞态不进蹲 → 飞态 shift+右键会失效，与 MC 不符）。
-    //   只绕过「开界面」类 useBlock（工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧）；门 / 活版门 / 床 / 机关 / 浆果丛 / 末地门 /
-    //   传送门等其它 useBlock **不绕过**（机制等价 MC shift 右键门仍开门、床仍睡 —— 这些非「容器 UI」语义，
-    //   shift 不改变其交互）。空手 sneak+右键功能方块 → 下方 m_selectedBlock==Air 守卫拦（不放置不挥手），
-    //   机制等价 MC 空手 shift 右键箱子无效应。
+    //   只绕过「开界面」类 useBlock（工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧；review0909 #2 补音符盒；
+    //   t1034 存量清偿再补门 / 活板门 / 床——潜行持方块 = 放置语义优先于开合 / 翻板 / 入睡，MC「潜行右键 =
+    //   对方块面放置」旁路口径统一）。机关 / 浆果丛 / 末地门 / 传送门等其它 useBlock 仍**不绕过**（非「容器
+    //   UI / 开合 / 入睡 / 调音」语义，shift 不改变其交互）。空手 sneak+右键功能方块 → 下方
+    //   m_selectedBlock==Air 守卫拦（不放置不挥手），机制等价 MC 空手 shift 右键箱子无效应。
     const bool sneakPlace = m_keys.value(Qt::Key_Shift);
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
     if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
@@ -3560,7 +3561,12 @@ void PlayerController::placeBlock()
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。
     //   空手亦可（睡是「使用」语义，与手持何物无关）。命中格为任一床色变体（BlockRegistry::isBed）→ trySleepAt：
     //   夜间 + 床周无怪物 → 进 fade 态（完成后跳清晨 + 设重生点）；白天 / 附近有怪物 → emit sleepRefused 文案。
-    if (BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    //   t1034（review0909 #2 存量登记项清偿）：补 !sneakPlace 门（对齐同函数工作台/熔炉/箱子/附魔台/铁砧/
+    //   发射器/投掷器/音符盒分支模式）——潜行持方块右键床 = 旁路入睡链走下方放置路径（MC：潜行右键床=放置，
+    //   不睡）。门加分支头而非 trySleepAt 内入睡窗口判定之后：潜行放置语义整链优先（夜门/雷暴门/怪物门一概
+    //   不触达），且 trySleepAt 直调面（QML/探针）语义不变；空手潜行右键 → 下方 m_selectedBlock==Air 守卫拦
+    //   （无动作，同 t1028 音符盒口径）。
+    if (!sneakPlace && BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         trySleepAt(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -3577,7 +3583,11 @@ void PlayerController::placeBlock()
         //   World::recomputePowerLocal 接收器分支写）。本分支对铁门不消费右键（return 掉会吞掉后续放置路径
         //   的语义），直接 fall-through——终审修 L3：fall-through 只跳过「门开合」这一个动作，手持方块右键
         //   铁门面仍会正常放置 + 挥臂（MC 同此：铁门只是不吃 use，不挡放置），空手右键铁门才真正无动作。
-        if (BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {
+        // t1034（review0909 #2 存量登记项清偿）：补 !sneakPlace 门——潜行持方块右键木门 = 旁路开合走下方
+        //   放置路径（MC 潜行右键 = 对方块面放置旁路口径，同本函数机关件分支模式）；空手潜行右键 → 下方
+        //   m_selectedBlock==Air 守卫拦（无动作，同 t1028 音符盒口径）。铁门本就不吃右键（t722 徒手不开、
+        //   fall-through 放置），不受本门影响。
+        if (!sneakPlace && BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 flipped = quint8((st & ~4) | (((st & 4) == 0) ? 4 : 0)); // 翻 bit2（开合）
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, flipped);
@@ -3595,7 +3605,10 @@ void PlayerController::placeBlock()
             emit swingArm();
             return;
         }
-        if (hitId == BlockRegistry::WoodTrapdoor) {
+        // t1034（review0909 #2 存量登记项清偿）：补 !sneakPlace 门——潜行持方块右键活板门 = 旁路翻板走
+        //   下方放置路径（同门/床/机关件分支模式）；空手潜行右键 → 下方 m_selectedBlock==Air 守卫拦
+        //   （无动作，同 t1028 音符盒口径）。
+        if (!sneakPlace && hitId == BlockRegistry::WoodTrapdoor) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const bool willOpen = (st & 1) == 0;
             quint8 ns = quint8(st ^ 1); // 翻 bit0（开合）
@@ -3613,8 +3626,8 @@ void PlayerController::placeBlock()
         // t1028 右键音符盒 → 循环调音 + 播放新音（useBlock 语义，MC 同款：右键 = 调音并发声）。
         //   review0909 #2：补 !sneakPlace 门（对齐同函数工作台/熔炉/箱子/附魔台/铁砧/发射器/投掷器
         //   各分支模式——潜行持方块右键 = 旁路 useBlock 走下方放置路径，放置语义不被调音吞；空手潜行
-        //   右键 → 下方 m_selectedBlock==Air 守卫拦，无动作。同 MC 潜行右键旁路口径）。注意门 / 床 /
-        //   活板门分支同款缺门是**存量**（非本修顺手改，防行为面扩大——dev-plan review0909 登记簿）。
+        //   右键 → 下方 m_selectedBlock==Air 守卫拦，无动作。同 MC 潜行右键旁路口径）。门 / 床 /
+        //   活板门三分支的同款缺门原为存量（review0909 #2 登记簿），已于 t1034 补齐（见上方三分支）。
         //   音高段 +1 回绕 (p+1)%25（25 档 0..24；noteBlockTunedState 单一权威，bit5 通电记忆位保留）。
         //   id 不变只 state 变 → World::setBlock 5 参数版走重网格化路径（发 worldChanged 不发
         //   broken/placed，同门/活板门口径）。发声走信号链（音频层只消费，PLAN §2 分层）：携新音高 +
