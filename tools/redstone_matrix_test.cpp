@@ -42534,10 +42534,11 @@ Item {
     //       Clear（睡醒清雷暴）+ 时间面照常落 0.75；白天 + Clear → 拒「只能在夜晚或雷暴中睡觉」；
     //       白天 + Thunder → 亦可睡但 wakeUp 按钮早退**不清**天气（清只挂跳晨完成沿）；夜 + Clear →
     //       可睡（正控制：(c)(d) 门是唯一拦截者）；
-    //   (e) 播报来源契约（review0909 #5；阴性轮敏感：摘 QML !restored 门 → qml 钉红）：
-    //       bedSpawnValidChanged(bool restored)——读档回填沿（clearBedSpawn → setBedSpawn，enterWorld
-    //       同款）restored=true（QML 静默，进世界不再复读「重生点已设置」）；入睡设锚沿 restored=false
-    //       （QML 播报）。
+    //   (e) 播报来源契约（review0909 #5；t1036 信号职责分离随迁；阴性轮敏感：摘 bedSpawnAnnounce
+    //       发射 → announce 断言腿红）：bedSpawnValidChanged() 无参（纯属性 NOTIFY，valid 沿时序
+    //       不变——置假沿 → 回填沿 → 入睡设锚沿三连发，valid 值 false/true/true）；bedSpawnAnnounce
+    //       (bool restored) 只在入睡设锚沿恰发一次（restored=false，QML 播「重生点已设置」）——
+    //       读档回填沿（setBedSpawn）与置假沿（clearBedSpawn）零 announce（QML 静默）。
     {
         World wT24;
         wT24.setWidth(48); wT24.setDepth(48); wT24.setHeight(96); wT24.setSeed(1024);
@@ -42580,15 +42581,16 @@ Item {
         const QMetaObject::Connection connR24 = QObject::connect(
             &pcT24, &PlayerController::sleepRefused, &pcT24,
             [&refusedT24, &refusedCountT24](const QString &r) { refusedT24 = r; ++refusedCountT24; });
-        // review0909 #5 播报来源契约：bedSpawnValidChanged(bool restored) 全沿记录（(valid, restored)
-        // 对）。QML 播报面 = restored==false 的置真沿；读档回填沿（restored=true）必须静默。
-        QVector<bool> emitValidT24, emitRestoredT24;
+        // review0909 #5 播报来源契约（t1036 双信号各自记录）：bedSpawnValidChanged() 无参——每次
+        //   发射记录发射时的属性值（valid 沿时序不变）；bedSpawnAnnounce(bool restored) 单独记录
+        //   restored 携带值（QML 播报面 = 入睡设锚沿恰一次 restored=false；回填 / 置假沿零 announce）。
+        QVector<bool> emitValidT24, emitAnnounceRestoredT24;
         const QMetaObject::Connection connE24 = QObject::connect(
             &pcT24, &PlayerController::bedSpawnValidChanged, &pcT24,
-            [&pcT24, &emitValidT24, &emitRestoredT24](bool restored) {
-                emitValidT24.push_back(pcT24.bedSpawnValid());
-                emitRestoredT24.push_back(restored);
-            });
+            [&pcT24, &emitValidT24]() { emitValidT24.push_back(pcT24.bedSpawnValid()); });
+        const QMetaObject::Connection connA24 = QObject::connect(
+            &pcT24, &PlayerController::bedSpawnAnnounce, &pcT24,
+            [&emitAnnounceRestoredT24](bool restored) { emitAnnounceRestoredT24.push_back(restored); });
 
         // (a) 夜间入睡即设锚 + 跳清晨（setPhase(0.5)=子夜；sleep Lying 1s + Settled 2s + Waking 0.8s）。
         clockT24.setPhase(0.5f);
@@ -42647,20 +42649,26 @@ Item {
         pcT24.trySleepAt(bx24, by24, bz24);
         const bool okControl = pcT24.sleeping();
         pcT24.wakeUp();
-        // (e) 播报来源契约（review0909 #5）：读档回填沿 restored=true（QML 静默）→ 入睡设锚沿
-        //     restored=false（QML 播「重生点已设置」）。
-        const int nEmitT24 = emitRestoredT24.size();
-        pcT24.clearBedSpawn(); // 置假沿（restored=false；QML 只播置真沿，此向静默）
-        pcT24.setBedSpawn(float(bx24) + 0.5f, float(by24) + 1.0f, float(bz24) + 0.5f); // 回填沿（enterWorld 同款）
-        const bool okRestoreQuiet = emitRestoredT24.size() == nEmitT24 + 2
-            && !emitValidT24[nEmitT24] && !emitRestoredT24[nEmitT24]           // 置假沿
-            && emitValidT24[nEmitT24 + 1] && emitRestoredT24[nEmitT24 + 1];    // 回填沿 restored=true
-        pcT24.trySleepAt(bx24, by24, bz24); // 入睡设锚沿 restored=false
-        const bool okSleepAnnounce = pcT24.sleeping() && emitRestoredT24.size() == nEmitT24 + 3
-            && emitValidT24[nEmitT24 + 2] && !emitRestoredT24[nEmitT24 + 2];
+        // (e) 播报来源契约（review0909 #5；t1036 随迁）：validChanged 无参沿时序不变（置假沿 →
+        //     回填沿 → 入睡设锚沿，valid 值 false/true/true）；announce 只在入睡设锚沿恰一次
+        //     restored=false——回填沿与置假沿零 announce（QML 静默）。
+        const int nValidT24 = emitValidT24.size();
+        const int nAnnounceT24 = emitAnnounceRestoredT24.size();
+        pcT24.clearBedSpawn(); // 置假沿（QML 只播置真沿，此向静默；无 announce）
+        pcT24.setBedSpawn(float(bx24) + 0.5f, float(by24) + 1.0f, float(bz24) + 0.5f); // 回填沿（enterWorld 同款；无 announce）
+        const bool okRestoreQuiet = emitValidT24.size() == nValidT24 + 2
+            && !emitValidT24[nValidT24]                                        // 置假沿 valid=false
+            && emitValidT24[nValidT24 + 1]                                     // 回填沿 valid=true
+            && emitAnnounceRestoredT24.size() == nAnnounceT24;                 // 两沿零 announce
+        pcT24.trySleepAt(bx24, by24, bz24); // 入睡设锚沿（validChanged + announce(false) 双发）
+        const bool okSleepAnnounce = pcT24.sleeping()
+            && emitValidT24.size() == nValidT24 + 3 && emitValidT24[nValidT24 + 2]
+            && emitAnnounceRestoredT24.size() == nAnnounceT24 + 1
+            && !emitAnnounceRestoredT24[nAnnounceT24];                         // announce 恰一次 restored=false
         pcT24.wakeUp();
         QObject::disconnect(connR24);
         QObject::disconnect(connE24);
+        QObject::disconnect(connA24);
         pcT24.release();
         probeWinT24.deleteLater();
         const bool okA = okEntry && okDawn && okRespawn && okHostile && okThunder && okThunderClear
@@ -42675,7 +42683,7 @@ Item {
                               << "restoreQuiet" << okRestoreQuiet << "sleepAnnounce" << okSleepAnnounce
                               << "phase" << clockT24.dayPhase() << "weather" << wT24.weatherState()
                               << "refused" << refusedT24 << "n" << refusedCountT24
-                              << "emits" << emitRestoredT24.size()
+                              << "emits" << emitValidT24.size() << "announces" << emitAnnounceRestoredT24.size()
                               << "feet" << pcT24.feetPosition().x() << pcT24.feetPosition().y()
                               << pcT24.feetPosition().z()
                               << "spawn" << pcT24.spawnPoint().x() << pcT24.spawnPoint().y()
@@ -42695,9 +42703,12 @@ Item {
                              "clears the storm back to Clear alongside the dawn skip, day+clear "
                              "refuses with the MC wording, day+thunder sleeps but an early wakeUp "
                              "keeps the storm (only a completed night resets weather), and a clear "
-                             "night sleeps (positive control); the announce-source contract carries "
-                             "restored=true on the save-restore edge (QML silent) and restored=false "
-                             "on the sleep-set edge (QML announces) - negative-round sensitive"
+                             "night sleeps (positive control); the announce-source contract (t1036 "
+                             "signal separation) carries the parameterless validChanged edge sequence "
+                             "false/true/true across clear/restore/sleep-set while bedSpawnAnnounce "
+                             "fires exactly once with restored=false on the sleep-set edge (QML "
+                             "announces) and zero times on the save-restore and clear edges (QML "
+                             "silent) - negative-round sensitive"
                           << (okA ? QString()
                                   : QStringLiteral("diag entry=%1 dawn=%2 respawn=%3 hostile=%4 "
                                                    "thunder=%5 thunderClear=%6 dayRefuse=%7 "
@@ -42855,13 +42866,19 @@ Item {
                 {"qml-bedspawn-set-toast-copy", "重生点已设置"},
                 // review0909 #5：读档回填沿（restored=true）静默——QML 播报只挂入睡设锚沿。
                 {"qml-bedspawn-restore-quiet", "if (player.bedSpawnValid && !restored) window.appendChatMessage(\"\", \"重生点已设置\", true)"},
+                // t1036：QML 播报 handler 改挂 bedSpawnAnnounce（bedSpawnValidChanged 无参化后不再
+                //   有 onBedSpawnValidChanged(restored) 处理器）。
+                {"qml-bedspawn-announce-handler", "function onBedSpawnAnnounce(restored)"},
                 {"qml-bedspawn-lost-handler", "function onBedSpawnLost()"},
                 {"qml-bedspawn-lost-toast-copy", "床被破坏，重生点已失效"},
             });
             missD << pinSet(root + QStringLiteral("/src/Game/playercontroller.h"), {
                 {"hdr-bedSpawnValid-prop", "Q_PROPERTY(bool bedSpawnValid READ bedSpawnValid NOTIFY bedSpawnValidChanged)"},
-                // review0909 #5：信号携来源沿（restored=true 读档回填 / false 入睡设锚）。
-                {"hdr-bedSpawnValid-signal-src", "void bedSpawnValidChanged(bool restored);"},
+                // review0909 #5 + t1036：播报源独立信号 bedSpawnAnnounce（只挂入睡设锚沿，restored
+                //   恒 false；回填 / 置假沿零发）——validChanged 无参化（纯属性 NOTIFY，Qt 6.11 约定
+                //   NOTIFY 参数=属性新值）。
+                {"hdr-bedSpawnValid-signal-src", "void bedSpawnValidChanged();"},
+                {"hdr-bedSpawnAnnounce-signal", "void bedSpawnAnnounce(bool restored);"},
                 {"hdr-setBedSpawn", "Q_INVOKABLE void setBedSpawn(float x, float y, float z);"},
                 {"hdr-clearBedSpawn", "void clearBedSpawn();"},
                 {"hdr-bedSpawnLost-signal", "void bedSpawnLost();"},
