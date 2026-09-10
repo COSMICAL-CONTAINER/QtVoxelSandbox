@@ -28095,8 +28095,10 @@ Item {
     //       + 燃烧豁免行保持钉（「仍不燃烧」面的源级契约）+ 两处 dayShadeAi 盔豁免行 count==2 钉。
     //   (c) #13（低）t952 mobAggroAgainst 受害者枚举门漏幼体：狼咬小蹒跚者 → 幼体转火追咬狼（狼掉血 =
     //       幼体近战唯一伤害源）——旧版注册侧 no-op 幼体恒追玩家 = 红 + switch case 钉。
-    //   (d) #14（低）t947 攻击距离内矮障碍瞬态起跳：野狼贴脸（distXZ 1.4 ≤ kAttackRange 1.6）前方
-    //       0.6 格 1 格矮墙 → 继续咬击（hits ≥3）且全程贴地（跳起抬升 <0.15；旧版边咬边跳 ≥1.0 = 红）。
+    //   (d) #14（低）t947 攻击距离内矮障碍瞬态起跳：驯服狼贴脸防御静止猪目标（distXZ 1.0 ≤ kAttackRange
+    //       1.6）前方 0.6 格 1 格矮墙 → 继续咬击（hits ≥3）且全程贴地（跳起抬升 <0.15；旧版边咬边跳
+    //       ≥1.0 = 红）。t1031 rig 迁移：旧「野狼咬玩家」供流转驯服狼防御分支供流（同 chase lambda 同
+    //       咬带门，野狼中立收口后旧供流面不复存在）；目标静止 = setWanderFrozen 冻结。
     //       t988 门收窄演化：压跳语义收窄为「同层可咬」（|tdy| ≤ 0.5）——本腿同层（dy=0）照旧压跳保持绿，
     //       异层面由 P-t988(c) 承接。
     //   (e) #16（低）t950 骑乘态 mob 未被拾取扫描排除：乘矿车 Shambler 压着铁胸甲 6 窗恒不拾 + 同窗
@@ -28334,34 +28336,47 @@ Item {
         }
 
         // ── (d) #14 攻击距离内不起跳（跳探加 distXZ 门）──
+        //   t1031 rig 迁移：旧 rig 以「野狼咬玩家」供咬击流；t1031 野狼中立收口（aiWolf 未驯服分支纯
+        //   游荡）后改由**驯服狼防御分支**供流——同 chase lambda、同咬击带门（distXZ ≤ kAttackRange +
+        //   |tdy| ≤ 0.5 同层压跳），#14 钉语义不变。目标 = 静止猪（spawn 在墙格内 = 原 rig「玩家点在
+        //   墙格」同位；setWanderFrozen 冻结 wander 钉位；20HP 承 3 口存活，4HP/口 t947 钉）。
         {
             World wd; flatRigC(wd);
             EntityManager emd;
+            emd.setWanderFrozen(true); // 静止目标（狼防御/跟随不走 aiWander，冻结不波及狼追击）
+            const int pig = emd.spawnMobTyped(21, 85, 22, EntityManager::MobPig,
+                                              QStringLiteral("#e8a0a0"), 20); // 咬击带内（狼 20.5 → 21.5 距 1.0）
             const int wolf = emd.spawnMobTyped(20, 85, 22, EntityManager::MobWolf,
-                                               QStringLiteral("#c8ccd4"), 10); // 未驯服 → 敌对玩家
+                                               QStringLiteral("#c8ccd4"), 10);
+            emd.setTameRollOverride(0); // t1031 缝必成（直调驯服——阴性轮摘骨头分流本腿恒绿）
+            const bool tamedD = wolf >= 0 && emd.tameWolf(wolf);
+            emd.setTameRollOverride(-1);
             for (int z = 21; z <= 23; ++z) wd.setBlock(21, 85, z, BR::Stone, 0); // 矮墙（狼前方 0.6 格探针位）
-            const QVector3D player(21.9f, 85.0f, 22.5f); // distXZ 1.4 ≤ kAttackRange 1.6 咬击带内
+            const QVector3D player(21.9f, 85.0f, 22.5f); // 主人位（狼-猪带内；狼到位后 < kFollowMinDist 站定）
             int hits = 0;
-            QObject::connect(&emd, &EntityManager::mobAttackedPlayer,
-                             [&hits](int, int, float, float) { ++hits; });
-            float baseY = 0.0f, maxY = 0.0f;
-            int airTicks = 0, maxAt = -1;
-            if (wolf >= 0) {
+            if (tamedD && pig >= 0) {
+                emd.setWolfTarget(pig); // 狼群追咬目标（t480 setWolfTarget 单一入口，防御分支供流）
+                int prevHp = emd.healthAt(pig);
                 // 60 tick 稳定窗（实测 6 tick 时仍处落地下沉中段 85.2995 → 贴支撑顶 85.45 的 +0.15
                 //   上 snap 会被误读成起跳；1s 后真值静止，起跳签名 ≥0.9 与噪声硬分界）。
                 for (int t = 0; t < 60; ++t) emd.tick(0.016f, &wd, player, 0.3f, 1.8f, true, false);
-                baseY = emd.posAt(wolf).y();
-                maxY = baseY;
+                const float baseY = emd.posAt(wolf).y();
+                float maxY = baseY;
+                int maxAt = -1;
                 for (int t = 0; t < 625; ++t) { // 10s：咬击冷却 1s → ≥3 口（边咬证据）
                     emd.tick(0.016f, &wd, player, 0.3f, 1.8f, true, false);
+                    const int hpNow = emd.healthAt(pig);
+                    if (hpNow < prevHp) { ++hits; prevHp = hpNow; } // 防御咬击落地面（4HP/口掉血计数）
                     const float yNow = emd.posAt(wolf).y();
-                    if (yNow > baseY + 0.05f) ++airTicks; // 离地帧计数（起跳签名）
                     if (yNow > maxY) { maxY = yNow; maxAt = t; }
                 }
+                okD = wolf >= 0 && hits >= 3 && (maxY - baseY) < 0.15f;
+                diag += QStringLiteral("d wolf=%1 pig=%2 hits=%3 lift=%4 maxAt=%5 base=%6 ")
+                            .arg(wolf).arg(pig).arg(hits).arg(maxY - baseY).arg(maxAt).arg(baseY);
+            } else {
+                okD = false;
+                diag += QStringLiteral("d spawn/tame failed ");
             }
-            okD = wolf >= 0 && hits >= 3 && (maxY - baseY) < 0.15f;
-            diag += QStringLiteral("d wolf=%1 hits=%2 lift=%3 air=%4 maxAt=%5 base=%6 ")
-                        .arg(wolf).arg(hits).arg(maxY - baseY).arg(airTicks).arg(maxAt).arg(baseY);
             // 跳探门钉：新门形在位（t988 收窄：异层目标咬带内仍探跳）+ 旧无距离门形绝迹（本函数内）。
             okD = okD && entCppC.contains(QStringLiteral(
                 "if (e.resting && world && (distXZ > kAttackRange || std::abs(tdy) > 0.5f)) {"));
@@ -28553,9 +28568,12 @@ Item {
                              " burn-site exemption line stays pinned (still never burns); (c) a"
                              " wolf bite on a BABY shambler registers revenge - the baby turns and"
                              " melees the wolf (wolf hp drop, closed up) where the old enum gate"
-                             " silently no-oped; (d) an untamed wolf at bite range (1.4 <= 1.6)"
-                             " with a 1-high wall 0.6 ahead keeps biting (>=3 hits) without ever"
-                             " leaving the ground (lift <0.15; the transient hop used to lift"
+                             " silently no-oped; (d) a TAMED wolf defending a frozen pig target"
+                             " at bite range (1.0 <= 1.6, t1031 rig migration: the untamed"
+                             " player-bite flow was retired by the wild-wolf-neutral caliber so"
+                             " the same chase lambda is now exercised through the defense branch)"
+                             " with a 1-high wall 0.6 ahead keeps biting (>=3 health drops) without"
+                             " ever leaving the ground (lift <0.15; the transient hop used to lift"
                              " ~1.0); (e) a cart-riding shambler standing on an iron chestplate"
                              " never picks it across six windows while a bare ground control in"
                              " the same scan does (riding excluded, resolvePlayerPush caliber),"
@@ -44174,6 +44192,310 @@ Item {
                              "recipe.cpp"
                           << (ok ? QString()
                                   : QStringLiteral("diag edge=%1 pins=%2").arg(edgeOkB).arg(pinsOkB));
+    }
+
+    // ── P-t1031a 狼驯服真链行为探针（R19.22 t1031；真输入链 + t1031 驯服概率缝确定性化）──
+    //    全链主体系 t480/t831/t878/t986-988 遗产（骨头分流 / 爱心沿 / 项圈 MobModel collarVisible /
+    //    传送跟随）；本单补驯服概率缝 + 野狼中立收口，探针钉行为状态面：
+    //    (a1) 必败腿（缝 999 → 样本 0.999 ≥ 0.33）：野狼 + 骨头右键 press → 不驯 + 骨头恰耗 1 +
+    //         无爱心沿（失败反馈登记简化为日志——MC 失败冒烟粒子不做，探针只钉状态面）；
+    //    (a2) 必成腿（缝 0 → 样本 0.0 < 0.33）：同狼再 press → 驯服态位 + 爱心沿（inLoveAt，t878③
+    //         心形 delegate 状态面）+ 骨头再耗 1；tick 5.5s > kTameHeartDuration 4s → 收心；
+    //    (a3) 坐/站两向切换（空手右键；t878① 口径骨头对驯服狼 no-op、坐站只走空手分支）：press →
+    //         坐（wolfSittingAt 真）→ press → 站（假）；空手切换零消耗；
+    //    (a4) 参战腿（attackMob→setWolfTarget t480 接线，t242/t1015 attack-target 真链）：驯服狼 +
+    //         静止僵尸（wander 冻结）→ 玩家 beginMining 命中僵尸（attackMob 唯一生产入口）→ 狼追击
+    //         咬击（僵尸掉血超过玩家空手一击 + 狼-僵尸最小 XZ 距 ≤ kAttackRange+0.1）；
+    //    (a5) 野狼中立腿（t1031 收口面）：未驯服狼 + 生存玩家 3 格（targetable=true）+ wander 冻结
+    //         钉位 6s → 零 mobAttackedPlayer + 狼 XZ 逐位钉在生成格（旧敌对分支 3 格 < 旧侦测 12 必
+    //         追咬 → 本腿对收口敏感；冻结只关 wander，旧 chase 不受影响 = 敏感性保留）。
+    //    缺省零调用与接线语句本体源钉在 P-t1031b（阴性轮摘驯服分流时 b 须恒绿 = 恰 a 红律）。
+    {
+        auto flatRig1031 = [](World &w) {
+            w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(31);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) w.setBlock(x, 84, z, BR::Stone, 0);
+        };
+        auto pump1031 = [](int ms) { // placeBlock 200ms 冷却（墙钟；t949/t1030b 同式）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        auto rightPress1031 = [](QQuickWindow &win) {
+            QMouseEvent press(QEvent::MouseButtonPress, QPointF(64.0, 64.0), QPointF(64.0, 64.0),
+                              Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            return QCoreApplication::sendEvent(&win, &press);
+        };
+        // 瞄 (mx,mz) 格 mob 中心：眼 (mx+0.5, 86.62, mz+3) → 距 2.74 < kReach 5（t949 aimRig 同式）。
+        //   itemId>0 时置持物槽；空手传 0（驯服坐站 / 空拳攻击路径）。
+        auto aimMob1031 = [](PlayerController &pc, World &w, EntityManager &em, Hotbar &hb,
+                             int mx, int mz, int itemId, int itemCount) {
+            pc.setWorld(&w);
+            pc.setEntityManager(&em);
+            pc.setHotbar(&hb);
+            pc.setSelectedBlock(BR::Air); // 材料段/空手 selectedBlock 归 Air 建模（t1030 教训：阴性轮兜底）
+            if (itemId > 0) hb.setStack(0, itemId, itemCount, 0);
+            hb.setSelectedSlot(0);
+            const QVector3D eye(float(mx) + 0.5f, 86.62f, float(mz) + 3.0f);
+            const QVector3D dir = (QVector3D(float(mx) + 0.5f, 85.5f, float(mz) + 0.5f) - eye).normalized();
+            pc.loadSavedState(eye.x(), 85.0f, eye.z(),
+                              qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                              qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+        };
+        QQuickWindow win1031;
+
+        // (a1)(a2)(a3) 同狼递进 rig。
+        bool okA = true;
+        int wolfA = -1;
+        {
+            bool failedTame = false, tamed = false, heartGone = false;
+            bool sitOn = false, sitOff = false, bonesHeld = false;
+            World wa;
+            flatRig1031(wa);
+            EntityManager ema;
+            Hotbar hba;
+            PlayerController pca;
+            pca.setParentItem(win1031.contentItem());
+            pca.grab();
+            wolfA = ema.spawnMobTyped(20, 85, 22, EntityManager::MobWolf,
+                                      QStringLiteral("#c8ccd4"), 10);
+            const int wolf = wolfA;
+            if (wolf >= 0) {
+                // (a1) 必败：缝 999 → 骨头恰耗 1、不驯、无爱心沿。
+                ema.setTameRollOverride(999);
+                aimMob1031(pca, wa, ema, hba, 20, 22, RecipeRegistry::BoneId, 64);
+                rightPress1031(win1031);
+                failedTame = !ema.wolfTamedAt(wolf) && hba.countAt(0) == 63 && !ema.inLoveAt(wolf);
+                // (a2) 必成：缝 0 → 驯服 + 爱心沿 + 再耗 1；5.5s 后收心（kTameHeartDuration 4s）。
+                ema.setTameRollOverride(0);
+                pump1031(210);
+                rightPress1031(win1031);
+                tamed = ema.wolfTamedAt(wolf) && ema.inLoveAt(wolf) && hba.countAt(0) == 62;
+                for (int t = 0; t < 344; ++t) // 5.5s > 4s（t831 同式衰减窗）
+                    ema.tick(0.016f, &wa, QVector3D(22.5f, 86.0f, 22.5f), 0.3f, 1.8f, true);
+                heartGone = !ema.inLoveAt(wolf);
+                ema.setTameRollOverride(-1); // 缝复位（后续腿走生产缺省路径）
+                // (a3) 坐/站两向（空手右键；骨头已耗尽无关——分支判据 heldItemId==0）。
+                hba.setStack(0, 0, 0, 0); // 清持物（空手）
+                pump1031(210);
+                rightPress1031(win1031);
+                sitOn = ema.wolfSittingAt(wolf);
+                pump1031(210);
+                rightPress1031(win1031);
+                sitOff = !ema.wolfSittingAt(wolf);
+                bonesHeld = hba.countAt(0) == 0; // 空手切换零消耗（槽已空，不被误扣）
+            } else {
+                failedTame = tamed = heartGone = sitOn = sitOff = false;
+            }
+            pca.release();
+            okA = wolfA >= 0 && failedTame && tamed && heartGone && sitOn && sitOff && bonesHeld;
+            if (!okA)
+                qInfo().noquote() << "  [t1031a diag] fail=" << failedTame << "tamed=" << tamed
+                                  << "heartGone=" << heartGone << "sitOn=" << sitOn
+                                  << "sitOff=" << sitOff << "bonesHeld=" << bonesHeld;
+        }
+
+        // (a4) 参战腿（真攻击链 → t480 接线；驯服走缝直调——阴性轮摘骨头分流本腿恒绿）。
+        bool assisted = false;
+        {
+            World wc;
+            flatRig1031(wc);
+            EntityManager emc;
+            emc.setWanderFrozen(true); // 静止僵尸（狼防御/跟随不走 aiWander，冻结不波及狼追击）
+            Hotbar hbc;
+            PlayerController pcc;
+            pcc.setParentItem(win1031.contentItem());
+            pcc.grab();
+            const int wolf = emc.spawnMobTyped(16, 85, 22, EntityManager::MobWolf,
+                                               QStringLiteral("#c8ccd4"), 10);
+            emc.setTameRollOverride(0);
+            const bool pre = wolf >= 0 && emc.tameWolf(wolf);
+            emc.setTameRollOverride(-1);
+            const int zombie = emc.spawnMobTyped(20, 85, 22, EntityManager::MobShambler,
+                                                 QStringLiteral("#4a6a3a"), 20);
+            aimMob1031(pcc, wc, emc, hbc, 20, 22, 0, 0); // 空手瞄僵尸（眼距 2.74；狼 (16.5,22.5) 离射线）
+            pcc.beginMining(); // attackMob 唯一生产入口（t866/t242）→ damageEntity(1) + setWolfTarget
+            const int hpAfterPlayer = emc.healthAt(zombie);
+            float minDz = 1e9f;
+            for (int t = 0; t < 1250 && !assisted; ++t) { // 20s 事件帽（t988 同式）
+                emc.tick(0.016f, &wc, QVector3D(20.5f, 86.0f, 25.5f), 0.3f, 1.8f, false);
+                const QVector3D pw = emc.posAt(wolf), pz = emc.posAt(zombie);
+                minDz = std::min(minDz, QVector3D(pw.x() - pz.x(), 0.0f, pw.z() - pz.z()).length());
+                if (emc.healthAt(zombie) < hpAfterPlayer && minDz <= 1.7f)
+                    assisted = pre && hpAfterPlayer < 20; // 玩家空手一击先落地，狼咬再掉血 = 参战
+            }
+            pcc.release();
+            if (!assisted)
+                qInfo().noquote() << "  [t1031a diag] pre=" << pre << "hpPlayer=" << hpAfterPlayer
+                                  << "hpEnd=" << emc.healthAt(zombie) << "minDz=" << minDz;
+        }
+
+        // (a5) 野狼中立腿（t1031 收口面）。
+        bool neutral = false;
+        {
+            World wd;
+            flatRig1031(wd);
+            EntityManager emd;
+            emd.setWanderFrozen(true); // 钉位（游荡噪声归零；旧敌对 chase 不受冻结影响 = 敏感性保留）
+            const int wolf = emd.spawnMobTyped(22, 85, 22, EntityManager::MobWolf,
+                                               QStringLiteral("#c8ccd4"), 10);
+            int bites = 0;
+            QObject::connect(&emd, &EntityManager::mobAttackedPlayer,
+                             [&bites](int, int, float, float) { ++bites; });
+            for (int t = 0; t < 375; ++t) // 6s（旧口径咬击冷却 1s → ≥5 口签名，充分可辨）
+                emd.tick(0.016f, &wd, QVector3D(19.5f, 86.0f, 22.5f), 0.3f, 1.8f, true, false);
+            const QVector3D pw = emd.posAt(wolf);
+            neutral = wolf >= 0 && bites == 0 && pw.x() == 22.5f && pw.z() == 22.5f
+                   && !emd.wolfTamedAt(wolf);
+            if (!neutral)
+                qInfo().noquote() << "  [t1031a diag] bites=" << bites << "pos=" << pw;
+        }
+
+        bool ok = okA && assisted && neutral;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1031a wolf taming real-chain behavior: seam-pinned MUST-FAIL bone "
+                             "attempt consumes exactly one bone and stays wild with no heart, "
+                             "seam-pinned MUST-TAME attempt flips wolfTamed with the heart edge "
+                             "(decayed after the 4s window), the empty-hand right-click toggles "
+                             "sit then stand both ways with zero consumption (bone is a no-op on "
+                             "a tamed wolf, t878 caliber), the player's real attack chain hands "
+                             "the struck mob to the tamed wolf (assist bite lands past the "
+                             "player's own hit, min wolf-zombie gap within the bite band), and "
+                             "a wild wolf near a survival player stays put with ZERO "
+                             "mobAttackedPlayer over 6s (t1031 neutral caliber; wander frozen "
+                             "for determinism, the old hostile chase ignored the freeze so the "
+                             "leg is regression-sensitive)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag a=%1 assist=%2 neutral=%3")
+                                       .arg(okA).arg(assisted).arg(neutral));
+    }
+
+    // ── P-t1031b 狼驯服边界 + 接线源钉（R19.22 t1031；pinSet 剥注释，套件纪律勿裸 contains）──
+    //    (b1) 骨头右键非狼不耗（真 placeBlock 链）：持骨瞄猪 press → 骨头 64 不变（骨头分支对非狼
+    //         不消耗不放置；selectedBlock 显式建模 Air = 阴性轮 fall-through 兜底，t1030b 同式）；
+    //    (b2) 空手右键野狼不驯不坐：press → wolfTamedAt/wolfSittingAt 恒假（驯服只走骨头、坐站只走
+    //         驯服后空手；野狼右键无反应，机制等价 MC 只有驯服狼可命令）；
+    //    (b3) 缝缺省零调用（源面）：setter / 驯服样本接管语句 / 头文件声明 / 缺省 -1 成员 pinSet 在位 +
+    //         playercontroller.cpp 全文不含 setTameRollOverride（生产路径零调用——阴性轮不触缝，本组恒绿）；
+    //    (b4) 接线语句本体（阴性轮只摘**驯服尝试段**，以下各钉字面在位 = 恰 P-t1031a 红律）：骨头分支
+    //         判据、空手坐站切换语句、attackMob 参战接线语句、aiWolf 中立门（Q_UNUSED 退役形参）。
+    {
+        bool ok = true;
+        // (b1) 骨头 + 猪（非狼）→ 不消耗。
+        bool pigUntouched = false;
+        {
+            World wb;
+            auto flatRigB = [&]() {
+                wb.setWidth(44); wb.setDepth(44); wb.setHeight(96); wb.setSeed(32);
+                for (int x = 2; x < 42; ++x)
+                    for (int z = 2; z < 42; ++z) wb.setBlock(x, 84, z, BR::Stone, 0);
+            };
+            flatRigB();
+            EntityManager emb;
+            Hotbar hbb;
+            PlayerController pcb;
+            pcb.setSelectedBlock(BR::Air); // 材料段物品 selectedBlock 归 Air 建模（阴性轮兜底，t1030b 同式）
+            QQuickWindow winB;
+            pcb.setParentItem(winB.contentItem());
+            const auto aimB = [&](int mx, int mz, int itemId, int itemCount) {
+                pcb.setWorld(&wb);
+                pcb.setEntityManager(&emb);
+                pcb.setHotbar(&hbb);
+                if (itemId > 0) hbb.setStack(0, itemId, itemCount, 0);
+                hbb.setSelectedSlot(0);
+                const QVector3D eye(float(mx) + 0.5f, 86.62f, float(mz) + 3.0f);
+                const QVector3D dir = (QVector3D(float(mx) + 0.5f, 85.5f, float(mz) + 0.5f) - eye).normalized();
+                pcb.loadSavedState(eye.x(), 85.0f, eye.z(),
+                                   qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                                   qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+            };
+            pcb.grab();
+            const int pig = emb.spawnMobTyped(20, 85, 22, EntityManager::MobPig,
+                                              QStringLiteral("#e8a0a0"), 10);
+            aimB(20, 22, RecipeRegistry::BoneId, 64);
+            QMouseEvent pressB(QEvent::MouseButtonPress, QPointF(64.0, 64.0), QPointF(64.0, 64.0),
+                               Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(&winB, &pressB);
+            pigUntouched = pig >= 0 && hbb.countAt(0) == 64 && !emb.wolfTamedAt(pig);
+            pcb.release();
+            winB.deleteLater();
+        }
+        // (b2) 空手 + 野狼 → 不驯不坐。
+        bool wildUntouched = false;
+        {
+            World wc;
+            wc.setWidth(44); wc.setDepth(44); wc.setHeight(96); wc.setSeed(33);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wc.setBlock(x, 84, z, BR::Stone, 0);
+            EntityManager emc;
+            Hotbar hbc;
+            PlayerController pcc;
+            pcc.setSelectedBlock(BR::Air);
+            QQuickWindow winC;
+            pcc.setParentItem(winC.contentItem());
+            pcc.setWorld(&wc);
+            pcc.setEntityManager(&emc);
+            pcc.setHotbar(&hbc); // 槽保持空（heldItemId==0）
+            hbc.setSelectedSlot(0);
+            const QVector3D eye(20.5f, 86.62f, 25.0f);
+            const QVector3D dir = (QVector3D(20.5f, 85.5f, 22.5f) - eye).normalized();
+            pcc.loadSavedState(eye.x(), 85.0f, eye.z(),
+                               qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                               qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+            pcc.grab();
+            const int wolf = emc.spawnMobTyped(20, 85, 22, EntityManager::MobWolf,
+                                               QStringLiteral("#c8ccd4"), 10);
+            QMouseEvent pressC(QEvent::MouseButtonPress, QPointF(64.0, 64.0), QPointF(64.0, 64.0),
+                               Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(&winC, &pressC);
+            wildUntouched = wolf >= 0 && !emc.wolfTamedAt(wolf) && !emc.wolfSittingAt(wolf);
+            pcc.release();
+            winC.deleteLater();
+        }
+        // (b3)(b4) 源钉（pinSet 剥注释）。
+        const QString exeDirB1031 = QCoreApplication::applicationDirPath();
+        const QString rootB1031 = QDir(exeDirB1031 + QStringLiteral("/..")).absolutePath();
+        QStringList missB1031;
+        missB1031 << pinSet(rootB1031 + QStringLiteral("/src/Entities/entitymanager.cpp"), {
+            {"cpp-tame-roll-setter", "void EntityManager::setTameRollOverride(int roll)"},
+            {"cpp-tame-roll-consume", "const double roll = m_tameRollOverride >= 0"},
+            {"cpp-wolf-neutral-gate", "Q_UNUSED(playerTargetable)"},
+        });
+        missB1031 << pinSet(rootB1031 + QStringLiteral("/src/Entities/entitymanager.h"), {
+            {"hdr-tame-roll-decl", "Q_INVOKABLE void setTameRollOverride(int roll);"},
+            {"hdr-tame-roll-default", "int m_tameRollOverride = -1;"},
+        });
+        missB1031 << pinSet(rootB1031 + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-bone-branch-pred", "heldItemId == RecipeRegistry::BoneId"},
+            {"cpp-wolf-sit-toggle", "m_entityManager->toggleWolfSit(mobIdx);"},
+            {"cpp-wolf-assist-wire", "m_entityManager->setWolfTarget(entityIndex);"},
+        });
+        QFile pcB1031(rootB1031 + QStringLiteral("/src/Game/playercontroller.cpp"));
+        const bool noGameCaller = !pcB1031.open(QIODevice::ReadOnly)
+            || !QString::fromUtf8(pcB1031.readAll()).contains(QStringLiteral("setTameRollOverride"));
+        const bool pinsOkB1031 = missB1031.isEmpty() && noGameCaller;
+        if (!pinsOkB1031)
+            qInfo().noquote() << "  [t1031b diag] pig=" << pigUntouched << "wild=" << wildUntouched
+                              << "noCaller=" << noGameCaller
+                              << "miss=" << missB1031.join(QLatin1Char(','));
+        ok = pigUntouched && wildUntouched && pinsOkB1031;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1031b wolf taming boundaries + wiring source pins: a bone "
+                             "right-click on a non-wolf (pig) consumes nothing through the real "
+                             "placeBlock chain, an empty-hand right-click on a wild wolf neither "
+                             "tames nor sits it (taming is bone-only, commands are tame-only, MC "
+                             "caliber), the tame-roll seam is default-off with zero production "
+                             "callers (setter + sample-takeover + header decl + default -1 pinned, "
+                             "playercontroller contains no reference), and the wiring statements "
+                             "are comment-immune pinned: the bone branch predicate, the empty-hand "
+                             "sit-toggle call, the attackMob assist wire and the retired "
+                             "playerTargetable neutral gate"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag pig=%1 wild=%2 pins=%3")
+                                       .arg(pigUntouched).arg(wildUntouched).arg(pinsOkB1031));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
