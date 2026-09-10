@@ -1045,6 +1045,16 @@ signals:
     //   entityManager.spawnPrimedTnt，复用既有机关点火链——机制同 t490 右键机关：先清 TNT 方块再生
     //   引燃态实体，防 1.5 格叠加）。分层（PLAN §2）：同 blockDroppedAsItem 模式。
     void powerTntTriggered(int x, int y, int z);
+    // t1033 床方块被**非玩家路径**销毁（爆炸：destroySphereSilent 末尾收口——TNT detonateTntSphere /
+    //   苦力怕 detonateStalker 两爆炸入口共用本函数 = 一处覆盖）。携被毁床格世界坐标 + 被毁前 state
+    //   （setBlock(Air) 前 capture——id 变更重置 state=0，同门 t134 lessons-learned；上层据此经
+    //   bedPartnerOffset 解配对半，判定「毁的是否锚床任一半」）。玩家挖掘路径不走本信号（finishMiningAt
+    //   自有锚失效链，t1024；两链同汇 clearBedSpawn 单点，不双播报）。自然路径口径登记：岩浆/火不毁床
+    //   （flammable() 单一权威表不含床——焚毁路径不存在）；水冲清单 isAttachableBlock 不含床（床非附着块，
+    //   水冲不触）；世界换代清锚走 seedChanged 既有链（t1024，刻意静默不播报）。分层（PLAN §2）：World
+    //   低层只发语义事件，不反向依赖 Game —— 消费端 PlayerController（seedChanged 收口同款：setWorld 内
+    //   UniqueConnection 直连）判锚后 clearBedSpawn + bedSpawnLost（t1024 既有播报面自动生效，不新增播报）。
+    void blockDestroyedBed(int x, int y, int z, int state);
     // t658 发射器 / 投掷器被红石电力触发（通电上升沿）。呈现层（Main.qml）转发 player.fireDispenserAtQml
     //   （PlayerController 暴露的 QML 入口 → fireDispenserAt，per-dispenser 冷却 / state 朝向 / 库存分派
     //   全复用既有机关触发链——「与既有机关触发并存」的收口点）。方向 = 机器 state 朝向（单一方向源 t608）。

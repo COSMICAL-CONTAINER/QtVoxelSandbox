@@ -2736,6 +2736,10 @@ void World::tickLeafDecay()
 std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, int cz, float radius)
 {
     std::vector<DestroyedVoxel> destroyed;
+    // t1033 被毁床登记（state 须在 setBlock(Air) 前 capture——id 变更重置 state=0，同门 t134；
+    //   语义信号见 world.h signals 注释，末尾统一 emit，同本函数 N 写 1 emit 批量口径）。
+    struct BedCellHit { int x, y, z; quint8 state; };
+    std::vector<BedCellHit> destroyedBeds;
     if (radius <= 0.0f || m_width <= 0 || m_depth <= 0 || m_height <= 0) return destroyed;
     const int r = int(std::ceil(radius));
     const float r2 = radius * radius;
@@ -2753,6 +2757,8 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
                     || b == BlockRegistry::Obsidian)
                     continue; // 空气 / 基岩 / 水 / 黑曜石不破坏（机制等价 MC 爆炸：不毁水体、不破基岩；
                               //   t472 黑曜石爆炸抗性 6000 → 免疫 Stalker/TNT 爆炸，spec「blast-resistant」）
+                if (BlockRegistry::isBed(b))
+                    destroyedBeds.push_back({bx, by, bz, m_chunks.stateAt(bx, by, bz)}); // t1033：毁前 capture
                 m_chunks.setBlock(bx, by, bz, BlockRegistry::Air); // 直写 + 标脏（含跨 chunk 边界邻接脏），不 emit
                 destroyed.push_back({bx, by, bz, b});
                 if (!any) { minX = maxX = bx; minY = maxY = by; minZ = maxZ = bz; any = true; }
@@ -2810,6 +2816,10 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     }
     emit worldChanged();
     m_chunks.clearAllDirty();
+    // t1033：被毁床逐格语义事件（携毁前 state；消费端 PlayerController 判锚床 → clearBedSpawn +
+    //   bedSpawnLost，见 world.h signals 注释）。世界写入已收口后才发（消费者只见终态，零重入面）。
+    for (const BedCellHit &bd : destroyedBeds)
+        emit blockDestroyedBed(bd.x, bd.y, bd.z, int(bd.state));
     qInfo("vo.edit: explosion destroyed = %d (center %d,%d,%d r=%g)",
           int(destroyed.size()), cx, cy, cz, double(radius)); // 可观测：一次爆炸的破坏块数
     return destroyed;

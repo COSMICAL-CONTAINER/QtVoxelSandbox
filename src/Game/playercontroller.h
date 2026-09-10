@@ -1355,6 +1355,15 @@ private:
     //   上先行采用过出生列（m_spawnPos 已改写非 pristine）→ enterWorld 换真种子重生时旧坐标误用。床位
     //   重生不跨世界（存档不持久化床位，同既有语义）→ 换代即复位无行为回归。只改内存态 + emit，零栅格写。
     void onWorldSeedChanged();
+    // t1033 爆炸等非玩家路径毁床 → 锚失效（World::blockDestroyedBed 语义事件收口；seedChanged 同款
+    //   setWorld 内 UniqueConnection 直连）。判等谓词与 finishMiningAt 床分支逐字同构：y 同层 ∧
+    //   （被毁格 == 锚格 ∨ 其配对半 == 锚格）——配对偏移解自**被毁前** state（World 毁前 capture 随信号
+    //   携行，bedPartnerOffset 单一权威）。命中 → clearBedSpawn 单点收口 + bedSpawnLost（t1024 既有
+    //   播报面）。两半同爆炸毁 → 双信号：首发清锚翻假、次发 !m_bedSpawnValid 早退 → 播报恰一次（玩家
+    //   挖掘链 + 爆炸链双路径汇入同一收口，不双播报）。未设锚 / 非锚床 → 早退零 emit（幂等面）。
+    //   分层（PLAN §2）：信号方向 World→PlayerController 同 seedChanged（World 只发语义事件零反向
+    //   依赖）；PlayerController 是唯一同时持 World* 与床锚态的对象，收口在此不涉 QML 转发。
+    void onWorldBedBlockDestroyed(int x, int y, int z, int state);
 
     World *m_world = nullptr;
     Hotbar *m_hotbar = nullptr;                  // 拾取 addStack / 丢弃 takeStack 的栈操作目标（Q_PROPERTY 绑定）
