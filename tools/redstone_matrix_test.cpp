@@ -43884,6 +43884,281 @@ Item {
                                         .arg(recOk).arg(negOk).arg(pinsOkC));
     }
 
+    // ── P-t1030a 骨粉合成数量 + 右键催熟行为链（R19.22 t1030；真玩家路径 placeBlock + Hotbar 消耗）──
+    //   盘点回标：功能本体 t447（BonemealId 0x232 注册 / 1 骨头→3 骨粉 shapeless 配方）/ t791
+    //   （World::applyBonemeal 统一入口 +2..3 阶段）既已交付，t791 探针为 World 层直调锁数值分布；
+    //   本探针补 Game 层行为链（合成数量契约 / placeBlock 分流消耗 / 创造豁免 / 封顶与成熟口径）：
+    //   (a) 合成：1 骨头 shapeless 单放 → 3 骨粉（2×2 背包栏与 3×3 工作台同命中，MC bone→3 bone meal
+    //       1:3 产出比）；2 骨头多重集无配方（阴性）。
+    //   (b) 生存催熟（真 placeBlock 链）：持骨粉右键 WheatCrop（方块 25，state=阶段 0..7）→ 每次推进
+    //       恰在 +2..+3 带内（钳顶步 after==7 例外）+ 槽内恰 -1 + id 不漂移；从 stage 2 连施到封顶
+    //       用次 ∈ {2,3}（数学保证与骰子分布无关：每步 ≥2 → 最多 3 步，存在 +3 → 最少 2 步）；封顶后
+    //       再施 = 登记口径「无效应不消耗」（world.cpp applyBonemeal 对 st>=WheatCropStageMax 返
+    //       false → playercontroller 不耗不挥；MC 亦可为「消耗无生长」，本工程选不消耗并钉死）。
+    //   (c) 创造催熟：同链 Creative 模式 → 阶段照常推进而槽内恒定（创造不耗，本工程创造口径先例：
+    //       同种子 / 蛋 / 桶消耗豁免模式）。
+    //   骰子确定性分布（hashVoxel(seed⊕使用序号×φ)）已由 t791 探针锁定；催熟为瞬时 use，无挖掘 /
+    //   进度 tick 链 → 无 busy-wait 依赖（t1022/t1026 的 dt 坑不适用）。阴性轮敏感：playercontroller.cpp
+    //   骨粉分流判据恒假化（false && 前缀，Edit 反向 restore）→ (b)(c) 全红（阶段不推、count 不动），
+    //   (a) 配方腿与 P-t1030b 的 pins 不受影响（world.cpp / recipe 层未动）→ 恰 P-t1030a 红。
+    {
+        bool ok = true;
+        const int B = RecipeRegistry::BoneId, M = RecipeRegistry::BonemealId;
+        // (a) 配方数量：2×2 背包栏 + 3×3 工作台单放均 1 骨头 → 3 骨粉（shapeless）；2 骨头无配方。
+        const int g2A[4] = { B, 0, 0, 0 };
+        const int g3A[9] = { B, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const int g2twoA[4] = { B, B, 0, 0 };
+        const auto mealAtA = [](const int *g, int n) -> const RecipeRegistry::Recipe * {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(g, n);
+            return (r && r->outputId == RecipeRegistry::BonemealId && r->outputCount == 3 && r->shapeless)
+                       ? r : nullptr;
+        };
+        const bool recOkA = mealAtA(g2A, 2) != nullptr && mealAtA(g3A, 3) != nullptr
+            && RecipeRegistry::match(g2twoA, 2) == nullptr;
+        if (!recOkA)
+            qInfo().noquote() << "  [t1030a diag] recipe g2" << (mealAtA(g2A, 2) != nullptr)
+                              << "g3" << (mealAtA(g3A, 3) != nullptr)
+                              << "twoBoneNeg" << (RecipeRegistry::match(g2twoA, 2) == nullptr);
+        // rig：40×40×32 seed 10301（t1026a 净空纪律：石板地板 + 工作带显式清空 → 天光满）。
+        World wA;
+        wA.setWidth(40);
+        wA.setDepth(40);
+        wA.setHeight(32);
+        wA.setSeed(10301);
+        for (int x = 4; x <= 35; ++x)
+            for (int z = 10; z <= 22; ++z) {
+                wA.setBlock(x, 15, z, BR::Stone, 0);
+                for (int y = 16; y <= 31; ++y) wA.setBlock(x, y, z, BR::Air, 0);
+            }
+        Hotbar hbA;
+        PlayerController pcA; // t814 真消费端模式（无窗口直造；挂窗 grab 载体同 P-t945/t1026a/t1028b）
+        pcA.setWorld(&wA);
+        pcA.setHotbar(&hbA);
+        // 显式建模真实游戏的 selectedBlock 接线（Main.qml `selectedBlock: hotbarVM.selectedBlockId` →
+        //   Hotbar::selectedBlockId 材料段→Air）：探针无 QML 绑定，m_selectedBlock 会保持构造默认 Stone
+        //   ——阴性轮摘骨粉分流时 fall-through 走通用放置路径（放默认方块 + 扣选中栈）污染计数断言。
+        //   本探针全部腿持骨粉（材料段 → 恒 Air）→ 构造后设一次即可。
+        pcA.setSelectedBlock(BR::Air);
+        QQuickWindow winA;
+        pcA.setParentItem(winA.contentItem());
+        pcA.grab();
+        // 瞄准帮手（t1026a 同款：re-grab 光标归零 → loadSavedState 定向 + 模式 → tick 刷射线）。
+        const auto aimA = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ, int mode) {
+            const float ex = feetX, ey = 16.0f + 1.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcA.release();
+            pcA.grab();
+            pcA.loadSavedState(feetX, 16.0f, feetZ, yaw, pitch, mode);
+            pcA.tick();
+            return pcA.hitBlock();
+        };
+        const auto pumpMsA = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (b) 生存催熟：W 株 x=12（耕地支撑 + stage2 起始）；持 5 骨粉右键连施到封顶。
+        wA.setBlock(12, 15, 16, BR::Farmland, 0);
+        wA.setBlock(12, 16, 16, BR::WheatCrop, 2);
+        hbA.setStack(0, M, 5);
+        hbA.setSelectedSlot(0);
+        const QVector3D hitWA = aimA(15.5f, 16.5f, 12.5f, 16.5f, 16.5f, 2 /* Survival */);
+        int usedA = 0, badStepA = -1, badDeltaA = 0, badCntA = 0;
+        while (wA.stateAt(12, 16, 16) < BR::WheatCropStageMax && usedA < 5) {
+            const int before = wA.stateAt(12, 16, 16);
+            const int cntBefore = hbA.countAt(0);
+            pcA.placeBlock();
+            pumpMsA(260);
+            ++usedA;
+            const int after = wA.stateAt(12, 16, 16);
+            const int d = after - before;
+            // 推进带 +2..+3（钳顶步 after==7 合法）+ 生存恰耗 1 + id 不漂移。
+            if ((d != 2 && d != 3 && after != BR::WheatCropStageMax)
+                || hbA.countAt(0) != cntBefore - 1
+                || wA.blockAt(12, 16, 16) != BR::WheatCrop) {
+                badStepA = usedA;
+                badDeltaA = d;
+                badCntA = cntBefore - hbA.countAt(0);
+                break;
+            }
+        }
+        const bool growOkA = hitWA == QVector3D(12, 16, 16)
+            && wA.stateAt(12, 16, 16) == BR::WheatCropStageMax
+            && usedA >= 2 && usedA <= 3 && badStepA < 0;
+        if (!growOkA)
+            qInfo().noquote() << "  [t1030a diag] grow hit" << hitWA << "stage"
+                              << wA.stateAt(12, 16, 16) << "used" << usedA
+                              << "badStep" << badStepA << "badDelta" << badDeltaA
+                              << "badCnt" << badCntA << "cnt" << hbA.countAt(0);
+        // 成熟施用（登记口径钉死）：stage==7 再施 → 无效应不消耗（阶段不动、count 不减）。
+        pumpMsA(260);
+        const int cntMatA = hbA.countAt(0);
+        pcA.placeBlock();
+        pumpMsA(260);
+        const bool matureOkA = hbA.countAt(0) == cntMatA
+            && wA.stateAt(12, 16, 16) == BR::WheatCropStageMax
+            && wA.blockAt(12, 16, 16) == BR::WheatCrop;
+        if (!matureOkA)
+            qInfo().noquote() << "  [t1030a diag] mature cnt" << hbA.countAt(0) << "was" << cntMatA
+                              << "stage" << wA.stateAt(12, 16, 16);
+        // (c) 创造催熟：C 株 x=20（stage0 起始）Creative 模式连施两次 → 推进照常 + count 恒 3。
+        wA.setBlock(20, 15, 16, BR::Farmland, 0);
+        wA.setBlock(20, 16, 16, BR::WheatCrop, 0);
+        hbA.setStack(0, M, 3);
+        hbA.setSelectedSlot(0);
+        const QVector3D hitCA = aimA(15.5f, 16.5f, 20.5f, 16.5f, 16.5f, 1 /* Creative */);
+        pcA.placeBlock();
+        pumpMsA(260);
+        const int stC1 = wA.stateAt(20, 16, 16);
+        pcA.placeBlock();
+        pumpMsA(260);
+        const int stC2 = wA.stateAt(20, 16, 16);
+        const bool creativeOkA = hitCA == QVector3D(20, 16, 16)
+            && (stC1 == 2 || stC1 == 3)
+            && (stC2 - stC1 == 2 || stC2 - stC1 == 3) // 0 起步两施不可达钳顶（≤3+3=6）
+            && hbA.countAt(0) == 3                    // 创造不消耗
+            && wA.blockAt(20, 16, 16) == BR::WheatCrop;
+        if (!creativeOkA)
+            qInfo().noquote() << "  [t1030a diag] creative hit" << hitCA << "st1" << stC1
+                              << "st2" << stC2 << "cnt" << hbA.countAt(0);
+        pcA.release();
+        winA.deleteLater();
+        ok = recOkA && growOkA && matureOkA && creativeOkA;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1030a bonemeal craft count + right-click growth chain (real player "
+                             "path): one bone crafts 3 bone meal shapeless in both the 2x2 inventory "
+                             "grid and a 3x3 table slot while two bones match nothing; survival "
+                             "right-clicks on an immature wheat crop advance it exactly +2..+3 "
+                             "stages per use (clamp step to stage 7 allowed) consuming exactly one "
+                             "bone meal each time with the id preserved, maturing from stage 2 in "
+                             "2-3 uses; applying to the mature crop is the registered no-effect "
+                             "no-consume caliber (stage held, count held); in creative mode two "
+                             "uses advance the crop identically while the stack stays untouched "
+                             "(negative-round sensitive: playercontroller bonemeal branch "
+                             "deactivation)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag rec=%1 grow=%2 mature=%3 creative=%4")
+                                        .arg(recOkA).arg(growOkA).arg(matureOkA).arg(creativeOkA));
+    }
+
+    // ── P-t1030b 骨粉边界（右键非作物不消耗不响）+ 催熟链源码钉（R19.22 t1030）──
+    //   (a) 边界（真 placeBlock 链）：持骨粉生存右键石头（非作物非生长目标）→ 不消耗 + 目标照旧。
+    //       applyBonemeal 对非三类目标返 false → 不耗不挥（机制等价 MC 骨粉对非生长目标无效应）。
+    //       瞄 +x 侧面进入（眼位 15.62 高于墩顶：瞄 y14.5 才保射线在 x=11 交越时 y≈14.69 已落回
+    //       y14 带、恰命中 y14 石墩侧面；瞄 14.9 会先撞 y15 预置石的侧面）→ y15 预置石封死顶面
+    //       放置格；即使阴性轮摘骨粉分流 fall-through，材料段物品 selectedBlock 归 Air（rig 构造后
+    //       显式建模 QML 绑定，见 pcB.setSelectedBlock）→ 通用放置被 m_selectedBlock==Air 守卫
+    //       （playercontroller.cpp placeBlock 末段）挡下 → 本腿对阴性轮恒绿（恰 a 红律）。
+    //   (b) 源码钉（pinSet 剥注释，套件纪律勿裸 contains）：右键分流判据 + applyBonemeal 统一入口
+    //       调用语句本体（playercontroller.cpp——阴性轮 false && 恒假化后 needle 仍字面在位）、
+    //       applyBonemeal 已熟早退 + 推进语句本体（world.cpp）、推进带常量（world.h）、物品 id 存档
+    //       契约 BoneId=0x217 / BonemealId=0x232（recipe.h；BonemealId 为 t447 时点材料段尾追加，
+    //       后续物品仍只许尾追加不重排）、配方 pattern / 产物行（recipe.cpp）。
+    {
+        bool ok = true;
+        World wB;
+        wB.setWidth(24);
+        wB.setDepth(24);
+        wB.setHeight(24);
+        wB.setSeed(10302);
+        for (int x = 2; x <= 21; ++x)
+            for (int z = 8; z <= 18; ++z) {
+                wB.setBlock(x, 13, z, BR::Stone, 0);
+                for (int y = 14; y <= 22; ++y) wB.setBlock(x, y, z, BR::Air, 0);
+            }
+        // 石墩 y14（边界目标）+ y15 预置石（堵顶面放置格 → 通用放置路径也无格可落）。
+        wB.setBlock(10, 14, 13, BR::Stone, 0);
+        wB.setBlock(10, 15, 13, BR::Stone, 0);
+        Hotbar hbB;
+        PlayerController pcB; // t814 真消费端模式（同 t1030a）
+        pcB.setWorld(&wB);
+        pcB.setHotbar(&hbB);
+        pcB.setSelectedBlock(BR::Air); // 同 t1030a：建模 QML 材料段→Air 接线（阴性轮 fall-through 兜底）
+        QQuickWindow winB;
+        pcB.setParentItem(winB.contentItem());
+        pcB.grab();
+        const auto aimB = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = feetX, ey = 14.0f + 1.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcB.release();
+            pcB.grab();
+            pcB.loadSavedState(feetX, 14.0f, feetZ, yaw, pitch, 2 /* Survival */);
+            pcB.tick();
+            return pcB.hitBlock();
+        };
+        const auto pumpMsB = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        hbB.setStack(0, RecipeRegistry::BonemealId, 4);
+        hbB.setSelectedSlot(0);
+        const QVector3D hitB = aimB(13.5f, 13.5f, 10.5f, 14.5f, 13.5f); // 瞄 y14.5：+x 侧面入（14.9 会先撞 y15 预置石）
+        pcB.placeBlock();
+        pumpMsB(260);
+        const bool edgeOkB = hitB == QVector3D(10, 14, 13)
+            && hbB.countAt(0) == 4 // 非作物不消耗
+            && wB.blockAt(10, 14, 13) == BR::Stone
+            && wB.blockAt(10, 15, 13) == BR::Stone; // 目标与放置格照旧
+        if (!edgeOkB)
+            qInfo().noquote() << "  [t1030b diag] edge hit" << hitB << "cnt" << hbB.countAt(0)
+                              << "id14" << int(wB.blockAt(10, 14, 13))
+                              << "id15" << int(wB.blockAt(10, 15, 13));
+        pcB.release();
+        winB.deleteLater();
+        // (b) 源码钉（pinSet 剥注释；阴性轮摘 playercontroller 骨粉分流判据后各 needle 仍字面在位）。
+        const QString exeDirB = QCoreApplication::applicationDirPath();
+        const QString rootB = QDir(exeDirB + QStringLiteral("/..")).absolutePath();
+        QStringList missB;
+        missB << pinSet(rootB + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-bonemeal-branch", "heldItemId == RecipeRegistry::BonemealId"},
+            {"cpp-bonemeal-entry", "m_world->applyBonemeal(m_hitBx, m_hitBy, m_hitBz)"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/World/world.cpp"), {
+            {"cpp-bonemeal-mature-earlyout", "if (st >= BlockRegistry::WheatCropStageMax) return false;"},
+            {"cpp-bonemeal-advance", "const int advance = kBonemealCropAdvanceMin"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/World/world.h"), {
+            {"hdr-bonemeal-adv-min", "static constexpr int kBonemealCropAdvanceMin = 2;"},
+            {"hdr-bonemeal-adv-max", "static constexpr int kBonemealCropAdvanceMax = 3;"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/Game/recipe.h"), {
+            {"hdr-bone-id-contract", "BoneId       = 0x217;"},
+            {"hdr-bonemeal-id-contract", "BonemealId        = 0x232;"},
+        });
+        missB << pinSet(rootB + QStringLiteral("/src/Game/recipe.cpp"), {
+            {"cpp-bonemeal-pattern", "{ RecipeRegistry::BoneId, 0, 0, 0, 0, 0, 0, 0, 0 },"},
+            {"cpp-bonemeal-output", "RecipeRegistry::BonemealId, 3, 1, \"bone_meal\" },"},
+        });
+        const bool pinsOkB = missB.isEmpty();
+        if (!pinsOkB)
+            qInfo().noquote() << "  [t1030b diag] pin miss:" << missB.join(QLatin1Char(','));
+        ok = edgeOkB && pinsOkB;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1030b bonemeal edge + growth-chain source pins: right-clicking a "
+                             "stone with bone meal held consumes nothing and leaves the target "
+                             "untouched (non-growth target no-effect; the top placement slot is "
+                             "pre-stoned so the leg stays green even with the branch deactivated); "
+                             "source pins lock the bonemeal branch predicate and the applyBonemeal "
+                             "entry call in playercontroller, the mature-earlyout and the +2..3 "
+                             "advance statement in world.cpp, the advance-band constants in "
+                             "world.h, the save-contract item ids BoneId=0x217 and "
+                             "BonemealId=0x232 and the shapeless 1-bone-to-3-meal recipe rows in "
+                             "recipe.cpp"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag edge=%1 pins=%2").arg(edgeOkB).arg(pinsOkB));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
