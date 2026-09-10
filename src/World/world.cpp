@@ -4954,6 +4954,8 @@ bool World::applyBonemeal(int x, int y, int z)
     if (id == BlockRegistry::WheatCrop || id == BlockRegistry::CarrotCrop
         || id == BlockRegistry::PotatoCrop) {
         if (st >= BlockRegistry::WheatCropStageMax) return false; // 已成熟 → 无效应不消耗（MC 同）
+        //    t1030 登记口径：成熟施用二选一取「无效应不消耗」，非 MC 观感的「消耗无生长」；
+        //    P-t1030a 成熟腿行为级钉死——阶段与槽计数俱不动。
         const int advance = kBonemealCropAdvanceMin
             + int((roll >> 8) % quint32(kBonemealCropAdvanceMax - kBonemealCropAdvanceMin + 1));
         const int newSt = std::min(int(st) + advance, int(BlockRegistry::WheatCropStageMax));
