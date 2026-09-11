@@ -45053,6 +45053,321 @@ Item {
                                        .arg(pigUntouched).arg(wildUntouched).arg(pinsOkB1031));
     }
 
+    // ── P-t1034a 门 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
+    //    两向：(1) 潜行持方块右键木门 = 放置落命中面邻格（门不开：两半 state bit2 保持 0、doorToggled
+    //    零发——use 被旁路）；(2) 非潜行持方块右键 = 开合照常（use 优先于放置吃掉右键：两半同翻
+    //    bit2=4、doorToggled 恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘门分支
+    //    !sneakPlace 门 → 潜行腿红（潜行右键仍开门 + 门面无放置）+ cpp-door-sneak-gate 钉红；
+    //    非潜行对照腿不受门影响保绿。
+    {
+        World wT34a;
+        wT34a.setWidth(48); wT34a.setDepth(48); wT34a.setHeight(96); wT34a.setSeed(10341);
+        Hotbar hbT34a;
+        PlayerController pcT34a;
+        pcT34a.setWorld(&wT34a);
+        pcT34a.setHotbar(&hbT34a);
+        QQuickWindow winT34a;
+        pcT34a.setParentItem(winT34a.contentItem());
+        // rig：y=14 Planks 地台，y15..20 净空；门 A（z=16，潜行腿）与门 B（z=20，非潜行对照腿）各两格
+        //（下格 state0 + 上格 state8，合态 bit2=0；state bit[1:0]=0 朝 +X → 门板贴 +X 边）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT34a.setBlock(x, y, z, BR::Air, 0);
+                wT34a.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT34a.setBlock(12, 15, 16, BR::WoodDoor, quint8(0)); // 门 A 下格（合）
+        wT34a.setBlock(12, 16, 16, BR::WoodDoor, quint8(8)); // 门 A 上格
+        wT34a.setBlock(12, 15, 20, BR::WoodDoor, quint8(0)); // 门 B 下格（合）
+        wT34a.setBlock(12, 16, 20, BR::WoodDoor, quint8(8)); // 门 B 上格
+        int togglesT34a = 0;
+        bool lastOpenT34a = false;
+        const QMetaObject::Connection cTglA = QObject::connect(
+            &pcT34a, &PlayerController::doorToggled, &pcT34a,
+            [&](bool open) { ++togglesT34a; lastOpenT34a = open; });
+        // 瞄准帮手（t1028b 同款：re-grab 光标归零 → loadSavedState 定向 → tick 刷射线）；玩家站
+        //   地台 y=15（眼 16.62），自 +X 侧瞄门格 +X 面（state0 门板贴 +X 边 → 命中即门板面）。
+        const auto aimT34a = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT34a.release();
+            pcT34a.grab();
+            pcT34a.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT34a.tick();
+            return pcT34a.hitBlock();
+        };
+        const auto pumpT34a = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟，t1028b 同款）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 潜行腿：潜行 + 持木板右键门 A 的 +X 面 → 木板落邻格 (13,15,16)；门 A 两半合态不动 +
+        //     doorToggled 零发（潜行旁路 useBlock，t1034 门）。
+        const QVector3D hitSneakA = aimT34a(16.5f, 12.95f, 15.5f, 16.5f);
+        pcT34a.setKey(Qt::Key_Shift, true);        // 潜行（sneakPlace = m_keys 原始键态，t523 口径）
+        pcT34a.setSelectedBlock(int(BR::Planks));  // 持方块（无 QML 引擎，C++ 直喂 selectedBlock，t1028b 同款）
+        pcT34a.placeBlock();
+        pumpT34a(260);
+        pcT34a.setKey(Qt::Key_Shift, false);
+        const bool okSneakA = hitSneakA == QVector3D(12, 15, 16)
+            && wT34a.blockAt(13, 15, 16) == BR::Planks   // 放置成功（命中面邻格）
+            && wT34a.blockAt(12, 15, 16) == BR::WoodDoor  // 门本体原样
+            && (wT34a.stateAt(12, 15, 16) & 4) == 0       // 下半未开
+            && wT34a.blockAt(12, 16, 16) == BR::WoodDoor
+            && (wT34a.stateAt(12, 16, 16) & 4) == 0       // 上半联动位未翻
+            && togglesT34a == 0;                          // 开合零发（use 未发生）
+        // (2) 非潜行对照腿：仍持木板（不潜行）右键门 B 的 +X 面 → 开合照常（use 分支优先于放置吃掉
+        //     右键）：两半同翻 bit2=4、doorToggled 恰 1 次携 open=true、邻格 (13,15,20) 无放置。
+        pumpT34a(260);
+        const QVector3D hitUseA = aimT34a(20.5f, 12.95f, 15.5f, 20.5f);
+        pcT34a.placeBlock(); // 不潜行（Shift 已松）→ use 照常
+        pumpT34a(260);
+        const bool okUseA = hitUseA == QVector3D(12, 15, 20)
+            && togglesT34a == 1 && lastOpenT34a           // 开合恰一次（门两格同翻只发一次）
+            && (wT34a.stateAt(12, 15, 20) & 4) == 4       // 下半开
+            && (wT34a.stateAt(12, 16, 20) & 4) == 4       // 上半联动开
+            && wT34a.blockAt(13, 15, 20) == BR::Air;      // 无放置（右键被 use 消费）
+        // (3) 源钉（pinSet 剥注释；阴性轮摘门即红）。
+        const QString rootT34a = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT34a = pinSet(rootT34a + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-door-sneak-gate", "if (!sneakPlace && BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {"},
+        });
+        if (!missT34a.isEmpty())
+            qInfo().noquote() << "  [t1034a diag] pins" << missT34a.join(QLatin1Char(','));
+        QObject::disconnect(cTglA);
+        pcT34a.release();
+        winT34a.deleteLater();
+        const bool okA = okSneakA && okUseA && missT34a.isEmpty();
+        if (!okA)
+            qInfo().noquote() << "  [t1034a diag] hitSneak" << hitSneakA << "hitUse" << hitUseA;
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1034a door sneakPlace bypass: sneaking with a held block and "
+                             "right-clicking a wooden door places the held block on the clicked "
+                             "face's neighbor cell while the door stays shut on both halves with "
+                             "zero doorToggled emissions (use bypassed, MC sneak-use caliber, "
+                             "review0909 #2 legacy cleared); without sneak the right-click still "
+                             "opens the door (both halves flip bit2, exactly one doorToggled(true)) "
+                             "and consumes the click so nothing is placed (negative-round "
+                             "sensitive: door-branch sneakPlace gate removal)"
+                          << (okA ? QString()
+                                  : QStringLiteral("diag sneak=%1 use=%2 pins=%3 toggles=%4")
+                                        .arg(okSneakA).arg(okUseA).arg(missT34a.isEmpty())
+                                        .arg(togglesT34a));
+    }
+
+    // ── P-t1034b 床 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
+    //    两向：(1) 非潜行空手右键床（白天非雷暴）= 入睡链照常触达 → 拒睡文案「只能在夜晚或雷暴中
+    //    睡觉」（trySleepAt 夜/雷暴窗口门的白天分支——契约口径：拒绝文案不算放置失败对照）；
+    //    (2) 潜行持方块右键床 = 放置落命中面邻格（睡链整链不触达：sleepRefused 计数不增长、不入睡、
+    //    床两半原样——MC：潜行右键床=放置，不睡）。门加在 placeBlock 床分支头（先于 trySleepAt 调用），
+    //    夜门/雷暴门/怪物门序一律不被触达。阴性轮敏感（单构建三摘一轮）：摘床分支 !sneakPlace 门 →
+    //    潜行腿红（潜行右键仍走拒睡链：refused 计 +1 且无放置）+ cpp-bed-sneak-gate 钉红；非潜行
+    //    拒睡对照腿不受门影响保绿。
+    {
+        World wT34b;
+        wT34b.setWidth(48); wT34b.setDepth(48); wT34b.setHeight(96); wT34b.setSeed(10342);
+        wT34b.setWeatherState(0); // Clear（白天拒睡对照的确定性前提；review0909 #1 口径）
+        Hotbar hbT34b;
+        WorldClock clockT34b;
+        clockT34b.setPhase(0.2f); // 白天（isNight=false；setPhase 特权指令，t1024a 同款）
+        PlayerController pcT34b;
+        pcT34b.setWorld(&wT34b);
+        pcT34b.setWorldClock(&clockT34b);
+        pcT34b.setHotbar(&hbT34b);
+        QQuickWindow winT34b;
+        pcT34b.setParentItem(winT34b.contentItem());
+        // rig：y=14 Planks 地台，y15..20 净空；床 foot (12,15,16) state0 + head (11,15,16) state8
+        //（D=+X：head 在 foot -X 侧，t1024a 同款摆位）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 20; ++z) {
+                for (int y = 15; y <= 20; ++y) wT34b.setBlock(x, y, z, BR::Air, 0);
+                wT34b.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT34b.setBlock(12, 15, 16, BR::BedWhite, quint8(0)); // foot
+        wT34b.setBlock(11, 15, 16, BR::BedWhite, quint8(8)); // head
+        int refusedT34b = 0;
+        QString lastRefuseT34b;
+        const QMetaObject::Connection cRefB = QObject::connect(
+            &pcT34b, &PlayerController::sleepRefused, &pcT34b,
+            [&refusedT34b, &lastRefuseT34b](const QString &r) { ++refusedT34b; lastRefuseT34b = r; });
+        const auto aimT34b = [&](float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = 16.5f;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT34b.release();
+            pcT34b.grab();
+            pcT34b.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT34b.tick();
+            return pcT34b.hitBlock();
+        };
+        const auto pumpT34b = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 非潜行对照腿：空手不潜行右键床 foot 的 +X 侧面（aim y 15.15 在床垫低盒 y[0,~0.31] 带内
+        //     —— 首跑教训：aim y 15.5 掠过低盒侧沿命中顶面 +Y，放置目标格变床顶格）→ 入睡链照常触达：
+        //     拒睡文案「只能在夜晚或雷暴中睡觉」恰 1 次 + 不入睡 + 邻格无放置（use 语义照常，t388 链回归）。
+        const QVector3D hitUseB = aimT34b(12.95f, 15.15f, 16.5f);
+        pcT34b.setSelectedBlock(int(BR::Air)); // 空手（睡是「使用」语义，与手持何物无关）
+        pcT34b.placeBlock();
+        pumpT34b(260);
+        const bool okUseB = hitUseB == QVector3D(12, 15, 16)
+            && refusedT34b == 1
+            && lastRefuseT34b == QStringLiteral("只能在夜晚或雷暴中睡觉")
+            && !pcT34b.sleeping()
+            && wT34b.blockAt(13, 15, 16) == BR::Air; // 无放置（右键被睡链消费）
+        // (2) 潜行腿：潜行 + 持木板右键床 foot 的 +X 侧面（同 (1) 带内 aim）→ 木板落邻格 (13,15,16)；
+        //     睡链整链不触达：refused 计数保持 1（潜行这一下零新增拒睡）+ 不入睡 + 床两半 id/state 原样。
+        const QVector3D hitSneakB = aimT34b(12.95f, 15.15f, 16.5f);
+        pcT34b.setKey(Qt::Key_Shift, true);        // 潜行（sneakPlace = m_keys 原始键态，t523 口径）
+        pcT34b.setSelectedBlock(int(BR::Planks));  // 持方块（C++ 直喂 selectedBlock，t1028b 同款）
+        pcT34b.placeBlock();
+        pumpT34b(260);
+        pcT34b.setKey(Qt::Key_Shift, false);
+        const bool okSneakB = hitSneakB == QVector3D(12, 15, 16)
+            && refusedT34b == 1                            // 睡链零触达（潜行这一下不拒睡不入睡）
+            && !pcT34b.sleeping()
+            && wT34b.blockAt(13, 15, 16) == BR::Planks     // 放置成功（命中面邻格）
+            && wT34b.blockAt(12, 15, 16) == BR::BedWhite && wT34b.stateAt(12, 15, 16) == 0 // foot 原样
+            && wT34b.blockAt(11, 15, 16) == BR::BedWhite && wT34b.stateAt(11, 15, 16) == 8; // head 原样
+        // (3) 源钉（pinSet 剥注释；阴性轮摘门即红）。
+        const QString rootT34b = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT34b = pinSet(rootT34b + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-bed-sneak-gate", "if (!sneakPlace && BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {"},
+        });
+        if (!missT34b.isEmpty())
+            qInfo().noquote() << "  [t1034b diag] pins" << missT34b.join(QLatin1Char(','));
+        QObject::disconnect(cRefB);
+        pcT34b.release();
+        winT34b.deleteLater();
+        const bool okB = okUseB && okSneakB && missT34b.isEmpty();
+        if (!okB)
+            qInfo().noquote() << "  [t1034b diag] hitUse" << hitUseB << "hitSneak" << hitSneakB
+                              << "refused" << refusedT34b << "msg" << lastRefuseT34b;
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| t1034b bed sneakPlace bypass: a plain empty-hand right-click on the "
+                             "bed by day still reaches the sleep chain and refuses with the exact "
+                             "night-or-thunder message (sleep window intact, MC caliber); "
+                             "sneaking with a held block and right-clicking the bed instead places "
+                             "the block on the clicked face's neighbor cell with the whole sleep "
+                             "chain untouched (refusal count frozen, not sleeping, both bed halves "
+                             "pristine - MC: sneak-use on a bed places, never sleeps; review0909 #2 "
+                             "legacy cleared; negative-round sensitive: bed-branch sneakPlace gate "
+                             "removal re-routes the sneak click into the day refusal)"
+                          << (okB ? QString()
+                                  : QStringLiteral("diag use=%1 sneak=%2 pins=%3 refused=%4")
+                                        .arg(okUseB).arg(okSneakB).arg(missT34b.isEmpty())
+                                        .arg(refusedT34b));
+    }
+
+    // ── P-t1034c 活板门 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
+    //    两向：(1) 潜行持方块右键合态活板门 = 放置落命中面邻格（板不翻：state bit0 保持 0、
+    //    doorToggled 零发——use 被旁路）；(2) 非潜行持方块右键 = 翻板照常（bit0→1、doorToggled
+    //    恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘活板门分支 !sneakPlace 门 → 潜行腿红
+    //    （潜行右键仍翻板 + 板面无放置）+ cpp-trapdoor-sneak-gate 钉红；非潜行对照腿不受门影响保绿。
+    {
+        World wT34c;
+        wT34c.setWidth(48); wT34c.setDepth(48); wT34c.setHeight(96); wT34c.setSeed(10343);
+        Hotbar hbT34c;
+        PlayerController pcT34c;
+        pcT34c.setWorld(&wT34c);
+        pcT34c.setHotbar(&hbT34c);
+        QQuickWindow winT34c;
+        pcT34c.setParentItem(winT34c.contentItem());
+        // rig：y=14 Planks 地台，y15..20 净空；活板门 A（z=16，潜行腿）与 B（z=20，非潜行对照腿）
+        // 各一格合态（state0：贴地水平薄板 y 0..3/16）。自 +X 侧瞄薄板 +X 面（aim y 在薄板带内）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT34c.setBlock(x, y, z, BR::Air, 0);
+                wT34c.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT34c.setBlock(12, 15, 16, BR::WoodTrapdoor, quint8(0)); // A（合）
+        wT34c.setBlock(12, 15, 20, BR::WoodTrapdoor, quint8(0)); // B（合）
+        int togglesT34c = 0;
+        bool lastOpenT34c = false;
+        const QMetaObject::Connection cTglC = QObject::connect(
+            &pcT34c, &PlayerController::doorToggled, &pcT34c,
+            [&](bool open) { ++togglesT34c; lastOpenT34c = open; });
+        const auto aimT34c = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT34c.release();
+            pcT34c.grab();
+            pcT34c.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT34c.tick();
+            return pcT34c.hitBlock();
+        };
+        const auto pumpT34c = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 潜行腿：潜行 + 持木板右键活板门 A 的 +X 面（薄板带内）→ 木板落邻格 (13,15,16)；
+        //     板合态不动（bit0 保持 0）+ doorToggled 零发（潜行旁路 useBlock，t1034 门）。
+        const QVector3D hitSneakC = aimT34c(16.5f, 12.95f, 15.10f, 16.5f);
+        pcT34c.setKey(Qt::Key_Shift, true);        // 潜行（sneakPlace = m_keys 原始键态，t523 口径）
+        pcT34c.setSelectedBlock(int(BR::Planks));  // 持方块（C++ 直喂 selectedBlock，t1028b 同款）
+        pcT34c.placeBlock();
+        pumpT34c(260);
+        pcT34c.setKey(Qt::Key_Shift, false);
+        const bool okSneakC = hitSneakC == QVector3D(12, 15, 16)
+            && wT34c.blockAt(13, 15, 16) == BR::Planks   // 放置成功（命中面邻格）
+            && wT34c.blockAt(12, 15, 16) == BR::WoodTrapdoor
+            && (wT34c.stateAt(12, 15, 16) & 1) == 0      // 板未翻（合态）
+            && togglesT34c == 0;                          // 翻板零发（use 未发生）
+        // (2) 非潜行对照腿：仍持木板（不潜行）右键活板门 B 的 +X 面 → 翻板照常（use 分支优先于放置）：
+        //     bit0→1、doorToggled 恰 1 次携 open=true、邻格 (13,15,20) 无放置。
+        pumpT34c(260);
+        const QVector3D hitUseC = aimT34c(20.5f, 12.95f, 15.10f, 20.5f);
+        pcT34c.placeBlock(); // 不潜行（Shift 已松）→ use 照常
+        pumpT34c(260);
+        const bool okUseC = hitUseC == QVector3D(12, 15, 20)
+            && togglesT34c == 1 && lastOpenT34c           // 翻板恰一次（开）
+            && wT34c.blockAt(12, 15, 20) == BR::WoodTrapdoor
+            && (wT34c.stateAt(12, 15, 20) & 1) == 1       // 板已翻（开态）
+            && wT34c.blockAt(13, 15, 20) == BR::Air;      // 无放置（右键被 use 消费）
+        // (3) 源钉（pinSet 剥注释；阴性轮摘门即红）。
+        const QString rootT34c = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT34c = pinSet(rootT34c + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-trapdoor-sneak-gate", "if (!sneakPlace && hitId == BlockRegistry::WoodTrapdoor) {"},
+        });
+        if (!missT34c.isEmpty())
+            qInfo().noquote() << "  [t1034c diag] pins" << missT34c.join(QLatin1Char(','));
+        QObject::disconnect(cTglC);
+        pcT34c.release();
+        winT34c.deleteLater();
+        const bool okC = okSneakC && okUseC && missT34c.isEmpty();
+        if (!okC)
+            qInfo().noquote() << "  [t1034c diag] hitSneak" << hitSneakC << "hitUse" << hitUseC;
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| t1034c trapdoor sneakPlace bypass: sneaking with a held block and "
+                             "right-clicking a closed trapdoor places the held block on the "
+                             "clicked face's neighbor cell while the trapdoor stays closed (state "
+                             "bit0 untouched, zero doorToggled emissions - use bypassed, MC "
+                             "sneak-use caliber, review0909 #2 legacy cleared); without sneak the "
+                             "right-click still flips the trapdoor open (bit0 set, exactly one "
+                             "doorToggled(true)) and consumes the click so nothing is placed "
+                             "(negative-round sensitive: trapdoor-branch sneakPlace gate removal)"
+                          << (okC ? QString()
+                                  : QStringLiteral("diag sneak=%1 use=%2 pins=%3 toggles=%4")
+                                        .arg(okSneakC).arg(okUseC).arg(missT34c.isEmpty())
+                                        .arg(togglesT34c));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
