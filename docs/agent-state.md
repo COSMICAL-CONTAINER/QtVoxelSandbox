@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1041
+current_task: t1043
 current_task_status: READY
-last_completed_task: t1042 被动型受击惊逃（panic flee MC 原版口径）+ 野狼唯一反击（526→530，阳性一次过；阴性恰红 a/b/c；t1031b 中立门针重钉）
-last_task_closure_commit: （docs 本提交；代码终态见 test(t1042) 提交）
-last_verified_commit: test(t1042)（矩阵 530 PASS / 0 FAIL，matrix_t1042_final.log 权威，binary 与源对齐）
+last_completed_task: t1041 instancing 批 4 收官——工具 3D 族（五几何+弓 per-id 桶 + tier 色 per-instance color + 弓弦 stringPass 双表）+ 工具/材料 billboard 族 + 异形 billboard 族（per-id 贴图桶池选型，禁自定义 shader）全合批（530→534，阳性一次过；阴性轮1 恰红 c、轮2 恰红 a+b+c；t1007 治理路径 a 终点）
+last_task_closure_commit: （docs 本提交；代码终态见 test(t1041) 提交）
+last_verified_commit: test(t1041)（矩阵 534 PASS / 0 FAIL，matrix_t1041_final.log 权威，binary 与源对齐）
 last_governance_review: 2026-09-11（audit #4 GREEN）
 governance_review_due: false
-completed_tasks_since_governance_review: 4
-next_task: t1041（R19.23 执行顺序 t1038✅→t1040✅→t1039✅→t1042✅→t1041 收官；之后 parity bug 波 t1043-t1046（e131797 用户裁决「一切按原版」）→ R19.23 批次 review + audit #5）
-next_task_source: docs/dev-plan.md R19.23 段
+completed_tasks_since_governance_review: 5
+next_task: t1043 铁轨水蚀 + 矿井防水（parity bug 波首单，裁-1；之后 t1044 蜘蛛爬墙 → t1045 耕地退化 → t1046 parity 小修合集 → R19.23 批次 review + audit #5）
+next_task_source: docs/dev-plan.md R19.23 段 + docs/parity-ledger.md 用户裁决
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
@@ -32,9 +32,9 @@ needs_human: false
 
 ## Recovery Point
 
-- 最近闭环：**t1042**（2026-09-12 03:25）：被动型受击惊逃 panic flee（牛/羊/猪/鸡/未驯服豹猫 + 狼幼崽共用；kPanicDuration=8s/kPanicSpeed=2×walk；aiPanicFlee 三消费点置顶压求偶/引诱/幼随/吃草）+ 野狼唯一反击（setWolfProvoked 受击沿写点 chasing=玩家，只在受击沿置位不复活旧「见人就咬」，超时/超距/不可锁定清除同 hostile 收口，咬击 4HP 走 t321 节流）+ 驯服狼零反击维持 + 幼狼恒驯服（t480 继承）受击只惊逃，矩阵 **526→530 PASS / 0 FAIL**（matrix_t1042_final.log 权威），阴性单轮三摘恰红（527/3 = P-t1042a/b/c 惊逃腿，t1042d 针腿恒绿，matrix_t1042_neg.log），voxelsandbox EXIT=0 + 冒烟 EXIT=124 + tail20 留存。**登记**：Q_UNUSED(playerTargetable) 退役 → P-t1031b cpp-wolf-neutral-gate 针重钉为 aiWolf 未驯服分支头（t1031「激怒反击面登记不做」按用户纠正口径清偿）；主人打自家驯服狼时 setWolfTarget 共享目标语义会让其它驯服狼追咬该狼（t480 既有，非本单范围）。
-- 下一最小动作：派 t1041 instancing 批 4 收官（工具 3D 族五几何+tier 色 per-instance color + 工具/材料 billboard 族 per-id 贴图桶 + 异形 billboard 族；盘点 t1039 GlowShellInstancing 第三池先例与 ItemEntityManager 族谓词面；F3 draw call 对比列实机；矩阵基线 530）——之后按 e131797 用户裁决插入 parity bug 波 t1043-t1046，再 R19.23 批次 review + audit #5。
-- 实机确认：R19.23 已闭环 4 项（t1038 书台同相 / t1039 壳观感四项 / t1042 惊逃与狼反击观感）+ R19.22 总表 16 项 + 回归三单（t1005/t1006/t1007）待用户实机数据。
+- 最近闭环：**t1041**（2026-09-12）：掉落物 instancing 批 4 收官（t1007 治理路径 a 终点）——剩余三族全合批：①工具 3D 族（isTool3DDrop 五几何+弓 per-id 桶 × ToolDropInstancing，tier 色×天光 per-instance color〔t1039 先例〕+ 弓弦 stringPass 第二实例表〔t1038 不承载子树先例〕）；②工具/材料 billboard 族 + ③异形 billboard 族（BillboardDropInstancing itemIconFamily 双池单类，per-id 贴图=per-id host 桶池选型〔atlas+UV 需自定义 shader=PLAN §2-A 禁区〕，camPitch/camYaw 进实例表 rotation 朝相机，billboard 不自转）；Main.qml 十分支排除链 + 三新 host（各 8 桶，溢出 delegate 保底）；空转门 t1032 同款两池。矩阵 **530→534 PASS / 0 FAIL**（matrix_t1041_final.log 权威），阴性轮两轮（①摘空转门恰红 533/1=P-t1041c；②摘双 feeder 收纳谓词恰红 531/3=P-t1041a+b+c 谓词感知面），voxelsandbox EXIT=0 + 冒烟 EXIT=124 + tail20 留存。**登记**：钓鱼竿 type8 掉落 delegate 无分支（t803 只补打火石）如实不入族；弓弦-弓身 ms 级相位脱锁=批 1/2/3 已登记接受口径；QML 三 reassign/has* 编排面=headless 盲区，源码钉 P-t1041d 覆盖；rig slot-reuse 槽号教训（拾取沿断言须按 LIFO 复用算槽）。
+- 下一最小动作：派 **t1043 铁轨水蚀 + 矿井防水**（parity bug 波首单，裁-1：Rail 入水毁族 isAttachableBlock 单一权威 + placeMineshaft 生成期防水「水下段不放轨/轨下垫不刷层」最小面盘点；探针=流水毁轨腿+矿井轨 worldgen 防水腿，阴性轮摘生成期防水恰红；矩阵基线 534）——之后 t1044 蜘蛛爬墙 → t1045 耕地退化 → t1046 parity 小修合集 → R19.23 批次 review + audit #5（t1041 收官已达「批次结束」触发条件的一半：还差 parity 波 4 单闭环）。
+- 实机确认：R19.23 已闭环 5 项（t1038 书台同相 / t1039 壳观感四项 / t1042 惊逃与狼反击观感 / **t1041 F3 draw call 对比 + 工具 tier 色/弓弦/billboard 观感六项**）+ R19.22 总表 16 项 + 回归三单（t1005/t1006/t1007）待用户实机数据。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。
 - 若任务完成：更新当前任务、状态、最新 commit、验证结果、任务计数和下一触发点，并与 dev-plan 同一 docs 闭环提交。
 
