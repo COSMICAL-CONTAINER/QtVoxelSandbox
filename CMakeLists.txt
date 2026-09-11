@@ -195,6 +195,11 @@ qt_add_executable(voxelsandbox
     #   向下只读 Game 层 ItemEntityManager + 家族谓词静态权威；t858 同款 Quick3D 公开 API 模式）。
     src/Game/blockdropinstancing.cpp
     src/Game/blockdropinstancing.h
+    # t1039（R19.23）掉落物 instancing 批 3：光晕壳族全族 feeder（UnitCube 半透壳 1 draw/全族；
+    #   per-instance color 承载附魔紫/灰×天光 + 呼吸 opacity 进实例表；槽序前 kShellCap 活体收纳，
+    #   QML delegate 排除侧薄委托同源谓词）。向下只读 ItemEntityManager，同批 1/2 呈现适配器分层。
+    src/Game/glowshellinstancing.cpp
+    src/Game/glowshellinstancing.h
     # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
     src/Entities/entitymanager.cpp
     src/Entities/entitymanager.h
@@ -939,6 +944,10 @@ add_executable(redstone_matrix_test
     #   实例数=活体数 / 拾取-合并-despawn 零扰动）。依赖 itementitymanager（已列）+ blockregistry（已列）。
     src/Game/blockdropinstancing.cpp
     src/Game/blockdropinstancing.h
+    # t1039 掉落物 instancing 批 3 探针：GlowShellInstancing feeder 直调（壳族收纳/实例数/颜色实例表/
+    #   呼吸 alpha/空转门/kShellCap 溢出降级）。依赖 itementitymanager（已列）；Quick3D 公开 API。
+    src/Game/glowshellinstancing.cpp
+    src/Game/glowshellinstancing.h
     # t946 坐姿变换链连续域探针附加：Renderer 层 MobModel 直编（真几何顶点射线剪影断言——t880
     #   ItemShapeGeometry 行为级先例；review24 时「只用头内 constexpr、不链 mobmodel.cpp」的旧注释口径
     #   自本探针起放开为「头 constexpr 静态断言 + 行为级直编并存」）。
