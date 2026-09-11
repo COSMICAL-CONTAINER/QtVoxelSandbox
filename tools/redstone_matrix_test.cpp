@@ -45498,7 +45498,8 @@ Item {
     //    (b3) 缝缺省零调用（源面）：setter / 驯服样本接管语句 / 头文件声明 / 缺省 -1 成员 pinSet 在位 +
     //         playercontroller.cpp 全文不含 setTameRollOverride（生产路径零调用——阴性轮不触缝，本组恒绿）；
     //    (b4) 接线语句本体（阴性轮只摘**驯服尝试段**，以下各钉字面在位 = 恰 P-t1031a 红律）：骨头分支
-    //         判据、空手坐站切换语句、attackMob 参战接线语句、aiWolf 中立门（Q_UNUSED 退役形参）。
+    //         判据、空手坐站切换语句、attackMob 参战接线语句、aiWolf 中立门（t1042 重钉为分支头——
+    //         反击只走受击沿挑逗，不见人就咬）。
     {
         bool ok = true;
         // (b1) 骨头 + 猪（非狼）→ 不消耗。
@@ -45579,7 +45580,9 @@ Item {
         missB1031 << pinSet(rootB1031 + QStringLiteral("/src/Entities/entitymanager.cpp"), {
             {"cpp-tame-roll-setter", "void EntityManager::setTameRollOverride(int roll)"},
             {"cpp-tame-roll-consume", "const double roll = m_tameRollOverride >= 0"},
-            {"cpp-wolf-neutral-gate", "Q_UNUSED(playerTargetable)"},
+            // t1042 重钉：aiWolf 未驯服分支门（旧 Q_UNUSED(playerTargetable) 随 t1042 反击面退役——
+            //   playerTargetable 现由野狼反击锁定门消费，本钉改锚分支头，中立收口语义不变）。
+            {"cpp-wolf-neutral-gate", "if (!e.wolfTamed) {"},
         });
         missB1031 << pinSet(rootB1031 + QStringLiteral("/src/Entities/entitymanager.h"), {
             {"hdr-tame-roll-decl", "Q_INVOKABLE void setTameRollOverride(int roll);"},
@@ -45609,8 +45612,9 @@ Item {
                              "callers (setter + sample-takeover + header decl + default -1 pinned, "
                              "playercontroller contains no reference), and the wiring statements "
                              "are comment-immune pinned: the bone branch predicate, the empty-hand "
-                             "sit-toggle call, the attackMob assist wire and the retired "
-                             "playerTargetable neutral gate"
+                             "sit-toggle call, the attackMob assist wire and the aiWolf wild-wolf "
+                             "branch gate (t1042 re-pin: retaliation fires only via the hit-path "
+                             "provocation, never sight-based)"
                           << (ok ? QString()
                                  : QStringLiteral("diag pig=%1 wild=%2 pins=%3")
                                        .arg(pigUntouched).arg(wildUntouched).arg(pinsOkB1031));
@@ -46042,6 +46046,376 @@ Item {
                              "(raw fish = the taming item source; smelting/hunger caliber already "
                              "pinned by the t836 probes) (negative-round sensitive: aiOcelot "
                              "stand-follow chase removal)";
+    }
+
+    // ── P-t1042a 被动型受击惊逃（R19.23 t1042；MC 原版口径：牛受击只惊逃永不反击）──
+    //    (a1) 受击沿真链：玩家空手 beginMining 命中牛（attackMob 唯一生产入口）→ 扣 1HP 存活 +
+    //         惊逃态置值（panicTimerAt == 8.0 = kPanicDuration「~8s 量级」登记面）；
+    //    (a2) 惊逃位移：3s 内离玩家距离逐 0.5s 窗增益 ≥0.4 且总增益 ≥3.5（panic 2.0 b/s 恒向背离；
+    //         wander 上限 1.0 b/s → 3s 总增益 ≤3.0 不可混同，wander 噪声免疫判据）；
+    //    (a3) 速度带：疾走期 moveSpeed ∈ [1.4,2.6]（陆地 =kPanicSpeed 2.0；>kWalkSpeed=加速游离，
+    //         <kChaseSpeed 2.8=非敌对追击）；
+    //    (a4) 零反击：全程 mobAttackedPlayer 计数 == 0（牛从不成为攻击者）；
+    //    (a5) 超时回落：8.5s 后 panicTimerAt == 0（时长 8s 量级）+ 再 0.7s 后 moveSpeed ≤1.05
+    //         （wander 重掷 idle 0 / kWalkSpeed 1.0；panic 残速 2.0 被选向重掷冲销 = 回落正常游走）。
+    //    阴性轮敏感（单构建三摘一轮：aiPanicFlee 三消费点 false && 前缀）：(a2)/(a3) 恰红 + (a5) 恰红
+    //         （timer 不衰减恒 8.0、零惊逃位移）；(a1)/(a4) 保绿。
+    {
+        World wa;
+        wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1042);
+        for (int x = 2; x < 42; ++x)
+            for (int z = 2; z < 42; ++z) wa.setBlock(x, 84, z, BR::Stone, 0);
+        EntityManager ema;
+        Hotbar hba;
+        PlayerController pca;
+        QQuickWindow winA1042;
+        pca.setParentItem(winA1042.contentItem());
+        pca.grab(); // m_captured（beginMining 入口门，t949 同式）
+        pca.setWorld(&wa);
+        pca.setEntityManager(&ema);
+        pca.setHotbar(&hba); // 槽保持空（heldItemId==0 → 空手 kFistDamage 1）
+        pca.setSelectedBlock(BR::Air); // 材料段/空手 selectedBlock 归 Air 建模（t1030 教训）
+        const int cow = ema.spawnMobTyped(20, 85, 22, EntityManager::MobCow,
+                                          QStringLiteral("#5a4030"), 10);
+        const QVector3D pp(20.5f, 85.0f, 25.0f); // 玩家脚位（牛南方 2.5 格）
+        const QVector3D eye(20.5f, 86.62f, 25.0f);
+        const QVector3D dir = (QVector3D(20.5f, 85.5f, 22.5f) - eye).normalized();
+        pca.loadSavedState(eye.x(), 85.0f, eye.z(),
+                           qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                           qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+        int bites = 0;
+        QObject::connect(&ema, &EntityManager::mobAttackedPlayer,
+                         [&bites](int, int, float, float) { ++bites; });
+        pca.beginMining(); // 受击沿真链（t242/t866）→ damageEntity(1) + knockback + setPanicFlee
+        const bool a1 = cow >= 0 && ema.healthAt(cow) == 9
+                        && std::abs(ema.panicTimerAt(cow) - 8.0f) < 1e-3f;
+        bool a2 = true, a3 = true;
+        float totalGain = 0.0f;
+        const auto dxz = [&pp](const QVector3D &p) {
+            return QVector3D(p.x() - pp.x(), 0.0f, p.z() - pp.z()).length();
+        };
+        float prevD = dxz(ema.posAt(cow));
+        for (int w = 0; w < 6; ++w) { // 3s 惊逃窗（6 × 0.5s）
+            for (int t = 0; t < 31; ++t) ema.tick(0.016f, &wa, pp, 0.3f, 1.8f, true);
+            const float d = dxz(ema.posAt(cow));
+            const float gain = d - prevD;
+            if (gain < 0.4f) a2 = false; // 逐窗背离（panic 1.0/窗；击退窗更高）
+            totalGain += gain;
+            const float ms = ema.moveSpeedAt(cow);
+            if (ms < 1.4f || ms > 2.6f) a3 = false; // 疾走带（陆地 = 2.0）
+            prevD = d;
+        }
+        a2 = a2 && totalGain >= 3.5f; // wander 3s 上限 3.0 → 判据噪声免疫
+        const bool a4 = bites == 0;
+        for (int t = 0; t < 344; ++t) ema.tick(0.016f, &wa, pp, 0.3f, 1.8f, true); // 累计 ~8.5s
+        const bool a5timer = ema.panicTimerAt(cow) == 0.0f;
+        for (int t = 0; t < 44; ++t) ema.tick(0.016f, &wa, pp, 0.3f, 1.8f, true); // 0.7s 回落窗
+        const bool a5 = a5timer && ema.moveSpeedAt(cow) <= 1.05f;
+        pca.release();
+        winA1042.deleteLater();
+        const bool ok = a1 && a2 && a3 && a4 && a5;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1042a passive panic-flee on hit (MC caliber): a bare-fist hit on "
+                             "a cow through the real attackMob chain drops exactly 1 HP and arms "
+                             "the panic state at 8.0s (kPanicDuration registration), the cow then "
+                             "gains >=3.5 blocks of player-distance over 3s with every 0.5s window "
+                             ">=0.4 (monotone away-drift, wander-noise immune since wander caps at "
+                             "3.0) at sprint speed within [1.4,2.6] (2x walk = accelerated flee, "
+                             "below hostile chase band), fires ZERO mobAttackedPlayer (cows never "
+                             "retaliate), and after the 8s window the panic timer is exactly 0 "
+                             "with moveSpeed resettled <=1.05 (wander re-roll: idle or walk; the "
+                             "panic residual speed is consumed) (negative-round sensitive: the "
+                             "three aiPanicFlee consumer gates false&&-prefixed in one build)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag a1=%1 a2=%2(%3) a3=%4 a4=%5 a5=%6(%7)")
+                                       .arg(a1).arg(a2).arg(totalGain).arg(a3).arg(a4)
+                                       .arg(a5).arg(a5timer));
+    }
+
+    // ── P-t1042b 豹猫被打逃逸 + 驯服狼被打零反击对照腿（R19.23 t1042）──
+    //    (b1) 未驯服豹猫受击沿真链命中 → 惊逃态置值 + 3s 离玩家总增益 ≥3.5 + 零 mobAttackedPlayer
+    //         （MC 原版口径：豹猫被打只逃不反击）；
+    //    (b2) 驯服狼（t1031 驯服缝直调）被玩家真链命中 → 零 mobAttackedPlayer（6s）+ 无惊逃态置值 +
+    //         掉血恰 1（驯服狼豁免维持——被打不反击主人，对照腿）。
+    //    阴性轮敏感：摘惊逃消费点 → (b1) 恰红（豹猫零位移）；(b2) 对照腿保绿（不依赖惊逃分支）。
+    {
+        // (b1) 豹猫逃逸。
+        bool okB1 = false;
+        float gainB1 = -1.0f;
+        {
+            World wb;
+            wb.setWidth(44); wb.setDepth(44); wb.setHeight(96); wb.setSeed(1043);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wb.setBlock(x, 84, z, BR::Stone, 0);
+            EntityManager emb;
+            Hotbar hbb;
+            PlayerController pcb;
+            QQuickWindow winB1042;
+            pcb.setParentItem(winB1042.contentItem());
+            pcb.grab();
+            pcb.setWorld(&wb);
+            pcb.setEntityManager(&emb);
+            pcb.setHotbar(&hbb);
+            pcb.setSelectedBlock(BR::Air);
+            const int cat = emb.spawnMobTyped(26, 85, 22, EntityManager::MobOcelot,
+                                              QStringLiteral("#e8c890"), 10);
+            const QVector3D pp(26.5f, 85.0f, 25.0f);
+            const QVector3D eye(26.5f, 86.62f, 25.0f);
+            const QVector3D dir = (QVector3D(26.5f, 85.5f, 22.5f) - eye).normalized();
+            pcb.loadSavedState(eye.x(), 85.0f, eye.z(),
+                               qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                               qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+            int bites = 0;
+            QObject::connect(&emb, &EntityManager::mobAttackedPlayer,
+                             [&bites](int, int, float, float) { ++bites; });
+            pcb.beginMining();
+            const bool hitOk = cat >= 0 && emb.healthAt(cat) == 9
+                               && std::abs(emb.panicTimerAt(cat) - 8.0f) < 1e-3f;
+            const auto dxz = [&pp](const QVector3D &p) {
+                return QVector3D(p.x() - pp.x(), 0.0f, p.z() - pp.z()).length();
+            };
+            const float d0 = dxz(emb.posAt(cat));
+            for (int t = 0; t < 188; ++t) emb.tick(0.016f, &wb, pp, 0.3f, 1.8f, true); // 3s
+            gainB1 = dxz(emb.posAt(cat)) - d0;
+            pcb.release();
+            winB1042.deleteLater();
+            okB1 = hitOk && gainB1 >= 3.5f && bites == 0;
+        }
+        // (b2) 驯服狼零反击对照腿。
+        bool okB2 = false;
+        {
+            World wc;
+            wc.setWidth(44); wc.setDepth(44); wc.setHeight(96); wc.setSeed(1044);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wc.setBlock(x, 84, z, BR::Stone, 0);
+            EntityManager emc;
+            Hotbar hbc;
+            PlayerController pcc;
+            QQuickWindow winC1042;
+            pcc.setParentItem(winC1042.contentItem());
+            pcc.grab();
+            pcc.setWorld(&wc);
+            pcc.setEntityManager(&emc);
+            pcc.setHotbar(&hbc);
+            pcc.setSelectedBlock(BR::Air);
+            const int wolf = emc.spawnMobTyped(20, 85, 22, EntityManager::MobWolf,
+                                               QStringLiteral("#c8ccd4"), 10);
+            emc.setTameRollOverride(0); // t1031 驯服缝必成（直调驯服）
+            const bool tamed = wolf >= 0 && emc.tameWolf(wolf);
+            emc.setTameRollOverride(-1);
+            const QVector3D pp(20.5f, 85.0f, 25.0f);
+            const QVector3D eye(20.5f, 86.62f, 25.0f);
+            const QVector3D dir = (QVector3D(20.5f, 85.5f, 22.5f) - eye).normalized();
+            pcc.loadSavedState(eye.x(), 85.0f, eye.z(),
+                               qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                               qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+            int bites = 0;
+            QObject::connect(&emc, &EntityManager::mobAttackedPlayer,
+                             [&bites](int, int, float, float) { ++bites; });
+            pcc.beginMining(); // 打自己的驯服狼
+            const bool hitOk = tamed && emc.healthAt(wolf) == 9;
+            for (int t = 0; t < 375; ++t) emc.tick(0.016f, &wc, pp, 0.3f, 1.8f, true); // 6s
+            pcc.release();
+            winC1042.deleteLater();
+            okB2 = hitOk && bites == 0 && emc.panicTimerAt(wolf) == 0.0f;
+        }
+        const bool ok = okB1 && okB2;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1042b ocelot flees and tamed wolf never retaliates (MC caliber): "
+                             "a bare-fist hit on an untamed ocelot arms the 8s panic state and "
+                             "yields >=3.5 blocks of player-distance over 3s with ZERO "
+                             "mobAttackedPlayer (ocelots flee and never fight back), while the "
+                             "control leg shows a tamed wolf struck by its owner drops exactly 1 "
+                             "HP with zero panic state and zero bites over 6s (t1031 exemption "
+                             "maintained - the tamed wolf never retaliates against the player) "
+                             "(negative-round sensitive: only the ocelot leg)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag b1=%1(%2) b2=%3").arg(okB1).arg(gainB1).arg(okB2));
+    }
+
+    // ── P-t1042c 野狼被打敌对反击 + 幼狼不反击只惊逃（R19.23 t1042；MC 原版口径）──
+    //    (c1) 野狼受击沿真链命中（扣 1HP 存活）→ 6s 内 mobAttackedPlayer ≥1 次、伤害 ≥1（狼咬击
+    //         kWolfAttackDamage=4 面经信号下传）+ 狼-玩家最小 XZ 距 ≤1.7（咬击带，t1031a 参战腿判据）；
+    //    (c2) 幼狼被打 → 不反击只惊逃：驯服双亲繁殖产幼崽（t400 enterLoveMode ×2 真链）→ 摘除双亲
+    //         （防命中幼崽的 setWolfTarget 泼到驯服双亲身上触发防御追咬污染位移）→ 玩家命中幼崽 →
+    //         panicTimerAt==8 + 2s 离玩家增益 ≥2.5（panic 4.0 vs wander 上限 2.0 可分辨）+ 零 bites。
+    //    阴性轮敏感：摘惊逃消费点 → (c2) 恰红（幼狼零惊逃位移）；(c1) 反击腿保绿（独立分支）。
+    {
+        // (c1) 野狼反击。
+        bool okC1 = false;
+        {
+            World wa;
+            wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1045);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wa.setBlock(x, 84, z, BR::Stone, 0);
+            EntityManager ema;
+            Hotbar hba;
+            PlayerController pca;
+            QQuickWindow winD1042;
+            pca.setParentItem(winD1042.contentItem());
+            pca.grab();
+            pca.setWorld(&wa);
+            pca.setEntityManager(&ema);
+            pca.setHotbar(&hba);
+            pca.setSelectedBlock(BR::Air);
+            const int wolf = ema.spawnMobTyped(20, 85, 22, EntityManager::MobWolf,
+                                               QStringLiteral("#c8ccd4"), 10);
+            const QVector3D pp(20.5f, 85.0f, 25.0f);
+            const QVector3D eye(20.5f, 86.62f, 25.0f);
+            const QVector3D dir = (QVector3D(20.5f, 85.5f, 22.5f) - eye).normalized();
+            pca.loadSavedState(eye.x(), 85.0f, eye.z(),
+                               qRadiansToDegrees(std::atan2(-dir.x(), -dir.z())),
+                               qRadiansToDegrees(std::asin(dir.y())), 2 /* Survival */);
+            int bites = 0, biteDmg = -1, biteType = -1;
+            QObject::connect(&ema, &EntityManager::mobAttackedPlayer,
+                             [&](int amount, int type, float, float) {
+                                 ++bites; biteDmg = amount; biteType = type;
+                             });
+            pca.beginMining();
+            const bool hitOk = wolf >= 0 && ema.healthAt(wolf) == 9;
+            float minD = 1e9f;
+            for (int t = 0; t < 375; ++t) { // 6s
+                ema.tick(0.016f, &wa, pp, 0.3f, 1.8f, true);
+                const QVector3D pw = ema.posAt(wolf);
+                minD = std::min(minD, QVector3D(pw.x() - pp.x(), 0.0f, pw.z() - pp.z()).length());
+            }
+            pca.release();
+            winD1042.deleteLater();
+            okC1 = hitOk && bites >= 1 && biteDmg >= 1 && biteType == EntityManager::MobWolf
+                   && minD <= 1.7f;
+            if (!okC1)
+                qInfo().noquote() << "  [t1042c diag] hitOk=" << hitOk << "bites=" << bites
+                                  << "dmg=" << biteDmg << "type=" << biteType << "minD=" << minD;
+        }
+        // (c2) 幼狼只惊逃。
+        bool okC2 = false;
+        float gainC2 = -1.0f;
+        {
+            World wb;
+            wb.setWidth(44); wb.setDepth(44); wb.setHeight(96); wb.setSeed(1046);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wb.setBlock(x, 84, z, BR::Stone, 0);
+            EntityManager emb;
+            const QVector3D farL(22.5f, 86.0f, 22.5f); // 世界中心（幼崽跟随瞬移落 2..5 环 → 四向留足惊逃跑位）
+            emb.setTameRollOverride(0); // t1031 驯服缝必成
+            const int pa = emb.spawnMobTyped(14, 85, 15, EntityManager::MobWolf,
+                                             QStringLiteral("#c8ccd4"), 10);
+            const int pb = emb.spawnMobTyped(15, 85, 15, EntityManager::MobWolf,
+                                             QStringLiteral("#c8ccd4"), 10);
+            const bool parents = pa >= 0 && pb >= 0 && emb.tameWolf(pa) && emb.tameWolf(pb);
+            emb.setTameRollOverride(-1);
+            const bool love = parents && emb.enterLoveMode(pa) && emb.enterLoveMode(pb);
+            for (int t = 0; t < 24; ++t) emb.tick(0.016f, &wb, farL, 0.3f, 1.8f, false); // 配对产崽
+            int baby = -1;
+            for (int i = 0; i < emb.count(); ++i)
+                if (emb.aliveAt(i) && emb.isBabyAt(i)
+                    && emb.mobTypeAt(i) == EntityManager::MobWolf) baby = i;
+            // 摘除双亲（命中幼崽 setWolfTarget=幼崽 会让驯服双亲防御追咬它 → 污染惊逃位移面；
+            //   999 致死走既有死亡链，0.64s 后尸体移除完毕）。
+            emb.damageEntity(pa, 999);
+            emb.damageEntity(pb, 999);
+            for (int t = 0; t < 40; ++t) emb.tick(0.016f, &wb, farL, 0.3f, 1.8f, false);
+            const bool babyOk = love && baby >= 0 && emb.aliveAt(baby);
+            Hotbar hbb;
+            PlayerController pcb;
+            QQuickWindow winE1042;
+            pcb.setParentItem(winE1042.contentItem());
+            pcb.grab();
+            pcb.setWorld(&wb);
+            pcb.setEntityManager(&emb);
+            pcb.setHotbar(&hbb);
+            pcb.setSelectedBlock(BR::Air);
+            const QVector3D bp = emb.posAt(baby);
+            const QVector3D ppB(bp.x(), 85.0f, bp.z() + 3.0f);
+            const QVector3D eyeB(bp.x(), 86.62f, bp.z() + 3.0f);
+            const QVector3D dirB = (QVector3D(bp.x(), bp.y(), bp.z()) - eyeB).normalized();
+            pcb.loadSavedState(eyeB.x(), 85.0f, eyeB.z(),
+                               qRadiansToDegrees(std::atan2(-dirB.x(), -dirB.z())),
+                               qRadiansToDegrees(std::asin(dirB.y())), 2 /* Survival */);
+            int bites = 0;
+            QObject::connect(&emb, &EntityManager::mobAttackedPlayer,
+                             [&bites](int, int, float, float) { ++bites; });
+            const int hp0 = emb.healthAt(baby);
+            pcb.beginMining();
+            const bool hitOk = babyOk && emb.healthAt(baby) == hp0 - 1
+                               && std::abs(emb.panicTimerAt(baby) - 8.0f) < 1e-3f;
+            const auto dxz = [&ppB](const QVector3D &p) {
+                return QVector3D(p.x() - ppB.x(), 0.0f, p.z() - ppB.z()).length();
+            };
+            const float d0 = dxz(emb.posAt(baby));
+            for (int t = 0; t < 125; ++t) emb.tick(0.016f, &wb, ppB, 0.3f, 1.8f, true); // 2s
+            gainC2 = dxz(emb.posAt(baby)) - d0;
+            pcb.release();
+            winE1042.deleteLater();
+            okC2 = hitOk && gainC2 >= 2.5f && bites == 0;
+            if (!okC2)
+                qInfo().noquote() << "  [t1042c diag] babyOk=" << babyOk << "hitOk=" << hitOk
+                                  << "gain=" << gainC2 << "bites=" << bites;
+        }
+        const bool ok = okC1 && okC2;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1042c wild wolf retaliates and wolf babies only flee (MC "
+                             "caliber): a bare-fist hit on a wild adult wolf through the real "
+                             "attackMob chain drops 1 HP and the wolf closes into the bite band "
+                             "(min gap <=1.7) landing at least one mobAttackedPlayer of >=1 "
+                             "damage as MobWolf within 6s (hostile-style retaliation with the "
+                             "same chase/memory clearing caliber), while a bred wolf puppy "
+                             "struck by the player only arms the 8s panic state and gains >=2.5 "
+                             "blocks of distance over 2s with zero bites (babies never "
+                             "retaliate, they flee; parents removed pre-hit so the t480 defense "
+                             "chain cannot pollute the flee path) (negative-round sensitive: "
+                             "only the puppy leg)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag c1=%1 c2=%2(%3)").arg(okC1).arg(okC2).arg(gainC2));
+    }
+
+    // ── P-t1042d t1042 接线源钉（pinSet 剥注释；阴性轮摘 aiPanicFlee 三消费点（false && 前缀）本组
+    //     恒绿——钉面全为定义 / 调用 / 门 / 消费谓词本体，false && 前缀不摘语句 → 恰 P-t1042a/b/c 红律）──
+    {
+        bool ok = true;
+        const QString exeDir1042 = QCoreApplication::applicationDirPath();
+        const QString root1042 = QDir(exeDir1042 + QStringLiteral("/..")).absolutePath();
+        QStringList miss1042;
+        miss1042 << pinSet(root1042 + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-panic-wire", "m_entityManager->setPanicFlee(entityIndex);"},
+            {"cpp-wolf-provoke-wire", "m_entityManager->setWolfProvoked(entityIndex);"},
+        });
+        miss1042 << pinSet(root1042 + QStringLiteral("/src/Entities/entitymanager.cpp"), {
+            {"cpp-panic-set-def", "void EntityManager::setPanicFlee(int i)"},
+            {"cpp-panic-set-log", "panic-flees for"},
+            {"cpp-wolf-provoke-def", "void EntityManager::setWolfProvoked(int i)"},
+            {"cpp-wolf-provoke-gate", "if (e.wolfTamed || e.baby) return;"},
+            {"cpp-wolf-provoke-log", "provoked: retaliates against player"},
+            {"cpp-panic-flee-def", "bool EntityManager::aiPanicFlee(Entity &e, float dt, World *world, float worldW, float worldD,"},
+            {"cpp-panic-consumers", "e.panicTimer > 0.0f", 3}, // 通用链 / aiOcelot / aiWolf 幼崽三消费点
+        });
+        miss1042 << pinSet(root1042 + QStringLiteral("/src/Entities/entitymanager.h"), {
+            {"hdr-panic-field", "float panicTimer = 0.0f;"},
+            {"hdr-panic-accessor", "Q_INVOKABLE float panicTimerAt(int i) const;"},
+            {"hdr-panic-flee-decl", "bool aiPanicFlee(Entity &e, float dt, World *world, float worldW, float worldD,"},
+            {"hdr-panic-const", "static constexpr float kPanicDuration = 8.0f;"},
+        });
+        ok = miss1042.isEmpty();
+        if (!ok)
+            qInfo().noquote() << "  [t1042d diag] miss=" << miss1042.join(QLatin1Char(','));
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1042d panic-flee + wolf-retaliation wiring source pins: the "
+                             "attackMob hit-path carries both new write-points (setPanicFlee + "
+                             "setWolfProvoked) next to the t480/t635 precedent wires, "
+                             "EntityManager defines the panic registrar with its MC-caliber log "
+                             "face, the wolf provocation gate (tamed-or-baby exempt, t1031 kept), "
+                             "the shared aiPanicFlee mover consumed by exactly three gates "
+                             "(generic passive chain, untamed aiOcelot, aiWolf puppy), and the "
+                             "header carries the panicTimer field + panicTimerAt accessor + "
+                             "aiPanicFlee declaration + kPanicDuration constant (comment-immune "
+                             "pinSet; the consumer-gate pin is false&&-mutation-immune so the "
+                             "negative round reds exactly the behavior legs)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag pins=%1").arg(miss1042.join(QLatin1Char(','))));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
