@@ -71,6 +71,8 @@
 #include "xporbinstancing.h"      // t858 经验球 instancing 试点探针（feeder 实例表内容级断言）
 #include "blockdropinstancing.h"  // t1027 掉落物 instancing 治理首批探针（族分桶 / 实例表内容级断言）
 #include "glowshellinstancing.h"  // t1039 掉落物 instancing 批 3 探针（光晕壳族收纳 / 颜色实例表 / 空转门 / 容量降级）
+#include "tooldropinstancing.h"   // t1041 掉落物 instancing 批 4 探针（工具 3D 族 tier 色 / 弓弦 stringPass / 空转门）
+#include "billboarddropinstancing.h" // t1041 批 4 探针（billboard 图标族双池 / 朝相机旋转 / 空转门）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "cheststore.h"           // t1013 箱子矿车内容键存储（转正 / 回生 / 掉落链断言源）
 #include "loottable.h"            // t1035 豹猫驯服分化探针（fishingPool 直调：生鱼=驯服道具来源钉）
@@ -20294,6 +20296,450 @@ Item {
                              "floor formula, kShellCap admission, the slot*0.37 stagger, the 0.45 "
                              "shell scale and the idle-gate plumbing (negative-round sensitive: "
                              "any pinned wiring or formula edit turns this leg red)";
+    }
+
+    // ── P-t1041a 掉落物 instancing 批 4 探针：工具 3D 族 per-id 桶 + tier 色 per-instance color ──
+    //   isTool3DDrop（五类几何镐/锄/斧/铲/剑 + 弓）经 ToolDropInstancing 收进工具桶（Main.qml
+    //   toolDropInstHost，批 1/2 同构）。钉契约：
+    //   ① 族分桶互斥——剪刀 0x110（图标族）/ 材料 0x200 / 火把 13（3D 形状族）/ 钓鱼竿 0x111（掉落
+    //      delegate 无分支——既有行为如实不入族，t1041 登记）即便被（误）指派桶也恒空表（谓词拒）；
+    //   ② 实例数=活体数（木镐 2 → 2 条；拾取塌表）；③ 实例表内容与旧 delegate 逐字对齐——XZ 精确 =
+    //      实体世界位、Y ∈ bob 解析带（0↔0.15）、scale 0.45 均匀、纯 Y 轴旋转（工具继承自转，无 billboard
+    //      抵消）；④ tier 色 per-instance color（t1039 color 实例表先例）——木镐 tier1 = (138,90,46)、
+    //      铁剑 tier3 = (216,216,230)、弓弦 stringPass = (245,245,245)（t330 不随 tier）+ alpha 1.0
+    //      （不透明；⚠ 断言口径沿 P-t1039a：calculateTableEntry 落表经 sRGBToLinear，探针镜像线性值）；
+    //      ⑤ 天光乘子沿——k = minLight + (1-minLight)×skyLight，setSkyLight 0.5 → 木镐 r = qRound(138×0.7)
+    //      = 97，还原 1.0 逐位回 138（t144 夜间变暗契约）。
+    //   阴性轮敏感：摘收纳谓词（false && 前缀）→ 本腿互斥面恰红。
+    {
+        // Quick3D calculateTableEntry 的 sRGB→linear 逐字镜像（P-t1039a 同款 lambda）
+        const auto srgbToLinear1041a = [](float c) {
+            return c * (c * (c * 0.305306011f + 0.682171111f) + 0.012522878f);
+        };
+        ItemEntityManager items1041a;
+        ToolDropInstancing fPick1041a, fSword1041a, fBow1041a, fStr1041a, fNeg1041a;
+        fPick1041a.setManager(&items1041a);
+        fPick1041a.setFamilyId(int(ToolRegistry::PickaxeWood));  // 木镐 tier 1
+        fSword1041a.setManager(&items1041a);
+        fSword1041a.setFamilyId(int(ToolRegistry::SwordIron));   // 铁剑 tier 3
+        fBow1041a.setManager(&items1041a);
+        fBow1041a.setFamilyId(int(ToolRegistry::Bow));           // 弓（type 7）
+        fStr1041a.setManager(&items1041a);
+        fStr1041a.setStringPass(true);                           // 弓弦第二实例表（t330 白弦）
+        fStr1041a.setFamilyId(int(ToolRegistry::Bow));
+        fNeg1041a.setManager(&items1041a);                       // 误指派面（familyId 沿途换）
+        // 格距 ≥3（> kMergeRadius=2，防就近合并塌缩活体数——P-t1027a 同 rig 纪律）
+        items1041a.spawnItem(10, 40, 10, int(ToolRegistry::PickaxeWood), 1);
+        items1041a.spawnItem(14, 40, 10, int(ToolRegistry::PickaxeWood), 1);
+        items1041a.spawnItem(18, 40, 10, int(ToolRegistry::SwordIron), 1);
+        items1041a.spawnItem(22, 40, 10, int(ToolRegistry::Bow), 1);
+        items1041a.spawnItem(26, 40, 10, int(ToolRegistry::Shears), 1);  // 图标族（不入工具 3D 桶）
+        items1041a.spawnItem(30, 40, 10, 0x200, 1);                      // 材料段（木棒）
+        items1041a.spawnItem(34, 40, 10, 13, 1);                         // 火把（3D 形状族）
+        items1041a.spawnItem(38, 40, 10, int(ToolRegistry::FishingRod), 1); // 钓鱼竿（无掉落分支，不入族）
+        const int cntPick1041a = fPick1041a.probeInstanceCount();
+        const int cntSword1041a = fSword1041a.probeInstanceCount();
+        const int cntBow1041a = fBow1041a.probeInstanceCount();
+        const int cntStr1041a = fStr1041a.probeInstanceCount();
+        bool ok1041a = cntPick1041a == 2 && cntSword1041a == 1
+                       && cntBow1041a == 1 && cntStr1041a == 1; // ①② 实例数=活体数（弓身/弦同表条数）
+        fNeg1041a.setFamilyId(int(ToolRegistry::Shears));
+        ok1041a = ok1041a && fNeg1041a.probeInstanceCount() == 0;    // ① 剪刀即便误指派也恒空
+        fNeg1041a.setFamilyId(int(ToolRegistry::FishingRod));
+        ok1041a = ok1041a && fNeg1041a.probeInstanceCount() == 0;    // ① 钓鱼竿不入族（登记面）
+        fNeg1041a.setFamilyId(0x200);
+        ok1041a = ok1041a && fNeg1041a.probeInstanceCount() == 0;    // ① 材料段拒
+        fNeg1041a.setFamilyId(13);
+        ok1041a = ok1041a && fNeg1041a.probeInstanceCount() == 0;    // ① 3D 形状族拒
+        // ③ 变换内容（木镐首条）
+        QVector3D p1041a, sc1041a; QQuaternion q1041a;
+        ok1041a = ok1041a && fPick1041a.probeInstanceAt(0, &p1041a, &sc1041a, &q1041a, nullptr);
+        ok1041a = ok1041a && std::abs(p1041a.x() - 10.5f) < 1e-4f && std::abs(p1041a.z() - 10.5f) < 1e-4f;
+        ok1041a = ok1041a && p1041a.y() >= 40.5f - 1e-4f && p1041a.y() <= 40.65f + 1e-4f;
+        ok1041a = ok1041a && std::abs(sc1041a.x() - 0.45f) < 1e-5f
+                  && std::abs(sc1041a.y() - 0.45f) < 1e-5f && std::abs(sc1041a.z() - 0.45f) < 1e-5f;
+        const QVector3D eu1041a = q1041a.toEulerAngles();
+        ok1041a = ok1041a && std::abs(std::remainder(eu1041a.x(), 360.0f)) < 1e-3f
+                  && std::abs(std::remainder(eu1041a.z(), 360.0f)) < 1e-3f;
+        // ④ tier 色 per-instance color（线性落表口径，k=1：minLight 0.4 + skyLight 1 → k=1）
+        const float tolC1041a = 2.0f / 255.0f;
+        QColor cPick1041a, cSword1041a, cStr1041a;
+        ok1041a = ok1041a && fPick1041a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cPick1041a);
+        ok1041a = ok1041a && std::abs(cPick1041a.redF() - srgbToLinear1041a(138.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cPick1041a.greenF() - srgbToLinear1041a(90.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cPick1041a.blueF() - srgbToLinear1041a(46.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cPick1041a.alphaF() - 1.0f) <= 1e-3f; // 不透明（无 hasTransparency）
+        ok1041a = ok1041a && fSword1041a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cSword1041a);
+        ok1041a = ok1041a && std::abs(cSword1041a.redF() - srgbToLinear1041a(216.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cSword1041a.greenF() - srgbToLinear1041a(216.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cSword1041a.blueF() - srgbToLinear1041a(230.0f / 255.0f)) <= tolC1041a;
+        ok1041a = ok1041a && fStr1041a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cStr1041a);
+        ok1041a = ok1041a && std::abs(cStr1041a.redF() - srgbToLinear1041a(245.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cStr1041a.greenF() - srgbToLinear1041a(245.0f / 255.0f)) <= tolC1041a
+                  && std::abs(cStr1041a.blueF() - srgbToLinear1041a(245.0f / 255.0f)) <= tolC1041a;
+        // ⑤ 天光乘子沿：k = 0.4 + 0.6×0.5 = 0.7 → 木镐 r = qRound(138×0.7) = 97；还原逐位回 138
+        fPick1041a.setSkyLight(0.5);
+        QColor cDim1041a;
+        ok1041a = ok1041a && fPick1041a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cDim1041a);
+        ok1041a = ok1041a && std::abs(cDim1041a.redF() - srgbToLinear1041a(97.0f / 255.0f)) <= tolC1041a;
+        fPick1041a.setSkyLight(1.0);
+        ok1041a = ok1041a && fPick1041a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cDim1041a)
+                  && std::abs(cDim1041a.redF() - srgbToLinear1041a(138.0f / 255.0f)) <= tolC1041a;
+        // ② 拾取沿：首条木镐被拾 → 表塌到 1
+        items1041a.setCountAt(0, 0);
+        const int cntAfterPick1041a = fPick1041a.probeInstanceCount();
+        ok1041a = ok1041a && cntAfterPick1041a == 1;
+        if (!ok1041a)
+            qInfo().noquote() << "  [t1041a diag] pick" << cntPick1041a << "sword" << cntSword1041a
+                              << "bow" << cntBow1041a << "str" << cntStr1041a
+                              << "afterPick" << cntAfterPick1041a
+                              << "pickLin r/g/b" << cPick1041a.redF() << cPick1041a.greenF()
+                              << cPick1041a.blueF() << "strLin r" << cStr1041a.redF()
+                              << "dimLin r" << cDim1041a.redF() << "dimExp"
+                              << srgbToLinear1041a(97.0f / 255.0f);
+        if (!ok1041a) ++totalFail;
+        qInfo().noquote() << (ok1041a ? "PASS" : "FAIL")
+                          << "| t1041a drop-item instancing batch 4: the tool 3D family "
+                             "(isTool3DDrop: pickaxe/hoe/axe/shovel/sword plus bow) feeds per-id "
+                             "tool buckets through ToolDropInstancing - shears/materials-0x200/the "
+                             "3D-shape-family torch and the branchless fishing rod never enter a "
+                             "tool bucket even when (mis)assigned one (cross-family mutex on the "
+                             "single C++ predicate), entry counts equal live counts (two wooden "
+                             "pickaxes -> 2, collapse to 1 after picking), entries carry exact XZ "
+                             "slot positions + the analytic bob band on Y + 0.45 uniform scale + "
+                             "pure-Y spin (delegate parity - tools keep the entRoot spin, no "
+                             "billboard cancel), tier colors ride the per-instance color table "
+                             "(t1039 precedent) with wooden 138/90/46 and iron 216/216/230 plus "
+                             "the bow-string second table carrying silk white 245/245/245 "
+                             "(t330, tier-independent) asserted against the linear values "
+                             "Quick3D's calculateTableEntry stores, and the skylight tint follows "
+                             "k = minLight + (1-minLight)*skyLight (dimming to r=97 at skyLight "
+                             "0.5, restoring bit-exact at 1.0) (negative-round sensitive: feeder "
+                             "predicate removal)";
+    }
+
+    // ── P-t1041b 批 4 探针：billboard 图标族双池（异形方块图标族 + 工具/材料图标族）+ 朝相机旋转 ──
+    //   BillboardDropInstancing itemIconFamily 两模式（缺省 = isBlockIconBillboardDrop 异形方块图标族
+    //   〔楼梯 16/花 49/床〕；true = isIconBillboardDrop 工具/材料图标族〔剪刀 0x110/打火石 0x121/材料
+    //   0x200〕）。钉契约：① 双池分桶互斥——火把 13 不进异形桶（3D 形状族）、异形 id 不进图标桶、
+    //   工具 3D/整立方不进图标桶（双向跨池谓词面）；② 实例数=活体数 + 拾取塌表；③ 实例表内容——
+    //   XZ 精确、Y bob 带、scale 0.3、rotation euler = (camPitch, camYaw, 0)（朝相机旋转进实例表；
+    //   billboard 不自转——旧分支显式抵消 rotY）+ camYaw 沿 markDirty 跟随（40→90）。
+    //   阴性轮敏感：摘收纳谓词（false && 前缀）→ 本腿互斥面恰红。
+    {
+        ItemEntityManager items1041b;
+        BillboardDropInstancing fStairs1041b, fFlower1041b, fBed1041b, fTorchNeg1041b,
+            fStairsNeg1041b, fIcon1041b, fIconNeg1041b;
+        fStairs1041b.setManager(&items1041b);
+        fStairs1041b.setFamilyId(int(BR::WoodStairs));
+        fStairs1041b.setCamPitch(25.0);
+        fStairs1041b.setCamYaw(40.0);
+        fFlower1041b.setManager(&items1041b);
+        fFlower1041b.setFamilyId(int(BR::FlowerRed));
+        fBed1041b.setManager(&items1041b);
+        fBed1041b.setFamilyId(int(BR::BedRed));
+        fTorchNeg1041b.setManager(&items1041b);
+        fTorchNeg1041b.setFamilyId(13);              // 火把：3D 形状族 → 异形桶恒空
+        fStairsNeg1041b.setManager(&items1041b);
+        fStairsNeg1041b.setFamilyId(int(ToolRegistry::Shears)); // 异形模式对剪刀 id 恒空
+        fIcon1041b.setManager(&items1041b);
+        fIcon1041b.setItemIconFamily(true);
+        fIcon1041b.setFamilyId(int(ToolRegistry::Shears));
+        fIconNeg1041b.setManager(&items1041b);
+        fIconNeg1041b.setItemIconFamily(true);
+        fIconNeg1041b.setFamilyId(int(BR::WoodStairs)); // 图标模式对异形 id 恒空（双向互斥）
+        items1041b.spawnItem(10, 40, 10, int(BR::WoodStairs), 1);
+        items1041b.spawnItem(14, 40, 10, int(BR::FlowerRed), 1);
+        items1041b.spawnItem(18, 40, 10, int(BR::BedRed), 1);
+        items1041b.spawnItem(22, 40, 10, 13, 1);                              // 火把（3D 族）
+        items1041b.spawnItem(26, 40, 10, int(ToolRegistry::Shears), 1);
+        items1041b.spawnItem(30, 40, 10, int(ToolRegistry::FlintAndSteel), 1);
+        items1041b.spawnItem(34, 40, 10, 0x200, 1);                           // 木棒（材料段）
+        const int cntStairs1041b = fStairs1041b.probeInstanceCount();
+        bool ok1041b = cntStairs1041b == 1
+                       && fFlower1041b.probeInstanceCount() == 1
+                       && fBed1041b.probeInstanceCount() == 1
+                       && fTorchNeg1041b.probeInstanceCount() == 0
+                       && fStairsNeg1041b.probeInstanceCount() == 0
+                       && fIcon1041b.probeInstanceCount() == 1
+                       && fIconNeg1041b.probeInstanceCount() == 0;            // ①② 双池收纳+互斥
+        fIcon1041b.setFamilyId(int(ToolRegistry::FlintAndSteel));
+        ok1041b = ok1041b && fIcon1041b.probeInstanceCount() == 1;            // ② 打火石同池（换桶沿）
+        fIcon1041b.setFamilyId(0x200);
+        ok1041b = ok1041b && fIcon1041b.probeInstanceCount() == 1;            // ② 材料段同池
+        fIcon1041b.setFamilyId(int(ToolRegistry::PickaxeWood));
+        ok1041b = ok1041b && fIcon1041b.probeInstanceCount() == 0;            // ① 工具 3D 不进图标池
+        fIcon1041b.setFamilyId(int(BR::Dirt));
+        ok1041b = ok1041b && fIcon1041b.probeInstanceCount() == 0;            // ① 整立方不进图标池
+        // ③ 变换内容（楼梯首条）：XZ 精确 + Y bob 带 + scale 0.3 + 朝相机旋转 euler=(25,40,0)
+        QVector3D p1041b, sc1041b; QQuaternion q1041b;
+        ok1041b = ok1041b && fStairs1041b.probeInstanceAt(0, &p1041b, &sc1041b, &q1041b);
+        ok1041b = ok1041b && std::abs(p1041b.x() - 10.5f) < 1e-4f && std::abs(p1041b.z() - 10.5f) < 1e-4f;
+        ok1041b = ok1041b && p1041b.y() >= 40.5f - 1e-4f && p1041b.y() <= 40.65f + 1e-4f;
+        ok1041b = ok1041b && std::abs(sc1041b.x() - 0.3f) < 1e-5f
+                  && std::abs(sc1041b.y() - 0.3f) < 1e-5f && std::abs(sc1041b.z() - 0.3f) < 1e-5f;
+        const QVector3D eu1041b = q1041b.toEulerAngles();
+        ok1041b = ok1041b && std::abs(eu1041b.x() - 25.0f) < 1e-3f
+                  && std::abs(std::remainder(eu1041b.y() - 40.0f, 360.0f)) < 1e-3f
+                  && std::abs(std::remainder(eu1041b.z(), 360.0f)) < 1e-3f;
+        // ③ 相机沿：setCamYaw(90) → 实例表 rotation 跟随（markDirty 路径重取）；还原 40
+        fStairs1041b.setCamYaw(90.0);
+        QQuaternion qYaw1041b;
+        ok1041b = ok1041b && fStairs1041b.probeInstanceAt(0, nullptr, nullptr, &qYaw1041b);
+        const QVector3D euYaw1041b = qYaw1041b.toEulerAngles();
+        ok1041b = ok1041b && std::abs(std::remainder(euYaw1041b.y() - 90.0f, 360.0f)) < 1e-3f;
+        fStairs1041b.setCamYaw(40.0);
+        // ② 拾取沿：楼梯被拾 → 表塌到 0（空槽不进表）
+        items1041b.setCountAt(0, 0);
+        const int cntAfterPick1041b = fStairs1041b.probeInstanceCount();
+        ok1041b = ok1041b && cntAfterPick1041b == 0;
+        if (!ok1041b)
+            qInfo().noquote() << "  [t1041b diag] stairs" << cntStairs1041b
+                              << "afterPick" << cntAfterPick1041b
+                              << "eu x/y/z" << eu1041b.x() << eu1041b.y() << eu1041b.z();
+        if (!ok1041b) ++totalFail;
+        qInfo().noquote() << (ok1041b ? "PASS" : "FAIL")
+                          << "| t1041b drop-item instancing batch 4: the two billboard icon "
+                             "families feed per-id texture buckets through one BillboardDropInstancing "
+                             "class with the itemIconFamily mode switch - the block-icon family "
+                             "(isBlockIconBillboardDrop: stairs-16 partial, cross flower, colored "
+                             "bed) and the item icon family (isIconBillboardDrop: shears, flint "
+                             "and steel, material segment) each admit exactly their own ids with "
+                             "two-way cross-pool mutex (the 3D-family torch never enters a "
+                             "block-icon bucket, block-icon ids never enter item-icon buckets, "
+                             "tools-3D and plain cubes never enter icon buckets), entry counts "
+                             "equal live counts and collapse on pickup, entries carry exact XZ + "
+                             "the analytic bob band + 0.3 uniform scale, the camera-facing "
+                             "rotation rides the instance table as euler (camPitch, camYaw, 0) "
+                             "(the bitwise equivalent of the old Ry(camYaw)*Rx(camPitch) child "
+                             "compose - billboards do not spin) and follows a camYaw edge via "
+                             "markDirty, and the per-id textures stay per-id host buckets since "
+                             "the atlas+UV route would need a custom shader (PLAN section 2-A "
+                             "forbidden) (negative-round sensitive: feeder predicate removal)";
+    }
+
+    // ── P-t1041c 批 4 三池空转门行为腿（t1032c 同款；ToolDropInstancing + BillboardDropInstancing）──
+    //   空转（familyId<=0 / 非本族 id / 桶内活体 0）→ 钟停（probeTickerActive()==false 且事件泵后仍
+    //   false）；活跃沿（setManager / setFamilyId / setItemIconFamily / setStringPass / manager
+    //   entitiesChanged 有桶内活体）start + markDirty 兜底。谓词感知：剪刀/钓鱼竿 id 的工具桶、
+    //   itemIconFamily 模式下的异形 id 桶恒空转。源面：两个新 feeder 构造体均不含无条件
+    //   m_ticker.start()（摘门 lesion 会在构造体重启钟 → 行为面 + 本结构面同步红）。
+    //   阴性轮敏感：摘空转门（构造启钟 + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红。
+    {
+        ItemEntityManager items1041c;
+        ToolDropInstancing fGate1041c, fStrGate1041c;
+        BillboardDropInstancing fBGate1041c;
+        const auto pumpFor1041c = [](int ms) {
+            QElapsedTimer t1041c; t1041c.start();
+            while (!t1041c.hasExpired(ms))
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // 工具池门：构造 / 接线 / 指派空桶三停
+        const bool okCtorIdle1041c = !fGate1041c.probeTickerActive();
+        fGate1041c.setManager(&items1041c);
+        const bool okWireIdle1041c = !fGate1041c.probeTickerActive();
+        fGate1041c.setFamilyId(int(ToolRegistry::PickaxeWood));
+        const bool okAssignedIdle1041c = !fGate1041c.probeTickerActive();
+        items1041c.spawnItem(10, 40, 10, int(ToolRegistry::PickaxeWood), 1); // 活跃沿
+        const bool okActiveEdge1041c = fGate1041c.probeTickerActive()
+                                       && fGate1041c.probeInstanceCount() == 1;
+        pumpFor1041c(50);
+        const bool okActiveRun1041c = fGate1041c.probeTickerActive();
+        items1041c.setCountAt(0, 0); // 拾走 → 空转沿 stop
+        const bool okIdleEdge1041c = !fGate1041c.probeTickerActive();
+        pumpFor1041c(50);
+        const bool okIdleStay1041c = !fGate1041c.probeTickerActive();
+        // 谓词感知：剪刀/钓鱼竿 id 即便有活体也不为本族 → 恒空转恒空表
+        items1041c.spawnItem(14, 40, 10, int(ToolRegistry::Shears), 1);
+        fGate1041c.setFamilyId(int(ToolRegistry::Shears));
+        const bool okShearsPredIdle1041c = !fGate1041c.probeTickerActive()
+                                           && fGate1041c.probeInstanceCount() == 0;
+        items1041c.spawnItem(18, 40, 10, int(ToolRegistry::FishingRod), 1);
+        fGate1041c.setFamilyId(int(ToolRegistry::FishingRod));
+        const bool okRodPredIdle1041c = !fGate1041c.probeTickerActive()
+                                        && fGate1041c.probeInstanceCount() == 0;
+        // 弦表门：stringPass 通道同门——非弓桶空转，弓活体入桶启钟
+        fStrGate1041c.setStringPass(true);
+        fStrGate1041c.setManager(&items1041c);
+        fStrGate1041c.setFamilyId(int(ToolRegistry::Bow));
+        const bool okStrIdle1041c = !fStrGate1041c.probeTickerActive();
+        items1041c.spawnItem(22, 40, 10, int(ToolRegistry::Bow), 1);
+        const bool okStrActive1041c = fStrGate1041c.probeTickerActive()
+                                      && fStrGate1041c.probeInstanceCount() == 1;
+        // billboard 池门：同三停一启 + 模式切换谓词感知（异形 id 在 itemIconFamily 模式下恒空转）
+        fBGate1041c.setManager(&items1041c);
+        fBGate1041c.setFamilyId(int(BR::WoodStairs));
+        const bool okBIdle1041c = !fBGate1041c.probeTickerActive();
+        items1041c.spawnItem(26, 40, 10, int(BR::WoodStairs), 1);
+        const bool okBActive1041c = fBGate1041c.probeTickerActive()
+                                    && fBGate1041c.probeInstanceCount() == 1;
+        fBGate1041c.setItemIconFamily(true);
+        const bool okBModeIdle1041c = !fBGate1041c.probeTickerActive()
+                                      && fBGate1041c.probeInstanceCount() == 0;
+        fBGate1041c.setItemIconFamily(false);
+        const bool okBModeBack1041c = fBGate1041c.probeTickerActive()
+                                      && fBGate1041c.probeInstanceCount() == 1;
+        items1041c.setCountAt(3, 0); // 拾走楼梯（t256 slot-reuse：镐拾走后槽 0 被剪刀复用 → 剪刀0/竿1/弓2/楼梯3）→ 空转沿 stop
+        const bool okBIdleEdge1041c = !fBGate1041c.probeTickerActive();
+        // 源面：两个新 feeder 构造体均不再含无条件 start（t1032c 结构钉同款）
+        const QString exeDir1041c = QCoreApplication::applicationDirPath();
+        const auto ctorNoStart1041c = [&exeDir1041c](const QString &rel, const QString &ctorNeedle) {
+            QFile f(QDir(exeDir1041c + QStringLiteral("/..")).absoluteFilePath(rel));
+            const QString src = f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            const int ctorBegin = src.indexOf(ctorNeedle);
+            const int ctorEnd = src.indexOf(QStringLiteral("\n}"), ctorBegin);
+            return ctorBegin >= 0 && ctorEnd > ctorBegin
+                && !src.mid(ctorBegin, ctorEnd - ctorBegin).contains(QStringLiteral("m_ticker.start()"));
+        };
+        const bool okCtorSrc1041c =
+            ctorNoStart1041c(QStringLiteral("src/Game/tooldropinstancing.cpp"),
+                             QStringLiteral("ToolDropInstancing::ToolDropInstancing(QQuick3DObject *parent)"))
+            && ctorNoStart1041c(QStringLiteral("src/Game/billboarddropinstancing.cpp"),
+                                QStringLiteral("BillboardDropInstancing::BillboardDropInstancing(QQuick3DObject *parent)"));
+        const bool ok1041c = okCtorIdle1041c && okWireIdle1041c && okAssignedIdle1041c
+                             && okActiveEdge1041c && okActiveRun1041c && okIdleEdge1041c
+                             && okIdleStay1041c && okShearsPredIdle1041c && okRodPredIdle1041c
+                             && okStrIdle1041c && okStrActive1041c && okBIdle1041c
+                             && okBActive1041c && okBModeIdle1041c && okBModeBack1041c
+                             && okBIdleEdge1041c && okCtorSrc1041c;
+        if (!ok1041c)
+            qInfo().noquote() << "  [t1041c diag] ctor" << okCtorIdle1041c << "wire" << okWireIdle1041c
+                              << "assigned" << okAssignedIdle1041c << "activeEdge" << okActiveEdge1041c
+                              << "activeRun" << okActiveRun1041c << "idleEdge" << okIdleEdge1041c
+                              << "idleStay" << okIdleStay1041c << "shearsPred" << okShearsPredIdle1041c
+                              << "rodPred" << okRodPredIdle1041c << "strIdle" << okStrIdle1041c
+                              << "strActive" << okStrActive1041c << "bIdle" << okBIdle1041c
+                              << "bActive" << okBActive1041c << "bModeIdle" << okBModeIdle1041c
+                              << "bModeBack" << okBModeBack1041c << "bIdleEdge" << okBIdleEdge1041c
+                              << "ctorSrc" << okCtorSrc1041c;
+        if (!ok1041c) ++totalFail;
+        qInfo().noquote() << (ok1041c ? "PASS" : "FAIL")
+                          << "| t1041c batch-4 idle gates (t1032c caliber, both new feeders): the "
+                             "16ms animation timers start STOPPED - constructing, wiring and "
+                             "assigning an empty bucket all leave them idle, the first live "
+                             "member starts them with a fresh table, the active period survives "
+                             "an event pump, picking the last member stops them and a pump does "
+                             "not revive them, the gates are predicate-aware (shears and the "
+                             "branchless fishing rod keep a tool bucket idle and empty, the "
+                             "stringPass table only arms for a live bow bucket, and switching "
+                             "the billboard feeder into itemIconFamily mode stops the clock for "
+                             "a live block-icon id and back), and neither new constructor "
+                             "carries an unconditional timer start - idle feeders no longer "
+                             "wake ~60x/s or push empty tables to render sync (negative-round "
+                             "sensitive: idle-gate removal)";
+    }
+
+    // ── P-t1041d 批 4 接线源钉 + 口径逐字钉（t1032d/t1039d 同纪律；QML 编排面盲区的源钉覆盖）──
+    //   QML 编排（reassignToolBuckets / reassignItemBuckets / reassignBlockIconBuckets / has*Bucket）
+    //   headless 不可行为级断言（review0910 #2 盲区）→ pinSet 剥注释钉接线在位（三 host id / 薄委托
+    //   谓词 / 桶排除链 6+3+1 针 / familyId 绑定 / 几何 per-id / stringPass / itemIconFamily /
+    //   camPitch/camYaw 绑定 / 图标 wrapper）+ itementitymanager 三谓词声明 + C++ 口径逐字（收纳谓词 /
+    //   tier 色映射 / 弦白 245 / scale / bob 公式 / 天光 k / 空转门 / entitiesChanged 沿 / billboard
+    //   朝相机 rotation）。材料/异形贴图材质逐字同参以 window 切片承载（pinSet 表达不了的顺序面）。
+    {
+        const QString exeDir1041d = QCoreApplication::applicationDirPath();
+        const QString root1041d = QDir(exeDir1041d + QStringLiteral("/..")).absolutePath();
+        QStringList miss1041d;
+        miss1041d << pinSet(root1041d + QStringLiteral("/src/ui/Main.qml"), {
+            {"qml-tool-host-id", "id: toolDropInstHost"},
+            {"qml-tool-reassign-fn", "function reassignToolBuckets"},
+            {"qml-tool-reassign-call", "toolDropInstHost.reassignToolBuckets()"},
+            {"qml-tool-predicate", "itemEntities.isTool3DDrop(id)"},
+            {"qml-tool-hasbucket-exclude", "&& !toolDropInstHost.hasToolBucket(entRoot.entId)", 6},
+            {"qml-tool-geometry-per-id", "geometry: toolDropInstHost.geomForId(toolDropInstHost.buckets[index])"},
+            {"qml-tool-familyid-binding", "familyId: toolDropInstHost.buckets[index]", 2},
+            {"qml-tool-stringpass", "stringPass: true"},
+            {"qml-icon-host-id", "id: itemIconInstHost"},
+            {"qml-icon-reassign-fn", "function reassignItemBuckets"},
+            {"qml-icon-reassign-call", "itemIconInstHost.reassignItemBuckets()"},
+            {"qml-icon-predicate", "itemEntities.isIconBillboardDrop(id)"},
+            {"qml-icon-hasbucket-exclude", "&& !itemIconInstHost.hasItemBucket(entRoot.entId)", 3},
+            {"qml-icon-itemfamily", "itemIconFamily: true"},
+            {"qml-icon-familyid-binding", "familyId: itemIconInstHost.buckets[index]"},
+            {"qml-icon-texture-wrapper", "sourceItem: Item {"},
+            {"qml-icon-toolicon-type", "toolType: hotbarVM.toolType(itemIconInstHost.buckets[index])"},
+            {"qml-icon-maticon-id", "materialId: itemIconInstHost.buckets[index]"},
+            {"qml-blockicon-host-id", "id: blockIconInstHost"},
+            {"qml-blockicon-reassign-fn", "function reassignBlockIconBuckets"},
+            {"qml-blockicon-reassign-call", "blockIconInstHost.reassignBlockIconBuckets()"},
+            {"qml-blockicon-predicate", "itemEntities.isBlockIconBillboardDrop(id)"},
+            {"qml-blockicon-hasbucket-exclude", "&& !blockIconInstHost.hasIconBucket(entRoot.entId)"},
+            {"qml-blockicon-familyid-binding", "familyId: blockIconInstHost.buckets[index]"},
+            {"qml-blockicon-iconsource", "hotbarVM.iconSourceForBlock(blockIconInstHost.buckets[index])"},
+            {"qml-billboard-campitch", "camPitch: cam.eulerRotation.x", 2},
+            {"qml-billboard-camyaw", "camYaw: cam.eulerRotation.y", 2},
+        });
+        miss1041d << pinSet(root1041d + QStringLiteral("/src/Game/itementitymanager.h"), {
+            {"hdr-tool3d-decl", "Q_INVOKABLE static bool isTool3DDrop(int itemId);"},
+            {"hdr-iconbillboard-decl", "Q_INVOKABLE static bool isIconBillboardDrop(int itemId);"},
+            {"hdr-blockiconbillboard-decl", "Q_INVOKABLE static bool isBlockIconBillboardDrop(int itemId);"},
+        });
+        miss1041d << pinSet(root1041d + QStringLiteral("/src/Game/tooldropinstancing.cpp"), {
+            {"feeder-tool-filter", "ItemEntityManager::isTool3DDrop(m_familyId)", 2},
+            {"feeder-tool-tier-gold", "cr = 242; cg = 200; cb = 50;"},
+            {"feeder-tool-tier-copper", "cr = 200; cg = 120; cb = 80;"},
+            {"feeder-tool-tier-diamond", "cr = 79;  cg = 217; cb = 210;"},
+            {"feeder-tool-tier-iron", "cr = 216; cg = 216; cb = 230;"},
+            {"feeder-tool-tier-stone", "cr = 154; cg = 154; cb = 154;"},
+            {"feeder-tool-string-white", "cr = cg = cb = 245;"},
+            {"feeder-tool-bob-formula", "0.075 * (1.0 - std::cos(M_PI * s2))"},
+            {"feeder-tool-stagger", "slot * 0.37"},
+            {"feeder-tool-scale", "QVector3D(0.45f, 0.45f, 0.45f)"},
+            {"feeder-tool-lightk", "m_minLight + (1.0 - m_minLight) * m_skyLight"},
+            {"feeder-tool-idle-start", "m_ticker.start()"},
+            {"feeder-tool-idle-stop", "m_ticker.stop()"},
+            {"feeder-tool-entities-edge", "connect(m_manager, &ItemEntityManager::entitiesChanged"},
+        });
+        miss1041d << pinSet(root1041d + QStringLiteral("/src/Game/billboarddropinstancing.cpp"), {
+            {"feeder-billboard-icon-filter", "ItemEntityManager::isIconBillboardDrop(m_familyId)"},
+            {"feeder-billboard-blockicon-filter", "ItemEntityManager::isBlockIconBillboardDrop(m_familyId)"},
+            {"feeder-billboard-cam-rot", "QVector3D(float(m_camPitch), float(m_camYaw), 0.0f)"},
+            {"feeder-billboard-bob-formula", "0.075 * (1.0 - std::cos(M_PI * s2))"},
+            {"feeder-billboard-scale", "QVector3D(0.3f, 0.3f, 0.3f)"},
+            {"feeder-billboard-stagger", "slot * 0.37"},
+            {"feeder-billboard-idle-start", "m_ticker.start()"},
+            {"feeder-billboard-idle-stop", "m_ticker.stop()"},
+            {"feeder-billboard-entities-edge", "connect(m_manager, &ItemEntityManager::entitiesChanged"},
+        });
+        // 材质逐字同参——异形图标桶 Model 材质块（familyId 钉后窗）含旧 billboard 分支参数。
+        QFile mf1041d(root1041d + QStringLiteral("/src/ui/Main.qml"));
+        const QString qml1041d = mf1041d.open(QIODevice::ReadOnly)
+            ? QString::fromUtf8(mf1041d.readAll()) : QString();
+        const int bi1041d = qml1041d.indexOf(
+            QStringLiteral("familyId: blockIconInstHost.buckets[index]"));
+        const QString matWin1041d = (bi1041d >= 0) ? qml1041d.mid(bi1041d, 1200) : QString();
+        const bool okMatParity1041d = bi1041d >= 0
+            && matWin1041d.contains(QStringLiteral("alphaCutoff: 0.5"))
+            && matWin1041d.contains(QStringLiteral("opacity: 0.99"))
+            && matWin1041d.contains(QStringLiteral("baseColor: terrainLight(worldClock.skyLight)"))
+            && matWin1041d.contains(QStringLiteral("generateMipmaps: false"))
+            && matWin1041d.contains(QStringLiteral("hotbarVM.iconSourceForBlock(blockIconInstHost.buckets[index])"));
+        const bool okPins1041d = miss1041d.isEmpty();
+        const bool ok1041d = okMatParity1041d && okPins1041d;
+        if (!ok1041d)
+            qInfo().noquote() << "  [t1041d diag] mat" << okMatParity1041d
+                              << "pin miss:" << miss1041d.join(QLatin1Char(','));
+        if (!ok1041d) ++totalFail;
+        qInfo().noquote() << (ok1041d ? "PASS" : "FAIL")
+                          << "| t1041d batch-4 wiring source pins + verbatim calibers: the three "
+                             "new bucket hosts (toolDropInstHost / itemIconInstHost / "
+                             "blockIconInstHost) carry their reassignment functions, thin "
+                             "predicate delegations (isTool3DDrop / isIconBillboardDrop / "
+                             "isBlockIconBillboardDrop single C++ authority), bucket exclusion "
+                             "chains on all ten delegate branches (six tool-3D, three item-icon, "
+                             "one block-icon), per-bucket geometry switching, the bow stringPass "
+                             "second table, the itemIconFamily mode, the camera euler bindings "
+                             "and the icon wrapper, the header declares the three family "
+                             "predicates, and both feeders carry the verbatim calibers - the "
+                             "tier color map (gold 242/200/50, copper 200/120/80, diamond "
+                             "79/217/210, iron 216/216/230, stone 154/154/154, wood default), "
+                             "silk-white 245 string pass, the analytic bob and slot*0.37 "
+                             "stagger, 0.45/0.3 scales, the skylight floor formula, the "
+                             "camera-facing rotation in the instance table, the billboard "
+                             "material parity window (alphaCutoff 0.5 + opacity 0.99 + "
+                             "terrainLight + generateMipmaps false + iconSourceForBlock) and "
+                             "the idle-gate plumbing (negative-round sensitive: any pinned "
+                             "wiring or formula edit turns this leg red)";
     }
 
     // ── review27-4 附魔台（94）掉落物 / 资源浏览器双渲染互斥（源码钉）──
