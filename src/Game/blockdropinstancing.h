@@ -31,6 +31,11 @@
 //      （单 Model 单几何单材质，桶内全实例经 instancing 共享 = 同 id 全实例同几何）。附魔台 94 台顶
 //      悬浮小书不进实例表（instancing 无法承载 per-instance 子树）→ 保留 delegate 逐实体渲染
 //      （Main.qml dropBookNode 移出 shape Model 成 entRoot 直接子节点，世界变换逐位不变）。
+//      t1038（Review_2026-09-11 #1 定夺修）→ **94 整体不桶化**：QML reassignShapeBuckets skip 94 +
+//      本 feeder 收纳侧（getInstanceBuffer / hasLiveMember）同参排除——桶路径下台体 feeder 解析相位
+//      （m_clock + slot×0.37）与书 entRoot QML 动画相位（delegate 创建时刻）分属两套时钟（恒定旋转
+//      偏移 + bob 反相嵌入台体），94 恒走 delegate 同链同相旧观感逐位恢复（其余 24 id 桶化不变；
+//      94 低频掉落合批损失可忽略）。
 //   ③ 异形 billboard 族（partial/cross/bed 非 3D，BillboardQuad + per-id 图标 Texture）——登记分步。
 //   ④ 工具 3D 族（五类几何 + 弓，tier 色 per-instance color 可承载）——登记分步。
 //   ⑤ 工具 / 材料 billboard 族（ToolIcon / MaterialIcon sourceItem per-id）——登记分步。

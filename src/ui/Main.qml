@@ -6274,6 +6274,8 @@ Window {
                     //   全实例共享），未入桶（桶池满溢出 / 桶释放瞬间）id 保底走本 delegate——两侧谓词
                     //   同源 ItemEntityManager::isItem3DFamily 单一权威（feeder shapeFamily 模式 +
                     //   reassignShapeBuckets 重算侧同判，批 1 hasBucket 纪律沿用）。
+                    //   t1038（Review_2026-09-11 #1）：94 恒未入桶（reassignShapeBuckets 计数循环 skip
+                    //   ——书台同相）→ 本 delegate 是 94 的唯一渲染链（台+书同链同相，不丢渲不双渲）。
                     Model {
                         visible: isItem3DFamily(entRoot.entId) && !blockShapeInstHost.hasShapeBucket(entRoot.entId)
                         geometry: ItemShapeGeometry { blockId: entRoot.entId }
@@ -6761,8 +6763,11 @@ Window {
             //   保底（visible 链 hasShapeBucket 排除同源谓词，优雅降级不丢渲）。在用桶保持不让位
             //   （review0910 #4 刻意取舍维持现状，防几何重建抖动）。空转门（review0910 #3）：本池
             //   feeder 从设计起带门（familyId<=0 / 桶内活体 0 不走钟，活跃沿 start+markDirty 兜底），
-            //   批 1 池同批收口同款门。附魔台（94）台顶悬浮小书保留 delegate 逐实体渲染（dropBookNode
-            //   已上移 entRoot 直属——instancing 无法承载 per-instance 子树，两路径观感一致）。
+            //   批 1 池同批收口同款门。附魔台（94）**整体不桶化**（Review_2026-09-11 #1 定夺修，t1038）：
+            //   台顶悬浮小书是 delegate 侧 per-instance 子树（dropBookNode，entRoot QML 动画驱动），
+            //   instancing 无法承载——若 94 入桶，台体走 feeder 解析相位而书走 entRoot 动画相位
+            //   （两套时钟 → 恒定旋转偏移 + bob 反相书嵌台体），故计数循环 skip 94：台+书恒走
+            //   delegate 同链同相（旧观感逐位恢复；94 低频掉落合批损失可忽略；C++ 收纳侧同参排除）。
             //   review0910 #2 盲区登记：本 host 的 reassignShapeBuckets / hasShapeBucket 是纯 QML JS
             //   编排（信号 handler 改表类），headless 探针不可行为级断言（与 reassignDropBuckets 同型
             //   盲区）——源码钉 + 实机确认项（≥10 种 3D 族 id 定向冒烟）覆盖。
@@ -6790,6 +6795,13 @@ Window {
                         if (!itemEntities.aliveAt(i)) continue
                         const id = itemEntities.itemIdAt(i)
                         if (!itemEntities.isItem3DFamily(id)) continue
+                        // Review_2026-09-11 #1（t1038）：instancing 无法承载 per-instance 子树，94 整体不桶化保书台同相
+                        //   （若 94 入桶：台体走 feeder 解析相位 m_clock+slot×0.37，小书仍走 entRoot QML 动画相位=
+                        //   delegate 创建时刻 → 两套时钟恒定旋转偏移 0-360° + bob 反相时书嵌入台体）。skip 后
+                        //   hasShapeBucket(94) 恒 false（无第二处特判）→ 台+书恒走 delegate 同链同相，旧观感逐位
+                        //   恢复；94 低频掉落合批损失可忽略。C++ 收纳侧（blockdropinstancing getInstanceBuffer /
+                        //   hasLiveMember）同参排除为第二道防线 = 阴性轮探针可达面。
+                        if (id === 94) continue
                         counts[id] = (counts[id] || 0) + 1
                     }
                     const prev = blockShapeInstHost.buckets
