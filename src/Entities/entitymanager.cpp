@@ -1879,6 +1879,46 @@ void EntityManager::setGolemRetaliate(int i)
     e.golemWindup = 0.0f; // 已在蓄力中被再打 → 重蓄（打断当前拳，重新抬臂；反击记忆刷新）
 }
 
+// t1042 被动型受击惊逃（PlayerController::attackMob 命中后调；见头文件注释）。类型门收口在此：
+//   被动五型（pig/cow/sheep/chicken + 未驯服豹猫）与狼幼崽置 panicTimer，其余（敌对 / 造物 / 驯服狼 /
+//   野狼成体——后者由 setWolfProvoked 反击——驯服猫）静默 no-op。机制等价 MC 1.0：被动受击只惊逃
+//   （panic ~8s）永不反击；豹猫被打只逃不反击；幼崽不反击只惊逃。
+void EntityManager::setPanicFlee(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.dead) return;
+    const bool passiveFleeType = e.mobType == MobPig || e.mobType == MobCow || e.mobType == MobSheep
+        || e.mobType == MobChicken || (e.mobType == MobOcelot && !e.ocelotTamed);
+    const bool wolfBaby = e.mobType == MobWolf && e.baby; // t1042 幼崽不反击只惊逃（共用惊逃机制）
+    if (!passiveFleeType && !wolfBaby) return;
+    e.panicTimer = kPanicDuration;
+    qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "panic-flees for" << kPanicDuration << "s";
+}
+
+// t1042 野狼被打敌对反击锁定（PlayerController::attackMob 目标是未驯服成体狼时调；见头文件注释）。
+//   chasing=玩家走 aiHostile 先例进入写点（chasing=true + chaseTimer=kChaseMemory）；维持 / 超时 / 超距
+//   清收在 aiWolf 未驯服分支（同 hostile 收口）。驯服狼 / 狼幼崽 / 非 wolf / dead / 越界 → 静默 no-op。
+void EntityManager::setWolfProvoked(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.dead || e.mobType != MobWolf) return;
+    if (e.wolfTamed || e.baby) return; // t1031 驯服狼豁免维持 + t1042 幼崽只惊逃
+    e.chasing = true;
+    e.chaseTimer = kChaseMemory;
+    qCInfo(lcEnt) << "wild wolf" << i << "provoked: retaliates against player";
+}
+
+// t1042 惊逃剩余秒数读口（矩阵探针钉「时长 ~8s 登记面」+ 超时回落腿；非 Mob / 越界 → 0）。
+float EntityManager::panicTimerAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0.0f;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob) return 0.0f;
+    return e.panicTimer;
+}
+
 // t239 mob 子类 id（t240 pig/cow/sheep；t242/t243 分流）。越界 → 0。
 int EntityManager::mobTypeAt(int i) const
 {
@@ -2946,6 +2986,29 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     return moved;
 }
 
+// t1042 被动型惊逃移动（牛/羊/猪/鸡/豹猫 + 狼幼崽共用机制）：受击沿 setPanicFlee 置 panicTimer =
+//   kPanicDuration 后，各 AI 分支（通用被动链 / aiOcelot 未驯服分支 / aiWolf 幼崽分支）在 panicTimer>0 时
+//   调本方法。机制等价 MC 1.0 panic：背离玩家疾走 ~8s，期间不游走选向 / 不寻偶 / 不引诱 / 不幼随 / 不吃草
+//   （优先级置顶由 caller 门序保证——通用链中本分支在 love/lure/baby 之前，eating 门读 panicTimer 豁免）。
+//   实现：每 AI tick 衰减 panicTimer + 钉 yaw=离玩家（dir=(-sin,0,-cos) 约定下背离方向 = atan2(pdx,pdz)，
+//   与「朝向玩家」的 atan2(-pdx,-pdz) 反号）+ 强制疾走 kPanicSpeed + 短置 wanderTimer=0.4（防 aiWander 本帧
+//   重新随机选向，同 t1025 引诱/寻偶钉法），位移交 aiWander（复用逐轴碰撞撤回 + 边界 clamp + 撞墙缩短 timer
+//   换向 + t1029 冻结缝语义——wander 冻结时惊逃同样冻结不位移）。返回是否真位移（驱动 dirty + moveSpeed）。
+bool EntityManager::aiPanicFlee(Entity &e, float dt, World *world, float worldW, float worldD,
+                                float speedScale, const QVector3D &playerPos)
+{
+    if (e.panicTimer <= 0.0f) return false;
+    e.panicTimer -= dt;
+    if (e.panicTimer < 0.0f) e.panicTimer = 0.0f;
+    const float pdx = playerPos.x() - e.pos.x();
+    const float pdz = playerPos.z() - e.pos.z();
+    if (pdx * pdx + pdz * pdz > 1e-8f)
+        e.yawRad = std::atan2(pdx, pdz); // 背离玩家（同 (-sin,-cos) yaw 约定；重合时保当前朝向）
+    e.wanderSpeed = kPanicSpeed; // 疾走（2×kWalkSpeed；MC panic 加速游离量级）
+    e.wanderTimer = 0.4f;        // 防 aiWander 本帧重新随机选向（同 t1025 引诱钉法）
+    return aiWander(e, dt, world, worldW, worldD, speedScale);
+}
+
 // t399 鱿鱼水生 AI（详见头文件 aiSquid 注释）。机制对齐 MC 1.0 squid：水里周期喷水推进（上浮 + 水平漂游）+
 //   通用重力缓沉 → 节律性游动；离水搁浅走 t980 挣扎缓动（间歇低速蠕动，非行走步态；离水掉血在 tick
 //   窒息块）。分层（PLAN §2）：只读 World::blockAt（mobFeetInWater 脚位水格判，同文件静态助手）+ 自身
@@ -3025,8 +3088,8 @@ bool EntityManager::aiSquid(Entity &e, float dt, World *world, float worldW, flo
 }
 
 // t480 狼 AI（详见头文件 aiWolf 注释）。机制对齐 MC 1.0 狼三态：
-//   (1) 未驯服 → 中立方（t1031 口径收口：纯 aiWander 游荡、不主动攻击玩家；旧主动敌对分支退役，
-//       激怒反击面登记不做）。
+//   (1) 未驯服 → 中立方 + 受击反击（t1031 收口：不主动攻击玩家；t1042 反击面：被打 → setWolfProvoked 置
+//       chasing=玩家 → 追咬玩家，超时/超距清除同 hostile 收口；幼崽不反击只惊逃）。
 //   (2) 驯服 + 坐 → 留守（不移动不攻击）。
 //   (3) 驯服 + 站 → 跟随主人 + 防御（追击咬击 m_wolfTarget 目标 mob）；求偶期优先寻偶。
 //       t947 ① 跟随门：观察者（playerSpectator）不跟随（走近/瞬移全停 → 回退 wander）；③ chase 越障跳
@@ -3113,13 +3176,56 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         return moved;
     };
 
-    // (1) 未驯服：**中立方**（t1031 口径收口：机制等价 MC 1.0 野狼中性——不主动攻击玩家；被玩家攻击后
-    //     的激怒反击面本单登记不做，见 dev-plan t1031）。旧 t480 主动敌对分支（kWolfDetectRange 侦测 →
-    //     追击 → 近距咬玩家 emit mobAttackedPlayer）整体退役：与「骨头右键驯服」的驯兽语义冲突（敌对面
-    //     会先咬死玩家再谈驯服）且 MC 野狼本中性。非驯语义 → 纯游荡（同被动生物）。
+    // t1042 狼幼崽惊逃置顶（登记口径「幼崽不反击只惊逃」）：受击惊逃优先于驯服跟随 / 野狼游荡；惊逃窗
+    //   尽后落回各自既有语义（驯服幼崽回跟随——生产面狼幼崽恒驯服，t480 父代继承；野幼崽回游荡）。
+    //   反击面由 setWolfProvoked 的 baby 门登记兜底（chasing 永不为幼崽置位，无论驯服与否）。
+    if (e.baby && e.panicTimer > 0.0f)
+        return aiPanicFlee(e, dt, world, worldW, worldD, speedScale, playerPos);
+
+    // (1) 未驯服：野狼两态（t1031 中立收口 + t1042 反击面；机制等价 MC 1.0 原版：野狼**中立**，不主动
+    //     攻击玩家，被玩家攻击才敌对反击）。旧 t480 主动敌对分支（kWolfDetectRange 侦测 → 见人就咬）随
+    //     t1031 退役**不复活**——chasing 只能由受击沿（setWolfProvoked）置位，侦测带内仅**续期**已有反击
+    //     记忆（见下），未挑逗的野狼照旧纯游荡。
     if (!e.wolfTamed) {
-        Q_UNUSED(playerTargetable) // 旧敌对分支的锁定门形参随收口退役（签名保留 = caller 零改动）
-        return aiWander(e, dt, world, worldW, worldD, speedScale);
+        // t290 同源门（aiIronGolem `golemAngry && playerTargetable` 先例）：创造/观察者不可锁定 → 不反击
+        //   并清反击态（同 tick hostile 收口清 chasing/chaseTimer 模式，防模式切换后残留追击）。
+        if (!playerTargetable) {
+            if (e.chasing) { e.chasing = false; e.chaseTimer = 0.0f; }
+            return aiWander(e, dt, world, worldW, worldD, speedScale);
+        }
+        const float wdx = playerPos.x() - e.pos.x();
+        const float wdz = playerPos.z() - e.pos.z();
+        const float wdy = playerPos.y() - e.pos.y();
+        const float distPlayer = std::sqrt(wdx * wdx + wdz * wdz);
+        // 反击记忆维持（同 aiHostile (1) 收口语义倒置：进入只由受击沿写点置位；带内续期、带外衰减、
+        //   归零弃追回游荡）。
+        if (e.chasing) {
+            if (distPlayer <= kDetectRange) {
+                e.chaseTimer = kChaseMemory;
+            } else {
+                e.chaseTimer -= dt;
+                if (e.chaseTimer <= 0.0f) { e.chaseTimer = 0.0f; e.chasing = false; }
+            }
+        }
+        if (!e.chasing)
+            return aiWander(e, dt, world, worldW, worldD, speedScale);
+        // t1042 反击追咬：追击玩家（复用 t923 chase 体系——逐轴碰撞撤回 + 越障跳 + 泳跃同款）+ 近距咬击
+        //   （狼咬击常量 kWolf*；t321 全局节流收口同 aiHostile——多狼围攻与敌对围攻共用玩家受击节拍）。
+        //   咬击走 mobAttackedPlayer 语义信号（呈现层路由 PlayerState，Survival 门控在呈现侧，同 t290）。
+        if (distPlayer > 1e-4f) e.yawRad = std::atan2(-wdx, -wdz);
+        const bool moved = chase(playerPos.x(), playerPos.z(), kWolfChaseSpeed * speedScale, distPlayer, wdy);
+        if (distPlayer <= kAttackRange && std::abs(wdy) <= kAttackVertRange
+            && e.wolfAttackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
+            e.wolfAttackCooldown = kWolfAttackCooldown;
+            m_playerHitCooldown = kPlayerHitThrottle;
+            float kbX, kbZ;
+            if (distPlayer > 1e-3f) { kbX = wdx / distPlayer; kbZ = wdz / distPlayer; }
+            else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 兜底：朝狼面朝方向（=推开玩家）
+            emit mobAttackedPlayer(kWolfAttackDamage, e.mobType, kbX, kbZ);
+            qCInfo(lcEnt) << "wild wolf" << idx << "retaliated against player for"
+                          << kWolfAttackDamage << "HP";
+        }
+        return moved;
     }
 
     // (2)(3) 驯服 + 站。
@@ -3223,7 +3329,11 @@ bool EntityManager::aiOcelot(int idx, Entity &e, float dt, World *world, const Q
                              float worldW, float worldD, float speedScale, bool playerSpectator)
 {
     // (1) 未驯服：被动游荡（丛林野豹猫；不攻击不敌对。驯服前的野生形态，机制等价 MC 1.0 野豹猫）。
+    //     t1042 受击惊逃：被打（setPanicFlee）→ panicTimer>0 期间背离玩家疾走（MC 原版口径：豹猫被打
+    //     只逃不反击）；驯服猫不受惊逃（跟随语义不变，跟随门/坐留守照旧）。
     if (!e.ocelotTamed) {
+        if (e.panicTimer > 0.0f)
+            return aiPanicFlee(e, dt, world, worldW, worldD, speedScale, playerPos);
         return aiWander(e, dt, world, worldW, worldD, speedScale);
     }
 
@@ -7689,7 +7799,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   浮力缓沉 + 流水推动在下方 Mob 分支末段（flow push）+ 共享垂直段（buoyancy）处理。
             // t500 perf：speedScale 已提到 aiTick 守卫之外（每帧算，供水流推动用）；此处不重复。
             const bool isSheep = (e.mobType == MobSheep);
-            const bool eating = isSheep && e.eatTimer > 0.0f;
+            // t1042 惊逃优先级置顶：惊逃中的羊不进吃草周期（受击打断吃草 → 背离玩家疾走；周期剩余
+            //   eatTimer 冻结保留，惊逃结束后无食草冷却地自然续吃——MC panic 压过一切常规行为）。
+            const bool eating = isSheep && e.eatTimer > 0.0f && e.panicTimer <= 0.0f;
             if (eating) {
                 // 吃草周期：推进计时；到 apply 阈值时消耗脚下草方块（Grass→Dirt，t897 ①）；周期内强制 idle。
                 // t500 perf：节流帧用 aiDt（累积值）推进 → 平均速率与原每帧路径一致。
@@ -7801,6 +7913,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   XZ，Y 由小鸡自身落地扫描贴地 → 骑手随之起伏；骑乘中的鸡照常周期下蛋，机制等价 MC）。
                     //   moveSpeed 不在此清零：钉位 pass 每帧写入骑手速度驱动 walkPhase（小鸡腿随移动摆动）。
                 } else {
+                // t1042 被动型惊逃置顶门（MC panic 优先级最高：惊逃期间不寻偶 / 不引诱 / 不幼随 / 不游走
+                //   选向 / 不吃草扫描——见上 eating 门）：panicTimer>0 → 走 aiPanicFlee（内含 aiWander 位移）
+                //   并跳过下方选向块与公共 aiWander（防同帧双移）。
+                if (e.panicTimer > 0.0f) {
+                    if (aiPanicFlee(e, float(aiDt), world, worldW, worldD, speedScale, listener)) dirty = true;
+                } else {
                 // t400 求偶寻偶（spec「喂食 → 求偶 → 同种配对」；机制等价 MC 1.0 love mode 寻偶）：成体可繁殖 mob
                 //   在求偶期（loveTimer>0）→ 覆盖 wander 的随机选向，把 yaw 钉向最近同种求偶配偶 + 强制行走 +
                 //   短置 wanderTimer（防 aiWander 本帧重新随机选向）→ aiWander 沿该 yaw 行走靠近配偶，使两求偶者
@@ -7860,6 +7978,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 }
                 if (isSheep && e.eatCooldown > 0.0f) e.eatCooldown -= float(aiDt);
                 if (aiWander(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
+                } // t1042 惊逃豁免段收口（求偶/引诱/幼随选向 + 公共 aiWander 仅非惊逃帧走；惊逃帧上方 aiPanicFlee 已自含位移）
                 if (isSheep && e.eatCooldown <= 0.0f && e.wanderSpeed <= 0.0f) {
                     // idle 且扫描冷却到：脚下是草方块 → 开吃草周期（headPitch 动画 + 中段消耗）；无 → 重置短冷却再等。
                     //   t897 ①：目标 = 脚下草方块（旧「身前草丛」收紧——纯草地无草丛也吃、不吃不吃在看朝向）。
