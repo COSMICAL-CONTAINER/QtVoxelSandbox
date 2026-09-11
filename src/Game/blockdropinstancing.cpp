@@ -89,6 +89,9 @@ bool BlockDropInstancing::hasLiveMember() const
     const bool famOK = m_shapeFamily ? ItemEntityManager::isItem3DFamily(m_familyId)
                                      : ItemEntityManager::isPlainCubeDrop(m_familyId);
     if (!famOK) return false;
+    // t1038：94 不桶化同参排除（getInstanceBuffer 第二道防线的镜像）——94 活体不算本桶活跃，
+    //   空转门不为永不出表的 94 桶走钟（与 getInstanceBuffer 谓词同参，review0910 #3 纪律）。
+    if (m_shapeFamily && m_familyId == 94) return false;
     const int n = m_manager->count();
     for (int i = 0; i < n; ++i) {
         if (m_manager->aliveAt(i) && m_manager->itemIdAt(i) == m_familyId) return true;
@@ -118,6 +121,13 @@ QByteArray BlockDropInstancing::getInstanceBuffer(int *instanceCount)
         //   isItem3DFamily 3D 形状族（批 2 blockShapeInstHost 池），缺省 false 收 isPlainCubeDrop
         //   整立方族（批 1 行为逐位不变）；两侧谓词同源纪律与批 1 相同（hasShapeBucket 排除侧）。
         if (itemId != m_familyId) continue;
+        // t1038（Review_2026-09-11 #1）：附魔台 94 整体不桶化——instancing 无法承载 per-instance 子树
+        //   （dropBookNode 小书 = delegate 侧 entRoot QML 动画驱动），桶内台体走 feeder 解析相位而书走
+        //   delegate 动画相位（两套时钟 → 书台恒定旋转偏移 + bob 反相嵌入）。生产路径 QML
+        //   reassignShapeBuckets 已 skip 94（永无 familyId=94 的桶），此处 C++ 侧同源排除为第二道
+        //   防线：即便误指派也恒出空表，94 恒走 delegate 保底（台+书同链同相）。与 hasLiveMember
+        //   同参（review0910 #3 空转门谓词一致性纪律）。
+        if (m_shapeFamily && itemId == 94) continue;
         if (m_shapeFamily ? !ItemEntityManager::isItem3DFamily(itemId)
                           : !ItemEntityManager::isPlainCubeDrop(itemId)) continue;
         m_liveSlots.append(i);
