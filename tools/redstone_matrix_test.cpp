@@ -70,6 +70,7 @@
 #include "xporbmanager.h"         // t889 暂停语义探针（墙钟顺延三管理器调用面钉）；t858 feeder 探针共用
 #include "xporbinstancing.h"      // t858 经验球 instancing 试点探针（feeder 实例表内容级断言）
 #include "blockdropinstancing.h"  // t1027 掉落物 instancing 治理首批探针（族分桶 / 实例表内容级断言）
+#include "glowshellinstancing.h"  // t1039 掉落物 instancing 批 3 探针（光晕壳族收纳 / 颜色实例表 / 空转门 / 容量降级）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "cheststore.h"           // t1013 箱子矿车内容键存储（转正 / 回生 / 掉落链断言源）
 #include "loottable.h"            // t1035 豹猫驯服分化探针（fishingPool 直调：生鱼=驯服道具来源钉）
@@ -19974,6 +19975,325 @@ Item {
                              "deliberate trade-off, pinned at minCount=2 so any future yield "
                              "logic turns red), and the idle-gate plumbing (refreshTicker "
                              "start/stop + entitiesChanged edge) is comment-immune pinned";
+    }
+
+    // ── P-t1039a 掉落物 instancing 批 3 探针：光晕壳族全族合批（R19.23；批 1/2 P-t1027a/t1032a 同 rig）──
+    //   旧 delegate entShell 无 visible 条件 = 壳全族横切（每个活体掉落实体恒带一壳）。批 3 压成
+    //   全族单 instanced Model 单实例表（GlowShellInstancing，1 draw）。钉契约：
+    //   ① 全族收纳——整立方（泥土）/ 3D 形状族（火把 13）/ partial billboard 族（楼梯 16）/
+    //      工具段 0x100 / 材料段 0x200 同池（壳不看 itemId，与本体族路由正交）；实例数 = 活体数；
+    //   ② 实例表内容逐字对齐旧 entShell——XZ 精确 = 实体世界位、Y ∈ bob 解析带（0↔0.15）、
+    //      scale 0.45 均匀、纯 Y 轴旋转；
+    //   ③ per-instance color——普通灰 (176,176,176)（默认光 k=1）+ 静态 alpha 0.35；附魔紫
+    //      (140,64,230) + 呼吸 alpha ∈ [0.28,0.45]（t696 解析式带；逐字公式由 P-t1039d 源钉承载）。
+    //      ⚠ 断言口径：QQuick3DInstancing::calculateTableEntry 落表前经 QSSGUtils::color::sRGBToLinear
+    //      （Qt 6.11 src/utils/qssgutils.cpp 多项式 C1·c³+C2·c²+C3·c，alpha 透传），getColor() 原样
+    //      回读**线性**值——探针按同一多项式镜像期望线性值（= Quick3D 线性色管线的权威存储值；
+    //      渲染输出端转回 sRGB ⇒ 视觉 = 旧 delegate baseColor 同色，材质路径同经 sRGB→linear）；
+    //   ④ 天光乘子——k = minLight + (1-minLight)×skyLight（tintBySkyLight floor 公式；setSkyLight
+    //      0.5 → 灰 sRGB r 变 qRound(176×0.7)=123；还原 1.0 → 逐位回 176）。
+    //   阴性轮敏感：摘壳收纳 alive 过滤（false && 前缀）→ 本腿拾取后实例数面恰红。
+    {
+        // Quick3D calculateTableEntry 的 sRGB→linear 逐字镜像（QSSGUtils::color::sRGBToLinear，
+        // Qt 6.11 qssgutils.cpp：rgb*(rgb*(rgb*C1+C2)+C3)；探针线性回读期望值用）
+        const auto srgbToLinear1039a = [](float c) {
+            return c * (c * (c * 0.305306011f + 0.682171111f) + 0.012522878f);
+        };
+        ItemEntityManager items1039a;
+        GlowShellInstancing fShell1039a;
+        fShell1039a.setManager(&items1039a); // skyLight/minLight 缺省 1.0/0.4 → k=1（headless 确定态）
+        // 格距 ≥3（> kMergeRadius=2，防就近合并塌缩活体数——P-t1027a 同 rig 纪律）；附魔工具与
+        //   普通工具同 id 异位（距 8）不合并——附魔随实例走（t590）正是紫/灰分色断言的前提。
+        items1039a.spawnItem(10, 40, 10, int(BR::Dirt), 1);                    // 灰壳（整立方族）
+        items1039a.spawnItem(14, 40, 10, 13, 1);                               // 灰壳（3D 形状族）
+        items1039a.spawnItem(18, 40, 10, int(BR::WoodStairs), 1);              // 灰壳（billboard 族）
+        items1039a.spawnItem(22, 40, 10, 0x100, 1);                            // 灰壳（工具段）
+        items1039a.spawnItem(26, 40, 10, 0x200, 1);                            // 灰壳（材料段）
+        items1039a.spawnItem(30, 40, 10, 0x100, 1, QVariantList{7, 0, 0, 0});  // 紫壳（附魔工具）
+        const int cntAll1039a = fShell1039a.probeInstanceCount();
+        bool ok1039a = cntAll1039a == 6; // ① 全族收纳：5 灰 + 1 紫 = 活体数
+        // ② 首条（泥土灰壳）变换内容
+        QVector3D p1039a, sc1039a;
+        QQuaternion q1039a;
+        QColor c1039a;
+        ok1039a = ok1039a && fShell1039a.probeInstanceAt(0, &p1039a, &sc1039a, &q1039a, &c1039a);
+        ok1039a = ok1039a && std::abs(p1039a.x() - 10.5f) < 1e-4f && std::abs(p1039a.z() - 10.5f) < 1e-4f;
+        ok1039a = ok1039a && p1039a.y() >= 40.5f - 1e-4f && p1039a.y() <= 40.65f + 1e-4f;
+        ok1039a = ok1039a && std::abs(sc1039a.x() - 0.45f) < 1e-5f
+                  && std::abs(sc1039a.y() - 0.45f) < 1e-5f && std::abs(sc1039a.z() - 0.45f) < 1e-5f;
+        const QVector3D eu1039a = q1039a.toEulerAngles();
+        ok1039a = ok1039a && std::abs(std::remainder(eu1039a.x(), 360.0f)) < 1e-3f
+                  && std::abs(std::remainder(eu1039a.z(), 360.0f)) < 1e-3f;
+        // ③ 颜色实例表：灰 176 三通道（线性落表）+ 静态 0.35 alpha（alpha 透传不进伽马）
+        const float tolC1039a = 2.0f / 255.0f;
+        ok1039a = ok1039a && std::abs(c1039a.redF() - srgbToLinear1039a(176.0f / 255.0f)) <= tolC1039a
+                  && std::abs(c1039a.greenF() - srgbToLinear1039a(176.0f / 255.0f)) <= tolC1039a
+                  && std::abs(c1039a.blueF() - srgbToLinear1039a(176.0f / 255.0f)) <= tolC1039a;
+        ok1039a = ok1039a && std::abs(c1039a.alphaF() - 0.35f) <= 1.5f / 255.0f + 1e-3f;
+        // ③ 紫实例（附魔工具，槽序第 6 条）：rgb 140/64/230（线性落表）+ 呼吸带 alpha
+        QColor cp1039a;
+        ok1039a = ok1039a && fShell1039a.probeInstanceAt(5, nullptr, nullptr, nullptr, &cp1039a);
+        ok1039a = ok1039a && std::abs(cp1039a.redF() - srgbToLinear1039a(140.0f / 255.0f)) <= tolC1039a
+                  && std::abs(cp1039a.greenF() - srgbToLinear1039a(64.0f / 255.0f)) <= tolC1039a
+                  && std::abs(cp1039a.blueF() - srgbToLinear1039a(230.0f / 255.0f)) <= tolC1039a;
+        ok1039a = ok1039a && cp1039a.alphaF() >= 0.28f - 2.0f / 255.0f
+                  && cp1039a.alphaF() <= 0.45f + 2.0f / 255.0f;
+        // ④ 天光乘子沿：k = 0.4 + 0.6×0.5 = 0.7 → 灰 sRGB r = qRound(176×0.7) = 123；还原逐位回 176
+        fShell1039a.setSkyLight(0.5); // minLight 缺省 0.4 = Main.qml window.minLight 同值
+        QColor cd1039a;
+        ok1039a = ok1039a && fShell1039a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cd1039a);
+        ok1039a = ok1039a && std::abs(cd1039a.redF() - srgbToLinear1039a(123.0f / 255.0f)) <= tolC1039a;
+        fShell1039a.setSkyLight(1.0);
+        ok1039a = ok1039a && fShell1039a.probeInstanceAt(0, nullptr, nullptr, nullptr, &cd1039a)
+                  && std::abs(cd1039a.redF() - srgbToLinear1039a(176.0f / 255.0f)) <= tolC1039a;
+        // ① 拾取沿：泥土被拾（setCountAt 0 = releaseSlot）→ 实例表塌到 5（空槽不进表）
+        items1039a.setCountAt(0, 0);
+        const int cntAfterPick1039a = fShell1039a.probeInstanceCount();
+        ok1039a = ok1039a && cntAfterPick1039a == 5;
+        if (!ok1039a)
+            qInfo().noquote() << "  [t1039a diag] all" << cntAll1039a << "afterPick"
+                              << cntAfterPick1039a
+                              << "grayLin r/g/b/a" << c1039a.redF() << c1039a.greenF() << c1039a.blueF()
+                              << c1039a.alphaF() << "grayLinExp" << srgbToLinear1039a(176.0f / 255.0f)
+                              << "purpleLin r/g/b" << cp1039a.redF() << cp1039a.greenF() << cp1039a.blueF()
+                              << "purpleExp" << srgbToLinear1039a(140.0f / 255.0f) << ","
+                              << srgbToLinear1039a(64.0f / 255.0f) << "," << srgbToLinear1039a(230.0f / 255.0f)
+                              << "purpleA" << cp1039a.alphaF()
+                              << "dimLin r" << cd1039a.redF() << "dimExp" << srgbToLinear1039a(123.0f / 255.0f);
+        if (!ok1039a) ++totalFail;
+        qInfo().noquote() << (ok1039a ? "PASS" : "FAIL")
+                          << "| t1039a drop glow-shell instancing batch 3: the old entShell delegate "
+                             "carried no visible condition so EVERY live drop entity wears a shell "
+                             "(family cross-cutting) - the whole shell family now feeds one instanced "
+                             "Model (one draw): plain-cube dirt, 3D-family torch, billboard stairs, "
+                             "tool-segment and material-segment items all enter the same table with "
+                             "the entry count equal to the live count, entries carry exact XZ slot "
+                             "positions + the analytic bob band on Y + 0.45 uniform scale + pure-Y "
+                             "rotation (verbatim entShell parity), per-instance color holds gray "
+                             "176/176/176 with static alpha 0.35 versus enchanted purple 140/64/230 "
+                             "with the t696 breathing alpha band 0.28..0.45 (asserted against the "
+                             "linear values Quick3D's calculateTableEntry stores via its "
+                             "sRGBToLinear pipeline conversion - the renderer's authoritative table "
+                             "content, visually identical to the delegate material path), and the "
+                             "skylight tint "
+                             "follows k = minLight + (1-minLight)*skyLight (dimming to r=123 at "
+                             "skyLight 0.5 and restoring bit-exact at 1.0) while picking a drop "
+                             "collapses the table - hasTransparency makes the table alpha render on "
+                             "the opaque white material (negative-round sensitive: shell alive-filter "
+                             "removal)";
+    }
+
+    // ── P-t1039b 批 3 两侧谓词同源 + 跨池正交腿（壳不双渲 / 壳不占本体桶 / 桶不占壳）──
+    //   同源最强形式：QML delegate 排除侧（entShell visible !hasShellAt）薄委托 feeder 的
+    //   Q_INVOKABLE hasShellAt —— 与 getInstanceBuffer 收纳（前 kShellCap 活体槽）互为镜像。
+    //   本腿钉 C++ 可达面：① 谓词镜像——≤cap 时 hasShellAt(i)==aliveAt(i) ∀i 且双 feeder 确定性
+    //   同表（count 相等）；② 谓词边界——越界 / 空槽 / 无 manager 恒 false（delegate 壳保底）；
+    //   ③ 跨池正交——壳池收火把 13 而整立方本体桶（familyId=13）恒空、泥土两池并存（壳 + 本体
+    //   是不同视觉件，同 id 壳不双渲 ≠ 壳体互斥）；④ 死槽翻转 + 槽复用回升（t256 slot-reuse 语义）。
+    //   阴性轮敏感：摘壳收纳 alive 过滤 → ①镜像 / ④塌缩面恰红。
+    {
+        ItemEntityManager items1039b;
+        GlowShellInstancing fShell1039b, fMirror1039b;
+        fShell1039b.setManager(&items1039b);
+        fMirror1039b.setManager(&items1039b); // 第二实例 = 确定性同表面（同 manager 同表）
+        items1039b.spawnItem(10, 40, 10, int(BR::Dirt), 1);       // 整立方（本体桶也收）
+        items1039b.spawnItem(14, 40, 10, 13, 1);                  // 火把（3D 族，本体桶不收）
+        items1039b.spawnItem(18, 40, 10, int(BR::Wool), 1);       // 整立方（羊毛）
+        items1039b.spawnItem(22, 40, 10, 0x100, 1);               // 工具段（本体桶不收）
+        items1039b.spawnItem(26, 40, 10, 0x200, 1);               // 材料段（本体桶不收）
+        bool parity1039b = true;
+        for (int i = 0; i < items1039b.count(); ++i)
+            parity1039b = parity1039b && fShell1039b.hasShellAt(i) == items1039b.aliveAt(i);
+        const int cntA1039b = fShell1039b.probeInstanceCount();
+        const int cntB1039b = fMirror1039b.probeInstanceCount();
+        const bool okMirror1039b = parity1039b && cntA1039b == 5 && cntB1039b == 5; // ①
+        const bool okBounds1039b = !fShell1039b.hasShellAt(-1) && !fShell1039b.hasShellAt(items1039b.count()); // ②
+        GlowShellInstancing fBare1039b; // 无 manager（QML 未接线退化面）
+        const bool okBare1039b = !fBare1039b.hasShellAt(0) && fBare1039b.probeInstanceCount() == 0; // ②
+        // ③ 跨池正交：本体桶侧（批 1 BlockDropInstancing）——泥土入整立方桶、火把恒不进；
+        //    壳池侧两 id 全收（count 5）。壳排除链挂 entShell 节点、桶排除链挂本体 Model——正交。
+        BlockDropInstancing fPlainDirt1039b, fPlainTorch1039b;
+        fPlainDirt1039b.setManager(&items1039b);
+        fPlainDirt1039b.setFamilyId(int(BR::Dirt));
+        fPlainTorch1039b.setManager(&items1039b);
+        fPlainTorch1039b.setFamilyId(13);
+        const bool okOrtho1039b = fPlainDirt1039b.probeInstanceCount() == 1
+                                  && fPlainTorch1039b.probeInstanceCount() == 0
+                                  && fShell1039b.probeInstanceCount() == 5;
+        // ④ 死槽翻转 + 槽复用：拾走火把（槽 1）→ hasShellAt(1) false、壳表塌 4（本体泥土桶不动）；
+        //    远位重投火把 → 复用空槽 → hasShellAt 回 true、壳表回 5。
+        items1039b.setCountAt(1, 0);
+        const bool okDead1039b = !fShell1039b.hasShellAt(1) && fShell1039b.probeInstanceCount() == 4
+                                 && fPlainDirt1039b.probeInstanceCount() == 1;
+        items1039b.spawnItem(60, 40, 10, 13, 1); // 距其余 ≥3 格防合并
+        const bool okReuse1039b = fShell1039b.hasShellAt(1) && fShell1039b.probeInstanceCount() == 5;
+        const bool ok1039b = okMirror1039b && okBounds1039b && okBare1039b
+                             && okOrtho1039b && okDead1039b && okReuse1039b;
+        if (!ok1039b)
+            qInfo().noquote() << "  [t1039b diag] mirror" << okMirror1039b << "bounds" << okBounds1039b
+                              << "bare" << okBare1039b << "ortho" << okOrtho1039b << "dead"
+                              << okDead1039b << "reuse" << okReuse1039b
+                              << "cntA" << cntA1039b << "cntB" << cntB1039b;
+        if (!ok1039b) ++totalFail;
+        qInfo().noquote() << (ok1039b ? "PASS" : "FAIL")
+                          << "| t1039b glow-shell two-sided same-source predicate + cross-pool "
+                             "orthogonality: the delegate exclusion side (entShell visible "
+                             "!hasShellAt) thin-delegates the feeder's own Q_INVOKABLE so admission "
+                             "(getInstanceBuffer takes the first kShellCap live slots) and exclusion "
+                             "are mirror images of one C++ function - with the pool under cap "
+                             "hasShellAt equals aliveAt for every slot and two feeder instances "
+                             "produce identical tables, out-of-range/dead/unmanaged slots answer "
+                             "false (delegate shell fallback), the shell pool admits torch-13 while "
+                             "the plain-cube body bucket for id 13 stays empty and dirt lives in "
+                             "both pools (shell and body are separate visual pieces - one shell per "
+                             "entity, never two), and picking a torch flips its hasShellAt false "
+                             "with the table collapsing while a far re-spawn reuses the slot and "
+                             "restores admission (negative-round sensitive: shell alive-filter "
+                             "removal)";
+    }
+
+    // ── P-t1039c 批 3 空转门行为腿 + kShellCap 溢出降级腿（t1032c 同纪律；壳族无 familyId →
+    //    活跃判定 = 任一活体槽）──
+    //   空转三停一启：构造停① / 接线停② / 拾走停③；首发活体启（entitiesChanged 沿）+ 事件泵后
+    //   保持。skyLight/minLight 沿不启钟（色调重取无时钟语义）。溢出降级：130 活体（manager 上限
+    //   200 内）→ 实例表恰 128（kShellCap）、尾 2 槽 hasShellAt false（delegate 壳保底）；拾走前段
+    //   一槽 → 尾槽 128 转入池（降级→恢复连续面）。
+    //   阴性轮敏感：摘空转门（构造 start + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红；
+    //   摘收纳容量（上限放宽）→ 溢出面恰红。
+    {
+        ItemEntityManager items1039c;
+        GlowShellInstancing fGate1039c;
+        const auto pumpFor1039 = [](int ms) {
+            QElapsedTimer t1039c; t1039c.start();
+            while (!t1039c.hasExpired(ms))
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const bool okCtorIdle1039c = !fGate1039c.probeTickerActive();   // 停①：构造不启钟
+        fGate1039c.setManager(&items1039c);
+        const bool okWireIdle1039c = !fGate1039c.probeTickerActive();   // 停②：接线后仍空转
+        fGate1039c.setSkyLight(0.5);
+        const bool okTintIdle1039c = !fGate1039c.probeTickerActive();   // 色调沿不启钟
+        fGate1039c.setSkyLight(1.0);
+        items1039c.spawnItem(10, 40, 10, int(BR::Dirt), 1);             // 启：entitiesChanged 活跃沿
+        const bool okActiveEdge1039c = fGate1039c.probeTickerActive()
+                                       && fGate1039c.probeInstanceCount() == 1;
+        pumpFor1039(50);
+        const bool okActiveRun1039c = fGate1039c.probeTickerActive();   // 活跃期恒走钟
+        items1039c.setCountAt(0, 0);                                    // 拾走 → 停③：空转沿
+        const bool okIdleEdge1039c = !fGate1039c.probeTickerActive();
+        pumpFor1039(50);
+        const bool okIdleStay1039c = !fGate1039c.probeTickerActive();   // 空转期保持停
+        // 溢出降级腿：130 活体泥土（30 列 × 行距 3 格，格距 > kMergeRadius=2 防合并）
+        for (int k = 0; k < 130; ++k)
+            items1039c.spawnItem(4 + 3 * (k % 30), 40, 4 + 3 * (k / 30), int(BR::Dirt), 1);
+        const int cntCap1039c = fGate1039c.probeInstanceCount();
+        const bool okCapCount1039c = cntCap1039c == GlowShellInstancing::kShellCap; // 128 封顶
+        const bool okCapTail1039c = !fGate1039c.hasShellAt(128) && !fGate1039c.hasShellAt(129)
+                                    && fGate1039c.hasShellAt(0) && fGate1039c.hasShellAt(127);
+        const bool okCapActive1039c = fGate1039c.probeTickerActive();   // 壳池活跃（动画走钟）
+        items1039c.setCountAt(0, 0); // 拾走前段一槽 → 活体 129 → 尾槽 128 转入池（恢复面）
+        const bool okCapRestore1039c = fGate1039c.hasShellAt(128) && !fGate1039c.hasShellAt(129)
+                                       && !fGate1039c.hasShellAt(0)
+                                       && fGate1039c.probeInstanceCount() == GlowShellInstancing::kShellCap;
+        // 源面：构造体不含无条件 start（t1032c 同款结构钉——摘门 lesion 在构造体重启钟即翻红）
+        const QString exeDir1039c = QCoreApplication::applicationDirPath();
+        QFile gsi1039c(QDir(exeDir1039c + QStringLiteral("/..")).absoluteFilePath(
+            QStringLiteral("src/Game/glowshellinstancing.cpp")));
+        const QString gsiSrc1039c = gsi1039c.open(QIODevice::ReadOnly)
+            ? QString::fromUtf8(gsi1039c.readAll()) : QString();
+        const int ctor0t1039c = gsiSrc1039c.indexOf(QStringLiteral("GlowShellInstancing::GlowShellInstancing"));
+        const int ctorEnd1039c = gsiSrc1039c.indexOf(QStringLiteral("\n}"), ctor0t1039c);
+        const bool okCtorSrc1039c = ctor0t1039c >= 0 && ctorEnd1039c > ctor0t1039c
+            && !gsiSrc1039c.mid(ctor0t1039c, ctorEnd1039c - ctor0t1039c).contains(QStringLiteral("m_ticker.start()"));
+        const bool ok1039c = okCtorIdle1039c && okWireIdle1039c && okTintIdle1039c
+                             && okActiveEdge1039c && okActiveRun1039c && okIdleEdge1039c
+                             && okIdleStay1039c && okCapCount1039c && okCapTail1039c
+                             && okCapActive1039c && okCapRestore1039c && okCtorSrc1039c;
+        if (!ok1039c)
+            qInfo().noquote() << "  [t1039c diag] ctor" << okCtorIdle1039c << "wire" << okWireIdle1039c
+                              << "tint" << okTintIdle1039c << "activeEdge" << okActiveEdge1039c
+                              << "activeRun" << okActiveRun1039c << "idleEdge" << okIdleEdge1039c
+                              << "idleStay" << okIdleStay1039c << "capCount" << okCapCount1039c
+                              << "capTail" << okCapTail1039c << "capActive" << okCapActive1039c
+                              << "capRestore" << okCapRestore1039c << "ctorSrc" << okCtorSrc1039c
+                              << "cnt" << cntCap1039c;
+        if (!ok1039c) ++totalFail;
+        qInfo().noquote() << (ok1039c ? "PASS" : "FAIL")
+                          << "| t1039c glow-shell idle gate + kShellCap overflow degradation: the "
+                             "16ms feeder timer starts STOPPED (constructor stays start-free, "
+                             "wiring and a skylight tint edge both leave it idle), the first live "
+                             "drop starts it through the entitiesChanged edge with a fresh table, "
+                             "the active period survives an event pump, picking the last drop stops "
+                             "it and a pump does not revive it (no familyId for the cross-cutting "
+                             "shell family - any live slot is activity), stuffing 130 live drops "
+                             "caps the instance table at exactly kShellCap=128 with the two tail "
+                             "slots answered false (delegate shell fallback, manager cap 200 keeps "
+                             "the overflow state reachable) and picking one head slot promotes the "
+                             "first overflow slot back into the pool (negative-round sensitive: "
+                             "idle-gate removal and admission-cap removal)";
+    }
+
+    // ── P-t1039d 批 3 两侧接线源钉 + 动画解析式逐字钉（t1032d 同纪律；QML 编排面盲区的源钉覆盖）──
+    //   QML 侧只有薄委托（无 reassign 表类 handler——壳族无桶池），headless 行为面由 P-t1039a/b/c
+    //   直调覆盖；本腿钉接线在位（host id / instancing 绑定 / manager / 天光两绑 / 薄委托 / entShell
+    //   排除 / 呼吸 running 门 / 白基色）+ C++ 侧公式逐字（呼吸 0.28+0.17·½·(1−cos) / 静态 0.35 /
+    //   紫 140 / 灰 176 / 收纳容量 / slot×0.37 错峰 / scale 0.45 / hasTransparency / 天光 floor 公式 /
+    //   空转门启停 / entitiesChanged 沿）。
+    {
+        const QString exeDir1039d = QCoreApplication::applicationDirPath();
+        const QString root1039d = QDir(exeDir1039d + QStringLiteral("/..")).absolutePath();
+        QStringList miss1039d;
+        miss1039d << pinSet(root1039d + QStringLiteral("/src/ui/Main.qml"), {
+            {"qml-glowshell-host-id", "id: glowShellInstHost"},
+            {"qml-glowshell-instancing-bind", "instancing: GlowShellInstancing {"},
+            {"qml-glowshell-manager-bind", "manager: itemEntities", 3},
+            {"qml-glowshell-skylight-bind", "skyLight: worldClock.skyLight"},
+            {"qml-glowshell-minlight-bind", "minLight: window.minLight"},
+            {"qml-glowshell-thin-delegate",
+             "function hasShellAt(slot) { return glowShellInst.hasShellAt(slot) }"},
+            {"qml-glowshell-entshell-exclude", "visible: !glowShellInstHost.hasShellAt(index)"},
+            {"qml-glowshell-breath-gate", "running: entShell.visible && entRoot.entHasEnch"},
+            {"qml-glowshell-white-base", "baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)", 2},
+        });
+        miss1039d << pinSet(root1039d + QStringLiteral("/src/Game/glowshellinstancing.h"), {
+            {"hdr-glowshell-cap", "static constexpr int kShellCap = 128"},
+            {"hdr-glowshell-hasshell", "Q_INVOKABLE bool hasShellAt(int slot) const"},
+            {"hdr-glowshell-gate-probe", "Q_INVOKABLE bool probeTickerActive() const"},
+        });
+        miss1039d << pinSet(root1039d + QStringLiteral("/src/Game/glowshellinstancing.cpp"), {
+            {"feeder-glowshell-transparency", "setHasTransparency(true)"},
+            {"feeder-glowshell-breath-formula",
+             "0.28 + 0.17 * 0.5 * (1.0 - std::cos(M_PI * s3))"},
+            {"feeder-glowshell-static-alpha", "0.35f"},
+            {"feeder-glowshell-purple", "qRound(140.0 * k)"},
+            {"feeder-glowshell-gray", "qRound(176.0 * k)"},
+            {"feeder-glowshell-cap-admission", "m_liveSlots.size() < kShellCap"},
+            {"feeder-glowshell-stagger", "slot * 0.37"},
+            {"feeder-glowshell-scale", "QVector3D(0.45f, 0.45f, 0.45f)"},
+            {"feeder-glowshell-lightk", "m_minLight + (1.0 - m_minLight) * m_skyLight"},
+            {"feeder-glowshell-idle-start", "m_ticker.start()"},
+            {"feeder-glowshell-idle-stop", "m_ticker.stop()"},
+            {"feeder-glowshell-entities-edge", "connect(m_manager, &ItemEntityManager::entitiesChanged"},
+        });
+        const bool ok1039d = miss1039d.isEmpty();
+        if (!ok1039d)
+            qInfo().noquote() << "  [t1039d diag] pin miss:" << miss1039d.join(QLatin1Char(','));
+        if (!ok1039d) ++totalFail;
+        qInfo().noquote() << (ok1039d ? "PASS" : "FAIL")
+                          << "| t1039d glow-shell wiring source pins + verbatim analytic pins: the "
+                             "QML side stays a thin delegation (no bucket reassignment handler - the "
+                             "cross-cutting shell family needs no bucket pool) with the host id, the "
+                             "GlowShellInstancing binding, the itemEntities manager plus the "
+                             "worldClock.skyLight and window.minLight tint bindings, the "
+                             "hasShellAt thin delegate, the entShell visible exclusion, the "
+                             "breathing running gate and the white material base color all pinned "
+                             "comment-immune, while the C++ feeder carries the verbatim calibers - "
+                             "hasTransparency(true), the t696 breathing formula "
+                             "0.28 + 0.17*0.5*(1-cos(pi*s)) at 800ms per leg, static gray alpha "
+                             "0.35, purple 140/64/230 vs gray 176/176/176 through the skylight "
+                             "floor formula, kShellCap admission, the slot*0.37 stagger, the 0.45 "
+                             "shell scale and the idle-gate plumbing (negative-round sensitive: "
+                             "any pinned wiring or formula edit turns this leg red)";
     }
 
     // ── review27-4 附魔台（94）掉落物 / 资源浏览器双渲染互斥（源码钉）──
