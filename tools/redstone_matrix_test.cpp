@@ -18386,6 +18386,11 @@ Item {
         QQuickWindow probeWin;
         pcF.setParentItem(probeWin.contentItem());
         pcF.grab();
+        // t1040 rig 加固（t1030 盲区清偿）：烈焰弹是材料段物品，真实游戏 QML 绑定 player.selectedBlock
+        //   经 Hotbar::selectedBlockId 材料段→Air；探针无 QML 引擎，m_selectedBlock 会保持构造默认
+        //   Stone（playercontroller.h t06 默认）。发射分支按 hotbar heldItemId 无条件 return（不读
+        //   selectedBlock，fall-through 通用放置不可达）→ 显式归 Air 建模接线（阴性轮/未来腿兜底）。
+        pcF.setSelectedBlock(int(BR::Air));
         // 配方 match 双证 + id 钉位 + 创造调色板
         const int gridCoal[9] = { RecipeRegistry::BlazePowderId, RecipeRegistry::CoalId,
                                   RecipeRegistry::GunpowderId, 0, 0, 0, 0, 0, 0 };
@@ -20695,6 +20700,7 @@ Item {
         QQuickWindow probeWin14;
         pcB.setParentItem(probeWin14.contentItem());
         pcB.grab(); // captured 入口门（P-t891 探针同款挂窗载体，无 show）
+        pcB.setSelectedBlock(int(BR::Air)); // t1040 rig 加固（t1030 同式）：烈焰弹材料段→Air 建模（kCap 拒生成腿分支 return 不读此面，兜底通用放置）
         pcB.loadSavedState(3.5f, float(fy14 + 1), 6.5f, 0.0f, -30.0f, 2 /* Survival */);
         int swingB = 0;
         QObject::connect(&pcB, &PlayerController::swingArm, &pcB, [&]() { ++swingB; });
@@ -27597,6 +27603,7 @@ Item {
             PlayerController pca;
             pca.setParentItem(probeWin949.contentItem());
             pca.grab(); // m_window 就绪 → setCaptured(true)（placeBlock/eating 共同入口门）
+            pca.setSelectedBlock(int(BR::Air)); // t1040 rig 加固（t1030 同式）：生鱼材料段→Air 建模（eventFilter 喂食分流 + 分支 return 均不读此面，兜底 fall-through 通用放置）
             const int cat = aimRig949(pca, wa, ema, hba, 20, 12,
                                       EntityManager::MobOcelot, RecipeRegistry::RawFishId);
             bool tamed = false;
@@ -27623,6 +27630,7 @@ Item {
             PlayerController pcb;
             pcb.setParentItem(probeWin949.contentItem());
             pcb.grab();
+            pcb.setSelectedBlock(int(BR::Air)); // t1040 rig 加固（t1030 同式）：熟鱼食物分支 beginEating 不进 placeBlock，selectedBlock 归 Air 建模（兜底）
             const int cat = aimRig949(pcb, wb, emb, hbb, 20, 12,
                                       EntityManager::MobOcelot, RecipeRegistry::CookedFishId);
             bool tamed = false;
@@ -27647,6 +27655,7 @@ Item {
             PlayerController pcc;
             pcc.setParentItem(probeWin949.contentItem());
             pcc.grab();
+            pcc.setSelectedBlock(int(BR::Air)); // t1040 rig 加固（t1030 同式）：狼肉材料段→Air 建模（喂食分流 + 肉分支 return 均不读此面，兜底）
             const int wolf = aimRig949(pcc, wc, emc, hbc, 20, 12,
                                        EntityManager::MobWolf, RecipeRegistry::RawBeefId);
             bool tamed = false;
@@ -34908,6 +34917,7 @@ Item {
             pcT996.grab(); // m_window 就绪 → setCaptured(true) 走通（placeBlock 入口门）
             hbT996.setStack(0, int(ToolRegistry::FlintAndSteel), 1); // 手持打火石（用户场景）
             hbT996.setSelectedSlot(0);
+            pcT996.setSelectedBlock(int(BR::Air)); // t1040 rig 加固（t1030 同式）：打火石工具段→Air 建模（引燃分支按 heldItemId 无条件 return 不读此面，兜底通用放置）
             // 瞄准 + tick 刷射线（t945 aimP945 同款：release+grab 重居中光标防 delta 踢变 →
             //   loadSavedState 定位定向 → tick 刷 updateRaycast 命中）。
             const auto aimT996 = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ) {
@@ -42388,6 +42398,7 @@ Item {
             //   验后还原空手（防 heldItemId 残留劫持后续 placeBlock 分流）。
             const float feetTop9[3] = { float(xn9) - 1.5f, float(kRigY + 3), float(zn9) + 0.5f };
             const float aimTop9[3] = { float(xn9) + 0.5f, float(kRigY) + 1.9f, float(zn9) + 0.5f };
+            pcT1017.setSelectedBlock(BR::Air); // t1040 rig 加固：粉尘物品 QML 绑定归 Air——前腿置入的 WoodTrapdoor 残留在此腿被 heldItemId 分流旁路（不读 selectedBlock），显式归 Air 消残留 + 兜底
             hbT1017.setHeldBlock(RecipeRegistry::RedstoneId);
             const QVector3D hitDu = aimT1017(feetTop9[0], feetTop9[1], feetTop9[2],
                                              aimTop9[0], aimTop9[1], aimTop9[2]);
@@ -44081,6 +44092,10 @@ Item {
         QQuickWindow winF;
         pcF.setParentItem(winF.contentItem());
         pcF.grab();
+        // t1040 rig 加固（t1030 同式）：锄/种子皆经 hotbar heldItemId 分流且分支无条件 return（含
+        //   阴性腿「石头不耕 / 泥土不种」）→ m_selectedBlock 从未被读；显式归 Air 建模 QML 材料/
+        //   工具段→Air 接线，堵 fall-through 通用放置对默认 Stone 的潜在误放误耗（隐性消耗）。
+        pcF.setSelectedBlock(int(BR::Air));
         // 掉落收集（等价 Main.qml onSpawnItem 直连计数，t852 先例）。
         QVector<int> dropIdF, dropCntF;
         const QMetaObject::Connection dropConnF = QObject::connect(
@@ -44523,6 +44538,10 @@ Item {
         // (1) 调音 round-trip：空手生存瞄音符盒顶面，右键 25 次 → 音高序列 1..24,0（(p+1)%25 回绕）
         //     恰 25 次 noteBlockTuned；第 9 次音名断言「A4」（noteBlockNoteName 单一权威，n=9=440Hz）；
         //     终态 state 音高段 == 0（round-trip 契约：25 次≡回 0）。
+        // t1040 rig 加固（t1030 同式）：空手调音腿在 QML 绑定下 selectedBlock=Air（空手分支 miss 时
+        //   fall-through 到 m_selectedBlock==Air 通用放置守卫）——显式归 Air 建模，防 aim 落空踩构造
+        //   默认 Stone 误放误耗（音符盒分支拦截不受影响）。
+        pcT28b.setSelectedBlock(int(BR::Air));
         const QVector3D hitTun = aimT28b(14.5f, 16.5f, float(nx28b) + 0.5f, float(ny28b) + 0.9f,
                                          float(nz28b) + 0.5f, 2 /* Survival */);
         for (int i = 0; i < 25; ++i) {
