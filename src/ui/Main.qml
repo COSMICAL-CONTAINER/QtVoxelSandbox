@@ -6602,8 +6602,18 @@ Window {
                     //     天光乘子夜间同步变暗（同浅灰壳）。无附魔 → 浅灰半透（原状）。
                     //   t696：紫晕加缓慢呼吸（opacity 0.28↔0.45，~1.6s 循环）—— 静态半透壳观感弱（用户实测
                     //     「掉落无紫晕」实为不显眼）；shimmer 让附魔态一眼可辨（机制等价 MC glint 流动光）。
+                    //   t1039（R19.23）批 3 instancing：壳族全族合批——每个活体掉落实体的壳经
+                    //     glowShellInstHost 单 Model 单实例表渲染（GlowShellInstancing，1 draw/全族壳），
+                    //     本 delegate 壳仅作**降级保底**：visible 排除链 !hasShellAt(index)（薄委托
+                    //     GlowShellInstancing 同一 C++ 谓词——两侧同源最强形式，同 id 壳不双渲）；
+                    //     溢出（壳池 kShellCap=128 满）/ 无 manager 时 hasShellAt=false → 本壳照旧
+                    //     逐实体渲染（优雅降级不丢渲，与批 1 hasBucket / 批 2 hasShapeBucket 纪律
+                    //     同型——壳排除链只挂本节点，与本体 Model 的两条桶排除链正交）。壳-体相位
+                    //     脱锁口径（feeder 时钟 vs 本 delegate 动画钟）已登记为接受：壳是独立半透
+                    //     halo（0.45 包 0.3 本体，非嵌入件），与 t1038 书-台不透明嵌入件不同级。
                     Model {
                         id: entShell
+                        visible: !glowShellInstHost.hasShellAt(index)
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6615,8 +6625,11 @@ Window {
                             opacity: 0.35          // 半透（<1 触发透明混合）
                         }
                         // t696 附魔呼吸（仅带附魔实体播放；普通掉落物静态灰壳不动画）。
+                        //   t1039：running 追加 entShell.visible 门（t1023 「Animation on 不随
+                        //   visible 停表」同款收口）——壳已入实例池（visible=false）时本动画停跑
+                        //  （合批的收益面：隐藏 delegate 不再烧周期动画），降级保底路径行为不变。
                         SequentialAnimation on opacity {
-                            running: entRoot.entHasEnch
+                            running: entShell.visible && entRoot.entHasEnch
                             loops: Animation.Infinite
                             NumberAnimation { from: 0.28; to: 0.45; duration: 800; easing.type: Easing.InOutSine }
                             NumberAnimation { from: 0.45; to: 0.28; duration: 800; easing.type: Easing.InOutSine }
@@ -6852,6 +6865,46 @@ Window {
                                 baseColorMap: voxelAtlas
                             }
                         }
+                    }
+                }
+            }
+
+            // t1039（R19.23）掉落物 instancing 批 3：**光晕壳族全族合批**（治理 ⑥ 号族收官——
+            //   壳是全族横切件：旧 delegate entShell 无 visible 条件，每个活体掉落实体恒带一壳）。
+            //   压成全族**单 instanced Model 单实例表**（GlowShellInstancing，1 draw/全族壳）：
+            //   壳无 per-id 几何（UnitCube 全族共享）/ 无 per-id 材质（纯色 + per-instance color），
+            //   故无需批 1/2 的桶池——单 feeder 单 Model（第三池设计自由度：壳独立成池，与本体
+            //   族解耦，本体仍走批 1/2 桶或 delegate 旧路径）。per-instance color 承载：
+            //   rgb = 附魔紫/灰 × 天光乘子（skyLight/minLight 属性绑 worldClock/window——t144
+            //   夜间同步变暗契约继续成立）；alpha = 灰静态 0.35 / 附魔呼吸 0.28↔0.45（t696 解析式
+            //   下沉 C++，公式逐字对齐旧 SequentialAnimation 双腿 800ms InOutSine），Qt 官方
+            //   hasTransparency 使表 alpha 在不透明材质上生效（等效旧材质 opacity<1 透明通道）。
+            //   两侧谓词同源：feeder 收纳（槽序前 kShellCap=128 活体）与 delegate 排除侧
+            //   （entShell visible !hasShellAt 薄委托同一 C++ 函数）互为镜像——同 id 壳不双渲；
+            //   溢出（>128 活体，manager 上限 200）尾槽壳走 delegate 保底（降级不丢渲）。壳排除链
+            //   只挂 entShell 节点，与本体 hasBucket/hasShapeBucket 链正交互不掺杂。空转门（t1032
+            //   同款）：16ms 钟构造不启，任一活体 → start+markDirty 兜底，无活体 → stop。壳-体
+            //   相位脱锁口径已登记接受（独立半透 halo 非 t1038 嵌入件；批 1/2 本体 feeder 同
+            //   slot×0.37 口径同实例化期构造，常态偏移 ms 级）。review0910 #2 同型盲区登记：本处
+            //   QML 编排仅薄委托（无 reassign 表类 handler），headless 行为面由 C++ 谓词直调探针
+            //  （P-t1039a-d）覆盖 + 实机壳观感冒烟项（壳显/呼吸/拾取消失）。
+            Node {
+                id: glowShellInstHost
+                function hasShellAt(slot) { return glowShellInst.hasShellAt(slot) }
+                Model {
+                    geometry: UnitCube {}
+                    instancing: GlowShellInstancing {
+                        id: glowShellInst
+                        manager: itemEntities
+                        skyLight: worldClock.skyLight
+                        minLight: window.minLight
+                    }
+                    // 材质与旧 delegate entShell 逐字同参的等效面：NoLighting + 白基色（per-instance
+                    //   color 承载紫/灰×天光与 alpha——t858 二值绿同机制）；材质本体不透明，
+                    //   hasTransparency（C++ 构造置位）使实例表 alpha 参与渲染。
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
                     }
                 }
             }
