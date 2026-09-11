@@ -271,8 +271,19 @@ void PlayerController::setBedSpawn(float x, float y, float z)
 
 // t1024 床位重生锚失效（单点收口；契约见 .h）：复位 kSpawn pristine + 清锚 + valid 翻假。
 //   幂等（已 pristine 且 invalid → 静默零 emit，防世界换代 / 连环挖床抖 QML）。
+//   t1037 MC「床毁即醒」：睡眠中锚失效 → 先走既有受惊醒路径 cancelSleep 瞬断睡觉序列再清锚。
+//   病灶 = t1033 爆炸链：睡眠 Settled 计时中锚床被炸 → 本方法清锚后 m_sleeping 仍真，Settled 计时
+//   满落入 sleepAdvanceToDawn 无条件重写 m_spawnPos / m_bedAnchor 回已毁床位并把 m_bedSpawnValid
+//   翻回 true（守卫沿静默）→ 重生点在已不存在的床上重新武装。中断后 m_sleeping 翻假 → updateSleep
+//   早退，sleepAdvanceToDawn 永不可达（绝不跳晨——醒时相位保持）；出床瞬移由 cancelSleep →
+//   leaveBedTeleport 承担（床已毁，扫床周首个可站位格，MC 下床语义）。统一收口：三个调用方
+//   （t1033 爆炸槽 / onWorldSeedChanged 换代 / finishMiningAt 挖床）语义一致——挖床与睡眠互斥
+//   （睡眠中输入域冻结）、换代前必经 release 已清睡态，故本检测对它们零行为面，仅防御兜底；
+//   非睡眠态 no-op（cancelSleep 自守），t1024 既有幂等面不变。
 void PlayerController::clearBedSpawn()
 {
+    if (m_sleeping)
+        cancelSleep(); // t1037：睡眠中锚失效即醒（受惊醒路径；阴性轮敏感：false && 摘本行 → P-t1037 红）
     const QVector3D pristine{kSpawnX, kSpawnY, kSpawnZ};
     const bool wasValid = m_bedSpawnValid;
     m_bedSpawnValid = false;
