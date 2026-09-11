@@ -43356,6 +43356,124 @@ Item {
                                         .arg(okWashed).arg(okMined).arg(okSingleLost).arg(lostT33c));
     }
 
+    // ── P-t1037 睡眠中锚床被炸 → MC「床毁即醒」（行为级；阴性轮敏感：摘 clearBedSpawn 头部睡眠中断
+    //    `if (m_sleeping) cancelSleep();` → false && 前缀 → 本腿红）──
+    //   病灶（review A P3-2，行号 HEAD=e673860）：睡眠 Settled 计时中锚床被爆炸摧毁（t1033 新路径
+    //   blockDestroyedBed → clearBedSpawn）：clearBedSpawn 已播「重生点已失效」并清锚，但 m_sleeping
+    //   仍真 → 随后的 sleepAdvanceToDawn（旧 :3153-3155）无条件重写 m_spawnPos / m_bedAnchor 回已毁
+    //   床位并把 m_bedSpawnValid 翻回 true（守卫沿静默）→ 重生点在已不存在床位上重新武装。
+    //   驱动序：锚床 setBedSpawn（t1024b 同款读档恢复入口）→ 夜（setPhase 0.5 + setRunning(false) 冻结
+    //   时钟——「醒，非跳晨」的相位判别器：skipToDawn 直写 elapsed 不经 QTimer，暂停态照样跳，故冻结
+    //   下相位从 0.5 挪走 = 唯一来源是跳晨）→ trySleepAt 真实入睡（t898 同款，无 EntityManager 挂接 →
+    //   敌对门自过）→ 泵至 Settled（captured 路径 updateSleep 才跑，t1024/t891 同款 17ms 泵）→ TNT 引燃
+    //   （t1033a 同款引燃链单一尾）→ ents 固定 dt 细步 6.25s（> 5s 引信；**不泵 PC**——Settled 计时窗
+    //   2s < 引信 5s，泵 PC 会让跳晨抢在爆炸前发生，t1033a「爆炸链与玩家物理正交」同款）→ 断言①醒
+    //   （sleeping 翻假 + 相位仍在 0.5 = 未跳晨）+ bedSpawnValid=false + bedSpawnLost 恰一次 + spawn 回
+    //   pristine (80,80,80) → 再泵 PC 冲过原 Settling 计时窗（≈5s > 2s Settled + 0.8s Waking）→ 断言②
+    //   不重新武装（valid 仍假 / spawn 仍 pristine / lost 仍 1 / 相位仍 0.5）。
+    {
+        World wT37;
+        wT37.setWidth(48); wT37.setDepth(48); wT37.setHeight(96); wT37.setSeed(1037);
+        WorldClock clockT37;
+        clockT37.setRunning(false); // 冻结 100ms QTimer：相位不漂，「相位不变」断言才对跳晨单一判别
+        clockT37.setPhase(0.5f);    // 子夜（isNight；setPhase 特权指令，t1024 同款）
+        PlayerController pcT37;
+        pcT37.setWorld(&wT37); // blockDestroyedBed → onWorldBedBlockDestroyed 直连（t1033a 同款）
+        pcT37.setWorldClock(&clockT37);
+        QQuickWindow probeWinT37;
+        pcT37.setParentItem(probeWinT37.contentItem());
+        pcT37.grab(); // m_captured → captured 路径 updateSleep（t1024 同款；不 grab 则睡眠机不推进）
+        const auto pumpT37 = [&pcT37](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            pcT37.tick();
+        };
+        const int bx37 = 20, by37 = 40, bz37 = 20;
+        for (int dx = -3; dx <= 4; ++dx)
+            for (int dz = -2; dz <= 2; ++dz) {
+                wT37.setBlock(bx37 + dx, by37 - 1, bz37 + dz, BR::Stone, 0); // 石台（同 t1033a rig）
+                for (int dy = 0; dy <= 4; ++dy)
+                    if (wT37.blockAt(bx37 + dx, by37 + dy, bz37 + dz) != BR::Air)
+                        wT37.setBlock(bx37 + dx, by37 + dy, bz37 + dz, BR::Air, 0);
+            }
+        wT37.setBlock(bx37, by37, bz37, BR::BedWhite, quint8(0));     // foot（head 在 -X）
+        wT37.setBlock(bx37 - 1, by37, bz37, BR::BedWhite, quint8(8)); // head
+        int lostT37 = 0, announceT37 = 0;
+        const QMetaObject::Connection connL37 = QObject::connect(
+            &pcT37, &PlayerController::bedSpawnLost, &pcT37, [&lostT37]() { ++lostT37; });
+        const QMetaObject::Connection connA37 = QObject::connect(
+            &pcT37, &PlayerController::bedSpawnAnnounce, &pcT37, [&announceT37](bool) { ++announceT37; });
+        pcT37.setBedSpawn(float(bx37) + 0.5f, float(by37) + 1.0f, float(bz37) + 0.5f);
+        // 真实入睡（t898 同款入口）→ 泵至 Settled（计时窗内：入 Settled 即停，留足 2s 未耗）。
+        pcT37.trySleepAt(bx37, by37, bz37);
+        for (int t = 0; t < 400 && !pcT37.sleepSettled(); ++t) pumpT37(17);
+        const bool okSleeping = pcT37.sleeping() && pcT37.sleepSettled()
+            && pcT37.bedSpawnValid()
+            && pcT37.spawnPoint() == QVector3D(float(bx37) + 0.5f, float(by37) + 1.0f, float(bz37) + 0.5f);
+        const int announceEntryT37 = announceT37; // 入睡设锚沿恰 1 次 announce（review0909 #5 既有口径）
+        // 引燃（t1033a 同款：格静默清 + PrimedTnt 实体接管）→ 固定 dt 细步 6.25s > 5s 引信。
+        wT37.setBlock(bx37 + 2, by37, bz37, BR::TntBlock, 0);
+        const bool okIgnited = wT37.clearBlockSilent(bx37 + 2, by37, bz37);
+        EntityManager entsT37;
+        entsT37.spawnPrimedTnt(bx37 + 2, by37, bz37);
+        for (int i = 0; i < 400; ++i) // 只泵实体：爆炸链与玩家睡眠计时正交（t1033a 同款）
+            entsT37.tick(0.015625, &wT37, QVector3D(-1000.0f, 80.0f, -1000.0f), 0.3f, 1.8f, true);
+        const bool okBroken = wT37.blockAt(bx37, by37, bz37) == BR::Air
+            && wT37.blockAt(bx37 - 1, by37, bz37) == BR::Air; // 锚床两半都在球内被清
+        // ①床毁即醒：睡态中断 + 相位不变（非跳晨）+ 锚失效播报恰一次 + spawn 回 pristine。
+        const bool okWoke = !pcT37.sleeping()
+            && std::abs(clockT37.dayPhase() - 0.5f) < 1e-3f
+            && !pcT37.bedSpawnValid() && lostT37 == 1
+            && pcT37.spawnPoint() == QVector3D(80.0f, 80.0f, 80.0f)
+            && announceT37 == announceEntryT37; // 置假沿零 announce（QML 静默，t1036 口径）
+        // ②跳晨窗过后不重新武装：再泵 PC ≈5s > 2s Settled + 0.8s Waking——病灶里 sleepAdvanceToDawn
+        //   在此把重生点重写回已毁床位并翻回 valid；修复后 m_sleeping 已假 → updateSleep 早退不可达。
+        for (int t = 0; t < 300; ++t) pumpT37(17);
+        const bool okNoRearm = !pcT37.bedSpawnValid() && lostT37 == 1
+            && pcT37.spawnPoint() == QVector3D(80.0f, 80.0f, 80.0f)
+            && std::abs(clockT37.dayPhase() - 0.5f) < 1e-3f;
+        QObject::disconnect(connL37);
+        QObject::disconnect(connA37);
+        pcT37.release();
+        probeWinT37.deleteLater();
+        const bool okT37 = okSleeping && okIgnited && okBroken && okWoke && okNoRearm;
+        if (!okT37)
+            qInfo().noquote() << "  [t1037 diag] sleeping" << okSleeping << "ignited" << okIgnited
+                              << "broken" << okBroken << "woke" << okWoke << "noRearm" << okNoRearm
+                              << "| lost" << lostT37 << "announce" << announceT37
+                              << "valid" << pcT37.bedSpawnValid()
+                              << "spawn" << pcT37.spawnPoint().x() << pcT37.spawnPoint().y()
+                              << pcT37.spawnPoint().z()
+                              << "phase" << clockT37.dayPhase()
+                              << "footId" << int(wT37.blockAt(bx37, by37, bz37))
+                              << "headId" << int(wT37.blockAt(bx37 - 1, by37, bz37));
+        if (!okT37) ++totalFail;
+        qInfo().noquote() << (okT37 ? "PASS" : "FAIL")
+                          << "| t1037 destroy-anchor during sleep wakes the player (MC bed-break "
+                             "wake): a player settled asleep on the anchor bed (real trySleepAt "
+                             "entry, pumped into Settled inside the 2s window) has the bed blasted "
+                             "by the real TNT fuse chain (PrimedTnt, fixed-dt 6.25s > 5s fuse, "
+                             "entity ticks only - orthogonal to the player sleep timer, t1033a "
+                             "pattern); the blockDestroyedBed relay converges on clearBedSpawn "
+                             "which now interrupts the sleep sequence through the existing "
+                             "startle-wake path (cancelSleep) BEFORE the anchor clear - the player "
+                             "wakes (sleeping false) WITHOUT the dawn jump (world clock phase "
+                             "stays frozen at 0.5), bedSpawnValid flips false with bedSpawnLost "
+                             "firing exactly once, the spawn point snaps back to the pristine "
+                             "world spawn (80,80,80) and pumping past the original Settling "
+                             "window never re-arms the respawn point on the destroyed bed (the "
+                             "old lesion let sleepAdvanceToDawn rewrite m_spawnPos/m_bedAnchor "
+                             "onto the gone bed and flip validity back true; negative-round "
+                             "sensitive: false &&-ing out the sleep interrupt in clearBedSpawn "
+                             "turns this leg red)"
+                          << (okT37 ? QString()
+                                  : QStringLiteral("diag sleeping=%1 ignited=%2 broken=%3 woke=%4 "
+                                                   "noRearm=%5 lost=%6")
+                                        .arg(okSleeping).arg(okIgnited).arg(okBroken)
+                                        .arg(okWoke).arg(okNoRearm).arg(lostT37));
+    }
+
     // ── P-t1024c 床位重生锚持久化 round-trip（真 SQLite；t1016 模式）+ 源码钉 ──
     //   (a) 有效锚：saveAll 第 6 参 {valid,x,y,z} → bed_x('g'9)/bed_y/bed_z/bed_valid=1 四键与 chunks/
     //       meta 同事务 → 关库重开 loadBedSpawn 逐键还原；
