@@ -81,6 +81,21 @@ public:
     //   3D 家族 → BlockCube 满格立方渲染路由。工具（0x100+）/ 材料（0x200+）段经 id < BlockRegistry::Count
     //   上界自然排除（下 static_assert 钉死该前提；段界挪动须回改本谓词）。
     Q_INVOKABLE static bool isPlainCubeDrop(int itemId);
+    // ── t1041（R19.23）批 4 收官三谓词（单一权威；与 isItem3DFamily / isPlainCubeDrop 同纪律——
+    //    QML delegate 排除侧与 C++ feeder 收纳侧（ToolDropInstancing / BillboardDropInstancing）
+    //    必须对同族判定逐位一致，否则双渲或丢渲）。族表对齐 Main.qml 掉落 delegate 分支条件逐字。──
+    // 工具 3D 族：工具段 ∧ toolType ∈ {Pickaxe=1, Hoe=2, Axe=3, Shovel=4, Sword=5, Bow=7}（五类几何 + 弓，
+    //   Main.qml 六个 3D 分支的 C++ 镜像）。剪刀 6 / 打火石 9 走图标 billboard 族；钓鱼竿 8 掉落 delegate
+    //   **无分支**（t803 只补了打火石）——如实维持既有行为不入任何族（t1041 登记，非本单范围）。
+    Q_INVOKABLE static bool isTool3DDrop(int itemId);
+    // 工具/材料 billboard 图标族：剪刀/打火石（工具段 ∧ toolType ∈ {Shears=6, FlintSteel=9}，ToolIcon
+    //   sourceItem）∨ 材料段（id ≥ RecipeRegistry::MaterialIdBase，**单边 >= 含护甲段**——Hotbar::isMaterial
+    //   逐字同判，MaterialIcon sourceItem）。两支同池（BillboardQuad + per-id Canvas 图标贴图）。
+    Q_INVOKABLE static bool isIconBillboardDrop(int itemId);
+    // 异形 billboard 族：partial / cross / 床段 ∧ 非 3D 族（Main.qml billboard delegate visible 链
+    //   (isPartialBlock ∨ isCrossBlock ∨ isBed) ∧ !isItem3DFamily 的 C++ 镜像；BillboardQuad +
+    //   per-id 图标 PNG（iconSourceForBlock）。楼梯 16 在族（partial 非 3D），火把 13 不在（3D 族）。
+    Q_INVOKABLE static bool isBlockIconBillboardDrop(int itemId);
     // t743：第 i 个槽位实体是否**已着地**（resting——落在支撑方块顶面静止；飞行 / 浮水 / 瀑布下沉恒
     //   false）。压力板掉落物触发（updatePressurePlates 掉落物分支）据它门控：着地 = 物品与板面真实
     //   接触才压板（机制等价 MC 物品实体压板），飞行掠过板顶不误触。空槽 / 越界 → false。

@@ -1,5 +1,7 @@
 #include "itementitymanager.h"
 #include "world.h" // t60/t271 tick 只读 World::blockAt/stateAt/isSolid/isCollidable（向下依赖；PLAN §2 Entities→World 合规）
+#include "toolregistry.h" // t1041 isTool3DDrop / isIconBillboardDrop 查 ToolRegistry::tool(type/tier)——Game 层同层纯表查询
+#include "recipe.h"       // t1041 isIconBillboardDrop 材料段界 RecipeRegistry::MaterialIdBase（Hotbar::isMaterial 同源常量）
 
 #include <QLoggingCategory>
 #include <QtMath> // qFloor
@@ -42,6 +44,42 @@ bool ItemEntityManager::isPlainCubeDrop(int itemId)
     if (BlockRegistry::isCrossBillboard(quint8(itemId))) return false;    // cross 段（花 / 树苗…）→ flat billboard
     if (BlockRegistry::isBed(quint8(itemId))) return false;               // 床段（含 8 色扩展床）→ bed 图标 billboard
     return !isItem3DFamily(itemId);                                       // 3D 形状族（火把 / 门 / 栅栏…）排除
+}
+
+// ── t1041 批 4 收官三谓词（实现见头注释；单一权威，QML 侧薄委托）──
+bool ItemEntityManager::isTool3DDrop(int itemId)
+{
+    const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
+    if (!t) return false; // 非工具段（方块 / 材料 / 越界）→ 恒假
+    switch (t->type) {
+    case BlockRegistry::Pickaxe:   // 五类几何分支（Main.qml toolType===1..5 七分支中的五支）
+    case BlockRegistry::Hoe:
+    case BlockRegistry::Axe:
+    case BlockRegistry::Shovel:
+    case BlockRegistry::Sword:
+    case BlockRegistry::Bow:       // 弓（type 7 分支；BowStringGeometry 弦随 stringPass 实例表）
+        return true;
+    default:                       // Shears 6 / FishingRod 8 / FlintSteel 9 / 其余不入 3D 族
+        return false;
+    }
+}
+
+bool ItemEntityManager::isIconBillboardDrop(int itemId)
+{
+    const ToolRegistry::ToolDef *t = ToolRegistry::tool(itemId);
+    if (t)
+        return t->type == BlockRegistry::Shears      // 剪刀（t329 billboard ToolIcon 分支）
+            || t->type == BlockRegistry::FlintSteel; // 打火石（t803 billboard ToolIcon 分支）
+    return itemId >= RecipeRegistry::MaterialIdBase; // 材料段（Hotbar::isMaterial 逐字同判：单边 >= 含护甲段）
+}
+
+bool ItemEntityManager::isBlockIconBillboardDrop(int itemId)
+{
+    if (itemId <= 0 || itemId >= int(BlockRegistry::Count)) return false;
+    if (isItem3DFamily(itemId)) return false;                            // 3D 族走形状桶（delegate 链首闸同判）
+    return BlockRegistry::isPartialBlock(quint8(itemId))                 // t219 异形段（台阶/楼梯/栅栏/门…）
+        || BlockRegistry::isCrossBillboard(quint8(itemId))               // t440 cross 段（花/树苗…）
+        || BlockRegistry::isBed(quint8(itemId));                         // t496 床段
 }
 
 // 生成掉落实体：存格中心坐标 + id + count，bump 版本号发 entitiesChanged → QML Repeater 追加 delegate。
