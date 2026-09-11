@@ -19553,11 +19553,13 @@ Item {
     //   isItem3DFamily 25 id（火把/活板门/台阶/雪层/草丛/附魔台/枯灌木/小麦/栅栏/门/蘑菇/蛛网/红石
     //   火把/拉杆/按钮；木楼梯 16 不在族——t880 billboard 语义）经 BlockDropInstancing shapeFamily
     //   模式收进形状桶（Main.qml blockShapeInstHost，批 1 blockDropInstHost 同构）。钉契约：
-    //   ① 25 id 全员可入形状桶（逐 id 指派，条数 = 该 id 活体数）；② 跨族互斥——楼梯 16（partial 非
+    //   ① 25 id 族逐 id 查询——t1038（Review_2026-09-11 #1）起 94 **整体不桶化**（isItem3DFamily(94)
+    //   仍真但形状模式 feeder 恒出空表；其余 24 id 条数 = 该 id 活体数）；② 跨族互斥——楼梯 16（partial 非
     //   3D）/ 整立方（泥土）/ 工具 0x100 / 材料 0x200 永不进形状桶，火把也永不进整立方桶（批 1 侧）；
     //   ③ 实例表内容与批 1 同参——XZ 精确 = 实体世界位、Y ∈ bob 解析带（0↔0.15）、scale 0.3 均匀、
     //   纯 Y 轴旋转。
-    //   阴性轮敏感：摘 feeder 形状过滤（false && 前缀，t1030/t1031 先例）→ 本腿楼梯/异族拒绝面恰红。
+    //   阴性轮敏感：摘 feeder 形状过滤（false && 前缀，t1030/t1031 先例）→ 本腿楼梯/异族拒绝面恰红；
+    //   摘 94 不桶化 skip → 本腿 94 腿恰红（期望 0 实得 1）。
     {
         ItemEntityManager items1032a;
         BlockDropInstancing fTorch1032a, fDoor1032a, fStairs1032a, fPlain1032a;
@@ -19592,8 +19594,10 @@ Item {
         const QVector3D eu1032a = q1032a.toEulerAngles();
         ok1032a = ok1032a && std::abs(std::remainder(eu1032a.x(), 360.0f)) < 1e-3f
                   && std::abs(std::remainder(eu1032a.z(), 360.0f)) < 1e-3f;
-        // ① 25 id 全员入形状桶：逐 id 指派（顺带压 setFamilyId 换桶沿），条数 = 该 id 活体数
-        //    （同 P-t1027b 家族表；ItemEntityManager::isItem3DFamily 行为级已在 P-t1027b 钉）。
+        // ① 25 id 族逐 id 查询（顺带压 setFamilyId 换桶沿）：t1038 起 94 整体不桶化——期望条数改 0
+        //    （isItem3DFamily(94) 仍真但形状模式 feeder 恒出空表：QML 桶池计数循环 skip 94 + C++ 收纳
+        //    侧同参排除）；其余 24 id 照旧 条数 = 该 id 活体数（ItemEntityManager::isItem3DFamily
+        //    行为级已在 P-t1027b 钉）。
         static const int kFam1032[] = { 13, 20, 136, 15, 87, 58, 109, 44, 24, 94,
                                         43, 25, 17, 60, 88, 19, 135, 89, 115, 48,
                                         102, 129, 112, 113, 114 };
@@ -19607,9 +19611,13 @@ Item {
             int liveOfId1032a = 0;
             for (int i = 0; i < items1032a.count(); ++i)
                 if (items1032a.aliveAt(i) && items1032a.itemIdAt(i) == kFam1032[k]) ++liveOfId1032a;
-            if (fLoop1032a.probeInstanceCount() != liveOfId1032a) famMiss1032a = kFam1032[k];
+            // t1038：94 期望 0（不桶化）——阴性轮摘 skip 即此处恰红（94 活体 1 实得 1 ≠ 0）
+            const int expect1032a = (kFam1032[k] == 94) ? 0 : liveOfId1032a;
+            if (fLoop1032a.probeInstanceCount() != expect1032a) famMiss1032a = kFam1032[k];
         }
         ok1032a = ok1032a && famMiss1032a < 0;
+        // t1038：不桶化 ≠ 出族——isItem3DFamily(94) 仍真（delegate 渲染链首闸保持，台+书恒走同链）
+        ok1032a = ok1032a && ItemEntityManager::isItem3DFamily(94);
         // 异族不混入（同 id 才收）：换回火把 id → 恰 2（初始 + 循环）；泥土/楼梯/工具/材料不计数。
         fLoop1032a.setFamilyId(13);
         const int torchTotal1032a = fLoop1032a.probeInstanceCount();
@@ -19623,9 +19631,13 @@ Item {
                           << "| t1032a drop-item instancing batch 2: the 3D shape family "
                              "(isItem3DFamily 25 ids, stairs-16 excluded per the t880 billboard "
                              "exception) feeds per-id shape buckets through the BlockDropInstancing "
-                             "shapeFamily mode: every family id lands in a bucket with entry count "
-                             "equal to its live count (torch=1/door=1 then each of the 25 ids = its "
-                             "live slots), stairs-16/dirt/tools-0x100/materials-0x200 never enter a "
+                             "shapeFamily mode: every family id is probed per-id with the entry count "
+                             "equal to its live count (torch=1/door=1 then each of the 25 ids), with "
+                             "t1038 excluding the enchanting table 94 from shape buckets entirely "
+                             "(isItem3DFamily(94) stays true - the delegate chain gate holds - while "
+                             "the shape feeder serves an empty table for it, keeping the floating "
+                             "book and the table on one same-chain same-phase delegate render), "
+                             "stairs-16/dirt/tools-0x100/materials-0x200 never enter a "
                              "shape bucket and a torch never enters a plain-cube bucket (cross-family "
                              "mutex on both modes), and entries carry exact XZ slot positions + the "
                              "analytic bob band on Y + 0.3 uniform scale + pure-Y rotation - the "
@@ -19633,6 +19645,88 @@ Item {
                              "draw per active bucket id (geometry shared by all instances of the "
                              "same id) while the bucket-full overflow path keeps the delegate "
                              "fallback rendering";
+    }
+
+    // ── P-t1038a 附魔台 94 整体不桶化行为腿（Review_2026-09-11 #1 定夺修；书-台相位失锁病灶收口）──
+    //   病灶（review 实读）：t1032 把 94 上移 dropBookNode 后若 94 入形状桶，台体走 feeder 解析相位
+    //   （m_clock.elapsed()/1000 + slot×0.37），小书仍走 entRoot QML 动画相位（NumberAnimation 相位
+    //   = delegate 创建时刻）→ 两套时钟恒定旋转偏移 0-360° + bob 异相振幅最大 0.15 格（反相时书嵌
+    //   入台体）。修法（用户推荐）：94 整体排除出形状桶——台+书恒走 delegate 同链同相。本腿钉
+    //   headless 可达面：
+    //   ① isItem3DFamily(94) 仍真（delegate 渲染链首闸保持——不桶化 ≠ 出族）；
+    //   ② 形状模式 feeder 对 94 恒出空表（94 活体在场 →「形状桶无 94 桶」的 feeder 查询面投影 =
+    //      C++ 收纳侧 getInstanceBuffer 排除）；同场对照：其余 3D 族 id（火把 13）照常入桶走钟；
+    //   ③ 空转门同参：94 桶即使（误）指派也不走钟（hasLiveMember 与 getInstanceBuffer 同参排除
+    //      ——无僵尸钟，review0910 #3 纪律）；
+    //   ④ QML 编排面（reassignShapeBuckets / hasShapeBucket 纯 JS）headless 不可行为级断言
+    //      （review0910 #2 登记盲区）→ 源码钉（P-t1032c ctor 源钉同纪律）：Main.qml
+    //      reassignShapeBuckets 切片含 `if (id === 94) continue` skip + Review_2026-09-11 #1 登记
+    //      注释；hasShapeBucket 切片零 94 字面（「无第二处特判」结构不变量钉）。
+    //   阴性轮敏感：摘 C++ 收纳侧 skip（false && 前缀）→ ②③ 恰红；摘 Main.qml skip → ④ 源钉恰红。
+    {
+        ItemEntityManager items1038;
+        items1038.spawnItem(10, 40, 10, 94, 1);   // 附魔台活体在场（病灶触发条件）
+        items1038.spawnItem(14, 40, 10, 13, 1);   // 对照：火把（其余 24 id 桶化不受影响）
+        const bool fam94True1038 = ItemEntityManager::isItem3DFamily(94); // ①
+        BlockDropInstancing f941038;
+        f941038.setShapeFamily(true);
+        f941038.setManager(&items1038);
+        f941038.setFamilyId(94); // 误指派面：即便 QML 桶池事故指派 94，feeder 也恒空（第二道防线）
+        const bool no94Table1038 = f941038.probeInstanceCount() == 0;     // ②
+        const bool no94Clock1038 = !f941038.probeTickerActive();          // ③ 同参空转门
+        BlockDropInstancing fTorch1038;
+        fTorch1038.setShapeFamily(true);
+        fTorch1038.setManager(&items1038);
+        fTorch1038.setFamilyId(13);
+        const bool torchNormal1038 = fTorch1038.probeInstanceCount() == 1
+                                     && fTorch1038.probeTickerActive();   // ② 对照
+        // ④ 源码钉：QML 编排面盲区的源钉覆盖（skip 在位 + 登记注释在位 + 无第二处特判）
+        const QString exeDir1038 = QCoreApplication::applicationDirPath();
+        QFile qml1038(QDir(exeDir1038 + QStringLiteral("/..")).absoluteFilePath(
+            QStringLiteral("src/ui/Main.qml")));
+        const QString qmlSrc1038 = qml1038.open(QIODevice::ReadOnly)
+            ? QString::fromUtf8(qml1038.readAll()) : QString();
+        const int rsb01038 = qmlSrc1038.indexOf(QStringLiteral("function reassignShapeBuckets"));
+        const int rsb11038 = qmlSrc1038.indexOf(
+            QStringLiteral("Component.onCompleted: reassignShapeBuckets"), rsb01038);
+        const QString rsbSeg1038 = (rsb01038 >= 0 && rsb11038 > rsb01038)
+            ? qmlSrc1038.mid(rsb01038, rsb11038 - rsb01038) : QString();
+        const int hsb01038 = qmlSrc1038.indexOf(QStringLiteral("function hasShapeBucket"));
+        const int hsb11038 = qmlSrc1038.indexOf(QStringLiteral("function reassignShapeBuckets"),
+                                                hsb01038);
+        const QString hsbSeg1038 = (hsb01038 >= 0 && hsb11038 > hsb01038)
+            ? qmlSrc1038.mid(hsb01038, hsb11038 - hsb01038) : QString();
+        const bool qmlSkipPinned1038 = !rsbSeg1038.isEmpty()
+            && rsbSeg1038.contains(QStringLiteral("if (id === 94) continue")) // 摘 skip 即红
+            && rsbSeg1038.contains(QStringLiteral("Review_2026-09-11 #1"));   // 登记注释在位
+        const bool noSecondGate1038 = !hsbSeg1038.isEmpty()
+            && !hsbSeg1038.contains(QStringLiteral("94"));                    // 无第二处特判
+        const bool ok1038 = fam94True1038 && no94Table1038 && no94Clock1038
+                            && torchNormal1038 && qmlSkipPinned1038 && noSecondGate1038;
+        if (!ok1038)
+            qInfo().noquote() << "  [t1038 diag] fam94" << fam94True1038 << "noTable"
+                              << no94Table1038 << "noClock" << no94Clock1038 << "torch"
+                              << torchNormal1038 << "qmlPin" << qmlSkipPinned1038
+                              << "noSecond" << noSecondGate1038
+                              << "segLen" << rsbSeg1038.length();
+        if (!ok1038) ++totalFail;
+        qInfo().noquote() << (ok1038 ? "PASS" : "FAIL")
+                          << "| t1038a enchanting-table 94 excluded from shape buckets entirely "
+                             "(Review_2026-09-11 #1, book-table phase-lock fix): isItem3DFamily(94) "
+                             "stays true so the delegate render chain gate holds (no bucketing does "
+                             "not mean eviction from the 3D family), the shape-mode feeder serves an "
+                             "empty instance table for id 94 even with a live 94 item in the scene "
+                             "(the feeder-query projection of the bucket pool never assigning 94 - "
+                             "the C++ collection-side defense line) and its idle gate stays stopped "
+                             "(hasLiveMember same-predicate exclusion, no zombie clock), a torch in "
+                             "the same scene still buckets and clocks normally (the other 24 family "
+                             "ids untouched), and the QML orchestration surface (reassignShapeBuckets "
+                             "/ hasShapeBucket, a registered headless blind spot) is covered by "
+                             "source pins: the counting loop carries the id-94 skip with the "
+                             "Review_2026-09-11 #1 registration comment while hasShapeBucket holds "
+                             "no second 94 special case - the floating book and the table now always "
+                             "render on one delegate chain sharing the entRoot animation clock "
+                             "(constant rotation offset and out-of-phase bob eliminated)";
     }
 
     // ── P-t1032b 桶满降级路径 headless 可达面（review0910 #2 采纳；QML 编排面盲区如实 scoped）──
@@ -19824,13 +19918,22 @@ Item {
         });
         // 结构面（indexOf+mid 范围序断言，pinSet 表达不了；P-t1027b okDeleg 先例）：
         //   重算侧同源——reassignShapeBuckets 函数体内用薄委托谓词、无字面量 id 表。
+        //   t1038 修订：唯一豁免 = 登记「Review_2026-09-11 #1」的 94 skip（if (id === 94) continue
+        //   ——书台同相定夺修，注释须紧邻前置）；其余字面 id 比对仍禁（防旁路谓词权威）。
         QFile mf1032d(root1032d + QStringLiteral("/src/ui/Main.qml"));
         const QString qml1032d = mf1032d.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf1032d.readAll()) : QString();
         const int rs0 = qml1032d.indexOf(QStringLiteral("function reassignShapeBuckets"));
         const int rs1 = qml1032d.indexOf(QStringLiteral("blockShapeInstHost.buckets = next"), rs0);
+        const QString rsWin1032d = (rs0 >= 0 && rs1 > rs0) ? qml1032d.mid(rs0, rs1 - rs0) : QString();
+        const int skip941032d = rsWin1032d.indexOf(QStringLiteral("if (id === 94) continue"));
+        const bool okSkipRegistered1032d = skip941032d >= 0
+            && rsWin1032d.left(skip941032d).contains(QStringLiteral("Review_2026-09-11 #1"));
+        QString rsStripped1032d = rsWin1032d;
+        rsStripped1032d.remove(QStringLiteral("if (id === 94) continue"));
         const bool okResignSameSrc1032d = rs0 >= 0 && rs1 > rs0
-            && qml1032d.mid(rs0, rs1 - rs0).contains(QStringLiteral("itemEntities.isItem3DFamily(id)"))
-            && !qml1032d.mid(rs0, rs1 - rs0).contains(QStringLiteral("id === "));
+            && rsWin1032d.contains(QStringLiteral("itemEntities.isItem3DFamily(id)"))
+            && okSkipRegistered1032d
+            && !rsStripped1032d.contains(QStringLiteral("id === "));
         // 材质逐字同参——桶 Model 材质块（geometry 钉后窗）含旧 ItemShapeGeometry 分支五参数。
         const int gi = qml1032d.indexOf(
             QStringLiteral("geometry: ItemShapeGeometry { blockId: blockShapeInstHost.buckets[index] }"));
@@ -19852,7 +19955,9 @@ Item {
                           << "| t1032d batch-2 same-source predicate pins + geometry sharing "
                              "equivalence + no-yield registration: the shape-family admission "
                              "(feeder isItem3DFamily filter), the QML bucket reassignment (thin "
-                             "delegation, no literal table) and the delegate exclusion "
+                             "delegation, no literal id table beyond the single t1038-registered "
+                             "id-94 skip carrying its Review_2026-09-11 #1 registration comment) "
+                             "and the delegate exclusion "
                              "(hasShapeBucket on the shape Model visible chain) all judge every "
                              "id from the single C++ authority, the per-bucket geometry is pinned "
                              "to the bucket id (not per-entity) with same-id rebuilds proven "
