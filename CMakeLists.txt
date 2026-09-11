@@ -200,6 +200,14 @@ qt_add_executable(voxelsandbox
     #   QML delegate 排除侧薄委托同源谓词）。向下只读 ItemEntityManager，同批 1/2 呈现适配器分层。
     src/Game/glowshellinstancing.cpp
     src/Game/glowshellinstancing.h
+    # t1041（R19.23）掉落物 instancing 批 4 收官：工具 3D 族 per-id 桶 feeder（tier 色×天光 per-instance
+    #   color，t1039 color 实例表先例；stringPass 弓弦双表——instancing 不承载 per-instance 子树，t1038 先例）
+    #   + billboard 图标族双池单 feeder（itemIconFamily 切换异形方块图标族/工具材料图标族；朝相机旋转
+    #   camPitch/camYaw 进实例表；per-id 贴图 = per-id 桶池选型，无自定义 shader——PLAN §2-A 合规）。
+    src/Game/tooldropinstancing.cpp
+    src/Game/tooldropinstancing.h
+    src/Game/billboarddropinstancing.cpp
+    src/Game/billboarddropinstancing.h
     # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
     src/Entities/entitymanager.cpp
     src/Entities/entitymanager.h
@@ -948,6 +956,13 @@ add_executable(redstone_matrix_test
     #   呼吸 alpha/空转门/kShellCap 溢出降级）。依赖 itementitymanager（已列）；Quick3D 公开 API。
     src/Game/glowshellinstancing.cpp
     src/Game/glowshellinstancing.h
+    # t1041 掉落物 instancing 批 4 收官探针：ToolDropInstancing（工具 3D 族 tier 色 per-instance color /
+    #   弓弦 stringPass 双表/空转门）+ BillboardDropInstancing（异形方块图标族/工具材料图标族双池谓词/
+    #   朝相机旋转进实例表/空转门）。依赖 itementitymanager（已列）+ toolregistry（已列）。
+    src/Game/tooldropinstancing.cpp
+    src/Game/tooldropinstancing.h
+    src/Game/billboarddropinstancing.cpp
+    src/Game/billboarddropinstancing.h
     # t946 坐姿变换链连续域探针附加：Renderer 层 MobModel 直编（真几何顶点射线剪影断言——t880
     #   ItemShapeGeometry 行为级先例；review24 时「只用头内 constexpr、不链 mobmodel.cpp」的旧注释口径
     #   自本探针起放开为「头 constexpr 静态断言 + 行为级直编并存」）。

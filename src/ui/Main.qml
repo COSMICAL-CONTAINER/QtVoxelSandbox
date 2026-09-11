@@ -6344,6 +6344,7 @@ Window {
                     Model {
                         visible: (hotbarVM.isPartialBlock(entRoot.entId) || hotbarVM.isCrossBlock(entRoot.entId) || hotbarVM.isBed(entRoot.entId))
                                   && !isItem3DFamily(entRoot.entId) // t880 3D 家族走上方 ItemShapeGeometry 分支
+                                  && !blockIconInstHost.hasIconBucket(entRoot.entId) // t1041 批 4：hasIconBucket 排除 = 已入异形图标桶（blockIconInstHost）的 id 走合批 Model，溢出保底走本 delegate——两侧谓词同源 ItemEntityManager::isBlockIconBillboardDrop 单一权威
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6368,7 +6369,7 @@ Window {
                     //   baseColor 按 tier 着色（木褐 / 石灰 / 铁银白，五类同 tier 同色）；绕 Y 自转时正面恒有工具形可见。
                     //   t264：按 toolType 选 5 类工具几何（镐 / 锄 / 斧 / 铲 / 剑，五互斥 Model）。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 1
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 1 && !toolDropInstHost.hasToolBucket(entRoot.entId) // t1041 批 4：hasToolBucket 排除 = 已入工具桶（toolDropInstHost）的 id 走合批 Model，未入桶（桶池满溢出）保底走本 delegate——两侧谓词同源 ItemEntityManager::isTool3DDrop 单一权威
                         geometry: PickaxeGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6391,7 +6392,7 @@ Window {
                     }
                     // t233 锄掉落物（type=Hoe）：同 scale / 位置 / tier 配色，几何换 HoeGeometry。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 2
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 2 && !toolDropInstHost.hasToolBucket(entRoot.entId) // t1041 批 4 同上（锄分支）
                         geometry: HoeGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6411,7 +6412,7 @@ Window {
                     }
                     // t264 斧掉落物（type=Axe）：同 scale / 位置 / tier 配色，几何换 AxeGeometry。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 3
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 3 && !toolDropInstHost.hasToolBucket(entRoot.entId) // t1041 批 4 同上（斧分支）
                         geometry: AxeGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6431,7 +6432,7 @@ Window {
                     }
                     // t264 铲掉落物（type=Shovel）：同 scale / 位置 / tier 配色，几何换 ShovelGeometry。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 4
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 4 && !toolDropInstHost.hasToolBucket(entRoot.entId) // t1041 批 4 同上（铲分支）
                         geometry: ShovelGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6451,7 +6452,7 @@ Window {
                     }
                     // t264 剑掉落物（type=Sword）：纵向长刃，同 scale / 位置 / tier 配色，几何换 SwordGeometry。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 5
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 5 && !toolDropInstHost.hasToolBucket(entRoot.entId) // t1041 批 4 同上（剑分支）
                         geometry: SwordGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6471,7 +6472,7 @@ Window {
                     }
                     // t304/t330 弓掉落物（type=Bow）：BowGeometry C 形弓身 + 子节点白弦，随 entRoot 绕 Y 自转。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 7
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 7 && !toolDropInstHost.hasToolBucket(entRoot.entId) // t1041 批 4 同上（弓分支；子节点白弦随本 Model 隐藏——弦的合批走 toolDropInstHost stringPass 第二实例表，t1038 不承载子树先例）
                         geometry: BowGeometry {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6502,7 +6503,7 @@ Window {
                     //   （ToolIcon toolType===6 内部强制，不跟随 tier）。alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test
                     //   契约（透明底不丢弃会被当不透明黑）；baseColor 乘 terrainLight 夜间变暗（同方块 / 材料段掉落物）。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 6
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 6 && !itemIconInstHost.hasItemBucket(entRoot.entId) // t1041 批 4：hasItemBucket 排除 = 已入图标桶（itemIconInstHost）的剪刀 id 走合批 Model，溢出保底走本 delegate——两侧谓词同源 ItemEntityManager::isIconBillboardDrop 单一权威
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6527,7 +6528,7 @@ Window {
                     //   半透光晕壳无本体。补 billboard 分支（ToolIcon toolType===9 自绘 / pack 覆盖同图源），
                     //   拾取链不变（itemId 原样回背包）。alphaCutoff:0.5 + opacity:0.99 沿用 alpha-test 契约。
                     Model {
-                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 9
+                        visible: hotbarVM.isTool(entRoot.entId) && hotbarVM.toolType(entRoot.entId) === 9 && !itemIconInstHost.hasItemBucket(entRoot.entId) // t1041 批 4 同上（打火石分支）
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6565,7 +6566,7 @@ Window {
                     //   丢弃会被当不透明黑 → 图标坍成黑块。alphaCutoff:0.5 + opacity:0.99 → 仅图标像素显。
                     //   flipV：t186 改 false（旧 true 翻 V → 桶开口朝下；同手持材料路径）。
                     Model {
-                        visible: hotbarVM.isMaterial(entRoot.entId)
+                        visible: hotbarVM.isMaterial(entRoot.entId) && !itemIconInstHost.hasItemBucket(entRoot.entId) // t1041 批 4 同上（材料段分支；谓词同源 isIconBillboardDrop 的材料支）
                         geometry: BillboardQuad {}
                         scale: Qt.vector3d(0.3, 0.3, 0.3)
                         position: Qt.vector3d(0, entRoot.bobY, 0)
@@ -6905,6 +6906,308 @@ Window {
                     materials: PrincipledMaterial {
                         lighting: PrincipledMaterial.NoLighting
                         baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                    }
+                }
+            }
+
+            // t1041（R19.23）掉落物 instancing 批 4 收官 ①：**工具 3D 族**（isTool3DDrop：五类几何
+            //   镐/锄/斧/铲/剑 + 弓；tier 色映射 t472/t557/t589）按批 1/2 同款压成 per-id 桶 × 单
+            //   instanced Model（ToolDropInstancing feeder，1 draw / 桶）。族内 per-id 差异只在几何
+            //   （toolType 选 Pickaxe/Hoe/Axe/Shovel/Sword/Bow 单例几何，桶指派变化才切）与 tier 色
+            //   （同 id 同 tier → 常量色）——tier 色×天光走 **per-instance color**（t1039 color 实例表
+            //   先例；材质本体白基色，实例色乘法 = 旧「材质 baseColor = tier 色×tintBySkyLight」的
+            //   逐位等效面）。scale 0.45 + rotY 3s/圈自转 + bob 0↔0.15（slot×0.37 错峰）全部下沉
+            //   feeder 解析式（公式逐字对齐旧 delegate）。**弓弦双表**：旧弓 Model 子节点白弦（t330
+            //   蜘蛛丝白 245，不随 tier）是 per-instance 子树——instancing 不承载（t1038 书-台先例），
+            //   弦独立第二 Model + 同 feeder 类 **stringPass=true** 第二实例表（变换口径与弓身表逐字
+            //   同参，仅色不同；两 feeder 同帧构造，相位偏移 ms 级 = 批 1/2/3 跨 feeder 已登记接受口径）。
+            //   两侧谓词同源：feeder 收纳侧 ItemEntityManager::isTool3DDrop，本 host 重算侧
+            //   itemEntities.isTool3DDrop 薄委托，delegate 排除侧 hasToolBucket（六分支 visible 链追加，
+            //   桶态投影）——批 1 hasBucket / 批 2 hasShapeBucket 纪律沿用。桶满 8 溢出 → 旧 delegate
+            //   保底（优雅降级不丢渲）。空转门 t1032 同款（含谓词感知：剪刀/材料等非本族 id 的桶不走钟；
+            //   弦表只服务弓桶）。钓鱼竿（type 8）掉落 delegate 无分支（t803 只补了打火石）——如实维持
+            //   不入族（登记项，非本单范围）。review0910 #2 同型盲区登记：reassignToolBuckets /
+            //   hasToolBucket 纯 QML JS 编排，headless 行为面由 C++ 谓词直调探针（P-t1041a/c）覆盖
+            //   + 源码钉（P-t1041d）+ 实机确认项。
+            Node {
+                id: toolDropInstHost
+                readonly property int kBucketCount: 8
+                // 桶池：buckets[k] = 已指派的工具 3D 族 id（0 = 空桶）。整体替换赋值 → property var 自动
+                //   notify → hasToolBucket 绑定（delegate visible 链）随指派重算。
+                property var buckets: [0, 0, 0, 0, 0, 0, 0, 0]
+
+                function hasToolBucket(id) {
+                    const b = toolDropInstHost.buckets
+                    for (let k = 0; k < b.length; ++k) if (b[k] === id) return true
+                    return false
+                }
+
+                // 桶重指派（批 1 reassignDropBuckets 同款）：扫活体工具 3D 族 id 计数 → 在用桶保持
+                //   （防几何切换抖动，review0910 #4 不让位）→ 空桶按活体数降序、id 升序并列补位（确定性
+                //   tiebreak）→ 消失 id 释放。entitiesChanged 驱动。谓词与 feeder 收纳侧同源
+                //   （itemEntities.isTool3DDrop 薄委托 → ItemEntityManager 静态单一权威）。
+                function reassignToolBuckets() {
+                    const counts = ({})
+                    const n = itemEntities.count
+                    for (let i = 0; i < n; ++i) {
+                        if (!itemEntities.aliveAt(i)) continue
+                        const id = itemEntities.itemIdAt(i)
+                        if (!itemEntities.isTool3DDrop(id)) continue
+                        counts[id] = (counts[id] || 0) + 1
+                    }
+                    const prev = toolDropInstHost.buckets
+                    const next = [0, 0, 0, 0, 0, 0, 0, 0]
+                    const freeSlots = []
+                    const kept = []
+                    for (let k = 0; k < toolDropInstHost.kBucketCount; ++k) {
+                        const id = (k < prev.length) ? prev[k] : 0
+                        if (id > 0 && counts[id] > 0) { next[k] = id; kept.push(id) }
+                        else freeSlots.push(k)
+                    }
+                    const cands = Object.keys(counts).map(Number).filter(function(id) { return kept.indexOf(id) < 0 })
+                    cands.sort(function(a, b) { return (counts[b] - counts[a]) || (a - b) })
+                    while (freeSlots.length > 0 && cands.length > 0) next[freeSlots.shift()] = cands.shift()
+                    toolDropInstHost.buckets = next
+                }
+
+                Component.onCompleted: reassignToolBuckets()
+                Connections {
+                    target: itemEntities
+                    function onEntitiesChanged() { toolDropInstHost.reassignToolBuckets() }
+                }
+
+                // 五类几何 + 弓 + 弦单例（桶 Model 按桶 id 的 toolType 切换引用；同 id 全实例共享同一
+                //   几何实例 = Quick3D instancing 同 geometry 指针语义，批 2 几何共享先例）。
+                PickaxeGeometry { id: toolGeomPick }
+                HoeGeometry { id: toolGeomHoe }
+                AxeGeometry { id: toolGeomAxe }
+                ShovelGeometry { id: toolGeomShovel }
+                SwordGeometry { id: toolGeomSword }
+                BowGeometry { id: toolGeomBow }
+                BowStringGeometry { id: toolGeomString }
+                function geomForId(id) {
+                    const tt = id > 0 ? hotbarVM.toolType(id) : 0
+                    return tt === 2 ? toolGeomHoe
+                         : tt === 3 ? toolGeomAxe
+                         : tt === 4 ? toolGeomShovel
+                         : tt === 5 ? toolGeomSword
+                         : tt === 7 ? toolGeomBow
+                         : toolGeomPick // 缺省镐形（ToolIcon toolType 兜底同款）
+                }
+
+                Repeater {
+                    model: toolDropInstHost.kBucketCount
+                    delegate: Node {
+                        visible: toolDropInstHost.buckets[index] > 0
+                        Model {
+                            // 几何 per-id：桶指派变化才切（空桶 visible=false 不渲染）。
+                            geometry: toolDropInstHost.geomForId(toolDropInstHost.buckets[index])
+                            instancing: ToolDropInstancing {
+                                manager: itemEntities
+                                familyId: toolDropInstHost.buckets[index]
+                                skyLight: worldClock.skyLight
+                                minLight: window.minLight
+                            }
+                            // 材质本体白基色：tier 色×天光在 per-instance color（t1039 先例；
+                            //   实例表已携 0.45 缩放 / 自转 / bob，Model 本体 transform 恒 identity）。
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                            }
+                        }
+                        Model {
+                            // 弓弦第二 Model（仅弓桶显）：stringPass=true 第二实例表，变换口径与弓身
+                            //   表逐字同参（同 slot 集合同 pos/bob/rotY/scale 0.45），色 = 蜘蛛丝白
+                            //   245×k（t330，不随 tier）。
+                            visible: toolDropInstHost.buckets[index] > 0 && hotbarVM.toolType(toolDropInstHost.buckets[index]) === 7
+                            geometry: toolGeomString
+                            instancing: ToolDropInstancing {
+                                stringPass: true
+                                manager: itemEntities
+                                familyId: toolDropInstHost.buckets[index]
+                                skyLight: worldClock.skyLight
+                                minLight: window.minLight
+                            }
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // t1041 批 4 收官 ②：**工具/材料 billboard 图标族**（isIconBillboardDrop：剪刀/打火石
+            //   ToolIcon + 材料段〔含护甲〕MaterialIcon）压成 per-id 桶 × 单 instanced Model
+            //   （BillboardDropInstancing itemIconFamily=true 模式，1 draw / 桶）。**per-id 贴图选型登记**：
+            //   instanced Model 全实例共享材质 → texture atlas + UV 进实例表需自定义 shader = RHI 囚笼
+            //   违规禁区（PLAN §2-A 禁自定义 shader）→ 选 **per-id host 桶池**（批 1/2 同构）：每活跃 id
+            //   占一桶，桶内全实例共享同一 Texture（ToolIcon/MaterialIcon sourceItem Canvas 64×64）+
+            //   同一材质 = 同 id 合批。贴图 per-id 由桶内 wrapper Item 双图标可见性切换（isTool →
+            //   ToolIcon{toolType} / isMaterial → MaterialIcon{materialId}，两支同池异贴图，显隐互斥）。
+            //   朝相机旋转进实例表：camPitch/camYaw 绑 cam.eulerRotation（旧 billboard 世界朝向
+            //   = Ry(camYaw)·Rx(camPitch) 的逐位等效面；相机沿 setter markDirty）。billboard 不自转
+            //   （旧分支显式抵消 rotY——feeder 无 rotY 项，与批 1/2/3 的自转表不同）；bob 同批 1/2 公式。
+            //   材质与旧 delegate 分支逐字同参（NoLighting + alphaCutoff 0.5 + opacity 0.99 cutout 契约
+            //   + flipV:false + 天光乘子 baseColor）。两侧谓词同源：feeder 收纳 isIconBillboardDrop /
+            //   QML 重算薄委托 / delegate 排除 hasItemBucket（剪刀/打火石/材料三分支 visible 链追加）。
+            //   空转门 t1032 同款（含谓词感知：方块图标族 id 的桶不走钟）。
+            Node {
+                id: itemIconInstHost
+                readonly property int kBucketCount: 8
+                property var buckets: [0, 0, 0, 0, 0, 0, 0, 0]
+
+                function hasItemBucket(id) {
+                    const b = itemIconInstHost.buckets
+                    for (let k = 0; k < b.length; ++k) if (b[k] === id) return true
+                    return false
+                }
+
+                function reassignItemBuckets() {
+                    const counts = ({})
+                    const n = itemEntities.count
+                    for (let i = 0; i < n; ++i) {
+                        if (!itemEntities.aliveAt(i)) continue
+                        const id = itemEntities.itemIdAt(i)
+                        if (!itemEntities.isIconBillboardDrop(id)) continue
+                        counts[id] = (counts[id] || 0) + 1
+                    }
+                    const prev = itemIconInstHost.buckets
+                    const next = [0, 0, 0, 0, 0, 0, 0, 0]
+                    const freeSlots = []
+                    const kept = []
+                    for (let k = 0; k < itemIconInstHost.kBucketCount; ++k) {
+                        const id = (k < prev.length) ? prev[k] : 0
+                        if (id > 0 && counts[id] > 0) { next[k] = id; kept.push(id) }
+                        else freeSlots.push(k)
+                    }
+                    const cands = Object.keys(counts).map(Number).filter(function(id) { return kept.indexOf(id) < 0 })
+                    cands.sort(function(a, b) { return (counts[b] - counts[a]) || (a - b) })
+                    while (freeSlots.length > 0 && cands.length > 0) next[freeSlots.shift()] = cands.shift()
+                    itemIconInstHost.buckets = next
+                }
+
+                Component.onCompleted: reassignItemBuckets()
+                Connections {
+                    target: itemEntities
+                    function onEntitiesChanged() { itemIconInstHost.reassignItemBuckets() }
+                }
+
+                Repeater {
+                    model: itemIconInstHost.kBucketCount
+                    delegate: Node {
+                        visible: itemIconInstHost.buckets[index] > 0
+                        Model {
+                            geometry: BillboardQuad {}
+                            instancing: BillboardDropInstancing {
+                                itemIconFamily: true
+                                manager: itemEntities
+                                familyId: itemIconInstHost.buckets[index]
+                                camPitch: cam.eulerRotation.x
+                                camYaw: cam.eulerRotation.y
+                            }
+                            // 材质与旧 delegate 剪刀/打火石/材料分支逐字同参（NoLighting + alphaCutoff
+                            //   0.5 + opacity 0.99 <1 强制透明通道尊重贴图 alpha 的 cutout 契约 +
+                            //   flipV:false + 天光乘子 baseColor；实例表已携 0.3 缩放 / 朝相机旋转 /
+                            //   bob，Model 本体 transform 恒 identity）。
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                alphaCutoff: 0.5
+                                opacity: 0.99
+                                baseColor: terrainLight(worldClock.skyLight)
+                                baseColorMap: Texture {
+                                    flipV: false
+                                    sourceItem: Item {
+                                        width: 64; height: 64
+                                        ToolIcon {
+                                            x: 0; y: 0; width: 64; height: 64
+                                            visible: hotbarVM.isTool(itemIconInstHost.buckets[index])
+                                            toolType: hotbarVM.toolType(itemIconInstHost.buckets[index])
+                                        }
+                                        MaterialIcon {
+                                            x: 0; y: 0; width: 64; height: 64
+                                            visible: hotbarVM.isMaterial(itemIconInstHost.buckets[index])
+                                            materialId: itemIconInstHost.buckets[index]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // t1041 批 4 收官 ③：**异形 billboard 图标族**（isBlockIconBillboardDrop：partial/cross/床
+            //   非 3D——楼梯 16 在族、火把 13 在 3D 族不入）压成 per-id 桶 × 单 instanced Model
+            //   （BillboardDropInstancing 缺省模式，1 draw / 桶）。贴图 = iconSourceForBlock(id) 图标
+            //   PNG（旧分支 Texture source 逐字同参：pack 开关联动 + generateMipmaps:false，无 flipV
+            //   覆写——旧分支本就未设）。朝相机旋转 / bob / 材质与 ② 同机制；两侧谓词同源
+            //   （feeder 收纳 isBlockIconBillboardDrop / QML 重算薄委托 / delegate 排除 hasIconBucket）。
+            //   空转门 t1032 同款。桶满 8 溢出 → 旧 delegate 保底。
+            Node {
+                id: blockIconInstHost
+                readonly property int kBucketCount: 8
+                property var buckets: [0, 0, 0, 0, 0, 0, 0, 0]
+
+                function hasIconBucket(id) {
+                    const b = blockIconInstHost.buckets
+                    for (let k = 0; k < b.length; ++k) if (b[k] === id) return true
+                    return false
+                }
+
+                function reassignBlockIconBuckets() {
+                    const counts = ({})
+                    const n = itemEntities.count
+                    for (let i = 0; i < n; ++i) {
+                        if (!itemEntities.aliveAt(i)) continue
+                        const id = itemEntities.itemIdAt(i)
+                        if (!itemEntities.isBlockIconBillboardDrop(id)) continue
+                        counts[id] = (counts[id] || 0) + 1
+                    }
+                    const prev = blockIconInstHost.buckets
+                    const next = [0, 0, 0, 0, 0, 0, 0, 0]
+                    const freeSlots = []
+                    const kept = []
+                    for (let k = 0; k < blockIconInstHost.kBucketCount; ++k) {
+                        const id = (k < prev.length) ? prev[k] : 0
+                        if (id > 0 && counts[id] > 0) { next[k] = id; kept.push(id) }
+                        else freeSlots.push(k)
+                    }
+                    const cands = Object.keys(counts).map(Number).filter(function(id) { return kept.indexOf(id) < 0 })
+                    cands.sort(function(a, b) { return (counts[b] - counts[a]) || (a - b) })
+                    while (freeSlots.length > 0 && cands.length > 0) next[freeSlots.shift()] = cands.shift()
+                    blockIconInstHost.buckets = next
+                }
+
+                Component.onCompleted: reassignBlockIconBuckets()
+                Connections {
+                    target: itemEntities
+                    function onEntitiesChanged() { blockIconInstHost.reassignBlockIconBuckets() }
+                }
+
+                Repeater {
+                    model: blockIconInstHost.kBucketCount
+                    delegate: Node {
+                        visible: blockIconInstHost.buckets[index] > 0
+                        Model {
+                            geometry: BillboardQuad {}
+                            instancing: BillboardDropInstancing {
+                                manager: itemEntities
+                                familyId: blockIconInstHost.buckets[index]
+                                camPitch: cam.eulerRotation.x
+                                camYaw: cam.eulerRotation.y
+                            }
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                alphaCutoff: 0.5
+                                opacity: 0.99
+                                baseColor: terrainLight(worldClock.skyLight)
+                                baseColorMap: Texture {
+                                    source: { const _p = resourcePack.active; return _p >= 0 ? hotbarVM.iconSourceForBlock(blockIconInstHost.buckets[index]) : "" }   // t440 cross 段 flat 图标 / t219 异形立体图标 / t496 染色 bed 图标（旧分支逐字同参）；t745 触碰 active → pack 开关即时刷
+                                    generateMipmaps: false
+                                }
+                            }
+                        }
                     }
                 }
             }
