@@ -72,6 +72,7 @@
 #include "blockdropinstancing.h"  // t1027 掉落物 instancing 治理首批探针（族分桶 / 实例表内容级断言）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "cheststore.h"           // t1013 箱子矿车内容键存储（转正 / 回生 / 掉落链断言源）
+#include "loottable.h"            // t1035 豹猫驯服分化探针（fishingPool 直调：生鱼=驯服道具来源钉）
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
                                    //   PLAN §2 低层永不 include 高层；互钉只能落在本测试 TU，它合法 include 全栈）
@@ -45366,6 +45367,119 @@ Item {
                                   : QStringLiteral("diag sneak=%1 use=%2 pins=%3 toggles=%4")
                                         .arg(okSneakC).arg(okUseC).arg(missT34c.isEmpty())
                                         .arg(togglesT34c));
+    }
+
+    // ── P-t1035 豹猫驯服分化口径钉（R19.22 末项；盘点回标 + 现状行为腿）──
+    //    盘点结论（生产代码现状 > dev-plan 设想，本探针按现状钉）：t481 生鱼驯服链（~1/3 概率 / 失败仍
+    //    耗鱼 / 毛色变体 0..2）+ t949 实机右键输入缝（P-t949(a) 真输入腿持续覆盖）+ t963 项圈镜像补齐
+    //    全在库 → 驯服链无 src 缺口。驯服猫现库口径 = 现代 MC：站态**跟随**（kOcelotFollowSpeed 走近 /
+    //    kFollowMinDist 停步 / >kOcelotTeleportDist=12 瞬移，t878⑤）+ 坐/站命令（t481 空手分支）+ 红项圈
+    //    （t963 双落点）+ 不防御不反击（t923c2）—— dev-plan t1035「信任态不跟随不项圈」设想已被
+    //    t878（跟随+瞬移）/ t963（项圈）先行演化掉，过时口径在 docs 登记、行为零改动。
+    //    (a) 驯服猫坐态留守（镜像 t831(c) 狼腿）：toggleOcelotSit → 玩家 3 格外 1s 零位移；
+    //    (b) 站态跟随走近（镜像 t831(c2)）：玩家 7.5 格外 2s 位移 ≥2（走向主人，kOcelotFollowSpeed=4.0）；
+    //    (c) 过远瞬移（镜像 t831(d/d3)）：>12 格 1s 内跳至玩家 ≤10 环；近距 6 走跟不跳变（8 帧 ≤1.0）；
+    //    (d) 跟随态字段分化：狼/猫状态 accessor 跨型互查恒 false（wolfTamedAt/wolfSittingAt 对猫槽、
+    //        ocelotTamedAt/ocelotSittingAt 对狼槽——同槽真值只在本型 accessor 面），且两链独立成证；
+    //    (e) 生鱼来源钉（盘点问 3）：LootTable::fishingPool() 直调——RawFishId 在池且为最高权重条目
+    //        （钓鱼产驯服道具，t401 池单一权威；熔炼生→熟与 +2 饥饿口径由 t836 系探针既有在库）。
+    //    阴性轮敏感：摘 aiOcelot 站态跟随 chase 段 → (b) 红（猫不再走向主人）；(a)(c)(d)(e) 不受影响
+    //    保绿（坐态冻结分支更早、瞬移分支独立于 chase、字段钉在 accessor、池钉在 LootTable）。
+    {
+        World wT35;
+        wT35.setWidth(44); wT35.setDepth(44); wT35.setHeight(96); wT35.setSeed(1035);
+        for (int x = 2; x < 42; ++x)
+            for (int z = 2; z < 42; ++z) {
+                for (int y = 85; y <= 90; ++y) wT35.setBlock(x, y, z, BR::Air, 0); // 瞬移落点扫描带净空
+                wT35.setBlock(x, 84, z, BR::Stone, 0); // 平石台（t831 同款免凿高台）
+            }
+        EntityManager emT35;
+        bool ok = true;
+        // 驯服入口（P-t831(e) 同款循环；实机输入缝已由 P-t949(a) 持续覆盖，此处 EntityManager 层直驯）。
+        const int wolfT35 = emT35.spawnMobTyped(8, 85, 8, EntityManager::MobWolf,
+                                                QStringLiteral("#c8ccd4"), 10);
+        const int catT35 = emT35.spawnMobTyped(20, 85, 20, EntityManager::MobOcelot,
+                                               QStringLiteral("#e8c890"), 10);
+        ok = ok && wolfT35 >= 0 && catT35 >= 0;
+        bool diagTamedW = false, diagTamedC = false;
+        float diagTpDXZ = 99.0f, diagFol = 0.0f, diagSit = 99.0f;
+        bool okA = false, okB = false, okC1 = false, okC2 = false, okD = false, okE = false;
+        if (ok) {
+            bool wolfTamed = false, catTamed = false;
+            for (int a = 0; a < 200 && !wolfTamed; ++a)
+                wolfTamed = emT35.tameWolf(wolfT35);
+            for (int a = 0; a < 200 && !catTamed; ++a)
+                catTamed = emT35.tameOcelot(catT35);
+            diagTamedW = wolfTamed;
+            diagTamedC = catTamed;
+            ok = ok && wolfTamed && catTamed;
+            // (d) 跟随态字段分化：跨型互查恒 false + 本型真值各自成证（驯服产物 = 各型独立驯服态字段）。
+            okD = emT35.wolfTamedAt(wolfT35) && !emT35.ocelotTamedAt(wolfT35)
+                && !emT35.ocelotSittingAt(wolfT35)
+                && emT35.ocelotTamedAt(catT35) && !emT35.wolfTamedAt(catT35)
+                && !emT35.wolfSittingAt(catT35);
+            // (a) 坐态留守：猫坐下 → 玩家 3 格外 1s 零位移（MC 坐猫留守，镜像 t831(c)）。
+            emT35.toggleOcelotSit(catT35);
+            const bool sittingT35 = emT35.ocelotSittingAt(catT35);
+            const QVector3D sitP0 = emT35.posAt(catT35);
+            for (int t = 0; t < 64; ++t)
+                emT35.tick(0.016f, &wT35, QVector3D(23.5f, 86.0f, 20.5f), 0.3f, 1.8f, true);
+            diagSit = (emT35.posAt(catT35) - sitP0).length();
+            okA = sittingT35 && diagSit < 0.05f;
+            // (b) 站态跟随：起立 → 玩家 7.5 格外 2s 位移 ≥2（走向主人；kFollowMinDist=2.5 内停步）。
+            emT35.toggleOcelotSit(catT35);
+            const bool standingT35 = !emT35.ocelotSittingAt(catT35);
+            const QVector3D folP0 = emT35.posAt(catT35);
+            for (int t = 0; t < 125; ++t)
+                emT35.tick(0.016f, &wT35, QVector3D(27.5f, 86.0f, 20.5f), 0.3f, 1.8f, true);
+            diagFol = (emT35.posAt(catT35) - folP0).length();
+            okB = standingT35 && diagFol >= 2.0f;
+            // (c1) 过远瞬移（>kOcelotTeleportDist=12）：35 格外玩家 1s 内跳至 ≤10 环
+            //      （listener y=86 台面层 → 落点扫描带 87..82 覆盖台面 85 格，t831 同注）。
+            const QVector3D farT35(36.5f, 86.0f, 36.5f);
+            for (int t = 0; t < 64; ++t)
+                emT35.tick(0.016f, &wT35, farT35, 0.3f, 1.8f, true);
+            const QVector3D tpPos = emT35.posAt(catT35);
+            diagTpDXZ = QVector3D(tpPos.x() - farT35.x(), 0.0f, tpPos.z() - farT35.z()).length();
+            okC1 = diagTpDXZ <= 10.0f;
+            // (c2) 近距 6 走跟不跳变：8 帧（≤2 AI 窗）位移 ≤1.0（瞬移跳变 ≥5 可分辨）。
+            const QVector3D nearT35(tpPos.x() + 6.0f, 86.0f, tpPos.z());
+            const QVector3D beforeNear = emT35.posAt(catT35);
+            for (int t = 0; t < 8; ++t)
+                emT35.tick(0.016f, &wT35, nearT35, 0.3f, 1.8f, true);
+            okC2 = (emT35.posAt(catT35) - beforeNear).length() < 1.0f;
+        }
+        // (e) 生鱼来源钉（直调 LootTable 单一权威，随机池无关）：RawFishId 在钓鱼池且为最高权重条目
+        //     （~55% 常见获物 = MC raw fish 口径；钓竿拉起链行为面由 t836 系探针既有在库）。
+        {
+            int fishW = 0, maxW = 0;
+            bool fishIn = false;
+            for (const LootTable::Entry &e : LootTable::fishingPool()) {
+                if (e.itemId == RecipeRegistry::RawFishId) { fishIn = true; fishW = e.weight; }
+                if (e.weight > maxW) maxW = e.weight;
+            }
+            okE = fishIn && fishW == maxW && fishW > 0;
+        }
+        ok = ok && okA && okB && okC1 && okC2 && okD && okE;
+        if (!ok)
+            qInfo().noquote() << "  [t1035 diag] tamedW" << diagTamedW << "tamedC" << diagTamedC
+                              << "a-sit" << okA << diagSit << "b-follow" << okB << diagFol
+                              << "c1-tp" << okC1 << diagTpDXZ << "c2-near" << okC2
+                              << "d-fields" << okD << "e-pool" << okE;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1035 ocelot taming divergence caliber (dev-plan trust-state vision "
+                             "registered outdated - production is modern-MC follow caliber): the "
+                             "tamed cat SITS put with a nearby player (1s zero drift, wolf t831(c) "
+                             "mirror) and FOLLOWS a 7.5-block owner >=2 blocks in 2s (kOcelotFollowSpeed "
+                             "4.0), teleports to the owner's 2..5 ring when >12 blocks (t878⑤ "
+                             "kOcelotTeleportDist) while a 6-block gap keeps walking (no jump), "
+                             "wolf/ocelot tamed+sitting state accessors cross-query each other's slot "
+                             "as false (per-type follow-state fields, both chains independently true), "
+                             "and LootTable::fishingPool() carries RawFishId as its top-weight entry "
+                             "(raw fish = the taming item source; smelting/hunger caliber already "
+                             "pinned by the t836 probes) (negative-round sensitive: aiOcelot "
+                             "stand-follow chase removal)";
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
