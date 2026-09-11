@@ -680,8 +680,10 @@ public:
     //   同 loadWorldTime 编排先例），裸 float 边界传入。
     Q_INVOKABLE void setBedSpawn(float x, float y, float z);
     // t1024 床位重生锚失效（单点收口）：m_spawnPos 复位 kSpawn pristine + bedSpawnValid=false +
-    //   锚格清零 + emit（指南针基准 / 有效位同步刷）。挖掉锚床（finishMiningAt 床分支）与世界换代
-    //   （onWorldSeedChanged）共用；幂等（已失效静默）。
+    //   锚格清零 + emit（指南针基准 / 有效位同步刷）。挖掉锚床（finishMiningAt 床分支）、爆炸等
+    //   非玩家毁床（onWorldBedBlockDestroyed，t1033）与世界换代（onWorldSeedChanged）共用；幂等
+    //   （已失效静默）。t1037 MC「床毁即醒」：睡眠中锚失效 → 先走受惊醒路径 cancelSleep 中断睡觉
+    //   序列（绝不落入 sleepAdvanceToDawn 跳晨把重生点重写回已毁床位），非睡眠态零行为面。
     void clearBedSpawn();
     // t238 设饥饿值（存档加载用；与 PlayerState.setHunger 配对）：clamp 到 [0, kMaxHunger]；同步本类的
     //   Physics 层饥饿累积器 m_hunger + emit hungerUpdated（让 Main.qml 路由到 playerState.setHunger 把
