@@ -9,15 +9,15 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1040
+current_task: t1039
 current_task_status: READY
-last_completed_task: t1038 附魔台 94 排除出形状桶（Review_2026-09-11 #1 用户定夺修，书台相位失锁收口）
-last_task_closure_commit: （收口 docs 本提交；代码终态 f7bfe2b）
-last_verified_commit: f7bfe2b（矩阵 522 PASS / 0 FAIL，binary 与源对齐）
-last_governance_review: 2026-09-11（audit #4 GREEN，docs/governance-audit-2026-09-11.md）
+last_completed_task: t1040 rig 稳健性补丁（8 站点显式持物加固，src 零改动，矩阵恒 522/0；实现棒限额中断由主控亲自收尾 docs）
+last_task_closure_commit: （docs 本提交；代码终态 e9eec34）
+last_verified_commit: e9eec34（矩阵 522 PASS / 0 FAIL，binary 与源对齐）
+last_governance_review: 2026-09-11（audit #4 GREEN）
 governance_review_due: false
-completed_tasks_since_governance_review: 1
-next_task: t1039（R19.23 执行顺序 t1038✅→t1040→t1039→t1042→t1041）
+completed_tasks_since_governance_review: 2
+next_task: t1039（R19.23 执行顺序 t1038✅→t1040✅→t1039→t1042→t1041）
 next_task_source: docs/dev-plan.md R19.23 段
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
