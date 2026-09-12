@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-12 12:55
+更新时间：2026-09-12 13:15
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,20 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1044
+current_task: t1047
 current_task_status: READY
-last_completed_task: t1043 铁轨水蚀 + 矿井防水（裁-1 清偿：Rail 三族入 isAttachableBlock 水毁附着族 + placeMineshaft 生成期干燥门〔候选收集→walk 后切比雪夫距 2 邻域无水才落块〕；矩阵 534→536，final 536/0；阴性轮1 摘家族接入恰红 5〔旧 neg1 在案〕、轮2 摘干燥门恰红 535/1=t1043b 唯一红；断链恢复流程重走全链，详见 dev-plan t1043 断链与恢复段）
-last_task_closure_commit: （docs 本提交；代码终态见 test(t1043) 提交）
-last_verified_commit: test(t1043)（矩阵 536 PASS / 0 FAIL，matrix_t1043_final.log 权威，binary 与源对齐；voxelsandbox 重建 EXIT=0 + offscreen 冒烟 SMOKE_ALIVE_12S + 60fps 稳态 tail20 留存 voxelsandbox_t1043_tail20.log）
-last_governance_review: 2026-09-11（audit #4 GREEN）
-governance_review_due: true
-completed_tasks_since_governance_review: 6
-workspace_clean: true
-mutation_restored: true
-positive_log: matrix_t1043_pos2.log
-final_log: matrix_t1043_final.log
-next_task: **先执行 audit #5 治理审计**（completed_tasks_since_governance_review=6 已触发「每 5 个完整闭环」计数条件，用户 0912 评审确认 due；不拖到批次末）→ 之后 t1044 蜘蛛爬墙（裁-2）→ t1045 耕地退化（裁-3）→ t1046 parity 小修合集（含 ⑦ noteClips 析构补齐，用户 0912 评审 #4）→ R19.23 批次 review
-next_task_source: docs/dev-plan.md R19.23 段 + docs/parity-ledger.md 用户裁决 + docs/dev-plan.md「用户评审落地（2026-09-12 上午）」段
+last_completed_task: t1043 铁轨水蚀 + 矿井防水（裁-1 清偿；断链恢复会话按用户 0912 评审流程重走证据链收口 0a6bc1b）
+last_task_closure_commit: 0a6bc1b（audit #5 与本块由主控收口后更新）
+last_verified_commit: 37e38a9（矩阵 536 PASS / 0 FAIL，matrix_t1043_final.log 权威，binary 与源对齐）
+last_governance_review: 2026-09-12（audit #5 YELLOW，docs/governance-audit-2026-09-12.md；GOV-20260912-1 = t1047）
+governance_review_due: false
+completed_tasks_since_governance_review: 0
+next_task: t1044（t1047 GOV 纠偏闭环后回原队列：t1044 蜘蛛爬墙 → t1045 耕地退化 → t1046 合集 → R19.23 批次 review → R20 主线）
+next_task_source: docs/dev-plan.md R19.23 段（audit #5 节「顺序再更新」）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
