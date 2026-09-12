@@ -3659,3 +3659,9 @@ t1005-t1023（19 项）。**建议顺序：回归清算 t1005→t1006→t1007（
 - **长期架构方向（用户评审，登记待议）**：instancing 治理已到治理路径 a 终点，**后续暂停新增 QML instancing 家族**；t1043-t1046 完成后转 R20 重构主线（R20.03 测试分层 → R20.04 基础类型 → R20.05 Command/Event/Snapshot → R20.06 GameSession → R20.07 WorldFacade → R20.09 Chunk 生命周期 → R20.11 后台 GenerationJob），掉落物 instancing 的 seam 化等 RenderData/EntityStore 就位后回补。
 
 **顺序（更新）**：t1042（进行中）→ t1041 → **t1043 → t1044 → t1045 → t1046（parity bug 波）** → R19.23 批次 review + audit #5。矩阵基线 526。
+
+### 治理审计 #5（2026-09-12 13:10，YELLOW）→ GOV-20260912-1 纠偏单 t1047
+
+audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review_2026-09-12 #1（中，未修）属「现有验收标准内可修的已指认缺陷」→ **YELLOW**，纠偏单 **t1047** 排在 t1044 之前，闭环后回原队列。合并四项：①**O-1 壳排除链非反应绑定**（Main.qml:6617 `visible: !glowShellInstHost.hasShellAt(index)` 无属性依赖 → >128 溢出态永续双壳/丢壳；修=revision 触碰一行 t256 模式 + P-t1039d 针同步）；②**O-2 弦 feeder 废钟**（tooldropinstancing hasLiveMember 追加弓门一行 + P-t1041c 可加一针）；③**O-3 狼退出惊逃集**（Review_0912 #3 定夺已由常设裁决解：MC 狼无 PanicGoal → setPanicFlee 的 wolfBaby 分支整体摘除 + P-t1042c 措辞改「零 panic」+ 头注释同步）；④**O-4 惊逃期 headPitch 冻结**（headPitchAt 返 0 条件追加 panicTimer 门一行）。⑤enchantsAt 分配登记不修。基线 536。
+
+**顺序（再更新）**：t1042✅ → t1041✅ → t1043✅ → **t1047（GOV 纠偏）** → t1044 → t1045 → t1046 → R19.23 批次 review → （用户方向）R20 重构主线 R20.03 起。矩阵基线 536。
