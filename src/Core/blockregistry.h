@@ -2306,16 +2306,20 @@ public:
     // t1012④ 附着块族单一权威谓词（机制等价 MC 1.0「流水冲毁 non-solid 附着物」）：id ∈ {火把（各
     //   TorchAttach state 共用 id 13）/ 红石火把（129，含熄灭位 state）/ 蜘蛛网（102）/ 木梯（62，
     //   review0906 #10 并入 —— MC 1.0 流水同样冲毁梯子；dropId(Ladder)=自身 → 掉落链免费成立，与
-    //   玩家挖除同链）} → true。消费点 = World::tickWaterFlow 扩散/下落落点（流水进入附着块格 →
-    //   setWaterSilent 置 Air + blockDroppedAsItem 按 dropId 掉落——掉落链对齐玩家挖除）。后续新增
-    //   水毁附着物只扩本表一处（新造平行系统禁止）。
-    //   **Rail 刻意排除（review0906 #10 登记，非遗漏）**：MC 1.0 流水同样毁轨，但本工程 worldgen
-    //   矿井在洞穴带成片铺轨（含水下洞穴 / 海底峡谷切穿面），轨入水毁族会让矿井轨道网被一次洞口
-    //   洪流成片掏空——矿井矿车玩法场景资产不可再生（worldgen 只在生成期铺一次）。梯子只挂在玩家
-    //   /结构竖井壁上、毁后可随手重放，无此顾虑。若后续加「轨道防水保护 / 矿井轨重铺」再收口。
+    //   玩家挖除同链）/ **铁轨族（t1043：isRail 三族——普通轨 103 / 动力轨 127 / 探测轨 128）**}
+    //   → true。消费点 = World::tickWaterFlow 扩散/下落落点（流水进入附着块格 → setWaterSilent 置
+    //   Air + blockDroppedAsItem 按 dropId 掉落——掉落链对齐玩家挖除；轨族 dropId=自身 → 掉落免费
+    //   成立）。后续新增水毁附着物只扩本表一处（新造平行系统禁止）。
+    //   **t1043 裁-1 清偿（review0906 #10 的 Rail 刻意豁免废除，用户定案「一切按照 MC 原版准则」）**：
+    //   MC 1.0 流水冲毁全部三种铁轨（docs/parity-ledger.md 裁-1，wiki 已引证）。旧豁免理由「矿井
+    //   worldgen 轨网资产不可再生，防洞口洪流成片掏空」由**伴随义务**承接（非豁免）：placeMineshaft
+    //   生成期对候选轨格做干燥门（轨只在干燥格放置——world.cpp placeMineshaft 轨道段 t1043 注释），
+    //   生成的矿井轨道网不再自带「进水即自毁」面；玩家后放轨 / 玩家引水冲轨 = MC 原版口径照冲。三族经 isRail 单一
+    //   权威一并纳入（动力 / 探测轨 MC 同样可被水冲毁；登记于 parity-ledger 裁-1 行）。
     static bool isAttachableBlock(quint8 id)
     {
-        return id == Torch || id == RedstoneTorch || id == Cobweb || id == Ladder;
+        return id == Torch || id == RedstoneTorch || id == Cobweb || id == Ladder
+            || isRail(id);
     }
 
     // t225 箱子朝向（存 chunk state，低 2 位编码水平朝向）：放置时记录箱子「前面（锁面，chest_front 贴图）」

@@ -7741,6 +7741,14 @@ void World::placeMineshaft()
             // t565 ④ 铁轨铺设记录：铺完统一算连接 state（直 / 拐角 / 十字形态）；t1001 ⑥ 矿井箱
             //   「落地轨旁」亦从本表取锚（考据轨上运输矿车 → 偏差落地等价）。
             std::vector<std::array<int, 3>> railCells;
+            // t1043 裁-1 生成期防水（伴随义务，非豁免——isAttachableBlock 轨族入水毁族的配套面）：
+            //   轨的**放置**从巷道 walk 内联改为「候选先收集 → walk 完成后统一过干燥门再落块」。
+            //   候选 = hash 保留率判过的中线格（与旧内联同一 hash 序，逐格判定不变）；落块推迟到
+            //   pieceCorridor / 起点厅 / 途中事件全部 carve 完毕之后，干燥门才能看到完整巷道周边
+            //   （breach 可能在某条轨之后才 carve 出来）。摘此门 → 洪流巷道的轨在运行期首水 tick
+            //   成片被冲（= review0906 #10 当初登记的「矿井轨网被一次洞口洪流掏空」，改由生成期
+            //   防水承接而非水蚀豁免；P-t1043b 阴性轮敏感位）。
+            std::vector<std::array<int, 3>> railCandidates;
 
             // 逐格铺地板 + 清空气（px,pz 列，地板 y0、内部空气 y0+1..y0+roomH；不动 Bedrock；越界钳制）。
             //   t1012 ① 地板政策：下方 Air = 洞穴空腔 → Planks 桥面；下方实地（默认嵌岩）→ Stone 石底。
@@ -7934,15 +7942,14 @@ void World::placeMineshaft()
                                 }
                             }
                         }
-                        // 残缺轨（中线 hash 保留率 kRailPct → 考据「铁轨残缺不连续」；仅空气格放；
-                        //   斜坡段随地板降层）。
+                        // 残缺轨（中线 hash 保留率 kRailPct → 考据「铁轨残缺不连续」；斜坡段随地板
+                        //   降层）。t1043：只做 hash 判定登记候选，**落块推迟**到 walk 后的干燥门统一
+                        //   执行（见 railCandidates 声明处注释 + 落块处 t1043 注释）。
                         {
                             const int ry = curY + 1;
                             if (ry < m_height
-                                && (hashVoxel(mineSeed ^ 0x5A17u, ax, ry, az) % 100u) < kRailPct
-                                && m_chunks.blockAt(ax, ry, az) == BlockRegistry::Air) {
-                                m_chunks.setBlock(ax, ry, az, BlockRegistry::Rail, 0);
-                                railCells.push_back({ax, ry, az});
+                                && (hashVoxel(mineSeed ^ 0x5A17u, ax, ry, az) % 100u) < kRailPct) {
+                                railCandidates.push_back({ax, ry, az});
                             }
                         }
                         // 蜘蛛网（顶角 w=±1 y=curY+kTunnelH ~12%；仅空气格，沿用 t565）。
@@ -8017,6 +8024,32 @@ void World::placeMineshaft()
                             putStruct(px, sy + 1, pz, BlockRegistry::Torch, BlockRegistry::TorchFloor);
                         }
                     }
+            }
+
+            // t1043 裁-1 生成期防水落块（干燥门；伴随义务——见 railCandidates 声明处注释）：
+            //   walk（含途中事件 / 蛛网支廊 / 斜坡段）全部 carve 完毕后，对每个候选轨格核查
+            //   「干燥格」：本格仍为 Air（walk 中被后续 carve / 结构覆盖的候选如弃）且**切比雪夫
+            //   距 2 的 5×5×5 邻域无水**。半径 2 的几何依据：placeUndergroundWaterPools 先于矿井
+            //   → 池水存活层与巷道 breach 的接触面必落在巷道截宽（w=±2 外一圈）或巷道尽头外一格、
+            //   且与轨行（curY+1）的竖直差 ≤ 巷道净高（≤3）→ 与最近候选轨的切比雪夫距 ≤ 2，半径 2
+            //   恰覆盖全部直接 breach 几何（不虚放大面）。干燥候选才落块（state=0，连接位由下方
+            //   统一重算覆盖）；湿候选跳过 = 「水下段不放轨」（轨只在干燥格放置）。登记残余：breach
+            //   洪流沿巷道最长可再蔓 7 格（kMaxFlowLevel）—— 距水 >2 的轨不在本门内（全量防水=
+            //   运行期流场模拟，超出「最小面」定案；parity-ledger 裁-1 行登记）。
+            for (const auto &cand : railCandidates) {
+                const int rx = cand[0], ry = cand[1], rz = cand[2];
+                if (ry < 0 || ry >= m_height) continue;
+                if (m_chunks.blockAt(rx, ry, rz) != BlockRegistry::Air) continue;
+                bool wet = false;
+                for (int ddx = -2; ddx <= 2 && !wet; ++ddx)
+                    for (int ddy = -2; ddy <= 2 && !wet; ++ddy)
+                        for (int ddz = -2; ddz <= 2 && !wet; ++ddz)
+                            if (m_chunks.blockAt(rx + ddx, ry + ddy, rz + ddz)
+                                == BlockRegistry::Water)
+                                wet = true;
+                if (wet) continue; // t1043 干燥门：水边 / 水下段不放轨（P-t1043b 行为面 + 源钉本体）
+                m_chunks.setBlock(rx, ry, rz, BlockRegistry::Rail, 0);
+                railCells.push_back({rx, ry, rz});
             }
 
             // t565 ④ 铁轨连接统一重算（直 / 拐角 / 十字形态由邻轨互连自动得出；与运行期 checkRailOnEdit
