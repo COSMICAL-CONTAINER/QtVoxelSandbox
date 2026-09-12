@@ -43283,18 +43283,22 @@ Item {
                                    : QStringLiteral("diag see [t1017 diag f]"));
     }
 
-    // ── P-t1012c 水冲毁梯子腿（review0906 #10；机制等价 MC 1.0 流水冲毁 ladder）──
-    //    (a) 谓词腿：isAttachableBlock 单一权威含 Ladder；Rail 刻意排除（登记口径 —— 矿井轨网
-    //        worldgen 资产不可再生，防洞口洪流成片掏轨）、Stone 阴性对照；
+    // ── P-t1012c 水冲毁梯子腿（review0906 #10；机制等价 MC 1.0 流水冲毁 ladder）—— t1043 口径更新：
+    //    裁-1 清偿后 Rail 族**入**水毁附着族（旧「Rail 刻意排除」登记废除；worldgen 侧由 placeMineshaft
+    //    生成期干燥门承接，见 P-t1043b），本探针的轨对照腿从「轨完好」翻转为「对向轨同源照冲」。
+    //    (a) 谓词腿：isAttachableBlock 单一权威含 Ladder + Rail（三族经 isRail）；Stone 阴性对照；
+    //        轨族 dropId=自身（掉落链免费成立面）；
     //    (b) 行为腿：悬空石平台 + 石墙 + 贴墙梯（state=0 支撑墙 +X）+ 水源贴梯扩散 → 梯被冲毁
     //        （格 Air ∨ Water 同 tick 入水）+ blockDroppedAsItem 掉自身 id（dropId(Ladder)=Ladder，
-    //        与玩家挖除掉落链同源）；对照：水源反向扩散轨格 → 铁轨完好（刻意排除的行为面钉）。
+    //        与玩家挖除掉落链同源）；同源反向扩散路径上的轨格**同样被冲毁**（t1043 MC 口径：
+    //        流水冲轨，dropId(Rail)=Rail；旧「轨完好对照」随裁-1 废除）→ 恰两掉落（梯 + 轨）。
     {
         bool okA10 = !BlockRegistry::isAttachableBlock(quint8(BR::Stone))
-            && !BlockRegistry::isAttachableBlock(quint8(BR::Rail))
+            && BlockRegistry::isAttachableBlock(quint8(BR::Rail))
             && BlockRegistry::isAttachableBlock(quint8(BR::Ladder))
             && BlockRegistry::isAttachableBlock(quint8(BR::Torch))
             && BlockRegistry::isAttachableBlock(quint8(BR::Cobweb))
+            && BlockRegistry::dropId(quint8(BR::Rail)) == int(BR::Rail)
             && BlockRegistry::dropId(quint8(BR::Ladder)) == int(BR::Ladder); // 掉落链免费成立面
         bool okB10 = false;
         {
@@ -43313,7 +43317,8 @@ Item {
             };
             settle10();
             // 悬空石平台一排 y=40（x 22..30）：墙 x=28（双层防绕）、梯 x=27 贴墙（state=0 → 支撑 +X），
-            //   水源 x=26（+X 扩散进梯格）；轨对照 x=24（水源 -X 扩散路径尽端，下方石面 = grounded）。
+            //   水源 x=26（+X 扩散进梯格冲毁；-X 扩散经 x=25 进 x=24 轨格同源照冲——t1043 口径，
+            //   下方石面全程 grounded）。
             constexpr int PY10 = 40, PZ10 = 24;
             for (int x = 22; x <= 30; ++x)
                 for (int dy = 1; dy <= 3; ++dy)
@@ -43323,34 +43328,39 @@ Item {
             wW10.setBlock(28, PY10 + 1, PZ10, BR::Stone, 0); // 支撑墙
             wW10.setBlock(28, PY10 + 2, PZ10, BR::Stone, 0);
             wW10.setBlock(27, PY10 + 1, PZ10, BR::Ladder, 0); // state=0 → 支撑墙 +X = 石墙
-            wW10.setBlock(24, PY10 + 1, PZ10, BR::Rail, 0);   // 轨对照（刻意排除的行为面）
-            int drops10 = 0;
-            int dropId10 = -1;
+            wW10.setBlock(24, PY10 + 1, PZ10, BR::Rail, 0);   // 轨对照（-X 扩散路径；t1043 起照冲）
+            int ladderDrops10 = 0, railDrops10 = 0;
             QObject::connect(&wW10, &World::blockDroppedAsItem, &wW10,
-                             [&](int, int, int, int id) { ++drops10; dropId10 = id; });
+                             [&](int, int, int, int id) {
+                                 if (id == int(BR::Ladder)) ++ladderDrops10;
+                                 if (id == int(BR::Rail)) ++railDrops10;
+                             });
             wW10.setBlock(26, PY10 + 1, PZ10, BR::Water, 0); // 源（桶倒路径同款源写入）
             settle10();
             const quint8 afterLadder = wW10.blockAt(27, PY10 + 1, PZ10);
             const bool ladderWashed = afterLadder == BR::Air || afterLadder == BR::Water;
-            const bool railIntact = wW10.blockAt(24, PY10 + 1, PZ10) == BR::Rail;
-            okB10 = ladderWashed && railIntact && drops10 >= 1 && dropId10 == int(BR::Ladder);
+            const quint8 afterRail = wW10.blockAt(24, PY10 + 1, PZ10);
+            const bool railWashed = afterRail == BR::Air || afterRail == BR::Water;
+            okB10 = ladderWashed && railWashed && ladderDrops10 == 1 && railDrops10 == 1;
             if (!okB10)
                 qInfo().noquote() << "  [t1012c diag b] ladderCell" << int(afterLadder)
-                                  << "rail" << int(wW10.blockAt(24, PY10 + 1, PZ10))
-                                  << "drops" << drops10 << "dropId" << dropId10;
+                                  << "railCell" << int(afterRail)
+                                  << "ladderDrops" << ladderDrops10 << "railDrops" << railDrops10;
         }
         if (!okA10) ++totalFail;
         if (!okB10) ++totalFail;
         qInfo().noquote() << (okA10 && okB10 ? "PASS" : "FAIL")
-                          << "| t1012c water-wash ladder leg (review0906 #10): the attachable-block"
-                             "water-destroy family now includes Ladder (dropId = itself so the drop"
-                             "chain is free) while Rail stays deliberately excluded (registered:"
-                             "worldgen mineshaft rail networks are non-renewable scene assets - one"
-                             "cave-mouth flood must not gut them; stone negative control) -"
-                             "behaviorally a water source spreading into a wall-attached ladder cell"
-                             "washes it to Air/Water and emits blockDroppedAsItem with the ladder's"
-                             "own id (same chain as player mining), while the rail cell on the"
-                             "opposite spread path of the same source stays fully intact"
+                          << "| t1012c water-wash ladder leg (review0906 #10, t1043 caliber update):"
+                             "the attachable-block water-destroy family includes Ladder AND the rail"
+                             "family (parity ruling cai-1 cleared the registered rail exemption - the"
+                             "worldgen side is carried by the placeMineshaft dry-cell gate, see"
+                             "P-t1043b) with rail dropId = itself so the drop chain is free (stone"
+                             "negative control) - behaviorally a water source spreading into a"
+                             "wall-attached ladder cell washes it to Air/Water and emits"
+                             "blockDroppedAsItem with the ladder's own id (same chain as player"
+                             "mining), while the same source spreading the opposite way now washes"
+                             "the rail cell too (MC caliber: flowing water destroys rails) - exactly"
+                             "one ladder drop and one rail drop"
                           << (okA10 && okB10 ? QString()
                                              : QStringLiteral("diag a=%1 b see [t1012c diag b]")
                                                    .arg(okA10));
@@ -46862,6 +46872,167 @@ Item {
                              "negative round reds exactly the behavior legs)"
                           << (ok ? QString()
                                  : QStringLiteral("diag pins=%1").arg(miss1042.join(QLatin1Char(','))));
+    }
+
+    // ── P-t1043a 流水冲毁铁轨腿（R19.23 t1043 裁-1 清偿；MC 原版口径：流水冲毁全部三种铁轨）──
+    //    (a) 谓词腿：isAttachableBlock 单一权威含轨族三 id（Rail 103 / GoldenRail 127 / DetectorRail
+    //        128，经 isRail 单一权威）+ 轨族 dropId=自身（掉落链免费成立——与玩家挖除同链）；
+    //    (b) 行为腿：地下石平台一排 + 三种轨并排 + 上游水源（同源 grounded 扩散，level 4/5/6 依次
+    //        到达）→ 三种轨全部被冲毁（格 Air ∨ Water）+ 各发一次 blockDroppedAsItem（按精确坐标
+    //        计数，worldgen 矿井轨 / 其它 wash 不入账）；阴性轮敏感：摘 blockregistry.h 的
+    //        `|| isRail(id)` 入族项 → 谓词腿 + 三 wash 腿 + P-t1012c 恰红。
+    {
+        bool okA = BlockRegistry::isAttachableBlock(quint8(BR::Rail))
+            && BlockRegistry::isAttachableBlock(quint8(BR::GoldenRail))
+            && BlockRegistry::isAttachableBlock(quint8(BR::DetectorRail))
+            && BlockRegistry::dropId(quint8(BR::Rail)) == int(BR::Rail)
+            && BlockRegistry::dropId(quint8(BR::GoldenRail)) == int(BR::GoldenRail)
+            && BlockRegistry::dropId(quint8(BR::DetectorRail)) == int(BR::DetectorRail);
+        bool okB = false;
+        {
+            World wT43a;
+            wT43a.setWidth(48); wT43a.setDepth(48); wT43a.setHeight(64); wT43a.setSeed(1043);
+            // worldgen 水沉降（t1012c 同口径：推进到连续静默，免地形水体扩散扰 rig）。
+            int wc43a = 0;
+            QObject::connect(&wT43a, &World::worldChanged, &wT43a, [&]() { ++wc43a; });
+            const auto settle43a = [&]() {
+                int quiet = 0;
+                for (int i = 0; i < 2000 && quiet < 10; ++i) {
+                    const int wc0 = wc43a;
+                    wT43a.tickWaterFlow(); wT43a.tickWaterFlow(); wT43a.tickWaterFlow();
+                    quiet = (wc43a == wc0) ? quiet + 1 : 0;
+                }
+            };
+            settle43a();
+            // 地下石平台 y=40（x 18..28，z=24）+ 净空 y41..43；三种轨并排 x=22/23/24（y=41），
+            //   水源 x=18（grounded 扩散：x19=l1 .. x22=l4 Rail → x23=l5 GoldenRail → x24=l6
+            //   DetectorRail 全冲；x25=l7 平台收尾）。
+            constexpr int PY = 40, PZ = 24;
+            for (int x = 18; x <= 28; ++x)
+                for (int dy = 1; dy <= 3; ++dy)
+                    if (wT43a.blockAt(x, PY + dy, PZ) != BR::Air)
+                        wT43a.setWaterSilent(x, PY + dy, PZ, BR::Air, 0);
+            for (int x = 18; x <= 28; ++x) wT43a.setBlock(x, PY, PZ, BR::Stone, 0);
+            const int railX[3] = { 22, 23, 24 };
+            const quint8 railId[3] = { BR::Rail, BR::GoldenRail, BR::DetectorRail };
+            for (int i = 0; i < 3; ++i)
+                wT43a.setBlock(railX[i], PY + 1, PZ, railId[i], 0);
+            // 掉落按精确坐标计数（worldgen 矿井轨 / 其它 wash 不入账）。
+            int railDrops43a = 0;
+            QObject::connect(&wT43a, &World::blockDroppedAsItem, &wT43a,
+                             [&](int x, int y, int z, int id) {
+                                 if (y != PY + 1 || z != PZ) return;
+                                 for (int i = 0; i < 3; ++i)
+                                     if (x == railX[i] && id == int(railId[i])) ++railDrops43a;
+                             });
+            wT43a.setBlock(18, PY + 1, PZ, BR::Water, 0); // 源（桶倒路径同款源写入）
+            settle43a();
+            bool allWashed = true;
+            for (int i = 0; i < 3; ++i) {
+                const quint8 after = wT43a.blockAt(railX[i], PY + 1, PZ);
+                allWashed = allWashed && (after == BR::Air || after == BR::Water);
+            }
+            okB = allWashed && railDrops43a == 3;
+            if (!okB) {
+                QString cells43a;
+                for (int i = 0; i < 3; ++i)
+                    cells43a += QString(" %1").arg(int(wT43a.blockAt(railX[i], PY + 1, PZ)));
+                qInfo().noquote() << "  [t1043a diag b] cells" << cells43a
+                                  << "drops" << railDrops43a;
+            }
+        }
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okA && okB ? "PASS" : "FAIL")
+                          << "| t1043a flowing water washes rails (MC caliber, parity ruling cai-1):"
+                             "the attachable-block water-destroy single authority includes all three"
+                             "rail ids (rail 103 / golden 127 / detector 128 via the isRail family"
+                             "predicate) with dropId = itself for the whole family so the drop chain"
+                             "is free (same chain as player mining) - behaviorally one grounded water"
+                             "source spreading along a stone platform washes all three rail kinds in"
+                             "its path (cells go Air/Water) and each emits exactly one"
+                             "blockDroppedAsItem at its own cell with its own id (counted by exact"
+                             "coordinates so worldgen mineshaft rails stay out of the tally)"
+                          << (okA && okB ? QString()
+                                         : QStringLiteral("diag a=%1 b see [t1043a diag b]").arg(okA));
+    }
+
+    // ── P-t1043b 矿井 worldgen 防水腿（t1043 伴随义务；轨只在干燥格放置）+ 双机制源钉 ──
+    //    (a) 行为/静态腿：12 seed × 128×128×64 真世界全量 worldgen → 全图扫 Rail（worldgen 只铺
+    //        Rail），每轨核查「干燥格」= 切比雪夫距 2 的 5×5×5 邻域无水（= placeMineshaft 干燥门
+    //        的放置契约，生成态复核）→ 违例恒 0 且轨总数 > 0（非空转：12 世界几千轨在扫描）。
+    //        几何依据（world.cpp t1043 注释同源）：placeUndergroundWaterPools 先于矿井 → 池水存活
+    //        层与巷道 breach 的接触面必在最近候选轨的切比雪夫 2 内 → 摘干燥门（false&& 前缀）后
+    //        12 世界必有违例 → 本腿恰红。
+    //    (b) 源钉：blockregistry.h 入族行（`|| isRail(id);`）+ world.cpp 候选登记 / 干燥门扫描 /
+    //        跳过 / 落块四语句本体（剥注释 pinSet；阴性轮 1 摘入族行 → hdr 钉红；阴性轮 2 摘干燥门
+    //        → cpp 钉红）。
+    {
+        bool ok = true;
+        int worldsT1043b = 0;
+        long railTotalT1043b = 0;
+        int violT1043b = 0;
+        const quint32 seedsT1043b[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 4242u,
+                                        2024u, 31337u, 7u, 99u, 12345u, 5150u };
+        for (quint32 sd : seedsT1043b) {
+            World wT1043b;
+            wT1043b.setWidth(128);
+            wT1043b.setDepth(128);
+            wT1043b.setHeight(64);
+            wT1043b.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含 placeMineshaft + 干燥门）
+            ++worldsT1043b;
+            for (int x = 0; x < 128; ++x)
+                for (int z = 0; z < 128; ++z)
+                    for (int y = 0; y < 64; ++y)
+                        if (wT1043b.blockAt(x, y, z) == BR::Rail) {
+                            ++railTotalT1043b;
+                            bool wet = false;
+                            for (int dx = -2; dx <= 2 && !wet; ++dx)
+                                for (int dy = -2; dy <= 2 && !wet; ++dy)
+                                    for (int dz = -2; dz <= 2 && !wet; ++dz)
+                                        if (wT1043b.blockAt(x + dx, y + dy, z + dz) == BR::Water)
+                                            wet = true;
+                            if (wet) ++violT1043b; // 干燥门契约：生成态任何轨 5×5×5 邻域不得有水
+                        }
+        }
+        const bool okScan = worldsT1043b == 12 && railTotalT1043b > 0 && violT1043b == 0;
+        if (!okScan)
+            qInfo().noquote() << "  [t1043b diag] worlds" << worldsT1043b << "rails"
+                              << railTotalT1043b << "violations" << violT1043b;
+        // (b) 双机制源钉（剥注释；t1042d 同款 root 解析）。
+        const QString exeDir1043b = QCoreApplication::applicationDirPath();
+        const QString root1043b = QDir(exeDir1043b + QStringLiteral("/..")).absolutePath();
+        QStringList miss1043b;
+        miss1043b << pinSet(root1043b + QStringLiteral("/src/Core/blockregistry.h"), {
+            {"hdr-wash-family-base", "id == Torch || id == RedstoneTorch || id == Cobweb || id == Ladder"},
+            {"hdr-rail-family-join", "|| isRail(id);"},
+        });
+        miss1043b << pinSet(root1043b + QStringLiteral("/src/World/world.cpp"), {
+            {"cpp-rail-candidate-row", "railCandidates.push_back({ax, ry, az});"},
+            {"cpp-dry-gate-scan", "for (int ddx = -2; ddx <= 2 && !wet; ++ddx)"},
+            {"cpp-dry-gate-skip", "if (wet) continue;"},
+            {"cpp-dry-gate-place", "m_chunks.setBlock(rx, ry, rz, BlockRegistry::Rail, 0);"},
+        });
+        const bool okPins = miss1043b.isEmpty();
+        if (!okPins)
+            qInfo().noquote() << "  [t1043b diag pins] miss=" << miss1043b.join(QLatin1Char(','));
+        ok = okScan && okPins;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1043b mineshaft worldgen waterproofing + dual-mechanism source pins"
+                             "(parity ruling cai-1 companion duty, not an exemption): across 12 fresh"
+                             "fully-generated 128x128x64 worlds every worldgen rail sits in a dry"
+                             "cell (no water within Chebyshev distance 2 - the exact placement"
+                             "contract of the placeMineshaft dry-cell gate, which defers rail blocks"
+                             "until the corridor walk finishes and then drops only candidates whose"
+                             "5x5x5 neighborhood is water-free) with thousands of rails scanned so"
+                             "the leg cannot pass vacuously; the pinSet half anchors the family join"
+                             "line in blockregistry.h and the candidate-row / dry-scan / skip / place"
+                             "statement bodies in world.cpp (comment-immune), so the negative rounds"
+                             "red exactly this leg plus the mutated mechanism's own pins"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag scan=%1 pins=%2")
+                                       .arg(okScan).arg(miss1043b.join(QLatin1Char(','))));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
