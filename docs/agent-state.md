@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-12 13:15
+更新时间：2026-09-14 01:25
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,15 +9,15 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1047
+current_task: t1044
 current_task_status: READY
-last_completed_task: t1043 铁轨水蚀 + 矿井防水（裁-1 清偿；断链恢复会话按用户 0912 评审流程重走证据链收口 0a6bc1b）
-last_task_closure_commit: 0a6bc1b（audit #5 与本块由主控收口后更新）
-last_verified_commit: 37e38a9（矩阵 536 PASS / 0 FAIL，matrix_t1043_final.log 权威，binary 与源对齐）
-last_governance_review: 2026-09-12（audit #5 YELLOW，docs/governance-audit-2026-09-12.md；GOV-20260912-1 = t1047）
+last_completed_task: t1047 GOV-20260912-1 纠偏闭环（review0912 四修：壳反应性/弦废钟/狼退出惊逃/headPitch；主控亲自收尾——实现棒限额死亡+蓝屏中断后接手；ef7dd0b/71140d7/docs）
+last_task_closure_commit: （docs 本提交；代码终态 71140d7）
+last_verified_commit: 71140d7（矩阵 536 PASS / 0 FAIL，matrix_t1047_final.log 权威，binary 与源对齐）
+last_governance_review: 2026-09-12（audit #5 YELLOW → GOV-20260912-1=t1047 已闭环，纠偏完成）
 governance_review_due: false
-completed_tasks_since_governance_review: 0
-next_task: t1044（t1047 GOV 纠偏闭环后回原队列：t1044 蜘蛛爬墙 → t1045 耕地退化 → t1046 合集 → R19.23 批次 review → R20 主线）
+completed_tasks_since_governance_review: 1
+next_task: t1044（GOV 纠偏闭环回原队列：t1044 蜘蛛爬墙 → t1045 耕地退化 → t1046 合集 → R19.23 批次 review → R20 主线）
 next_task_source: docs/dev-plan.md R19.23 段（audit #5 节「顺序再更新」）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
