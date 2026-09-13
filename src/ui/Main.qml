@@ -6614,7 +6614,12 @@ Window {
                     //     halo（0.45 包 0.3 本体，非嵌入件），与 t1038 书-台不透明嵌入件不同级。
                     Model {
                         id: entShell
-                        visible: !glowShellInstHost.hasShellAt(index)
+                        // t1047 O-1（review0912 #1）：hasShellAt 是无 NOTIFY 的 Q_INVOKABLE → 裸绑定不建
+                        //   依赖，壳表随拾取 / 槽复用 / >128 溢出翻转后本绑定永不重算（永续双壳 / 丢壳）。
+                        //   修=触碰 itemEntities.revision（t256/t935 表达式同款：NOTIFY=entitiesChanged
+                        //   沿 → 实体集每变重查谓词）。_r<0（manager 未就绪）恒 true=降级保底（同无
+                        //   manager 时 hasShellAt=false 的照旧逐实体渲染口径）。
+                        visible: { const _r = itemEntities.revision; return _r >= 0 ? !glowShellInstHost.hasShellAt(index) : true }
                         geometry: UnitCube {}
                         scale: Qt.vector3d(0.45, 0.45, 0.45)
                         position: Qt.vector3d(0, entRoot.bobY, 0)

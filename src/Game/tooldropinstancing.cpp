@@ -107,6 +107,13 @@ bool ToolDropInstancing::hasLiveMember() const
     // 谓词只依赖 familyId（桶粒度常量），提到循环外；与 getInstanceBuffer 收纳过滤同源同参。
     if (!m_manager || m_familyId <= 0) return false;
     if (!ItemEntityManager::isTool3DDrop(m_familyId)) return false;
+    // t1047 O-2 弓门（review0912 #2）：stringPass 通道只服务弓桶——非弓 id（剪刀/竿/五几何工具桶的
+    //   弦表 feeder）即便桶内有活体也恒空转（旧口径 7 废钟 ~420 唤醒/秒清偿）。ToolRegistry::tool
+    //   同 getInstanceBuffer 色面读口（toolregistry.h 已 include，BlockRegistry::Bow 随之可见）。
+    if (m_stringPass) {
+        const auto *td = ToolRegistry::tool(m_familyId);
+        if (!td || td->type != BlockRegistry::Bow) return false;
+    }
     const int n = m_manager->count();
     for (int i = 0; i < n; ++i) {
         if (m_manager->aliveAt(i) && m_manager->itemIdAt(i) == m_familyId) return true;

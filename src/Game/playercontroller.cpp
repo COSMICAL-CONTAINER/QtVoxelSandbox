@@ -2355,12 +2355,12 @@ void PlayerController::attackMob(int entityIndex)
     // t635 玩家打铁傀儡 → 反击锁定（setGolemRetaliate：golemAngry=true + 刷新记忆 → aiIronGolem 追击玩家 +
     //   近距蓄力重拳上抛，机制等价 MC 1.0 铁傀儡被打反击）。非铁傀儡静默 no-op。同 setWolfTarget 向下依赖模式。
     m_entityManager->setGolemRetaliate(entityIndex);
-    // t1042 被动型受击惊逃（牛/羊/猪/鸡/豹猫 + 狼幼崽；MC 原版口径：被动受击只惊逃永不反击——类型门在
-    //   EntityManager 侧收口：敌对 / 造物 / 驯服狼 / 野狼成体 / 驯服猫静默 no-op）。同 setGolemRetaliate
-    //   向下依赖模式（本受击沿第四写点，t480/t635/t1042）。
+    // t1042 被动型受击惊逃（牛/羊/猪/鸡/豹猫；t1047 O-3 起狼全族不入集——MC 狼无 PanicGoal。MC 原版
+    //   口径：被动受击只惊逃永不反击——类型门在 EntityManager 侧收口：敌对 / 造物 / 驯服狼 / 野狼成体 /
+    //   驯服猫 / 狼全族静默 no-op）。同 setGolemRetaliate 向下依赖模式（本受击沿第四写点，t480/t635/t1042）。
     m_entityManager->setPanicFlee(entityIndex);
-    // t1042 野狼被打敌对反击锁定（MC 1.0 中立狼被打 → 追咬玩家；驯服狼 t1031 豁免维持 + 幼崽只惊逃，
-    //   豁免门同在 EntityManager 侧）。chasing=玩家 + kChaseMemory 记忆，超时/超距清除同 hostile 收口。
+    // t1042 野狼被打敌对反击锁定（MC 1.0 中立狼被打 → 追咬玩家；驯服狼 t1031 豁免维持 + 幼崽零反击
+    //   零 panic（t1047 O-3），豁免门同在 EntityManager 侧）。chasing=玩家 + kChaseMemory 记忆，超时/超距清除同 hostile 收口。
     m_entityManager->setWolfProvoked(entityIndex);
     emit swingArm();
     // t295 mob 受击音效 + 敌对专属：随 mobAttacked 下传被攻击 mob 的 mobType，供呈现层据它路由到
