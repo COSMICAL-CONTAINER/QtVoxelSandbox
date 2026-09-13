@@ -3813,6 +3813,40 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
     return dirty;
 }
 
+// t1044 蜘蛛爬墙步（MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2；详见头文件
+//   aiSpiderWallClimb 注释）。AI tick 级脉冲（aiHostile 三条追击分支水平位移双轴皆撤回时调）：
+//   被阻轴贴面前探列（halfW+0.25，越过 AABB 前沿一个 AI 步长）脚位层或身体层有可碰撞方块
+//   （isCollidable 与撤回判定同源）→ vy = kSpiderClimbSpeed + resting 解除 → tick 重力分支积分上升。
+//   vy 正值窗（≥kAiTickInterval 帧内 0.61 残速）不触发落地扫描的 vy<0 snap 回弹 → 攀爬单调。
+//   天花板由 review25 #4 上浮钳制承接。
+//   能力门（阴性轮敏感靶）：仅 MobSpider / MobCaveSpider（t1012③ 同族；MC cave spider 同样爬墙）。
+bool EntityManager::aiSpiderWallClimb(Entity &e, World *world, bool blockedX, float nx, bool blockedZ, float nz)
+{
+    if (!world) return false;
+    const bool isClimber = (e.mobType == MobSpider) || (e.mobType == MobCaveSpider); // 阴性轮：false && 前缀摘门
+    if (!isClimber) return false;
+    const int fy = qFloor(e.pos.y() - e.halfH); // 脚位格（mob AABB 底面所在格，同越障跳口径）
+    if (fy < 0 || fy + 1 >= world->height()) return false;
+    // 逐被阻轴探可爬面：前探 halfW+0.25（越过 AABB 前沿 0.25 —— 撤回停位点的前沿距墙面的缝隙可达
+    // 一个 AI 步长 ≈0.18（逐轴撤回不贴面），固定 0.6 偏移在 halfW=0.45 时临界漏探（t1044 阳轮首跑
+    // 实证：蜘蛛停位 +0.6 差 0.004 落回自身列 → 恰不触发）；+0.25 余量对任意 mob 停位稳定命中前柱），
+    // 脚位层或身体层任一可碰撞 = 面存在。无被阻轴面（悬空/贴柱角无面）→ 不攀（caller 保持腿停重试）。
+    auto faceAhead = [world, fy, halfW = e.halfW](float px, float pz) {
+        const int fx = qFloor(px), fz = qFloor(pz);
+        return world->isCollidable(fx, fy, fz) || world->isCollidable(fx, fy + 1, fz);
+    };
+    bool face = false;
+    if (blockedX && nx != 0.0f)
+        face = faceAhead(e.pos.x() + (nx > 0.0f ? 1.0f : -1.0f) * (e.halfW + 0.25f), e.pos.z());
+    if (!face && blockedZ && nz != 0.0f)
+        face = faceAhead(e.pos.x(), e.pos.z() + (nz > 0.0f ? 1.0f : -1.0f) * (e.halfW + 0.25f));
+    if (!face) return false;
+    // 攀爬脉冲：vy 置爬升速 + 解除静止（tick 重力积分上升；vy 正值不触发落地扫描回弹）。
+    e.vy = kSpiderClimbSpeed;
+    e.resting = false;
+    return true;
+}
+
 // t281 敌对生物 AI（detect→pathfind→attack；详见头文件 aiHostile 注释）。机制对齐 MC 1.0 僵尸 / 骷髅近战 AI。
 //   简化 A* = 贪心方向（直线朝玩家）+ 1 格墙越障跳；非完整 A*（每帧多 mob 跑 A* 开销过大，近战 mob 直线 + 跳够用，
 //   平地 / 1 格台阶 / 树根 / 矮墙均能通过；复杂洞穴几何会卡墙，作为基类可接受，留给后续寻路增强）。
@@ -3915,9 +3949,13 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                     if (newZ < ehw) newZ = ehw;
                     if (newZ > worldD - ehw) newZ = worldD - ehw;
                     if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+                    const bool blockedX = (newX == e.pos.x()) && std::abs(nx) > 1e-4f; // 撤回=被阻（赋值前判）
+                    const bool blockedZ = (newZ == e.pos.z()) && std::abs(nz) > 1e-4f;
                     bool moved = false;
                     if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
                     if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+                    // t1044 蜘蛛爬墙：水平位移被实体方块面挡死 → 贴面攀爬脉冲（MC 口径；仅 Spider 家族门内生效）。
+                    if (!moved && aiSpiderWallClimb(e, world, blockedX, nx, blockedZ, nz)) moved = true;
                     e.moveSpeed = moved ? chaseSpd : 0.0f;
                     return moved;
                 }
@@ -3992,9 +4030,13 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
             if (newZ < ehw) newZ = ehw;
             if (newZ > worldD - ehw) newZ = worldD - ehw;
             if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+            const bool blockedX = (newX == e.pos.x()) && std::abs(nx) > 1e-4f; // 撤回=被阻（赋值前判）
+            const bool blockedZ = (newZ == e.pos.z()) && std::abs(nz) > 1e-4f;
             bool moved = false;
             if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
             if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+            // t1044 蜘蛛爬墙：水平位移被实体方块面挡死 → 贴面攀爬脉冲（MC 口径；仅 Spider 家族门内生效）。
+            if (!moved && aiSpiderWallClimb(e, world, blockedX, nx, blockedZ, nz)) moved = true;
             e.moveSpeed = moved ? chaseSpd : 0.0f;
             return moved;
         }
@@ -4144,8 +4186,13 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         if (newZ < ehw) newZ = ehw;
         if (newZ > worldD - ehw) newZ = worldD - ehw;
         if (mobAabbHitsSolid(world, newX, e.pos.y(), newZ, ehw, ehh)) newZ = e.pos.z();
+        const bool blockedX = (newX == e.pos.x()) && std::abs(nx) > 1e-4f; // 撤回=被阻（赋值前判）
+        const bool blockedZ = (newZ == e.pos.z()) && std::abs(nz) > 1e-4f;
         if (newX != e.pos.x()) { e.pos.setX(newX); moved = true; }
         if (newZ != e.pos.z()) { e.pos.setZ(newZ); moved = true; }
+        // t1044 蜘蛛爬墙：水平位移被实体方块面挡死 → 贴面攀爬脉冲（MC 口径；仅 Spider 家族门内生效）。
+        //   爬到墙顶（脚位过顶）水平试探自然解锁 → 越檐平移（登记简化：无独立檐机制）。
+        if (!moved && aiSpiderWallClimb(e, world, blockedX, nx, blockedZ, nz)) moved = true;
     }
     e.moveSpeed = moved ? chaseSpd : 0.0f; // 撞墙 → 腿停（moveSpeed=0），但仍在追踪，下帧重试 / 已跳（t298 含水中减速）
 
