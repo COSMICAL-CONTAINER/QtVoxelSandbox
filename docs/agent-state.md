@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-14 01:25
+更新时间：2026-09-14 04:20
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,15 +9,15 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1044
+current_task: t1045
 current_task_status: READY
-last_completed_task: t1047 GOV-20260912-1 纠偏闭环（review0912 四修：壳反应性/弦废钟/狼退出惊逃/headPitch；主控亲自收尾——实现棒限额死亡+蓝屏中断后接手；ef7dd0b/71140d7/docs）
-last_task_closure_commit: （docs 本提交；代码终态 71140d7）
-last_verified_commit: 71140d7（矩阵 536 PASS / 0 FAIL，matrix_t1047_final.log 权威，binary 与源对齐）
+last_completed_task: t1044 蜘蛛爬墙（parity 裁-2 清偿：aiHostile 三追击分支 aiSpiderWallClimb 贴面攀爬脉冲，Spider 家族门含 cave spider；29a8afe/5377f16/docs）
+last_task_closure_commit: （docs 本提交；代码终态 5377f16）
+last_verified_commit: 5377f16（矩阵 538 PASS / 0 FAIL，matrix_t1044_final.log 权威，binary 与源对齐）
 last_governance_review: 2026-09-12（audit #5 YELLOW → GOV-20260912-1=t1047 已闭环，纠偏完成）
 governance_review_due: false
-completed_tasks_since_governance_review: 1
-next_task: t1044（GOV 纠偏闭环回原队列：t1044 蜘蛛爬墙 → t1045 耕地退化 → t1046 合集 → R19.23 批次 review → R20 主线）
+completed_tasks_since_governance_review: 3
+next_task: t1045 耕地踩踏/水蚀退化（裁-3；parity bug 波尾单 → t1046 合集 → R19.23 批次 review → R20 主线）
 next_task_source: docs/dev-plan.md R19.23 段（audit #5 节「顺序再更新」）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -32,7 +32,7 @@ needs_human: false
 
 ## Recovery Point
 
-- 最近闭环：**t1043**（2026-09-12）：铁轨水蚀 + 矿井防水（parity bug 波首单，裁-1 清偿）——①blockregistry.h isAttachableBlock 追加 `|| isRail(id)`（普通 103/动力 127/探测 128 三族；review0906 #10 豁免废除）；②world.cpp placeMineshaft 轨铺设改「候选收集 → walk 完后统一干燥门落块」（切比雪夫距 2 的 5×5×5 邻域无水才落块；连接位 t565④ 统一重算不受影响）。矩阵 **534→536 PASS / 0 FAIL**（matrix_t1043_final.log 权威）；阴性轮两轮：轮1 摘 blockregistry 家族接入恰红 5（matrix_t1043_neg1.log，断链会话在案）、轮2 摘干燥门恰红 535/1 = t1043b 唯一红（matrix_t1043_neg2.log，恢复会话补齐）。**断链与恢复经过**（用户 0912 评审指认后重走）：断链会话阴性轮2 构建中断（僵尸 cmake/ninja 锁 build 目录）→ 干燥门变异残留 + 本文件曾误报 READY → 恢复会话：RECOVERY_REQUIRED 置态 → Edit 反向恢复 → 重建 → pos2 536/0 → 重注入 → neg2 恰红 → 恢复 → final 536/0 → voxelsandbox 重建 + 冒烟（SMOKE_ALIVE_12S，60fps 稳态，零 Repeater3D 孤儿告警）。**环境坑登记**：会话沙箱后台任务 stdout/stderr 重定向全面蒸发（shell/cmd/tee 三式 0 字节）→ 长任务矩阵/冒烟改 **PowerShell Start-Process detached 跑法**（stderr 实时落盘）；断链遗留挂起脚本会自发启动矩阵进程（wmic 按 CreationDate/ParentProcessId 甄别 taskkill）。
+- 最近闭环：**t1044**（2026-09-14）：蜘蛛爬墙（parity bug 波 2/4，裁-2 清偿）——①`aiSpiderWallClimb`（entitymanager.cpp:3822 区）：aiHostile 三条追击分支（仇恨狼/铁傀儡/玩家）水平位移双轴皆撤回（撞墙挡死）时调，被阻轴贴面前探列（halfW+0.25 越过 AABB 前沿一个 AI 步长；固定 0.6 偏移对宽体停位缝隙临界漏探，阳轮首跑实证后修正）脚位/身体层有可碰撞方块 → vy=kSpiderClimbSpeed（2.4 b/s 名义登记，净 ≈1.2 b/s，AI tick 4 帧窗内 vy 恒正不触发落地扫描回弹）+ 解除 resting；爬过墙顶水平试探自然解锁 → 越檐走既有追击水平移动（登记简化）；②能力门仅 Spider 家族（MobSpider+MobCaveSpider，MC cave spider 同爬，同批纳入）；游荡不入口（登记）；③**t285 勘误落地**（dev-plan 任务表行注记：「可爬墙 ✅」自本单起成立）。矩阵 **536→538 PASS / 0 FAIL**（matrix_t1044_final.log 权威）；阳性 matrix_t1044_pos.log 538/0（首跑 537/1 暴露探针 0.6 临界漏探 → halfW+0.25 修 → pos 538/0）；阴性轮摘 isClimber 门（false &&）→ **恰红 536/2 = t1044a/b 唯二红**（matrix_t1044_neg.log）→ Edit 反向 restore（纪律③）→ 重建 → 终跑 538/0（binary 03:59 > 全部改动源）。voxelsandbox 重建 EXIT=0 + offscreen 冒烟存活 12s（EXIT=124）+ logs/voxelsandbox_t1044_tail20.log（60fps 稳态零孤儿告警；注：app 日志走 logs/voxelsandbox.log 文件非 stderr——smoke 重定向 0 字节为既录环境坑，tail20 从日志文件取）。**待实机确认（观感类）**：蜘蛛/洞穴蜘蛛追击爬墙越檐动画观感（攀爬帧 moveSpeed 走追击速腿摆语义）。
 - 实机确认（累计）：R19.23 已闭环 6 项（t1038/t1039/t1041/t1042 各项 + **t1043 worldgen 矿井轨含水带出现率与流水冲玩家轨**）+ 用户 0912 评审追加：**批 1/2/4 桶池 Repeater 3D delegate 挂载实机渲染验证**（headless 冒烟零孤儿告警为间接信号；F3 draw call 前后对比 + 合批 Model 可见性）+ **Review_2026-09-12 #1 壳排除链 >128 溢出双壳/丢壳** + #2 stringPass 废钟（headless 不可见，实机/源码钉复核）+ R19.22 总表 16 项 + 回归三单（t1005/t1006/t1007）待用户实机数据。
 - 长期方向（用户 0912 评审）：instancing 治理到路径 a 终点后**暂停新增 QML instancing 家族**；t1043-t1046 完成后转 R20 重构主线（R20.03 测试分层 → 20.04 基础类型 → 20.05 Command/Event/Snapshot → 20.06 GameSession → 20.07 WorldFacade → 20.09 Chunk 生命周期 → 20.11 后台 GenerationJob）。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。**断链恢复按纪律⑦硬门执行**（工作区与 Control Block 不一致即 RECOVERY_REQUIRED）。
