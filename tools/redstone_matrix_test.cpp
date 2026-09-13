@@ -20238,9 +20238,13 @@ Item {
     // ── P-t1039d 批 3 两侧接线源钉 + 动画解析式逐字钉（t1032d 同纪律；QML 编排面盲区的源钉覆盖）──
     //   QML 侧只有薄委托（无 reassign 表类 handler——壳族无桶池），headless 行为面由 P-t1039a/b/c
     //   直调覆盖；本腿钉接线在位（host id / instancing 绑定 / manager / 天光两绑 / 薄委托 / entShell
-    //   排除 / 呼吸 running 门 / 白基色）+ C++ 侧公式逐字（呼吸 0.28+0.17·½·(1−cos) / 静态 0.35 /
-    //   紫 140 / 灰 176 / 收纳容量 / slot×0.37 错峰 / scale 0.45 / hasTransparency / 天光 floor 公式 /
-    //   空转门启停 / entitiesChanged 沿）。
+    //   排除〔t1047 O-1 改 revision 触碰反应式——hasShellAt 无 NOTIFY，非反应裸绑定在 >128 溢出 /
+    //   槽翻转态永续双壳/丢壳；review0912 #1〕 / 呼吸 running 门 / 白基色）+ C++ 侧公式逐字（呼吸
+    //   0.28+0.17·½·(1−cos) / 静态 0.35 / 紫 140 / 灰 176 / 收纳容量 / slot×0.37 错峰 / scale 0.45 /
+    //   hasTransparency / 天光 floor 公式 / 空转门启停 / entitiesChanged 沿）。
+    //   t1047 O-1 如实 scoped：溢出反应性行为腿 headless 不可达（QML 绑定重算无 C++ 直调面；壳池
+    //   hasShellAt 前 128 语义已由 P-t1039b/c 行为腿覆盖且本单不变）→ 源钉（本行）+ 绑定触碰结构钉
+    //   足够，实机确认（review0912 #1 同项）补观感面。
     {
         const QString exeDir1039d = QCoreApplication::applicationDirPath();
         const QString root1039d = QDir(exeDir1039d + QStringLiteral("/..")).absolutePath();
@@ -20253,7 +20257,8 @@ Item {
             {"qml-glowshell-minlight-bind", "minLight: window.minLight"},
             {"qml-glowshell-thin-delegate",
              "function hasShellAt(slot) { return glowShellInst.hasShellAt(slot) }"},
-            {"qml-glowshell-entshell-exclude", "visible: !glowShellInstHost.hasShellAt(index)"},
+            {"qml-glowshell-entshell-exclude",
+             "return _r >= 0 ? !glowShellInstHost.hasShellAt(index) : true"}, // t1047 O-1 revision 触碰绑定
             {"qml-glowshell-breath-gate", "running: entShell.visible && entRoot.entHasEnch"},
             {"qml-glowshell-white-base", "baseColor: Qt.rgba(1.0, 1.0, 1.0, 1.0)", 2},
         });
@@ -20287,7 +20292,11 @@ Item {
                              "cross-cutting shell family needs no bucket pool) with the host id, the "
                              "GlowShellInstancing binding, the itemEntities manager plus the "
                              "worldClock.skyLight and window.minLight tint bindings, the "
-                             "hasShellAt thin delegate, the entShell visible exclusion, the "
+                             "hasShellAt thin delegate, the entShell revision-touching visible "
+                             "exclusion (t1047 O-1: the bare non-reactive form never re-evaluated "
+                             "across over-cap and slot-flip states - the binding now touches "
+                             "itemEntities.revision so the predicate re-queries on every "
+                             "entity-set change), the "
                              "breathing running gate and the white material base color all pinned "
                              "comment-immune, while the C++ feeder carries the verbatim calibers - "
                              "hasTransparency(true), the t696 breathing formula "
@@ -20519,12 +20528,15 @@ Item {
     }
 
     // ── P-t1041c 批 4 三池空转门行为腿（t1032c 同款；ToolDropInstancing + BillboardDropInstancing）──
-    //   空转（familyId<=0 / 非本族 id / 桶内活体 0）→ 钟停（probeTickerActive()==false 且事件泵后仍
-    //   false）；活跃沿（setManager / setFamilyId / setItemIconFamily / setStringPass / manager
-    //   entitiesChanged 有桶内活体）start + markDirty 兜底。谓词感知：剪刀/钓鱼竿 id 的工具桶、
-    //   itemIconFamily 模式下的异形 id 桶恒空转。源面：两个新 feeder 构造体均不含无条件
+    //   空转（familyId<=0 / 非本族 id / 桶内活体 0 / t1047 O-2：stringPass 通道非弓 id）→ 钟停
+    //   （probeTickerActive()==false 且事件泵后仍 false）；活跃沿（setManager / setFamilyId /
+    //   setItemIconFamily / setStringPass / manager entitiesChanged 有桶内活体）start + markDirty 兜底。
+    //   谓词感知：剪刀/钓鱼竿 id 的工具桶、itemIconFamily 模式下的异形 id 桶恒空转；t1047 O-2 弓门：
+    //   stringPass 表只服务弓桶——非弓 id 即便桶内有活体弦表钟恒停（review0912 #2 废钟清偿）。
+    //   源面：两个新 feeder 构造体均不含无条件
     //   m_ticker.start()（摘门 lesion 会在构造体重启钟 → 行为面 + 本结构面同步红）。
-    //   阴性轮敏感：摘空转门（构造启钟 + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红。
+    //   阴性轮敏感：摘空转门（构造启钟 + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红；
+    //   t1047 O-2 摘弓门 → okStrBowGate1041c 恰红。
     {
         ItemEntityManager items1041c;
         ToolDropInstancing fGate1041c, fStrGate1041c;
@@ -20566,6 +20578,13 @@ Item {
         items1041c.spawnItem(22, 40, 10, int(ToolRegistry::Bow), 1);
         const bool okStrActive1041c = fStrGate1041c.probeTickerActive()
                                       && fStrGate1041c.probeInstanceCount() == 1;
+        // t1047 O-2 弓门（review0912 #2）：stringPass 谓词感知弓语义——启钟的弓桶切到**非弓 3D 族工具**
+        //   （PickaxeWood=type1-5 族内、且有活体）→ 钟恒停恒空表（弦表只服务弓桶；旧口径 7 废钟 ~420
+        //   唤醒/秒清偿面）。敏感性注记：剪/竿不在 isTool3DDrop（族谓词先拦），切桶目标必须取族内非弓
+        //   id 且有活体，否则面空转（t1047 阴轮首跑实证：剪刀面门摘仍绿）。
+        items1041c.spawnItem(22, 42, 10, int(ToolRegistry::PickaxeWood), 1); // 非弓 3D 族活体（敏感性活体；占用槽 3）
+        fStrGate1041c.setFamilyId(int(ToolRegistry::PickaxeWood));
+        const bool okStrBowGate1041c = !fStrGate1041c.probeTickerActive(); // 只断言钟（review0912 #2 缺陷面=废钟；表条目由 QML visible 门兜底不计成本）
         // billboard 池门：同三停一启 + 模式切换谓词感知（异形 id 在 itemIconFamily 模式下恒空转）
         fBGate1041c.setManager(&items1041c);
         fBGate1041c.setFamilyId(int(BR::WoodStairs));
@@ -20579,7 +20598,7 @@ Item {
         fBGate1041c.setItemIconFamily(false);
         const bool okBModeBack1041c = fBGate1041c.probeTickerActive()
                                       && fBGate1041c.probeInstanceCount() == 1;
-        items1041c.setCountAt(3, 0); // 拾走楼梯（t256 slot-reuse：镐拾走后槽 0 被剪刀复用 → 剪刀0/竿1/弓2/楼梯3）→ 空转沿 stop
+        items1041c.setCountAt(4, 0); // 拾走楼梯（t256 slot-reuse：镐拾走后槽 0 被剪刀复用 → 剪刀0/竿1/弓2/O-2镐3/楼梯4）→ 空转沿 stop
         const bool okBIdleEdge1041c = !fBGate1041c.probeTickerActive();
         // 源面：两个新 feeder 构造体均不再含无条件 start（t1032c 结构钉同款）
         const QString exeDir1041c = QCoreApplication::applicationDirPath();
@@ -20599,16 +20618,17 @@ Item {
         const bool ok1041c = okCtorIdle1041c && okWireIdle1041c && okAssignedIdle1041c
                              && okActiveEdge1041c && okActiveRun1041c && okIdleEdge1041c
                              && okIdleStay1041c && okShearsPredIdle1041c && okRodPredIdle1041c
-                             && okStrIdle1041c && okStrActive1041c && okBIdle1041c
-                             && okBActive1041c && okBModeIdle1041c && okBModeBack1041c
-                             && okBIdleEdge1041c && okCtorSrc1041c;
+                             && okStrIdle1041c && okStrActive1041c && okStrBowGate1041c
+                             && okBIdle1041c && okBActive1041c && okBModeIdle1041c
+                             && okBModeBack1041c && okBIdleEdge1041c && okCtorSrc1041c;
         if (!ok1041c)
             qInfo().noquote() << "  [t1041c diag] ctor" << okCtorIdle1041c << "wire" << okWireIdle1041c
                               << "assigned" << okAssignedIdle1041c << "activeEdge" << okActiveEdge1041c
                               << "activeRun" << okActiveRun1041c << "idleEdge" << okIdleEdge1041c
                               << "idleStay" << okIdleStay1041c << "shearsPred" << okShearsPredIdle1041c
                               << "rodPred" << okRodPredIdle1041c << "strIdle" << okStrIdle1041c
-                              << "strActive" << okStrActive1041c << "bIdle" << okBIdle1041c
+                              << "strActive" << okStrActive1041c << "strBowGate" << okStrBowGate1041c
+                              << "bIdle" << okBIdle1041c
                               << "bActive" << okBActive1041c << "bModeIdle" << okBModeIdle1041c
                               << "bModeBack" << okBModeBack1041c << "bIdleEdge" << okBIdleEdge1041c
                               << "ctorSrc" << okCtorSrc1041c;
@@ -20621,7 +20641,10 @@ Item {
                              "an event pump, picking the last member stops them and a pump does "
                              "not revive them, the gates are predicate-aware (shears and the "
                              "branchless fishing rod keep a tool bucket idle and empty, the "
-                             "stringPass table only arms for a live bow bucket, and switching "
+                             "stringPass table only arms for a live bow bucket, switching the "
+                             "stringPass feeder to a non-bow id with live members never arms "
+                             "its clock (t1047 O-2 bow gate - the seven dead string clocks are "
+                             "gone), and switching "
                              "the billboard feeder into itemIconFamily mode stops the clock for "
                              "a live block-icon id and back), and neither new constructor "
                              "carries an unconditional timer start - idle feeders no longer "
@@ -46691,13 +46714,17 @@ Item {
                                  : QStringLiteral("diag b1=%1(%2) b2=%3").arg(okB1).arg(gainB1).arg(okB2));
     }
 
-    // ── P-t1042c 野狼被打敌对反击 + 幼狼不反击只惊逃（R19.23 t1042；MC 原版口径）──
+    // ── P-t1042c 野狼被打敌对反击 + 狼无 panic（R19.23 t1042；t1047 O-3 改写：MC 原版——狼无
+    //    PanicGoal）──
     //    (c1) 野狼受击沿真链命中（扣 1HP 存活）→ 6s 内 mobAttackedPlayer ≥1 次、伤害 ≥1（狼咬击
     //         kWolfAttackDamage=4 面经信号下传）+ 狼-玩家最小 XZ 距 ≤1.7（咬击带，t1031a 参战腿判据）；
-    //    (c2) 幼狼被打 → 不反击只惊逃：驯服双亲繁殖产幼崽（t400 enterLoveMode ×2 真链）→ 摘除双亲
-    //         （防命中幼崽的 setWolfTarget 泼到驯服双亲身上触发防御追咬污染位移）→ 玩家命中幼崽 →
-    //         panicTimerAt==8 + 2s 离玩家增益 ≥2.5（panic 4.0 vs wander 上限 2.0 可分辨）+ 零 bites。
-    //    阴性轮敏感：摘惊逃消费点 → (c2) 恰红（幼狼零惊逃位移）；(c1) 反击腿保绿（独立分支）。
+    //    (c2) 幼狼被打 → 零 panic 零反击（t1047 O-3：setPanicFlee 狼全族 no-op + setWolfProvoked baby
+    //         门维持）：驯服双亲繁殖产幼崽（t400 enterLoveMode ×2 真链）→ 摘除双亲（防命中幼崽的
+    //         setWolfTarget 泼到驯服双亲身上触发防御追咬污染位移）→ 玩家命中幼崽 → panicTimerAt 恒 0
+    //         （命中沿 + 2s 后双查）+ 2s 离玩家增益 <2.5（无惊逃加速；panic 4.0 vs wander 上限 2.0
+    //         可分辨带沿用）+ 零 bites。
+    //    阴性轮敏感（t1047）：临时回插 setPanicFlee 的 wolfBaby 分支 → (c2) 恰红（panicTimer==8 +
+    //         惊逃增益 ≥2.5 双面红）；(c1) 反击腿保绿（独立分支）。
     {
         // (c1) 野狼反击。
         bool okC1 = false;
@@ -46796,7 +46823,7 @@ Item {
             const int hp0 = emb.healthAt(baby);
             pcb.beginMining();
             const bool hitOk = babyOk && emb.healthAt(baby) == hp0 - 1
-                               && std::abs(emb.panicTimerAt(baby) - 8.0f) < 1e-3f;
+                               && emb.panicTimerAt(baby) == 0.0f; // t1047 O-3：命中沿零 panic
             const auto dxz = [&ppB](const QVector3D &p) {
                 return QVector3D(p.x() - ppB.x(), 0.0f, p.z() - ppB.z()).length();
             };
@@ -46805,7 +46832,7 @@ Item {
             gainC2 = dxz(emb.posAt(baby)) - d0;
             pcb.release();
             winE1042.deleteLater();
-            okC2 = hitOk && gainC2 >= 2.5f && bites == 0;
+            okC2 = hitOk && gainC2 < 2.5f && emb.panicTimerAt(baby) == 0.0f && bites == 0; // 无惊逃加速 + 2s 后仍零 panic
             if (!okC2)
                 qInfo().noquote() << "  [t1042c diag] babyOk=" << babyOk << "hitOk=" << hitOk
                                   << "gain=" << gainC2 << "bites=" << bites;
@@ -46813,23 +46840,29 @@ Item {
         const bool ok = okC1 && okC2;
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t1042c wild wolf retaliates and wolf babies only flee (MC "
+                          << "| t1042c wild wolf retaliates and wolves have no panic (MC "
                              "caliber): a bare-fist hit on a wild adult wolf through the real "
                              "attackMob chain drops 1 HP and the wolf closes into the bite band "
                              "(min gap <=1.7) landing at least one mobAttackedPlayer of >=1 "
                              "damage as MobWolf within 6s (hostile-style retaliation with the "
                              "same chase/memory clearing caliber), while a bred wolf puppy "
-                             "struck by the player only arms the 8s panic state and gains >=2.5 "
-                             "blocks of distance over 2s with zero bites (babies never "
-                             "retaliate, they flee; parents removed pre-hit so the t480 defense "
-                             "chain cannot pollute the flee path) (negative-round sensitive: "
-                             "only the puppy leg)"
+                             "struck by the player stays at zero panic - the panic timer never "
+                             "arms (checked right after the hit and again after 2s), the puppy "
+                             "gains no flee acceleration (2s distance gain stays below the 2.5 "
+                             "panic-vs-wander discrimination band) and zero bites land (wolves "
+                             "have no panic (MC caliber): no PanicGoal, adults retaliate via "
+                             "setWolfProvoked instead, babies zero reaction; parents removed "
+                             "pre-hit so the t480 defense chain cannot pollute the path) "
+                             "(negative-round sensitive: only the puppy leg - re-inserting the "
+                             "withdrawn setPanicFlee wolf-baby branch reds it)"
                           << (ok ? QString()
                                  : QStringLiteral("diag c1=%1 c2=%2(%3)").arg(okC1).arg(okC2).arg(gainC2));
     }
 
     // ── P-t1042d t1042 接线源钉（pinSet 剥注释；阴性轮摘 aiPanicFlee 三消费点（false && 前缀）本组
-    //     恒绿——钉面全为定义 / 调用 / 门 / 消费谓词本体，false && 前缀不摘语句 → 恰 P-t1042a/b/c 红律）──
+    //     恒绿——钉面全为定义 / 调用 / 门 / 消费谓词本体，false && 前缀不摘语句 → 恰 P-t1042a/b/c 红律）
+    //     t1047 O-4 追加：headPitchAt 惊逃门针（headless 无吃草态缝 → 行为腿不可达，结构钉 + 实机确认
+    //     补面，review0912 #4 如实 scoped）──
     {
         bool ok = true;
         const QString exeDir1042 = QCoreApplication::applicationDirPath();
@@ -46847,6 +46880,7 @@ Item {
             {"cpp-wolf-provoke-log", "provoked: retaliates against player"},
             {"cpp-panic-flee-def", "bool EntityManager::aiPanicFlee(Entity &e, float dt, World *world, float worldW, float worldD,"},
             {"cpp-panic-consumers", "e.panicTimer > 0.0f", 3}, // 通用链 / aiOcelot / aiWolf 幼崽三消费点
+            {"cpp-headpitch-panic-gate", "if (e.panicTimer > 0.0f) return 0.0f;"}, // t1047 O-4 惊逃期头回正
         });
         miss1042 << pinSet(root1042 + QStringLiteral("/src/Entities/entitymanager.h"), {
             {"hdr-panic-field", "float panicTimer = 0.0f;"},
@@ -46867,7 +46901,9 @@ Item {
                              "the shared aiPanicFlee mover consumed by exactly three gates "
                              "(generic passive chain, untamed aiOcelot, aiWolf puppy), and the "
                              "header carries the panicTimer field + panicTimerAt accessor + "
-                             "aiPanicFlee declaration + kPanicDuration constant (comment-immune "
+                             "aiPanicFlee declaration + kPanicDuration constant, and "
+                             "headPitchAt carries the t1047 O-4 panic gate zeroing the graze "
+                             "pose while panicTimer runs (comment-immune "
                              "pinSet; the consumer-gate pin is false&&-mutation-immune so the "
                              "negative round reds exactly the behavior legs)"
                           << (ok ? QString()
