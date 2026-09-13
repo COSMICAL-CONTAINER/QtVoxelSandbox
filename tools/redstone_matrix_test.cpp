@@ -10984,7 +10984,11 @@ int main(int argc, char *argv[])
             // 清 (a) 场（拆砖铺耕地；地板留作 (b)）。
             for (int dx = 0; dx <= 10; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Farmland, 0);
             // (b) 耕地走廊：耕地矮盒真顶 +0.9375；新僵尸同款。断言全程 feet ≈ kRigY+0.9375 且 maxX ≥ x0+8。
-            const int zB = ents.spawnMobTyped(x0, kRigY + 2, z0, EntityManager::MobShambler,
+            //     t1045 注记：出生高由 kRigY+2 降为 kRigY+1——MC onFallenUpon 踩踏概率化（裁-3）后，
+            //     自 2 格高落的僵尸着地落差 ~1.06 → P≈0.56 概率踩坏脚下耕地（feetOff 断言被行为性打破）。
+            //     本探针验证面是「行走贴真顶」非「坠落」，出生降到落差 0.0625（概率地板 0.5 内恒不踩，
+            //     World::farmlandTrampleRoll 单一权威）→ 行走语义面恢复确定；断言本体未放宽。
+            const int zB = ents.spawnMobTyped(x0, kRigY + 1, z0, EntityManager::MobShambler,
                                               QStringLiteral("#44aa44"), 100);
             const QVector3D farmTarget(float(x0) + 10.5f, float(kRigY) + 0.9375f, float(z0) + 0.5f);
             for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, farmTarget, 0.3f, 1.8f, true); // 预热落定
@@ -47234,6 +47238,267 @@ Item {
                                  : QStringLiteral("diag b1=%1(maxY=%2) b2=%3(maxY=%4 endZ=%5) pins=%6")
                                        .arg(okB1).arg(maxYB1).arg(okB2).arg(maxYB2).arg(endZB2)
                                        .arg(miss1044.join(QLatin1Char(','))));
+    }
+
+    // ── P-t1045a 玩家踩踏耕地概率化 + 弹苗（R19.23 t1045；parity-ledger 裁-3，MC 原版口径）──
+    //    MC Java onFallenUpon 公式 P = clamp(fall − 0.5, 0, 1)（wiki Farmland/Trampling 引证：
+    //    「jumps/falls on the block (with chance equal to distance fallen - 0.5)」）。真玩家物理链
+    //    （loadSavedState 置空 → tick 重力下落 → 着地沿），落差 ~1.26（跳高带，P≈0.76 < 1：
+    //    缝两端都可判）；World::setTrampleRollOverride 千分比缝钉两端（t1031 setTameRollOverride
+    //    先例，生产零调用、钉住时不消费 RNG → 同值恒同果零漂移）：
+    //    (a1) 缝=0（必踩）：湿耕地（state=FarmlandHydrationMax）+ 上方 state0 小麦苗 → 回 Dirt
+    //         且 state==0（湿润态随 id 消失）+ 苗被清（Air）+ 弹落恰 1×SeedId×1（dropCropDrops
+    //         t1026 单一权威，未熟恒 1 种子=确定性）；
+    //    (a2) 缝=999（概率带内必不踩，须低落差带）：干耕地原样 Farmland、零掉落。
+    //    阴性轮敏感：摘 World::farmlandTrampleRoll 本体（false&& 前缀）→ (a1) 恰红（踩踏腿+弹苗腿）。
+    {
+        World wa;
+        wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1045);
+        for (int x = 2; x < 42; ++x)
+            for (int z = 2; z < 42; ++z) wa.setBlock(x, 84, z, BR::Stone, 0);
+        wa.setBlock(10, 84, 10, BR::Farmland, BR::FarmlandHydrationMax); // (a1) 湿耕地
+        wa.setBlock(10, 85, 10, BR::WheatCrop, 0);                       // state0 苗（弹落恒 1 种子）
+        wa.setBlock(20, 84, 10, BR::Farmland, 0);                        // (a2) 干耕地
+        PlayerController pcF45;
+        pcF45.setWorld(&wa);
+        QVector<int> dropId45, dropCnt45;
+        const QMetaObject::Connection dropConn45 = QObject::connect(
+            &pcF45, &PlayerController::spawnItem, &pcF45,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropId45.push_back(id);
+                dropCnt45.push_back(count);
+            });
+        const auto pumpFor45 = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const auto tickP45 = [&](int n) {
+            for (int i = 0; i < n; ++i) { pumpFor45(17); pcF45.tick(); }
+        };
+        // (a1) 缝=0 必踩：落差 ≈1.26（86.2 → 耕地顶 84.9375）。
+        wa.setTrampleRollOverride(0);
+        pcF45.loadSavedState(10.5f, 86.2f, 10.5f, -90.0f, 0.0f, 2);
+        for (int t = 0; t < 60 && wa.blockAt(10, 84, 10) == BR::Farmland; ++t) tickP45(1);
+        bool hitOk = wa.blockAt(10, 84, 10) == BR::Dirt
+            && wa.stateAt(10, 84, 10) == 0 // 湿润 state 随 id 消失（t1045 探针④踩踏半面）
+            && wa.blockAt(10, 85, 10) == BR::Air;
+        bool cropOk = dropId45.size() == 1 && dropId45[0] == RecipeRegistry::SeedId
+            && dropCnt45[0] == 1;
+        // (a2) 缝=999 必不踩：同落差带（P≈0.76，样本 0.999 ≥ P）。
+        wa.setTrampleRollOverride(999);
+        dropId45.clear();
+        dropCnt45.clear();
+        pcF45.loadSavedState(20.5f, 86.2f, 10.5f, -90.0f, 0.0f, 2);
+        tickP45(30);
+        bool noOk = wa.blockAt(20, 84, 10) == BR::Farmland && dropId45.isEmpty();
+        wa.setTrampleRollOverride(-1); // 缝复位（生产零残留）
+        QObject::disconnect(dropConn45);
+        const bool ok = hitOk && cropOk && noOk;
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t1045a diag] hitOk=" << hitOk << "cropOk=" << cropOk
+                              << "noOk=" << noOk
+                              << " a=" << int(wa.blockAt(10, 84, 10)) << "stateA"
+                              << wa.stateAt(10, 84, 10) << "crop" << int(wa.blockAt(10, 85, 10))
+                              << "b=" << int(wa.blockAt(20, 84, 10)) << "drops" << dropId45.size();
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1045a player trampling farmland is probabilistic with crop pop "
+                             "(MC caliber, parity adjudication cai-3): a real-physics landing from "
+                             "the jump-height band (fall ~1.26, P = fall - 0.5 ~ 0.76) with the "
+                             "roll seam pinned low reverts the hydrated farmland to dirt with the "
+                             "moisture state gone and pops the young wheat crop as exactly one "
+                             "seed via the dropCropDrops single authority, while the same fall "
+                             "with the seam pinned high keeps the dry farmland intact with zero "
+                             "drops (negative-round sensitive: the trample roll body false&&-prefixed)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag hit=%1 crop=%2 no=%3")
+                                       .arg(hitOk).arg(cropOk).arg(noOk));
+    }
+
+    // ── P-t1045b mob 落地踩踏 + 接线源钉（R19.23 t1045）──
+    //    (b1) 蜘蛛落到湿耕地（落差 ≈1.06，P≈0.56，缝=0 必踩）→ 回 Dirt + 经
+    //         farmlandTrampledByMob → PlayerController::onMobTrampledFarmland 清苗 + dropCropDrops
+    //         弹落恰 1×SeedId（信号直连 Game 层，headless 可行为级断言）。
+    //    (b2) 概率地板对照：缝仍=0，蜘蛛仅 0.06 微落差落地 → fall ≤ 0.5 地板内恒不踩（resting
+    //         行走面同口径短路）→ 干耕地原样。
+    //    (b3) 接线源钉（剥注释 pinSet，t1044b 同款）：掷骰本体/缝消费/玩家分支/mob 分支/回土/发信/
+    //         信号与槽声明/水冲两调用点/转换应用/静水源门。
+    //    阴性轮敏感：摘掷骰本体 → (b1) 恰红（(b2) 地板对照保绿语义不变）；钉 needle 变体注——掷骰
+    //    本体被摘时该 needle 同步失配（病灶自身 pin 面，t1043 先例），与 (b1) 同腿计红不另增。
+    {
+        World wb;
+        wb.setWidth(44); wb.setDepth(44); wb.setHeight(96); wb.setSeed(1046);
+        for (int x = 2; x < 42; ++x)
+            for (int z = 2; z < 42; ++z) wb.setBlock(x, 84, z, BR::Stone, 0);
+        wb.setBlock(10, 84, 12, BR::Farmland, BR::FarmlandHydrationMax); // (b1) 湿耕地
+        wb.setBlock(10, 85, 12, BR::WheatCrop, 0);                       // state0 苗
+        wb.setBlock(16, 84, 12, BR::Farmland, 0);                        // (b2) 干耕地
+        EntityManager emb;
+        PlayerController pcb45;
+        pcb45.setWorld(&wb);
+        pcb45.setEntityManager(&emb); // t1045 直连在 setEntityManager 内建立（生产同路）
+        QVector<int> dropIdB, dropCntB;
+        const QMetaObject::Connection dropConnB = QObject::connect(
+            &pcb45, &PlayerController::spawnItem, &pcb45,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropIdB.push_back(id);
+                dropCntB.push_back(count);
+            });
+        const QVector3D farB(-1000.0f, 10.0f, -1000.0f);
+        emb.setWanderFrozen(true); // t1029 缝：冻结游荡（下落期零水平漂移，落点列恒定）
+        wb.setTrampleRollOverride(0);
+        // (b1) 蜘蛛自 86.3 中心落到耕地顶 84.9375（落差 ≈1.06 → P≈0.56，缝 0 → 必踩）。
+        const int spiderB = emb.spawnMobTyped(10, 86, 12, EntityManager::MobSpider,
+                                              QStringLiteral("#1e1e1e"), 10);
+        bool mobOk = spiderB >= 0;
+        if (spiderB >= 0) {
+            for (int t = 0; t < 120 && wb.blockAt(10, 84, 12) == BR::Farmland; ++t)
+                emb.tick(0.016f, &wb, farB, 0.3f, 1.8f, true);
+            mobOk = mobOk && wb.blockAt(10, 84, 12) == BR::Dirt
+                && wb.blockAt(10, 85, 12) == BR::Air
+                && dropIdB.size() == 1 && dropIdB[0] == RecipeRegistry::SeedId && dropCntB[0] == 1;
+        }
+        // (b2) 概率地板对照：缝仍 0，0.06 微落差（85.3 中心 → 顶 84.9375）→ 恒不踩。
+        const int spiderB2 = emb.spawnMobTyped(16, 85, 12, EntityManager::MobSpider,
+                                               QStringLiteral("#222222"), 10);
+        bool floorOk = spiderB2 >= 0;
+        if (spiderB2 >= 0) {
+            for (int t = 0; t < 90; ++t) emb.tick(0.016f, &wb, farB, 0.3f, 1.8f, true);
+            floorOk = floorOk && wb.blockAt(16, 84, 12) == BR::Farmland;
+        }
+        emb.setWanderFrozen(false);
+        wb.setTrampleRollOverride(-1);
+        QObject::disconnect(dropConnB);
+        // (b3) 接线源钉（剥注释；两 call 点 / 应用 / 静水源门 / 掷骰与缝 / 两分支 / 回土 / 发信 / 声明）。
+        const QString exeDir1045 = QCoreApplication::applicationDirPath();
+        const QString root1045 = QDir(exeDir1045 + QStringLiteral("/..")).absolutePath();
+        QStringList miss1045;
+        miss1045 << pinSet(root1045 + QStringLiteral("/src/World/world.cpp"), {
+            {"cpp-roll-body", "return sample < p;"},
+            {"cpp-roll-seam", "double(m_trampleRollOverride % 1000) / 1000.0"},
+            {"cpp-wash-fall-call", "tryWashFarmland(c.x, c.y - 1, c.z, c.level)"},
+            {"cpp-wash-side-call", "tryWashFarmland(nx, c.y, nz, c.level)"},
+            {"cpp-wash-apply", "setWaterSilent(fw.x, fw.y, fw.z, BlockRegistry::Dirt, 0)"},
+            {"cpp-wash-src-gate", "if (srcLevel == 0) return false;"},
+        });
+        miss1045 << pinSet(root1045 + QStringLiteral("/src/World/world.h"), {
+            {"hdr-roll-decl", "bool farmlandTrampleRoll(float fallDistance);"},
+            {"hdr-seam-decl", "Q_INVOKABLE void setTrampleRollOverride(int roll);"},
+        });
+        miss1045 << pinSet(root1045 + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-player-trample", "m_world->farmlandTrampleRoll(fall)"},
+            {"cpp-relay-connect", "&EntityManager::farmlandTrampledByMob", 2},
+        });
+        miss1045 << pinSet(root1045 + QStringLiteral("/src/Game/playercontroller.h"), {
+            {"hdr-slot-decl", "void onMobTrampledFarmland(int x, int y, int z);"},
+        });
+        miss1045 << pinSet(root1045 + QStringLiteral("/src/Entities/entitymanager.cpp"), {
+            {"cpp-mob-trample", "world->farmlandTrampleRoll(fallDist)"},
+            {"cpp-mob-revert", "world->setBlockSilent(cx, restCellY, cz, BlockRegistry::Dirt, 0);"},
+            {"cpp-mob-signal", "emit farmlandTrampledByMob(cx, restCellY, cz);"},
+        });
+        miss1045 << pinSet(root1045 + QStringLiteral("/src/Entities/entitymanager.h"), {
+            {"hdr-signal-decl", "void farmlandTrampledByMob(int x, int y, int z);"},
+        });
+        const bool okPins45 = miss1045.isEmpty();
+        if (!okPins45)
+            qInfo().noquote() << "  [t1045b diag pins] miss=" << miss1045.join(QLatin1Char(','));
+        const bool ok = mobOk && floorOk && okPins45;
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t1045b diag] mobOk=" << mobOk << "floorOk=" << floorOk
+                              << " a=" << int(wb.blockAt(10, 84, 12)) << "crop"
+                              << int(wb.blockAt(10, 85, 12)) << "b=" << int(wb.blockAt(16, 84, 12))
+                              << "drops" << dropIdB.size();
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1045b mob landing tramples farmland with crop pop and wiring "
+                             "pins (MC caliber, parity adjudication cai-3): a spider landing on "
+                             "hydrated farmland from the P~0.56 band with the shared roll seam "
+                             "pinned low reverts it to dirt and pops the young crop as exactly "
+                             "one seed through the farmlandTrampledByMob relay into the "
+                             "dropCropDrops single authority (MC onFallenUpon applies to all "
+                             "entities; the modern 0.512 size exemption and mobGriefing gate are "
+                             "not carried - Beta/1.0 baseline has no size gate and the project "
+                             "has no gamerule system, registered), while a 0.06-block step "
+                             "landing stays below the formula floor and never tramples even "
+                             "with the seam pinned low; the pinSet half anchors the roll body, "
+                             "seam consumption, the player branch, the mob branch, the silent "
+                             "dirt revert, the signal emit and declarations, plus both wash "
+                             "call sites, the conversion apply and the still-source gate "
+                             "(comment-immune)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag mob=%1 floor=%2 pins=%3")
+                                       .arg(mobOk).arg(floorOk)
+                                       .arg(miss1045.join(QLatin1Char(','))));
+    }
+
+    // ── P-t1045c 流水冲耕转换（R19.23 t1045；裁-3 定案：流水冲耕地=变回泥土，方块转换非掉落物）──
+    //    (c1) 流水（state>0）grounded 蔓延落点=湿耕地 → 转 Dirt（state 清零、水**不**入格——Dirt
+    //         挡水）+ 全程零 blockDroppedAsItem（与附着块冲毁掉落分型）；
+    //    (c2) 干耕地同退化（t1045 探针④：干/湿都退化）；
+    //    (c3) 静水源（level 0）直接邻接 → 不冲（hydration 基建面选型登记：耕地依水而建不受静水
+    //         接触破坏；维基 Java/Bedrock 均无流水毁耕条目，本腿按裁-3 定案口径实现并台账注记）。
+    //    阴性轮敏感：摘水冲两调用点（false&& 前缀）→ (c1)(c2) 恰红（(c3) 保绿——门反摘会误伤）。
+    {
+        bool wetOk = false, dryOk = false, noDrop = true, srcOk = false;
+        {
+            World wc;
+            wc.setWidth(44); wc.setDepth(44); wc.setHeight(96); wc.setSeed(1047);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wc.setBlock(x, 83, z, BR::Stone, 0); // 地板 y=83（水面/耕地同道 y=84 grounded）
+            wc.setBlock(12, 84, 8, BR::Farmland, BR::FarmlandHydrationMax);  // (c1) 湿耕地
+            wc.setBlock(12, 84, 30, BR::Farmland, 0);                        // (c2) 干耕地（相距 22 > 扩散 7）
+            int dropCnt45c = 0;
+            const QMetaObject::Connection dropConnC = QObject::connect(
+                &wc, &World::blockDroppedAsItem, &wc,
+                [&dropCnt45c](int, int, int, int) { ++dropCnt45c; });
+            wc.setBlock(10, 84, 8, BR::Water, 0);   // 桶倒源（west 2 格；下方地板 83 → grounded 蔓延）
+            wc.setBlock(10, 84, 30, BR::Water, 0);  // 干耕地同道
+            for (int t = 0; t < 15; ++t) wc.tickWaterFlow(); // 节流 3:1 → ~5 波前步（2 步需 + 余量）
+            wetOk = wc.blockAt(12, 84, 8) == BR::Dirt && wc.stateAt(12, 84, 8) == 0
+                && wc.blockAt(12, 84, 8) != BR::Water; // 转换非掉落：水不入格
+            dryOk = wc.blockAt(12, 84, 30) == BR::Dirt;
+            noDrop = dropCnt45c == 0; // 非掉落物：全程零 blockDroppedAsItem
+            QObject::disconnect(dropConnC);
+        }
+        {
+            World wd; // (c3) 静水源邻接豁免（土堤围死唯一接触面）
+            wd.setWidth(44); wd.setDepth(44); wd.setHeight(96); wd.setSeed(1048);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wd.setBlock(x, 83, z, BR::Stone, 0); // 地板 y=83
+            wd.setBlock(12, 84, 18, BR::Farmland, 0); // 耕地（东邻静源）
+            wd.setBlock(13, 84, 18, BR::Water, 0);    // 静水源直接邻接
+            for (int x = 11; x <= 14; ++x) {          // 土堤：z=17/19 两行 + 西/东柱
+                wd.setBlock(x, 84, 17, BR::Stone, 0);
+                wd.setBlock(x, 84, 19, BR::Stone, 0);
+            }
+            wd.setBlock(11, 84, 18, BR::Stone, 0);
+            wd.setBlock(14, 84, 18, BR::Stone, 0);
+            for (int t = 0; t < 15; ++t) wd.tickWaterFlow();
+            srcOk = wd.blockAt(12, 84, 18) == BR::Farmland; // 静水接触不冲
+        }
+        const bool ok = wetOk && dryOk && noDrop && srcOk;
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t1045c diag] wetOk=" << wetOk << "dryOk=" << dryOk
+                              << "noDrop=" << noDrop << "srcOk=" << srcOk;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1045c flowing water washes farmland back to dirt as a block "
+                             "conversion (parity adjudication cai-3): flowing spread onto a "
+                             "hydrated farmland reverts it to dirt with the moisture state "
+                             "cleared and the water never enters the cell (dirt blocks flow - "
+                             "a conversion, not a drop: zero blockDroppedAsItem across the "
+                             "whole run, distinct from the attachable wash family), the dry "
+                             "farmland lane degrades identically (both hydration states "
+                             "degrade), and a still source (level 0) directly adjacent never "
+                             "washes its farmland (hydration infrastructure choice: farms are "
+                             "built against still water; flowing-only contact, registered; "
+                             "negative-round sensitive: both wash call sites false&&-prefixed)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag wet=%1 dry=%2 noDrop=%3 src=%4")
+                                       .arg(wetOk).arg(dryOk).arg(noDrop).arg(srcOk));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
