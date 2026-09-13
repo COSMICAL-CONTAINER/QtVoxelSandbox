@@ -47071,6 +47071,171 @@ Item {
                                        .arg(okScan).arg(miss1043b.join(QLatin1Char(','))));
     }
 
+    // ── P-t1044a 蜘蛛爬墙（R19.23 t1044；MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2）──
+    //    场景：平地平台 + 2 高 1 宽墙（(20,85..86,23) 顶面 87.0）阻在蜘蛛(20.5,85.3,21.5)与玩家
+    //    (20.5,85,26) 之间（纯 +Z 追击线）。蜘蛛追击水平位移被墙挡死（逐轴撤回）→ aiSpiderWallClimb
+    //    贴面攀爬脉冲（vy=kSpiderClimbSpeed 名义 2.4 b/s，AI tick 4 帧窗内重力衰减后 vy 恒正不触发
+    //    落地扫描回弹 → 净爬升 ≈1.2 b/s；固定 dt=0.016 细步泵，t1033/t1037 dt 语义先例）。
+    //    (a1) 净爬升：全程 maxY ≥ 87.0（中心过墙顶带 = feet ≥ 86.7；修复前蜘蛛封顶 85.3——2 高墙
+    //         越障跳不触发（墙顶两格非净空）→ 无爬墙机制则永卡墙根）；
+    //    (a2) 爬升先于越檐：首次中心 ≥ 86.6（爬升中段）严格早于首次 z > 22.9（越檐；墙根卡位上限
+    //         ≈22.74）→ 垂直位移是越檐的前因，非水平绕过；
+    //    (a3) 越檐抵达：终点与玩家 XZ 距 ≤ 1.2（修复前卡墙根距离 ≈3.45）→ MC 蜘蛛爬到顶后沿檐
+    //         平移（登记简化：走既有追击水平移动）直达目标。
+    //    阴性轮敏感（摘 aiSpiderWallClimb isClimber 门 false && 前缀）：(a1)(a2)(a3) 恰红（蜘蛛零
+    //    爬升、永卡墙根）；蜘蛛家族能力门见 P-t1044b 对照腿。
+    {
+        World wa;
+        wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1044);
+        for (int x = 2; x < 42; ++x)
+            for (int z = 2; z < 42; ++z) wa.setBlock(x, 84, z, BR::Stone, 0);
+        wa.setBlock(20, 85, 23, BR::Stone, 0); // 2 高 1 宽墙（顶面 87.0；越障跳对 2 高墙不触发）
+        wa.setBlock(20, 86, 23, BR::Stone, 0);
+        EntityManager ema;
+        const int spider = ema.spawnMobTyped(20, 85, 21, EntityManager::MobSpider,
+                                             QStringLiteral("#1e1e1e"), 10);
+        const QVector3D pp(20.5f, 85.0f, 26.0f); // 玩家脚位（墙另一侧，纯 +Z 追击线）
+        bool a1 = false, a2 = false, a3 = false;
+        if (spider >= 0) {
+            float maxY = -1e9f;
+            int firstY = -1, firstCross = -1;
+            QVector3D p;
+            for (int t = 0; t < 480; ++t) { // 7.68s（爬升 ≈1.6s + 逼近 + 越檐 + 抵达余量）
+                ema.tick(0.016f, &wa, pp, 0.3f, 1.8f, true);
+                p = ema.posAt(spider);
+                if (p.y() > maxY) maxY = p.y();
+                if (firstY < 0 && p.y() >= 86.6f) firstY = t;       // 爬升中段带（墙 85..86 上部）
+                if (firstCross < 0 && p.z() > 22.9f) firstCross = t; // 越檐（墙根卡位上限 ≈22.74）
+            }
+            const float endDist = QVector3D(p.x() - pp.x(), 0.0f, p.z() - pp.z()).length();
+            a1 = maxY >= 87.0f;
+            a2 = firstY >= 0 && firstCross >= 0 && firstY < firstCross;
+            a3 = endDist <= 1.2f;
+            if (!(a1 && a2 && a3))
+                qInfo().noquote() << "  [t1044a diag] maxY=" << maxY << "firstY=" << firstY
+                                  << "firstCross=" << firstCross << "endDist=" << endDist
+                                  << "end=(" << p.x() << "," << p.y() << "," << p.z() << ")";
+        }
+        const bool ok = spider >= 0 && a1 && a2 && a3;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1044a spider climbs a wall to reach its target (MC caliber, "
+                             "parity adjudication cai-2): chasing a player separated by a 2-high "
+                             "1-wide wall the blocked chase horizontal move latches a face climb "
+                             "(vy pulse at the registered kSpiderClimbSpeed caliber, gravity-decay "
+                             "kept positive so the landing scan never snaps back), the spider rises "
+                             "past the wall top band (max center Y >= 87.0 from a rest of 85.3 - a "
+                             "2-high wall cannot be jump-cleared so a pre-fix spider is wall-bound "
+                             "forever), the mid-climb band precedes the top crossing (climb is the "
+                             "cause of the traversal, not a horizontal detour), and it then walks "
+                             "over the edge (registered simplification: edge traverse is the plain "
+                             "chase move, no separate mantling) to end within 1.2 blocks of the "
+                             "player (negative-round sensitive: the isClimber gate false&&-prefixed)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag a1=%1 a2=%2 a3=%3 spider=%4")
+                                       .arg(a1).arg(a2).arg(a3).arg(spider));
+    }
+
+    // ── P-t1044b 能力门对照 + 接线源钉（R19.23 t1044）──
+    //    (b1) 洞穴蜘蛛（MobCaveSpider，t1012③ 同族）同场景爬墙越檐：MC cave spider 同样爬墙 →
+    //         纳入同批（登记）。maxY ≥ 87.0 + 终点距玩家 ≤ 1.2（同 a1/a3 判据）。
+    //    (b2) 非蜘蛛敌对对照（MobShambler = 僵尸位）：同场景（2 高墙阻路）不爬升——maxY ≤ 86.0
+    //         （rest 中心 85.9；2 高墙不可越障跳 → 修复前后都封顶墙根）且 z < 23.0（永不越檐，
+    //         卡位 ≈22.44）→ 能力门把爬墙限定在 Spider 家族。
+    //    (b3) 接线源钉（剥注释 pinSet，t1043b 同款；追击链三条分支中仇恨狼 / 铁傀儡两分支 headless
+    //         无对照腿 → 结构钉补位，t1047 O-4 先例）：爬墙调用 ×3（三条追击分支）+ isClimber 门 +
+    //         攀爬脉冲语句 + header 声明。
+    //    阴性轮敏感：摘 isClimber 门 → (b1) 恰红；(b2) 保绿（Shambler 不依赖爬墙分支）；(b3) 钉
+    //    needle 仍在（钉接线非钉门真值）。
+    {
+        bool okB1 = false, okB2 = false;
+        QVector3D endB1;
+        float maxYB1 = -1e9f, maxYB2 = -1e9f, endZB2 = -1e9f;
+        { // (b1) 洞穴蜘蛛爬墙。
+            World wb1;
+            wb1.setWidth(44); wb1.setDepth(44); wb1.setHeight(96); wb1.setSeed(1045);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wb1.setBlock(x, 84, z, BR::Stone, 0);
+            wb1.setBlock(24, 85, 23, BR::Stone, 0);
+            wb1.setBlock(24, 86, 23, BR::Stone, 0);
+            EntityManager emb1;
+            const int cspider = emb1.spawnMobTyped(24, 85, 21, EntityManager::MobCaveSpider,
+                                                   QStringLiteral("#223344"), 10);
+            const QVector3D pp(24.5f, 85.0f, 26.0f);
+            if (cspider >= 0) {
+                for (int t = 0; t < 480; ++t) {
+                    emb1.tick(0.016f, &wb1, pp, 0.3f, 1.8f, true);
+                    endB1 = emb1.posAt(cspider);
+                    if (endB1.y() > maxYB1) maxYB1 = endB1.y();
+                }
+                const float endDist = QVector3D(endB1.x() - pp.x(), 0.0f, endB1.z() - pp.z()).length();
+                okB1 = maxYB1 >= 87.0f && endDist <= 1.2f;
+            }
+        }
+        { // (b2) 僵尸位对照：同场景不爬升。
+            World wb2;
+            wb2.setWidth(44); wb2.setDepth(44); wb2.setHeight(96); wb2.setSeed(1046);
+            for (int x = 2; x < 42; ++x)
+                for (int z = 2; z < 42; ++z) wb2.setBlock(x, 84, z, BR::Stone, 0);
+            wb2.setBlock(20, 85, 23, BR::Stone, 0);
+            wb2.setBlock(20, 86, 23, BR::Stone, 0);
+            EntityManager emb2;
+            const int zombie = emb2.spawnMobTyped(20, 85, 21, EntityManager::MobShambler,
+                                                  QStringLiteral("#2e5a2e"), 10);
+            const QVector3D pp(20.5f, 85.0f, 26.0f);
+            if (zombie >= 0) {
+                QVector3D p;
+                for (int t = 0; t < 300; ++t) { // 4.8s（走到墙根 ~1.5s 后长卡）
+                    emb2.tick(0.016f, &wb2, pp, 0.3f, 1.8f, true);
+                    p = emb2.posAt(zombie);
+                    if (p.y() > maxYB2) maxYB2 = p.y();
+                }
+                endZB2 = p.z();
+                okB2 = maxYB2 <= 86.0f && endZB2 < 23.0f;
+            }
+        }
+        // (b3) 接线源钉（剥注释；调用 needle 出现恰 3 处 = 三条追击分支全接线）。
+        const QString exeDir1044 = QCoreApplication::applicationDirPath();
+        const QString root1044 = QDir(exeDir1044 + QStringLiteral("/..")).absolutePath();
+        QStringList miss1044;
+        miss1044 << pinSet(root1044 + QStringLiteral("/src/Entities/entitymanager.cpp"), {
+            {"cpp-climb-call-x3", "aiSpiderWallClimb(e, world, blockedX, nx, blockedZ, nz)", 3},
+            {"cpp-climber-gate", "(e.mobType == MobSpider) || (e.mobType == MobCaveSpider)"},
+            {"cpp-climb-pulse", "e.vy = kSpiderClimbSpeed;"},
+        });
+        miss1044 << pinSet(root1044 + QStringLiteral("/src/Entities/entitymanager.h"), {
+            {"hdr-climb-decl",
+             "bool aiSpiderWallClimb(Entity &e, World *world, bool blockedX, float nx, bool blockedZ, float nz);"},
+        });
+        const bool okPins = miss1044.isEmpty();
+        if (!okPins)
+            qInfo().noquote() << "  [t1044b diag pins] miss=" << miss1044.join(QLatin1Char(','));
+        if (!okB1)
+            qInfo().noquote() << "  [t1044b diag b1] maxY=" << maxYB1 << "end=("
+                              << endB1.x() << "," << endB1.y() << "," << endB1.z() << ")";
+        if (!okB2)
+            qInfo().noquote() << "  [t1044b diag b2] maxY=" << maxYB2 << "endZ=" << endZB2;
+        const bool ok = okB1 && okB2 && okPins;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1044b climb capability gate and wiring pins (MC caliber): the "
+                             "cave spider (same spider family, t1012) climbs the same test wall "
+                             "and reaches its target exactly like the spider (MC cave spiders "
+                             "climb too - included in this batch, registered), while a non-spider "
+                             "hostile (the shambler, our zombie) in the identical blocked-chase "
+                             "scenario never leaves the wall-foot band (max Y <= 86.0 at its "
+                             "85.9 rest, never crosses the wall plane) - the climber gate limits "
+                             "wall climbing to the spider family; the pinSet half anchors the "
+                             "climb call in all three chase branches (aggro wolf / iron golem / "
+                             "player, count>=3), the climber gate, the climb pulse statement and "
+                             "the header declaration (comment-immune, t1047 O-4 precedent for "
+                             "headless-unreachable branches)"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag b1=%1(maxY=%2) b2=%3(maxY=%4 endZ=%5) pins=%6")
+                                       .arg(okB1).arg(maxYB1).arg(okB2).arg(maxYB2).arg(endZB2)
+                                       .arg(miss1044.join(QLatin1Char(','))));
+    }
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     return totalFail == 0 ? 0 : 1;
 }
