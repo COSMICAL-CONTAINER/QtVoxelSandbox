@@ -8530,10 +8530,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //   无支撑（含只扫到水）→ 自由下落（原 mobSolidY<0 路径）。
         if (!ceilingClamped) {
         float restTopY = -1.0f;
+        int restCellY = -1; // t1045 落点支撑格 Y（踩踏耕地判读用；-1 = 无支撑）
         for (int cy = mobTopCell; cy >= mobBotCell; --cy) {
             if (cy < 0) break; // 越界下方=空气（World 约定）→ 不视作地面，实体继续落
             const float top = mobSupportTopY(world, cx, cy, cz);
-            if (top >= 0.0f) { restTopY = top; break; }
+            if (top >= 0.0f) { restTopY = top; restCellY = cy; break; }
         }
 
         if (restTopY >= 0.0f) {
@@ -8566,6 +8567,19 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 if (!pullExempt && !feetInWater && fallDist > kMobFallSafeBlocks) {
                     damageEntity(idx, int(std::floor(fallDist - kMobFallSafeBlocks)));
                     dirty = true;
+                }
+                // t1045 mob 踩踏耕地（parity 裁-3：MC onFallenUpon 对一切实体生效——mobGriefing 缺省
+                //   true 且工程无 gamerule 系统 → 全 mob 通行，登记；Java modern 的 0.512 尺寸豁免门不
+                //   入（Beta/1.0 基准无此门），登记）。落点支撑格 Farmland → World::farmlandTrampleRoll
+                //   单一掷骰（与玩家同公式同缝；概率地板 fall ≤ 0.5 恒不踩——resting 期间不走本分支、
+                //   行走并入小落差自然短路）。命中 → setBlockSilent 回 Dirt（湿润 state 随 id 消失）+
+                //   发 farmlandTrampledByMob → PlayerController 收事件清苗 + dropCropDrops 单一权威弹落
+                //   （掉落表不出 Entities 层，分层口径）。
+                if (restCellY >= 0
+                    && world->blockAt(cx, restCellY, cz) == BlockRegistry::Farmland
+                    && world->farmlandTrampleRoll(fallDist)) {
+                    world->setBlockSilent(cx, restCellY, cz, BlockRegistry::Dirt, 0);
+                    emit farmlandTrampledByMob(cx, restCellY, cz);
                 }
             }
         } else if (mobNewY != e.pos.y()) {

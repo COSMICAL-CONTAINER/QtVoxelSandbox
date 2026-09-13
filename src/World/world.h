@@ -332,6 +332,27 @@ public:
     //   只读 m_chunks.blockAt（向下依赖）；世界空 → 0（干态兜底）。非 Q_INVOKABLE（C++ 调）。
     int farmlandHydrationLevel(int x, int y, int z) const;
 
+    // t1045 耕地踩踏概率判定（踩踏回泥单一权威掷骰；parity-ledger 裁-3，MC 原版口径）：MC Java
+    //   FarmlandBlock.onFallenUpon 公式——实体落到耕地，踩坏概率 = clamp(下落距离 − 0.5, 0, 1)
+    //   （wiki 引证三元组：基准 MC Java（1.x 起公式稳定）/ minecraft.wiki w/Farmland Trampling 节
+    //   「jumps/falls on the block (with chance equal to distance fallen - 0.5)」/ 翻案维持：fall ≤ 0.5
+    //   恒不踩（走路并入 / 微步不坏，同旧 t639④ 口径收紧为公式地板）、跳 ~1.25 → 75%、高坠概率 >1
+    //   封顶必踩）。掷骰源：m_trampleRollOverride ≥ 0 取缝值千分比（setTameRollOverride t1031 缝先例，
+    //   生产零调用；矩阵探针两端钉死、同值恒同果）；缺省 −1 走全局 RNG（实体物理交互随机性，同
+    //   dropLeafDrops 范畴，非 worldgen 确定性 §2-K）。纯掷骰无副作用；caller（玩家着地沿
+    //   PlayerController::step / mob 落地沿 EntityManager::tick）负责落格 Farmland 校验与回土写入。
+    //   玩家/mob 共用本判定 = 概率公式单一权威（mob 侧 Java modern 的 0.512 尺寸豁免门与
+    //   mobGriefing 门不入：Beta/1.0 基准无尺寸门、工程无 gamerule 系统，登记于 parity-ledger 裁-3）。
+    static constexpr float kFarmlandTrampleFallMin = 0.5f; // MC onFallenUpon 概率地板（fall ≤ 此值恒不踩）
+    bool farmlandTrampleRoll(float fallDistance);
+    // t1045 踩踏概率测试缝（setTameRollOverride 同款，headless 矩阵探针确定性化）：roll ≥ 0 期间
+    //   farmlandTrampleRoll 不消费全局 RNG，改以缝值千分比作本次踩踏样本（sample = (roll % 1000) /
+    //   1000.0）：setTrampleRollOverride(0) = 概率带内必踩、setTrampleRollOverride(999) = 概率带内必不踩
+    //   （须配 fall < 1.5 的低落差场景——高坠概率封顶 >1 时缝值也拦不住，探针落差取 ~1.26 跳高带）。
+    //   -1（缺省）= 生产路径零改动（照常 QRandomGenerator::global 掷骰）。纯标量运行期状态（不持久化、
+    //   跨世界 reset 族无需清，同 m_tameRollOverride 先例）；setter 生产路径零调用。
+    Q_INVOKABLE void setTrampleRollOverride(int roll);
+
     // t474/t649 附魔台书架加成计数（机制等价 MC 1.0 enchanting table bookshelf power）。给定附魔台方块格
     //   (x,y,z)：只数**水平切比雪夫距离 == 2 的 16 格环带** × **y / y+1 两层**的 Bookshelf，且书架半步格
     //   （书架位向附魔台 1 格、同 y）须为 Air（「中间隔一格空气」的空间要求——贴身书架墙不计）。上限钳到 15。
@@ -1650,6 +1671,10 @@ private:
     //   （3s/窗）→ 后放水 / 挖水约 3s 内耕地湿润度更新（可见、可验收；MC 1.0 走 random tick 较慢，取快便于肉眼复核）。
     int m_farmlandHydrTickCounter = 0;
     static constexpr int kFarmlandHydrTickInterval = 30; // tickFarmlandHydration 节流间隔（100ms → 3s/窗）
+    // t1045 踩踏概率缝状态（setTrampleRollOverride 写；缺省 -1 = 不接管，farmlandTrampleRoll 照常掷
+    //   全局 RNG）。≥ 0 时踩踏样本取缝值千分比（(roll%1000)/1000.0，setTameRollOverride 缝先例同式）。
+    //   纯标量运行期状态（不持久化，跨世界 reset 族无需清）；生产路径零调用。
+    int m_trampleRollOverride = -1;
     // t305 树苗生长 tick 节流计数 + 常量：tickSaplingGrowth() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kSaplingTickInterval 才做一次成长判定（~每 kSaplingTickInterval×0.1s 一窗）。窗口序号
     //   m_saplingIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同窗口不同树苗错峰生长。

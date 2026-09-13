@@ -1169,6 +1169,12 @@ signals:
     //   把被毁方块的物品弹出来；同 fallingBlockDropped 模式）。分层（PLAN §2）：Entities 层发语义事件，
     //   呈现层只消费，绝不反向写栅格。
     void explosionDroppedItem(int x, int y, int z, int itemId);
+    // t1045 mob 踩耕地回土（mob 落地沿踩踏命中时发，每踩一格一发）：坐标 = 被踩耕地格。回土写入
+    //   （setBlockSilent Dirt）已在 Entities 层完成（Entities→World 向下合规）；本信号只上报事件给
+    //   Game 层——PlayerController::onMobTrampledFarmland（setEntityManager 内直连）清苗 +
+    //   dropCropDrops 弹落（掉落表单一权威在 Game 层，Entities 不产掉落，分层口径）。纯语义事件，
+    //   呈现层不消费（headless 语义）；无订阅者时无害。
+    void farmlandTrampledByMob(int x, int y, int z);
     // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」的命中反馈）：玩家弓射出的箭（spawnArrowPlayer）在 tick 内
     //   命中 mob 时发。damageEntity 已扣血 + 红闪 + 归零 mobDied 死亡掉落；本信号额外驱动命中音（呈现层 →
     //   AudioManager.playMobHurt，同近战 attackMob→PlayerController.mobAttacked 模式）。mobType = 被命中 mob 子类 id。

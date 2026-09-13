@@ -1188,6 +1188,11 @@ private:
     //   链）；TallGrass / WheatCrop 非 solid 且不作他物支撑 → 单趟向上扫即足够（无级联，破一块不会链式
     //   掉一串）。掉落产出与玩家破块同源（dropCropDrops 共用，成熟小麦失撑仍掉小麦 + 种子）。
     void dropUnsupportedCropsAround(int x, int y, int z);
+    // t1045 mob 踩耕地弹苗（EntityManager::farmlandTrampledByMob 收口槽，setEntityManager 内直连——
+    //   Game 持 EntityManager 注入指针先例，信号直连同步）。mob 落地沿的回土写入在 Entities 层完成
+    //   （Entities→World 向下合规）；本槽只补 Game 层专属面：清苗（静默写，同玩家踩踏分支口径）+
+    //   dropCropDrops 弹落（t1026 单一权威——掉落表不出 Game 层，Entities 层不产掉落）。无苗 no-op。
+    void onMobTrampledFarmland(int x, int y, int z);
     // t739 红石粉失撑掉落（R19.11 用户复盘「红石粉不得浮空」）：破块后查**正上方格**，若为红石粉导线、
     //   且本格（粉的唯一支撑位——粉恒铺在支撑格顶面）已非有效支撑（isDustSupport 单一权威：完整立方 /
     //   上半砖）→ 粉直接掉落为红石粉物品（0x224，与放置来源一致；激活态照样掉）。机制等价 MC「红石粉
@@ -1788,10 +1793,10 @@ private:
     static constexpr float kGravity = 28.0f;
     static constexpr float kJump = 8.4f;       // 顶点约 1.25 格
     static constexpr float kMaxFall = 78.4f;
-    // t639④ 踩踏耕地触发下落阈值（格）：着地下落距离 > 此值 → 落点耕地被踩坏成泥土。普通跳跃顶点 ~1.25 →
-    //   原地跳跃落地 ~1.25 触发；跨 1 格高平台下落 ~1.06 触发；走路并入（下落≈0）不触发（机制对齐 MC 1.0
-    //   「非跳跃踩踏耕地不坏、跳跃 / 坠落踩坏」）。
-    static constexpr float kFarmlandTrampleFall = 1.0f;
+    // t639④ 踩踏耕地触发下落阈值（格）—— t1045 起退役：踩踏判定改 MC Java onFallenUpon 概率公式
+    //   P = clamp(fall − 0.5, 0, 1)（World::farmlandTrampleRoll 单一权威，kFarmlandTrampleFallMin=0.5
+    //   概率地板随之迁 World 层）。旧「fall > 1.0 恒踩坏」确定性门保留于历史注释；100% 踩坏偏离 MC
+    //   概率口径，由 parity-ledger 裁-3 本单清偿（非跳跃踩不坏口径不变——概率地板内恒不踩）。
     // t296 玩家受击击退常量（机制对齐 MC 1.0 玩家被击退量级；与 EntityManager mob 击退 kKnockbackHoriz=4.5 /
     //   kKnockbackUp=4.5 / kKnockbackDrag=4.0 同族，玩家侧略强使「被打」反馈明显）：
     //   - kHitKnockbackHoriz：受击水平初速（blocks/s）。略高于玩家走速 4.3 + mob 击退 → 一击把玩家推 ~1.3 格

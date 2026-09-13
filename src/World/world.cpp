@@ -1505,6 +1505,28 @@ void World::tickWaterFlow()
         return true;
     };
 
+    // t1045 流水冲耕登记（parity-ledger 裁-3 定案：流水冲耕地=变回泥土）：扩散落点是耕地格 → 记入
+    //   farmlandWashed（**转换**变体，与附着块的「冲毁变掉落物」分型——MC 口径耕地本体不掉落，方块
+    //   转换为 Dirt，本格**不**灌水（Dirt 是实体方块挡水，水停在本格）；湿润 state 随 id 一并消失）。
+    //   **门=扩散源是流水（srcLevel > 0）**：静水源（level 0）邻接不冲——耕地依水而建是 hydration 基建
+    //   面（t329/t406 同层邻水滋润），静止水接触恒不算「冲」；流水接触（grounded 蔓延 / 瀑布落柱）→
+    //   转换。登记选型：wiki（Java/Bedrock）均无流水毁耕条目，本腿按裁-3 定案口径实现（台账留维基缺口
+    //   注记）。farmlandWashKeys 去重（多源指向同一格只转一次）。下游应用段见 washed 应用之后。
+    struct FarmlandWashedCell { int x, y, z; };
+    std::vector<FarmlandWashedCell> farmlandWashed;
+    std::unordered_set<long long> farmlandWashKeys;
+    auto tryWashFarmland = [&](int x, int y, int z, quint8 srcLevel) -> bool {
+        if (srcLevel == 0) return false; // 静水源接触不冲（hydration 基建面；流水 srcLevel>0 才冲）
+        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) return false;
+        if (m_chunks.blockAt(x, y, z) != BlockRegistry::Farmland) return false;
+        const long long k = keyOf(x, y, z);
+        if (!farmlandWashKeys.count(k)) {
+            farmlandWashKeys.insert(k);
+            farmlandWashed.push_back({x, y, z});
+        }
+        return true;
+    };
+
     // 下方格类别：y==0 视为实体底（基岩层不可下落）；否则查 m_chunks。
     //   0=air(下落) / 1=solid(grounded，水平蔓延) / 2=water(水下柱，本格既不下落也不蔓延)。
     auto belowKind = [&](int x, int y, int z) -> int {
@@ -1606,6 +1628,9 @@ void World::tickWaterFlow()
             // t1012④ 下方是附着块（贴地火把等）→ 冲毁登记 + 同 tick 灌入流水 level=1（同下落口径；
             //   机制等价 MC 流水浇毁脚下火把）。
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1));
+        } else if (bk == 1 && tryWashFarmland(c.x, c.y - 1, c.z, c.level)) {
+            // t1045 下方是耕地（瀑布落柱浇在耕地上）→ 冲耕转换回泥土。**不**灌水（Dirt 实体方块
+            //   挡水，水停在本格；与附着块「冲毁+灌入」分型——耕地是转换非掉落）。
         }
         // 水平蔓延：仅当本格 grounded（下方为实体方块，bk==1）才向水平 air 邻居扩散；air → 写 level+1；
         //   既有流水 → re-level 下调。t350 修「单桶水流遇崖边悬空 cascade → 淹平面（tsunami）」：
@@ -1629,6 +1654,9 @@ void World::tickWaterFlow()
                     // t1012④ 邻格是附着块（墙面火把 / 红石火把 / 蛛网）→ 冲毁登记 + 同 tick 灌入流水
                     //   （level+1 同 air 蔓延口径；机制等价 MC 流水漫过冲毁附着物并掉落）。
                     tryAdd(nbKey, quint8(c.level + 1));
+                } else if (tryWashFarmland(nx, c.y, nz, c.level)) {
+                    // t1045 流水漫向耕地（grounded 水平蔓延落点）→ 冲耕转换回泥土。**不**灌水
+                    //   （Dirt 挡水；下一 tick 稳态——转换一次性，不会反复触发）。
                 } else if (nbId == BlockRegistry::Water) {
                     // t224 re-leveling：既有流水邻居若能被提供更低 level（更近源）→ 下调之。
                     //   旧实现只入 air → 两股流水相遇在中线，首达者独占该格 level，后到者被 `!=Air` 挡在
@@ -1673,6 +1701,13 @@ void World::tickWaterFlow()
             anyChange = true;
         }
     }
+    // t1045 流水冲耕应用：耕地 → Dirt 方块转换（静默写、湿润 state 随 id 消失；**无**掉落信号——
+    //   与附着块冲毁掉落分型，MC 口径耕地本体不掉落；上方作物保留——Dirt 仍支撑作物，同 MC 干化
+    //   回土口径「作物留存、不再生长」，毁苗只属踩踏链）。setWaterSilent 内部 check*族钩子承接
+    //   m_growthCells 索引陈旧项（blockAt 复核跳过，同水格防御口径）。先于 adds 无交叉（本格从不
+    //   入 adds——转换格不灌水）。
+    for (const FarmlandWashedCell &fw : farmlandWashed)
+        anyChange |= setWaterSilent(fw.x, fw.y, fw.z, BlockRegistry::Dirt, 0);
     for (const auto &kv : adds) {
         const long long k = kv.first;
         const int x = static_cast<int>(k % W);
@@ -2416,6 +2451,25 @@ int World::farmlandHydrationLevel(int x, int y, int z) const
     // 距离 → 等级：dist 1→3、2→2、3→1、≥4/无水→0（4 级 0..3，darker=wetter）。
     const int level = kRadius - bestDist; // dist 1→3、2→2、3→1、4→0、哨兵(5)→-1
     return (level > 0) ? level : 0;
+}
+
+// t1045 耕地踩踏概率判定（见 world.h 头注释）：MC Java onFallenUpon 公式 P = clamp(fall − 0.5, 0, 1)。
+//   缝接管（m_trampleRollOverride ≥ 0）同值恒同果（探针确定性）；缺省全局 RNG。纯掷骰无副作用。
+bool World::farmlandTrampleRoll(float fallDistance)
+{
+    const double p = double(fallDistance) - double(kFarmlandTrampleFallMin);
+    if (p <= 0.0) return false; // 概率地板：fall ≤ 0.5 恒不踩（走路并入 / 微步不坏）
+    const double sample = m_trampleRollOverride >= 0
+        ? double(m_trampleRollOverride % 1000) / 1000.0 // t1045 缝接管（t1031 同式；同值恒同果）
+        : QRandomGenerator::global()->generateDouble();
+    return sample < p;
+}
+
+// t1045 踩踏概率测试缝 setter（见 world.h 头注释；setTameRollOverride t1031 同款，生产路径零调用）。
+void World::setTrampleRollOverride(int roll)
+{
+    if (roll == m_trampleRollOverride) return;
+    m_trampleRollOverride = roll;
 }
 
 // t474 附魔台书架加成计数（见 world.h 头注释）。t649 对齐 MC 1.0 书架计数规则（机制等价，无专有资产）：
