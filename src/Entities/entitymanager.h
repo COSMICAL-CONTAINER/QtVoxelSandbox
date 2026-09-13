@@ -905,15 +905,16 @@ public:
     //   非 MobIronGolem / dead / 越界 → 静默早退。
     void setGolemRetaliate(int i);
     // t1042 被动型受击惊逃（PlayerController::attackMob 命中后调；Game→Entities 向下依赖，同 setGolemRetaliate
-    //   模式）：牛/羊/猪/鸡/**未驯服豹猫** + 狼**幼崽** → panicTimer = kPanicDuration（MC panic ~8s 量级），
+    //   模式）：牛/羊/猪/鸡/**未驯服豹猫** → panicTimer = kPanicDuration（MC panic ~8s 量级），
     //   期间 aiPanicFlee 背离玩家疾走（MC 原版口径：被动受击只惊逃永不反击）。类型门收口在此：敌对 / 造物 /
-    //   驯服狼 / 野狼成体（后者走 setWolfProvoked 反击）/ 驯服猫（跟随语义不变）→ 静默 no-op。dead（致死击
+    //   驯服狼 / 野狼成体（后者走 setWolfProvoked 反击）/ 驯服猫（跟随语义不变）/ **狼全族**（t1047 O-3：
+    //   MC 狼无 PanicGoal——成体被打经 setWolfProvoked 反击、幼崽零 panic）→ 静默 no-op。dead（致死击
     //   不惊逃，尸体走死亡链）/ 非 Mob / 越界 → 静默早退。
     void setPanicFlee(int i);
     // t1042 野狼被打敌对反击锁定（PlayerController::attackMob 目标是未驯服**成体**狼时调；同 setGolemRetaliate
     //   模式）：chasing=玩家（aiHostile 先例进入写点 chasing=true + chaseTimer=kChaseMemory）→ aiWolf 追咬
-    //   玩家，超时/超距清除同 hostile 收口。驯服狼（t1031 豁免维持——被打不反击主人）/ 狼幼崽（只惊逃，
-    //   见 setPanicFlee）/ 非 wolf / dead / 越界 → 静默 no-op。
+    //   玩家，超时/超距清除同 hostile 收口。驯服狼（t1031 豁免维持——被打不反击主人）/ 狼幼崽（零反击零
+    //   panic，t1047 O-3）/ 非 wolf / dead / 越界 → 静默 no-op。
     void setWolfProvoked(int i);
     // t727 夜行者近战命中瞬移躲避（PlayerController::attackMob 命中 MobNightwalker 后调；Game→Entities 向下依赖，
     //   同 setWolfTarget / setGolemRetaliate 模式）。仅 mobType==MobNightwalker && alive && !dead && 瞬移冷却到 →
@@ -1687,7 +1688,7 @@ private:
         //   期间 aiPanicFlee 背离玩家疾走（MC 1.0 panic 口径：被动受击只惊逃永不反击），优先级置顶
         //   （压过求偶寻偶 / 食物引诱 / 幼崽跟随 / wander 选向 / 羊吃草）。放 struct 末尾区保聚合初始化
         //   不错位（t256 元教训）；DMI 兜底 + spawnMobCore 整体 move 入槽 → 槽复用自动清回 0。
-        float panicTimer = 0.0f;       // 惊逃剩余秒数（>0 惊逃；仅被动五型 + 狼幼崽用）
+        float panicTimer = 0.0f;       // 惊逃剩余秒数（>0 惊逃；仅被动五型用——狼全族 t1047 O-3 起不入集）
     };
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
@@ -1858,8 +1859,9 @@ private:
     // speedScale：水平位移缩放（t298 水中减速；1.0 陆地、kWaterSpeedMul 水中）。透传给 mob 的水平移动，
     //   使在水中时既减位移又同步降低 moveSpeed（t241 腿摆频率随 moveSpeed，故水中腿也变慢 = 视觉上「挣扎」）。
     bool aiWander(Entity &e, float dt, World *world, float worldW, float worldD, float speedScale = 1.0f);
-    // t1042 被动型惊逃移动（牛/羊/猪/鸡/豹猫 + 狼幼崽共用；调用点：通用被动链 / aiOcelot 未驯服分支 /
-    //   aiWolf 幼崽分支，各在 panicTimer>0 时调——惊逃优先级置顶由 caller 门序保证）。机制等价 MC 1.0
+    // t1042 被动型惊逃移动（牛/羊/猪/鸡/豹猫共用；t1047 O-3 起狼不入惊逃集。调用点：通用被动链 /
+    //   aiOcelot 未驯服分支 / aiWolf 幼崽门序位〔狼侧不可达，防御登记面变化绕过门序〕，各在
+    //   panicTimer>0 时调——惊逃优先级置顶由 caller 门序保证）。机制等价 MC 1.0
     //   panic：每 AI tick 衰减 panicTimer + 钉 yaw=离玩家 + 强制疾走（kPanicSpeed）+ 短置 wanderTimer
     //   （防 aiWander 本帧重掷选向，同 t1025 引诱钉法），位移交 aiWander（复用逐轴碰撞撤回 + 边界 clamp +
     //   撞墙换向 + t1029 冻结缝语义）。返回是否真位移（驱动 dirty + moveSpeed）。
@@ -1885,7 +1887,8 @@ private:
     //       游荡、不主动攻击玩家（机制等价 MC 1.0 野狼中性：不主动攻击玩家，被打才反击——t1042）；受击沿
     //       setWolfProvoked 置 chasing=玩家 → 追咬玩家，超时（kChaseMemory 带外衰减）/ 超距（kDetectRange
     //       外）清除同 hostile 收口；chasing **只**能由受击沿置位，侦测带内仅续期已有反击记忆（不复活旧
-    //       t480「见人就咬」主动敌对分支）；幼崽（baby）不反击只惊逃（aiPanicFlee，t1042 口径登记）；
+    //       t480「见人就咬」主动敌对分支）；幼崽（baby）零反击零 panic（t1047 O-3：MC 狼无 PanicGoal，
+    //       setPanicFlee 不收狼；setWolfProvoked baby 门维持）；
     //       playerTargetable=false（创造/观察者不可锁定）→ 不反击并清反击态（同 aiIronGolem 门先例）。
     //   (2) 驯服 + 坐（wolfSitting=true）：**留守** —— 不移动不攻击（跟随主人回来自动续跟）；机制等价 MC 坐狼。
     //   (3) 驯服 + 站：**跟随 + 防御** —— 有防御目标（m_wolfTarget：主人攻击 / 主人受击来源的 mob）→ 追击并

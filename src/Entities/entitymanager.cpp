@@ -1696,11 +1696,14 @@ float EntityManager::walkPhaseAt(int i) const
 
 // t241 羊头部俯仰（QML 驱动 MobModel 头俯仰）：仅 mobType==MobSheep 且吃草周期内返 sin(πp) 包络
 //   （p = 周期内进度 0..1；中段最深 = kEatHeadPitch、起末归 0）；其余 → 0（头不转）。
+//   t1047 O-4：惊逃期返 0 头回正——tick 侧惊逃打断吃草只冻结 eatTimer（低头包络会停在半途），
+//   panicTimer>0 期间呈现面归 0（惊逃羊抬头疾走，惊逃窗尽后包络从冻结位续走）。
 float EntityManager::headPitchAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0.0f;
     const Entity &e = m_entities[size_t(i)];
     if (e.kind != Mob || e.mobType != MobSheep || e.eatTimer <= 0.0f) return 0.0f;
+    if (e.panicTimer > 0.0f) return 0.0f; // t1047 O-4 惊逃期头回正（返 0 条件追加 panicTimer 门）
     const float p = (kEatDuration - e.eatTimer) / kEatDuration; // 周期内进度 0..1
     return kEatHeadPitch * std::sin(3.14159265f * p);           // sin(πp) 包络：起末 0、中段最深（负=低头）
 }
@@ -1880,9 +1883,11 @@ void EntityManager::setGolemRetaliate(int i)
 }
 
 // t1042 被动型受击惊逃（PlayerController::attackMob 命中后调；见头文件注释）。类型门收口在此：
-//   被动五型（pig/cow/sheep/chicken + 未驯服豹猫）与狼幼崽置 panicTimer，其余（敌对 / 造物 / 驯服狼 /
-//   野狼成体——后者由 setWolfProvoked 反击——驯服猫）静默 no-op。机制等价 MC 1.0：被动受击只惊逃
-//   （panic ~8s）永不反击；豹猫被打只逃不反击；幼崽不反击只惊逃。
+//   被动五型（pig/cow/sheep/chicken + 未驯服豹猫）置 panicTimer，其余（敌对 / 造物 / 驯服狼 /
+//   野狼成体——后者由 setWolfProvoked 反击——驯服猫 / **狼全族**）静默 no-op。机制等价 MC 1.0：
+//   被动受击只惊逃（panic ~8s）永不反击；豹猫被打只逃不反击。t1047 O-3（review0912 #3，常设裁决
+//   「一切按原版」）：MC 狼**无 PanicGoal**——成体被打经 setWolfProvoked 敌对反击、幼崽零 panic
+//   （旧「幼崽不反击只惊逃」wolfBaby 分支摘除：狼整体退出惊逃集，驯服狼本就豁免）。
 void EntityManager::setPanicFlee(int i)
 {
     if (i < 0 || i >= int(m_entities.size())) return;
@@ -1890,8 +1895,7 @@ void EntityManager::setPanicFlee(int i)
     if (!e.alive || e.kind != Mob || e.dead) return;
     const bool passiveFleeType = e.mobType == MobPig || e.mobType == MobCow || e.mobType == MobSheep
         || e.mobType == MobChicken || (e.mobType == MobOcelot && !e.ocelotTamed);
-    const bool wolfBaby = e.mobType == MobWolf && e.baby; // t1042 幼崽不反击只惊逃（共用惊逃机制）
-    if (!passiveFleeType && !wolfBaby) return;
+    if (!passiveFleeType) return; // t1047 O-3：狼退出惊逃集（含幼崽；旧 wolfBaby 分支摘除）
     e.panicTimer = kPanicDuration;
     qCInfo(lcEnt) << "mob" << i << "type" << e.mobType << "panic-flees for" << kPanicDuration << "s";
 }
@@ -1904,7 +1908,7 @@ void EntityManager::setWolfProvoked(int i)
     if (i < 0 || i >= int(m_entities.size())) return;
     Entity &e = m_entities[size_t(i)];
     if (!e.alive || e.kind != Mob || e.dead || e.mobType != MobWolf) return;
-    if (e.wolfTamed || e.baby) return; // t1031 驯服狼豁免维持 + t1042 幼崽只惊逃
+    if (e.wolfTamed || e.baby) return; // t1031 驯服狼豁免维持 + t1047 O-3 幼崽零反击零 panic（狼无 PanicGoal）
     e.chasing = true;
     e.chaseTimer = kChaseMemory;
     qCInfo(lcEnt) << "wild wolf" << i << "provoked: retaliates against player";
@@ -2986,9 +2990,9 @@ bool EntityManager::aiWander(Entity &e, float dt, World *world, float worldW, fl
     return moved;
 }
 
-// t1042 被动型惊逃移动（牛/羊/猪/鸡/豹猫 + 狼幼崽共用机制）：受击沿 setPanicFlee 置 panicTimer =
-//   kPanicDuration 后，各 AI 分支（通用被动链 / aiOcelot 未驯服分支 / aiWolf 幼崽分支）在 panicTimer>0 时
-//   调本方法。机制等价 MC 1.0 panic：背离玩家疾走 ~8s，期间不游走选向 / 不寻偶 / 不引诱 / 不幼随 / 不吃草
+// t1042 被动型惊逃移动（牛/羊/猪/鸡/豹猫共用机制；t1047 O-3 起狼不入惊逃集）：受击沿 setPanicFlee 置
+//   panicTimer = kPanicDuration 后，各 AI 分支（通用被动链 / aiOcelot 未驯服分支 / aiWolf 幼崽门序位）
+//   在 panicTimer>0 时调本方法。机制等价 MC 1.0 panic：背离玩家疾走 ~8s，期间不游走选向 / 不寻偶 / 不引诱 / 不幼随 / 不吃草
 //   （优先级置顶由 caller 门序保证——通用链中本分支在 love/lure/baby 之前，eating 门读 panicTimer 豁免）。
 //   实现：每 AI tick 衰减 panicTimer + 钉 yaw=离玩家（dir=(-sin,0,-cos) 约定下背离方向 = atan2(pdx,pdz)，
 //   与「朝向玩家」的 atan2(-pdx,-pdz) 反号）+ 强制疾走 kPanicSpeed + 短置 wanderTimer=0.4（防 aiWander 本帧
@@ -3176,8 +3180,10 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
         return moved;
     };
 
-    // t1042 狼幼崽惊逃置顶（登记口径「幼崽不反击只惊逃」）：受击惊逃优先于驯服跟随 / 野狼游荡；惊逃窗
-    //   尽后落回各自既有语义（驯服幼崽回跟随——生产面狼幼崽恒驯服，t480 父代继承；野幼崽回游荡）。
+    // t1042 狼幼崽惊逃置顶 → t1047 O-3 改口径：MC 狼无 PanicGoal（成体被打经 setWolfProvoked 反击 /
+    //   幼崽零 panic）→ 狼整体退出惊逃集（setPanicFlee 单一登记权威不再收狼）。本门序位保留为共用
+    //   移动器的消费位（狼侧 panicTimer 恒 0 → 不可达；防御未来登记面变化绕过优先级序）。幼崽落回：
+    //   生产面狼幼崽恒驯服（t480 父代继承）→ 恒走跟随语义；野幼崽恒游荡。
     //   反击面由 setWolfProvoked 的 baby 门登记兜底（chasing 永不为幼崽置位，无论驯服与否）。
     if (e.baby && e.panicTimer > 0.0f)
         return aiPanicFlee(e, dt, world, worldW, worldD, speedScale, playerPos);
