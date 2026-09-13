@@ -322,7 +322,16 @@ void PlayerController::setItemEntities(ItemEntityManager *m)
 void PlayerController::setEntityManager(EntityManager *m)
 {
     if (m_entityManager == m) return;
+    // t1045 mob 踩耕地事件直连（UniqueConnection 防重注入叠加；信号直连同步——EntityManager 落地沿
+    //   发 farmlandTrampledByMob → 本类清苗 + dropCropDrops 单一权威弹落，掉落表不出 Game 层）。
+    if (m_entityManager)
+        disconnect(m_entityManager, &EntityManager::farmlandTrampledByMob, this,
+                   &PlayerController::onMobTrampledFarmland);
     m_entityManager = m;
+    if (m_entityManager) {
+        connect(m_entityManager, &EntityManager::farmlandTrampledByMob, this,
+                &PlayerController::onMobTrampledFarmland, Qt::UniqueConnection);
+    }
     updateFoodLure(); // t1025：换实体管理器（进世界 / 重载）即按当前持物重刷引诱门控表
     emit entityManagerChanged();
 }
@@ -2127,6 +2136,23 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
     m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
+}
+
+// t1045 mob 踩耕地弹苗（EntityManager::farmlandTrampledByMob 收口槽；见 .h 注释）。回土已在 Entities
+//   层完成（setBlockSilent Dirt）；本槽只处理 Game 层专属面：正上方格若是作物 → 快照 state 后静默清
+//   苗（同玩家踩踏分支口径，无破块粒子/音）+ dropCropDrops 按阶段掉产物（t1026 单一权威——成熟掉
+//   小麦 + 1-3 种子、未熟掉 1 种子、胡萝卜/土豆按阶段 1-4/1）。无苗 / 越界 → no-op（caller 误调防御）。
+void PlayerController::onMobTrampledFarmland(int x, int y, int z)
+{
+    if (!m_world) return;
+    const int cy = y + 1;
+    if (cy < 0 || cy >= m_world->height()) return;
+    const quint8 crop = m_world->blockAt(x, cy, z);
+    if (crop != BlockRegistry::WheatCrop && crop != BlockRegistry::CarrotCrop
+        && crop != BlockRegistry::PotatoCrop) return;
+    const quint8 cstate = m_world->stateAt(x, cy, z); // 清格前快照（WheatCrop 成熟判定，t134 时序）
+    m_world->setWaterSilent(x, cy, z, BlockRegistry::Air, 0);
+    dropCropDrops(x, cy, z, crop, cstate);
 }
 
 // t739 红石粉失撑掉落（见 playercontroller.h 头注释）：破块后查正上方格，若为红石粉导线、且本格
@@ -7884,15 +7910,15 @@ void PlayerController::step(qreal dt)
                 } else if (dmg > 0) emit fallDamageTaken(dmg, PlayerState::Fall); // t311 死因=高处坠落
             }
         }
-        // t639④ 踩踏耕地（机制等价 MC 1.0：跳跃 / 坠落落到耕地上 → 耕地变泥土 + 上方作物掉落）。
-        //   触发条件 = 着地瞬间（本分支即"滞空→着地"沿）+ 下落距离 > 阈值（普通跳跃 ~1.26 / 跨 1 格平
-        //   台下落 ~1.06 均触发；走路并入耕地 / 微步下台阶 < 1.0 不踩坏，机制对齐 MC「非跳跃踩踏不坏」。
-        //   脚位格 = 地面复探同款取样（floor(m_pos.y - 0.05)），精确取落点被踩的耕地格（脚位 0.9375 /
-        //   整块顶 1.0 均映射到支撑格）。踩坏 → setBlock(Dirt)（耕地湿润态一并清）；耕地上有作物 →
-        //   失撑掉落（复用 dropCropDrops 按生长阶段掉产物 = 未成熟掉种子、成熟掉小麦/作物，同失撑级联）。
-        //   仅玩家路径（mob 踩踏留 t642 mob AI 轮）；创造同样踩坏（世界交互非伤害，机制对齐 MC）。分层：
-        //   本处属 Game/Physics（读落点 + 写 World），不改 setBlock 语义。
-        if (fall > kFarmlandTrampleFall && m_world) {
+        // t1045 踩踏耕地概率化（parity 裁-3，MC 原版口径）：着地沿踩踏判定改 MC Java onFallenUpon
+        //   公式——P = clamp(fall − 0.5, 0, 1)（World::farmlandTrampleRoll 单一权威掷骰：fall ≤ 0.5
+        //   概率地板恒不踩=走路并入 / 微步不坏；跳 ~1.25 → 75% 概率；高坠概率封顶必踩）。旧 t639④
+        //   「fall > 1.0 恒踩坏」确定性门退役（100% 踩坏偏离 MC 概率口径——parity-ledger 裁-3 本单
+        //   清偿）。缝 setTrampleRollOverride 矩阵两端钉死，生产走全局 RNG（实体物理交互随机性）。
+        //   踩坏 → setBlockSilent(Dirt)（耕地湿润态一并清）；耕上有作物 → 失撑弹落（dropCropDrops
+        //   按生长阶段掉产物 = 未成熟掉种子、成熟掉小麦/作物，同失撑级联，t1026 单一权威）。创造同样
+        //   踩坏（世界交互非伤害，机制对齐 MC）。mob 侧同公式踩踏在 EntityManager 落地沿（t1045）。
+        if (fall > 0.5f && m_world && m_world->farmlandTrampleRoll(fall)) {
             const int bx = int(std::floor(m_pos.x()));
             const int by = int(std::floor(m_pos.y() - 0.05f)); // 脚底下一格（同地面复探 oy-0.05 取样）
             const int bz = int(std::floor(m_pos.z()));
