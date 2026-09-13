@@ -1989,6 +1989,19 @@ private:
     //   游荡态不加装 daylight 寻路机）。skyBrightness = 天光乘子（tick 透传，见 tick 注释；缺省 0 = 夜间语义）。
     bool aiHostile(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos, float worldW, float worldD,
                    float speedScale = 1.0f, float skyBrightness = 0.0f);
+    // t1044 蜘蛛爬墙步（MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2；dev-plan t285
+    //   「可爬墙 ✅」表述自本单起转为成立）。aiHostile 三条追击分支（仇恨狼 / 铁傀儡 / 玩家）水平位移
+    //   **双轴皆被撤回**（撞墙挡死，moved==false）时调：若被阻轴的贴面前探列（halfW+0.25，越过 AABB
+    //   前沿一个 AI 步长——逐轴撤回停位点前沿距墙面缝隙可达 ≈0.18，固定偏移对宽体 mob 临界漏探，
+    //   t1044 阳轮首跑实证）在脚位层或身体层存在可碰撞方块（World::isCollidable 单一权威，与撤回判定
+    //   mobAabbHitsSolid 同源）→ 攀爬脉冲：vy = kSpiderClimbSpeed + 解除 resting（tick 重力分支积分
+    //   上升；上方净空由 review25 #4 上浮天花板钳制承接）。爬到墙顶（脚位过墙顶）水平试探自然解锁 →
+    //   越檐平移（登记简化：顶檐平移走既有追击水平移动，无独立檐机制，探针只钉垂直爬升+越檐到位）。
+    //   能力门：仅 Spider 家族（MobSpider / MobCaveSpider）；其余敌对（Shambler/Silverfish/Bones）同场景
+    //   不爬（照旧腿停 / 越障跳）。游荡（aiWander）不调本函数。返 true = 进入攀爬脉冲（caller 记 moved
+    //   → dirty + moveSpeed 走追击速 = 攀爬期腿摆动画语义）。
+    //   阴性轮敏感靶：本函数 isClimber 门 false && 前缀 → 全部爬升腿恰红（对照腿保绿）。
+    bool aiSpiderWallClimb(Entity &e, World *world, bool blockedX, float nx, bool blockedZ, float nz);
     // t951 灼烧级日光暴露采样**单一权威**（定义在 .cpp；燃烧扣血 tickHostileLife 与 t951 白天阴影 AI 共用
     //   同一采样，禁第二套光照判定）：(px,py,pz)（**身体中心**，feet = y−halfH）是否处于会点燃亡灵的直射
     //   日光下——界内 + 身体格见天（skyLightAt>=15，t280 燃烧同列采样）+ 白天（skyBrightness>kBurnSky-
@@ -2721,6 +2734,14 @@ private:
     static constexpr float kAttackVertRange = 2.0f;  // 攻击垂直容差（blocks；|mobY - playerFeetY|；防跨层）
     static constexpr float kAttackCooldown  = 1.0f;  // 单 mob 攻击间隔（秒）
     static constexpr int   kAttackDamage    = 3;     // 单次近战伤害（HP；t353 自 4 降回 3 = 1.5 心，配 1s 节流给反应窗口）
+    // t1044 蜘蛛爬墙速（blocks/s；MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2）。
+    //   名义值按 MC 量级登记（「≈平地速度或稍慢」裁决口径：取 kChaseSpeed 的 ~0.86× = 2.4）。承载方式 =
+    //   aiHostile 追击被墙挡死时 AI tick 脉冲置 vy（aiSpiderWallClimb），tick 重力 kGravity 每帧衰减 →
+    //   kAiTickInterval=4 帧窗内 vy 恒正（2.4 − 28·4/60 ≈ 0.61 > 0，不触发落地扫描 vy<0 回弹分支），
+    //   净爬升 ≈1.2 b/s（登记取舍：无每帧攀爬通道，以 AI tick 脉冲承载，量级在 MC 蜘蛛爬行带内）。
+    //   仅 aiHostile 追击链消费（Spider 家族门，含 t1012③ MobCaveSpider——MC cave spider 同样爬墙）；
+    //   aiWander 游荡不入口（MC 蜘蛛随机游走不爬墙，登记口径）。
+    static constexpr float kSpiderClimbSpeed = 2.4f;
     // t321/t353 玩家受击全局节流（秒；详见 kPlayerHitThrottle 注释）。单 mob 冷却只防自己连抽，多 mob 围攻时各 mob
     //   独立冷却叠加 → DPS 倍乘（无节流时 4 只 × 4HP/s = 16HP/s ≈ 满血瞬死，玩家无反应窗口）。本节流在 EntityManager
     //   全局层串行化「玩家被命中」：任一 mob（近战 attack / 骷髅箭命中）经 mobAttackedPlayer 命中后置 m_playerHitCooldown
