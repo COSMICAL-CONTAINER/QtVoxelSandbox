@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-14 04:20
+更新时间：2026-09-14 07:30
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1045
+current_task: t1046
 current_task_status: READY
-last_completed_task: t1044 蜘蛛爬墙（parity 裁-2 清偿：aiHostile 三追击分支 aiSpiderWallClimb 贴面攀爬脉冲，Spider 家族门含 cave spider；29a8afe/5377f16/docs）
-last_task_closure_commit: （docs 本提交；代码终态 5377f16）
-last_verified_commit: 5377f16（矩阵 538 PASS / 0 FAIL，matrix_t1044_final.log 权威，binary 与源对齐）
+last_completed_task: t1045 耕地踩踏/水蚀退化（parity 裁-3 清偿：踩踏概率回泥 P=clamp(fall−0.5,0,1) 玩家+mob 同公式 + 流水冲耕转换回 Dirt）
+last_task_closure_commit: （docs 本提交；代码终态见 fix/test 两提交）
+last_verified_commit: test(t1045)（矩阵 541 PASS / 0 FAIL，matrix_t1045_final.log 权威，binary 07:07:56 > 全部改动源）
 last_governance_review: 2026-09-12（audit #5 YELLOW → GOV-20260912-1=t1047 已闭环，纠偏完成）
 governance_review_due: false
-completed_tasks_since_governance_review: 3
-next_task: t1045 耕地踩踏/水蚀退化（裁-3；parity bug 波尾单 → t1046 合集 → R19.23 批次 review → R20 主线）
-next_task_source: docs/dev-plan.md R19.23 段（audit #5 节「顺序再更新」）
+completed_tasks_since_governance_review: 4
+next_task: t1046 parity 小修合集（低-1 幼崽血量 / 低-2 音符盒 glass→hat / 低-3 拉杆按钮 !sneakPlace / 低-4 种子基准钉死 / 低-5 天气时长持久化 / 低-6 ride_minecart 1km+原创标注 / noteClips 析构补齐）→ R19.23 批次 review → audit #6
+next_task_source: docs/dev-plan.md R19.23 段 t1046 条目（parity bug 波尾单，合集七项）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
@@ -32,8 +32,8 @@ needs_human: false
 
 ## Recovery Point
 
-- 最近闭环：**t1044**（2026-09-14）：蜘蛛爬墙（parity bug 波 2/4，裁-2 清偿）——①`aiSpiderWallClimb`（entitymanager.cpp:3822 区）：aiHostile 三条追击分支（仇恨狼/铁傀儡/玩家）水平位移双轴皆撤回（撞墙挡死）时调，被阻轴贴面前探列（halfW+0.25 越过 AABB 前沿一个 AI 步长；固定 0.6 偏移对宽体停位缝隙临界漏探，阳轮首跑实证后修正）脚位/身体层有可碰撞方块 → vy=kSpiderClimbSpeed（2.4 b/s 名义登记，净 ≈1.2 b/s，AI tick 4 帧窗内 vy 恒正不触发落地扫描回弹）+ 解除 resting；爬过墙顶水平试探自然解锁 → 越檐走既有追击水平移动（登记简化）；②能力门仅 Spider 家族（MobSpider+MobCaveSpider，MC cave spider 同爬，同批纳入）；游荡不入口（登记）；③**t285 勘误落地**（dev-plan 任务表行注记：「可爬墙 ✅」自本单起成立）。矩阵 **536→538 PASS / 0 FAIL**（matrix_t1044_final.log 权威）；阳性 matrix_t1044_pos.log 538/0（首跑 537/1 暴露探针 0.6 临界漏探 → halfW+0.25 修 → pos 538/0）；阴性轮摘 isClimber 门（false &&）→ **恰红 536/2 = t1044a/b 唯二红**（matrix_t1044_neg.log）→ Edit 反向 restore（纪律③）→ 重建 → 终跑 538/0（binary 03:59 > 全部改动源）。voxelsandbox 重建 EXIT=0 + offscreen 冒烟存活 12s（EXIT=124）+ logs/voxelsandbox_t1044_tail20.log（60fps 稳态零孤儿告警；注：app 日志走 logs/voxelsandbox.log 文件非 stderr——smoke 重定向 0 字节为既录环境坑，tail20 从日志文件取）。**待实机确认（观感类）**：蜘蛛/洞穴蜘蛛追击爬墙越檐动画观感（攀爬帧 moveSpeed 走追击速腿摆语义）。
-- 实机确认（累计）：R19.23 已闭环 6 项（t1038/t1039/t1041/t1042 各项 + **t1043 worldgen 矿井轨含水带出现率与流水冲玩家轨**）+ 用户 0912 评审追加：**批 1/2/4 桶池 Repeater 3D delegate 挂载实机渲染验证**（headless 冒烟零孤儿告警为间接信号；F3 draw call 前后对比 + 合批 Model 可见性）+ **Review_2026-09-12 #1 壳排除链 >128 溢出双壳/丢壳** + #2 stringPass 废钟（headless 不可见，实机/源码钉复核）+ R19.22 总表 16 项 + 回归三单（t1005/t1006/t1007）待用户实机数据。
+- 最近闭环：**t1045**（2026-09-14）：耕地踩踏/水蚀退化（parity bug 波 3/4，裁-3 清偿）——①踩踏概率回泥：World 层单一掷骰 `farmlandTrampleRoll(fall)`（MC Java onFallenUpon 公式 P=clamp(fall−0.5,0,1)，wiki 三元组引证；kFarmlandTrampleFallMin=0.5 概率地板；缝 setTrampleRollOverride 千分比=t1031 同式，生产零调用全局 RNG）；玩家踩踏分支概率化（t639④ fall>1.0 恒踩退役）+ mob 落地沿踩踏（t970 落地沿锚 restCellY + 新信号 farmlandTrampledByMob→PlayerController::onMobTrampledFarmland 直连清苗+dropCropDrops 弹落，掉落表不出 Game 层）；mobGriefing 门/0.512 尺寸豁免门不入（无 gamerule 系统/Beta1.0 基准，登记）；②流水冲耕：tickWaterFlow tryWashFarmland 转换变体（扩散落点耕地→setWaterSilent(Dirt,0) 湿润态随 id 消失、不灌水、零 blockDroppedAsItem，与附着块冲毁掉落分型；静水源邻接不冲=hydration 基建面选型，仅流水(state>0)冲；维基缺口：Java/Bedrock wiki 均无流水毁耕，按裁-3 定案实现台账注记）；③矩阵 **538→541 PASS / 0 FAIL**（matrix_t1045_final.log 权威）；阳性 matrix_t1045_pos.log 541/0（首跑 539/2：t1045c rig 水源放地板层下坠排空（rig 几何 bug 改地板 y=83）+ review26-1 行为性打破）；阴性轮一构建双摘（掷骰本体 + 水冲两调用点 false&&）→ **恰红 538/3 = t1045a/b/c 唯三红**（matrix_t1045_neg.log）→ Edit 反向 restore（纪律③）→ 重建 → 终跑 541/0（binary 07:07:56 > 源 07:07:34）。**连带修复**：review26-1 耕地走廊腿僵尸出生高 kRigY+2→kRigY+1（概率化后 2 格高落 P≈0.56 打破 feetOff 断言；该腿验证行走非坠落，断言未放宽）。voxelsandbox 重建 EXIT=0（build_t1045_app.log 零 error）+ offscreen 冒烟存活 13s（60fps 稳态；smoke 重定向 0 字节既录环境坑，tail20 从 logs/voxelsandbox.log 取）+ logs/voxelsandbox_t1045_tail20.log 留存。**待实机确认（观感类）**：跳跃踩农田概率回泥（跳一次 75% 不再必坏）/ mob 路过农田偶发踩坏 / 瀑布浇耕地流水漫田渐次回泥观感。
+- 实机确认（累计）：R19.23 已闭环 7 项（t1038/t1039/t1041/t1042 各项 + t1043 worldgen 矿井轨 + **t1045 踩踏/冲耕观感**）+ 用户 0912 评审追加：**批 1/2/4 桶池 Repeater 3D delegate 挂载实机渲染验证**（headless 冒烟零孤儿告警为间接信号；F3 draw call 前后对比 + 合批 Model 可见性）+ **Review_2026-09-12 #1 壳排除链 >128 溢出双壳/丢壳** + #2 stringPass 废钟（headless 不可见，实机/源码钉复核）+ R19.22 总表 16 项 + 回归三单（t1005/t1006/t1007）待用户实机数据。
 - 长期方向（用户 0912 评审）：instancing 治理到路径 a 终点后**暂停新增 QML instancing 家族**；t1043-t1046 完成后转 R20 重构主线（R20.03 测试分层 → 20.04 基础类型 → 20.05 Command/Event/Snapshot → 20.06 GameSession → 20.07 WorldFacade → 20.09 Chunk 生命周期 → 20.11 后台 GenerationJob）。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。**断链恢复按纪律⑦硬门执行**（工作区与 Control Block 不一致即 RECOVERY_REQUIRED）。
 - 若任务完成：更新当前任务、状态、最新 commit、验证结果、任务计数和下一触发点，并与 dev-plan 同一 docs 闭环提交。
