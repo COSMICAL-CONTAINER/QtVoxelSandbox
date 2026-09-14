@@ -37393,7 +37393,7 @@ Item {
         progT20B.onItemPicked(int(RecipeRegistry::RedstoneId));             // get_redstone（15）
         okB = okB && progT20B.isUnlocked(QStringLiteral("get_diamond"))
               && progT20B.isUnlocked(QStringLiteral("get_redstone")) && toastT20B == 15;
-        progT20B.onRodeMinecart();                                          // ride_minecart（16）
+        progT20B.onMinecartMoved(1000.0f);                                  // ride_minecart（16，t1046：里程达阈 1km）
         progT20B.onFishCaught();                                            // first_catch（17）
         progT20B.onChestCartOpened();                                       // chest_cart_loot（18）
         progT20B.onStructureEntered(1);                                     // entered_mineshaft（19）
@@ -37405,7 +37405,7 @@ Item {
               && progT20B.isUnlocked(QStringLiteral("entered_mineshaft"))
               && progT20B.isUnlocked(QStringLiteral("entered_desert_temple"))
               && progT20B.isUnlocked(QStringLiteral("entered_jungle_temple")) && toastT20B == 21;
-        progT20B.onRodeMinecart();                                          // 幂等：不再 toast
+        progT20B.onMinecartMoved(1.0f);                                     // 幂等：已解锁，越阈续乘不再 toast
         progT20B.onFishCaught();
         progT20B.onChestCartOpened();
         progT20B.onStructureEntered(3);
@@ -37480,7 +37480,8 @@ Item {
             });
             missPinT20 << pinSet(srcT20(QStringLiteral("src/ui/Main.qml")), {
                 {"qml-route-structureEntered", "function onStructureEntered(kind) { progress.onStructureEntered(kind) }"}, // 路由行
-                {"qml-route-rodeMinecart", "if (ridingCart) progress.onRodeMinecart()"},
+                // t1046：骑乘边沿解锁（onRodeMinecart）退役 → 改钉 moved 路由行的 ridingCart 门控里程埋点。
+                {"qml-route-minecartMoved", "if (ridingCart) progress.onMinecartMoved(deltaBlocks)"},
                 {"qml-route-chestCartOpened", "if (isCartCell) progress.onChestCartOpened()"},
                 {"qml-route-fishCaught", "progress.onFishCaught()"},
             });
@@ -37510,9 +37511,9 @@ Item {
                           << "| t1020 achievement-tree expansion: structureEntered edge fires once per"
                              " dungeon entry with idempotent toast and finishWorldLoad re-arm,"
                              " first-kill x4 co-unlocks with monster_hunter, first-ore parent gating"
-                             " (coal/iron/redstone), minecart/fish/chest-cart hooks, kind mapping,"
-                             " 31 defs with shape checks, save->load replay without re-toast,"
-                             " source pins (guard/reset/route/def/constants)";
+                             " (coal/iron/redstone), minecart 1km distance hook (t1046)/fish/chest-cart"
+                             " hooks, kind mapping, 31 defs with shape checks, save->load replay"
+                             " without re-toast, source pins (guard/reset/route/def/constants)";
     }
     } // t1020 面板 A+B 共用作用域收口（B 复用 A 的探针世界 / 存档句柄）
 
@@ -42692,10 +42693,14 @@ Item {
                                       + QStringLiteral("/..")).absolutePath();
             QStringList missD;
             missD << pinSet(root + QStringLiteral("/src/ui/Main.qml"), {
-                {"qml-exit-chain-5th", "{ phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState }"},
+                // t1046：退出链快照补 weatherTimerMs（剩余毫秒）→ 原单行钉拆两行 + 续跑接线钉。
+                {"qml-exit-chain-5th", "{ phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState,"},
+                {"qml-exit-chain-timer", "weatherTimerMs: Math.round(theWorld.weatherRemainingSec() * 1000) },"},
                 {"qml-restore-time", "worldClock.restoreTime(wt.phase, wt.day)"},
                 // review0906 #14：仅真带 weather 键才恢复（缺键保 resetWeather 首场晴偏短窗）
                 {"qml-restore-weather-guard", "if (wt.hasWeather) theWorld.setWeatherState(wt.weather)"},
+                // t1046 低-5：真带剩余时长键 → setWeatherRemainingSec 精确续跑剩余窗
+                {"qml-restore-weather-timer", "if (wt.hasWeatherTimer) theWorld.setWeatherRemainingSec(wt.weatherTimerMs / 1000)"},
             });
             missD << pinSet(root + QStringLiteral("/src/World/worldclock.h"), {
                 {"hdr-restoreTime", "Q_INVOKABLE void restoreTime(float phase, qint64 day);"},
@@ -44540,15 +44545,17 @@ Item {
     //       幼崽 0.5× / 配对距 3 / 喂幼减 10%≈120s）——漂移即红 = 口径登记本体；
     //   (b) 喂食恋爱 + 双满产崽 + 幼崽字段（默认 MC 计时；0.38s 窗内幼崽远未长大、冷却远未到期）：
     //       inLoveAt 双真 → 配对产崽 + 双亲退恋进冷却（breedCooldownAt≈300）+ 幼崽 babyScaleAt=0.5 /
-    //       halfHeightAt=成体×0.5（物理盒同倍缩，t952 小蹒跚者同款机制）/ maxHealth 5=减半 / growTimer 挂满
-    //       1200s；
+    //       halfHeightAt=成体×0.5（物理盒同倍缩，t952 小蹒跚者同款机制）/ maxHealth 10 = 成体上限满血
+    //       （t1046 parity 台账低-1「幼崽血量=成体」，SPEC：t1025 旧减半断言随裁决「一切按原版」改写）/
+    //       growTimer 挂满 1200s；
     //   (c) 冷却门（阴性轮敏感：摘 enterLoveMode 冷却行 → 本腿红）：冷却中再喂 → false（爱心不再触发）；
     //   (d) 幼崽不可繁殖门（阴性轮敏感：摘 enterLoveMode 幼崽行 → 本腿红）：幼崽求偶 false / 幼崽可喂
     //       feedBaby（growTimer 精确减 kBabyFeedGrow）/ 成体喂幼 false；
     //   (e) 缝调短冷却开合（setBreedTimings 测试缝，产品默认恒 MC 值）：1s 冷却内 false → 1.6s 后归零可再求偶
     //       （门「关→开」双向实证，300s 真值跑不动的折算口径）；
-    //   (f) 成长还原：0.8s 成长缝 → 幼崽到点 baby=false + babyScaleAt 1.0 + halfHeightAt 还原成体盒 + 血量
-    //       上限/当前 ×2 还原 10（减半的精确逆）+ growTimer 归零。
+    //   (f) 成长还原：0.8s 成长缝 → 幼崽到点 baby=false + babyScaleAt 1.0 + halfHeightAt 还原成体盒 +
+    //       血量上限/当前恒 10（t1046 低-1：幼崽本就满血，长大无血量还原面——t1025 ×2 还原退役）+
+    //       growTimer 归零。
     {
         bool ok = true;
         // (a) 常量口径：t400 常量段为 private（勿为探针动可见性）→ 数值面由两处锁定：
@@ -44585,7 +44592,7 @@ Item {
         const bool babyFields = babyA >= 0
             && std::abs(emA.babyScaleAt(babyA) - 0.5f) < 1e-4f
             && std::abs(emA.halfHeightAt(babyA) - 0.225f) < 1e-4f  // sheep 成体 halfH 0.45 × 0.5（物理盒同倍缩）
-            && emA.maxHealthAt(babyA) == 5 && emA.healthAt(babyA) == 5
+            && emA.maxHealthAt(babyA) == 10 && emA.healthAt(babyA) == 10 // t1046 低-1：满血=成体上限（阴性轮：重插减半行即红）
             && emA.growTimerAt(babyA) > 1199.0f;   // 产崽即挂满 1200s（窗内衰减 ≤0.4s）
         // (c) 冷却门（阴性轮敏感）。
         const bool cooldownGate = babyA >= 0 && !emA.enterLoveMode(pa) && !emA.enterLoveMode(pb);
@@ -44622,7 +44629,7 @@ Item {
         const bool grown = fedC && babyC >= 0 && !emC.isBabyAt(babyC)
             && std::abs(emC.babyScaleAt(babyC) - 1.0f) < 1e-4f
             && std::abs(emC.halfHeightAt(babyC) - 0.50f) < 1e-4f   // cow 成体盒还原
-            && emC.maxHealthAt(babyC) == 10 && emC.healthAt(babyC) == 10  // 减半的精确逆
+            && emC.maxHealthAt(babyC) == 10 && emC.healthAt(babyC) == 10  // t1046 低-1：幼崽满血，长大恒 10/10
             && emC.growTimerAt(babyC) == 0.0f;
         // (d) 源码钉（滤注释 pinSet；两道求偶门钉钉在 P-t1025a——与被护行为腿同行，阴性轮摘门时
         //     钉随行红 = 恰红面收敛在 P-t1025a，P-t1025b 保绿证其余系统零回归）。
@@ -44813,7 +44820,8 @@ Item {
             {"hdr-lure-table", "bool m_foodLure[kMobTypeCount] = {};"},
         });
         miss << pinSet(root + QStringLiteral("/src/Entities/entitymanager.cpp"), {
-            {"cpp-baby-box-halve", "baby.halfW *= kBabyScale;"},            {"cpp-baby-hp-halve", "baby.maxHealth = std::max(1, baby.maxHealth / 2);"},
+            {"cpp-baby-box-halve", "baby.halfW *= kBabyScale;"},            // t1046 SPEC：旧 cpp-baby-hp-halve（减半行）随低-1 清偿移除，改钉满血写
+            {"cpp-baby-hp-full", "baby.health = baby.maxHealth;"},
             {"cpp-grow-restore-box", "applyMobCollisionBox(e.mobType, e);"},
             {"cpp-baby-follow-hook", "const int parent = findNearestAdultSameType(idx);"},
             {"cpp-lure-gate", "m_foodLure[e.mobType]"},
@@ -45049,7 +45057,8 @@ Item {
                               << "darkHit" << darkHitF << "actN" << actAdvF.size() << "mono" << monoF
                               << "stageA" << prevStageF << "stageB" << wF.stateAt(16, 16, 16)
                               << "stageC" << wF.stateAt(20, 16, 16) << "stageD" << wF.stateAt(24, 16, 16);
-        // (d) 成熟收获（A 株已熟）：空手生存挖 → 恰 2 件：1× 小麦 + 1-3× 种子（t1026 口径）。
+        // (d) 成熟收获（A 株已熟）：空手生存挖 → 恰 1 小麦 + 0-3× 种子（t1046 低-4 口径：0 种子合法 →
+        //     只有种子数 >0 才弹第二件 → 掉落件数 1 或 2）。
         hbF.setStack(0, 0, 0);
         dropIdF.clear();
         dropCntF.clear();
@@ -45064,13 +45073,14 @@ Item {
                           << "mining" << pcF.mining() << "prog" << pcF.miningProgress()
                           << "mode" << int(pcF.mode()) << "worldRunning" << pcF.worldRunning();
         bool matOk = hitHarvA == QVector3D(12, 16, 16) && wF.blockAt(12, 16, 16) == BR::Air
-            && dropIdF.size() == 2;
+            && (dropIdF.size() == 1 || dropIdF.size() == 2);
         int wheatN = 0, seedTotal = 0;
         for (int i = 0; i < dropIdF.size(); ++i) {
             if (dropIdF[i] == RecipeRegistry::WheatId && dropCntF[i] == 1) ++wheatN;
             if (dropIdF[i] == RecipeRegistry::SeedId) seedTotal += dropCntF[i];
         }
-        matOk = matOk && wheatN == 1 && seedTotal >= 1 && seedTotal <= 3;
+        matOk = matOk && wheatN == 1 && seedTotal >= 0 && seedTotal <= 3
+            && (seedTotal == 0 ? dropIdF.size() == 1 : dropIdF.size() == 2); // 0 种 → 单件（t1046 弹出门）
         if (!matOk)
             qInfo().noquote() << "  [t1026a diag] mature drops n" << dropIdF.size() << "wheat" << wheatN
                               << "seeds" << seedTotal << "hit" << hitHarvA;
@@ -45104,9 +45114,10 @@ Item {
                              "monotonic per window) maturing the open crop to stage 7 while the "
                              "stone-enclosed dark crop (skyLight 0 < 9), the no-farmland-support crop "
                              "and the already-mature anchor all hold stage; harvesting the mature crop "
-                             "bare-handed yields exactly 1 wheat + 1-3 seeds and harvesting the stage-3 "
-                             "crop yields exactly 1 seed (negative-round sensitive: crop light gate + "
-                             "harvest drop table)"
+                             "bare-handed yields exactly 1 wheat plus 0-3 seeds (t1046 Beta/1.0 seed "
+                             "caliber: zero seeds legally emits no seed item) and harvesting the "
+                             "stage-3 crop yields exactly 1 seed (negative-round sensitive: crop light "
+                             "gate + harvest drop table)"
                           << (ok ? QString()
                                   : QStringLiteral("diag hoe=%1 seed=%2 growth=%3 mature=%4 imm=%5")
                                         .arg(hoeOk).arg(seedOk).arg(growthOk).arg(matOk).arg(immOk));
@@ -45147,7 +45158,9 @@ Item {
             {"cpp-hoe-convert", "m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Farmland, quint8(hydr));"},
             {"cpp-seed-plant", "m_world->setBlock(wx, wy, wz, cs.cropBlockId, 0);"},
             {"cpp-crop-drop-wheat", "emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);"},
-            {"cpp-crop-drop-seed", "const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 4) : 1;"},
+            // t1046 低-4：小麦种子基准钉死 ~Beta/1.0 = 0-3（bounded(0,4) 上界开区间；旧 1-3 退役）。
+            {"cpp-crop-drop-seed", "const int seedCount  = mature ? QRandomGenerator::global()->bounded(0, 4) : 1;"},
+            {"cpp-crop-drop-seed-gate", "if (seedCount > 0)"},
         });
         missB << pinSet(rootB + QStringLiteral("/src/Game/playercontroller.h"), {
             {"hdr-grass-seed-denom", "static constexpr int kTallGrassSeedDropDenom = 8;"},
@@ -45179,8 +45192,9 @@ Item {
                              "bounding-box translation = MC one-row-of-three caliber), while a vertical "
                              "column, a 2x2 grid and a row of seeds all refuse; source pins lock the "
                              "hoe->farmland and seed->crop wiring, the crop growth light/support gates "
-                             "and stage write, the harvest drop table (1 wheat + 1-3 seeds mature, 1 "
-                             "seed immature), the 1/8 tall-grass seed denominator, the bread recipe row "
+                             "and stage write, the harvest drop table (1 wheat + 0-3 seeds mature "
+                             "per t1046 Beta/1.0 caliber, 1 seed immature), the 1/8 tall-grass seed "
+                             "denominator, the bread recipe row "
                              "and the save-contract block ids (Farmland=23, WheatCrop=25)"
                           << (ok ? QString()
                                   : QStringLiteral("diag rows=%1 negs=%2 pins=%3")
@@ -45194,17 +45208,19 @@ Item {
     //   (c) 稳定通电续泵：不复响（bit5 记忆位做真沿——摘沿判定的阴性轮此处红）；
     //   (d) 断电下降沿：静音 + bit5 清位（重臂就绪）；
     //   (e) 再通电：再响（重臂闭环，恰 2 次）；
-    //   (f) 音色族三族 + 悬空兜底参数断言：stone→kick(2) / sand→snare(3) / air→piano(0)。
+    //   (f) 音色族四族 + 悬空兜底参数断言：stone→kick(2) / sand→snare(3) / glass→hat(4)（t1046 低-2
+    //       第四族）/ air→piano(0)。
     {
         bool ok = true;
         World wT28a;
         wT28a.setWidth(48); wT28a.setDepth(64); wT28a.setHeight(96); wT28a.setSeed(10281);
-        // 四 rig（列距 4）：各坐不同下方材质（planks/stone/sand/悬空）；拉杆各贴 -X 邻格独立供电。
+        // 五 rig（列距 4）：各坐不同下方材质（planks/stone/sand/glass/悬空）；拉杆各贴 -X 邻格独立供电。
         //   工作带 y=20 显式净空 + y=19 石板地板（t1025 fBm 地形教训：禁赌 worldgen）；
         //   悬空 rig 的地板格挖空（下方真 Air → piano 兜底腿）。
         struct NoteRig { int x; quint8 below; int family; };
-        const NoteRig rigs[4] = { { 8, BR::Planks, 1 }, { 12, BR::Stone, 2 },
-                                  { 16, BR::Sand, 3 }, { 20, BR::Air, 0 } };
+        const NoteRig rigs[5] = { { 8, BR::Planks, 1 }, { 12, BR::Stone, 2 },
+                                  { 16, BR::Sand, 3 }, { 20, BR::Glass, 4 },
+                                  { 24, BR::Air, 0 } };
         for (int x = 4; x <= 26; ++x)
             for (int z = 20; z <= 24; ++z) {
                 for (int y = 20; y <= 24; ++y) wT28a.setBlock(x, y, z, BR::Air, 0);
@@ -45225,7 +45241,7 @@ Item {
             wT28a.setBlock(r.x - 1, 20, 22, BR::Lever, quint8(on));
         };
         const auto rigState = [&](const NoteRig &r) { return wT28a.stateAt(r.x, 20, 22); };
-        // (a) 初始 off：零误触发。(b)-(e) 全边沿语义走 rig 0（planks→bass）。(f) 族参数走 rig 1..3。
+        // (a) 初始 off：零误触发。(b)-(e) 全边沿语义走 rig 0（planks→bass）。(f) 族参数走 rig 1..4。
         const NoteRig &r0 = rigs[0];
         tickN(wT28a, 4);
         const bool okIdle = played == 0;
@@ -45245,7 +45261,7 @@ Item {
         const bool okRearm = played == 2 && lastPitch == 9;           // 再通再响
         bool okFam = true;
         int famFail = -1, famExp = -1, famGot = -1, famGotX = -1, famGotPlayed = -1, famGotPitch = -1;
-        for (int i = 1; i < 4; ++i) {
+        for (int i = 1; i < 5; ++i) {
             const NoteRig &r = rigs[i];
             const int played0 = played;
             leverSet(r, 1);
@@ -45270,8 +45286,9 @@ Item {
                              "powered memory bit without disturbing the pitch field; sustained power "
                              "never re-fires (true edge via the state memory bit); the falling edge "
                              "is silent and clears the memory bit; re-powering fires again (re-arm); "
-                             "family projection asserts stone=kick, sand=snare, floating=piano "
-                             "(negative-round sensitive: edge-judgment removal)"
+                             "family projection asserts stone=kick, sand=snare, glass=hat (t1046 "
+                             "fourth family) and floating=piano "
+                             "(negative-round sensitive: edge-judgment removal, glass-hat mapping removal)"
                           << (ok ? QString()
                                   : QStringLiteral("diag idle=%1 rise=%2 hold=%3 fall=%4 rearm=%5 fam=%6 "
                                                    "played=%7 pitch=%8 fam=%9 famFailLeg=%10 exp=%11 "
@@ -45481,6 +45498,8 @@ Item {
         missC << pinSet(rootC + QStringLiteral("/src/Core/blockregistry.cpp"), {
             {"hdr-note-family", "BlockRegistry::NoteTimbreFamily BlockRegistry::noteTimbreFamily(quint8 belowId)"},
             {"hdr-note-notename", "QString BlockRegistry::noteBlockNoteName(int pitch)"},
+            // t1046 低-2：玻璃=hat 第四族（id 直判，不动 GroupStone——脱组代价登记面）。
+            {"cpp-note-glass-hat", "if (belowId == Glass) return NoteTimbreHat;"},
         });
         missC << pinSet(rootC + QStringLiteral("/src/Audio/audiomanager.cpp"), {
             {"aud-note-play", "void AudioManager::playNote(int pitch, int family)"},
@@ -45488,6 +45507,10 @@ Item {
             // review0909 #3b：Audio 层手抄镜像钉（与 hdr-note-pitchcount 成对——两侧漂移即红，
             // 替代跨层 include 的分层保留同步方案）。
             {"aud-note-pitchcount", "static constexpr int kNotePitchCount = 25;"},
+            // t1046 低-2 hat 倍移速率 + 评审 #4 noteClips 析构补齐（app 目标独有编译单元：
+            // 矩阵不编 audiomanager.cpp → 源码钉即该面唯一探针，编译验证 = voxelsandbox 重建）。
+            {"aud-note-hat-rate", "case 4: rate = 3.0f; break;"},
+            {"aud-note-deinit", "ma_sound_uninit(&d->noteClips[size_t(n)].sound);"},
         });
         missC << pinSet(rootC + QStringLiteral("/src/ui/Main.qml"), {
             {"qml-note-redstone", "function onNoteBlockPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }"},
@@ -47499,6 +47522,430 @@ Item {
                           << (ok ? QString()
                                  : QStringLiteral("diag wet=%1 dry=%2 noDrop=%3 src=%4")
                                        .arg(wetOk).arg(dryOk).arg(noDrop).arg(srcOk));
+    }
+
+    // ── P-t1046a 拉杆 / 按钮 sneakPlace 旁路（R19.23 t1046 低-3；t1034 门同式）──
+    //    两向四腿：(1) 潜行持方块右键拉杆 = 放置落命中面邻格（拉杆 bit0 保持 0——use 被旁路）；
+    //    (2) 非潜行持方块右键拉杆 = 激活照常（bit0 翻 1、无放置）；(3)(4) 木按钮同两向（按下 bit0=1）。
+    //    阴性轮敏感：摘机关分支 !sneakPlace 门 → 潜行两腿红（潜行右键仍扳动 + 无放置）+ cpp-mech-sneak-gate
+    //    钉红；非潜行对照腿不受门影响保绿。
+    {
+        World wT46a;
+        wT46a.setWidth(48); wT46a.setDepth(48); wT46a.setHeight(96); wT46a.setSeed(10461);
+        Hotbar hbT46a;
+        PlayerController pcT46a;
+        pcT46a.setWorld(&wT46a);
+        pcT46a.setHotbar(&hbT46a);
+        QQuickWindow winT46a;
+        pcT46a.setParentItem(winT46a.contentItem());
+        // rig：y=14 Planks 地台，y15..20 净空；拉杆 A/B（z=16/20，贴地 state0）与按钮 A/B（z=24/28，
+        //     贴地扁薄盒 state0）各四件——潜行腿与 use 腿分件，免放置遮挡串扰。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 30; ++z) {
+                for (int y = 15; y <= 20; ++y) wT46a.setBlock(x, y, z, BR::Air, 0);
+                wT46a.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT46a.setBlock(12, 15, 16, BR::Lever, quint8(0));       // 拉杆 A（潜行腿）
+        wT46a.setBlock(12, 15, 20, BR::Lever, quint8(0));       // 拉杆 B（use 腿）
+        wT46a.setBlock(12, 15, 24, BR::WoodButton, quint8(0));  // 按钮 A（潜行腿）
+        wT46a.setBlock(12, 15, 28, BR::WoodButton, quint8(0));  // 按钮 B（use 腿）
+        // 瞄准帮手（t1034a 同款）：自 +X 侧瞄准机关格（拉杆瞄贴地基座顶面 y15.09 / 按钮瞄钮板顶面
+        //     y15.06，射线恒 z=16.6（基座 z 内域，避开摆棍 ±Z 摆段 z≤16.5）→ 恰中基座/钮板 +Y 面，
+        //     几何按 mechBoxes 精确推演）。
+        const auto aimT46a = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT46a.release();
+            pcT46a.grab();
+            pcT46a.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT46a.tick();
+            return pcT46a.hitBlock();
+        };
+        const auto pumpT46a = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟，t1034a 同款）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 潜行腿·拉杆：潜行持木板右键拉杆 A 基座顶面 → 木板落上方邻格 (12,16,16)；拉杆 A bit0 保持 0。
+        const QVector3D hitSneakLv = aimT46a(16.6f, 12.5f, 15.09f, 16.6f);
+        pcT46a.setKey(Qt::Key_Shift, true);        // 潜行（sneakPlace = m_keys 原始键态，t523 口径）
+        pcT46a.setSelectedBlock(int(BR::Planks));  // 持方块（C++ 直喂 selectedBlock，t1034a 同款）
+        pcT46a.placeBlock();
+        pumpT46a(260);
+        pcT46a.setKey(Qt::Key_Shift, false);
+        const bool okSneakLv = hitSneakLv == QVector3D(12, 15, 16)
+            && wT46a.blockAt(12, 16, 16) == BR::Planks    // 命中面邻格放置成功（+Y 面）
+            && wT46a.blockAt(12, 15, 16) == BR::Lever
+            && (wT46a.stateAt(12, 15, 16) & 1) == 0;      // 拉杆未扳动（use 被旁路）
+        // (2) use 腿·拉杆：不潜行右键拉杆 B → 激活翻 bit0=1、无放置。
+        pumpT46a(260);
+        const QVector3D hitUseLv = aimT46a(20.6f, 12.5f, 15.09f, 20.6f);
+        pcT46a.placeBlock(); // 不潜行（Shift 已松）→ 机关激活照常
+        pumpT46a(260);
+        const bool okUseLv = hitUseLv == QVector3D(12, 15, 20)
+            && wT46a.blockAt(12, 15, 20) == BR::Lever
+            && (wT46a.stateAt(12, 15, 20) & 1) == 1       // 拉杆扳开
+            && wT46a.blockAt(12, 16, 20) == BR::Air;      // 无放置（右键被 use 消费）
+        // (3) 潜行腿·按钮：潜行持木板右键按钮 A 钮板顶面 → 木板落 (12,16,24)；按钮 A bit0 保持 0。
+        pumpT46a(260);
+        const QVector3D hitSneakBtn = aimT46a(24.6f, 12.5f, 15.06f, 24.6f);
+        pcT46a.setKey(Qt::Key_Shift, true);
+        pcT46a.placeBlock();
+        pumpT46a(260);
+        pcT46a.setKey(Qt::Key_Shift, false);
+        const bool okSneakBtn = hitSneakBtn == QVector3D(12, 15, 24)
+            && wT46a.blockAt(12, 16, 24) == BR::Planks
+            && wT46a.blockAt(12, 15, 24) == BR::WoodButton
+            && (wT46a.stateAt(12, 15, 24) & 1) == 0;      // 按钮未按下（use 被旁路）
+        // (4) use 腿·按钮：不潜行右键按钮 B → 按下 bit0=1、无放置。
+        pumpT46a(260);
+        const QVector3D hitUseBtn = aimT46a(28.6f, 12.5f, 15.06f, 28.6f);
+        pcT46a.placeBlock();
+        pumpT46a(260);
+        const bool okUseBtn = hitUseBtn == QVector3D(12, 15, 28)
+            && wT46a.blockAt(12, 15, 28) == BR::WoodButton
+            && (wT46a.stateAt(12, 15, 28) & 1) == 1       // 按钮按下（弹回计时入表）
+            && wT46a.blockAt(12, 16, 28) == BR::Air;      // 无放置
+        // (5) 源钉（pinSet 剥注释；阴性轮摘门即红）。
+        const QString rootT46a = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT46a = pinSet(rootT46a + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"cpp-mech-sneak-gate", "if (!sneakPlace && BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {"},
+        });
+        if (!missT46a.isEmpty())
+            qInfo().noquote() << "  [t1046a diag] pins" << missT46a.join(QLatin1Char(','));
+        pcT46a.release();
+        winT46a.deleteLater();
+        const bool okA = okSneakLv && okUseLv && okSneakBtn && okUseBtn && missT46a.isEmpty();
+        if (!okA)
+            qInfo().noquote() << "  [t1046a diag] sneakLv=" << okSneakLv << "useLv=" << okUseLv
+                              << "sneakBtn=" << okSneakBtn << "useBtn=" << okUseBtn
+                              << "hitSneakLv" << hitSneakLv << "hitUseLv" << hitUseLv
+                              << "hitSneakBtn" << hitSneakBtn << "hitUseBtn" << hitUseBtn;
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| t1046a lever/button sneakPlace bypass: sneaking with a held block and "
+                             "right-clicking a floor lever (or a wood button) places the held block "
+                             "on the hit face's neighbor cell while the mechanism state bit stays "
+                             "clear (activation bypassed, MC sneak-use caliber, parity low-3); "
+                             "without sneak the right-click still activates the lever (bit0 set) "
+                             "and presses the button (bit0 set, recovery armed) and consumes the "
+                             "click so nothing is placed (negative-round sensitive: mech-branch "
+                             "sneakPlace gate removal)"
+                          << (okA ? QString()
+                                  : QStringLiteral("diag sneakLv=%1 useLv=%2 sneakBtn=%3 useBtn=%4 pins=%5")
+                                        .arg(okSneakLv).arg(okUseLv).arg(okSneakBtn).arg(okUseBtn)
+                                        .arg(missT46a.isEmpty()));
+    }
+
+    // ── P-t1046c 天气剩余时长持久化 + 精确续跑（R19.23 t1046 低-5；MC level.dat RainTime/ThunderTime 口径）──
+    //    (a) 真 WorldStore：快照携 weatherTimerMs=77777 落 world_meta（weather_timer_ms）→ 关库重开逐键
+    //        相等；(b) 旧档形态（四参 saveAll）→ hasWeatherTimer=false / weatherTimerMs=0 缺省；
+    //    (c) World 续跑：setWeatherState 设态 + setWeatherRemainingSec 覆盖剩余窗 → tickWeather 部分
+    //        推进剩余精确递减 → 到点翻 Clear 重抽新窗；sec<=0 静默拒（tickWeather 前置不变量）；
+    //    (d) 源钉：两 C++ 入口声明 + 存/读两侧键字面量（阴性轮敏感）。
+    {
+        World wT46c;
+        wT46c.setWidth(48); wT46c.setDepth(48); wT46c.setHeight(96); wT46c.setSeed(1046);
+        WorldStore storeT46c;
+        storeT46c.setWorld(&wT46c);
+        bool okA = false, okB = false, okC = false, okD = false;
+        // (a) 带键 round-trip。
+        const QString dbT46c = QDir::temp().absoluteFilePath(
+                QStringLiteral("voxel_t1046c_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+        QFile::remove(dbT46c);
+        {
+            QVariantMap wt;
+            wt.insert(QStringLiteral("weather"), 1); // Rain
+            wt.insert(QStringLiteral("weatherTimerMs"), qlonglong(77777));
+            okA = storeT46c.openWorld(dbT46c)
+                && storeT46c.saveAll(QStringLiteral("t1046c"), QVariantList(), QVariantList(), QVariantList(), wt);
+            storeT46c.closeWorld();
+            QVariantMap back;
+            if (okA && storeT46c.openWorld(dbT46c)) back = storeT46c.loadWorldTime();
+            storeT46c.closeWorld();
+            okA = okA && back.value(QStringLiteral("weather")).toInt() == 1
+                && back.value(QStringLiteral("hasWeatherTimer")).toBool() == true
+                && back.value(QStringLiteral("weatherTimerMs")).toLongLong() == 77777;
+            if (!okA)
+                qInfo().noquote() << "  [t1046c diag a] back =" << back;
+        }
+        // (b) 旧档缺键 → 缺省（hasWeatherTimer false / weatherTimerMs 0）。
+        {
+            const QString dbOld = QDir::temp().absoluteFilePath(
+                    QStringLiteral("voxel_t1046cold_probe_%1.sqlite").arg(QCoreApplication::applicationPid()));
+            QFile::remove(dbOld);
+            const bool built = storeT46c.openWorld(dbOld)
+                && storeT46c.saveAll(QStringLiteral("t1046cold")); // 四参旧调用形态：不写时间键
+            storeT46c.closeWorld();
+            QVariantMap back;
+            if (built && storeT46c.openWorld(dbOld)) back = storeT46c.loadWorldTime();
+            storeT46c.closeWorld();
+            okB = built && back.value(QStringLiteral("hasWeatherTimer")).toBool() == false
+                && back.value(QStringLiteral("weatherTimerMs")).toLongLong() == 0;
+            if (!okB)
+                qInfo().noquote() << "  [t1046c diag b] built" << built << "back =" << back;
+            QFile::remove(dbOld);
+        }
+        // (c) World 精确续跑 + 非法拒。
+        {
+            wT46c.setWeatherState(1);                    // Rain（随机窗重抽）
+            wT46c.setWeatherRemainingSec(0.8f);          // 覆盖为存档剩余窗
+            const bool setOk = wT46c.weatherState() == 1
+                && std::abs(wT46c.weatherRemainingSec() - 0.8f) < 1e-4f;
+            wT46c.setWeatherRemainingSec(0.0f);          // 非法：静默拒（计时不变）
+            wT46c.setWeatherRemainingSec(-2.0f);         // 非法：静默拒
+            const bool gateOk = std::abs(wT46c.weatherRemainingSec() - 0.8f) < 1e-4f;
+            wT46c.tickWeather(0.3);                      // 部分推进 → 剩余 0.5 精确递减
+            const bool stepOk = wT46c.weatherState() == 1
+                && std::abs(wT46c.weatherRemainingSec() - 0.5f) < 1e-3f;
+            wT46c.tickWeather(0.5);                      // 到点 → 翻 Clear + 重抽新窗
+            const bool flipOk = wT46c.weatherState() == 0
+                && wT46c.weatherRemainingSec() > 0.0f
+                && wT46c.weatherRemainingSec() <= 120.0f;
+            okC = setOk && gateOk && stepOk && flipOk;
+            if (!okC)
+                qInfo().noquote() << "  [t1046c diag c] setOk" << setOk << "gateOk" << gateOk
+                                  << "stepOk" << stepOk << "flipOk" << flipOk
+                                  << "state" << wT46c.weatherState()
+                                  << "remain" << wT46c.weatherRemainingSec();
+        }
+        // (d) 源钉（两 C++ 入口 + 存/读两侧键）。
+        {
+            const QString rootT46c = QDir(QCoreApplication::applicationDirPath()
+                                          + QStringLiteral("/..")).absolutePath();
+            QStringList missT46c;
+            missT46c << pinSet(rootT46c + QStringLiteral("/src/World/world.h"), {
+                {"hdr-remain-get", "Q_INVOKABLE float weatherRemainingSec() const { return m_weatherTimer; }"},
+                {"hdr-remain-set", "Q_INVOKABLE void setWeatherRemainingSec(float seconds);"},
+            });
+            missT46c << pinSet(rootT46c + QStringLiteral("/src/World/worldstore.cpp"), {
+                {"cpp-store-timer-key", "metas.append({QStringLiteral(\"weather_timer_ms\"),"},
+                {"cpp-load-timer-key", "meta.contains(QStringLiteral(\"weather_timer_ms\"))"},
+            });
+            okD = missT46c.isEmpty();
+            if (!okD)
+                qInfo().noquote() << "  [t1046c diag d] pin miss:" << missT46c.join(QLatin1Char(','));
+        }
+        QFile::remove(dbT46c);
+        if (!okA) ++totalFail;
+        if (!okB) ++totalFail;
+        if (!okC) ++totalFail;
+        if (!okD) ++totalFail;
+        qInfo().noquote() << (okA && okB && okC && okD ? "PASS" : "FAIL")
+                          << "| t1046c weather remaining-window persistence (MC RainTime/ThunderTime"
+                             " caliber, parity low-5): a save carrying weatherTimerMs stores it as"
+                             " world_meta weather_timer_ms inside the same transaction and a"
+                             " close/reopen round-trips it exactly while a legacy save without"
+                             " the key defaults hasWeatherTimer=false; the restore path"
+                             " setWeatherState+setWeatherRemainingSec resumes the archived window"
+                             " precisely (0.8s minus a 0.3s tick leaves 0.5s), the expiry flips"
+                             " to Clear with a fresh random window, and non-positive seconds are"
+                             " silently rejected (tickWeather positive-timer invariant); source"
+                             " pins lock both C++ entries and the store/load key literals"
+                             " (negative-round sensitive)"
+                          << (okA && okB && okC && okD
+                                  ? QString()
+                                  : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
+                                        .arg(okA).arg(okB).arg(okC).arg(okD));
+    }
+
+    // ── P-t1046d 小麦种子基准钉死 0-3（R19.23 t1046 低-4；~Beta/1.0 口径，多株实测逐株带内）──
+    //    真玩家路径逐株收割 12 株成熟作物：每株恰 1 小麦 + 0-3 种子（0 种合法 → 该株单件弹落）。
+    //    逐株断言全带内（确定性）；0-3 精确口径由 t1026b 的 cpp-crop-drop-seed 源钉锁（阴性轮
+    //    改回 bounded(1,4) → 钉红恰面）。
+    {
+        World wT46d;
+        wT46d.setWidth(64); wT46d.setDepth(48); wT46d.setHeight(96); wT46d.setSeed(10462);
+        Hotbar hbT46d;
+        PlayerController pcT46d;
+        pcT46d.setWorld(&wT46d);
+        pcT46d.setHotbar(&hbT46d);
+        QQuickWindow winT46d;
+        pcT46d.setParentItem(winT46d.contentItem());
+        pcT46d.grab();
+        pcT46d.setSelectedBlock(int(BR::Air)); // 空手（t1040 rig 加固同式）
+        // rig：y=14 Planks 地台 + y=15 耕地行（间距 4）+ y=16 成熟作物（stage 7 直写，绕生长链）。
+        QVector<int> plotXs;
+        for (int x = 8; x <= 52 && plotXs.size() < 12; x += 4) plotXs.push_back(x);
+        for (int x = 6; x <= 56; ++x)
+            for (int z = 12; z <= 20; ++z) {
+                for (int y = 15; y <= 20; ++y) wT46d.setBlock(x, y, z, BR::Air, 0);
+                wT46d.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        for (int px : plotXs) {
+            wT46d.setBlock(px, 15, 16, BR::Farmland, 0);
+            wT46d.setBlock(px, 16, 16, BR::WheatCrop, BR::WheatCropStageMax);
+        }
+        QVector<int> dropIdD, dropCntD;
+        const QMetaObject::Connection dropConnD = QObject::connect(
+            &pcT46d, &PlayerController::spawnItem, &pcT46d,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropIdD.push_back(id);
+                dropCntD.push_back(count);
+            });
+        // 瞄准 / 挖掘帮手（t1026a 同款：墙钟 dt 喂 updateMining，瞬破门槛 0.05s）。
+        const auto aimT46d = [&](float feetX, float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = feetX, ey = 16.0f + 1.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT46d.release();
+            pcT46d.grab();
+            pcT46d.loadSavedState(feetX, 16.0f, feetZ, yaw, pit, 2 /* Survival */);
+            pcT46d.tick();
+            return pcT46d.hitBlock();
+        };
+        const auto mineBlockT46d = [&](int bx, int by, int bz) {
+            pcT46d.beginMining();
+            for (int i = 0; i < 6000 && wT46d.blockAt(bx, by, bz) != BR::Air; ++i) {
+                QElapsedTimer dtw;
+                dtw.start();
+                while (dtw.elapsed() < 17)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+                pcT46d.tick();
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            }
+            pcT46d.endMining();
+        };
+        bool allInBand = true, allWheatOne = true, dropShapeOk = true;
+        int badSeeds = -1, badPlot = -1;
+        for (int px : plotXs) {
+            const QVector3D hit = aimT46d(float(px) + 3.0f, 16.5f, float(px) + 0.5f, 16.5f, 16.5f);
+            dropIdD.clear();
+            dropCntD.clear();
+            mineBlockT46d(px, 16, 16);
+            int wheatN = 0, seeds = 0;
+            for (int i = 0; i < dropIdD.size(); ++i) {
+                if (dropIdD[i] == RecipeRegistry::WheatId && dropCntD[i] == 1) ++wheatN;
+                if (dropIdD[i] == RecipeRegistry::SeedId) seeds += dropCntD[i];
+            }
+            const bool shapeOk = hit == QVector3D(px, 16, 16)
+                && wT46d.blockAt(px, 16, 16) == BR::Air
+                && (dropIdD.size() == 1 || dropIdD.size() == 2)
+                && (seeds == 0 ? dropIdD.size() == 1 : dropIdD.size() == 2);
+            if (!shapeOk || wheatN != 1) { dropShapeOk = dropShapeOk && shapeOk; allWheatOne = allWheatOne && wheatN == 1; badPlot = px; }
+            if (seeds < 0 || seeds > 3) { allInBand = false; badSeeds = seeds; badPlot = px; }
+        }
+        QObject::disconnect(dropConnD);
+        pcT46d.release();
+        winT46d.deleteLater();
+        const bool ok = allInBand && allWheatOne && dropShapeOk && plotXs.size() == 12;
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t1046d diag] allInBand" << allInBand << "allWheatOne" << allWheatOne
+                              << "dropShape" << dropShapeOk << "plots" << plotXs.size()
+                              << "badSeeds" << badSeeds << "badPlot" << badPlot;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1046d mature wheat seed caliber pinned 0-3 (Beta/1.0 baseline, parity"
+                             " low-4): harvesting twelve mature crops through the real player path"
+                             " yields exactly one wheat each plus a per-crop seed count strictly"
+                             " inside {0,1,2,3} where a zero-seed crop legally emits no seed item"
+                             " (drop set is 1 or 2 items accordingly); the exact bounded(0,4)"
+                             " caliber and the emit gate are source-pinned in t1026b"
+                             " (negative-round sensitive: reverting to the retired 1-3 range flips"
+                             " the t1026b seed pin)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag band=%1 wheat=%2 shape=%3 plots=%4 badSeeds=%5 badPlot=%6")
+                                        .arg(allInBand).arg(allWheatOne).arg(dropShapeOk)
+                                        .arg(plotXs.size()).arg(badSeeds).arg(badPlot));
+    }
+
+    // ── P-t1046e 轨道骑士 1km 里程达阈 + 发明成就原创标注（R19.23 t1046 低-6；MC On A Rail 口径）──
+    //    (a) 里程达阈：400+599.5 不解锁 → +0.5 达 1000 解锁（同 tick 幂等）；负增量忽略；flush 后统计
+    //        minecartTravelBlocks 精确；(b) 存档 round-trip：里程 + 解锁态恢复、不重发 toast；
+    //    (c) 描述钉：ride_minecart = 1km 口径不带原创；发明九项（首杀四 + 进结构四 + 箱车）描述尾
+    //        「（原创）」；MC 同型项（获得原木 / 愿者上钩）不带；(d) 源钉（定义行 + 埋点声明 + 阈值）。
+    {
+        PlayerProgress progT46e;
+        int toastT46e = 0;
+        QObject::connect(&progT46e, &PlayerProgress::achievementUnlocked, &progT46e,
+                         [&](const QString &, const QString &, const QString &) { ++toastT46e; });
+        progT46e.onMinecartMoved(400.0f);
+        const bool underOk = !progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 0;
+        progT46e.onMinecartMoved(599.5f);
+        const bool nearOk = !progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 0;
+        progT46e.onMinecartMoved(0.5f);   // 累计恰 1000 → 达阈
+        const bool unlockOk = progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 1;
+        progT46e.onMinecartMoved(500.0f); // 越阈续乘：unlock 幂等不再 toast
+        progT46e.onMinecartMoved(-5.0f);  // 负增量防御忽略
+        const bool idemOk = progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 1;
+        progT46e.onPlayTimeTick(0.6f);    // > kFlushInterval → flush 累积入统计
+        const double travelE = progT46e.minecartTravelBlocks();
+        const bool travelOk = std::abs(travelE - 1500.0) < 1e-6;
+        // (b) 持久化 round-trip。
+        PlayerProgress progT46eLoad;
+        int toastT46eLoad = 0;
+        QObject::connect(&progT46eLoad, &PlayerProgress::achievementUnlocked, &progT46eLoad,
+                         [&](const QString &, const QString &, const QString &) { ++toastT46eLoad; });
+        progT46eLoad.loadVariant(progT46e.toVariant());
+        const bool loadOk = progT46eLoad.isUnlocked(QStringLiteral("ride_minecart"))
+            && std::abs(progT46eLoad.minecartTravelBlocks() - 1500.0) < 1e-6
+            && toastT46eLoad == 0;
+        // (c) 描述钉（achievements() 单源 = toast / UI 同源）。
+        QString rideDesc, woodDesc, fishDesc, spiderDesc, dungeonDesc, cartDesc;
+        int defsT46e = 0;
+        for (const QVariant &v : progT46e.achievements()) {
+            const QVariantMap m = v.toMap();
+            ++defsT46e;
+            const QString id = m.value(QStringLiteral("id")).toString();
+            if (id == QLatin1String("ride_minecart")) rideDesc = m.value(QStringLiteral("desc")).toString();
+            if (id == QLatin1String("get_wood")) woodDesc = m.value(QStringLiteral("desc")).toString();
+            if (id == QLatin1String("first_catch")) fishDesc = m.value(QStringLiteral("desc")).toString();
+            if (id == QLatin1String("kill_spider")) spiderDesc = m.value(QStringLiteral("desc")).toString();
+            if (id == QLatin1String("entered_dungeon")) dungeonDesc = m.value(QStringLiteral("desc")).toString();
+            if (id == QLatin1String("chest_cart_loot")) cartDesc = m.value(QStringLiteral("desc")).toString();
+        }
+        const QString tag = QString::fromUtf8("（原创）");
+        const bool descOk = defsT46e == 31
+            && rideDesc == QString::fromUtf8("乘矿车沿铁轨累计行驶 1 千米") // MC On A Rail 同型 → 不标原创
+            && !woodDesc.endsWith(tag) && !fishDesc.endsWith(tag)          // MC 同型（Delicious Fish）不标
+            && spiderDesc.endsWith(tag) && dungeonDesc.endsWith(tag) && cartDesc.endsWith(tag); // 发明项标
+        // (d) 源钉（定义行 + 埋点声明 + 阈值常量 + 标注字面量）。
+        const QString rootT46e = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        QStringList missT46e;
+        missT46e << pinSet(rootT46e + QStringLiteral("/src/Game/playerprogress.cpp"), {
+            {"def-ride-1km", "乘矿车沿铁轨累计行驶 1 千米"},
+            {"def-tag-spider", "首次击杀蜘蛛（原创）"},
+            {"def-tag-dungeon", "发现了藏在地底的怪物房间（原创）"},
+            {"def-tag-cart", "打开装货的矿车取走物品（原创）"},
+        });
+        missT46e << pinSet(rootT46e + QStringLiteral("/src/Game/playerprogress.h"), {
+            {"hdr-invokable-minecartMoved", "Q_INVOKABLE void onMinecartMoved(float deltaBlocks);"},
+            {"hdr-minecart-km", "static constexpr qreal kMinecartRideKm = 1000.0;"},
+        });
+        const bool pinsE = missT46e.isEmpty();
+        if (!pinsE)
+            qInfo().noquote() << "  [t1046e diag] pin miss:" << missT46e.join(QLatin1Char(','));
+        const bool ok = underOk && nearOk && unlockOk && idemOk && travelOk && loadOk && descOk && pinsE;
+        if (!ok) ++totalFail;
+        if (!ok)
+            qInfo().noquote() << "  [t1046e diag] under" << underOk << "near" << nearOk << "unlock" << unlockOk
+                              << "idem" << idemOk << "travel" << travelOk << travelE
+                              << "load" << loadOk << "desc" << descOk << "pins" << pinsE
+                              << "ride=" << rideDesc << "spider=" << spiderDesc;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1046e rail-knight 1km cumulative ride + originality tags (MC On A"
+                             " Rail caliber, parity low-6): minecart distance accumulates through"
+                             " onMinecartMoved with the unlock firing exactly at the 1000-block"
+                             " threshold (400+599.5 stays locked, +0.5 unlocks, beyond-threshold"
+                             " repeats and negative deltas are idempotent/ignored), the flushed"
+                             " statistic reads back 1500 and survives a save->load round-trip"
+                             " without re-toasting; the ride_minecart description states the 1km"
+                             " caliber without the originality tag while the nine project-invented"
+                             " achievements (per-species first kills, structure entries, chest"
+                             " cart) carry the (original) suffix and MC-counterpart ones do not;"
+                             " source pins lock the def rows, the invokable and the threshold"
+                             " (negative-round sensitive)"
+                          << (ok ? QString()
+                                  : QStringLiteral("diag under=%1 near=%2 unlock=%3 idem=%4 travel=%5"
+                                                   " load=%6 desc=%7 pins=%8")
+                                        .arg(underOk).arg(nearOk).arg(unlockOk).arg(idemOk)
+                                        .arg(travelOk).arg(loadOk).arg(descOk).arg(pinsE));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
