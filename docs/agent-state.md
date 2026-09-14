@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-14 14:40
+更新时间：2026-09-14 18:00
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: R19.23-batch-review
-current_task_status: IN_PROGRESS
-last_completed_task: t1046 parity 小修合集七项收官（主控亲自收尾——实现棒重启+限额双重事故死亡，WIP 完整存活；51cc43c/309a69d/f9effa4）
-last_task_closure_commit: （docs 本提交；代码终态 f9effa4）
-last_verified_commit: f9effa4（矩阵 545 PASS / 0 FAIL，matrix_t1046_final.log 权威，binary 14:31 与源对齐）
+current_task: R19.23 批次收口 docs（批次统计 + audit #6；主控自做）
+current_task_status: READY
+last_completed_task: t1048 批次 review 收口（On A Rail 500m 单方向径向勘误 P2-1 主体 + P3/台账清偿全量；183782b/a72ca74/本 docs）
+last_task_closure_commit: （docs 本提交；代码终态 a72ca74）
+last_verified_commit: a72ca74（矩阵 545 PASS / 0 FAIL，matrix_t1048_final.log 权威，binary 17:33:31 与源对齐）
 last_governance_review: 2026-09-12（audit #5 YELLOW → GOV-20260912-1=t1047 已闭环）
 governance_review_due: true（批次结束触发：R19.23 收口时 audit #6）
-completed_tasks_since_governance_review: 5（t1038/t1040/t1039/t1042/t1043… audit#5 后计 t1047+t1046=2，含恢复重走口径以批次统计为准）
-next_task: R19.23 批次 review（双只读 reviewer：A 代码正确性 / B 探针+台账；窗口 884eabd..HEAD）
-next_task_source: docs/dev-plan.md R19.23 段「顺序（终）」
+completed_tasks_since_governance_review: 6（t1047+t1046+t1048，audit#5 后；批次统计以主控口径为准）
+next_task: R19.23 批次收口 docs（统计 + audit #6）→ R20 主线（R20.03 测试分层起，用户 0912 方向）
+next_task_source: docs/dev-plan.md R19.23 段「顺序（终）」+ t1048 段
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
@@ -27,15 +27,16 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = 批次 review 前 docs 提交（代码终态 f9effa4），工作区干净；`.codex/` 豁免不删不提交。
-- 纪律①-⑧全在案（⑦工作区一致性硬门 / ⑧SPEC_CHANGE 门）；**新增环境纪律：大 TU 编译用 -j 1（-j 20 曾 OOM 失败 + 09-13 蓝屏，cc1plus 峰值 11GB/总 34GB）**。
+- HEAD = t1048 docs 提交（代码终态 a72ca74），工作区干净；`.codex/` 豁免不删不提交。
+- 纪律①-⑧全在案（⑦工作区一致性硬门 / ⑧SPEC_CHANGE 门）；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；本单大 TU 单编译 cc1plus 峰值 ~10GB / 34GB 总量，-j 1 下安全通过）。
 
 ## Recovery Point
 
-- 最近闭环：**t1046 parity 小修合集七项**（2026-09-14，51cc43c/309a69d/f9effa4）：①幼崽满血 ②glass→hat ③机关潜行旁路 ④天气时长持久化 ⑤种子 0-3 ⑥ride 1km+原创标注 ⑦noteClips 析构。矩阵 **541→545 PASS / 0 FAIL**（matrix_t1046_final.log）；阴性六摘一构建恰红 538/7（七红与六摘一一对应）。**收尾实录**：实现棒于 0912 评审流程置 RECOVERY_REQUIRED 后死于重启+限额，WIP 十六文件完整存活；主控接手走完整验证阶梯（串行构建→阳性 545/0→六摘阴性 538/7→restore→终跑 545/0→双目标重建→冒烟 tail20）。
-- R19.23 批次全貌：t1038→t1040→t1039→t1042（口径修正版）→t1041→t1043→t1047（GOV 纠偏）→t1044→t1045→t1046，矩阵 521→**545**；三份用户 review（0910/0911/0912）+ MC parity 专审全部摄入；parity 波 t1043-1046 全清（裁-1/2/3+7 低）。
-- 下一最小动作：双只读批次 reviewer 已派（A 代码正确性 / B 探针+台账，窗口 884eabd..f9effa4+docs）→ 整合发现 → 修真实问题 → 批次统计 + audit #6 → **R20 主线**（R20.03 测试分层起，用户 0912 方向；含测试大 TU 拆分与矩阵 --filter 两项提速投资）。
-- 实机确认累计清单：R19.22 16 项 + R19.21 12 项 + parity 波各项观感 + 回归三单（t1005/t1006/t1007）待用户数据。
+- 最近闭环：**t1048 批次 review 收口**（2026-09-14，183782b fix + a72ca74 test + 本 docs）：On A Rail 勘误为 MC 500m 单方向径向制（kMinecartRideGoal=500 + onMinecartRideStarted 起点沿捕获 + onMinecartMoved 携位置采样 + 平方判据；minecartTravelBlocks 降 display-only）+ A-P3-1 算术注释勘误（fix）；P-t1046e 改写（非累计钉死 + 恰 500 缝 + 判定窗门 + round-trip 1600；不加腿矩阵恒 545）+ t1020 腿/pin 签名联动（test）；dev-plan t1043/t1046/t1047 勘误（neg1 枚举补 t1012c / neg2 双因归因 / ⑤⑥ 引证勘误 + B-P3-2 scoped 登记 / neg2rc 残段登记）+ 台账 low-1..6 翻牌 + low-4 引证勘误 + onMoved 双喂登记 + agent-state 同步（docs）。矩阵 545→545（matrix_t1048_final.log 权威）；阴性 = 恰阈缝摘除（≥→>）恰红 544/1 t1046e（matrix_t1048_neg3.log）。
+- R19.23 批次全貌：t1038→t1040→t1039→t1042→t1041→t1043→t1047→t1044→t1045→t1046→**t1048（批次 review 收口）**，矩阵 521→545。双只读批次 review（A 代码正确性 / B 探针+台账）P2-1/P3/台账项全部清偿或登记。
+- **新发现待办（t1048 阳性轮暴露，移交主控立项）**：review26-1 农田走廊腿环境敏感翻红（新 TU 布局下 3/4、失败轨迹逐位一致、同 binary 有全绿反例 pos2、与 RNG 不相关）——疑似 walk/support 路径潜伏 UB 被重编译布局暴露，非 t1048 行为面；证据链 matrix_t1048_pos.log（544/1）/pos2（545/0）/neg/neg2（co-red）/final（545/0）留存根目录。
+- 下一最小动作：主控做批次统计 + audit #6 → R20 主线（R20.03 测试分层起；含测试大 TU 拆分与矩阵 --filter 两项提速投资）。
+- 实机确认累计清单：R19.22 16 项 + R19.21 12 项 + parity 波各项观感 + t1048 骑车 500m 节奏（径向制下绕圈无效）待用户数据。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。断链恢复按纪律⑦硬门执行。
 
 ## Governance Counter
