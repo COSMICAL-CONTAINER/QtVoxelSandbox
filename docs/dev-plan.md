@@ -3708,4 +3708,24 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 **待实机确认**：无（纯测试基建单，无行为面）。**下一任务：R20.04 基础类型**。
 
-**顺序（终）**：t1049✅ → **R20.03✅（测试分层：拆分 + --filter 两项提速投资落地）** → R20.04 基础类型 → R20.05 Command/Event/Snapshot → R20.06 GameSession → R20.07 WorldFacade → R20.09 Chunk 生命周期 → R20.11 后台 GenerationJob。矩阵基线 **545**。
+**顺序（终）**：t1049✅ → **R20.03✅（测试分层：拆分 + --filter 两项提速投资落地；plan 原文 R20.04=测试矩阵拆分，实质由本单覆盖）** → **R20.05✅（基础类型）** → R20.06 Command/Event/Snapshot → R20.07 GameSession → R20.09 Chunk 生命周期 → R20.11 后台 GenerationJob。矩阵基线 **549**。
+
+### R20.05 基础类型（2026-09-15，floorDiv/floorMod + ChunkKey + BlockPos + 固定 Tick + Error/Result：只立类型 + 最小示范采用）
+
+**编号正名注记**：plan 原文（refactor-plan §29.2/§29.3）R20.04 = 测试矩阵拆分第一步（已由 R20.03 实质覆盖），本单 = plan §29.3 R20.05「ChunkKey、BlockPos、Tick」。R20.03 收口时 dev-plan/agent-state 按本地序列把本单误标「R20.04 基础类型」，自本单起回归 plan 编号：下一单 = **plan R20.06「Command、Event、Snapshot」**（原本地序列的「R20.05 Command/Event/Snapshot」「R20.06 GameSession」编号顺次正名为 R20.06/R20.07）。
+
+  → **✅✅ 落地（2026-09-15）：src/Core/mathtypes.h + src/Core/result.h 两枚 Core 叶子头（header-only），矩阵 545→549（4 新腿 r2005a-d，band 547±2 内），默认世界逐位不变（worldgen 数值头逐位恒等 + 全部 PASS 行与 matrix_r2003_split_run3.log 权威恒等，仅 3 处登记漂移类）。**（feat + test + 本 docs 三段提交）
+
+**类型面（只立类型，调用点零 wholesale 迁移——plan 原文「先不改变世界生成和玩法」）**：① **floorDiv/floorMod**（向下取整除/模单一权威；plan §5.1「所有模块禁止自行实现负坐标换算」。落回标盘点：chunk 路由**全部集中** ChunkManager 且为「x<0 早退守卫 + 截断除法 x/16 + 减法重建 x-cx*16」——非负域正确、负坐标域无任何语义（越界=空气/拒绝）；**未发现移位掩码（x>>4 / x&15）散布点**（路由集中化使然）；既有 packGrowthCell/packLeafCell 的 quint16 截断打包在负/大坐标域会静默环绕，登记为后续迁移面）。② **ChunkKey**（有符号 chunk 坐标键：fromWorld(floorDiv 语义) / flatIndex(既有网格公式 cx+chunksX*cz 的类型化包装，布局零变) / packed(quint32 补码拼接 = int32 域双射，负坐标不别名) / hash(hashMix64 双射 → 64 位内单射、无随机盐跨进程稳定) / 字典序 operator< / std::hash+qHash 双面）。③ **BlockPos**（x,y,z int + 6 邻 neighbors() 固定序 / manhattanLength / isAdjacentTo(曼哈顿=1) / +−==）。④ **Tick**（kClockTickMs=100 基准 + kClockTickSecs=0.1s；节流常量族盘点登记于头注释防漂移：World 侧 11 个间隔常量 + kBurnWindows 两档（world.h 私有 static，单位=基准 tick 个数）+ 异构域 EntityManager::kAiTickInterval=4（渲染帧 60Hz 错峰）+ PlayerController ~16ms 物理帧——**本单不迁移**，R20.07 GameSession 固定 Tick 时收口）。⑤ **Error/Result<T>（+Result<void> 特化）**（code==0=Ok、message 静态字面量；最小值类型零依赖；只立类型不迁移调用点——World 写族「bool 返回 + 静默拒绝」面留 R20.06 Command 骨架接线）。
+
+**示范采用（行为逐位不变——非负域上 floorDiv==截断除法、floorMod==减法重建式；「摘即红」由 r2005d 源码钉 pinSet 承担）**：① chunkmanager.cpp 路由 ×3（blockAt / setBlock / chunkAtWorld 改 floorDiv/floorMod）+ 网格索引 ×2（chunk()/recreate() 改 ChunkKey::flatIndex 包装）；② worldclock.h `kTickMs = Tick::kClockTickMs` 声明点回指（值恒 100 不变）；③ BlockPos 加性重载 ×5（ChunkManager chunkAtWorld/blockAt/setBlock + World blockAt/setBlock；非 Q_INVOKABLE，QML 面零变化）。heightmapAt / columnTopSurfaceY / 光场路由 / stateAt 等其余 6 处路由点**未迁移**（登记为后续迁移面；同文件部分采用为本单契约「示范非 wholesale」的如实形态）。
+
+**探针（tools/matrix/section09_foundations.cpp 新段置尾，4 腿，filter 词 r2005）**：r2005a floorDiv/floorMod 负坐标全象限（15 例钉表含 ±1 边界 / chunk 边界精确 / -4k±1 规律 / 负除数 + 代数恒等式 a∈[-4097,4097]×b∈{16,-16,7,-7} 全域扫 + 截断除法基线对照钉）；r2005b ChunkKey 往返/单射/哈希稳定（packed 位精确往返 / 7×7 负坐标网格 packed+hash 双单射 / 相等键同哈希 / flatIndex 与原式逐位 parity / 字典序 / QHash+std::unordered_set 可用 / Chunk::kSize==16 互钉）；r2005c BlockPos 邻接/运算 + World 层真值行（加性重载 ↔ int 版全等：chunk 查找指针等值 / 越界双 null / 全高列读逐字节等 / 写-读-还原交换轮）；r2005d Tick 钉值 + Error/Result 行为 + 示范采用「摘即红」源码钉（pinSet 剥注释：chunkmanager.cpp floorDiv(×6 / floorMod(×4 / ChunkKey×2、worldclock.h Tick::kClockTickMs×1——revert 任一采用即红）。
+
+**验证**：-j1 分段增量构建（helpers.h 触发 + src 依赖重编 = 32 步 ~7min；**单段迭代红利实收：section09 修腿 → 重编+链接+filter 面重跑全程 ~40s ×2 轮**，对照拆前单 TU 85min/轮）→ binary mtime > 全部改动源 → 全矩阵 **549 PASS / 0 FAIL ×2**（matrix_r2005_pos.log + matrix_r2005_final.log，EXIT=0；双跑 PASS 行 diff 仅 t997/t979 内嵌计时数同类漂移）→ **worldgen 腿族逐位恒等**（worldgen 数值头 diff 权威 = 空；545 权威 PASS 行 diff 仅 3 处登记漂移：t813 构建戳时间/哈希、t997 内嵌毫秒、t1023c src 树文件计数 127→129 [= 本单新增 mathtypes.h/result.h 两文件，线程原语仍 0 命中]）→ app voxelsandbox 重建 EXIT=0 + offscreen 冒烟 EXIT=124 存活 + logs/voxelsandbox_r2005_tail20.log 留存。
+
+**阴性轮（重构类豁免登记）**：本单为「立类型 + 行为恒等示范采用」，无行为口径面可作 lesion 翻红，阴性轮豁免；替代证据链三件：r2005a-d 新腿全绿（验收面）+ r2005d「摘即红」源码钉（示范采用面）+ worldgen 腿族逐位恒等（世界生成零漂移面）。
+
+**过程注记（如实登记）**：r2005c 首跑 2 红均为腿自身问题非产品代码——[arith] 期望笔误（manhattanLength(5,41,7)=53 非 13）；[write] 环境事实误设：rig 网格外 (90,41,170) 的 worldgen 山体可自然达 y=41，写同 id（Stone→Stone）是 setBlock 合法「无变化」拒绝面（sb=0 而 w=3/cm=3 实锤）→ 改「读原 id → 写异 id → 还原原 id」交换式，清理口径顺带从「清回空气」加强为「还原本格」（世界基线面零残留）。R20.03 登记的 src/Renderer/mobmodel.h 与 src/Core/resourcepackmanager.cpp 注释旧文件名漂移本单仍未顺带修（保持范围纪律），顺带修编号顺延 R20.06+。
+
+**待实机确认**：无（类型单，无行为面）。**下一任务：R20.06 Command/Event/Snapshot 立类型**（plan §29.3：BreakBlock 可经 Command 表达 / WorldDelta 表达受影响 Chunk / Event 不携带 QObject / Snapshot 可独立复制测试——先只定义数据结构和队列）。
