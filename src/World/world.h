@@ -61,6 +61,10 @@ public:
 
     // 越界返回 0（空气）。跨 chunk 由 ChunkManager 路由；网格与物理都用它。
     Q_INVOKABLE quint8 blockAt(int x, int y, int z) const;
+    // R20.05 BlockPos 最小示范采用（加性 C++ 重载，非 Q_INVOKABLE——QML 面本单不动）：与 int 版
+    //   全等（体内直转调；矩阵 r2005c 腿对真 rig 世界钉「重载面同源」）。只立类型可用性，不迁移调用点。
+    quint8 blockAt(BlockPos p) const { return blockAt(p.x, p.y, p.z); }
+    bool setBlock(BlockPos p, quint8 id) { return setBlock(p.x, p.y, p.z, id); }
     // 是否「存在方块」（非 air）：raycast 选体 / 掉落实体着地 / mesher 邻居剔除 等用。
     // 注：名为 isSolid 但语义是「非 air 实存」（保留以兼容既有调用点）。碰撞语义见 isCollidable。
     Q_INVOKABLE bool isSolid(int x, int y, int z) const { return blockAt(x, y, z) != 0; }
