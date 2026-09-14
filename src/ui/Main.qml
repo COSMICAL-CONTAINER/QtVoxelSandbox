@@ -854,12 +854,16 @@ Window {
         //   「进世界即见天气」口径），防无条件 setWeatherState(Clear) 把初始窗重抽为常规 45/120s。
         //   须在本函数内 theWorld 已完成 beginLoad/regenerate 之后（天气与地形无关，仅顺序可读性）；
         //   worldClock.running 绑 window.worldRunning，此处写 phase/day 即时派生亮度 / 太阳方向
-        //   （applyTime 即时 emit），进世界首帧即存档时刻的昼夜观感。
+        //   （applyTime 即时 emit），进世界首帧即存档时刻的昼夜观感。t1046：存档真带剩余时长键
+        //   （hasWeatherTimer）→ setWeatherRemainingSec 精确续跑剩余窗（MC level.dat RainTime/
+        //   ThunderTime 口径）；缺键（旧档）→ 保持 setWeatherState 的随机重抽窗。
         {
             const wt = worldStore.loadWorldTime()
             worldClock.restoreTime(wt.phase, wt.day)
             if (wt.hasWeather) theWorld.setWeatherState(wt.weather)
-            console.info("[t1016] world time restored: phase=" + wt.phase + " day=" + wt.day + " weather=" + wt.weather + " hasWeather=" + wt.hasWeather)
+            if (wt.hasWeatherTimer) theWorld.setWeatherRemainingSec(wt.weatherTimerMs / 1000)
+            console.info("[t1016] world time restored: phase=" + wt.phase + " day=" + wt.day + " weather=" + wt.weather + " hasWeather=" + wt.hasWeather
+                         + " weatherTimerMs=" + wt.weatherTimerMs)
         }
         // t1024 床位重生锚恢复：存档带 bed_valid=1 → player.setBedSpawn 回填床位（死亡 respawn 回床 +
         //   挖床失效链的持久化半边）。旧存档 / 从未睡过床 → hasBed=false 跳过（保持 seedChanged 复位后的
@@ -1022,12 +1026,14 @@ Window {
         // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
         // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
         // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
-        // t1016：世界时钟快照同事务落盘（saveAll 第 5 参 = {phase, day, weather}，WorldClock /
-        //        World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排传入）。
+        // t1016：世界时钟快照同事务落盘（saveAll 第 5 参 = {phase, day, weather, weatherTimerMs}，
+        //        WorldClock / World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排传入；
+        //        t1046 补 weatherTimerMs = 当前态剩余毫秒，weather_rain/thunder 双计数器的单态等价键）。
         // t1024：床位重生锚同事务落盘（saveAll 第 6 参 = {valid, x, y, z}，PlayerController 的
         //        bedSpawnValid + spawnPoint 裸原语打包；有效写四键、失效写 bed_valid=0）。
         const okWorld = worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers(),
-                                           { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState },
+                                           { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState,
+                                             weatherTimerMs: Math.round(theWorld.weatherRemainingSec() * 1000) },
                                            player.bedSpawnValid
                                                ? { valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }
                                                : { valid: false })
@@ -2135,7 +2141,16 @@ Window {
     // progress 走过路程埋点：player 每帧 emit moved(水平位移增量) → progress.onMove 累加（内部 ~0.5s flush）。
     //   纯水平 √(dx²+dz²)，不含跳跃 dy；reportHorizSpeed 是 step 各出口唯一位移瓶颈 → 每帧每路径只计一次。
     //   同 playerMined→onBlockMined / blockPlaced→onBlockPlaced 单向事件流模式（PLAN §2 分层）。
-    Connections { target: player; function onMoved(deltaBlocks) { progress.onMove(deltaBlocks) } }
+    //   t1046 矿车里程埋点：骑矿车期间（ridingCart 门控）位移增量并入 progress.onMinecartMoved ——
+    //   「轨道骑士」乘矿车累计 1km 达阈（parity 台账低-6 = MC On A Rail 口径；ridingCart 边沿滞后
+    //   ≤1 tick 首帧增量可能计入普通路程，1km 口径下可忽略，登记）。
+    Connections {
+        target: player
+        function onMoved(deltaBlocks) {
+            if (ridingCart) progress.onMinecartMoved(deltaBlocks)
+            progress.onMove(deltaBlocks)
+        }
+    }
 
     // t386 闪电击中（雷雨天随机，World::strikeLightning 发）：闪光 + 雷声 + 击中点附近实体伤害的单一入口。
     //   分层（PLAN §2）：World 低层只发 lightningStruck(x,y,z) 语义事件 + 自身焚毁木类方块；呈现层（白闪动画 +
@@ -14865,9 +14880,9 @@ Window {
     onRidingCartChanged: {
         if (ridingCart) { dismountHintVisible = true; dismountHintTimer.restart() }
         else { dismountHintVisible = true; dismountHintTimer.stop() }
-        // t1020 progress 成就：首次骑上矿车（false→true 边沿）→「轨道骑士」。onRodeMinecart 内幂等
-        //   unlock，重复上下车只首次弹 toast（同 onRidingBoatChanged → onBoatBoarded 先例）。
-        if (ridingCart) progress.onRodeMinecart()
+        // t1046：「轨道骑士」改乘矿车累计 1km 达阈（parity 台账低-6 = MC On A Rail 口径）——旧
+        //   「骑上即解锁」onRodeMinecart 边沿埋点退役；里程经下方 onMoved Connections 路由
+        //   （ridingCart 门控 → progress.onMinecartMoved）。
     }
     // t530 下船提示 ~5s 自动消失（机制等价 MC 1.0 骑船提示短暂出现；现常驻改为限时）：首次上船显提示 +
     //   dismountHintTimer 5s 后把 dismountHintVisible 置 false → 提示自动隐（玩家已知晓按键）。重新上船（ridingBoat
