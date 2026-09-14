@@ -6,6 +6,8 @@
 #include <QVector3D>
 #include <QtQml/qqml.h>
 
+#include "mathtypes.h" // R20.05：Tick 基准常量单一权威（kTickMs 声明点回指，见 private 段）
+
 // 世界时钟（Game 层）：MC 1.0 风格昼夜节律的**单一权威时间源**。
 //
 // PLAN §2 不变量 H：昼夜 = **天光亮度乘子** lerp（**非**旋转方向光）。本类只暴露**纯函数**
@@ -178,7 +180,9 @@ private:
 
     // 100ms（10Hz）：昼夜 lerp 缓慢，10Hz 已视觉平滑且不无谓刷爆 QML 绑定（与 PlayerController
     // 的 16ms 物理 tick 解耦——时钟不需要 60Hz）。
-    static constexpr int kTickMs = 100;
+    //   R20.05：声明点上收 Tick::kClockTickMs（mathtypes.h 单一权威；值恒 100 不变——基准 tick
+    //   数值钉由矩阵 r2005d 腿承担；节流常量族的迁移边界登记见 Tick 头注释，本单不 wholesale）。
+    static constexpr int kTickMs = Tick::kClockTickMs;
     static constexpr float kDaySecs  = 1200.f; // ~20 分钟一周期（MC 1.0；dev-spec）
     static constexpr float kFastSecs = 30.f;   // 调试加速周期（dev-spec）
     // t123 太阳轨道常量：

@@ -22,7 +22,9 @@ void ChunkManager::recreate(int width, int depth, int height)
     m_chunks.resize(size_t(m_chunksX * m_chunksZ));
     for (int cz = 0; cz < m_chunksZ; ++cz)
         for (int cx = 0; cx < m_chunksX; ++cx)
-            m_chunks[size_t(cx + m_chunksX * cz)] =
+            // R20.05：网格索引公式经 ChunkKey::flatIndex 类型化包装（逐位同式 cx + chunksX*cz；
+            //   布局零变化——本单只立类型，r2005d 源码钉摘即红）。
+            m_chunks[size_t(ChunkKey{ cx, cz }.flatIndex(m_chunksX))] =
                 std::make_unique<Chunk>(cx * kSize, cz * kSize, m_height);
 }
 
@@ -30,14 +32,17 @@ Chunk *ChunkManager::chunk(int cx, int cz) const
 {
     if (cx < 0 || cz < 0 || cx >= m_chunksX || cz >= m_chunksZ)
         return nullptr;
-    return m_chunks[size_t(cx + m_chunksX * cz)].get();
+    // R20.05：同 recreate()——ChunkKey::flatIndex 包装（逐位同式）。
+    return m_chunks[size_t(ChunkKey{ cx, cz }.flatIndex(m_chunksX))].get();
 }
 
 Chunk *ChunkManager::chunkAtWorld(int x, int z) const
 {
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth)
         return nullptr;
-    return chunk(x / kSize, z / kSize);
+    // R20.05 示范采用：floorDiv 替代截断除法（守卫非负域上逐位等价——r=x%16≥0 且 (r<0)!=(b<0)
+    //   恒假 → 无校正分支生效）；负坐标语义就此立起（R20.09 无界世界起真消费）。
+    return chunk(floorDiv(x, kSize), floorDiv(z, kSize));
 }
 
 // t155g：清所有 chunk 的 dirty 标记（World::setBlock 在 emit worldChanged 后调）。
@@ -55,8 +60,11 @@ quint8 ChunkManager::blockAt(int x, int y, int z) const
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return 0; // 世界越界 = 空气（面剔除画边界面；物理把界外当可走出/可坠落）
-    Chunk *c = chunk(x / kSize, z / kSize);
-    return c ? c->blockAt(x - (x / kSize) * kSize, y, z - (z / kSize) * kSize) : quint8(0);
+    // R20.05 示范采用：floorDiv/floorMod 替代「截断除法 + 减法重建」（守卫非负域上逐位等价，
+    //   floorMod(x,16) == x - (x/16)*16 == x&15）；负坐标语义单一权威（floorDiv(-1,16)=-1 /
+    //   floorMod(-1,16)=15）自本函数起可写，本单域仍 [0,W) 不变（越界早退先于路由）。
+    Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+    return c ? c->blockAt(floorMod(x, kSize), y, floorMod(z, kSize)) : quint8(0);
 }
 
 // t121：世界坐标 (x,z) 列的 heightmap（PLAN §2-H）。路由到所在 chunk 的局部列；越界 / 无 chunk → -1。
@@ -134,8 +142,9 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
 {
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return false; // 世界越界：拒绝
-    const int cx = x / kSize, cz = z / kSize;
-    const int lx = x - cx * kSize, lz = z - cz * kSize;
+    // R20.05 示范采用：floorDiv/floorMod（同 blockAt——守卫非负域上逐位等价）。
+    const int cx = floorDiv(x, kSize), cz = floorDiv(z, kSize);
+    const int lx = floorMod(x, kSize), lz = floorMod(z, kSize);
     Chunk *c = chunk(cx, cz);
     if (!c) return false;
     // t188 perf：读 oldId 用于「流体专用脏」分类。isFluidLike(oldId) && isFluidLike(id) = 流体类写

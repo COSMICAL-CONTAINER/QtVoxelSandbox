@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "chunk.h"
+#include "mathtypes.h" // R20.05 基础类型（Core 叶子）：floorDiv/floorMod 路由 + ChunkKey 网格索引包装 + BlockPos 加性重载
 
 // ChunkManager：持有一片连续的 chunk 列网格（width×depth 平面铺满，每 chunk 16×16 列），
 // 负责「世界坐标 ↔ chunk/局部坐标」路由、跨 chunk blockAt/setBlock、越界判定、
@@ -53,6 +54,11 @@ public:
     Chunk *chunk(int cx, int cz) const;
     // 世界坐标 (x,z) 所在 chunk（越界 nullptr）。
     Chunk *chunkAtWorld(int x, int z) const;
+    // R20.05 BlockPos 最小示范采用（加性 C++ 重载，非 Q_INVOKABLE——QML 面本单不动）：与 int 版
+    //   全等（体内直转调；r2005c 腿对真 rig 世界钉「重载面同源」）。只立类型可用性，不迁移调用点。
+    Chunk *chunkAtWorld(BlockPos p) const { return chunkAtWorld(p.x, p.z); }
+    quint8 blockAt(BlockPos p) const { return blockAt(p.x, p.y, p.z); }
+    bool setBlock(BlockPos p, quint8 id) { return setBlock(p.x, p.y, p.z, id); }
     // t155g：清所有 chunk 的 dirty（World 在 emit worldChanged 后调 —— 此时所有 dirty chunk 的
     //   terrain+water 两段 ChunkGeometry 都已在槽里重建完毕，统一清脏避免「一段 clearDirty 抢清致另一段跳过」）。
     void clearAllDirty();
