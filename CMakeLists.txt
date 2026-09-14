@@ -896,6 +896,13 @@ add_executable(redstone_matrix_test
     tools/matrix/section09_foundations.cpp
     src/Core/mathtypes.h
     src/Core/result.h
+    # R20.06 Command/Event/Snapshot 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触——
+    #   3 腿 r2006a-c，filter 词 r2006）。随段直编三个 Core 头（command/event/snapshot，
+    #   header-only；result.h 本单增补错误码域 kErrQueueFull + QObjectFree 概念）。
+    tools/matrix/section10_command_event_snapshot.cpp
+    src/Core/command.h
+    src/Core/event.h
+    src/Core/snapshot.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
