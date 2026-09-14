@@ -1,0 +1,5869 @@
+// tools/matrix/section01_redstone_core.cpp —— R20.03 测试分层段 TU
+// 原 tools/redstone_matrix_test.cpp L296-6156 逐字节搬移（段 md5: 6c8067b13c0a35d2f369022d516a83b6；
+// 8 段拼接 == 原 main 体，md5 82ac70c7ede1a2ed647fea738734be6b，存证 build/r2003_proof/）。
+#include "matrix_helpers.h"
+
+void MatrixRun::section01_redstone_core()
+{
+    // ── 矩阵维度（t740 全量：任务点名 9 源 + 石/铁/金压力板 3 补充源；接收器 8 族——t1028 增音符盒）──
+    const SourceDef sources[] = {
+        { "RedstoneTorch(lit)",   BR::RedstoneTorch,      0,                            true,  false },
+        { "RedstoneBlock",        BR::RedstoneBlock,      0,                            true,  false },
+        { "Lever(on)",            BR::Lever,              1,                            false, false },
+        { "WoodButton(pressed)",  BR::WoodButton,         1,                            false, false },
+        { "StoneButton(pressed)", BR::StoneButton,        1,                            false, false },
+        { "WoodPlate(pressed)",   BR::WoodPressurePlate,  1,                            false, false },
+        { "CobblePlate(pressed)", BR::CobblePressurePlate,1,                            false, false },
+        { "StonePlate(pressed)",  BR::StonePressurePlate, 1,                            false, false },
+        { "IronPlate(pressed)",   BR::IronPressurePlate,  1,                            false, false },
+        { "GoldPlate(pressed)",   BR::GoldPressurePlate,  1,                            false, false },
+        { "DetectorRail(cart)",   BR::DetectorRail,       BR::DetectorRailStateOnFlag,  false, false },
+        { "DustTrail(lever->x3)", BR::Lever,              1,                            false, true  }, // 粉传导（用户点名场景）
+    };
+    const RecvDef recvs[] = {
+        { "TNT",          BR::TntBlock,      0,                            true  },
+        { "RedstoneLamp", BR::RedstoneLamp,  BR::RedstoneLampStateOnFlag,  false },
+        { "GoldenRail",   BR::GoldenRail,    BR::GoldenRailStateOnFlag,    false },
+        { "Dispenser",    BR::Dispenser,     0,                            true  },
+        { "Dropper",      BR::Dropper,       0,                            true  },
+        { "IronDoor",     BR::IronDoor,      0x04,                         false },
+        { "IronTrapdoor", BR::IronTrapdoor,  0x01,                         false },
+        // t1028 音符盒（通电上升沿发声）：state 判据 = bit5 通电记忆位（升沿置位 / 降沿清位）——
+        //   本矩阵按 state 型覆盖 12 源 × 升/降沿；「发声信号 + 不复响」行为腿走 P-t1028a 专探针。
+        { "NoteBlock",    BR::NoteBlock,     BR::NoteBlockStatePoweredFlag, false },
+    };
+
+    qInfo().noquote() << "=== t740 redstone activation matrix (World-layer harness) ===";
+    int totalFail = 0;
+    for (const SourceDef &src : sources) {
+        for (const RecvDef &rc : recvs) {
+            // 每个 case 独立 rig 位（列距 22 / 行距 3 隔离防串扰）。
+            const auto [x0, z0] = nextSlot();
+            const int srcX = x0;
+            const int recvX = src.dustTrail ? x0 + 4 : x0 + 1;
+
+            // 搭 rig：粉传导场景 = lever(on) + 粉×3 + 接收器；其余 = 源 + 相邻接收器。
+            w.setBlock(srcX, kRigY, z0, src.id, src.onState);
+            if (src.dustTrail)
+                for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
+            w.setBlock(recvX, kRigY, z0, rc.id, 0);
+
+            const int tnt0 = tntFired, disp0 = dispFired;
+            tickN(w, 6);
+
+            bool on = false;
+            QString onNote;
+            if (rc.signalBased && rc.id == BR::TntBlock) {
+                on = (tntFired > tnt0) && lastTntX == recvX && lastTntY == kRigY && lastTntZ == z0;
+                if (!on) onNote = QStringLiteral("no powerTntTriggered");
+            } else if (rc.signalBased) {
+                on = dispFired > disp0;
+                if (!on) onNote = QStringLiteral("no powerDispenserTriggered");
+            } else {
+                on = (w.stateAt(recvX, kRigY, z0) & rc.onFlag) != 0;
+                if (!on) onNote = QStringLiteral("state flag not set (st=%1)").arg(int(w.stateAt(recvX, kRigY, z0)));
+            }
+            // 降沿复查（仅 state 型接收器；信号型无降沿语义——消费端沿检测）。
+            bool offOk = true;
+            QString offNote;
+            if (on && !rc.signalBased) {
+                if (src.removeToOff)      w.setBlock(srcX, kRigY, z0, BR::Air);
+                else                      w.setBlock(srcX, kRigY, z0, src.id, 0); // 开关位清零（lever/按钮/板 bit0、探测轨 bit4、粉线 lever off）
+                tickN(w, 6);
+                offOk = (w.stateAt(recvX, kRigY, z0) & rc.onFlag) == 0;
+                if (!offOk) offNote = QStringLiteral("falling edge: flag stuck");
+            }
+            const bool ok = on && offOk;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL") << "|" << src.name << "->" << rc.name
+                              << (on ? QString() : onNote) << (offOk ? QString() : offNote);
+            // 清场（隔离带外的本 rig 格全清，防跨 case 影响）。
+            for (int i = 0; i < 6; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+    }
+
+    // ── 场景探针（用户点名 / 语义边界）──
+    qInfo().noquote() << "=== scenario probes ===";
+
+    // P1 火把后放 TNT（源先就位、稳态后再放接收器 —— 可达性反序）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::RedstoneTorch, 0);
+        tickN(w, 6);
+        w.setBlock(x0 + 1, kRigY, z0, BR::TntBlock, 0);
+        const int t0 = tntFired;
+        tickN(w, 6);
+        const bool ok = tntFired > t0;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| torch-first, TNT placed last -> fires";
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P2 粉长线（lever + 8 粉 + TNT）：末粉电力 = 16-9 = 7 > 0 → 应点燃；沿线电力级单调衰减 15→8。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Lever, 1);
+        for (int i = 1; i <= 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
+        w.setBlock(x0 + 9, kRigY, z0, BR::TntBlock, 0);
+        const int t0 = tntFired;
+        tickN(w, 8);
+        bool ok = tntFired > t0;
+        for (int i = 1; i <= 8 && ok; ++i) {
+            const int p = w.stateAt(x0 + i, kRigY, z0) & BR::RedstoneDustPowerMask;
+            if (p != 16 - i) { qInfo().noquote() << "  dust" << i << "power" << p << "expect" << 16 - i; ok = false; }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| 8-dust trail decays 15..8, fires TNT";
+        for (int i = 0; i <= 9; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P3 粉超距（lever + 16 粉 + TNT）：末粉电力 0 → TNT 不应点燃（15 格衰减上限语义）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Lever, 1);
+        for (int i = 1; i <= 16; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
+        w.setBlock(x0 + 17, kRigY, z0, BR::TntBlock, 0);
+        const int t0 = tntFired;
+        tickN(w, 10);
+        const bool ok = tntFired == t0;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| 16-dust out-of-range: TNT must NOT fire";
+        for (int i = 0; i <= 17; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P4 火把立方块上、粉在地面斜下邻（经典 torch-on-block 布线）：t740 修复后应喂粉 15 + 灯亮；断火把降沿灯灭。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Stone);                 // 支撑块
+        w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);  // 火把立其上
+        w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);   // 地面粉（与火把斜角）
+        w.setBlock(x0 + 2, kRigY, z0, BR::RedstoneLamp, 0);
+        tickN(w, 6);
+        const int p = w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask;
+        const bool lampOn = (w.stateAt(x0 + 2, kRigY, z0) & BR::RedstoneLampStateOnFlag) != 0;
+        bool ok = (p == 15) && lampOn;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| torch-on-block -> diagonal-down dust power=15, lamp on (t740 fix)";
+        w.setBlock(x0, kRigY + 1, z0, BR::Air); // 拆火把（降沿）
+        tickN(w, 6);
+        const int p2 = w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask;
+        const bool lampOff = (w.stateAt(x0 + 2, kRigY, z0) & BR::RedstoneLampStateOnFlag) == 0;
+        ok = (p2 == 0) && lampOff;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| torch removed -> diagonal dust 0, lamp off";
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P4b 复审 #6：墙上挂的红石火把（attach 低 3 位 1..4）**不**向斜下角粉供电 —— 旧 seeding 不读
+    //   attach 形态，墙上装饰火把把墙脚一圈粉点亮（意外通电）。立式（P4）语义不变（正对照）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0 - 1, kRigY + 1, z0, BR::Stone);            // 墙（火把支撑，-X 邻）
+        w.setBlock(x0,     kRigY + 1, z0, BR::RedstoneTorch, BR::TorchOnNX); // 墙挂火把（支撑在 -X）
+        w.setBlock(x0 + 1, kRigY,     z0, BR::RedstoneDust, 0);   // 墙脚斜下角粉（+1,-1,0）
+        w.setBlock(x0 + 2, kRigY,     z0, BR::RedstoneLamp, 0);
+        tickN(w, 6);
+        const int p = w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask;
+        const bool lampOff = (w.stateAt(x0 + 2, kRigY, z0) & BR::RedstoneLampStateOnFlag) == 0;
+        const bool ok = (p == 0) && lampOff;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| wall torch (TorchOnNX) -> diagonal-down dust stays 0, lamp off (review #6)";
+        w.setBlock(x0 - 1, kRigY + 1, z0, BR::Air);
+        w.setBlock(x0,     kRigY + 1, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY,     z0, BR::Air);
+        w.setBlock(x0 + 2, kRigY,     z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P5 火把立在 TNT 顶面（TNT 是火把支撑）：火把供下邻强电 → 应点燃。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::TntBlock, 0);
+        w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);
+        const int t0 = tntFired;
+        tickN(w, 6);
+        const bool ok = tntFired > t0;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| torch standing ON TNT -> fires";
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0, kRigY + 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P6 红石火把 NOT 门（t657 语义抽查）：支撑块被供电 → 火把熄灭（OffFlag）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Stone);
+        w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);
+        tickN(w, 6);
+        bool ok = (w.stateAt(x0, kRigY + 1, z0) & BR::RedstoneTorchStateOffFlag) == 0; // 亮态
+        w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneBlock); // 支撑块邻供强电
+        tickN(w, 8);
+        ok = ok && (w.stateAt(x0, kRigY + 1, z0) & BR::RedstoneTorchStateOffFlag) != 0; // 熄灭
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| torch NOT-gate: powered support -> torch off";
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0, kRigY + 1, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P7 拉杆直接邻 TNT（既有历史直连路径之外的电力路径）：扳上 → 电力点燃。
+    //   （游戏内右键拉杆另有 t490 直连四邻 TNT 点火——与本电力路径并存；本测只验电力侧。）
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Lever, 1);
+        w.setBlock(x0 + 1, kRigY, z0, BR::TntBlock, 0);
+        const int t0 = tntFired;
+        tickN(w, 6);
+        const bool ok = tntFired > t0;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| lever(on) adjacent TNT (power path) -> fires";
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P8 地面火把 → 同层粉×3 → TNT（用户字面场景「红石火把和红石粉激活 TNT」）：应点燃 + 粉级 15/14/13。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::RedstoneTorch, 0);
+        for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
+        w.setBlock(x0 + 4, kRigY, z0, BR::TntBlock, 0);
+        const int t0 = tntFired;
+        tickN(w, 8);
+        bool ok = tntFired > t0;
+        for (int i = 1; i <= 3 && ok; ++i) {
+            const int p = w.stateAt(x0 + i, kRigY, z0) & BR::RedstoneDustPowerMask;
+            if (p != 16 - i) { qInfo().noquote() << "  dust" << i << "power" << p << "expect" << 16 - i; ok = false; }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| floor torch -> same-level 3-dust -> TNT fires (user scenario)";
+        for (int i = 0; i <= 4; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P9 火把立方块上 + 地面粉×3 → TNT（t740 斜下供粉修复的端到端用户场景）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Stone);
+        w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);
+        for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
+        w.setBlock(x0 + 4, kRigY, z0, BR::TntBlock, 0);
+        const int t0 = tntFired;
+        tickN(w, 8);
+        const bool ok = tntFired > t0;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| torch-on-block -> diagonal 3-dust -> TNT fires (t740 fix e2e)";
+        for (int i = 0; i <= 4; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        w.setBlock(x0, kRigY + 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P10 t739 阶梯爬坡供电（平地粉 → 上台阶 → 平地粉；渲染改 L 形贴边爬升后的电力侧回归）：
+    //   电力语义不动（爬墙斜角仍算一跳衰减，t702/t738/t740 修复保持）—— lever + 平地粉×2 + 一格高
+    //   石阶 + 阶上粉 + 阶后平地粉 + 灯：全线导通（灯亮）且电力 15/14/13/12 逐粉 -1（爬墙计一跳）；
+    //   连接位高半字节按「水平邻粉 + 爬墙斜角」置位（渲染 L 形贴边（低处平铺 + 竖直贴面段）读的
+    //   正是这些位 + chunkgeometry 三高探针——本探针锁 state 侧不回退）。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::Lever, 1);
+        w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);     // 平地粉
+        w.setBlock(x0 + 2, kRigY, z0, BR::RedstoneDust, 0);     // 平地粉（墙脚）
+        w.setBlock(x0 + 3, kRigY, z0, BR::Stone, 0);            // 一格高台阶
+        w.setBlock(x0 + 3, kRigY + 1, z0, BR::RedstoneDust, 0); // 阶上粉（爬升）
+        w.setBlock(x0 + 4, kRigY, z0, BR::RedstoneDust, 0);     // 阶后平地粉（下降）
+        w.setBlock(x0 + 5, kRigY, z0, BR::RedstoneLamp, 0);
+        tickN(w, 8);
+        const bool lampOn = (w.stateAt(x0 + 5, kRigY, z0) & BR::RedstoneLampStateOnFlag) != 0;
+        bool ok = lampOn;
+        const struct { int x, y, wantP, wantConn; } want[] = {
+            { x0 + 1, kRigY,     15, 0x01 }, // 仅 +X 同层粉
+            { x0 + 2, kRigY,     14, 0x03 }, // -X 同层 + +X 爬墙（斜角上粉）
+            { x0 + 3, kRigY + 1, 13, 0x03 }, // -X / +X 皆爬墙（斜角下粉）
+            { x0 + 4, kRigY,     12, 0x02 }, // 仅 -X 爬墙（斜角上粉）
+        };
+        for (const auto &e : want) {
+            const quint8 st = w.stateAt(e.x, e.y, z0);
+            const int p = st & BR::RedstoneDustPowerMask;
+            const int conn = st >> 4;
+            if (p != e.wantP || conn != e.wantConn) {
+                qInfo().noquote() << "  dust" << e.x << "y" << e.y << "power" << p << "conn" << conn
+                                  << "expect power" << e.wantP << "conn" << e.wantConn;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| stair-step climb over 1-block step: power 15/14/13/12, lamp on (t739)";
+        for (int i = 0; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 3, kRigY + 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P8 板压灯竖直路径（t743 ①）：压力板直接放红石灯正上方（板 = 灯的 +Y 邻，向下供电）。驱动序列镜像
+    //   真实路径：先放未压板（玩家放置 state=0）→ 稳态 → 再经 **5 参数 setBlock 只写 bit0**（与
+    //   PlayerController::updatePressurePlates 踩下沿完全同一入口，非矩阵主体的「放置即带压下态」）→
+    //   tickRedstone 后灯亮；清 bit0（离开沿）→ 灯灭。竖直 +Y/-Y 方向在此前矩阵主体（同层水平邻）与 P4
+    //   （火把斜下喂粉）之外单独验证——notePowerWrite 锚点 → 锚点 6 邻接收器扫描含 -Y 邻灯。
+    //   t743 ②（掉落物压木板）的判定在 Game 层（ItemEntityManager resting 支撑格 = floor(pos.y())-1，
+    //   本工具只编 Core+World 两层测不到）；掉落物压板在 World 层与玩家踩板同写 bit0 → 电力侧由本探针覆盖。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0, kRigY, z0, BR::RedstoneLamp, 0);               // 灯
+        w.setBlock(x0, kRigY + 1, z0, BR::WoodPressurePlate, 0);      // 板在灯正上方（放置态，未压）
+        tickN(w, 2);
+        w.setBlock(x0, kRigY + 1, z0, BR::WoodPressurePlate, 1);      // 踩下沿写 bit0（真实驱动同入口）
+        tickN(w, 6);
+        bool ok = (w.stateAt(x0, kRigY, z0) & BR::RedstoneLampStateOnFlag) != 0;
+        w.setBlock(x0, kRigY + 1, z0, BR::WoodPressurePlate, 0);      // 离开沿清 bit0
+        tickN(w, 6);
+        ok = ok && (w.stateAt(x0, kRigY, z0) & BR::RedstoneLampStateOnFlag) == 0;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| plate directly on lamp (vertical down-power), press/release edges (t743)";
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0, kRigY + 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P9 机关族逐态几何映射（t744 ②回归锁）：用户复盘「按钮放地面变正方形」，静态排查 + 全链 mesher dump
+    //   实证贴地态自 t662 起就是贴地扁薄盒（6/16×2/16×6/16，Y[0,2/16]）——报告疑含陈旧 exe 因素（同 t740
+    //   复盘）。本探针把「state 附着编码 → mechBoxes 几何」逐态断言锁进 harness（地面/四墙 × 激活两态 +
+    //   放置法线映射），未来任何把地面态画回墙面姿态 / 厚边离墙的回归直接 FAIL。纯 Core 断言（mechBoxes
+    //   静态，渲染与 raycastAABBs 选中同源——锁住渲染即同时锁住选体）。
+    {
+        bool ok = true;
+        const float t = 1.0f / 16.0f;
+        const quint8 mechIds[3] = { BR::Lever, BR::WoodButton, BR::StoneButton };
+        for (const quint8 id : mechIds) {
+            const bool isLever = (id == BR::Lever);
+            for (int active = 0; active <= 1; ++active) {
+                for (int attach = 0; attach <= 4; ++attach) {
+                    const quint8 state = quint8((active ? 1u : 0u)
+                                                | (quint8(attach) << BR::MechAttachShift));
+                    const auto boxes = BR::mechBoxes(id, state);
+                    if (boxes.empty()) { ok = false; continue; }
+                    // 全盒并集（按钮单盒；拉杆底座+摆棍取并集验「贴面侧」）。
+                    float minX = 9e9f, maxX = -9e9f, minY = 9e9f, maxY = -9e9f, minZ = 9e9f, maxZ = -9e9f;
+                    for (const auto &b : boxes) {
+                        minX = qMin(minX, b.minX); maxX = qMax(maxX, b.maxX);
+                        minY = qMin(minY, b.minY); maxY = qMax(maxY, b.maxY);
+                        minZ = qMin(minZ, b.minZ); maxZ = qMax(maxZ, b.maxZ);
+                    }
+                    const float th = active ? 1.0f : 2.0f; // 机关厚度单位（1/16）：按下压薄
+                    switch (attach) {
+                    case 0: // 贴地：并集贴格底（minY=0）且总高 ≤ 按钮 2/16（按下 1/16）/ 拉杆棍高 14/16
+                        if (qAbs(minY) > 1e-4f) ok = false;
+                        if (!isLever && maxY > (th + 0.5f) * t) ok = false;       // 按钮 = 贴地扁薄盒
+                        if (isLever && maxY > 14.0f * t) ok = false;              // 拉杆 = 贴地底座+棍（棍顶 14/16）
+                        if (isLever && boxes.size() < 3) ok = false;              // 底座 + 两段摆棍
+                        break;
+                    case 1: // 支撑在 +X：厚边/底座贴 x=1 格边（mechBoxes 厚度 ≤ th+0.5/16，不掉离墙）
+                        if (qAbs(maxX - 1.0f) > 1e-4f || minX < 1.0f - (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    case 2: // 支撑在 -X：贴 x=0
+                        if (qAbs(minX) > 1e-4f || maxX > (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    case 3: // 支撑在 +Z：贴 z=1
+                        if (qAbs(maxZ - 1.0f) > 1e-4f || minZ < 1.0f - (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    default: // 支撑在 -Z：贴 z=0
+                        if (qAbs(minZ) > 1e-4f || maxZ > (th + 0.5f + (isLever ? 6.0f : 0.0f)) * t) ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+        // 放置法线 → 附着编码映射（playercontroller placeBlock 写 state 的同一函数）：顶面贴地 / 四侧取反码
+        //   （MechAttachOnXX = 支撑块方向）/ 底面拒（-1，v1 不支持天花板挂装）。
+        if (BR::mechAttachFromNormal(0, 1, 0) != BR::MechAttachFloor) ok = false;
+        if (BR::mechAttachFromNormal(1, 0, 0) != BR::MechAttachOnNX) ok = false;
+        if (BR::mechAttachFromNormal(-1, 0, 0) != BR::MechAttachOnPX) ok = false;
+        if (BR::mechAttachFromNormal(0, 0, 1) != BR::MechAttachOnNZ) ok = false;
+        if (BR::mechAttachFromNormal(0, 0, -1) != BR::MechAttachOnPZ) ok = false;
+        if (BR::mechAttachFromNormal(0, -1, 0) != -1) ok = false;
+        // 附着解码 ↔ 几何贴边一致性：mechAttachOffset 给的支撑向必须与 mechBoxes 厚边所在侧同向
+        //   （OnPX → dx=+1 → 厚边在 x=1；失撑掉落扫描与渲染/选中读同一编码，锁三者同源）。
+        {
+            int dx, dy, dz;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnPX << BR::MechAttachShift), dx, dy, dz);
+            if (dx != 1 || dy != 0 || dz != 0) ok = false;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnNX << BR::MechAttachShift), dx, dy, dz);
+            if (dx != -1) ok = false;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnPZ << BR::MechAttachShift), dx, dy, dz);
+            if (dz != 1) ok = false;
+            BR::mechAttachOffset(quint8(BR::MechAttachOnNZ << BR::MechAttachShift), dx, dy, dz);
+            if (dz != -1) ok = false;
+            BR::mechAttachOffset(0, dx, dy, dz);
+            if (dx != 0 || dy != -1 || dz != 0) ok = false; // 贴地 → 支撑在下方
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| mech per-attach geometry: floor=flat-thin-box, wall=flush-to-support, decode parity (t744)";
+    }
+
+    // ── P-t992 按钮几何统一探针（墙面口径为基准）：用户「按钮放地上和放墙上大小不统一（以墙上为准）」
+    //    +「墙上形态比例也不协调」→ mechBoxes 按钮板统一为 MC 比例 6/16 宽 × 4/16 高 × 厚 2/16（按下
+    //    6×4×1）：五安装面（贴地 + 四墙）同一张 6×4 钮脸、同一厚度，尺寸不再随安装面漂移。旧版墙面钮
+    //    仅 2/16 高（y 7..9 = 细横条，比例失调），地面钮 6×6 见方 footprint（与墙面 6×2 观感两套尺寸）。
+    //    断言（木/石 × 五附着 × 激活两态，单盒按钮）：
+    //    (i)   厚度轴 extent == th（2 常态 / 1 按下——按下仅压薄不改脸，t628 零回归）；
+    //    (ii)  非厚度两轴 extent 恒 {4,6}/16 —— 同一钮脸（统一性钉）；
+    //    (iii) 钮脸位置钉：墙面钮 y 6..10 居中（比例协调 + 与墙 +Z 形同宽），地面钮宽沿 X 5..11（墙面
+    //          同宽口径）× 深 6..10；厚边贴支撑面（P9 已锁，随 t992 复锁）；
+    //    (iv)  源码钉：mechBoxes 按钮 t992 契约锚 + PX 墙面行字面量（渲染/射线/查看器三消费端同源自动）。
+    {
+        bool ok = true;
+        const float t = 1.0f / 16.0f;
+        const quint8 btnIds[2] = { BR::WoodButton, BR::StoneButton };
+        for (const quint8 id : btnIds) {
+            for (int active = 0; active <= 1; ++active) {
+                const float th = active ? 1.0f : 2.0f;
+                for (int attach = 0; attach <= 4; ++attach) {
+                    const quint8 state = quint8((active ? 1u : 0u)
+                                                | (quint8(attach) << BR::MechAttachShift));
+                    const auto boxes = BR::mechBoxes(id, state);
+                    if (boxes.size() != 1) { ok = false; continue; }
+                    const BR::BlockAABB &b = boxes.front();
+                    const float ex = (b.maxX - b.minX) / t;
+                    const float ey = (b.maxY - b.minY) / t;
+                    const float ez = (b.maxZ - b.minZ) / t;
+                    // 厚度轴：贴地=Y、四墙 X/X/Z/Z；其余两轴为钮脸。
+                    float thExt = -1.0f, faceA = -1.0f, faceB = -1.0f;
+                    switch (attach) {
+                    case 0: thExt = ey; faceA = ex; faceB = ez; break;
+                    case 1: case 2: thExt = ex; faceA = ey; faceB = ez; break;
+                    default: thExt = ez; faceA = ex; faceB = ey; break;
+                    }
+                    float lo = std::min(faceA, faceB), hi = std::max(faceA, faceB);
+                    const bool dimsOk = std::fabs(thExt - th) < 1e-3f      // (i) 厚度 = th
+                        && std::fabs(lo - 4.0f) < 1e-3f && std::fabs(hi - 6.0f) < 1e-3f; // (ii) 统一 4×6 脸
+                    // (iii) 位置钉：厚边贴支撑 + 墙面钮 y[6,10] 居中 + 地面钮宽沿 X[5,11]
+                    bool posOk = false;
+                    switch (attach) {
+                    case 0:
+                        posOk = std::fabs(b.minY) < 1e-4f
+                            && std::fabs(b.minX - 5.0f * t) < 1e-4f && std::fabs(b.maxX - 11.0f * t) < 1e-4f;
+                        break;
+                    case 1:  posOk = std::fabs(b.maxX - 1.0f) < 1e-4f; break;
+                    case 2:  posOk = std::fabs(b.minX) < 1e-4f; break;
+                    case 3:  posOk = std::fabs(b.maxZ - 1.0f) < 1e-4f; break;
+                    default: posOk = std::fabs(b.minZ) < 1e-4f; break;
+                    }
+                    if (attach != 0) // 墙面钮：y 6..10（4/16 高居中——旧 7..9 细横条的比例失调根除）
+                        posOk = posOk && std::fabs(b.minY - 6.0f * t) < 1e-4f
+                             && std::fabs(b.maxY - 10.0f * t) < 1e-4f;
+                    if (!dimsOk || !posOk) {
+                        qInfo().noquote() << "  [t992 diag] btn" << int(id) << "active" << active
+                                          << "attach" << attach << "ext" << ex << ey << ez
+                                          << "dimsOk" << dimsOk << "posOk" << posOk;
+                        ok = false;
+                    }
+                }
+            }
+        }
+        // (iv) 源码钉：mechBoxes 按钮 t992 锚 + PX 墙面行字面量（三消费端共用本函数，钉源即钉全部）
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile bf(root + QStringLiteral("/src/Core/blockregistry.cpp"));
+            const QString src = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+            if (src.isEmpty()
+                || !src.contains(QStringLiteral("t992 统一口径"))
+                || !src.contains(QStringLiteral("out.push_back({(16.0f - th) * t, 6.0f * t, 5.0f * t, 1.0f, 10.0f * t, 11.0f * t})"))) {
+                qInfo().noquote() << "  [t992 diag] source pin miss src" << src.isEmpty();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t992 button geometry unified to the wall baseline: plate 6/16 wide x 4/16 "
+                             "tall x 2/16 thick (pressed halves thickness only) on all five attach faces "
+                             "(floor footprint was a 6x6 nub vs the wall 6x2 sliver; MC-proportioned 4/16 "
+                             "tall face centered at mid-block), flush to support, world mesher / raycast / "
+                             "viewer preview consume the same mechBoxes source";
+    }
+
+    // ── P-t993 玻璃增实探针（材质轴，pack 两态同调）：用户「玻璃透明度还是太透明」→ 世界玻璃段材质
+    //    opacity 0.30→0.45（迭代史 t405 0.45 → t899 0.30 → t993 0.45；与手持玻璃立方同值，收口 t899 起
+    //    世界段/手持的漂移）。断言三腿：
+    //    (a) 材质腿：Main.qml glassChunkComp 切片内唯一一处 opacity 赋值解析 == 0.45 且 ∈(0,1) 开区间
+    //        （Blend 半透：仍可透视且实体感）+ t993 契约锚在场；手持玻璃两处（第一/第三人称
+    //        heldCubeIsGlass 分支）同 0.45（玻璃三消费端同值钉）。
+    //    (b) 贴图契约腿（tile 逐像素）：textures/atlas.png tile 68（default_glass）全 64×64 px alpha==255
+    //        —— 「纹理不透 + 材质半透」同 water 模式契约（可透视性由材质 opacity 承担；贴图保持不透 =
+    //        实体感基底，且不触碰 terrain 段 Mask/alphaCutoff 契约、无透明段排序新面）。
+    //    (c) pack 两态一致钉：resourcepackmanager.cpp tileFilenameMap 含 {68, glass.png}（pack-on 覆写
+    //        tile 68 像素）而 (a) 切片内 opacity 赋值唯一且无条件（不随 pack 分支）→ 材质增实两态同调。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        // (a) 材质腿：glassChunkComp 切片解析
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString mainQml = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const int iGlass = mainQml.indexOf(QStringLiteral("id: glassChunkComp"));
+        const int iGlassEnd = mainQml.indexOf(QStringLiteral("// t468 冰段"), iGlass); // 冰段注释 = 玻璃段界标
+        if (iGlass < 0 || iGlassEnd <= iGlass) {
+            qInfo().noquote() << "  [t993 diag] glass slice miss" << iGlass << iGlassEnd;
+            ok = false;
+        } else {
+            const QString seg = mainQml.mid(iGlass, iGlassEnd - iGlass);
+            const int io = seg.indexOf(QStringLiteral("opacity:"));
+            const int ioe = seg.indexOf(QLatin1Char(';'), io);
+            const float op = (io >= 0 && ioe > io) ? seg.mid(io + int(qstrlen("opacity:")), ioe - io - int(qstrlen("opacity:"))).toFloat() : -1.0f;
+            const bool matOk = op > 0.0f && op < 1.0f && std::fabs(op - 0.45f) < 1e-3f
+                && seg.count(QStringLiteral("opacity:")) == 1 // 唯一且无条件（pack 两态同调 + 不随分支漂移）
+                && seg.contains(QStringLiteral("t993 玻璃再增实一档"));
+            const int held45 = mainQml.count(QStringLiteral("heldCubeIsGlass(player.selectedBlock) ? 0.45"));
+            if (!matOk || held45 != 2) {
+                qInfo().noquote() << "  [t993 diag] matOk" << matOk << "op" << op << "held45" << held45;
+                ok = false;
+            }
+        }
+        // (b) 贴图契约腿：tile 68 逐像素 alpha==255（纹理不透 + 材质半透，同 water 模式）
+        {
+            QImage atlas(root + QStringLiteral("/textures/atlas.png"));
+            constexpr int kGlassTile = 68;  // default_glass（BlockRegistry::AtlasTileCount 单行图集；t1028 起 185）
+            constexpr int kPx = 64;         // kAtlasTilePx 文档镜像
+            bool opaqueAll = false;
+            if (atlas.isNull() || atlas.width() < (kGlassTile + 1) * kPx) {
+                qInfo().noquote() << "  [t993 diag] atlas load miss";
+            } else {
+                const QImage tile = atlas.copy(kGlassTile * kPx, 0, kPx, kPx)
+                                        .convertToFormat(QImage::Format_RGBA8888);
+                opaqueAll = !tile.isNull();
+                for (int y = 0; y < tile.height() && opaqueAll; ++y) {
+                    const uchar *row = tile.constScanLine(y);
+                    for (int x = 0; x < tile.width(); ++x) {
+                        if (row[x * 4 + 3] != 255) { opaqueAll = false; break; }
+                    }
+                }
+            }
+            if (!opaqueAll) {
+                qInfo().noquote() << "  [t993 diag] glass tile alpha not fully opaque";
+                ok = false;
+            }
+        }
+        // (c) pack 两态一致钉：tileFilenameMap 走 glass.png 覆写 tile 68，材质不随 pack 分支
+        {
+            QFile rf(root + QStringLiteral("/src/Core/resourcepackmanager.cpp"));
+            const QString rsrc = rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString();
+            if (rsrc.isEmpty()
+                || !rsrc.contains(QStringLiteral("{68, QStringLiteral(\"glass.png\")}"))) {
+                qInfo().noquote() << "  [t993 diag] pack pin miss rsrc" << rsrc.isEmpty();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t993 glass solidified one notch: world glass segment material opacity "
+                             "0.30 -> 0.45 (t405 0.45 / t899 0.30 / t993 0.45 iteration history; unified "
+                             "with both held-cube glass paths = three glass consumers same value), "
+                             "texture stays fully opaque per the water-mode 'opaque texture + translucent "
+                             "material' contract (no Mask/alphaCutoff coupling, no sort-order new faces), "
+                             "pack-on replaces tile 68 pixels only so the material bump tunes both pack "
+                             "states identically";
+    }
+
+    // ── P-t994 刷怪笼迷你生物贴图链探针：用户「笼内迷你生物只有模型没有贴图、纯灰色」→ 根因 = t786 原稿
+    //    把贴图查表属性（miniProgTex/miniPackTex）声明在 miniMobBob 上，而全部消费端引用
+    //    miniMobSpin.miniPackTex（miniMobSpin 无此属性 → QML 绑定静默取 undefined → `undefined !== null`
+    //    恒真 → MobModel.packTextured 恒真（几何走 pack box-UV 而程序贴图缺席）+ 材质 baseColorMap=undefined
+    //    （无贴图纯灰、baseColor 恒走 tl 近白灰）+ 眼层 visible 恒假 = 用户全症状；模型形状仍对——几何
+    //    mobType 直读 spawnerRoot.cageMobType 不经查表）。断言三腿：
+    //    (a) 源码钉：spawnerDelegate 切片内破坏性引用形态 miniMobSpin.miniPackTex / miniProgTex 绝迹；
+    //        修正引用行 verbatim 在场（packTextured / baseColorMap 三元 / 眼层 visible）+ t994 作用域锚。
+    //    (b) 蛋→笼映射回程腿（表驱动，全 14 蛋型）：RecipeRegistry::mobTypeForSpawnEgg（蛋权威）→
+    //        BlockRegistry::spawnerStateForMob（编码）→ EntityManager::spawnerMobTypeForState（解码）==
+    //        原 mobType —— 蛋→笼 state→迷你呈现取型链逐型闭合；且每型的 EntityManager.Mob<名> 字面量在
+    //        Main.qml spawnerDelegate 切片内有行（迷你贴图/体色表覆盖全蛋型，无漏网灰型）。
+    //    (c) 三消费端同源钉：世界 delegate（Main.qml mobHost）/ 图鉴（ResourceBrowser.qml）/ 笼迷你共享
+    //        MobModel（几何一处修多处共享，t782 纪律）；笼迷你解码走 entityManager.spawnerMobTypeForState
+    //        （与 tickSpawners 同一权威）两处调用在场。
+    {
+        bool ok = true;
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
+        QFile bf(root + QStringLiteral("/src/ui/ResourceBrowser.qml"));
+        const QString mainQml = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
+        const QString browser = bf.open(QIODevice::ReadOnly) ? QString::fromUtf8(bf.readAll()) : QString();
+        const int iDel = mainQml.indexOf(QStringLiteral("id: spawnerDelegate"));
+        const int iDelEnd = mainQml.indexOf(QStringLiteral("t196 / t225 / t441 箱子盖子"), iDel);
+        if (iDel < 0 || iDelEnd <= iDel) {
+            qInfo().noquote() << "  [t994 diag] spawnerDelegate slice miss" << iDel << iDelEnd;
+            ok = false;
+        } else {
+            const QString seg = mainQml.mid(iDel, iDelEnd - iDel);
+            // (a) 源码钉：破坏形态绝迹 + 修正引用行 verbatim
+            const bool fixPins = !seg.contains(QStringLiteral("miniMobSpin.miniPackTex"))
+                && !seg.contains(QStringLiteral("miniMobSpin.miniProgTex"))
+                && seg.contains(QStringLiteral("packTextured: miniMobBob.miniPackTex !== null"))
+                && seg.contains(QStringLiteral("baseColorMap: miniMobBob.miniPackTex !== null ? miniMobBob.miniPackTex : miniMobBob.miniProgTex"))
+                && seg.contains(QStringLiteral("visible: miniMobBob.miniPackTex === null"))
+                && seg.contains(QStringLiteral("t994 作用域契约"));
+            if (!fixPins) {
+                qInfo().noquote() << "  [t994 diag] fix pins missing (broken-form residue or verbatim rows)";
+                ok = false;
+            }
+            // (b) 蛋→笼映射回程 + QML 迷你表逐型覆盖
+            EntityManager em994;
+            struct EggRow { int eggId; const char *qmlName; };
+            const EggRow eggs994[] = {
+                { RecipeRegistry::SpawnEggPigId,          "MobPig" },
+                { RecipeRegistry::SpawnEggCowId,          "MobCow" },
+                { RecipeRegistry::SpawnEggSheepId,        "MobSheep" },
+                { RecipeRegistry::SpawnEggShamblerId,     "MobShambler" },
+                { RecipeRegistry::SpawnEggBonesId,        "MobBones" },
+                { RecipeRegistry::SpawnEggStalkerId,      "MobStalker" },
+                { RecipeRegistry::SpawnEggSpiderId,       "MobSpider" },
+                { RecipeRegistry::SpawnEggChickenId,      "MobChicken" },
+                { RecipeRegistry::SpawnEggSquidId,        "MobSquid" },
+                { RecipeRegistry::SpawnEggNightwalkerId,  "MobNightwalker" },
+                { RecipeRegistry::SpawnEggEmberlingId,    "MobEmberling" },
+                { RecipeRegistry::SpawnEggWolfId,         "MobWolf" },
+                { RecipeRegistry::SpawnEggOcelotId,       "MobOcelot" },
+                { RecipeRegistry::SpawnEggBabyShamblerId, "MobBabyShambler" },
+            };
+            for (const EggRow &e : eggs994) {
+                const int mt = RecipeRegistry::mobTypeForSpawnEgg(e.eggId);
+                const quint8 st = BlockRegistry::spawnerStateForMob(mt);
+                const int back = em994.spawnerMobTypeForState(int(st));
+                const bool qmlRow = seg.contains(QStringLiteral("EntityManager.") + QString::fromLatin1(e.qmlName));
+                if (mt < 0 || back != mt || !qmlRow) {
+                    qInfo().noquote() << "  [t994 diag] egg" << QString::number(e.eggId, 16) << "mt" << mt
+                                      << "back" << back << "qmlRow" << qmlRow;
+                    ok = false;
+                }
+            }
+        }
+        // (c) 三消费端同源钉：世界 delegate / 图鉴 / 笼迷你共享 MobModel；解码权威两处调用
+        {
+            const bool sameSource = mainQml.contains(QStringLiteral("geometry: MobModel {"))
+                && browser.contains(QStringLiteral("MobModel {"))
+                && mainQml.contains(QStringLiteral("entityManager.spawnerMobTypeForState"));
+            int decodeCalls = 0, from = 0;
+            const QString needle = QStringLiteral("entityManager.spawnerMobTypeForState");
+            while ((from = mainQml.indexOf(needle, from)) >= 0) { ++decodeCalls; from += needle.length(); }
+            if (!sameSource || decodeCalls < 2) {
+                qInfo().noquote() << "  [t994 diag] sameSource" << sameSource << "decodeCalls" << decodeCalls;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t994 spawner cage mini texture chain: the t786 texture-lookup properties live "
+                             "on miniMobBob so every consumer (MobModel.packTextured / material baseColorMap+"
+                             "baseColor+alphaMode / eye visibility) references miniMobBob - the broken "
+                             "miniMobSpin.* form is extinct (it silently evaluated undefined, made "
+                             "undefined !== null constantly true, and starved the mini of its texture = the "
+                             "user's shape-correct but pure-gray mini); all 14 spawn eggs round-trip "
+                             "mobTypeForSpawnEgg -> spawnerStateForMob -> spawnerMobTypeForState and every "
+                             "type has a QML mini-table row; world delegate / gallery / cage mini share the "
+                             "same MobModel geometry source";
+    }
+
+    // P10 t733 铁轨失撑掉落（R19.11 三族统一；World::checkRailOnEdit 单一入口覆盖全部破坏路径）：支撑位被清
+    //   为 Air → 正上方铁轨坍落为掉落物（blockDroppedAsItem，dropId=自身；连接位 / 通电位丢弃）。本探针驱动
+    //   三族代表路径：① 挖掘（setBlock Air 破支撑，含创造——World 层无 drop 标志）② 爆炸（destroySphereSilent
+    //   逐破坏格：轨在球外幸存、支撑被炸）③ TNT 点火变实体（clearBlockSilent 清支撑）。另锁两个边界：
+    //   ④ 上半砖支撑（isTopFlushSupport 正分支）——清侧邻不掉 / 清半砖本体才掉；⑤ 直破铁轨本格零掉落
+    //   （守卫 isRail(oldId) 防与 finishMiningAt 通用 drop 双掉）。
+    {
+        int railDrops = 0;
+        quint8 lastDropId = 0; int lastDropX = -1, lastDropY = -1;
+        const QMetaObject::Connection dropConn =
+            QObject::connect(&w, &World::blockDroppedAsItem, &w, [&](int x, int y, int z, int id) {
+                Q_UNUSED(z);
+                ++railDrops; lastDropId = quint8(id); lastDropX = x; lastDropY = y;
+            });
+        bool ok = true;
+        // ① 挖掘路径 × 三族：Stone 支撑 + 轨其上 → 破支撑 → 轨成掉落物（id=自身）且格已清（无浮空残留）。
+        const quint8 railKinds[3] = { BR::Rail, BR::GoldenRail, BR::DetectorRail };
+        for (const quint8 rk : railKinds) {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::Stone, 0);
+            w.setBlock(x0, kRigY + 1, z0, rk, 0);
+            const int d0 = railDrops;
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            if (railDrops != d0 + 1 || lastDropId != rk || lastDropX != x0 || lastDropY != kRigY + 1
+                || w.blockAt(x0, kRigY + 1, z0) != BR::Air) {
+                qInfo().noquote() << "  mine-support rail-drop failed for id" << int(rk);
+                ok = false;
+            }
+        }
+        // ② 爆炸路径：半径 3 球心 (x0,kRigY,z0)——支撑 (dx=2,dy=2) 距 2.83 被炸；轨 (dx=2,dy=3) 距 3.61 球外
+        //   幸存但失撑 → 坍落（恒掉，不走爆炸 ~50% 破坏掉落概率门——支撑脱落是必然事件）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0 + 2, kRigY + 2, z0, BR::Stone, 0);
+            w.setBlock(x0 + 2, kRigY + 3, z0, BR::Rail, 0);
+            const int d0 = railDrops;
+            w.destroySphereSilent(x0, kRigY, z0, 3.0f);
+            if (railDrops != d0 + 1 || lastDropId != BR::Rail
+                || w.blockAt(x0 + 2, kRigY + 3, z0) != BR::Air) {
+                qInfo().noquote() << "  blast-support rail-drop failed";
+                ok = false;
+            }
+        }
+        // ③ TNT 点火路径：TNT 支撑被 clearBlockSilent 静默清（变引燃实体）→ 其上轨立即掉落（无浮空残留）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::TntBlock, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::GoldenRail, 0); // 动力轨铺 TNT 顶（用户场景）
+            const int d0 = railDrops;
+            w.clearBlockSilent(x0, kRigY, z0);
+            if (railDrops != d0 + 1 || lastDropId != BR::GoldenRail
+                || w.blockAt(x0, kRigY + 1, z0) != BR::Air) {
+                qInfo().noquote() << "  tnt-prime rail-drop failed";
+                ok = false;
+            }
+        }
+        // ④ 上半砖支撑边界（isTopFlushSupport：完整立方 ∨ 上半砖，t741 单一权威）：清侧邻 → 支撑在 → 不掉；
+        //    清半砖本体 → 掉。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::WoodSlab, 1);      // 上半砖（bit0=1 → 顶面齐平可撑）
+            w.setBlock(x0, kRigY + 1, z0, BR::Rail, 0);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Stone, 0);
+            const int d0 = railDrops;
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);          // 清侧邻 → 不掉
+            if (railDrops != d0 || w.blockAt(x0, kRigY + 1, z0) != BR::Rail) {
+                qInfo().noquote() << "  lateral clear must not drop rail";
+                ok = false;
+            }
+            w.setBlock(x0, kRigY, z0, BR::Air);              // 清半砖本体 → 掉
+            if (railDrops != d0 + 1 || w.blockAt(x0, kRigY + 1, z0) != BR::Air) {
+                qInfo().noquote() << "  slab-support clear must drop rail";
+                ok = false;
+            }
+        }
+        // ⑤ 直破铁轨本格：守卫 isRail(oldId) → 本分支零掉落（通用 drop 走 finishMiningAt，防双掉）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::Stone, 0);
+            w.setBlock(x0, kRigY + 1, z0, BR::Rail, 0);
+            const int d0 = railDrops;
+            w.setBlock(x0, kRigY + 1, z0, BR::Air);          // 直破轨本体
+            if (railDrops != d0) {
+                qInfo().noquote() << "  direct rail break must not double-drop";
+                ok = false;
+            }
+            w.setBlock(x0, kRigY, z0, BR::Air);
+        }
+        QObject::disconnect(dropConn); // 探针结束拆计数器（不影响主程序的掉落物消费链）
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| rail support-drop on mine/blast/tnt-prime for all 3 kinds (t733)";
+    }
+
+    // P11 t737 铁轨环线探针（贴图象限 + 矿车绕圈）：铺 3×3 环（8 格轨、4 拐角）→
+    //   (a) 连接位断言：四拐角 state 恰为各自两邻臂位（railConnections 权威实算）；
+    //   (b) 象限断言：每拐角经 BlockRegistry::railCornerArms（连接位→两臂单一权威）出臂向 →
+    //       PartialBlockGeometry::append（mesher 同源直调）产出的拐角 quad 的贴图肘角 (u=0,v=0) 必落
+    //       (ex,ez)（出口臂贴 x 臂边 / 入口臂贴 z 臂边）—— t737 修正前四象限 v↔z 全反（左转显右转贴图）；
+    //   (c) 骑乘绕圈：上车 + 持续 W（wish 动态随行进向）→ 车必须留在环 footprint、四拐角逐一过心、
+    //       每拐角进/出向垂直（真转弯非直行穿出）、Y 钉轨面；
+    //   (d) 空车绕圈：玩家「追着推」（静止即续推）→ 同 footprint / 转弯断言 + 车头 yaw 覆盖全部
+    //       4 基数向（t737：stepCartAlongRail 过弯更新 yaw —— 旧版空车过弯车头不转）。
+    {
+        const auto [x0, z0] = nextSlot();
+        const int cx = x0 + 1, cz = z0 + 1; // 环心（环 = 心外 8 格）
+        const auto isRing = [&](int x, int z) {
+            return std::abs(x - cx) <= 1 && std::abs(z - cz) <= 1 && (x != cx || z != cz);
+        };
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                if (dx != 0 || dz != 0)
+                    w.setBlock(cx + dx, kRigY, cz + dz, BR::Rail, 0);
+        // (a)+(b) 四拐角：NW=(cx-1,cz-1) 等；期望 con = 两邻臂位组合。
+        const struct { int x, z; quint8 wantCon; } corners[4] = {
+            { cx - 1, cz - 1, quint8(BR::RailConnPx | BR::RailConnPz) }, // 东+南邻
+            { cx + 1, cz - 1, quint8(BR::RailConnNx | BR::RailConnPz) }, // 西+南邻
+            { cx - 1, cz + 1, quint8(BR::RailConnPx | BR::RailConnNz) }, // 东+北邻
+            { cx + 1, cz + 1, quint8(BR::RailConnNx | BR::RailConnNz) }, // 西+北邻
+        };
+        bool ok = true;
+        for (const auto &c : corners) {
+            const quint8 con = quint8(w.stateAt(c.x, kRigY, c.z) & 0x0F);
+            if (con != c.wantCon) {
+                qInfo().noquote() << "  corner" << c.x << kRigY << c.z << "con" << int(con)
+                                  << "expect" << int(c.wantCon);
+                ok = false;
+                continue;
+            }
+            int axd = 0, azd = 0;
+            if (!BR::railCornerArms(con, axd, azd)) { ok = false; continue; }
+            // mesher 同源直调：零邻居 ctx（railDelta 缺省 INT_MIN → 平拐角），归一 UV 空间验象限。
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = 0; // Rail case 只读 railDelta*（缺省 INT_MIN 平拐角）
+            const float tileW = 1.0f / 16.0f;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::Rail, con, lctx, nctx,
+                                         tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            const float ex = (axd > 0) ? 1.0f : 0.0f; // 出口臂贴的 x 边
+            const float ez = (azd > 0) ? 1.0f : 0.0f; // 入口臂贴的 z 边
+            bool elbow = false, diag = false;
+            for (const Vtx &v : verts) {
+                const float uu = (v.u - 136.0f * tileW) / tileW; // 拐角瓦片 UV 归一 [0,1]
+                if (uu < 0.25f && v.v < 0.25f
+                    && std::fabs(v.x - ex) < 1e-4f && std::fabs(v.z - ez) < 1e-4f) elbow = true;
+                if (uu > 0.75f && v.v > 0.75f
+                    && std::fabs(v.x - (1.0f - ex)) < 1e-4f && std::fabs(v.z - (1.0f - ez)) < 1e-4f) diag = true;
+            }
+            if (!elbow || !diag) {
+                qInfo().noquote() << "  corner quadrant wrong at" << c.x << c.z
+                                  << "arms" << axd << azd << "elbow" << elbow << "diag" << diag;
+                ok = false;
+            }
+        }
+        // 环上直格应是对向 2 位（EW）直轨形态（拐角规则不外溢到边格）。
+        if (quint8(w.stateAt(cx, kRigY, cz - 1) & 0x0F) != quint8(BR::RailConnPx | BR::RailConnNx)) ok = false;
+        // ── 通用绕圈跑法（骑乘 / 空车共用断言壳）──
+        const float rideH = 0.45f; // kCartRideH（MinecartManager 私有常量的文档值：轨格 cell 底 + 1/16 板 + 车底
+                                    //   偏移；t768 车斗加高 0.75 模型后底板下沿偏移 0.375 → 0.45。改几何须同步此镜像值）
+        const int kTicks = 2400;    // 0.016s × 2400 ≈ 38.4s 仿真：骑乘 ~8 格/s 多圈 / 空车 4 格/s 续推多圈
+        bool seenYaw[4] = { false, false, false, false }; // 空车过弯 yaw 基数覆盖（0/90/180/270）
+        const auto runLaps = [&](MinecartManager &carts, int cartIdx, bool ridden) {
+            QVector3D prev = carts.posAt(cartIdx);
+            float wishX = 1.0f, wishZ = 0.0f; // 初始沿 spawn 定向（北边中点格 EW 直轨 → +X）
+            int lastBx = int(std::floor(prev.x())), lastBz = int(std::floor(prev.z()));
+            int inDx = 1, inDz = 0; // 进入当前格的方向（spawn 格起步向 +X）
+            double pathLen = 0.0;
+            int cornerVisits = 0, turns = 0;
+            for (int t = 0; t < kTicks; ++t) {
+                QVector3D cp;
+                if (ridden) {
+                    carts.tickRiddenCart(0.016, &w, wishX, wishZ, cp);
+                } else {
+                    carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着车：静止即续推（滑行中被速度闸门跳过）
+                    carts.tickPushedCarts(0.016, &w);
+                    cp = carts.posAt(cartIdx);
+                }
+                const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
+                pathLen += std::sqrt(double(ddx) * ddx + double(ddz) * ddz);
+                const float dl = std::sqrt(ddx * ddx + ddz * ddz);
+                if (dl > 1e-4f) { wishX = ddx / dl; wishZ = ddz / dl; } // wish 动态随行进向（玩家随车头朝前）
+                if (!ridden) {
+                    // 过弯车头基数断言（t737：stepCartAlongRail 重选向时同步 yaw；四舍五入吸收 FP 尾差）
+                    const int yb = int(std::lround(carts.yawAt(cartIdx))) % 360;
+                    const int ybucket = (yb == 0) ? 0 : (yb == 90) ? 1 : (yb == 180) ? 2 : (yb == 270) ? 3 : -1;
+                    if (ybucket >= 0) seenYaw[ybucket] = true;
+                }
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                if (!isRing(bx, bz)) {
+                    qInfo().noquote() << "  cart left ring at tick" << t << "pos" << cp;
+                    return false;
+                }
+                if (std::fabs(cp.y() - (kRigY + rideH)) > 0.01f) {
+                    qInfo().noquote() << "  cart off rail surface at tick" << t << "y" << cp.y();
+                    return false;
+                }
+                if (bx != lastBx || bz != lastBz) {
+                    const int ndx = bx - lastBx, ndz = bz - lastBz;
+                    if (std::abs(ndx) + std::abs(ndz) != 1) { // 跨格必单位轴对齐（一步一格）
+                        qInfo().noquote() << "  non-adjacent cell jump at tick" << t;
+                        return false;
+                    }
+                    const bool wasCorner = (std::abs(lastBx - cx) == 1 && std::abs(lastBz - cz) == 1);
+                    if (wasCorner) {
+                        if (ndx * inDx + ndz * inDz != 0) { // 出拐角必垂直进向（真转弯，非直行穿出）
+                            qInfo().noquote() << "  no turn at corner" << lastBx << lastBz
+                                              << "in" << inDx << inDz << "out" << ndx << ndz;
+                            return false;
+                        }
+                        ++turns;
+                    } else if (ndx != inDx || ndz != inDz) { // 直格不跑偏
+                        qInfo().noquote() << "  drift on straight at" << lastBx << lastBz;
+                        return false;
+                    }
+                    inDx = ndx; inDz = ndz;
+                    lastBx = bx; lastBz = bz;
+                }
+                for (const auto &c : corners) {
+                    if (std::fabs(cp.x() - (c.x + 0.5f)) < 0.2f && std::fabs(cp.z() - (c.z + 0.5f)) < 0.2f) {
+                        ++cornerVisits; // 过心采样（tick 步长 0.13 内必有一次距心 <0.2）
+                        break;
+                    }
+                }
+                prev = cp;
+            }
+            // 门槛按驱动方式分档：骑乘 8 格/s 巡航 ~8 圈；空车 4 格/s 续推（每推 ~2 格）~3.5 圈。
+            const double minPath = ridden ? 40.0 : 20.0;
+            const int minVisits = ridden ? 12 : 8;
+            const int minTurns = ridden ? 8 : 6;
+            qInfo().noquote() << "  laps ridden=" << ridden << "pathLen" << pathLen
+                              << "cornerVisits" << cornerVisits << "turns" << turns;
+            return pathLen > minPath && cornerVisits >= minVisits && turns >= minTurns;
+        };
+        // (c) 骑乘绕圈
+        MinecartManager carts;
+        carts.spawnCart(cx, kRigY, cz - 1, &w); // 北边中点格（EW 直轨 → spawn 定向 +X）
+        const QVector3D mountOrigin(float(cx) + 0.5f, float(kRigY) + 2.0f, float(cz - 1) + 0.5f);
+        if (!carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f)) ok = false;
+        ok = ok && runLaps(carts, 0, true);
+        // (d) 空车绕圈（销毁骑乘车 → 原格重生空车 → 续推绕圈 + yaw 基数覆盖断言）。
+        //   slot-reuse LIFO：销毁 0 号槽后重生车仍落 0 号槽（count() 恒 1）→ cartIdx 恒 0。
+        if (!carts.hitCartFromRay(QVector3D(carts.posAt(0).x(), float(kRigY) + 2.0f, carts.posAt(0).z()),
+                                  QVector3D(0, -1, 0), 4.0f, &w, true)) ok = false;
+        carts.spawnCart(cx, kRigY, cz - 1, &w);
+        ok = ok && runLaps(carts, 0, false);
+        if (!(seenYaw[0] && seenYaw[1] && seenYaw[2] && seenYaw[3])) {
+            qInfo().noquote() << "  empty-cart yaw did not cover 4 cardinals:"
+                              << seenYaw[0] << seenYaw[1] << seenYaw[2] << seenYaw[3];
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| rail loop: corner quadrants + ridden/empty cart orbit with turning + yaw (t737)";
+        // 清场
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(cx + dx, kRigY, cz + dz, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P12 t736 探测轨真实路径（真实矿车实体驱动，含空车；区别于矩阵主体的「直接写 state」驱动）：直线轨
+    //   Rail - DetectorRail - Rail - Rail，探测轨侧邻红石灯。占用统一重扫在 tickPushedCarts 末尾
+    //   （updateDetectorRailOccupancy，全车种帧级收口）。
+    //   (a) 空车停驻探测轨（spawn 即静止、无人骑乘）→ tickPushedCarts + tickRedstone → bit4 置 + 灯亮
+    //       （t736 新覆盖：旧版 t658 只标被骑路径，空车不触发）；
+    //   (a2) 驻轨续帧幂等守卫 —— worldChanged（setWaterSilent 每次写必发）计数在稳态续帧不增（state
+    //       不变不写，车驻轨期间零 state 写）；
+    //   (b) 玩家追推离开（pushEmptyCart + tickPushedCarts 每帧、玩家随车贴住，同 P11 空车跑法）→ 车滑出
+    //       探测格 → bit4 清 + 灯灭（离开沿降断电；用户验收「车离开 → 信号断开」）；
+    //   (c) 被骑路径回归（tryMount + tickRiddenCart 与 tickPushedCarts 同帧双调 —— 与 PlayerController
+    //       骑乘分支同序）：停驻被骑 → 灯亮（t680 ③ 停驶恒供电语义经统一 pass 保留），W 推离 → 灯灭。
+    {
+        const auto [x0, z0] = nextSlot();
+        const int detX = x0 + 1;
+        const int lampX = x0 + 1, lampZ = z0 + 1;
+        w.setBlock(x0,     kRigY, z0, BR::Rail, 0);
+        w.setBlock(detX,   kRigY, z0, BR::DetectorRail, 0);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Rail, 0);
+        w.setBlock(x0 + 3, kRigY, z0, BR::Rail, 0);
+        w.setBlock(lampX,  kRigY, lampZ, BR::RedstoneLamp, 0);
+        const auto detOn  = [&]() { return (w.stateAt(detX, kRigY, z0) & BR::DetectorRailStateOnFlag) != 0; };
+        const auto lampOn = [&]() { return (w.stateAt(lampX, kRigY, lampZ) & BR::RedstoneLampStateOnFlag) != 0; };
+        int wc = 0; // worldChanged 计数（幂等守卫探针：setWaterSilent 每次写必发）
+        const QMetaObject::Connection wcConn =
+            QObject::connect(&w, &World::worldChanged, &w, [&]() { ++wc; });
+
+        // (a) 空车停驻 → 通电。
+        MinecartManager carts;
+        carts.spawnCart(detX, kRigY, z0, &w); // 空车直落探测轨（静止，无人骑）
+        for (int t = 0; t < 8; ++t) { carts.tickPushedCarts(0.016, &w); w.tickRedstone(); }
+        bool okA = detOn() && lampOn();
+        // (a2) 稳态续帧零写（幂等守卫：state 已置不重写 → worldChanged 不增，轨保持通电）。
+        const int wc0 = wc;
+        for (int t = 0; t < 20; ++t) { carts.tickPushedCarts(0.016, &w); w.tickRedstone(); }
+        const bool okA2 = (wc == wc0) && detOn() && lampOn();
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| empty cart parked on detector -> bit4 + adjacent lamp on (t736)";
+        if (!okA2) ++totalFail;
+        qInfo().noquote() << (okA2 ? "PASS" : "FAIL")
+                          << "| idempotent guard: steady frames zero state writes, lamp stays on (t736)";
+        // (b) 追推离开 → 降沿断电。
+        QVector3D player = carts.posAt(0);
+        bool left = false;
+        for (int t = 0; t < 600 && !left; ++t) {
+            carts.pushEmptyCart(&w, player, 1.0f, 0.0f); // 玩家追着车：静止即续推（滑行中被速度闸门跳过）
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+            player = carts.posAt(0);
+            if (int(std::floor(player.x())) >= x0 + 2) left = true; // 车心已出探测格
+        }
+        for (int t = 0; t < 12; ++t) { carts.tickPushedCarts(0.016, &w); w.tickRedstone(); } // 离开沿收敛
+        const bool okB = left && !detOn() && !lampOn();
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| empty cart pushed off detector -> bit4 clear + lamp off (leave edge, t736)";
+        // (c) 被骑路径回归：挖掉空车 → 原格重生 + 上车 → 停驻被骑亮 / 推离灭。
+        carts.hitCartFromRay(QVector3D(carts.posAt(0).x(), float(kRigY) + 2.0f, carts.posAt(0).z()),
+                             QVector3D(0, -1, 0), 4.0f, &w, true); // 清场（车在远处轨上，与探测轨无关）
+        carts.spawnCart(detX, kRigY, z0, &w);
+        const QVector3D mountOrigin(float(detX) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+        bool okC = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f) && carts.ridingIndex() == 0;
+        for (int t = 0; t < 8; ++t) { // 停驻被骑（wish 0）—— 同帧双调镜像 PlayerController 骑乘分支
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+        }
+        okC = okC && detOn() && lampOn();
+        bool rodeAway = false;
+        for (int t = 0; t < 240 && !rodeAway; ++t) { // W 推离（wish +X 沿轨）
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+            if (int(std::floor(carts.posAt(0).x())) >= x0 + 2) rodeAway = true;
+        }
+        for (int t = 0; t < 12; ++t) { // 离开沿收敛（停驻被骑帧续跑统一 pass）
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            w.tickRedstone();
+        }
+        okC = okC && rodeAway && !detOn() && !lampOn();
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| ridden path regression: parked-on lit, rode away -> off (t736)";
+        QObject::disconnect(wcConn);
+        // 清场
+        carts.clearAll();
+        for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+        w.setBlock(lampX, kRigY, lampZ, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P12b t769 矿车坡道行驶探针（Entities 层 MinecartManager 直编，同 P11/P12 模式）：平-坡-平轨道
+    //   （x0..x0+1 @Y 低平 + 坡格 x0+1@Y 东邻 x0+2@Y+1 + x0+2..x0+3 @Y+1 高平 —— 1:1 上坡）。
+    //   (a) 被骑上坡（tryMount + W 持续 +X）：断言 400 tick 内爬上高平台停驻死端 (x0+3.5, Y+1+rideH)
+    //       （旧版 pickTrackStep 邻轨防御只查同层 → 坡脚格心 x0+1.5 停死，本探针复现「上不去」）；
+    //       沿途坡段 Y 随水平进度连续插值（y = Y+(x-(x0+1))+rideH，验收「非阶跃」）。
+    //   (b) 空车下坡（顶平台 spawn + 玩家向西续推，同 P12(b) 跑法）：断言滑到低平台停驻死端 (x0+0.5,
+    //       Y+rideH)（旧版在坡顶格心 x0+2.5 停死，复现「下不去」）；沿途坡段 Y 同款连续插值。
+    //   (c) 坡格中心直接 spawn 的静止车：初始俯仰即贴合坡面（车头朝上坡向）——不需先行驶（放置即平行）。
+    {
+        const auto [x0, z0] = nextSlot();
+        const float rideH = 0.45f; // kCartRideH（P11 同款镜像值：轨格 cell 底 + 1/16 板 + 车底偏移）
+        // t769 教训：本 slot 的地形可达 y≥42（「40 以上必空」假设在该列失效）—— 坡轨上方格若被地形实心
+        //   占据，scanRailColumn 的实心遮挡断扫（复审 #4 语义，防隔板假支撑）会把坡中段（pos.y 跨上轨层
+        //   后向下扫）判离轨 → 车冻死在坡 55% 处。用户场景是露天坡（坡格上方是天空）→ rig 先净空轨道
+        //   box（x0..x0+3 × kRigY..kRigY+2 × z0）再铺轨，等价露天环境。
+        for (int i = 0; i <= 3; ++i)
+            for (int dy = 0; dy <= 2; ++dy)
+                if (w.blockAt(x0 + i, kRigY + dy, z0) != BR::Air)
+                    w.setBlock(x0 + i, kRigY + dy, z0, BR::Air);
+        w.setBlock(x0,     kRigY,     z0, BR::Rail, 0);
+        w.setBlock(x0 + 1, kRigY,     z0, BR::Rail, 0); // 坡格（东邻高一格 → 坡面自西向东抬升）
+        w.setBlock(x0 + 2, kRigY + 1, z0, BR::Rail, 0);
+        w.setBlock(x0 + 3, kRigY + 1, z0, BR::Rail, 0);
+        // 坡段期望表面（验收 Y 连续插值）：x∈[x0+1,x0+2] → Y+(x-(x0+1))；低平段 Y；高平段 Y+1。
+        const auto wantSurf = [&](float x) {
+            if (x < float(x0 + 1)) return float(kRigY);
+            if (x > float(x0 + 2)) return float(kRigY + 1);
+            return float(kRigY) + (x - float(x0 + 1));
+        };
+        MinecartManager carts;
+        // (a) 被骑上坡。
+        carts.spawnCart(x0, kRigY, z0, &w);
+        const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0) + 0.5f);
+        bool okA = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+        bool yContA = true;
+        float slopePitchA = 0.0f; int slopePitchN = 0; // 坡中段（x∈[x0+1.3,x0+1.7] 窗全落坡格）俯仰均值
+        for (int t = 0; t < 400; ++t) {
+            QVector3D cp;
+            carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp); // W 持续（+X 上坡）
+            carts.tickPushedCarts(0.016, &w);
+            if (std::fabs(cp.y() - (wantSurf(cp.x()) + rideH)) > 0.02f) {
+                qInfo().noquote() << "  uphill Y off surface at tick" << t << "pos" << cp;
+                yContA = false;
+                break;
+            }
+            if (cp.x() > float(x0 + 1) + 0.3f && cp.x() < float(x0 + 1) + 0.7f) {
+                slopePitchA += carts.pitchAt(0);
+                ++slopePitchN;
+            }
+        }
+        const QVector3D topP = carts.posAt(0);
+        okA = okA && yContA
+            && std::fabs(topP.x() - float(x0 + 3) - 0.5f) < 0.01f
+            && std::fabs(topP.y() - float(kRigY + 1) - rideH) < 0.02f
+            && slopePitchN >= 3 && std::fabs(slopePitchA / float(slopePitchN) - 45.0f) < 1.0f
+            && std::fabs(carts.pitchAt(0)) < 0.5f; // 停驻高平台 → 俯仰归零
+        if (!okA) qInfo().noquote() << "  uphill final pos" << topP << "pitch" << carts.pitchAt(0)
+                                     << "slopePitch" << (slopePitchN ? slopePitchA / float(slopePitchN) : 0.0f)
+                                     << "samples" << slopePitchN
+                                     << "con(slope)" << int(w.stateAt(x0 + 1, kRigY, z0) & 0x0F)
+                                     << "blockAboveSlope" << int(w.blockAt(x0 + 1, kRigY + 1, z0));
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| cart climbs ramp: reaches top dead-end, Y interpolates, pitch ~+45 on slope / 0 on flat (t769)";
+        // (b) 空车下坡：销毁被骑车 → 顶平台格心重生（连接位定轴朝 -X 下坡向）→ 玩家续推滑降。
+        carts.hitCartFromRay(QVector3D(topP.x(), float(kRigY) + 3.0f, topP.z()),
+                             QVector3D(0, -1, 0), 4.0f, &w, true);
+        carts.spawnCart(x0 + 3, kRigY + 1, z0, &w);
+        QVector3D player = carts.posAt(0);
+        bool yContB = true;
+        float slopePitchB = 0.0f; int slopePitchN2 = 0;
+        for (int t = 0; t < 400; ++t) {
+            // t863④ 适配：车进低死端格后停推（追推会把死端车推离轨道出轨——本探针验下坡贴面 / 俯仰）。
+            if (player.x() > float(x0) + 1.0f)
+                carts.pushEmptyCart(&w, player, -1.0f, 0.0f); // 玩家追着车向西推
+            carts.tickPushedCarts(0.016, &w);
+            player = carts.posAt(0);
+            if (std::fabs(player.y() - (wantSurf(player.x()) + rideH)) > 0.02f) {
+                qInfo().noquote() << "  downhill Y off surface at tick" << t << "pos" << player;
+                yContB = false;
+                break;
+            }
+            if (player.x() > float(x0 + 1) + 0.3f && player.x() < float(x0 + 1) + 0.7f) {
+                slopePitchB += carts.pitchAt(0); // 车头朝坡下 → 俯仰应为负（下俯）
+                ++slopePitchN2;
+            }
+        }
+        const bool okB = yContB
+            && int(std::floor(player.x())) == x0 // 滑到低平台格（全程下坡完成；精确停点是摩擦渐停位置，
+                                                 //   不钉死端格心 —— 空车无持续供能，可能在心前磨停）
+            && std::fabs(player.y() - float(kRigY) - rideH) < 0.02f
+            && slopePitchN2 >= 3 && std::fabs(slopePitchB / float(slopePitchN2) + 45.0f) < 1.0f;
+        if (!okB) qInfo().noquote() << "  downhill final pos" << player << "pitch" << carts.pitchAt(0)
+                                    << "slopePitch" << (slopePitchN2 ? slopePitchB / float(slopePitchN2) : 0.0f)
+                                    << "samples" << slopePitchN2;
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| cart descends ramp: coasts to bottom dead-end, Y interpolates, pitch ~-45 (nose downhill) (t769)";
+        // (c) 坡格中心直接 spawn 的静止车：初始俯仰即贴合坡面（车头朝上坡向 +45；放置即平行，无需先行驶）。
+        carts.spawnCart(x0 + 1, kRigY, z0, &w); // slot-reuse 后新车落槽 1（0 号槽被 (b) 车占用）
+        const QVector3D sp = carts.posAt(1);
+        const bool okC = carts.count() == 2
+            && std::fabs(sp.x() - float(x0 + 1) - 0.5f) < 0.01f
+            && std::fabs(sp.y() - (float(kRigY) + 0.5f + rideH)) < 0.02f // 坡格中心坡面高 = 0.5
+            && std::fabs(carts.pitchAt(1) - 45.0f) < 0.5f;
+        if (!okC) qInfo().noquote() << "  slope-spawn pos" << sp << "pitch" << carts.pitchAt(1)
+                                    << "count" << carts.count();
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| cart spawned on slope cell: parked body already parallel to ramp (+45) (t769)";
+        // 清场（(c) 的静止车由 clearAll 收）。
+        carts.clearAll();
+        for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY + ((i >= 2) ? 1 : 0), z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P12c t770 矿车弯道贴轨约束探针（Entities 层 MinecartManager 直编，同 P11/P12/P12b 模式）：L 形轨
+    //   （南 2 直 + 拐角 + 东 3 直）。用户报「弯道瞬间 90° 转向 → 慢速前进没触发旋转就脱轨 / 倒退大概率脱轨」。
+    //   逐 tick 断言车始终在轨道中心线折线 ±0.05 内 + 出弯朝向（yaw 基数）：
+    //   (a) 慢速前进（targetV≈0.5 格/s：wish 带 0.998 垂直分量 → proj≈0.0625）爬行进拐角格、格心前松键摩擦
+    //       停驻（蠕行 ~0.24 格 → 停驻点落格心前 0.08-0.2 的弯道格内非格心位）→ 全程在中心线上 + 停稳静止；
+    //   (b) 停驻位垂直重选向（「慢速前进未触发旋转即脱轨」复现）：停驻帧的 wish 重选向在弯道格心**前**把
+    //       dir 掰向出口臂 → 重推起步沿出口臂行驶。修前无贴轨约束 → 带横向偏移（~0.15 格 > 0.05）滑出
+    //       中心线 FAIL；修后弯道格内强制贴轨（垂直轴钉格心线）→ 沿出口臂中心线行驶 + 出弯朝向 yaw=270；
+    //   (c) 倒退过弯（「倒退大概率脱轨」复现）：东行途中反踩（wish=-dir → 负速倒行、头向不变）→ 过拐角后
+    //       必须落回南腿中心线继续倒行。修前：到心重选结果不持久化（sgn<0 不写回 dir）→ 下一帧 travel 按
+    //       旧轴横切出轨（滑向西场外停驻）FAIL；修后头向 yaw=180（倒行头向=新臂取反）、终停南死端格心。
+    {
+        const auto [x0, z0] = nextSlot();
+        // t769 教训：先净空轨道 box（地形可达 y≥42，scanRailColumn 实心遮挡断扫会把车判离轨冻死）。
+        for (int dx = 0; dx <= 3; ++dx)
+            for (int dz = -2; dz <= 0; ++dz)
+                for (int dy = 0; dy <= 2; ++dy)
+                    if (w.blockAt(x0 + dx, kRigY + dy, z0 + dz) != BR::Air)
+                        w.setBlock(x0 + dx, kRigY + dy, z0 + dz, BR::Air);
+        w.setBlock(x0,     kRigY, z0 - 2, BR::Rail, 0); // 南死端（spawn 格）
+        w.setBlock(x0,     kRigY, z0 - 1, BR::Rail, 0);
+        w.setBlock(x0,     kRigY, z0,     BR::Rail, 0); // 拐角（南臂 + 东臂）
+        w.setBlock(x0 + 1, kRigY, z0,     BR::Rail, 0);
+        w.setBlock(x0 + 2, kRigY, z0,     BR::Rail, 0);
+        w.setBlock(x0 + 3, kRigY, z0,     BR::Rail, 0); // 东死端
+        const float rideH = 0.45f; // kCartRideH 镜像值（P11/P12b 同款；改几何须同步）
+        // 中心线折线距离：南腿 x0+0.5 × z∈[z0-1.5, z0+0.5] + 东腿 z0+0.5 × x∈[x0+0.5, x0+3.5]（共点拐角）。
+        const auto segDist = [](float px, float pz, float ax, float az, float bx, float bz) {
+            const float abx = bx - ax, abz = bz - az;
+            float t = ((px - ax) * abx + (pz - az) * abz) / (abx * abx + abz * abz);
+            t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+            const float dx = px - (ax + abx * t), dz = pz - (az + abz * t);
+            return std::sqrt(dx * dx + dz * dz);
+        };
+        const auto lineDist = [&](float px, float pz) {
+            const float a = segDist(px, pz, float(x0) + 0.5f, float(z0) - 1.5f,
+                                        float(x0) + 0.5f, float(z0) + 0.5f);
+            const float b = segDist(px, pz, float(x0) + 0.5f, float(z0) + 0.5f,
+                                        float(x0) + 3.5f, float(z0) + 0.5f);
+            return a < b ? a : b;
+        };
+        const auto onTrack = [&](const QVector3D &p, int t, const char *phase) {
+            if (lineDist(p.x(), p.z()) > 0.05f) {
+                qInfo().noquote() << "  " << phase << "off centerline at tick" << t << "pos" << p;
+                return false;
+            }
+            if (std::fabs(p.y() - (kRigY + rideH)) > 0.02f) {
+                qInfo().noquote() << "  " << phase << "off rail surface at tick" << t << "y" << p.y();
+                return false;
+            }
+            return true;
+        };
+        MinecartManager carts;
+        carts.spawnCart(x0, kRigY, z0 - 2, &w);
+        const QVector3D mountOrigin(float(x0) + 0.5f, float(kRigY) + 2.0f, float(z0 - 2) + 0.5f);
+        bool okA = carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f);
+        QVector3D cp;
+        // (a) 慢速爬行进拐角格：进格后在 z∈(z0+0.06, z0+0.14) 窗口松键（tick 步长 0.008 必命中）。
+        bool reached = false;
+        for (int t = 0; t < 2500; ++t) {
+            carts.tickRiddenCart(0.016, &w, 0.998f, 0.0625f, cp);
+            carts.tickPushedCarts(0.016, &w);
+            if (!onTrack(cp, t, "crawl ")) { okA = false; break; }
+            if (int(std::floor(cp.x())) == x0 && int(std::floor(cp.z())) == z0
+                && cp.z() > float(z0) + 0.06f && cp.z() < float(z0) + 0.14f) {
+                reached = true;
+                break;
+            }
+        }
+        if (!reached) {
+            qInfo().noquote() << "  crawl never reached mid-corner window, pos" << cp;
+            okA = false;
+        }
+        if (okA) {
+            // (a 续) 松键摩擦停驻：蠕行 ~0.24 格后死区归零 → 停驻点仍在弯道格内、格心之前。
+            for (int t = 0; t < 250 && okA; ++t) {
+                carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (!onTrack(cp, t, "stop ")) okA = false;
+            }
+            if (int(std::floor(cp.x())) != x0 || int(std::floor(cp.z())) != z0 || cp.z() >= float(z0) + 0.5f) {
+                qInfo().noquote() << "  stop position not mid-corner-cell (pre-center):" << cp;
+                okA = false;
+            }
+            const QVector3D stopP = cp;
+            for (int t = 0; t < 20 && okA; ++t) { // 停稳静止守卫（后续帧位置不变）
+                carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if ((cp - stopP).length() > 1e-4f) {
+                    qInfo().noquote() << "  cart did not stay parked at" << cp;
+                    okA = false;
+                }
+            }
+        }
+        if (!okA) ++totalFail;
+        qInfo().noquote() << (okA ? "PASS" : "FAIL")
+                          << "| slow crawl into corner + friction park stays on centerline (t770)";
+        // (b) 停驻位垂直重选向重推（贴轨约束）→ (c) 东行途中反踩倒退过弯回南腿。
+        bool okB = okA, okC = okA;
+        bool sawYaw270 = false, sawYaw180 = false;
+        if (okA) {
+            // (b) 重推（wish 同爬行向量 = 大垂直分量）：停驻重选向选出口臂 → 修后贴轨沿东臂中心线行驶。
+            //   复审 #23 适配：贴轨收敛改限速（每 tick ≤kCartCenterSnapPerTick=0.1 格）→ 重推初期允许
+            //   「残留偏移按限速衰减」的过渡态（旧瞬时钉回一步到位；t770 修前的真脱轨 = 偏移**不衰减**
+            //   仍在此断言下 FAIL —— 防脱轨回归力保留）：过渡窗内须要么已贴线（≤0.05）要么以 ≥0.099/tick
+            //   衰减且不回升；窗后回到严格 onTrack。过渡窗长 = ceil(off0/0.1)+1（0.5 格上界 → ≤6 tick）。
+            const float off0 = lineDist(carts.posAt(0).x(), carts.posAt(0).z());
+            const int graceT = int(std::ceil(off0 / 0.1f)) + 1;
+            float prevOff = off0;
+            for (int t = 0; t < 400 && okB; ++t) {
+                carts.tickRiddenCart(0.016, &w, 0.998f, 0.0625f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                const float off = lineDist(cp.x(), cp.z());
+                if (t < graceT) {
+                    if (off > 0.05f
+                        && (off > prevOff + 1e-6f
+                            || off > std::max(0.05f, off0 - 0.099f * float(t)) + 1e-6f)) {
+                        qInfo().noquote() << "  relaunch snap not converging at bounded rate, tick" << t
+                                          << "off" << off << "prev" << prevOff << "off0" << off0;
+                        okB = false;
+                        break;
+                    }
+                } else if (!onTrack(cp, t, "relaunch ")) { okB = false; break; }
+                prevOff = off;
+                if (cp.x() > float(x0) + 1.0f && cp.x() < float(x0) + 2.0f
+                    && int(std::lround(carts.yawAt(0))) % 360 == 270) sawYaw270 = true;
+                if (cp.x() >= float(x0) + 2.0f) break; // 东行到位 → 切 (c) 反踩
+            }
+            if (!sawYaw270) {
+                qInfo().noquote() << "  exit heading not +X (yaw 270) after corner relaunch, yaw"
+                                  << carts.yawAt(0) << "pos" << cp;
+                okB = false;
+            }
+        }
+        if (!okB) okC = false; // (c) 依赖 (b) 把车摆到东行途中 —— (b) 脱轨则 (c) 无从起跑，连带记 FAIL（防空跑 PASS）
+        if (okB) {
+            // (c) 行进中反踩：wish=-dir（东行头向 (1,0) → 种子 (-1,0)）→ 负速倒行；头向不变倒退过弯。
+            //   过弯落南腿后 wish 随腿向改 (0,-1)（= 反对新头向 (0,1)，维持倒行；镜像玩家过弯后重对准）。
+            for (int t = 0; t < 800 && okC; ++t) {
+                const bool onSouthLeg = int(std::floor(cp.x())) == x0 && int(std::floor(cp.z())) < z0;
+                carts.tickRiddenCart(0.016, &w, onSouthLeg ? 0.0f : -1.0f, onSouthLeg ? -1.0f : 0.0f, cp);
+                carts.tickPushedCarts(0.016, &w);
+                if (!onTrack(cp, t, "reverse ")) { okC = false; break; }
+                if (onSouthLeg && int(std::lround(carts.yawAt(0))) % 360 == 180) sawYaw180 = true;
+                // 终态：南死端格心停驻（死端重选 false → speed=0）。目标 z = (z0-2)+0.5 —— 显式括号防
+                //   左结合错读（cp.z()-float(z0-1)-0.5 会被算成 cp.z()-z0+0.5-... 即差一格的邻格心）。
+                if (std::fabs(cp.x() - (float(x0) + 0.5f)) < 0.01f
+                    && std::fabs(cp.z() - (float(z0) - 1.5f)) < 0.01f) break;
+            }
+            const QVector3D fin = carts.posAt(0);
+            if (std::fabs(fin.x() - (float(x0) + 0.5f)) > 0.01f || std::fabs(fin.z() - (float(z0) - 1.5f)) > 0.01f) {
+                qInfo().noquote() << "  reverse ride did not park at south dead-end center, pos" << fin;
+                okC = false;
+            }
+            if (!sawYaw180) {
+                qInfo().noquote() << "  reverse corner heading not maintained (yaw 180 missing), yaw"
+                                  << carts.yawAt(0) << "pos" << fin;
+                okC = false;
+            }
+            if (okC) { // 停稳静止守卫
+                for (int t = 0; t < 20 && okC; ++t) {
+                    carts.tickRiddenCart(0.016, &w, 0.0f, 0.0f, cp);
+                    carts.tickPushedCarts(0.016, &w);
+                    if ((cp - fin).length() > 1e-4f) {
+                        qInfo().noquote() << "  cart did not stay parked (reverse) at" << cp;
+                        okC = false;
+                    }
+                }
+            }
+        }
+        if (!okB) ++totalFail;
+        qInfo().noquote() << (okB ? "PASS" : "FAIL")
+                          << "| mid-cell relaunch at corner clamps to exit-arm centerline, yaw 270 (t770)";
+        if (!okC) ++totalFail;
+        qInfo().noquote() << (okC ? "PASS" : "FAIL")
+                          << "| reverse ride through corner stays on centerline, yaw 180, parks at dead end (t770)";
+        // 清场
+        carts.clearAll();
+        for (int dx = 0; dx <= 3; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Air);
+        for (int dz = -2; dz <= -1; ++dz) w.setBlock(x0, kRigY, z0 + dz, BR::Air);
+        tickN(w, 2);
+    }
+
+    // P13 t759 要塞传送门房净空探针（worldgen 回归，非红石 —— 同 t737 环线先例收录）。断言：(a) 12 框架环
+    //   逐格仍在记录层 strongholdPortalY（B5 三坐标一致性的生成侧镜像 —— t759 只抬顶板不动框架层）；
+    //   (b) 每框架顶之上 4 格 Air + 第 5 格顶板石砖（净高 8：内部 dy 1..8 Air / 顶板 dy=9 = 框架层+5）→ 验收
+    //   「框架上方至少 3 格通行空间」；(c) 通行断面抽样（t1002 演化：piece 链重建后房体局部坐标不变 ——
+    //   北向直梯段 C3 中段 (0,rel -9) / 东监牢房 P10 中段 (14,0) 离地 2..4 格 Air、传送门房楼梯顶步
+    //   (0,rel -15,dy3) 之上 3 格 Air）+ (d) 格栅入口腿（t1002 新增）：入口门洞通行口 (1,dy1..2,rel -10)
+    //   通 Air、两侧铁栏杆在位（wiki「入口恒格栅」）。被测世界：优先主世界 w（默认种子 1337 的 96×96×48
+    //   生成即含 1 座要塞 → 零额外生成开销，且 rig 全在 y=41 浅层不触地下要塞）；主世界无要塞时（未来
+    //   worldgen 常量演进）独立 96×96 世界扫种子兜底 —— 尺寸取 96 与主世界同：要塞 kMargin=23 抖动域，
+    //   bx=60 候选族恒过边界（60+5 < 96-23）→ 每种子 ~64% 命中，24 发上限仅防退化。
+    {
+        const World *pw = &w;
+        World fallbackW;
+        if (!pw->hasStronghold()) {
+            fallbackW.setWidth(96);
+            fallbackW.setDepth(96);
+            fallbackW.setHeight(48);
+            for (int s = 1; s <= 24 && !fallbackW.hasStronghold(); ++s)
+                fallbackW.setSeed(s); // 同尺寸重生成一次（96×96 共 4 候选格，每种子 ~64% 命中）
+            pw = &fallbackW;
+        }
+        bool ok = pw->hasStronghold();
+        if (!ok)
+            qInfo().noquote() << "  no stronghold in main or 24 fallback seeds (infra failure, not product bug)";
+        if (ok) {
+            const int px = pw->strongholdPortalX(), py = pw->strongholdPortalY(), pz = pw->strongholdPortalZ();
+            const int cy = py - 4, cz = pz + 18; // 反解要塞原点（框架层 = cy+4；环中心 dz = -18）
+            // (a)+(b) 框架环 12 格（标准 ±2 方形环，四边各 3 不含角）逐格验框架 / 头顶净空 / 顶板。
+            int frames = 0;
+            for (int rdx = -2; rdx <= 2; ++rdx) {
+                for (int rdz = -2; rdz <= 2; ++rdz) {
+                    const bool onRing = (rdx == -2 || rdx == 2) ? (rdz >= -1 && rdz <= 1)
+                                                                : (rdz == -2 || rdz == 2) && (rdx >= -1 && rdx <= 1);
+                    if (!onRing) continue;
+                    ++frames;
+                    if (pw->blockAt(px + rdx, py, pz + rdz) != BR::EndPortal) {
+                        qInfo().noquote() << "  frame missing at" << (px + rdx) << py << (pz + rdz);
+                        ok = false;
+                    }
+                    for (int up = 1; up <= 4; ++up) { // 框架顶之上 4 格全 Air（任务验收 ≥3，取满量自证）
+                        if (pw->blockAt(px + rdx, py + up, pz + rdz) != BR::Air) {
+                            qInfo().noquote() << "  headroom blocked at +" << up << "above frame" << (px + rdx) << (pz + rdz);
+                            ok = false;
+                        }
+                    }
+                    if (pw->blockAt(px + rdx, py + 5, pz + rdz) != BR::StoneBrick) { // 顶板（dy=9 = 框架层+5）
+                        qInfo().noquote() << "  roof missing at +5 above frame" << (px + rdx) << (pz + rdz);
+                        ok = false;
+                    }
+                }
+            }
+            if (frames != 12) {
+                qInfo().noquote() << "  ring frame count" << frames << "!= 12";
+                ok = false;
+            }
+            // (c) 通行断面抽样（t1002 演化后坐标）：北向直梯段 C3 中段 (0,rel -9) / 东监牢房 P10 中段
+            //     (14,0) 自地板上 2..4 格；传送门房楼梯顶步（rel -15,dy3）上 1..3 格（玩家站楼梯脚位
+            //     ~dy+3.5，头需再 2 格）。
+            const auto airRun = [&](int x, int yBase, int z, int from, int to) {
+                for (int up = from; up <= to; ++up)
+                    if (pw->blockAt(x, yBase + up, z) != BR::Air) return false;
+                return true;
+            };
+            if (!airRun(px, cy, cz - 9, 2, 4)) {
+                qInfo().noquote() << "  north stair-corridor headroom blocked";
+                ok = false;
+            }
+            if (!airRun(px + 14, cy, cz, 2, 4)) {
+                qInfo().noquote() << "  east prison-hall headroom blocked";
+                ok = false;
+            }
+            if (!airRun(px, cy + 3, cz - 15, 1, 3)) {
+                qInfo().noquote() << "  stair top headroom blocked";
+                ok = false;
+            }
+            // (d) 格栅入口腿（t1002 新增）：门洞面 z=rel -10 —— 通行口 (1,dy1..2) 通 Air、西柱/东顶梁
+            //     为铁栏杆（Wiki「入口恒格栅」；39 栏总数由 P-t1002 计）。
+            if (pw->blockAt(px + 1, cy + 1, cz - 10) != BR::Air
+                || pw->blockAt(px + 1, cy + 2, cz - 10) != BR::Air) {
+                qInfo().noquote() << "  grate entry gap blocked";
+                ok = false;
+            }
+            if (pw->blockAt(px - 1, cy + 1, cz - 10) != BR::IronBars
+                || pw->blockAt(px + 1, cy + 3, cz - 10) != BR::IronBars) {
+                qInfo().noquote() << "  grate entry bars missing";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| stronghold portal room headroom: 4 air above frames + roof at +5, ring intact at"
+                             " recorded Y, corridor/stair clearance + barred grate entry (t759/t1002)";
+    }
+
+    // ── t762 黑曜石挖掘规则探针（纯 Core/Game 表查询，无 World 交互）：① 无附魔钻石镐 miningTime == 12.0s
+    //    （hardness 96 / speedMul 8，t762 验收值）；② 仅钻石镐 canHarvest（掉落），木/石/铁/金/铜镐全 false
+    //    （无掉落）；③ 低档镐 miningSpeedMul == 1.0（无加成恒慢，96s 极慢）+ 空手 canHarvest false。
+    {
+        // 工具段枚举值即绝对物品 id（PickaxeWood=0x101 起；ToolIdBase=0x100 仅是段下界哨兵，非加数）。
+        const auto diaId  = int(ToolRegistry::PickaxeDiamond);
+        const auto ironId = int(ToolRegistry::PickaxeIron);
+        const auto goldId = int(ToolRegistry::GoldPickaxe);
+        const auto woodId = int(ToolRegistry::PickaxeWood);
+        const auto stoneId = int(ToolRegistry::PickaxeStone);
+        const auto copperId = int(ToolRegistry::CopperPickaxe);
+        bool ok = std::abs(ToolRegistry::miningTime(BR::Obsidian, diaId) - 12.0f) < 1e-3f
+                  && ToolRegistry::canHarvest(BR::Obsidian, diaId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, ironId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, goldId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, woodId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, stoneId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, copperId)
+                  && !ToolRegistry::canHarvest(BR::Obsidian, 0) // 空手（非工具 id 0）→ 无掉落
+                  && ToolRegistry::miningSpeedMul(BR::Obsidian, ironId) == 1.0f
+                  && ToolRegistry::miningSpeedMul(BR::Obsidian, goldId) == 1.0f
+                  && ToolRegistry::canMine(BR::Obsidian); // 可挖（破坏进度可推进，仅速度/掉落受限）
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| obsidian mining rule: diamond pick 96/8=12.0s + drop; wood/stone/iron/gold/"
+                             "copper pick no bonus (1.0x) and NO drop (t762)";
+    }
+
+    // ── t763 附魔数值生效链探针（纯 Game 层表 + Hotbar 实例，无 World/QML）：① 锐锋→攻击伤害输入链
+    //    （钻石剑基础 7 + 锐锋 III ×0.5 = 8.5，attackMob 同公式；tooltip 文本源 enchantListText 出「锐锋 III」）；
+    //    ② 保护族 EPF 路由（含本任务补的 Emberling=15 → 火焰保护 / EnderPearlTp=16 → 摔落保护两条新路由，
+    //    修前二者漏专项加成）；③ 耐久附魔消耗概率（控制组无附魔必损；耐久 III 400 次受击损耗 ≈300，
+    //    75% 损 / 25% 跳过，容差 ±40≈4.6σ 防偶发 FAIL）。
+    {
+        Hotbar hb;
+        // ① 锐锋伤害输入链：基础伤 + 0.5*级 与 attackMob（playercontroller t476 链）同式。
+        const int sharp3 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+        const int enchSharp[4] = {sharp3, 0, 0, 0};
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const float expectAtk = float(ToolRegistry::attackDamage(diaSword)) + 0.5f * 3.0f;
+        bool ok = ToolRegistry::attackDamage(diaSword) == 7
+                  && EnchantRegistry::findLevel(enchSharp, int(EnchantRegistry::Sharpness)) == 3
+                  && std::abs(expectAtk - 8.5f) < 1e-4f
+                  && hb.itemAttackDamage(diaSword) == 7
+                  && hb.enchantListText(QVariantList{sharp3, 0, 0, 0})
+                         == QString::fromUtf8("锐锋 III");
+        // ② 保护族 EPF 路由：钻石胸甲火焰保护 III（唯一护甲）→ Fire(9)/Emberling(15) 均 6；无通用保护
+        //    → Fall(1)/Starvation(4) 均 0。护甲 id = ArmorIdBase + tier*4 + piece（钻石 tier=4）。
+        const int fireProt3 = EnchantRegistry::pack(int(EnchantRegistry::FireProtection), 3);
+        const int feather2  = EnchantRegistry::pack(int(EnchantRegistry::FeatherFall), 2);
+        const int prot2     = EnchantRegistry::pack(int(EnchantRegistry::Protection), 2);
+        const int diaChest  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 1; // 钻石胸甲
+        const int diaHelm   = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 0; // 钻石头盔
+        const int diaBoots  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 3; // 钻石靴
+        hb.armorSetStack(1, diaChest, 1, 100, QVariantList{fireProt3, 0, 0, 0}, QString());
+        ok = ok && hb.armorProtectionFactor(9) == 6      // Fire：火焰保护 3 级 ×2 EPF
+                  && hb.armorProtectionFactor(15) == 6   // Emberling 火球（t728）：t763 补路由（修前 0）
+                  && hb.armorProtectionFactor(1) == 0    // Fall：无摔落保护
+                  && hb.armorProtectionFactor(4) == 0;   // Starvation：无通用保护
+        // 加靴子摔落保护 II + 头盔通用保护 II：Fall(1)/EnderPearlTp(16) = 2+4 = 6；Fire(9) = 2+6 = 8；Starvation = 2。
+        hb.armorSetStack(3, diaBoots, 1, 100, QVariantList{feather2, 0, 0, 0}, QString());
+        hb.armorSetStack(0, diaHelm, 1, 100, QVariantList{prot2, 0, 0, 0}, QString());
+        ok = ok && hb.armorProtectionFactor(1) == 6
+                  && hb.armorProtectionFactor(16) == 6   // 暗渊珠传送自伤（t758）：t763 补路由（修前 2）
+                  && hb.armorProtectionFactor(9) == 8
+                  && hb.armorProtectionFactor(4) == 2;
+        // ③ 耐久消耗概率：控制组皮革头盔无附魔 50 次受击必损 50；钻石胸甲耐久 III 400 次受击损耗
+        //    ∈ [260, 340]（期望 300；每次 25% 概率跳过）。走 damageArmor（对全部装备槽生效 → 先清场）。
+        hb.armorSetStack(0, 0, 0, 0, QVariantList{}, QString());
+        hb.armorSetStack(1, 0, 0, 0, QVariantList{}, QString());
+        hb.armorSetStack(3, 0, 0, 0, QVariantList{}, QString());
+        const int leatherHelm = int(RecipeRegistry::ArmorIdBase); // 皮革头盔（tier0 头）
+        hb.armorSetStack(0, leatherHelm, 1, 55, QVariantList{}, QString());
+        for (int i = 0; i < 50; ++i) hb.damageArmor();
+        ok = ok && hb.armorDurabilityAt(0) == 5;
+        hb.armorSetStack(0, 0, 0, 0, QVariantList{}, QString());
+        const int unb3 = EnchantRegistry::pack(int(EnchantRegistry::Unbreaking), 3);
+        hb.armorSetStack(1, diaChest, 1, 500, QVariantList{unb3, 0, 0, 0}, QString());
+        const int durStart = hb.armorDurabilityAt(1);
+        for (int i = 0; i < 400; ++i) hb.damageArmor();
+        const int lost = durStart - hb.armorDurabilityAt(1);
+        ok = ok && lost >= 260 && lost <= 340;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| enchant effect chain: sharpness 7+1.5=8.5 + tooltip text source; EPF routing "
+                             "fire/emberling/pearl-tp/feather/protection; unbreaking-III wear over 400 hits in "
+                             "[260,340], no-enchant control exact 50 (t763)";
+    }
+    // ── P-t887b 成就小地图拖拽源码钉（review27 #2；行为级 headless 不可达——MouseArea drag 需真窗口
+    //    输入，退路 = review Lessons 3 源码钉「首次交互断绑定」语句面）──
+    //    旧版病灶：treeMinimap 声明 anchors.top/right 却用 drag.target 写 x/y——锚布局每次 polish 把
+    //    写入同步回锚定位（Qt Quick 硬约束：锚与绝对定位不可混用），拖拽 100% 无效；守卫
+    //    `if (!anchors.top && !anchors.right)` 恒 false（anchors.top 读回恒真值 AnchorLine 对象，两套
+    //    qml.exe 实测清锚后仍真）→ clamp 也是死代码。断言（Main.qml treeMinimap 段，滤段界）：
+    //    (a) onPressed 显式清两锚（`anchors.top = undefined` + `anchors.right = undefined`）——首次
+    //        交互断绑定语句面存在；(b) userMoved 旗守卫存在（真值对象不可作守卫）；(c) 旧死守卫全形
+    //        `if (!anchors.top && !anchors.right)` 不存在（负向）；(d) drag 边界按父 treeViewport 口径
+    //        （父链 clip: true，取舍 = 约束在视口内；旧版 progressOverlay 全窗口径 = 跨坐标空间错位），
+    //        旧 `progressOverlay.width - 24` 边界不回归（负向）；(e) 视口缩放经 Connections 钳回。
+    {
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
+        const QString t = qf.open(QIODevice::ReadOnly) ? QString::fromUtf8(qf.readAll()) : QString();
+        const int i0 = t.indexOf(QStringLiteral("id: treeMinimap"));
+        const int iEnd = i0 >= 0 ? t.indexOf(QStringLiteral("// 返回按钮：关进度面板"), i0) : -1;
+        if (i0 < 0 || iEnd < 0) {
+            qInfo().noquote() << "  [t887b pin diag] treeMinimap block miss i0=" << i0 << "iEnd=" << iEnd;
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t887b minimap drag source pin: treeMinimap block not found";
+        } else {
+            const QString seg = t.mid(i0, iEnd - i0);
+            const bool okA = seg.contains(QStringLiteral("treeMinimap.anchors.top = undefined"))
+                          && seg.contains(QStringLiteral("treeMinimap.anchors.right = undefined"));
+            const bool okB = seg.contains(QStringLiteral("property bool userMoved: false"))
+                          && seg.contains(QStringLiteral("onXChanged: if (userMoved) clampIntoViewport()"));
+            const bool okC = !seg.contains(QStringLiteral("if (!anchors.top && !anchors.right)"));
+            const bool okD = seg.contains(QStringLiteral("drag.maximumX: treeViewport.width - 24"))
+                          && seg.contains(QStringLiteral("drag.maximumY: treeViewport.height - 24"))
+                          && seg.contains(QStringLiteral("function clampIntoViewport()"))
+                          && !seg.contains(QStringLiteral("progressOverlay.width - 24"));
+            const bool okE = seg.contains(QStringLiteral("function onWidthChanged() { if (treeMinimap.userMoved) treeMinimap.clampIntoViewport() }"));
+            // t928 补钉：拖拽接线本体（drag.target = treeMinimap——无此行清锚/守卫全在也拖不动，
+            //   review27 #2 修复链的最后一环；fd0b3f4 后多轮 Main.qml 改动的在位核验）。
+            const bool okF = seg.contains(QStringLiteral("drag.target: treeMinimap"));
+            const bool okT887b = okA && okB && okC && okD && okE && okF;
+            if (!okT887b) ++totalFail;
+            if (!okT887b)
+                qInfo().noquote() << "  [t887b pin diag] clearAnchors" << okA << "userMovedGuard" << okB
+                                  << "oldDeadGuardGone" << okC << "viewportBounds" << okD
+                                  << "resizeReclamp" << okE << "dragTargetWired" << okF;
+            qInfo().noquote() << (okT887b ? "PASS" : "FAIL")
+                              << "| t887b minimap drag source pin: first-interaction anchor break "
+                                 "(onPressed clears anchors.top/right to undefined - Qt Quick hard "
+                                 "constraint: anchors override imperative x/y writes, two qml.exe "
+                                 "rigs verified the clear makes writes stick), userMoved flag guard "
+                                 "(anchors.top reads back a truthy AnchorLine even after clearing, "
+                                 "the old !anchors.top guard form was structurally dead - pinned "
+                                 "absent), drag bounds in parent treeViewport space (clip:true "
+                                 "ancestor, decision pinned in comments - old progressOverlay "
+                                 "full-window bounds were a cross-space mismatch, pinned absent), "
+                                 "and viewport-resize re-clamp via Connections; t928 adds the "
+                                 "final chain link -- drag.target: treeMinimap itself is pinned "
+                                 "(without the wiring line the cleared anchors and guards would "
+                                 "still drag nothing)";
+        }
+    }
+
+    // ── P-t890 燃烧方块侧壁接触点燃探针（AABB 接触扫描行为级 + 阴性轮）──
+    //    t890：旧三格判定漏「贴燃烧方块侧壁走」——玩家 AABB 半宽 0.3 身在邻格、中心列不含燃烧格 → 永不
+    //    点燃。修法 = 仙人掌判据族先例（满格 AABB + kTouchSkin 容差皮 + 正交 ±1 扩圈），Fire 格同口径并入。
+    //    断言：(a) 玩家贴 2 高木板墙侧壁走（墙已 igniteFlammableAt 进燃烧态，中心列距墙格 ≥1 格）→ 点燃
+    //    （旧判定此场景恒 false = 用户症状本体）；(b) 对照：同布局未点燃墙走位 → 不点燃（阴性，排除
+    //    「rig 里别的东西点的火」）；(c) 站顶：站燃烧板顶（脚底支撑面 = 燃块）→ 点燃；(d) 斜对角隔离：
+    //    燃烧格仅在玩家 AABB 对角外一格（XZ 各隔 0.3+ 缝）→ 不点燃（AABB 过滤生效，无误伤面）；
+    //    (e) mob 侧壁同链（pig 贴燃烧墙 → isBurningAt(mob) 真）。
+    {
+        World wS;
+        wS.setWidth(48); wS.setDepth(48); wS.setHeight(96); wS.setSeed(89);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const auto tickP = [&](int n, float dt) {
+            for (int i = 0; i < n; ++i) {
+                pumpFor(17);
+                ents.tick(qreal(dt), &wS, farL, 0.3f, 1.8f, false);
+                pc.tick();
+            }
+        };
+        hb.setStack(0, ToolRegistry::FishingRod, 1, ToolRegistry::maxDurability(ToolRegistry::FishingRod));
+        hb.setSelectedSlot(0);
+        pc.setWorld(&wS);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        const int fy = 83;
+        auto buildLane = [&](bool lit) { // 石道 + 东侧木板高墙（x=8 列，z 4..8，两层）
+            for (int x = 2; x <= 7; ++x)
+                for (int z = 4; z <= 8; ++z) {
+                    wS.setBlock(x, fy, z, BR::Stone, 0);
+                    wS.setBlock(x, fy + 1, z, BR::Air, 0);
+                    wS.setBlock(x, fy + 2, z, BR::Air, 0);
+                    wS.setBlock(x, fy + 3, z, BR::Air, 0);
+                }
+            for (int z = 4; z <= 8; ++z) {
+                wS.setBlock(8, fy, z, BR::Stone, 0);
+                wS.setBlock(8, fy + 1, z, BR::Planks, 0);
+                wS.setBlock(8, fy + 2, z, BR::Planks, 0);
+                wS.setBlock(8, fy + 3, z, BR::Air, 0);
+            }
+            if (lit) {
+                wS.igniteFlammableAt(8, fy + 1, 6);
+                wS.igniteFlammableAt(8, fy + 2, 6);
+            }
+        };
+        // (a) 侧壁贴走：玩家 (7.5, fy+1) 朝 +Z 走（W 键），身体中心 x=7.5 距墙列 x=8 恰半宽贴面
+        //     （pMaxX=7.8 vs 墙 cMinX=8.0 → 含 0.002 皮重叠 = 接触；旧中心列判定 footY 层 blockAt(7,*)
+        //     全 Stone/Air → 恒 false）。走 1s 内 burning 必真。
+        buildLane(true);
+        pc.loadSavedState(7.5f, float(fy + 1), 6.0f, -90.0f, 0.0f, 2);
+        pc.setKey(Qt::Key_W, true); // 朝 -90°（+Z）前推 → 贴墙面滑走
+        bool sideLit = false;
+        for (int t = 0; t < 24 && !sideLit; ++t) { tickP(1, 0.05f); sideLit = pc.burning(); }
+        pc.setKey(Qt::Key_W, false);
+        // (d) 斜对角阴性先于清场：换新 lane 未燃态走同一路径对照在 (b)；斜对角单独摆。
+        bool diagClear = false;
+        {
+            buildLane(false);
+            wS.setBlock(8, fy + 1, 6, BR::Planks, 0);
+            wS.setBlock(8, fy + 2, 6, BR::Air, 0);
+            wS.igniteFlammableAt(8, fy + 1, 6);
+            // 玩家在 (6.5, fy+1, 4.5)：燃烧格 (8,fy+1,6) 的 XZ 对角邻方向隔 ≥1.2 格 → AABB 不重叠
+            pc.loadSavedState(6.5f, float(fy + 1), 4.5f, -90.0f, 0.0f, 2);
+            pc.setKey(Qt::Key_W, true); // 同款贴走（远离墙列 → 全程无接触）
+            for (int t = 0; t < 20 && !diagClear; ++t) { tickP(1, 0.05f); diagClear = !pc.burning(); }
+            diagClear = diagClear || (!pc.burning()); // 全程未燃即阴性成立
+            pc.setKey(Qt::Key_W, false);
+        }
+        // (b) 未燃墙对照：同布局同走位，墙未点燃 → 全程不燃（排除「rig 里别的东西点的火」）。
+        buildLane(false);
+        pc.clearStatusEffects();
+        pc.loadSavedState(7.5f, float(fy + 1), 6.0f, -90.0f, 0.0f, 2);
+        pc.setKey(Qt::Key_W, true);
+        bool unlitClean = true;
+        for (int t = 0; t < 24 && unlitClean; ++t) { tickP(1, 0.05f); unlitClean = !pc.burning(); }
+        pc.setKey(Qt::Key_W, false);
+        // (c) 站顶：单块板 (5,fy+1,6)，点燃后玩家站其上（碰撞 snap 脚底在板顶缝上——旧三格判定靠
+        //     footY-1 兜过，本断言锁新扫描的站顶分支不回归）
+        wS.setBlock(5, fy + 1, 6, BR::Planks, 0);
+        wS.igniteFlammableAt(5, fy + 1, 6);
+        pc.clearStatusEffects();
+        pc.loadSavedState(5.5f, float(fy + 2), 6.5f, -90.0f, 0.0f, 2);
+        bool topLit = false;
+        for (int t = 0; t < 24 && !topLit; ++t) { tickP(1, 0.05f); topLit = pc.burning(); }
+        // (f) review27 #3 腾空越顶不点燃（旧 bug 本体）：玩家悬停在燃板顶 +0.5 格（footY-1 恰为燃板、
+        //     XZ 足印盖住该列——旧站顶分支无 Y 校验，第一 tick 即误点燃并刷满 8s fireTimer）。修复后
+        //     Y 界定 pMinY <= float(footY)+kTouchSkin 挡住腾空窗（跳跃越过 / 下落掠过同窗口）。断言：
+        //     首 tick（下落 ~0.035 格仍悬空）不燃；继续 tick 落到板顶（snap 缝 +1e-4 入容差皮）→ 燃
+        //     （= (c) 站顶语义不回归，两向钉死边界）。
+        pc.clearStatusEffects();
+        pc.loadSavedState(5.5f, float(fy + 2.5f), 6.5f, -90.0f, 0.0f, 2);
+        tickP(1, 0.05f);
+        const bool hoverClean = !pc.burning();
+        bool landLit = false;
+        for (int t = 0; t < 24 && !landLit; ++t) { tickP(1, 0.05f); landLit = pc.burning(); }
+        // (e) mob 侧壁：pig 出生即贴墙（x=7.5 格心 → AABB maxX=7.8，距墙 cMinX=8.0 缝 0.2 < halfW 0.45
+        //     → 出生帧即重叠）+ knockback 推向墙（对消 wander 随机步的离墙漂移；短窗抢拍 < 首游荡窗）。
+        buildLane(true);
+        const int pigS = ents.spawnMobTyped(7, fy + 1, 6, EntityManager::MobPig,
+                                            QStringLiteral("#ee9999"), 20);
+        bool mobSideLit = pigS >= 0;
+        if (pigS >= 0) {
+            for (int t = 0; t < 30; ++t) {
+                ents.knockback(pigS, 1.0f, 0.0f, 0.5f); // 每帧轻推 +X 贴墙（kKnockbackDrag 强阻尼不积累）
+                ents.tick(0.05, &wS, farL, 0.3f, 1.8f, false);
+                if (ents.isBurningAt(pigS)) { mobSideLit = true; break; }
+            }
+        }
+        // 清场（全 lane Air + 熄玩家）
+        for (int x = 2; x <= 8; ++x)
+            for (int z = 4; z <= 8; ++z)
+                for (int dy = 0; dy <= 3; ++dy) wS.setBlock(x, fy + dy, z, BR::Air, 0);
+        pc.clearStatusEffects();
+        const bool okT890 = sideLit && diagClear && unlitClean && topLit && mobSideLit && hoverClean && landLit;
+        if (!okT890) ++totalFail;
+        if (!okT890)
+            qInfo().noquote() << "  [t890 diag] sideLit" << sideLit << "diagClear" << diagClear
+                              << "unlitClean" << unlitClean << "topLit" << topLit
+                              << "mobSideLit" << mobSideLit
+                              << "hoverClean" << hoverClean << "landLit" << landLit;
+        qInfo().noquote() << (okT890 ? "PASS" : "FAIL")
+                          << "| t890 side-contact ignition review: walking flush against a burning "
+                             "plank wall now ignites the player (full-cell AABB overlap scan over own "
+                             "footprint cells plus orthogonal neighbors, kTouchSkin=0.002 absorbs the "
+                             "1e-4 collision snap gap - cactus contact-damage predicate family "
+                             "precedent; old center-column 3-cell check structurally missed it since "
+                             "the body rests in the adjacent cell), standing on a burning plank top "
+                             "still ignites (support-face branch now Y-bounded pMinY<=footY+skin per "
+                             "review27 #3 - airborne hover 0.5 above the burning top (jump-over/"
+                             "fall-past window, footY-1 = burning cell, footprint covering it) does "
+                             "NOT ignite on first tick, then falling onto the top re-ignites), "
+                             "diagonal-only burning cell one cell "
+                             "out does NOT ignite (AABB filter rejects corner false positives), an "
+                             "unlit identical walk stays clean (negative control), and the mob side "
+                             "shares the same scan (pig hugging the wall catches fire); lava keeps "
+                             "center-column fluid-contact semantics untouched";
+    }
+
+    // ── t798 效率附魔审计探针（纯 Core/Game 表查询，无 World/QML）：① 等级分档递增 —— 机制等价 MC 1.0
+    //    「效率在工具基础速上**加法**叠 level²+1」（I +2 / II +5 / III +10 / IV +17 / V +26）：木镐
+    //    （speedMul 2）挖石头（hardness 1.5）时长 0.750 / 0.375 / 0.214 / 0.125 / 0.079 / 0.054s 每级严格
+    //    递减（旧「耗时整体 ×(1+level)」各级统一乘 = 用户报「附任意效率像效率 V」根因）；② 匹配门控 ——
+    //    木镐效率 V 挖泥土 / 沙（Shovel 类）时长 == 无附魔（0.5s 恒定，镐附效率挖土零加成）；③ 交叉 ——
+    //    铁镐效率 III 挖石 1.5/16=0.094s（基础速 6 同吃加法分档）+ 木铲效率 I 挖土 0.5/3.2=0.156s（铲对
+    //    土匹配 → 有加成，方向性对照）；④ 采掘等级门控 —— 木镐效率 V 挖黑曜石仍 96s（mul 1.0 不吃效率，
+    //    t762「仅钻石镐 12s」语义零回归）。另：t763 表 12 附魔公式全复查 —— 锐锋 +0.5/级、亡灵 / 节肢
+    //    +2.5/级（对族）、击退 +50%/级、燃焰 4s/级、时运 ×(1+[0,level])（限矿）、保护族 EPF 通用 1 / 专项
+    //    2 每级、耐久按级概率跳过、精准采集 / 水中亲和 maxLevel 1 二值 —— 全部等级分档，无「统一不分档」
+    //    同病（仅效率旧实现犯，本任务已修）。
+    {
+        const auto woodPick   = int(ToolRegistry::PickaxeWood);
+        const auto ironPick   = int(ToolRegistry::PickaxeIron);
+        const auto woodShovel = int(ToolRegistry::ShovelWood);
+        auto mtClose = [](float got, float expect) { return std::abs(got - expect) < 1e-3f; };
+        // ① 等级分档（木镐挖石头）：有效速 2/4/7/12/19/28 → 六档严格递减。
+        const float stoneT[6] = {
+            ToolRegistry::miningTime(BR::Stone, woodPick, 0),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 1),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 2),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 3),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 4),
+            ToolRegistry::miningTime(BR::Stone, woodPick, 5),
+        };
+        bool ok = mtClose(stoneT[0], 0.750f)
+                  && mtClose(stoneT[1], 0.375f)
+                  && mtClose(stoneT[2], 1.5f / 7.0f)
+                  && mtClose(stoneT[3], 0.125f)
+                  && mtClose(stoneT[4], 1.5f / 19.0f)
+                  && mtClose(stoneT[5], 1.5f / 28.0f)
+                  && stoneT[0] > stoneT[1] && stoneT[1] > stoneT[2] && stoneT[2] > stoneT[3]
+                  && stoneT[3] > stoneT[4] && stoneT[4] > stoneT[5]; // 分档递减 ≠ 统一顶级
+        // ② 匹配门控：木镐效率 V 挖泥土 / 沙 == 无附魔（恒 0.5s）。
+        ok = ok && ToolRegistry::miningTime(BR::Dirt, woodPick, 5) == ToolRegistry::miningTime(BR::Dirt, woodPick, 0)
+                  && mtClose(ToolRegistry::miningTime(BR::Dirt, woodPick, 0), 0.5f)
+                  && ToolRegistry::miningTime(BR::Sand, woodPick, 5) == ToolRegistry::miningTime(BR::Sand, woodPick, 0);
+        // ③ 交叉：铁镐效率 III 挖石 0.094s；木铲效率 I 挖土 0.156s（匹配方才吃加成）。
+        ok = ok && mtClose(ToolRegistry::miningTime(BR::Stone, ironPick, 3), 1.5f / 16.0f)
+                  && mtClose(ToolRegistry::miningTime(BR::Dirt, woodShovel, 1), 0.5f / 3.2f);
+        // ④ 采掘等级门控：木镐效率 V 挖黑曜石仍 96s（t762 不回归）。
+        ok = ok && mtClose(ToolRegistry::miningTime(BR::Obsidian, woodPick, 5), 96.0f);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| efficiency audit: wood pick stone tiered 0.750/0.375/0.214/0.125/0.079/0.054s "
+                             "(additive lvl^2+1 on tool base, MC 1.0); eff-V pick on dirt/sand == no-enchant 0.5s; "
+                             "iron pick eff-III stone 0.094s / wood shovel eff-I dirt 0.156s cross; wood pick "
+                             "eff-V obsidian still 96s harvest-gate (t798)";
+    }
+
+    // ── t755 死亡态硬锁探针（纯 Game 层 PlayerState，无 World/QML/PlayerController）：
+    //    ① 致死一击把 health 精确落库 0（死亡屏心条全空的前提——修前若落 1 即「半颗心」症状之一）；
+    //    ② heal() 死亡免疫：dead 态治疗被拒（修前无守卫 → 致死 tick 尾部饥饿回血 healed(1) 经呈现层
+    //       路由把 0 加回 1 = 用户报告的死亡屏半颗心根因）；③ respawn 复位链：清 dead + 拉满血饥 +
+    //       死因复位（重生后输入解锁 / 血量回满的前置状态链）。
+    {
+        PlayerState ps;
+        ps.setHealth(1);
+        ps.takeDamage(3, int(PlayerState::Fall));   // 致死一击（1-3 → clamp 0）
+        const bool lethalOk = !ps.dead() == false
+                              && ps.health() == 0
+                              && ps.deathCause() == int(PlayerState::Fall);
+        // heal 死亡免疫：dead 态任意治疗不改 health（保持 0，心条全空）。
+        ps.heal(5);
+        const bool healGuardOk = ps.health() == 0;
+        // respawn 复位链：清 dead + 满血 + 死因复位 Generic。
+        ps.respawn();
+        const bool respawnOk = !ps.dead()
+                               && ps.health() == ps.maxHealth()
+                               && ps.deathCause() == int(PlayerState::Generic);
+        const bool ok = lethalOk && healGuardOk && respawnOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| death hard-lock state chain: lethal hit lands health=0 + dead + cause; "
+                             "heal() rejected while dead (half-heart-after-death root); respawn clears "
+                             "dead + full restore (t755)";
+    }
+
+    // ── t852 死亡掉落链探针（Game 层 PlayerController + Hotbar 直编，t814 真消费端模式；spawnItem 消费端
+    //    = Main.qml onSpawnItem → itemEntities.spawnItem 的等价直连计数）：
+    //    ① 四段全掉——hotbar 9 / main 27 / 光标手持栈 / 护甲 4 槽逐非空栈各发 1 个 spawnItem（整栈一实体，
+    //       3×3 邻域散布），附魔 / 实例名 / 耐久末三参全透传（死亡掉落再捡回保真的 C++ 本体面）；
+    //    ② 掉落即清——resetForMode(Survival) 后四段全空（用户报「死亡后背包物品都在、不掉落」的回归面在
+    //       QML 路由层：t690 曾在 onDied 写 `window.<面板id>`（QML id 非 Window 属性 → 恒 undefined →
+    //       TypeError 静默掐断死亡处理器）→ dropAllItems 从未被调。本探针锁 C++ 本体链恒掉恒清；QML 路由
+    //       修复的静态契约钉在 Main.qml onDied 头注释 + try/finally 收口，行为面人工目视）；
+    //    ③ 幂等——背包已空时再调零发射（死亡只掉一次，无重复实体）。
+    {
+        PlayerController pc;   // 无窗口直造（componentComplete 不触发，无 16ms 定时器；m_pos=出生常量 80,80,80）
+        Hotbar hb;
+        pc.setHotbar(&hb);
+        // 装填四段：hotbar 槽 0 = 泥土 64；槽 1 = 钻石剑（锐锋 III + 改名「屠龙」+ 磨损耐久 800）；
+        // main 槽 0 = 木棍 32；护甲槽 0 = 钻石头盔（保护 II + 耐久 300）；光标手持 = 石头 3。
+        const int sharp3   = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
+        const int prot2    = EnchantRegistry::pack(int(EnchantRegistry::Protection), 2);
+        const int diaSword = int(ToolRegistry::DiamondSword);
+        const int diaHelm  = int(RecipeRegistry::ArmorIdBase) + 4 * 4 + 0; // 钻石头盔（t763 同式）
+        hb.setStack(0, BR::Dirt, 64);
+        hb.setStack(1, diaSword, 1, 800, QVariantList{sharp3, 0, 0, 0}, QString::fromUtf8("屠龙"));
+        hb.mainSetStack(0, RecipeRegistry::StickId, 32);
+        hb.armorSetStack(0, diaHelm, 1, 300, QVariantList{prot2, 0, 0, 0}, QString());
+        hb.setHeldBlock(int(BR::Stone));
+        hb.setHeldCount(3);
+        // 消费端直连（等价 Main.qml onSpawnItem 转发；同线程直接连接 = QML handler 语义）：记录全参 + 落点。
+        QVector<int> gotId, gotCount, gotDur, gotX, gotY, gotZ;
+        QVector<QVariantList> gotEnch;
+        QVector<QString> gotName;
+        QObject::connect(&pc, &PlayerController::spawnItem, &pc,
+                         [&](int x, int y, int z, int id, int count, const QVariantList &ench,
+                             const QString &name, int dur) {
+            gotX.push_back(x); gotY.push_back(y); gotZ.push_back(z);
+            gotId.push_back(id); gotCount.push_back(count);
+            gotEnch.push_back(ench); gotName.push_back(name); gotDur.push_back(dur);
+        });
+        pc.dropAllItems();   // 死亡本体链（Main.qml onDied 主链同调）
+        // ① 发射序列：hotbar（泥 64 → 剑 1）→ main（棍 32）→ held（石 3）→ armor（盔 1），逐栈一实体 +
+        //    剑 / 盔的附魔首元 + .size()==4 全槽形状（review24 低危补口：盔侧原只断首元，剑/盔对称）、
+        //    实例名、磨损耐久逐参断言（t590/t622/t686 三参透传的死亡路径回归面）。
+        const bool emitOk = gotId.size() == 5
+                && gotId[0] == int(BR::Dirt) && gotCount[0] == 64
+                && gotId[1] == diaSword && gotCount[1] == 1
+                && gotDur[1] == 800 && gotEnch[1].size() == 4 && gotEnch[1][0].toInt() == sharp3
+                && gotName[1] == QString::fromUtf8("屠龙")
+                && gotId[2] == RecipeRegistry::StickId && gotCount[2] == 32
+                && gotId[3] == int(BR::Stone) && gotCount[3] == 3
+                && gotId[4] == diaHelm && gotCount[4] == 1
+                && gotDur[4] == 300 && gotEnch[4].size() == 4 && gotEnch[4][0].toInt() == prot2;
+        // 散布面：死亡格（m_pos=80,80,80 → cx=cz=80）3×3 邻域内（|dx| ≤ 1 且 |dz| ≤ 1）。
+        //   review24 低危补口：y 落点此前匿名丢弃——现断 y 恰为死亡格 y=80（cy=floor(m_pos.y()) 直传，
+        //   「脚底整数格」契约）。精确等值（非 ±1 带）：若回归改为眼位（脚底+1.62 → floor 81）或 +1 抬升，
+        //   带断言放行、等值断言捕获。
+        bool scatterOk = emitOk;
+        for (int i = 0; i < gotX.size() && scatterOk; ++i)
+            scatterOk = std::abs(gotX[i] - 80) <= 1 && std::abs(gotZ[i] - 80) <= 1 && gotY[i] == 80;
+        // ② 掉落即清：hotbar / main / 护甲三段全空 + 光标手持清（resetForMode(Survival) + heldStack 归零）。
+        const bool clearedOk = hb.blockIdAt(0) == 0 && hb.blockIdAt(1) == 0
+                && hb.mainBlockIdAt(0) == 0 && hb.armorBlockIdAt(0) == 0
+                && hb.heldBlock() == 0;
+        // ③ 幂等：空背包再调 → 零新发射（计数不变）。
+        pc.dropAllItems();
+        const bool idempotentOk = gotId.size() == 5;
+        const bool ok = emitOk && scatterOk && clearedOk && idempotentOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| death drop chain: hotbar+main+held+armor all scatter-dropped (3x3, y=death "
+                             "cell) with full 4-slot ench shape/name/durability passthrough, inventory "
+                             "cleared on drop, second call emits nothing (t852)";
+    }
+
+    // ── t756 出生点选择探针（World 层 findSpawnColumn 多种子回归；独立小世界逐种子重生成，不动主世界
+    //    rig）：种子 42（用户报告「出生在树里」的复现种子）+ 4 个互异回归种子，断言每个世界记录的出生列
+    //    均为「可站立裸地表」：① 支撑格完整立方或积雪层（实体支撑，树叶/原木/草丛/水面薄物均不合规）；
+    //    ② 出生格 h+1 与头部格 h+2 全 Air（树干/邻树树冠占据即否决——修复的直接断言面；水下/湖列的水面
+    //    占 h+1 同遭否决）；③ heightmapAt == h（当前列首个非空恰为地表 → 头顶无任何遮蔽，非树冠/洞顶）。
+    //    世界取 96×96×96（高 96 > 树冠顶 ~82 → 树正常生成，探针真正行使避树；48 高主世界地表钳顶无树，
+    //    用它探针会空转）。h 断言用 min(heightAt, height-1) 同 findSpawnColumn / generate 填充式。
+    {
+        World spawnW;
+        spawnW.setWidth(96);
+        spawnW.setDepth(96);
+        spawnW.setHeight(96);
+        const int seeds[] = { 42, 7, 1337, 2024, 99 }; // 5 个互异种子（验收「连开 5 个不同种子」）
+        bool ok = true;
+        for (const int s : seeds) {
+            spawnW.setSeed(s); // 同尺寸重生成（同 P13 fallback 模式）
+            const int sx = spawnW.spawnColumnX(), sz = spawnW.spawnColumnZ();
+            const int h = std::min(spawnW.heightAt(sx, sz), 95); // 与填充同式钳顶（96-1）
+            const quint8 sup = spawnW.blockAt(sx, h, sz);
+            const quint8 feet = spawnW.blockAt(sx, h + 1, sz);
+            const quint8 head = spawnW.blockAt(sx, h + 2, sz);
+            const bool colOk = (BR::isFullCube(sup) || sup == BR::SnowLayer)
+                               && feet == BR::Air && head == BR::Air
+                               && spawnW.heightmapAt(sx, sz) == h;
+            if (!colOk) {
+                qInfo().noquote() << "  seed" << s << "col" << sx << sz << "h" << h
+                                  << "sup" << int(sup) << "feet" << int(feet)
+                                  << "head" << int(head) << "hm" << spawnW.heightmapAt(sx, sz);
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| spawn column search: seeds {42,7,1337,2024,99} all resolve to standable "
+                             "bare surface — solid/snow-layer support, feet+head cells air, heightmap=="
+                             "heightAt (no trunk/canopy/water overhead) (t756)";
+    }
+
+    // ── review-d #20 尺寸 setter seedChanged 探针（World 层信号链；Review 2026-08-23 #20 潜伏坑半边）：
+    //    setWidth/setDepth/setHeight 重建世界（generate 内 findSpawnColumn 按新尺寸重选出生列）但修前不
+    //    emit seedChanged → 挂接该信号的世界派生缓存不被通知（PlayerController::onWorldSeedChanged 复位
+    //    重生点 → 旧尺寸出生列坐标残留指向新栅格）。断言：①三 setter 变值各发恰一次 seedChanged；
+    //    ②同值守卫静默（幂等）；③重建后出生列 getter 落在新尺寸界内（与 setter 链一致）。取舍：三连发
+    //    不节流（消费端幂等复位、generate 本就各跑一次，见 world.cpp setter 头注释）。PlayerController
+    //    侧采用链（adoptSpawnColumn / onWorldSeedChanged 复位）为 QQuickItem 派生类，不接入本 GUI-free
+    //    测试（QML enterWorld 接线人工目视）。
+    {
+        World wR20;
+        int seedSigs = 0;
+        QObject::connect(&wR20, &World::seedChanged, &wR20, [&]() { ++seedSigs; });
+        wR20.setWidth(32);   // 默认 16 → 32：generate + seedChanged ×1
+        wR20.setDepth(32);   // 16 → 32：×1
+        wR20.setHeight(48);  // 16 → 48：×1
+        const int afterThree = seedSigs;
+        wR20.setWidth(32);   // 同值守卫：不 generate 不 emit
+        const int sx20 = wR20.spawnColumnX(), sz20 = wR20.spawnColumnZ();
+        const bool ok = afterThree == 3 && seedSigs == 3
+                        && sx20 >= 0 && sx20 < 32 && sz20 >= 0 && sz20 < 32;
+        if (!ok)
+            qInfo().noquote() << "  [review-d #20 diag] afterThree" << afterThree
+                              << "final" << seedSigs << "spawnCol" << sx20 << sz20;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review-d #20 size setters emit seedChanged (world-identity reset "
+                             "notification: width/depth/height rebuild each notifies exactly once, "
+                             "same-value guard silent, spawn column getter in new bounds) "
+                             "(Review 2026-08-23 #20)";
+    }
+
+    // ── review-d #22 农夫计数回放链式补前置探针（Game 层 PlayerProgress；Review 2026-08-23 #22）：
+    //    t752 把 farmer 由独立根重挂 time_to_farm 下 → 「cropsHarvested≥10 但锄头线未解锁」的旧档计数
+    //    回放被 unlock 父前置静默吞（修前）。断言：①该档回放后 farmer + 全祖先链（time_to_farm/
+    //    crafting_table/get_wood/open_inventory）解锁；②树形一致（任何已解锁节点的父必已解锁——不出
+    //    「子亮父锁」破相）；③计数 9 对照不解锁；④sniper 回放不链式补前置（10 次箭命中不蕴含首杀，
+    //    父 monster_hunter 缺席仍吞——与实时 unlock 一致，非重挂回归面）；⑤档内已有中间祖先
+    //    （time_to_farm=true）时回放补齐其下 farmer 与其上祖先、已解锁级幂等。
+    {
+        PlayerProgress ppR22;
+        const auto loadStats = [&](const char *statKey, int statVal, const char *achKey) {
+            QVariantMap st; st.insert(QString::fromLatin1(statKey), statVal);
+            QVariantMap a;
+            if (achKey) a.insert(QString::fromLatin1(achKey), true);
+            QVariantMap data; data.insert("stats", st); data.insert("achievements", a);
+            ppR22.loadVariant(data);
+        };
+        // ① 计数达阈 + 全链未解锁 → 链式补全
+        loadStats("cropsHarvested", 10, nullptr);
+        const bool chainOk = ppR22.isUnlocked("farmer") && ppR22.isUnlocked("time_to_farm")
+                             && ppR22.isUnlocked("crafting_table") && ppR22.isUnlocked("get_wood")
+                             && ppR22.isUnlocked("open_inventory");
+        // ② 树形一致：每个已解锁且非根的 def，其父必已解锁
+        bool treeOk = true;
+        const QVariantList achR22 = ppR22.achievements();
+        for (const QVariant &v : achR22) {
+            const QVariantMap m = v.toMap();
+            if (m.value("unlocked").toBool() && !m.value("parentId").toString().isEmpty()
+                && !ppR22.isUnlocked(m.value("parentId").toString()))
+                treeOk = false;
+        }
+        // ③ 计数 9 对照：不解锁 farmer / 不补锄头线（回放只对达阈计数补链）
+        loadStats("cropsHarvested", 9, nullptr);
+        const bool belowOk = !ppR22.isUnlocked("farmer") && !ppR22.isUnlocked("time_to_farm");
+        // ④ sniper 回放保持原前置语义（不链式补：箭命中≠首杀）
+        loadStats("arrowsHitMobs", 10, nullptr);
+        const bool sniperOk = !ppR22.isUnlocked("sniper") && !ppR22.isUnlocked("monster_hunter");
+        // ⑤ 档内已有中间祖先：补齐上下 + 幂等
+        loadStats("cropsHarvested", 12, "time_to_farm");
+        const bool partialOk = ppR22.isUnlocked("farmer") && ppR22.isUnlocked("time_to_farm")
+                               && ppR22.isUnlocked("crafting_table") && ppR22.isUnlocked("get_wood")
+                               && ppR22.isUnlocked("open_inventory");
+        const bool ok = chainOk && treeOk && belowOk && sniperOk && partialOk;
+        if (!ok)
+            qInfo().noquote() << "  [review-d #22 diag] chain" << chainOk << "tree" << treeOk
+                              << "below" << belowOk << "sniper" << sniperOk << "partial" << partialOk;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| review-d #22 farmer count replay chains ancestry: crops>=10 with hoe-line "
+                             "locked restores farmer + full ancestor chain tree-consistent, crops=9 no "
+                             "unlock, sniper replay stays parent-gated (arrow hits != first kill), "
+                             "mid-chain ancestor in save idempotent top-up (Review 2026-08-23 #22)";
+    }
+
+    // P14 审查 #2 火把翻转降沿 / 重亮升沿探针（t740 环粉可达性回归锁）：立在石块上的火把喂斜下环粉 → 灯亮；
+    //    邻位拉杆供能支撑块 → 火把熄灭（NOT 门翻转）→ 环粉必须断电、灯灭（修前：翻转走 Phase B2 静默直写
+    //    不经 notePowerWrite，锚点展开只播 6 正交种子 → 斜下环粉永不可达，保留陈旧电力 15 恒亮）；拉杆回位
+    //    → 火把重亮 → 环粉复电 15、灯复亮（两方向翻转都收敛）。对照 P4：P4 验「拆火把」的编辑路径（经
+    //    notePowerWrite kDiag），本探针验「火把在场、自身反相」的翻转路径——审查 #2 指出 t740 矩阵漏的正是这条。
+    {
+        const auto [x0, z0] = nextSlot();
+        w.setBlock(x0,     kRigY,     z0, BR::Stone, 0);          // 支撑块
+        w.setBlock(x0,     kRigY + 1, z0, BR::RedstoneTorch, 0);  // 火把立其上
+        w.setBlock(x0 + 1, kRigY,     z0, BR::RedstoneDust, 0);   // 斜下环粉（仅火把斜角供，拉杆对它是斜角不直供）
+        w.setBlock(x0 + 2, kRigY,     z0, BR::RedstoneLamp, 0);   // 灯挨粉
+        w.setBlock(x0,     kRigY,     z0 + 1, BR::Lever, 0);      // NOT 门输入：拉杆贴支撑块侧面（初始关）
+        tickN(w, 10);
+        const auto dustP = [&]() { return w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask; };
+        const auto lampOn = [&]() { return (w.stateAt(x0 + 2, kRigY, z0) & BR::RedstoneLampStateOnFlag) != 0; };
+        bool ok = dustP() == 15 && lampOn();            // 初稳态：火把亮 → 环粉 15、灯亮
+        w.setBlock(x0, kRigY, z0 + 1, BR::Lever, 1);    // 拉杆供能支撑块 → 火把反相熄灭
+        tickN(w, 10);
+        ok = ok && dustP() == 0 && !lampOn();           // 翻转降沿：环粉断电、灯灭（修前此处恒亮 = FAIL 面）
+        w.setBlock(x0, kRigY, z0 + 1, BR::Lever, 0);    // 拉杆回位 → 火把重亮
+        tickN(w, 10);
+        ok = ok && dustP() == 15 && lampOn();           // 重亮升沿：环粉复电、灯复亮
+        w.setBlock(x0, kRigY, z0 + 1, BR::Lever, 1);    // 再供能再熄（双向翻转收敛性）
+        tickN(w, 10);
+        ok = ok && dustP() == 0 && !lampOn();
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| torch NOT-gate FLIP reaches diagonal ring dust: lit 15/lamp on, "
+                             "flip-off 0/lamp off, relight 15/lamp on again (review #2)";
+        // 清场
+        w.setBlock(x0, kRigY + 1, z0, BR::Air);
+        w.setBlock(x0, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+        w.setBlock(x0 + 2, kRigY, z0, BR::Air);
+        w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+        tickN(w, 2);
+    }
+
+    // ── 审查 #1 末影眼巡航高度回归探针（Entities 层 EntityManager 直编，同 t737 MinecartManager 先例）：
+    //    t758 插入 spawnEnderPearl 时 spawnEnderEye 的 enderEyeCruiseY 赋值被 diff 吞掉 → 字段全工程无写入
+    //    点（只剩默认 0.0f）→ tick 远段爬升分量恒 0，升空巡航整体死码且运行期无任何报错面。spawn 两枚不同
+    //    高度的眼，断言巡航高度 == origin.y() + 8（kEnderEyeClimbHeight），防同类「插函数吞赋值」静默回归。
+    {
+        EntityManager ents;
+        const int s1 = ents.spawnEnderEye(QVector3D(10.5f, 20.0f, 10.5f), QVector3D(1.0f, 0.5f, 0.0f));
+        const int s2 = ents.spawnEnderEye(QVector3D(12.5f, 33.0f, 12.5f), QVector3D(0.0f, 0.2f, 1.0f));
+        const bool ok = s1 >= 0 && s2 >= 0
+                        && std::abs(ents.enderEyeCruiseYAt(s1) - 28.0f) < 1e-4f
+                        && std::abs(ents.enderEyeCruiseYAt(s2) - 41.0f) < 1e-4f;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| ender-eye spawn records cruise Y = origin.y()+8 at two throw heights "
+                             "(regression guard, review #1)";
+    }
+
+    // ── P15 t772 红石块直供全器件 × 双放置顺序矩阵 ──
+    //   用户报告（R19.12 测试）：「红石块只点亮红石粉/红石灯，发射器、TNT 等均不响应；通电红石粉也点不着
+    //   TNT」。主矩阵（上方 12 源 × 7 接收器）只测「源与器件同帧在场后的首个重算」——放置顺序从未独立成
+    //   维度，而顺序正是可达性路径的分水岭：order A（器件先就位稳态、后放源）可达性走 notePowerWrite 锚点
+    //   的 6 邻接收器展开（t657 引入、t706 扩全红石族脏达）；order B（源先就位稳态、后放器件）可达性走
+    //   器件自身锚点（t656 起即有）。本探针把两条路径 × 3 源（红石块 / 立式亮火把 / 扳开拉杆）× 7 器件全
+    //   组合断言激活（信号型 = 计数 + 坐标；状态型 = 通电位 + 降沿复查）——任一组合 FAIL 即用户症状在当前
+    //   HEAD 的复现点。同槽复用（每 case 末完整清场 + 2 tick 收敛，槽预算 6 个，远低于 124 上限）。
+    //   注：发射器 / 投掷器在呈现层另有「空库存无动作」语义（t607 玩家机器身份）——本 World 层探针断言
+    //   的是 powerDispenserTriggered 信号已发出（消费端 fireDispenserAtQml 的沿检测输入），非可见弹射。
+    {
+        const SourceDef s772[] = {
+            { "RedstoneBlock",      BR::RedstoneBlock, 0,                           true,  false },
+            { "RedstoneTorch(lit)", BR::RedstoneTorch, 0,                           true,  false },
+            { "Lever(on)",          BR::Lever,         1,                           false, false },
+        };
+        const RecvDef r772[] = {
+            { "TNT",          BR::TntBlock,      0,                           true  },
+            { "Dispenser",    BR::Dispenser,     0,                           true  },
+            { "Dropper",      BR::Dropper,       0,                           true  },
+            { "RedstoneLamp", BR::RedstoneLamp,  BR::RedstoneLampStateOnFlag, false },
+            { "GoldenRail",   BR::GoldenRail,    BR::GoldenRailStateOnFlag,   false },
+            { "IronDoor",     BR::IronDoor,      0x04,                        false },
+            { "IronTrapdoor", BR::IronTrapdoor,  0x01,                        false },
+        };
+        for (int order = 0; order < 2; ++order) {
+            for (const SourceDef &src : s772) {
+                const auto [x0, z0] = nextSlot(); // 每源一槽，7 器件顺序复用（case 间全清 + 收敛 tick）
+                // review0906 D2 首跑实锤：depth 144→180 后 worldgen 在槽 (26,41,85) 一带现出天然空腔
+                //   （diag_t772 实测 y39..43 全空气）——活板门浮空放置后，源放置这一「邻格编辑」触发 t851
+                //   失撑复检（hasAttach 无任何实体面：火把/拉杆非 trapdoorSupportBlock）→ 板当即脱落 =
+                //   torch/lever → IronTrapdoor 假红（RedstoneBlock case 因红石块自身算实体面而幸存；
+                //   D1 的 144 世界该槽恰埋实心山体 = 从未触发）。本探针语义 =「源—器件相邻供电」，与
+                //   地形无关 → 显式铺接收器正下方支撑石，选址不再依赖 y41 恰好实心（t814 教训同源：
+                //   器件必须自带落位保障）。
+                w.setBlock(x0 + 1, kRigY - 1, z0, BR::Stone, 0);
+                for (const RecvDef &rc : r772) {
+                    const int srcX = x0, recvX = x0 + 1;
+                    if (order == 0) {
+                        // order A：器件先就位 + 稳态 4 tick → 后放源（用户实测路径：先摆 TNT/发射器、再贴红石块）。
+                        w.setBlock(recvX, kRigY, z0, rc.id, 0);
+                        tickN(w, 4);
+                        w.setBlock(srcX, kRigY, z0, src.id, src.onState);
+                    } else {
+                        // order B：源先就位 + 稳态 4 tick → 后放器件。
+                        w.setBlock(srcX, kRigY, z0, src.id, src.onState);
+                        tickN(w, 4);
+                        w.setBlock(recvX, kRigY, z0, rc.id, 0);
+                    }
+                    const int tnt0 = tntFired, disp0 = dispFired;
+                    tickN(w, 6);
+                    bool on = false;
+                    QString onNote;
+                    if (rc.signalBased && rc.id == BR::TntBlock) {
+                        on = (tntFired > tnt0) && lastTntX == recvX && lastTntY == kRigY && lastTntZ == z0;
+                        if (!on) onNote = QStringLiteral("no powerTntTriggered");
+                    } else if (rc.signalBased) {
+                        on = dispFired > disp0;
+                        if (!on) onNote = QStringLiteral("no powerDispenserTriggered");
+                    } else {
+                        on = (w.stateAt(recvX, kRigY, z0) & rc.onFlag) != 0;
+                        if (!on) onNote = QStringLiteral("state flag not set (st=%1)").arg(int(w.stateAt(recvX, kRigY, z0)));
+                    }
+                    bool offOk = true;
+                    QString offNote;
+                    if (on && !rc.signalBased) {
+                        if (src.removeToOff) w.setBlock(srcX, kRigY, z0, BR::Air);
+                        else                 w.setBlock(srcX, kRigY, z0, src.id, 0);
+                        tickN(w, 6);
+                        offOk = (w.stateAt(recvX, kRigY, z0) & rc.onFlag) == 0;
+                        if (!offOk) offNote = QStringLiteral("falling edge: flag stuck");
+                    }
+                    const bool ok = on && offOk;
+                    if (!ok) ++totalFail;
+                    qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                                      << "| t772"
+                                      << (order == 0 ? "[device-first,source-last]" : "[source-first,device-last]")
+                                      << src.name << "->" << rc.name
+                                      << (on ? QString() : onNote) << (offOk ? QString() : offNote);
+                    // 清场（源 + 器件全清；信号型 TNT 的清块在呈现层，World 层探针须自理）+ 2 tick 收敛。
+                    w.setBlock(srcX, kRigY, z0, BR::Air);
+                    w.setBlock(recvX, kRigY, z0, BR::Air);
+                    tickN(w, 2);
+                }
+            }
+        }
+    }
+
+    // ── P16 t771 跨轨种拐角探针（普通轨×{普通,动力,探测}邻弯 + 动力-普通-动力垂直链 + 矿车过混合拐角）──
+    //   用户报告（R19.12）：「只有普通铁轨可以转弯……动力铁轨和动力铁轨之间中间放普通铁轨也能转弯才对，
+    //   只需要一个普通铁轨也可以转弯，普通铁轨和动力铁轨之间也可以转弯，仿我的世界规则」。机制等价
+    //   MC 1.0：弯道形态只呈现在**普通轨格**上（railCornerArms 消费 con 位），但配对邻轨**轨种不限**
+    //   （普通/动力/探测均可作臂）；动力/探测轨自身永不弯（railConnections 规则②直线投影恒直）。
+    //   断言四层（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 混合 L 拐角 × 3 臂种（两臂同为普通/动力/探测）：拐角格 con 恰为两垂直臂位 + mesher 象限
+    //       （railCornerArms + PartialBlockGeometry 同源直调，同 P11 (b)）；两臂格各自回落指向拐角的
+    //       单端直位（臂轨不弯）；
+    //   (b) 动力轨坐弯位（两垂直普通邻）永不弯：con 为直线投影单端位（railCornerArms 拒绝）；
+    //   (c) 动力-普通-动力 / 探测-普通-探测垂直链（用户主诉场景）：中间普通轨 con = 两垂直臂位（拐角）；
+    //       破端轨 → 中间轨随编辑复检回落单端直位（连接是派生态，破轨断弯）；
+    //   (d) 矿车过混合拐角（动力轨起步 → 普通轨拐角 → 动力轨死端）：进/出拐角必垂直（真转弯）、
+    //       Y 钉轨面、过弯后 yaw 覆盖行进向基数（180 = +Z 头向）、终停死端格心（pickTrackStep 反向滤）。
+    {
+        // 拐角象限断言（P11 (b) 同源）：con → railCornerArms 臂向 → mesher 直调拐角 quad 的肘角/对角
+        //   落 (ex,ez)/(1-ex,1-ez)。提出共享 lambda（P16 三处复用：混合 L × 3 臂种 + 链弯中间轨）。
+        const auto cornerQuadrantOk = [](quint8 con) {
+            int axd = 0, azd = 0;
+            if (!BR::railCornerArms(con, axd, azd)) return false;
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = 0; // Rail case 只读 railDelta*（缺省平拐角）
+            const float tileW = 1.0f / 16.0f;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::Rail, con, lctx, nctx,
+                                         tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            const float ex = (axd > 0) ? 1.0f : 0.0f; // 出口臂贴的 x 边
+            const float ez = (azd > 0) ? 1.0f : 0.0f; // 入口臂贴的 z 边
+            bool elbow = false, diag = false;
+            for (const Vtx &v : verts) {
+                const float uu = (v.u - 136.0f * tileW) / tileW; // 拐角瓦片 UV 归一 [0,1]
+                if (uu < 0.25f && v.v < 0.25f
+                    && std::fabs(v.x - ex) < 1e-4f && std::fabs(v.z - ez) < 1e-4f) elbow = true;
+                if (uu > 0.75f && v.v > 0.75f
+                    && std::fabs(v.x - (1.0f - ex)) < 1e-4f && std::fabs(v.z - (1.0f - ez)) < 1e-4f) diag = true;
+            }
+            return elbow && diag;
+        };
+
+        // (a) 混合 L：拐角 C=(x0,z0) 普通轨；-X 臂与 +Z 臂同为轨种 K ∈ {普通,动力,探测}。
+        const struct { const char *name; quint8 id; } armKinds[3] = {
+            { "rail",     BR::Rail },
+            { "golden",   BR::GoldenRail },
+            { "detector", BR::DetectorRail },
+        };
+        for (const auto &k : armKinds) {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0 - 1, kRigY, z0, k.id, 0);       // -X 臂（轨种 K）
+            w.setBlock(x0, kRigY, z0 + 1, k.id, 0);       // +Z 臂（轨种 K）
+            w.setBlock(x0, kRigY, z0, BR::Rail, 0);       // 拐角（最后放：邻齐后一次成形）
+            const quint8 cCon = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            const quint8 armX = quint8(w.stateAt(x0 - 1, kRigY, z0) & 0x0F);
+            const quint8 armZ = quint8(w.stateAt(x0, kRigY, z0 + 1) & 0x0F);
+            const bool ok = cCon == quint8(BR::RailConnNx | BR::RailConnPz) // 拐角 = 两垂直臂位
+                            && cornerQuadrantOk(cCon)                       // 象限（贴图与连接位同源）
+                            && armX == BR::RailConnPx                        // -X 臂单端直位（臂不弯）
+                            && armZ == BR::RailConnNz;                       // +Z 臂单端直位
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771 mixed L corner, arms =" << k.name
+                              << "con" << int(cCon) << "armX" << int(armX) << "armZ" << int(armZ);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (b) 动力轨坐弯位（两垂直普通邻）永不弯：NS 轴偏好下直线投影取 +Z 单端位（非拐角组合）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0 - 1, kRigY, z0, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Rail, 0);
+            w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0); // 动力轨最后放（坐进弯位）
+            const quint8 gCon = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            int axd = 0, azd = 0;
+            const bool ok = gCon == BR::RailConnPz && !BR::railCornerArms(gCon, axd, azd);
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771 golden rail at bend slot stays straight, con" << int(gCon);
+            w.setBlock(x0 - 1, kRigY, z0, BR::Air);
+            w.setBlock(x0, kRigY, z0 + 1, BR::Air);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (c) 垂直链：端轨 E1(-X) + 中间普通轨 + 端轨 E2(+Z)，端轨种 ∈ {动力×2, 探测×2}（用户主诉
+        //     「动力和动力之间中间放普通铁轨也能转弯」）。破 E2 复检断弯回落。
+        const struct { const char *name; quint8 id; } endKinds[2] = {
+            { "golden",   BR::GoldenRail },
+            { "detector", BR::DetectorRail },
+        };
+        for (const auto &e : endKinds) {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, e.id, 0);           // E1（-X 端）
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);   // 中间普通轨
+            w.setBlock(x0 + 1, kRigY, z0 + 1, e.id, 0);   // E2（+Z 端，最后放 → 中间轨成弯）
+            const quint8 mCon = quint8(w.stateAt(x0 + 1, kRigY, z0) & 0x0F);
+            const quint8 e1 = quint8(w.stateAt(x0, kRigY, z0) & 0x0F);
+            const quint8 e2 = quint8(w.stateAt(x0 + 1, kRigY, z0 + 1) & 0x0F);
+            bool ok = mCon == quint8(BR::RailConnNx | BR::RailConnPz) && cornerQuadrantOk(mCon)
+                      && e1 == BR::RailConnPx && e2 == BR::RailConnNz;
+            // 破 E2 → 中间轨随邻编辑复检断弯，回落 -X 单端直位（连接是派生态非持久属性）。
+            w.setBlock(x0 + 1, kRigY, z0 + 1, BR::Air);
+            const quint8 mAfter = quint8(w.stateAt(x0 + 1, kRigY, z0) & 0x0F);
+            ok = ok && mAfter == BR::RailConnNx;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771" << e.name << "-rail-" << e.name << "vertical chain bends middle,"
+                                 "after break" << int(mAfter);
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (d) 矿车过混合拐角：G1(动力,-X 端起步) → 拐角(普通轨) → G2(动力,+Z 死端)。空车追推跑法
+        //     （同 P11 (d)：pushEmptyCart + tickPushedCarts 每帧、wish 随行进向）。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0, kRigY, z0, BR::GoldenRail, 0);       // G1：con=Px → spawn 定向 +X
+            w.setBlock(x0 + 1, kRigY, z0, BR::Rail, 0);         // 拐角（普通轨）
+            w.setBlock(x0 + 1, kRigY, z0 + 1, BR::GoldenRail, 0); // G2：死端（到达即停）
+            MinecartManager carts;
+            carts.spawnCart(x0, kRigY, z0, &w);
+            const float rideH = 0.45f; // kCartRideH 文档值（同 P11 镜像注释）
+            QVector3D prev = carts.posAt(0);
+            float wishX = 1.0f, wishZ = 0.0f;
+            int lastBx = int(std::floor(prev.x())), lastBz = int(std::floor(prev.z()));
+            int inDx = 1, inDz = 0; // 进入当前格方向（spawn 定向 +X）
+            bool reachedCorner = false, reachedEnd = false, turnOk = false, yawOk = false;
+            bool inFootprint = true, yOk = true;
+            for (int t = 0; t < 900 && inFootprint; ++t) {
+                // t863④ 适配：到达死端格后停推（追推会把死端车推离轨道出轨——本探针验拐角语义非推离；
+                //   停推后余速滑到死端格心停驻）。
+                if (int(std::floor(prev.x())) != x0 + 1 || int(std::floor(prev.z())) != z0 + 1)
+                    carts.pushEmptyCart(&w, prev, wishX, wishZ); // 玩家追着推（静止即续推）
+                carts.tickPushedCarts(0.016f, &w);
+                const QVector3D cp = carts.posAt(0);
+                const float ddx = cp.x() - prev.x(), ddz = cp.z() - prev.z();
+                const float dl = std::sqrt(ddx * ddx + ddz * ddz);
+                if (dl > 1e-4f) { wishX = ddx / dl; wishZ = ddz / dl; }
+                const int bx = int(std::floor(cp.x())), bz = int(std::floor(cp.z()));
+                const bool onTrack = (bx == x0 && bz == z0) || (bx == x0 + 1 && bz == z0)
+                                     || (bx == x0 + 1 && bz == z0 + 1);
+                if (!onTrack) { inFootprint = false; break; }
+                if (std::fabs(cp.y() - (float(kRigY) + rideH)) > 0.01f) yOk = false;
+                if (bx != lastBx || bz != lastBz) {
+                    const int ndx = bx - lastBx, ndz = bz - lastBz;
+                    // 出拐角必垂直进向（真转弯非直行穿出）——先判后更新 in-dir（同 P11 环线断言）。
+                    if (lastBx == x0 + 1 && lastBz == z0 && ndx * inDx + ndz * inDz == 0) turnOk = true;
+                    inDx = ndx; inDz = ndz;
+                    lastBx = bx; lastBz = bz;
+                }
+                if (bx == x0 + 1 && bz == z0) reachedCorner = true;
+                if (bx == x0 + 1 && bz == z0 + 1) {
+                    reachedEnd = true;
+                    const int yb = int(std::lround(carts.yawAt(0))) % 360;
+                    if (yb == 180) yawOk = true; // +Z 行进头向（-Z 前 = 0 约定下 yaw=180）
+                }
+                prev = cp;
+            }
+            // 终停死端格心：G2 是唯一出口朝来路的格（pickTrackStep 反向滤 → 到心停）。
+            const QVector3D fin = carts.posAt(0);
+            const bool stoppedAtEnd = int(std::floor(fin.x())) == x0 + 1 && int(std::floor(fin.z())) == z0 + 1;
+            const bool ok = reachedCorner && reachedEnd && turnOk && yawOk && inFootprint && yOk
+                            && stoppedAtEnd;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t771 cart through mixed corner (golden->rail corner->golden dead end):"
+                                 " turn" << turnOk << "yaw180" << yawOk << "stopAtEnd" << stoppedAtEnd;
+            w.setBlock(x0, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY, z0 + 1, BR::Air);
+            tickN(w, 2);
+        }
+    }
+
+    // ── P17 t773 TNT 点燃路径补全探针（粉链两接法 + 升降沿语义 + 探测轨有车端到端）──
+    //   用户报告（R19.12）：「通电红石粉也点不着 TNT」「探测轨有车信号也应触发 TNT」。t772 P15 已实证
+    //   直供源（红石块 / 火把 / 拉杆）× TNT 双放置顺序全过（用户症状 = 陈旧 exe）；本组探针补齐**粉链**
+    //   与**探测轨**两条剩余路径的回归锁：
+    //   (a) 同层粉链（lever - 粉 - TNT）：升沿恰一次点燃 + 坐标命中；断电降沿复算触达（World 层清块归
+    //       呈现层信号消费端）但**不得再触发**；断电后再上电（场内无 TNT）不触发；重放 TNT（粉仍通电）
+    //       → 立即点燃（器件后放路径，等价用户重新摆 TNT）；
+    //   (b) 粉在 TNT 上方爬坡斜接（lever - 地面粉 - TNT 顶粉）：顶粉经爬墙斜角（水平邻 y+1）从地面粉
+    //       得电（距源 2 跳 → 电力 14），TNT 由正交上邻通电粉点燃（isReceivingPower 含 +Y 向读）；
+    //       拆源降沿顶粉同步断电、无再触发；
+    //   (c) 探测轨有车端到端（Rail-Detector-Rail-Rail 直轨 + 空车直落探测格 + TNT 贴轨南邻）：车压轨
+    //       bit4 置位（setWaterSilent → notePowerWrite，非主矩阵的「直摆激活态」捷径）→ 邻接 TNT 点燃；
+    //       驻轨稳态幂等零写 → 不重复点燃；推离降沿 bit4 清 → 无再触发。
+    //   ⚠ 消费端镜像（探针成败关键）：World 层 TNT 分支无升沿守卫（每次电力活动 pass 触达且通电即 emit
+    //   ——粉 state 写入沿的回插复算会再触达），防双触发的收口在呈现层消费端（playercontroller
+    //   firePowerTnt：isTnt 守卫 + 同步 clearBlockSilent——2810 行分支注释「点燃后清 Air 由信号消费端做」）。
+    //   孤测若无消费端清块，「恰一次」断言必假 FAIL（双 emit 落在同一 TNT 块上；真实链路里第一次 emit
+    //   已同步清块 → 第二次 emit 前 addReceiver 读到 Air 根本不发生）。本组探针统一挂 scoped 消费端
+    //   镜像连接（isTnt 守卫 + clearBlockSilent，firePowerTnt 的 World 侧动作同款），断言语义 = 真实链路。
+    {
+        // 消费端镜像连接（(a)(b)(c) 共用；探针末统一断开——全局计数连接不动）。
+        const QMetaObject::Connection tntCons =
+            QObject::connect(&w, &World::powerTntTriggered, &w, [&](int x, int y, int z) {
+                if (BR::isTnt(w.blockAt(x, y, z))) w.clearBlockSilent(x, y, z);
+            });
+
+        // (a) 同层粉链 + 升降沿语义。
+        {
+            const auto [x0, z0] = nextSlot();
+            w.setBlock(x0,     kRigY, z0, BR::Lever, 1);         // 源（扳开）
+            w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);  // 粉（与 TNT 同层相邻）
+            w.setBlock(x0 + 2, kRigY, z0, BR::TntBlock, 0);      // TNT 最后放（编辑锚点入脏驱动首算）
+            const int t0 = tntFired;
+            tickN(w, 6);
+            bool ok = (tntFired - t0 == 1)                                                     // 升沿恰一次
+                      && lastTntX == x0 + 2 && lastTntY == kRigY && lastTntZ == z0              // 坐标命中
+                      && w.blockAt(x0 + 2, kRigY, z0) == BR::Air                               // 消费端已清块
+                      && (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) == 15;      // 粉确为活跃 15
+            w.setBlock(x0, kRigY, z0, BR::Lever, 0);   // 断源 → 降沿
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 1)                                                     // 降沿不重复点燃
+                  && (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) == 0;           // 粉断电收敛
+            w.setBlock(x0, kRigY, z0, BR::Lever, 1);   // 再上电（场内无 TNT——原块已点燃清走）
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 1);                                                    // 无器件 → 不触发
+            w.setBlock(x0 + 2, kRigY, z0, BR::TntBlock, 0); // 重放 TNT（用户重新摆；粉仍通电 15）
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 2)                                                     // 器件后放 → 立即点燃
+                  && lastTntX == x0 + 2 && lastTntY == kRigY && lastTntZ == z0
+                  && w.blockAt(x0 + 2, kRigY, z0) == BR::Air;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t773 same-level dust trail -> TNT: rising edge fires exactly once, "
+                                 "falling edge no re-fire, re-power w/o TNT silent, replaced TNT fires "
+                                 "immediately";
+            for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+            tickN(w, 2);
+        }
+
+        // (b) 粉在 TNT 上方爬坡斜接（t769 教训：先净空工作 box——本列地形可能达 y≥42，顶粉格被挤占即假 FAIL）。
+        {
+            const auto [x0, z0] = nextSlot();
+            for (int i = 0; i <= 2; ++i)
+                for (int dy = 0; dy <= 1; ++dy)
+                    if (w.blockAt(x0 + i, kRigY + dy, z0) != BR::Air)
+                        w.setBlock(x0 + i, kRigY + dy, z0, BR::Air);
+            w.setBlock(x0,     kRigY,     z0, BR::Lever, 1);         // 源
+            w.setBlock(x0 + 1, kRigY,     z0, BR::RedstoneDust, 0);  // 地面粉（源直供 15）
+            w.setBlock(x0 + 2, kRigY,     z0, BR::TntBlock, 0);      // TNT
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::RedstoneDust, 0);  // TNT 顶粉（与地面粉爬墙斜角互连）
+            const int t0 = tntFired;
+            tickN(w, 6);
+            bool ok = (tntFired - t0 == 1)
+                      && lastTntX == x0 + 2 && lastTntY == kRigY && lastTntZ == z0
+                      && (w.stateAt(x0 + 2, kRigY + 1, z0) & BR::RedstoneDustPowerMask) == 14; // 距源 2 跳
+            w.setBlock(x0, kRigY, z0, BR::Air);       // 拆源 → 全线断电降沿
+            tickN(w, 6);
+            ok = ok && (tntFired - t0 == 1)
+                  && (w.stateAt(x0 + 2, kRigY + 1, z0) & BR::RedstoneDustPowerMask) == 0       // 顶粉同步断电
+                  && (w.stateAt(x0 + 1, kRigY, z0) & BR::RedstoneDustPowerMask) == 0;         // 地面粉同步断电
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t773 dust climbing onto TNT top (wall-diagonal hop): top dust power 14, "
+                                 "TNT fires once; source removed -> trail dead, no re-fire";
+            w.setBlock(x0,     kRigY,     z0, BR::Air);
+            w.setBlock(x0 + 1, kRigY,     z0, BR::Air);
+            w.setBlock(x0 + 2, kRigY,     z0, BR::Air);
+            w.setBlock(x0 + 2, kRigY + 1, z0, BR::Air);
+            tickN(w, 2);
+        }
+        // (c) 探测轨有车 → TNT 端到端（真实矿车压轨置位链，非直摆激活态）。
+        {
+            const auto [x0, z0] = nextSlot();
+            const int detX = x0 + 1;
+            w.setBlock(x0,     kRigY, z0,     BR::Rail, 0);
+            w.setBlock(detX,   kRigY, z0,     BR::DetectorRail, 0);
+            w.setBlock(x0 + 2, kRigY, z0,     BR::Rail, 0);
+            w.setBlock(x0 + 3, kRigY, z0,     BR::Rail, 0);
+            w.setBlock(detX,   kRigY, z0 + 1, BR::TntBlock, 0);   // TNT 贴探测轨南邻
+            const auto detOn = [&]() { return (w.stateAt(detX, kRigY, z0) & BR::DetectorRailStateOnFlag) != 0; };
+            MinecartManager carts;
+            carts.spawnCart(detX, kRigY, z0, &w); // 空车直落探测轨（静止，无人骑）
+            const int t0 = tntFired;
+            for (int t = 0; t < 8; ++t) { carts.tickPushedCarts(0.016f, &w); w.tickRedstone(); }
+            bool ok = detOn()                                                        // bit4 置位（经矿车占用链）
+                      && (tntFired - t0 == 1)                                        // 升沿恰一次点燃
+                      && lastTntX == detX && lastTntY == kRigY && lastTntZ == z0 + 1; // 坐标命中
+            for (int t = 0; t < 20; ++t) { carts.tickPushedCarts(0.016f, &w); w.tickRedstone(); }
+            ok = ok && detOn() && (tntFired - t0 == 1);                              // 驻轨稳态幂等零写不重复点燃
+            QVector3D player = carts.posAt(0);                                       // 玩家追推 +X 离开（同 P12 跑法）
+            bool left = false;
+            for (int t = 0; t < 600 && !left; ++t) {
+                carts.pushEmptyCart(&w, player, 1.0f, 0.0f);
+                carts.tickPushedCarts(0.016f, &w);
+                w.tickRedstone();
+                player = carts.posAt(0);
+                if (int(std::floor(player.x())) >= x0 + 2) left = true;
+            }
+            for (int t = 0; t < 12; ++t) { carts.tickPushedCarts(0.016f, &w); w.tickRedstone(); }
+            ok = ok && left && !detOn() && (tntFired - t0 == 1);                     // 离开沿断电降沿无再触发
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t773 detector rail with real cart -> adjacent TNT fires exactly once "
+                                 "(bit4 via occupancy chain); parked steady no re-fire; cart leaves -> off, "
+                                 "no re-fire";
+            carts.clearAll();
+            for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
+            w.setBlock(detX, kRigY, z0 + 1, BR::Air);
+            tickN(w, 2);
+        }
+
+        QObject::disconnect(tntCons); // 消费端镜像仅限本组探针（全局计数连接保留）
+    }
+
+    // ── P17 t774 TNT 爆炸伤害 mob 探针（Entities 层 EntityManager 直编，同末影眼先例）──
+    //   用户报告（R19.12）：「TNT 爆炸之后对生物没有伤害？只有对玩家才有伤害」——旧爆炸路径
+    //   （detonateTntSphere / detonateStalker）只 emit mobAttackedPlayer 伤玩家，球内 mob 零伤。修后
+    //   damageMobsFromExplosion 补 mob 侧（同公式距离衰减 + 击退 + 死亡走 mobDied 掉落链）。矩阵断言
+    //   （任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 距离单调：3 只猪距爆心 ~1 / ~2 / ~4 格（4 > 半径 3 在球外）——受伤恰 16 / 8 / 0 HP
+    //       （round(kExplosionDamageMax·(1−d/R))，同玩家侧公式/常量）；8 HP 猪吃满 8 伤 → dead + ~0.5s 死亡
+    //       动画后 mobDied 恰一次（掉落链入口）；球外猪全程无伤；
+    //   (b) 击退：幸存近猪被推离爆心（+X 方向位移 >> 游荡抖动；死亡猪尸体不推——只断言幸存者）；
+    //   (c) 玩家链不双伤：爆心 1 格处虚拟玩家脚位 → mobAttackedPlayer 恰发一次且伤害同公式（16），
+    //       后续远场爆炸不再新增（既有玩家链原样保留，新增 mob 侧不碰玩家）；
+    //   (d) 水中爆炸照样伤 mob：TNT 格置 Water（originInWater 只跳地形破坏）→ 距 ~1 格猪照样受伤。
+    {
+        const auto [x0, z0] = nextSlot();
+        const int ty = kRigY;
+        // 平台（防 spawn 即坠落；爆炸毁掉球内部分 → 猪跌落不影响水平击退断言；球外猪的平台幸存）。
+        for (int dx = 0; dx <= 6; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        EntityManager ents;
+        // 猪位 = 格心 + halfH=0.45（spawnMobCore 口径）；爆心 = TNT 格心 (x0+0.5, ty+0.5, z0+0.5)。
+        const int pigNear = ents.spawnMobTyped(x0 + 1, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 30); // 距 ~1.001 → 16 HP（幸存 → 击退断言）
+        const int pigMid  = ents.spawnMobTyped(x0 + 2, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 8);  // 距 ~2.001 → 8 HP → 恰死（死亡/掉落链断言）
+        const int pigFar  = ents.spawnMobTyped(x0 + 4, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 5);  // 距 ~4.000 > 3 → 球外 0 HP
+        int playerHits = 0, playerDmg = -1;
+        QObject::connect(&ents, &EntityManager::mobAttackedPlayer, &ents,
+                         [&](int amount, int type, float kx, float kz) {
+                             Q_UNUSED(type); Q_UNUSED(kx); Q_UNUSED(kz);
+                             ++playerHits; playerDmg = amount;
+                         });
+        int diedCount = 0, diedType = -1;
+        QObject::connect(&ents, &EntityManager::mobDied, &ents,
+                         [&](int x, int y, int z, int type, bool burned, bool baby) {
+                             Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(burned); Q_UNUSED(baby);
+                             ++diedCount; diedType = type;
+                         });
+        const float pigNearX0 = ents.posAt(pigNear).x();
+        // (c) 虚拟玩家脚位：爆心 +1 格 X、身体中心与爆心同高（脚 y = ty−0.4 → 中心 ty+0.5）→ 距 1.0 → 16 HP。
+        const QVector3D playerPos(x0 + 1.5f, ty - 0.4f, z0 + 0.5f);
+        ents.detonateTntSphere(x0, ty, z0, &w, playerPos);
+        bool ok = ents.healthAt(pigNear) == 30 - 16
+               && ents.healthAt(pigMid) == 0 && ents.deadAt(pigMid)
+               && ents.healthAt(pigFar) == 5 && !ents.deadAt(pigFar)
+               && playerHits == 1 && playerDmg == 16;
+        // (a2)+(b) tick 40×16ms（0.64s > kDeathTime 0.5s）：死亡链 mobDied 恰一次（pigMid，猪类型）；
+        //   幸存近猪被击退远离爆心。击退位移在**前 6 tick（0.096s）**取值：knockback vx≈6 b/s 指数衰减期
+        //   位移 ~0.4-0.55 格，而 aiWander 随机游荡同窗最坏反向 ~0.1 格 → 阈值 0.25 防偶发（全窗累计游荡
+        //   抖动会稀释单调性，短窗让击退主导）。方向 = (mob−爆心) XZ 归一 = +X。
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        float knockDx = 0.0f;
+        for (int t = 0; t < 40; ++t) {
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            if (t == 5) knockDx = ents.posAt(pigNear).x() - pigNearX0;
+        }
+        ok = ok && diedCount == 1 && diedType == int(EntityManager::MobPig)
+               && knockDx > 0.25f && knockDx < 1.5f         // 击退远离爆心（+X，短窗量级护栏）
+               && ents.healthAt(pigFar) == 5 && !ents.deadAt(pigFar); // 球外猪全程无伤
+        // (d) 水中爆炸照样伤 mob：爆心格置 Water（originInWater → 只跳地形破坏，不门控伤害）→ 距 ~1 格新猪照样 16 HP。
+        const int pigWat = ents.spawnMobTyped(x0 + 6, ty, z0, EntityManager::MobPig, QStringLiteral("#ee9999"), 20);
+        w.setBlock(x0 + 5, ty, z0, BR::Water, 0);
+        ents.detonateTntSphere(x0 + 5, ty, z0, &w, farListener); // 玩家 = 远场 → 半径外不发 mobAttackedPlayer
+        ok = ok && ents.healthAt(pigWat) == 20 - 16 && !ents.deadAt(pigWat)
+               && playerHits == 1; // 既有玩家链未被新增 mob 侧双触发
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t774 TNT explosion damages mobs: 3 pigs at d~1/2/4 take 16/8/0 HP "
+                             "(player-side formula); 8HP pig dies -> mobDied exactly once (drop chain); "
+                             "survivor knocked away from blast; player hit chain fires exactly once "
+                             "(no double); underwater blast still damages mobs";
+        // 清场（平台 + 水格全清 + 2 tick 收敛）。
+        w.setBlock(x0 + 5, ty, z0, BR::Air);
+        for (int dx = 0; dx <= 6; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air);
+        tickN(w, 2);
+    }
+
+    // ── P18 t775 骑矿车窒息探针（1 格高通道顶头扣血的几何 + 节奏断言）──
+    //   用户报告（R19.12）：「生存坐矿车穿 1 格高通道（头撞实体方块）应扣血，现无痛穿过」。根因：
+    //   PlayerController.step 的矿车骑乘分支早 return，不经走路路径末尾的 t160 窒息块 → 骑乘期头部
+    //   嵌实心格零伤（修法 = 分支内座位同步后直调抽出的 tickSuffocation，走路 / 骑乘共用同链）。
+    //   矩阵断言（World + Entities 层可及范围 —— PlayerController 属 Game 层不直编，接线由上述共用
+    //   函数保证，探针锁定几何前提与节奏规则）：
+    //   (a) 1 格净空（轨格 y=R、天花板 y=R+1）：骑乘眼位（脚底 = 车心 −kCartSeatDrop + 眼高）对
+    //       World::pointBlockedByCollision 恒 true（t775 起玩家窒息与探针共用本 World 判据）；
+    //   (b) 每秒 1HP 节奏镜像（kSuffocationInterval=1s 同规则累积）≥3 脉冲（4.8s 连续嵌 → 4 脉冲）；
+    //   (c) 对照组 2 格净空（天花板 y=R+2）：眼位 1.7575 < 2 不嵌 → 全程 false、0 脉冲（防「坐车
+    //       恒扣血」的反向回归）；
+    //   (d) 车本体不受天花板影响：两 rig 车都全程钉轨面（y=R+rideH）且驶完全程到死端（scanRailColumn
+    //   自 floor(pos.y) 起扫，天花板在其上方不遮轨 → 矿车物理可进 1 格净空通道 = 用户症状前提）。
+    {
+        // 镜像常量（与 Game 层 playercontroller / minecartmanager 私有常量文档值同步，改几何须三处同步）：
+        const float seatDrop = 0.3125f; // kCartSeatDrop（脚底 = 矿车中心 −0.3125，t768 底板面偏移）
+        const float eyeH = 1.62f;       // kEyeHeight（站姿眼位；骑乘不改变 m_eyeHeight）
+        const float suffInterval = 1.0f; // kSuffocationInterval（t160 窒息扣血间隔，每秒 1HP）
+        // rig 坐标：不用 nextSlot()（其 4×31 网格已被前序探针占满，尾行 z0=97 越界 → setBlock 全拒 = 假
+        //   FAIL）；固定 z=94 行（界内最后一行，前序探针已自清）+ 前置净空（含前后各 1 格隔离边 + 上方
+        //   4 层 —— 断开残留邻轨的连接位 / 清残留实心，幂等）。
+        const int tunX = 30, tunZ = 94;
+        const auto driveTunnel = [&](int ceilY, int *outPulses) -> bool {
+            const int cells = 12;
+            for (int i = -1; i <= cells; ++i)
+                for (int y = kRigY; y <= kRigY + 3; ++y)
+                    w.setBlock(tunX + i, y, tunZ, BR::Air, 0);
+            for (int i = 0; i < cells; ++i) {
+                w.setBlock(tunX + i, kRigY, tunZ, BR::Rail, 0);      // 直轨 EW（连接位自动互连）
+                w.setBlock(tunX + i, ceilY, tunZ, BR::Stone, 0);     // 天花板（1 格净空 ceilY=R+1 / 对照 R+2）
+            }
+            MinecartManager carts;
+            carts.spawnCart(tunX, kRigY, tunZ, &w); // 西端格（EW 直轨 → spawn 定向 +X）
+            const QVector3D mountOrigin(float(tunX) + 0.5f, float(kRigY) + 2.0f, float(tunZ) + 0.5f);
+            *outPulses = 0;
+            float suffTimer = 0.0f, maxX = 0.0f;
+            bool asExpected = true;
+            if (!carts.tryMount(mountOrigin, QVector3D(0, -1, 0), 4.0f)) {
+                qInfo().noquote() << "  mount failed: cart" << carts.posAt(0);
+                return false;
+            }
+            const bool wantEmbedded = (ceilY == kRigY + 1); // 1 格净空 → 全程嵌；2 格 → 全程不嵌
+            for (int t = 0; t < 300; ++t) { // 0.016s × 300 = 4.8s：8 格/s 巡航 ~1.6s 驶完 12 格后停死端（仍嵌）
+                QVector3D cp;
+                carts.tickRiddenCart(0.016, &w, 1.0f, 0.0f, cp); // 持续 W（+X 沿轨）
+                // (d) 车钉轨面（天花板不遮 scanRailColumn —— 车物理可进 1 格净空通道）。
+                if (std::fabs(cp.y() - (kRigY + 0.45f)) > 0.01f) asExpected = false;
+                if (cp.x() > maxX) maxX = cp.x();
+                // (a)/(c) 骑乘眼位（玩家几何：脚底 = 车心 −seatDrop，眼 = 脚底 +eyeH ≈ R+1.7575）。
+                const float eyeY = cp.y() - seatDrop + eyeH;
+                const bool embedded = w.pointBlockedByCollision(cp.x(), eyeY, cp.z());
+                if (embedded != wantEmbedded) asExpected = false;
+                // 节奏镜像（t160 同规则：嵌 → 累积 dt，每 1s 一脉冲；出 → 清零）。
+                if (embedded) {
+                    suffTimer += 0.016f;
+                    if (suffTimer >= suffInterval) { suffTimer -= suffInterval; ++(*outPulses); }
+                } else {
+                    suffTimer = 0.0f;
+                }
+            }
+            // (d) 驶完全程：西端格心 x0+0.5 → 东端死端格心 +11.5 共 11 格；阈值 10.5 吸收停驻格心微差。
+            if (maxX < float(tunX) + 10.5f)
+                qInfo().noquote() << "  short run: maxX" << maxX << "ceilY" << ceilY;
+            carts.clearAll();
+            for (int i = -1; i <= cells; ++i)
+                for (int y = kRigY; y <= kRigY + 3; ++y)
+                    w.setBlock(tunX + i, y, tunZ, BR::Air, 0);
+            tickN(w, 2);
+            return asExpected && (maxX >= float(tunX) + 10.5f);
+        };
+        int pulses1 = 0, pulses2 = 0;
+        const bool ok1 = driveTunnel(kRigY + 1, &pulses1); // (a)+(b) 1 格净空 → 全程嵌 + 多脉冲
+        const bool ok2 = driveTunnel(kRigY + 2, &pulses2); // (c) 对照 2 格净空 → 全程不嵌 + 0 脉冲
+        bool ok = ok1 && ok2 && pulses1 >= 3 && pulses2 == 0;
+        if (!ok)
+            qInfo().noquote() << "  tunnel suffocation mismatch: 1blk ok" << ok1 << "pulses" << pulses1
+                              << "| 2blk ok" << ok2 << "pulses" << pulses2;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t775 ridden-cart head-in-block: 1-block tunnel embeds rider eye "
+                             "(pointBlockedByCollision) every tick + >=3 suffocation pulses @1HP/s; "
+                             "2-block control never embeds (0 pulses); cart stays pinned to rail in both "
+                             "(ceiling does not occlude scanRailColumn)";
+    }
+
+    // ── P19 t776 墙插红石火把贴图共轴重合探针（mesher 同源直调，同 P11 模式；纯 Core+World 断言）──
+    //   用户报告（R19.12）：「红石火把可插墙，但横着的竖着的贴图没有重合到一块去」。根因：t738 墙插
+    //   S 片（垂直墙面的侧视深度片）= 柄根→离墙 0.45 的**单向** quad 铺**整张瓦片** → 贴图中央火把列
+    //   （柄 2px + 焰头 4px）落在片内 u=0.5 = 离墙 0.225 处，而 W 片（平行墙面正视图）火把列在火把轴
+    //   （柄根贴墙）→ 两片剪影沿轴错开互不重合（斜视一把火把裂成两把错位剪影）。t776 修：S 片改绕火把
+    //   把轴**对称**窄带（宽 0.2）只采瓦片中央子区 u∈[0.375,0.625] —— 与 W 片（整瓦铺 0.8 宽）同 texel
+    //   密度（柄/焰世界宽两片一致），两片火把列共轴重合。矩阵断言（像素级视觉留人工目视，几何/UV 规则
+    //   在 mesher 输出上可精确锁定）：
+    //   (a) 五形态（立地 + 四向墙插）每 quad 顶边中点 == B+轴×0.8、底边中点钉柄根 —— 贴图中央火把列
+    //       （u=0.5 处）钉在两片共同火把轴上（t776 修前 S 片中点离轴 0.225 → FAIL）；审查修 #17 后 S 带
+    //       贴墙底角钳到格界 → 底边中点沿附着轴向格心内移 ≤0.05（W 片仍精确等于 B）；
+    //   (b) 墙插两片：W 片 0.8 整瓦采样（u 铺满 [0,1]）+ S 带顶边宽 0.2 子区采样（u∈[0.375,0.625] 焰头
+    //       4px 列区）、底边宽 [0.1,0.2]（#17 钳成梯形：0.2−0.075=0.125）→ 两片 texel 密度一致；
+    //   (c) 杆向/亮端：底边（贴图底=柄端，v=0）恒 y=0.197 且离墙最近、顶边中点沿轴伸离墙（四向各验
+    //       点积符号）+ 上倾 0.866×0.8；立地态底边 y=0、顶边 y=1、中点 (0.5,·,0.5)（亮端朝上）；
+    //   (d) 熄灭位（RedstoneTorchStateOffFlag）几何不变、瓦片换 170（暗红熄焰）：u 全落 tile 170 区；
+    //   (e) 审查修 #17（Review 2026-08-23 低危）回归防线：S 带全部顶点附着轴坐标 ∈[0,1]（修前贴墙底角
+    //       1.075/-0.075 越界 0.075 穿入支撑格 —— 非满立方支撑（半砖/玻璃/铁砧）下可见穿模）。
+    {
+        // 镜像常量（partialblockgeometry RedstoneTorch case 同源；改几何须两处同步）。
+        constexpr float kTLean = 0.5f, kTUpright = 0.866f, kTShaft = 0.80f;
+        constexpr float kTBaseOffWall = 0.475f, kTBaseY = 0.197f;
+        const float tileW = 1.0f / 16.0f;
+        const int onTile = BR::tileIndex(BR::RedstoneTorch, BR::PosX); // 161（def sideTile）
+        PartialLightCtx lctx; lctx.light = 1.0f;
+        for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+        PartialNeighborCtx nctx; // RedstoneTorch case 不读邻居（缺省全 0 即可）
+        bool ok = true;
+        // 墙插四向（state 低 3 位 1..4 = TorchOnNX/PX/NZ/PZ，torchAttachOffset 出支撑向 (ax,0,az)）。
+        for (int form = 1; form <= 4; ++form) {
+            int ax = 0, ay = 0, az = 0;
+            BR::torchAttachOffset(quint8(form), ax, ay, az);
+            const float bx = 0.5f + ax * kTBaseOffWall, bz = 0.5f + az * kTBaseOffWall;
+            const float axx = -ax * kTLean * kTShaft, ayy = kTUpright * kTShaft, azz = -az * kTLean * kTShaft;
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch, quint8(form),
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            // 逐 quad（pushCrossQuad 每 quad 正反两组、每组 4 顶点同角同 UV → 步长 4 全组同断言）。
+            // 审查修 #17：S 带贴墙底角钳到格界（底边 0.2→0.125 梯形、底边中点内移 0.0375）→ W 片与
+            //   S 带分支断言（几何不同），先按 u 采样区分片型（#17 只动几何不动 UV）。
+            int wPlanes = 0, ribbons = 0;
+            for (int g = 0; g + 3 < verts.size(); g += 4) {
+                const Vtx &p0 = verts[g], &p1 = verts[g + 1], &p2 = verts[g + 2], &p3 = verts[g + 3];
+                const float mbx = (p0.x + p1.x) / 2, mbz = (p0.z + p1.z) / 2; // 底边中点（= 贴图 u=0.5 火把列）
+                const float mtx = (p2.x + p3.x) / 2, mtz = (p2.z + p3.z) / 2;
+                const float uu0 = (p0.u - onTile * tileW) / tileW, uu1 = (p1.u - onTile * tileW) / tileW;
+                const float wBot = std::sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)
+                                             + (p1.z - p0.z) * (p1.z - p0.z));
+                const float wTop = std::sqrt((p3.x - p2.x) * (p3.x - p2.x) + (p3.y - p2.y) * (p3.y - p2.y)
+                                             + (p3.z - p2.z) * (p3.z - p2.z));
+                const bool fullU = std::fabs(uu0) < 1e-4f && std::fabs(uu1 - 1.0f) < 1e-4f;
+                const bool subU = std::fabs(uu0 - 0.375f) < 1e-4f && std::fabs(uu1 - 0.625f) < 1e-4f;
+                if (fullU == subU) { // u 采样区不属于任一片型（或同时命中）
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "u-region wrong: w" << wBot << "uu" << uu0 << uu1;
+                    ok = false;
+                    continue;
+                }
+                const bool isRibbon = subU;
+                if (isRibbon) {
+                    // S 带（#17 钳界后）：贴墙底角钳到本格格界 → 底边成梯形；顶边 / 垂直轴不动。
+                    const float mba = (ax != 0) ? mbx : mbz, rootA = (ax != 0) ? bx : bz;
+                    const float perpA = (ax != 0) ? mbz : mbx;
+                    bool sOk = std::fabs(perpA - 0.5f) < 1e-4f      // 垂直轴中点恒过格心（钳界不动垂直轴）
+                               && std::fabs(mba - rootA) <= 0.051f  // (a') 底边中点内移 ≤0.05（实测 0.0375）
+                               && wBot >= 0.099f && wBot <= 0.201f  // (b') 底边宽 [0.1,0.2]（实测 0.125）
+                               && std::fabs(wTop - 0.2f) < 1e-4f;   // 顶边仍 0.2（未钳）
+                    // (e) #17 回归防线：全部顶点附着轴坐标 ∈ [0,1]（修前贴墙底角越界 ±0.075 穿支撑格）。
+                    const float va[4] = { (ax != 0) ? p0.x : p0.z, (ax != 0) ? p1.x : p1.z,
+                                         (ax != 0) ? p2.x : p2.z, (ax != 0) ? p3.x : p3.z };
+                    for (int k = 0; k < 4 && sOk; ++k)
+                        if (va[k] < -1e-4f || va[k] > 1.0f + 1e-4f) sOk = false;
+                    if (!sOk) {
+                        qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                          << "S-ribbon clip wrong: mba" << mba << "root" << rootA
+                                          << "wBot" << wBot << "wTop" << wTop;
+                        ok = false;
+                        continue;
+                    }
+                } else if (std::fabs(mbx - bx) > 1e-4f || std::fabs(mbz - bz) > 1e-4f
+                           || std::fabs(wBot - 0.8f) > 1e-4f || std::fabs(wTop - 0.8f) > 1e-4f) {
+                    // W 片：底边中点 == 柄根（两轴精确）+ 上下边宽 0.8（整瓦，不钳）。
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "W-plane wrong: mid" << mbx << mbz << "w" << wBot << wTop;
+                    ok = false;
+                    continue;
+                }
+                // 公共 (a)/(c)：底边 y=柄根高 + 顶边中点 == 轴端（两片均精确 —— 钳界不动顶边）+ 亮端（v=0
+                //   柄端）沿轴伸离支撑（四向点积符号）+ 上倾 0.866×0.8。
+                const float away = -(ax * (mtx - mbx) + az * (mtz - mbz));
+                if (std::fabs(p0.y - kTBaseY) > 1e-4f
+                    || std::fabs(mtx - (bx + axx)) > 1e-4f || std::fabs(mtz - (bz + azz)) > 1e-4f
+                    || std::fabs(p2.y - (kTBaseY + ayy)) > 1e-4f
+                    || p0.v > 1e-4f || p1.v > 1e-4f || p2.v < 1.0f - 1e-4f || away <= 0.0f
+                    || std::fabs((p2.y - p0.y) - ayy) > 1e-4f) {
+                    qInfo().noquote() << "  wall form" << form << "quad" << g / 4
+                                      << "axis/bright-end wrong: base mid" << mbx << p0.y << mbz
+                                      << "top mid" << mtx << p2.y << mtz << "away" << away;
+                    ok = false;
+                    continue;
+                }
+                if (isRibbon) ++ribbons; else ++wPlanes;
+            }
+            if (wPlanes != 2 || ribbons != 2) { // 每 quad 正反两组 → 各计 2
+                qInfo().noquote() << "  wall form" << form << "plane mix wrong: W" << wPlanes << "S" << ribbons;
+                ok = false;
+            }
+        }
+        // 立地（TorchFloor=0）：满格居中 cross —— 中点 (0.5,·,0.5)、底 y=0 顶 y=1、整瓦采样、亮端朝上。
+        {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch, 0,
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            for (int g = 0; g + 3 < verts.size(); g += 4) {
+                const Vtx &p0 = verts[g], &p1 = verts[g + 1], &p2 = verts[g + 2];
+                const float mbx = (p0.x + p1.x) / 2, mbz = (p0.z + p1.z) / 2;
+                if (std::fabs(mbx - 0.5f) > 1e-4f || std::fabs(mbz - 0.5f) > 1e-4f
+                    || std::fabs(p0.y) > 1e-4f || std::fabs(p2.y - 1.0f) > 1e-4f
+                    || p0.v > 1e-4f || p2.v < 1.0f - 1e-4f
+                    || std::fabs((p0.u - onTile * tileW) / tileW) > 1e-4f
+                    || std::fabs((p1.u - onTile * tileW) / tileW - 1.0f) > 1e-4f) {
+                    qInfo().noquote() << "  floor form quad" << g / 4 << "wrong: mid" << mbx << mbz
+                                      << "y" << p0.y << p2.y << "v" << p0.v << p2.v;
+                    ok = false;
+                }
+            }
+        }
+        // (d) 熄灭位：几何同上（底边中点共轴）、瓦片换 170。
+        {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::RedstoneTorch,
+                                         quint8(1 | BR::RedstoneTorchStateOffFlag),
+                                         lctx, nctx, tileW, 0.0f, 0.0f, 0.0f, 1.0f);
+            for (const Vtx &v : verts) {
+                if (v.u < 170.0f * tileW - 1e-6f || v.u > 171.0f * tileW + 1e-6f) {
+                    qInfo().noquote() << "  off-flag tile wrong: u" << v.u;
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t776+review#17 wall redstone torch: 5 attach forms pin mid-edge torch "
+                             "column onto shared axis (top mid exact; W 0.8 full-tile / S-ribbon top 0.2 "
+                             "sub-region, bottom edge clipped to cell bounds = trapezoid <=0.05 shift), "
+                             "all S-ribbon verts within cell on attach axis (no 0.075 support penetration), "
+                             "bright end away from wall (4 dirs) / up on floor, off flag swaps tile 170";
+    }
+
+    // ── P20 t803 生物碰火燃烧探针（Entities 层 EntityManager 直编，同 t774 TNT 先例）──
+    //   用户报告（R19.12）：「怪物碰到火不燃烧（僵尸实测）」。根因（t803）：mob 碰撞 / 支撑 / 越障判定
+    //   （mobAabbHitsSolid / mobFootprintHasSupport / mobSupportTopY / isJumpObstacle）消费 World::isSolid
+    //   （语义 = 非 air 实存，非碰撞）→ Fire（ShapeNone 无碰撞盒光源格）被当实体墙 → mob 永远走不进火格
+    //   （t724 点燃判定「脚位/身体格 == Fire」永不命中，且 isJumpObstacle 还会对火格起跳翻过）；另旧版站火
+    //   时每 AI tick 清零火伤累积器 → 泡在火里反而不扣血（玩家侧 t351 修复的 mob 镜像）。矩阵断言（任一
+    //   FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 追击穿火：僵尸（Shambler，敌对近战）追玩家穿火格 —— 中心进火格（>=x+4.1）且点燃（isBurningAt）
+    //       （HEAD 旧象：火=墙 → 僵尸停在格边 / 跳过火格，永不点燃）；
+    //   (b) 站火持续燃烧 + 周期火伤：僵尸困 1×1 石栏火格（四邻 2 高石墙 —— 2 高墙顶非空气 → 越障跳不触发）
+    //       20s：燃烧近全程（burnTicks >= 总 tick−60，容 15% 随机熄灭后 ≤4 帧复燃的短隙）、扣血 >=10HP
+    //       （每 kFireDamageInterval=1s 扣 1HP × 15% 随机提前熄灭 → 20s 期望 ~17HP；阈值 10 ≈ 4σ 统计护栏）、
+    //       不死（100HP 上限 ~20 伤）；
+    //   (c) 火灭即恢复：拆火格 → <=9.5s 内停燃（fireTimer <= kFireDuration 8s 定时双保险 + 随机熄灭只会更早）
+    //       且其后 2.5s 血量恒定（无残留伤害源）。
+    //   确定性：tickN 只驱动 tickRedstone（World::tick / tickFire / tickWeather / tickHostileLife 均不跑）→
+    //   火格不自灭 / 不蔓延、无雨灭、无日光烧（日光 burning 走 tickHostileLife）→ 唯一随机源 = 15% 火伤
+    //   随机熄灭（触火即 ≤4 帧内复燃）。日光 / 降水两混淆源由此路径性排除（非靠搭顶棚）。
+    {
+        // rig 寻址：**运行期扫描空区，不走 nextSlot()** —— 上述循环探针在运行期已把 124 个 slot 位（4 列 × 31
+        //   行，z=4..94）耗尽，nextSlot() 此刻返回 z=97+ 越界 → setBlock 全被拒（火 / 平台 / 栏杆全没放上 = 假
+        //   FAIL，本探针首轮实测踩坑）；且 kRigY=41 头注释「40 以上必空」不可尽信（本世界 (6,41..43,1) 实测有
+        //   生成石柱，spawn 即嵌墙窒息 = 假 FAIL 第二轮）。改扫 y∈[ty-1, ty+3] 全净空的 12 格行（扫不到 → rigOk
+        //   false 判 FAIL，不下断言防越界副作用）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 11 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 11 && clear; ++dx)
+                    for (int dy = -1; dy <= 3 && clear; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const int ty = kRigY;
+        EntityManager ents;
+        const bool rigOk = x0 >= 0;
+        // (a) 追击走廊：石台 x0..x0+8（防 spawn 坠落），火格在路径中点 (x0+4, ty, z0)；虚拟玩家脚位
+        //     (x0+8.5, ty, z0+0.5) —— XZ 距 ~8 < kDetectRange=16 → 僵尸全程追击（追击向量纯 +X，同 z 行）。
+        for (int dx = 0; dx <= 8; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        w.setBlock(x0 + 4, ty, z0, BR::Fire, 0);
+        const int zombie = ents.spawnMobTyped(x0, ty, z0, EntityManager::MobShambler, QStringLiteral("#44aa44"), 100);
+        const QVector3D playerFeet(x0 + 8.5f, float(ty), z0 + 0.5f);
+        float maxX = ents.posAt(zombie).x();
+        bool burnedAfter = false;
+        for (int t = 0; t < 240; ++t) { // 3.84s：8 格追击 ~2.9s（kChaseSpeed 2.8 b/s）+ 余量
+            ents.tick(0.016f, &w, playerFeet, 0.3f, 1.8f, true); // playerTargetable=true → 敌对可锁定追击
+            if (ents.posAt(zombie).x() > maxX) maxX = ents.posAt(zombie).x();
+            if (ents.isBurningAt(zombie)) burnedAfter = true;
+        }
+        const bool okA = maxX >= x0 + 4.1f && burnedAfter; // 中心进火列（floor(pos.x)==x0+4）且曾点燃
+        // 清 (a) 场（火 + 石台；僵尸留在 ents 里随后续段自然游荡 / 坠落，不参与任何断言）。
+        w.setBlock(x0 + 4, ty, z0, BR::Air);
+        for (int dx = 0; dx <= 8; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air);
+        tickN(w, 2);
+
+        // (b) 困兽火格：火 (fx, ty, fz)（复用 (a) 已清场区），四邻 ±X/±Z 各 2 高石墙（ty / ty+1 —— 越障跳需
+        //     墙顶两格空气，2 高墙挡跳 → 僵尸被钉在火格内持续触火；半宽 0.30 < 0.5 → 1×1 栏内放得下，脚位格恒 = 火格）。
+        const int fx = x0 + 4, fz = z0;
+        w.setBlock(fx, ty - 1, fz, BR::Stone, 0); // 火格支撑（防僵尸跌出栏）
+        w.setBlock(fx, ty, fz, BR::Fire, 0);
+        const int dx4[4] = { 1, -1, 0, 0 }, dz4[4] = { 0, 0, 1, -1 };
+        for (int i = 0; i < 4; ++i) {
+            w.setBlock(fx + dx4[i], ty,     fz + dz4[i], BR::Stone, 0);
+            w.setBlock(fx + dx4[i], ty + 1, fz + dz4[i], BR::Stone, 0);
+        }
+        const int victim = ents.spawnMobTyped(fx, ty, fz, EntityManager::MobShambler, QStringLiteral("#44aa44"), 100);
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f); // 距 >> kDetectRange → 不追击，栏内纯游荡
+        const int totalTicks = 1250;                            // 20s
+        int burnTicks = 0;
+        for (int t = 0; t < totalTicks; ++t) {
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            if (ents.isBurningAt(victim)) ++burnTicks;
+        }
+        const int dmg = 100 - ents.healthAt(victim);
+        const bool okB = burnTicks >= totalTicks - 60 && dmg >= 10 && !ents.deadAt(victim);
+
+        // (c) 拆火 → 停燃 + 血量稳定：fireTimer <= 8s（定时双保险），9.5s 窗（+1.5s 余量，随机熄灭只会更早）
+        //     内必然烧尽；再 2.5s 验证无残留伤害（火伤 / 仙人掌均无源，血量必须逐 tick 不变）。
+        w.setBlock(fx, ty, fz, BR::Air);
+        for (int t = 0; t < 594 && ents.isBurningAt(victim); ++t) // 9.5s；烧尽即早停（省时）
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        const bool outOk = !ents.isBurningAt(victim);
+        const int hpStable = ents.healthAt(victim);
+        for (int t = 0; t < 157; ++t) // 2.5s
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        const bool okC = outOk && ents.healthAt(victim) == hpStable;
+
+        const bool ok = rigOk && okA && okB && okC;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t803 mobs ignite on fire cells: chasing shambler walks into fire cell "
+                             "and burns (fire pass-through in collision/support/jump predicates); pinned "
+                             "shambler burns nearly full 20s (relight gaps <=60 ticks) taking >=10 HP "
+                             "periodic fire damage without dying; after fire removed burn stops <=9.5s "
+                             "(fireTimer 8s cap) and health stays stable";
+        // 清场（火已拆；栏杆 + 支撑）。
+        w.setBlock(fx, ty - 1, fz, BR::Air);
+        for (int i = 0; i < 4; ++i) {
+            w.setBlock(fx + dx4[i], ty,     fz + dz4[i], BR::Air);
+            w.setBlock(fx + dx4[i], ty + 1, fz + dz4[i], BR::Air);
+        }
+        tickN(w, 2);
+    }
+
+    // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火
+    //   瞬灭〔t844 语义〕+ 燃烧方块格不烧掉落物）──
+    //   用户报告（R19.12）：「打火石对着木头制品右键点燃 + 蔓延」「打火石对苦力怕右键引爆」「往火里丢
+    //   物品被烧掉」。三段断言（任一 FAIL = 用户症状在当前 HEAD 的复现点）：
+    //   (a) 木墙点燃蔓延烧毁链（t843 语义重做版——旧「火吞块 setBlock(Fire) 替换」退役，点燃 = 方块进
+    //       燃烧态、id 不变，烧毁发生在燃烧计时归零）：石台上 6 连木板墙 + 端点火格 → 两段断言：① 首次
+    //       点燃中途观测 isBurningAt 真 + blockAt 仍是 Planks（直燃语义核心，400 窗内 P(未燃)≈4e-5）；
+    //       ② 继续驱动至 1000 窗（500s；2.5%/邻/窗 → 每块期望 ~20s + 5s 燃烧计时 + 余烬火衔接 → 链式
+    //       ~2.5min，1000 窗 = 期望 25 次点燃对 6 块需求 ≈ -3.9σ 裕量）→ 全部木板被吞（blockAt 全非
+    //       Planks）、火最终无燃料自熄（全 Air）；烧毁走 setBlock(Fire) 放置语义 → blockBroken(Planks)
+    //       恒 0（烧毁无掉落，区别于破块链）；
+    //   (b) Stalker 打火石引爆：远场监听（>> kDetectRange 不追踪）+ playerTargetable=false（旧 !targetable
+    //       门会清 fuseTimer 并跳过 aiStalker——本断言兼证 t804 的门豁免）→ igniteStalkerFlint 返 true；
+    //       猪（非 Stalker）同调用返 false（类型拒）；点燃后原地 ~1.5s 引爆（爆炸恰一次、引爆时刻 ∈
+    //       [1.4, 2.3]s、期间 inflateAt 曾 >0.2 = 蓄力膨胀可见）；
+    //   (c) item 入火**瞬灭**（t844 需求反转覆盖旧 0.8s 点燃窗）：item 直落 Fire 格 → 首 tick 即毁
+    //       （[1,3] tick，与岩浆同款瞬灭语义，无动画无信号）；itemBurned 已退役 → 连接计数恒 0（信号
+    //       不复存在）；对照 Lava 格内生成瞬毁同窗；**燃烧方块格不烧掉落物**（t844 语义边界）：item 落
+    //       在燃烧木板顶面（igniteFlammableAt 后栅格 id 不变 = 实体支撑面）→ 200 tick 存活不被焚毁
+    //       （燃烧是「方块本身着火」非「火占据该格」）。
+    //   确定性：item 物理无随机源（spawnItemAt 零初速直落，免 spawnItem 弹出方向的哈希漂移）；tickFire
+    //   散布 = hashVoxel(seed+窗口序号) 纯函数（300s 窗数远超期望值 3σ，非精确值断言）。
+    {
+        // rig 寻址：运行期扫描空区（同 P20 先例——nextSlot() 已被上方循环探针耗尽；「40 以上必空」不可
+        //   尽信）。需 24 格宽（(a) 木墙 8 + (c) 焚烧 5 + (b) Stalker+爆炸半径缓冲 11）× y∈[ty-1,ty+3] 全净空。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 23 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 23 && clear; ++dx)
+                    for (int dy = -1; dy <= 3 && clear; ++dy)
+                        if (w.blockAt(xx + dx, kRigY + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const int ty = kRigY;
+        const bool rigOk = x0 >= 0;
+
+        // (c-pre) t841/t846 World 层可及判据（打火石分支的守卫输入端——PlayerController 属 Game 层不直编，
+        //     P20 先例；此处锁定 World 侧真值，Game 层行为走 t814 真消费端模式 + 人工目视）：
+        //     ① 命中立地火格 igniteFlammableAt 恒拒（Fire 非可燃 → false）→ 回退路径被 Game 层 t841 守卫
+        //       短路（World 判据：火上无新火可生）；② Torch 不算火（非 Fire 非 flammable → 直燃拒 +
+        //       t841 两判据均不含它 → 对火把右键照常回退立地火）；③ 睡莲不算可燃（直燃拒 → 走 t846
+        //       Game 层拒绝路径，火不可生于叶上）。
+
+        // (a) 木墙点燃蔓延烧毁链（t843 语义重做版）：石台 dx 0..7，木板墙 dx 1..6（ty 层），立地火 dx 0（贴首块
+        //   木板）。① 首燃中途观测（直燃语义：isBurningAt 真 + id 保留）→ ② 终态烧穿断言。
+        //   blockBroken 计数只滤 Planks（火自熄 Fire→Air 也发 blockBroken 但 oldId==Fire，排除）。
+        int plankBreaks = 0;
+        QObject::connect(&w, &World::blockBroken, &w,
+                         [&](int, int, int, int oldId) { if (oldId == int(BR::Planks)) ++plankBreaks; });
+        for (int dx = 0; dx <= 7; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        for (int dx = 1; dx <= 6; ++dx) w.setBlock(x0 + dx, ty, z0, BR::Planks, 0);
+        w.setBlock(x0, ty, z0, BR::Fire, 0);
+        bool litIntact = false; // ① 首燃观测：进燃烧态且栅格 id 仍是 Planks（燃烧是侧表瞬态不改 id）
+        int winsRun = 0;
+        for (int win = 0; win < 400 && !litIntact; ++win) { // 2.5%/窗 → P(400 窗未燃)≈4e-5
+            for (int k = 0; k < 5; ++k) w.tickFire(); // 5 调 = 1 判定窗（kFireTickInterval）
+            ++winsRun;
+            if (w.isBurningAt(x0 + 1, ty, z0))
+                litIntact = w.blockAt(x0 + 1, ty, z0) == BR::Planks; // 中途采样在 10 窗燃烧计时内必命中
+        }
+        for (int win = winsRun; win < 1000; ++win) // ② 继续烧穿（点燃 ~40 窗/链环 + 10 窗燃烧 + 余烬火衔接）
+            for (int k = 0; k < 5; ++k) w.tickFire();
+        int planksLeft = 0, firesLeft = 0;
+        for (int dx = 0; dx <= 7; ++dx) {
+            const quint8 b = w.blockAt(x0 + dx, ty, z0);
+            if (b == BR::Planks) ++planksLeft;
+            if (b == BR::Fire) ++firesLeft;
+        }
+        const bool okA = rigOk && litIntact && planksLeft == 0 && firesLeft == 0 && plankBreaks <= 1;
+        // plankBreaks ≤1：t804 (a2) 燃烧板计时推进段的烧毁会发一次 blockBroken(Planks)（燃烧态耗尽的
+        //   正常烧毁链，非本段木墙的破块掉落）——计数器是探针块级共享的，跨子场景累加；t843 语义下
+        //   「蔓延烧毁无 blockBroken」的强断言由 P-t843(a)（单板隔离世界）锁定，此处放宽为 ≤1。
+        if (!okA)
+            qInfo().noquote() << "  [t804a diag] litIntact" << litIntact << "winsRun" << winsRun
+                              << "planksLeft" << planksLeft << "firesLeft" << firesLeft
+                              << "plankBreaks" << plankBreaks;
+        // 清 (a) 场（石台 + 残火/灰烬；正常应为全 Air，仍防御性清）。
+        for (int dx = 0; dx <= 7; ++dx) {
+            w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
+            w.setBlock(x0 + dx, ty, z0, BR::Air, 0);
+        }
+        tickN(w, 2);
+
+        // (a2) t841/t846 World 层可及判据（z=4 行）：立地火格直燃恒拒（t841 判据①的 World 真值）+
+        //     燃烧格幂等不重置计时（判据②）+ Torch 非火（判据③）+ 睡莲非可燃非火（t846 拒点）。
+        bool okA2 = false;
+        {
+            // ① 立地火格：石台上放 Fire → igniteFlammableAt false（Fire 非 flammable）。
+            w.setBlock(x0 + 1, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 1, ty, 4, BR::Fire, 0);
+            const bool fireCellRejected = !w.igniteFlammableAt(x0 + 1, ty, 4)
+                                          && w.blockAt(x0 + 1, ty, 4) == BR::Fire;
+            // ② 燃烧格幂等：木板点燃 → 计时推进 3 窗（余 7）→ 重复 ignite false 且剩余窗数不变
+            //    （isBurningAt 真 = 表内仍有项；「不重置」由重复拒绝直接保证——World 直燃入口本就幂等，
+            //    Game 层 t841 守卫防的是回退路径在燃烧格旁生新立地火，此处锁 World 输入端真值）。
+            w.setBlock(x0 + 3, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 3, ty, 4, BR::Planks, 0);
+            const bool litOnce = w.igniteFlammableAt(x0 + 3, ty, 4);
+            for (int k = 0; k < 15; ++k) w.tickFire(); // 3 窗（计时 10→7）
+            const bool reIgniteRejected = !w.igniteFlammableAt(x0 + 3, ty, 4)
+                                          && w.isBurningAt(x0 + 3, ty, 4)
+                                          && w.blockAt(x0 + 3, ty, 4) == BR::Planks;
+            for (int k = 0; k < 35; ++k) w.tickFire(); // 再 7 窗 → 第 10 窗烧毁；若重置过则仍在燃
+            const bool timerNotReset = !w.isBurningAt(x0 + 3, ty, 4); // 原计时已耗尽（未被重复点燃续期）
+            // ③ Torch 不算火：火把格直燃拒 + 非 Fire（t841 两判据均不含它 → 对火把右键照常走回退路径）。
+            w.setBlock(x0 + 5, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 5, ty, 4, BR::Torch, 0);
+            const bool torchNotFire = !w.igniteFlammableAt(x0 + 5, ty, 4)
+                                      && w.blockAt(x0 + 5, ty, 4) == BR::Torch;
+            // ④ 睡莲：直燃拒（非可燃非火）→ Game 层 t846 拒绝路径输入端成立。
+            w.setBlock(x0 + 7, ty - 1, 4, BR::Stone, 0);
+            w.setBlock(x0 + 7, ty, 4, BR::LilyPad, 0);
+            const bool lilypadNotIgnitable = !w.igniteFlammableAt(x0 + 7, ty, 4)
+                                             && w.blockAt(x0 + 7, ty, 4) == BR::LilyPad;
+            okA2 = fireCellRejected && litOnce && reIgniteRejected && timerNotReset
+                   && torchNotFire && lilypadNotIgnitable;
+            if (!okA2)
+                qInfo().noquote() << "  [t804 a2 diag] fireCellRejected" << fireCellRejected
+                                  << "litOnce" << litOnce << "reIgniteRejected" << reIgniteRejected
+                                  << "timerNotReset" << timerNotReset
+                                  << "torchNotFire" << torchNotFire
+                                  << "lilypadNotIgnitable" << lilypadNotIgnitable;
+            for (int dx : {1, 3, 5, 7}) {
+                w.setBlock(x0 + dx, ty, 4, BR::Air, 0);
+                w.setBlock(x0 + dx, ty - 1, 4, BR::Air, 0);
+            }
+            tickN(w, 2);
+        }
+
+        // (b) Stalker 打火石短引信引爆：Stalker dx 16 / 猪 dx 18（类型拒对照）各 1×1 石台；远场监听 +
+        //   playerTargetable=false（兼证 !targetable 门豁免——已点燃的引信不因切模式熄火）。
+        EntityManager ents;
+        w.setBlock(x0 + 16, ty - 1, z0, BR::Stone, 0);
+        w.setBlock(x0 + 18, ty - 1, z0, BR::Stone, 0);
+        const int stalker = ents.spawnMobTyped(x0 + 16, ty, z0, EntityManager::MobStalker,
+                                               QStringLiteral("#44aa44"), 20);
+        const int pig = ents.spawnMobTyped(x0 + 18, ty, z0, EntityManager::MobPig,
+                                           QStringLiteral("#ee9999"), 10);
+        int explosions = 0;
+        QObject::connect(&ents, &EntityManager::explosion, &ents,
+                         [&](int, int, int) { ++explosions; });
+        const bool ignOk = rigOk && stalker >= 0 && pig >= 0
+                           && ents.igniteStalkerFlint(stalker)   // Stalker → true（置不可逆短引信）
+                           && !ents.igniteStalkerFlint(pig);     // 猪 → false（仅 Stalker 可点）
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        int explodeTick = -1;
+        float inflateSeen = 0.0f;
+        for (int t = 1; t <= 300 && explodeTick < 0; ++t) {
+            ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+            if (!ents.aliveAt(stalker)) { explodeTick = t; break; }
+            const float inf = ents.inflateAt(stalker);
+            if (inf > inflateSeen) inflateSeen = inf;
+        }
+        const double fuseSec = explodeTick > 0 ? explodeTick * 0.016 : -1.0;
+        const bool okB = ignOk && explodeTick > 0 && fuseSec >= 1.4 && fuseSec <= 2.3
+                         && inflateSeen > 0.2f && explosions == 1;
+        // 清 (b) 场：爆炸球（半径 3）残坑 + 石台 —— 整盒覆写 Air（含 ty±若干，防残骸影响 (c)）。
+        for (int dx = 12; dx <= 21; ++dx)
+            for (int dy = -3; dy <= 4; ++dy)
+                w.setBlock(x0 + dx, ty + dy, z0, BR::Air, 0);
+        tickN(w, 2);
+
+        // (c) item 入火瞬灭（t844）：火 dx 10 / 岩浆 dx 12 / 燃烧板 dx 14（各石台支撑）；item 从上方
+        //     直落（spawnItemAt 零初速）。itemBurned 已随 t844 删除（信号不存在 → 本文件无连接点 =
+        //     「烟粒子路径退役」的编译期事实，运行期以 burnTick 瞬灭 + 无残留槽间接锁定）。
+        ItemEntityManager items;
+        const int fx = x0 + 10, lx = x0 + 12;
+        for (int dx = 10; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        w.setBlock(fx, ty, z0, BR::Fire, 0);
+        // (c1) 火瞬灭：直落 ~3 格 ≈27 tick 入火格 → 入格当帧毁（总 [20,40] tick；对照旧 0.8s 点燃窗
+        //     语义总时长 ≥65 tick——上限 40 锁定「无窗」；岩浆对照 (c2) 为格内生成首 tick 即毁 [1,3]，
+        //     两者同款「接触即灭、无动画无信号」语义，仅落体时差）。
+        items.spawnItemAt(QVector3D(float(fx) + 0.5f, float(ty + 3) + 0.5f, float(z0) + 0.5f),
+                          int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
+        const int itFire = items.count() - 1;
+        int burnTick = -1;
+        for (int t = 1; t <= 400; ++t) {
+            items.tick(0.016, &w);
+            if (!items.aliveAt(itFire)) { burnTick = t; break; }
+        }
+        // (c2) 岩浆瞬毁对照：直接生成于岩浆格内（t343 消费路径 = 中心格 == Lava 即毁；直落会先停在
+        //     岩浆面顶——岩浆非穿透语义，不在本任务范围）→ 首 tick 即毁（与火焚同款瞬灭语义对齐）。
+        w.setBlock(lx, ty, z0, BR::Lava, 0);
+        items.spawnItemAt(QVector3D(float(lx) + 0.5f, float(ty) + 0.5f, float(z0) + 0.5f),
+                          int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
+        const int itLava = items.count() - 1;
+        int lavaTick = -1;
+        for (int t = 1; t <= 200; ++t) {
+            items.tick(0.016, &w);
+            if (!items.aliveAt(itLava)) { lavaTick = t; break; }
+        }
+        // (c3) 燃烧方块格不烧掉落物（t844 语义边界）：item 落在燃烧木板顶面 → 200 tick 存活。燃烧态 =
+        //     栅格 id 不变（Planks 实体支撑面）→ item resting 其上照常物理，不被焚毁（燃烧是「方块本身
+        //     着火」非「火占据该格」——只有立地火格 blockAt==Fire 烧物品）。木板不驱动 tickFire（items.tick
+        //     不含世界 tick）→ 计时冻结，燃烧源稳定。
+        const int bx = x0 + 14;
+        w.setBlock(bx, ty - 1, z0, BR::Stone, 0);   // 石台（防木板失撑掉落为掉落物干扰计数）
+        w.setBlock(bx, ty, z0, BR::Planks, 0);
+        const bool boardLit = w.igniteFlammableAt(bx, ty, z0)
+                              && w.blockAt(bx, ty, z0) == BR::Planks && w.isBurningAt(bx, ty, z0);
+        items.spawnItemAt(QVector3D(float(bx) + 0.5f, float(ty + 2) + 0.5f, float(z0) + 0.5f),
+                          int(BR::Planks), 1, 0.0f, 0.0f, 0.0f);
+        const int itBoard = items.count() - 1;
+        bool boardItemAlive = true;
+        for (int t = 0; t < 200 && boardItemAlive; ++t) {
+            items.tick(0.016, &w);
+            boardItemAlive = items.aliveAt(itBoard);
+        }
+        const bool okC = rigOk && burnTick >= 20 && burnTick <= 40
+                         // 直落 ~3 格重力下坠 ≈27 tick 入火格，入格当帧瞬灭（旧 0.8s 窗语义总时长
+                         // ≥65 tick——上限 40 即证无点燃窗；下限 20 防未入格先毁的假阳性）。
+                         && lavaTick >= 1 && lavaTick <= 3
+                         && boardLit && boardItemAlive;
+        // 清 (c) 场（石台 + 岩浆 + 燃烧板；岩浆不驱动 tickLavaFlow 不蔓延，直接清）。
+        w.setBlock(lx, ty, z0, BR::Air, 0);
+        w.setBlock(bx, ty, z0, BR::Air, 0); // 同 id/替换写均清燃烧侧表（t843 setBlock 契约）
+        for (int dx = 10; dx <= 14; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air, 0);
+        tickN(w, 2);
+
+        const bool ok = rigOk && okA && okA2 && okB && okC;
+        if (!ok) {
+            qInfo().noquote() << "  [t804 diag] rigOk" << rigOk << "| okA" << okA
+                              << "planksLeft" << planksLeft << "firesLeft" << firesLeft
+                              << "plankBreaks" << plankBreaks
+                              << "| okA2" << okA2
+                              << "| okB" << okB << "ignOk" << ignOk << "explodeTick" << explodeTick
+                              << "fuseSec" << QString::number(fuseSec, 'f', 2)
+                              << "inflateSeen" << inflateSeen << "explosions" << explosions
+                              << "| okC" << okC << "burnTick" << burnTick << "lavaTick" << lavaTick
+                              << "boardLit" << boardLit << "boardItemAlive" << boardItemAlive;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t804 flint ignition extended (t843/t841/t844/t846 semantics): fire next to "
+                             "6-plank wall ignites planks into burning state with id preserved (mid-burn "
+                             "sample), chain burns all planks away (no blockBroken-drop chain) and "
+                             "self-extinguishes; world-side flint guards: standing-fire cell and "
+                             "re-ignite of a burning cell both rejected with timer never reset, torch is "
+                             "not fire (fallback still allowed), lily pad not ignitable; flint on stalker "
+                             "detonates in-place ~1.5s uncancellable fuse (pig rejected, !targetable gate "
+                             "exempt, exactly one explosion, inflate visible); item dropped into fire "
+                             "vanishes instantly (<=3 ticks, lava-parity instant destroy, no 0.8s window / "
+                             "no smoke signal - itemBurned retired), item resting on a burning plank "
+                             "board survives 200 ticks untouched (burning-block cells never burn items)";
+    }
+
+    // ── t805 船上岸回归探针（用户「船又能直接开上岸」；回归根因 = t711/21fff7b 把碰岸探测的 ignoreIce
+    //    豁免扩为「与水面同高的任何固体」→ 世界海缓坡（seaColumnHeight 每 ~12 格升 1）的 h==waterLevel
+    //    同层湿沙带宽达 10+ 格，整条带变「可行驶表面」→ 船从海里顶着 W 直接开上沙滩深处 = t661「上岸应
+    //    难 / 需速度」语义被冲掉。修复 = 豁免收回仅冰族 isIce）──
+    //    四泳道断言（BoatManager 直调 tickRiddenBoat，dt=1/60 定步长；全程不跑 BoatManager::tick → 被骑
+    //    船物理唯一由本探针驱动，确定性；未骑船不 tick → 冻结在原位不干扰后续泳道）：
+    //    A 水道：开阔水满速推进 ≥7 b/s（kBoatSpeed=8 的 lerp 稳态 7.9）；
+    //    B 陆道：无水陆档怠速 ∈[1.8,3.0]（kBoatSpeed×kBoatLandSpeedMul=2.4，t584 原值）+ 水陆速比 ≥2.5
+    //      （「离水减速」骤降比，期望 ~3.3）；
+    //    C 岸道：同层湿沙（沙格顶==水面顶）+1 格干沙滩柱 —— 满 W 冲岸 5s：船停在水线前（中心 x 从未越
+    //      沙列界，仍浮水面 Y==水面顶，=「不可直接开上岸」）；随后倒挡 1s 退回水道 ≥3 格（=「贴岸可被推
+    //      下水」，t611 只清朝向分量的语义）；
+    //    D 冰道：同层冰面（冰格顶==水面顶）—— 船可从水面直接滑上冰面越界 ≥1.5 格（L10 冰豁免保留，防
+    //      本修复过度回退把冰也挡了）。冰是船可行驶表面 / 沙岸是岸（船贴水线停），两者本就应不同。──
+    {
+        // rig 选址：本测试世界 setHeight(48) 而 worldgen 地表基线 64 → 高度被钳到 47，y 44..47 几乎整片
+        //   实心石（t804 实测同因「kRigY=41 也有生成石柱」）。不清场扫描、直接**凿进石里**：每泳道 =
+        //   3 格宽条带（船 footprint Z ±0.7 自条带中格 bz+k+1.5 覆盖 bz+k..bz+k+2，恰不溢出到邻带），
+        //   y=44 铺石板（防下方天然洞穴漏支撑）、y 45..47 凿空（船碰撞层 cy/cy+1 必净空）。
+        //   本探针最后跑，覆写既有探针残留无副作用；rigOk = 石板落位抽查。
+        const int bx = 6, bz = 6;             // 远离世界边 clamp（minX=0.5）；x 39 / z 20 以内全在界内
+        const int fy = 44;                    // 石板层；水面 / 同层沙面 / 冰面 = 45；水面顶 = 46
+        const int zA = bz + 1, zB = bz + 5, zC = bz + 9, zD = bz + 13; // 泳道中格（条带 = 中格 ±1）
+        BoatManager boats;
+        bool rigOk = true;
+        bool okSpeeds = false, okStop = false, okFloat = false, okReverse = false, okIce = false;
+        float waterSpeed = 0.0f, landSpeed = 0.0f, maxXC = 0.0f, revX = 0.0f, xD = 0.0f;
+        QVector3D posC;
+        QVector3D bp;
+        bool crashed = false;
+        const auto mount = [&boats](const QVector3D &p) {   // 从船正上方垂直下射线（命中即骑）
+            return boats.tryMount(QVector3D(p.x(), p.y() + 3.0f, p.z()), QVector3D(0.0f, -1.0f, 0.0f), 8.0f);
+        };
+        // 凿道：四条带（z 中格 ±1）× x bx..bx+33：y=44 Stone、y 45..47 Air；随后各道铺特征。
+        const int laneMid[4] = { zA, zB, zC, zD };
+        for (const int zm : laneMid) {
+            for (int dx = 0; dx <= 33; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    w.setBlock(bx + dx, fy, zm + dz, BR::Stone, 0);
+                    w.setBlock(bx + dx, fy + 1, zm + dz, BR::Air, 0);
+                    w.setBlock(bx + dx, fy + 2, zm + dz, BR::Air, 0);
+                    w.setBlock(bx + dx, fy + 3, zm + dz, BR::Air, 0);
+                }
+        }
+        rigOk = w.blockAt(bx + 2, fy, zA) == BR::Stone;
+        // A 水道：整条铺水（45 层）；B 陆道：保持凿空石板（船贴 45.2 息速）。
+        for (int dx = 0; dx <= 33; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, zA + dz, BR::Water, 0);
+        // C 岸道：水 bx..bx+7 + 同层湿沙列 bx+8（沙格顶==水面顶 46）+ 干沙滩柱 bx+9（顶 47，高出水面 1）。
+        for (int dx = 0; dx <= 7; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, zC + dz, BR::Water, 0);
+        for (int dz = -1; dz <= 1; ++dz) {
+            w.setBlock(bx + 8, fy + 1, zC + dz, BR::Sand, 0);
+            w.setBlock(bx + 9, fy + 1, zC + dz, BR::Sand, 0);
+            w.setBlock(bx + 9, fy + 2, zC + dz, BR::Sand, 0);
+        }
+        // D 冰道：水 bx..bx+7 + 同层冰面 bx+8..bx+12（冰格顶==水面顶 → L10 豁免应放行）。
+        for (int dx = 0; dx <= 12; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(bx + dx, fy + 1, zD + dz, dx <= 7 ? BR::Water : BR::Ice);
+
+        if (rigOk) {
+            // A 水道满速：帧 100→150（1.67→2.5s）平均速度 ≈7.9（kBoatSpeed=8，approach=4 的 lerp 稳态）。
+            //   注：spawnBoat 返 bool（非索引）→ 骑乘射线用**确定的落点**（格中心 (x+0.5, y+1, z+0.5)，
+            //   kBoatDraft=0）发，船索引用 tryMount 后的 ridingIndex()。
+            const bool spawnA = boats.spawnBoat(bx + 2, fy + 1, zA, BoatManager::Oak);
+            const bool mountA = spawnA && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 2), float(zA) + 0.5f));
+            const int boatA = boats.ridingIndex();
+            float xA100 = 0.0f, xA150 = 0.0f;
+            for (int t = 1; t <= 150; ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                if (t == 100) xA100 = boats.posAt(boatA).x();
+                if (t == 150) xA150 = boats.posAt(boatA).x();
+            }
+            waterSpeed = (xA150 - xA100) / (50.0 / 60.0);
+
+            // B 陆道怠速：同一测量窗（期望 2.4 = 8×kBoatLandSpeedMul 0.3，t584 原值）。tryMount 自动换骑。
+            const bool spawnB = boats.spawnBoat(bx + 2, fy, zB, BoatManager::Oak);
+            const bool mountB = spawnB && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 1), float(zB) + 0.5f));
+            const int boatB = boats.ridingIndex();
+            float xB100 = 0.0f, xB150 = 0.0f;
+            for (int t = 1; t <= 150; ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                if (t == 100) xB100 = boats.posAt(boatB).x();
+                if (t == 150) xB150 = boats.posAt(boatB).x();
+            }
+            landSpeed = (xB150 - xB100) / (50.0 / 60.0);
+            okSpeeds = mountA && mountB && !crashed && boats.aliveAt(boatA) && boats.aliveAt(boatB)
+                       && waterSpeed >= 7.0f && landSpeed >= 1.8f && landSpeed <= 3.0f
+                       && waterSpeed / landSpeed >= 2.5f;
+
+            // C 岸道挡停：满 W 冲岸 5s —— 探测（修复后同层沙不再豁免）每帧清朝向速度 → 船停在沙列界前
+            //   ~0.5 格（中心 x ≤ 界-0.2），从未越过；Y 仍钉水面顶 46（未搁浅 / 未爬岸）。
+            const bool spawnC = boats.spawnBoat(bx + 2, fy + 1, zC, BoatManager::Oak);
+            const bool mountC = spawnC && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 2), float(zC) + 0.5f));
+            const int boatC = boats.ridingIndex();
+            for (int t = 1; t <= 300; ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                const float x = boats.posAt(boatC).x();
+                if (x > maxXC) maxXC = x;
+            }
+            posC = boats.posAt(boatC);
+            okStop = mountC && !crashed && boats.aliveAt(boatC)
+                     && maxXC <= float(bx + 8) - 0.2f   // 中心从未越过沙列界（界 = bx+8.0）
+                     && posC.x() >= float(bx + 6);      // 且确已冲到水线（非中途卡住）
+            okFloat = std::abs(posC.y() - float(fy + 2)) <= 0.3f; // 仍浮水面（水面顶 = fy+2 = 46）
+            // C 倒挡退水：贴岸船倒退 1s（t611：探测只清朝向分量 → 背向保留）→ 退回水道 ≥3 格。
+            for (int t = 1; t <= 60; ++t)
+                boats.tickRiddenBoat(1.0 / 60.0, &w, -1.0f, 0.0f, bp, crashed);
+            revX = boats.posAt(boatC).x();
+            okReverse = !crashed && posC.x() - revX >= 3.0f;
+
+            // D 冰道放行（豁免保留）：满 W 冲冰 —— 冰族仍豁免 → 船从水面直接滑上冰面（中心越冰列界
+            //   bx+8 至少 1.5 格；冰档换挡后 11.2 b/s，~1.3s 即达）。
+            const bool spawnD = boats.spawnBoat(bx + 2, fy + 1, zD, BoatManager::Oak);
+            const bool mountD = spawnD && mount(QVector3D(float(bx + 2) + 0.5f, float(fy + 2), float(zD) + 0.5f));
+            const int boatD = boats.ridingIndex();
+            for (int t = 1; t <= 300 && xD < float(bx + 10); ++t) {
+                boats.tickRiddenBoat(1.0 / 60.0, &w, 1.0f, 0.0f, bp, crashed);
+                xD = boats.posAt(boatD).x();
+            }
+            okIce = mountD && !crashed && boats.aliveAt(boatD)
+                    && xD >= float(bx + 8) + 1.5f
+                    && std::abs(boats.posAt(boatD).y() - float(fy + 2) - 0.2f) <= 0.5f; // 骑在冰面顶上
+
+            // 清场（石板 / 水 / 沙 / 冰全清 Air —— 与其它探针同款即用即清）。
+            boats.clearAll();
+            for (const int zm : laneMid)
+                for (int dx = 0; dx <= 33; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dy = fy; dy <= fy + 3; ++dy)
+                            w.setBlock(bx + dx, dy, zm + dz, BR::Air, 0);
+            tickN(w, 2);
+        }
+        const bool ok = rigOk && okSpeeds && okStop && okFloat && okReverse && okIce;
+        if (!ok) {
+            qInfo().noquote() << "  [t805 diag] rigOk" << rigOk << "| okSpeeds" << okSpeeds
+                              << "waterSpeed" << QString::number(waterSpeed, 'f', 2)
+                              << "landSpeed" << QString::number(landSpeed, 'f', 2)
+                              << "| okStop" << okStop << "maxXC" << maxXC << "sandEdge" << bx + 8
+                              << "posC.x" << posC.x() << "| okFloat" << okFloat << "posC.y" << posC.y()
+                              << "| okReverse" << okReverse << "revX" << revX
+                              << "| okIce" << okIce << "xD" << xD;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t805 boat shore regression: full-W boat in open water reaches ~8 b/s while "
+                             "land gear idles at 2.4 (ratio ~3.3, sharp out-of-water decel); same-level wet "
+                             "sand shore (block top == water surface top) stops the boat at the waterline "
+                             "(center never crosses the sand column, still afloat at surface Y) and reverse "
+                             "backs it >=3 blocks into the water; same-level ice stays exempt (boat slides "
+                             "onto ice >=1.5 blocks past the edge, riding on top) - restores t661 "
+                             "'beaching needs speed / shore stops boat' semantics lost in 21fff7b (t711)";
+    }
+
+    // ── t799 沙/沙砾失撑即时下落探针（World 层 checkGravityBlockOnEdit + Entities 层 FallingBlock 链）──
+    //   用户报告（R19.12）：「沙子直接放在火把上面不会触发掉落，能稳定放置；下面是睡莲/草丛/半砖也一样，
+    //   只有超过一格高度下落才变掉落物。沙砾同样」。旧实现 = Main.qml maybeTriggerFallingBlock（消费
+    //   blockPlaced/blockBroken 在呈现层嵌套 setBlock+spawn）——修后判定下沉 World 层单一谓词
+    //   （BlockRegistry::isGravityBlock + isFullCube 支撑判定），发 gravityBlockFell → 呈现层转
+    //   EntityManager.spawnFallingBlock（本探针复刻该消费端）。矩阵断言（任一 FAIL = 用户症状复现点）：
+    //   (a) 放置路径：沙/沙砾放火把/半砖/草丛/睡莲（非完整立方支撑）上 → setBlock 同步坍落（信号 +
+    //       格清 Air），实体下落遇火把变掉落物（t220 语义回归）；
+    //   (b) 稳定：放完整立方（石头/TNT/另一沙）上 → 零信号零坍落（沙柱叠放稳定性不回归）；
+    //   (c) 更新路径：挖掉沙柱底层支撑 → 上方坍落 + 实体落到完整支撑格上还原方块（>1 格落差着地）；
+    //   (d) 半空放置（下方空气 >1 格落差）→ 坍落实体落到火把上 → 变掉落物（用户「>1 格才变掉落物」现状
+    //       的正确侧保留：落差不是门控，失撑才是）；
+    //   (e) 水中沙：沙放水面上 → 坍落穿透水柱落到水底还原（t220 水不挡沙 / 填堵水格不回归）；
+    //   (f) 爆炸（destroySphereSilent）与 TNT 点火（clearBlockSilent）两静默入口 → 上方沙坍落（写入口收口）。
+    {
+        // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 的 4×31 网格早被前序循环探针耗尽，此刻返回
+        //   z=97+ 越界 → setBlock 全被拒 = 假 FAIL）。需 13 格宽 × y∈[ty-1,ty+3] 全净空（含 (d) 半空放置
+        //   上探一层，防残留浮空重力方块混入坍落计数）。
+        const int ty = kRigY;
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 12 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = 0; dx <= 12 && clear; ++dx)
+                    for (int dy = -1; dy <= 3 && clear; ++dy)
+                        if (w.blockAt(xx + dx, ty + dy, zz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const bool rigOk = x0 >= 0;
+        if (!rigOk)
+            qInfo().noquote() << "  [t799 diag] no clear rig strip found (13 wide x y[ty-1,ty+3])";
+        // 平台（实体落点 / 支撑底座；探针即用即清）。列布局（互不复用防串扰）：
+        //   dx0..3 沙×{火把,半砖,草丛,睡莲} / dx4..7 沙砾×同族 / dx8 石+沙+沙砾稳定柱 / dx9 TNT+沙 /
+        //   dx10 火把+半空沙 / dx11 水+沙 / dx12 独立石柱+沙（爆炸用）。
+        for (int dx = 0; dx <= 12; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Stone, 0);
+        EntityManager ents;
+        // t794 审查防悬挂：gravityBlockFell 的 [&] 捕获引用本块栈局部（ents / fellSignals），块结束后连接若
+        //   仍挂在 w 上（旧 context=&w 与块同寿错配）→ 后续任何探针（t794 铁砧重力起）再发本信号即对悬空
+        //   引用求值 = UB。改挂本守卫对象（块结束析构 → 自动断连）；fallingBlockDropped 连接 context 本就是
+        //   &ents（随块析构自动断）无需改。
+        QObject gravSigGuard;
+        // 复刻 Main.qml onGravityBlockFell 消费端（World 语义事件 → 下落实体）+ fallingBlockDropped → 计数。
+        //   （旧版只计数不 spawn → ents 恒空 / itemDrops 恒 0 = 假 FAIL；消费端必须真转实体。）
+        int fellSignals = 0, fellId = -1, itemDrops = 0;
+        QObject::connect(&w, &World::gravityBlockFell, &gravSigGuard,
+                         [&](int x, int y, int z, int blockId) {
+                             ++fellSignals; fellId = blockId;
+                             ents.spawnFallingBlock(x, y, z, blockId);
+                         });
+        QObject::connect(&ents, &EntityManager::fallingBlockDropped, &ents,
+                         [&](int, int, int, int) { ++itemDrops; });
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        const auto settle = [&](int frames) { // 驱动实体物理至稳态（着地还原 / 变掉落物均含移除）
+            for (int t = 0; t < frames; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        };
+
+        // (a) 放置路径 × 支撑族矩阵：沙(8)/沙砾(139) × {火把, 半砖, 草丛, 睡莲} → 同步坍落 + 落非完整支撑变掉落物。
+        bool okA = true;
+        const quint8 partials[] = { BR::Torch, BR::WoodSlab, BR::TallGrass, BR::LilyPad };
+        const quint8 gravities[] = { BR::Sand, BR::Gravel };
+        for (int g = 0; g < 2; ++g) {
+            for (int k = 0; k < 4; ++k) {
+                const int cx = x0 + g * 4 + k;             // 沙 dx0..3 / 沙砾 dx4..7
+                w.setBlock(cx, ty, z0, partials[k], 0);    // 非完整立方支撑（立平台上）
+                fellSignals = 0; fellId = -1; itemDrops = 0;
+                w.setBlock(cx, ty + 1, z0, gravities[g], 0); // 玩家放置同一入口
+                const bool fellNow = fellSignals == 1 && fellId == int(gravities[g])
+                                     && w.blockAt(cx, ty + 1, z0) == BR::Air; // 同帧清格转实体
+                settle(240);                               // 实体下落 → 遇非完整支撑变掉落物（t220）
+                okA = okA && fellNow && itemDrops == 1 && ents.liveCount() == 0
+                      && w.blockAt(cx, ty + 1, z0) == BR::Air; // 不还原成方块（支撑族全同判）
+            }
+        }
+
+        // (b) 稳定矩阵：完整立方支撑（石头 / TNT / 下层沙）→ 零信号零坍落（沙柱叠放稳定性）。
+        bool okB = true;
+        {
+            w.setBlock(x0 + 8, ty, z0, BR::Stone, 0);
+            w.setBlock(x0 + 9, ty, z0, BR::TntBlock, 0);
+            fellSignals = 0;
+            w.setBlock(x0 + 8, ty + 1, z0, BR::Sand, 0);    // 沙放石头上
+            w.setBlock(x0 + 8, ty + 2, z0, BR::Gravel, 0);  // 沙砾放沙上（沙=完整立方可支撑）
+            w.setBlock(x0 + 9, ty + 1, z0, BR::Sand, 0);    // 沙放 TNT 上（TNT 完整立方）
+            okB = fellSignals == 0
+                  && w.blockAt(x0 + 8, ty + 1, z0) == BR::Sand
+                  && w.blockAt(x0 + 8, ty + 2, z0) == BR::Gravel
+                  && w.blockAt(x0 + 9, ty + 1, z0) == BR::Sand;
+            settle(60); // 稳定柱若干 tick 后仍原位（无实体生成）
+            okB = okB && ents.liveCount() == 0
+                  && w.blockAt(x0 + 8, ty + 1, z0) == BR::Sand
+                  && w.blockAt(x0 + 8, ty + 2, z0) == BR::Gravel;
+        }
+
+        // (c) 更新路径：挖掉稳定柱底层沙 → 正上方沙砾坍落 + 落到石头上还原方块（着地支撑=完整立方）。
+        bool okC = true;
+        {
+            fellSignals = 0; fellId = -1; itemDrops = 0;
+            w.setBlock(x0 + 8, ty + 1, z0, BR::Air, 0);     // 挖底层沙（正上方沙砾失撑）
+            okC = fellSignals == 1 && fellId == int(BR::Gravel)
+                  && w.blockAt(x0 + 8, ty + 2, z0) == BR::Air; // 柱清空转实体
+            settle(240);                                     // 1 格落差 → 落到石柱顶还原沙砾
+            okC = okC && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 8, ty + 1, z0) == BR::Gravel; // 着地还原（非掉落物——下方是完整支撑）
+        }
+
+        // (d) 半空放置（>1 格落差）：沙放火把上两格（中间空气）→ 坍落 → 穿 1 格空气落火把 → 变掉落物。
+        bool okD = true;
+        {
+            w.setBlock(x0 + 10, ty, z0, BR::Torch, 0);
+            fellSignals = 0; itemDrops = 0;
+            w.setBlock(x0 + 10, ty + 2, z0, BR::Sand, 0);   // 下方 (ty+1) 空气 → 放置即失撑
+            okD = fellSignals == 1 && w.blockAt(x0 + 10, ty + 2, z0) == BR::Air;
+            settle(240);
+            okD = okD && itemDrops == 1 && ents.liveCount() == 0; // 落火把 → 掉落物（落差不改变语义）
+        }
+
+        // (e) 水中沙：平台上 1 格水柱，沙放水面 → 坍落穿透水（t220 水不挡沙）→ 落水底还原（填堵水格）。
+        bool okE = true;
+        {
+            w.setBlock(x0 + 11, ty, z0, BR::Water, 0);
+            fellSignals = 0; itemDrops = 0;
+            w.setBlock(x0 + 11, ty + 1, z0, BR::Sand, 0);   // 下方水 → 非完整支撑 → 失撑
+            okE = fellSignals == 1 && w.blockAt(x0 + 11, ty + 1, z0) == BR::Air;
+            settle(240);
+            okE = okE && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 11, ty, z0) == BR::Sand; // 着地还原在水底格（排水填堵）
+        }
+
+        // (f) 静默写入口收口：爆炸（destroySphereSilent 破支撑）+ TNT 点火（clearBlockSilent 清 TNT 格）。
+        bool okF = true;
+        {
+            // 爆炸：沙 (ty+1) 立于独立石柱 (ty) 上，炸石柱（半径 <1 只毁中心格）→ 上方沙坍落 → 落平台还原。
+            w.setBlock(x0 + 12, ty, z0, BR::Stone, 0);
+            w.setBlock(x0 + 12, ty + 1, z0, BR::Sand, 0);
+            fellSignals = 0; itemDrops = 0;
+            w.destroySphereSilent(x0 + 12, ty, z0, 0.9f);
+            okF = fellSignals == 1 && w.blockAt(x0 + 12, ty + 1, z0) == BR::Air;
+            settle(240);
+            okF = okF && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 12, ty, z0) == BR::Sand; // 落到平台石顶还原
+            // TNT 点火：(b) 的 dx9 列（TNT + 上方沙仍稳定）→ 清 TNT 格（firePowerTnt 同一入口）→ 沙坍落。
+            fellSignals = 0; itemDrops = 0;
+            w.clearBlockSilent(x0 + 9, ty, z0);
+            okF = okF && fellSignals == 1 && w.blockAt(x0 + 9, ty + 1, z0) == BR::Air;
+            settle(240);
+            okF = okF && itemDrops == 0 && ents.liveCount() == 0
+                  && w.blockAt(x0 + 9, ty, z0) == BR::Sand;  // 落到平台石顶还原
+        }
+
+        const bool ok = rigOk && okA && okB && okC && okD && okE && okF;
+        if (!ok) {
+            qInfo().noquote() << "  [t799 diag] okA" << okA << "| okB" << okB << "| okC" << okC
+                              << "| okD" << okD << "| okE" << okE << "| okF" << okF
+                              << "| lastFellSignals" << fellSignals << "fellId" << fellId
+                              << "itemDrops" << itemDrops;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t799 gravity blocks (sand/gravel) instant-fall on non-full-cube "
+                             "supports: placing sand or gravel on torch/slab/tall-grass/lily-pad "
+                             "collapses to a falling entity in the same setBlock (single World-layer "
+                             "predicate, placement == update path), falling through/onto a partial "
+                             "block converts to item drop (t220), on full cube it re-places; "
+                             "sand-column stacking on full support stays put, water column pierced "
+                             "and sealed, explosion + TNT-prime silent write entries also trigger "
+                             "the collapse - fixes 'sand sits stable on torch' user report";
+    }
+
+    // ── t794 铁砧重力探针（isGravityBlock 扩铁砧三阶段 + FallingBlock 砸伤 / 着地还原 / 落地音信号）──
+    //   用户报告（R19.12）：「铁砧应该要有重力效果，砸到下方的生物会扣血，砸到地面的时候会有声音。」
+    //   t799 重力链对铁砧开箱即用程度：失撑坍落 / 下落物理 100% 复用（BlockRegistry::isGravityBlock 谓词
+    //   加 isAnvil 即通，World 层零新代码）；本任务补的分叉语义 = ① 砸伤（dmg=(floor(落差)−1)×2，2 格起伤
+    //   每多 1 格 +1♥，先伤后落，每实体每次下落只伤一次）；② 着地恒还原铁砧方块（沙落部分方块变掉落物，
+    //   铁砧还原 —— 落火把上也还原不掉物品）；③ 落地音事件 fallingBlockLanded（仅铁砧族发）。矩阵断言：
+    //   (P) 砸猪数值 + 落差单调：圈养猪（四周墙围 —— aiWander 无跳跃、XZ 撞墙撤回 → 猪恒留落点列、盒顶
+    //       恒 ty+0.9，检测拍落差确定）上方铁砧落 3 格 → 恰扣 2HP（(2−1)×2），落 5 格 → 恰扣 6HP（(4−1)×2，
+    //       > A 单调；恰扣一次 = 一次性拍不多帧连扣）+ 着地还原铁砧于猪格（生物不挡下落体）；
+    //   (U) 更新路径：铁砧放完整立方上稳定（零信号）→ 挖支撑 → gravityBlockFell(id=Anvil) + 着地还原 +
+    //       landed 信号恰 1 次 + 零掉落物；
+    //   (T) 落火把（不完整方块）：还原铁砧于火把上方（**不掉物品** —— 与沙 t220 分叉）+ landed 信号 +
+    //       火把原位不动；
+    //   (L) 砸玩家：listener 站落点列 → mobAttackedPlayer 携 MobAnvil 哨兵，伤害 2HP → 6HP 随落差单调。
+    {
+        const int ty = kRigY;
+        // rig 寻址：11 宽 dx[-1,10]（圈养猪墙 x0-1 起 + 空隔 + 更新 / 火把 / 玩家列 + 边距）× 3 深 dz[-1,1]
+        //   （猪圈 z 向墙）× y[ty-1, ty+6]（平台下探 / 铁砧最高 ty+5）全净空。
+        int x0 = -1, z0 = -1;
+        for (int zz = 1; zz < 96 && x0 < 0; zz += 3) {
+            for (int xx = 4; xx + 10 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 10 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 6 && clear; ++dy)
+                            if (w.blockAt(xx + dx, ty + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        }
+        const bool rigOk = x0 >= 0;
+        if (!rigOk)
+            qInfo().noquote() << "  [t794 diag] no clear rig strip found (11 wide x 3 deep x y[ty-1,ty+6])";
+        // 平台（全列支撑底座；圈栏 / 各探针列共享一层）。
+        for (int dx = -1; dx <= 10; ++dx)
+            for (int dz = -1; dz <= 1; ++dz)
+                w.setBlock(x0 + dx, ty - 1, z0 + dz, BR::Stone, 0);
+        EntityManager ents;
+        QObject sigGuard; // t794 信号守卫：块结束析构自动断连（防 [&] 捕获块局部悬挂，见 t799 gravSigGuard 同修）
+        int fellSignals = 0, fellId = -1, itemDrops = 0, landedSignals = 0, landedId = -1;
+        QObject::connect(&w, &World::gravityBlockFell, &sigGuard,
+                         [&](int x, int y, int z, int blockId) {
+                             ++fellSignals; fellId = blockId;
+                             ents.spawnFallingBlock(x, y, z, blockId); // 复刻 Main.qml onGravityBlockFell 消费端
+                         });
+        QObject::connect(&ents, &EntityManager::fallingBlockDropped, &ents,
+                         [&](int, int, int, int) { ++itemDrops; });
+        QObject::connect(&ents, &EntityManager::fallingBlockLanded, &ents,
+                         [&](int, int, int, int blockId) { ++landedSignals; landedId = blockId; });
+        int hitCount = 0, hitSrcType = -1, hitAmount0 = 0, hitAmount1 = 0;
+        QObject::connect(&ents, &EntityManager::mobAttackedPlayer, &ents,
+                         [&](int amount, int srcType, float, float) {
+                             if (hitCount == 0) hitAmount0 = amount;
+                             else if (hitCount == 1) hitAmount1 = amount;
+                             hitSrcType = srcType; ++hitCount;
+                         });
+        const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+        const auto tickFar = [&](int frames) {
+            for (int t = 0; t < frames; ++t) ents.tick(0.016f, &w, farListener, 0.3f, 1.8f, false);
+        };
+        // 固定 80 帧落定预算：铁砧最高落 5 格 ≈ 36 帧着地；着地后立刻读数（猪被埋窒息 1HP/s 从着地起
+        //   ~63 帧后才首扣 → 80 帧内读数干净，数值不受窒息串扰）。
+        // (P) 圈养猪砸伤：A 列铁砧放 ty+3（放置即坍落，落 3 格）→ 恰 2HP；B 列 ty+5 → 恰 6HP。
+        bool okP = true;
+        int pigA = -1, pigB = -1;
+        {
+            const int ax = x0, bx = x0 + 2; // 两圈栏相邻共享中墙（x0+1）
+            const int wallsX[3] = { x0 - 1, x0 + 1, x0 + 3 };
+            for (int i = 0; i < 3; ++i) w.setBlock(wallsX[i], ty, z0, BR::Stone, 0);
+            w.setBlock(ax, ty, z0 - 1, BR::Stone, 0); w.setBlock(ax, ty, z0 + 1, BR::Stone, 0);
+            w.setBlock(bx, ty, z0 - 1, BR::Stone, 0); w.setBlock(bx, ty, z0 + 1, BR::Stone, 0);
+            pigA = ents.spawnMobTyped(ax, ty, z0, EntityManager::MobPig, QStringLiteral("#ffa0a0"), 10);
+            pigB = ents.spawnMobTyped(bx, ty, z0, EntityManager::MobPig, QStringLiteral("#a0ffa0"), 10);
+            tickFar(90); // 猪 resting 落定（盒顶 ty+0.9；圈内走不出列）
+            okP = pigA >= 0 && pigB >= 0
+                  && ents.healthAt(pigA) == 10 && ents.healthAt(pigB) == 10;
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(ax, ty + 3, z0, BR::Anvil, 0); // 下方空气 → 放置即坍落（World 层 ① 自检）
+            okP = okP && fellSignals == 1 && fellId == int(BR::Anvil);
+            tickFar(80);
+            okP = okP && itemDrops == 0 && landedSignals == 1 && landedId == int(BR::Anvil)
+                  && ents.healthAt(pigA) == 8       // 恰扣 2HP（(floor(2.1..2.27)−1)×2；恰一次 = 一次性拍）
+                  && w.blockAt(ax, ty, z0) == BR::Anvil; // 着地还原于猪格（先伤后落）
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(bx, ty + 5, z0, BR::Anvil, 0); // 落 5 格 → 恰 6HP
+            tickFar(80);
+            okP = okP && itemDrops == 0 && landedSignals == 1
+                  && ents.healthAt(pigB) == 4       // 10 − (floor(4.1..4.34)−1)×2 = 10 − 6（落差单调 > A 的 2）
+                  && w.blockAt(bx, ty, z0) == BR::Anvil;
+        }
+        // (U) 更新路径：放完整立方上稳定 → 挖支撑坍落 → 还原 + landed 恰 1 + 零掉落物。
+        bool okU = true;
+        {
+            const int ux = x0 + 5;
+            w.setBlock(ux, ty, z0, BR::Stone, 0);
+            fellSignals = 0;
+            w.setBlock(ux, ty + 1, z0, BR::Anvil, 0); // 铁砧放石头上 → 稳定（零信号）
+            okU = fellSignals == 0 && w.blockAt(ux, ty + 1, z0) == BR::Anvil;
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(ux, ty, z0, BR::Air, 0);       // 挖支撑 → World 层 ② 复检坍落
+            okU = okU && fellSignals == 1 && fellId == int(BR::Anvil)
+                  && w.blockAt(ux, ty + 1, z0) == BR::Air;
+            tickFar(80);                              // 1 格落差 → 落平台顶还原
+            okU = okU && itemDrops == 0 && landedSignals == 1 && landedId == int(BR::Anvil)
+                  && w.blockAt(ux, ty, z0) == BR::Anvil;
+        }
+        // (T) 落火把（不完整方块）：还原铁砧于火把上方一格（不掉物品 —— 与沙 t220「碎成掉落物」分叉）。
+        bool okT = true;
+        {
+            const int tx = x0 + 7;
+            w.setBlock(tx, ty, z0, BR::Torch, 0);
+            fellSignals = 0; landedSignals = 0; itemDrops = 0;
+            w.setBlock(tx, ty + 3, z0, BR::Anvil, 0);  // 放置即坍落 → 落 2 格遇火把
+            okT = fellSignals == 1 && w.blockAt(tx, ty + 3, z0) == BR::Air;
+            tickFar(80);
+            okT = okT && itemDrops == 0 && landedSignals == 1 && landedId == int(BR::Anvil)
+                  && w.blockAt(tx, ty + 1, z0) == BR::Anvil // 还原于火把上方（恒还原方块）
+                  && w.blockAt(tx, ty, z0) == BR::Torch;    // 火把原位不动
+        }
+        // (L) 砸玩家：listener 脚位站落点列（playerTargetable=true）→ mobAttackedPlayer 携 MobAnvil 哨兵，
+        //     伤害随落差单调（ty+4 落 → 2HP；ty+6 落 → 6HP）。
+        bool okL = true;
+        {
+            const int lx = x0 + 9;
+            const QVector3D listener(float(lx) + 0.5f, float(ty), float(z0) + 0.5f);
+            hitCount = 0; hitSrcType = -1; hitAmount0 = 0; hitAmount1 = 0;
+            w.setBlock(lx, ty + 4, z0, BR::Anvil, 0);
+            for (int t = 0; t < 80; ++t) ents.tick(0.016f, &w, listener, 0.3f, 1.8f, true);
+            w.setBlock(lx, ty + 6, z0, BR::Anvil, 0); // 第一块已落 ty → 第二块落其上，仍砸穿玩家 AABB
+            for (int t = 0; t < 80; ++t) ents.tick(0.016f, &w, listener, 0.3f, 1.8f, true);
+            okL = hitCount == 2 && hitSrcType == int(EntityManager::MobAnvil)
+                  && hitAmount0 == 2 && hitAmount1 == 6 && hitAmount1 > hitAmount0;
+        }
+        const bool ok = rigOk && okP && okU && okT && okL;
+        if (!ok) {
+            qInfo().noquote() << "  [t794 diag] okP" << okP << "| okU" << okU << "| okT" << okT
+                              << "| okL" << okL << "| pigA hp" << (pigA >= 0 ? ents.healthAt(pigA) : -1)
+                              << "pigB hp" << (pigB >= 0 ? ents.healthAt(pigB) : -1)
+                              << "| hits" << hitCount << "amt0" << hitAmount0 << "amt1" << hitAmount1
+                              << "src" << hitSrcType << "| fell" << fellSignals << "id" << fellId
+                              << "| landed" << landedSignals << "lid" << landedId << "| items" << itemDrops;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t794 anvil gravity: anvil (3 damage stages) joins the sand/gravel gravity "
+                             "chain via the single isGravityBlock predicate (support-break and mid-air "
+                             "placement both collapse instantly), falling anvil crushes mobs and the "
+                             "player with distance-scaled damage (exactly 2HP at 3-block fall / 6HP at "
+                             "5-block, damage-first-then-land, once per entity per fall, player death "
+                             "cause via MobAnvil sentinel), lands by restoring the anvil block even on "
+                             "partial blocks like torches (never an item drop, unlike sand t220), and "
+                             "emits fallingBlockLanded for the heavy-metal landing sound";
+    }
+
+    // ── t849/t850/t851 铁砧·仙人掌·活板门三件套探针（Core 表查询 + World rig + 玩家碰撞点测，P11 模式）──
+    //   t849：铁砧三阶段（Anvil/AnvilChipped/AnvilDamaged）非整格三件套收窄 —— ① collision/selection/raycast
+    //         三消费端走 anvilShapeBoxes 三盒窄形（XZ 12/16 足印，底座/腰柱/顶台三段，与 mesher 铁砧 case
+    //         同源镜像）→ 足印外环隙可站人/可透视；② heightmap 排除 → 列顶实面落到下方支撑块（PCF 阴影/
+    //         天光列不再被铁砧整格抬高）；仙人掌同查（0.8 居中细柱三件套 + heightmap 排除）。
+    //   t850：活板门两材质（木/铁）× 两态（合/开）阴影按薄板形状 —— 合态列顶=下方支撑面（板顶 0.1875 由
+    //         solidTopOffset 表达，heightmap 不再指向薄板格）；开态列顶=贴边竖板仍由 solidTopOffset 给满高
+    //         （heightmap 排除后自动落到下方支撑，开态竖板遮挡由既有 solidTopOffset(ShapeTrapdoor,open)=1.0
+    //         在 columnTopSurfaceY 组合表达——但该组合仅在「活板门是 heightmap 顶」时生效，排除后列顶恒为
+    //         支撑块 → 本探针锁「排除后列顶=支撑块顶」契约，开/合两态一致）。
+    //   t851：① 放置预检（PlayerController 直编不可达 placeBlock 射线段 → World 层谓词直验 + 失撑链全链
+    //         断言；放置拒绝的人工目视项见报告）：活板门须依附实体面（isCollidable 下方或四侧）、门须
+    //         isTopFlushSupport 齐平地面（t741 既有谓词天然拒门叠门——Door 非完整立方非上半砖）；
+    //         ② 失撑级联：拆支撑 → 正上方活板门柱/双格门（含叠门通天链）逐格 blockBroken+
+    //         blockDroppedAsItem；红石路径（setBlockSilent 静默写）与玩家路径（setBlock 编辑钩子）同收口。
+    {
+        constexpr float kEps = 1e-4f;
+        const auto boxesTopOf = [](const std::vector<BR::BlockAABB> &bs) {
+            float t = -1.0f;
+            for (const auto &b : bs) if (b.maxY > t) t = b.maxY;
+            return t;
+        };
+        // ── (A) Core 三件套窄形值锁：铁砧三阶段 + 仙人掌（collision=selection=raycast 同源 anvilShapeBoxes /
+        //     0.8 柱；足印 XZ [2/16,14/16] / [1.6/16,14.4/16]）。
+        bool okA = true;
+        const quint8 anvils[3] = { BR::Anvil, BR::AnvilChipped, BR::AnvilDamaged };
+        for (quint8 aid : anvils) {
+            const auto col = BR::collisionAABBs(aid, 0);
+            const auto sel = BR::selectionAABBs(aid, 0);
+            const auto ray = BR::raycastAABBs(aid, 0);
+            okA = okA && col.size() == 3 && sel.size() == 3 && ray.size() == 3; // 三盒窄形（底座/腰柱/顶台）
+            if (!okA || col.empty() || sel.empty()) break;
+            float footMinX = 1e9f, footMaxX = -1e9f;
+            for (const auto &b : col) {
+                footMinX = std::min(footMinX, b.minX);
+                footMaxX = std::max(footMaxX, b.maxX);
+            }
+            okA = okA
+                  && std::fabs(footMinX - 2.0f / 16.0f) < kEps && std::fabs(footMaxX - 14.0f / 16.0f) < kEps // 12/16 足印
+                  && std::fabs(col[0].minY) < kEps && std::fabs(col[0].maxY - 4.0f / 16.0f) < kEps           // 底座 y[0,4]
+                  && std::fabs(col[1].maxY - 10.0f / 16.0f) < kEps                                            // 腰柱到 y10
+                  && std::fabs(boxesTopOf(col) - 1.0f) < kEps                                                  // 顶台满高
+                  && std::fabs(boxesTopOf(sel) - 1.0f) < kEps && std::fabs(boxesTopOf(ray) - 1.0f) < kEps;
+            if (!okA) {
+                qInfo().noquote() << "  [t849 diag] anvil" << int(aid) << "col" << col.size()
+                                  << "sel" << sel.size() << "ray" << ray.size()
+                                  << "footX" << footMinX << ".." << footMaxX;
+                break;
+            }
+        }
+        {
+            const auto ccol = BR::collisionAABBs(BR::Cactus, 0);
+            const auto csel = BR::selectionAABBs(BR::Cactus, 0);
+            okA = okA && ccol.size() == 1 && csel.size() == 1
+                  && std::fabs(ccol[0].minX - 0.1f) < kEps && std::fabs(ccol[0].maxX - 0.9f) < kEps // 0.8 居中柱
+                  && std::fabs(csel[0].maxY - 1.0f) < kEps;
+        }
+        // ── (B) World 窄形行为 rig：铁砧缝隙可站人（点测）+ 可入缝（碰撞盒不覆盖环隙）+ heightmap 排除 +
+        //     PCF 列顶落支撑面；仙人掌/活板门 heightmap 排除同核（开/合两态列顶一致=支撑面）。
+        //     rig 取净空区（t794 模式）：8 宽 × 3 深 × y[ty,ty+6] 全 Air（防 worldgen 地形/树冠抬高
+        //     heightmap 使断言空转）；平台自建。
+        bool okB = true;
+        int brokenB = 0, dropsB = 0;
+        QObject sigGuardB;
+        {
+            World w849;
+            w849.setWidth(48); w849.setDepth(48); w849.setHeight(96);
+            w849.setSeed(20260824u);
+            const auto clearArea = [&](int ox, int oz, int oy) {
+                for (int dx = 0; dx < 8; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int yy = oy - 1; yy <= oy + 6; ++yy)
+                            if (w849.blockAt(ox + dx, yy, oz + dz) != BR::Air) return false;
+                return true;
+            };
+            int x0 = -1, z0 = -1, ty = -1;
+            for (int yy = 68; yy + 7 < 96 && x0 < 0; ++yy) // 地表 ~66、树冠 +10 → 从 68 起找地上净空带
+                for (int zz = 4; zz < 44 && x0 < 0; zz += 2)
+                    for (int xx = 4; xx + 8 < 48 && x0 < 0; xx += 2)
+                        if (clearArea(xx, zz, yy)) { x0 = xx; z0 = zz; ty = yy; }
+            okB = x0 >= 0;
+            if (x0 < 0)
+                qInfo().noquote() << "  [t849 diag] (B) no clear rig area";
+            QObject::connect(&w849, &World::blockBroken, &sigGuardB,
+                             [&](int, int, int, int) { ++brokenB; });
+            QObject::connect(&w849, &World::blockDroppedAsItem, &sigGuardB,
+                             [&](int, int, int, int) { ++dropsB; });
+            const int ax = x0, az = z0;
+            // 平台 + 铁砧 + 仙人掌 + 活板门四列（各自独立列、互不相邻防侧撑串扰：间距 ≥2 格）。
+            w849.setBlock(ax, ty, az, BR::Stone, 0);          // 铁砧列支撑
+            w849.setBlock(ax + 3, ty, az, BR::Stone, 0);      // 仙人掌列支撑（Stone 非 Sand——band 下方悬空，
+                                                               //   Sand 是重力块放置即坍落，列顶断言会空转）
+            w849.setBlock(ax + 6, ty, az, BR::Stone, 0);      // 活板门列支撑
+            w849.setBlock(ax, ty + 1, az, BR::Anvil, 0);
+            // ① 缝隙可入：铁砧足印外环隙中心 (ax+0.03, ty+1.5, az+0.5) —— x∈[14/16,1] 环隙（整格时代被挡）。
+            okB = okB && !w849.pointBlockedByCollision(float(ax) + 0.97f, float(ty) + 1.5f, float(az) + 0.5f);
+            // ② 砧身内仍挡：腰柱中心点 (ax+0.5, ty+1.5, az+0.5) 须在碰撞盒内（挡人语义保留）。
+            okB = okB && w849.pointBlockedByCollision(float(ax) + 0.5f, float(ty) + 1.5f, float(az) + 0.5f);
+            // ③ heightmap 排除：铁砧列 hm 应停在 Stone 行（ty），PCF 列顶 = ty + solidTopOffset(Stone)=ty+1；
+            //    仙人掌列同（hm=沙行）。修前 hm 抬到异形行（ty+1）→ 列顶 ty+2 整格误暗一环。
+            w849.setBlock(ax + 3, ty + 1, az, BR::Cactus, 0);
+            w849.setBlock(ax + 6, ty + 1, az, BR::WoodTrapdoor, 0); // 合态（state bit0=0）
+            okB = okB && w849.heightmapAt(ax, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax, az) - float(ty + 1)) < kEps
+                  && w849.heightmapAt(ax + 3, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 3, az) - float(ty + 1)) < kEps;
+            // ④ t850 活板门两态列顶一致（都落到 Stone 顶 ty+1——薄板不入列顶；solidTopOffset 开态竖板满高
+            //    仅在板是列顶时参与，排除后本探针锁「列顶恒支撑面」契约）：
+            okB = okB && w849.heightmapAt(ax + 6, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 6, az) - float(ty + 1)) < kEps;
+            w849.setBlock(ax + 6, ty + 1, az, BR::WoodTrapdoor, 0x01); // 开态（bit0=1，朝向位默认）
+            okB = okB && w849.heightmapAt(ax + 6, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 6, az) - float(ty + 1)) < kEps;
+            w849.setBlock(ax + 6, ty + 1, az, BR::IronTrapdoor, 0x00); // 铁活板门合态同口径
+            okB = okB && w849.heightmapAt(ax + 6, az) == ty
+                  && std::fabs(w849.columnTopSurfaceY(ax + 6, az) - float(ty + 1)) < kEps;
+        }
+        // ── (C) t851 失撑级联 rig：① 空中叠放活板门（无实体面依附）→ 直写模拟绕过预检的脏世界，
+        //     拆其唯一侧撑 → 板+其上门级联掉；② 门叠门通天（3 扇门叠柱站同一石台上）→ 拆石台 →
+        //     3 扇 6 格全掉（6 blockDroppedAsItem）；③ 有撑门不受邻破影响（零误伤）。
+        bool okC = true;
+        int dropsC1 = 0, dropsC2 = 0, dropsC3 = 0;
+        QObject sigGuardC;
+        {
+            World w851;
+            w851.setWidth(48); w851.setDepth(48); w851.setHeight(96);
+            w851.setSeed(777u);
+            QObject::connect(&w851, &World::blockDroppedAsItem, &sigGuardC,
+                             [&](int, int, int, int) { ++dropsC1; ++dropsC2; ++dropsC3; });
+            // rig：净空带搜索（(B) 同款——地表 ~66、树冠更高 → 从 68 起找 8 宽 × 3 深 × 8 高全 Air 带；
+            //   三个子 rig 分占带内不相交列：C1 用 bx0..bx0+1、C2 用 bx0+3、C3 用 bx0+5..bx0+6）。
+            const auto clearBand = [&](int ox, int oz, int oy) {
+                for (int dx = 0; dx < 8; ++dx)
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int yy = oy - 1; yy <= oy + 6; ++yy)
+                            if (w851.blockAt(ox + dx, yy, oz + dz) != BR::Air) return false;
+                return true;
+            };
+            int bx0 = -1, bz0 = -1, ty = -1;
+            for (int yy = 68; yy + 7 < 96 && bx0 < 0; ++yy)
+                for (int zz = 4; zz < 44 && bx0 < 0; zz += 2)
+                    for (int xx = 4; xx + 8 < 48 && bx0 < 0; xx += 2)
+                        if (clearBand(xx, zz, yy)) { bx0 = xx; bz0 = zz; ty = yy; }
+            if (bx0 < 0) {
+                okC = false;
+                qInfo().noquote() << "  [t851 diag] no clear band for rig";
+            }
+
+            // ① 活板门贴墙浮空（合法放置形态）：墙在 -X 侧。拆墙 → 板失撑掉 1 件。
+            {
+                dropsC1 = dropsC2 = dropsC3 = 0;
+                const int px = bx0, pz = bz0; // 带内 x0..x0+1 列（净空已由带搜索保证）
+                if (px < 0) {
+                    okC = false;
+                    qInfo().noquote() << "  [t851 diag] (C1) skipped (no band)";
+                } else {
+                    w851.setBlock(px, ty, pz, BR::Stone, 0);      // 墙（唯一侧撑）
+                    w851.setBlock(px + 1, ty, pz, BR::WoodTrapdoor, 0x02 | 0x01); // 板（开态贴 -X 边；state 仅视觉）
+                    dropsC1 = 0;
+                    w851.setBlock(px, ty, pz, BR::Air, 0);        // 拆墙 → setBlock 编辑钩子 ③ 复检
+                    okC = okC && dropsC1 == 1 && w851.blockAt(px + 1, ty, pz) == BR::Air;
+                }
+            }
+            // ② 门叠门通天：石台上 3 扇木门叠柱（ty..ty+5）。拆石台 → 6 格全掉（每格一件）。
+            {
+                dropsC1 = dropsC2 = dropsC3 = 0;
+                const int dx2 = bx0 + 3, dz2 = bz0; // 带内 x0+3 列（净空已由带搜索保证）
+                if (dx2 < 0) {
+                    okC = false;
+                    qInfo().noquote() << "  [t851 diag] (C2) skipped (no band)";
+                } else {
+                    w851.setBlock(dx2, ty - 1, dz2, BR::Stone, 0);
+                    for (int door = 0; door < 3; ++door) {
+                        w851.setBlock(dx2, ty + door * 2, dz2, BR::WoodDoor, quint8(0));      // 下扇 bit3=0
+                        w851.setBlock(dx2, ty + door * 2 + 1, dz2, BR::WoodDoor, quint8(8)); // 上扇 bit3=1
+                    }
+                    dropsC2 = 0;
+                    w851.setBlockSilent(dx2, ty - 1, dz2, BR::Air, 0); // 红石/系统静默拆支撑（setBlockSilent 收口路径）
+                    okC = okC && dropsC2 == 6;
+                    for (int yy = ty; yy <= ty + 5; ++yy)
+                        okC = okC && w851.blockAt(dx2, yy, dz2) == BR::Air;
+                }
+            }
+            // ③ 零误伤：正常门（站石台）旁挖无关方块 → 门不动。
+            {
+                dropsC1 = dropsC2 = dropsC3 = 0;
+                const int nx = bx0 + 5, nz = bz0; // 带内 x0+5..x0+6 列（净空已由带搜索保证）
+                if (nx < 0) {
+                    okC = false;
+                    qInfo().noquote() << "  [t851 diag] (C3) skipped (no band)";
+                } else {
+                    w851.setBlock(nx, ty - 1, nz, BR::Stone, 0);
+                    w851.setBlock(nx, ty, nz, BR::SpruceDoor, quint8(1));
+                    w851.setBlock(nx, ty + 1, nz, BR::SpruceDoor, quint8(9));
+                    dropsC3 = 0;
+                    w851.setBlock(nx + 1, ty, nz, BR::Air, 0); // 挖旁边无关格（原为本就空的格也行——写 Air 幂等）
+                    okC = okC && dropsC3 == 0
+                          && w851.blockAt(nx, ty, nz) == BR::SpruceDoor
+                          && w851.blockAt(nx, ty + 1, nz) == BR::SpruceDoor;
+                }
+            }
+        }
+        // ── (D) t849② 选中框/射线窄形 + t851 放置预检谓词静态断言（World 层谓词直验——placeBlock 的射线
+        //     段在 PlayerController 私有方法内，矩阵不可达；放置拒绝行为人工目视收口，P20 先例）。
+        bool okD = true;
+        {
+            // 活板门依附面判定（trapdoorSupportBlock 单一权威——playercontroller 预检 / World 复检同读）：
+            //   实体面（Stone）判允；air 判拒；**活板门/门自身判拒**（附着族不互相依附——板套板悬浮叠两侧一致拒）。
+            okD = okD && BR::trapdoorSupportBlock(BR::Stone, 0)
+                  && !BR::trapdoorSupportBlock(BR::Air, 0)
+                  && !BR::trapdoorSupportBlock(BR::WoodTrapdoor, 0x00)
+                  && !BR::trapdoorSupportBlock(BR::IronTrapdoor, 0x01)
+                  && !BR::trapdoorSupportBlock(BR::WoodDoor, 0);
+            // 门叠门拒放口径：isTopFlushSupport(WoodDoor)=false（Door 非完整立方非上半砖）→ t741 门放置
+            //    分支天然拒「门上叠门通天」。
+            okD = okD && !BR::isTopFlushSupport(BR::WoodDoor, 0);
+            // isCollidable 本身对活板门恒真（碰撞实体语义不动——玩家仍站板顶）；依附判定走排除版谓词。
+            okD = okD && BR::isCollidable(BR::WoodTrapdoor, 0x00);
+        }
+        const bool ok = okA && okB && okC && okD;
+        if (!ok) {
+            qInfo().noquote() << "  [t849 diag] okA" << okA << "| okB" << okB << "| okC" << okC
+                              << "| okD" << okD << "| c1drops" << dropsC1 << "| c2drops" << dropsC2
+                              << "| c3drops" << dropsC3;
+        }
+        if (!ok) ++totalFail;
+        Q_UNUSED(brokenB); Q_UNUSED(dropsB); // (B) 信号计数仅烟囱守卫（heightmap 断言是主面）
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t849/t850/t851 anvil+cactus non-full-cube trio + trapdoor thin-plate shadow "
+                             "+ attach support: anvil 3-stage collision/selection/raycast narrow to the "
+                             "three-box footprint (12/16 base/waist/top, gap walkable via point probe, "
+                             "waist still blocks), cactus trio at 0.8 centered column, all three families "
+                             "excluded from heightmap so PCF column-top lands on the support block "
+                             "(trapdoor open/closed wood+iron alike), wall-mounted trapdoor falls when its "
+                             "sole side support breaks, 3-door sky tower collapses into 6 item drops on "
+                             "silent support clear, intact door untouched by neighbor edits";
+    }
+
+    // ── t800 物品栏归类清理探针（纯 Game 层 Hotbar 实例，无 World rig）：① 材料段调色板不再列羊毛物品
+    //    （0x20E）与玻璃物品（0x204）——用户「羊毛 item 多此一举（方块栏已有羊毛方块）」「玻璃应放方块那边」；
+    //    ② 方块段调色板含玻璃 Glass=54（移入）且白羊毛 + 15 色变体全在列（建筑取色不受影响）；③ 两物品生存链
+    //    完好 —— nameForBlock 仍返中文名（杀羊掉羊毛 / 破玻璃掉玻璃的 tooltip / 图鉴名源）；④ 玻璃方块图标可
+    //    解析（iconSourceForBlock(54) 非空 —— Glass 无 qrc 手绘图，pack 关态靠 isPackDerivedIconFamily 程序
+    //    图集重渲（t838(1) 起 dimetric 3D 立方投影），回退链断链 = 空图标 = FAIL 面）。注：④ 在本测试二进制只验「URL 解析链通」——测试
+    //    target 无 qrc 资源（atlas 加载失败会打一条预期内 qWarning），瓦片像素内容留给实机人工目视；测试进程
+    //    落盘的空图不毒害实机缓存（App 侧缓存命中只认进程内 map，恒重渲覆写，见 blockAtlasIconSource L9/L10）。
+    {
+        Hotbar hb;
+        const QVariantList mats = hb.creativeMaterials();
+        bool matsClean = true;
+        for (const QVariant &m : mats)
+            matsClean = matsClean && m.toInt() != int(RecipeRegistry::WoolId)
+                                 && m.toInt() != int(RecipeRegistry::GlassId);
+        const QVariantList blocks = hb.creativeBlocks();
+        bool hasGlass = false, hasWhiteWool = false;
+        int woolVariants = 0;
+        for (const QVariant &b : blocks) {
+            hasGlass     = hasGlass || b.toInt() == int(BR::Glass);
+            hasWhiteWool = hasWhiteWool || b.toInt() == int(BR::Wool);
+            if (b.toInt() >= int(BR::WoolOrange) && b.toInt() <= int(BR::WoolBlack))
+                ++woolVariants;
+        }
+        const bool ok = matsClean && hasGlass && hasWhiteWool && woolVariants == 15
+                && hb.nameForBlock(int(RecipeRegistry::WoolId)) == QString::fromUtf8("羊毛")
+                && hb.nameForBlock(int(RecipeRegistry::GlassId)) == QString::fromUtf8("玻璃")
+                && !hb.iconSourceForBlock(int(BR::Glass)).isEmpty();
+        if (!ok) {
+            qInfo().noquote() << "  [t800 diag] matsClean" << matsClean << "| hasGlass" << hasGlass
+                              << "| hasWhiteWool" << hasWhiteWool << "| woolVariants" << woolVariants
+                              << "| woolName" << hb.nameForBlock(int(RecipeRegistry::WoolId))
+                              << "| glassName" << hb.nameForBlock(int(RecipeRegistry::GlassId))
+                              << "| glassIcon empty?" << hb.iconSourceForBlock(int(BR::Glass)).isEmpty();
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t800 inventory categorization: wool item (0x20E) and glass item (0x204) "
+                             "removed from creative materials palette, glass block (54) present in blocks "
+                             "palette alongside white wool + 15 color variants, both item names still "
+                             "resolve for survival drop chains, glass block icon resolves via runtime atlas "
+                             "re-render (t838(1) dimetric 3D cube projection; flat-2D was the t800 misdirection)";
+    }
+
+    // ── t991 栅栏几何对齐 MC 探针（Core 表查询 + mesher 同源直调，P11/P19 模式；纯静态断言无 rig，不占
+    //    nextSlot 容量；P-t801 演化——t801 的「视觉 1.0 裁高」被用户口径推翻，本探针按 MC 1.0 形态重钉）：
+    //    用户「栅栏太难受了、完全不符合预期」→ 先对照 MC 形态逐项差修复。木栅栏 = 中心柱 4/16 见方 ×
+    //    1.5 格高 + 四向双横杆（2/16 截面，上下两道）；石栅栏（墙）= 8/16 柱 + 顶部凸缘 + 低连接拱；
+    //    相邻栅栏/贴墙自动连接（判定不变）。断言四层（木 17/云杉 88 与圆石墙 60 形制分家）：
+    //    (a) 木/云杉几何：孤立四邻空气 = 单柱（y ∈ [0,1.5]、水平 bounds = 4/16 柱径、无格边顶点）；
+    //        四向连栅栏 = 柱 + 8 道横杆（横杆真到格边、2/16 窄截面在场 0.4375/0.5625、上下两道 y 平面
+    //        6/16·9/16·12/16·15/16 四值齐 —— 旧 0.4 厚板绝无此值）。
+    //    (b) 圆石墙几何：孤立 = 柱 + 顶部凸缘（yMax≈1.0；凸缘外挑在场 x==3/16，8/16 柱径之外的唯一
+    //        水平极值）；四向连 = 低连接拱在场（y==10/16 顶点 = 拱底，低于凸缘下沿 —— 「柱高拱低」）。
+    //    （盒分离 + 同源源码钉两腿见下一个 t991b 探针块。）
+    {
+        const quint8 woodFences[2] = { BR::WoodFence, BR::SpruceFence };
+        constexpr float kEps = 1e-4f;
+        const auto appendFence = [](quint8 fid, bool connected) {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            const quint8 nb = connected ? BR::WoodFence : quint8(BR::Air); // 连接判定 isCollidable||isFullCube：栅栏邻即连
+            nctx.posX = nctx.negX = nctx.posZ = nctx.negZ = nb;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, fid, 0, lctx, nctx,
+                                         1.0f / 16.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            return verts;
+        };
+        bool ok = true;
+        // (a) 木/云杉：孤立单柱 / 连接双横杆
+        for (quint8 fid : woodFences) {
+            for (int connected = 0; connected <= 1; ++connected) {
+                const QVector<Vtx> verts = appendFence(fid, connected != 0);
+                float xMin = 1e9f, xMax = -1e9f, yMin = 1e9f, yMax = -1e9f;
+                bool edge = false, thinRail = false;
+                bool yLo = false, yLoT = false, yHi = false, yHiT = false;
+                for (const Vtx &v : verts) {
+                    xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                    yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+                    if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                        || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+                    if (std::fabs(v.z - 0.4375f) < kEps || std::fabs(v.x - 0.4375f) < kEps) thinRail = true;
+                    if (std::fabs(v.y - 0.375f)  < kEps) yLo  = true;
+                    if (std::fabs(v.y - 0.5625f) < kEps) yLoT = true;
+                    if (std::fabs(v.y - 0.75f)   < kEps) yHi  = true;
+                    if (std::fabs(v.y - 0.9375f) < kEps) yHiT = true;
+                }
+                const bool geoOk = !verts.isEmpty()
+                    && std::fabs(yMin) < kEps && std::fabs(yMax - 1.5f) < kEps; // 柱高 1.5（MC 24px）
+                // 孤立 = 单柱：水平 bounds 即 4/16 柱径、无格边顶点；连接 = 横杆到格边（bounds 0..1）
+                const bool boundsOk = connected
+                    ? (std::fabs(xMin) < kEps && std::fabs(xMax - 1.0f) < kEps)
+                    : (std::fabs(xMin - 0.375f) < kEps && std::fabs(xMax - 0.625f) < kEps);
+                const bool railOk = connected == (edge && thinRail && yLo && yLoT && yHi && yHiT);
+                if (!geoOk || !boundsOk || !railOk) {
+                    qInfo().noquote() << "  [t991 diag] wood fence" << int(fid) << "connected" << connected
+                                      << "verts" << verts.size() << "yMin" << yMin << "yMax" << yMax
+                                      << "xMin" << xMin << "xMax" << xMax << "edge" << edge
+                                      << "thinRail" << thinRail << "rails" << yLo << yLoT << yHi << yHiT;
+                    ok = false;
+                }
+            }
+        }
+        // (b) 圆石墙：孤立 = 柱 + 顶部凸缘；连接 = 低连接拱
+        for (int connected = 0; connected <= 1; ++connected) {
+            const QVector<Vtx> verts = appendFence(BR::CobbleFence, connected != 0);
+            float xMin = 1e9f, xMax = -1e9f, yMin = 1e9f, yMax = -1e9f;
+            bool flange = false, arch = false, edge = false;
+            for (const Vtx &v : verts) {
+                xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+                if (std::fabs(v.x - 0.1875f) < kEps) flange = true;      // 凸缘外挑 1px（8/16 柱径外唯一极值）
+                if (std::fabs(v.y - 0.625f)  < kEps) arch = true;        // 低连接拱底（低于凸缘下沿 15/16）
+                if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                    || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+            }
+            // 孤立 = 柱 + 凸缘：bounds 即凸缘外挑 3/16..13/16；连接 = 拱到格边（bounds 0..1）
+            const bool boundsOk = connected
+                ? (std::fabs(xMin) < kEps && std::fabs(xMax - 1.0f) < kEps)
+                : (std::fabs(xMin - 0.1875f) < kEps && std::fabs(xMax - 0.8125f) < kEps);
+            const bool wallOk = !verts.isEmpty()
+                && std::fabs(yMin) < kEps && std::fabs(yMax - 1.0f) < kEps
+                && boundsOk
+                && flange && connected == (arch && edge);
+            if (!wallOk) {
+                qInfo().noquote() << "  [t991 diag] wall connected" << connected << "verts" << verts.size()
+                                  << "yMin" << yMin << "yMax" << yMax << "xMin" << xMin << "xMax" << xMax
+                                  << "flange" << flange << "arch" << arch << "edge" << edge;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t991 fence geometry aligned to MC: wood/spruce = 4/16 post x 1.5 tall "
+                             "(isolated = bare post, no edge vertices) + two 2/16 rails per connected side "
+                             "reaching the cell edges at MC y bands 6-9/16 and 12-15/16; cobble wall split "
+                             "into its own shape (8/16 post + 1px top flange overhang + low connecting arch "
+                             "below the flange, isolated = post+flange only)";
+    }
+
+    // ── t991b 栅栏盒分离 + 同源源码钉（P-t801(b) 腿随 t991 视觉演化 + 新增源码钉腿）──
+    //    (c) 盒分离：collisionAABBs 顶==1.5（> 跳跃顶点 ~1.25（playercontroller.h kJump=8.4 的文档镜像值，
+    //        同 P11 rideH 镜像先例）→ 跳不过，mob 支撑/越障链零改动）；selectionAABBs / raycastAABBs 贴
+    //        视觉 —— 木/云杉顶 1.5 且 4/16 柱径、墙顶 1.0 且 8/16 柱径。
+    //    (d) 源码钉：partialblockgeometry / itemshapegeometry 两处 fence case 均带 t991 契约锚与 MC 截面
+    //        常数（世界渲染与查看器预览同源改）。
+    {
+        constexpr float kEps = 1e-4f;
+        constexpr float kJumpApex = 1.25f; // playercontroller.h kJump=8.4「顶点约 1.25 格」的文档镜像值（改跳跃力须同步）
+        const auto topOf = [](const std::vector<BR::BlockAABB> &bs) {
+            float t = -1.0f;
+            for (const auto &b : bs) if (b.maxY > t) t = b.maxY;
+            return t;
+        };
+        bool ok = true;
+        // (c) 盒分离：碰撞 1.5 不可越；选中框/射线贴视觉（墙 8/16×1.0、木 4/16×1.5）
+        for (quint8 fid : { BR::WoodFence, BR::CobbleFence, BR::SpruceFence }) {
+            const float colTop = topOf(BR::collisionAABBs(fid, 0));
+            const auto sel = BR::selectionAABBs(fid, 0);
+            const auto ray = BR::raycastAABBs(fid, 0);
+            const bool wall = (fid == BR::CobbleFence);
+            const float wantTop = wall ? 1.0f : 1.5f;
+            const float wantHalf = wall ? 0.75f : 0.625f;  // 柱面（0.25..0.75 墙 / 0.375..0.625 木）
+            const bool boxOk = !sel.empty() && !ray.empty()
+                && std::fabs(sel.front().minX - (1.0f - wantHalf)) < kEps
+                && std::fabs(sel.front().maxX - wantHalf) < kEps
+                && std::fabs(ray.front().minX - (1.0f - wantHalf)) < kEps
+                && std::fabs(ray.front().maxX - wantHalf) < kEps
+                && std::fabs(topOf(sel) - wantTop) < kEps && std::fabs(topOf(ray) - wantTop) < kEps;
+            if (!(std::fabs(colTop - 1.5f) < kEps && colTop > kJumpApex && boxOk)) {
+                qInfo().noquote() << "  [t991 diag] fence" << int(fid) << "colTop" << colTop
+                                  << "sel" << sel.size() << "ray" << ray.size();
+                ok = false;
+            }
+        }
+        // (d) 源码钉：两处 fence case 的 t991 锚 + MC 截面常数（世界 mesher / 查看器预览同源）
+        {
+            const QString exeDir = QCoreApplication::applicationDirPath();
+            const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+            QFile pf(root + QStringLiteral("/src/World/partialblockgeometry.cpp"));
+            QFile inf(root + QStringLiteral("/src/Renderer/itemshapegeometry.cpp"));
+            const QString pgeo = pf.open(QIODevice::ReadOnly) ? QString::fromUtf8(pf.readAll()) : QString();
+            const QString igeo = inf.open(QIODevice::ReadOnly) ? QString::fromUtf8(inf.readAll()) : QString();
+            if (pgeo.isEmpty() || igeo.isEmpty()
+                || !pgeo.contains(QStringLiteral("rTh0 = 0.4375f, rTh1 = 0.5625f"))
+                || !pgeo.contains(QStringLiteral("0.1875f, 0.8125f, 0.9375f, 1.0f, 0.1875f, 0.8125f"))
+                || !pgeo.contains(QStringLiteral("t991 栅栏几何对齐 MC"))
+                || !igeo.contains(QStringLiteral("0.375f, 0.375f, 0.375f, 0.625f, 1.5f, 0.625f"))
+                || !igeo.contains(QStringLiteral("t991 与世界 mesher 同源对齐 MC 形态"))) {
+                qInfo().noquote() << "  [t991 diag] source pin miss pgeo" << pgeo.isEmpty()
+                                  << "igeo" << igeo.isEmpty();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t991b fence visual-tracking boxes + same-source pins: collision stays 1.5 "
+                             "(jump apex ~1.25 still blocked, mob chain untouched) while selection + raycast "
+                             "boxes track the new visuals (wall 8/16 x 1.0, wood 4/16 x 1.5), and both "
+                             "fence cases (world mesher + viewer preview) carry the t991 contract anchors "
+                             "with MC rail/flange constants";
+    }
+
+    // ── P-t998 结构新方块三件探针（苔石砖 140 / 裂纹石砖 141 / 铁栏杆 142；Core 表钉 + 贴图逐像素 +
+    //    mesher 同源直调 + 调色板入口，纯静态断言无 rig，不占 nextSlot 容量）──
+    //    验收四腿：
+    //    (a) def / tileIndex 钉：三方块各面 tile 指向新瓦片 181/182/183；苔/裂石砖整立方石质口径（同
+    //        StoneBrick：1.5 / Pickaxe / requiresTool / minTier1 / 自掉）；铁栏杆金属口径（5.0 同铁块量级 /
+    //        Pickaxe / requiresTool / minTier1 / 自掉）+ 薄杆族判定（isPartialBlock / isCollidable /
+    //        非 isFence——与栅栏形制分家）。
+    //    (b) 贴图逐像素腿（textures/*.png 是入库资产非 build 产物，缺文件即 FAIL）：苔石砖 = 与石砖同
+    //        RNG 基底 + 暗绿苔斑簇在场（非苔区逐像素同石砖）；裂纹石砖 = 石砖基底 + <45 近黑裂纹线在场
+    //        （石砖本体最暗 58 砖缝 → 裂纹特征可分离）；铁栏杆 = 周期 4 竖条亮度分布（条 ≥110 / 缝 ≤90
+    //        带宽间隔）+ y7..8 横带贯穿 + alpha 恒不透明（薄杆面整张压缩采样契约，见 build_iron_bars.py）。
+    //    (c) 铁栏杆几何顶点腿（PartialBlockGeometry 直调，t991 模式）：孤立四邻空气 = 单柱（水平 bounds
+    //        = 2/16 柱径、满格高、无格边顶点）；四向连铁栏杆 = 柱 + 4 横板（真到格边、居中带 y 7/16·9/16
+    //        平面在场、2/16 截面）；贴方块面连接（邻 Stone 同样出横板——isFullCube 腿）。
+    //    (d) 盒分离 + 调色板入口钉：碰撞 = 4/16 立柱盒满格高（collisionTopY 1.0 可跳过）；选中 / 射线 =
+    //        十字条带双盒；creativeBlocks 含三方块且 iconSourceForBlock 全可解析（Glass 先例：无 qrc 手绘
+    //        图，程序图集重渲是唯一原生图标路径，回退链断链 = 空图标 FAIL 面）。
+    {
+        constexpr float kEps = 1e-4f;
+        bool ok = true;
+        // (a) def / tileIndex / 工具掉落口径钉
+        struct BarPin { quint8 id; int tile; };
+        const BarPin pins[3] = { { BR::MossyStoneBrick, 181 }, { BR::CrackedStoneBrick, 182 },
+                                 { BR::IronBars, 183 } };
+        for (const BarPin &p : pins) {
+            const BR::BlockDef &d = BR::def(p.id);
+            const bool tileOk = d.topTile == p.tile && d.bottomTile == p.tile
+                && d.sideTile == p.tile && d.frontTile == p.tile
+                && BR::tileIndex(p.id, BR::Top) == p.tile && BR::tileIndex(p.id, BR::Bottom) == p.tile
+                && BR::tileIndex(p.id, BR::PosX) == p.tile && BR::tileIndex(p.id, BR::NegZ) == p.tile;
+            const bool shapeOk = (p.id == BR::IronBars)
+                ? (!d.solid && d.shape == BR::ShapeIronBars && d.hardness == 5.0f)
+                : (d.solid && d.shape == BR::ShapeFull && d.hardness == 1.5f);
+            const bool toolOk = d.toolType == int(BR::Pickaxe) && d.requiresTool && d.minToolTier == 1
+                && d.dropId == int(p.id) && d.dropCount == 1;
+            if (!tileOk || !shapeOk || !toolOk || BR::AtlasTileCount < 184) {
+                qInfo().noquote() << "  [t998 diag] def" << int(p.id) << "tileOk" << tileOk
+                                  << "shapeOk" << shapeOk << "toolOk" << toolOk
+                                  << "atlas" << BR::AtlasTileCount;
+                ok = false;
+            }
+        }
+        if (BR::isFence(BR::IronBars) || !BR::isPartialBlock(BR::IronBars)
+            || !BR::isCollidable(BR::IronBars, quint8(0))) {
+            qInfo().noquote() << "  [t998 diag] bars family: isFence" << BR::isFence(BR::IronBars)
+                              << "partial" << BR::isPartialBlock(BR::IronBars)
+                              << "collidable" << BR::isCollidable(BR::IronBars, quint8(0));
+            ok = false;
+        }
+        // (b) 贴图逐像素腿（16×16 源；探针读源图，图集打包由 build_atlas.py 顺序契约 + 静态 assert 兜底）
+        const QString exeDir = QCoreApplication::applicationDirPath();
+        const QString texRoot = QDir(exeDir + QStringLiteral("/..")).absolutePath();
+        const auto loadTex = [&texRoot](const char *name) {
+            return QImage(texRoot + QStringLiteral("/textures/") + QString::fromLatin1(name)
+                          + QStringLiteral(".png"));
+        };
+        const QImage sb = loadTex("default_stone_brick");
+        const QImage ms = loadTex("default_mossy_stone_brick");
+        const QImage cs = loadTex("default_cracked_stone_brick");
+        const QImage ib = loadTex("default_iron_bars");
+        if (sb.size() != QSize(16, 16) || ms.size() != QSize(16, 16)
+            || cs.size() != QSize(16, 16) || ib.size() != QSize(16, 16)) {
+            qInfo().noquote() << "  [t998 diag] tex size" << sb.size() << ms.size() << cs.size() << ib.size();
+            ok = false;
+        } else {
+            int mossPx = 0, baseDiff = 0;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                const QRgb m = ms.pixel(x, y), s = sb.pixel(x, y);
+                const bool moss = qGreen(m) > qRed(m) + 15 && qGreen(m) > qBlue(m) + 15;
+                if (moss) ++mossPx;
+                else if (m != s) ++baseDiff; // 非苔区与石砖同 RNG 基底逐像素一致
+            }
+            if (mossPx < 24 || baseDiff > 4) {
+                qInfo().noquote() << "  [t998 diag] mossy mossPx" << mossPx << "baseDiff" << baseDiff;
+                ok = false;
+            }
+            int crackDark = 0, sbDark = 0, crackDiff = 0;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                const QRgb c = cs.pixel(x, y), s = sb.pixel(x, y);
+                const bool dark = qMax(qRed(c), qMax(qGreen(c), qBlue(c))) < 45; // 裂纹近黑（深于 58 砖缝）
+                if (dark) ++crackDark;
+                else if (c != s) ++crackDiff;
+                if (qMax(qRed(s), qMax(qGreen(s), qBlue(s))) < 45) ++sbDark;
+            }
+            if (crackDark < 12 || sbDark != 0 || crackDiff > 0) {
+                qInfo().noquote() << "  [t998 diag] cracked dark" << crackDark << "sbDark" << sbDark
+                                  << "crackDiff" << crackDiff;
+                ok = false;
+            }
+            int alphaBad = 0;
+            bool bandsOk = true, bandRowOk = true;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+                const QRgb p = ib.pixel(x, y);
+                if (qAlpha(p) != 255) ++alphaBad; // alpha 恒不透明契约
+                const int lum = (qRed(p) + qGreen(p) + qBlue(p)) / 3;
+                if (y == 7 || y == 8) {
+                    if (x < 15 && lum < 110) bandRowOk = false; // y7..8 横带贯穿（x15 边框倒角豁免）
+                } else if (y != 15) {                            // y15 底边倒角豁免
+                    if (x % 4 < 2 ? lum < 110 : lum > 90) bandsOk = false; // 条亮（≥110）缝暗（≤90）带间隔
+                }
+            }
+            if (alphaBad != 0 || !bandsOk || !bandRowOk) {
+                qInfo().noquote() << "  [t998 diag] iron alphaBad" << alphaBad << "bandsOk" << bandsOk
+                                  << "bandRowOk" << bandRowOk;
+                ok = false;
+            }
+        }
+        // (c) 铁栏杆几何顶点腿（mesher 同源直调）
+        const auto appendBars = [](quint8 pxN, quint8 nxN, quint8 pzN, quint8 nzN) {
+            QVector<Vtx> verts; QVector<quint32> idx;
+            PartialLightCtx lctx; lctx.light = 1.0f;
+            for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
+            PartialNeighborCtx nctx;
+            nctx.posX = pxN; nctx.negX = nxN; nctx.posZ = pzN; nctx.negZ = nzN;
+            PartialBlockGeometry::append(verts, idx, 0, 0, 0, BR::IronBars, 0, lctx, nctx,
+                                         1.0f / 16.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+            return verts;
+        };
+        {   // 孤立 = 单柱：水平 bounds = 2/16 柱径、满格高、无格边顶点
+            const QVector<Vtx> verts = appendBars(quint8(0), quint8(0), quint8(0), quint8(0));
+            float xMin = 1e9f, xMax = -1e9f, yMin = 1e9f, yMax = -1e9f;
+            bool edge = false;
+            for (const Vtx &v : verts) {
+                xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                yMin = std::min(yMin, v.y); yMax = std::max(yMax, v.y);
+                if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                    || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+            }
+            const bool isoOk = !verts.isEmpty()
+                && std::fabs(xMin - 0.4375f) < kEps && std::fabs(xMax - 0.5625f) < kEps
+                && std::fabs(yMin) < kEps && std::fabs(yMax - 1.0f) < kEps && !edge;
+            if (!isoOk) {
+                qInfo().noquote() << "  [t998 diag] bars isolated xMin" << xMin << "xMax" << xMax
+                                  << "yMax" << yMax << "edge" << edge << "verts" << verts.size();
+                ok = false;
+            }
+        }
+        {   // 四向连铁栏杆 = 柱 + 4 横板（真到格边 + 居中带平面 + 2/16 截面）；贴方块面同连（Stone 腿）
+            const QVector<Vtx> verts = appendBars(BR::IronBars, BR::IronBars, BR::IronBars, BR::IronBars);
+            float xMin = 1e9f, xMax = -1e9f, zMin = 1e9f, zMax = -1e9f;
+            bool yLo = false, yHi = false, thin = false, edge = false;
+            for (const Vtx &v : verts) {
+                xMin = std::min(xMin, v.x); xMax = std::max(xMax, v.x);
+                zMin = std::min(zMin, v.z); zMax = std::max(zMax, v.z);
+                if (std::fabs(v.y - 0.4375f) < kEps) yLo = true;   // 横板居中带下沿（7/16）
+                if (std::fabs(v.y - 0.5625f) < kEps) yHi = true;   // 横板居中带上沿（9/16）
+                if (std::fabs(v.z - 0.4375f) < kEps || std::fabs(v.x - 0.4375f) < kEps) thin = true; // 2/16 截面
+                if (std::fabs(v.x) < kEps || std::fabs(v.x - 1.0f) < kEps
+                    || std::fabs(v.z) < kEps || std::fabs(v.z - 1.0f) < kEps) edge = true;
+            }
+            const bool connOk = !verts.isEmpty()
+                && std::fabs(xMin) < kEps && std::fabs(xMax - 1.0f) < kEps
+                && std::fabs(zMin) < kEps && std::fabs(zMax - 1.0f) < kEps
+                && yLo && yHi && thin && edge;
+            if (!connOk) {
+                qInfo().noquote() << "  [t998 diag] bars connected xMin" << xMin << "xMax" << xMax
+                                  << "zMin" << zMin << "zMax" << zMax << "yLo/Hi" << yLo << yHi
+                                  << "thin" << thin << "edge" << edge;
+                ok = false;
+            }
+            const QVector<Vtx> vStone = appendBars(BR::Stone, quint8(0), quint8(0), quint8(0));
+            float sxMax = -1e9f;
+            bool sBand = false;
+            for (const Vtx &v : vStone) {
+                sxMax = std::max(sxMax, v.x);
+                if (std::fabs(v.y - 0.4375f) < kEps && v.x > 0.9f) sBand = true; // +X 横板远端在场
+            }
+            const bool stoneOk = std::fabs(sxMax - 1.0f) < kEps && sBand;
+            if (!stoneOk) {
+                qInfo().noquote() << "  [t998 diag] bars stone-nb xMax" << sxMax << "band" << sBand;
+                ok = false;
+            }
+        }
+        // (d) 盒分离 + 调色板入口钉
+        {
+            const std::vector<BR::BlockAABB> col = BR::collisionAABBs(BR::IronBars, 0);
+            const std::vector<BR::BlockAABB> sel = BR::selectionAABBs(BR::IronBars, 0);
+            const std::vector<BR::BlockAABB> ray = BR::raycastAABBs(BR::IronBars, 0);
+            bool boxOk = col.size() == 1 && sel.size() == 2 && ray.size() == 2
+                && std::fabs(col.front().minX - 0.375f) < kEps && std::fabs(col.front().maxX - 0.625f) < kEps
+                && std::fabs(col.front().maxY - 1.0f) < kEps
+                && std::fabs(sel.front().minX - 0.4375f) < kEps && std::fabs(sel.front().maxX - 0.5625f) < kEps
+                && std::fabs(sel.back().minX) < kEps && std::fabs(sel.back().maxX - 1.0f) < kEps
+                && std::fabs(ray.front().minX - 0.4375f) < kEps && std::fabs(ray.back().maxX - 1.0f) < kEps
+                && std::fabs(BR::collisionTopY(BR::IronBars, 0) - 1.0f) < kEps;
+            Hotbar hb;
+            const QVariantList blocks = hb.creativeBlocks();
+            bool palOk = true;
+            for (const BarPin &p : pins) {
+                bool in = false;
+                for (const QVariant &b : blocks) in = in || b.toInt() == int(p.id);
+                palOk = palOk && in && !hb.iconSourceForBlock(int(p.id)).isEmpty();
+            }
+            if (!boxOk || !palOk) {
+                qInfo().noquote() << "  [t998 diag] boxes col" << col.size() << "sel" << sel.size()
+                                  << "ray" << ray.size() << "boxOk" << boxOk << "palOk" << palOk;
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t998 structure block trio: mossy/cracked stone brick full-cube stone "
+                             "profile (1.5 pickaxe tool-required, per-face tiles 181/182 carrying the "
+                             "same-RNG stone brick base with moss clusters / <45-dark crack lines and "
+                             "clean base elsewhere) and iron bars (tile 183 opaque periodic-4 bright-bar "
+                             "texture with mid band, 2/16 post + mid-band arms connecting to neighbor "
+                             "bars and full-cube faces, 4/16 full-height collision post with cross-strip "
+                             "selection/raycast, palette + icon entries pinned)";
+    }
+
+    // ── t802 全配方审计探针（纯 Game 层静态表查询 + 匹配器直调，无 World rig，不占 nextSlot 容量）──
+    //    用户报三缺 + 举一反三全表：① 云杉原木→云杉木板→木剑等木制品链（根因 = 木制品配方原料只认
+    //    Planks，云杉木板 SprucePlanks 是独立 id 且无平行配方 → 修法 = 匹配器两阶段「精确→板材族等价
+    //    回退」，机制等价 MC 1.0 任意木板通配，云杉专属配方 spruce_slab/door/boat 仍精确优先不被截胡）；
+    //    ② 打火石合成不了（t761 误写有序纵列，MC 1.0 原版无序 → 改 shapeless，横/竖/斜摆全通）；
+    //    ③ 燃烬棒不能分解成燃烬粉（MC 正道是合成分解 1 棒→2 粉 → 补 shapeless 配方，熔炉路径并存）。
+    //    附全表回归：recipeAt 遍历每条配方「自身 pattern 自匹配」指针相等断言（防被更早配方遮蔽 = 永不
+    //    可合，防未来匹配算法改动静默丢配方）+ 表长下限（防整段误删）；补缺新配方（箱子/梯子/砂岩×2/
+    //    石砖×3/发射器）随全表自匹配一并覆盖；圆石压力板 gridSize 勘误（t627 漏改）单测；箭改回 MC
+    //    正统原料（燧石+棒+羽毛）正反两测；云杉熔炉链（烧炭 + 燃料）单测。
+    {
+        bool ok = true;
+        const auto expectCraft = [&](const int *grid, int n, int wantOut, int wantCnt, const char *tag) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(grid, n);
+            if (!r || r->outputId != wantOut || r->outputCount != wantCnt) {
+                qInfo().noquote() << "  [t802 diag]" << tag << "-> got"
+                                  << (r ? QStringLiteral("out=%1 cnt=%2").arg(r->outputId).arg(r->outputCount)
+                                        : QStringLiteral("null"))
+                                  << "want out=" << wantOut << "cnt=" << wantCnt;
+                ok = false;
+            }
+        };
+        const auto expectNoMatch = [&](const int *grid, int n, const char *tag) {
+            if (RecipeRegistry::match(grid, n)) {
+                qInfo().noquote() << "  [t802 diag]" << tag << "-> unexpectedly matched out="
+                                  << RecipeRegistry::match(grid, n)->outputId;
+                ok = false;
+            }
+        };
+
+        // (1) 云杉木制品链：原木→木板→木棒/工作台/五件套工具（等价回退路径，全经 2×2 或 3×3）。
+        const int SP = int(BR::SprucePlanks);
+        {
+            const int g1[9] = { int(BR::SpruceLog), 0, 0, 0 };
+            expectCraft(g1, 2, int(BR::SprucePlanks), 4, "spruce_log->planks");
+            const int g2[9] = { SP, 0, SP, 0 };
+            expectCraft(g2, 2, RecipeRegistry::StickId, 4, "spruce_planks->sticks");
+            const int g3[9] = { SP, SP, SP, SP };
+            expectCraft(g3, 2, int(BR::CraftingTable), 1, "spruce_planks->crafting_table");
+            const int gPick[9] = { SP, SP, SP,  0, RecipeRegistry::StickId, 0,  0, RecipeRegistry::StickId, 0 };
+            expectCraft(gPick, 3, int(ToolRegistry::PickaxeWood), 1, "spruce_wood_pickaxe");
+            const int gAxe[9]  = { SP, SP, 0,  SP, RecipeRegistry::StickId, 0,  0, RecipeRegistry::StickId, 0 };
+            expectCraft(gAxe, 3, int(ToolRegistry::AxeWood), 1, "spruce_wood_axe");
+            const int gShv[9]  = { SP, 0, 0,  RecipeRegistry::StickId, 0, 0,  RecipeRegistry::StickId, 0, 0 };
+            expectCraft(gShv, 3, int(ToolRegistry::ShovelWood), 1, "spruce_wood_shovel");
+            const int gHoe[9]  = { SP, SP, 0,  0, RecipeRegistry::StickId, 0,  0, RecipeRegistry::StickId, 0 };
+            expectCraft(gHoe, 3, int(ToolRegistry::HoeWood), 1, "spruce_wood_hoe");
+            const int gSwd[9]  = { SP, 0, 0,  SP, 0, 0,  RecipeRegistry::StickId, 0, 0 };
+            expectCraft(gSwd, 3, int(ToolRegistry::SwordWood), 1, "spruce_wood_sword");
+            // 精确优先（等价回退不得截胡云杉专属产物）：3 云杉木板横排 → 云杉台阶（非橡木台阶）；
+            //   云杉木板纵列 → 云杉门（非橡木门）；橡木横排 → 橡木台阶（非云杉台阶）。
+            const int gSlabS[9] = { SP, SP, SP, 0, 0, 0, 0, 0, 0 };
+            expectCraft(gSlabS, 3, int(BR::SpruceSlab), 6, "3*spruce_planks->spruce_slab(exact-first)");
+            const int gDoorS[9] = { SP, 0, 0, SP, 0, 0, SP, 0, 0 };
+            expectCraft(gDoorS, 3, int(BR::SpruceDoor), 1, "spruce_col->spruce_door(exact-first)");
+            const int gSlabO[9] = { int(BR::Planks), int(BR::Planks), int(BR::Planks), 0, 0, 0, 0, 0, 0 };
+            expectCraft(gSlabO, 3, int(BR::WoodSlab), 6, "3*planks->wood_slab(oak-exact)");
+            // 等价回退广度抽样：云杉板+羊毛→红床 / 云杉板楼梯形→橡木楼梯 / 单云杉板→木按钮 /
+            //   云杉板+羊毛方块床形→白床（MC 任意木板语义的族外覆盖）。t834/review #7 起床原料统一
+            //   Wool 方块 27（旧 0x20E 材料段物品退役、无掉落源——下方 expectNoMatch 钉死不再回头路）。
+            const int gBed[9] = { SP, int(BR::Wool), 0, 0 };
+            expectCraft(gBed, 2, int(BR::BedRed), 1, "spruce_planks+wool->bed_red");
+            const int gBedOld[9] = { SP, int(RecipeRegistry::WoolId), 0, 0 };
+            expectNoMatch(gBedOld, 2, "t834 retired: spruce+wool_item(0x20E) no longer crafts bed_red");
+            const int gStair[9] = { SP, 0, 0, SP, SP, 0, SP, SP, SP };
+            expectCraft(gStair, 3, int(BR::WoodStairs), 4, "spruce_stairs-shape->wood_stairs");
+            const int gBtn[9] = { SP, 0, 0, 0 };
+            expectCraft(gBtn, 2, int(BR::WoodButton), 1, "single_spruce_plank->wood_button");
+            const int gBedW[9] = { int(BR::Wool), int(BR::Wool), int(BR::Wool), SP, SP, SP, 0, 0, 0 };
+            expectCraft(gBedW, 3, int(BR::BedWhite), 1, "wool+spruce_row->bed_white");
+        }
+
+        // (2) 打火石：MC 1.0 无序配方——铁锭+燧石 2×2 四种摆法（竖/倒竖/横/斜）+ 3×3 对角全通。
+        {
+            const int iron = RecipeRegistry::IronIngotId, flint = RecipeRegistry::FlintId;
+            const int gA[9] = { iron, 0, flint, 0 };
+            expectCraft(gA, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_vertical");
+            const int gB[9] = { flint, 0, iron, 0 };
+            expectCraft(gB, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_vertical_flipped");
+            const int gC[9] = { iron, flint, 0, 0 };
+            expectCraft(gC, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_horizontal");
+            const int gD[9] = { iron, 0, 0, flint };
+            expectCraft(gD, 2, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_diagonal");
+            const int gE[9] = { iron, 0, 0, 0, 0, 0, 0, 0, flint };
+            expectCraft(gE, 3, int(ToolRegistry::FlintAndSteel), 1, "flint&steel_3x3_corners");
+        }
+
+        // (3) 燃烬棒分解：1 棒 → 2 粉（合成正道，任意格；熔炉路径并存核）。
+        {
+            const int g1[9] = { RecipeRegistry::BlazeRodId, 0, 0, 0 };
+            expectCraft(g1, 2, RecipeRegistry::BlazePowderId, 2, "blaze_rod->2_powder_2x2");
+            const int g2[9] = { 0, 0, 0, 0, RecipeRegistry::BlazeRodId, 0, 0, 0, 0 };
+            expectCraft(g2, 3, RecipeRegistry::BlazePowderId, 2, "blaze_rod->2_powder_center");
+            if (SmeltingRegistry::smeltResult(RecipeRegistry::BlazeRodId) != RecipeRegistry::BlazePowderId) {
+                qInfo().noquote() << "  [t802 diag] blaze_rod furnace path lost";
+                ok = false;
+            }
+        }
+
+        // (4) 审计补缺新配方显式抽查（全量由下方 (6) 自匹配覆盖）：箱子 / 梯子 / 发射器。
+        {
+            const int P = int(BR::Planks);
+            const int gChest[9] = { P, P, P, P, 0, P, P, P, P };
+            expectCraft(gChest, 3, int(BR::Chest), 1, "8_planks_ring->chest");
+            const int gLadder[9] = { RecipeRegistry::StickId, 0, RecipeRegistry::StickId,
+                                     RecipeRegistry::StickId, RecipeRegistry::StickId, RecipeRegistry::StickId,
+                                     RecipeRegistry::StickId, 0, RecipeRegistry::StickId };
+            expectCraft(gLadder, 3, int(BR::Ladder), 3, "7_sticks_H->3_ladder");
+            const int gDisp[9] = { int(BR::Cobble), int(BR::Cobble), int(BR::Cobble),
+                                   int(BR::Cobble), int(ToolRegistry::Bow), int(BR::Cobble),
+                                   int(BR::Cobble), RecipeRegistry::RedstoneId, int(BR::Cobble) };
+            expectCraft(gDisp, 3, int(BR::Dispenser), 1, "7_cobble+bow+redstone->dispenser");
+            // 圆石压力板 gridSize 勘误：2 圆石横排在 2×2 背包栏即可合（t627 注释口径，代码曾漏改）。
+            const int gPlate[9] = { int(BR::Cobble), int(BR::Cobble), 0, 0 };
+            expectCraft(gPlate, 2, int(BR::CobblePressurePlate), 1, "2_cobble_row_2x2->cobble_plate");
+        }
+
+        // (5) 箭改回 MC 正统原料：燧石+棒+羽毛 → 4 箭；旧「铁锭+棒+线」不再匹配。
+        {
+            const int gNew[9] = { RecipeRegistry::FlintId, 0, 0,
+                                  RecipeRegistry::StickId, 0, 0,
+                                  RecipeRegistry::FeatherId, 0, 0 };
+            expectCraft(gNew, 3, RecipeRegistry::ArrowId, 4, "flint+stick+feather->4_arrows");
+            const int gOld[9] = { RecipeRegistry::IronIngotId, 0, 0,
+                                  RecipeRegistry::StickId, 0, 0,
+                                  RecipeRegistry::StringId, 0, 0 };
+            expectNoMatch(gOld, 3, "old_iron_arrow_column(retired)");
+        }
+
+        // (6) 全表回归：每条配方「自身 pattern 在自身 gridSize 上经 match() 必返回自身」（指针相等 =
+        //    未被更早配方遮蔽 + 匹配算法两轮后仍可达）+ 表长下限（t802 后 ≥ 140；防整段误删）。
+        const int recipeTotal = RecipeRegistry::recipeCount();
+        if (recipeTotal < 140) {
+            qInfo().noquote() << "  [t802 diag] recipe table shrank: count =" << recipeTotal;
+            ok = false;
+        }
+        for (int i = 0; i < recipeTotal; ++i) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::recipeAt(i);
+            if (!r) { qInfo().noquote() << "  [t802 diag] recipeAt(" << i << ") null"; ok = false; continue; }
+            int g[9] = { 0 };
+            const int n = r->gridSize;
+            if (r->shapeless) {
+                // 无序：pattern 位置无关（匹配只读多重集）→ 非空格依序填入前 k 格；非空格数 > n*n
+                //   = 该配方在自身 gridSize 实际不可合（真缺口，指针断言下方暴露）。
+                int k = 0;
+                for (int c = 0; c < 9; ++c)
+                    if (r->pattern[c] != 0) {
+                        if (k < n * n) g[k] = r->pattern[c];
+                        ++k;
+                    }
+                if (k > n * n) {
+                    qInfo().noquote() << "  [t802 diag] recipe" << i << r->name
+                                      << "shapeless ingredients" << k << ">" << n * n << "cells";
+                    ok = false;
+                    continue;
+                }
+            } else {
+                // 有序：按 2×2 左上子矩阵约定抽取（pattern 内容越出子矩阵 = 2×2 实际不可合 = 真缺口）。
+                for (int y = 0; y < n; ++y)
+                    for (int x = 0; x < n; ++x)
+                        g[y * n + x] = r->pattern[y * 3 + x];
+            }
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, n);
+            if (m != r) {
+                qInfo().noquote() << "  [t802 diag] recipe" << i << r->name << "self-match got"
+                                  << (m ? m->name : "null") << "(shadowed?)";
+                ok = false;
+            }
+        }
+
+        // (7) 云杉熔炉链补缺：云杉原木烧木炭 + 云杉原木/木板可当燃料（15s 同橡木）。
+        if (SmeltingRegistry::smeltResult(int(BR::SpruceLog)) != RecipeRegistry::CharcoalId
+            || SmeltingRegistry::fuelBurnSeconds(int(BR::SpruceLog)) != 15.f
+            || SmeltingRegistry::fuelBurnSeconds(int(BR::SprucePlanks)) != 15.f) {
+            qInfo().noquote() << "  [t802 diag] spruce furnace chain:"
+                              << "smelt=" << SmeltingRegistry::smeltResult(int(BR::SpruceLog))
+                              << "fuelLog=" << SmeltingRegistry::fuelBurnSeconds(int(BR::SpruceLog))
+                              << "fuelPlanks=" << SmeltingRegistry::fuelBurnSeconds(int(BR::SprucePlanks));
+            ok = false;
+        }
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t802 recipe audit: spruce planks family-equivalence fallback (log->planks->"
+                             "sticks/crafting-table/5 wood tools all craftable, exact-first keeps spruce "
+                             "slab/door outputs, oak unaffected), flint&steel restored to shapeless (all 4 "
+                             "2x2 arrangements + 3x3 diagonal), blaze rod craft-decomposition 1->2 powder "
+                             "(furnace path kept), 9 missing recipes added (chest/ladder/sandstone/cut-"
+                             "sandstone/stone-brick x3/dispenser/blaze-powder), cobble pressure-plate grid "
+                             "size fixed to 2x2, arrow back to MC flint+stick+feather, spruce log smelts to "
+                             "charcoal + spruce log/planks burn 15s, full-table self-match regression over"
+                          << recipeTotal << "recipes";
+    }
+
+    // ── t795 附魔台门槛公式探针（Game 层公式 + Hotbar 桥接 + World 书架计数三层；UI 状态机「无 lapis 灰 /
+    //    lapis 足亮」在 QML 绑定层，本探针盖其 C++ 权威源，UI 显亮需人工目测）：
+    //    ① tierForBookshelves：0..4 → 1 档；5..9 → 2 档；10..15 → 3 档；**无模式旁路**（函数无模式参数——
+    //       创造同样须书架达标；t795 收口前的 QML creativeMode 直通 3 档已删）；
+    //    ② offeredLevelFor：bs=0 → [1,2,3]；bs=4 → 3 档 10；bs=14 → 3 档 28（<30）；bs=15 → [10,20,30]——
+    //       顶格 30 仅满 15 书架可达（书架封顶），全域对 bs 单调不减且在 [1,30]；
+    //    ③ Hotbar Q_INVOKABLE 桥接与静态函数同值（QML 绑定单一权威，防桥接层漂移）；
+    //    ④ World::countBookshelvesAround：净空环境 0；下层环带 15 书架 + 空气半步 → 15；堵 1 个半步格 →
+    //       该书架不计（14）；两层 32 位全放 → 封顶 15（书架数上限）。rig 用 y=46/47（其余探针全在
+    //       kRigY=41/42，地形/树冠 ~33，46+ 必空零串扰）。
+    {
+        bool ok = EnchantRegistry::tierForBookshelves(0) == 1
+                  && EnchantRegistry::tierForBookshelves(4) == 1
+                  && EnchantRegistry::tierForBookshelves(5) == 2
+                  && EnchantRegistry::tierForBookshelves(9) == 2
+                  && EnchantRegistry::tierForBookshelves(10) == 3
+                  && EnchantRegistry::tierForBookshelves(15) == 3
+                  && EnchantRegistry::tierForBookshelves(99) == 3;   // 超上限防御钳（同 15）
+        ok = ok && EnchantRegistry::offeredLevelFor(0, 0) == 1
+                  && EnchantRegistry::offeredLevelFor(0, 1) == 2
+                  && EnchantRegistry::offeredLevelFor(0, 2) == 3
+                  && EnchantRegistry::offeredLevelFor(4, 2) == 10    // 4 书架 3 档 10（t649 校准锚点 b）
+                  && EnchantRegistry::offeredLevelFor(14, 2) == 28   // 14 书架 < 30（封顶仅满 15）
+                  && EnchantRegistry::offeredLevelFor(15, 0) == 10
+                  && EnchantRegistry::offeredLevelFor(15, 1) == 20
+                  && EnchantRegistry::offeredLevelFor(15, 2) == 30;  // 满 15 书架 → [10,20,30]
+        for (int bs = 0; bs <= 15; ++bs)                            // 全域：值域 [1,30] + 对 bs 单调不减
+            for (int t = 0; t < 3; ++t) {
+                const int v = EnchantRegistry::offeredLevelFor(bs, t);
+                if (v < 1 || v > 30) ok = false;
+                if (bs > 0 && v < EnchantRegistry::offeredLevelFor(bs - 1, t)) ok = false;
+            }
+        Hotbar hb795;
+        ok = ok && hb795.enchantTierForBookshelves(9) == 2           // ③ QML 绑定入口同值
+                  && hb795.enchantTierForBookshelves(10) == 3
+                  && hb795.enchantOfferedLevel(15, 2) == 30;
+        // ④ World 环带计数 rig：附魔台位 (ecx,46,ecz)，环带 = 切比雪夫 2 × 两层（46/47）。rig 寻址：
+        //    **运行期扫描空区，不走 nextSlot()**（P20 先例——前序循环探针已把 4×31 slot 网格耗尽，此刻
+        //    nextSlot() 返回 z=97+ 越界 → setBlock 全被拒 = 假 FAIL，本探针首轮实测踩坑）。扫 y=46/47 两层
+        //    全净空的 5×5 区（其余探针全在 kRigY=41/42 + 生成石柱实测 ≤43，46+ 大概率空但按 P20 教训
+        //    不写死断言，扫不到 → 判 FAIL 不下断言防越界副作用）。
+        int ecx = -1, ecz = -1;
+        const int eY = 46;
+        for (int zz = 2; zz + 2 < 96 && ecx < 0; zz += 3) {
+            for (int xx = 2; xx + 2 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -2; dx <= 2 && clear; ++dx)
+                    for (int dz = -2; dz <= 2 && clear; ++dz)
+                        if (w.blockAt(xx + dx, eY, zz + dz) != BR::Air
+                            || w.blockAt(xx + dx, eY + 1, zz + dz) != BR::Air) clear = false;
+                if (clear) { ecx = xx; ecz = zz; }
+            }
+        }
+        ok = ok && ecx >= 0;
+        if (ecx < 0) {
+            qInfo().noquote() << "  [t795 diag] no clear 5x5 region at y=46/47";
+        } else {
+            const int emptyCnt = w.countBookshelvesAround(ecx, eY, ecz);
+            ok = ok && emptyCnt == 0;                                // 净空环境 → 0
+            int placed795 = 0;                                       // 下层环带前 15 位放书架（半步全空）
+            for (int dx = -2; dx <= 2 && placed795 < 15; ++dx)
+                for (int dz = -2; dz <= 2 && placed795 < 15; ++dz) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                    w.setBlock(ecx + dx, eY, ecz + dz, BR::Bookshelf, 0);
+                    ++placed795;
+                }
+            const int cnt15 = w.countBookshelvesAround(ecx, eY, ecz);
+            // 堵角位书架 (dx=-2,dz=-2)（放置序第 1 个）的半步格 (-1,-1)。半步 = (dx/2, dz/2) 向零取整：
+            //   边中点半步被 3 个环格共享（如 (1,0) 服务 (2,-1)/(2,0)/(2,1)——首轮实测堵它掉 3 本），角位
+            //   半步 (±1,±1) 只服务角书架自己 → 堵它精确 -1（首轮踩坑记录，防后人重试边中点）。
+            w.setBlock(ecx - 1, eY, ecz - 1, BR::Cobble, 0);
+            const int cnt14 = w.countBookshelvesAround(ecx, eY, ecz);
+            w.setBlock(ecx - 1, eY, ecz - 1, BR::Air, 0);            // 复原半步
+            for (int dy = 0; dy <= 1; ++dy)                          // 两层 32 位全放满 → 封顶 15
+                for (int dx = -2; dx <= 2; ++dx)
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                        w.setBlock(ecx + dx, eY + dy, ecz + dz, BR::Bookshelf, 0);
+                    }
+            const int cntCap = w.countBookshelvesAround(ecx, eY, ecz);
+            ok = ok && cnt15 == 15 && cnt14 == 14 && cntCap == 15;
+            if (emptyCnt != 0 || cnt15 != 15 || cnt14 != 14 || cntCap != 15)
+                qInfo().noquote() << "  [t795 diag] world ring count:" << emptyCnt << "->"
+                                  << cnt15 << "->" << cnt14 << "->" << cntCap;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| enchant gate: tier 1/2/3 at 0/5/10 bookshelves (no creative bypass), offered "
+                             "[1,2,3]@0 -> [10,20,30]@15 with top 30 only at full 15, monotonic in-range; "
+                             "hotbar bridge identical; world ring 0 -> 15 -> blocked half-step 14 -> 32 "
+                             "placed capped 15 (t795; UI lapis-gated highlight = QML binding, manual check)";
+    }
+
+    // ── t823 书架→附魔台字流口径 tripwire（用户报「没看到文字流」实机核查产物；矩阵不链 Quick3D →
+    //    QML 枚举无法直测，改**冻结镜像** EnchantGlyphFlow.qml rescanPairs 的逐行语义与本权威锁同值：
+    //    权威规则改动而 QML 副本未跟 → 镜像与权威失配 FAIL，提醒同步 EnchantGlyphFlow.qml（及同规则
+    //    第二副本 EnchantRunes.qml）。镜像与权威**有意分歧仅一处**：不设 15 上限 —— 字流发射按全部
+    //    有效对（每 pair 独立发射，>15 书架照常出字），15 封顶是附魔强度档位语义非视觉语义。
+    //    同时钉用户搭法口径三态（复现文档 docs/test-reports/t823-glyphflow-repro.md 第 2 节同图）：
+    //    ① 单层地面环带即有效 —— **无需两层高**（用户重点怀疑项，t795 只证计数 15 未按字流口径钉）；
+    //    ② 贴身环带（切比雪夫==1，8 格全放）恒 0 —— 与附魔档位同口径：能吃到书架档位加成的搭法必然
+    //      出字流、不出流的搭法也吃不到档位（两处同源，附魔台 UI 里看书架档位 = 字流搭法自检入口）；
+    //    ③ 半步格被堵 → 该书架不计（视觉与档位同步减）。rig 同 t795：运行期扫描净空 5×5 区（P20
+    //    教训不走 nextSlot）；y 带取 44/45（**世界高 48 → y∈[0,47]**，首轮踩坑 y=50/51 越界静默拒 = 全
+    //    探针假 FAIL 的 t814 同款病；t795 残架在 46/47 不冲突，扫描自带避开）。末尾复原 Air。
+    {
+        // 冻结镜像（改动此函数 = 改 QML 副本语义，须三处同步：World 权威 / 本镜像 / QML 两副本）：
+        //   Math.trunc(dx/2) ≡ C++ 整除向零（dx∈{-2,0,2} 商恰整数，两写法同值）；QML !==95/!==0 由
+        //   recipe.cpp t823 static_assert 钉 95/94 字面量，此处镜像走谓词等价。
+        const auto mirrorShelfPairs = [](const World &world, int x, int y, int z) {
+            int pairs = 0;
+            for (int dy = 0; dy <= 1; ++dy) {
+                const int yy = y + dy;
+                for (int dx = -2; dx <= 2; ++dx)
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        if (std::max(std::abs(dx), std::abs(dz)) != 2) continue;
+                        if (!BR::isBookshelf(world.blockAt(x + dx, yy, z + dz))) continue;
+                        if (world.blockAt(x + dx / 2, yy, z + dz / 2) != quint8(BR::Air)) continue;
+                        ++pairs;
+                    }
+            }
+            return pairs;
+        };
+        int gx = -1, gz = -1;
+        const int gY = 44;
+        for (int zz = 2; zz + 2 < 96 && gx < 0; zz += 3)
+            for (int xx = 2; xx + 2 < 96; xx += 2) {
+                bool clear = true;
+                for (int dx = -2; dx <= 2 && clear; ++dx)
+                    for (int dz = -2; dz <= 2 && clear; ++dz)
+                        if (w.blockAt(xx + dx, gY, zz + dz) != BR::Air
+                            || w.blockAt(xx + dx, gY + 1, zz + dz) != BR::Air) clear = false;
+                if (clear) { gx = xx; gz = zz; }
+            }
+        bool ok = gx >= 0;
+        if (gx < 0) {
+            qInfo().noquote() << "  [t823 diag] no clear 5x5 region at y=44/45";
+        } else {
+            const auto clearRing = [&]() {
+                for (int dy = 0; dy <= 1; ++dy)
+                    for (int dx = -2; dx <= 2; ++dx)
+                        for (int dz = -2; dz <= 2; ++dz) {
+                            w.setBlock(gx + dx, gY + dy, gz + dz, BR::Air, 0);
+                            if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                                w.setBlock(gx + dx / 2, gY + dy, gz + dz / 2, BR::Air, 0);
+                        }
+            };
+            // ① 净空 → 双侧 0（镜像 == 权威基线）。
+            const int m0 = mirrorShelfPairs(w, gx, gY, gz), a0 = w.countBookshelvesAround(gx, gY, gz);
+            // ② 贴身环带 8 格全放书架（切比雪夫==1）→ 双侧 0：不出流 = 也不加档（用户搭法口径钉）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (dx != 0 || dz != 0)
+                        w.setBlock(gx + dx, gY, gz + dz, BR::Bookshelf, 0);
+            const int mAdj = mirrorShelfPairs(w, gx, gY, gz), aAdj = w.countBookshelvesAround(gx, gY, gz);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    if (dx != 0 || dz != 0)
+                        w.setBlock(gx + dx, gY, gz + dz, BR::Air, 0);
+            // ③ 单层地面环带 16 格全放（上层恒空）→ 镜像 16（不封顶）/ 权威 15（封顶）——**单层即满**，
+            //    且有意分歧（视觉不封顶）一并钉死：满环带 + UI 开 = 字流最密场景。
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    if (std::max(std::abs(dx), std::abs(dz)) == 2)
+                        w.setBlock(gx + dx, gY, gz + dz, BR::Bookshelf, 0);
+            const int m16 = mirrorShelfPairs(w, gx, gY, gz), a16 = w.countBookshelvesAround(gx, gY, gz);
+            // ④ 堵两角书架半步（(±1,±1) 各只服务自己的角书架，t795 边中点教训）→ 双侧 -2。
+            w.setBlock(gx - 1, gY, gz - 1, BR::Cobble, 0);
+            w.setBlock(gx + 1, gY, gz + 1, BR::Cobble, 0);
+            const int m14 = mirrorShelfPairs(w, gx, gY, gz), a14 = w.countBookshelvesAround(gx, gY, gz);
+            w.setBlock(gx - 1, gY, gz - 1, BR::Air, 0);
+            w.setBlock(gx + 1, gY, gz + 1, BR::Air, 0);
+            // ⑤ 单列两层高（一角 dy0/dy1 叠放）→ 双侧 2：两层架每层独立计，第二层同样要自己的半步空。
+            clearRing();
+            w.setBlock(gx - 2, gY,     gz - 2, BR::Bookshelf, 0);
+            w.setBlock(gx - 2, gY + 1, gz - 2, BR::Bookshelf, 0);
+            const int mStack = mirrorShelfPairs(w, gx, gY, gz), aStack = w.countBookshelvesAround(gx, gY, gz);
+            clearRing();   // 复原净空（好公民：t795 未清是历史，新探针不留脏 rig）
+            ok = ok && m0 == 0 && a0 == 0
+                 && mAdj == 0 && aAdj == 0
+                 && m16 == 16 && a16 == 15
+                 && m14 == 14 && a14 == 14
+                 && mStack == 2 && aStack == 2;
+            if (!ok)
+                qInfo().noquote() << "  [t823 diag] mirror/authority: empty " << m0 << "/" << a0
+                                  << " adjacent " << mAdj << "/" << aAdj
+                                  << " ring16 " << m16 << "/" << a16
+                                  << " blocked2 " << m14 << "/" << a14
+                                  << " stack " << mStack << "/" << aStack;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t823 glyph-flow rule tripwire: QML rescanPairs mirror == world authority "
+                             "(empty 0/0, adjacent ring 0/0 = no flow no tier, single ground layer 16 pairs "
+                             "vs capped 15 = one-layer suffices + visual uncapped by design, blocked half-step "
+                             "-2 both sides, two-high stack 2/2)";
+    }
+
+    // ── t785 生物蛋补全探针（用户「末影人和烈焰人的生物蛋……应该和其他的生物蛋放在一起，而且贴图也是仿照
+    //    他们的生物蛋，还有就是狼和豹猫的生物蛋都没有出现」；Game 层表 + Core 生成式染色表）：
+    //    ① 蛋 id→mobType 单一权威表 RecipeRegistry::mobTypeForSpawnEgg 全 13 蛋接通且与 EntityManager::MobType
+    //      枚举同值（t785 收口——此前映射散在 placeBlock 内联链 + QML 两处手抄，t728 审查修 B9 即此类
+    //      「加了蛋漏接」缺口；狼/豹猫/夜行者/燃烬者四新接为重点）；
+    //    ② 创造背包材料段 13 蛋**连续同列**（egg 区聚合无杂项穿插——夜行者/燃烬者蛋此前孤列在暗渊链材料后）；
+    //    ③ Hotbar::nameForBlock 13 蛋全有名（空名 = 调色板/tooltip 无名，t728 B9 同类缺口）；
+    //    ④ Core 生成式染色表 spawnEggTint 13 蛋全有条目 + 非蛋 id 不误命中（pack miss 时该蛋按 mob 配色
+    //      两层染色，而非空白模板）。蛋图标观感 / 蛋区排布为 QML 层，需人工目视。
+    {
+        bool ok = RecipeRegistry::SpawnEggNightwalkerId == 0x246   // t785 新 id 分配锁（重排破存档兼容）
+                  && RecipeRegistry::SpawnEggEmberlingId == 0x247
+                  && RecipeRegistry::SpawnEggWolfId == 0x249
+                  && RecipeRegistry::SpawnEggOcelotId == 0x24A
+                  && RecipeRegistry::SpawnEggCaveSpiderId == 0x25E; // t1012③ 洞穴蜘蛛蛋（尾追加锁）
+        const int allEggs[] = {
+            RecipeRegistry::SpawnEggPigId, RecipeRegistry::SpawnEggCowId, RecipeRegistry::SpawnEggSheepId,
+            RecipeRegistry::SpawnEggShamblerId, RecipeRegistry::SpawnEggBonesId, RecipeRegistry::SpawnEggStalkerId,
+            RecipeRegistry::SpawnEggSpiderId, RecipeRegistry::SpawnEggChickenId, RecipeRegistry::SpawnEggSquidId,
+            RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
+            RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
+            RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；蛋区尾追加保连续同列）
+            RecipeRegistry::SpawnEggCaveSpiderId,   // t1012③ 洞穴蜘蛛蛋（0x25E；蛋区尾追加保连续同列）
+        };
+        const int expectMob[] = {
+            EntityManager::MobPig, EntityManager::MobCow, EntityManager::MobSheep,
+            EntityManager::MobShambler, EntityManager::MobBones, EntityManager::MobStalker,
+            EntityManager::MobSpider, EntityManager::MobChicken, EntityManager::MobSquid,
+            EntityManager::MobNightwalker, EntityManager::MobEmberling,
+            EntityManager::MobWolf, EntityManager::MobOcelot,
+            EntityManager::MobBabyShambler,
+            EntityManager::MobCaveSpider,
+        };
+        const int eggCount = int(sizeof(allEggs) / sizeof(allEggs[0]));
+        for (int i = 0; i < eggCount; ++i) {
+            // ① 单一权威表 → mob 类型（枚举同值断言：枚举改动而表漏跟 = 此处 FAIL）
+            const int got = RecipeRegistry::mobTypeForSpawnEgg(allEggs[i]);
+            if (got != expectMob[i]) {
+                qInfo().noquote() << "  [t785 diag] egg 0x" + QString::number(allEggs[i], 16)
+                                  << "-> mobType" << got << "expected" << expectMob[i];
+                ok = false;
+            }
+            // ④ 生成式染色表条目存在（nullptr = pack miss 时无配色 → 空白模板蛋）
+            if (!spawnEggTint(allEggs[i])) {
+                qInfo().noquote() << "  [t785 diag] egg 0x" + QString::number(allEggs[i], 16)
+                                  << "missing spawnEggTint entry";
+                ok = false;
+            }
+        }
+        // 非蛋 id 两表恒「无」（防表越界误命中）：燧石（材料段非蛋）与 0x212（蛋段内夹的钻石占位）。
+        if (RecipeRegistry::mobTypeForSpawnEgg(RecipeRegistry::FlintId) != -1
+            || RecipeRegistry::mobTypeForSpawnEgg(0x212) != -1
+            || spawnEggTint(RecipeRegistry::FlintId) != nullptr
+            || spawnEggTint(0x212) != nullptr) {
+            qInfo().noquote() << "  [t785 diag] non-egg id falsely matched egg table";
+            ok = false;
+        }
+        // ②③ 创造背包蛋区连续同列 + 全蛋有名。
+        Hotbar hb785;
+        const QVariantList mats785 = hb785.creativeMaterials();
+        int eggMin = mats785.size(), eggMax = -1, eggSeen = 0;
+        for (int i = 0; i < mats785.size(); ++i) {
+            if (RecipeRegistry::mobTypeForSpawnEgg(mats785.at(i).toInt()) >= 0) {
+                eggMin = std::min(eggMin, i);
+                eggMax = std::max(eggMax, i);
+                ++eggSeen;
+            }
+        }
+        if (eggSeen != eggCount || eggMax - eggMin + 1 != eggCount) {
+            qInfo().noquote() << "  [t785 diag] creative egg block: seen" << eggSeen << "of" << eggCount
+                              << "span" << (eggMax - eggMin + 1) << "(expected contiguous)";
+            ok = false;
+        }
+        for (int i = 0; i < eggCount; ++i) {
+            if (hb785.nameForBlock(allEggs[i]).isEmpty()) {
+                qInfo().noquote() << "  [t785 diag] egg 0x" + QString::number(allEggs[i], 16)
+                                  << "has empty nameForBlock";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t785 spawn-egg completion: 15 eggs (nightwalker/emberling moved into the "
+                             "contiguous egg block + wolf 0x249 / ocelot 0x24A new + t952 baby-shambler "
+                             "0x25D + t1012 cave-spider 0x25E appended) all map to correct "
+                             "EntityManager mob types via single-authority table, all present & contiguous "
+                             "in creative palette with names, all have generative tint entries (egg icon "
+                             "look & palette layout = QML, manual check)";
+    }
+
+    // ── t786 刷怪笼类型化（spawner cage typing）：①state 位布局 round-trip（编码/解码互逆 + 旧存档兼容
+    //   分流）②地牢 worldgen 加权分布多 seed 核对（蠹虫不在地牢池）③tickSpawners 据 state 刷对应型 ④创造
+    //   放置默认型。数值契约锁（枚举漂移 = 此处 FAIL，同 t785 单一权威教训）。
+    {
+        bool ok = true;
+        EntityManager em786;
+        // ① 编码 → 解码互逆（五类型全表）：BlockRegistry::spawnerStateForMob(Core 层 raw int)→ state 常量
+        //   → EntityManager::spawnerMobTypeForState 解码回原型。同时锁位布局常量本身。
+        const int types786[] = { EntityManager::MobShambler, EntityManager::MobBones,
+                                 EntityManager::MobStalker, EntityManager::MobSpider, EntityManager::MobSilverfish,
+                                 EntityManager::MobCaveSpider }; // t1012③ 洞穴蜘蛛笼型入 round-trip 全表
+        for (int t : types786) {
+            const quint8 st = BlockRegistry::spawnerStateForMob(t);
+            if (em786.spawnerMobTypeForState(int(st)) != t) {
+                qInfo().noquote() << "  [t786 diag] type" << t << "round-trip got"
+                                  << em786.spawnerMobTypeForState(int(st));
+                ok = false;
+            }
+        }
+        if (BlockRegistry::SpawnerStateMobShift != 1 || BlockRegistry::SpawnerStateMobMask != 0x3E
+            || BlockRegistry::SpawnerStateShambler != 0x08 || BlockRegistry::SpawnerStateBones != 0x0A
+            || BlockRegistry::SpawnerStateStalker != 0x0C || BlockRegistry::SpawnerStateSpider != 0x0E
+            || BlockRegistry::SpawnerStateSilverfish != 0x1D
+            || BlockRegistry::SpawnerStateCaveSpider != 0x28 // t1012③ 洞穴蜘蛛笼（枚举尾追加型）
+            || BlockRegistry::SpawnerStateSilverfishFlag != 0x01) {
+            qInfo() << "  [t786 diag] spawner state bit-layout constants drifted";
+            ok = false;
+        }
+        // ①b 旧存档兼容：state=0（旧地牢笼）→ Shambler；state=1（t487 旧要塞银鱼笼）→ Silverfish；
+        //   非法 type 位 → 兜底 Shambler 不崩不误刷。t787 注：旧样本 0x21（type16）扩表后是合法
+        //   Nightwalker（蛋改型）→ 非法样本换 0x29（type20）；t1012③ MobCaveSpider=20 转正后 0x28/
+        //   0x29（type20|bit0）均合法 → 非法样本再移 0x2A（type21 > MobCaveSpider=20 越界）；
+        //   0x3E（type31）仍非法。旧蜘蛛笼 0x0E 解码 MobSpider 不断档（存档兼容）。
+        if (em786.spawnerMobTypeForState(0) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(1) != EntityManager::MobSilverfish
+            || em786.spawnerMobTypeForState(0x0E) != EntityManager::MobSpider
+            || em786.spawnerMobTypeForState(0x2A) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(0x3E) != EntityManager::MobShambler) {
+            qInfo() << "  [t786 diag] legacy/invalid-state decode wrong";
+            ok = false;
+        }
+        // ② 地牢 worldgen 加权分布（多 seed 池化）：新世界（generate() 已含 placeDungeons，勿重复调）逐个
+        //   重生成后扫全图 Spawner 按**原始 state** 分类 —— 要塞银鱼笼（state=1 旧 / 0x1D 新）单独计，
+        //   其余归地牢池并解码统计：地牢池不得出现蠹虫/未知型、不得残留无类型旧格（state=0）；t999 起
+        //   池 = 僵尸 50% / 骷髅 25% / 蜘蛛 25%，爬行者（Stalker）退出地牢池（旧 40/25/20/15 池作废，
+        //   合法演化）→ 单世界/池化爬行者笼绝迹 + 池化份额窗断言（小样本宽窗）。探针自建临时世界
+        //   （矩阵 harness 共享 nextSlot 已耗尽 —— t799 教训）。
+        auto classifyWorldSpawners = [](World &w, int counts[4], int &stronghold, int &legacyUntyped,
+                                        int &unknown, int &mineshaftWeb) {
+            for (int i = 0; i < 4; ++i) counts[i] = 0;
+            stronghold = 0; legacyUntyped = 0; unknown = 0; mineshaftWeb = 0;
+            for (int y = 0; y < w.height(); ++y)
+                for (int z = 0; z < w.depth(); ++z)
+                    for (int x = 0; x < w.width(); ++x) {
+                        if (w.blockAt(x, y, z) != BlockRegistry::Spawner) continue;
+                        const quint8 st = w.stateAt(x, y, z);
+                        // 要塞银鱼笼两代形态：t487 旧 state=1 / t786 新 0x1D（type14|bit0）。bit0+type14 组合
+                        //   只由 placeStronghold 写出（地牢池无蠹虫），按要塞计。
+                        if (st == BlockRegistry::SpawnerStateSilverfishFlag
+                            || st == BlockRegistry::SpawnerStateSilverfish) { ++stronghold; continue; }
+                        // t1001 合法演化：废弃矿井蛛网走廊（placeMineshaft pieceSpiderRoom，t1012 ② 起
+                        //   走廊形）也写蜘蛛族笼（t1012③ 偏差转正：state 0x0E MobSpider → 0x28
+                        //   MobCaveSpider，旧值仅旧存档）。按笼周 7×7×3 蛛网计数分流 —— 走廊形夹网巢
+                        //   保底 ≥8 网（笼位 ±1 轴邻格恒 3 层满网）= 矿井蛛笼，单列 mineshaftWeb 登记
+                        //   不入地牢池窗；地牢蛛笼零网不误伤（巷道穿过残留散网 ≤3 量级，远低于阈值）。
+                        const int decoded786 = EntityManager().spawnerMobTypeForState(int(st));
+                        if (decoded786 == EntityManager::MobSpider
+                            || decoded786 == EntityManager::MobCaveSpider) {
+                            int webs = 0;
+                            for (int dx = -3; dx <= 3 && webs < 8; ++dx)
+                                for (int dz = -3; dz <= 3 && webs < 8; ++dz)
+                                    for (int dy = 1; dy <= 3 && webs < 8; ++dy)
+                                        if (w.blockAt(x + dx, y - 1 + dy, z + dz) == BlockRegistry::Cobweb)
+                                            ++webs;
+                            if (webs >= 8) { ++mineshaftWeb; continue; }
+                        }
+                        switch (decoded786) {
+                        case EntityManager::MobShambler: ++counts[0]; break;
+                        case EntityManager::MobBones:    ++counts[1]; break;
+                        case EntityManager::MobStalker:  ++counts[2]; break;
+                        case EntityManager::MobSpider:   ++counts[3]; break;
+                        default: ++unknown; break;
+                        }
+                        if (st == 0) ++legacyUntyped; // 全新生成不应有无类型旧格
+                    }
+        };
+        int pooled[4] = { 0, 0, 0, 0 };
+        const quint32 seeds786[] = { 20260821u, 777u, 424242u, 1337u, 90210u };
+        int worldsChecked = 0;
+        int pooledMineshaftWeb = 0; // t1001 矿井蛛笼池化登记（不入地牢池窗）
+        for (quint32 sd : seeds786) {
+            World w786;
+            // t999：rig 尺寸对齐 t995 128²×64 同 seed 池（原 96²×48 池 ~8 笼样本对「Stalker 退出池」
+            //   无判别力 —— 阴性轮实证该池恰好零抽出爬行者笼 → 分布腿漏红；128² 池 ~12 房样本实证
+            //   回退池必现 Stalker）。setter 内 generate() 全量 worldgen（含 placeDungeons，勿重复调）。
+            w786.setWidth(128);
+            w786.setDepth(128);
+            w786.setHeight(64);
+            w786.setSeed(int(sd));
+            int c[4], strong, legacyU, unk, mineWeb;
+            classifyWorldSpawners(w786, c, strong, legacyU, unk, mineWeb);
+            pooledMineshaftWeb += mineWeb;
+            ++worldsChecked;
+            if (unk != 0 || legacyU != 0) { // 地牢池全类型化、无未知型
+                qInfo().noquote() << "  [t786 diag] seed" << sd << "dungeon pool unknown/untyped:" << unk << legacyU;
+                ok = false;
+            }
+            if (c[2] != 0) { // t999：Stalker 退出地牢池 → 单世界不得再现爬行者笼
+                qInfo().noquote() << "  [t786 diag] seed" << sd << "stalker back in dungeon pool:" << c[2];
+                ok = false;
+            }
+            // 单世界分布粗检已删（t999）：128² 稀疏池下世界仅 1-2 笼，「蜘蛛>僵尸」在此样本量是合法抽取
+            //   （2 笼无僵尸 P≈25%）→ 纯噪声假红；分布语义由池化窗断言承担（13+ 样本），Stalker 退出池
+            //   由上下两条定性腿承担（单世界 / 池化，任一出现即红，与样本量无关）。
+            for (int i = 0; i < 4; ++i) pooled[i] += c[i];
+        }
+        const int pooledTotal = pooled[0] + pooled[1] + pooled[2] + pooled[3];
+        if (worldsChecked > 0 && pooledTotal == 0) {
+            qInfo() << "  [t786 diag] no dungeons generated across probe seeds";
+            ok = false;
+        }
+        if (pooled[2] != 0) { // t999 池化：爬行者笼绝迹（Stalker 退出地牢池）
+            qInfo().noquote() << "  [t786 diag] pooled stalker cages present:" << pooled[2];
+            ok = false;
+        }
+        if (pooledTotal >= 5 && !(pooled[0] * 10 >= pooledTotal * 3 && pooled[0] * 10 <= pooledTotal * 7)) {
+            // t999 池化份额窗（小样本宽窗）：僵尸 ~50% ∈ [30,70]%
+            qInfo().noquote() << "  [t786 diag] pooled zombie share off 50%:" << pooled[0] << "/" << pooledTotal;
+            ok = false;
+        }
+        if (pooledTotal >= 5 && !(pooled[1] * 20 >= pooledTotal && pooled[1] * 20 <= pooledTotal * 9)) {
+            // 骷髅 ~25% ∈ [5,45]%
+            qInfo().noquote() << "  [t786 diag] pooled bones share off 25%:" << pooled[1] << "/" << pooledTotal;
+            ok = false;
+        }
+        if (pooledTotal >= 5 && !(pooled[3] * 20 >= pooledTotal && pooled[3] * 20 <= pooledTotal * 9)) {
+            // 蜘蛛 ~25% ∈ [5,45]%
+            qInfo().noquote() << "  [t786 diag] pooled spider share off 25%:" << pooled[3] << "/" << pooledTotal;
+            ok = false;
+        }
+        // review0903 #3 先例：diag 恒打印 —— 绿跑也留池化分布数值（退化为旧池 / 权重漂移可早察）。
+        qInfo().noquote() << "  [t786 diag] pooled shambler/bones/stalker/spider" << pooled[0] << pooled[1]
+                          << pooled[2] << pooled[3] << "/" << pooledTotal << "over" << worldsChecked
+                          << "worlds mineshaftWebCages" << pooledMineshaftWeb;
+        // ③ tickSpawners 据 state 刷对应型：手摆僵尸笼（state=SpawnerStateShambler）+ 合法 spawn 位，
+        //    累计 tick 超 kSpawnerInterval(6s) 后应出 Shambler（非 Bones/Silverfish）；再换骷髅笼反证。
+        //    spawn 条件（玩家近 / cap）语义不变——探针只验「型随笼」。
+        auto tickTypedCage = [](quint8 cageState, bool &typedSpawned, bool &wrongTyped) {
+            World w786;
+            w786.setWidth(48);
+            w786.setDepth(48);
+            w786.setHeight(32);
+            w786.setSeed(9);
+            const int sx = 24, sy = 8, sz = 24;
+            w786.setBlock(sx, sy, sz, BlockRegistry::Spawner, cageState);
+            // 刻写位手工清空（worldgen 地形 y=8 恒实心 → 不挖空气 spawn 预检恒拒）：笼 8 水平邻 × (y, y+1)
+            //   全 air + 各自脚下 solid，给 tickSpawners 一个合法候选位。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dz == 0) continue; // 笼格本身不动
+                    w786.setBlock(sx + dx, sy, sz + dz, BlockRegistry::Air);
+                    w786.setBlock(sx + dx, sy + 1, sz + dz, BlockRegistry::Air);
+                    w786.setBlock(sx + dx, sy - 1, sz + dz, BlockRegistry::Stone); // air + 下方 solid
+                }
+            EntityManager emT;
+            const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f); // XZ ≤16 激活圈内
+            for (int i = 0; i < 80; ++i) emT.tickSpawners(0.1, &w786, playerPos); // 累计 8s > kSpawnerInterval=6s
+            typedSpawned = false; wrongTyped = false;
+            const int want = (cageState == BlockRegistry::SpawnerStateBones) ? int(EntityManager::MobBones)
+                                                                             : int(EntityManager::MobShambler);
+            for (int i = 0; i < emT.count(); ++i) {
+                if (!emT.aliveAt(i)) continue;
+                if (emT.mobTypeAt(i) == want) typedSpawned = true; // 只认刻写位邻域的 mob（防 worldgen 噪声）
+                else wrongTyped = true;
+            }
+        };
+        {
+            bool typedSpawned, wrongTyped;
+            tickTypedCage(quint8(BlockRegistry::SpawnerStateShambler), typedSpawned, wrongTyped);
+            if (!typedSpawned || wrongTyped) {
+                qInfo().noquote() << "  [t786 diag] shambler-cage tick spawned wrong pool:" << typedSpawned << wrongTyped;
+                ok = false;
+            }
+        }
+        {
+            bool typedSpawned, wrongTyped;
+            tickTypedCage(quint8(BlockRegistry::SpawnerStateBones), typedSpawned, wrongTyped);
+            if (!typedSpawned || wrongTyped) {
+                qInfo().noquote() << "  [t786 diag] bones-cage tick spawned wrong pool:" << typedSpawned << wrongTyped;
+                ok = false;
+            }
+        }
+        // ④ 创造放置默认型：placeState 分支常量核（PlayerController 放置路径写 spawnerStateForMob(MobShambler)
+        //    = SpawnerStateShambler；解码回 Shambler）。放置 UI 全链路需人工目视（见 dev-plan）。
+        if (BlockRegistry::spawnerStateForMob(EntityManager::MobShambler) != BlockRegistry::SpawnerStateShambler) {
+            qInfo() << "  [t786 diag] placement default state mismatch";
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t786 typed spawner cages: state encode/decode round-trip per mob type "
+                             "(bit1-5 layout locked), legacy states 0->shambler / 1->silverfish, invalid "
+                             "type bits fall back safely, dungeon worldgen weighted pool over multiple seeds "
+                             "is 50/25/25 shambler/bones/spider with stalker exited (t999 evolution), no "
+                             "silverfish, tickSpawners spawns the cage's typed mob (both polarity probes), "
+                             "creative placement defaults to shambler (cage mini-model visuals = QML, "
+                             "manual check)";
+    }
+
+    // ── review26 #19 刷怪支撑收口 isCollidable 探针（EntityManager 直编，t786 tickTypedCage rig 族）──
+    //   用户症状（review26 低危）：宠物瞬移 / 自然刷怪 / 刷怪笼支撑判定仍 isSolid（非 air）→ 落花草下帧
+    //   坠落、落水瞬进水。修：四处收口 World::isCollidable（t865 单一权威）。刷怪笼候选扫描是**确定性
+    //   首匹配**（固定 kSpawnDx/Dz 枚举序）→ 可构造唯一候选位 rig 行为级钉死：候选下方是花草时零刷怪
+    //   （旧 isSolid 判花草可站 → 首周期即刷）；同 rig 下方换石头 → 首周期必刷在唯一候选格心。
+    //   （狼 / 豹猫瞬移与自然刷怪同谓词替换，源码一致性由本探针钉住谓词语义。）
+    {
+        bool okNeg = false, okPos = false;
+        // rig：独立小世界（t786 同款）。笼 @（24,8,24）；7 个非花候选位的 y=8/y=9 双层填死（here!=Air
+        //   恒拒）；唯一候选 (25,8,24) 净空两格，下方 (25,7) = 待测支撑块。
+        const auto runSupportCage = [&](quint8 supportBlock, int &spawnedCount, float &spawnX) {
+            World wS;
+            wS.setWidth(48); wS.setDepth(48); wS.setHeight(32); wS.setSeed(9);
+            const int sx = 24, sy = 8, sz = 24;
+            wS.setBlock(sx, sy, sz, BlockRegistry::Spawner, BlockRegistry::SpawnerStateShambler);
+            static const int kDx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+            static const int kDz[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+            for (int i = 0; i < 8; ++i) {
+                const int cx = sx + kDx[i], cz = sz + kDz[i];
+                if (i == 0) { // 唯一候选（枚举序首位）：净空两格 + 下方待测支撑
+                    wS.setBlock(cx, sy, cz, BlockRegistry::Air, 0);
+                    wS.setBlock(cx, sy + 1, cz, BlockRegistry::Air, 0);
+                    wS.setBlock(cx, sy - 1, cz, supportBlock, 0);
+                    continue;
+                }
+                wS.setBlock(cx, sy, cz, BlockRegistry::Stone, 0);     // 其它 7 位 y=8 填死
+                wS.setBlock(cx, sy + 1, cz, BlockRegistry::Stone, 0); // y=9 也填死（cyOff=1 不再可用）
+            }
+            EntityManager emS;
+            const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f); // 激活圈内
+            for (int t = 0; t < 80; ++t) emS.tickSpawners(0.1, &wS, playerPos); // 8s > 6s 首周期
+            spawnedCount = 0; spawnX = -1.0f;
+            for (int i = 0; i < emS.count(); ++i)
+                if (emS.aliveAt(i)) { ++spawnedCount; spawnX = emS.posAt(i).x(); }
+        };
+        {
+            int n = 0; float px = -1.0f;
+            runSupportCage(BR::FlowerRed, n, px); // 花草支撑（ShapeNone → isCollidable=false）
+            okNeg = n == 0; // 旧 isSolid：花草非 air → 可站 → 首周期即刷（回退即红）
+            if (!okNeg) qInfo().noquote() << "  [review26-19 diag] flower-floor spawned" << n << "@x" << px;
+        }
+        {
+            int n = 0; float px = -1.0f;
+            runSupportCage(BR::Stone, n, px); // 石头支撑（isCollidable=true 正对照）
+            okPos = n >= 1 && std::abs(px - 25.5f) < 1e-3f; // 必刷在唯一候选格心
+            if (!okPos) qInfo().noquote() << "  [review26-19 diag] stone-floor spawned" << n << "@x" << px;
+        }
+        const bool ok19 = okNeg && okPos;
+        if (!ok19) ++totalFail;
+        qInfo().noquote() << (ok19 ? "PASS" : "FAIL")
+                          << "| review26-19 spawn support requires a collidable block: a spawner whose "
+                             "only candidate cell sits above a flower spawns nothing (old isSolid read "
+                             "non-air as standable), the same rig over stone spawns at the unique "
+                             "candidate cell center; wolf/ocelot teleport and natural spawn share the "
+                             "same predicate swap";
+    }
+
+    // ── review26 #20 collisionTopY 免构建镜像等价探针（Core 层全表扫描）──
+    //   免构建顶面查询（BlockRegistry::collisionTopY）替代 supportTopYAt 慢路径的 collisionAABBs 最高盒
+    //   maxY 读取（resting 掉落物每帧两格窗复探在异形支撑上不再堆分配）。等价性 = 全 id（0..255）×
+    //   state（0..255）逐格断言 collisionTopY(id,st) == 盒空 ? -1 : max(box.maxY) —— 改形状只动一处
+    //   （shapeBoxes / collisionAABBs 特例表 vs collisionTopY 镜像表）→ 本探针红，防两表漂移。
+    {
+        quint32 checked = 0;
+        int firstBadId = -1, firstBadSt = -1;
+        float badWant = 0.0f, badGot = 0.0f;
+        for (int id = 0; id < 256 && firstBadId < 0; ++id) {
+            for (int st = 0; st < 256; ++st) {
+                float want = -1.0f;
+                for (const auto &b : BR::collisionAABBs(quint8(id), quint8(st)))
+                    if (b.maxY > want) want = b.maxY;
+                const float got = BR::collisionTopY(quint8(id), quint8(st));
+                ++checked;
+                if (std::abs(want - got) > 1e-6f) {
+                    firstBadId = id; firstBadSt = st; badWant = want; badGot = got;
+                    break;
+                }
+            }
+        }
+        const bool ok20 = firstBadId < 0 && checked > 0;
+        if (!ok20)
+            qInfo().noquote() << "  [review26-20 diag] id=" << firstBadId << "st=" << firstBadSt
+                          << "want=" << badWant << "got=" << badGot;
+        if (!ok20) ++totalFail;
+        qInfo().noquote() << (ok20 ? "PASS" : "FAIL")
+                          << "| review26-20 allocation-free collisionTopY mirrors collisionAABBs exactly: "
+                             "for every block id x state (65536 combos), collisionTopY equals the max "
+                             "box maxY (or -1 when boxless) -- supportTopYAt's slow path swaps the "
+                             "vector-building read for this scalar mirror with zero behavior change, "
+                             "and any future shape edit touching only one of the two tables turns this "
+                             "red (anti-drift pin)";
+    }
+
+    // ── P-t859 collisionAABBsInto out-param 等价探针（R19.14 堆分配消除；Core 层全表扫描 + World 层抽查）──
+    //   玩家/mob 碰撞热路径改读 BlockRegistry::collisionAABBsInto（栈上定容直写）与
+    //   World::collisionAABBsAt(out,cap)（世界坐标偏移版）。等价性 = 全 id × state 断言 Into 输出与
+    //   by-value 薄壳 collisionAABBs 逐盒逐字段完全一致（count / 6 坐标分量）+ 缓冲越界保护（cap=0 时
+    //   只报计数不写穿）+ World 版抽查（放置方块后 out-param 盒 = cell-local 盒 + 格偏移）。改形状
+    //   漏同步两路 → 本探针红（防单一权威漂移，同 review26-20 钉法）。
+    {
+        quint32 checked859 = 0;
+        int badId859 = -1, badSt859 = -1;
+        QString diag859;
+        for (int id = 0; id < 256 && badId859 < 0; ++id) {
+            for (int st = 0; st < 256; ++st) {
+                const auto vec = BR::collisionAABBs(quint8(id), quint8(st));
+                BlockRegistry::BlockAABB buf[BR::kMaxAABBsPerCell];
+                const int n = BR::collisionAABBsInto(quint8(id), quint8(st), buf, BR::kMaxAABBsPerCell);
+                ++checked859;
+                bool same = n == int(vec.size()) && n <= BR::kMaxAABBsPerCell;
+                for (int i = 0; same && i < n; ++i) {
+                    const auto &a = vec[size_t(i)], &b = buf[i];
+                    same = a.minX == b.minX && a.minY == b.minY && a.minZ == b.minZ
+                           && a.maxX == b.maxX && a.maxY == b.maxY && a.maxZ == b.maxZ;
+                }
+                if (!same) { badId859 = id; badSt859 = st; break; }
+            }
+        }
+        // cap=0 保护（单点抽查，防逐组合跑刷爆日志——putAABB 守卫是共享代码路径，一次足以证不写穿）：
+        // review-r1914-final M1 钳制语义：返回值钳到 cap（cap=0 → 返回 0 且不写任何字节；调用方全部
+        // 以 kMaxAABBsPerCell 定容数组循环返回值，未钳的 n>cap 正是终审指出的潜伏越界读引爆点）。
+        bool cap0Ok = false;
+        {
+            const int nFull = BR::collisionAABBsInto(quint8(1) /*Stone=ShapeFull*/, quint8(0),
+                                                     nullptr, 0);
+            BlockRegistry::BlockAABB canary[BR::kMaxAABBsPerCell];
+            for (auto &c : canary) c = {1234.5f, 1234.5f, 1234.5f, 1234.5f, 1234.5f, 1234.5f};
+            const int n0 = BR::collisionAABBsInto(quint8(1), quint8(0), canary, 0);
+            bool untouched = true;
+            for (const auto &c : canary)
+                if (c.minX != 1234.5f) untouched = false;
+            cap0Ok = nFull == 0 && n0 == 0 && untouched; // 两次查询各响一次 qWarning（守卫在响，符合预期）
+            if (!cap0Ok) diag859 = "cap0-guard";
+        }
+        bool okCore859 = badId859 < 0 && checked859 > 0 && cap0Ok;
+        if (!okCore859)
+            qInfo().noquote() << "  [t859 diag] id=" << badId859 << "st=" << badSt859 << diag859;
+        // World 层抽查：放一块下半砖（state bit0=0 → 盒顶 0.5），out-param 版须回 (bx,bz) 偏移的矮盒。
+        bool okWorld859 = false;
+        {
+            const auto [wx, wz] = nextSlot();
+            placeRigBlock(w, wx, kRigY, wz, BR::CobbleSlab, 0);
+            BlockRegistry::BlockAABB wb[BR::kMaxAABBsPerCell];
+            const int wn = w.collisionAABBsAt(wx, kRigY, wz, wb, BR::kMaxAABBsPerCell);
+            okWorld859 = wn == 1
+                         && std::abs(wb[0].minX - float(wx)) < 1e-6f
+                         && std::abs(wb[0].minY - float(kRigY)) < 1e-6f
+                         && std::abs(wb[0].minZ - float(wz)) < 1e-6f
+                         && std::abs(wb[0].maxX - float(wx + 1)) < 1e-6f
+                         && std::abs(wb[0].maxY - (float(kRigY) + 0.5f)) < 1e-6f
+                         && std::abs(wb[0].maxZ - float(wz + 1)) < 1e-6f;
+            if (!okWorld859)
+                qInfo().noquote() << "  [t859 diag] world slab n=" << wn << "box="
+                                  << (wn > 0 ? wb[0].minX : -1.f) << (wn > 0 ? wb[0].minY : -1.f)
+                                  << (wn > 0 ? wb[0].minZ : -1.f) << (wn > 0 ? wb[0].maxX : -1.f)
+                                  << (wn > 0 ? wb[0].maxY : -1.f) << (wn > 0 ? wb[0].maxZ : -1.f);
+            w.setBlock(wx, kRigY, wz, BR::Air, 0);
+        }
+        const bool okT859 = okCore859 && okWorld859;
+        if (!okT859) ++totalFail;
+        qInfo().noquote() << (okT859 ? "PASS" : "FAIL")
+                          << "| t859 collisionAABBsInto out-param path: stack-buffer collision query "
+                             "(BlockRegistry::collisionAABBsInto + World::collisionAABBsAt(out,cap)) is "
+                             "field-exact with the by-value shell for all 65536 id x state combos, cap=0 "
+                             "returns the count without writing a byte (overflow guard), and the World "
+                             "wrapper offsets cell-local boxes into world space (lower slab spot check) - "
+                             "player/mob collision hot paths (3 axes x ~12 cells/tick + 60 mob "
+                             "predicates) drop 2 vector heap allocations per query with zero behavior "
+                             "change";
+    }
+
+    // ── t787 生物蛋×刷怪笼交互（用户「拿上生物蛋对着刷怪笼右键，就可以弄成刷这个生物的刷怪笼」；机制等价
+    //    MC 1.0 spawn egg 右键 spawner 改型）：①全 13 蛋改型 round-trip（蛋表 → 编码 → 解码互逆，白名单
+    //    扩表锁死——加蛋漏接 = 此处 FAIL，t785 B9 缺口防线）②哨兵/越界 type 仍兜底 Shambler（扩表不含
+    //    MobTest/golem/Tnt/Anvil 哨兵，防「经笼凭空刷哨兵型」）③改型写入 + tickSpawners 按新类型刷
+    //    （被动型走 spawnPassiveMob 且 hostile=false；敌对型走原路径）④被动笼同型 local cap（4 只封顶，
+    //    mobTypeCountNear 判据——防无上限刷屏）。蛋消耗（Hotbar takeStack）/ 笼心迷你模型切换（QML
+    //    cleanupVis 重读链）在 PlayerController/QML 层，需人工目视（同 t786 ④ 注记）。
+    {
+        bool ok = true;
+        EntityManager em787;
+        // ① 全 13 蛋改型 round-trip（蛋 id 表同 t785 探针单一权威源）。
+        const int eggs787[] = {
+            RecipeRegistry::SpawnEggPigId, RecipeRegistry::SpawnEggCowId, RecipeRegistry::SpawnEggSheepId,
+            RecipeRegistry::SpawnEggShamblerId, RecipeRegistry::SpawnEggBonesId, RecipeRegistry::SpawnEggStalkerId,
+            RecipeRegistry::SpawnEggSpiderId, RecipeRegistry::SpawnEggChickenId, RecipeRegistry::SpawnEggSquidId,
+            RecipeRegistry::SpawnEggNightwalkerId, RecipeRegistry::SpawnEggEmberlingId,
+            RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
+            RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；round-trip 覆盖随全表扩展）
+            RecipeRegistry::SpawnEggCaveSpiderId,   // t1012③ 洞穴蜘蛛蛋（0x25E；round-trip 覆盖随全表扩展）
+        };
+        for (int eggId : eggs787) {
+            const int mt = RecipeRegistry::mobTypeForSpawnEgg(eggId);
+            const quint8 st = BlockRegistry::spawnerStateForMob(mt);
+            if (mt < 0 || em787.spawnerMobTypeForState(int(st)) != mt) {
+                qInfo().noquote() << "  [t787 diag] egg 0x" + QString::number(eggId, 16)
+                                  << "-> mobType" << mt << "state" << st << "round-trip got"
+                                  << em787.spawnerMobTypeForState(int(st));
+                ok = false;
+            }
+        }
+        // ② 哨兵 / 越界 type 编码后解码仍兜底 Shambler（0=MobTest / 12 SnowGolem / 13 IronGolem / 15 Tnt /
+        //    18 Anvil / 21 越界 —— 均无蛋不可经笼改型写入，白名单拒绝。t952 注：type19 已扩为合法
+        //    BabyShambler（蛋 0x25D 可改型写入）→ 越界样本上移到 20；t1012③ 注：type20 已扩为合法
+        //    CaveSpider（worldgen 矿井蛛笼 0x28 直写）→ 越界样本再上移到 21）。
+        const int sentinels787[] = { 0, 12, 13, 15, 18, 21 };
+        for (int st_ : sentinels787) {
+            if (em787.spawnerMobTypeForState(int(BlockRegistry::spawnerStateForMob(st_))) != EntityManager::MobShambler) {
+                qInfo().noquote() << "  [t787 diag] sentinel type" << st_ << "not rejected by decode whitelist";
+                ok = false;
+            }
+        }
+        // ③ 改型写入 + tick 按新类型刷（同 t786 ③ 自建临时世界模式：先摆僵尸笼 = 创造放置路径，再按
+        //    PlayerController 蛋分支同款 5 参数 setBlock 改型 → stateAt 校验 → tickSpawners 累计超
+        //    kSpawnerInterval）。
+        auto retypeCageTick = [](int eggMobType, int &wantSpawned, int &wrongSpawned,
+                                 bool &wantHostile, bool &stateWritten, float seconds) {
+            World w787;
+            w787.setWidth(48);
+            w787.setDepth(48);
+            w787.setHeight(32);
+            w787.setSeed(9);
+            const int sx = 24, sy = 8, sz = 24;
+            w787.setBlock(sx, sy, sz, BlockRegistry::Spawner, BlockRegistry::SpawnerStateShambler);
+            // 刻写位手工清空（同 t786：worldgen y=8 恒实心 → 不挖空气 spawn 预检恒拒）。
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dz == 0) continue;
+                    w787.setBlock(sx + dx, sy, sz + dz, BlockRegistry::Air);
+                    w787.setBlock(sx + dx, sy + 1, sz + dz, BlockRegistry::Air);
+                    w787.setBlock(sx + dx, sy - 1, sz + dz, BlockRegistry::Stone);
+                }
+            // 蛋分支同款改型写（5 参数 setBlock：id 不变只 state 变 → 不发 placed/broken）。
+            w787.setBlock(sx, sy, sz, BlockRegistry::Spawner, BlockRegistry::spawnerStateForMob(eggMobType));
+            stateWritten = w787.stateAt(sx, sy, sz) == BlockRegistry::spawnerStateForMob(eggMobType);
+            EntityManager emT;
+            const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f);
+            const int ticks = int(seconds * 10.0f);
+            for (int i = 0; i < ticks; ++i) emT.tickSpawners(0.1, &w787, playerPos);
+            wantSpawned = 0; wrongSpawned = 0; wantHostile = false;
+            for (int i = 0; i < emT.count(); ++i) {
+                if (!emT.aliveAt(i)) continue;
+                if (emT.mobTypeAt(i) == eggMobType) {
+                    ++wantSpawned;
+                    wantHostile = wantHostile || emT.isHostileAt(i);
+                } else {
+                    ++wrongSpawned;
+                }
+            }
+        };
+        {
+            // 被动极性：猪蛋改僵尸笼 → 刷 Pig（≥1）且全部非敌对、无其它型。
+            int got = 0, wrong = 0; bool hostile = false, written = false;
+            retypeCageTick(EntityManager::MobPig, got, wrong, hostile, written, 8.0f);
+            if (!written || got < 1 || wrong != 0 || hostile) {
+                qInfo().noquote() << "  [t787 diag] pig-cage tick:" << written << got << wrong << hostile;
+                ok = false;
+            }
+        }
+        {
+            // 敌对极性：蜘蛛蛋改僵尸笼 → 刷 Spider 且敌对（原路径回归）。
+            int got = 0, wrong = 0; bool hostile = false, written = false;
+            retypeCageTick(EntityManager::MobSpider, got, wrong, hostile, written, 8.0f);
+            if (!written || got < 1 || wrong != 0 || !hostile) {
+                qInfo().noquote() << "  [t787 diag] spider-cage tick:" << written << got << wrong << hostile;
+                ok = false;
+            }
+        }
+        {
+            // ④ 被动笼同型 local cap：34s ≈ 5 个刷怪周期（kSpawnerInterval=6s）→ 前 4 周期各刷 1 只、
+            //    第 5 周期同型邻域已 ≥ kSpawnerLocalCap(4) → 恰好 4 只封顶（mobTypeCountNear 判据生效）。
+            int got = 0, wrong = 0; bool hostile = false, written = false;
+            retypeCageTick(EntityManager::MobPig, got, wrong, hostile, written, 34.0f);
+            if (got != 4 || wrong != 0) {
+                qInfo().noquote() << "  [t787 diag] passive local cap: pigs" << got << "wrong" << wrong
+                                  << "(expected exactly 4 = kSpawnerLocalCap)";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t787 spawn-egg x spawner retype: all 14 eggs (t952 baby-shambler appended) round-trip through "
+                             "spawnerStateForMob/spawnerMobTypeForState (whitelist extended, sentinels/overflow "
+                             "still fall back to shambler), retype write via same-id setBlock then tickSpawners "
+                             "spawns the egg's type (pig passive+non-hostile / spider hostile polarity), passive "
+                             "cage capped at 4 same-type nearby (egg consumption + cage mini-model switch = "
+                             "playercontroller/QML, manual check)";
+    }
+
+    // ── t788 染料体系探针（Game 层静态查询为主：配方 / 掉落 / 冶炼 / 命名 / 调色板聚合，纯查表不用 rig ——
+    //    测试尾段新探针不动共享 nextSlot 分配器）：
+    //    ① 染料段 16 色连续（DyeIdBase=0x24B 起 DyeIdBase+i）且 Hotbar::nameForBlock 全有名（空名 =
+    //       调色板/tooltip 无名，t728 B9 同类缺口）；四花色染料名精确核对（红/黄/蓝/白）；
+    //    ② 四花破坏 dropId == 对应色染料常量（跨层契约：Core blockregistry 字面量 ↔ recipe.h 常量经
+    //       static_assert 钉死 + 此处运行期经 dropId 访问器复核）；
+    //    ③ 熔炉烧仙人掌 → 绿染料 + 冶炼 XP ≥ 1（kSmelt/kSmeltXp 两表都要接，B4「注释声称表漏行」同类缺口）；
+    //    ④ 染色链 32 条可合成：16 染料 × {白羊毛方块 Wool=27 / 白床 BedWhite=78} → 对应色羊毛（idx==0 复用
+    //       Wool，其余 FirstWoolVariant 起）/ 床（色段散布 32..39+78..85 查表）；抽 2 条换位摆证无序；
+    //       染料+错基（木板）不产染色羊毛（防等价表误扩）；
+    //    ⑤ 创造背包材料 tab 染料 16 色连续同列（染料区聚合，同 t785 蛋区连续性口径；图鉴 ResourceBrowser
+    //       由 creativeMaterials 自动派生 = 同源在列）；
+    //    ⑥ 32 条新配方已被 t802 全表自匹配回归自动覆盖（同表防丢，此处不重复）。染粉图标配色为 QML 层，
+    //       需人工目视。
+    {
+        // 染料 16 色（行序 = 羊毛 16 色标准序）
+        const int dyeIds[16] = {
+            RecipeRegistry::DyeWhiteId, RecipeRegistry::DyeOrangeId, RecipeRegistry::DyeMagentaId,
+            RecipeRegistry::DyeLightBlueId, RecipeRegistry::DyeYellowId, RecipeRegistry::DyeLimeId,
+            RecipeRegistry::DyePinkId, RecipeRegistry::DyeGrayId, RecipeRegistry::DyeLightGrayId,
+            RecipeRegistry::DyeCyanId, RecipeRegistry::DyePurpleId, RecipeRegistry::DyeBlueId,
+            RecipeRegistry::DyeBrownId, RecipeRegistry::DyeGreenId, RecipeRegistry::DyeRedId,
+            RecipeRegistry::DyeBlackId,
+        };
+        // 目标羊毛（idx==0 复用 Wool=27；其余 FirstWoolVariant=63 起 +idx-1）与目标床（色段散布 32..39 +
+        //   78..85 → 逐条常量查表：白 78 / 橙 33 / 品红 38 / 浅蓝 79 / 黄 34 / 柠绿 80 / 粉 81 / 灰 82 /
+        //   浅灰 83 / 青 36 / 紫 84 / 蓝 37 / 棕 85 / 绿 35 / 红 32 / 黑 39）。
+        const int woolTarget[16] = {
+            int(BR::Wool), int(BR::WoolOrange), int(BR::WoolMagenta), int(BR::WoolLightBlue),
+            int(BR::WoolYellow), int(BR::WoolLime), int(BR::WoolPink), int(BR::WoolGray),
+            int(BR::WoolLightGray), int(BR::WoolCyan), int(BR::WoolPurple), int(BR::WoolBlue),
+            int(BR::WoolBrown), int(BR::WoolGreen), int(BR::WoolRed), int(BR::WoolBlack),
+        };
+        const int bedTarget[16] = {
+            int(BR::BedWhite), int(BR::BedOrange), int(BR::BedMagenta), int(BR::BedLightBlue),
+            int(BR::BedYellow), int(BR::BedLime), int(BR::BedPink), int(BR::BedGray),
+            int(BR::BedLightGray), int(BR::BedCyan), int(BR::BedPurple), int(BR::BedBlue),
+            int(BR::BedBrown), int(BR::BedGreen), int(BR::BedRed), int(BR::BedBlack),
+        };
+        // ① 段连续性（常量重排 / 抽漏 = FAIL）+ 全有名 + 四花色名精确核对。
+        Hotbar hb788;
+        bool ok = RecipeRegistry::DyeIdBase == 0x24B;
+        for (int i = 0; i < 16; ++i) {
+            if (dyeIds[i] != RecipeRegistry::DyeIdBase + i) {
+                qInfo().noquote() << "  [t788 diag] dye segment not contiguous at" << i
+                                  << "got 0x" + QString::number(dyeIds[i], 16);
+                ok = false;
+            }
+            if (hb788.nameForBlock(dyeIds[i]).isEmpty()) {
+                qInfo().noquote() << "  [t788 diag] dye 0x" + QString::number(dyeIds[i], 16)
+                                  << "has empty nameForBlock";
+                ok = false;
+            }
+        }
+        ok = ok && hb788.nameForBlock(RecipeRegistry::DyeRedId) == QString::fromUtf8("红色染料")
+                  && hb788.nameForBlock(RecipeRegistry::DyeYellowId) == QString::fromUtf8("黄色染料")
+                  && hb788.nameForBlock(RecipeRegistry::DyeBlueId) == QString::fromUtf8("蓝色染料")
+                  && hb788.nameForBlock(RecipeRegistry::DyeWhiteId) == QString::fromUtf8("白色染料");
+        // ② 四花破坏 → 对应色染料（dropId 经 Core 访问器；字面量 ↔ 常量契约已由 recipe.cpp static_assert 钉死）。
+        ok = ok && BR::dropId(BR::FlowerRed) == RecipeRegistry::DyeRedId
+                  && BR::dropId(BR::FlowerYellow) == RecipeRegistry::DyeYellowId
+                  && BR::dropId(BR::FlowerBlue) == RecipeRegistry::DyeBlueId
+                  && BR::dropId(BR::FlowerWhite) == RecipeRegistry::DyeWhiteId;
+        if (!ok) {
+            qInfo().noquote() << "  [t788 diag] flower drops:"
+                              << BR::dropId(BR::FlowerRed) << BR::dropId(BR::FlowerYellow)
+                              << BR::dropId(BR::FlowerBlue) << BR::dropId(BR::FlowerWhite)
+                              << "expect" << RecipeRegistry::DyeRedId << RecipeRegistry::DyeYellowId
+                              << RecipeRegistry::DyeBlueId << RecipeRegistry::DyeWhiteId;
+        }
+        // ③ 熔炉烧仙人掌 → 绿染料 + XP（B4 同类缺口：两表任一漏行即 FAIL）。
+        if (SmeltingRegistry::smeltResult(int(BR::Cactus)) != RecipeRegistry::DyeGreenId
+            || SmeltingRegistry::smeltXpReward(RecipeRegistry::DyeGreenId) < 1) {
+            qInfo().noquote() << "  [t788 diag] cactus smelt:"
+                              << SmeltingRegistry::smeltResult(int(BR::Cactus))
+                              << "xp" << SmeltingRegistry::smeltXpReward(RecipeRegistry::DyeGreenId);
+            ok = false;
+        }
+        // ④ 染色链 32 条：染料+白羊毛 → 色羊毛 / 染料+白床 → 色床（2×2 无序，正摆 + 抽查换位摆）。
+        for (int i = 0; i < 16; ++i) {
+            int g[9] = { dyeIds[i], int(BR::Wool), 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+            if (!m || m->outputId != woolTarget[i]) {
+                qInfo().noquote() << "  [t788 diag] dye+wool" << i << "->"
+                                  << (m ? m->outputId : -1) << "expected" << woolTarget[i];
+                ok = false;
+            }
+            int gb[9] = { dyeIds[i], int(BR::BedWhite), 0, 0, 0, 0, 0, 0, 0 };
+            m = RecipeRegistry::match(gb, 2);
+            if (!m || m->outputId != bedTarget[i]) {
+                qInfo().noquote() << "  [t788 diag] dye+bed" << i << "->"
+                                  << (m ? m->outputId : -1) << "expected" << bedTarget[i];
+                ok = false;
+            }
+        }
+        // 换位摆抽查（无序位置无关：橙染羊毛基在左 / 绿染白床基在上）。
+        {
+            int g[9] = { int(BR::Wool), RecipeRegistry::DyeOrangeId, 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+            if (!m || m->outputId != int(BR::WoolOrange)) {
+                qInfo().noquote() << "  [t788 diag] swapped wool arrangement mismatch";
+                ok = false;
+            }
+            int gb[9] = { 0, int(BR::BedWhite), 0, RecipeRegistry::DyeGreenId, 0, 0, 0, 0, 0 };
+            m = RecipeRegistry::match(gb, 2);
+            if (!m || m->outputId != int(BR::BedGreen)) {
+                qInfo().noquote() << "  [t788 diag] swapped bed arrangement mismatch";
+                ok = false;
+            }
+        }
+        // 防等价表误扩：染料+木板（错基）不得产任何染色羊毛（kIngredientEquivalents 意外吃进染料即 FAIL）。
+        {
+            int g[9] = { RecipeRegistry::DyeRedId, int(BR::Planks), 0, 0, 0, 0, 0, 0, 0 };
+            const RecipeRegistry::Recipe *m = RecipeRegistry::match(g, 2);
+            if (m && (m->outputId == int(BR::WoolRed) || m->outputId == int(BR::BedRed))) {
+                qInfo().noquote() << "  [t788 diag] dye+planks wrongly matched dye recipe";
+                ok = false;
+            }
+        }
+        // ⑤ 创造背包材料 tab 染料 16 色连续同列（图鉴 ResourceBrowser 由 creativeMaterials 派生 = 同源在列）。
+        {
+            const QVariantList mats788 = hb788.creativeMaterials();
+            int dyeMin = mats788.size(), dyeMax = -1, dyeSeen = 0;
+            for (int i = 0; i < mats788.size(); ++i) {
+                const int id = mats788.at(i).toInt();
+                if (id >= RecipeRegistry::DyeIdBase && id <= RecipeRegistry::DyeBlackId) {
+                    dyeMin = std::min(dyeMin, i);
+                    dyeMax = std::max(dyeMax, i);
+                    ++dyeSeen;
+                }
+            }
+            if (dyeSeen != 16 || dyeMax - dyeMin + 1 != 16) {
+                qInfo().noquote() << "  [t788 diag] creative dye block: seen" << dyeSeen
+                                  << "span" << (dyeMax - dyeMin + 1) << "(expected 16 contiguous)";
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t788 dye system: 16 dye items 0x24B..0x25A contiguous & named, 4 flowers drop "
+                             "matching dyes (red/yellow/blue/white) via dropId, furnace cactus->green dye with "
+                             "XP, all 32 coloring recipes craftable (16 dye+white-wool -> colored wool, 16 "
+                             "dye+white-bed -> colored bed; shapeless spot-checked swapped, wrong-base "
+                             "rejected), dyes contiguous in creative palette (resource browser derived), "
+                             "recipes auto-covered by t802 full-table self-match (dye icon colors = QML, "
+                             "manual check)";
+    }
+
+    // ── t789 羊自然毛色探针（用户「羊刷出来只有白色羊毛，没有别的羊毛」）：Entities 层直编（同 t787 自建
+    //    临时对象模式，不动共享 nextSlot 分配器）：
+    //    ① 色板契约：sheepWoolTintForIndex(0..15) 全有名非空 + 关键色精确核对（白 #ffffff 恒等 / 黑
+    //       #1e1e26 / 棕 #734b2d——浏览器 woolPalette / build_wool.py 同值镜像，漂移即 FAIL）；
+    //    ② spawn 分布：多轮「刷 ~60 只 → clearAll 清场」累计 4800 样本按自然权重采样（kCap=64 是产品
+    //       硬上限单轮封顶；粉 0.164% 在小样本下断言天生 flaky，大样本压 P(漏粉)<0.05%）→ 白主导（>60%）
+    //       + 六自然色全出现（粉 ≥1，灰/浅灰/棕/黑另设 0.4× 下限带）+ 上溢带护栏（≤2.5×名义+0.02）
+    //       + 无表外色（只允许 {0,6,7,8,12,15}）+ 非 sheep mob（猪对照）恒 0 不受污染；
+    //    ③ 剪羊毛掉对应色：shearSheep 发 sheepSheared(x,y,z,woolIdx) 携带与 sheepWoolAt 一致的下标
+    //       （QML 层 sheepWoolDropId 映射在呈现层，C++ 锁信号载荷正确性）；已剪再剪不发（幂等回归，
+    //       只重剪同批已剪样本）；
+    //    ④ 死亡掉对应色：damageEntity 致死 → 带 World tick 越过死亡动画（EntityManager::tick 对 null world
+    //       整帧早退，deathTimer 不推进 → 必须传真世界）→ mobDied(...,woolIdx) 第 7 参 == 该羊下标；
+    //    ⑤ 幼崽继承父代色（tickBreeding 覆写随机色，同 ocelotVariant 先例；段前清场——②③④ 遗留被动
+    //       生物超 kPassiveMobCap=24 会钳死配对产崽）。渲染观感（毛层 tint 上羊身 /
+    //       pack 态 fur 染色 / 浏览器变体联动）需人工目视。
+    {
+        bool ok = true;
+        EntityManager em789;
+        // ① 色板契约（16 下标全覆盖 + 白恒等 + 两关键色锚点）。
+        for (int i = 0; i < 16; ++i) {
+            const QColor c = em789.sheepWoolTintForIndex(i);
+            if (!c.isValid()) {
+                qInfo().noquote() << "  [t789 diag] tint" << i << "invalid";
+                ok = false;
+            }
+        }
+        if (em789.sheepWoolTintForIndex(0) != QColor(QStringLiteral("#ffffff"))
+            || em789.sheepWoolTintForIndex(15) != QColor(QStringLiteral("#1e1e26"))
+            || em789.sheepWoolTintForIndex(12) != QColor(QStringLiteral("#734b2d"))) {
+            qInfo().noquote() << "  [t789 diag] palette anchors drifted (white/black/brown)";
+            ok = false;
+        }
+        // ② spawn 自然色分布：多轮清场重刷累计 kSheepTotal=4800 样本（名义权重 白 .8184 / 黑·灰·浅灰 .05
+        //    各 / 棕 .03 / 粉 .0016）。kCap=64 是产品硬上限 → 单轮 spawn 至 ~60 只（留猪对照位），clearAll
+        //    释放全部槽后再刷下一轮；粉期望 λ=4800×.0016≈7.9，P(全轮漏粉)<0.05%（单轮 600 样本 λ≈1 时
+        //    P(漏)≈37% 天生 flaky，故取大样本）。
+        constexpr int kSheepPerRound = 60;
+        constexpr int kSheepRounds = 80;   // 80 × 60 = 4800 样本
+        constexpr int kSheepTotal = kSheepPerRound * kSheepRounds;
+        int cnt[16] = {};
+        for (int round = 0; round < kSheepRounds && ok; ++round) {
+            em789.clearAll(); // 清场上轮（releaseSlot 全活体槽；幂等）
+            int spawnedThisRound = 0;
+            for (int i = 0; i < kSheepPerRound; ++i) {
+                const int slot = em789.spawnMobTyped(4, kRigY, 4, EntityManager::MobSheep,
+                                                     QStringLiteral("#f5f0e8"), 10);
+                if (slot < 0) { // cap 提前到顶（理论 60<64 不会触发；防御性 FAIL 而非静默缩样本）
+                    qInfo().noquote() << "  [t789 diag] sheep spawn capped at" << i
+                                      << "in round" << round;
+                    ok = false;
+                    break;
+                }
+                ++cnt[em789.sheepWoolAt(slot)];
+                ++spawnedThisRound;
+            }
+            if (spawnedThisRound != kSheepPerRound) break;
+        }
+        if (ok) {
+            // 猪（对照）：非 sheep 的 mob 毛色字段不受 spawnMobCore 写入污染。
+            const int pigSlot = em789.spawnMobTyped(6, kRigY, 4, EntityManager::MobPig,
+                                                    QStringLiteral("#ee9999"), 10);
+            if (pigSlot >= 0 && em789.sheepWoolAt(pigSlot) != 0) {
+                qInfo().noquote() << "  [t789 diag] non-sheep mob polluted:" << em789.sheepWoolAt(pigSlot);
+                ok = false;
+            }
+        }
+        const int naturalColors[6] = { 0, 6, 7, 8, 12, 15 };
+        const double nominal[6] = { 0.8184, 0.0016, 0.05, 0.05, 0.03, 0.05 }; // 与 kSheepNaturalWeights 同源序
+        if (cnt[0] * 100 < kSheepTotal * 60) { // 白主导 >60%
+            qInfo().noquote() << "  [t789 diag] white not dominant:" << cnt[0] << "/" << kSheepTotal;
+            ok = false;
+        }
+        for (int c = 0; c < 6; ++c) {
+            const int idx = naturalColors[c];
+            if (c > 0) {
+                // 下限带：粉 ≥1（λ≈7.9 下 P(0) 可忽略）；黑/灰/浅灰/棕另设 0.4× 名义下限（4800 样本下
+                //   0.4×5%=1920 vs σ≈31、0.4×3%=1152 vs σ≈25 —— 偏离 30σ+ 只可能是权重表漂移而非采样噪声）。
+                const double share = double(cnt[idx]) / double(kSheepTotal);
+                if ((idx == 6 && cnt[idx] < 1)
+                    || (idx != 6 && share < nominal[c] * 0.4)) {
+                    qInfo().noquote() << "  [t789 diag] natural color" << idx << "underflow:"
+                                      << cnt[idx] << "/" << kSheepTotal;
+                    ok = false;
+                }
+                // 上溢带护栏：≤2.5× 名义 + 0.02（查权重表静默漂移；白已单独断言主导）。
+                if (share > nominal[c] * 2.5 + 0.02) {
+                    qInfo().noquote() << "  [t789 diag] color" << idx << "share" << share
+                                      << "far over nominal" << nominal[c];
+                    ok = false;
+                }
+            }
+        }
+        for (int idx = 0; idx < 16; ++idx) {
+            bool isNatural = false;
+            for (int c = 0; c < 6; ++c) isNatural = isNatural || naturalColors[c] == idx;
+            if (!isNatural && cnt[idx] != 0) {
+                qInfo().noquote() << "  [t789 diag] non-natural color" << idx << "spawned" << cnt[idx];
+                ok = false;
+            }
+        }
+        // ③ 剪羊毛携对应色：抽 3 只活体羊，sheepSheared 载荷逐只 == 剪切对象的 sheepWoolAt（连接内按发射序
+        //    记录载荷，与外层记录的目标下标按序核对）；幂等回归：**只对已剪的同 3 只**再剪不再发信号
+        //    （旧版对全群重剪——未剪样本发新信号 = 探针自伤假 FAIL）。
+        {
+            constexpr int kShearSamples = 3;
+            int shearedCount = 0;
+            int payloadWool[kShearSamples] = {};
+            QObject::connect(&em789, &EntityManager::sheepSheared, &em789,
+                             [&](int sx, int sy, int sz, int woolIdx) {
+                                 Q_UNUSED(sx); Q_UNUSED(sy); Q_UNUSED(sz);
+                                 if (shearedCount < kShearSamples) payloadWool[shearedCount] = woolIdx;
+                                 ++shearedCount;
+                             });
+            int checked = 0;
+            int wantWool[kShearSamples] = {};
+            int shearedSlot[kShearSamples] = {};
+            for (int i = 0; i < em789.count() && checked < kShearSamples; ++i) {
+                if (!em789.aliveAt(i) || em789.mobTypeAt(i) != EntityManager::MobSheep) continue;
+                wantWool[checked] = em789.sheepWoolAt(i);
+                shearedSlot[checked] = i;
+                em789.shearSheep(i); // 同步直连 → 发射序 == 循环序，payloadWool 与 wantWool 按序对齐
+                ++checked;
+            }
+            // 幂等：仅重剪已剪样本 → 零新信号。
+            const int before = shearedCount;
+            for (int k = 0; k < checked; ++k) em789.shearSheep(shearedSlot[k]);
+            bool shearOk = checked == kShearSamples && shearedCount == before;
+            for (int k = 0; k < kShearSamples; ++k) shearOk = shearOk && payloadWool[k] == wantWool[k];
+            if (!shearOk) {
+                qInfo().noquote() << "  [t789 diag] shear payload/idempotence:" << checked
+                                  << "samples," << before << "-> after" << shearedCount
+                                  << "payloads" << payloadWool[0] << payloadWool[1] << payloadWool[2]
+                                  << "want" << wantWool[0] << wantWool[1] << wantWool[2];
+                ok = false;
+            }
+        }
+        // ④ 死亡掉对应色：取一只活体成体羊记录下标 → damageEntity 致死 → 带真实 World 驱动 tick 越过
+        //    死亡动画（EntityManager::tick 对 null world **整帧早退**，deathTimer 永不推进 → 旧版传 nullptr
+        //    = mobDied 恒不发 = 探针自伤假 FAIL；t774 先例同传真世界）→ mobDied 第 7 参 == 该羊下标。
+        {
+            World w789d; // 死亡段专用小世界（羊悬空 y=41 落地即 resting；死亡态冻结 AI/重力不位移）
+            w789d.setWidth(32);
+            w789d.setDepth(32);
+            w789d.setHeight(48);
+            w789d.setSeed(11);
+            int deathIdx = -1, deathWool = -1;
+            for (int i = 0; i < em789.count() && deathIdx < 0; ++i) {
+                // review #32：须挑**未剪毛**样本——③ 段刚剪过 3 只，剪毛羊致死 mobDied 第 8 参 sheared=true
+                //   （QML 据此压掉羊毛掉落），本探针锁的是「正常羊毛掉落羊」的 woolIdx 载荷（剪毛样本的
+                //   true/false 对照见文件尾 review-e 探针）。
+                if (em789.aliveAt(i) && !em789.deadAt(i) && !em789.isBabyAt(i)
+                    && !em789.shearedAt(i)
+                    && em789.mobTypeAt(i) == EntityManager::MobSheep)
+                    deathIdx = i;
+            }
+            if (deathIdx < 0) {
+                qInfo() << "  [t789 diag] no live adult sheep left for death probe";
+                ok = false;
+            } else {
+                deathWool = em789.sheepWoolAt(deathIdx);
+                int diedPayload = -1, diedType = -1, diedCount = 0, diedSheared = -1;
+                QObject::connect(&em789, &EntityManager::mobDied, &em789,
+                                 [&](int x, int y, int z, int type, bool burned, bool baby,
+                                     int woolIdx, bool sheared) {
+                                     Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z);
+                                     Q_UNUSED(burned); Q_UNUSED(baby);
+                                     ++diedCount; diedType = type; diedPayload = woolIdx;
+                                     diedSheared = sheared ? 1 : 0;
+                                 });
+                em789.damageEntity(deathIdx, em789.maxHealthAt(deathIdx));
+                const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+                for (int t = 0; t < 40 && diedCount == 0; ++t) // 0.64s > kDeathTime 0.5s → mobDied 已发
+                    em789.tick(0.016f, &w789d, farListener, 0.3f, 1.8f, false);
+                // review #32 第 8 参 sheared：本样本未剪毛 → 恒 false（剪毛样本的 true 分支见 review-e 探针）。
+                if (diedCount != 1 || diedType != EntityManager::MobSheep || diedPayload != deathWool
+                    || diedSheared != 0) {
+                    qInfo().noquote() << "  [t789 diag] death drop payload:" << diedCount << diedType
+                                      << diedPayload << "expected wool" << deathWool
+                                      << "sheared" << diedSheared;
+                    ok = false;
+                }
+            }
+        }
+        // ⑤ 幼崽继承：**清场后**构造两只求偶期成体羊 → tickBreeding → 幼崽 wool ∈ 双亲色集。
+        //    清场是硬前提：②③④ 段遗留 ~61 只被动生物 > kPassiveMobCap=24（产品种群上限，配对不再产崽）
+        //    → 不清场则 babies 恒 0（旧版此段因 spawn cap 整块跳过从未真正跑过，清场后才首次暴露）。
+        {
+            em789.clearAll();
+            World w789;
+            w789.setWidth(32);
+            w789.setDepth(32);
+            w789.setHeight(24);
+            w789.setSeed(7);
+            const auto pa = em789.spawnMobTyped(14, 12, 15, EntityManager::MobSheep,
+                                                QStringLiteral("#f5f0e8"), 10);
+            const auto pb = em789.spawnMobTyped(15, 12, 15, EntityManager::MobSheep,
+                                                QStringLiteral("#f5f0e8"), 10);
+            if (pa >= 0 && pb >= 0) {
+                // 两亲代 spawn 随机色不可控 → 继承断言收窄为「幼崽 ∈ 双亲色集」：仍能抓「羊幼崽走了
+                //   权重表随机重掷」（回归时幼崽色 81.8% 概率落白、与双亲集脱钩）的破链。
+                em789.enterLoveMode(pa);
+                em789.enterLoveMode(pb);
+                const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
+                for (int t = 0; t < 20; ++t) // 0.32s：寻偶相遇 + 配对产崽（kBabyGrowTime 前幼崽仍在槽）
+                    em789.tick(0.016f, &w789, farListener, 0.3f, 1.8f, false);
+                const int setA = em789.sheepWoolAt(pa), setB = em789.sheepWoolAt(pb);
+                int babySeen = 0, babyWrong = 0;
+                for (int i = 0; i < em789.count(); ++i) {
+                    if (!em789.aliveAt(i) || !em789.isBabyAt(i) || em789.mobTypeAt(i) != EntityManager::MobSheep)
+                        continue;
+                    ++babySeen;
+                    const int wc = em789.sheepWoolAt(i);
+                    if (wc != setA && wc != setB) ++babyWrong; // 走了权重表随机 = 回归
+                }
+                if (babySeen < 1 || babyWrong != 0) {
+                    qInfo().noquote() << "  [t789 diag] baby inherit: babies" << babySeen
+                                      << "wrong" << babyWrong << "parents" << setA << setB;
+                    ok = false;
+                }
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t789 sheep natural colors: 16-entry tint palette valid with white-identity/"
+                             "black/brown anchors mirroring browser woolPalette, 4800 spawns over clear-all "
+                             "rounds follow natural weights (white >60% dominant, pink/gray/light-gray/"
+                             "brown/black all appear, no out-of-table colors, pigs unpolluted), shearSheep "
+                             "carries the sheep's own index and re-shear stays silent, mobDied payload "
+                             "equals the died sheep's index, breeding babies inherit a parent color (not "
+                             "rerolled)";
+    }
+
+    // ── t777 羊 pack 态「多一双眼」根因合成器探针 ──
+    // 修法核心 = t749 毛层命中时 mobTextureSource(3) 返回合成贴图（毛身 + 本体层头区真脸）→ QML 眼 overlay
+    //   须隐（判据 sheepWoolFaceActive，Main.qml/ResourceBrowser 共用）。本探针锁合成器两端语义（纯函数、
+    //   临时 PNG rig，不触碰进程全局 BuiltState——那非本测试私有，实例化 ResourcePackManager 会读到宿主机
+    //   settings.json 的真实 pack 态 = 非密闭）：
+    //   ① 真 64×32 fur+body 双 PNG → 合成落盘成功 + 输出保 base 尺寸 + **头区 (0,0)-(28,14) = 本体层色**
+    //     （真脸覆写，眼 overlay 隐的依据）+ 毛身区（head 区外）= 毛层原色（毛身保留）；
+    //   ② body 源缺失 → 空串优雅降级（调用方回退毛层原样、头前无脸 → 眼 overlay 须保留的路径）。
+    // 腿 skin 色 overlay / 眼位修正是 QML 呈现层，无 C++ 可测路径（矩阵不链 Quick3D）。
+    {
+        bool ok = true;
+        QDir d777(QDir::temp().absoluteFilePath("t777_sheep_probe"));
+        d777.removeRecursively();
+        d777.mkpath(".");
+        // ① 真 64×32 双源（毛层米白 / 本体层棕，两色互异防「合成成功但没覆写」假 PASS）。
+        const QString furPath = d777.absoluteFilePath("fur.png");
+        const QString bodyPath = d777.absoluteFilePath("body.png");
+        QImage fur777(64, 32, QImage::Format_ARGB32);
+        fur777.fill(QColor(0xf0, 0xec, 0xe4));
+        QImage body777(64, 32, QImage::Format_ARGB32);
+        body777.fill(QColor(0x7a, 0x5a, 0x48));
+        if (!fur777.save(furPath, "PNG") || !body777.save(bodyPath, "PNG")) {
+            qInfo().noquote() << "  [t777 diag] failed to write temp source PNGs";
+            ok = false;
+        }
+        const QString comp = generateSheepWoolFaceFile(furPath, bodyPath, 1);
+        if (comp.isEmpty()) {
+            qInfo().noquote() << "  [t777 diag] composite unexpectedly failed on valid 64x32 pair";
+            ok = false;
+        } else {
+            QImage out777(comp);
+            if (out777.isNull() || out777.width() != 64 || out777.height() != 32) {
+                qInfo().noquote() << "  [t777 diag] composite output not base 64x32:"
+                                  << (out777.isNull() ? -1 : out777.width())
+                                  << "x" << (out777.isNull() ? -1 : out777.height());
+                ok = false;
+            } else {
+                // 头区中心 (14,7) ∈ base (0,0)-(28,14) → 本体层色（真脸）；毛身区 (40,20)（body/leg 行）→ 毛层色。
+                if (out777.pixelColor(14, 7) != QColor(0x7a, 0x5a, 0x48)) {
+                    qInfo().noquote() << "  [t777 diag] head region not body-layer color:"
+                                      << out777.pixelColor(14, 7).name();
+                    ok = false;
+                }
+                if (out777.pixelColor(40, 20) != QColor(0xf0, 0xec, 0xe4)) {
+                    qInfo().noquote() << "  [t777 diag] wool body region not fur color:"
+                                      << out777.pixelColor(40, 20).name();
+                    ok = false;
+                }
+            }
+        }
+        // ② body 缺失 → 空串（降级：调用方回退毛层原样 = 无脸 → QML 眼 overlay 保留路径）。
+        if (!generateSheepWoolFaceFile(furPath, d777.absoluteFilePath("missing.png"), 1).isEmpty()) {
+            qInfo().noquote() << "  [t777 diag] missing body source should degrade to empty, not succeed";
+            ok = false;
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t777 sheep wool-face compositor: valid 64x32 fur+body pair composites to "
+                             "base-size output with body-layer (real-face) pixels in head region (0,0)-"
+                             "(28,14) and fur pixels preserved in wool body/leg rows, missing body source "
+                             "degrades to empty (caller falls back to raw fur = eye overlay stays visible)";
+    }
+
+    // ── t779 头像裁剪修复探针（用户「猪头像缺鼻子、蠹虫头像缺眼睛」）──
+    // 根因：MC 机制 = 猪鼻画在独立贴图偏移盒 (16,16) 4×3×1（头脸 (8,8)-(16,16) 只有 row11 双眼）；
+    //   蠹虫旧条目取的是第二体节甲壳 (2,4)-(10,9)（无眼），真头 = 首盒 (0,0)6×2×2、双眼跨 top/front
+    //   边界（demo 包像素取证）。修法 = 猪「脸 + 鼻覆写盒合成」/ 蠹虫「头顶+脸拼合区直取」。
+    //   ① 布局常量锁（mobHeadIconLayout 单一权威——resourcepackmanager.cpp 生成器与探针同源，表数值
+    //     漂移 = 此处 FAIL，同 t785 单一权威教训）：猪 front(8,8)8×8 + 鼻覆写 src(17,17)4×3 贴 (2,4)；
+    //     蠹虫 front(0,0)8×4 无覆写；回归锁牛/蜘蛛/豹猫/夜行者 front 不变 + 表外 mobType 恒无条目。
+    //   ② 端到端合成（临时 PNG rig 直调 generateMobHeadIconFor，不触碰进程全局 BuiltState/settings，
+    //     同 t777 密闭语义）：合成猪 64×32（整图脸粉 A + 鼻 Front 深粉 B，走 pig/pig.png 主映射子目录
+    //     探测）→ 图标 64×64 中 A=脸底/B=鼻贴脸中下/C=下巴（旧实现无合成 → B 处仍 A，FAIL）；合成蠹虫
+    //     64×32 扁平（头区 (0,0)-(8,4) = C / 余 = D，走 explicitSrc 扁平探测）→ 图标含 C 横带居中 + 带外
+    //     透明（旧裁剪 (2,4)-(10,9) 全 D 区，FAIL）。图鉴图标本体观感（QML 缩放呈现）需人工目视。
+    {
+        bool ok = true;
+        // ① 布局常量锁（mob/…/paste 全字段；表加条目改数值 = 漂移即 FAIL）。
+        {
+            const struct {
+                int mob; int fx, fy, fw, fh; bool ov; int sx, sy, sw, sh, px, py;
+            } exp[] = {
+                //       front               overlay(src …, paste …)
+                {  1,  8,  8,  8,  8,  true,  17, 17, 4, 3, 2, 4 }, // 猪：脸 + 鼻覆写（眼 row3 上 / 鼻 row4-6 下）
+                { 14,  0,  0,  8,  4, false,   0,  0, 0, 0, 0, 0 }, // 蠹虫：头顶+脸拼合区（含双眼）
+                {  2,  6,  6,  8,  8, false,   0,  0, 0, 0, 0, 0 }, // 牛（d=6 → front (6,6)；回归锁）
+                {  7, 40, 12,  8,  8, false,   0,  0, 0, 0, 0, 0 }, // 蜘蛛（offset(32,4) d=8；回归锁）
+                { 11,  5,  5,  5,  4, false,   0,  0, 0, 0, 0, 0 }, // 豹猫（offset(1,1) 5×4×4；回归锁）
+                { 16,  8,  8,  8,  6, false,   0,  0, 0, 0, 0, 0 }, // 夜行者（h=6 底两行空；回归锁）
+            };
+            for (const auto &e : exp) {
+                MobHeadIconLayout lay;
+                if (!mobHeadIconLayout(e.mob, &lay)
+                        || lay.frontX != e.fx || lay.frontY != e.fy
+                        || lay.frontW != e.fw || lay.frontH != e.fh
+                        || lay.hasOverlay != e.ov || lay.ovSrcX != e.sx || lay.ovSrcY != e.sy
+                        || lay.ovW != e.sw || lay.ovH != e.sh
+                        || lay.ovPasteX != e.px || lay.ovPasteY != e.py) {
+                    qInfo().noquote() << "  [t779 diag] layout for mob" << e.mob << "mismatch (front"
+                                      << lay.frontX << lay.frontY << lay.frontW << lay.frontH
+                                      << "ov" << lay.hasOverlay << ")";
+                    ok = false;
+                }
+            }
+            MobHeadIconLayout none;
+            if (mobHeadIconLayout(99, &none)) { // 表外未知型恒无条目（防越段误命中）
+                qInfo().noquote() << "  [t779 diag] unknown mobType should have no entry";
+                ok = false;
+            }
+        }
+        // ② 端到端：猪鼻合成 + 蠹虫眼区。
+        QDir d779(QDir::temp().absoluteFilePath("t779_headicon_probe"));
+        d779.removeRecursively();
+        d779.mkpath(".");
+        QDir(d779.absoluteFilePath("pig")).mkpath("."); // 猪 explicitSrc 空 → mobEntityMap 主映射 pig/pig.png（子目录布局）
+        const QColor faceA(0xf0, 0xa0, 0xa8), snoutB(0xc0, 0x60, 0x70);   // 脸粉 / 鼻深粉（互异防假 PASS）
+        const QColor headC(0x88, 0x90, 0x88), bodyD(0x40, 0x48, 0x40);    // 虫头灰 / 体节深灰
+        QImage pigTex(64, 32, QImage::Format_ARGB32);
+        pigTex.fill(faceA);
+        {
+            QPainter p(&pigTex);
+            p.fillRect(17, 17, 4, 3, snoutB); // 鼻 Front (17,17)-(21,20)（MC 鼻盒 offset(16,16) 4×3×1 的脸面）
+            p.end();
+        }
+        QImage sfTex(64, 32, QImage::Format_ARGB32);
+        sfTex.fill(bodyD);
+        {
+            QPainter p(&sfTex);
+            p.fillRect(0, 0, 8, 4, headC);    // 虫头拼合区 (0,0)-(8,4)（头顶+脸，双眼所在）
+            p.end();
+        }
+        if (!pigTex.save(d779.absoluteFilePath("pig/pig.png"), "PNG")
+                || !sfTex.save(d779.absoluteFilePath("silverfish.png"), "PNG")) {
+            qInfo().noquote() << "  [t779 diag] failed to write temp source PNGs";
+            ok = false;
+        }
+        // 猪：8×8 脸 → 64×64 图标（×8 整倍块映射）：脸(3,1) 眼上方 = A；鼻贴放 (2,4)-(6,7) → 脸(4,5) = B
+        //   （旧实现无合成此处 A → FAIL）；脸(7,7) 下巴（覆写区外）= A。
+        const QString pigIcon = generateMobHeadIconFor(1, d779.absolutePath(), 1);
+        if (pigIcon.isEmpty()) {
+            qInfo().noquote() << "  [t779 diag] pig icon generation unexpectedly failed";
+            ok = false;
+        } else {
+            QImage ic(pigIcon);
+            if (ic.width() != 64 || ic.height() != 64) {
+                qInfo().noquote() << "  [t779 diag] pig icon not 64x64:" << ic.width() << "x" << ic.height();
+                ok = false;
+            } else if (ic.pixelColor(28, 12) != faceA || ic.pixelColor(36, 44) != snoutB
+                       || ic.pixelColor(60, 60) != faceA) {
+                qInfo().noquote() << "  [t779 diag] pig icon pixels wrong: forehead"
+                                  << ic.pixelColor(28, 12).name() << "snout" << ic.pixelColor(36, 44).name()
+                                  << "chin" << ic.pixelColor(60, 60).name();
+                ok = false;
+            }
+        }
+        // 蠹虫：8×4 头区 aspect 2 → 64×32 条带贴 (0,16)：带中 (36,36) = C；带外 (32,8) 透明。
+        //   （旧裁剪 (2,4)-(10,9) 全落 D 区 → 带中 D，FAIL。）
+        const QString sfIcon = generateMobHeadIconFor(14, d779.absolutePath(), 1);
+        if (sfIcon.isEmpty()) {
+            qInfo().noquote() << "  [t779 diag] silverfish icon generation unexpectedly failed";
+            ok = false;
+        } else {
+            QImage ic(sfIcon);
+            if (ic.width() != 64 || ic.height() != 64) {
+                qInfo().noquote() << "  [t779 diag] silverfish icon not 64x64:" << ic.width() << "x" << ic.height();
+                ok = false;
+            } else if (ic.pixelColor(36, 36) != headC || ic.pixelColor(32, 8).alpha() != 0) {
+                qInfo().noquote() << "  [t779 diag] silverfish icon pixels wrong: band"
+                                  << ic.pixelColor(36, 36).name() << "outside alpha"
+                                  << ic.pixelColor(32, 8).alpha();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t779 mob head icon crops: pig front (8,8)8x8 + snout overlay box (16,16)4x3x1 "
+                             "front (17,17)-(21,20) composited at face (2,4) (eyes row3 above snout rows4-6), "
+                             "silverfish front switched from body-segment (2,4)-(10,9) to head top+face band "
+                             "(0,0)-(8,4) containing both eyes, cow/spider/ocelot/nightwalker fronts locked "
+                             "unchanged, synthetic 64x32 rigs verify snout/eye pixels land in the 64x64 icons "
+                             "(icon look in browser = QML, manual check)";
+    }
+
+    // ── t780 狼/豹猫 pack 身体贴图映射探针（用户「浏览器 3D 预览狼仍用兔子贴图、豹猫贴图不对——头对身错」）──
+    // 根因：狼(10)/豹猫(11) 自 t749 起刻意不入 mobEntityMap（当时几何全脸 UV 无 box-UV 数据，防
+    //   packTextured 误命中）→ mobTextureSource 恒 miss → 3D 预览身体恒程序全脸 UV（灰身立耳四足读作
+    //   「兔子」），2D 头像却走 explicitSrc 正确显头 = 「头对身错」。修法 = mobmodel.cpp 补两分支 box-UV
+    //   （demo 包像素实测分区：狼身采 mane(21,0)——body(18,14) 三面未涂满；豹猫身 (20,6) 尾随身同纹）+
+    //   入主映射 + 头像 explicitSrc 撤除（主映射同源）+ Main.qml delegate / 图鉴 / 刷怪笼迷你态 pack 接线。
+    //   ① 映射锁（mobEntityMap t780 提头后可直调，同 t785 spawnEggTint）：10→wolf/wolf.png、11→
+    //     cat/ocelot.png 精确路径；14（蠹虫）仍**不在**表（几何全脸 UV 只走头像 explicitSrc——入表会让
+    //     3D packTextured 采到未设定位 = 贴图错乱回归）。
+    //   ② 头区布局锁（mobHeadIconLayout 单一权威）：狼 front(4,4)6×6（新增锁——t780 只改来源路径不改
+    //     裁剪区）/ 豹猫 front(5,5)5×4（t779 已锁，重申 explicitSrc 撤除不漂移）。
+    //   ③ 端到端（临时 PNG rig 直调 generateMobHeadIconFor，密闭不触碰进程全局 BuiltState/settings，
+    //     同 t777/t779 语义）：rig 按 mobEntityMap 子目录布局落 wolf/wolf.png + cat/ocelot.png → 两型
+    //     头像生成成功且中心像素正确 = explicitSrc 撤除后「region 条目 → mobEntityMap → 文件解析」链路
+    //     通（映射漏行 / 头区条目丢 → 空串 FAIL）。3D box-UV 采样观感（mobmodel.cpp 几何层）需人工目视。
+    {
+        bool ok = true;
+        // ① 映射锁（精确路径 + 蠹虫排除）。
+        {
+            bool wolfOk = false, ocelotOk = false, silverfishInMap = false;
+            for (const auto &m : mobEntityMap()) {
+                if (m.first == 10) wolfOk = (m.second == QStringLiteral("wolf/wolf.png"));
+                if (m.first == 11) ocelotOk = (m.second == QStringLiteral("cat/ocelot.png"));
+                if (m.first == 14) silverfishInMap = true;
+            }
+            if (!wolfOk || !ocelotOk || silverfishInMap) {
+                qInfo().noquote() << "  [t780 diag] map entries wrong: wolf" << wolfOk
+                                  << "ocelot" << ocelotOk << "silverfish-in-map" << silverfishInMap;
+                ok = false;
+            }
+        }
+        // ② 头区布局锁。
+        {
+            const struct { int mob; int fx, fy, fw, fh; } exp[] = {
+                { 10,  4,  4,  6,  6 }, // 狼：head(0,0)6×6×4 → front (4,4)-(10,10)
+                { 11,  5,  5,  5,  4 }, // 豹猫：head(1,1)5×4×4 → front (5,5)-(10,9)
+            };
+            for (const auto &e : exp) {
+                MobHeadIconLayout lay;
+                if (!mobHeadIconLayout(e.mob, &lay)
+                        || lay.frontX != e.fx || lay.frontY != e.fy
+                        || lay.frontW != e.fw || lay.frontH != e.fh) {
+                    qInfo().noquote() << "  [t780 diag] head layout mob" << e.mob << "mismatch (front"
+                                      << lay.frontX << lay.frontY << lay.frontW << lay.frontH << ")";
+                    ok = false;
+                }
+            }
+        }
+        // ③ 端到端：explicitSrc 撤除后主映射路径解析（子目录布局同 demo 包）。
+        QDir d780(QDir::temp().absoluteFilePath("t780_mobtex_probe"));
+        d780.removeRecursively();
+        d780.mkpath(".");
+        QDir(d780.absoluteFilePath("wolf")).mkpath(".");
+        QDir(d780.absoluteFilePath("cat")).mkpath(".");
+        const QColor wolfHead(0x9a, 0x8c, 0x88), catFace(0xdd, 0xd7, 0x7b); // 狼头灰 / 豹猫脸黄（互异防假 PASS）
+        QImage wolfTex(64, 32, QImage::Format_ARGB32), catTex(64, 32, QImage::Format_ARGB32);
+        wolfTex.fill(wolfHead);
+        catTex.fill(catFace);
+        if (!wolfTex.save(d780.absoluteFilePath("wolf/wolf.png"), "PNG")
+                || !catTex.save(d780.absoluteFilePath("cat/ocelot.png"), "PNG")) {
+            qInfo().noquote() << "  [t780 diag] failed to write temp source PNGs";
+            ok = false;
+        }
+        const struct { int mob; QColor center; } rigs[] = { { 10, wolfHead }, { 11, catFace } };
+        for (const auto &e : rigs) {
+            const QString icon = generateMobHeadIconFor(e.mob, d780.absolutePath(), 1);
+            if (icon.isEmpty()) {
+                qInfo().noquote() << "  [t780 diag] mob" << e.mob << "icon generation unexpectedly failed";
+                ok = false;
+                continue;
+            }
+            QImage ic(icon);
+            if (ic.width() != 64 || ic.height() != 64 || ic.pixelColor(32, 32) != e.center) {
+                qInfo().noquote() << "  [t780 diag] mob" << e.mob << "icon wrong:" << ic.width() << "x"
+                                  << ic.height() << "center" << ic.pixelColor(32, 32).name();
+                ok = false;
+            }
+        }
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t780 wolf/ocelot pack body texture: mobEntityMap gains 10->wolf/wolf.png + "
+                             "11->cat/ocelot.png (silverfish 14 stays out - head-only explicitSrc path), "
+                             "head fronts locked (4,4)6x6 / (5,5)5x4, explicitSrc removal verified end-to-end "
+                             "via subdir-layout rigs resolving through the main map (3D box-UV look = QML, "
+                             "manual check)";
+    }
+}
