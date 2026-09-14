@@ -3708,7 +3708,7 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 **待实机确认**：无（纯测试基建单，无行为面）。**下一任务：R20.04 基础类型**。
 
-**顺序（终）**：t1049✅ → **R20.03✅（测试分层：拆分 + --filter 两项提速投资落地；plan 原文 R20.04=测试矩阵拆分，实质由本单覆盖）** → **R20.05✅（基础类型）** → **R20.06✅（Command/Event/Snapshot）** → R20.07 GameSession → R20.09 Chunk 生命周期 → R20.11 后台 GenerationJob。矩阵基线 **552**。
+**顺序（终）**：t1049✅ → **R20.03✅（测试分层：拆分 + --filter 两项提速投资落地；plan 原文 R20.04=测试矩阵拆分，实质由本单覆盖）** → **R20.05✅（基础类型）** → **R20.06✅（Command/Event/Snapshot）** → **R20.07✅（GameSession）** → R20.08 WorldFacade → R20.09 EditBuffer → R20.10 Chunk 生命周期 → R20.11 后台 GenerationJob。矩阵基线 **556**。
 
 ### R20.05 基础类型（2026-09-15，floorDiv/floorMod + ChunkKey + BlockPos + 固定 Tick + Error/Result：只立类型 + 最小示范采用）
 
@@ -3745,3 +3745,17 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **过程注记（如实登记）**：r2006c 首跑 1 红为腿自身问题非产品代码——方向二「改源 → 副本不变」误拿「方向一已按计划改过的副本」对未改 baseline 比较（把刻意的副本改动误判为串扰）→ 改副本期望态显式逐字段钉（复跑即绿）。冒烟 stdout 重定向 0 字节为 R20.03 已录环境坑（GUI 子系统），tail20 从 app 自写 logs/voxelsandbox.log 取（qInstallMessageHandler→QFile）。
 
 **待实机确认**：无（类型单，无行为面）。**下一任务：R20.07 GameSession**（plan §29.3 R20.07：固定 Tick / 暂停 / BreakBlock / PlaceBlock / WorldDelta 五项迁移入 GameSession——无头程序可执行一段游戏 Tick、QML 经 Adapter 玩游戏、新旧路径结果一致）。
+
+### R20.07 GameSession（2026-09-15，最小游戏循环编排壳：无头可跑 + QML 零迁移 + 旧新一致）
+
+  → **✅✅ 落地（2026-09-15）：src/Game/gamesession.h（header-only 编排壳，Q_OBJECT/AUTOMOC）+ tools/matrix/section11_gamesession.cpp 新段置尾 4 腿，矩阵 552→556（band 555±2 内），QML/PlayerController/World 生产面零触碰（Main.qml 不挂 GameSession——「包起来」不是「替换」）。**（feat + test + 本 docs 三段提交）
+
+**五项迁移（plan §29.3 R20.07）**：① **固定 Tick**——stepTick(deltaSecs) 整数毫秒累积器（qRound(dt×1000)，0.1s→100ms 精确无浮点残渣），每满 Tick::kClockTickMs 执行一个整 tick（N×stepTick(0.1) == stepTick(N×0.1) == N tick，r2007b 行级钉）；tick 体 = Main.qml onTicked 桥接的 World 模拟家族 13 调用逐行同序（tickWaterFlow→…→tickWeather(kClockTickSecs)，次序即节拍语义，r2007b 顺序 indexOf 源码钉）。② **暂停**——pause/resume 幂等闸；暂停期 stepTick 恒 0 且 **dt 丢弃不累积**（与 WorldClock::setRunning(false) 停表同门——无 catch-up 时间债，r2007c 行级钉：pause 中泵 0.5s 后 resume 泵 0.6s 恰 6 tick 非 11）；编排壳级闸与 WorldClock 硬暂停（昼夜 QTimer 面）两闸并存互不越权。③④ **BreakBlock / PlaceBlock**——enqueueCommand(Command) 经 R20.06 CommandQueue（FIFO+满载拒绝穿透），执行只发生在整 tick 边界：到期命令（targetTick ≤ tick 号，0=尽快）drain 后**委托 World::setBlock(4 参)**——world.cpp 自述「写栅格的唯一入口」，写后钩子族 + blockBroken/blockPlaced + worldChanged 全套照走，**零游戏逻辑复制**；基线盘点登记：PlayerController break/place 前门（射线命中+capture+hotbar 门控）无头域不可达且与显式 BlockPos 意图不同构，玩家域语义（掉落/耐久/成就）留后续 intent 层任务。⑤ **WorldDelta**——blockBroken/blockPlaced（仅有的带坐标编辑事件）回调内 ChunkKey::fromWorld(x,z,Chunk::kSize) 幂等入集 + changedBlocks + BlockChanged 事件入 EventQueue（满载丢弃可见计数器）；每整 tick 收口 emit tickCompleted(tick, delta)。**已知边界登记**：流体等静默写只发无参 worldChanged 不带坐标 → 不入本 delta，per-tick 编辑面收口归 R20.09 EditBuffer 正席。
+
+**验收三条（plan 原文）**：「无头程序可执行一段游戏 Tick」——本类无 QTimer/无窗口/无 QML 依赖，纯 stepTick 泵驱动，r2007c 300-tick 真世界连跑稳定收口；「QML 仍可通过 Adapter 玩游戏」——零迁移即 Adapter 现状（QML 经 WorldClock.ticked 桥接照旧），r2007b 双钉守卫：Main.qml onTicked 桥接面存在钉 + **零迁移阴性钉（Main.qml 剥注释后不得含 "GameSession"）**常驻；「旧路径与新路径结果一致」——r2007a 双生世界（48×48×96 seed 82 同构incantation）同一命令序列 A=直调权威+直调家族 vs B=GameSession enqueue+stepTick → 全栅格 id+state 逐位一致 + tick-1 WorldDelta chunk 集 {(0,0),(1,1)} 与旧路径编辑面等价。与 WorldClock 关系登记：不接管不绑定（QML 面零变化承重面），未来 Adapter 只需把 ticked(dt) 桥到 stepTick(dt)（本单不接）。
+
+**验证**：分段增量构建（首建 19 步 ~5min 含 AUTOMOC 入册 + 全段重编[matrix_helpers.h 触达]；修腿红利实收：r2007b 期望修正 → 单段重编+链接+filter 面重跑全程 ~40s）→ binary mtime > 全部改动源 → 全矩阵 **556 PASS / 0 FAIL ×2**（matrix_r2007_pos/final.log，EXIT=0；双跑间 diff 仅 t997 内嵌计时 1 处登记漂移；552 权威 PASS 行 diff = 4 新增（r2007a-d）+ 4 变更全落已登记漂移类：t813 戳时间/哈希、t830 采样计数 40→41、t997 计时、t1023c src 文件计数 132→133=恰为本单 1 新头**线程原语仍 0**）→ **worldgen 腿族逐位恒等**（worldgen 行 diff = 空）→ app voxelsandbox 重建 EXIT=0 + offscreen 冒烟 EXIT=124 存活 + logs/voxelsandbox_r2007_tail20.log 留存。
+
+**阴性轮（最小摘除登记，性价比取舍）**：r2007d(1)「旁路即红」常驻探针——入队未泵 tick 前世界零变化（日后若把命令执行从整 tick 边界挪到 enqueue 直写，本腿常驻变红=架构级 lesion 的活体阴性）；配合 r2007b 源码钉（m_world.setBlock( 委托 ×2 + 13-tick 家族顺序）承担「摘委托直连」面；变异构建式阴性（删 GameSession 委托函数）由编译失败天然承担，不另起构建轮（登记豁免）。**过程坑登记**：r2007b 首跑 1 红为腿自身——0.25s 批量泵的 50ms 余量被漏算（误设 0.04 泵仍 0 tick）→ 余量链显式重推（80→120 跨界→60→150）复跑即绿；矩阵日志含 CR + 非 UTF-8 字节 → grep 需 -a（既录环境坑复认）。
+
+**待实机确认**：无（编排壳单，QML/渲染面零变化——app 冒烟 60fps 稳态已证）。**下一任务：R20.08 WorldFacade**（plan §29.3：World 查询/写入接口收窄——新代码不再直取 Chunk 内部指针、规则走统一查询、Renderer 不持可变 World、旧 World 仍为 Implementation）。
