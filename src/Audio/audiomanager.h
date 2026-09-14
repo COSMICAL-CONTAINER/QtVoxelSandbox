@@ -180,14 +180,14 @@ public:
     Q_INVOKABLE void playChestClose();
     // t1028 音符盒发声（NoteBlock 唯一音出口）：按调音段 pitch（0..24 半音，越界 clamp）选播
     //   note_pitch_NN.wav 程序合成钢琴音（build_sounds.py gen_note_piano，§9 原创；n=9=A4=440Hz）。
-    //   family = BlockRegistry::NoteTimbreFamily（0=piano / 1=bass / 2=kick / 3=snare，MC 1.0「下方方块
-    //   定乐器」口径）→ 播放速率倍移近似（bass ×0.5 / kick ×1.0 / snare ×2.0；登记简化：同一钢琴采样
-    //   倍移，非独立采样——独立采样留后续；review0909 #8：kick ×1.0 与 piano 兜底**同速率同声**（可闻
-    //   零差），独立采样落地前为已知登记面）。触发源（Main.qml 单一通道路由）：右键调音 /
-    //   攻击按下沿 / 红石通电上升沿（World.noteBlockPlayed / PlayerController.noteBlockTuned /
-    //   noteBlockAttackPlayed 语义事件）。重播 = seek 0 截断重发（连击不堆叠，同其他单件模式——音符盒
-    //   是 per-pitch clip 池，同 pitch 连击截断、异 pitch 天然并行，MC 多音阶和弦观感）。
-    //   engine / clip 失败静默早退（§2-E，不崩）。
+    //   family = BlockRegistry::NoteTimbreFamily（0=piano / 1=bass / 2=kick / 3=snare / 4=hat（t1046
+    //   玻璃下方第四族），MC「下方方块定乐器」口径）→ 播放速率倍移近似（bass ×0.5 / kick ×1.0 /
+    //   snare ×2.0 / hat ×3.0；登记简化：同一钢琴采样倍移，非独立采样——独立采样留后续；review0909
+    //   #8：kick ×1.0 与 piano 兜底**同速率同声**（可闻零差），独立采样落地前为已知登记面）。触发源
+    //   （Main.qml 单一通道路由）：右键调音 / 攻击按下沿 / 红石通电上升沿（World.noteBlockPlayed /
+    //   PlayerController.noteBlockTuned / noteBlockAttackPlayed 语义事件）。重播 = seek 0 截断重发
+    //   （连击不堆叠，同其他单件模式——音符盒是 per-pitch clip 池，同 pitch 连击截断、异 pitch 天然
+    //   并行，MC 多音阶和弦观感）。engine / clip 失败静默早退（§2-E，不崩）。
     Q_INVOKABLE void playNote(int pitch, int family);
 
     float volume() const { return m_volume; }

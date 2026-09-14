@@ -521,6 +521,14 @@ AudioManager::~AudioManager()
     if (d->achievementClip.ok) ma_sound_uninit(&d->achievementClip.sound);
     if (d->chestOpenClip.ok) ma_sound_uninit(&d->chestOpenClip.sound);
     if (d->chestCloseClip.ok) ma_sound_uninit(&d->chestCloseClip.sound);
+    // t1046 noteClips 池析构补齐（用户 0912 评审 #4）：t1028 新增 25 档音符盒 clip 池当年漏出本表——
+    //   旧版析构只 uninit 旧音效池后直接 ma_engine_uninit，noteClips 的 ma_sound 挂着对 engine 内部
+    //   data_source 的引用被连带拆解（未定义行为面；对齐上方 groupClips / 单件池逐个释放模式）。
+    //   资源生命周期面，无行为探针——矩阵目标不含 audiomanager.cpp（app 目标独有编译单元），
+    //   编译验证 = voxelsandbox 重建 EXIT=0；源码钉见 t1028c pin aud-note-deinit。
+    for (int n = 0; n < Data::kNotePitchCount; ++n)
+        if (d->noteClips[size_t(n)].ok)
+            ma_sound_uninit(&d->noteClips[size_t(n)].sound);
     ma_engine_uninit(&d->engine);
 }
 
@@ -844,9 +852,10 @@ void AudioManager::playChestClose()
 
 // ── t1028 音符盒发声（契约面见 audiomanager.h playNote 注释）──
 //   音量 = master × 0.9（乐器独奏前景级，MC 音符盒显著可闻）；音色族 = ma_sound_set_pitch 速率倍移
-//   （bass ×0.5 低八度 / kick ×1.0 原速 / snare ×2.0 高八度「清脆」；piano 原速）——登记简化：同一
-//   钢琴采样倍移，非 MC 独立乐器采样。per-pitch clip 池：seek 0 截断重发同 pitch、异 pitch 并行
-//   （多音符盒和弦观感）。越界 pitch / family clamp + 兜底（防 QML 传参脏值，永不崩）。
+//   （bass ×0.5 低八度 / kick ×1.0 原速 / snare ×2.0 高八度「清脆」/ hat ×3.0（t1046 玻璃下方第四族，
+//   超高倍短脆近似——倍移递进 0.5/1/2/3 的登记选型）；piano 原速）——登记简化：同一钢琴采样倍移，
+//   非 MC 独立乐器采样。per-pitch clip 池：seek 0 截断重发同 pitch、异 pitch 并行（多音符盒和弦观感）。
+//   越界 pitch / family clamp + 兜底（防 QML 传参脏值，永不崩）。
 void AudioManager::playNote(int pitch, int family)
 {
     const int p = qBound(0, pitch, Data::kNotePitchCount - 1);
@@ -855,6 +864,7 @@ void AudioManager::playNote(int pitch, int family)
     case 1: rate = 0.5f; break;  // NoteTimbreBass（木下方 → 低音拨弦）
     case 2: rate = 1.0f; break;  // NoteTimbreKick（石下方 → 低鼓原速）
     case 3: rate = 2.0f; break;  // NoteTimbreSnare（沙下方 → 高八度脆响）
+    case 4: rate = 3.0f; break;  // NoteTimbreHat（t1046 玻璃下方 → 超高倍短脆近似）
     default: break;
     }
     auto &c = d->noteClips[size_t(p)]; // Clip 是 Data 嵌套类型——AudioManager 作用域裸名不可见（app 目标编译教训：矩阵目标不含 audiomanager.cpp）
