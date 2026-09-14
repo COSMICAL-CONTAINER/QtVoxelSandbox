@@ -24,7 +24,12 @@ void MatrixRun::section03_mid_probes()
     //       rig 模拟生产时序：每格世界 tick 之间**交替注入 scanDispenserTraps(1/60s) 帧驱动 + 沿写入**
     //       （沿注入 = 置拉杆再 tickRedstone 触达，等价 QML 信号帧内到达），连发 N=6 沿断言 N 次发射
     //       （回退一帧容差 → 恰 3 次 = FAIL）。
-    {
+    runLegMulti({ "t913 dispenser cooldown pinned to MC 0.2s (2 redstone ticks @ 10Hz; rising-edge-once semantics s"
+        "tay in the t689 baseline set): first edge fires exactly one arrow, a fresh rising edge 0.112s in"
+        " stays blocked (cooldown window), an edge at 0.24s total MUST re-fire, and a 0.2s equal-period c"
+        "lock interleaved with 60fps frame-driven decay fires all 6 edges (review28 #2: the frame-quantiz"
+        "ed remainder ~0.008s at the 12th frame must not swallow the on-period edge; constant window pinn"
+        "ed in (0.1, 0.3])" }, [&]() {
         PlayerController pc;
         EntityManager ents;
         DispenserStore store;
@@ -103,7 +108,7 @@ void MatrixRun::section03_mid_probes()
         store.clearDispenser(x0, kRigY, z0);
         ents.clearAll();
         tickN(w, 2);
-    }
+    });
 
     // ── t866 载具攻击 / 摧毁语义探针（Game 层 PlayerController + EntityManager + MinecartManager 直编）──
     //   用户报告（R19.15）：①「矿车载生物时打矿车本体 → 打到生物 → 生物永远下不来」（乘骑 mob 钉座位
@@ -123,7 +128,9 @@ void MatrixRun::section03_mid_probes()
     //        tickPushedCarts 环境检查即毁 + cartBroken 发（生存掉落语义）；
     //   (c)  岩浆：静止车格被岩浆灌入（setBlock Lava）→ 下一 tick 即毁（同链；掉落物落岩浆由
     //        ItemEntityManager 瞬毁判定收尾，净效果 = 毁无物）。
-    {
+    runLegMulti({ "t866 attack on passenger-carrying cart routes to cart durability (mob unharmed, still seated), c"
+        "reative hit destroys + passenger auto-released, moving cart touching cactus breaks into dropped "
+        "item, lava cell destroys cart same chain" }, [&]() {
         // rig 选址：运行期扫描空区（t867 先例）。需 8×1×4 净空（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -301,7 +308,7 @@ void MatrixRun::section03_mid_probes()
             w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
 
 
@@ -323,7 +330,13 @@ void MatrixRun::section03_mid_probes()
     //   ⑦ 缺角 21×21 最大门 → 成门 441（四角可选语义在超大门保持）；
     //   ⑧ 破框碎门（批 F 钩子超大门回归）：⑦ 门破底梁中格（镜像 finishMiningAt setBlock(Air)+
     //      breakNetherPortalsAround 序列）→ 整门 441 格全熄（连通域熄灭尺寸无关）。
-    {
+    runLegMulti({ "t848 portal size cap 23x23: interior 2x3..21x21 (frame outer 4x5..23x23 MC 1.0 cap; t806-era wid"
+        "th-cap truncated measurement -> pillar probe hit interior air = user 'only 4x4 ignites'), user-r"
+        "epro 5x4 lights 20 cells, 21x21 max lights on both planes 441 cells each (= interior area, top-r"
+        "ight ignite pins 21-step down + 20-step left scan bounds), 22w/22h rejected zero cells, 2x3 min "
+        "unchanged, shared middle pillar double door lights independently (12 then 12+12) and collapses t"
+        "ogether on shared-pillar break, cornerless 21x21 lights, bottom-beam break collapses whole 441-c"
+        "ell door via write-family extinguish hook" }, [&]() {
         World w848;
         w848.setWidth(64);
         w848.setDepth(64);
@@ -492,7 +505,7 @@ void MatrixRun::section03_mid_probes()
                              "independently (12 then 12+12) and collapses together on shared-pillar "
                              "break, cornerless 21x21 lights, bottom-beam break collapses whole "
                              "441-cell door via write-family extinguish hook";
-    }
+    });
 
     // ── P-t812 铁轨四向连接优先级 + 红石变道探针（R19.13 🅰；t771 三消费端同源架构的交汇形态收口）──
     //   用户报告：「普通铁轨周围 3+ 轨连接时一坨不知道咋走」。断言四组（任一 FAIL = 用户症状在当前
@@ -503,7 +516,13 @@ void MatrixRun::section03_mid_probes()
     //       拐角贴图走 railCornerArms 同源象限）；激活前稳定（放源块 / 邻编辑不闪变）；拉杆升沿切弯 →
     //       断电保持 → 再升沿再切；红石块 / 压力板两源同语义（isReceivingPower 全源覆盖）；
     //   (c) 矿车过 T 交叉按当前弯向走：默认弯向出口侧 → 通电切弯后改走另一侧 → 断电后仍按保持的弯向走。
-    {
+    runLegMulti({ "t812 four-way junction = straight pair not multi-arm cross: conafter edit(stable across neighbor"
+        "-edit recompute)",
+               "t812 T-junction switch: default curvetile136 corner, stable pre-power, lever/redstone-block/pres"
+        "sure-plate rising edges toggle curve, falling edges hold position (MC junction semantics; con no"
+        "w)",
+               "t812 cart through T-junction follows current curve: default exits +Z dead end, after power toggl"
+        "e exits -Z, after power off holds -Z" }, [&]() {
         // ── (a) 四向全连 → 直线一对 + 不闪变 ──
         {
             const auto [x0, z0] = nextSlot();
@@ -684,7 +703,7 @@ void MatrixRun::section03_mid_probes()
             w.setBlock(x0 - 1, kRigY, z0, BR::Air);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t821 床头/尾 z-fighting 盒几何探针（bedHalfBoxes 单一权威直调；World 层静态函数，无 rig 依赖）──
     //    用户报「浏览器 3D 床预览，床头/尾羊毛与床身模板接触面重叠闪烁」：旧版床垫长轴满 [0,1] → 床垫外
@@ -694,7 +713,9 @@ void MatrixRun::section03_mid_probes()
     //    (b) 床垫 + 枕头长轴**外端**内缩 kBedBoardThick 恰达板内面（不触格边 = 与板外面不再共面）；
     //    (c) 床垫长轴**内端**仍满触格边（两半对接连续，t496「中间不空」契约不随本修复回归）；
     //    (d) 外端存在贴格边、顶至 boardTop 的 planks 板盒（内缩后外端仍有板封口，无可见缺口）。
-    {
+    runLegMulti({ "t821 bed board z-fight: mattress/pillow outer end inset to board inner face, mattress inner end "
+        "joins at cell boundary, board caps outer end (16 colors x 4 facings x head/foot =rigs; a/b/c/d ="
+        ")" }, [&]() {
         bool okA = true, okB = true, okC = true, okD = true;
         const int planksT821 = BR::tileIndex(quint8(BR::Planks), BR::PosX);
         const int woolT821 = BR::tileIndex(quint8(BR::Wool), BR::PosX);
@@ -743,7 +764,7 @@ void MatrixRun::section03_mid_probes()
                              " mattress inner end joins at cell boundary, board caps outer end (16 colors x 4"
                              " facings x head/foot ="
                           << bedChecks << "rigs; a/b/c/d =" << okA << okB << okC << okD << ")";
-    }
+    });
 
     // ── t824 附魔台选项池物品过滤探针（R19.13；Game 层表 + Hotbar 桥接，无 World/QML）──
     //    用户报告：「镐子附上亡灵杀手（对镐无意义）」。根因：选项池按大类 mask 过滤（亡灵杀手
@@ -760,7 +781,12 @@ void MatrixRun::section03_mid_probes()
     //    (b) Hotbar 桥接 selectEnchantsPreviewForItem == EnchantRegistry 直调（同 seed 同产物）；
     //    (c) enchantSelected 对锄返 false（附魔台点档 no-op，不白扣 XP / 青金石）+ 对剑 true 且产物全在剑池
     //        + 已附魔再点返 false（防重复附魔闸不回归）。
-    {
+    runLegMulti({ "t824 enchant pool filtered per item: pick/shovel subset {eff,silk,fortune,unbreaking} (no undead"
+        "-slay on pick = user symptom), axe adds sharpness-family w/o fortune, sword weapon-only, chest w"
+        "/o feather-fall, boots+feather/helm+aqua, hoe/shears empty + category None, bow subset {might,bo"
+        "w-shock,bright-draw,never-run,unbreaking} and rod subset {tide-call,bite-call,unbreaking} all pr"
+        "esent (t960 exclusive pools, categories BowItem/RodItem), book keeps full 20; bridge==direct; en"
+        "chantSelected rejects hoe & already-enchanted" }, [&]() {
         Hotbar hb;
         const int diaPick   = int(ToolRegistry::PickaxeDiamond);
         const int diaShovel = int(ToolRegistry::DiamondShovel);
@@ -868,7 +894,7 @@ void MatrixRun::section03_mid_probes()
                              "never-run,unbreaking} and rod subset {tide-call,bite-call,unbreaking} all "
                              "present (t960 exclusive pools, categories BowItem/RodItem), book keeps full 20; "
                              "bridge==direct; enchantSelected rejects hoe & already-enchanted";
-    }
+    });
 
     // ── t825 锋利最终伤害显示 = 实战同源探针（R19.13；Game 层公式 + Hotbar 桥接）──
     //    用户报告：「钻石剑附锋利后伤害显示仍 +7」。静态复核：实际伤害链（attackMob t476/t763）与九处
@@ -876,7 +902,9 @@ void MatrixRun::section03_mid_probes()
     //    （attackMob 起点 + displayAttackDamage 桥接取整），「显示 = 实战的目标无关部分」结构化成立。
     //    断言：① 权威公式精确值（钻石剑 7 + 0.5/级：0/7.0、I/7.5、III/8.5；木剑 V = 4+2.5 = 6.5）；
     //    ② 显示桥接 = round(权威)（含 .5 半上取整与 JS Math.round 同侧：I → 8）；③ 无附魔 / 非武器不虚增。
-    {
+    runLegMulti({ "t825 display==combat damage single source: weaponAttackDamage 7/7.5/8.5 (dia sword lvl 0/I/III),"
+        " wood sword V 6.5; Hotbar::displayAttackDamage rounds same authority (8 at .5 half-up, 9 at III,"
+        " level sweep 0..5 equality); empty/partial enchant arrays degrade to base" }, [&]() {
         Hotbar hb;
         const int diaSword  = int(ToolRegistry::DiamondSword);
         const int woodSword = int(ToolRegistry::SwordWood);
@@ -913,7 +941,7 @@ void MatrixRun::section03_mid_probes()
                              "sword lvl 0/I/III), wood sword V 6.5; Hotbar::displayAttackDamage rounds same "
                              "authority (8 at .5 half-up, 9 at III, level sweep 0..5 equality); empty/partial "
                              "enchant arrays degrade to base";
-    }
+    });
 
     // ── t917 附魔选项 hover 预告同源探针（源码钉 + 行为面；R19.16）──
     //    用户口径：「锋利? 耐久?」式预告——只显示一种附魔、必定出现该附魔、等级未知。诚实预告的前提 =
@@ -928,7 +956,13 @@ void MatrixRun::section03_mid_probes()
     //    （归一化写）与 `if (srcCount0 > 1)`（归一化门）——旧序（种子在归一化写后取）下书堆路径
     //    writeSlot 触发的同步 optionReroll++ 令施放种子 ≠ hover 预告种子，「必得」预告漂移。种子取在
     //    `const srcCount0` 行之前 = 归一化写（会 bump reroll 的唯一写）之前，两函数严格同源。
-    {
+    runLegMulti({ "t917 enchant option hover preview single-source: tierSeed authority (pos^item^tier^reroll; clock"
+        " mixing Date.now()&0xffff extinct), doEnchant and tierPreviewName both consume root.tierSeed -> "
+        "preview == first pick of the actual result (guaranteed enchant, level masked); sword offered 1.."
+        "30 / book samples non-empty with resolvable display names; review28 #3: the doEnchant seed snaps"
+        "hot is taken BEFORE the H1 book-stack normalization gate/write (seed line < srcCount0 gate line "
+        "< slot-0 write line) so the synchronous optionReroll++ fired by the normalization enchantRev bum"
+        "p can no longer split the preview seed from the cast seed" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString rootDir = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile ef(rootDir + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
@@ -977,7 +1011,7 @@ void MatrixRun::section03_mid_probes()
                              "book-stack normalization gate/write (seed line < srcCount0 gate line < slot-0 "
                              "write line) so the synchronous optionReroll++ fired by the normalization "
                              "enchantRev bump can no longer split the preview seed from the cast seed";
-    }
+    });
 
     // ── t918 铁砧 shift+左键产物直入背包探针（源码钉；R19.16）──
     //    用户：「附魔书敲进工具完成后 shift+左键对合成品应直接放到背包，现在没反应被鼠标拿取」。
@@ -997,7 +1031,16 @@ void MatrixRun::section03_mid_probes()
     //    ⑦ 工作台批量合成 slotShiftLeftCraft 同病同钉（review 模式小结 #1 清点结论：附魔台无「预检算
     //       容量」组合，仅铁砧/工作台两处）：无名产物不并入带名同 id 栈（守卫槽侧半边）→ 槽名判空 + 落定
     //       Math.min 封顶。
-    {
+    runLegMulti({ "t918 anvil shift-click product to inventory: takeProduct(toInventory) dual route, preview slot p"
+        "asses window.shiftHeld, inventory route lands via hotbar.addToAny (hotbar-first empty slots, sam"
+        "e-id unnamed merge in place), preflight counts main+hotbar capacity + cursor fallback and bails "
+        "with zero consumption when neither fits (t626 duplicate-item guard preserved); leftover falls ba"
+        "ck to cursor (MC take-out semantics); review28 #1 hardening: preflight same-caliber as addToAny "
+        "bidirectional named guard (same-id stack headroom counted only when product itself unnamed - out"
+        "Name.length===0 pinned verbatim), landing else branch holds heldId===outId guard (unreachable fo"
+        "reign-cursor fallback drops remain as entity, no silent swallow) + Math.min(cap,...) clamp; craf"
+        "ting-table slotShiftLeftCraft swept and pinned in InventoryOps.js (named-slot headroom excluded "
+        "+ cursor clamp)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString rootDir = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile af(rootDir + QStringLiteral("/src/ui/AnvilUI.qml"));
@@ -1027,7 +1070,7 @@ void MatrixRun::section03_mid_probes()
                              "(unreachable foreign-cursor fallback drops remain as entity, no silent swallow) + "
                              "Math.min(cap,...) clamp; crafting-table slotShiftLeftCraft swept and pinned in "
                              "InventoryOps.js (named-slot headroom excluded + cursor clamp)";
-    }
+    });
 
     // ── t919 钻石剑伤害核账探针（公式面 + 运行时 DoT 补刀复现；R19.16）──
     //    用户疑问：「钻石剑只有火焰附加、显示 +7 伤害，两刀砍死 20 血僵尸——7×2=14 < 20 为何死？」。
@@ -1043,7 +1086,11 @@ void MatrixRun::section03_mid_probes()
     //    displayAttackDamage=7（显示 = 直伤同源，火不在面板）。② 运行时 —— 两只满血 Shambler 各吃两刀
     //    直伤 7：无火对照 6s 后存活（14 < 20，血 6）；带火（每刀后 ignite 4s）在窗内死亡且 mobDied 带
     //    burned=true（DoT 补刀走火烧致死链）——同一 rig 上「无火不死 / 有火死」的对照即用户疑问的答案。
-    {
+    runLegMulti({ "t919 diamond sword damage accounting: base 7 (tier 4), fire-aspect adds ZERO direct damage (weap"
+        "onAttackDamage 7.0 with FA II, display +7 == combat direct damage - fire lives in the ignite DoT"
+        "); two 7-hits leave a 20HP shambler alive at 6HP without fire, with per-hit ignite(4s) the burn "
+        "ticks finish it and mobDied carries burned=true (DoT finisher = expected, not a display bug); cr"
+        "it x1.5 path noted in attackMob (11/hit, two jump strikes 22 >= 20 standalone)" }, [&]() {
         Hotbar hb;
         const int diaSword = int(ToolRegistry::DiamondSword);
         const int fa2 = EnchantRegistry::pack(int(EnchantRegistry::FireAspect), 2);
@@ -1139,7 +1186,7 @@ void MatrixRun::section03_mid_probes()
                                  "mobDied carries burned=true (DoT finisher = expected, not a display bug); crit "
                                  "x1.5 path noted in attackMob (11/hit, two jump strikes 22 >= 20 standalone)";
         }
-    }
+    });
 
     // ── t826 击退附魔实战强度探针（R19.13；公式面 + Entities 层真位移，t774 爆炸击退同款 rig）──
     //    用户报告：「附击退打生物无击退」。根因：旧强度 1+0.5*级 令 II 仅 ~2.3 格总位移（基线 ~1.1 格），
@@ -1148,7 +1195,9 @@ void MatrixRun::section03_mid_probes()
     //    断言：① 公式面 0/1/2 级 = 1.0/4.0/7.0（负级防御钳）；② 物理面 —— 真 EntityManager 三猪各吃一档
     //    knockback(+X)，8 tick（0.128s）位移严格按级递增且落量级带（理论 0.90/3.60/6.30 格 ≈
     //    v0*(1-e^-0.512)/4，v0 = 4.5*strength；游荡噪声 ±0.15）。
-    {
+    runLegMulti({ "t826 knockback enchant scales in combat: strength 1.0/4.0/7.0 (lvl 0/I/II, negative clamped); re"
+        "al EntityManager displacement over 0.128s strictly increasing ~0.9/3.6/6.3 blocks (old +50%/lvl "
+        "was ~1.4/2.0 = wander-noise level, user saw no knockback)" }, [&]() {
         bool ok = std::abs(EnchantRegistry::knockbackStrength(0) - 1.0f) < 1e-5f
                && std::abs(EnchantRegistry::knockbackStrength(1) - 4.0f) < 1e-5f
                && std::abs(EnchantRegistry::knockbackStrength(2) - 7.0f) < 1e-5f
@@ -1224,7 +1273,7 @@ void MatrixRun::section03_mid_probes()
                              "negative clamped); real EntityManager displacement over 0.128s strictly "
                              "increasing ~0.9/3.6/6.3 blocks (old +50%/lvl was ~1.4/2.0 = wander-noise level, "
                              "user saw no knockback)";
-    }
+    });
 
     // ── t827 燃焰点燃链探针（R19.13 附魔全效果审计的「重点疑」实测项；EntityManager 直编）──
     //    attackMob → ignite(level*4s) 静态接线已核（playercontroller t476 链）；本探针锁点燃 → 火烧推进
@@ -1233,7 +1282,9 @@ void MatrixRun::section03_mid_probes()
     //    ≥5 只实际扣血（每只 P(扣) = 0.85，P(<5) ≈ 3e-5）；③ 6 只 1HP 猪 ≥1 只烧死（首脉冲 ~1.05s +
     //    0.5s 死亡动画 → mobDied burned=true ~1.55s 在窗内；P(全不成) = 0.15^6 ≈ 1e-5）。游荡 ≤1.76 格 →
     //    地板 7 行宽（dz -3..+3）+ 出生位留 ≥2 格边距，防侧移跌落污染对照。
-    {
+    runLegMulti({ "t827 fire-aspect ignite chain: ignite->isBurningAt immediate (control stays unlit), 1s-interval "
+        "fire damage lands on >=5/10 meter pigs in 2.2s, 1HP pig dies with burned=true (cooked-drop entry"
+        "); attackMob->ignite(4s*level) wiring static-verified" }, [&]() {
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 125 && x0 < 0; zz += 2)
             for (int xx = 4; xx + 15 < 96 && x0 < 0; xx += 2) {
@@ -1308,7 +1359,7 @@ void MatrixRun::section03_mid_probes()
                                  "1HP pig dies with burned=true (cooked-drop entry); attackMob->ignite("
                                  "4s*level) wiring static-verified";
         }
-    }
+    });
 
     // ── P-t828 水下窒息 + 鱿鱼浮力（R19.13 生物组；专用局部世界 wA：pit 水柜 + 干 pit 对照）──
     //    (a) 猪（3HP）沉水 pit 底部：头位浸水 → 15s 呼吸耗尽 → 1HP/s 窒息掉血（20s 窗扣 ~4HP → 死或 ≤1）；
@@ -1322,7 +1373,8 @@ void MatrixRun::section03_mid_probes()
     //    升到水面呼吸）后敞顶猪不再溺亡（MC 语义：溺水须被按在水下）——加盖把猪钉在盖下（review25 #4 上浮
     //    天花板钳制）保溺水断言仍可达；鱿鱼浮面被盖截在 ~87.6 ≥ 86.2 下界，(b) 断言不变。水位恒定（探针
     //    不 tick world，流体静置）。
-    {
+    runLegMulti({ "t828 drowning + squid buoyancy: submerged pig loses HP after 15s breath (1HP/s, dry control stay"
+        "s full), squid buoyed off pool floor (no bottom-resting) and exempt from drowning" }, [&]() {
         World wA;
         wA.setWidth(44); wA.setDepth(44); wA.setHeight(96); wA.setSeed(21);
         for (int x = 8; x < 38; ++x)
@@ -1370,7 +1422,7 @@ void MatrixRun::section03_mid_probes()
                           << "| t828 drowning + squid buoyancy: submerged pig loses HP after 15s "
                              "breath (1HP/s, dry control stays full), squid buoyed off pool floor "
                              "(no bottom-resting) and exempt from drowning";
-    }
+    });
 
     // ── P-t923 驯服狼生态三面（R19.16 t923：跟随返修 / 浮面 / 仇恨传递 + 阴性轮）──
     //    (a) 全链复现用户实测「走了他还在水里最后淹死」并断言修复：驯服站立狼沉 2 深水坑（壁顶与水面等高
@@ -1386,7 +1438,11 @@ void MatrixRun::section03_mid_probes()
     //        顺带注册 m_wolfTarget 把 (c) 残狼引来搅局——t480 melee 注册链）。
     //    (d) 源码钉：火球 / 骷髅箭命中狼两伤害点调 wolfRetaliateAgainst + 箭碰撞滤网并入狼（QML 外 C++ 行为
     //        可行为级断言的是 hook 本体；两处伤害点内部走逐帧弹道，headless 复现弹道不稳 → t880 (b) 源码钉先例）。
-    {
+    runLegMulti({ "t923 tamed-wolf ecology: float-to-surface (head-submerged buoyancy) breaks the drown chain, sitt"
+        "ing pet still floats but stays put (negative), standing pet swims-hops the pond lip and reaches "
+        "the owner (follow rework root = water trap), wolfRetaliateAgainst drives pack biting of a mob at"
+        "tacker while the same hook is a no-op for tamed cats (MC 1.0: cats do not fight) and both damage"
+        " sites (skeleton arrow + emberling fireball) are source-pinned to the hook" }, [&]() {
         World wW;
         wW.setWidth(44); wW.setDepth(44); wW.setHeight(96); wW.setSeed(26); // rig y84+ 地形之上（t828 同款）
         for (int x = 4; x < 40; ++x)
@@ -1496,7 +1552,7 @@ void MatrixRun::section03_mid_probes()
                              "attacker while the same hook is a no-op for tamed cats (MC 1.0: cats do "
                              "not fight) and both damage sites (skeleton arrow + emberling fireball) "
                              "are source-pinned to the hook";
-    }
+    });
 
     // ── P-t829 末影人三修（专用局部世界 wB 平石台；rig y84+ 地形之上，t828 同款免凿高台）──
     //    (a) 碰水即伤 + 瞬移逃离：夜行者站 1 深水洼 → 首触 tick 扣 1HP + 8..16 格瞬移离开（4s 窗 hp<满
@@ -1506,7 +1562,10 @@ void MatrixRun::section03_mid_probes()
     //        残留（旧「dodge 后箭继续飞 / 冷却内零反应穿身」两面都锁）、夜行者未被箭扣血（弹射免疫）；
     //    (c) 下巴补全合成器：合成 256×128 rig（头盒区底带透明 + 上部不透明脸 / 眼亮行）→ 输出头区全不透明
     //        + 列向延拓色（下巴带 == 其列上方最近不透明色）+ 眼行原样保留 + 头区外像素不动 + 坏输入返空。
-    {
+    runLegMulti({ "t829 nightwalker trio: water contact deals first-touch damage + teleport escape, player arrow hi"
+        "t forces teleport dodge and consumes the arrow (no pass-through, no cooldown-blind window, mob u"
+        "nhurt), chin-filler compositor fills head-box transparent band via column extension preserving e"
+        "yes and out-of-region pixels" }, [&]() {
         World wB;
         wB.setWidth(48); wB.setDepth(48); wB.setHeight(96); wB.setSeed(22);
         for (int x = 2; x < 46; ++x)
@@ -1619,7 +1678,7 @@ void MatrixRun::section03_mid_probes()
                              "the arrow (no pass-through, no cooldown-blind window, mob unhurt), "
                              "chin-filler compositor fills head-box transparent band via column "
                              "extension preserving eyes and out-of-region pixels";
-    }
+    });
 
     // ── P-t830 燃烬者主世界自然刷新摘除（专用局部世界 wF **height 96**：共享 w 高 48 时 heightAt ~57-71
     //    越 surface 界 → surface 尝试恒败只剩稀有洞穴气袋（实测 60 周期仅 3 刷）——高度 96 下地表 spawn
@@ -1628,7 +1687,8 @@ void MatrixRun::section03_mid_probes()
     //    断言零 Emberling（旧 6 份表 P(40 采样零燃烬) = (5/6)^40 ≈ 4.6e-4 → 回归必被逮）+ ≥3 型多样
     //    （防「摘除时错删整池」的反向回归）。手动刷路径（蛋 / 笼 spawnHostileMob）不经本表——t787 探针
     //    已锁笼路径含 Emberling，不受影响。ring [24,40] 全落界内（listener 居中 50,50）。
-    {
+    runLegMulti({ "t830 emberling removed from natural dark-spawn pool:  natural spawns sampled with zero Emberling"
+        " (>=3 distinct hostile types prove pool alive; eggs/spawner manual paths untouched)" }, [&]() {
         World wF;
         wF.setWidth(100); wF.setDepth(100); wF.setHeight(96); wF.setSeed(26);
         EntityManager em830;
@@ -1657,7 +1717,7 @@ void MatrixRun::section03_mid_probes()
                           << "| t830 emberling removed from natural dark-spawn pool: " << samples
                           << " natural spawns sampled with zero Emberling (>=3 distinct hostile "
                              "types prove pool alive; eggs/spawner manual paths untouched)";
-    }
+    });
 
     // ── P-t831 狼/豹猫驯服全链补全（专用局部世界 wC 平石台；Entities 层直测，Game 层 useBlock 接线静态审）──
     //    (a) 驯服成功 → 爱心（inLoveAt 真）→ kTameHeartDuration 4s 衰减后收心；
@@ -1665,7 +1725,10 @@ void MatrixRun::section03_mid_probes()
     //    (c) 坐态冻结（toggleWolfSit 后近旁玩家 1s 零位移）↔ 站态跟随（2s 位移 ≥2）；
     //    (d) 跟随态距玩家 > kWolfTeleportDist → 瞬移到玩家近旁（1s 内 ≤10 格）；
     //    (e) 豹猫驯服同爱心链。
-    {
+    runLegMulti({ "t831/t878 taming chain: tame success shows heart (decays 4s), healTamedPet restores injured pet "
+        "(full/wild reject), sitting freezes movement vs standing follows owner, >12-block gap teleports "
+        "pet to owner side (mid-gap 16 also jumps, near-gap 6 does not - t878⑤ 24->12), ocelot taming sho"
+        "ws heart too (collar/sit-toggle GUI glue static-reviewed)" }, [&]() {
         World wC;
         wC.setWidth(44); wC.setDepth(44); wC.setHeight(96); wC.setSeed(23); // rig y84+ 地形之上（t828 同款）
         for (int x = 2; x < 42; ++x)
@@ -1756,7 +1819,7 @@ void MatrixRun::section03_mid_probes()
                              "owner side (mid-gap 16 also jumps, near-gap 6 does not - t878⑤ 24->12), "
                              "ocelot taming shows heart too (collar/sit-toggle GUI glue "
                              "static-reviewed)";
-    }
+    });
 
     // ── P-t878④ 中键 pick-block 生物蛋映射全蛋族补全（纯静态映射直调；Game 层）──
     //    mobTypeEggId（PlayerController 静态单一权威）必须覆盖 RecipeRegistry **全部 13 种蛋**（t785 造狼/
@@ -1764,7 +1827,11 @@ void MatrixRun::section03_mid_probes()
     //    (a) 4 新映射精确命中（狼/豹猫/夜行者/燃烬者）；
     //    (b) 蛋族完备性：遍历全部 mobType 收集映射，**恰好**等于 13 蛋全集（加蛋不跟表 → 集合差非空即红）；
     //    (c) 单射：无两个 mobType 映射同一蛋 id（防复制粘贴错位）。
-    {
+    runLegMulti({ "t878 pick-block egg map completion: mobTypeEggId covers ALL 13 spawn-egg items (wolf/ocelot/nigh"
+        "twalker/emberling added - the t785 egg batch never followed this table, which is why creative mi"
+        "ddle-click could not copy wolf/ocelot eggs), set-equality against the RecipeRegistry egg family "
+        "plus injectivity pin 'new egg must follow the table' (a future egg without a mapping row turns t"
+        "his red)" }, [&]() {
         bool ok = true;
         ok = ok && PlayerController::mobTypeEggId(EntityManager::MobWolf)
                   == RecipeRegistry::SpawnEggWolfId;
@@ -1808,12 +1875,13 @@ void MatrixRun::section03_mid_probes()
                              "wolf/ocelot eggs), set-equality against the RecipeRegistry egg family plus "
                              "injectivity pin 'new egg must follow the table' (a future egg without a "
                              "mapping row turns this red)";
-    }
+    });
 
     // ── P-t832 染料染羊 + 长回自然色重掷（专用局部世界 wD 草平台）──
     //    染（sheepWoolAt=染下标）→ 剪毛载荷 = 染色（一次性语义上半）→ 吃草长回 = 重掷自然权重恢复自然色
     //    （确定性断言：长回色 ∈ 自然色集 {0,6,7,8,12,15}——染 10 紫 ∉ 集，重掷绝不再现 10）；非羊拒染。
-    {
+    runLegMulti({ "t832 dye-on-sheep: dyeSheep sets wool color, shear payload carries the dyed color (one-shot sema"
+        "ntics), regrow rerolls natural weights (never the dyed color again), non-sheep rejected" }, [&]() {
         World wD;
         wD.setWidth(44); wD.setDepth(44); wD.setHeight(96); wD.setSeed(24); // rig y84 地形之上
         for (int x = 8; x < 36; ++x)
@@ -1857,14 +1925,16 @@ void MatrixRun::section03_mid_probes()
                           << "| t832 dye-on-sheep: dyeSheep sets wool color, shear payload carries "
                              "the dyed color (one-shot semantics), regrow rerolls natural weights "
                              "(never the dyed color again), non-sheep rejected";
-    }
+    });
 
     // ── P-t833 刷怪笼被动实刷 + 鱿鱼水格路径（专用局部世界 wE 平石台 + 水柱）──
     //    蛋改型语义下的被动笼（pig state / squid state）经 tickSpawners 真刷：猪笼出猪（血 10 = 被动默认，
     //    敌对路由是 20——极性锁）；鱿鱼笼走水格谓词（here+above Water）在水柱内出鱿鱼。笼位 state 用
     //    BlockRegistry::spawnerStateForMob 单一权威编码。迷你模型换型视觉（t833① 重建修）不进矩阵（无
     //    Quick3D），留人工目视。
-    {
+    runLegMulti({ "t833 passive spawners really spawn: pig cage produces 10-HP pigs (passive polarity) and squid ca"
+        "ge spawns through the water-column predicate (spawn lands submerged); cage mini-model retype vis"
+        "ual is manual-check (rebuilt-on-retype fix)" }, [&]() {
         World wE;
         wE.setWidth(40); wE.setDepth(40); wE.setHeight(96); wE.setSeed(25); // rig y84 地形之上
         for (int x = 2; x < 38; ++x)
@@ -1905,7 +1975,7 @@ void MatrixRun::section03_mid_probes()
                              "(passive polarity) and squid cage spawns through the water-column "
                              "predicate (spawn lands submerged); cage mini-model retype visual is "
                              "manual-check (rebuilt-on-retype fix)";
-    }
+    });
 
     // ── P-r24#1 门整扇湿判防火带（Review 2026-08-24 中危 #1；专用局部世界 seed 31，P-t830 局部世界先例）──
     //   7b83fbd 防火带只判主目标湿 → 门配对联动点燃无湿判：火从干半扇侧掷中 → 被水保护的湿半扇被连带
@@ -1918,7 +1988,10 @@ void MatrixRun::section03_mid_probes()
     // (b) 烧尽收尾兜底（确定性，无概率）：干扇两半点燃 → 同 id 写清除上扇燃烧态（t843 契约：显式写 =
     //     换新实例清侧表）→ 上扇侧放水 → 下扇 10 窗烧尽时 (d) 兜底须被湿判拦下 → 上扇存活（修前兜底
     //     setBlock(Air) 焚毁湿半扇）。
-    {
+    runLegMulti({ "review24#1 door whole-panel wet firebreak: fire licking the dry half never ignites either half w"
+        "hile water touches the other half (600 windows, door intact, never burning), and a half ignited "
+        "before water arrived burns out without consuming its now-wet pair (burn-completion fallback skip"
+        "s wet dual)" }, [&]() {
         World wD1;
         wD1.setWidth(40); wD1.setDepth(40); wD1.setHeight(96); wD1.setSeed(31);
         const int gy1 = 81; // rig 层（96 高度地形之上；整带自凿清空防丘陵地形撞 rig）
@@ -1965,7 +2038,7 @@ void MatrixRun::section03_mid_probes()
                              "windows, door intact, never burning), and a half ignited before water "
                              "arrived burns out without consuming its now-wet pair (burn-completion "
                              "fallback skips wet dual)";
-    }
+    });
 
     // ── P-r24#2 clearBlockSilent 红石火把幽灵网格（Review 2026-08-24 中危 #2；专用局部世界 seed 32）──
     //   recheck 火把分支旧版不 emit，而 clearBlockSilent 的 worldChanged/clearAllDirty 在 recheck
@@ -1973,7 +2046,9 @@ void MatrixRun::section03_mid_probes()
     //   「实际掉落 ≥1」时自 emit。断言（信号时序序：掉落信号之后必须还能观测到 worldChanged——修前
     //   唯一 worldChanged 在掉落之前 → 时序断言 FAIL）：TNT 顶立红石火把（TorchFloor state=0，支撑 =
     //   正下方 TNT 格）→ clearBlockSilent 清 TNT → 火把格变 Air + 掉落物信号 + 之后仍有重建信号。
-    {
+    runLegMulti({ "review24#2 clearBlockSilent redstone-torch ghost mesh: torch standing on TNT drops exactly once "
+        "when TNT ignition clears the block, torch cell becomes Air, and a worldChanged (rebuild signal) "
+        "is observed AFTER the drop (torch branch self-emits on actual drop)" }, [&]() {
         World wT2;
         wT2.setWidth(40); wT2.setDepth(40); wT2.setHeight(96); wT2.setSeed(32);
         for (int x = 10; x <= 14; ++x)
@@ -2011,7 +2086,7 @@ void MatrixRun::section03_mid_probes()
                              "on TNT drops exactly once when TNT ignition clears the block, torch "
                              "cell becomes Air, and a worldChanged (rebuild signal) is observed "
                              "AFTER the drop (torch branch self-emits on actual drop)";
-    }
+    });
 
     // ── P-r24#3 静默清格两兄弟路径附着物复检（Review 2026-08-24 中危 #3；专用局部世界 seed 33）──
     //   「口径合一」漏改 destroySphereSilent（爆炸）与 tickLavaFlow（岩浆焚毁）：(a) 爆炸掀支撑后
@@ -2020,7 +2095,9 @@ void MatrixRun::section03_mid_probes()
     // (b) 岩浆焚毁木板支撑（8%/窗确定性哈希，≤400 窗必中）→ 焚毁循环内 recheck 须把轨掉落（修前
     //   tickLavaFlow 不含 checkRailOnEdit → 轨悬浮）。岩浆稳态早退（m_lavaDirty）用标记格翻转逐窗
     //   重标脏驱动（pokeFluidDirty 7 邻扫含岩浆源）；每窗 35 调 tickLavaFlow ≥ 节流 30 保证恰 1 窗。
-    {
+    runLegMulti({ "review24#3 silent-clear sibling paths recheck attachments: explosion dropping support drops the "
+        "out-of-sphere pressure plate AND rail (no floating residue), lava burning a plank support drops "
+        "the rail on top (burn loop now routes through recheckAttachmentsAfterClear)" }, [&]() {
         World wX3;
         wX3.setWidth(48); wX3.setDepth(40); wX3.setHeight(96); wX3.setSeed(33);
         for (int x = 10; x <= 30; ++x)
@@ -2074,7 +2151,7 @@ void MatrixRun::section03_mid_probes()
                              "dropping support drops the out-of-sphere pressure plate AND rail (no "
                              "floating residue), lava burning a plank support drops the rail on top "
                              "(burn loop now routes through recheckAttachmentsAfterClear)";
-    }
+    });
 
     // ── P-t835 暗渊珠五项修探针（Entities 层 EntityManager 直编 + Game 层 applyEnderPearlTeleport 直调，
     //    同 t774 / t852 先例；独立小世界 96×40×96 不动主世界 rig——96 高世界地形+树冠最高 ~81，y≥84 天空
@@ -2092,7 +2169,12 @@ void MatrixRun::section03_mid_probes()
     //        kEnderPearlGravity=12 轻重力直证）；45° 满抛 → ~50 格带（旧 12+重力 28 只 ~5 格）。
     //    (e) ⑤疾跑加成：平抛 v=24 与 v=24×1.3（镜像 kPearlSprintFactor，对齐 t51 Sprint ×1.3）落距比
     //        ∈[1.27,1.33]；镜像常量值锁（Game 层掷出分支本地 constexpr 探针不可达，P18 镜像同步模式）。
-    {
+    runLegMulti({ "t835 ender pearl five fixes: (1) any-contact teleports - pearl lands ON rail/torch/plate cell it"
+        "self and player stands in-cell (y=84) / on plate top (y=85); (2) water/lava slow-sink (1.5 / 0.7"
+        " b/s steady band) then teleport at liquid-bottom cell, player placed in water cell; (3) void & o"
+        "ut-of-bounds fall removes pearl with ZERO teleport; (4) flat throw v=24 drops ~24 blocks (light "
+        "gravity 12), 45deg ~50 blocks; (5) sprint 1.3x speed -> range ratio 1.27..1.33 + Survival tp sel"
+        "f-damage (5, EnderPearlTp) exactly once per teleport" }, [&]() {
         // 镜像常量（与实现侧私有/函数本地常量文档值同步，改值须两处同步；P18 镜像模式——Entities 层
         //   kEnderPearlGravity / Game 层掷珠分支 kPlayerPearlSpeed/kPearlSprintFactor 均探针不可达）：
         constexpr float kMirrorPearlGravity = 12.0f;       // EntityManager::kEnderPearlGravity（t835④ 珠轻重力；MC 投掷物 12 vs 世界 28）
@@ -2250,7 +2332,7 @@ void MatrixRun::section03_mid_probes()
                              "teleport; (4) flat throw v=24 drops ~24 blocks (light gravity 12), 45deg ~50 blocks; "
                              "(5) sprint 1.3x speed -> range ratio 1.27..1.33 + Survival tp self-damage (5, "
                              "EnderPearlTp) exactly once per teleport";
-    }
+    });
 
     // ── t837(1) 画作支撑失撑 World 钩子族探针（World rig 直编；setBlock / clearBlockSilent 双入口 + M1 邻画
     //    不误伤 + 墙体置换保留）：1x2 画（锚格 top state=0x80|face|index / 非锚格 bottom state=faceBits）贴
@@ -2261,7 +2343,18 @@ void MatrixRun::section03_mid_probes()
     //    (d) 直调 World::removePaintingAt（finishMiningAt 直挖画格同路径）→ 整画清 + 1 件；
     //    (e) clearBlockSilent（TNT 点火清格等系统路径，recheckAttachmentsAfterClear 收口）→ 整画掉落；
     //    (f) M1 钉契约：同面并排两 1x1 画，破其一的墙 → 只掉那一张，邻画完好（连通域 ≠ 整画，锚格矩形圈定）。
-    {
+    runLegMulti({ "t837 painting support (a): dig wall behind NON-anchor cell of 1x2 painting -> whole painting dro"
+        "ps as ONE item (no residual single face)",
+               "t837 painting support (b): dig wall behind anchor cell -> whole 1x2 painting drops (ANY support "
+        "face break drops the entire painting, MC semantics)",
+               "t837 painting support (c): wall replaced by another full cube -> painting survives, zero drops ("
+        "support recheck keeps valid walls)",
+               "t837 painting remove (d): World::removePaintingAt from non-anchor seed clears the whole 1x2 pain"
+        "ting + drops exactly one item",
+               "t837 painting support (e): clearBlockSilent (TNT-ignite style system clear) -> painting drops vi"
+        "a recheckAttachmentsAfterClear single entry",
+               "t837 painting M1 pin (f): two adjacent 1x1 paintings share a wall plane - breaking one support d"
+        "rops ONLY that painting, neighbor intact" }, [&]() {
         // 运行期查 1x2 与 1x1 的画作 index（paintingSize 单一权威，免本表持字面量副本）。
         int idx1x2 = -1, idx1x1 = -1;
         for (int i = 0; i < BR::PaintingCount; ++i) {
@@ -2375,7 +2468,7 @@ void MatrixRun::section03_mid_probes()
                               << "| t837 painting M1 pin (f): two adjacent 1x1 paintings share a wall plane - "
                                  "breaking one support drops ONLY that painting, neighbor intact";
         }
-    }
+    });
 
     // ── t847 植物放置谓词探针（Core 纯函数真值表 + World 花失撑掉落链 t788 回归钉）：plantGroundBlock
     //    单一权威——草丛→**仅草方块**（t903 收紧：泥土也不行，用户定稿对齐 MC；拒草上叠草 / 树叶 / 沙 /
@@ -2383,7 +2476,11 @@ void MatrixRun::section03_mid_probes()
     //    蘑菇→泥土/草方块；枯灌木→沙子。掉落链：破花下泥土 → 花 dropId 掉落（t788 染料链不回归；dropId
     //    运行期读，免字面量副本）。放置预检本体在 PlayerController 私有 placeBlock（t841 P20 先例：谓词面 +
     //    失撑面矩阵化，放置拒绝人工目视收口）。
-    {
+    runLegMulti({ "t847 plant placement predicate: plantGroundBlock single authority truth table (tallgrass grass-o"
+        "nly per t903 tightening - dirt rejected too, no grass-on-grass/leaves/water; flowers +farmland; "
+        "mushrooms dirt/grass; dead bush sand-only) + flower lost-support drop stays on dropId chain (t78"
+        "8 dye linkage) + tallgrass lost-support now symmetric with the placement-side family (isGroundPl"
+        "ant shared by precheck and the World hook; digs out ground -> grass clears and drops its dropId)" }, [&]() {
         const bool okGround =
                !BR::plantGroundBlock(BR::TallGrass, BR::Dirt)     // t903 收紧：泥土也不行（仅草方块）
             && BR::plantGroundBlock(BR::TallGrass, BR::Grass)
@@ -2439,14 +2536,16 @@ void MatrixRun::section03_mid_probes()
                              "dropId chain (t788 dye linkage) + tallgrass lost-support now symmetric with the "
                              "placement-side family (isGroundPlant shared by precheck and the World hook; digs "
                              "out ground -> grass clears and drops its dropId)";
-    }
+    });
 
     // ── t815/t838 item 图标路径探针（Game 层 Hotbar 闭合直调，t800 探针同模式；测试二进制无 qrc → 图集
     //    渲染落盘空图，URL 链路断言有效、像素内容留实机人工目视）：(1) 红石粉（130）pick-block 图标改走
     //    isPackDerivedIconFamily 程序图集 flat 重渲（file:/// 运行期缓存，非 qrc 手绘旧稿——「贴图旧版」
     //    根因钉死在回退链位置：旧稿只余渲染失败兜底）；(2) 玻璃（54）缓存族换代 icon4->icon5（URL 家族名
     //    断言；t800 flat -> t838(1) dimetric 3D 的画法切换靠换代兜底，防 AppLocalData 旧 flat 缓存被复用）。
-    {
+    runLegMulti({ "t815/t838 item icon paths: redstone dust pick-block icon resolves via runtime atlas flat re-rend"
+        "er (file:/// cache, stale hand-drawn qrc retired to last-resort fallback), glass icon cache fami"
+        "ly bumped icon6->icon7 (t879 trapdoor draw switch and t902 farmland face fix ride the same bump)" }, [&]() {
         Hotbar hb;
         const QString dustIcon = hb.iconSourceForBlock(int(BR::RedstoneDust));
         const QString glassIcon = hb.iconSourceForBlock(int(BR::Glass));
@@ -2467,7 +2566,7 @@ void MatrixRun::section03_mid_probes()
                              "atlas flat re-render (file:/// cache, stale hand-drawn qrc retired to last-resort "
                              "fallback), glass icon cache family bumped icon6->icon7 (t879 trapdoor draw switch "
                              "and t902 farmland face fix ride the same bump)";
-    }
+    });
 
     // ── P-t836 钓鱼系统整改探针（Entities 层 EntityManager 直编 + Game 层 PlayerController/Hotbar 真消费端，
     //    t835/t856 同模式；独立小世界 48×48×96 seed 77（t835 实测该种子地形+树冠 ≤81，y≥84 天空带免凿——
@@ -2493,7 +2592,24 @@ void MatrixRun::section03_mid_probes()
     //        180s 寿命兜底）；
     //    (i) review25 #13 实体格命中门：1 格墙后贴壁猪 + 高速飞行浮标（next 一跳入墙格且在猪外扩命中
     //        盒内）→ 贴面 Ground 不隔墙钩（旧序先钩后碰会隔墙钩住）。
-    {
+    runLegMulti({ "t836 fishing overhaul: bobber is an EntityManager projectile (light-gravity parabola, hook-on-fl"
+        "ight vs mob AABB, water settle at surface-minus-dip with state-aware liquid height, ground rest "
+        "frozen, out-of-bounds despawn ASSERTED: xz flyout within 8 ticks + void-y first-tick slot releas"
+        "e) driven from Game layer cast-anywhere/reel (EntityManager-carries-entity + PlayerController-se"
+        "ttles-semantics split, pearl/drop precedent); deterministic 5-30s wait via hashVoxel(seed^salt^c"
+        "astSerial) with exact reachable endpoints and +-1tick behavioral match, bite window 1.0s (t926 u"
+        "ser override of the MC 1.0 ~0.5s value; in-window reel = fishingPool loot thrown to the player a"
+        "s a ballistic spawnItemThrown (t886: solved arc, distance-adaptive speed) + rod -1, expired = es"
+        "caped signal + re-roll + empty reel costs nothing), hooked-mob reel pulls at ~6 b/s with -5 dura"
+        "bility and zero damage, dead-target reel = pull no-op with NO durability charge; externally-clea"
+        "red bobber keeps lazy fishing state then reels clean (no loot, no cost) with updateFishing inval"
+        "id-to-auto-reel pinned at source level (pc.tick captured gate unreachable headless, tradeoff dec"
+        "lared); ground-rest bobber rechecks its support cell on a 10-tick throttle and falls (review25 #"
+        "12: mined support -> flying within 40 ticks, no more hovering until the 180s lifetime bail); sol"
+        "id-cell hit gate precedes mob hooking (review25 #13: wall-pinned pig behind a 1-thick wall with "
+        "a fast bobber whose next point lands inside the wall cell and the padded pig AABB grounds at the"
+        " wall face instead of hooking through it); cooked fish 0x25B closes the chain (raw->cooked in BO"
+        "TH kSmelt+kSmeltXp, +4 hunger vs raw +2, name/tab/pack-mapping pinned, ocelot still raw-only)" }, [&]() {
         // 镜像常量（P18 模式，改值须两处同步；Entities 层 kBobberWaitHashSalt / kBobberBiteWindowSec 与
         //   Game 层获物抛物解均探针不可达私有）：
         constexpr quint32 kMirrorBobberSalt = 0xF15Cu;   // EntityManager::kBobberWaitHashSalt（等待掷骰盐）
@@ -3047,7 +3163,7 @@ void MatrixRun::section03_mid_probes()
                              "hooking through it); "
                              "cooked fish 0x25B closes the chain (raw->cooked in BOTH kSmelt+kSmeltXp, "
                              "+4 hunger vs raw +2, name/tab/pack-mapping pinned, ocelot still raw-only)";
-    }
+    });
 
     // ── Review 2026-08-25 #2 浇熄摘侧表信号探针（blockDoused 恰一次 + 坐标 + 火灭块存）──
     // 背景：浇熄设计为「火灭块存」——tickFire 抑制掷中后 m_burningCells.remove 直摘：栅格不变（无
@@ -3062,7 +3178,10 @@ void MatrixRun::section03_mid_probes()
     //   (c) tickFire 浇熄掷中路径：点燃（干）→ 邻注水 → 推窗至掷中（40%/窗 vs 木板 10 窗烧毁，
     //       先掷中概率 99.4%/候选；烧毁即换候选重试，40 候选下假 FAIL 率 ~1e-85）→ 恰一次 + 坐标 +
     //       块存 + 全程零 blockBroken（火灭块存 ≠ 烧毁语义钉死）。
-    {
+    runLegMulti({ "review25 #2 douse signal: same-id setBlock early-exit and tickFire suppress-roll removal each em"
+        "it blockDoused exactly once with correct coords and block-preserved (no blockBroken), change-pat"
+        "h stays silent (broken+worldChanged cover it); probabilistic roll closed via candidate search (4"
+        "0 tries, ~1e-85 false rate)" }, [&]() {
         // rig 选址：运行期扫描空区（t809 先例——尾部探针不占 nextSlot 网格）。需 11×6×8 候选带。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
@@ -3149,7 +3268,7 @@ void MatrixRun::section03_mid_probes()
                                  " (broken+worldChanged cover it); probabilistic roll closed via"
                                  " candidate search (40 tries, ~1e-85 false rate)";
         }
-    }
+    });
 
     // ── Review 2026-08-25 #3 tickVehicleRiding emit 节流探针（不直发 / pending 由 tick 收口接住）──
     // 背景：t811 tickVehicleRiding 末尾 `if (dirty) { ++m_revision; emit entitiesChanged(); }` 直发，且
@@ -3163,7 +3282,9 @@ void MatrixRun::section03_mid_probes()
     //   (b) 收口相：接续 ents.tick×6（含相位门 %3）→ ≥1 emit（pending 被 tick 接住 = 钉位变更最终可见，
     //       t811 呈现语义不丢）且 ≤ 3（= 6/3 + 1 节流上界——防「换一处直发」的复发面）；
     //   (c) 钉位行为不回归：全程 mob 钉车座位（t811 座位公式误差 <0.01）。
-    {
+    runLegMulti({ "review25 #3 riding emit throttle: tickVehicleRiding never emits entitiesChanged directly (20 dir"
+        "ty frames -> 0 emits; old code >=1 on first boarding frame), pending flushed through tick's kEmi"
+        "tEveryN gate (6 ticks -> 1..3 emits), seat-pin formula intact (dx/dy/dz < 0.01)" }, [&]() {
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
             for (int xx = 4; xx + 1 < 96 && x0 < 0; xx += 2) {
@@ -3240,7 +3361,7 @@ void MatrixRun::section03_mid_probes()
                                  " first boarding frame), pending flushed through tick's kEmitEveryN gate"
                                  " (6 ticks -> 1..3 emits), seat-pin formula intact (dx/dy/dz < 0.01)";
         }
-    }
+    });
 
     // ── Review 2026-08-25 #4 鱿鱼持续浮力天花板碰撞探针（封顶水柱上浮贴顶不穿出）──
     // 背景：垂直积分段只为下落设计——浮力 vy>0 自由上移分支无向上阻挡 → 头顶穿入固体格（冰面/封顶水池）
@@ -3252,7 +3373,10 @@ void MatrixRun::section03_mid_probes()
     //   (a) 不穿出：末位 pos.y + halfH ≤ 顶格下沿 + 0.02（旧版被整段抬到格顶上 ≈ +1.47 → 红）；
     //   (b) 贴顶稳定：末 60 帧 Y 带 ≤ 0.05（浮力再积再钳的贴顶悬停，非振荡/继续上穿）；
     //   (c) 确有上浮：末位 > 初始位（防「误杀浮力」的反向回归）。
-    {
+    runLegMulti({ "review25 #4 squid ceiling: sustained buoyancy in a capped water box clamps at head-level collisi"
+        "on bottom (pos.y+halfH stays below ceiling underface +0.02, 60-tick stability band <=0.05, still"
+        " rises from spawn = buoyancy intact); old code teleported squid whole-body above the ceiling (re"
+        "stY snap ~1.45 above the clamp)" }, [&]() {
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
             for (int xx = 4; xx + 4 < 96 && x0 < 0; xx += 2) {
@@ -3316,7 +3440,7 @@ void MatrixRun::section03_mid_probes()
                                  " buoyancy intact); old code teleported squid whole-body above the ceiling"
                                  " (restY snap ~1.45 above the clamp)";
         }
-    }
+    });
 
     // ── Review 2026-08-25 #5 珍珠无碰撞植物族穿过探针（草丛格穿过 / 铁轨格仍命中对照）──
     // 背景：t835 命中判据「本格任意方块实存（5 id 豁免表）」把 TallGrass/花/蘑菇/树苗/枯灌木/作物
@@ -3327,7 +3451,10 @@ void MatrixRun::section03_mid_probes()
     //   (a) 草丛列（石上 TallGrass）：珠穿过草格、命中**下方石格**才 enderPearlLanded（旧「任意实存」
     //       判据在草格即结算 → 落点 y = 草格 ≠ 石格 → 红）；
     //   (b) 铁轨列（石上 Rail）：珠在**轨格**即命中（薄盒存在 → t835 落轨传送语义钉死）。
-    {
+    runLegMulti({ "review25 #5 pearl plant pass-through: pearl falling through a TallGrass cell (ShapeNone, no coll"
+        "ision box) keeps flying and lands on the stone cell below (old any-block-here criterion triggere"
+        "d on the grass cell), while a Rail cell (thin collision box present) still triggers landing in-c"
+        "ell (t835 rail-teleport semantics preserved)" }, [&]() {
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 118 && x0 < 0; zz += 2)
             for (int xx = 4; xx + 3 < 96 && x0 < 0; xx += 2) {
@@ -3389,7 +3516,7 @@ void MatrixRun::section03_mid_probes()
                                  " box present) still triggers landing in-cell (t835 rail-teleport"
                                  " semantics preserved)";
         }
-    }
+    });
 
     // ── t874/t875 铁砧附魔丢失 + 附魔台拒入 真链探针（R19.15 批三）──
     // 背景：用户报「放入铁砧附魔直接没了，元数据丢失」（跨七八个版本未根治）+「附魔台能放入已附魔物品
@@ -3404,7 +3531,23 @@ void MatrixRun::section03_mid_probes()
     //   merge / rename）× 关包归还 × 存档 round-trip 后重绑 VM 再放入。
     // t875 覆盖：已附魔物品七入口拒入（真鼠标左/右键槽 0、右键拖、左键拖、数字键交换、Shift 搬运、双击
     //   合并）+ 全链无清洗（青金石槽放入 → 关包归还）+ 素品附魔 → 产物取出带附魔 → 拒再入。
-    {
+    runLegMulti({ "t874 real-chain anvil enchant preservation (real QQmlEngine x source-tree AnvilUI.qml x real C++"
+        " Hotbar): closes the last probe seam - t792 drove real QML against a mock Hotbar.qml, t822 drove"
+        " the real VM without any QML; this probe loads the actual AnvilUI.qml+InventoryOps.js with the a"
+        "ctual Hotbar/PlayerState injected and clicks via synthesized QMouseEvent through the inline TapH"
+        "andlers (the exact user path). Entries: mouse left/right on A slot, shift-move, drag single-slot"
+        " release, double-click pickup, number-key swap, takeProduct repair/combine/merge/rename, close-p"
+        "anel return, save round-trip with VM rebind; review28 #1 t918 shift-route legs: foreign-cursor +"
+        " named-product preflight rejects with zero consumption (no transmutation into cursor count), sam"
+        "e-id cursor stays at cap (no over-cap stack), named product still lands via addToAny into empty "
+        "slots; categories: tool/weapon(4-ench)/armor/enchanted-book, all with custom names + instance du"
+        "rability asserted at every hop",
+               "t875 real-chain enchanting-table gate + no-wipe (same harness, real EnchantingTableUI.qml): alre"
+        "ady-enchanted item rejected on all seven entry paths (mouse left/right on slot 0, right-drag pla"
+        "ce-one, left-drag redistribute + single-slot fallback, number-key swap, shift-move, double-click"
+        " merge) while cursor stack keeps id/ench/name intact; lapis-slot sojourn + close-panel return pr"
+        "eserves enchant metadata end-to-end (wipe hunt); clean-pick + lapis -> doEnchant tier1 product c"
+        "arries >=1 enchant, take-out keeps it, re-entry rejected" }, [&]() {
         // 类型注册：**探针私有 URI**（VoxelSandboxProbe）。不能用 VoxelSandbox —— build/VoxelSandbox/qmldir
         //   （qt_add_qml_module 产物）落在 exe 同目录默认 import path 上，`import VoxelSandbox` 会命中它并
         //   `prefer :/VoxelSandbox/` 重定向到 qrc 资源（本测试二进制未链模块资源 → "Script
@@ -4389,7 +4532,7 @@ Item {
                              "sojourn + close-panel return preserves enchant metadata end-to-end (wipe "
                              "hunt); clean-pick + lapis -> doEnchant tier1 product carries >=1 enchant, "
                              "take-out keeps it, re-entry rejected";
-    }
+    });
 
     // ── t873 书架→附魔台字流真链探针（用户「新版仍不见文字流」实机二查；t823 冻结镜像的实装版）──
     // 背景：t823 用**冻结镜像**（C++ 复刻 rescanPairs 逐行语义）钉了规则口径，但镜像 ≠ 实装 —— 用户换新
@@ -4404,7 +4547,12 @@ Item {
     //   emittedTotal/liveCount 计数一致；④ 堵半步 -1 对 + 删台归零且发射器停摆（500ms Timer running
     //   翻假——「无对即停摆」性能红线的实机钉子）。组件头注释宣称的「数据链完好」自此有自动化实证；
     //   渲染侧（字形贴图/尺寸/billboard）属 qml.exe/肉眼域，由 [t873] 运行期日志 + 实测文档覆盖。
-    {
+    runLegMulti({ "t873 glyph-flow real-chain probe (real QQmlEngine loads source-tree EnchantGlyphFlow.qml x real "
+        "World rig x injected ListModel): empty baseline 0 pairs + no-op spawn, single ground ring -> rea"
+        "l QML rescanPairs yields 16 (t823 mirror/authority 16/15 same rig cross-checked against the actu"
+        "al implementation), 12 spawns tracked by emittedTotal/liveCount, blocked half-step -1 pair, tabl"
+        "e-row removal -> zero pairs + spawn timer idle (data chain proven live; pixel-side remains qml.e"
+        "xe/manual)" }, [&]() {
         bool ok873 = true;
         QString diag873;
         World wG;
@@ -4566,7 +4714,7 @@ Item {
                              "implementation), 12 spawns tracked by emittedTotal/liveCount, blocked "
                              "half-step -1 pair, table-row removal -> zero pairs + spawn timer idle "
                              "(data chain proven live; pixel-side remains qml.exe/manual)";
-    }
+    });
 
     // ── t953 字形流两调 + 书架变更 rescan 加固（worldChanged 事件钩 + 风暴合并 + 1s 自愈轮询）──
     //    用户第五轮实测（8-28）：① 字还有点大、速度偏快——再调小调慢；② 多放 / 挖一个书架文字流停
@@ -4594,7 +4742,13 @@ Item {
     //        review0830 #20：防抖真 trailing-edge 钉（requestRescan 体无早退、每次 restart()，旧
     //        rescanPending 早退形态绝迹）——风暴合并行为腿对两形态同绿，注释-实现一致由本钉承载。
     //    (d) #20 trailing-edge 钉（见探针块内注）。
-    {
+    runLegMulti({ "t953 glyph-flow rescan hardening real-chain probe (real QQmlEngine x real World rig): full-ring "
+        "baseline via editRev sync channel, then WITHOUT ever touching editRev - explosion path (destroyS"
+        "phereSilent, worldChanged-only) drops pairs 16->15, entity-landing place-back restores 16, playe"
+        "r mine/place via World::setBlock self-heals 15/16 even with the host worldEditRev chain  severed"
+        ", 3-write storm inside the 200ms window merges into exactly one rescan, 1s watchdog rescans >=1x"
+        " in a 2.3s idle window under worldRunning (stale world-lifetime cache disease closed on all path"
+        "s)" }, [&]() {
         bool ok953a = true;
         QString diag953;
         // 泵事件循环等待墙钟（QTimer 需事件循环投递；每片 ≤10ms 防饿死，t889 pumpFor 同款）。
@@ -4743,10 +4897,16 @@ Item {
                              " severed, 3-write storm inside the 200ms window merges into exactly one "
                              "rescan, 1s watchdog rescans >=1x in a 2.3s idle window under worldRunning "
                              "(stale world-lifetime cache disease closed on all paths)";
-    }
+    });
 
     // ── t953 参数/通道源码钉（用户 8-28 第五轮口径「字还有点大、速度偏快——再调小调慢」+ rescan 双通道）──
-    {
+    runLegMulti({ "t953 glyph params + rescan channels source pin: glyph quads 0.21-0.32 (t915 0.26-0.40 x0.8, user"
+        " 'still a bit big'), drift 1.8 (x0.7, user 'a bit fast'), rate 0.40/shelf + cap 4/tick (<=8/s), "
+        "life clamp 0.9-2.2 scaled with the slower drift (clamping would truncate slow flights and re-acc"
+        "elerate the tail); worldChanged event hook -> requestRescan TRUE trailing-edge debounce (every r"
+        "eentry restart()s the 200ms window, review0830 #20: the old dirty-flag early-return form froze t"
+        "he window contrary to its own comment and is pinned extinct) + 1s self-heal watchdog gated activ"
+        "e&&worldRunning (review26-11 pause convention)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         const auto readSrc = [&root](const QString &rel) {
@@ -4800,7 +4960,7 @@ Item {
                              "dirty-flag early-return form froze the window contrary to its own comment "
                              "and is pinned extinct) + 1s self-heal watchdog gated active&&worldRunning "
                              "(review26-11 pause convention)";
-    }
+    });
 
     // ---- t889 暂停语义统一（两档：GUI 开=世界照跑玩家照坠但不动；ESC=全停；t885 鱼线持久前置）----
     //      门控矩阵钉子（行为级 + 源码钉双层）：
@@ -4816,7 +4976,15 @@ Item {
     //        (f) Main.qml 门控钉：window.worldRunning 派生属性 + worldClock.running / player.worldRunning
     //            绑定 + pauseOverlay 取反消费 + keyInput 未捕获守卫 + onTicked 桥无 captured/面板门（GUI 开
     //            时火 / 水 / 生长照跑的源头证）。
-    {
+    runLegMulti({ "t889 pause-semantics unification, two tiers (Java singleplayer parity): soft tier (!captured + w"
+        "orldRunning=true, any GUI panel open equivalent) keeps world running -- pc.tick() step() falls ("
+        "Y drops, XZ frozen), item entity falls, fishing persists with bobber alive; hard tier (worldRunn"
+        "ing=false, ESC menu equivalent) freezes player/item/bobber exact-equal with fishing line kept al"
+        "ive across pause+resume; WorldClock.running stops/starts the 100ms ticked gate behaviorally; def"
+        "erWallClocks pushes spawnMs (pickup-window ready->not-ready flip) and setWorldRunning rebases al"
+        "l three managers; release() body has no cancelFishing (t885 line persistence); Main.qml gate pin"
+        "s (worldRunning derived property + worldClock.running / player.worldRunning bindings + pauseOver"
+        "lay negated consume + keyInput !captured guard + onTicked bridge free of captured/panel gates)" }, [&]() {
         bool okA = true, okB = true, okC = true, okD = true, okE = true, okF = true;
         QString diag889;
         // 泵事件循环等待墙钟（QTimer 需事件循环投递；每片 ≤10ms 防饿死）
@@ -5023,7 +5191,7 @@ Item {
                              "derived property + worldClock.running / player.worldRunning bindings + "
                              "pauseOverlay negated consume + keyInput !captured guard + onTicked bridge "
                              "free of captured/panel gates)";
-    }
+    });
 
     // ── review26 #25 软档受击击退探针（Game 层 PlayerController 直编，t889(a) 软档 rig 族）──
     //   用户症状（review26 低危）：GUI 开（软档，世界照跑）被 mob 攻击伤害照扣但击退被吞——
@@ -5032,7 +5200,11 @@ Item {
     //   (a) 软档（默认 !captured）直调 applyHitKnockback(+X) → 玩家 X 位移 > 0.3（旧门恒 0 = 症状签名，回退即红）
     //       + 垂直小跳真发（y 曾高于地面）；
     //   (b) 对照：无击退时同窗口 X 精确不动（软档 XZ 冻结基线，位移只来自击退冲量）。
-    {
+    runLegMulti({ "review26-25 soft-tier hit knockback lands: with a GUI-open equivalent (!captured, world running)"
+        ", applyHitKnockback displaces the player >0.3 blocks along the hit direction with the vertical h"
+        "op (Java parity: damage already ticked, knockback must follow; old gate swallowed it - the no-kn"
+        "ockback window signature), while the no-hit control window keeps X/Z exactly frozen (displacemen"
+        "t comes only from the impulse)" }, [&]() {
         bool okA = false, okB = false, okHop = false;
         const auto pumpFor25 = [](int ms) {
             QElapsedTimer t;
@@ -5076,13 +5248,18 @@ Item {
                              "already ticked, knockback must follow; old gate swallowed it - the "
                              "no-knockback window signature), while the no-hit control window keeps X/Z "
                              "exactly frozen (displacement comes only from the impulse)";
-    }
+    });
 
     // ── P-t881 鱼线最大长度探针（32 格断线，行为级）──
     //    pc 真甩竿 → settle（近距 ~2 格）→ pc.tick 线仍持；applyEnderPearlTeleport 把玩家拉到 ~53 格
     //    （loadSavedState 会 cancelFishing 不可用——传送是唯一不撞钓鱼态的移位口）→ 传送本身不断线
     //    （检测在 updateFishing）→ 首 pc.tick 断线：浮标槽释放 + fishing 复位 + 耐久不变 + 零 fishCaught。
-    {
+    runLegMulti({ "t881 fishing line max length: eye-to-bobber 3D distance beyond 32 blocks snaps the line on the n"
+        "ext updateFishing mirror tick (bobber entity removed, fishing state cleared, zero fishCaught, ze"
+        "ro rod durability cost -- a snapped line is not a reel); near-distance tick keeps the line (beha"
+        "vioral: real cast -> settle -> pc.tick holds; ender-pearl teleport hauls the player ~53 blocks a"
+        "way without touching fishing state -- the only headless repositioning path, loadSavedState cance"
+        "ls fishing by savegame semantics)" }, [&]() {
         World wL;
         wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(78);
         EntityManager ents;
@@ -5144,7 +5321,7 @@ Item {
                              "-> settle -> pc.tick holds; ender-pearl teleport hauls the player ~53 blocks "
                              "away without touching fishing state -- the only headless repositioning path, "
                              "loadSavedState cancels fishing by savegame semantics)";
-    }
+    });
 
     // ── P-t882 拉拽反馈增强探针（行为级：距离缩放 / 上抛弧；源码钉：角度调制——yaw 无 WRITE，收杆改向
     //    行为级不可达 headless，t836(g) 同取舍）──
@@ -5156,7 +5333,17 @@ Item {
     //    (c) 源码钉：useFishingRod 体内距离增益（kFishHookPullGain）+ t927 落差解算上抛（√(2·g·Δh) 语句 +
     //        眼位目标 kFishHookLiftOverhead + 重型折扣 kFishHookHeavyLift）+ 角度调制（angleFactor 乘
     //        speed 与 lift 两支）语句面。
-    {
+    runLegMulti({ "t882 hook-reel feedback: pull strength scales with line length (speed += 0.35 x dist-capped-32 -"
+        "> far pig displaces >1.25x near pig in the first physics tick after the reel) and the launch arc"
+        " is solved from fall height (t927 drop-solved lift vy=sqrt(2 x 28 x dh) targeting the player eye"
+        " + overhead margin -> far-pig rise > 0.06/tick vs old flat 0.045 -- 'yanked visibly into the air"
+        "'), both modulated by reel angle (look-vs-line |cos| factor, facing the target = full power, sid"
+        "eways/over-shoulder decays to 0.4x; pitch excluded via horizontal renorm -- angled-down water ca"
+        "sts must not lose force; angle branch pinned at source level since yaw has no WRITE and re-aimin"
+        "g mid-hook is unreachable headless); impulse constants moved wholly to the Game layer (pullMobTo"
+        "ward now takes speed+upSpeed, Entities layer holds no impulse constants - kBobberHookPullUp reti"
+        "red); far-cast rig sweeps elevation 12-34 deg with a fresh pig per attempt (flat aim falls short"
+        " of a 12.5-block target under light gravity)" }, [&]() {
         World wP;
         wP.setWidth(48); wP.setDepth(48); wP.setHeight(96); wP.setSeed(79);
         EntityManager ents;
@@ -5311,14 +5498,20 @@ Item {
                              "impulse constants - kBobberHookPullUp retired); far-cast rig sweeps "
                              "elevation 12-34 deg with a fresh pig per attempt (flat aim falls "
                              "short of a 12.5-block target under light gravity)";
-    }
+    });
 
     // ── P-t883 夜行者对鱼钩瞬移探针（行为级）──
     //    真甩竿命中夜行者（t836(d) 直瞄轨迹，3 格内必中）→ ① 全程不钩定（bobberHookedMobAt 恒 -1，钩不住
     //    夜行者族）；② 夜行者被强制瞬移（位移 >4 格——瞬移带 8-16 格 vs 游荡步进 <1 格/秒可分辨）；③ 浮标
     //    穿过原站位继续飞 / 落定（实体仍活，不被消耗——鱼钩是软线不是箭）；对照：猪在 3 格直瞄必钩（t836(d)
     //    已钉，不重摆）。闪避后夜行者掉下平台（瞬移落点在平台外）也只断言位移量不断言落点。
-    {
+    runLegMulti({ "t883 nightwalker vs fishhook: flying-bobber hook scan treats a MobNightwalker hit as a projectil"
+        "e encounter -- forced teleport dodge (bypassing teleportCooldown, same t829 arrow-chain fix so a"
+        " cooldown-window hit can never pass through silently) and the bobber never latches (hook state m"
+        "achine unreachable for the nightwalker family; MC 1.0 enderman projectile-immunity parity for th"
+        "e fishing rod); the bobber itself is NOT consumed (soft line, unlike the arrow's remove=true) an"
+        "d keeps flying through the vacated spot; behavioral rig: direct 3-block aim at a settled nightwa"
+        "lker -> zero hook across 24 ticks + displacement >4 blocks (teleport band 8-16 vs wander <1/s)" }, [&]() {
         World wN;
         wN.setWidth(48); wN.setDepth(48); wN.setHeight(96); wN.setSeed(80);
         EntityManager ents;
@@ -5379,7 +5572,7 @@ Item {
                              "remove=true) and keeps flying through the vacated spot; behavioral "
                              "rig: direct 3-block aim at a settled nightwalker -> zero hook across "
                              "24 ticks + displacement >4 blocks (teleport band 8-16 vs wander <1/s)";
-    }
+    });
 
     // ── P-review26-8 弹射物闪避不清仇恨源码钉（review26 #8：浮标闪避复用 teleportEntity 免费净化）──
     //   行为级不可密闭驱动的取舍声明：enraged 是 ≤1s 瞬态（rage 满 1s 即 teleportBehindPlayer 转蓄力段，
@@ -5390,7 +5583,15 @@ Item {
     //      0 消耗清仇恨 = 免费无限远程「净化」+ 打断攻击前摇，箭链同为投射物一并修）；
     //   ③ 水逃逸 / 近战 dodge 保持默认 true（既有设计：水伤与近身交互打断激怒）+ 头文件默认参数存在。
     //   闪避行为本身（位移 / 不钩定 / 箭消耗）由 t883 / t829(b) 行为级探针覆盖，不重摆。
-    {
+    runLegMulti({ "review26-8 projectile dodge no longer wipes aggro: teleportEntity's landing hatred-clear trio (e"
+        "nraged/rageTimer/windupTimer) is gated behind a clearAggro param; all FOUR projectile dodge call"
+        " sites pass false explicitly (arrow + bobber direct, snowball + egg via the nightwalkerDodge pas"
+        "s-through added by review27 #5 - the old count-of-2 pin was the incomplete enumeration that let "
+        "the snowball/egg chains keep the free-purge exploit), while water-escape and melee dodge keep th"
+        "e default true (documented design: water damage and close-range interaction interrupt rage); sou"
+        "rce pin because the enraged state is a sub-1s transient gated on random wander yaw - behavioral "
+        "driving would be flaky (t889 a3 / t836 e precedent); dodge behavior itself stays covered by the "
+        "t883/t829(b) rigs" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile cf(root + QStringLiteral("/src/Entities/entitymanager.cpp"));
@@ -5437,12 +5638,21 @@ Item {
                              "state is a sub-1s transient gated on random wander yaw - behavioral "
                              "driving would be flaky (t889 a3 / t836 e precedent); dodge behavior "
                              "itself stays covered by the t883/t829(b) rigs";
-    }
+    });
 
     // ── P-t884 咬钩可见性全套探针（行为级：①入水水花信号恰一次 + 坐标；Water 态查询三态分辨；Game 层
     //    bobberInWater 镜像翻转。②微飘动画 / ③水面轨迹粒子 / ④下沉加深与咬钩水花加强是 QML 视觉层——
     //    commit 钉 visual-only：驱动条件（bobberInWater && !hasBite）已被本探针行为级锁死）──
-    {
+    runLegMulti({ "t884 bite-visibility set: (1) cast-to-water splash -- bobberSplashed fires exactly once on the F"
+        "lying->Water settle edge with the exact float-surface coordinates (3s idle water stays at one; r"
+        "e-entry after drain/refill re-fires naturally), routed to burstWaterCast; (2) bobberInWaterAt di"
+        "scriminates all four states (born Flying false / settled Water true / Ground false) and the Game"
+        "-layer bobberInWater mirror flips true after a settle+pc.tick and false on reel -- the exact dri"
+        "ving condition chain for the QML idle bob animation + approach-trail particles; (3) visual-only "
+        "halves (idle micro-bob sin phase +-0.035 via NumberAnimation, deterministic golden-angle approac"
+        "h ripples every 380ms arriving-and-dying at the bobber, bite sink deepened 0.15->0.35 plus bite "
+        "splash strengthened 10->14 particles, all gated bobberInWater&&!hasBite&&worldRunning so ESC fre"
+        "ezes them) pinned visual-only in the commit" }, [&]() {
         World wV;
         wV.setWidth(48); wV.setDepth(48); wV.setHeight(96); wV.setSeed(81);
         EntityManager ents;
@@ -5534,7 +5744,7 @@ Item {
                              "plus bite splash strengthened 10->14 particles, all gated "
                              "bobberInWater&&!hasBite&&worldRunning so ESC freezes them) pinned "
                              "visual-only in the commit";
-    }
+    });
 
     // ── P-t886 鱼获反馈探针（行为级：获物抛物弹出落玩家旁可捡 + 经验球 1-6 XP）──
     //    pc 真 Consumer 端（ItemEntityManager + XpOrbManager 都注入）：甩竿 → settle → drive 到咬钩 → 收竿 →
@@ -5544,7 +5754,19 @@ Item {
     //    ③ review26 #21：XP 直接入账——恰一次 fishXpGained、量 ∈[1,6]、零经验球（MC 1.0 钓鱼 1-6 XP
     //       无球实体；旧口径「球落浮标格中心」随 #21 退役）；
     //    ④ 弹速 = 抛物解 |v| 镜像（近距 ≈8.1，随距离自适应）+ 耐久 -1（口径不变）。
-    {
+    runLegMulti({ "t886 catch feedback: the loot item is spawned C++-side (dispenser/dropper direct-call precedent)"
+        " as a solved ballistic throw from the bobber - spawn point column-scanned to the first non-water"
+        " cell above the bobber +0.225 (review26 #7: static water = cell top +0.225; the old fixed +0.35 "
+        "lift never left the water cell on flowing water where the surface frac is lower, and the item fl"
+        "oat-water branch zeroes vy and glues the drop to the surface, killing the arc), target = player "
+        "center, flight time clamp(0.45+0.055D, 0.5,1.4), vy = dy/T + g*T/2 (g=28 item gravity mirror) - "
+        "after 3s of item physics the drop rests within 2.2 blocks of the player center (accurately catch"
+        "able); review26 #21: XP credits directly via one fishXpGained of 1-6 amount routed to addXp (MC "
+        "1.0 fishing grants no xp-orb entity - the old orb sat up to 32 blocks away at the bobber, pure-m"
+        "agnet so it never chased the player) and zero orb entities spawn (credit-orb mutual exclusion gu"
+        "ards double-grant); fishCaught speed payload equals the solved |v| mirror and the QML onFishCaug"
+        "ht forwarder is retired (signal is now informational - double-spawn guard); rod -1 unchanged. Ma"
+        "trix probe drives a real PlayerController with ItemEntityManager + XpOrbManager injected" }, [&]() {
         World wC;
         wC.setWidth(48); wC.setDepth(48); wC.setHeight(96); wC.setSeed(82);
         EntityManager ents;
@@ -5664,7 +5886,7 @@ Item {
                              "informational - double-spawn guard); rod -1 unchanged. Matrix probe "
                              "drives a real PlayerController with ItemEntityManager + XpOrbManager "
                              "injected";
-    }
+    });
 
     // ── P-review26-7 流动水获物弹出点列扫探针（review26 #7：+0.35 固定抬升在 state≥2 未离水格）──
     //   旧口径 kFishCatchRiseOffset 0.35 只在静水（state 0，液面 7/8）恰好把生成点送出水格；流动水
@@ -5674,7 +5896,15 @@ Item {
     //   y = 格底+0.25，旧口径生成点 = +0.60 仍在水格 = FAIL 面）→ ① 生成点 y = 首非水格+0.225 = 池上空气格
     //   fy+2+0.225 且中心格非 Water；② 弧线不被吞：spawn 后 2 tick 水平位移 >0（浮水分支只动 Y）。
     //   t886 探针（静水 rig）已同步新口径断言，两水位全覆盖。
-    {
+    runLegMulti({ "review26-7 catch spawn escapes FLOWING water: the loot pop point is column-scanned from the bobb"
+        "er cell up to the first non-water cell (+0.225, same column-scan the item float-water branch its"
+        "elf uses) instead of a fixed +0.35 lift - on state>=2 water the surface frac is <=0.75 so the ol"
+        "d fixed lift left the spawn INSIDE the water cell and the float branch zeroed vy and swallowed t"
+        "he whole arc (the t886 'no visible catch flight' symptom recurring on rivers/overflow edges); ri"
+        "g: 3x3 pool at state 5 (surface 3/8, bobber settles at cell+0.25, old code spawned at +0.60 = st"
+        "ill in water) - spawn lands at the air cell above (non-water center cell) and the drop moves hor"
+        "izontally within 2 ticks (arc alive); the t886 static-water probe asserts the same column-scan v"
+        "alue (cell top +0.225)" }, [&]() {
         World wL;
         wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(84);
         EntityManager ents;
@@ -5759,7 +5989,7 @@ Item {
                              "at the air cell above (non-water center cell) and the drop moves "
                              "horizontally within 2 ticks (arc alive); the t886 static-water probe "
                              "asserts the same column-scan value (cell top +0.225)";
-    }
+    });
 
     // ── P-review26-10 载具乘客钉位帧 rideRevision 同步探针（review26 #10：mob 乘客 QML 刷新 20Hz vs 矿车
     //   60Hz 不同步——快速车载乘视觉锯齿）──
@@ -5772,7 +6002,10 @@ Item {
     //   零 bump（无空转发射），钉位精度 <0.01（rig 自证场景成立）；(b) 源码钉——Main.qml mob delegate 的
     //   position 绑定触碰 entityManager.rideRevision + entitymanager.h 的 Q_PROPERTY 三件套存在
     //   （t870/t889 源码钉先例）。
-    {
+    runLegMulti({ "review26-10 vehicle passenger pin syncs to the cart cadence: every frame a passenger-carrying ca"
+        "rt MOVES bumps rideRevision exactly once (dedicated ridersChanged emit, only the mob delegate po"
+        "sition binding touches it - the t500 12-binding revision face stays at the 20Hz gate) and parked"
+        " frames emit nothing; QML position binding touches rideRevision (source pin); travel" }, [&]() {
         // 专用世界（review26-5/6 先例：seed 77 全空带 y84+ 平台——不占主世界 rig 位，防下游槽位漂移）：
         //   平台 y84 + 北向直轨 10 格 y85（x6，z21..30）。
         World wR10;
@@ -5873,7 +6106,7 @@ Item {
                              " and parked frames emit nothing; QML position binding touches"
                              " rideRevision (source pin); travel" << travel;
         // 专用世界随作用域丢弃，无需清场。
-    }
+    });
 
     // ── P-review26-11 硬暂停冻结纯 QML 视觉 Timer 源码钉（review26 #11：ESC 时附魔字形仍持续发射/飞行）──
     //   EnchantGlyphFlow 两 Timer 的 running 只绑 active（appState=="playing" 派生）→ ESC 硬档（世界全停）
@@ -5884,7 +6117,10 @@ Item {
     //   NumberAnimation。豁免面（UI chrome / 输入冻结期输出必静态，清点表落 Review 与 commit message）：
     //   bobber 拍水 Timer（t884 已 gate）/ f3Refresh / faceTimer（书朝向，玩家冻结→值静态）/ 指南针钟表
     //   图标 / 聊天淡出 / 上下船 toast / 信息 toast / anvil·enchant 面板闪光 / CharacterPreview3D 预览。
-    {
+    runLegMulti({ "review26-11 hard pause freezes pure-visual QML Timers: enchant glyph spawn+flight, ambient runes"
+        ", block debris pool, water/lava/fire/portal strip flipbooks, book page-flip and love hearts all "
+        "gate worldRunning (MC Java singleplayer pause freezes particles); UI-chrome timers (toasts, chat"
+        " fade, panel flashes, preview pane) stay exempt (source pin)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         const auto readSrc = [&root](const QString &rel) {
@@ -5929,7 +6165,7 @@ Item {
                                  " worldRunning (MC Java singleplayer pause freezes particles);"
                                  " UI-chrome timers (toasts, chat fade, panel flashes, preview pane)"
                                  " stay exempt (source pin)";
-    }
+    });
 
     // ── P-t888 火伤节奏对齐 MC 探针（行为级 + 数值钉）──
     //    t888：① 常量钉（kFireDamageInterval 0.75s / kFireExtinguishChance 0 / kFireDuration 8——改值须
@@ -5938,7 +6174,13 @@ Item {
     //      后 fireTimer 到期熄灭）；③ mob 侧同链（ignite 直燃猪，2.25s ≥3 拍 = 期望伤 >1HP/s）；
     //      ④ 阴性对照：kFireExtinguishChance=0 下 8s 窗内零「提前熄灭」（fireTimer 单调递减到自然归零，
     //      不出现中途跳零）。t889 软档语义照跑口径：pc.tick() 在 !captured 下 step 照跑火烧段。
-    {
+    runLegMulti({ "t888 fire damage pacing aligned to MC: interval constant pinned at 0.75s (first pulse lands in ["
+        "0.55,1.15]s vs old 1.0s), random early extinguish retired to exactly 0 (MC normal fire never sel"
+        "f-extinguishes mid-burn; rain douse is a separate path) -> 10.2s standing-in-fire window yields "
+        "exactly 13 damage pulses with zero swallowed ticks (old 0.15 chance ate ~40% of them), afterburn"
+        " duration stays MC 8s; mob side shares the same constants via ignite() >=3 HP lost in 3s; player"
+        " contact ignition reuses the t344 burn chain (soft-tier worldRunning semantics, world keeps tick"
+        "ing while GUI open)" }, [&]() {
         World wF;
         wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(86);
         EntityManager ents;
@@ -6026,7 +6268,7 @@ Item {
                              "same constants via ignite() >=3 HP lost in 3s; player contact ignition "
                              "reuses the t344 burn chain (soft-tier worldRunning semantics, world keeps "
                              "ticking while GUI open)";
-    }
+    });
 
     // ── P-t891 点火源扩展探针（① 岩浆邻燃 / ② 烈焰弹全链）──
     //    (a) 岩浆邻燃：木板贴岩浆源 → 首个命中窗**点燃进燃烧态**（isBurningAt 真 + id 保留 = 直燃语义；
@@ -6040,7 +6282,22 @@ Item {
     //        创造不耗 + 挥手信号；生存消耗 1 弹；低头发射不自伤（玩家侧火球 shooter 豁免——发射后 HP 满 =
     //        无 mobAttackedPlayer 伤害，pc 无 PlayerState 注入以「burning 未翻转」间接证）；合成配方
     //        match 双证（煤版 / 木炭版各合 3 发）+ FireChargeId 0x25C 钉位 + 创造调色板含烈焰弹。
-    {
+    runLegMulti({ "t891 ignition sources extended: (a) lava neighbor ignition -- a wood plank hugging a lava source"
+        " now ENTERS the burning state on the first hit window (id preserved = direct-burn semantics via "
+        "the shared igniteFlammableAt entry; the core path previously only incinerated), then burns away "
+        "through the burn-timer endgame exclusively (single-roll dual-meaning: ignite wins over incinerat"
+        "e, no double consumption), a water-backed bookshelf stays intact and unburned (damp-fuel firewal"
+        "l at the ignite entry; a wet plank would fall to the legacy incinerate path which has no water g"
+        "uard - out of scope), and a bookshelf (flammable but outside the old isWoodLike set) now catches"
+        " too (entry gate widened to the full flammable table); (b) fire charge item: real-PC right-click"
+        " launches a Fireball along the look direction (reusing the emberling projectile chain), stone-wa"
+        "ll hit places standing fire in the approach air cell (100% per-entity ignite chance, flint-and-s"
+        "teel-homolog caliber), plank wall enters burning state directly, survival consumes one charge wh"
+        "ile creative does not, straight-down launch never self-hits (behavioral: player-side fireball sp"
+        "awned INSIDE the player's expanded hitbox with playerTargetable=true yields zero mobAttackedPlay"
+        "er and settles into floor fire - owner exemption via shooter==-1 skip), recipes blaze-powder+coa"
+        "l/charcoal+gunpowder -> 3 charges both match and the item sits in the creative material palette "
+        "at id 0x25C" }, [&]() {
         World wL;
         wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(91);
         const int fy = 83;
@@ -6277,5 +6534,5 @@ Item {
                              "exemption via shooter==-1 skip), "
                              "recipes blaze-powder+coal/charcoal+gunpowder -> 3 charges both match and "
                              "the item sits in the creative material palette at id 0x25C";
-    }
+    });
 }

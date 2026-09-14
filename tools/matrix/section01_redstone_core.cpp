@@ -36,7 +36,8 @@ void MatrixRun::section01_redstone_core()
     qInfo().noquote() << "=== t740 redstone activation matrix (World-layer harness) ===";
     int totalFail = 0;
     for (const SourceDef &src : sources) {
-        for (const RecvDef &rc : recvs) {
+        for (const RecvDef &rc : recvs)
+            runLeg(QStringLiteral("%1->%2").arg(QLatin1String(src.name), QLatin1String(rc.name)), [&]() {
             // 每个 case 独立 rig 位（列距 22 / 行距 3 隔离防串扰）。
             const auto [x0, z0] = nextSlot();
             const int srcX = x0;
@@ -80,14 +81,14 @@ void MatrixRun::section01_redstone_core()
             // 清场（隔离带外的本 rig 格全清，防跨 case 影响）。
             for (int i = 0; i < 6; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
             tickN(w, 2);
-        }
+        });
     }
 
     // ── 场景探针（用户点名 / 语义边界）──
     qInfo().noquote() << "=== scenario probes ===";
 
     // P1 火把后放 TNT（源先就位、稳态后再放接收器 —— 可达性反序）。
-    {
+    runLegMulti({ "torch-first, TNT placed last -> fires" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::RedstoneTorch, 0);
         tickN(w, 6);
@@ -100,10 +101,10 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0, kRigY, z0, BR::Air);
         w.setBlock(x0 + 1, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P2 粉长线（lever + 8 粉 + TNT）：末粉电力 = 16-9 = 7 > 0 → 应点燃；沿线电力级单调衰减 15→8。
-    {
+    runLegMulti({ "8-dust trail decays 15..8, fires TNT" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Lever, 1);
         for (int i = 1; i <= 8; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
@@ -119,10 +120,10 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| 8-dust trail decays 15..8, fires TNT";
         for (int i = 0; i <= 9; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P3 粉超距（lever + 16 粉 + TNT）：末粉电力 0 → TNT 不应点燃（15 格衰减上限语义）。
-    {
+    runLegMulti({ "16-dust out-of-range: TNT must NOT fire" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Lever, 1);
         for (int i = 1; i <= 16; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
@@ -134,10 +135,11 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| 16-dust out-of-range: TNT must NOT fire";
         for (int i = 0; i <= 17; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P4 火把立方块上、粉在地面斜下邻（经典 torch-on-block 布线）：t740 修复后应喂粉 15 + 灯亮；断火把降沿灯灭。
-    {
+    runLegMulti({ "torch-on-block -> diagonal-down dust power=15, lamp on (t740 fix)",
+               "torch removed -> diagonal dust 0, lamp off" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Stone);                 // 支撑块
         w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);  // 火把立其上
@@ -161,11 +163,11 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0 + 1, kRigY, z0, BR::Air);
         w.setBlock(x0 + 2, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P4b 复审 #6：墙上挂的红石火把（attach 低 3 位 1..4）**不**向斜下角粉供电 —— 旧 seeding 不读
     //   attach 形态，墙上装饰火把把墙脚一圈粉点亮（意外通电）。立式（P4）语义不变（正对照）。
-    {
+    runLegMulti({ "wall torch (TorchOnNX) -> diagonal-down dust stays 0, lamp off (review #6)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0 - 1, kRigY + 1, z0, BR::Stone);            // 墙（火把支撑，-X 邻）
         w.setBlock(x0,     kRigY + 1, z0, BR::RedstoneTorch, BR::TorchOnNX); // 墙挂火把（支撑在 -X）
@@ -183,10 +185,10 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0 + 1, kRigY,     z0, BR::Air);
         w.setBlock(x0 + 2, kRigY,     z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P5 火把立在 TNT 顶面（TNT 是火把支撑）：火把供下邻强电 → 应点燃。
-    {
+    runLegMulti({ "torch standing ON TNT -> fires" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::TntBlock, 0);
         w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);
@@ -198,10 +200,10 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0, kRigY, z0, BR::Air);
         w.setBlock(x0, kRigY + 1, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P6 红石火把 NOT 门（t657 语义抽查）：支撑块被供电 → 火把熄灭（OffFlag）。
-    {
+    runLegMulti({ "torch NOT-gate: powered support -> torch off" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Stone);
         w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);
@@ -216,11 +218,11 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0, kRigY + 1, z0, BR::Air);
         w.setBlock(x0 + 1, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P7 拉杆直接邻 TNT（既有历史直连路径之外的电力路径）：扳上 → 电力点燃。
     //   （游戏内右键拉杆另有 t490 直连四邻 TNT 点火——与本电力路径并存；本测只验电力侧。）
-    {
+    runLegMulti({ "lever(on) adjacent TNT (power path) -> fires" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Lever, 1);
         w.setBlock(x0 + 1, kRigY, z0, BR::TntBlock, 0);
@@ -232,10 +234,10 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0, kRigY, z0, BR::Air);
         w.setBlock(x0 + 1, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P8 地面火把 → 同层粉×3 → TNT（用户字面场景「红石火把和红石粉激活 TNT」）：应点燃 + 粉级 15/14/13。
-    {
+    runLegMulti({ "floor torch -> same-level 3-dust -> TNT fires (user scenario)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::RedstoneTorch, 0);
         for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::RedstoneDust, 0);
@@ -251,10 +253,10 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL") << "| floor torch -> same-level 3-dust -> TNT fires (user scenario)";
         for (int i = 0; i <= 4; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P9 火把立方块上 + 地面粉×3 → TNT（t740 斜下供粉修复的端到端用户场景）。
-    {
+    runLegMulti({ "torch-on-block -> diagonal 3-dust -> TNT fires (t740 fix e2e)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Stone);
         w.setBlock(x0, kRigY + 1, z0, BR::RedstoneTorch, 0);
@@ -268,14 +270,14 @@ void MatrixRun::section01_redstone_core()
         for (int i = 0; i <= 4; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         w.setBlock(x0, kRigY + 1, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P10 t739 阶梯爬坡供电（平地粉 → 上台阶 → 平地粉；渲染改 L 形贴边爬升后的电力侧回归）：
     //   电力语义不动（爬墙斜角仍算一跳衰减，t702/t738/t740 修复保持）—— lever + 平地粉×2 + 一格高
     //   石阶 + 阶上粉 + 阶后平地粉 + 灯：全线导通（灯亮）且电力 15/14/13/12 逐粉 -1（爬墙计一跳）；
     //   连接位高半字节按「水平邻粉 + 爬墙斜角」置位（渲染 L 形贴边（低处平铺 + 竖直贴面段）读的
     //   正是这些位 + chunkgeometry 三高探针——本探针锁 state 侧不回退）。
-    {
+    runLegMulti({ "stair-step climb over 1-block step: power 15/14/13/12, lamp on (t739)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::Lever, 1);
         w.setBlock(x0 + 1, kRigY, z0, BR::RedstoneDust, 0);     // 平地粉
@@ -309,7 +311,7 @@ void MatrixRun::section01_redstone_core()
         for (int i = 0; i <= 5; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         w.setBlock(x0 + 3, kRigY + 1, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P8 板压灯竖直路径（t743 ①）：压力板直接放红石灯正上方（板 = 灯的 +Y 邻，向下供电）。驱动序列镜像
     //   真实路径：先放未压板（玩家放置 state=0）→ 稳态 → 再经 **5 参数 setBlock 只写 bit0**（与
@@ -318,7 +320,7 @@ void MatrixRun::section01_redstone_core()
     //   （火把斜下喂粉）之外单独验证——notePowerWrite 锚点 → 锚点 6 邻接收器扫描含 -Y 邻灯。
     //   t743 ②（掉落物压木板）的判定在 Game 层（ItemEntityManager resting 支撑格 = floor(pos.y())-1，
     //   本工具只编 Core+World 两层测不到）；掉落物压板在 World 层与玩家踩板同写 bit0 → 电力侧由本探针覆盖。
-    {
+    runLegMulti({ "plate directly on lamp (vertical down-power), press/release edges (t743)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0, kRigY, z0, BR::RedstoneLamp, 0);               // 灯
         w.setBlock(x0, kRigY + 1, z0, BR::WoodPressurePlate, 0);      // 板在灯正上方（放置态，未压）
@@ -335,14 +337,14 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0, kRigY, z0, BR::Air);
         w.setBlock(x0, kRigY + 1, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P9 机关族逐态几何映射（t744 ②回归锁）：用户复盘「按钮放地面变正方形」，静态排查 + 全链 mesher dump
     //   实证贴地态自 t662 起就是贴地扁薄盒（6/16×2/16×6/16，Y[0,2/16]）——报告疑含陈旧 exe 因素（同 t740
     //   复盘）。本探针把「state 附着编码 → mechBoxes 几何」逐态断言锁进 harness（地面/四墙 × 激活两态 +
     //   放置法线映射），未来任何把地面态画回墙面姿态 / 厚边离墙的回归直接 FAIL。纯 Core 断言（mechBoxes
     //   静态，渲染与 raycastAABBs 选中同源——锁住渲染即同时锁住选体）。
-    {
+    runLegMulti({ "mech per-attach geometry: floor=flat-thin-box, wall=flush-to-support, decode parity (t744)" }, [&]() {
         bool ok = true;
         const float t = 1.0f / 16.0f;
         const quint8 mechIds[3] = { BR::Lever, BR::WoodButton, BR::StoneButton };
@@ -411,7 +413,7 @@ void MatrixRun::section01_redstone_core()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| mech per-attach geometry: floor=flat-thin-box, wall=flush-to-support, decode parity (t744)";
-    }
+    });
 
     // ── P-t992 按钮几何统一探针（墙面口径为基准）：用户「按钮放地上和放墙上大小不统一（以墙上为准）」
     //    +「墙上形态比例也不协调」→ mechBoxes 按钮板统一为 MC 比例 6/16 宽 × 4/16 高 × 厚 2/16（按下
@@ -423,7 +425,10 @@ void MatrixRun::section01_redstone_core()
     //    (iii) 钮脸位置钉：墙面钮 y 6..10 居中（比例协调 + 与墙 +Z 形同宽），地面钮宽沿 X 5..11（墙面
     //          同宽口径）× 深 6..10；厚边贴支撑面（P9 已锁，随 t992 复锁）；
     //    (iv)  源码钉：mechBoxes 按钮 t992 契约锚 + PX 墙面行字面量（渲染/射线/查看器三消费端同源自动）。
-    {
+    runLegMulti({ "t992 button geometry unified to the wall baseline: plate 6/16 wide x 4/16 tall x 2/16 thick (pre"
+        "ssed halves thickness only) on all five attach faces (floor footprint was a 6x6 nub vs the wall "
+        "6x2 sliver; MC-proportioned 4/16 tall face centered at mid-block), flush to support, world meshe"
+        "r / raycast / viewer preview consume the same mechBoxes source" }, [&]() {
         bool ok = true;
         const float t = 1.0f / 16.0f;
         const quint8 btnIds[2] = { BR::WoodButton, BR::StoneButton };
@@ -493,7 +498,7 @@ void MatrixRun::section01_redstone_core()
                              "(floor footprint was a 6x6 nub vs the wall 6x2 sliver; MC-proportioned 4/16 "
                              "tall face centered at mid-block), flush to support, world mesher / raycast / "
                              "viewer preview consume the same mechBoxes source";
-    }
+    });
 
     // ── P-t993 玻璃增实探针（材质轴，pack 两态同调）：用户「玻璃透明度还是太透明」→ 世界玻璃段材质
     //    opacity 0.30→0.45（迭代史 t405 0.45 → t899 0.30 → t993 0.45；与手持玻璃立方同值，收口 t899 起
@@ -506,7 +511,11 @@ void MatrixRun::section01_redstone_core()
     //        实体感基底，且不触碰 terrain 段 Mask/alphaCutoff 契约、无透明段排序新面）。
     //    (c) pack 两态一致钉：resourcepackmanager.cpp tileFilenameMap 含 {68, glass.png}（pack-on 覆写
     //        tile 68 像素）而 (a) 切片内 opacity 赋值唯一且无条件（不随 pack 分支）→ 材质增实两态同调。
-    {
+    runLegMulti({ "t993 glass solidified one notch: world glass segment material opacity 0.30 -> 0.45 (t405 0.45 / "
+        "t899 0.30 / t993 0.45 iteration history; unified with both held-cube glass paths = three glass c"
+        "onsumers same value), texture stays fully opaque per the water-mode 'opaque texture + translucen"
+        "t material' contract (no Mask/alphaCutoff coupling, no sort-order new faces), pack-on replaces t"
+        "ile 68 pixels only so the material bump tunes both pack states identically" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -575,7 +584,7 @@ void MatrixRun::section01_redstone_core()
                              "material' contract (no Mask/alphaCutoff coupling, no sort-order new faces), "
                              "pack-on replaces tile 68 pixels only so the material bump tunes both pack "
                              "states identically";
-    }
+    });
 
     // ── P-t994 刷怪笼迷你生物贴图链探针：用户「笼内迷你生物只有模型没有贴图、纯灰色」→ 根因 = t786 原稿
     //    把贴图查表属性（miniProgTex/miniPackTex）声明在 miniMobBob 上，而全部消费端引用
@@ -592,7 +601,13 @@ void MatrixRun::section01_redstone_core()
     //    (c) 三消费端同源钉：世界 delegate（Main.qml mobHost）/ 图鉴（ResourceBrowser.qml）/ 笼迷你共享
     //        MobModel（几何一处修多处共享，t782 纪律）；笼迷你解码走 entityManager.spawnerMobTypeForState
     //        （与 tickSpawners 同一权威）两处调用在场。
-    {
+    runLegMulti({ "t994 spawner cage mini texture chain: the t786 texture-lookup properties live on miniMobBob so e"
+        "very consumer (MobModel.packTextured / material baseColorMap+baseColor+alphaMode / eye visibilit"
+        "y) references miniMobBob - the broken miniMobSpin.* form is extinct (it silently evaluated undef"
+        "ined, made undefined !== null constantly true, and starved the mini of its texture = the user's "
+        "shape-correct but pure-gray mini); all 14 spawn eggs round-trip mobTypeForSpawnEgg -> spawnerSta"
+        "teForMob -> spawnerMobTypeForState and every type has a QML mini-table row; world delegate / gal"
+        "lery / cage mini share the same MobModel geometry source" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -673,7 +688,7 @@ void MatrixRun::section01_redstone_core()
                              "mobTypeForSpawnEgg -> spawnerStateForMob -> spawnerMobTypeForState and every "
                              "type has a QML mini-table row; world delegate / gallery / cage mini share the "
                              "same MobModel geometry source";
-    }
+    });
 
     // P10 t733 铁轨失撑掉落（R19.11 三族统一；World::checkRailOnEdit 单一入口覆盖全部破坏路径）：支撑位被清
     //   为 Air → 正上方铁轨坍落为掉落物（blockDroppedAsItem，dropId=自身；连接位 / 通电位丢弃）。本探针驱动
@@ -681,7 +696,7 @@ void MatrixRun::section01_redstone_core()
     //   逐破坏格：轨在球外幸存、支撑被炸）③ TNT 点火变实体（clearBlockSilent 清支撑）。另锁两个边界：
     //   ④ 上半砖支撑（isTopFlushSupport 正分支）——清侧邻不掉 / 清半砖本体才掉；⑤ 直破铁轨本格零掉落
     //   （守卫 isRail(oldId) 防与 finishMiningAt 通用 drop 双掉）。
-    {
+    runLegMulti({ "rail support-drop on mine/blast/tnt-prime for all 3 kinds (t733)" }, [&]() {
         int railDrops = 0;
         quint8 lastDropId = 0; int lastDropX = -1, lastDropY = -1;
         const QMetaObject::Connection dropConn =
@@ -767,7 +782,7 @@ void MatrixRun::section01_redstone_core()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| rail support-drop on mine/blast/tnt-prime for all 3 kinds (t733)";
-    }
+    });
 
     // P11 t737 铁轨环线探针（贴图象限 + 矿车绕圈）：铺 3×3 环（8 格轨、4 拐角）→
     //   (a) 连接位断言：四拐角 state 恰为各自两邻臂位（railConnections 权威实算）；
@@ -778,7 +793,7 @@ void MatrixRun::section01_redstone_core()
     //       每拐角进/出向垂直（真转弯非直行穿出）、Y 钉轨面；
     //   (d) 空车绕圈：玩家「追着推」（静止即续推）→ 同 footprint / 转弯断言 + 车头 yaw 覆盖全部
     //       4 基数向（t737：stepCartAlongRail 过弯更新 yaw —— 旧版空车过弯车头不转）。
-    {
+    runLegMulti({ "rail loop: corner quadrants + ridden/empty cart orbit with turning + yaw (t737)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         const int cx = x0 + 1, cz = z0 + 1; // 环心（环 = 心外 8 格）
         const auto isRing = [&](int x, int z) {
@@ -935,7 +950,7 @@ void MatrixRun::section01_redstone_core()
             for (int dz = -1; dz <= 1; ++dz)
                 w.setBlock(cx + dx, kRigY, cz + dz, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P12 t736 探测轨真实路径（真实矿车实体驱动，含空车；区别于矩阵主体的「直接写 state」驱动）：直线轨
     //   Rail - DetectorRail - Rail - Rail，探测轨侧邻红石灯。占用统一重扫在 tickPushedCarts 末尾
@@ -948,7 +963,10 @@ void MatrixRun::section01_redstone_core()
     //       探测格 → bit4 清 + 灯灭（离开沿降断电；用户验收「车离开 → 信号断开」）；
     //   (c) 被骑路径回归（tryMount + tickRiddenCart 与 tickPushedCarts 同帧双调 —— 与 PlayerController
     //       骑乘分支同序）：停驻被骑 → 灯亮（t680 ③ 停驶恒供电语义经统一 pass 保留），W 推离 → 灯灭。
-    {
+    runLegMulti({ "empty cart parked on detector -> bit4 + adjacent lamp on (t736)",
+               "idempotent guard: steady frames zero state writes, lamp stays on (t736)",
+               "empty cart pushed off detector -> bit4 clear + lamp off (leave edge, t736)",
+               "ridden path regression: parked-on lit, rode away -> off (t736)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         const int detX = x0 + 1;
         const int lampX = x0 + 1, lampZ = z0 + 1;
@@ -1030,7 +1048,7 @@ void MatrixRun::section01_redstone_core()
         for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY, z0, BR::Air);
         w.setBlock(lampX, kRigY, lampZ, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P12b t769 矿车坡道行驶探针（Entities 层 MinecartManager 直编，同 P11/P12 模式）：平-坡-平轨道
     //   （x0..x0+1 @Y 低平 + 坡格 x0+1@Y 东邻 x0+2@Y+1 + x0+2..x0+3 @Y+1 高平 —— 1:1 上坡）。
@@ -1040,7 +1058,9 @@ void MatrixRun::section01_redstone_core()
     //   (b) 空车下坡（顶平台 spawn + 玩家向西续推，同 P12(b) 跑法）：断言滑到低平台停驻死端 (x0+0.5,
     //       Y+rideH)（旧版在坡顶格心 x0+2.5 停死，复现「下不去」）；沿途坡段 Y 同款连续插值。
     //   (c) 坡格中心直接 spawn 的静止车：初始俯仰即贴合坡面（车头朝上坡向）——不需先行驶（放置即平行）。
-    {
+    runLegMulti({ "cart climbs ramp: reaches top dead-end, Y interpolates, pitch ~+45 on slope / 0 on flat (t769)",
+               "cart descends ramp: coasts to bottom dead-end, Y interpolates, pitch ~-45 (nose downhill) (t769)",
+               "cart spawned on slope cell: parked body already parallel to ramp (+45) (t769)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         const float rideH = 0.45f; // kCartRideH（P11 同款镜像值：轨格 cell 底 + 1/16 板 + 车底偏移）
         // t769 教训：本 slot 的地形可达 y≥42（「40 以上必空」假设在该列失效）—— 坡轨上方格若被地形实心
@@ -1146,7 +1166,7 @@ void MatrixRun::section01_redstone_core()
         carts.clearAll();
         for (int i = 0; i <= 3; ++i) w.setBlock(x0 + i, kRigY + ((i >= 2) ? 1 : 0), z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P12c t770 矿车弯道贴轨约束探针（Entities 层 MinecartManager 直编，同 P11/P12/P12b 模式）：L 形轨
     //   （南 2 直 + 拐角 + 东 3 直）。用户报「弯道瞬间 90° 转向 → 慢速前进没触发旋转就脱轨 / 倒退大概率脱轨」。
@@ -1159,7 +1179,9 @@ void MatrixRun::section01_redstone_core()
     //   (c) 倒退过弯（「倒退大概率脱轨」复现）：东行途中反踩（wish=-dir → 负速倒行、头向不变）→ 过拐角后
     //       必须落回南腿中心线继续倒行。修前：到心重选结果不持久化（sgn<0 不写回 dir）→ 下一帧 travel 按
     //       旧轴横切出轨（滑向西场外停驻）FAIL；修后头向 yaw=180（倒行头向=新臂取反）、终停南死端格心。
-    {
+    runLegMulti({ "slow crawl into corner + friction park stays on centerline (t770)",
+               "mid-cell relaunch at corner clamps to exit-arm centerline, yaw 270 (t770)",
+               "reverse ride through corner stays on centerline, yaw 180, parks at dead end (t770)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         // t769 教训：先净空轨道 box（地形可达 y≥42，scanRailColumn 实心遮挡断扫会把车判离轨冻死）。
         for (int dx = 0; dx <= 3; ++dx)
@@ -1329,7 +1351,7 @@ void MatrixRun::section01_redstone_core()
         for (int dx = 0; dx <= 3; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Air);
         for (int dz = -2; dz <= -1; ++dz) w.setBlock(x0, kRigY, z0 + dz, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // P13 t759 要塞传送门房净空探针（worldgen 回归，非红石 —— 同 t737 环线先例收录）。断言：(a) 12 框架环
     //   逐格仍在记录层 strongholdPortalY（B5 三坐标一致性的生成侧镜像 —— t759 只抬顶板不动框架层）；
@@ -1341,7 +1363,8 @@ void MatrixRun::section01_redstone_core()
     //   生成即含 1 座要塞 → 零额外生成开销，且 rig 全在 y=41 浅层不触地下要塞）；主世界无要塞时（未来
     //   worldgen 常量演进）独立 96×96 世界扫种子兜底 —— 尺寸取 96 与主世界同：要塞 kMargin=23 抖动域，
     //   bx=60 候选族恒过边界（60+5 < 96-23）→ 每种子 ~64% 命中，24 发上限仅防退化。
-    {
+    runLegMulti({ "stronghold portal room headroom: 4 air above frames + roof at +5, ring intact at recorded Y, cor"
+        "ridor/stair clearance + barred grate entry (t759/t1002)" }, [&]() {
         const World *pw = &w;
         World fallbackW;
         if (!pw->hasStronghold()) {
@@ -1423,12 +1446,13 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| stronghold portal room headroom: 4 air above frames + roof at +5, ring intact at"
                              " recorded Y, corridor/stair clearance + barred grate entry (t759/t1002)";
-    }
+    });
 
     // ── t762 黑曜石挖掘规则探针（纯 Core/Game 表查询，无 World 交互）：① 无附魔钻石镐 miningTime == 12.0s
     //    （hardness 96 / speedMul 8，t762 验收值）；② 仅钻石镐 canHarvest（掉落），木/石/铁/金/铜镐全 false
     //    （无掉落）；③ 低档镐 miningSpeedMul == 1.0（无加成恒慢，96s 极慢）+ 空手 canHarvest false。
-    {
+    runLegMulti({ "obsidian mining rule: diamond pick 96/8=12.0s + drop; wood/stone/iron/gold/copper pick no bonus "
+        "(1.0x) and NO drop (t762)" }, [&]() {
         // 工具段枚举值即绝对物品 id（PickaxeWood=0x101 起；ToolIdBase=0x100 仅是段下界哨兵，非加数）。
         const auto diaId  = int(ToolRegistry::PickaxeDiamond);
         const auto ironId = int(ToolRegistry::PickaxeIron);
@@ -1451,14 +1475,16 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| obsidian mining rule: diamond pick 96/8=12.0s + drop; wood/stone/iron/gold/"
                              "copper pick no bonus (1.0x) and NO drop (t762)";
-    }
+    });
 
     // ── t763 附魔数值生效链探针（纯 Game 层表 + Hotbar 实例，无 World/QML）：① 锐锋→攻击伤害输入链
     //    （钻石剑基础 7 + 锐锋 III ×0.5 = 8.5，attackMob 同公式；tooltip 文本源 enchantListText 出「锐锋 III」）；
     //    ② 保护族 EPF 路由（含本任务补的 Emberling=15 → 火焰保护 / EnderPearlTp=16 → 摔落保护两条新路由，
     //    修前二者漏专项加成）；③ 耐久附魔消耗概率（控制组无附魔必损；耐久 III 400 次受击损耗 ≈300，
     //    75% 损 / 25% 跳过，容差 ±40≈4.6σ 防偶发 FAIL）。
-    {
+    runLegMulti({ "enchant effect chain: sharpness 7+1.5=8.5 + tooltip text source; EPF routing fire/emberling/pear"
+        "l-tp/feather/protection; unbreaking-III wear over 400 hits in [260,340], no-enchant control exac"
+        "t 50 (t763)" }, [&]() {
         Hotbar hb;
         // ① 锐锋伤害输入链：基础伤 + 0.5*级 与 attackMob（playercontroller t476 链）同式。
         const int sharp3 = EnchantRegistry::pack(int(EnchantRegistry::Sharpness), 3);
@@ -1512,7 +1538,7 @@ void MatrixRun::section01_redstone_core()
                           << "| enchant effect chain: sharpness 7+1.5=8.5 + tooltip text source; EPF routing "
                              "fire/emberling/pearl-tp/feather/protection; unbreaking-III wear over 400 hits in "
                              "[260,340], no-enchant control exact 50 (t763)";
-    }
+    });
     // ── P-t887b 成就小地图拖拽源码钉（review27 #2；行为级 headless 不可达——MouseArea drag 需真窗口
     //    输入，退路 = review Lessons 3 源码钉「首次交互断绑定」语句面）──
     //    旧版病灶：treeMinimap 声明 anchors.top/right 却用 drag.target 写 x/y——锚布局每次 polish 把
@@ -1524,7 +1550,15 @@ void MatrixRun::section01_redstone_core()
     //        `if (!anchors.top && !anchors.right)` 不存在（负向）；(d) drag 边界按父 treeViewport 口径
     //        （父链 clip: true，取舍 = 约束在视口内；旧版 progressOverlay 全窗口径 = 跨坐标空间错位），
     //        旧 `progressOverlay.width - 24` 边界不回归（负向）；(e) 视口缩放经 Connections 钳回。
-    {
+    runLegMulti({ "t887b minimap drag source pin: first-interaction anchor break (onPressed clears anchors.top/righ"
+        "t to undefined - Qt Quick hard constraint: anchors override imperative x/y writes, two qml.exe r"
+        "igs verified the clear makes writes stick), userMoved flag guard (anchors.top reads back a truth"
+        "y AnchorLine even after clearing, the old !anchors.top guard form was structurally dead - pinned"
+        " absent), drag bounds in parent treeViewport space (clip:true ancestor, decision pinned in comme"
+        "nts - old progressOverlay full-window bounds were a cross-space mismatch, pinned absent), and vi"
+        "ewport-resize re-clamp via Connections; t928 adds the final chain link -- drag.target: treeMinim"
+        "ap itself is pinned (without the wiring line the cleared anchors and guards would still drag not"
+        "hing)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
@@ -1571,7 +1605,7 @@ void MatrixRun::section01_redstone_core()
                                  "(without the wiring line the cleared anchors and guards would "
                                  "still drag nothing)";
         }
-    }
+    });
 
     // ── P-t890 燃烧方块侧壁接触点燃探针（AABB 接触扫描行为级 + 阴性轮）──
     //    t890：旧三格判定漏「贴燃烧方块侧壁走」——玩家 AABB 半宽 0.3 身在邻格、中心列不含燃烧格 → 永不
@@ -1581,7 +1615,17 @@ void MatrixRun::section01_redstone_core()
     //    「rig 里别的东西点的火」）；(c) 站顶：站燃烧板顶（脚底支撑面 = 燃块）→ 点燃；(d) 斜对角隔离：
     //    燃烧格仅在玩家 AABB 对角外一格（XZ 各隔 0.3+ 缝）→ 不点燃（AABB 过滤生效，无误伤面）；
     //    (e) mob 侧壁同链（pig 贴燃烧墙 → isBurningAt(mob) 真）。
-    {
+    runLegMulti({ "t890 side-contact ignition review: walking flush against a burning plank wall now ignites the pl"
+        "ayer (full-cell AABB overlap scan over own footprint cells plus orthogonal neighbors, kTouchSkin"
+        "=0.002 absorbs the 1e-4 collision snap gap - cactus contact-damage predicate family precedent; o"
+        "ld center-column 3-cell check structurally missed it since the body rests in the adjacent cell),"
+        " standing on a burning plank top still ignites (support-face branch now Y-bounded pMinY<=footY+s"
+        "kin per review27 #3 - airborne hover 0.5 above the burning top (jump-over/fall-past window, foot"
+        "Y-1 = burning cell, footprint covering it) does NOT ignite on first tick, then falling onto the "
+        "top re-ignites), diagonal-only burning cell one cell out does NOT ignite (AABB filter rejects co"
+        "rner false positives), an unlit identical walk stays clean (negative control), and the mob side "
+        "shares the same scan (pig hugging the wall catches fire); lava keeps center-column fluid-contact"
+        " semantics untouched" }, [&]() {
         World wS;
         wS.setWidth(48); wS.setDepth(48); wS.setHeight(96); wS.setSeed(89);
         EntityManager ents;
@@ -1716,7 +1760,7 @@ void MatrixRun::section01_redstone_core()
                              "unlit identical walk stays clean (negative control), and the mob side "
                              "shares the same scan (pig hugging the wall catches fire); lava keeps "
                              "center-column fluid-contact semantics untouched";
-    }
+    });
 
     // ── t798 效率附魔审计探针（纯 Core/Game 表查询，无 World/QML）：① 等级分档递增 —— 机制等价 MC 1.0
     //    「效率在工具基础速上**加法**叠 level²+1」（I +2 / II +5 / III +10 / IV +17 / V +26）：木镐
@@ -1729,7 +1773,9 @@ void MatrixRun::section01_redstone_core()
     //    +2.5/级（对族）、击退 +50%/级、燃焰 4s/级、时运 ×(1+[0,level])（限矿）、保护族 EPF 通用 1 / 专项
     //    2 每级、耐久按级概率跳过、精准采集 / 水中亲和 maxLevel 1 二值 —— 全部等级分档，无「统一不分档」
     //    同病（仅效率旧实现犯，本任务已修）。
-    {
+    runLegMulti({ "efficiency audit: wood pick stone tiered 0.750/0.375/0.214/0.125/0.079/0.054s (additive lvl^2+1 "
+        "on tool base, MC 1.0); eff-V pick on dirt/sand == no-enchant 0.5s; iron pick eff-III stone 0.094"
+        "s / wood shovel eff-I dirt 0.156s cross; wood pick eff-V obsidian still 96s harvest-gate (t798)" }, [&]() {
         const auto woodPick   = int(ToolRegistry::PickaxeWood);
         const auto ironPick   = int(ToolRegistry::PickaxeIron);
         const auto woodShovel = int(ToolRegistry::ShovelWood);
@@ -1766,14 +1812,15 @@ void MatrixRun::section01_redstone_core()
                              "(additive lvl^2+1 on tool base, MC 1.0); eff-V pick on dirt/sand == no-enchant 0.5s; "
                              "iron pick eff-III stone 0.094s / wood shovel eff-I dirt 0.156s cross; wood pick "
                              "eff-V obsidian still 96s harvest-gate (t798)";
-    }
+    });
 
     // ── t755 死亡态硬锁探针（纯 Game 层 PlayerState，无 World/QML/PlayerController）：
     //    ① 致死一击把 health 精确落库 0（死亡屏心条全空的前提——修前若落 1 即「半颗心」症状之一）；
     //    ② heal() 死亡免疫：dead 态治疗被拒（修前无守卫 → 致死 tick 尾部饥饿回血 healed(1) 经呈现层
     //       路由把 0 加回 1 = 用户报告的死亡屏半颗心根因）；③ respawn 复位链：清 dead + 拉满血饥 +
     //       死因复位（重生后输入解锁 / 血量回满的前置状态链）。
-    {
+    runLegMulti({ "death hard-lock state chain: lethal hit lands health=0 + dead + cause; heal() rejected while dea"
+        "d (half-heart-after-death root); respawn clears dead + full restore (t755)" }, [&]() {
         PlayerState ps;
         ps.setHealth(1);
         ps.takeDamage(3, int(PlayerState::Fall));   // 致死一击（1-3 → clamp 0）
@@ -1794,7 +1841,7 @@ void MatrixRun::section01_redstone_core()
                           << "| death hard-lock state chain: lethal hit lands health=0 + dead + cause; "
                              "heal() rejected while dead (half-heart-after-death root); respawn clears "
                              "dead + full restore (t755)";
-    }
+    });
 
     // ── t852 死亡掉落链探针（Game 层 PlayerController + Hotbar 直编，t814 真消费端模式；spawnItem 消费端
     //    = Main.qml onSpawnItem → itemEntities.spawnItem 的等价直连计数）：
@@ -1805,7 +1852,9 @@ void MatrixRun::section01_redstone_core()
     //       TypeError 静默掐断死亡处理器）→ dropAllItems 从未被调。本探针锁 C++ 本体链恒掉恒清；QML 路由
     //       修复的静态契约钉在 Main.qml onDied 头注释 + try/finally 收口，行为面人工目视）；
     //    ③ 幂等——背包已空时再调零发射（死亡只掉一次，无重复实体）。
-    {
+    runLegMulti({ "death drop chain: hotbar+main+held+armor all scatter-dropped (3x3, y=death cell) with full 4-slo"
+        "t ench shape/name/durability passthrough, inventory cleared on drop, second call emits nothing ("
+        "t852)" }, [&]() {
         PlayerController pc;   // 无窗口直造（componentComplete 不触发，无 16ms 定时器；m_pos=出生常量 80,80,80）
         Hotbar hb;
         pc.setHotbar(&hb);
@@ -1865,7 +1914,7 @@ void MatrixRun::section01_redstone_core()
                           << "| death drop chain: hotbar+main+held+armor all scatter-dropped (3x3, y=death "
                              "cell) with full 4-slot ench shape/name/durability passthrough, inventory "
                              "cleared on drop, second call emits nothing (t852)";
-    }
+    });
 
     // ── t756 出生点选择探针（World 层 findSpawnColumn 多种子回归；独立小世界逐种子重生成，不动主世界
     //    rig）：种子 42（用户报告「出生在树里」的复现种子）+ 4 个互异回归种子，断言每个世界记录的出生列
@@ -1874,7 +1923,9 @@ void MatrixRun::section01_redstone_core()
     //    占 h+1 同遭否决）；③ heightmapAt == h（当前列首个非空恰为地表 → 头顶无任何遮蔽，非树冠/洞顶）。
     //    世界取 96×96×96（高 96 > 树冠顶 ~82 → 树正常生成，探针真正行使避树；48 高主世界地表钳顶无树，
     //    用它探针会空转）。h 断言用 min(heightAt, height-1) 同 findSpawnColumn / generate 填充式。
-    {
+    runLegMulti({ "spawn column search: seeds {42,7,1337,2024,99} all resolve to standable bare surface — solid/sno"
+        "w-layer support, feet+head cells air, heightmap==heightAt (no trunk/canopy/water overhead) (t756"
+        ")" }, [&]() {
         World spawnW;
         spawnW.setWidth(96);
         spawnW.setDepth(96);
@@ -1903,7 +1954,7 @@ void MatrixRun::section01_redstone_core()
                           << "| spawn column search: seeds {42,7,1337,2024,99} all resolve to standable "
                              "bare surface — solid/snow-layer support, feet+head cells air, heightmap=="
                              "heightAt (no trunk/canopy/water overhead) (t756)";
-    }
+    });
 
     // ── review-d #20 尺寸 setter seedChanged 探针（World 层信号链；Review 2026-08-23 #20 潜伏坑半边）：
     //    setWidth/setDepth/setHeight 重建世界（generate 内 findSpawnColumn 按新尺寸重选出生列）但修前不
@@ -1913,7 +1964,9 @@ void MatrixRun::section01_redstone_core()
     //    不节流（消费端幂等复位、generate 本就各跑一次，见 world.cpp setter 头注释）。PlayerController
     //    侧采用链（adoptSpawnColumn / onWorldSeedChanged 复位）为 QQuickItem 派生类，不接入本 GUI-free
     //    测试（QML enterWorld 接线人工目视）。
-    {
+    runLegMulti({ "review-d #20 size setters emit seedChanged (world-identity reset notification: width/depth/heigh"
+        "t rebuild each notifies exactly once, same-value guard silent, spawn column getter in new bounds"
+        ") (Review 2026-08-23 #20)" }, [&]() {
         World wR20;
         int seedSigs = 0;
         QObject::connect(&wR20, &World::seedChanged, &wR20, [&]() { ++seedSigs; });
@@ -1934,7 +1987,7 @@ void MatrixRun::section01_redstone_core()
                              "notification: width/depth/height rebuild each notifies exactly once, "
                              "same-value guard silent, spawn column getter in new bounds) "
                              "(Review 2026-08-23 #20)";
-    }
+    });
 
     // ── review-d #22 农夫计数回放链式补前置探针（Game 层 PlayerProgress；Review 2026-08-23 #22）：
     //    t752 把 farmer 由独立根重挂 time_to_farm 下 → 「cropsHarvested≥10 但锄头线未解锁」的旧档计数
@@ -1943,7 +1996,9 @@ void MatrixRun::section01_redstone_core()
     //    「子亮父锁」破相）；③计数 9 对照不解锁；④sniper 回放不链式补前置（10 次箭命中不蕴含首杀，
     //    父 monster_hunter 缺席仍吞——与实时 unlock 一致，非重挂回归面）；⑤档内已有中间祖先
     //    （time_to_farm=true）时回放补齐其下 farmer 与其上祖先、已解锁级幂等。
-    {
+    runLegMulti({ "review-d #22 farmer count replay chains ancestry: crops>=10 with hoe-line locked restores farmer"
+        " + full ancestor chain tree-consistent, crops=9 no unlock, sniper replay stays parent-gated (arr"
+        "ow hits != first kill), mid-chain ancestor in save idempotent top-up (Review 2026-08-23 #22)" }, [&]() {
         PlayerProgress ppR22;
         const auto loadStats = [&](const char *statKey, int statVal, const char *achKey) {
             QVariantMap st; st.insert(QString::fromLatin1(statKey), statVal);
@@ -1987,14 +2042,15 @@ void MatrixRun::section01_redstone_core()
                              "locked restores farmer + full ancestor chain tree-consistent, crops=9 no "
                              "unlock, sniper replay stays parent-gated (arrow hits != first kill), "
                              "mid-chain ancestor in save idempotent top-up (Review 2026-08-23 #22)";
-    }
+    });
 
     // P14 审查 #2 火把翻转降沿 / 重亮升沿探针（t740 环粉可达性回归锁）：立在石块上的火把喂斜下环粉 → 灯亮；
     //    邻位拉杆供能支撑块 → 火把熄灭（NOT 门翻转）→ 环粉必须断电、灯灭（修前：翻转走 Phase B2 静默直写
     //    不经 notePowerWrite，锚点展开只播 6 正交种子 → 斜下环粉永不可达，保留陈旧电力 15 恒亮）；拉杆回位
     //    → 火把重亮 → 环粉复电 15、灯复亮（两方向翻转都收敛）。对照 P4：P4 验「拆火把」的编辑路径（经
     //    notePowerWrite kDiag），本探针验「火把在场、自身反相」的翻转路径——审查 #2 指出 t740 矩阵漏的正是这条。
-    {
+    runLegMulti({ "torch NOT-gate FLIP reaches diagonal ring dust: lit 15/lamp on, flip-off 0/lamp off, relight 15/"
+        "lamp on again (review #2)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         w.setBlock(x0,     kRigY,     z0, BR::Stone, 0);          // 支撑块
         w.setBlock(x0,     kRigY + 1, z0, BR::RedstoneTorch, 0);  // 火把立其上
@@ -2025,13 +2081,14 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0 + 2, kRigY, z0, BR::Air);
         w.setBlock(x0, kRigY, z0 + 1, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // ── 审查 #1 末影眼巡航高度回归探针（Entities 层 EntityManager 直编，同 t737 MinecartManager 先例）：
     //    t758 插入 spawnEnderPearl 时 spawnEnderEye 的 enderEyeCruiseY 赋值被 diff 吞掉 → 字段全工程无写入
     //    点（只剩默认 0.0f）→ tick 远段爬升分量恒 0，升空巡航整体死码且运行期无任何报错面。spawn 两枚不同
     //    高度的眼，断言巡航高度 == origin.y() + 8（kEnderEyeClimbHeight），防同类「插函数吞赋值」静默回归。
-    {
+    runLegMulti({ "ender-eye spawn records cruise Y = origin.y()+8 at two throw heights (regression guard, review #"
+        "1)" }, [&]() {
         EntityManager ents;
         const int s1 = ents.spawnEnderEye(QVector3D(10.5f, 20.0f, 10.5f), QVector3D(1.0f, 0.5f, 0.0f));
         const int s2 = ents.spawnEnderEye(QVector3D(12.5f, 33.0f, 12.5f), QVector3D(0.0f, 0.2f, 1.0f));
@@ -2042,7 +2099,7 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| ender-eye spawn records cruise Y = origin.y()+8 at two throw heights "
                              "(regression guard, review #1)";
-    }
+    });
 
     // ── P15 t772 红石块直供全器件 × 双放置顺序矩阵 ──
     //   用户报告（R19.12 测试）：「红石块只点亮红石粉/红石灯，发射器、TNT 等均不响应；通电红石粉也点不着
@@ -2054,7 +2111,7 @@ void MatrixRun::section01_redstone_core()
     //   HEAD 的复现点。同槽复用（每 case 末完整清场 + 2 tick 收敛，槽预算 6 个，远低于 124 上限）。
     //   注：发射器 / 投掷器在呈现层另有「空库存无动作」语义（t607 玩家机器身份）——本 World 层探针断言
     //   的是 powerDispenserTriggered 信号已发出（消费端 fireDispenserAtQml 的沿检测输入），非可见弹射。
-    {
+    runLegMulti({ "t772[device-first,source-last][source-first,device-last]->" }, [&]() {
         const SourceDef s772[] = {
             { "RedstoneBlock",      BR::RedstoneBlock, 0,                           true,  false },
             { "RedstoneTorch(lit)", BR::RedstoneTorch, 0,                           true,  false },
@@ -2130,7 +2187,7 @@ void MatrixRun::section01_redstone_core()
                 }
             }
         }
-    }
+    });
 
     // ── P16 t771 跨轨种拐角探针（普通轨×{普通,动力,探测}邻弯 + 动力-普通-动力垂直链 + 矿车过混合拐角）──
     //   用户报告（R19.12）：「只有普通铁轨可以转弯……动力铁轨和动力铁轨之间中间放普通铁轨也能转弯才对，
@@ -2146,7 +2203,10 @@ void MatrixRun::section01_redstone_core()
     //       破端轨 → 中间轨随编辑复检回落单端直位（连接是派生态，破轨断弯）；
     //   (d) 矿车过混合拐角（动力轨起步 → 普通轨拐角 → 动力轨死端）：进/出拐角必垂直（真转弯）、
     //       Y 钉轨面、过弯后 yaw 覆盖行进向基数（180 = +Z 头向）、终停死端格心（pickTrackStep 反向滤）。
-    {
+    runLegMulti({ "t771 mixed L corner, arms =conarmXarmZ",
+               "t771 golden rail at bend slot stays straight, con",
+               "t771-rail-vertical chain bends middle,after break",
+               "t771 cart through mixed corner (golden->rail corner->golden dead end): turnyaw180stopAtEnd" }, [&]() {
         // 拐角象限断言（P11 (b) 同源）：con → railCornerArms 臂向 → mesher 直调拐角 quad 的肘角/对角
         //   落 (ex,ez)/(1-ex,1-ez)。提出共享 lambda（P16 三处复用：混合 L × 3 臂种 + 链弯中间轨）。
         const auto cornerQuadrantOk = [](quint8 con) {
@@ -2308,7 +2368,7 @@ void MatrixRun::section01_redstone_core()
             w.setBlock(x0 + 1, kRigY, z0 + 1, BR::Air);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P17 t773 TNT 点燃路径补全探针（粉链两接法 + 升降沿语义 + 探测轨有车端到端）──
     //   用户报告（R19.12）：「通电红石粉也点不着 TNT」「探测轨有车信号也应触发 TNT」。t772 P15 已实证
@@ -2329,7 +2389,12 @@ void MatrixRun::section01_redstone_core()
     //   孤测若无消费端清块，「恰一次」断言必假 FAIL（双 emit 落在同一 TNT 块上；真实链路里第一次 emit
     //   已同步清块 → 第二次 emit 前 addReceiver 读到 Air 根本不发生）。本组探针统一挂 scoped 消费端
     //   镜像连接（isTnt 守卫 + clearBlockSilent，firePowerTnt 的 World 侧动作同款），断言语义 = 真实链路。
-    {
+    runLegMulti({ "t773 same-level dust trail -> TNT: rising edge fires exactly once, falling edge no re-fire, re-p"
+        "ower w/o TNT silent, replaced TNT fires immediately",
+               "t773 dust climbing onto TNT top (wall-diagonal hop): top dust power 14, TNT fires once; source r"
+        "emoved -> trail dead, no re-fire",
+               "t773 detector rail with real cart -> adjacent TNT fires exactly once (bit4 via occupancy chain);"
+        " parked steady no re-fire; cart leaves -> off, no re-fire" }, [&]() {
         // 消费端镜像连接（(a)(b)(c) 共用；探针末统一断开——全局计数连接不动）。
         const QMetaObject::Connection tntCons =
             QObject::connect(&w, &World::powerTntTriggered, &w, [&](int x, int y, int z) {
@@ -2442,7 +2507,7 @@ void MatrixRun::section01_redstone_core()
         }
 
         QObject::disconnect(tntCons); // 消费端镜像仅限本组探针（全局计数连接保留）
-    }
+    });
 
     // ── P17 t774 TNT 爆炸伤害 mob 探针（Entities 层 EntityManager 直编，同末影眼先例）──
     //   用户报告（R19.12）：「TNT 爆炸之后对生物没有伤害？只有对玩家才有伤害」——旧爆炸路径
@@ -2456,7 +2521,9 @@ void MatrixRun::section01_redstone_core()
     //   (c) 玩家链不双伤：爆心 1 格处虚拟玩家脚位 → mobAttackedPlayer 恰发一次且伤害同公式（16），
     //       后续远场爆炸不再新增（既有玩家链原样保留，新增 mob 侧不碰玩家）；
     //   (d) 水中爆炸照样伤 mob：TNT 格置 Water（originInWater 只跳地形破坏）→ 距 ~1 格猪照样受伤。
-    {
+    runLegMulti({ "t774 TNT explosion damages mobs: 3 pigs at d~1/2/4 take 16/8/0 HP (player-side formula); 8HP pig"
+        " dies -> mobDied exactly once (drop chain); survivor knocked away from blast; player hit chain f"
+        "ires exactly once (no double); underwater blast still damages mobs" }, [&]() {
         const auto [x0, z0] = nextSlot();
         const int ty = kRigY;
         // 平台（防 spawn 即坠落；爆炸毁掉球内部分 → 猪跌落不影响水平击退断言；球外猪的平台幸存）。
@@ -2515,7 +2582,7 @@ void MatrixRun::section01_redstone_core()
         w.setBlock(x0 + 5, ty, z0, BR::Air);
         for (int dx = 0; dx <= 6; ++dx) w.setBlock(x0 + dx, ty - 1, z0, BR::Air);
         tickN(w, 2);
-    }
+    });
 
     // ── P18 t775 骑矿车窒息探针（1 格高通道顶头扣血的几何 + 节奏断言）──
     //   用户报告（R19.12）：「生存坐矿车穿 1 格高通道（头撞实体方块）应扣血，现无痛穿过」。根因：
@@ -2530,7 +2597,9 @@ void MatrixRun::section01_redstone_core()
     //       恒扣血」的反向回归）；
     //   (d) 车本体不受天花板影响：两 rig 车都全程钉轨面（y=R+rideH）且驶完全程到死端（scanRailColumn
     //   自 floor(pos.y) 起扫，天花板在其上方不遮轨 → 矿车物理可进 1 格净空通道 = 用户症状前提）。
-    {
+    runLegMulti({ "t775 ridden-cart head-in-block: 1-block tunnel embeds rider eye (pointBlockedByCollision) every "
+        "tick + >=3 suffocation pulses @1HP/s; 2-block control never embeds (0 pulses); cart stays pinned"
+        " to rail in both (ceiling does not occlude scanRailColumn)" }, [&]() {
         // 镜像常量（与 Game 层 playercontroller / minecartmanager 私有常量文档值同步，改几何须三处同步）：
         const float seatDrop = 0.3125f; // kCartSeatDrop（脚底 = 矿车中心 −0.3125，t768 底板面偏移）
         const float eyeH = 1.62f;       // kEyeHeight（站姿眼位；骑乘不改变 m_eyeHeight）
@@ -2600,7 +2669,7 @@ void MatrixRun::section01_redstone_core()
                              "(pointBlockedByCollision) every tick + >=3 suffocation pulses @1HP/s; "
                              "2-block control never embeds (0 pulses); cart stays pinned to rail in both "
                              "(ceiling does not occlude scanRailColumn)";
-    }
+    });
 
     // ── P19 t776 墙插红石火把贴图共轴重合探针（mesher 同源直调，同 P11 模式；纯 Core+World 断言）──
     //   用户报告（R19.12）：「红石火把可插墙，但横着的竖着的贴图没有重合到一块去」。根因：t738 墙插
@@ -2620,7 +2689,10 @@ void MatrixRun::section01_redstone_core()
     //   (d) 熄灭位（RedstoneTorchStateOffFlag）几何不变、瓦片换 170（暗红熄焰）：u 全落 tile 170 区；
     //   (e) 审查修 #17（Review 2026-08-23 低危）回归防线：S 带全部顶点附着轴坐标 ∈[0,1]（修前贴墙底角
     //       1.075/-0.075 越界 0.075 穿入支撑格 —— 非满立方支撑（半砖/玻璃/铁砧）下可见穿模）。
-    {
+    runLegMulti({ "t776+review#17 wall redstone torch: 5 attach forms pin mid-edge torch column onto shared axis (t"
+        "op mid exact; W 0.8 full-tile / S-ribbon top 0.2 sub-region, bottom edge clipped to cell bounds "
+        "= trapezoid <=0.05 shift), all S-ribbon verts within cell on attach axis (no 0.075 support penet"
+        "ration), bright end away from wall (4 dirs) / up on floor, off flag swaps tile 170" }, [&]() {
         // 镜像常量（partialblockgeometry RedstoneTorch case 同源；改几何须两处同步）。
         constexpr float kTLean = 0.5f, kTUpright = 0.866f, kTShaft = 0.80f;
         constexpr float kTBaseOffWall = 0.475f, kTBaseY = 0.197f;
@@ -2750,7 +2822,7 @@ void MatrixRun::section01_redstone_core()
                              "sub-region, bottom edge clipped to cell bounds = trapezoid <=0.05 shift), "
                              "all S-ribbon verts within cell on attach axis (no 0.075 support penetration), "
                              "bright end away from wall (4 dirs) / up on floor, off flag swaps tile 170";
-    }
+    });
 
     // ── P20 t803 生物碰火燃烧探针（Entities 层 EntityManager 直编，同 t774 TNT 先例）──
     //   用户报告（R19.12）：「怪物碰到火不燃烧（僵尸实测）」。根因（t803）：mob 碰撞 / 支撑 / 越障判定
@@ -2770,7 +2842,10 @@ void MatrixRun::section01_redstone_core()
     //   确定性：tickN 只驱动 tickRedstone（World::tick / tickFire / tickWeather / tickHostileLife 均不跑）→
     //   火格不自灭 / 不蔓延、无雨灭、无日光烧（日光 burning 走 tickHostileLife）→ 唯一随机源 = 15% 火伤
     //   随机熄灭（触火即 ≤4 帧内复燃）。日光 / 降水两混淆源由此路径性排除（非靠搭顶棚）。
-    {
+    runLegMulti({ "t803 mobs ignite on fire cells: chasing shambler walks into fire cell and burns (fire pass-throu"
+        "gh in collision/support/jump predicates); pinned shambler burns nearly full 20s (relight gaps <="
+        "60 ticks) taking >=10 HP periodic fire damage without dying; after fire removed burn stops <=9.5"
+        "s (fireTimer 8s cap) and health stays stable" }, [&]() {
         // rig 寻址：**运行期扫描空区，不走 nextSlot()** —— 上述循环探针在运行期已把 124 个 slot 位（4 列 × 31
         //   行，z=4..94）耗尽，nextSlot() 此刻返回 z=97+ 越界 → setBlock 全被拒（火 / 平台 / 栏杆全没放上 = 假
         //   FAIL，本探针首轮实测踩坑）；且 kRigY=41 头注释「40 以上必空」不可尽信（本世界 (6,41..43,1) 实测有
@@ -2855,7 +2930,7 @@ void MatrixRun::section01_redstone_core()
             w.setBlock(fx + dx4[i], ty + 1, fz + dz4[i], BR::Air);
         }
         tickN(w, 2);
-    }
+    });
 
     // ── P21 t804 点燃交互扩展探针（① 木墙点燃蔓延烧毁链 / ② Stalker 打火石短引信引爆 / ③ item 入火
     //   瞬灭〔t844 语义〕+ 燃烧方块格不烧掉落物）──
@@ -2879,7 +2954,15 @@ void MatrixRun::section01_redstone_core()
     //       （燃烧是「方块本身着火」非「火占据该格」）。
     //   确定性：item 物理无随机源（spawnItemAt 零初速直落，免 spawnItem 弹出方向的哈希漂移）；tickFire
     //   散布 = hashVoxel(seed+窗口序号) 纯函数（300s 窗数远超期望值 3σ，非精确值断言）。
-    {
+    runLegMulti({ "t804 flint ignition extended (t843/t841/t844/t846 semantics): fire next to 6-plank wall ignites "
+        "planks into burning state with id preserved (mid-burn sample), chain burns all planks away (no b"
+        "lockBroken-drop chain) and self-extinguishes; world-side flint guards: standing-fire cell and re"
+        "-ignite of a burning cell both rejected with timer never reset, torch is not fire (fallback stil"
+        "l allowed), lily pad not ignitable; flint on stalker detonates in-place ~1.5s uncancellable fuse"
+        " (pig rejected, !targetable gate exempt, exactly one explosion, inflate visible); item dropped i"
+        "nto fire vanishes instantly (<=3 ticks, lava-parity instant destroy, no 0.8s window / no smoke s"
+        "ignal - itemBurned retired), item resting on a burning plank board survives 200 ticks untouched "
+        "(burning-block cells never burn items)" }, [&]() {
         // rig 寻址：运行期扫描空区（同 P20 先例——nextSlot() 已被上方循环探针耗尽；「40 以上必空」不可
         //   尽信）。需 24 格宽（(a) 木墙 8 + (c) 焚烧 5 + (b) Stalker+爆炸半径缓冲 11）× y∈[ty-1,ty+3] 全净空。
         int x0 = -1, z0 = -1;
@@ -3103,7 +3186,7 @@ void MatrixRun::section01_redstone_core()
                              "vanishes instantly (<=3 ticks, lava-parity instant destroy, no 0.8s window / "
                              "no smoke signal - itemBurned retired), item resting on a burning plank "
                              "board survives 200 ticks untouched (burning-block cells never burn items)";
-    }
+    });
 
     // ── t805 船上岸回归探针（用户「船又能直接开上岸」；回归根因 = t711/21fff7b 把碰岸探测的 ignoreIce
     //    豁免扩为「与水面同高的任何固体」→ 世界海缓坡（seaColumnHeight 每 ~12 格升 1）的 h==waterLevel
@@ -3119,7 +3202,12 @@ void MatrixRun::section01_redstone_core()
     //      下水」，t611 只清朝向分量的语义）；
     //    D 冰道：同层冰面（冰格顶==水面顶）—— 船可从水面直接滑上冰面越界 ≥1.5 格（L10 冰豁免保留，防
     //      本修复过度回退把冰也挡了）。冰是船可行驶表面 / 沙岸是岸（船贴水线停），两者本就应不同。──
-    {
+    runLegMulti({ "t805 boat shore regression: full-W boat in open water reaches ~8 b/s while land gear idles at 2."
+        "4 (ratio ~3.3, sharp out-of-water decel); same-level wet sand shore (block top == water surface "
+        "top) stops the boat at the waterline (center never crosses the sand column, still afloat at surf"
+        "ace Y) and reverse backs it >=3 blocks into the water; same-level ice stays exempt (boat slides "
+        "onto ice >=1.5 blocks past the edge, riding on top) - restores t661 'beaching needs speed / shor"
+        "e stops boat' semantics lost in 21fff7b (t711)" }, [&]() {
         // rig 选址：本测试世界 setHeight(48) 而 worldgen 地表基线 64 → 高度被钳到 47，y 44..47 几乎整片
         //   实心石（t804 实测同因「kRigY=41 也有生成石柱」）。不清场扫描、直接**凿进石里**：每泳道 =
         //   3 格宽条带（船 footprint Z ±0.7 自条带中格 bz+k+1.5 覆盖 bz+k..bz+k+2，恰不溢出到邻带），
@@ -3260,7 +3348,7 @@ void MatrixRun::section01_redstone_core()
                              "backs it >=3 blocks into the water; same-level ice stays exempt (boat slides "
                              "onto ice >=1.5 blocks past the edge, riding on top) - restores t661 "
                              "'beaching needs speed / shore stops boat' semantics lost in 21fff7b (t711)";
-    }
+    });
 
     // ── t799 沙/沙砾失撑即时下落探针（World 层 checkGravityBlockOnEdit + Entities 层 FallingBlock 链）──
     //   用户报告（R19.12）：「沙子直接放在火把上面不会触发掉落，能稳定放置；下面是睡莲/草丛/半砖也一样，
@@ -3276,7 +3364,12 @@ void MatrixRun::section01_redstone_core()
     //       的正确侧保留：落差不是门控，失撑才是）；
     //   (e) 水中沙：沙放水面上 → 坍落穿透水柱落到水底还原（t220 水不挡沙 / 填堵水格不回归）；
     //   (f) 爆炸（destroySphereSilent）与 TNT 点火（clearBlockSilent）两静默入口 → 上方沙坍落（写入口收口）。
-    {
+    runLegMulti({ "t799 gravity blocks (sand/gravel) instant-fall on non-full-cube supports: placing sand or gravel"
+        " on torch/slab/tall-grass/lily-pad collapses to a falling entity in the same setBlock (single Wo"
+        "rld-layer predicate, placement == update path), falling through/onto a partial block converts to"
+        " item drop (t220), on full cube it re-places; sand-column stacking on full support stays put, wa"
+        "ter column pierced and sealed, explosion + TNT-prime silent write entries also trigger the colla"
+        "pse - fixes 'sand sits stable on torch' user report" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 的 4×31 网格早被前序循环探针耗尽，此刻返回
         //   z=97+ 越界 → setBlock 全被拒 = 假 FAIL）。需 13 格宽 × y∈[ty-1,ty+3] 全净空（含 (d) 半空放置
         //   上探一层，防残留浮空重力方块混入坍落计数）。
@@ -3429,7 +3522,7 @@ void MatrixRun::section01_redstone_core()
                              "sand-column stacking on full support stays put, water column pierced "
                              "and sealed, explosion + TNT-prime silent write entries also trigger "
                              "the collapse - fixes 'sand sits stable on torch' user report";
-    }
+    });
 
     // ── t794 铁砧重力探针（isGravityBlock 扩铁砧三阶段 + FallingBlock 砸伤 / 着地还原 / 落地音信号）──
     //   用户报告（R19.12）：「铁砧应该要有重力效果，砸到下方的生物会扣血，砸到地面的时候会有声音。」
@@ -3445,7 +3538,12 @@ void MatrixRun::section01_redstone_core()
     //   (T) 落火把（不完整方块）：还原铁砧于火把上方（**不掉物品** —— 与沙 t220 分叉）+ landed 信号 +
     //       火把原位不动；
     //   (L) 砸玩家：listener 站落点列 → mobAttackedPlayer 携 MobAnvil 哨兵，伤害 2HP → 6HP 随落差单调。
-    {
+    runLegMulti({ "t794 anvil gravity: anvil (3 damage stages) joins the sand/gravel gravity chain via the single i"
+        "sGravityBlock predicate (support-break and mid-air placement both collapse instantly), falling a"
+        "nvil crushes mobs and the player with distance-scaled damage (exactly 2HP at 3-block fall / 6HP "
+        "at 5-block, damage-first-then-land, once per entity per fall, player death cause via MobAnvil se"
+        "ntinel), lands by restoring the anvil block even on partial blocks like torches (never an item d"
+        "rop, unlike sand t220), and emits fallingBlockLanded for the heavy-metal landing sound" }, [&]() {
         const int ty = kRigY;
         // rig 寻址：11 宽 dx[-1,10]（圈养猪墙 x0-1 起 + 空隔 + 更新 / 火把 / 玩家列 + 边距）× 3 深 dz[-1,1]
         //   （猪圈 z 向墙）× y[ty-1, ty+6]（平台下探 / 铁砧最高 ty+5）全净空。
@@ -3582,7 +3680,7 @@ void MatrixRun::section01_redstone_core()
                              "cause via MobAnvil sentinel), lands by restoring the anvil block even on "
                              "partial blocks like torches (never an item drop, unlike sand t220), and "
                              "emits fallingBlockLanded for the heavy-metal landing sound";
-    }
+    });
 
     // ── t849/t850/t851 铁砧·仙人掌·活板门三件套探针（Core 表查询 + World rig + 玩家碰撞点测，P11 模式）──
     //   t849：铁砧三阶段（Anvil/AnvilChipped/AnvilDamaged）非整格三件套收窄 —— ① collision/selection/raycast
@@ -3599,7 +3697,13 @@ void MatrixRun::section01_redstone_core()
     //         isTopFlushSupport 齐平地面（t741 既有谓词天然拒门叠门——Door 非完整立方非上半砖）；
     //         ② 失撑级联：拆支撑 → 正上方活板门柱/双格门（含叠门通天链）逐格 blockBroken+
     //         blockDroppedAsItem；红石路径（setBlockSilent 静默写）与玩家路径（setBlock 编辑钩子）同收口。
-    {
+    runLegMulti({ "t849/t850/t851 anvil+cactus non-full-cube trio + trapdoor thin-plate shadow + attach support: an"
+        "vil 3-stage collision/selection/raycast narrow to the three-box footprint (12/16 base/waist/top,"
+        " gap walkable via point probe, waist still blocks), cactus trio at 0.8 centered column, all thre"
+        "e families excluded from heightmap so PCF column-top lands on the support block (trapdoor open/c"
+        "losed wood+iron alike), wall-mounted trapdoor falls when its sole side support breaks, 3-door sk"
+        "y tower collapses into 6 item drops on silent support clear, intact door untouched by neighbor e"
+        "dits" }, [&]() {
         constexpr float kEps = 1e-4f;
         const auto boxesTopOf = [](const std::vector<BR::BlockAABB> &bs) {
             float t = -1.0f;
@@ -3820,7 +3924,7 @@ void MatrixRun::section01_redstone_core()
                              "(trapdoor open/closed wood+iron alike), wall-mounted trapdoor falls when its "
                              "sole side support breaks, 3-door sky tower collapses into 6 item drops on "
                              "silent support clear, intact door untouched by neighbor edits";
-    }
+    });
 
     // ── t800 物品栏归类清理探针（纯 Game 层 Hotbar 实例，无 World rig）：① 材料段调色板不再列羊毛物品
     //    （0x20E）与玻璃物品（0x204）——用户「羊毛 item 多此一举（方块栏已有羊毛方块）」「玻璃应放方块那边」；
@@ -3830,7 +3934,10 @@ void MatrixRun::section01_redstone_core()
     //    图集重渲（t838(1) 起 dimetric 3D 立方投影），回退链断链 = 空图标 = FAIL 面）。注：④ 在本测试二进制只验「URL 解析链通」——测试
     //    target 无 qrc 资源（atlas 加载失败会打一条预期内 qWarning），瓦片像素内容留给实机人工目视；测试进程
     //    落盘的空图不毒害实机缓存（App 侧缓存命中只认进程内 map，恒重渲覆写，见 blockAtlasIconSource L9/L10）。
-    {
+    runLegMulti({ "t800 inventory categorization: wool item (0x20E) and glass item (0x204) removed from creative ma"
+        "terials palette, glass block (54) present in blocks palette alongside white wool + 15 color vari"
+        "ants, both item names still resolve for survival drop chains, glass block icon resolves via runt"
+        "ime atlas re-render (t838(1) dimetric 3D cube projection; flat-2D was the t800 misdirection)" }, [&]() {
         Hotbar hb;
         const QVariantList mats = hb.creativeMaterials();
         bool matsClean = true;
@@ -3864,7 +3971,7 @@ void MatrixRun::section01_redstone_core()
                              "palette alongside white wool + 15 color variants, both item names still "
                              "resolve for survival drop chains, glass block icon resolves via runtime atlas "
                              "re-render (t838(1) dimetric 3D cube projection; flat-2D was the t800 misdirection)";
-    }
+    });
 
     // ── t991 栅栏几何对齐 MC 探针（Core 表查询 + mesher 同源直调，P11/P19 模式；纯静态断言无 rig，不占
     //    nextSlot 容量；P-t801 演化——t801 的「视觉 1.0 裁高」被用户口径推翻，本探针按 MC 1.0 形态重钉）：
@@ -3877,7 +3984,10 @@ void MatrixRun::section01_redstone_core()
     //    (b) 圆石墙几何：孤立 = 柱 + 顶部凸缘（yMax≈1.0；凸缘外挑在场 x==3/16，8/16 柱径之外的唯一
     //        水平极值）；四向连 = 低连接拱在场（y==10/16 顶点 = 拱底，低于凸缘下沿 —— 「柱高拱低」）。
     //    （盒分离 + 同源源码钉两腿见下一个 t991b 探针块。）
-    {
+    runLegMulti({ "t991 fence geometry aligned to MC: wood/spruce = 4/16 post x 1.5 tall (isolated = bare post, no "
+        "edge vertices) + two 2/16 rails per connected side reaching the cell edges at MC y bands 6-9/16 "
+        "and 12-15/16; cobble wall split into its own shape (8/16 post + 1px top flange overhang + low co"
+        "nnecting arch below the flange, isolated = post+flange only)" }, [&]() {
         const quint8 woodFences[2] = { BR::WoodFence, BR::SpruceFence };
         constexpr float kEps = 1e-4f;
         const auto appendFence = [](quint8 fid, bool connected) {
@@ -3961,7 +4071,7 @@ void MatrixRun::section01_redstone_core()
                              "reaching the cell edges at MC y bands 6-9/16 and 12-15/16; cobble wall split "
                              "into its own shape (8/16 post + 1px top flange overhang + low connecting arch "
                              "below the flange, isolated = post+flange only)";
-    }
+    });
 
     // ── t991b 栅栏盒分离 + 同源源码钉（P-t801(b) 腿随 t991 视觉演化 + 新增源码钉腿）──
     //    (c) 盒分离：collisionAABBs 顶==1.5（> 跳跃顶点 ~1.25（playercontroller.h kJump=8.4 的文档镜像值，
@@ -3969,7 +4079,10 @@ void MatrixRun::section01_redstone_core()
     //        视觉 —— 木/云杉顶 1.5 且 4/16 柱径、墙顶 1.0 且 8/16 柱径。
     //    (d) 源码钉：partialblockgeometry / itemshapegeometry 两处 fence case 均带 t991 契约锚与 MC 截面
     //        常数（世界渲染与查看器预览同源改）。
-    {
+    runLegMulti({ "t991b fence visual-tracking boxes + same-source pins: collision stays 1.5 (jump apex ~1.25 still"
+        " blocked, mob chain untouched) while selection + raycast boxes track the new visuals (wall 8/16 "
+        "x 1.0, wood 4/16 x 1.5), and both fence cases (world mesher + viewer preview) carry the t991 con"
+        "tract anchors with MC rail/flange constants" }, [&]() {
         constexpr float kEps = 1e-4f;
         constexpr float kJumpApex = 1.25f; // playercontroller.h kJump=8.4「顶点约 1.25 格」的文档镜像值（改跳跃力须同步）
         const auto topOf = [](const std::vector<BR::BlockAABB> &bs) {
@@ -4024,7 +4137,7 @@ void MatrixRun::section01_redstone_core()
                              "boxes track the new visuals (wall 8/16 x 1.0, wood 4/16 x 1.5), and both "
                              "fence cases (world mesher + viewer preview) carry the t991 contract anchors "
                              "with MC rail/flange constants";
-    }
+    });
 
     // ── P-t998 结构新方块三件探针（苔石砖 140 / 裂纹石砖 141 / 铁栏杆 142；Core 表钉 + 贴图逐像素 +
     //    mesher 同源直调 + 调色板入口，纯静态断言无 rig，不占 nextSlot 容量）──
@@ -4043,7 +4156,12 @@ void MatrixRun::section01_redstone_core()
     //    (d) 盒分离 + 调色板入口钉：碰撞 = 4/16 立柱盒满格高（collisionTopY 1.0 可跳过）；选中 / 射线 =
     //        十字条带双盒；creativeBlocks 含三方块且 iconSourceForBlock 全可解析（Glass 先例：无 qrc 手绘
     //        图，程序图集重渲是唯一原生图标路径，回退链断链 = 空图标 FAIL 面）。
-    {
+    runLegMulti({ "t998 structure block trio: mossy/cracked stone brick full-cube stone profile (1.5 pickaxe tool-r"
+        "equired, per-face tiles 181/182 carrying the same-RNG stone brick base with moss clusters / <45-"
+        "dark crack lines and clean base elsewhere) and iron bars (tile 183 opaque periodic-4 bright-bar "
+        "texture with mid band, 2/16 post + mid-band arms connecting to neighbor bars and full-cube faces"
+        ", 4/16 full-height collision post with cross-strip selection/raycast, palette + icon entries pin"
+        "ned)" }, [&]() {
         constexpr float kEps = 1e-4f;
         bool ok = true;
         // (a) def / tileIndex / 工具掉落口径钉
@@ -4234,7 +4352,7 @@ void MatrixRun::section01_redstone_core()
                              "texture with mid band, 2/16 post + mid-band arms connecting to neighbor "
                              "bars and full-cube faces, 4/16 full-height collision post with cross-strip "
                              "selection/raycast, palette + icon entries pinned)";
-    }
+    });
 
     // ── t802 全配方审计探针（纯 Game 层静态表查询 + 匹配器直调，无 World rig，不占 nextSlot 容量）──
     //    用户报三缺 + 举一反三全表：① 云杉原木→云杉木板→木剑等木制品链（根因 = 木制品配方原料只认
@@ -4246,7 +4364,13 @@ void MatrixRun::section01_redstone_core()
     //    可合，防未来匹配算法改动静默丢配方）+ 表长下限（防整段误删）；补缺新配方（箱子/梯子/砂岩×2/
     //    石砖×3/发射器）随全表自匹配一并覆盖；圆石压力板 gridSize 勘误（t627 漏改）单测；箭改回 MC
     //    正统原料（燧石+棒+羽毛）正反两测；云杉熔炉链（烧炭 + 燃料）单测。
-    {
+    runLegMulti({ "t802 recipe audit: spruce planks family-equivalence fallback (log->planks->sticks/crafting-table"
+        "/5 wood tools all craftable, exact-first keeps spruce slab/door outputs, oak unaffected), flint&"
+        "steel restored to shapeless (all 4 2x2 arrangements + 3x3 diagonal), blaze rod craft-decompositi"
+        "on 1->2 powder (furnace path kept), 9 missing recipes added (chest/ladder/sandstone/cut-sandston"
+        "e/stone-brick x3/dispenser/blaze-powder), cobble pressure-plate grid size fixed to 2x2, arrow ba"
+        "ck to MC flint+stick+feather, spruce log smelts to charcoal + spruce log/planks burn 15s, full-t"
+        "able self-match regression overrecipes" }, [&]() {
         bool ok = true;
         const auto expectCraft = [&](const int *grid, int n, int wantOut, int wantCnt, const char *tag) {
             const RecipeRegistry::Recipe *r = RecipeRegistry::match(grid, n);
@@ -4428,7 +4552,7 @@ void MatrixRun::section01_redstone_core()
                              "size fixed to 2x2, arrow back to MC flint+stick+feather, spruce log smelts to "
                              "charcoal + spruce log/planks burn 15s, full-table self-match regression over"
                           << recipeTotal << "recipes";
-    }
+    });
 
     // ── t795 附魔台门槛公式探针（Game 层公式 + Hotbar 桥接 + World 书架计数三层；UI 状态机「无 lapis 灰 /
     //    lapis 足亮」在 QML 绑定层，本探针盖其 C++ 权威源，UI 显亮需人工目测）：
@@ -4440,7 +4564,10 @@ void MatrixRun::section01_redstone_core()
     //    ④ World::countBookshelvesAround：净空环境 0；下层环带 15 书架 + 空气半步 → 15；堵 1 个半步格 →
     //       该书架不计（14）；两层 32 位全放 → 封顶 15（书架数上限）。rig 用 y=46/47（其余探针全在
     //       kRigY=41/42，地形/树冠 ~33，46+ 必空零串扰）。
-    {
+    runLegMulti({ "enchant gate: tier 1/2/3 at 0/5/10 bookshelves (no creative bypass), offered [1,2,3]@0 -> [10,20"
+        ",30]@15 with top 30 only at full 15, monotonic in-range; hotbar bridge identical; world ring 0 -"
+        "> 15 -> blocked half-step 14 -> 32 placed capped 15 (t795; UI lapis-gated highlight = QML bindin"
+        "g, manual check)" }, [&]() {
         bool ok = EnchantRegistry::tierForBookshelves(0) == 1
                   && EnchantRegistry::tierForBookshelves(4) == 1
                   && EnchantRegistry::tierForBookshelves(5) == 2
@@ -4521,7 +4648,7 @@ void MatrixRun::section01_redstone_core()
                              "[1,2,3]@0 -> [10,20,30]@15 with top 30 only at full 15, monotonic in-range; "
                              "hotbar bridge identical; world ring 0 -> 15 -> blocked half-step 14 -> 32 "
                              "placed capped 15 (t795; UI lapis-gated highlight = QML binding, manual check)";
-    }
+    });
 
     // ── t823 书架→附魔台字流口径 tripwire（用户报「没看到文字流」实机核查产物；矩阵不链 Quick3D →
     //    QML 枚举无法直测，改**冻结镜像** EnchantGlyphFlow.qml rescanPairs 的逐行语义与本权威锁同值：
@@ -4535,7 +4662,9 @@ void MatrixRun::section01_redstone_core()
     //    ③ 半步格被堵 → 该书架不计（视觉与档位同步减）。rig 同 t795：运行期扫描净空 5×5 区（P20
     //    教训不走 nextSlot）；y 带取 44/45（**世界高 48 → y∈[0,47]**，首轮踩坑 y=50/51 越界静默拒 = 全
     //    探针假 FAIL 的 t814 同款病；t795 残架在 46/47 不冲突，扫描自带避开）。末尾复原 Air。
-    {
+    runLegMulti({ "t823 glyph-flow rule tripwire: QML rescanPairs mirror == world authority (empty 0/0, adjacent ri"
+        "ng 0/0 = no flow no tier, single ground layer 16 pairs vs capped 15 = one-layer suffices + visua"
+        "l uncapped by design, blocked half-step -2 both sides, two-high stack 2/2)" }, [&]() {
         // 冻结镜像（改动此函数 = 改 QML 副本语义，须三处同步：World 权威 / 本镜像 / QML 两副本）：
         //   Math.trunc(dx/2) ≡ C++ 整除向零（dx∈{-2,0,2} 商恰整数，两写法同值）；QML !==95/!==0 由
         //   recipe.cpp t823 static_assert 钉 95/94 字面量，此处镜像走谓词等价。
@@ -4626,7 +4755,7 @@ void MatrixRun::section01_redstone_core()
                              "(empty 0/0, adjacent ring 0/0 = no flow no tier, single ground layer 16 pairs "
                              "vs capped 15 = one-layer suffices + visual uncapped by design, blocked half-step "
                              "-2 both sides, two-high stack 2/2)";
-    }
+    });
 
     // ── t785 生物蛋补全探针（用户「末影人和烈焰人的生物蛋……应该和其他的生物蛋放在一起，而且贴图也是仿照
     //    他们的生物蛋，还有就是狼和豹猫的生物蛋都没有出现」；Game 层表 + Core 生成式染色表）：
@@ -4637,7 +4766,11 @@ void MatrixRun::section01_redstone_core()
     //    ③ Hotbar::nameForBlock 13 蛋全有名（空名 = 调色板/tooltip 无名，t728 B9 同类缺口）；
     //    ④ Core 生成式染色表 spawnEggTint 13 蛋全有条目 + 非蛋 id 不误命中（pack miss 时该蛋按 mob 配色
     //      两层染色，而非空白模板）。蛋图标观感 / 蛋区排布为 QML 层，需人工目视。
-    {
+    runLegMulti({ "t785 spawn-egg completion: 15 eggs (nightwalker/emberling moved into the contiguous egg block + "
+        "wolf 0x249 / ocelot 0x24A new + t952 baby-shambler 0x25D + t1012 cave-spider 0x25E appended) all"
+        " map to correct EntityManager mob types via single-authority table, all present & contiguous in "
+        "creative palette with names, all have generative tint entries (egg icon look & palette layout = "
+        "QML, manual check)" }, [&]() {
         bool ok = RecipeRegistry::SpawnEggNightwalkerId == 0x246   // t785 新 id 分配锁（重排破存档兼容）
                   && RecipeRegistry::SpawnEggEmberlingId == 0x247
                   && RecipeRegistry::SpawnEggWolfId == 0x249
@@ -4716,12 +4849,16 @@ void MatrixRun::section01_redstone_core()
                              "EntityManager mob types via single-authority table, all present & contiguous "
                              "in creative palette with names, all have generative tint entries (egg icon "
                              "look & palette layout = QML, manual check)";
-    }
+    });
 
     // ── t786 刷怪笼类型化（spawner cage typing）：①state 位布局 round-trip（编码/解码互逆 + 旧存档兼容
     //   分流）②地牢 worldgen 加权分布多 seed 核对（蠹虫不在地牢池）③tickSpawners 据 state 刷对应型 ④创造
     //   放置默认型。数值契约锁（枚举漂移 = 此处 FAIL，同 t785 单一权威教训）。
-    {
+    runLegMulti({ "t786 typed spawner cages: state encode/decode round-trip per mob type (bit1-5 layout locked), le"
+        "gacy states 0->shambler / 1->silverfish, invalid type bits fall back safely, dungeon worldgen we"
+        "ighted pool over multiple seeds is 50/25/25 shambler/bones/spider with stalker exited (t999 evol"
+        "ution), no silverfish, tickSpawners spawns the cage's typed mob (both polarity probes), creative"
+        " placement defaults to shambler (cage mini-model visuals = QML, manual check)" }, [&]() {
         bool ok = true;
         EntityManager em786;
         // ① 编码 → 解码互逆（五类型全表）：BlockRegistry::spawnerStateForMob(Core 层 raw int)→ state 常量
@@ -4925,7 +5062,7 @@ void MatrixRun::section01_redstone_core()
                              "silverfish, tickSpawners spawns the cage's typed mob (both polarity probes), "
                              "creative placement defaults to shambler (cage mini-model visuals = QML, "
                              "manual check)";
-    }
+    });
 
     // ── review26 #19 刷怪支撑收口 isCollidable 探针（EntityManager 直编，t786 tickTypedCage rig 族）──
     //   用户症状（review26 低危）：宠物瞬移 / 自然刷怪 / 刷怪笼支撑判定仍 isSolid（非 air）→ 落花草下帧
@@ -4933,7 +5070,10 @@ void MatrixRun::section01_redstone_core()
     //   首匹配**（固定 kSpawnDx/Dz 枚举序）→ 可构造唯一候选位 rig 行为级钉死：候选下方是花草时零刷怪
     //   （旧 isSolid 判花草可站 → 首周期即刷）；同 rig 下方换石头 → 首周期必刷在唯一候选格心。
     //   （狼 / 豹猫瞬移与自然刷怪同谓词替换，源码一致性由本探针钉住谓词语义。）
-    {
+    runLegMulti({ "review26-19 spawn support requires a collidable block: a spawner whose only candidate cell sits "
+        "above a flower spawns nothing (old isSolid read non-air as standable), the same rig over stone s"
+        "pawns at the unique candidate cell center; wolf/ocelot teleport and natural spawn share the same"
+        " predicate swap" }, [&]() {
         bool okNeg = false, okPos = false;
         // rig：独立小世界（t786 同款）。笼 @（24,8,24）；7 个非花候选位的 y=8/y=9 双层填死（here!=Air
         //   恒拒）；唯一候选 (25,8,24) 净空两格，下方 (25,7) = 待测支撑块。
@@ -4982,14 +5122,17 @@ void MatrixRun::section01_redstone_core()
                              "non-air as standable), the same rig over stone spawns at the unique "
                              "candidate cell center; wolf/ocelot teleport and natural spawn share the "
                              "same predicate swap";
-    }
+    });
 
     // ── review26 #20 collisionTopY 免构建镜像等价探针（Core 层全表扫描）──
     //   免构建顶面查询（BlockRegistry::collisionTopY）替代 supportTopYAt 慢路径的 collisionAABBs 最高盒
     //   maxY 读取（resting 掉落物每帧两格窗复探在异形支撑上不再堆分配）。等价性 = 全 id（0..255）×
     //   state（0..255）逐格断言 collisionTopY(id,st) == 盒空 ? -1 : max(box.maxY) —— 改形状只动一处
     //   （shapeBoxes / collisionAABBs 特例表 vs collisionTopY 镜像表）→ 本探针红，防两表漂移。
-    {
+    runLegMulti({ "review26-20 allocation-free collisionTopY mirrors collisionAABBs exactly: for every block id x s"
+        "tate (65536 combos), collisionTopY equals the max box maxY (or -1 when boxless) -- supportTopYAt"
+        "'s slow path swaps the vector-building read for this scalar mirror with zero behavior change, an"
+        "d any future shape edit touching only one of the two tables turns this red (anti-drift pin)" }, [&]() {
         quint32 checked = 0;
         int firstBadId = -1, firstBadSt = -1;
         float badWant = 0.0f, badGot = 0.0f;
@@ -5018,7 +5161,7 @@ void MatrixRun::section01_redstone_core()
                              "vector-building read for this scalar mirror with zero behavior change, "
                              "and any future shape edit touching only one of the two tables turns this "
                              "red (anti-drift pin)";
-    }
+    });
 
     // ── P-t859 collisionAABBsInto out-param 等价探针（R19.14 堆分配消除；Core 层全表扫描 + World 层抽查）──
     //   玩家/mob 碰撞热路径改读 BlockRegistry::collisionAABBsInto（栈上定容直写）与
@@ -5026,7 +5169,12 @@ void MatrixRun::section01_redstone_core()
     //   by-value 薄壳 collisionAABBs 逐盒逐字段完全一致（count / 6 坐标分量）+ 缓冲越界保护（cap=0 时
     //   只报计数不写穿）+ World 版抽查（放置方块后 out-param 盒 = cell-local 盒 + 格偏移）。改形状
     //   漏同步两路 → 本探针红（防单一权威漂移，同 review26-20 钉法）。
-    {
+    runLegMulti({ "t859 collisionAABBsInto out-param path: stack-buffer collision query (BlockRegistry::collisionAA"
+        "BBsInto + World::collisionAABBsAt(out,cap)) is field-exact with the by-value shell for all 65536"
+        " id x state combos, cap=0 returns the count without writing a byte (overflow guard), and the Wor"
+        "ld wrapper offsets cell-local boxes into world space (lower slab spot check) - player/mob collis"
+        "ion hot paths (3 axes x ~12 cells/tick + 60 mob predicates) drop 2 vector heap allocations per q"
+        "uery with zero behavior change" }, [&]() {
         quint32 checked859 = 0;
         int badId859 = -1, badSt859 = -1;
         QString diag859;
@@ -5096,7 +5244,7 @@ void MatrixRun::section01_redstone_core()
                              "player/mob collision hot paths (3 axes x ~12 cells/tick + 60 mob "
                              "predicates) drop 2 vector heap allocations per query with zero behavior "
                              "change";
-    }
+    });
 
     // ── t787 生物蛋×刷怪笼交互（用户「拿上生物蛋对着刷怪笼右键，就可以弄成刷这个生物的刷怪笼」；机制等价
     //    MC 1.0 spawn egg 右键 spawner 改型）：①全 13 蛋改型 round-trip（蛋表 → 编码 → 解码互逆，白名单
@@ -5105,7 +5253,11 @@ void MatrixRun::section01_redstone_core()
     //    （被动型走 spawnPassiveMob 且 hostile=false；敌对型走原路径）④被动笼同型 local cap（4 只封顶，
     //    mobTypeCountNear 判据——防无上限刷屏）。蛋消耗（Hotbar takeStack）/ 笼心迷你模型切换（QML
     //    cleanupVis 重读链）在 PlayerController/QML 层，需人工目视（同 t786 ④ 注记）。
-    {
+    runLegMulti({ "t787 spawn-egg x spawner retype: all 14 eggs (t952 baby-shambler appended) round-trip through sp"
+        "awnerStateForMob/spawnerMobTypeForState (whitelist extended, sentinels/overflow still fall back "
+        "to shambler), retype write via same-id setBlock then tickSpawners spawns the egg's type (pig pas"
+        "sive+non-hostile / spider hostile polarity), passive cage capped at 4 same-type nearby (egg cons"
+        "umption + cage mini-model switch = playercontroller/QML, manual check)" }, [&]() {
         bool ok = true;
         EntityManager em787;
         // ① 全 13 蛋改型 round-trip（蛋 id 表同 t785 探针单一权威源）。
@@ -5214,7 +5366,7 @@ void MatrixRun::section01_redstone_core()
                              "spawns the egg's type (pig passive+non-hostile / spider hostile polarity), passive "
                              "cage capped at 4 same-type nearby (egg consumption + cage mini-model switch = "
                              "playercontroller/QML, manual check)";
-    }
+    });
 
     // ── t788 染料体系探针（Game 层静态查询为主：配方 / 掉落 / 冶炼 / 命名 / 调色板聚合，纯查表不用 rig ——
     //    测试尾段新探针不动共享 nextSlot 分配器）：
@@ -5230,7 +5382,11 @@ void MatrixRun::section01_redstone_core()
     //       由 creativeMaterials 自动派生 = 同源在列）；
     //    ⑥ 32 条新配方已被 t802 全表自匹配回归自动覆盖（同表防丢，此处不重复）。染粉图标配色为 QML 层，
     //       需人工目视。
-    {
+    runLegMulti({ "t788 dye system: 16 dye items 0x24B..0x25A contiguous & named, 4 flowers drop matching dyes (red"
+        "/yellow/blue/white) via dropId, furnace cactus->green dye with XP, all 32 coloring recipes craft"
+        "able (16 dye+white-wool -> colored wool, 16 dye+white-bed -> colored bed; shapeless spot-checked"
+        " swapped, wrong-base rejected), dyes contiguous in creative palette (resource browser derived), "
+        "recipes auto-covered by t802 full-table self-match (dye icon colors = QML, manual check)" }, [&]() {
         // 染料 16 色（行序 = 羊毛 16 色标准序）
         const int dyeIds[16] = {
             RecipeRegistry::DyeWhiteId, RecipeRegistry::DyeOrangeId, RecipeRegistry::DyeMagentaId,
@@ -5362,7 +5518,7 @@ void MatrixRun::section01_redstone_core()
                              "rejected), dyes contiguous in creative palette (resource browser derived), "
                              "recipes auto-covered by t802 full-table self-match (dye icon colors = QML, "
                              "manual check)";
-    }
+    });
 
     // ── t789 羊自然毛色探针（用户「羊刷出来只有白色羊毛，没有别的羊毛」）：Entities 层直编（同 t787 自建
     //    临时对象模式，不动共享 nextSlot 分配器）：
@@ -5380,7 +5536,11 @@ void MatrixRun::section01_redstone_core()
     //    ⑤ 幼崽继承父代色（tickBreeding 覆写随机色，同 ocelotVariant 先例；段前清场——②③④ 遗留被动
     //       生物超 kPassiveMobCap=24 会钳死配对产崽）。渲染观感（毛层 tint 上羊身 /
     //       pack 态 fur 染色 / 浏览器变体联动）需人工目视。
-    {
+    runLegMulti({ "t789 sheep natural colors: 16-entry tint palette valid with white-identity/black/brown anchors m"
+        "irroring browser woolPalette, 4800 spawns over clear-all rounds follow natural weights (white >6"
+        "0% dominant, pink/gray/light-gray/brown/black all appear, no out-of-table colors, pigs unpollute"
+        "d), shearSheep carries the sheep's own index and re-shear stays silent, mobDied payload equals t"
+        "he died sheep's index, breeding babies inherit a parent color (not rerolled)" }, [&]() {
         bool ok = true;
         EntityManager em789;
         // ① 色板契约（16 下标全覆盖 + 白恒等 + 两关键色锚点）。
@@ -5595,7 +5755,7 @@ void MatrixRun::section01_redstone_core()
                              "carries the sheep's own index and re-shear stays silent, mobDied payload "
                              "equals the died sheep's index, breeding babies inherit a parent color (not "
                              "rerolled)";
-    }
+    });
 
     // ── t777 羊 pack 态「多一双眼」根因合成器探针 ──
     // 修法核心 = t749 毛层命中时 mobTextureSource(3) 返回合成贴图（毛身 + 本体层头区真脸）→ QML 眼 overlay
@@ -5606,7 +5766,10 @@ void MatrixRun::section01_redstone_core()
     //     （真脸覆写，眼 overlay 隐的依据）+ 毛身区（head 区外）= 毛层原色（毛身保留）；
     //   ② body 源缺失 → 空串优雅降级（调用方回退毛层原样、头前无脸 → 眼 overlay 须保留的路径）。
     // 腿 skin 色 overlay / 眼位修正是 QML 呈现层，无 C++ 可测路径（矩阵不链 Quick3D）。
-    {
+    runLegMulti({ "t777 sheep wool-face compositor: valid 64x32 fur+body pair composites to base-size output with b"
+        "ody-layer (real-face) pixels in head region (0,0)-(28,14) and fur pixels preserved in wool body/"
+        "leg rows, missing body source degrades to empty (caller falls back to raw fur = eye overlay stay"
+        "s visible)" }, [&]() {
         bool ok = true;
         QDir d777(QDir::temp().absoluteFilePath("t777_sheep_probe"));
         d777.removeRecursively();
@@ -5658,7 +5821,7 @@ void MatrixRun::section01_redstone_core()
                              "base-size output with body-layer (real-face) pixels in head region (0,0)-"
                              "(28,14) and fur pixels preserved in wool body/leg rows, missing body source "
                              "degrades to empty (caller falls back to raw fur = eye overlay stays visible)";
-    }
+    });
 
     // ── t779 头像裁剪修复探针（用户「猪头像缺鼻子、蠹虫头像缺眼睛」）──
     // 根因：MC 机制 = 猪鼻画在独立贴图偏移盒 (16,16) 4×3×1（头脸 (8,8)-(16,16) 只有 row11 双眼）；
@@ -5672,7 +5835,11 @@ void MatrixRun::section01_redstone_core()
     //     探测）→ 图标 64×64 中 A=脸底/B=鼻贴脸中下/C=下巴（旧实现无合成 → B 处仍 A，FAIL）；合成蠹虫
     //     64×32 扁平（头区 (0,0)-(8,4) = C / 余 = D，走 explicitSrc 扁平探测）→ 图标含 C 横带居中 + 带外
     //     透明（旧裁剪 (2,4)-(10,9) 全 D 区，FAIL）。图鉴图标本体观感（QML 缩放呈现）需人工目视。
-    {
+    runLegMulti({ "t779 mob head icon crops: pig front (8,8)8x8 + snout overlay box (16,16)4x3x1 front (17,17)-(21,"
+        "20) composited at face (2,4) (eyes row3 above snout rows4-6), silverfish front switched from bod"
+        "y-segment (2,4)-(10,9) to head top+face band (0,0)-(8,4) containing both eyes, cow/spider/ocelot"
+        "/nightwalker fronts locked unchanged, synthetic 64x32 rigs verify snout/eye pixels land in the 6"
+        "4x64 icons (icon look in browser = QML, manual check)" }, [&]() {
         bool ok = true;
         // ① 布局常量锁（mob/…/paste 全字段；表加条目改数值 = 漂移即 FAIL）。
         {
@@ -5778,7 +5945,7 @@ void MatrixRun::section01_redstone_core()
                              "(0,0)-(8,4) containing both eyes, cow/spider/ocelot/nightwalker fronts locked "
                              "unchanged, synthetic 64x32 rigs verify snout/eye pixels land in the 64x64 icons "
                              "(icon look in browser = QML, manual check)";
-    }
+    });
 
     // ── t780 狼/豹猫 pack 身体贴图映射探针（用户「浏览器 3D 预览狼仍用兔子贴图、豹猫贴图不对——头对身错」）──
     // 根因：狼(10)/豹猫(11) 自 t749 起刻意不入 mobEntityMap（当时几何全脸 UV 无 box-UV 数据，防
@@ -5795,7 +5962,10 @@ void MatrixRun::section01_redstone_core()
     //     同 t777/t779 语义）：rig 按 mobEntityMap 子目录布局落 wolf/wolf.png + cat/ocelot.png → 两型
     //     头像生成成功且中心像素正确 = explicitSrc 撤除后「region 条目 → mobEntityMap → 文件解析」链路
     //     通（映射漏行 / 头区条目丢 → 空串 FAIL）。3D box-UV 采样观感（mobmodel.cpp 几何层）需人工目视。
-    {
+    runLegMulti({ "t780 wolf/ocelot pack body texture: mobEntityMap gains 10->wolf/wolf.png + 11->cat/ocelot.png (s"
+        "ilverfish 14 stays out - head-only explicitSrc path), head fronts locked (4,4)6x6 / (5,5)5x4, ex"
+        "plicitSrc removal verified end-to-end via subdir-layout rigs resolving through the main map (3D "
+        "box-UV look = QML, manual check)" }, [&]() {
         bool ok = true;
         // ① 映射锁（精确路径 + 蠹虫排除）。
         {
@@ -5865,5 +6035,5 @@ void MatrixRun::section01_redstone_core()
                              "head fronts locked (4,4)6x6 / (5,5)5x4, explicitSrc removal verified end-to-end "
                              "via subdir-layout rigs resolving through the main map (3D box-UV look = QML, "
                              "manual check)";
-    }
+    });
 }

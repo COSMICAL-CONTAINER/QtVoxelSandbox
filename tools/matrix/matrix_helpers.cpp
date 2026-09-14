@@ -74,6 +74,28 @@ void MatrixRun::placeRigBlock(World &world, int x, int y, int z, BR::Id id, quin
                x, y, z, int(id), int(st));
 }
 
+// ── R20.03 目标 B：--filter 腿门控 ──
+// names = 本腿组全部静态腿名（PASS 行名，非空）；命中任一子串即整组执行
+//（多腿共享作用域按块级门控：任一腿名命中，块内全部腿执行——共享 rig 前置使然）；
+// 全不命中则逐名 SKIP 并计数。legFilter 空 = 全跑（与无参逐位一致）。
+void MatrixRun::runLegMulti(const QStringList &names, const std::function<void()> &body)
+{
+    if (legFilter.isEmpty()) {
+        body();
+        return;
+    }
+    for (const QString &n : names) {
+        if (n.contains(legFilter)) {
+            body();
+            return;
+        }
+    }
+    for (const QString &n : names) {
+        ++skipCount;
+        qInfo().noquote() << "SKIP |" << n;
+    }
+}
+
 // ── 段调度：原 main 体执行序原样（腿间状态依赖不可变）──
 void MatrixRun::runAll()
 {
@@ -87,4 +109,6 @@ void MatrixRun::runAll()
     section08_recent();
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
+    if (!legFilter.isEmpty())
+        qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
 }

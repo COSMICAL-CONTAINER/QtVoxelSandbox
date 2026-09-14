@@ -8,7 +8,13 @@ int main(int argc, char *argv[])
     //   构造需 Gui 平台集成；无窗口创建，探针纯对象交互）。
     QGuiApplication app(argc, argv);
 
+    // R20.03 目标 B：--filter <substring> —— 腿名含子串才执行，未命中计 SKIP；
+    // 不加该参数时行为与原先逐位一致（全 545 跑）。
     MatrixRun run;
+    for (int i = 1; i < argc; ++i) {
+        if (QLatin1String(argv[i]) == QLatin1String("--filter") && i + 1 < argc)
+            run.legFilter = QString::fromUtf8(argv[++i]);
+    }
     run.runAll();
     return run.totalFail == 0 ? 0 : 1;
 }

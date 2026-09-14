@@ -233,6 +233,19 @@ public:
     QPair<int, int> nextSlot(); // 原 main lambda（L249-261）同体成员化
     void placeRigBlock(World &world, int x, int y, int z, BR::Id id, quint8 st); // 原 lambda（L268-274）
 
+    // ── R20.03 目标 B：--filter 腿门控 ──
+    //   legFilter 非空时：腿名（PASS 行名）含子串的组才执行，未命中组逐名输出
+    //   "SKIP | <name>" 并计 skipCount；为空时直接执行（输出与无参逐位一致）。
+    //   记账粒度：静态打印语句（循环腿多次执行按语句计 1）；t740 矩阵循环例外，
+    //   逐腿运行期名（section01 专用单名 runLeg 形态）。
+    QString legFilter;
+    int skipCount = 0;
+    void runLegMulti(const QStringList &names, const std::function<void()> &body);
+    void runLeg(const QString &name, const std::function<void()> &body)
+    {
+        runLegMulti(QStringList { name }, body);
+    }
+
 private:
     void section01_redstone_core(); // 原 L296-6156 逐字节段
     void section02_early_probes(); // 原 L6157-12287 逐字节段
