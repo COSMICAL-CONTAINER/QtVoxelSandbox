@@ -2095,9 +2095,11 @@ void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 stat
     if (id == BlockRegistry::WheatCrop) {
         const bool mature = state >= BlockRegistry::WheatCropStageMax;
         const int wheatCount = mature ? 1 : 0;
-        // t1026 对齐 dev-plan 口径「成熟挖 → 1 小麦 + 1-3 种子」（t237 旧值 1-2；bounded(lo,hi) 上界开区间
-        //   → bounded(1,4) = {1,2,3}）：收获自给循环更宽裕（1 麦 + 1-3 种 ≥ 消耗 1 种/株 → 净增益恒正）。
-        const int seedCount  = mature ? QRandomGenerator::global()->bounded(1, 4) : 1; // 成熟 1-3 / 未成熟 1
+        // t1046 小麦种子基准钉死（parity 台账低-4，用户裁决「一切按原版」）：项目基准 ~Beta/1.0 →
+        //   成熟 0-3 种子（wiki 三元组引证：Java 现代（1.0 正式版起）= 1-4；Beta/旧版与基岩 = 0-3；
+        //   引证 docs/parity-ledger.md 低-4 行 + dev-plan t1046 条目⑤）。bounded(0,4) = {0,1,2,3}
+        //   （上界开区间）；0 → 不弹种子实体（MC 口径可能颗粒无收）。t1026 旧值 1-3 两版皆非，退役。
+        const int seedCount  = mature ? QRandomGenerator::global()->bounded(0, 4) : 1;
         constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         int sx = x, sz = z;
         for (const auto &o : kHoriz) {
@@ -2105,7 +2107,8 @@ void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 stat
         }
         if (wheatCount > 0)
             emit spawnItem(x, y, z, RecipeRegistry::WheatId, wheatCount);
-        emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
+        if (seedCount > 0)
+            emit spawnItem(sx, y, sz, RecipeRegistry::SeedId, seedCount);
     } else if (id == BlockRegistry::CarrotCrop || id == BlockRegistry::PotatoCrop) {
         // t407 胡萝卜/马铃薯收割：成熟掉 1-4× 对应物品（机制等价 MC 1.0 成熟作物 1-4）；未成熟仅 1×。
         //   产出物即种子（玩家可再种），机制对齐 MC carrot/potato「种 1 收 1-4」。未成熟仅返 1 个（基础兜底，
@@ -3550,9 +3553,10 @@ void PlayerController::placeBlock()
     //   飞态 shift 下降 / 创造走），非 m_moveState==Crouch（后者飞态不进蹲 → 飞态 shift+右键会失效，与 MC 不符）。
     //   只绕过「开界面」类 useBlock（工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧；review0909 #2 补音符盒；
     //   t1034 存量清偿再补门 / 活板门 / 床——潜行持方块 = 放置语义优先于开合 / 翻板 / 入睡，MC「潜行右键 =
-    //   对方块面放置」旁路口径统一）。机关 / 浆果丛 / 末地门 / 传送门等其它 useBlock 仍**不绕过**（非「容器
-    //   UI / 开合 / 入睡 / 调音」语义，shift 不改变其交互）。空手 sneak+右键功能方块 → 下方
-    //   m_selectedBlock==Air 守卫拦（不放置不挥手），机制等价 MC 空手 shift 右键箱子无效应。
+    //   对方块面放置」旁路口径统一）。机关（拉杆 / 按钮）t1046 补旁路（parity 台账低-3，t1034 同式）：
+    //   潜行持方块右键机关 = 对面放置而非扳动；浆果丛 / 末地门 / 传送门等其它 useBlock 仍**不绕过**
+    //   （非「容器 UI / 开合 / 入睡 / 调音 / 机关」语义，shift 不改变其交互）。空手 sneak+右键功能方块 →
+    //   下方 m_selectedBlock==Air 守卫拦（不放置不挥手），机制等价 MC 空手 shift 右键箱子无效应。
     const bool sneakPlace = m_keys.value(Qt::Key_Shift);
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
     if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
@@ -3758,6 +3762,9 @@ void PlayerController::placeBlock()
     //   + spawnPrimedTnt 延时引爆）+ 挥手。空手亦可（激活机关是「使用」语义，与手持何物无关）。优先于放置（右键
     //   机关即激活，不另放块），机制等价 MC 1.0 杠杆 / 按下激活红石脉冲点火 TNT。
     //   isManualIgniter 覆盖 Lever / WoodButton / StoneButton 三类机关（单一权威谓词，避免三处硬编码 id 判定漂移）。
+    //   t1046 潜行旁路门（parity 台账低-3，t1034 门 / 活板门 / 床同式）：!sneakPlace 才走机关激活——
+    //   潜行持方块右键机关 = 对命中面邻格放置（fall-through 放置路径），不扳动（MC「潜行右键 = 对方块面
+    //   放置」口径）；非潜行右键激活照旧。空手潜行右键 → m_selectedBlock==Air 守卫拦，无效应。
     //   点燃 = 移除 TNT 方块（clearBlockSilent 点火专用静默清 + worldChanged 重建 mesh，不发 broken/placed → 免粒子 / 音
     //   spam；clearBlockSilent 绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒写）+ spawnPrimedTnt（默认 fuse ~5s）→ 引爆时链式引燃邻接 TNT。
     //   **t628 边沿触发语义**（对齐 t627 压力板边沿；用户「按钮触发一次自动恢复；拉杆拉开持续激活——扳上沿
@@ -3771,7 +3778,7 @@ void PlayerController::placeBlock()
     //   - t628 发射器 / 投掷器触发：激活沿上扫 **6 邻**（同 TNT 点火同圈）为 Dispenser/Dropper → fireDispenserAt
     //     一次（per-dispenser 冷却防抖；方向 = 机器 state 朝向，与机关方位无关——t608 单一方向源）。
     //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World state + 调 EntityManager.spawnPrimedTnt），向下依赖。
-    if (BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlace && BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
         const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
         const bool isButton = BlockRegistry::isWoodButton(hitId) || BlockRegistry::isStoneButton(hitId);

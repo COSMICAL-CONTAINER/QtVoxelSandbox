@@ -1166,11 +1166,11 @@ private:
     //   木梯失撑语义，机制等价 MC「按钮 / 拉杆附着面被移除即脱落」）。机关无碰撞不撑他机关 → 单趟扫即足够。
     void dropUnsupportedMechAround(int x, int y, int z);
     // t247 草丛 / 小麦作物掉落产出（玩家破块 / 失撑共用）：把 WheatCrop（按 state 判成熟，t237 收割：
-    //   成熟掉 1 小麦物品 + 1-3 种子（t1026 对齐 dev-plan 口径，由 t237 的 1-2 上调）、未成熟仅 1 种子）/
-    //   TallGrass（1/kTallGrassSeedDropDenom 概率掉种，t246）的 spawnItem 计算收敛到此 → finishMiningAt
-    //   与 dropUnsupportedCropsAround 共用，**失撑掉落与玩家破块产出同源**，零分支漂移。纯掉落计算
-    //   （t619 cropHarvested 成就埋点不在此发 —— review-L2：两调用方应区别计数，见 finishMiningAt drop
-    //   分支注释）。id 非两者 → no-op（caller 误调防御）。
+    //   成熟掉 1 小麦物品 + 0-3 种子（t1046 对齐 MC ~Beta/1.0 基准钉死，parity 台账低-4；t1026 的 1-3
+    //   退役）、未成熟仅 1 种子）/ TallGrass（1/kTallGrassSeedDropDenom 概率掉种，t246）的 spawnItem
+    //   计算收敛到此 → finishMiningAt 与 dropUnsupportedCropsAround 共用，**失撑掉落与玩家破块产出
+    //   同源**，零分支漂移。纯掉落计算（t619 cropHarvested 成就埋点不在此发 —— review-L2：两调用方应
+    //   区别计数，见 finishMiningAt drop 分支注释）。id 非两者 → no-op（caller 误调防御）。
     //   state 须为 setBlock(Air) 前快照（t134 时序：setBlock 委托 5 参数版以 state=0 写入，之后 stateAt
     //   永返 0 → WheatCrop 成熟判定失效，须先读）。分层同 spawnItem（Game/Physics 发语义事件，呈现层 /
     //   ViewModel 只消费）。

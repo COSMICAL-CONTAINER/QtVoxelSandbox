@@ -1084,8 +1084,9 @@ public:
         //     bit[4:0]（NoteBlockStatePitchMask）= 音高 0..24 半音（0=C4 起，A4=9=440Hz；调音循环写）。
         //     bit5（NoteBlockStatePoweredFlag）  = 红石通电记忆位（RailSwitchPoweredFlag 先例）：上升沿
         //       发声 + 置位 / 下降沿清位——稳定通电不重复响（MC 口径每升沿响一次），断电再通再响。
-        //   **音色族**（noteTimbreFamily，登记 3 族 MC 1.0 口径：木=bass / 石=kick / 沙=snare——
-        //   下方方块材质定族；播放简化=同一钢琴采样按族速率倍移，独立采样登记后续）。
+        //   **音色族**（noteTimbreFamily，登记 4 族 MC 1.0 口径：木=bass / 石=kick / 沙=snare /
+        //   玻璃=hat（t1046 低-2，Beta1.2 起）——下方方块定族；播放简化=同一钢琴采样按族速率倍移，
+        //   独立采样登记后续）。
         //   配方：8 木板环 + 1 红石粉 → 1 音符盒（工作台，MC 1.0 同料）。进红石 tab 创造调色板
         //   （音符盒是红石机关件——红石触发发声）。
         NoteBlock         = 143, // 音符盒：右键调音（0-24 半音循环）+ 攻击/红石上升沿发声；下方方块定音色族
@@ -2210,9 +2211,11 @@ public:
     //   频率口径 f = 440×2^((n-9)/12)（n=9 = A4 = 440Hz，dev-plan t1028 公式）。UI 文案单一权威
     //   （PlayerController 调音播报 / 探针断言同源，防两处手抄漂移）。
     static QString noteBlockNoteName(int pitch);
-    // 音色族（MC 1.0 口径登记 3 族 + 兜底钢琴）：下方方块材质定族——木=bass / 石=kick / 沙=snare，
-    //   其余（含悬空）= piano。materialGroup(id) 复用（音色族即材质组的投影，单一权威不另立表）。
-    enum NoteTimbreFamily : int { NoteTimbrePiano = 0, NoteTimbreBass = 1, NoteTimbreKick = 2, NoteTimbreSnare = 3 };
+    // 音色族（MC 1.0 口径登记 4 族 + 兜底钢琴）：下方方块定族——木=bass / 石=kick / 沙=snare /
+    //   玻璃=hat（t1046 第四族，parity 台账低-2：Beta1.2 起 MC 玻璃下方=hat 脆响；Glass 材质组
+    //   GroupStone 依赖挖掘/掉落音面 → 脱组代价大，选型按方块 id 直判不动 materialGroup），
+    //   其余（含悬空）= piano。materialGroup(id) 复用（bass/kick/snare 三族即材质组投影）。
+    enum NoteTimbreFamily : int { NoteTimbrePiano = 0, NoteTimbreBass = 1, NoteTimbreKick = 2, NoteTimbreSnare = 3, NoteTimbreHat = 4 };
     static NoteTimbreFamily noteTimbreFamily(quint8 belowId);
     // 三高探针：每个水平方向（±X / ±Z）的邻格在上/中/下三层的方块 id（0 = 空气 / 非轨）。
     //   坡度（t667）存在性判定即查 up / down 层（邻居轨坐在 1 格高台阶上 / 邻居轨低 1 格）。

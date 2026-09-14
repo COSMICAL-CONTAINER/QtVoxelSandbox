@@ -2637,17 +2637,17 @@ bool EntityManager::tickBreeding(qreal dt)
         }
         if (e.baby) {
             e.growTimer -= float(dt);
-            if (e.growTimer <= 0.0f) {
-                e.growTimer = 0.0f;
-                e.baby = false; // 长大成体（QML babyScaleAt 1.0 → 重缩回正常体型）
-                // t1025 成长还原（幼崽缩放基建的逆操作）：按类型还原成体碰撞盒（applyMobCollisionBox 单一
-                //   权威）+ 血量上限加倍还原（产崽时减半的精确逆：maxHealth×2、health×2 clamp 上限）+ pos.y
-                //   重锚（盒底恒贴地 —— halfH 变高 Δ，collision 中心同步抬 Δ，防还原盒嵌入地面卡住移动）。
-                const float babyHalfH = e.halfH;
-                applyMobCollisionBox(e.mobType, e);
-                e.maxHealth = std::max(1, e.maxHealth * 2); // 产崽减半的精确逆（×2）；当前血量同倍回上限
-                e.health = std::min(e.health * 2, e.maxHealth);
-                e.pos.setY(e.pos.y() + (e.halfH - babyHalfH));
+                if (e.growTimer <= 0.0f) {
+                    e.growTimer = 0.0f;
+                    e.baby = false; // 长大成体（QML babyScaleAt 1.0 → 重缩回正常体型）
+                    // t1025 成长还原（幼崽缩放基建的逆操作）：按类型还原成体碰撞盒（applyMobCollisionBox 单一
+                    //   权威）+ pos.y 重锚（盒底恒贴地 —— halfH 变高 Δ，collision 中心同步抬 Δ，防还原盒嵌入
+                    //   地面卡住移动）。t1046 血量还原面退役（parity 台账低-1，用户裁决「一切按原版」）：幼崽
+                    //   血量=成体上限满血（MC Baby 血量口径），本就 10/10 长大无 maxHealth/health 可还原——
+                    //   t1025 旧「×2 还原」是产崽减半的逆，减半已随低-1 清偿一并移除，此处不再触血量。
+                    const float babyHalfH = e.halfH;
+                    applyMobCollisionBox(e.mobType, e);
+                    e.pos.setY(e.pos.y() + (e.halfH - babyHalfH));
                 dirty = true;
                 qCInfo(lcEnt) << "baby grew up at pos" << e.pos << "type" << e.mobType;
             }
@@ -2709,13 +2709,14 @@ bool EntityManager::tickBreeding(qreal dt)
             baby.baby = true;            // 标幼崽（QML babyScaleAt → 0.5 缩小）
             baby.growTimer = m_babyGrowSec; // 长大倒计时（t1025：运行期值，缺省 = MC 20 min 口径）
             // t1025 幼崽缩放基建对齐（t952 小蹒跚者同款「物理盒即缩放」机制，非 t400 旧版仅 QML 视觉缩）：
-            //   碰撞盒 ×kBabyScale（halfW/halfH 同倍）+ **最大血量减半**（spec「幼崽不可繁殖/血量减半」；幼崽
-            //   血量上限 = 成体一半，当前血量随上限回满）。pos.y 贴 collision 底面重锚（spawnMobCore 按成体盒
-            //   pos.y = 格底 + halfH；缩盒后改 格底 + 幼体 halfH，免首帧嵌地）。
+            //   碰撞盒 ×kBabyScale（halfW/halfH 同倍）。t1046 血量口径改写（parity 台账低-1，用户裁决
+            //   「一切按原版」）：MC Baby 血量 = 成体上限满血（非减半）——maxHealth/health 保持
+            //   spawnMobCore 的满血语义原样（10/10），旧「maxHealth/2」减半与长大「×2 还原」双双退役；
+            //   pos.y 贴 collision 底面重锚（spawnMobCore 按成体盒 pos.y = 格底 + halfH；缩盒后改
+            //   格底 + 幼体 halfH，免首帧嵌地）。
             const float adultHalfH = baby.halfH;
             baby.halfW *= kBabyScale;
             baby.halfH *= kBabyScale;
-            baby.maxHealth = std::max(1, baby.maxHealth / 2);
             baby.health = baby.maxHealth;
             baby.pos.setY(baby.pos.y() - (adultHalfH - baby.halfH));
             if (b.mobType == MobWolf)
@@ -6583,14 +6584,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         //   spawnMobCore 内部用 kDefaultMaxHealth（同 spawn egg 路径）。
                         m_entities[size_t(slot)].baby = true;
                         m_entities[size_t(slot)].growTimer = m_babyGrowSec;
-                        // t1025 幼崽缩放基建对齐（同 tickBreeding 产崽段：物理盒 ×kBabyScale + 血量减半 +
+                        // t1025 幼崽缩放基建对齐（同 tickBreeding 产崽段：物理盒 ×kBabyScale +
                         //   pos.y 贴底重锚——蛋孵小鸡与繁殖幼崽同款幼体形态，单点语义不分叉）。
+                        //   t1046 血量口径改写（parity 台账低-1）：MC Baby 血量 = 成体上限满血，
+                        //   旧「maxHealth/2 减半」退役；health 保持 spawnMobCore 满血语义。
                         {
                             Entity &hatch = m_entities[size_t(slot)];
                             const float adultHalfH = hatch.halfH;
                             hatch.halfW *= kBabyScale;
                             hatch.halfH *= kBabyScale;
-                            hatch.maxHealth = std::max(1, hatch.maxHealth / 2);
                             hatch.health = hatch.maxHealth;
                             hatch.pos.setY(hatch.pos.y() - (adultHalfH - hatch.halfH));
                         }

@@ -116,12 +116,15 @@ public:
     Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {},
                              const QVariantMap &worldTime = {}, const QVariantMap &bedSpawn = {});
     // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int,
-    //   hasWeather: bool}。旧存档缺键 → 逐键缺省（phase 0.0 = 新世界默认相位 / day 0 / weather 0 =
-    //   Clear 晴天）——「新增字段对旧存档缺省（默认早晨 / 晴天）」，加载端拿默认值恢复 = 与新世界
-    //   首帧时钟一致，不炸不跳。review0906 #14：hasWeather = 存档是否**真带** weather 键（缺键默认
-    //   weather 0 与「真存过 Clear」不可区分 → 消费端仅 hasWeather 才 setWeatherState，缺键走
-    //   resetWeather 首场晴偏短窗，防无条件恢复把初始 20/45s 窗重抽为常规 45/120s）。未打开 → 空 map
-    //   （caller 判空跳过恢复）。
+    //   hasWeather: bool, hasWeatherTimer: bool, weatherTimerMs: qlonglong}。旧存档缺键 → 逐键缺省
+    //   （phase 0.0 = 新世界默认相位 / day 0 / weather 0 = Clear 晴天 / weatherTimerMs 0）——「新增字段
+    //   对旧存档缺省（默认早晨 / 晴天）」，加载端拿默认值恢复 = 与新世界首帧时钟一致，不炸不跳。
+    //   review0906 #14：hasWeather = 存档是否**真带** weather 键（缺键默认 weather 0 与「真存过
+    //   Clear」不可区分 → 消费端仅 hasWeather 才 setWeatherState，缺键走 resetWeather 首场晴偏短窗，
+    //   防无条件恢复把初始 20/45s 窗重抽为常规 45/120s）。t1046 hasWeatherTimer / weatherTimerMs =
+    //   剩余时长键（weather_timer_ms 毫秒 int；parity 台账低-5 等价 MC RainTime/ThunderTime）——缺键
+    //   （旧档）→ 恢复端用 setWeatherState 随机窗；真带 → setWeatherRemainingSec 精确续跑。未打开 →
+    //   空 map（caller 判空跳过恢复）。
     Q_INVOKABLE QVariantMap loadWorldTime() const;
     // t1024 读床位重生锚（与 saveAll 第 6 参同形）：{hasBed: bool, x: double, y: double, z: double}。
     //   旧存档缺键 → hasBed=false（coords 0）——「新增字段对旧存档缺省」，消费端（Main.qml enterWorld）

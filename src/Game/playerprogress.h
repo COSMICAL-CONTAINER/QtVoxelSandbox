@@ -34,10 +34,11 @@
 //     路由（「隔墙有眼」，t1000）。
 //   - onEnchanted() / onEnchantedBookObtained()：EnchantingTableUI.doEnchant 成功末尾（「附魔师」/「书虫」）。
 //   - onAnvilUsed()：AnvilUI.takeProduct 成功末尾（「铁匠」）。
-//   - t1020 新埋点（成就树四分支扩展）：onStructureEntered(int kind)（player.structureEntered 边沿信号，
-//     地牢/矿井/沙漠神殿/丛林神殿四探索成就）/ onRodeMinecart()（Main.qml ridingCart 边沿，「轨道骑士」）/
-//     onFishCaught()（player.fishCaught 通知信号，「愿者上钩」）/ onChestCartOpened()（openChest 的
-//     isCartCell 分支，「移动金库」）；另 onMobKilled / onItemPicked 扩展首杀四生物 / 首煤铁红石判定。
+    //   - t1020 新埋点（成就树四分支扩展）：onStructureEntered(int kind)（player.structureEntered 边沿信号，
+    //     地牢/矿井/沙漠神殿/丛林神殿四探索成就）/ onMinecartMoved(float)（t1046 改造：player.moved 经
+    //     Main.qml ridingCart 门控路由，「轨道骑士」乘矿车累计 1km 达阈）/ onFishCaught()（player.fishCaught
+    //     通知信号，「愿者上钩」）/ onChestCartOpened()（openChest 的 isCartCell 分支，「移动金库」）；
+    //     另 onMobKilled / onItemPicked 扩展首杀四生物 / 首煤铁红石判定。
 //
 // 成就解锁逻辑在埋点方法内判定（如 onCraft(SwordWood) → unlock("出击时间")）。unlock 时先查前置依赖：
 //   父成就未解锁 → 忽略本次解锁事件（progress-tree 三轮；机制等价 MC 1.0 父成就未达成则子成就解锁不生效）。
@@ -77,6 +78,8 @@ class PlayerProgress : public QObject
     // t619 新统计：箭命中生物次数（arrowHitMob 累计）+ 收获成熟作物次数（cropHarvested 累计）。
     Q_PROPERTY(int arrowsHitMobs READ arrowsHitMobs NOTIFY progressChanged)
     Q_PROPERTY(int cropsHarvested READ cropsHarvested NOTIFY progressChanged)
+    // t1046 新统计：乘矿车累计里程（格；onMinecartMoved 累积，「轨道骑士」1km 达阈源）。
+    Q_PROPERTY(qreal minecartTravelBlocks READ minecartTravelBlocks NOTIFY progressChanged)
     // 内容版本号（任一统计 / 成就写入自增）。QML 列表 delegate 触碰它取最新 achievements() / statsList()
     //   （同 ChestStore revision / Hotbar slotRevision 模式，moc 安全契约）。
     Q_PROPERTY(int revision READ revision NOTIFY progressChanged)
@@ -96,6 +99,7 @@ public:
     int itemsPicked() const { return m_itemsPicked; }
     int arrowsHitMobs() const { return m_arrowsHitMobs; }
     int cropsHarvested() const { return m_cropsHarvested; }
+    qreal minecartTravelBlocks() const { return m_minecartTravelBlocks; }
     int revision() const { return m_revision; }
 
     // ── 埋点方法（Q_INVOKABLE；各事件源经 QML 桥接调）──
@@ -147,8 +151,11 @@ public:
     //   神殿；本层不持 World —— Game/ViewModel 零向上依赖，数值契约同 BlockRegistry 直引模式注释绑定）。
     //   player.structureEntered 一次性边沿信号 → Main.qml 路由。解锁对应探索成就（unlock 幂等）。
     Q_INVOKABLE void onStructureEntered(int kind);
-    // 首次骑上矿车（Main.qml ridingCart false→true 边沿，同 onBoatBoarded 船先例）。解锁「轨道骑士」。
-    Q_INVOKABLE void onRodeMinecart();
+    // t1046 乘矿车里程埋点（parity 台账低-6，机制等价 MC 1.0「On A Rail」乘矿车累计 1km）：骑矿车期间
+    //   每帧位移增量（player.moved 经 Main.qml ridingCart 门控路由；替代 t1020 旧「骑上即解锁」的
+    //   onRodeMinecart 边沿埋点）。delta 并入节流累积器（~0.5s flush 同 onMove 模式），累计达
+    //   kMinecartRideKm（1000 格 = MC 口径 1km）解锁「轨道骑士」。负 delta 防御忽略。
+    Q_INVOKABLE void onMinecartMoved(float deltaBlocks);
     // 钓竿收竿获物（player.fishCaught 通知信号 → Main.qml 路由；获物实体已由 Game 层直调生成）。
     //   解锁「愿者上钩」。
     Q_INVOKABLE void onFishCaught();
@@ -226,9 +233,11 @@ private:
     int m_itemsPicked = 0;          // 拾取物品次数
     int m_arrowsHitMobs = 0;        // t619 箭命中生物次数（onArrowHitMob 累计）
     int m_cropsHarvested = 0;       // t619 收获成熟作物次数（onCropHarvested 累计）
+    qreal m_minecartTravelBlocks = 0.0; // t1046 乘矿车累计里程（格；onMinecartMoved 达 kMinecartRideKm 解锁轨道骑士）
 
     // onMove / onPlayTimeTick 节流累积器（免每帧 emit progressChanged 抖 QML 绑定）。
     float m_distanceAccum = 0.0f;   // 距离累积（格；onPlayTimeTick 达 kFlushInterval 时一并并入 distanceTraveled）
+    float m_minecartAccum = 0.0f;   // t1046 矿车里程累积（格；同上并入 minecartTravelBlocks）
     float m_playTimeFlushTimer = 0.0f; // 游戏时间 flush 计时（秒；达 kFlushInterval 才 emit）
 
     // 成就解锁状态（id → true）。QString 键；成就数少，性能非热点。
@@ -241,6 +250,9 @@ private:
     // t619 计数型成就阈值：箭命中生物次数（神射手）/ 收获成熟作物次数（农夫）。
     static constexpr int kSniperHits = 10;
     static constexpr int kFarmerHarvests = 10;
+    // t1046「轨道骑士」里程阈值：乘矿车累计 1000 格（机制等价 MC 1.0 On A Rail 乘矿车行驶 1km，
+    //   parity 台账低-6；1 格 = 1 米的 MC 距离口径）。
+    static constexpr qreal kMinecartRideKm = 1000.0;
 };
 
 #endif // PLAYERPROGRESS_H

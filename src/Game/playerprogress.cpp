@@ -24,7 +24,7 @@
 //   跟随末影之眼，本工程无该物品 → 按进入结构落地：PlayerController tick 内 insideStronghold 边沿 →
 //   enteredStronghold 信号 → Main.qml 路由）各自独立根；t1020 追加七条独立根：探索四结构（「地牢探秘」
 //   「废矿来客」「沙漠寻踪」「丛林秘境」——World::inside* 区域沿信号，判定权威 = rebuildStructureRegions
-//   重推导足迹）+ 生活三条（「轨道骑士」骑矿车 / 「愿者上钩」钓鱼首获 / 「移动金库」箱车取物）。
+//   重推导足迹）+ 生活三条（「轨道骑士」t1046 起乘矿车累计 1km / 「愿者上钩」钓鱼首获 / 「移动金库」箱车取物）。
 //   t1020 亦扩两条既有埋点判定：onMobKilled 首杀四生物（蜘蛛/骸骨/潜行者/银鱼，挂「怪物猎人」下）/
 //   onItemPicked 首煤·首铁·首红石（矿脉首矿，挂挖矿线下）。
 //   父成就未解锁时子成就不解锁（unlock 前置检查）。iconId = 节点图标（QML 树节点显示）。
@@ -87,29 +87,33 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
         { "get_redstone",   "get_diamond",    "红石!",      "首次获得红石粉",
           int(RecipeRegistry::RedstoneId) },
         // 战斗支（首杀各生物代表，挂「怪物猎人」下；同事件首杀 → 父先行解锁，同 tick 双解锁）：
-        { "kill_spider",    "monster_hunter", "织网终结者", "首次击杀蜘蛛",
+        //   t1046 四条首杀为工程发明项（MC 无按种首杀成就）→ 描述尾「（原创）」标注（低-6，功能不删）。
+        { "kill_spider",    "monster_hunter", "织网终结者", "首次击杀蜘蛛（原创）",
           int(RecipeRegistry::SpawnEggSpiderId) },
-        { "kill_bones",     "monster_hunter", "白骨收藏家", "首次击杀骸骨",
+        { "kill_bones",     "monster_hunter", "白骨收藏家", "首次击杀骸骨（原创）",
           int(RecipeRegistry::SpawnEggBonesId) },
-        { "kill_stalker",   "monster_hunter", "拆弹专家",   "首次击杀潜行者",
+        { "kill_stalker",   "monster_hunter", "拆弹专家",   "首次击杀潜行者（原创）",
           int(RecipeRegistry::SpawnEggStalkerId) },
-        { "kill_silverfish", "monster_hunter", "石中蛀虫",  "首次击杀银鱼",
+        { "kill_silverfish", "monster_hunter", "石中蛀虫",  "首次击杀银鱼（原创）",
           int(BlockRegistry::StoneBrick) },
         // 探索支（进入四结构区域，各独立根 —— 同「隔墙有眼」t1000 先例，不挂线避免父前置吞沿）：
-        { "entered_dungeon", nullptr,        "地牢探秘",   "发现了藏在地底的怪物房间",
+        //   t1046 四条进结构为工程发明项（MC 无进结构成就）→ 描述尾「（原创）」标注（低-6，功能不删）。
+        { "entered_dungeon", nullptr,        "地牢探秘",   "发现了藏在地底的怪物房间（原创）",
           int(BlockRegistry::Spawner) },
-        { "entered_mineshaft", nullptr,      "废矿来客",   "发现了废弃的地下矿井",
+        { "entered_mineshaft", nullptr,      "废矿来客",   "发现了废弃的地下矿井（原创）",
           int(BlockRegistry::Planks) },
-        { "entered_desert_temple", nullptr,  "沙漠寻踪",   "发现了沙漠中的神殿",
+        { "entered_desert_temple", nullptr,  "沙漠寻踪",   "发现了沙漠中的神殿（原创）",
           int(BlockRegistry::CutSandstone) },
-        { "entered_jungle_temple", nullptr,  "丛林秘境",   "发现了丛林深处的神殿",
+        { "entered_jungle_temple", nullptr,  "丛林秘境",   "发现了丛林深处的神殿（原创）",
           int(BlockRegistry::Lever) },
         // 生活支（载具 / 渔获 / 箱车，各独立根）：
-        { "ride_minecart",  nullptr,          "轨道骑士",   "骑上矿车沿铁轨行驶",
+        //   t1046「轨道骑士」改 MC 1.0 On A Rail 口径：乘矿车**累计行驶 1km** 解锁（kMinecartRideKm，
+        //   parity 台账低-6；旧「骑上即解锁」退役）。「移动金库」为工程发明项 → 尾「（原创）」标注。
+        { "ride_minecart",  nullptr,          "轨道骑士",   "乘矿车沿铁轨累计行驶 1 千米",
           int(RecipeRegistry::MinecartId) },
         { "first_catch",    nullptr,          "愿者上钩",   "用钓竿钓起一件获物",
           int(RecipeRegistry::RawFishId) },
-        { "chest_cart_loot", nullptr,         "移动金库",   "打开装货的矿车取走物品",
+        { "chest_cart_loot", nullptr,         "移动金库",   "打开装货的矿车取走物品（原创）",
           int(BlockRegistry::Chest) },
     };
     return kDefs;
@@ -189,7 +193,8 @@ void PlayerProgress::onMove(float deltaBlocks)
     m_distanceAccum += deltaBlocks;
 }
 
-// 游戏时间 tick：累加 playTimeSecs；每 kFlushInterval 秒 flush（emit progressChanged + 把累积距离并入）。
+// 游戏时间 tick：累加 playTimeSecs；每 kFlushInterval 秒 flush（emit progressChanged + 把累积距离
+//   （走过路程 + t1046 矿车里程两路）并入各自统计）。
 void PlayerProgress::onPlayTimeTick(float dt)
 {
     m_playTimeSecs += qreal(dt);
@@ -199,6 +204,10 @@ void PlayerProgress::onPlayTimeTick(float dt)
         if (m_distanceAccum > 0.0f) {
             m_distanceTraveled += qreal(m_distanceAccum);
             m_distanceAccum = 0.0f;
+        }
+        if (m_minecartAccum > 0.0f) {
+            m_minecartTravelBlocks += qreal(m_minecartAccum);
+            m_minecartAccum = 0.0f;
         }
         bumpAndEmit();
     }
@@ -327,8 +336,16 @@ void PlayerProgress::onStructureEntered(int kind)
     }
 }
 
-// 骑上矿车 → 「轨道骑士」（幂等 unlock；重复上下车只首次弹 toast）。
-void PlayerProgress::onRodeMinecart() { unlock("ride_minecart"); }
+// t1046 乘矿车里程埋点（头注释见 .h；parity 台账低-6 = MC 1.0 On A Rail 口径）：delta 并入节流累积器；
+//   达阈判定读「已并入 + 累积」全量（kMinecartRideKm）——达阈即解锁，无需等 flush（flush 只影响
+//   统计呈现，不影响解锁时点）；unlock 幂等（越阈续乘的重复判定早退，不重发 toast）。
+void PlayerProgress::onMinecartMoved(float deltaBlocks)
+{
+    if (deltaBlocks <= 0.0f) return; // 负 / 零增量防御忽略
+    m_minecartAccum += deltaBlocks;
+    if (m_minecartTravelBlocks + qreal(m_minecartAccum) >= kMinecartRideKm)
+        unlock("ride_minecart");
+}
 
 // 钓竿收竿获物 → 「愿者上钩」（幂等 unlock；获物实体由 Game 层直调生成，本埋点仅成就口径）。
 void PlayerProgress::onFishCaught() { unlock("first_catch"); }
@@ -458,6 +475,7 @@ QVariantList PlayerProgress::statsList() const
     add("拾取物品",   QString::number(m_itemsPicked));
     add("箭中生物",   QString::number(m_arrowsHitMobs));   // t619
     add("收获作物",   QString::number(m_cropsHarvested));  // t619
+    add("矿车里程",   QString("%1 格").arg(int(m_minecartTravelBlocks))); // t1046
     return out;
 }
 
@@ -478,6 +496,7 @@ QVariantMap PlayerProgress::toVariant() const
     stats["itemsPicked"] = m_itemsPicked;
     stats["arrowsHitMobs"] = m_arrowsHitMobs;     // t619
     stats["cropsHarvested"] = m_cropsHarvested;   // t619
+    stats["minecartTravelBlocks"] = m_minecartTravelBlocks; // t1046
     QVariantMap ach;
     for (const auto &d : achievementDefs())
         ach[QString::fromUtf8(d.id)] = m_unlocked.contains(QString::fromUtf8(d.id));
@@ -492,8 +511,8 @@ void PlayerProgress::loadVariant(const QVariantMap &data)
 {
     m_playTimeSecs = 0.0; m_daysPlayed = 0; m_blocksMined = 0; m_blocksPlaced = 0;
     m_distanceTraveled = 0.0; m_mobsKilled = 0; m_deaths = 0; m_craftsCount = 0; m_itemsPicked = 0;
-    m_arrowsHitMobs = 0; m_cropsHarvested = 0;
-    m_distanceAccum = 0.0f; m_playTimeFlushTimer = 0.0f; m_unlocked.clear();
+    m_arrowsHitMobs = 0; m_cropsHarvested = 0; m_minecartTravelBlocks = 0.0;
+    m_distanceAccum = 0.0f; m_minecartAccum = 0.0f; m_playTimeFlushTimer = 0.0f; m_unlocked.clear();
 
     const QVariantMap stats = data.value("stats").toMap();
     if (!stats.isEmpty()) {
@@ -508,6 +527,7 @@ void PlayerProgress::loadVariant(const QVariantMap &data)
         m_itemsPicked = stats.value("itemsPicked", 0).toInt();
         m_arrowsHitMobs = stats.value("arrowsHitMobs", 0).toInt();     // t619（旧档缺 → 0）
         m_cropsHarvested = stats.value("cropsHarvested", 0).toInt();   // t619（旧档缺 → 0）
+        m_minecartTravelBlocks = stats.value("minecartTravelBlocks", 0.0).toReal(); // t1046（旧档缺 → 0）
     }
     const QVariantMap ach = data.value("achievements").toMap();
     for (auto it = ach.begin(); it != ach.end(); ++it)
