@@ -10981,6 +10981,16 @@ int main(int argc, char *argv[])
                 slabMaxX = std::max(slabMaxX, p.x());
             }
             const bool okA = slabMaxFeetOff <= 0.02f && slabMaxX >= float(x0) + 8.0f;
+            // t1049（GOV-20260914-1）根因修复：拆 (a) 场前先遣散 zA——此前 zA 跨段泄漏进 (b)，slab→farmland
+            //   换地后其脚位（砖顶 kRigY+0.5）留在耕地格内部（新支撑真顶 +0.9375 高于脚位）→ aiHostile 玩家
+            //   路径越障跳探（:4156，无攻击距离门）把自身所在耕地格判墙（isJumpObstacle 真顶 > 脚位+1e-3）
+            //   → 虚假起跳 + t670 滑流落回走廊中段 → 落地 fallDist≈0.75 触发 t1045 踩踏掷骰（全局 RNG）→
+            //   掷中则耕地变 Dirt 满格台阶（+0.0625）→ (b) zB 走到台阶合规越障跳 → feetOff = 离散弧顶采样
+            //   （kJumpSpeed 8.4 / kGravity 28 / 半隐式欧拉 19 tick ≈ 1.19347）> 0.02 = 本腿环境敏感翻红根因
+            //   （同 binary 红绿翻转 = 踩踏 RNG；跨 binary 失败轨迹逐位一致 = 跳跃物理常数，非 UB/布局敏感
+            //   FP）。遣散后 (b) 从净实体态起：zB 出生落差 0.0625 → 踩踏掷骰 p≤0 概率地板提前返回，全腿
+            //   零 RNG 消费确定化。断言本体 (a)/(b) 未放宽。
+            ents.removeEntityAt(zA);
             // 清 (a) 场（拆砖铺耕地；地板留作 (b)）。
             for (int dx = 0; dx <= 10; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Farmland, 0);
             // (b) 耕地走廊：耕地矮盒真顶 +0.9375；新僵尸同款。断言全程 feet ≈ kRigY+0.9375 且 maxX ≥ x0+8。
