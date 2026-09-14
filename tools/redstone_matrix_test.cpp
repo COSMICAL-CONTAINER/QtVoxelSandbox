@@ -11010,10 +11010,20 @@ int main(int argc, char *argv[])
                 farmMaxX = std::max(farmMaxX, p.x());
             }
             const bool okB = farmMaxFeetOff <= 0.02f && farmMaxX >= float(x0) + 8.0f;
-            const bool ok = okA && okB;
+            // t1049 结构钉：锚定腿 (b) 起跑前的 zA 遣散语句（剥注释后仍在的真实语句）——未来腿重构若回退
+            //   跨段泄漏（踩踏 RNG 翻红源）即矩阵可辨。pinSet 自文件自钉（t1027 源钉先例；本矩阵尚无
+            //   tools/ 自钉先例，路径解析同 exeDir/../ 约定）。理由：本修复是行为腿内部的确定性结构面，
+            //   行为断言 (a)/(b) 在「泄漏恰好未掷中」的 run 下无法区分已修/未修——只有源钉能把回归变红。
+            const bool okPin = pinSet(
+                QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absoluteFilePath(
+                    QStringLiteral("tools/redstone_matrix_test.cpp")), {
+                {"review26-1-legb-despawn", "ents.removeEntityAt(zA);"},
+            }).isEmpty();
+            const bool ok = okA && okB && okPin;
             if (!ok)
                 qInfo().noquote() << "  review26-1 slab: feetOff" << slabMaxFeetOff << "maxX" << slabMaxX
-                                  << "| farmland: feetOff" << farmMaxFeetOff << "maxX" << farmMaxX;
+                                  << "| farmland: feetOff" << farmMaxFeetOff << "maxX" << farmMaxX
+                                  << "| pin" << okPin;
             if (!ok) ++totalFail;
             qInfo().noquote() << (ok ? "PASS" : "FAIL")
                               << "| review26-1 mobs stride across bottom-slab and farmland floors at"
