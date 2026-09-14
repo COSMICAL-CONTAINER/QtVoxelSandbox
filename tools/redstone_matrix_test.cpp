@@ -37393,7 +37393,8 @@ Item {
         progT20B.onItemPicked(int(RecipeRegistry::RedstoneId));             // get_redstone（15）
         okB = okB && progT20B.isUnlocked(QStringLiteral("get_diamond"))
               && progT20B.isUnlocked(QStringLiteral("get_redstone")) && toastT20B == 15;
-        progT20B.onMinecartMoved(1000.0f);                                  // ride_minecart（16，t1046：里程达阈 1km）
+        progT20B.onMinecartRideStarted(0.0, 0.0);
+        progT20B.onMinecartMoved(600.0f, 600.0, 0.0);                       // ride_minecart（16，t1048：径向 ≥500 达阈；600 越阈避开恰 500 校准缝——阴性缝摘除时本腿保绿，恰红 t1046e）
         progT20B.onFishCaught();                                            // first_catch（17）
         progT20B.onChestCartOpened();                                       // chest_cart_loot（18）
         progT20B.onStructureEntered(1);                                     // entered_mineshaft（19）
@@ -37405,7 +37406,7 @@ Item {
               && progT20B.isUnlocked(QStringLiteral("entered_mineshaft"))
               && progT20B.isUnlocked(QStringLiteral("entered_desert_temple"))
               && progT20B.isUnlocked(QStringLiteral("entered_jungle_temple")) && toastT20B == 21;
-        progT20B.onMinecartMoved(1.0f);                                     // 幂等：已解锁，越阈续乘不再 toast
+        progT20B.onMinecartMoved(1.0f, 601.0, 0.0);                         // 幂等：已解锁，越阈续乘不再 toast
         progT20B.onFishCaught();
         progT20B.onChestCartOpened();
         progT20B.onStructureEntered(3);
@@ -37480,8 +37481,8 @@ Item {
             });
             missPinT20 << pinSet(srcT20(QStringLiteral("src/ui/Main.qml")), {
                 {"qml-route-structureEntered", "function onStructureEntered(kind) { progress.onStructureEntered(kind) }"}, // 路由行
-                // t1046：骑乘边沿解锁（onRodeMinecart）退役 → 改钉 moved 路由行的 ridingCart 门控里程埋点。
-                {"qml-route-minecartMoved", "if (ridingCart) progress.onMinecartMoved(deltaBlocks)"},
+                // t1046 起 ridingCart 门控里程埋点；t1048 改径向口径：路由行随签名携当前位置采样。
+                {"qml-route-minecartMoved", "if (ridingCart) progress.onMinecartMoved(deltaBlocks, player.position.x, player.position.z)"},
                 {"qml-route-chestCartOpened", "if (isCartCell) progress.onChestCartOpened()"},
                 {"qml-route-fishCaught", "progress.onFishCaught()"},
             });
@@ -37511,7 +37512,7 @@ Item {
                           << "| t1020 achievement-tree expansion: structureEntered edge fires once per"
                              " dungeon entry with idempotent toast and finishWorldLoad re-arm,"
                              " first-kill x4 co-unlocks with monster_hunter, first-ore parent gating"
-                             " (coal/iron/redstone), minecart 1km distance hook (t1046)/fish/chest-cart"
+                             " (coal/iron/redstone), minecart 500m radial ride hook (t1048)/fish/chest-cart"
                              " hooks, kind mapping, 31 defs with shape checks, save->load replay"
                              " without re-toast, source pins (guard/reset/route/def/constants)";
     }
@@ -47855,28 +47856,40 @@ Item {
                                         .arg(plotXs.size()).arg(badSeeds).arg(badPlot));
     }
 
-    // ── P-t1046e 轨道骑士 1km 里程达阈 + 发明成就原创标注（R19.23 t1046 低-6；MC On A Rail 口径）──
-    //    (a) 里程达阈：400+599.5 不解锁 → +0.5 达 1000 解锁（同 tick 幂等）；负增量忽略；flush 后统计
-    //        minecartTravelBlocks 精确；(b) 存档 round-trip：里程 + 解锁态恢复、不重发 toast；
-    //    (c) 描述钉：ride_minecart = 1km 口径不带原创；发明九项（首杀四 + 进结构四 + 箱车）描述尾
-    //        「（原创）」；MC 同型项（获得原木 / 愿者上钩）不带；(d) 源钉（定义行 + 埋点声明 + 阈值）。
+    // ── P-t1046e 轨道骑士 500m 单方向径向位移达阈 + 发明成就原创标注（R19.23 t1048 勘误；MC On A Rail
+    //    真口径 = 乘矿车到达距乘车起点单方向 ≥500 米的一点，review0913-A P2-1；t1046 旧「累计 1km」退役）──
+    //    (a) 单方向口径钉死：起点记录后掉头折返——累计里程 600 ≥ 500 而径向位移 0 → 仍锁（非累计制）；
+    //        径向位移恰 500 达阈解锁（≥ 缝；缝值全程半精度可表示：300/0/99.5/400.5/500 全精确无 FP 噪声）；
+    //        起点未记录喂远点不伪解锁（判定窗门）；负增量对里程统计防御忽略、径向采样照走；flush 后统计精确；
+    //    (b) 存档 round-trip：里程统计 + 解锁态恢复、不重发 toast（径向起点不入档，解锁态入档）；
+    //    (c) 描述钉：ride_minecart = 500m 单方向口径不带原创；发明九项（首杀四 + 进结构四 + 箱车）抽查
+    //        三项尾「（原创）」+ MC 同型两反例不带（余六项由 achievements() 描述同源生成面覆盖——UI 单一
+    //        来源，如实 scoped，review0913-B P3-2）；
+    //    (d) 源钉（定义行 + 埋点声明 ×2 + 阈值常量 + QML 起点捕获 / 位置路由行）。
     {
         PlayerProgress progT46e;
         int toastT46e = 0;
         QObject::connect(&progT46e, &PlayerProgress::achievementUnlocked, &progT46e,
                          [&](const QString &, const QString &, const QString &) { ++toastT46e; });
-        progT46e.onMinecartMoved(400.0f);
+        progT46e.onMinecartRideStarted(0.0, 0.0);
+        progT46e.onMinecartMoved(300.0f, 300.0, 0.0);   // 径向 300，累计 300
         const bool underOk = !progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 0;
-        progT46e.onMinecartMoved(599.5f);
+        progT46e.onMinecartMoved(300.0f, 0.0, 0.0);     // 掉头回起点：累计 600 ≥ 500 但径向 0 → 非累计制钉死
+        const bool notCumulativeOk = !progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 0;
+        progT46e.onMinecartMoved(99.5f, 99.5, 0.0);     // 径向 99.5，累计 699.5 → 仍锁
         const bool nearOk = !progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 0;
-        progT46e.onMinecartMoved(0.5f);   // 累计恰 1000 → 达阈
+        progT46e.onMinecartMoved(400.5f, 500.0, 0.0);   // 径向恰 500 → 达阈（≥ 缝）
         const bool unlockOk = progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 1;
-        progT46e.onMinecartMoved(500.0f); // 越阈续乘：unlock 幂等不再 toast
-        progT46e.onMinecartMoved(-5.0f);  // 负增量防御忽略
+        progT46e.onMinecartMoved(500.0f, 0.0, 0.0);     // 回起点：径向 0、累计 1100——unlock 幂等不再 toast
+        progT46e.onMinecartMoved(-5.0f, -5.0, 0.0);     // 负增量：统计不计，径向采样照走
         const bool idemOk = progT46e.isUnlocked(QStringLiteral("ride_minecart")) && toastT46e == 1;
         progT46e.onPlayTimeTick(0.6f);    // > kFlushInterval → flush 累积入统计
         const double travelE = progT46e.minecartTravelBlocks();
-        const bool travelOk = std::abs(travelE - 1500.0) < 1e-6;
+        const bool travelOk = std::abs(travelE - 1600.0) < 1e-6;
+        // (a') 起点未记录（fresh 实例直接喂远点）→ 不得对 (0,0) 起算伪解锁（判定窗门敏感）。
+        PlayerProgress progT46eGuard;
+        progT46eGuard.onMinecartMoved(1000.0f, 100000.0, 0.0);
+        const bool guardOk = !progT46eGuard.isUnlocked(QStringLiteral("ride_minecart"));
         // (b) 持久化 round-trip。
         PlayerProgress progT46eLoad;
         int toastT46eLoad = 0;
@@ -47884,7 +47897,7 @@ Item {
                          [&](const QString &, const QString &, const QString &) { ++toastT46eLoad; });
         progT46eLoad.loadVariant(progT46e.toVariant());
         const bool loadOk = progT46eLoad.isUnlocked(QStringLiteral("ride_minecart"))
-            && std::abs(progT46eLoad.minecartTravelBlocks() - 1500.0) < 1e-6
+            && std::abs(progT46eLoad.minecartTravelBlocks() - 1600.0) < 1e-6
             && toastT46eLoad == 0;
         // (c) 描述钉（achievements() 单源 = toast / UI 同源）。
         QString rideDesc, woodDesc, fishDesc, spiderDesc, dungeonDesc, cartDesc;
@@ -47902,50 +47915,63 @@ Item {
         }
         const QString tag = QString::fromUtf8("（原创）");
         const bool descOk = defsT46e == 31
-            && rideDesc == QString::fromUtf8("乘矿车沿铁轨累计行驶 1 千米") // MC On A Rail 同型 → 不标原创
+            && rideDesc == QString::fromUtf8("乘矿车到达距乘车点 500 米外的位置") // MC On A Rail 同型 → 不标原创
             && !woodDesc.endsWith(tag) && !fishDesc.endsWith(tag)          // MC 同型（Delicious Fish）不标
             && spiderDesc.endsWith(tag) && dungeonDesc.endsWith(tag) && cartDesc.endsWith(tag); // 发明项标
-        // (d) 源钉（定义行 + 埋点声明 + 阈值常量 + 标注字面量）。
+        // (d) 源钉（定义行 + 埋点声明 ×2 + 阈值常量 + 标注字面量 + QML 起点/位置路由行）。
         const QString rootT46e = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         QStringList missT46e;
         missT46e << pinSet(rootT46e + QStringLiteral("/src/Game/playerprogress.cpp"), {
-            {"def-ride-1km", "乘矿车沿铁轨累计行驶 1 千米"},
+            {"def-ride-500m", "乘矿车到达距乘车点 500 米外的位置"},
             {"def-tag-spider", "首次击杀蜘蛛（原创）"},
             {"def-tag-dungeon", "发现了藏在地底的怪物房间（原创）"},
             {"def-tag-cart", "打开装货的矿车取走物品（原创）"},
         });
         missT46e << pinSet(rootT46e + QStringLiteral("/src/Game/playerprogress.h"), {
-            {"hdr-invokable-minecartMoved", "Q_INVOKABLE void onMinecartMoved(float deltaBlocks);"},
-            {"hdr-minecart-km", "static constexpr qreal kMinecartRideKm = 1000.0;"},
+            {"hdr-invokable-minecartMoved", "Q_INVOKABLE void onMinecartMoved(float deltaBlocks, qreal x, qreal z);"},
+            {"hdr-invokable-rideStarted", "Q_INVOKABLE void onMinecartRideStarted(qreal x, qreal z);"},
+            {"hdr-minecart-goal", "static constexpr qreal kMinecartRideGoal = 500.0;"},
+        });
+        missT46e << pinSet(rootT46e + QStringLiteral("/src/ui/Main.qml"), {
+            {"qml-route-rideStarted", "progress.onMinecartRideStarted(player.position.x, player.position.z)"},
+            {"qml-route-minecartMoved", "if (ridingCart) progress.onMinecartMoved(deltaBlocks, player.position.x, player.position.z)"},
         });
         const bool pinsE = missT46e.isEmpty();
         if (!pinsE)
             qInfo().noquote() << "  [t1046e diag] pin miss:" << missT46e.join(QLatin1Char(','));
-        const bool ok = underOk && nearOk && unlockOk && idemOk && travelOk && loadOk && descOk && pinsE;
+        const bool ok = underOk && notCumulativeOk && nearOk && unlockOk && idemOk && guardOk
+            && travelOk && loadOk && descOk && pinsE;
         if (!ok) ++totalFail;
         if (!ok)
-            qInfo().noquote() << "  [t1046e diag] under" << underOk << "near" << nearOk << "unlock" << unlockOk
-                              << "idem" << idemOk << "travel" << travelOk << travelE
+            qInfo().noquote() << "  [t1046e diag] under" << underOk << "notCum" << notCumulativeOk
+                              << "near" << nearOk << "unlock" << unlockOk << "idem" << idemOk
+                              << "guard" << guardOk << "travel" << travelOk << travelE
                               << "load" << loadOk << "desc" << descOk << "pins" << pinsE
                               << "ride=" << rideDesc << "spider=" << spiderDesc;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t1046e rail-knight 1km cumulative ride + originality tags (MC On A"
-                             " Rail caliber, parity low-6): minecart distance accumulates through"
-                             " onMinecartMoved with the unlock firing exactly at the 1000-block"
-                             " threshold (400+599.5 stays locked, +0.5 unlocks, beyond-threshold"
-                             " repeats and negative deltas are idempotent/ignored), the flushed"
-                             " statistic reads back 1500 and survives a save->load round-trip"
-                             " without re-toasting; the ride_minecart description states the 1km"
-                             " caliber without the originality tag while the nine project-invented"
-                             " achievements (per-species first kills, structure entries, chest"
-                             " cart) carry the (original) suffix and MC-counterpart ones do not;"
-                             " source pins lock the def rows, the invokable and the threshold"
-                             " (negative-round sensitive)"
+                          << "| t1046e rail-knight 500m single-direction radial ride + originality tags"
+                             " (MC On A Rail caliber, t1048 erratum of the retired 1km cumulative"
+                             " reading): the ride origin is captured at the mount edge and each"
+                             " onMinecartMoved sample judges radial displacement from it - turning"
+                             " back after 600 cumulative blocks leaves radial 0 and stays locked"
+                             " (proving non-cumulative), unlocking fires exactly at radial 500"
+                             " (>= seam on half-precision-exact values), repeats past threshold"
+                             " and negative deltas stay idempotent/ignored for the stat while"
+                             " radial sampling continues, an unrecorded origin never unlocks"
+                             " spuriously, the flushed statistic reads back 1600 and survives a"
+                             " save->load round-trip without re-toasting; the ride_minecart"
+                             " description states the 500m single-direction caliber without the"
+                             " originality tag while the nine project-invented achievements"
+                             " (per-species first kills, structure entries, chest cart) carry the"
+                             " (original) suffix (three spot-checked) and MC-counterpart ones do"
+                             " not; source pins lock the def rows, both invokables, the threshold"
+                             " and the QML origin/route lines (negative-round sensitive)"
                           << (ok ? QString()
-                                  : QStringLiteral("diag under=%1 near=%2 unlock=%3 idem=%4 travel=%5"
-                                                   " load=%6 desc=%7 pins=%8")
-                                        .arg(underOk).arg(nearOk).arg(unlockOk).arg(idemOk)
-                                        .arg(travelOk).arg(loadOk).arg(descOk).arg(pinsE));
+                                  : QStringLiteral("diag under=%1 notCum=%2 near=%3 unlock=%4 idem=%5"
+                                                   " guard=%6 travel=%7 load=%8 desc=%9 pins=%10")
+                                        .arg(underOk).arg(notCumulativeOk).arg(nearOk).arg(unlockOk)
+                                        .arg(idemOk).arg(guardOk).arg(travelOk).arg(loadOk)
+                                        .arg(descOk).arg(pinsE));
     }
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
