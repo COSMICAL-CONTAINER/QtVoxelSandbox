@@ -67,6 +67,13 @@ qt_add_executable(voxelsandbox
     #   主菜单角落 / F3 / 启动日志三处消费；redstone_matrix_test 直编本源做格式探针。
     src/Core/buildinfo.cpp
     src/Core/buildinfo.h
+    # R20.05 基础类型（Core 叶子，header-only）：floorDiv/floorMod（负坐标语义单一权威）/
+    #   ChunkKey（chunk 坐标→可哈希键）/ BlockPos（方块坐标+邻接）/ Tick（固定 tick 基准）。
+    #   只立类型 + 最小示范采用（chunkmanager 路由 / worldclock 声明点），调用点迁移留后续单。
+    src/Core/mathtypes.h
+    # R20.05 基础错误类型（Core 叶子，header-only）：Error / Result<T> 最小雏形（§5.1
+    #   voxel_base 方向；只立类型不迁移调用点，R20.06 Command/Event 骨架时接线）。
+    src/Core/result.h
     src/World/chunk.cpp
     src/World/chunk.h
     src/World/chunkmanager.cpp
@@ -884,6 +891,11 @@ add_executable(redstone_matrix_test
     tools/matrix/section06_worldgen_drag.cpp
     tools/matrix/section07_chests_mobs.cpp
     tools/matrix/section08_recent.cpp
+    # R20.05 基础类型探针段（新段置尾：runAll 末执行，不与原八段共享 rig 写状态；4 腿
+    #   r2005a-d，filter 词 r2005）。随段直编两个 Core 头（mathtypes/result，header-only）。
+    tools/matrix/section09_foundations.cpp
+    src/Core/mathtypes.h
+    src/Core/result.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

@@ -107,6 +107,8 @@ void MatrixRun::runAll()
     section06_worldgen_drag();
     section07_chests_mobs();
     section08_recent();
+    section09_foundations(); // R20.05 基础类型（新段置尾：世界基线面零接触——setBlock 写即清，
+                             //   且执行序在 worldgen 腿族（section06）之后，逐位恒等核对不受扰）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty())
