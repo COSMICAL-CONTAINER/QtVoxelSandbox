@@ -3708,7 +3708,7 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 **待实机确认**：无（纯测试基建单，无行为面）。**下一任务：R20.04 基础类型**。
 
-**顺序（终）**：t1049✅ → **R20.03✅（测试分层：拆分 + --filter 两项提速投资落地；plan 原文 R20.04=测试矩阵拆分，实质由本单覆盖）** → **R20.05✅（基础类型）** → R20.06 Command/Event/Snapshot → R20.07 GameSession → R20.09 Chunk 生命周期 → R20.11 后台 GenerationJob。矩阵基线 **549**。
+**顺序（终）**：t1049✅ → **R20.03✅（测试分层：拆分 + --filter 两项提速投资落地；plan 原文 R20.04=测试矩阵拆分，实质由本单覆盖）** → **R20.05✅（基础类型）** → **R20.06✅（Command/Event/Snapshot）** → R20.07 GameSession → R20.09 Chunk 生命周期 → R20.11 后台 GenerationJob。矩阵基线 **552**。
 
 ### R20.05 基础类型（2026-09-15，floorDiv/floorMod + ChunkKey + BlockPos + 固定 Tick + Error/Result：只立类型 + 最小示范采用）
 
@@ -3729,3 +3729,19 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **过程注记（如实登记）**：r2005c 首跑 2 红均为腿自身问题非产品代码——[arith] 期望笔误（manhattanLength(5,41,7)=53 非 13）；[write] 环境事实误设：rig 网格外 (90,41,170) 的 worldgen 山体可自然达 y=41，写同 id（Stone→Stone）是 setBlock 合法「无变化」拒绝面（sb=0 而 w=3/cm=3 实锤）→ 改「读原 id → 写异 id → 还原原 id」交换式，清理口径顺带从「清回空气」加强为「还原本格」（世界基线面零残留）。R20.03 登记的 src/Renderer/mobmodel.h 与 src/Core/resourcepackmanager.cpp 注释旧文件名漂移本单仍未顺带修（保持范围纪律），顺带修编号顺延 R20.06+。
 
 **待实机确认**：无（类型单，无行为面）。**下一任务：R20.06 Command/Event/Snapshot 立类型**（plan §29.3：BreakBlock 可经 Command 表达 / WorldDelta 表达受影响 Chunk / Event 不携带 QObject / Snapshot 可独立复制测试——先只定义数据结构和队列）。
+
+### R20.06 Command/Event/Snapshot（2026-09-15，三体系立类型与队列：破局点数据结构，调用点零迁移）
+
+  → **✅✅ 落地（2026-09-15）：src/Core/command.h + event.h + snapshot.h 三枚 Core 叶子头（header-only）+ result.h 增补（错误码分域 kErrQueueFull + QObjectFree 概念），矩阵 549→552（3 新腿 r2006a-c，band 551±2 内），生产调用点零迁移（src/ 其余文件零触碰）。**（feat + test + 本 docs 三段提交）
+
+**类型面（plan §4.2 三分法逐项落位 + §29.3 R20.06「先只定义数据结构和队列，不大规模迁移调用点」）**：① **Command**（「想做什么」意图数据：plan §4.2 必带六项逐项落位——来源 actorId / 目标 Tick targetTick / 相关 EntityId actorId（quint32 粗粒度，R20.14 收口强类型）/ 输入序号 sequence / 必要参数 pos+blockId / 校验最小上下文 pos；breakBlock/placeBlock 双工厂，验收锚「BreakBlock 可以通过 Command 表达」由 r2006a 行级证明；**不接玩家输入生产路径**，R20.07 GameSession 是首个消费方）。② **Event**（「已经发生了什么」：EventKind = plan §4.2 事件例单全席 7 种；字段按 kind 解释域——pos/blockId/entityId/aux/tick；**不驱动核心规则隐式重入**）。③ **WorldDelta**（受影响 chunk 集 = 本单验收锚：固定 64 容量 ChunkKey 数组 + 有效前缀长度，addAffected 幂等去重不占位 / affects 线性成员 / 满载不静默挤出；changedBlocks+tick 汇总；ranges/light 明细留 R20.09 EditBuffer）。④ **WorldSnapshot**（plan §4.2 四纪律：自包含全值成员 / QObjectFree 编译期钉 / 无指针无引用 / 消费面只读；tick+尺度元数据+自持 BlockEdit 改动面 vector——拷贝即深拷贝；稠密快照留 R20.13 MeshBuilder 消费侧）。⑤ **三队列**（单线程，无锁——多线程留 R20 后续登记：CommandQueue/EventQueue = FIFO deque 固定上界 256 **满载拒绝**（Result<void>+kErrQueueFull，事件不可再生故拒绝；pop 空 = 正常态 bool 与满载 Error 刻意分层）；SnapshotQueue = 定容 4 环形 **满则覆盖最老**（渲染只插值两已完成 Snapshot——快照可再生故覆盖；两域容量策略分化为刻意设计）。⑥ **result.h 增补**（错误码分域落位首枚 kErrQueueFull=101（队列域 1xx）；QObjectFree concept =「不携带 QObject」的机制化权威——is_base_of 钉子对象携带，裸指针边界如实登记）。
+
+**探针（tools/matrix/section10_command_event_snapshot.cpp 新段置尾，3 腿，filter 词 r2006；rig 世界零接触——零残留由构造保证，比 r2005c 即写即还原更强一级）**：r2006a Command 表达 + FIFO/容量/清空（工厂字段往返 + 负坐标 BlockPos 复用钉 + 256 满载 kErrQueueFull 拒绝不覆盖 + 弹一空一 + clear）；r2006b Event 无 QObject 编译期钉 + EventQueue + WorldDelta chunk 集（QObjectFree 四类型复钉 + 7-kind 编译期点名 + FIFO + 满载同门 + ChunkKey 负坐标复用钉 fromWorld(-1,47,16)==(-1,2) + 幂等去重/64 上界/成员判定）；r2006c Snapshot 双向拷贝独立（改副本源不变 + 改源副本不变 + 赋值面/空快照独立）+ 环形覆盖（容量 4 六入弹 3/4/5/6）+ push 后改源值语义钉。
+
+**验证**：-j1 分段增量构建（首建 17 步 1m18.6s 含 result.h 依赖链重编；**修腿红利实收：r2006c 首跑 1 红修复 → 重编+链接+filter 重跑全程 ~5s**）→ binary mtime > 全部改动源 → 全矩阵 **552 PASS / 0 FAIL ×2**（matrix_r2006_pos/final.log，EXIT=0；双跑与 549 权威 PASS 行 diff = 3 新增（r2006a-c）+ 4 变更全落已登记漂移类：t813 戳时间/哈希、t979/t997 内嵌计时、t1023c src 文件计数 129→132 = 恰为本单 3 新头**线程原语仍 0**）→ **worldgen 腿族逐位恒等**（worldgen 数值头 diff 权威 = 空）→ app voxelsandbox 重建 EXIT=0（40s）+ offscreen 冒烟 EXIT=124 存活（60fps 稳态剖析）+ logs/voxelsandbox_r2006_tail20.log 留存。
+
+**阴性轮（重构类豁免登记）**：本单为「纯加类型/队列」零调用点迁移，无行为口径面可作 lesion 翻红，阴性轮豁免；替代证据链三件：r2006a-c 新腿全绿（验收面）+ **「Event 不携带 QObject」的编译期摘即红**（result.h QObjectFree + event.h 头内 static_assert——给 Event 加 QObject 派生成员 = 构建即红，类型层阴性即此性质，r2006b 腿内复钉使 proof 面在测试文本可见）+ worldgen 腿族逐位恒等（世界生成零漂移面）。
+
+**过程注记（如实登记）**：r2006c 首跑 1 红为腿自身问题非产品代码——方向二「改源 → 副本不变」误拿「方向一已按计划改过的副本」对未改 baseline 比较（把刻意的副本改动误判为串扰）→ 改副本期望态显式逐字段钉（复跑即绿）。冒烟 stdout 重定向 0 字节为 R20.03 已录环境坑（GUI 子系统），tail20 从 app 自写 logs/voxelsandbox.log 取（qInstallMessageHandler→QFile）。
+
+**待实机确认**：无（类型单，无行为面）。**下一任务：R20.07 GameSession**（plan §29.3 R20.07：固定 Tick / 暂停 / BreakBlock / PlaceBlock / WorldDelta 五项迁移入 GameSession——无头程序可执行一段游戏 Tick、QML 经 Adapter 玩游戏、新旧路径结果一致）。
