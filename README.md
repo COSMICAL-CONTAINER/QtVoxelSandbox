@@ -21,7 +21,7 @@ inspired by classic-era Minecraft. All code and assets are original.
 - **矿车与铁轨**：坡道物理、多车挤压、载人驾驶、脱轨重挂
 - **生物**：十余种生物 AI——驯服（狼 / 豹猫）、装备拾取穿戴、幼年体、骑士组合、白天避光等
 - **音效**：由 CC0 音源（`tools/cc0_audio/`）经 `tools/build_sounds.py` 程序化合成
-- **工程化**：397 项无头行为探针全绿（`tools/redstone_matrix_test.cpp`）、构建版本戳、零警告构建
+- **工程化**：545 项无头行为探针全绿（`tools/matrix/`，R20.03 起分层 8 段 TU + `--filter` 子串选腿）、构建版本戳、零警告构建
 
 ## 构建
 

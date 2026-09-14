@@ -871,7 +871,19 @@ endif()
 #   t763 附魔数值生效链探针附加：Game 层 Hotbar（EPF 路由 / 耐久消耗概率 / 攻击伤 tooltip 源；随附
 #   enchantregistry/armor/recipe/smelting 表 + Core resourcepackmanager —— Hotbar 向下仅依赖这些纯表）。
 add_executable(redstone_matrix_test
-    tools/redstone_matrix_test.cpp
+    # R20.03 测试分层：原 3.4MB 单 TU（tools/redstone_matrix_test.cpp，-j 1 编译 ~85min）拆为
+    #   main + helpers + 8 段 TU（tools/matrix/；段体 = 原 main 体连续行区间逐字节搬移，
+    #   段 md5 存证 build/r2003_proof/）——加探针只重编对应段 + 链接。
+    tools/matrix/matrix_main.cpp
+    tools/matrix/matrix_helpers.cpp
+    tools/matrix/section01_redstone_core.cpp
+    tools/matrix/section02_early_probes.cpp
+    tools/matrix/section03_mid_probes.cpp
+    tools/matrix/section04_instancing.cpp
+    tools/matrix/section05_render_ui.cpp
+    tools/matrix/section06_worldgen_drag.cpp
+    tools/matrix/section07_chests_mobs.cpp
+    tools/matrix/section08_recent.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
