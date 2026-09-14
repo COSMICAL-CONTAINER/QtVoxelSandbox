@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-14 18:00
+更新时间：2026-09-14 18:10
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: R19.23 批次收口 docs（批次统计 + audit #6；主控自做）
+current_task: t1049
 current_task_status: READY
-last_completed_task: t1048 批次 review 收口（On A Rail 500m 单方向径向勘误 P2-1 主体 + P3/台账清偿全量；183782b/a72ca74/本 docs）
-last_task_closure_commit: （docs 本提交；代码终态 a72ca74）
+last_completed_task: t1048 On A Rail 勘误（500m 单方向径向制，P2-1 主体 + P3/台账清偿全量；183782b/a72ca74/4d584ee）+ R19.23 批次 review 收口（A pass / B fail→P1 已闭 a121581）
+last_task_closure_commit: （audit #6 docs 提交；代码终态 a72ca74）
 last_verified_commit: a72ca74（矩阵 545 PASS / 0 FAIL，matrix_t1048_final.log 权威，binary 17:33:31 与源对齐）
-last_governance_review: 2026-09-12（audit #5 YELLOW → GOV-20260912-1=t1047 已闭环）
-governance_review_due: true（批次结束触发：R19.23 收口时 audit #6）
-completed_tasks_since_governance_review: 6（t1047+t1046+t1048，audit#5 后；批次统计以主控口径为准）
-next_task: R19.23 批次收口 docs（统计 + audit #6）→ R20 主线（R20.03 测试分层起，用户 0912 方向）
-next_task_source: docs/dev-plan.md R19.23 段「顺序（终）」+ t1048 段
+last_governance_review: 2026-09-14（audit #6 YELLOW，docs/governance-audit-2026-09-14.md；GOV-20260914-1=t1049 UB 排查，须先于 R20）
+governance_review_due: false
+completed_tasks_since_governance_review: 0
+next_task: R20.03（t1049 GOV 纠偏闭环后进 R20 重构主线；R20.03 测试分层 = 测试大 TU 拆分 + 矩阵 --filter 两项提速投资）
+next_task_source: docs/dev-plan.md R19.23 段「顺序（终）」+ refactor-plan R20 序
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
