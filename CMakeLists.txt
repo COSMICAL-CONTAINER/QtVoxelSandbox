@@ -903,6 +903,12 @@ add_executable(redstone_matrix_test
     src/Core/command.h
     src/Core/event.h
     src/Core/snapshot.h
+    # R20.07 GameSession 探针段（置尾先例沿用：runAll 末执行，filter 词 r2007；4 腿
+    #   r2007a-d = 双路径一致 / 固定 Tick+源码钉 / 暂停+无头连跑 / 阴性轮。随段直编
+    #   src/Game/gamesession.h（header-only 编排壳，Q_OBJECT → AUTOMOC 经本清单入册；
+    #   自建 fresh 小世界 ×3——world/chunk 系源文件已列，无新增 .cpp）。
+    tools/matrix/section11_gamesession.cpp
+    src/Game/gamesession.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
