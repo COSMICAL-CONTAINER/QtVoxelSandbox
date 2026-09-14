@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-14 18:10
+更新时间：2026-09-14 23:25（t1049 闭环）
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,15 +9,15 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1049
+current_task: R20.03（测试分层 = 测试大 TU 拆分 + 矩阵 --filter 两项提速投资）
 current_task_status: READY
-last_completed_task: t1048 On A Rail 勘误（500m 单方向径向制，P2-1 主体 + P3/台账清偿全量；183782b/a72ca74/4d584ee）+ R19.23 批次 review 收口（A pass / B fail→P1 已闭 a121581）
-last_task_closure_commit: （audit #6 docs 提交；代码终态 a72ca74）
-last_verified_commit: a72ca74（矩阵 545 PASS / 0 FAIL，matrix_t1048_final.log 权威，binary 17:33:31 与源对齐）
-last_governance_review: 2026-09-14（audit #6 YELLOW，docs/governance-audit-2026-09-14.md；GOV-20260914-1=t1049 UB 排查，须先于 R20）
+last_completed_task: t1049 GOV-20260914-1 纠偏闭环（review26-1 翻红根因 = 腿跨段 mob 泄漏 + t1045 踩踏 RNG，非 UB；48c2f09 fix + 3351a91 test + 本 docs）
+last_task_closure_commit: 3351a91（代码终态 = 48c2f09 + 3351a91）
+last_verified_commit: 3351a91（矩阵 545 PASS / 0 FAIL ×3，matrix_t1049_final1/2/3.log 权威，binary 22:34 与源对齐）
+last_governance_review: 2026-09-14（audit #6 YELLOW → GOV-20260914-1=t1049 已闭环，R20 前置门解除）
 governance_review_due: false
-completed_tasks_since_governance_review: 0
-next_task: R20.03（t1049 GOV 纠偏闭环后进 R20 重构主线；R20.03 测试分层 = 测试大 TU 拆分 + 矩阵 --filter 两项提速投资）
+completed_tasks_since_governance_review: 1
+next_task: R20.03（R20 重构主线首单；t1049 登记的「支撑抬高嵌入 mob 自格跳+级联踩踏」引擎 quirk 作 walk 重构输入）
 next_task_source: docs/dev-plan.md R19.23 段「顺序（终）」+ refactor-plan R20 序
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -32,7 +32,8 @@ needs_human: false
 
 ## Recovery Point
 
-- 最近闭环：**t1048 批次 review 收口**（2026-09-14，183782b fix + a72ca74 test + 本 docs）：On A Rail 勘误为 MC 500m 单方向径向制（kMinecartRideGoal=500 + onMinecartRideStarted 起点沿捕获 + onMinecartMoved 携位置采样 + 平方判据；minecartTravelBlocks 降 display-only）+ A-P3-1 算术注释勘误（fix）；P-t1046e 改写（非累计钉死 + 恰 500 缝 + 判定窗门 + round-trip 1600；不加腿矩阵恒 545）+ t1020 腿/pin 签名联动（test）；dev-plan t1043/t1046/t1047 勘误（neg1 枚举补 t1012c / neg2 双因归因 / ⑤⑥ 引证勘误 + B-P3-2 scoped 登记 / neg2rc 残段登记）+ 台账 low-1..6 翻牌 + low-4 引证勘误 + onMoved 双喂登记 + agent-state 同步（docs）。矩阵 545→545（matrix_t1048_final.log 权威）；阴性 = 恰阈缝摘除（≥→>）恰红 544/1 t1046e（matrix_t1048_neg3.log）。
+- 最近闭环：**t1049 GOV-20260914-1 纠偏**（2026-09-14，48c2f09 fix + 3351a91 test + 本 docs）：review26-1 农田走廊腿翻红根因 = **非 UB**——腿 (a) 下半砖僵尸 zA 跨段泄漏进腿 (b)，slab→farmland 换地把 zA 脚位留在耕地格内部（支撑真顶高于脚位）→ aiHostile 玩家路径越障跳探（无攻击距离门）把自格判墙 → 虚假起跳+滑流回走廊 → 落地触发 t1045 踩踏掷骰（全局 RNG，P=fall−0.5）→ 掷中耕地变 Dirt 满格台阶 → zB 合规越障跳 feetOff=离散弧顶 1.19347 翻红；同 binary 红绿翻转=踩踏 RNG（pos/pos2 构建戳同为 15:43 取证；「RNG 无关」原判勘误），跨 binary 逐位一致=跳跃物理常数（恰证非 UB）。**UBSAN 不可行已登记**（两 MinGW 工具链均无 libubsan/libasan）。修复 = 腿内 removeEntityAt(zA)（(b) 净实体态起、全腿零 RNG 确定化，断言未放宽）+ pinSet 自文件结构钉（tools/ 自钉首例）；引擎侧「支撑抬高嵌入 mob 自格跳+级联踩踏」quirk 登记 R20 walk 重构输入（本单不动行为面）。矩阵 545→545（3× 全绿 matrix_t1049_final1/2/3.log；修复前 5 连绿 matrix_t1049_pos_r1-r5.log 留证）；app 重建 EXIT=0 + 冒烟 EXIT=124 存活 + logs/voxelsandbox_t1049_tail20.log。**audit #6 YELLOW 纠偏完成，R20 前置门解除。**
+- t1048 批次 review 收口（2026-09-14，183782b fix + a72ca74 test）：On A Rail 勘误 500m 径向制 + 批次 review P3/台账全量清偿（详见 dev-plan t1048 段）；矩阵 545（matrix_t1048_final.log）。
 - R19.23 批次全貌：t1038→t1040→t1039→t1042→t1041→t1043→t1047→t1044→t1045→t1046→**t1048（批次 review 收口）**，矩阵 521→545。双只读批次 review（A 代码正确性 / B 探针+台账）P2-1/P3/台账项全部清偿或登记。
 - **新发现待办（t1048 阳性轮暴露，移交主控立项）**：review26-1 农田走廊腿环境敏感翻红（新 TU 布局下 3/4、失败轨迹逐位一致、同 binary 有全绿反例 pos2、与 RNG 不相关）——疑似 walk/support 路径潜伏 UB 被重编译布局暴露，非 t1048 行为面；证据链 matrix_t1048_pos.log（544/1）/pos2（545/0）/neg/neg2（co-red）/final（545/0）留存根目录。
 - 下一最小动作：主控做批次统计 + audit #6 → R20 主线（R20.03 测试分层起；含测试大 TU 拆分与矩阵 --filter 两项提速投资）。
