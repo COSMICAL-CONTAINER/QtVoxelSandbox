@@ -17,7 +17,12 @@ void MatrixRun::section04_instancing()
     //    柱内格（上方仍是水 → 满块）→ 水下。
     //    阴性轮：回退 waterSurfaceFrac(0) → 1.0 则 (a) 源值钉红 + (b)(c) 高度断言红（+1/8 偏差超容差）+
     //    (d) 空段判红（恢复满格恒水下）——四方同红即「单一权威生效」的证明。
-    {
+    runLegMulti({ "t892 still-water surface lowered to 7/8 (2px below block top, MC semantics): single-authority wa"
+        "terSurfaceFrac (source 7/8 / flow (8-s)/8 / clamp) drives all four consumers in lockstep - meshe"
+        "r renderTop (visual surface; farmland 15/16 now stands above water, fixing the reported perspect"
+        "ive clash), item float restY, boat waterline and the eye-in-water liquid-fraction check (eye in "
+        "the 1/8 air band above a still surface is no longer underwater; column-interior cells stay full-"
+        "block wet)" }, [&]() {
         World wS;
         // 48×48×96 seed 77 = t836 已证净空带（地形 ≤81 → 82+ 全空；小世界也会自动 worldgen，rig 层须避开
         //   自然地形——首跑 seed 892 物品落在 y≈45 天然地表上红）。
@@ -88,7 +93,7 @@ void MatrixRun::section04_instancing()
                              "stands above water, fixing the reported perspective clash), item float restY, boat "
                              "waterline and the eye-in-water liquid-fraction check (eye in the 1/8 air band above "
                              "a still surface is no longer underwater; column-interior cells stay full-block wet)";
-    }
+    });
 
     // ── P-t893 流水动画流向四向匹配（源码钉；驱动 ChunkGeometry 需渲染后端，t879/t889 源码钉先例）──
     //    流水条带（右列）图案随帧沿 −v 移动（build_fluid_strips roll_y + t563 保向）→ mesher 按本格离源
@@ -97,7 +102,13 @@ void MatrixRun::section04_instancing()
     //    spec「静止面无向」）；②四向旋转路由俱在（±Y 顶面 cv≡−D 四分支 + ±X 墙 ±Z 流 / ±Z 墙 ±X 流
     //    沿墙横置、正交流保持竖直下淌 t563 语义）；③u/v 窗不越狱（colL/hxs 列窗 + stripV0 帧子区保留
     //    → positionV 翻书不受扰，零 mesh 重建语义不变）。回退（删 flowDir 旋转）→ 钉②红。
-    {
+    runLegMulti({ "t893 flow animation direction matches the four flow directions: mesher derives the away-from-sou"
+        "rce cardinal from the 4-neighbor water-state gradient (same algorithm as item drift/player push)"
+        " for flow cells only (still column, lava and unresolvable isolated cells stay directionless) and"
+        " rotates the strip UVs so the -v pattern motion maps onto that direction on the top face, with s"
+        "ide walls animating horizontally only when the flow runs along the wall (waterfalls keep flowing"
+        " down); u stays locked to the column window and v to the frame-0 sub-range so the positionV flip"
+        "book is untouched" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile cf(root + QStringLiteral("/src/World/chunkgeometry.cpp"));
@@ -132,7 +143,7 @@ void MatrixRun::section04_instancing()
                              "animating horizontally only when the flow runs along the wall (waterfalls keep "
                              "flowing down); u stays locked to the column window and v to the frame-0 sub-range "
                              "so the positionV flipbook is untouched";
-    }
+    });
 
     // ── P-t894 潜行者模型 0.85（源码钉：QML 契约——纯视觉项 t781 先例不进行为矩阵）──
     //    用户「苦力怕（潜行者）现偏大」→ 全模视觉缩 0.85。钉三面成对契约：①Main.qml scale 基 0.85
@@ -142,7 +153,11 @@ void MatrixRun::section04_instancing()
     //    判定不随视觉变）；④图鉴预览 mobPreviewScale(6) 同源 0.85（所见即游戏内比例）。
     //    回退 scale 到 1.0（漏 Y 补偿）→ ①红（②仍绿但契约断裂面由 ① 单钉暴露，Y 补偿独立值 0.765
     //    与 0.85 基乘积钉死）。
-    {
+    runLegMulti({ "t894 stalker model scaled to 0.85 (visual-only, hitbox untouched): base scale 0.85 on all three "
+        "axes with the relative inflate swell kept (full charge ~1.28), leg-bottom Y compensation 0.90*0."
+        "85 keeps the feet on the collision floor (pair contract - changing the scale without the offset "
+        "lifts the model 0.135 off the ground), collision halfW/halfH stay at the mobType-table single au"
+        "thority, and the resource browser preview mirrors 0.85" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
@@ -164,7 +179,7 @@ void MatrixRun::section04_instancing()
                              "contract - changing the scale without the offset lifts the model 0.135 off the "
                              "ground), collision halfW/halfH stay at the mobType-table single authority, and the "
                              "resource browser preview mirrors 0.85";
-    }
+    });
 
     // ── P-t895 F3 修复（源码钉：①重叠布局分列 + ②MC 1.0 行结构逐面对齐）──
     //    ① 用户「黄绿文字重叠」根因：主 F3 块（黄 #ffff00）与 FrameProfiler 报告（绿 #00ff88）各自绝对
@@ -177,7 +192,13 @@ void MatrixRun::section04_instancing()
     //      biome 行、bl/ol 光照行（脚下格 blockLightAt/skyLightAt 真值）。钉六行前缀俱在 + 旧格式行
     //      （"build: " 单行 / "pos: " 合并行 / "yaw: " 独行）已删。工程诊断尾段保留（§2-F 验收铁律，
     //      MC 行在前工程扩展在后，空行分隔）。
-    {
+    runLegMulti({ "t895 F3 overlay fixed: (1) yellow main block and green FrameProfiler report now live in one Colu"
+        "mn (auto-stacked, overlap from the hardcoded y=62+200 with the grown ~20-line main block is stru"
+        "cturally gone); (2) main block realigned line-by-line to MC 1.0 F3 - version-carrying title, fps"
+        " line, separate x/y/z lines with MC coordinate//block//in-chunk-16 format, f facing line (MC car"
+        "dinal table +Z->0/-X->1/-Z->2/+X->3 with yaw/pitch), biome line and bl/ol feet-light line from r"
+        "eal World queries; project diagnostics kept as a blank-line-separated tail (PLAN 2-F acceptance "
+        "requires the mesh/perf stats)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile mf(root + QStringLiteral("/src/ui/Main.qml"));
@@ -216,7 +237,7 @@ void MatrixRun::section04_instancing()
                              "table +Z->0/-X->1/-Z->2/+X->3 with yaw/pitch), biome line and bl/ol feet-light "
                              "line from real World queries; project diagnostics kept as a blank-line-separated "
                              "tail (PLAN 2-F acceptance requires the mesh/perf stats)";
-    }
+    });
 
     // ── P-t896 创造拿取/复制语义（源码钉 QML 数量契约 + Hotbar VM 行为级数量钉）──
     //    用户定稿：**中键 = 复制一整组** —— 对背包物品（hotbar / 主栏 / 合成 / 护甲槽）中键复制的是
@@ -228,7 +249,12 @@ void MatrixRun::section04_instancing()
     //    「调色板左键默认 1 个」被用户 8-28 定稿翻案（左键回整组 / 右键接走单件），该键位分配钉由 P-t975
     //    承接；本探针保留 t896 仍拥有的面——中键复制整组（调色板中键 + copyStackToCursor）+ 数量单一权威
     //    + 旧式 min(count,…) 绝迹。回退复制面（中键回源槽数）→ 对应钉红。
-    {
+    runLegMulti({ "t896 creative copy semantics (left-click quantity leg legally evolved to P-t975 per the user's 8"
+        "-28 re-finalization): middle-click on any inventory slot clones a FULL maxStackSize stack to the"
+        " cursor instead of the slot's current count (the old min(count,max) clone let a 2-item slot beco"
+        "me 4 when placed back - the reported 2-becomes-4 doubling); quantity authority stays Hotbar::max"
+        "StackSize (blocks 64, tools/buckets/armor 1) read by all QML copy sites, pinned by source pin pl"
+        "us behavioral VM quantity probe" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile inf(root + QStringLiteral("/src/ui/Inventory.qml"));
@@ -261,7 +287,7 @@ void MatrixRun::section04_instancing()
                              " when placed back - the reported 2-becomes-4 doubling); quantity authority"
                              " stays Hotbar::maxStackSize (blocks 64, tools/buckets/armor 1) read by all"
                              " QML copy sites, pinned by source pin plus behavioral VM quantity probe";
-    }
+    });
 
     // ── P-t897 羊两修（行为级：吃草门 = 脚下草方块 + 静止 walkPhase 归零）──
     //    ① 吃草动画只在**脚下草方块**触发（t897 ①）：草方块平台（**全场零草丛**）上的羊照常开吃草周期
@@ -276,7 +302,13 @@ void MatrixRun::section04_instancing()
     //    羊被物理钉在栏内，只能吃栏内 Grass）。窗口同步放宽 2400→3600 帧（57.6s，覆盖 RNG 掷骰节律的
     //    多轮 idle/吃草/冷却循环）。围栏后「吃到」的判定不再依赖几何停留（栏内全是 Grass，任何一次
     //    idle 吃草都落在断言面内）。
-    {
+    runLegMulti({ "t897 sheep fixes: graze animation now keys on the grass block UNDERFOOT (the own-column support "
+        "cell - sheep on a pure grass-block platform with zero tall grass starts eating cycles and turns "
+        "the block below to dirt), while the negative control keeps every bait tall-grass plant intact on"
+        " a stone platform with zero dirt conversions (old front-column tall-grass logic would have consu"
+        "med a plant); stationary walk animation resets to zero - the pig's walkPhase observed advancing "
+        "later reads exactly 0 after an idle phase (old freeze kept the last phase forever, legs stuck mi"
+        "d-stride)" }, [&]() {
         World wG;
         wG.setWidth(36); wG.setDepth(36); wG.setHeight(96); wG.setSeed(31); // 平台 rig y84/85（局部覆写）
         // 草围栏（外环 7..15 周界 2 高石墙；栏内地表 8..14² 全 Grass、零草丛；墙下垫石防浮空）。
@@ -341,7 +373,7 @@ void MatrixRun::section04_instancing()
                              "consumed a plant); stationary walk animation resets to zero - the pig's "
                              "walkPhase observed advancing later reads exactly 0 after an idle phase (old "
                              "freeze kept the last phase forever, legs stuck mid-stride)";
-    }
+    });
 
     // ── P-t898 睡觉瞬移躺床 / 出床回位探针（Game 层真消费端，t814 模式）──
     //   用户 8-25 澄清：睡下时人物**直接瞬移到床上躺平、视角/相机移到床位置**（对齐 MC，非原地睡觉）；
@@ -353,7 +385,15 @@ void MatrixRun::section04_instancing()
     //       (x0+1) 地板支撑 / 头身两格净空 → feet=(x0+1.5, y, z0+0.5)，Y=床层站地面）、sleeping/sleepLying 假；
     //   (c) 白天拒绝零位移副作用：setPhase(0)=正午 → trySleepAt 被拒（瞬移必须在夜间/无怪物两道语义门之后，
     //       被拒不产生位移）。
-    {
+    runLegMulti({ "t898 bed-sleep teleport: right-click bed at night teleports the player flat onto the bed (feet p"
+        "inned to the foot-cell end offset 0.4 along the head->foot axis so the 1.8-block body nests insi"
+        "de the 2-block bed, Y = bed top, yaw rotated to the bed axis looking toward the foot, lying-pose"
+        " gate on - and review27 #1: the gate is a real Q_PROPERTY read via QMetaObject::indexOfProperty/"
+        "property() on both lying and woken states, the exact resolution path QML uses; the old bare memb"
+        "er function resolved to undefined in Main.qml bindings), interrupt-style wake teleports out to t"
+        "he first standable cell beside the bed at floor level (MC get-out-of-bed semantics, pose gate of"
+        "f), and a daytime refusal produces zero displacement side effects (teleport strictly after the n"
+        "ight/monster semantic gates)" }, [&]() {
         PlayerController pc;
         WorldClock clock;
         EntityManager ents; // 空管理器：hostileNearby 恒 false（怪物拒绝路径不触发）
@@ -420,7 +460,7 @@ void MatrixRun::section04_instancing()
                              "the bed at floor level (MC get-out-of-bed semantics, pose gate off), and a "
                              "daytime refusal produces zero displacement side effects (teleport strictly "
                              "after the night/monster semantic gates)";
-    }
+    });
 
     // ── P-t900 垃圾桶语义终版（VM 行为级 + 源码钉；用户 8-25 定稿）──
     //   定稿原话：「普通左键=清光标持有（t839 语义保持）+ shift+左键=清空整个背包」。QML 点击路由不可由
@@ -431,7 +471,13 @@ void MatrixRun::section04_instancing()
     //   (b) 源码钉：Inventory.qml 销毁槽块（滤注释）——MouseArea（TapHandler 不分辨修饰键，t700 教训）+
     //       ShiftModifier 分流分支含 9 槽 setStack 循环 + mainCount 槽 mainSetStack 循环 + 光标清空 +
     //       普通左键两档（heldBlock 整组 / 选中槽单格）保留。
-    {
+    runLegMulti({ "t900 trash-slot final semantics (user 8-25): plain left click keeps t839 tiers (cursor-held stac"
+        "k destroyed / selected single slot cleared when empty-handed), shift+left-click clears the ENTIR"
+        "E inventory (behavioral leg proves the exact QML call sequence - 9 setStack + 27 mainSetStack + "
+        "4 armorSetStack (review27 #21) + heldBlock reset - leaves zero residue in every slot read, armor"
+        " included; the crafting-grid half is QML-local state pinned by review27-21; source pin proves th"
+        "e MouseArea modifier split and retires the old TapHandler form - TapHandler cannot see modifiers"
+        ", t700 lesson)" }, [&]() {
         Hotbar hb;
         for (int s = 0; s < 9; ++s) hb.setStack(s, int(BR::Cobble), 32);
         for (int m = 0; m < hb.mainCount(); ++m) hb.mainSetStack(m, int(BR::Planks), 16);
@@ -502,14 +548,18 @@ void MatrixRun::section04_instancing()
                              "crafting-grid half is QML-local state pinned by review27-21; source pin proves "
                              "the MouseArea modifier split and retires the old TapHandler form - TapHandler "
                              "cannot see modifiers, t700 lesson)";
-    }
+    });
 
     // ── P-t901 画作背面木板源码钉（t837 未愈返修；纯视觉项轻量源码钉，t781/t893 先例）──
     //   用户「背面仍全透明」根因：画面 BillboardQuad 默认背面剔除 → 墙后侧（玻璃墙 / 透视支撑后）看画，
     //   quad 被剔 = 无像素。修法 = 第二张反向法线 quad（绕 Y 180°）贴木板背板（MC 语义：画作背面木板）。
     //   QML delegate 渲染不可由本 harness 直驱 → 源码钉 paintingDelegate 块：背 quad 的 180° 欧拉 +
     //   default_wood.png（= 图集 tile 8 planks 同源）+ 背面略压暗 baseColor 存在。
-    {
+    runLegMulti({ "t901 painting back board: second reverse-normal quad (Y+180 euler, backface-culled pair so no co"
+        "planar z-fight, offset 1/64 wall-ward) carries the plank board texture default_wood.png (same so"
+        "urce file as atlas tile 8) slightly dimmed - MC semantics: a painting's back is a wooden board, "
+        "fixing the fully-transparent back visible through glass walls (source pin on the paintingDelegat"
+        "e block; visual confirmation pending user playtest)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
@@ -533,7 +583,7 @@ void MatrixRun::section04_instancing()
                              "slightly dimmed - MC semantics: a painting's back is a wooden board, fixing "
                              "the fully-transparent back visible through glass walls (source pin on the "
                              "paintingDelegate block; visual confirmation pending user playtest)";
-    }
+    });
 
     // ── P-t902 耕地图标面源码钉（纯视觉项轻量源码钉；atlasIconSpecForBlock 是文件内 static，行为级不可
     //    直调 → 钉 case 存在 + def 字段契约）──
@@ -542,7 +592,12 @@ void MatrixRun::section04_instancing()
     //   右=泥。修法 = 显式 case 钉 side/front=sideT（dirt 单一权威）。双腿：(a) def 契约（top=26 / side=2 /
     //   front=27——字段复用事实本身钉死，泛化路径对耕地必错）；(b) 源码钉 spec 的 Farmland case 用
     //   (topT, sideT, sideT) 且先于 ShapeFull 泛化（boxes 非空则泛化不跑）。
-    {
+    runLegMulti({ "t902 farmland item icon faces: explicit spec case pins side AND front faces to the dirt side-til"
+        "e (single authority def.sideTile) with only the top carrying the tilled texture - the generic Sh"
+        "apeFull path fed the mesher-reused frontTile (wet-farmland top tile 27) into the icon's left-fro"
+        "nt face, so the icon read as farmland on both visible faces; def field-reuse contract pinned (to"
+        "p=26 dry / side=2 dirt / front=27 wet-top) and cache family bumped icon6->icon7 so stale on-disk"
+        " icons regenerate; visual confirmation pending user playtest" }, [&]() {
         const BR::BlockDef &fd = BR::def(BR::Farmland);
         const bool okDef = fd.topTile == 26 && fd.sideTile == 2 && fd.frontTile == 27;
         const QString exeDir = QCoreApplication::applicationDirPath();
@@ -574,7 +629,7 @@ void MatrixRun::section04_instancing()
                              "(top=26 dry / side=2 dirt / front=27 wet-top) and cache family bumped "
                              "icon6->icon7 so stale on-disk icons regenerate; visual confirmation pending "
                              "user playtest";
-    }
+    });
 
     // ── P-t903 草丛支撑置换失撑探针（World 层行为级；放置面真值表已随 t847 探针收紧同步钉）──
     //   用户定稿「只能放草方块（泥土也不行）」+ 失撑链同口径：草丛唯一合法支撑 = 草方块 → 支撑被**置换**为
@@ -584,7 +639,13 @@ void MatrixRun::section04_instancing()
     //   (b) 通用置换路径：setBlockSilent(Dirt→Farmland) 锄地语义 → 草丛同掉（任意非草面置换）；
     //   (c) 阴性对照（族口径不扩大）：花下泥土置换成耕地（花合法面含 Farmland）→ 花**不**掉（t507
     //       「置换不掉」族口径对花 / 蘑菇保留，只草丛收口）。
-    {
+    runLegMulti({ "t903 tallgrass support-replacement lost-support: grass block's only legal support is another gra"
+        "ss block (placement tightened, dirt rejected), and the lost-support hook now drops the tall gras"
+        "s when its support is REPLACED by any non-grass face - the sheep-graze path (setWaterSilent Gras"
+        "s->Dirt, t897 entry) and the generic silent replacement (Dirt->Farmland hoe semantics) both clea"
+        "r the plant and drop its dropId, while the flower negative control stays put on replaced-but-sti"
+        "ll-legal farmland (family replacement-caliber kept for flowers/mushrooms, only tallgrass tighten"
+        "ed)" }, [&]() {
         const auto [x0, z0] = nextSlot();
         placeRigBlock(w, x0, kRigY, z0, BR::Grass, 0);
         placeRigBlock(w, x0, kRigY + 1, z0, BR::TallGrass, 0);
@@ -629,7 +690,7 @@ void MatrixRun::section04_instancing()
                              "plant and drop its dropId, while the flower negative control stays put on "
                              "replaced-but-still-legal farmland (family replacement-caliber kept for flowers/"
                              "mushrooms, only tallgrass tightened)";
-    }
+    });
 
     // ── P-t857 F3 渲染统计真值源码钉（R19.14 性能起步批；源序钉先例 = review #4/#5 的 rpm 源序探针）──
     //   buildF3Text 的 draw 行自 t857 起读 view3d.renderStats 真值（drawCallCount / drawVertexCount /
@@ -637,7 +698,11 @@ void MatrixRun::section04_instancing()
     //   退役。钉三件事：① 函数体必经 renderStats 真值四读；② 估算公式 token（drawEst）在函数体内绝迹；
     //   ③ View3D 上 extendedDataCollectionEnabled 绑 f3Visible（真值收集的开关契约——漏绑则真值恒 0，
     //   F3 显示静默失真）。QML 无 static_assert 面 → 源码文本钉（滤 // 注释行后切片断言）。
-    {
+    runLegMulti({ "t857 F3 render-stats truth: buildF3Text draw line reads view3d.renderStats real values (drawCall"
+        "Count/drawVertexCount/renderPassCount via RenderStats, extended collection gated on f3Visible at"
+        " the View3D) and the legacy ~drawEst sum formula (visibleSegmentCount+items+mobs+torches+6) is r"
+        "etired - estimate drift vs backend reality (transparency pass splits, frustum culling, instancin"
+        "g batches) no longer misleads perf work" }, [&]() {
         QString qmlPath;
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
@@ -696,7 +761,7 @@ void MatrixRun::section04_instancing()
                              "sum formula (visibleSegmentCount+items+mobs+torches+6) is retired - estimate "
                              "drift vs backend reality (transparency pass splits, frustum culling, "
                              "instancing batches) no longer misleads perf work";
-    }
+    });
 
     // ── P-t860 cutout 段折叠（R19.14 试验项，保留交付）：行为级 + 源码钉双探针 ──
     //   背景：t442 起 terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（与 cutout 段材质逐字相同，
@@ -709,7 +774,16 @@ void MatrixRun::section04_instancing()
     //   true = 复原），源码钉改钉联动四件（开关声明 / 守卫实例化 / cutoutFolded 绑定 / segmentsPerChunk
     //   派生），任何半恢复（只改一处）即红；旧「无 createObject + 段数 5」静态钉退役（照旧注释恢复
     //   createObject 会两段同发 z-fighting——正是 review28 #4 的缺陷）。
-    {
+    runLegMulti({ "t860 cutout segment folded into terrain: terrain-segment ChunkGeometry absorbs cross-billboard v"
+        "ertices (TallGrass placement grows the terrain mesh, pre-fold routing diverted it to a separate "
+        "cutout model) - sound because both materials became literally identical after t439/t442 (alphaMo"
+        "de Mask + cutoff 0.5), same vertex pipeline, same depth-writing opaque pass; review28 #4: the do"
+        "cumented degrade lever is now an explicit switch - ChunkGeometry.cutoutFolded=false behaviorally"
+        " sheds cross vertices back to baseline (pre-t860 skip list restored, mutually exclusive with a r"
+        "estored cutout segment, no double-emission z-fighting) and refolding restores them, while the Ma"
+        "in.qml source pin locks the single-switch coupling (cutoutSegmentRestored declared false + guard"
+        "ed crossChunkComp instantiation + cutoutFolded binding + segmentsPerChunk derivation all keyed t"
+        "o one property - any half-restored path goes red)" }, [&]() {
         const auto [x860, z860] = nextSlot();
         const int cx860 = x860 / 16, cz860 = z860 / 16;
         ChunkGeometry geoT;
@@ -814,7 +888,7 @@ void MatrixRun::section04_instancing()
                              "single-switch coupling (cutoutSegmentRestored declared false + guarded "
                              "crossChunkComp instantiation + cutoutFolded binding + segmentsPerChunk "
                              "derivation all keyed to one property - any half-restored path goes red)";
-    }
+    });
 
     // ── P-t858 经验球 instancing 试点探针（R19.14；Game 层 feeder 直调，实例表内容级）──
     //   XpOrbInstancing（QQuick3DInstancing 子类，公开 API、无自定义 shader——RHI 囚笼合规）把整族
@@ -822,7 +896,12 @@ void MatrixRun::section04_instancing()
     //   表条目位置 = 管理器 posAt ± bob 带（Y ∈ [pos.y, pos.y+0.12]，XZ 精确——bob 只加 Y，解析式
     //   0.06*(1-cos) ∈ [0,0.12]）；③ clearAll（切世界清场）后表清空（slot-reuse 的 alive=false 槽
     //   不进表）。掉落物各族保持逐 Model 的范围取舍在 xporbinstancing.h 头注释 + dev-plan 记录钉死。
-    {
+    runLegMulti({ "t858 xp-orb instancing pilot: XpOrbInstancing feeder derives the instance table from XpOrbManage"
+        "r slots (empty without manager or live orbs, entry position = slot pos + analytic bob band on Y "
+        "only, clearAll empties the table since dead slots never enter it) - whole family renders as one "
+        "Model/one draw replacing per-orb delegates, pickups/magnetism stay pure C++ in the manager; drop"
+        "-item families stay per-Model by scope decision (per-item textures/geometries need per-itemId bu"
+        "cketed models, deferred with rationale)" }, [&]() {
         XpOrbManager orbs858;
         XpOrbInstancing feed858;
         QVector3D p858;
@@ -852,7 +931,7 @@ void MatrixRun::section04_instancing()
                              "pickups/magnetism stay pure C++ in the manager; drop-item families "
                              "stay per-Model by scope decision (per-item textures/geometries need "
                              "per-itemId bucketed models, deferred with rationale)";
-    }
+    });
 
     // ── P-t1027a 掉落物 instancing 治理首批探针（R19.21；Game 层 feeder 直调，t858 先例）──
     //   方块整立方族（ItemEntityManager::isPlainCubeDrop：泥土/石头/圆石/木板/砂/羊毛16色…挖掘产出主面，
@@ -864,7 +943,14 @@ void MatrixRun::section04_instancing()
     //   clearAll 反射——表随活体集同步缩；④ 合并不加实例——同 id 就近 spawn（≤kMergeRadius=2）走 count
     //   累加，feeder 条数不变（1 实例 count=3 = 1 条目）；⑤ 数据链零改动——feeder 只读，拾取判定 /
     //   despawn / 物理全在 C++ 管理器（既有掉落腿覆盖）。
-    {
+    runLegMulti({ "t1027 drop-item instancing batch 1: BlockDropInstancing feeder buckets the plain-cube drop famil"
+        "y per itemId (only same-id live slots enter a bucket: dirt=3/cobble=2 while the torch item and a"
+        " material item never enter any plain-cube bucket), entries carry exact XZ slot positions + analy"
+        "tic bob band on Y only + 0.3 uniform scale + pure-Y rotation, pickup setCountAt(0) / removeAt / "
+        "clearAll shrink the table in lockstep, and same-id nearby spawns merge by count WITHOUT adding i"
+        "nstances (1 slot count=3 stays 1 entry) - the largest drop family now renders as one Model/one d"
+        "raw per active bucket id replacing per-entity inline geometry/material instances (t1007 governan"
+        "ce path a), while pickup/despawn/merge/physics data chains stay untouched (feeder is read-only)" }, [&]() {
         ItemEntityManager items1027;
         BlockDropInstancing fDirt1027, fCobble1027, fTorch1027;
         fDirt1027.setManager(&items1027);   fDirt1027.setFamilyId(int(BR::Dirt));
@@ -928,7 +1014,7 @@ void MatrixRun::section04_instancing()
                              "as one Model/one draw per active bucket id replacing per-entity inline "
                              "geometry/material instances (t1007 governance path a), while pickup/"
                              "despawn/merge/physics data chains stay untouched (feeder is read-only)";
-    }
+    });
 
     // ── P-t1027b 族谓词单一权威行为级 + QML 接线源码钉（t1027 首批）──
     //   QML delegate 排除侧（Main.qml plain-cube visible 链 hasBucket）与 C++ feeder 收纳侧
@@ -936,7 +1022,14 @@ void MatrixRun::section04_instancing()
     //   谓词已自 Main.qml isItem3DFamily 字面量表收编（t880 建 / t925 扩 / t965 订正，25 id 原样）→
     //   C++ 行为级全枚举 + QML 薄委托 / 桶池接线源码钉（QML 渲染分支 headless 不可行为级断言，
     //   review27-4 源码钉先例；阴性轮敏感：摘 hasBucket 排除 / 摘 feeder 过滤各自翻红）。
-    {
+    runLegMulti({ "t1027 family predicate single authority: ItemEntityManager::isItem3DFamily (24-id table moved ve"
+        "rbatim from Main.qml) and isPlainCubeDrop are behaviorally pinned in C++ (plain mining drops inc"
+        "l. the 16 wool colors in, every 3D-family id plus stairs-16/air/out-of-range/tool/material segme"
+        "nts out) so the QML delegate exclusion side and the C++ feeder inclusion side judge every id ide"
+        "ntically; source pins lock the QML wiring (hasBucket exclusion appended to the plain-cube visibl"
+        "e chain, BlockDropInstancing buckets with manager+familyId, reassignDropBuckets signal handler p"
+        "er the AOT binding lesson, isItem3DFamily thin delegation) and the feeder filter as the negative"
+        "-round lesion sites" }, [&]() {
         bool okPred = true;
         // 整立方族收录抽点（常规挖掘产出面 + 16 色羊毛段 27 / FirstWoolVariant..LastWoolVariant）
         okPred = okPred && ItemEntityManager::isPlainCubeDrop(int(BR::Grass))
@@ -1026,7 +1119,7 @@ void MatrixRun::section04_instancing()
                              "BlockDropInstancing buckets with manager+familyId, reassignDropBuckets "
                              "signal handler per the AOT binding lesson, isItem3DFamily thin "
                              "delegation) and the feeder filter as the negative-round lesion sites";
-    }
+    });
 
     // ── P-t1032a 掉落物 instancing 批 2 探针：3D 形状族 per-id 桶（R19.22；批 1 P-t1027a 同 rig）──
     //   isItem3DFamily 25 id（火把/活板门/台阶/雪层/草丛/附魔台/枯灌木/小麦/栅栏/门/蘑菇/蛛网/红石
@@ -1039,7 +1132,18 @@ void MatrixRun::section04_instancing()
     //   纯 Y 轴旋转。
     //   阴性轮敏感：摘 feeder 形状过滤（false && 前缀，t1030/t1031 先例）→ 本腿楼梯/异族拒绝面恰红；
     //   摘 94 不桶化 skip → 本腿 94 腿恰红（期望 0 实得 1）。
-    {
+    runLegMulti({ "t1032a drop-item instancing batch 2: the 3D shape family (isItem3DFamily 25 ids, stairs-16 exclu"
+        "ded per the t880 billboard exception) feeds per-id shape buckets through the BlockDropInstancing"
+        " shapeFamily mode: every family id is probed per-id with the entry count equal to its live count"
+        " (torch=1/door=1 then each of the 25 ids), with t1038 excluding the enchanting table 94 from sha"
+        "pe buckets entirely (isItem3DFamily(94) stays true - the delegate chain gate holds - while the s"
+        "hape feeder serves an empty table for it, keeping the floating book and the table on one same-ch"
+        "ain same-phase delegate render), stairs-16/dirt/tools-0x100/materials-0x200 never enter a shape "
+        "bucket and a torch never enters a plain-cube bucket (cross-family mutex on both modes), and entr"
+        "ies carry exact XZ slot positions + the analytic bob band on Y + 0.3 uniform scale + pure-Y rota"
+        "tion - the second-largest drop family now renders as one ItemShapeGeometry/one draw per active b"
+        "ucket id (geometry shared by all instances of the same id) while the bucket-full overflow path k"
+        "eeps the delegate fallback rendering" }, [&]() {
         ItemEntityManager items1032a;
         BlockDropInstancing fTorch1032a, fDoor1032a, fStairs1032a, fPlain1032a;
         fTorch1032a.setShapeFamily(true);
@@ -1124,7 +1228,7 @@ void MatrixRun::section04_instancing()
                              "draw per active bucket id (geometry shared by all instances of the "
                              "same id) while the bucket-full overflow path keeps the delegate "
                              "fallback rendering";
-    }
+    });
 
     // ── P-t1038a 附魔台 94 整体不桶化行为腿（Review_2026-09-11 #1 定夺修；书-台相位失锁病灶收口）──
     //   病灶（review 实读）：t1032 把 94 上移 dropBookNode 后若 94 入形状桶，台体走 feeder 解析相位
@@ -1142,7 +1246,18 @@ void MatrixRun::section04_instancing()
     //      reassignShapeBuckets 切片含 `if (id === 94) continue` skip + Review_2026-09-11 #1 登记
     //      注释；hasShapeBucket 切片零 94 字面（「无第二处特判」结构不变量钉）。
     //   阴性轮敏感：摘 C++ 收纳侧 skip（false && 前缀）→ ②③ 恰红；摘 Main.qml skip → ④ 源钉恰红。
-    {
+    runLegMulti({ "t1038a enchanting-table 94 excluded from shape buckets entirely (Review_2026-09-11 #1, book-tabl"
+        "e phase-lock fix): isItem3DFamily(94) stays true so the delegate render chain gate holds (no buc"
+        "keting does not mean eviction from the 3D family), the shape-mode feeder serves an empty instanc"
+        "e table for id 94 even with a live 94 item in the scene (the feeder-query projection of the buck"
+        "et pool never assigning 94 - the C++ collection-side defense line) and its idle gate stays stopp"
+        "ed (hasLiveMember same-predicate exclusion, no zombie clock), a torch in the same scene still bu"
+        "ckets and clocks normally (the other 24 family ids untouched), and the QML orchestration surface"
+        " (reassignShapeBuckets / hasShapeBucket, a registered headless blind spot) is covered by source "
+        "pins: the counting loop carries the id-94 skip with the Review_2026-09-11 #1 registration commen"
+        "t while hasShapeBucket holds no second 94 special case - the floating book and the table now alw"
+        "ays render on one delegate chain sharing the entRoot animation clock (constant rotation offset a"
+        "nd out-of-phase bob eliminated)" }, [&]() {
         ItemEntityManager items1038;
         items1038.spawnItem(10, 40, 10, 94, 1);   // 附魔台活体在场（病灶触发条件）
         items1038.spawnItem(14, 40, 10, 13, 1);   // 对照：火把（其余 24 id 桶化不受影响）
@@ -1206,7 +1321,7 @@ void MatrixRun::section04_instancing()
                              "no second 94 special case - the floating book and the table now always "
                              "render on one delegate chain sharing the entRoot animation clock "
                              "(constant rotation offset and out-of-phase bob eliminated)";
-    }
+    });
 
     // ── P-t1032b 桶满降级路径 headless 可达面（review0910 #2 采纳；QML 编排面盲区如实 scoped）──
     //   reassignDropBuckets / hasBucket / reassignShapeBuckets / hasShapeBucket 是纯 QML JS 编排
@@ -1215,7 +1330,13 @@ void MatrixRun::section04_instancing()
     //   （familyId<=0 = 桶满溢出 / 桶释放后无桶 id 的 QML 投影）」的空表响应，与「桶释放→重指派」
     //   的实例表恢复：桶满 8 时第 9 种 id 恰无桶 → feeder familyId 保持 0 → 恒空表（delegate 旧
     //   路径渲染不双渲的 C++ 侧保证）；桶释放 id 重获指派 → 实例表恢复 = 活体数。
-    {
+    runLegMulti({ "t1032b bucket-full degradation headless-reachable faces (review0910 #2 adoption, QML orchestrati"
+        "on blind spot honestly scoped): with 9 distinct plain-cube ids alive the unassigned feeder (fami"
+        "lyId=0, the C++ projection of the 9th id having no bucket) serves an empty table and never doubl"
+        "e-renders, re-assigning the released bucket id restores the instance table to the live count, re"
+        "leasing it again (familyId=0) empties it, and the batch-2 shape feeder obeys the same contract i"
+        "ncluding the negative familyId sentinel - the QML reassign/hasBucket orchestration itself stays "
+        "a registered blind spot covered by source pins plus an on-device smoke item" }, [&]() {
         ItemEntityManager items1032b;
         BlockDropInstancing f9th1032b;
         f9th1032b.setManager(&items1032b); // familyId 保持 0 = 未入桶 id 的 feeder 态
@@ -1267,7 +1388,7 @@ void MatrixRun::section04_instancing()
                              "contract including the negative familyId sentinel - the QML "
                              "reassign/hasBucket orchestration itself stays a registered blind "
                              "spot covered by source pins plus an on-device smoke item";
-    }
+    });
 
     // ── P-t1032c 8×16ms 定时器空转门行为腿（review0910 #3 采纳；批 1/批 2 两池同款门）──
     //   空转（familyId<=0 或桶内活体 0）→ 钟停：「tick 不再 markDirty」的 headless 可观测面 =
@@ -1277,7 +1398,15 @@ void MatrixRun::section04_instancing()
     //   markDirty 兜底（markDirty 兜底为源钉面：refreshTicker 调用点全在 set* 沿 + entitiesChanged
     //   沿）。形状模式门为谓词感知：桶 id 非本族活体（门 19 在位而火把桶空）不算活跃。
     //   阴性轮敏感：摘空转门（构造启钟 + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红。
-    {
+    runLegMulti({ "t1032c 16ms feeder timer idle gate (review0910 #3 adoption, both bucket pools): the animation ti"
+        "mer now starts STOPPED - constructing and wiring a feeder leaves it idle, assigning a familyId w"
+        "ith zero live members keeps it idle, the first live member (entitiesChanged edge) starts it with"
+        " a fresh table, the active period keeps it running across an event pump (animation behavior iden"
+        "tical to the old always-on clock), picking the last member stops it and an event pump does not r"
+        "evive it, the shape mode applies the same gate with predicate awareness (a foreign-family live i"
+        "tem keeps the bucket idle) and the constructor source no longer contains an unconditional start "
+        "- idle feeders no longer wake ~60x/s or push empty tables to render sync every frame (XpOrbInsta"
+        "ncing t858 precedent stays always-on by scope decision, registered for a follow-up)" }, [&]() {
         ItemEntityManager items1032c;
         BlockDropInstancing fGate1032c;
         const auto pumpFor1032 = [](int ms) {
@@ -1349,7 +1478,7 @@ void MatrixRun::section04_instancing()
                              "start - idle feeders no longer wake ~60x/s or push empty tables to "
                              "render sync every frame (XpOrbInstancing t858 precedent stays "
                              "always-on by scope decision, registered for a follow-up)";
-    }
+    });
 
     // ── P-t1032d 批 2 两侧谓词同源钉 + 几何共享等价断言 + 不让位登记钉（批 1 P-t1027b 同纪律）──
     //   同源三面：feeder 收纳侧（shapeFamily 模式过滤 isItem3DFamily）/ QML 重算侧
@@ -1359,7 +1488,17 @@ void MatrixRun::section04_instancing()
     //   「同 id 重建几何逐位确定」行为级等价断言（同 id 两实例 vertexData 全等、异 id 不等）承载。
     //   review0910 #4：在用桶保持不让位 = 防几何重建抖动刻意取舍**维持现状**（两池 kept 逻辑逐字
     //   同款、无让位分支——kept 恒钉 minCount=2，让位逻辑若 future 加入即翻红）。
-    {
+    runLegMulti({ "t1032d batch-2 same-source predicate pins + geometry sharing equivalence + no-yield registration"
+        ": the shape-family admission (feeder isItem3DFamily filter), the QML bucket reassignment (thin d"
+        "elegation, no literal id table beyond the single t1038-registered id-94 skip carrying its Review"
+        "_2026-09-11 #1 registration comment) and the delegate exclusion (hasShapeBucket on the shape Mod"
+        "el visible chain) all judge every id from the single C++ authority, the per-bucket geometry is p"
+        "inned to the bucket id (not per-entity) with same-id rebuilds proven byte-identical and cross-id"
+        " distinct (the headless equivalent of same-id same-geometry-pointer sharing), the bucket Model m"
+        "aterial reproduces the old ItemShapeGeometry branch verbatim (Mask + 0.5 cutoff + 0.99 opacity +"
+        " atlas + skylight tint), both bucket pools keep the stable-kept-bucket no-yield assignment (revi"
+        "ew0910 #4 deliberate trade-off, pinned at minCount=2 so any future yield logic turns red), and t"
+        "he idle-gate plumbing (refreshTicker start/stop + entitiesChanged edge) is comment-immune pinned" }, [&]() {
         // 几何 per-id 确定性（桶内全实例共享同一几何的「同 id 同内容」等价面）
         ItemShapeGeometry gA1032d, gB1032d, gC1032d;
         gA1032d.setBlockId(13);  // 火把（细立柱特型）
@@ -1448,7 +1587,7 @@ void MatrixRun::section04_instancing()
                              "deliberate trade-off, pinned at minCount=2 so any future yield "
                              "logic turns red), and the idle-gate plumbing (refreshTicker "
                              "start/stop + entitiesChanged edge) is comment-immune pinned";
-    }
+    });
 
     // ── P-t1039a 掉落物 instancing 批 3 探针：光晕壳族全族合批（R19.23；批 1/2 P-t1027a/t1032a 同 rig）──
     //   旧 delegate entShell 无 visible 条件 = 壳全族横切（每个活体掉落实体恒带一壳）。批 3 压成
@@ -1466,7 +1605,19 @@ void MatrixRun::section04_instancing()
     //   ④ 天光乘子——k = minLight + (1-minLight)×skyLight（tintBySkyLight floor 公式；setSkyLight
     //      0.5 → 灰 sRGB r 变 qRound(176×0.7)=123；还原 1.0 → 逐位回 176）。
     //   阴性轮敏感：摘壳收纳 alive 过滤（false && 前缀）→ 本腿拾取后实例数面恰红。
-    {
+    runLegMulti({ "t1039a drop glow-shell instancing batch 3: the old entShell delegate carried no visible conditio"
+        "n so EVERY live drop entity wears a shell (family cross-cutting) - the whole shell family now fe"
+        "eds one instanced Model (one draw): plain-cube dirt, 3D-family torch, billboard stairs, tool-seg"
+        "ment and material-segment items all enter the same table with the entry count equal to the live "
+        "count, entries carry exact XZ slot positions + the analytic bob band on Y + 0.45 uniform scale +"
+        " pure-Y rotation (verbatim entShell parity), per-instance color holds gray 176/176/176 with stat"
+        "ic alpha 0.35 versus enchanted purple 140/64/230 with the t696 breathing alpha band 0.28..0.45 ("
+        "asserted against the linear values Quick3D's calculateTableEntry stores via its sRGBToLinear pip"
+        "eline conversion - the renderer's authoritative table content, visually identical to the delegat"
+        "e material path), and the skylight tint follows k = minLight + (1-minLight)*skyLight (dimming to"
+        " r=123 at skyLight 0.5 and restoring bit-exact at 1.0) while picking a drop collapses the table "
+        "- hasTransparency makes the table alpha render on the opaque white material (negative-round sens"
+        "itive: shell alive-filter removal)" }, [&]() {
         // Quick3D calculateTableEntry 的 sRGB→linear 逐字镜像（QSSGUtils::color::sRGBToLinear，
         // Qt 6.11 qssgutils.cpp：rgb*(rgb*(rgb*C1+C2)+C3)；探针线性回读期望值用）
         const auto srgbToLinear1039a = [](float c) {
@@ -1554,7 +1705,7 @@ void MatrixRun::section04_instancing()
                              "collapses the table - hasTransparency makes the table alpha render on "
                              "the opaque white material (negative-round sensitive: shell alive-filter "
                              "removal)";
-    }
+    });
 
     // ── P-t1039b 批 3 两侧谓词同源 + 跨池正交腿（壳不双渲 / 壳不占本体桶 / 桶不占壳）──
     //   同源最强形式：QML delegate 排除侧（entShell visible !hasShellAt）薄委托 feeder 的
@@ -1564,7 +1715,16 @@ void MatrixRun::section04_instancing()
     //   ③ 跨池正交——壳池收火把 13 而整立方本体桶（familyId=13）恒空、泥土两池并存（壳 + 本体
     //   是不同视觉件，同 id 壳不双渲 ≠ 壳体互斥）；④ 死槽翻转 + 槽复用回升（t256 slot-reuse 语义）。
     //   阴性轮敏感：摘壳收纳 alive 过滤 → ①镜像 / ④塌缩面恰红。
-    {
+    runLegMulti({ "t1039b glow-shell two-sided same-source predicate + cross-pool orthogonality: the delegate exclu"
+        "sion side (entShell visible !hasShellAt) thin-delegates the feeder's own Q_INVOKABLE so admissio"
+        "n (getInstanceBuffer takes the first kShellCap live slots) and exclusion are mirror images of on"
+        "e C++ function - with the pool under cap hasShellAt equals aliveAt for every slot and two feeder"
+        " instances produce identical tables, out-of-range/dead/unmanaged slots answer false (delegate sh"
+        "ell fallback), the shell pool admits torch-13 while the plain-cube body bucket for id 13 stays e"
+        "mpty and dirt lives in both pools (shell and body are separate visual pieces - one shell per ent"
+        "ity, never two), and picking a torch flips its hasShellAt false with the table collapsing while "
+        "a far re-spawn reuses the slot and restores admission (negative-round sensitive: shell alive-fil"
+        "ter removal)" }, [&]() {
         ItemEntityManager items1039b;
         GlowShellInstancing fShell1039b, fMirror1039b;
         fShell1039b.setManager(&items1039b);
@@ -1623,7 +1783,7 @@ void MatrixRun::section04_instancing()
                              "with the table collapsing while a far re-spawn reuses the slot and "
                              "restores admission (negative-round sensitive: shell alive-filter "
                              "removal)";
-    }
+    });
 
     // ── P-t1039c 批 3 空转门行为腿 + kShellCap 溢出降级腿（t1032c 同纪律；壳族无 familyId →
     //    活跃判定 = 任一活体槽）──
@@ -1633,7 +1793,15 @@ void MatrixRun::section04_instancing()
     //   一槽 → 尾槽 128 转入池（降级→恢复连续面）。
     //   阴性轮敏感：摘空转门（构造 start + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红；
     //   摘收纳容量（上限放宽）→ 溢出面恰红。
-    {
+    runLegMulti({ "t1039c glow-shell idle gate + kShellCap overflow degradation: the 16ms feeder timer starts STOPP"
+        "ED (constructor stays start-free, wiring and a skylight tint edge both leave it idle), the first"
+        " live drop starts it through the entitiesChanged edge with a fresh table, the active period surv"
+        "ives an event pump, picking the last drop stops it and a pump does not revive it (no familyId fo"
+        "r the cross-cutting shell family - any live slot is activity), stuffing 130 live drops caps the "
+        "instance table at exactly kShellCap=128 with the two tail slots answered false (delegate shell f"
+        "allback, manager cap 200 keeps the overflow state reachable) and picking one head slot promotes "
+        "the first overflow slot back into the pool (negative-round sensitive: idle-gate removal and admi"
+        "ssion-cap removal)" }, [&]() {
         ItemEntityManager items1039c;
         GlowShellInstancing fGate1039c;
         const auto pumpFor1039 = [](int ms) {
@@ -1704,7 +1872,7 @@ void MatrixRun::section04_instancing()
                              "the overflow state reachable) and picking one head slot promotes the "
                              "first overflow slot back into the pool (negative-round sensitive: "
                              "idle-gate removal and admission-cap removal)";
-    }
+    });
 
     // ── P-t1039d 批 3 两侧接线源钉 + 动画解析式逐字钉（t1032d 同纪律；QML 编排面盲区的源钉覆盖）──
     //   QML 侧只有薄委托（无 reassign 表类 handler——壳族无桶池），headless 行为面由 P-t1039a/b/c
@@ -1716,7 +1884,18 @@ void MatrixRun::section04_instancing()
     //   t1047 O-1 如实 scoped：溢出反应性行为腿 headless 不可达（QML 绑定重算无 C++ 直调面；壳池
     //   hasShellAt 前 128 语义已由 P-t1039b/c 行为腿覆盖且本单不变）→ 源钉（本行）+ 绑定触碰结构钉
     //   足够，实机确认（review0912 #1 同项）补观感面。
-    {
+    runLegMulti({ "t1039d glow-shell wiring source pins + verbatim analytic pins: the QML side stays a thin delegat"
+        "ion (no bucket reassignment handler - the cross-cutting shell family needs no bucket pool) with "
+        "the host id, the GlowShellInstancing binding, the itemEntities manager plus the worldClock.skyLi"
+        "ght and window.minLight tint bindings, the hasShellAt thin delegate, the entShell revision-touch"
+        "ing visible exclusion (t1047 O-1: the bare non-reactive form never re-evaluated across over-cap "
+        "and slot-flip states - the binding now touches itemEntities.revision so the predicate re-queries"
+        " on every entity-set change), the breathing running gate and the white material base color all p"
+        "inned comment-immune, while the C++ feeder carries the verbatim calibers - hasTransparency(true)"
+        ", the t696 breathing formula 0.28 + 0.17*0.5*(1-cos(pi*s)) at 800ms per leg, static gray alpha 0"
+        ".35, purple 140/64/230 vs gray 176/176/176 through the skylight floor formula, kShellCap admissi"
+        "on, the slot*0.37 stagger, the 0.45 shell scale and the idle-gate plumbing (negative-round sensi"
+        "tive: any pinned wiring or formula edit turns this leg red)" }, [&]() {
         const QString exeDir1039d = QCoreApplication::applicationDirPath();
         const QString root1039d = QDir(exeDir1039d + QStringLiteral("/..")).absolutePath();
         QStringList miss1039d;
@@ -1776,7 +1955,7 @@ void MatrixRun::section04_instancing()
                              "floor formula, kShellCap admission, the slot*0.37 stagger, the 0.45 "
                              "shell scale and the idle-gate plumbing (negative-round sensitive: "
                              "any pinned wiring or formula edit turns this leg red)";
-    }
+    });
 
     // ── P-t1041a 掉落物 instancing 批 4 探针：工具 3D 族 per-id 桶 + tier 色 per-instance color ──
     //   isTool3DDrop（五类几何镐/锄/斧/铲/剑 + 弓）经 ToolDropInstancing 收进工具桶（Main.qml
@@ -1791,7 +1970,18 @@ void MatrixRun::section04_instancing()
     //      ⑤ 天光乘子沿——k = minLight + (1-minLight)×skyLight，setSkyLight 0.5 → 木镐 r = qRound(138×0.7)
     //      = 97，还原 1.0 逐位回 138（t144 夜间变暗契约）。
     //   阴性轮敏感：摘收纳谓词（false && 前缀）→ 本腿互斥面恰红。
-    {
+    runLegMulti({ "t1041a drop-item instancing batch 4: the tool 3D family (isTool3DDrop: pickaxe/hoe/axe/shovel/sw"
+        "ord plus bow) feeds per-id tool buckets through ToolDropInstancing - shears/materials-0x200/the "
+        "3D-shape-family torch and the branchless fishing rod never enter a tool bucket even when (mis)as"
+        "signed one (cross-family mutex on the single C++ predicate), entry counts equal live counts (two"
+        " wooden pickaxes -> 2, collapse to 1 after picking), entries carry exact XZ slot positions + the"
+        " analytic bob band on Y + 0.45 uniform scale + pure-Y spin (delegate parity - tools keep the ent"
+        "Root spin, no billboard cancel), tier colors ride the per-instance color table (t1039 precedent)"
+        " with wooden 138/90/46 and iron 216/216/230 plus the bow-string second table carrying silk white"
+        " 245/245/245 (t330, tier-independent) asserted against the linear values Quick3D's calculateTabl"
+        "eEntry stores, and the skylight tint follows k = minLight + (1-minLight)*skyLight (dimming to r="
+        "97 at skyLight 0.5, restoring bit-exact at 1.0) (negative-round sensitive: feeder predicate remo"
+        "val)" }, [&]() {
         // Quick3D calculateTableEntry 的 sRGB→linear 逐字镜像（P-t1039a 同款 lambda）
         const auto srgbToLinear1041a = [](float c) {
             return c * (c * (c * 0.305306011f + 0.682171111f) + 0.012522878f);
@@ -1896,7 +2086,7 @@ void MatrixRun::section04_instancing()
                              "k = minLight + (1-minLight)*skyLight (dimming to r=97 at skyLight "
                              "0.5, restoring bit-exact at 1.0) (negative-round sensitive: feeder "
                              "predicate removal)";
-    }
+    });
 
     // ── P-t1041b 批 4 探针：billboard 图标族双池（异形方块图标族 + 工具/材料图标族）+ 朝相机旋转 ──
     //   BillboardDropInstancing itemIconFamily 两模式（缺省 = isBlockIconBillboardDrop 异形方块图标族
@@ -1906,7 +2096,18 @@ void MatrixRun::section04_instancing()
     //   XZ 精确、Y bob 带、scale 0.3、rotation euler = (camPitch, camYaw, 0)（朝相机旋转进实例表；
     //   billboard 不自转——旧分支显式抵消 rotY）+ camYaw 沿 markDirty 跟随（40→90）。
     //   阴性轮敏感：摘收纳谓词（false && 前缀）→ 本腿互斥面恰红。
-    {
+    runLegMulti({ "t1041b drop-item instancing batch 4: the two billboard icon families feed per-id texture buckets"
+        " through one BillboardDropInstancing class with the itemIconFamily mode switch - the block-icon "
+        "family (isBlockIconBillboardDrop: stairs-16 partial, cross flower, colored bed) and the item ico"
+        "n family (isIconBillboardDrop: shears, flint and steel, material segment) each admit exactly the"
+        "ir own ids with two-way cross-pool mutex (the 3D-family torch never enters a block-icon bucket, "
+        "block-icon ids never enter item-icon buckets, tools-3D and plain cubes never enter icon buckets)"
+        ", entry counts equal live counts and collapse on pickup, entries carry exact XZ + the analytic b"
+        "ob band + 0.3 uniform scale, the camera-facing rotation rides the instance table as euler (camPi"
+        "tch, camYaw, 0) (the bitwise equivalent of the old Ry(camYaw)*Rx(camPitch) child compose - billb"
+        "oards do not spin) and follows a camYaw edge via markDirty, and the per-id textures stay per-id "
+        "host buckets since the atlas+UV route would need a custom shader (PLAN section 2-A forbidden) (n"
+        "egative-round sensitive: feeder predicate removal)" }, [&]() {
         ItemEntityManager items1041b;
         BillboardDropInstancing fStairs1041b, fFlower1041b, fBed1041b, fTorchNeg1041b,
             fStairsNeg1041b, fIcon1041b, fIconNeg1041b;
@@ -1996,7 +2197,7 @@ void MatrixRun::section04_instancing()
                              "markDirty, and the per-id textures stay per-id host buckets since "
                              "the atlas+UV route would need a custom shader (PLAN section 2-A "
                              "forbidden) (negative-round sensitive: feeder predicate removal)";
-    }
+    });
 
     // ── P-t1041c 批 4 三池空转门行为腿（t1032c 同款；ToolDropInstancing + BillboardDropInstancing）──
     //   空转（familyId<=0 / 非本族 id / 桶内活体 0 / t1047 O-2：stringPass 通道非弓 id）→ 钟停
@@ -2008,7 +2209,16 @@ void MatrixRun::section04_instancing()
     //   m_ticker.start()（摘门 lesion 会在构造体重启钟 → 行为面 + 本结构面同步红）。
     //   阴性轮敏感：摘空转门（构造启钟 + refreshTicker 早退）→ 本腿全部「空转必须 false」面恰红；
     //   t1047 O-2 摘弓门 → okStrBowGate1041c 恰红。
-    {
+    runLegMulti({ "t1041c batch-4 idle gates (t1032c caliber, both new feeders): the 16ms animation timers start ST"
+        "OPPED - constructing, wiring and assigning an empty bucket all leave them idle, the first live m"
+        "ember starts them with a fresh table, the active period survives an event pump, picking the last"
+        " member stops them and a pump does not revive them, the gates are predicate-aware (shears and th"
+        "e branchless fishing rod keep a tool bucket idle and empty, the stringPass table only arms for a"
+        " live bow bucket, switching the stringPass feeder to a non-bow id with live members never arms i"
+        "ts clock (t1047 O-2 bow gate - the seven dead string clocks are gone), and switching the billboa"
+        "rd feeder into itemIconFamily mode stops the clock for a live block-icon id and back), and neith"
+        "er new constructor carries an unconditional timer start - idle feeders no longer wake ~60x/s or "
+        "push empty tables to render sync (negative-round sensitive: idle-gate removal)" }, [&]() {
         ItemEntityManager items1041c;
         ToolDropInstancing fGate1041c, fStrGate1041c;
         BillboardDropInstancing fBGate1041c;
@@ -2121,7 +2331,7 @@ void MatrixRun::section04_instancing()
                              "carries an unconditional timer start - idle feeders no longer "
                              "wake ~60x/s or push empty tables to render sync (negative-round "
                              "sensitive: idle-gate removal)";
-    }
+    });
 
     // ── P-t1041d 批 4 接线源钉 + 口径逐字钉（t1032d/t1039d 同纪律；QML 编排面盲区的源钉覆盖）──
     //   QML 编排（reassignToolBuckets / reassignItemBuckets / reassignBlockIconBuckets / has*Bucket）
@@ -2130,7 +2340,18 @@ void MatrixRun::section04_instancing()
     //   camPitch/camYaw 绑定 / 图标 wrapper）+ itementitymanager 三谓词声明 + C++ 口径逐字（收纳谓词 /
     //   tier 色映射 / 弦白 245 / scale / bob 公式 / 天光 k / 空转门 / entitiesChanged 沿 / billboard
     //   朝相机 rotation）。材料/异形贴图材质逐字同参以 window 切片承载（pinSet 表达不了的顺序面）。
-    {
+    runLegMulti({ "t1041d batch-4 wiring source pins + verbatim calibers: the three new bucket hosts (toolDropInstH"
+        "ost / itemIconInstHost / blockIconInstHost) carry their reassignment functions, thin predicate d"
+        "elegations (isTool3DDrop / isIconBillboardDrop / isBlockIconBillboardDrop single C++ authority),"
+        " bucket exclusion chains on all ten delegate branches (six tool-3D, three item-icon, one block-i"
+        "con), per-bucket geometry switching, the bow stringPass second table, the itemIconFamily mode, t"
+        "he camera euler bindings and the icon wrapper, the header declares the three family predicates, "
+        "and both feeders carry the verbatim calibers - the tier color map (gold 242/200/50, copper 200/1"
+        "20/80, diamond 79/217/210, iron 216/216/230, stone 154/154/154, wood default), silk-white 245 st"
+        "ring pass, the analytic bob and slot*0.37 stagger, 0.45/0.3 scales, the skylight floor formula, "
+        "the camera-facing rotation in the instance table, the billboard material parity window (alphaCut"
+        "off 0.5 + opacity 0.99 + terrainLight + generateMipmaps false + iconSourceForBlock) and the idle"
+        "-gate plumbing (negative-round sensitive: any pinned wiring or formula edit turns this leg red)" }, [&]() {
         const QString exeDir1041d = QCoreApplication::applicationDirPath();
         const QString root1041d = QDir(exeDir1041d + QStringLiteral("/..")).absolutePath();
         QStringList miss1041d;
@@ -2234,14 +2455,19 @@ void MatrixRun::section04_instancing()
                              "terrainLight + generateMipmaps false + iconSourceForBlock) and "
                              "the idle-gate plumbing (negative-round sensitive: any pinned "
                              "wiring or formula edit turns this leg red)";
-    }
+    });
 
     // ── review27-4 附魔台（94）掉落物 / 资源浏览器双渲染互斥（源码钉）──
     //   isItem3DFamily 家族成员里附魔台不在 isPartialBlock（mesher 靠 chunkgeometry 显式 case 并入）→
     //   BlockCube 分支 visible 对 94 仍 true，与 ItemShapeGeometry 分支叠加 = 满格立方 + 矮台四面共面
     //   z-fight。修法 = 两处 BlockCube 分支 visible 追加家族排除（不把 94 并入 isPartialBlock——放置 /
     //   失撑 / 碰撞链回归面大）。QML 渲染分支 headless 不可行为级断言 → 源码钉两分支互斥（t880 (b) 先例）。
-    {
+    runLegMulti({ "review27-4 enchanting-table dual-render z-fight: both BlockCube branches (drop-item delegate in "
+        "Main.qml + resource-browser preview) now exclude the isItem3DFamily / selectedIsItem3D family so"
+        " the full cube and the real ItemShapeGeometry partial shape can never be visible at once (source"
+        " pin - 94 sits outside isPartialBlock so the family-exclusion clause is the only mutual exclusio"
+        "n guard; merging 94 into isPartialBlock was rejected to keep the place/support/collision chain u"
+        "ntouched)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         bool ok4 = true;
@@ -2282,7 +2508,7 @@ void MatrixRun::section04_instancing()
                              "sits outside isPartialBlock so the family-exclusion clause is the only mutual "
                              "exclusion guard; merging 94 into isPartialBlock was rejected to keep the "
                              "place/support/collision chain untouched)";
-    }
+    });
 
     // ── review27-5 雪球 / 鸡蛋闪避链 clearAggro=false（源码钉 + 闪避入口全枚举）──
     //   review26 #8 修复只给箭 / 浮标两链传了 clearAggro=false，雪球 / 蛋走 nightwalkerDodge 内
@@ -2292,7 +2518,14 @@ void MatrixRun::section04_instancing()
     //   本钉同时数 entitymanager.cpp 投射物命中分支 m.mobType == MobNightwalker == 4（箭 / 雪球 / 蛋 /
     //   浮标），日后新增第五条闪避入口（如火球补免疫分支）会翻数 → 强制同步更新本探针（排查结论：
     //   火球现无闪避分支——真伤害直击不清仇恨不位移；末影珍珠 / 末影眼不判 mob 命中——非闪避入口）。
-    {
+    runLegMulti({ "review27-5 nightwalker projectile-dodge aggro preservation: snowball and egg dodge chains now pa"
+        "ss clearAggro=false through nightwalkerDodge (matching the arrow/bobber caliber from review26 #8"
+        " - a zero-damage infinitely-rebuyable projectile must not double as a free remote purge wiping e"
+        "nraged/rageTimer/windupTimer and cancelling the attack windup), the melee 30%-dodge path keeps t"
+        "he default clearAggro=true, and the projectile hit-branch count (m.mobType == MobNightwalker == "
+        "4: arrow/snowball/egg/bobber) pins the complete dodge-entry enumeration so a future fifth entry "
+        "forces a conscious probe update (fireball hits with real damage and no dodge branch; pearl/ender"
+        "-eye never test mob hits)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         bool ok5 = true;
@@ -2329,7 +2562,7 @@ void MatrixRun::section04_instancing()
                              "bobber) pins the complete dodge-entry enumeration so a future fifth entry "
                              "forces a conscious probe update (fireball hits with real damage and no dodge "
                              "branch; pearl/ender-eye never test mob hits)";
-    }
+    });
 
     // ── review27-6 船降位后撞睡莲扫层（行为级：快=碎 / 慢=挡 双半边）──
     //   t892 静水降位（稳态船 Y = 顶水格 + 7/8 → floor = 顶水格 W）后，睡莲只存在于「顶水格+1」层
@@ -2338,7 +2571,13 @@ void MatrixRun::section04_instancing()
     //   断言：(a) W 层顶浮船满速撞 W+1 层叶 → 叶碎（Air）+ lilyPadSmashed 信号（t805 骑乘 rig：
     //   tryMount + tickRiddenBoat 定步长驱动）；(b) 低速（wish 0.25 → 稳态 2.0 < 阈值 3.0）同景 →
     //   叶完好且船被挡在叶列前（防过度修复破「慢=挡」契约）。
-    {
+    runLegMulti({ "review27-6 boat lily-pad smash layer realigned to the lowered waterline: with the t892 still-wat"
+        "er surface (boat rest Y = top-water + 7/8, floor = the top water cell W) a full-throttle ridden "
+        "boat smashes the lily pad one layer up at W+1 (smashLilyPads now scans cy-1..cy+1 - the pad-only"
+        " layer is cy+1; behavioral via tryMount + tickRiddenBoat rig, lilyPadSmashed signal observed), w"
+        "hile a slow boat (steady 2.0 b/s < 3.0 threshold) still gets blocked by the intact pad before it"
+        "s footprint enters the pad column (fast=smash / slow=stop both halves of the t630/t711 contract "
+        "pinned)" }, [&]() {
         World wR6;
         // 48×48×96 seed 77 = t836 已证净空带（t892 同款；地形 ≤81 → 82+ 全空）。
         wR6.setWidth(48); wR6.setDepth(48); wR6.setHeight(96); wR6.setSeed(77);
@@ -2397,7 +2636,7 @@ void MatrixRun::section04_instancing()
                              "while a slow boat (steady 2.0 b/s < 3.0 threshold) still gets blocked by the "
                              "intact pad before its footprint enters the pad column (fast=smash / slow=stop "
                              "both halves of the t630/t711 contract pinned)";
-    }
+    });
 
     // ── review27-7 烧尽终局附着复检（行为级：火把 / 铁活板门 / 铁门随燃失掉落）──
     //   t891 岩浆点燃改道「点燃 → 计时烧尽」后，烧尽终局走 4 参 setBlock（钩子清单无 trapdoor/door
@@ -2409,7 +2648,14 @@ void MatrixRun::section04_instancing()
     //   蔓延干扰（木门 / 木活板门会被燃烧板的逐窗蔓延掷骰点燃烧成另一条链，断言面被污染）。
     //   断言：三板均燃尽（非 Planks）后三附着格全 Air + 各格 blockDroppedAsItem 信号 ≥1（铁门两扇各 1）。
     //   t843 火蔓延路径共用本终局 = 既有缺口顺带收口（同断言覆盖）。
-    {
+    runLegMulti({ "review27-7 burnout endgame re-checks attachments: the burn-timer endgame (shared by the t891 lav"
+        "a-ignite path and the t843 fire-spread path - the latter's pre-existing gap closes here too) now"
+        " runs recheckAttachmentsAfterClear after the burnout setBlock, so a torch standing on the plank,"
+        " an iron door mounted on it and an iron trapdoor attached to its side all break and drop as item"
+        "s at those cells instead of floating (behavioral: three attachment cells go Air with blockDroppe"
+        "dAsItem signals; iron variants chosen as non-flammable carriers so same-type spread cannot diver"
+        "t the door/trapdoor into their own burn chains; door cells themselves skip the generic recheck a"
+        "nd keep the wet/rain-guarded pair cleanup)" }, [&]() {
         World wR7;
         wR7.setWidth(48); wR7.setDepth(48); wR7.setHeight(96); wR7.setSeed(77);
         const int fy7 = 83;
@@ -2482,7 +2728,7 @@ void MatrixRun::section04_instancing()
                              "iron variants chosen as non-flammable carriers so same-type spread cannot "
                              "divert the door/trapdoor into their own burn chains; door cells themselves "
                              "skip the generic recheck and keep the wet/rain-guarded pair cleanup)";
-    }
+    });
 
     // ── review27-8 Waking 渐显期相机基准（行为级）──
     //   相机躺偏移（-look×1.4 / Y−1.35）按床顶躺位标定，但 Waking 入口 leaveBedTeleport 已把 m_pos 瞬移
@@ -2493,7 +2739,12 @@ void MatrixRun::section04_instancing()
     //   (c) Waking 中段 fade<0.5 时 lie 仍 0；(d) Lying 中断醒（wakeUp）后 lie==0。
     //   captured 前置：updateSleep 只在 m_captured 路径跑（!captured 早 return 之前不到睡眠段）——
     //   t891 的「挂窗 + grab」载体同款（headless 无指针锁）。
-    {
+    runLegMulti({ "review27-8 waking camera anchor: the lie camera offset is calibrated for the on-bed lying spot, "
+        "but leaveBedTeleport has already moved m_pos to the bedside floor when Waking starts - so the li"
+        "e amount is zeroed at the teleport (single point) and pinned to 0 through the whole Waking phase"
+        " (fade still ramps 1->0); the lying ramp now only runs in the fall-asleep direction (Lying 0->1)"
+        ", so the fade-in eye never sinks into the bed or the wall behind it (lie>0.44 was below bed-top "
+        "under the old 1->0 wake ramp); interrupt-wake mid-Lying also reads lie==0" }, [&]() {
         World wR8;
         wR8.setWidth(48); wR8.setDepth(48); wR8.setHeight(96); wR8.setSeed(77);
         WorldClock clockR8;
@@ -2561,7 +2812,7 @@ void MatrixRun::section04_instancing()
                              "fall-asleep direction (Lying 0->1), so the fade-in eye never sinks into "
                              "the bed or the wall behind it (lie>0.44 was below bed-top under the old "
                              "1->0 wake ramp); interrupt-wake mid-Lying also reads lie==0";
-    }
+    });
 
     // ── review27-9 掉落物附魔台「悬浮书」局部坐标（源码钉；纯视觉 headless 不可行为级）──
     //   旧版 dropBookNode y=0.14（疑似 0.46×0.3 误做预缩放）被父级 Model scale 0.3 再乘 → 实际 0.042
@@ -2573,7 +2824,13 @@ void MatrixRun::section04_instancing()
     //   形状桶后 shape Model visible=false，书保留 delegate 逐实体渲染）——0.3 父级缩小并入本节点
     //   （position 换算 bobY + 0.46×0.3、显式 scale 0.3，世界变换逐位不变），页坐标两枚原样；查看器
     //   侧锚不动。钉随迁新公式（不放宽：仍逐字钉书心 0.46 常量与补偿式 + 页坐标 count==2）。
-    {
+    runLegMulti({ "review27-9 drop-item enchanting-table book visible: dropBookNode keeps the same local coordinate"
+        "s as the resource-browser preview and the placed-state delegate (book center y=0.46 above the 0."
+        "375 table top, pages at +/-0.176 scaled 0.38x0.03x0.46) - t1032 moved the node out of the instan"
+        "ced shape Model into a direct entRoot child (the enchanting table id rides the shape bucket whil"
+        "e the book stays a per-drop delegate render) with the 0.3 uniform shrink folded into the node it"
+        "self (bobY + 0.46*0.3 position compensation, world transform bit-identical); the old y=0.14 pre-"
+        "scale mistake stays negatively pinned" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         bool ok9 = true;
@@ -2618,7 +2875,7 @@ void MatrixRun::section04_instancing()
                              "the node itself (bobY + 0.46*0.3 position compensation, world "
                              "transform bit-identical); the old y=0.14 pre-scale mistake stays "
                              "negatively pinned";
-    }
+    });
 
     // ── review27-10 mob 侧站燃块顶（行为级：悬停不燃 / 落顶复燃——与玩家侧对称）──
     //   mob 侧主扫描 yy 从 footY 起（Y 严格）恒不覆盖 footY-1 支撑格：站燃块顶唯一覆盖是 t843 中心列
@@ -2626,7 +2883,12 @@ void MatrixRun::section04_instancing()
     //   脚底贴支撑面 ±0.002）+ 中心列快速路径同款 Y 界定（玩家侧 review27 #3 口径）。rig：燃板正上 1×1
     //   石井（禁 XZ 漂移，落点确定）；(a) 猪出生悬空 feet=板顶+1.0，慢 tick（dt 0.005×20）下落 <0.16 格
     //   期间（覆盖 ≥5 个 aiTick）不燃——旧中心列行在此窗必燃（阴性回归钉）；(b) 常速 tick 落定板顶后复燃。
-    {
+    runLegMulti({ "review27-10 mob stand-on-burning-top parity: the mob-side scan now carries the player-side stand"
+        "-on branch (footprint columns of the support layer with the Y touch bound - feet within kTouchSk"
+        "in of the support face) plus the same Y bound on the t843 center-column fast path, so a pig hove"
+        "ring inside the 1-block window above a burning plank top (jump-over/fall-through) stays unlit wh"
+        "ile landing back on the top ignites it (behavior mirrors the player side; the misleading 'alread"
+        "y redundant' comment is gone - the strict-Y main scan never covered the support layer)" }, [&]() {
         World wR10;
         wR10.setWidth(48); wR10.setDepth(48); wR10.setHeight(96); wR10.setSeed(77);
         EntityManager ents10;
@@ -2673,7 +2935,7 @@ void MatrixRun::section04_instancing()
                              "the top ignites it (behavior mirrors the player side; the misleading "
                              "'already redundant' comment is gone - the strict-Y main scan never "
                              "covered the support layer)";
-    }
+    });
 
     // ── review27-11 玩家水灭 / 雨灭（行为级；MC 1.0 着火实体浸水 / 淋雨立即熄灭）──
     //   t888 拿掉随机熄灭后玩家侧无任何提前止损（注释谎称「雨灭走 mob/世界侧」）。修法 = 火段补水灭
@@ -2681,7 +2943,12 @@ void MatrixRun::section04_instancing()
     //   rig（seed 86 石地板，biome 扫 Plains 列——沙漠列恒 Clear 会假阴性）：(a) 站火点燃 → 撤火干燥
     //   对照仍燃（防「任意 tick 熄灭」假阳性）→ 脚位格换水 → 熄；(b) 两 pc 同景（露天 / 头顶石檐），
     //   撤火后强降雨 → 露天熄、檐下仍燃（雨灭谓词的见天半边隔离）。
-    {
+    runLegMulti({ "review27-11 player fire extinguish paths: the player fire segment now douses immediately when fe"
+        "et or eyes are in water and when the shared World::rainExtinguishesAt predicate hits (sky-expose"
+        "d + precipitating column - the same single authority the mob side uses, replacing the misleading"
+        " 'rain handled elsewhere' comment); dry control stays burning after the fire source is removed, "
+        "the roofed control stays burning through the rain (sky half of the predicate isolated), and the "
+        "t888 full-8s no-early-stop gap is closed for the player" }, [&]() {
         World wR11;
         wR11.setWidth(48); wR11.setDepth(48); wR11.setHeight(96); wR11.setSeed(86);
         EntityManager ents11;
@@ -2780,7 +3047,7 @@ void MatrixRun::section04_instancing()
                              "after the fire source is removed, the roofed control stays burning "
                              "through the rain (sky half of the predicate isolated), and the t888 "
                              "full-8s no-early-stop gap is closed for the player";
-    }
+    });
 
     // ── review27-12 walkPhase 骑乘 / 死亡态归零（行为级 + 源码钉）──
     //   骑乘态 / 死亡态在主循环 continue 早退，恒不达 t897 ② 归零块——行走中被放上矿车 / 被击杀的 mob
@@ -2788,7 +3055,11 @@ void MatrixRun::section04_instancing()
     //   与死亡翻转处顺带 walkPhase=stepAccum=0。断言：(a) 行走中（walkPhase≠0 瞬间）damageEntity 致死
     //   → walkPhase==0；(b) 行走中 spawnCart 贴身 + tickVehicleRiding → 登乘（rideCartAt≥0）且
     //   walkPhase==0；(c) 源码钉三写点。
-    {
+    runLegMulti({ "review27-12 walkPhase zeroing covers riding and death: both early-exit states never reach the t8"
+        "97 idle-reset block, so the mount write-sites (cart and boat boarding, next to the moveSpeed cle"
+        "ar) and the death flip now zero walkPhase and stepAccum in place - a walking mob put into a mine"
+        "cart or killed mid-stride snaps its legs to neutral instead of freezing mid-step (the exact visu"
+        "al bug t897-2 claimed to have fixed); comments no longer claim the idle block covers them" }, [&]() {
         World wR12;
         wR12.setWidth(48); wR12.setDepth(48); wR12.setHeight(96); wR12.setSeed(77);
         EntityManager ents12;
@@ -2858,7 +3129,7 @@ void MatrixRun::section04_instancing()
                              "minecart or killed mid-stride snaps its legs to neutral instead of "
                              "freezing mid-step (the exact visual bug t897-2 claimed to have fixed); "
                              "comments no longer claim the idle block covers them";
-    }
+    });
 
     // ── review27-13 ParticleSystem3D 族 + 世界锚定动画暂停门（源码钉）──
     //   review26 #11「全仓纯视觉 Timer 清点」漏网同族：TorchSmoke/AmbientParticles/WeatherParticles
@@ -2867,7 +3138,13 @@ void MatrixRun::section04_instancing()
     //   worldRunning 注入门（Loader.onLoaded 绑 window.worldRunning，BlockParticles 模式）+ 书 /
     //   刷怪笼动画补 && window.worldRunning（flutter 与大摆互斥改声明式——命令式 stop/restart 会夺
     //   running 绑定）。
-    {
+    runLegMulti({ "review27-13 particle systems and world-anchored animations under the pause gate: the three Parti"
+        "cles3D-isolated components (torch smoke, ambient, weather) expose a worldRunning property bound "
+        "through their Loaders to window.worldRunning (BlockParticles pattern) so ESC hard pause stops em"
+        "ission and freezes in-flight particles; the enchanting book bob/flutter, its facing timer and th"
+        "e spawner mini-mob spin/bob animations are gated the same way, with the flutter-vs-big-flip mute"
+        "x made declarative (!pageFlipAnim.running) because imperative stop()/restart() calls would steal"
+        " the running binding and re-open the pause gate" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         bool ok13 = true;
@@ -2910,7 +3187,7 @@ void MatrixRun::section04_instancing()
                              "made declarative (!pageFlipAnim.running) because imperative "
                              "stop()/restart() calls would steal the running binding and re-open the "
                              "pause gate";
-    }
+    });
 
     // ── review27-14 烈焰弹边缘对（①朝脚下直射不自燃 ②kCap 拒生成不消耗；行为级）──
     //   ① 玩家侧火球（fireballShooter==-1）直下发射撞非可燃地板：来向格 == 玩家自身格（旧版立地火把
@@ -2918,7 +3195,13 @@ void MatrixRun::section04_instancing()
     //     来向一格优先、四向兜底；燃烬者火球 shooter>=0 不偏移保持敌意落火语义）。
     //   ② EntityManager 实体达 kCap：spawnFireball 返 -1（弹未生成）→ 烈焰弹不消耗 / 不挥手（旧版
     //     无条件 takeStack = 弹被吞仍扣 1 发；烈焰弹是生存合成资源 3 发/组）。
-    {
+    runLegMulti({ "review27-14 fire-charge edge pair: a straight-down player fireball hitting the floor under the s"
+        "hooter no longer drops standing fire into the shooter's own cell (the approach cell overlaps the"
+        " player AABB so the fire offsets to the first neighbor outside it - horizontal travel direction "
+        "first, compass fallback, owner-side only since emberling splash near the player is intended), an"
+        "d a launch rejected at the entity cap (spawnFireball -1) consumes no charge and plays no swing ("
+        "crafted survival ammo must not vanish into a full entity table; the old path took the stack unco"
+        "nditionally)" }, [&]() {
         World wR14;
         wR14.setWidth(48); wR14.setDepth(48); wR14.setHeight(96); wR14.setSeed(77);
         const int fy14 = 84;
@@ -2987,7 +3270,7 @@ void MatrixRun::section04_instancing()
                              "and a launch rejected at the entity cap (spawnFireball -1) consumes no charge "
                              "and plays no swing (crafted survival ammo must not vanish into a full entity "
                              "table; the old path took the stack unconditionally)";
-    }
+    });
 
     // ── review27-15 水面降位外溢对（①睡莲叶高读液面·源码钉 ②两层冰墙骑船 Y 振荡·行为级）──
     //   ① t892 静水液面降 7/8 后，睡莲 quad 旧「cell 底 + 1/16 按满格水面校准」悬空 ~3/16——叶高改读
@@ -2996,7 +3279,13 @@ void MatrixRun::section04_instancing()
     //   ② 岸边两层冰墙：首层冰顶 snap 上去后船中心层（restLayer）仍是冰（第二层）→ 下一帧 iceTop 升到
     //     第二层顶（高差 1.0 > snap）回钉水面 → 再 snap = 逐帧 ~0.325 振荡。修 = snap 前查目标层无冰
     //     （埋位守卫）；单层冰面 snap（t892/t805 契约）必须不受影响（对照半边）。
-    {
+    runLegMulti({ "review27-15 lowered-waterline spillover pair: the lily-pad quad height now reads the water cell "
+        "below through the mesher context (waterSurfaceFrac, source-pinned across producer and consumer -"
+        " the old cell-bottom+1/16 calibration floated the leaf ~3/16 above the 7/8 surface), and a ridde"
+        "n boat approaching a TWO-layer ice wall no longer y-oscillates ~0.325/frame (the snap-up target "
+        "layer contains the second ice layer = buried hull = wall not surface, guard rejects the snap and"
+        " the boat stays pinned to the waterline 84.875), while the single-layer ice sheet still snaps up"
+        " and rests stably at 85.2 (the t892/t805 ice-road contract the guard must not over-reach)" }, [&]() {
         const QString exeDir15 = QCoreApplication::applicationDirPath();
         const QString root15 = QDir(exeDir15 + QStringLiteral("/..")).absolutePath();
         // (a) 源码钉：三方契约（消费 nb.belowState×waterSurfaceFrac / ctx 字段存在 / chunkgeometry 填）
@@ -3084,13 +3373,17 @@ void MatrixRun::section04_instancing()
                              "surface, guard rejects the snap and the boat stays pinned to the waterline "
                              "84.875), while the single-layer ice sheet still snaps up and rests stably at "
                              "85.2 (the t892/t805 ice-road contract the guard must not over-reach)";
-    }
+    });
 
     // ── review27-18 腾空羊不开吃（源码钉；行为回归由 P-t897 草栏探针看守）──
     //   groundY = floor(pos.y − halfH) − 1 的垂直窗口腾空时放宽 ~1 格（小跳 / 下落 / 水面缓沉都在窗内）
     //   → 旧版腾空羊可开吃并在 0.5s 后空中消耗 Grass→Dirt。修 = sheepEatGrass 入口 resting 门（检测与
     //   消耗同门）。行为级「落地照常吃」由 P-t897（草栏 grassDirt≥1）覆盖——本探针钉源码契约面。
-    {
+    runLegMulti({ "review27-18 airborne sheep cannot open a graze cycle: sheepEatGrass gates on e.resting (detectio"
+        "n and consumption share the same gate - the groundY=floor(pos.y-halfH)-1 window is ~1 block too "
+        "generous while airborne, so a hopping/sinking sheep used to open the cycle and consume Grass->Di"
+        "rt mid-air 0.5s later); grounded eating stays covered behaviorally by the P-t897 grass-pen probe"
+        " (grassDirt >= 1)" }, [&]() {
         const QString exeDir18 = QCoreApplication::applicationDirPath();
         const QString root18 = QDir(exeDir18 + QStringLiteral("/..")).absolutePath();
         QFile ef18(root18 + QStringLiteral("/src/Entities/entitymanager.cpp"));
@@ -3107,12 +3400,17 @@ void MatrixRun::section04_instancing()
                              "so a hopping/sinking sheep used to open the cycle and consume Grass->Dirt "
                              "mid-air 0.5s later); grounded eating stays covered behaviorally by the "
                              "P-t897 grass-pen probe (grassDirt >= 1)";
-    }
+    });
 
     // ── review27-21 清空整个背包语义收口（源码钉：盔甲 4 槽 + 2×2 合成格一并清）──
     //   旧 shift+左键只清 hotbar 9 + main 27 + 光标——盔甲（armorSetStack 独立存储）与合成格原料残留、
     //   输出槽仍显产物 =「整个背包」语义不完整。QML 不可行为直驱（review27-13 源码钉先例）。
-    {
+    runLegMulti({ "review27-21 clear-whole-inventory semantics completed: the shift+click trash action now also cle"
+        "ars the four armor slots (armorSetStack, separately stored) and the 2x2 crafting grid ingredient"
+        "s (output slot is a craftRev derived binding and recomputes to empty), so 'entire inventory' no "
+        "longer leaves armor and ingredients behind while the UI implies a full wipe; no-confirmation ris"
+        "k registered as a product note (user-pinned 8-25 semantics, adjacency misclick warning in the co"
+        "mment)" }, [&]() {
         const QString exeDir21 = QCoreApplication::applicationDirPath();
         const QString root21 = QDir(exeDir21 + QStringLiteral("/..")).absolutePath();
         QFile iv21(root21 + QStringLiteral("/src/ui/Inventory.qml"));
@@ -3134,14 +3432,19 @@ void MatrixRun::section04_instancing()
                              "leaves armor and ingredients behind while the UI implies a full wipe; "
                              "no-confirmation risk registered as a product note (user-pinned 8-25 "
                              "semantics, adjacency misclick warning in the comment)";
-    }
+    });
 
     // ── review27-23 火把拆/重放重置 burnout（行为级：计数窗继承 + 冷却锁定两半）──
     //   m_torchBurnout 唯一摘表路径原只有到期 → (a) 计数窗内拆后同格重放，新火把继承 flips（不到 8 翻
     //   即熔断）；(b) 冷却锁定期内拆后重放，锁定门 continue 跳过评估——基座已供电也错误亮到到期。
     //   修 = notePowerWrite 中 oldId==RedstoneTorch 时 erase 该格键（MC 拆火把重放即重置熔断）。
     //   rig = review26-6(a) 拉杆 NOT 门（每拨恰一翻可精确计数）。
-    {
+    runLegMulti({ "review27-23 torch burnout resets on break+replace: notePowerWrite erases the cell's burnout entr"
+        "y when the torch is removed, so a torch replaced mid-count-window starts from zero flips (the ol"
+        "d inherited count fused it before 8 fresh toggles) and a torch replaced during the cooldown lock"
+        " gets evaluated immediately - with a powered base it turns OFF at once instead of illegally stay"
+        "ing lit until cooldown expiry (MC semantics: replacing a torch resets its burnout state; lever N"
+        "OT-gate rig, deterministic integer counters)" }, [&]() {
         World wR23;
         wR23.setWidth(48); wR23.setDepth(48); wR23.setHeight(96); wR23.setSeed(77);
         for (int x = 2; x <= 40; ++x)
@@ -3208,7 +3511,7 @@ void MatrixRun::section04_instancing()
                              "evaluated immediately - with a powered base it turns OFF at once instead of "
                              "illegally staying lit until cooldown expiry (MC semantics: replacing a torch "
                              "resets its burnout state; lever NOT-gate rig, deterministic integer counters)";
-    }
+    });
 
     // ── t905 perf：群系 memo（World::biomeAt 列级缓存）契约探针 ──
     // 背景：tickIceFreeze 每 5s 节流窗遍历全水格索引逐格调 biomeAt（单次最多 5 条 4 阶 fBm ~20 次
@@ -3216,7 +3519,11 @@ void MatrixRun::section04_instancing()
     // 本探针钉三契约：① 同世界两遍全图读一致（缓存暖后回读同值，不抖动）；② 换 seed 缓存失效
     //   （regenerate 清缓存 → 新图生效，非旧缓存假阳性）；③ 同 seed 跨实例一致（memo 路径 == 纯计算
     //   路径的确定性，§2-K 无损）。时序收益另行实测（perf 报告），此处只钉语义零回归。
-    {
+    runLegMulti({ "t905 biome memo: per-column cache in biomeAt returns identical values on cold and warm passes, i"
+        "s cleared on seed change (no stale-map false positives), and a seeded rebuild matches an indepen"
+        "dent same-seed world (memo path == pure fBm path determinism, PLAN 2-K intact; motivation: tickI"
+        "ceFreeze scans the water-cell index calling biomeAt per cell - 5 fbm chains x 4 noise octaves ea"
+        "ch was the dominant cost of the ice bucket hitch)" }, [&]() {
         qInfo().noquote() << "=== t905 perf probes (biome memo contract) ===";
         World wA;
         wA.setWidth(64);
@@ -3271,7 +3578,7 @@ void MatrixRun::section04_instancing()
                              "fBm path determinism, PLAN 2-K intact; motivation: tickIceFreeze scans the "
                              "water-cell index calling biomeAt per cell - 5 fbm chains x 4 noise octaves each "
                              "was the dominant cost of the ice bucket hitch)";
-    }
+    });
 
     // ── P-t926 咬钩信号重做探针（行为级：判定窗 ~1s；源码钉：下沉幅度 / 待机缩幅 / 鱼粒子距离-方位域）──
     //    用户原话四要素：待机微飘缩幅别喧宾夺主 / 鱼粒子在浮标随机方位随机距离 ≤4 格出现游向鱼钩 /
@@ -3280,7 +3587,16 @@ void MatrixRun::section04_instancing()
     //    窗长 ∈[0.9,1.1]s 且窗口内 bobberHasBiteAt 恒 true / 逃走后翻 false。视觉三面（QML）按 t887b/
     //    t924 源码钉手法锁语句面：Main.qml 下沉 0.35→0.7 / 微飘 0.035→0.018（fishingBobber 段界滤）；
     //    BlockParticles 距离域 0.7..4.0（≤4 上限）+ 距离解算游速（t884 近距涟漪域 0.9..1.32 退役）。
-    {
+    runLegMulti({ "t926 bite-signal rework: judgment window widened 0.5->1.0s (kBobberBiteWindowSec user override p"
+        "inned over the MC 1.0 ~0.5s value -- 'about one second to right-click reel', behavioral: bobberB"
+        "it->bobberEscaped measures 1.00s +-0.1 in the water rig, bobberHasBiteAt true throughout the win"
+        "dow and false after the escape), bite sink deepened 0.35->0.7 blocks with a stronger splash (16 "
+        "particles, vY 4.4) as the 'pull it under hard' moment, idle micro-bob shrunk 0.035->0.018 so the"
+        " wait phase no longer drowns the bite contrast, and the approach-fish particle domain replaces t"
+        "884's close ripple ring (0.9..1.32) with random-bearing random-distance <=4-block spawns (0.7..4"
+        ".0 deterministic golden-angle + phase-derived distance) whose swim speed is solved from distance"
+        " (1.2+0.8xrad -> any spawn reaches the hook in <=1.1s, arriving-and-dying at the bobber); QML ha"
+        "lves pinned at source level per the t887b/t924 precedent" }, [&]() {
         World wL;
         wL.setWidth(48); wL.setDepth(48); wL.setHeight(96); wL.setSeed(82);
         EntityManager ents;
@@ -3363,7 +3679,7 @@ void MatrixRun::section04_instancing()
                              "distance (1.2+0.8xrad -> any spawn reaches the hook in <=1.1s, "
                              "arriving-and-dying at the bobber); QML halves pinned at source "
                              "level per the t887b/t924 precedent";
-    }
+    });
 
     // ── P-t927 拉拽飞天返修探针（行为级：高台收杆峰值 ≥ 玩家高度 − 1 + 重型折扣；t882 参数返修）──
     //    用户「空中右键收杆看不到生物飞起」：旧 t882 冲量式上抛 2.8+0.18d 的峰值 = vy²/56（32 格远也只
@@ -3375,7 +3691,16 @@ void MatrixRun::section04_instancing()
     //    (c) 两者耐久均 -5（钩住收杆口径不变）。
     //    flake 声明（t1029 起退役）：原口径「与 t882(b) 同源（mob 首游荡窗内甩钩 RNG），偶发漂移复跑清」
     //    —— wander 冻结缝接管后甩钩窗全确定，本腿不再依赖复跑清。
-    {
+    runLegMulti({ "t927 hook-reel to player height: drop-solved launch replaces the t882 impulse lift -- vy = sqrt("
+        "2 x 28 x dh) with dh targeting the player eye + 0.6 overhead margin (old 2.8+0.18xd peaked at vy"
+        "^2/56 ~1.3 blocks, nowhere near an elevated player, the 'reel from a height and the mob never vi"
+        "sibly flies' root); behavioral rig: player on a Y+6 pillar reels a ground pig -> pig peak Y >= p"
+        "layer feet - 1 (solved target ~eye+0.6 vs required feet-1, 3-block margin), weight-class discoun"
+        "t via the mobType halfH mass proxy (halfHeightAt >= 1.0 = heavy family) -- iron golem (halfH 1.2"
+        "0) still yanked >2 blocks but peaks >=1 below the pig (x0.55 dh discount, 'heavy barely lifts, l"
+        "ight sails over the head'); floor dh 1.3 keeps same-level reels visibly airborne; -5 durability "
+        "unchanged; elevation-sweep rig with a fresh mob per attempt per the t882(b) wander-window discip"
+        "line" }, [&]() {
         World wG;
         wG.setWidth(48); wG.setDepth(48); wG.setHeight(96); wG.setSeed(83);
         EntityManager ents;
@@ -3470,7 +3795,7 @@ void MatrixRun::section04_instancing()
                              "head'); floor dh 1.3 keeps same-level reels visibly airborne; -5 "
                              "durability unchanged; elevation-sweep rig with a fresh mob per "
                              "attempt per the t882(b) wander-window discipline";
-    }
+    });
 
     // ── P-t970 钓获生物坠伤豁免探针（行为级 + 源码钉；t927 拉拽链的落地结算面）──
     //    用户第五轮「被拉上来的生物落地有掉落伤害——免除/大幅减轻该次拉拽产生的坠伤（拉拽是玩家动作，
@@ -3489,7 +3814,18 @@ void MatrixRun::section04_instancing()
     //    P-t882(c)/P-t927 源码钉 + 行为腿锁死，此处直驱消掉甩钩仰角扫描 RNG（t882/t927 已知 flake 源），
     //    不向矩阵基线引入新 flake。rig 全 setBlock 自凿先于砌筑（t933 教训：不信地形/净空带），独占局部
     //    World；落点带 = 高台石板（顶 50，8..20×18..30）+ 环地板（顶 40）。
-    {
+    runLegMulti({ "t970 reeled-mob fall-damage exemption: a generic mob landing-settlement chain now exists (peak-f"
+        "eet vs landing-top, dmg = floor(fall - 3), water landing cancels, damage via the existing damage"
+        "Entity hurt chain) and the fishing reel stamps a ONE-SHOT exemption consumed unconditionally at "
+        "the next landing edge -- (a) a pig reeled in a ~11-block solved arc lands at full HP (peak >= st"
+        "art+6 pins a real arc; unexempted the same arc would deal 8), (b) control: an unpulled drop from"
+        " the same 11-block fall takes exactly 8 (10->2 HP), (c) the SAME pig reeled at full 20 HP then d"
+        "ropped through a support-dug shaft falls 50->40 and lands at exactly 13 HP (=7 damage: zero if t"
+        "he exemption survived the body, 18 if the landing had not reset the fall baseline - both faces p"
+        "inned), (d) a >3-block drop into a water well lands unharmed (t200 mirror), (e) source pins on t"
+        "he reel-side stamp inside pullMobToward, the landing-edge consume/peak-reset/water/damage lines,"
+        " and the 3.0f threshold constant; reel driven directly through pullMobToward (the rod->entry wir"
+        "ing is P-t882(c)/P-t927 pinned) so no new hook-sweep RNG enters the baseline" }, [&]() {
         World wF;
         wF.setWidth(48); wF.setDepth(48); wF.setHeight(96); wF.setSeed(89);
         EntityManager ents;
@@ -3691,7 +4027,7 @@ void MatrixRun::section04_instancing()
                              "damage lines, and the 3.0f threshold constant; reel driven directly "
                              "through pullMobToward (the rod->entry wiring is P-t882(c)/P-t927 pinned) "
                              "so no new hook-sweep RNG enters the baseline";
-    }
+    });
 
     // ── P-t1029 wander 冻结测试缝探针（行为级 + 源码钉；t882/t927/t960 三族钓鱼 flaky 治理的缝本体）──
     //    review0907 B-P3-4：三族偶红同源 = 甩钩 / 量测窗内猪 wander RNG（t882 okFar-false / t960 dBMax
@@ -3708,7 +4044,15 @@ void MatrixRun::section04_instancing()
     //    (d) 源码钉：aiWander 早退语句本体 + setter 实现 + 头文件声明 / 缺省 false 成员（pinSet 剥注释，
     //        阴轮摘缝即红）。(c) 假红质量：重掷恰回 yaw=0 概率 1/62832，叠加 3s 行走窗 idle 概率
     //        （kIdleChance≈25%/片）→ <5e-6，远低于被治理的原噪声（套件史 13 次 t882/t960 偶红）。
-    {
+    runLegMulti({ "t1029 wander-freeze test seam: EntityManager::setWanderFrozen(bool) short-circuits aiWander befo"
+        "re the time-slice countdown / RNG re-roll / speed write / displacement (global QRandomGenerator "
+        "stream untouched, moveSpeed zeroed, walk phase idle) while gravity and the knockback / reel phys"
+        "ics stay live -- the manager-level equivalent of the t970 direct-drive RNG purge and the single "
+        "kill switch for the shared t882/t927/t960 wander noise; legs: an 80s frozen window keeps positio"
+        "n/yaw/walk-phase bit-identical, an air-spawned frozen pig still settles onto the platform at the"
+        " same rest height (freeze != hover), unfreeze re-rolls the yaw within one AI tick (seam-off rest"
+        "ores the legacy noise path), and source pins lock the aiWander guard, the setter body, the heade"
+        "r declaration and the default-false member" }, [&]() {
         World wS;
         wS.setWidth(48); wS.setDepth(48); wS.setHeight(96); wS.setSeed(97);
         EntityManager ents;
@@ -3789,7 +4133,7 @@ void MatrixRun::section04_instancing()
                              "unfreeze re-rolls the yaw within one AI tick (seam-off restores the "
                              "legacy noise path), and source pins lock the aiWander guard, the "
                              "setter body, the header declaration and the default-false member";
-    }
+    });
 
     // ── P-t929 大峡谷孤立水格探针（worldgen 行为级：多 seed 生成 → 全图孤立水格 == 0）──
     //   用户「大峡谷中间还是会生成单独的水方块然后直接掉落，旁边没有别的支撑方块」——根因 = t376/t601
@@ -3799,7 +4143,15 @@ void MatrixRun::section04_instancing()
     //   水平邻皆非水（无侧向水体喂养 → 起 tick 必为孤立下落柱）；worldgen 纯函数于 seed（PLAN §2-K）→
     //   同 seed 计数确定，可精确断言 0。多 seed 扫：瀑布门控按概率命中含水壁环，单 seed 可能不触发
     //   （阴性轮依赖其中至少一 seed 在退役前命中）。fresh world 无任何 rig 编辑 → 不与游玩期倒水混淆。
-    {
+    runLegMulti({ "t929 canyon lone-water removal: the t376/t601 high-source waterfall pass is retired wholesale --"
+        " it planted a single Water source hanging in the canyon center column (solid air below, zero hor"
+        "izontal water neighbors), which on the first fluid tick bleeds into a lone falling column exactl"
+        "y matching the user report 'a single water block appears mid-canyon and drops with nothing suppo"
+        "rting it'; canyons are now canonically dry landforms (carve-disc drain + kDrainRadius drain band"
+        ", no new sources placed), and a full-grid sweep over six deterministic seeds asserts worldgen em"
+        "its zero unsupported isolated water cells anywhere (water with air below and no horizontal water"
+        " neighbor), so in-world waterfalls are player-made only; wall-ring water detection dead code rem"
+        "oved with the feature" }, [&]() {
         const int kT929Seeds[] = {1337, 42, 7, 2024, 8888, 555};
         int isoTotal = 0;
         QString perSeedDiag;
@@ -3849,7 +4201,7 @@ void MatrixRun::section04_instancing()
                              "isolated water cells anywhere (water with air below and no horizontal water "
                              "neighbor), so in-world waterfalls are player-made only; wall-ring water "
                              "detection dead code removed with the feature";
-    }
+    });
 
     // ── P-t930 沙子悬浮链 26 邻域探针（World 层行为级；t799 既有「直接上方」支线保钉 + 新 ③ 级联四腿）──
     //   用户口径：「破坏其中一个沙子应自动检测周围沙子状态，悬空就掉落；放置一个方块在它一格之内（26
@@ -3860,7 +4212,16 @@ void MatrixRun::section04_instancing()
     //   五腿：(a) 破坏对角邻格触发邻域悬空沙坍落；(b) 放置完整立方（斜对角）触发（旧早退路径）；(c) 连锁
     //   传播——初扫不可达（距编辑格 dx=2）的第二悬空沙经第一坍落格续扫带落；(d) 阴性——有支撑沙在邻域
     //   编辑后不掉、放置支撑面救活悬空沙；(e) 破坏沙柱底格全柱坍落（既有②行为回归钉）。
-    {
+    runLegMulti({ "t930 sand 26-neighborhood gravity cascade: any edit (break OR place, including placing a full cu"
+        "be which used to early-return untouched) now BFS-scans the 26-voxel neighborhood for unsupported"
+        " gravity blocks (same predicate as placement self-check: below not a full cube) and drops them a"
+        "s whole columns, with cleared cells re-queued so the collapse propagates outward (a floater two "
+        "cells from the edit falls via the first dropped column's rescan); supported sand near an edit st"
+        "ays put and placing a support under a floater rescues it (no false drops, no missed drops); brea"
+        "king the bottom of a sand column still cascades the whole column (t799 direct-above branch kept)"
+        "; floaters staged via setBlockFromEntity (the entity-landing write path that carries no edit hoo"
+        "ks -- equivalent of landed-then-undermined stale sand, deterministically constructible in the ri"
+        "g)" }, [&]() {
         int fellCount = 0;
         const QMetaObject::Connection fellConn =
             QObject::connect(&w, &World::gravityBlockFell, &w, [&fellCount](int, int, int, int) {
@@ -3965,7 +4326,7 @@ void MatrixRun::section04_instancing()
                              "hooks -- equivalent of landed-then-undermined stale sand, "
                              "deterministically constructible in the rig)"
                              ;
-    }
+    });
 
     // ── P-t931 满耐久不显耐久条源码钉（纯 UI 修；t902/t857 源码文本钉先例——QML 无 static_assert 面）──
     //   用户：「刚做好的工具耐久度是满的，在背包界面就不要显示耐久条了；1~9 物品栏的显示是正确的，只有
@@ -3976,7 +4337,15 @@ void MatrixRun::section04_instancing()
     //   hotbar / 装备槽 + SurvivalInventory 主栏 / hotbar 全走本组件）；② SurvivalInventory 内联 armorDurBar
     //   （唯二不迁移组件的槽）同判 + 护甲耐久数字 Text 同口径（满耐久无数字）；③ Main.qml HUD hotbar
     //   参照实现保持不变（`durabilityBar.curDur < durabilityBar.maxDur` 正锚）。
-    {
+    runLegMulti({ "t931 full-durability hides the bar in inventory panels: DurabilityBar's visible gains curDur < m"
+        "axDur (the t498 'always show in inventory' caliber is overruled by the user -- a freshly crafted"
+        " tool or new armor shows NO bar/number in inventory/chest-adjacent panels until first damage, th"
+        "en it stays visible), which unifies every panel (Inventory survival-tab main/hotbar/armor slots "
+        "+ SurvivalInventory main/hotbar all route through the component) with the HUD hotbar reference ("
+        "t315/t349, pinned unchanged as the positive anchor); the two non-migrated spots are pinned too -"
+        "- the inline armorDurBar gets the same comparison and the armor durability number text hides at "
+        "full durability (visible only while armorDurabilityAt < armorMaxDurability); pure UI change pinn"
+        "ed at source level per the t902 precedent" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         auto readSrc = [&root](const QString &rel) -> QString {
@@ -4013,7 +4382,7 @@ void MatrixRun::section04_instancing()
                              "armorDurabilityAt < armorMaxDurability); pure UI change pinned at source "
                              "level per the t902 precedent"
                              ;
-    }
+    });
 
     // ── P-t933 跨世界卡顿泄漏定位探针（TNT 炸沙坑 8FPS → kill @e 无效 → 换世界仍卡 → 重启恢复）──
     //   三腿：
@@ -4037,7 +4406,23 @@ void MatrixRun::section04_instancing()
     //       空气盒（blockAt 全 Air 判定），不假定固定坐标为空。worldgen 水（海 / 湖邻洞穴）首 tick 起
     //       有合法有限沉降 → 各断言窗前先跑**沉降循环**（tickWaterFlow 推进到连续无写入），把「自然
     //       瞬态」与「泄漏残留」分离——沉降收敛本身也是 (b)/(c)「有限收敛」前提的一部分。
-    {
+    runLegMulti({ "t933 cross-world lag leak localization: the TNT-on-sand 8FPS storm is the t930 gravity cascade r"
+        "e-introducing per-CELL recomputeLightAround (each a +/-15-to-sky-top two-channel reflood plus a "
+        "qInfo disk flush) and per-COLUMN worldChanged QML fanout into the explosion chain that t320 had "
+        "batched -- dropGravityColumn now does ONE refloodBox per column and cascadeGravityAround collaps"
+        "es the whole BFS into ONE union-box reflood + ONE worldChanged (equivalence: every cell's light "
+        "influence is a subset of its +/-15 box, all boxes subset the union, boundary-seed reflood of the"
+        " union equals the per-cell terminal state, pinned by skyLight==15 on a former floater cell and <"
+        "15 under the placed shade block); probe legs: (a) 128 staged floaters collapse via a single edit"
+        " with <=4 refloods and <=3 worldChanged (per-cell code would need >=129), (b) after the explosio"
+        "n + cascade a full world tick battery (water/lava/fire/growth/ice/leaf/weather/redstone) produce"
+        "s ZERO worldChanged/blockBroken/light-reflood in steady state -- no non-converging recompute loo"
+        "p, killing the 'lighting keeps rebuilding' hypothesis at the World layer, (c) the same battery s"
+        "tays zero after both real world-exit paths (regenerate worldgen AND beginLoad+finishLoad save-lo"
+        "ad) -- no process-level World state survives a world switch (index sets, side tables, dirty flag"
+        "s, activity boxes, and the new gravity-light union box are all cleared), so the residual cross-w"
+        "orld cost the user measured lives in the QML scene layer (slot high-water delegate fanout = t935"
+        "; render-side waitSync = t934, now observable via the F3 'act ct' line)" }, [&]() {
         World w933;
         w933.setWidth(96);
         w933.setDepth(96);
@@ -4296,7 +4681,7 @@ void MatrixRun::section04_instancing()
                              "(slot high-water delegate fanout = t935; render-side waitSync = t934, "
                              "now observable via the F3 'act ct' line)"
                              ;
-    }
+    });
 
     // ── P-t972 载入世界空白区探针（R19.17 🅶 杂项组；行为级 ChunkGeometry 直驱，t860 先例）──
     //   用户第五轮口径：进世界看到大片空白透过去（疑似回到原点计算/区块未请求），走近挖/放才刷新。
@@ -4309,7 +4694,29 @@ void MatrixRun::section04_instancing()
     //   链）→ 进入世界秒级填满；③窗外段错过的内容重建 / 光照重烘记欠账（deferredRebuildPending /
     //   lightStale），稳态低频排空保远处可见地形最终一致。本探针在局部 2×2 chunk 世界直驱三新入口
     //   钉行为契约 + Main.qml 源码钉编排链（kickWorldMeshSync 挂载 / 可见性解链 / 排空泵）。
-    {
+    runLegMulti({ "t972 world-entry blank region: the t470/t472 view culling chained Model.visible to the chunkInRa"
+        "nge rebuild window, so on entering a world 51-84 of the 100 finite-world chunks were force-hidde"
+        "n (and the window itself only rebuilt at load) -- the user saw large see-through voids that only"
+        " filled near-dig/place. Fix: Model.visible derives from vertexCount alone (finite world renders "
+        "edge to edge, MC 1.0 finite-map semantics; t470 measured zero FPS gain from draw culling so this"
+        " is free), and the presentation layer kicks a progressive near-to-far mesh sync on world entry ("
+        "clearMesh invalidates the previous world's out-of-window meshes so no stale terrain shows, then "
+        "one bounded refreshMesh per frame drains the queue through the SAME buildMesh(Dirty) chain as ed"
+        "its -- seconds-scale fill, no synchronous full-rebuild stall). Probe legs (local 2x2 chunk world"
+        ", direct ChunkGeometry drive per t860 precedent): the in-window segment rebuilds synchronously f"
+        "rom loaded data at finishLoad (empty-mesh count in view radius = 0), the load books the out-of-w"
+        "indow miss as deferredRebuildPending, clearMesh zeroes it and refreshMesh rebuilds fresh-from-cu"
+        "rrent-data (vertex count tracks the new world, not the retained old mesh), an out-of-window edit"
+        " and a past-threshold dayMul step each book their debt and refreshMesh clears both (steady-state"
+        " eventual consistency for visible far terrain); Main.qml source pin locks the orchestration (six"
+        " templates visible-unchained from chunkInRange, kickWorldMeshSync defined and hooked inside ente"
+        "rWorld after the player pose settles, clearMesh on far segments, shift+refreshMesh drain pump). "
+        "review0901 additions: drain-side dedup counter leg (a steady-debt entry catch-up rebuilt by the "
+        "player walking near is SKIPPED by the recheck predicate vertexCount>0 && no deferred && no light"
+        "Stale = zero wasted rebuilds, while bootstrap entries (vertexCount==0 after clearMesh) and debt "
+        "entries still rebuild, counted via meshRebuilt), plus raw-source registration pins (the drain pu"
+        "mp's deliberate UI-chrome exemption from the worldRunning pause caliber, the edge-to-edge draw-c"
+        "ost Android verification registration, and the drain recheck predicate form)" }, [&]() {
         World wl972;
         wl972.setWidth(32);
         wl972.setDepth(32);
@@ -4545,7 +4952,7 @@ void MatrixRun::section04_instancing()
                              "worldRunning pause caliber, the edge-to-edge draw-cost Android "
                              "verification registration, and the drain recheck predicate form)"
                              ;
-    }
+    });
 
     // ── P-t934 waitSync 渲染侧归因插桩探针（dev-plan R19.17 性能批二；t933 act-ct 先例的渲染线程侧续篇）──
     //   背景：用户实测 frame2 行 waitSync 76ms 一家独大而 render_cpu ~7ms / RenderStats render ~1ms——
@@ -4563,7 +4970,25 @@ void MatrixRun::section04_instancing()
     //   (c) 源码钉 Main.qml：F3 render-side 行读 RenderStats 的 lastCompletedGpuTime（真 GPU ms，perf-t520
     //       「无 GPU 计时」诚实标注的补面）/ renderPrepareTime / frameTime / syncTime / vmemUsedBytes——①②
     //   的实机判读面（waitSync 大时 gpu 大 → ①；prep 大 + mesh reb 非 0 → ②；都小 → ③看 (N)）。
-    {
+    runLegMulti({ "t934 waitSync render-side attribution instrumentation: the 76ms GUI block at the sync barrier is"
+        " mechanically [render pass + present/vsync + post-frame cleanup] of the PREVIOUS frame on the re"
+        "nder thread (render_cpu small => time went to one of three sinks); this task delivers the discri"
+        "minating instrumentation: (1) fPresent bucket (afterRendering on the render thread -> frameSwapp"
+        "ed receipt on GUI = present blocking + queued dispatch, wired in main.cpp), (2) per-bucket sampl"
+        "e counts (N) on the frame/frame2 report lines (denominator mismatch = hook coalescing under cong"
+        "estion -- the mechanical explanation for the user's four-segment sum 150.4 vs main_total 88.4; a"
+        " segment's N exceeding main's N means the identity is not additive, not extra cost), (3) the F3 "
+        "render-side truth line from View3D.renderStats: frameTime/syncTime/renderPrepareTime plus lastCo"
+        "mpletedGpuTime (TRUE GPU ms via RHI timestamp queries, closing the perf-t520 'no GPU timing' hon"
+        "esty gap) and vmemUsedBytes (monotonic vmem growth across world switches that only a process res"
+        "tart clears = the process-level GPU leak signature); read-out guide: waitSync big + gpu big => G"
+        "PU/present bound (treat via renderDistance/segment folding/overdraw), waitSync big + prep big + "
+        "win-line mesh reb nonzero => render-thread upload/rebuild storm (the t930/t933 storm's render-si"
+        "de echo), both small + N mismatch => frame coalescing (measurement caliber); probe legs: (a) beh"
+        "avioral count roundtrip on FrameProfiler (ignored ms<=0 samples must not count, report formats '"
+        "ms(N)' including the new present field), (b) source-pin the fPresent wiring + count bump, (c) so"
+        "urce-pin the F3 render-side property reads (a typo'd property name would silently kill the line "
+        "at runtime -- TypeError, headless-invisible)" }, [&]() {
         // (a) 行为级：计数 roundtrip + 报告格式（先 flush 清窗防此前 World 计数残留；tickFrame 保除数 ≥1）。
         FrameProfiler *fp934 = FrameProfiler::instance();
         fp934->tickFrame();
@@ -4651,7 +5076,7 @@ void MatrixRun::section04_instancing()
                              "the F3 render-side property reads (a typo'd property name would "
                              "silently kill the line at runtime -- TypeError, headless-invisible)"
                           ;
-    }
+    });
 
     // ── P-t935 mob ltail 10.59ms 粒度化 revision 探针（R19.17 性能批二收官；t933 判决的 QML 侧残留面）──
     //   用户实测（TNT 炸沙坑后）mob 行 ltail 10.59ms —— t905 头号假设实锤：20Hz 节流后单次 emit 仍激活
@@ -4668,7 +5093,22 @@ void MatrixRun::section04_instancing()
     //   (d) 源码钉：EntitySlotMonitor 类 / slotMonitorAt / notifyEntitiesChanged 漏斗 / 指纹差分本体；
     //       Main.qml 迁移面 —— mon.revision 绑定 ≥ 100 处且 entityManager.revision 全文件残留 0（残留
     //       = 未迁绑定仍吃全局扇出 = 粒度化破洞，t934 教训：源码钉须配行为腿防注释嵌字假绿）。
-    {
+    runLegMulti({ "t935 per-slot entity revision fanout: one throttled entitiesChanged emit used to reactivate ALL "
+        "N delegates' ~50 revision bindings each (user-measured mob ltail 10.59ms after a TNT sand-pit ex"
+        "plosion, 47-slot high-water; empty slots and resting mobs re-evaluating bindings that read back "
+        "identical values = pure waste, and the cross-world residue t933 verdict placed in the QML scene "
+        "layer); fix = slot-granular dirty list: every notify funnels through notifyEntitiesChanged which"
+        " diffs a per-slot fingerprint of the QML-visible fields (slotFingerprint, the At()-accessor fiel"
+        "d contract) and bumps ONLY changed slots' EntitySlotMonitor -> delegate bindings moved from enti"
+        "tyManager.revision to mon.revision re-evaluate per changed slot only; walking mobs still refresh"
+        " (MobModel walkPhase quantization unchanged), dead/high-water slots cost zero; quantified via th"
+        "e F3 mob line emit/bump/fan counters (bump = slots actually refreshed, fan = legacy count*emit f"
+        "anout); probe legs: (a) damage slot 1 of 3 bumps exactly slot 1 + emit=1/bump=1/fan=3, (b) clear"
+        "All bumps all (visible hide) then each re-spawn reusing a freed slot bumps only that slot -- dea"
+        "d-slot fanout stays zero across the high-water pool, (c) 4th spawn grows count 3->4 with fan=4 b"
+        "ump=1 and the new slot's monitor bumps on its first damage, (d) source pins for the funnel/finge"
+        "rprint/monitor + the Main.qml migration (>=100 mon.revision bindings, zero entityManager.revisio"
+        "n survivors)" }, [&]() {
         EntityManager ents;
         auto monRev = [&ents](int i) -> int {
             QObject *m = ents.slotMonitorAt(i);
@@ -4779,7 +5219,7 @@ void MatrixRun::section04_instancing()
                              "pins for the funnel/fingerprint/monitor + the Main.qml migration (>=100 "
                              "mon.revision bindings, zero entityManager.revision survivors)"
                           ;
-    }
+    });
 
     // ── P-t978 生物复制体泄漏探针（R19.18 批六首项；用户 9-01 实测「新建世界生成瞬间双影 + 地上全是静止
     //   复制生物」，F3 mobs 1/36 = C++ 1 活体 vs 36 槽高水位，复制体呈 QML delegate/槽池簿记形态）──
@@ -4794,7 +5234,29 @@ void MatrixRun::section04_instancing()
     //       pre-fix 恒 r1 不动 = 冻结复现）；复用槽 LIFO 与未复用死槽零额外 bump = t935 经济学不回退；
     //   (c) 源码钉：releaseSlot 守卫行 + clearAll corrective + Main.qml visible 的 entityManager.count
     //       自愈触碰在场，且 entityManager.revision 残留恒 0、mon.revision 迁移面 ≥100 不减（P-t935(d) 同钉）。
-    {
+    runLegMulti({ "t978 mob-clone leak: the user's 9-01 playtest reports a duplicated projection at spawn-instant i"
+        "n fresh worlds and piles of static texture-only mob clones after long sessions (F3 mobs 1/36 = o"
+        "ne live entity vs 36-slot high-water, so the clones present as QML delegate / slot-bookkeeping s"
+        "tate, not C++ entities); static audit of the existing paths proved no spontaneous freeze (P-t935"
+        " already pins the per-slot bump semantics, all six releaseSlot callers alive-check first, and th"
+        "e fingerprint contract covers every At() accessor field), so the fix is three defensive layers, "
+        "each probe-pinned here: (a) releaseSlot gains an idempotency guard -- a double release must neve"
+        "r push the same index into the free list twice (pre-fix, two spawns then pop the same slot LIFO "
+        "and the second std::move silently overwrites the first: same slot index twice + liveCount drift "
+        "= the slot-pool corruption face); (b) clearAll gains a corrective bump for dead slots that alrea"
+        "dy carry a monitor (= a delegate is watching): their fingerprint aligned to the dead state at th"
+        "e release notify, so routine notifies never bump them again and a frozen delegate has no routine"
+        " self-heal face -- the cross-world teardown is the only mandatory whole-pool refresh point, so i"
+        "t force-bumps exactly once (monitor-less dead slots stay zero-bump, keeping the t935 economics; "
+        "the LIFO reuse and unused-dead-slot zero-bump semantics are unchanged); (c) source pins for the "
+        "guard line, the corrective line, and the Main.qml visible self-heal net (an entityManager.count "
+        "touch -- NOTIFY entitiesChanged fires on every notify -- so a dead slot's delegate re-reads aliv"
+        "eAt and hides at the next emit no matter what failed in the monitor chain; cost is one bool Q_IN"
+        "VOKABLE re-eval per slot per emit against the ~50 bindings-per-slot t935 collapsed, and the enti"
+        "tyManager.revision string stays extinct with the mon.revision migration surface >= 100); probe l"
+        "egs: (a) double-remove then two spawns land on distinct live slots with liveCount 2, (b) pre-kil"
+        "led slot 1 with a monitor advances exactly +1 on clearAll then stays put across an LIFO reuse of"
+        " slot 2, (c) the three fix markers present with the t935 pins intact" }, [&]() {
         // (a) 双释放 → 两次 spawn 必得两个不同活槽。
         EntityManager enta;
         const int pa = enta.spawnMobTyped(10, kRigY, 10, EntityManager::MobPig, QStringLiteral("#ee9999"), 30);
@@ -4885,7 +5347,7 @@ void MatrixRun::section04_instancing()
                              "+1 on clearAll then stays put across an LIFO reuse of slot 2, (c) the "
                              "three fix markers present with the t935 pins intact"
                           ;
-    }
+    });
 
     // ── P-t936 动力轨传播顺序无关探针（World 直编；spec「不管先放什么，激活都沿动力铁轨链传到红石最远
     //    可达范围」—— 用户实测：先放上坡动力轨再激活一段，后放的其他上坡动力轨不被激活〔要全部摆好再激
@@ -4902,7 +5364,23 @@ void MatrixRun::section04_instancing()
     //       不在任何 6 正交扫描域 = 残留通电位）；
     //   (e) 源码钉：goldenRailChainStep 单一权威（声明 + 定义）+ notePowerWrite 放置沿重算块 + 链 BFS 消费
     //       同 helper + 深度常量恰一处声明（防第二套判定 / 双深度源漂移回归）。
-    {
+    runLegMulti({ "t936 powered-rail propagation is order-independent: activation is a pure function of the world l"
+        "ayout - placing a powered rail that extends an already-energized climbing chain lights it immedi"
+        "ately (user report: rails placed AFTER activating a segment stayed dark unless everything was la"
+        "id out before powering; the receiver scan only covered 6-orthogonal neighbors so a newly placed "
+        "slope rail never saw the directly-fed seed up to 8 chain cells away along the diagonal rail geom"
+        "etry); fix = golden-rail edits walk the chain via goldenRailChainStep (the same three-height-pro"
+        "be single authority the chain BFS uses) for kGoldenRailChainMax steps and dirty every rail on it"
+        ", so the next tick re-seeds from the true directly-fed rail and the t704/t910 BFS relights/extin"
+        "guishes to the fixed-point regardless of placement order; symmetric destruction face covered (br"
+        "eaking a mid-chain slope rail now extinguishes the sourceless far wing instead of leaving stale "
+        "charge outside the 6-orthogonal scan domain); probe legs: (a) user-order main leg (A..C placed, "
+        "powered, then D..F placed after -> all 6 lit), (b) negative unpowered-chain extension stays dark"
+        " + source placed LAST lights all 7, (c) downhill 9-rail chain lights seed+7 only (chain depth ca"
+        "p pinned - no over-lighting past kGoldenRailChainMax), (d) mid-chain break keeps the fed side li"
+        "t and drops the far wing, (e) source pins: helper declaration+definition, the notePowerWrite pla"
+        "cement-walk block, the BFS consuming the same helper, and exactly one kGoldenRailChainMax declar"
+        "ation" }, [&]() {
         // rig 选址：运行期扫描空区（lessons t769：不信任「某高度以上必空」经验值）。单列 rig（链沿 X 走
         //   向，dz -1..1 隔离）；各腿独立选址、用毕清场。
         const auto scanRigArea = [&](int dxLo, int dxHi, int dyLo, int dyHi) {
@@ -5078,7 +5556,7 @@ void MatrixRun::section04_instancing()
                              "placement-walk block, the BFS consuming the same helper, and "
                              "exactly one kGoldenRailChainMax declaration"
                           ;
-    }
+    });
 
     // ── P-t937 平行轨道独立激活 + 重算风暴收窄探针（World 直编；spec t937 ①②）──
     //   ① 平行独立：两条互不连接的平行动力轨线（A 沿 X 走、B 贴其 +Z 侧同沿 X 走），源只贴 A 头 →
@@ -5091,7 +5569,27 @@ void MatrixRun::section04_instancing()
     //      （goldenRailChainHasFedSeed 域外种子兜底——旧版扫描域无种子即误熄、波前数 tick 后重亮 =
     //      两拍闪烁）；拆源 → 链全灭（降沿终态 = 布局纯函数不变，t936 不变量保持）。
     //   (d) 源码钉：链步连接位门槛 / 快路径收窄谓词 / 反向走查消费 / 链传集并入写集 / 计数器声明。
-    {
+    runLegMulti({ "t937 parallel tracks activate independently and the power-recompute trigger surface is narrowed "
+        "to connectivity-relevant edits: (1) chain propagation now requires the stepping rail's own conne"
+        "ction bit toward the step direction (the same physical-connection authority the mesher and minec"
+        "art pickTrackStep consume), so a redstone source feeding one track no longer leaks across to an "
+        "unconnected parallel track placed beside it (old chain step only probed spatial existence - any "
+        "golden rail in the 3-height window was chain, so power jumped the gap between side-by-side track"
+        "s; user report: one redstone lit two independent parallel tracks); (2) notePowerWrite's fast pat"
+        "h only continues when a neighbor is dust or a power SOURCE - plain blocks read as 0 in every pow"
+        "er reading just like air, so placing/breaking ordinary blocks beside rails (and t930 cascade san"
+        "d landings) trigger zero redstone recomputes (old path accepted ANY power-family neighbor includ"
+        "ing receivers, pumping a full-chain recompute whose scan domain missed the chain seed and visibl"
+        "y flickered the rails dark-then-lit); (3) before writing a golden rail dark, a bounded reverse s"
+        "eed-walk (same chain-step authority, same depth) confirms no directly-fed rail within chain dist"
+        "ance 7 - legit triggers (lever/lamp placement, source edits) no longer emit wrong dark intermedi"
+        "ates, and the chain-lit set is merged into the receiver write set so brightening completes in on"
+        "e pass; final activation states are unchanged (order-independent pure function of layout, t936 i"
+        "nvariant kept, P-t936 legs stay green); probe legs: (a) parallel rig A-lit-6/B-dark-0, (b) stone"
+        " place+break beside the lit chain - powerRecomputePasses counter flat and chain stays lit, (c) l"
+        "ever beside mid-chain recompute counter rises with no flicker + source removal darkens the chain"
+        ", (d) source pins for the connection gate, narrowed predicate, reverse-walk consumption, write-s"
+        "et merge, and the counter accessor" }, [&]() {
         // rig 选址：运行期扫描空区（lessons t769）。双线 rig（A/B 沿 X 平行、dz -1..2 隔离）。
         const auto scanRig937 = [&](int dxLo, int dxHi) {
             int rx = -1, rz = -1;
@@ -5232,7 +5730,7 @@ void MatrixRun::section04_instancing()
                              "narrowed predicate, reverse-walk consumption, write-set merge, and the "
                              "counter accessor"
                           ;
-    }
+    });
 
     // ── P-t938 铁轨可选中探针（选体射线直调）【t983 改版：整格命中废除，终局 = 薄板 sub-AABB】──
     //   沿革：t638③ 轨选体盒 = 2/16 贴地薄板（轨格上部空气段穿透 → t938 用户「挖轨变挖后面 / 放矿车
@@ -5249,7 +5747,27 @@ void MatrixRun::section04_instancing()
     //       (f) 放置回归：轨板命中面（+Y）邻格 = 轨上方 Air 可放块不毁轨；轨格自身不可被替换；
     //       (g) 源码钉：fullCell 链无轨特判 / updateRaycast 过滤器 / .h 沿革注 / selectionAABBs 轨薄板
     //           分支 + 矿车放置分支 + 放置预检行。
-    {
+    runLegMulti({ "t938 rails pick semantics settled by t983 thin-plate precision: the selection hit-box saga ended"
+        " with the user's sixth-round report - standing on a rail and aiming forward to place the next ra"
+        "il, the crosshair pointed at the target cell yet the FOOT rail under the player was picked (t938"
+        "'s full-cell HitRail made any ray entering the rail cell - even through its top-face air band, 1"
+        "5/16 of the cell - hit it instantly). Final rule (user iron law: the pick must hit what it point"
+        "s at): the rail's real intersection box is the ~2/16 plate (raycastAABBs), distance compared by "
+        "the real box - aiming at the plate still selects the rail (digging / minecart placement keep wor"
+        "king), aiming through the upper air band passes through to the target behind; the camera (HitPar"
+        "tial) shares the same plate geometry (collision-less rail never pulls the camera, t605 unchanged"
+        "); the RayFilter::HitRail bit and the fullCell special case are removed. Probe legs: (a) shallow"
+        " ray through the rail cell's upper air band hits the wall behind (t938 full-cell leg inverted - "
+        "the no phantom-foot-rail pin); (b) steep ray onto the plate still hits the rail with +Y normal ("
+        "plate path regression guard); (c) ray through the air cell above the rail hits the wall behind ("
+        "see-through preserved); (d) golden and detector rails behave identically via the plate path (isR"
+        "ail family); (e) the same (a) ray under the camera filter HitPartial hits the wall (camera zero-"
+        "regression pin, same geometry as selection now); (f) placement regression: the rail-plate hit + "
+        "normal targets the air cell above the rail, a stone written there leaves the rail intact, and th"
+        "e rail cell itself fails every air/fluid-only placement precheck; (g) source pins for the fullCe"
+        "ll chain without the rail special case, the converged updateRaycast filter, the raycast.h supers"
+        "ession note, the selectionAABBs thin plate branch, the minecart on-rail placement branch, and th"
+        "e placement precheck line" }, [&]() {
         // rig 选址：运行期扫描空区（lessons t769）。footprint x0-1..x0+5 × z0-1..z0+1 × y kRigY-1..kRigY+3。
         const auto scanRig938 = [&]() {
             int rx = -1, rz = -1;
@@ -5406,7 +5924,7 @@ void MatrixRun::section04_instancing()
                              " plate branch, the minecart on-rail placement branch, and the"
                              " placement precheck line"
                           ;
-    }
+    });
 
     // ── P-t983 铁轨平行不吸附 + 站轨选块指哪打哪 + review0830-B #12 翻案探针（World setBlock /
     //    raycastVoxel 直调；spec「①三种铁轨平行放置吸附怪异完全不遵守规则——平行相邻轨不互连，只有
@@ -5431,7 +5949,27 @@ void MatrixRun::section04_instancing()
     //   (d) 站轨选块：石面上一格脚底轨 + 眼位站轨上朝前下方瞄前向石块顶面 → 命中前向石格（+Y 法线）
     //       而非脚底轨（pre-fix 命中脚底轨 = 红）→ 放置目标 = 前向轨格（hit+normal 推导）；
     //   (e) 源码钉：规则②既有定向 0 连接行 / 规则③显式轴闸 / clampShift 链延续精确层两行 / #12 翻案注。
-    {
+    runLegMulti({ "t983 parallel rails do not snap + standing-on-rail pick hits what it points at + review0830-B #1"
+        "2 overturned: (1) railConnections used to flip a directed rail's axis to grab a perpendicular si"
+        "de neighbor (rules 2/3/4 catch-all cascades), so two PARALLEL rails placed side by side each saw"
+        " the other as their only neighbor and both got yanked into a connected pair (user: parallel plac"
+        "ement snaps weirdly and ignores the rules entirely); now a rail with an explicit orientation (bi"
+        "t5 placement facing or existing connection bits) whose preferred axis has no neighbors keeps 0 c"
+        "onnections (axis metadata conserved) - only truly fresh rails orient toward a single neighbor, a"
+        "nd only endpoint-facing neighbors ever connect; (2) the t938 full-cell rail pick let the ray hit"
+        " the foot rail through the 15/16 air band of its cell - standing on a rail and aiming forward at"
+        " the next cell selected the rail underfoot (user: the pick must hit what it points at); the HitR"
+        "ail bit and special case are removed and rails use the thin-plate sub-AABB (see the P-t938 rewri"
+        "te for the full saga); (3) the clampShift chain-reachability gate compared the chain delta again"
+        "st the lenient column-scan first-found layer, which an overhead parallel line hijacked - the reg"
+        "istered review0830-B #12 tradeoff is settled with the precise target layer (rySelf + chainDelta "
+        "must BE rail and sit within the next-frame scan window). Probe legs: (a) parallel plain rails st"
+        "ay 0-connection with bit5 conserved, then an endpoint-facing east extension connects Px/Nx; (b) "
+        "same for golden rails (three-rail-family coverage); (c) two fresh zero-state rails still orient "
+        "toward each other (single-neighbor defines the axis, zero regression); (d) the standing-on-rail "
+        "forward pick hits the forward stone cell with +Y normal and the hit+normal placement target is t"
+        "he forward rail cell (pre-fix picked the foot rail = red); (e) source pins for the rule-2/rule-3"
+        " explicit-axis gates, the precise chain layer lines and the #12 registration marker" }, [&]() {
         // (a)(b)(c) shape 腿 rig 选址：footprint x-2..x+2 × z-2..z+2 × Y-1..Y+1。
         int xa = -1, za = -1;
         for (int zz = 4; zz < 92 && xa < 0; zz += 5)
@@ -5592,7 +6130,7 @@ void MatrixRun::section04_instancing()
                              " (e) source pins for the rule-2/rule-3 explicit-axis gates, the"
                              " precise chain layer lines and the #12 registration marker"
                           ;
-    }
+    });
 
     // ── P-t1018 铁轨延伸松弛（t983 回炉）探针（World setBlock 直编；spec「沿轨线端点延伸铺设时，新轨
     //    自动接续既有轨——连接由邻轨端点拓扑决定，放置朝向无关；平行侧邻拒连禁令不回退（t983 主口径
@@ -5613,7 +6151,39 @@ void MatrixRun::section04_instancing()
     //   (c) 平行侧邻拒连不回退（t1018 自守卫）：EW 面向孤轨 + 北侧 EW 面向平行轨 → 双 0 连接 + bit5
     //       守恒（P-t983 腿 a 同构复钉，防松弛翻轴回潮）；
     //   (d) 源码钉：端点相对判定实现 / 规则②③松弛行 / axisCon 守卫 / World 单轴镜像行。
-    {
+    runLegMulti({ "t1018 rail extension relaxation (t983 rework): extending a line at its endpoint used to depend o"
+        "n placement facing - a new rail placed with the facing axis perpendicular to the line carried th"
+        "e wrong bit5 axis preference, the explicit-axis gate (t983) kept it at 0 connections and the lin"
+        "e stayed broken at the extension point no matter how many more rails the player laid (user: exte"
+        "nding never connects regardless of facing). Fix relaxes exactly that case: a rail whose state is"
+        " placement-facing only (c == 0) with zero neighbors on its preferred axis connects along the per"
+        "pendicular axis when the neighbor there is ENDPOINT-relative (neighbor's own axis contains the j"
+        "oining direction - railProbeEndpointAligned single table: connection bits first, bit5 fallback, "
+        "slope arms read the actual layer state (review0906 #5)), and bit5 mirrors the actually-connected"
+        " axis on write-back (single-axis mirror extension); parallel SIDE neighbors (neighbor axis perpe"
+        "ndicular to the joining direction) are still rejected - the t983 no-snap rule is NOT rolled back"
+        ", and rails with existing connection bits (c != 0) never relax (their connections are the real t"
+        "opology). Probe legs: (a) NS line endpoint extension connects both ways - EW-facing (wrong-axis "
+        "bit5) placement joins the line (Nz + bit5 mirrored clear, end rail closes Pz/Nz) and fresh NS pl"
+        "acement still joins (single- neighbor axis, zero regression) = facing-independent; (b) a 1-gap b"
+        "ridge filled with an EW-facing rail closes both ends through Pz|Nz, same layout with golden rail"
+        "s (three-rail-family coverage); (c) parallel EW-facing rails stay mutually 0-connection with bit"
+        "5 conserved (t983 leg-a isomorph re-pinned against axis-flip regression); (d) source pins for th"
+        "e endpoint-aligned predicate, the rule-2/rule-3 relaxation lines, the axisCon guard and the Worl"
+        "d single-axis bit5 mirror",
+               "t1018(e) slope-arm layer-state leg (review0906 #5): an up-layer PERPENDICULAR directed line (EW "
+        "mid-rail, c = Px|Nx) must not accept a slope arm from a fresh EW-facing rail one block below - t"
+        "he old slope-arm branch returned true unconditionally (RailProbe structurally lacked up/down lay"
+        "er state), so the new rail kept a one-way ghost connection the line never reciprocates (its c !="
+        " 0 axisCon existence path cannot add the down link): mesher drew a head-tilted ramp and carts dr"
+        "ove in one direction only. The slope branch now reads the actual layer state (upState/downState "
+        "filled by the runtime recompute) EVERYWHERE slope arms are consumed - the rule-2/3 relaxation ta"
+        "ble AND the rule-1 t982 corner slope- priority path (a ghost slope arm no longer hijacks the lin"
+        "e end's existing connection and sever the line: the legitimate arm is kept as a single connectio"
+        "n instead): connection bits must contain the joining axis, else reject (ghost rail stays a 0-con"
+        "nection stub with bit5 conserved, line unchanged); a fresh up-layer stub (state 0, conservative "
+        "NS read = endpoint-relative) still forms the legitimate two-way slope segment (positive control "
+        "against blanket rejection)diag see [t1018 diag] e" }, [&]() {
         // shape 腿 rig 选址：footprint x-2..x+2 × z-2..z+6 × Y-1..Y+2。
         int xa = -1, za = -1;
         for (int zz = 3; zz < 90 && xa < 0; zz += 4)
@@ -5835,7 +6405,7 @@ void MatrixRun::section04_instancing()
                              " blanket rejection)"
                           << (okE5 ? QString()
                                    : QStringLiteral("diag see [t1018 diag] e"));
-    }
+    });
 
     // ── P-t939 单格坡静置矿车下滑规则探针（MinecartManager 直编；spec「单格上/下坡静置矿车仍静止——
     //    应往下坡运动。口径（用户定稿）：未激活动力轨=减速可平衡坡上；普通轨=下滑；激活动力轨+探测轨=
@@ -5856,7 +6426,24 @@ void MatrixRun::section04_instancing()
     //       (f) 平地阴性：平轨 / 通电动力轨平地静车位移 ≈0（t735④「平地静置空车不被动力轨弹射」+
     //           「下滑只发生在有下坡分量」）；滚落车 y 贴回平轨面（无悬浮）；
     //       (g) 源码钉：brake 闸 / 静置闸梯度消费 / 滑行梯度覆盖 / helper 实现 / 头文件阈值常量。
-    {
+    runLegMulti({ "t939 stationary carts slide down single-block slopes: the t909 static-start gate only read NEIGH"
+        "BOR rail layer deltas (continuous slopes step +-1 per cell), so a single-block hump/dip embedded"
+        " in a flat line - where the entire gradient lives on the cart's OWN cell surface (railRiseAt's f"
+        "x ramp, neighbor probes read {uphill +1, flat 0}) - was classified flat and the cart stayed park"
+        "ed (user report). Fix adds a same-surface gradient sample (cartRailGradient, the very surface Y-"
+        "pinning/pitch sampling reads, +-kCartPitchProbe window) to BOTH the static-start gate and the sl"
+        "iding slope classification (kick + slope-gravity roll, not friction creep), gated by rail type p"
+        "er the user's final rules: unpowered golden rail = brake that holds a parked cart on a slope (ru"
+        "le 1), plain/detector/powered rails roll downhill (rules 2+3, powered lerp takes over after the "
+        "start); flat ground has no downhill component so all rail types stay parked and the t735(4) no-l"
+        "aunch exemption survives. Probe legs: (a) single up-slope plain rail rolls west >=1.5 (kick-only"
+        " coast is ~0.5, so the threshold also pins the sliding-half gravity overlay), ends glued to the "
+        "flat lead surface, stays inside the rig; (b) single down-slope rolls east >=1.5; (c) unpowered g"
+        "olden rail on the same slope: zero displacement (balance pin); (d) powered golden rail (Redstone"
+        "Block direct feed, flag verified) rolls west >=1.5; (e) detector rail rolls east >=1.5; (f) flat"
+        " plain rail and flat POWERED golden rail carts stay put (t735(4) negative regression); (g) sourc"
+        "e pins for the brake gate, both gradient consumption sites, the helper, and the threshold consta"
+        "nt" }, [&]() {
         // rig 选址：运行期扫描空区（t909 模式）。footprint x0-6..x0+4 × z0-1..z0+3 × kRigY-2..kRigY+3
         //   （含 RedstoneBlock 层 Y-1 与峰 Y+1）。
         int x0 = -1, z0 = -1;
@@ -6031,7 +6618,7 @@ void MatrixRun::section04_instancing()
                              "for the brake gate, both gradient consumption sites, the helper, and the "
                              "threshold constant"
                           ;
-    }
+    });
 
     // ── P-t940 脱轨车近轨吸附探针（MinecartManager 直编；spec「玩家身体碰撞把矿车推到旁边铁轨上时，
     //    矿车自动吸附回轨恢复正常移动形态（近轨 snap）」）──
@@ -6049,7 +6636,23 @@ void MatrixRun::section04_instancing()
     //   (d) 坡轨吸附：脱轨车西推入 NS 坡格（北邻 +1）→ 吸附 Y 钉**坡面**（railY + rise(0.5) + rideH
     //       = +0.95，非平地高度 +0.45）+ X 钉轨心线 + 俯仰 45°（放置即贴坡同函数）；
     //   (e) 源码钉：snap 调用点 / helper 定义与声明（防静默移除）。
-    {
+    runLegMulti({ "t940 body-pushed derailed cart snaps back onto a nearby rail: a cart shoved sideways or along th"
+        "e ground into a rail cell was caught positionally but kept free-body physics (gliding at ground "
+        "height through the rail boards, pushes routed through the derailed branch - never regaining rail"
+        " movement form). Fix adds an end-of-free-physics near-rail snap (trySnapDerailedToRail) with a s"
+        "ame-layer gate (rail layer must equal the cart-center cell, strict column scan so solid floors b"
+        "lock), a dead-end-outward exemption (pickTrackStep with the current velocity - the only arm anti"
+        "-parallel to an exiting push filters out, preserving t863(4)/t908 push-off semantics; orphan 0-c"
+        "onnection rails never snap), and reuses the placement/riding pinning set (perpendicular axis ont"
+        "o the rail center line, Y=pinCartY on the same rise surface - slope rails pin to the sloped face"
+        " not flat height, pitch via updateCartPitch, head along the selected arm) with velocity projecte"
+        "d onto the rail axis (lateral component dropped per the t908 decomposition). Probe legs: (a) lat"
+        "eral ground shove onto an EW line snaps within ticks - center-line aligned, riding height, parke"
+        "d on the rail, continued lateral pushing stays a no-op; (b) along-rail entry preserves along-rai"
+        "l speed and glides >=1.2 cells glued to the surface; (c) dead-end along-axis push-off still exit"
+        "s west and settles on the ground off-track (not re-snapped) and stays put; (d) slope-cell snap p"
+        "ins Y to the slope face (+0.95 = rise 0.5 + rideH, not flat +0.45) with a 45deg pitch; (e) sourc"
+        "e pins for the call site, helper definition and declaration" }, [&]() {
         // rig 选址：运行期扫描空区（t908 模式）。footprint x0-6..x0+3 × z0-1..z0+4 × kRigY-2..kRigY+2
         //   （(c) 西滑走廊地板铺到 x0-5 —— 推离 4 blocks/s / 摩擦 ≤2/s 最远 ~4 格）。
         int x0 = -1, z0 = -1;
@@ -6233,5 +6836,5 @@ void MatrixRun::section04_instancing()
                              " Y to the slope face (+0.95 = rise 0.5 + rideH, not flat +0.45) with a 45deg"
                              " pitch; (e) source pins for the call site, helper definition and declaration"
                           ;
-    }
+    });
 }

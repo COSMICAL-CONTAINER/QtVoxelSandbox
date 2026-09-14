@@ -10,7 +10,16 @@ void MatrixRun::section08_recent()
     //     遮挡档位精确可算。遮挡判据 = occludesNeighborFace（与邻面剔除同谓词）；因子曲线 =
     //     VoxelLight::kAoFactor {1.0, 0.8, 0.6, 0.5}，双侧同遮钳 3。断言以「无遮挡角点色 = flat」
     //     为基准（对光场值稳健），AO 角点 = flat × 曲线值精确钉。
-    {
+    runLegMulti({ "t1023b ambient-occlusion toggle (smooth-lighting research first small step): terrain culled path"
+        " gains per-corner classic MC AO - three occlusion probes per vertex (side/side/diagonal around t"
+        "he face's neighbor cell, occluder predicate = occludesNeighborFace, the same authority as face c"
+        "ulling), factor curve kAoFactor {1.0,0.8,0.6,0.5} with the both-sides-clamp-to-3 rule, multiplie"
+        "d after the light-field clamp (contact shadows may dip below kVcMin); default OFF keeps vertex c"
+        "olors bit-identical (zero-cost bypass), ON pins the exact corner ladder {0.5, 0.8, 0.8, 1.0} x f"
+        "lat on an L-wall rig (diagonal corner double-clamped, two single-side, one open), and OFF again "
+        "restores the vertex buffer byte-for-byte (revert lever is the one window.aoEnabled switch); gree"
+        "dy/fluid/partial segments deliberately not sampled (merge-key/view contract registered in the t1"
+        "023 report)diag flat=%1 v=%2/%3 okFlat=%4 okRt=%5 %6" }, [&]() {
         const auto [xb, zb] = nextSlot();
         const int x1 = xb + 1, z1 = zb; // 中心格（足印 ±2；行距 3 内不蹭邻行器件）
         const int cy = 42;              // 平台层（kRigY+1）
@@ -135,12 +144,18 @@ void MatrixRun::section08_recent()
                                        : QStringLiteral("diag flat=%1 v=%2/%3 okFlat=%4 okRt=%5 %6")
                                              .arg(flat, 0, 'f', 4).arg(vCount).arg(vCountAo)
                                              .arg(okFlat).arg(okRt).arg(diagAo));
-    }
+    });
 
     // (c) meshing 线程模式事实钉（t906 复核）：src/ 全树 *.cpp/*.h 零线程原语 与 Main.qml F3 行
     //     `threads: 0/0 (sync meshing)` 互锁——两事实须同时在场；线程化立项（t1023 报告 §1.3 路线）
     //     时必须同步更新 F3 行与本探针，防「F3 谎报 0/0」。
-    {
+    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck): src tree scans zero threading primitives (QThreadPo"
+        "ol/QThread/QtConcurrent/QFuture/moveToThread/std::thread/std::async) acrossfiles, and the F3 lin"
+        "e 'threads: 0/0 (sync meshing)' stays pinned - the F3 string is a t906-documented fact (never a "
+        "degraded thread pool: one never existed; meshing is synchronous on the GUI thread via ChunkGeome"
+        "try direct-connected slots), so the two facts are interlocked: threading the mesher (t1023 repor"
+        "t section 1.3 route: halo snapshot base then worker pool) must update both the F3 line and this "
+        "probe in the same changediag files=%1 hits=%2 f3=%3 %4" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString srcRoot = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
         if (!QDir(srcRoot).exists()) {
@@ -195,7 +210,7 @@ void MatrixRun::section08_recent()
                                               : QStringLiteral("diag files=%1 hits=%2 f3=%3 %4")
                                                     .arg(files).arg(hits).arg(f3Present).arg(hitDetail));
         }
-    }
+    });
 
     // ── P-t1024a 睡觉跳夜 + 床位重生锚 + 拒睡门 + 雷暴可睡 + 播报来源契约（R19.21 t1024；review0909
     //    #1/#5 清偿；t388/t457 状态机之上的完整床语义）──
@@ -216,7 +231,21 @@ void MatrixRun::section08_recent()
     //       不变——置假沿 → 回填沿 → 入睡设锚沿三连发，valid 值 false/true/true）；bedSpawnAnnounce
     //       (bool restored) 只在入睡设锚沿恰发一次（restored=false，QML 播「重生点已设置」）——
     //       读档回填沿（setBedSpawn）与置假沿（clearBedSpawn）零 announce（QML 静默）。
-    {
+    runLegMulti({ "t1024a bed semantics: right-clicking a bed at night starts sleep AND anchors the respawn point a"
+        "t the bed the moment sleep begins (MC sleep-sets-spawn semantics; bedSpawnValid is a real Q_PROP"
+        "ERTY resolved via QMetaObject like QML does); the settled timer auto-skips the night with the da"
+        "y clock landing exactly on dawn phase 0.75 (the skip-night time face), respawn() then places the"
+        " player back on the bed top; an hostile shambler within the 8-block bed radius refuses sleep wit"
+        "h the spec message (zero displacement, anchor kept); a thunderstorm is a LEGAL sleep window (rev"
+        "iew0909 #1 wiki caliber: sleeping at night or during thunderstorms) - night+thunder sleeps, fini"
+        "shing the sleep clears the storm back to Clear alongside the dawn skip, day+clear refuses with t"
+        "he MC wording, day+thunder sleeps but an early wakeUp keeps the storm (only a completed night re"
+        "sets weather), and a clear night sleeps (positive control); the announce-source contract (t1036 "
+        "signal separation) carries the parameterless validChanged edge sequence false/true/true across c"
+        "lear/restore/sleep-set while bedSpawnAnnounce fires exactly once with restored=false on the slee"
+        "p-set edge (QML announces) and zero times on the save-restore and clear edges (QML silent) - neg"
+        "ative-round sensitivediag entry=%1 dawn=%2 respawn=%3 hostile=%4 thunder=%5 thunderClear=%6 dayR"
+        "efuse=%7 dayThunder=%8 wakeKeepsStorm=%9 control=%10 restoreQuiet=%11 sleepAnnounce=%12" }, [&]() {
         World wT24;
         wT24.setWidth(48); wT24.setDepth(48); wT24.setHeight(96); wT24.setSeed(1024);
         // regenerate（worldgen 地形；heightAt 纯函数与栅格同源）：respawn 的 snapSpawnToGround 贴
@@ -395,13 +424,18 @@ void MatrixRun::section08_recent()
                                         .arg(okHostile).arg(okThunder).arg(okThunderClear)
                                         .arg(okDayRefuse).arg(okDayThunder).arg(okWakeKeepsStorm)
                                         .arg(okControl).arg(okRestoreQuiet).arg(okSleepAnnounce));
-    }
+    });
 
     // ── P-t1024b 挖锚床失效链（真实注视挖掘链驱动；阴性轮敏感：摘 finishMiningAt 清锚钩子 → 本腿红）──
     //   床锚经 setBedSpawn（存档恢复入口，enterWorld 同款）设位 → 玩家站床顶 pitch -90（真实捕获 +
     //   updateRaycast 选体）→ beginMining 创造瞬破 → finishMiningAt 床分支：配对格联动清（t428）+
     //   锚床判定 → clearBedSpawn（重生点回世界出生点 kSpawn pristine）+ bedSpawnLost 恰发一次。
-    {
+    runLegMulti({ "t1024b respawn-anchor invalidation: mining the anchor bed through the real gaze chain (captured "
+        "controller, straight-down raycast, creative beginMining) breaks both bed halves via the pair-cle"
+        "ar and invalidates the bed spawn in the same finishMiningAt pass - bedSpawnValid flips false, be"
+        "dSpawnLost fires exactly once and the spawn point snaps back to the world spawn constant (80,80,"
+        "80), so a later death respawns at world spawn instead of a floating bed coordinate (negative-rou"
+        "nd sensitive)diag set=%1 broken=%2 invalidated=%3 lost=%4" }, [&]() {
         World wT24b;
         wT24b.setWidth(48); wT24b.setDepth(48); wT24b.setHeight(96); wT24b.setSeed(1025);
         PlayerController pcT24b;
@@ -457,7 +491,7 @@ void MatrixRun::section08_recent()
                           << (okB ? QString()
                                   : QStringLiteral("diag set=%1 broken=%2 invalidated=%3 lost=%4")
                                         .arg(okSet).arg(okBroken).arg(okInvalidated).arg(lostT24b));
-    }
+    });
 
     // ── P-t1033a 爆炸清锚床失效链（真实引信链驱动；review0909 #4 遗留清偿；阴性轮敏感：摘
     //    PlayerController::setWorld 内 blockDestroyedBed connect（语义信号断链）→ 本腿红）──
@@ -468,7 +502,15 @@ void MatrixRun::section08_recent()
     //   PlayerController 收口（seedChanged 同款 setWorld 直连）：bedSpawnValid 置假 + bedSpawnLost 恰一次
     //   （两半双信号被 m_bedSpawnValid 门幂等塌缩成一次播报，与玩家挖掘链同汇 clearBedSpawn 单点）+
     //   spawnPoint 回 kSpawn pristine (80,80,80)（重生回世界出生点，不再悬空指已消失床）。
-    {
+    runLegMulti({ "t1033a explosion invalidates bed anchor: an ignited TNT beside the anchor bed runs the real fuse"
+        " chain (PrimedTnt entity, fixed-dt 6.25s > 5s fuse) and detonates through World::destroySphereSi"
+        "lent (the single chokepoint shared by TNT and creeper explosions), destroying both bed halves; t"
+        "he new blockDestroyedBed semantic signal (one per destroyed half, fired after the world write bu"
+        "rst) reaches PlayerController via the seedChanged-style setWorld connect, collapses the double h"
+        "it through the m_bedSpawnValid gate into exactly one bedSpawnLost announcement and snaps the spa"
+        "wn point back to the pristine world spawn (80,80,80) instead of a floating bed coordinate (negat"
+        "ive-round sensitive: removing the connect turns this leg red)diag set=%1 ignited=%2 broken=%3 in"
+        "validated=%4 lost=%5" }, [&]() {
         World wT33a;
         wT33a.setWidth(48); wT33a.setDepth(48); wT33a.setHeight(96); wT33a.setSeed(1033);
         EntityManager entsT33a; // PrimedTnt 断言源 + 引信驱动（t996 同款，不挂 PC——爆炸链与玩家物理正交）
@@ -530,14 +572,20 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag set=%1 ignited=%2 broken=%3 invalidated=%4 lost=%5")
                                         .arg(okSet).arg(okIgnited).arg(okBroken)
                                         .arg(okInvalidated).arg(lostT33a));
-    }
+    });
 
     // ── P-t1033b 爆炸锚失效幂等面（阴性轮敏感：摘槽内 m_bedSpawnValid 门 / 锚判等 → 对应腿红）──
     //   (i) 未设锚：床上 TNT 照炸（床两半消失）→ bedSpawnLost / bedSpawnValidChanged 均**零**发（无效锚
     //       的用户面零 emit——爆炸链不得给从未睡过床的玩家播「重生点已失效」）；
     //   (ii) 非锚床：锚设在 B 床（同层异位 10 格）→ A 位复置床被炸（同 y 过 Y 门）→ 零 lost、B 锚与
     //       spawnPoint 纹丝不动（判等谓词 x/z 面有判别力；clearBedSpawn 幂等不被无谓触发）。
-    {
+    runLegMulti({ "t1033b explosion anchor-clear idempotence faces: blasting a bed while no spawn anchor is set des"
+        "troys the bed but emits zero user-facing edges (no bedSpawnLost, no bedSpawnValidChanged - playe"
+        "rs who never slept keep a silent world); with the anchor set on a different bed ten cells away o"
+        "n the same Y layer, re-detonating the first bed still emits nothing and the anchor plus spawn po"
+        "int stay untouched (the y-gate + x/z anchor-match predicate discriminates same-layer neighbor be"
+        "ds; negative-round sensitive: dropping the m_bedSpawnValid gate or the anchor match turns the ma"
+        "tching leg red)diag noAnchor=%1 anchorSet=%2 nonAnchor=%3 lost=%4 fires=%5" }, [&]() {
         World wT33b;
         wT33b.setWidth(48); wT33b.setDepth(48); wT33b.setHeight(96); wT33b.setSeed(1034);
         EntityManager entsT33b;
@@ -609,7 +657,7 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag noAnchor=%1 anchorSet=%2 nonAnchor=%3 lost=%4 fires=%5")
                                         .arg(okNoAnchor).arg(okAnchorSet).arg(okNonAnchor)
                                         .arg(lostT33b).arg(validFiresT33b));
-    }
+    });
 
     // ── P-t1033c 非玩家口径登记钉（水冲不触床）+ 玩家挖掘既有链回归（双链不双播报）──
     //   (i) 水冲：锚床贴邻落水源 → tickWaterFlow 推进 → 流水工作面成立（邻格成流）但床格仍 Bed——
@@ -618,7 +666,14 @@ void MatrixRun::section08_recent()
     //   (ii) 挖掘回归：同一锚床经真实注视挖掘链（t1024b 同款：站床顶 pitch -90 → 创造瞬破）挖除 →
     //       lost 恰 1（先水后挖累计恰一次 = 爆炸新链 + 玩家挖掘既有链同汇 clearBedSpawn 单点，不双播报；
     //       t1024b 存量腿继续独立钉挖掘链本体）。
-    {
+    runLegMulti({ "t1033c non-player caliber pins: flowing water right up against the anchored bed proves the flow "
+        "works (neighbor cell turns to flowing water) yet never touches the bed - the t1012④ wash list (i"
+        "sAttachableBlock: torches, cobweb, ladder) deliberately excludes beds, so the anchor survives wi"
+        "th zero announcements (caliber registration probe); afterwards mining the same anchor bed throug"
+        "h the real gaze chain (t1024b pattern) invalidates it with bedSpawnLost firing exactly once acro"
+        "ss the water + mine sequence - the new explosion relay and the legacy mining path converge on th"
+        "e single clearBedSpawn chokepoint without double announcementsdiag washed=%1 mined=%2 singleLost"
+        "=%3 lost=%4" }, [&]() {
         World wT33c;
         wT33c.setWidth(48); wT33c.setDepth(48); wT33c.setHeight(96); wT33c.setSeed(1035);
         PlayerController pcT33c;
@@ -682,7 +737,7 @@ void MatrixRun::section08_recent()
                           << (okC ? QString()
                                   : QStringLiteral("diag washed=%1 mined=%2 singleLost=%3 lost=%4")
                                         .arg(okWashed).arg(okMined).arg(okSingleLost).arg(lostT33c));
-    }
+    });
 
     // ── P-t1037 睡眠中锚床被炸 → MC「床毁即醒」（行为级；阴性轮敏感：摘 clearBedSpawn 头部睡眠中断
     //    `if (m_sleeping) cancelSleep();` → false && 前缀 → 本腿红）──
@@ -699,7 +754,18 @@ void MatrixRun::section08_recent()
     //   （sleeping 翻假 + 相位仍在 0.5 = 未跳晨）+ bedSpawnValid=false + bedSpawnLost 恰一次 + spawn 回
     //   pristine (80,80,80) → 再泵 PC 冲过原 Settling 计时窗（≈5s > 2s Settled + 0.8s Waking）→ 断言②
     //   不重新武装（valid 仍假 / spawn 仍 pristine / lost 仍 1 / 相位仍 0.5）。
-    {
+    runLegMulti({ "t1037 destroy-anchor during sleep wakes the player (MC bed-break wake): a player settled asleep "
+        "on the anchor bed (real trySleepAt entry, pumped into Settled inside the 2s window) has the bed "
+        "blasted by the real TNT fuse chain (PrimedTnt, fixed-dt 6.25s > 5s fuse, entity ticks only - ort"
+        "hogonal to the player sleep timer, t1033a pattern); the blockDestroyedBed relay converges on cle"
+        "arBedSpawn which now interrupts the sleep sequence through the existing startle-wake path (cance"
+        "lSleep) BEFORE the anchor clear - the player wakes (sleeping false) WITHOUT the dawn jump (world"
+        " clock phase stays frozen at 0.5), bedSpawnValid flips false with bedSpawnLost firing exactly on"
+        "ce, the spawn point snaps back to the pristine world spawn (80,80,80) and pumping past the origi"
+        "nal Settling window never re-arms the respawn point on the destroyed bed (the old lesion let sle"
+        "epAdvanceToDawn rewrite m_spawnPos/m_bedAnchor onto the gone bed and flip validity back true; ne"
+        "gative-round sensitive: false &&-ing out the sleep interrupt in clearBedSpawn turns this leg red"
+        ")diag sleeping=%1 ignited=%2 broken=%3 woke=%4 noRearm=%5 lost=%6" }, [&]() {
         World wT37;
         wT37.setWidth(48); wT37.setDepth(48); wT37.setHeight(96); wT37.setSeed(1037);
         WorldClock clockT37;
@@ -800,7 +866,7 @@ void MatrixRun::section08_recent()
                                                    "noRearm=%5 lost=%6")
                                         .arg(okSleeping).arg(okIgnited).arg(okBroken)
                                         .arg(okWoke).arg(okNoRearm).arg(lostT37));
-    }
+    });
 
     // ── P-t1024c 床位重生锚持久化 round-trip（真 SQLite；t1016 模式）+ 源码钉 ──
     //   (a) 有效锚：saveAll 第 6 参 {valid,x,y,z} → bed_x('g'9)/bed_y/bed_z/bed_valid=1 四键与 chunks/
@@ -808,7 +874,15 @@ void MatrixRun::section08_recent()
     //   (b) 失效锚：{valid:false} → bed_valid=0 门（挖锚床后退出 = 下次进世界不回填，即使坐标键残留）；
     //   (c) 旧档缺键：五参旧调用 → hasBed=false（从未睡过床 → 世界出生点重生，t388 起既有语义）；
     //   (d) 源码钉：QML 进/出世界编排 + C++ 入口签名 + 拒睡/雷暴门与文案（阴性轮敏感）。
-    {
+    runLegMulti({ "t1024c bed-spawn persistence rig: the exit save writes the respawn anchor {valid,x,y,z} through "
+        "saveAll's 6th arg into world_meta inside the SAME transaction as chunks/meta (bed_x 'g'9 short r"
+        "ound-trip + bed_valid gate); a close/reopen round-trips the bed spawn exactly; the invalid form "
+        "writes bed_valid=0 which gates the stale coordinate keys off (mined-bed-then-exit must not resto"
+        "re the bed); a legacy five-arg save has no bed keys and loads hasBed=false (world-spawn respawn,"
+        " pre-t1024 semantics); source pins lock the QML restore wiring, both exit-chain forms, the respa"
+        "wn/lost toasts, the restore-quiet announce gate (review0909 #5), all four C++ contract surfaces,"
+        " the hostile refusal and the night-or-thunder sleep window with its wording plus the storm-clear"
+        " on dawn (review0909 #1) (negative-round sensitive)diag a=%1 b=%2 c=%3 d=%4" }, [&]() {
         World wT24c;
         wT24c.setWidth(48); wT24c.setDepth(48); wT24c.setHeight(96); wT24c.setSeed(1026);
         WorldStore storeT24c;
@@ -941,7 +1015,7 @@ void MatrixRun::section08_recent()
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
-    }
+    });
 
     // ── P-t1025a 繁殖链 MC 口径：喂食恋爱 → 双满产崽 → 幼崽缩放字段/血量减半 → 冷却门 → 幼崽不可繁殖 →
     //    缝调短冷却开合 → 成长还原成体（R19.21 t1025；t400/t479 繁殖链之上的口径回标 + t952 幼体基建对齐）──
@@ -960,7 +1034,17 @@ void MatrixRun::section08_recent()
     //   (f) 成长还原：0.8s 成长缝 → 幼崽到点 baby=false + babyScaleAt 1.0 + halfHeightAt 还原成体盒 +
     //       血量上限/当前恒 10（t1046 低-1：幼崽本就满血，长大无血量还原面——t1025 ×2 还原退役）+
     //       growTimer 归零。
-    {
+    runLegMulti({ "t1025a breeding MC-parity: constants locked to the registered conversion (love 30s / breed coold"
+        "own 5min=300s / baby growth 20min=1200s / baby 0.5x / pair range 3 / baby-feed -10%); feeding tw"
+        "o adult sheep puts both in love, pairing spawns one baby while both parents drop out of love int"
+        "o the breed cooldown; the baby has scale 0.5 with a physically halved collision box (t952 baby m"
+        "echanism, halfHeight 0.225), halved max health 5 and a full 1200s growth timer; feeding during t"
+        "he cooldown is refused (hearts stay off); a baby refuses love mode but accepts feedBaby which sh"
+        "aves exactly kBabyFeedGrow off the growth timer while an adult refuses feedBaby; the setBreedTim"
+        "ings seam shortens the cooldown to 1s which closes then reopens the gate on real ticks; a 0.8s g"
+        "rowth-seam cow baby grows up in-place restoring the adult collision box, scale 1.0 and doubled h"
+        "ealth to 10 (negative-round sensitive: cooldown gate + baby no-love gate)diag paired=%1 fields=%"
+        "2 cdGate=%3 babyGate=%4 closed=%5 reopened=%6 grown=%7" }, [&]() {
         bool ok = true;
         // (a) 常量口径：t400 常量段为 private（勿为探针动可见性）→ 数值面由两处锁定：
         //     ① t1025b (d) 的 pinSet 头文件钉（= 300.0f / = 1200.0f / 30.0f / 0.5f / 3.0f / 120.0f 字面量行）；
@@ -1083,7 +1167,7 @@ void MatrixRun::section08_recent()
                                                    "closed=%5 reopened=%6 grown=%7")
                                         .arg(paired).arg(babyFields).arg(cooldownGate)
                                         .arg(babyGate).arg(gateClosed).arg(gateReopened).arg(grown));
-    }
+    });
 
     // ── P-t1025b 幼崽跟随父母 + 食物引诱 + Game 层门控接线（R19.21 t1025 AI 行为腿）──
     //   (a) 幼崽跟随最近成年同种：产崽 → 杀双亲（dead 不作认亲目标）→ 远端放同种成年羊 + 异种成年牛对照 →
@@ -1093,7 +1177,15 @@ void MatrixRun::section08_recent()
     //   (c) Game 层接线（真 Hotbar 信号链）： WheatId → 牛/羊门控真 / SeedId → 鸡真 / CarrotId → 猪真 /
     //       空手 → 全清（breedFoodMatches 单一权威，喂食分流与引诱同源）；
     //   (d) 源码钉（滤注释 pinSet；阴性轮行为腿在 P-t1025a，钉只锁接线存在性）。
-    {
+    runLegMulti({ "t1025b baby-follow + food-lure: a baby orphaned by killing both parents locks yaw onto and walks"
+        " toward the nearest adult of the SAME species while ignoring the adult cow control (follow-neare"
+        "st-adult semantics); with the pig food-lure gate on, a pig inside the 10-block radius pins yaw o"
+        "n and walks toward the player, a pig beyond the radius keeps bounded wander drift with unpinned "
+        "yaw, and turning the gate off unpins; the Game-layer wiring drives the gate table through the re"
+        "al Hotbar slotsChanged chain (wheat->cow+sheep, seeds->chicken, carrot->pig, empty hand clears a"
+        "ll - one breedFoodMatches authority shared with the feeding path); source pins lock the seam/lur"
+        "e contract surfaces, both love gates and the baby box/HP halvingdiag follow=%1 lureState=%2 lure"
+        "In=%3 lureFar=%4 lureOff=%5 wired=%6 pins=%7" }, [&]() {
         bool ok = true;
         EntityManager em;
         World w;
@@ -1263,7 +1355,7 @@ void MatrixRun::section08_recent()
                                                    "lureOff=%5 wired=%6 pins=%7")
                                         .arg(follow).arg(lureState).arg(lureIn).arg(lureFar)
                                         .arg(lureOff).arg(wired).arg(pinsOk));
-    }
+    });
 
     // ── P-t1026a 小麦农业闭环行为腿（R19.21 t1026；真实玩家路径：placeBlock 锄/种 + beginMining 收割 +
     //    World::tickCropGrowth 直泵）──
@@ -1286,7 +1378,16 @@ void MatrixRun::section08_recent()
     //   (e) 未熟收获：stage 3 作物 → 恰 1 次 spawnItem：仅 1× SeedId（无小麦）。
     //   rig：独立 40×40×32 世界 seed 10261（t1025 净空纪律：显式石板地板 + 上方全清 → 天光 15；骰子依赖
     //   seed+窗口序号 → 独立世界保 m_cropIntervalIndex 从 0 起算）。
-    {
+    runLegMulti({ "t1026a wheat farming loop (real player path): hoe right-click converts dirt AND grass tops to dr"
+        "y farmland in survival (hydration state 0, one durability tick, stone refuses); 8 seeds plant a "
+        "stage-0 wheat crop above the farmland consuming exactly one seed while plain dirt and an already"
+        "-planted crop refuse; tick-pumped growth reproduces the deterministic scatter dice exactly (actu"
+        "al advance windows == simulated windows, +1 monotonic per window) maturing the open crop to stag"
+        "e 7 while the stone-enclosed dark crop (skyLight 0 < 9), the no-farmland-support crop and the al"
+        "ready-mature anchor all hold stage; harvesting the mature crop bare-handed yields exactly 1 whea"
+        "t plus 0-3 seeds (t1046 Beta/1.0 seed caliber: zero seeds legally emits no seed item) and harves"
+        "ting the stage-3 crop yields exactly 1 seed (negative-round sensitive: crop light gate + harvest"
+        " drop table)diag hoe=%1 seed=%2 growth=%3 mature=%4 imm=%5" }, [&]() {
         bool ok = true;
         World wF;
         wF.setWidth(40);
@@ -1525,7 +1626,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                   : QStringLiteral("diag hoe=%1 seed=%2 growth=%3 mature=%4 imm=%5")
                                         .arg(hoeOk).arg(seedOk).arg(growthOk).arg(matOk).arg(immOk));
-    }
+    });
 
     // ── P-t1026b 面包配方（3 小麦一行三格）+ 农业链源码钉（R19.21 t1026）──
     //   (a) 有序 3×3 顶/中/底行平移全通（shapedEqual 最小包围盒对齐 = MC 一行三格可在台内任意行摆放）→
@@ -1535,7 +1636,13 @@ void MatrixRun::section08_recent()
     //       钉红；改 playercontroller.cpp 收割掉落表 → P-t1026a 收获腿红 + cpp-crop-drop 钉红）：
     //       锄转换 / 播种 / 生长门与写入 / 掉落表 / 草丛掉种分母 / 面包配方行 / 存档契约 id（Farmland=23、
     //       WheatCrop=25 枚举尾段既有位，漂移即红）。
-    {
+    runLegMulti({ "t1026b bread recipe + farming source pins: three wheat in a row crafts 1 bread from the top, mid"
+        "dle and bottom rows of a 3x3 table (shaped bounding-box translation = MC one-row-of-three calibe"
+        "r), while a vertical column, a 2x2 grid and a row of seeds all refuse; source pins lock the hoe-"
+        ">farmland and seed->crop wiring, the crop growth light/support gates and stage write, the harves"
+        "t drop table (1 wheat + 0-3 seeds mature per t1046 Beta/1.0 caliber, 1 seed immature), the 1/8 t"
+        "all-grass seed denominator, the bread recipe row and the save-contract block ids (Farmland=23, W"
+        "heatCrop=25)diag rows=%1 negs=%2 pins=%3" }, [&]() {
         bool ok = true;
         const int Wf = RecipeRegistry::WheatId;
         const int gTop[9] = { Wf, Wf, Wf, 0, 0, 0, 0, 0, 0 };
@@ -1603,7 +1710,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                   : QStringLiteral("diag rows=%1 negs=%2 pins=%3")
                                         .arg(rowsOk).arg(negsOk).arg(pinsOkB));
-    }
+    });
 
     // ── P-t1028a 音符盒红石触发链（R19.21 t1028；World 接收器真消费端探针，powerTntTriggered 计数模式）──
     //   (a) 初始 off：tick 泵零误触发（无源静默）；
@@ -1614,7 +1721,14 @@ void MatrixRun::section08_recent()
     //   (e) 再通电：再响（重臂闭环，恰 2 次）；
     //   (f) 音色族四族 + 悬空兜底参数断言：stone→kick(2) / sand→snare(3) / glass→hat(4)（t1046 低-2
     //       第四族）/ air→piano(0)。
-    {
+    runLegMulti({ "t1028a note-block redstone chain: an idle rig never fires; the lever rising edge fires noteBlock"
+        "Played exactly once carrying the tuned pitch (9=A4) and the below-block timbre family (planks=ba"
+        "ss) and latches the powered memory bit without disturbing the pitch field; sustained power never"
+        " re-fires (true edge via the state memory bit); the falling edge is silent and clears the memory"
+        " bit; re-powering fires again (re-arm); family projection asserts stone=kick, sand=snare, glass="
+        "hat (t1046 fourth family) and floating=piano (negative-round sensitive: edge-judgment removal, g"
+        "lass-hat mapping removal)diag idle=%1 rise=%2 hold=%3 fall=%4 rearm=%5 fam=%6 played=%7 pitch=%8"
+        " fam=%9 famFailLeg=%10 exp=%11 got=%12 gotX=%13 gotPlayed=%14 gotPitch=%15" }, [&]() {
         bool ok = true;
         World wT28a;
         wT28a.setWidth(48); wT28a.setDepth(64); wT28a.setHeight(96); wT28a.setSeed(10281);
@@ -1702,13 +1816,20 @@ void MatrixRun::section08_recent()
                                         .arg(lastPitch).arg(lastFamily)
                                         .arg(famFail).arg(famExp).arg(famGot)
                                         .arg(famGotX).arg(famGotPlayed).arg(famGotPitch));
-    }
+    });
 
     // ── P-t1028b 真实玩家路径：右键调音 round-trip（25 次≡回 0，MC 口径 25 档）+ 调音发声链
     //    （noteBlockTuned 携新音高 + 音名「A4」单一权威）+ 潜行旁路门（review0909 #2）+ 攻击发声
     //    （左键按下沿，pitch=当前调音，挖掘照常破掉掉自身）──阴性轮敏感：调音回绕摘 mod → round-trip
     //    腿红；摘音符盒 !sneakPlace 门 → 潜行腿红（潜行右键仍调音 + 木板未落地）。
-    {
+    runLegMulti({ "t1028b note-block player path: 25 survival right-clicks on the note block cycle the pitch throug"
+        "h 1..24 and wrap back to 0 exactly (25-slot round trip, MC caliber) emitting noteBlockTuned each"
+        " time with the ninth carrying note name A4; sneaking with a held block and right-clicking bypass"
+        "es tuning and places the block on the adjacent face instead (review0909 #2 sneakPlace gate, MC s"
+        "neak-use bypass); the left-click attack edge fires noteBlockAttackPlayed exactly once with the c"
+        "urrent pitch (0) and below-block family (planks=bass) while survival mining still progresses and"
+        " drops the note block itself (negative-round sensitive: tuning wrap removal, sneakPlace gate rem"
+        "oval)diag tun=%1 sneak=%2 atkOnce=%3 mined=%4 atkP=%5 atkF=%6 drops=%7" }, [&]() {
         World wT28b;
         wT28b.setWidth(48); wT28b.setDepth(48); wT28b.setHeight(96); wT28b.setSeed(10282);
         Hotbar hbT28b;
@@ -1855,14 +1976,20 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag tun=%1 sneak=%2 atkOnce=%3 mined=%4 atkP=%5 atkF=%6 drops=%7")
                                         .arg(okTun).arg(okSneakPlace).arg(okAtkOnce).arg(okMined)
                                         .arg(attackPitch).arg(attackFamily).arg(dropIds28b.size()));
-    }
+    });
 
     // ── P-t1028c 音符盒配方（8 木板环 + 红石粉芯，MC 1.0 同料）+ 全链源码钉 ──
     //   (a) 配方：环 + 芯 → NoteBlock ×1（最小包围盒 3×3）；环 + 空芯 = 箱子（环本身不是音符盒，
     //       防形状混recipes）；2×2 放不下。
     //   (b) 源码钉（滤注释 pinSet；阴性轮红腿：摘 world.cpp 沿判定 → P-t1028a 腿红 + cpp-note-edge 钉红；
     //       摘调音回绕 → P-t1028b round-trip 腿红 + hdr-note-tuned 钉红）。
-    {
+    runLegMulti({ "t1028c note-block recipe + full-chain source pins: eight planks ringed around one redstone dust "
+        "crafts exactly 1 note block (MC 1.0 caliber, 3x3 table) while the plain empty-centered ring (a c"
+        "hest) refuses; source pins lock the rising-edge memory-bit judgment and the World semantic signa"
+        "l, the tuning and attack emissions in PlayerController, the save-contract id (NoteBlock=143) and"
+        " the 25-slot pitch state helpers with the note-name and timbre-family single authorities, the Au"
+        "dioManager playNote playback entry and the QML redstone/tuned routing, the recipe row and the ge"
+        "n_note_piano synthesis generatordiag rec=%1 neg=%2 pins=%3" }, [&]() {
         bool ok = true;
         const int P = int(BlockRegistry::Planks);
         const int gNote[9] = { P, P, P, P, RecipeRegistry::RedstoneId, P, P, P, P };
@@ -1945,7 +2072,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                   : QStringLiteral("diag rec=%1 neg=%2 pins=%3")
                                         .arg(recOk).arg(negOk).arg(pinsOkC));
-    }
+    });
 
     // ── P-t1030a 骨粉合成数量 + 右键催熟行为链（R19.22 t1030；真玩家路径 placeBlock + Hotbar 消耗）──
     //   盘点回标：功能本体 t447（BonemealId 0x232 注册 / 1 骨头→3 骨粉 shapeless 配方）/ t791
@@ -1964,7 +2091,14 @@ void MatrixRun::section08_recent()
     //   进度 tick 链 → 无 busy-wait 依赖（t1022/t1026 的 dt 坑不适用）。阴性轮敏感：playercontroller.cpp
     //   骨粉分流判据恒假化（false && 前缀，Edit 反向 restore）→ (b)(c) 全红（阶段不推、count 不动），
     //   (a) 配方腿与 P-t1030b 的 pins 不受影响（world.cpp / recipe 层未动）→ 恰 P-t1030a 红。
-    {
+    runLegMulti({ "t1030a bonemeal craft count + right-click growth chain (real player path): one bone crafts 3 bon"
+        "e meal shapeless in both the 2x2 inventory grid and a 3x3 table slot while two bones match nothi"
+        "ng; survival right-clicks on an immature wheat crop advance it exactly +2..+3 stages per use (cl"
+        "amp step to stage 7 allowed) consuming exactly one bone meal each time with the id preserved, ma"
+        "turing from stage 2 in 2-3 uses; applying to the mature crop is the registered no-effect no-cons"
+        "ume caliber (stage held, count held); in creative mode two uses advance the crop identically whi"
+        "le the stack stays untouched (negative-round sensitive: playercontroller bonemeal branch deactiv"
+        "ation)diag rec=%1 grow=%2 mature=%3 creative=%4" }, [&]() {
         bool ok = true;
         const int B = RecipeRegistry::BoneId, M = RecipeRegistry::BonemealId;
         // (a) 配方数量：2×2 背包栏 + 3×3 工作台单放均 1 骨头 → 3 骨粉（shapeless）；2 骨头无配方。
@@ -2107,7 +2241,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                   : QStringLiteral("diag rec=%1 grow=%2 mature=%3 creative=%4")
                                         .arg(recOkA).arg(growOkA).arg(matureOkA).arg(creativeOkA));
-    }
+    });
 
     // ── P-t1030b 骨粉边界（右键非作物不消耗不响）+ 催熟链源码钉（R19.22 t1030）──
     //   (a) 边界（真 placeBlock 链）：持骨粉生存右键石头（非作物非生长目标）→ 不消耗 + 目标照旧。
@@ -2122,7 +2256,13 @@ void MatrixRun::section08_recent()
     //       applyBonemeal 已熟早退 + 推进语句本体（world.cpp）、推进带常量（world.h）、物品 id 存档
     //       契约 BoneId=0x217 / BonemealId=0x232（recipe.h；BonemealId 为 t447 时点材料段尾追加，
     //       后续物品仍只许尾追加不重排）、配方 pattern / 产物行（recipe.cpp）。
-    {
+    runLegMulti({ "t1030b bonemeal edge + growth-chain source pins: right-clicking a stone with bone meal held cons"
+        "umes nothing and leaves the target untouched (non-growth target no-effect; the top placement slo"
+        "t is pre-stoned so the leg stays green even with the branch deactivated); source pins lock the b"
+        "onemeal branch predicate and the applyBonemeal entry call in playercontroller, the mature-earlyo"
+        "ut and the +2..3 advance statement in world.cpp, the advance-band constants in world.h, the save"
+        "-contract item ids BoneId=0x217 and BonemealId=0x232 and the shapeless 1-bone-to-3-meal recipe r"
+        "ows in recipe.cppdiag edge=%1 pins=%2" }, [&]() {
         bool ok = true;
         World wB;
         wB.setWidth(24);
@@ -2220,7 +2360,7 @@ void MatrixRun::section08_recent()
                              "recipe.cpp"
                           << (ok ? QString()
                                   : QStringLiteral("diag edge=%1 pins=%2").arg(edgeOkB).arg(pinsOkB));
-    }
+    });
 
     // ── P-t1031a 狼驯服真链行为探针（R19.22 t1031；真输入链 + t1031 驯服概率缝确定性化）──
     //    全链主体系 t480/t831/t878/t986-988 遗产（骨头分流 / 爱心沿 / 项圈 MobModel collarVisible /
@@ -2238,7 +2378,14 @@ void MatrixRun::section08_recent()
     //         钉位 6s → 零 mobAttackedPlayer + 狼 XZ 逐位钉在生成格（旧敌对分支 3 格 < 旧侦测 12 必
     //         追咬 → 本腿对收口敏感；冻结只关 wander，旧 chase 不受影响 = 敏感性保留）。
     //    缺省零调用与接线语句本体源钉在 P-t1031b（阴性轮摘驯服分流时 b 须恒绿 = 恰 a 红律）。
-    {
+    runLegMulti({ "t1031a wolf taming real-chain behavior: seam-pinned MUST-FAIL bone attempt consumes exactly one "
+        "bone and stays wild with no heart, seam-pinned MUST-TAME attempt flips wolfTamed with the heart "
+        "edge (decayed after the 4s window), the empty-hand right-click toggles sit then stand both ways "
+        "with zero consumption (bone is a no-op on a tamed wolf, t878 caliber), the player's real attack "
+        "chain hands the struck mob to the tamed wolf (assist bite lands past the player's own hit, min w"
+        "olf-zombie gap within the bite band), and a wild wolf near a survival player stays put with ZERO"
+        " mobAttackedPlayer over 6s (t1031 neutral caliber; wander frozen for determinism, the old hostil"
+        "e chase ignored the freeze so the leg is regression-sensitive)diag a=%1 assist=%2 neutral=%3" }, [&]() {
         auto flatRig1031 = [](World &w) {
             w.setWidth(44); w.setDepth(44); w.setHeight(96); w.setSeed(31);
             for (int x = 2; x < 42; ++x)
@@ -2398,7 +2545,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                  : QStringLiteral("diag a=%1 assist=%2 neutral=%3")
                                        .arg(okA).arg(assisted).arg(neutral));
-    }
+    });
 
     // ── P-t1031b 狼驯服边界 + 接线源钉（R19.22 t1031；pinSet 剥注释，套件纪律勿裸 contains）──
     //    (b1) 骨头右键非狼不耗（真 placeBlock 链）：持骨瞄猪 press → 骨头 64 不变（骨头分支对非狼
@@ -2410,7 +2557,14 @@ void MatrixRun::section08_recent()
     //    (b4) 接线语句本体（阴性轮只摘**驯服尝试段**，以下各钉字面在位 = 恰 P-t1031a 红律）：骨头分支
     //         判据、空手坐站切换语句、attackMob 参战接线语句、aiWolf 中立门（t1042 重钉为分支头——
     //         反击只走受击沿挑逗，不见人就咬）。
-    {
+    runLegMulti({ "t1031b wolf taming boundaries + wiring source pins: a bone right-click on a non-wolf (pig) consu"
+        "mes nothing through the real placeBlock chain, an empty-hand right-click on a wild wolf neither "
+        "tames nor sits it (taming is bone-only, commands are tame-only, MC caliber), the tame-roll seam "
+        "is default-off with zero production callers (setter + sample-takeover + header decl + default -1"
+        " pinned, playercontroller contains no reference), and the wiring statements are comment-immune p"
+        "inned: the bone branch predicate, the empty-hand sit-toggle call, the attackMob assist wire and "
+        "the aiWolf wild-wolf branch gate (t1042 re-pin: retaliation fires only via the hit-path provocat"
+        "ion, never sight-based)diag pig=%1 wild=%2 pins=%3" }, [&]() {
         bool ok = true;
         // (b1) 骨头 + 猪（非狼）→ 不消耗。
         bool pigUntouched = false;
@@ -2528,7 +2682,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                  : QStringLiteral("diag pig=%1 wild=%2 pins=%3")
                                        .arg(pigUntouched).arg(wildUntouched).arg(pinsOkB1031));
-    }
+    });
 
     // ── P-t1034a 门 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
     //    两向：(1) 潜行持方块右键木门 = 放置落命中面邻格（门不开：两半 state bit2 保持 0、doorToggled
@@ -2536,7 +2690,12 @@ void MatrixRun::section08_recent()
     //    bit2=4、doorToggled 恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘门分支
     //    !sneakPlace 门 → 潜行腿红（潜行右键仍开门 + 门面无放置）+ cpp-door-sneak-gate 钉红；
     //    非潜行对照腿不受门影响保绿。
-    {
+    runLegMulti({ "t1034a door sneakPlace bypass: sneaking with a held block and right-clicking a wooden door place"
+        "s the held block on the clicked face's neighbor cell while the door stays shut on both halves wi"
+        "th zero doorToggled emissions (use bypassed, MC sneak-use caliber, review0909 #2 legacy cleared)"
+        "; without sneak the right-click still opens the door (both halves flip bit2, exactly one doorTog"
+        "gled(true)) and consumes the click so nothing is placed (negative-round sensitive: door-branch s"
+        "neakPlace gate removal)diag sneak=%1 use=%2 pins=%3 toggles=%4" }, [&]() {
         World wT34a;
         wT34a.setWidth(48); wT34a.setDepth(48); wT34a.setHeight(96); wT34a.setSeed(10341);
         Hotbar hbT34a;
@@ -2634,7 +2793,7 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag sneak=%1 use=%2 pins=%3 toggles=%4")
                                         .arg(okSneakA).arg(okUseA).arg(missT34a.isEmpty())
                                         .arg(togglesT34a));
-    }
+    });
 
     // ── P-t1034b 床 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
     //    两向：(1) 非潜行空手右键床（白天非雷暴）= 入睡链照常触达 → 拒睡文案「只能在夜晚或雷暴中
@@ -2644,7 +2803,13 @@ void MatrixRun::section08_recent()
     //    夜门/雷暴门/怪物门序一律不被触达。阴性轮敏感（单构建三摘一轮）：摘床分支 !sneakPlace 门 →
     //    潜行腿红（潜行右键仍走拒睡链：refused 计 +1 且无放置）+ cpp-bed-sneak-gate 钉红；非潜行
     //    拒睡对照腿不受门影响保绿。
-    {
+    runLegMulti({ "t1034b bed sneakPlace bypass: a plain empty-hand right-click on the bed by day still reaches the"
+        " sleep chain and refuses with the exact night-or-thunder message (sleep window intact, MC calibe"
+        "r); sneaking with a held block and right-clicking the bed instead places the block on the clicke"
+        "d face's neighbor cell with the whole sleep chain untouched (refusal count frozen, not sleeping,"
+        " both bed halves pristine - MC: sneak-use on a bed places, never sleeps; review0909 #2 legacy cl"
+        "eared; negative-round sensitive: bed-branch sneakPlace gate removal re-routes the sneak click in"
+        "to the day refusal)diag use=%1 sneak=%2 pins=%3 refused=%4" }, [&]() {
         World wT34b;
         wT34b.setWidth(48); wT34b.setDepth(48); wT34b.setHeight(96); wT34b.setSeed(10342);
         wT34b.setWeatherState(0); // Clear（白天拒睡对照的确定性前提；review0909 #1 口径）
@@ -2744,14 +2909,19 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag use=%1 sneak=%2 pins=%3 refused=%4")
                                         .arg(okUseB).arg(okSneakB).arg(missT34b.isEmpty())
                                         .arg(refusedT34b));
-    }
+    });
 
     // ── P-t1034c 活板门 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
     //    两向：(1) 潜行持方块右键合态活板门 = 放置落命中面邻格（板不翻：state bit0 保持 0、
     //    doorToggled 零发——use 被旁路）；(2) 非潜行持方块右键 = 翻板照常（bit0→1、doorToggled
     //    恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘活板门分支 !sneakPlace 门 → 潜行腿红
     //    （潜行右键仍翻板 + 板面无放置）+ cpp-trapdoor-sneak-gate 钉红；非潜行对照腿不受门影响保绿。
-    {
+    runLegMulti({ "t1034c trapdoor sneakPlace bypass: sneaking with a held block and right-clicking a closed trapdo"
+        "or places the held block on the clicked face's neighbor cell while the trapdoor stays closed (st"
+        "ate bit0 untouched, zero doorToggled emissions - use bypassed, MC sneak-use caliber, review0909 "
+        "#2 legacy cleared); without sneak the right-click still flips the trapdoor open (bit0 set, exact"
+        "ly one doorToggled(true)) and consumes the click so nothing is placed (negative-round sensitive:"
+        " trapdoor-branch sneakPlace gate removal)diag sneak=%1 use=%2 pins=%3 toggles=%4" }, [&]() {
         World wT34c;
         wT34c.setWidth(48); wT34c.setDepth(48); wT34c.setHeight(96); wT34c.setSeed(10343);
         Hotbar hbT34c;
@@ -2843,7 +3013,7 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag sneak=%1 use=%2 pins=%3 toggles=%4")
                                         .arg(okSneakC).arg(okUseC).arg(missT34c.isEmpty())
                                         .arg(togglesT34c));
-    }
+    });
 
     // ── P-t1035 豹猫驯服分化口径钉（R19.22 末项；盘点回标 + 现状行为腿）──
     //    盘点结论（生产代码现状 > dev-plan 设想，本探针按现状钉）：t481 生鱼驯服链（~1/3 概率 / 失败仍
@@ -2861,7 +3031,15 @@ void MatrixRun::section08_recent()
     //        （钓鱼产驯服道具，t401 池单一权威；熔炼生→熟与 +2 饥饿口径由 t836 系探针既有在库）。
     //    阴性轮敏感：摘 aiOcelot 站态跟随 chase 段 → (b) 红（猫不再走向主人）；(a)(c)(d)(e) 不受影响
     //    保绿（坐态冻结分支更早、瞬移分支独立于 chase、字段钉在 accessor、池钉在 LootTable）。
-    {
+    runLegMulti({ "t1035 ocelot taming divergence caliber (dev-plan trust-state vision registered outdated - produc"
+        "tion is modern-MC follow caliber): the tamed cat SITS put with a nearby player (1s zero drift, w"
+        "olf t831(c) mirror) and FOLLOWS a 7.5-block owner >=2 blocks in 2s (kOcelotFollowSpeed 4.0), tel"
+        "eports to the owner's 2..5 ring when >12 blocks (t878⑤ kOcelotTeleportDist) while a 6-block gap "
+        "keeps walking (no jump), wolf/ocelot tamed+sitting state accessors cross-query each other's slot"
+        " as false (per-type follow-state fields, both chains independently true), and LootTable::fishing"
+        "Pool() carries RawFishId as its top-weight entry (raw fish = the taming item source; smelting/hu"
+        "nger caliber already pinned by the t836 probes) (negative-round sensitive: aiOcelot stand-follow"
+        " chase removal)" }, [&]() {
         World wT35;
         wT35.setWidth(44); wT35.setDepth(44); wT35.setHeight(96); wT35.setSeed(1035);
         for (int x = 2; x < 42; ++x)
@@ -2956,7 +3134,7 @@ void MatrixRun::section08_recent()
                              "(raw fish = the taming item source; smelting/hunger caliber already "
                              "pinned by the t836 probes) (negative-round sensitive: aiOcelot "
                              "stand-follow chase removal)";
-    }
+    });
 
     // ── P-t1042a 被动型受击惊逃（R19.23 t1042；MC 原版口径：牛受击只惊逃永不反击）──
     //    (a1) 受击沿真链：玩家空手 beginMining 命中牛（attackMob 唯一生产入口）→ 扣 1HP 存活 +
@@ -2970,7 +3148,15 @@ void MatrixRun::section08_recent()
     //         （wander 重掷 idle 0 / kWalkSpeed 1.0；panic 残速 2.0 被选向重掷冲销 = 回落正常游走）。
     //    阴性轮敏感（单构建三摘一轮：aiPanicFlee 三消费点 false && 前缀）：(a2)/(a3) 恰红 + (a5) 恰红
     //         （timer 不衰减恒 8.0、零惊逃位移）；(a1)/(a4) 保绿。
-    {
+    runLegMulti({ "t1042a passive panic-flee on hit (MC caliber): a bare-fist hit on a cow through the real attackM"
+        "ob chain drops exactly 1 HP and arms the panic state at 8.0s (kPanicDuration registration), the "
+        "cow then gains >=3.5 blocks of player-distance over 3s with every 0.5s window >=0.4 (monotone aw"
+        "ay-drift, wander-noise immune since wander caps at 3.0) at sprint speed within [1.4,2.6] (2x wal"
+        "k = accelerated flee, below hostile chase band), fires ZERO mobAttackedPlayer (cows never retali"
+        "ate), and after the 8s window the panic timer is exactly 0 with moveSpeed resettled <=1.05 (wand"
+        "er re-roll: idle or walk; the panic residual speed is consumed) (negative-round sensitive: the t"
+        "hree aiPanicFlee consumer gates false&&-prefixed in one build)diag a1=%1 a2=%2(%3) a3=%4 a4=%5 a"
+        "5=%6(%7)" }, [&]() {
         World wa;
         wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1042);
         for (int x = 2; x < 42; ++x)
@@ -3041,7 +3227,7 @@ void MatrixRun::section08_recent()
                                  : QStringLiteral("diag a1=%1 a2=%2(%3) a3=%4 a4=%5 a5=%6(%7)")
                                        .arg(a1).arg(a2).arg(totalGain).arg(a3).arg(a4)
                                        .arg(a5).arg(a5timer));
-    }
+    });
 
     // ── P-t1042b 豹猫被打逃逸 + 驯服狼被打零反击对照腿（R19.23 t1042）──
     //    (b1) 未驯服豹猫受击沿真链命中 → 惊逃态置值 + 3s 离玩家总增益 ≥3.5 + 零 mobAttackedPlayer
@@ -3049,7 +3235,12 @@ void MatrixRun::section08_recent()
     //    (b2) 驯服狼（t1031 驯服缝直调）被玩家真链命中 → 零 mobAttackedPlayer（6s）+ 无惊逃态置值 +
     //         掉血恰 1（驯服狼豁免维持——被打不反击主人，对照腿）。
     //    阴性轮敏感：摘惊逃消费点 → (b1) 恰红（豹猫零位移）；(b2) 对照腿保绿（不依赖惊逃分支）。
-    {
+    runLegMulti({ "t1042b ocelot flees and tamed wolf never retaliates (MC caliber): a bare-fist hit on an untamed "
+        "ocelot arms the 8s panic state and yields >=3.5 blocks of player-distance over 3s with ZERO mobA"
+        "ttackedPlayer (ocelots flee and never fight back), while the control leg shows a tamed wolf stru"
+        "ck by its owner drops exactly 1 HP with zero panic state and zero bites over 6s (t1031 exemption"
+        " maintained - the tamed wolf never retaliates against the player) (negative-round sensitive: onl"
+        "y the ocelot leg)diag b1=%1(%2) b2=%3" }, [&]() {
         // (b1) 豹猫逃逸。
         bool okB1 = false;
         float gainB1 = -1.0f;
@@ -3143,7 +3334,7 @@ void MatrixRun::section08_recent()
                              "(negative-round sensitive: only the ocelot leg)"
                           << (ok ? QString()
                                  : QStringLiteral("diag b1=%1(%2) b2=%3").arg(okB1).arg(gainB1).arg(okB2));
-    }
+    });
 
     // ── P-t1042c 野狼被打敌对反击 + 狼无 panic（R19.23 t1042；t1047 O-3 改写：MC 原版——狼无
     //    PanicGoal）──
@@ -3156,7 +3347,16 @@ void MatrixRun::section08_recent()
     //         可分辨带沿用）+ 零 bites。
     //    阴性轮敏感（t1047）：临时回插 setPanicFlee 的 wolfBaby 分支 → (c2) 恰红（panicTimer==8 +
     //         惊逃增益 ≥2.5 双面红）；(c1) 反击腿保绿（独立分支）。
-    {
+    runLegMulti({ "t1042c wild wolf retaliates and wolves have no panic (MC caliber): a bare-fist hit on a wild adu"
+        "lt wolf through the real attackMob chain drops 1 HP and the wolf closes into the bite band (min "
+        "gap <=1.7) landing at least one mobAttackedPlayer of >=1 damage as MobWolf within 6s (hostile-st"
+        "yle retaliation with the same chase/memory clearing caliber), while a bred wolf puppy struck by "
+        "the player stays at zero panic - the panic timer never arms (checked right after the hit and aga"
+        "in after 2s), the puppy gains no flee acceleration (2s distance gain stays below the 2.5 panic-v"
+        "s-wander discrimination band) and zero bites land (wolves have no panic (MC caliber): no PanicGo"
+        "al, adults retaliate via setWolfProvoked instead, babies zero reaction; parents removed pre-hit "
+        "so the t480 defense chain cannot pollute the path) (negative-round sensitive: only the puppy leg"
+        " - re-inserting the withdrawn setPanicFlee wolf-baby branch reds it)diag c1=%1 c2=%2(%3)" }, [&]() {
         // (c1) 野狼反击。
         bool okC1 = false;
         {
@@ -3288,13 +3488,21 @@ void MatrixRun::section08_recent()
                              "withdrawn setPanicFlee wolf-baby branch reds it)"
                           << (ok ? QString()
                                  : QStringLiteral("diag c1=%1 c2=%2(%3)").arg(okC1).arg(okC2).arg(gainC2));
-    }
+    });
 
     // ── P-t1042d t1042 接线源钉（pinSet 剥注释；阴性轮摘 aiPanicFlee 三消费点（false && 前缀）本组
     //     恒绿——钉面全为定义 / 调用 / 门 / 消费谓词本体，false && 前缀不摘语句 → 恰 P-t1042a/b/c 红律）
     //     t1047 O-4 追加：headPitchAt 惊逃门针（headless 无吃草态缝 → 行为腿不可达，结构钉 + 实机确认
     //     补面，review0912 #4 如实 scoped）──
-    {
+    runLegMulti({ "t1042d panic-flee + wolf-retaliation wiring source pins: the attackMob hit-path carries both new"
+        " write-points (setPanicFlee + setWolfProvoked) next to the t480/t635 precedent wires, EntityMana"
+        "ger defines the panic registrar with its MC-caliber log face, the wolf provocation gate (tamed-o"
+        "r-baby exempt, t1031 kept), the shared aiPanicFlee mover consumed by exactly three gates (generi"
+        "c passive chain, untamed aiOcelot, aiWolf puppy), and the header carries the panicTimer field + "
+        "panicTimerAt accessor + aiPanicFlee declaration + kPanicDuration constant, and headPitchAt carri"
+        "es the t1047 O-4 panic gate zeroing the graze pose while panicTimer runs (comment-immune pinSet;"
+        " the consumer-gate pin is false&&-mutation-immune so the negative round reds exactly the behavio"
+        "r legs)diag pins=%1" }, [&]() {
         bool ok = true;
         const QString exeDir1042 = QCoreApplication::applicationDirPath();
         const QString root1042 = QDir(exeDir1042 + QStringLiteral("/..")).absolutePath();
@@ -3339,7 +3547,7 @@ void MatrixRun::section08_recent()
                              "negative round reds exactly the behavior legs)"
                           << (ok ? QString()
                                  : QStringLiteral("diag pins=%1").arg(miss1042.join(QLatin1Char(','))));
-    }
+    });
 
     // ── P-t1043a 流水冲毁铁轨腿（R19.23 t1043 裁-1 清偿；MC 原版口径：流水冲毁全部三种铁轨）──
     //    (a) 谓词腿：isAttachableBlock 单一权威含轨族三 id（Rail 103 / GoldenRail 127 / DetectorRail
@@ -3348,7 +3556,13 @@ void MatrixRun::section08_recent()
     //        到达）→ 三种轨全部被冲毁（格 Air ∨ Water）+ 各发一次 blockDroppedAsItem（按精确坐标
     //        计数，worldgen 矿井轨 / 其它 wash 不入账）；阴性轮敏感：摘 blockregistry.h 的
     //        `|| isRail(id)` 入族项 → 谓词腿 + 三 wash 腿 + P-t1012c 恰红。
-    {
+    runLegMulti({ "t1043a flowing water washes rails (MC caliber, parity ruling cai-1):the attachable-block water-d"
+        "estroy single authority includes all threerail ids (rail 103 / golden 127 / detector 128 via the"
+        " isRail familypredicate) with dropId = itself for the whole family so the drop chainis free (sam"
+        "e chain as player mining) - behaviorally one grounded watersource spreading along a stone platfo"
+        "rm washes all three rail kinds inits path (cells go Air/Water) and each emits exactly oneblockDr"
+        "oppedAsItem at its own cell with its own id (counted by exactcoordinates so worldgen mineshaft r"
+        "ails stay out of the tally)diag a=%1 b see [t1043a diag b]" }, [&]() {
         bool okA = BlockRegistry::isAttachableBlock(quint8(BR::Rail))
             && BlockRegistry::isAttachableBlock(quint8(BR::GoldenRail))
             && BlockRegistry::isAttachableBlock(quint8(BR::DetectorRail))
@@ -3422,7 +3636,7 @@ void MatrixRun::section08_recent()
                              "coordinates so worldgen mineshaft rails stay out of the tally)"
                           << (okA && okB ? QString()
                                          : QStringLiteral("diag a=%1 b see [t1043a diag b]").arg(okA));
-    }
+    });
 
     // ── P-t1043b 矿井 worldgen 防水腿（t1043 伴随义务；轨只在干燥格放置）+ 双机制源钉 ──
     //    (a) 行为/静态腿：12 seed × 128×128×64 真世界全量 worldgen → 全图扫 Rail（worldgen 只铺
@@ -3434,7 +3648,14 @@ void MatrixRun::section08_recent()
     //    (b) 源钉：blockregistry.h 入族行（`|| isRail(id);`）+ world.cpp 候选登记 / 干燥门扫描 /
     //        跳过 / 落块四语句本体（剥注释 pinSet；阴性轮 1 摘入族行 → hdr 钉红；阴性轮 2 摘干燥门
     //        → cpp 钉红）。
-    {
+    runLegMulti({ "t1043b mineshaft worldgen waterproofing + dual-mechanism source pins(parity ruling cai-1 compani"
+        "on duty, not an exemption): across 12 freshfully-generated 128x128x64 worlds every worldgen rail"
+        " sits in a drycell (no water within Chebyshev distance 2 - the exact placementcontract of the pl"
+        "aceMineshaft dry-cell gate, which defers rail blocksuntil the corridor walk finishes and then dr"
+        "ops only candidates whose5x5x5 neighborhood is water-free) with thousands of rails scanned sothe"
+        " leg cannot pass vacuously; the pinSet half anchors the family joinline in blockregistry.h and t"
+        "he candidate-row / dry-scan / skip / placestatement bodies in world.cpp (comment-immune), so the"
+        " negative roundsred exactly this leg plus the mutated mechanism's own pinsdiag scan=%1 pins=%2" }, [&]() {
         bool ok = true;
         int worldsT1043b = 0;
         long railTotalT1043b = 0;
@@ -3500,7 +3721,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                  : QStringLiteral("diag scan=%1 pins=%2")
                                        .arg(okScan).arg(miss1043b.join(QLatin1Char(','))));
-    }
+    });
 
     // ── P-t1044a 蜘蛛爬墙（R19.23 t1044；MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2）──
     //    场景：平地平台 + 2 高 1 宽墙（(20,85..86,23) 顶面 87.0）阻在蜘蛛(20.5,85.3,21.5)与玩家
@@ -3515,7 +3736,15 @@ void MatrixRun::section08_recent()
     //         平移（登记简化：走既有追击水平移动）直达目标。
     //    阴性轮敏感（摘 aiSpiderWallClimb isClimber 门 false && 前缀）：(a1)(a2)(a3) 恰红（蜘蛛零
     //    爬升、永卡墙根）；蜘蛛家族能力门见 P-t1044b 对照腿。
-    {
+    runLegMulti({ "t1044a spider climbs a wall to reach its target (MC caliber, parity adjudication cai-2): chasing"
+        " a player separated by a 2-high 1-wide wall the blocked chase horizontal move latches a face cli"
+        "mb (vy pulse at the registered kSpiderClimbSpeed caliber, gravity-decay kept positive so the lan"
+        "ding scan never snaps back), the spider rises past the wall top band (max center Y >= 87.0 from "
+        "a rest of 85.3 - a 2-high wall cannot be jump-cleared so a pre-fix spider is wall-bound forever)"
+        ", the mid-climb band precedes the top crossing (climb is the cause of the traversal, not a horiz"
+        "ontal detour), and it then walks over the edge (registered simplification: edge traverse is the "
+        "plain chase move, no separate mantling) to end within 1.2 blocks of the player (negative-round s"
+        "ensitive: the isClimber gate false&&-prefixed)diag a1=%1 a2=%2 a3=%3 spider=%4" }, [&]() {
         World wa;
         wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1044);
         for (int x = 2; x < 42; ++x)
@@ -3565,7 +3794,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                  : QStringLiteral("diag a1=%1 a2=%2 a3=%3 spider=%4")
                                        .arg(a1).arg(a2).arg(a3).arg(spider));
-    }
+    });
 
     // ── P-t1044b 能力门对照 + 接线源钉（R19.23 t1044）──
     //    (b1) 洞穴蜘蛛（MobCaveSpider，t1012③ 同族）同场景爬墙越檐：MC cave spider 同样爬墙 →
@@ -3578,7 +3807,15 @@ void MatrixRun::section08_recent()
     //         攀爬脉冲语句 + header 声明。
     //    阴性轮敏感：摘 isClimber 门 → (b1) 恰红；(b2) 保绿（Shambler 不依赖爬墙分支）；(b3) 钉
     //    needle 仍在（钉接线非钉门真值）。
-    {
+    runLegMulti({ "t1044b climb capability gate and wiring pins (MC caliber): the cave spider (same spider family, "
+        "t1012) climbs the same test wall and reaches its target exactly like the spider (MC cave spiders"
+        " climb too - included in this batch, registered), while a non-spider hostile (the shambler, our "
+        "zombie) in the identical blocked-chase scenario never leaves the wall-foot band (max Y <= 86.0 a"
+        "t its 85.9 rest, never crosses the wall plane) - the climber gate limits wall climbing to the sp"
+        "ider family; the pinSet half anchors the climb call in all three chase branches (aggro wolf / ir"
+        "on golem / player, count>=3), the climber gate, the climb pulse statement and the header declara"
+        "tion (comment-immune, t1047 O-4 precedent for headless-unreachable branches)diag b1=%1(maxY=%2) "
+        "b2=%3(maxY=%4 endZ=%5) pins=%6" }, [&]() {
         bool okB1 = false, okB2 = false;
         QVector3D endB1;
         float maxYB1 = -1e9f, maxYB2 = -1e9f, endZB2 = -1e9f;
@@ -3665,7 +3902,7 @@ void MatrixRun::section08_recent()
                                  : QStringLiteral("diag b1=%1(maxY=%2) b2=%3(maxY=%4 endZ=%5) pins=%6")
                                        .arg(okB1).arg(maxYB1).arg(okB2).arg(maxYB2).arg(endZB2)
                                        .arg(miss1044.join(QLatin1Char(','))));
-    }
+    });
 
     // ── P-t1045a 玩家踩踏耕地概率化 + 弹苗（R19.23 t1045；parity-ledger 裁-3，MC 原版口径）──
     //    MC Java onFallenUpon 公式 P = clamp(fall − 0.5, 0, 1)（wiki Farmland/Trampling 引证：
@@ -3678,7 +3915,12 @@ void MatrixRun::section08_recent()
     //         t1026 单一权威，未熟恒 1 种子=确定性）；
     //    (a2) 缝=999（概率带内必不踩，须低落差带）：干耕地原样 Farmland、零掉落。
     //    阴性轮敏感：摘 World::farmlandTrampleRoll 本体（false&& 前缀）→ (a1) 恰红（踩踏腿+弹苗腿）。
-    {
+    runLegMulti({ "t1045a player trampling farmland is probabilistic with crop pop (MC caliber, parity adjudication"
+        " cai-3): a real-physics landing from the jump-height band (fall ~1.26, P = fall - 0.5 ~ 0.76) wi"
+        "th the roll seam pinned low reverts the hydrated farmland to dirt with the moisture state gone a"
+        "nd pops the young wheat crop as exactly one seed via the dropCropDrops single authority, while t"
+        "he same fall with the seam pinned high keeps the dry farmland intact with zero drops (negative-r"
+        "ound sensitive: the trample roll body false&&-prefixed)diag hit=%1 crop=%2 no=%3" }, [&]() {
         World wa;
         wa.setWidth(44); wa.setDepth(44); wa.setHeight(96); wa.setSeed(1045);
         for (int x = 2; x < 42; ++x)
@@ -3742,7 +3984,7 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                  : QStringLiteral("diag hit=%1 crop=%2 no=%3")
                                        .arg(hitOk).arg(cropOk).arg(noOk));
-    }
+    });
 
     // ── P-t1045b mob 落地踩踏 + 接线源钉（R19.23 t1045）──
     //    (b1) 蜘蛛落到湿耕地（落差 ≈1.06，P≈0.56，缝=0 必踩）→ 回 Dirt + 经
@@ -3754,7 +3996,16 @@ void MatrixRun::section08_recent()
     //         信号与槽声明/水冲两调用点/转换应用/静水源门。
     //    阴性轮敏感：摘掷骰本体 → (b1) 恰红（(b2) 地板对照保绿语义不变）；钉 needle 变体注——掷骰
     //    本体被摘时该 needle 同步失配（病灶自身 pin 面，t1043 先例），与 (b1) 同腿计红不另增。
-    {
+    runLegMulti({ "t1045b mob landing tramples farmland with crop pop and wiring pins (MC caliber, parity adjudicat"
+        "ion cai-3): a spider landing on hydrated farmland from the P~0.56 band with the shared roll seam"
+        " pinned low reverts it to dirt and pops the young crop as exactly one seed through the farmlandT"
+        "rampledByMob relay into the dropCropDrops single authority (MC onFallenUpon applies to all entit"
+        "ies; the modern 0.512 size exemption and mobGriefing gate are not carried - Beta/1.0 baseline ha"
+        "s no size gate and the project has no gamerule system, registered), while a 0.06-block step land"
+        "ing stays below the formula floor and never tramples even with the seam pinned low; the pinSet h"
+        "alf anchors the roll body, seam consumption, the player branch, the mob branch, the silent dirt "
+        "revert, the signal emit and declarations, plus both wash call sites, the conversion apply and th"
+        "e still-source gate (comment-immune)diag mob=%1 floor=%2 pins=%3" }, [&]() {
         World wb;
         wb.setWidth(44); wb.setDepth(44); wb.setHeight(96); wb.setSeed(1046);
         for (int x = 2; x < 42; ++x)
@@ -3859,7 +4110,7 @@ void MatrixRun::section08_recent()
                                  : QStringLiteral("diag mob=%1 floor=%2 pins=%3")
                                        .arg(mobOk).arg(floorOk)
                                        .arg(miss1045.join(QLatin1Char(','))));
-    }
+    });
 
     // ── P-t1045c 流水冲耕转换（R19.23 t1045；裁-3 定案：流水冲耕地=变回泥土，方块转换非掉落物）──
     //    (c1) 流水（state>0）grounded 蔓延落点=湿耕地 → 转 Dirt（state 清零、水**不**入格——Dirt
@@ -3868,7 +4119,14 @@ void MatrixRun::section08_recent()
     //    (c3) 静水源（level 0）直接邻接 → 不冲（hydration 基建面选型登记：耕地依水而建不受静水
     //         接触破坏；维基 Java/Bedrock 均无流水毁耕条目，本腿按裁-3 定案口径实现并台账注记）。
     //    阴性轮敏感：摘水冲两调用点（false&& 前缀）→ (c1)(c2) 恰红（(c3) 保绿——门反摘会误伤）。
-    {
+    runLegMulti({ "t1045c flowing water washes farmland back to dirt as a block conversion (parity adjudication cai"
+        "-3): flowing spread onto a hydrated farmland reverts it to dirt with the moisture state cleared "
+        "and the water never enters the cell (dirt blocks flow - a conversion, not a drop: zero blockDrop"
+        "pedAsItem across the whole run, distinct from the attachable wash family), the dry farmland lane"
+        " degrades identically (both hydration states degrade), and a still source (level 0) directly adj"
+        "acent never washes its farmland (hydration infrastructure choice: farms are built against still "
+        "water; flowing-only contact, registered; negative-round sensitive: both wash call sites false&&-"
+        "prefixed)diag wet=%1 dry=%2 noDrop=%3 src=%4" }, [&]() {
         bool wetOk = false, dryOk = false, noDrop = true, srcOk = false;
         {
             World wc;
@@ -3926,14 +4184,19 @@ void MatrixRun::section08_recent()
                           << (ok ? QString()
                                  : QStringLiteral("diag wet=%1 dry=%2 noDrop=%3 src=%4")
                                        .arg(wetOk).arg(dryOk).arg(noDrop).arg(srcOk));
-    }
+    });
 
     // ── P-t1046a 拉杆 / 按钮 sneakPlace 旁路（R19.23 t1046 低-3；t1034 门同式）──
     //    两向四腿：(1) 潜行持方块右键拉杆 = 放置落命中面邻格（拉杆 bit0 保持 0——use 被旁路）；
     //    (2) 非潜行持方块右键拉杆 = 激活照常（bit0 翻 1、无放置）；(3)(4) 木按钮同两向（按下 bit0=1）。
     //    阴性轮敏感：摘机关分支 !sneakPlace 门 → 潜行两腿红（潜行右键仍扳动 + 无放置）+ cpp-mech-sneak-gate
     //    钉红；非潜行对照腿不受门影响保绿。
-    {
+    runLegMulti({ "t1046a lever/button sneakPlace bypass: sneaking with a held block and right-clicking a floor lev"
+        "er (or a wood button) places the held block on the hit face's neighbor cell while the mechanism "
+        "state bit stays clear (activation bypassed, MC sneak-use caliber, parity low-3); without sneak t"
+        "he right-click still activates the lever (bit0 set) and presses the button (bit0 set, recovery a"
+        "rmed) and consumes the click so nothing is placed (negative-round sensitive: mech-branch sneakPl"
+        "ace gate removal)diag sneakLv=%1 useLv=%2 sneakBtn=%3 useBtn=%4 pins=%5" }, [&]() {
         World wT46a;
         wT46a.setWidth(48); wT46a.setDepth(48); wT46a.setHeight(96); wT46a.setSeed(10461);
         Hotbar hbT46a;
@@ -4043,7 +4306,7 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag sneakLv=%1 useLv=%2 sneakBtn=%3 useBtn=%4 pins=%5")
                                         .arg(okSneakLv).arg(okUseLv).arg(okSneakBtn).arg(okUseBtn)
                                         .arg(missT46a.isEmpty()));
-    }
+    });
 
     // ── P-t1046c 天气剩余时长持久化 + 精确续跑（R19.23 t1046 低-5；MC level.dat RainTime/ThunderTime 口径）──
     //    (a) 真 WorldStore：快照携 weatherTimerMs=77777 落 world_meta（weather_timer_ms）→ 关库重开逐键
@@ -4051,7 +4314,14 @@ void MatrixRun::section08_recent()
     //    (c) World 续跑：setWeatherState 设态 + setWeatherRemainingSec 覆盖剩余窗 → tickWeather 部分
     //        推进剩余精确递减 → 到点翻 Clear 重抽新窗；sec<=0 静默拒（tickWeather 前置不变量）；
     //    (d) 源钉：两 C++ 入口声明 + 存/读两侧键字面量（阴性轮敏感）。
-    {
+    runLegMulti({ "t1046c weather remaining-window persistence (MC RainTime/ThunderTime caliber, parity low-5): a s"
+        "ave carrying weatherTimerMs stores it as world_meta weather_timer_ms inside the same transaction"
+        " and a close/reopen round-trips it exactly while a legacy save without the key defaults hasWeath"
+        "erTimer=false; the restore path setWeatherState+setWeatherRemainingSec resumes the archived wind"
+        "ow precisely (0.8s minus a 0.3s tick leaves 0.5s), the expiry flips to Clear with a fresh random"
+        " window, and non-positive seconds are silently rejected (tickWeather positive-timer invariant); "
+        "source pins lock both C++ entries and the store/load key literals (negative-round sensitive)diag"
+        " a=%1 b=%2 c=%3 d=%4" }, [&]() {
         World wT46c;
         wT46c.setWidth(48); wT46c.setDepth(48); wT46c.setHeight(96); wT46c.setSeed(1046);
         WorldStore storeT46c;
@@ -4155,13 +4425,18 @@ void MatrixRun::section08_recent()
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
-    }
+    });
 
     // ── P-t1046d 小麦种子基准钉死 0-3（R19.23 t1046 低-4；~Beta/1.0 口径，多株实测逐株带内）──
     //    真玩家路径逐株收割 12 株成熟作物：每株恰 1 小麦 + 0-3 种子（0 种合法 → 该株单件弹落）。
     //    逐株断言全带内（确定性）；0-3 精确口径由 t1026b 的 cpp-crop-drop-seed 源钉锁（阴性轮
     //    改回 bounded(1,4) → 钉红恰面）。
-    {
+    runLegMulti({ "t1046d mature wheat seed caliber pinned 0-3 (Beta/1.0 baseline, parity low-4): harvesting twelve"
+        " mature crops through the real player path yields exactly one wheat each plus a per-crop seed co"
+        "unt strictly inside {0,1,2,3} where a zero-seed crop legally emits no seed item (drop set is 1 o"
+        "r 2 items accordingly); the exact bounded(0,4) caliber and the emit gate are source-pinned in t1"
+        "026b (negative-round sensitive: reverting to the retired 1-3 range flips the t1026b seed pin)dia"
+        "g band=%1 wheat=%2 shape=%3 plots=%4 badSeeds=%5 badPlot=%6" }, [&]() {
         World wT46d;
         wT46d.setWidth(64); wT46d.setDepth(48); wT46d.setHeight(96); wT46d.setSeed(10462);
         Hotbar hbT46d;
@@ -4257,7 +4532,7 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag band=%1 wheat=%2 shape=%3 plots=%4 badSeeds=%5 badPlot=%6")
                                         .arg(allInBand).arg(allWheatOne).arg(dropShapeOk)
                                         .arg(plotXs.size()).arg(badSeeds).arg(badPlot));
-    }
+    });
 
     // ── P-t1046e 轨道骑士 500m 单方向径向位移达阈 + 发明成就原创标注（R19.23 t1048 勘误；MC On A Rail
     //    真口径 = 乘矿车到达距乘车起点单方向 ≥500 米的一点，review0913-A P2-1；t1046 旧「累计 1km」退役）──
@@ -4269,7 +4544,19 @@ void MatrixRun::section08_recent()
     //        三项尾「（原创）」+ MC 同型两反例不带（余六项由 achievements() 描述同源生成面覆盖——UI 单一
     //        来源，如实 scoped，review0913-B P3-2）；
     //    (d) 源钉（定义行 + 埋点声明 ×2 + 阈值常量 + QML 起点捕获 / 位置路由行）。
-    {
+    runLegMulti({ "t1046e rail-knight 500m single-direction radial ride + originality tags (MC On A Rail caliber, t"
+        "1048 erratum of the retired 1km cumulative reading): the ride origin is captured at the mount ed"
+        "ge and each onMinecartMoved sample judges radial displacement from it - turning back after 600 c"
+        "umulative blocks leaves radial 0 and stays locked (proving non-cumulative), unlocking fires exac"
+        "tly at radial 500 (>= seam on half-precision-exact values), repeats past threshold and negative "
+        "deltas stay idempotent/ignored for the stat while radial sampling continues, an unrecorded origi"
+        "n never unlocks spuriously, the flushed statistic reads back 1600 and survives a save->load roun"
+        "d-trip without re-toasting; the ride_minecart description states the 500m single-direction calib"
+        "er without the originality tag while the nine project-invented achievements (per-species first k"
+        "ills, structure entries, chest cart) carry the (original) suffix (three spot-checked) and MC-cou"
+        "nterpart ones do not; source pins lock the def rows, both invokables, the threshold and the QML "
+        "origin/route lines (negative-round sensitive)diag under=%1 notCum=%2 near=%3 unlock=%4 idem=%5 g"
+        "uard=%6 travel=%7 load=%8 desc=%9 pins=%10" }, [&]() {
         PlayerProgress progT46e;
         int toastT46e = 0;
         QObject::connect(&progT46e, &PlayerProgress::achievementUnlocked, &progT46e,
@@ -4375,5 +4662,5 @@ void MatrixRun::section08_recent()
                                         .arg(underOk).arg(notCumulativeOk).arg(nearOk).arg(unlockOk)
                                         .arg(idemOk).arg(guardOk).arg(travelOk).arg(loadOk)
                                         .arg(descOk).arg(pinsE));
-    }
+    });
 }

@@ -15,7 +15,19 @@ void MatrixRun::section05_render_ui()
     //   t931 同款用户最新口径翻案先例）。qrc 程序布局 0 不动（壁窗族有铆钉列结构、前后本就同族 =
     //   正锚）。钉：(a) 统一纵帮行 ×2 + (b) 端帮参照行 ×1 + (c) 旧壁窗坐标串清零 + (d) 布局 0 两行
     //   不变 + (e) Main.qml 五个车斗 Model 同一 baseColorMap 绑定 ×5。
-    {
+    runLegMulti({ "t941 minecart 3D side walls unified to the front/back texture: the demo-pack layout side pieces "
+        "(MinecartBox kPackParts 1/2) sampled the wall-band bright/dark windows for their large faces (t8"
+        "62② outer-bright/inner-dark split) - PIL re-measure shows that band is flat gray noise (lum~74, "
+        "sd~6, no structure) reading as the stone texture per the user's round-5 report; fix makes pieces"
+        " 1/2 sample the exact same rect set as the end piece 3 (large faces = the framed end-face window"
+        " (0,2)-(20,10) = the front/back texture, rim strips = the end piece's light inner-wall rows), so"
+        " all four walls(front/back/left/right) share one texture and the wall band is no longer referenc"
+        "ed by any piece (the t862② shading distinction is overruled by the user's unify caliber, t931-st"
+        "yle latest-word precedent); qrc program layout 0 untouched (its wall windows carry rivet-column "
+        "structure and are already the same family front/back - pinned unchanged as the positive anchor)."
+        " Source pins: unified side rect line x2, end-piece reference line, old wall-band window coords a"
+        "bsent, layout-0 lines intact, and all five cart Model materials bound to the same baseColorMap i"
+        "n Main.qml" }, [&]() {
         const QString exeDir941 = QCoreApplication::applicationDirPath();
         const QString root941 = QDir(exeDir941 + QStringLiteral("/..")).absolutePath();
         auto readSrc941 = [&root941](const QString &rel) -> QString {
@@ -60,7 +72,7 @@ void MatrixRun::section05_render_ui()
                              " window coords absent, layout-0 lines intact, and all five cart Model"
                              " materials bound to the same baseColorMap in Main.qml"
                           ;
-    }
+    });
 
     // ── P-t942 爆炸毁能量源后动力轨激活残留探针（World 直编 destroySphereSilent；spec「TNT/苦力怕炸掉
     //    红石块/火把后部分动力轨仍激活」）──
@@ -79,7 +91,28 @@ void MatrixRun::section05_render_ui()
     //   (e) 坡链形态（t910 几何）：上坡链爆源 → 1 tick 全灭（三高探针从源位发现 ±1 层种子轨）；
     //   (f) 源码钉：helper 声明 + 定义恰一处（禁第二套链判定）、t942 ② 触发行（源 / 粉扩位）、Phase A2
     //       走查行、destroySphereSilent 链尾 notePowerWrite 挂点（两爆炸入口共用）。
-    {
+    runLegMulti({ "t942 explosion destroying a power source leaves no stale charge on powered-rail chains: notePowe"
+        "rWrite only chain-walked RAIL edits (t936), so when a blast (destroySphereSilent's per-voxel not"
+        "ePowerWrite tail, shared by the TNT and stalker detonation entries) destroyed the redstone block"
+        " or torch FEEDING a chain, only the edit cell and its 6-orthogonal neighbors entered the recompu"
+        "te domain - the seed rail flipped dark but the rest of the chain was only pulled in stepwise by "
+        "the flip wavefront (8-rail chain measured 5 ticks still partly lit = the user's 'some powered ra"
+        "ils stay activated' window; dust-relay layouts lingered longer) - while placement/break edits th"
+        "rough setBlock had the same stepwise falling edge. Fix keeps ONE chain-walk authority (dirtyGold"
+        "enRailChainFrom, extracted from the t936 block, still stepping via goldenRailChainStep only) and"
+        " fires it for rail, power-EMITTER and dust edits alike (edit cell is not a rail so the 3-height "
+        "probe finds the seed it feeds with no connection-bit gate), plus the Phase A2 dust-power-change "
+        "reinsert walks the same helper so surviving-dust-relayed chains converge in one pass too - the w"
+        "hole chain fed by a destroyed source goes dark in the NEXT single tick, and the bright edge keep"
+        "s its one-pass semantics (t937 goldenPowered merge); the t937 fast-path narrowing is untouched ("
+        "plain-block edits still zero-recompute through the explosion path). Probe legs: (a) redstone-blo"
+        "ck-fed flat chain of 8, blast pinned on the source only -> all dark within 1 tick (was 7-lit at "
+        "t1), (b) same with a redstone torch source, (c) blast pinned on a mid-chain rail -> fed side sta"
+        "ys lit 3, far wing dark 4 (t936 destruction symmetry via the explosion path), (d) blasting an un"
+        "related lone stone -> powerRecomputePasses counter flat and chain stays 8/8 lit (narrowing not r"
+        "egressed), (e) climbing chain blast-the-source -> 1-tick full dark, (f) source pins: helper decl"
+        "ared once + defined exactly once, the emitter/dust trigger lines, the Phase-A2 walk line pair, t"
+        "he destroySphereSilent tail notePowerWrite hook comment, and the preserved t936 comment anchor" }, [&]() {
         const auto scanRig942 = [&](int dxLo, int dxHi, int dyLo, int dyHi) {
             int rx = -1, rz = -1;
             for (int zz = 3; zz < 94 && rx < 0; zz += 2)
@@ -274,7 +307,7 @@ void MatrixRun::section05_render_ui()
                              " lines, the Phase-A2 walk line pair, the destroySphereSilent tail"
                              " notePowerWrite hook comment, and the preserved t936 comment anchor"
                           ;
-    }
+    });
 
     // ── P-t943 V 字载人变慢 + 多车卡出探针（MinecartManager 直编；spec「① 载人后速度变慢、最高点速度
     //    正转负时特别慢（往返换向阻尼过大？）；② 多矿车丝滑运动有概率卡出 V 字到隔壁 / 横着卡在坡上
@@ -300,7 +333,31 @@ void MatrixRun::section05_render_ui()
     //          存活 / 恒贴轨线（|z−心|<0.02，横向逃逸零容忍）/ yaw 恒轴向（fmod 90° ±0.5，「横着」零
     //          容忍）/ 含留（x 与 y 双界）/ 末 400 tick 每车路程 ≥1.0（无冻结无颤抖死锁）；
     //      (d) 源码钉：coasting 闸 / 链可达闸两行 / 速度一致性 match / 钳向清速两行 / yaw 重钉。
-    {
+    runLegMulti({ "t943 V-valley ridden slowdown + multi-cart escapes: the ridden path's no-input coasting went thr"
+        "ough the targetV lerp where an uphill leg has no slope gravity at all - only kCartFriction expon"
+        "ential decay (12.8 needs ~6.4 blocks to bleed off, crawling at 0.x b/s for seconds before the re"
+        "versal = the user's 'especially slow at the top'), while the empty-cart path integrates kCartSlo"
+        "peGravity along the track - same V, different physics. Fix routes input-free unpowered riding th"
+        "rough the same slope integration as the empty path (uphill 19.8 b/s^2 bleed, downhill converge t"
+        "o +-10, flat friction, t863(1) stall slide-back), leaving input-driven and powered-rail semantic"
+        "s untouched. Multi-cart escapes get three closures: the depenetration near-layer gate now also r"
+        "equires chain continuity (the target column's rail must be this chain's own slope continuation -"
+        " connection bit plus railProbeDelta layer match - so stacked crossing lines can no longer hijack"
+        " a pressed cart onto a neighboring chain), a persistently squeezed pair (both sides clamped, sti"
+        "ll overlapped) gets velocity consistency (the faster chaser along n adopts the chased velocity, "
+        "clamped to +-boost, killing the bounce-vs-slope-kick limit cycle) with clamp-direction zeroing ("
+        "a boundary-clamped cart may not keep velocity pointing into the clamp - segment moves have no mi"
+        "d-cell boundary validation, so breaking this slides carts through walls into rail-less columns w"
+        "here pinCartY drops them, the t907(a) cage regression this probe family guards), and a post-reso"
+        "lution cartYawFromDir re-pin keeps every rail-locked cart's heading exactly on its rail axis. Pr"
+        "obe legs: (a) empty reference cart oscillates in the 5-arm V (capture threshold 14.1 > 12.8 impu"
+        "lse clamp = closed system) with >=6 reversals and <=90 arm-crawl ticks in 24s; (b) a mounted car"
+        "t driven with no input meets the same thresholds - same physics as empty, no parked start, no fr"
+        "iction crawl at the reversal; (c) four carts (two in the valley, one per arm) run 1500 ticks wit"
+        "h collision resolution: all alive, never off the rail line, yaw always an exact axis heading, ne"
+        "ver out of the rig, and every cart still covers >=1.0 blocks over the last 400 ticks (no freeze,"
+        " no trembling deadlock); (d) source pins for the coasting gate, the chain continuity lines, the "
+        "velocity-consistency match, the clamp-direction zeroing pair, and the yaw re-pin" }, [&]() {
         // rig 选址：运行期扫描空区（t909 模式）。footprint x0-5..x0+6 × z0-1..z0+1 × kRigY-2..kRigY+6。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -498,7 +555,7 @@ void MatrixRun::section05_render_ui()
                              " continuity lines, the velocity-consistency match, the clamp-direction"
                              " zeroing pair, and the yaw re-pin"
                           ;
-    }
+    });
 
     // ── P-t981 V 形轨谷一次停驻 + 嵌入车失联冻结清算探针（MinecartManager 直编；spec「矿车放在 V 形铁轨
     //    滑落到底部时卡住、来回振荡最后才停——谷底应一次平滑减速停驻（或按速度通过），不许往复振荡」
@@ -526,7 +583,35 @@ void MatrixRun::section05_render_ui()
     //       （车体前半已探入该格 = 入点嵌入）→ 续骑 → 车越过 x0+3.2（豁免推进穿石至死端飞出；pre-fix 恒
     //       被回退冻结在 x0+2.8 上下）；
     //   (d) 源码钉：两处捕获调用 / haveFreePos 门 / t1019 能量余量常量（t981 逃逸阈钉合法演化）/ 捕获实现签名。
-    {
+    runLegMulti({ "t981 V-valley one-pass settle + embedded sampling-lost freeze (review0831 #28): an unpowered V-v"
+        "alley cell is fully conservative physics - downhill half accelerates by kCartSlopeGravity, uphil"
+        "l half decelerates by the same, zero dissipation inside the valley - while the stall slide-back "
+        "(-0.5) and the static-start kick (+1.0) re-pump energy at each wall stop, so a cart sliding to t"
+        "he bottom enters a wall-to-wall limit cycle instead of settling (user report: stuck oscillating,"
+        " only stops at the end). Fix adds tryValleyBottomCapture: a cart entering a V-valley cell (strai"
+        "ght rail, both axis neighbors +1, same geometry as the railRiseAt valley branch) is taken over b"
+        "y a brake-to-center speed law (a = v^2/2d recomputed per tick, self-correcting), gliding to a si"
+        "ngle smooth stop at the valley bottom center where the gradient is zero and every gate agrees on"
+        " rest; golden rails keep their own brake/boost semantics and fast carts pass through by speed (t"
+        "981 gated capture by the escape speed threshold; t1019 legally evolved that gate to the energy c"
+        "riterion v^2 >= 2g*h opposite-climb - both behavioral legs here are unchanged under it). Same-do"
+        "main registration review0831 #28 is verified NOT this symptom (leg (a) reproduces the oscillatio"
+        "n with no embedded block) but is settled here: the !sampled branch of the stepCartAlongRail bloc"
+        "ked-triage reverted and zeroed speed unconditionally, ignoring the embeddedAtEntry escape exempt"
+        "ion - an embedded cart hitting a sampling-lost substep (probe column with no reachable rail) was"
+        " reverted every tick and frozen solid (push feed swallowed; recovery only by breaking the overla"
+        "pping block). Fix gates the revert on haveFreePos (same shape as the uphill branch): non-embedde"
+        "d carts still revert, embedded carts keep the carry-overlap exemption until they escape. Probe l"
+        "egs: (a) cart spawned on the west wall of a 3-cell V glides down and settles with ZERO x-directi"
+        "on reversals (pre-fix limit cycle makes >=2), parks within 0.06 of the valley center at surface "
+        "height and stays pinned for 60 ticks; (b) a boost-fed cart (8-cell powered golden run, arrival ~"
+        "11.6, energy above the opposite-climb threshold) crosses the valley center eastward by >=0.9 - t"
+        "he valley does not capture fast traffic; (c) mounted eastbound cart whose forward rail is swappe"
+        "d to stone after passing a cell center (body already probing the cell = embedded at entry) escap"
+        "es past x0+3.2 post-fix (pre-fix frozen forever at ~x0+2.8 = the user's immovable cart); (d) sou"
+        "rce pins for both capture call sites, the t1019 energy-margin constant (t981 escape-threshold pi"
+        "n legally evolved), the capture implementation, the haveFreePos-gated revert and the #28 registr"
+        "ation marker" }, [&]() {
         // ── (a) 谷一次停驻。rig 选址：footprint x0-1..x0+3 × z0-1..z0+1 × Y-1..Y+2。──
         int xa = -1, za = -1;
         for (int zz = 3; zz < 94 && xa < 0; zz += 2)
@@ -753,7 +838,7 @@ void MatrixRun::section05_render_ui()
                              " legally evolved), the capture implementation, the"
                              " haveFreePos-gated revert and the #28 registration marker"
                           ;
-    }
+    });
 
     // ── P-t1019 V 谷通过物理能量判据探针（MinecartManager 直编；spec「谷底捕获改能量判据——进谷速度
     //    足以爬升对面坡（v² ≥ 2g·h 对面坡升）则通过；不足才谷心制动停驻；消灭『打转』极限环」；
@@ -772,7 +857,63 @@ void MatrixRun::section05_render_ui()
     //   (b2) 临界档（review0907 B-P2-3）：运行时自搜索动力平台长 L×平段衰减格 D 共 8 档，取入谷 v²
     //       落通过阈 ±10% 窗的档，断言「通过或停驻二选一、无往复」（rev ≤ 1）——判据漂移最敏感点；
     //   (c) 源码钉：能量判据行 / 对面坡升扫描行 / 余量常量 / 扫描上限常量。
-    {
+    runLegMulti({ "t1019 V-valley pass physics on the energy criterion (t981 rework): the old capture gate was a si"
+        "ngle speed threshold (|v| <= 10 captures everything gravity can reach, > 10 passes everything po"
+        "wered) which cannot ask the per-case question 'can THIS cart climb THIS opposite wall' - near-co"
+        "nservative valley physics returns exactly the rim-drop energy to a cart entering from an equal-h"
+        "eight wall, so a threshold either traps energetic gravity traffic in the bowl or releases under-"
+        "powered carts to fail on the far wall and re-enter (the spin limit cycle). Fix replaces the gate"
+        " with the energy criterion: pass iff v^2 >= 2*kCartSlopeGravity*(h_opposite + margin), where g i"
+        "s the project's slope kinematics constant (world gravity 28 x sin45 along- track component, the "
+        "same constant the valley integrates) and h_opposite is the total contiguous +1-per-cell climb of"
+        " the far wall (scanned per travel direction, staircase walls fully counted - a deep bowl must no"
+        "t release a cart it cannot eject); the 0.05-block margin covers the settle-kick re-pump so a jus"
+        "t-barely-escaping cart is captured instead of crest-stalling into the kick-back band. A critical"
+        "-energy leg (review0907 B-P2-3) is reported separately below (its own PASS line). Insufficient e"
+        "nergy still brakes to a single smooth stop at the valley center (t981 law unchanged). Probe legs"
+        " (position/velocity curves, pass-or-monotonic-decel, no oscillation in either speed tier): (a) l"
+        "ow tier - cart released on the west rim of a 3-cell V enters at v^2 ~ 21 < threshold ~ 41.6, |v|"
+        " non-increasing after valley entry, distance-to-center non-increasing (never crosses), zero x re"
+        "versals, parks within 0.06 of the center, pinned for 60 ticks; (b) high tier - boost-fed cart en"
+        "ters at v^2 ~ 135 > threshold, x strictly non-decreasing, zero reversals, crosses >= 0.9 east of"
+        " the center (a captured cart cannot); (c) source pins for the energy pass line, the pass thresho"
+        "ld, the opposite-climb scan and the scan cap constant",
+               "t1019(b2) critical-energy boundary leg (review0907 B-P2-3): runtime self-search over powered-pla"
+        "tform lengths L in 1..4 x flat decay cells D in 0..1 finds a trial whose measured valley-entry v"
+        "^2 lands within +-10% of the mirrored pass threshold 2*19.799*(1+0.05) = 41.58 (boost is a per-t"
+        "ick lerp toward the 12.8 cap with no closed form, so the leg calibrates itself each run instead "
+        "of hardcoding a platform length), then asserts the boundary contract: pass (crosses 0.9 east of "
+        "center) OR stop (parks within 0.15 of center) - never a limit cycle (<= 1 x-reversal; a single c"
+        "limb-and- return on the far wall is the documented near-threshold capture shape, repeated recipr"
+        "ocation is the killed spin cycle). Most sensitive spot for criterion drift: a changed threshold "
+        "formula or margin flips the behavior of the in-window trial first herediag no trial in window, s"
+        "ee [t1019 diag] b2",
+               "t1019(d) in-band mid-tier leg (review0906 #6): a cart entering the valley cell at v^2 in [25, 39"
+        "] - inside the ~[21.8, 41.6) wrong-capture band (the reachable single-cell-boost tier measures ~"
+        "38 at the rim; lower tiers are unreachable - flat decay bleeds only ~0.2 v^2 per cell and the we"
+        "st-descent gain lands after the sampling point) - must PASS through, because the criterion now c"
+        "harges the energy to the valley-floor account: the downhill half still returns ~2*g*d = ~19.8 v^"
+        "2 while the cart slides to the center, so the sampled account 38.5 + 19.8 = 58.3 clears the pass"
+        " threshold 41.58 (old-capture margin 3.1, new-pass margin 16.7) and the cart crests the far wall"
+        " (crosses 0.6+ past the center; a captured cart parks within 0.06 of it and can never). The old "
+        "gate sampled the CURRENT v^2 every tick of the downhill half - capture is takeover (skip slope p"
+        "hysics, v monotone down) so the cart never got its 'slide to the floor, grow, then be released' "
+        "chance and mid-band entries were wrongly braked to a stop at the center (legs (a)/(b) straddle t"
+        "he band edges and stayed green on both formulas; this leg is the discriminator). Runtime self-se"
+        "arch over platform L in 1..4 x flat decay D in 0..4 picks the trial whose measured valley-entry "
+        "v^2 lands in-band; rev <= 1 tolerates the documented single climb-and-return after the far- wall"
+        " dead end (a re-entry at low energy is then captured - no limit cycle)diag no in-band trial, see"
+        " [t1019 diag] d",
+               "t1019(e/f) golden-rail valley legs (review0906 #7): the valley-cell exemption used to fire on Go"
+        "ldenRail regardless of power state, while the t939 (3) unpowered-brake lives only in the |speed|"
+        " < 1e-3 static branch - a COASTING cart on an unpowered golden rail in a V valley was handed bac"
+        "k the near-conservative valley physics plus both wall re-pump kicks: the t981 reciprocation symp"
+        "tom revived on unpowered golden valleys. The exemption now requires GoldenRailStateOnFlag (the s"
+        "ame bit the boost path reads): (e) unpowered - the gravity cart (static-gate start, entry v^2 ~ "
+        "21, valley-floor account 40.8 < 41.58) is captured, parks at the center with zero reversals and "
+        "stays pinned for 60 ticks (once stopped, the t939 (3) static brake takes over = stable rest); (f"
+        ") powered control - the boost lerp takes over in the valley and the cart passes the far wall, pr"
+        "oving the narrowing did not swallow the powered-rail semanticsdiag see [t1019 diag] e/f" }, [&]() {
         // ── (a) 低速档。rig 选址：footprint x0-1..x0+3 × z0-1..z0+1 × Y-1..Y+2。──
         int xa = -1, za = -1;
         for (int zz = 3; zz < 94 && xa < 0; zz += 2)
@@ -1334,7 +1475,7 @@ void MatrixRun::section05_render_ui()
                              " powered-rail semantics"
                           << (okG7 ? QString()
                                    : QStringLiteral("diag see [t1019 diag] e/f"));
-    }
+    });
 
     // ── P-t944 上坡顶方块阻挡探针（MinecartManager 直编；spec「上坡处上方放方块 → 矿车被挡住不能穿墙
     //    过去（移动积分对坡向阻挡格的碰撞）」）──
@@ -1356,7 +1497,22 @@ void MatrixRun::section05_render_ui()
     //   (e) 阴性·下坡不阻挡：阻挡格在场，峰上 spawn 车向西下坡 → 穿阻挡格列直达低平死端（用户口径
     //       「下坡方向不做额外阻挡」钉住，防上行闸被简化掉）；
     //   (f) 源码钉：入点锚 / 子步探测调用 / 上行闸梯度行 / 回钳调用 / 两函数定义 / 头文件声明。
-    {
+    runLegMulti({ "t944 block above an uphill rail stops the cart (no more wall-phasing through slope-top blocks): "
+        "the rail-mode integrator was a privilege lane constrained only by rail connections, so a cart cl"
+        "imbing a gradient surface phased straight through a block placed over the slope. Fix probes the "
+        "committed substep position (cart AABB vs world collision sub-AABBs, Y pinned to the candidate's "
+        "rail surface so the raised body cell is naturally covered) and gates the block to UPHILL travel "
+        "only (same-surface gradient along travel > the t939 threshold) - downhill and flat overlaps stay"
+        " unblocked per the user's caliber (low-headroom descent semantics kept; flat overlaps do not geo"
+        "metrically exist). Probe legs: (a) climbing into a block over the slope stops the cart on the lo"
+        "wer flank, rail-locked with Y pinned to the surface, stable under continued W (no wall-pass); (b"
+        ") removing the block resumes the traverse to the upper dead-end; (c) negative: an obstacle-free "
+        "build traverses unchanged from a standing start; (d) negative: a flat 1-clearance tunnel mouth ("
+        "P18 geometry) is passed through - the cart top 0.9125 never meets a ceiling bottom at 1.0; (e) n"
+        "egative: with the block present a crest-spawned cart descends straight through the block column "
+        "to the low dead-end (no downhill blocking); (f) source pins for the entry anchor, the substep pr"
+        "obe call, the uphill gradient gate, the clamp call, both helper definitions, and the header decl"
+        "aration" }, [&]() {
         // rig 选址：运行期扫描空区（t943 模式）。footprint x0-2..x0+4 × z0-1..z0+1 × kRigY-2..kRigY+3。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -1567,7 +1723,7 @@ void MatrixRun::section05_render_ui()
                              " probe call, the uphill gradient gate, the clamp call, both helper"
                              " definitions, and the header declaration"
                           ;
-    }
+    });
 
     // ── P-r0830B review-2026-08-30 批 B（矿车 / 红石中 #2/#3/#4 + 低 #8/#9/#10/#11/#12）探针 ──
     //   七修一登（审查建议照单全收），每腿回退对应修法即红：
@@ -1595,7 +1751,30 @@ void MatrixRun::section05_render_ui()
     //   (g) #11（低）t943 有输入分支补 t939 梯度覆盖：W 驱动西行下单格坡面（层差读 0 的口径劈叉面）
     //       → 速度吃 slopeDownAuto 供能下探（阈值钉；旧版裸邻轨层差在坡面上向平侧回 8 巡航 = 红）。
     //   (h) #12（低）t943 链可达闸「下线并行轨过拒」登记注释：源码钉（纯注释登记，注释消失即红）。
-    {
+    runLegMulti({ "review0830 batch B (carts/redstone #2 #3 #4 #8 #9 #10 #11 #12): (a) a source floating DIRECTLY A"
+        "BOVE its seed rail with the chain descending off it puts the first chain rail 2 layers below the"
+        " destroyed cell - outside the 4-axis three-height probe window while isReceivingPower legally re"
+        "ads the 6-orthogonal feed - so the old discovery found nothing and the chain shrank one rail per"
+        " tick via the flip wavefront (t1 still 7 lit); the vertical-seed probe (x, y+-1, z) for non-rail"
+        " edit cells now dirties the whole chain for a one-pass shutdown (source-below mirror rejected: t"
+        "he t733 support collapse of the seed rail would itself chain-walk and mask the blind spot); (b) "
+        "a parked EMPTY cart on a de-powered golden slope holds (t939 brake anchor), but MOUNTING it used"
+        " to route the stationary ride through the coasting slope integrator which started it rolling fro"
+        "m zero (the t939 half-fix); the same gate now zeroes the ridden stationary cart while W input st"
+        "ill pushes it (brake but pushable); (c) climbing a single-block slope under a stone with the rai"
+        "l BEHIND the cart torn out mid-climb (the review's rail-less column, made reachable) loses the b"
+        "ackward gradient sample: the old code flipped anchorFree and KEPT the overlapping commit, so the"
+        " next tick's embedded entry exempted the whole tick and the cart phased through the stone onto t"
+        "he upper arm; the split embeddedAtEntry/lastFreePos reverts the lost substep instead - the cart "
+        "never crosses the block column; (d) a stationary cart on flat plain rail makes ZERO gradient sam"
+        "ples (cheap 4-neighbor +-1-layer prefilter; was one ~30-blockAt sweep per tick); (e) source pins"
+        " for the snap staging form (verify in a local copy, commit once); (f) tearing the end dust off a"
+        " source- less dust line flips the neighbor's connection bits with power unchanged and the chain-"
+        "walk counter moves by exactly 1 (the notePowerWrite edit walk only; was 2 with the wide A2 trigg"
+        "er), while feeding the line a redstone block still walks (>=2); (g) driving W west down a single"
+        "-block slope face whose layer diff reads 0: the gradient overlay now engages slopeDownAuto on th"
+        "e input branch (speed dips past the -8 cruise target; was pinned at cruise); (h) source pin for "
+        "the chain-reachability gate's registered under-line parallel-track tradeoff comment" }, [&]() {
         bool okA = false, okB = false, okC = false, okD = false, okE = false,
              okF = false, okG = false, okH = false;
         const QString exeDirRb = QCoreApplication::applicationDirPath();
@@ -1963,7 +2142,7 @@ void MatrixRun::section05_render_ui()
                              " cruise); (h) source pin for the chain-reachability gate's"
                              " registered under-line parallel-track tradeoff comment"
                           ;
-    }
+    });
 
     // ── P-t945 仙人掌旁放铁轨（玩家放置全链）探针 ──
     //   用户第五轮实测「仙人掌旁放铁轨放不了」——t911 只钉了 World 直编层（P-t911 探针经 w.setBlock 直写，
@@ -1984,7 +2163,19 @@ void MatrixRun::section05_render_ui()
     //   (f) 对称面·火把贴柱旁 → 放置成功 + 仙人掌无恙 + 零掉落（非实体族同口径）；
     //   (g) 对称面·石头挤占柱旁 → 放置成功 + 整柱坍落（t984 后完整实体方块邻接仍触发 ④，钉口径防漂移）；
     //   (h) 源码钉：placeBlock 铁轨预检块 + checkCactusOnEdit ④ 邻接坍落关键行（任一消失即红）。
-    {
+    runLegMulti({ "t945 rail placement beside a cactus succeeds through the REAL player placement path (raycast -> "
+        "placeBlock prechecks -> setBlock) and leaves the cactus standing (t984 caliber): (a) aiming at t"
+        "he ground top beside the column places the rail in the adjacent ground-level cell and both colum"
+        "n cells stay cactus with zero drops; (b) aiming at the cactus column's own 0.8 selection face re"
+        "solves to the same adjacent cell with the same outcome; (c) negative: aiming at the upper column"
+        " face targets a support-less cell and the placement is rejected WITHOUT breaking the cactus (ill"
+        "egal placement gets no free pass); (d) negative: a floating rail spot far from any cactus stays "
+        "rejected (rail support semantics intact); (e) Survival mode end-to-end: same placement through a"
+        " hotbar rail stack with the stack consumed by one (t669) and the cactus intact; (f) symmetry: a "
+        "torch aimed beside the column also places harmlessly (non-solid families never fell the cactus);"
+        " (g) symmetry: a solid stone beside the column still fells it (t984 keeps the full-cube gate - p"
+        "inned against scope drift); (h) source pins for the rail support precheck and the adjacency coll"
+        "apse call" }, [&]() {
         // rig 选址：kRigY 高空全空盒扫描（同 t911 模式；dx -1..7、dz -1..1、dy -2..+4）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -2239,7 +2430,7 @@ void MatrixRun::section05_render_ui()
                                  " (t984 keeps the full-cube gate - pinned against scope drift); (h) source"
                                  " pins for the rail support precheck and the adjacency collapse call";
         }
-    }
+    });
 
     // ── P-t984 仙人掌旁放非整立方方块（行为级口径翻案）探针 ──
     //   用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」：仙人掌破坏校验
@@ -2255,7 +2446,16 @@ void MatrixRun::section05_render_ui()
     //   (f) 源码钉：④ 门槛 isFullCube 行 + t503 worldgen 守卫 isFullCube 行（任一消失即红）；
     //   (g) 对照腿·玻璃（review0903 #1：solid=false 但 ShapeFull 的整立方）贴柱 → 照旧整柱坍落（isSolid
     //       代理口径下漏放 → 本腿钉「整立方才是权威」，代理门槛回潮即红）。
-    {
+    runLegMulti({ "t984 non-full-cube neighbors beside a cactus place successfully and leave the cactus standing (r"
+        "eversed caliber per user): (a) rail, golden rail, detector rail and torch on the four horizontal"
+        " neighbors of a 2-high column all stay with the cactus intact and zero drops; (b) wood and stone"
+        " pressure plates likewise; control legs keep the existing semantics: (c) a full cube (stone) bes"
+        "ide the column still fells it (one drop), (d) sand (a full cube - same predicate as the t503 wor"
+        "ldgen guard and falling-sand path) still fells it; (e) dig chain: rail-adjacent cactus survives,"
+        " digging the rail harms nothing, digging the sand support drops the whole 2-high column via the "
+        "support-loss chain; (f) source pins for the isFullCube gate in checkCactusOnEdit and the t503 wo"
+        "rldgen guard (one predicate, both paths); (g) glass (full cube with solid=false - review0903 #1)"
+        " still fells it (the old isSolid proxy let glass slip through - pinned against regression)" }, [&]() {
         // rig 选址：kRigY 高空全空盒扫描（dx -1..2、dz -1..1、dy -2..+4）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -2428,7 +2628,7 @@ void MatrixRun::section05_render_ui()
                                  " solid=false - review0903 #1) still fells it (the old isSolid proxy"
                                  " let glass slip through - pinned against regression)";
         }
-    }
+    });
 
     // ── P-t985 仙人掌底接触阴影探针（不满格方块的光照 opacity 语义；t985）──
     //   用户实测：仙人掌放沙子上「底部沙子与仙人掌接触的部分整片变成阴影」。根因归因（skyLight 与 AO
@@ -2448,7 +2648,17 @@ void MatrixRun::section05_render_ui()
     //   (d) 其它不满格方块同口径：铁轨 / 火把 / 石压力板 / 雪层贴沙 → 所占格 skyLightAt==15（支撑面不暗，
     //       防漂移钉——本族本就全透，钉住不许跟回去）；
     //   (e) 源码钉：lightOpacity Cactus 全透行 + 光 BFS 只读 lightOpacity 单一权威行（任一消失即红）。
-    {
+    runLegMulti({ "t985 a cactus standing on sand casts no contact shadow on the support face (light-opacity semant"
+        "ics for non-full blocks, reversed t445 full-shadow caliber): (a) both cactus cells of a 2-high c"
+        "olumn on sand read skylight 15 - the cell the sand top face samples used to sit at 0 because the"
+        " seed column broke at the cactus and the 15-opacity BFS refused to leak in, pressing the whole c"
+        "ontact face into the darkness floor; (b) the cactus column stays out of the heightmap (columnTop"
+        "SurfaceY == sand top) so the AO/PCF side of the double check is pinned too; control legs keep ex"
+        "isting semantics: (c) a full stone cube on sand still reads skylight 0 and still tops the column"
+        " (full cubes keep full shadow); (d) rail, torch, stone pressure plate and snow layer on sand all"
+        " keep skylight 15 in their cells (non-full families stay transparent - drift guard); (e) source "
+        "pins for the transparent cactus opacity row and the light BFS reading the single lightOpacity au"
+        "thority (t933 batch reflood chain included)" }, [&]() {
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
             for (int xx = 4; xx + 2 < 96 && x0 < 0; xx += 2) {
@@ -2555,7 +2765,7 @@ void MatrixRun::section05_render_ui()
                                  " reading the single lightOpacity authority (t933 batch reflood"
                                  " chain included)";
         }
-    }
+    });
 
     // ── P-t946 坐姿变换链连续域探针（狼/豹猫；t946 断链形态回归拦截，t987 前爪根锚重推后照绿）──
     //   用户实测（第五轮）：「身体翘太高、身体与躯体分离中间透明」。根因 = t878② 坐姿把躯干绕枢 +40°
@@ -2574,7 +2784,21 @@ void MatrixRun::section05_render_ui()
     //   (f) 源码钉：单根锚派生形态（t987 kSitPivotY/kSitPivotZ 值 + 躯干 addBoxRot 枢轴引用 + 颈附
     //       sitRot 链 + 大腿块 z 绑根锚）+ Main.qml / ResourceBrowser.qml 眼/尾 overlay 成对契约新位
     //       （t880/t902/t931 源码钉先例——QML 侧无行为级断言面）。
-    {
+    runLegMulti({ "t946 wolf/ocelot sit pose rebuilt on a single root-anchor transform chain: the t878 pose rotated"
+        " the torso +40 deg about a hip pivot while head/ears/legs stayed at independent absolute coordin"
+        "ates (broken chain -> the user-visible 'chest reared too high with a transparent gap between bod"
+        "y halves'). The fix derives every torso-following segment (head via the rotated neck attach, ear"
+        "s via the head offset) from ONE root anchor + pitch (mobmodel.cpp sitRot lambdas; t987 re-rooted"
+        " the chain onto the front-paw ground point kSitPivotY/kSitPivotZ with an analytic-landing pitch,"
+        " discipline unchanged), with hind legs folded flat under the rump and standing-identical front l"
+        "egs. Verified on REAL mesh vertices (MobModel direct build; per-column coverage = normal-oriente"
+        "d crossing-depth union -- parity is wrong here because the joints intentionally OVERLAP as separ"
+        "ate closed boxes): (a) sit minY == collision bottom (wolf -0.42 / ocelot -0.40), (b) maxY <= 0.6"
+        "2/0.58 (no rearing high), (c) hip band z[0.16,0.36]/[0.10,0.30] columns ground-connected with in"
+        "terior gaps <= 0.075 (the broken form gaps 0.11-0.23), (d) front-leg band columns continuous, (e"
+        ") standing-pose silhouette bounds unchanged (zero regression), (f) source pins for the shared-ro"
+        "ot derivation form and the Main.qml/ResourceBrowser.qml eye/collar/tail overlay pair-contract po"
+        "sitions" }, [&]() {
         bool ok = true;
         QString diag;
         // 三角汤（顶点 stride 5 float = pos3+uv2，MobVtx 契约；索引 U32）。
@@ -2805,7 +3029,7 @@ void MatrixRun::section05_render_ui()
                              " pins for the shared-root derivation form and the Main.qml/ResourceBrowser.qml"
                              " eye/collar/tail overlay pair-contract positions"
                              ;
-    }
+    });
 
     // ── P-t987 四足坐姿肢体返修探针（狼/豹猫；用户口径「完全像兔子——后脚多出好长一节接触地面、
     //    腿凭空长高一节」）──
@@ -2825,7 +3049,22 @@ void MatrixRun::section05_render_ui()
     //    (d) 紧凑坐高钉：坐姿全顶点 maxY ≤ 站姿 maxY + 0.02（狼 0.37 / 豹猫 0.32；旧形态耳顶
     //        0.568/0.50 = 「兔子直立」必红）；
     //    (e) 站态对照零回归：sitPose=false 全顶点 AABB = 站姿界（狼 [−0.42,0.37] / 豹猫 [−0.40,0.32]）。
-    {
+    runLegMulti({ "t987 quadruped sit-pose limb rework (wolf/ocelot): the t946 pose kept the root anchor on the rum"
+        "p itself, so the 18-deg rearing barely moved the hip (-0.013) while lifting the chest to 0.39 --"
+        " the sit height came from LENGTHENED front legs (0.34 -> 0.54) plus a 0.42-tall thigh pillar and"
+        " a long ground slab under the haunch (user: 'the back foot grows a long extra section touching t"
+        "he ground, the legs grow a taller section out of nowhere -- looks exactly like a rabbit'). The r"
+        "ework roots the chain on the FRONT-PAW GROUND POINT (the standing front-leg footprint as the str"
+        "uctural invariant) and pitches the torso by the analytic angle that lands the rump-bottom corner"
+        " exactly on the ground (wolf 24.4 deg / ocelot 26.6 deg): hips truly grounded, front legs in the"
+        " standing footprint (tops sunk 0.03/0.04 into the chest to fill the shoulder notch, no 0.5 lengt"
+        "hening), hind legs folded as low side-buried haunch blocks plus flat forward paw slabs. Verified"
+        " on REAL mesh vertices (MobModel direct build): (a) a grounded vertex exists in the rear-rump ba"
+        "nd z[0.40,0.50]/[0.36,0.46] (the old form's hip bottom hangs at -0.143 -> red), (b) zero sit ver"
+        "tices below the support plane (no through-ground protruding section), (c) the front-leg column's"
+        " OUTER half holds a top-ring vertex within 0.03 of the sit leg top -0.05/-0.02 (the lengthened 0"
+        ".12/0.09 tops -> red), (d) sit maxY <= standing maxY + 0.02 (compact crouch; the old upright 0.5"
+        "68/0.50 -> red), (e) standing-pose full-vertex AABB unchanged" }, [&]() {
         bool ok = true;
         QString diag;
         auto sitVertScan = [](int mobType, bool sit, float &mnY, float &mxY,
@@ -2921,7 +3160,7 @@ void MatrixRun::section05_render_ui()
                              " maxY + 0.02 (compact crouch; the old upright 0.568/0.50 -> red), (e)"
                              " standing-pose full-vertex AABB unchanged"
                              ;
-    }
+    });
 
     // ── P-t986 项圈一圈探针（驯服狼/豹猫「脖子完整一圈项链」；旧 t831/t963 overlay 退役）──
     //    用户第五轮口径「差不多看到两个红点的样子」根因：旧单横扁盒 overlay 心 z=-0.30 埋进头盒
@@ -2942,7 +3181,20 @@ void MatrixRun::section05_render_ui()
     //        Main.qml collarVisible 绑定 == 2（狼+豹猫）、ResourceBrowser.qml ≥1；双 QML 文件零
     //        旧 overlay 残留（坐姿位 vector3d(0,0.35,-0.175)/(0,0.32,-0.19) + 横扁环带 scale
     //        (0.42,0.06,0.07)/(0.36,0.05,0.06) 四串全绝迹 = 「一处几何不复制」tripwire）。
-    {
+    runLegMulti({ "t986 full collar ring: the old single flat-box overlay sat at z=-0.30, INSIDE the head box z-ran"
+        "ge, so only the two x-side tabs poked out (user: 'you can basically just see two red dots'). The"
+        " collar now lives in MobModel geometry (collarVisible + dedicated subset 1): four thin slabs wra"
+        "p the BARE neck segment (band z[-0.26,-0.20] between body front and head rear) around the neck c"
+        "ross-section, visible as a complete ring from any yaw. Verified on REAL mesh vertices (MobModel "
+        "direct build): collar adds exactly 96 verts in all four pose/species combos (wolf/ocelot x stand"
+        "/sit) spread over >=7 of 8 45-deg sectors around the neck axis (two-dot form spans <=2), centroi"
+        "d at the bare-neck anchor (0.02,-0.23) or the sit-chain-derived spot (-0.015,-0.067 / -0.013,-0."
+        "033; t987 front-paw root chain); source pins: single-geometry emission x4 in mobmodel.cpp, colla"
+        "rVisible bindings in Main.qml x2 + ResourceBrowser (t782 three-consumer sharing), zero old overl"
+        "ay leftovers (no duplicate box lists), and zero MC-asset wiring: the collar is procedural geomet"
+        "ry with a mapless solid-color material - wolf_collar/cat_collar texture names are referenced by "
+        "no implementation file (IP gate: nothing shipped or consumed from the vanilla entity texture set"
+        ")" }, [&]() {
         bool ok = true;
         QString diag;
         struct RingV { float x, y, z; };
@@ -3072,7 +3324,7 @@ void MatrixRun::section05_render_ui()
                              " names are referenced by no implementation file (IP gate: nothing"
                              " shipped or consumed from the vanilla entity texture set)"
                              ;
-    }
+    });
 
     // ── P-t947 狼三修（R19.17 ①观察者不跟随 / ②咬击 4HP 口径 / ③chase 越障跳）──
     //    通用 rig：44×44×96 局部世界（seed 26）整面凿平 —— y[85,95] 清 Air + y84 全铺 Stone（lessons
@@ -3093,7 +3345,14 @@ void MatrixRun::section05_render_ui()
     //        2 格厚 > kAttackRange 1.6 → 隔墙咬几何不可能（咬到必已越墙）；狼防御追击 → 越墙（中心 x >
     //        24.2 = 远侧墙沿 24.0 + 落位余量）+ 越墙后咬击掉血（「起跳越过后继续接近」）。t923 版 chase 把
     //        跳门在 `!moved`（斜向滑墙单轴恒可动 → 永不等到撞停）—— 阴性轮回退该形态本腿恒红（贴墙溜到超时）。
-    {
+    runLegMulti({ "t947 wolf triple-fix: (1) spectator-owner follow gate -- tamed standing wolf holds off (>=4.0) a"
+        "nd skips the far-teleport (>=10) while the owner spectates, creative/survival control still clos"
+        "es to the 2.5 stop band (<=3.0); (2) bite caliber pinned at 4 HP/bite (static_assert + per-bite="
+        "=4): an armored 20HP shambler survives two bites at exactly 12 HP -- total 8 < 20, no two-bite k"
+        "ill (t377 mob armor is visual-only by spec, so the constant is the real per-bite damage); (3) ch"
+        "ase obstacle jump now probes proactively every AI tick (aiHostile precedent) instead of only aft"
+        "er a full stop behind a >0.6 gate -- the wolf crosses a 2-thick full-depth 1-high wall it cannot"
+        " bite through and lands a bite beyond it" }, [&]() {
         bool ok = true;
         QString diag;
         // ② 常量源级钉（kWolfAttackDamage 是类私有 constexpr，测试 TU 不可直读 → t923 (d) 源码钉先例）：
@@ -3259,7 +3518,7 @@ void MatrixRun::section05_render_ui()
                              " full stop behind a >0.6 gate -- the wolf crosses a 2-thick full-depth"
                              " 1-high wall it cannot bite through and lands a bite beyond it"
                              ;
-    }
+    });
 
     // ── P-t988 驯服狼战斗 AI 探针（用户口径「狼帮我打僵尸 AI 还是不会走路 + 遇到要跳跃才能上的
     //    格子不会跳、卡在那里」）──
@@ -3283,7 +3542,20 @@ void MatrixRun::section05_render_ui()
     //        不改变本腿终态）；门形回归（同层贴脸压跳）由 P-r0830C(d) 钉承担）：僵尸钉在台沿格（24,86,22，
     //        主人贴邻 1.0 咬距内 → 僵尸追主不动），狼台下面压台面后距僵尸 0.8 ≤ kAttackRange → 异层目标
     //        （|tdy|=1.0 > 0.5）带内照探跳 → 狼跳上台。判据同 (b) 合取，25s 帽。
-    {
+    runLegMulti({ "t988 tamed-wolf combat AI: command the wolf on a zombie (the real registration chain -- the sham"
+        "bler melee-hits the owner on its detect band and the hit site registers the shared m_wolfTarget)"
+        " and the wolf RUNS to close (flat control: min wolf-zombie distance reaches the 1.6 bite band an"
+        "d the first bite lands within 20s) and hops the 1-block step on the way (step leg: a full-depth "
+        "y85 stone platform tops out 1 above the floor, the wolf below reaches x>=24.5 WITH y>=86.3 -- th"
+        "e conjunction only holds once it stands on top; a ground jump peaks past 86.3 but the platform f"
+        "ace keeps x pinned < 24.5, a blocked wolf stays at x<20) and lands its bite beyond the step with"
+        "in 30s; the #14 bite-band jump suppression stays narrowed to SAME-FLOOR targets (|target dy| <= "
+        "0.5): leg c is a CAPABILITY leg -- the wolf can climb to and bite a cross-level target pinned at"
+        " the ledge 0.8 XZ away -- not a gate-shape discriminator (the probe's own diag showed the leg ou"
+        "tcome is insensitive to the gate form via the knockback release-distance clause, review0903 #2);"
+        " gate-shape regression (no-hop-while-biting on a same-floor target) is pinned by the review0830 "
+        "C(d) rig (source pin evolved to the narrowed gate); the chase lambda stays the single movement d"
+        "rive and the follow/stand states keep their t947 bands (zero regression)" }, [&]() {
         bool ok = true;
         QString diag;
         auto flatRig988 = [](World &w) {
@@ -3419,7 +3691,7 @@ void MatrixRun::section05_render_ui()
                              " the chase lambda stays the single movement drive and the follow/stand"
                              " states keep their t947 bands (zero regression)"
                              ;
-    }
+    });
 
     // ── P-t948 狼攻击仇恨转移（R19.17 🅲：狼主动咬敌对 → 被咬者转火攻击狼；t923 反击注册面核）──
     //    通用 rig：44×44×96 局部世界（seed 26）整面凿平 —— y[85,95] 清 Air + y84 全铺 Stone（t947
@@ -3438,7 +3710,13 @@ void MatrixRun::section05_render_ui()
     //    (d) 源码钉：狼咬击点接单一注册入口 mobAggroAgainst(m_wolfTarget, idx) + 敌对近战消费点接
     //        wolfRetaliateAgainst(aggroIdx, idx)（t923 反击面在转火近战路径的接线完整；t923(d) 源码钉
     //        先例——逐帧弹道 / 打斗时序 headless 不稳的面锁接线文本）。
-    {
+    runLegMulti({ "t948 wolf-bite aggro transfer: the bitten hostile turns on the biting wolf -- a shambler (with t"
+        "he player inside its detect band) counter-melees the wolf that bit it (wolf hp drop = zombie mel"
+        "ee is the only damage source and only the revenge branch melee-hits mobs), a bones archer keeps "
+        "distance and shoots the wolf (arrows settle on the wolf via the existing t712/t923 filter, seman"
+        "tics intact), a bitten pig (passive, no aggro system) never fights back (wolf stays full HP), an"
+        "d both wiring sites are source-pinned (bite -> mobAggroAgainst, melee consumer -> wolfRetaliateA"
+        "gainst)" }, [&]() {
         bool ok = true;
         QString diag;
         auto flatRig948 = [](World &w) {
@@ -3559,7 +3837,7 @@ void MatrixRun::section05_render_ui()
                              " and both wiring sites are source-pinned (bite -> mobAggroAgainst,"
                              " melee consumer -> wolfRetaliateAgainst)"
                              ;
-    }
+    });
 
     // ── P-t949 豹猫两修（R19.17 🅲：① 生鱼驯服 live 右键可达 / ② 图鉴驯服猫预览贴图源 × UV 模式同源）──
     //    根因①：eventFilter 右键链的食物分支（foodHungerAmount>0 → beginEating + return）先行拦截——生鱼 /
@@ -3582,7 +3860,15 @@ void MatrixRun::section05_render_ui()
     //        互异 =「豹猫贴图非狼贴图」映射级断言）；Main.qml 钉游戏内 ocelotPackHit 判据含 !ocatTamed +
     //        baseColorMap 收口永不落狼贴图；ResourceBrowser.qml 钉 packTextured 门含驯服猫例外且与 t920
     //        贴图切换同条件（t923(d) 文件读源码钉先例——QML 消费端 headless 不可达）。
-    {
+    runLegMulti({ "t949 ocelot pair-fix: raw-fish right-click on a wild ocelot tames it through the REAL input chai"
+        "n (synthesized right-press driven straight into eventFilter -- the eat branch no longer swallows"
+        " the feed; tame flag + variant 0..2 + fish consumed), a cooked fish press never tames (t836 raw-"
+        "only caliber: eat path, fish untouched), raw beef on a damaged tamed wolf heals it 6->10 through"
+        " the same gate (t480 meat face now reachable live), and the texture source stays single- authori"
+        "ty: mobEntityMap 11->cat/ocelot.png distinct from 10->wolf/wolf.png, the in-game delegate pack-h"
+        "it excludes the tamed state, and the viewer packTextured gate now carries the same tamed-cat exc"
+        "eption as the t920 texture switch (no more box-UV sampling of the program cat art = the wolf-gra"
+        "y mottle the user reported)" }, [&]() {
         bool ok = true;
         QString diag;
         auto flatRig949 = [](World &w) {
@@ -3757,7 +4043,7 @@ void MatrixRun::section05_render_ui()
                              " exception as the t920 texture switch (no more box-UV sampling of the"
                              " program cat art = the wolf-gray mottle the user reported)"
                              ;
-    }
+    });
 
     // ── P-t950 mob 装备拾取穿着（R19.17 🅲：僵尸/骷髅**经过**装备掉落物时有概率拾取并穿上——不主动
     //    寻路纯接触判定；按槽位规则更好护甲/武器才换；换下旧装备掉回地面）──
@@ -3778,7 +4064,16 @@ void MatrixRun::section05_render_ui()
     //    (e) 非装备不掉腿：生猪排（食物材料段）+ 弓（attackDamage=徒手 → 非武器口径）在场 → 6 窗恒不拾。
     //    (f) 源码钉：tickImpl 接线行 / 类型门行 / 护甲与武器的严格更大比较行 / removeAt 移除行 / 旧装备
     //        掉地行 / Entity heldItemId 字段行。
-    {
+    runLegMulti({ "t950 mob equipment pickup-and-wear: a shambler passing over an iron chestplate dons it (armor sl"
+        "ot changes, drop vanishes from the ground, nothing re-dropped from the empty slot) under chance="
+        "1, a worse drop (leather on an iron-set mob) stays put across six windows while a better one (di"
+        "amond) swaps in and the displaced iron chestplate falls back to the ground and is never re-sucke"
+        "d once aged (strictly-better rule, not the pickup-delay window), weapons follow the same rule as"
+        " a data-registered held slot (wood sword picked from bare hands, iron sword swaps it out and the"
+        " wood sword drops back, bones archers obey the same rule; attack power stays the AI constant per"
+        " the registered trade-off), chance=0 never picks across eight windows, food and the bow (fist-cl"
+        "ass attackDamage) are never picked, and the tickImpl wiring / type gate / strictly-better compar"
+        "isons / removal / drop- back sites are source-pinned" }, [&]() {
         bool ok = true;
         QString diag;
         auto flatRig950 = [](World &w) {
@@ -3997,7 +4292,7 @@ void MatrixRun::section05_render_ui()
                              " wiring / type gate / strictly-better comparisons / removal / drop-"
                              " back sites are source-pinned"
                              ;
-    }
+    });
 
     // ── P-t951 白天阴影 AI（R19.17 🅲：僵尸/骷髅白天优先找阴凉保命；等玩家进阴影才发起攻击；
     //    骷髅可在阴影内射箭（走位不出阴影）；夜间全部现行行为零回归）──
@@ -4018,7 +4313,17 @@ void MatrixRun::section05_render_ui()
     //    (d) 夜间零回归腿：缺省 skyBrightness → 暴晒僵尸照旧直线追击并攻击（t951 分支旁路 = 旧行为）。
     //    (e) 源码钉：迟滞刷新行（两 AI ≥2）/ 灼烧谓词定义 + ≥7 处消费（单源禁令行为面）/ 白名单行 +
     //        ≥3 消费 / 攻击压门行 / 弓手候选闸行 / 头文件声明 + 常量 + Entity 字段 / tickImpl 生产接线。
-    {
+    runLegMulti({ "t951 daytime shade AI: a sun-exposed shambler (player pressing inside its detect band) walks int"
+        "o a stone overhang and settles in truly shaded cells, holding there across a stability window; a"
+        " sheltered zombie facing a sun-lit player 2.4 blocks away neither attacks nor leaves the overhan"
+        "g for 300 ticks and opens the attack the moment the player steps into the shade; a sheltered bon"
+        "es archer under retreat pressure (player 2.6 blocks, inside the keep-min band) still shoots and "
+        "lands an arrow on the exposed player while floor(XZ) never leaves the overhang cells (movement c"
+        "andidates that would land in burning sunlight are dropped); with the sky channel at its night de"
+        "fault the legacy behavior is bit-identical (shambler charges and attacks in the open); and the s"
+        "hade-hold hysteresis lines, the single sun-exposure sampling authority (burn + both AIs + player"
+        " verdict), the undead whitelist, the attack-suppression gate, the archer candidate gate, the hea"
+        "der declaration/constants/field and the production skyBrightness wiring are source-pinned" }, [&]() {
         bool ok = true;
         QString diag;
         auto flatRig951 = [](World &w) {
@@ -4215,7 +4520,7 @@ void MatrixRun::section05_render_ui()
                              " declaration/constants/field and the production skyBrightness wiring"
                              " are source-pinned"
                              ;
-    }
+    });
 
     // ── P-t952 小蹒跚者 + 小鸡骑士（R19.17 🅲：<1 格高、移速快、可穿盔甲的幼体僵尸；生成时概率与
     //    小鸡组合成「小鸡骑士」——小鸡驮小僵尸，骑手 AI 驱动载具位移）──
@@ -4240,7 +4545,21 @@ void MatrixRun::section05_render_ui()
     //        冻结 + aiAccum 累积、载具 AI 挂起分支、挂载 pass 接线、晒燃白名单、玩家推挤成对豁免、
     //        aiHostile 快速低伤参数分支、Renderer 分支与白名单表行、拾取门扩段、蛋表 case、创造
     //        调色板、图鉴条目 / 蛋映射 / Loader 贴图行、蛋图标 case。
-    {
+    runLegMulti({ "t952 baby shambler + chicken jockey: the spawned baby stands under half a block tall (halfH 0.45"
+        ", below the adult's 0.90) with a slimmer hostile box; chasing a player from the same 5-block dis"
+        "tance it covers over 1.15x the adult's ground in 30 ticks (fast caliber); it picks up and wears "
+        "an iron chestplate it stands on through the equipment- pickup whitelist (t950 face extended); wi"
+        "th the jockey chance pinned to 1 every baby spawn combines with a chicken at the same cell - the"
+        " two-slot pair is cross-linked and the rider stays pinned on the mount's top across ticks while "
+        "the mount's XZ follows the rider - and pinned to 0 every baby spawns independent with no chicken"
+        " in the world; killing the chicken drops the baby back to the ground alive and unlinked, killing"
+        " the baby frees the chicken alive and unlinked; the egg-table and spawner round-trips map the ne"
+        "w egg to the baby type without polluting the adult shambler egg; and the enum/fields/ chance, th"
+        "e combine hook and roll, the natural-spawn baby flip, the ridden freeze + beat accumulation, the"
+        " mount AI suspension, the pass wiring, the pair push-skip, the daylight-burn whitelist, the fast"
+        "- low-damage AI parameters, the renderer branch and table row, the pickup-gate extension, the eg"
+        "g-table case, the creative palette, the encyclopedia entry/egg map, the delegate loader/texture "
+        "and the egg icon are source-pinned" }, [&]() {
         bool ok = true;
         QString diag;
         auto flatRig952 = [](World &w) {
@@ -4555,7 +4874,7 @@ void MatrixRun::section05_render_ui()
                              " encyclopedia entry/egg map, the delegate loader/texture and the egg"
                              " icon are source-pinned"
                              ;
-    }
+    });
 
     // ── P-r0830C review-2026-08-30 批 C（生物：中 #5/#6 + 低 #13/#14/#15/#16/#17/#18/#19/#26）探针 ──
     //   十修一登（审查建议照单全收），驱动方式 = EntityManager / PlayerController / Hotbar / MinecartManager
@@ -4589,7 +4908,35 @@ void MatrixRun::section05_render_ui()
     //       undeadBurnsInDaylight 语义分立：亡灵族门不含头盔免烧豁免）。
     //   #18（低）音频层裸 19 镜像配对钉落在 P-t952(i) pinEnum 组（现有 audiomanager 行 + 枚举值配对
     //       断言，防未来枚举漂移——预防性钉，现状即绿）。
-    {
+    runLegMulti({ "review0830 batch C (mobs #5 #6 #13 #14 #15 #16 #17 #18 #19 #26): (a) the tamed OCELOT mirrors th"
+        "e wolf's spectator gate - a standing cat holds off (>=4.0) and skips the far-teleport (>=10) whi"
+        "le its owner spectates where following used to close/teleport, the creative/survival control sti"
+        "ll closes to the stop band (<=3.0), and the wolf/cat gates share one literal gate form (sync pin"
+        ", count >=2) with the dispatch/signature pass-through pinned; (b) the helmet burn exemption now "
+        "feeds the shade machine too: a BARE sun-lit shambler still retreats into the overhang (control),"
+        " a HELMETED one charges straight to the sun-lit player and bites (no shade-seek, no attack suppr"
+        "ession) instead of parking in the shade, and a helmeted bones archer walks OUT of the overhang o"
+        "nce the sunlit-candidate gate switches off with dayShadeAi, while the burn-site exemption line s"
+        "tays pinned (still never burns); (c) a wolf bite on a BABY shambler registers revenge - the baby"
+        " turns and melees the wolf (wolf hp drop, closed up) where the old enum gate silently no-oped; ("
+        "d) a TAMED wolf defending a frozen pig target at bite range (1.0 <= 1.6, t1031 rig migration: th"
+        "e untamed player-bite flow was retired by the wild-wolf-neutral caliber so the same chase lambda"
+        " is now exercised through the defense branch) with a 1-high wall 0.6 ahead keeps biting (>=3 hea"
+        "lth drops) without ever leaving the ground (lift <0.15; the transient hop used to lift ~1.0); (e"
+        ") a cart-riding shambler standing on an iron chestplate never picks it across six windows while "
+        "a bare ground control in the same scan does (riding excluded, resolvePlayerPush caliber), with t"
+        "he pickup-chance default pinned to the kEquipPickupChance constant; (f) after the jockey pair en"
+        "gages the wall with the player east -- the rider's gate cycles eastward jump intent at the face "
+        "and since t1008 the mount-hop takes the pair over the top -- and the player flips to the west si"
+        "de (the evolved window lets the pair re-cross westward), killing the chicken drops the baby with"
+        " ZERO eastward per-tick drift frames (the old stale-glide streamer drifted ~1 block east mid-fal"
+        "l; the pin-segment discard of the rider's vy/glide is the regression core and stays source-pinne"
+        "d); (g) the wander-state burns-in-place trade-off is comment-registered at both AI early- exits "
+        "plus the header caliber; (h) an UndeadSlay-III diamond sword deals 15 to the BABY shambler == 15"
+        " to the adult == base 7 + the displayed (+8) (t961 show==combat pairing), 7 vs the spider (famil"
+        "y gate does not leak) and 7 unenchanted (the gate enables, not adds), backed by the isUndeadFami"
+        "ly single authority (deliberately split from undeadBurnsInDaylight: the family gate carries no h"
+        "elmet exemption) with the bare t476 list extinct" }, [&]() {
         bool okA = false, okB = false, okC = false, okD = false,
              okE = false, okF = false, okG = false, okH = false;
         QString diag;
@@ -5072,7 +5419,7 @@ void MatrixRun::section05_render_ui()
                              " from undeadBurnsInDaylight: the family gate carries no helmet"
                              " exemption) with the bare t476 list extinct"
                              ;
-    }
+    });
 
     // ── t954 书本合拢动画重做源码钉（用户第五轮口径「一瞬间+只有左边合并——应左页向右、右页向左
     //    对向合拢成有厚度的关闭书籍」；纯视觉项，动画时序/观感 headless 不可达——3D 呈现层需真窗口，
@@ -5083,7 +5430,16 @@ void MatrixRun::section05_render_ui()
     //    合拢厚度层（封面抬升 stackLift / 基页下沉内移 gather / 右页叠层 rightPageBlock / 书脊增高
     //    closeAmt）+ ESC 硬档落定（delegate 实例内 Connections——window 作用域不含 inline Component
     //    内 id，兼修 review28 #9 的运行期断链；window 级旧语句面加 typeof 守卫保持 P-review28b 契约）。
-    {
+    runLegMulti({ "t954 book closing rework source pin: the close transition is now a command-driven parallel anima"
+        "tion with BOTH pages converging toward the spine in one 850ms ease-out beat (the left page's out"
+        "er edge sweeps right over the hinge to -178 while the right page flattens to +1 and gathers 0.02"
+        "5 toward the spine - the old bound-property 240ms Behavior read as instant and visibly moved onl"
+        "y the left half), the closed form gains thickness (cover lifted 0.026 arching over the page stac"
+        "k, base page dropped and gathered inward, an inset paper block layer riding the right page, spin"
+        "e bar growing 0.03->0.075 as the bound edge), and the ESC hard-pause settle covers the transitio"
+        "ns through the delegate-instance Connections (snapBookPose writes every driven property to the b"
+        "ookOpen-consistent rest pose) with the window-level handler keeping the review28b statement surf"
+        "ace behind a typeof guard because inline-Component ids never resolve at window scope" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile qf954(root + QStringLiteral("/src/ui/Main.qml"));
@@ -5153,7 +5509,7 @@ void MatrixRun::section05_render_ui()
                              "window-level handler keeping the review28b statement surface behind "
                              "a typeof guard because inline-Component ids never resolve at window "
                              "scope";
-    }
+    });
 
     // ── P-review0830-1 书本右页几何不变量运行期断言（Review_2026-08-30 #1 高危；审查 §六-1 结构性
     //    建议「几何/变换类改动补运行期断言」的落点）──
@@ -5172,7 +5528,21 @@ void MatrixRun::section05_render_ui()
     //    (4) 敞开态 flutter 静息页片心（R(baseAngle)·(0.19, 0.004)）变换进右页盒体系仍在盒内
     //        （|x|≤半宽 0.19 且 |y|≤半厚 0.011 = 嵌入非悬空；出病灶 y≈0.075 > 0.011）；
     //    (5) 左页节点 position 无 x 分量（左右枢轴对称性——左页单偏移/右页双偏移即错位实锤）。
-    {
+    runLegMulti({ "review0830-1 book right-page geometry invariants (Review_2026-08-30 #1 high): t954 added a node-"
+        "level position on rightPageNode while the child Model kept its original 0.19 page offset, so the"
+        " offset was counted TWICE (transform order T(node pos)*R*T(model pos)) - the open-state inner ed"
+        "ge sat 0.19 off the spine (half a page width), the closed-state right page slid out to ~0.545 be"
+        "side the left cover (~0.38) instead of stacking, and the flutter page hung in the gap; the old P"
+        "-t954 probe pinned the very buggy line as a positive pin, which is exactly the geometry-class bl"
+        "ind spot review section six flags; the fix makes the node position a pure toward-spine translati"
+        "on (-0.025*gather) leaving the child 0.19 intact and the pivot on the spine; this probe parses t"
+        "he REAL Main.qml node chain constants (affine parse of the position expressions, not a verbatim "
+        "pin - coefficient changes re-evaluate, unparseable shapes go red) and recomputes the T*R*T chain"
+        " in C++ asserting five numeric invariants: open-state right-page inner edge ~ 0 on the spine, cl"
+        "osed-state right outer edge within the left cover's outer edge (stacked not side-by-side), close"
+        "d-state right inner edge crossing the spine onto the cover (the thickness base), the flutter res"
+        "t flip center transformed into the right page box frame still inside the box (embedded, not floa"
+        "ting), and the left page node carrying no x component (pivot symmetry)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile qfR1(root + QStringLiteral("/src/ui/Main.qml"));
@@ -5365,7 +5735,7 @@ void MatrixRun::section05_render_ui()
                              "thickness base), the flutter rest flip center transformed into the right "
                              "page box frame still inside the box (embedded, not floating), and the "
                              "left page node carrying no x component (pivot symmetry)";
-    }
+    });
 
     // ── t955 hover 预告格式改源码钉（用户第五轮口径「去掉『必得』字样——直接『效率......?』」；
     //    纯 UI 文案项，hover 悬浮文案 headless 不可达——t931/t941/t954 源码钉先例）──
@@ -5378,7 +5748,13 @@ void MatrixRun::section05_render_ui()
     //       格式语义已由名本身承载，「必出」承诺不靠前置词）；
     //    ③ 预告管线正锚 —— tierPreviewName 定义与调用仍在（格式改不碰 t917 同源链；预览文本仍
     //       唯一出自它，防「格式改」顺手把预览源改掉）。
-    {
+    runLegMulti({ "t955 enchant hover preview format: the guaranteed-prefix wording is gone - the tooltip renders t"
+        "he enchant name straight into the '......?' suffix (the name itself carries the guaranteed-appea"
+        "rance promise, the ellipsis = the rest of the result list unrevealed, ? = level masked; the MC 1"
+        ".0 one-enchant-level-blurred caliber is unchanged and the t917 preview==cast single-source chain"
+        " is untouched), the old 'prefix + name + space-question' source form is extinct anywhere in the "
+        "file including comments, and tierPreviewName remains the sole text source (pipeline positive anc"
+        "hor)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile ef955(root + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
@@ -5408,7 +5784,7 @@ void MatrixRun::section05_render_ui()
                              "extinct anywhere in the file including comments, and "
                              "tierPreviewName remains the sole text source (pipeline positive "
                              "anchor)";
-    }
+    });
 
     // ── t956 附魔台 / 铁砧创造中键复制补口（源码钉 ×2 + 真 QML×真 C++ Hotbar 行为腿；R19.17）──
     //    用户第五轮实测：「附魔台/铁砧 UI 创造中键复制返修（t896 链在这两个 UI 不管用了）」。根因：
@@ -5433,7 +5809,19 @@ void MatrixRun::section05_render_ui()
     //       （no-op 早退不发）；Main.qml 三面板（Inventory + 附魔台 + 铁砧）同一消费端
     //       onItemTaken → handPopAnim.start（中键获得与拾取一致的手弹视觉反馈）；行为腿直连信号计数：
     //       两次成功复制恰 2 发、空槽 no-op 0 发（发点在守卫之后的实锤）。
-    {
+    runLegMulti({ "t956 enchanting/anvil creative middle-click copy: the t896 chain now reaches both block-adjacent"
+        " workstations - each panel carries a panel-level copyStackToCursor (verbatim Inventory.qml calib"
+        "er: maxStackSize full-stack quantity, list4 sequence normalization, durability/enchant/name inst"
+        "ance fidelity) and exactly three middle-button TapHandlers (input-slot component + main row + ho"
+        "tbar row) each creative-gated; the anvil product-preview slot is excluded verbatim (copying a pr"
+        "ojected output would bypass takeProduct consumption, same precedent as the crafting result slot)"
+        "; review0830 #22 pickup feedback: both panels declare signal itemTaken() and emit it at the end "
+        "of a successful copy (no-op early-returns stay silent), the Main.qml consumer is the same onItem"
+        "Taken -> handPopAnim.start line across all three panels, and the behavioral leg counts emissions"
+        " over the real panel object (exactly 2 for the two successful copies, 0 for the empty-slot no-op"
+        "); behavioral leg drives the real AnvilUI.qml against the real Hotbar VM: 5-item stone source co"
+        "pies as a 64 stack (not min(5,64)), tool copies as 1 with durability 37 / sharpness-3 / custom n"
+        "ame intact, stale cursor overwritten, empty slot no-op" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile ef956(root + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
@@ -5670,7 +6058,7 @@ Item {
                              "drives the real AnvilUI.qml against the real Hotbar VM: 5-item stone source "
                              "copies as a 64 stack (not min(5,64)), tool copies as 1 with durability 37 / "
                              "sharpness-3 / custom name intact, stale cursor overwritten, empty slot no-op";
-    }
+    });
 
     // ── t957 附魔台 UI 文案收口 + 青金石「空缺风格」轮廓图标（源码钉 ×2 + PNG 数据钉；R19.17）──
     //    用户第五轮口径：① 删「武器/工具」字样与「左槽放……」提示行；② 青金石轮廓图标不像 →
@@ -5683,7 +6071,16 @@ Item {
     //    ③ PNG 数据钉 —— 资产本体结构断言：48×48、四角全透明、近黑不透明边缘像素成规模（「边缘
     //       变黑」）、半透冷蓝内部残色成规模（空缺/镂空感）；源图 icon_lapis_item.png 同在（提取链
     //       输入落盘，脚本重跑可复现）。
-    {
+    runLegMulti({ "t957 enchanting-table wording cleanup + lapis void-style outline icon: the slot category caption"
+        " (binding literal, property declaration and consumer) and the empty-slot-0 hint line are extinct"
+        " from the panel (the surviving lapis-shortage hint is pinned as the positive anchor - deleting t"
+        "he empty-state row did not take the whole hint component down), the t544 hand-drawn Canvas place"
+        "holder (onPaint fingerprint) is replaced by an Image referencing the offline edge-extracted asse"
+        "t icon_lapis_outline.png still gated by showLapisOutline, and the PNG data pin asserts the void-"
+        "style structure (48x48, fully transparent corners, a solid population of near-black opaque edge "
+        "pixels = edges turned black, semi-transparent cool-blue interior residue = hollow feel) with the"
+        " extraction-chain source icon_lapis_item.png on disk (tools/build_lapis_outline.py reruns reprod"
+        "ucibly)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile ef957(root + QStringLiteral("/src/ui/EnchantingTableUI.qml"));
@@ -5735,7 +6132,7 @@ Item {
                              "turned black, semi-transparent cool-blue interior residue = hollow "
                              "feel) with the extraction-chain source icon_lapis_item.png on disk "
                              "(tools/build_lapis_outline.py reruns reproducibly)";
-    }
+    });
 
     // ── t958 铁砧面板操作内容垂直居中（源码钉；R19.17 🅳）──
     //    用户第五轮口径：「铁砧 UI 上下居中：改名栏与 A+B→C 下方空一行——面板内容垂直居中」。
@@ -5750,7 +6147,21 @@ Item {
     //       冲突行）依序全落在 flash 叠层注释之前（改名框起的三段链整体收进块内）；
     //    ③ 内部刚性钉 —— 改名框贴块顶无固定上距（上下留白由居中锚承担）+ 槽行仍锚改名框下 10px
     //       （块内相对关系逐字未动，居中只平移整块、不重排内部）。
-    {
+    runLegMulti({ "t958 anvil panel operation content vertically centered: the operation content (rename box + A+B-"
+        ">C slot row + level/conflict hint lines) is wrapped in an opBlock content block (width tracking "
+        "the operation area, height = the 120px content extent, review0830 #7: 108 left the conflict row "
+        "only 12px = a single wrapped line, so a 2-3 line merge-conflict text spilled ~11px past the 134p"
+        "x operation area into the main inventory row) pinned with anchors.verticalCenter to the operatio"
+        "n-area midline - the old top-pinned form (rename box anchored to parent.top with a fixed 2px top"
+        " margin, leaving a ~24px dead band below the A+B->C row inside the 134px area) is extinct; the w"
+        "rapped chain order (block -> renameBox -> slotRow -> the two slotRow.bottom hints) all lands bef"
+        "ore the success-flash overlay comment, and the internal relationships stay byte-identical (renam"
+        "e box flush at block top without a fixed margin, slot row still renameBox.bottom + 10) - centeri"
+        "ng only translates the block, never re-lays-out its content; the text-budget leg parses the bloc"
+        "k geometry constants from the source and a real QQmlEngine-measured worst-case merge-conflict Te"
+        "xt (same 9px/WrapAnywhere/236px caliber) asserting the in-block available height covers the meas"
+        "ured worst text and the 3-line theoretical worst never reaches past the operation area bottom + "
+        "column spacing (never paints over the inventory row)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile af958(root + QStringLiteral("/src/ui/AnvilUI.qml"));
@@ -5898,7 +6309,7 @@ Item {
                              "in-block available height covers the measured worst text and the "
                              "3-line theoretical worst never reaches past the operation area bottom "
                              "+ column spacing (never paints over the inventory row)";
-    }
+    });
 
     // ── t959 附魔池随机性收窄探针（R19.17 🅳；Game 层表 + Hotbar 桥接，无 World/QML —— t824 同台先例）──
     //    用户第五轮口径：「书本附魔把很多工具+装甲附魔冲突地混在一起——书附魔池按类别（工具/武器/装甲/书）
@@ -5926,7 +6337,16 @@ Item {
     //        胸甲 ⊆ {保护,火焰保护,弹射物保护,耐久}（不出工具/武器系）——t824 逐物品过滤面不回归。
     //    (d) t917 同源钉 —— 书物品 Hotbar::selectEnchantsPreviewForItem == EnchantRegistry::
     //        selectEnchantsForItem 同 seed 逐条相等（收窄活在桥下共用层，QML 面无副本）。
-    {
+    runLegMulti({ "t959 enchant pool category narrowing: every enchant carries homeCategory (weapon/tool/armor/bow/"
+        "rod/universal - t960 added the bow/rod categories) + conflictGroup pinned per id; a book cast fi"
+        "rst rolls ONE main category from the same LCG stream and draws only from that category pool plus"
+        " universal (unbreaking), so a single cast never mixes cross-category lines (the old full-pool un"
+        "ion let sharpness-family + efficiency + protection coalesce into one book = the user symptom), s"
+        "ame-group exclusives stay pairwise-absent within a product, all 20 enchants remain reachable acr"
+        "oss casts (union un-narrowed), same seed reproduces the identical product, direct item enchantin"
+        "g keeps the t824 per-item pools (pick/shovel mining-only - no armor lines on tools - chest armor"
+        "-only), and the narrowing lives under the Hotbar bridge so preview==cast stays single-source (t9"
+        "17)" }, [&]() {
         Hotbar hb;
         const int bookId   = RecipeRegistry::BookId;
         const int diaPick  = int(ToolRegistry::PickaxeDiamond);
@@ -6055,5 +6475,5 @@ Item {
                              " item enchanting keeps the t824 per-item pools (pick/shovel mining-only"
                              " - no armor lines on tools - chest armor-only), and the narrowing lives"
                              " under the Hotbar bridge so preview==cast stays single-source (t917)";
-    }
+    });
 }

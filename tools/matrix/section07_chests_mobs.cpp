@@ -14,7 +14,11 @@ void MatrixRun::section07_chests_mobs()
     //    （setPhase 钉正午 / 子夜控制 isNight）。断言：足迹外 zone=0；要塞内→1 且界内连 tick 零重发、
     //    离开→0；矿井内→2（昼夜无关）；沙漠顶冠露天格：昼→0 / 夜→3、地下角格（不见天）夜→0；丛林内
     //    昼→4 / 夜→5；地牢内→0（四音不覆盖地牢）；足迹外采样点选在五谓词全外（防重叠结构串扰）。
-    {
+    runLegMulti({ "t1021 structure-ambient gating: structureAmbientZone derived per tick from t1020 region tables -"
+        "- outside=0, stronghold in->1 (steady in-region re-ticks zero re-emit) out->0, mineshaft->2 day "
+        "and night, desert temple exposed cell 0 by day / 3 at midnight / underground cell silent at nigh"
+        "t, jungle temple 4 by day / 5 at night, dungeon-only cell stays 0 (no ambience registered) (seed"
+        "s dun/mine/des/jun =)" }, [&]() {
         World wT21;
         wT21.setWidth(96); wT21.setDepth(96); wT21.setHeight(96);
         int seedT21Dun = -1, seedT21Mine = -1, seedT21Des = -1, seedT21Jun = -1;
@@ -204,7 +208,7 @@ void MatrixRun::section07_chests_mobs()
                              " 4 by day / 5 at night, dungeon-only cell stays 0 (no ambience registered)"
                              " (seeds dun/mine/des/jun ="
                           << seedT21Dun << seedT21Mine << seedT21Des << seedT21Jun << ")";
-    }
+    });
 
     // ── t1021 音效层探针（面板 C：review0907 A-P2-1 要塞足迹 × 矿井 region 重叠格 structureEntered
     //    边沿不被要塞态吞 —— 边沿检测无条件执行；环境音区折叠要塞优先级保留）──
@@ -213,7 +217,12 @@ void MatrixRun::section07_chests_mobs()
     //    entered_mineshaft 边沿仍触发）。原实现把四结构 loop 挂在 m_insideStronghold 的 else 臂：
     //    要塞区内重叠格处进入事件被整 tick 跳过（本面板 B 点腿阴性敏感）。zone 断言：A/B 两点均
     //    要塞低鸣（折叠单独做后要塞最高优先级不变）。
-    {
+    runLegMulti({ "t1021 stronghold-footprint x mineshaft-region overlap (review0907 A-P2-1): standing inside the s"
+        "tronghold footprint does NOT swallow structureEntered edges anymore -- point A (footprint, outsi"
+        "de mineshaft region) establishes the stronghold state with a clean mineshaft edge baseline, poin"
+        "t B (footprint AND mineshaft envelope overlap) still fires entered_mineshaft on the next tick, a"
+        "nd the ambient zone stays stronghold (priority fold kept; the old else-branch skipped the whole "
+        "region loop inside strongholds) (seed =)" }, [&]() {
         World wT21C;
         wT21C.setWidth(96); wT21C.setDepth(96); wT21C.setHeight(48);
         bool foundC = false;
@@ -291,7 +300,7 @@ void MatrixRun::section07_chests_mobs()
                              " entered_mineshaft on the next tick, and the ambient zone stays"
                              " stronghold (priority fold kept; the old else-branch skipped the whole"
                              " region loop inside strongholds) (seed =" << foundSeedC << ")";
-    }
+    });
 
     // ── t1021 音效层探针（面板 B：四环境音 + 三事件音 wav 资产存在性 / WAV 格式合法性 + 全链源码钉）──
     //    (a) 资产腿：sounds/ 七新 wav 存在且格式合法（RIFF/WAVE、PCM s16 mono 44100、data 非空、时长
@@ -299,7 +308,11 @@ void MatrixRun::section07_chests_mobs()
     //    (b) 源码钉：PlayerController zone 属性 / 值域枚举 / 折叠 emit 门 / 复合门 / 重置钩子；Main.qml
     //        zone 分流路由 + 成就 chime + 箱子开/关路由；AudioManager Q_INVOKABLE 面；build_sounds.py
     //        生成器在位（重生成面可复现）。
-    {
+    runLegMulti({ "t1021 sound-layer assets and wiring: seven new wavs exist with valid PCM s16 mono 44100 headers "
+        "and expected durations (two 8s loops, drip/chirps/achievement/chest-open/chest-close one-shots),"
+        " qrc registered, and the full chain pinned (zone property/enum/fold-emit gate/night+exposed gate"
+        "/dual resets in PlayerController, QML zone dispatch + achievement chime + chest open/close routi"
+        "ng, AudioManager Q_INVOKABLE surface, build_sounds.py generators)" }, [&]() {
         bool okB = true;
         const QString rootT21 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         // WAV 解析：走 chunk 遍历（不假设 44 字节头 —— fmt 扩展 / 附加块兼容），钉 PCM s16 mono 44100。
@@ -427,12 +440,18 @@ void MatrixRun::section07_chests_mobs()
                              " gate/night+exposed gate/dual resets in PlayerController, QML zone"
                              " dispatch + achievement chime + chest open/close routing, AudioManager"
                              " Q_INVOKABLE surface, build_sounds.py generators)";
-    }
+    });
 
     // ── t1022 键位重映射探针（面板 A：KeybindManager 默认表完整性 + settings.json 真 round-trip +
     //    冲突拒收 + 旧档缺节/坏值向后兼容 + 恢复默认 + 显示名；显式 setStorePath 密闭于临时目录，
     //    绝不触碰工程根真实 settings.json——t779/t785 探针密闭语义同款）──
-    {
+    runLegMulti({ "t1022 key-remap table: 13-action default table complete with pairwise-unique canonical keys (pin"
+        "ned id->key order), remap persists into settings.json keyBindings preserving sibling fields, rel"
+        "oad restores the mapping (forward->Up canonicalizes to engine W), unowned physical keys DISCARD "
+        "to Key_unknown (review0907 alias fix), conflicting apply is rejected with mapping intact, vacate"
+        "d canonical key is claimable, fixed keys (Esc/digits/B/G/Ctrl) rejected ApplyForbiddenKey with m"
+        "odeCycle->G idempotent re-apply kept, unknown action/invalid key rejected, resetDefaults round-t"
+        "rips to file, partial section keeps defaults for missing/invalid rows, keyDisplayName W" }, [&]() {
         using KM = KeybindManager;
         bool okA = true;
         QString diagT22;
@@ -549,12 +568,20 @@ void MatrixRun::section07_chests_mobs()
                              " modeCycle->G idempotent re-apply kept, unknown action/invalid"
                              " key rejected, resetDefaults round-trips to file, partial"
                              " section keeps defaults for missing/invalid rows, keyDisplayName W";
-    }
+    });
 
     // ── t1022 键位重映射探针（面板 B：引擎侧生效链——真 PlayerController × KeybindManager 注入，
     //    模拟按键事件（setKey 物理键）→ canonical 翻译 → m_keys → 动作触发（跳/蹲/前进位移）；
     //    null 注入对照（未注入 = 原始键直入旧行为）；QML 路由/设置页/引擎 choke 点/构建接线源码钉）──
-    {
+    runLegMulti({ "t1022 key-remap engine chain: injected KeybindManager makes PlayerController.setKey canonicalize"
+        " simulated key events -- default Space jumps, rebound C jumps, rebound X sneaks into Crouch and "
+        "releases to Walk, rebound Up walks forward (+Z at yaw 180) while the vacated W is dead (review09"
+        "07 alias fix: unowned keys discard instead of passthrough), non-injected controller keeps raw-ke"
+        "y legacy behavior, all probe writes stay hermetic to a temp store (project-root settings.json by"
+        "te-identical sentinel), and the full wiring is pinned (QML seven-action keyFor routing + recorde"
+        "r/conflict/reset settings panel + revision-touch guard + engine canonical choke point + CMake du"
+        "al-target sources; 18 wiring pins, comment-filtered) SEPARATELY COUNTED from 3 copy pins (user-v"
+        "isible string existence: reset/recording/ conflict labels - presence pinning, not wiring)" }, [&]() {
         using KM = KeybindManager;
         bool okB = true;
         QString diagT22B;
@@ -751,7 +778,7 @@ void MatrixRun::section07_chests_mobs()
                              " 18 wiring pins, comment-filtered) SEPARATELY COUNTED from"
                              " 3 copy pins (user-visible string existence: reset/recording/"
                              " conflict labels - presence pinning, not wiring)";
-    }
+    });
 
     // ── t1022 键位重映射探针（面板 C：review0907 A-P2-2 两病灶修复面 —— 隐藏别名丢弃 + 固定键黑名单
     //    强制；纯 KeybindManager 层，密闭临时存储）──
@@ -762,7 +789,12 @@ void MatrixRun::section07_chests_mobs()
     //    (iii) 幂等不回归：黑名单内默认键同值重绑（modeCycle→G / sneak→Shift）保持 ApplyOk。
     //    (iv) load() 侧强制：settings.json 带黑名单键值（jump=51 即 Key_3 / chat=16777216 即 Esc）→
     //         读回落默认（值域守卫口径延伸到黑名单；非法值落默认语义不变）。
-    {
+    runLegMulti({ "t1022 alias-kill + forbidden-key blacklist (review0907 A-P2-2): after forward->C the physical ol"
+        "d key W canonicalizes to Key_unknown (discarded by the setKey choke; no hidden passthrough alias"
+        "), fixed registration keys (Esc / digits 0-9 / B / G / Ctrl) are rejected as bind targets with A"
+        "pplyForbiddenKey and the mapping stays intact, same-value re-apply of blacklisted defaults (mode"
+        "Cycle->G, sneak->Shift) stays ApplyOk, and load() falls blacklisted settings.json values back to"
+        " defaults" }, [&]() {
         using KM = KeybindManager;
         bool okC22 = true;
         QString diagT22C;
@@ -821,7 +853,7 @@ void MatrixRun::section07_chests_mobs()
                              " same-value re-apply of blacklisted defaults (modeCycle->G,"
                              " sneak->Shift) stays ApplyOk, and load() falls blacklisted"
                              " settings.json values back to defaults";
-    }
+    });
 
     // ── t1022 键位重映射探针（面板 D：review0907 B #1/#2/#5 显示层与拒收码语义腿——纯 KeybindManager
     //    层 + QML 钉，密闭临时存储）──
@@ -835,7 +867,13 @@ void MatrixRun::section07_chests_mobs()
     //        占用键（inventory 占 E）仍 ApplyConflict（对照腿，分流面不倒挂）。
     //    (iv) QML 钉：录制器 ApplyForbiddenKey 分流行（接线钉）+「该键为固定功能键」文案（copy 钉，
     //        单独记账不与接线混计——t1022B 先例）。
-    {
+    runLegMulti({ "t1022 keybind display layer + reject ordering (review0907 B #1/#2/#5): keyDisplayName returns co"
+        "rrect non-empty names for blacklisted default keys Shift/G/Esc while staying empty for non-key v"
+        "alues (settings-page rows no longer blank), own-canonical rebind back to defaults is allowed (sn"
+        "eak->Shift, modeCycle->G after moving away), blacklist precedes conflict (occupied fixed key = A"
+        "pplyForbiddenKey; non-blacklisted occupied key still ApplyConflict), and the QML recorder has th"
+        "e dedicated fixed-key branch (1 wiring pin, comment-filtered) SEPARATELY COUNTED from 1 copy pin"
+        " (fixed-key message presence)" }, [&]() {
         using KM = KeybindManager;
         bool okD22 = true;
         QString diagT22D;
@@ -912,7 +950,7 @@ void MatrixRun::section07_chests_mobs()
                              " occupied key still ApplyConflict), and the QML recorder has the"
                              " dedicated fixed-key branch (1 wiring pin, comment-filtered)"
                              " SEPARATELY COUNTED from 1 copy pin (fixed-key message presence)";
-    }
+    });
 
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
     //    rig：t995/t1001 同款 5 seed（20260821/777/424242/1337/90210，缺要塞的种子跳过、备胎续扫，
@@ -929,7 +967,11 @@ void MatrixRun::section07_chests_mobs()
     //    (e) 源码钉：piece 上限 50 / 传送门保证旗（**阴性轮钉**：摘除即红）/ 权重表行字面（**阴性轮
     //        钉**：打乱即红）/ 变体 45/75/95 比例字面 / 格架 spine 行（传送门链深 5 / 大图书馆 5 /
     //        角房 7 ≥ 链深契约）/ 重试子 seed。
-    {
+    runLegMulti({ "t1002 stronghold piece-chain rebuild: 12-frame portal room (world-total EndPortal == 12, eyes/po"
+        "oled, lava, silverfish cage, 39 grate bars + 20 prison bars = 59, 2 iron doors), furniture count"
+        "s (bookshelf [200,400], ladders >=7, webs >=8 at wiki 7%, chests >=3, slabs [40,80]), per-block "
+        "variant pool 45/30/20/5 in windows, deterministic re-gen, piece-table/guarantee source pins, see"
+        "ds-missworlds" }, [&]() {
         bool ok = true;
         const quint32 seedsT1002[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u };
         auto sampleHashT1002 = [](World &w, int cx, int cy, int cz) {
@@ -1088,7 +1130,7 @@ void MatrixRun::section07_chests_mobs()
                              " [200,400], ladders >=7, webs >=8 at wiki 7%, chests >=3, slabs [40,80]), per-block"
                              " variant pool 45/30/20/5 in windows, deterministic re-gen, piece-table/guarantee"
                              " source pins, seeds-miss" << seedMiss << "worlds" << worldsChecked;
-    }
+    });
 
     // ── P-t1001 废弃矿井逐方块重建探针（R19.19 批 t1001；placeMineshaft piece 化重写验收面）──
     //    rig：t995 同款 5 seed（20260821/777/424242/1337/90210）× 128×128×64 世界池。矿井中心复刻：
@@ -1111,7 +1153,11 @@ void MatrixRun::section07_chests_mobs()
     //    ⑥箱贴轨（偏差「箱落地轨旁」）：每 ChestStateMineshaftFlag 箱四水平邻含 Rail 且池内 ≥1；
     //    ⑦火把窗：矿井域 y∈{sy+3, sy+4} Torch 池化 ≥15（火把只出现在支撑过梁顶）；
     //    ⑧源码钉：piece 表五件 + 支撑间隔常量行 + 笼 state 行 + 残缺轨率行 + hashColumn 算法行。
-    {
+    runLegMulti({ "t1001 mineshaft per-block rebuild: piece-based placeMineshaft (start room 10x10 with arched plan"
+        "k band + 3..4 radial exits, 3x3 corridors with supports every 4 (min pooled gap, rock-embedded w"
+        "alls% all-steps), fragmented rails% in [50,90], 5x5 pillared intersections, diagonal slope piece"
+        "s, cave-spider web corridors (spawner state CaveSpider, box webs>=8 full-web fill%), chests rail"
+        "-sidetorches) overclean shafts /candidates, piece-table pins" }, [&]() {
         bool ok = true;
         struct ShaftT1001 { int cx, cz, sy; };
         std::vector<ShaftT1001> shaftsT1001;
@@ -1324,7 +1370,7 @@ void MatrixRun::section07_chests_mobs()
                              " box webs>=8 full-web fill" << spiderWebPct << "%), chests rail-side" << chestT1001
                           << "torches" << torchT1001 << ") over" << shaftsT1001.size() << "clean"
                              " shafts /" << candT1001 << "candidates, piece-table pins";
-    }
+    });
 
     // ── P-t1011 矿井火把密度窗 + 光源归因探针（t1011；placeMineshaft 跨中壁挂火把 + 照明口径验收面）──
     //    用户实测「矿井里见光但 F3 bl:0 没看到火把」→ 归因：bl 通道非零必须近处有火把（lightEmission 14，
@@ -1347,7 +1393,12 @@ void MatrixRun::section07_chests_mobs()
     //       通道固有存在（与火把覆盖正交），登记不复零；巷走 max bl 最小值同为遥测（巷外连通敞域
     //       〔洞穴长廊 / 邻矿井厅〕非矿井结构管辖，照明属后续批次口径）；
     //    ⑦ 源码钉：壁挂判定行 / 壁挂落块行 / kTorchPct 行（阴性轮敏感）。
-    {
+    runLegMulti({ "t1011 mineshaft torch coverage + light attribution: mid-span paired wall torches + start-parlor "
+        "corner torches (torch gap hist 0-3/4-6/7-10/11+share% 7-10/11+ zero = light trace within 6 steps"
+        " everywhere, dark walkable prefixes<=1, wall-mount torchesroom-corner torchestorch-cell blockLig"
+        "ht/>=12, min walk bl(telemetry: corridor-external open volumes = caves/neighbor parlors out of m"
+        "ineshaft scope), skylight-seep sl>0/bl=0 cells/(cave-opening daylight channel = the F3 bl:0 attr"
+        "ibution, orthogonal to torch coverage) overwalks /shafts, wall-torch pins" }, [&]() {
         bool ok = true;
         int walksT1011 = 0;             // 巷走池（rig 体量）
         int darkPrefixT1011 = 0;        // ① 前 5 步（steps≥5 真可走段）全暗巷走数
@@ -1507,7 +1558,7 @@ void MatrixRun::section07_chests_mobs()
                              << "(cave-opening daylight channel = the F3 bl:0 attribution,"
                              " orthogonal to torch coverage) over"
                           << walksT1011 << "walks /" << shaftsT1011 << "shafts, wall-torch pins";
-    }
+    });
 
     // ── P-t1012 矿井几何三项探针（t1012 ①② + t1011 移交段 B 推进回归；placeMineshaft 几何回归验收面）──
     //    rig：t1001/t1011 同款候选复刻（hashColumn FNV 同源 + 起点厅拱带 36 Planks 净样）；hashVoxel 已
@@ -1527,7 +1578,10 @@ void MatrixRun::section07_chests_mobs()
     //       MobCaveSpider 笼（t1012③ 偏差转正，旧 MobSpider 0x0E 登记退役）：笼座实体地板 + 7×7×3 盒
     //       ≥8 网（t786「≥8 网即矿井蛛笼」分流同口径）+ 笼邻 4 向 × 3 层零开露空气（满网签名）；池内净笼 ≥3。
     //    ④ 源码钉：段 B 推进条件行 / 地板政策行 / 走廊形选型行 / 满网落块行（阴性轮敏感）。
-    {
+    runLegMulti({ "t1012 mineshaft geometry trio: corridor leg-B advancement restored(t565 semantics, solid head ce"
+        "lls/), per-column floor policy (embedded=stone/cavity=planks, violations), spider web corridors "
+        "1-2x2-3x3-6 full-webbed with cave-spider cages (branches/, web fill/, clean cages/), geometry pi"
+        "ns" }, [&]() {
         bool ok = true;
         int legBCellsT1012 = 0;          // ① 段 B 阴影点位总数（量纲）
         int legBSolidT1012 = 0;          // ① 段 B 阴影点位落天然实体数（回归签名；修复后恒 0）
@@ -1754,7 +1808,7 @@ void MatrixRun::section07_chests_mobs()
                           << branchDimOkT1012 << "/" << branchesT1012 << ", web fill" << webMatchT1012
                           << "/" << webCellsT1012 << ", clean cages" << cleanCagesT1012 << "/"
                           << cagesT1012 << "), geometry pins";
-    }
+    });
 
     // ── P-t1012③④ 洞穴蜘蛛真变种 + 水破坏附着块探针（R19.20 t1012 第二棒；engine 侧行为腿）──
     //    ③ 洞穴蜘蛛真变种（转正偏差 1）四腿：
@@ -1773,7 +1827,10 @@ void MatrixRun::section07_chests_mobs()
     //      tickWaterFlow 沉降泵后断言：三附着块格全数 → Air 且有 dropId 掉落信号（Torch→13 自身 /
     //      RedstoneTorch→129 自身 / Cobweb→0x219 线，对齐玩家挖除掉落链）；石头对照被水漫但**完好**
     //     （阴性腿：isAttachableBlock(Stone)=false）；非附着块不产生掉落（掉落计数恰 3）。
-    {
+    runLegMulti({ "t1012 cave-spider variant + water attachment breakup: MobCaveSpider=20 enum-tail + spawner state"
+        " 0x28 roundtrip (old 0x0E decode kept) + egg 0x25E both-way + 0.7x mini hitbox (0.32x0.21 hostil"
+        "e) + poison DoT multi-tick (armor-bypass chain, creative-inert) + wash torch/cobweb/redstone-tor"
+        "ch to Air with dropId drops (stone control intact)" }, [&]() {
         bool ok = true;
         // diag 载荷（绿跑静默；红跑打印定位失败腿）。
         int diagPoison = -1, diagDrops = -1;
@@ -1939,7 +1996,7 @@ void MatrixRun::section07_chests_mobs()
                              " + 0.7x mini hitbox (0.32x0.21 hostile) + poison DoT multi-tick (armor-bypass"
                              " chain, creative-inert) + wash torch/cobweb/redstone-torch to Air with dropId"
                              " drops (stone control intact)";
-    }
+    });
 
     // ── P-t1012⑤ 满网蛛网走廊刷怪笼刷新腿（review0907 B 跨批高危 #1 修复面）──
     //    病灶：t1012② 满网走廊把笼周 8 邻 × 上层全填 Cobweb（非 Air）→ tickSpawners 陆生谓词
@@ -1949,7 +2006,11 @@ void MatrixRun::section07_chests_mobs()
     //    「笼周 8 邻 × 2 层全非 Air」，钉死「豁免即唯一使能」：摘豁免〔阴性轮〕本腿必红）→ 玩家激活
     //    圈内直调 tickSpawners 长 tick（80×0.1s 累计 8s > kSpawnerInterval=6s，P-t786 同式）→ 笼邻
     //    Cobweb 格刷出 MobCaveSpider。
-    {
+    runLegMulti({ "t1012 full-web corridor cage spawns (review0907 B cross-batch high #1): worldgen cave-spider cag"
+        "e embedded in a fully webbed corridor (8-neighbor x 2-layer all-non-air precondition) ticks past"
+        " kSpawnerInterval with the player in range and spawns a MobCaveSpider on a Cobweb neighbor cell "
+        "(land spawn predicate exempts Cobweb here/above; negative-round: removing the exemption re-block"
+        "s every candidate = loud red)" }, [&]() {
         bool okCageSpawn = false;
         int diagSeedT1212c = -1, diagCageWorldsT1212c = 0;
         const quint32 seedsT1212c[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 4242u, 2024u, 31337u };
@@ -2007,7 +2068,7 @@ void MatrixRun::section07_chests_mobs()
                              " player in range and spawns a MobCaveSpider on a Cobweb neighbor cell"
                              " (land spawn predicate exempts Cobweb here/above; negative-round:"
                              " removing the exemption re-blocks every candidate = loud red)";
-    }
+    });
 
     // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
     //    rig：t995/t1001/t1002 同款池化口径，但世界升 160×160×**128**（t307 起地表基线 64、desert 地表
@@ -2031,7 +2092,13 @@ void MatrixRun::section07_chests_mobs()
     //        压板→9 TNT 链（StonePressurePlate (0,S-11,0) 正下 3×3 TntBlock @S-12 恰 9）；
     //    (g) 确定性：首个有效 seed 重生成 → 足迹域 stride-2 抽样 FNV 一致（PLAN §2-K）；
     //    (h) 源码钉：层半边表行 / 密室深度行 / 安卡行表行 / 中心蓝块行 / 暗渠循环行 / 箱 state 行。
-    {
+    runLegMulti({ "t1003 desert temple per-block rebuild: 21x21 stepped pyramid (layer halves 10..5, cut-sandstone "
+        "cap + lintel), four-face ankh wool pattern (21/face, front 13 at door+lintel holes - MC-faithful"
+        " per wiki blueprint: the complete ankh figure lives on the floor centre and the cellar, facades "
+        "carry only striped front-tower bands, no complete pattern above the door), floor wind-rose check"
+        "er 24 orange + center blue, 3 entrances + 4 top windows + upper hollow, secret diagonal tunnel, "
+        "chamber 7x7x4 with 4 oriented pyramid chests + plate-over-3x3-TNT (9) chain, well deterministic "
+        "re-gen, source pins, templesworldsseeds-missravine-skipped" }, [&]() {
         bool ok = true;
         const quint32 seedsT1003[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u,
                                        42u, 999u, 31337u, 2024u, 8675309u, 271828u, 314159u, 123456789u,
@@ -2325,7 +2392,7 @@ void MatrixRun::section07_chests_mobs()
                              " 7x7x4 with 4 oriented pyramid chests + plate-over-3x3-TNT (9) chain, well"
                              " deterministic re-gen, source pins, temples" << templesTotal << "worlds"
                           << worldsChecked << "seeds-miss" << seedMiss << "ravine-skipped" << ravineSkipped;
-    }
+    });
 
     // ── P-t1004 丛林神殿逐方块重建探针（R19.19 批 t1004；placeJungleTemple 三层 + 红石组合锁验收面）──
     //    rig：t1003 同款 160×160×128 世界池（t307 地表基线 64 → 64 高 rig 塔顶守卫恒拒，见 P-t1003 注）+
@@ -2348,7 +2415,11 @@ void MatrixRun::section07_chests_mobs()
     //    (g) 确定性：首个净样神殿重生成 → 足迹域 stride-2 抽样 FNV 一致；
     //    (h) 源码钉：拉杆 0x06 行 / 常亮火把 state 4 行 / 熄灭态火把行 / IronDoor 0x08 行 / 箭数 hash 行 /
     //        苔率 kMossyPct 行 / 汇流平衡表行。
-    {
+    runLegMulti({ "t1004 jungle temple per-block rebuild: 3-story mossy-mixed cobble keep(15x15 two slabs + 11x11 t"
+        "op, pooled mossy window), dual dispenser arrowtraps (corridor mid + corner-chest, ammo window 2-"
+        "14 in state bits), 3-leverredstone AND combination lock (unique all-ON combo opens IronDoor beha"
+        "viorallyover 8 fresh-world combos, closed otherwise), 2 oriented jungle chests,stairs + webs, de"
+        "terministic re-gen, source pins, templesworldsseeds-missravine-skipped" }, [&]() {
         bool ok = true;
         const quint32 seedsT1004[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u,
                                        42u, 999u, 31337u, 2024u, 8675309u, 271828u, 314159u, 123456789u,
@@ -2648,7 +2719,7 @@ void MatrixRun::section07_chests_mobs()
                              "stairs + webs, deterministic re-gen, source pins, temples" << templesTotal
                           << "worlds" << worldsChecked << "seeds-miss" << seedMiss
                           << "ravine-skipped" << ravineSkipped;
-    }
+    });
 
     // ── P-t1013 箱子矿车探针（R19.20 t1013 转正偏差 2；机制等价 MC 1.0 minecart with chest）──
     //    rig：共享世界轨线 + worldgen 标记箱 + PlayerController/MinecartManager/ChestStore 真注入
@@ -2670,7 +2741,33 @@ void MatrixRun::section07_chests_mobs()
     //        Main.qml delegate 箱体 / onChestCartBroken / enterWorld 接线（阴性轮敏感）。
     //    (g) review0907 A-P1-1：loot 不再生 —— roll 后取空重开不再 roll（looted 持久标志 gate）+
     //        "looted":true 落盘 round-trip（cart 回生标记同条目共存，旧档缺键 = 从未 roll）。
-    {
+    runLegMulti({ "t1013 chest-minecart conversion: mineshaft marker chest -> silent block removal (no blockBroken)"
+        " + cart key registered + cart spawned on adjacent rail cell in full rail posture with key = spaw"
+        "n cell (convertMineshaftChests path a)",
+               "t1013 chest-cart interaction: findCartHit + chestKeyAt contract for the right-click-open branch,"
+        " tryMount rejects chest cart (plain cart control mounts)",
+               "t1013 chest-cart break chain: survival 3-hit final blow emits chestCartBroken exactly once with "
+        "cart key (cartBroken zero = no double minecart drop), slot metadata readable at signal time then"
+        " clearChest, creative instant-break also emits (t767 deviation: contents never silently voided),"
+        " void loss emits nothing and keeps the key for respawn",
+               "t1013 chest-cart movement: spawns static, player push moves it along the rail >=1 cell pinned to"
+        " rail surface (powered-rail physics shared, pinned by P12 family)",
+               "t1013 chest-cart persistence: empty cart-key entry survives allChests (cart-flag true, empty-exe"
+        "mption) -> loadAll round-trip -> convertMineshaftChests path (b) respawns the entity; populateMi"
+        "neshaftLoot first-open gate (empty cart key rolls once, filled/non-cart entries no-op)",
+               "t1013 loot no-regen (review0907 A-P1-1): mineshaft cart loot rolls once -- take all 27 slots emp"
+        "ty then reopen -> populateMineshaftLoot rejected and slots stay empty (same-seed re-roll infinit"
+        "e regen fixed by persistent looted flag); looted:true survives allChests->loadAll round-trip wit"
+        "h cart respawn flag coexisting on the same entry (old-save compatible: missing looted key = neve"
+        "r rolled)",
+               "t1013 cart-key cell guard + chest-cart mob mount (review0907 B cross-batch high #3 / legacy #4):"
+        " placing a Chest block onto a registered cart key cell is rejected as a no-op (no double-contain"
+        "er aliasing, clearChest can never erase the respawn key via a block chest), the same aim places "
+        "normally once the key is cleared (plain cells undisturbed), and the mob board scan skips chest c"
+        "arts (spider at the cart cell stays unseated while a pig on a plain cart seats, matching the pla"
+        "yer-side tryMount rejection)",
+               "t1013 source pins: variant fields + chestCartBroken signal + tryMount reject + convert chain + M"
+        "ain.qml delegate/lid-skip/handler/enterWorld wiring" }, [&]() {
         const auto [x0T1013, z0T1013] = nextSlot();
         bool okA = false, okB = false, okC = false, okD = false, okE = false, okF = false;
         bool okG = false; // review0907 A-P1-1 战利品不再生腿（roll → 取空 → 重开不再生 + looted 落盘）
@@ -3157,7 +3254,7 @@ void MatrixRun::section07_chests_mobs()
         qInfo().noquote() << (okF ? "PASS" : "FAIL")
                           << "| t1013 source pins: variant fields + chestCartBroken signal + tryMount reject +"
                              " convert chain + Main.qml delegate/lid-skip/handler/enterWorld wiring";
-    }
+    });
 
     // ── P-t1010 沙漠/丛林神殿野外生成落位率探针（R19.20 t1010；用户实测「新世界未见到神殿」验收面）──
     //    根因（联合概率过低，非放置静默失败）：160² 世界沙漠神殿仅 3×3=9 网格候选 × 45% 命中 ×
@@ -3179,7 +3276,16 @@ void MatrixRun::section07_chests_mobs()
     //        （钉「自报计数 = 真实栅格落位」，防日志与栅格漂移）；
     //    (d) 确定性腿：同 seed 二次独立构 World → 自报四元组逐项相等（PLAN §2-K）；
     //    (e) 源码钉：两处保底旗行 / 两处保底入口行 / siteOk 收口行（world.cpp）。
-    {
+    runLegMulti({ "t1010 desert/jungle temple wild-generation rate: biome-presence implies >=1 temple per seed (str"
+        "onghold-style nearest-center fallback when no temple sits within spawn radius of world center, r"
+        "eview0905 #3), 32-seed full-scan log-captured counts with block-level cross-check, determinism r"
+        "e-gen, source pins, desert seedsjungle seedsdesert templesjungle templeszero-with-biome seeds",
+               "t1010b temple guarantee spawn-circle proximity: eligible desert/jungle site columns inside spawn"
+        " radius R of world center imply >=1 temple of that kind inside R (guarantee fires on empty circl"
+        "e and lands nearest-center, no duplicate when main path already covers the circle; biome-in-R wi"
+        "thout eligible cols degrades to nearest-eligible landing, registered; lesion revert to placed==0"
+        " goes red on corner-temple seeds), 32-seed block-level full-height chest/door presence scan, eli"
+        "gible-in-R seeds/biome-in-R seeds/desert chest-clusters in Rjungle temples in R" }, [&]() {
         bool ok = true;
         const quint32 seedsT1010[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 5150u, 2718u, 1618u,
                                        42u, 999u, 31337u, 2024u, 8675309u, 271828u, 314159u, 123456789u,
@@ -3555,7 +3661,7 @@ void MatrixRun::section07_chests_mobs()
                               << "desert chest-clusters in R" << desertRTotal
                               << "jungle temples in R" << jungleRTotal;
         }
-    }
+    });
 
     // ── P-t1006 生物复制体未愈探针（R19.20 首项；用户 f6e9a51 实测「进场即有静止贴图生物 + 随时间无限
     //   复制」，R19.18 t978 三层防御未对症；t1005 实体层 7 布局 + 64 槽压满全绿未复现 → 本探针按
@@ -3574,7 +3680,28 @@ void MatrixRun::section07_chests_mobs()
     //   (c) QML delegate 语义（假说 4，权重上调面：真 QQmlEngine + mobHost 同构 Repeater——mon.revision
     //       + t978 count 自愈触碰 + aliveAt 三绑定逐字同形）：spawn / 长tick / removeEntityAt /
     //       clearAll / 复用重spawn 六相 delegate 可见数 == 引擎活体数（t978 三层防线在场回归）。
-    {
+    runLegMulti({ "t1006 mob-clone-unhealed: the user's f6e9a51 playtest reports statictexture mobs already present"
+        " on world entry and infinite duplication overtime (t978's three defensive layers did not cure it"
+        "); this probe rebuildsthe user path on real EntityManager + real World + real QQmlEngine acrosst"
+        "he four hypotheses: (a) entry spawn replica (3 fixed + 10 biome-weightedscatter + 2 wolves on a "
+        "sealed stone platform 20 blocks above terrain) witha 480s simulated night-pressure long tick (ti"
+        "ck + tickHostileLife +tickSpawners full chain) asserting the live-count curve stays within thele"
+        "git ceiling 15+30+2, the aliveSlots==liveCount bookkeeping invariant everysimulated second, and "
+        "a 90s consecutive zero-displacement static-bodydetector over platform mobs (legit idle upper bou"
+        "nd ~0.25^15), (b) theR19.19 spawner-cage path laid out alone in explicitly shelled rigs(first-ru"
+        "n lesson: a 3x3 pocket carved into worldgen stone is NOT sealed --a trapped mob deadlocks the ho"
+        "stile 4m-ball gate at 1 spawn and worldgencave connections fake a passive gate breach), a dual h"
+        "ostile cage openarena 17x17x3 must ramp then plateau at the 12-near-player area cap (peak<= 14, "
+        "t180 >= 5 proves the ramp, no creep 180s -> 234s), a fully shelled3x3 passive pocket (whole pock"
+        "et inside the 4m ball) must hold EXACTLY 4pigs = kSpawnerLocalCap both sides of the gate, and an"
+        " open passive arenaquantifies in diag (registered design gap -- egg-modified cages beinguser-unr"
+        "eachable in survival) the no-far-despawn slow creep with total <= kCap,(c) the QML delegate sema"
+        "ntics through a real QQmlEngine: amobHost-isomorphic Repeater (mon.revision + t978 count self-he"
+        "al touch +aliveAt binding verbatim) driven through six phases (spawn3 / long tick /kill1 / LIFO-"
+        "reuse respawn2 / clearAll / respawn4) must keep visibledelegate count == engine live count at ev"
+        "ery phase with delegate count ==slot count (t978 three layers regression-pinned); probe legs: (a"
+        ") growthcurve + static detector green, (b) cage rates plateau at caps, (c) six-phasedelegate/ali"
+        "ve parity" }, [&]() {
         bool ok1006 = true;
         QString diag1006;
         constexpr int kPlatY = 70;      // 石台面（远超 worldgen 地形上限 → 台上群与台外暗刷群空间隔离）
@@ -3981,7 +4108,7 @@ Item {
                              "curve + static detector green, (b) cage rates plateau at caps, (c) six-phase"
                              "delegate/alive parity"
                           << (ok1006 ? QString() : diag1006);
-    }
+    });
 
     // ── P-t1007 进程级卡顿泄漏 rig（R19.20 t1007；用户 f6e9a51 实测：跑一段时间掉到 7FPS、F3
     //    items 93/93、render-side 行 gpu/prep+present 重、重进存档恢复 99FPS；重开 t997 归因遗留 +
@@ -4009,7 +4136,24 @@ Item {
     //   (f) 源码钉：新 F3 读数链在场（entitymanager.h primedCount/slotHighWater、itementitymanager.h
     //       liveHighWater、Main.qml entities 行 primed/del/64 hw token）——插桩不可静默消失（t1005/t1006
     //       关单要靠它采数）。
-    {
+    runLegMulti({ "t1007 process-level stutter leak rig: the user's f6e9a51 playtest sawFPS decay to 7 with F3 item"
+        "s 93/93 and a heavy render-side line(gpu/prep/present) that a world re-entry resets to 99 FPS; o"
+        "ffscreen hasno QRhi render thread so gpu/prep/present/vmem stay on-device F3 readings(registered"
+        ", never invented here) and this probe pins the ENGINE-sideequivalent surface through the real ex"
+        "plosion->drop forwarding chain:(a) 36 primed TNT (t997 6x6 layout) all detonate with zero primed"
+        " residuewhile item live stays <= the 200 cap under the drop flood with per-samplealiveSlots==liv"
+        "eCount bookkeeping, (b) 250 named drops (merge-exempt)saturate EXACTLY live=200 slots=200 hw=200"
+        " (LRU eviction pinned),(c) mobs fill EXACTLY 64 = kCap, (e1) full-pool vs (e2) empty-pool tickch"
+        "ain wall time recorded in diag as the sim-side curve to table againstthe user F3 numbers (sim wa"
+        "s 4.63ms of 66.7ms - single-digit sim at fullpools localizes the 14x decay to the render side: l"
+        "ive entity delegatedraw cost scales linearly via per-delegate inline geometry/materialinstances "
+        "with no instancing; the t858 xp-orb instancing precedent is theregistered governance path, on-de"
+        "vice curve comparison required beforeany rendering rework - no blind offscreen fix), (d) world r"
+        "e-entry(clearAll both pools, enterWorld-isomorphic) resets EXACTLY the livesets (items/mobs/prim"
+        "ed -> 0) while bounded remnants persist by design(slot vectors 200/64, high waters 200/64) - no "
+        "unbounded engine leakexists offscreen, so the recovery face is the live entity set; (f) sourcepi"
+        "ns lock the new F3 telemetry (primedCount/slotHighWater/liveHighWater +the mobs-N/cap()-hw items"
+        "-hw primed del V/T entities line shared with thet1005/t1006 closure data collection)" }, [&]() {
         bool ok1007 = true;
         QString diag1007;
         constexpr int kPlatY = 40;
@@ -4230,7 +4374,7 @@ Item {
                              "the mobs-N/cap()-hw items-hw primed del V/T entities line shared with the"
                              "t1005/t1006 closure data collection)"
                           << (ok1007 ? QString() : diag1007);
-    }
+    });
 
     // ── P-t1013b 回生落车守卫 + 开箱遮挡腿（review0906 #12；t1013 回生链的行为面补钉）──
     //    (a) 落格守卫：回生键格被玩家填实（Stone）→ spawnCartImpl 向上扫首个可落格（车落键格上
@@ -4239,7 +4383,15 @@ Item {
     //    (b) 开箱遮挡：玩家与箱车之间隔墙（主选体命中 m_hitDist ≈ 1.6 < chestDist ≈ 3.2）→ 右键
     //        不再 emit chestOpened（旧 kReach 全程无遮挡 = 隔墙开箱取物品）；拆墙同几何 → 恰一次
     //        emit 携正确内容键（遮挡守卫未过杀贴脸开箱）。
-    {
+    runLegMulti({ "t1013b respawn-into-solid guard + chest-open occlusion (review0906 #12): (a) a respawn whose key"
+        " cell the player filled with stone nolonger embeds a ghost cart inside the block - spawnCartImpl"
+        " scans upto the first non-collidable cell (cart lands on top of the filledcell in ground posture"
+        ", key addressing unchanged, key cell untouched)and refuses outright if the column is full (key k"
+        "ept in ChestStorefor the next enterWorld retry); (b) right-clicking a chest cartBEHIND a wall no"
+        " longer opens it - the open ray is clamped by themain-selection hit distance (wall hit ~1.6 < ca"
+        "rt ~3.2 -> chestOpenednot emitted), and the same geometry with the wall removed opens exactlyonc"
+        "e with the correct content key (the guard does not over-rejectpoint-blank opens)diag a/b see [t1"
+        "013b diag a]/[t1013b diag b]" }, [&]() {
         const auto [xa12, za12] = nextSlot();
         bool okA12 = false;
         {
@@ -4364,7 +4516,7 @@ Item {
                              "point-blank opens)"
                           << (okA12 && okB12 ? QString()
                                              : QStringLiteral("diag a/b see [t1013b diag a]/[t1013b diag b]"));
-    }
+    });
 
     // ── P-t1014 矿脉化逐矿种探针（R19.20 t1014；scatterOres 散点 → MC 1.0 式矿脉的验收面）──
     //    rig：t1001/t995 同款 5 seed（20260821/777/424242/1337/90210）× 128×128×64 世界池 +
@@ -4375,7 +4527,55 @@ Item {
     //    旧散点签名（阴性轮敏感）：连通域 ≥96% 为孤块、conn26 ≈ 0%、中带域中位长轴 -1（无域可采）。
     //    腿：(a) 煤 2×2×5 长条+贴连散块 (b) 铁 2×2×2+角贴块 (c) 金/红石 MC1.0 blob (d) 钻/青/铜 blob
     //        (e) 经济总量 ±13% 窗 + 同 seed 复跑 7 矿总量全等 (f) 源码钉（脉形表/三印章/矿盐/石门）。
-    {
+    runLegMulti({ "t1014(a) coal 2x2x5 bar + hash-glued scatter: per-seed vein components300..470 (scattered baseli"
+        "ne was ~7500 singletons), mid-size componentbbox median long axis 5..8 short axis 3..4 (bar+glue"
+        " silhouette),26-adjacency connection >= 85%, band y[8,60] with >= 99% strictnessand absolute [7,"
+        "60] (mineshaft wall ore exemption), economy per-seed6845..8891 (old-scatter carve-survival basel"
+        "ine 7868 +-13% -> total oreNOT inflated)shape/window miss, see diag",
+               "t1014(b) iron 2x2x2 cube + diagonal corner blocks: mid-size componentsare bare cubes (bbox media"
+        "n exactly 2x2x2), 150..215 cubes per world,corner blocks merge under 26-adjacency -> connection "
+        ">= 90% (they arediagonal so 6-conn singletons are expected and fine), band y[5,30]>= 99% strict "
+        "with <= 40 absolute (mineshaft exemption), economy2146..2788 (baseline 2467 +-13%)shape/window m"
+        "iss, see diag",
+               "t1014(c) gold + redstone MC1.0-size blobs: gold 1328..1724 total in225..275 walk-veins strictly "
+        "inside y[5,25]; redstone 24702..32084 in1300..1650 veins strictly inside y[5,16] with merged-she"
+        "et tail capped(hist41 <= 160, registered effective-density carryover - the legacy(r2>>24)%10000 "
+        "8-bit truncation is preserved per economy parity, seeworld.cpp ledger note), connection >= 95% ("
+        "redstone vein-count windowlowered 1390 -> 1300 for review0906 #18: the horizontal-only repickrem"
+        "oves zero-displacement retry deaths so walks travel farther and~5% fewer larger components form "
+        "- totals and connection unchanged)shape/window miss, see diag",
+               "t1014(d) diamond/lapis/copper MC1.0-size blobs: diamond 1832..2380 in315..375 veins y[5,40]; lap"
+        "is 2201..2859 in 420..485 veins y[5,31];copper 4423..5745 in 790..990 veins y[5,45]; all strictl"
+        "y banded,connection >= 85%, scraggly walk silhouette (bbox median long 4..8,short <= 2 like vani"
+        "lla scraggle)shape/window miss, see diag",
+               "t1014(e) frequency economy + determinism: all 7 ore species landper-seed within +-13% of the old"
+        "-scatter carve-survival baseline(coal 7868 / copper 5084 / iron 2467 / gold 1526 / diamond 2106 "
+        "/lapis 2530 / redstone 28393) - veining must not inflate total ore -and a same-seed regeneration"
+        " reproduces all 7 totals EXACTLY(pure hashVoxel worldgen, no runtime RNG)economy window or regen"
+        " miss, see diag",
+               "t1014(f) source pins: world.cpp keeps the kProfiles vein table, theper-ore salts, the coal bar o"
+        "rientation pick, the iron cube/cornerstamp branch, the blob off-stone redirect and the stone-onl"
+        "y gate(negative-round sensitive: reverting scatterOres to per-voxel scatterloses the table and e"
+        "very shape leg above reads the scatteredsignature: ~96% singletons, conn26 ~ 0%)source pin missi"
+        "ng",
+               "t1014(g) 128-high-world coal climbs above y=60 (review0907 A-P1-2):coal profile yMax=0 sentinel "
+        "makes the band ceiling purely column-adaptive(hc-5, matching the legacy per-column stoneTop=h-3 "
+        "scatter rule), so hillcolumns (surface up to ~71 at 128 world height) carry coal veins above the"
+        "old hard cap of 60 -- the 64-high rig worlds never trigger the cap (hc-5<= 58) so legs (a)-(f) a"
+        "re unchanged; threshold is y>=62 because thecapped bar overshoots the 60 ceiling by exactly one "
+        "block (y=61,diag-verified negative round), and at least one of 5 seeds must showcoal at y>=62 (p"
+        "er-seed counts in diag)no coal above 61 in any seed",
+               "t1014(h) coastal land columns inside sea-centered cells carry ore(review0906 #11): the old cell-"
+        "level skip vetoed a whole 16x16 cell onits center column height, so land columns of sea-centered"
+        " cells(the coastal transition belt) went completely oreless - whole zero-orepatches unlike the l"
+        "egacy per-column skip; the skip is gone and pure-seacells are now rejected per-column inside try"
+        "Ore (h <= wl+1), restoringthe legacy distribution. Rig = two dedicated sea-bearing seeds(150461 "
+        "/ 174218 - a 40-seed diag sweep found the t1014 fixed-seedwindows contain NO sea-centered cell a"
+        "t all, so the skip never firedthere; each dedicated seed carries exactly one beach-centered cell"
+        ",center h 58/59): each seed must show >= 200 ore blocks on land columns(h >= 60) of its sea-cent"
+        "ered cell (measured 747 / 782 under therestored per-column rejection - the old skip reads wander"
+        "-in overflowonly, see the D2 lesion round) and the census structurally confirms thesea cells exi"
+        "st (no vacuous green on seed drift)sea-cell land-column distribution miss, see diag" }, [&]() {
         struct OreStatT1014 {
             int total = 0, comps = 0, conn26 = 0, inBand = 0;
             int ymin = 999, ymax = -1;
@@ -4844,7 +5044,7 @@ Item {
                              "sea cells exist (no vacuous green on seed drift)"
                           << (okH ? QString()
                                   : QStringLiteral("sea-cell land-column distribution miss, see diag"));
-    }
+    });
 
     // ── P-t1015 载具攻击目标甄别探针（R19.20 t1015；机制等价 MC 1.0 骑乘组合 hitbox 拆分甄别）──
     //    rig：共享世界清场 + 真 EntityManager/BoatManager/MinecartManager 注入 + tickVehicleRiding 真
@@ -4858,7 +5058,22 @@ Item {
     //    (d2) 瞄乘员上身（车盒不在射线上）→ 乘员掉血、车耐久不动。
     //    (e) 源码钉：beginMining 骑乘改判的 rayHitDistAt 甄别行 + hit*At 指定目标结算行 + 两 manager
     //        新读口签名（阴性轮敏感：旧重路由行被删即红）。
-    {
+    runLegMulti({ "t1015 vehicle-attack target discrimination rig: mob riding a boat,ray through the rider's upper "
+        "half damages the rider only (boatintact), ray through the hull with BOTH boxes on the ray picks "
+        "thenearer boat surface -> boat breaks and the rider keeps full HP(single target per click), and "
+        "the decoy leg pins the t1015 core:a second boat parked BEHIND the rider catching the same upper-"
+        "bodyray is no longer hit - the rider takes the damage and BOTH boatssurvive (old t866 re-route r"
+        "esolved 'nearest any boat' and woulddismantle the wrong decoy); cart family mirrors both faces ("
+        "hullclick costs exactly 1 of 3 cart HP with rider unharmed, upper-bodyclick hurts the rider with"
+        " cart HP untouched); source pins lockthe rayHitDistAt nearest-AABB discrimination and the hit*At"
+        " pinnedsettlement (negative-round sensitive)diag a=%1 b=%2 c=%3 d=%4 e=%5",
+               "t1015(f) attacker-eye-inside-vehicle-box leg (review0906 #13):with the attacker's eye standing I"
+        "NSIDE the cart's hitbox (cartcenter column, cart-center height), a click on the boarded rider'sb"
+        "ody damages the rider and leaves the cart at full 3/3 HP - thediscrimination ray used to return "
+        "0 for in-box origins, and'0 <= any mobDist' made the vehicle win EVERY tie, so pointing atthe bo"
+        "dy through your own overlap hit the cart instead;rayHitDistAt now reports -1 (miss) for in-box o"
+        "rigins on both thecart and boat managers while findCartHit/findBoatHit (mount andopen-chest seek"
+        "ing) keep their in-box-hit semanticsdiag see [t1015 diag f]" }, [&]() {
         const auto [x0T1015, z0T1015] = nextSlot();
         QQuickWindow probeWinT1015;
         bool okA = false, okB = false, okC = false, okD = false, okE = false;
@@ -5090,7 +5305,7 @@ Item {
                              "open-chest seeking) keep their in-box-hit semantics"
                           << (okF13 ? QString()
                                     : QStringLiteral("diag see [t1015 diag f]"));
-    }
+    });
 
     // ── P-t1016 世界时间持久化探针（R19.20 t1016；存退重进保留退出时刻 + weather/天数）──
     //    (a) 真 WorldStore SQLite：saveAll 第 5 参时钟快照（phase/day/weather）落 world_meta → 关库
@@ -5100,7 +5315,15 @@ Item {
     //    (c) 恢复链：WorldClock.restoreTime 精确复原 (phase, day)（无 setPhase 的 day+1 副作用，月相
     //        = day%8 随之复原）+ World.setWeatherState 设态 / 同态零噪声 / 非法值拒；
     //    (d) 源码钉：Main.qml 退出链第 5 参 + enterWorld 恢复接线 + 两 C++ 恢复入口签名（阴性轮敏感）。
-    {
+    runLegMulti({ "t1016 world-clock persistence rig: the exit save writes the clocksnapshot {phase,day,weather} th"
+        "rough saveAll's 5th arg intoworld_meta inside the SAME transaction as chunks/meta, a close/reope"
+        "n round-trips all three keys exactly (float 'g'9 shortround-trip phase, qint64 day, enum weather"
+        "); a legacy save withoutthe time keys loads per-key defaults (phase 0 / day 0 / weatherClear = a"
+        " fresh world's first frame, no crash); restoreTime putsback (phase, day) EXACTLY with no setPhas"
+        "e day+1 side effect(moon phase = day%8 follows), and setWeatherState sets the statewith one emit"
+        ", stays silent on same-state restore, and silentlyrejects out-of-enum values; source pins lock t"
+        "he QML exit-chain5th arg, the enterWorld restore wiring and both C++ restoreentries (negative-ro"
+        "und sensitive)diag a=%1 b=%2 c=%3 d=%4" }, [&]() {
         World wT1016;
         wT1016.setWidth(48);
         wT1016.setDepth(48);
@@ -5224,7 +5447,7 @@ Item {
                                   ? QString()
                                   : QStringLiteral("diag a=%1 b=%2 c=%3 d=%4")
                                         .arg(okA).arg(okB).arg(okC).arg(okD));
-    }
+    });
 
     // ── P-t1016b 天气键来源 + 大 day 相位保真（review0906 #14 / #15）──
     //    (a) #14 来源腿：带 weather 键存档 round-trip → hasWeather true（消费端恢复天气态）；
@@ -5234,7 +5457,15 @@ Item {
     //    (b) #15 相位保真腿：WorldClock 冻结表 + restoreTime(day=5,000,003 ≳ 2²², phase 0.3725)
     //        → dayPhase 复原（旧 float 折算在该量级 ULP ≈ 0.4 天吞相位小数 = 跳回整刻）、
     //        dayCount / moonPhase(=day%8) 精确；小 day 惯量（3）不变对照。
-    {
+    runLegMulti({ "t1016b weather-key provenance + large-day phase fidelity(review0906 #14 / #15): loadWorldTime no"
+        "w reports hasWeather so themissing-key default (weather 0) is distinguishable from a genuinelysa"
+        "ved Clear - enterWorld restores the weather state ONLY when the keyexists, keeping resetWeather'"
+        "s short first-clear window (20/45s,'weather visible shortly after entering a world') for old sav"
+        "es andfresh worlds instead of re-rolling it to the regular 45/120s window;and applyTime derives "
+        "elapsed ms by integer day*period + double phasesplit, so restoreTime round-trips phase EXACTLY a"
+        "t day 5,000,003(past 2^22 where the old float folding quantized phase in ~0.4-dayULP steps - dir"
+        "ty/hand-edited saves silently snapped to whole ticks)with dayCount and moonPhase (=day%8) exact "
+        "and the small-day pathunchangeddiag a=%1 b see [t1016b diag b]" }, [&]() {
         World wT1016b;
         wT1016b.setWidth(48);
         wT1016b.setDepth(48);
@@ -5312,7 +5543,7 @@ Item {
                           << (okA16 && okB16 ? QString()
                                              : QStringLiteral("diag a=%1 b see [t1016b diag b]")
                                                    .arg(okA16));
-    }
+    });
 
     // ── P-t1017 仙人掌不可附着探针（R19.20 t1017；机制等价 MC 1.0 仙人掌非可附着面）──
     //    (a) 谓词腿：torchSupportBlock 单一权威对 Cactus 翻假（Stone/Sand 常规支撑对照不回退）；
@@ -5322,7 +5553,37 @@ Item {
     //    (c) 悬空石底面（天花板语义对照）：火把 / 红石火把 / 石按钮贴底面全拒 = 既有 t738/机关「底面
     //        不挂装」共享规则，非仙人掌特化（钉「底面拒」不随本批漂移）；
     //    (d) 源码钉：torchSupportBlock Cactus 排除行 + 机关 / 木梯预检 Cactus 拒绝（阴性轮敏感）。
-    {
+    runLegMulti({ "t1017 cactus-rejects-attachables rig: the single-authoritytorchSupportBlock predicate now return"
+        "s false for Cactus (stone/sandcontrols keep supporting), and through the REAL aim->placeBlockcha"
+        "in all three attachable kinds (torch / redstone torch / stonebutton) are rejected on a 2-high ca"
+        "ctus column across ALL FIVEaimable faces (top + four sides; the bottom face's target cell isburi"
+        "ed by sand/the lower column so placement there is alreadyoccupancy-rejected, and the ceiling rul"
+        "e is pinned by thefloating-stone leg) - 15/15 combinations keep their target cellsAir with the c"
+        "olumn intact, while the SAME 15 operations on astone block all place correctly - plus thefloatin"
+        "g-stone bottom-face leg pins that ceiling rejection is thepre-existing shared rule, not cactus-s"
+        "pecific; source pins lockthe cactus rejection in torchSupportBlock and the mech/ladderprecheck g"
+        "uards (negative-round sensitive: reverting the cactusexclusion lets torches attach to the column"
+        " and the predicate legreads red)diag a=%1 b=%2 c=%3 d=%4",
+               "t1017(e) neighbor-edit drop leg (review0906 #8): old-save residue injects a ladder side-attached"
+        " to a LIVE cactus column (a ladder is not a full cube so the cactus neighbor-collapse rule never"
+        " fires - the residue persists exactly as in pre-t1017 saves) and a floor-mounted lever on the co"
+        "lumn top (top-face attachment does not touch the cactus horizontal-neighbor rule either). Mining"
+        " a DIFFERENT neighbor of each attached block (support cactus alive throughout) runs the 6-neighb"
+        "or recheck: the rechecks used bare isFullCube which Cactus (ShapeFull) always passes - the place"
+        "ment precheck rejected cactus while the residue never dropped (the reject-vs-residue split). Bot"
+        "h rechecks now read the shared mechLadderSupportBlock authority (isFullCube && != Cactus), so th"
+        "e ladder and the lever drop on the neighbor edit while the column stays intact; a stone-wall lad"
+        "der whose support block is mined directly still drops (harness sanity control)diag see [t1017 di"
+        "ag e]",
+               "t1017(f) attach-family cactus sweep (review0906 #9): the ground/face-support wrapper predicates "
+        "(trapdoorSupportBlock /isTopFlushSupport / isDustSupport / solidSupportBlock, the last nowthe sh"
+        "ared authority mechLadderSupportBlock delegates to) all returnfalse for Cactus while stone and t"
+        "op-half-slab controls keepsupporting, and through the REAL aim->placeBlock chain a trapdooragain"
+        "st the column's side face (its only candidate attach face -nothing below), plus redstone dust, s"
+        "now layer, rail and door on thecolumn top are ALL rejected with their target cells staying Air a"
+        "ndthe column intact (pre-fix every one of these placed: ShapeFullcactus passed the bare predicat"
+        "es), while snow layer and rail on astone block still place (the tightening does not over-reject)"
+        "diag see [t1017 diag f]" }, [&]() {
         const auto [x0T1017, z0T1017] = nextSlot();
         QQuickWindow probeWinT1017;
         WorldClock clockT1017;
@@ -5802,7 +6063,7 @@ Item {
                              "stone block still place (the tightening does not over-reject)"
                           << (okF9 ? QString()
                                    : QStringLiteral("diag see [t1017 diag f]"));
-    }
+    });
 
     // ── P-t1012c 水冲毁梯子腿（review0906 #10；机制等价 MC 1.0 流水冲毁 ladder）—— t1043 口径更新：
     //    裁-1 清偿后 Rail 族**入**水毁附着族（旧「Rail 刻意排除」登记废除；worldgen 侧由 placeMineshaft
@@ -5813,7 +6074,14 @@ Item {
     //        （格 Air ∨ Water 同 tick 入水）+ blockDroppedAsItem 掉自身 id（dropId(Ladder)=Ladder，
     //        与玩家挖除掉落链同源）；同源反向扩散路径上的轨格**同样被冲毁**（t1043 MC 口径：
     //        流水冲轨，dropId(Rail)=Rail；旧「轨完好对照」随裁-1 废除）→ 恰两掉落（梯 + 轨）。
-    {
+    runLegMulti({ "t1012c water-wash ladder leg (review0906 #10, t1043 caliber update):the attachable-block water-d"
+        "estroy family includes Ladder AND the railfamily (parity ruling cai-1 cleared the registered rai"
+        "l exemption - theworldgen side is carried by the placeMineshaft dry-cell gate, seeP-t1043b) with"
+        " rail dropId = itself so the drop chain is free (stonenegative control) - behaviorally a water s"
+        "ource spreading into awall-attached ladder cell washes it to Air/Water and emitsblockDroppedAsIt"
+        "em with the ladder's own id (same chain as playermining), while the same source spreading the op"
+        "posite way now washesthe rail cell too (MC caliber: flowing water destroys rails) - exactlyone l"
+        "adder drop and one rail dropdiag a=%1 b see [t1012c diag b]" }, [&]() {
         bool okA10 = !BlockRegistry::isAttachableBlock(quint8(BR::Stone))
             && BlockRegistry::isAttachableBlock(quint8(BR::Rail))
             && BlockRegistry::isAttachableBlock(quint8(BR::Ladder))
@@ -5885,7 +6153,7 @@ Item {
                           << (okA10 && okB10 ? QString()
                                              : QStringLiteral("diag a=%1 b see [t1012c diag b]")
                                                    .arg(okA10));
-    }
+    });
 
     // ── P-t1008 小僵尸两修探针（① 生物蛋图标管线统一 ② 小鸡骑士组合越障跳）──
     //    通用 rig：44×44×96 局部世界（seed 26）y[85,95] 清 Air + y84 铺 Stone（P-t988 同款）+
@@ -5904,7 +6172,19 @@ Item {
     //        tickMobMounts 跳意图转移块 → 本腿恰红（组合永卡台下面），(a)(c) 照绿。
     //    (c) 非骑乘小僵尸对照腿：plain baby（chance=0 全独立）同台面追玩家 → aiHostile 链
     //        t670 越障跳既有照绿（防本单意外破坏独立追击链；也钉「② 病灶仅在挂载链」的口径）。
-    {
+    runLegMulti({ "t1008 baby-shambler duo: (a) the spawn-egg icon pipeline is unified -- itemFilenameMap gains the"
+        " 0x25D row (the only missing egg id since t952; with a pack ON the baby egg used to fall back to"
+        " the hand-drawn MaterialIcon canvas while the other 14 eggs took the two-template spawn_egg.png "
+        "tint pipeline = the user-visible style split), spawnEggTint(0x25D) keeps the brighter baby-green"
+        " family tint for the generated fallback, and the MaterialIcon case stays as the pack-off fallbac"
+        "k; (b) the chicken jockey complex now crosses a 1-block step while chasing the player: the rider"
+        "'s aiHostile jump gate fires in the mounted state (pin keeps resting=true so the gate is reachab"
+        "le) but the mount pin used to discard vy/glide wholesale = the complex stalled at the step face "
+        "forever -- the jump intent now transfers to the mount (exact kJumpSpeed while the mount is groun"
+        "ded), its own gravity/landing physics lifts the complex, the rider's AABB clears the step and th"
+        "e XZ pin drags the mount onto the top (rider x>=24.5 CONJ y>=86.3 plus reaching the 1.6 bite ban"
+        "d, 30s cap); (c) the unmounted baby control leg pins the plain hostile chain still hops the step"
+        " by itself (the lesion was mount-chain only)diag %1" }, [&]() {
         bool okA = false, okB = false, okC = false;
         QString diag1008;
         auto flatRig1008 = [](World &w) {
@@ -6013,7 +6293,7 @@ Item {
                           << (okA && okB && okC
                                   ? QString()
                                   : QStringLiteral("diag %1").arg(diag1008));
-    }
+    });
 
     // ── P-t1023 性能批三（R19.20；docs/perf-batch3-research-2026-09.md）三腿 ──
     //   (a) 隐藏 delegate 永停表动画 `running: visible` 门控源码钉（t1007 治理路径 b/c 最小步；
@@ -6025,7 +6305,14 @@ Item {
     //       事实行互锁——未来线程化立项必须两处同步更新（防 F3 谎报）。
 
     // (a) 源码钉：注释滤除后四条门控文本必须全体在场（任何一处被删/改绑即红；t860 源码钉先例）。
-    {
+    runLegMulti({ "t1023a hidden-delegate animation gates (t1007-b/c minimal step): QML 'Animation on' never stops "
+        "for visible:false (t561 flame lesson), so the 200-slot item pool kept running rotY spin + bobY f"
+        "loat on every delegate including empty/picked-up hidden slots (~2x slots of constant animation b"
+        "urn) and all 47 mob delegates kept the ender-eye/ender-pearl roll spinning regardless of entKind"
+        " - the fix gates all four infinite animations on delegate/node visibility (running: entRoot.visi"
+        "ble / endereyeNode.visible / enderpearlNode.visible), the t696 established pattern; hidden deleg"
+        "ates stop paying animation ticks and slot-reuse restarts from 'from' = fresh-entity semanticsdia"
+        "g rotY %1 bobY %2 eye %3 pearl %4" }, [&]() {
         QString qml;
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
@@ -6089,5 +6376,5 @@ Item {
                                          : QStringLiteral("diag rotY %1 bobY %2 eye %3 pearl %4")
                                                .arg(gateRotY).arg(gateBobY).arg(gateEye).arg(gatePearl));
         }
-    }
+    });
 }

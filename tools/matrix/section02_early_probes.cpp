@@ -13,7 +13,12 @@ void MatrixRun::section02_early_probes()
     //   sapling bone meal 45% 概率即时成树（概率判定非阶段推进）+ 支撑 / 主干畅通守卫（光照豁免）；浆果丛
     //   +1 阶段封顶。rig 寻址：运行期扫描 y40..47 全净空 20×5 区（P20 先例——nextSlot 网格已被前序循环探针
     //   耗尽；树苗须 y≤41 才容得下 4 格主干 + 2 格树冠余量 → 净空须验到 y47）。
-    {
+    runLegMulti({ "t791 bonemeal balance: crops advance 2-3 stages per use so 3-4 bone meals mature a plant from st"
+        "age 0 (10 plants locked uses 3..4, advance in {2,3} clamped at 7, id preserved, mature -> no-op "
+        "no-consume), sapling 45% per use instant tree (trunk base Log, 6 saplings within 10-24 rolls, fi"
+        "rst-try and retry both observed) with support+clearance guards (cobble base / blocked trunk neve"
+        "r grow yet still consumed), berry bush +1 stage to cap then no-op, non-targets false (survival c"
+        "onsume + swing + stage texture swap = playercontroller/QML, manual check)" }, [&]() {
         bool ok = true;
         int bx = -1, bz = -1;
         for (int zz = 2; zz + 4 < 96 && bx < 0; zz += 3) {
@@ -149,7 +154,7 @@ void MatrixRun::section02_early_probes()
                              "trunk never grow yet still consumed), berry bush +1 stage to cap then no-op, "
                              "non-targets false (survival consume + swing + stage texture swap = "
                              "playercontroller/QML, manual check)";
-    }
+    });
 
     // ── t806 余烬门尺寸泛化探针（World 层直调：点燃检测 / 连通域熄灭 t806 已自 PlayerController 下沉 World
     //    单一权威——同末地门三件套模式，矩阵可直编；粒子改门色紫是 QML blockColor 表（呈现层单一权威）→
@@ -163,7 +168,12 @@ void MatrixRun::section02_early_probes()
     //    任一格点燃同成门；⑨ 破框碎门：破任一承重框格（镜像 finishMiningAt 的 setBlock(Air)+
     //    breakNetherPortalsAround 序列）→ 整门 20 格全熄；直挖门格（setBlock(Air)+removeNetherPortalAt）
     //    同样整门熄（连通域尺寸无关）。
-    {
+    runLegMulti({ "t806 portal frame generalization: ignite fills whole 2x3..4x5 inner opening (2x3 min X-plane 6 c"
+        "ells state=0 / 4x5 Z-plane 20 cells state=1, ignition position-independent at 5 sample cells), o"
+        "versized 22w/22h (t848-era cap; t806-era 5w/6h now legal) + below-min 1w/2h + non-rectangular + "
+        "missing beam/pillar rejected with zero cells, corners optional (cornerless 3x4 lights + corner b"
+        "reak keeps door), frame-member break collapses whole door via connected-domain clear (particle c"
+        "olor = QML blockColor, manual check)" }, [&]() {
         World w806;
         w806.setWidth(48);
         w806.setDepth(48);
@@ -340,7 +350,7 @@ void MatrixRun::section02_early_probes()
                              "(cornerless 3x4 lights + corner break keeps door), frame-member break collapses "
                              "whole door via connected-domain clear (particle color = QML blockColor, manual "
                              "check)";
-    }
+    });
 
     // ── Review 2026-08-23 #1 slim 皮肤布局探测回归探针 ──
     // 背景：复审 #8 的 slim 修复整体无效——旧探测区 u[52,54) 落在 slim 臂背面 [51,54) 内（PIL 实测
@@ -355,7 +365,9 @@ void MatrixRun::section02_early_probes()
     //     classic 也判 slim → FAIL。HD 2×（128×128，sc=2）与退化小图（32×16 → 保守 classic）同锁。
     //   ② demo 包实测（有 pack 才跑，缺则记 note 跳过）：alex.png → slim、steve.png → classic——
     //     真实皮肤布局假设的防线（①合成图按公式画，公式理解错则②用真图拦）。
-    {
+    runLegMulti({ "review#1 slim-skin probe region: synthetic MC-layout arm strips classify classic(end u=56)/slim("
+        "end u=54) at base 64x32 + HD 2x, degenerate 32x16 + 64x16 stub (probe rows off-canvas) conservat"
+        "ive-classic, demo pack alex->slim / steve->classic (real PIL-verified layouts)" }, [&]() {
         bool ok = true;
         // ① 合成条带（64×32 base 与 128×64 HD 2× 两档）。
         const auto makeArmStrip = [](int w, int h, int stripEndPx) {
@@ -477,7 +489,7 @@ void MatrixRun::section02_early_probes()
                           << (realChecked
                                   ? ", demo pack alex->slim / steve->classic (real PIL-verified layouts)"
                                   : "");
-    }
+    });
 
     // ── P21 复审 #2（2026-08-23）低顶净空坡道探针（MinecartManager 直编，同 P12b/P18 模式）──
     //   Review #2：scanRailColumn「实心即断」× 坡道车位居上 —— 坡段 rise>0.55 时 floor(pos.y) = 轨Y+1
@@ -496,7 +508,13 @@ void MatrixRun::section02_early_probes()
     //   (a) 相1 阻挡 + 相2 恢复通行（上）；
     //   (b) af9ec8e 隔板回归防线：地面车（kCartGroundH=0.3875）站实心地板、地板下 1 格平轨 —— mount +
     //       持续 W + 玩家推全链后钉死不动（宽容版一致性校验拒：差 1.9375 >> kRideScanTol 0.5）。
-    {
+    runLegMulti({ "review#2 low-headroom ramp re-scoped by t944 (ceiling flush above slope rail now BLOCKS the clim"
+        "b - user's latest word): phase 1 the cart is stopped on the lower slope flank, stays rail-pinned"
+        " (Y on surface) and holds under continued W (no wall-pass); phase 2 clearing the block resumes t"
+        "he traverse to the top dead-end with the original review#2 assertions (Y pinned, pitch continuou"
+        "s & clamped, ~+45 mid-slope, settle guard)",
+               "review#2 af9ec8e floor-slab guard kept: ground cart above rail-under-floor stays dead (lenient s"
+        "can consistency rejects, gap 1.9375 >> tol)" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 4×31 网格已耗尽）。需 7×3×6（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 1; zz < 96 && x0 < 0; zz += 3)
@@ -632,7 +650,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(x0, kRigY - 1, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P22 复审 #3（2026-08-23）拐角路由连续探针（MinecartManager 直编）【t982 改版】──
     //   原腿钉「坡臂拐角双线性 rise 连续」（拐角格东臂 +1 / 南臂同层 → 拐角 quad 沿坡臂整边抬升 45°）。
@@ -642,7 +660,10 @@ void MatrixRun::section02_early_probes()
     //   (a) Y 连续：每 tick |Δy| ≤ 0.55（全轨同层 → 恒 0 阶跃）；
     //   (b) 俯仰连续：每 tick |Δpitch| ≤ 46° 且 |pitch| ≤ 45.5°（kCartPitchMaxDeg 护栏仍在）；
     //   (c) 过弯驶达南死端格心停驻 + 停稳守卫（连续性断言不放松「不出轨」底线）。
-    {
+    runLegMulti({ "review#3 flat-corner route continuity (t982 reshaped: slope-arm corners are outlawed by the turn"
+        "-x-ascend mutual exclusion, corners are flat-only now so the bilinear-rise geometry class is gon"
+        "e - this leg guards the flat-corner round trip): Y step <=0.55/tick, pitch continuous |d|<=46 & "
+        "clamped 45, parks at far dead-end" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例）。需 6×6×5（含隔离边；全轨同层 Y+1）。
         int cx = -1, cz = -1;
         for (int zz = 1; zz < 96 && cx < 0; zz += 3)
@@ -729,7 +750,7 @@ void MatrixRun::section02_early_probes()
             for (int dz = 1; dz <= 3; ++dz) w.setBlock(cx, kCy, cz + dz, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P-t982 铁轨转弯×上坡互斥探针（World setBlock + MinecartManager 直编；spec「一格铁轨绝对不可
     //    同时转弯和上坡——坡上转弯场景转弯贴图被拉伸 45° 兼作上坡；坡上转弯按 MC 口径落成平转弯 /
@@ -746,7 +767,23 @@ void MatrixRun::section02_early_probes()
     //   (d) 行为腿：骑乘东行爬坡到坡顶格（西臂 -1 + 南臂 stub，无东延续）→ 车直线停驻坡顶（z 恒轨心线、
     //       不被拽上南臂）；pre-fix 该格成弯（Nx|Pz）→ 车过心即被甩向南臂（z 变）= 红；
     //   (e) 源码钉：互斥判定两行 / T 分支平端优选。
-    {
+    runLegMulti({ "t982 rail turn x ascend mutual exclusion: railConnections corner rule (t709 arm-height relaxatio"
+        "n) let a perpendicular pair with a SLOPED arm form a corner - the mesher corner quad then lifts "
+        "its full slope-arm edge by 1.0 (armLift), stretching the corner texture 45 degrees to also serve"
+        " as the ascent (user report), and the cart's railRiseAt mirror made it climb the stretched face "
+        "through the turn. Fix: the corner forms only when BOTH arms are same-layer (three-high probe del"
+        "tas == 0); any sloped arm forbids the bend and the cell becomes a straight ascending/descending "
+        "segment along the sloped arm (slope beats turn, the perpendicular arm is dropped and re-resolves"
+        " as an independent stub facing the cell's side), so a slope-top turn is exactly one of flat-turn"
+        " or straight-slope and the 45-degree stretched form is gone; the t812 switch T branch prefers th"
+        "e flat through-end for its bend when exactly one end is sloped. Probe legs: (a) slope-top with a"
+        " perpendicular same-level stub resolves to a straight east-ascending segment holding Px with NO "
+        "Pz (turn and ascend bits never coexist, railCornerArms false) while the stub one-way faces it wi"
+        "th Nz; (b) same-level perpendicular pair still corners (Px|Pz, arms +1/+1, flat-turn zero regres"
+        "sion); (c) slope-bottom (east arm -1) likewise becomes a straight descending segment; (d) a moun"
+        "ted cart creeping east climbs and stops ON the slope-top cell center with z pinned to the rail l"
+        "ine (pre-fix corner Nx|Pz flung the cart onto the south stub = red); (e) source pins for the mut"
+        "ual-exclusion lines and the flat-end preference" }, [&]() {
         // (a)(b)(c) shape 腿 rig 选址：footprint xt-2..xt+2 × zt-1..zt+2 × Y-2..Y+2。
         int xt = -1, zt = -1;
         for (int zz = 3; zz < 94 && xt < 0; zz += 4)
@@ -917,7 +954,7 @@ void MatrixRun::section02_early_probes()
                              " stub = red); (e) source pins for the mutual-exclusion lines and the"
                              " flat-end preference"
                           ;
-    }
+    });
 
     // ── P23 复审 #23（2026-08-23）段中重选向横向收敛限速探针（MinecartManager 直编，同 P12c 场景）──
     //   Review #23：停驻重选向（minecartmanager tickRiddenCart 停驻分支）在**段中非心位**改 dir → 下一步
@@ -928,7 +965,8 @@ void MatrixRun::section02_early_probes()
     //   (c) 重推期每 tick 横向（z，此时垂直于行进轴）位移 ≤0.101（修前首 tick = 全偏移 ≥0.11 → FAIL）
     //       且限窗内收敛到格心线（|z−(z0+0.5)| ≤1e-3）；
     //   (d) 沿东臂驶达死端格心停驻（限速不破坏到达性）。
-    {
+    runLegMulti({ "review#23 mid-cell relaunch: lateral recenter capped at 0.1/tick (was one-shot ~0.5 teleport), c"
+        "onverges to centerline, still reaches east dead-end" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例）。L 形：南腿 2 直 + 拐角 + 东臂 3 直，需 6×6×5（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 96 && x0 < 0; zz += 3)
@@ -1039,7 +1077,7 @@ void MatrixRun::section02_early_probes()
             for (int dz = -2; dz <= -1; ++dz) w.setBlock(x0, kRigY, z0 + dz, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P24 复审 #4（2026-08-23 中危）重力坍落柱附着物级联掉落探针 ──
     //   Review #4：dropGravityColumn 逐格 m_chunks.setBlock(Air) 直写绕过 check*OnEdit 编辑钩子族 +
@@ -1052,7 +1090,9 @@ void MatrixRun::section02_early_probes()
     //       → Air + 掉落（修前全残留 → FAIL）；
     //   (b) 沙柱本体全清（坍落完整性，非附着物断言的副作用核对）；
     //   (c) 对照柱（基座不拆）火把原样保留（拆别柱不误伤）+ 全程 ≥7 次掉落信号（含甘蔗 2）+ ≥1 雪层坍落。
-    {
+    runLegMulti({ "review#4 gravity-column attachments: base removal collapses sand column and clears torch/rail/pl"
+        "ate/flower (dropped), sugarcane cascade (2 cells), snow layer (fell entity), side redstone torch"
+        " (dropped); control column untouched; >=7 drop signals + 1 snow-fell" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例——nextSlot() 网格已耗尽）。8 柱单排、列距 2（柱侧红石火把
         //   占邻列不受扰：邻柱坍落扫到它时 state 解码支撑在另一侧 → 跳过）→ 需 17×3×7（含隔离边）。
         //   首版 4×2 网格 14×11×7 实测扫不到（124 矩阵 rig 残块 + 生成石柱把大块净空切碎）。
@@ -1140,7 +1180,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(colX[3] + 1, by + 2, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P25 复审 #15（2026-08-23 低危）「支撑格被换成非满顶支撑 → 轨坍落」探针 ──
     //   Review #15：checkRailOnEdit 失撑守卫旧要求 `id == Air`（仅挖掘 / 爆炸清格触发），本格被换成水
@@ -1150,7 +1190,9 @@ void MatrixRun::section02_early_probes()
     //       坍落清 Air + blockDroppedAsItem(id=Rail)——修前 id==Water≠Air 守卫跳过 → 轨浮空 → FAIL；
     //   (b) 焚毁路径（setBlock 写 Fire 入可燃支撑格 Planks，火吞支撑的等价写）→ 轨同样立即坍落；
     //   (c) 对照：水写入非支撑邻格 → 轨保留（坍落只看唯一支撑位，不误伤邻写）。
-    {
+    runLegMulti({ "review#15 rail support substitution: ice->water (setWaterSilent) and planks->fire (setBlock) und"
+        "er rail both drop the rail immediately (support loss reads current cell content, not just Air ed"
+        "its); neighbor water write leaves rail intact" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例）。3 组各 2 格宽（支撑+轨）+ 隔离边 → 9×4×5。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 96 && x0 < 0; zz += 3)
@@ -1206,7 +1248,7 @@ void MatrixRun::section02_early_probes()
             w.setWaterSilent(x0 + 7, by, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P26 复审 #16（2026-08-23 低危）火吞木门整门联动探针（t843 语义重做版）──
     //   Review #16：门在可燃表内，火蔓延只点燃半格 → 另半扇孤立残留无掉落。t843 重做后语义：点燃 = 进
@@ -1221,7 +1263,10 @@ void MatrixRun::section02_early_probes()
     //   确定性：火源 6 邻仅门下格可燃（无燃料不熄灭路径被 hasFuel 门挡）→ 点燃只是时间问题（2.5%/窗
     //   ——review-g #5 叠加补偿后；上限 3000 窗，P(未燃)≈0.975^3000≈e^-76）；harness 只驱动 tickFire
     //   （无雨 / 无风灭混淆源）。
-    {
+    runLegMulti({ "review#16 door whole-burn (t843 semantics): fire lighting one door half enters it into burning s"
+        "tate with id preserved and ignites the paired half in the same call (upper is not 6-adjacent to "
+        "the fire - only reachable via linkage); both halves burn out same-window via ember flare (no blo"
+        "ckBroken = no-drop burn), stone control never ignites" }, [&]() {
         // rig 寻址：运行期扫描空区（P20 先例）。火源 + 门 2 格 + 石柱 2 格 + 隔离边 → 7×6×6。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 96 && x0 < 0; zz += 3)
@@ -1290,7 +1335,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(x0 + 3, by + 1, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── P27 复审 #19（2026-08-23 低危）栅栏向铁砧伸横档探针（mesher 同源直调，同 P11/P19 模式）──
     //   Review #19：t766 铁砧 solid=false 后栅栏连接谓词仍 isFence||isSolid → 栅栏不向铁砧伸横档（同类：
@@ -1299,7 +1344,8 @@ void MatrixRun::section02_early_probes()
     //   (a) +X 邻铁砧 → 顶点数 > 全空气基线（横档画出；修前 isSolid(Anvil)=false → 与基线同 → FAIL）；
     //   (b) +X 邻铁砧 == +X 邻栅栏（连接量与栅栏互连完全一致）；
     //   (c) +X 邻火把（ShapeNone）== 基线（非实体面仍不连——谓词放宽不至连空气族）。
-    {
+    runLegMulti({ "review#19 fence-to-anvil connection: R1 predicate (isCollidable||isFullCube) draws rail arms tow"
+        "ard anvil exactly like fence-fence; torch (ShapeNone) still not connected" }, [&]() {
         const float tileW = 1.0f / 16.0f;
         PartialLightCtx lctx; lctx.light = 1.0f;
         for (int i = 0; i < 6; ++i) lctx.face[i] = 1.0f;
@@ -1324,7 +1370,7 @@ void MatrixRun::section02_early_probes()
                           << "| review#19 fence-to-anvil connection: R1 predicate (isCollidable||"
                              "isFullCube) draws rail arms toward anvil exactly like fence-fence; torch "
                              "(ShapeNone) still not connected";
-    }
+    });
 
     // ── review-e 修复批探针（Review 2026-08-23 #6/#7/#8/#32 + dev-plan t834 生存链闭环）──
     // (a) #7/#8 配方生存链：剪/杀白羊掉 Wool 方块（QML sheepWoolDropId 字面量 27——静态契约由 recipe.cpp 尾部
@@ -1338,7 +1384,13 @@ void MatrixRun::section02_early_probes()
     //     需人工目视（字面量界标 27/63 已由 (a) 锁住）。
     // ⚠️ (c) 写共享 AppLocalData 目录（缓存生成器落盘路径固定）——探针会清掉 mobhead_1 / woolface 当前真身，
     //     属自愈型副作用（下次构建期 ensureBuiltLocked / 懒生成重落盘），同 t777/t779/t780 先例。
-    {
+    runLegMulti({ "review-e survival chains & death payload & rev-named caches: sheep wool drop literal 27/63+idx-1"
+        " feeds all 16 dye recipes and planks+wool->bed_red (retired 0x20E no longer crafts anything), re"
+        "dstone lamp crafts from glass BLOCK (54, self-drop) not glass item 0x204 (sand smelt still yield"
+        "s placeable 0x204 transit), mobDied 8th param sheared=true suppresses wool drop on sheared sheep"
+        " death (unsheared control false), mobhead/sheep-woolface derived cache filenames embed _r<revisi"
+        "on> with per-revision stale cleanup incl. legacy unsuffixed names (QML clamp #33 / leg covers #3"
+        "4 = manual visual check)" }, [&]() {
         bool ok = true;
         // (a1) 跨层字面量契约：QML sheepWoolDropId 白→27 / 有色→63+idx-1 ↔ BlockRegistry 同值 ↔ 染色配方
         //     原料/产物逐位相等（QML 掉什么，配方就吃什么、产什么色）。
@@ -1498,7 +1550,7 @@ void MatrixRun::section02_early_probes()
                              "sheep death (unsheared control false), mobhead/sheep-woolface derived cache "
                              "filenames embed _r<revision> with per-revision stale cleanup incl. legacy "
                              "unsuffixed names (QML clamp #33 / leg covers #34 = manual visual check)";
-    }
+    });
 
     // ── Review 2026-08-24 #4/#5 apply() 重建序 + pack 直返 URL cache-bust 探针 ──
     // #4 背景：mobhead 头像是构建期预生成（ensureBuiltLocked 以 s.revision 落盘 _r<rev>.png）；启动后首次
@@ -1519,7 +1571,12 @@ void MatrixRun::section02_early_probes()
     //     （无源部署）→ 记 note 跳过②（①③仍跑，不在无源机器上假 FAIL）。
     //   ③ #5 纯函数契约：查询串存在 / 随 revision 变 / QUrl::toLocalFile 剥离查询串（mobTextureSource
     //     羊/夜行者分支拿命中 URL 取 localFile 喂合成器靠这条——查询串不得污染文件寻址）。
-    {
+    runLegMulti({ "review24 #4/#5 pack cache-bust timing: sealed pig rig lazy(rev0) vs first-apply rebuild(rev1) mo"
+        "bhead URLs differ (same URL = QML URL-cache stale), packFileUrl appends ?r=<rev> that changes wi"
+        "th revision and strips from QUrl::toLocalFile, source pin: apply() bumps revision BEFORE ensureB"
+        "uiltLocked() rebuild + all five direct-return families route through packFileUrl+ review25 #7: i"
+        "con/atlas/strip families (6 small + 2 long) bust ?r=<rev> with bare file:/// direct-returns bann"
+        "ed (source pin skipped - no source tree next to exe)" }, [&]() {
         bool ok = true;
         // ① #4 时序模拟（pig rig 子目录布局，同 review-e (c) 模式）。
         QDir dR24(QDir::temp().absoluteFilePath("review24_45_probe"));
@@ -1685,7 +1742,7 @@ void MatrixRun::section02_early_probes()
                                     "+ review25 #7: icon/atlas/strip families (6 small + 2 long) bust"
                                     " ?r=<rev> with bare file:/// direct-returns banned"
                                   : " (source pin skipped - no source tree next to exe)");
-    }
+    });
 
     // ── Review 2026-08-23 #27 余烬门熄灭钩子并入 World 写入族探针 ──
     // 背景：旧熄门钩子只挂 playercontroller 挖掘路径（finishMiningAt 显式调 breakNetherPortalsAround），
@@ -1699,7 +1756,11 @@ void MatrixRun::section02_early_probes()
     //   (d) setWaterSilent 置换门格（流体蒸发 / 改道代表）；(e) 纯放置对照（旧格 Air → 不熄，机制等价
     //   MC 放置不破门）；(f) 玩家挖掘路径回归（setBlock(Air) 拆柱 —— 旧 playercontroller 显式调用的等价
     //   序列，现由 World 层钩子自覆盖）。每场景重建 4×5 Z 平面无角门（t806 ④ 无角合法）+ 点燃 20 格。
-    {
+    runLegMulti({ "review-f #27 portal extinguish joined World write family: displacement of non-air cell (explosio"
+        "n sphere per-voxel / setBlockSilent / clearBlockSilent / setWaterSilent / player dig setBlock) c"
+        "ollapses whole connected portal domain (4x5 rig: 16 out-of-sphere cells die via hook, obsidian f"
+        "rame blast-immune), pure placement into air beside a lit door keeps all 20 cells (predicate guar"
+        "d), removeNetherPortalAt clear guarded against nested BFS" }, [&]() {
         World wRf27;
         wRf27.setWidth(48);
         wRf27.setDepth(48);
@@ -1815,7 +1876,7 @@ void MatrixRun::section02_early_probes()
                              "(4x5 rig: 16 out-of-sphere cells die via hook, obsidian frame blast-immune), "
                              "pure placement into air beside a lit door keeps all 20 cells (predicate "
                              "guard), removeNetherPortalAt clear guarded against nested BFS";
-    }
+    });
 
     // ── Review 2026-08-23 #28 铁砧砸伤按目标结算探针 ──
     // 背景：旧 anvilDamaged 是**落体侧一次性拍**——下落铁砧首个命中帧置位后整次下落不再结算 → 铁砧先穿
@@ -1826,7 +1887,11 @@ void MatrixRun::section02_early_probes()
     //   (floor−1)×2=10；旧代码先结算玩家 → 猪 100 不动）+ 玩家恰 1 次 2HP（落差 2.x 格）；(Q) 着地后 20 帧
     //   （< 窒息首扣 ~63 帧）两者读数不动（同落体不重复结算）；(R) 第二块铁砧（新 serial）→ 玩家再结算
     //   一次（「每次下落」独立）+ 落在第一块上（着地还原链不受记账影响）。
-    {
+    runLegMulti({ "review-f #28 anvil crush settles per target: one fall through virtual player band then penned pi"
+        "g damages BOTH exactly once each (pig 100->92 at first-overlap frame (floor(5.1x)-1)*2=8, player"
+        " 1 hit 2HP — old one-shot falling-entity flag starved the later target), readings frozen for 20 "
+        "post-land frames (no re-settlement within one fall, pre-suffocation window), second anvil with f"
+        "resh serial re-settles player (per-fall independence) and stacks on first (restore chain intact)" }, [&]() {
         World wRf28;
         wRf28.setWidth(48);
         wRf28.setDepth(48);
@@ -1901,7 +1966,7 @@ void MatrixRun::section02_early_probes()
                              "re-settlement within one fall, pre-suffocation window), second anvil with "
                              "fresh serial re-settles player (per-fall independence) and stacks on first "
                              "(restore chain intact)";
-    }
+    });
 
     // ── Review 2026-08-23 #29 铁砧砸伤窄盒探针 ──
     // 背景：旧砸伤 XZ 判定用落体 halfW(0.5)+目标 halfW 的满格宽 → 贴格边站（视觉上铁砧 12/16 宽没碰到）
@@ -1909,7 +1974,10 @@ void MatrixRun::section02_early_probes()
     //   等其余落体仍 0.5）。玩家 listener halfW=0.3 → 命中阈 0.375+0.3=0.675（旧 0.8）。断言：
     //   (a) 列心偏 0.7（>0.675 新界、<0.8 旧界）→ 0 命中（旧代码必中的判别位）；(b) 偏 0.6 对照 → 恰一次
     //   2HP（窄盒内仍正常结算，落差 2.x 格）。两列各自落定还原铁砧于平台顶。
-    {
+    runLegMulti({ "review-f #29 anvil crush narrow footprint: crush XZ test uses anvil visual half-width 0.375 (12/"
+        "16) + listener 0.3 = 0.675 threshold — listener 0.7 off column axis untouched (old full-cell 0.8"
+        " box would hit), 0.6 control hit exactly once for 2HP at 2-block fall, both anvils restore on pl"
+        "atform (sand-family falling blocks keep 0.5, manual check)" }, [&]() {
         World wRf29;
         wRf29.setWidth(48);
         wRf29.setDepth(48);
@@ -1955,7 +2023,7 @@ void MatrixRun::section02_early_probes()
                              "listener 0.7 off column axis untouched (old full-cell 0.8 box would hit), "
                              "0.6 control hit exactly once for 2HP at 2-block fall, both anvils restore "
                              "on platform (sand-family falling blocks keep 0.5, manual check)";
-    }
+    });
 
     // ── Review 2026-08-23 #30 鱿鱼笼水格刷位探针 ──
     // 背景：tickSpawners 找位谓词硬编码「air+上 air+下 solid」陆生条件 → 鱿鱼笼（生物蛋改型）复用后
@@ -1963,7 +2031,10 @@ void MatrixRun::section02_early_probes()
     //   rig：48×48 种子 9 世界（y=8 worldgen 恒实心），笼刻 MobSquid 型，唯一合格邻位 = (sx+1) 水柱两格，
     //   其余 7 水平邻显式塞 Stone 双层（陆 / 水两谓词均不满足 → 无处可刷的旧代码 0 刷判别位）。一周期
     //   tickSpawners(6.0) → 恰 1 只鱿鱼且落水柱格。
-    {
+    runLegMulti({ "review-f #30 squid cage spawns in water: squid-typed spawner uses water cell predicate (cell+abo"
+        "ve both Water, no solid floor needed) — exactly 1 squid in the sole 2-deep water column neighbor"
+        " while all 7 other neighbors stone-filled (old land predicate would spawn nowhere / beached squi"
+        "d)" }, [&]() {
         World wRf30;
         wRf30.setWidth(48);
         wRf30.setDepth(48);
@@ -2008,7 +2079,7 @@ void MatrixRun::section02_early_probes()
                              "cell predicate (cell+above both Water, no solid floor needed) — exactly 1 "
                              "squid in the sole 2-deep water column neighbor while all 7 other neighbors "
                              "stone-filled (old land predicate would spawn nowhere / beached squid)";
-    }
+    });
 
     // ── Review 2026-08-23 #31 被动笼不受敌对预算压制探针 ──
     // 背景：旧 tickSpawners 入口全局敌对 cap（hostileCount()>=kHostileMobCap=30）+ 玩家周边区域 cap 早退
@@ -2018,7 +2089,11 @@ void MatrixRun::section02_early_probes()
     //   30 只蹒腚者（XZ 距玩家 ~57 > kHostileAreaRadius=48，全局敌对预算打满），玩家旁猪笼 + 蹒腚者笼各一
     //   （邻位手工挖空 + 石底）。一周期 → 猪笼照刷恰 1（旧入口早退判别位：0 刷），蹒腚者笼被全局 cap 压制
     //   0 刷，hostileCount 恒 30。
-    {
+    runLegMulti({ "review-f #31 passive cage ignores hostile budget: with global hostile pool maxed (30 far seeded "
+        "shamblers >48 away, outside area radius), nearby pig cage still spawns exactly 1 (old entry gate"
+        " starved ALL cages incl. passive), shambler cage correctly suppressed by hostile global cap, hos"
+        "tileCount stays 30 (MC 1.0 spawner not bound by ambient hostile cap; same-type local cap + total"
+        " kCap remain, manual check)" }, [&]() {
         World wRf31;
         wRf31.setWidth(96);
         wRf31.setDepth(96);
@@ -2062,7 +2137,7 @@ void MatrixRun::section02_early_probes()
                              "incl. passive), shambler cage correctly suppressed by hostile global cap, "
                              "hostileCount stays 30 (MC 1.0 spawner not bound by ambient hostile cap; "
                              "same-type local cap + total kCap remain, manual check)";
-    }
+    });
 
     // ── Review 2026-08-23 #5 火蔓延抑制层探针（① 新蔓延率统计 / ② 湿燃料防火带 / ③ 火自身邻水加速自熄 /
     //    ④ 降雨露天自熄 + 屋檐对照）──
@@ -2088,7 +2163,20 @@ void MatrixRun::section02_early_probes()
     //     tickFire）→ 露天火（skyLightAt==15 + 该列 isPrecipitatingAt 前置校验）带燃料 200 窗内熄灭；
     //     对照：同列隔 8 格加石板屋顶（火格 skyLight<15 前置校验）→ 若火熄则其燃料板必已被吞（火只可能
     //     烧完燃料自然熄，不可能被雨杀——淋不到；杀错 = 抑制判定漏了遮挡门）。结束恢复 Clear（卫生）。
-    {
+    runLegMulti({ "review-g #5 fire suppression layer: per-neighbor spread compensated 5%->2.5% (19200-sample lane "
+        "statistics inside 2.0-3.0% band, all fueled fires survive clear weather), water-adjacent target "
+        "never ignites (moat firebreak, deterministic), water-adjacent fire self-extinguishes fast (~40%/"
+        "window suppression beats fuel), open-sky rain kills fueled fire within 200 windows while roofed "
+        "control fire only dies by consuming its own fuel (skyLight<15 not rained on); suppression predic"
+        "ates factored into fireRainExposedAt/fireWaterNeighborAt for t843 fire-semantics redo to adopt",
+               "review25 #9 rain-saved door half survives burn-out cleanup: with rain forced upfront (big-step t"
+        "ickWeather), each column burns a lone lower door half under a stone roof (roof keeps skyLight<15"
+        " so no douse rolls) for 9 of 10 windows, then roof removed + paired upper half placed + sky refl"
+        "ooded to 15 right before the final window so burn-out cleanup sees an un-burnt rain-exposed pair"
+        "; every burnout column keeps the upper half as WoodDoor, zero WoodDoor blockBroken during the fi"
+        "nal window (stray pair-clear-to-Air is the only possible broken source), >=1 burnout scenario as"
+        "serted across 20 spread columns (40%/window douse roll on the now-exposed lower half is the only"
+        " skip path; hashVoxel-seeded so the outcome is deterministic)" }, [&]() {
         World wG5;
         wG5.setWidth(96);
         wG5.setDepth(96);
@@ -2340,7 +2428,7 @@ void MatrixRun::section02_early_probes()
                              "columns (40%/window douse roll on the now-exposed lower half is the only "
                              "skip path; hashVoxel-seeded so the outcome is deterministic)";
     }
-    }
+    });
 
     // ── P-t843 可燃物直燃语义重做探针（专用局部世界 wT，P30/P31/review-g#5 先例）──
     //   dev-plan t843：打火石右键可燃方块 = 方块本身点燃（燃烧态 = World 侧表 m_burningCells 瞬态，
@@ -2370,7 +2458,15 @@ void MatrixRun::section02_early_probes()
     //       1 窗后仍 Fire（有燃料火无自熄掷骰路径——确定性非概率）；
     //   (f) 燃烧中替换 / 同 id 复原清态：燃板 setBlock(Stone) 替换 → isBurningAt 假；再点燃后同 id
     //       setBlock(Planks) no-op 写 → isBurningAt 假（review-g#5(a) 每窗复原所依赖契约的显式锁定）。
-    {
+    runLegMulti({ "t843 direct-ignite fire semantics: flint right-click on flammable enters burning state with id p"
+        "reserved (side-table transient, surface-fire overlay via blockIgnited), exact 10-window wood tim"
+        "er (9 windows burning, 10th burns to ember flare, ember dies fuel-less), stone rejected (falls b"
+        "ack to standing fire), wet-fuel firebreak rejected at ignite (unified 3-entry gate) while burnin"
+        "g-turned-wet douses with block intact, burning-cell same-state spread proven without any fire ce"
+        "ll, mob on burning plank ignites within 40 ticks (player leg = same predicate copy in step, manu"
+        "al visual), standing fire loses support = extinguished inside the same setBlock call (checkFireO"
+        "nEdit hook) while fueled+supported control survives deterministically, replace/same-id-noop writ"
+        "e clears burning state" }, [&]() {
         World wT;
         wT.setWidth(48);
         wT.setDepth(48);
@@ -2541,7 +2637,7 @@ void MatrixRun::section02_early_probes()
                              "fire loses support = extinguished inside the same setBlock call "
                              "(checkFireOnEdit hook) while fueled+supported control survives "
                              "deterministically, replace/same-id-noop write clears burning state";
-    }
+    });
 
     // ── t813 构建版本戳探针（Core 叶子直编）：锁 BuildInfo 两值非空 + 格式 ──
     //   stamp = CMake 每次 build 生成的 "YYYY-MM-DD HH:MM"（16 字符）；gitHash = git
@@ -2550,7 +2646,10 @@ void MatrixRun::section02_early_probes()
     //   失败」自相矛盾——无 .git 源码导出包 / CI 缓存构建会矩阵恒红；环境缺失≠格式回归，SKIP 单列不算
     //   FAIL 不算 PASS）；stamp 格式恒断（真回归照 FAIL）——SKIP 行也带 stamp 值供人工核。探针跑在矩阵
     //   测试 exe 里 = 顺带验证「该 exe 的 stamp 随本次构建刷新」（构建-运行同刻，分钟差即重建链生效证据）。
-    {
+    runLegMulti({ "t813 build stamps: stamp(YYYY-MM-DD HH:MM) git(7-10 hex, git rev-parse --short HEAD); header reg"
+        "enerated every build via cmake/WriteBuildStamp.cmake with content-change-only rewrite so only bu"
+        "ildinfo.cpp recompiles; git==\"nogit\" judged SKIP (CMake honest fallback = environment without "
+        "git, not a format regression; stamp format still asserted, stamp break stays FAIL)" }, [&]() {
         const QString stamp = BuildInfo::instance()->stamp();
         const QString ghash = BuildInfo::instance()->gitHash();
         const QRegularExpression stampRe(QStringLiteral("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$"));
@@ -2568,7 +2667,7 @@ void MatrixRun::section02_early_probes()
                              "rewrite so only buildinfo.cpp recompiles; git==\"nogit\" judged SKIP "
                              "(CMake honest fallback = environment without git, not a format "
                              "regression; stamp format still asserted, stamp break stays FAIL)";
-    }
+    });
 
     // ── P-t814 真消费端执行探针（Game 层 PlayerController 直编）──
     //   用户报告（R19.13）：「激活红石粉/红石块/红石火把都不能点燃 TNT、不能触发发射器/投掷器」，但
@@ -2589,7 +2688,16 @@ void MatrixRun::section02_early_probes()
     //       集 unpowered→powered 沿检测，t689）；源拆除再快速复置 → 冷却窗内仍不发射（per-dispenser 2s 闸）。
     //   任一 FAIL = 用户症状在消费端的复现点（World 层已由 P15/t773 洗冤）；全 PASS = 链完整，用户复测走
     //   docs/test-reports/t814-redstone-repro-steps.md（版本戳核对 + 逐源×逐器件最简搭建）。
-    {
+    runLegMulti({ "t814 real-consumer probes: Main.qml forwarding mirrored onto actual PlayerController.firePowerTn"
+        "t/fireDispenserAtQml (lever->TNT clears block + spawns primed entity at cell center; redstone-bl"
+        "ock->dispenser w/ 3 arrows fires 1 + decrements to 2; lever->dropper w/ 5 dust pops 1 item entit"
+        "y + decrements to 4; empty tracked dispenser powered = design no-op; stable-power re-touch and s"
+        "ub-0.5s-cooldown re-power both do not re-fire, each zero-fire leg gated by powerDispenserTrigger"
+        "ed emission-count delta so cooldown-block vs signal-lost are distinguished; cooldown driven past"
+        " 0.5s expiry via scanDispenserTraps equivalent-decrement then a true re-edge MUST re-fire +1 arr"
+        "ow/stock 2->1, pinning the cooldown duration both directions) - consumer leg never executed by P"
+        "15/t773 before, iron-door contrast explained (door = in-World state write, TNT/dispenser = signa"
+        "l->QML->consumer)" }, [&]() {
         PlayerController pc;          // 真消费端（Game 层；C++ 直造不启 16ms 定时器——componentComplete 不触发）
         EntityManager ents;           // spawnPrimedTnt / spawnArrowPlayer 断言源（不 tick → 实体冻结可数）
         DispenserStore store;         // 库存分派断言源
@@ -2787,7 +2895,7 @@ void MatrixRun::section02_early_probes()
                              "pinning the cooldown duration both directions) - consumer leg never executed by "
                              "P15/t773 before, iron-door contrast explained (door = in-World state write, "
                              "TNT/dispenser = signal->QML->consumer)";
-    }
+    });
 
     // ── P-t856 发射器弹点燃 TNT 探针（Game 层真消费端，t814 模式）──
     //   MC 1.0 dispenser 语义：发射器内 TNT 经激活（拉杆，激活链 t772/t814 已锁、本任务零改动）→ 弹出
@@ -2803,7 +2911,20 @@ void MatrixRun::section02_early_probes()
     //       碰撞 → 墙格 spawn = ~5s 后就地爆穿墙波及发射器自身）；review26 #24 起堵口**一律**退化普通掉落物
     //       弹出（不点燃）——旧版「再探一格」不看连通 → 1 格厚墙时 TNT 隔墙生成在墙后（穿墙 TNT），已收口；
     //   (e) 红石直接邻接 TNT 原地引爆（firePowerTnt 清方块 + 原格生成）不回归由 t814 (a) 既有探针复跑覆盖。
-    {
+    runLegMulti({ "t856 dispenser fires primed TNT: lever behind a 3-TNT dispenser pops a PrimedTnt at the facing-a"
+        "djacent cell center (state 0 -> +X, source kept off the firing face), full standard fuse (fusePr"
+        "ogress==1.0 pins kPrimedTntFuseSec, chain-fuse 1.2s would read 0.24), fuse ticking + directional"
+        " +X drift after one 0.25s entity tick pins pop-along-facing velocity (t871: pop speed 4.0->1.6),"
+        " and after 1.05s of driven ticks the primed TNT settles INSIDE the facing-adjacent cell (floor=="
+        "x0+1, the 'one cell past the muzzle' user contract; the old 4.0 speed landed two cells out), sto"
+        "ck 3->2; sub-0.5s-cooldown re-edge fires nothing while powerDispenserTriggered still emits, cool"
+        "down driven past 0.5s then re-edge MUST re-pop (+1 entity, stock 2->1); dropper w/ TNT pops a pl"
+        "ain item drop with zero primed entities (dropper = item-only, the other side of the two-path bou"
+        "ndary); blocked firing face (review25 #11 / review26 #24) always degrades to a plain item drop w"
+        "ith zero primed entities -- whether only the adjacent cell is walled (the wall-behind cell stays"
+        " primed-free: old code teleported TNT through a 1-thick wall) or the exit is fully walled (MC-ap"
+        "proximate: recoverable item over silent swallow), stock decremented on every path; redstone-dire"
+        "ct-adjacent in-place priming regression is covered by the t814(a) probe above" }, [&]() {
         PlayerController pc;
         EntityManager ents;
         DispenserStore store;
@@ -3038,7 +3159,7 @@ void MatrixRun::section02_early_probes()
                              "swallow), stock decremented on every path; "
                              "redstone-direct-adjacent in-place priming regression is "
                              "covered by the t814(a) probe above";
-    }
+    });
 
     // ── P-t868 高频红石逐沿发射探针（Game 层真消费端，t814/t856 模式）──
     //   用户实测：「发射器高频红石只能激活一次」（旧 2.0s 冷却把第二个上升沿整只吞掉）。修复 = 冷却缩短
@@ -3049,7 +3170,10 @@ void MatrixRun::section02_early_probes()
     //   (b) 防抖闸仍有效：同一冷却窗内（只 tickN 推进世界、无帧驱动递减）再造真上升沿 → 不多发
     //       （t814 (e)② 同口径；t869 火把环时钟落地前的独立驱动——本探针不依赖无稳态电路存在）。
     //   (c) 库存对账：发射次数 == 库存扣减量（无凭空箭 / 无吞库存）。
-    {
+    runLegMulti({ "t868 high-frequency redstone re-fires per rising edge: rapid lever cycling (edge -> 0.7s frame-d"
+        "riven cooldown decay -> re-edge) MUST re-fire (the old 2.0s cooldown swallowed every sub-2s edge"
+        " = the reported fires-once symptom), stock decremented exactly once per shot; a fresh re-edge in"
+        "side the cooldown window stays blocked (single-path double-fire guard intact)" }, [&]() {
         PlayerController pc;
         EntityManager ents;
         DispenserStore store;
@@ -3119,14 +3243,16 @@ void MatrixRun::section02_early_probes()
                              "cooldown swallowed every sub-2s edge = the reported fires-once symptom), stock "
                              "decremented exactly once per shot; a fresh re-edge inside the cooldown "
                              "window stays blocked (single-path double-fire guard intact)";
-    }
+    });
 
     // ── review26 #16 同柱垂直叠放发射器独立冷却探针（Game 层真消费端，t856/t868 模式）──
     //   用户症状（review26 低危）：冷却键 (x<<32|z) 不含 Y → 同柱垂直两台发射器共享冷却，0.5s 内上台
     //   发射后下台的合法沿被吞（t868「逐沿发射」语义在柱粒度上破裂）。修：键入 Y（21/21/10 三维布局，
     //   同 m_redstoneLitCells 既有键序）。断言：同 tick 两台各自被拉杆通电 → 两箭各发一支（箭 +2、
     //   两台库存各扣 1）——旧键下第二台被共享冷却拦（恰 1 箭、一台库存不扣），回退即红。
-    {
+    runLegMulti({ "review26-16 per-dispenser cooldown keyed in 3D: two vertically stacked dispensers powered the sa"
+        "me tick each fire their own arrow (old (x<<32|z) key shared the cooldown across the column and s"
+        "wallowed the lower machine's legal edge within 0.5s), both stocks decremented" }, [&]() {
         PlayerController pc;
         EntityManager ents;
         DispenserStore store;
@@ -3175,7 +3301,7 @@ void MatrixRun::section02_early_probes()
         store.clearDispenser(x0, kRigY, z0);
         store.clearDispenser(x0, kRigY + 1, z0);
         tickN(w, 2);
-    }
+    });
 
     // ── P-t869 红石无稳态电路（时钟）复刻探针（World 层，t740 回归定位）──
     //   用户实测：「红石高频 / 无限电路上版本有、本版没了」。考古结论：v1 电网从未支持过*合法*无稳态——
@@ -3192,7 +3318,14 @@ void MatrixRun::section02_early_probes()
     //       （tick 6/12/20 采样 OffFlag 恒置位——非振荡，锁存反相）；
     //   (c) **贯穿直线稳定对照**（t740 反闪烁保持）：粉直线贴基座侧而过（中格对向双连 = 贯穿形）→
     //       20 tick 火把恒亮（装饰环不再误触发——豁免换成形状后原修案语义仍在）。
-    {
+    runLegMulti({ "t869 redstone astable circuits restored via dust shape semantics: torch-on-block + 2-cell dust s"
+        "tub at the base side self-oscillates (>=4 state flips + power alternation in 24 ticks; the t740 "
+        "blanket base-ring exemption pinned it at 0 flips = the reported regression), lever-driven 3-dust"
+        " line ENDING at the support holds the torch inverted (latched NOT gate), while a straight dust l"
+        "ine PASSING the support side stays silent (through-line has no side output) and a lone dot has n"
+        "o output at all - both t740 anti-flicker shapes remain stable; archaeology: t740 3686e27 killed "
+        "both the accidental ring flicker AND every dust-fed NOT/clock input, t812 bit7 / t689 edges / t7"
+        "07 BFS cleared of involvement" }, [&]() {
         bool okClock = false, okNot = false, okStable = false;
         // (a) 火把时钟：x0=Stone(基座) x0/y+1=Torch x0+1..x0+2=粉 stub 两格（近格连接朝远格 = 端点形 →
         //     开放端指向基座 → 供能；单格 dot 不输出（P4/P14 稳定语义），须两格才成回路）。
@@ -3289,7 +3422,7 @@ void MatrixRun::section02_early_probes()
                              "archaeology: t740 3686e27 killed both the accidental ring flicker AND every "
                              "dust-fed NOT/clock input, t812 bit7 / t689 edges / t707 BFS "
                              "cleared of involvement";
-    }
+    });
 
     // ── P-review26-5 红石粉形状输出「臂轴延长端」语义探针（review26 #5：拐角/单臂垂直侧自相矛盾修口）──
     //   旧判定等价「目标向无连接位且非贯穿直线侧即供电」：单臂粉向三个非连接方向全 true，贯穿直线垂直侧
@@ -3301,7 +3434,14 @@ void MatrixRun::section02_early_probes()
     //       探针前移会推移 t812 等下游探针的 rig 位，矿车跑法对槽位地形敏感 = 假 FAIL）：端点粉臂**垂直于**
     //       基座方向 → 火把恒亮（旧代码此形态供电 → 火把熄 = FAIL 面）；臂沿基座方向（延长端，拉杆驱动）→
     //       火把锁存熄灭（正对照，t869(b) NOT 门形态不变）；拐角开放侧 → 供电熄灭（正对照，与旧行为一致）。
-    {
+    runLegMulti({ "review26-5 dust shape output unified to arm-axis extension semantics: target +-X powered iff the"
+        " dust has an X-axis arm (px||nx), +-Z iff (pz||nz), dot stays dark - endpoint perpendicular side"
+        "s no longer power (old rule powered all 3 non-connected sides of a single-arm dust while a throu"
+        "gh-line's perpendicular side stayed dark - same geometry, opposite verdict one cell apart), endp"
+        "oint extension end / corner open sides / through-line axial ends still power (NOT-gate and clock"
+        " wiring intact), t740 anti-flicker shapes (dot + through-line side) unchanged; four-shape functi"
+        "on truth table + world rigs: perpendicular-arm endpoint keeps the torch lit (old code powered it"
+        "), lever-driven extension end and corner open side keep it latched off (positive controls)" }, [&]() {
         const auto dustSt = [](quint8 conn) { return quint8(conn << 4); };
         const quint8 armNx  = dustSt(BR::RedstoneDustConnNx);
         const quint8 armPx  = dustSt(BR::RedstoneDustConnPx);
@@ -3407,7 +3547,7 @@ void MatrixRun::section02_early_probes()
                              "function truth table + world rigs: perpendicular-arm endpoint keeps the "
                              "torch lit (old code powered it), lever-driven extension end and corner "
                              "open side keep it latched off (positive controls)";
-    }
+    });
 
     // ── P-review26-6 火把 burnout 熔断探针（review26 #6：端点粉贴基座永续振荡无兜底）──
     //   t869 形状语义恢复端点/拐角回灌后，「火把立方块上 + 基座旁 ≥2 格端点粉」= 5Hz 永续振荡（每 tick
@@ -3420,7 +3560,14 @@ void MatrixRun::section02_early_probes()
     //   (b) 自由时钟（t869(a) 同 rig）长跑 320 tick：早期 ≥4 翻（振荡未被熔断误杀）→ 出现 60..100 tick
     //       连续熄灭段（锁定段长钉冷却量级）→ 段后 100 tick 内再翻转（冷却后恢复振荡 = 「可振荡」tradeoff
     //       保持，burnout 只封「永续」）。
-    {
+    runLegMulti({ "review26-6 torch burnout fuse: a torch flipping  times inside the 60s window locks OFF for  reds"
+        "tone ticks (8s, MC 160gt parity) then re-evaluates - lever-driven NOT rig: 8th flip (would-be re"
+        "light under an OFF lever) stays dark = locked, no relight within 70 ticks, relight lands in the "
+        "73..100 window, circuit toggles normally after cooldown; free-running endpoint-dust clock: >=4 f"
+        "lips before the fuse (oscillation not over-killed), a 60..100-tick continuous dark stretch (lock"
+        " magnitude), and post-lock flips within 100 ticks (cooldown expiry restores oscillation - astabl"
+        "e circuits remain buildable, only PERPETUAL 5Hz hammering is fused; deterministic integer counte"
+        "rs, PLAN 2-K)" }, [&]() {
         constexpr int kMirrorBurnoutFlips = 8;      // World::kTorchBurnoutFlipLimit 镜像（改值须两处同步）
         constexpr int kMirrorBurnoutCooldown = 80;  // World::kTorchBurnoutCooldownTicks 镜像
         Q_UNUSED(kMirrorBurnoutFlips);
@@ -3522,7 +3669,7 @@ void MatrixRun::section02_early_probes()
                              "100 ticks (cooldown expiry restores oscillation - astable circuits "
                              "remain buildable, only PERPETUAL 5Hz hammering is fused; deterministic "
                              "integer counters, PLAN 2-K)";
-    }
+    });
 
     // ── P-t870 红石粉中键复制给物品 id 探针（t815 返修：根因不在图标源在 id）──
     //   用户二报「复制红石粉仍非红石粉图标」。根因：pickBlock 把**方块形态** 130 写进 hotbar →
@@ -3532,7 +3679,11 @@ void MatrixRun::section02_early_probes()
     //   断言：(a) 行为级——映射函数直调（dust→0x224；石头/发射器/红石矿石恒自身——矿石 pick 给
     //   矿石本体非掉落物，MC 语义）；(b) 源码钉——pickBlock 经 pickItemIdForBlock 路由（captured /
     //   射线门内不可行为直驱，t889/a3 先例）。
-    {
+    runLegMulti({ "t870 pick-block on redstone dust yields the dust ITEM id: mapping authority returns RedstoneId(0"
+        "x224) for the wire block (130) and identity for stone/dispenser/redstone-ore (ore picks its bloc"
+        "k, not the drop), and pickBlock routes through pickItemIdForBlock before the hotbar write (sourc"
+        "e pin - the t815 icon-source-only fix never touched the id, hotbar held the block-form id so the"
+        " icon came from the block-segment atlas and never matched the redstone-tab/material entries)" }, [&]() {
         // (a) 行为级：映射单一权威直调。
         const bool okMap = PlayerController::pickItemIdForBlock(quint8(BR::RedstoneDust))
                                == RecipeRegistry::RedstoneId
@@ -3570,7 +3721,7 @@ void MatrixRun::section02_early_probes()
                              "t815 icon-source-only fix never touched the id, hotbar held the block-form id "
                              "so the icon came from the block-segment atlas and never matched the redstone-"
                              "tab/material entries)";
-    }
+    });
 
     // ── P-t879 活板门双修（行为级 + 源码钉；专用断言不建 rig）──
     //    (a) 木活板门 def 贴图契约：大面（top/bottom）= 180 四镂空板、薄侧边（side/front）= planks(8)
@@ -3581,7 +3732,12 @@ void MatrixRun::section02_early_probes()
     //    (c) 源码钉：chunkgeometry isCutoutTrapX 同时含 IronTrapdoor 与 WoodTrapdoor（cutout 段
     //        路由——木活板门孔须 alphaCutoff 透视；驱动 ChunkGeometry 需渲染后端，行为级不可密闭，
     //        t870/t889 源码钉先例）+ mesher trapdoor case 木/铁 sideTile 分流（planks/iron_block）。
-    {
+    runLegMulti({ "t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 (four-hole plank board, "
+        "alpha cutout - the old all-planks solid plate read as a wooden pressure plate) with plank thin e"
+        "dges, atlas regenerated (185 tiles since t1028 appended 184; t998 appended 181..183 before; stal"
+        "e pre-t879 atlas width still fails) with real alpha holes in tiles 178/180, and both trapdoors r"
+        "oute to the cutout pass (source pin - holes need alphaCutoff to see through); iron side tiles us"
+        "e iron_block / wood planks per family (mesher + runtime icon spec + offline icon)" }, [&]() {
         const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
         const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
                            && wtd.sideTile == 8 && wtd.frontTile == 8;
@@ -3643,7 +3799,7 @@ void MatrixRun::section02_early_probes()
                              "real alpha holes in tiles 178/180, and both trapdoors route to the cutout "
                              "pass (source pin - holes need alphaCutoff to see through); iron side tiles use "
                              "iron_block / wood planks per family (mesher + runtime icon spec + offline icon)";
-    }
+    });
 
     // ── P-t880 异形物品 3D 模型族（ItemShapeGeometry 行为级 + 红石粉粉堆源码钉）──
     //    (a) 几何契约：每族 blockId 建形状后断言**顶点数 + 形心居中 bounds**——活板门 24 顶点（单薄板，
@@ -3653,7 +3809,11 @@ void MatrixRun::section02_early_probes()
     //        防退化成满立方（24 顶点但 bounds ±0.5 —— bounds 断言抓它）。
     //    (b) 红石粉 item 图标改粉堆瓦片 167（dust_dot_off；旧 166 线向 = 「一条线」观感根因）——运行期
     //        spec 内部函数不可直调 → 源码钉 flatSpec(167) 落位（滤注释）。
-    {
+    runLegMulti({ "t880 item 3D family: ItemShapeGeometry builds real partial shapes (trapdoor plate / slab half-bo"
+        "x / stairs two-box / snow 1/8 / torch 2/16-column / grass double-sided cross / enchant 0.75 box)"
+        " centered on each shape's mid-height with vertex-count + bounds contracts pinned per family, and"
+        " the redstone dust item icon renders the dust-dot pile tile 167 instead of the wire line 166 (so"
+        "urce pin)" }, [&]() {
         bool ok = true;
         {
             ItemShapeGeometry g;
@@ -3703,7 +3863,7 @@ void MatrixRun::section02_early_probes()
                              "double-sided cross / enchant 0.75 box) centered on each shape's mid-height with "
                              "vertex-count + bounds contracts pinned per family, and the redstone dust item icon "
                              "renders the dust-dot pile tile 167 instead of the wire line 166 (source pin)";
-    }
+    });
 
     // ── P-t925 3D 模型扩面第二批（t880 口径：每新形状 顶点数 + 包络 断言；栅栏 / 门 / 机关 / cross 扩面）──
     //    几何契约（ItemShapeGeometry 直调）：栅栏族 = 木/云杉 柱 + 四向双档 9 盒（216 顶点；t991 圆石墙
@@ -3713,7 +3873,12 @@ void MatrixRun::section02_early_probes()
     //    yMax ≈ 0（棍顶 8/16）；按钮 = 单盒 24 且 yMax = -0.375（盒 y[0,2/16] 贴地小凸块，负 yMax 防退化
     //    满格）。另有两侧家族表同步源码钉（ResourceBrowser selectedIsItem3D ∪ Main.qml isItem3DFamily
     //    都含 t925 全部 15 个族员——加族员须同步两处的契约钉死）。
-    {
+    runLegMulti({ "t925 item 3D family batch 2: fences (wood/spruce post + four double arms, 9 boxes; t991 cobble w"
+        "all split to its own 6-box post+flange+arch shape), doors (3/16 plate at +X edge with family-pla"
+        "nks thin sides), lever (mechBoxes base + stick, same source as world mesher) and buttons (single"
+        " 2/16 nub) build real multi-box shapes, the cross batch (dead bush / mature wheat / red+white mu"
+        "shroom / cobweb / redstone torch) builds double-sided X-quads, all with per-shape vertex+bounds "
+        "contracts, and both family tables (viewer + drop) are source-pinned to contain all 15 new ids" }, [&]() {
         bool ok = true;
         {
             ItemShapeGeometry g;
@@ -3802,7 +3967,7 @@ void MatrixRun::section02_early_probes()
                              "mushroom / cobweb / redstone torch) builds double-sided X-quads, all with "
                              "per-shape vertex+bounds contracts, and both family tables (viewer + drop) are "
                              "source-pinned to contain all 15 new ids";
-    }
+    });
 
     // ── P-t924 附魔台查看器 = 世界放置形态 对齐契约（R19.16 t924；源码钉——QML 渲染分支 headless 不可
     //    行为级断言，t880 (b) 先例）──
@@ -3814,7 +3979,11 @@ void MatrixRun::section02_early_probes()
     //    (c) ItemShapeGeometry 附魔台 case 真用 0.75 矮盒（partialblockgeometry 同高；防「修回整格」）；
     //    (d) 悬浮书坐标三处同源：查看器 etBookNode 与掉落物 dropBookNode 同为 y=0.46、页 scale
     //        0.38×0.03×0.46 ×2（review27 #9 钉的「同款局部坐标」契约）。
-    {
+    runLegMulti({ "t924 enchant-table viewer/world parity: browser routes 94 to the item3D family, cube branch excl"
+        "udes the family (z-fight/full-cube regression pin - the reported 'full obsidian cube + jitter' w"
+        "as the review27 #4 double render), ItemShapeGeometry keeps the 0.75 half-height box (same as par"
+        "tialblockgeometry), and the hovering book coords (y=0.46, pages 0.38x0.03x0.46) stay identical b"
+        "etween viewer and drop (review27 #9 contract)" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -3860,7 +4029,7 @@ void MatrixRun::section02_early_probes()
                              "half-height box (same as partialblockgeometry), and the hovering "
                              "book coords (y=0.46, pages 0.38x0.03x0.46) stay identical between "
                              "viewer and drop (review27 #9 contract)";
-    }
+    });
 
     // ── t822 铁砧附魔丢失实机复现二探针（R19.13）：t792 桩外两段真链补测 ──
     //   用户再报「附魔物品放入铁砧 UI 即消失附魔、取出变普通」；t792 实机探针（qml.exe 驱动真实
@@ -3885,7 +4054,13 @@ void MatrixRun::section02_early_probes()
     //       逐字段比对（含空槽）。存档库用临时目录绝对路径（dbPath 对绝对入参直通，不污染 saves/）。
     //   全 PASS = 桩外真链同判完好，用户症状按 t814 版本戳方法论走复现文档分流。
     bool okA_pickup = true, okA_sameId = true, okA_place = true, okA_return = true;
-    {
+    runLegMulti({ "t822a real-Hotbar anvil cursor chain (mock-VM residual divergence closed): AnvilUI.slotLeft/take"
+        "Product/returnAnvilToHotbar call sequences mirrored onto the actual C++ Hotbar VM - pickup clear"
+        "s-then-refills cursor in order (setHeldBlock new-id wipes ench/name, setters after), same-id pic"
+        "kup early-return keeps stale fields then overwrites one-by-one (ench MUST land), full-stack plac"
+        "e into main, addToAny close-panel return for armor piece + enchanted book (new-slot branch write"
+        "s ench/name, cap-1 never merges); covered categories tool/armor/book + multi-ench (2-slot pick, "
+        "4-field arrays)" }, [&]() {
         Hotbar vm;
         const int pick = ToolRegistry::PickaxeIron;                  // 0x102
         const int chest = RecipeRegistry::ArmorIdBase + 4 * ArmorRegistry::Iron + ArmorRegistry::Chestplate;
@@ -3983,12 +4158,17 @@ void MatrixRun::section02_early_probes()
                              "addToAny close-panel return for armor piece + enchanted book (new-slot branch "
                              "writes ench/name, cap-1 never merges); covered categories tool/armor/book + "
                              "multi-ench (2-slot pick, 4-field arrays)";
-    }
+    });
 
     // (B) 真 WorldStore SQLite round-trip：gatherPlayerState 精确形状落盘 → 关库重开 → applyPlayerState
     //   精确调用回灌 → 全字段比对。四条满配剑（4 ench 全占用）覆盖多附魔上界。
     bool okB_build = true, okB_round = true, okB_apply = true;
-    {
+    runLegMulti({ "t822b real-WorldStore SQLite enchant round-trip (serialization leg never probed before): exact g"
+        "atherPlayerState v3 map shape (hotbar9+main27+armor4, per-slot id/count/durability/enchants[4]/n"
+        "ame) saved via savePlayerData -> close -> reopen -> loadPlayerData -> JSON field compare -> exac"
+        "t applyPlayerState calls into a fresh Hotbar -> all-slot field equality vs source VM; covered mu"
+        "lti-ench 4/4-full sword, enchanted book, armor piece with partial durability + custom names + em"
+        "pty slots (db on temp-dir absolute path, saves/ untouched)" }, [&]() {
         Hotbar vm2;
         const int pick = ToolRegistry::PickaxeIron;
         const int sword = ToolRegistry::SwordIron;
@@ -4154,7 +4334,7 @@ void MatrixRun::section02_early_probes()
                              "Hotbar -> all-slot field equality vs source VM; covered multi-ench 4/4-full sword, "
                              "enchanted book, armor piece with partial durability + custom names + empty slots "
                              "(db on temp-dir absolute path, saves/ untouched)";
-    }
+    });
 
     // ── t809 空车身体推送过拐角探针（pushEmptyCart 选向，MinecartManager 直编，P12c 同款 L 形场景）──
     //   用户报告（R19.13）：空车沿直段长按 W 连推（视点 / 输入不随拐角转向），推到拐弯处来回振荡「推不动」。
@@ -4169,7 +4349,8 @@ void MatrixRun::section02_early_probes()
     //   (b) 抵达后 100 tick 停驻不动（死端无沿合成向的可走连接 → 不再被推走）；
     //   (c) 全程 5 格 L 形 footprint 内 + Y 钉轨面；
     //   (d) 振荡诊断计数：从西臂滑回拐角的次数（修前每循环 +1 不收敛；修后 0）。
-    {
+    runLegMulti({ "t809 empty-cart body-push through corner (exit toward enum-order loser): reaches west dead-end c"
+        "enter + parks, no oscillation; arrivedTickcornerBacks" }, [&]() {
         // rig 寻址：运行期扫描空区（P20/P23 先例——nextSlot() 网格已被上方探针耗尽）。需 6×5×5 净空
         //   （含隔离边；x 从 x0-2 到 x0、z 从 z0-2 到 z0）。
         int x0 = -1, z0 = -1;
@@ -4251,7 +4432,7 @@ void MatrixRun::section02_early_probes()
             for (int dx = 0; dx <= 2; ++dx) w.setBlock(x0 - dx, kRigY, z0 - 2, BR::Air);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t810 满动力轨环线骑乘速度曲线探针（tickRiddenCart 动力段 boost，MinecartManager 直编，P11 环场景）──
     //   用户报告（R19.13）：满动力轨环线骑乘过弯速度骤减（两条动力轨喂入也救不回）；同轨空车匀速圈跑。
@@ -4274,7 +4455,8 @@ void MatrixRun::section02_early_probes()
     //       2.5/8.9）；A+B 共 1600 tick（25.6s）内 ≥13 圈（修后 ~17 圈 / 修前 8 圈，16 格/圈）；
     //   (d) 刹车守卫：C 段 wish 反车头向（每 tick 跟随）60 tick 内 |v| 一度 <7（proj<0 不被 boost 角力）；
     //   (e) 恢复守卫：D 段 wish 车头向 300 tick 内 v 回 ≥11（全 boost 档恢复力）。
-    {
+    runLegMulti({ "t810 powered-ring ridden speed curve (no-input + lagged input, was corner collapse to catapult g"
+        "ear): minAmeanAminBmeanBlaps; brake honored + recovers to boost" }, [&]() {
         // rig 寻址：运行期扫描空区（P20/P23 先例）。5×5 环（环心 ±2）+ 1 格隔离边 → 需 7×7×5 净空
         //   （隔离边防邻 rig 红石元件误供本环动力轨）。
         int x0 = -1, z0 = -1;
@@ -4427,7 +4609,7 @@ void MatrixRun::section02_early_probes()
                         w.setBlock(cx + dx, kRigY, cz + dz, BR::Air);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t811 生物自动乘坐矿车探针（EntityManager + MinecartManager 直编；登乘 / 满员拒载 / AI 冻结钉位
     //   随车 / 挖车释放 / 玩家占用不接客，全链一次过）──
@@ -4439,7 +4621,9 @@ void MatrixRun::section02_early_probes()
     //   （含 Y 座位公式 车心−0.3125+halfH）且车总位移 ≥3 格（确在动）；(c) 停驻后 100 tick 零漂移；
     //   (d) hitCartFromRay 挖车 → 下一 pass rideCart==-1 + 存活 + 重力落定地板顶（kRigY+halfH）；
     //   (e) 第二 mob 同格不登（生物占座满员）+ 玩家 tryMount 满员车被拒；(f) 玩家骑乘的车不接 mob。
-    {
+    runLegMulti({ "t811 mob auto-rides minecart: board+freeze-pin follows cart (seatY = cartY-0.3125+halfH), 100-ti"
+        "ck park zero-drift, destroy releases + resettles, full cart refuses 2nd mob & player, player-rid"
+        "den cart takes no mob; travel" }, [&]() {
         // rig 选址：运行期扫描空区（t809 先例——nextSlot 网格已被上方探针耗尽）。需 7×4×6 净空。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 93 && x0 < 0; zz += 2)
@@ -4561,7 +4745,7 @@ void MatrixRun::section02_early_probes()
             }
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t811 生物自动乘坐船探针（EntityManager + BoatManager 直编；双座登乘 / 满员 / 玩家拒载 / 挖船释放）──
     //   rig：凿进天然石 3 宽水道（t805 模式：fy=44 石板 + 45..47 凿空 + 45 层铺水 → 水面顶 46；船浮 46）。
@@ -4569,7 +4753,8 @@ void MatrixRun::section02_early_probes()
     //   左舷 −0.3，yaw=0 时 right=+X）且 Y = 船位+halfH；(b) mob C 同格不登（2 生物 = 满员 2）；
     //   (c) 满员船玩家 tryMount 被拒（返 false 且 ridingIndex 不变）；(d) hitBoatFromRay 挖船 → A/B
     //   双双 rideBoat==-1 且存活（原地释放恢复 AI）。
-    {
+    runLegMulti({ "t811 mob auto-rides boat: dual seats (+/-0.3 sides, pinY = boatY+halfH), 3rd mob refused (cap 2)"
+        ", player tryMount refused when full, break releases both in place; seatGap" }, [&]() {
         const int bx = 40, bz = 10; // t805 rig（bx=6,bz=6,x≤39）之外的开阔石区
         const int fy = 44;          // 石板层；水面 = 45；水面顶 = 46
         for (int dx = 0; dx <= 4; ++dx)
@@ -4634,7 +4819,7 @@ void MatrixRun::section02_early_probes()
                 for (int dy = 0; dy <= 3; ++dy)
                     w.setBlock(bx + dx, fy + dy, bz + dz, BR::Air, 0);
         tickN(w, 2);
-    }
+    });
 
     // ── t865 生物贴轨行走 + 草丛误跳探针（EntityManager 直编，t803 追击走廊模式）──
     //   用户报告（R19.15）：「生物走铁轨悬浮上方一格」（支撑判定把非整格当满格抬高）+「僵尸遇草丛跳过去」
@@ -4647,7 +4832,9 @@ void MatrixRun::section02_early_probes()
     //       悬浮轨上一格 feet=kRigY+1）；
     //   (b) 草丛直走：同走廊铺 4 格草丛（无轨）—— 全程无起跳（feet 恒 ≈ 地面，越障跳从未触发）且到达
     //       远端（旧象：草丛=墙 → 起跳翻过 = 用户「僵尸遇草丛跳过去」）。
-    {
+    runLegMulti({ "t865 mobs walk rails at true surface (feet on floor through 1/16 rail plate, no full-block lift)"
+        " and stride through tall grass without jumping (no-collision blocks are neither wall nor support"
+        ")" }, [&]() {
         // rig 选址：运行期扫描空区（t809/t811 先例）。需 13×1×5 净空（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -4719,7 +4906,7 @@ void MatrixRun::section02_early_probes()
             }
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t867 压力板掉落物贴板探针（ItemEntityManager 直编，t804 掉落物探针模式）──
     //   用户报告（R19.15）：「掉落物落在压力板上悬上方一格」。根因（t867）：ItemEntityManager 落地列扫
@@ -4731,7 +4918,9 @@ void MatrixRun::section02_early_probes()
     //   (b) 满格支撑回归对照：同 rig 相邻列石块顶的掉落物仍停 块格+1+0.3（收口不改变整格落定高度）；
     //   (c) 挖板后失支撑穿透：拆板 → 掉落物解除 resting 续落到石块顶（块格+1+0.3）——薄支撑消失的
     //       重力跟随（板不承载的另一半语义）。
-    {
+    runLegMulti({ "t867 item rests glued to pressure plate top (restY = plate 1/16 + 0.3, was floating a full block"
+        " above), full-block rest height unchanged, plate removal drops item onto pedestal (thin support "
+        "vanishes -> gravity re-settles)" }, [&]() {
         // rig 选址：运行期扫描空区（t865 先例）。需 5×1×4 净空（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -4787,7 +4976,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(x0 + 2, kRigY - 1, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── review26 #1 mob 矮碰撞支撑行走探针（EntityManager 直编，t865 追击走廊模式）──
     //   Review 2026-08-26 #1：t865 把支撑/落定收口到碰撞真顶后，mob 脚位落进矮支撑格内部（下半砖 +0.5 /
@@ -4797,7 +4986,8 @@ void MatrixRun::section02_early_probes()
     //   (a) 下半砖地面：僵尸沿 10 格下半砖走廊追击 —— 全程脚底 Y ≈ 砖真顶（kRigY+0.5，贴面行走非冻结
     //       非兔跳）且到达走廊远端（旧象 = 起步即冻结 maxX≈x0）；
     //   (b) 耕地地面：同走廊铺耕地 —— 脚底 ≈ kRigY+0.9375（耕地矮盒真顶）且到达远端。
-    {
+    runLegMulti({ "review26-1 mobs stride across bottom-slab and farmland floors at true support tops (feet snapped"
+        " inside the support cell are exempt from the foot-cell horizontal scan; no freeze, no bunny-hop)" }, [&]() {
         // rig 选址：运行期扫描空区（t865 先例）。需 13×1×5 净空（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -4890,7 +5080,7 @@ void MatrixRun::section02_early_probes()
             }
             tickN(w, 2);
         }
-    }
+    });
 
     // ── review26 #2 掉落物贴薄支撑水平滑动探针（ItemEntityManager 直编，t867 探针模式）──
     //   Review 2026-08-26 #2：物品静息中心 = 真顶 + kRestOffset(0.3)，下半砖（真顶 +0.5）中心落在砖格
@@ -4898,7 +5088,8 @@ void MatrixRun::section02_early_probes()
     //   也滑不动（物品被钉死在落点）。修 = 水平碰撞探测与 resting 复探同源：目标格真顶 ≤ 当前底+容差
     //   = 正站其顶不挡。矩阵断言：(a) 砖面带 +X 初速掉落物滑行 ≥1.5 格（旧象 = 位移 0）；(b) 满格墙
     //   仍挡（滑到墙前停，不进墙格——豁免不过界）。
-    {
+    runLegMulti({ "review26-2 item with horizontal pop velocity slides across a bottom-slab floor (resting cell exe"
+        "mpt when support top is at the item's feet) and full blocks ahead still stop it" }, [&]() {
         // rig 选址：运行期扫描空区（t867 先例）。需 6×1×4 净空（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -4950,14 +5141,15 @@ void MatrixRun::section02_early_probes()
             }
             tickN(w, 2);
         }
-    }
+    });
 
     // ── review26 #3 岩浆沟壑越障跳探针（EntityManager 直编，t865 追击走廊模式）──
     //   Review 2026-08-26 #3：t865 收口后 isJumpObstacle 只对 Water 保留 ditch-jump，岩浆（ShapeNone →
     //   isCollidable=false）落到 false = 不当沟壑 → mob 径直走进脚位岩浆格（点燃殉死）。修 = Water/Lava
     //   同列沟壑跳。矩阵断言：僵尸沿石走廊追击，脚位层中段一格岩浆源 —— 途径时脚底离地（跳跃触发，
     //   maxFeetY ≥ 地面+0.4；旧象 = 不跳恒贴地走进岩浆）且到达远端。
-    {
+    runLegMulti({ "review26-3 mob jumps over a foot-level lava cell like water ditches (lava joins the ditch-jump l"
+        "ist; was walked straight into)" }, [&]() {
         // rig 选址：运行期扫描空区（t865 先例）。需 10×1×5 净空（含隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -5003,7 +5195,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(x0 + 4, kRigY, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t863 矿车坡道物理四修探针（MinecartManager 直编，P12b 同款坡 rig 族）──
     //   用户报告（R19.15 玩法阻塞）：① 上坡失速悬停半空（应反向滑落）；② 悬停 / 停驻态挖掉下方轨 /
@@ -5014,7 +5206,9 @@ void MatrixRun::section02_early_probes()
     //   (c) ③ 坡顶死端（后邻轨低一格 = 爬升到顶 + 前端无轨）+ 速度足 → 飞出平抛落到轨端外接地板
     //       （机制等价 MC 1.0 轨端飞行，速度不足才停驻——平死端停靠面由 t769/t811 既有探针钉）；
     //   (d) ④ 平死端静止车被玩家朝端外推 → 推离轨道出轨，贴地滑行落到轨端外地板（进入自由物理）。
-    {
+    runLegMulti({ "t863 ramp physics: uphill stall slides back to foot, mined support drops parked cart onto catch "
+        "floor, crest dead-end launches at speed onto beyond-end floor, dead-end cart pushable off the ra"
+        "il into free physics" }, [&]() {
         // rig 选址：运行期扫描空区（t867 先例）。需 10×1×4 净空（含隔离边 + 落地板区）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -5140,7 +5334,7 @@ void MatrixRun::section02_early_probes()
             for (int i = 1; i <= 3; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t864 矿车互卡悬浮探针（MinecartManager 直编；PlayerController 骑乘帧同序驱动）──
     //   用户报告（R19.15 玩法阻塞）：「上坡被前方矿车卡住时悬浮原地一直向上——碰撞卡阻时应停驻 / 滑回，
@@ -5149,7 +5343,8 @@ void MatrixRun::section02_early_probes()
     //   (a) 无上漂：被卡车全程 Y 恒贴轨面（±0.1——旧症状「一直向上」= Y 持续抬升脱离轨面）；
     //   (b) 卡阻终态 = 停驻 / 滑回：被卡车不越过前车（A.x < B.x 恒成立），且全程存在「首次接触后回落」
     //       （反溜 / 被顶回——碰撞冲量 + 死区 + t863① 反溜链把卡阻车送回坡下，不在坡面悬停）。
-    {
+    runLegMulti({ "t864 uphill cart-cart jam: blocked cart stays glued to rail surface (no upward drift), never pen"
+        "etrates the blocker, and falls back after first contact (stall/slide-back, no mid-air hover)" }, [&]() {
         // rig 选址：运行期扫描空区。需 8×1×4 净空。坡：x0..x0+1 低平 + x0+2 坡（东邻高 1）+
         //   x0+3..x0+4 高平（B 停驻死端）；A 被骑从坡脚冲。
         int x0 = -1, z0 = -1;
@@ -5228,7 +5423,7 @@ void MatrixRun::section02_early_probes()
             for (int i = 0; i <= 2; ++i) w.setBlock(x0 + i, kRigY + ((i >= 2) ? 1 : 0), z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── review26 #14 derailed 矿车可被撞滑探针（MinecartManager 直编，t863(d)/t864 推离 rig 族）──
     //   用户症状（review26 低危）：出轨落地的矿车在车-车碰撞中是不可推动的幽灵障碍 —— 行进车撞上
@@ -5237,7 +5432,9 @@ void MatrixRun::section02_early_probes()
     //   (a) 停驻出轨车被行进车撞后位移 ≥0.5 格（旧代码恒 0 = 幽灵障碍签名，回退即红）；
     //   (b) 终态两车分离 ≥0.85（kCartCollideSep−ε：无穿透互锁 / 无永久贴脸抖动）；
     //   (c) 行进车推进 ≥1 格（撞滑不吞行进侧动量到「原地锁死」）。
-    {
+    runLegMulti({ "review26-14 derailed cart is knockable: a sliding cart striking a derailed-parked cart displaces"
+        " it >=0.5 cells (old code: immovable ghost obstacle), both settle apart >=0.85 with no interpene"
+        "tration lock, and the striker keeps >=1 cell of progress" }, [&]() {
         // rig 选址：运行期扫描空区（t863 同款）。需 11×1×4 净空（地板走廊 x0..x0+8 + 隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -5318,7 +5515,7 @@ void MatrixRun::section02_early_probes()
             for (int i = 1; i <= 8; ++i) w.setBlock(x0 + i, kRigY - 1, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t907 密闭单格 cart-cart 挤压飞穿探针（MinecartManager 直编；t864/review26-14 rig 族）──
     //   用户报告（R19.16 玩法阻塞）：全封闭单格空间内矿车互挤，碰撞解析把车飞出牢笼（穿实体方块）。
@@ -5332,7 +5529,14 @@ void MatrixRun::section02_early_probes()
     //       tickPushedCarts(0.3f)（tick 饿死窗口，t904 实测 16ms 定时器可被饿到 1/3 以下）—— 单步
     //       1.2 格 > 1 格厚墙：旧版一步欧拉只验落点格（墙后开格）→ 整车穿墙；子步化（≤0.45 格逐格
     //       墙检）后贴墙停驻。
-    {
+    runLegMulti({ "t907 sealed-cage cart squeeze: collision resolution keeps both cart centers out of solid cells a"
+        "nd inside a fully sealed 2-cell rail cage (separation still resolves >=0.85, not frozen), ground"
+        " carts squeezed in a 1-cell stone box stay boxed, a derailed ejection at 4 blocks/s through a 0."
+        "5s starved tick cannot tunnel the 1-thick wall (substepped wall checks; old single-step Euler la"
+        "nded past the wall in the open cell), and two carts alternately squeezed across a 1:1 slope step"
+        " (rail layers differ by 1, dead-end launches caught by end walls) still end >=0.85 apart - revie"
+        "w28 #7 lets the depenetration gate admit |rail layer delta| <= 1 slope continuations, pinned by "
+        "P-review28c" }, [&]() {
         // rig 选址：运行期扫描空区（t863 先例）。需 12×1×4 净空（(a)(b) 笼 + (c) 穿墙走廊 + 隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -5547,7 +5751,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(x0 + 6, kRigY, z0, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t908 玩家推车向量分解探针（MinecartManager 直编；spec「轨上矿车被玩家身体/推动时只接受沿轨
     //   前后分量，横向推无效（不脱轨）；pushEmptyCart 与玩家碰撞挤推两路都按轨向投影」）──
@@ -5557,7 +5761,14 @@ void MatrixRun::section02_early_probes()
     //   (c) 西端死端格横推：零位移 + 不脱轨（旧版选中内陆臂 dot=0.25 推走；再旧路径 = 合成主轴落
     //       垂直向时朝侧向弹出脱轨）；
     //   (d) 西端死端格**沿轴外向**推：t863④ 推离保留（出轨滑离轨端 —— 分解不吞死端合法推离）。
-    {
+    runLegMulti({ "t908 push decomposition: lateral player push on a railed cart is a no-op (zero displacement, no "
+        "derail - body-squeeze away and walking wish both project onto the rail axis), longitudinal push "
+        "still rolls the cart along the rail glued to the surface, dead-end lateral push stays put, and t"
+        "he along-axis outward push at the dead end still knocks the cart off the rail end (t863 push-off"
+        " preserved, direction = rail-axis sign); review28 #6 adds orphan-rail symmetry - a 0-connection "
+        "rail carrying only the EW axis-preference bit is pushed off by a lateral push exactly like a sta"
+        "te-0 NS orphan (the axis bit is texture/rise metadata, not a push decomposition axis - old code "
+        "swallowed lateral pushes on EW orphans only, an orientation-dependent asymmetry)" }, [&]() {
         // rig 选址：运行期扫描空区。需 10×1×4 净空（地板 x0-3..x0+2 + 轨 3 格 + 隔离边）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -5695,7 +5906,7 @@ void MatrixRun::section02_early_probes()
                                  "decomposition axis - old code swallowed lateral pushes on EW orphans "
                                  "only, an orientation-dependent asymmetry)";
         }
-    }
+    });
 
     // ── P-review28a 睡眠分支探测轨占用重扫源码钉（review28 #5；行为级 headless 不可达——PlayerController
     //    睡眠窗口分支需 Game 层 tick 驱动，退路 = 源码钉两调齐全 + 次序，P-t887b 先例）──
@@ -5703,7 +5914,11 @@ void MatrixRun::section02_early_probes()
     //    销毁压探测轨的车后，该轨带电滞留整个睡眠窗口（骑船分支两调齐全）。断言：review28 #5 标记之后
     //    的窗口内先 checkCartEnvironment 后 updateDetectorRailOccupancy（tickPushedCarts 同序：环境
     //    检查在前、占用收口在后——毁车当帧收离开沿断电）。
-    {
+    runLegMulti({ "review28a sleep-branch detector-rail rescan pin: the sleeping-window cart environment check is f"
+        "ollowed by updateDetectorRailOccupancy within the same block (tickPushedCarts order - env check "
+        "first, occupancy close after: a cart destroyed on a detector rail during sleep drops the power e"
+        "dge the same frame instead of staying powered until wake; review26 #13 added the env check witho"
+        "ut the rescan)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile sf(root + QStringLiteral("/src/Game/playercontroller.cpp"));
@@ -5721,14 +5936,18 @@ void MatrixRun::section02_early_probes()
                              "after: a cart destroyed on a detector rail during sleep drops the power "
                              "edge the same frame instead of staying powered until wake; review26 #13 "
                              "added the env check without the rescan)";
-    }
+    });
 
     // ── P-review28b 翻书大摆 worldRunning 硬档门源码钉（review28 #9；行为级 headless 不可达——ESC 硬暂停
     //    + 2.65s 大摆动画时序需真窗口，退路 = 源码钉变更 handler 语句面）──
     //    pageFlipAnim 本体 running:false 字面 + restart() 命令式驱动（声明式 worldRunning 门会与 restart
     //    抢 running 绑定）→ 硬档门补在 window 级 onWorldRunningChanged：硬档时 stop() + 复位 flipAngle
     //    （恢复侧由 pageFlutterAnim 的声明式 running 条件自动接管续摆）。断言三语句面存在。
-    {
+    runLegMulti({ "review28b page-flip hard-pause gate pin: the big page-flip animation (imperatively driven - runn"
+        "ing:false literal + restart(), a declarative worldRunning gate would fight restart over the runn"
+        "ing binding) gets its hard-pause gate at the window-level onWorldRunningChanged handler: ESC dur"
+        "ing the 2.65s swing stops the animation and resets flipAngle to the rest pose (resume is automat"
+        "ic - the idle flutter animation's declarative running condition takes back over)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile qf(root + QStringLiteral("/src/ui/Main.qml"));
@@ -5745,7 +5964,7 @@ void MatrixRun::section02_early_probes()
                              "during the 2.65s swing stops the animation and resets flipAngle to the "
                              "rest pose (resume is automatic - the idle flutter animation's declarative "
                              "running condition takes back over)";
-    }
+    });
 
     // ── P-review28c 去穿插近层闸源码钉（review28 #7；多车坡谷挤压的行为级构造需受控中间态（三车
     //    非重合定位无 headless 手段），闸形以源码钉钉死；坡段双车分离 ≥0.85 不变量由 t907(d) 行为级
@@ -5757,7 +5976,13 @@ void MatrixRun::section02_early_probes()
     //    chainDelta（railProbeDelta 三高探针值域 {-1,0,+1}，±1 近层约束隐式保持）直接验该层轨本体
     //    （+ 下一帧列扫窗顶约束 ryChain ≤ floor(pos.y)），头顶并行线轨不再劫持列扫首层。断言（闸标记
     //    后窗口内）：链延续层提取 + 该层 isRail 精确验 + 腰位闸 isCollidable 配套（拆任一 → FAIL）。
-    {
+    runLegMulti({ "review28c depenetration near-layer gate pin: clampShift admits cross-cell depenetration shifts o"
+        "nly when the chain-continuation layer (rySelf + chainDelta, the +-1 probe domain keeping review2"
+        "8 #7's slope-continuation admission) is a rail in the target column AND the landing waist cell i"
+        "s non-solid - the old strict-equality gate clamped every slope-boundary shift back into the curr"
+        "ent cell, and a 1-wide cell cannot fit two 0.98 separations, so carts wedged between +1/-1 slope"
+        " neighbors stayed permanently overlapped (t983 swapped the old colRailY first-rail-layer compare"
+        " for the exact chain layer so a parallel overhead line can no longer hijack the verdict)" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
         QFile sf(root + QStringLiteral("/src/Entities/minecartmanager.cpp"));
@@ -5780,7 +6005,7 @@ void MatrixRun::section02_early_probes()
                              "neighbors stayed permanently overlapped (t983 swapped the old "
                              "colRailY first-rail-layer compare for the exact chain layer so a "
                              "parallel overhead line can no longer hijack the verdict)";
-    }
+    });
 
     // ── t909 V 形动力永动探针（MinecartManager 直编；spec「V 底两格激活动力轨应无限往复 / 半山腰放置
     //   应下坡运动 / 下坡初速与加速度加大」）──
@@ -5791,7 +6016,11 @@ void MatrixRun::section02_early_probes()
     //       格（v²=2ad → kCartSlopeKick 1.0 起步 ~2.5 格到 10；旧版恒速不加速恒到不了）；
     //   (c) ① 底部往复不停驻：1500 tick（24s）内方向反转 ≥6 次（≥3 完整周期；停驻 / 飞出顶 = 反转不足）；
     //   (d) 全程含留在 rig 内（x∈[x0-4.6, x0+5.6]，未飞出顶）+ Y 平滑（|Δy|/tick < 0.35，未坠落）。
-    {
+    runLegMulti({ "t909 V perpetual rig: cart placed mid-slope rolls downhill immediately (static-start gate yields"
+        " on gradients), first descent reaches ~max slope speed (9.0+) within 4.5 blocks (slope gravity a"
+        "ccel g*sin45, old code coasted at constant speed), and the two powered rails at the V bottom sus"
+        "tain endless oscillation (>=6 direction reversals in 24s, no mid-slope park, no crest launch, st"
+        "ays inside the rig)" }, [&]() {
         // rig 选址：运行期扫描空区。需 12×1×4 净空（V 底 2 + 两坡 4+4 + 隔离边；高度 +5）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -5885,7 +6114,7 @@ void MatrixRun::section02_early_probes()
             }
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t910 动力铁轨充能沿坡传播探针（World 直编；spec「上坡的动力铁轨被红石激活应传播到上下坡固定
     //    距离的动力铁轨（现只有平地传远）—— 充能扩散沿轨走向含升降」）──
@@ -5894,7 +6123,10 @@ void MatrixRun::section02_early_probes()
     //            升降」；旧版链 BFS 钉同 y → 坡链除种子外一根不亮）；
     //         (b) 平链 6 根全亮（t704 平链语义回归）；
     //         (c) 拆源 → 两链全灭（降沿对称沿坡收缩 —— 波前 ±1 层入脏集，熄灭链不被卡在首格）。
-    {
+    runLegMulti({ "t910 golden-rail power chain follows rail geometry up/down slopes: a redstone-fed powered rail l"
+        "ights all 6 rails of a +1-per-cell climbing chain exactly like the same-length flat chain (old B"
+        "FS was same-Y only - slope chains stayed dark past the seed), and removing the source extinguish"
+        "es both chains symmetrically (falling-edge wavefront also walks the slope layers)" }, [&]() {
         // rig 选址：运行期扫描空区。dx -1..6、dz -1..3、dy -2..+6。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 92 && x0 < 0; zz += 4)
@@ -5953,7 +6185,7 @@ void MatrixRun::section02_early_probes()
             w.setBlock(x0 - 1, kRigY, z0 + 2, BR::Air, 0);
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t911 铁轨贴仙人掌探针（World 直编）──
     //   **t984 口径翻案**（用户 9-01 原话「我的口径是能放下来，而不是仙人掌会掉落，你之前一直都做错了」）：
@@ -5964,7 +6196,10 @@ void MatrixRun::section02_early_probes()
     //   (a) 铁轨贴 2 高仙人掌**上层**格放置 → 放置成功（轨留存）+ 上下两格仙人掌原样 + 零掉落；
     //   (b) 铁轨贴 1 高仙人掌（基座层）→ 同（基线场景钉语义）；
     //   (c) 阴性对照：铁轨距仙人掌 2 格（不放置）→ 仙人掌无恙（保留旧对照腿）。
-    {
+    runLegMulti({ "t911 rail placement beside a cactus leaves the cactus standing (t984 reversed caliber: a rail ne"
+        "xt to a cactus, mid-column or base level, places successfully and the whole column stays intact "
+        "with zero drops - only full-cube blocks break cacti; the cactus cart-dropper chain t866 uses ent"
+        "ity contact damage and is unaffected), and a rail two cells away leaves the cactus untouched" }, [&]() {
         // rig 选址：运行期扫描空区。dx -1..6、dz -1..1、dy -2..+3。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -6035,7 +6270,7 @@ void MatrixRun::section02_early_probes()
             }
             tickN(w, 2);
         }
-    }
+    });
 
     // ── t912 发射器发矿车探针（Game 层 PlayerController + DispenserStore + MinecartManager +
     //    ItemEntityManager 直编，t856/t868 模式；spec「发射矿车物品 → 在发射口前邻格放置矿车实体；
@@ -6046,7 +6281,10 @@ void MatrixRun::section02_early_probes()
     //   (b) 地面模式：拆轨后邻格净空 → 矿车实体贴 cell 底（kCartGroundH 镜像 0.3875，t734 放宽放置）；
     //   (c) 堵口降级：邻格实体方块堵住 → 不放实体（车数不增）+ 掉落物实体 +1（MinecartId 物品形态，
     //       review26 #24 堵口门复用）+ 库存照扣。
-    {
+    runLegMulti({ "t912 dispenser minecart: dispensing a minecart places a cart entity in the spout-adjacent cell ("
+        "rail cell -> on-rail mode with yaw aligned to the rail axis via the connection-direction chain, "
+        "open ground -> ground-parked mode at kCartGroundH), a blocked spout degrades to a dropped mineca"
+        "rt item (review26-24 gate reused) and stock decrements in all cases" }, [&]() {
         PlayerController pc;
         EntityManager ents;
         DispenserStore store;
@@ -6137,5 +6375,5 @@ void MatrixRun::section02_early_probes()
         store.clearDispenser(x0, kRigY, z0);
         items.clearAll();
         tickN(w, 2);
-    }
+    });
 }

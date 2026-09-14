@@ -27,7 +27,16 @@ void MatrixRun::section06_worldgen_drag()
     //        缩放——×6 对基线的确定界天然分离（基线 <2.2 / 高倍率 >5.2 / 间隔 >3.0）；燃箭箭命中后
     //        isBurningAt 真、基线箭假）；
     //    (g) Game 层接线源码钉（t927(c) 手法：endBowDraw / useFishingRod 去注释体内五个权威函数调用）。
-    {
+    runLegMulti({ "t960 bow/rod exclusive enchantments: registry grows to 20 with the bow line (might +1HP/lv arrow"
+        " damage, bow-shock x2/lv arrow knockback, bright-draw ignite-on-hit 5s, never-run no-arrow-consu"
+        "mption) and the rod line (tide-call wait x(1-0.2lv) faster bites, bite-call +0.5s/lv reel window"
+        " on top of the pinned 1.0s base), all conflict-group 0; applicability gate is strict-exclusive ("
+        "bow lines only on the bow, rod lines only on the rod, every other item refused, book carrier pas"
+        "ses - the t959 main-category wheel grows 3->5 so book casts reach all six); single-authority for"
+        "mulas pinned numerically; behavioral legs: same-cell same-serial bobber wait shrinks x0.4 with d"
+        "eterminism, +0.5s window measures 1.4-1.6s bite->escape, shock arrow pushes ~x2 baseline displac"
+        "ement and flame arrow leaves isBurning true (baseline false); endBowDraw/useFishingRod wiring pi"
+        "nned at source (t927(c) precedent)" }, [&]() {
         // (a) 数据钉。
         const int MG = int(EnchantRegistry::Might),       BS = int(EnchantRegistry::BowShock);
         const int BD = int(EnchantRegistry::BrightDraw),  NR = int(EnchantRegistry::NeverRun);
@@ -292,7 +301,7 @@ void MatrixRun::section06_worldgen_drag()
                              " measures 1.4-1.6s bite->escape, shock arrow pushes ~x2 baseline"
                              " displacement and flame arrow leaves isBurning true (baseline false);"
                              " endBowDraw/useFishingRod wiring pinned at source (t927(c) precedent)";
-    }
+    });
 
     // ── P-t961 杀手系攻击行族加成显示探针（R19.17 🅳；用户第五轮口径「亡灵杀手/截肢杀手的加成写进
     //    剑攻击行——『攻击+7(+3)』格式（括号=对特定族加成）」）──
@@ -308,7 +317,16 @@ void MatrixRun::section06_worldgen_drag()
     //        族加成数值——后缀值只活在注册表权威一处）；hotbar.cpp 桥本体含「(+」括号分支 + 走
     //        familyAttackBonus 调用链（t960(g) 手法）；review0830 #25：attackMob 实战体同调注册表
     //        familyAttackBonusFor 单支权威（族门在调用侧）+ 双写 2.5f 字面量绝迹（回退即红）。
-    {
+    runLegMulti({ "t961 slayer family bonus in the sword attack line: +N keeps the current display value (base + sh"
+        "arpness; slayers sit in mutual exclusion group 1 so a slayer sword's N is the plain base damage)"
+        " and a (+M) suffix carries the vs-family bonus taken from the single registry authority familyAt"
+        "tackBonus (2.5/level, same formula the combat path applies - review0830 #25: the combat path now"
+        " calls the registry per-branch authority familyAttackBonusFor with the family gate at the call s"
+        "ite, the doubled 2.5f literal in attackMob is pinned extinct and the single numeric source lives"
+        " in the registry so display==combat is by construction); diamond sword + arthropod I assembles +"
+        "7(+3), undead III rounds to (+8), no slayer keeps the old line shape via an empty suffix; all ni"
+        "ne attack-line assembly sites (8 panel tooltips + HUD hover) route through displayFamilyBonusTex"
+        "t, and the bridge body pins the registry call chain plus the (+ paren branch (t960(g)" }, [&]() {
         // (a) 注册表权威数值腿。
         const auto closeF = [](float got, float expect) { return std::abs(got - expect) < 1e-4f; };
         const int smite3  = EnchantRegistry::pack(int(EnchantRegistry::UndeadSlay), 3);
@@ -430,7 +448,7 @@ void MatrixRun::section06_worldgen_drag()
                              " assembly sites (8 panel tooltips + HUD hover) route through"
                              " displayFamilyBonusText, and the bridge body pins the registry call"
                              " chain plus the (+ paren branch (t960(g)";
-    }
+    });
 
     // ── P-t962 附魔书↔附魔书交换（R19.17 🅳 收官；用户第五轮口径「背包拿附魔书左键物品交换是对的，
     //    但附魔书对附魔书槽的交换没做——补齐」）──
@@ -450,7 +468,18 @@ void MatrixRun::section06_worldgen_drag()
     //    (c) 阴性腿：普通异 id 交换照旧（c1）；已附魔剑仍拒入槽 0（c2，豁免仅附魔书）；可堆叠同 id 满
     //        槽撞同 id 仍 no-op（c3，满槽 / 合并口径保持）；
     //    (d) 铁砧同病同修：A/B 两输入槽书书交换（铁砧面无门禁，纯 resolveClick 臂修复即愈）。
-    {
+    runLegMulti({ "t962 enchanted-book <-> enchanted-book slot swap: an enchanted book in hand left-clicking the en"
+        "chanting-table slot 0 (or either anvil input slot) now swaps instead of silently doing nothing -"
+        " InventoryOps.resolveClick routes same-id UNSTACKABLE stacks (maxStackSize<=1: tools/armor/books"
+        ") to the D instance-swap arm whose metadata (enchants/durability/name) rides each side faithfull"
+        "y both ways, while stackable full-slot no-op and every merge semantic stay pinned, and Enchantin"
+        "gTableUI.localCanPlace exempts the enchanted book from the category/enchanted rejection so it ca"
+        "n enter slot 0 (re-enchant remains blocked by the itemReady gate: tiers stay dark and doEnchant "
+        "consumes zero xp/lapis with a book in slot); legs: real EnchantingTableUI.qml+AnvilUI.qml x real"
+        " C++ Hotbar harness swaps book A (sharpness V named) against book B (fire-aspect I unnamed) and "
+        "back with per-slot metadata fidelity, places into and takes back from the empty slot, verifies d"
+        "oEnchant rejection, keeps the plain pickaxe/sword swap and the enchanted-sword rejection and the"
+        " 64-book full-slot no-op green, and swaps books in both anvil input slots" }, [&]() {
         static bool sT962TypesRegistered = false;
         if (!sT962TypesRegistered) {
             qmlRegisterType<Hotbar>("VoxelSandboxProbeT962", 1, 0, "Hotbar");
@@ -820,7 +849,7 @@ Item {
                              "slot, verifies doEnchant rejection, keeps the plain pickaxe/sword swap "
                              "and the enchanted-sword rejection and the 64-book full-slot no-op green, "
                              "and swaps books in both anvil input slots";
-    }
+    });
 
     // ── t963 豹猫查看器返修（R19.17 🅴：驯服后**变黑色**（错，驯服=家猫花纹）+ 没看到项圈；坐姿与狼
     //    同 bug 已随 t946 连修闭合，本探针零触碰坐姿面）──
@@ -843,7 +872,22 @@ Item {
     //        sd 8.5、88% 暗像素）全部断言必红 = 「驯服变黑」回归即测即红。
     //    (c) 项圈两处存在钉 + ocatTamed 单源钉（游戏内 visible: ocatTamed 唯一 + ocelotTamedAt 直读恰 1
     //        + 坐姿/站姿成对位置串；图鉴门挂 mobTamedPreview + 同款位置串 + 注释锚）。
-    {
+    runLegMulti({ "t963 ocelot viewer rework: the tamed coat no longer turns BLACK - the old variant-0 procedural t"
+        "exture was itself the all-black coat (the viewer always previewed it and in-game taming landed o"
+        "n it 1/3 of the time, reading as 'taming turns the ocelot black'), so the black coat is retired:"
+        " build_mob.py now generates mob_cat_tabby (warm orange-brown base, dark-brown tabby bands from a"
+        " self-created deterministic band function + phase dither, light cream muzzle/belly; not imitatin"
+        "g any existing cat coat) as variant 0 while variants 1/2 stay domestic, and every mob_cat_black "
+        "asset reference is extinct; the red collar the wolf has when tamed is mirrored onto the ocelot i"
+        "n BOTH places (in-game Main.qml delegate and the ResourceBrowser 3D preview) scaled to the ocelo"
+        "t neck (0.36/0.05/0.06, standing root (0,0.14,-0.30), sit position derived by the t946 hip-root "
+        "chain (0,0.319,-0.189)); texture switch, pack predicate and collar visibility all hang on the SA"
+        "ME ocatTamed state bit (exactly one direct ocelotTamedAt read remains in Main.qml); the sit-pose"
+        " face needed no touch (closed by t946, zero overlap); legs: dual-consumer texture source pins + "
+        "black-coat extinction across four files and the asset itself, PNG data pin (16x16 fully opaque, "
+        "warm base meanR-meanB>=40, patterned sd>=15, <=5 dark pixels, >=8 light belly/muzzle pixels - th"
+        "e old black coat meanLum 27.6 / sd 8.5 / 88% dark fails every clause), and collar/single-source "
+        "pins on both consumers" }, [&]() {
         bool ok = true;
         QString diag;
         const QString exeDir = QCoreApplication::applicationDirPath();
@@ -938,7 +982,7 @@ Item {
                              "patterned sd>=15, <=5 dark pixels, >=8 light belly/muzzle pixels - the "
                              "old black coat meanLum 27.6 / sd 8.5 / 88% dark fails every clause), "
                              "and collar/single-source pins on both consumers";
-    }
+    });
 
     // ── P-review0830-23 蛋路径项圈残留驯服态（Review_2026-08-30 #23 中危；审查 §六-4 建议
     //    「toggle 状态机补切走序列行为腿 + 同文件门式互对拍 sync pin」的落点）──
@@ -961,7 +1005,24 @@ Item {
     //        病面结构性不可再现；豹猫蛋腿翻转为「切蛋 = 蛋路径绝迹（selectedMobType 归 -1）+
     //        驯服残留清零（项圈灭 / 非 tabby / 眼 overlay 随分支门灭）」，驯服态正相腿（拨杆 →
     //        项圈显 + tabby）保绿不动。
-    {
+    runLegMulti({ "review0830-23 spawn-egg path keeps the residual tamed collar state off wild eggs (Review_2026-08"
+        "-30 #23; the review-0829 #7 pattern recurring AND being copied): t963's cat collar gate read the"
+        " DUAL-source selectedMobType (mob-section selection OR egg->type mapping, which is always 11 on "
+        "the ocelot-egg path), so the state machine 'tap ocelot -> toggle Tamed -> tap the ocelot egg' le"
+        "ft a wild egg wearing the red collar while the texture gate (single-source selectedMobFromSectio"
+        "n) correctly fell back to the wild coat - a lone contradicting overlay; the wolf collar gate is "
+        "the same shape (the review-0829 #7 leftover itself); the fix aligns both gates to the texture ga"
+        "te's exact single-source caliber (selectedMobFromSection === N && mobTamedPreview); legs: a same"
+        "-file gate-family sync pin (dual-source tamed-gate forms extinct, single-source forms counted at"
+        " every consumer: texture source, pack-UV exception, both eye overlays, the tamed-coat note; the "
+        "wolf/cat collar gates retired to the t986 geometry flag mobCollarActive -collarVisible, same tam"
+        "ed lever, single-source face preserved) and a real-QmlEngine rig driving the user's sequence thr"
+        "ough the real ResourceBrowser.qml (selectMob -> mobTamedPreview=true -> selectItem egg): the tam"
+        "ed state raises the preview MobModel's collarVisible flag + tabby texture, the egg switch must d"
+        "rop collarVisible to false, return the texture to wild, and the eye overlay goes OFF with the mo"
+        "b-preview branch gate (t989 evolution: the egg->mob preview path is extinct so the branch is hid"
+        "den outright - the old always-on-eye anti-vacuity anchor retired with it), mirrored for the wolf"
+        " collar and the wolf egg" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -1153,7 +1214,7 @@ Item {
                              "extinct so the branch is hidden outright - the old always-on-eye "
                              "anti-vacuity anchor retired with it), mirrored for the wolf "
                              "collar and the wolf egg";
-    }
+    });
 
     // ── P-t964 预览重置按钮 z 序探针（R19.17 🅴；用户第五轮口径「方块预览滚轮放大后遮住右下角
     //    重置按钮——按钮应永远最前」）──
@@ -1168,7 +1229,19 @@ Item {
     //    (b) 约定钉：全文独立 `z: 10` 行恰 3 处（变体面板 t783 ② 先例 + 本按钮 t964 + t965 形态按钮组
     //        按约定入层——钉合法演化）=「预览区浮层永远最前」层级契约登记（t967 分类按钮组同约定加 z）。
     //    (c) 身份钉：块内仍是缩放重置按钮本体（缩放态显隐谓词 + reset 写 1.0 + 右下角锚）防 z 钉漂移。
-    {
+    runLegMulti({ "t964 preview reset button z-order: wheel-zooming the block preview no longer covers the bottom-r"
+        "ight reset button - the button was declared BEFORE the full-viewport View3D (cubeView) and QML s"
+        "ibling stacking paints later-declared siblings on top, so the viewport painted over it exactly w"
+        "hen it is visible (zoom != 1 is when the zoomed model pixels reach the bottom-right corner); the"
+        " fix lifts the button with an explicit z: 10 above the viewport default z 0 following the varian"
+        "tPanel precedent (explicit z guards against later sibling insertion re-flipping the order), regi"
+        "stering the preview-area floating-layer contract (variant panel + reset button + the future t965"
+        " mode/classification button group all carry explicit z >= 10, always frontmost of the viewport);"
+        " legs: button-block z pin + contract comment anchor + viewport-head-stays-default-z pin (button "
+        "layer z > viewport layer z), file-wide standalone z: 10 row count == 3 (panel + button + the t96"
+        "5 form button group joining the registered z >= 10 floating-layer convention), and identity pins"
+        " keeping the z pin on the real reset button (zoom-visibility predicate, reset-to-1.0 handler, bo"
+        "ttom-right anchor)" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -1229,7 +1302,7 @@ Item {
                              "z >= 10 floating-layer convention), and identity pins keeping the z pin on the real "
                              "reset button (zoom-visibility predicate, reset-to-1.0 handler, "
                              "bottom-right anchor)";
-    }
+    });
 
     // ── P-t965 形态切换按钮组系统探针（R19.17 🅴；用户第五轮口径「变体面板扩展成编号按钮组（1 2 3…
     //    默认最普通形态）——耕地干/湿两态、门+活板门未激活/激活、草丛低/中/高三态、红石火把亮/灭、
@@ -1255,7 +1328,23 @@ Item {
     //    (c) 查看器源码钉：按钮组构建链（支持表消费 + 默认钮 1 + 换选重置 + 预览 blockState 接线 +
     //        编号钮本体 + z:10 浮层契约〔P-t964(b) 同步演化恰 3〕+ 门族 135/127 家族钉与 71 绝迹）。
     //    (d) review0830 #27 按钮组宽度契约腿（源码解析宽链常量 → 8 钮恒不溢出由构造成立）。
-    {
+    runLegMulti({ "t965 form-toggle button group system: the browser variant panel extends into numbered state butt"
+        "ons (1 2 3..., button 1 = state 0 = the placed default form) driven by a single Game-layer suppo"
+        "rt table (Hotbar::blockFormStates: farmland dry/wet via the 2-bit hydration level, wood/spruce/i"
+        "ron doors open on state bit2, wood/iron trapdoors open on bit0, tall grass short/mid/tall via va"
+        "riant states, redstone torch lit/unlit via the off flag, powered rail unpowered/powered via the "
+        "on flag, end portal frame eyeless/eyed via the active flag, and the three crops expose all 8 gro"
+        "wth stages 0..7); the preview meshes consume the same state through BlockRegistry::stateTileOver"
+        "ride (Core single authority, mesher branches now delegate to it too): trapdoor/door open geometr"
+        "y swaps the plate edge, grass cross height 0.5/1.0/2.0, crop stage / torch off / powered-rail ti"
+        "les verified by UV, farmland dry-wet and frame eyeless-eyed top tiles verified per face; state o"
+        "n non-form blocks is inert byte-for-byte; the iron door family id was corrected 71(=cyan wool, a"
+        " masked routing bug)->135 on both QML family tables and the powered rail joins the viewer-only 3"
+        "D family; legs: support-table behavior pins (13 entries + 8 unsupported-empty incl. cyan wool 71"
+        " and detector rail 128), geometry behavior pins (ItemShapeGeometry + BlockCube direct), and brow"
+        "ser source pins (panel + z:10 floating-layer contract + default-form reset + wiring + review0830"
+        " #27 width contract parsed from the source: 8 worst-case buttons 8*w+7*sp fit inside the content"
+        " column 322-2x10-58-10=234 by construction, not by border slack)" }, [&]() {
         bool ok = true;
         // (a) 支持表行为钉（Hotbar::blockFormStates 直调；Game 层单一权威）。
         Hotbar hb965;
@@ -1514,7 +1603,7 @@ Item {
                              "+ review0830 #27 width contract parsed from the source: 8 worst-case "
                              "buttons 8*w+7*sp fit inside the content column 322-2x10-58-10=234 by "
                              "construction, not by border slack)";
-    }
+    });
 
     // ── P-t966 预览拖拽方向 rig 探针（R19.17 🅴；用户第六轮口径「左右旋转到背面还是反的——
     //    彻底查相位判定（spinAngle 基准/拖拽轴映射），实机 rig 验证」）──
@@ -1539,7 +1628,28 @@ Item {
     //         不被竖直拖触碰（轴纯度）。
     //    (a) 源码钉（辅助，非替代）：纯线性定律行逐字 + const faceSign / Math.cos 绝迹 +
     //        旧单节点合成串绝迹 + 四分支 pitch/yaw 两层计数 + 契约注释锚。
-    {
+    runLegMulti({ "t966 preview drag direction final fix (user sixth round: left-right rotating to the back face is"
+        " STILL reversed - t921 phase compensation did not cure): the sign-face panorama is now settled -"
+        " horizontal drag has been purely linear since t599 (spinAngle += dx*0.6, no phase face, proven u"
+        "niform by the rig's four-phase yaw legs); the only phase-dependent sign face was t921's sign(cos"
+        "(displayYaw)) pitch increment patch, and the true root is the TRANSFORM GRAPH: a single-node eul"
+        "erRotation composes as Ry(yaw)*Rx(pitch) with yaw outermost in world space (verified empirically"
+        " against this Qt's Quick3D scene graph, which has no rotationOrder knob), so the pitch hinge Ry("
+        "theta)*X_axis projects onto the screen with a cos(theta) factor - it flips exactly on the back p"
+        "hase (the round-five symptom) and swings toward the view axis near the side phase where vertical"
+        " drag leaks an in-plane spin component (the drag axis is swapped); t921's compensation patched t"
+        "he LAW on top of that phase face and re-flips at the +/-90 deg boundary mid-gesture, which is wh"
+        "y the user still felt it wrong; the fix splits all four preview branches (full cube / bed / item"
+        " shape / mob) into a PITCH PARENT (world-frame tilt, hinge always the screen-horizontal X axis, "
+        "projection never flips) over a YAW CHILD (spinAngle turntable) and restores the pure linear law "
+        "with zero phase judgment; the behavioral rig loads the real source-tree ResourceBrowser.qml in a"
+        " real QQmlEngine against real Quick3D nodes (sceneRotation/scenePosition read back, no re-implem"
+        "ented math) and asserts near-surface screen displacement under 1px drags: yaw right/left at spin"
+        " 0/90/180/270 all move the near face right/left respectively, pitch up/down at front/side/back p"
+        "hases keeps 'up-drag sees the top' uniform with <=25% lateral leakage (old graph measured ~40% o"
+        "r a near-zero vertical component at the side phase) and yaw value untouched by vertical drags; s"
+        "ource pins keep the pure linear law line verbatim, the old single-node composition string and an"
+        "y const faceSign / Math.cos extinct, and the four-branch pitch/yaw split counted" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -1744,7 +1854,7 @@ Item {
                              "by vertical drags; source pins keep the pure linear law line verbatim, "
                              "the old single-node composition string and any const faceSign / Math.cos "
                              "extinct, and the four-branch pitch/yaw split counted";
-    }
+    });
 
     // ── P-t967 分类单选化 + 三大类重划探针（R19.17 🅴；用户第五轮口径「选一个物品又选一个生物，
     //    出现在一起导致问题——共用一个选中态；分类重划三大类 生物/方块/物品材料，无 3D 贴图的归
@@ -1767,7 +1877,33 @@ Item {
     //        同钉床分支；反向 selectMob(狼)→selectItem(石头) → selectedMobFromSection==-1 且只剩
     //        BlockCube；代表条目 ×4 循环「先物品后生物」selectedId 恒归 0；selectedTabName 三类
     //        逐字断言。
-    {
+    runLegMulti({ "t967 browser single-selection + three-category regroup: the user's fifth-round report 'a mob and"
+        " an item can be selected at the SAME time (pick an item then a mob and they appear together)' re"
+        "solves to two independent selection variables (selectedMobFromSection for the mob gallery vs sel"
+        "ectedId for the palette) whose only mutual exclusion was one-directional: item taps cleared the "
+        "mob side but mob taps left selectedId stale, and the bed / item-shape preview branches gate thei"
+        "r visibility on selectedIsBed / selectedIsItem3D with no !selectedIsMob guard (the full-cube bra"
+        "nch's review27-4 family exclusion cannot cure a cross-category dual selection), so BedModelGeome"
+        "try / ItemShapeGeometry and the MobModel rendered stacked while the name/category row and the fo"
+        "rm/variant panels followed selectedIsMob alone; the fix funnels every tap through selectMob / se"
+        "lectItem authorities that write their own side AND clear the other (selectedId = 0 sentinel), ma"
+        "king the dual state unreachable by construction; categories regroup into Mobs / Blocks / Items-M"
+        "aterials via one authoritative categoryOfEntry predicate that reuses the very same id-level 3D r"
+        "outing functions (isCubeId / isBedId / isItem3DId) so the classification table IS the preview ro"
+        "uting table: mob-gallery entries and spawn eggs (whose preview is the 3D mob model) are Mobs, pa"
+        "lette entries with an exclusive 3D display (full cubes, beds, the t880/t925/t965 item-shape fami"
+        "lies) are Blocks, and everything without a 3D display (tools, materials, armor, and flat-icon cr"
+        "oss/rail/plate families) is Items-Materials, per the user's 'no 3D goes to items-materials' cali"
+        "ber; legs: source pins (authority function bodies, tap routing, extinct inline dual-write forms,"
+        " three Repeater partitions + section headers, predicate delegation), a real-QmlEngine rig readin"
+        "g the palette partition back (pairwise disjoint + union == paletteModel + representative pins: s"
+        "tone/torch/trapdoor/white-bed/tall-grass -> Blocks, stick/bow/armor -> Items-Materials, pig/wolf"
+        " eggs EXTINCT from the palette (t989 evolution: in no partition and categoryOfEntry no longer yi"
+        "elds Mobs for them), wolf gallery -> Mobs tab), and behavior pins driving the real selection sta"
+        "te machine (torch then wolf: selectedId returns to 0 and the visible geometry set holds MobModel"
+        " alone; bed then wolf likewise for the bed branch; wolf then stone flips back with BlockCube alo"
+        "ne; stick/egg tab names (t989 evolution: egg select path extinct); three-representative exclusiv"
+        "ity loop)" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -2129,7 +2265,7 @@ Item {
                              "for the bed branch; wolf then stone flips back with BlockCube alone; "
                              "stick/egg tab names (t989 evolution: egg select path extinct); "
                              "three-representative exclusivity loop)";
-    }
+    });
 
     // ── P-t989 查看器生物蛋整段移除探针（R19.17 🅴；用户 9-01 口径「生物蛋纯属多余，上面已经有
     //    生物的查看了」+「小僵尸蛋和别的蛋（风格）不统一」→ 查看器不再列蛋）──
@@ -2148,7 +2284,26 @@ Item {
     //        图鉴本体保留（mobModel 表 17 条）；selectMob(狼) → 生物 tab 照旧；选蛋路径不存在
     //        （selectItem(猪蛋) → 非生物预览态）；单选中收口照旧（selectItem(木棍) → selectMob(狼)
     //        → selectedId 归 0）。
-    {
+    runLegMulti({ "t989 browser spawn-egg section removed (t967 partial reversal - user 9-01: 'mob eggs are redunda"
+        "nt, the mob gallery above already shows the mobs' + the baby-shambler egg reads stylistically of"
+        "f next to the other eggs): the viewer-side egg face is gone wholesale while the boundary holds -"
+        " the mob GALLERY stays (mobModel table untouched), the creative inventory (Inventory.qml materia"
+        "ls tab) keeps its egg section, and right-click spawning / pick-block egg routes are untouched; r"
+        "emoval face = egg section header + grid, the categoryOfEntry egg entry (the table no longer yiel"
+        "ds category 0), the egg preview path (the old mobTypeForEgg(selectedId) fallback into the mob 3D"
+        " branch) and the paletteModel egg segment - filtered via a new authoritative Hotbar::isSpawnEgg "
+        "Q_INVOKABLE delegating to RecipeRegistry::mobTypeForSpawnEgg, so the QML-side egg-id literal mir"
+        "ror table retires wholesale (egg keys extinct from viewer code, comment-only registration per th"
+        "e t989 contract); P-t967 evolved lawfully per the P-t949(d) precedent (its egg legs now assert e"
+        "gg absence: no egg in any partition / categoryOfEntry never 0 / egg select path yields no mob st"
+        "ate, two partition Repeaters, itemCell reuse count 3->2); legs: comment-stripped source pins (st"
+        "ring-aware // and /* */ stripper so registration comments may keep the keys) asserting mobTypeFo"
+        "rEgg / eggEntries / the egg header and all 15 egg hex keys extinct from CODE, plus the positive "
+        "filter line and section structure; a real-QQmlEngine rig reading the real palette back: pairwise"
+        "-disjoint block/mat partitions whose multiset union equals paletteModel, all 15 egg ids absent f"
+        "rom palette and both partitions with categoryOfEntry==2, the 18-entry mob gallery intact, wolf g"
+        "allery tap still yields the Mobs tab, selectItem(pig egg) no longer produces the mob preview sta"
+        "te, and the single-selection funnel (stick then wolf -> selectedId 0) unchanged" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -2420,7 +2575,7 @@ Item {
                              "tab, selectItem(pig egg) no longer produces the mob preview state, "
                              "and the single-selection funnel (stick then wolf -> selectedId 0) "
                              "unchanged";
-    }
+    });
 
     // ── P-t990 方块默认视角回归俯视探针（R19.17 🅴；用户口径「方块默认视角从俯视变成仰视了，
     //    之前不是这样——git -S 查回归源修复」）──
@@ -2443,7 +2598,28 @@ Item {
     //           z 分量 ∈ (0.30, 0.45)（sin22°≈0.375：号 + 量级双钉）在 spin 0/90/180/270 全相位恒
     //           成立（旧图恒负 = 病面），bottom 法线 z 恒 < 0；上拖 +0.6°（t877 定稿符号）→ top z
     //           增（更俯视）。
-    {
+    runLegMulti({ "t990 block default view restored to top-down (user: 'the block default view changed from top-dow"
+        "n to bottom-up, it was not like this before'): git -S archaeology (the -22/userPitch/eulerRotati"
+        "on chain across t458/t599/t820/t877/t966) proves the base-tilt VALUE never flipped sign - the re"
+        "gression source is the t966 SPLIT itself: in the old single-node graph Ry(yaw)*Rx(pitch) the -22"
+        " deg tilt acted in the model-local frame so the spin carried it around and the top/bottom faces "
+        "alternated visibility (a tumbling look; the 'sees the top face' comment was true for half the ph"
+        "ase); once t966 moved the tilt into a world-frame pitch parent the same constant became absolute"
+        " - the top-face normal's z component sin(-22 deg) is permanently negative (away from the +Z-axis"
+        " camera), so EVERY spin phase shows the underside = a constant bottom-up view, the user's sympto"
+        "m honestly attributed to the node-hierarchy change; fix = flip the base -22 -> +22 on all four p"
+        "review branches (sin(+22 deg) > 0 = top face always fronting the camera = the JEI-style constant"
+        " top-down three-quarter view), the -35 yaw offset and the t877 user-approved drag law stay byte-"
+        "identical (up-drag raises userPitch = more top-down under either base sign, so the P-t966 behavi"
+        "oral legs are green under both with no re-judgment; its base count pin evolved lawfully per the "
+        "P-t949(d) precedent); legs: source pins (four split pitch bindings with +22, the -22 form extinc"
+        "t file-wide, the t990 contract anchor, four yaw children, the pure linear drag law line) plus a "
+        "real-QQmlEngine rig reading the real scene graph back - exactly four bare QQuick3DNode pitch par"
+        "ents at eulerRotation.x == 22 (one per branch), and the visible BlockCube Model's sceneRotation "
+        "mapped by the top/bottom face normals: top normal z within (0.30, 0.45) = sin22 magnitude AND si"
+        "gn, bottom normal z negative, invariant across spin 0/90/180/270 (the old graph was constant-neg"
+        "ative), and an up-drag of +0.6 deg increases the top normal z (more top-down, the t877 contract "
+        "intact)" }, [&]() {
         bool ok = true;
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
@@ -2628,7 +2804,7 @@ Item {
                              "normal z negative, invariant across spin 0/90/180/270 (the old graph "
                              "was constant-negative), and an up-drag of +0.6 deg increases the top "
                              "normal z (more top-down, the t877 contract intact)";
-    }
+    });
 
     // ── P-t968 燃烬者两修探针（R19.17 🅴；用户第五轮口径「头×0.6 再缩；烈焰棒上下错开一点（不在同一
     //    平面）」）──
@@ -2645,7 +2821,19 @@ Item {
     //        0.47（轨道半径/转轴保持）+ 外缘 0.57 + 总跨 1.30。
     //    (b) 源码钉（t931/t941 文本钉先例——QML/几何值无 static_assert 面）：头尺寸表值行 + 棒 Y 交错
     //        三元式 + 旧共面棒心/旧头尺寸绝迹 + 两消费端呈现参数随动 + 公转动画两处保持。
-    {
+    runLegMulti({ "t968 emberling two fixes: the head shrinks a further x0.6 (t818's 0.7^3 cube, half 0.35 -> 0.21 "
+        "= 0.42^3) scaled about its own center (0,+0.10,0) so the head position holds (y span [-0.11,+0.3"
+        "1]); the four orbiting rods break out of one plane - even rods sit at center y +0.07, odd at -0."
+        "13 (base -0.03 +/- 0.10), the rod Y value set holds exactly two distinct tops {0.62,0.42} and tw"
+        "o distinct bottoms {-0.48,-0.68} (non-coplanar) while the spin axis, orbit radius 0.52 (inner ed"
+        "ge 0.47 / outer 0.57) and per-rod length 1.10 all stay put, total span now [-0.68,+0.62]=1.30; t"
+        "he fix lands once in the shared MobModel mobType-17 geometry so all three consumers (in-game del"
+        "egate, browser preview, spawner-cage mini) move together, their presentation tables re-derived f"
+        "rom the new span/center (cage mini 0.38->0.32 / yOff 0.008->0.010, browser 1.1->0.95 / centY 0.0"
+        "2->0.03); legs: behavioral vertex read of a real MobModel (24-vert head bucket at half 0.21 + 96"
+        "-vert rod bucket with the two-tier Y sets and radius kept) plus source pins on the head size lin"
+        "e, the stagger ternary, the extinct coplanar rod center and old head size, the consumer tables, "
+        "and the rodSpin orbit animations retained on both QML sides" }, [&]() {
         bool ok = true;
         QString diag;
         // (a) 行为级：真 MobModel mobType 17 顶点直读（stride 5 float = pos3+uv2，MobVtx 契约）。
@@ -2745,7 +2933,7 @@ Item {
                              "line, the stagger ternary, the extinct coplanar rod center and old "
                              "head size, the consumer tables, and the rodSpin orbit animations "
                              "retained on both QML sides";
-    }
+    });
 
     // ── P-t969 火把贴图采样窗/UV 修正探针（R19.17 🅴；用户第五轮口径「中间悬空黑色部分——贴图采样窗
     //    /UV 修正」）──
@@ -2765,7 +2953,21 @@ Item {
     //        端面窗同样红）；④u 窗 ⊆ 火把本体柱内容列。
     //    (b) 源码钉：内容带/端面窗常量行 + addShapeBox capTop/capBot 形参管线 + 火把调用接线 + 旧
     //        满窗调用形绝迹。
-    {
+    runLegMulti({ "t969 torch texture sampling-window/UV fix: the floating black shard under the preview/dropped to"
+        "rch is the box end faces sampling the FULL tile-height window - the torch tile's rows 0 and 14-1"
+        "5 are transparent (Mask-discarded), so the side faces kept dead bands top and bottom and the +/-"
+        "Y end faces squeezed the whole strip (transparent rows included) into a 2/16 wafer that hung bel"
+        "ow the visible stick across a fully transparent gap (reproduced headlessly: detached diamond sha"
+        "rd 6px below the stick, black gap between); fix = side v window rectified onto the opaque conten"
+        "t band [2/16,15/16] (V convention image-top = v 1, per the t489 pixel-proven contract - the wind"
+        "ow was derived flipped) and the end faces overridden via new capTopV/capBotV addShapeBox params "
+        "to the fully two-column-opaque wood bands (top rows 6-7 / bottom rows 12-13, mechanism-equivalen"
+        "t to the MC torch block model sampling the stick cross-section on its up face) - no cap window m"
+        "ay include a flame row because the flame tip row 1 is single-column (x8 transparent) and would p"
+        "unch a black hole mid-cap; legs: UV-rect pin reading the real ItemShapeGeometry(13) vertex UVs a"
+        "gainst the per-pixel opaque bbox of atlas tile 17 (all faces inside the content band, side faces"
+        " mutually rectified with it, caps inside the wood band, u inside the stick columns) plus source "
+        "pins on the window constants, the cap parameter plumbing and the extinct full-window torch call" }, [&]() {
         bool ok = true;
         QString diag;
         // 内容真值：tile 17 逐像素扫 alpha≥128 包围盒（build_torch.py 画稿 4× NEAREST 上采样，内容
@@ -2873,7 +3075,7 @@ Item {
                              "rectified with it, caps inside the wood band, u inside the stick "
                              "columns) plus source pins on the window constants, the cap parameter "
                              "plumbing and the extinct full-window torch call";
-    }
+    });
 
     // ── P-t971 鱼粒子预告窗探针（R19.17 🅵 钓鱼组收官；用户第五轮口径「一开始（入水待机）就有水粒子——
     //    应收窄到临近咬钩才出现」）──
@@ -2897,7 +3099,24 @@ Item {
     //        保留 !player.hasBite（窗口停拍不回退）+ interval: 380（发射节流不碰）。
     //    阴性轮（回退验红已登记 commit；复原后随本矩阵全绿）：bobberApproachAt 去掉剩余等待门
     //        （= t971 前语义，全待机期 true）→ (a)①②与 (c) 前段腿恰红；(b)(d) 不受影响。
-    {
+    runLegMulti({ "t971 fish-particle lead window: the t884③ idle approach-particle chain (QML 380ms beat -> burstW"
+        "aterApproach) no longer runs from the water-settle instant - its trigger gate narrows to the las"
+        "t kBobberParticleLeadSec=2.5s before the bite (user caliber: particles used to bubble the whole "
+        "wait, now they announce the bite; option 1 of the brief, the N-second lookahead that hands off n"
+        "aturally into the pinned 1.0s judgment window), single authority EntityManager::bobberApproachAt"
+        " (Water && waiting-phase && remaining <= N) mirrored as PlayerController bobberApproach into the"
+        " QML running clause - emission throttle (380ms) and the particle pool untouched, only the gate m"
+        "oved; behavioral: baseline wait shows 2.0s of post-settle silence (earliest possible open = 5s l"
+        "ower bound - N), gate-open->bite measures 2.5s +-0.1, gate holds every tick to the bite edge, st"
+        "ays false through the bite window (t926 sudden-quiet contrast preserved - this task narrows the "
+        "wait, it does not extend into the window) and after the escape re-roll, while the cast splash st"
+        "ill fires exactly once (cast feedback kept, decoupled from the lead gate); tide leg: a determini"
+        "stically pre-selected short wait (base <=5.5s x0.4 <=2.2s < N) shows the gate true from the sett"
+        "le tick through the bite (short waits are fully covered, no naked window); Game mirror leg: a re"
+        "al pc cast tracks the entity predicate tick-by-tick, silent early, open in the window, all four "
+        "mirrors cleared on reel; source pin: the Main.qml fishing segment running clause carries player."
+        "bobberApproach, keeps !player.hasBite and the 380ms interval; negative round registered in the c"
+        "ommit (gate term removed -> baseline-early + mirror-early legs red, restored green)" }, [&]() {
         World wT;
         wT.setWidth(48); wT.setDepth(48); wT.setHeight(96); wT.setSeed(82);
         EntityManager entsT;
@@ -3065,7 +3284,7 @@ Item {
                              "player.bobberApproach, keeps !player.hasBite and the 380ms "
                              "interval; negative round registered in the commit (gate term "
                              "removed -> baseline-early + mirror-early legs red, restored green)";
-    }
+    });
 
     // ── P-t973 生物格放方块检测（R19.17 🅶 杂项组；用户第五轮口径「生物占据的格子不能放置方块——防活埋」）──
     //   玩家放置全链探针（P-t945 同式：直编 PlayerController 走完整放置链 射线 → 预检 → setBlock），
@@ -3086,7 +3305,21 @@ Item {
     //       （矿车在 MinecartManager，不在占用门查询域——骑乘建筑链路零干扰）；
     //   (f) 源码钉：占用门调用行 + Entities 侧排除面（kind!=Mob/dead）+ 门在预检链的序位（目标格必须空
     //       检查之后、方块族专项预检（火把）之前——t945 字符串钉模式 + 语句序钉）。
-    {
+    runLegMulti({ "t973 mob-occupied-cell placement gate: the write cell of any placement is checked against living"
+        "-mob AABBs (anti-burial, user caliber) via the read-only EntityManager::mobOccupiesCell query (G"
+        "ame -> Entities downward dependency, hostileNearby precedent) - (a) empty-cell control places an"
+        "d swings (chain proven live, so (b)'s rejection is not a ray-miss no-op); (b) Survival placement"
+        " aimed at the shambler's actual occupied cell is rejected: cell id unchanged, stack not consumed"
+        ", no arm swing (reject = no-op caliber), hitBlock pinned so the precheck chain demonstrably ran;"
+        " (c) a dropped item occupying the target cell while the shambler is still alive next door still "
+        "places - non-mob entities never gate (MC semantics: items can be covered), consume/swing normal;"
+        " (d) after damageEntity lethal (hp<=0 death-animation frame, slot still alive) the same cell pla"
+        "ces - dying mobs do not block; (e) mounted on a ground-mode minecart via tryMount, aiming from t"
+        "he actually-read seat eye, the cell beside the cart places and the ride persists - vehicles are "
+        "outside the gate's query domain; (f) source pins: the gate call sits in the generic precheck lay"
+        "er between the target-must-be-empty check and the first block-family precheck (torch), the door-"
+        "upper and bed-head write cells are gated symmetrically, the merge/stack write sites carry the sa"
+        "me gate, and the Entities side exclusion face (alive && kind==Mob && !dead) is pinned" }, [&]() {
         // rig 选址：kRigY 高空全空盒扫描（P-t945 同式；dx -1..10、dz -1..1、dy -2..+4）。
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
@@ -3374,7 +3607,7 @@ Item {
                                  " merge/stack write sites carry the same gate, and the Entities"
                                  " side exclusion face (alive && kind==Mob && !dead) is pinned";
         }
-    }
+    });
 
     // ── P-t974 保存退出偶发未保存（用户第五轮：有概率重进是上一次存档点）──
     //    调查判决：保存链（savePlayerData → saveAll → saveProgress）全部是同步 SQLite 写 —— 链上无
@@ -3390,7 +3623,29 @@ Item {
     //    失败不计数 —— 与 false 返回值同源互证）作行为级观测面。原子性核验：saveAll 单事务
     //    （DELETE 全量 + INSERT，COMMIT 失败整事务回滚）+ chunks 主键 (cx,cz) → 半写永不可见、
     //    失败必回滚到旧档（本探针 (c) 腿实证）。
-    {
+    runLegMulti({ "t974 save-exit silent-loss race: the exit-save chain (player state + chunks transaction + progre"
+        "ss) is synchronous SQLite - the probabilistic window is the discarded return values (fire-and-fo"
+        "rget: one transient external lock / disk failure rolls the transaction back and the file keeps t"
+        "he PREVIOUS save while exit proceeds) plus the never-saving window-close path - (a) behavior leg"
+        ": exit-save -> immediate close -> reopen -> reload sees the NEW save (marker block, player posit"
+        "ion, inventory stack, progress), not the previous one; (b) write-completion counter: the trio bu"
+        "mps saveOkCount by exactly +3, failures never count; (c) race-window positive leg, deterministic"
+        ": a second connection holding BEGIN EXCLUSIVE (in the wild: AV / indexer / sync tools) makes all"
+        " three writes fail detectably (false + flat counter), the rolled-back file keeps the previous sa"
+        "ve intact (half-writes never visible = atomicity proof), and the retry after lock release succee"
+        "ds +3; (d) source pins: the runExitSave gate (check -> retry -> toast) precedes coverGrabPending"
+        " in saveAndExitToWorldList, onClosing routes the window-close path through the same chain and cl"
+        "oses the store, and the WorldStore counter contract (Q_PROPERTY + exactly 3 bump sites, saveAll'"
+        "s after the commit gate). review0901 additions: (e) behavioral leg on the real return-chain - th"
+        "e returnTransientItemsBeforeSave function source is extracted from Main.qml verbatim and driven "
+        "against a real AnvilUI.qml x real C++ Hotbar rig (damaged iron pickaxe into slot A -> chain runs"
+        " -> slot emptied -> item in the VM bag with durability intact -> gatherPlayerState-shaped snapsh"
+        "ot saved -> world reopened -> item back in the bag; pre-fix the function does not exist and the "
+        "leg is red); (f) source pins: the shared function is defined with all return arms (three panels "
+        "/ three craft grids / close-inventory / held fallback) and is called before the save in BOTH exi"
+        "t paths (exactly 3 literal occurrences = definition + two call sites), lastExitSaveOk is written"
+        " by both paths and consumed by the world-list '上次退出未保存' badge (unsavedExitFile binding), and the"
+        " retry-without-backoff trade-off registration (<=300ms cap direction) is in place" }, [&]() {
         bool okA = false;   // 行为腿：保存退出 → 立即关库重载同档 → 关键状态往返一致（非上一次存档点）
         bool okB = false;   // 写完成计数腿：三写成功恰好 +3；失败腿零计数
         bool okC = false;   // 竞态窗口阳性腿：瞬持库写锁 → 三写全部失败（可检测）→ 回滚保旧档（症状复现）→ 锁释放重试成功
@@ -3930,7 +4185,7 @@ Item {
                              " by both paths and consumed by the world-list '上次退出未保存' badge"
                              " (unsavedExitFile binding), and the retry-without-backoff trade-off"
                              " registration (<=300ms cap direction) is in place";
-    }
+    });
 
     // ── P-t975 创造拿取语义再反转（用户 8-28 定稿：调色板**左键 = 拿一组 / 右键 = 只拿一个**，
     //    t896 的「左键默认 1 个」被翻案）──
@@ -3948,7 +4203,16 @@ Item {
     //        ⑨预设附魔书右键 = 0x227×1 带预设附魔；itemTaken / voidReturn 发射计数精确钉
     //        （拿取发、归还/满组 no-op 不发）。
     //    阴性轮：左键数量回 1（翻案回滚）→ 恰 P-t975 FAIL → 复原绿。
-    {
+    runLegMulti({ "t975 creative take semantics re-reversed (user 8-28 final word, overriding t896's left-click-tak"
+        "es-one): palette LEFT-click takes a FULL maxStackSize stack and RIGHT-click takes exactly ONE it"
+        "em; both buttons share the paletteTake single entry (t632 preset-book / t318 same-cell toggle-re"
+        "turn kept on the primary left button only / t136-t292-t356 swap-with-void-return structure uncha"
+        "nged, quantity assigned per button), while the middle-click copy face (t653/t896/t956) is untouc"
+        "hed - repeated right-clicks accumulate one at a time capped at maxStackSize instead of oscillati"
+        "ng take/void; the palette is the only unlimited-source creative take face in the codebase (slot "
+        "faces keep shared survival semantics); pinned by source pins (entry structure, per-button quanti"
+        "ty literals, exactly two infinite-source take literals and two paletteTake call sites) plus a be"
+        "havioral leg on the real Inventory.qml x real Hotbar rig with a host-mirroring void-return sink" }, [&]() {
         bool okPin = false, behavOk = false;
         QString behavDiag;
         const QString exeDir975 = QCoreApplication::applicationDirPath();
@@ -4209,7 +4473,7 @@ Item {
                              " structure, per-button quantity literals, exactly two infinite-source take"
                              " literals and two paletteTake call sites) plus a behavioral leg on the real"
                              " Inventory.qml x real Hotbar rig with a host-mirroring void-return sink";
-    }
+    });
 
     // ── P-t976 背包耐久条显隐回归修（用户第五轮：已消耗耐久的镐背包里不显条、hover 能看到耐久掉了）──
     //    调查判决：HEAD 显示条件本身未反（t931 语义「满耐久隐、受损显」正确，引擎级 rig 全绿）；真根因
@@ -4229,7 +4493,16 @@ Item {
     //        ④live damage：选中满耐久镐 damageSelectedItem×30 → 220/250 条由隐转显（签名不与腿① 相撞）
     //        ⑤空槽条自隐 + 总条数 40（4 护甲 armorDurBar 内联 + 27 主栏 + 9 hotbar 行）。
     //    阴性轮：撤 SurvivalInventory 主栏 visible 上收行（回退组件内隐式决策）→ 恰 P-t976 FAIL → 复原绿。
-    {
+    runLegMulti({ "t976 backpack durability-bar display regression (user fifth round: consumed pickaxe shows NO bar"
+        " in the inventory while hover tooltip shows the dropped durability) - display condition itself i"
+        "s correct (t931 full-hides semantics kept) but lived inside the separately AOT-compiled Durabili"
+        "tyBar.qml unit two hops away from the panel revision bindings, the exact real-machine never-re-e"
+        "valuates class (t498 'no durability in backpack, only hover tooltip' same symptom); fix hoists t"
+        "he visibility decision into each of the five usage sites' delegate unit as a revision-touching e"
+        "xpression (the app-proven icon/count shape); pinned by source pins (three revision variants exac"
+        "tly once per panel, component contract + t931 line kept) plus behavioral legs on the real Surviv"
+        "alInventory.qml x real Hotbar rig (damaged-visible with proportional colored width / full-hidden"
+        " / late-arrival-visible / live damageSelectedItem flip / empty-hidden, 40 bars total)" }, [&]() {
         bool okPin = false, behavOk = false;
         QString behavDiag;
         const QString exeDir976 = QCoreApplication::applicationDirPath();
@@ -4533,7 +4806,7 @@ Item {
                           << " SurvivalInventory.qml x real Hotbar rig (damaged-visible with proportional"
                           << " colored width / full-hidden / late-arrival-visible / live damageSelectedItem"
                           << " flip / empty-hidden, 40 bars total)";
-    }
+    });
 
     // ── P-t977 切换物品栏物品名浮显（R19.17 🅶 杂项组收官；用户第五轮口径「切槽显示当前物品名——
     //    血量/饱食度上方中间、白字；附魔物品显示详情（名称+耐久度+换行+逐条附魔带等级）；改名物品显示
@@ -4550,7 +4823,25 @@ Item {
     //        hold 2000 / fade 300 默认常量 + onSelectedSlotChanged 直读 Q_INVOKABLE（AOT 契约）+
     //        lastShownSlot 同槽守卫 + 非活跃期基线重同步（读档灌 selectedSlot 不闪名）。
     //    阴性轮：撤 flash() 的 holdTimer.restart()（计时重置回退）→ 恰 P-t977 FAIL → 复原绿。
-    {
+    runLegMulti({ "t977 hotbar switch item-name flash (user fifth round: switching slots shows the current item nam"
+        "e centered above the hearts/hunger row in white; enchanted items show details (name + durability"
+        " + per-enchant roman-level lines); renamed items show the renamed name; fades out after a hold) "
+        "- assembly single-sourced in Hotbar::slotDetailText (AOT lesson: QML consumes the string via a s"
+        "ignal-handler Q_INVOKABLE read, never a cross-unit binding); same-slot content churn suppressed "
+        "by lastShownSlot guard; inactive window resyncs the baseline so the world-load slot restore neve"
+        "r flashes; pinned by exact-string assembly legs (renamed+enchanted pickaxe 4-line / plain single"
+        "-line / empty / armor durability line / enchanted book without durability line), behavioral legs"
+        " on the real HeldItemNameFlash.qml x real Hotbar rig (baseline silent / switch shows name at ful"
+        "l opacity / enchanted text equals the C++ authority / empty hides / switch-storm restart keeps t"
+        "he last slot opaque past the first slot's deadline then fades to 0), and source pins (mount abov"
+        "e vitalsBar + active gate + hotbar injection, white color, holdMs 2000 / fadeMs 300 defaults, ha"
+        "ndler + guard forms). review0901 additions: the durability caliber is unified - maxDurabilityFor"
+        " is the single dual-segment authority (tool segment then ArmorRegistry fallback) consumed by slo"
+        "tDetailText AND all five durability-bar sites (HUD hotbar + Inventory x2 + SurvivalInventory x2)"
+        "; behavioral leg proves the flash text's durability max equals the authority for a damaged armor"
+        " piece in a hotbar slot while the single-segment form (toolMaxDurability==0) renders no bar on t"
+        "he real DurabilityBar.qml (pre-fix split reproduced), tools and non-durable items unchanged; sou"
+        "rce pins lock the authority declaration, the slotDetailText delegation, and all five call sites" }, [&]() {
         bool okAsm = false, okQml = false, okPin = false;
         QString diag977;
         Hotbar vm977;
@@ -4849,7 +5140,7 @@ Item {
                           << " DurabilityBar.qml (pre-fix split reproduced), tools and non-durable"
                           << " items unchanged; source pins lock the authority declaration, the"
                           << " slotDetailText delegation, and all five call sites";
-    }
+    });
 
     // ── P-t996 打火石直点 TNT 引燃链探针（R19.18 批 t996；用户 9-01 实测「点燃 TNT 后原方块没清除——
     //    持续闪烁动画不停、方块变成贴图、人物可以穿过去」）──
@@ -4869,7 +5160,18 @@ Item {
     //       detonatePrimedTnt）+ 爆炸真发生（半径内哨兵石块被 destroySphereSilent 清掉）+ 原格仍 Air；
     //   (c) 非 TNT 回退不回归：打火石点石头顶面 → 邻格照常落火（t724 语义保留，石面点火不被分流误吞）；
     //   (d) 源码钉：placeBlock 打火石分支内 TNT 直点分流的条件 + 两调用锚（任一散失即红）。
-    {
+    runLegMulti({ "t996 flint-and-steel on a TNT block ignites it in place (user ninth-round report: after igniting"
+        ", the original block never cleared - an endless flicker, the block 'turned into a texture', and "
+        "the player could walk through it; root cause: the t492 Bug B removal of direct TNT right-click i"
+        "gnition predates the flint and steel, and t724 never added the TNT split, so the click fell thro"
+        "ugh to the fallback ground-fire path which placed a flipbook-flickering, non-colliding cross-qua"
+        "d fire in the face-adjacent cell while the TNT stayed forever unprimed): the hit TNT cell is cle"
+        "ared to Air, a PrimedTnt entity takes over at the cell center with a full default fuse, no fire "
+        "lands in the face-adjacent cells (pre-fix symptom guard); the fuse chain runs to zero, removes t"
+        "he entity and really explodes (sentinel stone inside the blast radius destroyed, cell still Air)"
+        "; flint on a stone top face still falls back to placing fire (t724 semantics kept); source pins "
+        "lock the TNT split condition and the clearBlockSilent + spawnPrimedTnt pair inside the flint bra"
+        "nch" }, [&]() {
         int x0 = -1, z0 = -1;
         for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
             for (int xx = 4; xx + 7 < 96 && x0 < 0; xx += 2) {
@@ -5034,7 +5336,7 @@ Item {
                               << " kept); source pins lock the TNT split condition and the"
                               << " clearBlockSilent + spawnPrimedTnt pair inside the flint branch";
         }
-    }
+    });
 
     // ── P-t997 多 TNT 同帧引爆性能归因 + 爆炸波分期探针（R19.18 批 t997；用户 9-01 实测 35d5a72
     //    「放很多 TNT 爆炸仍很卡：15FPS / 66.7ms/frame / sim 仅 4.63ms」——t933 修的是单爆炸级联风暴
@@ -5059,7 +5361,16 @@ Item {
     //       —— 分期顺带去掉重叠 reflood 的真实收益，「总量不变」契约指破坏方块量（totalDet==36）
     //       而非 reflood 计数；
     //   (c) 源码钉：entitymanager.h 预算常量 + entitymanager.cpp 预算钳制行（任一散失即红）。
-    {
+    runLegMulti({ "t997 mass TNT same-tick detonation staged by a per-tick budget; attribution: 36 same-fuse primed"
+        " TNT over a stone platform driven in 1/60s ticks producedreflood boxes / worldChanged fanouts / "
+        "light edits / grav cols / cascades for detonations (each explosion runs the t933-batched chain o"
+        "nce: 1x refloodBox + 1x worldChanged + 1x clearAllDirty, so N same-tick explosions = N overlappi"
+        "ng reflood boxes and N QML mesh-recheck fanouts in one frame - the user F3 snapshot showed sim o"
+        "nly 4.63ms of 66.7ms, so the cure is bounding the per-frame detonation wave); the budget spreads"
+        " detonations <=4 per tick (max tickms vs avgms in this rig) while total destruction and the 1.2s"
+        " chain-ignite semantics stay intact (all 36 really explode, zero primed left); GUI-side present/"
+        "vsync/GPU numbers still need on-device F3; source pins lock the budget constant and its = 4 lite"
+        "ral value (review0903 #8) plus the fuse-regroup clamp" }, [&]() {
         int x0 = -1, z0 = -1;
         // rig 选址（三级）：① stride 2 快扫（同 t996 模式）；② stride 1 全深细扫（奇对齐 + t814 扩深
         //   128 后 z≥96 老扫描盲区）；③ 兜底：全图扫「占用最少」候选位 → setBlock Air 预清场后照常搭台。
@@ -5221,7 +5532,7 @@ Item {
                               << " F3; source pins lock the budget constant and its = 4 literal"
                               << " value (review0903 #8) plus the fuse-regroup clamp";
         }
-    }
+    });
 
     // ── P-t1005 红石块旁多 TNT 连锁引燃·终态清零探针（R19.20 批 t1005；用户实测回归「红石块旁多 TNT
     //    同时连锁引爆 → 部分 TNT 持续闪烁不清除（永续 primed 残留）；单发引爆正常」——t997 波分期修复
@@ -5243,7 +5554,13 @@ Item {
     //   2s > 链式最大引信 1.8s，防波间空窗假收敛；cap 不 settle = 用户「永续闪烁」行为学复现 → 红）；
     //   (c) 终态零残留（settle 点零存活 primed + 全部原 TNT 格 Air——「TNT 方块全部变 Air、无存活
     //   primed 实体残留」逐字口径）。
-    {
+    runLegMulti({ "t1005 redstone-block adjacent multi-TNT chain ignition burns down: 7 layouts (2x2 / 3x3 / 1x4 / "
+        "5-same-frame cluster over budget 4 / 8-direct dual-source 2-deep regroup / dust-fed 2x6 dense ar"
+        "ray wave-1 power-cut / pool-full 64-slot cap pressure with a fuse-frozen zombie-slot detector + "
+        "detector self-check) driven by the real consumer chain (tickRedstone -> powerTntTriggered -> fir"
+        "ePowerTnt) with per-frame entity ticks (1/60s) + per-6-frame redstone ticks (100ms WorldClock to"
+        "pology) all settled to zero surviving primed entities and all-Air rig cells inside the bounded w"
+        "indow (2s settle hysteresis > 1.8s max chain fuse)" }, [&]() {
         PlayerController pc;
         EntityManager ents;
         pc.setWorld(&w);
@@ -5517,7 +5834,7 @@ Item {
                           << " surviving primed entities and all-Air rig cells inside the bounded"
                           << " window (2s settle hysteresis > 1.8s max chain fuse)"
                           << (ok1005 ? QString() : diag1005);
-    }
+    });
 
     // ── P-t979 猪两修（浅水淹没度溺水 + 掉落表；专用局部世界 w979a/b：围栏平台 + 浅水档水洼/盖顶水槽）──
     //    根因：t828 溺水头判（旧）= floor(pos.y+halfH·0.8) 处**整格** blockAt==Water 布尔，无视水位档
@@ -5539,7 +5856,12 @@ Item {
     //        牛皮革保留——掉落表在 QML 呈现层，headless 无 spawnItem 可断行为 → 源码钉先例 t880/t997）。
     //    阴性轮（行为关键必须）：回退溺水判据为旧整格布尔（浮面/resting 保持新谓词）→ (b) 盖顶水槽腿恰红
     //        （4 头全死：口鼻被钉持续淹没复现）→ 复原绿。
-    {
+    runLegMulti({ "t979 pig ankle-deep water safety + drop table: open 1/8 and 1/4 level puddles zero drowning dama"
+        "ge (full HP) and >=6/8 wade out ( exits), covered ankle-deep trench keeps all 4 pigs per leg at "
+        "full HP with snout pinned under the lid (/8 alive across both levels), pinned under deep source "
+        "water the pig still drowns (chain intact); snout-line-vs-surface single-authority predicate shar"
+        "ed by drown + swim-up + resting-break, pig drop is meat-only with cooked-on-burn kept and cow le"
+        "ather untouched (pins)" }, [&]() {
         const int kPigMax = 3;
         bool ok = true;
         int exitedTotal = 0; // (a) 合计脱困头数（诊断输出用）
@@ -5699,7 +6021,7 @@ Item {
                              " still drowns (chain intact); snout-line-vs-surface single-authority"
                              " predicate shared by drown + swim-up + resting-break, pig drop is"
                              " meat-only with cooked-on-burn kept and cow leather untouched (pins)";
-    }
+    });
 
     // ── P-t980 鱿鱼陆地生存两修（离水搁浅窒息掉血至死 + 陆地挣扎缓动非行走步态；局部世界 w980）──
     //    旧状：鱿鱼离水不伤不死（窒息块整体跳过鱿鱼）+ 搁浅委托 aiWander = 正常行走步态（kWalkSpeed
@@ -5721,7 +6043,10 @@ Item {
     //    阴性轮（两刀，见提交正文）：①注释掉 tick 鱿鱼窒息 else 块 → (a)(b) 恰红（409/1，回到
     //        「离水不死」旧世界）；②aiSquid 搁浅分支回退 aiWander 委托 → (c) max(moveSpeed) 触 1.0
     //        恰红（行走步态复现）→ 均复原绿。
-    {
+    runLegMulti({ "t980 squid land survival: beached squid takes 1HP/s stranding damage after a 1s grace (exactly 2"
+        " hits by 3.5s, dead by 12s) and its land gait degrades to intermittent struggling (max moveSpeed"
+        "< walk speed, >=1/3 samples at rest), water squid stays full HP with swim/bob intact; belly-line"
+        " predicate pairs the t979 snout-line authority (pins)" }, [&]() {
         World w980;
         w980.setWidth(40); w980.setDepth(40); w980.setHeight(96); w980.setSeed(23);
         // 围栏平台：y84 石板 + y85..86 边墙（同 P-t979 口径，防 wander/蠕动出平台坠地形假红）。
@@ -5820,7 +6145,7 @@ Item {
                           << "< walk speed, >=1/3 samples at rest), water squid stays full HP with"
                              " swim/bob intact; belly-line predicate pairs the t979 snout-line"
                              " authority (pins)";
-    }
+    });
 
     // ── t995 地底结构对照首批修正探针（共享 rig：多 seed 小世界池 → 地牢房间逐房采样；worldgen 行为级
     //    + 源码钉，同 t759/t786 先例收录）──
@@ -5970,7 +6295,9 @@ Item {
     //   方向性断言随生成端重写作废）：净样池 ≥4；地板苔/圆石两材质齐（逐块混排真发生）；墙环+顶板
     //   零苔且圆石在场（t999 墙顶普通圆石口径）；池化地板苔率窗 [60,90]%；源码钉（旧 mossyPct 双率
     //   lambda 绝迹 + t999 地板 75% 苔行 / 墙零苔行 verbatim）。
-    {
+    runLegMulti({ "t995a dungeon masonry (t999 evolution): per-block floor mix 25% cobble/75% MossyCobble in [60,90"
+        "]% window with walls/ceiling zero-moss cobble replaces the stale dual-rate mix in placeDungeons,"
+        " MC Monster Room masonry look; pooled floor mossycobblewall mossycobbleoverclean rooms" }, [&]() {
         bool ok = clean995 >= 4;
         int mf = 0, cf = 0, mw = 0, cw = 0;
         for (const Room995 &r : rooms995) {
@@ -5999,11 +6326,12 @@ Item {
                              " replaces the stale dual-rate mix in placeDungeons, MC Monster Room"
                              " masonry look; pooled floor mossy" << mf << "cobble" << cf
                           << "wall mossy" << mw << "cobble" << cw << "over" << clean995 << "clean rooms";
-    }
+    });
 
     // P-t995b 内空 5/7 随机探针：净样池 ≥4；全部净样 W/D ∈ {5,7}（采样构造已滤，此处防御复查）；
     //   池内 5 与 7 两种尺寸均出现（随机化真发生，非恒 7 摆设）；源码钉（bit28/29 取值行 verbatim）。
-    {
+    runLegMulti({ "t995b dungeon room size randomization: interior W/D hash-picked 5/7 per room (MC 5x5..7x7 variet"
+        "y, was fixed 7x7), both sizes present across pooled seeds; clean rooms/" }, [&]() {
         bool ok = clean995 >= 4;
         bool sawFive = false, sawSeven = false;
         for (const Room995 &r : rooms995) {
@@ -6033,14 +6361,17 @@ Item {
                           << "| t995b dungeon room size randomization: interior W/D hash-picked 5/7"
                              " per room (MC 5x5..7x7 variety, was fixed 7x7), both sizes present across"
                              " pooled seeds; clean rooms" << clean995 << "/" << dungeonRooms995;
-    }
+    });
 
     // P-t995c 地牢箱尝试规则探针（t999 合法演化：旧「恒角箱 + ~50% 对角二箱」断言随生成端改制作废）：
     //   每净样 0..2 箱（MC 规则 = 2 箱位 × 各 3 次尝试，全失败 → 0 箱少见态，登记不锁）；每箱贴墙核
     //   （四水平邻恰一实心 —— 非 Air 且非 Chest，与生成端 chestSolidNeighbors 同口径）；池内 ≥1 间双箱房
     //   （尝试规则下双箱概率 ~半，固定种子池确定）；双箱相邻（自然成双布局）仅登记（项目无双箱合并态）；
     //   源码钉（t999 尝试规则锚 verbatim + 旧对角二箱行绝迹）。
-    {
+    runLegMulti({ "t995c dungeon chest attempt rule (t999 evolution): 0-2 chests per room via 2 slots x 3 tries (ze"
+        "ro-chest rooms, two-chest rooms/), every chest wall-adjacent with exactly one solid neighbor, ad"
+        "jacent-pair layout registered (no double-chest merge state in project), corner-guarantee retired"
+        " (pins)" }, [&]() {
         bool ok = clean995 >= 4;
         int twoChestRooms = 0, zeroChestRooms = 0, adjRooms = 0;
         for (const Room995 &r : rooms995) {
@@ -6074,14 +6405,16 @@ Item {
                              " with exactly one solid neighbor, adjacent-pair layout" << adjRooms
                           << " registered (no double-chest merge state in project), corner-guarantee"
                              " retired (pins)";
-    }
+    });
 
     // ── P-t999 地牢逐方块校准（墙脚豁口 + t999 口径联合面；复用 t995 5-seed rig 扩展采样）──
     //    腿：①豁口——每净样墙脚豁口 run ∈ [0,5]（MC 上限；全封 = 0 豁口房间，登记）、每 run 向外穿透
     //    （通空气，盲洞 = 形态破坏）、>80% 净样 ≥1 豁口（有限世界无空气邻域全封率由窗口容忍 + 日志登记）；
     //    ②联合面（阴性轮敏感面）——池化地板苔率窗 [60,90]%、墙零苔、净样刷怪笼全 ∈ {Shambler,Bones,
     //    Spider}（Stalker 退出地牢池）；③源码钉——豁口数行 / 挖穿锚 / 地板苔行 verbatim。
-    {
+    runLegMulti({ "t999 dungeon per-block calibration: 1-5 wall-foot 2-high openings per room dug outward to neares"
+        "t air (total, rooms with >=1 opening/>80%, fully sealed roomsregistered, no blind tunnels), join"
+        "t face floor mossy in [60,90]% window / walls zero moss / spawner pool stalker-free (pins)" }, [&]() {
         bool ok = clean995 >= 4;
         int openTotal = 0, roomsWithOpen = 0, sealedRooms = 0, penBad = 0;
         for (const Room995 &r : rooms995) {
@@ -6124,7 +6457,7 @@ Item {
                              " rooms" << sealedRooms << "registered, no blind tunnels), joint face"
                              " floor mossy in [60,90]% window / walls zero moss / spawner pool"
                              " stalker-free (pins)";
-    }
+    });
 
     // ── t1000 成就「隔墙有眼」探针（进入要塞结构区域解锁；行为级 + bounds 一致性 + 源码钉）──
     //   (a) 行为腿：真 PlayerController + 真要塞世界 + 真 PlayerProgress（QML 路由的 C++ 等价直连）——
@@ -6137,7 +6470,10 @@ Item {
     //   (c) 源码钉：tick 上升沿守卫 + finishWorldLoad 重置 + QML 路由行 + 定义行 + 常量同源。
     //   被测世界：主世界 w 已被早前探针改种子 / 尺寸（44×44×96 seed26 一族），要塞有无不定 → 同 t759
     //   fallback 模式自建 96×96×48 扫种子（每种子 ~64% 命中，24 发上限仅防退化）。
-    {
+    runLegMulti({ "t1000 stronghold-entry achievement: edge-guarded enteredStronghold fires once on entering footpr"
+        "int (outside ticks silent, in-bounds re-ticks quiet, re-entry re-fires with idempotent toast, fi"
+        "nishWorldLoad re-arms guard), bounds match footprint ring/roof cells incl. y-range, save->load v"
+        "oxel rebind keeps bounds correct with no re-toast, source pins (guard/reset/route/def/constants)" }, [&]() {
         bool ok = true;
         World wT1000;
         wT1000.setWidth(96);
@@ -6295,7 +6631,7 @@ Item {
                              " bounds match footprint ring/roof cells incl. y-range, save->load voxel"
                              " rebind keeps bounds correct with no re-toast, source pins (guard/reset/"
                              "route/def/constants)";
-    }
+    });
 
     // ── t1020 成就树扩展探针（面板 A：四结构区域重推导 + 足迹一致性 + 读档重推导）──
     //    rig：96×96×48 逐种子扫描（seeds 1..80，每结构独立记首个命中种子；地牢加验刷怪笼在位 /
@@ -6305,7 +6641,20 @@ Item {
     //        floor 砂岩、丛林 = 苔石混排地板）；
     //    (a') 读档重推导腿：真 WorldStore 存 → beginLoad + loadChunks + finishLoad（rebuild 从
     //        seed 纯算术重推导）→ 四结构区域表与生成期逐项相等 + insideDungeon 判读一致。
-    {
+    runLegMulti({ "t1020 structure-region re-derivation: seed-pure sites() recompute fills dungeon/mineshaft/desert"
+        "/jungle region tables (bounds closed-interval sampling incl. corner and out-of-range cells, voxe"
+        "l-tie checks: dungeon spawner / pyramid sandstone / jungle mossy floor), save->load rebuild repr"
+        "oduces identical region tables with no serialization(seeds dun/mine/des/jun =)",
+               "t1020 mineshaft envelope behavior leg (review0907 low #3): every worldgen Rail cell () lies insi"
+        "de a mineshaft region bbox (corridor pieces never stick out of the envelope) and the region-0 ho"
+        "rizontal half-extent is 32 = 2 x kEnvHalf 16 (L-shaped perpendicular legs: 6 + 9 + 1 wall ring; "
+        "old 26 was a collinear mis-derivation), so the entered-mineshaft bbox and the ambient audio zone"
+        " no longer double the real footprint",
+               "t1020 achievement-tree expansion: structureEntered edge fires once per dungeon entry with idempo"
+        "tent toast and finishWorldLoad re-arm, first-kill x4 co-unlocks with monster_hunter, first-ore p"
+        "arent gating (coal/iron/redstone), minecart 500m radial ride hook (t1048)/fish/chest-cart hooks,"
+        " kind mapping, 31 defs with shape checks, save->load replay without re-toast, source pins (guard"
+        "/reset/route/def/constants)" }, [&]() {
         World wT20Dun, wT20Mine, wT20Des, wT20Jun;
         // 高 96：沙漠 / 丛林神殿坐落**地表**（siteOk 守卫 surfaceY+顶冠 < m_height）→ 48 高世界
         //   地表普遍 ≥38 → 神殿恒拒（t1020 首轮 80 seed 全空根因）；96 高给足地表带。地牢 / 矿井
@@ -6703,5 +7052,5 @@ Item {
                              " hooks, kind mapping, 31 defs with shape checks, save->load replay"
                              " without re-toast, source pins (guard/reset/route/def/constants)";
     }
-    } // t1020 面板 A+B 共用作用域收口（B 复用 A 的探针世界 / 存档句柄）
+    }); // t1020 面板 A+B 共用作用域收口（B 复用 A 的探针世界 / 存档句柄）
 }
