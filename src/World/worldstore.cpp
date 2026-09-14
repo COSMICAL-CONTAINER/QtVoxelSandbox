@@ -469,7 +469,9 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     };
     // t1016 世界时钟快照（caller 传非空 map 才写；同事务原子 —— 时间与地形同一存档点，杜绝「半新」
     //   存档）。phase 用 'g'/9 位有效数字：float 短往返表示（读回 toFloat 逐位还原）；day qint64 直接
-    //   十进制；weather 枚举 int。缺键跳过该键（不写半截快照）。
+    //   十进制；weather 枚举 int；t1046 weather_timer_ms = 当前态剩余毫秒 int（parity 台账低-5：
+    //   等价 MC level.dat RainTime/ThunderTime 精确续跑——态唯一 + 单计时器，单键即可精确恢复剩余窗）。
+    //   缺键跳过该键（不写半截快照）。
     if (!worldTime.isEmpty()) {
         if (worldTime.contains(QStringLiteral("phase")))
             metas.append({QStringLiteral("clock_phase"),
@@ -480,6 +482,9 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
         if (worldTime.contains(QStringLiteral("weather")))
             metas.append({QStringLiteral("weather"),
                           QString::number(worldTime.value(QStringLiteral("weather")).toInt())});
+        if (worldTime.contains(QStringLiteral("weatherTimerMs")))
+            metas.append({QStringLiteral("weather_timer_ms"),
+                          QString::number(worldTime.value(QStringLiteral("weatherTimerMs")).toLongLong())});
     }
     // t1024 床位重生锚（caller 传非空 map 才写；四键与 chunks / meta 同事务原子）。valid → 四键全写
     //   （bed_x 'g'9 float 短往返，同 clock_phase 口径）；!valid → 只写 bed_valid=0（显式失效位，
@@ -547,7 +552,9 @@ QVariantMap WorldStore::loadMeta() const
 //   review0906 #14：hasWeather = 存档是否**真带** weather 键（缺键默认 0 与「真存过 Clear」不可区分
 //   = enterWorld 无条件 setWeatherState 把 resetWeather 的首场晴偏短窗（20/45s）重抽为常规窗
 //   45/120s 的根因）。消费端（Main.qml enterWorld）仅 hasWeather 才恢复天气态；缺键走 resetWeather
-//   原窗（初始短窗口径恢复）。
+//   原窗（初始短窗口径恢复）。t1046 hasWeatherTimer / weatherTimerMs = 剩余时长键（world_meta
+//   weather_timer_ms，毫秒 int）—— 缺键（旧档）→ hasWeatherTimer=false，恢复端走 setWeatherState
+//   的随机重抽窗；真带 → setWeatherRemainingSec 精确续跑剩余窗（MC RainTime/ThunderTime 口径）。
 QVariantMap WorldStore::loadWorldTime() const
 {
     QVariantMap out;
@@ -570,6 +577,12 @@ QVariantMap WorldStore::loadWorldTime() const
                meta.contains(QStringLiteral("weather"))
                    ? QVariant(meta.value(QStringLiteral("weather")).toInt())
                    : QVariant(0));
+    out.insert(QStringLiteral("hasWeatherTimer"),
+               QVariant(meta.contains(QStringLiteral("weather_timer_ms"))));
+    out.insert(QStringLiteral("weatherTimerMs"),
+               meta.contains(QStringLiteral("weather_timer_ms"))
+                   ? QVariant(qlonglong(meta.value(QStringLiteral("weather_timer_ms")).toLongLong()))
+                   : QVariant(qlonglong(0)));
     return out;
 }
 

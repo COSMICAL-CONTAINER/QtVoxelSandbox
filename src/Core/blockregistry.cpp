@@ -2866,11 +2866,15 @@ QString BlockRegistry::noteBlockNoteName(int pitch)
     return QString::fromLatin1(kNames[p % 12]) + QString::number(4 + p / 12);
 }
 
-// t1028 音色族（下方方块材质定族；MC 1.0 口径登记 3 族 + 兜底钢琴）：materialGroup 投影（单一权威，
-//   不另立方块清单）——木=bass（低音拨弦）/ 石=kick（低鼓）/ 沙=snare（军鼓）/ 其余（含悬空）=piano。
-//   播放端（AudioManager::playNote）按族做速率倍移近似（登记简化：同一钢琴采样，非独立采样）。
+// t1028 音色族（下方方块定族；MC 1.0 口径登记 4 族 + 兜底钢琴）——木=bass（低音拨弦）/ 石=kick（低鼓）/
+//   沙=snare（军鼓）/ 玻璃=hat（t1046 第四族：Beta1.2 起 MC「下方玻璃 → hat 脆响」，parity 台账低-2）/
+//   其余（含悬空）=piano。bass/kick/snare 三族 = materialGroup 投影；hat 按 Glass 方块 id 直判——Glass
+//   材质组 GroupStone 被挖掘/脚步/破坏音面（AudioManager::groupIndex clip 池）依赖，脱组会连带改音效面，
+//   故不动 materialGroup（选型登记：音色映射单点 id 判，材质组语义零扩散）。播放端（AudioManager::playNote）
+//   按族做速率倍移近似（登记简化：同一钢琴采样，非独立采样）。
 BlockRegistry::NoteTimbreFamily BlockRegistry::noteTimbreFamily(quint8 belowId)
 {
+    if (belowId == Glass) return NoteTimbreHat;    // t1046 玻璃=hat（id 直判，不动 GroupStone）
     switch (materialGroup(belowId)) {
     case GroupWood:   return NoteTimbreBass;   // 木=bass
     case GroupStone:  return NoteTimbreKick;   // 石=kick

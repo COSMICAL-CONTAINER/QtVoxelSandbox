@@ -5338,7 +5338,8 @@ void World::resetWeather()
 }
 
 // t1016 存档天气恢复（头注释见 .h）：设态 + 按该态的随机时长窗重抽剩余时长（与 tickWeather 转换时
-//   设时同口径；恢复「态」不恢复「剩余秒数」——秒数不进存档，重抽 = 进世界后正常随机模拟续跑）。
+//   设时同口径）。t1046 起「态 + 剩余窗」双精确：本函数仍重抽（保持单独设态的旧行为语义），存档链
+//   随后用 setWeatherRemainingSec 覆盖为存档剩余秒（见下）。
 //   非法 state 静默拒（保当前态，防脏档破枚举不变量）；态未翻（同态恢复）不 emit（零噪声）。
 void World::setWeatherState(int state)
 {
@@ -5355,6 +5356,15 @@ void World::setWeatherState(int state)
     const bool changed = (m_weather != next);
     m_weather = next;
     if (changed) emit weatherChanged(); // 态翻转 → 驱动 QML 天空变暗 + 粒子切换
+}
+
+// t1046 天气剩余时长精确续跑（头注释见 .h；parity 台账低-5，机制等价 MC level.dat RainTime /
+//   ThunderTime）。只写计时不触态（态由 setWeatherState 负责，恢复端先态后时长配对调用）；
+//   sec ≤ 0 静默拒（守 m_weatherTimer > 0 不变量——tickWeather 对 ≤0 早退，写入会把天气钉死）。
+void World::setWeatherRemainingSec(float seconds)
+{
+    if (seconds <= 0.0f) return;
+    m_weatherTimer = seconds;
 }
 
 // t385 天气 tick（见 world.h 头注释）。机制等价 MC 1.0 天气：晴 ↔ 降水（雨/雪/雷）随机时长转换。
