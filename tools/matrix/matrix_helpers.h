@@ -259,4 +259,7 @@ private:
                                   //   只读 rig 世界 w + 段内 setBlock 均即写即清，不污染任何腿族）
     void section10_command_event_snapshot(); // R20.06 Command/Event/Snapshot 探针（置尾先例沿用：
                                              //   纯类型/队列行为面——rig 世界零接触，接 section09）
+    void section11_gamesession(); // R20.07 GameSession 探针（置尾先例沿用：自建 fresh 小世界
+                                  //   ×3（48×48×96 s82 双生 A/B + 共享 C），rig 世界 w 零接触，
+                                  //   接 section10）
 };
