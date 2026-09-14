@@ -257,4 +257,6 @@ private:
     void section08_recent(); // 原 L43625-47995 逐字节段
     void section09_foundations(); // R20.05 基础类型探针（新段置尾：原八段零改动，runAll 末执行——
                                   //   只读 rig 世界 w + 段内 setBlock 均即写即清，不污染任何腿族）
+    void section10_command_event_snapshot(); // R20.06 Command/Event/Snapshot 探针（置尾先例沿用：
+                                             //   纯类型/队列行为面——rig 世界零接触，接 section09）
 };
