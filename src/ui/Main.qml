@@ -2141,13 +2141,15 @@ Window {
     // progress 走过路程埋点：player 每帧 emit moved(水平位移增量) → progress.onMove 累加（内部 ~0.5s flush）。
     //   纯水平 √(dx²+dz²)，不含跳跃 dy；reportHorizSpeed 是 step 各出口唯一位移瓶颈 → 每帧每路径只计一次。
     //   同 playerMined→onBlockMined / blockPlaced→onBlockPlaced 单向事件流模式（PLAN §2 分层）。
-    //   t1046 矿车里程埋点：骑矿车期间（ridingCart 门控）位移增量并入 progress.onMinecartMoved ——
-    //   「轨道骑士」乘矿车累计 1km 达阈（parity 台账低-6 = MC On A Rail 口径；ridingCart 边沿滞后
-    //   ≤1 tick 首帧增量可能计入普通路程，1km 口径下可忽略，登记）。
+    //   t1048 矿车径向埋点：骑矿车期间（ridingCart 门控）位移增量 + 当前水平位置并 progress.onMinecartMoved
+    //   ——「轨道骑士」= 距乘车起点单方向 ≥500 格径向位移达阈（MC On A Rail 真口径，review0913-A P2-1
+    //   勘误；t1046 旧「累计 1km」退役）。起点由下方 onRidingCartChanged 上升沿捕获传入——分层选型：
+    //   QML 同持 ridingCart 边沿与玩家坐标两源，C++ PlayerProgress 零向上依赖（PLAN §2）。ridingCart
+    //   边沿滞后 ≤1 tick 首帧增量可能计入普通路程，500 格口径下可忽略，登记。
     Connections {
         target: player
         function onMoved(deltaBlocks) {
-            if (ridingCart) progress.onMinecartMoved(deltaBlocks)
+            if (ridingCart) progress.onMinecartMoved(deltaBlocks, player.position.x, player.position.z)
             progress.onMove(deltaBlocks)
         }
     }
@@ -14878,11 +14880,17 @@ Window {
     //   dismountHintTimer；文案统一「按潜行键（Shift）下X」（机制等价 MC 1.0 骑乘提示）。两个 property 的
     //   onChanged 各自驱动 → 船↔矿车换乘也触发显 / 计时（无缝）。
     onRidingCartChanged: {
-        if (ridingCart) { dismountHintVisible = true; dismountHintTimer.restart() }
+        if (ridingCart) {
+            dismountHintVisible = true; dismountHintTimer.restart()
+            // t1048「轨道骑士」起点捕获（MC On A Rail 真口径 = 距乘车点单方向 ≥500 米，review0913-A
+            //   P2-1 勘误）：骑上沿（false→true）把当帧玩家水平坐标（= 乘车点；ridingCart 边沿滞后
+            //   ≤1 tick 车移，500 格口径下可忽略）传 progress.onMinecartRideStarted，开径向判定窗。
+            //   旧「骑上即解锁」onRodeMinecart 与 t1046「累计 1km」口径均退役；骑行里程经上方 onMoved
+            //   Connections 路由（ridingCart 门控 → onMinecartMoved 径向判定 + 里程统计 display-only）。
+            //   重复骑乘每次重记起点（每段骑行各自起算，机制等价 MC「entered the minecart」口径）。
+            progress.onMinecartRideStarted(player.position.x, player.position.z)
+        }
         else { dismountHintVisible = true; dismountHintTimer.stop() }
-        // t1046：「轨道骑士」改乘矿车累计 1km 达阈（parity 台账低-6 = MC On A Rail 口径）——旧
-        //   「骑上即解锁」onRodeMinecart 边沿埋点退役；里程经下方 onMoved Connections 路由
-        //   （ridingCart 门控 → progress.onMinecartMoved）。
     }
     // t530 下船提示 ~5s 自动消失（机制等价 MC 1.0 骑船提示短暂出现；现常驻改为限时）：首次上船显提示 +
     //   dismountHintTimer 5s 后把 dismountHintVisible 置 false → 提示自动隐（玩家已知晓按键）。重新上船（ridingBoat

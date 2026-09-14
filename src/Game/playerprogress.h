@@ -2,6 +2,7 @@
 #define PLAYERPROGRESS_H
 
 #include <QObject>
+#include <QPointF>
 #include <QtQml/qqml.h>
 #include <QVariantList>
 
@@ -35,8 +36,10 @@
 //   - onEnchanted() / onEnchantedBookObtained()：EnchantingTableUI.doEnchant 成功末尾（「附魔师」/「书虫」）。
 //   - onAnvilUsed()：AnvilUI.takeProduct 成功末尾（「铁匠」）。
     //   - t1020 新埋点（成就树四分支扩展）：onStructureEntered(int kind)（player.structureEntered 边沿信号，
-    //     地牢/矿井/沙漠神殿/丛林神殿四探索成就）/ onMinecartMoved(float)（t1046 改造：player.moved 经
-    //     Main.qml ridingCart 门控路由，「轨道骑士」乘矿车累计 1km 达阈）/ onFishCaught()（player.fishCaught
+    //     地牢/矿井/沙漠神殿/丛林神殿四探索成就）/ t1048 勘误后的矿车径向埋点（player.moved 经 Main.qml
+    //     ridingCart 门控路由：onMinecartRideStarted 骑上沿记起点 + onMinecartMoved 骑行中每帧携位置采样，
+    //     「轨道骑士」= 距乘车起点单方向 ≥500 格径向位移达阈——MC On A Rail 真口径，review0913-A P2-1；
+    //     t1046 旧「累计 1km」口径两轴皆偏退役）/ onFishCaught()（player.fishCaught
     //     通知信号，「愿者上钩」）/ onChestCartOpened()（openChest 的 isCartCell 分支，「移动金库」）；
     //     另 onMobKilled / onItemPicked 扩展首杀四生物 / 首煤铁红石判定。
 //
@@ -78,7 +81,8 @@ class PlayerProgress : public QObject
     // t619 新统计：箭命中生物次数（arrowHitMob 累计）+ 收获成熟作物次数（cropHarvested 累计）。
     Q_PROPERTY(int arrowsHitMobs READ arrowsHitMobs NOTIFY progressChanged)
     Q_PROPERTY(int cropsHarvested READ cropsHarvested NOTIFY progressChanged)
-    // t1046 新统计：乘矿车累计里程（格；onMinecartMoved 累积，「轨道骑士」1km 达阈源）。
+    // t1046 新统计：乘矿车累计里程（格；onMinecartMoved 累积，display-only 呈现——t1048 起「轨道骑士」
+    //   判定改径向位移口径，不再读本统计）。
     Q_PROPERTY(qreal minecartTravelBlocks READ minecartTravelBlocks NOTIFY progressChanged)
     // 内容版本号（任一统计 / 成就写入自增）。QML 列表 delegate 触碰它取最新 achievements() / statsList()
     //   （同 ChestStore revision / Hotbar slotRevision 模式，moc 安全契约）。
@@ -151,11 +155,21 @@ public:
     //   神殿；本层不持 World —— Game/ViewModel 零向上依赖，数值契约同 BlockRegistry 直引模式注释绑定）。
     //   player.structureEntered 一次性边沿信号 → Main.qml 路由。解锁对应探索成就（unlock 幂等）。
     Q_INVOKABLE void onStructureEntered(int kind);
-    // t1046 乘矿车里程埋点（parity 台账低-6，机制等价 MC 1.0「On A Rail」乘矿车累计 1km）：骑矿车期间
-    //   每帧位移增量（player.moved 经 Main.qml ridingCart 门控路由；替代 t1020 旧「骑上即解锁」的
-    //   onRodeMinecart 边沿埋点）。delta 并入节流累积器（~0.5s flush 同 onMove 模式），累计达
-    //   kMinecartRideKm（1000 格 = MC 口径 1km）解锁「轨道骑士」。负 delta 防御忽略。
-    Q_INVOKABLE void onMinecartMoved(float deltaBlocks);
+    // t1048 乘矿车径向位移埋点（R19.23 批次 review A P2-1 勘误；机制等价 MC 1.0「On A Rail」真口径 =
+    //   乘矿车到达距**乘车起点**单方向 ≥500 米的一点，非累计里程制——t1046 旧口径两轴皆偏退役）：
+    //   Main.qml ridingCart 上升沿调 onMinecartRideStarted 记录起点，骑行期间每帧位移增量 + 当前水平
+    //   位置经本埋点采样。delta 仅并入节流累积器（~0.5s flush 同 onMove 模式，矿车里程统计 display-only）；
+    //   径向判定 = 起点→当前位置水平直线距离 ≥ kMinecartRideGoal 即解锁「轨道骑士」（平方比较免开方，
+    //   500²=250000 二进制浮点恰精确 → 恰阈缝无 FP 噪声；登记「单方向 = 径向距离」口径选型）。回折 /
+    //   绕圈的累计里程不缩径向判定（与累计制的分野，探针 t1046e 钉死）；unlock 幂等（越阈续乘 / 回折的
+    //   重复判定早退不重发 toast）。负 delta（倒车）对统计防御忽略、径向采样照走。起点未记录（未骑上
+    //   先喂点）→ 只累积不判定（防对 (0,0) 起算伪解锁）。
+    Q_INVOKABLE void onMinecartMoved(float deltaBlocks, qreal x, qreal z);
+    // t1048 骑乘起点记录（Main.qml onRidingCartChanged false→true 边沿调，携当帧玩家水平坐标 = 乘车点；
+    //   ridingCart 边沿滞后 ≤1 tick 车移，500 格口径下可忽略，登记）：记 origin + 开判定窗；重复骑乘每次
+    //   重记起点（每段骑行各自起算）。下沿不关窗——onMinecartMoved 只在 ridingCart 门控下被喂，语义
+    //   无差（登记）；loadVariant 清窗（跨世界换档残留清零，径向状态不入档）。
+    Q_INVOKABLE void onMinecartRideStarted(qreal x, qreal z);
     // 钓竿收竿获物（player.fishCaught 通知信号 → Main.qml 路由；获物实体已由 Game 层直调生成）。
     //   解锁「愿者上钩」。
     Q_INVOKABLE void onFishCaught();
@@ -233,7 +247,11 @@ private:
     int m_itemsPicked = 0;          // 拾取物品次数
     int m_arrowsHitMobs = 0;        // t619 箭命中生物次数（onArrowHitMob 累计）
     int m_cropsHarvested = 0;       // t619 收获成熟作物次数（onCropHarvested 累计）
-    qreal m_minecartTravelBlocks = 0.0; // t1046 乘矿车累计里程（格；onMinecartMoved 达 kMinecartRideKm 解锁轨道骑士）
+    qreal m_minecartTravelBlocks = 0.0; // t1046 乘矿车累计里程（格；onMinecartMoved 累积，display-only 统计——t1048 起成就判定不读它）
+    // t1048 乘矿车径向判定状态：乘车起点（水平坐标，onMinecartRideStarted 记录）+ 判定窗开关（防
+    //   未记起点先喂点 → 对 (0,0) 起算伪解锁）。窗随下次骑乘重开；下沿不关（无喂点，语义无差，登记）。
+    QPointF m_minecartRideOrigin{0.0, 0.0};
+    bool m_minecartRideActive = false;
 
     // onMove / onPlayTimeTick 节流累积器（免每帧 emit progressChanged 抖 QML 绑定）。
     float m_distanceAccum = 0.0f;   // 距离累积（格；onPlayTimeTick 达 kFlushInterval 时一并并入 distanceTraveled）
@@ -250,9 +268,10 @@ private:
     // t619 计数型成就阈值：箭命中生物次数（神射手）/ 收获成熟作物次数（农夫）。
     static constexpr int kSniperHits = 10;
     static constexpr int kFarmerHarvests = 10;
-    // t1046「轨道骑士」里程阈值：乘矿车累计 1000 格（机制等价 MC 1.0 On A Rail 乘矿车行驶 1km，
-    //   parity 台账低-6；1 格 = 1 米的 MC 距离口径）。
-    static constexpr qreal kMinecartRideKm = 1000.0;
+    // t1048「轨道骑士」单方向径向位移阈值：距乘车起点 ≥500 格（机制等价 MC 1.0 On A Rail =「乘矿车到达
+    //   距起点单方向 500 米的一点」，wiki 引证 review0913-A P2-1；t1046 旧「累计 1km」口径勘误退役；
+    //   1 格 = 1 米的 MC 距离口径；500²=250000 平方比较免开方且恰可精确表示）。
+    static constexpr qreal kMinecartRideGoal = 500.0;
 };
 
 #endif // PLAYERPROGRESS_H

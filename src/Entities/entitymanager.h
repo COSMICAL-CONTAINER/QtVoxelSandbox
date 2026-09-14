@@ -2743,7 +2743,7 @@ private:
     // t1044 蜘蛛爬墙速（blocks/s；MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2）。
     //   名义值按 MC 量级登记（「≈平地速度或稍慢」裁决口径：取 kChaseSpeed 的 ~0.86× = 2.4）。承载方式 =
     //   aiHostile 追击被墙挡死时 AI tick 脉冲置 vy（aiSpiderWallClimb），tick 重力 kGravity 每帧衰减 →
-    //   kAiTickInterval=4 帧窗内 vy 恒正（2.4 − 28·4/60 ≈ 0.61 > 0，不触发落地扫描 vy<0 回弹分支），
+    //   kAiTickInterval=4 帧窗内 vy 恒正（2.4 − 28·4/60 ≈ 0.53 > 0，不触发落地扫描 vy<0 回弹分支），
     //   净爬升 ≈1.2 b/s（登记取舍：无每帧攀爬通道，以 AI tick 脉冲承载，量级在 MC 蜘蛛爬行带内）。
     //   仅 aiHostile 追击链消费（Spider 家族门，含 t1012③ MobCaveSpider——MC cave spider 同样爬墙）；
     //   aiWander 游荡不入口（MC 蜘蛛随机游走不爬墙，登记口径）。

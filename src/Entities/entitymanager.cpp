@@ -3818,8 +3818,8 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
 //   aiSpiderWallClimb 注释）。AI tick 级脉冲（aiHostile 三条追击分支水平位移双轴皆撤回时调）：
 //   被阻轴贴面前探列（halfW+0.25，越过 AABB 前沿一个 AI 步长）脚位层或身体层有可碰撞方块
 //   （isCollidable 与撤回判定同源）→ vy = kSpiderClimbSpeed + resting 解除 → tick 重力分支积分上升。
-//   vy 正值窗（≥kAiTickInterval 帧内 0.61 残速）不触发落地扫描的 vy<0 snap 回弹 → 攀爬单调。
-//   天花板由 review25 #4 上浮钳制承接。
+//   vy 正值窗（≥kAiTickInterval 帧内 ≈0.53 残速，2.4−28·4/60 勘误 review0913-A P3-1）不触发落地扫描
+//   的 vy<0 snap 回弹 → 攀爬单调。天花板由 review25 #4 上浮钳制承接。
 //   能力门（阴性轮敏感靶）：仅 MobSpider / MobCaveSpider（t1012③ 同族；MC cave spider 同样爬墙）。
 bool EntityManager::aiSpiderWallClimb(Entity &e, World *world, bool blockedX, float nx, bool blockedZ, float nz)
 {

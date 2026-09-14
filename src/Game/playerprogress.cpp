@@ -24,7 +24,8 @@
 //   跟随末影之眼，本工程无该物品 → 按进入结构落地：PlayerController tick 内 insideStronghold 边沿 →
 //   enteredStronghold 信号 → Main.qml 路由）各自独立根；t1020 追加七条独立根：探索四结构（「地牢探秘」
 //   「废矿来客」「沙漠寻踪」「丛林秘境」——World::inside* 区域沿信号，判定权威 = rebuildStructureRegions
-//   重推导足迹）+ 生活三条（「轨道骑士」t1046 起乘矿车累计 1km / 「愿者上钩」钓鱼首获 / 「移动金库」箱车取物）。
+//   重推导足迹）+ 生活三条（「轨道骑士」t1048 勘误口径：乘矿车到达距乘车起点单方向 ≥500 米——MC On A
+//   Rail 真口径，review0913-A P2-1 / 「愿者上钩」钓鱼首获 / 「移动金库」箱车取物）。
 //   t1020 亦扩两条既有埋点判定：onMobKilled 首杀四生物（蜘蛛/骸骨/潜行者/银鱼，挂「怪物猎人」下）/
 //   onItemPicked 首煤·首铁·首红石（矿脉首矿，挂挖矿线下）。
 //   父成就未解锁时子成就不解锁（unlock 前置检查）。iconId = 节点图标（QML 树节点显示）。
@@ -107,9 +108,10 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
         { "entered_jungle_temple", nullptr,  "丛林秘境",   "发现了丛林深处的神殿（原创）",
           int(BlockRegistry::Lever) },
         // 生活支（载具 / 渔获 / 箱车，各独立根）：
-        //   t1046「轨道骑士」改 MC 1.0 On A Rail 口径：乘矿车**累计行驶 1km** 解锁（kMinecartRideKm，
-        //   parity 台账低-6；旧「骑上即解锁」退役）。「移动金库」为工程发明项 → 尾「（原创）」标注。
-        { "ride_minecart",  nullptr,          "轨道骑士",   "乘矿车沿铁轨累计行驶 1 千米",
+        //   t1048「轨道骑士」勘误为 MC 1.0 On A Rail 真口径：乘矿车到达距**乘车起点**单方向 ≥500 米的
+        //   一点（review0913-A P2-1 wiki 引证；t1046 旧「累计 1km」口径两轴皆偏退役）。「移动金库」为
+        //   工程发明项 → 尾「（原创）」标注。
+        { "ride_minecart",  nullptr,          "轨道骑士",   "乘矿车到达距乘车点 500 米外的位置",
           int(RecipeRegistry::MinecartId) },
         { "first_catch",    nullptr,          "愿者上钩",   "用钓竿钓起一件获物",
           int(RecipeRegistry::RawFishId) },
@@ -336,15 +338,27 @@ void PlayerProgress::onStructureEntered(int kind)
     }
 }
 
-// t1046 乘矿车里程埋点（头注释见 .h；parity 台账低-6 = MC 1.0 On A Rail 口径）：delta 并入节流累积器；
-//   达阈判定读「已并入 + 累积」全量（kMinecartRideKm）——达阈即解锁，无需等 flush（flush 只影响
-//   统计呈现，不影响解锁时点）；unlock 幂等（越阈续乘的重复判定早退，不重发 toast）。
-void PlayerProgress::onMinecartMoved(float deltaBlocks)
+// t1048 乘矿车径向位移埋点（头注释见 .h；R19.23 批次 review A P2-1 勘误 = MC 1.0 On A Rail 真口径）：
+//   delta 只喂节流累积器（矿车里程统计 display-only，负 / 零增量防御忽略，t1046 语义保留）；径向判定
+//   每帧绝对位置采样：起点→当前位置水平距离平方 ≥ kMinecartRideGoal² 即解锁——平方比较免开方且恰阈
+//   缝精确，回折 / 绕圈累计不缩径向（与累计制的分野，探针 t1046e 钉死）。unlock 幂等（越阈续乘 /
+//   回折的重复判定早退，不重发 toast）；起点未记录 → 只累积不判定。
+void PlayerProgress::onMinecartMoved(float deltaBlocks, qreal x, qreal z)
 {
-    if (deltaBlocks <= 0.0f) return; // 负 / 零增量防御忽略
-    m_minecartAccum += deltaBlocks;
-    if (m_minecartTravelBlocks + qreal(m_minecartAccum) >= kMinecartRideKm)
+    if (deltaBlocks > 0.0f)
+        m_minecartAccum += deltaBlocks; // 里程统计只计正向增量（负 / 零防御忽略）
+    if (!m_minecartRideActive) return;  // 起点未记录（未骑上先喂点防御）→ 不判径向
+    const qreal dx = x - m_minecartRideOrigin.x();
+    const qreal dz = z - m_minecartRideOrigin.y();
+    if (dx * dx + dz * dz >= kMinecartRideGoal * kMinecartRideGoal)
         unlock("ride_minecart");
+}
+
+// t1048 骑乘起点记录（Main.qml ridingCart 上升沿调；口径与登记见 .h 头注释）。
+void PlayerProgress::onMinecartRideStarted(qreal x, qreal z)
+{
+    m_minecartRideOrigin = QPointF(x, z);
+    m_minecartRideActive = true;
 }
 
 // 钓竿收竿获物 → 「愿者上钩」（幂等 unlock；获物实体由 Game 层直调生成，本埋点仅成就口径）。
@@ -513,6 +527,8 @@ void PlayerProgress::loadVariant(const QVariantMap &data)
     m_distanceTraveled = 0.0; m_mobsKilled = 0; m_deaths = 0; m_craftsCount = 0; m_itemsPicked = 0;
     m_arrowsHitMobs = 0; m_cropsHarvested = 0; m_minecartTravelBlocks = 0.0;
     m_distanceAccum = 0.0f; m_minecartAccum = 0.0f; m_playTimeFlushTimer = 0.0f; m_unlocked.clear();
+    // t1048 径向判定窗一并清（跨世界换档残留清零；径向起点不入档，未达阈档续玩由下次骑乘重开窗补判）。
+    m_minecartRideOrigin = QPointF(0.0, 0.0); m_minecartRideActive = false;
 
     const QVariantMap stats = data.value("stats").toMap();
     if (!stats.isEmpty()) {
