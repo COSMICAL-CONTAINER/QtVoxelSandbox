@@ -3555,23 +3555,37 @@ void PlayerController::placeBlock()
     //   t1034 存量清偿再补门 / 活板门 / 床——潜行持方块 = 放置语义优先于开合 / 翻板 / 入睡，MC「潜行右键 =
     //   对方块面放置」旁路口径统一）。机关（拉杆 / 按钮）t1046 补旁路（parity 台账低-3，t1034 同式）：
     //   潜行持方块右键机关 = 对面放置而非扳动；浆果丛 / 末地门 / 传送门等其它 useBlock 仍**不绕过**
-    //   （非「容器 UI / 开合 / 入睡 / 调音 / 机关」语义，shift 不改变其交互）。空手 sneak+右键功能方块 →
-    //   下方 m_selectedBlock==Air 守卫拦（不放置不挥手），机制等价 MC 空手 shift 右键箱子无效应。
+    //   （非「容器 UI / 开合 / 入睡 / 调音 / 机关」语义，shift 不改变其交互）。
+    //   t1050（Review_2026-09-15 #2，用户「一切按 MC 原版」裁决）纠偏：旁路收窄为**手持可放置方块
+    //   才旁路**——sneakPlaceBlock = sneakPlace && m_selectedBlock != Air（selectedBlock 经 hotbar
+    //   对非方块物品槽已归 Air，见桶 / 锄 / 食物 / 骨头等分支注释，故该判据恰为「手持方块」）。
+    //   MC 口径：「按住使用键时，手持物品的使用优先于目标方块的交互」（minecraft.wiki/w/Sneaking
+    //   Effects 段原文 "Pressing use prioritizes using a held item over interacting with a targeted
+    //   block"；潜行对面放置 Java 1.4.6/12w49a 引入、沿用至今）——空手（/持非方块物品）sneak
+    //   右键无「手持物品可用」→ **照常交互**：拉杆扳动 / 按钮按下 / 门开合 / 活板门翻板 / 床入睡 /
+    //   工作台熔炉箱子等开 UI。51cc43c③ 起的 `!sneakPlace` 裸门使空手 sneak 右键落放置路径被
+    //   m_selectedBlock==Air 守卫拦成「无效应」（机关 1 族 + 门/活板门/床 3 族 + UI 族共 12 门同
+    //   疾，本修一并恢复）；旧注释「机制等价 MC 空手 shift 右键箱子无效应」系登记口径错误（MC
+    //   空手 shift 右键箱子=打开），随之改写。t1034/t1046「潜行持方块」语义腿逐位不变（判据为
+    //   合取，持方块时新旧门同值）。残余登记：箱子矿车裸键门（m_hasHit 块外，无 sneakPlaceBlock
+    //   作用域）维持登记，随下一波 parity 单收口。
     const bool sneakPlace = m_keys.value(Qt::Key_Shift);
+    // t1050：潜行放置旁路单一判据（手持方块才旁路；下方 12 门统一改读 sneakPlaceBlock）。
+    const bool sneakPlaceBlock = sneakPlace && m_selectedBlock != BlockRegistry::Air;
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
-    if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
+    if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
         emit craftingTableOpened();
         return;
     }
     // t87：右键熔炉 → 打开 FurnaceUI 冶炼界面（同工作台模式：优先于放置，无论手持何物右键熔炉即开）。
-    if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Furnace) {
+    if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Furnace) {
         emit furnaceOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t173/t179：右键箱子 → 打开 ChestUI 物品栏（同工作台 / 熔炉模式：优先于放置，无论手持何物右键箱子
     //   即开）。发 chestOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开 ChestUI（释放指针 +
     //   盖子开合动画）；ChestStore 据坐标寻址该箱子的 27 槽。机制等价 MC 右键箱子开物品栏。
-    if (!sneakPlace && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Chest) {
+    if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Chest) {
         emit chestOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -3579,7 +3593,7 @@ void PlayerController::placeBlock()
     //   何物右键附魔台即开）。发 enchantingTableOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开
     //   EnchantingTableUI（释放指针）；UI 据坐标查 World.countBookshelvesAround 算书架加成 → 提升可选
     //   附魔等级上限（机制等价 MC 1.0 附魔台书架 power）。空手亦可（开界面是「使用」语义，与手持何物无关）。
-    if (!sneakPlace && BlockRegistry::isEnchantingTable(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlaceBlock && BlockRegistry::isEnchantingTable(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit enchantingTableOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -3587,7 +3601,7 @@ void PlayerController::placeBlock()
     //   何物右键铁砧即开）。发 anvilOpened(x,y,z) 携命中格世界坐标 → 呈现层 Connections 打开 AnvilUI（释放
     //   指针）；UI 据坐标调 damageAnvil 推进铁砧损坏阶段。机制等价 MC 右键铁砧开铁砧界面。空手亦可（开界面
     //   是「使用」语义，与手持何物无关）。isAnvil 覆盖完好 / 微损 / 重损三阶段（任一皆可开 UI）。
-    if (!sneakPlace && BlockRegistry::isAnvil(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlaceBlock && BlockRegistry::isAnvil(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit anvilOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -3598,11 +3612,11 @@ void PlayerController::placeBlock()
     //   t609：投掷器（Dropper）同开本界面——机制等价 MC 1.0 投掷器 9 槽 UI；内容存复用 DispenserStore（按坐标
     //   键控，发射器 / 投掷器共用同一 store 不冲突）。isDropperUiBlock = 发射器 ∪ 投掷器（谓词在 QML 侧据
     //   blockId 判标题；C++ 侧同一信号、同一 UI 路径）。
-    if (!sneakPlace && BlockRegistry::isDispenser(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlaceBlock && BlockRegistry::isDispenser(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit dispenserOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
-    if (!sneakPlace && BlockRegistry::isDropper(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlaceBlock && BlockRegistry::isDropper(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit dispenserOpened(m_hitBx, m_hitBy, m_hitBz); // t609 投掷器共用发射器 UI / store（标题由 QML 按 id 判）
         return;
     }
@@ -3612,9 +3626,10 @@ void PlayerController::placeBlock()
     //   t1034（review0909 #2 存量登记项清偿）：补 !sneakPlace 门（对齐同函数工作台/熔炉/箱子/附魔台/铁砧/
     //   发射器/投掷器/音符盒分支模式）——潜行持方块右键床 = 旁路入睡链走下方放置路径（MC：潜行右键床=放置，
     //   不睡）。门加分支头而非 trySleepAt 内入睡窗口判定之后：潜行放置语义整链优先（夜门/雷暴门/怪物门一概
-    //   不触达），且 trySleepAt 直调面（QML/探针）语义不变；空手潜行右键 → 下方 m_selectedBlock==Air 守卫拦
-    //   （无动作，同 t1028 音符盒口径）。
-    if (!sneakPlace && BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    //   不触达），且 trySleepAt 直调面（QML/探针）语义不变。
+    //   t1050（Review0915 #2 纠偏）：门改读 sneakPlaceBlock（手持方块才旁路）——空手潜行右键床 → 本分支
+    //   照常触达入睡链（MC：空手 shift 右键床=尝试入睡；旧「无动作」口径系登记错误，已改写）。
+    if (!sneakPlaceBlock && BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         trySleepAt(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
@@ -3632,10 +3647,11 @@ void PlayerController::placeBlock()
         //   的语义），直接 fall-through——终审修 L3：fall-through 只跳过「门开合」这一个动作，手持方块右键
         //   铁门面仍会正常放置 + 挥臂（MC 同此：铁门只是不吃 use，不挡放置），空手右键铁门才真正无动作。
         // t1034（review0909 #2 存量登记项清偿）：补 !sneakPlace 门——潜行持方块右键木门 = 旁路开合走下方
-        //   放置路径（MC 潜行右键 = 对方块面放置旁路口径，同本函数机关件分支模式）；空手潜行右键 → 下方
-        //   m_selectedBlock==Air 守卫拦（无动作，同 t1028 音符盒口径）。铁门本就不吃右键（t722 徒手不开、
-        //   fall-through 放置），不受本门影响。
-        if (!sneakPlace && BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {
+        //   放置路径（MC 潜行右键 = 对方块面放置旁路口径，同本函数机关件分支模式）。铁门本就不吃右键（t722
+        //   徒手不开、fall-through 放置），不受本门影响。
+        //   t1050（Review0915 #2 纠偏）：门改读 sneakPlaceBlock（手持方块才旁路）——空手潜行右键木门 →
+        //   本分支照常两半同翻开合（MC：空手 shift 右键门=开合；旧「无动作」口径系登记错误，已改写）。
+        if (!sneakPlaceBlock && BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 flipped = quint8((st & ~4) | (((st & 4) == 0) ? 4 : 0)); // 翻 bit2（开合）
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, flipped);
@@ -3654,9 +3670,10 @@ void PlayerController::placeBlock()
             return;
         }
         // t1034（review0909 #2 存量登记项清偿）：补 !sneakPlace 门——潜行持方块右键活板门 = 旁路翻板走
-        //   下方放置路径（同门/床/机关件分支模式）；空手潜行右键 → 下方 m_selectedBlock==Air 守卫拦
-        //   （无动作，同 t1028 音符盒口径）。
-        if (!sneakPlace && hitId == BlockRegistry::WoodTrapdoor) {
+        //   下方放置路径（同门/床/机关件分支模式）。
+        //   t1050（Review0915 #2 纠偏）：门改读 sneakPlaceBlock（手持方块才旁路）——空手潜行右键活板门 →
+        //   本分支照常翻板（MC：空手 shift 右键活板门=翻板；旧「无动作」口径系登记错误，已改写）。
+        if (!sneakPlaceBlock && hitId == BlockRegistry::WoodTrapdoor) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const bool willOpen = (st & 1) == 0;
             quint8 ns = quint8(st ^ 1); // 翻 bit0（开合）
@@ -3673,15 +3690,16 @@ void PlayerController::placeBlock()
         }
         // t1028 右键音符盒 → 循环调音 + 播放新音（useBlock 语义，MC 同款：右键 = 调音并发声）。
         //   review0909 #2：补 !sneakPlace 门（对齐同函数工作台/熔炉/箱子/附魔台/铁砧/发射器/投掷器
-        //   各分支模式——潜行持方块右键 = 旁路 useBlock 走下方放置路径，放置语义不被调音吞；空手潜行
-        //   右键 → 下方 m_selectedBlock==Air 守卫拦，无动作。同 MC 潜行右键旁路口径）。门 / 床 /
-        //   活板门三分支的同款缺门原为存量（review0909 #2 登记簿），已于 t1034 补齐（见上方三分支）。
+        //   各分支模式——潜行持方块右键 = 旁路 useBlock 走下方放置路径，放置语义不被调音吞）。
+        //   门 / 床 / 活板门三分支的同款缺门原为存量（review0909 #2 登记簿），已于 t1034 补齐（见上方三分支）。
+        //   t1050（Review0915 #2 纠偏）：门改读 sneakPlaceBlock（手持方块才旁路）——空手潜行右键音符盒 →
+        //   本分支照常调音（MC：空手 shift 右键音符盒=调音；旧「无动作」口径系登记错误，已改写）。
         //   音高段 +1 回绕 (p+1)%25（25 档 0..24；noteBlockTunedState 单一权威，bit5 通电记忆位保留）。
         //   id 不变只 state 变 → World::setBlock 5 参数版走重网格化路径（发 worldChanged 不发
         //   broken/placed，同门/活板门口径）。发声走信号链（音频层只消费，PLAN §2 分层）：携新音高 +
         //   音色族（下方方块材质投影；悬空/越界下方=air → piano 兜底）+ 音名（播报文案单一权威）。
         //   MC 右键调音的音高提示=本工程系统播报「音高：C#4」（呈现层 appendChatMessage，t1024 文案先例）。
-        if (!sneakPlace && hitId == BlockRegistry::NoteBlock) {
+        if (!sneakPlaceBlock && hitId == BlockRegistry::NoteBlock) {
             const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
             const quint8 ns = BlockRegistry::noteBlockTunedState(st);
             m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
@@ -3764,7 +3782,10 @@ void PlayerController::placeBlock()
     //   isManualIgniter 覆盖 Lever / WoodButton / StoneButton 三类机关（单一权威谓词，避免三处硬编码 id 判定漂移）。
     //   t1046 潜行旁路门（parity 台账低-3，t1034 门 / 活板门 / 床同式）：!sneakPlace 才走机关激活——
     //   潜行持方块右键机关 = 对命中面邻格放置（fall-through 放置路径），不扳动（MC「潜行右键 = 对方块面
-    //   放置」口径）；非潜行右键激活照旧。空手潜行右键 → m_selectedBlock==Air 守卫拦，无效应。
+    //   放置」口径）；非潜行右键激活照旧。
+    //   t1050（Review0915 #2 纠偏，51cc43c③ 回归收口）：门改读 sneakPlaceBlock（手持方块才旁路）——空手
+    //   （/持非方块）潜行右键机关 → 本分支照常扳动 / 按下（MC：空手 shift 右键拉杆=扳动；51cc43c③ 的裸
+    //   `!sneakPlace` 门使空手 sneak 右键落放置路径被 Air 守卫拦成「无效应」，系与 MC 口径相悖的行为回归）。
     //   点燃 = 移除 TNT 方块（clearBlockSilent 点火专用静默清 + worldChanged 重建 mesh，不发 broken/placed → 免粒子 / 音
     //   spam；clearBlockSilent 绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒写）+ spawnPrimedTnt（默认 fuse ~5s）→ 引爆时链式引燃邻接 TNT。
     //   **t628 边沿触发语义**（对齐 t627 压力板边沿；用户「按钮触发一次自动恢复；拉杆拉开持续激活——扳上沿
@@ -3778,7 +3799,7 @@ void PlayerController::placeBlock()
     //   - t628 发射器 / 投掷器触发：激活沿上扫 **6 邻**（同 TNT 点火同圈）为 Dispenser/Dropper → fireDispenserAt
     //     一次（per-dispenser 冷却防抖；方向 = 机器 state 朝向，与机关方位无关——t608 单一方向源）。
     //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World state + 调 EntityManager.spawnPrimedTnt），向下依赖。
-    if (!sneakPlace && BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
+    if (!sneakPlaceBlock && BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         const quint8 hitId = m_world->blockAt(m_hitBx, m_hitBy, m_hitBz);
         const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
         const bool isButton = BlockRegistry::isWoodButton(hitId) || BlockRegistry::isStoneButton(hitId);
