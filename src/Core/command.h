@@ -34,25 +34,32 @@ enum class CommandKind : quint8
 };
 
 // ── Command：一条待执行意图（纯数据值类型：无 QObject / 无信号 / 无回调 / 平凡可拷贝）──
+// R20.09 增补（Review_2026-09-15 #3①）：blockState 字段——PlaceBlock 此前恒走 4 参 setBlock
+//（state 派生 0），带朝向/半砖/湿度态的方块经命令放置会**静默丢 state**；扩字段后执行方
+// 转五参权威（gamesession.h executeCommand → Facade::setBlockWithState），默认 0 向后兼容
+// 全部既有提交方（r2006a/r2007 腿零改动）。
 struct Command
 {
     CommandKind kind = CommandKind::BreakBlock;
     BlockPos pos{};       // 目标格（负坐标同等合法——floorDiv 路由语义是执行方的职责）
     quint8 blockId = 0;   // PlaceBlock：放置 id；BreakBlock 忽略（恒 0）
+    quint8 blockState = 0; // PlaceBlock：放置 state（朝向/半砖/湿度等；默认 0 = 旧口径）；BreakBlock 忽略
     quint32 actorId = 0;  // 来源者 EntityId（0 = 系统 / 服务器）
     quint32 sequence = 0; // 输入 / 客户端序号（提交侧单调递增；重放判定预留）
     int targetTick = 0;   // 目标固定 Tick（Tick::kClockTickMs 节拍；0 = 尽快执行）
 
-    // BreakBlock 表达工厂：验收锚的规范姿势（blockId 占 0，四个显式字段齐备）。
+    // BreakBlock 表达工厂：验收锚的规范姿势（blockId/blockState 占 0，显式字段齐备）。
     static Command breakBlock(const BlockPos &p, quint32 actor, quint32 seq, int tick)
     {
-        return Command{ CommandKind::BreakBlock, p, 0, actor, seq, tick };
+        return Command{ CommandKind::BreakBlock, p, 0, 0, actor, seq, tick };
     }
 
-    // PlaceBlock 同形工厂（显式字段次序对齐 breakBlock，调用点可对称替换）。
-    static Command placeBlock(const BlockPos &p, quint8 id, quint32 actor, quint32 seq, int tick)
+    // PlaceBlock 同形工厂（显式字段次序对齐 breakBlock，调用点可对称替换）；state 缺省 0
+    // = 向后兼容（五参调用点语义与四参 setBlock 旧口径逐位一致）。
+    static Command placeBlock(const BlockPos &p, quint8 id, quint32 actor, quint32 seq, int tick,
+                              quint8 state = 0)
     {
-        return Command{ CommandKind::PlaceBlock, p, id, actor, seq, tick };
+        return Command{ CommandKind::PlaceBlock, p, id, state, actor, seq, tick };
     }
 };
 

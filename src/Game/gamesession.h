@@ -25,10 +25,12 @@
 //    且命令携带显式 BlockPos（意图数据），与「射线算位」的输入前门不同构；玩家域语义
 //    （掉落 / 耐久 / 成就）属 PlayerController 域，留后续 intent 层任务收口（登记非目标）。
 // ④ WorldDelta 构造点：World::blockBroken(x,y,z,oldId) / blockPlaced(x,y,z,id) 是仅有的
-//    带坐标编辑事件 → 本类在事件回调里累积受影响 ChunkKey（ChunkKey::fromWorld +
-//    Chunk::kSize，幂等去重）+ 改动量 → 每 Tick 一个 WorldDelta。**已知边界（登记）**：
-//    流体蔓延等静默写只发无参 worldChanged、不带坐标 → 不入本 delta；per-tick 编辑面收口
-//    是 R20.09 EditBuffer 的正席，本类只表达「命令驱动 + 语义事件可见」的改动面。
+//    带坐标编辑事件 → 本类在事件回调里经 R20.09 EditBuffer 登记（同格同 Tick 重复写合并
+//    ——后写胜，重复通知抑制），每 Tick 收口 takeDelta 出一个 WorldDelta + 按合并面派生
+//    BlockChanged 事件（Tick 末统一发布——不再逐写入队）。**R20.09 已落**：per-tick 编辑
+//    面收口正席由 src/Core/editbuffer.h 承担（本类是首个消费方）；流体等静默写只发无参
+//    worldChanged、不带坐标 → 不经本面（静默写族全量接线仍登记 R20.10+——EditBuffer 类型
+//    已正席，调用点迁移是后续单）。
 // ⑤ 与 WorldClock 的关系（盘点后定，登记）：WorldClock 仍是 QML 路径的墙钟单一权威
 //   （QTimer 100ms → ticked(0.1)）；本类**不接管、不绑定**它（QML 面零变化的承重面）。
 //    固定 Tick 基准同源 Tick::kClockTickMs（mathtypes.h 单一权威）；stepTick 的 dt 口径与
@@ -49,6 +51,7 @@
 
 #include "chunk.h"     // Chunk::kSize（chunk 路由参数——单一权威，不写魔法 16）
 #include "command.h"   // Command / CommandQueue（R20.06 队列——GameSession 首个生产消费方）
+#include "editbuffer.h" // R20.09 EditBuffer / DirtyChunkSet（Tick 内编辑合并收口——本类首个消费方）
 #include "event.h"     // Event / WorldDelta / EventQueue（编辑面表达）
 #include "mathtypes.h" // Tick::kClockTickMs / BlockPos / ChunkKey
 #include "result.h"    // Result<void>（满载拒绝失败面穿透）
@@ -94,9 +97,15 @@ public:
     // 最近一个整 tick 的编辑面（tickCompleted 同帧快照；无编辑 tick = 空 delta）。
     const WorldDelta &lastDelta() const { return m_lastDelta; }
 
-    // 事件观察面（BlockChanged 每 edit 一条；EventQueue 满载丢弃必须可见 → 计数器暴露）。
+    // 最近一个整 tick 的脏 chunk 集（R20.09 验收④的会话面示范：渲染调度按**集合**一次
+    // 查询——每 Tick 一次、不再直绑每一次 setBlock；全量接线 ChunkGeometry/QML 归 R20.10+）。
+    const DirtyChunkSet &lastDirtyChunks() const { return m_edits.dirtyChunks(); }
+
+    // 事件观察面（BlockChanged 每合并编辑格一条、Tick 末统一入队；EventQueue 满载丢弃
+    // 必须可见 → 计数器暴露）。EditBuffer 记录面满载丢弃同门可见（droppedEditCount）。
     EventQueue &events() { return m_events; }
     int droppedEventCount() const { return m_droppedEvents; }
+    int droppedEditCount() const { return m_droppedEdits; }
 
 signals:
     // 每整 tick 收口发（tick = 已完成 tick 号；delta = 本 tick 编辑面快照）。
@@ -105,37 +114,44 @@ signals:
 private:
     // 一个整 tick：tick 号推进 → 到期命令 drain（FIFO 保序；未到期原序回队——回队 push
     // 恒成功：刚腾出的空位 ≥ 回队数）→ World 模拟家族（Main.qml 桥接次序逐行镜像）→
-    // delta 收口 + 信号。
+    // EditBuffer 收口（takeDelta + 按合并编辑面派生 BlockChanged 事件）+ 信号。
     void runOneTick();
-    // 命令执行（**委托不复制**）：BreakBlock → setBlock(pos, Air)、PlaceBlock → setBlock(pos,
-    // blockId)——经 WorldFacade 收窄面落 World::setBlock「写栅格的唯一入口」权威（R20.08 迁移：
-    // 命令写走 Facade；权威仍是 World::setBlock，全套写后钩子 / 语义事件照走）。
-    // 越界 / 无变化由 World 权威语义静默拒绝（同玩家前门路径的行为面）。
+    // 命令执行（**委托不复制**）：BreakBlock → setBlock(pos, Air)、PlaceBlock →
+    // setBlockWithState(pos, blockId, blockState)——经 WorldFacade 收窄面落 World::setBlock
+    //「写栅格的唯一入口」权威（R20.08 迁移：命令写走 Facade；R20.09 落 Review_2026-09-15
+    // #3①：PlaceBlock 带 state 五参权威落地——带朝向/半砖态方块不再静默丢 state，默认 0
+    // 向后兼容）。越界 / 无变化由 World 权威语义静默拒绝（同玩家前门路径的行为面）。
     void executeCommand(const Command &c);
-    // 编辑登记（blockBroken/blockPlaced 回调）：受影响 chunk 幂等入集 + 改动量 + BlockChanged
-    // 事件入队。事件 blockId = 改动后 id（信号后回读栅格——破带旧 id、改后 id 以权威为准）。
+    // 编辑登记（blockBroken/blockPlaced 回调 → R20.09 EditBuffer 委托）：改动后 id 回读 +
+    // record（同格合并 / 新格首记 / 满载丢弃可见）。**Tick 内零通知**——BlockChanged 事件
+    // 由 runOneTick 收口按合并编辑面统一派生（每格一条、id=终态——验收①「不产生不必要的
+    // 重复通知」的会话面承担点）。
     void noteEdit(int x, int y, int z);
 
     World &m_world;
     // R20.08 WorldFacade（示范迁移：新代码经收窄面读写世界）：查询/写入走 m_facade（命令写
-    //   setBlock + 编辑后回读 blockAt），tick 模拟泵家族仍直调 m_world（模拟泵非查询/写面，
-    //   Facade 不收拢——选型登记于 docs R20.08 关单；r2008d 阴性钉守「命令零旁路」）。
+    //   setBlock/setBlockWithState + 编辑后回读 blockAt），tick 模拟泵家族仍直调 m_world（模
+    //   拟泵非查询/写面，Facade 不收拢——选型登记于 docs R20.08 关单；r2008d 阴性钉守「命
+    //   令零旁路」）。
     WorldFacade m_facade;
     CommandQueue m_commands;
     EventQueue m_events;
+    EditBuffer m_edits; // R20.09：Tick 内编辑合并收口（chunk 路由模长取 Chunk::kSize 单一权威）
     WorldDelta m_lastDelta;
     int m_tick = 0;
     int m_accumMs = 0;    // 整数毫秒累积器（余量跨 stepTick 保留；暂停丢弃——见头注）
     bool m_paused = false;
     int m_droppedEvents = 0;
+    int m_droppedEdits = 0; // EditBuffer 记录面满载丢弃累计（kMaxEdits 上界——不可再生必须可见）
 };
 
 inline GameSession::GameSession(World &world, QObject *parent)
     : QObject(parent)
     , m_world(world)
     , m_facade(world)
+    , m_edits(Chunk::kSize) // R20.09：chunk 路由模长单一权威（Core 叶子不自持该常量）
 {
-    // 编辑语义事件 → WorldDelta 构造点（带坐标的仅此两路，见头注③④）。直接连接同步登记
+    // 编辑语义事件 → EditBuffer 登记点（带坐标的仅此两路，见头注③④）。直接连接同步登记
     //（World setBlock 栈内执行——与 tick 收口同线程同序，无队列延迟）。
     QObject::connect(&m_world, &World::blockBroken, this, [this](int x, int y, int z, int) {
         noteEdit(x, y, z);
@@ -162,8 +178,7 @@ inline int GameSession::stepTick(qreal deltaSecs)
 inline void GameSession::runOneTick()
 {
     ++m_tick; // tick 号先推进：targetTick ≤ 新号即「到期」（0 = 尽快，首个整 tick 即执行）
-    m_lastDelta.clear();
-    m_lastDelta.tick = m_tick;
+    m_edits.clear(); // R20.09：Tick 内编辑面从零累积（溢出累计跨 tick 保留——不可再生可见）
 
     // 到期命令 drain（FIFO 保序；未到期暂存原序回队——回队数 ≤ 刚弹出数，push 恒成功）。
     QVector<Command> deferred;
@@ -193,6 +208,20 @@ inline void GameSession::runOneTick()
     m_world.tickLeafDecay();
     m_world.tickWeather(Tick::kClockTickSecs); // 秒制口径 = WorldClock::ticked 携带值（0.1）
 
+    // R20.09 收口：Tick 末发布一次 WorldDelta（takeDelta——合并面投影）+ 按合并编辑面派生
+    // BlockChanged 事件（每格一条、id = 终态；逐写入队已成历史——重复通知由 EditBuffer 合并
+    // 抑制）。事件满载丢弃可见（同旧逐条口径，计数器不变）。
+    m_lastDelta = m_edits.takeDelta(m_tick);
+    for (const BlockEdit &ed : m_edits.edits()) {
+        Event e;
+        e.kind = EventKind::BlockChanged;
+        e.pos = ed.pos;
+        e.blockId = ed.id;
+        e.tick = m_tick;
+        if (!m_events.push(e).isOk())
+            ++m_droppedEvents;
+    }
+
     emit tickCompleted(m_tick, m_lastDelta);
 }
 
@@ -203,22 +232,21 @@ inline void GameSession::executeCommand(const Command &c)
         m_facade.setBlock(c.pos, quint8(BlockRegistry::Air));
         break;
     case CommandKind::PlaceBlock:
-        m_facade.setBlock(c.pos, c.blockId);
+        // R20.09（Review_2026-09-15 #3①）：id+state 五参权威落地——带朝向/半砖态方块经
+        // 命令放置不再被 4 参版静默重置 state=0（blockState 默认 0 向后兼容旧提交方）。
+        m_facade.setBlockWithState(c.pos, c.blockId, c.blockState);
         break;
     }
 }
 
 inline void GameSession::noteEdit(int x, int y, int z)
 {
-    m_lastDelta.addAffected(ChunkKey::fromWorld(x, z, Chunk::kSize)); // 幂等去重（重复不占位）
-    ++m_lastDelta.changedBlocks;
-    Event e;
-    e.kind = EventKind::BlockChanged;
-    e.pos = BlockPos{ x, y, z };
-    e.blockId = m_facade.blockAt(x, y, z); // 改动后 id（破 = Air；Ice→水类特写按权威栅格为准）
-    e.tick = m_tick;
-    if (!m_events.push(e).isOk())
-        ++m_droppedEvents; // 事件不可再生——满载丢弃必须可见（对比快照域的覆盖语义）
+    // R20.09：改动后 id 经 Facade 回读（信号后栅格已是权威终态——破 = Air；Ice→水类特写
+    // 同口径），登记委托 EditBuffer（同格合并后写胜 / 新格首记 / 满载丢弃可见）。
+    // **Tick 内零通知**——事件由 runOneTick 收口统一派生（见上）。
+    const quint8 afterId = m_facade.blockAt(x, y, z);
+    if (m_edits.record(x, y, z, afterId) == RecordResult::Overflowed)
+        ++m_droppedEdits;
 }
 
 #endif // GAMESESSION_H
