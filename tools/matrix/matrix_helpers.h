@@ -284,4 +284,9 @@ private:
                                   //   fresh 小世界 48×48×96 s82（快照采集/逐位等价/计数穿透）；
                                   //   r2013d 零世界（纯源码钉 + 裸快照），rig 世界 w 零接触，
                                   //   接 section16）
+    void section18_entitystore(); // R20.14 EntityStore 探针（置尾先例沿用：r2014a-b store/
+                                  //   Adapter 直驱孪生等价 + 快照权威（裸 World 仅焚毁子面）；
+                                  //   r2014c Adapter 消费面回归（notify 沿计数 + feeder 面）；
+                                  //   r2014d 纯源码钉 + 编译期钉，rig 世界 w 零接触，
+                                  //   接 section17）
 };
