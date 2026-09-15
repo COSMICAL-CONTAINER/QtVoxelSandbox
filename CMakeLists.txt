@@ -915,6 +915,14 @@ add_executable(redstone_matrix_test
     #   自建 fresh 小世界 ×4——world/chunk 系源文件已列，无新增 .cpp）。
     tools/matrix/section12_worldfacade.cpp
     src/World/worldfacade.h
+    # R20.09 EditBuffer 探针段（置尾先例沿用：runAll 末执行，filter 词 r2009；4 腿
+    #   r2009a-d = 类型面可测 / 同格合并+终态 parity / 多 chunk 批量收口 / 源码钉+blockState。
+    #   随段直编 src/Core/editbuffer.h（header-only 值类型组件，非 QObject 无 AUTOMOC）+
+    #   src/Core/command.h（R20.09 落 Review #3① blockState 扩字段）；r2009a 纯类型腿零世界，
+    #   r2009b-d 自建 fresh 小世界 ×4——world/chunk 系源文件已列，无新增 .cpp）。
+    tools/matrix/section13_editbuffer.cpp
+    src/Core/editbuffer.h
+    src/Core/command.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

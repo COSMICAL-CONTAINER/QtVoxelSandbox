@@ -258,14 +258,18 @@ void MatrixRun::section11_gamesession()
         const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
                                      + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
         const QStringList missGs = pinSet(srcRoot + QStringLiteral("/Game/gamesession.h"), {
-            // R20.08 迁移：命令写经 WorldFacade 收窄面（m_facade.setBlock ×2）——终局权威仍是
-            //   World::setBlock（facade 纯转发，worldfacade.h 委托钉在 section12 r2008c）。
-            SrcPin("r2007 delegate both commands to World::setBlock authority via WorldFacade", "m_facade.setBlock(c.pos", 2),
+            // R20.08 迁移：命令写经 WorldFacade 收窄面——R20.09 起为 setBlock（破）+
+            //   setBlockWithState（放，Review #3① state 落地）双入口，共 2 处（前缀式计数；
+            //   setBlockWithState 单独钉在 section12 r2008c / section13 r2009d）。
+            SrcPin("r2007 delegate both commands to World::setBlock authority via WorldFacade", "m_facade.setBlock", 2),
             SrcPin("r2007 fixed tick base = Tick::kClockTickMs single authority", "Tick::kClockTickMs", 1),
             SrcPin("r2007 integral-ms accumulator crosses at kClockTickMs", "m_accumMs >= kClockTickMs", 1),
             SrcPin("r2007 due-drain via CommandQueue pop (delegate queue, no bypass)", "m_commands.pop(c)", 1),
             SrcPin("r2007 deferred commands replayed in order", "m_commands.push(d)", 1),
-            SrcPin("r2007 delta chunk routing ChunkKey::fromWorld x Chunk::kSize", "ChunkKey::fromWorld", 1),
+            // R20.09 迁移：delta chunk 路由形态（ChunkKey::fromWorld）移入 editbuffer.h
+            //   （r2009d 钉）；会话面保留路由模长单一权威（构造传 Chunk::kSize，Core 叶子
+            //   不自持该常量）——钉随事实迁移面走。
+            SrcPin("r2007 delta chunk routing modulus = Chunk::kSize single authority", "Chunk::kSize", 1),
             SrcPin("r2007 BlockChanged event per edit", "EventKind::BlockChanged", 1),
         });
         // 家族次序钉：13 个带前缀调用在源码文本中 indexOf 严格递增（注释不含 "m_world."

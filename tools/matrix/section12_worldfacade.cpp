@@ -337,10 +337,13 @@ void MatrixRun::section12_worldfacade()
         ok = ok && chunkNegOk;
         if (!chunkNegOk) diag += QStringLiteral("[chunk-flowback] ");
 
-        // ③ 命令零旁路钉（GameSession 经 Facade；r2007b 委托钉的收口面续行）：
+        // ③ 命令零旁路钉（GameSession 经 Facade；r2007b 委托钉的收口面续行）：R20.09 起写
+        //    面双入口——setBlock（破）+ setBlockWithState（放，Review #3① state 落地）；
+        //    前缀式计数钉双入口 ≥2，setBlockWithState 入口单独钉防退化回 4 参丢 state。
         const QString gsPath = srcRoot + QStringLiteral("/Game/gamesession.h");
         const QStringList missGs = pinSet(gsPath, {
-            SrcPin("r2008 command writes go through the facade", "m_facade.setBlock(", 2),
+            SrcPin("r2008 command writes go through the facade", "m_facade.setBlock", 2),
+            SrcPin("r2008 place write lands id+state via facade", "m_facade.setBlockWithState(", 1),
             SrcPin("r2008 edit after-read goes through the facade", "m_facade.blockAt(", 1),
         });
         for (const QString &m : missGs) {
