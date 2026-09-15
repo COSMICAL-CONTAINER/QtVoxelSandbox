@@ -80,6 +80,11 @@ qt_add_executable(voxelsandbox
     src/World/chunkmanager.h
     src/World/chunkgeometry.cpp
     src/World/chunkgeometry.h
+    # R20.13 MeshBuilder（网格算法单一权威，自 chunkgeometry.cpp 整体迁出）：CPU mesher 纯函数
+    #   （输入稠密快照 / 输出 owning ChunkMeshData，QObjectFree 值纪律；零 QQuick3D——QQuick3D 灌注
+    #   留在 chunkgeometry 适配面）。World 层同 mesher 子系统（partialblockgeometry/voxellight）同层。
+    src/World/meshbuilder.cpp
+    src/World/meshbuilder.h
     # t257 体素光照 / PCF 软影单点实现（mesher 与 BlockCube 掉落沙共用同一光场 + 软影公式）：
     #   header-only inline，属 World 层（只读 World 光场 / heightmap），Renderer（BlockCube）向下依赖合规。
     src/World/voxellight.h
@@ -949,6 +954,15 @@ add_executable(redstone_matrix_test
     tools/matrix/section16_backgroundgen.cpp
     src/World/backgroundgeneration.h
     src/World/terraingen.h
+    # R20.13 MeshBuilder 探针段（置尾先例沿用：runAll 末执行，filter 词 r2013；4 腿 r2013a-d =
+    #   端到端逐位等价承重墙[9 变体×2 chunk 顶点/索引字节比对 + 已知场景精确 Δ]/快照自持性/
+    #   FrameProfiler 计数穿透+消费面回归/结构钉+worldgen 锚。随段直编 src/World/meshbuilder.{h,cpp}
+    #   （网格算法单一权威，非 QObject 无 AUTOMOC；chunkgeometry.cpp 已在下方直编——委托面回归用）；
+    #   r2013a-c 自建 fresh 小世界 48×48×96 s82（section11+ 先例，rig 世界 w 零接触），r2013d 零世界
+    #   （纯源码钉 + 裸快照）。
+    tools/matrix/section17_meshbuilder.cpp
+    src/World/meshbuilder.cpp
+    src/World/meshbuilder.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

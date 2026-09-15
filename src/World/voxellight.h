@@ -72,10 +72,15 @@ inline float aoCornerFactor(bool occSide1, bool occSide2, bool occCorner)
 //   方块光时间不变），故影因子本身时间不变 —— 仅随 sunDir（量化跨步）变。
 //   退化：太阳低于门 kSunMin（含夜间 sunDir.y<=0）→ 0；太阳近天顶（水平分量≈0）→ 退化不投影；门附近按
 //   kSunFade 平滑淡入，防量化跨步时影突变。
-inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadowsEnabled,
-                       float wx, float wy, float wz)
+//
+//   R20.13 泛化缝（MeshBuilder 单一权威配套）：PCF 数学体收进 sunShadowColumnTop 模板——「列顶从哪来」
+//   参数化（ColumnTopOf(x,z) → float）。旧 World 路径（本文件 sunShadow，BlockCube 掉落沙等消费）与
+//   ChunkMeshSnapshot 路径（meshbuilder.cpp 快照域列顶）共用同一份门/淡入/步进/2×2 PCF 实现，**禁两份
+//   软影逻辑**（本头「单点定义」纪律的直接延伸）；World 版本仅多一个 null 门，其余逐行保留。
+template <typename ColumnTopOf>
+inline float sunShadowColumnTop(const QVector3D &sunDir, bool shadowsEnabled,
+                                ColumnTopOf &&columnTop, float wx, float wy, float wz)
 {
-    if (!world) return 0.0f;
     if (!shadowsEnabled) return 0.0f;
     if (sunDir.y() <= kSunMin) return 0.0f;                        // 太阳低于门 → 不投影（黎明/黄昏/夜间）
     const float sh = std::sqrt(sunDir.x() * sunDir.x() + sunDir.z() * sunDir.z());
@@ -101,7 +106,7 @@ inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadows
                 // t360 列顶实面世界 y（按方块真实模型高度：下半砖 0.5 / 合活版门 0.1875 / 整立方 1.0…），
                 //   取代旧「heightmap+1.0 整格」假设 —— 修下半砖 / 合活版门被当整格高投出整格黑影、邻地误暗。
                 //   top<0（空列 / 越界）永不遮挡。
-                const float top = world->columnTopSurfaceY(x0 + xi, z0 + zi);
+                const float top = columnTop(x0 + xi, z0 + zi);
                 if (top >= 0.0f && top > rayY) ++occluded;
                 ++total;
             }
@@ -109,6 +114,15 @@ inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadows
     }
     if (total == 0) return 0.0f;
     return (float(occluded) / float(total)) * elevFade;
+}
+
+inline float sunShadow(const World *world, const QVector3D &sunDir, bool shadowsEnabled,
+                       float wx, float wy, float wz)
+{
+    if (!world) return 0.0f;
+    return sunShadowColumnTop(sunDir, shadowsEnabled,
+                              [world](int x, int z) { return world->columnTopSurfaceY(x, z); },
+                              wx, wy, wz);
 }
 
 // t151/t257 单格光照 → 顶点色值（mesher 立方面与 BlockCube 掉落沙共用同一光照公式 → 渲染一致）。
