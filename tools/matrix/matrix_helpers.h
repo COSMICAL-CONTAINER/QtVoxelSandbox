@@ -289,4 +289,8 @@ private:
                                   //   r2014c Adapter 消费面回归（notify 沿计数 + feeder 面）；
                                   //   r2014d 纯源码钉 + 编译期钉，rig 世界 w 零接触，
                                   //   接 section17）
+    void section19_savecoordinator(); // R20.15 SaveCoordinator 探针（置尾先例沿用：r2015a-c
+                                      //   自建 fresh 小世界 + 临时 SQLite 库（QDir::temp()
+                                      //   pid 键名，测试自清理）；r2015d 纯源码钉 + 编译期钉，
+                                      //   rig 世界 w 零接触，接 section18）
 };
