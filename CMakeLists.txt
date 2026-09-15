@@ -930,6 +930,14 @@ add_executable(redstone_matrix_test
     #   已列，无新增 .cpp）。
     tools/matrix/section14_chunklifecycle.cpp
     src/World/chunklifecycle.h
+    # R20.11 GenerationJob 同步版 ChunkScheduler 探针段（置尾先例沿用：runAll 末执行，filter
+    #   词 r2011；4 腿 r2011a-d = 请求模型（ID/重复合并/优先级/满载）/ 取消+过期丢弃 / 失败面
+    #   Result 穿透+worker 可替换性 / 生命周期互锁+固定世界零变化+源码钉。随段直编
+    #   src/World/generationjob.h（header-only 请求编排层，非 QObject 无 AUTOMOC）；
+    #   r2011a-c 纯请求模型腿零世界，r2011d 裸 3×3 ChunkManager + fresh 小世界——world/chunk
+    #   系源文件已列，无新增 .cpp）。
+    tools/matrix/section15_generationjob.cpp
+    src/World/generationjob.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
