@@ -43,8 +43,11 @@
 //   侧。数据经 applyGeneratedChunkData（ChunkManager::setBlock 5 参守卫入口——越界拒 / 标脏 /
 //   边界邻接标脏，与 worldgen 直写 chunk 的静默约定一致）落格；生命周期边①（交接时）边②
 //   （收割时）由 scheduler pumpAsync 经 setLifecycle 驱动（与 R20.11 同款 best-effort，非法
-//   转移被守卫拒即忽略 = 固定世界零变化）。真实生产接线（Absent-only 策略层 / World 挂点）
-//   仍登记后续——本单 app 面零变化。
+//   转移被守卫拒即忽略 = 固定世界零变化）；失败恢复边⑨（Loading→Absent，R20.10b）同由
+//   scheduler 在失败 outcome **实际投递**时驱动（交接后才过期/取消的丢弃面不转移）。本
+//   worker 自身生成恒成功面（纯函数无失败路径），边⑨经异步协议对任意 isAsynchronous()
+//   worker 生效（矩阵 r2010bb 脚本化异步 worker 实证）。真实生产接线（Absent-only 策略层 /
+//   World 挂点）仍登记后续——本单 app 面零变化。
 //
 // ── 分层 / QML 面 ──────────────────────────────────────────────────────────────────
 //   World 层 header-only，非 QObject 无 AUTOMOC，无 Q_INVOKABLE/Q_PROPERTY（生命周期与调度
