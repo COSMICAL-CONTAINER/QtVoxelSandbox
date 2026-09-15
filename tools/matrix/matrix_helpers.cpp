@@ -121,6 +121,7 @@ void MatrixRun::runAll()
     section11_gamesession(); // R20.07 GameSession（置尾先例沿用：自建 fresh 小世界，rig 零接触）
     section12_worldfacade(); // R20.08 WorldFacade（置尾先例沿用：自建 fresh 小世界，rig 零接触）
     section13_editbuffer(); // R20.09 EditBuffer（置尾先例沿用：纯类型腿 + 自建 fresh 小世界，rig 零接触）
+    section14_chunklifecycle(); // R20.10 Chunk lifecycle（置尾先例沿用：纯图腿 + 自建 fresh 小世界，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
