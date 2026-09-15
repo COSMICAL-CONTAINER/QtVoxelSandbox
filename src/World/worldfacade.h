@@ -72,6 +72,10 @@ public:
     // 天气（全局态 + 群系解析局部降水；mob 灭火 / 作物 / 呈现层共用判据）。
     int weatherStateAt(int x, int z) const { return m_world->weatherStateAt(x, z); }
     bool isPrecipitatingAt(int x, int z) const { return m_world->isPrecipitatingAt(x, z); }
+    // 世界高（尺度元数据；R20.13 ChunkMeshSnapshot 采集面用——稠密域 y 容量定格）。
+    int height() const { return m_world->height(); }
+    // t360 列顶实面世界 y（PCF 软影采样源；R20.13 快照采集统一走收窄面——World 同名方法逐位转发）。
+    float columnTopSurfaceY(int x, int z) const { return m_world->columnTopSurfaceY(x, z); }
 
     // ── chunk 网格门查询（R20.08 示范迁移点专用：mesher 脏门 / 存在门——之前渲染侧经
     //    World::chunks().chunk(cx,cz) 直取 Chunk* 读 dirty()/fluidOnlyDirty()，现收拢为本面

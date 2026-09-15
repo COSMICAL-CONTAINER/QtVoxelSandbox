@@ -268,15 +268,12 @@ signals:
 
 private:
     void onWorldChanged();            // worldChanged 槽：仅 dirty chunk 才重建（编辑即时，同步于 setBlock）
-    void buildMesh(RebuildReason reason); // 局部 culled mesh + 写入 QQuick3DGeometry + 清脏（编辑路径）
-    int tileFor(quint8 block, int face, quint8 state) const;
-    // t406 耕地湿润等级 → +Y 顶面顶点色暗化系数（darker=wetter）。仅 Farmland +Y 顶面消费。
-    float farmlandHydrBrightMul(quint8 hydr) const;
-    // t153 PCF 软影（方案③：t151 顶点光基底 + heightmap 正交深度图）：给定世界空间顶点，沿 sunDir 水平
-    //   方向步进 kMaxShadow 格、2×2 PCF 采样路径列 heightmap，返回 [0,1] 软影因子（0=全亮、1=全影）。
-    //   mesher 据此把天光分量乘 (1-sh)，火把方光取 max 保留。只读 World::heightmapAt + 裸 sunDir（不依赖
-    //   Game 层 WorldClock，保持 Renderer→向下）。
-    float sunShadowAt(float wx, float wy, float wz) const;
+    // R20.13 MeshBuilder：网格算法单一权威已抽出（meshbuilder.{h,cpp}）——本方法收敛为
+    //   「采集稠密快照 → MeshBuilder::build（owning ChunkMeshData）→ 灌 QQuick3D 几何」。旧私有
+    //   网格件（tileFor / farmlandHydrBrightMul / sunShadowAt / blockAtWorld / stateAtWorld 与
+    //   buildMesh 体）自本类**搬移**（非复制）进 meshbuilder（快照访问器同名同语义承接数据来源
+    //   替换）；Q_PROPERTY/信号面零变化（验收④：旧 QtQuick3DAdapter 消费形态保持）。
+    void buildMesh(RebuildReason reason);
     // tXXX sun-step 粗量化门：判定本次 sunDir / dayMul 变化是否需要重烘顶点色（否则只更新值不重建）。
     //   重烘事件：影淡入/淡出带穿越（y 跨 kSunMin/kSunMax）| 仰角/方位角累计变超阈值 | dayMul 累计变超
     //   kDayMulThresh | 距上次重烘超硬顶。昼夜天光（dayMul）现烘进顶点色天空分量（PLAN §2-H），故 dayMul 累计
@@ -300,15 +297,8 @@ private:
     {
         return m_world && WorldFacade(*m_world).chunkFluidOnlyDirtyAt(cx, cz);
     }
-    // 世界坐标查询（跨 chunk 经 world.blockAt 路由 → 边界面剔除正确）
-    quint8 blockAtWorld(int wx, int wy, int wz) const {
-        return m_world ? m_world->blockAt(wx, wy, wz) : quint8(0);
-    }
-    // t133：世界坐标 state 查询（异形方块朝向/开合；经 world.stateAt 跨 chunk 路由）。
-    //   常规方块 / 越界 → 0。PartialBlockGeometry::append 据此选朝向变体。
-    quint8 stateAtWorld(int wx, int wy, int wz) const {
-        return m_world ? m_world->stateAt(wx, wy, wz) : quint8(0);
-    }
+    // R20.13：世界坐标查询帮手（blockAtWorld/stateAtWorld）随网格本体迁入 ChunkMeshSnapshot
+    //   快照访问器（同名同 OOB 语义）——本类消费世界面收敛为「存在/脏三门（Facade）+ 采集一次」。
 
     World *m_world = nullptr;
     int m_cx = -1; // -1 = 未赋值（chunkExists 门恒 false，待 QML 赋 cx/cz 后才建）
