@@ -4007,3 +4007,31 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **待实机确认**：无新增——失败恢复属无头可断言面（六态表 + scheduler 记账），产品观感零变化（app 冒烟稳态 60fps 实证）。
 
 **下一阶段候选提醒（本单不自行开工）**：**②流式激活设计段是审计 #9 定向的下一步**（refactor-plan 增补设计段 → 交用户 md 通道定夺——R20 弧线的目的地，产品可见性高）；其后按用户定向执行流式激活/SaveCoordinator 生产接线/parity 波（review0915 #4#6）。
+
+### t1053（2026-09-16，嵌格生物假跳+踩踏级联运行期修复：resting 复探嵌入顶起 + isJumpObstacle 嵌格态层豁免——review0915 #4，t1049 engine quirk 注销单）
+
+  → **✅✅ 落地（2026-09-16）：src/Entities/entitymanager.cpp 单文件四改动 + tools/matrix/section02_early_probes.cpp（t1053 新腿）；矩阵 597→598。**（fix + test + 本 docs 三段提交）
+
+**根因链（读码实证，补全 t1049 提交注）**：mob 站矮支撑顶（台阶 +0.5）→ 支撑被换高（slab→farmland 耕地真顶 +0.9375；玩法面 = 玩家在 mob 脚下放抬升支撑方块——t973 活埋门只拦「写入格与 mob 盒严格相交」的放置，**相切放行**的抬升类放置与一切非玩家 setBlock 链[rig/掉落沙/爆炸]仍可嵌格）→ mob 脚位陷进新支撑格内部 → **嵌入态常驻**：tick resting 复探的支撑扫描对「高于脚位的层」明确跳过（旧注释「由窒息 / 挤出兜底」——**mob 侧并无挤出机制**[extrudeEmbedded/launchUnburyUpward 均玩家侧私有]，嵌入不窒息[头在空气]即永久嵌格）→ aiHostile 越障探针（:4156 邻近，无攻击距离门）判墙：嵌格层**所有列**的真顶（0.9375）都 > 脚位（0.5）+1e-3，探针无论落自身列还是邻列恒判墙 → 假跳 + t670 滑流 → 落地贴新顶（落地扫描无脚位上限，与 resting 复探的下贴窗不同）fallDist = apex 脚位(0.5+1.19) − 新顶(0.9375) ≈ 0.75 → t1045 踩踏掷骰 P=0.25 → 耕地可能被踩成 Dirt（级联收口，与 t1049 实测 P(hit)~0.25 模型吻合）。
+
+**修法选型（review0915 #4 两候选读码后改形组合，头注释立此存照）**：候选 A 字面（isJumpObstacle 判定前滤 `feet 格 == 候选格`，即 XZ 自列豁免）经几何核验**不足以修住**——嵌格层走廊**邻列**同判墙，探针落邻列（mob 中心 +0.6 偏移常落邻列）时假跳照发；候选 B（放置链挤出）与 t973 活埋门语义纠缠（门拒 vs 门放行后救，两语义面打架）且 placeBlock 多写入收口（通用放置/双半砖合并×2/雪层堆叠）挂点散落、只覆盖玩家放置一域。落地为**组合两语义面各一权威**：①**C 嵌入顶起**（root cause）——tick resting 复探支撑扫描加 embedTop 记录（仅 `cy == feetCell` 中心列脚位格层，防「1 格高通道顶/桥面等头上的地」误顶）+ 顶起分支（`embedTop > 脚位 + kMobEmbedTol` 先于下贴判；mobAabbHitsSolid at 新位全高净空门[塞不进不抬，launchUnburyUpward t712 玩家先例同型]；fallPeakY 基准随顶起新位[顶起非腾空，否则旧低位基准给下次落地注入假落差]；resting 保持贴新顶）；顶起量天然有界 <1 格（embedTop ∈ 脚位格层内）；②**A' 嵌格态层豁免**（防御）——isJumpObstacle 加 ownX/ownZ 参数，`world->supportTopYAt(ownX, y, ownZ) > feetY + kMobEmbedTol` → 整层恒非墙：**AI 探跳段先于物理复探段执行**，末帧假跳必须由探针豁免挡（顶起来不及——放置帧后第一次 aiTick 即假跳，NEG1 实证）。两处消费同一 kMobEmbedTol=0.1（kEmbedTol 玩家挤出先例 t289/t355 同值，「显著嵌入」防 ULP/边界 FP）。10 个调用点（aiHostile/狼 t947③/golem×2/archer×4/aiWander/aiStalker）全传自身列，签名无默认值=编译器强制无遗漏。
+
+**MC 口径引证三元组**：minecraft.wiki/w/Entity（General behavior 节，2026-09-16 实读）：①"Most types of entities prevent blocks from being placed in the space they occupy"——t973 活埋拒门的 MC 依据（本修不破坏该门，放置链语义零变化）；②solid block 进入实体空间时实体 "is free to move out of the solid block but not back in"——**MC 口径 = 嵌入实体不被困死、可脱出不可回入**。本修取向上脱出（支撑就在脚下，向上 = 最小位移脱出向，与落地承接同源），即 C 顶起的语义锚；落沙顶起（MC 实体站上落沙顶）为同族行为常识面。①②合读：MC 不允许「mob 被支撑困死+自判墙假跳级联」的形态存在。
+
+**既有腿核对结论（修复不得语义漂移——实测零漂移）**：①t1045a/b 踩踏腿（P 公式/缝接线）——3P 全绿：踩踏公式与缝零触碰（本修只断「嵌格→假跳→fallDist」病灶链，正常落地的 P=clamp(fall−0.5,0,1) 与 setTrampleRollOverride 缝逐位不动）；②t1049 遣散腿（review26-1 腿内结构钉 `ents.removeEntityAt(zA)`）——review26-1 7P 全绿：测试 rig 的跨段泄漏修复是测试侧确定性面，与引擎侧嵌格修复正交（钉语句未动）；③t670 滑流——无独立腿名（历史如此，仅注释面提及），滑流触发面由 t947③ 越障跳腿 2P（主动探跳+翻墙）与 t1053(b) 对照柱（合规抬升照跳）双覆盖，jumpGX/GZ 写入沿（跳沿）零改动；④t947 系 2P + review26-1 矮支撑行走 7P（mob 站台阶/耕地正常行走脚位贴真顶不冻结不兔跳）——嵌格豁免判据 ownTop > feet+0.1 在正常站立（ownTop≈feet）不触发，review26 #1 豁免域零波及。
+
+**矩阵（597→598，section02 走廊模式同址，filter 词 t1053）**：**t1053a 嵌格消除断言**——石地板+下半砖走廊 rig + 僵尸落定站台阶顶（kRigY+0.5）→ slab→farmland 换地（玩法面 rig 等价）→ setTrampleRollOverride(0) 确定性缝（级联若复现 P=0.25>0 必踩必红）→ 断言三柱：脚位峰值 ≤ 新顶+0.02（无假跳弧，旧码 apex≈+1.19）/ finalFeet≈kRigY+0.9375（被顶起贴新顶，旧码嵌格常驻 0.5）/ 耕地全程 Farmland；**对照柱 (b)**——mob 站台阶顶（ownTop=feet 不入豁免）遇前方单列耕地抬升（+0.4375 合规越障墙）→ 照跳（起跳弧超台阶顶 0.3+）——豁免判据不误伤合规越障（该柱不断言耕地保持：合规跳落 fallDist≈0.75 在缝 0 下被踩是 t1045 正确行为，非级联病灶）。
+
+**验证链（全绿）**：分段增量构建（-j 4）→ binary mtime > 全部改动源 → filter **t1053 1P** 首跑绿 → 前置回归 **t1045 3P / t947 2P / review26-1 7P / r2007 5P / r2008 5P / r2009 4P / r2010 6P / r2011 4P / r2012 4P / r2013 4P / r2014 4P / r2015 4P / r2010b 3P** 全绿（t1049/t670 词零独立腿名如上核对结论，覆盖面由 review26-1/t947/t1053b 承接）→ 阴性轮（见下）→ 全矩阵 **598 PASS / 0 FAIL ×2**（matrix_t1053_pos/final.log，EXIT=0；597 权威 PASS 行 diff = **+1 恰 t1053** + 漂移仅登记类[t813 戳 02:35→03:49 与哈希 8a73428→60ffafd / t997 计时 0.1766→0.1776 级]；**t979/t1023c 本轮零漂移**；pos/final 两轮腿名 diff 仅 t997 墙钟数字，腿集合恒等 598）→ app voxelsandbox 重建 EXIT=0 + offscreen 冒烟 **EXIT=124** + logs/voxelsandbox_t1053_tail20.log 稳态 60fps。
+
+**阴性轮（实跑存证 matrix_t1053_neg.log，恰红面设计先于腿文并按 NEG1 实测修订声明）**：NEG1 = 摘 **A' 探针豁免**（isJumpObstacle 嵌格态分支 `false &&` 前缀使永不可达）→ rebuild → 恰红**全柱**[maxFeet 43.13 假跳弧 + farmKept false 级联踩踏 + finalFeet 42.0=踩坏列 Dirt 满格顶（**级联传导红非独立声明柱**，腿注释已按实测修订）]→ Edit 反向还原；NEG2 = 摘 **C 嵌入顶起**（顶起分支 `false &&` 前缀）→ rebuild → 恰红 **{finalFeet} 单柱**（maxFeet=41.5 嵌格无跳[②挡跳]、farmKept=true[无级联]、对照柱照跳 42.99）——红源各自恰为被摘语义本体 → Edit 反向还原 → 回绿（matrix_t1053_restore.log PASS）。
+
+**登记非目标**：①运行期通用嵌格挤出（水平塞入墙体的脱出——窒息域 + 玩家 extrudeEmbedded 同族，属实体碰撞解析大改，本修只收口「脚下支撑换高」嵌入形态）；②玩家侧 extrudeEmbedded/launchUnburyUpward 零触碰（不动共用机制，无先例回归面）；③t973 活埋门语义零变化（相切放行口径不动——本修把放行后的嵌格后果收口）；④R20 walk 重构（探针 0.6/0.7 偏移 per-cell 粒度维持旧语义）。
+
+**过程坑**：①isJumpObstacle 调用点盘点靠 head 截断的 grep 漏了 4 处（archer×2/aiWander/aiStalker）——首编即被「too few arguments」响亮揪出，签名无默认值的设计恰使漏改不可静默；②(b) 对照柱首版断言耕地保持——合规越障跳落地 fallDist≈0.75 在确定性缝 0 下必被踩（t1045 正确行为非病灶），首版腿文自审时去除该断言并注释立此存照。
+
+**待实机确认（观感面必核——行为修复必列实机）**：农场里站着的 mob 脚下放台阶/耕地类抬升支撑（或锄地换地）→ 实机复现原病灶路径：mob 不再原地蹦跳+农田不再被连锁踩坏；mob 应被顶上新的支撑顶正常行走（原路径 = t1049 实录 hop+backward glide+trample cascade）。
+
+**engine quirk 注销**：t1049 提交注 "engine-side latent quirk REGISTERED for R20 walk refactor: a mob embedded by a support-raising block placement self-judges its own cell as an obstacle (hop + backward glide + trample cascade)"——**随本单闭环注销**（agent-state Recovery Point 旧段同步注销；R20 walk 重构登记面不再含本项）。
+
+**下一任务**：§29.4 流式激活（**待用户 md 定向，不开工**）；或 parity 波后续（审计 #9 ③按用户定向）。
