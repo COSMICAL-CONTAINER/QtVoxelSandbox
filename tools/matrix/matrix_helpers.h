@@ -280,4 +280,8 @@ private:
                                     //   零世界（裸 scheduler + 真线程后台 worker）；r2012d
                                     //   裸 3×3 ChunkManager + fresh 小世界 ×1，rig 世界 w
                                     //   零接触，接 section15）
+    void section17_meshbuilder(); // R20.13 MeshBuilder 探针（置尾先例沿用：r2013a-c 自建
+                                  //   fresh 小世界 48×48×96 s82（快照采集/逐位等价/计数穿透）；
+                                  //   r2013d 零世界（纯源码钉 + 裸快照），rig 世界 w 零接触，
+                                  //   接 section16）
 };

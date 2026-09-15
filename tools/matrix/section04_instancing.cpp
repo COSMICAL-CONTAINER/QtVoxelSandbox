@@ -111,14 +111,16 @@ void MatrixRun::section04_instancing()
         "book is untouched" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
-        QFile cf(root + QStringLiteral("/src/World/chunkgeometry.cpp"));
+        // R20.13 同变更修订（t1023c 先例）：flowDir 流向判定/旋转路由本体自 chunkgeometry.cpp 迁
+        //   meshbuilder.cpp，且数据来源机械替换（m_lavaOnly → snap.lavaOnly）——钉面随迁随替。
+        QFile cf(root + QStringLiteral("/src/World/meshbuilder.cpp"));
         const QString t = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
         const int i0 = t.indexOf(QStringLiteral("int flowDir = 0;"));
         const int i1 = t.indexOf(QStringLiteral("if (flowDir != 0)"));
         bool okGate = false, okRot = false;
         if (i0 >= 0) {
             const QString seg = t.mid(i0, 900);
-            okGate = seg.contains(QStringLiteral("!m_lavaOnly && st > 0"))
+            okGate = seg.contains(QStringLiteral("!snap.lavaOnly && st > 0"))
                      && seg.contains(QStringLiteral("fns < st"))
                      && seg.contains(QStringLiteral("fgx") ) && seg.contains(QStringLiteral("fgz"));
         }
@@ -3294,14 +3296,14 @@ void MatrixRun::section04_instancing()
         const QString t15 = pg15.open(QIODevice::ReadOnly) ? QString::fromUtf8(pg15.readAll()) : QString();
         QFile ph15(root15 + QStringLiteral("/src/World/partialblockgeometry.h"));
         const QString h15 = ph15.open(QIODevice::ReadOnly) ? QString::fromUtf8(ph15.readAll()) : QString();
-        QFile cg15(root15 + QStringLiteral("/src/World/chunkgeometry.cpp"));
+        QFile cg15(root15 + QStringLiteral("/src/World/meshbuilder.cpp")); // R20.13 同变更修订：LilyPad 上下文填充随 mesher 本体迁 meshbuilder.cpp
         const QString c15 = cg15.open(QIODevice::ReadOnly) ? QString::fromUtf8(cg15.readAll()) : QString();
         const bool okA15 = t15.contains(QStringLiteral("waterSurfaceFrac(nb.belowState)"))
                            && t15.contains(QStringLiteral("nb.belowId == BlockRegistry::Water"))
                            && !t15.contains(QStringLiteral("constexpr float yp = 1.0f / 16.0f;"))
                            && h15.contains(QStringLiteral("quint8 belowId = 0;"))
-                           && c15.contains(QStringLiteral("nctx.belowId = blockAtWorld(wx, ly - 1, wz)"))
-                           && c15.contains(QStringLiteral("nctx.belowState = stateAtWorld(wx, ly - 1, wz)"));
+                           && c15.contains(QStringLiteral("nctx.belowId = snap.blockAtWorld(wx, ly - 1, wz)"))
+                           && c15.contains(QStringLiteral("nctx.belowState = snap.stateAtWorld(wx, ly - 1, wz)"));
         // (b) 行为级：两层冰墙（lane A z 6..8 x=20 两层）骑船逼近 → 埋位守卫拒 snap，Y 稳定钉水面
         //     84.875（surf = 84 + 7/8）不超 85.0（旧版振荡上界 85.2 = 84+1+0.2）；单层冰面（lane B
         //     z 15..17 x 20..30 一层）snap 照常 → Y 到 85.2 稳定（守卫不过度）。

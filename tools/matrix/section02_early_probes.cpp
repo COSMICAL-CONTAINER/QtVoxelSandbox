@@ -3759,15 +3759,17 @@ void MatrixRun::section02_early_probes()
             okAtlas = okAtlas && holes180 >= 8 && holes178 >= 8; // 每列两段 3×4px 孔 → ≥8 半透明行
         }
         // (c) 源码钉（滤注释后断言路由谓词文本）。
+        //     R20.13 同变更修订（t1023c 先例）：mesher 本体自 chunkgeometry.cpp 迁 meshbuilder.cpp——
+        //     isCutoutTrapX 路由谓词随迁，钉面改指新落点（搬移非复制）。
         bool okPin = false;
         {
             const QString exeDir = QCoreApplication::applicationDirPath();
             const QString root = QDir(exeDir + QStringLiteral("/..")).absolutePath();
-            QFile cf(root + QStringLiteral("/src/World/chunkgeometry.cpp"));
+            QFile cf(root + QStringLiteral("/src/World/meshbuilder.cpp"));
             const QString t = cf.open(QIODevice::ReadOnly) ? QString::fromUtf8(cf.readAll()) : QString();
             const int i0 = t.indexOf(QStringLiteral("isCutoutTrapX ="));
             if (i0 < 0) {
-                qInfo().noquote() << "  t879 pin slice miss (chunkgeometry)";
+                qInfo().noquote() << "  t879 pin slice miss (meshbuilder)";
             } else {
                 const QString seg = t.mid(i0, 240);
                 okPin = seg.contains(QStringLiteral("IronTrapdoor")) && seg.contains(QStringLiteral("WoodTrapdoor"));
