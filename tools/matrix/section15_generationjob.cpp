@@ -21,9 +21,10 @@
 //     的无头实证（不加线程）；中途 setWorker 换实例调用者面零改动）；
 //   与 R20.10 生命周期互锁 + 固定世界零变化 → r2011d（挂 ChunkManager 的 scheduler：Absent
 //     chunk 的 Generate job 执行前取边① Absent→Loading（worker 执行时刻实测 Loading）+ 成功
-//     后取边② Loading→Generated；取消在执行前 = 状态**不推进**（恒 Absent——六态表无
-//     Loading→Absent 回退边，本层不做非法回退）；失败停在 Loading（六态表无失败边，恢复登记
-//     R20.12）；默认稳态 Loaded chunk 被 submit+pump 后生命周期表**逐位不动**（守卫拒非法
+//     后取边② Loading→Generated；取消在执行前 = 状态**不推进**（恒 Absent——本层不做取消
+//     回退）；失败经恢复边⑨回 Absent（R20.10b 同变更修订：原「失败停 Loading」旧钉随六态表
+//     扩边改写——失败 outcome 实投即转移，重请求=新 job；自动重试策略登记非目标）；默认稳态
+//     Loaded chunk 被 submit+pump 后生命周期表**逐位不动**（守卫拒非法
 //     转移 → best-effort 忽略 = 固定世界零变化的结构性根据）+ fresh 世界全表 Loaded 稳态 +
 //     源码钉（值纪律四钉 / worker 缝签名 / 生命周期边①②调用点 / 满载拒绝码）+ 反探
 //    （generationjob.h 零 Q_INVOKABLE/Q_PROPERTY；world.cpp / worldstore.h / Main.qml 零
@@ -442,8 +443,9 @@ void MatrixRun::section15_generationjob()
         " the documented lifecycle edges only - an Absent chunk's Generate job is observed"
         " in Loading by the worker at execution time (edge 1) and lands in Generated after"
         " success (edge 2), a canceled-before-run request leaves its chunk at Absent (no"
-        " advance, no illegal rollback), a failed job stays at Loading (no failure edge,"
-        " recovery registered for R20.12), and submitting+pumping a default-steady-Loaded"
+        " advance, no rollback), a failed job recovers to Absent through the R20.10b failure"
+        " edge (edge 9) and an immediate re-request (new id) walks edges 1-2 again to"
+        " Generated, and submitting+pumping a default-steady-Loaded"
         " chunk executes the work but leaves all nine lifecycle entries bit-untouched (the"
         " guarded transition rejects and the scheduler ignores - the structural reason the"
         " fixed world is behaviorally unchanged); a fresh 48x48x96 s82 world still comes up"
@@ -500,7 +502,9 @@ void MatrixRun::section15_generationjob()
                         .arg(execOne).arg(edge1).arg(edge2).arg(noAdvance).arg(outA)
                         .arg(int(mgr.lifecycleAt(0, 1)));
 
-        // ③ 失败不推进：六态表无 Loading 失败边 → 失败 job 停在 Loading（恢复登记 R20.12）：
+        // ③ 失败恢复边⑨（R20.10b 同变更修订——原「失败停 Loading」旧钉随六态表扩边改写）：
+        //    失败 outcome 实投 → Loading→Absent（回可重试态），且重请求立即可行（新 job 再走
+        //    ①② 到 Generated；自动重试策略不在面内）：
         const bool route11 = mgr.setLifecycle(1, 1, ChunkLifecycle::Evicting)
             && mgr.setLifecycle(1, 1, ChunkLifecycle::Absent);
         w.failKeys.insert(pk(1, 1));
@@ -510,13 +514,23 @@ void MatrixRun::section15_generationjob()
         const bool failPathOk = route11 && rc.isOk() && w.trace.size() == 2
             && sched.outcomeCount() == 1 && sched.takeOutcome(oc)
             && oc.requestId == rc.value() && isError(oc.error) && oc.error.code == 42
-            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Loading;
-        ok = ok && failPathOk;
-        if (!failPathOk)
-            diag += QStringLiteral("[failpath r=%1 exec=%2 code=%3 life=%4] ")
-                        .arg(rc.isOk()).arg(w.trace.size()).arg(oc.error.code)
-                        .arg(int(mgr.lifecycleAt(1, 1)));
+            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Absent; // 边⑨ 失败恢复（R20.10b）
         w.failKeys.clear();
+        const auto rc2 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 1, 1 }); // 重请求=新 job
+        sched.pump();
+        GenerationJobOutcome oc2;
+        const bool retryOk = rc2.isOk() && rc2.value() != rc.value() && w.trace.size() == 3
+            && w.trace[2].key == pk(1, 1)
+            && sched.outcomeCount() == 1 && sched.takeOutcome(oc2)
+            && oc2.requestId == rc2.value() && !isError(oc2.error)
+            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Generated; // ①② 重走
+        ok = ok && failPathOk && retryOk;
+        if (!failPathOk || !retryOk)
+            diag += QStringLiteral("[failpath r=%1 exec=%2 code=%3 life=%4 retry r=%5 exec=%6 out=%7 life=%8] ")
+                        .arg(rc.isOk()).arg(w.trace.size()).arg(oc.error.code)
+                        .arg(int(mgr.lifecycleAt(1, 1)))
+                        .arg(rc2.isOk()).arg(w.trace.size())
+                        .arg(sched.outcomeCount()).arg(int(mgr.lifecycleAt(1, 1)));
 
         // ④ 固定世界零变化（结构性）：默认稳态 Loaded chunk 直接 submit+pump → 工作执行、
         //    生命周期表 9 格逐位不动（守卫拒非法转移、scheduler 忽略——零变化的结构根据）。
@@ -528,7 +542,8 @@ void MatrixRun::section15_generationjob()
                 lifeBefore[size_t(cx + 3 * cz)] = mgr.lifecycleAt(cx, cz);
         const auto rd = sched.submit(GenerationJobKind::Generate, ChunkKey{ 1, 0 });
         sched.pump();
-        bool fixedOk = rd.isOk() && w.trace.size() == 3
+        // 执行计数锚 4 = ②1 + ③失败1 + ③重请求1 + ④1（R20.10b 同变更修订：③ 增重请求一拍）。
+        bool fixedOk = rd.isOk() && w.trace.size() == 4
             && mgr.lifecycleAt(1, 0) == ChunkLifecycle::Loaded;
         for (int cz = 0; cz < 3 && fixedOk; ++cz)
             for (int cx = 0; cx < 3 && fixedOk; ++cx)
@@ -596,8 +611,9 @@ void MatrixRun::section15_generationjob()
                           << "| r2011d lifecycle interlock + fixed-world zero change:"
                              " worker observes Loading at execution time and the chunk"
                              " lands Generated after success, cancel-before-run never"
-                             " advances (stays Absent), failure parks at Loading, a"
-                             " default-Loaded chunk runs the work with the nine-entry"
+                             " advances (stays Absent), failure recovers to Absent through"
+                             " the R20.10b edge and the re-request walks edges 1-2 again,"
+                             " a default-Loaded chunk runs the work with the nine-entry"
                              " lifecycle table bit-untouched, a fresh world still comes up"
                              " all-Loaded, and structure pins + reverse probes hold the"
                              " value-discipline asserts, the guarded lifecycle call sites"

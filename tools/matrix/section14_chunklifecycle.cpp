@@ -1,13 +1,15 @@
 #include "matrix_helpers.h"
 
 #include "chunklifecycle.h" // R20.10 被测：六态类型 + 转移表单一权威（经 world.h → chunkmanager.h 亦可达，显式 include 表明被测面）
+#include "generationjob.h"  // R20.10b 联动面：失败恢复边⑨的两路投递点（同步泵 r2010ba / pumpAsync r2010bb）
 #include "worldfacade.h"    // R20.10 联动面：三门（chunkExistsAt/chunkDirtyAt/chunkFluidOnlyDirtyAt）生命周期接线
 
-// R20.10 Chunk lifecycle 探针段（4 腿 r2010a-d；filter 词 "r2010"；矩阵 570→574，band 572±2 内）。
-// 置尾先例沿用（接 section13，runAll 末执行）；r2010a 纯图腿零世界（独立 ChunkManager 网格），
-// r2010b-d 自建 fresh 小世界 48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)
-//（section11+ 先例），对 rig 世界 w 零接触。任务契约（docs/refactor-plan-2026-09-08.md §29.3
-// R20.10 原文四验收）：
+// R20.10 Chunk lifecycle 探针段（6 腿 r2010a-d + r2010ba/bb；filter 词 "r2010"；矩阵
+// 570→574，R20.10b 595→597，band 597±1 内）。置尾先例沿用（接 section13，runAll 末执行）；
+// r2010a 纯图腿零世界（独立 ChunkManager 网格），r2010b-d 自建 fresh 小世界 48×48×96 seed 82
+// + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)（section11+ 先例），r2010ba/bb
+// 裸 3×3 ChunkManager + 裸 scheduler（零世界零 tick 零 RNG），对 rig 世界 w 零接触。任务契约
+//（docs/refactor-plan-2026-09-08.md §29.3 R20.10 原文四验收）：
 //   「先实现 Absent、Loading、Generated、Active、Loaded、Evicting」→ r2010a（六态全图：枚举域
 //     六值 + 独立编码的 8 合法边表 vs 转移权威 36 对逐对互证 + 守卫式 setter 在真网格上同表；
 //     合法路径 Loaded→Active→Loaded→Evicting→Absent→Loading→Generated→Loaded 走通全部 8 边
@@ -29,9 +31,19 @@
 //   worldgen/store 豁免域直读 blob 的前提），**不实现落盘驱逐**（数据保留策略登记为后续单）。
 //   r2010c/r2010d 按此断言：卸载窗内编辑保留、重载后逐位恢复、存②照常带出全部 chunk。
 // 阴性轮登记：摘 ChunkManager::setLifecycle 的转移守卫**调用点**（`if
-//   (!chunkLifecycleTransitionLegal(...)) return false;` 两行摘除——t1051 教训：摘调用点，
+//   (!chunkLifecycleTransitionLegal(...)) return false;` 两行摘除——t1051 敏训：摘调用点，
 //   勿用 false && 前缀把条件守卫变无条件执行）→ 非法转移被接受 → r2010a 恰红（36 对互证腿），
 //   其余腿（合法路径/默认稳态/卸载重载/存档往返）不受扰。
+// **R20.10b 失败恢复边⑨（审计 #9 ①放行单——R20.11 登记欠账「失败停 Loading，恢复登记后续」
+//   的闭合）**：六态表 8→9 边（新增⑨ Loading→Absent，语义选型见 chunklifecycle.h 头注释——
+//   失败 outcome **实际投递**才转移；epoch 过期/取消的丢弃面不投递故不转移；重请求=新 job，
+//   与 R20.12「epoch 丢弃旧任务」同门；自动重试策略登记非目标）。两路投递点同走一边（单一
+//   权威，禁两份转移逻辑）：同步泵（r2010ba）+ pumpAsync 收割（r2010bb 脚本化异步 worker 走
+//   R20.12 缝——BackgroundGenerationWorker 纯函数恒成功面，失败注入用 isAsynchronous() 测试
+//   替身）。表计数变化 → r2010a 既有计数腿**同变更修订**（纠偏非放宽：9 边/27 非法 + 走图
+//   加⑨段）；r2011d ③（section15）「失败停 Loading」旧钉同步改写（Absent+重请求可行）。
+//   固定世界零变化：失败注入打在默认稳态 Loaded chunk 上，边①/边⑨双双被守卫拒 → 表逐位
+//   不动（r2010ba④/r2010bb④ 失败注入版实证）。
 void MatrixRun::section14_chunklifecycle()
 {
     // ── 共享 rig：fresh 小世界构造 + 确定性天气钉（section12 initTwin 同款）────────────────
@@ -88,20 +100,26 @@ void MatrixRun::section14_chunklifecycle()
                     }
         return true;
     };
+    // R20.10b 新腿帮手：chunk 键 packed（section15/16 同款）。
+    const auto pk = [](int cx, int cz) { return ChunkKey{ cx, cz }.packed(); };
 
     // ── r2010a：六态全图——枚举域 + 独立边表互证 + 守卫式 setter 同表（零世界）───────────
+    //   （R20.10b 同变更修订：9 边/27 非法 + 走图加⑨失败恢复段——纠偏非放宽，随失败边扩表）
     runLeg(QStringLiteral("r2010a six-state graph authority (R20.10 Chunk lifecycle): the"
         " ChunkLifecycle enum has exactly six states Absent/Loading/Generated/Active/Loaded/"
-        "Evicting, an independently encoded table of the eight legal edges (Absent->Loading,"
+        "Evicting, an independently encoded table of the nine legal edges (Absent->Loading,"
         " Loading->Generated, Generated->Loaded, Loaded->Active, Active->Loaded, Loaded->"
-        "Evicting, Evicting->Absent, Evicting->Loaded) matches the transition authority over"
-        " all 36 from/to pairs (the other 28 including self-transitions are illegal), a bare"
+        "Evicting, Evicting->Absent, Evicting->Loaded, Loading->Absent) matches the transition"
+        " authority over all 36 from/to pairs (the other 27 including self-transitions are"
+        " illegal), a bare"
         " 3x3 ChunkManager grid starts every chunk in the resident-Loaded default steady"
         " state with out-of-bounds reading Absent and rejecting writes, the full legal walk"
         " Loaded->Active->Loaded->Evicting->Absent->Loading->Generated->Loaded traverses all"
-        " eight edges and all six states, the cancel edge Evicting->Loaded walks on its own,"
-        " and a guarded setter positioned in each of the six states accepts exactly the"
-        " documented targets and rejects every other transition without state change"), [&]() {
+        " eight original edges and all six states plus the cancel edge, and the R20.10b"
+        " failure-recovery edge Loading->Absent walks on its own before re-walking the"
+        " request chain, and a guarded setter positioned in each of the six states accepts"
+        " exactly the documented targets and rejects every other transition without state"
+        " change"), [&]() {
         bool ok = true;
         QString diag;
 
@@ -110,7 +128,8 @@ void MatrixRun::section14_chunklifecycle()
         ok = ok && enumOk;
         if (!enumOk) diag += QStringLiteral("[enum count=%1] ").arg(int(ChunkLifecycle::Count));
 
-        // ② 独立编码的合法边表（腿自持真相——与 chunklifecycle.h 单一权威互证防双漂移）：
+        // ② 独立编码的合法边表（腿自持真相——与 chunklifecycle.h 单一权威互证防双漂移；
+        //    R20.10b 同变更修订：⑨ 失败恢复边入表）：
         const QPair<ChunkLifecycle, ChunkLifecycle> edges[] = {
             { ChunkLifecycle::Absent, ChunkLifecycle::Loading },       // ① requestLoad
             { ChunkLifecycle::Loading, ChunkLifecycle::Generated },    // ② generateDone
@@ -120,6 +139,7 @@ void MatrixRun::section14_chunklifecycle()
             { ChunkLifecycle::Loaded, ChunkLifecycle::Evicting },      // ⑥ requestEvict
             { ChunkLifecycle::Evicting, ChunkLifecycle::Absent },      // ⑦ finishEvict
             { ChunkLifecycle::Evicting, ChunkLifecycle::Loaded },      // ⑧ cancelEvict
+            { ChunkLifecycle::Loading, ChunkLifecycle::Absent },       // ⑨ generateFailed（R20.10b 失败恢复）
         };
         const auto edgeLegal = [&](ChunkLifecycle f, ChunkLifecycle t) {
             for (const auto &e : edges)
@@ -198,6 +218,15 @@ void MatrixRun::section14_chunklifecycle()
         // (0,1)：取消边 Evicting→Loaded 单独走（驱逐途中又被需要）。
         walkOk = walkOk && step(0, 1, ChunkLifecycle::Evicting)
             && step(0, 1, ChunkLifecycle::Loaded);
+        // (1,1) 续：失败恢复边⑨单独走（R20.10b）——Loading 直接回 Absent，随后重走 ①②③
+        //    （失败后重请求 = 新链路，六态图内自洽闭环）：
+        walkOk = walkOk && step(1, 1, ChunkLifecycle::Evicting)
+            && step(1, 1, ChunkLifecycle::Absent)
+            && step(1, 1, ChunkLifecycle::Loading)
+            && step(1, 1, ChunkLifecycle::Absent) // ⑨ generateFailed（失败恢复）
+            && step(1, 1, ChunkLifecycle::Loading)
+            && step(1, 1, ChunkLifecycle::Generated)
+            && step(1, 1, ChunkLifecycle::Loaded);
         ok = ok && walkOk;
         if (!walkOk) diag += QStringLiteral("[walk] ");
 
@@ -289,13 +318,14 @@ void MatrixRun::section14_chunklifecycle()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| r2010a six-state graph authority: six states, an"
-                             " independently encoded 8-edge table matches the transition"
-                             " authority over all 36 pairs (28 illegal incl. self), a bare"
+                             " independently encoded 9-edge table matches the transition"
+                             " authority over all 36 pairs (27 illegal incl. self), a bare"
                              " 3x3 grid starts resident-Loaded with OOB=Absent/write-"
-                             "reject, the full legal walk traverses all 8 edges and all 6"
-                             " states plus the cancel edge, and the guarded setter in each"
-                             " state accepts exactly the documented targets rejecting the"
-                             " rest without mutation"
+                             "reject, the full legal walk traverses all eight original"
+                             " edges and all 6 states plus the cancel edge and the R20.10b"
+                             " failure-recovery edge Loading->Absent, and the guarded"
+                             " setter in each state accepts exactly the documented targets"
+                             " rejecting the rest without mutation"
                           << (ok ? QString() : diag);
     });
 
@@ -683,6 +713,373 @@ void MatrixRun::section14_chunklifecycle()
                              " bit-identical (the exemption-domain store serializes all"
                              " nine chunks regardless of lifecycle state) and leaves the"
                              " lifecycle table untouched"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2010ba：R20.10b 失败恢复边⑨——同步泵投递面转移 + 重请求可行 + 丢弃面不转移 + 失败
+    //    注入零变化（裸 3×3 网格 + 裸 scheduler，零世界零 tick 零 RNG——确定性终态断言）────
+    runLeg(QStringLiteral("r2010ba sync-pump failure-recovery edge (R20.10b): a failing worker"
+        " on an Absent chunk (routed via legal Evicting edges) is observed in Loading at"
+        " execution (edge 1), delivers its Failed outcome verbatim (code 42 with message)"
+        " and recovers to Absent through the new failure edge (edge 9) - the chunk is"
+        " immediately re-requestable and a fresh job (a new request id) walks edges 1-2"
+        " again to Generated; a canceled-before-run request and a stale (epoch-bumped)"
+        " request both leave their chunks untouched at Absent (drop faces never execute,"
+        " never deliver, never transition); a failure injected on a default-steady-Loaded"
+        " chunk still delivers its error outcome but leaves the nine-entry lifecycle table"
+        " bit-untouched (edges 1 and 9 both guard-rejected - fixed-world zero change holds"
+        " under failure injection); the failure edge is pinned in the transition authority"
+        " and the store stays lifecycle-blind"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // 同步失败注入 worker（轨迹 + 执行时刻生命周期观察 + 失败集；section15 TraceWorker 同族）：
+        class SyncFailWorker : public GenerationWorker
+        {
+        public:
+            QVector<quint64> execKeys;  // 执行序 packed key（轨迹）
+            QVector<int> execLifecycle; // 执行时刻 lifecycleAt 观察（-1 = 无挂点）
+            QSet<quint64> failKeys;     // 命中 → Result::fail(42, "synthetic worker failure")
+            const ChunkManager *observe = nullptr;
+
+            Result<void> execute(const GenerationRequest &req) override
+            {
+                execKeys.append(req.key.packed());
+                execLifecycle.append(
+                    observe ? int(observe->lifecycleAt(req.key.cx, req.key.cz)) : -1);
+                if (failKeys.contains(req.key.packed()))
+                    return Result<void>::fail(42, "synthetic worker failure");
+                return Result<void>::ok();
+            }
+        };
+
+        // ① 失败注入 → outcome 实投 → 边⑨：
+        ChunkManager mgr(48, 48, 32); // 3×3（默认稳态全 Loaded 自证）
+        bool steadyOk = mgr.chunksX() == 3 && mgr.chunksZ() == 3;
+        for (int cz = 0; cz < 3 && steadyOk; ++cz)
+            for (int cx = 0; cx < 3 && steadyOk; ++cx)
+                steadyOk = steadyOk && mgr.lifecycleAt(cx, cz) == ChunkLifecycle::Loaded;
+        ok = ok && steadyOk;
+        if (!steadyOk) diag += QStringLiteral("[steady] ");
+
+        GenerationScheduler sched(&mgr);
+        SyncFailWorker w;
+        w.observe = &mgr;
+        sched.setWorker(&w);
+
+        // ① (2,2) 经合法边⑥⑦布到 Absent → 失败 submit → pump：执行时实测 Loading（边①先于
+        //    失败）→ outcome（Error 42 原样穿透）→ 终态 Absent（边⑨ 失败恢复）：
+        const bool route22 = mgr.setLifecycle(2, 2, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(2, 2, ChunkLifecycle::Absent);
+        w.failKeys.insert(pk(2, 2));
+        const auto r1 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 2, 2 });
+        sched.pump();
+        GenerationJobOutcome o1;
+        const bool failOk = route22 && r1.isOk() && w.execKeys.size() == 1
+            && w.execKeys[0] == pk(2, 2)
+            && w.execLifecycle[0] == int(ChunkLifecycle::Loading) // 边①先于失败
+            && sched.outcomeCount() == 1 && sched.takeOutcome(o1)
+            && o1.requestId == r1.value() && isError(o1.error) && o1.error.code == 42
+            && o1.error.message
+            && qstrcmp(o1.error.message, "synthetic worker failure") == 0
+            && mgr.lifecycleAt(2, 2) == ChunkLifecycle::Absent; // 边⑨ 失败恢复
+        ok = ok && failOk;
+        if (!failOk)
+            diag += QStringLiteral("[fail exec=%1 e1=%2 out=%3 life=%4] ")
+                        .arg(w.execKeys.size())
+                        .arg(w.execLifecycle.value(0, -1))
+                        .arg(sched.outcomeCount())
+                        .arg(int(mgr.lifecycleAt(2, 2)));
+
+        // ② 重请求可行：清失败集 → 新 submit（新 requestId = 新 job）→ pump → 边①②重走到
+        //    Generated（失败恢复语义只到「回 Absent 可再请求」，自动重试策略不在面内）：
+        w.failKeys.clear();
+        const auto r2 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 2, 2 });
+        sched.pump();
+        GenerationJobOutcome o2;
+        const bool retryOk = r2.isOk() && r2.value() != r1.value()
+            && w.execKeys.size() == 2 && w.execKeys[1] == pk(2, 2)
+            && sched.outcomeCount() == 1 && sched.takeOutcome(o2)
+            && o2.requestId == r2.value() && !isError(o2.error)
+            && mgr.lifecycleAt(2, 2) == ChunkLifecycle::Generated;
+        ok = ok && retryOk;
+        if (!retryOk)
+            diag += QStringLiteral("[retry id=%1 exec=%2 out=%3 life=%4] ")
+                        .arg(r2.value()).arg(w.execKeys.size())
+                        .arg(sched.outcomeCount()).arg(int(mgr.lifecycleAt(2, 2)));
+
+        // ③ 丢弃面不转移：取消（执行前）与过期（epoch bump 后）都零执行零投递，chunk 恒
+        //    Absent（六态表无取消/过期回退——「不推进」语义与边⑨投递面判据正交）：
+        const bool route01 = mgr.setLifecycle(0, 1, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(0, 1, ChunkLifecycle::Absent);
+        const auto r3 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 0, 1 });
+        const bool c3 = sched.cancel(r3.value());
+        const bool route12 = mgr.setLifecycle(1, 2, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(1, 2, ChunkLifecycle::Absent);
+        const auto r4 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 1, 2 });
+        const int execBefore = w.execKeys.size();
+        sched.setWorldEpoch(1); // r4 提交于 epoch 0 → 泵时按过期丢弃
+        sched.pump();
+        GenerationJobOutcome odrop;
+        bool dropOk = route01 && r3.isOk() && c3 && route12 && r4.isOk()
+            && w.execKeys.size() == execBefore // 两 job 都零执行
+            && sched.outcomeCount() == 0 && !sched.takeOutcome(odrop)
+            && mgr.lifecycleAt(0, 1) == ChunkLifecycle::Absent // 取消不推进
+            && mgr.lifecycleAt(1, 2) == ChunkLifecycle::Absent; // 过期不推进
+        sched.setWorldEpoch(0); // 还原 epoch（后续相位在初始 epoch 域断言）
+        ok = ok && dropOk;
+        if (!dropOk)
+            diag += QStringLiteral("[drop exec=%1/%2 out=%3 01=%4 12=%5] ")
+                        .arg(w.execKeys.size()).arg(execBefore)
+                        .arg(sched.outcomeCount())
+                        .arg(int(mgr.lifecycleAt(0, 1)))
+                        .arg(int(mgr.lifecycleAt(1, 2)));
+
+        // ④ 失败注入零变化：默认稳态 Loaded chunk 上失败 outcome 照常实投（同步泵执行 ⟹ 有活
+        //    别名 ⟹ 投递），但边①/边⑨双双被守卫拒 → 生命周期表 9 格逐位不动（固定世界零变化
+        //    在失败注入下保持——「零变化」不依赖「无失败」假设）：
+        std::array<ChunkLifecycle, 9> lifeBefore {};
+        for (int cz = 0; cz < 3; ++cz)
+            for (int cx = 0; cx < 3; ++cx)
+                lifeBefore[size_t(cx + 3 * cz)] = mgr.lifecycleAt(cx, cz);
+        w.failKeys.insert(pk(0, 0));
+        const auto r5 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 0, 0 });
+        sched.pump();
+        GenerationJobOutcome o5;
+        bool fixedOk = r5.isOk() && w.execKeys.size() == execBefore + 1
+            && sched.outcomeCount() == 1 && sched.takeOutcome(o5)
+            && o5.requestId == r5.value() && isError(o5.error) && o5.error.code == 42
+            && mgr.lifecycleAt(0, 0) == ChunkLifecycle::Loaded;
+        for (int cz = 0; cz < 3 && fixedOk; ++cz)
+            for (int cx = 0; cx < 3 && fixedOk; ++cx)
+                fixedOk = fixedOk
+                    && mgr.lifecycleAt(cx, cz) == lifeBefore[size_t(cx + 3 * cz)];
+        ok = ok && fixedOk;
+        if (!fixedOk)
+            diag += QStringLiteral("[fixed exec=%1 life00=%2] ")
+                        .arg(w.execKeys.size()).arg(int(mgr.lifecycleAt(0, 0)));
+        w.failKeys.clear();
+
+        // ⑤ 源码钉：转移权威含⑨（剥注释后锚真实分派语句）；worldstore 零生命周期接触
+        //   （豁免域隔离——worldstore 头/体零 Lifecycle/setLifecycle 记号）：
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+                                     + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        const auto forbiddenAbsent = [](const QString &path, const char *needle) {
+            const QStringList miss = pinSet(path, { SrcPin("forbidden-probe", needle, 1) });
+            return miss.size() == 1
+                && !miss.first().startsWith(QStringLiteral("<file-unreadable"));
+        };
+        const QStringList missCl = pinSet(
+            srcRoot + QStringLiteral("/World/chunklifecycle.h"), {
+                SrcPin("r2010b failure-recovery edge in the transition authority",
+                    "|| to == ChunkLifecycle::Absent", 1),
+            });
+        for (const QString &m : missCl) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
+        const bool storeNegOk
+            = forbiddenAbsent(srcRoot + QStringLiteral("/World/worldstore.h"), "Lifecycle")
+            && forbiddenAbsent(srcRoot + QStringLiteral("/World/worldstore.cpp"), "setLifecycle");
+        ok = ok && storeNegOk;
+        if (!storeNegOk) diag += QStringLiteral("[store-neg] ");
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2010ba sync-pump failure-recovery edge: a failing worker"
+                             " is observed in Loading at execution, delivers its Failed"
+                             " outcome verbatim and recovers to Absent through edge 9,"
+                             " then an immediate re-request (new id) walks edges 1-2 to"
+                             " Generated; canceled and stale drop faces never execute,"
+                             " deliver or transition; a failure injected on a default-"
+                             " Loaded chunk delivers its outcome but leaves the nine-entry"
+                             " table bit-untouched; the edge is pinned in the authority and"
+                             " the store stays lifecycle-blind"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2010bb：R20.10b 失败恢复边⑨——pumpAsync 收割投递面转移（R20.12 缝）+ 交接后过期
+    //    失败停 Loading（丢弃面不转移）+ 失败注入零变化 + worker 侧零生命周期驱动（反探）──
+    //    BackgroundGenerationWorker 纯函数恒成功面 → 失败注入用脚本化 isAsynchronous() 测试
+    //    替身走同一异步协议（r2011c 可替换性同门——零线程零时序，完成记录按脚本 FIFO 交付）。
+    runLeg(QStringLiteral("r2010bb async-harvest failure-recovery edge (R20.10b, R20.12 seam):"
+        " a scripted asynchronous worker takes an Absent chunk's job at handout (edge 1"
+        " fires - the chunk reads Loading deterministically before any harvest), a scripted"
+        " failure completion delivers its Failed outcome on the caller thread and the chunk"
+        " recovers to Absent through the failure edge (edge 9), an immediate re-request"
+        " walks edges 1-2 again to Generated; a failure completed AFTER an epoch bump is"
+        " dropped at delivery (zero outcomes) and its chunk deliberately stays at Loading"
+        " (the drop face never transitions - the same gate as the R20.12 epoch discard); a"
+        " delivered failure on a default-steady-Loaded chunk leaves the nine-entry table"
+        " bit-untouched (both edges guard-rejected); both scheduler delivery points share"
+        " one delivery-face judge (source pins) and the worker side never drives the"
+        " lifecycle itself (comment-stripped reverse probe)"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // 脚本化异步 worker（R20.12 缝的测试替身；交接记录 + 脚本化完成 FIFO）：
+        class ScriptedAsyncWorker : public GenerationWorker
+        {
+        public:
+            QVector<GenerationRequest> handed;     // 交接序（submitAsync 受理记录）
+            QVector<quint64> handedJobIds;         // 交接序 jobId（脚本完成记录对账键）
+            struct Done
+            {
+                quint64 jobId = 0;
+                Error error{};
+            };
+            QVector<Done> script; // 完成脚本（takeCompletedAsync FIFO 交付）
+
+            bool isAsynchronous() const override { return true; }
+            // 同步 execute 缝：async-only（BackgroundGenerationWorker 同款防御——直调可见 fail）：
+            Result<void> execute(const GenerationRequest &req) override
+            {
+                Q_UNUSED(req);
+                return Result<void>::fail(201, "ScriptedAsyncWorker is async-only (use submitAsync)");
+            }
+            Result<void> submitAsync(const GenerationRequest &req, quint64 jobId) override
+            {
+                handed.append(req);
+                handedJobIds.append(jobId);
+                return Result<void>::ok();
+            }
+            bool takeCompletedAsync(CompletedGeneration &out) override
+            {
+                if (script.isEmpty())
+                    return false;
+                const Done d = script.takeFirst();
+                out = CompletedGeneration{ d.jobId, d.error };
+                return true;
+            }
+        };
+
+        ChunkManager mgr(48, 48, 32); // 3×3（默认稳态全 Loaded——r2010ba 同款自证省略，④快照承担）
+        GenerationScheduler sched(&mgr);
+        ScriptedAsyncWorker w;
+        sched.setWorker(&w);
+
+        // ① (1,1) 经合法边⑥⑦布到 Absent → submit → 泵一轮（交接边①：终态 Loading——交接无
+        //    条件先于收割，确定性非时序）→ 脚本失败完成 → 泵收割：outcome 实投 + 边⑨回 Absent：
+        const bool route11 = mgr.setLifecycle(1, 1, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(1, 1, ChunkLifecycle::Absent);
+        const auto r1 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 1, 1 });
+        sched.pump();
+        const bool handoutOk = route11 && r1.isOk() && w.handed.size() == 1
+            && w.handed[0].key == ChunkKey{ 1, 1 }
+            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Loading; // 边①交接时已取
+        w.script.append({ w.handedJobIds[0], Error{ 42, "synthetic async failure" } });
+        sched.pump();
+        GenerationJobOutcome o1;
+        const bool failOk = handoutOk && sched.outcomeCount() == 1 && sched.takeOutcome(o1)
+            && o1.requestId == r1.value() && isError(o1.error) && o1.error.code == 42
+            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Absent // 边⑨ 失败恢复
+            && sched.inFlightJobCount() == 0;
+        ok = ok && failOk;
+        if (!failOk)
+            diag += QStringLiteral("[fail hand=%1 out=%2 life=%3 inf=%4] ")
+                        .arg(w.handed.size()).arg(sched.outcomeCount())
+                        .arg(int(mgr.lifecycleAt(1, 1))).arg(sched.inFlightJobCount());
+
+        // ② 重请求（新 job 新 id）→ 交接（边① Loading）→ 脚本成功完成 → 收割边② → Generated：
+        const auto r2 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 1, 1 });
+        sched.pump(); // 交接相
+        const bool hand2 = r2.isOk() && r2.value() != r1.value() && w.handed.size() == 2
+            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Loading;
+        w.script.append({ w.handedJobIds[1], Error{} });
+        sched.pump(); // 收割相
+        GenerationJobOutcome o2;
+        const bool retryOk = hand2 && sched.outcomeCount() == 1 && sched.takeOutcome(o2)
+            && o2.requestId == r2.value() && !isError(o2.error)
+            && mgr.lifecycleAt(1, 1) == ChunkLifecycle::Generated;
+        ok = ok && retryOk;
+        if (!retryOk)
+            diag += QStringLiteral("[retry hand=%1 out=%2 life=%3] ")
+                        .arg(w.handed.size()).arg(sched.outcomeCount())
+                        .arg(int(mgr.lifecycleAt(1, 1)));
+
+        // ③ 丢弃面不转移（语义保持）：交接后才 bump epoch 的失败完成在收割时被静默丢弃
+        //    （零 outcome）→ chunk **停 Loading**（边⑨不取——世界已换代，旧任务产物连同状态
+        //    一并作废，与「epoch 丢弃旧任务」同门）：
+        const bool route02 = mgr.setLifecycle(0, 2, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(0, 2, ChunkLifecycle::Absent);
+        const auto r3 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 0, 2 });
+        sched.pump(); // 交接（边① → Loading）
+        const bool hand3 = route02 && r3.isOk() && w.handed.size() == 3
+            && mgr.lifecycleAt(0, 2) == ChunkLifecycle::Loading;
+        sched.setWorldEpoch(7); // 交接后才换代（R20.12 验收③时序）
+        w.script.append({ w.handedJobIds[2], Error{ 42, "synthetic async failure" } });
+        sched.pump(); // 收割：deliver 过滤丢弃（delivered=0）→ 边⑨不取
+        GenerationJobOutcome odrop;
+        bool dropOk = hand3 && sched.outcomeCount() == 0 && !sched.takeOutcome(odrop)
+            && mgr.lifecycleAt(0, 2) == ChunkLifecycle::Loading // 停 Loading（丢弃面不转移）
+            && sched.inFlightJobCount() == 0 && sched.pendingJobCount() == 0;
+        ok = ok && dropOk;
+        if (!dropOk)
+            diag += QStringLiteral("[drop out=%1 life=%2 inf=%3 pj=%4] ")
+                        .arg(sched.outcomeCount()).arg(int(mgr.lifecycleAt(0, 2)))
+                        .arg(sched.inFlightJobCount()).arg(sched.pendingJobCount());
+
+        // ④ 失败注入零变化（epoch 7 域）：默认稳态 Loaded chunk 的失败 outcome 照常实投（别名
+        //    epoch 7 = 当前），边①/边⑨双被守卫拒 → 表 9 格逐位不动：
+        std::array<ChunkLifecycle, 9> lifeBefore {};
+        for (int cz = 0; cz < 3; ++cz)
+            for (int cx = 0; cx < 3; ++cx)
+                lifeBefore[size_t(cx + 3 * cz)] = mgr.lifecycleAt(cx, cz);
+        const auto r4 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 0, 0 });
+        sched.pump(); // 交接相（边①被拒：Loaded→Loading 非法 → 停 Loaded）
+        const bool hand4 = r4.isOk() && w.handed.size() == 4
+            && mgr.lifecycleAt(0, 0) == ChunkLifecycle::Loaded;
+        w.script.append({ w.handedJobIds[3], Error{ 42, "synthetic async failure" } });
+        sched.pump(); // 收割相：outcome 实投（error）但边⑨被拒
+        GenerationJobOutcome o4;
+        bool fixedOk = hand4 && sched.outcomeCount() == 1 && sched.takeOutcome(o4)
+            && o4.requestId == r4.value() && isError(o4.error)
+            && mgr.lifecycleAt(0, 0) == ChunkLifecycle::Loaded;
+        for (int cz = 0; cz < 3 && fixedOk; ++cz)
+            for (int cx = 0; cx < 3 && fixedOk; ++cx)
+                fixedOk = fixedOk
+                    && mgr.lifecycleAt(cx, cz) == lifeBefore[size_t(cx + 3 * cz)];
+        ok = ok && fixedOk;
+        if (!fixedOk)
+            diag += QStringLiteral("[fixed out=%1 life00=%2] ")
+                        .arg(sched.outcomeCount()).arg(int(mgr.lifecycleAt(0, 0)));
+
+        // ⑤ 源码钉：两路投递点同一判据（单一语义，禁两份转移逻辑）+ worker 侧零生命周期驱动
+        //   （反探——backgroundgeneration.h 代码面零 setLifecycle 记号，生命周期归 scheduler）：
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+                                     + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        const auto forbiddenAbsent = [](const QString &path, const char *needle) {
+            const QStringList miss = pinSet(path, { SrcPin("forbidden-probe", needle, 1) });
+            return miss.size() == 1
+                && !miss.first().startsWith(QStringLiteral("<file-unreadable"));
+        };
+        const QStringList missGj = pinSet(
+            srcRoot + QStringLiteral("/World/generationjob.h"), {
+                SrcPin("r2010b failure edge driven at both delivery points (single judge)",
+                    "delivered > 0 && m_chunks", 2),
+                SrcPin("r2010b delivery-face judge captured at both sites",
+                    "const int delivered = deliver(", 2),
+            });
+        for (const QString &m : missGj) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
+        const bool workerNegOk = forbiddenAbsent(
+            srcRoot + QStringLiteral("/World/backgroundgeneration.h"), "setLifecycle");
+        ok = ok && workerNegOk;
+        if (!workerNegOk) diag += QStringLiteral("[worker-neg] ");
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2010bb async-harvest failure-recovery edge: a scripted"
+                             " async handout takes edge 1 (Loading), a delivered failure"
+                             " completion recovers the chunk to Absent through edge 9 and"
+                             " the re-request walks edges 1-2 to Generated, a post-bump"
+                             " failure completion is dropped at delivery leaving the chunk"
+                             " parked at Loading (drop face never transitions), a delivered"
+                             " failure on a default-Loaded chunk leaves the table bit-"
+                             "untouched, both delivery points share one judge (pins), and"
+                             " the worker side never drives lifecycle"
                           << (ok ? QString() : diag);
     });
 }
