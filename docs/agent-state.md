@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-15 12:10（t1050 review0915 两项纠偏闭环）
+更新时间：2026-09-15 13:40（t1051 review0913 #1 矿井悬空轨清偿闭环）
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: t1051（Review_2026-09-13 #1：矿井干燥门缺支撑校验→悬空轨，worldgen 面改动会移位生成腿——独立成单全矩阵核移位）；完成后回主线 R20.10 Chunk 生命周期
+current_task: R20.10 Chunk 生命周期（refactor-plan §29.3：Absent/Loading/Generated/Active/Loaded/Evicting 六态；固定 10×10 世界仍可运行、Chunk 可卸载重载）
 current_task_status: READY
-last_completed_task: t1050（Review_2026-09-15 两项纠偏一单两修：① gamesession.h stepTick 入口双钳制[方案①：负 dt/NaN→零累积、dt>kMaxStepSecs(1.0s) 整体丢弃+qWarning+droppedDtCount 背压可见——qRound 溢出洞结构性焊死]；② playercontroller useBlock 12 门收窄 sneakPlaceBlock[手持方块才旁路放置；空手/持非方块 sneak 右键机关/门/活板门/床/七 UI 族照常交互——MC wiki "use prioritizes held item" 引证入 dev-plan 关单]；矩阵 r2007e + t1050a-d 共 5 新腿 + 5 源码钉同步）
-last_task_closure_commit: docs(plan)（代码终态 = fix(t1050) + test(t1050)，哈希见 git log）
-last_verified_commit: test(t1050)（矩阵 569 PASS / 0 FAIL ×2：matrix_t1050_pos/final.log EXIT=0；564 权威 diff = 5 新增[t1050a-d + r2007e] + 3 登记漂移类[t813 戳/t997 计时/t979 涉水；t1023c 零漂移=本单无新文件]；filter 面 t1050=5P/0F、r2007=5P、t1034=3P、t1046 面、t1028=3P 全绿；阴性轮 neg1 摘负 dt 门→恰红 r2007e→Edit 反向还原→回绿、neg2 摘合取项→恰红 t1050a-d 零误伤→还原→回绿；app 重建 EXIT=0 + 冒烟 EXIT=124 + tail20 零错误）
+last_completed_task: t1051（Review_2026-09-13 #1 矿井悬空轨清偿：placeMineshaft 干燥门内 isTopFlushSupport 支撑校验（处方式，400 语料零过滤=契约面+防御完备）+ pruneUnsupportedWorldgenRails carveCanyon 后置守卫（真实机制清偿——400 世界 sweep + 逐 pass 桩归因：悬空轨产生者是峡谷掏空已铺轨地板，seed 42/166/207 共 7 根，非 review 假设的同矿延迟落块形态）；P-t1051a 27 世界悬空轨==0 腿 + 三源钉；顺手修 review0915 #5 filtered 汇总行；MC wiki Rail 三元组引证入 dev-plan）
+last_task_closure_commit: docs(plan)（代码终态 = fix(t1051) + test(t1051)，哈希见 git log）
+last_verified_commit: test(t1051)（矩阵 570 PASS / 0 FAIL ×2：matrix_t1051_pos/final.log EXIT=0；569 权威 diff = +1 新增[t1051a] + 2 登记漂移类[t813 戳/t997 计时]，worldgen 腿零改写零未归因漂移；filter 面 t1051=1P、t1043=4P、mineshaft=27P、t1020=4P、t1014=8P、t929=1P、canyon=1P、t1003=1P、t1013=9P、t1011=1P、determin=30P、re-gen=5P 全绿；阴性轮 neg 摘 prune 调用点→悬空轨 7 根精确重现→t1051a 独红 525 SKIP 零误伤→还原→回绿[存证 matrix_t1051_neg.log + restore]；app 重建 EXIT=0 + 冒烟 EXIT=124 + tail20 零错误）
 last_governance_review: 2026-09-15（audit #7 GREEN——R20 地基 5 闭环全绿放行；Mimosa ENOBUFS 环境注记在案）
 governance_review_due: false
-completed_tasks_since_governance_review: 2
-next_task: t1051（review0913 #1 悬空轨）→ 之后 R20.10 Chunk 生命周期
-next_task_source: docs/Review_2026-09-13.md #1（Review_2026-09-15 清偿状态表维持登记）+ docs/refactor-plan-2026-09-08.md §29.3 R20.10
+completed_tasks_since_governance_review: 3
+next_task: R20.10 Chunk 生命周期 → 之后 R20.11 后台 GenerationJob
+next_task_source: docs/refactor-plan-2026-09-08.md §29.3 R20.10（review0913 #1/#2/#3/#4、review0915 #4/#7、箱车裸键门残余维持登记）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
@@ -33,12 +33,13 @@ needs_human: false
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
 - **R20.08 起 facade 纪律**：新代码世界读写统一走 WorldFacade（收窄视图）；mesher 零 Chunk*（chunkgeometry 禁出反探常驻）；GameSession 命令零旁路（m_world.setBlock 禁出反探 + m_facade.setBlock/setBlockWithState 正面钉，r2008c 常驻）；Facade 不转发静默写族。
 - **R20.09 起编辑面纪律**：Tick 内编辑统一经 EditBuffer（src/Core/editbuffer.h）登记——同格同 Tick 合并后写胜、Tick 内零通知、收口 takeDelta 单点发布 + 合并面派生 BlockChanged；**dirty chunk 集合统一 DirtyChunkSet**（三态 add 可测；WorldDelta::addAffected 保守面不扩）；PlaceBlock 命令带 state 五参权威落地（4 参丢 state 口径退役）。ChunkGeometry/QML 渲染路径仍零触碰（按集合调度重建归 R20.13）；静默写族接线归 R20.10+。
-- **探针钉纪律（R20.08 新教训）**：pinSet 失败条件 cnt<minCount → **0 计数 SrcPin 恒不红（空转钉）**；「禁出」钉必须走 minCount=1 反探（miss 非空=合规，复用剥注释器防注释提及误伤）或腿体内手工 contains（r2007b 先例）；新钉上 workload 前先做「变异→恰红」自证；**minCount 对实际出现次数核，勿拍脑袋翻倍**（r2009d x1<2 误设教训）。
+- **探针钉纪律（R20.08 新教训）**：pinSet 失败条件 cnt<minCount → **0 计数 SrcPin 恒不红（空转钉）**；「禁出」钉必须走 minCount=1 反探（miss 非空=合规，复用剥注释器防注释提及误伤）或腿体内手工 contains（r2007b 先例）；新钉上 workload 前先做「变异→恰红」自证；**minCount 对实际出现次数核，勿拍脑袋翻倍**（r2009d x1<2 误设教训）。**阴性变异选址（t1051 新教训）**：`if (<cond>) continue;` 形态的守卫，摘守卫用 `false &&` 前缀 = 把守卫变**无条件执行**（t1051 首版变异把「摘无撑轨」变「摘光全部轨」，rails 31537→7 假红形态）——正确阴性 = 摘**调用点**（`if (false) guard();`）；行为面发现力靠语料内嵌复现体 seed（t1051a 内嵌 42/166/207）。
 - **腿选址纪律（R20.08/R20.09 新教训）**：涉 chunk 计数断言的腿，选址必须**结构性保证**跨 chunk（cx 分驻不同值），不靠地形扫描碰运气；「破/放目标」须显式验证非空气/空气，**破位还须验证顶上无附着**（破表面块会级联清除其上 TallGrass——r2009c chg=4 首红实证，空操/级联都会塌事件计数）；腿 diag 带判别信息（pre/post id、逐事件、chunk 键）。
 
 ## Recovery Point
 
-- 最近闭环：**t1050 review0915 两项纠偏**（2026-09-15，fix(t1050) + test(t1050) + 本 docs）：① 修1（Review0915 #1，中）src/Game/gamesession.h stepTick 入口双钳制（方案①，选型依据在头注——方案②留 qRound 溢出洞）：负 dt/NaN→零累积（`!(deltaSecs>=0.0)` 一并拦）、dt>kMaxStepSecs(1.0s) 整体丢弃+qWarning+droppedDtCount（超界=异常墙钟差不 catch-up——与暂停「dt 丢弃不欠账」同门）；r2007e 四柱腿（3600 丢弃+计数 / 丢弃后泵不受污染 / 负 dt 无负时间债 / 恰上界 1.0s=10 tick）。② 修2（Review0915 #2，低）src/Game/playercontroller.cpp useBlock 12 门收窄 `sneakPlaceBlock = sneakPlace && m_selectedBlock != Air`（selectedBlock 经 hotbar 非方块槽已归 Air→判据恰为「手持方块」）：空手/持非方块 sneak 右键拉杆扳动/按钮按/门开合/活板门翻板/床入睡/七 UI 族/音符盒调音照常交互（51cc43c③ 回归收口）；MC 三元组引证入 dev-plan 关单（wiki Sneaking "use prioritizes held item"/Java 12w49a/minecraft.wiki 2026-09-15 实读）；t1034/t1046 持方块腿逐位兼容零改写、5 源码钉针句同步、旧口径注释改写；t1050a-d 四族腿各配持方块对照柱 + t1050a 判据合取钉。③ 矩阵 564→569；阴性轮×2 恰红/还原存证 matrix_t1050_neg{1,2}.log + restore。**登记剩余待办**：Review0915 #4（嵌格生物=R20 walk 登记维持）/#5/#7（维持登记）/#6（顺手修搭下一笔 entitymanager）+ 箱子矿车裸键门残余（空手 sneak 同疾，随下一波 parity 单）+ **Review_2026-09-13 #1（矿井干燥门缺支撑校验→悬空轨）仍待修 → 下一单 t1051**（worldgen 面改动会移位生成腿，独立成单全矩阵核移位，不混入本单）。
+- 最近闭环：**t1051 review0913 #1 矿井悬空轨清偿**（2026-09-15，fix(t1051) + test(t1051) + 本 docs）：① 修1（处方式）src/World/world.cpp placeMineshaft 干燥门内加一行 `if (!BlockRegistry::isTopFlushSupport(m_chunks.blockAt(rx, ry-1, rz), m_chunks.stateAt(rx, ry-1, rz))) continue;`（与 t733 失撑坍落 / 门族放置同一单一权威谓词）——400 语料实测过滤数 0（review 假设的同矿延迟落块形态未触发），保留 = 契约面 + 防御完备。② 修2（真实机制清偿）新增 `pruneUnsupportedWorldgenRails()`：全图扫 Rail、正下方非齐平支撑 → 摘轨回「少一段轨」无害终态；位序 carveCanyon 后、pruneFloatingSnowLayers 毗邻（t716 ③ 同款 carve 类后置守卫先例）；只判 Rail 单 id。**机制归因修正**：400 世界 sweep + worldgen 逐 pass 计数桩实证悬空轨产生者 = carveCanyon 掏空已铺轨地板（seed 42/166/207 各 3/2/2 根共 7，跳变点精确落在 carveCanyon；要塞 Phase A 壳覆盖/Phase C 掏刻同域结构上产不出悬空轨）；MC wiki Rail 三元组引证（顶面带沿块才可铺 / 失撑掉自身 / Infdev 20100618 / minecraft.wiki 2026-09-15 实读）入 dev-plan。③ P-t1051a（section08）：27 世界（12 t1043b 同源 + 3 复现体 + 12 扩面）悬空轨==0 行为半 + world.cpp 三钉（gate/prune/prune-call）；顺手修 review0915 #5 filtered 汇总行（matrix_helpers.cpp，filter 模式 `=== filtered: legFilter=<s>, ran N legs ===`，零头文件改动）。④ 矩阵 569→570；阴性轮摘 prune 调用点→7 根精确重现→t1051a 独红零误伤→还原回绿（matrix_t1051_neg.log + restore）。**登记剩余待办**：箱子矿车裸键门残余（随下一波 parity）+ Review0915 #4/#7 维持登记 / #6 顺手修搭下一笔 entitymanager + review0913 #2/#3/#4 维持登记（#5 已顺手修）。
+- t1050 review0915 两项纠偏（2026-09-15，fix + test + docs 4172927）：stepTick dt 入口双钳制（方案①+droppedDtCount）+ 空手潜行右键交互 MC 口径恢复（sneakPlaceBlock 手持方块判据）；矩阵 564→569；阴性轮×2 存证。
 - R20.09 EditBuffer（2026-09-15，fix(r2009) + test(r2009) + docs c760606）：src/Core/editbuffer.h（DirtyChunkSet + EditBuffer）+ GameSession 首消费方 + Review0915 #3① Command.blockState 五参权威；矩阵 560→564；section13 四腿。World/QML/PlayerController/ChunkGeometry 零触碰。
 - R20.08 WorldFacade（2026-09-15，f0517c6/30efc3b/6d7c649）：WorldFacade 收窄视图 + GameSession/ChunkGeometry 双示范迁移，矩阵 556→560。
 - R20.07 GameSession（2026-09-15，7ca99e1/cc33c69/cf63c07）：编排壳五项迁移，矩阵 552→556。
@@ -47,12 +48,12 @@ needs_human: false
 - R20.03 测试分层（2026-09-15，09b8cb7/3daab66）：tools/matrix/ 八段 + --filter；545/0；全量冷编 2m4s。
 - t1049 GOV-20260914-1（2026-09-14）：review26-1 = 腿跨段泄漏 + 踩踏 RNG，非 UB。
 - R19.23 批次全貌：t1038→…→t1049，矩阵 521→545。
-- **下一最小动作**：t1051（review0913 #1 悬空轨——worldgen 面独立成单，全矩阵核生成腿移位；worldstore mineshaft placeMineshaft 干燥门补支撑校验 + P-t1043b 悬空轨==0 针）→ 之后 R20.10 Chunk 生命周期（治理计数 2/5）。
+- **下一最小动作**：R20.10 Chunk 生命周期（refactor-plan §29.3：Absent/Loading/Generated/Active/Loaded/Evicting 六态；固定 10×10 世界仍可运行、Chunk 可卸载重载；治理计数 3/5）→ 之后 R20.11 后台 GenerationJob。
 - 实机确认累计清单：R19.22 16 项 + R19.21 12 项 + parity 波各项观感 + t1048 骑车 500m 节奏待用户数据。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。断链恢复按纪律⑦硬门执行。
 
 ## Governance Counter
 
-- 锚点：2026-09-08 初始化 GREEN；#2/#3（09-09）、#4（09-11）GREEN、#5（09-12）YELLOW→闭环、#6（09-14）YELLOW→GOV-20260914-1 闭环、**#7（09-15）GREEN**（R20 地基 5 闭环放行，计数重算）；此后新闭环计数：R20.09 = 1/5、t1050 = 2/5。
+- 锚点：2026-09-08 初始化 GREEN；#2/#3（09-09）、#4（09-11）GREEN、#5（09-12）YELLOW→闭环、#6（09-14）YELLOW→GOV-20260914-1 闭环、**#7（09-15）GREEN**（R20 地基 5 闭环放行，计数重算）；此后新闭环计数：R20.09 = 1/5、t1050 = 2/5、t1051 = 3/5。
 - 触发规则：每 5 个完整闭环任务、批次结束、架构阶段切换、异常指标、定时触发 → 读 autonomous-governance 相关章节写结论。
 - 任务计数只统计完整 fix/test/docs 闭环。
