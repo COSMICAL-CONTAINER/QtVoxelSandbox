@@ -272,4 +272,8 @@ private:
                                      //   纯图腿零世界；r2010b-d 自建 fresh 小世界 ×4
                                      //   （wB 稳态 / wC 卸载重载 / wS1+wS2 存档往返），
                                      //   rig 世界 w 零接触，接 section13）
+    void section15_generationjob(); // R20.11 GenerationJob 同步版 ChunkScheduler 探针（置尾
+                                    //   先例沿用：r2011a-c 纯请求模型腿零世界（裸 scheduler
+                                    //   + 测试 worker）；r2011d 裸 3×3 ChunkManager +
+                                    //   fresh 小世界 ×1，rig 世界 w 零接触，接 section14）
 };
