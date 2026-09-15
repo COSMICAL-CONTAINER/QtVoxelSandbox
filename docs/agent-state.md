@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-15 09:40（R20.08 闭环）
+更新时间：2026-09-15 09:55（R20.08 闭环 + 治理审计 #7 GREEN）
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,15 +9,15 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: R20.09 EditBuffer（plan §29.3 R20.09：一次 Tick 内方块修改合并成 WorldDelta——多次相邻编辑不产生重复通知、规则终态与旧实现一致、DirtyChunkSet 可被测试、mesh 调度不再直绑每一次 setBlock；gamesession 静默写收口正席）——先过治理检查（计数已满 5）
+current_task: R20.09 EditBuffer（plan §29.3 R20.09：一次 Tick 内方块修改合并成 WorldDelta——多次相邻编辑不产生重复通知、规则终态与旧实现一致、DirtyChunkSet 可被测试、mesh 调度不再直绑每一次 setBlock；gamesession 静默写收口正席）
 current_task_status: READY
 last_completed_task: R20.08 WorldFacade（src/World/worldfacade.h header-only 收窄视图：查询面 12 入口 + chunk 网格三门查询 + 命令语义写 setBlock/setBlockWithState 四转发，非 QObject 纯值语义包装；GameSession 命令写/回读迁移 + ChunkGeometry myChunk() 退役 = mesher 零 Chunk*；World 类零改动、QML 零迁移；实现由后台 agent 起头、网络断链后主控盘点续完成）
-last_task_closure_commit: 本 docs 提交（代码终态 = fix(r2008) worldfacade.h+gamesession.h+chunkgeometry.{h,cpp} + test(r2008) section12 四腿+CMakeLists+helpers+section11 钉同步）
-last_verified_commit: test(r2008)（矩阵 560 PASS / 0 FAIL ×2：matrix_r2008_pos/final.log EXIT=0；556 权威 diff = 4 新增 r2008a-d + 5 登记漂移类[t813 戳/t830 采样/t979 涉水计数 16→15/t997 计时/t1023c 文件数 133→134]；filter 面 r2008=4P/0F、r2007=4P/0F；阴性轮 matrix_r2008_neg.log 变异旁路→恰红 r2008c[正面钉 x0<2 + command-bypass 反探双红因]→Edit 反向还原→回绿；app 重建 EXIT=0 + 冒烟 EXIT=124 + tail20 零错误）
-last_governance_review: 2026-09-14（audit #6 YELLOW → GOV-20260914-1=t1049 已闭环；R20.03 为 R20 首单，治理计数从 0 起算）
-governance_review_due: true（R20.08 收口后满 5 完整闭环：R20.03/05/06/07/08——先治理审计再开 R20.09）
-completed_tasks_since_governance_review: 5
-next_task: 治理审计 GOV-20260915-#7 → R20.09 EditBuffer
+last_task_closure_commit: 6d7c649 docs(plan)（代码终态 = fix(r2008) f0517c6 + test(r2008) 30efc3b）
+last_verified_commit: test(r2008) 30efc3b（矩阵 560 PASS / 0 FAIL ×2：matrix_r2008_pos/final.log EXIT=0；556 权威 diff = 4 新增 r2008a-d + 5 登记漂移类[t813 戳/t830 采样/t979 涉水计数 16→15/t997 计时/t1023c 文件数 133→134]；filter 面 r2008=4P/0F、r2007=4P/0F；阴性轮 matrix_r2008_neg.log 变异旁路→恰红 r2008c[正面钉 x0<2 + command-bypass 反探双红因]→Edit 反向还原→回绿；app 重建 EXIT=0 + 冒烟 EXIT=124 + tail20 零错误）
+last_governance_review: 2026-09-15（audit #7 GREEN——R20 地基 5 闭环全绿放行；Mimosa ENOBUFS 环境注记在案）
+governance_review_due: false
+completed_tasks_since_governance_review: 0
+next_task: R20.09 EditBuffer
 next_task_source: docs/refactor-plan-2026-09-08.md §29.3 R20.09
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -44,12 +44,12 @@ needs_human: false
 - R20.03 测试分层（2026-09-15，09b8cb7/3daab66）：tools/matrix/ 八段 + --filter；545/0；全量冷编 2m4s。
 - t1049 GOV-20260914-1（2026-09-14）：review26-1 = 腿跨段泄漏 + 踩踏 RNG，非 UB。
 - R19.23 批次全貌：t1038→…→t1049，矩阵 521→545。
-- **下一最小动作**：治理审计 GOV-20260915-#7（计数满 5 触发；读 autonomous-governance 触发章节 + 核 Git/矩阵/控制块，写结论）→ 通过后 R20.09 EditBuffer。
+- **下一最小动作**：R20.09 EditBuffer（治理审计 #7 已 GREEN 放行）。
 - 实机确认累计清单：R19.22 16 项 + R19.21 12 项 + parity 波各项观感 + t1048 骑车 500m 节奏待用户数据。
 - 若 API 限额、断链或进程退出：只更新本文件的 Current Control Block 和 Recovery Point，不扩大任务范围。断链恢复按纪律⑦硬门执行。
 
 ## Governance Counter
 
-- 锚点：2026-09-08 初始化 GREEN；#2/#3（09-09）、#4（09-11）GREEN、#5（09-12）YELLOW→闭环、#6（09-14）YELLOW→GOV-20260914-1 闭环。
+- 锚点：2026-09-08 初始化 GREEN；#2/#3（09-09）、#4（09-11）GREEN、#5（09-12）YELLOW→闭环、#6（09-14）YELLOW→GOV-20260914-1 闭环、**#7（09-15）GREEN**（R20 地基 5 闭环放行，计数重算）。
 - 触发规则：每 5 个完整闭环任务、批次结束、架构阶段切换、异常指标、定时触发 → 读 autonomous-governance 相关章节写结论。
 - 任务计数只统计完整 fix/test/docs 闭环。
