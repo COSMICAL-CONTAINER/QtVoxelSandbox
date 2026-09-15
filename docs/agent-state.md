@@ -77,6 +77,6 @@ needs_human: false
 
 ## Governance Counter
 
-- 锚点：2026-09-08 初始化 GREEN；#2/#3（09-09）、#4（09-11）GREEN、#5（09-12）YELLOW→闭环、#6（09-14）YELLOW→GOV-20260914-1 闭环、#7（09-15 上午）GREEN（R20 地基 5 闭环放行）、**#8（09-15 下午，docs/governance-audit-2026-09-15-b.md）GREEN**（用户 0912 指令波 R20.03→11 收官 + 5 闭环 [R20.09/t1050/t1051/R20.10/R20.11] 全绿放行；线程期红线已立：worker 禁 QObject/QML/QQuick3D）；#9（09-16 凌晨，docs/governance-audit-2026-09-16.md）GREEN——**§29.3 序列收官** + 5 闭环 [R20.12/13/14/15/t1052] 放行；下一阶段方向权衡在案（①Loading 失败恢复边→②流式激活设计段交用户→③定向执行）；计数起重算。
+- 锚点：2026-09-08 初始化 GREEN；#2/#3（09-09）、#4（09-11）GREEN、#5（09-12）YELLOW→闭环、#6（09-14）YELLOW→GOV-20260914-1 闭环、#7（09-15 上午）GREEN（R20 地基 5 闭环放行）、**#8（09-15 下午，docs/governance-audit-2026-09-15-b.md）GREEN**（用户 0912 指令波 R20.03→11 收官 + 5 闭环 [R20.09/t1050/t1051/R20.10/R20.11] 全绿放行；线程期红线已立：worker 禁 QObject/QML/QQuick3D）；#9（09-16 凌晨，docs/governance-audit-2026-09-16.md）GREEN——**§29.3 序列收官** + 5 闭环放行，方向权衡①②③在案；此后 r2010b 闭环（计数 1/5）；**§29.4 流式激活设计草案 v1 已入 refactor-plan 尾（D1-D6 + P1-P5 + 四问），待用户 md 定向，定向前 parity 波（t1053 walk 重构）先行**。
 - 触发规则：每 5 个完整闭环任务、批次结束、架构阶段切换、异常指标、定时触发 → 读 autonomous-governance 相关章节写结论。
 - 任务计数只统计完整 fix/test/docs 闭环。
