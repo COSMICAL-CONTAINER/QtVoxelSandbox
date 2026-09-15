@@ -2,7 +2,8 @@
 
 #include "gamesession.h" // R20.07 被测：GameSession（固定 Tick / 暂停 / 命令委托 / WorldDelta）
 
-// R20.07 GameSession 探针段（4 腿 r2007a-d；filter 词 "r2007"；矩阵 552→556，band 555±2 内）。
+// R20.07 GameSession 探针段（5 腿 r2007a-e；filter 词 "r2007"；矩阵 552→556，band 555±2 内；
+// t1050 增 r2007e dt 钳制腿 → 569）。
 // 置尾先例沿用（接 section10，runAll 末执行）；本段自建 48×48×96 seed 82 fresh 小世界
 //（section06 t973 同款 incantation，全矩阵 proven）×3（A/B 双生 + C 共享腿世界），对 rig
 // 世界 w 零接触。任务契约（docs/refactor-plan-2026-09-08.md §29.3 R20.07 原文）：
@@ -479,6 +480,71 @@ void MatrixRun::section11_gamesession()
                              " exact tick, FIFO order observable via final world state"
                              " (place->break = Air, break-noop->place = Stone), capacity"
                              " reject visible at session API (256 then kErrQueueFull)"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2007e：dt 钳制（t1050 修1，Review_2026-09-15 #1 方案①入口双钳制）──────────────────
+    //    (1) dt=3600s（断点续跑 / 切后台恢复量级墙钟差）→ 整体丢弃：返回 0、tick 不动、计数 +1、
+    //        累积器零残留（无 catch-up 突发、无时间债）；(2) 丢弃后 0.1s 泵照常 1 tick（无污染）；
+    //    (3) 负 dt → 零累积（负时间债入口焊死——后续正常 dt 不被吃）；(4) 恰上界 1.0s（== 严格
+    //        大于才丢）→ 10 tick 照常。选型依据（方案① vs ②）见 gamesession.h stepTick 注。
+    //    阴性轮敏感：摘负 dt 门（false && 前缀）→ (3) 红（-0.5s 入累积器成 -500ms 负债，下一泵
+    //    0.1s 只到 -400 < 100 → 0 tick ≠ 1，恰红且快）；摘超界门同理 (1) 红（3600s → 36000 tick
+    //    连跑，探针挂死即红）。共享 wC 稳态，(4) 十 tick 无面（r2007c 300 soak 先例）。
+    runLeg(QStringLiteral("r2007e dt clamp entry guard (t1050, Review_2026-09-15 #1 option A):"
+        " a 3600s stepTick (wall-clock gap scale - debugger breakpoint resume / background"
+        " return) is dropped wholesale - 0 ticks executed, tick count unchanged,"
+        " droppedDtCount reads 1 and the accumulator carries no residue (no catch-up"
+        " burst, no time debt); a following normal 0.1s pump still fires exactly one tick"
+        " (unpoisoned); a negative dt (-0.5s) is clamped to zero accumulation so the next"
+        " 0.1s pump still fires exactly one tick (no negative debt eating future time);"
+        " dt exactly at the 1.0s cap is accepted (ten ticks, strict-greater drop) - the"
+        " int-ms accumulator input domain is bounded at entry so qRound cannot overflow"
+        " (negative-round sensitive: negative-dt guard removal / over-limit guard removal)"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // (1) 超界丢弃：dt=3600s → 0 tick + 计数 1 + tick 不动：
+        GameSession g1(wC);
+        const int big = g1.stepTick(3600.0);
+        const bool bigOk = big == 0 && g1.tick() == 0 && g1.droppedDtCount() == 1;
+        ok = ok && bigOk;
+        if (!bigOk) diag += QStringLiteral("[big got=%1 tick=%2 drops=%3] ")
+                                 .arg(big).arg(g1.tick()).arg(g1.droppedDtCount());
+
+        // (2) 丢弃后零残留：0.1s 泵照常 1 tick（累积器未被 3600s 污染）：
+        const int after = g1.stepTick(0.1);
+        const bool afterOk = after == 1 && g1.tick() == 1 && g1.droppedDtCount() == 1;
+        ok = ok && afterOk;
+        if (!afterOk) diag += QStringLiteral("[after got=%1 tick=%2] ").arg(after).arg(g1.tick());
+
+        // (3) 负 dt → 零累积：自身 0 tick 且**不吃后续**（-500ms 负债若入累积器，下一泵 100ms
+        //     只到 -400 < 100 → 0 tick——阴性轮摘负 dt 门的恰红点）。tick 断言分两步：负泵后
+        //     查一次（tick 仍 0），后续泵后再查一次（tick 1）——同语句内先泵后断会时序错位。
+        GameSession g2(wC);
+        const int neg = g2.stepTick(-0.5);
+        const bool negSelf = neg == 0 && g2.tick() == 0; // 负泵自身零推进
+        const int negAfter = g2.stepTick(0.1);
+        const bool negOk = negSelf && negAfter == 1 && g2.tick() == 1; // 后续正常 dt 不被吃
+        ok = ok && negOk;
+        if (!negOk) diag += QStringLiteral("[neg self=%1 got=%2 after=%3 tick=%4] ")
+                                 .arg(negSelf).arg(neg).arg(negAfter).arg(g2.tick());
+
+        // (4) 恰上界不超界：1.0s（== kMaxStepSecs，严格大于才丢）→ 10 tick 照常 + 零丢弃计数：
+        GameSession g3(wC);
+        const int atCap = g3.stepTick(1.0);
+        const bool capOk = atCap == 10 && g3.tick() == 10 && g3.droppedDtCount() == 0;
+        ok = ok && capOk;
+        if (!capOk) diag += QStringLiteral("[cap got=%1 tick=%2] ").arg(atCap).arg(g3.tick());
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2007e dt clamp entry guard: 3600s wall-clock gap dropped"
+                             " wholesale (0 ticks, droppedDtCount=1, no residue), following"
+                             " normal 0.1s pump unaffected, negative dt clamped to zero"
+                             " accumulation (no negative debt eating the next pump), dt at"
+                             " the 1.0s cap still yields ten ticks - accumulator input"
+                             " domain bounded at entry (t1050, Review_2026-09-15 #1)"
                           << (ok ? QString() : diag);
     });
 }

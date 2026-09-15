@@ -1908,8 +1908,8 @@ void MatrixRun::section08_recent()
         // (1b) 潜行旁路门（review0909 #2）：潜行持方块右键音符盒 → 旁路调音走放置（MC 潜行右键旁路
         //      useBlock 口径，同工作台/箱子等分支；非潜行右键 → 调音已由 (1) 的 25 次空手右键证明——
         //      门只拦潜行路径）。瞄准 +X 侧脸（放置落侧邻格，顶面留给 (2) 攻击腿的瞄准惯例）。
-        //      阴性轮敏感：摘 playercontroller.cpp 音符盒分支 !sneakPlace 门 → 潜行右键仍调音
-        //      （tunedPitches 增长、音高位翻、侧邻格无木板）→ 本腿红。
+    //    阴性轮敏感：摘 playercontroller.cpp 音符盒分支 sneakPlaceBlock 门（t1050 起旁路判据名）
+    //    → 潜行右键仍调音（tunedPitches 增长、音高位翻、侧邻格无木板）→ 本腿红。
         const int nTunedBeforeSneak = tunedPitches.size();
         const QVector3D hitSneak = aimT28b(14.5f, 16.5f, float(nx28b) + 0.9f, float(ny28b) + 0.5f,
                                           float(nz28b) + 0.5f, 2);
@@ -2018,7 +2018,7 @@ void MatrixRun::section08_recent()
             {"cpp-note-tune-emit", "emit noteBlockTuned(m_hitBx, m_hitBy, m_hitBz, pitch, family,"},
             {"cpp-note-atk-emit", "emit noteBlockAttackPlayed(m_hitBx, m_hitBy, m_hitBz, pitch, family);"},
             // review0909 #2：调音分支补潜行旁路门（对齐同函数容器/机关件分支模式）。
-            {"cpp-note-sneak-gate", "if (!sneakPlace && hitId == BlockRegistry::NoteBlock) {"},
+            {"cpp-note-sneak-gate", "if (!sneakPlaceBlock && hitId == BlockRegistry::NoteBlock) {"},
         });
         missC << pinSet(rootC + QStringLiteral("/src/Core/blockregistry.h"), {
             {"hdr-note-id-contract", "NoteBlock         = 143,"},
@@ -2688,7 +2688,7 @@ void MatrixRun::section08_recent()
     //    两向：(1) 潜行持方块右键木门 = 放置落命中面邻格（门不开：两半 state bit2 保持 0、doorToggled
     //    零发——use 被旁路）；(2) 非潜行持方块右键 = 开合照常（use 优先于放置吃掉右键：两半同翻
     //    bit2=4、doorToggled 恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘门分支
-    //    !sneakPlace 门 → 潜行腿红（潜行右键仍开门 + 门面无放置）+ cpp-door-sneak-gate 钉红；
+    //    sneakPlaceBlock 门（t1050 起判据名）→ 潜行腿红（潜行右键仍开门 + 门面无放置）+ cpp-door-sneak-gate 钉红；
     //    非潜行对照腿不受门影响保绿。
     runLegMulti({ "t1034a door sneakPlace bypass: sneaking with a held block and right-clicking a wooden door place"
         "s the held block on the clicked face's neighbor cell while the door stays shut on both halves wi"
@@ -2769,7 +2769,7 @@ void MatrixRun::section08_recent()
         // (3) 源钉（pinSet 剥注释；阴性轮摘门即红）。
         const QString rootT34a = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         const QStringList missT34a = pinSet(rootT34a + QStringLiteral("/src/Game/playercontroller.cpp"), {
-            {"cpp-door-sneak-gate", "if (!sneakPlace && BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {"},
+            {"cpp-door-sneak-gate", "if (!sneakPlaceBlock && BlockRegistry::isDoor(hitId) && hitId != BlockRegistry::IronDoor) {"},
         });
         if (!missT34a.isEmpty())
             qInfo().noquote() << "  [t1034a diag] pins" << missT34a.join(QLatin1Char(','));
@@ -2800,7 +2800,8 @@ void MatrixRun::section08_recent()
     //    睡觉」（trySleepAt 夜/雷暴窗口门的白天分支——契约口径：拒绝文案不算放置失败对照）；
     //    (2) 潜行持方块右键床 = 放置落命中面邻格（睡链整链不触达：sleepRefused 计数不增长、不入睡、
     //    床两半原样——MC：潜行右键床=放置，不睡）。门加在 placeBlock 床分支头（先于 trySleepAt 调用），
-    //    夜门/雷暴门/怪物门序一律不被触达。阴性轮敏感（单构建三摘一轮）：摘床分支 !sneakPlace 门 →
+    //    夜门/雷暴门/怪物门序一律不被触达。阴性轮敏感（单构建三摘一轮）：摘床分支 sneakPlaceBlock 门
+    //    （t1050 起判据名）→
     //    潜行腿红（潜行右键仍走拒睡链：refused 计 +1 且无放置）+ cpp-bed-sneak-gate 钉红；非潜行
     //    拒睡对照腿不受门影响保绿。
     runLegMulti({ "t1034b bed sneakPlace bypass: a plain empty-hand right-click on the bed by day still reaches the"
@@ -2883,7 +2884,7 @@ void MatrixRun::section08_recent()
         // (3) 源钉（pinSet 剥注释；阴性轮摘门即红）。
         const QString rootT34b = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         const QStringList missT34b = pinSet(rootT34b + QStringLiteral("/src/Game/playercontroller.cpp"), {
-            {"cpp-bed-sneak-gate", "if (!sneakPlace && BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {"},
+            {"cpp-bed-sneak-gate", "if (!sneakPlaceBlock && BlockRegistry::isBed(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {"},
         });
         if (!missT34b.isEmpty())
             qInfo().noquote() << "  [t1034b diag] pins" << missT34b.join(QLatin1Char(','));
@@ -2914,7 +2915,7 @@ void MatrixRun::section08_recent()
     // ── P-t1034c 活板门 sneakPlace 旁路（review0909 #2 存量登记项清偿，t1034）──
     //    两向：(1) 潜行持方块右键合态活板门 = 放置落命中面邻格（板不翻：state bit0 保持 0、
     //    doorToggled 零发——use 被旁路）；(2) 非潜行持方块右键 = 翻板照常（bit0→1、doorToggled
-    //    恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘活板门分支 !sneakPlace 门 → 潜行腿红
+    //    恰 1 次、邻格无放置）。阴性轮敏感（单构建三摘一轮）：摘活板门分支 sneakPlaceBlock 门（t1050 起判据名）→ 潜行腿红
     //    （潜行右键仍翻板 + 板面无放置）+ cpp-trapdoor-sneak-gate 钉红；非潜行对照腿不受门影响保绿。
     runLegMulti({ "t1034c trapdoor sneakPlace bypass: sneaking with a held block and right-clicking a closed trapdo"
         "or places the held block on the clicked face's neighbor cell while the trapdoor stays closed (st"
@@ -2989,7 +2990,7 @@ void MatrixRun::section08_recent()
         // (3) 源钉（pinSet 剥注释；阴性轮摘门即红）。
         const QString rootT34c = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         const QStringList missT34c = pinSet(rootT34c + QStringLiteral("/src/Game/playercontroller.cpp"), {
-            {"cpp-trapdoor-sneak-gate", "if (!sneakPlace && hitId == BlockRegistry::WoodTrapdoor) {"},
+            {"cpp-trapdoor-sneak-gate", "if (!sneakPlaceBlock && hitId == BlockRegistry::WoodTrapdoor) {"},
         });
         if (!missT34c.isEmpty())
             qInfo().noquote() << "  [t1034c diag] pins" << missT34c.join(QLatin1Char(','));
@@ -4189,7 +4190,7 @@ void MatrixRun::section08_recent()
     // ── P-t1046a 拉杆 / 按钮 sneakPlace 旁路（R19.23 t1046 低-3；t1034 门同式）──
     //    两向四腿：(1) 潜行持方块右键拉杆 = 放置落命中面邻格（拉杆 bit0 保持 0——use 被旁路）；
     //    (2) 非潜行持方块右键拉杆 = 激活照常（bit0 翻 1、无放置）；(3)(4) 木按钮同两向（按下 bit0=1）。
-    //    阴性轮敏感：摘机关分支 !sneakPlace 门 → 潜行两腿红（潜行右键仍扳动 + 无放置）+ cpp-mech-sneak-gate
+    //    阴性轮敏感：摘机关分支 sneakPlaceBlock 门（t1050 起判据名）→ 潜行两腿红（潜行右键仍扳动 + 无放置）+ cpp-mech-sneak-gate
     //    钉红；非潜行对照腿不受门影响保绿。
     runLegMulti({ "t1046a lever/button sneakPlace bypass: sneaking with a held block and right-clicking a floor lev"
         "er (or a wood button) places the held block on the hit face's neighbor cell while the mechanism "
@@ -4280,7 +4281,7 @@ void MatrixRun::section08_recent()
         // (5) 源钉（pinSet 剥注释；阴性轮摘门即红）。
         const QString rootT46a = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         const QStringList missT46a = pinSet(rootT46a + QStringLiteral("/src/Game/playercontroller.cpp"), {
-            {"cpp-mech-sneak-gate", "if (!sneakPlace && BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {"},
+            {"cpp-mech-sneak-gate", "if (!sneakPlaceBlock && BlockRegistry::isManualIgniter(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {"},
         });
         if (!missT46a.isEmpty())
             qInfo().noquote() << "  [t1046a diag] pins" << missT46a.join(QLatin1Char(','));
@@ -4306,6 +4307,404 @@ void MatrixRun::section08_recent()
                                   : QStringLiteral("diag sneakLv=%1 useLv=%2 sneakBtn=%3 useBtn=%4 pins=%5")
                                         .arg(okSneakLv).arg(okUseLv).arg(okSneakBtn).arg(okUseBtn)
                                         .arg(missT46a.isEmpty()));
+    });
+
+    // ── P-t1050a 空手潜行右键机关照常扳动（t1050 修2，Review_2026-09-15 #2 MC 口径纠偏）──
+    //    两向：(1) 空手潜行右键拉杆 = 扳动照常（bit0 0→1 + 挥手 + 无放置）——潜行只让手持方块的
+    //    放置优先（minecraft.wiki/w/Sneaking Effects："Pressing use prioritizes using a held item
+    //    over interacting with a targeted block"；空手无手持物品 → 交互照常），51cc43c③ 裸门回归
+    //    （空手 sneak 右键机关=无效应）就此收口；(2) 持方块潜行对照 = 放置优先不回归（t1046a 同
+    //    语义再钉：bit0 保持 0 + 邻格木板）。
+    //    阴性轮敏感：sneakPlaceBlock 判据摘 m_selectedBlock!=Air 合取项（退回裸 sneakPlace）→
+    //    (1) 红（空手 sneak 旁路到放置，拉杆不扳）+ t1050b/c/d 空手腿同红 + 判据钉红；(2) 与既有
+    //    持方块腿（t1034a/b/c、t1046a、t1028b(1b)）判据取值不变 → 保绿（恰红面 = 本单四新腿）。
+    runLegMulti({ "t1050a empty-hand sneak right-click still activates mechanisms (t1050, Review_"
+        "2026-09-15 #2 MC caliber fix): sneaking with an empty hand and right-clicking a floor "
+        "lever toggles it on (state bit0 set, exactly one swingArm, no block placed on the hit "
+        "face's neighbor cell - sneak only prioritizes placing a held block, an empty hand falls "
+        "through to normal interaction per MC wiki Sneaking use-prioritizes-held-item caliber); "
+        "sneaking with a held block on the control lever still bypasses to placement (bit0 stays "
+        "clear, planks land above - t1046a caliber regression-pinned)"
+        "diag emptyHand=%1 heldCtl=%2 pins=%3 swings=%4" }, [&]() {
+        World wT50a;
+        wT50a.setWidth(48); wT50a.setDepth(48); wT50a.setHeight(96); wT50a.setSeed(10501);
+        Hotbar hbT50a;
+        PlayerController pcT50a;
+        pcT50a.setWorld(&wT50a);
+        pcT50a.setHotbar(&hbT50a);
+        QQuickWindow winT50a;
+        pcT50a.setParentItem(winT50a.contentItem());
+        // rig：y=14 Planks 地台，y15..20 净空；拉杆 A（z=16，空手腿）与 B（z=20，持方块对照腿）
+        //     贴地 state0（t1046a 同式摆位）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT50a.setBlock(x, y, z, BR::Air, 0);
+                wT50a.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT50a.setBlock(12, 15, 16, BR::Lever, quint8(0)); // A（空手腿）
+        wT50a.setBlock(12, 15, 20, BR::Lever, quint8(0)); // B（对照腿）
+        int swingsT50a = 0;
+        const QMetaObject::Connection cSwA = QObject::connect(
+            &pcT50a, &PlayerController::swingArm, &pcT50a,
+            [&swingsT50a]() { ++swingsT50a; });
+        // 瞄准帮手（t1046a 同款）：自 +X 侧瞄拉杆基座顶面 y15.09，射线 z=基座 z 内域（恰中 +Y 面）。
+        const auto aimT50a = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT50a.release();
+            pcT50a.grab();
+            pcT50a.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT50a.tick();
+            return pcT50a.hitBlock();
+        };
+        const auto pumpT50a = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 空手腿：显式归 Air（t1040 rig 加固同式）+ 潜行右键拉杆 A → 扳动（bit0=1）+ 恰一次
+        //     挥手（使用动作，t29）+ 无放置（右键被 use 消费）。
+        const QVector3D hitEmptyA = aimT50a(16.6f, 12.5f, 15.09f, 16.6f);
+        pcT50a.setSelectedBlock(int(BR::Air));    // 空手
+        pcT50a.setKey(Qt::Key_Shift, true);       // 潜行（sneakPlace = m_keys 原始键态，t523 口径）
+        pcT50a.placeBlock();
+        pumpT50a(260);
+        pcT50a.setKey(Qt::Key_Shift, false);
+        const bool okEmptyA = hitEmptyA == QVector3D(12, 15, 16)
+            && wT50a.blockAt(12, 15, 16) == BR::Lever
+            && (wT50a.stateAt(12, 15, 16) & 1) == 1       // 扳动（激活沿——t1050 纠偏核心断言）
+            && swingsT50a == 1                             // 一次「使用」动作挥手
+            && wT50a.blockAt(12, 16, 16) == BR::Air;       // 无放置
+        // (2) 持方块对照腿：潜行持木板右键拉杆 B → 放置优先（bit0 保持 0 + 邻格木板，t1046a 口径）。
+        pumpT50a(260);
+        const QVector3D hitHeldA = aimT50a(20.6f, 12.5f, 15.09f, 20.6f);
+        pcT50a.setKey(Qt::Key_Shift, true);
+        pcT50a.setSelectedBlock(int(BR::Planks)); // 持方块（C++ 直喂 selectedBlock，t1028b 同款）
+        pcT50a.placeBlock();
+        pumpT50a(260);
+        pcT50a.setKey(Qt::Key_Shift, false);
+        const bool okHeldA = hitHeldA == QVector3D(12, 15, 20)
+            && wT50a.blockAt(12, 16, 20) == BR::Planks     // 命中面邻格放置
+            && wT50a.blockAt(12, 15, 20) == BR::Lever
+            && (wT50a.stateAt(12, 15, 20) & 1) == 0;       // 未扳动（use 被旁路）
+        // (3) 源钉：旁路判据合取形态（阴性轮摘合取项即红；pinSet 剥注释）。
+        const QString rootT50a = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT50a = pinSet(rootT50a + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"t1050 sneak bypass holds-block conjunction",
+             "const bool sneakPlaceBlock = sneakPlace && m_selectedBlock != BlockRegistry::Air;"},
+        });
+        if (!missT50a.isEmpty())
+            qInfo().noquote() << "  [t1050a diag] pins" << missT50a.join(QLatin1Char(','));
+        QObject::disconnect(cSwA);
+        pcT50a.release();
+        winT50a.deleteLater();
+        const bool okA50 = okEmptyA && okHeldA && missT50a.isEmpty();
+        if (!okA50)
+            qInfo().noquote() << "  [t1050a diag] hitEmpty" << hitEmptyA << "hitHeld" << hitHeldA
+                              << "stA" << wT50a.stateAt(12, 15, 16) << "stB" << wT50a.stateAt(12, 15, 20);
+        if (!okA50) ++totalFail;
+        qInfo().noquote() << (okA50 ? "PASS" : "FAIL")
+                          << "| t1050a empty-hand sneak right-click still activates mechanisms: "
+                             "empty-hand sneak on a lever toggles bit0 on with one swingArm and "
+                             "no placement (MC wiki use-prioritizes-held-item caliber, 51cc43c "
+                             "empty-hand regression closed); held-block sneak still bypasses to "
+                             "placement on the control lever (t1046a caliber re-pinned)"
+                          << (okA50 ? QString()
+                                    : QStringLiteral("diag emptyHand=%1 heldCtl=%2 pins=%3 swings=%4")
+                                          .arg(okEmptyA).arg(okHeldA).arg(missT50a.isEmpty())
+                                          .arg(swingsT50a));
+    });
+
+    // ── P-t1050b 空手潜行右键门照常开合（t1050 修2；t1034a 同 rig 反向面）──
+    //    (1) 空手潜行右键木门 = 开合照常（两半同翻 bit2=4、doorToggled 恰 1 次、无放置）；(2) 持方块
+    //    潜行对照 = 放置优先不回归（门两半合态不动 + toggles 不增长 + 邻格木板）。阴性轮敏感同 t1050a。
+    runLegMulti({ "t1050b empty-hand sneak right-click still opens doors (t1050, Review_2026-09-1"
+        "5 #2 MC caliber fix): sneaking with an empty hand and right-clicking a wooden door opens"
+        " it (both halves flip bit2, exactly one doorToggled(true), no block placed - empty hand"
+        " interacts normally, MC wiki use-prioritizes-held-item caliber); sneaking with a held bl"
+        "ock on the control door still bypasses to placement (door stays shut, toggle count froze"
+        "n, planks land on the clicked face's neighbor cell)diag emptyHand=%1 heldCtl=%2 toggles"
+        "=%3" }, [&]() {
+        World wT50b;
+        wT50b.setWidth(48); wT50b.setDepth(48); wT50b.setHeight(96); wT50b.setSeed(10502);
+        Hotbar hbT50b;
+        PlayerController pcT50b;
+        pcT50b.setWorld(&wT50b);
+        pcT50b.setHotbar(&hbT50b);
+        QQuickWindow winT50b;
+        pcT50b.setParentItem(winT50b.contentItem());
+        // rig：y=14 Planks 地台；门 A（z=16，空手腿）与 B（z=20，对照腿）各两格（下 0 + 上 8，合态）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT50b.setBlock(x, y, z, BR::Air, 0);
+                wT50b.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT50b.setBlock(12, 15, 16, BR::WoodDoor, quint8(0)); // 门 A 下格（合）
+        wT50b.setBlock(12, 16, 16, BR::WoodDoor, quint8(8)); // 门 A 上格
+        wT50b.setBlock(12, 15, 20, BR::WoodDoor, quint8(0)); // 门 B 下格（合）
+        wT50b.setBlock(12, 16, 20, BR::WoodDoor, quint8(8)); // 门 B 上格
+        int togglesT50b = 0;
+        bool lastOpenT50b = false;
+        const QMetaObject::Connection cTglB = QObject::connect(
+            &pcT50b, &PlayerController::doorToggled, &pcT50b,
+            [&](bool open) { ++togglesT50b; lastOpenT50b = open; });
+        const auto aimT50b = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT50b.release();
+            pcT50b.grab();
+            pcT50b.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT50b.tick();
+            return pcT50b.hitBlock();
+        };
+        const auto pumpT50b = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 空手腿：空手 + 潜行右键门 A 的 +X 面（t1034a 同 aim）→ 开合照常。
+        const QVector3D hitEmptyB = aimT50b(16.5f, 12.95f, 15.5f, 16.5f);
+        pcT50b.setSelectedBlock(int(BR::Air));    // 空手
+        pcT50b.setKey(Qt::Key_Shift, true);       // 潜行
+        pcT50b.placeBlock();
+        pumpT50b(260);
+        pcT50b.setKey(Qt::Key_Shift, false);
+        const bool okEmptyB = hitEmptyB == QVector3D(12, 15, 16)
+            && togglesT50b == 1 && lastOpenT50b            // 开合恰一次（两格同翻只发一次）
+            && (wT50b.stateAt(12, 15, 16) & 4) == 4        // 下半开
+            && (wT50b.stateAt(12, 16, 16) & 4) == 4        // 上半联动开
+            && wT50b.blockAt(13, 15, 16) == BR::Air;       // 无放置（右键被 use 消费）
+        // (2) 持方块对照腿：潜行持木板右键门 B → 放置优先（门两半合态不动 + toggles 不增长）。
+        pumpT50b(260);
+        const QVector3D hitHeldB = aimT50b(20.5f, 12.95f, 15.5f, 20.5f);
+        pcT50b.setKey(Qt::Key_Shift, true);
+        pcT50b.setSelectedBlock(int(BR::Planks));
+        pcT50b.placeBlock();
+        pumpT50b(260);
+        pcT50b.setKey(Qt::Key_Shift, false);
+        const bool okHeldB = hitHeldB == QVector3D(12, 15, 20)
+            && togglesT50b == 1                            // 对照腿零新增开合（use 被旁路）
+            && (wT50b.stateAt(12, 15, 20) & 4) == 0
+            && (wT50b.stateAt(12, 16, 20) & 4) == 0        // 门 B 两半合态不动
+            && wT50b.blockAt(13, 15, 20) == BR::Planks;    // 命中面邻格放置
+        QObject::disconnect(cTglB);
+        pcT50b.release();
+        winT50b.deleteLater();
+        const bool okB50 = okEmptyB && okHeldB;
+        if (!okB50)
+            qInfo().noquote() << "  [t1050b diag] hitEmpty" << hitEmptyB << "hitHeld" << hitHeldB
+                              << "toggles" << togglesT50b;
+        if (!okB50) ++totalFail;
+        qInfo().noquote() << (okB50 ? "PASS" : "FAIL")
+                          << "| t1050b empty-hand sneak right-click still opens doors: empty-hand "
+                             "sneak opens the door (both halves flip bit2, one doorToggled(true), "
+                             "no placement - MC wiki use-prioritizes-held-item caliber); held-block "
+                             "sneak still bypasses to placement (door shut, toggle count frozen)"
+                          << (okB50 ? QString()
+                                    : QStringLiteral("diag emptyHand=%1 heldCtl=%2 toggles=%3")
+                                          .arg(okEmptyB).arg(okHeldB).arg(togglesT50b));
+    });
+
+    // ── P-t1050c 空手潜行右键床照常触达入睡链（t1050 修2；t1034b 同 rig 反向面）──
+    //    (1) 空手潜行右键床（白天非雷暴）= 入睡链照常触达 → 拒睡文案恰 1 次（同 t1034b 非潜行对照
+    //    面——差异仅在潜行键态，证明门不再吞空手 sneak）；(2) 持方块潜行对照 = 放置优先不回归
+    //    （refused 不增长 + 邻格木板）。阴性轮敏感同 t1050a。
+    runLegMulti({ "t1050c empty-hand sneak right-click still reaches the sleep chain (t1050, Revie"
+        "w_2026-09-15 #2 MC caliber fix): sneaking with an empty hand and right-clicking the bed b"
+        "y day still refuses with the exact night-or-thunder message (sleep chain reached, not sle"
+        "eping, no placement - MC wiki use-prioritizes-held-item caliber); sneaking with a held b"
+        "lock on the control bed still bypasses to placement (refusal count frozen, planks land o"
+        "n the clicked face's neighbor cell)diag emptyHand=%1 heldCtl=%2 refused=%3" }, [&]() {
+        World wT50c;
+        wT50c.setWidth(48); wT50c.setDepth(48); wT50c.setHeight(96); wT50c.setSeed(10503);
+        wT50c.setWeatherState(0); // Clear（白天拒睡的确定性前提，t1034b 同款）
+        Hotbar hbT50c;
+        WorldClock clockT50c;
+        clockT50c.setPhase(0.2f); // 白天（isNight=false；setPhase 特权指令，t1024a 同款）
+        PlayerController pcT50c;
+        pcT50c.setWorld(&wT50c);
+        pcT50c.setWorldClock(&clockT50c);
+        pcT50c.setHotbar(&hbT50c);
+        QQuickWindow winT50c;
+        pcT50c.setParentItem(winT50c.contentItem());
+        // rig：床 A foot (12,15,16)/head (11,15,16)（空手腿）+ 床 B foot (12,15,20)/head (11,15,20)
+        //（对照腿），D=+X：head 在 foot -X 侧（t1034b 同式摆位）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT50c.setBlock(x, y, z, BR::Air, 0);
+                wT50c.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT50c.setBlock(12, 15, 16, BR::BedWhite, quint8(0)); // 床 A foot
+        wT50c.setBlock(11, 15, 16, BR::BedWhite, quint8(8)); // 床 A head
+        wT50c.setBlock(12, 15, 20, BR::BedWhite, quint8(0)); // 床 B foot
+        wT50c.setBlock(11, 15, 20, BR::BedWhite, quint8(8)); // 床 B head
+        int refusedT50c = 0;
+        QString lastRefuseT50c;
+        const QMetaObject::Connection cRefC = QObject::connect(
+            &pcT50c, &PlayerController::sleepRefused, &pcT50c,
+            [&refusedT50c, &lastRefuseT50c](const QString &r) { ++refusedT50c; lastRefuseT50c = r; });
+        const auto aimT50c = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT50c.release();
+            pcT50c.grab();
+            pcT50c.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT50c.tick();
+            return pcT50c.hitBlock();
+        };
+        const auto pumpT50c = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 空手腿：空手 + 潜行右键床 A foot 侧面（aim y 15.15 床垫低盒带内，t1034b 首跑教训同式）
+        //     → 入睡链照常触达：拒睡文案恰 1 次 + 不入睡 + 无放置。
+        const QVector3D hitEmptyC = aimT50c(16.5f, 12.95f, 15.15f, 16.5f);
+        pcT50c.setSelectedBlock(int(BR::Air));    // 空手
+        pcT50c.setKey(Qt::Key_Shift, true);       // 潜行（t1050 纠偏：不再吞空手交互）
+        pcT50c.placeBlock();
+        pumpT50c(260);
+        pcT50c.setKey(Qt::Key_Shift, false);
+        const bool okEmptyC = hitEmptyC == QVector3D(12, 15, 16)
+            && refusedT50c == 1
+            && lastRefuseT50c == QStringLiteral("只能在夜晚或雷暴中睡觉")
+            && !pcT50c.sleeping()
+            && wT50c.blockAt(13, 15, 16) == BR::Air        // 无放置（右键被睡链消费）
+            && wT50c.blockAt(12, 15, 16) == BR::BedWhite;  // 床本体原样
+        // (2) 持方块对照腿：潜行持木板右键床 B → 放置优先（refused 不增长 + 邻格木板）。
+        pumpT50c(260);
+        const QVector3D hitHeldC = aimT50c(20.5f, 12.95f, 15.15f, 20.5f);
+        pcT50c.setKey(Qt::Key_Shift, true);
+        pcT50c.setSelectedBlock(int(BR::Planks));
+        pcT50c.placeBlock();
+        pumpT50c(260);
+        pcT50c.setKey(Qt::Key_Shift, false);
+        const bool okHeldC = hitHeldC == QVector3D(12, 15, 20)
+            && refusedT50c == 1                            // 睡链零触达（潜行持方块 = 放置优先）
+            && !pcT50c.sleeping()
+            && wT50c.blockAt(13, 15, 20) == BR::Planks     // 命中面邻格放置
+            && wT50c.blockAt(12, 15, 20) == BR::BedWhite;  // 床本体原样
+        QObject::disconnect(cRefC);
+        pcT50c.release();
+        winT50c.deleteLater();
+        const bool okC50 = okEmptyC && okHeldC;
+        if (!okC50)
+            qInfo().noquote() << "  [t1050c diag] hitEmpty" << hitEmptyC << "hitHeld" << hitHeldC
+                              << "refused" << refusedT50c << "msg" << lastRefuseT50c;
+        if (!okC50) ++totalFail;
+        qInfo().noquote() << (okC50 ? "PASS" : "FAIL")
+                          << "| t1050c empty-hand sneak right-click still reaches the sleep chain: "
+                             "empty-hand sneak on the bed by day refuses with the exact "
+                             "night-or-thunder message and places nothing (MC wiki "
+                             "use-prioritizes-held-item caliber); held-block sneak still bypasses "
+                             "to placement with the refusal count frozen"
+                          << (okC50 ? QString()
+                                    : QStringLiteral("diag emptyHand=%1 heldCtl=%2 refused=%3")
+                                          .arg(okEmptyC).arg(okHeldC).arg(refusedT50c));
+    });
+
+    // ── P-t1050d 空手潜行右键活板门照常翻板（t1050 修2；t1034c 同 rig 反向面）──
+    //    (1) 空手潜行右键合态活板门 = 翻板照常（bit0→1、doorToggled 恰 1 次、无放置）；(2) 持方块
+    //    潜行对照 = 放置优先不回归（bit0 保持 0 + toggles 不增长 + 邻格木板）。阴性轮敏感同 t1050a。
+    runLegMulti({ "t1050d empty-hand sneak right-click still flips trapdoors (t1050, Review_2026-"
+        "09-15 #2 MC caliber fix): sneaking with an empty hand and right-clicking a closed trapdo"
+        "or flips it open (state bit0 set, exactly one doorToggled(true), no block placed - MC wi"
+        "ki use-prioritizes-held-item caliber); sneaking with a held block on the control trapdoo"
+        "r still bypasses to placement (bit0 stays clear, toggle count frozen, planks land on the"
+        " clicked face's neighbor cell)diag emptyHand=%1 heldCtl=%2 toggles=%3" }, [&]() {
+        World wT50d;
+        wT50d.setWidth(48); wT50d.setDepth(48); wT50d.setHeight(96); wT50d.setSeed(10504);
+        Hotbar hbT50d;
+        PlayerController pcT50d;
+        pcT50d.setWorld(&wT50d);
+        pcT50d.setHotbar(&hbT50d);
+        QQuickWindow winT50d;
+        pcT50d.setParentItem(winT50d.contentItem());
+        // rig：活板门 A（z=16，空手腿）与 B（z=20，对照腿）各一格合态 state0（t1034c 同式摆位）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT50d.setBlock(x, y, z, BR::Air, 0);
+                wT50d.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT50d.setBlock(12, 15, 16, BR::WoodTrapdoor, quint8(0)); // A（合）
+        wT50d.setBlock(12, 15, 20, BR::WoodTrapdoor, quint8(0)); // B（合）
+        int togglesT50d = 0;
+        bool lastOpenT50d = false;
+        const QMetaObject::Connection cTglD = QObject::connect(
+            &pcT50d, &PlayerController::doorToggled, &pcT50d,
+            [&](bool open) { ++togglesT50d; lastOpenT50d = open; });
+        const auto aimT50d = [&](float feetZ, float aimX, float aimY, float aimZ) {
+            const float ex = 14.5f, ey = 16.62f, ez = feetZ;
+            const float dx = aimX - ex, dy = aimY - ey, dz = aimZ - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pit = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcT50d.release();
+            pcT50d.grab();
+            pcT50d.loadSavedState(ex, 15.0f, ez, yaw, pit, 2 /* Survival */);
+            pcT50d.tick();
+            return pcT50d.hitBlock();
+        };
+        const auto pumpT50d = [](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 空手腿：空手 + 潜行右键活板门 A 的 +X 面（薄板带内 aim，t1034c 同式）→ 翻板照常。
+        const QVector3D hitEmptyD = aimT50d(16.5f, 12.95f, 15.10f, 16.5f);
+        pcT50d.setSelectedBlock(int(BR::Air));    // 空手
+        pcT50d.setKey(Qt::Key_Shift, true);       // 潜行
+        pcT50d.placeBlock();
+        pumpT50d(260);
+        pcT50d.setKey(Qt::Key_Shift, false);
+        const bool okEmptyD = hitEmptyD == QVector3D(12, 15, 16)
+            && togglesT50d == 1 && lastOpenT50d            // 翻板恰一次（开）
+            && wT50d.blockAt(12, 15, 16) == BR::WoodTrapdoor
+            && (wT50d.stateAt(12, 15, 16) & 1) == 1        // 板已翻（开态）
+            && wT50d.blockAt(13, 15, 16) == BR::Air;       // 无放置（右键被 use 消费）
+        // (2) 持方块对照腿：潜行持木板右键活板门 B → 放置优先（bit0 保持 0 + toggles 不增长）。
+        pumpT50d(260);
+        const QVector3D hitHeldD = aimT50d(20.5f, 12.95f, 15.10f, 20.5f);
+        pcT50d.setKey(Qt::Key_Shift, true);
+        pcT50d.setSelectedBlock(int(BR::Planks));
+        pcT50d.placeBlock();
+        pumpT50d(260);
+        pcT50d.setKey(Qt::Key_Shift, false);
+        const bool okHeldD = hitHeldD == QVector3D(12, 15, 20)
+            && togglesT50d == 1                            // 对照腿零新增翻板（use 被旁路）
+            && wT50d.blockAt(12, 15, 20) == BR::WoodTrapdoor
+            && (wT50d.stateAt(12, 15, 20) & 1) == 0        // 板合态不动
+            && wT50d.blockAt(13, 15, 20) == BR::Planks;    // 命中面邻格放置
+        QObject::disconnect(cTglD);
+        pcT50d.release();
+        winT50d.deleteLater();
+        const bool okD50 = okEmptyD && okHeldD;
+        if (!okD50)
+            qInfo().noquote() << "  [t1050d diag] hitEmpty" << hitEmptyD << "hitHeld" << hitHeldD
+                              << "toggles" << togglesT50d;
+        if (!okD50) ++totalFail;
+        qInfo().noquote() << (okD50 ? "PASS" : "FAIL")
+                          << "| t1050d empty-hand sneak right-click still flips trapdoors: "
+                             "empty-hand sneak flips the closed trapdoor open (bit0 set, one "
+                             "doorToggled(true), no placement - MC wiki use-prioritizes-held-item "
+                             "caliber); held-block sneak still bypasses to placement (bit0 clear, "
+                             "toggle count frozen)"
+                          << (okD50 ? QString()
+                                    : QStringLiteral("diag emptyHand=%1 heldCtl=%2 toggles=%3")
+                                          .arg(okEmptyD).arg(okHeldD).arg(togglesT50d));
     });
 
     // ── P-t1046c 天气剩余时长持久化 + 精确续跑（R19.23 t1046 低-5；MC level.dat RainTime/ThunderTime 口径）──
