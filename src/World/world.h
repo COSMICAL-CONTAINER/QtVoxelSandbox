@@ -12,6 +12,7 @@
 
 #include "blockregistry.h" // isCollidable 走 BlockDef.solid（t88 火把 non-solid 不挡玩家）
 #include "chunkmanager.h" // 内部多 chunk 存储（World 层，不外泄到 QML）
+#include "terraingen.h" // R20.12 纯地形生成单一权威（Perlin/fBm/群系/海域/列体——World 委托到 m_terrain）
 
 // 体素世界（QML façade + 单一数据源）：内部由 ChunkManager 持一片 chunk 列网格路由（本回合
 // 3×3=9 chunk，世界 48×48×16）；Perlin fBm 生成地形，被网格(ChunkGeometry)与物理
@@ -1110,12 +1111,11 @@ signals:
     void noteBlockPlayed(int x, int y, int z, int pitch, int family);
 
 private:
-    void generate();          // 重建置换表 + ChunkManager + 填充地形（静默，不 emit）
-    void buildPermutation();  // 由 seed 填 512 置换表（线性同余，可复现）
-    double noise2(double x, double z) const;
-    double fbm(double x, double z) const;
-    // t278 3D Perlin 噪声（洞穴 carve 用）。复用 buildPermutation 的 m_perm[512] 表（与 noise2 同源）；
-    //   grad3 三维梯度。纯函数于 seed + (x,y,z) → 同 seed 同 3D 噪声场（PLAN §2-K）。范围 ~[-1,1]。
+    void generate();          // 重建纯地形采样器 + ChunkManager + 填充地形（静默，不 emit）
+    double noise2(double x, double z) const; // R20.12 起委托 m_terrain（单一权威 terraingen.h）
+    double fbm(double x, double z) const;    // 同上（委托壳——carve 族仍经 World 面调用）
+    // t278 3D Perlin 噪声（洞穴 carve 用）。R20.12 起委托 m_terrain.noise3（置换表已随纯采样器
+    //   迁入 terraingen.h 单一权威；worldgen 逐位恒等由矩阵 worldgen/determin/re-gen 三腿族守）。
     double noise3(double x, double y, double z) const;
     // t274/t306 群系枚举（plains/forest/hills/desert 四分；机制等价 MC 1.0 大尺度群系，名称为通用描述词，§9 合规）。
     //   worldgen 内部用：heightAt 据群系选振幅、placeTrees/placeTallGrass 据群系选密度、isDesert 收口到
@@ -1126,7 +1126,9 @@ private:
     //   t481/t486 前置：新增 Jungle（6，编码 6）—— 第五条独立低频 fBm 从 forest 带 + plains 候选带里 carve 出
     //   丛林（温热湿润林地，高树浓叶，见 biomeAt / heightAt / placeJungleTrees）。Hills/Desert/Snowy/Swamp 判定
     //   均先于丛林早退 → 丛林绝不吞掉既有群系（spec「勿让既有 Desert/Swamp/Snowy 消失」）。
-    enum class Biome { Plains, Hills, Desert, Forest, Snowy, Swamp, Jungle };
+    //   R20.12：枚举本体迁 TerrainGen::Biome 单一权威（terraingen.h），此处 using 别名保持全部
+    //   调用点（Biome::Plains 等）零改动。
+    using Biome = TerrainGen::Biome;
     // t385 天气状态机枚举（机制等价 MC 1.0 天气四态）。私有嵌套（天气细节，不外泄类型到 QML；
     //   Q_INVOKABLE weatherState / weatherStateAt 返 int 编码）。Thunder = 降水 + 风暴（雷电闪光 / 引燃留 t386）。
     enum class Weather : int { Clear = 0, Rain = 1, Snow = 2, Thunder = 3 };
@@ -1139,10 +1141,6 @@ private:
     // t905 perf：本入口加列级 memo（m_biomeCache，见其声明注释）—— 群系图运行期不变，重复调用变 O(1)
     //   数组读；fBm 判定本体移 biomeComputeAt（正名「计算路径」，纯函数于 seed 不变，§2-K 确定性无损）。
     Biome biomeAt(int x, int z) const;
-    // t905 perf：biomeAt 的 fBm 计算本体（原 biomeAt 函数体原样迁移，零语义变化）。最多 5 条 4 阶 fBm
-    //   （主群系图 + 丛林 + 森林 + 雪原 + 沼泽，每条 4 次 noise2）→ 单次 ~20 次 Perlin 采样。仅由
-    //   biomeAt 在 memo 未命中时调（worldgen generate 首遍全列填缓存后，运行期 tick 全命中）。
-    Biome biomeComputeAt(int x, int z) const;
     // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威；旧独立 fBm 实现已由 t274 biomeAt 统一）。
     //   供 generate（沙表层）/ placeTrees / placeTallGrass 跳过沙漠列。纯函数于 seed（经 biomeAt）。
     bool isDesert(int x, int z) const;
@@ -1155,7 +1153,9 @@ private:
     //   (80,80) 远离四角 → 不落海。heightAt 保持纯 fBm（不改），海域重塑仅在 generate/fillWater 显式应用 →
     //   placeTrees/placeTallGrass/scatterOres 经既有的「草顶 / 自然高度」守卫自然跳过海域（海列自然 surfaceY 处为
     //   air/水，非 Grass → 不种树/草），placeSurfaceLakes/placeUndergroundWaterPools 显式跳过。
-    void seaCorner(int &cx, int &cz) const;
+    //   R20.12：三函数计算本体已迁 TerrainGen（seaCorner/seaColumnHeight/isSeaSandColumn——单一
+    //   权威 terraingen.h）；此处保留 seaColumnHeight / isSeaSandColumn 委托壳（fillWater /
+    //   placeSurfaceLakes 等同步路径零改动），seaCorner 无剩余调用者已随之收编。
     int seaColumnHeight(int x, int z) const;
     bool isSeaSandColumn(int x, int z) const;
 
@@ -1491,13 +1491,17 @@ private:
     void setVoxelIfAir(int x, int y, int z, quint8 id);       // 仅写空气格（树冠不覆盖主干/地形）
     void setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state); // t310：带 state（草变种 worldgen）
     quint32 hashColumn(int seed, int x, int z) const;         // 整数哈希（列级 seed/x/z）→ 确定性伪随机
+                                                              //   R20.12 起委托 m_terrain（单一权威）
     // hashVoxel 已升 public（t836；声明见顶部 public 段注释）——钓浮标等待掷骰等跨层确定性消费共用同一权威。
     // t380：块编辑后标记流体脏（驱动 tickWaterFlow/tickLavaFlow 早退）。查编辑格 + 6 正交邻是否含
     //   Water/Lava → 设对应 m_waterDirty/m_lavaDirty=true（见 m_*Dirty 字段头注释）。blockAt 越界返 Air
     //   安全（不需 bounds 检查）。编辑是 click-rate → 6 次 blockAt 可忽略。
     void pokeFluidDirty(int x, int y, int z);
 
-    std::vector<int> m_perm;  // 512 置换表（Perlin）
+    // R20.12：纯地形采样器（seed + dims + 置换表一体；构造后只读）。generate/beginLoad 按
+    //   (m_seed, m_width/m_depth/m_height) 重建；heightAt/biomeAt/fbm/noise*/hash* 等查询面全部
+    //   委托到它（单一权威 terraingen.h）。初值与字段缺省（1337 / 16³）一致——构造体首行即 generate。
+    TerrainGen m_terrain{ 1337, { 16, 16, 16 } };
     int m_width = 16, m_depth = 16, m_height = 16, m_seed = 1337;
     // t905 perf：群系列级 memo（W×D 扁平字节缓存，值 = Biome 枚举编码，0xFF = 未填）。根因：biomeAt 单次
     //   调用最多 5 条 4 阶 fBm（~20 次 Perlin noise2），而 tickIceFreeze 每 5s 节流窗遍历全水格索引逐格调它
