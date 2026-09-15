@@ -46,6 +46,11 @@
 // 渣），每攒满 kClockTickMs 执行一个整 tick（N×stepTick(0.1) == stepTick(N×0.1) == N 个
 // tick——r2007b 行级钉）。tick 体次序 = Main.qml 桥接次序逐行镜像（①）。
 //
+// dt 钳制（t1050，Review_2026-09-15 #1）：stepTick 入口双钳制——负 dt / NaN → 零累积（无负
+// 时间债入口）；dt > kMaxStepSecs(1.0s) 整体丢弃 + qWarning + droppedDtCount 计数（断点续跑 /
+// 切后台恢复量级的异常墙钟差不 catch-up——与暂停「dt 丢弃不欠账」同门；int 累积器输入域被
+// 入口钳死故无 qRound 溢出）。选型依据与探针见 stepTick 注 + r2007e。
+//
 // 分层（PLAN §2）：Game 层编排壳——向下依赖 World（tick 家族 + setBlock 权威）+ Core
 //（command/event/mathtypes/result），不依赖 Renderer/Entities/QML；不反向被 World 依赖。
 
@@ -58,6 +63,7 @@
 #include "world.h"     // World：tick 家族（模拟泵——见下「选型」）+ setBlock 写实现权威
 #include "worldfacade.h" // R20.08 WorldFacade：查询/写入收窄面（命令写 + 编辑后回读走此面）
 
+#include <QDebug>  // qWarning（超界 dt 丢弃——背压可见，t1050）
 #include <QObject>
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
 
@@ -71,6 +77,10 @@ class GameSession : public QObject
 public:
     // 固定 Tick 基准（Tick::kClockTickMs 的会话侧别名——单一权威不出 mathtypes.h）。
     static constexpr int kClockTickMs = Tick::kClockTickMs;
+
+    // t1050（Review_2026-09-15 #1）：单次 stepTick 的 dt 上限（秒）。超过即整体丢弃 + qWarning
+    // + droppedDtCount 计数（不累积不 catch-up——见 stepTick 注）。未来 Adapter 接墙钟时同读此值。
+    static constexpr qreal kMaxStepSecs = 1.0;
 
     // 持 World 引用（编排壳不拥有世界——World 生命周期归 caller / QML，会话可随时重建）。
     explicit GameSession(World &world, QObject *parent = nullptr);
@@ -106,6 +116,9 @@ public:
     EventQueue &events() { return m_events; }
     int droppedEventCount() const { return m_droppedEvents; }
     int droppedEditCount() const { return m_droppedEdits; }
+    // t1050：超界 dt（> kMaxStepSecs）整体丢弃累计——背压可见（真机 Adapter 接墙钟后异常
+    // 墙钟差频度可观测；矩阵腿 r2007e 断言丢弃 + 计数）。
+    int droppedDtCount() const { return m_droppedDts; }
 
 signals:
     // 每整 tick 收口发（tick = 已完成 tick 号；delta = 本 tick 编辑面快照）。
@@ -143,6 +156,7 @@ private:
     bool m_paused = false;
     int m_droppedEvents = 0;
     int m_droppedEdits = 0; // EditBuffer 记录面满载丢弃累计（kMaxEdits 上界——不可再生必须可见）
+    int m_droppedDts = 0;   // t1050：超界 dt 丢弃累计（> kMaxStepSecs 整体丢弃——背压可见）
 };
 
 inline GameSession::GameSession(World &world, QObject *parent)
@@ -165,6 +179,22 @@ inline int GameSession::stepTick(qreal deltaSecs)
 {
     if (m_paused)
         return 0; // 暂停：dt 丢弃不累积（无时间债；复跑自冻结点继续——WorldClock 停表同门）
+    // t1050（Review_2026-09-15 #1，方案①入口双钳制——选型依据：方案②「保留累积 + 单次 N tick
+    // 上界」留有 qRound(deltaSecs*1000.0) 超出 int 域的 UB 洞（1e6 秒级墙钟差在 tick 上界生效
+    // 前就溢出 int 累积器），方案①在入口把累积器输入域钳死 [0, kMaxStepSecs]（1000ms ≪
+    // INT_MAX，溢出不可能发生）；「超界整体丢弃」与暂停「dt 丢弃不欠账」同门——断点续跑 /
+    // 切后台恢复量级的墙钟差属异常 gap，不 catch-up 不补账（单泵至多 10 tick，无「万 tick 连
+    // 跑」的世界模拟假死）。既有探针 dt 全部 ≤0.7s（r2007a 0.3 / r2007b 0.7 / r2007c 0.6），
+    // 钳制不触达——N×stepTick(0.1)==stepTick(N×0.1) 与暂停停表逐位兼容（r2007e 回归钉）。
+    if (!(deltaSecs >= 0.0))
+        return 0; // 负 dt / NaN → 零累积（NaN 比较恒假一并拦）——负时间债入口焊死
+    if (deltaSecs > kMaxStepSecs) {
+        ++m_droppedDts; // 背压可见（droppedDtCount 暴露）
+        qWarning() << "GameSession::stepTick: dt" << deltaSecs << "s exceeds" << kMaxStepSecs
+                   << "s cap - dropped wholesale (no catch-up debt); dropped-dt total"
+                   << m_droppedDts;
+        return 0;
+    }
     m_accumMs += qRound(deltaSecs * 1000.0);
     int executed = 0;
     while (m_accumMs >= kClockTickMs) {
