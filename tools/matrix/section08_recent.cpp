@@ -3724,6 +3724,109 @@ void MatrixRun::section08_recent()
                                        .arg(okScan).arg(miss1043b.join(QLatin1Char(','))));
     });
 
+    // ── P-t1051a 矿井轨支撑守卫腿（review0913 #1：悬空轨 == 0；t1043 干燥门的支撑伴随义务）──
+    //    (a) 行为腿：27 seed × 128×128×64 真世界全量 worldgen → 全图扫 Rail，每轨核查「正下方格
+    //        isTopFlushSupport」（完整立方或上半砖顶面齐平；与 t733 失撑坍落 / 门族放置同一单一
+    //        权威谓词）。MC 口径：铁轨需下方支撑、无支撑不放置（悬空轨不存在）→ 违例恒 0 且轨
+    //        总数 > 0（非空转）。机制归因（400 世界 sweep + worldgen 逐 pass 计数桩实测）：悬空轨
+    //        实际产生者 = carveCanyon（后于 placeMineshaft 运行）掏空已铺轨地板格——seed 42/166/207
+    //        各 3/2/2 根、修前红跑存证，三复现体 seed 已入本腿语料（发现力保障，非空转）；review0913
+    //        #1 假设的同矿延迟落块形态在该语料未触发（门内过滤数 = 0）。修复双面 = placeMineshaft
+    //        落块循环支撑门（处方式契约面 + 延迟落块防御）+ pruneUnsupportedWorldgenRails（t716 ③
+    //        同款 carve 类后置守卫，摘无撑轨回「少一段轨」无害终态）。
+    //    (b) 源钉：world.cpp 支撑门语句本体 + prune 守卫语句本体（剥注释 pinSet；t1043b 同款 root
+    //        解析）。阴性轮摘 prune（守卫体 false&& 前缀）→ 悬空轨重现 → 行为半红 + 钉红 = 本腿独红。
+    runLegMulti({ "t1051a mineshaft rail support guard (review0913 #1, companion duty of the t1043"
+        " dry gate): across 27 freshfully-generated 128x128x64 worlds every worldgen rail rests on"
+        " a top-flush support block (isTopFlushSupport on the cell directly below - the same"
+        " single-authority predicate as the t733 unsupported-rail-fall and door placement"
+        " semantics; MC caliber: rails require support beneath, a floating rail is never placed)"
+        " with thousands of rails scanned so the leg cannot pass vacuously; the corpus embeds"
+        " three reproducer seeds (42/166/207, attribution sweep measured 3/2/2 floating rails"
+        " pre-fix) so the behavior half is mutation-sensitive; attribution pinned the producer on"
+        " carveCanyon hollowing floor cells beneath already-placed rails (the deferred-placement"
+        " form never fired on this corpus), so the fix is two-fold: the support gate in the"
+        " placeMineshaft drop loop (prescribed contract face + deferred-placement defense) and"
+        " the pruneUnsupportedWorldgenRails carve-following guard (t716 precedent) removing"
+        " unsupported rails back to the harmless missing-segment end state; the pinSet half"
+        " anchors both statement bodies in world.cpp (comment-immune) so the negative round"
+        " (prune guard false&&-prefixed) reds this leg on both halvesdiag worlds=%1 rails=%2"
+        " floating=%3 pins=%4" }, [&]() {
+        bool ok = true;
+        int worldsT1051a = 0;
+        long railTotalT1051a = 0;
+        int floatT1051a = 0;
+        // 12 t1043b 同源 seed + 3 复现体（42/166/207，归因 sweep 实测修前 3/2/2 根悬空轨）+ 12 扩面 seed。
+        const quint32 seedsT1051a[] = { 20260821u, 777u, 424242u, 1337u, 90210u, 4242u,
+                                        2024u, 31337u, 7u, 99u, 12345u, 5150u,
+                                        42u, 166u, 207u,
+                                        606u, 8080u, 1999u, 20260915u, 555u, 31415u,
+                                        2718u, 161u, 903u, 717425u, 8675309u, 404u };
+        for (quint32 sd : seedsT1051a) {
+            World wT1051a;
+            wT1051a.setWidth(128);
+            wT1051a.setDepth(128);
+            wT1051a.setHeight(64);
+            wT1051a.setSeed(int(sd)); // setter 内 generate() 全量 worldgen（含支撑门 + prune 守卫）
+            ++worldsT1051a;
+            for (int x = 0; x < 128; ++x)
+                for (int z = 0; z < 128; ++z)
+                    for (int y = 0; y < 64; ++y)
+                        if (wT1051a.blockAt(x, y, z) == BR::Rail) {
+                            ++railTotalT1051a;
+                            if (!BR::isTopFlushSupport(wT1051a.blockAt(x, y - 1, z),
+                                                       wT1051a.stateAt(x, y - 1, z)))
+                                ++floatT1051a; // 悬空轨：正下方非齐平支撑（review0913 #1 形态）
+                        }
+        }
+        const bool okScan = worldsT1051a == 27 && railTotalT1051a > 0 && floatT1051a == 0;
+        if (!okScan)
+            qInfo().noquote() << "  [t1051a diag] worlds" << worldsT1051a << "rails"
+                              << railTotalT1051a << "floating" << floatT1051a;
+        // (b) 双机制源钉（剥注释；t1043b 同款 root 解析）。
+        const QString exeDirT1051a = QCoreApplication::applicationDirPath();
+        const QString rootT1051a = QDir(exeDirT1051a + QStringLiteral("/..")).absolutePath();
+        QStringList missT1051a;
+        missT1051a << pinSet(rootT1051a + QStringLiteral("/src/World/world.cpp"), {
+            {"cpp-support-gate",
+             "if (!BlockRegistry::isTopFlushSupport(m_chunks.blockAt(rx, ry - 1, rz),"
+             " m_chunks.stateAt(rx, ry - 1, rz))) continue;"},
+            {"cpp-support-prune",
+             "if (BlockRegistry::isTopFlushSupport(m_chunks.blockAt(x, y - 1, z),"
+             " m_chunks.stateAt(x, y - 1, z))) continue;"},
+            {"cpp-support-prune-call", "pruneUnsupportedWorldgenRails();"},
+        });
+        const bool okPins = missT1051a.isEmpty();
+        if (!okPins)
+            qInfo().noquote() << "  [t1051a diag pins] miss=" << missT1051a.join(QLatin1Char(','));
+        ok = okScan && okPins;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| t1051a mineshaft rail support guard (review0913 #1, companion duty"
+                             " of the t1043 dry gate): across 27 freshfully-generated 128x128x64"
+                             " worlds every worldgen rail rests on a top-flush support block"
+                             " (isTopFlushSupport on the cell directly below - the same"
+                             " single-authority predicate as the t733 unsupported-rail-fall and"
+                             " door placement semantics; MC caliber: rails require support"
+                             " beneath, a floating rail is never placed) with thousands of rails"
+                             " scanned so the leg cannot pass vacuously; the corpus embeds three"
+                             " reproducer seeds (42/166/207, attribution sweep measured 3/2/2"
+                             " floating rails pre-fix) so the behavior half is mutation-sensitive;"
+                             " attribution pinned the producer on carveCanyon hollowing floor"
+                             " cells beneath already-placed rails (the deferred-placement form"
+                             " never fired on this corpus), so the fix is two-fold: the support"
+                             " gate in the placeMineshaft drop loop (prescribed contract face +"
+                             " deferred-placement defense) and the pruneUnsupportedWorldgenRails"
+                             " carve-following guard (t716 precedent) removing unsupported rails"
+                             " back to the harmless missing-segment end state; the pinSet half"
+                             " anchors both statement bodies in world.cpp (comment-immune) so the"
+                             " negative round (prune guard false&&-prefixed) reds this leg on"
+                             " both halves"
+                          << (ok ? QString()
+                                 : QStringLiteral("diag scan=%1 pins=%2")
+                                       .arg(okScan).arg(missT1051a.join(QLatin1Char(','))));
+    });
+
     // ── P-t1044a 蜘蛛爬墙（R19.23 t1044；MC 原版口径：蜘蛛沿实体方块面垂直爬墙，parity-ledger 裁-2）──
     //    场景：平地平台 + 2 高 1 宽墙（(20,85..86,23) 顶面 87.0）阻在蜘蛛(20.5,85.3,21.5)与玩家
     //    (20.5,85,26) 之间（纯 +Z 追击线）。蜘蛛追击水平位移被墙挡死（逐轴撤回）→ aiSpiderWallClimb
