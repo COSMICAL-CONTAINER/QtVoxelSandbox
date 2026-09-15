@@ -923,6 +923,13 @@ add_executable(redstone_matrix_test
     tools/matrix/section13_editbuffer.cpp
     src/Core/editbuffer.h
     src/Core/command.h
+    # R20.10 Chunk lifecycle 探针段（置尾先例沿用：runAll 末执行，filter 词 r2010；4 腿
+    #   r2010a-d = 六态全图 / 固定世界默认稳态 / 卸载-重载 mesher 门端到端 / 源码钉+存档往返。
+    #   随段直编 src/World/chunklifecycle.h（header-only 六态类型 + 转移表单一权威，非 QObject
+    #   无 AUTOMOC）；r2010a 纯图腿零世界，r2010b-d 自建 fresh 小世界——world/chunk 系源文件
+    #   已列，无新增 .cpp）。
+    tools/matrix/section14_chunklifecycle.cpp
+    src/World/chunklifecycle.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
