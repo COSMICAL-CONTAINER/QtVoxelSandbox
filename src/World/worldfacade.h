@@ -36,6 +36,7 @@
 
 #include "world.h" // World：实现权威（本类纯转发，零逻辑复制）
 
+#include "chunklifecycle.h" // R20.10 六态门谓词 chunkLifecycleQueryable（单一权威，勿复制）
 #include "mathtypes.h" // BlockPos（Core 叶子——新代码的坐标类型门面）
 
 // World 的收窄视图（非 QObject：纯值语义包装——拷贝/临时构造均廉价，持 World 引用不拥有）。
@@ -75,19 +76,27 @@ public:
     // ── chunk 网格门查询（R20.08 示范迁移点专用：mesher 脏门 / 存在门——之前渲染侧经
     //    World::chunks().chunk(cx,cz) 直取 Chunk* 读 dirty()/fluidOnlyDirty()，现收拢为本面
     //    三查询；委托 World 层同一路由，语义逐位一致。cx/cz 为 chunk 网格坐标，越界返 false）──
+    //    **R20.10 生命周期接线**：三门在「chunk 对象在位」之上叠加生命周期门
+    //    （chunkLifecycleQueryable = 态 ∈ {Loaded, Active}，单一权威见 chunklifecycle.h）——
+    //    chunkExistsAt = 对象在位 && 态可查询；chunkDirtyAt / chunkFluidOnlyDirtyAt = 存在门
+    //    为真才读脏标记，否则恒 false（mesher 门跳过）。默认稳态全 chunk = Loaded → 三门与
+    //    R20.08 行为逐位一致（r2008 全绿常驻 + r2010b 零变化实证）；卸载（Loaded→Evicting→
+    //    Absent）后三门恒 false、重载（Absent→Loading→Generated→Loaded）后恢复（r2010c 端到
+    //    端）。ChunkGeometry 侧零改动（门经本面继承生命周期语义，r2008c 结构钉照常在位）。
     bool chunkExistsAt(int cx, int cz) const
     {
-        return m_world->chunks().chunk(cx, cz) != nullptr;
+        const Chunk *c = m_world->chunks().chunk(cx, cz);
+        return c != nullptr && chunkLifecycleQueryable(m_world->chunks().lifecycleAt(cx, cz));
     }
     bool chunkDirtyAt(int cx, int cz) const
     {
         const Chunk *c = m_world->chunks().chunk(cx, cz);
-        return c && c->dirty();
+        return c && chunkLifecycleQueryable(m_world->chunks().lifecycleAt(cx, cz)) && c->dirty();
     }
     bool chunkFluidOnlyDirtyAt(int cx, int cz) const
     {
         const Chunk *c = m_world->chunks().chunk(cx, cz);
-        return c && c->fluidOnlyDirty();
+        return c && chunkLifecycleQueryable(m_world->chunks().lifecycleAt(cx, cz)) && c->fluidOnlyDirty();
     }
 
     // ── 写入面（显式入口；玩家/命令语义——R20.07 GameSession 命令委托的同一终端权威）──

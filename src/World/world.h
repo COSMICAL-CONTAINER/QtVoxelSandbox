@@ -1005,6 +1005,15 @@ public:
     //   （state bit4）。只读。
     bool isPowerSource(int x, int y, int z) const;
 
+    // R20.10 Chunk lifecycle（refactor-plan §29.3）：C++ 面转移 forwarder（态表/选型/六态图见
+    //   chunkmanager.h + chunklifecycle.h）。**非 Q_INVOKABLE 且永不入 QML 面**——生命周期决策
+    //   只在 World 层（plan 验收第四条「QML 不再决定 Chunk 的真实生命周期」以「QML 根本无生命
+    //   周期访问面」达成，r2010d 反探钉）；查询面复用 chunks() 只读引用（lifecycleAt）即可达。
+    bool setChunkLifecycle(int cx, int cz, ChunkLifecycle to)
+    {
+        return m_chunks.setLifecycle(cx, cz, to);
+    }
+
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
     const ChunkManager &chunks() const { return m_chunks; }
 

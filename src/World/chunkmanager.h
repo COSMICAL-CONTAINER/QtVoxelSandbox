@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "chunk.h"
+#include "chunklifecycle.h" // R20.10 六态类型 + 转移表单一权威（ChunkLifecycle/chunkLifecycleTransitionLegal）
 #include "mathtypes.h" // R20.05 基础类型（Core 叶子）：floorDiv/floorMod 路由 + ChunkKey 网格索引包装 + BlockPos 加性重载
 
 // ChunkManager：持有一片连续的 chunk 列网格（width×depth 平面铺满，每 chunk 16×16 列），
@@ -63,6 +64,25 @@ public:
     //   terrain+water 两段 ChunkGeometry 都已在槽里重建完毕，统一清脏避免「一段 clearDirty 抢清致另一段跳过」）。
     void clearAllDirty();
 
+    // ── R20.10 Chunk lifecycle（refactor-plan §29.3；类型/转移表单一权威见 chunklifecycle.h）──
+    //   **选型：态存 ChunkManager 侧表（std::vector<ChunkLifecycle>，与 m_chunks 同布局同索引），
+    //   不存 Chunk 内字段**。理由三条：
+    //   ① 豁免域隔离——worldstore 直读 chunk blob（Chunk::voxelData 三数组，R20.08 关单登记豁免）
+    //     是存档往返权威；态放 Chunk 内会给存档语义引入「该不该序列化」的诱惑面，侧表让 Chunk 保持
+    //     纯体素容器、store 路径结构上看不见生命周期（「没有未保存数据被静默丢失」在本单最小解释下
+    //     结构性成立，r2010d 实证）。
+    //   ② Absent/Evicting 语义需要「实例缺席仍可表态」——最小解释下驱逐不销毁 Chunk 对象（数据
+    //     保留策略是登记的后续单），实例字段无法表达「对象在但内容不可用」；侧表可以。
+    //   ③ 定长稠密 vector 与 m_chunks 同生同灭：recreate() 是唯一的初始化点（全表 Loaded），O(1)
+    //     索引、零分配churn，与既有网格布局（ChunkKey::flatIndex）同式。
+    //   消费面收口：查询走 lifecycleAt()（World::chunks() 只读引用即可达）；写走 setLifecycle()
+    //   （唯一转移入口，转移守卫在此——摘此调用点即阴性红，见 .cpp）。World 另有 C++ 面
+    //   setChunkLifecycle forwarder（非 Q_INVOKABLE——生命周期决策不进 QML，plan 验收第四条）。
+    //   默认稳态 = 全表 Loaded（常驻已加载）：固定 10×10 / fresh 48×48 世界行为零变化的基线
+    //   （r2010b 钉）。门查询可见面（mesher 三门）= {Loaded, Active}，见 chunklifecycle.h。
+    ChunkLifecycle lifecycleAt(int cx, int cz) const; // 越界 → Absent（语义一致：无可用内容）
+    bool setLifecycle(int cx, int cz, ChunkLifecycle to); // 唯一转移入口：非法转移（含自转移）拒 false
+
     // 尺寸变化时重建网格（清空旧 chunk，新建零填充 chunk，全部脏）。
     void recreate(int width, int depth, int height);
 
@@ -72,6 +92,9 @@ private:
     int m_width = 0, m_depth = 0, m_height = 0;
     int m_chunksX = 0, m_chunksZ = 0;                  // = ceil(width/kSize), ceil(depth/kSize)
     std::vector<std::unique_ptr<Chunk>> m_chunks;      // 索引 [cx + m_chunksX * cz]
+    // R20.10 生命周期侧表（与 m_chunks 同布局同索引；选型理由见类方法注释）。recreate() 全表
+    //   置 Loaded（默认稳态）；此后仅 setLifecycle 可写（唯一转移入口）。
+    std::vector<ChunkLifecycle> m_lifecycle;
 };
 
 #endif // CHUNKMANAGER_H
