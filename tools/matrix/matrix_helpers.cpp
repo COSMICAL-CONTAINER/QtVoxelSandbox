@@ -124,6 +124,7 @@ void MatrixRun::runAll()
     section14_chunklifecycle(); // R20.10 Chunk lifecycle（置尾先例沿用：纯图腿 + 自建 fresh 小世界，rig 零接触）
     section15_generationjob(); // R20.11 GenerationJob 同步版 ChunkScheduler（置尾先例沿用：纯请求模型腿 + 裸网格/fresh 小世界，rig 零接触）
     section16_backgroundgen(); // R20.12 后台 GenerationJob（置尾先例沿用：真线程 worker 腿 + 裸网格/fresh 小世界，rig 零接触）
+    section17_meshbuilder(); // R20.13 MeshBuilder（置尾先例沿用：fresh 小世界快照/逐位等价/计数穿透 + 纯源码钉腿，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
