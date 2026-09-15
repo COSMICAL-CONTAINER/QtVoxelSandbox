@@ -976,6 +976,16 @@ add_executable(redstone_matrix_test
     #   itementitymanager.cpp 已在下方直编（Adapter 委托面回归用）；r2014a-d 零世界（r2014a 焚毁
     #   子面用裸 World 直排岩浆格——非 rig 世界 w）。
     tools/matrix/section18_entitystore.cpp
+    # R20.15 SaveCoordinator 探针段（置尾先例沿用：runAll 末执行，filter 词 r2015；4 腿 r2015a-d =
+    #   统一 SaveGeneration 代次语义[三部分一代次+两域正交+单调]/冻结-持久化分离承重墙[冻结后改动
+    #   活体→重读=冻结点≠活体+损坏 chunk 降级一致]/故障注入+恢复三态[真锁·注入 Player·崩溃前收尾·
+    #   缺台账→Fresh]/结构钉[QObjectFree 复述+协议关键步+SQLiteAdapter 全盲反探+零 QML 零接线+
+    #   schema 版本零 bump]。随段直编 src/World/savecoordinator.{h,cpp}（存档协调层，非 QObject
+    #   无 AUTOMOC；WorldStore 零改动 = SQLiteAdapter 现状保持——plan R20.15「先保持 SQLiteAdapter」）。
+    #   r2015a-c 自建 fresh 小世界 + 临时 SQLite 库（QDir::temp() pid 键名，测试自清理），r2015d 零世界。
+    tools/matrix/section19_savecoordinator.cpp
+    src/World/savecoordinator.cpp
+    src/World/savecoordinator.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

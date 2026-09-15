@@ -126,6 +126,7 @@ void MatrixRun::runAll()
     section16_backgroundgen(); // R20.12 后台 GenerationJob（置尾先例沿用：真线程 worker 腿 + 裸网格/fresh 小世界，rig 零接触）
     section17_meshbuilder(); // R20.13 MeshBuilder（置尾先例沿用：fresh 小世界快照/逐位等价/计数穿透 + 纯源码钉腿，rig 零接触）
     section18_entitystore(); // R20.14 EntityStore（置尾先例沿用：store/Adapter 直驱孪生等价 + 快照权威 + notify 沿计数回归 + 纯源码钉腿，rig 零接触）
+    section19_savecoordinator(); // R20.15 SaveCoordinator（置尾先例沿用：统一 SaveGeneration/冻结-持久化分离/故障注入恢复三态 + 纯源码钉腿，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
