@@ -4821,6 +4821,128 @@ void MatrixRun::section08_recent()
                                           .arg(okEmptyD).arg(okHeldD).arg(togglesT50d));
     });
 
+    // ── P-t1052a 箱车裸键门清偿：空手 sneak 右键箱车照常开箱（t1050 残余登记清偿，Review_2026-09-15 #2 同门收官）──
+    //    三相：(1) 基线 = 无 shift 空手右键箱车 → 开箱恰 1 携内容键（t1013b(b) 同族回归钉，同 rig 内
+    //    自证 findCartHit 命中 + 遮挡守卫不过杀）；(2) t1052 核心 = 空手 + shift → **照常开箱**（旧裸键
+    //    门 !m_keys.value(Key_Shift) 把此形态旁路到骑乘/放置路径——箱车不可骑守卫 + m_selectedBlock==Air
+    //    守卫连环拦成「无效应」，t1050 十二门同疾第 13 门；修后门 = sneak ∧ 持可放置方块合取，与
+    //    m_hasHit 块内 12 门单一判据同构）；(3) 持方块 + shift 对照 = 放置优先（chestOpened 不再增长 +
+    //    命中面邻格落木板，t1050 四腿同款对照柱；MC 口径 = 手持物品的使用优先于目标交互）。
+    //    阴性轮敏感：矿车开箱门摘本单合取（退回裸 !Key_Shift）→ (2) 语义柱红（空手 sneak 不开箱，
+    //    opens 相对 +1 落空）+ 源钉红；(1) 基线与 (3) 对照柱全走相对恒等/快照锚（R20.11）→ 保绿；
+    //    既有全部箱车腿（t1013/t1013b 均无 shift 形态）判据取值不变 → 保绿（恰红面 = 本单新腿单腿）。
+    runLegMulti({ "t1052a chest-minecart raw-sneak-bypass residual closed (t1050 residual, Review_2026-09-1"
+        "5 #2 same-gate finale): right-clicking a chest cart with an empty hand opens it exactly once c"
+        "arrying the content key with or without sneaking - sneaking without a placeable block falls t"
+        "hrough to normal container use (the old raw shift gate routed empty-hand sneak past the open "
+        "branch into mount/placement where the chest-cart-cannot-be-ridden guard and the Air-selectio"
+        "n guard turned it into a no-effect, the 13th gate with the t1050 disease); sneaking with a h"
+        "eld block still bypasses the open to placement priority (chestOpened frozen, planks land on "
+        "the hit face's neighbor cell - the t1050 four-leg control column)diag base=%1 emptyShift=%2 "
+        "heldShift=%3 pins=%4 opens=%5" }, [&]() {
+        World wT52;
+        wT52.setWidth(48); wT52.setDepth(48); wT52.setHeight(96); wT52.setSeed(10521);
+        PlayerController pcT52;
+        pcT52.setWorld(&wT52);
+        MinecartManager cartsT52;
+        pcT52.setMinecartManager(&cartsT52);
+        QQuickWindow winT52;
+        pcT52.setParentItem(winT52.contentItem());
+        // rig：y=14 Planks 地台，y15..20 净空（t1050a 同式）；箱车键格 (12,15,16) 四邻无轨 → 地面静止
+        //     姿态（车心 y=15.3875，体盒 x[12.05,12.95] z[16,17] y[14.94,15.84]）；玩家 (12.5,15,18.5)
+        //     瞄地台 (12,14,15) 顶面点 (12.5,15.0,15.5)——射线穿车体盒（findCartHit 命中）且穿键格 Air
+        //     （箱车是实体不挡体素射线）落主选 (12,14,15)；对照写格 (12,15,15) 在车后不蹭车盒/玩家 AABB。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT52.setBlock(x, y, z, BR::Air, 0);
+                wT52.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        cartsT52.spawnChestCart(12, 15, 16, &wT52, 12, 15, 16);
+        int opensT52 = 0;
+        int keyT52[3] = { -1, -1, -1 };
+        const QMetaObject::Connection cOpenT52 = QObject::connect(
+            &pcT52, &PlayerController::chestOpened, &pcT52,
+            [&](int kx, int ky, int kz) { ++opensT52; keyT52[0] = kx; keyT52[1] = ky; keyT52[2] = kz; });
+        const auto aimT52 = [&]() { // 瞄地台 (12,14,15) 顶面（t1050a aim 同式：grab+loadSavedState+tick 刷主选）
+            const float ex = 12.5f, ey = 16.62f, ez = 18.5f;
+            const float dx = 12.5f - ex, dy = 15.0f - ey, dz = 15.5f - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            pcT52.release();
+            pcT52.grab();
+            pcT52.loadSavedState(ex, 15.0f, ez,
+                                 std::atan2(-dx, -dz) * 57.2957795f,
+                                 std::asin(dy / len) * 57.2957795f, 1 /* Creative（无消耗，t1013b 同款）*/);
+            pcT52.tick(); // updateRaycast 刷新命中
+            return pcT52.hitBlock();
+        };
+        const auto pumpT52 = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // (1) 基线：无潜行空手右键箱车 → 开箱恰 1 携键 + 无放置（use 被消费；放置零 = 幽灵放置不回归）。
+        const QVector3D hitT52 = aimT52();
+        pcT52.setSelectedBlock(int(BR::Air));    // 空手（C++ 直喂；防默认 selectedBlock 幽灵放置，t1013b 教训）
+        pcT52.placeBlock();
+        pumpT52(260);
+        const bool okBase = opensT52 == 1
+            && keyT52[0] == 12 && keyT52[1] == 15 && keyT52[2] == 16 // 内容键 = 生成格（键寻址契约）
+            && hitT52 == QVector3D(12, 14, 15)     // 主选命中地台顶面（箱车不挡体素射线）
+            && wT52.blockAt(12, 15, 15) == BR::Air; // 无放置
+        const int opensAfterBaseT52 = opensT52; // 相对计数锚（R20.11：辅助/对照柱钉相对恒等，绝对计数归语义柱专钉——阴性变异红面不得扩散进对照柱）
+        // (2) t1052 核心：空手 + 潜行右键箱车 → 照常开箱（恰 +1 携键；旧裸键门此形态 = 无效应）。
+        pumpT52(260);
+        aimT52();
+        pcT52.setKey(Qt::Key_Shift, true);       // 潜行（m_keys 原始键态，§2-D 单一输入路径）
+        pcT52.placeBlock();
+        pumpT52(260);
+        pcT52.setKey(Qt::Key_Shift, false);
+        const bool okEmptyShift = opensT52 == opensAfterBaseT52 + 1
+            && keyT52[0] == 12 && keyT52[1] == 15 && keyT52[2] == 16
+            && wT52.blockAt(12, 15, 15) == BR::Air; // 空手无放置（use 被消费）
+        const int opensBeforeHeldT52 = opensT52; // 相对恒等锚（对照柱：开箱计数须冻结）
+        // (3) 持方块潜行对照 = 放置优先（t1050 四腿同款对照柱）：chestOpened 冻结 + 命中面邻格木板。
+        pumpT52(260);
+        aimT52();
+        pcT52.setKey(Qt::Key_Shift, true);
+        pcT52.setSelectedBlock(int(BR::Planks)); // 持方块（C++ 直喂，t1028b 同款）
+        pcT52.placeBlock();
+        pumpT52(260);
+        pcT52.setKey(Qt::Key_Shift, false);
+        const bool okHeldShift = opensT52 == opensBeforeHeldT52   // 开箱被旁路（相对恒等：计数冻结，放置优先不回归）
+            && wT52.blockAt(12, 15, 15) == BR::Planks             // 命中面邻格放置
+            && wT52.blockAt(12, 14, 15) == BR::Planks;            // 地台本体不动
+        // 源钉：矿车开箱旁路合取形态（阴性轮摘合取退回裸键门即红；pinSet 剥注释；t1050a 判据钉同式）。
+        const QString rootT52 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT52 = pinSet(rootT52 + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"t1052 chest-cart open bypass holds-block conjunction",
+             "const bool sneakPlaceBlock = m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;"},
+        });
+        if (!missT52.isEmpty())
+            qInfo().noquote() << "  [t1052a diag] pins" << missT52.join(QLatin1Char(','));
+        QObject::disconnect(cOpenT52);
+        cartsT52.clearAll();
+        pcT52.release();
+        winT52.deleteLater();
+        const bool okT52 = okBase && okEmptyShift && okHeldShift && missT52.isEmpty();
+        if (!okT52)
+            qInfo().noquote() << "  [t1052a diag] hit" << hitT52 << "opens" << opensT52
+                              << "key" << keyT52[0] << keyT52[1] << keyT52[2]
+                              << "cell" << int(wT52.blockAt(12, 15, 15));
+        if (!okT52) ++totalFail;
+        qInfo().noquote() << (okT52 ? "PASS" : "FAIL")
+                          << "| t1052a chest-minecart raw-sneak-bypass residual closed: empty-hand "
+                             "right-click opens the chest cart exactly once with its content key "
+                             "with or without sneak (the old raw shift gate made empty-hand sneak "
+                             "a no-effect - 13th gate with the t1050 disease); held-block sneak "
+                             "still bypasses the open to placement (t1050 control column)"
+                          << (okT52 ? QString()
+                                    : QStringLiteral("diag base=%1 emptyShift=%2 heldShift=%3 pins=%4 opens=%5")
+                                          .arg(okBase).arg(okEmptyShift).arg(okHeldShift)
+                                          .arg(missT52.isEmpty()).arg(opensT52));
+    });
+
     // ── P-t1046c 天气剩余时长持久化 + 精确续跑（R19.23 t1046 低-5；MC level.dat RainTime/ThunderTime 口径）──
     //    (a) 真 WorldStore：快照携 weatherTimerMs=77777 落 world_meta（weather_timer_ms）→ 关库重开逐键
     //        相等；(b) 旧档形态（四参 saveAll）→ hasWeatherTimer=false / weatherTimerMs=0 缺省；

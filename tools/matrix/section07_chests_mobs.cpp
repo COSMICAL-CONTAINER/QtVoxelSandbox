@@ -4437,7 +4437,8 @@ Item {
             // review0906 D2 首跑归因：m_selectedBlock 默认 Stone（t06 hotbar 绑定）——phase-1 隔墙点击
             //   在箱车分支被守卫正确拒后落到通用放置分支，把 Stone 误放到墙击面邻格；phase-2 拆墙后这颗
             //   「幽灵石头」距眼 ~0.54 抢占主选（m_hitDist < chestDist）→ 守卫拒开箱 = opens 0 假红。
-            //   空手（Air）分流：箱车开箱分支不读 selectedBlock，通用放置无物可放。
+            //   空手（Air）分流：无 shift → t1052 合取门（sneak ∧ 持方块）不旁路、照常进开箱分支（被
+            //   遮挡守卫拒），通用放置无物可放。
             pc12.setSelectedBlock(BR::Air);
             QQuickWindow probeWin12;
             pc12.setWorld(&w);
