@@ -13,6 +13,7 @@
 #include <unordered_map> // t185 tickWaterFlow 的 adds 哈希表（key = 体素线性编码 → 新 level，多源取 min）
 #include <unordered_set> // t221 tickWaterFlow 的 evapKeys 集合（本 tick 将退场的格 key，供扩散 pass 跳过）
 
+
 // t425 perf：生长方块（作物 / 甘蔗 / 耕地 / 树苗）位置索引的坐标打包 / 解包 + 成员判定。
 //   生长 tick（tickCropGrowth / tickSugarcaneGrowth / tickFarmlandHydration / tickSaplingGrowth）旧版每窗
 //   **全图扫 W×D×H**（160×160×128 ≈ 3.3M 格 / 数十 ms）即便世界无任何生长方块也照扫 —— 在放大世界（t276
@@ -5666,6 +5667,8 @@ void World::generate()
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     pruneFloatingSnowLayers(); // t716 ③：carve 类 pass 之后清扫悬浮雪层（峡谷盘 / 洞口开口挖掉支撑格留下的
                                //   悬空 SnowLayer → 直删；先于填水 / 树草 → 后续特征据「雪顶」守卫不再误判）。
+    pruneUnsupportedWorldgenRails(); // t1051（review0913 #1）：carveCanyon 掏空矿井轨地板 → 悬空轨摘除
+                                     //   （t716 ③ 同款 carve 类后置守卫；先于填水 / 树草 → 后续特征见无悬空轨）。
     fillWater(); // t148：海平面以下低洼列填水（地形之上；先于树木 → 水占格使树不生于水中，setVoxelIfAir 守）
     freezeSurfaceWater(); // t395：Snowy 群系海/湖表层水冻结为冰（fillWater 之后水已就位；先于树 / 草）
     placeSurfaceLakes(); // t309：地表小湖泊（fillWater 之后 → 湖独立于海；先于树 / 草 → 树 / 草据「草顶」守卫跳过湖列）。
@@ -7352,6 +7355,34 @@ void World::pruneFloatingSnowLayers()
         qInfo() << "worldgen: pruned floating snow layers =" << pruned; // 同 seed → 同计数（确定性核对）
 }
 
+// t1051 生成期轨支撑守卫（review0913 #1；t716 ③ pruneFloatingSnowLayers 同款「carve 类 pass 后置守卫」）：
+//   全图扫 Rail，正下方非齐平支撑（isTopFlushSupport 完整立方 / 上半砖——与 t733 失撑坍落 / 门族放置同一
+//   单一权威谓词）→ 摘轨（m_chunks.setBlock Air 直写，worldgen 不 emit）。机制归因（400 世界 sweep + 逐
+//   pass 计数桩实测，seed 42/166/207 复现体共 7 根悬空轨）：carveCanyon（generate 内后于 placeMineshaft
+//   运行；y=22 峡底 + fbm 半径调制盘 carve）掏空**已铺轨**的地板格 → 轨悬空；placeMineshaft 落块循环内的
+//   支撑门（同函数）对此不可见——门在峡谷 carve 之前已全部跑完。MC 口径：铁轨需下方支撑、无支撑不放置
+//   （悬空轨不存在）→ 摘轨 = 回到「少一段轨」的无害终态（与门内过滤同一处置口径），不做地形回填。
+//   守卫位序 = carveCanyon 之后、pruneFloatingSnowLayers 毗邻（同一「所有 carve 类 pass 之后一次跑」语义，
+//   t716 头注释同源）；幂等同 t716（删后重扫无变化）；纯函数于 seed → 同 seed 同计数（确定性核对）。
+//   worldgen 只铺普通 Rail（golden / detector 为玩家放置面，各有运行期支撑检查）→ 本守卫只判 Rail 单 id。
+void World::pruneUnsupportedWorldgenRails()
+{
+    int pruned = 0;
+    for (int x = 0; x < m_width; ++x) {
+        for (int z = 0; z < m_depth; ++z) {
+            for (int y = 1; y < m_height; ++y) { // y=0 下方无格（基岩域），从 1 起（同 pruneFloatingSnowLayers）
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::Rail) continue;
+                // t1051 支撑守卫：正下方有齐平支撑 → 保留；无 → 摘轨（悬空轨禁生成；P-t1051a 行为面 + 源钉本体）
+                if (BlockRegistry::isTopFlushSupport(m_chunks.blockAt(x, y - 1, z), m_chunks.stateAt(x, y - 1, z))) continue;
+                m_chunks.setBlock(x, y, z, BlockRegistry::Air);
+                ++pruned;
+            }
+        }
+    }
+    if (pruned > 0)
+        qInfo() << "worldgen: pruned unsupported rails =" << pruned; // 同 seed → 同计数（确定性核对）
+}
+
 // t309 地下水池（见 world.h 头注释）。机制等价 MC 1.0 地下水湖 / 封闭水洼：地下深处小型封闭空腔 + 底层水源。
 //   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 抖动 → 在地下 y 范围内选中心，
 //   carve 一个小圆盘空腔（底层水源 + 上方 air 气室），空腔被周围实体岩石天然封闭 → 水源稳态（不蔓延）+ 黑暗。
@@ -8112,6 +8143,16 @@ void World::placeMineshaft()
                                 == BlockRegistry::Water)
                                 wet = true;
                 if (wet) continue; // t1043 干燥门：水边 / 水下段不放轨（P-t1043b 行为面 + 源钉本体）
+                // t1051 支撑门（review0913 #1；与 t733 失撑坍落 / 门族放置同一单一权威谓词
+                //   isTopFlushSupport）：延迟落块的支撑伴随义务——若更晚 piece 的 carve 在登记之后
+                //   掏空本候选的地板格，干燥候选会在悬空位落块（旧内联代码形态为「轨连同地板被清毁」
+                //   的少一段轨，无视觉产物）。MC 口径：铁轨需下方支撑、无支撑不放置（悬空轨不存在）
+                //   → 下方格非齐平支撑即跳过落块，只滤被掏空支撑的候选、正常面零变化。归因注记：
+                //   400 世界 sweep 实测本门过滤数 = 0（同矿内延迟落块形态在该语料未触发）；悬空轨的
+                //   实际产生者是后置 carveCanyon 掏空已铺轨地板 → 由 pruneUnsupportedWorldgenRails
+                //   守卫摘除（见该函数头注释）。本门保留 = review0913 #1 处方式的契约面 + 延迟落块
+                //   机制的防御完备（P-t1051a 源钉本体之一）。
+                if (!BlockRegistry::isTopFlushSupport(m_chunks.blockAt(rx, ry - 1, rz), m_chunks.stateAt(rx, ry - 1, rz))) continue; // t1051 支撑门：下方无齐平支撑不落轨（悬空轨禁生成）
                 m_chunks.setBlock(rx, ry, rz, BlockRegistry::Rail, 0);
                 railCells.push_back({rx, ry, rz});
             }

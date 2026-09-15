@@ -1289,6 +1289,16 @@ private:
     //   只扫 SnowLayer（t716 范围；草方块同病但 MC 峡壁露土本就自然，不在本任务范围）。纯查询 + 直删，
     //   不发信号（worldgen 既有约定）。幂等：重复跑零变化。
     void pruneFloatingSnowLayers();
+    // t1051 轨支撑守卫（review0913 #1「矿井干燥门缺支撑校验→悬空轨」的生成期清偿；pruneFloatingSnowLayers
+    //   同款 carve 类后置守卫）：carveCanyon 之后、fillWater / 树草之前跑一次全图清扫——Rail 正下方非齐平
+    //   支撑（isTopFlushSupport：完整立方 / 上半砖顶面，t733 失撑坍落同源单一权威谓词；MC 口径「铁轨需下方
+    //   支撑、无支撑不放置，悬空轨不存在」）→ 摘轨（直删无掉落，worldgen 语义「生成期不该存在的悬空轨」；
+    //   对比游玩期 checkRailOnEdit 的邻格编辑触发坍落，此处是**生成期修正**）。成因链：carveCanyon 后于
+    //   placeMineshaft 运行，峡底盘 carve 可恰好掏空已铺轨的地板格（400 世界 sweep 实测 seed 42/166/207
+    //   共 7 根；placeMineshaft 内部支撑门在峡谷 carve 前已跑完、对此不可见）。只扫 Rail（worldgen 只铺普通
+    //   Rail；golden/detector 为玩家放置面）。纯查询 + 直删，不发信号（worldgen 既有约定）；幂等；纯函数于
+    //   seed → 同 seed 同计数。
+    void pruneUnsupportedWorldgenRails();
     // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves / carveCaveEntrances
     //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
     //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态
