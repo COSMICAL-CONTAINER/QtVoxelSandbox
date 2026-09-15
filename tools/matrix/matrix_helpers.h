@@ -265,4 +265,7 @@ private:
     void section12_worldfacade(); // R20.08 WorldFacade 探针（置尾先例沿用：自建 fresh 小世界
                                   //   ×4（wQ 查询 / wA+wB 写入双生 / wF mesher 门+会话共享），
                                   //   rig 世界 w 零接触，接 section11）
+    void section13_editbuffer(); // R20.09 EditBuffer 探针（置尾先例沿用：r2009a 纯类型腿零
+                                 //   世界；r2009b-d 自建 fresh 小世界 ×4（双生 wB1/wB2 +
+                                 //   wC1 + wD1），rig 世界 w 零接触，接 section12）
 };
