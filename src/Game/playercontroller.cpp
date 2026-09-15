@@ -3568,7 +3568,7 @@ void PlayerController::placeBlock()
     //   疾，本修一并恢复）；旧注释「机制等价 MC 空手 shift 右键箱子无效应」系登记口径错误（MC
     //   空手 shift 右键箱子=打开），随之改写。t1034/t1046「潜行持方块」语义腿逐位不变（判据为
     //   合取，持方块时新旧门同值）。残余登记：箱子矿车裸键门（m_hasHit 块外，无 sneakPlaceBlock
-    //   作用域）维持登记，随下一波 parity 单收口。
+    //   作用域）→ t1052 已清偿（矿车开箱分支就地重算同一合取，见下方矿车交互段 (a0)）。
     const bool sneakPlace = m_keys.value(Qt::Key_Shift);
     // t1050：潜行放置旁路单一判据（手持方块才旁路；下方 12 门统一改读 sneakPlaceBlock）。
     const bool sneakPlaceBlock = sneakPlace && m_selectedBlock != BlockRegistry::Air;
@@ -4862,10 +4862,19 @@ void PlayerController::placeBlock()
     if (m_minecartManager) {
         // (a0) t1013 箱子矿车：右键命中 → 开箱 UI（chestOpened 携**内容键** = 生成格坐标，非车当前位 ——
         //   ChestStore 按键寻址，车沿轨驶离后 UI / 存取仍对同一份内容）。优先于骑乘（箱子矿车不可骑 ——
-        //   tryMount 内守卫兜底），对齐右键箱子方块开箱语义；sneak 绕过开箱（同箱子 shift+右键放置语义，
-        //   开箱分支 findCartHit 独立射线（同 (a)；sneak 原始键态直读 —— 本段在 m_hasHit 块外，
-        //   placeBlock 的 sneakPlace 局部量不在作用域，语义同源 §2-D m_keys 单一输入路径）。
-        if (!m_keys.value(Qt::Key_Shift)) {
+        //   tryMount 内守卫兜底），对齐右键箱子方块开箱语义。t1052（t1050 残余清偿，Review_2026-09-15
+        //   #2 同门收官）：旁路门收窄为合取 sneakPlaceBlock = sneak ∧ 手持可放置方块——与 m_hasHit
+        //   块内 12 门 t1050 单一判据同构（本段在 m_hasHit 块外，其局部量不在作用域，故按同一合取
+        //   就地重算；键态同源 §2-D m_keys 单一输入路径）。MC 口径：「手持物品的使用优先于目标交互」
+        //   （minecraft.wiki/w/Sneaking Effects 原文 "Pressing use prioritizes using a held item over
+        //   interacting with a targeted block"；右键箱车开箱 = 容器 use 交互，wiki/w/Minecart_with_Chest
+        //   Usage 段 "Chest minecarts' contents can be accessed by pressing use item button on them"，
+        //   车种 Java Alpha v1.0.14 加入、use 开箱随车种即有）——空手（/持非方块物品）sneak 右键箱车**照常开箱**（旧裸键门 !Key_Shift 把
+        //   空手 sneak 右键箱车旁路到骑乘/放置路径，被「箱车不可骑」守卫 + m_selectedBlock==Air 守卫
+        //   拦成「无效应」，与 t1050 十二门同疾 = 第 13 门）；持方块 sneak = 放置优先（开箱被旁路 →
+        //   落 (a) 骑乘[箱车拒载]/(b) 放矿车/通用放块路径）。
+        const bool sneakPlaceBlock = m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;
+        if (!sneakPlaceBlock) {
             float chestDist = 0.0f;
             const int chestIdx = m_minecartManager->findCartHit(position(), lookDirection(), kReach, &chestDist);
             int keyX = -1, keyY = -1, keyZ = -1;
