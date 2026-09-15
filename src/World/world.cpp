@@ -52,7 +52,9 @@ static inline bool isGrowthBlock(quint8 id)
 //   t338：海 + 沙滩改为集中于一角（seaColumnHeight 四分之一圆盘缓坡，角点 seaFloor=waterLevel-6 → 边缘
 //   waterLevel+1 干沙滩），不再「全域低洼列散水/散沙」。本常量仍是海平面 / 海底 / 沙滩阈值的单一权威
 //   （fillWater 灌到 waterLevel；沙滩环 = waterLevel+1）。同 seed 仍确定（fbm + seaColumnHeight 纯函数）。
-constexpr int kWaterLevel = 58;
+//   R20.12：常量本体迁 TerrainGen::kWaterLevel（terraingen.h 单一权威）；本文件级名锚定其值
+//   （编译期取自权威），fillWater 等同步调用点零改动、双份漂移不可能。
+constexpr int kWaterLevel = TerrainGen::kWaterLevel;
 
 World::World(QObject *parent) : QObject(parent)
 {
@@ -60,14 +62,15 @@ World::World(QObject *parent) : QObject(parent)
 }
 
 // t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob
-//   覆盖）。recreate 把 25 chunk 全清零 + 全标脏（首帧重建）；buildPermutation 重建 Perlin 表使后续
-//   heightAt 等查询用新 seed（一致性，虽加载路径主要靠存档而非 worldgen）。仅 emit seedChanged（dims 不变）；
+//   覆盖）。recreate 把 25 chunk 全清零 + 全标脏（首帧重建）；m_terrain 按新 seed 重建（R20.12 起纯
+//   地形采样器 = 单一权威 terraingen.h，置换表随其构造期填充）使后续 heightAt 等查询用新 seed
+//   （一致性，虽加载路径主要靠存档而非 worldgen）。仅 emit seedChanged（dims 不变）；
 //   **不** emit worldChanged（网格此时全空，finishLoad 写完 blob 后才统一触发重建，避免中间态重建浪费）。
 void World::beginLoad(int seed)
 {
     m_seed = seed;
     m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
-    buildPermutation();                            // 新 seed 的 Perlin 置换表（heightAt 查询一致性）
+    m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // 新 seed 的纯地形采样器（heightAt 查询一致性）
     m_biomeCache.clear(); // t905 perf：seed 换新 → 群系 memo 作废（懒重建；见 world.h m_biomeCache 注释）
     m_decayingLeaves.clear(); // t325 网格重置 → 渐进衰减队列作废（坐标已不指向当前栅格；防误清新世界叶）
     m_growthCells.clear();   // t425 网格重置 → 生长方格索引作废（finishLoad 写完 blob 后 rebuildGrowthCells 全图重建）
@@ -5075,142 +5078,31 @@ bool World::applyBonemeal(int x, int y, int z)
     return false; // 非三类目标 → 无效应不消耗（机制等价 MC 骨粉对非生长目标无效应）
 }
 
-// --- Perlin（2D fBm）---
-static double fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
-static double lerp(double a, double b, double t) { return a + t * (b - a); }
-static double grad2(int hash, double x, double z)
-{
-    int h = hash & 7;
-    double u = h < 4 ? x : z;
-    double v = h < 4 ? z : x;
-    return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
-}
-// t278 3D Perlin 梯度（与 grad2 同源；hash 低 4 位选 12 个 3D 梯度方向之一，标准 Perlin grad3）。
-//   供 noise3 用，洞穴 carve 的 3D 噪声场。
-static double grad3(int hash, double x, double y, double z)
-{
-    int h = hash & 15;
-    double u = h < 8 ? x : y;
-    double v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
-    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
-}
-
-void World::buildPermutation()
-{
-    // 置换表（线性同余 RNG，可复现；同 seed → 同表 → 同高度图）
-    m_perm.resize(512);
-    int p[256];
-    for (int i = 0; i < 256; ++i) p[i] = i;
-    unsigned int state = unsigned(m_seed >= 0 ? m_seed : -m_seed) + 1u;
-    for (int i = 255; i > 0; --i) {
-        state = state * 1103515245u + 12345u;
-        int j = int((state >> 16) % unsigned(i + 1));
-        std::swap(p[i], p[j]);
-    }
-    for (int i = 0; i < 512; ++i) m_perm[i] = p[i & 255];
-}
+// ── R20.12：Perlin 噪声族与置换表已迁 TerrainGen 单一权威（terraingen.h——同步路径与后台
+//    worker 共用同一份纯函数；worldgen 逐位恒等由矩阵 worldgen/determin/re-gen 三腿族守）。
+//    World 侧保留 noise2/fbm/noise3 委托壳（carveCanyon/carveCaves 等同步调用点零改动）。
 
 double World::noise2(double x, double z) const
 {
-    const int X = int(std::floor(x)) & 255;
-    const int Z = int(std::floor(z)) & 255;
-    x -= std::floor(x);
-    z -= std::floor(z);
-    const double u = fade(x), v = fade(z);
-    const int A = m_perm[X] + Z, B = m_perm[X + 1] + Z;
-    return lerp(lerp(grad2(m_perm[A], x, z), grad2(m_perm[B], x - 1.0, z), u),
-                lerp(grad2(m_perm[A + 1], x, z - 1.0), grad2(m_perm[B + 1], x - 1.0, z - 1.0), u), v);
+    return m_terrain.noise2(x, z);
 }
 
-// t278 3D Perlin 噪声（机制等价标准 Perlin 3D；洞穴 carve 的 3D 标量场）。复用 noise2 的 fade/lerp/m_perm。
-//   索引链 m_perm[X]+Y → m_perm[..]+Z 与 noise2 同模式（m_perm 512 项，中间索引 ≤510、+1 ≤511 安全）。
-//   纯函数于 seed（m_perm 由 buildPermutation 派生于 seed）→ 同 seed 同 3D 噪声场（PLAN §2-K）。范围 ~[-1,1]。
 double World::noise3(double x, double y, double z) const
 {
-    const int X = int(std::floor(x)) & 255;
-    const int Y = int(std::floor(y)) & 255;
-    const int Z = int(std::floor(z)) & 255;
-    x -= std::floor(x);
-    y -= std::floor(y);
-    z -= std::floor(z);
-    const double u = fade(x), v = fade(y), w = fade(z);
-    const int A  = m_perm[X]     + Y;
-    const int AA = m_perm[A]     + Z;
-    const int AB = m_perm[A + 1] + Z;
-    const int B  = m_perm[X + 1] + Y;
-    const int BA = m_perm[B]     + Z;
-    const int BB = m_perm[B + 1] + Z;
-    const double x1 = x - 1.0;
-    const double y1 = y - 1.0;
-    const double z1 = z - 1.0;
-    return lerp(
-        lerp(
-            lerp(grad3(m_perm[AA],     x,  y,  z ), grad3(m_perm[BA],     x1, y,  z ), u),
-            lerp(grad3(m_perm[AB],     x,  y1, z ), grad3(m_perm[BB],     x1, y1, z ), u),
-            v),
-        lerp(
-            lerp(grad3(m_perm[AA + 1], x,  y,  z1), grad3(m_perm[BA + 1], x1, y,  z1), u),
-            lerp(grad3(m_perm[AB + 1], x,  y1, z1), grad3(m_perm[BB + 1], x1, y1, z1), u),
-            v),
-        w);
+    return m_terrain.noise3(x, y, z);
 }
 
 double World::fbm(double x, double z) const
 {
-    double total = 0, amp = 1, freq = 1, maxv = 0;
-    for (int o = 0; o < 4; ++o) {
-        total += noise2(x * freq, z * freq) * amp;
-        maxv += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    return total / maxv; // ~[-1,1]
+    return m_terrain.fbm(x, z);
 }
 
 int World::heightAt(int x, int z) const
 {
-    // t119：高度由 16 重定标到 64（地表抬升、留出基岩底层 + 更厚石层 + 更高天空间）。
-    // 原 7+n*4（地表 ~3..11）→ 28+n*12（地表 ~16..40）：基岩层 y 0..4 在地表之下，石层 12..36
-    // 厚度（散布矿石有空间），天空间 24..48（树 / 飞行）。同 seed 仍确定（fbm 纯函数）。
-    // t162：振幅 12→8（用户「太陡太过于陡峭」→ 更平缓少陡山），基线 28→30 → 地表 ~22..38。
-    //   水位 24 仍相交（~22..24 低洼列见水），沙滩带 / 树·矿石阈值（waterLevel+1=25）同步成立。
-    // t274：群系分流 + 整体振幅降低（用户「现纯山地凹凸不平 → 大草原平地、山地仅特定群系」）。
-    //   每个群系独立振幅 —— plains 极平（amp 2，多数陆地）、hills 起伏保留山地感（amp 7，少数），
-    //   desert 平缓沙丘（amp 3）。共用基线 30 → 群系边界高差有界（最坏 plains↔hills ≈7 格，低频
-    //   群系边界稀少），无浮空 / 悬崖。水位 24：plains(28..32)/desert(27..33) 恒高于水 → 草原 / 沙漠
-    //   主体无水；hills(23..37) 低洼列见水 / 沙滩带（waterLevel+1=25 阈值仍成立）。同 seed 确定
-    //   （fbm + biomeAt 均纯函数，PLAN §2-K）。机制等价 MC 1.0 群系化高度图（plains 平 / hills 起伏 /
-    //   desert 沙，spec 原意）。
-    // t307：地表整体抬高 —— 基线 30→64（用户「现地表 ~30，计划 ~64+，至少地面 64 格左右」），
-    //   振幅沿 t162/t274 用户已调定的平缓值（plains/forest 2、hills 7、desert 3）不动（避免回退用户
-    //   反复要求的「大草原平地」）。结果地表：plains/forest ~62..66、desert ~61..67、hills ~57..71
-    //   （地表中位 ~64，满足「地面 64 格」）。世界高度同步 64→128（Main.qml）留出树冠（地表+~10）+
-    //   天空间 / 飞行。水位 24→58 同源抬高（保持「低于基线 6 格」→ 低洼 hills 仍见水 / 沙滩带，
-    //   比例同 t162/t274）；沙滩带 / 树·矿石阈值（waterLevel+1=59）同步成立。同 seed 确定（fbm +
-    //   biomeAt 纯函数，PLAN §2-K）。
-    const double n = fbm((x + m_seed) * 0.09, (z + m_seed) * 0.09); // [-1,1]
-    double amp;
-    switch (biomeAt(x, z)) {
-        case Biome::Hills:  amp = 7.0; break; // 起伏（山地感，仅此群系有显著地形变化）
-        case Biome::Desert: amp = 3.0; break; // 平缓沙丘
-        case Biome::Forest: amp = 5.0; break; // 森林（t341）：amp 2→5 起伏（用户「森林要更起伏」→ 产山坡供洞口贴附；
-                                             //   不再与 plains 同振幅 → 森林/草原边界有小幅高差，但低于 hills amp 7，
-                                             //   保持「大草原平地」仍成立）。t306 原 amp 2（与 plains 同）已废。
-        case Biome::Snowy:  amp = 3.0; break; // 雪原/针叶（t395）：平缓起伏（介于 plains 2 与 desert 3 之间；覆雪地表
-                                             //   宜平缓，少悬崖；机制等价 MC 1.0 雪原 / 针叶平缓地形）。
-        case Biome::Swamp:  amp = 0.0; break; // 沼泽（t396）：**完美平坦**（amp 0 → 全 Swamp 列等高于基线 64）。
-                                             //   平坦是浅水池稳态的前提 —— placeSwampPools 把约半数草顶改造成 1 格深
-                                             //   Water 源，全列等高 → 水源层水平邻接同高草岛（Grass）→ 不溢流（机制等价
-                                             //   MC 1.0 沼泽平地 + 浅水洼地貌；非 MC 沼泽的微起伏，本工程取严格平坦保水源稳定）。
-        case Biome::Jungle: amp = 5.0; break; // 丛林（t481/t486 前置）：**略高于平原、同森林级**（spec「丛林振幅略高于
-                                             //   平原、同森林级」→ amp 5 与 Forest 同级；温热湿润低地轻微起伏，供高树
-                                             //   扎根 + 与森林边界高差小 → 无缝衔接。不取 plains 的 amp 2 —— 丛林非开阔
-                                             //   草原，且与森林邻接时同振幅保边界零高差）。
-        case Biome::Plains: // 草原（多数陆地）
-        default:            amp = 2.0; break; // 极平（spec「大草原=平地」）
-    }
-    const int h = int(std::lround(64.0 + n * amp));
-    return std::max(0, h);
+    // R20.12：计算本体迁 TerrainGen::heightAt（群系振幅选择 + fBm 采样——单一权威 terraingen.h，
+    //   同步路径与后台 worker 共用；本壳保持 Q_INVOKABLE 查询面与 worldgen 内部调用点零改动）。
+    //   历史（t119/t162/t274/t307 振幅与基线调参记录）随本体迁入 terraingen.h heightWithBiome。
+    return m_terrain.heightAt(x, z);
 }
 
 // t274 群系判定（PLAN §2-K 确定性）：单一群系 fBm（频率 0.012，seed 偏移 +3571，与高度噪声 0.09、
@@ -5232,53 +5124,11 @@ World::Biome World::biomeAt(int x, int z) const
             m_biomeCache.assign(want, 0xFF); // 懒建 / 尺寸换代自愈（generate/beginLoad 亦显式清）
         quint8 &slot = m_biomeCache[size_t(x) + size_t(z) * size_t(m_width)];
         if (slot != 0xFF) return Biome(slot);
-        const Biome b = biomeComputeAt(x, z);
+        const Biome b = m_terrain.biomeComputeAt(x, z); // R20.12：fBm 本体 = TerrainGen 单一权威
         slot = quint8(b); // Biome 编码 0..6（< 0xFF 哨兵），见 enum class Biome
         return b;
     }
-    return biomeComputeAt(x, z);
-}
-
-// t905 perf：biomeAt 的 fBm 计算本体（原 biomeAt 函数体原样迁移，零语义变化；仅由 biomeAt memo 未命中调）。
-World::Biome World::biomeComputeAt(int x, int z) const
-{
-    const double b = fbm((x + m_seed + 3571) * 0.012, (z + m_seed + 3571) * 0.012); // [-1,1]
-    if (b > 0.5)  return Biome::Hills;
-    if (b < -0.4) return Biome::Desert;
-    // t481/t486 前置 丛林（Jungle）：第五条独立低频 fBm（频率 0.014 + seed 偏移 +5133，与主群系图 0.012/+3571、
-    //   森林图 0.020/+977、雪原图 0.016/+6420、沼泽图 0.024/+8842、高度图 0.09 均不同）→ 丛林图与五者解耦。
-    //   低频 → 丛林成片（非逐格斑点，机制等价 MC 1.0 丛林大尺度分布）。**从 Forest/Plains 中分出**：同一张 j 图
-    //   在森林候选带（f>0.40）内把 Jungle 从 Forest 里 carve 出、在平原剩余候选带内把 Jungle 从 Plains 里 carve 出
-    //   → 丛林区域跨森林/平原连片（两处都读 j，非两次独立随机 → 边界无缝）。Hills/Desert 判定先于丛林早退、
-    //   Snowy/Swamp 判定也在丛林-plains 判定之前早退 → 丛林**绝不**吞掉既有 Desert/Swamp/Snowy（spec「勿让既有
-    //   Desert/Swamp/Snowy 消失」；hills 先于丛林 → 山地也保留）。阈值 kJungleBiomeThresh → 全图 ~10-20% 列成丛林
-    //   （10 seed 实测均值 ~13.5%，见 kJungleBiomeThresh 旁注释）。纯函数于 seed → 同 seed 同丛林分布（PLAN §2-K）。
-    constexpr double kJungleBiomeThresh = 0.25; // 实测（160×160 全域，Python 复刻同款 Perlin fBm 遍历 10 seed）：丛林
-                                                //   平均 ~13.5%（seed 1337 = 13.4%、seed 42 = 15.1%），落 spec「~10-20%」中段；
-                                                //   fBm 阈值单图分区随 seed 有方差（5%..20%），均值即目标带（机制等价 MC 群系面积随 seed 变）。
-    const double j = fbm((x + m_seed + 5133) * 0.014, (z + m_seed + 5133) * 0.014); // [-1,1]
-    // t306：原 plains 候选带（b ∈ [-0.4,0.5]）用第二条独立低频 fBm 把 forest 从草原里 carve 出来。
-    //   独立频率 0.020 + seed 偏移 +977（与主群系图 0.012/+3571、高度图 0.09 均不同）→ 森林图与三者解耦；
-    //   低频 → 森林成片（非逐格斑点，机制等价 MC 1.0 森林群系大尺度分布）。
-    //   t373：阈值 0.15→0.40（fbm 近似正态居中 0）。旧 0.15 实测森林吞没草原（草原几乎不可见），
-    //   因 4 阶 fbm 实际分布比名义 [-1,1] 收窄、0.15 已落入正半区主流段 → 森林占比偏高。提至 0.40
-    //   把森林压成少数（候选带内 ~15-20%），草原重新成为大片开阔地带（spec「大草原」原意）；森林仍
-    //   成片共存（spec「森林+草原」二者共存，森林不消失）。纯函数于 seed → 同 seed 同 forest/plains 划分（PLAN §2-K）。
-    const double f = fbm((x + m_seed + 977) * 0.020, (z + m_seed + 977) * 0.020); // [-1,1]
-    if (f > 0.40) return (j > kJungleBiomeThresh) ? Biome::Jungle : Biome::Forest; // 森林带内：丛林 fBm 高 → Jungle
-    // t395 雪原/针叶群系：用第三条独立低频 fBm 把 Snowy 从草原里 carve 出来。独立频率 0.016 + seed 偏移 +6420
-    //   （与主群系图 0.012/+3571、森林图 0.020/+977、高度图 0.09 均不同）→ 雪原图与四者解耦；低频 → 雪原成片
-    //   （非逐格斑点，机制等价 MC 1.0 寒冷群系大尺度分布）。阈值 0.45 → 候选带内少数（~10-15%）成雪原（与沙漠 /
-    //   森林同为少数群系，草原仍占多数）。纯函数于 seed → 同 seed 同雪原分布（PLAN §2-K）。
-    const double s = fbm((x + m_seed + 6420) * 0.016, (z + m_seed + 6420) * 0.016); // [-1,1]
-    if (s > 0.45) return Biome::Snowy;
-    // t396 沼泽群系：用第四条独立低频 fBm 把 Swamp 从草原里 carve 出来。独立频率 0.024 + seed 偏移 +8842
-    //   （与主群系图 0.012/+3571、森林图 0.020/+977、雪原图 0.016/+6420、高度图 0.09 均不同）→ 沼泽图与五者解耦；
-    //   低频 → 沼泽成片（非逐格斑点，机制等价 MC 1.0 沼泽大尺度分布）。阈值 0.30 → 候选带内少数（~15-20%）成
-    //   沼泽（略多于雪原，沼泽为本任务标志性群系；仍为少数，草原占多数）。纯函数于 seed → 同 seed 同沼泽分布（§2-K）。
-    const double sw = fbm((x + m_seed + 8842) * 0.024, (z + m_seed + 8842) * 0.024); // [-1,1]
-    if (sw > 0.30) return Biome::Swamp;
-    return (j > kJungleBiomeThresh) ? Biome::Jungle : Biome::Plains; // 平原剩余带内：丛林 fBm 高 → Jungle（从 Plains 分出）
+    return m_terrain.biomeComputeAt(x, z);
 }
 
 // t117/t274 沙漠群系判定：收口到 biomeAt == Desert（单一权威）。旧 t117 独立 fBm（0.018/+7919/0.35）
@@ -5434,87 +5284,26 @@ void World::strikeLightning()
     emit lightningStruck(x, y, z); // 驱动呈现层（白闪 + playThunder）+ 实体层（mob / 玩家近击中点伤害）
 }
 
-// t338 海域角点（4 角之一；seed 派生确定性）。海域（海 + 沙滩）集中于此角，内陆无散沙 / 散水。
-//   hashColumn 用固定独立坐标（与其它 worldgen hashColumn 解耦）→ 同 seed 同角（PLAN §2-K）。
-void World::seaCorner(int &cx, int &cz) const
-{
-    const quint32 r = hashColumn(m_seed, 0x5EA1u, 0xC0A5u);
-    cx = (r & 1u) ? m_width - 1 : 0;
-    cz = (r & 2u) ? m_depth - 1 : 0;
-}
-
-// t338/t372 海域列高度（海 + 沙滩集中于一角）。返回：
-//   -1 = 远内陆（dist 超过海域半径 + 过渡带 → 走自然 heightAt，无海沙 / 海水）
-//   0..m_height-1 = 海域重塑地表 y：
-//     · 沙海盘（dist <= effectiveRadius）：角点最深 seaFloor → 岸线 beachTop 缓坡（+ 高度噪声柔化）；
-//       h<waterLevel 为海底由 fillWater 灌水，h==waterLevel+1 为干沙滩。表层 Sand（见 isSeaSandColumn）。
-//     · 过渡带（effectiveRadius < dist <= effectiveRadius+blendWidth）：高度由 beachTop smoothstep 过渡到
-//       自然 heightAt → 消除「岸线 59 ↔ 邻接森林 62-66」的悬崖（t372）；表层走自然群系草地（isSeaSandColumn=false）。
-//   t372 海岸线柔化（spec「沙滩太规整」）：低频 fBm 抖动 effectiveRadius → 蜿蜒岸线（非规整圆弧）；
-//   高度噪声 → 海底/沙滩微起伏（非完美平面）。纯函数于 seed + dims + heightAt（fbm）（PLAN §2-K）。
-//   generate 据此重塑地形（沙底/沙滩），fillWater 仅在沙海盘（h<waterLevel）灌水，
-//   placeSurfaceLakes/placeUndergroundWaterPools 据此跳过海域（避免叠湖 / 误挖海水柱）。
+// t338/t372 海域列高度（海 + 沙滩集中于一角）。R20.12：计算本体迁 TerrainGen::seaColumnHeight
+//   （单一权威 terraingen.h——同步路径与后台 worker 共用同一份纯函数；seaCorner 无剩余 World 侧
+//   调用者，随之收编）。本壳保持 fillWater / placeSurfaceLakes / placeUndergroundWaterPools 等
+//   同步调用点零改动。原 t372 岸线蜿蜒 / 高度柔化 / smoothstep 过渡带记录随本体迁入。
 int World::seaColumnHeight(int x, int z) const
 {
-    if (m_width <= 0 || m_depth <= 0) return -1;
-    int cx, cz;
-    seaCorner(cx, cz);
-    const int dx = x - cx, dz = z - cz;
-    const double dist = std::sqrt(double(dx) * dx + double(dz) * dz);
-    const int seaRadius = std::min(m_width, m_depth) * 3 / 10; // 海域半径（地图短边 30% → 一角可见海）
-
-    // t372 岸线蜿蜒（spec「沙滩太规整」）：低频 fBm 抖动有效半径 → 自然蜿蜒岸线（非规整圆弧）。
-    //   独立频率 0.07 + seed 偏移 +5331（与高度图 0.09 / 群系 0.012 均解耦）→ 同 seed 同岸线（PLAN §2-K）。
-    const double shore = fbm((x + m_seed + 5331) * 0.07, (z + m_seed + 5331) * 0.07); // [-1,1]
-    const double effectiveRadius = double(seaRadius) * (1.0 + 0.12 * shore);          // ±12% 蜿蜒
-
-    constexpr int kSeaDepth = 6;                      // 角点海深（水位之下格数）
-    const int seaFloor = kWaterLevel - kSeaDepth;     // 角点海底（最深）
-    const int beachTop = kWaterLevel + 1;             // 岸线干沙滩（水位 +1）
-
-    if (dist <= effectiveRadius) {
-        // 沙海盘（海盆 + 干沙滩）：缓坡 + 高度噪声（柔化规整线性坡）。
-        //   高度噪声独立频率 0.15 + seed 偏移 +8842 → 海底 / 沙滩微起伏（非完美平面，PLAN §2-K）。
-        const double t = dist / effectiveRadius;                       // 0（角点）..1（岸线）
-        const double heightNoise = fbm((x + m_seed + 8842) * 0.15, (z + m_seed + 8842) * 0.15) * 1.5;
-        const int h = int(std::lround(seaFloor + (beachTop - seaFloor) * t + heightNoise));
-        return std::max(0, std::min(h, m_height - 1));
-    }
-
-    // t372 高度过渡带（spec「沙滩与邻接森林高差突兀」）：沙盘外圈把高度从 beachTop smoothstep 过渡到
-    //   自然 heightAt → 消除岸线处 cliff（beach 59 ↔ forest 62-66 突跳）。表层走自然群系（草地），故与
-    //   generate 的沙表层判定（isSeaSandColumn）分离。纯函数于 seed + heightAt（fbm）→ 同 seed 同过渡（§2-K）。
-    const double blendWidth = double(seaRadius) * 0.30; // 过渡带宽（海域半径 30%）
-    if (dist <= effectiveRadius + blendWidth) {
-        const int naturalH = std::min(heightAt(x, z), m_height - 1);
-        const double bt = (dist - effectiveRadius) / blendWidth; // 0（接沙盘）..1（接内陆）
-        const double e = bt * bt * (3.0 - 2.0 * bt);            // smoothstep（缓和、切线水平 → 无缝拼接）
-        const int h = int(std::lround(beachTop + (naturalH - beachTop) * e));
-        return std::max(0, std::min(h, m_height - 1));
-    }
-    return -1; // 远内陆 → 走自然 heightAt
+    return m_terrain.seaColumnHeight(x, z);
 }
 
-// t372 沙海盘判定（spec「沙滩表层」）。返回该列是否为真正沙表层（海盆 + 干沙滩）。与 seaColumnHeight
-//   共用完全相同的 effectiveRadius 计算（确定性一致：沙→草表层切换恰好落在岸线，与高度过渡带起点重合 →
-//   沙滩边缘无缝接草地）。过渡带列（dist > effectiveRadius）返回 false → 走自然群系草地。纯函数于
-//   seed + dims（PLAN §2-K）。供 generate 决定沙表层 / 草地表层。
+// t372 沙海盘判定（spec「沙滩表层」）。R20.12：本体迁 TerrainGen::isSeaSandColumn（与
+//   seaColumnHeight 共用完全相同的 effectiveRadius 计算——确定性一致的单一权威）。本壳保持
+//   generate / fillWater 同步调用点零改动。
 bool World::isSeaSandColumn(int x, int z) const
 {
-    if (m_width <= 0 || m_depth <= 0) return false;
-    int cx, cz;
-    seaCorner(cx, cz);
-    const int dx = x - cx, dz = z - cz;
-    const double dist = std::sqrt(double(dx) * dx + double(dz) * dz);
-    const int seaRadius = std::min(m_width, m_depth) * 3 / 10;
-    const double shore = fbm((x + m_seed + 5331) * 0.07, (z + m_seed + 5331) * 0.07); // 与 seaColumnHeight 同源
-    const double effectiveRadius = double(seaRadius) * (1.0 + 0.12 * shore);
-    return dist <= effectiveRadius;
+    return m_terrain.isSeaSandColumn(x, z);
 }
 
 void World::generate()
 {
-    buildPermutation();
+    m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // R20.12：纯地形采样器重建（置换表随构造填充）
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
     m_biomeCache.clear(); // t905 perf：seed / 尺寸换新 → 群系 memo 作废（懒重建；generate 首遍逐列填回）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
@@ -5532,111 +5321,32 @@ void World::generate()
     gravLightReset();        // t933：全新世界 → 重力级联光照联合盒 / 批标志防御清（同 beginLoad 口径）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）
 
-    // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定，下层 dirt / 深 stone。
-    //   - 沙漠群系（isDesert）：**仅表层 4-6 格沙**下接 Stone（t255 修正：旧实现整柱沙 y 0..h 全 Sand →
-    //     沙贯穿到基岩层，挖沙挖到底全沙、且沙柱占满石层使矿石无分布空间）。表层沙厚度按 hashColumn 派生
-    //     4..6（确定性，PLAN §2-K，沙丘高低起伏感）；其下 Stone 由 scatterOres 散布矿石、底层由 placeBedrock
-    //     覆盖基岩（机制等价 MC 沙漠：薄沙层 + 沙岩/石基底；本工程无沙岩方块故直接下接 Stone）。
-    //   - 海域（t338 seaColumnHeight >= 0，集中于一角）：海盆 + 沙滩。该列地表重塑为缓坡（角点最深海底 →
-    //     边缘干沙滩），表层 Sand / 下 Dirt / 深 Stone；fillWater 随后在海盆（h<waterLevel）灌满海水。海优先于
-    //     群系（海覆盖任何群系，统一沙底）。
-    //   - 其余内陆：正常陆地（表层 Grass / 下 Dirt / 深 Stone）。
-    //   t338：旧「全域 h<=waterLevel+1 → 散布沙滩/水下沙」已移除 —— 内陆低洼列不再产散沙（spec「内陆无散沙」），
-    //     沙 + 海水集中于此一角。逐列独立 → 跨 chunk 边界天然连续；同 seed 确定（fbm / seaColumnHeight 纯函数，§2-K）。
-    //   走 ChunkManager.setBlock 跨 chunk 写入（初始全脏，其脏标记在此无副作用）。
+    // 填充地形（逐列规则，仅放大到 width×depth）：表层选择由「群系 + 海域」决定。R20.12：列体
+    //   （沙漠 / 海域 / 雪原 / 内陆的方块选择与确定性哈希派生）已迁 TerrainGen::fillTerrainColumn
+    //   （单一权威 terraingen.h——同步路径经下方 WorldColumnSink 写 m_chunks，后台 worker 经缓冲
+    //   sink 写自持 GeneratedChunkData，共用同一函数）。此处仅保留群系统计与循环编排（原 t255/
+    //   t338/t394/t526/t761 选择规则的记录随本体迁入）。走 ChunkManager.setBlock 跨 chunk 写入
+    //   （初始全脏，其脏标记在此无副作用）。
+    struct WorldColumnSink
+    {
+        ChunkManager *c;
+        void write(int x, int y, int z, quint8 id, quint8 state) { c->setBlock(x, y, z, id, state); }
+    } columnSink{ &m_chunks };
     int desertCols = 0, seaCols = 0, plainsCols = 0, hillsCols = 0, forestCols = 0, snowyCols = 0, swampCols = 0, jungleCols = 0;
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
-            const Biome bio = biomeAt(x, z);
-            const bool desert = (bio == Biome::Desert); // t274：经 biomeAt 单一权威（原 isDesert 收口于此）
-            // t338/t372：海域（海 + 沙滩）集中于一角。seaColumnHeight 返回沙海盘 + 过渡带的重塑高度（>=0）；
-            //   isSeaSandColumn 仅沙海盘为真 → 沙表层；过渡带（高度已平滑过渡到 heightAt）走自然群系草地。
-            const int seaH = seaColumnHeight(x, z);
-            const bool inSeaHeight = (seaH >= 0);                       // 沙海盘 + 过渡带（高度重塑）
-            const bool inSandSea = inSeaHeight && isSeaSandColumn(x, z); // 仅沙海盘（沙表层 / 灌水）
-            const int h = inSeaHeight ? seaH : std::min(heightAt(x, z), m_height - 1);
-            // t255/t394：沙漠列确定性哈希（PLAN §2-K）—— 沙厚度 / 砂岩厚度各取不同位段派生（解耦）。
-            //   非沙漠列置 0 不用（下方 thickness 判定跳过）。
-            const quint32 colHash = desert ? hashColumn(m_seed, x, z) : 0u;
-            // t255：沙漠表层沙厚度 4..6 格（colHash 低 2 位派生）。
-            const int desertSandThickness = desert ? (4 + int(colHash % 3u)) : 0;
-            // t394：沙下砂岩层厚度 3..5 格（colHash bit[9:8] 派生；沙下成岩，机制等价 MC 沙漠沙下砂岩）。
-            const int desertSandstoneThickness = desert ? (3 + int((colHash >> 8) % 3u)) : 0;
-            // t761 沙海盘表层沙砾混排（机制等价 MC 1.0 海岸砾石滩斑 / 砾石海底）：两级确定性哈希——
-            //   ① 4×4 粗格（x>>2,z>>2 共享决策）按 kGravelBeachPct% 选「砾石斑带」；② 带内逐列 65% 兑现。
-            //   为什么两级：纯列级独立掷硬币成「撒胡椒面」（单列孤立砾石不读作滩斑），先成带再参差兑现
-            //   → 成片但边缘破碎的砾石滩观感。密度旋钮 = kGravelBeachPct（常量可调，约 16% 沙海面列）。
-            //   仅沙海盘（inSandSea）表层 y==h 一格（沙滩面 / 海底面）；沙砾同受重力（与沙同族塌落链）。
-            constexpr unsigned kGravelBeachPct = 25u;  // 砾石斑带命中概率（密度主旋钮：25% 带 × 65% 列兑现 ≈ 16%）
-            constexpr unsigned kGravelBeachFill = 65u; // 带内列兑现概率（调小 → 斑更稀碎；调大 → 斑更整片）
-            const bool beachGravel = inSandSea
-                && ((hashColumn(m_seed + 7611, x >> 2, z >> 2) % 100u) < kGravelBeachPct)
-                && ((hashColumn(m_seed + 7612, x, z) % 100u) < kGravelBeachFill);
+            const TerrainGen::TerrainColumnSummary col = m_terrain.fillTerrainColumn(x, z, columnSink);
+            const Biome bio = col.biome;
+            const bool desert = (bio == Biome::Desert);
             if (desert) ++desertCols;
-            else if (inSandSea) ++seaCols;
-            // t306：森林地表仍为草（机制等价 MC 森林地表草地），仅树/草密度分化 → surface 填充无需分流 forest。
+            else if (col.sandSea) ++seaCols;
+            // t274/t306：群系分布可观测（plains 应为多数 / forest 次之 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
             if (bio == Biome::Plains) ++plainsCols;
             else if (bio == Biome::Hills) ++hillsCols;
             else if (bio == Biome::Forest) ++forestCols;
             else if (bio == Biome::Snowy) ++snowyCols;
             else if (bio == Biome::Swamp) ++swampCols;
             else if (bio == Biome::Jungle) ++jungleCols;
-            for (int y = 0; y <= h; ++y) {
-                quint8 b;
-                if (inSandSea) {
-                    // t338 海域：沙表层（海底 / 沙滩）+ Dirt + Stone（机制等价 MC 海岸沙 + 水下沙底）。沙海盘优先于
-                    //   群系（海覆盖任何群系，统一沙底）；fillWater 随后在海盆（h<waterLevel）灌满海水到海平面。
-                    //   t761：表层按列确定性混排沙砾（beachGravel 两级哈希，见上方常量注释）——砾石滩斑 /
-                    //   砾石海底观感（机制等价 MC 1.0 海岸 gravel 滩）。
-                    if (y == h)          b = beachGravel ? BlockRegistry::Gravel : BlockRegistry::Sand;  // 沙表层（海底 / 沙滩；t761 概率混砾）
-                    else if (y >= h - 2) b = BlockRegistry::Dirt;  // 表层下土
-                    else                 b = BlockRegistry::Stone; // 深石
-                } else if (desert) {
-                    // t255/t394：表层 desertSandThickness 格沙（h-y < thickness）下接 Sandstone 层（h-y <
-                    //   thickness+sandstoneThickness）再下接 Stone（修旧整柱沙贯穿基岩 bug）。机制等价 MC 1.0
-                    //   沙漠沙下砂岩层（沙压成岩）。沙 / 砂岩厚度均 colHash 不同位段派生 → 确定性（PLAN §2-K）。
-                    if (h - y < desertSandThickness)                       b = BlockRegistry::Sand;      // 表层沙
-                    else if (h - y < desertSandThickness + desertSandstoneThickness) b = BlockRegistry::Sandstone; // 沙下砂岩
-                    else                                                b = BlockRegistry::Stone;      // 深石
-                } else {
-                    // t526 雪原地表结构（机制等价 MC 寒冷群系覆雪；区别旧版「雪层直接铺在泥土上」）：
-                    //   泥→雪块→积雪层（y==h-1=Snow 整块、y==h=SnowLayer 薄层）→ 不生成草方块（雪原地表改泥土）。
-                    //   ① 远离海边 / 沙滩：海域重塑带（inSeaHeight = 沙海盘 + 过渡带，含沙滩缓坡）的 Snowy 列**不覆雪**
-                    //      （改泥土顶，区别旧版「沙滩边雪层」），仅内陆 Snowy 列才覆雪。
-                    //   ② 雪层下雪块过渡（不直接泥上雪层）：避免雪层塌陷感 + 与「8 层≈雪块」语义一致（雪层下有雪块承托）。
-                    //   t505 旧逻辑（SnowLayer 直接铺在草顶上）已重写为下方 Dirt→Snow→SnowLayer 三层。
-                    const bool isSnowy = (bio == Biome::Snowy);
-                    if (isSnowy && inSeaHeight) {
-                        // t526 海域过渡带：雪原列不覆雪（远离海边 / 沙滩）、不生成草方块 → 泥顶。下 Dirt / Stone。
-                        if (y == h)          b = BlockRegistry::Dirt;   // 过渡带泥顶（雪原列不草不雪）
-                        else if (y >= h - 2) b = BlockRegistry::Dirt;   // 表层下土
-                        else                 b = BlockRegistry::Stone;  // 深石
-                    } else if (isSnowy) {
-                        // t526 内陆雪原：SnowLayer 薄层（state 0..2 = 1/8..3/8 厚真实积雪）→ Snow 整块 → Dirt → Stone。
-                        if (y == h) {
-                            // SnowLayer 薄层（state 0..2 随机；与旧 t505 同 slHash 独立位段派生，确定性）。
-                            //   m_chunks.setBlock 5 参数版写 id+state（worldgen 静默；光场随后 recomputeLightField 重算）。
-                            const quint32 slHash = hashColumn(m_seed, x, z);
-                            const quint8 snowState = quint8((slHash >> 4) % 3u); // 0..2（独立位段，确定性）
-                            m_chunks.setBlock(x, y, z, BlockRegistry::SnowLayer, snowState);
-                            continue; // 已写 SnowLayer（含 state），跳过下方默认 setBlock（其会重置 state=0）
-                        } else if (y == h - 1) {
-                            b = BlockRegistry::Snow; // 雪层下雪块过渡（泥→雪块→积雪层）
-                        } else if (y >= h - 2) {
-                            b = BlockRegistry::Dirt; // 表层下土
-                        } else {
-                            b = BlockRegistry::Stone; // 深石
-                        }
-                    } else if (y == h) {
-                        b = BlockRegistry::Grass;      // 草地表层（非雪原列）
-                    } else if (y >= h - 2) {
-                        b = BlockRegistry::Dirt;       // 土
-                    } else {
-                        b = BlockRegistry::Stone;      // 石
-                    }
-                }
-                m_chunks.setBlock(x, y, z, b);
-            }
         }
     }
     // t274/t306：群系分布可观测（plains 应为多数 / forest 次之 / hills + desert 少数）；同 seed → 同分布（确定性核对）。
@@ -5699,42 +5409,19 @@ void World::generate()
     rebuildStructureRegions();
 }
 
-// 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。纯函数，不依赖任何运行期随机源
-// （PLAN §2-K：固定 seed → 完全一致的树分布）。与 Perlin 置换表独立，避免树位与高度噪声耦合。
+// 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。R20.12：本体迁
+//   TerrainGen::hashColumn（单一权威 terraingen.h——同步路径与后台 worker 共用），本壳保持
+//   worldgen 散布族 34 处调用点零改动。原「与 Perlin 置换表独立」等记录随本体迁入。
 quint32 World::hashColumn(int seed, int x, int z) const
 {
-    quint32 h = 0x811c9dc5u; // FNV-1a basis
-    auto step = [&h](quint32 v) {
-        h ^= v;
-        h *= 0x01000193u; // FNV-1a prime
-    };
-    step(quint32(seed));
-    step(quint32(x));
-    step(quint32(z));
-    // FNV-1a 单轮扩散偏弱，补一轮 xorshift-mix 提高 avalanche（低位用于密度判定，须质量好）。
-    h ^= h >> 16;
-    h *= 0x7feb352du;
-    h ^= h >> 15;
-    return h;
+    return m_terrain.hashColumn(seed, x, z);
 }
 
-// 体素级哈希（FNV-1a + 同款 avalanche）：seed/x/y/z → 32 位确定性伪随机。与 hashColumn 同算法、
-// 多喂一个 y，供 scatterOres 做 3D 散布（矿石按体素而非按列分布）。纯函数（PLAN §2-K）。
+// 体素级哈希（FNV-1a + 同款 avalanche）：seed/x/y/z → 32 位确定性伪随机。R20.12：本体迁
+//   TerrainGen::hashVoxel（单一权威），本壳保持 public 查询面（t836 钓浮标等跨层消费）零改动。
 quint32 World::hashVoxel(int seed, int x, int y, int z) const
 {
-    quint32 h = 0x811c9dc5u; // FNV-1a basis
-    auto step = [&h](quint32 v) {
-        h ^= v;
-        h *= 0x01000193u; // FNV-1a prime
-    };
-    step(quint32(seed));
-    step(quint32(x));
-    step(quint32(y));
-    step(quint32(z));
-    h ^= h >> 16;
-    h *= 0x7feb352du;
-    h ^= h >> 15;
-    return h;
+    return m_terrain.hashVoxel(seed, x, y, z);
 }
 
 // 仅在合法边界且当前为空气时写入。树冠据此不覆盖主干/地形；跨 chunk 写入 + 脏标记由 ChunkManager 处理。

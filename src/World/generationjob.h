@@ -118,6 +118,20 @@ static_assert(QObjectFree<GenerationJobOutcome>, "GenerationJobOutcome must be Q
 static_assert(std::is_trivially_copyable_v<GenerationJobOutcome>,
               "GenerationJobOutcome stays trivially copyable (queue-safe value semantics)");
 
+// ── CompletedGeneration：异步完成记录（交接账本对账键 + worker 的 Error 穿透）────────────
+// 持 Error 而非 Result<void>：Result 不可默认构造（fail-safe 取值纪律）不宜作队列成员默认
+// 值；Error 是平凡聚合（code==0 = 成功面），调度侧 pumpAsync 换算回 Result<void> 走既有
+// deliver 穿透路径。trivially copyable 钉不变。
+struct CompletedGeneration
+{
+    quint64 jobId = 0;
+    Error error{}; // code==0 = 完成；非零 = 失败（worker 的 Error 原样穿透，同同步 execute 语义）
+};
+// 值纪律编译期钉（同 Request/Outcome：可安全跨线程携带、不携带 QObject 子对象）。
+static_assert(QObjectFree<CompletedGeneration>, "CompletedGeneration must be QObject-free (plan §29.3 R20.12)");
+static_assert(std::is_trivially_copyable_v<CompletedGeneration>,
+              "CompletedGeneration stays trivially copyable (thread-safe value semantics)");
+
 // ── GenerationWorker：执行后端缝（验收④——换 worker 不改调用者）──────────────────────
 // 同步版的默认形态 = pump 内联直跑；R20.12 换后台线程实现时调用者（submit/cancel/pump/
 // takeOutcome）零改动。worker 的失败面经 Result<void> 穿透到 outcome（不吞错）。
@@ -127,6 +141,29 @@ public:
     virtual ~GenerationWorker() = default;
     // 执行一个（已合并的）请求单元。返回 ok = 完成；fail = 失败（Error 穿透到每个活别名）。
     virtual Result<void> execute(const GenerationRequest &req) = 0;
+
+    // ── R20.12 后台线程协议（可选扩展；以下默认实现 = 同步语义逐位不变，r2011 腿面全绿守）──
+    // isAsynchronous() 为真时 scheduler.pump() 走「交接 + 收割」两相（pumpAsync），不再内联
+    // execute()：交接经 submitAsync（满载 fail = 背压，job 留队下轮 pump 再试），完成经
+    // takeCompletedAsync（FIFO）回到调用者线程投递。outcome 仍**只**产生在 pump/takeOutcome
+    // 侧（调用者线程）——epoch/取消过滤在投递时刻（deliver）生效 = 「world epoch 可以丢弃旧
+    // 任务」的后台版（交接后才过期的在途结果被静默丢弃，不投递）。数据面（自持缓冲）由具体
+    // worker 自带（见 backgroundgeneration.h GeneratedChunkData），不经本协议 payload 化——
+    // GenerationJobOutcome 保持 r2011 值纪律（trivially copyable 钉不动）。
+    virtual bool isAsynchronous() const { return false; }
+    // 移交一个（已合并的）请求单元到后台。ok = 受理；fail = 暂不受理（队列满载等，背压重试）。
+    virtual Result<void> submitAsync(const GenerationRequest &req, quint64 jobId)
+    {
+        Q_UNUSED(req);
+        Q_UNUSED(jobId);
+        return Result<void>::ok();
+    }
+    // 取一条完成记录（FIFO；空 = false 正常态，同 takeOutcome 口径）。jobId 对账移交账本。
+    virtual bool takeCompletedAsync(CompletedGeneration &out)
+    {
+        Q_UNUSED(out);
+        return false;
+    }
 };
 
 // ── GenerationScheduler：同步版请求编排器（调用者的唯一访问面）──────────────────────
@@ -183,41 +220,30 @@ public:
         return false;
     }
 
-    // pending 账面（job = 合并后的执行单元数；request = 别名数）。pump 后归零（全消耗）。
+    // pending 账面（job = 合并后的执行单元数；request = 别名数）。同步 pump 后归零（全消耗）；
+    // 异步 pump 后 = 未交接的余量（已交接部分入 inFlightJobCount 账，完成收割时双账同消）。
     int pendingJobCount() const { return int(m_jobs.size()); }
     int pendingRequestCount() const { return int(m_requests.size()); }
+    // R20.12：已交接后台、尚未收割的 job 数（异步账本；同步 worker 恒 0）。
+    int inFlightJobCount() const { return int(m_inFlight.size()); }
 
     // 同步执行全部 pending job（按优先级序内联直跑），并为每个活别名投递 outcome。
     // 过期/取消的请求与全死 job 按验收③静默丢弃（不执行、不投递）。无 worker 时不执行。
+    // R20.12：isAsynchronous() worker 改走「交接 + 收割」两相（pumpAsync）——请求模型
+    //   （submit/cancel/epoch 快照/优先级选活/投递过滤）与调用者面零改动。
     void pump()
     {
         if (!m_worker)
             return;
+        if (m_worker->isAsynchronous()) {
+            pumpAsync();
+            return;
+        }
         while (!m_jobs.empty()) {
-            // 选下一执行者：(priority, 首活 requestId) 最小；同时无活别名的 job 本轮淘汰。
-            bool found = false;
-            std::deque<Job>::const_iterator best = m_jobs.end();
+            std::deque<Job>::iterator best = m_jobs.end();
             quint32 bestFirstLive = 0;
-            for (auto it = m_jobs.cbegin(); it != m_jobs.cend(); ++it) {
-                quint32 firstLive = 0;
-                bool anyLive = false;
-                for (const Request &r : m_requests) {
-                    if (r.jobId != it->jobId || r.canceled || r.epoch != m_worldEpoch)
-                        continue; // 取消 / 过期别名不救活 job（验收③丢弃语义）
-                    anyLive = true;
-                    if (firstLive == 0 || r.requestId < firstLive)
-                        firstLive = r.requestId;
-                }
-                if (!anyLive)
-                    continue;
-                if (!found || int(it->priority) < int(best->priority)
-                    || (it->priority == best->priority && firstLive < bestFirstLive)) {
-                    found = true;
-                    best = it;
-                    bestFirstLive = firstLive;
-                }
-            }
-            if (!found) { // 全部 job 无活别名（取消/过期耗尽）——静默清账，零执行零投递
+            if (!selectNextLiveJob(best, bestFirstLive)) {
+                // 全部 job 无活别名（取消/过期耗尽）——静默清账，零执行零投递
                 m_jobs.clear();
                 m_requests.clear();
                 break;
@@ -267,6 +293,81 @@ private:
         bool canceled = false; // 取消标记（取消后永不投递）
     };
 
+    // 选下一执行者（同步内联直跑与异步交接共用）：(priority, 首活 requestId) 最小；无活别名
+    // （取消/过期耗尽）的 job 跳过。返回 false = 全部 job 无活别名（调用方按各自语义清账）。
+    bool selectNextLiveJob(std::deque<Job>::iterator &bestOut, quint32 &bestFirstLiveOut)
+    {
+        bool found = false;
+        for (auto it = m_jobs.begin(); it != m_jobs.end(); ++it) {
+            quint32 firstLive = 0;
+            bool anyLive = false;
+            for (const Request &r : m_requests) {
+                if (r.jobId != it->jobId || r.canceled || r.epoch != m_worldEpoch)
+                    continue; // 取消 / 过期别名不救活 job（验收③丢弃语义）
+                anyLive = true;
+                if (firstLive == 0 || r.requestId < firstLive)
+                    firstLive = r.requestId;
+            }
+            if (!anyLive)
+                continue;
+            if (!found || int(it->priority) < int(bestOut->priority)
+                || (it->priority == bestOut->priority && firstLive < bestFirstLiveOut)) {
+                found = true;
+                bestOut = it;
+                bestFirstLiveOut = firstLive;
+            }
+        }
+        return found;
+    }
+
+    // R20.12 异步泵（isAsynchronous() worker 专用）——交接 + 收割两相：
+    //   交接相：按既有选活序逐 job submitAsync 移交后台（满载 fail = 背压本轮止，job 留队下轮
+    //     pump 再试）；受理即取边①（Absent→Loading best-effort，同同步泵守卫语义——非法转移
+    //     被拒即忽略 = 固定世界零变化）并记入在途账本。全部剩余 job 无活别名时只清死 job 账面
+    //     （在途 job 的别名必须保留到收割）。
+    //   收割相：takeCompletedAsync FIFO 逐完成记录——边②仅成功面推进 + deliver 投递（取消/
+    //     epoch 过滤在此生效：交接后才 bump epoch 的在途结果被静默丢弃 = 验收③后台版）。
+    //   线程边界：submitAsync/takeCompletedAsync 只在调用者线程调（本函数的调用者 = pump 的
+    //     调用者）；跨线程同步由具体 worker 自管（见 backgroundgeneration.h 的锁与条件变量）。
+    void pumpAsync()
+    {
+        for (;;) {
+            std::deque<Job>::iterator best = m_jobs.end();
+            quint32 bestFirstLive = 0;
+            if (!selectNextLiveJob(best, bestFirstLive)) {
+                for (const Job &j : m_jobs) // 死 job 清账（在途账本不动）
+                    eraseRequests(j.jobId);
+                m_jobs.clear();
+                break;
+            }
+            const Job job = *best;
+            const GenerationRequest req{ bestFirstLive, job.kind, job.key, job.priority,
+                                         m_worldEpoch };
+            if (!m_worker->submitAsync(req, job.jobId).isOk())
+                break; // worker 队列满载 = 背压（可见拒绝在 worker 侧记账；本轮止）
+            m_jobs.erase(best);
+            if (m_chunks) // 边① handout 时取（生成在途）
+                m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Loading);
+            m_inFlight.push_back(job);
+        }
+        CompletedGeneration c;
+        while (m_worker->takeCompletedAsync(c)) {
+            for (auto it = m_inFlight.begin(); it != m_inFlight.end(); ++it) {
+                if (it->jobId != c.jobId)
+                    continue;
+                const Job job = *it;
+                m_inFlight.erase(it);
+                const Result<void> r = isError(c.error) ? Result<void>::fail(c.error)
+                                                        : Result<void>::ok(); // Error → Result 换算
+                if (r.isOk() && m_chunks) // 边②成功后推进（失败停 Loading，恢复登记 R20.12+）
+                    m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Generated);
+                deliver(job, r);
+                eraseRequests(job.jobId);
+                break;
+            }
+        }
+    }
+
     // 为 job 的每个活别名（未取消 && epoch 当前）投递一条 outcome（Error 穿透）。
     void deliver(const Job &job, const Result<void> &r)
     {
@@ -298,6 +399,7 @@ private:
     quint64 m_nextJobId = 1;
     std::deque<Job> m_jobs;         // pending 执行单元（合并后）
     std::deque<Request> m_requests; // pending 别名账本（jobId 挂靠）
+    std::deque<Job> m_inFlight;     // R20.12：已交接后台未收割的 job（jobId 对账；同步 worker 恒空）
     std::deque<GenerationJobOutcome> m_outcomes; // 已完成结果 FIFO（容量登记见头注分化说明）
 };
 
