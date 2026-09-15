@@ -909,6 +909,12 @@ add_executable(redstone_matrix_test
     #   自建 fresh 小世界 ×3——world/chunk 系源文件已列，无新增 .cpp）。
     tools/matrix/section11_gamesession.cpp
     src/Game/gamesession.h
+    # R20.08 WorldFacade 探针段（置尾先例沿用：runAll 末执行，filter 词 r2008；4 腿
+    #   r2008a-d = 查询面等价 / 写入面等价 / 结构钉+mesher 脏门端到端 / 阴性常驻+会话回归。
+    #   随段直编 src/World/worldfacade.h（header-only 收窄视图，非 QObject 无 AUTOMOC）；
+    #   自建 fresh 小世界 ×4——world/chunk 系源文件已列，无新增 .cpp）。
+    tools/matrix/section12_worldfacade.cpp
+    src/World/worldfacade.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
