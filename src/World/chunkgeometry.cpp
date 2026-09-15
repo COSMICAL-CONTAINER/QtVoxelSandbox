@@ -365,20 +365,18 @@ void ChunkGeometry::refreshMesh()
     buildMesh(RebuildReason::Dirty);
 }
 
-// 本几何负责的 chunk（cx/cz 越界或 world 未设 → nullptr）。每次现查（不在本类缓存指针），
-// 故 world 重建（recreate 销毁旧 chunk）后不会悬空：拿到的是新 chunk。
-Chunk *ChunkGeometry::myChunk() const
-{
-    if (!m_world) return nullptr;
-    return m_world->chunks().chunk(m_cx, m_cz); // cx/cz 越界 → nullptr
-}
+// R20.08 WorldFacade 迁移：旧 myChunk()（m_world->chunks().chunk(m_cx, m_cz) 直取 Chunk*）退役——
+//   chunk 存在/脏/流体专用脏三门改经 WorldFacade 收窄面查询（chunkgeometry.h chunkExists/chunkDirty/
+//   chunkFluidOnlyDirty 三帮手，逐位同语义委托）。本类自此零 Chunk*（渲染侧唯一 Chunk 内部指针
+//   消费点消除——refactor-plan §29.3 R20.08 验收①；矩阵 r2008c 结构钉守「myChunk 不回流」）。
 
 // dirty 驱动（dev-spec t03 验收）：仅当本 chunk 脏才重建。worldChanged 每次编辑都发，
 // 但 9 个 ChunkGeometry 各检各的 chunk 脏标记 → rebuild 次数 = dirty chunk 数（非脏跳过）。
 // t155 编辑即时重建保证：setBlock → ChunkManager.markDirty → World::emit worldChanged（GUI 同线程
 //   直连）→ 本槽**同步**执行 buildMesh(Dirty)，破 / 放后贴图当帧刷新（不延迟到太阳步进，<1 帧）。
 //   clearDirty 由本（编辑）路径独占 —— 太阳刷新（setSunDir→buildMesh(Sun)）见到的 chunk 永远非脏
-//   （编辑的 onWorldChanged 已同步清过），故清脏条件 `c->dirty()` 在太阳路径恒 false 不清、在编辑路径
+//   （编辑的 onWorldChanged 已同步清过），故清脏条件 chunkDirty()（R20.08 前为 `c->dirty()`）在
+//   太阳路径恒 false 不清、在编辑路径
 //   恒 true 清除，二者语义解耦、对任何太阳时序 immediate rebuild 都稳健（见 buildMesh 末尾清脏）。
 void ChunkGeometry::onWorldChanged()
 {
@@ -389,13 +387,11 @@ void ChunkGeometry::onWorldChanged()
     //   渐进同步队列排空（refreshMesh），远处可见地形不再等玩家走近才更新。
     //   首次构建期（启动）chunkInRange 默认 true，此门控不影响首次 mesh 生成。
     if (!m_chunkInRange) {
-        if (Chunk *c0 = myChunk())
-            if (c0->dirty())
-                m_deferredRebuild = true; // t972：内容重建欠账（本次 worldChanged 的变更窗外未建）
+        if (chunkDirty(m_cx, m_cz))
+            m_deferredRebuild = true; // t972：内容重建欠账（本次 worldChanged 的变更窗外未建）
         return;
     }
-    Chunk *c = myChunk();
-    if (!c || !c->dirty()) return;
+    if (!chunkDirty(m_cx, m_cz)) return;
     // t188 perf：流体专用脏跳过 —— 当本 chunk 自上次 clearAllDirty 以来只收到流体类写（Air/Water/Lava，
     //   由 ChunkManager::setBlock 据 oldId/newId 分类累积于 chunk::fluidOnlyDirty），本段若为 terrain/cross/
     //   glass/ice（非 water/lava 段）则顶点不变（这些段只画非流体方块，流体写必产相同 mesh）→ 跳过重建。
@@ -403,7 +399,7 @@ void ChunkGeometry::onWorldChanged()
     //   water/lava 段（m_waterOnly / m_lavaOnly）恒重建（流体写确改变其水面/流面几何）。流体专用假定由
     //   clearAllDirty 复位 true、固体写清 false（固体 dominate → 必重建）；故「混窗」（流体+固体）终态 false →
     //   重建，无误跳。冰段（m_iceOnly）跳过同理：冰↔水经 setWaterSilent 写 Ice（实体）→ fluidOnly=false → 重建。
-    if (c->fluidOnlyDirty() && !m_waterOnly && !m_lavaOnly) return;
+    if (chunkFluidOnlyDirty(m_cx, m_cz) && !m_waterOnly && !m_lavaOnly) return;
     buildMesh(RebuildReason::Dirty);
 }
 
@@ -551,14 +547,14 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     if (reason == RebuildReason::Dirty) FrameProfiler::instance()->count("meshNdirty");
     else if (reason == RebuildReason::Sun) FrameProfiler::instance()->count("meshNsun");
     else FrameProfiler::instance()->count("meshNwater");
-    Chunk *c = myChunk();
+    const bool haveChunk = chunkExists(m_cx, m_cz); // R20.08：存在门经 Facade（旧 myChunk() 直取退役）
     const int H = m_world ? m_world->height() : 0;
     constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）
     const int originX = m_cx * S, originZ = m_cz * S; // chunk 世界起点
 
     QVector<Vtx> verts;
     QVector<quint32> idx;
-    if (c && m_world) {
+    if (haveChunk && m_world) {
         verts.reserve(4096);
         idx.reserve(8192);
     }
@@ -624,7 +620,7 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
         return VoxelLight::aoCornerFactor(o1, o2, oc);
     };
 
-    if (c && m_world) {
+    if (haveChunk && m_world) {
         // ---- PASS 1：不完整方块（异形）合批进同一 chunk mesh（t133 PartialBlockGeometry）----
         //   **terrain 段独有**（水段无 partial；waterOnly 守卫防水段 ChunkGeometry 重复渲染异形方块）。
         //   每 cell 仅一次 append。独立于 PASS 2 的面 mask——否则 6 面 mask 各扫一次会 6× 重复 append。
