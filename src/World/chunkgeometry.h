@@ -6,7 +6,8 @@
 
 #include <QtQml/qqml.h>
 
-#include "world.h" // Q_PROPERTY(World*) + chunks() 路由（World 层只读）
+#include "world.h" // Q_PROPERTY(World*) + 路由（World 层只读）
+#include "worldfacade.h" // R20.08 WorldFacade：chunk 脏门/存在门查询走收窄面（不再直取 Chunk*）
 
 // 体素区块几何（纯视图，per-chunk，t03）：每个 ChunkGeometry 负责一个 chunk（cx,cz）的
 // 局部 culled meshing。从注入的 World（经 blockAt 跨 chunk 路由）取体素 + 邻居判定，
@@ -14,7 +15,7 @@
 // (cx*16, 0, cz*16) 完成世界定位。
 //
 // dirty 驱动重建（dev-spec t03 验收）：setBlock 经 ChunkManager 标目标 + 边界邻接 chunk 脏；
-// worldChanged → onWorldChanged() 检 myChunk()->dirty()，**仅脏 chunk 重建并清脏**，非脏
+// worldChanged → onWorldChanged() 检 chunkDirty()（R20.08 前为 myChunk()->dirty()），**仅脏 chunk 重建并清脏**，非脏
 // chunk 不重建（rebuild 次数 = dirty chunk 数）。跨 chunk 边界面剔除走 world.blockAt
 //（相邻两 chunk 实体→共边面剔除无夹层；一侧空气→画出；越界=空气）→ 3×3 无缝。
 //
@@ -281,7 +282,24 @@ private:
     //   kDayMulThresh | 距上次重烘超硬顶。昼夜天光（dayMul）现烘进顶点色天空分量（PLAN §2-H），故 dayMul 累计
     //   变化超阈值亦触发重烘（保持昼夜过渡可见、但不 10Hz 全量重建）；block 项不受影响（方块光时间不变）。
     bool sunRebuildDue(const QVector3D &dir, float dayMul) const;
-    Chunk *myChunk() const;           // 本几何负责的 chunk（world/cx/cz 无效 → nullptr）
+    // R20.08 WorldFacade 门查询（示范迁移点）：本几何负责的 chunk 的存在/脏/流体专用脏三门，
+    //   经 WorldFacade 收窄面查询（worldfacade.h chunkExistsAt/chunkDirtyAt/chunkFluidOnlyDirtyAt
+    //   —— 委托 World 层同一路由，语义与旧 myChunk() 直取 Chunk* 逐位一致）。**每次现查、不缓存
+    //   指针**（旧 myChunk 同款防悬空口径：world recreate 后拿到的是新 chunk 状态）；world 未设
+    //   → 恒 false（同旧 myChunk() 返 nullptr 的门语义）。迁移后本类零 Chunk*（渲染侧唯一
+    //   Chunk 内部指针消费点消除——R20.08 验收①）。
+    bool chunkExists(int cx, int cz) const
+    {
+        return m_world && WorldFacade(*m_world).chunkExistsAt(cx, cz);
+    }
+    bool chunkDirty(int cx, int cz) const
+    {
+        return m_world && WorldFacade(*m_world).chunkDirtyAt(cx, cz);
+    }
+    bool chunkFluidOnlyDirty(int cx, int cz) const
+    {
+        return m_world && WorldFacade(*m_world).chunkFluidOnlyDirtyAt(cx, cz);
+    }
     // 世界坐标查询（跨 chunk 经 world.blockAt 路由 → 边界面剔除正确）
     quint8 blockAtWorld(int wx, int wy, int wz) const {
         return m_world ? m_world->blockAt(wx, wy, wz) : quint8(0);
@@ -293,7 +311,7 @@ private:
     }
 
     World *m_world = nullptr;
-    int m_cx = -1; // -1 = 未赋值（myChunk 返回 nullptr，待 QML 赋 cx/cz 后才建）
+    int m_cx = -1; // -1 = 未赋值（chunkExists 门恒 false，待 QML 赋 cx/cz 后才建）
     int m_cz = -1;
     QVector3D m_sunDir{0.f, 1.f, 0.f}; // t123 太阳方向（单位向量；默认天顶正午，QML 绑 WorldClock.sunDir）
     float m_dayMul = 1.0f; // PLAN §2-H：昼夜天光乘子（仅乘天光分量；默认 1.0=正午全日照，QML 绑 terrainLight(skyLight)）

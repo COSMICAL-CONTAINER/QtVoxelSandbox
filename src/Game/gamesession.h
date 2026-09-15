@@ -52,7 +52,8 @@
 #include "event.h"     // Event / WorldDelta / EventQueue（编辑面表达）
 #include "mathtypes.h" // Tick::kClockTickMs / BlockPos / ChunkKey
 #include "result.h"    // Result<void>（满载拒绝失败面穿透）
-#include "world.h"     // World：tick 家族 + setBlock 写权威（委托目标，不复制其逻辑）
+#include "world.h"     // World：tick 家族（模拟泵——见下「选型」）+ setBlock 写实现权威
+#include "worldfacade.h" // R20.08 WorldFacade：查询/写入收窄面（命令写 + 编辑后回读走此面）
 
 #include <QObject>
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
@@ -106,8 +107,9 @@ private:
     // 恒成功：刚腾出的空位 ≥ 回队数）→ World 模拟家族（Main.qml 桥接次序逐行镜像）→
     // delta 收口 + 信号。
     void runOneTick();
-    // 命令执行（**委托不复制**）：BreakBlock → World::setBlock(pos, Air)、PlaceBlock →
-    // World::setBlock(pos, blockId)——「写栅格的唯一入口」全套写后钩子 / 语义事件照走。
+    // 命令执行（**委托不复制**）：BreakBlock → setBlock(pos, Air)、PlaceBlock → setBlock(pos,
+    // blockId)——经 WorldFacade 收窄面落 World::setBlock「写栅格的唯一入口」权威（R20.08 迁移：
+    // 命令写走 Facade；权威仍是 World::setBlock，全套写后钩子 / 语义事件照走）。
     // 越界 / 无变化由 World 权威语义静默拒绝（同玩家前门路径的行为面）。
     void executeCommand(const Command &c);
     // 编辑登记（blockBroken/blockPlaced 回调）：受影响 chunk 幂等入集 + 改动量 + BlockChanged
@@ -115,6 +117,10 @@ private:
     void noteEdit(int x, int y, int z);
 
     World &m_world;
+    // R20.08 WorldFacade（示范迁移：新代码经收窄面读写世界）：查询/写入走 m_facade（命令写
+    //   setBlock + 编辑后回读 blockAt），tick 模拟泵家族仍直调 m_world（模拟泵非查询/写面，
+    //   Facade 不收拢——选型登记于 docs R20.08 关单；r2008d 阴性钉守「命令零旁路」）。
+    WorldFacade m_facade;
     CommandQueue m_commands;
     EventQueue m_events;
     WorldDelta m_lastDelta;
@@ -127,6 +133,7 @@ private:
 inline GameSession::GameSession(World &world, QObject *parent)
     : QObject(parent)
     , m_world(world)
+    , m_facade(world)
 {
     // 编辑语义事件 → WorldDelta 构造点（带坐标的仅此两路，见头注③④）。直接连接同步登记
     //（World setBlock 栈内执行——与 tick 收口同线程同序，无队列延迟）。
@@ -193,10 +200,10 @@ inline void GameSession::executeCommand(const Command &c)
 {
     switch (c.kind) {
     case CommandKind::BreakBlock:
-        m_world.setBlock(c.pos, quint8(BlockRegistry::Air));
+        m_facade.setBlock(c.pos, quint8(BlockRegistry::Air));
         break;
     case CommandKind::PlaceBlock:
-        m_world.setBlock(c.pos, c.blockId);
+        m_facade.setBlock(c.pos, c.blockId);
         break;
     }
 }
@@ -208,7 +215,7 @@ inline void GameSession::noteEdit(int x, int y, int z)
     Event e;
     e.kind = EventKind::BlockChanged;
     e.pos = BlockPos{ x, y, z };
-    e.blockId = m_world.blockAt(x, y, z); // 改动后 id（破 = Air；Ice→水类特写按权威栅格为准）
+    e.blockId = m_facade.blockAt(x, y, z); // 改动后 id（破 = Air；Ice→水类特写按权威栅格为准）
     e.tick = m_tick;
     if (!m_events.push(e).isOk())
         ++m_droppedEvents; // 事件不可再生——满载丢弃必须可见（对比快照域的覆盖语义）
