@@ -4,70 +4,58 @@
 #include <QObject>
 #include <QVariantList>
 #include <QVector3D>
-#include <QElapsedTimer>
 #include <QtQml/qqml.h>
 
-#include <vector>
-
+#include "entitystore.h"     // R20.14：掉落物模拟单一权威（src/Entities，向下合规）
 #include "blockregistry.h" // t1027 家族谓词用 BlockRegistry::Count/isPartialBlock/isCrossBillboard/isBed（Game→Core 向下合规）
 
-// 方块掉落实体管理器（t35；Entities/Game ViewModel 层）。
+// 方块掉落实体管理器（t35；呈现 ViewModel 层）。
 //
-// 生存模式破坏**可掉落**方块时，在该格生成一个 item entity（旋转 / 浮动的小方块图标），
-// 等待 t36 拾取。创造秒破不产出（PlayerController 不发 spawnItem 信号）；生存不可采掘
-// （canHarvest=false，如空手破石）也不产出。
+// ── R20.14 EntityStore 过渡 Adapter（plan §29.3 R20.14 验收④；头注立此存照）──────────
+// 本类自 R20.14 起收敛为 **过渡 Adapter**：掉落物模拟（spawn 物理 / 就近合并 / LRU 驱逐 /
+// 拾取 / 自然 despawn / 岩浆·火·仙人掌焚毁 / 批量收口 / 槽位复用 / EntityId 分配）的单一
+// 权威在 src/Entities/entitystore.h（EntityStore，非 QObject 值语义组件）——本类**逐方法
+// 一行委托，不复制逻辑**（禁两份模拟逻辑并存，r2014d 反探钉：合并/物理/槽位机件禁回流
+// 本文件）。迁移纪律：
+//   · QML / instancing feeder 消费面（Q_PROPERTY count/revision、entitiesChanged 信号、
+//     全部 Q_INVOKABLE 与 C++ 直调面：aliveAt/count/posAt/itemIdAt/countAt/restingAt/
+//     enchantsAt/nameAt/durabilityAt/setCountAt/removeAt/clearAll/isPickupReady/
+//     deferWallClocks/tick/spawn 三入口/beginBatch-endBatch）**语义零变化**——本单承重墙
+//     （P-t1027a/b/c、t1032、t1039、t1041 腿族全绿 = 通过线）。
+//   · notify 沿：EntityStore 变更收口经 notifySink 回调上行 → 本类 emit entitiesChanged()
+//     （含 t354 批量收口与 clearAll 无条件直发语义，逐位保留）。
+//   · EntityId 语义：槽位下标（QML Repeater 寻址，t256/t978 LIFO 复用）与 store 级稳定
+//     EntityId 双轨——前者 QML 承重契约零变化，后者见 entitystore.h 头注（验收①）。
+//   · 渲染家族谓词（isItem3DFamily / isPlainCubeDrop / isTool3DDrop / isIconBillboardDrop /
+//     isBlockIconBillboardDrop）留本类：渲染域单一权威（QML delegate 排除侧与 C++ feeder
+//     收纳侧同源），非模拟域；t1027b/t1041d 源钉钉在本文件路径，随迁移同址保留。
 //
-// 数据形态（pos / id / count / 物理态）：每个实体 = {世界坐标 pos, 物品 id, 数量 count,
-// 垂直速度 vy, 是否已落地 resting}。count 字段（t64）支持「整栈丢弃为 1 实体」（如 4 木棒丢出
-// 仍为 1 实体 count=4）；拾取时把 count 全数交 Hotbar::addStack，装不下则 entity.count 留余数。
-// 呈现层（Main.qml 的 Repeater）经 count + posAt + itemIdAt + countAt 读数据，自发旋转 / 浮动
-// 动画（不反向写）；count>1 时 delegate 显数量数字。
-// 拾取（t36）：PlayerController 每帧扫附近实体 → Hotbar.addStack 成功 → removeAt 销毁该实体；
-//   t64：拾取按 entity.count 全数尝试入背包，余数（背包满）回写 entity.count，entity 保留。
-// 丢弃（t36）：PlayerController Q 键 → 经 spawnItem 信号（onSpawnItem 转发）回流入本类 spawnItem。
-//
-// 实体数量有上限（防溢出，spec「>200 跳过 / 合并」）：达到上限 kCap 时新 spawn 被跳过 +
-// 告警，保留已有实体（最简策略；合并 / LRU 推迟）。
-//
-// t60 掉落物重力：spawn 时实体悬浮在格中央（pos.y = y + 0.5），落地前每帧 tick() 施加重力
-// （vy -= g*dt，钳到 -kMaxFall），下移后扫实体所在列查首个实体方块 → 落到其顶面停下（resting=true，
-// vy=0）。落地后仍保留旋转 / 浮动动画（呈现层自发，不受 resting 影响）。落地后再检测到下方方块
-// 被挖空（支撑格变空气）→ 解除 resting 续落（防悬空）。tick 由 PlayerController::tick() 每帧驱动
-// （独立于玩家捕获态 → 菜单 / 暂停时世界照常模拟），传入 World* 做只读 solidity 查询。
-//
-// 分层（PLAN §2）：本层属 Entities（PLAN §2 分层「Entities: ... 掉落物」位于 Game / Physics 之下、
-// World 之上）。t60 引入**向下**只读依赖 World（isSolid），方向合规（PLAN §2「依赖只向下」）；不依赖
-// Renderer / Physics / QtQuick3D。spawnItem 触发由 PlayerController（Game/Physics 层）发信号，Main.qml
-// 的 Connections 转发到本类 spawnItem() —— 单向事件流，本类不持有 PlayerController（同
-// blockBroken→粒子 / fallDamageTaken→PlayerState 模式）。
-class World; // 前向声明（t60 tick 只读 World::isSolid；完整定义在 .cpp include）
+// 既有行为注（t36 拾取 / t64 整栈与余数 / t53 免拾窗 / t60 重力 / t256 槽位复用 / t271 浮水
+// 随流 / t320 LRU+寿命 / t343-t445 焚毁 / t354 批量 / t490fix 合并 / t608-t609 定向弹出 /
+// t590-t647 元数据保真 / t867 薄支撑）全量随模拟体迁至 EntityStore（entitystore.h/.cpp
+// 头注与 git 历史归档），此处不重复。
+class World; // 前向声明（tick 只读 World 查询族）
 class ItemEntityManager : public QObject
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(ItemEntityManager)
-    // count：当前实体数（Repeater 作 int model → 生成 0..count-1 delegate）。NOTIFY entitiesChanged
-    // 驱动 spawn 后 Repeater 追加新 delegate（不重建已有 → 动画连续不被打断）。
+    // count：当前槽表长（Repeater 作 int model → 生成 0..count-1 delegate；t256 起单调不降）。
+    // NOTIFY entitiesChanged 驱动 spawn 后 Repeater 追加新 delegate（不重建已有 → 动画连续）。
     Q_PROPERTY(int count READ count NOTIFY entitiesChanged)
-    // revision：实体集版本号（随 spawn / 未来 remove 自增）。供需要整列重建的消费者「触碰」
-    // 绑定作 NOTIFY 触发器（同 Hotbar.slotRevision 模式）；当前 Repeater 直接用 count，预留。
+    // revision：实体集版本号（变更收口沿自增；批量区间内也逐次自增，仅 emit 被收口）。
     Q_PROPERTY(int revision READ revision NOTIFY entitiesChanged)
 
 public:
     explicit ItemEntityManager(QObject *parent = nullptr);
 
-    int count() const { return int(m_entities.size()); }
-    int revision() const { return m_revision; }
-    // t256：当前**活体**实体数（不含已释放的空槽）。F3 draw-call 估算用它（空槽 delegate visible=false
-    //   不参与绘制）。spawn 上限判定（kCap）也读它（空槽可复用，不算满）。
-    Q_INVOKABLE int liveCount() const { return m_liveCount; }
-    // t1007：本会话活体高水位（历史 max(liveCount)；acquireSlot 更新）。**clearAll 不重置**——「重进存档」
-    //   重置的是活体集；高水位保留 = 上一世界确实到过的峰值（有界 ≤kCap=200，LRU 驱逐 + 5min despawn
-    //   双钳）。F3 与 items live/slots 并排（10Hz 普通 JS 读取）：live 高 + 逐 item 独立 geometry/材质实例
-    //   = draw-call 线性放大面；重载后 live 归零 hw 不变 = 峰值残留有界，非无限增长。
-    Q_INVOKABLE int liveHighWater() const { return m_liveHighWater; }
-    // t256：第 i 个槽位是否活体。呈现层 delegate 据它 visible：空槽隐藏（slot 复用保 Repeater count
-    //   单调不降、delegate 永不销毁）。越界 → false。pickupScan 也据此跳过空槽。
-    Q_INVOKABLE bool aliveAt(int i) const;
+    int count() const { return m_store.count(); }
+    int revision() const { return m_store.revision(); }
+    // t256：当前**活体**实体数（不含已释放空槽）。F3 draw-call 估算与 kCap 满载判定读它。
+    Q_INVOKABLE int liveCount() const { return m_store.liveCount(); }
+    // t1007：本会话活体高水位（clearAll 不重置；跨重载判读面——语义见 EntityStore）。
+    Q_INVOKABLE int liveHighWater() const { return m_store.liveHighWater(); }
+    // t256：第 i 个槽位是否活体（空槽 → false；呈现层 delegate visible + pickupScan 跳过）。
+    Q_INVOKABLE bool aliveAt(int i) const { return m_store.aliveAt(i); }
 
     // ── t1027（R19.21）掉落物渲染家族谓词（单一权威；instancing 治理首批）──
     //   「QML delegate 排除侧」与「C++ feeder 收纳侧」（BlockDropInstancing）必须对同族判定逐位一致，
@@ -96,286 +84,83 @@ public:
     //   (isPartialBlock ∨ isCrossBlock ∨ isBed) ∧ !isItem3DFamily 的 C++ 镜像；BillboardQuad +
     //   per-id 图标 PNG（iconSourceForBlock）。楼梯 16 在族（partial 非 3D），火把 13 不在（3D 族）。
     Q_INVOKABLE static bool isBlockIconBillboardDrop(int itemId);
-    // t743：第 i 个槽位实体是否**已着地**（resting——落在支撑方块顶面静止；飞行 / 浮水 / 瀑布下沉恒
-    //   false）。压力板掉落物触发（updatePressurePlates 掉落物分支）据它门控：着地 = 物品与板面真实
-    //   接触才压板（机制等价 MC 物品实体压板），飞行掠过板顶不误触。空槽 / 越界 → false。
-    Q_INVOKABLE bool restingAt(int i) const;
+    // t743：第 i 个槽位实体是否**已着地**（压力板掉落物触发门控）。空槽 / 越界 → false。
+    Q_INVOKABLE bool restingAt(int i) const { return m_store.restingAt(i); }
 
-    // 在方块格 (x,y,z)（整数坐标）生成一个 itemId 的掉落实体。位置存该格中心
-    // (x+0.5, y+0.5, z+0.5)（实体悬浮在格中央）。达到 kCap → 跳过 + qWarning（防溢出）。
-    // itemId<=0（air / 非法）拒（caller 应已过滤；双保险）。count 为实体携带数量（t64：整栈
-    // 丢弃为 1 实体；缺省 1 = 单件，与历史调用兼容）；count<=0 视作 1，>maxStack 由 caller 分流
-    // （本类不查 maxStack —— PlayerController 拾取时把全数交 Hotbar.addStack 自然分流到多槽）。
-    //
-    // t490fix 就近合并（机制等价 MC 1.0 掉落物合并）：spawn 前扫现有活体，找同 itemId 且 pos 距
-    //   (x+0.5,y+0.5,z+0.5) ≤ kMergeRadius 的第一个 → count 累加（clamp BlockRegistry::maxStackSize(itemId)，
-    //   溢出走新 spawn）。合并方向：新 spawn 往已有实体合，不动已有 pos（避免视觉跳变）。count 用
-    //   setCountAt 改（bump revision+emit，批内 notifyChanged 仅标 dirty → t354 批行为保留）。maxStack<=1
-    //   （工具 / 护甲 / 桶 / 蘑菇汤等不可堆叠）→ 跳过合并走新 spawn。性能：每次 O(n)，n≤kCap=200 可接受
-    //   （爆炸批量 spawn 时 each O(200)×50 = 10k blockAt-free 比较，远好于不合并的 50 个新 delegate）。
-    //   t590 enchants：QVariantList<int> 4 元素（每 = EnchantRegistry::pack 值；缺省空 = 无附魔）。
-    //   工具 / 护甲丢弃传其实例附魔 → 实体携带 → 拾取回填（防数据丢失）；可堆叠物品（合并路径）恒 0。
-    //   t622 name：自定义名（铁砧重命名产物丢弃传其实例名 → 实体携带 → 拾取回填，防「改名物品丢出再捡
-    //   丢名」；缺省空 = 无名 = 注册表默认名）。可堆叠物品丢弃不传名（同附魔语义）。
-    //   review D2-c durability：实例耐久（-1 = 未初始化 → 拾取端 addToAny 归一满耐久；>0 = 显式保真 —— 磨损
-    //   工具经箱子破块掉落（Main.qml 携 slotDurabilityAt）丢出再捡耐久不复原；可堆叠物品恒 -1 inert）。
-    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {}, const QString &name = QString(), int durability = -1);
-
-    // t608 定点定向弹出（发射器排出口统一口径）：在**浮点世界坐标 pos**（发射器格中心 + 朝向外向 ×0.5 =
-    //   排出口面中心）生成掉落物，初始水平速度 = (dirX,dirZ) 归一化 × speed（沿发射器朝向弹出，机制等价
-    //   MC 1.0 发射器 / 投掷器从排出口把物品弹出）。与 spawnItem（格中心 + 哈希随机弹出方向）的唯一差异：
-    //   ① 位置精确到排出口（用户「掉落物和投掷物应同一个口出来」）；② 弹出方向 = 发射朝向（非随机）。
-    //   其余（合并 / LRU / 免拾窗 / 重力 + 摩擦 / maxStack）与 spawnItem 完全同链。dirX/dirZ 全 0（退化）→
-    //   speed 视作 0（原地生成，重力落地）。分层同 spawnItem（Entities 层，无向上依赖）。
-    //   t622 name：同 spawnItem（发射器 / 投掷器弹出物品的实例名保真）。
-    //   t647 durability：同 spawnItem（发射器弹出的磨损工具耐久保真）。
+    // 在方块格 (x,y,z) 生成一个 itemId 的掉落实体（存格中心；t490fix 就近合并；t320 LRU；
+    //   t64 count 语义；t590/t622/review D2-c 元数据保真）。达到 kCap → LRU 驱逐最老。
+    Q_INVOKABLE void spawnItem(int x, int y, int z, int itemId, int count = 1, const QVariantList &enchants = {}, const QString &name = QString(), int durability = -1)
+    {
+        m_store.spawnItem(x, y, z, itemId, count, enchants, name, durability);
+    }
+    // t608 定点定向弹出（发射器排出口统一口径）：位置精确到排出口 + 弹出方向 = 发射朝向；
+    //   其余（合并 / LRU / 免拾窗 / 物理）与 spawnItem 同链。
     Q_INVOKABLE void spawnItemAt(const QVector3D &pos, int itemId, int count,
                                  float dirX, float dirZ, float speed,
                                  const QVariantList &enchants = {}, const QString &name = QString(),
-                                 int durability = -1);
-    // t609 带俯仰的定点定向弹出（Q 丢弃修正）：在浮点世界坐标 pos（玩家眼位 + 视线 × 0.3）生成掉落物，
-    // 初速度 = (dirX,dirY,dirZ) 归一化 × speed（三维视线方向——仰视上抛 / 俯视下压，机制等价 MC 玩家把
-    // 物品朝视线方向扔出）。与上方水平版（vy=0）的差异仅在初速含 Y 分量；其余（合并 / LRU / 免拾窗 /
-    // 重力 + 摩擦）完全同链。PlayerController 主动丢弃（dropHeld 族）C++ 直调本入口（非 QML，不 Q_INVOKABLE）。
-    //   t622 name：同 spawnItem（玩家主动丢弃的改名物品保真——dropHeld 族传 held/slot 实例名）。
-    //   t647 durability：同 spawnItem（丢弃的磨损工具耐久保真；dropHeld 族现未传 → 缺省 -1 归一满，
-    //   发射器弹出路径传槽内实例值）。
+                                 int durability = -1)
+    {
+        m_store.spawnItemAt(pos, itemId, count, dirX, dirZ, speed, enchants, name, durability);
+    }
+    // t609 带俯仰的定点定向弹出（Q 丢弃修正；PlayerController C++ 直调，非 Q_INVOKABLE）。
     void spawnItemThrown(const QVector3D &pos, int itemId, int count,
                          float dirX, float dirY, float dirZ, float speed,
                          const QVariantList &enchants = {}, const QString &name = QString(),
-                         int durability = -1);
-
-    // t354 批量 spawn 抑制 entitiesChanged（修 Stalker 爆炸「t320 已批 worldChanged 但仍卡」的复发根因）：
-    //   一次爆炸按 kExplosionDropChance(~50%) 对球内每破坏块发 explosionDroppedItem → 呈现层逐个 spawnItem，
-    //   而旧 spawnItem **每次** ++revision + emit entitiesChanged → N 个掉落物 = N 次 Repeater model(count) 变更 +
-    //   N 轮「全体 delegate 触碰 revision 重算 4 绑定」= O(N²) 绑定重算 + N 次重 3D delegate 即时实例化
-    //   （BlockCube / Billboard Canvas）→ 一帧数十 ms（FPS 崩 + 落地前每帧续卡）。t320 只批了 World 层的
-    //   worldChanged（N 写 1 emit），漏了本 Game/Item 层的 entitiesChanged —— 即复发根因。
-    //   beginBatch/endBatch 把同一次爆炸的 N 个 spawn 收口成末尾 1 次 emit（Repeater 一次补齐 N 个新 delegate、
-    //   已存在 delegate 仅重算 1 轮）= O(N)。深度计数可嵌套；非爆炸的常规 spawn（玩家丢弃 / mob 死亡 / 落沙）
-    //   不经批（depth=0）→ 立即 emit，行为不变。clearAll 不经批（重置语义，应即时通知）。机制等价 MC 爆炸
-    //   一次性结算掉落而非逐块入世界。呈现层用法：第一发爆炸掉落信号 beginBatch、爆炸总结信号（onExplosion，
-    //   detonateStalker 末尾恒发）endBatch 收口。
-    Q_INVOKABLE void beginBatch(); // 进入批量：notifyChanged 仅标 dirty、不 emit（depth++）
-    Q_INVOKABLE void endBatch();   // 退出批量：depth 归 0 且有 dirty → 1 次 emit；非批 / 无 dirty → no-op
-    // t354 当前是否在批量区间（depth>0）。呈现层据此判「首发爆炸掉落」开批（仅 begin 一次），避免在 QML 维护
-    //   跨 handler 的批量态（批态集中在 C++ m_batchDepth，单一事实源）。
-    Q_INVOKABLE bool batchActive() const { return m_batchDepth > 0; }
-
-    // 第 i 个实体的世界坐标（呈现层 Repeater delegate 绑它摆位）。越界返回 (0,0,0)。
-    Q_INVOKABLE QVector3D posAt(int i) const;
-    // 第 i 个实体的物品 id（呈现层据它设 BlockCube.blockId / 分流到 ToolIcon / MaterialIcon 外观）。
-    // 越界返回 0。
-    Q_INVOKABLE int itemIdAt(int i) const;
-    // 第 i 个实体的数量（t64：呈现层 count>1 时显数字；PlayerController 拾取按它入背包）。越界返回 0。
-    Q_INVOKABLE int countAt(int i) const;
-    // t590 第 i 个实体的附魔元数据（QVariantList<int> 4 元素，每 = EnchantRegistry::pack 值；0 = 空槽）。
-    //   呈现层据它给掉落物紫光晕 + 拾取回填附魔用。越界 / 空槽 → {0,0,0,0}。
-    Q_INVOKABLE QVariantList enchantsAt(int i) const;
-    // t622 第 i 个实体的自定义名（铁砧重命名产物丢弃保真；空串 = 注册表默认名）。越界 / 空槽 → 空串。
-    //   PlayerController 拾取（pickupScan）读它回填 Hotbar::addToAny 第 5 参；呈现层掉落物无需显示（无 tooltip UI）。
-    Q_INVOKABLE QString nameAt(int i) const;
-    // review D2-c 第 i 个实体的实例耐久（-1 = 未初始化 → 拾取端归一满耐久；>0 = 显式保真）。越界 / 空槽 → -1。
-    //   PlayerController 拾取（pickupScan）读它回填 Hotbar::addToAny 第 3 参（同 enchantsAt / nameAt 回填模式）。
-    Q_INVOKABLE int durabilityAt(int i) const;
-    // 把第 i 个实体的数量设为 n（t64：拾取装不下时把余数回写、保留 entity）。n<=0 销毁该实体
-    // （余数为 0 = 全拾走）。边界安全（越界静默）。仅 PlayerController::pickupScan 调（拾取路径），
-    // 非 QML 调用入口。bump revision 驱动 QML delegate 数量绑定重算。
-    Q_INVOKABLE void setCountAt(int i, int n);
-    // 销毁第 i 个实体（t36 拾取后调用）。erase-shift（保持其余实体位置 / 索引连续；非 swap-remove，
-    // 否则末位 delegate 会瞬移到被拾取位 → 视觉跳变）。越界静默。bump revision → QML Repeater
-    // delegate 的 posAt/itemIdAt 绑定（触碰 revision）整列重算，shift 后各 delegate 对齐新数据。
-    Q_INVOKABLE void removeAt(int i);
-    // t176 存档：清空所有掉落实体（切世界 / 退出存档前调，防上一世界的掉落物残留进新世界）。
-    //   t437：改「释放全部活体槽位」而非「清空 vector」——保 slot-reuse 单调不变量（count 不降）。根因同
-    //   EntityManager::clearAll：旧 m_entities.clear() 把 count→0，QML itemHost Repeater 随之→0，但 reparent
-    //   进 itemHost 的 3D delegate（QQuick3DNode）不进 QQuickRepeater 跟踪表、所有权已转给 itemHost → Repeater
-    //   销毁不到 → delegate 永久成孤儿（lessons-learned t170）。每次退存档→再进都把上一世界全部掉落物 delegate
-    //   孤儿化 + 新世界从 0 重建 → 跨世界单调累积 → 内存只增不减、FPS 掉到个位数（"退存档再进仍卡"的直接根因；
-    //   C++ 审计全 clean，泄漏在 QML 场景图侧；t256 已用 slot-reuse 修「游玩期」却漏了「切世界 clearAll」断点）。
-    //   改释放槽位：alive=false + 入 free list + liveCount=0，保留 vector → count 不降 → Repeater 不销毁 delegate
-    //   （无孤儿）→ 下次进世界复用既有 delegate（aliveAt 翻 true + revision bump 重绑）。高水位受 kCap(200) 钳制，
-    //   有界常驻开销远优于跨世界无界泄漏。仅释放活体槽（幂等）。emit entitiesChanged → QML 据 revision 翻释放槽
-    //   delegate visible=false 隐藏（不销毁）。
-    Q_INVOKABLE void clearAll() {
-        for (size_t i = 0; i < m_entities.size(); ++i)
-            if (m_entities[i].alive) releaseSlot(int(i));
-        emit entitiesChanged();
+                         int durability = -1)
+    {
+        m_store.spawnItemThrown(pos, itemId, count, dirX, dirY, dirZ, speed, enchants, name, durability);
     }
 
-    // t53：第 i 个实体是否已过「新生免拾取期」（spawn 后 kPickupDelayMs 内 false → pickupScan 跳过）。
-    // 破块瞬间实体常落在玩家近旁（如脚下方块中心距玩家中心仅 ~1.4 格 < kPickupDist 1.5），若无免拾窗
-    // 则下一帧即被 pickupScan 收走、玩家永远看不见实体（用户反馈「仍 auto-collect 入背包」的根因）。
-    // 加 0.5s 免拾窗（机制等价 MC block-break 的短暂 pickup delay）让实体先可见、再入背包。越界 /
-    // 时钟未启 → true（保守可拾，防卡死、防延迟机制误伤合法拾取）。
-    bool isPickupReady(int i) const;
+    // t354 批量 spawn 抑制 entitiesChanged（修爆炸 O(N²) 绑定风暴 → O(N)；深度可嵌套；
+    //   非爆炸常规 spawn 不经批 → 立即 emit）。clearAll 不经批（重置语义，无条件通知）。
+    Q_INVOKABLE void beginBatch() { m_store.beginBatch(); }
+    Q_INVOKABLE void endBatch() { m_store.endBatch(); }
+    Q_INVOKABLE bool batchActive() const { return m_store.batchActive(); }
 
-    // t889 暂停期墙钟顺延（硬暂停复跑时由 PlayerController::setWorldRunning 调，传暂停时长 ms）：活体槽
-    //   spawnMs（拾取延迟 / 5min 自然寿命的**墙钟真值源**）整体 +ms —— 等价「暂停期墙钟不走」，长暂停
-    //   不会一次性烧穿寿命 / 免拾窗（机制等价 MC Java 单机 ESC 暂停一切计时冻结；旧注释「暂停期照常流逝」
-    //   语义随 t889 退役）。ms<=0 早退（幂等防御）；纯寿命簿记无 revision bump。
-    void deferWallClocks(qint64 ms);
+    // 呈现层 Repeater delegate 绑定读族（越界安全语义与旧实现逐位一致）。
+    Q_INVOKABLE QVector3D posAt(int i) const { return m_store.posAt(i); }
+    Q_INVOKABLE int itemIdAt(int i) const { return m_store.itemIdAt(i); }
+    Q_INVOKABLE int countAt(int i) const { return m_store.countAt(i); }
+    Q_INVOKABLE QVariantList enchantsAt(int i) const { return m_store.enchantsAt(i); }
+    Q_INVOKABLE QString nameAt(int i) const { return m_store.nameAt(i); }
+    Q_INVOKABLE int durabilityAt(int i) const { return m_store.durabilityAt(i); }
+    // t64：拾取余数回写（n<=0 → 全拾走销毁）。仅 PlayerController::pickupScan 调。
+    Q_INVOKABLE void setCountAt(int i, int n) { m_store.setCountAt(i, n); }
+    // 销毁第 i 个实体（t36 拾取后调用；t256 起释放槽位非 erase-shift——count 单调不降，
+    //   Repeater delegate 不泄漏）。
+    Q_INVOKABLE void removeAt(int i) { m_store.removeAt(i); }
+    // t176/t437：清空所有掉落实体（切世界 / 退出存档前调）——释放全部活体槽 + **无条件**
+    //   emit entitiesChanged（重置语义；保 slot-reuse 单调不变量防 delegate 孤儿泄漏）。
+    Q_INVOKABLE void clearAll() { m_store.clearAll(); }
 
-    // t60 掉落物重力 / t271 水冲走掉落物：每帧推进所有实体的物理（由 PlayerController::tick 每帧调，
-    //   常开、独立于捕获态——菜单/暂停时世界照常模拟）。**C++ 直调**（非 QML 调 → 不挂 Q_INVOKABLE，
-    //   避开 moc 对 World* 前向类型的 metatype 处理）。world 为 null / 无实体 → 早 return（保守不动作）。
-    //
-    //   t60 空气重力：未入水时 vy -= g*dt（钳 -kMaxFall），按 dy 下移 pos.y，下移路径上扫实体所在列
-    //   （cx = floor(pos.x)、cz = floor(pos.z)）查首个实体方块 → 命中则贴其顶面停下（pos.y =
-    //   solidCellY + 1 + kRestOffset、vy=0、resting=true）。已 resting 的实体复探支撑格仍实体才续落
-    //   （防下方被挖后悬空）。任一实体 pos / resting 真变 → 末尾 bump revision + emit entitiesChanged
-    //   （驱动 QML delegate 的 {revision; posAt(index)} 绑定重算 → 呈现位置实时；count 不变 → Repeater
-    //   不重建 delegate，旋转 / 浮动动画连续不被打断）。
-    //
-    //   t271 入水（中心格 == Water）：
-    //     (a) **浮水面**（buoyancy，非瀑布）：扫该列自中心格向上找「最顶水格」（其上为非水 = 水面），
-    //         目标静止 Y = surfCellY + waterSurfaceFrac(顶水格 state) - kItemFloatOffset（t892：液面走
-    //         单一权威，源 7/8；中心贴水面、留在水格内防 floor 抖出空气→
-    //         下帧误判离水→重力回落的振荡）。中心在目标下方 → 以恒速 kItemRiseSpeed 上浮（机制等价 MC
-    //         掉落物水中缓浮）；到水面 → 钳到目标、vy=0。**瀑布例外**（水格下方为空气 = 水柱下落）→ 不上浮，
-    //         fall-through 到重力分支随水柱下沉（机制等价 MC 掉落物被瀑布带下；落入下方水池后转浮水）。
-    //     (b) **随流移动**（flow push）：仅流水格（state>0；水源 state=0 静止不推，spec）→ 据 4 向邻居
-    //         state 梯度推算「离源方向」（state 低于本格的邻居 = 近源 → 推力朝远离它），归一化后 ×
-    //         kItemFlowSpeed × dt 直接叠入水平位移（与 PlayerController t211 玩家水流推力同源算法）。
-    //         水平位移前查目标格 isCollidable（实体碰撞）→ 撞墙 / 撞半砖该轴不动（per-axis 试探让实体沿墙
-    //         滑动而非卡死）。浮水 + 瀑布均施（水柱底部漫流仍横向带）。
-    //     **关键修正（t271）**：t60 列扫用 World::isSolid（=非 air，含 Water）会让掉落物停在水面上当成地面；
-    //       改为 isSolid && blockAt != Water（水视作穿透，机制等价 t220「水不挡沙」），掉落物由此穿水面
-    //       入水 → 下帧中心格变 Water → 转浮水分支上浮（而非粘在水面当着地）。
-    //   分层（PLAN §2）：本层属 Entities/Game，向下只读 World（blockAt/stateAt/isSolid/isCollidable），
-    //     不依赖 Renderer/Physics/QtQuick3D。
-    void tick(qreal dt, World *world);
+    // t53：第 i 个实体是否已过新生免拾取期（0.5s；越界 / 时钟未启 → true 保守可拾）。
+    bool isPickupReady(int i) const { return m_store.isPickupReady(i); }
+
+    // t889 暂停期墙钟顺延（硬暂停复跑时由 PlayerController::setWorldRunning 调）：活体槽
+    //   spawnMs 整体 +ms；ms<=0 幂等早退；纯寿命簿记无 revision bump。
+    void deferWallClocks(qint64 ms) { m_store.deferWallClocks(ms); }
+    // R20.14 寿命时钟注入缝（ageLifetimeClock，deferWallClocks 对偶；t1029 缝纪律）——
+    //   生产路径零调用，矩阵 despawn 腿经 Adapter 面同步驱动孪生（与 store 直驱同参）。
+    void ageLifetimeClock(qint64 ms) { m_store.ageLifetimeClock(ms); }
+
+    // t60 掉落物重力 / t271 水冲走 / t343-t445 焚毁 / t320 寿命驱逐（每帧由
+    //   PlayerController::tick 调；C++ 直调非 Q_INVOKABLE——避开 moc 对 World* 前向类型的
+    //   metatype 处理）。world null / 无实体 → 早退。物理语义见 EntityStore::tick。
+    void tick(qreal dt, World *world) { m_store.tick(dt, world); }
+
+    // R20.14：可见实体快照观察（验收③；EntityStore 在 notify 沿 / clearAll 重建——呈现面
+    //   消费仍走上述逐槽读口零变化，本访问器供快照权威的测试 / 未来消费方）。
+    const EntityStoreSnapshot &snapshot() const { return m_store.snapshot(); }
+    // R20.14：store 级稳定 EntityId 观察（验收①；槽无效 / 空槽 → 0 哨兵）。
+    quint32 entityIdAtSlot(int i) const { return m_store.entityIdAtSlot(i); }
 
 signals:
-    void entitiesChanged(); // spawn / 未来 remove 触发；驱动 count/revision + QML 绑定刷新
+    void entitiesChanged(); // spawn / remove / 物理脏 / despawn / clearAll 触发（经 store notifySink 上行）
     // （t804 itemBurned 火焚烟粒子信号已随 t844 需求反转退役：入火改瞬灭无动画无烟，与岩浆同款语义。）
 
 private:
-    struct ItemEntity {
-        QVector3D pos;
-        int itemId;
-        int count = 1;       // t64：实体携带数量（整栈丢弃为 1 实体；拾取按此数入背包）
-        qint64 spawnMs = 0;  // 生成时刻（m_clock.elapsed()）；t53 isPickupReady 算 age 用
-        float vy = 0.0f;     // t60：垂直速度（blocks/s；向下为负）；落地后归 0
-        // t468 水平速度（blocks/s）：掉落物生成时带初始「弹出」水平速度（机制等价 MC 破块 / 丢弃物品弹出），
-        //   每 tick 积分位移 + 摩擦衰减。冰面摩擦极低 → 持续滑动（spec「冰上丢弃物品会一直滑动往前」）；
-        //   常规地面摩擦高 → 快速停下。放 resting 之前（alive 仍须末位，保聚合初始化 tail-default）。
-        float vx = 0.0f;
-        float vz = 0.0f;
-        bool resting = false;// t60：是否已落在实体方块顶面（resting 跳过重力，仅复探支撑格）
-        // t590 附魔元数据（4 槽 × EnchantRegistry::pack 值；0 = 空槽）：随掉落物实例走（同 ItemStack 语义，
-        //   工具 / 护甲丢弃 → 实体携带其附魔 → 拾取回填，防「附魔工具丢出再捡变普通」）。方块 / 材料段掉落
-        //   恒全 0（inert）。放 alive 之前（聚合初始化 {pos,itemId,count,spawnMs} 不显式列 → 取默认全 0，
-        //   tail-default 契约不破坏）。
-        int enchants[4] = {0, 0, 0, 0};
-        // t622 自定义名（铁砧重命名产物丢弃保真；空串 = 注册表默认名）。同 enchants 语义随实例走 →
-        //   拾取回填（pickupScan 传 addToAny 第 5 参）。显式默认 QString() 抑制 -Wmissing-field-initializers
-        //   （同 ItemStack.customName 的部分聚合初始化场景）。
-        QString name = QString();
-        // review D2-c 实例耐久（同 name/enchants 随实例走：-1 = 未初始化 → 拾取端 addToAny 归一满耐久；
-        //   >0 = 显式保真，破箱掉落的磨损工具丢出再捡耐久不复原）。放 alive 之前（tail-default 契约同
-        //   name）。显式默认 -1 抑制 -Wmissing-field-initializers。
-        int durability = -1;
-        // （t804 fireBurn 火焚倒计字段已随 t844 需求反转退役：入火改瞬灭，无点燃窗可倒计。）
-        // t256：槽位占用标志（slot-reuse 模型，同 EntityManager::Entity::alive）。true = 活体；false = 已释放
-        //   空槽（待复用）。放末位：spawnItem 的聚合初始化 {pos,itemId,count,spawnMs} 不显式列 alive →
-        //   取默认 true（C++ 聚合初始化尾字段缺省即 default member init）。掉落物被拾取（removeAt /
-        //   setCountAt(0)）后 releaseSlot → alive=false；下次 spawnItem 复用空槽。tick / pickupScan 跳过
-        //   空槽；呈现层 delegate visible:aliveAt(index)。
-        bool alive = true;
-    };
-    std::vector<ItemEntity> m_entities;
-    int m_revision = 0;
-    // t354 批量 spawn 抑制 emit（见 beginBatch 注释）：depth>0 时 notifyChanged 只标 dirty 不 emit；
-    //   endBatch 归 0 且 dirty → 1 次 emit 收口 N 个累积变更。非批（depth=0）时 notifyChanged 立即 emit，行为同旧。
-    int m_batchDepth = 0;
-    bool m_batchDirty = false;
-    QElapsedTimer m_clock; // 构造时 start()；spawn 记 elapsed、拾取算 age（墙钟，暂停期照常流逝无残留锁）
-
-    // t256 slot-reuse（修掉落沙衍生掉落物 delegate 泄漏；机制同 EntityManager，详见其注释）：实体移除
-    //   （拾取 / setCountAt(0)）不再 erase-shift，而 releaseSlot 标 alive=false + 入 free list；下次 spawn
-    //   复用空槽。m_entities.size()（=count 属性 = QML Repeater model）单调不降 → Repeater 不需销毁 reparent
-    //   的 3D delegate（lessons-learned t170：reparent 后的 3D delegate count 减小不销毁 → 掉落物 spawn/拾取
-    //   抖动致 delegate 累积泄漏）。沙落不完整方块变掉落物（fallingBlockDropped → spawnItem）+ 生存挖掘产出
-    //   均频繁 spawn/拾取，同族泄漏；slot 复用根治。高水位受 kCap(200) 钳制，与既有峰值并发同量级。
-    std::vector<int> m_freeSlots; // 已释放可复用的槽索引（LIFO）
-    int m_liveCount = 0;          // 活体实体数（= m_entities.size() − 空槽数）；spawn 上限 + F3 draw 估算读它
-    int m_liveHighWater = 0;      // t1007 本会话活体高水位（历史 max(m_liveCount)；acquireSlot 更新，
-                                  //   clearAll 不重置——跨重载判读面，见 liveHighWater() 注释）
-
-    int acquireSlot(ItemEntity &&e)
-    {
-        int slot;
-        if (!m_freeSlots.empty()) {
-            slot = m_freeSlots.back();
-            m_freeSlots.pop_back();
-            m_entities[size_t(slot)] = std::move(e);
-        } else {
-            m_entities.push_back(std::move(e));
-            slot = int(m_entities.size()) - 1;
-        }
-        ++m_liveCount;
-        // t1007：高水位随占槽更新（历史峰值；clearAll 释放不回撤，见 liveHighWater() 注释）。
-        if (m_liveCount > m_liveHighWater) m_liveHighWater = m_liveCount;
-        return slot;
-    }
-    void releaseSlot(int idx)
-    {
-        if (idx < 0 || idx >= int(m_entities.size())) return;
-        m_entities[size_t(idx)].alive = false;
-        m_freeSlots.push_back(idx);
-        --m_liveCount;
-    }
-    // t320 自然寿命到期驱逐（每帧 tick 调，独立于 world）。扫所有活体，age（m_clock.elapsed()
-    //   − spawnMs）> kDespawnMs → releaseSlot（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。任一驱逐
-    //   → bump revision + emit entitiesChanged（驱动 QML 隐藏对应 delegate）。空集合 / 无到期 → no-op。
-    //   t889：硬暂停（ESC）期 tick 不跑 + 复跑 deferWallClocks 顺延 spawnMs → 暂停期不老化；GUI 开（软档）照常。
-    void despawnExpired();
-    // t354 批量 emit 收口（见 beginBatch 注释）：实体集每次变更（spawn / setCount / remove / tick dirty /
-    //   despawn dirty）统一走此。++revision 恒做（delegate 触碰 revision 取最新值）；emit 仅在非批（depth<=0）时发，
-    //   批内仅标 dirty、由 endBatch 末尾 1 次 emit 收口。clearAll 走独立直 emit（重置语义、不经批）。
-    void notifyChanged();
-
-    static constexpr int kCap = 200;             // 实体数上限（spec：>200 跳过 / 合并）
-    static constexpr qint64 kPickupDelayMs = 500; // 新生免拾取期（ms；t53 让实体先可见再可拾）
-    // t320 掉落物自然寿命（ms；机制等价 MC 1.0 掉落物 5 分钟后消失）。tick() 内扫所有活体，age > kDespawnMs
-    //   → releaseSlot 移除（同拾取路径，aliveAt=false → delegate 隐藏 + 槽位可复用）。修爆炸后掉落物累积致
-    //   FPS / 内存崩塌：单次爆炸可产出数十个掉落物，多次爆炸 + 无自然消失 → 累积到 kCap(200) 高水位 →
-    //   数百 3D delegate 长期占驻 QQuick3D 场景图（slot-reuse 模型下 count 单调不降，达到 200 后永不回落）。
-    //   5 min 寿命让活跃掉落物在玩家走开 / 漏拾后自然退场，常态 active count 维持低个位到几十，远低于 cap。
-    static constexpr qint64 kDespawnMs = 300000;  // 掉落物寿命（ms；5 min，机制等价 MC 掉落物 5 min 消失）
-    // t60 物理常量（与 PlayerController 同值：保持世界重力手感一致；lessons-learned「重力/跳跃常量」）。
-    static constexpr float kGravity = 28.0f;  // 重力加速度（blocks/s²）
-    static constexpr float kMaxFall = 78.4f;  // 终端下落速度（blocks/s；防无限加速）
-    // 落地后实体中心相对支撑方块顶面的静止偏移（格）。图标 Model scale 0.3（半高 0.15）→ 中心高于顶面
-    // 0.3 时图标底贴顶面 +0.15、留余量给浮动动画（bobY 0..0.15）不穿地；半透外壳 scale 0.45 略大无碍。
-    static constexpr float kRestOffset = 0.3f;
-    // t271 水冲走掉落物（spec「item 掉落物入水→浮水面 + 随流移动」）常量：
-    //   kItemRiseSpeed：水中浮力上浮速度（blocks/s；恒速，机制等价 MC 掉落物水中缓浮——不取加速度模型
-    //     是为避免「深水→陡升→水面→急刹」的机械感，恒速上升视觉更接近 MC 静稳上浮）。
-    //   kItemFlowSpeed：流水水平推移速度（blocks/s；流水格 state>0 沿离源方向直接叠入水平位移）。比玩家
-    //     kWaterFlowPush（4.0，每 tick 叠入速度且玩家有移动阻尼）取小——掉落物无水平阻尼，直接积分位移，
-    //     小值保「被流走可见但不火箭」。
-    //   kItemFloatOffset：浮水静止时中心距水面（cell 顶）的下沉量（格）；留中心在水格内防 floor 抖出
-    //     空气 → 下一帧误判离水 → 重力回落的振荡（中心贴近水面、略没入水中，机制等价 MC 掉落物贴水面浮）。
-    static constexpr float kItemRiseSpeed   = 2.5f;
-    static constexpr float kItemFlowSpeed   = 2.0f;
-    static constexpr float kItemFloatOffset = 0.05f;
-    // t468 掉落物水平弹出 + 冰面滑动常量（spec「冰上丢弃物品会一直滑动往前」）：
-    //   kItemPopSpeed：生成时初始水平弹出速度（blocks/s；机制等价 MC 破块 / 丢弃物品弹出方向随机、幅值小）。
-    //     确定性哈希（位置 + itemId）给每件一个固定方向 + 幅值抖动 → 同一掉落可复现，非运行期随机源。
-    //   kItemGroundFriction：常规地面水平摩擦衰减率（1/s；exp(-rate*dt) 衰减；6 → ~0.5s 基本停下）。
-    //   kItemIceFriction：冰面水平摩擦衰减率（1/s；0.4 → 滑行 ~数秒，机制等价 MC 冰上物品长滑）。
-    //     冰上摩擦远低于常规地面 → 用户肉眼「冰上丢弃物品会一直滑动往前」。
-    static constexpr float kItemPopSpeed      = 2.0f;
-    static constexpr float kItemGroundFriction = 6.0f;
-    static constexpr float kItemIceFriction    = 0.4f;
-    // t490fix 掉落物就近合并（机制等价 MC 1.0 同 itemId 掉落物在近邻合并为 1 实体；用户报告「2 个 TNT 爆炸后掉落物太多」）。
-    //   spawnItem 入口扫现有活体，找同 itemId 且 pos 距 (x+0.5,y+0.5,z+0.5) ≤ kMergeRadius 的第一个 → count 累加（clamp
-    //   maxStack，溢出走新 spawn）。合并方向：新 spawn 往已有实体合，不动已有 pos（避免视觉跳变）。
-    //   kMergeRadius=2.0：2 格（爆炸散布广，1 格命中率低致顶满；2 格兼顾合并率与视觉聚集）。
-    static constexpr float kMergeRadius = 2.0f;
-    // （t804 kItemFireBurnSec 火焚时长常量已随 t844 需求反转退役：入火瞬灭无窗。）
+    // 模拟单一权威（唯一数据成员——Adapter 零自有模拟状态）。
+    EntityStore m_store;
 };
 
 // t1027：isPlainCubeDrop 用 id < Count 上界排除工具（0x100+）/ 材料（0x200+）段——方块枚举一旦膨胀

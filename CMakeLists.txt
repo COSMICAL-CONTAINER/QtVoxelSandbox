@@ -234,6 +234,11 @@ qt_add_executable(voxelsandbox
     #   （机制等价 MC 1.0 minecart）。新实体类型（Cart），slot-reuse 模型（同 BoatManager）。
     src/Entities/minecartmanager.cpp
     src/Entities/minecartmanager.h
+    # R20.14 EntityStore（Entities 层）：掉落物族模拟单一权威（spawn 物理/合并/拾取/despawn/焚毁/
+    #   批量收口/槽位复用/EntityId 稳定 id + 可见实体快照）——非 QObject 值语义组件（plan §29.3
+    #   R20.14「模拟实体不依赖 QML」）。ItemEntityManager（src/Game）收敛为过渡 Adapter 委托本类。
+    src/Entities/entitystore.cpp
+    src/Entities/entitystore.h
     src/Game/raycast.cpp
     src/Game/raycast.h
     src/Game/recipe.cpp
@@ -963,6 +968,14 @@ add_executable(redstone_matrix_test
     tools/matrix/section17_meshbuilder.cpp
     src/World/meshbuilder.cpp
     src/World/meshbuilder.h
+    # R20.14 EntityStore 探针段（置尾先例沿用：runAll 末执行，filter 词 r2014；4 腿 r2014a-d =
+    #   store↔Adapter 孪生行为等价承重墙[同操作序列 spawn/合并/拾取/despawn/焚毁逐位一致]/
+    #   可见实体快照权威[沿重建+独立复制]/Adapter 消费面回归[notify 沿计数+feeder 面零变化]/
+    #   结构钉[QObjectFree 复述+搬移件落位+模拟本体禁回流反探+零 QML]。随段直编
+    #   src/Entities/entitystore.cpp（模拟单一权威，非 QObject 无 AUTOMOC——已列下方探针附加）；
+    #   itementitymanager.cpp 已在下方直编（Adapter 委托面回归用）；r2014a-d 零世界（r2014a 焚毁
+    #   子面用裸 World 直排岩浆格——非 rig 世界 w）。
+    tools/matrix/section18_entitystore.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
@@ -993,6 +1006,9 @@ add_executable(redstone_matrix_test
     # t804 掉落物火焚探针附加：Game 层 ItemEntityManager（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号
     # + 出火熄火；向下只依赖 Core/World/Qt，不引入 PlayerController/QML）。
     src/Game/itementitymanager.cpp
+    # R20.14 EntityStore 探针附加：Entities 层掉落物模拟单一权威直驱（r2014a 孪生等价 / r2014b
+    #   快照权威 / r2014c Adapter 消费面回归 / r2014d 结构钉；向下只依赖 Core/World，不引入 QML）。
+    src/Entities/entitystore.cpp
     # t805 船上岸回归探针附加：Entities 层 BoatManager（水/陆速比 + 同层湿沙挡停 + 冰面豁免保留 +
     # 贴岸倒退；向下只依赖 Core+World，不引入 Game/QML）。
     src/Entities/boatmanager.cpp
