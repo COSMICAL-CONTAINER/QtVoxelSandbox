@@ -3981,3 +3981,29 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **待实机确认（观感面必核）**：空手潜行右键箱车开箱观感 + 持方块潜行右键箱车放置观感（真机对运行中箱车实测一次；矩阵为无头等价面）。
 
 **下一阶段候选（供治理审计 #9 权衡，本单不自行开工）**：①SaveCoordinator 生产接线（Main.qml 保存流迁移——QML 面变更需专门评估）；②Loading 失败恢复边；③Absent-only 流式生成策略层；④Edits-on-evict；⑤review0915 #4（R20 walk）/ #6（搭下一笔 entitymanager）。
+
+### R20.10b（2026-09-16，Loading 失败恢复边：六态表 8→9 边补失败恢复——审计 #9 ①放行单，R20.11 登记欠账「失败停 Loading，恢复登记后续」的闭合）
+
+  → **✅✅ 落地（2026-09-16）：src/World/chunklifecycle.h 转移表单一权威 8→9 边（新增⑨ Loading→Absent 失败恢复）+ src/World/generationjob.h 两路投递点接线（同步泵 + pumpAsync 收割共用投递面判据）+ src/World/backgroundgeneration.h 头注释登记 + tools/matrix/section14_chunklifecycle.cpp（r2010a 同变更修订 + 新腿 r2010ba/bb）+ tools/matrix/section15_generationjob.cpp（r2011d 同变更修订）；矩阵 595→597。**（fix + test + 本 docs 三段提交）
+
+**失败边语义选型（头注释立此存照）**：⑨ = **Loading→Absent**（非 Loading→Generated/Loaded）。依据三条：①与 R20.12「epoch 丢弃旧任务」语义同门——失败即内容不可用，回 Absent（=「槽位无可用内容」的态语义本位）后**重请求 = 新 job**（走边①②），与「执行完再请求 = 新 job 重跑」的既有请求模型完全同构；②回 Generated/Loaded 会伪造「内容已生成」的事实（Generated 语义 = 内容生成完毕——失败恰恰是没有），且晋升驻留面的门查询谓词会错误放行残缺内容；③重试语义只到「回到 Absent 可再请求」为止——**自动重试策略不属本单**（登记非目标，防越权：指数退避/次数上限等属策略层，与 Absent-only 策略层一并登记后续）。
+
+**投递面判据（单一权威，禁两份转移逻辑）**：失败边只在**失败 outcome 实际投递**时取——`deliver` 改返 `int`（实际投递条数），两路投递点共用同一判据 `!r.isOk() && delivered > 0` → `ChunkManager::setLifecycle` 唯一守卫入口取⑨：①**R20.11 同步泵**（执行与投递同调用内、epoch 不可能中途变化、被选中的 job 必有活别名 ⟹ 失败 outcome 必然实投，判据恒真但不写死——与异步面同形）；②**R20.12 pumpAsync 收割相**（交接后才过期/被取消的丢弃面不投递故**不转移**——chunk 停 Loading：世界已换代，旧任务产物连同其状态转移一并作废，与「epoch 丢弃旧任务」同门）。成功面（边②）语义零改动（异步面投递与否照旧驱动——内容已生成是事实，R20.12 既有口径）。取消在执行前 = 恒 Absent「不推进」语义不变（边⑨非取消回退路径）。BackgroundGenerationWorker 自身恒成功面（纯函数无失败路径），边⑨经异步协议对任意 isAsynchronous() worker 生效（r2010bb 脚本化测试替身实证）。
+
+**固定世界零变化不变量（结构性保持）**：默认稳态全表 Loaded、无 job 无失败 → 行为零变化照旧；且零变化**不依赖「无失败」假设**——失败注入打在 Loaded chunk 上时，边①（Loaded→Loading）与边⑨（Loaded→Absent）双双被守卫拒，outcome 照常投递而表逐位不动（r2010ba④ 同步面 + r2010bb④ 异步面双实证）。QML 零迁移（generationjob/chunklifecycle 非 QObject 无 QML 面）；worldstore 零触碰（反探钉：worldstore.h 零 Lifecycle 记号 / worldstore.cpp 零 setLifecycle 记号常驻 r2010ba⑤）。
+
+**表计数变化 → 同变更修订清单（纠偏非放宽，随失败边扩表）**：①r2010a（section14）独立编码边表 8→9 行 + 「36 对互证/27 非法含自转移」计数面 + 全边走图加⑨段（Loading→Absent 单独走 + 重走①②③）+ 腿文/汇总行同步；②r2011d（section15）「失败停 Loading（六态表无失败边）」旧钉改写为「失败恢复边⑨回 Absent + 重请求（新 id）再走①②到 Generated」+ ④ 执行计数锚 3→4（③ 增重请求一拍——首跑漏项，binary 验证期抓红即修）；③generationjob.h 头注释互锁节（「失败边不存在」→「⑨ 投递面判据」）+ chunkmanager/chunklifecycle 注释同步；④backgroundgeneration.h 头注结果应用节补边⑨登记。
+
+**矩阵（595→597，section14 置尾两新腿，filter 词 r2010b）**：**r2010ba 同步泵失败边**——失败注入（worker Result::fail(42)）→ 执行时实测 Loading（边①）→ outcome Error 原样穿透 → 边⑨转移断言（Loading→Absent）→ 重请求可行（新 requestId 新 job 再走①②到 Generated）→ 丢弃面不转移（取消执行前/过期 epoch bump 后均零执行零投递恒 Absent）→ 失败注入零变化（Loaded chunk 表快照逐位不动）→ 源钉（转移权威含⑨：剥注释锚 `|| to == ChunkLifecycle::Absent` 分派语句）+ store 反探；**r2010bb 异步收割失败边（R20.12 缝）**——ScriptedAsyncWorker（isAsynchronous()=true 测试替身，零线程零时序，交接记录 + 脚本完成 FIFO）→ 交接边①（终态 Loading 确定性：交接无条件先于收割）→ 脚本失败完成 → 收割实投 + 边⑨回 Absent → 重请求①②到 Generated → **交接后 epoch bump 的失败完成被丢弃（零 outcome）且 chunk 停 Loading（丢弃面不转移语义保持）**→ 失败注入零变化 → 双投递点单判据源钉（`delivered > 0 && m_chunks` ×2 / `const int delivered = deliver(` ×2）+ worker 侧零生命周期驱动反探（backgroundgeneration.h 代码面零 setLifecycle 记号）。
+
+**验证链（全绿）**：分段增量构建（-j 4；chunkmanager/chunkgeometry/worldstore 等 42 TU + 链接）→ binary mtime > 全部改动源 → filter **r2010b 3P**（既有 r2010b + 两新腿）/ **r2010 6P** / **r2011 4P** / **r2012 4P** 全绿 EXIT=0 → 前置回归 filter **r2007 5P / r2008 5P / r2009 4P / r2013 4P / r2014 4P / r2015 4P + worldgen 23P / determin 31P / store 49P / save 38P** 全绿 → 阴性轮（见下）→ 全矩阵 **597 PASS / 0 FAIL ×2**（matrix_r2010b_pos/final.log，EXIT=0；595 权威 PASS 行 diff = **+2 恰为本单新腿 + r2010a/r2011d 两条同变更修订行** + 漂移仅登记类[t813 戳 01:29→02:35 与哈希 949cbc0→8a73428 / t997 计时 0.1769→0.1766 级]；**t979/t1023c 本轮零漂移**；pos/final 两轮腿名 diff = 空零漂移，t997 差异逐 token 核实为纯墙钟数）→ app voxelsandbox 重建 EXIT=0 + offscreen 冒烟 **EXIT=124** + logs/voxelsandbox_r2010b_tail20.log 稳态 60fps。
+
+**阴性轮（实跑存证 matrix_r2010b_neg.log，恰红面设计先于腿文）**：NEG1 = 摘**同步泵**失败边转移调用（`false &&` 前缀使分支永不可达——语义精确摘除）→ rebuild → 恰红 **{r2010ba, r2011d}**（两腿共钉同步失败边语义——r2011d 为本单同变更修订面，红面如实声明；diag 形态核验 = `life=1`[停 Loading 未转移] 而 outcome 照常投递，即被摘语义本体）；r2010bb（异步面）与其余全绿零误伤 → Edit 反向还原 → rebuild → r2010b 3P + r2011 4P 回绿。NEG2 = 摘 **pumpAsync 收割**失败边转移调用 → rebuild → 恰红 **{r2010bb}** 单腿（diag `life=1` 同形态）；r2010ba 不受扰（同步面独立）→ Edit 反向还原 → rebuild → r2010b 3P 回绿。
+
+**过程坑登记**：①section14 新腿首编译两错——`pk` 帮手 lambda 未定义（section15 段内私有，section14 补段级同款）+ ScriptedAsyncWorker 漏覆写纯虚 `execute`（补 async-only 防御 fail，BackgroundGenerationWorker 同款）——测试替身实现 GenerationWorker 子类必须覆写 execute()；②r2011d ④ 执行计数锚（`trace.size()==3`）漏随 ③ 重请求同步 +1——首跑 `[fixed exec=4]` 抓红即修（锚改 4 + 注释注明拍数构成）；教训：同变更修订「计数腿」时不只对账**被测语义断言**，还要对账**执行拍数锚**。
+
+**登记非目标（维持既有登记面）**：①自动重试策略（指数退避/次数上限——策略层事，随 Absent-only 策略层一并）；②Absent-only 流式生成激活策略层（R20 弧线目的地，设计段交用户 md 通道）；③Edits-on-evict 落盘驱逐（R20.10 登记）；④SaveCoordinator 生产接线（流式相位配套）；⑤review0915 #4#6#7、箱车实机观感维持登记。
+
+**待实机确认**：无新增——失败恢复属无头可断言面（六态表 + scheduler 记账），产品观感零变化（app 冒烟稳态 60fps 实证）。
+
+**下一阶段候选提醒（本单不自行开工）**：**②流式激活设计段是审计 #9 定向的下一步**（refactor-plan 增补设计段 → 交用户 md 通道定夺——R20 弧线的目的地，产品可见性高）；其后按用户定向执行流式激活/SaveCoordinator 生产接线/parity 波（review0915 #4#6）。
