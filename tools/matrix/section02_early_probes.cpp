@@ -5084,7 +5084,114 @@ void MatrixRun::section02_early_probes()
         }
     });
 
-    // ── review26 #2 掉落物贴薄支撑水平滑动探针（ItemEntityManager 直编，t867 探针模式）──
+    // ── t1053 嵌格生物假跳+踩踏级联运行期修复（review0915 #4；t1049 engine quirk 注销单）──
+    //   病灶链（t1049 提交注实录 + review0915 #4）：mob 站矮支撑顶（台阶 +0.5）→ 支撑被换高（slab→
+    //   farmland 耕地真顶 +0.9375；玩法面 = 玩家在 mob 脚下放抬升支撑方块）→ mob 脚位 (0.5) 陷进新支撑
+    //   格内部 → aiHostile 越障探针把脚位层判墙（嵌格层**所有列**真顶 0.9375 > 脚位 0.5+1e-3，探针无论
+    //   落自身列还是邻列恒判墙）→ 虚假起跳 + t670 滑流 → 落地贴新顶 fallDist≈0.75（apex 脚位 0.5+1.19 −
+    //   新顶 0.9375）→ t1045 踩踏掷骰 P=0.25 → 耕地被踩成 Dirt（级联收口）。修 = 组合（两语义面各一权
+    //   威，review0915 #4 候选 A/B 读码后改形）：①tick resting 复探**嵌入顶起**（脚位格层中心列支撑真顶
+    //   > 脚位+kMobEmbedTol → 顶到真顶；mobAabbHitsSolid at 新位净空门；root cause 消嵌——旧「由窒息/
+    //   挤出兜底」登记系空头支票，mob 侧原无挤出机制[extrudeEmbedded 仅玩家侧]）；②isJumpObstacle
+    //   **嵌格态层豁免**（自身列支撑真顶 > 脚位+tol → 整层恒非墙）——AI 探跳段先于物理复探段执行，
+    //   末帧假跳必须由探针豁免挡（顶起来不及）。矩阵断言（旧码任一 FAIL = 症状复现）：
+    //   (a) 嵌格消除断言：走廊 slab→farmland 换地后 mob 不假跳（脚位峰值 ≤ 新顶+0.02，无跳跃弧）且被
+    //       顶起新顶（finalFeet ≈ kRigY+0.9375）且耕地全程保持（setTrampleRollOverride(0) 确定性缝：
+    //       旧码级联 fallDist 0.75 → P=0.25>0 → 样本 0 必中必踩红）。恰红面（NEG1/NEG2 实测）：
+    //       摘 ② → 全柱红[maxFeet 假跳弧 + farmKept false 级联踩踏 + finalFeet=踩坏列 Dirt 满格顶
+    //       42.0（级联传导红，非独立声明柱）]；摘 ① → {finalFeet} 单柱红（maxFeet=41.5 嵌格无跳、
+    //       farmKept=true ② 挡跳故无级联、对照柱照跳）——红源各自恰为被摘语义本体。
+    //   (b) 对照柱（正常越障不回归）：mob 站台阶顶（ownTop=feet → 不入嵌格豁免）遇前方耕地抬升
+    //       （+0.4375 合规越障墙）→ 照跳（脚位峰值 > 台阶顶+0.3 起跳弧）——豁免判据不误伤合规越障。
+    runLegMulti({ "t1053 support-swap embedded mob: no spurious obstacle jump (no glide arc), mob extruded up"
+        " onto the raised support top, farmland survives deterministic trample seam; genuine raised step"
+        " ahead still jumped (exemption does not clip legitimate obstacle hops)" }, [&]() {
+        // rig 选址：运行期扫描空区（review26-1 先例）。需 13×1×5 净空（含隔离边）。
+        int x0 = -1, z0 = -1;
+        for (int zz = 3; zz < 94 && x0 < 0; zz += 2)
+            for (int xx = 4; xx + 12 < 96 && x0 < 0; xx += 2) {
+                bool clear = true;
+                for (int dx = -1; dx <= 12 && clear; ++dx)
+                    for (int dz = -1; dz <= 1 && clear; ++dz)
+                        for (int dy = -1; dy <= 3 && clear; ++dy)
+                            if (w.blockAt(xx + dx, kRigY + dy, zz + dz) != BR::Air) clear = false;
+                if (clear) { x0 = xx; z0 = zz; }
+            }
+        if (x0 < 0) {
+            ++totalFail;
+            qInfo().noquote() << "FAIL | t1053 embedded-mob cascade: no clear rig area found";
+        } else {
+            EntityManager ents;
+            const float kShamblerHalfH = 0.9f; // 敌对系半高（review26-1 同款脚位换算 p.y−0.9）
+            w.setTrampleRollOverride(0); // t1045 确定性缝：P>0 即必踩（级联若复现 → 耕地必变 Dirt 必红）
+            // (a) 台阶走廊 + 僵尸落定站台阶顶（自上方一格半落，免初始嵌格；review26-1 (a) 同式）。
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::CobbleSlab, 0);
+            }
+            const int zA = ents.spawnMobTyped(x0, kRigY + 2, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D target(float(x0) + 10.5f, float(kRigY) + 0.5f, float(z0) + 0.5f);
+            for (int t = 0; t < 40; ++t) ents.tick(0.016f, &w, target, 0.3f, 1.8f, true); // 预热落定
+            // 支撑换高（slab→farmland；玩法面 = 脚下放抬升支撑的 rig 等价，t1049 提交注同场景）。
+            for (int dx = 0; dx <= 10; ++dx) w.setBlock(x0 + dx, kRigY, z0, BR::Farmland, 0);
+            float maxFeet = -1e9f, finalFeet = -1e9f;
+            bool farmlandKept = true;
+            for (int t = 0; t < 300; ++t) { // 4.8s：旧码假跳在前 ~1s 内必现（AI tick 节流窗内多拍机会）
+                ents.tick(0.016f, &w, target, 0.3f, 1.8f, true);
+                const QVector3D p = ents.posAt(zA);
+                maxFeet = std::max(maxFeet, p.y() - kShamblerHalfH);
+                finalFeet = p.y() - kShamblerHalfH;
+            }
+            for (int dx = 0; dx <= 10; ++dx)
+                if (w.blockAt(x0 + dx, kRigY, z0) != BR::Farmland) farmlandKept = false;
+            const float newTop = float(kRigY) + 0.9375f; // 耕地矮盒真顶
+            const bool okA = maxFeet <= newTop + 0.02f      // 无假跳：全程脚位不超新支撑顶（旧码 apex ≈ +1.19）
+                && std::fabs(finalFeet - newTop) <= 0.02f   // 被顶起贴新顶（旧码嵌格常驻 0.5）
+                && farmlandKept;                            // 耕地全存（旧码确定性缝下必踩）
+            // 清 (a) 场（含遣散；不跨段泄漏——t1049 教训）。
+            ents.removeEntityAt(zA);
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            }
+            // (b) 对照：台阶走廊中段 + 前方列耕地抬升 → 站台阶顶的 mob 照跳（合规越障不回归）。
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Stone, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::CobbleSlab, 0);
+            }
+            w.setBlock(x0 + 7, kRigY, z0, BR::Farmland, 0); // 单列耕地 = +0.4375 抬升墙（非嵌格：mob 仍在 slab 列）
+            const int zB = ents.spawnMobTyped(x0, kRigY + 2, z0, EntityManager::MobShambler,
+                                              QStringLiteral("#44aa44"), 100);
+            const QVector3D targetB(float(x0) + 10.5f, float(kRigY) + 0.5f, float(z0) + 0.5f);
+            float bMaxFeet = -1e9f;
+            for (int t = 0; t < 300; ++t) { // 走到耕地沿即跳（豁免判据 ownTop=feet 不触发）；上顶后步下
+                ents.tick(0.016f, &w, targetB, 0.3f, 1.8f, true);
+                bMaxFeet = std::max(bMaxFeet, ents.posAt(zB).y() - kShamblerHalfH);
+            }
+            // 注：不断言该列耕地保持——合规越障跳落地 fallDist≈0.75 → P=0.25>0，确定性缝 0 下被踩是
+            //   t1045 onFallenUpon 的**正确行为**（非级联病灶）；(a) 的耕地柱才是嵌格级联的声明面。
+            const bool okB = bMaxFeet > float(kRigY) + 0.5f + 0.3f; // 起跳弧超台阶顶 0.3+（真实跳了）
+            const bool ok = okA && okB;
+            if (!ok)
+                qInfo().noquote() << "  t1053 diag: maxFeet" << maxFeet << "finalFeet" << finalFeet
+                                  << "farmKept" << farmlandKept << "| step-hop maxFeet" << bMaxFeet;
+            if (!ok) ++totalFail;
+            qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                              << "| t1053 support-swap embedded mob: no spurious obstacle jump (no glide arc), mob extruded up"
+                                 " onto the raised support top, farmland survives deterministic trample seam; genuine raised step"
+                                 " ahead still jumped (exemption does not clip legitimate obstacle hops)";
+            // 清场
+            ents.clearAll();
+            w.setBlock(x0 + 7, kRigY, z0, BR::Air, 0);
+            for (int dx = 0; dx <= 10; ++dx) {
+                w.setBlock(x0 + dx, kRigY - 1, z0, BR::Air, 0);
+                w.setBlock(x0 + dx, kRigY, z0, BR::Air, 0);
+            }
+            w.setTrampleRollOverride(-1); // 缝复位（生产零残留，t1045 同款）
+            tickN(w, 2);
+        }
+    });
     //   Review 2026-08-26 #2：物品静息中心 = 真顶 + kRestOffset(0.3)，下半砖（真顶 +0.5）中心落在砖格
     //   内部 → 摩擦段水平碰撞探测 hcy=qFloor(pos.y())=砖格自身 → isCollidable 恒 true → 带初始弹出速度
     //   也滑不动（物品被钉死在落点）。修 = 水平碰撞探测与 resting 复探同源：目标格真顶 ≤ 当前底+容差
