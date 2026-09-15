@@ -9,8 +9,10 @@
 // 失败（「摘即红」在类型层成立，阴性轮豁免的替代证据之一，矩阵 r2006b 腿内复钉）。
 // WorldDelta = 一次 Tick 编辑面的「受影响 chunk 集」表达（本单验收锚：「WorldDelta 可以
 // 表达受影响 Chunk」）；plan 的完整 WorldDelta（changed block ranges / light regions /
-// block-entity-sound event 明细）留 R20.09 EditBuffer 收口——本单只立 chunk 集 + 改动量
-// 汇总的最小骨架。
+// block-entity-sound event 明细）的**类型收口**已由 R20.09 EditBuffer 正席承担
+//（editbuffer.h——DirtyChunkSet 独立集合类型 + takeDelta 单点投影），ranges/light 明细
+// 仍登记 R20.13 MeshBuilder 消费侧接线时再立；本类型保持 chunk 集 + 改动量汇总的最小
+// 骨架不变（r2006-r2009 存量契约零破坏）。
 // 事件队列 = 单线程 FIFO；容量策略与命令队列同门：固定上界 + 满载拒绝（事件不静默丢失；
 // 对照 SnapshotQueue「满则覆盖最老」的刻意分化——事件是已发生事实不可再生，快照可再生）。
 // 分层（PLAN §2）：Core 叶子——mathtypes.h（ChunkKey/BlockPos）+ result.h + <array>/
@@ -41,7 +43,7 @@ struct Event
 {
     EventKind kind = EventKind::BlockChanged;
     BlockPos pos{};       // 方块域位置（BlockChanged / SoundRequested / ChunkActivated）
-    quint8 blockId = 0;   // BlockChanged：改动后 id（旧值 / 范围化留 R20.09 EditBuffer）
+    quint8 blockId = 0;   // BlockChanged：改动后 id（旧值/范围化明细登记 R20.13 MeshBuilder 消费侧）
     quint32 entityId = 0; // 实体域（Spawned / Died / Dropped；0 = 非实体域）
     quint16 aux = 0;      // 小型副参（SoundRequested 音效 id 等；按 kind 解释）
     int tick = 0;         // 产生时固定 Tick（消费方时效判定 / 重放排序）
@@ -62,12 +64,14 @@ struct WorldDelta
 
     std::array<ChunkKey, kMaxAffectedChunks> affected{};
     int affectedCount = 0; // 有效前缀长度（0..kMaxAffectedChunks）
-    int changedBlocks = 0; // 汇总口径：本 delta 方块改动数（ranges 化留 R20.09）
+    int changedBlocks = 0; // 汇总口径：本 delta 合并后编辑格数（R20.09 EditBuffer.takeDelta 产；
+                           //   ranges 化登记 R20.13 MeshBuilder 消费侧）
     int tick = 0;          // 产出时固定 Tick
 
     // 登记受影响 chunk：新登记 true；已在集内（幂等去重，不占位）或集满（不静默挤出）
-    // 返回 false。重复与满载共用 false——区分靠 affects()（重复登记是合法幂等，集满是
-    // 需要扩容决策的异常态；细分语义留 R20.09 EditBuffer 接线时再定）。
+    // 返回 false。重复与满载共用 false——**细分语义已由 R20.09 DirtyChunkSet 三态收口**
+    //（editbuffer.h ChunkAddResult：Added/AlreadyDirty/Full）；本类型保持共用 false 的
+    // 保守面不变（r2006-r2008 存量消费方零改动——调用方需区分时改用 DirtyChunkSet）。
     bool addAffected(const ChunkKey &k)
     {
         if (affectedCount >= kMaxAffectedChunks || affects(k))
