@@ -7,13 +7,13 @@
 // Active、Loaded、Evicting」）：chunk 生命周期的**六态类型 + 转移表单一权威**（header-only，
 // 非 QObject 无 AUTOMOC——同 editbuffer/mathtypes 的 Core 叶子形态，但属 World 层）。
 //
-// ── 六态转移图（合法边恰 8 条；其余 28 个 from→to 组合一律非法）────────────────────────
+// ── 六态转移图（合法边恰 9 条；其余 27 个 from→to 组合一律非法）────────────────────────
 //
 //       requestLoad           generateDone            promoteToResident
 //  Absent ────────────▶ Loading ────────────▶ Generated ──────────────▶ Loaded
-//     ▲                                                                  ▲  │
-//     │ finishEvict                                    cancelEvict ──────┘  │ activate /
-//     │                                                                    │ deactivate
+//     ▲  ▲                    │                                        ▲  │
+//     │  └── generateFailed ──┘ （⑨ 失败恢复，R20.10b）   cancelEvict ──┘  │ activate /
+//     │ finishEvict                                                  │ deactivate
 //  Evicting ◀──────────────── requestEvict ──────────────────────────────── Loaded
 //                 (Loaded 是驻留枢纽：激活/驱逐/取消驱逐都经它)
 //
@@ -26,11 +26,16 @@
 //     ⑥ Loaded    → Evicting   （选中驱逐）
 //     ⑦ Evicting  → Absent     （驱逐完成）
 //     ⑧ Evicting  → Loaded     （驱逐取消——驱逐途中又被需要）
+//     ⑨ Loading   → Absent     （生成失败恢复——R20.10b：失败 outcome **实际投递**时经
+//                                 守卫入口回 Absent，重请求 = 新 job，与 R20.12「epoch
+//                                 丢弃旧任务」语义同门；epoch 过期/取消的丢弃面不投递
+//                                 故不转移。重试语义只到「回到 Absent 可再请求」为止，
+//                                 自动重试策略登记非目标）
 //
 // ── 态语义 ──────────────────────────────────────────────────────────────────────
 //   Absent    槽位无可用内容（流式世界里未生成/未读回；本单最小解释下 Chunk 对象仍在内存，
 //             见 chunkmanager.h 选型注释——「不落盘驱逐」是登记的后续单）。
-//   Loading   加载/生成进行中（内容尚不可查询）。
+//   Loading   加载/生成进行中（内容尚不可查询；生成失败经 ⑨ 回 Absent，不停留）。
 //   Generated 内容已生成但未晋升驻留（mesh 未建、门查询不可见）。
 //   Active    驻留 + 活跃使用（门查询可见；将来 scheduler 的活跃域态）。
 //   Loaded    驻留已加载（门查询可见；**默认稳态**——等价 R20.10 之前「全部 chunk 常驻已加载」
@@ -74,7 +79,9 @@ inline bool chunkLifecycleTransitionLegal(ChunkLifecycle from, ChunkLifecycle to
 {
     switch (from) {
     case ChunkLifecycle::Absent: return to == ChunkLifecycle::Loading; // ①
-    case ChunkLifecycle::Loading: return to == ChunkLifecycle::Generated; // ②
+    case ChunkLifecycle::Loading:
+        return to == ChunkLifecycle::Generated // ②
+            || to == ChunkLifecycle::Absent; // ⑨ 失败恢复（R20.10b）
     case ChunkLifecycle::Generated: return to == ChunkLifecycle::Loaded; // ③
     case ChunkLifecycle::Loaded:
         return to == ChunkLifecycle::Active // ④

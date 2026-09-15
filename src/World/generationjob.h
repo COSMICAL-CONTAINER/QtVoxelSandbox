@@ -29,17 +29,20 @@
 //
 // ── 与 R20.10 Chunk lifecycle 的互锁（读码后选型，头注释立此存照）──────────────────
 //    GenerationScheduler 可挂一个 ChunkManager（构造参数，可空 = 纯请求模型），对 Generate/
-//    Load 类 job 驱动 chunklifecycle.h 转移图的 ①② 两条边：
+//    Load 类 job 驱动 chunklifecycle.h 转移图的 ①②⑨ 三条边：
 //      执行开始前：Absent→Loading（边①，即 chunklifecycle.h 注释预留的「R20.11 挂点」）；
 //      执行成功后：Loading→Generated（边②）。晋升 Generated→Loaded（边③）**不由本层驱动**
-//      （驻留晋升是 mesh/激活策略的决策面，登记后续单）；失败边不存在（六态图无
-//      Loading→X 失败边）——失败 job 停在 Loading（恢复策略登记 R20.12 一并收口）。
+//      （驻留晋升是 mesh/激活策略的决策面，登记后续单）；失败面走**失败恢复边⑨
+//      Loading→Absent**（R20.10b：失败 outcome **实际投递**才转移——epoch 过期/取消的丢弃面
+//      不投递故不转移；转移后 chunk 回可重试态，重请求 = 新 job，与 R20.12「epoch 丢弃旧任务」
+//      语义同门。自动重试策略不属本层，登记非目标）。
 //    驱动是 **best-effort 记账**：经 ChunkManager::setLifecycle 唯一守卫入口尝试，非法转移
 //    （含默认稳态 Loaded→Loading）被守卫拒绝即静默忽略、不影响工作执行——这正是「固定世界
-//    零变化」的结构性根据：默认世界全表 Loaded，任何 submit+pump 都改不了生命周期表
-//   （r2011d 实证）。取消发生在执行前 = 状态从未离开 Absent（「不推进」而非「回退」——六态
-//    表没有 Loading→Absent 边，本层绝不做非法回退）。生产语义登记：真实流式世界里 submit
-//    侧必须只对 Absent chunk 提交 Generate（本层是请求模型不是策略层，R20.12 接线时收口）。
+//    零变化」的结构性根据：默认世界全表 Loaded，任何 submit+pump（含失败注入）都改不了生命
+//    周期表（r2011d 实证 + r2010ba 失败注入版实证）。取消发生在执行前 = 状态从未离开 Absent
+//    （「不推进」——本层不做取消回退；边⑨只由失败投递面驱动，非取消回退路径）。生产语义登
+//    记：真实流式世界里 submit 侧必须只对 Absent chunk 提交 Generate（本层是请求模型不是策
+//    略层，R20.12 接线时收口）。
 //
 // ── 结果模型（「Result 穿透」）───────────────────────────────────────────────────
 //    worker 返回 Result<void>（result.h，成功面 + 失败面）；失败时 worker 的 Error **原样
@@ -258,10 +261,17 @@ public:
             const GenerationRequest req{ bestFirstLive, job.kind, job.key, job.priority,
                                          m_worldEpoch };
             const Result<void> r = m_worker->execute(req);
-            // 边②（Loading→Generated）仅成功面推进；失败停在 Loading（恢复登记 R20.12）。
+            // 边②（Loading→Generated）仅成功面推进。同步泵内执行与投递同调用、epoch 不可能
+            //   中途变化、被选中的 job 必有活别名 ⟹ 失败 outcome 必然实际投递——失败恢复边⑨
+            //   随投递面取（见 deliver 之后），与异步收割同一判据（单一语义）。
             if (r.isOk() && m_chunks)
                 m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Generated);
-            deliver(job, r);
+            const int delivered = deliver(job, r);
+            // 边⑨（Loading→Absent，R20.10b 失败恢复）：仅失败 outcome 实际投递时取——经唯一
+            //   守卫入口回 Absent（重请求=新 job）。默认稳态 Loaded chunk 上边①已被守卫拒，
+            //   此处边⑨同样被拒 = 固定世界零变化不破（r2010ba 失败注入版实证）。
+            if (!r.isOk() && delivered > 0 && m_chunks)
+                m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Absent);
             eraseRequests(job.jobId);
         }
     }
@@ -326,7 +336,8 @@ private:
     //     被拒即忽略 = 固定世界零变化）并记入在途账本。全部剩余 job 无活别名时只清死 job 账面
     //     （在途 job 的别名必须保留到收割）。
     //   收割相：takeCompletedAsync FIFO 逐完成记录——边②仅成功面推进 + deliver 投递（取消/
-    //     epoch 过滤在此生效：交接后才 bump epoch 的在途结果被静默丢弃 = 验收③后台版）。
+    //     epoch 过滤在此生效：交接后才 bump epoch 的在途结果被静默丢弃 = 验收③后台版）；
+    //     失败 outcome **实际投递**时取失败恢复边⑨（R20.10b——丢弃面不转移，见收割体内注）。
     //   线程边界：submitAsync/takeCompletedAsync 只在调用者线程调（本函数的调用者 = pump 的
     //     调用者）；跨线程同步由具体 worker 自管（见 backgroundgeneration.h 的锁与条件变量）。
     void pumpAsync()
@@ -359,9 +370,14 @@ private:
                 m_inFlight.erase(it);
                 const Result<void> r = isError(c.error) ? Result<void>::fail(c.error)
                                                         : Result<void>::ok(); // Error → Result 换算
-                if (r.isOk() && m_chunks) // 边②成功后推进（失败停 Loading，恢复登记 R20.12+）
+                if (r.isOk() && m_chunks) // 边②成功后推进（投递与否照旧驱动——内容已生成，R20.12 既有语义）
                     m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Generated);
-                deliver(job, r);
+                const int delivered = deliver(job, r);
+                // 边⑨（Loading→Absent，R20.10b 失败恢复）——仅失败 outcome 实际投递时取：
+                //   交接后才过期/被取消的丢弃面不投递故不转移（chunk 停 Loading——世界已换代，
+                //   旧任务产物连同其状态转移一并作废，与「epoch 丢弃旧任务」同门）。
+                if (!r.isOk() && delivered > 0 && m_chunks)
+                    m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Absent);
                 eraseRequests(job.jobId);
                 break;
             }
@@ -369,8 +385,10 @@ private:
     }
 
     // 为 job 的每个活别名（未取消 && epoch 当前）投递一条 outcome（Error 穿透）。
-    void deliver(const Job &job, const Result<void> &r)
+    //   返回实际投递条数——R20.10b 失败恢复边⑨的投递面判据（丢弃面 = 0 → 不转移）。
+    int deliver(const Job &job, const Result<void> &r)
     {
+        int delivered = 0;
         for (const Request &req : m_requests) {
             if (req.jobId != job.jobId || req.canceled || req.epoch != m_worldEpoch)
                 continue;
@@ -380,7 +398,9 @@ private:
             o.key = job.key;
             o.error = r.error();
             m_outcomes.push_back(o);
+            ++delivered;
         }
+        return delivered;
     }
     void eraseRequests(quint64 jobId)
     {
