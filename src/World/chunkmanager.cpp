@@ -20,6 +20,12 @@ void ChunkManager::recreate(int width, int depth, int height)
     // 再逐格 move 赋值新 chunk。
     m_chunks.clear();
     m_chunks.resize(size_t(m_chunksX * m_chunksZ));
+    // R20.10 生命周期侧表同步重建：全表 Loaded（默认稳态 = 常驻已加载——等价本单之前「全部
+    //   chunk 永久驻留」的现行行为，plan 验收第一条「当前固定 10×10 世界仍可运行」的零变化基线；
+    //   beginLoad 的零填充分区网格同样落 Loaded——加载窗语义与旧版无态时期一致，store 豁免域
+    //   不受影响）。此后仅 setLifecycle 可写。
+    m_lifecycle.clear();
+    m_lifecycle.assign(size_t(m_chunksX * m_chunksZ), ChunkLifecycle::Loaded);
     for (int cz = 0; cz < m_chunksZ; ++cz)
         for (int cx = 0; cx < m_chunksX; ++cx)
             // R20.05：网格索引公式经 ChunkKey::flatIndex 类型化包装（逐位同式 cx + chunksX*cz；
@@ -54,6 +60,29 @@ void ChunkManager::clearAllDirty()
 {
     for (auto &c : m_chunks)
         if (c) { c->clearDirty(); c->resetFluidOnlyDirty(); }
+}
+
+// ── R20.10 Chunk lifecycle（选型与六态转移图见 chunklifecycle.h / chunkmanager.h）────────
+ChunkLifecycle ChunkManager::lifecycleAt(int cx, int cz) const
+{
+    if (cx < 0 || cz < 0 || cx >= m_chunksX || cz >= m_chunksZ)
+        return ChunkLifecycle::Absent; // 越界语义 = 无可用内容（与 chunk() 越界 nullptr 一致）
+    // R20.05：ChunkKey::flatIndex 包装（与 m_chunks 同式同索引——侧表同布局的落点）。
+    return m_lifecycle[size_t(ChunkKey{ cx, cz }.flatIndex(m_chunksX))];
+}
+
+// 唯一转移入口：转移守卫（chunklifecycle.h 单一权威谓词）拦非法转移（含自转移）。**阴性轮
+//   摘守卫摘这里的「调用点」**（t1051 教训：勿用 false && 前缀把条件守卫变无条件执行）——
+//   摘后非法转移被接受 → r2010a 全图腿恰红。
+bool ChunkManager::setLifecycle(int cx, int cz, ChunkLifecycle to)
+{
+    if (cx < 0 || cz < 0 || cx >= m_chunksX || cz >= m_chunksZ)
+        return false; // 越界拒（无槽位可表态）
+    const size_t i = size_t(ChunkKey{ cx, cz }.flatIndex(m_chunksX));
+    if (!chunkLifecycleTransitionLegal(m_lifecycle[i], to))
+        return false;
+    m_lifecycle[i] = to;
+    return true;
 }
 
 quint8 ChunkManager::blockAt(int x, int y, int z) const
