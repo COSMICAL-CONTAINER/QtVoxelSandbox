@@ -3811,3 +3811,25 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **非目标（登记）**：①箱子矿车裸键门空手 sneak 同疾——随下一波 parity 单；②Review_2026-09-15 #4（嵌格生物自判障碍=已登记 R20 walk refactor 维持）/#5（filter 汇总行）/＃7（weather_timer_ms 恰 0 回落）维持登记、#6（baby-grow 缩进对齐）顺手修搭下一笔 entitymanager 改动；③**Review_2026-09-13 #1（矿井干燥门缺支撑校验→悬空轨）仍待修 → 下一单 t1051**（worldgen 面改动会移位生成腿，独立成单全矩阵核移位，不混入本单）；④R20.10 Chunk 生命周期排 t1051 之后。
 
 **待实机确认**：无（空手潜行交互恢复即 MC 口径本身——app 冒烟稳态；GameSession 仍无 QML 消费方、真机 Adapter 未接）。**下一任务：t1051（review0913 #1 悬空轨，worldgen 面独立成单全矩阵核移位）→ 之后 R20.10 Chunk 生命周期**。
+
+### t1051（2026-09-15，Review_2026-09-13 #1 矿井悬空轨清偿：干燥门支撑校验 + carveCanyon 后置轨支撑守卫 + P-t1051a 悬空轨==0 针）
+
+  → **✅✅ 落地（2026-09-15）：src/World/world.cpp placeMineshaft 干燥门内加 isTopFlushSupport 支撑校验行（处方式）+ 新增 pruneUnsupportedWorldgenRails 生成期守卫（carveCanyon 后、t716 ③ pruneFloatingSnowLayers 同款位序）+ world.h 头注释；tools/matrix/section08_recent.cpp 新腿 P-t1051a（27 世界悬空轨==0 行为半 + 三源钉）+ matrix_helpers.cpp filter 模式汇总行（review0915 #5 顺手修）；矩阵 569→570。**（fix + test + 本 docs 三段提交）
+
+**根因与机制归因（对 review0913 #1 的一处重要修正）**：用户文件假设的机制 = t1043 延迟落块使「同矿更晚 piece 掏空候选轨地板」→ 干燥候选在悬空位重新落块。本单 400 世界 sweep（128×128×64，修前基线）实测：**该机制在语料上触发数为 0**（干燥门内支撑校验过滤候选数 = 0，轨总数修前修后不变）——悬空轨的真实产生者是 **carveCanyon**（generate 内后于 placeMineshaft 运行；y=22 峡底 + fbm 半径调制盘 carve）恰好掏空**已铺轨**的地板格：worldgen 逐 pass 计数桩定位，seed 42/166/207 三世界各 3/2/2 根共 7 根，跳变点全部精确落在 carveCanyon（之前恒 0、之后恒定），其余后置 pass（神殿/要塞/树草/填水）零贡献。要塞排除论据：要塞 45×45 实心壳 Phase A 会覆盖箱内一切方块、Phase C 掏刻域与壳重合 → 壳内轨不可能存活、壳外不受 carve → 结构上产不出悬空轨。**修法 = 双面**：① 处方式支撑门保留（review0913 #1 契约面 + 延迟落块机制防御完备——语料零触发是经验事实非结构不可能，门在即闭合）；② pruneUnsupportedWorldgenRails 守卫摘除真实机制产物（全图扫 Rail、正下方非 isTopFlushSupport → 摘轨回「少一段轨」无害终态，不做地形回填；位序 carveCanyon 之后与 pruneFloatingSnowLayers 毗邻 = t716 ③「所有 carve 类 pass 之后一次跑」同款先例，该先例正是峡谷掏空雪层支撑的同族缺陷清偿）。只判 Rail 单 id（worldgen 只铺普通 Rail；golden/detector 为玩家放置面各有运行期支撑检查）。
+
+**MC 口径引证三元组**：行为 = 铁轨放置需正下方格提供顶面支撑（「a block whose top face has a rim around the edge」——完整立方/上半砖/倒置楼梯等），不可附着于任何方块的侧/底面；支撑消失 → 轨破坏并掉落自身（「breaks and drops as an item when it becomes unsupported」）→ 悬空轨作为存续形态不存在。版本 = Java Edition **Infdev 20100618**（Seecret Friday Update 加入铁轨，支撑语义自引入即在；本工程 1.0 基线）。出处 = minecraft.wiki/w/Rail（2026-09-15 实读）。口径实现 = 复用 t741 isTopFlushSupport 单一权威（完整立方/上半砖顶面——与 t733 失撑坍落 / 门族放置同谓词，不新开轨专用支撑口径；wiki 的倒置楼梯/漏斗等「带沿顶面」扩展不在本谓词域，属既登记工程口径非本单收窄）。
+
+**矩阵（569→570）**：P-t1051a（section08，t1043b 后邻位）——行为半 = 27 seed × 128×128×64 全量 worldgen 全图扫 Rail、每轨核验正下方 isTopFlushSupport（语料含 3 复现体 seed 42/166/207 = 修前红跑实测 3/2/2 根悬空轨，发现力保障非空转）；源钉半 = world.cpp 三钉（cpp-support-gate 干燥门内支撑行 / cpp-support-prune 守卫摘轨行 / cpp-support-prune-call generate 调用点，剥注释 pinSet）。**顺手修（review0915 #5，可选面）**：matrix_helpers.cpp filter 模式汇总尾追加 `=== filtered: legFilter=<s>, ran N legs ===`（N = 实际执行腿组数；文件内 static 零头文件改动、全量跑不输出、PASS 行计数零影响）。
+
+**验证**：分段增量构建（-j 4；world.cpp/section08_recent/matrix_helpers 重编 + 链接）→ binary mtime（13:36 前历次）> 全部改动源 → filter t1051 **1P/0F**（EXIT=0）→ worldgen 前置段回归 filter **t1043 4P / mineshaft 27P / t1020 4P / t1014 8P / t929 1P / canyon 1P / t1003 1P / t1013 9P / t1011 1P / determin* 30P / re-gen 5P** 全绿 EXIT=0 → 全矩阵 **570 PASS / 0 FAIL ×2**（matrix_t1051_pos/final.log，EXIT=0；569 权威 PASS 行 diff = **+1 新增（t1051a）**+ 2 变更全落已登记漂移类（t813 戳时间/哈希、t997 计时毫秒数）；t979/t1023c 零漂移；**worldgen 腿零改写零移位**——t1012 矿井系/t1001/t1011/t1013/t1020/t1021/t1003/t929 全部原行原样，同 seed 确定性再生腿全绿 = 修复后 worldgen 仍纯函数）→ app voxelsandbox 重建 EXIT=0 + offscreen 冒烟 EXIT=124 存活 + logs/voxelsandbox_t1051_tail20.log 零错误（尾部 WRN 同 r2009/t1050 基线 teardown 既登记项，稳态 60fps）。
+
+**阴性轮（实跑存证 matrix_t1051_neg.log + matrix_t1051_restore.log）**：neg = generate 调用点摘 prune（`if (false) pruneUnsupportedWorldgenRails();`）→ filter t1051 **恰红 1 腿 t1051a 独红**：floating = 7 精确重现（27 世界 railTotal 2246 > 0 非空转；525 SKIP 零误伤；t1043b 干燥契约腿不受波及 = 归因自洽的旁证——干燥门与峡谷守卫是两条独立义务）→ **Edit 反向还原** → rebuild → filter t1051 回绿（matrix_t1051_restore.log）。**阴性变体教训登记**：对守卫体做 `false &&` 前缀变异（摘 continue 条件）≠「守卫失效」而 = 「无条件摘光全部轨」（filter 跑出 rails=0，matrix_t1051_neg.log 首版）——条件continue 形态的守卫，阴性变异应摘**调用点**而非条件本身；归因诊断（临时 400 sweep + 逐 pass 计数桩 + 坐标/邻域签名）已全部拆除无残留（HEAD 恢复面即干净面）。
+
+**过程坑登记**：①prune 首版条件写反（`if (!support) continue;` 后接摘轨 = 保留悬空轨、摘光有撑轨，filter 跑出 railTotal 31537→7 即刻爆红）——矩阵腿先红于提交，纪律自证；修正为 `if (support) continue;`。②qInfo(stderr) 与重定向 stdout 混冲曾误导「终态 0 悬空轨」误读，后以腿内 ChunkManager 路径直扫当场对账定案（两路读数一致，唯时序窗差异）。
+
+**worldgen 腿移位清单（逐行）**：全矩阵 570 PASS diff 对 569 权威——新增：t1051a（本单新腿）；变更：t813（构建戳时间/git 哈希，登记类）、t997（计时毫秒 0.1737→0.1754 / 0.00472857→0.00477565，登记类）；改写：**无**；未归因漂移：**无**。pos vs final 互 diff = 仅 t997 计时（登记类）。
+
+**非目标（登记）**：①箱子矿车裸键门残余——维持随下一波 parity 单；②Review0915 #4（嵌格生物=R20 walk 登记维持）/#7（weather_timer_ms=维持登记）/#6（baby-grow 缩进=顺手修搭下一笔 entitymanager）维持；review0913 #2/#4/#3 维持登记（#5 filtered 汇总行本单已顺手修）；③prune 谓词域 = isTopFlushSupport（完整立方/上半砖），wiki「带沿顶面」更宽族（倒置楼梯/漏斗）不在 worldgen 产物域、如未来 worldgen 引入该族再议；④同矿延迟落块支撑门零过滤是 400 语料经验值——门保留为契约面，不因零触发拆除。
+
+**下一任务：R20.10 Chunk 生命周期**（refactor-plan §29.3：Absent/Loading/Generated/Active/Loaded/Evicting 六态；固定 10×10 世界仍可运行、Chunk 可卸载重载）。
