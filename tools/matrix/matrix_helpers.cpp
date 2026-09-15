@@ -1,5 +1,11 @@
 #include "matrix_helpers.h"
 
+// review0915 #5 顺手修：--filter 模式下「实际执行腿组数」计数（runLegMulti 命中分支自增），
+//   runAll 尾部输出 `=== filtered: legFilter=<s>, ran N legs ===` —— 裸看 total FAIL:0 不再被
+//   误读为全套件绿（N 与 total PASS + total SKIP 的口径差 = 循环腿静态语句计 1，登记维持不改）。
+//   文件内 static：runLegMulti / runAll 同 TU，零头文件改动（段 TU 不重编面）。
+static int s_filteredRanLegs = 0;
+
 // R20.03：原 main() 前置 rig 搭建（L229-294）成员化落位。行序与语义同原：
 // World 三 setter（各自 regenerate 一次）→ 信号计数器 connect（同步计数，接收者 &w 同原）
 // → nextSlot / placeRigBlock 同体成员化。w / slotIdx / 计数器为成员（matrix_helpers.h），
@@ -86,6 +92,7 @@ void MatrixRun::runLegMulti(const QStringList &names, const std::function<void()
     }
     for (const QString &n : names) {
         if (n.contains(legFilter)) {
+            ++s_filteredRanLegs; // review0915 #5：filter 模式实际执行腿组数（汇总行用）
             body();
             return;
         }
@@ -116,6 +123,10 @@ void MatrixRun::runAll()
     section13_editbuffer(); // R20.09 EditBuffer（置尾先例沿用：纯类型腿 + 自建 fresh 小世界，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
-    if (!legFilter.isEmpty())
+    if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
+        // review0915 #5 顺手修：filter 模式追加实际执行腿组数（exit 0 只证明「选中腿全绿」）。
+        qInfo().noquote() << "=== filtered: legFilter=" << legFilter
+                          << ", ran" << s_filteredRanLegs << "legs ===";
+    }
 }
