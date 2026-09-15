@@ -938,6 +938,17 @@ add_executable(redstone_matrix_test
     #   系源文件已列，无新增 .cpp）。
     tools/matrix/section15_generationjob.cpp
     src/World/generationjob.h
+    # R20.12 后台 GenerationJob 探针段（置尾先例沿用：runAll 末执行，filter 词 r2012；4 腿
+    #   r2012a-d = 非阻塞真线程身份 / 纯函数逐位恒等（承重墙：后台 ≡ 同步共享函数 ≡ 真世界锚）/
+    #   epoch 丢弃+取消的后台版 / 退出安全+R20.10 生命周期互锁+固定世界零变化+源码钉。随段直编
+    #   src/World/backgroundgeneration.h（真线程 worker：标准线程原语 + 锁护卫 FIFO，非 QObject
+    #   无 AUTOMOC；本单头注释立此存照的线程选型依据在其中）+ src/World/terraingen.h（纯地形
+    #   生成单一权威——generate() 列体迁出后的共用函数）；r2012a-c 零世界（裸 scheduler+后台
+    #   worker），r2012d 裸 3×3 ChunkManager + fresh 小世界——world/chunk 系源文件已列，无新增
+    #   .cpp；t1023c 事实钉同变更修订（src/ 首个受认可线程原语落点 = backgroundgeneration.h））。
+    tools/matrix/section16_backgroundgen.cpp
+    src/World/backgroundgeneration.h
+    src/World/terraingen.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

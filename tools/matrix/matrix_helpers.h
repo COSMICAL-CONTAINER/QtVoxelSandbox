@@ -276,4 +276,8 @@ private:
                                     //   先例沿用：r2011a-c 纯请求模型腿零世界（裸 scheduler
                                     //   + 测试 worker）；r2011d 裸 3×3 ChunkManager +
                                     //   fresh 小世界 ×1，rig 世界 w 零接触，接 section14）
+    void section16_backgroundgen(); // R20.12 后台 GenerationJob 探针（置尾先例沿用：r2012a-c
+                                    //   零世界（裸 scheduler + 真线程后台 worker）；r2012d
+                                    //   裸 3×3 ChunkManager + fresh 小世界 ×1，rig 世界 w
+                                    //   零接触，接 section15）
 };

@@ -146,16 +146,21 @@ void MatrixRun::section08_recent()
                                              .arg(okFlat).arg(okRt).arg(diagAo));
     });
 
-    // (c) meshing 线程模式事实钉（t906 复核）：src/ 全树 *.cpp/*.h 零线程原语 与 Main.qml F3 行
-    //     `threads: 0/0 (sync meshing)` 互锁——两事实须同时在场；线程化立项（t1023 报告 §1.3 路线）
-    //     时必须同步更新 F3 行与本探针，防「F3 谎报 0/0」。
-    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck): src tree scans zero threading primitives (QThreadPo"
-        "ol/QThread/QtConcurrent/QFuture/moveToThread/std::thread/std::async) acrossfiles, and the F3 lin"
-        "e 'threads: 0/0 (sync meshing)' stays pinned - the F3 string is a t906-documented fact (never a "
-        "degraded thread pool: one never existed; meshing is synchronous on the GUI thread via ChunkGeome"
-        "try direct-connected slots), so the two facts are interlocked: threading the mesher (t1023 repor"
-        "t section 1.3 route: halo snapshot base then worker pool) must update both the F3 line and this "
-        "probe in the same changediag files=%1 hits=%2 f3=%3 %4" }, [&]() {
+    // (c) meshing 线程模式事实钉（t906 复核；R20.12 同变更修订）：src/ 全树 *.cpp/*.h 的线程
+    //     原语命中**只允许**落在唯一受认可落点 src/World/backgroundgeneration.h 且只允许
+    //     std::thread（R20.12 后台 GenerationJob——线程期红线 worker 禁 QObject，标准线程原语
+    //     选型依据见其头注）与 Main.qml F3 行 `threads: 0/0 (sync meshing)` 互锁——mesher 仍
+    //     同步（F3 行照常成立），任何**新增**线程原语文件/记号（含 mesher 线程化 t1023 §1.3）
+    //     仍必须同变更更新本探针，防「F3 谎报 / 野线程潜入」。
+    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck; R20.12 amended): src tree"
+        " threading-primitive hits (QThreadPool/QThread/QtConcurrent/QFuture/moveToThread/st"
+        "d::thread/std::async) are sanctioned only in World/backgroundgeneration.h with"
+        " std::thread (the background generation worker - worker side bans QObject, see its"
+        " header), and the F3 line 'threads: 0/0 (sync meshing)' stays pinned (meshing is"
+        " still synchronous on the GUI thread via ChunkGeometry direct-connected slots); any"
+        " new primitive site (incl. mesher threading per t1023 report section 1.3) must"
+        " update both the F3 line and this probe in the same changediag files=%1 hits=%2"
+        " f3=%3 %4" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString srcRoot = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
         if (!QDir(srcRoot).exists()) {
@@ -171,7 +176,9 @@ void MatrixRun::section08_recent()
                 QStringLiteral("QFuture"), QStringLiteral("moveToThread"), QStringLiteral("std::thread"),
                 QStringLiteral("std::async"),
             };
-            int files = 0, hits = 0;
+            const QString kSanctionedRel = QStringLiteral("World/backgroundgeneration.h");
+            const QString kSanctionedTok = QStringLiteral("std::thread");
+            int files = 0, hits = 0, sanctionedHits = 0;
             QString hitDetail;
             QDirIterator it(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
                             QDir::Files, QDirIterator::Subdirectories);
@@ -180,10 +187,13 @@ void MatrixRun::section08_recent()
                 if (!f.open(QIODevice::ReadOnly)) continue;
                 ++files;
                 const QString content = QString::fromUtf8(f.readAll());
+                const QString rel = QDir(srcRoot).relativeFilePath(it.filePath());
                 for (const QString &tok : tokens) {
                     if (content.contains(tok)) {
                         ++hits;
                         hitDetail += it.filePath() + QStringLiteral(":") + tok + QStringLiteral(" ");
+                        if (rel == kSanctionedRel && tok == kSanctionedTok)
+                            ++sanctionedHits; // R20.12 受认可落点
                     }
                 }
             }
@@ -192,20 +202,21 @@ void MatrixRun::section08_recent()
             if (mf.open(QIODevice::ReadOnly))
                 f3Present = QString::fromUtf8(mf.readAll())
                                 .contains(QStringLiteral("threads: 0/0 (sync meshing)"));
-            const bool okThreadPin = files > 0 && hits == 0 && f3Present;
+            // 命中面 = 全部命中都在受认可落点（且落点在场 ≥1 命中——防「worker 文件被挪走后
+            // 事实钉空转」）；F3 行照常钉（mesher 仍同步）。
+            const bool okThreadPin = files > 0 && hits > 0 && hits == sanctionedHits && f3Present;
             if (!okThreadPin) ++totalFail;
             qInfo().noquote() << (okThreadPin ? "PASS" : "FAIL")
-                              << "| t1023c sync-meshing fact pin (t906 recheck): src tree scans"
-                             " zero threading primitives (QThreadPool/QThread/QtConcurrent/QFuture/"
-                             "moveToThread/std::thread/std::async) across"
+                              << "| t1023c sync-meshing fact pin (t906 recheck; R20.12 amended):"
+                                 " src tree threading-primitive hits are sanctioned only in"
+                                 " World/backgroundgeneration.h with std::thread (background"
+                                 " generation worker; worker side bans QObject), across"
                               << files
                               << "files, and the F3 line 'threads: 0/0 (sync meshing)' stays pinned"
-                                 " - the F3 string is a t906-documented fact (never a degraded"
-                                 " thread pool: one never existed; meshing is synchronous on the"
-                                 " GUI thread via ChunkGeometry direct-connected slots), so the"
-                                 " two facts are interlocked: threading the mesher (t1023 report"
-                                 " section 1.3 route: halo snapshot base then worker pool) must"
-                                 " update both the F3 line and this probe in the same change"
+                                 " (meshing is still synchronous on the GUI thread via"
+                                 " ChunkGeometry direct-connected slots); any new primitive site"
+                                 " (incl. mesher threading, t1023 report section 1.3) must update"
+                                 " both the F3 line and this probe in the same change"
                               << (okThreadPin ? QString()
                                               : QStringLiteral("diag files=%1 hits=%2 f3=%3 %4")
                                                     .arg(files).arg(hits).arg(f3Present).arg(hitDetail));
