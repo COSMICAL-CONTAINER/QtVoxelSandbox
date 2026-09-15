@@ -3957,3 +3957,27 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **待实机确认（必须列——存档行为观感面矩阵不能替代）**：①真实存档往返一次（保存→退出→读档→改动面完整：方块/箱子/熔炉/发射器/玩家位姿/进度/时钟/床位齐全）；②异常退出后再进恢复观感（杀进程后重进：读上一次存档点、无半写花屏；未来生产接线后 Interrupted 分类入口的 UI 呈现另行设计）；③重命名/删除世界列表面与封面 PNG 照旧；④退出存档 toast 与 saveOkCount 完成门（t974 链）不受协调层引入扰动（生产接线前本就零接触——接线后复验）。
 
 **下一任务：待定**（plan §29.3 编号任务到 R20.15 已尽——无 R20.16；候选=本关单登记待办族[Main.qml 保存流迁移到 SaveCoordinator 等生产接线 / Loading 失败恢复 / Absent-only 策略层 / Edits-on-evict / 箱车裸键门 / review0915 #4#6#7]或用户指令；治理计数 4/5——下一单收口即满 5 → 审计 #9 主控执行）。
+
+### t1052（2026-09-15/16，箱车裸键门残余清偿：placeBlock 矿车开箱门收窄为 t1050 同款合取判据——parity 波收官小单）
+
+  → **✅✅ 落地（2026-09-16）：src/Game/playercontroller.cpp 矿车交互段 (a0) 开箱门由裸键 `!m_keys.value(Qt::Key_Shift)` 收窄为合取 `sneakPlaceBlock = m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air`（t1050 单一判据同构就地重算）+ playercontroller/section07 两处登记口径注释同步；tools/matrix/section08_recent.cpp 新腿 P-t1052a（三相：无 shift 基线 / 空手 sneak 开箱核心 / 持方块 sneak 放置优先对照 + 源钉）；矩阵 594→595。**（fix + test + 本 docs 三段提交）
+
+**盘点结论（t1050 残余登记清偿，如实）**：病灶确认且恰一处——placeBlock 矿车交互段 (a0) 箱车开箱门（t1013）读**裸 Shift 键态**（本段在 m_hasHit 块外、t1050 的 sneakPlaceBlock 局部量无作用域，51cc43c③ 同源裸门）：空手 sneak 右键箱车被旁路到骑乘/放置路径，被「箱车不可骑」守卫（tryMount）+ `m_selectedBlock==Air` 守卫（右键放置入口）连环拦成**无效应**——t1050 十二门同疾的第 13 门；minecartmanager 侧零 sneak 门（盘点过），boxcar 开箱 UI 信号面（chestOpened 携内容键）本身无恙。**既有探针核对：零腿钉旧语义**——t1013/t1013b 箱车系全部无 shift 形态（t1013b(b) 开箱遮挡腿即「无 shift 空手开箱」，新旧门下判据取值同恒逐位兼容），唯一过时面 = t1013b 一处行内注释「箱车开箱分支不读 selectedBlock」（本单使其读合取门）随单改写——纠偏非放宽，与 t1050「5 处源码钉针句改写」同例但范围更小。
+
+**修法（与 t1050 同构，不新立第二套规则）**：门收窄为合取 `sneakPlaceBlock = sneak ∧ 手持可放置方块`（m_selectedBlock 经 hotbar 对非方块物品槽归 Air 的既有归一 → 判据恰为「手持可放置方块」）；本段在 m_hasHit 块外故**就地重算同名判据**（函数作用域合法：m_hasHit 块 3857 行收口，12 门局部量不出块），键态同源 §2-D m_keys 单一输入路径。空手/持非方块 sneak → 照常开箱；持方块 sneak → 开箱被旁路落 (a) 骑乘[箱车拒载]/(b) 放矿车/通用放块路径 = 放置优先。QML 零迁移（修 C++ 语义门；chestOpened/呈现层零变化）。
+
+**MC 口径引证（parity 三元组入账）**：①**容器 use 交互** = 右键箱车开容器 UI——minecraft.wiki/w/Minecart_with_Chest Usage 段原文 "Chest minecarts' contents can be accessed by pressing use item button on them"（**版本** = 车种 Java Alpha v1.0.14 加入、use 开箱随车种即有；**出处** = minecraft.wiki/w/Minecart_with_Chest，2026-09-16 实读）；②**潜行门** = 手持物品使用优先于目标交互——minecraft.wiki/w/Sneaking Effects 段 "Pressing use prioritizes using a held item over interacting with a targeted block"（t1050 同引证，本单延及箱车实体容器面）；③**工程口径** = 与箱子方块开箱门（t173：非潜行无论手持何物右键即开）+ t1050 潜行合取门同构——容器 use 交互族旁路口径 13 门统一。
+
+**矩阵（594→595）**：P-t1052a（section08，t1050d 后邻位）三相：⑴ 无 shift 空手右键箱车 → 开箱恰 1 携内容键（t1013b(b) 同族回归钉；同 rig 自证 findCartHit 命中 + review0906 #12b 遮挡守卫不过杀 + 主选命中地台顶面 = 箱车不挡体素射线）；⑵ **t1052 核心**：空手 + shift → 照常开箱恰 +1（旧裸键门此形态 = 无效应，即本单疾病本体）；⑶ 持方块 + shift 对照 → chestOpened 相对冻结 + 命中面邻格落木板（t1050 四腿同款对照柱）。断言纪律：⑴⑶ 走相对恒等/快照锚（opensAfterBaseT52/opensBeforeHeldT52 相对计数锚——绝对计数 `opens==2` 首版被语义变异连带红即改，见过程坑）；源钉 = 开箱合取语句剥注释 pinSet（阴性轮摘门即红）。rig：48×48×96 seed 10521 自建 fresh 小世界（section11 先例）+ y=14 Planks 地台 + 箱车键格 (12,15,16) 四邻无轨 = 地面静止姿态（车心 y=15.3875，kCartGroundH；射线几何穿车体盒 y[14.94,15.84] 于 s∈[0.5,0.83] 确定性相交，对照写格 (12,15,15) 不蹭车盒/玩家 AABB——结构化选址非碰运气）。
+
+**验证**：分段增量构建（-j 4；playercontroller/section07/section08 重编 + 链接）→ binary mtime（01:03 级）> 全部改动源 → filter t1052 **1P/0F**（首跑即绿）→ 前置回归 filter **t1050 6P / t1034 3P / t1046 8P / t1028 4P / t1013 2P** 全绿 EXIT=0 → 阴性轮（见下）→ 全矩阵 **595 PASS / 0 FAIL ×2**（matrix_t1052_pos/final.log，EXIT=0；594 权威 PASS 行 diff = **+1 恰为本单 t1052a** + 2 变更全落已登记漂移类：t813 戳时间/哈希（00:05→01:29 / a54bea8→949cbc0）、t997 计时毫秒数（0.1839→0.1773 级）；**t979/t1023c 本轮零漂移**[无新增 src 文件，线程原语仍单落点]；pos/final 两轮腿名 diff = 空零漂移）→ app voxelsandbox 重建 EXIT=0 + offscreen 冒烟 EXIT=124 存活 + logs/voxelsandbox_t1052_tail20.log 稳态。
+
+**阴性轮（实跑存证 matrix_t1052_neg.log + matrix_t1052_neg_restore.log / matrix_t1052_t1050_restore.log）**：neg = 矿车开箱门摘本单合取（退回裸 `!m_keys.value(Qt::Key_Shift)`，Edit 变异；「摘守卫摘调用点」纪律此处 = 摘**判据本体**还原旧行为——判据行删除即旧门原样，非 `false &&` 形态）→ rebuild → 全矩阵**恰红 1 腿 t1052a**（diag 逐柱：base=1 基线绿 / **emptyShift=0 语义柱红** = 空手 sneak 被旧门旁路成无效应的本体 / **heldShift=1 对照柱绿** = 相对恒等锚不被波及 / pins=0 源钉红），既有全部箱车腿（无 shift 形态）与其余 594 腿零误伤 → **Edit 反向还原** → rebuild → filter t1052 1P + t1050 6P 回绿。
+
+**过程坑登记**：①腿内对照柱首版钉绝对累计计数 `opensT52 == 2`——NEG 首轮被语义变异连带红（opens 停在 1，对照柱自身行为未变却判红）= R20.11「绝对计数/绝对序归被测语义腿专钉」教训的**腿内再现**；修法 = 相对计数锚快照 + 相对 +1/恒等断言，NEG 二轮红面收缩到语义柱 + 源钉（heldShift=1）。②教训：腿文定稿前先写阴性轮期望红面并**逐柱核对断言的变异敏感性**（R20.15 ⑤ 同族再现）。
+
+**非目标（登记）**：①箱车骑乘/挖车/放矿车路径零触碰（tryMount 箱车拒载、hitCartFromRay、放矿车 t734 均不改）；②持非方块物品（剑/食物等）sneak 右键箱车细分语义（现判据下 = 照常开箱与空手同门；MC 实体交互面若需「持物优先」细分另行登记）；③review0915 #4（R20 walk）/ #6（搭下一笔 entitymanager）/ #7 维持既有登记。
+
+**待实机确认（观感面必核）**：空手潜行右键箱车开箱观感 + 持方块潜行右键箱车放置观感（真机对运行中箱车实测一次；矩阵为无头等价面）。
+
+**下一阶段候选（供治理审计 #9 权衡，本单不自行开工）**：①SaveCoordinator 生产接线（Main.qml 保存流迁移——QML 面变更需专门评估）；②Loading 失败恢复边；③Absent-only 流式生成策略层；④Edits-on-evict；⑤review0915 #4（R20 walk）/ #6（搭下一笔 entitymanager）。
