@@ -25,6 +25,11 @@ bool isCropBlock(int blockId)
         || blockId == BlockRegistry::PotatoCrop;
 }
 
+// t1053 嵌格容差（review0915 #4）：kEmbedTol 玩家挤出先例（t289/t355，playercontroller.cpp）同值 0.1
+//   ——「显著嵌入」门槛，防 ULP/边界 FP 把正常站立（真顶 ≈ 脚位）误判为嵌入引发振荡。两处消费：
+//   isJumpObstacle 嵌格态层豁免 + tick resting 复探嵌入顶起（t1053），改须两处同步。
+static constexpr float kMobEmbedTol = 0.1f;
+
 // t642 → t865 越障跳判据「前方脚位是墙」收口（单一权威 = World::isCollidable）：
 //   无碰撞格（轨 / 火把 / 草丛 / 花 / 树苗 / 作物 / 火 —— ShapeNone 无碰撞盒族）**不是墙** → mob 直接
 //   走过不跳（机制等价 MC 怪跨过草丛 / 花不跳踩；t642 作物豁免与 t803 火焰豁免的同族收口 —— 枚举式
@@ -37,9 +42,20 @@ bool isCropBlock(int blockId)
 //   同类真顶上：下半砖地面 / 耕地 / 压力板走廊），非墙不跳（否则 t865 落定链把脚位 snap 进矮支撑格
 //   内部后 fy=脚位格恒命中自身同类 → 全程兔跳）。真顶高于脚位（走进矮墙 / 上台阶）仍照旧跳。
 //   feetY = 调用点 mob 当前脚位世界 Y（e.pos.y()−e.halfH）；默认 -1 = 不启用高度判（按整格口径）。
-bool isJumpObstacle(World *world, int x, int y, int z, float feetY)
+// t1053 嵌格态层豁免（review0915 #4，t1049 engine quirk 注销单）：ownX/ownZ = 调用点 mob 中心列。
+//   mob 中心列在候选层（y = 脚位格层）有碰撞支撑且真顶**显著高于脚位**（> kMobEmbedTol）= 嵌格态
+//   （支撑被换高 / 抬升方块落格，mob 脚位陷进支撑格内部，t1049 提交注实录）——此时脚位层是 mob 所站
+//   地面非「前方的墙」，**整层恒不跳**：嵌格层所有列的真顶都高于脚位，探针无论落自身列还是邻列都会
+//   误判墙 → 假跳 + t670 滑流 + 落地 fallDist 触发 t1045 踩踏掷骰级联（review0915 #4 病灶链）。豁免
+//   判据只锚「自身列支撑本体」（所站地面），正常站立（真顶 ≈ 脚位，review26 #1 豁免域）与真实门前墙
+//   （自身列脚位层是空气 ownTop=-1）零波及；嵌格消除由 tick resting 复探的 t1053 嵌入顶起分支承接
+//   （物理段）——本豁免防「支撑换高帧 → 下个 aiTick AI 探跳段先于物理复探段执行」的末帧假跳（AI 段
+//   在前，顶起来不及），两处消费同一 kMobEmbedTol 容差。
+bool isJumpObstacle(World *world, int x, int y, int z, float feetY, int ownX, int ownZ)
 {
     if (!world || y < 0) return false;
+    if (world->supportTopYAt(ownX, y, ownZ) > feetY + kMobEmbedTol)
+        return false; // t1053 嵌格态：脚位层是所站地面非墙（见上注；ownTop=-1 穿透 → 不豁免）
     const quint8 bid = world->blockAt(x, y, z);
     if (bid == BlockRegistry::Water || bid == BlockRegistry::Lava)
         return true; // 水 / 岩浆当沟壑跳过（t642 口径保留 + review26 #3 岩浆同列）
@@ -2637,17 +2653,17 @@ bool EntityManager::tickBreeding(qreal dt)
         }
         if (e.baby) {
             e.growTimer -= float(dt);
-                if (e.growTimer <= 0.0f) {
-                    e.growTimer = 0.0f;
-                    e.baby = false; // 长大成体（QML babyScaleAt 1.0 → 重缩回正常体型）
-                    // t1025 成长还原（幼崽缩放基建的逆操作）：按类型还原成体碰撞盒（applyMobCollisionBox 单一
-                    //   权威）+ pos.y 重锚（盒底恒贴地 —— halfH 变高 Δ，collision 中心同步抬 Δ，防还原盒嵌入
-                    //   地面卡住移动）。t1046 血量还原面退役（parity 台账低-1，用户裁决「一切按原版」）：幼崽
-                    //   血量=成体上限满血（MC Baby 血量口径），本就 10/10 长大无 maxHealth/health 可还原——
-                    //   t1025 旧「×2 还原」是产崽减半的逆，减半已随低-1 清偿一并移除，此处不再触血量。
-                    const float babyHalfH = e.halfH;
-                    applyMobCollisionBox(e.mobType, e);
-                    e.pos.setY(e.pos.y() + (e.halfH - babyHalfH));
+            if (e.growTimer <= 0.0f) { // review0915 #6：缩进恢复 12 空格统一（纯格式；语义逐位不变）
+                e.growTimer = 0.0f;
+                e.baby = false; // 长大成体（QML babyScaleAt 1.0 → 重缩回正常体型）
+                // t1025 成长还原（幼崽缩放基建的逆操作）：按类型还原成体碰撞盒（applyMobCollisionBox 单一
+                //   权威）+ pos.y 重锚（盒底恒贴地 —— halfH 变高 Δ，collision 中心同步抬 Δ，防还原盒嵌入
+                //   地面卡住移动）。t1046 血量还原面退役（parity 台账低-1，用户裁决「一切按原版」）：幼崽
+                //   血量=成体上限满血（MC Baby 血量口径），本就 10/10 长大无 maxHealth/health 可还原——
+                //   t1025 旧「×2 还原」是产崽减半的逆，减半已随低-1 清偿一并移除，此处不再触血量。
+                const float babyHalfH = e.halfH;
+                applyMobCollisionBox(e.mobType, e);
+                e.pos.setY(e.pos.y() + (e.halfH - babyHalfH));
                 dirty = true;
                 qCInfo(lcEnt) << "baby grew up at pos" << e.pos << "type" << e.mobType;
             }
@@ -3158,8 +3174,9 @@ bool EntityManager::aiWolf(int idx, Entity &e, float dt, World *world, const QVe
             const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
             const int fx = qFloor(e.pos.x() + fdx * 0.6f);
             const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+            const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
             if (fy >= 0
-                && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // 作物可穿越不跳（t642 同款）
+                && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ) // 作物可穿越不跳（t642 同款）
                 && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落
                 && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（跳峰 1.25 + 身高 0.9 → 两格口径，同 aiHostile）
                 e.vy = kJumpSpeed;
@@ -3692,8 +3709,9 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
                 const int fy = qFloor(e.pos.y() - e.halfH);
                 const int fx = qFloor(e.pos.x() + fdx * 0.66f);
                 const int fz = qFloor(e.pos.z() + fdz * 0.66f);
+                const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)
                     && !world->isSolid(fx, fy + 1, fz)
                     && !world->isSolid(fx, fy + 2, fz)
                     && !world->isSolid(fx, fy + 3, fz)) {
@@ -3779,8 +3797,9 @@ bool EntityManager::aiIronGolem(int idx, Entity &e, float dt, World *world, floa
                 const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
                 const int fx = qFloor(e.pos.x() + fdx * 0.66f);
                 const int fz = qFloor(e.pos.z() + fdz * 0.66f);
+                const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // 前方脚位是墙（作物格排除，可穿越不跳）
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ) // 前方脚位是墙（作物格排除，可穿越不跳）
                     && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（翻上去后脚位）
                     && !world->isSolid(fx, fy + 2, fz)                // 头位可容（golem 2.4 高 → 再上方两格须空气）
                     && !world->isSolid(fx, fy + 3, fz)) {
@@ -3930,8 +3949,9 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                         const int fy = qFloor(e.pos.y() - e.halfH);
                         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
                         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+                        const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
                         if (fy >= 0
-                            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)
                             && !world->isSolid(fx, fy + 1, fz)
                             && !world->isSolid(fx, fy + 2, fz)) {
                             e.vy = kJumpSpeed;
@@ -4011,8 +4031,9 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
                 const int fy = qFloor(e.pos.y() - e.halfH);
                 const int fx = qFloor(e.pos.x() + fdx * 0.6f);
                 const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+                const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)
                     && !world->isSolid(fx, fy + 1, fz)
                     && !world->isSolid(fx, fy + 2, fz)) {
                     e.vy = kJumpSpeed;
@@ -4159,8 +4180,9 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
         const int fy = qFloor(e.pos.y() - e.halfH);          // 脚位格（mob 底面所在格）
         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+        const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
         if (fy >= 0
-            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH) // t642 前方脚位是墙（作物格排除，可穿越不跳）
+            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ) // t642 前方脚位是墙（作物格排除，可穿越不跳）+ t1053 嵌格态整层豁免
             && !world->isSolid(fx, fy + 1, fz)                // 墙顶可落（mob 翻上去后脚位）
             && !world->isSolid(fx, fy + 2, fz)) {             // 头位可容（mob ~1.8 高，再上方须空气）
             e.vy = kJumpSpeed;
@@ -4267,8 +4289,9 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
                     const int fy = qFloor(e.pos.y() - e.halfH);
                     const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
                     const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
+                    const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
                     if (fy >= 0
-                        && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                        && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)
                         && !world->isSolid(fx, fy + 1, fz)
                         && !world->isSolid(fx, fy + 2, fz)) {
                         e.vy = kJumpSpeed;
@@ -4353,8 +4376,9 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
                 const int fy = qFloor(e.pos.y() - e.halfH);
                 const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
                 const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
+                const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
                 if (fy >= 0
-                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)
+                    && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)
                     && !world->isSolid(fx, fy + 1, fz)
                     && !world->isSolid(fx, fy + 2, fz)) {
                     e.vy = kJumpSpeed;
@@ -4519,8 +4543,9 @@ bool EntityManager::aiArcher(int idx, Entity &e, float dt, World *world, const Q
         const int fy = qFloor(e.pos.y() - e.halfH);                 // 脚位格
         const int fx = qFloor(e.pos.x() + moveDirX * 0.7f);
         const int fz = qFloor(e.pos.z() + moveDirZ * 0.7f);
+        const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
         if (fy >= 0
-            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)    // t642 前方脚位是墙（作物格排除）
+            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)    // t642 前方脚位是墙（作物格排除）
             && !world->isSolid(fx, fy + 1, fz)                       // 墙顶可落
             && !world->isSolid(fx, fy + 2, fz)) {                    // 头位可容（mob ~1.8 高）
             e.vy = kJumpSpeed;
@@ -4769,8 +4794,9 @@ bool EntityManager::aiStalker(int idx, Entity &e, float dt, World *world, const 
         const int fy = qFloor(e.pos.y() - e.halfH);
         const int fx = qFloor(e.pos.x() + fdx * 0.6f);
         const int fz = qFloor(e.pos.z() + fdz * 0.6f);
+        const int ownX = qFloor(e.pos.x()), ownZ = qFloor(e.pos.z()); // t1053 嵌格态豁免判据列
         if (fy >= 0
-            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH)   // t642 前方脚位是墙（作物格排除，可穿越不跳）
+            && isJumpObstacle(world, fx, fy, fz, e.pos.y() - e.halfH, ownX, ownZ)   // t642 前方脚位是墙（作物格排除，可穿越不跳）
             && !world->isSolid(fx, fy + 1, fz)
             && !world->isSolid(fx, fy + 2, fz)) {
             e.vy = kJumpSpeed;
@@ -8423,13 +8449,37 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 //   落地扫描路径处理，不在此分支）。footprint 后续列仍高于中心列时 mobAabbHitsSolid 已挡
                 //   （台阶沿卡死由 t362 footprint 保 resting 覆盖 —— 本处仅移 Y 不移 XZ）。
                 float supportTop = -1.0f;
+                float embedTop = -1.0f; // t1053 嵌入支撑真顶（仅脚位格层中心列）
                 for (int cy = feetCell + 1; cy >= feetCell - 1; --cy) {
                     if (cy < 0) break;
                     const float top = mobSupportTopY(world, cx, cy, cz);
-                    if (top >= 0.0f && top <= e.pos.y() - e.halfH + 0.01f) { supportTop = top; break; }
-                    // cy 高于脚位的层（top > feet）不算当前支撑（mob 站进它下方 = 嵌入，由窒息 / 挤出兜底）
+                    if (top >= 0.0f) {
+                        if (top <= e.pos.y() - e.halfH + 0.01f) { supportTop = top; break; }
+                        // cy 高于脚位的层（top > feet）不算当前支撑（mob 站进它下方 = 嵌入）。
+                        //   t1053 嵌入顶起承接（替换旧「由窒息 / 挤出兜底」登记——mob 侧原无挤出机制，
+                        //   嵌入态常驻成 review0915 #4 假跳+踩踏级联病灶）：只记**脚位格层中心列**——
+                        //   嵌入格本体（支撑被换高 / 抬升方块落格，mob 脚位陷进该格）。±1 窗内其它高于
+                        //   脚位的层（1 格高通道顶 / 桥面等「头上的地」）不入判——顶起会把 mob 甩上桥。
+                        if (cy == feetCell) embedTop = top;
+                    }
                 }
-                if (supportTop >= 0.0f) {
+                if (embedTop > e.pos.y() - e.halfH + kMobEmbedTol) {
+                    // t1053 嵌入顶起（先于下贴判；kMobEmbedTol 与 isJumpObstacle 嵌格态层豁免同容差）：
+                    //   机制等价 MC「实体不被方块困死」——solid block 进入实体空间 → 实体可脱出不可回入
+                    //   （minecraft.wiki/w/Entity "free to move out of the solid block but not back in"，
+                    //   2026-09-16 实读；向上 = 支撑在脚下的最小位移脱出向，与落地承接同源）。
+                    //   launchUnburyUpward 玩家先例（t712）同型：抬到嵌入格真顶 + 上方全高净空门（塞不进
+                    //   不抬，保持既有窒息/挖出兜底）+ fallPeakY 基准随顶起新位（顶起非腾空，落差起算点
+                    //   跟新脚位——否则旧低位基准会给下次落地注入假落差触发 t1045 踩踏掷骰）。顶起量天然
+                    //   有界 < 1 格（embedTop ∈ 脚位格层内）。resting 保持（贴新顶静置）。
+                    const float restY = embedTop + e.halfH
+                                        + (e.mobType == MobEmberling ? kEmberlingHoverOffset : 0.0f);
+                    if (!mobAabbHitsSolid(world, e.pos.x(), restY, e.pos.z(), e.halfW, e.halfH)) {
+                        e.pos.setY(restY);
+                        e.fallPeakY = restY - e.halfH; // 基准随顶起新位（顶起非腾空）
+                        dirty = true;
+                    }
+                } else if (supportTop >= 0.0f) {
                     // t728 燃烬者悬浮：restY 加 kEmberlingHoverOffset 抬升（不断回退到贴地）。悬浮 mob 中心底
                     //   面距支撑面恒悬空 ~0.4 格（视觉，机制等价 MC 烈焰人飞浮）；上下 sin 浮动由 QML 动画驱动。
                     const float restY = supportTop + e.halfH
