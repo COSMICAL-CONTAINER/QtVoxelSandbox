@@ -112,6 +112,7 @@ void MatrixRun::runAll()
     section10_command_event_snapshot(); // R20.06 Command/Event/Snapshot（置尾先例沿用：纯类型/
                                         //   队列行为面，rig 世界零接触——零残留由构造保证）
     section11_gamesession(); // R20.07 GameSession（置尾先例沿用：自建 fresh 小世界，rig 零接触）
+    section12_worldfacade(); // R20.08 WorldFacade（置尾先例沿用：自建 fresh 小世界，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty())

@@ -262,4 +262,7 @@ private:
     void section11_gamesession(); // R20.07 GameSession 探针（置尾先例沿用：自建 fresh 小世界
                                   //   ×3（48×48×96 s82 双生 A/B + 共享 C），rig 世界 w 零接触，
                                   //   接 section10）
+    void section12_worldfacade(); // R20.08 WorldFacade 探针（置尾先例沿用：自建 fresh 小世界
+                                  //   ×4（wQ 查询 / wA+wB 写入双生 / wF mesher 门+会话共享），
+                                  //   rig 世界 w 零接触，接 section11）
 };

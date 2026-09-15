@@ -258,7 +258,9 @@ void MatrixRun::section11_gamesession()
         const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
                                      + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
         const QStringList missGs = pinSet(srcRoot + QStringLiteral("/Game/gamesession.h"), {
-            SrcPin("r2007 delegate both commands to World::setBlock authority", "m_world.setBlock(c.pos", 2),
+            // R20.08 迁移：命令写经 WorldFacade 收窄面（m_facade.setBlock ×2）——终局权威仍是
+            //   World::setBlock（facade 纯转发，worldfacade.h 委托钉在 section12 r2008c）。
+            SrcPin("r2007 delegate both commands to World::setBlock authority via WorldFacade", "m_facade.setBlock(c.pos", 2),
             SrcPin("r2007 fixed tick base = Tick::kClockTickMs single authority", "Tick::kClockTickMs", 1),
             SrcPin("r2007 integral-ms accumulator crosses at kClockTickMs", "m_accumMs >= kClockTickMs", 1),
             SrcPin("r2007 due-drain via CommandQueue pop (delegate queue, no bypass)", "m_commands.pop(c)", 1),
