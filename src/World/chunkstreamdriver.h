@@ -54,13 +54,25 @@
 //   两相（generationjob.h R20.12 缝——isAsynchronous 分派在底层，调用者面零改动即验收④），
 //   故本组件单一 pump() 转发即同时是 pumpAsync 通路；收割缝 = takeOutcome / outcomeCount /
 //   pendingJobCount 三个只读/取用转发（outcome 为每活别名一条 FIFO，r2011 语义原样）。
-//   驱动器零 kind 感知：只提交 Generate kind，泵面原样透传——r2017 kind 门（Mesh 三边不
-//   驱动）等生命周期语义全部留在 GenerationJob 唯一权威内，不受本层影响。
+//   驱动器 kind 面：默认全 Generate（P2 形态）；r2019 起 saved-content 缝使能时可选 Load
+//   （D5 回灌，见类头注「P3 扩展」节），零 Mesh——r2017 kind 门（Mesh 三边不驱动）等生命
+//   周期语义全部留在 GenerationJob 唯一权威内，不受本层影响。
 //
 // ── 登记非目标（本单零做）──────────────────────────────────────────────────────────
-//   toEvict 执行（P3 卸载 + Edits-on-evict 落盘——decide 的 toEvict 单本组件不消费）；
-//   生产接线（World / PlayerController / QML 位置源——P3/P4）；worker meshing（D6 后续单）；
+//   生产接线（World / PlayerController / QML 位置源——P4/P5）；worker meshing（D6 后续单）；
 //   参数实值（P5 调参）；共享世界级 GenerationJob 实例（生产接线期再演化）。
+//
+// ── §29.4-P3 扩展（r2019）：可选 evictor 回调 + saved-content Load 路径（最小扩展面）──────
+//   P3 原文：「视距外 Evicting→Absent，改动块经 SaveCoordinator 落盘、重载回灌」。本组件
+//   只扩两个**可选注入点**，驱逐执行本体在 chunkevictor.h 的 ChunkEvictor（纯编排值组件）：
+//   ① setEvictor：onPlayerChunk 决策沿在提交/取消完成后以 d.toEvict 调用（P1 toEvict 单的
+//      消费面）——**默认 null = 逐位零变化**（r2018 全部既有腿回归绿为实证）；使能回调 +
+//      streaming off 时不可达（回调点在 onPlayerChunk 默认关短路之后，r2019a 承重墙钉）。
+//   ② setSavedContentQuery：D5 回灌路径——非 null 时 submit 前查询该 chunk 是否有存档内容：
+//      有 → Load kind（r2011 Load 语义：与 Generate 共用边①②）；无 → Generate。
+//      **默认 null = 全 Generate（P2 行为逐位不变，r2018b 双生断言继续成立）**。
+//   两扩展「默认注入前与 P2 逐位等价」由头注释立证 + r2018 既有腿回归绿实证；P3 落盘/转移
+//   执行器与生命周期语义仍零进入本组件（驱动器零 setLifecycle 记号不变，r2018d 反探钉）。
 //
 // ── QML / 线程 / 分层面 ───────────────────────────────────────────────────────────
 //   非 QObject、无 Q_INVOKABLE / Q_PROPERTY（调度编排不进 QML，R20 主线「QML 零迁移」不
@@ -87,6 +99,9 @@ class ChunkStreamDriver
 public:
     // 生命周期纯缝（P1 同款语义：零 World*/Chunk*/QObject* 指针；可空 = 无信息）。
     using LifecycleSeamFn = std::function<ChunkLifecycle(int cx, int cz)>;
+    // §29.4-P3 扩展缝（r2019）：toEvict 消费回调 + saved-content 查询（均可空——null = P2 形态）。
+    using EvictorFn = std::function<void(const QVector<GenerationPolicyEvict> &)>;
+    using SavedContentQueryFn = std::function<bool(int cx, int cz)>;
 
     // 只读统计小聚合（命名从简；头测断言用）。
     struct Stats
@@ -113,6 +128,12 @@ public:
     // 纯缝注入（P1 同款：可空；null 缝 = 无信息 → 零提交，取消面照常半径驱动）。
     void setSeam(const LifecycleSeamFn &seam) { m_seam = seam; }
 
+    // §29.4-P3 扩展注入（r2019；均可空——默认 null = P2 逐位等价，见类头注「P3 扩展」节）。
+    // evictor：决策沿 toEvict 消费回调（生产接线期绑 ChunkEvictor::evict 等价执行面）。
+    void setEvictor(const EvictorFn &evictor) { m_evictor = evictor; }
+    // savedContentQuery：submit 前「有存档内容 → Load kind」查询（null = 全 Generate）。
+    void setSavedContentQuery(const SavedContentQueryFn &q) { m_savedQuery = q; }
+
     // worker 缝转发（generationjob 验收④同门：换实例 = 换实现，编排面零改动）。
     void setWorker(GenerationWorker *worker) { m_jobs.setWorker(worker); }
 
@@ -133,9 +154,14 @@ public:
         // ① 决策（P1 纯函数权威；null 缝 fail-safe 恒空 → 零提交）。
         const GenerationPolicyDecision d = m_policy.decide(cx, cz, m_seam);
         // ② 逐项 submit（priority 原样传递；r2011 合并别名制天然去重——重复请求零副作用）。
+        //    P3 D5 回灌路径（r2019）：saved-content 缝非 null 时 submit 前查询——有存档内容
+        //    → Load kind（r2011 Load 语义），无 → Generate；null = 全 Generate（P2 逐位不变）。
         for (const GenerationPolicyRequest &r : d.toRequest) {
+            const GenerationJobKind kind = (m_savedQuery && m_savedQuery(r.cx, r.cz))
+                ? GenerationJobKind::Load
+                : GenerationJobKind::Generate;
             const Result<quint32> id = m_jobs.submit(
-                GenerationJobKind::Generate, ChunkKey{ r.cx, r.cz }, r.priority);
+                kind, ChunkKey{ r.cx, r.cz }, r.priority);
             if (id.isOk()) {
                 m_pending[ChunkKey{ r.cx, r.cz }.packed()].append(id.value());
                 ++m_stats.submitted;
@@ -163,6 +189,11 @@ public:
                 ++it;
             }
         }
+        // ④ §29.4-P3 驱逐消费沿（r2019）：提交/取消完成后以 decide 的 toEvict 单回调 evictor
+        //    （执行本体在 ChunkEvictor——本组件零转移零落盘逻辑；默认 null = 逐位零变化，
+        //    streaming off 时此处不可达[短路在入口]，r2019a 承重墙钉）。
+        if (m_evictor)
+            m_evictor(d.toEvict);
     }
 
     // 泵转发（同步内联 / 异步「交接+收割」自动路由在底层——头注「pump」节选型）。
@@ -188,6 +219,8 @@ private:
     GenerationPolicyParams m_params;  // 读视图（默认关旗 + gen 半径；唯一写路径 = setParams）
     GenerationPolicy m_policy;        // 决策权威（decide 纯函数；参数与读视图同步）
     LifecycleSeamFn m_seam;           // 生命周期纯缝（P1 同款；可空）
+    EvictorFn m_evictor;              // §29.4-P3 toEvict 消费回调（r2019；默认 null = P2 形态）
+    SavedContentQueryFn m_savedQuery; // §29.4-P3 saved-content 查询（r2019；默认 null = 全 Generate）
     GenerationScheduler m_jobs;       // 自持 GenerationJob（纯请求模型形态——挂点归生产接线）
     // 在途提交集：packed(cx,cz) → 该 key 的活别名 id 列表（合并别名制下可多别名；离半径
     // 逐别名取消；erase-on-cancel 保证幂等——已消费 id 的 cancel false 不入账）。
