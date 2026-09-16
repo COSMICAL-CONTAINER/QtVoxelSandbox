@@ -127,6 +127,7 @@ void MatrixRun::runAll()
     section17_meshbuilder(); // R20.13 MeshBuilder（置尾先例沿用：fresh 小世界快照/逐位等价/计数穿透 + 纯源码钉腿，rig 零接触）
     section18_entitystore(); // R20.14 EntityStore（置尾先例沿用：store/Adapter 直驱孪生等价 + 快照权威 + notify 沿计数回归 + 纯源码钉腿，rig 零接触）
     section19_savecoordinator(); // R20.15 SaveCoordinator（置尾先例沿用：统一 SaveGeneration/冻结-持久化分离/故障注入恢复三态 + 纯源码钉腿，rig 零接触）
+    section20_generationpolicy(); // §29.4-P1 GenerationPolicy（置尾先例沿用：默认关零变化/请求面/驱逐面/确定性+结构钉，全段零世界纯函数腿，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {

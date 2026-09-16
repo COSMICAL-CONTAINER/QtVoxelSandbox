@@ -293,4 +293,8 @@ private:
                                       //   自建 fresh 小世界 + 临时 SQLite 库（QDir::temp()
                                       //   pid 键名，测试自清理）；r2015d 纯源码钉 + 编译期钉，
                                       //   rig 世界 w 零接触，接 section18）
+    void section20_generationpolicy(); // §29.4-P1 GenerationPolicy 策略层骨架探针（置尾先例
+                                       //   沿用：r2016a-d 全段零世界（纯函数决策组件，缝 =
+                                       //   QMap 合成生命周期表），rig 世界 w 零接触，接
+                                       //   section19）
 };
