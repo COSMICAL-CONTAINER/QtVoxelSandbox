@@ -1095,6 +1095,12 @@ private:
     //   返回 0=+X 1=-X 2=+Z 3=-Z（与不完整方块 state 朝向编码一致：stairs/door/trapdoor 均用此编码）。
     //   供 placeBlock 放 stairs/door 时定朝向、useBlock 开 trapdoor 时定开向。
     int horizontalFacing() const;
+    // t1054（review0916 #11）潜行放置旁路单一判据唯一落点：「按住 Shift 且手持可放置方块」。
+    //   原 placeBlock 两处手写副本（m_hasHit 块内 12 门判据 + 矿车交互段 (a0) 开箱门）收进本方法
+    //   两调用点改读，判据演进（如排除不可对实体放置的方块）只改一处不劈叉。语义逐位不变：
+    //   m_selectedBlock 经 hotbar 对非方块物品槽已归 Air（见 12 门判据注释），故合取恰为
+    //   「手持可放置方块」；键态同源 §2-D m_keys 单一输入路径。
+    bool heldPlaceableSneak() const;
     // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
     void updateMining(float dt);
     // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。

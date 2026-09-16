@@ -3525,6 +3525,15 @@ PlayerController::ArrowSlot PlayerController::findArrowInInventory() const
     return {false, 0, 0};
 }
 
+// t1054（review0916 #11）：潜行放置旁路单一判据唯一落点（声明见 .h）——placeBlock 的 m_hasHit
+//   块内 12 门判据与矿车交互段 (a0) 开箱门两调用点改读本 helper，两处手写合取
+//   `shift && m_selectedBlock != Air` 副本退役（语义逐位不变；行为恒等由 t1050 家族 + t1052a
+//   三相 + t1054b 源钉腿实证）。
+bool PlayerController::heldPlaceableSneak() const
+{
+    return m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;
+}
+
 // 右键：命中面法线方向的相邻空格置当前手持方块。
 // 校验：目标格须为空气（不覆盖实体）；且不与玩家 AABB 重叠（防自埋/卡死）。
 // 模式门控（t21）：观察者不能放块（用户核心诉求）——在调用 World::setBlock 前拦截。
@@ -3569,9 +3578,10 @@ void PlayerController::placeBlock()
     //   空手 shift 右键箱子=打开），随之改写。t1034/t1046「潜行持方块」语义腿逐位不变（判据为
     //   合取，持方块时新旧门同值）。残余登记：箱子矿车裸键门（m_hasHit 块外，无 sneakPlaceBlock
     //   作用域）→ t1052 已清偿（矿车开箱分支就地重算同一合取，见下方矿车交互段 (a0)）。
-    const bool sneakPlace = m_keys.value(Qt::Key_Shift);
     // t1050：潜行放置旁路单一判据（手持方块才旁路；下方 12 门统一改读 sneakPlaceBlock）。
-    const bool sneakPlaceBlock = sneakPlace && m_selectedBlock != BlockRegistry::Air;
+    //   t1054（review0916 #11）：合取收进私有 helper heldPlaceableSneak()（矿车段 (a0) 开箱门
+    //   同读一处权威——两处手写副本消除，语义逐位不变，见 helper 定义旁注释）。
+    const bool sneakPlaceBlock = heldPlaceableSneak();
     // t50：右键工作台 → 打开 3×3 合成 UI（优先于放置；spec「右键工作台开 3×3」）。
     if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::CraftingTable) {
         emit craftingTableOpened();
@@ -4872,8 +4882,12 @@ void PlayerController::placeBlock()
         //   车种 Java Alpha v1.0.14 加入、use 开箱随车种即有）——空手（/持非方块物品）sneak 右键箱车**照常开箱**（旧裸键门 !Key_Shift 把
         //   空手 sneak 右键箱车旁路到骑乘/放置路径，被「箱车不可骑」守卫 + m_selectedBlock==Air 守卫
         //   拦成「无效应」，与 t1050 十二门同疾 = 第 13 门）；持方块 sneak = 放置优先（开箱被旁路 →
-        //   落 (a) 骑乘[箱车拒载]/(b) 放矿车/通用放块路径）。
-        const bool sneakPlaceBlock = m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;
+        //   (a) 骑乘被 t1054 sneak 裸门抑制 → 落 (b) 放矿车/通用放块路径；t1052 旧注释宣称落
+        //   「(a) 骑乘[箱车拒载]」系自证矛盾——对普通矿车 (a) tryMount 先于一切放置执行且不查
+        //   Shift 会吞掉放置（review0916 #4），t1054 修后本注释如实）。t1054（review0916 #11）：
+        //   合取改读私有 helper heldPlaceableSneak()（与 m_hasHit 块内 12 门同一处权威，就地重算
+        //   副本退役，语义逐位不变）。
+        const bool sneakPlaceBlock = heldPlaceableSneak();
         if (!sneakPlaceBlock) {
             float chestDist = 0.0f;
             const int chestIdx = m_minecartManager->findCartHit(position(), lookDirection(), kReach, &chestDist);
@@ -4891,7 +4905,25 @@ void PlayerController::placeBlock()
         // (a) 骑乘：命中矿车 → 上车（即便手持矿车物品也不另放，机制等价 MC 右键矿车优先上车）。
         //   rv-low-batch2 骑乘互斥：骑船时不得再上矿车（旧版两 rider 同时置位成幽灵骑乘态）。守卫：骑船中
         //   → 跳过上矿车（先 shift 下船才能换乘，与船侧守卫对称，机制等价 MC 同一时刻只能骑一个载具）。
+        //   t1054（review0916 #4，同族第 14 门 = 交互抑制面）：骑乘门加 sneak 抑制——`Key_Shift`
+        //   原始按下态裸门（shift 按住即不尝试上车，与手持无关；先于 tryMount 短路）。**语义分工
+        //   立此存照**：开箱/扳动类交互抑制 = sneakPlaceBlock 合取门【持可放置方块才旁路到放置，
+        //   t1050/t1052 家族，heldPlaceableSneak() 一处权威】；骑乘类 = shift 裸门【潜行即不骑——
+        //   空手 sneak 右键普通矿车无效应（不上车不放物，落 (b)/通用放置被各自守卫拦）、持方块
+        //   sneak 落 (b) 放矿车/通用放块路径 = 放置优先；无 shift 右键照旧上车】。MC 口径（三元组
+        //   2026-09-16 实读）：①潜行 + use 对可骑实体触发「交互」而非骑乘——minecraft.wiki/w/Sneaking
+        //   Effects 段原文 "Players are able to interact with a tamed horse (tamed donkey or mule
+        //   inventories, also) when pressing use item control while holding the sneak key"（潜行按住
+        //   时 use 走背包/交互而非上马，骑乘被潜行抑制的现行 wiki 表述面）；潜行上下一切载具 =
+        //   同页 History 段 "Sneaking is now used to get out for all transportation methods, such
+        //   as boats, horses and minecarts"（Java 1.6.1 / 13w16a）；②矿车骑乘本体 = use 实体交互
+        //   ——minecraft.wiki/w/Minecart Usage→Transportation 段原文 "Minecarts can be ridden by
+        //   pressing the "use" control on them"（Dismounting 段 "Players can exit the minecart by
+        //   sneaking while riding it"——下矿车同样是潜行，潜行与骑乘互斥的两端）；③工程口径 = 与
+        //   t1050/t1052 潜行旁路家族同门第 14 门统一（空手 sneak 右键普通矿车旧版被 tryMount 吞成
+        //   上车，t1052 提交注自证矛盾点随本修消除）。
         if (!(m_boatManager && m_boatManager->ridingIndex() >= 0)
+            && !m_keys.value(Qt::Key_Shift)
             && m_minecartManager->tryMount(position(), lookDirection(), kReach)) {
             m_lastPlaceMs = now;
             emit swingArm();
