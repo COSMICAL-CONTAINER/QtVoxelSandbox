@@ -301,4 +301,8 @@ private:
                                         //   先例沿用：r2018a-d 全段零世界（纯编排值组件，缝 =
                                         //   QMap 合成生命周期表），rig 世界 w 零接触，接
                                         //   section20）
+    void section22_chunkevictor(); // §29.4-P3 ChunkEvictor 卸载+Edits-on-evict 探针（置尾先例
+                                   //   沿用：r2019a/c/d 零世界（纯编排值组件 + 自校验 QMap
+                                   //   缝）；r2019b 真世界 + 真 SaveCoordinator + fresh 临时
+                                   //   库（r2015 先例），rig 世界 w 零接触，接 section21）
 };

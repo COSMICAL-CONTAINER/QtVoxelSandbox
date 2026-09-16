@@ -24,9 +24,9 @@
 //     pumpAsync 交接/收割两相：交接沿 = handed 记录可见[全 Generate kind + key/priority/序
 //     恒等]、收割沿 = outcome 交付可见；结构钉 = 头文件禁 QObject 基类/QML/线程原语/
 //     World*/ChunkManager*/setLifecycle 记号[驱动器零边驱动——生命周期边唯一权威 stays
-//     GenerationJob，ChunkManager 挂点归生产接线 P3] + 默认关双短路正面钉 + 只提交 Generate
-//     kind 钉[Mesh/Load kind 不出现在提交面] + 同移动序列双驱动器重放 submit/cancel 轨迹
-//     逐位恒等[确定性]）。
+//     GenerationJob，ChunkManager 挂点归生产接线] + 默认关双短路正面钉 + 默认全 Generate
+//     提交面钉[Mesh 禁出；r2019 起 Load 经 saved-content 缝门控合法——原 Load 禁探同变更
+//     修订，见 r2018d 腿内注] + 同移动序列双驱动器重放 submit/cancel 轨迹逐位恒等[确定性]）。
 // ── 阴性轮恰红面设计（**先于腿文定稿**，R20.11 收缩纪律；存证 matrix_r2018_neg1_red.log /
 //    matrix_r2018_neg1_restore.log / matrix_r2018_neg2_red.log / matrix_r2018_neg2_restore.log
 //    直落 build/ 终名，红跑/还原分文件，禁 TEMP 中转）────────────────────────────────────
@@ -547,8 +547,9 @@ void MatrixRun::section21_chunkstreamdriver()
         " decide order) and delivers scripted completions at the harvest phase (outcomes"
         " visible through the driver's harvest face, requestId/key FIFO-matched); source"
         " pins hold the header QObject-free with the double default-off short-circuit and"
-        " a Generate-only submission face while reverse probes prove no QObject base, QML"
-        " surface, thread primitive, World/ChunkManager pointer or setLifecycle token"
+        " a default Generate-only submission face (P3 revision: Load is legal only via"
+        " the seam-gated saved-content query) while reverse probes prove no QObject base,"
+        " QML surface, thread primitive, World/ChunkManager pointer or setLifecycle token"
         " (lifecycle edges stay GenerationJob's single authority, mount belongs to"
         " production wiring); the codebase stays unwired and the same movement sequence"
         " replayed through two fresh drivers yields bit-identical submit/cancel/execute"
@@ -634,8 +635,20 @@ void MatrixRun::section21_chunkstreamdriver()
             && forbiddenAbsent(drvHdr, "std::thread") && forbiddenAbsent(drvHdr, "QMutex")
             && forbiddenAbsent(drvHdr, "World *") && forbiddenAbsent(drvHdr, "ChunkManager *")
             && forbiddenAbsent(drvHdr, "setLifecycle") // 零边驱动：生命周期边权威 stays GenerationJob
-            && forbiddenAbsent(drvHdr, "GenerationJobKind::Mesh") // 提交面零 Mesh/Load kind
-            && forbiddenAbsent(drvHdr, "GenerationJobKind::Load");
+            && forbiddenAbsent(drvHdr, "GenerationJobKind::Mesh"); // 提交面零 Mesh kind
+        // r2019 同变更修订（纠偏非削钉——t1023c/t1050a 钉面随搬移修订先例）：§29.4-P3 给驱动器
+        //   增设 saved-content Load 路径（D5 回灌，默认 null = 全 Generate），原「Load kind 禁出
+        //   提交面」反探随被钉语义退役——改钉「Load 记号恰经缝门控出现 ≥1」（结构面承接归
+        //   section22 r2019d：setEvictor/setSavedContentQuery 正面钉 + Mesh 仍禁出 + 零接线）。
+        const QStringList missDrvLoad = pinSet(drvHdr, {
+            SrcPin("r2019 load-kind seam-gated selection (revises the r2018 Load-forbidden"
+                   " probe: Load is now legal via the saved-content seam only)",
+                "GenerationJobKind::Load", 1),
+        });
+        for (const QString &m : missDrvLoad) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
         const bool unwired = forbiddenAbsent(srcRoot + QStringLiteral("/World/world.h"),
                                  "ChunkStreamDriver")
             && forbiddenAbsent(srcRoot + QStringLiteral("/World/world.cpp"),
@@ -727,7 +740,9 @@ void MatrixRun::section21_chunkstreamdriver()
                              " worker hands out Generate-kind requests matching the decide"
                              " output and delivers FIFO-matched completions through the"
                              " harvest face; source pins keep the header QObject-free with"
-                             " double default-off short-circuits and a Generate-only face,"
+                             " double default-off short-circuits and a default"
+                             " Generate-only face (Load only via the P3 seam-gated"
+                             " saved-content query),"
                              " reverse probes prove no QObject/QML/thread/World/"
                              "ChunkManager/setLifecycle tokens and zero production wiring,"
                              " and two fresh drivers replay the same movement sequence with"
