@@ -191,6 +191,14 @@ public:
     void setWorker(GenerationWorker *w) { m_worker = w; }
     GenerationWorker *worker() const { return m_worker; }
 
+    // §29.5-W2 生产接线缝（加性；构造参数形态不变——默认 nullptr = 纯请求模型，r2011~r2021
+    // 全部既有腿的形态零变化）：世界级接线方（GameSession 流式会话）在构造后把 ChunkManager
+    // 挂点接入，边①②⑨（本类唯一权威驱动，r2017 kind 门语义不变）自此真实落表。这是 r2011
+    // 头注「可挂可变 ChunkManager*」预留面的生产首用缝——挂点转移仍经 ChunkManager::setLifecycle
+    // 唯一守卫入口；①②⑨三边均不触驻留集（{Loaded,Active}），驻留 revision 沿由晋升边③的
+    // 调用方（World::adoptGeneratedChunk 经 World::setChunkLifecycle forwarder）携带。
+    void setChunks(ChunkManager *chunks) { m_chunks = chunks; }
+
     // 世界 epoch（过期判定基准）：世界换代（regenerate / 读档）时递增——旧 epoch 的 pending
     // 请求在 pump 时按过期丢弃（不执行、不投递）。0 = 初始 epoch。
     void setWorldEpoch(quint32 e) { m_worldEpoch = e; }

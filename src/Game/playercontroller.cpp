@@ -156,6 +156,10 @@ void PlayerController::setWorld(World *w)
     m_insideStronghold = false;   // t1000：换世界清要塞进入沿守卫（同坐标瞬态表清理先例——新世界重新判沿）
     for (int k = 0; k < World::StructureKindCount; ++k)
         m_insideStructure[k] = false; // t1020：换世界同清四结构进入沿守卫（读档重进同清，见 finishWorldLoad）
+    // §29.5-W2：换世界重置 chunk 换格沿哨兵（新世界首 tick 重新发起始沿——同上方进入沿守卫
+    // 清守卫口径；流式会话按世界构造，旧世界沿缓存不得吞新世界首沿）。
+    m_lastChunkCx = std::numeric_limits<int>::min();
+    m_lastChunkCz = std::numeric_limits<int>::min();
     m_structureAmbientZone = AmbientNone; // t1021：换世界清结构环境音区（静默清 0，下一 tick 重推导重发 ——
                                           //   QML 退出世界显式全停兜底，重进后首 tick 值变即恢复对应环境音）
     // t756：世界换代（regenerate / beginLoad / setSeed / review #20 尺寸 setter 重建均 emit seedChanged）
@@ -1078,6 +1082,21 @@ void PlayerController::tickImpl()
     if (ambientZone != m_structureAmbientZone) {
         m_structureAmbientZone = ambientZone;
         emit structureAmbientZoneChanged(); // 值真变才发（Main.qml 分流启停对应环境音）
+    }
+    // §29.5-W2 位置源：玩家所在 chunk 换格沿检测（floorDiv16 在 C++ 侧——位置权威；流式驱动
+    // 位置源的生产缝）。ChunkKey::fromWorld 单一权威（floorDiv 负坐标语义——Core 叶子不自持
+    // kSize 由调用方传 Chunk::kSize）。放在 !m_worldRunning 早退之前（同 t1000/t1020 进入沿
+    // 先例：暂停/背包开时位置不变、判定稳定；读档瞬移后下一 tick 补沿，沿粒度 = chunk 换格
+    // 非逐帧）。与上一 chunk 缓存不同才发一次性沿信号（禁每帧直发，同 dispenserFired 先例）；
+    // 消费侧幂等由 ChunkStreamDriver::onPlayerChunk 承接（同 chunk 重复零动作）。
+    {
+        const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(m_pos.x()))),
+                                                 int(std::floor(double(m_pos.z()))), Chunk::kSize);
+        if (pc.cx != m_lastChunkCx || pc.cz != m_lastChunkCz) {
+            m_lastChunkCx = pc.cx;
+            m_lastChunkCz = pc.cz;
+            emit playerChunkChanged(pc.cx, pc.cz); // 起始沿（哨兵 INT_MIN）与换格沿同信号
+        }
     }
     // t223 近流水 proximity 水流声：节流扫描（每 kFlowScanInterval 秒一次）算最近流水格距离 → level。
     //   放在 !m_captured 早 return 之前 → 暂停 / 背包开时仍刷新（玩家停流水旁开背包，水流声应持续）；

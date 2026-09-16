@@ -59,8 +59,18 @@
 //   周期语义全部留在 GenerationJob 唯一权威内，不受本层影响。
 //
 // ── 登记非目标（本单零做）──────────────────────────────────────────────────────────
-//   生产接线（World / PlayerController / QML 位置源——P4/P5）；worker meshing（D6 后续单）；
-//   参数实值（P5 调参）；共享世界级 GenerationJob 实例（生产接线期再演化）。
+//   worker meshing（D6 后续单）；参数实值（P5 调参）；共享世界级 GenerationJob 实例（生产
+//   接线期再演化——W2 起由 GameSession 持本组件 + worker 的会话级实例，组件内自持形态不变）。
+//
+// ── §29.5-W2 生产接线扩展（r2024；会话级通电——上面的「生产接线」非目标登记自本单起解除）──
+//   计划原文（refactor-plan §29.5.2 W2）：「玩家位 → floorDiv16 → GameSession tick 尾
+//   driver.onPlayerChunk」。本头最小扩四员（默认未设 = r2018/r2019 形态逐位等价，既有腿全绿
+//   为证）：①setSlotEnsure——submit 前槽位物化缝（sparse 边①的槽位存在性前提：ChunkManager
+//   ::setLifecycle 无槽位拒）；②attachLifecycleSink——r2011 GenerationScheduler 预留
+//   ChunkManager 挂点的首用转发（边①②仍由 GenerationJob 唯一权威驱动，本组件零边驱动）；
+//   ③enableStreamingWith / ④streamingWithDefaultRadii——显式使能的参数缝（P1 默认半径单一
+//   来源，GameSession 接线面零策略类型记号）。世界接触面从「纯缝」扩为「纯缝 + 槽位/挂点
+//   转发」——指针仍不出本头（挂点经 GenerationScheduler 持有，W2 接线方注入）。
 //
 // ── §29.4-P3 扩展（r2019）：可选 evictor 回调 + saved-content Load 路径（最小扩展面）──────
 //   P3 原文：「视距外 Evicting→Absent，改动块经 SaveCoordinator 落盘、重载回灌」。本组件
@@ -137,6 +147,36 @@ public:
     // worker 缝转发（generationjob 验收④同门：换实例 = 换实现，编排面零改动）。
     void setWorker(GenerationWorker *worker) { m_jobs.setWorker(worker); }
 
+    // ── §29.5-W2 生产接线扩展（最小加性面；默认未设 = r2018/r2019 形态逐位等价）────────────
+    //   ① 槽位物化缝：sparse 世界边①（Absent→Loading）的前置——ChunkManager::setLifecycle 对
+    //      无槽位坐标拒（chunkmanager.cpp「无槽位可表态」），槽位缺席时边①静默失败 = 生命周
+    //      期沿断链。本缝在 submit 前对每个请求目标调一次（生产绑 World::ensureStreamingChunkSlot
+    //      ——ensureChunk 幂等物化 Absent 槽；decide 已先读缝，槽位落表不改变本次决策）；null =
+    //      P2/P3 形态（fixed 世界不构造驱动器，永不触及）。
+    using SlotEnsureFn = std::function<void(int cx, int cz)>;
+    void setSlotEnsure(const SlotEnsureFn &ensure) { m_slotEnsure = ensure; }
+    //   ② 生命周期挂点转发（r2011 预留面首用）：把自持 GenerationScheduler 的 ChunkManager 挂点
+    //      接到真实世界——边①（交接）/边②（收割）由 GenerationJob 唯一权威驱动（r2017 kind 门
+    //      语义原样），本组件本体仍零转移逻辑零边驱动（边驱动记号唯一落点 = generationjob.h，
+    //      r2018d 反探语义随 W2 同变更修订为「转发面恰一」留痕）。
+    void attachLifecycleSink(ChunkManager &chunks) { m_jobs.setChunks(&chunks); }
+    //   ③ W2 生产参数便捷缝（GameSession 接线面零策略类型记号——决策权威类型留在 World 层）：
+    //      显式使能 + 三半径（规整唯一路径 normalized 不变，r2017 同门）；P5 调参入口。
+    void enableStreamingWith(int generationRadiusChunks, int renderRadiusChunks, int scanExtentChunks)
+    {
+        setParams(GenerationPolicyParams(true, generationRadiusChunks, renderRadiusChunks,
+                                         scanExtentChunks));
+    }
+    //   ④ W2 生产默认构造：P1 默认半径（gen 4 / render 4 / scan 6——P5 调参前的实值权威，单一
+    //      来源 = GenerationPolicyParams 默认成员，此处不复制字面量）+ 显式使能（D1：流式仅
+    //      sparse 世界使能；fixed 世界连驱动器都不构造——GameSession 构造门）。
+    static ChunkStreamDriver streamingWithDefaultRadii()
+    {
+        const GenerationPolicyParams dflt; // P1 默认半径实值（4/4/6）
+        return ChunkStreamDriver(GenerationPolicyParams(
+            true, dflt.generationRadiusChunks, dflt.renderRadiusChunks, dflt.scanExtentChunks));
+    }
+
     // 玩家所在 chunk 变更沿（幂等；见类头注释「onPlayerChunk」节）。
     void onPlayerChunk(int cx, int cz)
     {
@@ -157,6 +197,11 @@ public:
         //    P3 D5 回灌路径（r2019）：saved-content 缝非 null 时 submit 前查询——有存档内容
         //    → Load kind（r2011 Load 语义），无 → Generate；null = 全 Generate（P2 逐位不变）。
         for (const GenerationPolicyRequest &r : d.toRequest) {
+            // §29.5-W2 槽位物化缝（submit 前置——sparse 边①的槽位存在性前提，见缝声明注释；
+            // null = P2/P3 形态零调用）。ensureChunk 幂等：已存在槽位原样返回，Absent 态不被触碰
+            // （decide 已先读缝——本次决策的 Absent-only 语义不因槽位落表而改变）。
+            if (m_slotEnsure)
+                m_slotEnsure(r.cx, r.cz);
             const GenerationJobKind kind = (m_savedQuery && m_savedQuery(r.cx, r.cz))
                 ? GenerationJobKind::Load
                 : GenerationJobKind::Generate;
@@ -221,6 +266,7 @@ private:
     LifecycleSeamFn m_seam;           // 生命周期纯缝（P1 同款；可空）
     EvictorFn m_evictor;              // §29.4-P3 toEvict 消费回调（r2019；默认 null = P2 形态）
     SavedContentQueryFn m_savedQuery; // §29.4-P3 saved-content 查询（r2019；默认 null = 全 Generate）
+    SlotEnsureFn m_slotEnsure;        // §29.5-W2 槽位物化缝（submit 前置；默认 null = P2/P3 形态）
     GenerationScheduler m_jobs;       // 自持 GenerationJob（纯请求模型形态——挂点归生产接线）
     // 在途提交集：packed(cx,cz) → 该 key 的活别名 id 列表（合并别名制下可多别名；离半径
     // 逐别名取消；erase-on-cancel 保证幂等——已消费 id 的 cancel false 不入账）。
