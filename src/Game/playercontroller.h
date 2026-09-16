@@ -726,6 +726,13 @@ signals:
     //   分层（PLAN §2）：Game/Physics 层算位移发语义事件，progress（ViewModel）经 QML 桥接消费（单向事件流，
     //   同 playerMined→onBlockMined / blockPlaced→onBlockPlaced 模式）。
     void moved(float deltaBlocks);
+    // §29.5-W2 位置源（流式激活的生产接线缝，零 QML 消费——生命周期/调度决策不进 QML，R20
+    // 主线不变量）：玩家所在 chunk 换格沿（floorDiv16 换格检测在本类 C++ 侧——位置权威；tickImpl
+    // env 桶沿检测，t1000/t1020 进入沿先例同位）。生产接线 = GameSession::notePlayerChunk 直连
+    //（QObject::connect，连接方 = 同时持有两者的装配面；矩阵 r2024 腿即无头消费者）。首次定位
+    // 即发起始沿（哨兵 INT_MIN 起始）；setWorld 重置哨兵（换世界重新起沿，同 m_insideStronghold
+    // 清守卫先例）。沿语义幂等性由消费侧 ChunkStreamDriver::onPlayerChunk 承接（同 chunk 重复零动作）。
+    void playerChunkChanged(int cx, int cz);
     void yawChanged();
     void pitchChanged();
     void modeChanged();
@@ -1560,6 +1567,12 @@ private:
     //   ——同 m_insideStronghold 口径（旧世界陈旧 true 不得吞新世界首个进入沿；unlock 幂等兜底防重复
     //   toast）。下标 = World::StructureKind。
     bool m_insideStructure[World::StructureKindCount] = {};
+    // §29.5-W2 位置源换格沿哨兵（playerChunkChanged(cx,cz) 一次性信号）：tickImpl env 桶对脚底
+    //   m_pos 做 floorDiv16 换格检测（ChunkKey::fromWorld 单一权威——负坐标进「左下」chunk），与
+    //   缓存不同即发沿后随值更新。INT_MIN = 未定位哨兵（首次 tick 即发起始沿）；setWorld 重置哨兵
+    //   （换世界重新起沿，同上方进入沿守卫清守卫先例）。
+    int m_lastChunkCx = std::numeric_limits<int>::min();
+    int m_lastChunkCz = std::numeric_limits<int>::min();
     // t223 近流水 proximity 水流声：m_flowSoundLevel = 最近流水格距离映射 [0,1]（tickImpl 节流扫描更新）；
     //   m_flowScanTimer 累加 dt 到 kFlowScanInterval 才重扫（~0.25s，省扫描开销）。值真变才 emit。
     float m_flowSoundLevel = 0.0f;

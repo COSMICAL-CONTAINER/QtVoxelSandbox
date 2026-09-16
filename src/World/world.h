@@ -14,6 +14,10 @@
 #include "chunkmanager.h" // 内部多 chunk 存储（World 层，不外泄到 QML）
 #include "terraingen.h" // R20.12 纯地形生成单一权威（Perlin/fBm/群系/海域/列体——World 委托到 m_terrain）
 
+// §29.5-W2：worker 自持体素输出缓冲（backgroundgeneration.h；World 面只以 const 引用承接——
+// 头文件零重 include，完整类型仅 world.cpp 定义处需要）。
+struct GeneratedChunkData;
+
 // 体素世界（QML façade + 单一数据源）：内部由 ChunkManager 持一片 chunk 列网格路由（本回合
 // 3×3=9 chunk，世界 48×48×16）；Perlin fBm 生成地形，被网格(ChunkGeometry)与物理
 // (PlayerController)共同查询 —— 二者读同一份栅格，保证「看得见的方块=碰得到的方块」。
@@ -82,6 +86,26 @@ public:
     // 种子光 flood）。Fixed 模式恒 false（无物化概念）。W2 驱动接线的生产缝（本单先供矩阵
     // 加载翻转腿用；生产零调用 = 零变化不破）。
     bool loadChunkAt(int cx, int cz);
+
+    // ── §29.5-W2 位置源 + 驱动接线（r2024）：异步流式的 World 侧生产缝（C++ only，全部
+    //    非 Q_INVOKABLE——r2022d「新面禁 Q_INVOKABLE 形态」同门；fixed 世界零调用）────────
+    //   流式会话（GameSession 持驱动器 + worker）的异步物化链 = worker 线程纯函数造缓冲 →
+    //   主线程收割拍落位（adoptGeneratedChunk：缓冲落格 + ③晋升驻留 + W1b population 主线程
+    //   重放 + 列种子光 flood）。World 保持既有职责面：驱动器/worker 不入 World（归属
+    //   GameSession 编排壳），本面只承接「主线程单写者」的内容物化与生命周期沿。
+    // GenerationScheduler 边①②（r2011 预留面）所需的 ChunkManager 可变引用（唯一消费方 =
+    // GameSession 流式接线；转移仍经 setLifecycle 唯一守卫入口——①②不触驻留集，revision 沿
+    // 由 adopt 的③经 setChunkLifecycle forwarder 携带）。
+    ChunkManager &streamingLifecycleSink() { return m_chunks; }
+    // sparse 槽位前置物化（幂等）：ensureChunk 物化 Absent 槽——驱动器边①的槽位存在性前提
+    //（无槽位时 setLifecycle 拒）。fixed 恒 false（无物化概念）。
+    bool ensureStreamingChunkSlot(int cx, int cz);
+    // 异步生成缓冲落位（主线程 Only——ChunkManager 非线程安全；调用方 = GameSession 收割拍）：
+    // 幂等（已驻留 true）；Generated/Loading 槽 = 缓冲经 r2012 守卫入口逐格落地 + heightmap
+    // 重算 + ③ Generated→Loaded（经 setChunkLifecycle 唯一入口——驻留 revision 沿自动携带，
+    // P4 池消费面连通）+ W1b sparsePopulateChunk 主线程窗口重放（population 写 World 不可越
+    // 线程；自身 chunk 可查询后运行 = r2023 同门）+ 列种子光 refloodBox（loadChunkAt 同门）。
+    bool adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data);
 
     int width() const  { return m_width; }
     int depth() const  { return m_depth; }

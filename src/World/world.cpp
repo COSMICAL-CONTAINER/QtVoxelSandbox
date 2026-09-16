@@ -1,5 +1,7 @@
 #include "world.h"
 
+#include "backgroundgeneration.h" // §29.5-W2：GeneratedChunkData 完整类型（adopt 落位定义处；
+                                  //   零 worker 实例化——worker 归属 GameSession 编排壳）
 #include "blockregistry.h"
 #include "frameprofiler.h" // perf：tick 函数计时进 w* 桶（诊断 WorldClock 10Hz 路径开销）
 
@@ -288,6 +290,35 @@ void World::sparsePopulateChunk(int cx, int cz)
                         m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
                 continue;
             }
+            // §29.5-W2：在途流式邻居（槽位在、非可查询、非 Absent = {Loading, Generated}——
+            // 异步会话中边①已交接 / 边②已收割但自身 adopt 未跑的 chunk）：按上方快照-回填-
+            // 恢复同门处理，**不走脚手架创建/拆卸**——其生命周期由异步链（边①②③，唯一权威
+            // generationjob.h + adopt）驱动，脚手架的 ⑥⑦+擦槽会拆掉在途槽位。其体素数组此刻
+            // 恒为空（W2 流式下内容只经自身 adopt 落位）：快照=全零 → 纯地形回填呈 pass-k 读
+            // 域真值 → population 窗口写入落快照域 → 恢复 memcpy 原样归零 → 该邻自身 adopt
+            // 随后落缓冲逐位重 derive（r2023b 恒等面同门；恢复无损论证同上——其对自身的溢写
+            // 已由自身 population 同值落位）。W1 同步链无在途槽位 = 本分支死代码（r2023 腿族
+            // 不触，恰红面零扰动）。
+            const ChunkLifecycle inflightLife = m_chunks.lifecycleAt(nx, nz);
+            if (inflightLife == ChunkLifecycle::Loading || inflightLife == ChunkLifecycle::Generated) {
+                Chunk *inflight = m_chunks.chunk(nx, nz);
+                if (!inflight)
+                    continue; // 防御（不可达：有态必有槽）
+                ReadNeighbor &n = nb[nbN++];
+                n.cx = nx;
+                n.cz = nz;
+                n.snapshotted = true; // 复用快照恢复面（created=false → 不拆卸、不动生命周期）
+                n.snapVoxels.assign(inflight->voxelData(), inflight->voxelData() + inflight->voxelCount());
+                n.snapStates.assign(inflight->stateData(), inflight->stateData() + inflight->voxelCount());
+                std::memset(inflight->voxelDataMut(), 0, inflight->voxelCount());
+                std::memset(inflight->stateDataMut(), 0, inflight->voxelCount());
+                inflight->recomputeAllHeightmaps(); // 全空列基准（terrain 回填经 setBlock 增量维护）
+                ScaffoldColumnSink sink{ &m_chunks };
+                for (int lz = 0; lz < kCS; ++lz)
+                    for (int lx = 0; lx < kCS; ++lx)
+                        m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
+                continue;
+            }
             if (!m_chunks.ensureChunk(nx, nz))
                 continue; // 防御（物化失败 → 该邻域读走 OOB 等价；C 内容不受影响）
             setChunkLifecycle(nx, nz, ChunkLifecycle::Loading);
@@ -443,6 +474,55 @@ bool World::loadChunkAt(int cx, int cz)
                cx * TerrainGen::kChunkSize + TerrainGen::kChunkSize - 1, m_height - 1,
                cz * TerrainGen::kChunkSize + TerrainGen::kChunkSize - 1, /*doSky=*/true);
     return true;
+}
+
+// ── §29.5-W2 异步生成缓冲落位（主线程 Only；语义见 world.h 声明注释）────────────────────
+// 时序（refactor-plan §29.5.2 W2 口径）：worker 线程纯函数造地形缓冲（零 World 指针零
+// QObject）→ 主线程收割拍 adopt 落位 → 主线程 sparsePopulateChunk（population 写 World 不可
+// 越线程；自身 chunk 可查询后运行 = W1b 同门）。生命周期三边分工：边①（交接→Loading）/边②
+//（收割→Generated）由 GenerationScheduler 的 ChunkManager 挂点真实驱动（r2011 预留面首用，
+// 唯一权威在 generationjob.h）；本函数收尾边③ Generated→Loaded 经 setChunkLifecycle 唯一
+// 入口——驻留 revision 沿自动携带（P4 池消费面连通）。单写者纪律：本函数只在 GameSession
+// 收割拍（主线程）调用——ChunkManager/侧表族非线程安全，worker 侧零触碰世界。
+bool World::adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data)
+{
+    if (m_chunks.mode() != WorldMode::Sparse)
+        return false; // fixed 无物化概念（零变化墙）
+    if (m_chunks.chunkMaterialized(cx, cz))
+        return true; // 已驻留幂等（重投递 / 走返重请求 no-op）
+    if (!m_chunks.ensureChunk(cx, cz))
+        return false; // 防御（物化失败）
+    // 槽位在途态对齐（防御面）：正常链 = 边①②已由调度器驱动到 Generated；极端面（在途槽
+    // 位曾被拆卸重建 / 交付时仍停 Loading）补齐 ①②——经唯一守卫入口，非法转移被拒即忽略
+    //（best-effort 记账，与 r2011 同门；六态域外态不预）。
+    if (m_chunks.lifecycleAt(cx, cz) == ChunkLifecycle::Absent)
+        setChunkLifecycle(cx, cz, ChunkLifecycle::Loading);
+    if (m_chunks.lifecycleAt(cx, cz) == ChunkLifecycle::Loading)
+        setChunkLifecycle(cx, cz, ChunkLifecycle::Generated);
+    if (!applyGeneratedChunkData(m_chunks, data))
+        return false; // 键 / 容量不匹配（防御；worker dims = 世界 dims 恒匹配）
+    Chunk *chunk = m_chunks.chunk(cx, cz);
+    if (!chunk)
+        return false; // 防御（不可达：物化必可取）
+    chunk->recomputeAllHeightmaps(); // heightmap 派生自体素（sparseGenerateChunk 同门）
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Loaded); // ③ 晋升驻留（revision 沿自动携带）
+    sparsePopulateChunk(cx, cz); // §29.5-W1b：fixed 全量 pass 的窗口重放（主线程；处置表见上）
+    // 新物化 chunk 光照补 flood（loadChunkAt 同门：ctor 全量种子只扫核心域，按需物化 chunk
+    // 须自带列种子；盒外邻值经统一门读——未物化 = 0 暗边界 / 已物化 = 现值渗入）。
+    refloodBox(cx * TerrainGen::kChunkSize, 0, cz * TerrainGen::kChunkSize,
+               cx * TerrainGen::kChunkSize + TerrainGen::kChunkSize - 1, m_height - 1,
+               cz * TerrainGen::kChunkSize + TerrainGen::kChunkSize - 1, /*doSky=*/true);
+    return true;
+}
+
+// §29.5-W2 sparse 槽位前置物化（幂等；语义见 world.h 声明注释）：驱动器 submit 前调——
+// ensureChunk 幂等物化 Absent 槽（已存在槽位原样返回，任何在途/驻留态不被触碰），使边①
+//（Absent→Loading）在交接拍真实落表（无槽位时 ChunkManager::setLifecycle 拒 = 沿断链）。
+bool World::ensureStreamingChunkSlot(int cx, int cz)
+{
+    if (m_chunks.mode() != WorldMode::Sparse)
+        return false; // fixed 无物化概念（零变化墙）
+    return m_chunks.ensureChunk(cx, cz) != nullptr;
 }
 
 // t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob

@@ -53,6 +53,18 @@
 //
 // 分层（PLAN §2）：Game 层编排壳——向下依赖 World（tick 家族 + setBlock 权威）+ Core
 //（command/event/mathtypes/result），不依赖 Renderer/Entities/QML；不反向被 World 依赖。
+//
+// ── §29.5-W2 位置源 + 驱动接线（r2024；流式激活第一次生产通电）────────────────────────
+// 计划原文：「玩家位 → floorDiv16 → GameSession tick 尾 driver.onPlayerChunk」。本壳为流式
+// 会话的编排归属（R20.07 纪律——驱动编排归会话，World 保持既有职责面）：①通电条件 =
+// World::isSparse()——fixed 世界连驱动器 / worker 都不构造（D2 零活动墙的最强形态，app 冒烟
+// 同面实证）；②位置源 = PlayerController 移动沿（floorDiv16 换格检测在 PlayerController C++
+// 侧）→ playerChunkChanged 信号直连 notePlayerChunk 钩子（零 QML 改动）；③tick 尾
+// pumpStreamingTick = 位置沿喂驱动器 + 泵（边①②由 GenerationJob 唯一权威驱动，r2011 预留
+// ChunkManager 挂点首用）+ review0916 #7 硬契约兑现（结果面/数据面收割拍内同拍双消）+ 数据
+// 面主线程落位（World::adoptGeneratedChunk：缓冲落格 + ③晋升 + W1b population 主线程重放）。
+// 登记非目标：驱逐面（W3——toEvict 决策产出的消费回调保持 null）/bake→worker 网格化（W4）/
+// UI 开关（W5）/半径参数实值（P5——W2 用 P1 默认）；worldstore 零触碰（sparse 持久化=W3/W5）。
 
 #include "chunk.h"     // Chunk::kSize（chunk 路由参数——单一权威，不写魔法 16）
 #include "command.h"   // Command / CommandQueue（R20.06 队列——GameSession 首个生产消费方）
@@ -66,6 +78,12 @@
 #include <QDebug>  // qWarning（超界 dt 丢弃——背压可见，t1050）
 #include <QObject>
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
+
+#include <memory> // std::unique_ptr（§29.5-W2 流式会话件）
+
+#include "backgroundgeneration.h" // §29.5-W2：BackgroundGenerationWorker（R20.12 真线程件——
+                                  //   W2 首个生产消费者）+ GeneratedChunkData（数据面值类型）
+#include "chunkstreamdriver.h"    // §29.5-W2：ChunkStreamDriver（P2 位置沿编排器——生产通电）
 
 // WorldDelta 经信号外发（直接连接无需元类型；声明以备未来跨线程排队连接）。
 Q_DECLARE_METATYPE(WorldDelta)
@@ -123,6 +141,33 @@ public:
     // 墙钟差频度可观测；矩阵腿 r2007e 断言丢弃 + 计数）。
     int droppedDtCount() const { return m_droppedDts; }
 
+    // ── §29.5-W2 位置源 + 驱动接线（r2024；计划原文「玩家位 → floorDiv16 → GameSession tick
+    //    尾 driver.onPlayerChunk」）────────────────────────────────────────────────────────
+    // 位置源钩子（生产接线 = PlayerController::playerChunkChanged 直连本钩子）：floorDiv16
+    // 换格检测在 PlayerController C++ 侧（位置权威），本侧零几何逻辑——只缓存最新玩家 chunk；
+    // 喂入本身零动作，驱动器变更沿在 tick 尾泵拍承接（onPlayerChunk 幂等：同 chunk 重复零动作）。
+    void notePlayerChunk(int cx, int cz)
+    {
+        m_playerChunkCx = cx;
+        m_playerChunkCz = cz;
+        m_hasPlayerChunk = true;
+    }
+    // 流式观测面（矩阵腿 / F3 排队观测消费口；fixed 世界恒 false / 0 / null）。
+    bool streamingActive() const { return m_streamDriver != nullptr; }
+    int streamingOutcomeCount() const { return m_streamOutcomeCount; }
+    int streamingAdoptedCount() const { return m_streamAdoptedCount; }
+    const ChunkStreamDriver *streamDriver() const { return m_streamDriver.get(); }
+    // worker 诊断读面（线程身份对账 / 已执行计数——r2012a 先例；fixed 恒 null）。
+    const BackgroundGenerationWorker *streamWorker() const { return m_streamWorker.get(); }
+    // P5 调参入口（W2 生产 = P1 默认半径不传即用；矩阵腿内压小半径控时长）。
+    void configureStreamingRadii(int generationRadiusChunks, int renderRadiusChunks,
+                                 int scanExtentChunks)
+    {
+        if (m_streamDriver)
+            m_streamDriver->enableStreamingWith(generationRadiusChunks, renderRadiusChunks,
+                                                scanExtentChunks);
+    }
+
 signals:
     // 每整 tick 收口发（tick = 已完成 tick 号；delta = 本 tick 编辑面快照）。
     void tickCompleted(int tick, const WorldDelta &delta);
@@ -132,6 +177,13 @@ private:
     // 恒成功：刚腾出的空位 ≥ 回队数）→ World 模拟家族（Main.qml 桥接次序逐行镜像）→
     // EditBuffer 收口（takeDelta + 按合并编辑面派生 BlockChanged 事件）+ 信号。
     void runOneTick();
+    // §29.5-W2 流式泵拍（tick 尾）：位置沿 → 驱动器 onPlayerChunk（变更沿幂等）→ 泵（底层
+    // 「交接 + 收割」两相，边①②由 GenerationJob 唯一权威驱动）→ review0916 #7 硬契约兑现：
+    // 收割拍内结果面（takeOutcome，每活别名一条）与数据面（takeResultData，每完成 job 恰一条
+    // 自持缓冲）同拍双消——两面各自独立 pop（#7 原文：只收一面 = 另一面无界积压）；数据面 =
+    // 主线程落位唯一通路（World::adoptGeneratedChunk：缓冲落格 + ③晋升 + W1b population 主
+    // 线程重放）。fixed 世界无驱动器 = 本函数零动作（D2 零活动墙，连构造都不发生）。
+    void pumpStreamingTick();
     // 命令执行（**委托不复制**）：BreakBlock → setBlock(pos, Air)、PlaceBlock → 按 blockState
     // 双路由（state==0 → setBlock 四参同 id no-op 保 state[r2017 MC 口径恢复]；state!=0 →
     // setBlockWithState 五参全写[R20.09 权威]）——经 WorldFacade 收窄面落 World::setBlock
@@ -162,6 +214,19 @@ private:
     int m_droppedEvents = 0;
     int m_droppedEdits = 0; // EditBuffer 记录面满载丢弃累计（kMaxEdits 上界——不可再生必须可见）
     int m_droppedDts = 0;   // t1050：超界 dt 丢弃累计（> kMaxStepSecs 整体丢弃——背压可见）
+
+    // ── §29.5-W2 流式会话件（sparse 世界独占构造；fixed 世界恒 null = D2 零活动墙）────────
+    // 成员声明序 = 析构序的承重选择（review0916 #8 析构序契约）：worker 先声明、驱动器后声明
+    // → 析构按声明逆序：驱动器（内含 GenerationScheduler，挂 worker 非拥有指针）先于 worker
+    // 消亡——「scheduler 先于 worker 析构」结构性成立，悬垂泵面不存在。零活动墙：
+    // BackgroundGenerationWorker 构造即起真线程——fixed 世界连构造都不发生（app 冒烟同面实证）。
+    std::unique_ptr<BackgroundGenerationWorker> m_streamWorker; // R20.12 真线程件（W2 首个生产消费者）
+    std::unique_ptr<ChunkStreamDriver> m_streamDriver;          // P2 位置沿编排器（W2 生产通电）
+    bool m_hasPlayerChunk = false; // 位置沿缓存（floorDiv16 换格检测在 PlayerController C++ 侧）
+    int m_playerChunkCx = 0;
+    int m_playerChunkCz = 0;
+    int m_streamOutcomeCount = 0; // 收割拍结果面累计（每活别名一条——#7 同拍消费账面）
+    int m_streamAdoptedCount = 0; // 收割拍数据面累计（每完成 job 恰一条——#7 同拍消费账面）
 };
 
 inline GameSession::GameSession(World &world, QObject *parent)
@@ -178,6 +243,27 @@ inline GameSession::GameSession(World &world, QObject *parent)
     QObject::connect(&m_world, &World::blockPlaced, this, [this](int x, int y, int z, int) {
         noteEdit(x, y, z);
     });
+
+    // ── §29.5-W2 流式会话通电（D2 承重门）：streaming 仅 sparse 世界使能——fixed 世界连驱
+    // 动器 / worker 都不构造（计划原文；零活动墙的最强形态，app 冒烟同面实证）。通电条件 =
+    // World::isSparse()（W1 模式位）。会话参数 = P1 默认半径（P5 调参前的实值权威）；r2011
+    // 预留 ChunkManager 挂点（边①②首用接线）+ W1 lifecycleAt 读缝 + 槽位物化缝 + 真线程
+    // worker（R20.12 件的首个生产消费者）在此一次接齐——World 保持既有职责面（驱动编排归
+    // 本编排壳，R20.07 纪律）。
+    if (m_world.isSparse()) {
+        m_streamWorker = std::make_unique<BackgroundGenerationWorker>(
+            m_world.seed(), TerrainGen::Dims{ m_world.width(), m_world.depth(), m_world.height() });
+        m_streamDriver = std::make_unique<ChunkStreamDriver>(
+            ChunkStreamDriver::streamingWithDefaultRadii());
+        m_streamDriver->setSeam([this](int cx, int cz) {
+            return m_world.chunks().lifecycleAt(cx, cz);
+        });
+        m_streamDriver->setSlotEnsure([this](int cx, int cz) {
+            m_world.ensureStreamingChunkSlot(cx, cz);
+        });
+        m_streamDriver->attachLifecycleSink(m_world.streamingLifecycleSink()); // r2011 预留面首用
+        m_streamDriver->setWorker(m_streamWorker.get());
+    }
 }
 
 inline int GameSession::stepTick(qreal deltaSecs)
@@ -270,6 +356,11 @@ inline void GameSession::runOneTick()
     //   信号栈内钉，收口后账面恒空）。溢出累计跨清账保留（EditBuffer::clear 口径——不可
     //   再生必须可见，口径不变）。
     m_edits.clear();
+
+    // §29.5-W2：流式泵拍（tick 尾——计划原文「GameSession tick 尾 driver.onPlayerChunk」；
+    // 驱动编排归会话壳[R20.07]；sparse 会话才有驱动器，fixed 零动作）。落位为静默写（worldgen
+    // 同门，不经 blockBroken/blockPlaced）→ 不触本 tick 已收口的编辑账面，次序在收口后无账面歧义。
+    pumpStreamingTick();
 }
 
 inline void GameSession::executeCommand(const Command &c)
@@ -308,6 +399,34 @@ inline void GameSession::noteEdit(int x, int y, int z)
     const quint8 afterId = m_facade.blockAt(x, y, z);
     if (m_edits.record(x, y, z, afterId) == RecordResult::Overflowed)
         ++m_droppedEdits;
+}
+
+// §29.5-W2 流式泵拍（tick 尾；语义见声明处头注释）。review0916 #7 硬契约的兑现点在双面
+// 循环的**同拍并列**——两面各自独立 pop（takeCompletedAsync 已在 pump 内被 scheduler 消费、
+// 转译为每活别名一条 outcome；takeResultData 与其同源同序、每完成 job 恰一条自持缓冲），
+// 只收一面 = 另一面无界积压（#7 原文）——故两面必须在同一收割拍内全部排干。
+inline void GameSession::pumpStreamingTick()
+{
+    if (!m_streamDriver)
+        return; // fixed 世界零驱动器（连构造都不发生）——D2 零活动墙
+    // ① 位置沿喂驱动器（变更沿幂等在驱动器：同 chunk 重复喂零动作、首喂即沿）。
+    if (m_hasPlayerChunk)
+        m_streamDriver->onPlayerChunk(m_playerChunkCx, m_playerChunkCz);
+    // ② 泵转发：同步 worker 内联直跑 / 异步 worker「交接 + 收割」两相自动路由（交接相边①、
+    //    收割相边②由 GenerationJob 唯一权威驱动——r2011 预留面 + r2017 kind 门语义原样）。
+    m_streamDriver->pump();
+    // ③ #7 同拍双面·结果面（outcome 每活别名一条；本会话只记账——投递面业务消费归后续单）。
+    GenerationJobOutcome outcome;
+    while (m_streamDriver->takeOutcome(outcome))
+        ++m_streamOutcomeCount;
+    // ④ #7 同拍双面·数据面（漏取 = m_data 无界积压——#7 原文）：主线程落位唯一通路，每条
+    //    缓冲经 World::adoptGeneratedChunk 落格 + ③晋升驻留（revision 沿）+ population 主线程。
+    std::unique_ptr<GeneratedChunkData> data;
+    while (m_streamWorker->takeResultData(data)) {
+        if (data)
+            m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
+        ++m_streamAdoptedCount;
+    }
 }
 
 #endif // GAMESESSION_H
