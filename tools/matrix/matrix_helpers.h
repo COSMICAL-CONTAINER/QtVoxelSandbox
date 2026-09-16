@@ -318,4 +318,8 @@ private:
                                   //   /恒等承重三腿自建 fresh 小世界族——固定世界四 setter
                                   //   incantation + sparse 构造缝（同 seed 同 dims 双世界），
                                   //   rig 世界 w 零接触；r2022 钉面腿纯源码钉，接 section24）
+    void section26_sparse_population(); // §29.5-W1b sparse population parity 探针（置尾先例沿用：
+                                  //   r2023a fixed 零变化墙 / r2023b parity 承重墙 / r2023c
+                                  //   加载顺序无关 / r2023d 结构钉——80×80×96 fresh 小世界族 +
+                                  //   纯源码钉，rig 世界 w 零接触，接 section25）
 };
