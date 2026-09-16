@@ -305,4 +305,8 @@ private:
                                    //   沿用：r2019a/c/d 零世界（纯编排值组件 + 自校验 QMap
                                    //   缝）；r2019b 真世界 + 真 SaveCoordinator + fresh 临时
                                    //   库（r2015 先例），rig 世界 w 零接触，接 section21）
+    void section23_meshworker(); // D6 worker meshing 探针（置尾先例沿用：r2020a-c 零世界
+                                 //   （手写快照 rig + 真线程 MeshWorker）；r2020a 另自建
+                                 //   fresh 小世界采集真实快照，rig 世界 w 零接触，接
+                                 //   section22）
 };
