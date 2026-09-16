@@ -4506,10 +4506,14 @@ void MatrixRun::section08_recent()
             && wT50a.blockAt(12, 15, 20) == BR::Lever
             && (wT50a.stateAt(12, 15, 20) & 1) == 0;       // 未扳动（use 被旁路）
         // (3) 源钉：旁路判据合取形态（阴性轮摘合取项即红；pinSet 剥注释）。
+        //     t1054 同变更修订钉面落点（t1023c 先例，纠偏非削钉）：合取收进私有 helper
+        //     heldPlaceableSneak()（review0916 #11），原 12 门判据行改读 helper、合取本体迁至
+        //     helper return 行（唯一权威）——钉随语义落点改指新行；阴性轮摘合取项（退回裸
+        //     sneakPlace / &&→||）→ 本钉同红（t1054b 与本钉双钉同一行，恰红面不变）。
         const QString rootT50a = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         const QStringList missT50a = pinSet(rootT50a + QStringLiteral("/src/Game/playercontroller.cpp"), {
             {"t1050 sneak bypass holds-block conjunction",
-             "const bool sneakPlaceBlock = sneakPlace && m_selectedBlock != BlockRegistry::Air;"},
+             "return m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;"},
         });
         if (!missT50a.isEmpty())
             qInfo().noquote() << "  [t1050a diag] pins" << missT50a.join(QLatin1Char(','));
@@ -4914,10 +4918,14 @@ void MatrixRun::section08_recent()
             && wT52.blockAt(12, 15, 15) == BR::Planks             // 命中面邻格放置
             && wT52.blockAt(12, 14, 15) == BR::Planks;            // 地台本体不动
         // 源钉：矿车开箱旁路合取形态（阴性轮摘合取退回裸键门即红；pinSet 剥注释；t1050a 判据钉同式）。
+        //   t1054 同变更修订钉面落点（t1023c 先例，纠偏非放宽）：合取收进私有 helper
+        //   heldPlaceableSneak()（review0916 #11），开箱门改读之——钉「两调用点（含本开箱门）改读
+        //   helper」minCount=2；合取本体唯一权威的语义钉由 t1054b 承接（helper 定义 + return 合取行
+        //   + 旧字面副本反探）。
         const QString rootT52 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
         const QStringList missT52 = pinSet(rootT52 + QStringLiteral("/src/Game/playercontroller.cpp"), {
-            {"t1052 chest-cart open bypass holds-block conjunction",
-             "const bool sneakPlaceBlock = m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;"},
+            {"t1052 chest-cart open bypass reads held-placeable-sneak helper",
+             "const bool sneakPlaceBlock = heldPlaceableSneak();", 2},
         });
         if (!missT52.isEmpty())
             qInfo().noquote() << "  [t1052a diag] pins" << missT52.join(QLatin1Char(','));
@@ -4941,6 +4949,179 @@ void MatrixRun::section08_recent()
                                     : QStringLiteral("diag base=%1 emptyShift=%2 heldShift=%3 pins=%4 opens=%5")
                                           .arg(okBase).arg(okEmptyShift).arg(okHeldShift)
                                           .arg(missT52.isEmpty()).arg(opensT52));
+    });
+
+    // ── P-t1054a 骑乘门 sneak 抑制（t1054，review0916 #4，同族第 14 门 = 交互抑制面）──
+    //    三相 + 回归柱（rig 照 t1052a 先例 seed 10521 地台；普通矿车静止轨上——孤轨 (12,15,16)
+    //    state0 平贴 cell 底薄板，选体射线走 t983 薄板 sub-AABB 口径穿轨板上部空气命中地台，车体盒
+    //    on-rail 姿态 y[15.0,15.9]（pos.y=15+kCartRideH≈15.45）仍被实体射线 s∈[0.5,0.83] 结构化
+    //    相交——t1052a 同几何）：(1) t1054 核心 = 持可放置方块 + shift + 右键普通矿车 → 放置发生
+    //    （命中面邻格木板，t1052a(3) 同格先例；(a) shift 裸门抑制 → (b) 非矿车物品跳过 → 通用放置）
+    //    且零 mount；(2) 空手 + shift + 右键普通矿车 → 无效应（零 mount、零放置、零开箱、零挥臂——
+    //    潜行一律抑制实体交互，shift 裸门与手持无关；旧版此形态 tryMount 先于放置吞成上车 = 病灶
+    //    本体，t1052 提交注自证矛盾点）；(3) 无 shift 右键 → mount 照旧（回归柱，骑乘门只对 sneak
+    //    关）。diag 带 mount 布尔 + 放置事件（格 id）+ heldId（selectedBlock）+ 挥臂/开箱计数。
+    //    阴性轮敏感：NEG-1 摘 (a) 段 sneak 裸门 → (1)(2) 红（mount 吞放置 / 空手 sneak 上车），
+    //    (3) 回归柱不红（无 shift 行为未动）、t1052a 三相不红（箱车走开箱/拒载路径不在 (a)）；
+    //    NEG-2 破 helper 合取（&&→||）→ 本腿不红（(a) 门读 m_keys 裸键不经 helper——t1054b 源钉
+    //    + t1050/t1052 行为腿承红）。
+    runLegMulti({ "t1054a minecart mount sneak suppression (parity gate 14, interaction-suppression face"
+        "): right-clicking a stationary rail cart while sneaking with a held placeable block places on "
+        "the hit face's neighbor cell and never mounts (the shift bare gate suppresses mounting outright"
+        ", placement priority wins); sneaking with an empty hand is a no-effect (no mount, no placement"
+        ", no open, no swing - sneaking suppresses entity interaction regardless of what is held, the o"
+        "ld code let tryMount swallow the use into mounting); without sneak the mount still happens (re"
+        "gression column - the gate only closes for sneak)diag held=%1 empty=%2 regress=%3 mountIdx=%4 "
+        "cell=%5 sel=%6 swings=%7 opens=%8 cartY=%9" }, [&]() {
+        World wT54;
+        wT54.setWidth(48); wT54.setDepth(48); wT54.setHeight(96); wT54.setSeed(10521);
+        PlayerController pcT54;
+        pcT54.setWorld(&wT54);
+        MinecartManager cartsT54;
+        pcT54.setMinecartManager(&cartsT54);
+        QQuickWindow winT54;
+        pcT54.setParentItem(winT54.contentItem());
+        // rig：y=14 Planks 地台（t1052a 同式）+ 孤轨 (12,15,16) + 普通矿车 on-rail 静止；玩家
+        //     (12.5,15,18.5) 瞄地台 (12,14,15) 顶面点 (12.5,15.0,15.5)——实体射线穿车体盒
+        //     s∈[0.5,0.83]（t1052a 同几何），选体射线穿轨板上部空气（t983 薄板口径）命中地台；
+        //     对照写格 (12,15,15) 不蹭车盒/玩家 AABB（t1052a(3) 先例）。
+        for (int x = 6; x <= 18; ++x)
+            for (int z = 12; z <= 24; ++z) {
+                for (int y = 15; y <= 20; ++y) wT54.setBlock(x, y, z, BR::Air, 0);
+                wT54.setBlock(x, 14, z, BR::Planks, 0);
+            }
+        wT54.setBlock(12, 15, 16, BR::Rail, 0);
+        cartsT54.spawnCart(12, 15, 16, &wT54);
+        const float cartY54 = cartsT54.count() == 1 ? cartsT54.posAt(0).y() : -1.0f;
+        int opensT54 = 0, swingsT54 = 0;
+        const QMetaObject::Connection cOpenT54 = QObject::connect(
+            &pcT54, &PlayerController::chestOpened, &pcT54, [&](int, int, int) { ++opensT54; });
+        const QMetaObject::Connection cSwingT54 = QObject::connect(
+            &pcT54, &PlayerController::swingArm, &pcT54, [&]() { ++swingsT54; });
+        const auto aimT54 = [&]() { // 瞄地台 (12,14,15) 顶面（t1052a aim 同式：grab+loadSavedState+tick 刷主选）
+            const float ex = 12.5f, ey = 16.62f, ez = 18.5f;
+            const float dx = 12.5f - ex, dy = 15.0f - ey, dz = 15.5f - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            pcT54.release();
+            pcT54.grab();
+            pcT54.loadSavedState(ex, 15.0f, ez,
+                                 std::atan2(-dx, -dz) * 57.2957795f,
+                                 std::asin(dy / len) * 57.2957795f, 1 /* Creative（无消耗，t1052a 同款）*/);
+            pcT54.tick(); // updateRaycast 刷新命中
+            return pcT54.hitBlock();
+        };
+        const auto pumpT54 = [](int ms) { // placeBlock 200ms 冷却间隔（t128；墙钟）
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        const bool rigOkT54 = cartsT54.count() == 1
+            && std::fabs(cartY54 - 15.45f) < 0.01f        // on-rail 姿态（cell 底 + 薄板 1/16 + kCartRideH）
+            && cartsT54.ridingIndex() == -1
+            && aimT54() == QVector3D(12, 14, 15);         // 选体射线穿轨板空气命中地台顶面（结构化选址自证）
+        // (1) t1054 核心：持方块 + sneak 右键普通矿车 → 放置优先 + 零 mount（旧版 tryMount 吞放置）。
+        pcT54.setSelectedBlock(int(BR::Planks)); // 持方块（C++ 直喂，t1052a(3) 同款；diag heldId 载体）
+        pcT54.setKey(Qt::Key_Shift, true);       // 潜行（m_keys 原始键态，§2-D 单一输入路径）
+        pcT54.placeBlock();
+        pumpT54(260);
+        pcT54.setKey(Qt::Key_Shift, false);
+        const bool okHeldT54 = cartsT54.ridingIndex() == -1      // 零 mount（(a) shift 裸门抑制）
+            && wT54.blockAt(12, 15, 15) == BR::Planks            // 命中面邻格放置（(b) 非矿车物品 → 通用放置）
+            && wT54.blockAt(12, 14, 15) == BR::Planks            // 地台本体不动
+            && cartsT54.count() == 1 && swingsT54 == 1;          // 零 spawn；放置恰 1 次挥臂
+        // (2) 空手 + sneak 右键普通矿车 → 无效应（潜行一律抑制实体交互；旧版 = tryMount 吞成上车）。
+        pumpT54(260);
+        aimT54();
+        pcT54.setSelectedBlock(int(BR::Air));    // 空手（C++ 直喂；防默认 selectedBlock 幽灵放置，t1013b 教训）
+        pcT54.setKey(Qt::Key_Shift, true);
+        pcT54.placeBlock();
+        pumpT54(260);
+        pcT54.setKey(Qt::Key_Shift, false);
+        const bool okEmptyT54 = cartsT54.ridingIndex() == -1     // 零 mount
+            && wT54.blockAt(12, 15, 15) == BR::Planks            // 零放置（(1) 落的木板不动）
+            && wT54.blockAt(12, 15, 14) == BR::Air               // 邻格零写入（无任何放置）
+            && cartsT54.count() == 1 && opensT54 == 0 && swingsT54 == 1; // 零事件（无新挥臂 / 无开箱）
+        // (3) 回归柱：无 shift 右键 → mount 照旧（骑乘门只对 sneak 关；上车路径挥臂恰 +1）。
+        pumpT54(260);
+        aimT54();
+        pcT54.placeBlock();
+        pumpT54(260);
+        const bool okRegressT54 = cartsT54.ridingIndex() == 0    // 恰上车（唯一车 = 槽 0）
+            && cartsT54.count() == 1 && swingsT54 == 2
+            && wT54.blockAt(12, 15, 15) == BR::Planks;           // 骑乘不落块
+        QObject::disconnect(cOpenT54);
+        QObject::disconnect(cSwingT54);
+        cartsT54.clearAll();
+        pcT54.release();
+        winT54.deleteLater();
+        const bool okT54 = rigOkT54 && okHeldT54 && okEmptyT54 && okRegressT54;
+        if (!okT54)
+            qInfo().noquote() << "  [t1054a diag] rig" << rigOkT54 << "held" << okHeldT54
+                              << "empty" << okEmptyT54 << "regress" << okRegressT54
+                              << "mountIdx" << cartsT54.ridingIndex()
+                              << "cell" << int(wT54.blockAt(12, 15, 15))
+                              << "sel" << pcT54.selectedBlock()
+                              << "swings" << swingsT54 << "opens" << opensT54
+                              << "cartY" << cartY54;
+        if (!okT54) ++totalFail;
+        qInfo().noquote() << (okT54 ? "PASS" : "FAIL")
+                          << "| t1054a minecart mount sneak suppression (parity gate 14): held-block "
+                             "sneak right-click places instead of mounting, empty-hand sneak is a "
+                             "no-effect (sneaking suppresses entity interaction outright - the old "
+                             "code let tryMount swallow the use), no-sneak still mounts (regression "
+                             "column)"
+                          << (okT54 ? QString()
+                                    : QStringLiteral("diag held=%1 empty=%2 regress=%3 mountIdx=%4 "
+                                                     "cell=%5 sel=%6 swings=%7 opens=%8 cartY=%9")
+                                          .arg(okHeldT54).arg(okEmptyT54).arg(okRegressT54)
+                                          .arg(cartsT54.ridingIndex())
+                                          .arg(int(wT54.blockAt(12, 15, 15)))
+                                          .arg(pcT54.selectedBlock())
+                                          .arg(swingsT54).arg(opensT54).arg(cartY54));
+    });
+
+    // ── P-t1054b sneakPlaceBlock helper 化承重钉（t1054，review0916 #11）──
+    //    helper 提取后两调用点语义恒等的源码面：①合取唯一权威 = helper 定义 + return 合取行
+    //    （NEG-2 破合取 &&→|| 即红）；②两调用点改读 helper（minCount=2——m_hasHit 块 12 门判据 +
+    //    矿车段 (a0) 开箱门；t1052a 源钉同变更修订后与本钉互恰）；③反探：旧手写合取调用行（两处
+    //    副本）必须消失（miss 非空 = 合规，r2007b 反探先例；pinSet 剥注释器防注释提及误伤）。
+    //    行为恒等的实证面 = t1050 家族（12 门）+ t1052a 三相全绿（全矩阵在案）。
+    runLegMulti({ "t1054b sneakPlaceBlock conjunction deduped into heldPlaceableSneak helper (review0916"
+        " #11): the shift-and-held-placeable-block conjunction has exactly one authority (the helper de"
+        "finition returning m_keys.value(Key_Shift) && m_selectedBlock != Air), both former handwritten"
+        " copies (the m_hasHit 12-gate criterion and the chest-cart open bypass) read the helper, and t"
+        "he old literal call-site conjunction lines are gone (inverted pin: their presence fails)diag "
+        "pins=%1 legacyGone=%2" }, [&]() {
+        const QString rootT54b = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/..")).absolutePath();
+        const QStringList missT54b = pinSet(rootT54b + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"t1054 helper definition",
+             "bool PlayerController::heldPlaceableSneak() const"},
+            {"t1054 helper conjunction authority",
+             "return m_keys.value(Qt::Key_Shift) && m_selectedBlock != BlockRegistry::Air;"},
+            {"t1054 both call sites read helper",
+             "const bool sneakPlaceBlock = heldPlaceableSneak();", 2},
+        });
+        // 反探：旧手写合取调用行必须消失（helper 化后两处副本退役；miss 非空 = needle 不存在 = 合规）。
+        const QStringList legacyT54b = pinSet(rootT54b + QStringLiteral("/src/Game/playercontroller.cpp"), {
+            {"t1054 legacy handwritten conjunction must be gone",
+             "const bool sneakPlaceBlock = m_keys.value(Qt::Key_Shift)"},
+        });
+        const bool legacyGoneT54b = !legacyT54b.isEmpty();
+        if (!missT54b.isEmpty())
+            qInfo().noquote() << "  [t1054b diag] pins" << missT54b.join(QLatin1Char(','));
+        if (!legacyGoneT54b)
+            qInfo().noquote() << "  [t1054b diag] legacy conjunction line still present";
+        const bool okT54b = missT54b.isEmpty() && legacyGoneT54b;
+        if (!okT54b) ++totalFail;
+        qInfo().noquote() << (okT54b ? "PASS" : "FAIL")
+                          << "| t1054b sneakPlaceBlock conjunction deduped into heldPlaceableSneak "
+                             "helper: one conjunction authority, both call sites read the helper, "
+                             "legacy handwritten copies gone (behavioral identity evidenced by the "
+                             "t1050 family + t1052a staying green)"
+                          << (okT54b ? QString()
+                                     : QStringLiteral("diag pins=%1 legacyGone=%2")
+                                           .arg(missT54b.isEmpty()).arg(legacyGoneT54b));
     });
 
     // ── P-t1046c 天气剩余时长持久化 + 精确续跑（R19.23 t1046 低-5；MC level.dat RainTime/ThunderTime 口径）──
