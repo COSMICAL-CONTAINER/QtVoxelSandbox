@@ -996,6 +996,14 @@ add_executable(redstone_matrix_test
     #   无新增 .cpp——world/chunk 系源文件已列）。
     tools/matrix/section20_generationpolicy.cpp
     src/World/generationpolicy.h
+    # §29.4-P2 ChunkStreamDriver 玩家移动驱动探针段（置尾先例沿用：runAll 末执行，filter 词
+    #   r2018；4 腿 r2018a-d = 默认关惰性承重墙[含关态在途账逐位不动]/请求跟随+取消面[含合并
+    #   别名 dedupe + 完成后重入重提交]/风暴背压[满载拒绝可见+排干收敛]/异步收割+结构钉[kind
+    #   纯度+确定性重放+反探]。随段直编 src/World/chunkstreamdriver.h（header-only 非 QObject
+    #   纯编排值组件，无 AUTOMOC，§29.4 P2 原文 + D1/D4 语义依据在其头注释）；r2018a-d 全段
+    #   零世界（缝 = QMap 合成生命周期表，rig 零接触），无新增 .cpp——world/chunk 系源文件已列）。
+    tools/matrix/section21_chunkstreamdriver.cpp
+    src/World/chunkstreamdriver.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

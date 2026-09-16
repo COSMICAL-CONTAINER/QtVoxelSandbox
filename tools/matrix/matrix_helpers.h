@@ -297,4 +297,8 @@ private:
                                        //   沿用：r2016a-d 全段零世界（纯函数决策组件，缝 =
                                        //   QMap 合成生命周期表），rig 世界 w 零接触，接
                                        //   section19）
+    void section21_chunkstreamdriver(); // §29.4-P2 ChunkStreamDriver 玩家移动驱动探针（置尾
+                                        //   先例沿用：r2018a-d 全段零世界（纯编排值组件，缝 =
+                                        //   QMap 合成生命周期表），rig 世界 w 零接触，接
+                                        //   section20）
 };
