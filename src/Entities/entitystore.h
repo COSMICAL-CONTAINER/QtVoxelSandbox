@@ -138,6 +138,12 @@ public:
                          int durability = -1);
     void setCountAt(int i, int n);  // n<=0 → 释放槽位（全拾走）
     void removeAt(int i);
+    // ── §29.5-W3 驱逐域掉落物移除（chunk 卸载语义；选型与 MC 引证三元组全录 =
+    //    EntityManager::despawnInChunk 声明注释，此处不赘——掉落物域同理，模拟权威 =
+    //    本类[R20.14 纪律]，Adapter 一行委托不复制）。移除中心格 floorDiv16 落在 (cx,cz)
+    //    的全部活体槽，走既有 releaseSlot（LIFO 复用 + EntityId 永不复用语义不动），
+    //    notifyChanged 单点收口。返回移除数（诊断面）。
+    int despawnInChunk(int cx, int cz);
     // 重置语义：释放全部活体槽 + **无条件**通知（不经批——同旧 clearAll 直 emit）。
     void clearAll();
 

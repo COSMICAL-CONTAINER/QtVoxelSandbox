@@ -628,3 +628,24 @@ void EntityStore::despawnExpired()
     }
     if (dirty) notifyChanged();
 }
+
+// ── §29.5-W3 驱逐域掉落物移除（选型 / MC 引证三元组 / 局限登记见 entitystore.h 声明注释；
+//    EntityManager::despawnInChunk 同构——两族同一卸载口径，禁两份语义分叉）────────────────
+int EntityStore::despawnInChunk(int cx, int cz)
+{
+    std::vector<int> doomed; // collect-then-release（EntityManager 同门：判读直观、批内幂等）
+    for (int i = 0; i < int(m_entities.size()); ++i) {
+        const ItemEntity &e = m_entities[size_t(i)];
+        if (!e.alive)
+            continue;
+        const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(e.pos.x()))),
+                                                int(std::floor(double(e.pos.z()))), Chunk::kSize);
+        if (pc.cx == cx && pc.cz == cz)
+            doomed.push_back(i);
+    }
+    for (const int i : doomed)
+        releaseSlot(i); // LIFO 复用 + EntityId 永不复用（R20.14 双轨语义不动）
+    if (!doomed.empty())
+        notifyChanged(); // 单点收口（revision + 快照重建 + sink 上行）
+    return int(doomed.size());
+}

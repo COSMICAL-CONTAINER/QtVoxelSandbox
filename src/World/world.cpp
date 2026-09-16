@@ -119,6 +119,9 @@ void World::sparseGenerate()
 // 自身 chunk 可查询（Loaded）后运行；同步调用内无外部观察者（单写者纪律），返回即全量稳态。
 void World::sparseGenerateChunk(int cx, int cz)
 {
+    // §29.5-W3：生成写抑制窗（列体填充 + population 窗口重放全程——内容初生非「编辑」，
+    // persist 域不记；嵌套安全 = 深度计数，population 自身写同被抑制）。
+    ChunkManager::UnsavedEditWriteWindow unsavedEditSuppression(m_chunks);
     Chunk *chunk = m_chunks.ensureChunk(cx, cz); // 现行 Chunk 构造路径物化 Absent 槽
     if (!chunk)
         return;
@@ -486,6 +489,8 @@ bool World::loadChunkAt(int cx, int cz)
 // 收割拍（主线程）调用——ChunkManager/侧表族非线程安全，worker 侧零触碰世界。
 bool World::adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data)
 {
+    // §29.5-W3：生成写抑制窗（守卫应用 + population 窗口重放全程——内容初生非「编辑」）。
+    ChunkManager::UnsavedEditWriteWindow unsavedEditSuppression(m_chunks);
     if (m_chunks.mode() != WorldMode::Sparse)
         return false; // fixed 无物化概念（零变化墙）
     if (m_chunks.chunkMaterialized(cx, cz))
@@ -523,6 +528,64 @@ bool World::ensureStreamingChunkSlot(int cx, int cz)
     if (m_chunks.mode() != WorldMode::Sparse)
         return false; // fixed 无物化概念（零变化墙）
     return m_chunks.ensureChunk(cx, cz) != nullptr;
+}
+
+// ── §29.5-W3 存档 blob 直接物化（重载执行体；选型论证见 world.h 声明注释）────────────────
+// 与 loadChunkAt/adoptGeneratedChunk 同构的生命周期链（①②③ + 列种子光），唯一分化 =
+// **跳过 sparsePopulateChunk**（blob 是驱逐时刻终态内容：population 已含 + 玩家编辑在列；
+// 重放会把 pass-k 语义 applied 到终态上 = W1b「读域时刻一致性」铁律的反面，且编辑丢失）+
+// blob 直 memcpy（不经守卫入口逐格写——blob 本就来自三数组原样字节，逐字节往返恒等）。
+bool World::restoreChunkFromBlob(int cx, int cz, const QByteArray &voxels, const QByteArray &states,
+                                 const QByteArray &light)
+{
+    if (m_chunks.mode() != WorldMode::Sparse)
+        return false; // fixed 无物化概念（零变化墙）
+    if (m_chunks.chunkMaterialized(cx, cz))
+        return true; // 已驻留幂等（重投递 / 走返重请求 no-op）
+    if (!m_chunks.ensureChunk(cx, cz))
+        return false; // 防御（物化失败）
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Loading); // ①（已 Generated 的在途槽被守卫拒 = no-op）
+    Chunk *chunk = m_chunks.chunk(cx, cz);
+    if (!chunk)
+        return false; // 防御（不可达：有槽必可取）
+    const size_t n = chunk->voxelCount();
+    if (size_t(voxels.size()) != n || size_t(states.size()) != n || size_t(light.size()) != n) {
+        // 尺寸守卫（worldstore loadChunks 同门：不写半截）；边①已交的槽位经 ⑨ 回 Absent
+        //（失败恢复边语义同 R20.10b——重请求 = 新 job）。
+        setChunkLifecycle(cx, cz, ChunkLifecycle::Absent);
+        return false;
+    }
+    std::memcpy(chunk->voxelDataMut(), voxels.constData(), n);
+    std::memcpy(chunk->stateDataMut(), states.constData(), n);
+    std::memcpy(chunk->lightDataMut(), light.constData(), n);
+    chunk->recomputeAllHeightmaps(); // heightmap 派生自体素（sparseGenerateChunk 同门）
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Generated); // ②（已 Generated = 自转移拒 no-op）
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Loaded);    // ③ 晋升驻留（revision 沿自动携带）
+    // §29.5-W3 选型：**此处无 population 窗口重放调用**——头注释立证（存档内容已是终态，
+    // 重放会把 pass-k 时刻语义 applied 到终态上 + 丢玩家编辑）。
+    // 索引收尾：blob 直 memcpy 不经写入路径 → 自身列增量索引缺席，按 population 路径
+    // rebuildPopulationCellIndexes 的空脚手架形态重建 growth/fluid/ice（scaffoldN=0 = 跳过
+    // 陈旧清理、仅自身 16×16 列扫描回填）；火格同扫入 m_fireCells（t724 索引同门收窄）。
+    rebuildPopulationCellIndexes(cx, cz, nullptr, 0);
+    const int kCS = TerrainGen::kChunkSize;
+    for (int lz = 0; lz < kCS; ++lz)
+        for (int lx = 0; lx < kCS; ++lx)
+            for (int y = 0; y < m_height; ++y)
+                if (m_chunks.blockAt(cx * kCS + lx, y, cz * kCS + lz) == BlockRegistry::Fire)
+                    m_fireCells.insert(packGrowthCell(cx * kCS + lx, y, cz * kCS + lz));
+    // 列种子光补 flood（loadChunkAt/adopt 同门：ctor 全量种子只扫核心域，重载 chunk 须自带
+    // 列种子；blob 光先恢复、flood 以邻域边界条件重定——跨 chunk 渗光一致性优先）。
+    refloodBox(cx * kCS, 0, cz * kCS, cx * kCS + kCS - 1, m_height - 1, cz * kCS + kCS - 1,
+               /*doSky=*/true);
+    return true;
+}
+
+// ── §29.5-W3 驱逐数据面闭合（边⑦成功尾部擦槽；选型论证见 world.h 声明注释）──────────────
+bool World::releaseStreamingChunk(int cx, int cz)
+{
+    if (m_chunks.mode() != WorldMode::Sparse)
+        return false; // fixed 稠密网格无拆卸概念（零变化墙）
+    return m_chunks.releaseSparseChunk(cx, cz);
 }
 
 // t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob
@@ -5811,6 +5874,9 @@ bool World::isSeaSandColumn(int x, int z) const
 
 void World::generate()
 {
+    // §29.5-W3：生成写抑制窗（fixed 全量 worldgen 全程——内容初生非「编辑」，persist 域
+    // 不记；构造 / regenerate / 改尺寸都经本函数，一处窗口全覆盖）。
+    ChunkManager::UnsavedEditWriteWindow unsavedEditSuppression(m_chunks);
     m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // R20.12：纯地形采样器重建（置换表随构造填充）
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
     m_biomeCache.clear(); // t905 perf：seed / 尺寸换新 → 群系 memo 作废（懒重建；generate 首遍逐列填回）
