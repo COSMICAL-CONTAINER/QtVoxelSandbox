@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <QVector> // §29.5-W1 sparseResidentKeysOrdered 返回类型（驻留集枚举收集面）
@@ -72,6 +73,47 @@ public:
     quint8 blockLightAt(int x, int y, int z) const;
     void setLight(int x, int y, int z, quint8 sky, quint8 block);
     void clearAllLight();
+
+    // ── §29.5-W3 驱逐 + Edits-on-evict：persist 域未落盘编辑追踪（chunk 级编辑面权威）────
+    //   **与 mesh 域 markDirty 分域**（mesh 脏 = 重建请求，被 worldChanged 后 clearAllDirty
+    //   全表清——t155g 语义，不能作「是否有未落盘编辑」的判据）。追踪语义 = 「该 chunk 自上
+    //   次落盘（或物化/重载）以来发生过内容写」：
+    //   · 标记点 = setBlock 5 参守卫入口成功尾部（**单漏斗**——全部内容写路径[玩家 setBlock /
+    //     静默写族 / 实体写 / 红石·铁轨 state 写 / worldgen sink / adopt 守卫应用]都经它），
+    //     抑制窗（下方 UnsavedEditWriteWindow）之外才记——生成窗内写入是内容初生非「编辑」。
+    //   · 光场单独变化（setLight / refloodBox）不记：落盘时三数组**原样采集**，光变化随任意
+    //     后续内容写一并入盘；仅光渗入的 chunk 被驱逐时旧 blob 照旧可重载（重载补列种子光，
+    //     无内容损失）。
+    //   · 消费面：dirtyQuery（生产绑 World::chunkHasUnsavedEdits → 本谓词）+ persist 成功后
+    //     clearUnsavedEdits（已落盘即不再 dirty）。fixed 模式同样记账（dedicated 面零开销——
+    //     每 chunk 编辑恰一集合键；fixed 世界不驱逐 = 只写不读，r2025a 零活动墙不受扰）。
+    bool chunkHasUnsavedEdits(int cx, int cz) const
+    {
+        return m_unsavedEdits.count(ChunkKey{ cx, cz }.packed()) > 0;
+    }
+    bool clearUnsavedEdits(int cx, int cz)
+    {
+        return m_unsavedEdits.erase(ChunkKey{ cx, cz }.packed()) > 0;
+    }
+
+    // 生成写抑制窗（RAII；可嵌套——深度计数）：World 的生成链（fixed generate / sparse 物化
+    //   全链 / adopt 应用+population）在其作用域内对 setBlock 漏斗**不记**未落盘编辑——
+    //   worldgen 写入是内容初生（重载可确定性重derive），不是「编辑」。
+    class UnsavedEditWriteWindow
+    {
+    public:
+        explicit UnsavedEditWriteWindow(ChunkManager &cm)
+            : m_cm(&cm)
+        {
+            ++m_cm->m_editSuspendDepth;
+        }
+        ~UnsavedEditWriteWindow() { --m_cm->m_editSuspendDepth; }
+        UnsavedEditWriteWindow(const UnsavedEditWriteWindow &) = delete;
+        UnsavedEditWriteWindow &operator=(const UnsavedEditWriteWindow &) = delete;
+
+    private:
+        ChunkManager *m_cm;
+    };
 
     // 取 chunk（网格坐标 cx,cz；越界返回 nullptr）。
     Chunk *chunk(int cx, int cz) const;
@@ -172,6 +214,11 @@ private:
     };
     WorldMode m_mode = WorldMode::Fixed; // 默认 Fixed = 全库既有行为逐位不变的结构性事实
     std::unordered_map<quint64, SparseSlot> m_sparse;
+    // ── §29.5-W3：persist 域未落盘编辑集合（键 = ChunkKey::packed；标记面见上方声明注释）──
+    //   生成写抑制深度（UnsavedEditWriteWindow 嵌套计数；>0 = 漏斗静默）。recreate /
+    //   reinitializeSparse 随网格重建清空（旧键不指向当前栅格——侧表族清空同门）。
+    std::unordered_set<quint64> m_unsavedEdits;
+    int m_editSuspendDepth = 0;
     // §29.5-W1b：population 写域钳制态（population 期间激活；fixed/平时恒 off = 零变化墙）。
     // 锚 chunk 坐标 ±1 chunk = 写域；掩码语义见 setPopulationWriteClamp 声明注释。
     bool m_popClampActive = false;

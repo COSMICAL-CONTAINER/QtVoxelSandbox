@@ -8694,3 +8694,25 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
     // t500 perf mob 子桶：mobAI 累入（mobPhys = mobLoop − mobAI 在 report 派生）。
     FrameProfiler::instance()->add("mobAI", aiNs);
 }
+
+// ── §29.5-W3 驱逐域活体移除（选型 / MC 引证三元组 / 局限登记见 entitymanager.h 声明注释）──
+int EntityManager::despawnInChunk(int cx, int cz)
+{
+    // 收集-后释放（avoid 边遍历边释放对 free list 的扰动不关心——releaseSlot 只 push_back，
+    // 但两段式写法与 rebuildPopulationCellIndexes 的 collect-then-erase 同门，判读直观）。
+    std::vector<int> doomed;
+    for (int i = 0; i < int(m_entities.size()); ++i) {
+        const Entity &e = m_entities[size_t(i)];
+        if (!e.alive)
+            continue; // 空槽跳过
+        const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(e.pos.x()))),
+                                                int(std::floor(double(e.pos.z()))), Chunk::kSize);
+        if (pc.cx == cx && pc.cz == cz)
+            doomed.push_back(i);
+    }
+    for (const int i : doomed)
+        releaseSlot(i); // t978 幂等守卫 + free list + 槽稳定契约（QML Repeater 面）逐位不动
+    if (!doomed.empty())
+        notifyEntitiesChanged(); // 批量 N 移 1 通知收口（t320 批量收口纪律）
+    return int(doomed.size());
+}

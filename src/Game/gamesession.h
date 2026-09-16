@@ -65,6 +65,33 @@
 // 面主线程落位（World::adoptGeneratedChunk：缓冲落格 + ③晋升 + W1b population 主线程重放）。
 // 登记非目标：驱逐面（W3——toEvict 决策产出的消费回调保持 null）/bake→worker 网格化（W4）/
 // UI 开关（W5）/半径参数实值（P5——W2 用 P1 默认）；worldstore 零触碰（sparse 持久化=W3/W5）。
+//
+// ── §29.5-W3 驱逐 + Edits-on-evict 落盘（r2025；setEvictor 回调自本单起从 null 转正）──────
+// 计划原文（refactor-plan §29.5.2 W3）：「driver evictor 注入 → ChunkEvictor 生产缝实装
+//（dirtyQuery = World 脏面、persistFn = §29.5.3 选型、lifecycleTransition = ChunkManager 真
+// 转移）。实体×卸载竞态语义收口」。W2 流式会话是接线宿主（R20.07 编排壳纪律——驱动编排归
+// 会话，World/组件保持既有职责面）。三缝的生产绑定点（头注释立证）：
+//   · dirtyQuery = World::chunkHasUnsavedEdits（persist 域 chunk 级编辑权威——与 mesh 域
+//     markDirty 分域，单漏斗标记面见 chunkmanager.h 头注释）；
+//   · persistFn = ChunkStore（per-chunk 附加表，§29.5.3 选型 1 (a)：additive 零 bump、
+//     r2015 save_coord 先例同款；blob = 驱逐时刻三数组原样字节）——持久化时机 = 驱逐候选
+//     dirty 时即时落盘（不走整世界 saveAll）；成功即清该 chunk 未落盘账；失败 = ChunkEvictor
+//     顺序铁律中止驱逐（保持驻留，P3 语义生产面）；
+//   · lifecycleTransition = World::setChunkLifecycle 真转移（⑥⑦合法边；经唯一守卫入口，
+//     驻留 revision 沿自动携带 = P4 池消费面连通）。转移缝内的两项生产语义：
+//       (1) 边⑥（target==Evicting）先调实体移除缝（setEvictionEntitySink——Entities 层
+//           despawnInChunk 经 std::function 注入，本壳零 Entities 类型依赖[分层不变]；
+//           选型 + MC 引证三元组 = EntityManager::despawnInChunk 头注释）——先于转移；
+//       (2) 边⑦（target==Absent）接受后 World::releaseStreamingChunk 擦槽（数据面闭合：
+//           内容已落盘或 clean 可重derive；残留槽会让重物化把陈旧内容复活[守卫入口空气
+//           零写]，population 脚手架拆卸同门）。
+//   重载路径：driver savedContentQuery = 附加表存在性查询（hasChunk——行只增不删，命中即
+//     稳定）→ Load kind job 照常走边①②（kind 门语义不变）→ 收割拍数据面按表命中路由：
+//     命中 → World::restoreChunkFromBlob 直接物化（**跳过 population**——存档内容已是终态
+//     含 population，头注释立证）；未命中 → W2 现行 adoptGeneratedChunk 生成路径。
+//   登记非目标：跨会话 blob×附加表 overlay 合并（W5/D3 域）；ChunkStore 生产 bind（W5 存档
+//     入口接线——未 bind 时 dirty 候选中止驱逐 = 宁驻留不误删 fail-safe）；hasChunk 逐查询
+//     开闭连接的经济学（W5/P5 优化面）；despawn 半径语义（不引入，见实体移除头注释）。
 
 #include "chunk.h"     // Chunk::kSize（chunk 路由参数——单一权威，不写魔法 16）
 #include "command.h"   // Command / CommandQueue（R20.06 队列——GameSession 首个生产消费方）
@@ -79,11 +106,14 @@
 #include <QObject>
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
 
+#include <functional> // std::function（§29.5-W3 实体移除缝）
 #include <memory> // std::unique_ptr（§29.5-W2 流式会话件）
 
 #include "backgroundgeneration.h" // §29.5-W2：BackgroundGenerationWorker（R20.12 真线程件——
                                   //   W2 首个生产消费者）+ GeneratedChunkData（数据面值类型）
 #include "chunkstreamdriver.h"    // §29.5-W2：ChunkStreamDriver（P2 位置沿编排器——生产通电）
+#include "chunkevictor.h" // §29.5-W3：ChunkEvictor（P3 驱逐编排器——生产实缝三件）
+#include "chunkstore.h"   // §29.5-W3：ChunkStore（D5 选型 (a) per-chunk 附加表——零 bump additive）
 
 // WorldDelta 经信号外发（直接连接无需元类型；声明以备未来跨线程排队连接）。
 Q_DECLARE_METATYPE(WorldDelta)
@@ -168,6 +198,38 @@ public:
                                                 scanExtentChunks);
     }
 
+    // ── §29.5-W3 驱逐 + Edits-on-evict 接线面（C++ only；fixed 世界恒 null / 空 / no-op）──
+    // 附加表绑定（生产 = W5 存档入口接线；矩阵 = fresh 临时库[r2015 先例，绝触 saves/]）。
+    // 未 bind：persist 缝恒失败（dirty 候选中止驱逐 = 宁驻留不误删）、savedContentQuery 恒
+    // miss（全 Generate）——fail-safe 两面都保守。
+    bool bindChunkEditsStore(const QString &dbFilePath)
+    {
+        if (!m_chunkStore)
+            return false; // fixed 世界无附加表（连构造都不发生 = D2 零活动墙同门）
+        m_chunkStore->bind(dbFilePath);
+        return true;
+    }
+    // 驱逐转移前活体移除缝（Entities 层接线方注入：[cx,cz] → 两族 despawnInChunk 的组合；
+    // 本壳零 Entities 类型依赖——分层不变[R20.07]。null = 无实体面可移除[驱逐照常进行]）。
+    void setEvictionEntitySink(std::function<void(int cx, int cz)> sink)
+    {
+        m_entityEvictSink = std::move(sink);
+    }
+    // 观测面：附加表（fixed 恒 null）/ 最近一次驱逐批的 ChunkEvictor 记账 / 调用序逐事件
+    // 轨迹（persist 先于转移的调用序柱[r2019b 同款生产面] + 先移除后转移的实体语义面）。
+    const ChunkStore *chunkEditsStore() const { return m_chunkStore.get(); }
+    ChunkEvictor::Report lastEvictionReport() const { return m_lastEvictionReport; }
+    // 轨迹事件（纯值小聚合）：kind 语义 = PersistOk[落盘成功，先于本候选任何转移]
+    // / PersistFail[落盘失败 = 中止驱逐]/ EdgeEvicting[边⑥接受]/ EdgeAbsent[边⑦接受]
+    // / TransitionRejected[转移被守卫拒]。诊断面，会话生命期累计（驱逐沿粒度，量级极小）。
+    struct EvictionTraceEvent
+    {
+        quint8 kind = 0; // 0=PersistOk 1=PersistFail 2=EdgeEvicting 3=EdgeAbsent 4=TransitionRejected
+        int cx = 0;
+        int cz = 0;
+    };
+    const QVector<EvictionTraceEvent> &evictionTrace() const { return m_evictionTrace; }
+
 signals:
     // 每整 tick 收口发（tick = 已完成 tick 号；delta = 本 tick 编辑面快照）。
     void tickCompleted(int tick, const WorldDelta &delta);
@@ -222,6 +284,12 @@ private:
     // BackgroundGenerationWorker 构造即起真线程——fixed 世界连构造都不发生（app 冒烟同面实证）。
     std::unique_ptr<BackgroundGenerationWorker> m_streamWorker; // R20.12 真线程件（W2 首个生产消费者）
     std::unique_ptr<ChunkStreamDriver> m_streamDriver;          // P2 位置沿编排器（W2 生产通电）
+    // ── §29.5-W3 驱逐件（sparse 独占构造；纯值组件零线程——声明序无析构序约束）──────────
+    std::unique_ptr<ChunkStore> m_chunkStore; // D5 选型 (a)：per-chunk 编辑附加表（默认未 bind）
+    ChunkEvictor m_chunkEvictor;              // P3 驱逐编排器（三缝生产绑定；构造后惰性）
+    std::function<void(int cx, int cz)> m_entityEvictSink; // 驱逐转移前活体移除缝（可空）
+    ChunkEvictor::Report m_lastEvictionReport;             // 最近一次驱逐批记账（观测面）
+    QVector<EvictionTraceEvent> m_evictionTrace;           // 调用序轨迹（persist/⑥/⑦/拒 逐事件）
     bool m_hasPlayerChunk = false; // 位置沿缓存（floorDiv16 换格检测在 PlayerController C++ 侧）
     int m_playerChunkCx = 0;
     int m_playerChunkCz = 0;
@@ -263,6 +331,59 @@ inline GameSession::GameSession(World &world, QObject *parent)
         });
         m_streamDriver->attachLifecycleSink(m_world.streamingLifecycleSink()); // r2011 预留面首用
         m_streamDriver->setWorker(m_streamWorker.get());
+
+        // ── §29.5-W3 驱逐 + Edits-on-evict 生产实缝（三缝绑真实权威；选型论证见类头注）────
+        m_chunkStore = std::make_unique<ChunkStore>(); // 默认未 bind（W5 存档入口接线；fail-safe 两面保守）
+        // dirtyQuery = World persist 域脏面（chunk 级编辑权威——单漏斗标记面在 ChunkManager）。
+        m_chunkEvictor.setDirtyQueryFn([this](int cx, int cz) {
+            return m_world.chunkHasUnsavedEdits(cx, cz);
+        });
+        // persistFn = per-chunk 附加表即时落盘（驱逐候选 dirty 时；不走整世界 saveAll）。
+        // 成功 = 清该 chunk 未落盘账；失败 = Result 穿透 → ChunkEvictor 顺序铁律中止驱逐
+        //（保持驻留零转移——P3「先落盘后转移」语义的生产执行体在本缝与组件内共同成立）。
+        m_chunkEvictor.setPersistFn([this](int cx, int cz) -> Result<void> {
+            const Chunk *c = m_world.chunks().chunk(cx, cz);
+            if (!c || !m_chunkStore || !m_chunkStore->isBound())
+                return Result<void>::fail(kErrChunkStoreNotBound,
+                                          "evict persist: store unbound or chunk missing");
+            const Result<void> r = m_chunkStore->persistChunk(cx, cz, *c);
+            if (r.isOk()) {
+                m_world.clearChunkUnsavedEdits(cx, cz); // 已落盘 → 不再 dirty
+                m_evictionTrace.append({ 0, cx, cz });  // PersistOk
+            } else {
+                m_evictionTrace.append({ 1, cx, cz });  // PersistFail
+            }
+            return r;
+        });
+        // lifecycleTransition = World::setChunkLifecycle 真转移（⑥⑦合法边；revision 沿自动
+        // 携带）。转移缝内两项生产语义：边⑥前实体移除（先于转移——卸载语义，头注引证）；
+        // 边⑦接受后擦槽（数据面闭合——population 脚手架拆卸同门）。
+        m_chunkEvictor.setTransitionFn([this](int cx, int cz, ChunkLifecycle target) -> bool {
+            if (target == ChunkLifecycle::Evicting && m_entityEvictSink)
+                m_entityEvictSink(cx, cz); // 驱逐候选区活体先于转移移除（实体语义收口点）
+            const bool ok = m_world.setChunkLifecycle(cx, cz, target);
+            if (ok) {
+                if (target == ChunkLifecycle::Evicting)
+                    m_evictionTrace.append({ 2, cx, cz }); // EdgeEvicting
+                else if (target == ChunkLifecycle::Absent) {
+                    m_evictionTrace.append({ 3, cx, cz }); // EdgeAbsent
+                    m_world.releaseStreamingChunk(cx, cz); // 数据面闭合：擦槽（内容真实丢弃）
+                }
+            } else {
+                m_evictionTrace.append({ 4, cx, cz }); // TransitionRejected
+            }
+            return ok;
+        });
+        // setEvictor 回调转正（W2 登记非目标自本单解除）：决策沿 toEvict 单 → P3 执行器。
+        // 形参用 generic lambda（r2016d「接线面零策略类型记号」纪律延续——W2 同款免修订，
+        // 策略类型留在 World 层，会话面只见回调形状）。
+        m_streamDriver->setEvictor([this](const auto &cands) {
+            m_lastEvictionReport = m_chunkEvictor.evict(cands);
+        });
+        // savedContentQuery = 附加表存在性（D5 回灌：命中 → Load kind job；未 bind 恒 miss）。
+        m_streamDriver->setSavedContentQuery([this](int cx, int cz) {
+            return m_chunkStore && m_chunkStore->isBound() && m_chunkStore->hasChunk(cx, cz);
+        });
     }
 }
 
@@ -419,12 +540,30 @@ inline void GameSession::pumpStreamingTick()
     GenerationJobOutcome outcome;
     while (m_streamDriver->takeOutcome(outcome))
         ++m_streamOutcomeCount;
-    // ④ #7 同拍双面·数据面（漏取 = m_data 无界积压——#7 原文）：主线程落位唯一通路，每条
-    //    缓冲经 World::adoptGeneratedChunk 落格 + ③晋升驻留（revision 沿）+ population 主线程。
+    // ④ #7 同拍双面·数据面（漏取 = m_data 无界积压——#7 原文）：主线程落位唯一通路。
+    //    §29.5-W3 路由：附加表命中（= 该 chunk 曾驱逐落盘，行只增不删故命中稳定）→
+    //    World::restoreChunkFromBlob 直接物化（跳过 population——存档内容已是终态，头注立证）；
+    //    未命中 → W2 现行 adoptGeneratedChunk 生成路径。命中但 blob 读回失败（病/尺寸守卫拒）
+    //    → 降级生成路径并告警（诚实降级 + 驱逐面已保内容，无正确性损失面——重载内容退化为
+    //    重derive 是已登记的尺寸守卫语义[worldstore loadChunks 同门]）。
     std::unique_ptr<GeneratedChunkData> data;
     while (m_streamWorker->takeResultData(data)) {
-        if (data)
-            m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
+        if (data) {
+            ChunkStoreBlob blob;
+            const bool stored = m_chunkStore && m_chunkStore->isBound()
+                && m_chunkStore->hasChunk(data->key.cx, data->key.cz)
+                && m_chunkStore->loadChunk(data->key.cx, data->key.cz, blob);
+            bool restored = false;
+            if (stored) {
+                restored = m_world.restoreChunkFromBlob(data->key.cx, data->key.cz, blob.voxels,
+                                                        blob.states, blob.light);
+                if (!restored)
+                    qWarning() << "GameSession: chunk_edits blob restore failed for"
+                               << data->key.cx << data->key.cz << "- degrading to regeneration";
+            }
+            if (!restored)
+                m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
+        }
         ++m_streamAdoptedCount;
     }
 }

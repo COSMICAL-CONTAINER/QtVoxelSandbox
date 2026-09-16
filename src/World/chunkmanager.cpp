@@ -26,6 +26,8 @@ void ChunkManager::recreate(int width, int depth, int height)
     //   不受影响）。此后仅 setLifecycle 可写。
     m_lifecycle.clear();
     m_lifecycle.assign(size_t(m_chunksX * m_chunksZ), ChunkLifecycle::Loaded);
+    // §29.5-W3：persist 域未落盘编辑集合随网格重建清空（旧键不指向当前栅格——侧表族清空同门）。
+    m_unsavedEdits.clear();
     for (int cz = 0; cz < m_chunksZ; ++cz)
         for (int cx = 0; cx < m_chunksX; ++cx)
             // R20.05：网格索引公式经 ChunkKey::flatIndex 类型化包装（逐位同式 cx + chunksX*cz；
@@ -147,6 +149,7 @@ void ChunkManager::reinitializeSparse(int coreWidth, int coreDepth, int height)
     m_chunks.clear();   // 稠密存储清空（防两套存储渗漏）
     m_lifecycle.clear();
     m_sparse.clear();   // 零 chunk 分配：全 Absent（槽位在 ensureChunk 时才物化）
+    m_unsavedEdits.clear(); // §29.5-W3：persist 域编辑集合随 sparse 重置清空（全新世界无编辑）
 }
 
 Chunk *ChunkManager::ensureChunk(int cx, int cz)
@@ -395,5 +398,10 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
     if (lx == 0)         { if (Chunk *n = chunk(cx - 1, cz)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // -X 邻
     if (lz == kSize - 1) { if (Chunk *n = chunk(cx, cz + 1)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // +Z 邻
     if (lz == 0)         { if (Chunk *n = chunk(cx, cz - 1)) { n->markDirty(); if (!fluidOnly) n->clearFluidOnlyDirty(); } } // -Z 邻
+    // ── §29.5-W3：persist 域未落盘编辑标记（单漏斗尾部；语义见 chunkmanager.h 声明注释）──
+    //   生成写抑制窗（UnsavedEditWriteWindow）之外的真实内容写 → 该 chunk 记一笔未落盘编辑。
+    //   幂等集合插入；生成窗内（worldgen sink / adopt 守卫应用 / population 窗口重放）零记录。
+    if (m_editSuspendDepth == 0)
+        m_unsavedEdits.insert(ChunkKey{ cx, cz }.packed());
     return true;
 }

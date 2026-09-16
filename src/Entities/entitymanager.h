@@ -871,6 +871,30 @@ public:
     //   PlayerController::arrowPickupScan 用它做「拾取延迟」门控（非 Arrow / 越界 → 0 = 视作不可拾）。
     Q_INVOKABLE qint64 arrowAgeMsAt(int i) const;
     Q_INVOKABLE void removeEntityAt(int i);
+    // ── §29.5-W3 驱逐域活体移除（chunk 卸载语义；头注释选型立证 + MC 引证三元组）────────
+    //   选型 = 「驱逐候选区内活体先于生命周期转移移除」（另一候选「冻结不 tick 留待重载」
+    //   被弃：需给全部实体 tick 路径加 per-tick chunk 驻留门 + 物理冻结面，且实体不入档的
+    //   既有登记口径下「重载恢复」面不可达——MC 引证三元组（2026-09-15 实读）：
+    //   ① minecraft.wiki/w/Chunk「Chunk loading」段："Unloaded chunks are unprocessed by the
+    //      game and do not process any of the game aspects."（卸载 chunk 不处理任何游戏面向
+    //      ——实体停 tick 的 chunk 级口径，本项目卸载后 OOB 语义自然承接）；
+    //   ② 同页 simulation 段："Chunk loading caused by a player ticket allows entities to be
+    //      ticked only if the chunk is in a square around the chunk which has the player
+    //      ticket" + "Zombies won't despawn because they are unloaded before being 128 blocks
+    //      away from the player"（实体 tick 资格绑定 chunk 加载态；实体随 chunk 卸载先行）；
+    //   ③ minecraft.wiki/w/Chunk_format History（1.17/20w45a）："Entities have been extracted
+    //      from main (terrain) once they become full chunks, and are now stored in separate
+    //      entities directory"（MC 实体存档载体 = chunk 存储本身——卸载即随 chunk 离开活动
+    //      世界。本项目实体不入档[R20.14/15 登记非目标]，chunk blob 无法携带实体 → 卸载时刻
+    //      从活动世界移除 = 最接近 MC 的形态。**局限如实登记**：MC 重载后实体自 chunk 存档
+    //      恢复，本项目移除即不再回来[MC 视角 ≈ despawn 而非 unload]；且 MC 的 despawn 半径
+    //      [128 块即时 despawn 等]是独立机制，本单不引入——P3 登记面「despawn 半径 vs 卸载
+    //      顺序」收口为：卸载移除先于转移 ⑥，despawn 半径语义零接线]）。
+    //   移除 = 中心格 floorDiv16 落在 (cx,cz) 的全部活体槽（mob/落体/箭/浮标全族——卸载语义
+    //   不分型），走既有 releaseSlot 释放语义（t978 幂等守卫 + free list + QML Repeater 槽
+    //   稳定契约逐位不动），收口一次 notifyEntitiesChanged（批量 N 移 1 通知，t320 同门）。
+    //   非 Q_INVOKABLE（生命周期决策零 QML，r2010d 精神）。返回移除数（诊断面）。
+    int despawnInChunk(int cx, int cz);
     // t284 Stalker 蓄力膨胀进度（0..1）：fuseTimer>0（正在蓄力）时返 clamp(fuseTimer/kFuseTime,0,1)，供 QML
     //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
     //   发白）。非 Stalker / 未蓄力 / 越界 → 0（模型静态）。revision 在蓄力期每帧 bump（tick Mob 分支）让绑定刷新。

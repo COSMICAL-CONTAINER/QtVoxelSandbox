@@ -2,6 +2,7 @@
 #define WORLD_H
 
 #include <QObject>
+#include <QByteArray> // §29.5-W3：restoreChunkFromBlob blob 载荷（per-chunk 附加表读回）
 #include <QHash> // t843 燃烧态侧表 m_burningCells（坐标→剩余燃烧窗数）
 #include <QVariantList> // t1020 structureRegion getter 返回类型（Q_INVOKABLE moc 契约）
 #include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）/ quint64（树叶衰减队列键）
@@ -106,6 +107,30 @@ public:
     // P4 池消费面连通）+ W1b sparsePopulateChunk 主线程窗口重放（population 写 World 不可越
     // 线程；自身 chunk 可查询后运行 = r2023 同门）+ 列种子光 refloodBox（loadChunkAt 同门）。
     bool adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data);
+
+    // ── §29.5-W3 驱逐 + Edits-on-evict（C++ only，全部非 Q_INVOKABLE——r2022d「新面禁
+    //    Q_INVOKABLE 形态」同门；fixed 世界零调用 = 零变化墙）────────────────────────────
+    // 存档 blob 直接物化（重载执行体；生产消费方 = GameSession 收割拍的 Load 路由）：追加表
+    // 命中的 chunk 从 blob 直接逐字节 memcpy 三数组落地，生命周期沿 ①②③ 合法链到 Loaded
+    // 稳态（与 sparseGenerateChunk/adoptGeneratedChunk 同门），随后**跳过 sparsePopulateChunk**
+    // ——存档内容已是驱逐时刻的**终态**（含 population 与玩家编辑；重放 population 会把
+    // pass-k 时刻语义应用到终态上 = W1b「读域时刻一致性」铁律的反面 + 玩家编辑丢失，头注释
+    // 立证）。收尾 = 自身列索引重建（growth/fluid/ice 经 rebuildPopulationCellIndexes 空脚手
+    // 架形态 + 火格自扫）+ 列种子光 refloodBox（loadChunkAt/adopt 同门）。blob 尺寸与目标
+    // chunk 容量不符 → false（worldstore loadChunks 尺寸守卫同门；边①已交的槽位经 ⑨ 回
+    // Absent——失败恢复边语义同 R20.10b）。
+    bool restoreChunkFromBlob(int cx, int cz, const QByteArray &voxels, const QByteArray &states,
+                              const QByteArray &light);
+    // 驱逐数据面闭合（生产消费方 = GameSession 驱逐转移缝的边⑦成功尾部）：擦除 sparse 槽位
+    // 与 chunk 实例（**数据不保留**——内容已按 Edits-on-evict 落盘或本就 clean 可重derive；
+    // population 脚手架拆卸 releaseSparseChunk 同门先例）。P3「内容真实丢弃归生产接线」的
+    // 本单兑现：残留槽位会让重物化走「空数组 + applyGeneratedChunkData 空气零写」把陈旧内
+    // 容复活（守卫入口只写非空格），擦槽令重载从真 Absent 起步。fixed 恒 false。
+    bool releaseStreamingChunk(int cx, int cz);
+    // persist 域脏面（chunk 级编辑权威）转发：驱逐 dirtyQuery 生产绑定点 + persist 成功后清
+    // 账（本体在 ChunkManager——单漏斗标记面见其头注释；转发使 GameSession 接线零策略细节）。
+    bool chunkHasUnsavedEdits(int cx, int cz) const { return m_chunks.chunkHasUnsavedEdits(cx, cz); }
+    bool clearChunkUnsavedEdits(int cx, int cz) { return m_chunks.clearUnsavedEdits(cx, cz); }
 
     int width() const  { return m_width; }
     int depth() const  { return m_depth; }

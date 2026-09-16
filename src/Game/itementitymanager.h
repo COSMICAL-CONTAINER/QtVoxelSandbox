@@ -142,6 +142,10 @@ public:
     // R20.14 寿命时钟注入缝（ageLifetimeClock，deferWallClocks 对偶；t1029 缝纪律）——
     //   生产路径零调用，矩阵 despawn 腿经 Adapter 面同步驱动孪生（与 store 直驱同参）。
     void ageLifetimeClock(qint64 ms) { m_store.ageLifetimeClock(ms); }
+    // §29.5-W3 驱逐域掉落物移除（一行委托——模拟权威 = EntityStore，R20.14「禁两份模拟
+    //   逻辑并存」纪律；选型与 MC 引证全录 = EntityStore::despawnInChunk 声明注释）。
+    //   非 Q_INVOKABLE（生命周期决策零 QML）。
+    int despawnInChunk(int cx, int cz) { return m_store.despawnInChunk(cx, cz); }
 
     // t60 掉落物重力 / t271 水冲走 / t343-t445 焚毁 / t320 寿命驱逐（每帧由
     //   PlayerController::tick 调；C++ 直调非 Q_INVOKABLE——避开 moc 对 World* 前向类型的
