@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-16 04:20（t1053 嵌格生物假跳+踩踏级联运行期修复闭环，矩阵 598；t1049 engine quirk 注销——下一阶段=§29.4 流式激活待用户定向）
+更新时间：2026-09-16 05:05（用户定向落定：§29.4 流式激活按建议列全量开工，D1-D6 均取建议项；Mimosa 深扫欠账清偿[22 发现零实质]）
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: §29.4 流式激活（待用户 md 定向——refactor-plan 尾已有设计草案 v1[D1-D6+P1-P5+四问]，用户定向前不开工；或 parity 波后续=审计 #9 ③按用户定向）
-current_task_status: READY
+current_task: §29.4 P1 GenerationPolicy 策略层骨架（子 agent 串行执行，filter 词 r2016——src/World/generationpolicy.h 纯决策组件：streamingEnabled 默认 false 恒空决策[固定世界零变化]、生成/渲染双半径[D4 生成≥渲染]、请求=Absent 且生成半径内按距离优先、驱逐候选=半径外已驻留非 Absent/Loading；零调用点迁移零 QML 触碰）
+current_task_status: IN_PROGRESS_SUBAGENT
 last_completed_task: t1053（嵌格生物假跳+踩踏级联运行期修复，review0915 #4 parity 波，t1049 engine quirk 注销单——**根因链补全**：嵌格常驻因 resting 复探对「高于脚位层」跳过+旧「由窒息/挤出兜底」登记系空头支票[mob 侧无挤出机制]；**修法组合两语义面各一权威**：①resting 复探嵌入顶起[embedTop 仅 cy==feetCell 中心列脚位格层防「头上的地」误顶；mobAabbHitsSolid at 新位净空门；fallPeakY 随顶起新位]②isJumpObstacle 嵌格态层豁免[ownX/ownZ 入参，10 调用点全传无默认=编译器强制；AI 探跳段先于物理复探段→末帧假跳必须探针挡，NEG1 实证]；kMobEmbedTol=0.1 两面同值[kEmbedTol 玩家先例]；候选 A 字面[XZ 自列豁免]经几何核验不足[嵌格层邻列同判墙]、B[放置链挤出]与 t973 门纠缠+多收口——读码后改形组合；MC 引证=wiki/w/Entity "prevent blocks from being placed in the space they occupy"+"free to move out of the solid block but not back in"[2026-09-16 实读]；顺手修 review0915 #6 baby-grow 缩进[纯格式并入]；QML 零迁移、t973 门/extrudeEmbedded/踩踏公式缝零触碰）
 last_task_closure_commit: docs(plan)（本提交；代码终态 = fix(t1053) afd739b + test(t1053) d4523a1）
 last_verified_commit: test(t1053) d4523a1（矩阵 598 PASS / 0 FAIL ×2：matrix_t1053_pos/final.log EXIT=0；597 权威 diff = +1 恰 t1053 + 漂移仅 t813 戳/t997 计时，t979/t1023c 零漂移，pos/final 腿集合恒等；filter 面 t1053=1P、review26-1=7P、t1045=3P、t947=2P、r2007-r2015[5/5/4/6/4/4/4/4/4/4P]+r2010b=3P；t1049/t670 零独立腿名[历史如此]——覆盖面由 review26-1 结构钉腿/t947③/t1053b 对照柱承接；阴性轮 NEG1 摘探针豁免恰红全柱[maxFeet 假跳弧+farmKept false 级联+finalFeet 传导红]→NEG2 摘嵌入顶起恰红{finalFeet}单柱[maxFeet 41.5 嵌格无跳/farmKept true/对照柱照跳]→双还原回绿[存证 matrix_t1053_neg.log 含 restore]；app 重建 EXIT=0 + 冒烟 EXIT=124 + tail20 稳态 60fps）
 last_governance_review: 2026-09-16（audit #9 GREEN——§29.3 序列收官 + 5 闭环放行；推荐次序：①Loading 失败恢复边[已清偿] → ②流式激活设计段[草案 v1 已入 refactor-plan 尾待用户定向] → ③按用户定向执行；Mimosa ENOBUFS 延续）
 governance_review_due: false
 completed_tasks_since_governance_review: 2
-next_task: §29.4 流式激活（待用户 md 定向）或 parity 波后续（审计 #9 ③）
-next_task_source: 用户 md 通道定向（refactor-plan §29.4 设计草案 v1 在案）
+next_task: §29.4 P1 GenerationPolicy 策略层骨架（进行中，子 agent）→ 其后 P2 移动驱动 → P3 卸载+Edits-on-evict → worker meshing（D6 同批）→ P4 QML 动态化 → P5 调参验收
+next_task_source: 用户会话指令 2026-09-16「直接开始做这几个功能继续做」——§29.4 D1-D6 全按草案建议列执行（dev-plan 尾定向条目）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0

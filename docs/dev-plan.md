@@ -4035,3 +4035,12 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 **engine quirk 注销**：t1049 提交注 "engine-side latent quirk REGISTERED for R20 walk refactor: a mob embedded by a support-raising block placement self-judges its own cell as an obstacle (hop + backward glide + trample cascade)"——**随本单闭环注销**（agent-state Recovery Point 旧段同步注销；R20 walk 重构登记面不再含本项）。
 
 **下一任务**：§29.4 流式激活（**待用户 md 定向，不开工**）；或 parity 波后续（审计 #9 ③按用户定向）。
+
+### §29.4 用户定向落定（2026-09-16，会话指令通道）→ P1 开工授权
+
+- **用户原话**：「先提交一次git，然后你直接开始做这几个功能继续做」（2026-09-16）——指 §29.4 流式激活相位族直接开工。
+- **D1-D6 决策表**：用户未逐项否决 → **全部按 §29.4 草案建议列执行**（D1=无限世界 / D2=新世界参数开关、旧世界不变 / D3=现有存档就地流式化 / D4=生成·渲染分离双参数[生成 ≥ 渲染] / D5=视距外 Evicting→Absent + Edits-on-evict 落盘 / D6=worker meshing 与流式同批排期）。后续相位若需推翻某项，走 md 修正通道登记。
+- **相位序**：P1 策略层骨架（GenerationPolicy，纯决策无头可测，固定世界默认关零变化）→ P2 玩家移动驱动 → P3 卸载+Edits-on-evict → P4 QML 动态化（全 R20 唯一动 QML 相位）→ P5 实机调参验收；D6=同批 → worker meshing 单随 P3 后插入。每相位独立 fix/test/docs 三段提交闭环，串行。
+- **Mimosa 深度安全扫描清偿（五轮 commit-hook ENOBUFS 欠账）**：jobId scan-job-mu34bnfv-01c9f4a4c5bec306，deep 档，2026-09-15T20:22:41Z 完成，封印 `sha256:9cc2d77a768592b5b6387736fa407f323f4a9861780b0b13d659a6ab545dd2e7`。**22 发现零实质风险**：19 LOW「不安全的随机数」全在 `tools/*.py` 资产构建脚本（随机性仅用于程序化资产变化，非安全域）；3 MEDIUM clang dead-stores 全在 vendored `external/…/miniaudio.h`（第三方库既有面，不修——升级时随上游）。src/ 树零发现。runStatus=inconclusive（调用图部分不完整：动态派发超分析规模）——按「静态扫描无运行时验证」口径记录，不构成安全宣称。
+
+**下一任务**：**§29.4 P1 GenerationPolicy 策略层骨架**（子 agent 串行执行，filter 词 r2016）。
