@@ -986,6 +986,16 @@ add_executable(redstone_matrix_test
     tools/matrix/section19_savecoordinator.cpp
     src/World/savecoordinator.cpp
     src/World/savecoordinator.h
+    # §29.4-P1 GenerationPolicy 策略层骨架探针段（置尾先例沿用：runAll 末执行，filter 词
+    #   r2016；4 腿 r2016a-d = 默认关零变化承重墙[disabled 任意输入两列表恒空]/激活请求面
+    #   [toRequest 恰 = 生成半径内 Absent 集 + priority 升序字典序全确定性]/驱逐面[半径外驻留
+    #   恰入一次距离降序 + [render,gen] 环带不驱逐（D4）+ 驱逐只看 gen 半径]/确定性+规整一致性
+    #   +结构钉[禁 QObject/线程原语/World 指针反探 + 零调用点迁移零 QML]。随段直编
+    #   src/World/generationpolicy.h（header-only 非 QObject 纯决策值组件，无 AUTOMOC，
+    #   §29.4 D1/D4/D5 语义依据在其头注释）；r2016a-d 全段零世界（缝 = QMap 合成生命周期表），
+    #   无新增 .cpp——world/chunk 系源文件已列）。
+    tools/matrix/section20_generationpolicy.cpp
+    src/World/generationpolicy.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
