@@ -314,4 +314,8 @@ private:
                                       //   s82 非方阵 ×1；r2021c 另挂真 QQmlEngine 真链
                                       //   harness——t874 家族同门），rig 世界 w 零接触；
                                       //   r2021d 纯源码钉，接 section23）
+    void section25_sparseworld(); // §29.5-W1 稀疏世界核探针（置尾先例沿用：r2022 承重墙/语义族
+                                  //   /恒等承重三腿自建 fresh 小世界族——固定世界四 setter
+                                  //   incantation + sparse 构造缝（同 seed 同 dims 双世界），
+                                  //   rig 世界 w 零接触；r2022 钉面腿纯源码钉，接 section24）
 };
