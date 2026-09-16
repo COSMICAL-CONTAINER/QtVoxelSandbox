@@ -3818,3 +3818,37 @@ Agent 每次自动选择任务时，按以下顺序：
 2. D2 新世界参数开关、旧世界不变？（建议：是）
 3. D3 现有存档就地流式化？（建议：是）
 4. D6 worker meshing 同批排期？（建议：是——流式后 meshing 会成为主瓶颈）
+
+---
+
+## §29.5 生产接线设计（草案 v1 —— 2026-09-16 主控执笔；P1-P4/D6 组件已闭环 [矩阵 624/0]，接线是流式激活的最后一弧）
+
+> 状态：设计草案 + 任务拆分。用户定向（2026-09-16「直接开始做这几个功能继续做」）授权流式弧；本段把「组件 → 生产」的接线拆成 W1-W5 五个串行闭环。**两个关键选型见 §29.5.3，用户可随时 md 纠偏改选**。
+
+### 29.5.1 前置事实
+
+- World 固定 dims（chunksX×chunksZ）构造时全量 `generate()`；blob 存整世界栅格（worldstore 冻结域）。
+- 组件族已就绪且零接线：GenerationPolicy（P1）→ ChunkStreamDriver（P2，自持 GenerationJob 纯请求模型、可选 evictor/savedContent 注入点）→ ChunkEvictor（P3，persist-before-transition）→ MeshWorker（D6，快照进/网格出）。
+- QML 池已数据驱动（P4：residentChunkRevision 沿 = ⑥移出/③⑧加入；枚举序 = world.cpp 权威）——**QML 侧已为无限世界就绪**。
+- 未加载 chunk 的查询语义可以**零新增**：稀疏模式下「未生成/未加载」直接复用现行 OOB（越界）答案（blockAt=Air、setBlock 拒、heightAt=-1 等同门）——加载后答案变真，卸载后回到 OOB 答案。
+
+### 29.5.2 任务拆分（串行，各 fix/test/docs 闭环）
+
+- **W1 稀疏世界核（r2022）**：World 构造模式分化——`fixed`（现状逐位不变）/`sparse`（dims 哨兵无界；构造零全量生成；出生半径预生成 = D4 参数首次落地）。未加载域 = OOB 等价语义（29.5.1 第三条）；chunklifecycle 六态在 sparse 世界进入真实消费（构造 Absent、加载走①②）。worldstore 零触碰（sparse 世界的持久化 = W3/W5）。承重腿：**同 seed 下 sparse 世界已加载区内容 ≡ fixed 世界同区内容逐位恒等**（生成权威 terraingen 单一性直接承接）。
+- **W2 位置源 + 驱动接线（r2023）**：玩家位 → floorDiv16 → GameSession tick 尾 `driver.onPlayerChunk`；GenerationJob ↔ ChunkManager `setLifecycle` 挂点首次生产接线（r2011 预留面）；BackgroundGenerationWorker 首个生产消费者（R20.12 真线程件）。streaming 仅 sparse 世界使能（D2：fixed 世界连驱动器都不构造）。
+- **W3 驱逐 + Edits-on-evict 落盘（r2024）**：driver evictor 注入 → ChunkEvictor 生产缝实装（dirtyQuery = World 脏面、persistFn = §29.5.3 选型、lifecycleTransition = ChunkManager 真转移）。实体×卸载竞态语义收口（P3 登记面：despawn 半径 vs 卸载顺序，MC 口径引证随单）。
+- **W4 bake → MeshWorker（r2025）**：ChunkGeometry bake 段改提交快照 + 收割应用；同步内联回退开关；F3 mesh 行加 worker 列。QML 零改动（池已动态）。
+- **W5 D2 参数开关 + D3 opt-in 转换（r2026）**：新世界 UI「无限世界」开关（默认关；**QML 例外登记**——P4 相位已闭，此处为 §29.5 显式登记的最小 QML 新增面，照 P4 钉纪律守护）；世界 meta 加 streaming 标志（additive 零迁移）；D3 = 世界菜单 opt-in「转为无限世界」（blob 区成为核心区，境外按需生成 + 经 W3 落盘）。**UI 文案与默认值是产品面——用户可 md 改**。
+
+### 29.5.3 两个关键选型（默认按推荐执行，md 可纠偏）
+
+1. **D5 执行——per-chunk 编辑持久化载体**：(a) **新增 per-chunk 附加表**（save_coord 同款 additive 路线，零格式迁移零 bump，hard-gate 安全）【推荐】；(b) 脏 chunk 留驻至下次整存后方可逐（实现最简，但与 MC「卸载即保存脏 chunk」口径有隙，且驻留集被脏块顶住 = 驱逐退化）。→ 取 (a)；W3 实装，wstore 附加表走 r2015 additive 先例。
+2. **D3 形态——opt-in 转换而非静默就地**：现有档默认永远 fixed（D2 承诺）；「转为无限世界」是显式 UI 动作（W5），转换 = meta 标志翻转 + blob 区转核心区，零数据搬迁。→ 比「首启静默流式化」保守且可回退（标志翻回即回固定语义，境外增量区变成不可达数据=可再清理）。
+
+### 29.5.4 风险登记
+
+- **OOB 语义回归面**（最大）：sparse 世界的 blockAt/setBlock/heightAt/supportTopYAt/液体/光照边界语义全部走 OOB 等价——W1 配语义门矩阵族逐门钉；fixed 世界零变化墙照挂。
+- **生成风暴**：快速移动请求速率 > 生成速率——driver 背压计数 + r2012 线程队列满载拒绝既有语义；W2 实装后 F3 加排队观测行，P5 调参。
+- **实体×卸载竞态**：mob/掉落物在卸载候选区内的处理次序——W3 设计内收口（MC 引证三元组随单）。
+- **首屏等待**：出生半径即 W1 参数；Cold start 观感 P5 验收（D4 双半径调参在此兑现）。
+- **存档兼容**：全程 additive（worldstore 冻结域 + save_coord 先例）；任何步骤发现需迁移 → STOP NEEDS_HUMAN。
