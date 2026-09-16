@@ -25,6 +25,12 @@
 //   m_edits.record(/takeDelta( 剥注释计数钉 + 旧收口路径禁出反探（m_lastDelta.addAffected /
 //   ++m_lastDelta.changedBlocks，minCount=1 反探 miss 非空=合规——pinSet 的 cnt<minCount
 //   语义下 0 计数钉恒不红，R20.08 空转钉教训）；新钉变异自证见 matrix_r2009_neg.log。
+// **r2017 同变更修订（agent-review-2026-09-16 #3，纠偏非放宽）**：fix C 把 tick 窗口语义从
+//   「start-clear 到收口」改「上收口到本收口」（清账唯一落点 = 收口发布之后）→ r2009b/c 的
+//   「收口后 lastDirtyChunks() 仍见本 tick 脏集」旧读数随语义退役，集合面单源断言**移入
+//   tickCompleted 信号栈内**（同帧快照域——gamesession.h lastDirtyChunks() 注释的自述域，
+//   review #12 同口径）；单源等价在两种窗口语义下都成立 = NEG-C（复原 start-clear）不敏感
+//   相对恒等，恰红面保持 {r2017c} 单腿（section11）。
 // 确定性口径：fresh 世界同 seed 同尺寸（worldgen 纯函数）+ 天气双钉 setWeatherState(0)+
 //   setWeatherRemainingSec(3600)（tickWeather 转换掷骰不进探针窗口）；裸地形稳态 13-tick
 //   家族全早退（无水/火/作物/冰/叶）——编辑面只由命令写构成，双生终态可比。
@@ -243,8 +249,18 @@ void MatrixRun::section13_editbuffer()
             // 路径 B1（GameSession）：一 tick 三条 FIFO 命令打同一格：
             GameSession gs(wB1);
             QVector<WorldDelta> deltas;
+            // r2017 同变更修订（纠偏非放宽）：集合面单源断言域移入 tickCompleted 信号栈内
+            //   （同帧快照域）——窗口语义改「上收口到本收口」后收口即清账，栈外读到的是空
+            //   账面；单源等价本身在两种窗口语义下都成立（NEG-C 不敏感的相对恒等）。
+            int dirtyAtClose = -1;
+            bool dirtyHasCell = false;
             QObject::connect(&gs, &GameSession::tickCompleted, &gs,
-                [&](int, const WorldDelta &d) { deltas.push_back(d); });
+                [&](int, const WorldDelta &d) {
+                    deltas.push_back(d);
+                    dirtyAtClose = gs.lastDirtyChunks().size();
+                    dirtyHasCell = gs.lastDirtyChunks().contains(
+                        ChunkKey::fromWorld(cell.x, cell.z, Chunk::kSize));
+                });
             const Result<void> r1 = gs.enqueueCommand(
                 Command::placeBlock(cell, quint8(BR::Stone), 7u, 1u, 0));
             const Result<void> r2 = gs.enqueueCommand(Command::breakBlock(cell, 7u, 2u, 0));
@@ -284,7 +300,8 @@ void MatrixRun::section13_editbuffer()
                 && gs.lastDelta().affects(ChunkKey::fromWorld(cell.x, cell.z, Chunk::kSize))
                 && deltas.size() == 1 && deltas[0].affectedCount == 1
                 && deltas[0].changedBlocks == 1;
-            const bool faceOk = gs.lastDirtyChunks().size() == 1
+            // 集合面 = 通知面单源（r2017 同变更修订：信号栈内同帧快照，见上）+ 收口后零丢弃：
+            const bool faceOk = dirtyAtClose == 1 && dirtyHasCell
                 && gs.droppedEventCount() == 0 && gs.droppedEditCount() == 0;
             ok = ok && evOk && deltaOk && faceOk;
             if (!evOk)
@@ -296,8 +313,8 @@ void MatrixRun::section13_editbuffer()
                             .arg(gs.lastDelta().affectedCount)
                             .arg(gs.lastDelta().changedBlocks).arg(deltas.size());
             if (!faceOk)
-                diag += QStringLiteral("[face dirty=%1 dropE=%2 dropEd=%3] ")
-                            .arg(gs.lastDirtyChunks().size()).arg(gs.droppedEventCount())
+                diag += QStringLiteral("[face atClose=%1 hasCell=%2 dropE=%3 dropEd=%4] ")
+                            .arg(dirtyAtClose).arg(dirtyHasCell).arg(gs.droppedEventCount())
                             .arg(gs.droppedEditCount());
 
             // 稳态 tick：空 delta（合并状态不跨 tick 边界泄漏）：
@@ -361,8 +378,17 @@ void MatrixRun::section13_editbuffer()
 
         if (ok) {
             QVector<WorldDelta> deltas;
+            // r2017 同变更修订（纠偏非放宽）：集合面单源断言域移入 tickCompleted 信号栈内
+            //   （同帧快照值拷贝）——窗口语义改「上收口到本收口」后收口即清账；单源等价本身
+            //   两种窗口语义下都成立（NEG-C 不敏感的相对恒等）。
+            DirtyChunkSet dirtyAtClose;
+            bool dirtyCaptured = false;
             QObject::connect(&gs, &GameSession::tickCompleted, &gs,
-                [&](int, const WorldDelta &d) { deltas.push_back(d); });
+                [&](int, const WorldDelta &d) {
+                    deltas.push_back(d);
+                    dirtyAtClose = gs.lastDirtyChunks();
+                    dirtyCaptured = true;
+                });
             const Result<void> r1 = gs.enqueueCommand(
                 Command::breakBlock(BlockPos{ pb.first, hb, pb.second }, 7u, 1u, 0));
             const Result<void> r2 = gs.enqueueCommand(
@@ -385,14 +411,16 @@ void MatrixRun::section13_editbuffer()
                             .arg(deltas.size()).arg(deltas.value(0).affectedCount)
                             .arg(deltas.value(0).changedBlocks);
 
-            // 集合面 = 通知面单源（调度一次查询——验收④会话面示范）：
-            const DirtyChunkSet &dirty = gs.lastDirtyChunks();
-            bool setOk = dirty.size() == deltas.value(0).affectedCount;
-            for (int i = 0; i < dirty.size() && setOk; ++i)
-                setOk = deltas.value(0).affects(dirty.at(i)); // 集合逐键 ∈ delta 集合
-            setOk = setOk && dirty.contains(kB) && dirty.contains(kA) && dirty.contains(kC);
+            // 集合面 = 通知面单源（调度一次查询——验收④会话面示范；r2017 起信号栈内快照）：
+            bool setOk = dirtyCaptured && dirtyAtClose.size() == deltas.value(0).affectedCount;
+            for (int i = 0; i < dirtyAtClose.size() && setOk; ++i)
+                setOk = deltas.value(0).affects(dirtyAtClose.at(i)); // 集合逐键 ∈ delta 集合
+            setOk = setOk && dirtyAtClose.contains(kB) && dirtyAtClose.contains(kA)
+                && dirtyAtClose.contains(kC);
             ok = ok && setOk;
-            if (!setOk) diag += QStringLiteral("[set dirty=%1] ").arg(dirty.size());
+            if (!setOk)
+                diag += QStringLiteral("[set captured=%1 dirty=%2] ")
+                            .arg(dirtyCaptured).arg(dirtyAtClose.size());
 
             // 终态格核验（破真落土 / 放真落石）+ 事件序（FIFO 破先放后、id=终态）：
             const bool cellsOk = wC1.blockAt(pb.first, hb, pb.second) == quint8(BR::Air)

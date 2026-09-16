@@ -2,7 +2,8 @@
 
 #include "generationpolicy.h" // §29.4-P1 被测：GenerationPolicy 流式激活策略层骨架（纯决策值组件）
 
-// §29.4-P1 GenerationPolicy 探针段（4 腿 r2016a-d；filter 词 "r2016"；矩阵 598→602，band 600±2 内）。
+// §29.4-P1 GenerationPolicy 探针段（4 腿 r2016a-d；filter 词 "r2016"；矩阵 598→602，band 600±2 内；
+// r2017 增 r2017d setParams 规整 twin 腿 → 606，见尾注）。
 // 置尾先例沿用（接 section19，runAll 末执行）；全段**零世界**（r2011a-c 纯请求模型腿同款——
 // 被测面是纯函数决策组件，缝 = 测试内 QMap 合成生命周期表，rig 世界 w 零接触，无 RNG 无 tick
 // 无时间源）。任务契约（docs/refactor-plan-2026-09-08.md §29.4「P1 策略层骨架」+ D1/D4/D5 建议列）：
@@ -505,6 +506,176 @@ void MatrixRun::section20_generationpolicy()
                              " priority domain is clamped, and source pins plus reverse"
                              " probes keep the header QObject-free, thread-free, seam-pure"
                              " and the codebase unwired with zero QML mention"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2017d：setParams 规整唯一路径（r2017 fix D，agent-review-2026-09-16 Info
+    //    「GenerationPolicy setParams 不再规整」）——r2016d 规整验证族的同变更扩展（独立腿
+    //    落地，filter 词 r2017；r2016d 本体不动 = 构造规整绿色回归柱）：
+    //    ①越界双生 twin：setParams(越界) ≡ 同参构造——字段逐位恒等 + 决策逐位恒等（此前
+    //      setParams 裸赋值可破不变量：gen>255 时 decide 的 priority=quint8(cheb) 回绕）；
+    //      判别格 = (300,0) Absent（仅在未规整的 ±400 越界窗内可见/优先级 quint8(300)=44
+    //      回绕）+ (255,0) Absent（规整后恰在窗界 → priority 255 无回绕钉）；
+    //    ②合规值 setParams 生效：字段读回一致 + 决策与同参构造 twin 逐位一致（双列表非空
+    //      = 恒等非空转）；
+    //    ③负值双生：全负入参 setParams ≡ 构造（全 0 归一）；
+    //    ④默认关形状经 setParams 存活（decide 恒空——零变化不变量的参数面不被 setParams 破）；
+    //    ⑤源码钉：构造与 setParams 双写共享 normalized 路径。
+    //    相对恒等纪律（R20.11）：twin 两侧同变仍恒等；绝对列表内容只钉 ① 的判别格（被摘
+    //    语义本体）。本单 NEG 轮登记为 NEG-A/B/C 三处主修；fix D 以双生断言自锚（摘规整
+    //    唯一路径 → ①③ 字段恒等面恰红）。
+    runLeg(QStringLiteral("r2017d setParams normalization twin (r2017 fix D, agent-review"
+        " 2026-09-16 Info 'setParams no longer normalizes'): setParams with out-of-range"
+        " params is bit-identical to constructing with the same params - fields (gen 300"
+        " clamps to 255, negative render to 0, scan into [gen,255]) and decisions alike"
+        " over a seam where an Absent cell at (300,0) is visible only through the"
+        " unnormalized +-400 window (the quint8 priority wraparound discriminator) and"
+        " an Absent cell at (255,0) pins an exact priority-255 request with no wrap;"
+        " in-range setParams takes effect (fields read back, decisions identical to the"
+        " constructed twin over a non-vacuous seam); all-negative setParams twins the"
+        " constructor's all-zero normalization; the default-off shape survives setParams"
+        " (decide stays empty); source pins hold both the constructor and setParams on"
+        " the shared normalize path"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // 缝帮手（同段先例）：合成生命周期表 + 条目 diag。
+        const auto kkey = [](int cx, int cz) { return (qint64(cx) << 32) | quint32(cz); };
+        const auto tableSeam = [&kkey](const QMap<qint64, ChunkLifecycle> &t) {
+            return [&t, &kkey](int cx, int cz) -> ChunkLifecycle {
+                return t.value(kkey(cx, cz), ChunkLifecycle::Absent);
+            };
+        };
+        const auto reqStr = [](const QVector<GenerationPolicyRequest> &v) {
+            QString s;
+            for (const auto &r : v)
+                s += QStringLiteral("(%1,%2)p%3 ").arg(r.cx).arg(r.cz).arg(r.priority);
+            return s;
+        };
+        const auto evStr = [](const QVector<GenerationPolicyEvict> &v) {
+            QString s;
+            for (const auto &e : v)
+                s += QStringLiteral("(%1,%2) ").arg(e.cx).arg(e.cz);
+            return s;
+        };
+        const auto fieldsEq = [](const GenerationPolicyParams &a,
+                                     const GenerationPolicyParams &b) {
+            return a.streamingEnabled == b.streamingEnabled
+                && a.generationRadiusChunks == b.generationRadiusChunks
+                && a.renderRadiusChunks == b.renderRadiusChunks
+                && a.scanExtentChunks == b.scanExtentChunks;
+        };
+
+        // ① 越界双生 twin（setParams vs 构造）：字段 + 决策逐位恒等：
+        GenerationPolicy pSet;
+        pSet.setParams(GenerationPolicyParams(true, 300, -2, 400)); // Info 原病灶面：gen>255
+        const GenerationPolicy pCtor{ GenerationPolicyParams(true, 300, -2, 400) };
+        const bool twinFields = fieldsEq(pSet.params(), pCtor.params())
+            && pSet.params().generationRadiusChunks == 255
+            && pSet.params().renderRadiusChunks == 0 && pSet.params().scanExtentChunks == 255;
+
+        // 大缝（自定义 lambda——勿用 tableSeam：其缺席默认 Absent 会让 ±255 窗全 Absent）：
+        //   |cx|,|cz| ≤ 300 全 Loaded（填满规整后 ±255 窗），窗外 Absent，(300,0)/(255,0)
+        //   特判 Absent——(300,0) 仅未规整 ±400 越界窗可见（回绕判别格），(255,0) 规整后
+        //   恰窗界 → priority 255 无回绕钉。
+        const auto wideSeam = [](int cx, int cz) -> ChunkLifecycle {
+            if ((cx == 300 && cz == 0) || (cx == 255 && cz == 0))
+                return ChunkLifecycle::Absent;
+            return (cx >= -300 && cx <= 300 && cz >= -300 && cz <= 300)
+                ? ChunkLifecycle::Loaded
+                : ChunkLifecycle::Absent;
+        };
+        const GenerationPolicyDecision dSet = pSet.decide(0, 0, wideSeam);
+        const GenerationPolicyDecision dCtor = pCtor.decide(0, 0, wideSeam);
+        const bool twinDecide = dSet == dCtor && dSet.toRequest.size() == 1
+            && dSet.toRequest.first() == GenerationPolicyRequest{ 255, 0, 255 }
+            && dSet.toEvict.isEmpty(); // 恰 (255,0)p255 一请求（无回绕）+ 零驱逐
+        ok = ok && twinFields && twinDecide;
+        if (!twinFields || !twinDecide) {
+            QString reqHead, evHead;
+            for (int i = 0; i < qMin(3, dSet.toRequest.size()); ++i)
+                reqHead += reqStr(dSet.toRequest.mid(i, 1));
+            for (int i = 0; i < qMin(3, dSet.toEvict.size()); ++i)
+                evHead += evStr(dSet.toEvict.mid(i, 1));
+            diag += QStringLiteral("[twin f=%1 d=%2 reqN=%3 evN=%4 head=%5 %6] ")
+                        .arg(twinFields).arg(twinDecide)
+                        .arg(dSet.toRequest.size()).arg(dSet.toEvict.size())
+                        .arg(reqHead, evHead);
+        }
+
+        // ② 合规值 setParams 生效（双列表非空 = 恒等非空转）：
+        QMap<qint64, ChunkLifecycle> t7;
+        t7.insert(kkey(1, -1), ChunkLifecycle::Absent);   // → toRequest（gen 窗内）
+        t7.insert(kkey(0, -1), ChunkLifecycle::Generated);
+        t7.insert(kkey(1, -3), ChunkLifecycle::Loaded);
+        t7.insert(kkey(4, -1), ChunkLifecycle::Generated); // d3 > gen → toEvict
+        t7.insert(kkey(-3, -4), ChunkLifecycle::Active);   // d4 → toEvict
+        t7.insert(kkey(4, 4), ChunkLifecycle::Absent);     // 半径外 Absent（不请求不驱逐）
+        GenerationPolicy pOk;
+        pOk.setParams(GenerationPolicyParams(true, 2, 1, 4));
+        const GenerationPolicy pOkTwin{ GenerationPolicyParams(true, 2, 1, 4) };
+        const bool inFields = fieldsEq(pOk.params(), pOkTwin.params())
+            && pOk.params().generationRadiusChunks == 2 && pOk.params().renderRadiusChunks == 1
+            && pOk.params().scanExtentChunks == 4;
+        const GenerationPolicyDecision dOk = pOk.decide(1, -1, tableSeam(t7));
+        const GenerationPolicyDecision dOkTwin = pOkTwin.decide(1, -1, tableSeam(t7));
+        const bool inDecide = dOk == dOkTwin && !dOk.toRequest.isEmpty()
+            && !dOk.toEvict.isEmpty();
+        ok = ok && inFields && inDecide;
+        if (!inFields || !inDecide)
+            diag += QStringLiteral("[in f=%1 d=%2 req=%3 ev=%4] ")
+                        .arg(inFields).arg(inDecide)
+                        .arg(reqStr(dOk.toRequest), evStr(dOk.toEvict));
+
+        // ③ 负值双生：全负入参 setParams ≡ 构造（全 0 归一 + 窗 = 玩家自格）：
+        GenerationPolicy pNeg;
+        pNeg.setParams(GenerationPolicyParams(true, -3, -7, -1));
+        const GenerationPolicy pNegTwin{ GenerationPolicyParams(true, -3, -7, -1) };
+        const bool negFields = fieldsEq(pNeg.params(), pNegTwin.params())
+            && pNeg.params().generationRadiusChunks == 0
+            && pNeg.params().renderRadiusChunks == 0 && pNeg.params().scanExtentChunks == 0;
+        QMap<qint64, ChunkLifecycle> tZero;
+        tZero.insert(kkey(0, 0), ChunkLifecycle::Absent);
+        const bool negDecide = pNeg.decide(0, 0, tableSeam(tZero))
+            == pNegTwin.decide(0, 0, tableSeam(tZero));
+        ok = ok && negFields && negDecide;
+        if (!negFields || !negDecide)
+            diag += QStringLiteral("[neg f=%1 d=%2] ").arg(negFields).arg(negDecide);
+
+        // ④ 默认关形状经 setParams 存活（decide 恒空——零变化参数面不被 setParams 破）：
+        GenerationPolicy pOff;
+        pOff.setParams(GenerationPolicyParams{});
+        const GenerationPolicyDecision dOff = pOff.decide(0, 0, tableSeam(t7));
+        const bool offOk = !pOff.params().streamingEnabled && dOff.toRequest.isEmpty()
+            && dOff.toEvict.isEmpty();
+        ok = ok && offOk;
+        if (!offOk) diag += QStringLiteral("[off] ");
+
+        // ⑤ 源码钉：规整唯一路径三站齐备（剥注释后 normalized( 恰 3 = static 定义 + 构造
+        //    调用 + setParams 调用——摘任一走线即红）：
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+                                     + QStringLiteral("/..")).absoluteFilePath(
+            QStringLiteral("src"));
+        const QStringList missGp = pinSet(
+            srcRoot + QStringLiteral("/World/generationpolicy.h"), {
+                SrcPin("r2017 ctor and setParams share the normalize path", "normalized(", 3),
+            });
+        for (const QString &m : missGp) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2017d setParams normalization twin: out-of-range setParams"
+                             " is field- and decision-identical to the constructed twin"
+                             " (gen 300 -> 255 with the (300,0) wraparound discriminator"
+                             " gone and an exact priority-255 request at the window edge),"
+                             " in-range setParams takes effect identically over a non-"
+                             " vacuous seam, all-negative setParams twins the constructor,"
+                             " the default-off shape survives setParams, and both write"
+                             " paths are pinned on the shared normalize (fix D, review"
+                             " 2026-09-16 Info)"
                           << (ok ? QString() : diag);
     });
 }

@@ -3,7 +3,7 @@
 #include "gamesession.h" // R20.07 被测：GameSession（固定 Tick / 暂停 / 命令委托 / WorldDelta）
 
 // R20.07 GameSession 探针段（5 腿 r2007a-e；filter 词 "r2007"；矩阵 552→556，band 555±2 内；
-// t1050 增 r2007e dt 钳制腿 → 569）。
+// t1050 增 r2007e dt 钳制腿 → 569；r2017 增 r2017a/c 两腿 → 606，见尾注）。
 // 置尾先例沿用（接 section10，runAll 末执行）；本段自建 48×48×96 seed 82 fresh 小世界
 //（section06 t973 同款 incantation，全矩阵 proven）×3（A/B 双生 + C 共享腿世界），对 rig
 // 世界 w 零接触。任务契约（docs/refactor-plan-2026-09-08.md §29.3 R20.07 原文）：
@@ -545,6 +545,305 @@ void MatrixRun::section11_gamesession()
                              " accumulation (no negative debt eating the next pump), dt at"
                              " the 1.0s cap still yields ten ticks - accumulator input"
                              " domain bounded at entry (t1050, Review_2026-09-15 #1)"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2017a：PlaceBlock state=0 同 id 异 state no-op 恢复（r2017 fix A，agent-review-
+    //    2026-09-16 #1）——三相对：①同 id 异 state 格（WoodStairs 朝向 s1）+ state=0 命令 →
+    //    no-op（id/state 保留、零事件零 delta、命令被消费[FIFO 后继 marker 照常执行]）；
+    //    ②同格显式 state=5 → 5 参全写生效（state 落 5；同 id 仅 state 变不发 broken/placed
+    //    = 既有接线语义[门开合口径]，编辑面如实不可见）+ 异格显式 state 对照（id 变 → 有
+    //    事件）；③回归柱：state=0 命令在「Air 格首放」「异 id 格替换」上落 (id,0) 与旧 5 参
+    //    /4 参权威逐位一致（绝对结果钉，非相对直调——直调写属 tick 外编辑，见 r2017c 窗口
+    //    语义）。选址显式布 state≠0 方块（楼梯朝向/台阶半高），diag 带 pre/post id+state。
+    //    MC 引证（三元组，2026-09-16 实读）：minecraft.wiki/w/Block_properties「replaceable」
+    //    属性——placed "in the same location as the replaceable block replace it" + "Most
+    //    blocks are not replaceable"（Java 现行机制）→ 同款不可替换方块占位 = 放置无效不改
+    //    原方块 → state=0 命令恢复 4 参同 id no-op。
+    //    阴性敏感（NEG-A）：摘 state==0 路由（state=0 回 5 参）→ ① 红（state 1 被强刷 0 =
+    //    被摘语义本体；②③⑤在 Air/异 id/显式 state 面与 5 参逐位一致不红）。
+    runLeg(QStringLiteral("r2017a PlaceBlock state=0 same-id no-op restore (r2017 fix A,"
+        " agent-review 2026-09-16 #1): a state=0 command onto a cell already holding the"
+        " SAME id with a non-zero state (WoodStairs facing state 1) is a no-op - id and"
+        " state preserved, zero BlockChanged events, empty WorldDelta, command consumed"
+        " (FIFO successor marker still executes in the same tick); an explicit state=5"
+        " command on the same cell full-writes through the five-arg authority (state"
+        " lands 5; a same-id state-only write emits no broken/placed so the edit face is"
+        " honestly invisible, while a fresh-cell explicit-state command lands state with"
+        " its event); regression columns hold: state=0 commands onto an Air cell and onto"
+        " a different-id cell land (id, state 0) exactly as the pre-fix authorities did"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // 选址（placeCol 列顶 +1 恒空；五格互斥，均不在本段早前腿用格上）：
+        const QPair<int, int> ps = placeCol(wC, 26, 26); // ①② 同格（WoodStairs）
+        const int hs = wC.heightAt(ps.first, ps.second);
+        const QPair<int, int> pr = placeCol(wC, 40, 24); // ③b 异 id 替换基底（先 Stone）
+        const int hr = wC.heightAt(pr.first, pr.second);
+        const QPair<int, int> pm = placeCol(wC, 12, 44); // ① FIFO 消费 marker（Dirt）
+        const int hm = wC.heightAt(pm.first, pm.second);
+        const QPair<int, int> p2 = placeCol(wC, 28, 28); // ② 显式 state 对照格（WoodSlab s1）
+        const int h2 = wC.heightAt(p2.first, p2.second);
+        const QPair<int, int> pa = placeCol(wC, 30, 30); // ③a Air 格首放（placeCol 跳过占用列）
+        const int ha = wC.heightAt(pa.first, pa.second);
+        const bool sitesOk = ps.first >= 0 && pr.first >= 0 && pm.first >= 0 && p2.first >= 0
+            && pa.first >= 0;
+        ok = ok && sitesOk;
+        if (!sitesOk) diag += QStringLiteral("[sites] ");
+
+        GameSession gs(wC);
+        QVector<WorldDelta> deltas;
+        QObject::connect(&gs, &GameSession::tickCompleted, &gs,
+            [&](int, const WorldDelta &d) { deltas.push_back(d); });
+
+        if (ok) {
+            // 相 0（tick 1）：显式 state 命令布底——S=WoodStairs 朝向 s1（5 参权威）、R=Stone：
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ ps.first, hs + 1, ps.second },
+                quint8(BR::WoodStairs), 7u, 1u, 0, 1));
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ pr.first, hr + 1, pr.second },
+                quint8(BR::Stone), 7u, 2u, 0));
+            const int t1 = gs.stepTick(0.1);
+            const quint8 sId = wC.blockAt(ps.first, hs + 1, ps.second);
+            const quint8 sSt = wC.stateAt(ps.first, hs + 1, ps.second);
+            const bool baseOk = t1 == 1 && deltas.size() == 1
+                && deltas[0].affectedCount == 2 && deltas[0].changedBlocks == 2
+                && sId == quint8(BR::WoodStairs) && sSt == 1
+                && wC.blockAt(pr.first, hr + 1, pr.second) == quint8(BR::Stone);
+            // 相 0 事件面收账（两 BlockChanged：Stairs@S / Stone@R，tick 1）——不清队会污染
+            //   相① 的 pop 序（首版腿即此坑：pop 到 tick1 遗留事件）：
+            Event eb1{}, eb2{};
+            const bool baseEvOk = gs.events().pop(eb1) && gs.events().pop(eb2)
+                && gs.events().isEmpty()
+                && eb1.blockId == quint8(BR::WoodStairs) && eb1.tick == 1
+                && eb2.blockId == quint8(BR::Stone) && eb2.tick == 1;
+            ok = ok && baseOk && baseEvOk;
+            if (!baseOk || !baseEvOk)
+                diag += QStringLiteral("[base t=%1 d=%2/%3 S=%4/%5 ev=%6/%7] ").arg(t1)
+                            .arg(deltas.value(0).affectedCount)
+                            .arg(deltas.value(0).changedBlocks).arg(sId).arg(sSt)
+                            .arg(int(eb1.blockId)).arg(int(eb2.blockId));
+        }
+
+        // 相 ①（tick 2）：同 id 异 state 格 + state=0 命令 → no-op（NEG-A 恰红点）：
+        if (ok) {
+            const quint8 preId = wC.blockAt(ps.first, hs + 1, ps.second);
+            const quint8 preSt = wC.stateAt(ps.first, hs + 1, ps.second);
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ ps.first, hs + 1, ps.second },
+                quint8(BR::WoodStairs), 7u, 3u, 0, 0)); // state=0 默认面 → 4 参 no-op
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ pm.first, hm + 1, pm.second },
+                quint8(BR::Dirt), 7u, 4u, 0)); // FIFO marker：证 no-op 命令被消费不堵队
+            const int t2 = gs.stepTick(0.1);
+            const quint8 postId = wC.blockAt(ps.first, hs + 1, ps.second);
+            const quint8 postSt = wC.stateAt(ps.first, hs + 1, ps.second);
+            Event e{};
+            const bool noopOk = t2 == 1 && deltas.size() == 2
+                && deltas[1].affectedCount == 1 && deltas[1].changedBlocks == 1 // 恰 marker 一格
+                && postId == preId && preId == quint8(BR::WoodStairs)
+                && postSt == preSt && preSt == 1 // id/state 全保留（强刷 0 即 NEG-A 红）
+                && wC.blockAt(pm.first, hm + 1, pm.second) == quint8(BR::Dirt)
+                && gs.events().pop(e) && gs.events().isEmpty()
+                && e.pos == BlockPos{ pm.first, hm + 1, pm.second }
+                && e.blockId == quint8(BR::Dirt) && e.tick == 2;
+            ok = ok && noopOk;
+            if (!noopOk)
+                diag += QStringLiteral("[noop pre=%1/%2 post=%3/%4 d=%5/%6 evM=%7] ")
+                            .arg(preId).arg(preSt).arg(postId).arg(postSt)
+                            .arg(deltas.value(1).affectedCount)
+                            .arg(deltas.value(1).changedBlocks)
+                            .arg(e.blockId);
+        }
+
+        // 相 ②（tick 3）：同格显式 state=5 → 5 参全写生效（state-only 写如实无事件）+ 异格
+        //    显式 state=1（id 变 → 有事件——5 参权威 + 信号面双钉）：
+        if (ok) {
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ ps.first, hs + 1, ps.second },
+                quint8(BR::WoodStairs), 7u, 5u, 0, 5)); // 同 id state 1→5（5 参全写）
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ p2.first, h2 + 1, p2.second },
+                quint8(BR::WoodSlab), 7u, 6u, 0, 1)); // Air 格显式 state（上半砖）
+            const int t3 = gs.stepTick(0.1);
+            const quint8 postId = wC.blockAt(ps.first, hs + 1, ps.second);
+            const quint8 postSt = wC.stateAt(ps.first, hs + 1, ps.second);
+            Event e{};
+            const bool explicitOk = t3 == 1 && deltas.size() == 3
+                && deltas[2].affectedCount == 1 && deltas[2].changedBlocks == 1 // 恰 S2 一格
+                && postId == quint8(BR::WoodStairs) && postSt == 5 // state 落 5（全写生效）
+                && wC.stateAt(p2.first, h2 + 1, p2.second) == 1
+                && wC.blockAt(p2.first, h2 + 1, p2.second) == quint8(BR::WoodSlab)
+                && gs.events().pop(e) && gs.events().isEmpty()
+                && e.pos == BlockPos{ p2.first, h2 + 1, p2.second }
+                && e.blockId == quint8(BR::WoodSlab) && e.tick == 3;
+            ok = ok && explicitOk;
+            if (!explicitOk)
+                diag += QStringLiteral("[expl S=%1/%2 d=%3/%4 slab=%5/%6] ")
+                            .arg(postId).arg(postSt)
+                            .arg(deltas.value(2).affectedCount)
+                            .arg(deltas.value(2).changedBlocks)
+                            .arg(wC.blockAt(p2.first, h2 + 1, p2.second))
+                            .arg(wC.stateAt(p2.first, h2 + 1, p2.second));
+        }
+
+        // 相 ③（tick 4）：回归柱——state=0 命令在 Air 格首放与异 id 替换上落 (id,0)（与旧
+        //    4/5 参权威逐位一致；fix A 唯一语义变化 = 相① 的同 id 异 state no-op）：
+        if (ok) {
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ pa.first, ha + 1, pa.second },
+                quint8(BR::WoodSlab), 7u, 7u, 0, 0)); // Air 格首放 → (WoodSlab, 0) 下半
+            gs.enqueueCommand(Command::placeBlock(BlockPos{ pr.first, hr + 1, pr.second },
+                quint8(BR::Cobble), 7u, 8u, 0, 0)); // Stone→Cobble 替换 → (Cobble, 0)
+            const int t4 = gs.stepTick(0.1);
+            Event e1{}, e2{};
+            const bool regOk = t4 == 1 && deltas.size() == 4
+                && deltas[3].affectedCount == 2 && deltas[3].changedBlocks == 2
+                && wC.blockAt(pa.first, ha + 1, pa.second) == quint8(BR::WoodSlab)
+                && wC.stateAt(pa.first, ha + 1, pa.second) == 0
+                && wC.blockAt(pr.first, hr + 1, pr.second) == quint8(BR::Cobble)
+                && wC.stateAt(pr.first, hr + 1, pr.second) == 0
+                && gs.events().pop(e1) && gs.events().pop(e2) && gs.events().isEmpty()
+                && e1.blockId == quint8(BR::WoodSlab) && e2.blockId == quint8(BR::Cobble)
+                && gs.droppedEventCount() == 0 && gs.droppedEditCount() == 0;
+            ok = ok && regOk;
+            if (!regOk)
+                diag += QStringLiteral("[reg d=%1/%2 A=%3/%4 R=%5/%6] ")
+                            .arg(deltas.value(3).affectedCount)
+                            .arg(deltas.value(3).changedBlocks)
+                            .arg(wC.blockAt(pa.first, ha + 1, pa.second))
+                            .arg(wC.stateAt(pa.first, ha + 1, pa.second))
+                            .arg(wC.blockAt(pr.first, hr + 1, pr.second))
+                            .arg(wC.stateAt(pr.first, hr + 1, pr.second));
+        }
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2017a PlaceBlock state=0 same-id no-op restore: same-id"
+                             " different-state cell (WoodStairs s1) + state=0 command is a"
+                             " consumed no-op (id/state kept, zero events, empty delta,"
+                             " FIFO marker executes), explicit state=5 full-writes (state"
+                             " lands, state-only write honestly invisible to the edit"
+                             " face) with fresh-cell explicit state keeping its event,"
+                             " and Air-first / different-id replacement columns land"
+                             " (id, 0) unchanged (fix A, review 2026-09-16 #1)"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2017c：out-of-tick 编辑可见性（r2017 fix C，agent-review-2026-09-16 #3）——tick
+    //    收口后、下一 tick 开始前到达的编辑（直写 World → blockPlaced/blockBroken → noteEdit
+    //    → m_edits）在下一收口照常作为 WorldDelta + BlockChanged 发布，绝不静默丢失；注入后
+    //    事件队列仍空 = R20.09「收口单点发布」钉；tick 内累积面回归柱（下一 tick 命令编辑在
+    //    自身收口发布）不变。
+    //    窗口语义（选型②，gamesession.h 头注立证）：「start-clear 到收口」→「上收口到本收
+    //    口」，清账唯一落点 = 收口发布之后；r2009b/c 集合面单源断言已随修订移入信号栈内
+    //    （双语义不变量，本腿是唯一 NEG-C 敏感面）。
+    //    阴性敏感（NEG-C）：复原 runOneTick 开头 m_edits.clear() → 注入编辑在 tick 2 开头被
+    //    整体抹除 → 收口 delta（aff/chg 2）与事件（Stone@P/Air@Q）双缺 → 恰红本腿。
+    runLeg(QStringLiteral("r2017c out-of-tick edit visibility (r2017 fix C, agent-review"
+        " 2026-09-16 #3): edits arriving after a tick close-out and before the next tick"
+        " (direct World writes firing blockPlaced/blockBroken into the session's edit"
+        " buffer) are published at the NEXT close-out as a WorldDelta carrying both"
+        " affected chunks and two BlockChanged events (Stone placed, surface broken) -"
+        " never silently dropped; before that close-out the event queue stays empty and"
+        " the delta/dirty face shows the pending pair (single-point publish preserved);"
+        " the in-tick accumulation face is unchanged (the next tick's command edit"
+        " publishes at its own close-out)"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // 选址：注入格 P（放 Stone，chunk (2,2)）、破位 Q（表面非 Air 实证 + 顶上两格净空
+        //    自证——附着花草/甘蔗会级联清块 = 第三笔编辑，r2009c chg 首红同源教训）、
+        //    tick 内回归柱格 K（placeCol 选列，h+1 空自证）——互斥且不在本段早前腿用格上：
+        const QPair<int, int> pp = placeCol(wC, 34, 34);
+        const int hp = wC.heightAt(pp.first, pp.second);
+        QPair<int, int> pq(-1, -1);
+        int hq = -1;
+        for (int dz = 0; dz < 8 && pq.first < 0; ++dz) {
+            const int z = 40 + dz;
+            const int h = wC.heightAt(4, z);
+            if (h >= 0 && h + 2 < wC.height() && wC.blockAt(4, h, z) != quint8(BR::Air)
+                && wC.blockAt(4, h + 1, z) == 0 && wC.blockAt(4, h + 2, z) == 0) {
+                pq = QPair<int, int>(4, z);
+                hq = h;
+            }
+        }
+        const QPair<int, int> kp = placeCol(wC, 8, 8);
+        const int hk = kp.first >= 0 ? wC.heightAt(kp.first, kp.second) : -1;
+        const bool sitesOk = pp.first >= 0 && pq.first >= 0 && kp.first >= 0
+            && wC.blockAt(pp.first, hp + 1, pp.second) == quint8(BR::Air);
+        ok = ok && sitesOk;
+        if (!sitesOk) diag += QStringLiteral("[sites pp=%1 pq=%2 kp=%3] ")
+                                 .arg(pp.first).arg(pq.first).arg(kp.first);
+
+        GameSession gs(wC);
+        QVector<WorldDelta> deltas;
+        QObject::connect(&gs, &GameSession::tickCompleted, &gs,
+            [&](int, const WorldDelta &d) { deltas.push_back(d); });
+
+        // tick 1：稳态收口（建立「上一收口」时点）：
+        const int t1 = gs.stepTick(0.1);
+        const bool steadyOk = t1 == 1 && deltas.size() == 1
+            && deltas[0].affectedCount == 0 && deltas[0].changedBlocks == 0;
+        ok = ok && steadyOk;
+        if (!steadyOk) diag += QStringLiteral("[steady t=%1] ").arg(t1);
+
+        // tick 1 收口后（tick 栈外）注入：直写 World → 语义信号 → noteEdit → m_edits：
+        const bool placed = wC.setBlock(pp.first, hp + 1, pp.second, quint8(BR::Stone));
+        const bool broke = wC.setBlock(pq.first, hq, pq.second, quint8(BR::Air));
+        ok = ok && placed && broke;
+        if (!placed || !broke) diag += QStringLiteral("[inject p=%1 b=%2] ").arg(placed).arg(broke);
+
+        // 单点发布钉：注入后、下一 tick 前事件队列恒空；账面挂起恰 2 chunk（下一窗待发布）：
+        const bool singleOk = gs.events().isEmpty() && gs.lastDelta().affectedCount == 0
+            && gs.lastDirtyChunks().size() == 2;
+        ok = ok && singleOk;
+        if (!singleOk)
+            diag += QStringLiteral("[single evEmpty=%1 lastDelta=%2 pending=%3] ")
+                        .arg(gs.events().isEmpty()).arg(gs.lastDelta().affectedCount)
+                        .arg(gs.lastDirtyChunks().size());
+
+        // tick 2：稳态泵——上一窗残余（out-of-tick 注入对）在本收口完整发布：
+        const int t2 = gs.stepTick(0.1);
+        Event e1{}, e2{};
+        const bool publishedOk = t2 == 1 && deltas.size() == 2
+            && deltas[1].affectedCount == 2 && deltas[1].changedBlocks == 2
+            && deltas[1].tick == 2
+            && deltas[1].affects(ChunkKey::fromWorld(pp.first, pp.second, Chunk::kSize))
+            && deltas[1].affects(ChunkKey::fromWorld(pq.first, pq.second, Chunk::kSize))
+            && gs.events().pop(e1) && gs.events().pop(e2) && gs.events().isEmpty()
+            && e1.pos == BlockPos{ pp.first, hp + 1, pp.second }
+            && e1.blockId == quint8(BR::Stone) && e1.tick == 2
+            && e2.pos == BlockPos{ pq.first, hq, pq.second }
+            && e2.blockId == quint8(BR::Air) && e2.tick == 2;
+        ok = ok && publishedOk;
+        if (!publishedOk)
+            diag += QStringLiteral("[pub n=%1 d=%2/%3 e1@%4=%5 e2@%6=%7] ")
+                        .arg(deltas.size()).arg(deltas.value(1).affectedCount)
+                        .arg(deltas.value(1).changedBlocks)
+                        .arg(e1.pos.x).arg(e1.blockId)
+                        .arg(e2.pos.x).arg(e2.blockId);
+
+        // tick 内累积面回归柱：tick 3 的命令编辑在自身收口发布（不与注入窗混淆）：
+        gs.enqueueCommand(Command::placeBlock(BlockPos{ kp.first, hk + 1, kp.second }, quint8(BR::Stone),
+            7u, 9u, 0));
+        const int t3 = gs.stepTick(0.1);
+        Event e3{};
+        const bool inTickOk = t3 == 1 && deltas.size() == 3
+            && deltas[2].affectedCount == 1 && deltas[2].changedBlocks == 1
+            && deltas[2].tick == 3
+            && gs.events().pop(e3) && gs.events().isEmpty()
+            && e3.pos == BlockPos{ kp.first, hk + 1, kp.second } && e3.blockId == quint8(BR::Stone)
+            && e3.tick == 3 && gs.droppedEventCount() == 0 && gs.droppedEditCount() == 0;
+        ok = ok && inTickOk;
+        if (!inTickOk)
+            diag += QStringLiteral("[intick n=%1 d=%2/%3] ").arg(deltas.size())
+                        .arg(deltas.value(2).affectedCount)
+                        .arg(deltas.value(2).changedBlocks);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2017c out-of-tick edit visibility: edits landing after a"
+                             " close-out (direct writes -> noteEdit) publish at the NEXT"
+                             " close-out as one WorldDelta (both chunks) plus both"
+                             " BlockChanged events, with the queue empty and the pending"
+                             " pair visible before it (single-point publish kept), and"
+                             " the next tick's command edit still publishes at its own"
+                             " close-out (fix C, review 2026-09-16 #3)"
                           << (ok ? QString() : diag);
     });
 }

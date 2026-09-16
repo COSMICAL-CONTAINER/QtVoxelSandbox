@@ -5,8 +5,8 @@
 #include "worldfacade.h"    // R20.10 联动面：三门（chunkExistsAt/chunkDirtyAt/chunkFluidOnlyDirtyAt）生命周期接线
 
 // R20.10 Chunk lifecycle 探针段（6 腿 r2010a-d + r2010ba/bb；filter 词 "r2010"；矩阵
-// 570→574，R20.10b 595→597，band 597±1 内）。置尾先例沿用（接 section13，runAll 末执行）；
-// r2010a 纯图腿零世界（独立 ChunkManager 网格），r2010b-d 自建 fresh 小世界 48×48×96 seed 82
+// 570→574，R20.10b 595→597，band 597±1 内；r2017 增 r2017b Mesh kind 门腿 → 606，见尾注）。
+// 置尾先例沿用（接 section13，runAll 末执行）；r2010a 纯图腿零世界（独立 ChunkManager 网格），r2010b-d 自建 fresh 小世界 48×48×96 seed 82
 // + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)（section11+ 先例），r2010ba/bb
 // 裸 3×3 ChunkManager + 裸 scheduler（零世界零 tick 零 RNG），对 rig 世界 w 零接触。任务契约
 //（docs/refactor-plan-2026-09-08.md §29.3 R20.10 原文四验收）：
@@ -1080,6 +1080,289 @@ void MatrixRun::section14_chunklifecycle()
                              " failure on a default-Loaded chunk leaves the table bit-"
                              "untouched, both delivery points share one judge (pins), and"
                              " the worker side never drives lifecycle"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2017b：生命周期边 Mesh kind 门（r2017 fix B，agent-review-2026-09-16 #2）——同步
+    //    pump 与 pumpAsync 两路、①②⑨ 三边、成功+失败两态：Mesh 类 job 全流程生命周期表
+    //    快照逐位不动；Generate kind 对照柱三边照旧驱动（kind 域门非全局摘除）。
+    //    判别面（被摘语义本体 = Mesh 语义下本应被驱动的边全部不发生）：
+    //      · Absent 格 Mesh 成功：执行时刻 worker 实测 Absent（边①被门，旧码是 Loading）+
+    //        终态停 Absent（边②被门，旧码到 Generated）；
+    //      · Loading 格 Mesh 失败：终态停 Loading（边⑨被门，旧码回 Absent）；
+    //      · 异步交接相：handout 后停 Absent（边①被门，旧码是 Loading）。
+    //    阴性敏感（NEG-B）：六处 kind 门各前置 false &&（= Mesh 照旧驱动生命周期）→ 本腿
+    //    多场景恰红；Generate/Load 腿族（r2010ba/bb、r2011d、r2012d）零 Mesh-with-chunks
+    //    场景不受扰（r2011a/c 的 Mesh job 无挂点 scheduler，生命周期面不存在）。
+    //    异步路 = ScriptedAsyncWorker 测试替身（r2010bb 先例——零线程零时序，完成记录按
+    //    脚本 FIFO 交付，交接边①在收割相之前无条件发生 = 确定性）。
+    runLeg(QStringLiteral("r2017b lifecycle-edge Mesh-kind gate (r2017 fix B, agent-review"
+        " 2026-09-16 #2): a Mesh job drives NO lifecycle edge on either pump path, both"
+        " success and failure - sync: a Mesh job on an Absent chunk is observed Absent by"
+        " the worker at execution (edge 1 gated) and the chunk stays Absent after success"
+        " (edge 2 gated), a Mesh job on a pre-positioned Loading chunk leaves it Loading"
+        " after success (edge 2 gated) and after a delivered failure (edge 9 gated), and"
+        " the nine-entry table is bit-identical across every Mesh scenario; async: the"
+        " handout phase leaves the Absent chunk Absent (edge 1 gated at handout) and the"
+        " harvested success keeps it Absent (edge 2 gated); Generate control columns on"
+        " the same routes still drive edges 1-2 and 1-9 (the gate is kind-scoped, not a"
+        " blanket removal), and the gate is pinned at all six edge sites"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // 表快照/对照帮手（r2010ba ④ 同款）：
+        const auto snap = [](ChunkManager &m) {
+            std::array<ChunkLifecycle, 9> t {};
+            for (int cz = 0; cz < 3; ++cz)
+                for (int cx = 0; cx < 3; ++cx)
+                    t[size_t(cx + 3 * cz)] = m.lifecycleAt(cx, cz);
+            return t;
+        };
+
+        // 同步 Mesh 探针 worker（r2010ba SyncFailWorker 同族 + kind 记录 + 执行时刻观察）：
+        class MeshProbeWorker : public GenerationWorker
+        {
+        public:
+            struct Exec
+            {
+                GenerationJobKind kind = GenerationJobKind::Generate;
+                quint64 key = 0;
+                int lifecycle = -1; // 执行时刻 lifecycleAt 观察（-1 = 无挂点）
+            };
+            QVector<Exec> trace;
+            QSet<quint64> failKeys;
+            const ChunkManager *observe = nullptr;
+
+            Result<void> execute(const GenerationRequest &req) override
+            {
+                trace.append({ req.kind, req.key.packed(),
+                    observe ? int(observe->lifecycleAt(req.key.cx, req.key.cz)) : -1 });
+                if (failKeys.contains(req.key.packed()))
+                    return Result<void>::fail(42, "synthetic worker failure");
+                return Result<void>::ok();
+            }
+        };
+
+        // ── 同步路：裸 3×3 ChunkManager（默认稳态全 Loaded 自证）────────────────────────
+        ChunkManager mgr(48, 48, 32);
+        bool steadyOk = mgr.chunksX() == 3 && mgr.chunksZ() == 3;
+        for (int cz = 0; cz < 3 && steadyOk; ++cz)
+            for (int cx = 0; cx < 3 && steadyOk; ++cx)
+                steadyOk = steadyOk && mgr.lifecycleAt(cx, cz) == ChunkLifecycle::Loaded;
+        ok = ok && steadyOk;
+        if (!steadyOk) diag += QStringLiteral("[steady] ");
+
+        GenerationScheduler sched(&mgr);
+        MeshProbeWorker w;
+        w.observe = &mgr;
+        sched.setWorker(&w);
+
+        // ① Absent 格 Mesh 成功：边①②全被门（worker 实测 Absent + 终态停 Absent + 表逐位）：
+        const bool route22 = mgr.setLifecycle(2, 2, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(2, 2, ChunkLifecycle::Absent);
+        const auto before22 = snap(mgr);
+        const auto rm1 = sched.submit(GenerationJobKind::Mesh, ChunkKey{ 2, 2 });
+        sched.pump();
+        GenerationJobOutcome om1;
+        const bool meshAbsentOk = route22 && rm1.isOk() && w.trace.size() == 1
+            && w.trace[0].kind == GenerationJobKind::Mesh && w.trace[0].key == pk(2, 2)
+            && w.trace[0].lifecycle == int(ChunkLifecycle::Absent) // 边①被门（旧码 Loading）
+            && sched.outcomeCount() == 1 && sched.takeOutcome(om1)
+            && om1.requestId == rm1.value() && !isError(om1.error)
+            && mgr.lifecycleAt(2, 2) == ChunkLifecycle::Absent // 边②被门（旧码 Generated）
+            && snap(mgr) == before22; // 表逐位不动
+        ok = ok && meshAbsentOk;
+        if (!meshAbsentOk)
+            diag += QStringLiteral("[mAbsent exec=%1 life=%2 out=%3 table=%4] ")
+                        .arg(w.trace.value(0).lifecycle)
+                        .arg(int(mgr.lifecycleAt(2, 2)))
+                        .arg(sched.outcomeCount())
+                        .arg(snap(mgr) == before22);
+
+        // ② Loading 格 Mesh 成功：边②被门（Loading→Generated 合法边被 kind 门拦，终态停
+        //    Loading——最锐判别：守卫自身拦不住这条合法边，只有 kind 门能）：
+        const bool route01 = mgr.setLifecycle(0, 1, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(0, 1, ChunkLifecycle::Absent)
+            && mgr.setLifecycle(0, 1, ChunkLifecycle::Loading);
+        const auto before01 = snap(mgr);
+        const auto rm2 = sched.submit(GenerationJobKind::Mesh, ChunkKey{ 0, 1 });
+        sched.pump();
+        GenerationJobOutcome om2;
+        const bool meshLoadingOk = route01 && rm2.isOk() && w.trace.size() == 2
+            && sched.outcomeCount() == 1 && sched.takeOutcome(om2)
+            && om2.requestId == rm2.value() && !isError(om2.error)
+            && mgr.lifecycleAt(0, 1) == ChunkLifecycle::Loading // 边②被门（旧码 Generated）
+            && snap(mgr) == before01;
+        ok = ok && meshLoadingOk;
+        if (!meshLoadingOk)
+            diag += QStringLiteral("[mLoading life=%1 table=%2] ")
+                        .arg(int(mgr.lifecycleAt(0, 1))).arg(snap(mgr) == before01);
+
+        // ③ Loading 格 Mesh 失败：失败 outcome 实投但边⑨被门（Loading→Absent 合法边被拦，
+        //    终态停 Loading——旧码回 Absent）：
+        const bool route12 = mgr.setLifecycle(1, 2, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(1, 2, ChunkLifecycle::Absent)
+            && mgr.setLifecycle(1, 2, ChunkLifecycle::Loading);
+        const auto before12 = snap(mgr);
+        w.failKeys.insert(pk(1, 2));
+        const auto rm3 = sched.submit(GenerationJobKind::Mesh, ChunkKey{ 1, 2 });
+        sched.pump();
+        GenerationJobOutcome om3;
+        const bool meshFailOk = route12 && rm3.isOk() && w.trace.size() == 3
+            && sched.outcomeCount() == 1 && sched.takeOutcome(om3)
+            && om3.requestId == rm3.value() && isError(om3.error) && om3.error.code == 42
+            && mgr.lifecycleAt(1, 2) == ChunkLifecycle::Loading // 边⑨被门（旧码 Absent）
+            && snap(mgr) == before12;
+        w.failKeys.clear();
+        ok = ok && meshFailOk;
+        if (!meshFailOk)
+            diag += QStringLiteral("[mFail out=%1 life=%2 table=%3] ")
+                        .arg(sched.outcomeCount())
+                        .arg(int(mgr.lifecycleAt(1, 2))).arg(snap(mgr) == before12);
+
+        // ④ Generate 对照柱（同路由）：边①②照旧驱动（kind 门是域门非全局摘除）：
+        const bool route00 = mgr.setLifecycle(0, 0, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(0, 0, ChunkLifecycle::Absent);
+        const auto rg1 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 0, 0 });
+        sched.pump();
+        GenerationJobOutcome og1;
+        const bool genCtrlOk = route00 && rg1.isOk() && w.trace.size() == 4
+            && w.trace[3].kind == GenerationJobKind::Generate
+            && w.trace[3].lifecycle == int(ChunkLifecycle::Loading) // 边①照旧（实测 Loading）
+            && sched.outcomeCount() == 1 && sched.takeOutcome(og1)
+            && og1.requestId == rg1.value() && !isError(og1.error)
+            && mgr.lifecycleAt(0, 0) == ChunkLifecycle::Generated; // 边②照旧
+        ok = ok && genCtrlOk;
+        if (!genCtrlOk)
+            diag += QStringLiteral("[gCtrl exec=%1 life=%2] ")
+                        .arg(w.trace.value(3).lifecycle)
+                        .arg(int(mgr.lifecycleAt(0, 0)));
+
+        // ⑤ Generate 失败对照柱：失败 outcome 实投 → 边⑨照旧（①→⑨ 往返，终 Absent）：
+        const bool route20 = mgr.setLifecycle(2, 0, ChunkLifecycle::Evicting)
+            && mgr.setLifecycle(2, 0, ChunkLifecycle::Absent);
+        w.failKeys.insert(pk(2, 0));
+        const auto rg2 = sched.submit(GenerationJobKind::Generate, ChunkKey{ 2, 0 });
+        sched.pump();
+        GenerationJobOutcome og2;
+        const bool genFailOk = route20 && rg2.isOk() && w.trace.size() == 5
+            && w.trace[4].lifecycle == int(ChunkLifecycle::Loading) // 边①照旧
+            && sched.outcomeCount() == 1 && sched.takeOutcome(og2)
+            && og2.requestId == rg2.value() && isError(og2.error) && og2.error.code == 42
+            && mgr.lifecycleAt(2, 0) == ChunkLifecycle::Absent; // 边⑨照旧（回可重试态）
+        w.failKeys.clear();
+        ok = ok && genFailOk;
+        if (!genFailOk)
+            diag += QStringLiteral("[gFail exec=%1 life=%2] ")
+                        .arg(w.trace.value(4).lifecycle)
+                        .arg(int(mgr.lifecycleAt(2, 0)));
+
+        // ── 异步路（ScriptedAsyncWorker 测试替身，r2010bb 先例）：mgr2 + 脚本化完成 ──────
+        class ScriptedMeshWorker : public GenerationWorker
+        {
+        public:
+            QVector<GenerationRequest> handed; // 交接序（submitAsync 受理记录）
+            QVector<quint64> handedJobIds;
+            struct Done
+            {
+                quint64 jobId = 0;
+                Error error{};
+            };
+            QVector<Done> script;
+
+            bool isAsynchronous() const override { return true; }
+            Result<void> execute(const GenerationRequest &req) override
+            {
+                Q_UNUSED(req);
+                return Result<void>::fail(201, "ScriptedMeshWorker is async-only");
+            }
+            Result<void> submitAsync(const GenerationRequest &req, quint64 jobId) override
+            {
+                handed.append(req);
+                handedJobIds.append(jobId);
+                return Result<void>::ok();
+            }
+            bool takeCompletedAsync(CompletedGeneration &out) override
+            {
+                if (script.isEmpty())
+                    return false;
+                const Done d = script.takeFirst();
+                out = CompletedGeneration{ d.jobId, d.error };
+                return true;
+            }
+        };
+
+        ChunkManager mgr2(48, 48, 32);
+        GenerationScheduler sched2(&mgr2);
+        ScriptedMeshWorker w2;
+        sched2.setWorker(&w2);
+
+        // ⑥ Absent 格 Mesh 异步：交接相边①被门（handout 后停 Absent——旧码是 Loading）+
+        //    收割成功后边②被门（终态停 Absent）+ 表逐位 + 在途账本双消：
+        const bool route11 = mgr2.setLifecycle(1, 1, ChunkLifecycle::Evicting)
+            && mgr2.setLifecycle(1, 1, ChunkLifecycle::Absent);
+        const auto before11 = snap(mgr2);
+        const auto rm4 = sched2.submit(GenerationJobKind::Mesh, ChunkKey{ 1, 1 });
+        sched2.pump(); // 交接相
+        const bool handOk = route11 && rm4.isOk() && w2.handed.size() == 1
+            && w2.handed[0].kind == GenerationJobKind::Mesh
+            && mgr2.lifecycleAt(1, 1) == ChunkLifecycle::Absent // 边①被门（旧码 Loading）
+            && sched2.inFlightJobCount() == 1;
+        w2.script.append({ w2.handedJobIds[0], Error{} });
+        sched2.pump(); // 收割相
+        GenerationJobOutcome om4;
+        const bool meshAsyncOk = handOk && sched2.outcomeCount() == 1
+            && sched2.takeOutcome(om4) && om4.requestId == rm4.value() && !isError(om4.error)
+            && mgr2.lifecycleAt(1, 1) == ChunkLifecycle::Absent // 边②被门（旧码 Generated）
+            && snap(mgr2) == before11 && sched2.inFlightJobCount() == 0;
+        ok = ok && meshAsyncOk;
+        if (!meshAsyncOk)
+            diag += QStringLiteral("[mAsync hand=%1 life=%2 out=%3 table=%4] ")
+                        .arg(w2.handed.size()).arg(int(mgr2.lifecycleAt(1, 1)))
+                        .arg(sched2.outcomeCount()).arg(snap(mgr2) == before11);
+
+        // ⑦ Generate 异步对照柱：交接相边①照旧（Loading）+ 收割成功边②照旧（Generated）：
+        const bool route02 = mgr2.setLifecycle(0, 2, ChunkLifecycle::Evicting)
+            && mgr2.setLifecycle(0, 2, ChunkLifecycle::Absent);
+        const auto rg3 = sched2.submit(GenerationJobKind::Generate, ChunkKey{ 0, 2 });
+        sched2.pump(); // 交接相
+        const bool hand2Ok = route02 && rg3.isOk() && w2.handed.size() == 2
+            && mgr2.lifecycleAt(0, 2) == ChunkLifecycle::Loading; // 边①照旧
+        w2.script.append({ w2.handedJobIds[1], Error{} });
+        sched2.pump(); // 收割相
+        GenerationJobOutcome og3;
+        const bool genAsyncOk = hand2Ok && sched2.outcomeCount() == 1
+            && sched2.takeOutcome(og3) && og3.requestId == rg3.value() && !isError(og3.error)
+            && mgr2.lifecycleAt(0, 2) == ChunkLifecycle::Generated; // 边②照旧
+        ok = ok && genAsyncOk;
+        if (!genAsyncOk)
+            diag += QStringLiteral("[gAsync hand=%1 life=%2] ")
+                        .arg(w2.handed.size()).arg(int(mgr2.lifecycleAt(0, 2)));
+
+        // ⑧ 源码钉：六处边驱动点全部带 kind 门（剥注释计数；NEG-B 的 false && 前缀不改变
+        //    计数 → 钉面对 NEG-B 不敏感，恰红面归行为断言 = R20.11 纪律）：
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+                                     + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        const QStringList missGj = pinSet(
+            srcRoot + QStringLiteral("/World/generationjob.h"), {
+                SrcPin("r2017 Mesh-kind gate at all six lifecycle edge sites",
+                    "job.kind != GenerationJobKind::Mesh", 6),
+            });
+        for (const QString &m : missGj) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2017b lifecycle-edge Mesh-kind gate: Mesh jobs drive no"
+                             " lifecycle edge on either pump path in success or failure"
+                             " (worker observes Absent at execution, Loading stays Loading"
+                             " through edge-2 and edge-9 routes, async handout and harvest"
+                             " keep Absent, tables bit-identical), Generate control columns"
+                             " still walk edges 1-2 and 1-9 on the same routes, and the"
+                             " gate is pinned at all six edge sites (fix B, review"
+                             " 2026-09-16 #2)"
                           << (ok ? QString() : diag);
     });
 }
