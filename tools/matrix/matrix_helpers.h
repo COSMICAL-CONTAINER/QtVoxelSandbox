@@ -328,4 +328,11 @@ private:
                                   //   80×80×96 fresh sparse 小世界族 + 48×48×96 fixed 小世界
                                   //   + 真 PlayerController 走查 + 真线程 worker（防 flake
                                   //   deadline 有界），rig 世界 w 零接触，接 section26）
+    void section28_eviction_persistence(); // §29.5-W3 驱逐 + Edits-on-evict 落盘 探针（置尾
+                                  //   先例沿用：r2025a fixed 零活动墙（无附加表构造）/
+                                  //   r2025b 驱逐回灌承重（真临时库 fresh+用后即删：persist
+                                  //   先于转移序柱 + ⑥⑦擦槽 + revision 沿 + blob 物化逐位
+                                  //   恒等 + population 跳过）/ r2025c 失败中止（真锁注入）
+                                  //   + 实体先移除语义 / r2025d 结构钉——80×80×96 fresh
+                                  //   sparse 小世界族，rig 世界 w 零接触，接 section27）
 };
