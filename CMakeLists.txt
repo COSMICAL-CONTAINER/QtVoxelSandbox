@@ -1004,6 +1004,16 @@ add_executable(redstone_matrix_test
     #   零世界（缝 = QMap 合成生命周期表，rig 零接触），无新增 .cpp——world/chunk 系源文件已列）。
     tools/matrix/section21_chunkstreamdriver.cpp
     src/World/chunkstreamdriver.h
+    # §29.4-P3 ChunkEvictor 卸载+Edits-on-evict 探针段（置尾先例沿用：runAll 末执行，filter 词
+    #   r2019；4 腿 r2019a-d = 默认关惰性承重墙[关态两缝不可达 + P2 形态双生恒等]/驱逐回灌往返
+    #   [真 SaveCoordinator + fresh 临时库 + 真世界生命周期表：persist 先于转移调用序柱 + 合法边
+    #   ⑥⑦ + Load kind 重入回灌逐位恒等]/失败中止[persist 失败 aborted 不转移 + 重报收敛 + 拒绝
+    #   有界 + null 缝 fail-safe]/结构钉+kind 选择[双头钉 + Load 恰经缝门控 + 确定性重放]。随段
+    #   直编 src/World/chunkevictor.h（header-only 非 QObject 纯编排值组件，无 AUTOMOC，§29.4
+    #   P3 原文 + D5 语义依据在其头注释）；r2019a/c/d 零世界（自校验 QMap 缝），r2019b 真世界
+    #   + 临时库（r2015 先例），rig 世界 w 零接触，无新增 .cpp——world/chunk 系源文件已列）。
+    tools/matrix/section22_chunkevictor.cpp
+    src/World/chunkevictor.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
