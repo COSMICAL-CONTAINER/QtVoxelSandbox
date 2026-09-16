@@ -898,16 +898,28 @@ void MatrixRun::section22_chunkevictor()
         ok = ok && drvNegOk;
         if (!drvNegOk) diag += QStringLiteral("[drv-neg] ");
 
-        // ⑤ 零接线（世界/会话/输入/QML 面零 ChunkEvictor 提及——生产接线归 P4/P5）。
+        // ⑤ 零接线（世界/输入/QML 面零 ChunkEvictor 提及）。§29.5-W3 起生产接线已在 GameSession
+        //    转正（refactor-plan §29.5.2 W3 原文「driver evictor 注入 → ChunkEvictor 生产缝
+        //    实装」，接线宿主 = GameSession 流式会话）→ gamesession.h 按电阻 r2018d 先例从
+        //    禁出名单退役，改正面钉「ChunkEvictor 成员 + 三缝绑定在场」= 授权接线点留痕
+        //    （纠偏留痕非削钉；world/playercontroller/Main.qml 禁出原样）。
         const bool unwired = forbiddenAbsent(srcRoot + QStringLiteral("/World/world.h"), "ChunkEvictor")
             && forbiddenAbsent(srcRoot + QStringLiteral("/World/world.cpp"), "ChunkEvictor")
-            && forbiddenAbsent(srcRoot + QStringLiteral("/Game/gamesession.h"), "ChunkEvictor")
             && forbiddenAbsent(srcRoot + QStringLiteral("/Game/playercontroller.h"), "ChunkEvictor")
             && forbiddenAbsent(srcRoot + QStringLiteral("/Game/playercontroller.cpp"), "ChunkEvictor")
             && forbiddenAbsent(srcRoot + QStringLiteral("/ui/Main.qml"), "ChunkEvictor")
             && forbiddenAbsent(srcRoot + QStringLiteral("/ui/Main.qml"), "ChunkStreamDriver");
         ok = ok && unwired;
         if (!unwired) diag += QStringLiteral("[unwired] ");
+        const QStringList missWired = pinSet(
+            srcRoot + QStringLiteral("/Game/gamesession.h"), {
+                SrcPin("W3 evictor member", "ChunkEvictor m_chunkEvictor;", 1),
+                SrcPin("W3 evictor seam binding", "m_chunkEvictor.setTransitionFn(", 1),
+            });
+        for (const QString &m : missWired) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
 
         // ⑥ kind 选择：null savedQuery → 全 Generate 双生（r2018b twin 复跑恒等）；恒 true →
         //    同键 kind 翻 Load（id/priority/stats 轨迹恒等）；恒 false ≡ null（双生复跑恒等）。

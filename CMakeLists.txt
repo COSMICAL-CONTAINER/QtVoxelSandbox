@@ -1067,6 +1067,22 @@ add_executable(redstone_matrix_test
     #   r2024a-c 自建 fresh 小世界族（sparse 80×80×96 s42 radius 0 + fixed 48×48×96 s82 孪生），
     #   rig 世界 w 零接触；无新增 .cpp——gamesession.h/world 系源文件已列）。
     tools/matrix/section27_streaming_wiring.cpp
+    # §29.5-W3 驱逐 + Edits-on-evict 落盘 探针段（置尾先例沿用：runAll 末执行，filter 词
+    #   r2025；4 腿 r2025a-d = fixed 零活动墙[fixed 会话连附加表都不构造 + 全状态逐位不动]/
+    #   驱逐回灌承重[真临时库 fresh+用后即删：编辑过的半径外 chunk → persist 先于转移调用序
+    #   柱 → ⑥⑦到 Absent + 擦槽 → residentChunkRevision 沿 → 重入半径附加表命中 → blob 物化
+    #   逐位恒等（编辑+未编辑区都验）+ population 跳过断言]/失败中止+实体语义[persist 真锁
+    #   注入失败 → 保持驻留 + aborted 计数 + 重报收敛；驱逐区内 mob/掉落物先于转移移除
+    #   （EntityStore/EntityManager despawnInChunk——MC 引证随单）]/结构钉[worldstore 禁触
+    #   反探 + 附加表 additive 正面钉（零 bump/旧码盲）+ 先落盘后转移源钉 + restore 跳
+    #   population 函数域钉 + QML 零触碰 + fixed 墙]。
+    #   r2025a-c 自建 fresh 小世界族（sparse 80×80×96 s42 radius 0 + 真 PlayerController 沿
+    #   面）+ 真临时 SQLite 库（QDir::temp() pid 键名，测试自清理，绝触 saves/）；r2025d 纯
+    #   源码钉。随段直编 src/World/chunkstore.{h,cpp}（per-chunk 附加表，r2015 additive 先例
+    #   同款——独立命名连接零 bump；worldstore.{h,cpp} 一行禁触）。
+    tools/matrix/section28_eviction_persistence.cpp
+    src/World/chunkstore.cpp
+    src/World/chunkstore.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

@@ -135,6 +135,7 @@ void MatrixRun::runAll()
     section25_sparseworld(); // §29.5-W1 稀疏世界核（置尾先例沿用：fixed 零变化承重墙/未加载域 OOB 等价+加载翻转/同 seed 权威恒等/钉面，rig 零接触）
     section26_sparse_population(); // §29.5-W1b sparse population parity（置尾先例沿用：fixed 零变化墙/parity 承重墙/加载顺序无关/结构钉，rig 零接触）
     section27_streaming_wiring(); // §29.5-W2 位置源 + 驱动接线（置尾先例沿用：fixed 零活动承重墙/通电走查承重/真线程收割+#7 契约+背压/结构钉，rig 零接触）
+    section28_eviction_persistence(); // §29.5-W3 驱逐 + Edits-on-evict 落盘（置尾先例沿用：fixed 零活动墙[无附加表构造]/驱逐回灌承重[真临时库]/失败中止+实体先移除/结构钉，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
