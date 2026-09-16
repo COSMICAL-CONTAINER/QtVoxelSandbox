@@ -1025,6 +1025,18 @@ add_executable(redstone_matrix_test
     #   小世界 48×48×96 s82 采集真实快照（section11+ 先例，rig 世界 w 零接触），r2020b/c/d 零世界）。
     tools/matrix/section23_meshworker.cpp
     src/World/meshworker.h
+    # §29.4-P4 QML 动态化探针段（置尾先例沿用：runAll 末执行，filter 词 r2021；4 腿 r2021a-d =
+    #   固定世界零变化承重墙[驻留集枚举 ≡ 旧 t276 固定网格循环序逐项恒等：3×3 方阵 + 2×3 非方阵
+    #   序判别 + revision 初始 0 + 编辑零沿 + keyAt 越界空表 + 枚举键直驱 ChunkGeometry 非空
+    #   mesh]/模型响应性[合法转移沿 revision/发射精确对账：⑥-1 ⑦零 bump ①②③恰 +1 于 ③ ⑤④
+    #   集内零沿 非法拒零沿 ⑥⑧加回 +1；枚举随增删逐项跟随]/QML 真链响应性[真 QQmlEngine × 真
+    #   World × setData slot 池镜像（Main.qml rebuildChunkSlotPool 消费逻辑最小复刻，t874 家族
+    #   同门）：沿同步直达 handler、池随增删、零警告]/钉面[world.h 三新成员逐一正面钉 +
+    #   world.cpp 枚举序单点权威钉 + Main.qml 消费面精确计数 + 旧固定网格循环反探退役 +
+    #   setChunkLifecycle 禁入 QML + 玩法路径标记在位 + r2007b 零迁移复述]。随段零新增 src——
+    #   world/chunk 系源文件已列；r2021a/b 自建 fresh 小世界，r2021c 真链 harness，rig 世界 w
+    #   零接触）。
+    tools/matrix/section24_qmldynamization.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

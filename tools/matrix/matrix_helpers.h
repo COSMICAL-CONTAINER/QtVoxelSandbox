@@ -309,4 +309,9 @@ private:
                                  //   （手写快照 rig + 真线程 MeshWorker）；r2020a 另自建
                                  //   fresh 小世界采集真实快照，rig 世界 w 零接触，接
                                  //   section22）
+    void section24_qmldynamization(); // §29.4-P4 QML 动态化探针（置尾先例沿用：r2021a/b/c
+                                      //   自建 fresh 小世界（48×48×96 s82 ×3 + 32×48×96
+                                      //   s82 非方阵 ×1；r2021c 另挂真 QQmlEngine 真链
+                                      //   harness——t874 家族同门），rig 世界 w 零接触；
+                                      //   r2021d 纯源码钉，接 section23）
 };
