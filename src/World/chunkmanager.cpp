@@ -36,6 +36,11 @@ void ChunkManager::recreate(int width, int depth, int height)
 
 Chunk *ChunkManager::chunk(int cx, int cz) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：无界域键控路由——槽位不存在 = nullptr（现行「越界返回 nullptr」同值）。
+        const auto it = m_sparse.find(ChunkKey{ cx, cz }.packed());
+        return it == m_sparse.end() ? nullptr : it->second.chunk.get();
+    }
     if (cx < 0 || cz < 0 || cx >= m_chunksX || cz >= m_chunksZ)
         return nullptr;
     // R20.05：同 recreate()——ChunkKey::flatIndex 包装（逐位同式）。
@@ -44,6 +49,12 @@ Chunk *ChunkManager::chunk(int cx, int cz) const
 
 Chunk *ChunkManager::chunkAtWorld(int x, int z) const
 {
+    // §29.5-W1 sparse：x/z 无界——按查询门（未物化 → nullptr = 现行「坐标越界」同值）。
+    if (m_mode == WorldMode::Sparse) {
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return nullptr;
+        return chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+    }
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth)
         return nullptr;
     // R20.05 示范采用：floorDiv 替代截断除法（守卫非负域上逐位等价——r=x%16≥0 且 (r<0)!=(b<0)
@@ -58,6 +69,11 @@ Chunk *ChunkManager::chunkAtWorld(int x, int z) const
 //   t188 perf：同时把 fluidOnlyDirty 复位 true（中性「假定下窗流体专用」），开新一轮累积窗口。
 void ChunkManager::clearAllDirty()
 {
+    if (m_mode == WorldMode::Sparse) {
+        for (auto &kv : m_sparse)
+            if (kv.second.chunk) { kv.second.chunk->clearDirty(); kv.second.chunk->resetFluidOnlyDirty(); }
+        return;
+    }
     for (auto &c : m_chunks)
         if (c) { c->clearDirty(); c->resetFluidOnlyDirty(); }
 }
@@ -65,6 +81,11 @@ void ChunkManager::clearAllDirty()
 // ── R20.10 Chunk lifecycle（选型与六态转移图见 chunklifecycle.h / chunkmanager.h）────────
 ChunkLifecycle ChunkManager::lifecycleAt(int cx, int cz) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：无槽位 → Absent（现行「越界 → Absent」同值——语义一致：无可用内容）。
+        const auto it = m_sparse.find(ChunkKey{ cx, cz }.packed());
+        return it == m_sparse.end() ? ChunkLifecycle::Absent : it->second.life;
+    }
     if (cx < 0 || cz < 0 || cx >= m_chunksX || cz >= m_chunksZ)
         return ChunkLifecycle::Absent; // 越界语义 = 无可用内容（与 chunk() 越界 nullptr 一致）
     // R20.05：ChunkKey::flatIndex 包装（与 m_chunks 同式同索引——侧表同布局的落点）。
@@ -76,6 +97,17 @@ ChunkLifecycle ChunkManager::lifecycleAt(int cx, int cz) const
 //   摘后非法转移被接受 → r2010a 全图腿恰红。
 bool ChunkManager::setLifecycle(int cx, int cz, ChunkLifecycle to)
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：无槽位拒（现行「越界拒（无槽位可表态）」同值）；守卫谓词同一权威——
+        // 稀疏只是存储形态分化，六态转移图零分叉。
+        const auto it = m_sparse.find(ChunkKey{ cx, cz }.packed());
+        if (it == m_sparse.end())
+            return false; // 无槽位可表态
+        if (!chunkLifecycleTransitionLegal(it->second.life, to))
+            return false;
+        it->second.life = to;
+        return true;
+    }
     if (cx < 0 || cz < 0 || cx >= m_chunksX || cz >= m_chunksZ)
         return false; // 越界拒（无槽位可表态）
     const size_t i = size_t(ChunkKey{ cx, cz }.flatIndex(m_chunksX));
@@ -85,8 +117,84 @@ bool ChunkManager::setLifecycle(int cx, int cz, ChunkLifecycle to)
     return true;
 }
 
+// ── §29.5-W1 稀疏世界核（r2022）：统一谓词 + 稀疏初始化 + 物化 + 驻留枚举 ────────────────
+// 存在性判断全库唯一落点（选型与谓词语义见 chunkmanager.h 注释；fixed 恒 true = 零变化墙）。
+bool ChunkManager::chunkMaterialized(int cx, int cz) const
+{
+    if (m_mode == WorldMode::Fixed)
+        return true;
+    const auto it = m_sparse.find(ChunkKey{ cx, cz }.packed());
+    return it != m_sparse.end() && chunkLifecycleQueryable(it->second.life);
+}
+
+bool ChunkManager::chunkContentPresent(int cx, int cz) const
+{
+    if (m_mode == WorldMode::Fixed)
+        return true;
+    const auto it = m_sparse.find(ChunkKey{ cx, cz }.packed());
+    return it != m_sparse.end() && it->second.life != ChunkLifecycle::Absent
+        && it->second.life != ChunkLifecycle::Evicting;
+}
+
+void ChunkManager::reinitializeSparse(int coreWidth, int coreDepth, int height)
+{
+    m_mode = WorldMode::Sparse;
+    m_width = std::max(0, coreWidth); // 核心域（生成语义参考——TerrainGen 海域/钳高、出生回退）
+    m_depth = std::max(0, coreDepth);
+    m_height = std::max(0, height);
+    m_chunksX = (m_width + kSize - 1) / kSize;  // 核心域 chunk 计数（信息性；查询域无界不由此界）
+    m_chunksZ = (m_depth + kSize - 1) / kSize;
+    m_chunks.clear();   // 稠密存储清空（防两套存储渗漏）
+    m_lifecycle.clear();
+    m_sparse.clear();   // 零 chunk 分配：全 Absent（槽位在 ensureChunk 时才物化）
+}
+
+Chunk *ChunkManager::ensureChunk(int cx, int cz)
+{
+    if (m_mode != WorldMode::Sparse)
+        return chunk(cx, cz); // Fixed 无物化概念（防御；生产不走到——现行路由）
+    const quint64 k = ChunkKey{ cx, cz }.packed();
+    const auto it = m_sparse.find(k);
+    if (it != m_sparse.end())
+        return it->second.chunk.get();
+    SparseSlot slot;
+    slot.life = ChunkLifecycle::Absent;
+    // 现行 Chunk 构造路径（recreate 同式：原点 = cx*kSize/cz*kSize，高度 = 世界高）。
+    slot.chunk = std::make_unique<Chunk>(cx * kSize, cz * kSize, m_height);
+    Chunk *raw = slot.chunk.get();
+    m_sparse.emplace(k, std::move(slot));
+    return raw;
+}
+
+QVector<QPair<int, int>> ChunkManager::sparseResidentKeysOrdered() const
+{
+    QVector<QPair<int, int>> keys;
+    keys.reserve(int(m_sparse.size()));
+    for (const auto &kv : m_sparse) {
+        // 键逆映射走 ChunkKey::fromPacked 单一权威（补码位型双射——负坐标 chunk 同样正确还原）。
+        const ChunkKey k = ChunkKey::fromPacked(kv.first);
+        if (kv.second.chunk && chunkLifecycleQueryable(kv.second.life))
+            keys.append({ k.cx, k.cz });
+    }
+    // cz 外 cx 内（= World residentChunkKeysOrdered 的枚举序契约；哈希容器序不可依赖 → 排序）。
+    std::sort(keys.begin(), keys.end(), [](const QPair<int, int> &a, const QPair<int, int> &b) {
+        return a.second != b.second ? a.second < b.second : a.first < b.first;
+    });
+    return keys;
+}
+
 quint8 ChunkManager::blockAt(int x, int y, int z) const
 {
+    // §29.5-W1 sparse：y 域两模式同构（有限高）；x/z 无界——未物化 chunk 的查询走现行
+    // 「坐标越界」同值早退（统一谓词单点，OOB 等价语义）。
+    if (m_mode == WorldMode::Sparse) {
+        if (y < 0 || y >= m_height)
+            return 0;
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return 0;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        return c ? c->blockAt(floorMod(x, kSize), y, floorMod(z, kSize)) : quint8(0);
+    }
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return 0; // 世界越界 = 空气（面剔除画边界面；物理把界外当可走出/可坠落）
     // R20.05 示范采用：floorDiv/floorMod 替代「截断除法 + 减法重建」（守卫非负域上逐位等价，
@@ -99,6 +207,13 @@ quint8 ChunkManager::blockAt(int x, int y, int z) const
 // t121：世界坐标 (x,z) 列的 heightmap（PLAN §2-H）。路由到所在 chunk 的局部列；越界 / 无 chunk → -1。
 int ChunkManager::heightmapAt(int x, int z) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：未物化 → -1（现行「世界越界 = 无实体」同值）。
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return -1;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        return c ? c->heightmapAt(floorMod(x, kSize), floorMod(z, kSize)) : -1;
+    }
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth)
         return -1; // 世界越界 = 无实体（mesher 对越界列本就无面可画）
     Chunk *c = chunk(x / kSize, z / kSize);
@@ -109,6 +224,17 @@ int ChunkManager::heightmapAt(int x, int z) const
 //   空列 / 越界 / 无 chunk → -1（不遮挡）。PCF 软影（voxellight.h sunShadow）每采样调本。
 float ChunkManager::columnTopSurfaceY(int x, int z) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：未物化 → -1（现行「越界不遮挡」同值）。
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return -1.0f;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        if (!c) return -1.0f;
+        const int lx = floorMod(x, kSize), lz = floorMod(z, kSize);
+        const int hm = c->heightmapAt(lx, lz);
+        if (hm < 0) return -1.0f;
+        return float(hm) + BlockRegistry::solidTopOffset(c->blockAt(lx, hm, lz), c->stateAt(lx, hm, lz));
+    }
     if (x < 0 || z < 0 || x >= m_width || z >= m_depth)
         return -1.0f;
     Chunk *c = chunk(x / kSize, z / kSize);
@@ -123,6 +249,15 @@ float ChunkManager::columnTopSurfaceY(int x, int z) const
 // t151 光场路由（世界坐标 → chunk 局部）。越界读返回 0（无光）。flood-fill 与 mesher 经此访问光场。
 quint8 ChunkManager::skyLightAt(int x, int y, int z) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：y 域同构；未物化 → 0（现行「越界无光」同值）。
+        if (y < 0 || y >= m_height)
+            return 0;
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return 0;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        return c ? c->skyLightAt(floorMod(x, kSize), y, floorMod(z, kSize)) : quint8(0);
+    }
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return 0;
     Chunk *c = chunk(x / kSize, z / kSize);
@@ -131,6 +266,14 @@ quint8 ChunkManager::skyLightAt(int x, int y, int z) const
 
 quint8 ChunkManager::blockLightAt(int x, int y, int z) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        if (y < 0 || y >= m_height)
+            return 0;
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return 0;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        return c ? c->blockLightAt(floorMod(x, kSize), y, floorMod(z, kSize)) : quint8(0);
+    }
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return 0;
     Chunk *c = chunk(x / kSize, z / kSize);
@@ -139,6 +282,16 @@ quint8 ChunkManager::blockLightAt(int x, int y, int z) const
 
 void ChunkManager::setLight(int x, int y, int z, quint8 sky, quint8 block)
 {
+    if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1：y 域同构；未物化忽略（现行「越界忽略」同值——flood 对未物化邻格不落写）。
+        if (y < 0 || y >= m_height)
+            return;
+        if (!chunkContentPresent(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        if (c) c->setLight(floorMod(x, kSize), y, floorMod(z, kSize), sky, block);
+        return;
+    }
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return; // 越界忽略（flood 自行跳过 OOB 邻居）
     Chunk *c = chunk(x / kSize, z / kSize);
@@ -148,6 +301,11 @@ void ChunkManager::setLight(int x, int y, int z, quint8 sky, quint8 block)
 // 全部 chunk 光场归零（re-flood 前清场，World::recomputeLightField 调）。
 void ChunkManager::clearAllLight()
 {
+    if (m_mode == WorldMode::Sparse) {
+        for (auto &kv : m_sparse)
+            if (kv.second.chunk) kv.second.chunk->clearLight();
+        return;
+    }
     for (auto &cp : m_chunks)
         if (cp) cp->clearLight();
 }
@@ -155,6 +313,14 @@ void ChunkManager::clearAllLight()
 // t133：世界坐标 state 读（跨 chunk 路由，同 blockAt）。越界 / 无 chunk → 0（常规方块无 state）。
 quint8 ChunkManager::stateAt(int x, int y, int z) const
 {
+    if (m_mode == WorldMode::Sparse) {
+        if (y < 0 || y >= m_height)
+            return 0;
+        if (!chunkMaterialized(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return 0;
+        Chunk *c = chunk(floorDiv(x, kSize), floorDiv(z, kSize));
+        return c ? c->stateAt(floorMod(x, kSize), y, floorMod(z, kSize)) : quint8(0);
+    }
     if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
         return 0; // 世界越界 = 无 state
     Chunk *c = chunk(x / kSize, z / kSize);
@@ -169,8 +335,17 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id)
 // t133：写 id + state + 标脏（含边界邻接）。与 4 参数版同一路径，仅多写一字节 state。
 bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+    // ── 域门（两模式分流；Fixed 分支为现行语句原样——零变化墙）────────────────────────
+    if (m_mode == WorldMode::Sparse) {
+        if (y < 0 || y >= m_height)
+            return false; // y 域两模式同构（现行越界拒绝同值）
+        // §29.5-W1：x/z 无界——按写门（未物化拒 = 现行「坐标越界」同值 false；Loading/
+        // Generated/Loaded/Active 内容在途或可用可写——出生半径预生成的列体填充在 Loading 态写入）。
+        if (!chunkContentPresent(floorDiv(x, kSize), floorDiv(z, kSize)))
+            return false;
+    } else if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) {
         return false; // 世界越界：拒绝
+    }
     // R20.05 示范采用：floorDiv/floorMod（同 blockAt——守卫非负域上逐位等价）。
     const int cx = floorDiv(x, kSize), cz = floorDiv(z, kSize);
     const int lx = floorMod(x, kSize), lz = floorMod(z, kSize);

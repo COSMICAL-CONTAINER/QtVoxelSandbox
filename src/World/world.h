@@ -49,6 +49,40 @@ class World : public QObject
 public:
     explicit World(QObject *parent = nullptr);
 
+    // ── §29.5-W1 稀疏世界核（r2022）：构造模式分化（Fixed 默认 = 全库既有行为逐位不变）──
+    //   sparse 参数（值聚合；核心域 = 生成语义参考域，查询域 x/z 无界与此无关——选型立证见
+    //   chunkmanager.h WorldMode 头注释：TerrainGen 海域半径/列钳高需要真实 dims，dims 哨兵会
+    //   破坏 r2022c 同 seed 恒等承重）。
+    //   spawnPreGenerateRadius 默认 2（D4 参数首次落地的选型头注释立证）：①方形半径与
+    //   ChunkManager 方形域/GenerationPolicy 切比雪夫窗同构（(2R+1)² chunk 方阵）；②冷启动
+    //   成本 ∝ R²——R=2 → 5×5=25 chunk ≈ 80×80 列，出生游走圈够用（W2 驱动接线后视距按
+    //   D4 双半径动态推进，出生预生成只是冷启动下限）；③任务书建议带 2-4，取下限控首屏
+    //   等待（§29.5.4 风险登记「首屏等待」）。负值归 0、上界钳 64（与 GenerationRequest
+    //   priority quint8 域同款保守界——归一化语义，不抛错）。
+    struct SparseWorldParams
+    {
+        int seed = 1337;
+        int coreWidth = 160;  // 核心域宽（生成语义域：海域/结构选址/出生回退列）
+        int coreDepth = 160;  // 核心域深
+        int height = 96;      // y 域两模式同构仍有限高
+        int spawnPreGenerateRadius = 2; // 出生半径预生成（chunk 单位，方形切比雪夫半径）
+    };
+    // sparse 构造：零全量生成、零 chunk 分配（全 Absent）+ 出生半径预生成（terraingen 单列
+    // 权威路径 + ①②③生命周期合法链）。Fixed 构造零改动（上一行原样）。
+    explicit World(const SparseWorldParams &sp, QObject *parent = nullptr);
+    // 构造模式读面（C++ only，非 Q_INVOKABLE——生命周期/模式决策零 QML，r2010d 精神延伸）。
+    bool isSparse() const { return m_chunks.mode() == WorldMode::Sparse; }
+    static int normalizedSpawnPreGenerateRadius(int r)
+    {
+        return r < 0 ? 0 : (r > 64 ? 64 : r);
+    }
+    int spawnPreGenerateRadius() const { return m_spawnPreGenerateRadius; }
+    // 按需物化单 chunk（sparse 模式；C++ only 非 Q_INVOKABLE）：已驻留幂等 true；未物化走
+    // sparseGenerateChunk 全链（Absent→Loading→Generated→Loaded + terraingen 单列权威 + 列
+    // 种子光 flood）。Fixed 模式恒 false（无物化概念）。W2 驱动接线的生产缝（本单先供矩阵
+    // 加载翻转腿用；生产零调用 = 零变化不破）。
+    bool loadChunkAt(int cx, int cz);
+
     int width() const  { return m_width; }
     int depth() const  { return m_depth; }
     int height() const { return m_height; }
@@ -1159,6 +1193,17 @@ signals:
 
 private:
     void generate();          // 重建纯地形采样器 + ChunkManager + 填充地形（静默，不 emit）
+    // ── §29.5-W1 稀疏世界核（r2022）私有链 ────────────────────────────────────────────
+    // sparse 初始化（构造期唯一入口；静默不 emit，与 generate 同约定）：TerrainGen 按核心域
+    // 重建 + 侧表族清空 + 零 chunk 分配（全 Absent）+ 出生半径预生成 + 光场/出生列/结构区域
+    // 三个 generate 尾同门收口。禁走 generate() 全域 pass（树/矿/洞等跨 chunk 结构的按 chunk
+    // 重放 = W2+ population 设计，登记非目标）。
+    void sparseGenerate();
+    // 单 chunk 物化全链（sparseGenerate 与 loadChunkAt 共用）：ensureChunk 物化 Absent 槽 →
+    // setChunkLifecycle 唯一入口走 ① Absent→Loading → terraingen 单列权威逐列填充
+    //（fillTerrainColumn 经 ChunkManager 5 参守卫写入口）→ recomputeAllHeightmaps →
+    // ② Loading→Generated → ③ Generated→Loaded（终态 = fixed create 的 Loaded 稳态，两模式同稳态）。
+    void sparseGenerateChunk(int cx, int cz);
     double noise2(double x, double z) const; // R20.12 起委托 m_terrain（单一权威 terraingen.h）
     double fbm(double x, double z) const;    // 同上（委托壳——carve 族仍经 World 面调用）
     // t278 3D Perlin 噪声（洞穴 carve 用）。R20.12 起委托 m_terrain.noise3（置换表已随纯采样器
@@ -1578,6 +1623,9 @@ private:
     //   语义退化）。beginLoad 显式清（防旧世界残留），finishLoad 末从存档体素重新解析（B5 反推模式）。
     int m_spawnColX = -1, m_spawnColZ = -1;
     ChunkManager m_chunks;    // 多 chunk 存储 + 跨 chunk 路由（World 层；默认空，generate 重建）
+    // §29.5-W1：出生半径预生成参数（D4 首落；chunk 单位方形切比雪夫半径，默认 2——选型立证
+    // 见 SparseWorldParams 头注释；负值/越界构造期归一化，sparse 构造路径唯一消费）。
+    int m_spawnPreGenerateRadius = 2;
     // t185 水流 tick 节流计数：tickWaterFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFlowTickInterval
     //   才把波前推进 1 格（~0.3s 一格 → 1 格/tick 流动动画可见）。MC 自身约 0.25s/格，本工程取 3（0.3s）平衡
     //   动画可见度与扫描开销（全图扫水格 ~1-2ms + 波前少量写入）。

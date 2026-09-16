@@ -4,11 +4,33 @@
 #include <QtGlobal> // quint8
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
+
+#include <QVector> // §29.5-W1 sparseResidentKeysOrdered 返回类型（驻留集枚举收集面）
 
 #include "chunk.h"
 #include "chunklifecycle.h" // R20.10 六态类型 + 转移表单一权威（ChunkLifecycle/chunkLifecycleTransitionLegal）
 #include "mathtypes.h" // R20.05 基础类型（Core 叶子）：floorDiv/floorMod 路由 + ChunkKey 网格索引包装 + BlockPos 加性重载
+
+// ── §29.5-W1 稀疏世界核（r2022）：World / ChunkManager 构造模式 ─────────────────────────
+//   Fixed = 现行稠密网格（recreate 全量分配 chunk + 全表 Loaded 稳态）——全库既有行为逐位不变
+//   （fixed 默认 = 零变化承重墙 r2022a）。Sparse = 查询域 x/z 无界（y 仍有限高）+ chunk 按需
+//   物化（初始化零 chunk 分配、全 Absent；出生半径预生成走 ①②③ 合法边到 Loaded 稳态，与
+//   fixed create 终态同稳态）。
+//
+//   选型立证（为何不用「dims 哨兵参数化」——任务书两案取一，头注释立此存照）：
+//   ① TerrainGen 的生成语义需要**真实 dims**：海域半径 = min(W,D)*3/10（seaColumnHeight /
+//      seaCorner）、列填充钳高 = min(h, H-1)（fillTerrainColumn）——dims 哨兵（0 / 负值）会让
+//      sparse 世界同 seed 生成结果 ≠ fixed 世界同区（r2022c 同 seed 区域恒等承重腿直接破）。
+//   ② width/depth 是 World 的 Q_PROPERTY（QML / 渲染 / F3 消费面）且被群系 memo 尺寸、出生
+//      回退列等十余处派生面读取——哨兵值会渗入全部派生面；显式模式位让「Fixed 走现行路径
+//      零改动」成为结构性事实（fixed 分支语句原样保留，sparse 分支全部加性），零变化墙最强形态。
+enum class WorldMode : quint8
+{
+    Fixed = 0,
+    Sparse
+};
 
 // ChunkManager：持有一片连续的 chunk 列网格（width×depth 平面铺满，每 chunk 16×16 列），
 // 负责「世界坐标 ↔ chunk/局部坐标」路由、跨 chunk blockAt/setBlock、越界判定、
@@ -83,6 +105,29 @@ public:
     ChunkLifecycle lifecycleAt(int cx, int cz) const; // 越界 → Absent（语义一致：无可用内容）
     bool setLifecycle(int cx, int cz, ChunkLifecycle to); // 唯一转移入口：非法转移（含自转移）拒 false
 
+    // ── §29.5-W1 稀疏世界核（r2022）────────────────────────────────────────────────────
+    //   模式与统一谓词（存在性判断全库唯一落点——查询门/写门/物化门皆经此三谓词，禁散落第二份）：
+    //   chunkMaterialized  = 查询门（对 mesher 门 / 驻留集同谓词）：Fixed 恒 true（稠密网格
+    //     chunk 恒在且恒驻留——零变化的结构性根据）；Sparse = 槽位已物化且生命周期可查询
+    //     （{Loaded, Active} = chunkLifecycleQueryable——未物化/在途/驱逐中的 chunk 查询一律
+    //     走现行「坐标越界」同值早退，即 OOB 等价语义）。
+    //   chunkContentPresent = 写门：Fixed 恒 true；Sparse = 槽位已物化且内容在途或可用
+    //     （{Loading, Generated, Loaded, Active}——出生半径预生成的列体填充发生在 Loading 态；
+    //     Absent/Evicting 拒写 = 现行「坐标越界」同值 false）。
+    WorldMode mode() const { return m_mode; }
+    bool chunkMaterialized(int cx, int cz) const;
+    bool chunkContentPresent(int cx, int cz) const;
+    // sparse 初始化：核心域尺寸定格（生成语义参考——查询域无界与此无关）+ 零 chunk 分配
+    // （m_sparse 清空 = 全 Absent；稠密存储清空防渗漏）。仅 sparse 构造路径调（World 构造分化）。
+    void reinitializeSparse(int coreWidth, int coreDepth, int height);
+    // 物化槽位：已存在返回既有；不存在则经**现行 Chunk 构造路径**（recreate 同式
+    // make_unique<Chunk>(cx*kSize, cz*kSize, m_height)）落一个 Absent 槽。Fixed 模式无物化
+    // 概念（防御回退现行 chunk()——生产不会走到）。
+    Chunk *ensureChunk(int cx, int cz);
+    // 驻留集枚举（sparse 版）：物化且可查询的槽位键，按 cz 外 cx 内排序（= World
+    // residentChunkKeysOrdered 的枚举序契约，r2021 权威面在 sparse 域的同序延伸）。
+    QVector<QPair<int, int>> sparseResidentKeysOrdered() const;
+
     // 尺寸变化时重建网格（清空旧 chunk，新建零填充 chunk，全部脏）。
     void recreate(int width, int depth, int height);
 
@@ -95,6 +140,20 @@ private:
     // R20.10 生命周期侧表（与 m_chunks 同布局同索引；选型理由见类方法注释）。recreate() 全表
     //   置 Loaded（默认稳态）；此后仅 setLifecycle 可写（唯一转移入口）。
     std::vector<ChunkLifecycle> m_lifecycle;
+
+    // ── §29.5-W1 稀疏存储（r2022；Fixed 模式下恒空——两套存储互不渗漏）─────────────────
+    //   选型：std::unordered_map（键 = ChunkKey::packed() 补码位型双射——负坐标 chunk 同样合法）
+    //   而非稠密 vector 的对偶键控版。槽位 = chunk 实例 + 生命周期同槽（与 Fixed「m_chunks +
+    //   m_lifecycle 稠密 vector 对」同构的键控形态；生命周期决策面仍走 setLifecycle 唯一守卫
+    //   入口，见 chunklifecycle.h——稀疏只是存储形态分化，六态转移图零分叉）。构造后 Absent
+    //   槽位零分配（零 unique_ptr、零 Chunk），物化走 ensureChunk（现行 Chunk 构造路径）。
+    struct SparseSlot
+    {
+        std::unique_ptr<Chunk> chunk;
+        ChunkLifecycle life = ChunkLifecycle::Absent; // 物化前不落槽 → 槽位存在即非 Absent 初见
+    };
+    WorldMode m_mode = WorldMode::Fixed; // 默认 Fixed = 全库既有行为逐位不变的结构性事实
+    std::unordered_map<quint64, SparseSlot> m_sparse;
 };
 
 #endif // CHUNKMANAGER_H

@@ -61,6 +61,98 @@ World::World(QObject *parent) : QObject(parent)
     generate(); // 默认参数生成（静默，不 emit）
 }
 
+// ── §29.5-W1 稀疏世界核（r2022）：sparse 构造（Fixed 构造零改动——上一行原样）──────────
+// 选型与参数语义见 world.h SparseWorldParams / chunkmanager.h WorldMode 头注释。零全量生成、
+// 零 chunk 分配（全 Absent）；出生半径预生成走 terraingen 单列权威 + ①②③生命周期合法链；
+// app 生产零调用（W5 UI 开关接线，D2 承诺「现有档默认永远 fixed」）。
+World::World(const SparseWorldParams &sp, QObject *parent) : QObject(parent)
+{
+    m_seed = sp.seed;
+    m_width = std::max(0, sp.coreWidth);
+    m_depth = std::max(0, sp.coreDepth);
+    m_height = std::max(0, sp.height);
+    m_spawnPreGenerateRadius = normalizedSpawnPreGenerateRadius(sp.spawnPreGenerateRadius);
+    sparseGenerate(); // 静默，不 emit（构造期无监听者；与 fixed 构造 generate 同约定）
+}
+
+// sparse 初始化（构造期唯一入口；silent 不 emit——generate 同约定）。禁走 generate() 全域
+// pass：树/矿/洞/水等跨 chunk 结构的按 chunk 重放 = W2+ population 设计（登记非目标），
+// 本单生成语义 = terraingen 单列权威（fillTerrainColumn）。
+void World::sparseGenerate()
+{
+    m_chunks.reinitializeSparse(m_width, m_depth, m_height); // 零 chunk 分配（全 Absent 态）
+    m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // 核心 dims = 生成语义参数（generate 首行同式——海域半径/列钳高）
+    m_biomeCache.clear();    // 群系 memo 作废（懒重建；generate 同门）
+    m_decayingLeaves.clear(); // 全新世界无失撑叶（generate 同门）
+    m_growthCells.clear();   // terrain-only 生成无 flora → 空集（后续编辑经 note*Write 增量维护）
+    m_waterCells.clear();
+    m_lavaCells.clear();
+    m_iceCells.clear();
+    m_fireCells.clear();
+    m_burningCells.clear();
+    m_torchBurnout.clear();
+    m_powerDirty.clear();
+    fluidActReset();
+    gravLightReset();
+    resetWeather(); // 全新世界 → 天气从 Clear 重起（generate 同门）
+
+    // 出生半径预生成（D4 首落）：中心 = 核心域中心 chunk；方形切比雪夫半径（ChunkManager
+    // 方形域同构——(2R+1)² chunk 方阵）。生成完成稳态 = Loaded（fixed create 终态，两模式同稳态）。
+    const int ccx = (m_width / 2) / TerrainGen::kChunkSize;
+    const int ccz = (m_depth / 2) / TerrainGen::kChunkSize;
+    for (int cz = ccz - m_spawnPreGenerateRadius; cz <= ccz + m_spawnPreGenerateRadius; ++cz)
+        for (int cx = ccx - m_spawnPreGenerateRadius; cx <= ccx + m_spawnPreGenerateRadius; ++cx)
+            sparseGenerateChunk(cx, cz);
+
+    recomputeLightField();     // generate 尾同门（天光/方块光种子扫核心域；预生成区 ⊆ 核心域时
+                               //   全量等价，域外按需物化走 loadChunkAt 的 refloodBox 列种子）
+    findSpawnColumn();         // generate 尾同门（环扫经统一门读栅格——未物化列读 Air 天然落选）
+    rebuildStructureRegions(); // generate 尾同门（候选选择是 seed 的纯函数，零体素访问）
+}
+
+// 单 chunk 物化全链（sparseGenerate 与 loadChunkAt 共用；生命周期经 setChunkLifecycle 唯一
+// 入口 = r2010 权威；r2021 驻留集 revision 沿在 ③ 可查询翻转处自动携带）。
+void World::sparseGenerateChunk(int cx, int cz)
+{
+    Chunk *chunk = m_chunks.ensureChunk(cx, cz); // 现行 Chunk 构造路径物化 Absent 槽
+    if (!chunk)
+        return;
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Loading);   // ① Absent→Loading（请求加载/生成）
+    // terraingen 单列权威填充：generate() 首循环 WorldColumnSink 同款——经 ChunkManager 5 参
+    // 守卫写入口逐格落地（Loading 态写门放行；heightmap 由 setBlock 增量维护）。
+    struct WorldColumnSink
+    {
+        ChunkManager *c;
+        void write(int x, int y, int z, quint8 id, quint8 state) { c->setBlock(x, y, z, id, state); }
+    } columnSink{ &m_chunks };
+    for (int lz = 0; lz < TerrainGen::kChunkSize; ++lz)
+        for (int lx = 0; lx < TerrainGen::kChunkSize; ++lx)
+            m_terrain.fillTerrainColumn(cx * TerrainGen::kChunkSize + lx,
+                                        cz * TerrainGen::kChunkSize + lz, columnSink);
+    chunk->recomputeAllHeightmaps(); // heightmap 派生自体素（finishLoad 同门防御）
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Generated); // ② 内容生成完毕
+    setChunkLifecycle(cx, cz, ChunkLifecycle::Loaded);    // ③ 晋升驻留（fixed create 终态）
+}
+
+// 按需物化单 chunk（sparse 模式；W2 驱动接线的生产缝——本单生产零调用 = app 零变化）。
+bool World::loadChunkAt(int cx, int cz)
+{
+    if (m_chunks.mode() != WorldMode::Sparse)
+        return false; // fixed 无物化概念（现行稠密网格恒在）
+    if (m_chunks.chunkMaterialized(cx, cz))
+        return true; // 已驻留幂等（重请求 no-op）
+    sparseGenerateChunk(cx, cz);
+    if (!m_chunks.chunkMaterialized(cx, cz))
+        return false; // 物化未达稳态（防御；纯函数生成无失败路径）
+    // 新物化 chunk 光照补 flood：ctor 全量 recomputeLightField 的种子循环只扫核心域，按需
+    // 物化的 chunk 须自带列种子。refloodBox 盒参数化（destroySphereSilent 批量收口同门），
+    // 盒外邻值经统一门读：未物化 = 0（暗边界，OOB 等价）/ 已物化 = 现值渗入。
+    refloodBox(cx * TerrainGen::kChunkSize, 0, cz * TerrainGen::kChunkSize,
+               cx * TerrainGen::kChunkSize + TerrainGen::kChunkSize - 1, m_height - 1,
+               cz * TerrainGen::kChunkSize + TerrainGen::kChunkSize - 1, /*doSky=*/true);
+    return true;
+}
+
 // t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob
 //   覆盖）。recreate 把 25 chunk 全清零 + 全标脏（首帧重建）；m_terrain 按新 seed 重建（R20.12 起纯
 //   地形采样器 = 单一权威 terraingen.h，置换表随其构造期填充）使后续 heightAt 等查询用新 seed
@@ -68,6 +160,8 @@ World::World(QObject *parent) : QObject(parent)
 //   **不** emit worldChanged（网格此时全空，finishLoad 写完 blob 后才统一触发重建，避免中间态重建浪费）。
 void World::beginLoad(int seed)
 {
+    if (isSparse())
+        return; // §29.5-W1：sparse 持久化 = W3/W5（worldstore 稀疏域冻结）——本单零触碰登记
     m_seed = seed;
     m_chunks.recreate(m_width, m_depth, m_height); // 零填充 + 全标脏（recreate 实现）
     m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // 新 seed 的纯地形采样器（heightAt 查询一致性）
@@ -101,6 +195,8 @@ void World::beginLoad(int seed)
 //   重建。recreate 已标脏，此处 markDirty 为防御（万一某 chunk 被中途 clearDirty）。
 void World::finishLoad()
 {
+    if (isSparse())
+        return; // §29.5-W1：sparse 持久化 = W3/W5——本单零触碰登记（store 永不见 sparse 世界）
     for (int cz = 0; cz < m_chunks.chunksZ(); ++cz) {
         for (int cx = 0; cx < m_chunks.chunksX(); ++cx) {
             if (Chunk *c = m_chunks.chunk(cx, cz)) {
@@ -804,6 +900,8 @@ void World::normalizeLoadedMechanismState()
 //   故无需先 beginLoad。emit seedChanged（QML 绑定刷新）+ worldChanged（ChunkGeometry 重建）。
 void World::regenerate(int seed)
 {
+    if (isSparse())
+        return; // §29.5-W1：sparse 世界无条件重生（固定全量 generate 语义）不适用——W5 转换单面，登记非目标
     m_seed = seed;
     generate();
     emit seedChanged();
@@ -818,10 +916,30 @@ void World::regenerate(int seed)
 //   （幂等复位，零重建副作用；generate 本就每 setter 各跑一次，emit 不新增重建，三连发只是三次廉价复位）；
 //   ②seedChanged 兼任 Q_PROPERTY seed 的 NOTIFY，值未变的额外通知只致绑定重求值同值（Qt 允许，无害）；
 //   ③改单一 resize 入口要动 ~20 处测试调用点且无行为差异，不为潜伏坑扩 API 面。
-void World::setWidth(int w)  { if (w == m_width)  return; m_width = w;  generate(); emit widthChanged();  emit seedChanged(); emit worldChanged(); }
-void World::setDepth(int d)  { if (d == m_depth)  return; m_depth = d;  generate(); emit depthChanged();  emit seedChanged(); emit worldChanged(); }
-void World::setHeight(int h) { if (h == m_height) return; m_height = h; generate(); emit heightChanged(); emit seedChanged(); emit worldChanged(); }
-void World::setSeed(int s)   { if (s == m_seed)   return; m_seed = s;   generate(); emit seedChanged();   emit worldChanged(); }
+void World::setWidth(int w)
+{
+    if (isSparse())
+        return; // §29.5-W1：sparse 域 x/z 无界，固定尺寸 setter（全量 generate 语义）不适用——登记非目标
+    if (w == m_width)  return; m_width = w;  generate(); emit widthChanged();  emit seedChanged(); emit worldChanged();
+}
+void World::setDepth(int d)
+{
+    if (isSparse())
+        return; // 同 setWidth sparse 守卫
+    if (d == m_depth)  return; m_depth = d;  generate(); emit depthChanged();  emit seedChanged(); emit worldChanged();
+}
+void World::setHeight(int h)
+{
+    if (isSparse())
+        return; // 同 setWidth sparse 守卫
+    if (h == m_height) return; m_height = h; generate(); emit heightChanged(); emit seedChanged(); emit worldChanged();
+}
+void World::setSeed(int s)
+{
+    if (isSparse())
+        return; // 同 setWidth sparse 守卫（sparse 换 seed 重建 = W5 转换单面）
+    if (s == m_seed)   return; m_seed = s;   generate(); emit seedChanged();   emit worldChanged();
+}
 
 quint8 World::blockAt(int x, int y, int z) const
 {
@@ -835,8 +953,18 @@ quint8 World::blockAt(int x, int y, int z) const
 //   5 参数 (id,0)，新方块重置 state=0）。异形方块的 state 由 5 参数 setBlock 显式管理（下方）。
 bool World::setBlock(int x, int y, int z, quint8 id)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // ── 域门（两模式分流；Fixed 分支现行语句原样——零变化墙）──────────────────────────
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        // x/z 无界——写门（统一谓词单点）：未物化拒 = 现行「坐标越界」同值 false；须拦在
+        // oldId 读 / 燃烧侧表清 / 写后钩子族之前（拒写零副作用）。
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false;
+    }
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     // t843：燃烧态清除放在无变化早退**之前**——任何对本格的显式写调用（含同 id no-op 写，如测试复原）
     //   都视为换上新方块实例 → 燃烧作废（栅格 id 从不因燃烧改变，早退路径不清则陈旧燃烧态挂在复原块上）。
@@ -974,8 +1102,16 @@ bool World::pointBlockedByCollision(float x, float y, float z) const
 //   信号语义：仅 id 变化发 broken/placed；id 不变只 state 变不发（非破 / 放，是开合动作），仅 worldChanged。
 bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // ── 域门（两模式分流；Fixed 分支现行语句原样——零变化墙，同 4 参数版）────────────────
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false; // x/z 无界——写门（统一谓词单点；拒写零副作用）
+    }
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     const quint8 oldState = m_chunks.stateAt(x, y, z);
     // t843：燃烧态清除放在无变化早退之前（同 4 参数版：任何显式写调用 = 换新实例，燃烧作废）。
@@ -9514,6 +9650,10 @@ int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky
 QVector<QPair<int, int>> World::residentChunkKeysOrdered() const
 {
     QVector<QPair<int, int>> keys;
+    // §29.5-W1：sparse 域 x/z 无界——禁稠密全扫；驻留集 = 物化且可查询槽位（同一谓词
+    // chunkLifecycleQueryable），枚举序契约不变（cz 外 cx 内；收集 + 排序于 ChunkManager）。
+    if (m_chunks.mode() == WorldMode::Sparse)
+        return m_chunks.sparseResidentKeysOrdered();
     const int nx = m_chunks.chunksX(), nz = m_chunks.chunksZ();
     keys.reserve(nx * nz);
     for (int cz = 0; cz < nz; ++cz)
