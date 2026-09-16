@@ -1196,14 +1196,27 @@ private:
     // ── §29.5-W1 稀疏世界核（r2022）私有链 ────────────────────────────────────────────
     // sparse 初始化（构造期唯一入口；静默不 emit，与 generate 同约定）：TerrainGen 按核心域
     // 重建 + 侧表族清空 + 零 chunk 分配（全 Absent）+ 出生半径预生成 + 光场/出生列/结构区域
-    // 三个 generate 尾同门收口。禁走 generate() 全域 pass（树/矿/洞等跨 chunk 结构的按 chunk
-    // 重放 = W2+ population 设计，登记非目标）。
+    // 三个 generate 尾同门收口。§29.5-W1b（r2023）起预生成链含 population 窗口重放（下两员）。
     void sparseGenerate();
     // 单 chunk 物化全链（sparseGenerate 与 loadChunkAt 共用）：ensureChunk 物化 Absent 槽 →
     // setChunkLifecycle 唯一入口走 ① Absent→Loading → terraingen 单列权威逐列填充
     //（fillTerrainColumn 经 ChunkManager 5 参守卫写入口）→ recomputeAllHeightmaps →
-    // ② Loading→Generated → ③ Generated→Loaded（终态 = fixed create 的 Loaded 稳态，两模式同稳态）。
+    // ② Loading→Generated → ③ Generated→Loaded（终态 = fixed create 的 Loaded 稳态，两模式同
+    // 稳态）→ sparsePopulateChunk 窗口重放（W1b：population 需经统一查询门读自身列，故在其
+    // 之后的 Loaded 平台上运行——同步调用内无外部观察者，返回即稳态全量内容）。
     void sparseGenerateChunk(int cx, int cz);
+    // ── §29.5-W1b sparse population parity（r2023；逐 pass 处置表全录见 world.cpp 本体头注释）
+    // 单 chunk population 窗口重放：按 fixed generate() 同序重放 (b) 级 pass（窗口 = 自身 ±1
+    // chunk scaffold 域 = MC population「features 可越界写入但限于邻近 3×3 chunk 区域」同构）；
+    // 结构族 (c) 豁免不调（world.cpp 处置表）。scaffold = 未物化邻 chunk 的 terrain-only 临时
+    // 物化（读域，①②③ 到可查询稳态），population 完成即经 ⑥⑦+releaseSparseChunk 拆卸——
+    // 该 chunk 正式物化时由本链逐位重derive。fixed 世界零调用（零变化墙）。
+    void sparsePopulateChunk(int cx, int cz);
+    // population 收尾索引重建：清本 population 脚手架列残留的 growth/fluid/ice 索引项（teardown
+    // 后为陈旧项），并按自身 chunk 16×16 列扫描回填（worldgen 直写不经 note*Write——与 fixed
+    // generate 末 rebuild 族同门，只是域收窄到自身 chunk）。scaffold 键集由调用方在 teardown
+    // 前显式传入（此刻 scaffold 尚物化，不能按物化态重推导）。
+    void rebuildPopulationCellIndexes(int cx, int cz, const ChunkKey *scaffold, int scaffoldN);
     double noise2(double x, double z) const; // R20.12 起委托 m_terrain（单一权威 terraingen.h）
     double fbm(double x, double z) const;    // 同上（委托壳——carve 族仍经 World 面调用）
     // t278 3D Perlin 噪声（洞穴 carve 用）。R20.12 起委托 m_terrain.noise3（置换表已随纯采样器
@@ -1251,9 +1264,18 @@ private:
     int seaColumnHeight(int x, int z) const;
     bool isSeaSandColumn(int x, int z) const;
 
+    // ── §29.5-W1b sparse population parity（r2023）：worldgen pass 域参数化（窗口重放）────
+    // 逐 pass 处置表全录见 world.cpp sparsePopulateChunk 头注释（单一权威）；本处只立参数约定：
+    // 部分 per-column 型 pass 增加**窗口参数** (wx0, wx1, wz0, wz1)——约定 wx1 <= wx0（默认全 0）
+    //   = 全核心域 [0,m_width)×[0,m_depth)（**fixed generate() 调用点零改动 = 逐位原样**，零变化
+    //   墙的结构性事实）；sparse population 传 chunk scaffold 窗（自身 ±1 chunk = MC population
+    //   「features 可越界写入但限于邻近 3×3 chunk 区域」的同构窗口）。窗口在 pass 体内**钳入核心
+    //   域**后作循环界——候选域超窗即与 fixed 全域重放结果对 C 列逐位一致（读闭合论证见处置表）。
+    // trace-global 型（carveCaves worm / carveCanyon）窗口只用于跳过不触窗的写原语（bbox 早退），
+    //   路径推导仍全域（纯函数链）→ 同 seed 逐位同结果。
     // 确定性树木生成（PLAN §2-K）：在 generate() 末段于 grass 表层种橡树（原木主干+树叶球冠）。
     // 位置/形状纯由 seed 决定；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
-    void placeTrees();                                  // 遍历列、密度+间距筛选后散布
+    void placeTrees(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0); // 遍历列、密度+间距筛选后散布
     // 单棵树：主干 trunkH 格 + 树冠。leafRand = 该列哈希的高位，驱动树冠四角叶的有无 → 每棵树冠轮廓
     // 各异（贴近 MC 橡树自然参差）。纯由 seed 派生（确定性，PLAN §2-K）。
     void placeTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
@@ -1269,7 +1291,7 @@ private:
     //   间距栅格（3×3 邻域不得已有树干 → 主干间距 ≥2 列）散布高树。树干更高（5..7 格，spec「树干更高 ~5-7」）
     //   + 树冠更大更浓（placeJungleTreeAt 半径 3 大伞盖，spec「树冠更大更浓」）→ 丛林观感（高树浓叶）。
     //   仅 grass 表层（Jungle 地表为草，与 placeTrees 同守卫）种；纯函数于 seed + biomeAt → 同 seed 同分布。
-    void placeJungleTrees();
+    void placeJungleTrees(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t481/t486 前置 单棵丛林树：主干 trunkH 格原木 + 半径 3「大伞盖」树冠（比橡树半径 2 球冠更大更浓，
     //   底层两层满填、仅伞缘四角按 leafRand 有无 → 每棵轮廓各异）。主干先置、树冠后置且仅写空气格 → 不覆盖主干。
     void placeJungleTreeAt(int x, int surfaceY, int z, int trunkH, quint32 leafRand);
@@ -1279,7 +1301,10 @@ private:
     //   越富）。三矿判定用同一 hash 的不同位段（独立 → 可重叠区三矿共存、优先钻石 > 铁 > 煤排冲突）。
     //   仅替换 Stone；同 seed → 同矿脉分布；禁用任何运行期随机源。密度随深度上调（深层 stone 多、洞穴穿
     //   多 → 洞壁裸露矿更可见，spec「洞穴 carve 自然暴露」——carveCaves 在本 pass 之后挖走 stone/ore 暴露矿脉）。
-    void scatterOres();
+    //   §29.5-W1b（r2023）：窗口参数同 placeTrees 约定——sparse population 以 cell 窗 + tryOre 读写域
+    //   双钳窗重放（处置表 (c) 替代条目：跨 cell 脉形交互与邻 cell 先占溢印不在重放面 = MC 1.0
+    //   per-chunk vein 同构；fixed 全域调用零改动）。
+    void scatterOres(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t761 沙砾矿袋（机制等价 MC 1.0 地下 gravel pocket / 砾石袋）：scatterOres 之后、carveCaves 之前，
     //   地下**浅层**确定性散布小型沙砾团（网格 + hashColumn 概率筛选 + 抖动 + 小椭球团替换，结构同
     //   placeUndergroundWaterPools 的圆盘空腔模式但**只替换 Stone 为 Gravel**——不挖空腔、不动基岩 / 水 /
@@ -1290,31 +1315,31 @@ private:
     void placeGravelPockets();
     // t119 底层基岩（PLAN §2-K 确定性）：地形填充后在 y 0..4 铺一层 Bedrock（不可破坏，hardness=-1.0）。
     // 厚度按 hashVoxel 坑洼（底实顶疏，机制等价 MC 1.0 基岩层）。仅覆盖最底几格；同 seed → 同分布。
-    void placeBedrock();
+    void placeBedrock(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t148 海平面填水（PLAN §2-K 确定性）：地形填充后在 waterLevel 以下的低洼列从 h+1 到 waterLevel
     //   填 Water（机制等价 MC 海洋 / 湖泊）。仅写空气格；同 seed → 同水域分布。waterLevel 见 .cpp 注释
     //   （t307：随地表抬高 24→58，保持「低于基线 6 格」使低洼 hills 仍见水 / 沙滩带）。
-    void fillWater();
+    void fillWater(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t235 草丛散布（PLAN §2-K 确定性）：地形 + 树 + 水定型后，遍历 grass 表层列（非沙漠 / 非沙滩水下 / 非水域），
     //   按 hashColumn(seed,x,z) 密度筛选在 grass 顶上方一格（surfaceY+1）置 TallGrass（仅写空气格 → 不覆盖
     //   树干 / 树叶 / 水）。同 seed → 同草丛分布；禁用任何运行期随机源。机制等价 MC 平原草丛点缀。
-    void placeTallGrass();
+    void placeTallGrass(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t394 沙漠植被散布（PLAN §2-K 确定性）：遍历 desert 沙顶列，按 hashColumn(seed,x,z) 密度筛选在沙顶
     //   上方置仙人掌（1-3 格高柱，每格仅写空气格 → 不覆盖实块）或枯死的灌木（cross 广告牌，仅写空气格）。
     //   机制等价 MC 1.0 沙漠仙人掌 / 枯灌木点缀。纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；
     //   禁用任何运行期随机源。仅写空气格 → 不覆盖沙上已生成的方块（与 placeTrees/placeTallGrass 同守卫语义）。
-    void placeDesertFlora();
+    void placeDesertFlora(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t396 沼泽浅水池（PLAN §2-K 确定性）：遍历 Swamp 群系列，用低频 fbm（与其它噪声解耦）把约半数草地列
     //   改造成 1 格深浅水池（草顶 → Water 源，state=0）。机制等价 MC 1.0 沼泽「平地 + 浅水洼 + 草岛」地貌。
     //   Swamp 群系 heightAt amp=0（完美平坦，见 heightAt 注释）→ 全 Swamp 列等高 → 水源层同高、水平邻接为
     //   草岛（同高 Grass）→ 不溢流（稳态源层）。仅写 Swamp 非海列（海域独立）。走 m_chunks.setBlock 直写
     //   （worldgen 静默；光场随后 recomputeLightField 重算）。纯函数于 seed（biomeAt + fbm）。
-    void placeSwampPools();
+    void placeSwampPools(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t396 沼泽植物散布（PLAN §2-K 确定性）：遍历 Swamp 群系列，在浅水格上方一格（水面 + 1）散布睡莲
     //   （LilyPad 横向浮叶，仅写空气格）+ 在草岛格上方一格低密度散布蘑菇（Mushroom cross 广告牌，仅写空气格）。
     //   机制等价 MC 1.0 沼泽睡莲浮水 + 阴暗草地小蘑菇。纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；
     //   禁用任何运行期随机源。仅写空气格 → 不覆盖水 / 草上已生成的方块（与 placeTrees/placeTallGrass 同守卫语义）。
-    void placeSwampFlora();
+    void placeSwampFlora(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t397 花散布（PLAN §2-K 确定性）：遍历各群系草地列（非沙漠 / 非雪原 / 非沙滩水下，与 placeTallGrass 同阈值），
     //   按 hashColumn(seed,x,z) 密度筛选在草顶上方一格（surfaceY+1）置 4 色花之一（cross 广告牌，仅写空气格）。
     //   机制等价 MC 1.0 各群系花点缀（平原多彩 / 森林少量 / 沼泽适量 / 山地稀疏）。各群系密度 + 色彩配比不同：
@@ -1322,7 +1347,7 @@ private:
     //   hills 稀疏（裸岩 / 林少花）。色选独立哈希位段 (r>>16)%4 选色（与密度位段 r%100 解耦）。仅写空气格
     //   （setVoxelIfAir）→ 不覆盖草上已生成的方块（树 / 草丛）。纯函数于 seed + biomeAt → 同 seed 同分布；
     //   禁用任何运行期随机源（与 placeTallGrass / placeSwampFlora 同守卫语义）。
-    void placeFlowers();
+    void placeFlowers(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t397 甘蔗散布（PLAN §2-K 确定性）：在邻水**沙顶**（沙滩 / 海岸）上方确定性散布 1..3 格高甘蔗柱（Sugarcane
     //   cross，每格仅写空气格）。spec t446 收紧三条件：(1) 直接坐在 Sand 上、(2) 沙顶层 surfaceY 或其下一层
     //   surfaceY-1 的水平 4 邻有 Water（任意 state）、(3) 沙顶正上方为空气（不在水里 / 湖底生）。草地 / 泥土 /
@@ -1335,7 +1360,7 @@ private:
     //     同语义）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦），逐格向上仅写空气格 → 不覆盖已
     //     生成的方块（树 / 草 / 花）。纯函数于 seed + biomeAt + 海域（seaColumnHeight/isSeaSandColumn/hashColumn）→
     //     同 seed 同分布；禁用任何运行期随机源（与 placeTallGrass / placeDesertFlora 同守卫语义）。
-    void placeSugarcane();
+    void placeSugarcane(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t467 雪原浆果灌木丛散布（PLAN §2-K 确定性）：遍历 Snowy 群系列，在积雪层（SnowLayer）地表上方一格低密度
     //   散布浆果灌木丛（SweetBerryBush cross 广告牌，仅写空气格）。机制等价 MC 1.0 sweet berry bush（寒冷群系浆果丛）。
     //   三守卫（同 placeTallGrass / placeFlowers 同族教训 t446 用对高度查询）：(1) 仅 Snowy 群系（biomeAt==Snowy，
@@ -1344,7 +1369,7 @@ private:
     //   水边沙）。阶段随机 1..2（独立哈希位段，与密度位段解耦）—— 不散布阶段 0（无果嫩丛无意义，worldgen 丛均带果）。
     //   纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源。仅写空气格（setVoxelIfAir）
     //   → 不覆盖雪上已生成的方块（云杉树干 / 树叶 / 任何已占格）。
-    void placeSweetBerryBushes();
+    void placeSweetBerryBushes(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t756 出生列确定性解析（PLAN §2-K）：全部地表特征（树 / 草 / 花 / 甘蔗 / 浆果丛）定型后，自世界
     //   中心列起按 chebyshev 环距向外扫描，取首个「可站立裸地表」列并记录 m_spawnCol*（供 Game 层出生 /
     //   重生定位）。三守卫（机制等价 MC 1.0 spawn 搜索「找首个安全露天落点」；地表取 min(heightAt,
@@ -1359,7 +1384,7 @@ private:
     //   格）冻结为 Ice（机制等价 MC 1.0 寒冷群系水面结冰）。仅冻最顶层水面（同 MC 仅表层结冰；下层水保留）；
     //   地下水池（cy ≤ h-7 << waterLevel）不在 y==waterLevel 故不受影响。generate 在 fillWater 之后调（水已就位）。
     //   走 m_chunks.setBlock 直写（worldgen 静默，光场随后 recomputeLightField 重算）。纯函数于 seed（biomeAt）。
-    void freezeSurfaceWater();
+    void freezeSurfaceWater(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t278 洞穴隧道生成（PLAN §2-K 确定性）：terrain + 矿石散布之后、填水之前 carve 地下洞穴。两套叠加：
     //   (a) 3D Perlin 阈值洞（两路偏移 noise3 同时高于阈值 → 蜿蜒管状洞穴，机制等价 MC 1.0 Perlin 洞穴）；
     //   (b) Perlin worm 隧道 + 分叉（确定性起点、沿 noise 扰动方向逐球 carve、定期分叉 → 连通隧道网 + Y/十
@@ -1367,7 +1392,7 @@ private:
     //       「内部黑暗」：天光 flood-fill 不穿实体 → 洞内无天光；recomputeLightField 在本 pass 之后跑）。
     //   纯函数于 seed（noise3 / hashColumn / hashVoxel）→ 同 seed 同洞穴分布。挖走 stone/dirt/ore，暴露矿石
     //   于洞壁（为 t279 洞穴裸露矿物铺路）；不挖 air/bedrock/water。
-    void carveCaves();
+    void carveCaves(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t341 山坡洞口（spec「多地表连通洞穴入口 + 山坡」）：carveCaves 之后，在「山坡腰」列（4 邻列既有严格更高
     //   也有严格更低 = 处于坡面而非峰/谷）+「近表有真实洞穴 air（carveCaves 已挖空）」双重过滤下，确定性散布
     //   3×3 可通行大洞口（自地表下挖到既有洞穴顶格）。仅该列近表有 cave air 才开口 → 永不产孤立竖井（修 t339
@@ -1381,7 +1406,7 @@ private:
     //   heightAt 下挖到峡谷底（落在矿层带内 → 两侧立壁纵贯煤/铜/铁/金矿层 → carve 暴露矿石于峡壁）。露天
     //   （清除地表草/土 → 天光直入）；不动基岩底层 / air / 水；跳过海域列（陆地地貌）。纯函数于 seed
     //   （hashColumn + noise2 / fbm）→ 同 seed 同峡谷（PLAN §2-K）。单条 worm → 每图约 1 条贯穿峡谷。
-    void carveCanyon();
+    void carveCanyon(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t716 ③ 雪层支撑守卫（雪原细雪悬浮峡谷/洞口上方）：carveCanyon / carveCaveEntrances 等 carve 类 pass
     //   之后、fillWater / 树草散布之前跑一次全图清扫——SnowLayer 正下方非实体（air / 水 / 无碰撞类）→ 该雪层
     //   失撑，移除（直删，无掉落——worldgen 语义「生成期不该存在的悬浮雪」；对比游玩期 checkSnowLayerOnEdit
@@ -1389,7 +1414,7 @@ private:
     //   支撑格、留下表面 SnowLayer 悬空（surfaceY 取 worm 中心高度，邻列地形 +1 时 carve 顶 = 邻列表面-1）。
     //   只扫 SnowLayer（t716 范围；草方块同病但 MC 峡壁露土本就自然，不在本任务范围）。纯查询 + 直删，
     //   不发信号（worldgen 既有约定）。幂等：重复跑零变化。
-    void pruneFloatingSnowLayers();
+    void pruneFloatingSnowLayers(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t1051 轨支撑守卫（review0913 #1「矿井干燥门缺支撑校验→悬空轨」的生成期清偿；pruneFloatingSnowLayers
     //   同款 carve 类后置守卫）：carveCanyon 之后、fillWater / 树草之前跑一次全图清扫——Rail 正下方非齐平
     //   支撑（isTopFlushSupport：完整立方 / 上半砖顶面，t733 失撑坍落同源单一权威谓词；MC 口径「铁轨需下方
@@ -1399,7 +1424,7 @@ private:
     //   共 7 根；placeMineshaft 内部支撑门在峡谷 carve 前已跑完、对此不可见）。只扫 Rail（worldgen 只铺普通
     //   Rail；golden/detector 为玩家放置面）。纯查询 + 直删，不发信号（worldgen 既有约定）；幂等；纯函数于
     //   seed → 同 seed 同计数。
-    void pruneUnsupportedWorldgenRails();
+    void pruneUnsupportedWorldgenRails(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t309 地下水池（封闭洞穴静止水层；spec「地下水池（封闭洞穴静止水层）」）：carveCaves / carveCaveEntrances
     //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
     //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态
@@ -1626,6 +1651,10 @@ private:
     // §29.5-W1：出生半径预生成参数（D4 首落；chunk 单位方形切比雪夫半径，默认 2——选型立证
     // 见 SparseWorldParams 头注释；负值/越界构造期归一化，sparse 构造路径唯一消费）。
     int m_spawnPreGenerateRadius = 2;
+    // §29.5-W1b（r2023）：population 窗口重放静默标志——置位期间 (b) 级 pass 的确定性计数
+    // qInfo 不落盘（每 chunk 重放都会打印、且计数为窗口投影值，落盘只会制造误导性日志噪声；
+    // fixed generate() 全域运行恒 false = 日志输出逐字原样，零变化墙）。
+    bool m_worldgenQuiet = false;
     // t185 水流 tick 节流计数：tickWaterFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFlowTickInterval
     //   才把波前推进 1 格（~0.3s 一格 → 1 格/tick 流动动画可见）。MC 自身约 0.25s/格，本工程取 3（0.3s）平衡
     //   动画可见度与扫描开销（全图扫水格 ~1-2ms + 波前少量写入）。

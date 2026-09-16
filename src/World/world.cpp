@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array> // t564：placeStronghold 候选要塞坐标集（std::array<int,3>）
 #include <cmath>
+#include <cstring> // §29.5-W1b：population 快照邻块 memcpy 恢复
 #include <queue>   // t151：recomputeLightField 的 BFS flood-fill 队列
 #include <unordered_map> // t185 tickWaterFlow 的 adds 哈希表（key = 体素线性编码 → 新 level，多源取 min）
 #include <unordered_set> // t221 tickWaterFlow 的 evapKeys 集合（本 tick 将退场的格 key，供扩散 pass 跳过）
@@ -111,7 +112,9 @@ void World::sparseGenerate()
 }
 
 // 单 chunk 物化全链（sparseGenerate 与 loadChunkAt 共用；生命周期经 setChunkLifecycle 唯一
-// 入口 = r2010 权威；r2021 驻留集 revision 沿在 ③ 可查询翻转处自动携带）。
+// 入口 = r2010 权威；r2021 驻留集 revision 沿在 ③ 可查询翻转处自动携带）。§29.5-W1b（r2023）
+// 起 ③ 之后接 sparsePopulateChunk 窗口重放——population 的 pass 体经统一查询门读栅格，故须在
+// 自身 chunk 可查询（Loaded）后运行；同步调用内无外部观察者（单写者纪律），返回即全量稳态。
 void World::sparseGenerateChunk(int cx, int cz)
 {
     Chunk *chunk = m_chunks.ensureChunk(cx, cz); // 现行 Chunk 构造路径物化 Absent 槽
@@ -132,6 +135,295 @@ void World::sparseGenerateChunk(int cx, int cz)
     chunk->recomputeAllHeightmaps(); // heightmap 派生自体素（finishLoad 同门防御）
     setChunkLifecycle(cx, cz, ChunkLifecycle::Generated); // ② 内容生成完毕
     setChunkLifecycle(cx, cz, ChunkLifecycle::Loaded);    // ③ 晋升驻留（fixed create 终态）
+    sparsePopulateChunk(cx, cz); // §29.5-W1b：fixed 全量 pass 的窗口重放（处置表见下）
+}
+
+// ── §29.5-W1b sparse population parity（r2023）────────────────────────────────────────────
+// 逐 pass 处置表（本单设计权威——audit #11 第 6 条授权：fixed generate() 全 pass 清单盘点 →
+// 逐 pass 三选一[(a)已被单列权威覆盖 / (b)窗口确定性重放 / (c)豁免登记]，目标 = 同 seed 下
+// sparse 世界已加载区 ≡ fixed 世界同区逐位恒等面的收宽；加载顺序无关性由「pass 数学体 =
+// (seed, 几何域) 的纯函数」保证——确定性优先于即时性）。
+//
+//   pass（fixed generate() 内执行序）          处置   依据
+//   ──────────────────────────────────────   ────   ─────────────────────────────────────
+//   fillTerrainColumn 列填充                  (a)    terraingen 单列权威（W1 已重放）
+//   placeBedrock                              (b)窗   逐体素纯 hashVoxel（零状态读）→
+//                                                    窗口=自身列即精确
+//   scatterOres                              (c)替   脉形（blob 游走 offStone / 长条壳 / 铁立
+//                                                    方角）以体素态反馈走向 = 读域出窗即两序
+//                                                    不齐（r2023c 恰红实证）；严格闭合需 C±2
+//                                                    chunk 读域（25 脚手架/chunk，违 sparse 成
+//                                                    本纪律）→ **(c) MC 同构替代**：cell 窗 +
+//                                                    tryOre 读写域双钳窗 = MC 1.0 per-chunk
+//                                                    vein 同构（wiki/w/World_generation："Each
+//                                                    feature has its own placement rules
+//                                                    including the number of placement
+//                                                    attempts"——per-chunk 尝试次数确定性）；
+//                                                    块缘 ±8 列跨 cell 脉形交互差异如实登记
+//   placeGravelPockets                        (b)全   网格 16+抖动±4+半径≤3 → C 影响袋中心
+//                                                    ⊆ C±7；读=写位 Stone 检查 ∈ scaffold
+//   carveCaves (a) 阈值噪声                   (b)窗   逐体素纯噪声阈值（读=写位）
+//   carveCaves (b) Perlin worm                (b)追    路径纯 noise3 位置链（零体素读）→ 每
+//                                                    chunk 全域 trace 自含重derive；carveSphere
+//                                                    读=写位 skip 检查（air 上不写 = 终态同义）
+//   carveCaveEntrances                        (b)全   山坡判定 = heightAt 纯 4 邻；cave-air
+//                                                    搜索 = 候选自身列 ∈ scaffold；开口 3×3
+//                                                    写 ⊆ 中心±4（近 C 候选读全 ∈ scaffold）
+//   placeUndergroundWaterPools                (b)全   海检/高度纯；disc 读=写位守卫 ⊆ 中心±7
+//   placeLavaLakes                            (b)全   同上（网格 16）
+//   placeDungeons                             (c)    豁口搜空气读域 = 足迹±12 曼哈顿（跨
+//                                                    scaffold 读闭合破缺）。MC 引证
+//                                                    （minecraft.wiki/w/World_generation，
+//                                                    2026-09 实读）：monster room 属
+//                                                    underground_structures decoration step
+//                                                    的 per-chunk feature，结构生成只读自身
+//                                                    模板与噪声地形、不读邻块 worldgen 体素
+//                                                    态——本 pass 的体素态依赖恰为与 MC 异构
+//                                                    之处，如实豁免不硬造
+//   placeMineshaft                            (c)    写域 ⊆ 中心±26 超 scaffold；t1012 地板
+//                                                    政策读支撑体素跨 chunk。MC 引证：同页
+//                                                    "A structure set determines the placement
+//                                                    positions of the structures"（spacing/
+//                                                    separation/frequency per-position 确定性
+//                                                    布置，starts 由 chunk 坐标种子推导）
+//   placeDesertTemple / placeJungleTemple     (c)    结构族（同 mineshaft 引证）
+//   placeStronghold                           (c)    结构族；同页 "strongholds in Java Edition
+//                                                    ... are placed as concentric rings"
+//   carveCanyon                               (b)追    路径纯 noise2 链 + 单 worm 全域 trace；
+//                                                    carveDisc/排水带/侧洞读=写位（skip 守卫
+//                                                    等幂）→ 窗口 bbox 早退只省窗外盘
+//   pruneFloatingSnowLayers                   (b)窗   扫列读自身列正下方一格
+//   pruneUnsupportedWorldgenRails             (b)窗   同上（矿井豁免 → 无生成轨 → 自然 no-op，
+//                                                    与 fixed 语义自洽）
+//   fillWater                                 (b)窗   逐列读自身列（seaColumnHeight 纯）
+//   freezeSurfaceWater                        (b)窗   逐列读自身列 y=waterLevel
+//   placeSurfaceLakes                         (b)全   低洼判定 = heightAt 纯 disc ±rad+1；
+//                                                    carve/灌水读=写位 ⊆ 中心±8
+//   placeSwampPools                           (b)窗   逐列自列读（biome/sea/height 纯）
+//   placeTrees / placeJungleTrees             (b)窗   树冠 ≤3 IfAir 写 ⊆ scaffold；surf/
+//                                                    under1 = 自列 ∈ scaffold；间距 occupied
+//                                                    = 窗口扫描（C 的 ±1 检查 ⊆ scaffold ✓）
+//   placeTallGrass / placeSwampFlora /        (b)窗   逐列自列读
+//   placeFlowers / placeSweetBerryBushes
+//   placeDesertFlora                          (b)窗   仙人掌 4 邻 isFullCube 读 ±1 ⊆ scaffold
+//   placeSugarcane                            (b)窗   邻水判定 4 邻×2 层读 ±1 ⊆ scaffold
+//   findSpawnColumn / recomputeLightField /   (a/c)  世界级收口：W1 sparseGenerate 尾同门已
+//   rebuildFluid/IceCells、rebuildStructureRegions    处理（light 按需物化 = loadChunkAt
+//                                                    refloodBox 列种子，W1 登记）；索引 = 本
+//                                                    函数尾 rebuildPopulationCellIndexes 自
+//                                                    身列重建；结构区域表 = sites() 纯函数
+//                                                    （W1 已落，与体素 population 无关）
+//
+// ── 窗口重放的精确性论证（r2023b 承重墙的读码立证）────────────────────────────────────────
+//   scaffold = 自身 ±1 chunk（3×3 = MC "Features can place block outside the current chunk's
+//   boundaries but are limited in the nearby 3×3 area" 的同构窗口）。关键不变量：**影响 C 列内容
+//   的全部 pass 决策读 ⊆ C±17 列 ⊆ scaffold（C±16）**（各 pass 读域上限见处置表：仙人掌/甘蔗
+//   ±1、树间距 ±1、Lakes 抖动+半径 ≤8……最大者散布族 ≥17——scatterOres 由此降级 (c) 替代，
+//   见上表）。scaffold 列在 pass 序 k 时刻的状态 = terrain + 窗口内 ≤k 序 pass 写入 = fixed 世
+//   界同位置同时刻状态（窗口外候选写入被写域钳制拒绝 = 两序同空）。归纳即得：**(b) 级 pass 对
+//   C 列的写入与 fixed 逐位一致**。窗外列的内容 = fixed 语义的自然外延（核心域边界外无候选
+//   网格 → 只有纯函数地形/邻域写入的外溢）。
+//   **读域的「时刻一致性」铁律（首跑 r2023b 恰红实证的修正一）**：population 读窗内的列必须呈
+//   现 pass-k 时刻状态，而**已物化邻 chunk 的现存内容是终态**（含后序 pass 的洞穴/树/水）——
+//   直接读终态会把后序事实泄漏进早期 pass 的决策（矿脉 Stone 竞争反序等）。故已物化邻走
+//   快照-回填-恢复（终态快照 → 数组清零 + 纯地形回填 → population → 终态恢复）：population
+//   期间读窗内恒为「terrain + ≤k 窗口 pass」= fixed 时刻真值；恢复无损（population 对该邻的
+//   溢写已在邻块自身 population 时以同值落位——候选域 ⊆ 邻块窗口 ⊇ 自身——幂等收敛）。
+//   **写域的「两序同空」铁律（二跑 r2023c 恰红实证的修正二）**：全候选域 pass 的远端溢写若落
+//   入「本 population 时恰已物化的真邻块」，即把 pass-k 数学 applied 到终态上 = 按加载次序污染
+//   邻块。写域钳制（锚 ±1 chunk）令窗外溢写两序同拒；窗内溢写落 snapshot-terrain/脚手架 =
+//   pass-k 读域状态（恢复时丢弃，邻块自身 population 已同值落位）= 确定性。
+void World::sparsePopulateChunk(int cx, int cz)
+{
+    if (!isSparse())
+        return; // fixed 世界零调用（零变化墙；防御）
+    // ── ① 读域就位（8 邻 = population 读窗；两形态）─────────────────────────────────────
+    // 未物化邻 → terrain 脚手架（新建，①②③ 到可查询稳态，population 后拆卸）。已物化邻 →
+    // **快照-回填-恢复**：其现存内容 = 自身 population 的**终态**（含洞穴/树/水等后序 pass），
+    // 而 pass-k 时刻的 fixed 真值 = 地形 + ≤k 序 pass 态——直接读终态会把「洞穴已掏空」等
+    // 后序事实泄漏进早期 pass 的读（实测 seed 82：矿脉竞争在真邻块读域下反序 → r2023b 恰红
+    // 实证）。故对已物化邻：快照 voxels/states → 数组清零 + 纯地形回填（pass-k 读域 = terrain
+    // + ≤k 窗口 pass，与 fixed 逐位一致）→ population 后恢复原终态（溢写已在邻块自身
+    // population 时以同值落位——候选域 ⊆ 邻块窗口 ⊇ 自身——恢复即无损幂等）。
+    struct ReadNeighbor
+    {
+        int cx = 0, cz = 0;
+        bool created = false;               // 新建 terrain 脚手架（拆卸面）
+        bool snapshotted = false;           // 已物化快照（恢复面）
+        std::vector<quint8> snapVoxels;
+        std::vector<quint8> snapStates;
+    };
+    ReadNeighbor nb[8];
+    int nbN = 0;
+    const int kCS = TerrainGen::kChunkSize;
+    const int wx0 = cx * kCS - kCS, wx1 = cx * kCS + 2 * kCS; // scaffold 窗 = 自身 ±1 chunk
+    const int wz0 = cz * kCS - kCS, wz1 = cz * kCS + 2 * kCS;
+    struct ScaffoldColumnSink
+    {
+        ChunkManager *c;
+        void write(int x, int y, int z, quint8 id, quint8 state) { c->setBlock(x, y, z, id, state); }
+    };
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dz == 0)
+                continue;
+            const int nx = cx + dx, nz = cz + dz;
+            if (m_chunks.chunkMaterialized(nx, nz)) {
+                // 快照-回填：终态 → 纯地形读域（population 后恢复，见 ③）。
+                Chunk *real = m_chunks.chunk(nx, nz);
+                if (!real)
+                    continue; // 防御（不可达：物化必可取）
+                ReadNeighbor &n = nb[nbN++];
+                n.cx = nx;
+                n.cz = nz;
+                n.snapshotted = true;
+                n.snapVoxels.assign(real->voxelData(), real->voxelData() + real->voxelCount());
+                n.snapStates.assign(real->stateData(), real->stateData() + real->voxelCount());
+                std::memset(real->voxelDataMut(), 0, real->voxelCount());
+                std::memset(real->stateDataMut(), 0, real->voxelCount());
+                real->recomputeAllHeightmaps(); // 全空列基准（terrain 回填经 setBlock 增量维护）
+                ScaffoldColumnSink sink{ &m_chunks };
+                for (int lz = 0; lz < kCS; ++lz)
+                    for (int lx = 0; lx < kCS; ++lx)
+                        m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
+                continue;
+            }
+            if (!m_chunks.ensureChunk(nx, nz))
+                continue; // 防御（物化失败 → 该邻域读走 OOB 等价；C 内容不受影响）
+            setChunkLifecycle(nx, nz, ChunkLifecycle::Loading);
+            ScaffoldColumnSink sink{ &m_chunks };
+            for (int lz = 0; lz < kCS; ++lz)
+                for (int lx = 0; lx < kCS; ++lx)
+                    m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
+            setChunkLifecycle(nx, nz, ChunkLifecycle::Generated);
+            setChunkLifecycle(nx, nz, ChunkLifecycle::Loaded);
+            nb[nbN].cx = nx;
+            nb[nbN].cz = nz;
+            nb[nbN].created = true;
+            ++nbN;
+        }
+    }
+    // teardown/恢复键集（调用方语义：rebuildPopulationCellIndexes 只清「新建脚手架」列——
+    // 快照邻块的索引项本就有效且恢复后仍指向同值内容，清了反而要重扫回填）。
+    ChunkKey createdKeys[8];
+    int createdN = 0;
+    for (int i = 0; i < nbN; ++i)
+        if (nb[i].created)
+            createdKeys[createdN++] = ChunkKey{ nb[i].cx, nb[i].cz };
+
+    // ── ② (b) 级 pass 同序重放（fixed generate() 内执行序原样；结构族 (c) 豁免不调）──────
+    // 写域钳制（锚 ±1 chunk = scaffold 窗）：窗外候选溢写恒拒——「邻块已/未物化」两序下同为
+    // 拒 = 顺序无关（r2023c 恰红实证的溢写污染面）；真邻块终态由此免受他块 population 触碰。
+    // scatterOres 传窗 = cell 循环 + tryOre 读写域双钳（脉形走向的体素态耦合 → 读域出窗即两
+    // 序不齐；处置表 (c) 替代条目）。其余全域 pass（gravel/entrances/pools/lava/lakes）候选循
+    // 环本身 O(核心域网格) 廉价，窗外写入被本钳制拒绝 = 与 fixed 对 C 列的影响逐位同空。静默
+    // 标志避免每 chunk 重放的确定性计数日志刷屏（fixed 全域运行恒 false = 日志逐字原样）。
+    m_chunks.setPopulationWriteClamp(true, cx, cz);
+    m_worldgenQuiet = true;
+    placeBedrock(wx0, wx1, wz0, wz1);
+    scatterOres(wx0, wx1, wz0, wz1);
+    placeGravelPockets();
+    carveCaves(wx0, wx1, wz0, wz1);
+    carveCaveEntrances();
+    placeUndergroundWaterPools();
+    placeLavaLakes();
+    carveCanyon(wx0, wx1, wz0, wz1);
+    pruneFloatingSnowLayers(wx0, wx1, wz0, wz1);
+    pruneUnsupportedWorldgenRails(wx0, wx1, wz0, wz1);
+    fillWater(wx0, wx1, wz0, wz1);
+    freezeSurfaceWater(wx0, wx1, wz0, wz1);
+    placeSurfaceLakes();
+    placeSwampPools(wx0, wx1, wz0, wz1);
+    placeTrees(wx0, wx1, wz0, wz1);
+    placeJungleTrees(wx0, wx1, wz0, wz1);
+    placeTallGrass(wx0, wx1, wz0, wz1);
+    placeDesertFlora(wx0, wx1, wz0, wz1);
+    placeSwampFlora(wx0, wx1, wz0, wz1);
+    placeFlowers(wx0, wx1, wz0, wz1);
+    placeSugarcane(wx0, wx1, wz0, wz1);
+    placeSweetBerryBushes(wx0, wx1, wz0, wz1);
+    m_worldgenQuiet = false;
+    m_chunks.setPopulationWriteClamp(false, cx, cz);
+
+    // ── ③ 索引收尾 + ④ 读域拆卸/恢复 ────────────────────────────────────────────────────
+    // 新建脚手架：⑥⑦ 合法边 + releaseSparseChunk 擦槽（数据不保留——正式物化时由
+    // sparseGenerateChunk 全量重放逐位重derive）。快照邻块：memcpy 恢复原终态（population
+    // 期间的溢写已在邻块自身 population 时以同值落位 = 恢复无损幂等）+ heightmap 重算。
+    rebuildPopulationCellIndexes(cx, cz, createdKeys, createdN);
+    for (int i = 0; i < nbN; ++i) {
+        if (nb[i].created) {
+            setChunkLifecycle(nb[i].cx, nb[i].cz, ChunkLifecycle::Evicting); // ⑥ 移出驻留
+            setChunkLifecycle(nb[i].cx, nb[i].cz, ChunkLifecycle::Absent);   // ⑦ 数据面闭合
+            m_chunks.releaseSparseChunk(nb[i].cx, nb[i].cz);                 // 擦槽（不保留）
+            continue;
+        }
+        if (nb[i].snapshotted) {
+            Chunk *real = m_chunks.chunk(nb[i].cx, nb[i].cz);
+            if (!real)
+                continue; // 防御（不可达：快照源恒在）
+            std::memcpy(real->voxelDataMut(), nb[i].snapVoxels.data(), real->voxelCount());
+            std::memcpy(real->stateDataMut(), nb[i].snapStates.data(), real->voxelCount());
+            real->recomputeAllHeightmaps(); // heightmap 派生自体素（快照态基准重算）
+        }
+    }
+}
+
+// population 收尾索引重建（语义见 world.h 声明注释）：本 population 新物化的 scaffold 列在
+// 拆卸后成为无主格——setVoxelIfAir（flora 族写路径）触发的 noteGrowth/noteFluid/noteIce
+// 增量项对 scaffold 列即陈旧，须按调用方传入的脚手架键集清（teardown 前调用 = 键集显式传递，
+// 不能按物化态重推导——此刻 scaffold 尚在）。自身 chunk 16×16 列的 worldgen 直写（不经写入
+// 路径 → 无增量项）按 fixed generate 末 rebuild 族同门扫描回填。既物化邻 chunk 的既有索引项
+// 不动（population 对其写入全部为确定性同值 no-op，见处置表幂等论证）。
+void World::rebuildPopulationCellIndexes(int cx, int cz, const ChunkKey *scaffold, int scaffoldN)
+{
+    const int kCS = TerrainGen::kChunkSize;
+    if (scaffoldN > 0) {
+        // 清 scaffold 列的陈旧增量项（collect-then-erase，避免边遍历边删迭代器失效）。
+        static thread_local std::vector<quint64> stale;
+        stale.clear();
+        const auto collectStale = [&](const std::unordered_set<quint64> &set) {
+            for (const quint64 k : set) {
+                int x, y, z;
+                unpackGrowthCell(k, x, y, z);
+                const int kx = floorDiv(x, kCS), kz = floorDiv(z, kCS);
+                if (kx == cx && kz == cz)
+                    continue; // 自身 chunk 列（合法终态，下方重扫回填）
+                for (int i = 0; i < scaffoldN; ++i)
+                    if (scaffold[i].cx == kx && scaffold[i].cz == kz) {
+                        stale.push_back(k);
+                        break;
+                    }
+            }
+        };
+        collectStale(m_growthCells);
+        collectStale(m_waterCells);
+        collectStale(m_lavaCells);
+        collectStale(m_iceCells);
+        for (const quint64 k : stale) {
+            m_growthCells.erase(k);
+            m_waterCells.erase(k);
+            m_lavaCells.erase(k);
+            m_iceCells.erase(k);
+        }
+    }
+    // 自身 chunk 列扫描回填（worldgen 直写不经写入路径 → 与 fixed generate 末 rebuild 同门）。
+    const int x0 = cx * kCS, z0 = cz * kCS;
+    for (int lz = 0; lz < kCS; ++lz) {
+        for (int lx = 0; lx < kCS; ++lx) {
+            const int x = x0 + lx, z = z0 + lz;
+            for (int y = 0; y < m_height; ++y) {
+                const quint8 b = m_chunks.blockAt(x, y, z);
+                if (b == BlockRegistry::Water)
+                    m_waterCells.insert(packGrowthCell(x, y, z));
+                else if (b == BlockRegistry::Lava)
+                    m_lavaCells.insert(packGrowthCell(x, y, z));
+                else if (b == BlockRegistry::Ice)
+                    m_iceCells.insert(packGrowthCell(x, y, z));
+                if (isGrowthBlock(b))
+                    m_growthCells.insert(packGrowthCell(x, y, z));
+            }
+        }
+    }
 }
 
 // 按需物化单 chunk（sparse 模式；W2 驱动接线的生产缝——本单生产零调用 = app 零变化）。
@@ -5721,8 +6013,15 @@ void World::placeJungleTreeAt(int x, int surfaceY, int z, int trunkH, quint32 le
 //   密度 14% > 森林 10% → 丛林更密（机制等价 MC 1.0 丛林密林；间距封顶 ~25% → 14% 全数通过间距）。
 //   placeTrees 已在 biomeAt==Jungle 列跳过（丛林树只由本 pass 散布）→ 不与橡树重复。纯函数于 seed + biomeAt
 //   （经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源（PLAN §2-K）。
-void World::placeJungleTrees()
+void World::placeJungleTrees(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款，见其体内注释）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
 
     constexpr int kMinJungleTrunk = 5; // 丛林主干最少格数（spec「树干更高 ~5-7」；高于橡树 4）
@@ -5731,8 +6030,8 @@ void World::placeJungleTrees()
     constexpr unsigned kJungleTreePct = 14; // 丛林树密度（% of grass 列；高于森林 10 → 更密，机制等价 MC 丛林密林）
 
     int placed = 0;
-    for (int z = 0; z < m_depth; ++z) {
-        for (int x = 0; x < m_width; ++x) {
+    for (int z = zLo; z < zHi; ++z) {
+        for (int x = xLo; x < xHi; ++x) {
             if (biomeAt(x, z) != Biome::Jungle) continue; // 仅丛林群系
             const int surfaceY = heightAt(x, z);
             // 与 placeTrees 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不种树（机制等价 MC 树不生于沙滩/水下）。
@@ -5766,7 +6065,8 @@ void World::placeJungleTrees()
             ++placed;
         }
     }
-    qInfo() << "worldgen: jungle trees placed =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: jungle trees placed =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // 确定性树木散布：遍历列，按哈希(seed,x,z) 决定是否尝试种树；占用栅格保证主干间距 ≥2 列。
@@ -5774,8 +6074,16 @@ void World::placeJungleTrees()
 // 树干 → 跳过。主干高度按世界高度钳制（留出树冠空间），放不下最小树则确定性跳过。全部纯函数于 seed → 可复现。
 // t306 群系分流密度（spec「森林（现多树）+ 草原（少树多草）」）：forest 密闭成林 / plains 开阔偶见孤树 /
 //   hills 零星。机制等价 MC 1.0 森林/平原树密度分化。密度纯函数于 seed + biomeAt → 同 seed 同树分布。
-void World::placeTrees()
+void World::placeTrees(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（本文件同款：wx1<=wx0 = 全核心域原样；sparse 传 scaffold 窗钳入核心域
+    // ——候选域 ⊆ [0,m_width)² 恒与 fixed 相同域约定，occupied 栅格索引安全）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
 
     constexpr int kMinTrunk    = 4; // 主干最少格数
@@ -5789,8 +6097,8 @@ void World::placeTrees()
     constexpr int kSnowyTreePct  = 9;  // t395 雪原/针叶：针叶林密闭（机制等价 MC taiga 密植云杉；接近 forest 密度）
 
     int placed = 0;
-    for (int z = 0; z < m_depth; ++z) {
-        for (int x = 0; x < m_width; ++x) {
+    for (int z = zLo; z < zHi; ++z) {
+        for (int x = xLo; x < xHi; ++x) {
             const int surfaceY = heightAt(x, z);
             // t149：水位阈值取代旧 kSandLevel=3 —— 沙滩带(wl±1)/水下(h<wl)/低洼不种树（机制等价 MC 树不生于沙滩/水下）。
             if (surfaceY <= kWaterLevel + 1) continue;
@@ -5856,7 +6164,8 @@ void World::placeTrees()
             ++placed;
         }
     }
-    qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: trees placed =" << placed; // 可观测：同 seed → 同计数（确定性核对）
 }
 
 // t235/t274 草丛确定性散布（PLAN §2-K）：遍历列，在 grass 表层（heightAt > waterLevel+1，非沙漠，与 generate
@@ -5874,8 +6183,15 @@ void World::placeTrees()
 //   t310 草变种（矮/中/高）：密度筛选后用**独立哈希位段** (r>>16)%100 选变种（与密度位段 r%100 解耦 → 密度与
 //   变种分布互不污染），各群系变种配比不同——plains 以矮/中为主（典型草地）、forest 林下多中/高草（茂盛下木）、
 //   hills 以矮草为主（裸露稀疏）。高草(2 格)需其上一格为空气（顶点延伸进上格）；被占则降级中草避免穿透实块。
-void World::placeTallGrass()
+void World::placeTallGrass(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     // t337 群系密度表（% of grass 列生草丛）：forest 茂盛 / plains 适中 / hills 稀疏（spec「森林多草，草原适量草」）。
     constexpr int kPlainsGrassPct = 18; // 草原适量（spec「草原=少树适量草」：开阔点缀；旧 40% 偏密致全图铺草）
     constexpr int kForestGrassPct = 35; // 森林茂盛（spec「森林=密树多草」：林下密下木；旧 18% 偏稀致森林不显密）
@@ -5892,8 +6208,8 @@ void World::placeTallGrass()
 
     int placed = 0;
     int plainsCols = 0, hillsCols = 0, forestCols = 0, jungleCols = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             const int surfaceY = heightAt(x, z);
             // 与 placeTrees 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生草丛（机制等价 MC 草丛不生于沙/水下）。
             if (surfaceY <= kWaterLevel + 1) continue;
@@ -5936,10 +6252,11 @@ void World::placeTallGrass()
             else ++hillsCols;
         }
     }
-    qInfo() << "worldgen: tall grass placed =" << placed
-            << "(plains" << plainsCols << "/ forest" << forestCols
-            << "/ jungle" << jungleCols
-            << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: tall grass placed =" << placed
+                << "(plains" << plainsCols << "/ forest" << forestCols
+                << "/ jungle" << jungleCols
+                << "/ hills" << hillsCols << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t394 沙漠植被散布（机制等价 MC 1.0 沙漠仙人掌 + 枯灌木点缀）：遍历 desert 沙顶列，按 hashColumn 密度筛选
@@ -5948,13 +6265,20 @@ void World::placeTallGrass()
 //   仅写空气格（setVoxelIfAir）→ 不覆盖沙上已生成的方块 / 树 / 草丛（与 placeTrees/placeTallGrass 同守卫语义；
 //   事实上 desert 列 placeTrees/placeTallGrass 已跳过，此处仅与沙海 / 洞口空气守卫配合）。
 //   密度：仙人掌稀疏（~3% 沙漠列）、枯灌木适中（~6%）—— 沙漠少植被但仍有点缀，机制等价 MC 沙漠稀疏植被。
-void World::placeDesertFlora()
+void World::placeDesertFlora(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr unsigned kCactusPct   = 3;  // 仙人掌密度（% of 沙漠沙顶列；稀疏点缀）
     constexpr unsigned kDeadBushPct = 6;  // 枯死的灌木密度（% of 沙漠沙顶列；适中点缀）
     int cactusPlaced = 0, deadBushPlaced = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             if (biomeAt(x, z) != Biome::Desert) continue; // 仅沙漠群系
             const int surfaceY = heightAt(x, z);
             // 与 placeTrees / placeTallGrass 同阈值：沙滩带(wl±1)/水下(h<wl)不生（机制等价 MC 沙漠植被不生于沙滩/水下）。
@@ -6010,8 +6334,9 @@ void World::placeDesertFlora()
             }
         }
     }
-    qInfo() << "worldgen: desert flora placed cactus =" << cactusPlaced
-            << "dead_bush =" << deadBushPlaced; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: desert flora placed cactus =" << cactusPlaced
+                << "dead_bush =" << deadBushPlaced; // 同 seed → 同计数（确定性核对）
 }
 
 // t396 沼泽浅水池（见 world.h 头注释）：遍历 Swamp 群系列，用低频 fbm（与地形 / 群系图均解耦）把约半数草地列
@@ -6022,11 +6347,18 @@ void World::placeDesertFlora()
 //   仅处理 Swamp 非海列（海域 seaColumnHeight>=0 独立，跳过）；surfaceY 须明显高于海平面（沼泽水独立于海，
 //   不溢入海）。走 m_chunks.setBlock 直写（worldgen 静默；光场随后 recomputeLightField 重算 → Water 全透光正确）。
 //   纯函数于 seed（biomeAt + fbm）→ 同 seed 同沼泽水分布（PLAN §2-K）。
-void World::placeSwampPools()
+void World::placeSwampPools(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     int pools = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             if (biomeAt(x, z) != Biome::Swamp) continue; // 仅沼泽群系
             if (seaColumnHeight(x, z) >= 0) continue;     // 海域独立（海 / 沙滩不叠沼泽水）
             const int surfaceY = std::min(heightAt(x, z), m_height - 1);
@@ -6044,7 +6376,8 @@ void World::placeSwampPools()
             ++pools;
         }
     }
-    qInfo() << "worldgen: swamp pools =" << pools; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: swamp pools =" << pools; // 同 seed → 同计数（确定性核对）
 }
 
 // t396 沼泽植物散布（见 world.h 头注释）：遍历 Swamp 群系列，在浅水格上方一格（surfaceY+1，水面之上）散布
@@ -6053,13 +6386,20 @@ void World::placeSwampPools()
 //   密度：睡莲 ~25% 水格（水面点缀，非满铺）、蘑菇 ~8% 草岛格（稀疏阴暗处冒头）—— 沼泽植物适量点缀（机制等价
 //   MC 沼泽睡莲 / 蘑菇稀疏分布）。仅写空气格（setVoxelIfAir）→ 不覆盖水 / 草上已生成的方块（树 / 草丛）。
 //   纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
-void World::placeSwampFlora()
+void World::placeSwampFlora(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr unsigned kLilyPct   = 25; // 睡莲密度（% of 沼泽水格；水面点缀，非满铺）
     constexpr unsigned kMushPct   = 8;  // 蘑菇密度（% of 沼泽草岛格；稀疏阴暗处冒头）
     int lilyPlaced = 0, mushPlaced = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             if (biomeAt(x, z) != Biome::Swamp) continue; // 仅沼泽群系
             const int surfaceY = std::min(heightAt(x, z), m_height - 1);
             const int y = surfaceY + 1; // 水面 / 草顶上方一格（植物放置位）
@@ -6081,8 +6421,9 @@ void World::placeSwampFlora()
             }
         }
     }
-    qInfo() << "worldgen: swamp flora placed lily =" << lilyPlaced
-            << "mushroom =" << mushPlaced; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: swamp flora placed lily =" << lilyPlaced
+                << "mushroom =" << mushPlaced; // 同 seed → 同计数（确定性核对）
 }
 
 // t397 花散布（见 world.h 头注释）：遍历各群系草地列，按 hashColumn 密度 + 群系色彩配比散布 4 色花之一于草顶上方
@@ -6091,8 +6432,15 @@ void World::placeSwampFlora()
 //   → 不覆盖草上已生成的方块（树 / 草丛）。与 placeTallGrass 同阈值（非沙漠 / 非雪原 / 非沙滩水下 / grass 顶）。
 //   纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
 //   worldgen 顺序：placeTallGrass 之后（草丛占草顶上方一格优先），花仅写空气格 → 已被草丛 / 树占的列自然跳过。
-void World::placeFlowers()
+void World::placeFlowers(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     // 各群系花密度（% of grass 列）。机制等价 MC 1.0 各群系花点缀密度分化：
     //   plains 多彩（草原花海，spec「平原多彩」）、forest 适中（林下小花）、swamp 适中（湿地野花）、hills 稀疏（裸岩少花）。
     //   取低于对应群系草丛密度（placeTallGrass：plains 18 / forest 35 / hills 12）→ 花点缀在草丛之间，不喧宾夺主。
@@ -6103,8 +6451,8 @@ void World::placeFlowers()
 
     int placed = 0;
     int red = 0, yellow = 0, blue = 0, white = 0; // 各色计数（可观测 / 确定性核对）
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             const int surfaceY = heightAt(x, z);
             // 与 placeTallGrass 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生花（机制等价 MC 花不生于沙/水下）。
             if (surfaceY <= kWaterLevel + 1) continue;
@@ -6141,9 +6489,11 @@ void World::placeFlowers()
             else                                              ++white;
         }
     }
-    qInfo() << "worldgen: flowers placed =" << placed
-            << "(red" << red << "/ yellow" << yellow
-            << "/ blue" << blue << "/ white" << white << ")"; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: flowers placed =" << placed
+                << "(red" << red << "/ yellow" << yellow
+                << "/ blue" << blue
+                << "/ white" << white << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t397 甘蔗散布（见 world.h 头注释）：在邻水**沙顶**（沙滩 / 海岸）上方确定性散布 1..3 格高甘蔗柱。
@@ -6162,13 +6512,21 @@ void World::placeFlowers()
 //     已生成的方块（树 / 草 / 花）。高度 1..3 独立哈希位段 (r>>16)%3 + 1（与密度位段 r%100 解耦）。
 //   纯函数于 seed + biomeAt + 海域（seaColumnHeight / isSeaSandColumn / hashColumn，PLAN §2-K）→ 同 seed 同分布；
 //   禁用任何运行期随机源。worldgen 顺序：placeFlowers 之后（花占草顶上方一格优先），甘蔗仅写空气格。
-void World::placeSugarcane()
+void World::placeSugarcane(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。邻水判定 4 邻 × 2 层读 ±1 列 ⊆ scaffold 窗
+    //（窗口含 scaffold ±1 chunk = 16 列余量 ≥ 1），读闭合见 sparsePopulateChunk 处置表。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr unsigned kSugarcanePct = 10; // 邻水沙滩列生甘蔗密度（% of 邻水沙顶列；机制等价 MC 水边甘蔗稀疏散布
                                           //  t547④：30% → 10%（1/3），「沙滩生成太频繁」——甘蔗成片过长，降密度）
     int placed = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue; // 沙漠群系甘蔗归 placeDesertFlora（仙人掌 / 枯灌木）—— 不在此散布
             // t446：取**真实沙顶 y**。本世界沙顶只出现在海域沙海盘（generate 在 seaColumnHeight 处铺 Sand）；
@@ -6219,7 +6577,8 @@ void World::placeSugarcane()
             }
         }
     }
-    qInfo() << "worldgen: sugarcane placed =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: sugarcane placed =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t467 雪原浆果灌木丛散布（见 world.h 头注释）：遍历 Snowy 群系列，在积雪层（SnowLayer）地表上方一格低密度
@@ -6232,12 +6591,19 @@ void World::placeSugarcane()
 //   阶段随机 1..2（独立哈希位段 (r>>16)&1 + 1，与密度位段 r%100 解耦）—— worldgen 丛均带果（阶段 0 无果嫩丛无散布意义，
 //   玩家采摘后丛回阶段 0 由 tickSweetBerryBushGrowth 重新长，同小麦 / 树苗生长机制）。仅写空气格（setVoxelIfAir）
 //   → 不覆盖雪上已生成的方块（云杉树干 / 树叶 / 任何已占格）。纯函数于 seed + biomeAt（经 hashColumn，PLAN §2-K）。
-void World::placeSweetBerryBushes()
+void World::placeSweetBerryBushes(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr unsigned kBushPct = 5; // 雪原雪顶列生浆果丛密度（% of 雪顶列；低密度点缀，机制等价 MC 浆果丛稀疏）
     int placed = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系
             const int surfaceY = heightAt(x, z);
             // 同 placeTallGrass / placeFlowers 阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生（机制等价 MC 浆果丛不生于沙/水下）。
@@ -6259,7 +6625,8 @@ void World::placeSweetBerryBushes()
             ++placed;
         }
     }
-    qInfo() << "worldgen: sweet berry bush placed =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: sweet berry bush placed =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t395 雪原/针叶群系水面冻结（见 world.h 头注释）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water
@@ -6267,13 +6634,20 @@ void World::placeSweetBerryBushes()
 //   地下水池（placeUndergroundWaterPools 的 cy ≤ h-7，对任意 surfaceY 恒 < waterLevel）不在 y==waterLevel → 不受
 //   影响；故扫描固定 y==waterLevel 一层即精准命中「海 / 低洼地表水表面」而不误冻地下水。走 m_chunks.setBlock
 //   直写（worldgen 静默；光场随后 recomputeLightField 重算 → Ice 满遮光正确计入）。纯函数于 seed（biomeAt，§2-K）。
-void World::freezeSurfaceWater()
+void World::freezeSurfaceWater(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     if (kWaterLevel >= m_height) return; // 极端：世界高度不足（防御）
     int frozen = 0;
     const int y = kWaterLevel;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             if (biomeAt(x, z) != Biome::Snowy) continue; // 仅雪原/针叶群系冻结
             if (m_chunks.blockAt(x, y, z) == BlockRegistry::Water) {
                 m_chunks.setBlock(x, y, z, BlockRegistry::Ice);
@@ -6281,7 +6655,8 @@ void World::freezeSurfaceWater()
             }
         }
     }
-    qInfo() << "worldgen: frozen surface ice =" << frozen; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: frozen surface ice =" << frozen; // 同 seed → 同计数（确定性核对）
 }
 
 // t468 结冰 tick（spec「寒冷群系暴露天空的水源→冰」）：见 world.h 头注释。每 5s 一窗，遍历水格索引
@@ -6420,12 +6795,19 @@ void World::tickIceMelt()
 //   世界无底、玩家坠落出界）——与「基岩作不可破坏底」的机制目标矛盾。此处把判定结果置为 Bedrock（而非 air），
 //   既满足 spec 验收「基岩层坑洼」（坑洼=上层基岩稀疏处露出石），又保证底部实心不 void。
 //   越界（y>=m_height）天然由循环上界挡住；hashVoxel 纯函数于 seed → 同 seed 同基岩分布（PLAN §2-K）。
-void World::placeBedrock()
+void World::placeBedrock(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr int kBedrockTop = 4; // 基岩层上界（含）；y 0..4 共 5 层
     if (m_height <= 0) return;     // 极端：无高度世界不铺基岩（防御）
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             const int top = std::min(kBedrockTop, m_height - 1); // 高度不足时只铺到顶
             for (int y = 0; y <= top; ++y) {
                 const quint32 r = hashVoxel(m_seed, x, y, z);
@@ -6476,8 +6858,18 @@ void World::placeBedrock()
 //   ≠ 旧散点逐列跳过分布；现纯海 cell 在 tryOre 逐列被拒，分布恢复旧貌）。矿井巷壁暴露矿（t565
 //   IronOre/CoalOre，见 placeMineshaft）独立于本 pass，不受影响。
 //   确定性：全部 hashVoxel(seed ⊕ 矿盐, ...) 纯函数（PLAN §2-K），同 seed 同矿脉；禁运行期随机源。
-void World::scatterOres()
+void World::scatterOres(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）+ **读写域双钳**：本 pass 的脉形 blob/长条/铁立方
+    // 以 tryOre 失位（offStone）反馈走向 = 体素态耦合形状，读域出窗即两序不齐（r2023c 恰红实
+    // 证）→ cell 循环与 tryOre 上下界同钳窗，窗外位置恒「拒」= 确定性（fixed win=false 全域
+    // 原样；sparse 面的跨 cell 交互缺口如实登记为 (c) 替代——见 sparsePopulateChunk 处置表）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr int kBedrockTop = 4; // 同 placeBedrock：基岩层 y 0..4 不布矿（旧 kOreMin=5 同源）
     constexpr int kCell       = 16; // 成脉网格（MC chunk 水平口径）
 
@@ -6517,8 +6909,10 @@ void World::scatterOres()
 
     // 置矿原语：越界 / 基岩层 / 海列 / stone 区段上界（y > h-3，同旧「y < h-2」）/ 非 Stone 拒绝。
     //   heightAt 逐格调 → 矿带按列自适应；先到先得由「仅置换 Stone」保证（重叠带稀有矿优先）。
+    //   §29.5-W1b：窗口模式额外钳 x/z 读写域（窗外恒 false = 走向确定性，见函数头注释）。
     const auto tryOre = [&](int x, int y, int z, quint8 id) -> bool {
         if (x < 0 || x >= m_width || z < 0 || z >= m_depth || y < 0 || y >= m_height) return false;
+        if (win && (x < xLo || x >= xHi || z < zLo || z >= zHi)) return false;
         if (y <= kBedrockTop) return false;
         const int h = std::min(heightAt(x, z), m_height - 1);
         if (h <= kWaterLevel + 1) return false;
@@ -6531,8 +6925,14 @@ void World::scatterOres()
     static const int kD6[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
     int placedByKind[kOreKindCount] = {};
 
-    for (int cz = 0; cz < m_depth; cz += kCell) {
-        for (int cx = 0; cx < m_width; cx += kCell) {
+    // §29.5-W1b：cell 循环窗口化（覆盖窗 ±1 cell = 脉 reach ≤8 的全部可能源 cell；窗外 stamp
+    // 由 tryOre 域门恒拒）。fixed（win=false）= 全域原样。
+    const int cLo0 = win ? std::max(0, zLo - kCell) : 0;
+    const int cHi0 = win ? std::min(m_depth, zHi + kCell) : m_depth;
+    const int cLo1 = win ? std::max(0, xLo - kCell) : 0;
+    const int cHi1 = win ? std::min(m_width, xHi + kCell) : m_width;
+    for (int cz = cLo0; cz < cHi0; cz += kCell) {
+        for (int cx = cLo1; cx < cHi1; cx += kCell) {
             // review0906 #11：cell 中心列高**不再作海列整格跳过**——旧口径按中心列一票否决整个
             //   16×16 cell，海洋中心 cell 内的陆地列（海岸过渡带）从此完全无矿 = 整 16×16 零矿
             //   patch，与旧散点「逐列跳过」分布不符。恢复旧分布：海列拒绝兜底在 tryOre 逐列海检
@@ -6639,7 +7039,8 @@ void World::scatterOres()
             }
         }
     }
-    qInfo() << "worldgen: ores placed = coal" << placedByKind[6] << "copper" << placedByKind[5]
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: ores placed = coal" << placedByKind[6] << "copper" << placedByKind[5]
             << "iron" << placedByKind[4] << "gold" << placedByKind[1]
             << "diamond" << placedByKind[0] << "lapis" << placedByKind[2]
             << "redstone" << placedByKind[3]; // 同 seed → 同计数（确定性核对）
@@ -6699,7 +7100,8 @@ void World::placeGravelPockets()
             ++placed;
         }
     }
-    qInfo() << "worldgen: gravel pockets =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: gravel pockets =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t278 洞穴隧道生成（PLAN §2-K 确定性；spec「3D Perlin 阈值 / random-worm 隧道 + 分叉路口；内部黑暗；连通性」）。
@@ -6727,8 +7129,17 @@ void World::placeGravelPockets()
 //   ~25 体素/球 ≈ 160k 写 + ~12k noise3 ≈ 数十 ms。worldgen 一次性可接受。挖走 stone/dirt/ore 暴露矿石于洞壁
 //   （t279 洞穴裸露矿物直接读栅格即得）。经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），
 //   不发 blockBroken（worldgen 既有约定——系统事件非玩家破块）。
-void World::carveCaves()
+void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。(a) 阈值噪声逐体素纯函数 → 窗口化逐位等价；
+    // (b) worm 路径纯 noise3 位置链（零体素读）仍**全域 trace**，仅对不触窗口的 carveSphere
+    // 作 bbox 早退（球心距窗 > 半径+1 的球其写域必在窗外 = 拒写同义，C 列内容逐位不受影响）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr int kBedrockTop   = 4;     // 基岩层上界（与 placeBedrock 同源；不挖基岩）
     constexpr int kSurfaceCeil  = 4;     // 表面之下留几格（保 ≥1 石顶：dirt 在 [h-2,h-1]、grass 在 h，故 h-3 起挖则留 y=h-3 石顶）
 
@@ -6740,8 +7151,8 @@ void World::carveCaves()
     //   地下体素被挖 → 蜿蜒走廊式洞穴（机制等价 MC 1.0 Perlin 洞穴）。
 
     int noiseCarved = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             const int h = std::min(heightAt(x, z), m_height - 1);
             const int yMax = h - kSurfaceCeil; // 留表面 + ≥1 石顶
             for (int y = kBedrockTop + 1; y <= yMax; ++y) {
@@ -6774,7 +7185,13 @@ void World::carveCaves()
 
     // 球形 carve：把 (px,py,pz) 半径 r 内的实体天然方块（非 air/bedrock/water）置 air。
     //   体素中心 = 整数坐标 +0.5；距离比球半径平方（避免 sqrt）。边界格越界跳过。
+    //   §29.5-W1b：窗口模式对球心距窗 > r+2 的球 bbox 早退（写域必在窗外 = 拒写同义；
+    //   窗内球的读写域 ⊆ scaffold，读闭合见 sparsePopulateChunk 处置表）。fixed（win=false）
+    //   永不早退 = 逐位原样。
     auto carveSphere = [&](double px, double py, double pz, double r) {
+        if (win && (px < double(wx0) - (r + 2.0) || px > double(wx1) + (r + 2.0)
+            || pz < double(wz0) - (r + 2.0) || pz > double(wz1) + (r + 2.0)))
+            return;
         const int ir = int(r) + 1;
         const int cx = int(std::floor(px)), cy = int(std::floor(py)), cz = int(std::floor(pz));
         const double r2 = r * r;
@@ -6875,9 +7292,10 @@ void World::carveCaves()
         }
     }
 
-    qInfo() << "worldgen: caves carved = noise" << noiseCarved
-            << "+ worm-steps" << wormSteps
-            << "(starts" << placedStarts << "worms" << int(worms.size()) << ")"; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: caves carved = noise" << noiseCarved
+                << "+ worm-steps" << wormSteps
+                << "(starts" << placedStarts << "worms" << int(worms.size()) << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t148 海平面填水（PLAN §2-K 确定性）：遍历列，地表高度 h < waterLevel 的低洼列从 h+1 到 waterLevel
@@ -6890,11 +7308,18 @@ void World::carveCaves()
 //   草原 / 沙漠主体无水（hills ~57..71 仅 57 低洼列见水）。出生列(80,80) 地表 ~64>58 保持陆地。t149 沙滩
 //   带 / 沙漠水位 / 树·矿石阈值均同源用此常量（generate 沙表层 / placeTrees / scatterOres 阈值 = waterLevel+1）。
 //   全程纯函数于 seed + heightAt（fbm）→ 同 seed 同水域分布；禁用任何运行期随机源（PLAN §2-K）。
-void World::fillWater()
+void World::fillWater(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     int waterCells = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             // t338：海水仅集中于海域一角（seaColumnHeight >= 0 的海盆，seaH < waterLevel）。旧「全域低洼列
             //   (h<waterLevel) 灌水」已移除 → 内陆低洼列不再产散布水洼（spec「内陆无散沙 / 散水」，沙随水走）。
             //   海域海底 = seaColumnHeight（与 generate 填充一致）；沙滩环（seaH=waterLevel+1）高于海平面不灌水。
@@ -6910,7 +7335,8 @@ void World::fillWater()
             }
         }
     }
-    qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: water cells =" << waterCells; // 同 seed → 同计数（确定性核对）
 }
 
 // t341 山坡洞口（见 world.h 头注释）。机制等价 MC 1.0 山坡洞口 / 天坑：在「山坡腰」列把既有地下洞穴网络与
@@ -6991,7 +7417,8 @@ void World::carveCaveEntrances()
             ++placed;
         }
     }
-    qInfo() << "worldgen: cave entrances =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: cave entrances =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t342 大峡谷地貌（见 world.h 头注释）。机制等价 MC ravine / 真实大峡谷：一条贯穿地图的长窄露天裂缝，两侧立壁
@@ -7008,8 +7435,17 @@ void World::carveCaveEntrances()
 //   （seaColumnHeight >= 0，峡谷为陆地地貌、不与海角水互动）。确定性：起点 / 朝向 / 路径全纯函数于 seed
 //   （hashColumn + noise2 / fbm）→ 同 seed 同峡谷（PLAN §2-K）。~1 条/图：单条 worm（无散布网格）→ 每图约 1 条贯穿峡谷。
 //   经 m_chunks.setBlock 直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），不发 blockBroken（worldgen 既有约定）。
-void World::carveCanyon()
+void World::carveCanyon(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（carveCaves 同款）：路径推导（noise2 位置链 + 起点 hash）纯函数仍全域
+    // trace；仅对不触窗口的 carveDisc/排水带/侧洞作 bbox 早退（写域必在窗外 = 拒写同义，C 列
+    // 内容逐位不受影响；fixed win=false 永不早退 = 逐位原样）。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     constexpr int kFloor       = 22;    // 峡谷底 y（远高于基岩层 0..4，carveDisc 另跳过 Bedrock；落在矿层带内 → 峡壁裸露煤/铜/铁/金矿层）
     constexpr int kBaseRadius  = 3;     // 底部半径（窄底；直径 ~6）
     constexpr int kTopExtra    = 2;     // 顶部额外半径（上宽下窄阶梯；顶半径 = base + extra ~5，spec「widening slightly」）
@@ -7037,8 +7473,12 @@ void World::carveCanyon()
 
     // 水平盘 carve（中心 cx/cz、高度 y、半径 r）：盘内实体天然方块（非 air/bedrock/water）置 air；跳过海域列。
     //   体素中心 = 整数坐标 +0.5；距离比半径平方（避免 sqrt）。盘半径 = V 形剖面按 y 插值 + fbm 峡壁调制。
+    //   §29.5-W1b：窗口模式对盘心距窗 > kTopExtra+3 的盘 bbox 早退（写域必在窗外 = 拒写同义）。
     int carvedVoxels = 0;
     auto carveDisc = [&](double cx, double cz, int y, double r) {
+        if (win && (cx < double(xLo) - (kTopExtra + 3) || cx > double(xHi) + (kTopExtra + 3)
+            || cz < double(zLo) - (kTopExtra + 3) || cz > double(zHi) + (kTopExtra + 3)))
+            return;
         const int ir = int(r) + 1;
         const int icx = int(std::floor(cx)), icz = int(std::floor(cz));
         const double r2 = r * r;
@@ -7101,6 +7541,11 @@ void World::carveCanyon()
     constexpr int kDrainRadius = kBaseRadius + kTopExtra + 2;
     int drainedCells = 0;
     for (const CanyonPt &p : path) {
+        // §29.5-W1b：排水带写域 ⊆ 路径点 ±kDrainRadius，带与窗不相交的路径点整点跳过（读域
+        // 同在带内 = OOB 拒写同义，C 列内容逐位不受影响；fixed 永不跳）。
+        if (win && (p.ix < xLo - kDrainRadius || p.ix > xHi + kDrainRadius
+            || p.iz < zLo - kDrainRadius || p.iz > zHi + kDrainRadius))
+            continue;
         const int R2 = kDrainRadius * kDrainRadius;
         for (int ox = -kDrainRadius; ox <= kDrainRadius; ++ox)
             for (int oz = -kDrainRadius; oz <= kDrainRadius; ++oz) {
@@ -7145,10 +7590,12 @@ void World::carveCanyon()
     //   直接掉落、旁边无支撑」的来源；worldgen 不再在峡谷带内产任何水源（排水带 + carve 排干已清零，
     //   此处不再补新）。瀑布观感退役为干涸峡谷；游玩期玩家自行倒水仍可造瀑（tickWaterFlow 正常路径）。
 
-    qInfo() << "worldgen: grand canyon carved =" << carvedVoxels
-            << "(steps" << steps << "floor" << kFloor << ")"; // 同 seed → 同计数（确定性核对）
-    qInfo() << "worldgen: canyon drained =" << drainedCells
-            << "side caves =" << sideCaves; // t376 确定性核对（t929 瀑布源退役）
+    if (!m_worldgenQuiet) {
+        qInfo() << "worldgen: grand canyon carved =" << carvedVoxels
+                << "(steps" << steps << "floor" << kFloor << ")"; // 同 seed → 同计数（确定性核对）
+        qInfo() << "worldgen: canyon drained =" << drainedCells
+                << "side caves =" << sideCaves; // t376 确定性核对（t929 瀑布源退役）
+    }
 }
 
 // t716 ③ 雪层支撑守卫（见 world.h 头注释）：全图扫 SnowLayer，正下方非实体（air / 水）→ 直删该雪层。
@@ -7160,11 +7607,18 @@ void World::carveCanyon()
 //   叠层堆积只发生在游玩期塌落合并 → 下方 SnowLayer 仍会被本守卫误删？——不会：本函数仅在 worldgen 期
 //   跑一次，游玩期塌落堆叠发生在其后（checkSnowLayerOnEdit 管游玩期失撑坍落，与本守卫分工不重叠）。
 //   幂等：删除后重扫无变化；纯查询 + 直删（m_chunks.setBlock，不发 blockBroken——worldgen 约定）。
-void World::pruneFloatingSnowLayers()
+void World::pruneFloatingSnowLayers(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）：逐列扫描读自身列正下方一格，窗口化逐位等价。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     int pruned = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             for (int y = 1; y < m_height; ++y) { // y=0 下方无格（基岩域），从 1 起
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::SnowLayer) continue;
                 if (!BlockRegistry::isSolid(m_chunks.blockAt(x, y - 1, z))) {
@@ -7174,7 +7628,7 @@ void World::pruneFloatingSnowLayers()
             }
         }
     }
-    if (pruned > 0)
+    if (pruned > 0 && !m_worldgenQuiet)
         qInfo() << "worldgen: pruned floating snow layers =" << pruned; // 同 seed → 同计数（确定性核对）
 }
 
@@ -7188,11 +7642,18 @@ void World::pruneFloatingSnowLayers()
 //   守卫位序 = carveCanyon 之后、pruneFloatingSnowLayers 毗邻（同一「所有 carve 类 pass 之后一次跑」语义，
 //   t716 头注释同源）；幂等同 t716（删后重扫无变化）；纯函数于 seed → 同 seed 同计数（确定性核对）。
 //   worldgen 只铺普通 Rail（golden / detector 为玩家放置面，各有运行期支撑检查）→ 本守卫只判 Rail 单 id。
-void World::pruneUnsupportedWorldgenRails()
+void World::pruneUnsupportedWorldgenRails(int wx0, int wx1, int wz0, int wz1)
 {
+    // §29.5-W1b 窗口归一（placeTrees 同款）：逐列扫描读自身列正下方一格，窗口化逐位等价。
+    const bool win = wx1 > wx0;
+    const int xLo = win ? std::max(wx0, 0) : 0;
+    const int xHi = win ? std::min(wx1, m_width) : m_width;
+    const int zLo = win ? std::max(wz0, 0) : 0;
+    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+
     int pruned = 0;
-    for (int x = 0; x < m_width; ++x) {
-        for (int z = 0; z < m_depth; ++z) {
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
             for (int y = 1; y < m_height; ++y) { // y=0 下方无格（基岩域），从 1 起（同 pruneFloatingSnowLayers）
                 if (m_chunks.blockAt(x, y, z) != BlockRegistry::Rail) continue;
                 // t1051 支撑守卫：正下方有齐平支撑 → 保留；无 → 摘轨（悬空轨禁生成；P-t1051a 行为面 + 源钉本体）
@@ -7202,7 +7663,7 @@ void World::pruneUnsupportedWorldgenRails()
             }
         }
     }
-    if (pruned > 0)
+    if (pruned > 0 && !m_worldgenQuiet)
         qInfo() << "worldgen: pruned unsupported rails =" << pruned; // 同 seed → 同计数（确定性核对）
 }
 
@@ -7267,7 +7728,8 @@ void World::placeUndergroundWaterPools()
             ++placed;
         }
     }
-    qInfo() << "worldgen: underground water pools =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: underground water pools =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t343 地下岩浆湖（见 world.h 头注释）。机制等价 MC 1.0 地下岩浆湖：Y<30 封闭洞穴内的小型岩浆洼地。
@@ -7325,7 +7787,8 @@ void World::placeLavaLakes()
             ++placed;
         }
     }
-    qInfo() << "worldgen: underground lava lakes =" << placed; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: underground lava lakes =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t392 地下地牢（见 world.h 头注释）。机制等价 MC 1.0 地牢 / 怪物房间：地下深处的小型封闭石室，中央放刷怪笼
@@ -9284,7 +9747,8 @@ void World::placeSurfaceLakes()
             ++placed;
         }
     }
-    qInfo() << "worldgen: surface lakes =" << placed << "(with cavern" << caverns << ")"; // 同 seed → 同计数（确定性核对）
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: surface lakes =" << placed << "(with cavern" << caverns << ")"; // 同 seed → 同计数（确定性核对）
 }
 
 // t151 真光场 BFS flood-fill（PLAN §2-H「方块光独立 flood-fill、时间不变」+ §M）。
