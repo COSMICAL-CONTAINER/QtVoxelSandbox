@@ -1047,6 +1047,16 @@ add_executable(redstone_matrix_test
     #   自建 fresh 小世界族（固定世界四 setter incantation + sparse 构造缝同 seed 同 dims
     #   双世界），rig 世界 w 零接触；无新增 .cpp——world/chunk 系源文件已列）。
     tools/matrix/section25_sparseworld.cpp
+    # §29.5-W1b sparse population parity 探针段（置尾先例沿用：runAll 末执行，filter 词 r2023；
+    #   4 腿 r2023a-d = fixed 生成零变化墙[同 seed 双 generate 逐位恒等 + generate() 全 pass 调用
+    #   序字面钉 + population 反探]/parity 承重墙[sparse ≡ fixed 9 内部 chunk 全 16×16×H 体素
+    #   id+state 逐位恒等——(b) 级重放 pass 全纳入 + 结构族豁免面前置确认 + (b) 签名非空转]/
+    #   加载顺序无关[radius 0 双世界两种 loadChunkAt 次序同组 chunk（含负坐标）逐位恒等]/
+    #   结构钉[populate 驱动体代表窗口调用 + scaffold 生命周期/拆卸单点 + 结构族豁免反探]。
+    #   r2023a-c 自建 fresh 小世界族（80×80×96 s82——5×5 chunk，radius 2 预生成恰覆全核心域/
+    #   radius 0 按需 loadChunkAt），rig 世界 w 零接触；r2023d 纯源码钉；无新增 .cpp——
+    #   world/chunk 系源文件已列）。
+    tools/matrix/section26_sparse_population.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

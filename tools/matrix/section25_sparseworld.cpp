@@ -16,10 +16,10 @@
 //     答案变真值[内容无关面：列顶非空气 + heightmap 一致 + 顶上天光 15]；经生命周期 forwarder
 //     ⑥ Evicting 后回到 OOB 答案、⑧ 取消驱逐恢复真值——查询门谓词的端到端实证）；
 //   「同 seed 已加载区 ≡ terraingen 权威逐位恒等」→ 恒等承重腿（三面：双世界纯函数门逐位
-//     恒等[heightAt/biomeIdAt 含负坐标] + sparse 已加载 chunk 对 generateTerrainChunk 权威
-//     缓冲逐体素恒等[id+state] + 结构性内陆列 envelope 锚；fixed 世界含 bedrock/矿/洞/树等
-//     后地形 pass，其与 terrain-only 稀疏块的全逐素恒等在物理上不成立——恒等面如实锚权威，
-//     population 重放登记非目标）；
+//     恒等[heightAt/biomeIdAt 含负坐标] + 负坐标 chunk 纯地形带对权威缓冲逐体素恒等[id+state]
+//     + 结构性内陆列 envelope 锚[双分支：纯地形面 / worldgen 特征块]；W1b 同变更修订留痕：
+//     W1 原面「已加载 chunk 全量 ≡ terrain-only 权威缓冲」在 population 落地后物理失效，
+//     收宽面移 section26/r2023b 的 sparse ≡ fixed 全体素恒等，本腿改锚纯地形带 + 特征感知）；
 //   「结构钉」→ 钉面腿（Fixed 默认参正面钉 + worldstore 禁触反探 + terraingen 单列消费 +
 //     生命周期经 setChunkLifecycle 唯一入口 + QML/P1-P3/D6 组件族禁出）。
 // 恰红面设计（先于腿文；双变异双还原，存证 build/ 终名日志）：
@@ -328,15 +328,23 @@ void MatrixRun::section25_sparseworld()
                              " flow" << (ok ? QString() : diag);
     });
 
-    // ── 恒等承重：同 seed 双世界纯函数门 + sparse 已加载区 ≡ terraingen 权威缓冲 ─────────
+    // ── 恒等承重：同 seed 双世界纯函数门 + 负坐标纯地形带 + 特征感知 envelope 锚 ─────────
+    // §29.5-W1b（r2023）同变更修订（纠偏留痕非削钉）：W1b 在 sparse 物化链上落地 population
+    // 窗口重放后，sparse chunk 内容 = 地形 + (b) 级 pass 重放，原「已加载 chunk 对 terrain-only
+    // 权威缓冲逐体素恒等」的 W1 收窄面物理失效——该面由 section26/r2023b 以更强的「sparse ≡
+    // fixed 全体素恒等」重新收宽。本腿恒等面如实改锚：
+    //   ② 负坐标 chunk（核心域外无 bedrock/矿/洞候选，population 触达为纯函数外溢）的纯地形带
+    //      [y∈0,5)（bedrockTop=4 之上、ore yMin=5 之下）对权威缓冲逐体素恒等；
+    //   ③ envelope 锚改双分支：列顶 = 纯地形面（heightAt + 群系表层 id）或 worldgen 特征块
+    //      （树冠/树干/植被族——population 语义面），两分支皆钉。
     runLeg(QStringLiteral("r2022c same-seed region identity against the single terrain authority (a"
         " fixed world and a sparse world sharing seed and generation dims agree bitwise on"
         " both pure gates - heightAt and biomeIdAt - across the loaded region AND negative"
-        " coordinates, both worlds matching a direct TerrainGen instance; every materialized"
-        " sparse chunk including negative-coordinate ones is voxel-bitwise identical [id and"
-        " state] to the authority chunk buffer produced by the shared column-fill function;"
-        " and the structurally inland center chunk anchors its column envelope to the same"
-        " pure heightAt with biome-consistent surface ids)"), [&]() {
+        " coordinates, both worlds matching a direct TerrainGen instance; the negative-coordinate"
+        " chunks' pure-terrain band below the population reach matches the authority chunk buffer"
+        " voxel-bitwise in id and state; and the inland center chunk anchors every column top to"
+        " either the pure heightAt surface with biome-consistent ids or a worldgen population"
+        " feature block)"), [&]() {
         bool ok = true;
         QString diag;
 
@@ -368,9 +376,9 @@ void MatrixRun::section25_sparseworld()
         pureOk = pureOk && pureCols == 81;
         ok = ok && pureOk;
 
-        // ② sparse 已加载 chunk 对权威缓冲逐体素恒等（id + state；含负坐标 chunk）：
-        const ChunkKey kKeys[] = { ChunkKey{ 0, 0 }, ChunkKey{ 2, 1 }, ChunkKey{ 3, 3 },
-            ChunkKey{ -1, -1 }, ChunkKey{ -1, 3 } };
+        // ② 负坐标 chunk 纯地形带 [y∈0,5) 对权威缓冲逐体素恒等（id+state；带 = bedrockTop 4
+        //    之上 1 格、ore yMin 5 之下——population 零触达区 = 纯 fillTerrainColumn 输出）：
+        const ChunkKey kKeys[] = { ChunkKey{ -1, -1 }, ChunkKey{ -1, 3 } };
         bool bufOk = true;
         for (const ChunkKey &k : kKeys) {
             const std::unique_ptr<GeneratedChunkData> buf = generateTerrainChunk(tg, k);
@@ -382,7 +390,7 @@ void MatrixRun::section25_sparseworld()
             for (int lz = 0; bufOk && lz < 16; ++lz) {
                 for (int lx = 0; bufOk && lx < 16; ++lx) {
                     const int wx = k.cx * 16 + lx, wz = k.cz * 16 + lz;
-                    for (int y = 0; y < kH; ++y) {
+                    for (int y = 0; y < 5; ++y) {
                         if (ws.blockAt(wx, y, wz) != buf->blockAt(lx, y, lz)
                             || ws.stateAt(wx, y, wz) != buf->stateAt(lx, y, lz)) {
                             bufOk = false;
@@ -397,11 +405,22 @@ void MatrixRun::section25_sparseworld()
         }
         ok = ok && bufOk;
 
-        // ③ 结构性内陆中块 envelope 锚（列顶 = min(heightAt, H-1)；表层 id 按群系——同
-        //    r2012b 锚形态transpose 到 sparse 查询面）：
+        // ③ 内陆中块 envelope 锚（双分支）：列顶 = 纯地形面（= min(heightAt,H-1) 且群系表层
+        //    id）或 worldgen 特征块（population 树冠/树干/植被族——顶部高于纯地形面时必为特征）。
         const int ox = 1 * 16, oz = 1 * 16;
         bool envOk = true;
         int envCols = 0;
+                const auto isFeature = [](quint8 b) {
+                    switch (b) {
+                        case BR::Log: case BR::SpruceLog: case BR::Leaves: case BR::SpruceLeaves:
+                        case BR::Cactus: case BR::DeadBush: case BR::Mushroom: case BR::LilyPad:
+                        case BR::TallGrass: case BR::FlowerRed: case BR::FlowerYellow:
+                        case BR::FlowerBlue: case BR::FlowerWhite: case BR::Sugarcane:
+                        case BR::SweetBerryBush:
+                        case BR::Water: return true; // population 特征面（树/植被/池水）
+                        default: return false;
+                    }
+                };
         for (int lz = 0; envOk && lz < 16; ++lz) {
             for (int lx = 0; envOk && lx < 16; ++lx) {
                 const int wx = ox + lx, wz = oz + lz;
@@ -411,13 +430,28 @@ void MatrixRun::section25_sparseworld()
                 const int expectTop = std::min(ws.heightAt(wx, wz), kH - 1);
                 const int biome = ws.biomeIdAt(wx, wz);
                 const quint8 topId = top >= 0 ? ws.blockAt(wx, top, wz) : quint8(0);
-                bool colOk = top == expectTop;
-                if (colOk && biome == 2) // Desert → 沙
-                    colOk = topId == BR::Sand;
-                else if (colOk && biome == 4) // Snowy → 积雪层
-                    colOk = topId == BR::SnowLayer && ws.stateAt(wx, top, wz) <= 2;
-                else if (colOk) // 其余内陆群系 → 草
-                    colOk = topId == BR::Grass;
+                bool colOk;
+                if (top == expectTop) { // 纯地形面分支（population 未触达柱顶）
+                    if (biome == 2) // Desert → 沙
+                        colOk = topId == BR::Sand;
+                    else if (biome == 4) // Snowy → 积雪层
+                        colOk = topId == BR::SnowLayer && ws.stateAt(wx, top, wz) <= 2;
+                    else // 其余内陆群系 → 草
+                        colOk = topId == BR::Grass;
+                } else if (top > expectTop) { // 特征分支：柱顶高于纯地形面 → population 特征块
+                    colOk = isFeature(topId);
+                } else { // carve 分支：柱顶低于纯地形面 → worldgen carve（洞口/峡谷壁/湖盆）露出的
+                         //   自然地表（石/土/沙/砾/雪层/水/裸露矿脉——population 不会在 carve 面上放特征）
+                    switch (topId) {
+                        case BR::Stone: case BR::Dirt: case BR::Sand: case BR::Gravel:
+                        case BR::SnowLayer: case BR::Water: case BR::Sandstone:
+                        case BR::CoalOre: case BR::IronOre: case BR::GoldOre:
+                        case BR::DiamondOre: case BR::RedstoneOre: case BR::LapisOre:
+                        case BR::CopperOre:
+                            colOk = true; break;
+                        default: colOk = false; break;
+                    }
+                }
                 if (!colOk) {
                     envOk = false;
                     diag += QStringLiteral("[env lx=%1 lz=%2 top=%3 want=%4 bio=%5 id=%6] ")
@@ -442,10 +476,11 @@ void MatrixRun::section25_sparseworld()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| r2022c same-seed identity: fixed and sparse worlds agree"
                              " bitwise on heightAt/biomeIdAt across loaded and negative"
-                             " coordinates (three-way with a direct TerrainGen), materialized"
-                             " sparse chunks (negative ones included) match the authority chunk"
-                             " buffers voxel-bitwise in id and state, and the inland center"
-                             " chunk anchors its envelope to the same pure heightAt"
+                             " coordinates (three-way with a direct TerrainGen), the"
+                             " negative-coordinate chunks' pure-terrain band matches the"
+                             " authority chunk buffers voxel-bitwise in id and state, and the"
+                             " inland center chunk anchors every column top to the pure surface"
+                             " or a population feature block"
                           << (ok ? QString() : diag);
     });
 
