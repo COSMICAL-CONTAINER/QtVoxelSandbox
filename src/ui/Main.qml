@@ -322,9 +322,10 @@ Window {
     //   本工程仍为「整片固定网格」全驻留）。worldgen 与 ChunkManager 全程维度无关（按 m_width/m_depth 迭代），
     //   故扩容只改尺寸 + chunk Model 数量，不动 worldgen 逻辑。改值需同步 playercontroller kSpawnX/Z（居中）。
     property int worldChunksPerSide: 10
-    // t276 动态 chunk Model 跟踪态：chunkAnchor.onCompleted 用 Component.createObject 按 chunksX×chunksZ
-    //   生成地形 + 水两段 Model（createObject + reparent 进 3D 场景 Node，t16/t170 已验证路径）。固定网格 → 仅一次
-    //   （chunksBuilt 守卫）。terrainGeos 持地形段 ChunkGeometry 引用；每个地形段经 Connections(onMeshRebuilt)
+    // t276 动态 chunk Model 跟踪态：chunkAnchor.onCompleted → window.rebuildChunkSlotPool 按
+    //   theWorld 驻留 chunk 集合（r2021 模型驱动；旧 chunksX×chunksZ 固定网格双循环退役）生成
+    //   地形 + 水等段 Model（createObject + reparent 进 3D 场景 Node，t16/t170 已验证路径）。streaming
+    //   关 → 仅一次（chunksBuilt 守卫）。terrainGeos 持地形段 ChunkGeometry 引用；每个地形段经 Connections(onMeshRebuilt)
     //   调 recomputeMeshStats 把全幅顶点 / 三角面汇总写入 meshVertices/meshTriangles 标量属性 —— F3 叠层**只读
     //   标量**（不把 var 数组进 text 绑定，否则 QML 把 var 属性读判为 binding loop）。chunkObjects 持 Model 引用防 GC。
     property var terrainGeos: []
@@ -396,6 +397,41 @@ Window {
         }
         window.meshVertices = v
         window.meshTriangles = t
+    }
+    // ── §29.4-P4（r2021）QML 动态化：chunk 实例化 = 数据驱动 slot 池（全 R20 唯一 QML 变更面）──
+    //   模型 = theWorld 驻留 chunk 集合（residentChunkCount × residentChunkKeyAt；枚举序 cz 外
+    //   cx 内 = 旧 t276 固定网格双循环序，C++ world.cpp 单一权威）。streaming 关（现状）→ 驻留
+    //   集恒全网格、residentChunkRevision 恒 0 → 池一次性成型（chunksBuilt 守卫同旧），实例化集
+    //   与旧固定网格**逐位等价**（零变化承重墙，矩阵 r2021a）；revision 沿（未来 streaming 激活
+    //   后的 chunk 增删）→ 下方 Connections 拆池重建，slot 池随模型增删（r2021b 真链实证）。
+    //   重建形态选型（立此存照）：**整池重派生**（销毁全部段 Model → 按枚举重建）——保
+    //   _refreshChunkVisibility / kickWorldMeshSync 的「每 segmentsPerChunk 段一组、组首全局
+    //   对齐」扁平数组不变量（两消费端零触碰 = QML 变更面集中在本池 + 实例化段）；差异增量
+    //   patch（只建删变动 slot）登记生产接线单优化面，本单不做（经济学归接线单评估）。
+    //   生命周期决策零 QML（r2010d 同门延伸）：本面只读驻留集枚举，转移/决策全在 C++。
+    function rebuildChunkSlotPool() {
+        if (window.chunksBuilt) return       // 一次性成型守卫（同旧 t276；revision 沿走 Connections 拆池路径）
+        window.chunksBuilt = true
+        const n = theWorld.residentChunkCount()
+        const geos = [], objs = []
+        for (let i = 0; i < n; ++i) {
+            const k = theWorld.residentChunkKeyAt(i)
+            const cx = k[0], cz = k[1]
+            const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
+            objs.push(t); geos.push(t.geometry)
+            objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+            objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
+            // t326 cutout 段开关联动照旧（review28 #4；t860 折叠默认 5 段）。
+            if (window.cutoutSegmentRestored)
+                objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+            objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
+            objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
+        }
+        window.terrainGeos = geos
+        window.chunkObjects = objs
+        window.recomputeMeshStats()   // 取初值（createObject 时各段已 buildMesh；后续 meshRebuilt 增量刷新）
+        console.info("[t276/r2021] built", objs.length, "chunk Models from", n, "resident chunks")
+        window._updatePlayerChunk()   // t470：段就绪 → 初始化玩家 chunk 缓存 + 应用重建窗口（同旧初建）
     }
     // perf-t520 F3 文本节流：把原 F3 text 绑定的全部读取 / 字符串拼接抽成普通函数 —— 由 10Hz Timer
     //   调用（f3RefreshTimer），结果写 window.f3Text 单一 string 属性，F3 Text 元素只读它。这样所有
@@ -4637,54 +4673,39 @@ Window {
         Texture { id: crack4; source: "qrc:/textures/crack_4.png"; generateMipmaps: false }
         Texture { id: crack5; source: "qrc:/textures/crack_5.png"; generateMipmaps: false }
 
-        // 每 chunk culled mesh（t03 / t276 大世界动态化）：地形段 + 水段各一个 ChunkGeometry，由 chunkAnchor.
-        //   onCompleted 按 theWorld.chunksX×chunksZ 用 Component.createObject 动态生成（替代旧 50 个显式 Model）。
+        // 每 chunk culled mesh（t03 / t276 大世界动态化；**§29.4-P4 r2021 起模型驱动 slot 池**）：
+        //   地形段 + 水段各一个 ChunkGeometry，由 chunkAnchor.onCompleted 调 window.rebuildChunkSlotPool
+        //   按 theWorld 驻留 chunk 集合（residentChunkCount × residentChunkKeyAt）用 Component.createObject
+        //   动态生成（替代旧 50 个显式 Model → t276 固定网格双循环 → r2021 模型枚举）。
         //   lessons-learned 已验证路径（t16 Loader / t170 torchHost）：createObject 第一参 = chunkAnchor（已在
-        //   View3D 场景内）→ Model 被领养进 3D 场景图渲染（非孤儿，parent=QQuick3DNode*）。固定网格下 chunk 数
-        //   恒定 → 仅一次（chunksBuilt 守卫）；切世界只换 seed 不换尺寸 → 无需销毁重建。可配网格
+        //   View3D 场景内）→ Model 被领养进 3D 场景图渲染（非孤儿，parent=QQuick3DNode*）。streaming 关下
+        //   驻留集恒定 → 仅一次（chunksBuilt 守卫）；切世界只换 seed 不换尺寸 → 无需销毁重建。可配网格
         //   （worldChunksPerSide）下显式声明不现实（10×10=200 Model），动态创建使网格尺寸单一权威 → 改一处全幅
         //   扩 / 缩。不用 Repeater（t03 验证：Repeater 的 3D Model delegate 触发「Delegate must not be of Item
-        //   type」告警 + 孤儿不渲染之虞）。流式加载推迟 Phase 2，本工程仍为整片固定网格全驻留。
+        //   type」告警 + 孤儿不渲染之虞）。r2021 起枚举源 = 驻留集（revision 沿→池随增删，见上
+        //   rebuildChunkSlotPool）；流式生产接线归后续单，本工程现状仍为整片固定网格全驻留（逐位等价墙）。
         //   跨 chunk 边界面剔除经 world.blockAt 路由（相邻实体共边面剔除无夹层 / 一侧空气画出 / 越界=空气）；
         //   dirty 驱动（setBlock 标目标 + 边界邻接脏；worldChanged → onWorldChanged 仅脏 chunk 重建）不变。
-        //   分层（PLAN §2）：本段属 Renderer 呈现层，只读 World（blockAt/stateAt/光场），不写栅格。
+        //   分层（PLAN §2）：本段属 Renderer 呈现层，只读 World（blockAt/stateAt/光场/驻留集枚举），不写栅格。
         Node {
             id: chunkAnchor   // chunk Model 领养锚点（createObject 第一参 → Model 进 3D 场景图渲染）
-            Component.onCompleted: {
-                // t276：按 theWorld.chunksX×chunksZ 动态生成地形 + 水两段 Model（createObject + reparent，
-                //   t16/t170 已验证）。固定网格 → 仅一次（chunksBuilt 守卫）。terrainGeos 供 F3 顶点汇总。
-                if (window.chunksBuilt) return
-                window.chunksBuilt = true
-                const nx = theWorld.chunksX, nz = theWorld.chunksZ
-                const geos = [], objs = []
-                for (let cz = 0; cz < nz; ++cz) {
-                    for (let cx = 0; cx < nx; ++cx) {
-                        const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
-                        objs.push(t); geos.push(t.geometry)
-                        objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
-                        objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
-                        // t326 cutout 段（草丛/作物/树苗/门/活板门）—— **t860（R19.14）折叠退役**：t442 起
-                        //   terrain 段材质已带 alphaMode:Mask + alphaCutoff:0.5（与 cutout 段材质逐字相同），
-                        //   cross/门/活板门顶点并入 terrain 段 mesh 渲染逐像素等价 → 停建本段 Model（每 chunk
-                        //   6 段 → 5 段，600 Model 满配 → 500，F3 drawCalls 真值可观测）。**降级杠杆
-                        //   （review28 #4 显式开关化）**：若实测草丛边缘 / 树苗阴影 / 门窗格出现观感回归 →
-                        //   window.cutoutSegmentRestored 置 true（一处翻转）——本行条件实例化 cutout 段、
-                        //   terrainChunkComp 的 cutoutFolded 翻 false（路由退回跳过清单）、segmentsPerChunk
-                        //   回 6，三面联动（旧「只解注释一行」路径会两段同发 z-fighting，已废）。开关在
-                        //   chunk 构建期读取 → 启动前置位生效。
-                        if (window.cutoutSegmentRestored)
-                            objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
-                        objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
-                        objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
-                    }
-                }
-                window.terrainGeos = geos
-                window.chunkObjects = objs
-                window.recomputeMeshStats()   // 取初值（createObject 时各段已 buildMesh；后续 meshRebuilt 增量刷新）
-                console.info("[t276] built", objs.length, "chunk Models (" + nx + "x" + nz + "=" + (nx*nz) + " chunks)")
-                // t470 首次刷新 chunk visibility：player.feetPosition 此前可能已 emit positionChanged 但 chunksBuilt
-                //   守门跳过；chunks 现就绪 → 显式初始化 _playerCX/_playerCZ + 应用 culling（远端 chunk 不可见）。
-                window._updatePlayerChunk()
+            // r2021：初建改模型驱动（window.rebuildChunkSlotPool，驻留集枚举）；旧固定网格
+            //   双循环（theWorld.chunksX×chunksZ）退役——streaming 关下枚举恒等 → 逐位等价。
+            Component.onCompleted: { window.rebuildChunkSlotPool() }
+        }
+        // r2021：驻留集 revision 沿 → slot 池随模型增删（streaming 关恒不发 = 现状零触发；
+        //   未来 streaming 激活后 chunk 增删在此响应：拆旧池 → 按新枚举重派生，见
+        //   rebuildChunkSlotPool 选型注释「整池重派生」）。
+        Connections {
+            target: theWorld
+            function onResidentChunkRevisionChanged() {
+                const objs = window.chunkObjects
+                for (let i = 0; i < objs.length; ++i)
+                    if (objs[i]) objs[i].destroy()
+                window.terrainGeos = []
+                window.chunkObjects = []
+                window.chunksBuilt = false
+                window.rebuildChunkSlotPool()
             }
         }
 

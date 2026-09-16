@@ -40,6 +40,11 @@ class World : public QObject
     Q_PROPERTY(int weatherState READ weatherState NOTIFY weatherChanged)
     // t385 天空变暗乘子 [0,1]（0=晴不变暗；Thunder 最暗）。QML clearColor/cloudColor 据此拉暗。
     Q_PROPERTY(float weatherDarkness READ weatherDarkness NOTIFY weatherChanged)
+    // ── §29.4-P4 驻留 chunk 集合模型面（r2021；QML 渲染数据驱动的最小读面）──────────────
+    //   驻留集 = { Loaded, Active }（chunkLifecycleQueryable——与 mesher 存在门同一谓词，选型
+    //   / revision 沿 / 固定世界零变化论证见 setChunkLifecycle 处选型注释；枚举读面只有下面
+    //   三个成员，QML 只读集合、生命周期决策仍全在 C++（r2010d 零决策面不变）。
+    Q_PROPERTY(int residentChunkRevision READ residentChunkRevision NOTIFY residentChunkRevisionChanged)
 
 public:
     explicit World(QObject *parent = nullptr);
@@ -1010,9 +1015,48 @@ public:
     //   chunkmanager.h + chunklifecycle.h）。**非 Q_INVOKABLE 且永不入 QML 面**——生命周期决策
     //   只在 World 层（plan 验收第四条「QML 不再决定 Chunk 的真实生命周期」以「QML 根本无生命
     //   周期访问面」达成，r2010d 反探钉）；查询面复用 chunks() 只读引用（lifecycleAt）即可达。
+    //
+    //   ── §29.4-P4 选型（r2021，头注释立此存照）────────────────────────────────────
+    //   本 forwarder 同时是驻留集 revision 的**唯一写点**：转移被守卫接受且 from/to 的
+    //   chunkLifecycleQueryable 值不同（= 驻留集成员变化：③ Generated→Loaded / ⑧ Evicting→Loaded
+    //   加入、⑥ Loaded→Evicting 移出）→ m_residentChunkRevision +1 + emit。⑤④ Loaded↔Active
+    //   集内平移、①②⑦⑨集外沿零 bump（revision 只追「渲染集成员」，不追全转移史）。
+    //   语义依据：驻留集 = { Loaded, Active } = chunkLifecycleQueryable（chunklifecycle.h 单一
+    //   权威）= mesher 存入门的同一谓词 →「ChunkGeometry slot 存在 ⇔ mesher 门接受该 chunk」
+    //   渲染存在面单一口径（Evicting 中 chunk 内容对 mesher 已不可见，slot 同帧摘除一致）。
+    //   最薄方案论证：World 已是 QML 消费的唯一世界单件（theWorld），读面 = 1 Q_PROPERTY +
+    //   2 Q_INVOKABLE（下方三件）；专用桥 QObject 会引入第二注册面 + 额外 context 属性，更厚。
+    //   流式组件（P1-P3/D6 值组件）QObjectFree 不进 QML（R20 纪律）——将来生产接线经本
+    //   forwarder（或接线期在本写点扩展）驱动转移，本面自动携带沿，接线缝已留。
+    //   固定世界零变化（承重墙）：streaming 关 = 生产零 setLifecycle 调用（R20.11 起全部
+    //   生成/卸载组件零接线）→ revision 恒 0、零发射；枚举 = 全网格 cz 外 cx 内 = Main.qml
+    //   旧 t276 固定网格循环序（r2021a 逐位恒等墙）。recreate/regenerate/beginLoad 不 bump
+    //   （成员集重建后仍全网格 Loaded；运行期换尺寸旧 QML 亦不处理——chunksBuilt 守卫一次
+    //   成型，登记非目标）。
     bool setChunkLifecycle(int cx, int cz, ChunkLifecycle to)
     {
-        return m_chunks.setLifecycle(cx, cz, to);
+        const ChunkLifecycle from = m_chunks.lifecycleAt(cx, cz);
+        if (!m_chunks.setLifecycle(cx, cz, to))
+            return false;
+        if (chunkLifecycleQueryable(from) != chunkLifecycleQueryable(to)) {
+            ++m_residentChunkRevision;
+            emit residentChunkRevisionChanged();
+        }
+        return true;
+    }
+
+    // ── §29.4-P4 驻留 chunk 集合读面（r2021；QML 消费契约 = Main.qml slot 池模型）────────
+    //   驻留数（|{Loaded,Active}|）与 i-th 驻留键 [cx,cz]（QVariantList，t1020 structureRegion
+    //   同款 QML 返回形态）。枚举序单一权威 = residentChunkKeysOrdered()（cz 外 cx 内），
+    //   双 Q_INVOKABLE 共用一体、禁第二份循环（恒等口径单点化，r2021 NEG-2 变异落点）。
+    int residentChunkRevision() const { return m_residentChunkRevision; }
+    Q_INVOKABLE int residentChunkCount() const { return residentChunkKeysOrdered().size(); }
+    Q_INVOKABLE QVariantList residentChunkKeyAt(int index) const
+    {
+        const QVector<QPair<int, int>> keys = residentChunkKeysOrdered();
+        if (index < 0 || index >= keys.size())
+            return {};
+        return QVariantList{ keys.at(index).first, keys.at(index).second };
     }
 
     // 暴露内部 chunk 网格给 Renderer/Game 层（只读引用；t03 per-chunk mesher、t10 F3 计数用）。
@@ -1040,6 +1084,9 @@ signals:
                         // 发——尺寸重建时 seed 值未变，但旧世界派生缓存（重生点等）同样作废，消费端据此复位；
                         // 兼任 Q_PROPERTY seed 的 NOTIFY，值未变的额外通知只致绑定重求值同值，无害）
     void worldChanged(); // 生成/编辑后发出 → 网格重建
+    // §29.4-P4 r2021：驻留 chunk 集合成员变化沿（③⑧加入 / ⑥移出，见 setChunkLifecycle 选型
+    //   注释）。固定世界恒不发（streaming 关零转移）；QML slot 池据本沿重建（Main.qml 实例化段）。
+    void residentChunkRevisionChanged();
     void weatherChanged(); // t385 天气态翻转（晴↔雨/雪/雷；驱动 QML 天空变暗 + 粒子切换）
     // t386 一次闪电击中（雷雨天随机触发）：携击中世界坐标 (x,y,z)。呈现层据此显屏幕白闪 + 雷声（playThunder）；
     //   实体层（mob / 玩家）据此对击中点附近实体造成伤害。World 自身已对击中点的木类方块引燃焚毁（见 strikeLightning）。
@@ -1907,6 +1954,15 @@ private:
     // BFS 单粉连通域上界（防病态长链失控；15 格衰减 + 6 向传播下实际域 ≤ 数百格）。t692：2048 → 4096
     //   （多电路共享同一 tick 的域收集时 2048 会截断 —— 波前推进被误判「无更多粉」传播停摆；2× 余量）。
     static constexpr int kPowerFloodCap = 4096;
+
+    // ── §29.4-P4 r2021 驻留集私有面 ────────────────────────────────────────────────
+    //   驻留 chunk 集合枚举序**单一权威**：cz 外 cx 内行主序（= Main.qml 旧 t276 固定网格
+    //   循环序，r2021a 恒等口径；亦 = ChunkManager flatIndex 序）。谓词 = chunkLifecycleQueryable
+    //   （{Loaded, Active}，与 mesher 存在门同源——渲染存在面单一口径）。只遍历不缓存
+    //   （全网格 O(chunks) 每查现算；QML 仅在沿时刻调，无热路径）。实现见 world.cpp。
+    QVector<QPair<int, int>> residentChunkKeysOrdered() const;
+    // 驻留集 revision（成员集变化沿 +1；唯一写点 = setChunkLifecycle forwarder，选型注释在该处）。
+    int m_residentChunkRevision = 0;
 };
 
 #endif // WORLD_H

@@ -9505,3 +9505,20 @@ int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky
     }
     return changedChunks;
 }
+
+// ── §29.4-P4 r2021：驻留 chunk 集合枚举序单一权威（选型见 world.h setChunkLifecycle 处
+//    注释）。序 = cz 外 cx 内行主序——与 Main.qml 旧 t276 固定网格双循环逐位同序（streaming
+//    关下驻留集 = 全网格 → 枚举恒等，r2021a 承重墙）；谓词 = chunkLifecycleQueryable（驻留
+//    两态 {Loaded, Active}，与 mesher 存在门同源）。residentChunkCount / residentChunkKeyAt
+//    双消费面共用本实现，禁第二份循环（r2021 NEG-2 变异落点单点化）。
+QVector<QPair<int, int>> World::residentChunkKeysOrdered() const
+{
+    QVector<QPair<int, int>> keys;
+    const int nx = m_chunks.chunksX(), nz = m_chunks.chunksZ();
+    keys.reserve(nx * nz);
+    for (int cz = 0; cz < nz; ++cz)
+        for (int cx = 0; cx < nx; ++cx)
+            if (chunkLifecycleQueryable(m_chunks.lifecycleAt(cx, cz)))
+                keys.append({ cx, cz });
+    return keys;
+}
