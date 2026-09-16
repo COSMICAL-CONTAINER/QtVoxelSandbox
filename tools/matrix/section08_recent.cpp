@@ -146,21 +146,25 @@ void MatrixRun::section08_recent()
                                              .arg(okFlat).arg(okRt).arg(diagAo));
     });
 
-    // (c) meshing 线程模式事实钉（t906 复核；R20.12 同变更修订）：src/ 全树 *.cpp/*.h 的线程
-    //     原语命中**只允许**落在唯一受认可落点 src/World/backgroundgeneration.h 且只允许
-    //     std::thread（R20.12 后台 GenerationJob——线程期红线 worker 禁 QObject，标准线程原语
-    //     选型依据见其头注）与 Main.qml F3 行 `threads: 0/0 (sync meshing)` 互锁——mesher 仍
-    //     同步（F3 行照常成立），任何**新增**线程原语文件/记号（含 mesher 线程化 t1023 §1.3）
-    //     仍必须同变更更新本探针，防「F3 谎报 / 野线程潜入」。
-    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck; R20.12 amended): src tree"
+    // (c) meshing 线程模式事实钉（t906 复核；R20.12 同变更修订；r2020/D6 再修订 = 纠偏留痕非
+    //     放宽——纪律原文已预见「含 R20.13 mesher 线程化」的修订路径）：src/ 全树 *.cpp/*.h 的
+    //     线程原语命中**只允许**落在双文件白名单 {src/World/backgroundgeneration.h（R20.12 后台
+    //     GenerationJob worker）, src/World/meshworker.h（D6 worker meshing——MeshBuilder 线程化
+    //     执行器，组件先行生产零接线）} 且只允许 std::thread（两 worker 均禁 QObject，选型依据
+    //     见各自头注）与 Main.qml F3 行 `threads: 0/0 (sync meshing)` 互锁——mesher 生产路径仍
+    //     同步（MeshWorker 不被任何生产 TU include，F3 行照常成立），任何**新增**线程原语文件/
+    //     记号（含 t1023 §1.3 后续面）仍必须同变更更新本探针，防「F3 谎报 / 野线程潜入」。
+    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck; R20.12 amended, dual-site): src tree"
         " threading-primitive hits (QThreadPool/QThread/QtConcurrent/QFuture/moveToThread/st"
-        "d::thread/std::async) are sanctioned only in World/backgroundgeneration.h with"
-        " std::thread (the background generation worker - worker side bans QObject, see its"
-        " header), and the F3 line 'threads: 0/0 (sync meshing)' stays pinned (meshing is"
-        " still synchronous on the GUI thread via ChunkGeometry direct-connected slots); any"
-        " new primitive site (incl. mesher threading per t1023 report section 1.3) must"
-        " update both the F3 line and this probe in the same changediag files=%1 hits=%2"
-        " f3=%3 %4" }, [&]() {
+        "d::thread/std::async) are sanctioned only in the dual-file whitelist"
+        " World/backgroundgeneration.h (background generation worker) + World/meshworker.h"
+        " (worker meshing executor, production-unwired) with std::thread (both workers ban"
+        " QObject, see their headers), and the F3 line 'threads: 0/0 (sync meshing)' stays"
+        " pinned (meshing is still synchronous on the GUI thread via ChunkGeometry"
+        " direct-connected slots; the worker-meshing component is not included by any"
+        " production TU); any new primitive site (incl. mesher threading per t1023 report"
+        " section 1.3) must update both the F3 line and this probe in the same changediag"
+        " files=%1 hits=%2 f3=%3 %4" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString srcRoot = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
         if (!QDir(srcRoot).exists()) {
@@ -176,9 +180,11 @@ void MatrixRun::section08_recent()
                 QStringLiteral("QFuture"), QStringLiteral("moveToThread"), QStringLiteral("std::thread"),
                 QStringLiteral("std::async"),
             };
-            const QString kSanctionedRel = QStringLiteral("World/backgroundgeneration.h");
+            // r2020 双文件白名单（纠偏留痕非放宽）：仍仅 std::thread，落点从单文件扩为两 worker 头。
+            const QString kSanctionedBg = QStringLiteral("World/backgroundgeneration.h"); // R20.12 后台 GenerationJob worker
+            const QString kSanctionedMw = QStringLiteral("World/meshworker.h"); // D6 MeshWorker（MeshBuilder 线程化执行器，生产零接线）
             const QString kSanctionedTok = QStringLiteral("std::thread");
-            int files = 0, hits = 0, sanctionedHits = 0;
+            int files = 0, hits = 0, sanctionedBgHits = 0, sanctionedMwHits = 0;
             QString hitDetail;
             QDirIterator it(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
                             QDir::Files, QDirIterator::Subdirectories);
@@ -192,8 +198,10 @@ void MatrixRun::section08_recent()
                     if (content.contains(tok)) {
                         ++hits;
                         hitDetail += it.filePath() + QStringLiteral(":") + tok + QStringLiteral(" ");
-                        if (rel == kSanctionedRel && tok == kSanctionedTok)
-                            ++sanctionedHits; // R20.12 受认可落点
+                        if (tok == kSanctionedTok) {
+                            if (rel == kSanctionedBg) ++sanctionedBgHits; // 受认可落点①
+                            else if (rel == kSanctionedMw) ++sanctionedMwHits; // 受认可落点②
+                        }
                     }
                 }
             }
@@ -202,24 +210,32 @@ void MatrixRun::section08_recent()
             if (mf.open(QIODevice::ReadOnly))
                 f3Present = QString::fromUtf8(mf.readAll())
                                 .contains(QStringLiteral("threads: 0/0 (sync meshing)"));
-            // 命中面 = 全部命中都在受认可落点（且落点在场 ≥1 命中——防「worker 文件被挪走后
-            // 事实钉空转」）；F3 行照常钉（mesher 仍同步）。
-            const bool okThreadPin = files > 0 && hits > 0 && hits == sanctionedHits && f3Present;
+            // 命中面 = 全部命中都在受认可落点（且**每个**白名单落点在场 ≥1 命中——防「worker
+            // 文件被挪走后事实钉空转」）；F3 行照常钉（mesher 生产路径仍同步）。
+            const int sanctionedHits = sanctionedBgHits + sanctionedMwHits;
+            const bool everySanctionedSitePresent = sanctionedBgHits >= 1 && sanctionedMwHits >= 1;
+            const bool okThreadPin = files > 0 && hits > 0 && hits == sanctionedHits
+                && everySanctionedSitePresent && f3Present;
             if (!okThreadPin) ++totalFail;
             qInfo().noquote() << (okThreadPin ? "PASS" : "FAIL")
-                              << "| t1023c sync-meshing fact pin (t906 recheck; R20.12 amended):"
-                                 " src tree threading-primitive hits are sanctioned only in"
-                                 " World/backgroundgeneration.h with std::thread (background"
-                                 " generation worker; worker side bans QObject), across"
+                              << "| t1023c sync-meshing fact pin (t906 recheck; R20.12 amended,"
+                                 " dual-site): src tree threading-primitive hits are sanctioned"
+                                 " only in the dual-file whitelist World/backgroundgeneration.h"
+                                 " (background generation worker) + World/meshworker.h (worker"
+                                 " meshing executor, production-unwired) with std::thread (both"
+                                 " workers ban QObject), across"
                               << files
                               << "files, and the F3 line 'threads: 0/0 (sync meshing)' stays pinned"
                                  " (meshing is still synchronous on the GUI thread via"
-                                 " ChunkGeometry direct-connected slots); any new primitive site"
-                                 " (incl. mesher threading, t1023 report section 1.3) must update"
-                                 " both the F3 line and this probe in the same change"
+                                 " ChunkGeometry direct-connected slots; the worker-meshing"
+                                 " component is not included by any production TU); any new"
+                                 " primitive site (incl. mesher threading, t1023 report section"
+                                 " 1.3) must update both the F3 line and this probe in the same"
+                                 " change"
                               << (okThreadPin ? QString()
-                                              : QStringLiteral("diag files=%1 hits=%2 f3=%3 %4")
-                                                    .arg(files).arg(hits).arg(f3Present).arg(hitDetail));
+                                              : QStringLiteral("diag files=%1 hits=%2 f3=%3 every=%4 %5")
+                                                    .arg(files).arg(hits).arg(f3Present)
+                                                    .arg(everySanctionedSitePresent).arg(hitDetail));
         }
     });
 
