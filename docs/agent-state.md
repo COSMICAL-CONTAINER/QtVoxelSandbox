@@ -9,14 +9,14 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: 治理审计 #10（主控亲自执行；计数满 5/5：r2010b/r2016/r2017/t1053/t1054）→ 其后 §29.4-P2 玩家移动驱动（待主控派单）
-current_task_status: READY
+current_task: §29.4-P2 玩家移动驱动（子 agent 串行执行，filter 词 r2018——src/World/chunkstreamdriver.h：位置沿 → decide.toRequest 逐项 submit Generate job / 离半径 pending 取消 / 风暴背压可见计数；默认关恒惰=固定世界零变化延续；零生产接线零 QML 触碰）
+current_task_status: IN_PROGRESS_SUBAGENT
 last_completed_task: t1054 parity 第 14 门（review0916 #4 骑乘门 sneak 抑制 + #11 sneakPlaceBlock helper 化；输入 = docs/agent-review-2026-09-16.md #4「中」+ #11「低」主控实锤分诊。**语义选型（头注释立此存照）**：#4 = (a) 骑乘段 tryMount 前置 shift 裸门 !m_keys.value(Qt::Key_Shift)【骑乘类 = 潜行即不骑，与手持无关；空手 sneak 右键普通矿车无效应、持方块 sneak 落 (b) 放矿车/通用放块、无 shift 照旧上车】——与开箱/扳动类合取门【持方块才旁路到放置】的**语义分工**立此存照；t1052 自证矛盾注释随修如实化；#11 = 合取收进私有 helper heldPlaceableSneak()，两调用点（12 门判据 + 箱车开箱门）改读，语义逐位不变）
 last_task_closure_commit: docs(plan)（本提交；代码终态 = fix(t1054) 55a2209 + test(t1054) 7c88b81）
 last_verified_commit: test(t1054)（矩阵 **608 PASS / 0 FAIL ×2**：matrix_t1054_pos.log + matrix_t1054_final.log 双日志在案 EXIT=0；606 权威 diff = +2 恰 t1054a/t1054b + 漂移仅登记类[t813 戳 12:06→13:46 与哈希 903be0b→486a16f、t997 墙钟]；t979/t830/t1023c 零漂移；pos/final 腿集合恒等 608[diff 仅 t997/t979 登记类数字]；filter 面 t1054=2P、前置回归终版 binary 全族重跑 t1050=6P t1052=1P t1013=2 legs t1046=8P t1034=3P t1028=4P r2007=5P r2008=5P r2009=4P r2010=6P r2010b=3P r2011~r2017=4P×7；阴性两轮恰红声明面：NEG-1 摘 (a) 段 sneak 裸门→腿级恰红{t1054a}[t1052a/t1050 对照族绿；柱级偏差留痕=相① mount 残留 m_riderCart 连带相③ ridingIndex 断言] / NEG-2 helper 合取 &&→||→全矩阵 599P/9F 实测红面 = 声明{t1054b,t1050a-d,t1052a}∪{t1034a,t1034c,t1046a}[无 sneak 持方块基线柱属合取语义面，t1053 NEG1 先例改声明留痕；t1054a 不红=预判成立]→双 Edit 反向还原回绿[还原后计数复核：门合取 3 项 / 合取式全文件恰 1 处；存证 matrix_t1054_neg1_red/restore.log + neg2_red/restore.log 直接落 build/ 终名]；app 重建 EXIT=0 + 冒烟 EXIT=124 + logs/voxelsandbox_t1054_tail20.log 稳态 60fps[prof[1s] 60fr / frame main*16.0(60)]）
-last_governance_review: 2026-09-16（audit #9 GREEN——§29.3 序列收官 + 5 闭环放行；此后 r2010b/r2016/r2017/t1053 闭环[计数 4/5] + t1054 闭环[计数 5/5 满]；Mimosa ENOBUFS 延续）
-governance_review_due: true
-completed_tasks_since_governance_review: 5
+last_governance_review: 2026-09-16（audit #10 GREEN——r2010b/t1053/P1/r2017/t1054 五闭环放行 P2；异常指标=agent 自报证据与磁盘不符 ×2[P1 final 未跑 / r2017 NEG-A 误写 TEMP]均被主控复核拦截，两条证据面铁律固化：×2 两轮日志在案才可写关单 + 阴性日志直落 build/ 终名禁 TEMP 中转；agent-review 通道命名空间纪律入册；详见 governance-audit-2026-09-16-b.md）
+governance_review_due: false
+completed_tasks_since_governance_review: 0
 next_task: 治理审计 #10（主控亲自）→ 其后 §29.4-P2（玩家移动驱动：位置沿 → decide.toRequest 逐项 submit GenerationJob；待主控开工单）→ P3 卸载+Edits-on-evict → worker meshing（D6 同批）→ P4 QML 动态化 → P5 调参验收
 next_task_source: 用户会话指令 2026-09-16「直接开始做这几个功能继续做」——t1054 为 review0916 #4/#11 parity 清偿单（主控实锤分诊）
 active_write_lease: main_orchestrator_serial_queue
