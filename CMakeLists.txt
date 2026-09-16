@@ -1014,6 +1014,17 @@ add_executable(redstone_matrix_test
     #   + 临时库（r2015 先例），rig 世界 w 零接触，无新增 .cpp——world/chunk 系源文件已列）。
     tools/matrix/section22_chunkevictor.cpp
     src/World/chunkevictor.h
+    # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
+    #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
+    #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
+    #   析构卫生[积压在途析构 join 有界 + 丢弃经 teardown 外哨可见 + 可重建性]/结构钉+修订后
+    #   t1023c 双文件白名单段内自证+零生产接线反探[MeshWorker 记号只在 meshworker.h]+线程身份。
+    #   随段直编 src/World/meshworker.h（header-only 非 QObject，r2012 backgroundgeneration.h
+    #   同门形态：std::thread+mutex+cv、析构 stop+discard+join、队列 64 满载可见拒绝、worker 执
+    #   行体唯一调用 MeshBuilder::build——meshbuilder.cpp 已列；无新增 .cpp）；r2020a 自建 fresh
+    #   小世界 48×48×96 s82 采集真实快照（section11+ 先例，rig 世界 w 零接触），r2020b/c/d 零世界）。
+    tools/matrix/section23_meshworker.cpp
+    src/World/meshworker.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
