@@ -76,5 +76,6 @@
 | 本文件 #2（生命周期边无 kind 门） | **本窗闭环（r2017 fix B，2026-09-16）**：generationjob.h 同步 pump 与 pumpAsync 两路六处边驱动点全带 `job.kind != Mesh` 门（Mesh 三边全不驱动 = 头注契约代码兑现；Generate/Load 照旧）；r2017b 双路成功/失败行为钉 + 源码钉 minCount=6 + NEG-B 恰红（首版 false && 前缀合取项 = 假红面过宽废弃，正确形态 = 删合取项） |
 | 本文件 #3（tick 外编辑被抹） | **本窗闭环（r2017 fix C，候选②窗口语义迁移，2026-09-16）**：runOneTick 开头 clear 移除、清账唯一落点收口发布之后——窗口 =「上收口到本收口」，out-of-tick 编辑归下一窗照常作为 WorldDelta + BlockChanged 发布；R20.09「Tick 内零通知、收口单点发布」不破；r2009b/c 集合面单源断言同变更修订移入 tickCompleted 信号栈内（双语义不变量，NEG-C 不误伤）；r2017c 钉 + NEG-C 恰红 |
 | 本文件 Info（GenerationPolicy setParams 不规整） | **本窗闭环（r2017 fix D，2026-09-16）**：规整唯一路径 = GenerationPolicyParams::normalized public static（4 参构造与 setParams 同走一路），杜绝手改字段破不变量 → quint8(cheb) 回绕；r2017d 越界/合规/负值三组双生 twin + (300,0) 回绕判别格 + (255,0) 窗界 priority-255 无回绕钉 |
-| 本文件 #4（骑乘门 sneak 抑制） | 待修：第 14 门，(a) 段加 Shift 门 + 矩阵腿，随 #11 helper 化顺手做 |
-| 本文件 #5~#12 | 登记/接线单契约/顺手修（#6 可搭下一笔 worldgen 改动，#9 纯视觉低优先） |
+| 本文件 #4（骑乘门 sneak 抑制） | **本窗闭环（t1054，2026-09-16）**：(a) 段 tryMount 前置 shift 裸门（潜行一律不骑，与手持无关——空手 sneak 右键普通矿车无效应、持方块 sneak 落放置路径、无 shift 照旧上车）；t1052 自证矛盾注释随修如实化；MC 引证 = wiki/w/Sneaking Effects 马匹交互句 + History 载具句（1.6.1/13w16a）+ wiki/w/Minecart Usage "ridden by pressing the use control"（2026-09-16 实读）；t1054a 三相+回归柱 + NEG-1 恰红 |
+| 本文件 #11（sneakPlaceBlock 合取两处手写副本） | **本窗闭环（t1054 同单）**：合取收进私有 helper `heldPlaceableSneak()`，:3574 与 :4876 两调用点改读（语义逐位不变）；t1054b 源钉（定义+return 合取行+两调用点 minCount=2+旧字面反探）+ t1050a/t1052a 源钉同变更修订 + NEG-2 全矩阵 9 腿恰红实证 |
+| 本文件 #5~#10、#12 | 登记/接线单契约/顺手修（#6 可搭下一笔 worldgen 改动，#9 纯视觉低优先） |
