@@ -1,7 +1,7 @@
 # QtMinecraft Agent State
 
 状态文件版本：1
-更新时间：2026-09-16 14:20（t1054 parity 第 14 门闭环：骑乘门 sneak 抑制 + sneakPlaceBlock helper 化，矩阵 608/0 双绿 + 阴性两轮恰红还原回绿；下一任务 = 治理审计 #10（主控亲自，计数 5/5）→ §29.4-P2）
+更新时间：2026-09-16 16:00（§29.4-P2 玩家移动驱动 ChunkStreamDriver 闭环：矩阵 612/0 双绿 + 阴性两轮恰红还原回绿；下一任务 = §29.4-P3 卸载 + Edits-on-evict）
 用途：为断链恢复、定时治理和连续开发 Agent 提供短状态入口。长历史进入 dev-plan，架构决策进入 refactor-plan，治理规则进入 autonomous-governance。
 
 ## Current Control Block
@@ -9,16 +9,16 @@
 ```yaml
 project: QtMinecraft
 state: READY
-current_task: §29.4-P2 玩家移动驱动（子 agent 串行执行，filter 词 r2018——src/World/chunkstreamdriver.h：位置沿 → decide.toRequest 逐项 submit Generate job / 离半径 pending 取消 / 风暴背压可见计数；默认关恒惰=固定世界零变化延续；零生产接线零 QML 触碰）
-current_task_status: IN_PROGRESS_SUBAGENT
-last_completed_task: t1054 parity 第 14 门（review0916 #4 骑乘门 sneak 抑制 + #11 sneakPlaceBlock helper 化；输入 = docs/agent-review-2026-09-16.md #4「中」+ #11「低」主控实锤分诊。**语义选型（头注释立此存照）**：#4 = (a) 骑乘段 tryMount 前置 shift 裸门 !m_keys.value(Qt::Key_Shift)【骑乘类 = 潜行即不骑，与手持无关；空手 sneak 右键普通矿车无效应、持方块 sneak 落 (b) 放矿车/通用放块、无 shift 照旧上车】——与开箱/扳动类合取门【持方块才旁路到放置】的**语义分工**立此存照；t1052 自证矛盾注释随修如实化；#11 = 合取收进私有 helper heldPlaceableSneak()，两调用点（12 门判据 + 箱车开箱门）改读，语义逐位不变）
-last_task_closure_commit: docs(plan)（本提交；代码终态 = fix(t1054) 55a2209 + test(t1054) 7c88b81）
-last_verified_commit: test(t1054)（矩阵 **608 PASS / 0 FAIL ×2**：matrix_t1054_pos.log + matrix_t1054_final.log 双日志在案 EXIT=0；606 权威 diff = +2 恰 t1054a/t1054b + 漂移仅登记类[t813 戳 12:06→13:46 与哈希 903be0b→486a16f、t997 墙钟]；t979/t830/t1023c 零漂移；pos/final 腿集合恒等 608[diff 仅 t997/t979 登记类数字]；filter 面 t1054=2P、前置回归终版 binary 全族重跑 t1050=6P t1052=1P t1013=2 legs t1046=8P t1034=3P t1028=4P r2007=5P r2008=5P r2009=4P r2010=6P r2010b=3P r2011~r2017=4P×7；阴性两轮恰红声明面：NEG-1 摘 (a) 段 sneak 裸门→腿级恰红{t1054a}[t1052a/t1050 对照族绿；柱级偏差留痕=相① mount 残留 m_riderCart 连带相③ ridingIndex 断言] / NEG-2 helper 合取 &&→||→全矩阵 599P/9F 实测红面 = 声明{t1054b,t1050a-d,t1052a}∪{t1034a,t1034c,t1046a}[无 sneak 持方块基线柱属合取语义面，t1053 NEG1 先例改声明留痕；t1054a 不红=预判成立]→双 Edit 反向还原回绿[还原后计数复核：门合取 3 项 / 合取式全文件恰 1 处；存证 matrix_t1054_neg1_red/restore.log + neg2_red/restore.log 直接落 build/ 终名]；app 重建 EXIT=0 + 冒烟 EXIT=124 + logs/voxelsandbox_t1054_tail20.log 稳态 60fps[prof[1s] 60fr / frame main*16.0(60)]）
+current_task: §29.4-P3 卸载 + Edits-on-evict（待主控开工单——decide.toEvict 消费面：视距外 Evicting→Absent 执行器 + 改动块经 SaveCoordinator 落盘回灌；GenerationJob ChunkManager 挂点/共享世界级实例生产接线入场的候选面；filter 词建议 r2019）
+current_task_status: PENDING_ASSIGN
+last_completed_task: §29.4-P2 玩家移动驱动（子 agent 串行执行，filter 词 r2018——src/World/chunkstreamdriver.h：header-only 非 QObject 纯编排值组件，位置沿 → decide.toRequest 逐项 submit Generate job[合并别名制天然去重] / 离半径 pending 逐别名取消[半径判据非 decide 成员判据，erase-on-cancel 幂等] / 风暴背压可见 rejectedSubmissions[满载拒绝计数跳过，下沿重算重发]；默认关恒惰=onPlayerChunk/pump 双短路、关态在途账逐位不动；自持 GenerationScheduler[纯请求模型形态——挂点归生产接线]；零 World*/ChunkManager* 持有零线程原语零 QML 面）
+last_completed_task_commits: fix(r2018) + test(r2018)（代码终态；本 docs 提交收口）
+last_verified_commit: test(r2018)（矩阵 **612 PASS / 0 FAIL ×2**：matrix_r2018_pos.log + matrix_r2018_final.log 双日志在案 EXIT=0；608 权威 diff = +4 恰 r2018a-d + 漂移仅登记类[t813 戳 13:46→15:31 与哈希 486a16f→2c705a3、t997 墙钟、t1023c src 文件计数 146→147 = 新增头文件机制 +1 同款先例]；t830/t979 零漂移；pos/final 腿集合恒等 612[diff 仅 t997 墙钟]；^FAIL 逐行归类 0；前置回归终版 binary 全族重跑 r2007=5P r2008=5P r2009=4P r2010=6P r2010b=3P r2011~r2017=4P×7；filter 面 r2018=4P；阴性两轮按终版腿文重取恰红声明面：NEG-1 摘默认关短路→{r2018a}[红载体=ph4 关态在途账被取消 c=25；首版 false && 前缀曾连带红 r2018d 门钉→改 && false 后缀+钉针前缀化收缩达标留痕] / NEG-2 摘出半径取消→{r2018b}取消柱[diag 仅 ph2/ph3 取消柱失配；首版连带红 r2018d canceled>0 非空转探针→腿文 R20.11 相对化修正后达标，两轮全量重取证据留痕]；四日志 matrix_r2018_neg{1,2}_{red,restore}.log 直接落 build/ 终名；app 重建 EXIT=0 + 冒烟 EXIT=124 + logs/voxelsandbox_r2018_tail20.log 稳态 60fps[prof[1s] 60fr / frame main*16.0(60)]）
 last_governance_review: 2026-09-16（audit #10 GREEN——r2010b/t1053/P1/r2017/t1054 五闭环放行 P2；异常指标=agent 自报证据与磁盘不符 ×2[P1 final 未跑 / r2017 NEG-A 误写 TEMP]均被主控复核拦截，两条证据面铁律固化：×2 两轮日志在案才可写关单 + 阴性日志直落 build/ 终名禁 TEMP 中转；agent-review 通道命名空间纪律入册；详见 governance-audit-2026-09-16-b.md）
 governance_review_due: false
-completed_tasks_since_governance_review: 0
-next_task: 治理审计 #10（主控亲自）→ 其后 §29.4-P2（玩家移动驱动：位置沿 → decide.toRequest 逐项 submit GenerationJob；待主控开工单）→ P3 卸载+Edits-on-evict → worker meshing（D6 同批）→ P4 QML 动态化 → P5 调参验收
-next_task_source: 用户会话指令 2026-09-16「直接开始做这几个功能继续做」——t1054 为 review0916 #4/#11 parity 清偿单（主控实锤分诊）
+completed_tasks_since_governance_review: 1
+next_task: §29.4-P3 卸载 + Edits-on-evict → worker meshing（D6 同批）→ P4 QML 动态化（全 R20 唯一动 QML 相位）→ P5 实机调参验收
+next_task_source: 用户会话指令 2026-09-16「直接开始做这几个功能继续做」——§29.4 P1-P5 相位族串行推进（P2 本单闭环）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
 retry_count: 0
@@ -27,7 +27,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1054 代码终态（fix 55a2209 + test 7c88b81 已提交；docs 提交随后），工作区干净；`.codex/` 豁免不删不提交。
+- HEAD = §29.4-P2 代码终态（fix(r2018) + test(r2018) 已提交；docs 提交随后），工作区干净；`.codex/` 豁免不删不提交。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
