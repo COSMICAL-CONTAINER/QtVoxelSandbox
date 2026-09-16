@@ -1057,6 +1057,16 @@ add_executable(redstone_matrix_test
     #   radius 0 按需 loadChunkAt），rig 世界 w 零接触；r2023d 纯源码钉；无新增 .cpp——
     #   world/chunk 系源文件已列）。
     tools/matrix/section26_sparse_population.cpp
+    # §29.5-W2 位置源 + 驱动接线 探针段（置尾先例沿用：runAll 末执行，filter 词 r2024；
+    #   4 腿 r2024a-d = fixed 零活动承重墙[fixed 世界 GameSession 无驱动器无 worker，全
+    #   tick/移动扫掠全状态逐位不动]/通电走查承重[真 PlayerController 走查 × 真驱动器 × 真线程
+    #   worker：①②③沿真实驱动 + OOB 门翻真 + residentChunkRevision 沿 + 半径取消 + 内容
+    #   抽样柱 ≡ fixed 孪生]/真线程收割+#7 双面同拍契约[每 job 恰一数据一条 outcome + 双面
+    #   排干零积压 + 线程身份 + 背压恰 17 拒绝 + 重请求重生成]/结构钉[会话通电门 + #7 函数域
+    #   同拍钉 + adopt 落位链钉 + QML/worldstore 反探]。
+    #   r2024a-c 自建 fresh 小世界族（sparse 80×80×96 s42 radius 0 + fixed 48×48×96 s82 孪生），
+    #   rig 世界 w 零接触；无新增 .cpp——gamesession.h/world 系源文件已列）。
+    tools/matrix/section27_streaming_wiring.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

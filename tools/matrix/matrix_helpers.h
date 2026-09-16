@@ -322,4 +322,10 @@ private:
                                   //   r2023a fixed 零变化墙 / r2023b parity 承重墙 / r2023c
                                   //   加载顺序无关 / r2023d 结构钉——80×80×96 fresh 小世界族 +
                                   //   纯源码钉，rig 世界 w 零接触，接 section25）
+    void section27_streaming_wiring(); // §29.5-W2 位置源 + 驱动接线 探针（置尾先例沿用：
+                                  //   r2024a fixed 零活动承重墙 / r2024b 通电走查承重 /
+                                  //   r2024c 真线程收割+#7 契约+背压 / r2024d 结构钉——
+                                  //   80×80×96 fresh sparse 小世界族 + 48×48×96 fixed 小世界
+                                  //   + 真 PlayerController 走查 + 真线程 worker（防 flake
+                                  //   deadline 有界），rig 世界 w 零接触，接 section26）
 };

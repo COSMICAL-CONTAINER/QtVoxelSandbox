@@ -649,20 +649,33 @@ void MatrixRun::section21_chunkstreamdriver()
             ok = false;
             diag += QStringLiteral("[%1] ").arg(m);
         }
+        // §29.5-W2 同变更修订（纠偏留痕非削钉——t1023c/r2019 Load-kind 修订先例）：原「全库
+        //   零接线」反探含 gamesession.h；W2（refactor-plan §29.5.2 原文「GameSession tick 尾
+        //   driver.onPlayerChunk」）授权 GameSession 为驱动器生产接线点，该文件从禁出名单退役、
+        //   改钉「接线恰经会话通电门出现」（下方 missGsWire 正面钉）；world.{h,cpp} /
+        //   playercontroller 双件 / Main.qml 禁出保持原样（接线面仍不出 World 与 QML）。
         const bool unwired = forbiddenAbsent(srcRoot + QStringLiteral("/World/world.h"),
                                  "ChunkStreamDriver")
             && forbiddenAbsent(srcRoot + QStringLiteral("/World/world.cpp"),
-                "ChunkStreamDriver")
-            && forbiddenAbsent(srcRoot + QStringLiteral("/Game/gamesession.h"),
                 "ChunkStreamDriver")
             && forbiddenAbsent(srcRoot + QStringLiteral("/Game/playercontroller.h"),
                 "ChunkStreamDriver")
             && forbiddenAbsent(srcRoot + QStringLiteral("/Game/playercontroller.cpp"),
                 "ChunkStreamDriver")
             && forbiddenAbsent(srcRoot + QStringLiteral("/ui/Main.qml"), "ChunkStreamDriver");
-        ok = ok && negProbeOk && unwired;
+        const QStringList missGsWire = pinSet(
+            srcRoot + QStringLiteral("/Game/gamesession.h"), {
+                SrcPin("W2 authorized session wiring (revises the r2018 gamesession-forbidden"
+                       " probe: the §29.5-W2 session gate is the sanctioned driver wiring point)",
+                    "ChunkStreamDriver::streamingWithDefaultRadii()", 1),
+            });
+        ok = ok && negProbeOk && unwired && missGsWire.isEmpty();
         if (!negProbeOk) diag += QStringLiteral("[neg-probe] ");
         if (!unwired) diag += QStringLiteral("[unwired] ");
+        for (const QString &m : missGsWire) {
+            ok = false;
+            diag += QStringLiteral("[%1] ").arg(m);
+        }
 
         // ③ 确定性：同移动序列 × 双 fresh 驱动器（同参同表）重放 → 轨迹逐位恒等：
         const GenerationPolicyParams parR(true, 2, 1, 4);
@@ -744,9 +757,10 @@ void MatrixRun::section21_chunkstreamdriver()
                              " Generate-only face (Load only via the P3 seam-gated"
                              " saved-content query),"
                              " reverse probes prove no QObject/QML/thread/World/"
-                             "ChunkManager/setLifecycle tokens and zero production wiring,"
-                             " and two fresh drivers replay the same movement sequence with"
-                             " bit-identical trajectories"
+                             "ChunkManager/setLifecycle tokens and production wiring only at"
+                             " the W2-authorized session gate (r2018 gamesession-forbidden"
+                             " probe amended in the same change), and two fresh drivers replay"
+                             " the same movement sequence with bit-identical trajectories"
                           << (ok ? QString() : diag);
     });
 }
