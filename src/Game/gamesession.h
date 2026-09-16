@@ -109,6 +109,9 @@ public:
 
     // 最近一个整 tick 的脏 chunk 集（R20.09 验收④的会话面示范：渲染调度按**集合**一次
     // 查询——每 Tick 一次、不再直绑每一次 setBlock；全量接线 ChunkGeometry/QML 归 R20.10+）。
+    // 活引用非拷贝，有效域 = tickCompleted 信号栈内（同帧快照）；r2017 起 stepTick 返回时
+    // 已收口清账（窗口 = 上收口到本收口）——跨帧持有请自行拷贝（值拷贝化维持 review #12
+    // 登记非目标）。
     const DirtyChunkSet &lastDirtyChunks() const { return m_edits.dirtyChunks(); }
 
     // 事件观察面（BlockChanged 每合并编辑格一条、Tick 末统一入队；EventQueue 满载丢弃
@@ -129,16 +132,18 @@ private:
     // 恒成功：刚腾出的空位 ≥ 回队数）→ World 模拟家族（Main.qml 桥接次序逐行镜像）→
     // EditBuffer 收口（takeDelta + 按合并编辑面派生 BlockChanged 事件）+ 信号。
     void runOneTick();
-    // 命令执行（**委托不复制**）：BreakBlock → setBlock(pos, Air)、PlaceBlock →
-    // setBlockWithState(pos, blockId, blockState)——经 WorldFacade 收窄面落 World::setBlock
+    // 命令执行（**委托不复制**）：BreakBlock → setBlock(pos, Air)、PlaceBlock → 按 blockState
+    // 双路由（state==0 → setBlock 四参同 id no-op 保 state[r2017 MC 口径恢复]；state!=0 →
+    // setBlockWithState 五参全写[R20.09 权威]）——经 WorldFacade 收窄面落 World::setBlock
     //「写栅格的唯一入口」权威（R20.08 迁移：命令写走 Facade；R20.09 落 Review_2026-09-15
-    // #3①：PlaceBlock 带 state 五参权威落地——带朝向/半砖态方块不再静默丢 state，默认 0
-    // 向后兼容）。越界 / 无变化由 World 权威语义静默拒绝（同玩家前门路径的行为面）。
+    // #3①：PlaceBlock 带 state 五参权威落地——带朝向/半砖态方块不再静默丢 state）。越界 /
+    // 无变化由 World 权威语义静默拒绝（同玩家前门路径的行为面）。
     void executeCommand(const Command &c);
     // 编辑登记（blockBroken/blockPlaced 回调 → R20.09 EditBuffer 委托）：改动后 id 回读 +
     // record（同格合并 / 新格首记 / 满载丢弃可见）。**Tick 内零通知**——BlockChanged 事件
     // 由 runOneTick 收口按合并编辑面统一派生（每格一条、id=终态——验收①「不产生不必要的
-    // 重复通知」的会话面承担点）。
+    // 重复通知」的会话面承担点）；r2017 起 tick 收口后（tick 栈外）到达的编辑同入本面归入
+    // 下一窗，收口单点发布不破（见 runOneTick 注）。
     void noteEdit(int x, int y, int z);
 
     World &m_world;
@@ -208,7 +213,13 @@ inline int GameSession::stepTick(qreal deltaSecs)
 inline void GameSession::runOneTick()
 {
     ++m_tick; // tick 号先推进：targetTick ≤ 新号即「到期」（0 = 尽快，首个整 tick 即执行）
-    m_edits.clear(); // R20.09：Tick 内编辑面从零累积（溢出累计跨 tick 保留——不可再生可见）
+    // r2017（agent-review-2026-09-16 #3）：**tick 开头不再清账**——tick 窗口语义从「start-
+    //   clear 到收口」改为「上一收口到本收口」（清账唯一落点 = 收口发布之后，见函数尾）：
+    //   tick 收口后、下一 tick 开始前到达的编辑（World 全局信号 → noteEdit → m_edits）自然
+    //   归入下一窗，在下一收口照常作为 WorldDelta + BlockChanged 事件发布，绝不静默丢失
+    //   （event.h 纪律「事件丢弃必须被看见」）。旧码开头 clear() 会把跨收口边界的编辑无事件
+    //   无 delta 无计数地整体抹除（r2017c 行为钉）。R20.09 纪律「Tick 内零通知、收口单点
+    //   发布」不破——out-of-tick 编辑与 tick 内编辑走同一 EditBuffer 合并面、同一收口发布点。
 
     // 到期命令 drain（FIFO 保序；未到期暂存原序回队——回队数 ≤ 刚弹出数，push 恒成功）。
     QVector<Command> deferred;
@@ -253,6 +264,12 @@ inline void GameSession::runOneTick()
     }
 
     emit tickCompleted(m_tick, m_lastDelta);
+
+    // r2017：清账唯一落点 = 收口发布**之后**（emit 栈内消费者按 tickCompleted 同帧快照读
+    //   lastDirtyChunks()——本行在信号栈外执行；r2009b/c 的集合面单源断言随窗口语义移入
+    //   信号栈内钉，收口后账面恒空）。溢出累计跨清账保留（EditBuffer::clear 口径——不可
+    //   再生必须可见，口径不变）。
+    m_edits.clear();
 }
 
 inline void GameSession::executeCommand(const Command &c)
@@ -262,9 +279,23 @@ inline void GameSession::executeCommand(const Command &c)
         m_facade.setBlock(c.pos, quint8(BlockRegistry::Air));
         break;
     case CommandKind::PlaceBlock:
-        // R20.09（Review_2026-09-15 #3①）：id+state 五参权威落地——带朝向/半砖态方块经
-        // 命令放置不再被 4 参版静默重置 state=0（blockState 默认 0 向后兼容旧提交方）。
-        m_facade.setBlockWithState(c.pos, c.blockId, c.blockState);
+        // r2017（agent-review-2026-09-16 #1）：按 blockState 双路由——
+        //   state == 0（默认/兼容面）走 4 参 setBlock：World 权威对「同 id」早退 no-op
+        //   （state 保留、零信号零写后钩子）。MC 口径：放置只进 Air/可替换格，目标格已被
+        //   同款**不可替换**方块占用 = 放置无效、原方块无变化（引证三元组：minecraft.wiki
+        //   /w/Block_properties「replaceable」属性——"blocks placed on, against, or in the
+        //   same location as the replaceable block replace it" + "Most blocks are not
+        //   replaceable"，Java 版现行机制，2026-09-16 实读）。旧码此处直走 5 参，同 id 异
+        //   state 格（楼梯朝向/上半砖/耕地湿度）被强刷 state=0 + 全套写后钩子 = 命令放置
+        //   从「静默拒绝」变「改写既有方块形态」。4/5 参在「Air 格首放」「异 id 格替换」
+        //   「同 id 同 state(0)」上行为逐位一致（都写 id,state=0）；本修唯一语义变化 = 同
+        //   id 异 state 格从「强刷 0」回「no-op」（r2017a 三相钉）。
+        //   state != 0（显式面）维持 5 参 setBlockWithState 全写（R20.09 权威落地不变，
+        //   r2009d 回归柱）。
+        if (c.blockState == 0)
+            m_facade.setBlock(c.pos, c.blockId);
+        else
+            m_facade.setBlockWithState(c.pos, c.blockId, c.blockState);
         break;
     }
 }

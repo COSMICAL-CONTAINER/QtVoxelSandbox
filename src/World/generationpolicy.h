@@ -94,14 +94,28 @@ struct GenerationPolicyParams
 
     GenerationPolicyParams() = default;
     // 规整构造（不变量在构造处强制——负值取 0、gen 钳 255、render ≤ gen、scan ∈ [gen, 255]）。
+    // r2017（agent-review-2026-09-16 Info「setParams 不再规整」）起规整唯一路径 = 本类型
+    //   public static normalized(...)：构造与 GenerationPolicy::setParams 同走一路（此前规
+    //   整只在构造、setParams 裸赋值可破不变量——gen>255 时 decide 的 priority=quint8(cheb)
+    //   回绕）。r2017d 双生钉。
     GenerationPolicyParams(bool streaming, int genR, int renderR, int scanR)
-        : streamingEnabled(streaming)
-        , generationRadiusChunks(std::min(255, std::max(0, genR)))
-        , renderRadiusChunks(0)
-        , scanExtentChunks(0)
     {
-        renderRadiusChunks = std::min(generationRadiusChunks, std::max(0, renderR));
-        scanExtentChunks = std::min(255, std::max(generationRadiusChunks, std::max(0, scanR)));
+        *this = normalized(streaming, genR, renderR, scanR);
+    }
+
+    // r2017 规整唯一路径（头注「归一化选型」的代码收口，构造与 setParams 共享；落位在
+    // Params 本体 = 规整即该值类型的构造契约）：负半径→0、gen 钳 255（priority quint8 域
+    // 上界，与 GenerationRequest::priority 同域）、render ≤ gen 收敛（D4 不变量）、
+    // scan ∈ [gen, 255]。静默规整选型依据见文件头注（配置病非运行时错）。
+    static GenerationPolicyParams
+    normalized(bool streaming, int genR, int renderR, int scanR)
+    {
+        GenerationPolicyParams p;
+        p.streamingEnabled = streaming;
+        p.generationRadiusChunks = std::min(255, std::max(0, genR));
+        p.renderRadiusChunks = std::min(p.generationRadiusChunks, std::max(0, renderR));
+        p.scanExtentChunks = std::min(255, std::max(p.generationRadiusChunks, std::max(0, scanR)));
+        return p;
     }
 };
 
@@ -173,7 +187,13 @@ public:
     explicit GenerationPolicy(const GenerationPolicyParams &params) : m_params(params) {}
 
     const GenerationPolicyParams &params() const { return m_params; }
-    void setParams(const GenerationPolicyParams &p) { m_params = p; }
+    // r2017：与构造同走规整唯一路径 GenerationPolicyParams::normalized(...)（合规入参逐位
+    // 恒等——r2017d 合规面回归柱；越界入参规整 ≡ 构造规整，杜绝「手改字段破不变量」面）。
+    void setParams(const GenerationPolicyParams &p)
+    {
+        m_params = GenerationPolicyParams::normalized(p.streamingEnabled,
+            p.generationRadiusChunks, p.renderRadiusChunks, p.scanExtentChunks);
+    }
 
     // 一次流式决策（见类头注释「决策面」——排序契约 / 默认关短路 / null 缝 fail-safe）。
     GenerationPolicyDecision decide(int playerCx, int playerCz, const ChunkSeamFn &querySeam) const
@@ -246,7 +266,7 @@ public:
     }
 
 private:
-    GenerationPolicyParams m_params; // 唯一状态（规整构造保证不变量）；decide 不改它
+    GenerationPolicyParams m_params; // 唯一状态（规整唯一路径保证不变量）；decide 不改它
 };
 
 #endif // GENERATIONPOLICY_H

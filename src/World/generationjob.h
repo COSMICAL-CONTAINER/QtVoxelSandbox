@@ -36,6 +36,13 @@
 //      Loading→Absent**（R20.10b：失败 outcome **实际投递**才转移——epoch 过期/取消的丢弃面
 //      不投递故不转移；转移后 chunk 回可重试态，重请求 = 新 job，与 R20.12「epoch 丢弃旧任务」
 //      语义同门。自动重试策略不属本层，登记非目标）。
+//    **r2017（agent-review-2026-09-16 #2）kind 门 = 上述契约的代码兑现**：同步 pump 与
+//      pumpAsync 两路共六处边驱动点全部带 `job.kind != GenerationJobKind::Mesh` 门——
+//      Mesh 类 job 三边全不驱动（此前仅本注释声明、代码未过滤：一个 Mesh 请求可把 Absent
+//      chunk 推入 Loading/Generated，而本层不驱动边③晋升且 Generated 不在
+//      chunkLifecycleQueryable 可见集 → chunk 永久停 Generated 对 mesher 三门不可见；异步
+//      交接窗内 Mesh 失败交付还会经边⑨把 Generate 在途的 chunk 打回 Absent = 状态与数据
+//      失配）。r2017b 双路行为钉；Generate/Load 两 kind 三边照旧（kind 域门非全局摘除）。
 //    驱动是 **best-effort 记账**：经 ChunkManager::setLifecycle 唯一守卫入口尝试，非法转移
 //    （含默认稳态 Loaded→Loading）被守卫拒绝即静默忽略、不影响工作执行——这正是「固定世界
 //    零变化」的结构性根据：默认世界全表 Loaded，任何 submit+pump（含失败注入）都改不了生命
@@ -256,7 +263,8 @@ public:
             m_jobs.erase(best);
             // 边①（Absent→Loading）best-effort：非 Absent（含默认稳态 Loaded）被守卫拒绝
             // 即忽略——固定世界生命周期表零变化的结构性根据（r2011d 实证）。
-            if (m_chunks)
+            // r2017 kind 门：Mesh 类 job 不驱动（头注互锁契约的代码兑现，r2017b 钉）。
+            if (m_chunks && job.kind != GenerationJobKind::Mesh)
                 m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Loading);
             const GenerationRequest req{ bestFirstLive, job.kind, job.key, job.priority,
                                          m_worldEpoch };
@@ -264,13 +272,14 @@ public:
             // 边②（Loading→Generated）仅成功面推进。同步泵内执行与投递同调用、epoch 不可能
             //   中途变化、被选中的 job 必有活别名 ⟹ 失败 outcome 必然实际投递——失败恢复边⑨
             //   随投递面取（见 deliver 之后），与异步收割同一判据（单一语义）。
-            if (r.isOk() && m_chunks)
+            if (r.isOk() && m_chunks && job.kind != GenerationJobKind::Mesh) // 边②仅成功面推进（r2017 Mesh kind 门）
                 m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Generated);
             const int delivered = deliver(job, r);
             // 边⑨（Loading→Absent，R20.10b 失败恢复）：仅失败 outcome 实际投递时取——经唯一
             //   守卫入口回 Absent（重请求=新 job）。默认稳态 Loaded chunk 上边①已被守卫拒，
             //   此处边⑨同样被拒 = 固定世界零变化不破（r2010ba 失败注入版实证）。
-            if (!r.isOk() && delivered > 0 && m_chunks)
+            //   r2017 kind 门：Mesh 类 job 不驱动。
+            if (!r.isOk() && delivered > 0 && m_chunks && job.kind != GenerationJobKind::Mesh)
                 m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Absent);
             eraseRequests(job.jobId);
         }
@@ -357,7 +366,7 @@ private:
             if (!m_worker->submitAsync(req, job.jobId).isOk())
                 break; // worker 队列满载 = 背压（可见拒绝在 worker 侧记账；本轮止）
             m_jobs.erase(best);
-            if (m_chunks) // 边① handout 时取（生成在途）
+            if (m_chunks && job.kind != GenerationJobKind::Mesh) // 边① handout 时取（生成在途；r2017 Mesh kind 门）
                 m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Loading);
             m_inFlight.push_back(job);
         }
@@ -370,13 +379,14 @@ private:
                 m_inFlight.erase(it);
                 const Result<void> r = isError(c.error) ? Result<void>::fail(c.error)
                                                         : Result<void>::ok(); // Error → Result 换算
-                if (r.isOk() && m_chunks) // 边②成功后推进（投递与否照旧驱动——内容已生成，R20.12 既有语义）
+                if (r.isOk() && m_chunks && job.kind != GenerationJobKind::Mesh) // 边②成功后推进（投递与否照旧驱动——内容已生成，R20.12 既有语义；r2017 Mesh kind 门）
                     m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Generated);
                 const int delivered = deliver(job, r);
                 // 边⑨（Loading→Absent，R20.10b 失败恢复）——仅失败 outcome 实际投递时取：
                 //   交接后才过期/被取消的丢弃面不投递故不转移（chunk 停 Loading——世界已换代，
                 //   旧任务产物连同其状态转移一并作废，与「epoch 丢弃旧任务」同门）。
-                if (!r.isOk() && delivered > 0 && m_chunks)
+                //   r2017 kind 门：Mesh 类 job 不驱动。
+                if (!r.isOk() && delivered > 0 && m_chunks && job.kind != GenerationJobKind::Mesh)
                     m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Absent);
                 eraseRequests(job.jobId);
                 break;
