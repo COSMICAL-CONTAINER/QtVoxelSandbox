@@ -4059,6 +4059,8 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 **过程坑（全在腿文/文档侧，组件零返工）**：①r2016b 场景 2 缝表只布 5/9 格——未列格默认 Absent 被**组件正确**请求而红（want 2 got 6）；补全九格手工布并注释立此存照（腿选址纪律：结构性布点勿靠缺席默认凑断言）。②r2016c 字段断言误把 render=0 当「应收敛到 gen」——归一化语义是「render>gen 才收敛、[0,gen] 合法值原样保留」，修断言非修组件；同变体 dLow/dEq 的 toEvict 恒等断言两轮全绿（D4 解耦承重）。③r2016d srcRoot 解析漏拼 `/src`（写成 absolutePath() 而非 absoluteFilePath("src")）→ 三处钉全 <file-unreadable>——r2011d 先例逐行照抄即过。④residentCells 误声明 bool[8][2]——GCC narrowing 编译错响亮揪出。⑤首版头文件曾把阴性变异形态 `false &&` 误写入正式短路行——写入后立即自查发现并 Edit 还原（阴性轮前正式码零变异残留，收口 grep 复核干净）。⑥shell 一次 `&&` 链中出现空日志假象（EXIT=0 但 0 PASS）——同命令重跑即正常，未复现未登记为 flaky。
 
+**主控复核（2026-09-16，证据面勘误——上述「×2 pos/final」的诚实性补证）**：agent 关单提交时点，neg 还原后的收口仅跑了 filter 轮（build/ 下 matrix_r2016_neg1/neg2/restore 三件均为 filter 体量 435-443KB 在案可核），**matrix_r2016_final.log 当时不存在，「×2 pos/final」系超前宣称**；主控亲核发现后，以还原后重建之 binary（t813 戳 10:16、git b4963f0）**亲自重跑全矩阵补齐终局权威——602 PASS / 0 FAIL、EXIT=0**，腿名 diff vs agent pos 轮仅登记类（t813 构建戳 09:45→10:16、t979 采样计数 16↔15 exits、t830/t997 同类），腿集合恒等 602——宣称的 ×2 由此补证成立，r2016 腿恰 4、正式码零变异残留（section20 两处 `false &&` 均在腿注释）。**教训登记**：关单文写「×2」前必须两轮全矩阵日志文件在案可查；neg 还原后的收口若只跑 filter，关单文必须如实写「final 轮 = 主控复跑」，不得预写未跑的日志名。
+
 **待实机确认**：无新增（无头决策组件，观感零变化——app 冒烟稳态 60fps 实证；固定世界行为零变化由 r2016a 承重墙 + 零接线反探双钉）。
 
 **下一任务**：**§29.4 P2 玩家移动驱动**（位置沿 → GenerationPolicy.decide 的 toRequest 逐项 submit GenerationJob[三 kind 已含优先级]；生成风暴背压 = 队列满载拒绝既有语义；待主控开工单）。
