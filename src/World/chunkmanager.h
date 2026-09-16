@@ -124,6 +124,24 @@ public:
     // make_unique<Chunk>(cx*kSize, cz*kSize, m_height)）落一个 Absent 槽。Fixed 模式无物化
     // 概念（防御回退现行 chunk()——生产不会走到）。
     Chunk *ensureChunk(int cx, int cz);
+    // ── §29.5-W1b sparse population parity（r2023）：population 脚手架拆卸 ────────────────
+    // 擦除 sparse 槽位与 chunk 实例（**数据不保留**——与 R20.10/W3 驱逐的「最小解释下驱逐
+    // 不销毁 Chunk 对象」数据保留语义刻意不同：脚手架是 population 窗口的一次性读域，其内容
+    // 将由该 chunk 自己的正式物化链（sparseGenerateChunk 全量 population 重放）逐位重derive，
+    // 保留反而是污染源——读闭合论证见 world.cpp sparsePopulateChunk 头注释处置表）。
+    // 前置：槽位生命周期已被调用方经 setChunkLifecycle 唯一入口驱动到 Absent（⑥⑦ 合法边）；
+    // 本方法只负责擦槽（Fixed 模式拒——稠密网格无拆卸概念）。返回是否确有槽位被擦除。
+    bool releaseSparseChunk(int cx, int cz);
+    // ── §29.5-W1b sparse population parity（r2023）：population 写域钳制 ──────────────────
+    // sparse population 期间把 setBlock 写域钳到锚 chunk ±1 chunk（= scaffold 读窗）：窗外写入
+    // 一律拒。两个语义依据（world.cpp sparsePopulateChunk 处置表「精确性论证」段）：
+    //   ① 顺序无关性——全候选域 pass 的远端候选溢写若落入「本 population 时恰已物化的真邻块」
+    //      （终态内容），会把 pass-k 数学 applied 到终态上 = 按加载次序污染邻块（r2023c 恰红
+    //      实证）；钳窗外后，远端溢写在「邻块存在/不存在」两序下同为拒 = 确定性；
+    //   ② 邻块保护——真邻块终态只能由其自身 population 全量重放产出（逐位 fixed 恒等面），
+    //      他块 population 的部分窗投影不得触碰（其溢写已由邻块自身 population 同值落位）。
+    // 恒 inactive 于 fixed 模式与 population 之外（写路径零开销零行为差 = 零变化墙）。
+    void setPopulationWriteClamp(bool active, int anchorCx, int anchorCz);
     // 驻留集枚举（sparse 版）：物化且可查询的槽位键，按 cz 外 cx 内排序（= World
     // residentChunkKeysOrdered 的枚举序契约，r2021 权威面在 sparse 域的同序延伸）。
     QVector<QPair<int, int>> sparseResidentKeysOrdered() const;
@@ -154,6 +172,10 @@ private:
     };
     WorldMode m_mode = WorldMode::Fixed; // 默认 Fixed = 全库既有行为逐位不变的结构性事实
     std::unordered_map<quint64, SparseSlot> m_sparse;
+    // §29.5-W1b：population 写域钳制态（population 期间激活；fixed/平时恒 off = 零变化墙）。
+    // 锚 chunk 坐标 ±1 chunk = 写域；掩码语义见 setPopulationWriteClamp 声明注释。
+    bool m_popClampActive = false;
+    int m_popClampCx = 0, m_popClampCz = 0;
 };
 
 #endif // CHUNKMANAGER_H

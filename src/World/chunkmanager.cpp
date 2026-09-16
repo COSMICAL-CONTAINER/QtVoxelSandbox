@@ -166,6 +166,24 @@ Chunk *ChunkManager::ensureChunk(int cx, int cz)
     return raw;
 }
 
+// ── §29.5-W1b（r2023）：population 脚手架拆卸（语义与前置见 chunkmanager.h 声明注释）────
+bool ChunkManager::releaseSparseChunk(int cx, int cz)
+{
+    if (m_mode != WorldMode::Sparse)
+        return false; // Fixed 稠密网格无拆卸概念（零变化墙）
+    return m_sparse.erase(ChunkKey{ cx, cz }.packed()) > 0;
+}
+
+// ── §29.5-W1b（r2023）：population 写域钳制（语义见 chunkmanager.h 声明注释）────────────
+void ChunkManager::setPopulationWriteClamp(bool active, int anchorCx, int anchorCz)
+{
+    if (m_mode != WorldMode::Sparse)
+        return; // Fixed 无 population 概念（防御；零变化墙）
+    m_popClampActive = active;
+    m_popClampCx = anchorCx;
+    m_popClampCz = anchorCz;
+}
+
 QVector<QPair<int, int>> ChunkManager::sparseResidentKeysOrdered() const
 {
     QVector<QPair<int, int>> keys;
@@ -337,6 +355,15 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
 {
     // ── 域门（两模式分流；Fixed 分支为现行语句原样——零变化墙）────────────────────────
     if (m_mode == WorldMode::Sparse) {
+        // §29.5-W1b：population 写域钳制（population 期间激活——见 chunkmanager.h 声明注释；
+        // 平时/fixed 恒 off，本分支零进入 = 写路径零变化）。先于写门：窗外写恒拒（与「未物化
+        // 拒」同值 false 同形），令远端候选溢写在「邻块已/未物化」两序下同为拒 = 确定性。
+        if (m_popClampActive) {
+            const int tcx = floorDiv(x, kSize), tcz = floorDiv(z, kSize);
+            if (tcx < m_popClampCx - 1 || tcx > m_popClampCx + 1
+                || tcz < m_popClampCz - 1 || tcz > m_popClampCz + 1)
+                return false;
+        }
         if (y < 0 || y >= m_height)
             return false; // y 域两模式同构（现行越界拒绝同值）
         // §29.5-W1：x/z 无界——按写门（未物化拒 = 现行「坐标越界」同值 false；Loading/
