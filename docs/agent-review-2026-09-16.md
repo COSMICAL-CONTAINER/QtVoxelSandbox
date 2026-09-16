@@ -72,6 +72,9 @@
 | Review_2026-09-15 #6（baby-grow 缩进错位） | **本窗闭环**：afd739b 顺带恢复（纯格式，语义逐位不变） |
 | Review_2026-09-15 #7（weather_timer_ms=0 回落） | 未见动，维持登记 |
 | Review_2026-09-13 #2（半径 2 运行期残余）/ #3（t1033c 文案） | 未见动，维持登记 |
-| 本文件 #1/#2/#3 | 待修：**P2 接线前落**（三条均为 GameSession/GenerationScheduler 接线面） |
+| 本文件 #1（PlaceBlock state=0 同 id 异 state 强刷） | **本窗闭环（r2017 fix A，2026-09-16）**：executeCommand 按 blockState 双路由——state=0 走 4 参 setBlock 同 id no-op 保 state（MC replaceable 口径恢复，引证三元组 = wiki/w/Block_properties，2026-09-16 实读），state≠0 维持 5 参权威；r2017a 三相钉（WoodStairs s1 no-op / 显式 s5 全写 / Air·异 id 回归柱）+ NEG-A 恰红 |
+| 本文件 #2（生命周期边无 kind 门） | **本窗闭环（r2017 fix B，2026-09-16）**：generationjob.h 同步 pump 与 pumpAsync 两路六处边驱动点全带 `job.kind != Mesh` 门（Mesh 三边全不驱动 = 头注契约代码兑现；Generate/Load 照旧）；r2017b 双路成功/失败行为钉 + 源码钉 minCount=6 + NEG-B 恰红（首版 false && 前缀合取项 = 假红面过宽废弃，正确形态 = 删合取项） |
+| 本文件 #3（tick 外编辑被抹） | **本窗闭环（r2017 fix C，候选②窗口语义迁移，2026-09-16）**：runOneTick 开头 clear 移除、清账唯一落点收口发布之后——窗口 =「上收口到本收口」，out-of-tick 编辑归下一窗照常作为 WorldDelta + BlockChanged 发布；R20.09「Tick 内零通知、收口单点发布」不破；r2009b/c 集合面单源断言同变更修订移入 tickCompleted 信号栈内（双语义不变量，NEG-C 不误伤）；r2017c 钉 + NEG-C 恰红 |
+| 本文件 Info（GenerationPolicy setParams 不规整） | **本窗闭环（r2017 fix D，2026-09-16）**：规整唯一路径 = GenerationPolicyParams::normalized public static（4 参构造与 setParams 同走一路），杜绝手改字段破不变量 → quint8(cheb) 回绕；r2017d 越界/合规/负值三组双生 twin + (300,0) 回绕判别格 + (255,0) 窗界 priority-255 无回绕钉 |
 | 本文件 #4（骑乘门 sneak 抑制） | 待修：第 14 门，(a) 段加 Shift 门 + 矩阵腿，随 #11 helper 化顺手做 |
 | 本文件 #5~#12 | 登记/接线单契约/顺手修（#6 可搭下一笔 worldgen 改动，#9 纯视觉低优先） |
