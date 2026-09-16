@@ -1037,6 +1037,16 @@ add_executable(redstone_matrix_test
     #   world/chunk 系源文件已列；r2021a/b 自建 fresh 小世界，r2021c 真链 harness，rig 世界 w
     #   零接触）。
     tools/matrix/section24_qmldynamization.cpp
+    # §29.5-W1 稀疏世界核探针段（置尾先例沿用：runAll 末执行，filter 词 r2022；4 腿 =
+    #   fixed 零变化承重墙[构造模式/六态稳态/驻留集全网格/越界门逐门/D4 参数归一化]/
+    #   未加载域 OOB 等价语义族[正负出界逐门同值 + 加载翻转 + 生命周期 forwarder 驱逐回环]/
+    #   同 seed 区域恒等承重[双世界纯函数门三面对账 + 已加载 chunk 对权威缓冲逐体素恒等含
+    #   负坐标 + 内陆 envelope 锚]/结构钉[Fixed 默认参 + worldstore 禁触反探 + 单列权威 +
+    #   生命周期唯一入口 + QML/组件族禁出]。随段直编 src/World/backgroundgeneration.h
+    #   （generateTerrainChunk 权威缓冲对照面——已列）+ chunklifecycle.h（已列）；r2022 前三腿
+    #   自建 fresh 小世界族（固定世界四 setter incantation + sparse 构造缝同 seed 同 dims
+    #   双世界），rig 世界 w 零接触；无新增 .cpp——world/chunk 系源文件已列）。
+    tools/matrix/section25_sparseworld.cpp
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

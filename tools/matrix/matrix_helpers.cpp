@@ -132,6 +132,7 @@ void MatrixRun::runAll()
     section22_chunkevictor(); // §29.4-P3 ChunkEvictor 卸载+Edits-on-evict（置尾先例沿用：惰性承重墙/驱逐回灌往返[真 SaveCoordinator + fresh 临时库]/失败中止+null 缝 fail-safe/结构钉+kind 选择，rig 零接触）
     section23_meshworker(); // D6 worker meshing（置尾先例沿用：确定性等价承重墙/队列纪律/析构卫生/结构钉+白名单修订自证+零接线，rig 零接触）
     section24_qmldynamization(); // §29.4-P4 QML 动态化（置尾先例沿用：固定世界枚举恒等墙/模型响应性沿对账/QML 真链响应性/钉面，rig 零接触）
+    section25_sparseworld(); // §29.5-W1 稀疏世界核（置尾先例沿用：fixed 零变化承重墙/未加载域 OOB 等价+加载翻转/同 seed 权威恒等/钉面，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
