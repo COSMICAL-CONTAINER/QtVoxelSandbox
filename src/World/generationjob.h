@@ -82,6 +82,14 @@
 #include "mathtypes.h"    // ChunkKey（请求目标 chunk——Core 叶子键类型）
 #include "result.h"       // Result / Error / kErrQueueFull（结果模型 + QObjectFree 值纪律）
 
+// 错误码分域续位（result.h 百位段约定：百位段 = 域，域内递增）：2xx = 执行域——201 =
+// backgroundgeneration.h worker-stopped、202 = meshworker.h 同域 stopped 码、203 = world.h
+// mesh-sink-unbound 码的同域递增下一位（同域递增先例；跨文件值域重叠已由 201 双定义先例
+// 登记为各子系统自域，名字互不冲突。记号面如实登记：本注释刻意不引 202/203 常量名——
+// 202 号常量名内嵌的 D6 执行器记号受全树白名单扫略管辖（r2020d ④ + t1023c 纪律），
+// generationjob.h 非其落点，故此处只用语义描述不用其字面）。
+constexpr int kErrAsyncNotImplemented = 204; // 异步协议未实现（submitAsync 漏覆写——基类默认可见失败面，t1055 C）
+
 // ── GenerationJobKind：请求种别（plan 验收①的三席；不预占席位，随 R20.12+ 接线面扩充）──
 enum class GenerationJobKind : quint8
 {
@@ -161,12 +169,24 @@ public:
     // worker 自带（见 backgroundgeneration.h GeneratedChunkData），不经本协议 payload 化——
     // GenerationJobOutcome 保持 r2011 值纪律（trivially copyable 钉不动）。
     virtual bool isAsynchronous() const { return false; }
-    // 移交一个（已合并的）请求单元到后台。ok = 受理；fail = 暂不受理（队列满载等，背压重试）。
+    // 移交一个（已合并的）请求单元到后台。ok = 受理；fail = 暂不受理（队列满载 kErrQueueFull
+    // = 背压本轮止下轮重试；其他码 = 交接不可达的永久性失败面，scheduler 以失败 outcome 可见
+    // 穿透并就地销账——见 pumpAsync 交接相注）。
+    //   **t1055 C（agent-review-2026-09-16 Info「GenerationWorker 基类默认实现自相矛盾」）**：
+    //   默认从 ok() 改 fail(kErrAsyncNotImplemented)。旧默认 ok() 与 takeCompletedAsync 默认
+    //   恒 false 组合成自相矛盾协议：漏覆写 submitAsync 的 isAsynchronous() worker 会让 job
+    //   交接成功入 m_inFlight 而完成记录永不到来 =「静默永久滞留」（inFlightJobCount 卡死、
+    //   别名永无 outcome、pending 账面被交接清空——三账同谎）。改 fail 后：交接相按永久性
+    //   失败面处理——失败 outcome **可见穿透**（每活别名一条，Error 原样穿透 = 事件丢弃可见
+    //   性同门）+ job 就地销账（不滞留、不重试风暴）；同步 worker（execute 纯虚面）不经此
+    //   默认，零影响；覆写正确的异步替身（ScriptedAsyncWorker 族 / BackgroundGenerationWorker）
+    //   不走默认体，零影响（r2029c 三柱钉）。
     virtual Result<void> submitAsync(const GenerationRequest &req, quint64 jobId)
     {
         Q_UNUSED(req);
         Q_UNUSED(jobId);
-        return Result<void>::ok();
+        return Result<void>::fail(kErrAsyncNotImplemented,
+                                  "async protocol not implemented (submitAsync not overridden)");
     }
     // 取一条完成记录（FIFO；空 = false 正常态，同 takeOutcome 口径）。jobId 对账移交账本。
     virtual bool takeCompletedAsync(CompletedGeneration &out)
@@ -188,8 +208,31 @@ public:
     explicit GenerationScheduler(ChunkManager *chunks = nullptr) : m_chunks(chunks) {}
 
     // worker 缝（验收④）：换实例 = 换实现，调用者面零改动。同步版 pump 前必须 setWorker。
+    //   **t1055 A 析构序契约（agent-review-2026-09-16 #8，头注释立此存照）**：m_worker 为
+    //   非拥有指针——调用方必须保证「scheduler 先于 worker 析构」**或**在 worker 析构前显式
+    //   detachWorker()。worker 先亡而无 detach = 悬垂泵面（pump→takeCompletedAsync UB）+
+    //   inFlight 僵尸账。生产路径（GameSession 流式会话）以成员声明序结构性满足
+    //  「scheduler（driver 内）先于 worker 析构」（gamesession.h W2 段承重注释）；显式
+    //   detachWorker() 是非成员序消费方（局部 scheduler / 重挂 worker 场景）的守卫缝。
     void setWorker(GenerationWorker *w) { m_worker = w; }
     GenerationWorker *worker() const { return m_worker; }
+
+    // **t1055 A（agent-review-2026-09-16 #8 清偿）：显式 detach 守卫缝。**
+    // worker 析构前调用：①m_inFlight 按「已放弃」销账——已交接后台的 job 随 worker 析构被
+    //   丢弃（BackgroundGenerationWorker 退出语义 = 队内未开工整体丢弃 + 至多一个在途跑完
+    //   后 join，backgroundgeneration.h 头注），其 outcome 永不到来，账面同步销账使
+    //   inFlightJobCount() 归零（不残留「永无 outcome」的僵尸账——#8 原文第二个坏面）；
+    //   ②清 m_worker 指针——此后 pump() 走 m_worker 空门首行返回 = **恒安全 no-op**（#8
+    //   原文第一个坏面「悬垂指针 UB」结构性摘除）。幂等（重复 detach 零动作）。
+    //   刻意不动 pending 域（m_jobs/m_requests）：未交接 job 从未经 worker 之手，仍属有效
+    //   待办——后续 setWorker(新实例) + pump 可继续服务（r2029a 重挂回归柱实证）。
+    //   线程原语零触碰（t1023c 白名单纪律）：本缝纯主线程账面操作，不涉任何锁/join——
+    //   worker 侧的丢弃+join 语义完全归属 BackgroundGenerationWorker 自身析构（不变）。
+    void detachWorker()
+    {
+        m_inFlight.clear(); // 已交接 job 按「已放弃」销账（outcome 永不到来——随 worker 亡）
+        m_worker = nullptr; // 悬垂指针摘除——后续 pump 恒安全 no-op
+    }
 
     // §29.5-W2 生产接线缝（加性；构造参数形态不变——默认 nullptr = 纯请求模型，r2011~r2021
     // 全部既有腿的形态零变化）：世界级接线方（GameSession 流式会话）在构造后把 ChunkManager
@@ -348,10 +391,11 @@ private:
     }
 
     // R20.12 异步泵（isAsynchronous() worker 专用）——交接 + 收割两相：
-    //   交接相：按既有选活序逐 job submitAsync 移交后台（满载 fail = 背压本轮止，job 留队下轮
-    //     pump 再试）；受理即取边①（Absent→Loading best-effort，同同步泵守卫语义——非法转移
-    //     被拒即忽略 = 固定世界零变化）并记入在途账本。全部剩余 job 无活别名时只清死 job 账面
-    //     （在途 job 的别名必须保留到收割）。
+    //   交接相：按既有选活序逐 job submitAsync 移交后台（满载 kErrQueueFull = 背压本轮止，
+    //     job 留队下轮 pump 再试；**t1055 C 起其他码 = 永久性交接失败 → 失败 outcome 可见穿透
+    //     + job 就地销账**，见交接体内注）；受理即取边①（Absent→Loading best-effort，同同步
+    //     泵守卫语义——非法转移被拒即忽略 = 固定世界零变化）并记入在途账本。全部剩余 job 无
+    //     活别名时只清死 job 账面（在途 job 的别名必须保留到收割）。
     //   收割相：takeCompletedAsync FIFO 逐完成记录——边②仅成功面推进 + deliver 投递（取消/
     //     epoch 过滤在此生效：交接后才 bump epoch 的在途结果被静默丢弃 = 验收③后台版）；
     //     失败 outcome **实际投递**时取失败恢复边⑨（R20.10b——丢弃面不转移，见收割体内注）。
@@ -371,8 +415,22 @@ private:
             const Job job = *best;
             const GenerationRequest req{ bestFirstLive, job.kind, job.key, job.priority,
                                          m_worldEpoch };
-            if (!m_worker->submitAsync(req, job.jobId).isOk())
-                break; // worker 队列满载 = 背压（可见拒绝在 worker 侧记账；本轮止）
+            const Result<void> handed = m_worker->submitAsync(req, job.jobId);
+            if (!handed.isOk() && handed.error().code != kErrQueueFull) {
+                // t1055 C：非背压类交接失败 = 永久性失败面（基类默认 submitAsync 漏覆写 =
+                //   异步协议缺失——旧默认 ok() 会让 job 交接入 m_inFlight 而完成记录永不到
+                //   来 =「静默永久滞留」，agent-review-2026-09-16 Info）。失败 outcome **可
+                //   见穿透**（每活别名一条，Error 原样穿透 = 事件丢弃可见性同门）+ job 就地
+                //   销账（不滞留、不重试风暴；outcome 投递面与 kind 无关——r2017 kind 门只
+                //   管生命周期边）。边①未取（交接失败先于受理），chunk 从未离开 Absent——
+                //   零转移零边调用（与「失败实投取边⑨」不同域：彼处边①已取、此处从未取）。
+                m_jobs.erase(best);
+                deliver(job, handed);
+                eraseRequests(job.jobId);
+                continue;
+            }
+            if (!handed.isOk())
+                break; // worker 队列满载 = 背压（可见拒绝在 worker 侧记账；本轮止，下轮 pump 重试）
             m_jobs.erase(best);
             if (m_chunks && job.kind != GenerationJobKind::Mesh) // 边① handout 时取（生成在途；r2017 Mesh kind 门）
                 m_chunks->setLifecycle(job.key.cx, job.key.cz, ChunkLifecycle::Loading);
@@ -430,7 +488,8 @@ private:
         }
     }
 
-    GenerationWorker *m_worker = nullptr; // 非拥有（调用者管生命周期）
+    GenerationWorker *m_worker = nullptr; // 非拥有（调用者管生命周期；t1055 A 契约见 setWorker 注——
+                                          //   scheduler 先于 worker 析构，或析构前显式 detachWorker）
     ChunkManager *m_chunks = nullptr;     // 可空（纯请求模型）；生命周期 best-effort 记账挂点
     quint32 m_worldEpoch = 0;             // 当前世界 epoch（过期判定基准）
     quint32 m_nextRequestId = 1;          // 0 = 无效哨兵，故从 1 起

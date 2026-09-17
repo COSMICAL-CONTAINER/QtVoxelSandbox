@@ -222,10 +222,14 @@ public:
 
     // 最近一个整 tick 的脏 chunk 集（R20.09 验收④的会话面示范：渲染调度按**集合**一次
     // 查询——每 Tick 一次、不再直绑每一次 setBlock；全量接线 ChunkGeometry/QML 归 R20.10+）。
-    // 活引用非拷贝，有效域 = tickCompleted 信号栈内（同帧快照）；r2017 起 stepTick 返回时
-    // 已收口清账（窗口 = 上收口到本收口）——跨帧持有请自行拷贝（值拷贝化维持 review #12
-    // 登记非目标）。
-    const DirtyChunkSet &lastDirtyChunks() const { return m_edits.dirtyChunks(); }
+    // **t1055 B（agent-review-2026-09-16 #12 清偿）：返回 DirtyChunkSet 值拷贝 = 真快照**
+    //（lastDelta() 同门）。旧形态返回 m_edits.dirtyChunks() **活引用**：注释自称「同帧快照」
+    // 而实现随账面活变——r2017 窗口语义下 stepTick 返回即收口清账，跨帧持有引用会读到
+    // 「已清空」/「下一窗进行中」集合（#12 原文契约与实现不符面）。值拷贝后任意时刻可安全
+    // 持有：快照 = 调用时刻内容定格（tickCompleted 信号栈内读取 = 本 tick 同帧快照，r2009b/c
+    // 断言域不变；栈外持有 = 上一窗终态）。DirtyChunkSet 平凡可拷贝固定容量（editbuffer.h
+    // 编译期钉，64 键 ≈1KB），拷贝成本可忽略；生产面零消费者（grep 复核，纯加性安全）。
+    DirtyChunkSet lastDirtyChunks() const { return m_edits.dirtyChunks(); }
 
     // 事件观察面（BlockChanged 每合并编辑格一条、Tick 末统一入队；EventQueue 满载丢弃
     // 必须可见 → 计数器暴露）。EditBuffer 记录面满载丢弃同门可见（droppedEditCount）。
