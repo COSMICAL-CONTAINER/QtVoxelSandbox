@@ -16,6 +16,8 @@ Item {
     property string selectedName: ""
     // t192 重命名内联编辑态：true = 展开「输入框 + 确认/取消」替换「重命名」按钮。选中切走时自动复位。
     property bool renaming: false
+    // §29.5-W5b（r2028）：D3 转换确认态（锚定文件名而非布尔——切选世界即隐确认行，免重置钩子）。
+    property string convertingFile: ""
     // review0901 #35：「上次退出未保存」角标数据面（宿主 Main.qml 绑定注入；"" = 无）。最近一次退出
     //   的世界（window.currentWorldFile）存档三写未全成（window.lastExitSaveOk===false）时 = 其文件名，
     //   条目上挂角标把 t974 的失败 toast 补成可回溯面；重进该世界并成功退出后宿主侧翻 true → 角标自隐。
@@ -265,6 +267,37 @@ Item {
                                 }
                             }
                         }
+                        // §29.5-W5b（r2028）：「无限世界」复选（D2 默认关——不勾选的创建链逐字节原样；
+                        //   勾选 → 创建时把流式标志随新存档落库，进入即 sparse 构造 + 流式会话通电）。
+                        //   文案是产品面——用户可 md 纠偏（§29.5 登记）。
+                        Row {
+                            width: parent.width; spacing: 8
+                            Rectangle {
+                                id: infiniteBox
+                                property bool checked: false   // D2：默认关（现有档/默认路径永远固定语义）
+                                width: 20; height: 20; radius: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: infiniteArea.containsMouse ? "#1a2733" : "#0a1018"
+                                border.color: infiniteBox.checked ? "#7fe57f" : "#2a3848"
+                                border.width: 1
+                                Rectangle {
+                                    anchors.fill: parent; anchors.margins: 4
+                                    radius: 2
+                                    color: "#7fe57f"
+                                    visible: infiniteBox.checked
+                                }
+                                MouseArea {
+                                    id: infiniteArea; anchors.fill: parent; hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: infiniteBox.checked = !infiniteBox.checked
+                                }
+                            }
+                            Text {
+                                text: "无限世界"
+                                color: "#bcd0e6"; font.pixelSize: 13
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
                         Rectangle {
                             width: parent.width; height: 38; radius: 6
                             color: createArea.containsPress ? "#335c33"
@@ -282,6 +315,11 @@ Item {
                                     const name = nameInput.text.trim().length > 0 ? nameInput.text.trim() : "新世界"
                                     const file = store.createWorld(name, seed)
                                     if (file.length > 0) {
+                                        // §29.5-W5b（r2028）：勾选 → 流式标志随创建链落库（附加表行，
+                                        //   additive 零迁移；未勾选 = 零调用 = 固定语义零变化）。core dims =
+                                        //   宿主世界栅格 dims（store.world 与宿主世界同一对象——与转换动作同口径）。
+                                        if (infiniteBox.checked)
+                                            StreamingBridge.flagNewWorldStreaming(file, store.world.width, store.world.depth)
                                         root.playRequested(file, name) // 新建即进入（机制等价 MC「创建世界并游玩」）
                                     }
                                 }
@@ -382,6 +420,72 @@ Item {
                                         id: cancelRenArea; anchors.fill: parent; hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: root.cancelRename()
+                                    }
+                                    Text { anchors.centerIn: parent; text: "取消"; color: "#cdd6dd"; font.pixelSize: 13 }
+                                }
+                            }
+                        }
+                        // §29.5-W5b（r2028）：D3 opt-in 转换——「未转换的 fixed 世界」显此动作
+                        //   （已转换 / 流式世界经桥读面隐藏；convertingFile 锚定选中项，切选即隐 = 免
+                        //   重置钩子）。可逆性：后端标志可翻回（fixed 链结构性不识流式附加表），翻回
+                        //   不设 UI（§29.5 登记）；确认文案三点如实告知 + 可翻回说明（产品面可 md 纠偏）。
+                        Rectangle {
+                            width: parent.width; height: 36; radius: 6
+                            visible: root.selectedFile.length > 0 && !root.renaming
+                                 && root.convertingFile.length === 0
+                                 && !StreamingBridge.saveIsStreaming(root.selectedFile)
+                            enabled: root.selectedFile.length > 0
+                            opacity: enabled ? 1.0 : 0.4
+                            color: convArea.containsMouse ? "#2f4a2a" : "#1c2e1a"
+                            border.color: "#5a8a4a"; border.width: 1
+                            MouseArea {
+                                id: convArea; anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: if (root.selectedFile.length > 0)
+                                    root.convertingFile = root.selectedFile
+                            }
+                            Text { anchors.centerIn: parent; text: "转为无限世界"; color: "#b8dcae"; font.pixelSize: 13 }
+                        }
+                        // 转换确认行（opt-in 二次确认——形态对齐重命名内联编辑行）。
+                        Column {
+                            width: parent.width; spacing: 8
+                            visible: root.convertingFile.length > 0
+                                     && root.convertingFile === root.selectedFile
+                            Text {
+                                width: parent.width
+                                text: "转为无限世界？\n核心区原样保留；境外按需生成、编辑自动保存；已卸载区的实体不保留。\n（可翻回固定世界，界面暂不提供入口）"
+                                color: "#cdd6dd"; font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                            Row {
+                                width: parent.width; spacing: 8
+                                Rectangle {
+                                    width: (parent.width - 8) / 2; height: 34; radius: 6
+                                    color: convOkArea.containsPress ? "#335c33"
+                                         : convOkArea.containsMouse ? "#4f8a4f" : "#3a6a3a"
+                                    border.color: "#7fe57f"; border.width: 1
+                                    MouseArea {
+                                        id: convOkArea; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            // D3 转换（纯元数据：标志 + core dims + 代次锚，零数据搬迁；
+                                            //   dims = 宿主世界栅格 dims，与创建链同口径）。失败由桥层
+                                            //   qWarning 留痕（标志缺席 = 照旧固定语义，诚实降级不谎报）。
+                                            StreamingBridge.convertSaveToStreaming(root.convertingFile, store.world.width, store.world.depth)
+                                            root.convertingFile = ""
+                                            root.refresh()
+                                        }
+                                    }
+                                    Text { anchors.centerIn: parent; text: "确认转换"; color: "#eaf6ea"; font.pixelSize: 13; font.bold: true }
+                                }
+                                Rectangle {
+                                    width: (parent.width - 8) / 2; height: 34; radius: 6
+                                    color: convCancelArea.containsMouse ? "#3a3a3a" : "#222a32"
+                                    border.color: "#4a4f55"; border.width: 1
+                                    MouseArea {
+                                        id: convCancelArea; anchors.fill: parent; hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.convertingFile = ""
                                     }
                                     Text { anchors.centerIn: parent; text: "取消"; color: "#cdd6dd"; font.pixelSize: 13 }
                                 }

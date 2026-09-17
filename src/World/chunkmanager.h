@@ -162,6 +162,12 @@ public:
     // sparse 初始化：核心域尺寸定格（生成语义参考——查询域无界与此无关）+ 零 chunk 分配
     // （m_sparse 清空 = 全 Absent；稠密存储清空防渗漏）。仅 sparse 构造路径调（World 构造分化）。
     void reinitializeSparse(int coreWidth, int coreDepth, int height);
+    // §29.5-W5b（r2028）fixed 归位初始化：与 reinitializeSparse 对偶的模式迁移面（生产唯一消费方
+    //   = World::reinitializeAsFixed 委托——StreamingBridge 进入链对「上一局流式残留」的跨世界清退）。
+    //   模式位归 Fixed + 稠密空网格重建（recreate 体复用——禁第二份重建逻辑；全表 Loaded 常驻稳态
+    //   = recreate 既有口径）。World 侧表族卫生（terrain/光场/出生/结构表/天气）由调用序契约的后续
+    //   beginLoad/regenerate 全量重置承担（本方法只做最小归位，见 World 侧头注）。
+    void reinitializeFixed(int width, int depth, int height);
     // 物化槽位：已存在返回既有；不存在则经**现行 Chunk 构造路径**（recreate 同式
     // make_unique<Chunk>(cx*kSize, cz*kSize, m_height)）落一个 Absent 槽。Fixed 模式无物化
     // 概念（防御回退现行 chunk()——生产不会走到）。

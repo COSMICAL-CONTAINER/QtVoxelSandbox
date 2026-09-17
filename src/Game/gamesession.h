@@ -263,6 +263,14 @@ public:
                                                 scanExtentChunks);
     }
 
+    // ── §29.5-W5b 生产帧泵（r2028；QML 路径零迁移的会话侧承重面）────────────────────────
+    // 生产形态下 World 模拟家族仍由 QML 既有 tick 桥独占驱动（「玩法路径零改动」R20 主线不变
+    // 量——本壳 runOneTick 的模拟族镜像只服务无头全语义入口 stepTick，矩阵腿族消费）；流式世界
+    // 的生产泵拍 = 本方法：只做 tick 尾流式收割拍（pumpStreamingTick——位置沿喂入 + 驱动器泵 +
+    // #7 同拍双消 + 网格收割），零模拟零命令。调用方 = StreamingBridge 挂在 WorldClock::ticked
+    // 上的槽（与 QML tick 桥同拍同源）；fixed 世界/无驱动器 = 泵体首行零动作墙（D2 同门）。
+    void pumpStreamingFrame() { pumpStreamingTick(); }
+
     // ── §29.5-W4 网格收割观测面（C++ only；fixed 世界恒 null / 0）─────────────────────────
     // 网格执行器读面（线程身份对账 / 队列账面——r2012a/r2020 先例；fixed 恒 null = D2 墙）。
     const MeshWorker *meshWorker() const { return m_meshWorker.get(); }

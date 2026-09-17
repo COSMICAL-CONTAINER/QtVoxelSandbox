@@ -152,6 +152,14 @@ void ChunkManager::reinitializeSparse(int coreWidth, int coreDepth, int height)
     m_unsavedEdits.clear(); // §29.5-W3：persist 域编辑集合随 sparse 重置清空（全新世界无编辑）
 }
 
+// §29.5-W5b（r2028）fixed 归位（语义见头文件声明处；recreate 体复用——模式位归位 +
+// 稠密空网格重建 = 全表 Loaded 常驻稳态，与 reinitializeSparse 对偶的最小迁移面）。
+void ChunkManager::reinitializeFixed(int width, int depth, int height)
+{
+    m_mode = WorldMode::Fixed;
+    recreate(width, depth, height);
+}
+
 Chunk *ChunkManager::ensureChunk(int cx, int cz)
 {
     if (m_mode != WorldMode::Sparse)
