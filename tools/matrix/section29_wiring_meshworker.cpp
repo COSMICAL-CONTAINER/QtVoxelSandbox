@@ -502,11 +502,13 @@ void MatrixRun::section29_wiring_meshworker()
         " zero-touch reverse probes [Main.qml carries none of the bridge method names,"
         " still no executor token, pool wiring intact]; single-authority compatibility"
         " reverse probes on chunkgeometry.cpp [no mesh-body tokens flowed back, the"
-        " extraction delegate + capture lines still stand x2]; the harvest beat is a single"
-        " drain point [takeBuilt callers across src/ are exactly meshworker.h +"
-        " gamesession.h]; the fixed-world zero-construction gate is pinned by source"
-        " order [make_unique sits after the isSparse gate]; and the World bridge face is"
-        " pinned in world.h/world.cpp token-free)"), [&]() {
+        " extraction delegate + capture lines still stand x2]; the harvest beats are the"
+        " sanctioned drain points [takeBuilt callers across src/ are exactly meshworker.h +"
+        " gamesession.h + world.cpp, the world.cpp site being the fixed-world harvest beat"
+        " amended in the same change per §29.7 t1060]; the fixed-world zero-construction"
+        " gate is pinned by source order [make_unique sits after the isSparse gate]; and"
+        " the World bridge face is pinned in world.h/world.cpp with the executor-ownership"
+        " whitelist amended for the fixed host [chunkgeometry stays token-free])"), [&]() {
         bool ok = true;
         QString diag;
         const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
@@ -541,7 +543,7 @@ void MatrixRun::section29_wiring_meshworker()
             });
         const QStringList missWh = pinSet(
             srcRoot + QStringLiteral("/World/world.h"), {
-                SrcPin("r2026 bridge gate", "bool chunkMeshAsyncActive() const { return bool(m_chunkMeshBuildSink); }", 1),
+                SrcPin("r2026 bridge gate", "bool chunkMeshAsyncActive() const { return bool(m_chunkMeshBuildSink) || m_fixedAsyncBakeDesired; }", 1),
                 SrcPin("r2026 bridge submit decl", "Result<void> submitChunkMeshJob(const ChunkMeshSnapshot &snap, quint64 requestId,", 1),
                 SrcPin("r2026 bridge deliver decl", "void deliverBuiltChunkMesh(quint64 requestId, ChunkMeshData &&mesh)", 1),
                 SrcPin("r2026 bridge cancel decl", "void cancelChunkMeshJob(quint64 requestId)", 1),
@@ -570,7 +572,8 @@ void MatrixRun::section29_wiring_meshworker()
         if (!orderOk) diag += QStringLiteral("[order gate=%1 mk=%2] ").arg(gatePos).arg(mkPos);
 
         // ③ 收割拍单点收口：全 src 树 takeBuilt( 调用面 = {meshworker.h 组件本体, gamesession.h
-        //    收割拍} 两文件恰尽（世界/几何/QML 零第二收割点）。
+        //    流式收割拍, world.cpp fixed 收割拍[§29.7 t1060 同变更修订——fixed 世界的薄收割槽
+        //    与流式泵拍互斥两落点，模式互斥不并存]} 三文件恰尽（几何/QML 零第二收割点）。
         QStringList takeBuiltFiles;
         QDirIterator itTb(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
                           QDir::Files, QDirIterator::Subdirectories);
@@ -581,9 +584,10 @@ void MatrixRun::section29_wiring_meshworker()
                 takeBuiltFiles << QDir(srcRoot).relativeFilePath(itTb.filePath());
         }
         takeBuiltFiles.sort();
-        const bool singleDrainOk = takeBuiltFiles.size() == 2
+        const bool singleDrainOk = takeBuiltFiles.size() == 3
             && takeBuiltFiles.contains(QStringLiteral("World/meshworker.h"))
-            && takeBuiltFiles.contains(QStringLiteral("Game/gamesession.h"));
+            && takeBuiltFiles.contains(QStringLiteral("Game/gamesession.h"))
+            && takeBuiltFiles.contains(QStringLiteral("World/world.cpp"));
         ok = ok && singleDrainOk;
         if (!singleDrainOk) diag += QStringLiteral("[drain %1] ").arg(takeBuiltFiles.join(QLatin1Char(',')));
 
@@ -602,14 +606,21 @@ void MatrixRun::section29_wiring_meshworker()
         ok = ok && qmlOk;
         if (!qmlOk) diag += QStringLiteral("[qml] ");
 
-        // ⑤ World/chunkgeometry 记号零出（桥面 token-free——执行器类型零泄漏进 World/Renderer）。
+        // ⑤ World/chunkgeometry 记号反探（§29.7 t1060 同变更修订——纠偏留痕非放宽）：执行器
+        //    记号白名单 = {meshworker.h 本体, gamesession.h W4 会话宿主, world.h/world.cpp
+        //    fixed 惰性归属宿主}——World 侧自本单起持 unique_ptr 所有权（fixed 惰性单例 +
+        //    自绑定提交缝 + 薄收割槽，r2034 结构钉守正面形态）；chunkgeometry 双件仍零记号
+        //   （几何经 World 桥 std::function 缝可达执行器，类型零泄漏进 Renderer）。
         const auto tokenAbsent = [&srcRoot](const QString &rel) {
             QFile f(srcRoot + QStringLiteral("/") + rel);
             return !f.open(QIODevice::ReadOnly)
                 || !QString::fromUtf8(f.readAll()).contains(QStringLiteral("MeshWorker"));
         };
-        const bool tokenOk = tokenAbsent(QStringLiteral("/World/world.h"))
-            && tokenAbsent(QStringLiteral("/World/world.cpp"))
+        const QStringList missWhOwner = pinSet(
+            srcRoot + QStringLiteral("/World/world.h"), {
+                SrcPin("r2034 fixed ownership member", "std::unique_ptr<MeshWorker> m_fixedMeshWorker;", 1),
+            });
+        const bool tokenOk = missWhOwner.isEmpty()
             && tokenAbsent(QStringLiteral("/World/chunkgeometry.h"))
             && tokenAbsent(QStringLiteral("/World/chunkgeometry.cpp"));
         ok = ok && tokenOk;
@@ -642,10 +653,12 @@ void MatrixRun::section29_wiring_meshworker()
                           << "| r2026d structure pins: the F3 win-line worker column is"
                              " positively pinned at source and behavior (quiescent flush"
                              " reports 'w]) worker 0  world'), QML stays zero-touch, the"
-                             " harvest beat is the single drain point across src/, the"
+                             " harvest beats are the sanctioned drain points (session pump"
+                             " plus the fixed-world beat amended in the same change), the"
                              " fixed-world zero-construction gate holds by source order,"
-                             " the World bridge stays token-free, and no mesh logic flowed"
-                             " back into chunkgeometry.cpp"
+                             " the World bridge face stays pinned with the executor token"
+                             " whitelisted for the fixed ownership host only, and no mesh"
+                             " logic flowed back into chunkgeometry.cpp"
                           << (ok ? QString() : diag);
     });
 }

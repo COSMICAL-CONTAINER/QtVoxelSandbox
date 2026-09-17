@@ -1165,6 +1165,18 @@ add_executable(redstone_matrix_test
     #   文件；sparse fresh 小世界族（80×80×96 s42 radius 0）+ 真临时 SQLite 库（fresh + 用后
     #   即删，saves/ 零触碰）+ 真线程收敛（deadline 轮询防 flake）。）
     tools/matrix/section34_observation_lines.cpp
+    # §29.7 t1060 fixed 世界 bake 异步化 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；
+    #   4 腿 r2034a-d = fixed 异步≡同步逐位等价承重墙[四形态：地形/流体水段/异形 cross/世界
+    #   边界 + 单实例线程身份 + F3 sub/mesh/worker 面 + 驻留零沿] / 风暴摊平[dayMul 跨门 →
+    #   提交数==非空段数 + 单拍应用恰 kFixedMeshHarvestPerBeat 上界 + 后续拍排干收敛 + 终态
+    #   逐位==同步参照 + F3 面对账] / 回退与卫生[env 全同步门 + 容量缝 0 退化满载内联回退
+    #   逐位 + 析构 join 有界 + 再构造再用] / 结构钉[env 缝正面钉 + 惰性单例源序 + 单实例/
+    #   不双起线程行为柱 + 收割宿主单点收口扫略 + 真桥 enterWorld/pumpTick 生产链行为柱 +
+    #   单一权威反探兼容 + QML 零触碰]。filter 词 r2034。随段直编 streamingbridge（§29.7 收割
+    #   宿主——已列源文件复用）；fixed 小世界族（96×96×96 s82 + 48×48×96 s82）+ 真临时
+    #   SQLite 库（fresh + 用后即删，saves/ 零触碰）+ 真线程收敛（阈值锚 deadline 轮询防
+    #   flake）。）
+    tools/matrix/section35_fixed_async_bake.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
