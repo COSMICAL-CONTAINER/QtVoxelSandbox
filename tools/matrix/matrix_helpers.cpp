@@ -138,6 +138,7 @@ void MatrixRun::runAll()
     section28_eviction_persistence(); // §29.5-W3 驱逐 + Edits-on-evict 落盘（置尾先例沿用：fixed 零活动墙[无附加表构造]/驱逐回灌承重[真临时库]/失败中止+实体先移除/结构钉，rig 零接触）
     section29_wiring_meshworker(); // §29.5-W4 bake→worker 网格化（置尾先例沿用：fixed 零变化墙[无 worker 构造]/异步等价承重墙[真执行器+收割拍逐位恒等]/回退+卫生[满载/已停回退+最新快照胜]/结构钉[F3 worker 列+单点收口]，rig 零接触）
     section30_streaming_persistence(); // §29.5-W5 后端 流式世界持久化 + D2/D3 标志 + overlay 合并（置尾先例沿用：fixed 零活动墙[保存/读档全语义逐位不动+库面零流式表]/流式存读往返承重墙[保存含冲洗+销毁重建逐位恒等+二次幂等，真临时库]/D3 转换往返[blob 物化+代次对代次仲裁+逆翻照旧]/结构钉[worldstore 禁触反探+additive 正面钉+冲洗失败不谎报+QML 零触碰]，rig 零接触）
+    section31_streaming_ui(); // §29.5-W5b 流式 UI（置尾先例沿用：默认关零变化墙[真链分流恒 false+会话零构造+三写/往返回归+库面零流式表]/开关+转换通电面[真 QQmlEngine×真桥单例：标志行+sparse 进入通电+真玩家走查生产泵收敛+D3 转换 blob 逐位+冲洗生产面+行回灌仲裁]/QML 面钉[变更面集中+Q_INVOKABLE 逐一正面钉+词元禁触+值组件零暴露]，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {

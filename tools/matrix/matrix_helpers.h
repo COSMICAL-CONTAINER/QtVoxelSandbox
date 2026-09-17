@@ -355,4 +355,12 @@ private:
                                   //   冲洗失败不谎报 + QML 零触碰]——80×80×96 sparse 族 +
                                   //   48×48×96 fixed 族 + 真线程收割（防 flake deadline
                                   //   有界），rig 世界 w 零接触，接 section29）
+    void section31_streaming_ui(); // §29.5-W5b 流式 UI 探针（置尾先例沿用：r2028a 默认关零
+                                  //   变化墙[真链分流恒 false + 会话零构造 + 三写/往返回归 +
+                                  //   库面零流式表] / r2028b 开关+转换通电面[真 QQmlEngine ×
+                                  //   真桥单例：标志行 + sparse 进入通电 + 真玩家走查生产泵收敛 +
+                                  //   D3 转换 blob 逐位 + 冲洗生产面 + 行回灌仲裁] / r2028c
+                                  //   QML 面钉[变更面集中 + Q_INVOKABLE 逐一正面钉 + 词元禁触 +
+                                  //   值组件零暴露]——真临时库 fresh+用后即删 + 真线程收敛，
+                                  //   rig 世界 w 零接触，接 section30）
 };
