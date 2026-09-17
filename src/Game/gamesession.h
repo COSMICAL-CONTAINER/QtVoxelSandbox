@@ -50,6 +50,9 @@
 // 时间债入口）；dt > kMaxStepSecs(1.0s) 整体丢弃 + qWarning + droppedDtCount 计数（断点续跑 /
 // 切后台恢复量级的异常墙钟差不 catch-up——与暂停「dt 丢弃不欠账」同门；int 累积器输入域被
 // 入口钳死故无 qRound 溢出）。选型依据与探针见 stepTick 注 + r2007e。
+// t1059（review0916 Info 顺手腿）：负 / NaN 丢弃补分域计数（droppedNegativeDts / droppedNanDts
+// ——双计数选型：负值 = 墙钟回拨族、NaN = Adapter 计算病族，两失败族根因不同，P5 实机调参须
+// 分辨，成本可忽略故不做单计数分域）。丢弃语义零变化（仍零累积整体丢弃）——纯加性可见性。
 //
 // ── §29.5-W5 后端：流式世界持久化 + D2/D3 标志 + overlay 合并（r2027；QML 零触碰）─────────
 // 计划原文（refactor-plan §29.5.2 W5 + §29.5.3 选型 2）：世界 meta streaming 标志（additive
@@ -152,11 +155,31 @@
 // 登记非目标：多 worker 扩并发 / 优先级调度（后续单）；W3 驱逐×在途网格竞态（在途网格按
 //   现有可见性门自然失效——QPointer 守卫交付丢弃，行为登记）；QML 任何改动（F3 worker 列在
 //   FrameProfiler win 行——C++ 面）。
+//
+// ── t1059 P5 观测前置：F3 流式观测行（拼行层 = Core/frameprofiler.cpp flush；本壳只是推送面）──
+// §29.5.4 风险登记「生成风暴：……W2 实装后 F3 加排队观测行，P5 调参」的同门兑现前置：报告新
+// 独立行 `stream s=N sub=N can=N rej=N out=N adopt=N mesh=N ev[P=N E=N S=N F=N R=N]`，挂在
+// win ms 行族（1s 窗报告的一行）。选型立证（头注释存照）：
+//   · 行恒在、流式关时值全零（与 W4 worker 列恒 0 先例同门）：fixed 世界本壳推送面不可达
+//     （pumpStreamingTick 首行零动作墙），flush 拼行读不到键 → 全零——不做条件显行，格式
+//     恒定可 grep，P5 期待「行在而零」与「行缺席」可区分；
+//   · 窗口增量语义（与 win 族全行同门）：数据流 = 本壳在事件落账点把增量推入 FrameProfiler
+//     计数桶（meshNworker 先例同构——Core 叶子可被任意上层 include 向下推数），flush 拼行
+//     读桶并清窗。P5 调参视角要的是每秒速率 / 背压尖峰，非会话总量（总量在日志累计差分可得）；
+//   · 数据源 = 本壳既有观测面逐项映射（零新增聚合源）：s = 泵拍心跳（驱动器存在的泵拍计数
+//     >0 即「本窗流式在画」）；sub/can/rej = streamDriver()->stats() 三累计的窗口增量（对
+//     推送基线差分——基线成员只是 F3 差分底账，聚合权威仍在驱动器，非第二份账本）；out/
+//     adopt/mesh = streamingOutcomeCount / streamingAdoptedCount / meshHarvestedCount 三个
+//     收割拍计数器的逐拍增量；ev 五分域 = 驱逐轨迹五类事件逐条推送（P=PersistOk E=EdgeEvicting
+//     S=EdgeAbsent F=PersistFail R=TransitionRejected——成功三域 + 失败两域，失败路径可见 =
+//     P3「宁驻留不误删」实机表现面）。
 
 #include "chunk.h"     // Chunk::kSize（chunk 路由参数——单一权威，不写魔法 16）
 #include "command.h"   // Command / CommandQueue（R20.06 队列——GameSession 首个生产消费方）
 #include "editbuffer.h" // R20.09 EditBuffer / DirtyChunkSet（Tick 内编辑合并收口——本类首个消费方）
 #include "event.h"     // Event / WorldDelta / EventQueue（编辑面表达）
+#include "frameprofiler.h" // t1059：F3 stream 行推送面（count/addCount——Core 叶子可被任意上层
+                           //   include 向下推数，PLAN §2 同门；meshNworker 先例同构）
 #include "mathtypes.h" // Tick::kClockTickMs / BlockPos / ChunkKey
 #include "meshworker.h" // §29.5-W4：D6 网格执行器（r2020 组件的 W4 生产接线——r2020d 全树
                         //   记号反探同变更修订：接线宿主白名单 = meshworker.h + 本文件）
@@ -239,6 +262,10 @@ public:
     // t1050：超界 dt（> kMaxStepSecs）整体丢弃累计——背压可见（真机 Adapter 接墙钟后异常
     // 墙钟差频度可观测；矩阵腿 r2007e 断言丢弃 + 计数）。
     int droppedDtCount() const { return m_droppedDts; }
+    // t1059：负 / NaN dt 分域丢弃累计（与 droppedDtCount 同门——纯加性读面，生产零消费可
+    // 接受；双计数选型立证见头注 dt 钳制段）。
+    int droppedNegativeDtCount() const { return m_droppedNegativeDts; }
+    int droppedNanDtCount() const { return m_droppedNanDts; }
 
     // ── §29.5-W2 位置源 + 驱动接线（r2024；计划原文「玩家位 → floorDiv16 → GameSession tick
     //    尾 driver.onPlayerChunk」）────────────────────────────────────────────────────────
@@ -426,6 +453,8 @@ private:
     int m_droppedEvents = 0;
     int m_droppedEdits = 0; // EditBuffer 记录面满载丢弃累计（kMaxEdits 上界——不可再生必须可见）
     int m_droppedDts = 0;   // t1050：超界 dt 丢弃累计（> kMaxStepSecs 整体丢弃——背压可见）
+    int m_droppedNegativeDts = 0; // t1059：负 dt 丢弃累计（墙钟回拨族——可见性分域）
+    int m_droppedNanDts = 0;      // t1059：NaN dt 丢弃累计（Adapter 计算病族——可见性分域）
 
     // ── §29.5-W2 流式会话件（sparse 世界独占构造；fixed 世界恒 null = D2 零活动墙）────────
     // 成员声明序 = 析构序的承重选择（review0916 #8 析构序契约）：worker 先声明、驱动器后声明
@@ -449,6 +478,10 @@ private:
     int m_playerChunkCz = 0;
     int m_streamOutcomeCount = 0; // 收割拍结果面累计（每活别名一条——#7 同拍消费账面）
     int m_streamAdoptedCount = 0; // 收割拍数据面累计（每完成 job 恰一条——#7 同拍消费账面）
+    // t1059：F3 stream 行 sub/can/rej 域的推送差分基线（上一推送时点的驱动器 stats 快照——
+    // 窗口增量 = 现值 − 基线，推送后更新。聚合权威仍在驱动器 stats()，本基线只是 F3 差分
+    // 底账非第二份账本；平凡可拷贝小聚合，无析构序约束）。
+    ChunkStreamDriver::Stats m_streamStatsPrevPushed;
     // ── §29.5-W5 冲洗/读档观测账面（矩阵断言 / 诊断；fixed 恒 0）─────────────────────────
     int m_flushPersistedCount = 0;   // 冲洗落盘 chunk 累计（逐 chunk 原子成功面）
     int m_flushFailedCount = 0;      // 冲洗失败 chunk 累计（失败上报可见面）
@@ -504,10 +537,13 @@ inline GameSession::GameSession(World &world, QObject *parent)
         // 本 lambda 只补驱逐轨迹（冲洗走独立计数，不污染驱逐沿轨迹语义）。
         m_chunkEvictor.setPersistFn([this](int cx, int cz) -> Result<void> {
             const Result<void> r = persistResidentChunk(cx, cz);
-            if (r.isOk())
+            if (r.isOk()) {
                 m_evictionTrace.append({ 0, cx, cz });  // PersistOk
-            else
+                FrameProfiler::instance()->count("streamEvP"); // t1059 F3 stream 行 ev[P] 域
+            } else {
                 m_evictionTrace.append({ 1, cx, cz });  // PersistFail
+                FrameProfiler::instance()->count("streamEvF"); // t1059 F3 stream 行 ev[F] 域
+            }
             return r;
         });
         // lifecycleTransition = World::setChunkLifecycle 真转移（⑥⑦合法边；revision 沿自动
@@ -518,14 +554,22 @@ inline GameSession::GameSession(World &world, QObject *parent)
                 m_entityEvictSink(cx, cz); // 驱逐候选区活体先于转移移除（实体语义收口点）
             const bool ok = m_world.setChunkLifecycle(cx, cz, target);
             if (ok) {
-                if (target == ChunkLifecycle::Evicting)
+                if (target == ChunkLifecycle::Evicting) {
                     m_evictionTrace.append({ 2, cx, cz }); // EdgeEvicting
-                else if (target == ChunkLifecycle::Absent) {
+                    FrameProfiler::instance()->count("streamEvE"); // t1059 F3 ev[E] 域
+                } else if (target == ChunkLifecycle::Absent) {
                     m_evictionTrace.append({ 3, cx, cz }); // EdgeAbsent
+                    FrameProfiler::instance()->count("streamEvS"); // t1059 F3 ev[S] 域
                     m_world.releaseStreamingChunk(cx, cz); // 数据面闭合：擦槽（内容真实丢弃）
                 }
             } else {
-                m_evictionTrace.append({ 4, cx, cz }); // TransitionRejected
+                // t1059 ev[R] 域口径：只记**驱逐转移**被拒（Evicting/Absent 目标——步2/步3
+                //   真失败面）；ensure-Loaded 步的自转移守卫拒 = 预期 no-op 不计失败
+                //   （chunkevictor.h 步1 注释原文口径），不入域防恒噪。
+                if (target != ChunkLifecycle::Loaded) {
+                    m_evictionTrace.append({ 4, cx, cz }); // TransitionRejected
+                    FrameProfiler::instance()->count("streamEvR"); // t1059 F3 ev[R] 域
+                }
             }
             return ok;
         });
@@ -563,8 +607,15 @@ inline int GameSession::stepTick(qreal deltaSecs)
     // 切后台恢复量级的墙钟差属异常 gap，不 catch-up 不补账（单泵至多 10 tick，无「万 tick 连
     // 跑」的世界模拟假死）。既有探针 dt 全部 ≤0.7s（r2007a 0.3 / r2007b 0.7 / r2007c 0.6），
     // 钳制不触达——N×stepTick(0.1)==stepTick(N×0.1) 与暂停停表逐位兼容（r2007e 回归钉）。
-    if (!(deltaSecs >= 0.0))
+    if (!(deltaSecs >= 0.0)) {
+        // t1059（review0916 Info 顺手腿）：负 / NaN 分域丢弃计数（纯加性可见性——丢弃语义
+        //   零变化仍零累积；NaN 判据 = qIsNaN，本分支其余入域者即负值）。
+        if (qIsNaN(deltaSecs))
+            ++m_droppedNanDts;
+        else
+            ++m_droppedNegativeDts;
         return 0; // 负 dt / NaN → 零累积（NaN 比较恒假一并拦）——负时间债入口焊死
+    }
     if (deltaSecs > kMaxStepSecs) {
         ++m_droppedDts; // 背压可见（droppedDtCount 暴露）
         qWarning() << "GameSession::stepTick: dt" << deltaSecs << "s exceeds" << kMaxStepSecs
@@ -844,10 +895,27 @@ inline void GameSession::pumpStreamingTick()
     // ② 泵转发：同步 worker 内联直跑 / 异步 worker「交接 + 收割」两相自动路由（交接相边①、
     //    收割相边②由 GenerationJob 唯一权威驱动——r2011 预留面 + r2017 kind 门语义原样）。
     m_streamDriver->pump();
+    // ②' t1059 F3 stream 行推送（0）：sub/can/rej 窗口增量（对推送基线差分——驱动器 stats
+    //    的全部变化都发生在 ①② 两步内，此处差分即本拍全量；增量 ≤0 时 addCount 静默守卫）。
+    const ChunkStreamDriver::Stats statsNow = m_streamDriver->stats();
+    FrameProfiler::instance()->addCount("streamSub",
+        statsNow.submitted - m_streamStatsPrevPushed.submitted);
+    FrameProfiler::instance()->addCount("streamCan",
+        statsNow.canceled - m_streamStatsPrevPushed.canceled);
+    FrameProfiler::instance()->addCount("streamRej",
+        statsNow.rejected - m_streamStatsPrevPushed.rejected);
+    m_streamStatsPrevPushed = statsNow;
+    // ②'' t1059 F3 stream 行推送（0'）：泵拍心跳（本拍驱动器在场 = 流式在画——行首 s 位
+    //    的源；fixed 世界不进此行，行恒全零）。每拍恰 1 次，窗内 ≥1 拍即 s=1。
+    FrameProfiler::instance()->count("streamPump");
     // ③ #7 同拍双面·结果面（outcome 每活别名一条；本会话只记账——投递面业务消费归后续单）。
     GenerationJobOutcome outcome;
-    while (m_streamDriver->takeOutcome(outcome))
+    qint64 outcomesDrained = 0; // t1059 F3 stream 行 out 域的本拍增量
+    while (m_streamDriver->takeOutcome(outcome)) {
         ++m_streamOutcomeCount;
+        ++outcomesDrained;
+    }
+    FrameProfiler::instance()->addCount("streamOut", outcomesDrained);
     // ④ #7 同拍双面·数据面（漏取 = m_data 无界积压——#7 原文）：主线程落位唯一通路。
     //    §29.5-W3 路由：附加表命中（= 该 chunk 曾驱逐落盘，行只增不删故命中稳定）→
     //    World::restoreChunkFromBlob 直接物化（跳过 population——存档内容已是终态，头注立证）；
@@ -855,6 +923,7 @@ inline void GameSession::pumpStreamingTick()
     //    → 降级生成路径并告警（诚实降级 + 驱逐面已保内容，无正确性损失面——重载内容退化为
     //    重derive 是已登记的尺寸守卫语义[worldstore loadChunks 同门]）。
     std::unique_ptr<GeneratedChunkData> data;
+    qint64 adoptedDrained = 0; // t1059 F3 stream 行 adopt 域的本拍增量
     while (m_streamWorker->takeResultData(data)) {
         if (data) {
             ChunkStoreBlob blob;
@@ -873,7 +942,9 @@ inline void GameSession::pumpStreamingTick()
                 m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
         }
         ++m_streamAdoptedCount;
+        ++adoptedDrained;
     }
+    FrameProfiler::instance()->addCount("streamAdopt", adoptedDrained);
     // ⑤ W4 网格收割拍（tick 尾单点收口——「收割拍单点收口」r2026d 钉面；与 ④ 数据面同拍
     //    并列排干，防收割队列无界积压）：每被接受请求恰一条 built（恰一产出铁律）→ 按
     //    requestId 经 World 注册表路由回几何（交付回调内自证最新在途键 = latest-wins 第二道
@@ -881,10 +952,13 @@ inline void GameSession::pumpStreamingTick()
     //    tick、零 QML 改动。fixed 世界无执行器 = 本段零动作（D2 零活动墙）。
     if (m_meshWorker) {
         MeshBuiltItem built;
+        qint64 meshDrained = 0; // t1059 F3 stream 行 mesh 域的本拍增量
         while (m_meshWorker->takeBuilt(built)) {
             m_world.deliverBuiltChunkMesh(built.requestId, std::move(built.mesh));
             ++m_meshHarvestedCount;
+            ++meshDrained;
         }
+        FrameProfiler::instance()->addCount("streamMesh", meshDrained);
     }
 }
 

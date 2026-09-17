@@ -125,6 +125,29 @@ void FrameProfiler::flush()
     //   计数；同步内联/回退路径不计）。fixed 世界恒 0（无执行器构造）；sparse 流式世界 > 0 =
     //   meshing 异步化可见面（构建段在 worker 线程，win 行 mesh ms 只余采集+灌注两主线程段）。
     const qint64 meshNWorker = meshReasonN("meshNworker");
+    // t1059 P5 观测前置：流式生成观测行（§29.5.4 风险登记「生成风暴…F3 排队观测行」同门兑现）。
+    //   数据源 = GameSession 推送面（gamesession.h 头注 t1059 段：泵拍心跳 + 驱动器 stats 差分
+    //   + 收割拍增量 + 驱逐轨迹五分域逐条计数——键名 stream*）。本层只读桶拼行、不产生语义：
+    //   s 位 = 窗内有泵拍（流式在画）；fixed 世界无推送 → 全部键缺席读 0 → 行恒在全零（与
+    //   win 行 worker 列恒 0 先例同门——不做条件显行，格式恒定可 grep）。
+    const auto streamCnt = [this](const char *key) {
+        auto it = m_counts.find(key);
+        return it == m_counts.end() ? qint64(0) : it->second;
+    };
+    QString streamLine = QStringLiteral("stream s=")
+        + QString::number(streamCnt("streamPump") > 0 ? 1 : 0)
+        + " sub=" + QString::number(streamCnt("streamSub"))
+        + " can=" + QString::number(streamCnt("streamCan"))
+        + " rej=" + QString::number(streamCnt("streamRej"))
+        + " out=" + QString::number(streamCnt("streamOut"))
+        + " adopt=" + QString::number(streamCnt("streamAdopt"))
+        + " mesh=" + QString::number(streamCnt("streamMesh"))
+        + " ev[P=" + QString::number(streamCnt("streamEvP"))
+        + " E=" + QString::number(streamCnt("streamEvE"))
+        + " S=" + QString::number(streamCnt("streamEvS"))
+        + " F=" + QString::number(streamCnt("streamEvF"))
+        + " R=" + QString::number(streamCnt("streamEvR")) + "]";
+
     // w 前缀桶：World 10 个 tick 函数（wWater/wLava/wCrop/wSug/wFarm/wSap/wIce/wLeaf/wWeath + t495 wIceMelt）。
     struct WEnt { const char *key; const char *label; };
     static const WEnt wEntries[] = {
@@ -304,8 +327,11 @@ void FrameProfiler::flush()
         + "  spawn " + QString::number(mobSubMs("mobSpawn"), 'f', 2)
         + "  loop " + QString::number(mobLoopMs, 'f', 2);
 
-    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4\n  %5\n  %6\n  %7")
-                   .arg(frames).arg(tickLine, winLine, cntLine, frameLine, frame2Line, mobLine);
+    // t1059：stream 行挂 win 行族之后（行族次序 = tick → win → stream → act ct → frame →
+    //   frame2 → mob；既有行逐字不动——r2026d 行为钉 'w])  worker 0  world' 免修订）。
+    m_report = QStringLiteral("prof[1s] %1fr\n  %2\n  %3\n  %4\n  %5\n  %6\n  %7\n  %8")
+                   .arg(frames)
+                   .arg(tickLine, winLine, streamLine, cntLine, frameLine, frame2Line, mobLine);
     m_lastFrames = frames;
 
     // 重置窗口。
