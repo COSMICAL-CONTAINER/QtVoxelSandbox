@@ -103,6 +103,18 @@ qt_add_executable(voxelsandbox
     #   玩家态经裸 QVariantMap 边界传入（不 include Game 层 playercontroller/hotbar，保依赖只向下）。
     src/World/worldstore.cpp
     src/World/worldstore.h
+    # §29.5-W5b 流式 UI（r2028，§29.5 登记的 QML 例外单）：Game 层 StreamingBridge——W5 后端会话
+    #   （gamesession.h，header-only 编排壳自本单起生产实例化）在 QML 面的最小消费投影（QML 单例，
+    #   BuildInfo 同款模式；五个 Q_INVOKABLE = D2 创建链标志 / 标志读面 / D3 opt-in 转换 / 进入分流 /
+    #   保存链前置冲洗——变更面集中守护见 tools/matrix/section31_streaming_ui.cpp r2028c）。
+    #   分层：Game → World/WorldStore 向下依赖（gamesession.h 同门先例）。随会话首度生产实例化，
+    #   chunkstore.cpp（D5 附加表 + stream_worlds 元数据域）自本单入 app 目标（W3-W5 期间仅矩阵
+    #   目标直编——生产零激活面随本单闭合）。
+    src/World/chunkstore.cpp
+    src/World/chunkstore.h
+    src/Game/gamesession.h
+    src/Game/streamingbridge.cpp
+    src/Game/streamingbridge.h
     src/Renderer/wiresquare.cpp
     src/Renderer/wiresquare.h
     src/Renderer/wirecube.cpp

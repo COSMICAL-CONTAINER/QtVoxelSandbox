@@ -82,6 +82,19 @@ public:
     explicit World(const SparseWorldParams &sp, QObject *parent = nullptr);
     // 构造模式读面（C++ only，非 Q_INVOKABLE——生命周期/模式决策零 QML，r2010d 精神延伸）。
     bool isSparse() const { return m_chunks.mode() == WorldMode::Sparse; }
+
+    // ── §29.5-W5b 流式 UI 桥进入链（r2028）：既存对象模式迁移两法（生产唯一消费方 =
+    //    StreamingBridge::enterWorld——无限世界进入的 sparse 重构 / 上一局流式残留的 fixed 清退；
+    //    C++ only 非 Q_INVOKABLE——r2022d「新面禁 Q_INVOKABLE 形态」同门，模式决策零 QML）────
+    // sparse 重构 = sparse ctor 体复用（单一权威收口：构造与运行期共用 sparseGenerate 同一初始化
+    //   体，禁第二份；静默不 emit——构造期无监听者同约定，QML 侧池重建走驻留 revision 沿）。
+    void reinitializeAsSparse(const SparseWorldParams &sp);
+    // fixed 归位 = 模式位 + 稠密空网格最小回置（ChunkManager::reinitializeFixed 委托）。**调用序
+    //   契约（头注释立证）**：caller 必须随后接既有 fixed 进入链之一（beginLoad / regenerate——
+    //   QML enterWorld 的两条既有分支），World 侧表族卫生（terrain 采样器 / 光场 / 出生列 / 结构
+    //   区域表 / 天气 / 生长流体索引）由该后续全量重置承担，本方法刻意不做（最小归位，避免与
+    //   beginLoad/generate 的清表体形成两份初始化逻辑）。
+    void reinitializeAsFixed(int width, int depth, int height);
     static int normalizedSpawnPreGenerateRadius(int r)
     {
         return r < 0 ? 0 : (r > 64 ? 64 : r);

@@ -763,7 +763,13 @@ Window {
         const meta = worldStore.loadMeta()
         let seed = parseInt(meta.seed, 10)
         if (isNaN(seed)) seed = 42
-        if (worldStore.hasChunks()) {
+        // §29.5-W5b（r2028）：无限世界进入分流——问桥一次。固定存档（无流式标志行）恒 false：
+        //   桥内顺带清上一局流式残留（会话终结 + 空网格归位），下方既有分流逐字节原样。true = 桥
+        //   已完成 sparse 重构 + 存读合并 + 流式会话通电（beginLoad/regenerate 的流式等价面——
+        //   sparse 世界七入口守卫对二者本就早退，跳过分流是冗余保险）。
+        if (StreamingBridge.enterWorld(theWorld, worldStore, worldClock, player, file, seed)) {
+            console.info("[r2028] infinite world entered:", file)
+        } else if (worldStore.hasChunks()) {
             // 已保存地形 → 加载存档（玩家编辑过的地形恢复，而非 worldgen 重生）
             theWorld.beginLoad(seed)
             worldStore.loadChunks()
@@ -1058,6 +1064,12 @@ Window {
     //   「保存退出偶发未保存：重进是上一次存档点」。caller 必须核验返回值（见 saveAndExitToWorldList
     //   的完成门），WorldStore.saveOkCount 计数器为行为级观测面。
     function runExitSave() {
+        // §29.5-W5b（r2028）：保存链三写前置冲洗（流式世界把驻留编辑块落附加表 + 推进保存代次）。
+        //   非流式会话恒 true 零动作（固定世界保存链逐字节原样）；失败 → false 短路三写 = 写失败
+        //   不谎报（caller 幂等重试一次 + toast 兜底——t974 完成门同门；重试重放 = 已落盘行同键
+        //   盖写无副作用）。关窗兜底路径（onClosing）走本函数同门覆盖。
+        if (!StreamingBridge.flushForSave())
+            return false
         const okPlayer = worldStore.savePlayerData(gatherPlayerState())
         // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
         // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。

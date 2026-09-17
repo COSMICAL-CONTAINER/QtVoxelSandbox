@@ -68,7 +68,16 @@ World::World(QObject *parent) : QObject(parent)
 // 选型与参数语义见 world.h SparseWorldParams / chunkmanager.h WorldMode 头注释。零全量生成、
 // 零 chunk 分配（全 Absent）；出生半径预生成走 terraingen 单列权威 + ①②③生命周期合法链；
 // app 生产零调用（W5 UI 开关接线，D2 承诺「现有档默认永远 fixed」）。
+// §29.5-W5b（r2028）起构造体委托 reinitializeAsSparse（单一权威收口——构造与运行期模式迁移
+// 共用同一初始化体，禁第二份；r2022d 语义钉面零变化：sparseGenerate/reinitializeSparse 调用链原样）。
 World::World(const SparseWorldParams &sp, QObject *parent) : QObject(parent)
+{
+    reinitializeAsSparse(sp); // 静默，不 emit（构造期无监听者；与 fixed 构造 generate 同约定）
+}
+
+// §29.5-W5b（r2028）：sparse ctor 体的运行期迁移落点（语义与调用序契约见 world.h 声明处头注）。
+// 体 = 原 sparse ctor 逐字移入（零语义变化）——m_spawnPreGenerateRadius 归一化复用既有单一权威。
+void World::reinitializeAsSparse(const SparseWorldParams &sp)
 {
     m_seed = sp.seed;
     m_width = std::max(0, sp.coreWidth);
@@ -76,6 +85,17 @@ World::World(const SparseWorldParams &sp, QObject *parent) : QObject(parent)
     m_height = std::max(0, sp.height);
     m_spawnPreGenerateRadius = normalizedSpawnPreGenerateRadius(sp.spawnPreGenerateRadius);
     sparseGenerate(); // 静默，不 emit（构造期无监听者；与 fixed 构造 generate 同约定）
+}
+
+// §29.5-W5b（r2028）：fixed 归位（语义与调用序契约见 world.h 声明处头注）。最小归位——
+// World 侧表族卫生由调用序契约的后续 beginLoad / regenerate 全量重置承担，此处刻意不做。
+void World::reinitializeAsFixed(int width, int depth, int height)
+{
+    m_width = std::max(0, width);
+    m_depth = std::max(0, depth);
+    m_height = std::max(0, height);
+    m_spawnPreGenerateRadius = 0; // fixed 世界无出生半径预生成概念（模式归位随清）
+    m_chunks.reinitializeFixed(m_width, m_depth, m_height); // 模式位归 Fixed + 稠密空网格（全 Loaded）
 }
 
 // sparse 初始化（构造期唯一入口；silent 不 emit——generate 同约定）。禁走 generate() 全域
