@@ -3873,3 +3873,21 @@ Agent 每次自动选择任务时，按以下顺序：
 
 ### 验收（腿族 filter r2031）
 fixed 零变化墙（Clean 路径行为/返回语义/saveOkCount 逐位同）｜marker→三写→complete 往返 + FaultHook 注入中途杀 → 下次读档 Interrupted → 重存收敛 Clean｜②开库失败可区分｜结构钉（worldstore 零触碰/additive/QML 单调用点）。
+
+---
+
+## §29.7 fixed 世界 bake 异步化——C1 完全体（草案 v1 —— 2026-09-18 主控执笔）
+
+> 状态：设计 + 任务书前置。依据 = vulkan-rhi-and-simd-survey-2026-08-21 路线 C1（worker meshing）+ 用户 2026-08-22 亲测确诊的黎明 sun 重烘风暴（dayMul 跨门 → ~225 段 × ~0.45ms 同步重烘 ≈ 100ms 主线程尖刺 → 10fps）。W4（r2026）已把 MeshWorker 接入**流式**世界；本段把同一模式推广到 **fixed** 世界（当前唯一生产模式）——调研报告 C1 的完全体。
+
+### 设计要点
+
+- **收割宿主（与 W4 的关键差异）**：fixed 世界 GameSession 流式会话件不构造（D2 零活动墙）→ 收割点不能挂 pumpStreamingTick。选型方向（实现 agent 盘点后定，头注释立证）：ChunkGeometry/World 侧每帧拉取沿（QQuickItem updatePaintNode/帧驱动）或 WorldClock::ticked 既有拍上的薄收割槽——准绳 = 不阻塞主线程、延迟有界、QML 零改动或最小登记例外。
+- **行为等价墙**：网格输出与同步路径逐位恒等（r2026b 模式复用——同快照 worker build ≡ 同步直调）；dayMul/sunDir 定格快照（W4 语义已有）；黎明天光渐变从「单帧 100ms 尖刺」变「分帧应用数秒完成」= MC 同款 gradual 观感（引证：MC 光照/天光更新即分帧渐进）。
+- **风暴摊平语义**：跨门帧 225 段全部提交 worker（队列有界满载拒绝→内联回退计数可见）——主线程尖刺上限 = 单段收割应用成本；帧率稳态由 F3 stream 行核验。
+- **回退**：env 开关（如 `QTVOXEL_SYNC_BAKE=1`）回全同步路径（实机异常时用户可自救）；默认异步。
+- **非目标**：C4（dayMul/sunDir 挪 shader uniform——根治但大改，本单只摊平）/C2/C7/SIMD（后续按 P5 数据）/多 worker 扩容。
+
+### 验收（腿族 filter r2034）
+
+fixed 异步 ≡ 同步逐位等价墙（r2026b 端到端化）｜风暴场景（注入 dayMul 跨门）主线程单帧应用有界+队列排干收敛｜env 回退回归｜F3 行核验｜fixed 既有 vertex/mesh/影族全绿。
