@@ -1156,6 +1156,15 @@ add_executable(redstone_matrix_test
     tools/matrix/section33_savebridge_wiring.cpp
     src/Game/savebridge.cpp
     src/Game/savebridge.h
+    # t1059 P5 观测前置 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；3 腿 r2033a-c =
+    #   fixed 全零行+行格式钉[行恒在零值 + 字段解析钉 + frameprofiler 拼行层/gamesession 推送面
+    #   源码正面钉] / 流式行计数与权威观测面逐项恒等[四窗 flush 界定：初载 3×3 精确 8 / 取消
+    #   走查恰 9 / ChunkGeometry 桥提交网格收割 / 真临时库驱逐 evP=1 evE=4 evS=4——行字段 ==
+    #   stats 差分/收割计数/轨迹分域增量] / dt 负/NaN 分域计数[三类精确 + 零变化墙 + 读面钉]。
+    #   filter 词 r2033。随段复用已列 gamesession/frameprofiler/chunkgeometry/chunkstore 系源
+    #   文件；sparse fresh 小世界族（80×80×96 s42 radius 0）+ 真临时 SQLite 库（fresh + 用后
+    #   即删，saves/ 零触碰）+ 真线程收敛（deadline 轮询防 flake）。）
+    tools/matrix/section34_observation_lines.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
