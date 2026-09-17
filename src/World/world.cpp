@@ -5838,10 +5838,21 @@ void World::setWeatherState(int state)
 
 // t1046 天气剩余时长精确续跑（头注释见 .h；parity 台账低-5，机制等价 MC level.dat RainTime /
 //   ThunderTime）。只写计时不触态（态由 setWeatherState 负责，恢复端先态后时长配对调用）；
-//   sec ≤ 0 静默拒（守 m_weatherTimer > 0 不变量——tickWeather 对 ≤0 早退，写入会把天气钉死）。
+//   sec ≤ 0 拒（守 m_weatherTimer > 0 不变量——tickWeather 对 ≤0 早退，写入会把天气钉死）。
+//   **t1055 D（Review_2026-09-15 #7 清偿）**：拒面从「静默」升级为「qInfo 诊断可见」——存档
+//   瞬间剩余 <0.5ms 时 Main.qml saveAll 的 Math.round(→0) 会产「带键但值 0」存档，恢复端
+//   （本函数唯一生产调用面 = Main.qml enterWorld 的 hasWeatherTimer 分支）把 0 写入被拒后
+//   回落 setWeatherState 随机重抽窗。qInfo 显式区分两种恢复结局：「精确续跑」（sec>0 受理，
+//   不打日志零噪声）与「0 值回落随机重抽」（sec≤0 拒 + 本条诊断）——行为零变化（计时照旧
+//   不动，t1046c 非法拒柱回归绿），纯日志可见性（事件丢弃可见性同门）。
 void World::setWeatherRemainingSec(float seconds)
 {
-    if (seconds <= 0.0f) return;
+    if (seconds <= 0.0f) {
+        qInfo() << "World::setWeatherRemainingSec: sec" << seconds
+                << "<= 0 rejected - keeping the setWeatherState random re-roll window"
+                << "(zero-value fallback; a precise resume calls with sec > 0)";
+        return;
+    }
     m_weatherTimer = seconds;
 }
 

@@ -452,8 +452,10 @@ public:
     // t1046 天气剩余时长（parity 台账低-5；机制等价 MC level.dat RainTime/ThunderTime 精确续跑）：
     //   weatherRemainingSec() = 当前态剩余秒数（m_weatherTimer 裸读，存档快照用）；
     //   setWeatherRemainingSec(sec) = 恢复端把存档剩余窗写回（与 setWeatherState 先后配对用：
-    //   先设态再覆盖剩余时长，实现「态 + 剩余窗」双精确恢复）。sec ≤ 0 静默拒（保 m_weatherTimer > 0
-    //   的 tickWeather 前置不变量，防脏档把天气钉死在当前态）；态不变零 emit（纯计时写，无事件面）。
+    //   先设态再覆盖剩余时长，实现「态 + 剩余窗」双精确恢复）。sec ≤ 0 拒（保 m_weatherTimer > 0
+    //   的 tickWeather 前置不变量，防脏档把天气钉死在当前态）；**t1055 D（Review_2026-09-15 #7
+    //   清偿）起拒面带 qInfo 诊断**（区分「精确续跑」与「0 值回落随机重抽」——纯日志可见性，
+    //   行为零变化）；态不变零 emit（纯计时写，无事件面）。
     Q_INVOKABLE float weatherRemainingSec() const { return m_weatherTimer; }
     Q_INVOKABLE void setWeatherRemainingSec(float seconds);
     // 局部降水类型（群系解析）：返回 Weather 枚举 int（0=Clear / 1=Rain / 2=Snow / 3=Thunder）。
