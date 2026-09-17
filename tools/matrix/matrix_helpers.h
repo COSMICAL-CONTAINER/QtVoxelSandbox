@@ -378,4 +378,9 @@ private:
                                   //   r2031d 结构钉[worldstore 零触碰反探 + additive 正面钉 +
                                   //   QML 两处例外面钉 + 生产零挂载]——真 QQmlEngine real-chain
                                   //   （真桥单例）+ fresh 临时库，rig 世界 w 零接触，接 section32）
+    void section34_observation_lines(); // t1059 P5 观测前置 探针（置尾先例沿用：r2033a fixed
+                                  //   全零行+行格式钉 / r2033b 流式行计数与权威面逐项恒等
+                                  //   [四窗：初载/取消走查/网格收割/驱逐落盘] / r2033c dt 负/
+                                  //   NaN 分域计数——sparse fresh 小世界族 + 真临时库 +
+                                  //   ChunkGeometry 桥提交，rig 世界 w 零接触，接 section33）
 };
