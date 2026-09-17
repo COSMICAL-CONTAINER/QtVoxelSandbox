@@ -20,6 +20,10 @@
 //     兼容性论证见头注④）。
 //   - WorldStore 零改动：持久化面只走其现有 Q_INVOKABLE（saveAll/savePlayerData/saveProgress/
 //     isOpen/world/setWorld）。
+//   - t1057 #5②（review0916 #5）：recover() 的 OpenError 可区分错误态——SQLite open 惰性，锁占
+//     常在读面才炸，故「open 失败」与「SELECT busy」两面目同归 OpenError，与「表真缺席=旧档
+//     Fresh」用 sqlite_master 只读探针辨析（实现见 recover() 内注）；saveAll 对 prior==OpenError
+//     拒存（禁不可知台账上的代次重编）。
 
 // 协调层台账连接名（独立于 worldstore 的 "voxelsandbox_worldstore"）。
 static const char *const kCoordConn = "voxelsandbox_savecoordinator";
@@ -40,21 +44,31 @@ void SaveCoordinator::bind(WorldStore *store, const QString &dbFilePath)
     m_dbPath = dbFilePath;
 }
 
-// ── recover()：台账只读 + 三态派生（Fresh/Clean/Interrupted 判据见头注）──────────────────
+// ── recover()：台账只读 + 状态派生（Fresh/Clean/Interrupted/OpenError 判据见头注）──────────
 SaveGenerationInfo SaveCoordinator::recover() const
 {
     SaveGenerationInfo info; // 缺省 Fresh 0/0
     if (m_dbPath.isEmpty() || !QFileInfo::exists(m_dbPath))
         return info; // 无库 = 无台账 = Fresh（新库/已删档）
+    // 台账读数结局（#5② 三面目）：Ok = 两键已读；NoTable = 表真缺席（旧档合法形态 = Fresh）；
+    //   Unreadable = 库打不开 / 读不了（锁占 / 病）——可区分错误态，绝不静默按 Fresh。
+    enum class LedgerRead
+    {
+        Ok,
+        NoTable,
+        Unreadable
+    };
+    LedgerRead read = LedgerRead::Unreadable; // 缺省不可读（open 失败也不静默 = #5②）
     if (QSqlDatabase::contains(kCoordConn))
         QSqlDatabase::removeDatabase(kCoordConn);
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kCoordConn);
         db.setDatabaseName(m_dbPath);
         if (db.open()) {
-            // 只读，不建表（recover 对无台账旧档 = SELECT 失败 → 保持 Fresh，不写任何东西）。
+            // 只读，不建表（recover 对无台账旧档不写任何东西）。
             QSqlQuery q(db);
             if (q.exec(QStringLiteral("SELECT key, value FROM %1").arg(QLatin1String(kCoordTable)))) {
+                read = LedgerRead::Ok;
                 while (q.next()) {
                     const QString k = q.value(0).toString();
                     const qint64 v = q.value(1).toLongLong();
@@ -63,15 +77,29 @@ SaveGenerationInfo SaveCoordinator::recover() const
                     else if (k == QLatin1String(kCoordKeyComplete))
                         info.completeGeneration = v;
                 }
+            } else {
+                // SELECT 失败两面目辨析（#5②）：sqlite_master 只读探针——成功且无行 = save_coord
+                //   表真缺席（旧档，Fresh 面保持 r2015 语义）；探针也失败（锁占时读 sqlite_master
+                //   同样 busy）/ 有行但主 SELECT 失败 = 台账读不了 → 维持 Unreadable 不谎报。
+                QSqlQuery probe(db);
+                if (probe.exec(QStringLiteral(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='%1'")
+                        .arg(QLatin1String(kCoordTable)))
+                    && !probe.next())
+                    read = LedgerRead::NoTable;
             }
+        } else {
+            qWarning() << "SaveCoordinator: ledger open failed:" << db.lastError().text();
         }
     }
     if (QSqlDatabase::contains(kCoordConn))
         QSqlDatabase::removeDatabase(kCoordConn);
-    info.state = info.generation <= 0
-                     ? SaveRecoveryState::Fresh
-                     : (info.generation > info.completeGeneration ? SaveRecoveryState::Interrupted
-                                                                  : SaveRecoveryState::Clean);
+    info.state = read == LedgerRead::Unreadable
+                     ? SaveRecoveryState::OpenError // #5②：读不了 ≠ 无台账（Fresh 留给旧档/新库）
+                     : (info.generation <= 0
+                            ? SaveRecoveryState::Fresh
+                            : (info.generation > info.completeGeneration ? SaveRecoveryState::Interrupted
+                                                                         : SaveRecoveryState::Clean));
     return info;
 }
 
@@ -204,6 +232,14 @@ SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
         return r;
     }
     const SaveGenerationInfo prior = recover();
+    if (prior.state == SaveRecoveryState::OpenError) {
+        // t1057 #5② 生产化：台账打不开 → 代次历史不可知。禁在不可知台账上从 0 重编 newGen
+        // （那会把「最后尝试如 5」抹成 1 = 台账历史失真，review0916 #5 指认面）——按 marker-first
+        // 第一闸同语义放弃：零部分尝试、receipt 失败（域内同码 kErrSaveCoordSql），调用方重试
+        // 语义（t974 完成门）与锁失败路径共用。
+        r.error = Error{ kErrSaveCoordSql, "generation ledger unreadable - refusing to renumber" };
+        return r;
+    }
     const qint64 newGen = qMax(prior.generation, prior.completeGeneration) + 1;
     if (!coordUpsert(kCoordKeyGeneration, newGen)) {
         r.error = Error{ kErrSaveCoordSql, "generation mark failed (lock/disk?)" };
