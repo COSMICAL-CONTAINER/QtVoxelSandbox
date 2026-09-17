@@ -3852,3 +3852,24 @@ Agent 每次自动选择任务时，按以下顺序：
 - **实体×卸载竞态**：mob/掉落物在卸载候选区内的处理次序——W3 设计内收口（MC 引证三元组随单）。
 - **首屏等待**：出生半径即 W1 参数；Cold start 观感 P5 验收（D4 双半径调参在此兑现）。
 - **存档兼容**：全程 additive（worldstore 冻结域 + save_coord 先例）；任何步骤发现需迁移 → STOP NEEDS_HUMAN。
+
+---
+
+## §29.6 SaveCoordinator 生产接线设计（草案 v1 —— 2026-09-17 主控执笔；主控拓扑盘点后落）
+
+> 状态：设计 + 单任务书前置。r2015 组件（marker-first/代次/恢复状态机/FaultHook 缝）零接线在库；本段把它接到生产保存/读档链。数据安全：零格式迁移（save_coord 表 additive，旧档无表=Fresh、旧码盲读新档），worldstore.{h,cpp} 冻结域零触碰。
+
+### 事实（主控盘点 2026-09-17）
+- 保存拓扑：Main.qml `runExitSave()`（t974 唯一实现，按钮+关窗兜底共用）→ W5b flushForSave 前置 → worldStore.savePlayerData / saveAll（单事务：地形+箱子+熔炉+发射器+时钟+床位）/ saveProgress——三次同步写，返回值与门 = caller。#5①「一次性构建+停 tick」由同步链序结构性成立（t1055 核）。
+- 读档拓扑：worldStore.openWorld / loadChunks / loadPlayerData / loadProgress 等 Q_INVOKABLE。
+- SaveCoordinator 能力：save_coord 台账（attempt 标记→三写→complete 戳）、generation 单调、Fresh/Clean/Interrupted 恢复状态机、recover()、SaveFaultHook 五段缝。#5② 欠账：recover() 对 db.open 失败静默按 Fresh → 需可区分错误态。
+
+### 接线形态（QML 例外单，W5b 先例）
+- **SaveBridge**（QML 单例，StreamingBridge 同款注册）：`saveViaCoordinator(name, chests, furnaces, dispensers, meta, bed, playerState, progress)` 一口进——内部序 = ①coordinator 写 attempt 标记（代次 g+1）②三写照旧调 worldStore 现有 Q_INVOKABLE（逐字节原样）③全成才盖 complete 戳；任一败=标记留档（下次读档 Interrupted）且返回 false 语义与现 runExitSave 逐位同。runExitSave 三写段改调桥（QML 变更面 = 一处调用置换，登记例外）。
+- **读档面**：openWorld 后 `SaveBridge.recoveryState(file)` → Clean/Fresh 静默；**Interrupted → toast「上次保存未完成，已载入最后完整数据；建议立即重新保存」**（文案登记 md 可纠偏）+ qInfo；建议重存收敛。
+- **#5② 修复**：recover() 开库失败从静默 Fresh 改为可区分错误态（savecoordinator.{h,cpp} 许可域）。
+- **冻结机制不接线**（选型立证）：r2015 ①冻结-持久化分离的 freeze 缓冲在生产冗余——保存链同步单线程无重入（t1055 核），世界不可能在写中途变化；生产只取其簿记面（marker/代次/Interrupted）。freeze 面留矩阵测试域。
+- **非目标**：流式世界 blob 语义改变（W5 既有 flush+saveAll 序不变，桥统一包裹）/自动重存/Interrupted 的自动修复（仅提示+建议重存）。
+
+### 验收（腿族 filter r2031）
+fixed 零变化墙（Clean 路径行为/返回语义/saveOkCount 逐位同）｜marker→三写→complete 往返 + FaultHook 注入中途杀 → 下次读档 Interrupted → 重存收敛 Clean｜②开库失败可区分｜结构钉（worldstore 零触碰/additive/QML 单调用点）。
