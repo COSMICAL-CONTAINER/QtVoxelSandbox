@@ -396,15 +396,17 @@ void ChunkGeometry::onWorldChanged()
 void ChunkGeometry::buildMesh(RebuildReason reason)
 {
     // ── §29.5-W4（r2026）bake→worker 网格化路径选择器 ──────────────────────────────────
-    // 仅 sparse 流式世界（World 桥 sink 已绑定 = World::chunkMeshAsyncActive——通电条件：
-    // GameSession 流式会话构造内 isSparse() 门绑定，fixed 世界连绑定都不发生 = D2 零活动墙
-    // 延续）先走异步：主线程定格快照 → 提交（requestId=(cx,cz,段,代次) 派生）→ 收割拍
-    //（GameSession tick 尾单点）交付应用。提交被拒（队列满载 / 执行器已停 / 桥未就绪）或
-    // 空快照（无 chunk——构建产物恒空，无作业必要）→ 落到下方同步内联回退（拒绝面计数可见）。
+    // 通电世界（World::chunkMeshAsyncActive：sparse 流式会话 sink 已绑定，或 §29.7 t1060 起
+    // fixed 世界经 enableFixedAsyncBake 使能——生产挂点 = StreamingBridge fixed 进入分支）
+    // 先走异步：主线程定格快照 → 提交（requestId=(cx,cz,段,代次) 派生）→ 收割拍交付应用
+    //（sparse = GameSession tick 尾 pumpStreamingTick ⑤ 段单点；fixed = StreamingBridge::
+    // pumpTick 挂 WorldClock::ticked 的薄收割槽，单拍应用有界=风暴摊平）。提交被拒（队列
+    // 满载 / 执行器已停 / 桥未就绪）或空快照（无 chunk——构建产物恒空，无作业必要）→ 落到
+    // 下方同步内联回退（拒绝面计数可见；未通电世界门不入 = 旧行为零变化墙逐位原样）。
     if (m_world && m_world->chunkMeshAsyncActive() && submitMeshJobAsync(reason))
         return;
 
-    // ── 同步内联路径（fixed 世界的唯一路径 = 旧行为零变化墙；sparse 世界的回退面）────────
+    // ── 同步内联路径（未通电世界的唯一路径 = 旧行为零变化墙；通电世界的回退面）──────────
     QElapsedTimer bt; bt.start(); // t155f：诊断编辑卡顿（每 chunk 重建耗时）
     // perf「mesh」桶：本 chunk 重建耗时累加进窗口——覆盖「采集快照 + MeshBuilder 构建 + QQuick3D
     //   灌注」全程（与旧路径同窗口同语义；事件计数 meshN 族已随网格本体迁入 MeshBuilder::build，
