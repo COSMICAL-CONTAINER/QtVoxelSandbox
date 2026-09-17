@@ -370,4 +370,12 @@ private:
                                   //   回归柱] / r2029d weather 0 值回落 qInfo 诊断[行为零变
                                   //   化]——裸 scheduler + 零线程替身 worker + fresh 小世界
                                   //   ×2，rig 世界 w 零接触，接 section31）
+    void section33_savebridge_wiring(); // t1057 SaveCoordinator 生产接线 探针（置尾先例沿用：
+                                  //   r2031a Clean 路径零变化墙[返回语义/计数观测/参数透传/
+                                  //   往返回归/旧档 Fresh] / r2031b marker→complete 往返+
+                                  //   中断恢复收敛[真保存走桥 + FaultHook 经桥注入 + 戳权威] /
+                                  //   r2031c #5② 开库失败可区分[真锁占 + open 级失败两面目] /
+                                  //   r2031d 结构钉[worldstore 零触碰反探 + additive 正面钉 +
+                                  //   QML 两处例外面钉 + 生产零挂载]——真 QQmlEngine real-chain
+                                  //   （真桥单例）+ fresh 临时库，rig 世界 w 零接触，接 section32）
 };

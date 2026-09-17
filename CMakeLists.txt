@@ -1145,6 +1145,17 @@ add_executable(redstone_matrix_test
     #   非背压交接失败可见穿透] / weather 0 值回落 qInfo 诊断。filter 词 r2029。裸 scheduler +
     #   零线程脚本化替身 worker 族（r2010bb/r2017b 先例）+ fresh 小世界 ×2。）
     tools/matrix/section32_residual_sweep.cpp
+    # t1057 SaveCoordinator 生产接线 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；
+    #   4 腿 r2031a-d = 零变化墙[Clean 路径返回语义/saveOkCount/参数透传/旧档 Fresh 读档回归] /
+    #   marker→complete 往返+中断恢复收敛[真保存走桥 + FaultHook 注入中途失败] /
+    #   #5② 开库失败可区分[真锁占 + open 级失败双面目] / 结构钉[worldstore 零触碰反探 +
+    #   additive 正面钉 + QML 两处例外面钉]。filter 词 r2031。随段直编 src/Game/savebridge.{h,cpp}
+    #   （t1057 QML 消费桥——QML 单例生产/QML 同对象）+ 复用已列 savecoordinator/worldstore/
+    #   streamingbridge 系源文件；真 QQmlEngine real-chain（r2028b 同门）+ 真临时 SQLite 库
+    #   （fresh + 用后即删，saves/ 零触碰）。）
+    tools/matrix/section33_savebridge_wiring.cpp
+    src/Game/savebridge.cpp
+    src/Game/savebridge.h
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
