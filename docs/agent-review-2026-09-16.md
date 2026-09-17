@@ -26,7 +26,7 @@
 ### Info（登记备查，不单独开修）
 
 - **dt 钳制观测面不对称**（40874cf）：负 dt/NaN 丢弃无计数无日志（`droppedDts` 只盖 >1.0s 面）；每条超界 dt 各发一条 qWarning，恒异常 dt 场景日志洪泛（建议节流）；单泵 tick 上限 10 是 `kMaxStepSecs/kClockTickMs` 隐式比值，若未来 kClockTickMs 调小（如 20ms）单泵即 50 tick——无显式护栏。
-- **epoch bump 若不配对 `recreate()`**（88e5588）：stale 失败交付为 0 的 chunk 永停 Loading（「旧任务产物作废」语义可接受，但 P2+ 接线须保证 setWorldEpoch 与 recreate 成对）。
+- **epoch bump 若不配对 `recreate()`**（88e5588）：stale 失败交付为 0 的 chunk 永停 Loading（「旧任务产物作废」语义可接受，但 P2+ 接线须保证 setWorldEpoch 与 recreate 成对）。**【处置 2026-09-18 主控核】生产零调用 `setWorldEpoch`**（全库仅 generationjob.h 定义处 + 矩阵腿）——W2 接线用纯请求模型形态从不 bump epoch，世界切换走 World 整体重建（r2034 双归零点收口）；零 bump = 零失配面，登记性关闭（契约句保留于 generationjob.h 头注，未来接 epoch 时成对即可）。
 - **GenerationWorker 基类默认实现自相矛盾**（fa5c3aa）：`submitAsync` 默认返回 ok() 而 `takeCompletedAsync` 默认恒 false → 漏覆写前者的异步 worker 会把 job 静默永久滞留 m_inFlight；建议基类默认改 `fail(kErrWorkerStopped)`。
 - **取消的在途异步 job 完成时仍推进边②**（fa5c3aa，已有注释文档化「内容已生成」语义，固定世界零影响）。
 - **嵌入豁免 return 位于水/岩浆判定之前**（afd739b，entitymanager.cpp:57-61）：嵌入态 mob 前方岩浆时本 tick 不跳——嵌入态通常 1 aiTick 内被顶起消除，仅一帧避险抑制；**深嵌入（>1 格）时豁免与顶起双双失效**（属窒息兜底域，MC 亦无法站立，可接受，建议 kMobEmbedTol 注释登记）。
