@@ -691,15 +691,17 @@ void MatrixRun::section08_recent()
 
     // ── P-t1033c 非玩家口径登记钉（水冲不触床）+ 玩家挖掘既有链回归（双链不双播报）──
     //   (i) 水冲：锚床贴邻落水源 → tickWaterFlow 推进 → 流水工作面成立（邻格成流）但床格仍 Bed——
-    //       isAttachableBlock 冲刷清单（火把 / 红石火把 / 蛛网 / 木梯，t1012④ 单一权威）不含床 → 床非
+    //       isAttachableBlock 冲刷清单（火把 / 红石火把 / 蛛网 / 木梯 / 铁轨三族，t1012④ 单一权威；
+    //       t1043 裁-1 后 rail 族入清单——r2032c 文案对账同步，review0913 #3）不含床 → 床非
     //       附着块水冲不触（口径登记探针钉）→ 锚保留零 lost；
     //   (ii) 挖掘回归：同一锚床经真实注视挖掘链（t1024b 同款：站床顶 pitch -90 → 创造瞬破）挖除 →
     //       lost 恰 1（先水后挖累计恰一次 = 爆炸新链 + 玩家挖掘既有链同汇 clearBedSpawn 单点，不双播报；
     //       t1024b 存量腿继续独立钉挖掘链本体）。
     runLegMulti({ "t1033c non-player caliber pins: flowing water right up against the anchored bed proves the flow "
-        "works (neighbor cell turns to flowing water) yet never touches the bed - the t1012④ wash list (i"
-        "sAttachableBlock: torches, cobweb, ladder) deliberately excludes beds, so the anchor survives wi"
-        "th zero announcements (caliber registration probe); afterwards mining the same anchor bed throug"
+        "works (neighbor cell turns to flowing water) yet never touches the bed - the t1012④ wash list ("
+        "isAttachableBlock: torches, redstone torch, cobweb, ladder, rail family) deliberately excludes b"
+        "eds, so the anchor survives with zero announcements (caliber registration probe); afterwards mini"
+        "ng the same anchor bed throug"
         "h the real gaze chain (t1024b pattern) invalidates it with bedSpawnLost firing exactly once acro"
         "ss the water + mine sequence - the new explosion relay and the legacy mining path converge on th"
         "e single clearBedSpawn chokepoint without double announcementsdiag washed=%1 mined=%2 singleLost"
@@ -757,8 +759,9 @@ void MatrixRun::section08_recent()
                           << "| t1033c non-player caliber pins: flowing water right up against the "
                              "anchored bed proves the flow works (neighbor cell turns to flowing "
                              "water) yet never touches the bed - the t1012④ wash list "
-                             "(isAttachableBlock: torches, cobweb, ladder) deliberately excludes "
-                             "beds, so the anchor survives with zero announcements (caliber "
+                             "(isAttachableBlock: torches, redstone torch, cobweb, ladder, rail family) "
+                             "deliberately excludes beds, so the anchor survives with zero "
+                             "announcements (caliber "
                              "registration probe); afterwards mining the same anchor bed through "
                              "the real gaze chain (t1024b pattern) invalidates it with bedSpawnLost "
                              "firing exactly once across the water + mine sequence - the new "

@@ -313,6 +313,72 @@ float mobSupportTopY(World *world, int x, int y, int z)
 {
     return world ? world->supportTopYAt(x, y, z) : -1.0f;
 }
+
+// t1058 嵌入态水平脱出扫描（review0916 #10；t1053「free to move out」口径的水平向补全）。触发域 =
+//   「嵌入态 ∧ 顶起被净空门挡」（tick resting 复探嵌入顶起分支的净空失败 else 面，调用点唯一）——
+//   顶起优先（MC 向上 = 支撑在脚下的最小脱出向，t1053 口径零变化墙），净空门挡下才轮到水平向。
+//   机制 = 玩家侧 extrudeEmbedded（t161，playercontroller.cpp）同型：向最近可站列**直接位移 + 贴
+//   新支撑**（确定性收口，非物理弹射），候选列双判 = 落位后全高净空（mobAabbHitsSolid，与顶起
+//   同门）+ 支撑可站（mobSupportTopY 真顶 ≥ 0，非 Air 顶；支撑层探窗 [feetCell+1 .. feetCell-2]
+//   与 resting 复探两格支撑/落地承接语义同族，容 1-2 格落位；更高层落位自然被净空门滤除——封顶
+//   场景下高位必无净空）。列中心落位（±0.5 与 spawn/stuck-escape 同式）：mob 盒 halfW < 0.5 →
+//   footprint 整入候选列，天然离开嵌入列。候选序 = XZ 距离最近优先，同距 (tx,tz) 字典序（确定性，
+//   任务书钦定）。扫描窗 ±2 列（覆盖「最近列被堵后次近列仍可达」；有界窗 = 有界脱出，登记语义）。
+//   自身列跳过（顶起分支已对当前位试过嵌入层净空——失败即自身列在窗口层无可站落位）。
+//   找不到候选列（真围死）→ 返 false，caller 维持冻结（如实：MC 同款困死场景，登记非目标——外部
+//   挖块 / 窒息兜底承接，t642 卡方块自恢复仍有头嵌路径）。纯只读扫描，零 World 写。
+bool mobEmbeddedHorizontalEscape(World *world, float posX, float posZ, int feetCell,
+                                 float halfW, float halfH, float hoverOffset,
+                                 float *outX, float *outY, float *outZ)
+{
+    if (!world || feetCell < 0) return false;
+    const int worldW = world->width();
+    const int worldD = world->depth();
+    const int ownX = qFloor(posX);
+    const int ownZ = qFloor(posZ);
+    constexpr int kEscapeScanWindow = 2; // 邻列扫描窗 ±2（有界脱出，登记语义）
+    bool found = false;
+    float bestDist2 = 0.0f;
+    float bestX = 0.0f, bestY = 0.0f, bestZ = 0.0f;
+    int bestTx = 0, bestTz = 0;
+    for (int dx = -kEscapeScanWindow; dx <= kEscapeScanWindow; ++dx) {
+        for (int dz = -kEscapeScanWindow; dz <= kEscapeScanWindow; ++dz) {
+            if (dx == 0 && dz == 0) continue; // 自身列 = 顶起已试过（净空门挡）→ 非本扫描域
+            const int tx = ownX + dx;
+            const int tz = ownZ + dz;
+            if (tx < 0 || tx >= worldW || tz < 0 || tz >= worldD) continue;
+            // 支撑层探（自上而下首个可站真顶；首支撑即定层——同柱更低层不复试，越挂空支撑本就
+            //   不可站，注释如上）。
+            float newTop = -1.0f;
+            for (int cy = feetCell + 1; cy >= feetCell - 2 && newTop < 0.0f; --cy) {
+                if (cy < 0) break;
+                newTop = mobSupportTopY(world, tx, cy, tz);
+            }
+            if (newTop < 0.0f) continue; // 无支撑 → 不可站
+            const float nx = float(tx) + 0.5f;
+            const float nz = float(tz) + 0.5f;
+            const float ny = newTop + halfH + hoverOffset; // 贴新支撑（与顶起/落位同式）
+            if (mobAabbHitsSolid(world, nx, ny, nz, halfW, halfH)) continue; // 落位后全高净空门（与顶起同门）
+            const float ddx = nx - posX;
+            const float ddz = nz - posZ;
+            const float dist2 = ddx * ddx + ddz * ddz;
+            const bool nearer = !found || dist2 < bestDist2 - 1e-6f
+                || (dist2 <= bestDist2 + 1e-6f
+                    && (tx < bestTx || (tx == bestTx && tz < bestTz))); // 同距字典序（确定性）
+            if (nearer) {
+                found = true;
+                bestDist2 = dist2;
+                bestX = nx; bestY = ny; bestZ = nz;
+                bestTx = tx; bestTz = tz;
+            }
+        }
+    }
+    if (!found) return false;
+    *outX = bestX;
+    *outY = bestY;
+    *outZ = bestZ;
+    return true;
+}
 } // namespace
 
 EntityManager::EntityManager(QObject *parent) : QObject(parent)
@@ -8478,6 +8544,32 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.pos.setY(restY);
                         e.fallPeakY = restY - e.halfH; // 基准随顶起新位（顶起非腾空）
                         dirty = true;
+                    } else {
+                        // t1058 嵌入态水平脱出（review0916 #10；t1053 向上最小脱出向的水平向补全——
+                        //   MC 口径 "free to move out of the solid block but not back in"（minecraft.wiki/w/Entity
+                        //   General behavior 节，t1053 引证沿用 + 2026-09-17 实读复核）：本分支是「脱出」的
+                        //   水平向收口。触发域刻意收窄 = 嵌入态 ∧ 顶起被净空门挡（上方净空不足 → 塞不下
+                        //   不抬）——不在此域零动作（t1053 语义零变化墙：净空足照旧顶起、正常站立 / 合规
+                        //   越障零波及）。修复面（review0916 #10 病灶三连环的最后一环）：豁免生效[整层不跳
+                        //   isJumpObstacle] + 顶起被挡[本 else] + 水平 AI 移动被 mobAabbHitsSolid 撤回[嵌入
+                        //   格 top>miny 不享 review26 #1 脚位格豁免] → mob 冻结直到外部挖块。机制 = 向最近
+                        //   可站列直接位移 + 贴新支撑（extrudeEmbedded 玩家先例同型确定性收口，非物理弹射；
+                        //   候选序 = 距离最近优先 + 同距 (tx,tz) 字典序）；落位后 fallPeakY 基准随新位（顶起
+                        //   先例同门——横移亦非腾空，防旧低位基准给下次落地注假落差触发 t1045 踩踏掷骰）；
+                        //   脱出后嵌格态自然解除（下 tick resting 复探贴新支撑）。无候选列（真围死）→ 维持
+                        //   冻结（登记非目标：MC 同款困死场景，外部挖块 / 头嵌窒息兜底承接）。
+                        float exX = 0.0f, exY = 0.0f, exZ = 0.0f;
+                        if (mobEmbeddedHorizontalEscape(
+                                world, e.pos.x(), e.pos.z(), feetCell, e.halfW, e.halfH,
+                                e.mobType == MobEmberling ? kEmberlingHoverOffset : 0.0f,
+                                &exX, &exY, &exZ)) {
+                            e.pos = QVector3D(exX, exY, exZ);
+                            e.vy = 0.0f; // 防残余竖速（stuck-escape 同式防御）
+                            e.fallPeakY = exY - e.halfH; // 基准随新位（横移非腾空）
+                            dirty = true;
+                            qCInfo(lcEnt) << "mob" << idx << "embedded horizontal escape to"
+                                          << exX << exY << exZ;
+                        }
                     }
                 } else if (supportTop >= 0.0f) {
                     // t728 燃烬者悬浮：restY 加 kEmberlingHoverOffset 抬升（不断回退到贴地）。悬浮 mob 中心底
