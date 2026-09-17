@@ -140,6 +140,7 @@ void MatrixRun::runAll()
     section30_streaming_persistence(); // §29.5-W5 后端 流式世界持久化 + D2/D3 标志 + overlay 合并（置尾先例沿用：fixed 零活动墙[保存/读档全语义逐位不动+库面零流式表]/流式存读往返承重墙[保存含冲洗+销毁重建逐位恒等+二次幂等，真临时库]/D3 转换往返[blob 物化+代次对代次仲裁+逆翻照旧]/结构钉[worldstore 禁触反探+additive 正面钉+冲洗失败不谎报+QML 零触碰]，rig 零接触）
     section31_streaming_ui(); // §29.5-W5b 流式 UI（置尾先例沿用：默认关零变化墙[真链分流恒 false+会话零构造+三写/往返回归+库面零流式表]/开关+转换通电面[真 QQmlEngine×真桥单例：标志行+sparse 进入通电+真玩家走查生产泵收敛+D3 转换 blob 逐位+冲洗生产面+行回灌仲裁]/QML 面钉[变更面集中+Q_INVOKABLE 逐一正面钉+词元禁触+值组件零暴露]，rig 零接触）
     section32_residual_sweep(); // t1055 残余清偿合集一 + t1056 合集二（置尾先例沿用：r2029a detachWorker 销账守卫/r2029b lastDirtyChunks 值快照语义/r2029c submitAsync fail-fast 默认/r2029d weather 0 值回落 qInfo 诊断 + r2030a 软影列顶域扩 PCF 半格触达[kTopDim 22+紧覆盖推导+真实快照逐探测列对真值]/r2030b generate 首循环回填群系 memo[全列已填+纯函数直连零变化+懒填兜底]，rig 零接触）
+    section33_savebridge_wiring(); // t1057 SaveCoordinator 生产接线（置尾先例沿用：r2031a Clean 路径零变化墙[真链三写段置换+计数观测+参数透传+旧档 Fresh 回归]/r2031b marker→complete 往返+中断恢复收敛[真保存走桥+两键 raw 直读+FaultHook 经桥注入+戳权威]/r2031c #5② 开库失败可区分[真锁占 open-error+拒存不重编+open 级失败]/r2031d 结构钉[worldstore 零触碰反探+additive 正面钉+QML 两处例外面钉+生产零挂载]，真 QQmlEngine real-chain × 真桥单例，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
