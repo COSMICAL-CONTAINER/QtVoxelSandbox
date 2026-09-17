@@ -1116,6 +1116,14 @@ add_executable(redstone_matrix_test
     tools/matrix/section30_streaming_persistence.cpp
     src/World/chunkstore.cpp
     src/World/chunkstore.h
+    # §29.5-W5b 流式 UI 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；3 腿 r2028a-c =
+    #   默认关零变化墙 / 开关+转换通电面[真 QQmlEngine×真桥单例 real-chain] / QML 面钉。filter 词
+    #   r2028。随段直编 src/Game/streamingbridge.{h,cpp}（W5b QML 消费桥——QML 单例生产/QML 同
+    #   对象）+ 复用已列 chunkstore/worldstore/gamesession/playercontroller/worldclock 系源文件；
+    #   真临时 SQLite 库（fresh + 用后即删，saves/ 零触碰）+ 真线程收敛（deadline 轮询防 flake））。
+    tools/matrix/section31_streaming_ui.cpp
+    src/Game/streamingbridge.cpp
+    src/Game/streamingbridge.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
