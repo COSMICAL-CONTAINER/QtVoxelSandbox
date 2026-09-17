@@ -588,6 +588,42 @@ bool World::releaseStreamingChunk(int cx, int cz)
     return m_chunks.releaseSparseChunk(cx, cz);
 }
 
+// ── §29.5-W4 异步网格作业桥（三实现；选型与覆盖语义论证见 world.h 声明注释）──────────────
+// 提交：sink 未绑定 = 执行器未就绪（kErrChunkMeshSinkUnbound 防御面——正常调用方先查
+// chunkMeshAsyncActive()）；绑定即值转发（满载/已停拒绝原样穿透 = 调用方同步回退面），被
+// 接受才注册回调（主线程单写者——收割拍同线程，提交→注册间无交错的窗口不存在）。
+Result<void> World::submitChunkMeshJob(const ChunkMeshSnapshot &snap, quint64 requestId,
+                                       std::function<void(quint64, ChunkMeshData &&)> waiter)
+{
+    if (!m_chunkMeshBuildSink)
+        return Result<void>::fail(kErrChunkMeshSinkUnbound, "chunk mesh build sink unbound");
+    const Result<void> r = m_chunkMeshBuildSink(snap, requestId);
+    if (r.isOk())
+        m_chunkMeshWaiters.insert_or_assign(requestId, std::move(waiter));
+    return r;
+}
+
+// 取消：幂等 erase（latest-snapshot-wins 显式半边 + 几何换代/清空防陈旧应用；注销后该
+// 请求的产出条目照常到达收割拍 → 交付 miss → 可见丢弃计数收口）。
+void World::cancelChunkMeshJob(quint64 requestId)
+{
+    m_chunkMeshWaiters.erase(requestId);
+}
+
+// 交付：命中即 erase + 回调移交（owning ChunkMeshData 整体 move，零拷贝）；miss = 已取消 /
+// 几何已亡 / 最新胜淘汰三类可见丢弃，统一计数（事件可见性同门，禁静默消失）。
+void World::deliverBuiltChunkMesh(quint64 requestId, ChunkMeshData &&mesh)
+{
+    const auto it = m_chunkMeshWaiters.find(requestId);
+    if (it == m_chunkMeshWaiters.end()) {
+        ++m_droppedBuiltMeshes;
+        return;
+    }
+    auto fn = std::move(it->second);
+    m_chunkMeshWaiters.erase(it);
+    fn(requestId, std::move(mesh));
+}
+
 // t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob
 //   覆盖）。recreate 把 25 chunk 全清零 + 全标脏（首帧重建）；m_terrain 按新 seed 重建（R20.12 起纯
 //   地形采样器 = 单一权威 terraingen.h，置换表随其构造期填充）使后续 heightAt 等查询用新 seed

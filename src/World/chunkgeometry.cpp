@@ -2,6 +2,7 @@
 #include "blockregistry.h"
 #include "chunk.h"
 #include "frameprofiler.h"        // perf：buildMesh 计时进「mesh」桶（settle t470 重建频率假设）
+#include "mathtypes.h"            // §29.5-W4：hashMix64/ChunkKey（requestId (cx,cz) 基座派生——Core 叶子单一权威）
 #include "meshbuilder.h"          // R20.13：网格算法单一权威（本文件的网格本体已整体迁入）
 #include "partialblockgeometry.h" // t133：Vtx（chunk 顶点格式）——灌注布局（stride/属性偏移）消费
 #include "voxellight.h"           // tXXX：sun-step 粗量化门常量（kSunMin/kSunFade，与软影同源）
@@ -9,10 +10,11 @@
 
 #include <QByteArray>
 #include <QElapsedTimer> // t155f：buildMesh 计时（诊断编辑卡顿）
+#include <QPointer>      // §29.5-W4：异步交付回调的本对象存活守卫（W3 驱逐/池重建竞态防悬垂）
 #include <QVector3D>
 
 #include <algorithm> // std::clamp / std::max（tXXX sun 粗量化门：仰角/方位角夹取）
-#include <cmath>     // tXXX sun 粗量化门：std::asin/std::acos/std::fabs
+#include <cmath>     // tXXX：std::asin/std::acos/std::fabs
 #include <cstring>
 
 // R20.13 迁移登记（抽取 = 搬移不改写；矩阵 r2013d 反探钉「网格本体不回流」）：本文件原持有的
@@ -32,6 +34,12 @@ ChunkGeometry::ChunkGeometry(QQuick3DObject *parent) : QQuick3DGeometry(parent) 
 void ChunkGeometry::setWorld(World *w)
 {
     if (m_world == w) return;
+    // §29.5-W4：换世界 = 旧世界的在途网格作业一并作废（收割拍若稍后交付旧世界网格，
+    //   会把上一世界的地形灌进已换绑的本段——显式注销，交付 miss 可见丢弃收口）。
+    if (m_world && m_pendingRequestId != 0) {
+        m_world->cancelChunkMeshJob(m_pendingRequestId);
+        m_pendingRequestId = 0;
+    }
     if (m_world) disconnect(m_world, &World::worldChanged, this, &ChunkGeometry::onWorldChanged);
     m_world = w;
     if (m_world) connect(m_world, &World::worldChanged, this, &ChunkGeometry::onWorldChanged);
@@ -301,6 +309,12 @@ void ChunkGeometry::setChunkInRange(bool inRange)
 //   原语 → addAttribute → update。不置脏（无世界事件，纯呈现层动作）。
 void ChunkGeometry::clearMesh()
 {
+    // §29.5-W4：世界内容换代 = 在途网格作业作废（陈旧 mesh 若在换代后交付，会把上一内容
+    //   灌进已清空的段——显式注销，交付 miss 可见丢弃收口；与 t972 欠账双清同面）。
+    if (m_world && m_pendingRequestId != 0) {
+        m_world->cancelChunkMeshJob(m_pendingRequestId);
+        m_pendingRequestId = 0;
+    }
     m_vertexCount = 0;
     m_triangleCount = 0;
     m_deferredRebuild = false;
@@ -381,6 +395,16 @@ void ChunkGeometry::onWorldChanged()
 // （验收⑤，矩阵 r2013a 字节比对承重）。
 void ChunkGeometry::buildMesh(RebuildReason reason)
 {
+    // ── §29.5-W4（r2026）bake→worker 网格化路径选择器 ──────────────────────────────────
+    // 仅 sparse 流式世界（World 桥 sink 已绑定 = World::chunkMeshAsyncActive——通电条件：
+    // GameSession 流式会话构造内 isSparse() 门绑定，fixed 世界连绑定都不发生 = D2 零活动墙
+    // 延续）先走异步：主线程定格快照 → 提交（requestId=(cx,cz,段,代次) 派生）→ 收割拍
+    //（GameSession tick 尾单点）交付应用。提交被拒（队列满载 / 执行器已停 / 桥未就绪）或
+    // 空快照（无 chunk——构建产物恒空，无作业必要）→ 落到下方同步内联回退（拒绝面计数可见）。
+    if (m_world && m_world->chunkMeshAsyncActive() && submitMeshJobAsync(reason))
+        return;
+
+    // ── 同步内联路径（fixed 世界的唯一路径 = 旧行为零变化墙；sparse 世界的回退面）────────
     QElapsedTimer bt; bt.start(); // t155f：诊断编辑卡顿（每 chunk 重建耗时）
     // perf「mesh」桶：本 chunk 重建耗时累加进窗口——覆盖「采集快照 + MeshBuilder 构建 + QQuick3D
     //   灌注」全程（与旧路径同窗口同语义；事件计数 meshN 族已随网格本体迁入 MeshBuilder::build，
@@ -388,8 +412,6 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     //   此桶量化真值。
     FrameProfiler::Scope profMesh("mesh");
     const bool haveChunk = chunkExists(m_cx, m_cz); // R20.08：存在门经 Facade（旧 myChunk() 直取退役）
-    const int H = m_world ? m_world->height() : 0;
-    constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）
 
     // 采集（验收②）：把本几何的烘焙状态（dayMul/sunDir/阴影/AO/greedy/六段路由开关）定格进
     //   快照元数据，再经 WorldFacade 收窄面把 chunk 及其 pad 邻域（边界面剔除 / AO 探针 / PCF 列顶
@@ -411,9 +433,111 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     if (haveChunk && m_world)
         snap = captureChunkMeshSnapshot(WorldFacade(*m_world), m_cx, m_cz, bake);
 
-    // 构建（验收③⑤）：网格算法单一权威，owning 输出自持（顶点/索引/统计）。
+    // 构建（验收③⑤）+ 收尾：网格算法单一权威，owning 输出自持（顶点/索引/统计）→ 灌注/
+    //   账本/观测收尾与异步交付路径共用 applyChunkMeshData（禁两份灌注逻辑并存）。
     //   Reason 与 RebuildReason 值域镜像（编译期互钉见 meshbuilder.cpp）。
-    const ChunkMeshData mesh = MeshBuilder::build(snap, MeshBuilder::Reason(int(reason)));
+    applyChunkMeshData(MeshBuilder::build(snap, MeshBuilder::Reason(int(reason))), reason,
+                       m_sunDir, m_dayMul, bt);
+}
+
+// ── §29.5-W4（r2026）异步提交半边（选型立证见 .h 声明注释；收割半边 = GameSession
+//    pumpStreamingTick 单点 → World::deliverBuiltChunkMesh → 本文件交付回调）────────────────
+// 采集段主线程成本计入「mesh」窗口桶（同步路径同桶分段口径——提交相 = 采集，交付相 = 灌注；
+// 两段不嵌套、构建段在 worker 线程不计入——异步化的收益即构建段离开主线程，桶语义如实分账）。
+bool ChunkGeometry::submitMeshJobAsync(RebuildReason reason)
+{
+    FrameProfiler::Scope profMesh("mesh");
+    const bool haveChunk = chunkExists(m_cx, m_cz);
+    ChunkMeshBakeParams bake;
+    bake.dayMul = m_dayMul;
+    bake.sunDir = m_sunDir;
+    bake.shadowsEnabled = m_shadowsEnabled;
+    bake.aoEnabled = m_aoEnabled;
+    bake.greedyMeshing = m_greedyMeshing;
+    bake.waterOnly = m_waterOnly;
+    bake.lavaOnly = m_lavaOnly;
+    bake.glassOnly = m_glassOnly;
+    bake.iceOnly = m_iceOnly;
+    bake.cutoutOnly = m_cutoutOnly;
+    bake.cutoutFolded = m_cutoutFolded;
+    ChunkMeshSnapshot snap;
+    if (haveChunk && m_world)
+        snap = captureChunkMeshSnapshot(WorldFacade(*m_world), m_cx, m_cz, bake);
+    if (!snap.valid())
+        return false; // 空快照（无 chunk/无世界）：构建产物恒空网格——同步内联零成本语义，非回退
+
+    // latest-snapshot-wins 路由层半边：上一作业在途 → 先显式注销（其产出交付时 miss →
+    // World::droppedBuiltMeshes 可见丢弃）。本几何同时至多一个在途作业（提交前必注销旧账）。
+    if (m_pendingRequestId != 0)
+        m_world->cancelChunkMeshJob(m_pendingRequestId);
+
+    // 提交代次先取后增（同段连发互异在途键——最新胜判据承重；派生选型见 deriveMeshJobRequestId）。
+    const quint32 gen = m_meshSubmitGen++;
+    const quint64 requestId = deriveMeshJobRequestId(m_cx, m_cz, segmentIndex(), gen);
+
+    // 交付回调：捕获采集时刻的烘焙账本值（应用与采集之间 sun/dayMul 可能前移——账本必须记
+    //   实际烘进顶点色的值，见 applyChunkMeshData 注）+ QPointer 存活守卫（W3 驱逐/池重建把
+    //   几何销毁后交付照常到达 → 丢弃，悬垂不可能）。
+    QPointer<ChunkGeometry> self(this);
+    const QVector3D bakedSunDir = m_sunDir;
+    const float bakedDayMul = m_dayMul;
+    const Result<void> r = m_world->submitChunkMeshJob(
+        snap, requestId,
+        [self, requestId, reason, bakedSunDir, bakedDayMul](quint64 deliveredId,
+                                                            ChunkMeshData &&mesh) {
+            if (!self)
+                return; // 几何已亡（世界换代/池重建/W3 驱逐）：交付 miss 已由 World 可见计数
+            if (deliveredId != self->m_pendingRequestId) {
+                // 最新胜第二道闸（双保险）：被新快照淘汰的在途产出（注销竞态防御面）——可见丢弃。
+                FrameProfiler::instance()->count("meshNstale");
+                return;
+            }
+            self->m_pendingRequestId = 0; // 交付收口：在途账清零
+            // perf：交付相（灌注）计入「mesh」窗口桶（与提交相同桶分段，不嵌套）。
+            FrameProfiler::Scope profApply("mesh");
+            QElapsedTimer bt; bt.start();
+            self->applyChunkMeshData(std::move(mesh), reason, bakedSunDir, bakedDayMul, bt);
+            // F3 worker 列数据源：本窗口经收割交付应用的网格数（同步路径不计——win 行
+            //   「worker N」= 异步化可见面；worker 构建段按 Reason::Dirty 计入 meshN/meshNdirty，
+            //   阳光/昼夜驱动的异步重建在该分桶如实呈现为 dirty——计数分桶差异登记面）。
+            FrameProfiler::instance()->count("meshNworker");
+        });
+    if (!r.isOk()) {
+        // 同步回退面（执行器拒绝族：队列满载 kErrQueueFull / 已停 = 202 执行域码）——可见
+        //   计数 + 告警，调用方走同步内联（网格仍正确产出）。
+        FrameProfiler::instance()->count("meshNsyncFallback");
+        qWarning("vo.render: chunk(%d,%d) async submit refused (code %d) - inline sync fallback",
+                 m_cx, m_cz, r.error().code);
+        return false;
+    }
+    m_pendingRequestId = requestId; // 在途账登记（交付回调的 latest-wins 判据锚）
+    return true;
+}
+
+// ── §29.5-W4 requestId 派生（(cx,cz,段) 基座 + 提交代次）────────────────────────────────
+// 布局 = hashMix64(ChunkKey{cx,cz}.packed()) 高位移入 | 段位 3 bit（bits 13-15）| 提交代次
+//   13 bit（bits 0-12，mod 8192）。**为何基座之外还要代次位**：纯 chunk 键对同段连发产生同键
+//   ——在途互异是最新胜判据（交付回调 deliveredId == m_pendingRequestId）与注册表 1:1 交付
+//   擦除的承重前提，故同段每次提交以 per-geometry 单调代次互异；回绕周期 8192 ≫ 在途上界
+//  （执行器请求队列 64 + 收割队列传递性有界 ≤ 受理数），回绕混淆在途窗口内结构性不可能。
+//   基座哈希域 = 64 位哈希单射假设（hashColumn/hashVoxel 同门先例）；即便极端碰撞，交付回调
+//   判据使误应用结构性不可能，最坏退化为一次丢弃 + 下次触发自然重提交（自愈面）。
+quint64 ChunkGeometry::deriveMeshJobRequestId(int cx, int cz, int segIndex, quint32 submitGen)
+{
+    const quint64 base = hashMix64(ChunkKey{ cx, cz }.packed());
+    return (base << 16) | (quint64(segIndex & 0x7) << 13) | quint64(submitGen & 0x1FFF);
+}
+
+// ── §29.5-W4 应用半边（同步/异步两路共用收尾链——禁两份灌注逻辑并存）────────────────────
+// 自旧 buildMesh 尾段收敛而来（逐行原样搬移）：统计镜像 → 灌 QQuick3D（文档序）→ 烘焙账本
+//   （bakedSunDir/bakedDayMul 形参 = 采集时刻定格值；同步路径传当前成员 = 同值）→ vo.render
+//   观测（格式逐字原样——异步交付同格式同 reason 名，worker 化可见面在 F3 worker 列）→ 通知。
+void ChunkGeometry::applyChunkMeshData(ChunkMeshData mesh, RebuildReason reason,
+                                       const QVector3D &bakedSunDir, float bakedDayMul,
+                                       const QElapsedTimer &bt)
+{
+    const int H = m_world ? m_world->height() : 0;
+    constexpr int S = Chunk::kSize; // 16（X、Z chunk 边长）
 
     // 网格统计（t10 F3 叠层）：顶点 / 三角面数已自持于 ChunkMeshData，本几何只镜像（QML 只读面不变）。
     m_vertexCount = mesh.vertexCount;
@@ -461,9 +585,11 @@ void ChunkGeometry::buildMesh(RebuildReason reason)
     // tXXX sun-step 粗量化：记录「本次实际烘进顶点色的太阳方向」+ 时刻 —— 下次 setSunDir 据此判是否值得
     //   重烘（方向变太小 → 只更新 m_sunDir 不重建）。**任何 reason** 的 buildMesh 都烘顶点色（PCF 软影用
     //   m_sunDir）→ 一律更新，门从「最近一次实际烘光的太阳位」起算（编辑即时重建后，sun 门从编辑时的太阳位
-    //   重新累积，不会把编辑前旧方向也计入）。
-    m_lastBakedSunDir = m_sunDir;
-    m_lastBakedDayMul = m_dayMul; // PLAN §2-H：记录「本次实际烘进顶点色的 dayMul」，下次 setDayMul 据此判量化门
+    //   重新累积，不会把编辑前旧方向也计入）。§29.5-W4：记账值 = 形参（采集时刻定格值）——同步路径
+    //   形参即当前成员（同值，行为逐位不变）；异步路径应用时刻的成员可能已前移，误记会破量化门
+    //  （把未烘进本网格的方向当已烘 → 太阳步进被跳过 → 软影陈旧）。
+    m_lastBakedSunDir = bakedSunDir;
+    m_lastBakedDayMul = bakedDayMul; // PLAN §2-H：记录「本次实际烘进顶点色的 dayMul」，下次 setDayMul 据此判量化门
     m_lastSunBakeNs = FrameProfiler::nowNs();
     m_deferredRebuild = false; // t972：本次重建已覆盖窗外欠账（内容 + 光照同源同烘）
     m_lightStale = false;
