@@ -5147,7 +5147,8 @@ void MatrixRun::section08_recent()
     //    (a) 真 WorldStore：快照携 weatherTimerMs=77777 落 world_meta（weather_timer_ms）→ 关库重开逐键
     //        相等；(b) 旧档形态（四参 saveAll）→ hasWeatherTimer=false / weatherTimerMs=0 缺省；
     //    (c) World 续跑：setWeatherState 设态 + setWeatherRemainingSec 覆盖剩余窗 → tickWeather 部分
-    //        推进剩余精确递减 → 到点翻 Clear 重抽新窗；sec<=0 静默拒（tickWeather 前置不变量）；
+    //        推进剩余精确递减 → 到点翻 Clear 重抽新窗；sec<=0 拒（tickWeather 前置不变量；
+    //        t1055 D 起拒面带 qInfo 诊断——计时不变行为面本腿照钉）；
     //    (d) 源钉：两 C++ 入口声明 + 存/读两侧键字面量（阴性轮敏感）。
     runLegMulti({ "t1046c weather remaining-window persistence (MC RainTime/ThunderTime caliber, parity low-5): a s"
         "ave carrying weatherTimerMs stores it as world_meta weather_timer_ms inside the same transaction"
@@ -5205,8 +5206,8 @@ void MatrixRun::section08_recent()
             wT46c.setWeatherRemainingSec(0.8f);          // 覆盖为存档剩余窗
             const bool setOk = wT46c.weatherState() == 1
                 && std::abs(wT46c.weatherRemainingSec() - 0.8f) < 1e-4f;
-            wT46c.setWeatherRemainingSec(0.0f);          // 非法：静默拒（计时不变）
-            wT46c.setWeatherRemainingSec(-2.0f);         // 非法：静默拒
+            wT46c.setWeatherRemainingSec(0.0f);          // 非法：拒（计时不变；t1055 D 起带 qInfo 诊断）
+            wT46c.setWeatherRemainingSec(-2.0f);         // 非法：拒（计时不变；t1055 D 起带 qInfo 诊断）
             const bool gateOk = std::abs(wT46c.weatherRemainingSec() - 0.8f) < 1e-4f;
             wT46c.tickWeather(0.3);                      // 部分推进 → 剩余 0.5 精确递减
             const bool stepOk = wT46c.weatherState() == 1

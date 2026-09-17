@@ -1127,6 +1127,12 @@ add_executable(redstone_matrix_test
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp
+    # t1055 agent-review 残余清偿合集一 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；
+    #   4 腿 r2029a-d = scheduler detachWorker 销账守卫 / lastDirtyChunks 值快照语义 /
+    #   GenerationWorker submitAsync fail-fast 默认[kErrAsyncNotImplemented=204 + pumpAsync
+    #   非背压交接失败可见穿透] / weather 0 值回落 qInfo 诊断。filter 词 r2029。裸 scheduler +
+    #   零线程脚本化替身 worker 族（r2010bb/r2017b 先例）+ fresh 小世界 ×2。）
+    tools/matrix/section32_residual_sweep.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp

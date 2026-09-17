@@ -363,4 +363,11 @@ private:
                                   //   QML 面钉[变更面集中 + Q_INVOKABLE 逐一正面钉 + 词元禁触 +
                                   //   值组件零暴露]——真临时库 fresh+用后即删 + 真线程收敛，
                                   //   rig 世界 w 零接触，接 section30）
+    void section32_residual_sweep(); // t1055 agent-review 残余清偿合集一 探针（置尾先例沿用：
+                                  //   r2029a scheduler detachWorker 守卫[销账+摘指针+泵安全
+                                  //   no-op+重挂一致] / r2029b lastDirtyChunks 值快照语义 /
+                                  //   r2029c submitAsync fail-fast 默认[204 可见穿透+零影响
+                                  //   回归柱] / r2029d weather 0 值回落 qInfo 诊断[行为零变
+                                  //   化]——裸 scheduler + 零线程替身 worker + fresh 小世界
+                                  //   ×2，rig 世界 w 零接触，接 section31）
 };
