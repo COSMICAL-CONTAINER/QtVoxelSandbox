@@ -51,7 +51,42 @@
 // 切后台恢复量级的异常墙钟差不 catch-up——与暂停「dt 丢弃不欠账」同门；int 累积器输入域被
 // 入口钳死故无 qRound 溢出）。选型依据与探针见 stepTick 注 + r2007e。
 //
-// 分层（PLAN §2）：Game 层编排壳——向下依赖 World（tick 家族 + setBlock 权威）+ Core
+// ── §29.5-W5 后端：流式世界持久化 + D2/D3 标志 + overlay 合并（r2027；QML 零触碰）─────────
+// 计划原文（refactor-plan §29.5.2 W5 + §29.5.3 选型 2）：世界 meta streaming 标志（additive
+// 零迁移）；D3 = opt-in 转换（blob 区成为核心区，境外按需生成 + 经 W3 落盘）；转换可逆
+// （标志翻回 = fixed 语义，境外数据不可达但不清除）。本单 = W5 后端半（UI = 下一单 W5b，
+// §29.5 登记的 QML 例外面——本壳零 QML 新增）。接线宿主 = 本流式会话（W2/W3/W4 同门）：
+//
+//   · **D2 后端（流式世界元数据）**：stream_worlds 附加表（chunkstore.h 头注 W5 段 = DDL 与
+//     代次刻度权威）——世界行本身经现有 Q_INVOKABLE 面创建（createWorld/openWorld，本壳零
+//     涉），streaming 标志与 core_w/core_d（出生区界）只住附加表；fixed 世界零标志零活动
+//     （连 ChunkStore 都不构造 = W3 零活动墙同门延续）。markStreamingWorld = D2 创建与 D3
+//     转换同一落点（置位 + core dims + 代次锚）；clearStreamingWorldFlag = D3 逆翻（仅翻
+//     标志，行保留）。
+//   · **保存时冲洗（流式世界持久化主通路）**：flushResidentEditsForSave——保存链（Main.qml
+//     saveAndExitToWorldList → persistWorldState 三同步写 [saveAll/savePlayerData/
+//     saveProgress]）的**前置挂点**（W5b 接线：冲洗成功才续走三写，失败上报不谎报 = r2015
+//     complete 戳同门）。冲洗域 = 全部驻留 dirty chunk 经 W3 persistFn 同缝（persistResidentChunk
+//     ——驱逐与冲洗共用唯一落盘执行体）落 chunk_edits；流式世界的持久化形态 = 玩家/进度
+//     blob（现行走）+ chunk_edits 全量——已生成未编辑的地形块不存，读档按 seed 确定性重生
+//     成（W1b parity 是正确性根基，头注释立证）。冲洗第一拍 = advanceStreamSaveGeneration
+//     （保存代次推进；写不进即失败上报——marker 同门）。
+//   · **读档合并（overlay 语义）**：loadStreamingWorld = sparse 构造（W1）+ 出生半径预生成
+//     之后的行全量回灌（跳 population——W3 语义）+ D3 核心区 blob 物化（经现有只读
+//     Q_INVOKABLE 面 hasChunks/loadChunks——worldstore 零改动，只读消费）。**仲裁 = 代次
+//     对代次**（chunk_edits 行代次 vs 世界存代次锚 base_gen，新者胜；同代 = 表胜——刻度统
+//     一与锚语义立证见 chunkstore.h 头注 W5 段）：行代次 ≥ base_gen → 行胜（当前流式时代
+//     事实）；< base_gen → blob 胜（再转换锚让位的老时代行）；无 blob 在场 → 无对手方，行
+//     全胜（原生流式世界，chunks 表恒空）。读档后追加生成的区块走 W2 生成路径（本壳既有
+//     收割拍照常）。
+//   · **D3 转换语义（后端）**：既有 fixed 世界 → 标志置位（不动原 blob，零数据搬迁——
+//     §29.5.3 选型 2 原文）→ 读档走「核心区 = blob 物化 + 境外按需生成 + 编辑块 overlay」；
+//     标志翻回 = fixed 语义（fixed 读档链不识 chunk_edits——worldstore 冻结域的结构性事实）。
+//   登记非目标：UI（W5b——本壳 API 为其接线面）；删除流式世界的清表策略（登记）；despawn
+//     半径接线（既有登记）；性能调参（P5）；保存流统一经 SaveCoordinator（W5b+——base_gen
+//     的「fixed 重存不可见」限制随保存流统一收敛，chunkstore.h 头注登记）。
+//
+// ── 分层（PLAN §2）：Game 层编排壳——向下依赖 World（tick 家族 + setBlock 权威）+ Core
 //（command/event/mathtypes/result），不依赖 Renderer/Entities/QML；不反向被 World 依赖。
 //
 // ── §29.5-W2 位置源 + 驱动接线（r2024；流式激活第一次生产通电）────────────────────────
@@ -89,7 +124,8 @@
 //     稳定）→ Load kind job 照常走边①②（kind 门语义不变）→ 收割拍数据面按表命中路由：
 //     命中 → World::restoreChunkFromBlob 直接物化（**跳过 population**——存档内容已是终态
 //     含 population，头注释立证）；未命中 → W2 现行 adoptGeneratedChunk 生成路径。
-//   登记非目标：跨会话 blob×附加表 overlay 合并（W5/D3 域）；ChunkStore 生产 bind（W5 存档
+//   登记非目标：跨会话 blob×附加表 overlay 合并（W5/D3 域——**W5 已兑现**：loadStreamingWorld
+//     overlay 仲裁，见下方 W5 头注段；W3 时点为登记）；ChunkStore 生产 bind（W5 存档
 //     入口接线——未 bind 时 dirty 候选中止驱逐 = 宁驻留不误删 fail-safe）；hasChunk 逐查询
 //     开闭连接的经济学（W5/P5 优化面）；despawn 半径语义（不引入，见实体移除头注释）。
 //
@@ -127,9 +163,12 @@
 #include "result.h"    // Result<void>（满载拒绝失败面穿透）
 #include "world.h"     // World：tick 家族（模拟泵——见下「选型」）+ setBlock 写实现权威
 #include "worldfacade.h" // R20.08 WorldFacade：查询/写入收窄面（命令写 + 编辑后回读走此面）
+#include "worldstore.h" // §29.5-W5：读档 blob 通路的只读 Q_INVOKABLE 消费面（hasChunks/loadChunks
+                        //   ——worldstore 零改动纯消费；Game→World 向下依赖，PLAN §2 同门）
 
 #include <QDebug>  // qWarning（超界 dt 丢弃——背压可见，t1050）
 #include <QObject>
+#include <QSet>    // 读档仲裁胜者集（ChunkKey::packed 键）
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
 
 #include <functional> // std::function（§29.5-W3 实体移除缝）
@@ -241,6 +280,61 @@ public:
         m_chunkStore->bind(dbFilePath);
         return true;
     }
+    // §29.5-W5：世界标识（stream_worlds 主键转发——生产 = 存档文件名；bind 后、首次元数据
+    //   操作前设置。缺省空串 = 匿名键）。返回 false = fixed 世界无 store（零活动墙同门）。
+    bool setStreamWorldId(const QString &worldId)
+    {
+        if (!m_chunkStore)
+            return false; // fixed 世界无附加表（连构造都不发生）
+        m_chunkStore->setStreamWorldId(worldId);
+        return true;
+    }
+    QString streamWorldId() const
+    {
+        return m_chunkStore ? m_chunkStore->streamWorldId() : QString();
+    }
+    // ── §29.5-W5 D2/D3 标志面（元数据域转发；fixed 世界恒 false——无 store 可言）─────────
+    // D2 创建与 D3 转换同一落点：streaming 置位 + core dims（出生区界 / 被转换世界 dims）+
+    // 代次锚（选型立证 = chunkstore.h 头注 W5 段）。纯元数据，零 blob 搬迁零 chunk_edits 触碰。
+    bool markStreamingWorld(int coreWidthBlocks, int coreDepthBlocks)
+    {
+        return m_chunkStore && m_chunkStore->isBound()
+            && m_chunkStore->markStreamingWorld(coreWidthBlocks, coreDepthBlocks);
+    }
+    // D3 逆翻：标志翻回 = fixed 语义（fixed 读档链不识 chunk_edits——worldstore 冻结域的
+    //   结构性事实）；行保留（境外数据不可达但不清除，§29.5.3 既有口径）。
+    bool clearStreamingWorldFlag()
+    {
+        return m_chunkStore && m_chunkStore->isBound() && m_chunkStore->clearStreamingWorldFlag();
+    }
+    // 流式世界读面（fixed 恒 false；streaming=0 的残留行同样 false）。
+    bool isStreamingWorld() const
+    {
+        if (!m_chunkStore || !m_chunkStore->isBound())
+            return false;
+        StreamWorldMeta meta;
+        return m_chunkStore->readStreamWorldMeta(meta) && meta.streaming;
+    }
+    // ── §29.5-W5 保存时冲洗（流式世界持久化主通路；语义见类头注 W5 段）─────────────────────
+    // 保存链前置挂点（W5b 接线：成功才续走三写）。拍序 = **先冲洗、后代次推进**（头注释立
+    //   证）：行盖写 = save_gen + 1（ChunkStore::persistChunk 统一刻度——驱逐在途写同式），
+    //   冲洗后推进 save_gen := 旧值 + 1 = 恰为本批行的盖写代次——「行代次 = 本次保存代次」
+    //   精确成立，且推进失败（锁/病）时行已在场（代次锚仲裁只对 base_gen，行不因失号失效，
+    //   marker 同门 = 写不进台账不销数据）；冲洗域 = 全部驻留 dirty chunk 经 W3 persistFn
+    //   同缝落盘（persistResidentChunk 唯一执行体——驱逐与冲洗共用）。任一 chunk 失败或代次
+    //   推进失败 = 返回 false（上报不谎报；账不清 = 下次保存重报收敛；已成功行不回滚）。
+    bool flushResidentEditsForSave();
+    // ── §29.5-W5 读档合并（overlay 语义；语义见类头注 W5 段）──────────────────────────────
+    // 行全量回灌 + D3 核心区 blob 物化（store 须已 openWorld 本世界且 setWorld 指向本壳世界
+    //   ——r2010d rebind 纪律；误绑防御 = qWarning + false）。非流式世界（无行 / streaming=0）
+    //   → false（caller 走既有 fixed 读档链）。返回聚合成败（行/blob 物化失败逐条 qWarning
+    //   不中断——诚实降级同门，世界仍可玩）。
+    bool loadStreamingWorld(WorldStore &store);
+    // 观测面（矩阵 / 诊断；fixed 恒 0）：冲洗落盘/失败 chunk 计数 + 读档行回灌/blob 物化计数。
+    int flushPersistedCount() const { return m_flushPersistedCount; }
+    int flushFailedCount() const { return m_flushFailedCount; }
+    int loadRestoredRowCount() const { return m_loadRestoredRowCount; }
+    int loadBlobChunkCount() const { return m_loadBlobChunkCount; }
     // 驱逐转移前活体移除缝（Entities 层接线方注入：[cx,cz] → 两族 despawnInChunk 的组合；
     // 本壳零 Entities 类型依赖——分层不变[R20.07]。null = 无实体面可移除[驱逐照常进行]）。
     void setEvictionEntitySink(std::function<void(int cx, int cz)> sink)
@@ -292,6 +386,18 @@ private:
     // 下一窗，收口单点发布不破（见 runOneTick 注）。
     void noteEdit(int x, int y, int z);
 
+    // ── §29.5-W5 落盘/回灌执行体（私有；冲洗与驱逐共用的唯一 chunk 落盘缝）────────────────
+    // 单 chunk 落盘（W3 persistFn 同体收口——驱逐缝与保存时冲洗两路共用，头注立证）：
+    // chunk 缺席 / store 未 bind → fail（fail-safe 面）；成功 = 清该 chunk 未落盘账（已落盘
+    // 不再 dirty）。代次盖写在 ChunkStore::persistChunk 内（世界保存代次刻度——chunkstore.h
+    // 头注 W5 契约修订段）。
+    Result<void> persistResidentChunk(int cx, int cz);
+    // 回灌前弃槽（读档 overlay 的「物化内容让位」语义）：已物化（出生预生成占位 / blob 先行
+    //  物化）→ ⑥⑦ 合法边到 Absent + 擦槽（数据面闭合，W3 转移缝同门）；未物化 = no-op
+    //  （restoreChunkFromBlob 自 ensure 物化）。被让位内容 = seed 可重derive 生成物或仲裁
+    //  败者 blob——让位零不可再生损失。
+    void discardStreamingChunkForRestore(int cx, int cz);
+
     World &m_world;
     // R20.08 WorldFacade（示范迁移：新代码经收窄面读写世界）：查询/写入走 m_facade（命令写
     //   setBlock/setBlockWithState + 编辑后回读 blockAt），tick 模拟泵家族仍直调 m_world（模
@@ -331,6 +437,11 @@ private:
     int m_playerChunkCz = 0;
     int m_streamOutcomeCount = 0; // 收割拍结果面累计（每活别名一条——#7 同拍消费账面）
     int m_streamAdoptedCount = 0; // 收割拍数据面累计（每完成 job 恰一条——#7 同拍消费账面）
+    // ── §29.5-W5 冲洗/读档观测账面（矩阵断言 / 诊断；fixed 恒 0）─────────────────────────
+    int m_flushPersistedCount = 0;   // 冲洗落盘 chunk 累计（逐 chunk 原子成功面）
+    int m_flushFailedCount = 0;      // 冲洗失败 chunk 累计（失败上报可见面）
+    int m_loadRestoredRowCount = 0;  // 读档行回灌累计（overlay 仲裁胜者面）
+    int m_loadBlobChunkCount = 0;    // 读档 blob 物化累计（D3 核心区面）
 };
 
 inline GameSession::GameSession(World &world, QObject *parent)
@@ -377,18 +488,14 @@ inline GameSession::GameSession(World &world, QObject *parent)
         // persistFn = per-chunk 附加表即时落盘（驱逐候选 dirty 时；不走整世界 saveAll）。
         // 成功 = 清该 chunk 未落盘账；失败 = Result 穿透 → ChunkEvictor 顺序铁律中止驱逐
         //（保持驻留零转移——P3「先落盘后转移」语义的生产执行体在本缝与组件内共同成立）。
+        // §29.5-W5：落盘执行体收口 persistResidentChunk（冲洗同缝共用——唯一落盘执行体），
+        // 本 lambda 只补驱逐轨迹（冲洗走独立计数，不污染驱逐沿轨迹语义）。
         m_chunkEvictor.setPersistFn([this](int cx, int cz) -> Result<void> {
-            const Chunk *c = m_world.chunks().chunk(cx, cz);
-            if (!c || !m_chunkStore || !m_chunkStore->isBound())
-                return Result<void>::fail(kErrChunkStoreNotBound,
-                                          "evict persist: store unbound or chunk missing");
-            const Result<void> r = m_chunkStore->persistChunk(cx, cz, *c);
-            if (r.isOk()) {
-                m_world.clearChunkUnsavedEdits(cx, cz); // 已落盘 → 不再 dirty
+            const Result<void> r = persistResidentChunk(cx, cz);
+            if (r.isOk())
                 m_evictionTrace.append({ 0, cx, cz });  // PersistOk
-            } else {
+            else
                 m_evictionTrace.append({ 1, cx, cz });  // PersistFail
-            }
             return r;
         });
         // lifecycleTransition = World::setChunkLifecycle 真转移（⑥⑦合法边；revision 沿自动
@@ -566,6 +673,149 @@ inline void GameSession::noteEdit(int x, int y, int z)
     const quint8 afterId = m_facade.blockAt(x, y, z);
     if (m_edits.record(x, y, z, afterId) == RecordResult::Overflowed)
         ++m_droppedEdits;
+}
+
+// ── §29.5-W5 落盘/回灌执行体 + 保存时冲洗 + 读档合并（语义见类头注 W5 段）──────────────────
+
+// 单 chunk 落盘唯一执行体（W3 驱逐缝与 W5 冲洗缝共用——persistFn lambda 只补轨迹）。
+inline Result<void> GameSession::persistResidentChunk(int cx, int cz)
+{
+    const Chunk *c = m_world.chunks().chunk(cx, cz);
+    if (!c || !m_chunkStore || !m_chunkStore->isBound())
+        return Result<void>::fail(kErrChunkStoreNotBound,
+                                  "persist: store unbound or chunk missing");
+    const Result<void> r = m_chunkStore->persistChunk(cx, cz, *c);
+    if (r.isOk())
+        m_world.clearChunkUnsavedEdits(cx, cz); // 已落盘 → 不再 dirty
+    return r;
+}
+
+// 回灌前弃槽：已物化（出生预生成占位 / blob 先行物化）→ ⑥⑦ 合法边 + 擦槽；未物化 no-op。
+inline void GameSession::discardStreamingChunkForRestore(int cx, int cz)
+{
+    if (!m_world.chunks().chunkMaterialized(cx, cz))
+        return; // 无槽可弃（restoreChunkFromBlob 自 ensure 物化）
+    m_world.setChunkLifecycle(cx, cz, ChunkLifecycle::Evicting); // ⑥（驻留态唯一合法出口）
+    m_world.setChunkLifecycle(cx, cz, ChunkLifecycle::Absent);   // ⑦
+    m_world.releaseStreamingChunk(cx, cz); // 擦槽（数据面闭合——W3 转移缝同门）
+}
+
+// 保存时冲洗（主通路）：驻留 dirty 逐 chunk 落盘（盖写 = save_gen + 1）→ 代次推进（旧值 + 1
+// = 恰为本批行盖写代次）。失败面逐 chunk 原子，聚合返回不谎报（任一失败或推进失败 = false；
+// 账不清 = 下次保存重报收敛）。
+inline bool GameSession::flushResidentEditsForSave()
+{
+    if (!m_chunkStore || !m_chunkStore->isBound() || !m_world.isSparse())
+        return false; // 无冲洗域（fixed / 未 bind）——上报失败不谎报
+    StreamWorldMeta meta;
+    if (!m_chunkStore->readStreamWorldMeta(meta) || !meta.streaming)
+        return false; // 未登记流式世界：无冲洗域（fixed 零标志零活动同门）
+    bool allOk = true;
+    // 驻留集枚举（ChunkManager sparse 版 = {Loaded, Active} 与驻留集同谓词，cz 外 cx 内序）。
+    const QVector<QPair<int, int>> resident = m_world.chunks().sparseResidentKeysOrdered();
+    for (const auto &k : resident) {
+        if (!m_world.chunkHasUnsavedEdits(k.first, k.second))
+            continue; // dirtyQuery 同驱逐缝：已生成未编辑的地形块不存（确定性重生成承载）
+        if (persistResidentChunk(k.first, k.second).isOk())
+            ++m_flushPersistedCount;
+        else {
+            ++m_flushFailedCount;
+            allOk = false; // 失败上报（该 chunk 账不清；已成功者不回滚）
+        }
+    }
+    // 代次推进收口：save := max(save, base) + 1 = 本批行的盖写代次（写不进 = 上报失败，
+    // 已落盘行不因失号失效——仲裁只对 base_gen，marker 同门）。
+    if (m_chunkStore->advanceStreamSaveGeneration() <= 0)
+        allOk = false;
+    return allOk;
+}
+
+// 读档合并（overlay 语义）：行全量回灌 + D3 核心区 blob 物化 + 代次对代次仲裁。
+inline bool GameSession::loadStreamingWorld(WorldStore &store)
+{
+    if (!m_world.isSparse() || !m_chunkStore || !m_chunkStore->isBound())
+        return false; // fixed 域 / 未 bind：无合并域
+    if (store.world() != &m_world) {
+        qWarning() << "GameSession::loadStreamingWorld: store not bound to this world"
+                   << "- rebind required (r2010d discipline)";
+        return false; // r2010d rebind 纪律防御（loadChunks 写入面 = store.m_world）
+    }
+    StreamWorldMeta meta;
+    if (!m_chunkStore->readStreamWorldMeta(meta) || !meta.streaming)
+        return false; // 非流式世界：caller 走既有 fixed 读档链
+    QVector<ChunkStoreBlob> rows;
+    if (m_chunkStore->loadAllRows(rows) < 0)
+        qWarning() << "GameSession::loadStreamingWorld: chunk_edits scan failed"
+                   << "- degrading to empty overlay"; // 诚实降级（读缝同门不抛不堵）
+
+    // D3 blob 存在面（现有只读 Q_INVOKABLE 消费）→ 仲裁：行代次 ≥ base_gen（锚）→ 行胜
+    //（新者胜；同代 = 表胜）；< → blob 胜（再转换锚让位的老时代行）。无 blob = 无对手方，
+    // 行全胜（原生流式世界，chunks 表恒空）。
+    const bool hasBlob = store.hasChunks();
+    QSet<quint64> winners;
+    for (const ChunkStoreBlob &row : rows) {
+        const bool winsAgainstBlob = !hasBlob || row.generation >= meta.baseGen;
+        if (winsAgainstBlob)
+            winners.insert(ChunkKey{ row.cx, row.cz }.packed());
+    }
+
+    // ① D3 核心区 blob 物化（经现有只读 Q_INVOKABLE 面 loadChunks——worldstore 零改动）：
+    //    核心域铺槽（仲裁胜者除外——槽缺席使 loadChunks 跳过该键，行回灌直落）→ loadChunks
+    //    把 blob 字节 memcpy 进槽位 → 逐槽「取字节 → 非零判定 → 弃槽 → restoreChunkFromBlob
+    //    物化」（restore = W3 物化链权威：①②③ + heightmap + 索引 + 列种子光，跳 population
+    //    ——存档内容已是终态）。全零槽 = 部分 blob（尺寸守卫跳过/缺行）→ 原样留存走重生成
+    //   （worldstore 尺寸守卫降级同门，不硬造空 chunk）。
+    if (hasBlob) {
+        const int coreCX = (meta.coreW + Chunk::kSize - 1) / Chunk::kSize;
+        const int coreCZ = (meta.coreD + Chunk::kSize - 1) / Chunk::kSize;
+        for (int cz = 0; cz < coreCZ; ++cz)
+            for (int cx = 0; cx < coreCX; ++cx) {
+                if (winners.contains(ChunkKey{ cx, cz }.packed()))
+                    continue; // 仲裁胜者：不铺槽（blob 让位，行回灌直落）
+                if (!m_world.chunks().chunkMaterialized(cx, cz))
+                    m_world.ensureStreamingChunkSlot(cx, cz);
+            }
+        store.loadChunks(); // 现有只读 Q_INVOKABLE：blob 字节 memcpy 进已存在槽位
+        for (int cz = 0; cz < coreCZ; ++cz)
+            for (int cx = 0; cx < coreCX; ++cx) {
+                if (winners.contains(ChunkKey{ cx, cz }.packed()))
+                    continue;
+                const Chunk *c = m_world.chunks().chunk(cx, cz);
+                if (!c)
+                    continue; // 防御（未铺槽 = 仲裁胜者）
+                const size_t n = c->voxelCount();
+                const QByteArray voxels(reinterpret_cast<const char *>(c->voxelData()), int(n));
+                const QByteArray states(reinterpret_cast<const char *>(c->stateData()), int(n));
+                const QByteArray light(reinterpret_cast<const char *>(c->lightData()), int(n));
+                bool filled = false;
+                for (const char byte : voxels)
+                    if (byte != 0) {
+                        filled = true;
+                        break;
+                    }
+                if (!filled)
+                    continue; // 零填充槽 = blob 未覆盖（部分 blob 降级）→ 留 Absent 走重生成
+                discardStreamingChunkForRestore(cx, cz); // 出生预生成占位让位（seed 可重derive）
+                if (m_world.restoreChunkFromBlob(cx, cz, voxels, states, light))
+                    ++m_loadBlobChunkCount;
+                else
+                    qWarning() << "GameSession::loadStreamingWorld: blob materialize failed for"
+                               << cx << cz << "- chunk stays regenerable";
+            }
+    }
+
+    // ② 行全量回灌（仲裁胜者；核心外自然覆盖）：blob 命中路由同门（W3 收割拍路由的读档版）。
+    for (const ChunkStoreBlob &row : rows) {
+        if (!winners.contains(ChunkKey{ row.cx, row.cz }.packed()))
+            continue; // 仲裁败者（老时代行）：blob / 重生成权威
+        discardStreamingChunkForRestore(row.cx, row.cz); // 出生预生成占位让位
+        if (m_world.restoreChunkFromBlob(row.cx, row.cz, row.voxels, row.states, row.light))
+            ++m_loadRestoredRowCount;
+        else
+            qWarning() << "GameSession::loadStreamingWorld: row restore failed for" << row.cx
+                       << row.cz << "- degrading to regeneration";
+    }
+    return true;
 }
 
 // §29.5-W2 流式泵拍（tick 尾；语义见声明处头注释）。review0916 #7 硬契约的兑现点在双面
