@@ -5729,6 +5729,12 @@ int World::heightAt(int x, int z) const
     // R20.12：计算本体迁 TerrainGen::heightAt（群系振幅选择 + fBm 采样——单一权威 terraingen.h，
     //   同步路径与后台 worker 共用；本壳保持 Q_INVOKABLE 查询面与 worldgen 内部调用点零改动）。
     //   历史（t119/t162/t274/t307 振幅与基线调参记录）随本体迁入 terraingen.h heightWithBiome。
+    //   t1056（agent-review-2026-09-16 #6）选型登记：维持委托 m_terrain.heightAt、**不回切**
+    //   memo 化 biomeAt——#6 的双算病灶在「首循环逐列群系计算不落 memo、后续 pass 的 biomeAt
+    //   首查再各算一次」，generate 首循环以 TerrainColumnSummary.biome 回填 m_biomeCache 后该
+    //   面已消除（fillTerrainColumn 内 heightWithBiome 本就直持本列群系，无二次计算）；heightAt
+    //   的委托链（TerrainGen::heightAt → biomeComputeAt 自算）是出生列解析 / 结构选址等一次性
+    //   生成期路径的既有形态，本单不改（生成结果零变化墙；若未来成为热路径另单评估）。
     return m_terrain.heightAt(x, z);
 }
 
@@ -5743,6 +5749,8 @@ int World::heightAt(int x, int z) const
 // t905 perf：biomeAt = 列级 memo 入口（头注释见 world.h m_biomeCache / biomeComputeAt）。在界列走缓存：
 //   未命中 → biomeComputeAt 算 fBm 并回填。越界列不走缓存（保持旧口径 —— 直接算 fBm，返回某确定群系，
 //   行为与加 memo 前逐字一致）。缓存尺寸自检兜底漏清（size 不匹配 = 尺寸已变 → 整表重建）。
+//   t1056（#6）起 fixed generate 首循环已逐列预填全表（回填落点见 generate 内）——本懒填路径保留为
+//   beginLoad/读档世界的兜底 + 尺寸自检自愈口径，语义不变。
 World::Biome World::biomeAt(int x, int z) const
 {
     if (x >= 0 && z >= 0 && x < m_width && z < m_depth) {
@@ -5752,6 +5760,7 @@ World::Biome World::biomeAt(int x, int z) const
         quint8 &slot = m_biomeCache[size_t(x) + size_t(z) * size_t(m_width)];
         if (slot != 0xFF) return Biome(slot);
         const Biome b = m_terrain.biomeComputeAt(x, z); // R20.12：fBm 本体 = TerrainGen 单一权威
+        ++m_biomeMemoMisses; // t1056（#6）判别探针：懒算 = memo 未命中（回填在位时 generate 内恒 0）
         slot = quint8(b); // Biome 编码 0..6（< 0xFF 哨兵），见 enum class Biome
         return b;
     }
@@ -5946,7 +5955,13 @@ void World::generate()
     ChunkManager::UnsavedEditWriteWindow unsavedEditSuppression(m_chunks);
     m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // R20.12：纯地形采样器重建（置换表随构造填充）
     m_chunks.recreate(m_width, m_depth, m_height); // 重建 chunk 网格（全新零填充 chunk，全脏）
-    m_biomeCache.clear(); // t905 perf：seed / 尺寸换新 → 群系 memo 作废（懒重建；generate 首遍逐列填回）
+    // t905 perf：seed / 尺寸换新 → 群系 memo 作废。t1056（agent-review-2026-09-16 #6）起不再
+    //   「清空后靠后续 biomeAt 首查懒填」——首循环下方逐列以 TerrainColumnSummary.biome 直接
+    //   回填（消群系 fBm 双算：fa5c3aa 后 fillTerrainColumn 直用 biomeComputeAt 不写 memo，
+    //   后续 pass 的 biomeAt 首查再各算一次 ≈ 每列 ~20 次 Perlin 采样白付；值同源 = 首循环
+    //   计算结果，逐位一致 = 行为零变化）。0xFF 哨兵预置 = biomeAt 的未填语义原样。
+    m_biomeCache.assign(size_t(m_width) * size_t(m_depth), 0xFF);
+    m_biomeMemoMisses = 0; // t1056（#6）判别探针随 memo 重置归零（「自本次生成以来的懒算次数」口径）
     m_decayingLeaves.clear(); // t325 全新世界无失撑叶 → 清渐进衰减队列（防旧世界坐标误清新世界叶）
     m_growthCells.clear();   // t425 全新世界 → 清生长方格索引（worldgen placeSugarcane 经 setVoxelIfAir 增量重建）
     m_waterCells.clear();    // perf：全新世界 → 清流体方格索引（worldgen 直写 chunk 不经写入路径 → 末尾 rebuildFluidCells 全图重建）
@@ -5977,6 +5992,9 @@ void World::generate()
     for (int x = 0; x < m_width; ++x) {
         for (int z = 0; z < m_depth; ++z) {
             const TerrainGen::TerrainColumnSummary col = m_terrain.fillTerrainColumn(x, z, columnSink);
+            // t1056（#6）：首循环回填群系 memo（键序与 biomeAt 懒填一致；值 = biomeComputeAt
+            //   同一结果 → 后续 biomeAt 首查直接命中，fBm 双算消除；结果逐位不变）。
+            m_biomeCache[size_t(x) + size_t(z) * size_t(m_width)] = quint8(col.biome);
             const Biome bio = col.biome;
             const bool desert = (bio == Biome::Desert);
             if (desert) ++desertCols;

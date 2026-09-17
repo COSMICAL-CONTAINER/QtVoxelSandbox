@@ -428,6 +428,24 @@ public:
     //   PLAN §2-K 确定性，同 seed 同群系图）。分层（PLAN §2）：World 低层只读查询，不依赖 Entities / Renderer。
     //   消费点：EntityManager::pickPassiveMobType 据本值加权选被动生物类型（t374 群系化刷怪）。
     Q_INVOKABLE int biomeIdAt(int x, int z) const { return int(biomeAt(x, z)); }
+    // t1056（agent-review-2026-09-16 #6）矩阵探针（C++ only 非 Q_INVOKABLE——r2022d「新面禁
+    //   Q_INVOKABLE 形态」同门；生产零调用）：群系 memo 已填列数（非 0xFF 哨兵计数）。fixed
+    //   generate 首循环回填后恒 == width*depth（r2030b「全列已填」断言面）；beginLoad 清表后
+    //   为 0、读档世界随 biomeAt 懒查逐列增长（懒填兜底路径未破坏的同门观测面）。只读。
+    int biomeMemoFilledCount() const
+    {
+        int filled = 0;
+        for (const quint8 v : m_biomeCache)
+            if (v != 0xFF)
+                ++filled;
+        return filled;
+    }
+    // t1056（#6）判别探针：自上次 generate（随 memo 重置归零）以来 World::biomeAt 的懒算
+    //   次数。首循环回填在位 → generate 期间后续 pass 的 biomeAt 全命中 → 恒 0；摘回填 →
+    //   后续 pass（placeTrees/placeTallGrass 等逐列群系判定）各付一次 fBm（#6 双算本体
+    //   复现）→ 计数飙升（实证：「全列已填」计数对摘回填不敏感——后续 pass 懒填同会填满，
+    //   判别力全在此计数）。C++ only 非 Q_INVOKABLE，生产零调用。只读。
+    int biomeMemoMissCount() const { return m_biomeMemoMisses; }
     // review0905 #3：神殿落位合格判定（siteOk 五守卫：margin / 群系 / 海域 / 顶越界 / 贴基岩）公开只读口。
     //   worldgen 三路（主路径 / 保底补座 / tryPlace 落位）共用的同一纯函数（world.cpp 定义处单一权威）——
     //   探针 P-t1010b 据此判「R 内存在合格列」（保底契约前提），与实现零复刻漂移。
@@ -1743,6 +1761,9 @@ private:
     //   后续 O(1) 数组读。失效：generate()/beginLoad() 显式清（seed / 尺寸换新，与 m_iceCells 等索引同批）；
     //   懒填充时尺寸自检（size 不匹配即整表重建）兜底任何漏清路径。mutable：biomeAt 是 const，缓存非语义。
     mutable std::vector<quint8> m_biomeCache;
+    // t1056（#6）判别探针计数（biomeMemoMissCount 读面）：biomeAt 懒算一次 +1；generate 随
+    //   memo 重置归零。运行期瞬态不进存档（powerRecomputePasses 同族口径）。
+    mutable int m_biomeMemoMisses = 0;
     // t729 最近要塞末地传送门中心格坐标（worldgen placeStronghold 放置处记录；全图至多一座要塞 / 一个传送门，
     //   t564「全图至多一个末地传送门」）。m_hasStronghold=false → 无要塞（世界未生成 / 空）→ 暗渊之眼掷出兜底
     //   不寻路。坐标语义 = 传送门房 12 框架环中心格：x=placeAt 的 cx（环 x 中心）、y=cy+4（地板 cy 之上门面 dy=4）、
