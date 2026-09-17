@@ -115,6 +115,18 @@ qt_add_executable(voxelsandbox
     src/Game/gamesession.h
     src/Game/streamingbridge.cpp
     src/Game/streamingbridge.h
+    # t1057 SaveCoordinator 生产接线（refactor-plan §29.6，§29.6 登记的 QML 例外单）：Game 层
+    #   SaveBridge——r2015 存档协调层（marker-first/代次/恢复状态机）在 QML 面的最小消费投影
+    #   （QML 单例，StreamingBridge 同款模式；两个 Q_INVOKABLE = saveViaCoordinator 一口进
+    #   [runExitSave 三写段置换] / recoveryState 恢复态读面[enterWorld Interrupted toast]）。
+    #   分层：Game → World（savecoordinator/worldstore）向下依赖（streamingbridge 同门先例）。
+    #   随桥首度生产实例化，savecoordinator.cpp（r2015 协调层本体 + t1057 #5② OpenError 修复）
+    #   自本单入 app 目标（r2015-t1056 期间仅矩阵目标直编——生产零接线面随本单闭合；
+    #   review0916 #5 指认的「生产目标根本不编译它」随本单清偿）。
+    src/World/savecoordinator.cpp
+    src/World/savecoordinator.h
+    src/Game/savebridge.cpp
+    src/Game/savebridge.h
     src/Renderer/wiresquare.cpp
     src/Renderer/wiresquare.h
     src/Renderer/wirecube.cpp

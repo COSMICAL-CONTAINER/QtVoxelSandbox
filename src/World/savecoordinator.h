@@ -58,8 +58,14 @@
 //
 // 分层（PLAN §2）：World 层（与 worldstore 同域；只依赖 World/Chunk/ChunkManager/WorldStore +
 // Core result.h + Qt Sql）。零 QML 面（无 Q_OBJECT/Q_PROPERTY/Q_INVOKABLE/QML_NAMED_ELEMENT）。
-// **零生产接线**（R20.11 GenerationJob 先例：组件 + 无头实证先行，Main.qml 保存流迁移 = 后续
-// 单；故现行保存/读档行为零变化是结构性事实）。
+// **生产接线 = t1057（refactor-plan §29.6）**：QML 侧经 Game 层 SaveBridge（QML 单例）一口进
+// saveAll——三写照旧经 WorldStore 现有 Q_INVOKABLE 面执行（worldstore 冻结域零改动）；本类自身
+// 仍零 QML 依赖。t1057 #5② 增补：recover() 对「库文件在而打不开」不再静默按 Fresh（那会把台账
+// 代次历史抹成 0、下次保存从 1 重编 = 历史失真，review0916 #5 指认），改报 OpenError 可区分
+// 错误态；saveAll 对 prior==OpenError 拒存（零部分尝试），杜绝不可知台账上的代次重编。
+// 冻结机制（①captureSnapshot+冻结缓冲）随 saveAll 原样保留在协议内不另做生产开关——保存链同步
+// 单线程无重入（t1055 核）冻结面对生产是冗余但无害（字节面恒等），生产的真正价值在簿记面
+// （marker/代次/Interrupted/complete 权威）；freeze 面的独立行为证明留矩阵测试域（r2015b）。
 
 #include <QByteArray>
 #include <QList>
@@ -81,12 +87,22 @@ constexpr int kErrSaveSnapshotApply = 204;  // 冻结快照回放失败（缓冲
 constexpr int kErrSaveStoreRejected = 205;  // 下游 WorldStore 拒绝（事务失败 / exec 失败）
 constexpr int kErrSaveFaultInjected = 206;  // SaveFaultHook 注入触发（测试缝；生产零挂载）
 
-// ── SaveRecoveryState：恢复状态机三态（最小落地；plan「恢复状态」原文域）────────────────
+// ── SaveRecoveryState：恢复状态机（plan「恢复状态」原文域 + t1057 #5② 增补第四态）────────
 enum class SaveRecoveryState
 {
     Fresh = 0,      // 无 save_coord 台账 = 旧档（协调层之前）或新库——视为合法干净态
     Clean,          // generation == completeGeneration = 最后一次保存完整收尾
     Interrupted,    // generation > completeGeneration = 最后一次保存未收尾（部分写可能存在）
+    OpenError,      // t1057 #5②（review0916 #5 指认面）：库文件在而台账打不开/读不了（外部锁 /
+                    //   磁盘病；SQLite open 是惰性的，锁占常在读面才炸——故 open 失败与
+                    //   SELECT busy 两面目同归此态，sqlite_master 只读探针把「表真缺席」
+                    //   的旧档合法形态留给 Fresh）——**可区分错误态，不与 Fresh（无台账=合法
+                    //   干净）混淆**。此时 generation 两读数未知（保持 0 = 「不可知」而非
+                    //   「无台账」）。选型 = 新枚举值而非 error 字段：SaveGenerationInfo 已是
+                    //   纯值读数结构，加枚举值对既有 Fresh/Clean/Interrupted 三态零扰动（枚举
+                    //   序稳定追加），消费面（t1057 SaveBridge::recoveryState）按态映射即可；
+                    //   error 字段会把「读数」与「读数时的故障」两域混在一结构里，且 error
+                    //   载荷（message 指针）对值纪律多余。
 };
 
 // ── SaveChunkBlob：单 chunk 冻结三段（voxels/states/light，与 chunks 表行同构）────────────
@@ -187,7 +203,8 @@ public:
     // 故障注入缝（验收⑤）。缺省无钩 = 生产形态，恒不注入。
     void setFaultHook(SaveFaultHook hook) { m_faultHook = std::move(hook); }
 
-    // 恢复状态读数（只读；库/表不存在 → Fresh）。唯一权威判据 = save_coord 两键比对。
+    // 恢复状态读数（只读；库/表不存在 → Fresh；库在而打不开 → OpenError = #5②，见枚举处注）。
+    //   唯一权威判据 = save_coord 两键比对。
     SaveGenerationInfo recover() const;
 
     // 统一保存（验收①②③本体；协议见头注 marker-first 五段）。失败绝不报告成功。

@@ -760,6 +760,18 @@ Window {
             console.warn("[t176] openWorld failed:", file)
             return
         }
+        // t1057（refactor-plan §29.6，本单 QML 例外单第二处）：读档面恢复状态提示——台账
+        //   interrupted（上次保存未收尾，部分写可能存在）→ toast 告知已载入最后完整数据 + 建议
+        //   立即重新保存（重存收敛 = Interrupted 的唯一恢复动作，r2015 语义；不自动修复）；
+        //   clean / fresh（旧档无台账）静默；open-error（台账读不了，#5② 可区分态）→ qWarning
+        //   留痕诚实降级不弹窗（载入数据本身照常可用）。文案登记 md 可纠偏。只读台账面，
+        //   对 fixed / 流式（W5b overlay 以 complete_generation 为仲裁锚）两链皆只读无扰。
+        const recState = SaveBridge.recoveryState(file)
+        if (recState === "interrupted") {
+            console.info("[t1057] previous exit save was interrupted - last complete data loaded,"
+                         + " suggesting an immediate re-save:", file)
+            showInfoToast("上次保存未完成，已载入最后完整数据；建议立即重新保存")
+        }
         const meta = worldStore.loadMeta()
         let seed = parseInt(meta.seed, 10)
         if (isNaN(seed)) seed = 42
@@ -1063,6 +1075,12 @@ Window {
     //   进程瞬持 .sqlite 文件锁：杀软 / 索引器 / 同步盘；磁盘满）即回滚留旧档、退出照常 = 用户实测
     //   「保存退出偶发未保存：重进是上一次存档点」。caller 必须核验返回值（见 saveAndExitToWorldList
     //   的完成门），WorldStore.saveOkCount 计数器为行为级观测面。
+    // t1057（refactor-plan §29.6 存档协调层生产接线，本单 QML 例外单第一处）：三写段置换为
+    //   SaveBridge 统一口进——桥内序 = attempt 标记（代次 +1）→ 三写照旧调 WorldStore 现有
+    //   Q_INVOKABLE（逐字节原样）→ 全成才盖 complete 戳；任一败 = 标记留档（下次读档
+    //   Interrupted）且返回 false，返回值门 / caller 完成门 / saveOkCount 观测面语义逐位不变
+    //   （成功 = 三部分各 +1 = +3；失败不计数）。参数 = 旧三写所需全集（分参序 = 桥载荷字段序，
+    //   见 savebridge.h 选型立证）。
     function runExitSave() {
         // §29.5-W5b（r2028）：保存链三写前置冲洗（流式世界把驻留编辑块落附加表 + 推进保存代次）。
         //   非流式会话恒 true 零动作（固定世界保存链逐字节原样）；失败 → false 短路三写 = 写失败
@@ -1070,24 +1088,26 @@ Window {
         //   盖写无副作用）。关窗兜底路径（onClosing）走本函数同门覆盖。
         if (!StreamingBridge.flushForSave())
             return false
-        const okPlayer = worldStore.savePlayerData(gatherPlayerState())
-        // t188：箱子内容随地形 / meta 同事务落盘（saveAll 第 2 参 = ChestStore::allChests() 产物）。
-        // t177 二轮复盘：熔炉内容同事务落盘（saveAll 第 3 参 = FurnaceStore::allFurnaces() 产物）。
-        // t542：发射器内容同事务落盘（saveAll 第 4 参 = DispenserStore::allDispensers() 产物）。
-        // t1016：世界时钟快照同事务落盘（saveAll 第 5 参 = {phase, day, weather, weatherTimerMs}，
-        //        WorldClock / World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排传入；
-        //        t1046 补 weatherTimerMs = 当前态剩余毫秒，weather_rain/thunder 双计数器的单态等价键）。
-        // t1024：床位重生锚同事务落盘（saveAll 第 6 参 = {valid, x, y, z}，PlayerController 的
+        // t188：箱子内容随地形 / meta 同事务落盘（第 3 参 = ChestStore::allChests() 产物）。
+        // t177 二轮复盘：熔炉内容同事务落盘（第 4 参 = FurnaceStore::allFurnaces() 产物）。
+        // t542：发射器内容同事务落盘（第 5 参 = DispenserStore::allDispensers() 产物）。
+        // t1016：世界时钟快照同事务落盘（第 6 参 = {phase, day, weather, weatherTimerMs}，
+        //        WorldClock / World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排
+        //        传入；t1046 补 weatherTimerMs = 当前态剩余毫秒，weather_rain/thunder 双计数器的
+        //        单态等价键）。
+        // t1024：床位重生锚同事务落盘（第 7 参 = {valid, x, y, z}，PlayerController 的
         //        bedSpawnValid + spawnPoint 裸原语打包；有效写四键、失效写 bed_valid=0）。
-        const okWorld = worldStore.saveAll(currentWorldName, chestStore.allChests(), furnaceStore.allFurnaces(), dispenserStore.allDispensers(),
-                                           { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState,
-                                             weatherTimerMs: Math.round(theWorld.weatherRemainingSec() * 1000) },
-                                           player.bedSpawnValid
-                                               ? { valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }
-                                               : { valid: false })
-        // progress 落盘（统计 + 成就，独立 upsert 单行表）。
-        const okProgress = worldStore.saveProgress(progress.toVariant())
-        return okPlayer && okWorld && okProgress
+        // t402：玩家态快照（第 8 参 = gatherPlayerState()，含位姿/血饥/xp/背包/护甲 v3 全集）；
+        // t176：进度快照（第 9 参 = progress.toVariant()，统计 + 成就）。
+        return SaveBridge.saveViaCoordinator(worldStore, currentWorldFile, currentWorldName,
+                                             chestStore.allChests(), furnaceStore.allFurnaces(),
+                                             dispenserStore.allDispensers(),
+                                             { phase: worldClock.dayPhase, day: worldClock.dayCount, weather: theWorld.weatherState,
+                                               weatherTimerMs: Math.round(theWorld.weatherRemainingSec() * 1000) },
+                                             player.bedSpawnValid
+                                                 ? { valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }
+                                                 : { valid: false },
+                                             gatherPlayerState(), progress.toVariant())
     }
     // t974 窗口关闭兜底存档：playing 态直接关窗（标题栏 X / Alt+F4）此前无任何落盘点 —— 进程即退，
     //   自上次保存退出后的全部进度静默丢失（用户侧「偶发未保存」的另一半：退出走按钮=存、走关窗=丢，
