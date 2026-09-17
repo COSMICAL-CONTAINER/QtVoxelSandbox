@@ -6485,4 +6485,264 @@ void MatrixRun::section02_early_probes()
         items.clearAll();
         tickN(w, 2);
     });
+
+    // ── r2032 三腿：嵌入态水平脱出（agent-review-2026-09-16 #10）+ 水冲清单文案对账（review0913 #3）──
+    //   #10 病灶：嵌入态 mob（支撑被换高）+ 上方净空不足 → 嵌格态层豁免生效[整层不跳] + 顶起被净空
+    //   门挡[塞不下不抬] + 水平 AI 移动被碰撞撤回 → mob 冻结直到外部挖块。修 = 顶起净空门挡下时向
+    //   最近可站列横移脱出（玩家侧挤出先例同型确定性收口；向上仍优先 = 最小脱出向口径不变）。
+    //   rig = 走廊模式变体（石地板 + slab 嵌入 + 头顶封顶 / 邻列封堵）；确定性手法 = wander 冻结缝 +
+    //   playerTargetable=false 双门（AI 全惰性，位置断言零 RNG 承受）+ setTrampleRollOverride(0) 缝
+    //   （若任何假坠落/级联复现 → 耕地必踩必红）。固定选址 + 工作盒先清空 = 与既有地形零耦合画布。
+
+    // r2032a 正常路径零变化墙：嵌入 + 净空足 → 顶起照旧（横移分支结构性不触——x 恒 spawn 列心）；
+    //   正常站立（无嵌入）→ 位置逐 tick 零漂移（横移分支不可达面）。
+    runLegMulti({ "r2032a clean-path wall: embedded support-swap with open headroom still lifts the mob onto "
+        "the raised support top with zero lateral drift (the horizontal escape branch never fires when "
+        "the lift gate passes), and plain standing on an untouched slab floor holds position exactly "
+        "(no phantom escape on the non-embedded path)" }, [&]() {
+        const int bx0 = 20, bz0 = 30;
+        const auto clearBox = [&]() {
+            for (int dx = -2; dx <= 13; ++dx)
+                for (int dz = -4; dz <= 4; ++dz)
+                    for (int dy = -3; dy <= 4; ++dy)
+                        w.setBlock(bx0 + dx, kRigY + dy, bz0 + dz, BR::Air, 0);
+        };
+        EntityManager ents;
+        ents.setWanderFrozen(true);
+        const QVector3D noListener(-1000.0f, 10.0f, -1000.0f);
+        const auto tickA = [&](int n) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(0.016), &w, noListener, 0.3f, 1.8f, false);
+        };
+        const float kShamblerHalfH = 0.9f;
+        bool okLift = false, okStand = false;
+        // (a) 嵌入 + 净空足：slab 行 → farmland 换地（无封顶）→ 顶起（x 零漂移 = 横移分支未触）。
+        clearBox();
+        for (int dx = 0; dx <= 10; ++dx) {
+            w.setBlock(bx0 + dx, kRigY - 1, bz0, BR::Stone, 0);
+            w.setBlock(bx0 + dx, kRigY, bz0, BR::CobbleSlab, 0);
+        }
+        const int mA = ents.spawnMobTyped(bx0 + 3, kRigY + 2, bz0, EntityManager::MobShambler,
+                                          QStringLiteral("#44aa44"), 100);
+        tickA(40); // 预热落定 slab 顶（wander 冻结 → x 恒 spawn 列心 43.5）
+        for (int dx = 0; dx <= 10; ++dx) w.setBlock(bx0 + dx, kRigY, bz0, BR::Farmland, 0);
+        float maxFeetA = -1e9f, finalFeetA = -1e9f, finalXA = -1e9f;
+        for (int t = 0; t < 300; ++t) {
+            tickA(1);
+            const QVector3D p = ents.posAt(mA);
+            maxFeetA = std::max(maxFeetA, p.y() - kShamblerHalfH);
+            finalFeetA = p.y() - kShamblerHalfH;
+            finalXA = p.x();
+        }
+        const float newTop = float(kRigY) + 0.9375f;
+        okLift = std::fabs(finalFeetA - newTop) <= 0.02f            // 顶起贴新顶（既有语义照旧）
+            && maxFeetA <= newTop + 0.02f                           // 无假跳弧
+            && std::fabs(finalXA - (float(bx0) + 3.5f)) <= 0.02f;   // x 零漂移 = 横移未触
+        ents.removeEntityAt(mA);
+        // (b) 正常站立（无嵌入）：未换地 slab 面静置 → 位置逐 tick 零漂移。
+        clearBox();
+        for (int dx = 0; dx <= 10; ++dx) {
+            w.setBlock(bx0 + dx, kRigY - 1, bz0, BR::Stone, 0);
+            w.setBlock(bx0 + dx, kRigY, bz0, BR::CobbleSlab, 0);
+        }
+        const int mB = ents.spawnMobTyped(bx0 + 3, kRigY + 2, bz0, EntityManager::MobShambler,
+                                          QStringLiteral("#44aa44"), 100);
+        tickA(40);
+        bool standStill = true;
+        float maxFeetB = -1e9f;
+        for (int t = 0; t < 150; ++t) {
+            tickA(1);
+            const QVector3D p = ents.posAt(mB);
+            maxFeetB = std::max(maxFeetB, p.y() - kShamblerHalfH);
+            if (std::fabs(p.x() - (float(bx0) + 3.5f)) > 1e-3f
+                || std::fabs(p.z() - (float(bz0) + 0.5f)) > 1e-3f)
+                standStill = false;
+        }
+        okStand = standStill
+            && std::fabs(maxFeetB - (float(kRigY) + 0.5f)) <= 0.02f; // 恒贴 slab 顶无上抬
+        ents.removeEntityAt(mB);
+        const bool ok = okLift && okStand;
+        if (!ok)
+            qInfo().noquote() << "  r2032a diag: liftFeet" << finalFeetA << "liftMax" << maxFeetA
+                             << "liftX" << finalXA << "| standMax" << maxFeetB
+                             << "standStill" << standStill;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2032a clean-path wall: embedded support-swap with open headroom still lifts"
+                             " the mob onto the raised support top with zero lateral drift (the horizontal"
+                             " escape branch never fires when the lift gate passes), and plain standing on"
+                             " an untouched slab floor holds position exactly (no phantom escape on the"
+                             " non-embedded path)";
+        ents.clearAll();
+        clearBox();
+        tickN(w, 2);
+    });
+
+    // r2032b 水平脱出承重（恰红面声明前置）：
+    //   (a) 嵌入 + 头顶封顶（嵌入柱 kRigY+1 单块——顶起被净空门挡；头部点在 kRigY+2 空气 = 无窒息、
+    //       无头嵌自恢复路径夺脱出）→ 恰脱出到最近可站列；farmland 行 x0..x0+10 全可站 → 与 (bx0+4)
+    //       同距 1.0 → 字典序取小 (bx0+2, bz0)（确定性断言本体）。落位 = 直接位移贴新支撑（无跳弧：
+    //       maxFeet ≤ 新顶+0.02）；脱出非落地 → 零踩踏级联（缝 0 下耕地全存为证）。
+    //   (b) 最近列被堵：(bx0+2) 列 kRigY+1..kRigY+2 两格石柱——支撑探窗首层命中假支撑顶 kRigY+2、
+    //       落位体格撞自身柱格 → 全高净空门拒 → 次近 (bx0+4, bz0)。阴性敏感柱（NEG-2 摘净空门 →
+    //       脱进实心柱格，落位 x 停 42.5 → 本相红）。
+    //   (c) 无候选列（真围死）：farmland/封顶只留嵌入柱、其余窗口列零支撑 → 全候选被拒 → 冻结维持
+    //       （登记语义腿；阴性敏感面——NEG-1 摘横移分支 → (a)/(b) 相冻结 = 旧行为，本相照旧绿）。
+    runLegMulti({ "r2032b embedded mob capped overhead escapes horizontally to the nearest standable column "
+        "(equidistant candidates resolve by ascending column order), skips a body-blocked nearest "
+        "column for the next open one (placement full-height clearance gate), and stays frozen in "
+        "place when no standable column exists in the scan window (registered sealed-in semantic); "
+        "no jump arc and no trample cascade on any phase (deterministic seam)" }, [&]() {
+        const int bx0 = 20, bz0 = 30;
+        const auto clearBox = [&]() {
+            for (int dx = -2; dx <= 13; ++dx)
+                for (int dz = -4; dz <= 4; ++dz)
+                    for (int dy = -3; dy <= 4; ++dy)
+                        w.setBlock(bx0 + dx, kRigY + dy, bz0 + dz, BR::Air, 0);
+        };
+        EntityManager ents;
+        ents.setWanderFrozen(true);
+        w.setTrampleRollOverride(0); // 确定性缝：假坠落级联若复现 → 耕地必踩必红（嵌入顶起腿族同款）
+        const QVector3D noListener(-1000.0f, 10.0f, -1000.0f);
+        const auto tickB = [&](int n) {
+            for (int i = 0; i < n; ++i) ents.tick(qreal(0.016), &w, noListener, 0.3f, 1.8f, false);
+        };
+        const float kShamblerHalfH = 0.9f;
+        const float topE = float(kRigY) + 0.9375f;
+        bool okA = false, okBp = false, okC = false;
+        // (a) 封顶嵌入 → 最近可站列（同距字典序 (bx0+2)）。
+        clearBox();
+        for (int dx = 0; dx <= 10; ++dx) {
+            w.setBlock(bx0 + dx, kRigY - 1, bz0, BR::Stone, 0);
+            w.setBlock(bx0 + dx, kRigY, bz0, BR::CobbleSlab, 0);
+        }
+        const int m1 = ents.spawnMobTyped(bx0 + 3, kRigY + 2, bz0, EntityManager::MobShambler,
+                                          QStringLiteral("#44aa44"), 100);
+        tickB(40);
+        for (int dx = 0; dx <= 10; ++dx) w.setBlock(bx0 + dx, kRigY, bz0, BR::Farmland, 0);
+        w.setBlock(bx0 + 3, kRigY + 1, bz0, BR::Stone, 0); // 封顶嵌入柱（净空门挡顶起）
+        float maxFeet1 = -1e9f, finFeet1 = -1e9f, finX1 = -1e9f, finZ1 = -1e9f;
+        for (int t = 0; t < 300; ++t) {
+            tickB(1);
+            const QVector3D p = ents.posAt(m1);
+            maxFeet1 = std::max(maxFeet1, p.y() - kShamblerHalfH);
+            finFeet1 = p.y() - kShamblerHalfH;
+            finX1 = p.x();
+            finZ1 = p.z();
+        }
+        bool farmKept1 = true;
+        for (int dx = 0; dx <= 10; ++dx)
+            if (w.blockAt(bx0 + dx, kRigY, bz0) != BR::Farmland) farmKept1 = false;
+        okA = std::fabs(finX1 - (float(bx0) + 2.5f)) <= 0.02f      // 同距对 → 字典序小列
+            && std::fabs(finZ1 - (float(bz0) + 0.5f)) <= 0.02f     // 纯 X 向横移
+            && std::fabs(finFeet1 - topE) <= 0.02f                 // 贴新支撑顶（farmland 真顶）
+            && maxFeet1 <= topE + 0.02f                            // 无跳弧（直接位移非弹射）
+            && farmKept1;                                          // 零踩踏级联
+        ents.removeEntityAt(m1);
+        // (b) 最近列被堵（假支撑顶 + 体格实心）→ 净空门拒 → 次近 (bx0+4)。
+        clearBox();
+        for (int dx = 0; dx <= 10; ++dx) {
+            w.setBlock(bx0 + dx, kRigY - 1, bz0, BR::Stone, 0);
+            w.setBlock(bx0 + dx, kRigY, bz0, BR::CobbleSlab, 0);
+        }
+        const int m2 = ents.spawnMobTyped(bx0 + 3, kRigY + 2, bz0, EntityManager::MobShambler,
+                                          QStringLiteral("#44aa44"), 100);
+        tickB(40);
+        for (int dx = 0; dx <= 10; ++dx) w.setBlock(bx0 + dx, kRigY, bz0, BR::Farmland, 0);
+        w.setBlock(bx0 + 3, kRigY + 1, bz0, BR::Stone, 0); // 封顶同 (a)
+        w.setBlock(bx0 + 2, kRigY + 1, bz0, BR::Stone, 0); // 堵最近列：支撑探窗首层假支撑顶
+        w.setBlock(bx0 + 2, kRigY + 2, bz0, BR::Stone, 0); // …+ 落位体格实心 → 净空门拒
+        float maxFeet2 = -1e9f, finFeet2 = -1e9f, finX2 = -1e9f;
+        for (int t = 0; t < 300; ++t) {
+            tickB(1);
+            const QVector3D p = ents.posAt(m2);
+            maxFeet2 = std::max(maxFeet2, p.y() - kShamblerHalfH);
+            finFeet2 = p.y() - kShamblerHalfH;
+            finX2 = p.x();
+        }
+        okBp = std::fabs(finX2 - (float(bx0) + 4.5f)) <= 0.02f     // 跳过被堵列取次近
+            && std::fabs(finFeet2 - topE) <= 0.02f
+            && maxFeet2 <= topE + 0.02f;
+        ents.removeEntityAt(m2);
+        // (c) 无候选（真围死）→ 冻结维持。
+        clearBox();
+        w.setBlock(bx0 + 3, kRigY - 1, bz0, BR::Stone, 0); // 基座只留嵌入柱（窗口其余列零支撑）
+        w.setBlock(bx0 + 3, kRigY, bz0, BR::CobbleSlab, 0);
+        const int m3 = ents.spawnMobTyped(bx0 + 3, kRigY + 2, bz0, EntityManager::MobShambler,
+                                          QStringLiteral("#44aa44"), 100);
+        tickB(40);
+        w.setBlock(bx0 + 3, kRigY, bz0, BR::Farmland, 0);
+        w.setBlock(bx0 + 3, kRigY + 1, bz0, BR::Stone, 0);
+        float maxFeet3 = -1e9f, finFeet3 = -1e9f, finX3 = -1e9f;
+        for (int t = 0; t < 300; ++t) {
+            tickB(1);
+            const QVector3D p = ents.posAt(m3);
+            maxFeet3 = std::max(maxFeet3, p.y() - kShamblerHalfH);
+            finFeet3 = p.y() - kShamblerHalfH;
+            finX3 = p.x();
+        }
+        okC = std::fabs(finX3 - (float(bx0) + 3.5f)) <= 0.02f      // 未脱出（冻结维持，登记语义）
+            && std::fabs(finFeet3 - (float(kRigY) + 0.5f)) <= 0.02f // 仍嵌原位（脚位 0.5）
+            && maxFeet3 <= float(kRigY) + 0.5f + 0.02f;            // 无假跳弧（层豁免在位）
+        ents.removeEntityAt(m3);
+        const bool ok = okA && okBp && okC;
+        if (!ok)
+            qInfo().noquote() << "  r2032b diag: A(x" << finX1 << "feet" << finFeet1 << "max" << maxFeet1
+                              << "farm" << farmKept1 << ") B(x" << finX2 << "feet" << finFeet2
+                              << "max" << maxFeet2 << ") C(x" << finX3 << "feet" << finFeet3
+                              << "max" << maxFeet3 << ")";
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2032b embedded mob capped overhead escapes horizontally to the nearest"
+                             " standable column (equidistant candidates resolve by ascending column"
+                             " order), skips a body-blocked nearest column for the next open one"
+                             " (placement full-height clearance gate), and stays frozen in place when"
+                             " no standable column exists in the scan window (registered sealed-in"
+                             " semantic); no jump arc and no trample cascade on any phase (deterministic"
+                             " seam)";
+        ents.clearAll();
+        w.setTrampleRollOverride(-1); // 缝复位（生产零残留）
+        clearBox();
+        tickN(w, 2);
+    });
+
+    // r2032c 水冲清单文案对账（review0913 #3 登记；纯测试侧文案零行为）：bed-anchor 水冲口径腿的
+    //   展示文案随 t1043 裁-1 后的现行 isAttachableBlock 族集逐项对账更新（rail 三族入清单）。钉面：
+    //   (i) 更新后文案在文案 TU 恰 2 处（腿名 + PASS 回显；剥注释计——字符串字面保留）；(ii) 陈旧
+    //   文案 0 处（原始文本 contains——文案只存在于字符串字面，无注释误伤面）；(iii) 活谓词现场对账：
+    //   火把 / 红石火把 / 蛛网 / 木梯 / 铁轨三族 ∈ 族，床（白/棕）与满格石不在族（床非附着 = 水冲
+    //   不触的行为前提本体）。
+    runLegMulti({ "r2032c wash-list copy reconciliation: the bed-anchor water-wash leg text matches the live "
+        "isAttachableBlock family (torches, redstone torch, cobweb, ladder, rail family; bed excluded) "
+        "- reconciled copy present exactly twice in the copy TU, stale pre-rail copy zero hits, and "
+        "the live predicate agrees member-by-member" }, [&]() {
+        const QString sec08 = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/.."))
+                                  .absoluteFilePath(QStringLiteral("tools/matrix/section08_recent.cpp"));
+        const bool pinsOk = pinSet(sec08, {
+            { "r2032c-copy-reconciled",
+              "isAttachableBlock: torches, redstone torch, cobweb, ladder, rail family", 2 },
+        }).isEmpty();
+        QFile f(sec08);
+        QString raw;
+        if (f.open(QIODevice::ReadOnly)) raw = QString::fromUtf8(f.readAll());
+        const bool staleGone = !raw.isEmpty()
+            && !raw.contains(QStringLiteral("isAttachableBlock: torches, cobweb, ladder)"));
+        const bool familyLive =
+            BR::isAttachableBlock(BR::Torch) && BR::isAttachableBlock(BR::RedstoneTorch)
+            && BR::isAttachableBlock(BR::Cobweb) && BR::isAttachableBlock(BR::Ladder)
+            && BR::isAttachableBlock(BR::Rail) && BR::isAttachableBlock(BR::GoldenRail)
+            && BR::isAttachableBlock(BR::DetectorRail)
+            && !BR::isAttachableBlock(BR::BedWhite) && !BR::isAttachableBlock(BR::BedBrown)
+            && !BR::isAttachableBlock(BR::Stone);
+        const bool ok = pinsOk && staleGone && familyLive;
+        if (!ok)
+            qInfo().noquote() << "  r2032c diag: pins" << pinsOk << "staleGone" << staleGone
+                              << "familyLive" << familyLive;
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2032c wash-list copy reconciliation: the bed-anchor water-wash leg text"
+                             " matches the live isAttachableBlock family (torches, redstone torch, cobweb,"
+                             " ladder, rail family; bed excluded) - reconciled copy present exactly twice"
+                             " in the copy TU, stale pre-rail copy zero hits, and the live predicate"
+                             " agrees member-by-member";
+    });
 }
