@@ -1094,6 +1094,14 @@ add_executable(redstone_matrix_test
     #   收敛全走 deadline 轮询（防 flake），rig 世界 w 零接触；无新增 .cpp——chunkgeometry/
     #   gamesession/world 系源文件已列）。
     tools/matrix/section29_wiring_meshworker.cpp
+    # §29.5-W5 后端 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；4 腿 r2027a-d =
+    #   fixed 零活动墙 / 流式存读往返承重墙 / D3 转换往返 / 结构钉。filter 词 r2027。
+    #   随段直编 src/World/chunkstore.cpp（W5 扩展：stream_worlds 元数据 + 行全量读回）+
+    #   src/World/worldstore.{h,cpp}（读档 blob 通路只读 Q_INVOKABLE 消费面——worldstore
+    #   零改动纯使用）；自建 fresh 小世界族（sparse 80×80×96 s42 radius 0 + fixed/sparse-core
+    #   48×48×96 s82）+ 真临时 SQLite 库（fresh + 用后即删，saves/ 零触碰）+ 真线程收敛
+    #  （deadline 轮询防 flake））。
+    tools/matrix/section30_streaming_persistence.cpp
     src/World/chunkstore.cpp
     src/World/chunkstore.h
     src/Core/blockregistry.cpp

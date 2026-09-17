@@ -345,4 +345,14 @@ private:
                                   //   80×80×96 fresh sparse 小世界族 + 48×48×96 fixed 小世界
                                   //   + 真线程收割（防 flake deadline 有界），rig 世界 w
                                   //   零接触，接 section28）
+    void section30_streaming_persistence(); // §29.5-W5 后端 流式世界持久化 + D2/D3 标志 +
+                                  //   overlay 合并 探针（置尾先例沿用：r2027a fixed 零活动
+                                  //   墙[保存/读档全语义逐位不动 + 库面零流式表] / r2027b
+                                  //   流式存读往返承重墙[保存含冲洗 + 销毁重建逐位恒等 +
+                                  //   二次幂等，真临时库 fresh+用后即删] / r2027c D3 转换
+                                  //   往返[blob 物化 + 代次对代次仲裁 + 逆翻照旧] /
+                                  //   r2027d 结构钉[worldstore 禁触反探 + additive 正面钉 +
+                                  //   冲洗失败不谎报 + QML 零触碰]——80×80×96 sparse 族 +
+                                  //   48×48×96 fixed 族 + 真线程收割（防 flake deadline
+                                  //   有界），rig 世界 w 零接触，接 section29）
 };
